@@ -1,0 +1,9 @@
+[package]
+name = "delonix-vm"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+delonix-core = { path = "../delonix-core" }
+delonix-net = { path = "../delonix-net" }
+libc = "0.2"

@@ -1,0 +1,25 @@
+[package]
+name = "delonix-cri"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+delonix-core = { path = "../delonix-core" }
+delonix-runtime = { path = "../delonix-runtime" }
+delonix-image = { path = "../delonix-image" }
+delonix-net = { path = "../delonix-net" }
+tonic = "0.12"
+prost = "0.13"
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { version = "1", features = ["rt-multi-thread", "net", "macros", "time", "signal", "sync"] }
+tokio-stream = { version = "0.1", features = ["net"] }
+axum = { version = "0.7", features = ["ws"] }
+futures-util = { version = "0.3", default-features = false, features = ["sink"] }
+hyper = "1"
+hyper-util = { version = "0.1", features = ["tokio"] }
+flate2 = { workspace = true, features = ["zlib-rs"] }
+libc = "0.2"
+
+[build-dependencies]
+tonic-build = "0.12"
