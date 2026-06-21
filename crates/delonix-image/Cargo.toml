@@ -1,0 +1,18 @@
+[package]
+name = "delonix-image"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+delonix-core = { path = "../delonix-core" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+tar = { workspace = true }
+flate2 = { workspace = true }
+nix = { workspace = true }
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls-webpki-roots", "json"] }
+zstd = "0.13"
+base64 = "0.22"
+# Verificação de assinaturas cosign/sigstore (B8): ECDSA P-256.
+ring = "0.17"

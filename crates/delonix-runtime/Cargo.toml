@@ -1,0 +1,10 @@
+[package]
+name = "delonix-runtime"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+delonix-core = { path = "../delonix-core" }
+nix = { workspace = true }
+libc = { workspace = true }
+seccompiler = { workspace = true }
