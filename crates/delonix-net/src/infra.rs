@@ -434,6 +434,7 @@ fn handle_control(line: &str) -> String {
         ["firewall", _netns, ip, hex] => do_firewall(ip, hex),
         ["unfirewall", ip] => do_unfirewall(ip),
         ["egress", policy] => do_egress(policy),
+        ["egress-net", bridge, policy] => do_egress_net(bridge, policy),
         _ => Err(Error::Invalid(format!("comando de controlo inválido: {line:?}"))),
     };
     match res {
@@ -752,6 +753,27 @@ fn do_egress(policy: &str) -> Result<()> {
     }
     match policy {
         "deny" => run("nft", &["add", "rule", "ip", INGRESS_TABLE, "forward", "oifname", "tap0", "drop"]),
+        "allow" => Ok(()),
+        _ => Err(Error::Invalid(format!("política de egress inválida: {policy}"))),
+    }
+}
+
+/// Egress POR-REDE (workspace): bloqueia/permite a saída→Internet de UMA bridge
+/// específica, sem afetar as outras redes. Regra: `forward iifname "<bridge>"
+/// oifname "tap0" drop`. Idempotente (remove as regras antigas dessa bridge antes).
+fn do_egress_net(bridge: &str, policy: &str) -> Result<()> {
+    let bridge = sanitize(bridge);
+    let needle_if = format!("iifname \"{bridge}\"");
+    let listed = crate::capture("nft", &["-a", "list", "chain", "ip", INGRESS_TABLE, "forward"]).unwrap_or_default();
+    for line in listed.lines() {
+        if line.contains(&needle_if) && line.contains("oifname \"tap0\"") && line.contains("drop") {
+            if let Some(handle) = line.rsplit("# handle ").next().and_then(|h| h.trim().parse::<u32>().ok()) {
+                run_ok("nft", &["delete", "rule", "ip", INGRESS_TABLE, "forward", "handle", &handle.to_string()]);
+            }
+        }
+    }
+    match policy {
+        "deny" => run("nft", &["add", "rule", "ip", INGRESS_TABLE, "forward", "iifname", &bridge, "oifname", "tap0", "drop"]),
         "allow" => Ok(()),
         _ => Err(Error::Invalid(format!("política de egress inválida: {policy}"))),
     }
@@ -1080,6 +1102,12 @@ pub fn apply_firewall(id: &str, ip: &str, fw: &delonix_core::ContainerFw) -> Res
 /// (egress permitido). Idempotente.
 pub fn set_egress_policy(deny: bool) -> Result<()> {
     control_send(&format!("egress {}", if deny { "deny" } else { "allow" }))
+}
+
+/// Como [`set_egress_policy`], mas SÓ para a bridge `<bridge>` (egress por-rede /
+/// por-workspace). Não afeta as outras redes.
+pub fn set_egress_policy_net(bridge: &str, deny: bool) -> Result<()> {
+    control_send(&format!("egress-net {} {}", bridge, if deny { "deny" } else { "allow" }))
 }
 
 /// Remove a firewall de um container do ingress (best-effort).

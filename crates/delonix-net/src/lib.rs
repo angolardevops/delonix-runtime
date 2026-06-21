@@ -20,7 +20,12 @@
 use delonix_core::{Error, Result};
 use std::process::{Command, Stdio};
 
+pub mod discover;
 pub mod infra;
+pub mod router;
+
+pub use discover::{discover_ports, DiscoveredPort};
+pub use router::Router;
 
 const BRIDGE: &str = "delonix0";
 const TABLE: &str = "delonix"; // tabela nft dedicada (família ip)
