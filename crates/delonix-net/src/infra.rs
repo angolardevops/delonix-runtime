@@ -379,10 +379,15 @@ fn start_slirp(holder_pid: i32) -> Result<()> {
 pub fn holder_main() -> ! {
     let started = setup_infra_netns().and_then(|_| {
         let _ = std::fs::remove_file(control_sock_path());
-        std::os::unix::net::UnixListener::bind(control_sock_path()).map_err(|e| Error::Runtime {
-            context: "control socket",
-            message: e.to_string(),
-        })
+        let listener =
+            std::os::unix::net::UnixListener::bind(control_sock_path()).map_err(|e| Error::Runtime {
+                context: "control socket",
+                message: e.to_string(),
+            })?;
+        // só o uid do engine pode falar com o holder: 0600 + SO_PEERCRED (control_loop).
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(control_sock_path(), std::fs::Permissions::from_mode(0o600));
+        Ok(listener)
     });
     match started {
         Ok(listener) => {
@@ -404,10 +409,39 @@ pub fn holder_main() -> ! {
 /// Aceita ligações no socket de controlo e serve um comando por ligação (a fábrica
 /// de netns/veth). Corre DENTRO do holder, logo as operações `ip`/`ip netns` ficam
 /// no netns de infra sem `nsenter`. Síncrono (um attach de cada vez — suficiente).
+/// uid do peer de uma ligação Unix (via SO_PEERCRED). `None` em falha.
+fn peer_uid(stream: &std::os::unix::net::UnixStream) -> Option<u32> {
+    use std::os::unix::io::AsRawFd;
+    let mut cred = libc::ucred { pid: 0, uid: 0, gid: 0 };
+    let mut len = std::mem::size_of::<libc::ucred>() as libc::socklen_t;
+    // SAFETY: getsockopt em SO_PEERCRED com um buffer ucred do tamanho correto.
+    let r = unsafe {
+        libc::getsockopt(
+            stream.as_raw_fd(),
+            libc::SOL_SOCKET,
+            libc::SO_PEERCRED,
+            &mut cred as *mut libc::ucred as *mut libc::c_void,
+            &mut len,
+        )
+    };
+    if r == 0 {
+        Some(cred.uid)
+    } else {
+        None
+    }
+}
+
 fn control_loop(listener: std::os::unix::net::UnixListener) -> ! {
     use std::io::{BufRead, BufReader, Write};
+    // SAFETY: geteuid() não tem pré-condições.
+    let own_uid = unsafe { libc::geteuid() };
     for conn in listener.incoming() {
         let Ok(mut stream) = conn else { continue };
+        // SO_PEERCRED: só aceita comandos do próprio uid do engine — impede que um
+        // utilizador local não-privilegiado conduza o holder / injete nft (CAP_NET_ADMIN).
+        if peer_uid(&stream) != Some(own_uid) {
+            continue;
+        }
         let mut line = String::new();
         if BufReader::new(&stream).read_line(&mut line).is_err() {
             continue;
