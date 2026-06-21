@@ -836,6 +836,11 @@ pub fn fw_chain_body(ip: &str, fw: &delonix_core::ContainerFw) -> String {
     let mut body = String::new();
     if fw.enabled {
         for r in &fw.rules {
+            // Defesa contra injeção nft: salta regras com campos inseguros
+            // (src/proto/port são interpolados na ruleset alimentada a `nft -f`).
+            if !r.nft_safe() {
+                continue;
+            }
             let (self_dir, peer_dir) = if r.dir == "out" { ("saddr", "daddr") } else { ("daddr", "saddr") };
             let mut line = format!("ip {self_dir} {ip}");
             if !r.src.is_empty() && r.src != "0.0.0.0/0" && r.src != "*" {
