@@ -433,6 +433,7 @@ fn handle_control(line: &str) -> String {
         ["unpublish", host_port] => do_unpublish(host_port),
         ["firewall", _netns, ip, hex] => do_firewall(ip, hex),
         ["unfirewall", ip] => do_unfirewall(ip),
+        ["egress", policy] => do_egress(policy),
         _ => Err(Error::Invalid(format!("comando de controlo inválido: {line:?}"))),
     };
     match res {
@@ -733,6 +734,27 @@ fn do_unpublish(host_port: &str) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// Política GLOBAL de egress do ingress único (corre DENTRO do netns de infra,
+/// onde o holder tem CAP_NET_ADMIN). `deny` adiciona `forward oifname tap0 drop`
+/// (bloqueia toda a saída para a Internet); `allow` remove-o. As regras de
+/// firewall por-carga (accept) que apareçam ANTES na chain `forward` continuam a
+/// abrir excepções pontuais — portanto isto é a política de BASE do egress.
+fn do_egress(policy: &str) -> Result<()> {
+    let listed = crate::capture("nft", &["-a", "list", "chain", "ip", INGRESS_TABLE, "forward"]).unwrap_or_default();
+    for line in listed.lines() {
+        if line.contains("oifname \"tap0\"") && line.contains("drop") {
+            if let Some(handle) = line.rsplit("# handle ").next().and_then(|h| h.trim().parse::<u32>().ok()) {
+                run_ok("nft", &["delete", "rule", "ip", INGRESS_TABLE, "forward", "handle", &handle.to_string()]);
+            }
+        }
+    }
+    match policy {
+        "deny" => run("nft", &["add", "rule", "ip", INGRESS_TABLE, "forward", "oifname", "tap0", "drop"]),
+        "allow" => Ok(()),
+        _ => Err(Error::Invalid(format!("política de egress inválida: {policy}"))),
+    }
 }
 
 /// Valida os campos de um publish antes de os meter num comando `nft` (defesa
@@ -1051,6 +1073,13 @@ pub fn detach_container(id: &str, ip: &str) {
 pub fn apply_firewall(id: &str, ip: &str, fw: &delonix_core::ContainerFw) -> Result<()> {
     let json = serde_json::to_vec(fw).map_err(|e| Error::Invalid(e.to_string()))?;
     control_send(&format!("firewall {} {} {}", sanitize(id), ip, hex_encode(&json)))
+}
+
+/// Define a política GLOBAL de egress do ingress único (via holder, no netns de
+/// infra). `deny` bloqueia toda a saída para a Internet; `allow` repõe o default
+/// (egress permitido). Idempotente.
+pub fn set_egress_policy(deny: bool) -> Result<()> {
+    control_send(&format!("egress {}", if deny { "deny" } else { "allow" }))
 }
 
 /// Remove a firewall de um container do ingress (best-effort).
