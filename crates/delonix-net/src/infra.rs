@@ -698,6 +698,15 @@ fn do_attach(netns: &str, ip: &str, bridge: &str, gateway: &str) -> Result<()> {
         run_ok("ip", &["netns", "exec", &netns, "ip", "-6", "addr", "add", &cidr6, "dev", "eth0", "nodad"]);
         run_ok("ip", &["netns", "exec", &netns, "ip", "-6", "route", "add", "default", "via", &gw6]);
     }
+    // ANTI-SPOOFING: o tráfego que entra deste veth TEM de ter o IP atribuído como
+    // origem — senão um container podia falsificar o source-IP e furar a firewall
+    // por-IP / o isolamento / a atribuição de fluxos. `insert` põe a regra no topo
+    // do `forward`, antes dos jumps por-container. Idempotente (limpa antes).
+    clear_antispoof(&vh);
+    run_ok(
+        "nft",
+        &["insert", "rule", "ip", INGRESS_TABLE, "forward", "iifname", &vh, "ip", "saddr", "!=", ip, "drop"],
+    );
     Ok(())
 }
 
@@ -706,9 +715,23 @@ fn do_attach(netns: &str, ip: &str, bridge: &str, gateway: &str) -> Result<()> {
 fn do_detach(netns: &str) -> Result<()> {
     let netns = sanitize(netns);
     let vh = vh_name(&netns);
+    clear_antispoof(&vh);
     run_ok("ip", &["netns", "del", &netns]);
     run_ok("ip", &["link", "del", &vh]);
     Ok(())
+}
+
+/// Remove as regras anti-spoofing de um veth no `forward` (idempotência).
+fn clear_antispoof(vh: &str) {
+    let listed = crate::capture("nft", &["-a", "list", "chain", "ip", INGRESS_TABLE, "forward"]).unwrap_or_default();
+    let needle = format!("iifname \"{vh}\"");
+    for line in listed.lines() {
+        if line.contains(&needle) && line.contains("saddr") && line.contains("drop") {
+            if let Some(h) = line.rsplit("# handle ").next().and_then(|x| x.trim().parse::<u32>().ok()) {
+                run_ok("nft", &["delete", "rule", "ip", INGRESS_TABLE, "forward", "handle", &h.to_string()]);
+            }
+        }
+    }
 }
 
 /// Cria um `tap` para uma VM, ligado à BRIDGE da sua rede (cria a bridge + DHCP se
