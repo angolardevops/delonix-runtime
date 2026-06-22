@@ -477,6 +477,10 @@ fn handle_control(line: &str) -> String {
         ["ping"] => Ok(()),
         ["attach", netns, ip, bridge, gateway] => do_attach(netns, ip, bridge, gateway),
         ["detach", netns] => do_detach(netns),
+        // multi-homing ao vivo (rootless): liga/desliga uma rede ADICIONAL a um
+        // container já a correr (veth extra para a bridge da rede privada).
+        ["attach-extra", netns, ifname, ip, bridge, gateway] => do_attach_extra(netns, ifname, ip, bridge, gateway),
+        ["detach-extra", netns, ifname] => do_detach_extra(netns, ifname),
         ["netdel", bridge] => do_netdel(bridge),
         ["vmtap", tap, bridge, gateway] => do_vmtap(tap, bridge, gateway),
         ["vmtapdel", tap] => do_vmtapdel(tap),
@@ -755,6 +759,52 @@ fn do_detach(netns: &str) -> Result<()> {
     Ok(())
 }
 
+/// Liga uma rede ADICIONAL a um container JÁ A CORRER (multi-homing ao vivo): um
+/// segundo `veth` do netns existente para a bridge da rede privada. Não cria o
+/// netns (já existe) e NÃO mexe na rota default (a rede primária mantém-na).
+fn do_attach_extra(netns: &str, ifname: &str, ip: &str, bridge: &str, gateway: &str) -> Result<()> {
+    let netns = sanitize(netns);
+    let ifname = sanitize(ifname);
+    let bridge = sanitize(bridge);
+    ensure_net_bridge(&bridge, gateway)?;
+    let vh = vh_name_extra(&netns, &ifname);
+    run_ok("ip", &["link", "del", &vh]); // limpa restos
+    run("ip", &["link", "add", &vh, "type", "veth", "peer", "name", &ifname])?;
+    run("ip", &["link", "set", &vh, "master", &bridge])?;
+    run("ip", &["link", "set", &vh, "up"])?;
+    run("ip", &["link", "set", &ifname, "netns", &netns])?;
+    let cidr = format!("{ip}/16");
+    for argv in [
+        vec!["netns", "exec", &netns, "ip", "addr", "add", &cidr, "dev", &ifname],
+        vec!["netns", "exec", &netns, "ip", "link", "set", &ifname, "up"],
+    ] {
+        run("ip", &argv)?;
+    }
+    // IPv6 (ULA) na nova interface (best-effort; sem rota default v6 — primária mantém).
+    if let Some(v6) = v6_of(ip) {
+        let cidr6 = format!("{v6}/64");
+        run_ok("ip", &["netns", "exec", &netns, "ip", "-6", "addr", "add", &cidr6, "dev", &ifname, "nodad"]);
+    }
+    // ANTI-SPOOFING também na interface adicional (mesma garantia por-IP do eth0).
+    clear_antispoof(&vh);
+    run_ok(
+        "nft",
+        &["insert", "rule", "ip", INGRESS_TABLE, "fwdeny", "iifname", &vh, "ip", "saddr", "!=", ip, "drop"],
+    );
+    Ok(())
+}
+
+/// Desliga uma rede adicional: remove o `veth` extra (leva o `<ifname>` do netns
+/// do container atrás). Best-effort.
+fn do_detach_extra(netns: &str, ifname: &str) -> Result<()> {
+    let netns = sanitize(netns);
+    let ifname = sanitize(ifname);
+    let vh = vh_name_extra(&netns, &ifname);
+    clear_antispoof(&vh);
+    run_ok("ip", &["link", "del", &vh]);
+    Ok(())
+}
+
 /// Remove as regras anti-spoofing de um veth no `forward` (idempotência).
 fn clear_antispoof(vh: &str) {
     let listed = crate::capture("nft", &["-a", "list", "chain", "ip", INGRESS_TABLE, "fwdeny"]).unwrap_or_default();
@@ -969,6 +1019,12 @@ fn is_ingress_ip(ip: &str) -> bool {
 /// Nome do `veth` do lado da bridge para um netns (determinístico, <= 15 chars).
 fn vh_name(netns: &str) -> String {
     format!("vh{:08x}", crate::fnv32(netns))
+}
+
+/// Nome do `veth` host-side de uma rede ADICIONAL (multi-homing): distinto por
+/// (netns, interface) para não colidir com o primário nem entre redes extra.
+fn vh_name_extra(netns: &str, ifname: &str) -> String {
+    format!("vx{:08x}", crate::fnv32(&format!("{netns}/{ifname}")))
 }
 
 // ---- firewall PARAMETRIZÁVEL do ingress (o ÚNICO sítio — princípio do utilizador) ----
@@ -1233,6 +1289,27 @@ pub fn attach_container(id: &str, net: &str) -> Result<(String, String)> {
             Err(e)
         }
     }
+}
+
+/// **Liga um container A CORRER a uma rede ADICIONAL** (multi-homing ao vivo,
+/// rootless): resolve a bridge/gateway/IP da rede e pede ao holder o `veth` extra
+/// na interface `eth<idx>`. Sem ref-count novo (o attach primário já segura a infra).
+/// Devolve `(ifname, ip)`.
+pub fn attach_extra_container(id: &str, idx: u32, net: &str) -> Result<(String, String)> {
+    let (bridge, prefix, gateway) = resolve_net(net)?;
+    let ip = container_ip_on(&prefix, id);
+    let ifname = format!("eth{idx}");
+    let netns = sanitize(id);
+    control_send(&format!("attach-extra {netns} {ifname} {ip} {bridge} {gateway}"))?;
+    Ok((ifname, ip))
+}
+
+/// **Desliga um container de uma rede adicional** (multi-homing ao vivo): pede ao
+/// holder a remoção do `veth` extra. Best-effort.
+pub fn detach_extra_container(id: &str, idx: u32) {
+    let netns = sanitize(id);
+    let ifname = format!("eth{idx}");
+    let _ = control_send(&format!("detach-extra {netns} {ifname}"));
 }
 
 /// **Desliga um container do ingress**: limpa a firewall (no seu `ip`), pede o
