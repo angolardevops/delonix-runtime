@@ -113,11 +113,28 @@ fn kill_pidfile(path: &Path) {
 /// `post` (masquerade do tap0) e `fwd` (FILTRO de forward — o ÚNICO sítio do
 /// firewall parametrizável, com chains por-container chamadas por jump). PURA.
 pub fn ingress_table_ruleset() -> String {
+    // DEFAULT-DENY no forward (Grupo B). Os DROPS dinâmicos (anti-spoof, isolamento,
+    // egress, egress-net, l4guard, fw por-container) vivem na chain `fwdeny`
+    // (prioridade -10, corre ANTES) — assim um `drop`/`accept` específico ganha
+    // sempre ao default. O `forward` (prioridade 0) só permite returns + egress +
+    // inbound; o resto cai no `policy drop`.
+    // Rollback instantâneo: DELONIX_FORWARD_POLICY=accept → volta ao default-allow.
+    let policy = if std::env::var("DELONIX_FORWARD_POLICY").ok().as_deref() == Some("accept") {
+        ""
+    } else {
+        " policy drop;"
+    };
     format!(
         "table ip {INGRESS_TABLE} {{\n\
          \x20 chain pre {{ type nat hook prerouting priority -100; }}\n\
          \x20 chain post {{ type nat hook postrouting priority 100; oifname \"tap0\" masquerade; }}\n\
-         \x20 chain forward {{ type filter hook forward priority 0; }}\n\
+         \x20 chain fwdeny {{ type filter hook forward priority -10; }}\n\
+         \x20 chain forward {{ type filter hook forward priority 0;{policy}\n\
+         \x20\x20 ct state established,related accept\n\
+         \x20\x20 ct state invalid drop\n\
+         \x20\x20 oifname \"tap0\" accept\n\
+         \x20\x20 iifname \"tap0\" accept\n\
+         \x20 }}\n\
          }}\n"
     )
 }
@@ -513,7 +530,7 @@ fn ensure_net_bridge(bridge: &str, gateway: &str) -> Result<()> {
     }
     // isolamento entre redes: drop forward entre esta bridge e as outras delonix.
     let listed = crate::capture("ip", &["-o", "link", "show", "type", "bridge"]).unwrap_or_default();
-    let fwd = crate::capture("nft", &["list", "chain", "ip", INGRESS_TABLE, "forward"]).unwrap_or_default();
+    let fwd = crate::capture("nft", &["list", "chain", "ip", INGRESS_TABLE, "fwdeny"]).unwrap_or_default();
     for line in listed.lines() {
         let other = line.split(':').nth(1).map(|s| s.trim().split('@').next().unwrap_or("").trim()).unwrap_or("");
         if other.is_empty() || other == bridge || (other != INFRA_BRIDGE && !other.starts_with("dlxn")) {
@@ -522,7 +539,7 @@ fn ensure_net_bridge(bridge: &str, gateway: &str) -> Result<()> {
         for (a, b) in [(bridge, other), (other, bridge)] {
             let needle = format!("iifname \"{a}\" oifname \"{b}\" drop");
             if !fwd.contains(&needle) {
-                run_ok("nft", &["add", "rule", "ip", INGRESS_TABLE, "forward", "iifname", a, "oifname", b, "drop"]);
+                run_ok("nft", &["add", "rule", "ip", INGRESS_TABLE, "fwdeny", "iifname", a, "oifname", b, "drop"]);
             }
         }
     }
@@ -722,7 +739,7 @@ fn do_attach(netns: &str, ip: &str, bridge: &str, gateway: &str) -> Result<()> {
     clear_antispoof(&vh);
     run_ok(
         "nft",
-        &["insert", "rule", "ip", INGRESS_TABLE, "forward", "iifname", &vh, "ip", "saddr", "!=", ip, "drop"],
+        &["insert", "rule", "ip", INGRESS_TABLE, "fwdeny", "iifname", &vh, "ip", "saddr", "!=", ip, "drop"],
     );
     Ok(())
 }
@@ -740,12 +757,12 @@ fn do_detach(netns: &str) -> Result<()> {
 
 /// Remove as regras anti-spoofing de um veth no `forward` (idempotência).
 fn clear_antispoof(vh: &str) {
-    let listed = crate::capture("nft", &["-a", "list", "chain", "ip", INGRESS_TABLE, "forward"]).unwrap_or_default();
+    let listed = crate::capture("nft", &["-a", "list", "chain", "ip", INGRESS_TABLE, "fwdeny"]).unwrap_or_default();
     let needle = format!("iifname \"{vh}\"");
     for line in listed.lines() {
         if line.contains(&needle) && line.contains("saddr") && line.contains("drop") {
             if let Some(h) = line.rsplit("# handle ").next().and_then(|x| x.trim().parse::<u32>().ok()) {
-                run_ok("nft", &["delete", "rule", "ip", INGRESS_TABLE, "forward", "handle", &h.to_string()]);
+                run_ok("nft", &["delete", "rule", "ip", INGRESS_TABLE, "fwdeny", "handle", &h.to_string()]);
             }
         }
     }
@@ -817,16 +834,16 @@ fn do_unpublish(host_port: &str) -> Result<()> {
 /// firewall por-carga (accept) que apareçam ANTES na chain `forward` continuam a
 /// abrir excepções pontuais — portanto isto é a política de BASE do egress.
 fn do_egress(policy: &str) -> Result<()> {
-    let listed = crate::capture("nft", &["-a", "list", "chain", "ip", INGRESS_TABLE, "forward"]).unwrap_or_default();
+    let listed = crate::capture("nft", &["-a", "list", "chain", "ip", INGRESS_TABLE, "fwdeny"]).unwrap_or_default();
     for line in listed.lines() {
         if line.contains("oifname \"tap0\"") && line.contains("drop") {
             if let Some(handle) = line.rsplit("# handle ").next().and_then(|h| h.trim().parse::<u32>().ok()) {
-                run_ok("nft", &["delete", "rule", "ip", INGRESS_TABLE, "forward", "handle", &handle.to_string()]);
+                run_ok("nft", &["delete", "rule", "ip", INGRESS_TABLE, "fwdeny", "handle", &handle.to_string()]);
             }
         }
     }
     match policy {
-        "deny" => run("nft", &["add", "rule", "ip", INGRESS_TABLE, "forward", "oifname", "tap0", "drop"]),
+        "deny" => run("nft", &["add", "rule", "ip", INGRESS_TABLE, "fwdeny", "oifname", "tap0", "drop"]),
         "allow" => Ok(()),
         _ => Err(Error::Invalid(format!("política de egress inválida: {policy}"))),
     }
@@ -838,16 +855,16 @@ fn do_egress(policy: &str) -> Result<()> {
 fn do_egress_net(bridge: &str, policy: &str) -> Result<()> {
     let bridge = sanitize(bridge);
     let needle_if = format!("iifname \"{bridge}\"");
-    let listed = crate::capture("nft", &["-a", "list", "chain", "ip", INGRESS_TABLE, "forward"]).unwrap_or_default();
+    let listed = crate::capture("nft", &["-a", "list", "chain", "ip", INGRESS_TABLE, "fwdeny"]).unwrap_or_default();
     for line in listed.lines() {
         if line.contains(&needle_if) && line.contains("oifname \"tap0\"") && line.contains("drop") {
             if let Some(handle) = line.rsplit("# handle ").next().and_then(|h| h.trim().parse::<u32>().ok()) {
-                run_ok("nft", &["delete", "rule", "ip", INGRESS_TABLE, "forward", "handle", &handle.to_string()]);
+                run_ok("nft", &["delete", "rule", "ip", INGRESS_TABLE, "fwdeny", "handle", &handle.to_string()]);
             }
         }
     }
     match policy {
-        "deny" => run("nft", &["add", "rule", "ip", INGRESS_TABLE, "forward", "iifname", &bridge, "oifname", "tap0", "drop"]),
+        "deny" => run("nft", &["add", "rule", "ip", INGRESS_TABLE, "fwdeny", "iifname", &bridge, "oifname", "tap0", "drop"]),
         "allow" => Ok(()),
         _ => Err(Error::Invalid(format!("política de egress inválida: {policy}"))),
     }
@@ -902,11 +919,11 @@ fn do_l4guard(conn_rate: u32, conn_max: u32) -> Result<()> {
 /// Remove as regras de L4 guard do `forward` (e, com elas, os meters dinâmicos —
 /// um meter sem regras que o referenciem é libertado). Idempotente.
 fn clear_l4guard() {
-    let listed = crate::capture("nft", &["-a", "list", "chain", "ip", INGRESS_TABLE, "forward"]).unwrap_or_default();
+    let listed = crate::capture("nft", &["-a", "list", "chain", "ip", INGRESS_TABLE, "fwdeny"]).unwrap_or_default();
     for line in listed.lines() {
         if line.contains("dlx_conn_rate") || line.contains("dlx_conn_count") {
             if let Some(h) = line.rsplit("# handle ").next().and_then(|x| x.trim().parse::<u32>().ok()) {
-                run_ok("nft", &["delete", "rule", "ip", INGRESS_TABLE, "forward", "handle", &h.to_string()]);
+                run_ok("nft", &["delete", "rule", "ip", INGRESS_TABLE, "fwdeny", "handle", &h.to_string()]);
             }
         }
     }
@@ -1017,10 +1034,10 @@ fn do_firewall(ip: &str, hex: &str) -> Result<()> {
         run_ok("nft", &["add", "chain", "ip", INGRESS_TABLE, &chain]);
     }
     // jumps idempotentes no fwd: tráfego PARA (daddr) e DE (saddr) o IP.
-    let fwd_chain = crate::capture("nft", &["list", "chain", "ip", INGRESS_TABLE, "forward"]).unwrap_or_default();
+    let fwd_chain = crate::capture("nft", &["list", "chain", "ip", INGRESS_TABLE, "fwdeny"]).unwrap_or_default();
     for dir in ["daddr", "saddr"] {
         if !fwd_chain.contains(&format!("ip {dir} {ip} jump {chain}")) {
-            run_ok("nft", &["add", "rule", "ip", INGRESS_TABLE, "forward", "ip", dir, ip, "jump", &chain]);
+            run_ok("nft", &["add", "rule", "ip", INGRESS_TABLE, "fwdeny", "ip", dir, ip, "jump", &chain]);
         }
     }
     // flush + reconstrução do corpo num único script (mantém a chain e os jumps).
@@ -1035,11 +1052,11 @@ fn do_firewall(ip: &str, hex: &str) -> Result<()> {
 /// handle) e apaga a chain. Best-effort.
 fn do_unfirewall(ip: &str) -> Result<()> {
     let chain = fw_chain_name(ip);
-    if let Ok(out) = crate::capture("nft", &["-a", "list", "chain", "ip", INGRESS_TABLE, "forward"]) {
+    if let Ok(out) = crate::capture("nft", &["-a", "list", "chain", "ip", INGRESS_TABLE, "fwdeny"]) {
         for line in out.lines() {
             if line.contains(&format!("jump {chain}")) {
                 if let Some(h) = line.rsplit("handle ").next().map(|s| s.trim()) {
-                    run_ok("nft", &["delete", "rule", "ip", INGRESS_TABLE, "forward", "handle", h]);
+                    run_ok("nft", &["delete", "rule", "ip", INGRESS_TABLE, "fwdeny", "handle", h]);
                 }
             }
         }
