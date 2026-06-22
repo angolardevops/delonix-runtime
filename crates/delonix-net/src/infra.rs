@@ -481,6 +481,13 @@ fn handle_control(line: &str) -> String {
         // container já a correr (veth extra para a bridge da rede privada).
         ["attach-extra", netns, ifname, ip, bridge, gateway] => do_attach_extra(netns, ifname, ip, bridge, gateway),
         ["detach-extra", netns, ifname] => do_detach_extra(netns, ifname),
+        // limite de largura de banda ao vivo (rootless): shaping no veth do lado
+        // do infra (download via tbf na raiz, upload via ingress police).
+        ["netrate", vh, rate, burst] => do_netrate(vh, rate, burst),
+        ["netrate-clear", vh] => {
+            do_netrate_clear(vh);
+            Ok(())
+        }
         ["netdel", bridge] => do_netdel(bridge),
         ["vmtap", tap, bridge, gateway] => do_vmtap(tap, bridge, gateway),
         ["vmtapdel", tap] => do_vmtapdel(tap),
@@ -803,6 +810,35 @@ fn do_detach_extra(netns: &str, ifname: &str) -> Result<()> {
     clear_antispoof(&vh);
     run_ok("ip", &["link", "del", &vh]);
     Ok(())
+}
+
+/// Aplica shaping de largura de banda no veth `vh` (lado do infra), DENTRO do
+/// netns de infra (corre no holder). Mesmo caudal nos dois sentidos:
+/// DOWNLOAD (host→container) = tbf na raiz; UPLOAD (container→host) = ingress
+/// `police`+`drop`. `rate`/`burst` já vêm em bit/s e bytes. Idempotente.
+fn do_netrate(vh: &str, rate: &str, burst: &str) -> Result<()> {
+    let vh = sanitize(vh);
+    let r = format!("{}bit", rate.parse::<u64>().unwrap_or(0).max(8000));
+    let b = burst.to_string();
+    do_netrate_clear(&vh); // reaplicação limpa
+    run("tc", &["qdisc", "add", "dev", &vh, "root", "tbf", "rate", &r, "burst", &b, "latency", "50ms"])?;
+    run("tc", &["qdisc", "add", "dev", &vh, "handle", "ffff:", "ingress"])?;
+    run(
+        "tc",
+        &[
+            "filter", "add", "dev", &vh, "parent", "ffff:", "protocol", "all", "prio", "1",
+            "u32", "match", "u32", "0", "0", "police", "rate", &r, "burst", &b, "drop",
+        ],
+    )?;
+    Ok(())
+}
+
+/// Remove o shaping do veth `vh` (best-effort). Apagar o veth já leva os qdiscs;
+/// limpa-se à mão para reaplicação e órfãos.
+fn do_netrate_clear(vh: &str) {
+    let vh = sanitize(vh);
+    run_ok("tc", &["qdisc", "del", "dev", &vh, "root"]);
+    run_ok("tc", &["qdisc", "del", "dev", &vh, "handle", "ffff:", "ingress"]);
 }
 
 /// Remove as regras anti-spoofing de um veth no `forward` (idempotência).
@@ -1302,6 +1338,20 @@ pub fn attach_extra_container(id: &str, idx: u32, net: &str) -> Result<(String, 
     let netns = sanitize(id);
     control_send(&format!("attach-extra {netns} {ifname} {ip} {bridge} {gateway}"))?;
     Ok((ifname, ip))
+}
+
+/// **Limita a largura de banda de um container A CORRER** (rootless, ao vivo):
+/// pede ao holder o shaping no veth do lado do infra (`vh<fnv>`). `rate_bit` em
+/// bit/s, `burst_bytes` em bytes. Idempotente.
+pub fn set_net_rate(id: &str, rate_bit: u64, burst_bytes: u64) -> Result<()> {
+    let vh = vh_name(&sanitize(id));
+    control_send(&format!("netrate {vh} {rate_bit} {burst_bytes}"))
+}
+
+/// **Remove o limite de largura de banda** de um container (rootless). Best-effort.
+pub fn clear_net_rate(id: &str) {
+    let vh = vh_name(&sanitize(id));
+    let _ = control_send(&format!("netrate-clear {vh}"));
 }
 
 /// **Desliga um container de uma rede adicional** (multi-homing ao vivo): pede ao
