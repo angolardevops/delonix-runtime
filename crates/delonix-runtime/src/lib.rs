@@ -2419,6 +2419,76 @@ pub fn unmount_live(container: &Container, target: &str) -> Result<()> {
 }
 
 // ----------------------------------------------------------------------------
+// Prioridade de CPU (nice/renice) — QoS #6
+// ----------------------------------------------------------------------------
+
+/// Reúne os PIDs (host) de um container: primeiro via `cgroup.procs` (preciso);
+/// se faltar (rootless sem delegação de cgroup), faz BFS pela árvore de processos
+/// a partir do `pid` do init, lendo o `ppid` (campo 4 de `/proc/<pid>/stat`).
+fn container_pids(container: &Container) -> Vec<i32> {
+    if let Ok(procs) = std::fs::read_to_string(format!("{}/cgroup.procs", container.cgroup())) {
+        let v: Vec<i32> = procs.lines().filter_map(|l| l.trim().parse().ok()).collect();
+        if !v.is_empty() {
+            return v;
+        }
+    }
+    let Some(root) = container.pid else { return Vec::new() };
+    // mapa ppid→[filhos] a partir de /proc, depois BFS desde o init.
+    let mut children: std::collections::HashMap<i32, Vec<i32>> = std::collections::HashMap::new();
+    if let Ok(rd) = std::fs::read_dir("/proc") {
+        for e in rd.flatten() {
+            let Ok(pid) = e.file_name().to_string_lossy().parse::<i32>() else { continue };
+            if let Ok(stat) = std::fs::read_to_string(format!("/proc/{pid}/stat")) {
+                // campo 4 (ppid) vem DEPOIS do `comm` entre parênteses — fatia após ')'.
+                if let Some(rest) = stat.rsplit(')').next() {
+                    let f: Vec<&str> = rest.split_whitespace().collect();
+                    if let Some(ppid) = f.get(1).and_then(|s| s.parse::<i32>().ok()) {
+                        children.entry(ppid).or_default().push(pid);
+                    }
+                }
+            }
+        }
+    }
+    let mut out = vec![root];
+    let mut queue = vec![root];
+    while let Some(p) = queue.pop() {
+        if let Some(kids) = children.get(&p) {
+            for &k in kids {
+                out.push(k);
+                queue.push(k);
+            }
+        }
+    }
+    out
+}
+
+/// Aplica uma prioridade de CPU (`nice`) a TODA a árvore de processos de um
+/// container A CORRER (renice ao vivo). Best-effort: baixar prioridade (nice
+/// positivo) funciona sem privilégio; subir (negativo) exige `CAP_SYS_NICE`/root,
+/// por isso falhas individuais não abortam. Devolve `(aplicados, total)`.
+pub fn set_priority(container: &Container, nice: i32) -> Result<(usize, usize)> {
+    let nice = nice.clamp(-20, 19);
+    let pid = container
+        .pid
+        .filter(|p| safe_to_signal(*p, container.pid_starttime))
+        .ok_or_else(|| Error::NotRunning(container.short_id().to_string()))?;
+    let _ = pid;
+    let pids = container_pids(container);
+    if pids.is_empty() {
+        return Err(Error::Invalid("sem processos no container".into()));
+    }
+    let mut applied = 0usize;
+    for p in &pids {
+        // SAFETY: setpriority com PRIO_PROCESS e um pid válido; sem efeitos de memória.
+        let r = unsafe { libc::setpriority(libc::PRIO_PROCESS, *p as libc::id_t, nice) };
+        if r == 0 {
+            applied += 1;
+        }
+    }
+    Ok((applied, pids.len()))
+}
+
+// ----------------------------------------------------------------------------
 // Ciclo de vida: stop / remove
 // ----------------------------------------------------------------------------
 
