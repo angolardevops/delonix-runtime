@@ -469,6 +469,11 @@ fn handle_control(line: &str) -> String {
         ["unfirewall", ip] => do_unfirewall(ip),
         ["egress", policy] => do_egress(policy),
         ["egress-net", bridge, policy] => do_egress_net(bridge, policy),
+        ["l4guard", rate, max] => do_l4guard(rate.parse().unwrap_or(50), max.parse().unwrap_or(200)),
+        ["l4guard-clear"] => {
+            clear_l4guard();
+            Ok(())
+        }
         _ => Err(Error::Invalid(format!("comando de controlo inválido: {line:?}"))),
     };
     match res {
@@ -836,6 +841,65 @@ fn do_egress_net(bridge: &str, policy: &str) -> Result<()> {
     }
 }
 
+/// Pré-flight de um ruleset `nft` (`nft -c -f -`): devolve `true` se for ACEITE,
+/// SEM o aplicar. É a "regra de ouro" da proteção L4 — só aplicamos depois de o
+/// kernel confirmar que suporta a sintaxe (ex.: `meter`/`ct count`).
+fn nft_check(script: &str) -> bool {
+    use std::io::Write;
+    let mut child = match Command::new("nft")
+        .args(["-c", "-f", "-"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+    {
+        Ok(c) => c,
+        Err(_) => return false,
+    };
+    if let Some(mut si) = child.stdin.take() {
+        let _ = si.write_all(script.as_bytes());
+    }
+    child.wait().map(|s| s.success()).unwrap_or(false)
+}
+
+/// Proteção DDoS L4 (req #5): rate-limit + ct-count POR-ORIGEM das NOVAS ligações
+/// de entrada (via tap0), no `forward` do dlxing. Não é global (cada origem tem o
+/// seu balde → não é self-DoS). `counter drop` torna os excessos OBSERVÁVEIS
+/// (deteção). best-effort + pré-flight `nft -c`: se o kernel não suportar `meter`,
+/// DEGRADA (não aplica, não parte o ruleset). Idempotente (limpa antes).
+fn do_l4guard(conn_rate: u32, conn_max: u32) -> Result<()> {
+    clear_l4guard();
+    let rate = conn_rate.clamp(1, 100_000);
+    let burst = rate.saturating_mul(2).max(1);
+    let max = conn_max.clamp(1, 1_000_000);
+    let script = format!(
+        "add rule ip {t} forward iifname \"tap0\" ct state new meter dlx_conn_rate \
+            {{ ip saddr limit rate over {rate}/second burst {burst} packets }} counter drop\n\
+         add rule ip {t} forward iifname \"tap0\" ct state new meter dlx_conn_count \
+            {{ ip saddr ct count over {max} }} counter drop\n",
+        t = INGRESS_TABLE,
+    );
+    // REGRA DE OURO: só aplica se o kernel aceitar a sintaxe (senão degrada).
+    if !nft_check(&script) {
+        return Ok(());
+    }
+    let _ = apply_nft_stdin(&script);
+    Ok(())
+}
+
+/// Remove as regras de L4 guard do `forward` (e, com elas, os meters dinâmicos —
+/// um meter sem regras que o referenciem é libertado). Idempotente.
+fn clear_l4guard() {
+    let listed = crate::capture("nft", &["-a", "list", "chain", "ip", INGRESS_TABLE, "forward"]).unwrap_or_default();
+    for line in listed.lines() {
+        if line.contains("dlx_conn_rate") || line.contains("dlx_conn_count") {
+            if let Some(h) = line.rsplit("# handle ").next().and_then(|x| x.trim().parse::<u32>().ok()) {
+                run_ok("nft", &["delete", "rule", "ip", INGRESS_TABLE, "forward", "handle", &h.to_string()]);
+            }
+        }
+    }
+}
+
 /// Valida os campos de um publish antes de os meter num comando `nft` (defesa
 /// contra injeção): protocolo `tcp`/`udp`, portas numéricas, IP na subnet de infra.
 fn validate_publish(proto: &str, host_port: &str, cip: &str, cport: &str) -> Result<()> {
@@ -1172,6 +1236,18 @@ pub fn set_egress_policy_net(bridge: &str, deny: bool) -> Result<()> {
     control_send(&format!("egress-net {} {}", bridge, if deny { "deny" } else { "allow" }))
 }
 
+/// Ativa/atualiza a proteção DDoS L4 (rate-limit + ct-count por-origem). `conn_rate`
+/// = novas ligações/segundo por IP; `conn_max` = ligações concorrentes por IP.
+/// best-effort no holder (degrada se o kernel não suportar). Ver [`do_l4guard`].
+pub fn set_l4_guard(conn_rate: u32, conn_max: u32) -> Result<()> {
+    control_send(&format!("l4guard {conn_rate} {conn_max}"))
+}
+
+/// Remove a proteção DDoS L4 (idempotente).
+pub fn clear_l4_guard() -> Result<()> {
+    control_send("l4guard-clear")
+}
+
 /// Remove a firewall de um container do ingress (best-effort).
 pub fn clear_firewall(ip: &str) {
     let _ = control_send(&format!("unfirewall {ip}"));
@@ -1401,6 +1477,10 @@ fn setup_infra_netns() -> Result<()> {
     run_ok("mount", &["-t", "tmpfs", "none", "/run"]);
     let _ = std::fs::create_dir_all("/run/netns");
     apply_nft_stdin(&ingress_table_ruleset())?;
+    // Proteção DDoS L4 por omissão (req #5): rate-limit + ct-count POR-ORIGEM.
+    // Limites conservadores (tráfego legítimo não é afetado), best-effort e com
+    // pré-flight `nft -c` (degrada em kernels sem `meter`). Configurável via API.
+    let _ = do_l4guard(50, 200);
     // DHCP da rede default do ingress (delonix0).
     start_dhcp(INFRA_BRIDGE, INFRA_PREFIX);
     Ok(())
