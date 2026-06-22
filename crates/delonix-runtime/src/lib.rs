@@ -9,14 +9,14 @@
 
 use std::collections::BTreeMap;
 use std::ffi::CString;
-use std::os::fd::{FromRawFd, OwnedFd};
+use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
 use std::time::Duration;
 
 use delonix_core::{Container, Error, Mount, Result, Status, Store};
 
 use nix::fcntl::{open, OFlag};
 use nix::mount::{mount, umount2, MntFlags, MsFlags};
-use nix::sched::{clone, setns, CloneFlags};
+use nix::sched::{clone, setns, unshare, CloneFlags};
 use nix::sys::signal::{kill, Signal};
 use nix::sys::stat::Mode;
 use nix::sys::wait::{waitpid, WaitStatus};
@@ -2168,6 +2168,251 @@ pub fn exec(container: &Container, argv: &[String], tty: bool) -> Result<i32> {
             } else {
                 let status = waitpid(child, None).map_err(syserr("waitpid"))?;
                 Ok(wait_to_code(status))
+            }
+        }
+    }
+}
+
+// ----------------------------------------------------------------------------
+// Hot-plug de volumes (zero-downtime): montar/desmontar num container A CORRER
+// ----------------------------------------------------------------------------
+//
+// A nova mount API do kernel (open_tree/move_mount, Linux 5.2+; mount_setattr
+// 5.12+) permite montar num container vivo sem o parar. O problema-chave é o
+// modelo ROOTLESS: depois do `pivot_root` a fonte (caminho do host) já NÃO é
+// visível dentro do mnt ns do container, e o userns do container não manda no
+// mnt ns do host. Solução (funciona em rootless E root):
+//   1. setns(user) → entra no userns do container (ganha CAP_SYS_ADMIN lá)
+//   2. unshare(CLONE_NEWNS) → mnt ns novo, CÓPIA do do host (fonte visível),
+//      mas POSSUÍDO pelo userns do container
+//   3. open_tree(CLONE) → clona a subárvore-fonte num mount DESTACADO (fd)
+//   4. setns(mnt) → entra no mnt ns REAL do container (raiz = raiz do container)
+//   5. move_mount(fd, alvo) → anexa o mount; o mesmo userns possui origem e
+//      destino, por isso o kernel autoriza
+// Tudo no filho de uma fork (single-threaded, requisito do setns(user)).
+
+const OPEN_TREE_CLONE: libc::c_uint = 1;
+const MOVE_MOUNT_F_EMPTY_PATH: libc::c_uint = 0x0000_0004;
+const MOUNT_ATTR_RDONLY: u64 = 0x0000_0001;
+const MOUNT_ATTR_NOSUID: u64 = 0x0000_0002;
+const MOUNT_ATTR_NODEV: u64 = 0x0000_0004;
+
+#[repr(C)]
+struct MountAttr {
+    attr_set: u64,
+    attr_clr: u64,
+    propagation: u64,
+    userns_fd: u64,
+}
+
+/// `open_tree(AT_FDCWD, src, OPEN_TREE_CLONE [|AT_RECURSIVE])` → fd dum mount
+/// destacado (cópia da subárvore que cobre `src`). Erro se o kernel não suportar.
+fn open_tree_clone(src: &str, recursive: bool) -> nix::Result<OwnedFd> {
+    let c = CString::new(src).map_err(|_| nix::errno::Errno::EINVAL)?;
+    let mut flags = OPEN_TREE_CLONE | (OFlag::O_CLOEXEC.bits() as libc::c_uint);
+    if recursive {
+        flags |= libc::AT_RECURSIVE as libc::c_uint;
+    }
+    // SAFETY: syscall com caminho válido (CString terminado em NUL) e flags válidas.
+    let fd = unsafe { libc::syscall(libc::SYS_open_tree, libc::AT_FDCWD, c.as_ptr(), flags) };
+    if fd < 0 {
+        return Err(nix::errno::Errno::last());
+    }
+    // SAFETY: fd >= 0 devolvido pelo kernel, com posse transferida ao OwnedFd.
+    Ok(unsafe { OwnedFd::from_raw_fd(fd as RawFd) })
+}
+
+/// `move_mount(dfd, "", AT_FDCWD, target, MOVE_MOUNT_F_EMPTY_PATH)` → anexa o
+/// mount destacado `dfd` em `target` (resolvido contra a raiz actual).
+fn move_mount_to(dfd: RawFd, target: &str) -> nix::Result<()> {
+    let empty = CString::new("").unwrap();
+    let c = CString::new(target).map_err(|_| nix::errno::Errno::EINVAL)?;
+    // SAFETY: dfd válido, caminhos NUL-terminados, flag válida.
+    let r = unsafe {
+        libc::syscall(
+            libc::SYS_move_mount,
+            dfd,
+            empty.as_ptr(),
+            libc::AT_FDCWD,
+            c.as_ptr(),
+            MOVE_MOUNT_F_EMPTY_PATH,
+        )
+    };
+    if r < 0 {
+        return Err(nix::errno::Errno::last());
+    }
+    Ok(())
+}
+
+/// `mount_setattr(dfd, "", AT_EMPTY_PATH|AT_RECURSIVE, &attr)` — fixa atributos
+/// (nosuid/nodev sempre, rdonly opcional) no mount destacado antes de o anexar.
+fn mount_setattr_fd(dfd: RawFd, attr_set: u64) -> nix::Result<()> {
+    let empty = CString::new("").unwrap();
+    let attr = MountAttr { attr_set, attr_clr: 0, propagation: 0, userns_fd: 0 };
+    // SAFETY: dfd válido, struct do tamanho declarado, flags válidas.
+    let r = unsafe {
+        libc::syscall(
+            libc::SYS_mount_setattr,
+            dfd,
+            empty.as_ptr(),
+            (libc::AT_EMPTY_PATH | libc::AT_RECURSIVE) as libc::c_uint,
+            &attr as *const MountAttr,
+            std::mem::size_of::<MountAttr>(),
+        )
+    };
+    if r < 0 {
+        return Err(nix::errno::Errno::last());
+    }
+    Ok(())
+}
+
+/// Abre o fd dum namespace do container, saltando-o se JÁ o partilhamos (mesmo
+/// inode) — juntá-lo depois daria EPERM. Devolve `Ok(None)` se já partilhado.
+fn open_container_ns(pid: i32, ns: &str) -> Result<Option<OwnedFd>> {
+    use std::os::unix::fs::MetadataExt;
+    let target = format!("/proc/{pid}/ns/{ns}");
+    let mine = format!("/proc/{}/ns/{ns}", std::process::id());
+    if let (Ok(a), Ok(b)) = (std::fs::metadata(&target), std::fs::metadata(&mine)) {
+        if a.ino() == b.ino() {
+            return Ok(None);
+        }
+    }
+    let fd = open(target.as_str(), OFlag::O_RDONLY | OFlag::O_CLOEXEC, Mode::empty())
+        .map_err(syserr("open ns"))?;
+    // SAFETY: fd >= 0 do kernel; posse transferida ao OwnedFd.
+    Ok(Some(unsafe { OwnedFd::from_raw_fd(fd) }))
+}
+
+/// Monta um bind-volume num container A CORRER, sem o parar (hot-plug). Ver o
+/// comentário do módulo para a sequência setns/unshare/open_tree/move_mount.
+pub fn mount_live(container: &Container, m: &Mount) -> Result<()> {
+    if !mount_target_safe(&m.target) {
+        return Err(Error::Invalid(format!("alvo de montagem inseguro: {}", m.target)));
+    }
+    let pid = container
+        .pid
+        .filter(|p| safe_to_signal(*p, container.pid_starttime))
+        .ok_or_else(|| Error::NotRunning(container.short_id().to_string()))?;
+    let src_is_dir = std::fs::metadata(&m.source)
+        .map_err(|_| Error::Invalid(format!("fonte de montagem inexistente: {}", m.source)))?
+        .is_dir();
+
+    // fds dos namespaces (abertos no PAI, no contexto do host; herdados pela fork).
+    let user_fd = if container.userns { open_container_ns(pid, "user")? } else { None };
+    let mnt_fd = open_container_ns(pid, "mnt")?
+        .ok_or_else(|| Error::Invalid("container partilha o mnt ns do host — nada a montar".into()))?;
+
+    let mut attr = MOUNT_ATTR_NOSUID | MOUNT_ATTR_NODEV;
+    if m.readonly {
+        attr |= MOUNT_ATTR_RDONLY;
+    }
+    let source = m.source.clone();
+    let target = m.target.clone();
+
+    // fork: o filho fica single-threaded (requisito do setns(user)).
+    // SAFETY: o filho só faz syscalls simples e `_exit`, sem correr destrutores.
+    match unsafe { fork() }.map_err(syserr("fork"))? {
+        ForkResult::Child => {
+            let fail = |code: i32, msg: &str| -> ! {
+                eprintln!("delonix: mount_live: {msg}");
+                unsafe { libc::_exit(code) }
+            };
+            // 1) entra no userns do container (ganha CAP_SYS_ADMIN lá).
+            if let Some(u) = user_fd {
+                if setns(u, CloneFlags::empty()).is_err() {
+                    fail(125, "setns(user)");
+                }
+                // SAFETY: temos CAP_SETUID no userns do container.
+                unsafe {
+                    libc::setgid(0);
+                    libc::setuid(0);
+                }
+            }
+            // 2) mnt ns novo (cópia do do host) possuído pelo userns do container.
+            if unshare(CloneFlags::CLONE_NEWNS).is_err() {
+                fail(124, "unshare(NEWNS)");
+            }
+            // 3) clona a subárvore-fonte (visível: ainda vemos a árvore do host).
+            let dfd = match open_tree_clone(&source, true) {
+                Ok(f) => f,
+                Err(e) => fail(123, &format!("open_tree: {e} (kernel suporta a nova mount API?)")),
+            };
+            if mount_setattr_fd(dfd.as_raw_fd(), attr).is_err() {
+                fail(122, "mount_setattr");
+            }
+            // 4) entra no mnt ns REAL do container (a raiz passa a ser a do container).
+            if setns(mnt_fd, CloneFlags::CLONE_NEWNS).is_err() {
+                fail(121, "setns(mnt)");
+            }
+            // 5) cria o ponto de montagem (resolve contra a raiz = raiz do container).
+            if src_is_dir {
+                let _ = std::fs::create_dir_all(&target);
+            } else {
+                if let Some(p) = std::path::Path::new(&target).parent() {
+                    let _ = std::fs::create_dir_all(p);
+                }
+                let _ = std::fs::File::create(&target);
+            }
+            // 6) anexa o mount destacado no alvo.
+            if move_mount_to(dfd.as_raw_fd(), &target).is_err() {
+                fail(120, "move_mount");
+            }
+            unsafe { libc::_exit(0) }
+        }
+        ForkResult::Parent { child } => {
+            let status = waitpid(child, None).map_err(syserr("waitpid"))?;
+            match status {
+                WaitStatus::Exited(_, 0) => Ok(()),
+                WaitStatus::Exited(_, code) => Err(Error::Invalid(format!(
+                    "falha a montar {} → {} no container vivo (código {code})",
+                    m.source, m.target
+                ))),
+                _ => Err(Error::Invalid("montagem ao vivo interrompida".into())),
+            }
+        }
+    }
+}
+
+/// Desmonta um bind-volume dum container A CORRER (hot-unplug). Entra no mnt ns
+/// do container e faz `umount2(target, MNT_DETACH)` (lazy: não falha se ocupado).
+pub fn unmount_live(container: &Container, target: &str) -> Result<()> {
+    if !mount_target_safe(target) {
+        return Err(Error::Invalid(format!("alvo de desmontagem inseguro: {target}")));
+    }
+    let pid = container
+        .pid
+        .filter(|p| safe_to_signal(*p, container.pid_starttime))
+        .ok_or_else(|| Error::NotRunning(container.short_id().to_string()))?;
+    let user_fd = if container.userns { open_container_ns(pid, "user")? } else { None };
+    let mnt_fd = open_container_ns(pid, "mnt")?
+        .ok_or_else(|| Error::Invalid("container partilha o mnt ns do host".into()))?;
+    let target = target.to_string();
+
+    // SAFETY: o filho só faz syscalls simples e `_exit`.
+    match unsafe { fork() }.map_err(syserr("fork"))? {
+        ForkResult::Child => {
+            if let Some(u) = user_fd {
+                if setns(u, CloneFlags::empty()).is_err() {
+                    unsafe { libc::_exit(125) };
+                }
+                unsafe {
+                    libc::setgid(0);
+                    libc::setuid(0);
+                }
+            }
+            if setns(mnt_fd, CloneFlags::CLONE_NEWNS).is_err() {
+                unsafe { libc::_exit(121) };
+            }
+            match umount2(target.as_str(), MntFlags::MNT_DETACH) {
+                Ok(()) => unsafe { libc::_exit(0) },
+                Err(_) => unsafe { libc::_exit(119) },
+            }
+        }
+        ForkResult::Parent { child } => {
+            let status = waitpid(child, None).map_err(syserr("waitpid"))?;
+            match status {
+                WaitStatus::Exited(_, 0) => Ok(()),
+                _ => Err(Error::Invalid(format!("falha a desmontar {target} no container vivo"))),
             }
         }
     }
