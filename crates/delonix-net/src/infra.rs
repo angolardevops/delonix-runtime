@@ -474,6 +474,18 @@ fn handle_control(line: &str) -> String {
             clear_l4guard();
             Ok(())
         }
+        // WireGuard sobre o overlay (req #6): a interface vive no netns de infra.
+        ["wg-up", iface, port, priv_key, addr] => {
+            crate::wg::ensure_iface(iface, priv_key, port.parse().unwrap_or(51820), addr)
+        }
+        ["wg-peer", iface, pub_key, endpoint, allowed] => crate::wg::set_peer(
+            iface,
+            &crate::wg::Peer {
+                public: pub_key.to_string(),
+                endpoint: endpoint.to_string(),
+                allowed_ips: allowed.split(',').map(str::to_string).collect(),
+            },
+        ),
         _ => Err(Error::Invalid(format!("comando de controlo inválido: {line:?}"))),
     };
     match res {
@@ -1246,6 +1258,18 @@ pub fn set_l4_guard(conn_rate: u32, conn_max: u32) -> Result<()> {
 /// Remove a proteção DDoS L4 (idempotente).
 pub fn clear_l4_guard() -> Result<()> {
     control_send("l4guard-clear")
+}
+
+/// Sobe a interface WireGuard `<iface>` no netns de infra (req #6) com a privada
+/// do nó e a porta de escuta. A privada vai pelo control socket (0600 + SO_PEERCRED
+/// = só o uid do engine). Ver [`crate::wg`].
+pub fn set_wg_iface(iface: &str, private_key: &str, listen_port: u16, addr_cidr: &str) -> Result<()> {
+    control_send(&format!("wg-up {iface} {listen_port} {private_key} {addr_cidr}"))
+}
+
+/// Adiciona um peer WireGuard (outro nó) à interface do overlay.
+pub fn set_wg_peer(iface: &str, public_key: &str, endpoint: &str, allowed_ips: &[String]) -> Result<()> {
+    control_send(&format!("wg-peer {iface} {public_key} {endpoint} {}", allowed_ips.join(",")))
 }
 
 /// Remove a firewall de um container do ingress (best-effort).
