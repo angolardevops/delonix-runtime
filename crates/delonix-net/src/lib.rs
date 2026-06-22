@@ -743,6 +743,42 @@ impl NetworkStore {
         self.get(name)
     }
 
+    /// Adiciona/atualiza um peer de um overlay existente (idempotente) e devolve a
+    /// rede atualizada. `peer` = `<node_ip>` ou `<node_ip>=<pubkey>=<wg_ip>`. É o
+    /// bloco do gossip/reconciliador (#6 fase 4): aplicar peers aprendidos. Dedup
+    /// pelo `node_ip` (chave/wg_ip podem ter rodado → substitui).
+    pub fn add_overlay_peer(&self, name: &str, peer: &str) -> Result<Network> {
+        let net = self.get(name)?;
+        if net.driver != DRIVER_OVERLAY {
+            return Err(Error::Invalid(format!("'{name}' não é um overlay")));
+        }
+        let (new_ip, _) = parse_overlay_peer(peer);
+        if new_ip.is_empty() {
+            return Err(Error::Invalid("peer inválido (falta node_ip)".into()));
+        }
+        let mut peers: Vec<String> = net
+            .peers
+            .iter()
+            .filter(|p| parse_overlay_peer(p).0 != new_ip)
+            .cloned()
+            .collect();
+        peers.push(peer.to_string());
+        // re-persiste substituindo SÓ a linha `peers=` (preserva base/vni/wgip).
+        let raw = std::fs::read_to_string(self.path(name))
+            .map_err(|e| Error::Runtime { context: "ler overlay", message: e.to_string() })?;
+        let new_line = format!("peers={}", peers.join(","));
+        let mut out: Vec<String> = raw
+            .lines()
+            .map(|l| if l.starts_with("peers=") { new_line.clone() } else { l.to_string() })
+            .collect();
+        if !out.iter().any(|l| l.starts_with("peers=")) {
+            out.push(new_line);
+        }
+        std::fs::write(self.path(name), out.join("\n") + "\n")
+            .map_err(|e| Error::Runtime { context: "escrever overlay", message: e.to_string() })?;
+        self.get(name)
+    }
+
     /// Cria uma rede `macvlan`/`ipvlan`: o container fica directamente na LAN
     /// física do `parent` (ex.: `eno1`), com `subnet`/`gateway` dessa LAN. Valida
     /// o nome, o driver, a existência do NIC-pai e o formato da subnet (CIDR).
@@ -1796,6 +1832,25 @@ mod tests {
         // malformado → trata como plano (sem wg)
         assert_eq!(parse_overlay_peer("10.0.0.2=").0, "10.0.0.2");
         assert!(parse_overlay_peer("10.0.0.2=").1.is_none());
+    }
+
+    #[test]
+    fn overlay_add_peer_dedup() {
+        let dir = std::env::temp_dir().join(format!("dlx-addpeer-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let store = NetworkStore::open(&dir).unwrap();
+        store.create_overlay("ov", 7, &[], Some("10.250.0.1")).unwrap();
+        // aprende um peer
+        let n = store.add_overlay_peer("ov", "10.0.0.2=PUB2=10.250.0.2").unwrap();
+        assert_eq!(n.peers, vec!["10.0.0.2=PUB2=10.250.0.2"]);
+        assert_eq!(n.wg_ip.as_deref(), Some("10.250.0.1")); // preserva wgip
+        // rotação: mesmo node_ip, chave nova → SUBSTITUI (não duplica)
+        let n2 = store.add_overlay_peer("ov", "10.0.0.2=PUBNEW=10.250.0.2").unwrap();
+        assert_eq!(n2.peers, vec!["10.0.0.2=PUBNEW=10.250.0.2"]);
+        // 2º peer distinto → adiciona
+        let n3 = store.add_overlay_peer("ov", "10.0.0.3=PUB3=10.250.0.3").unwrap();
+        assert_eq!(n3.peers.len(), 2);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
