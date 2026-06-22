@@ -33,10 +33,37 @@ pub struct Volume {
     /// Opções de montagem (`mount -o ...`), ex.: `vers=4,ro`.
     #[serde(default)]
     pub options: Option<String>,
+    /// Quota de tamanho em bytes (`--quota`). `None` = sem limite. Com privilégio
+    /// (modelo root) é um cap DURO via imagem ext4 montada por loop; em rootless é
+    /// um limite MONITORIZADO (uso medido, alerta perto do limite). [[híbrido #7]]
+    #[serde(default)]
+    pub quota_bytes: Option<u64>,
+    /// Percentagem de uso a partir da qual se gera alerta (omissão 90).
+    #[serde(default)]
+    pub alert_pct: Option<u8>,
 }
 
 fn default_driver() -> String {
     "local".to_string()
+}
+
+/// Tamanho humano (`512m`, `2g`, `10G`, `1048576`) → bytes. Sufixos binários
+/// (k=1024, m=1024², g=1024³, t=1024⁴); um `b`/`B` final é aceite. `None` se inválido.
+pub fn parse_size_bytes(s: &str) -> Option<u64> {
+    let lower = s.trim().to_lowercase();
+    let body = lower.strip_suffix('b').unwrap_or(lower.as_str());
+    let (num, mult) = match body.chars().last() {
+        Some('k') => (&body[..body.len() - 1], 1024u64),
+        Some('m') => (&body[..body.len() - 1], 1024 * 1024),
+        Some('g') => (&body[..body.len() - 1], 1024 * 1024 * 1024),
+        Some('t') => (&body[..body.len() - 1], 1024u64.pow(4)),
+        _ => (body, 1),
+    };
+    let n: f64 = num.trim().parse().ok()?;
+    if !n.is_finite() || n <= 0.0 {
+        return None;
+    }
+    Some((n * mult as f64) as u64)
 }
 
 /// O armazém de volumes, sob `<root>/volumes`.
@@ -107,6 +134,8 @@ impl VolumeStore {
             driver: driver.to_string(),
             device,
             options,
+            quota_bytes: None,
+            alert_pct: None,
         };
         // Monta ANTES de persistir: se o NFS falhar, não deixamos um volume órfão.
         if let Err(e) = self.ensure_mounted(&vol) {
@@ -120,6 +149,12 @@ impl VolumeStore {
     /// Garante que um volume `nfs` está montado (via `mount -t nfs`). No-op para
     /// volumes locais ou se já estiver montado. Best-effort: requer `mount.nfs`.
     pub fn ensure_mounted(&self, vol: &Volume) -> Result<()> {
+        // Volume com quota DURA (loopback ext4): remonta a imagem se desmontada
+        // (ex.: após reinício do host). Best-effort — sem privilégio, no-op.
+        let img = self.loop_img(&vol.name);
+        if vol.quota_bytes.is_some() && img.exists() && !is_mounted(&vol.mountpoint) {
+            let _ = Self::run("mount", &["-o", "loop", &img.to_string_lossy(), &vol.mountpoint]);
+        }
         if vol.driver != "nfs" || is_mounted(&vol.mountpoint) {
             return Ok(());
         }
@@ -179,12 +214,149 @@ impl VolumeStore {
             return Err(Error::NotFound(format!("volume {name}")));
         }
         if let Ok(v) = self.inspect(name) {
-            if v.driver == "nfs" && is_mounted(&v.mountpoint) {
+            // desmonta nfs OU o loopback de quota dura antes de apagar os dados.
+            if (v.driver == "nfs" || v.quota_bytes.is_some()) && is_mounted(&v.mountpoint) {
                 let _ = std::process::Command::new("umount").arg(&v.mountpoint).output();
             }
         }
         fs::remove_dir_all(dir)?;
         Ok(())
+    }
+
+    // ---- Quota (#7, híbrida) -------------------------------------------------
+    // Modelo ROOT (privileged): cap DURO via imagem ext4 montada por loop em `_data`
+    // (a escrita falha com ENOSPC ao encher; resize2fs cresce a quente). Modelo
+    // ROOTLESS (monitor): a quota é um limite medido — `usage()`+`over_quota()`
+    // expõem o estado e o alerta; não há cap duro (losetup precisa de CAP_SYS_ADMIN).
+
+    fn loop_img(&self, name: &str) -> PathBuf {
+        self.dir(name).join("data.img")
+    }
+
+    /// Uso REAL em bytes do volume (`du` do `_data`, recursivo). Para volumes com
+    /// loopback, reflete o ocupado dentro do ext4; para locais, o tamanho dos dados.
+    pub fn usage(&self, name: &str) -> u64 {
+        fn walk(p: &std::path::Path) -> u64 {
+            let mut total = 0u64;
+            if let Ok(rd) = fs::read_dir(p) {
+                for e in rd.flatten() {
+                    let Ok(ft) = e.file_type() else { continue };
+                    if ft.is_dir() {
+                        total += walk(&e.path());
+                    } else if let Ok(m) = e.metadata() {
+                        total += m.len();
+                    }
+                }
+            }
+            total
+        }
+        walk(&self.data_dir(name))
+    }
+
+    /// O volume está em (ou acima) do limiar de alerta? `(em_alerta, acima_da_quota)`.
+    pub fn quota_state(&self, vol: &Volume) -> (bool, bool) {
+        match vol.quota_bytes {
+            Some(q) if q > 0 => {
+                let used = self.usage(&vol.name);
+                let pct = vol.alert_pct.unwrap_or(90) as u64;
+                (used * 100 >= q * pct, used >= q)
+            }
+            _ => (false, false),
+        }
+    }
+
+    fn run(cmd: &str, args: &[&str]) -> Result<()> {
+        let out = std::process::Command::new(cmd)
+            .args(args)
+            .output()
+            .map_err(|e| Error::Runtime { context: "quota", message: format!("{cmd}: {e}") })?;
+        if !out.status.success() {
+            return Err(Error::Runtime {
+                context: "quota",
+                message: format!("{cmd} {}: {}", args.join(" "), String::from_utf8_lossy(&out.stderr).trim()),
+            });
+        }
+        Ok(())
+    }
+
+    /// Encontra o dispositivo de loop que serve a imagem (`losetup -j`), se houver.
+    fn loop_dev(img: &std::path::Path) -> Option<String> {
+        let out = std::process::Command::new("losetup")
+            .args(["-j", &img.to_string_lossy(), "-O", "NAME", "--noheadings"])
+            .output()
+            .ok()?;
+        let s = String::from_utf8_lossy(&out.stdout);
+        s.lines().next().map(|l| l.trim().to_string()).filter(|l| !l.is_empty())
+    }
+
+    /// Garante a imagem ext4 (privileged) com `quota` bytes montada em `_data`.
+    /// Cria na 1.ª vez (volume vazio) ou redimensiona a quente (cresce: truncate +
+    /// resize2fs online). Devolve `Err` se faltar privilégio/ferramentas.
+    fn apply_loopback(&self, name: &str, quota: u64) -> Result<()> {
+        let img = self.loop_img(name);
+        let data = self.data_dir(name);
+        let data_s = data.to_string_lossy().into_owned();
+        if !img.exists() {
+            // só criamos loopback sobre um `_data` VAZIO (senão esconderíamos dados).
+            if self.usage(name) > 0 {
+                return Err(Error::Invalid(
+                    "quota dura (loopback) só no volume vazio; cria com --quota ou esvazia primeiro".into(),
+                ));
+            }
+            // imagem esparsa do tamanho da quota → ext4 → mount por loop.
+            Self::run("truncate", &["-s", &quota.to_string(), &img.to_string_lossy()])?;
+            Self::run("mkfs.ext4", &["-q", "-F", "-m", "0", &img.to_string_lossy()])?;
+            fs::create_dir_all(&data)?;
+            Self::run("mount", &["-o", "loop", &img.to_string_lossy(), &data_s])?;
+            return Ok(());
+        }
+        // imagem já existe → garante montada e redimensiona para a nova quota.
+        if !is_mounted(&data_s) {
+            Self::run("mount", &["-o", "loop", &img.to_string_lossy(), &data_s])?;
+        }
+        let cur = fs::metadata(&img).map(|m| m.len()).unwrap_or(0);
+        if quota > cur {
+            // CRESCER a quente: aumenta a imagem e o fs (online).
+            Self::run("truncate", &["-s", &quota.to_string(), &img.to_string_lossy()])?;
+            let dev = Self::loop_dev(&img).ok_or_else(|| Error::Runtime {
+                context: "quota",
+                message: "loop device não encontrado".into(),
+            })?;
+            Self::run("losetup", &["-c", &dev])?; // reconhece o novo tamanho do backing
+            Self::run("resize2fs", &[&dev])?; // online grow
+        } else if quota < cur {
+            // ENCOLHER: ext4 não encolhe online — faz offline (desmonta/resize/monta).
+            // Recusa se ocupado (container a usar) ou se a quota < uso atual.
+            if self.usage(name) > quota {
+                return Err(Error::Invalid("a nova quota é menor que o uso atual — liberta espaço primeiro".into()));
+            }
+            if std::process::Command::new("umount").arg(&data_s).output().map(|o| !o.status.success()).unwrap_or(true) {
+                return Err(Error::Invalid("volume em uso — pára os containers para encolher a quota".into()));
+            }
+            let blocks = format!("{}s", quota / 512); // resize2fs aceita tamanho em sectores
+            // resize2fs precisa de e2fsck antes de encolher; loop temporário.
+            Self::run("e2fsck", &["-f", "-y", &img.to_string_lossy()]).ok();
+            Self::run("resize2fs", &[&img.to_string_lossy(), &blocks])?;
+            Self::run("truncate", &["-s", &quota.to_string(), &img.to_string_lossy()])?;
+            Self::run("mount", &["-o", "loop", &img.to_string_lossy(), &data_s])?;
+        }
+        Ok(())
+    }
+
+    /// Define (ou remove) a quota de um volume. `privileged` (modelo root) ativa o
+    /// cap DURO por loopback ext4; senão fica em modo MONITOR (só persiste o limite).
+    /// `quota=None` remove o limite (não desfaz um loopback já criado).
+    pub fn set_quota(&self, name: &str, quota: Option<u64>, alert_pct: Option<u8>, privileged: bool) -> Result<Volume> {
+        let mut vol = self.inspect(name)?;
+        if let (Some(q), true) = (quota, privileged) {
+            self.apply_loopback(name, q)?;
+        }
+        vol.quota_bytes = quota;
+        if alert_pct.is_some() {
+            vol.alert_pct = alert_pct;
+        }
+        fs::write(self.meta_path(name), serde_json::to_vec_pretty(&vol)?)?;
+        Ok(vol)
     }
 
     /// Traduz uma especificação `-v` num [`Mount`].
@@ -242,6 +414,35 @@ fn is_mounted(path: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parse_size_units() {
+        assert_eq!(parse_size_bytes("1024"), Some(1024));
+        assert_eq!(parse_size_bytes("1k"), Some(1024));
+        assert_eq!(parse_size_bytes("2m"), Some(2 * 1024 * 1024));
+        assert_eq!(parse_size_bytes("1g"), Some(1024 * 1024 * 1024));
+        assert_eq!(parse_size_bytes("1G"), Some(1024 * 1024 * 1024));
+        assert_eq!(parse_size_bytes("512mb"), Some(512 * 1024 * 1024));
+        assert_eq!(parse_size_bytes("0"), None);
+        assert_eq!(parse_size_bytes("abc"), None);
+        assert_eq!(parse_size_bytes(""), None);
+    }
+
+    #[test]
+    fn quota_state_alerts() {
+        let (s, dir) = store();
+        s.create("qv").unwrap();
+        std::fs::write(s.data_dir("qv").join("f"), vec![0u8; 950]).unwrap();
+        // quota 1000, alerta a 90% → 950/1000 = 95% ⇒ em alerta, não acima.
+        let v = s.set_quota("qv", Some(1000), Some(90), false).unwrap();
+        let (warn, over) = s.quota_state(&v);
+        assert!(warn && !over, "950/1000 deve estar em alerta mas não acima");
+        // acima da quota
+        std::fs::write(s.data_dir("qv").join("g"), vec![0u8; 200]).unwrap();
+        let (_, over2) = s.quota_state(&v);
+        assert!(over2, "1150/1000 deve estar acima da quota");
+        let _ = std::fs::remove_dir_all(dir);
+    }
 
     fn store() -> (VolumeStore, PathBuf) {
         let base = std::env::temp_dir().join(format!(
