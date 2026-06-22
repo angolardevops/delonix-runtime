@@ -568,7 +568,18 @@ fn log_shim_syslog(read_fd: i32, tag: String) -> ! {
 
 /// Monta um volume/bind no rootfs (antes do `pivot_root`). Zero-copy: o
 /// `MS_BIND` partilha os blocos do `source`, não copia dados.
+/// Um `target` de bind-mount é seguro? (absoluto e SEM componentes `..`). Defesa
+/// contra escape: `bind_volume` corre antes do `pivot_root`, logo um target
+/// relativo/`..` montaria sobre o filesystem do HOST.
+fn mount_target_safe(target: &str) -> bool {
+    let p = std::path::Path::new(target);
+    p.is_absolute() && !p.components().any(|c| matches!(c, std::path::Component::ParentDir))
+}
+
 fn bind_volume(rootfs: &str, m: &Mount) -> nix::Result<()> {
+    if !mount_target_safe(&m.target) {
+        return Err(nix::errno::Errno::EINVAL);
+    }
     let dst = format!("{rootfs}{}", m.target);
     // Origem ficheiro (ex.: segredo) → o alvo tem de ser um FICHEIRO; origem
     // directório → um directório.
@@ -587,16 +598,15 @@ fn bind_volume(rootfs: &str, m: &Mount) -> nix::Result<()> {
         MsFlags::MS_BIND | MsFlags::MS_REC,
         None::<&str>,
     )?;
+    // Remount para aplicar `nosuid`+`nodev` — um bind ignora estas flags no 1.º
+    // `mount`, logo sem isto um volume podia trazer binários setuid ou device
+    // nodes para dentro do container. `rdonly` adicional se pedido. (`noexec` NÃO,
+    // para não partir volumes com executáveis legítimos, ex.: código.)
+    let mut rflags = MsFlags::MS_BIND | MsFlags::MS_REMOUNT | MsFlags::MS_NOSUID | MsFlags::MS_NODEV;
     if m.readonly {
-        // um bind read-only exige um segundo `mount` com REMOUNT|RDONLY.
-        mount(
-            None::<&str>,
-            dst.as_str(),
-            None::<&str>,
-            MsFlags::MS_BIND | MsFlags::MS_REMOUNT | MsFlags::MS_RDONLY,
-            None::<&str>,
-        )?;
+        rflags |= MsFlags::MS_RDONLY;
     }
+    mount(None::<&str>, dst.as_str(), None::<&str>, rflags, None::<&str>)?;
     Ok(())
 }
 
@@ -2277,6 +2287,20 @@ pub fn remove(store: &Store, container: &Container, force: bool) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mount_target_rejects_traversal() {
+        // seguros
+        assert!(mount_target_safe("/data"));
+        assert!(mount_target_safe("/var/lib/app/config"));
+        // escape via `..` (montaria sobre o host antes do pivot_root)
+        assert!(!mount_target_safe("/../../etc"));
+        assert!(!mount_target_safe("/data/../../etc/shadow"));
+        assert!(!mount_target_safe("/a/../b"));
+        // relativo (resolve a partir do cwd do holder, não do rootfs)
+        assert!(!mount_target_safe("etc/passwd"));
+        assert!(!mount_target_safe(""));
+    }
 
     #[test]
     fn cpu_max_translates_cores_to_quota() {
