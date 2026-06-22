@@ -141,6 +141,18 @@ fn capture(prog: &str, args: &[&str]) -> Result<String> {
     Ok(String::from_utf8_lossy(&out.stdout).into_owned())
 }
 
+/// Parse de uma entrada de peer de overlay: `<node_ip>` (VXLAN plano) OU
+/// `<node_ip>=<wg_pubkey>=<wg_ip>` (cifrado). Devolve (node_ip, Option<(pubkey, wg_ip)>).
+pub fn parse_overlay_peer(s: &str) -> (String, Option<(String, String)>) {
+    let parts: Vec<&str> = s.splitn(3, '=').collect();
+    match parts.as_slice() {
+        [ip, pubkey, wgip] if !pubkey.is_empty() && !wgip.is_empty() => {
+            (ip.to_string(), Some((pubkey.to_string(), wgip.to_string())))
+        }
+        _ => (parts.first().map(|s| s.to_string()).unwrap_or_default(), None),
+    }
+}
+
 fn link_exists(name: &str) -> bool {
     Command::new("ip")
         .args(["link", "show", name])
@@ -435,8 +447,13 @@ pub struct Network {
     pub parent: Option<String>,
     /// VXLAN Network Identifier (só `overlay`): o segmento L2 partilhado entre nós.
     pub vni: Option<u32>,
-    /// IPs dos nós-pares (só `overlay`): destinos VXLAN para o L2 cruzar máquinas.
+    /// IPs dos nós-pares (só `overlay`): cada entrada é `<node_ip>` (VXLAN plano)
+    /// OU `<node_ip>=<wg_pubkey>=<wg_ip>` (overlay CIFRADO via túnel WireGuard).
     pub peers: Vec<String>,
+    /// IP de túnel WireGuard DESTE nó (só overlay cifrado, req #6). Presente ⇒
+    /// `ensure_overlay_wg` sobe a wg e o FDB do VXLAN usa os `wg_ip` dos peers,
+    /// cifrando o transporte.
+    pub wg_ip: Option<String>,
 }
 
 /// Driver `bridge` (o caso por omissão de uma rede de utilizador/`delonix0`).
@@ -474,6 +491,7 @@ impl Network {
             parent: None,
             vni: None,
             peers: Vec::new(),
+            wg_ip: None,
         }
     }
 
@@ -491,17 +509,19 @@ impl Network {
             parent: None,
             vni: None,
             peers: Vec::new(),
+            wg_ip: None,
         }
     }
 
     /// Constrói uma rede `overlay`: igual a uma bridge de utilizador (mesmo
     /// `/16`/gateway/veth), mas com um uplink VXLAN (`vni`) escravizado à bridge
     /// e FDB para os `peers` — o segmento L2 estende-se a vários nós.
-    fn overlay_with_base(name: &str, base: u8, vni: u32, peers: Vec<String>) -> Self {
+    fn overlay_with_base(name: &str, base: u8, vni: u32, peers: Vec<String>, wg_ip: Option<String>) -> Self {
         let mut n = Self::user_with_base(name, base);
         n.driver = DRIVER_OVERLAY.to_string();
         n.vni = Some(vni);
         n.peers = peers;
+        n.wg_ip = wg_ip;
         n
     }
 
@@ -519,6 +539,7 @@ impl Network {
             parent: Some(parent.to_string()),
             vni: None,
             peers: Vec::new(),
+            wg_ip: None,
         }
     }
 
@@ -595,7 +616,8 @@ impl NetworkStore {
                     .get("peers")
                     .map(|p| p.split(',').filter(|s| !s.trim().is_empty()).map(|s| s.trim().to_string()).collect())
                     .unwrap_or_default();
-                Ok(Network::overlay_with_base(name, base, vni, peers))
+                let wg_ip = kv.get("wgip").map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+                Ok(Network::overlay_with_base(name, base, vni, peers, wg_ip))
             }
             _ => {
                 let base: u8 = kv
@@ -695,7 +717,7 @@ impl NetworkStore {
     /// utilizador (`/16` próprio), mas estende-se a vários nós pelo `vni` e pela
     /// lista de `peers` (IPs dos outros nós Delonix). Sem peers, é local mas já
     /// pronta para juntar nós (basta recriar com os mesmos `vni`/`peers` lá).
-    pub fn create_overlay(&self, name: &str, vni: u32, peers: &[String]) -> Result<Network> {
+    pub fn create_overlay(&self, name: &str, vni: u32, peers: &[String], wg_ip: Option<&str>) -> Result<Network> {
         if name.is_empty() || name == DEFAULT_NET {
             return Err(Error::Invalid("'bridge' é a rede por omissão (reservada)".into()));
         }
@@ -712,7 +734,11 @@ impl NetworkStore {
             return Err(Error::Invalid("VNI inválido (1..16777215)".into()));
         }
         let base = self.free_base(name)?;
-        let body = format!("driver=overlay\nbase={base}\nvni={vni}\npeers={}\n", peers.join(","));
+        let wgip_line = wg_ip.map(|w| format!("wgip={w}\n")).unwrap_or_default();
+        let body = format!(
+            "driver=overlay\nbase={base}\nvni={vni}\npeers={}\n{wgip_line}",
+            peers.join(",")
+        );
         std::fs::write(self.path(name), body)?;
         self.get(name)
     }
@@ -938,6 +964,7 @@ impl Net {
         // L2 atravessar os nós-pares (FDB por peer).
         if net.driver == DRIVER_OVERLAY {
             self.ensure_vxlan(net)?;
+            self.ensure_overlay_wg(net)?; // cifra o transporte VXLAN entre nós (#6)
         }
         Ok(())
     }
@@ -965,8 +992,43 @@ impl Net {
         // cada peer — é o que faz o L2 chegar aos containers nos outros nós.
         let have = capture("bridge", &["fdb", "show", "dev", &dev]).unwrap_or_default();
         for peer in &net.peers {
-            if !have.contains(peer.as_str()) {
-                run_ok("bridge", &["fdb", "append", "00:00:00:00:00:00", "dev", &dev, "dst", peer]);
+            // overlay cifrado: o FDB aponta para o wg_ip do peer (não o node_ip),
+            // logo o UDP do VXLAN é encaminhado pelo túnel wg = cifrado.
+            let (node_ip, wg) = parse_overlay_peer(peer);
+            let dst = wg.map(|(_, wgip)| wgip).unwrap_or(node_ip);
+            if !have.contains(dst.as_str()) {
+                run_ok("bridge", &["fdb", "append", "00:00:00:00:00:00", "dev", &dev, "dst", &dst]);
+            }
+        }
+        Ok(())
+    }
+
+    /// WireGuard sobre o overlay (req #6, fase 3): sobe a interface wg do overlay
+    /// e configura os peers, de modo a CIFRAR o transporte VXLAN entre nós. Só age
+    /// se a rede tiver `wg_ip` (deste nó); senão fica o VXLAN plano (compatível).
+    /// O `ensure_vxlan` já aponta o FDB para os `wg_ip` dos peers, por isso o UDP
+    /// do VXLAN (4789) viaja pelo túnel wg. Sem `wg` no host → degrada (não cifra).
+    fn ensure_overlay_wg(&self, net: &Network) -> Result<()> {
+        let Some(my_wg_ip) = net.wg_ip.as_deref() else { return Ok(()) };
+        let Some(vni) = net.vni else { return Ok(()) };
+        if !crate::wg::available() {
+            return Ok(());
+        }
+        let key = crate::wg::ensure_node_key()?;
+        let iface = format!("wgo{vni:06x}"); // ≤ 15 chars
+        let port: u16 = 51820;
+        crate::wg::ensure_iface(&iface, &key.private, port, &format!("{my_wg_ip}/24"))?;
+        for peer in &net.peers {
+            let (node_ip, wg) = parse_overlay_peer(peer);
+            if let Some((pubkey, wgip)) = wg {
+                crate::wg::set_peer(
+                    &iface,
+                    &crate::wg::Peer {
+                        public: pubkey,
+                        endpoint: format!("{node_ip}:{port}"),
+                        allowed_ips: vec![format!("{wgip}/32")],
+                    },
+                )?;
             }
         }
         Ok(())
@@ -1722,6 +1784,34 @@ pub fn list_connections(ip2name: &std::collections::HashMap<String, String>) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn overlay_peer_parse() {
+        // VXLAN plano (só node_ip)
+        assert_eq!(parse_overlay_peer("10.0.0.2"), ("10.0.0.2".into(), None));
+        // cifrado: node_ip=pubkey=wg_ip
+        let (ip, wg) = parse_overlay_peer("10.0.0.2=AbCdEf0123/+key=10.250.0.2");
+        assert_eq!(ip, "10.0.0.2");
+        assert_eq!(wg, Some(("AbCdEf0123/+key".into(), "10.250.0.2".into())));
+        // malformado → trata como plano (sem wg)
+        assert_eq!(parse_overlay_peer("10.0.0.2=").0, "10.0.0.2");
+        assert!(parse_overlay_peer("10.0.0.2=").1.is_none());
+    }
+
+    #[test]
+    fn overlay_wgip_roundtrip() {
+        let dir = std::env::temp_dir().join(format!("dlx-wgo-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let store = NetworkStore::open(&dir).unwrap();
+        let peers = vec!["10.0.0.2=PUB2=10.250.0.2".to_string()];
+        let n = store.create_overlay("ov", 42, &peers, Some("10.250.0.1")).unwrap();
+        assert_eq!(n.wg_ip.as_deref(), Some("10.250.0.1"));
+        // recarrega do disco → wg_ip persiste
+        let n2 = store.get("ov").unwrap();
+        assert_eq!(n2.wg_ip.as_deref(), Some("10.250.0.1"));
+        assert_eq!(n2.peers, peers);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn ip_is_deterministic_and_avoids_reserved() {
