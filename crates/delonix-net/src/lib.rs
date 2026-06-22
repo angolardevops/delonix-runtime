@@ -144,12 +144,21 @@ fn capture(prog: &str, args: &[&str]) -> Result<String> {
 /// Parse de uma entrada de peer de overlay: `<node_ip>` (VXLAN plano) OU
 /// `<node_ip>=<wg_pubkey>=<wg_ip>` (cifrado). Devolve (node_ip, Option<(pubkey, wg_ip)>).
 pub fn parse_overlay_peer(s: &str) -> (String, Option<(String, String)>) {
-    let parts: Vec<&str> = s.splitn(3, '=').collect();
-    match parts.as_slice() {
-        [ip, pubkey, wgip] if !pubkey.is_empty() && !wgip.is_empty() => {
-            (ip.to_string(), Some((pubkey.to_string(), wgip.to_string())))
+    // Formato `node_ip=wg_pubkey=wg_ip`. A pubkey é base64 e TERMINA em `=`
+    // (padding) — colide com o delimitador. Como node_ip e wg_ip são IPs (nunca
+    // contêm `=`), delimitamos pelo PRIMEIRO e pelo ÚLTIMO `=`; o que sobra ao
+    // meio é a pubkey COM o seu padding intacto. (Peer VXLAN plano = só `node_ip`.)
+    match (s.find('='), s.rfind('=')) {
+        (Some(first), Some(last)) if last > first => {
+            let node = &s[..first];
+            let pubkey = &s[first + 1..last];
+            let wgip = &s[last + 1..];
+            if !pubkey.is_empty() && !wgip.is_empty() {
+                return (node.to_string(), Some((pubkey.to_string(), wgip.to_string())));
+            }
+            (node.to_string(), None)
         }
-        _ => (parts.first().map(|s| s.to_string()).unwrap_or_default(), None),
+        _ => (s.split('=').next().unwrap_or_default().to_string(), None),
     }
 }
 
@@ -1829,6 +1838,12 @@ mod tests {
         let (ip, wg) = parse_overlay_peer("10.0.0.2=AbCdEf0123/+key=10.250.0.2");
         assert_eq!(ip, "10.0.0.2");
         assert_eq!(wg, Some(("AbCdEf0123/+key".into(), "10.250.0.2".into())));
+        // REGRESSÃO: pubkey WireGuard REAL (base64 44c) TERMINA em `=` (padding) —
+        // o delimitador colide. O parser tem de preservar o padding e o wg_ip limpo.
+        let real = "VpKM6MYFVDIvcMBxnkBkf7/clXq+itJlPaW71o2iK24=";
+        let (ip2, wg2) = parse_overlay_peer(&format!("127.0.0.1={real}=10.250.0.1"));
+        assert_eq!(ip2, "127.0.0.1");
+        assert_eq!(wg2, Some((real.to_string(), "10.250.0.1".into())));
         // malformado → trata como plano (sem wg)
         assert_eq!(parse_overlay_peer("10.0.0.2=").0, "10.0.0.2");
         assert!(parse_overlay_peer("10.0.0.2=").1.is_none());
