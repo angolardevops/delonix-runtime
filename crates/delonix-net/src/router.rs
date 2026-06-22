@@ -43,6 +43,26 @@ impl Router {
         Router { owner: format!("container:{name}"), ip: ip.to_string() }
     }
 
+    /// Cria o router de uma **stack** (Fase 2), ancorado no **VIP estável** do
+    /// serviço (`crate::service_vip`). É o ÚNICO ponto de entrada externo da stack:
+    /// o ingress publica no VIP e o VIP balanceia para as réplicas (`set_lb`). Toda
+    /// a comunicação stack↔exterior passa por aqui (modelo broker).
+    pub fn for_stack(stack: &str, vip: &str) -> Self {
+        Router { owner: format!("stack:{stack}"), ip: vip.to_string() }
+    }
+
+    /// **(Re)programa o balanceador L4** do router para as `backends`
+    /// (`ip:port`), via nftables (round-robin por-ligação). É como o router da
+    /// stack distribui o tráfego que entra pelo seu VIP. No modo root usa o
+    /// `numgen`/conntrack do `Net`; no rootless o roteamento de serviço do ingress
+    /// é tratado à parte (no-op aqui). Idempotente.
+    pub fn set_lb(&self, backends: &[String], rootless: bool) -> Result<()> {
+        if rootless {
+            return Ok(());
+        }
+        Net.set_service_lb(&self.ip, backends)
+    }
+
     /// **Publica** `internal_port/proto` na `host_port` através do Ingress
     /// (DNAT host → `router.ip:internal_port`). Escolhe o caminho root vs rootless.
     /// Idempotência/limpeza ficam a cargo do chamador (que mantém o registo das
@@ -64,5 +84,35 @@ impl Router {
         } else {
             Net.unpublish_port(&self.ip, &host_port.to_string());
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn owner_and_ip_per_kind() {
+        let p = Router::for_pod("web", "10.200.1.5");
+        assert_eq!(p.owner, "pod:web");
+        assert_eq!(p.ip, "10.200.1.5");
+
+        let c = Router::for_container("nginx", "10.200.2.7");
+        assert_eq!(c.owner, "container:nginx");
+        assert_eq!(c.ip, "10.200.2.7");
+
+        // O router da stack ancora no VIP estável do serviço.
+        let vip = crate::service_vip("shop_web");
+        let s = Router::for_stack("shop", &vip);
+        assert_eq!(s.owner, "stack:shop");
+        assert_eq!(s.ip, vip);
+        assert!(s.ip.starts_with("10.90."), "VIP fora do espaço de serviço: {}", s.ip);
+    }
+
+    #[test]
+    fn set_lb_rootless_is_noop() {
+        // No rootless o roteamento de serviço é tratado à parte → não falha.
+        let r = Router::for_stack("s", &crate::service_vip("s_svc"));
+        assert!(r.set_lb(&["10.200.1.2:80".into()], true).is_ok());
     }
 }
