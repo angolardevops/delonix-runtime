@@ -468,6 +468,31 @@ mod tests {
     }
 
     #[test]
+    fn create_with_driver_idempotent_and_meta_on_disk() {
+        let (vs, base) = store();
+        // cria com driver explícito `local`
+        let v = vs.create_with("app_data", "local", None, None).unwrap();
+        assert_eq!(v.driver, "local");
+        // meta.json deve existir no disco
+        assert!(base.join("volumes/app_data/meta.json").exists());
+        // idempotente: re-criar devolve o existente sem erro
+        let v2 = vs.create_with("app_data", "local", None, None).unwrap();
+        assert_eq!(v2.name, "app_data");
+        assert_eq!(vs.list().unwrap().len(), 1);
+        // nome inválido → Error::Invalid
+        assert!(matches!(
+            vs.create_with("bad name!", "local", None, None),
+            Err(Error::Invalid(_))
+        ));
+        // nfs sem device → Error::Invalid
+        assert!(matches!(
+            vs.create_with("nas", "nfs", None, None),
+            Err(Error::Invalid(_))
+        ));
+        fs::remove_dir_all(&base).ok();
+    }
+
+    #[test]
     fn resolve_named_volume_creates_it() {
         let (vs, base) = store();
         let m = vs.resolve_spec("cache:/var/cache").unwrap();
