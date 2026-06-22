@@ -23,6 +23,7 @@ use std::process::{Command, Stdio};
 pub mod discover;
 pub mod infra;
 pub mod router;
+pub mod wg;
 
 pub use discover::{discover_ports, DiscoveredPort};
 pub use router::Router;
