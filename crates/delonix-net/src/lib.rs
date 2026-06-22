@@ -1175,9 +1175,22 @@ impl Net {
         );
         let (host_port, cont_port, proto) = parse_publish(spec)?;
         let to = format!("{container_ip}:{cont_port}");
-        // De fora / de outra máquina / da bridge.
-        run("nft", &["add", "rule", "ip", TABLE, "prerouting", &proto, "dport", &host_port, "dnat", "to", &to])?;
-        // Do próprio host (curl localhost:porta).
+        // SEGURO POR OMISSÃO: a porta fica só no LOOPBACK (regra `output` abaixo).
+        // Exposição externa (LAN/outras máquinas) exige opt-in explícito via
+        // DELONIX_PUBLISH_ADDR ("0.0.0.0" = todas as interfaces; ou um IP do host).
+        match std::env::var("DELONIX_PUBLISH_ADDR")
+            .ok()
+            .filter(|a| a.parse::<std::net::Ipv4Addr>().is_ok())
+        {
+            Some(ref ip) if ip == "0.0.0.0" => {
+                run("nft", &["add", "rule", "ip", TABLE, "prerouting", &proto, "dport", &host_port, "dnat", "to", &to])?;
+            }
+            Some(ip) => {
+                run("nft", &["add", "rule", "ip", TABLE, "prerouting", "ip", "daddr", &ip, &proto, "dport", &host_port, "dnat", "to", &to])?;
+            }
+            None => {} // loopback-only (default seguro): sem DNAT na prerouting externa
+        }
+        // Do próprio host (curl localhost:porta) — sempre.
         run("nft", &["add", "rule", "ip", TABLE, "output", "ip", "daddr", "127.0.0.0/8", &proto, "dport", &host_port, "dnat", "to", &to])?;
         // Hairpin: tráfego vindo do loopback tem de ser masquerade, senão o
         // container responde a 127.0.0.1 (a SI próprio) e a resposta nunca volta.
@@ -1546,8 +1559,16 @@ pub fn slirp_attach(pid: i32, publish: &[String]) -> Result<()> {
 fn slirp_add_hostfwd(sock: &std::path::Path, host_port: &str, guest_port: &str, proto: &str) -> Result<()> {
     use std::io::{Read, Write};
     use std::os::unix::net::UnixStream;
+    // SEGURO POR OMISSÃO: liga a porta publicada só ao loopback (127.0.0.1), não a
+    // todas as interfaces. Para expor na LAN, opt-in explícito via
+    // DELONIX_PUBLISH_ADDR (ex.: "0.0.0.0" ou um IP do host). Validado como IPv4
+    // para não injetar no JSON do api-socket do slirp.
+    let host_addr = std::env::var("DELONIX_PUBLISH_ADDR")
+        .ok()
+        .filter(|a| a.parse::<std::net::Ipv4Addr>().is_ok())
+        .unwrap_or_else(|| "127.0.0.1".to_string());
     let cmd = format!(
-        r#"{{"execute":"add_hostfwd","arguments":{{"proto":"{proto}","host_addr":"0.0.0.0","host_port":{host_port},"guest_addr":"{SLIRP_IP}","guest_port":{guest_port}}}}}"#
+        r#"{{"execute":"add_hostfwd","arguments":{{"proto":"{proto}","host_addr":"{host_addr}","host_port":{host_port},"guest_addr":"{SLIRP_IP}","guest_port":{guest_port}}}}}"#
     );
     let mut last = String::new();
     for _ in 0..50 {
