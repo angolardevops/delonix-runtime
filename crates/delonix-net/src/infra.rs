@@ -1521,6 +1521,25 @@ pub fn join_argv(id: &str) -> Option<Vec<String>> {
     ])
 }
 
+/// Bytes rx/tx do `eth0` de um container rootless, lidos DE DENTRO do seu netns
+/// (via `join_argv`). Do ponto de vista do container, `rx`=download e `tx`=upload
+/// (sem a troca do modelo root, onde se lê o veth do lado do host). Devolve
+/// `(download, upload)` ou `None` se a infra/container não estiver de pé.
+pub fn container_net_bytes(id: &str) -> Option<(u64, u64)> {
+    let prefix = join_argv(id)?;
+    let read = |stat: &str| -> Option<u64> {
+        let mut argv = prefix.clone();
+        argv.push("cat".into());
+        argv.push(format!("/sys/class/net/eth0/statistics/{stat}"));
+        let out = Command::new(&argv[0]).args(&argv[1..]).output().ok()?;
+        if !out.status.success() {
+            return None;
+        }
+        String::from_utf8_lossy(&out.stdout).trim().parse().ok()
+    };
+    Some((read("rx_bytes")?, read("tx_bytes")?))
+}
+
 /// Envia um comando ao socket de controlo do holder e espera `ok`. Tenta
 /// brevemente até o socket existir (o holder cria-o ao arrancar).
 fn control_send(cmd: &str) -> Result<()> {
