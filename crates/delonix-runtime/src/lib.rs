@@ -898,11 +898,26 @@ pub const USERNS_RANGE: u32 = 65_536;
 ///   container = uid não privilegiado no host).
 /// - **Rootless** (engine sem `sudo`): mapeia UM só uid — `0 <euid> 1` — porque
 ///   sem `newuidmap` (helper setuid) um não-root só pode mapear o seu próprio uid.
-fn write_userns_maps(pid: i32) -> Result<()> {
-    // `setgroups=deny` antes do gid_map (boa prática; obrigatório p/ não-root).
-    let _ = std::fs::write(format!("/proc/{pid}/setgroups"), "deny");
+fn write_userns_maps(pid: i32, want_range: bool) -> Result<()> {
     // SAFETY: geteuid/getegid não têm pré-condições.
     let (euid, egid) = unsafe { (libc::geteuid(), libc::getegid()) };
+    // ROOTLESS + imagem com USER≠0: o uid alvo (ex.: 1000) NÃO existe num mapa de
+    // um só uid. Mapeia um INTERVALO via `newuidmap`/`newgidmap` (helpers setuid que
+    // consultam /etc/subuid|subgid): container uid 0 → o nosso euid, e 1..N → os
+    // subuids delegados. Assim o `setuid(1000)` dentro do container passa a ser
+    // válido. Se os helpers/subuid não existirem, cai no mapa de um só uid (e o
+    // chamador degrada para correr como root, com aviso).
+    if want_range && euid != 0 && have_subid_helpers() {
+        let _ = std::fs::write(format!("/proc/{pid}/setgroups"), "deny");
+        let range = USERNS_RANGE - 1; // 1..USERNS_RANGE delegados aos subuids
+        let map_uid = format!("0 {euid} 1 1 {USERNS_UID_BASE} {range}");
+        let map_gid = format!("0 {egid} 1 1 {USERNS_UID_BASE} {range}");
+        run_idmap("newuidmap", pid, &map_uid)?;
+        run_idmap("newgidmap", pid, &map_gid)?;
+        return Ok(());
+    }
+    // `setgroups=deny` antes do gid_map (boa prática; obrigatório p/ não-root).
+    let _ = std::fs::write(format!("/proc/{pid}/setgroups"), "deny");
     let (uid_map, gid_map) = if euid == 0 {
         let m = format!("0 {USERNS_UID_BASE} {USERNS_RANGE}\n");
         (m.clone(), m)
@@ -920,10 +935,102 @@ fn write_userns_maps(pid: i32) -> Result<()> {
     Ok(())
 }
 
+/// `true` se os helpers `newuidmap`/`newgidmap` existem (necessários p/ mapear um
+/// intervalo de subuids em rootless — o caminho do `USER` da imagem ≠ root).
+fn have_subid_helpers() -> bool {
+    ["/usr/bin/newuidmap", "/bin/newuidmap"].iter().any(|p| std::path::Path::new(p).exists())
+        && ["/usr/bin/newgidmap", "/bin/newgidmap"].iter().any(|p| std::path::Path::new(p).exists())
+}
+
+/// Corre `newuidmap`/`newgidmap <pid> <map...>` (os args do mapa são tripletos
+/// `<id_no_ns> <id_no_host> <count>`).
+fn run_idmap(tool: &str, pid: i32, map: &str) -> Result<()> {
+    let mut cmd = std::process::Command::new(tool);
+    cmd.arg(pid.to_string());
+    for tok in map.split_whitespace() {
+        cmd.arg(tok);
+    }
+    let st = cmd.status().map_err(|e| Error::Runtime { context: "idmap", message: format!("{tool}: {e}") })?;
+    if !st.success() {
+        return Err(Error::Runtime { context: "idmap", message: format!("{tool} falhou (código {:?}) — verifica /etc/subuid e /etc/subgid", st.code()) });
+    }
+    Ok(())
+}
+
 /// `true` se o engine corre sem privilégios de root (modo *rootless*, A13).
 pub fn is_rootless() -> bool {
     // SAFETY: geteuid não tem pré-condições.
     unsafe { libc::geteuid() != 0 }
+}
+
+/// Remove uma árvore de ficheiros que pode conter ficheiros de **subuid** (chowned
+/// para o uid de serviço de um container rootless — ex.: o nginx faz chown das
+/// caches para 101 → host 100100). O utilizador (uid real) NÃO os consegue apagar.
+/// Solução (estilo `podman unshare rm`): fork dum filho num user namespace; o pai
+/// mapeia o intervalo de subuid (`newuidmap`); o filho torna-se root NESSE userns
+/// (logo dono efectivo dos subuids) e re-exec `delonix __rmtree <path>` que os apaga.
+/// Sem rootless/helpers → remoção directa.
+pub fn remove_tree_mapped(path: &std::path::Path) {
+    if !is_rootless() || !have_subid_helpers() {
+        let _ = std::fs::remove_dir_all(path);
+        return;
+    }
+    // Pré-computa TUDO o que aloca ANTES do fork (no filho pós-fork, num processo que
+    // possa ter threads, alocar pode deadlockar — só ops async-signal-safe lá).
+    let exe = std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("/usr/local/bin/delonix"));
+    let prog = match std::ffi::CString::new(exe.as_os_str().as_encoded_bytes()) {
+        Ok(p) => p,
+        Err(_) => { let _ = std::fs::remove_dir_all(path); return; }
+    };
+    let a1 = std::ffi::CString::new("__rmtree").unwrap();
+    let a2 = match std::ffi::CString::new(path.as_os_str().as_encoded_bytes()) {
+        Ok(p) => p,
+        Err(_) => { let _ = std::fs::remove_dir_all(path); return; }
+    };
+    let argv = [prog.as_ptr(), a1.as_ptr(), a2.as_ptr(), std::ptr::null()];
+    let mut fds = [0i32; 2];
+    if unsafe { libc::pipe(fds.as_mut_ptr()) } != 0 {
+        let _ = std::fs::remove_dir_all(path);
+        return;
+    }
+    let (r, w) = (fds[0], fds[1]);
+    // SAFETY: fork; o filho só faz close/unshare/read/setuid/execv (async-signal-safe,
+    // sem alocação — os CStrings/argv foram criados acima, antes do fork).
+    match unsafe { libc::fork() } {
+        0 => unsafe {
+            libc::close(w);
+            if libc::unshare(libc::CLONE_NEWUSER) != 0 {
+                libc::_exit(1);
+            }
+            let mut b = [0u8; 1];
+            let _ = libc::read(r, b.as_mut_ptr() as *mut libc::c_void, 1);
+            libc::close(r);
+            libc::setgid(0);
+            libc::setuid(0);
+            libc::execv(prog.as_ptr(), argv.as_ptr());
+            libc::_exit(127);
+        },
+        pid if pid > 0 => {
+            unsafe { libc::close(r) };
+            // pequena espera para o filho fazer unshare antes de mapearmos.
+            std::thread::sleep(std::time::Duration::from_millis(20));
+            let _ = write_userns_maps(pid, true);
+            unsafe {
+                let go = [1u8; 1];
+                let _ = libc::write(w, go.as_ptr() as *const libc::c_void, 1);
+                libc::close(w);
+                let mut st = 0;
+                libc::waitpid(pid, &mut st, 0);
+            }
+        }
+        _ => {
+            unsafe {
+                libc::close(r);
+                libc::close(w);
+            }
+            let _ = std::fs::remove_dir_all(path);
+        }
+    }
 }
 
 /// `true` se corremos DENTRO de um user namespace não-inicial (uid 0 mapeado, não
@@ -1112,6 +1219,8 @@ fn container_init(
     sysctls: &[String],
     host_pid: bool,
     inherit_userns: bool,
+    run_uid: Option<u32>,
+    run_gid: Option<u32>,
 ) -> isize {
     // User namespace: espera que o PAI escreva uid_map/gid_map antes de continuar
     // (até lá, somos `nobody` sem caps). O byte recebido é o "podes avançar".
@@ -1192,9 +1301,92 @@ fn container_init(
         apply_selinux(c); // confinamento MAC (SELinux) — só em hosts SELinux
     }
     apply_env(hostname, env); // ambiente limpo + ENV da imagem/stack/CLI
+    // `USER` da imagem (≠ root): troca para o uid/gid pedido ANTES do `execve`. Faz-se
+    // por último — depois das montagens/caps/seccomp, que precisaram de uid 0. Estamos
+    // dentro do user namespace (root do ns), logo temos CAP_CHOWN/SETUID sobre o
+    // intervalo mapeado: damos a posse do rootfs ao uid (uma vez; marcador para não
+    // repetir) e largamos privilégios. setgid ANTES de setuid (depois de setuid já não
+    // se pode mudar de grupo). Ex.: o Elasticsearch recusa correr como root.
+    if let Some(uid) = run_uid {
+        if uid != 0 {
+            let gid = run_gid.unwrap_or(uid);
+            chown_tree_once("/", uid, gid);
+            // O stdout/stderr são o pipe do log_shim, criado como uid 0. Imagens
+            // "unprivileged" (nginx, etc.) ligam /var/log/.../*.log → /dev/stdout
+            // (= /proc/self/fd/1) e REABREM-no já como o USER — o que falharia sem
+            // o pipe lhes pertencer. fchown dos 3 fds dá-lhes esse acesso.
+            // SAFETY: fchown sobre fds abertos válidos (0/1/2); erros ignorados.
+            unsafe {
+                libc::fchown(0, uid, gid);
+                libc::fchown(1, uid, gid);
+                libc::fchown(2, uid, gid);
+            }
+            // SAFETY: somos root no user ns → setgid/setgroups/setuid sucedem.
+            unsafe {
+                libc::setgroups(1, [gid].as_ptr());
+                if libc::setgid(gid) != 0 {
+                    eprintln!("delonix: setgid({gid}) falhou");
+                }
+                if libc::setuid(uid) != 0 {
+                    eprintln!("delonix: setuid({uid}) falhou — o USER da imagem não está mapeado (subuid?)");
+                    return 126;
+                }
+            }
+        }
+    }
     let _ = execvp(&argv[0], argv);
     eprintln!("delonix: exec falhou: {:?}", argv[0]);
     127
+}
+
+/// `chown -R <uid>:<gid>` no rootfs do container (caminho `root` já dentro do
+/// pivot_root). Idempotente via um marcador `/.delonix_user_<uid>` — só corre na
+/// 1.ª vez para um dado uid, evitando o custo a cada arranque. Best-effort: erros
+/// individuais são ignorados (ficheiros especiais), o que conta é a árvore da app.
+fn chown_tree_once(root: &str, uid: u32, gid: u32) {
+    let marker = format!("{}/.delonix_user_{uid}", root.trim_end_matches('/'));
+    if std::path::Path::new(&marker).exists() {
+        return;
+    }
+    fn rec(dir: &std::path::Path, uid: u32, gid: u32, depth: u32) {
+        if depth > 64 {
+            return;
+        }
+        let entries = match std::fs::read_dir(dir) {
+            Ok(e) => e,
+            Err(_) => return,
+        };
+        for ent in entries.flatten() {
+            let p = ent.path();
+            // não segue symlinks (lchown via libc); recursa só em dirs reais.
+            let ft = ent.file_type().ok();
+            let cpath = std::ffi::CString::new(p.as_os_str().as_encoded_bytes()).ok();
+            if let Some(c) = &cpath {
+                // SAFETY: lchown sobre um caminho válido; não segue symlink.
+                unsafe { libc::lchown(c.as_ptr(), uid, gid); }
+            }
+            if ft.map(|t| t.is_dir()).unwrap_or(false) {
+                rec(&p, uid, gid, depth + 1);
+            }
+        }
+    }
+    let rootp = std::path::Path::new(root);
+    // chown da própria raiz + árvore (exceto /proc, /sys, /dev que são mounts).
+    for top in std::fs::read_dir(rootp).into_iter().flatten().flatten() {
+        let name = top.file_name();
+        if matches!(name.to_str(), Some("proc") | Some("sys") | Some("dev")) {
+            continue;
+        }
+        let p = top.path();
+        if let Ok(c) = std::ffi::CString::new(p.as_os_str().as_encoded_bytes()) {
+            // SAFETY: lchown sobre caminho válido.
+            unsafe { libc::lchown(c.as_ptr(), uid, gid); }
+        }
+        if top.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+            rec(&p, uid, gid, 0);
+        }
+    }
+    let _ = std::fs::File::create(&marker);
 }
 
 /// Limite de PIDs por container (anti fork-bomb).
@@ -1623,6 +1815,14 @@ pub struct RunSpec<'a> {
     /// `CLONE_NEWUSER` nem `CLONE_NEWNET` (herda os do holder, já como uid 0), mas
     /// trata o rootfs como `userns` (é root no userns herdado). Ver `delonix-net::infra`.
     pub inherit_userns: bool,
+    /// `USER` da imagem: uid/gid para os quais trocar ANTES do `exec` (Docker `User`).
+    /// `None` ou `Some(0)` = corre como root (uid 0) — o comportamento histórico.
+    /// `Some(uid != 0)` faz o runtime (a) mapear um intervalo de subuid via
+    /// `newuidmap` em rootless (senão o uid não-zero não existe no userns), (b)
+    /// `chown` o rootfs para esse uid/gid e (c) `setgid`/`setuid` antes do `execve`.
+    /// Necessário para imagens que recusam root (ex.: Elasticsearch).
+    pub run_uid: Option<u32>,
+    pub run_gid: Option<u32>,
 }
 
 /// Cria e arranca um container (sem rede própria) — a assinatura da Fase 1.
@@ -1748,6 +1948,8 @@ fn spawn(store: &Store, container: &mut Container, rootfs: &str, spec: &RunSpec<
 
     let host_pid = spec.host_pid;
     let inherit_userns = spec.inherit_userns;
+    let run_uid = spec.run_uid;
+    let run_gid = spec.run_gid;
     let mut stack = vec![0u8; 1024 * 1024];
     let cb = Box::new(move || {
         container_init(
@@ -1772,6 +1974,8 @@ fn spawn(store: &Store, container: &mut Container, rootfs: &str, spec: &RunSpec<
             &sysctls,
             host_pid,
             inherit_userns,
+            run_uid,
+            run_gid,
         )
     });
 
@@ -1821,7 +2025,15 @@ fn spawn(store: &Store, container: &mut Container, rootfs: &str, spec: &RunSpec<
         unsafe {
             libc::close(r);
         }
-        if let Err(e) = write_userns_maps(pid.as_raw()) {
+        // Mapa de subuid (intervalo) por omissão em rootless quando há helpers
+        // `newuidmap`/`newgidmap` + /etc/subuid: além de permitir o USER≠0 da imagem,
+        // deixa os entrypoints que fazem `chown` para uids de serviço funcionarem —
+        // ex.: o nginx faz chown das caches para o uid 101; com mapa de um só uid isso
+        // dava `chown(...) failed (22: Invalid argument)` e o container saía. Sem os
+        // helpers, mantém o mapa de um só uid (comportamento histórico). Não afecta
+        // containers de ingress (herdam o userns do holder).
+        let want_range = run_uid.map(|u| u != 0).unwrap_or(false) || have_subid_helpers();
+        if let Err(e) = write_userns_maps(pid.as_raw(), want_range) {
             unsafe {
                 libc::close(w);
             }
