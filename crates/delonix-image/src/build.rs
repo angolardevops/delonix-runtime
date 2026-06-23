@@ -305,7 +305,7 @@ impl ImageStore {
             id,
             repo_tags,
             layers,
-            config: ImageConfig { cmd, entrypoint, env, cpus, memory, security, healthcheck },
+            config: ImageConfig { cmd, entrypoint, env, cpus, memory, security, healthcheck, user: String::new() },
             created_unix: created,
         };
         self.enforce_tag_uniqueness(&img)?;
@@ -347,7 +347,7 @@ impl ImageStore {
             id,
             repo_tags,
             layers: vec![layer],
-            config: ImageConfig { cmd, entrypoint: Vec::new(), env, cpus: None, memory: None, security: Vec::new(), healthcheck: None },
+            config: ImageConfig { cmd, entrypoint: Vec::new(), env, cpus: None, memory: None, security: Vec::new(), healthcheck: None, user: String::new() },
             created_unix: created,
         };
         self.enforce_tag_uniqueness(&img)?;
@@ -390,7 +390,7 @@ impl ImageStore {
             id,
             repo_tags,
             layers,
-            config: ImageConfig { cmd, entrypoint, env, cpus, memory, security, healthcheck },
+            config: ImageConfig { cmd, entrypoint, env, cpus, memory, security, healthcheck, user: String::new() },
             created_unix: created,
         };
         self.enforce_tag_uniqueness(&img)?;

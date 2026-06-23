@@ -34,6 +34,12 @@ pub struct ImageConfig {
     /// Comando de `HEALTHCHECK` do Dockerfile (a parte após `CMD`), se houver.
     #[serde(default)]
     pub healthcheck: Option<String>,
+    /// O utilizador por omissão (Docker/OCI: `User`), ex.: `"elasticsearch"`,
+    /// `"1000"` ou `"1000:1000"`. Vazio = root (uid 0). Imagens como o
+    /// Elasticsearch recusam correr como root, por isso o runtime troca para este
+    /// uid/gid antes do `exec` (em rootless, via mapa de subuid `newuidmap`).
+    #[serde(default)]
+    pub user: String,
 }
 
 /// Uma imagem registada localmente.
