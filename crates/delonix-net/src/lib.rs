@@ -1419,25 +1419,51 @@ impl Net {
     /// (Re)define o balanceamento L4 de um VIP de serviço para os `backends`
     /// (round-robin por-ligação via `numgen inc` + conntrack). Idempotente.
     pub fn set_service_lb(&self, vip: &str, backends: &[String]) -> Result<()> {
+        self.set_service_lb_algo(vip, backends, "round-robin")
+    }
+
+    /// Como [`set_service_lb`], mas com **algoritmo** selecionável (C6):
+    /// - `round-robin` — `numgen inc` (distribui por ligação, por ordem).
+    /// - `random` — `numgen random` (distribui aleatoriamente).
+    /// - `ip-hash` / `sticky` — `jhash ip saddr` (**afinidade de sessão**: o mesmo
+    ///   cliente cai sempre no mesmo backend, enquanto o pool não mudar).
+    /// - `weighted` — backends `ip:port#peso` (peso ≥1); repete o backend no map
+    ///   proporcionalmente ao peso (sem peso → round-robin).
+    /// nftables faz a seleção no kernel (zero cópia em userspace). `least-conn` não é
+    /// expressável só com `dnat`/`numgen` — fica para o caminho L7 (follow-up).
+    pub fn set_service_lb_algo(&self, vip: &str, backends: &[String], algo: &str) -> Result<()> {
         self.ensure_bridge()?;
         self.ensure_vip_masq();
         self.clear_service_lb(vip);
         if backends.is_empty() {
             return Ok(());
         }
+        // peso opcional "ip:port#peso" → expande a lista para o map ponderado.
+        let expand = || -> Vec<String> {
+            let mut out = Vec::new();
+            for b in backends {
+                if let Some((ipp, w)) = b.rsplit_once('#') {
+                    let n: usize = w.parse().unwrap_or(1).clamp(1, 64);
+                    for _ in 0..n { out.push(ipp.to_string()); }
+                } else {
+                    out.push(b.clone());
+                }
+            }
+            out
+        };
+        let strip = |b: &str| b.rsplit_once('#').map(|(a, _)| a.to_string()).unwrap_or_else(|| b.to_string());
         let rule = if backends.len() == 1 {
-            format!("add rule ip {TABLE} prerouting ip daddr {vip} dnat to {}\n", backends[0])
+            format!("add rule ip {TABLE} prerouting ip daddr {vip} dnat to {}\n", strip(&backends[0]))
         } else {
-            let map = backends
-                .iter()
-                .enumerate()
-                .map(|(i, ip)| format!("{i} : {ip}"))
-                .collect::<Vec<_>>()
-                .join(", ");
-            format!(
-                "add rule ip {TABLE} prerouting ip daddr {vip} dnat to numgen inc mod {} map {{ {map} }}\n",
-                backends.len()
-            )
+            let pool = if algo == "weighted" { expand() } else { backends.iter().map(|b| strip(b)).collect() };
+            let map = pool.iter().enumerate().map(|(i, ip)| format!("{i} : {ip}")).collect::<Vec<_>>().join(", ");
+            let selector = match algo {
+                "random" => format!("numgen random mod {}", pool.len()),
+                "ip-hash" | "sticky" => format!("jhash ip saddr mod {}", pool.len()),
+                // round-robin (default) e weighted (já expandido) usam numgen inc.
+                _ => format!("numgen inc mod {}", pool.len()),
+            };
+            format!("add rule ip {TABLE} prerouting ip daddr {vip} dnat to {selector} map {{ {map} }}\n")
         };
         apply_nft(&rule)
     }
