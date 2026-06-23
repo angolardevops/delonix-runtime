@@ -1660,6 +1660,57 @@ pub fn slirp_attach(pid: i32, publish: &[String]) -> Result<()> {
     }
 }
 
+/// **Reaper de slirp4netns órfãos** (#1 port-leak): quando o processo de um
+/// container sai SOZINHO (crash/exit, sem `delonix stop`), o `slirp4netns` que lhe
+/// servia a rede pode ficar a correr — segurando a porta de host publicada, o que
+/// bloqueia o re-arranque ("add_hostfwd failed"). Varre `/proc` uma vez, identifica
+/// os slirp4netns cujo **pid-alvo** (último arg numérico do cmdline) já não existe e
+/// mata-os; remove também os api-sockets `delonix-slirp-<pid>.sock` obsoletos.
+/// Barato (uma passagem por /proc) e seguro (só mexe em slirp4netns com alvo morto).
+/// Devolve quantos reapou.
+pub fn reap_orphan_slirp() -> usize {
+    let mut reaped = 0;
+    let rd = match std::fs::read_dir("/proc") {
+        Ok(r) => r,
+        Err(_) => return 0,
+    };
+    for e in rd.flatten() {
+        let name = e.file_name();
+        let pidstr = name.to_string_lossy();
+        let pid: i32 = match pidstr.parse() {
+            Ok(p) => p,
+            Err(_) => continue, // não é um directório de processo
+        };
+        let cmdline = match std::fs::read(format!("/proc/{pid}/cmdline")) {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+        // cmdline = args separados por NUL. O argv[0] tem de ser slirp4netns.
+        let argv: Vec<&[u8]> = cmdline.split(|b| *b == 0).filter(|s| !s.is_empty()).collect();
+        if argv.is_empty() || !argv[0].ends_with(b"slirp4netns") {
+            continue;
+        }
+        // o pid-alvo é o penúltimo arg (… <pid> tap0). Acha o último arg numérico.
+        let target: Option<i32> = argv
+            .iter()
+            .rev()
+            .find_map(|a| std::str::from_utf8(a).ok().and_then(|s| s.parse::<i32>().ok()));
+        let Some(target) = target else { continue };
+        // alvo vivo? `kill(pid, 0)` == 0 ⇒ existe. ESRCH ⇒ morto.
+        // SAFETY: kill com sinal 0 não envia sinal — só testa a existência do pid.
+        let alive = unsafe { libc::kill(target, 0) } == 0;
+        if alive {
+            continue;
+        }
+        // órfão: o container já morreu mas o slirp ficou. Mata-o (liberta a porta).
+        // SAFETY: SIGTERM a um slirp4netns confirmado órfão.
+        unsafe { libc::kill(pid, libc::SIGTERM); }
+        let _ = std::fs::remove_file(std::env::temp_dir().join(format!("delonix-slirp-{target}.sock")));
+        reaped += 1;
+    }
+    reaped
+}
+
 /// Pede ao slirp4netns (via o api-socket JSON) um *host-forward* `host_port` →
 /// `guest_port` no IP do container ([`SLIRP_IP`]). É como o Podman publica portas
 /// em rootless. Tenta brevemente até o socket existir (o slirp cria-o ao arrancar).
