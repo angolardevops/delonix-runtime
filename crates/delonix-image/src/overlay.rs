@@ -246,8 +246,30 @@ impl ImageStore {
         if merged.exists() {
             let _ = umount2(&merged, MntFlags::MNT_DETACH);
         }
-        let _ = std::fs::remove_dir_all(&base);
+        // ROOTLESS FLAT: `rootfs/` é o estado PERSISTENTE do container (reusado no
+        // restart, preserva as escritas — como o Docker). Em `stop`/cleanup NÃO o
+        // apagar; limpa só os directórios scratch do overlay (modelo root). O destroy
+        // definitivo é o `remove_container_dir` (chamado pelo `rm`).
+        if base.join("rootfs").exists() {
+            for d in ["merged", "upper", "work"] {
+                let _ = std::fs::remove_dir_all(base.join(d));
+            }
+        } else {
+            let _ = std::fs::remove_dir_all(&base);
+        }
         Ok(())
+    }
+
+    /// Remove TODO o directório do container (incl. o `rootfs/` flat). Usar no `rm`
+    /// (destroy definitivo), ao contrário do `unmount_rootfs` (stop, que preserva).
+    pub fn remove_container_dir(&self, container_id: &str) {
+        let _ = std::fs::remove_dir_all(self.container_dir(container_id));
+    }
+
+    /// Caminho do directório de um container (`<root>/containers/<id>`). Para o `rm`
+    /// poder removê-lo num userns mapeado (ficheiros de subuid) via runtime.
+    pub fn container_path(&self, container_id: &str) -> PathBuf {
+        self.container_dir(container_id)
     }
 }
 
