@@ -1511,6 +1511,44 @@ pub fn unpublish_port(host_port: &str) {
     let _ = control_send(&format!("unpublish {host_port}"));
 }
 
+/// Reconcilia os `hostfwd` do slirp ÚNICO do ingress contra os ports REALMENTE em
+/// uso por containers vivos: remove as entradas órfãs (de containers já removidos,
+/// ou que morreram sem limpar) que de outro modo bloqueavam o re-uso da porta de
+/// host. `live_ports` = host_ports publicados por containers vivos. Parte do reaper
+/// #1 (port-leak). Devolve quantas removeu. Barato (1 query ao api-socket).
+pub fn reap_orphan_hostfwds(live_ports: &std::collections::HashSet<u32>) -> usize {
+    let sock = slirp_sock_path();
+    if !sock.exists() {
+        return 0;
+    }
+    let listed = match slirp_api(&sock, r#"{"execute":"list_hostfwd"}"#) {
+        Ok(s) => s,
+        Err(_) => return 0,
+    };
+    let v: serde_json::Value = serde_json::from_str(&listed).unwrap_or(serde_json::Value::Null);
+    // A resposta vem como {"entries":[…]} ou {"return":{"entries":[…]}} conforme a versão.
+    let entries = v
+        .get("return")
+        .and_then(|r| r.get("entries"))
+        .and_then(|e| e.as_array())
+        .or_else(|| v.get("entries").and_then(|e| e.as_array()));
+    let mut removed = 0;
+    if let Some(entries) = entries {
+        for e in entries {
+            let hp = e.get("host_port").and_then(|p| p.as_u64()).unwrap_or(0) as u32;
+            if hp == 0 || live_ports.contains(&hp) {
+                continue;
+            }
+            if let Some(id) = e.get("id").and_then(|i| i.as_u64()) {
+                let cmd = format!(r#"{{"execute":"remove_hostfwd","arguments":{{"id":{id}}}}}"#);
+                let _ = slirp_api(&sock, &cmd);
+                removed += 1;
+            }
+        }
+    }
+    removed
+}
+
 /// Envia um comando JSON ao api-socket do slirp único e devolve a resposta.
 fn slirp_api(sock: &Path, json: &str) -> Result<String> {
     use std::io::{Read, Write};
