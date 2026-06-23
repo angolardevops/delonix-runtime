@@ -57,10 +57,18 @@ impl Router {
     /// `numgen`/conntrack do `Net`; no rootless o roteamento de serviço do ingress
     /// é tratado à parte (no-op aqui). Idempotente.
     pub fn set_lb(&self, backends: &[String], rootless: bool) -> Result<()> {
+        self.set_lb_algo(backends, "round-robin", rootless)
+    }
+
+    /// Como [`set_lb`], com **algoritmo** selecionável (C6): `round-robin`, `random`,
+    /// `ip-hash`/`sticky` (afinidade de sessão), `weighted` (`ip:port#peso`). O LB L4
+    /// por nftables é **root-only**; em rootless é no-op aqui (o LB de serviço rootless
+    /// por L7 fica como follow-up).
+    pub fn set_lb_algo(&self, backends: &[String], algo: &str, rootless: bool) -> Result<()> {
         if rootless {
             return Ok(());
         }
-        Net.set_service_lb(&self.ip, backends)
+        Net.set_service_lb_algo(&self.ip, backends, algo)
     }
 
     /// **Publica** `internal_port/proto` na `host_port` através do Ingress
