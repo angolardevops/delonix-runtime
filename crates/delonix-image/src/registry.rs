@@ -56,6 +56,8 @@ struct RawInner {
     entrypoint: Option<Vec<String>>,
     #[serde(rename = "Env")]
     env: Option<Vec<String>>,
+    #[serde(rename = "User")]
+    user: Option<String>,
 }
 
 fn reg_err(e: reqwest::Error) -> Error {
@@ -474,7 +476,7 @@ pub fn pull_from_registry(store: &ImageStore, reference: &str) -> Result<Image> 
 
     // 4) monta e guarda
     let raw: RawConfig = serde_json::from_slice(&config_bytes)?;
-    let inner = raw.config.unwrap_or(RawInner { cmd: None, entrypoint: None, env: None });
+    let inner = raw.config.unwrap_or(RawInner { cmd: None, entrypoint: None, env: None, user: None });
     let repo_tags = store.merged_tags(&config_digest, reference);
     let image = Image {
         id: config_digest,
@@ -484,6 +486,7 @@ pub fn pull_from_registry(store: &ImageStore, reference: &str) -> Result<Image> 
             cmd: inner.cmd.unwrap_or_default(),
             entrypoint: inner.entrypoint.unwrap_or_default(),
             env: inner.env.unwrap_or_default(),
+            user: inner.user.unwrap_or_default(),
             cpus: None,
             memory: None,
             security: Vec::new(),
