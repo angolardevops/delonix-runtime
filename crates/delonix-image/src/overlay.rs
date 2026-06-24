@@ -129,7 +129,11 @@ fn ensure_owner_writable(p: &Path) {
     if let Ok(md) = std::fs::metadata(p) {
         if md.is_dir() {
             let mode = md.permissions().mode();
-            if mode & 0o200 == 0 {
+            // Um directório precisa de ESCRITA **e** EXECUÇÃO do dono para se
+            // criarem/acederem entradas. `0o555` (r-x, sem w) E `0o644` (rw, sem x —
+            // ex.: `/etc/containerd` em algumas imagens) bloqueiam a escrita dos
+            // filhos em rootless → ficheiros desaparecem. Exigimos os dois (`0o300`).
+            if mode & 0o300 != 0o300 {
                 let mut perm = md.permissions();
                 perm.set_mode(mode | 0o700);
                 let _ = std::fs::set_permissions(p, perm);
@@ -315,6 +319,42 @@ mod tests {
         );
         let mode = std::fs::metadata(dir.join("ro")).unwrap().permissions().mode();
         assert!(mode & 0o200 != 0, "o directório tem de ficar gravável pelo dono (fix)");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Regressão B.3 (Kind): um directório `0o644` (escrita SEM execução — ex.:
+    /// `/etc/containerd` no kindest/node) bloqueia a criação de ficheiros lá dentro
+    /// em rootless. O fix tem de garantir também o bit de EXECUÇÃO.
+    #[test]
+    fn flat_extract_writes_into_writable_but_nonexec_dir() {
+        use std::os::unix::fs::PermissionsExt;
+        let mut buf = Vec::new();
+        {
+            let mut b = tar::Builder::new(&mut buf);
+            let mut dh = tar::Header::new_gnu();
+            dh.set_entry_type(tar::EntryType::Directory);
+            dh.set_size(0);
+            dh.set_mode(0o644); // rw-r--r-- (sem x) — o caso do /etc/containerd
+            dh.set_cksum();
+            b.append_data(&mut dh, "cfgdir/", std::io::empty()).unwrap();
+            let content = b"version = 2\n";
+            let mut fh = tar::Header::new_gnu();
+            fh.set_size(content.len() as u64);
+            fh.set_mode(0o644);
+            fh.set_cksum();
+            b.append_data(&mut fh, "cfgdir/config.toml", &content[..]).unwrap();
+            b.finish().unwrap();
+        }
+        let dir = std::env::temp_dir().join(format!("delonix-flat-nox-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        apply_layer_flat(&buf, &dir).unwrap();
+        assert!(
+            dir.join("cfgdir/config.toml").exists(),
+            "ficheiro num dir 0644 (sem x) tem de ser extraído (regressão Kind/containerd)"
+        );
+        let mode = std::fs::metadata(dir.join("cfgdir")).unwrap().permissions().mode();
+        assert_eq!(mode & 0o300, 0o300, "o dir tem de ficar com w+x do dono");
         std::fs::remove_dir_all(&dir).ok();
     }
 
