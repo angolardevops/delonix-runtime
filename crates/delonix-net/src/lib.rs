@@ -835,6 +835,18 @@ impl NetworkStore {
         if alloc_ip_cidr(subnet, "deadbeef").is_none() {
             return Err(Error::Invalid(format!("subnet inválida: '{subnet}' (ex.: 192.168.1.0/24)")));
         }
+        // AVISO DE SEGURANÇA (consentimento informado): macvlan/ipvlan põem o container
+        // DIRETAMENTE na LAN física do `parent`, com IP/MAC próprios. O tráfego egressa
+        // pelo NIC físico ABAIXO da forward chain do host → NÃO é filtrável pela nft do
+        // Delonix: SEM firewall por-container, SEM anti-spoof, SEM isolamento inter-rede.
+        // É a natureza do macvlan, não um bug — mas o operador tem de o saber. Para
+        // isolamento FILTRADO, usa uma rede `bridge` (default). Ver `is_lan_driver`.
+        eprintln!(
+            "delonix: AVISO DE SEGURANÇA — a rede '{name}' ({driver}) é NÃO-FILTRADA: os \
+             containers ficam diretamente na LAN física de '{parent}', FORA do firewall, \
+             do anti-spoof e do isolamento do Delonix. Usa uma rede `bridge` se precisares \
+             de filtragem."
+        );
         let body = format!(
             "driver={driver}\nparent={parent}\nsubnet={subnet}\ngateway={gateway}\n"
         );
