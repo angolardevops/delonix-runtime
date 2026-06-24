@@ -337,6 +337,22 @@ fn cap_num(name: &str) -> Option<u8> {
     })
 }
 
+/// Máscara com TODAS as capabilities suportadas pelo kernel (`--privileged`).
+/// Lê `/proc/sys/kernel/cap_last_cap` para não passar bits inválidos ao `capset`
+/// (que daria EINVAL). Fallback conservador: CAP_CHECKPOINT_RESTORE (40).
+fn all_caps_mask() -> u64 {
+    let last: u32 = std::fs::read_to_string("/proc/sys/kernel/cap_last_cap")
+        .ok()
+        .and_then(|s| s.trim().parse().ok())
+        .unwrap_or(40);
+    let last = last.min(63);
+    if last >= 63 {
+        u64::MAX
+    } else {
+        (1u64 << (last + 1)) - 1
+    }
+}
+
 /// Calcula a máscara de capabilities a manter: começa em [`KEPT_CAPS`], aplica
 /// `--cap-drop` (`ALL` → nenhuma) e depois `--cap-add`.
 fn resolve_cap_keep(cap_drop: &[String], cap_add: &[String]) -> u64 {
@@ -774,6 +790,7 @@ fn setup_rootfs(
     devices: &[String],
     sysctls: &[String],
     host_pid: bool,
+    privileged: bool,
 ) -> nix::Result<()> {
     sethostname(hostname)?;
     mount(
@@ -833,13 +850,29 @@ fn setup_rootfs(
     mask_proc_paths();
     // `/sys` SÓ-LEITURA (B13): impede escrita em controlos do kernel/dispositivos
     // a partir do container. nosuid/nodev/noexec por defesa. (Ignora se não há /sys.)
+    // EXCEÇÃO --privileged: `/sys` RW + `cgroup2` RW delegado, para o systemd dentro
+    // do container (nodes Kind) criar e gerir sub-cgroups. Só com `--privileged`.
+    let sys_base = MsFlags::MS_NOSUID | MsFlags::MS_NODEV | MsFlags::MS_NOEXEC;
     let _ = mount(
         Some("sysfs"),
         "/sys",
         Some("sysfs"),
-        MsFlags::MS_RDONLY | MsFlags::MS_NOSUID | MsFlags::MS_NODEV | MsFlags::MS_NOEXEC,
+        if privileged { sys_base } else { sys_base | MsFlags::MS_RDONLY },
         None::<&str>,
     );
+    if privileged {
+        // cgroup2 RW por cima de /sys/fs/cgroup. Com CLONE_NEWCGROUP, a vista fica
+        // enraizada no cgroup do container (delegado pelo host — pré-requisito
+        // cgroup v2 Delegate=yes). nsdelegate deixa o systemd gerir o seu subtree.
+        let _ = std::fs::create_dir_all(format!("{rootfs}/sys/fs/cgroup"));
+        let _ = mount(
+            Some("cgroup2"),
+            "/sys/fs/cgroup",
+            Some("cgroup2"),
+            MsFlags::MS_NOSUID | MsFlags::MS_NODEV | MsFlags::MS_NOEXEC,
+            Some("nsdelegate"),
+        );
+    }
     // Com user ns a raiz antiga é desmontada só DEPOIS do setuid + setup_dev_userns
     // (que precisa dela para ligar os nós reais do host ao /dev) — feito no caller.
     if !userns {
@@ -1221,6 +1254,7 @@ fn container_init(
     inherit_userns: bool,
     run_uid: Option<u32>,
     run_gid: Option<u32>,
+    privileged: bool,
 ) -> isize {
     // User namespace: espera que o PAI escreva uid_map/gid_map antes de continuar
     // (até lá, somos `nobody` sem caps). O byte recebido é o "podes avançar".
@@ -1260,7 +1294,7 @@ fn container_init(
     // `nobody`): o pivot_root e os ficheiros vão para o overlay do host (que aceita
     // o uid do host). Sem user ns, monta logo o `/dev` (bind dos nós reais do host).
     // Com user ns, o `/dev` é montado a seguir, já depois do setuid — ver abaixo.
-    if let Err(e) = setup_rootfs(rootfs, hostname, mounts, userns, devices, sysctls, host_pid) {
+    if let Err(e) = setup_rootfs(rootfs, hostname, mounts, userns, devices, sysctls, host_pid, privileged) {
         eprintln!("delonix: falha a preparar o rootfs: {e}");
         return 126;
     }
@@ -1890,8 +1924,15 @@ fn spawn(store: &Store, container: &mut Container, rootfs: &str, spec: &RunSpec<
     let join_netns = spec.join_netns.clone();
     let env = container.env.clone();
     let read_only = container.read_only;
-    let cap_keep = resolve_cap_keep(&container.cap_drop, &container.cap_add);
-    let seccomp_unconfined = container.seccomp.as_deref() == Some("unconfined");
+    // --privileged: mantém TODAS as caps + seccomp unconfined + cgroupns + /sys RW
+    // (ver setup_rootfs). Estritamente gated — o caminho não-privileged é idêntico.
+    let privileged = container.privileged;
+    let cap_keep = if privileged {
+        all_caps_mask()
+    } else {
+        resolve_cap_keep(&container.cap_drop, &container.cap_add)
+    };
+    let seccomp_unconfined = privileged || container.seccomp.as_deref() == Some("unconfined");
     let seccomp_detect = container.seccomp.as_deref() == Some("detect");
     let devices = container.devices.clone();
     let tmpfs = container.tmpfs.clone();
@@ -1933,6 +1974,11 @@ fn spawn(store: &Store, container: &mut Container, rootfs: &str, spec: &RunSpec<
     let userns = spec.userns && !spec.inherit_userns;
     if userns {
         flags |= CloneFlags::CLONE_NEWUSER;
+    }
+    // --privileged: cgroup namespace próprio (o systemd dentro do container vê o
+    // seu cgroup como raiz e pode delegar sub-cgroups).
+    if privileged {
+        flags |= CloneFlags::CLONE_NEWCGROUP;
     }
     // Pipe de sincronização: o filho espera o pai mapear os uid/gid (user ns).
     let sync = if userns {
@@ -1976,6 +2022,7 @@ fn spawn(store: &Store, container: &mut Container, rootfs: &str, spec: &RunSpec<
             inherit_userns,
             run_uid,
             run_gid,
+            privileged,
         )
     });
 
