@@ -199,6 +199,21 @@ fn table_exists() -> bool {
 fn netns_name(id: &str) -> String {
     format!("delonix-{}", &id[..id.len().min(12)])
 }
+
+/// Remove as regras anti-spoofing (`iifname "<hv>" ip saddr != … drop`) do `forward`
+/// da tabela ROOT, pelo handle (idempotência). Espelho de `infra.rs::clear_antispoof`
+/// para o caminho root/legacy. Best-effort.
+fn clear_antispoof_root(hv: &str) {
+    let listed = capture("nft", &["-a", "list", "chain", "ip", TABLE, "forward"]).unwrap_or_default();
+    let needle = format!("iifname \"{hv}\"");
+    for line in listed.lines() {
+        if line.contains(&needle) && line.contains("saddr") && line.contains("drop") {
+            if let Some(h) = line.rsplit("# handle ").next().and_then(|x| x.trim().parse::<u32>().ok()) {
+                run_ok("nft", &["delete", "rule", "ip", TABLE, "forward", "handle", &h.to_string()]);
+            }
+        }
+    }
+}
 fn host_veth(id: &str) -> String {
     format!("dlx{}", &id[..id.len().min(8)]) // <= 15 chars (IFNAMSIZ)
 }
@@ -1137,6 +1152,16 @@ impl Net {
         // No host: liga a ponta à bridge desta rede e levanta.
         run("ip", &["link", "set", &hv, "master", &net.bridge])?;
         run("ip", &["link", "set", &hv, "up"])?;
+        // ANTI-SPOOFING (paridade com o caminho rootless `infra.rs::do_attach`): o
+        // container só pode emitir com o SEU IP de origem. Sem isto pode forjar o
+        // `saddr` e contornar as regras por-IP do firewall (as garantias por-IP
+        // deixariam de ser reais). Idempotente (limpa antes); `insert` põe a regra no
+        // TOPO do `forward`, antes dos jumps por-container e dos drops de `@blocked`.
+        clear_antispoof_root(&hv);
+        run_ok(
+            "nft",
+            &["insert", "rule", "ip", TABLE, "forward", "iifname", &hv, "ip", "saddr", "!=", &ip, "drop"],
+        );
         Ok(ip)
     }
 
@@ -1181,6 +1206,7 @@ impl Net {
         let ns = netns_name(id);
         let hv = host_veth(id);
         self.clear_net_rate(id); // remove qualquer limite de banda (tc) do veth
+        clear_antispoof_root(&hv); // remove a regra anti-spoof do forward (antes do veth)
         run_ok("ip", &["link", "del", &hv]); // remove o par veth
         run_ok("ip", &["netns", "del", &ns]); // remove o nome do netns
         let ip = ip.map(String::from).unwrap_or_else(|| alloc_ip(id));
