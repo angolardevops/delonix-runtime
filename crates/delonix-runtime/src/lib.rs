@@ -1255,6 +1255,7 @@ fn container_init(
     run_uid: Option<u32>,
     run_gid: Option<u32>,
     privileged: bool,
+    console_sock: Option<(i32, i32)>,
 ) -> isize {
     // User namespace: espera que o PAI escreva uid_map/gid_map antes de continuar
     // (até lá, somos `nobody` sem caps). O byte recebido é o "podes avançar".
@@ -1311,6 +1312,14 @@ fn container_init(
         setup_dev_userns("/.delonix_old", devices);
         let _ = umount2("/.delonix_old", MntFlags::MNT_DETACH);
         let _ = std::fs::remove_dir("/.delonix_old");
+    }
+    // --privileged detached (nodes Kind): aloca um `/dev/console` (pty) para o
+    // PID 1 e captura-o no log. Tem de ser DEPOIS do `/dev`/devpts montado (acima)
+    // e ANTES de largar caps (o bind de `/dev/console` precisa de CAP_SYS_ADMIN).
+    // O `detach_stdio` acima já apontou o stdio herdado para /dev/null; isto
+    // reaponta-o para o pty. Ver `setup_console`.
+    if let Some(cs) = console_sock {
+        setup_console(cs);
     }
     apply_tmpfs(tmpfs); // --tmpfs (depois do pivot, ainda com caps)
     // `--read-only`: remonta o rootfs (`/`) só-leitura. Volumes/dev/proc são
@@ -1996,9 +2005,18 @@ fn spawn(store: &Store, container: &mut Container, rootfs: &str, spec: &RunSpec<
     let ulimits = container.ulimits.clone();
     let sysctls = container.sysctls.clone();
 
+    // Console (pty) para o PID 1: SÓ em `--privileged` detached com log (nodes
+    // Kind, que correm systemd como PID 1). Dá um `/dev/console` real cujo output
+    // — incluindo o estado do boot do systemd — é capturado no ficheiro de log, de
+    // modo que `docker logs -f` (= o que o Kind usa para detetar readiness) o veja.
+    // O caminho NÃO-privileged fica byte-a-byte idêntico (sem pty, pipe normal).
+    let console = privileged && detach && spec.log_path.is_some();
+
     // Logging shim: em detached, o stdout/stderr do container vão por um pipe para
-    // um processo `log_shim` que escreve em `log_path` COM rotação por tamanho.
-    let log_pipe: Option<(i32, i32)> = match (detach, &spec.log_path) {
+    // um processo `log_shim` que escreve em `log_path` COM rotação por tamanho. Em
+    // modo console o "pipe" é antes o MASTER do pty (recebido do container), por
+    // isso aqui não se cria pipe.
+    let log_pipe: Option<(i32, i32)> = match (detach && !console, &spec.log_path) {
         (true, Some(_)) => {
             let mut fds = [0i32; 2];
             // SAFETY: pipe() preenche 2 fds.
@@ -2011,6 +2029,21 @@ fn spawn(store: &Store, container: &mut Container, rootfs: &str, spec: &RunSpec<
         _ => None,
     };
     let log_fd = log_pipe.map(|(_, w)| w); // o container escreve na ponta de escrita
+
+    // Socketpair do *console socket* (runc): o init aloca o pty no devpts do
+    // container e devolve o master por aqui. `(pai, filho)`; o filho herda ambos na
+    // clone e fecha o do pai (ver `setup_console`).
+    let console_sock: Option<(i32, i32)> = if console {
+        let mut sv = [0i32; 2];
+        // SAFETY: socketpair() preenche 2 fds (AF_UNIX/SOCK_DGRAM, como no `exec`).
+        if unsafe { libc::socketpair(libc::AF_UNIX, libc::SOCK_DGRAM, 0, sv.as_mut_ptr()) } == 0 {
+            Some((sv[0], sv[1]))
+        } else {
+            None
+        }
+    } else {
+        None
+    };
 
     // Isolamento por omissão: mount, PID, UTS e **IPC** (System V/POSIX). O IPC
     // isolado impede um container de ver/alterar a memória partilhada e as filas
@@ -2080,6 +2113,7 @@ fn spawn(store: &Store, container: &mut Container, rootfs: &str, spec: &RunSpec<
             run_uid,
             run_gid,
             privileged,
+            console_sock,
         )
     });
 
@@ -2087,15 +2121,30 @@ fn spawn(store: &Store, container: &mut Container, rootfs: &str, spec: &RunSpec<
     let pid = unsafe { clone(cb, &mut stack, flags, Some(Signal::SIGCHLD as i32)) }
         .map_err(syserr("clone"))?;
 
-    // Arranca o logging shim (lê o pipe, escreve o log com rotação). Reparentado
-    // ao init quando o `delonix run` termina; morre quando o container fecha o pipe.
-    if let Some((logr, logw)) = log_pipe {
+    // Origem do log: em modo console é o MASTER do pty (recebido do init por
+    // SCM_RIGHTS); caso contrário a ponta de LEITURA do pipe de stdout/stderr.
+    let log_src: Option<i32> = if let Some((csp, csc)) = console_sock {
+        // SAFETY: o pai larga a ponta do filho e recebe o master do init.
+        unsafe { libc::close(csc) };
+        let m = recv_fd(csp);
+        unsafe { libc::close(csp) };
+        m // None se o init não conseguiu alocar o pty (cai sem log, sem bloquear)
+    } else {
+        log_pipe.map(|(r, _)| r)
+    };
+
+    // Arranca o logging shim (lê o pipe/master, escreve o log com rotação). Reparentado
+    // ao init quando o `delonix run` termina; morre quando o container fecha a fonte.
+    if let Some(src) = log_src {
         let lp = spec.log_path.clone().unwrap_or_default();
         let driver = container.log_driver.clone().unwrap_or_default();
         let tag = format!("delonix/{}", container.name);
         // SAFETY: fork de um processo single-threaded; o filho-shim só faz I/O e _exit.
         if let Ok(ForkResult::Child) = unsafe { fork() } {
-            unsafe { libc::close(logw) };
+            // Larga a ponta de ESCRITA do pipe (se existir) — só o container a mantém.
+            if let Some((_, logw)) = log_pipe {
+                unsafe { libc::close(logw) };
+            }
             // O shim sobrevive ao `delonix run` (vive enquanto o container viver).
             // Tem de LARGAR o stdio herdado do pai — senão um chamador que capture
             // o stdout do `run -d` (o shim Docker, `$(...)`, CI/scripts) fica
@@ -2113,13 +2162,13 @@ fn spawn(store: &Store, container: &mut Container, rootfs: &str, spec: &RunSpec<
                     }
                 }
             }
-            log_shim(logr, lp, MAX_LOG_BYTES, driver, tag, spec.log_cri); // não regressa (o pai não espera)
+            log_shim(src, lp, MAX_LOG_BYTES, driver, tag, spec.log_cri); // não regressa (o pai não espera)
         }
-        // O pai larga as duas pontas: só o container (logw via fd 1/2) e o shim
-        // (logr) as mantêm. Quando o container morre, o shim vê EOF.
-        unsafe {
-            libc::close(logr);
-            libc::close(logw);
+        // O pai larga as pontas: só o container (a fonte, via fd 1/2 ou o slave do
+        // pty) e o shim (src) as mantêm. Quando o container morre, o shim vê EOF/EIO.
+        unsafe { libc::close(src) };
+        if let Some((_, logw)) = log_pipe {
+            unsafe { libc::close(logw) };
         }
     }
 
@@ -2194,8 +2243,9 @@ fn spawn(store: &Store, container: &mut Container, rootfs: &str, spec: &RunSpec<
 /// Aloca um pty a partir do devpts **do container** (`/dev/ptmx` → `pts/ptmx`).
 /// Corre no neto (já dentro do mnt ns do container), por isso o `/dev/pts/N`
 /// resultante resolve lá dentro — o `tty` imprime o nome certo, tal como o
-/// Docker. Devolve `(master, slave)`; o master é enviado ao pai por SCM_RIGHTS.
-fn open_pty_in_container() -> Option<(i32, i32)> {
+/// Docker. Devolve `(master, slave, path_do_slave)`; o master é enviado ao pai
+/// por SCM_RIGHTS e o `path` (`/dev/pts/N`) serve para o bind de `/dev/console`.
+fn open_pty_in_container() -> Option<(i32, i32, String)> {
     unsafe {
         let m = libc::open(c"/dev/ptmx".as_ptr(), libc::O_RDWR | libc::O_NOCTTY);
         if m < 0 {
@@ -2210,12 +2260,56 @@ fn open_pty_in_container() -> Option<(i32, i32)> {
             libc::close(m);
             return None;
         }
+        let path = std::ffi::CStr::from_ptr(buf.as_ptr()).to_string_lossy().into_owned();
         let s = libc::open(buf.as_ptr(), libc::O_RDWR | libc::O_NOCTTY);
         if s < 0 {
             libc::close(m);
             return None;
         }
-        Some((m, s))
+        Some((m, s, path))
+    }
+}
+
+/// Dá um `/dev/console` (pty) ao PID 1 de um container `--privileged` detached e
+/// captura-o para o ficheiro de log. O `master` vai para o pai (que o liga ao
+/// `log_shim`), o `slave` vira `/dev/console` + stdio — é onde o **systemd**,
+/// como PID 1, escreve o estado do boot (ex.: "Reached target Multi-User
+/// System"). Sem isto esse estado ia só para o *journal*, invisível ao
+/// `docker logs -f` que o Kind usa para detetar o node pronto. Modelo *console
+/// socket* do runc. Corre no init do container (já com o `/dev`/devpts montado e
+/// ainda com caps), antes de largar privilégios e do `execve`.
+fn setup_console(console_sock: (i32, i32)) {
+    let (sp, sc) = console_sock;
+    // SAFETY: o init não usa a ponta do pai do socketpair.
+    unsafe { libc::close(sp) };
+    let Some((m, s, path)) = open_pty_in_container() else {
+        unsafe { libc::close(sc) };
+        return;
+    };
+    // Entrega o master ao pai (que o pumpa para o log) e larga-o aqui.
+    send_fd(sc, m);
+    // SAFETY: master e socket já não são precisos dentro do container.
+    unsafe {
+        libc::close(m);
+        libc::close(sc);
+    }
+    // `/dev/console` = bind do nó do slave (char device do pty). É o que o systemd
+    // abre por nome para imprimir o estado do boot. Best-effort.
+    let _ = std::fs::File::create("/dev/console"); // ponto de montagem
+    let _ = mount(Some(path.as_str()), "/dev/console", None::<&str>, MsFlags::MS_BIND, None::<&str>);
+    // Sessão nova + controlling tty no slave + stdio = slave (modelo runc
+    // `terminal:true`). O PID 1 (filho da clone) não é líder de grupo → o setsid
+    // sucede; o systemd herda isto e escreve para o pty capturado.
+    // SAFETY: FFI directa sobre o slave válido; best-effort.
+    unsafe {
+        libc::setsid();
+        libc::ioctl(s, libc::TIOCSCTTY as _, 0);
+        libc::dup2(s, 0);
+        libc::dup2(s, 1);
+        libc::dup2(s, 2);
+        if s > 2 {
+            libc::close(s);
+        }
     }
 }
 
@@ -2411,7 +2505,7 @@ pub fn exec(container: &Container, argv: &[String], tty: bool) -> Result<i32> {
                     // usa o slave como stdio (nova sessão + controlling terminal).
                     if let Some((sp, sc)) = pty_sock {
                         unsafe { libc::close(sp) }; // o neto só usa o seu lado
-                        if let Some((m, s)) = open_pty_in_container() {
+                        if let Some((m, s, _path)) = open_pty_in_container() {
                             send_fd(sc, m);
                             unsafe {
                                 libc::close(m);
