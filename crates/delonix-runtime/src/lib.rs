@@ -428,6 +428,69 @@ fn drop_capabilities(keep: u64) {
     }
 }
 
+/// Decide se o confinamento ficou MESMO em vigor, a partir dos campos lidos de
+/// `/proc/self/status`. Lógica pura (testável): exige `NO_NEW_PRIVS`, seccomp em
+/// modo filtro (2) quando esperado, e NENHUMA capability fora de `cap_keep` no
+/// bounding set nem no effective. `CapBnd`/`CapEff` ausentes = não-verificável =
+/// erro (fail-closed).
+fn confinement_ok(
+    no_new_privs: Option<u32>,
+    seccomp_mode: Option<u32>,
+    cap_bnd: Option<u64>,
+    cap_eff: Option<u64>,
+    seccomp_expected: bool,
+    cap_keep: u64,
+) -> std::result::Result<(), String> {
+    if no_new_privs != Some(1) {
+        return Err(format!("NO_NEW_PRIVS inativo ({no_new_privs:?})"));
+    }
+    // 2 = SECCOMP_MODE_FILTER. (`detect` também aplica um filtro → modo 2.)
+    if seccomp_expected && seccomp_mode != Some(2) {
+        return Err(format!("seccomp não está em modo filtro (Seccomp={seccomp_mode:?})"));
+    }
+    let bnd = cap_bnd.ok_or_else(|| "CapBnd ausente em /proc/self/status".to_string())?;
+    let eff = cap_eff.ok_or_else(|| "CapEff ausente em /proc/self/status".to_string())?;
+    let extra_bnd = bnd & !cap_keep;
+    let extra_eff = eff & !cap_keep;
+    if extra_bnd != 0 || extra_eff != 0 {
+        return Err(format!(
+            "capabilities fora da allowlist persistem (bnd_extra={extra_bnd:#x} eff_extra={extra_eff:#x})"
+        ));
+    }
+    Ok(())
+}
+
+/// FAIL-CLOSED: lê `/proc/self/status` e confirma que `no_new_privs`, o seccomp e o
+/// drop de caps ficaram MESMO em vigor antes do `execve`. Cada um destes controlos
+/// pode falhar em silêncio (capset/prctl/seccomp são, em parte, best-effort); um
+/// controlo de segurança que falha ABERTO é pior que nenhum, porque dá falsa
+/// confiança. Se a verificação falhar, o `container_init`/`exec` aborta. Opt-out
+/// explícito do OPERADOR (não do container, cujo env ainda não foi aplicado):
+/// `DELONIX_INSECURE_BESTEFFORT=1`.
+fn verify_confinement(seccomp_expected: bool, cap_keep: u64) -> std::result::Result<(), String> {
+    let status = std::fs::read_to_string("/proc/self/status")
+        .map_err(|e| format!("/proc/self/status ilegível: {e}"))?;
+    let (mut nnp, mut sec, mut bnd, mut eff) = (None, None, None, None);
+    for line in status.lines() {
+        if let Some(v) = line.strip_prefix("NoNewPrivs:") {
+            nnp = v.trim().parse::<u32>().ok();
+        } else if let Some(v) = line.strip_prefix("Seccomp:") {
+            sec = v.trim().parse::<u32>().ok();
+        } else if let Some(v) = line.strip_prefix("CapBnd:") {
+            bnd = u64::from_str_radix(v.trim(), 16).ok();
+        } else if let Some(v) = line.strip_prefix("CapEff:") {
+            eff = u64::from_str_radix(v.trim(), 16).ok();
+        }
+    }
+    confinement_ok(nnp, sec, bnd, eff, seccomp_expected, cap_keep)
+}
+
+/// O operador desligou as verificações fail-closed? (variável do ENGINE, lida antes
+/// de `apply_env` limpar o ambiente — um container não a pode forjar.)
+fn insecure_besteffort() -> bool {
+    std::env::var_os("DELONIX_INSECURE_BESTEFFORT").is_some()
+}
+
 /// Desliga o stdio do terminal em modo detached. `stdin` vai sempre para
 /// `/dev/null`; `stdout`/`stderr` vão para `out_fd` (a ponta de escrita do pipe
 /// do *logging shim*) se dado, senão para `/dev/null`.
@@ -1337,6 +1400,15 @@ fn container_init(
     set_no_new_privs(); // nenhum execve ganha privilégios (anti-escalada) — sempre
     drop_capabilities(cap_keep); // largar caps (depois das montagens, antes do exec)
     apply_seccomp(seccomp_unconfined, seccomp_detect); // allowlist (default-deny)
+    // FAIL-CLOSED: confirma que o confinamento ficou MESMO em vigor antes do execve.
+    // Corre ANTES do `setuid` do USER (mais abaixo) e ANTES do `apply_env` (logo lê o
+    // opt-out do ENGINE, não do container). Ver `verify_confinement`.
+    if !insecure_besteffort() {
+        if let Err(e) = verify_confinement(!seccomp_unconfined, cap_keep) {
+            eprintln!("delonix: confinamento NÃO verificado ({e}); a abortar o container");
+            return 126;
+        }
+    }
     if let Some(p) = apparmor {
         apply_apparmor(p); // confinamento MAC (AppArmor) — transita no execve
     }
@@ -1853,8 +1925,17 @@ fn setup_cgroup(c: &Container, pid: i32) -> Result<()> {
             message: format!("não foi possível criar {cg}"),
         });
     }
-    // device cgroup (eBPF): nega dispositivos de bloco (discos do host). Best-effort.
-    attach_device_filter(cg);
+    // device cgroup (eBPF): nega dispositivos de bloco (discos do host). Best-effort
+    // (kernels sem BPF_CGROUP_DEVICE). Se falhar, avisa em vez de ignorar em silêncio:
+    // a proteção primária mantém-se (sem CAP_MKNOD não se criam device nodes, e o
+    // `bind_devices` recusa block devices), mas o operador deve saber que esta camada
+    // não está activa.
+    if !attach_device_filter(cg) {
+        eprintln!(
+            "delonix: aviso — device cgroup (eBPF) não aplicado em {}; block devices dependem só de caps/seccomp",
+            c.name
+        );
+    }
     write_limit(cg, "memory.max", &c.memory_max)?; // teto de memória (kernel OOM-kill)
     // sem swap além da memória, senão o limite de memória seria contornável;
     // best-effort: o controlador de swap pode estar desligado no sistema.
@@ -2531,11 +2612,18 @@ pub fn exec(container: &Container, argv: &[String], tty: bool) -> Result<i32> {
                         }
                     }
                     set_no_new_privs();
-                    drop_capabilities(resolve_cap_keep(&container.cap_drop, &container.cap_add)); // mesmo confinamento
-                    apply_seccomp(
-                        container.seccomp.as_deref() == Some("unconfined"),
-                        container.seccomp.as_deref() == Some("detect"),
-                    );
+                    let exec_keep = resolve_cap_keep(&container.cap_drop, &container.cap_add);
+                    drop_capabilities(exec_keep); // mesmo confinamento
+                    let exec_unconf = container.seccomp.as_deref() == Some("unconfined");
+                    apply_seccomp(exec_unconf, container.seccomp.as_deref() == Some("detect"));
+                    // FAIL-CLOSED: o processo do `exec` tem de ficar tão confinado como
+                    // o init do container; aborta se algum controlo falhou em silêncio.
+                    if !insecure_besteffort() {
+                        if let Err(e) = verify_confinement(!exec_unconf, exec_keep) {
+                            eprintln!("delonix: confinamento do exec NÃO verificado ({e}); a abortar");
+                            unsafe { libc::_exit(126) };
+                        }
+                    }
                     apply_env(&container.name, &container.env); // mesmo ambiente do container
                     if let Some(p) = &container.apparmor {
                         apply_apparmor(p); // mesmo confinamento MAC que o processo de init
@@ -3032,6 +3120,30 @@ mod tests {
         // relativo (resolve a partir do cwd do holder, não do rootfs)
         assert!(!mount_target_safe("etc/passwd"));
         assert!(!mount_target_safe(""));
+    }
+
+    #[test]
+    fn confinement_ok_is_fail_closed() {
+        let keep = (1u64 << 1) | (1u64 << 3); // só caps 1 e 3 na allowlist
+        // estado bom: no_new_privs, seccomp modo filtro, caps ⊆ keep
+        assert!(confinement_ok(Some(1), Some(2), Some(keep), Some(keep), true, keep).is_ok());
+        // NO_NEW_PRIVS inativo → aborta
+        assert!(confinement_ok(Some(0), Some(2), Some(keep), Some(keep), true, keep).is_err());
+        // seccomp esperado mas não em modo filtro (falhou a aplicar) → aborta
+        assert!(confinement_ok(Some(1), Some(0), Some(keep), Some(keep), true, keep).is_err());
+        // cap fora da allowlist persiste no bounding set (capset/capbset falhou) → aborta
+        let leaked = keep | (1u64 << 21); // + CAP_SYS_ADMIN
+        assert!(confinement_ok(Some(1), Some(2), Some(leaked), Some(keep), true, keep).is_err());
+        // …ou no effective
+        assert!(confinement_ok(Some(1), Some(2), Some(keep), Some(leaked), true, keep).is_err());
+        // unconfined (--security-opt seccomp=unconfined): modo 0 é aceite
+        assert!(confinement_ok(Some(1), Some(0), Some(keep), Some(keep), false, keep).is_ok());
+        // campos de caps ausentes = não-verificável = aborta (fail-closed)
+        assert!(confinement_ok(Some(1), Some(2), None, Some(keep), true, keep).is_err());
+        assert!(confinement_ok(Some(1), Some(2), Some(keep), None, true, keep).is_err());
+        // privileged (keep = todas as caps): nada fica "fora" → ok
+        let allcaps = u64::MAX;
+        assert!(confinement_ok(Some(1), Some(2), Some(allcaps), Some(allcaps), true, allcaps).is_ok());
     }
 
     #[test]
