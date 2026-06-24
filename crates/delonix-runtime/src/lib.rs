@@ -2121,8 +2121,44 @@ fn spawn(store: &Store, container: &mut Container, rootfs: &str, spec: &RunSpec<
     let pid = unsafe { clone(cb, &mut stack, flags, Some(Signal::SIGCHLD as i32)) }
         .map_err(syserr("clone"))?;
 
+    // ORDEM CRÍTICA: o handshake do user namespace (libertar o filho com o byte
+    // "GO") TEM de vir ANTES do recv do console. Em modo console o init só aloca o
+    // pty e envia o master DEPOIS de receber o GO; se o pai bloqueasse no recv_fd
+    // antes de escrever o GO, dava deadlock (pai espera o master, filho espera o
+    // GO). Por isso: 1.º userns, 2.º console+log_shim.
+
+    // User namespace: o pai mapeia os uid/gid e liberta o filho pelo pipe.
+    if let Some((r, w)) = sync {
+        // SAFETY: o pai fecha o read e usa o write para libertar o filho.
+        unsafe {
+            libc::close(r);
+        }
+        // Mapa de subuid (intervalo) por omissão em rootless quando há helpers
+        // `newuidmap`/`newgidmap` + /etc/subuid: além de permitir o USER≠0 da imagem,
+        // deixa os entrypoints que fazem `chown` para uids de serviço funcionarem —
+        // ex.: o nginx faz chown das caches para o uid 101; com mapa de um só uid isso
+        // dava `chown(...) failed (22: Invalid argument)` e o container saía. Sem os
+        // helpers, mantém o mapa de um só uid (comportamento histórico). Não afecta
+        // containers de ingress (herdam o userns do holder).
+        let want_range = run_uid.map(|u| u != 0).unwrap_or(false) || have_subid_helpers();
+        if let Err(e) = write_userns_maps(pid.as_raw(), want_range) {
+            unsafe {
+                libc::close(w);
+            }
+            let _ = kill(pid, Signal::SIGKILL);
+            return Err(e);
+        }
+        // SAFETY: escreve 1 byte (o "podes avançar") e fecha o write.
+        unsafe {
+            let go = [1u8; 1];
+            let _ = libc::write(w, go.as_ptr() as *const libc::c_void, 1);
+            libc::close(w);
+        }
+    }
+
     // Origem do log: em modo console é o MASTER do pty (recebido do init por
-    // SCM_RIGHTS); caso contrário a ponta de LEITURA do pipe de stdout/stderr.
+    // SCM_RIGHTS, JÁ depois do GO do userns acima); caso contrário a ponta de
+    // LEITURA do pipe de stdout/stderr.
     let log_src: Option<i32> = if let Some((csp, csc)) = console_sock {
         // SAFETY: o pai larga a ponta do filho e recebe o master do init.
         unsafe { libc::close(csc) };
@@ -2169,35 +2205,6 @@ fn spawn(store: &Store, container: &mut Container, rootfs: &str, spec: &RunSpec<
         unsafe { libc::close(src) };
         if let Some((_, logw)) = log_pipe {
             unsafe { libc::close(logw) };
-        }
-    }
-
-    // User namespace: o pai mapeia os uid/gid e liberta o filho pelo pipe.
-    if let Some((r, w)) = sync {
-        // SAFETY: o pai fecha o read e usa o write para libertar o filho.
-        unsafe {
-            libc::close(r);
-        }
-        // Mapa de subuid (intervalo) por omissão em rootless quando há helpers
-        // `newuidmap`/`newgidmap` + /etc/subuid: além de permitir o USER≠0 da imagem,
-        // deixa os entrypoints que fazem `chown` para uids de serviço funcionarem —
-        // ex.: o nginx faz chown das caches para o uid 101; com mapa de um só uid isso
-        // dava `chown(...) failed (22: Invalid argument)` e o container saía. Sem os
-        // helpers, mantém o mapa de um só uid (comportamento histórico). Não afecta
-        // containers de ingress (herdam o userns do holder).
-        let want_range = run_uid.map(|u| u != 0).unwrap_or(false) || have_subid_helpers();
-        if let Err(e) = write_userns_maps(pid.as_raw(), want_range) {
-            unsafe {
-                libc::close(w);
-            }
-            let _ = kill(pid, Signal::SIGKILL);
-            return Err(e);
-        }
-        // SAFETY: escreve 1 byte (o "podes avançar") e fecha o write.
-        unsafe {
-            let go = [1u8; 1];
-            let _ = libc::write(w, go.as_ptr() as *const libc::c_void, 1);
-            libc::close(w);
         }
     }
 
