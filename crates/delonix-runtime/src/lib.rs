@@ -1767,7 +1767,64 @@ pub fn slice_budget() -> (u64, u64, u64, f64, u64) {
     )
 }
 
+/// Cgroup v2 atual do processo (de `/proc/self/cgroup`, linha `0::`).
+fn current_cgroup_v2() -> Option<String> {
+    let s = std::fs::read_to_string("/proc/self/cgroup").ok()?;
+    let rel = s.lines().find_map(|l| l.strip_prefix("0::"))?.trim();
+    Some(format!("/sys/fs/cgroup{rel}"))
+}
+
+/// Delegação cgroup ROOTLESS para um container **privileged** (nodes Kind, que
+/// verificam que o controlador `cpu` está delegado). Usa o cgroup DELEGADO do
+/// próprio processo (sob `user@<uid>.service`, escrevível) como base, move o
+/// delonix e o container para leaves (regra no-internal-processes do cgroup v2) e
+/// ativa `+cpu +memory +pids` no `subtree_control` da base — passando os
+/// controladores ao cgroup do container. Best-effort: devolve `false` se a base
+/// não for delegada/limpa (ex.: scope partilhado sem `cpu`), caindo o caller no
+/// comportamento atual (sem regressão). Requer o engine num cgroup delegado
+/// (`systemd-run --user --scope -p Delegate=yes` ou serviço de utilizador).
+fn setup_cgroup_delegated(c: &Container, pid: i32) -> bool {
+    let base = match current_cgroup_v2() {
+        Some(b) => b,
+        None => return false,
+    };
+    if std::fs::metadata(format!("{base}/cgroup.subtree_control")).is_err() {
+        return false; // base não escrevível/delegada
+    }
+    let leaf = format!("{base}/dlx-{}", c.id);
+    let mgr = format!("{base}/dlx-mgr");
+    if std::fs::create_dir_all(&leaf).is_err() || std::fs::create_dir_all(&mgr).is_err() {
+        return false;
+    }
+    // 1) container → leaf;  2) o nosso processo → mgr (liberta a base de processos).
+    if std::fs::write(format!("{leaf}/cgroup.procs"), pid.to_string()).is_err() {
+        return false;
+    }
+    let _ = std::fs::write(format!("{mgr}/cgroup.procs"), std::process::id().to_string());
+    // 3) delega os controladores aos filhos da base (um a um; falha se a base
+    // ainda tiver processos diretos → scope partilhado → abortar p/ fallback).
+    let mut any = false;
+    for ctrl in ["+cpu", "+memory", "+pids"] {
+        if std::fs::write(format!("{base}/cgroup.subtree_control"), ctrl).is_ok() {
+            any = true;
+        }
+    }
+    if !any {
+        return false; // sem delegação (no-internal-processes ou sem permissão)
+    }
+    // limites best-effort no leaf (agora com os controladores disponíveis).
+    let _ = std::fs::write(format!("{leaf}/memory.max"), &c.memory_max);
+    let _ = std::fs::write(format!("{leaf}/pids.max"), DEFAULT_PIDS_MAX);
+    true
+}
+
 fn setup_cgroup(c: &Container, pid: i32) -> Result<()> {
+    // --privileged rootless: tenta a delegação cgroup (cpu/memory/pids) no cgroup
+    // delegado do utilizador — necessária p/ o systemd dos nodes Kind. Se conseguir,
+    // está feito; senão cai no caminho normal (best-effort).
+    if c.privileged && (is_rootless() || in_userns()) && setup_cgroup_delegated(c, pid) {
+        return Ok(());
+    }
     ensure_delonix_slice(); // a slice-pai com os limites agregados (robustez)
     let cgroup = c.cgroup();
     let cg = cgroup.as_str();
