@@ -97,6 +97,34 @@ fn default_subnet() -> String {
     format!("10.{}.0.0/16", default_base())
 }
 
+/// A1 — **default-deny de entrada** para a subnet de uma rede Delonix. Bloqueia
+/// ligações NOVAS encaminhadas PARA um container que não sejam:
+///   - tráfego de retorno (qualquer estado != `new` passa, ex.: `established`), ou
+///   - uma porta **publicada** (`ct status dnat`, i.e. já passou por DNAT no ingress).
+///
+/// Mantém a SAÍDA totalmente aberta (a regra casa só `ip daddr <subnet>`) e NÃO
+/// toca na política do hook `forward` — encaminhamento não-Delonix do host fica
+/// intacto (ao contrário de um `policy drop`, que afetaria Docker/k8s/libvirt no
+/// mesmo host). As duas regras são autossuficientes (o `dnat accept` precede o
+/// `new drop`), idempotentes, e funcionam em tabelas novas ou pré-existentes.
+///
+/// Desligável com `DELONIX_FORWARD_OPEN=1` (restaura o encaminhamento aberto
+/// histórico — acesso direto ao IP do container a partir de outras redes).
+fn forward_inbound_deny(subnet: &str) {
+    if std::env::var_os("DELONIX_FORWARD_OPEN").is_some() {
+        return;
+    }
+    let drop_needle = format!("ip daddr {subnet} ct state new drop");
+    if let Ok(out) = capture("nft", &["list", "chain", "ip", TABLE, "forward"]) {
+        if out.contains(&drop_needle) {
+            return; // já aplicado
+        }
+    }
+    // 1.º: deixa passar o tráfego de portas publicadas (DNAT); 2.º: nega o resto.
+    run_ok("nft", &["add", "rule", "ip", TABLE, "forward", "ip", "daddr", subnet, "ct", "status", "dnat", "accept"]);
+    run_ok("nft", &["add", "rule", "ip", TABLE, "forward", "ip", "daddr", subnet, "ct", "state", "new", "drop"]);
+}
+
 /// O gestor de rede do Delonix.
 pub struct Net;
 
@@ -960,6 +988,8 @@ impl Net {
             );
             apply_nft(&ruleset)?;
         }
+        // A1: default-deny de entrada na subnet por omissão (idempotente).
+        forward_inbound_deny(&subnet);
         Ok(())
     }
 
@@ -998,6 +1028,8 @@ impl Net {
                 run_ok("nft", &["add", "rule", "ip", TABLE, "postrouting", "ip", "saddr", &net.subnet, "oifname", "!=", &net.bridge, "masquerade"]);
             }
         }
+        // A1: default-deny de entrada também na subnet desta rede (idempotente).
+        forward_inbound_deny(&net.subnet);
         // Isolamento: bloqueia o forward entre esta bridge e qualquer OUTRA
         // bridge Delonix (containers de redes diferentes não se alcançam).
         for other in list_delonix_bridges() {
