@@ -6,6 +6,7 @@
 
 pub mod auth;
 pub mod build;
+pub mod buildpack;
 pub mod cas;
 pub mod detect;
 pub mod image;
@@ -14,6 +15,7 @@ pub mod overlay;
 pub mod registry;
 pub mod sign;
 
+pub use buildpack::CnbPlan;
 pub use cas::{sha256_hex, Cas};
 pub use detect::{detect, Detected};
 pub use image::{Image, ImageConfig, ImageStore};
