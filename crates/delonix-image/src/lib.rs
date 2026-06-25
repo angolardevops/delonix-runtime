@@ -10,6 +10,7 @@ pub mod buildpack;
 pub mod cas;
 pub mod detect;
 pub mod image;
+pub mod internal_registry;
 pub mod load;
 pub mod overlay;
 pub mod registry;
