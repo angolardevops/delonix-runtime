@@ -7,6 +7,7 @@
 pub mod auth;
 pub mod build;
 pub mod cas;
+pub mod detect;
 pub mod image;
 pub mod load;
 pub mod overlay;
@@ -14,6 +15,7 @@ pub mod registry;
 pub mod sign;
 
 pub use cas::{sha256_hex, Cas};
+pub use detect::{detect, Detected};
 pub use image::{Image, ImageConfig, ImageStore};
 pub use load::load_docker_archive;
 pub use registry::{build_manifest, http_get, pull_from_registry, push_to_registry};
