@@ -1294,6 +1294,7 @@ fn container_init(
     privileged: bool,
     console_sock: Option<(i32, i32)>,
     secret_files: &[(String, String)],
+    workdir: Option<&str>,
 ) -> isize {
     // User namespace: espera que o PAI escreva uid_map/gid_map antes de continuar
     // (até lá, somos `nobody` sem caps). O byte recebido é o "podes avançar".
@@ -1383,6 +1384,15 @@ fn container_init(
     }
     if let Some(c) = selinux {
         apply_selinux(c); // confinamento MAC (SELinux) — só em hosts SELinux
+    }
+    // CWD da imagem (OCI `WorkingDir`) — DEPOIS do pivot, ANTES do exec. Sem isto,
+    // entrypoints que operam no CWD (redis/postgres `chown -R .`) correm a partir de `/`
+    // e tocam `/sys` (RO). Se o dir não existir, cria-o (semântica Docker do WORKDIR).
+    if let Some(w) = workdir.filter(|w| !w.is_empty() && *w != "/") {
+        let _ = std::fs::create_dir_all(w);
+        if chdir(w).is_err() {
+            eprintln!("delonix: aviso — falha a entrar no WORKDIR {w}");
+        }
     }
     apply_env(hostname, env); // ambiente limpo + ENV da imagem/stack/CLI
     // `USER` da imagem (≠ root): troca para o uid/gid pedido ANTES do `execve`. Faz-se
@@ -2149,6 +2159,8 @@ fn spawn(store: &Store, container: &mut Container, rootfs: &str, spec: &RunSpec<
         } else {
             Vec::new()
         };
+    // CWD da imagem (OCI WorkingDir) — capturado p/ o filho fazer `chdir` antes do exec.
+    let workdir = container.workdir.clone();
     let mut stack = vec![0u8; 1024 * 1024];
     let cb = Box::new(move || {
         container_init(
@@ -2178,6 +2190,7 @@ fn spawn(store: &Store, container: &mut Container, rootfs: &str, spec: &RunSpec<
             privileged,
             console_sock,
             &secret_files,
+            workdir.as_deref(),
         )
     });
 
