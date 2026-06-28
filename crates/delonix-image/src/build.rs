@@ -289,6 +289,7 @@ impl ImageStore {
             df.security.clone()
         };
         let healthcheck = df.healthcheck.clone().or_else(|| base.config.healthcheck.clone());
+        let workdir = df.workdir.clone().unwrap_or_default();
         let config_json = serde_json::json!({
             // Campos standard do config de imagem OCI/Docker (interop).
             "architecture": oci_arch(),
@@ -305,7 +306,7 @@ impl ImageStore {
             id,
             repo_tags,
             layers,
-            config: ImageConfig { cmd, entrypoint, env, cpus, memory, security, healthcheck, user: String::new() },
+            config: ImageConfig { cmd, entrypoint, env, cpus, memory, security, healthcheck, user: String::new(), working_dir: workdir.clone() },
             created_unix: created,
         };
         self.enforce_tag_uniqueness(&img)?;
@@ -347,7 +348,7 @@ impl ImageStore {
             id,
             repo_tags,
             layers: vec![layer],
-            config: ImageConfig { cmd, entrypoint: Vec::new(), env, cpus: None, memory: None, security: Vec::new(), healthcheck: None, user: String::new() },
+            config: ImageConfig { cmd, entrypoint: Vec::new(), env, cpus: None, memory: None, security: Vec::new(), healthcheck: None, user: String::new(), working_dir: String::new() },
             created_unix: created,
         };
         self.enforce_tag_uniqueness(&img)?;
@@ -376,6 +377,7 @@ impl ImageStore {
         let memory = base.config.memory.clone();
         let security = base.config.security.clone();
         let healthcheck = base.config.healthcheck.clone();
+        let workdir = base.config.working_dir.clone();
         let created = now_unix();
         let config_json = serde_json::json!({
             "architecture": oci_arch(),
@@ -390,7 +392,7 @@ impl ImageStore {
             id,
             repo_tags,
             layers,
-            config: ImageConfig { cmd, entrypoint, env, cpus, memory, security, healthcheck, user: String::new() },
+            config: ImageConfig { cmd, entrypoint, env, cpus, memory, security, healthcheck, user: String::new(), working_dir: workdir.clone() },
             created_unix: created,
         };
         self.enforce_tag_uniqueness(&img)?;
