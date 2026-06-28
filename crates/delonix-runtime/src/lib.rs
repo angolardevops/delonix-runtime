@@ -1147,6 +1147,43 @@ fn apply_tmpfs(specs: &[String]) {
     }
 }
 
+/// Monta um **tmpfs** em `/run/secrets` e escreve lá os pares chave→valor (0600),
+/// para `--secret-files`. Corre DENTRO do namespace do container (pós-`pivot_root`,
+/// ainda com caps): os valores ficam só em RAM (tmpfs) — nunca tocam o fs do host
+/// nem o do container, nem o ambiente. O mount fica read-only para o container.
+fn write_secret_files(pairs: &[(String, String)]) {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = "/run/secrets";
+    if std::fs::create_dir_all(dir).is_err() {
+        return;
+    }
+    let _ = mount(
+        Some("tmpfs"),
+        dir,
+        Some("tmpfs"),
+        MsFlags::MS_NOSUID | MsFlags::MS_NODEV,
+        Some("mode=0700"),
+    );
+    for (k, v) in pairs {
+        // só nomes de ficheiro seguros (são chaves de env válidas, mas defensivo).
+        if k.is_empty() || k.contains('/') {
+            continue;
+        }
+        let p = format!("{dir}/{k}");
+        if std::fs::write(&p, v).is_ok() {
+            let _ = std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o600));
+        }
+    }
+    // torna o tmpfs só-leitura para o container (os valores já lá estão).
+    let _ = mount(
+        None::<&str>,
+        dir,
+        None::<&str>,
+        MsFlags::MS_REMOUNT | MsFlags::MS_RDONLY | MsFlags::MS_NOSUID | MsFlags::MS_NODEV,
+        None::<&str>,
+    );
+}
+
 /// Escreve os `sysctl`s namespaced (`--sysctl net.x=y`) em `/proc/sys/...` do
 /// container (depois de `/proc` estar montado). Só os que o namespace permite.
 fn apply_sysctls(specs: &[String]) {
@@ -1256,6 +1293,7 @@ fn container_init(
     run_gid: Option<u32>,
     privileged: bool,
     console_sock: Option<(i32, i32)>,
+    secret_files: &[(String, String)],
 ) -> isize {
     // User namespace: espera que o PAI escreva uid_map/gid_map antes de continuar
     // (até lá, somos `nobody` sem caps). O byte recebido é o "podes avançar".
@@ -1322,6 +1360,9 @@ fn container_init(
         setup_console(cs);
     }
     apply_tmpfs(tmpfs); // --tmpfs (depois do pivot, ainda com caps)
+    if !secret_files.is_empty() {
+        write_secret_files(secret_files); // --secret-files: tmpfs in-namespace (ainda com caps)
+    }
     // `--read-only`: remonta o rootfs (`/`) só-leitura. Volumes/dev/proc são
     // mounts separados e mantêm-se escrevíveis; o resto fica imutável.
     if read_only {
@@ -2086,6 +2127,28 @@ fn spawn(store: &Store, container: &mut Container, rootfs: &str, spec: &RunSpec<
     let inherit_userns = spec.inherit_userns;
     let run_uid = spec.run_uid;
     let run_gid = spec.run_gid;
+    // --secret-files: lê+decifra os valores AGORA (no host, antes do pivot do filho)
+    // para os escrever num tmpfs in-namespace. Só nomes/raiz tocam fora da memória;
+    // os valores são capturados (move) no closure do clone = memória do filho.
+    let secret_files: Vec<(String, String)> =
+        if container.secret_files && !container.secrets.is_empty() {
+            match delonix_core::SecretStore::open(store.base()) {
+                Ok(ss) => {
+                    let mut map = std::collections::BTreeMap::new();
+                    for n in &container.secrets {
+                        if let Ok(s) = ss.load(n) {
+                            for (k, v) in s.data {
+                                map.insert(k, v);
+                            }
+                        }
+                    }
+                    map.into_iter().collect()
+                }
+                Err(_) => Vec::new(),
+            }
+        } else {
+            Vec::new()
+        };
     let mut stack = vec![0u8; 1024 * 1024];
     let cb = Box::new(move || {
         container_init(
@@ -2114,6 +2177,7 @@ fn spawn(store: &Store, container: &mut Container, rootfs: &str, spec: &RunSpec<
             run_gid,
             privileged,
             console_sock,
+            &secret_files,
         )
     });
 
