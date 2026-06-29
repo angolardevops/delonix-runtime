@@ -74,6 +74,17 @@ fn wait_to_code(status: WaitStatus) -> i32 {
     }
 }
 
+/// Converte o `WaitStatus` no [`Status`] terminal correto: saída 0 → Stopped,
+/// saída ≠ 0 → Failed, morto por sinal → Crashed.
+fn wait_to_status(status: WaitStatus) -> Status {
+    match status {
+        WaitStatus::Exited(_, 0) => Status::Stopped,
+        WaitStatus::Exited(_, code) => Status::Failed(code),
+        WaitStatus::Signaled(..) => Status::Crashed,
+        _ => Status::Crashed,
+    }
+}
+
 // ----------------------------------------------------------------------------
 // Criar e correr um container
 // ----------------------------------------------------------------------------
@@ -2305,7 +2316,7 @@ fn spawn(store: &Store, container: &mut Container, rootfs: &str, spec: &RunSpec<
     }
 
     let status = waitpid(pid, None).map_err(syserr("waitpid"))?;
-    container.status = Status::Exited(wait_to_code(status));
+    container.status = wait_to_status(status);
     container.pid = None;
     store.save(container)?;
     remove_cgroup(&container.cgroup());
@@ -2999,7 +3010,7 @@ pub fn stop(store: &Store, container: &mut Container, timeout_secs: u64) -> Resu
     // Protecção contra reutilização de PID: se o PID já não é o nosso processo
     // (kernel reciclou-o), NÃO enviamos sinais — só limpamos o estado.
     if !safe_to_signal(pid, st) {
-        container.status = Status::Exited(0);
+        container.status = Status::Stopped;
         container.pid = None;
         store.save(container)?;
         remove_cgroup(&container.cgroup());
@@ -3013,14 +3024,12 @@ pub fn stop(store: &Store, container: &mut Container, timeout_secs: u64) -> Resu
         std::thread::sleep(Duration::from_millis(100));
         waited += 1;
     }
-    let code = if safe_to_signal(pid, st) {
+    if safe_to_signal(pid, st) {
         let _ = kill(target, Signal::SIGKILL);
-        137
-    } else {
-        0
-    };
-
-    container.status = Status::Exited(code);
+    }
+    // Paragem INTENCIONAL (pelo utilizador) → sempre Stopped, mesmo que tenha sido
+    // preciso SIGKILL (não é um crash: foi um stop pedido).
+    container.status = Status::Stopped;
     container.pid = None;
     store.save(container)?;
     remove_cgroup(&container.cgroup());
@@ -3060,6 +3069,45 @@ pub fn is_frozen(container: &Container) -> bool {
     std::fs::read_to_string(format!("{}/cgroup.freeze", container.cgroup()))
         .map(|s| s.trim() == "1")
         .unwrap_or(false)
+}
+
+/// Reconcilia o `status` de um container contra a realidade do kernel (sem o
+/// gravar — o chamador grava se devolver `true`). Centraliza a lógica dos 6
+/// estados nas listagens (`ps`, API, Console):
+///   * Running + pid morto  → **Crashed** (morte inesperada; um stop limpo já teria
+///     posto Stopped). pid = None.
+///   * Running + congelado   → **Paused** (freezer do cgroup ativo).
+///   * Paused + descongelado → **Running** (retomado externamente).
+///   * Paused + pid morto    → **Crashed**.
+/// Estados terminais (Stopped/Failed/Crashed) e Created não são tocados.
+pub fn reconcile_status(c: &mut Container) -> bool {
+    match c.status {
+        Status::Running => match c.pid {
+            Some(pid) if !is_alive(pid) => {
+                c.status = Status::Crashed;
+                c.pid = None;
+                true
+            }
+            Some(_) if is_frozen(c) => {
+                c.status = Status::Paused;
+                true
+            }
+            _ => false,
+        },
+        Status::Paused => match c.pid {
+            Some(pid) if !is_alive(pid) => {
+                c.status = Status::Crashed;
+                c.pid = None;
+                true
+            }
+            Some(_) if !is_frozen(c) => {
+                c.status = Status::Running;
+                true
+            }
+            _ => false,
+        },
+        _ => false,
+    }
 }
 
 /// Reescreve, AO VIVO, os limites de cgroup de um container (`docker update`).
