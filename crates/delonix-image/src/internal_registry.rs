@@ -34,7 +34,11 @@ pub fn run_args(port: u16) -> Vec<String> {
         "--name".into(),
         NAME.into(),
         "-p".into(),
-        format!("127.0.0.1:{port}:5000"),
+        // O publish do engine é loopback-only POR OMISSÃO (DNAT só na chain `output`,
+        // 127.0.0.0/8); exposição externa exige DELONIX_PUBLISH_ADDR. Por isso `port:5000`
+        // já fica restrito ao loopback — sem precisar do prefixo `127.0.0.1:` (Docker-style,
+        // ainda não suportado pelo parser de `-p`).
+        format!("{port}:5000"),
         "-v".into(),
         format!("{DATA_VOLUME}:/var/lib/registry"),
         IMAGE.into(),
@@ -57,7 +61,7 @@ mod tests {
         assert_eq!(a[0], "run");
         assert!(a.contains(&"-d".to_string()));
         assert!(a.windows(2).any(|w| w == ["--name", NAME]));
-        assert!(a.contains(&"127.0.0.1:5000:5000".to_string())); // só loopback
+        assert!(a.contains(&"5000:5000".to_string())); // loopback-only é o default do publish
         assert!(a.contains(&format!("{DATA_VOLUME}:/var/lib/registry"))); // persistente
         assert_eq!(a.last().unwrap(), IMAGE);
     }
