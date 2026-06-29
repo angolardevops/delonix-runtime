@@ -116,8 +116,15 @@ pub fn ingress_table_ruleset() -> String {
     // DEFAULT-DENY no forward (Grupo B). Os DROPS dinâmicos (anti-spoof, isolamento,
     // egress, egress-net, l4guard, fw por-container) vivem na chain `fwdeny`
     // (prioridade -10, corre ANTES) — assim um `drop`/`accept` específico ganha
-    // sempre ao default. O `forward` (prioridade 0) só permite returns + egress +
-    // inbound; o resto cai no `policy drop`.
+    // sempre ao default. O `forward` (prioridade 0) permite returns + egress +
+    // inbound + **mesma rede** (intra-bridge `delonix0`); o resto cai no `policy drop`.
+    //
+    // INTRA-REDE: com `br_netfilter` (bridge-nf-call-iptables=1) o tráfego entre
+    // containers da MESMA bridge atravessa o forward e cairia no drop → apps não
+    // alcançariam os seus serviços/addons na mesma rede. Aceitamos `delonix0↔delonix0`
+    // (modelo Docker user-network/k8s: mesma rede comunica; cruzar redes é dropado pelo
+    // `fwdeny` inter-bridge). A micro-segmentação intra-rede faz-se com `kind:NetworkPolicy`
+    // (P12), cujas regras entram no `fwdeny` (correm antes, pré-emptem este accept).
     // Rollback instantâneo: DELONIX_FORWARD_POLICY=accept → volta ao default-allow.
     let policy = if std::env::var("DELONIX_FORWARD_POLICY").ok().as_deref() == Some("accept") {
         ""
@@ -134,6 +141,7 @@ pub fn ingress_table_ruleset() -> String {
          \x20\x20 ct state invalid drop\n\
          \x20\x20 oifname \"tap0\" accept\n\
          \x20\x20 iifname \"tap0\" accept\n\
+         \x20\x20 iifname \"delonix0\" oifname \"delonix0\" accept\n\
          \x20 }}\n\
          }}\n"
     )
