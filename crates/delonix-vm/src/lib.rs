@@ -766,7 +766,9 @@ pub fn status(base: &Path, name: &str) -> Result<Vm> {
         vm.status = Status::Running;
         vm.ip = backend.ip(&vm).or(vm.ip);
     } else {
-        vm.status = Status::Exited(0);
+        // Uma VM desligada = Stopped (o guest pode ter feito shutdown limpo; ao
+        // contrário dos containers, a VM é autónoma — não se assume crash).
+        vm.status = Status::Stopped;
         vm.pid = None;
     }
     Ok(vm)
