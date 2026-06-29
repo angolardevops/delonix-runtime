@@ -322,6 +322,7 @@ impl ImageStore {
         rootfs: &std::path::Path,
         cmd: Vec<String>,
         env: Vec<String>,
+        workdir: String,
         tag: &str,
     ) -> Result<Image> {
         let mut buf = Vec::new();
@@ -338,7 +339,7 @@ impl ImageStore {
         let config_json = serde_json::json!({
             "architecture": oci_arch(),
             "os": "linux",
-            "config": { "Cmd": cmd, "Env": env },
+            "config": { "Cmd": cmd, "Env": env, "WorkingDir": workdir },
             "rootfs": { "type": "layers", "diff_ids": diff_ids },
             "created_unix": created,
         });
@@ -348,7 +349,7 @@ impl ImageStore {
             id,
             repo_tags,
             layers: vec![layer],
-            config: ImageConfig { cmd, entrypoint: Vec::new(), env, cpus: None, memory: None, security: Vec::new(), healthcheck: None, user: String::new(), working_dir: String::new() },
+            config: ImageConfig { cmd, entrypoint: Vec::new(), env, cpus: None, memory: None, security: Vec::new(), healthcheck: None, user: String::new(), working_dir: workdir },
             created_unix: created,
         };
         self.enforce_tag_uniqueness(&img)?;
