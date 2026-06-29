@@ -63,6 +63,16 @@ pub struct VmConfig {
     /// Backend de virtualização: `Some("cloud-hypervisor")`, `Some("libvirt")` ou
     /// `None` (auto-deteção). Default histórico = cloud-hypervisor.
     pub backend: Option<String>,
+    /// Modo de rede do backend **libvirt** (o Cloud Hypervisor usa sempre o `tap` do
+    /// ingress). Abstrai o `<interface>` do domínio — o utilizador NUNCA escreve XML:
+    ///   * `None`/`"user"` — rede user-mode (SLIRP/passt): egress, sem IP de entrada.
+    ///   * `"nat"`         — rede NAT gerida pelo libvirt (`<source network=…>`, DHCP +
+    ///                       IP via `virsh domifaddr`). Requer `qemu:///system` (root).
+    ///   * `"bridge"`      — liga a uma bridge do host (`bridge` abaixo).
+    pub net_mode: Option<String>,
+    /// Nome da bridge do host (modo `net_mode = "bridge"`) ou da rede libvirt (modo
+    /// `"nat"`; default `"default"`).
+    pub bridge: Option<String>,
 }
 
 // ===========================================================================
@@ -515,11 +525,8 @@ pub fn libvirt_domain_xml(cfg: &VmConfig, overlay: &str, mac: &str) -> String {
         s.push_str("      <target dev='sda' bus='sata'/>\n");
         s.push_str("      <readonly/>\n    </disk>\n");
     }
-    // rede user-mode (SLIRP/passt): egress sem tap — rootless-friendly. A
-    // integração com a bridge do ingress (inbound pelo SDN) é um follow-up.
-    s.push_str("    <interface type='user'>\n");
-    s.push_str(&format!("      <mac address='{}'/>\n", xml_escape(mac)));
-    s.push_str("      <model type='virtio'/>\n    </interface>\n");
+    // rede: abstraída pelo YAML (net_mode) → `<interface>` virtio. Sem XML à mão.
+    s.push_str(&libvirt_interface_xml(cfg, mac));
     // consola série (logs de boot).
     s.push_str("    <serial type='pty'><target type='isa-serial' port='0'/></serial>\n");
     s.push_str("    <console type='pty'><target type='serial' port='0'/></console>\n");
@@ -536,6 +543,36 @@ pub fn libvirt_domain_xml(cfg: &VmConfig, overlay: &str, mac: &str) -> String {
     s.push_str("  </devices>\n");
     s.push_str("</domain>\n");
     s
+}
+
+/// Gera o `<interface>` do domínio libvirt a partir do `net_mode` do YAML — assim a
+/// rede fica 100% abstraída (sem XML à mão). **Função pura** — testada sem daemon.
+fn libvirt_interface_xml(cfg: &VmConfig, mac: &str) -> String {
+    let mac = xml_escape(mac);
+    let model = "      <model type='virtio'/>\n    </interface>\n";
+    match cfg.net_mode.as_deref().unwrap_or("user") {
+        "nat" | "network" => {
+            // rede NAT gerida pelo libvirt (DHCP + IP via domifaddr). `bridge` = nome
+            // da rede libvirt (default "default").
+            let net = cfg.bridge.as_deref().unwrap_or("default");
+            format!(
+                "    <interface type='network'>\n      <source network='{}'/>\n      <mac address='{mac}'/>\n{model}",
+                xml_escape(net)
+            )
+        }
+        "bridge" => {
+            // liga a uma bridge do host pré-existente.
+            let br = cfg.bridge.as_deref().unwrap_or("virbr0");
+            format!(
+                "    <interface type='bridge'>\n      <source bridge='{}'/>\n      <mac address='{mac}'/>\n{model}",
+                xml_escape(br)
+            )
+        }
+        _ => {
+            // user-mode (SLIRP/passt): egress sem tap — rootless-friendly (default).
+            format!("    <interface type='user'>\n      <mac address='{mac}'/>\n{model}")
+        }
+    }
 }
 
 /// Escapa os 5 caracteres especiais de XML.
@@ -583,6 +620,11 @@ impl VmBackend for LibvirtBackend {
         let overlay_abs = std::fs::canonicalize(overlay)
             .map(|p| p.to_string_lossy().into_owned())
             .unwrap_or_else(|_| overlay.to_string());
+        // Modo NAT: garante a rede libvirt ativa (best-effort; ignora se já o está).
+        if matches!(cfg.net_mode.as_deref(), Some("nat") | Some("network")) {
+            let net = cfg.bridge.as_deref().unwrap_or("default");
+            let _ = Command::new("virsh").args(["-c", uri, "net-start", net]).status();
+        }
         let xml = libvirt_domain_xml(cfg, &overlay_abs, &mac);
         let xml_path = vmdir.join(format!("{}.xml", cfg.name));
         std::fs::write(&xml_path, &xml)?;
@@ -814,6 +856,8 @@ mod tests {
             cpu_affinity: None,
             devices: vec![],
             backend: None,
+            net_mode: None,
+            bridge: None,
         }
     }
 
@@ -883,6 +927,24 @@ mod tests {
         assert!(xml.contains("<interface type='user'>"));
         assert!(xml.contains("52:54:00:ab:cd:ef"));
         assert!(xml.contains("host-passthrough"));
+    }
+
+    #[test]
+    fn libvirt_interface_modes_from_yaml() {
+        let mut c = hpc_cfg();
+        // default = user-mode (egress, rootless).
+        assert!(libvirt_interface_xml(&c, "52:54:00:00:00:01").contains("type='user'"));
+        // nat → rede libvirt (default "default") com IP via domifaddr.
+        c.net_mode = Some("nat".into());
+        let nat = libvirt_interface_xml(&c, "52:54:00:00:00:01");
+        assert!(nat.contains("type='network'") && nat.contains("source network='default'"));
+        c.bridge = Some("dlxnat".into());
+        assert!(libvirt_interface_xml(&c, "52:54:00:00:00:01").contains("source network='dlxnat'"));
+        // bridge → bridge do host.
+        c.net_mode = Some("bridge".into());
+        c.bridge = Some("br0".into());
+        let br = libvirt_interface_xml(&c, "52:54:00:00:00:01");
+        assert!(br.contains("type='bridge'") && br.contains("source bridge='br0'"));
     }
 
     #[test]
