@@ -2512,13 +2512,13 @@ pub fn exec(container: &Container, argv: &[String], tty: bool) -> Result<i32> {
         .filter(|p| safe_to_signal(*p, container.pid_starttime))
         .ok_or_else(|| Error::NotRunning(container.short_id().to_string()))?;
 
-    // Com user namespace, junta-o PRIMEIRO (para o processo ficar mapeado e ganhar
-    // caps nesse ns); depois UTS, NET, PID e MNT (mnt por último).
-    let ns_list: &[&str] = if container.userns {
-        &["user", "uts", "net", "pid", "mnt"]
-    } else {
-        &["uts", "net", "pid", "mnt"]
-    };
+    // Junta o user namespace PRIMEIRO (para ganhar caps nesse ns e poder juntar os
+    // restantes); depois UTS, NET, PID e MNT (mnt por último). Inclui-se SEMPRE o
+    // `user`: a lógica de skip-por-inode abaixo remove-o se já o partilhamos (container
+    // host). Crucial para os containers do INGRESS rootless, que **herdam** o user ns
+    // do holder (não criam o seu) e por isso tinham `container.userns=false` — sem o
+    // setns(user) o setns(uts) dava EPERM (o UTS pertence a esse user ns).
+    let ns_list: &[&str] = &["user", "uts", "net", "pid", "mnt"];
     // Abre os fds no PAI (resolvem-se no contexto do host); herdam-se pela fork.
     // Salta os namespaces que JÁ partilhamos (mesmo inode) — ex.: um container
     // com user ns mas sem rede partilha o `net` do host, e juntá-lo depois de
@@ -2538,6 +2538,10 @@ pub fn exec(container: &Container, argv: &[String], tty: bool) -> Result<i32> {
             .map_err(syserr("open ns"))?;
         fds.push((ns, fd));
     }
+    // Entrámos mesmo num user ns? (i.e., não o partilhávamos já). Se sim, tornamo-nos
+    // uid 0 dentro dele depois dos setns — quer o container o tenha CRIADO (`userns`)
+    // quer o tenha HERDADO do holder do ingress.
+    let joined_userns = fds.iter().any(|(n, _)| *n == "user");
 
     let cargv: Vec<CString> = argv
         .iter()
@@ -2571,10 +2575,10 @@ pub fn exec(container: &Container, argv: &[String], tty: bool) -> Result<i32> {
                     unsafe { libc::_exit(125) };
                 }
             }
-            // Com user namespace, juntámo-lo como nobody (com caps); tornamo-nos
-            // uid 0 DENTRO (igual ao init do container).
+            // Se juntámos um user ns (criado OU herdado), tornamo-nos uid 0 DENTRO
+            // (igual ao init do container).
             // SAFETY: após setns(user) temos CAP_SETUID no user ns do container.
-            if container.userns {
+            if joined_userns {
                 unsafe {
                     libc::setgid(0);
                     libc::setuid(0);
