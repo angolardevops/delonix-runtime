@@ -155,18 +155,24 @@ fn apply_seccomp(unconfined: bool, detect: bool) {
     // Devolvendo ENOSYS forçamos o glibc a cair no `clone` (que É filtrado).
     // ENOSYS (ERRNO) tem precedência sobre o Allow do filtro principal, por isso
     // ganha mesmo com clone3 ainda na allowlist (necessário p/ threads via clone).
+    //
+    // Instala-se SEMPRE, **inclusive em `detect`**: o modo `detect` afina o *log*
+    // dos syscalls negados (FLAG_LOG no filtro principal), NÃO afrouxa o
+    // confinamento. Se este pré-filtro só corresse com `!detect`, um container com
+    // `--security-opt seccomp=detect` poderia `clone3(CLONE_NEWUSER)` e escapar
+    // por userns aninhado — exactamente o buraco que o resto do filtro fecha. A
+    // tentativa de userns que daí resulta cai no `clone` filtrado (logado no
+    // filtro principal), por isso não se perde detecção.
     let mut pre: BTreeMap<i64, Vec<SeccompRule>> = BTreeMap::new();
     pre.insert(libc::SYS_clone3, vec![]);
-    if !detect {
-        if let Ok(pf) = SeccompFilter::new(
-            pre,
-            SeccompAction::Allow,                      // não-casado: deixa passar
-            SeccompAction::Errno(libc::ENOSYS as u32), // clone3 → ENOSYS
-            arch,
-        ) {
-            if let Ok(pp) = TryInto::<seccompiler::BpfProgram>::try_into(pf) {
-                let _ = apply_filter(&pp);
-            }
+    if let Ok(pf) = SeccompFilter::new(
+        pre,
+        SeccompAction::Allow,                      // não-casado: deixa passar
+        SeccompAction::Errno(libc::ENOSYS as u32), // clone3 → ENOSYS
+        arch,
+    ) {
+        if let Ok(pp) = TryInto::<seccompiler::BpfProgram>::try_into(pf) {
+            let _ = apply_filter(&pp);
         }
     }
 
@@ -3169,9 +3175,13 @@ pub fn is_frozen(container: &Container) -> bool {
 ///   * Paused + pid morto    → **Crashed**.
 /// Estados terminais (Stopped/Failed/Crashed) e Created não são tocados.
 pub fn reconcile_status(c: &mut Container) -> bool {
+    // `safe_to_signal` (não `is_alive` cru) para fechar a janela de reutilização
+    // de PID: se o init morreu e o kernel reciclou o PID para um processo alheio
+    // do host, `is_alive` daria `true` e o container ficaria preso em Running a
+    // apontar para um PID que não é o seu. O `starttime` registado desempata.
     match c.status {
         Status::Running => match c.pid {
-            Some(pid) if !is_alive(pid) => {
+            Some(pid) if !safe_to_signal(pid, c.pid_starttime) => {
                 c.status = Status::Crashed;
                 c.pid = None;
                 true
@@ -3183,7 +3193,7 @@ pub fn reconcile_status(c: &mut Container) -> bool {
             _ => false,
         },
         Status::Paused => match c.pid {
-            Some(pid) if !is_alive(pid) => {
+            Some(pid) if !safe_to_signal(pid, c.pid_starttime) => {
                 c.status = Status::Crashed;
                 c.pid = None;
                 true
