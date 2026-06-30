@@ -74,6 +74,17 @@ fn wait_to_code(status: WaitStatus) -> i32 {
     }
 }
 
+/// Converte o `WaitStatus` no [`Status`] terminal correto: saída 0 → Stopped,
+/// saída ≠ 0 → Failed, morto por sinal → Crashed.
+fn wait_to_status(status: WaitStatus) -> Status {
+    match status {
+        WaitStatus::Exited(_, 0) => Status::Stopped,
+        WaitStatus::Exited(_, code) => Status::Failed(code),
+        WaitStatus::Signaled(..) => Status::Crashed,
+        _ => Status::Crashed,
+    }
+}
+
 // ----------------------------------------------------------------------------
 // Criar e correr um container
 // ----------------------------------------------------------------------------
@@ -426,6 +437,69 @@ fn drop_capabilities(keep: u64) {
     unsafe {
         libc::syscall(libc::SYS_capset, &hdr as *const _, data.as_ptr());
     }
+}
+
+/// Decide se o confinamento ficou MESMO em vigor, a partir dos campos lidos de
+/// `/proc/self/status`. Lógica pura (testável): exige `NO_NEW_PRIVS`, seccomp em
+/// modo filtro (2) quando esperado, e NENHUMA capability fora de `cap_keep` no
+/// bounding set nem no effective. `CapBnd`/`CapEff` ausentes = não-verificável =
+/// erro (fail-closed).
+fn confinement_ok(
+    no_new_privs: Option<u32>,
+    seccomp_mode: Option<u32>,
+    cap_bnd: Option<u64>,
+    cap_eff: Option<u64>,
+    seccomp_expected: bool,
+    cap_keep: u64,
+) -> std::result::Result<(), String> {
+    if no_new_privs != Some(1) {
+        return Err(format!("NO_NEW_PRIVS inativo ({no_new_privs:?})"));
+    }
+    // 2 = SECCOMP_MODE_FILTER. (`detect` também aplica um filtro → modo 2.)
+    if seccomp_expected && seccomp_mode != Some(2) {
+        return Err(format!("seccomp não está em modo filtro (Seccomp={seccomp_mode:?})"));
+    }
+    let bnd = cap_bnd.ok_or_else(|| "CapBnd ausente em /proc/self/status".to_string())?;
+    let eff = cap_eff.ok_or_else(|| "CapEff ausente em /proc/self/status".to_string())?;
+    let extra_bnd = bnd & !cap_keep;
+    let extra_eff = eff & !cap_keep;
+    if extra_bnd != 0 || extra_eff != 0 {
+        return Err(format!(
+            "capabilities fora da allowlist persistem (bnd_extra={extra_bnd:#x} eff_extra={extra_eff:#x})"
+        ));
+    }
+    Ok(())
+}
+
+/// FAIL-CLOSED: lê `/proc/self/status` e confirma que `no_new_privs`, o seccomp e o
+/// drop de caps ficaram MESMO em vigor antes do `execve`. Cada um destes controlos
+/// pode falhar em silêncio (capset/prctl/seccomp são, em parte, best-effort); um
+/// controlo de segurança que falha ABERTO é pior que nenhum, porque dá falsa
+/// confiança. Se a verificação falhar, o `container_init`/`exec` aborta. Opt-out
+/// explícito do OPERADOR (não do container, cujo env ainda não foi aplicado):
+/// `DELONIX_INSECURE_BESTEFFORT=1`.
+fn verify_confinement(seccomp_expected: bool, cap_keep: u64) -> std::result::Result<(), String> {
+    let status = std::fs::read_to_string("/proc/self/status")
+        .map_err(|e| format!("/proc/self/status ilegível: {e}"))?;
+    let (mut nnp, mut sec, mut bnd, mut eff) = (None, None, None, None);
+    for line in status.lines() {
+        if let Some(v) = line.strip_prefix("NoNewPrivs:") {
+            nnp = v.trim().parse::<u32>().ok();
+        } else if let Some(v) = line.strip_prefix("Seccomp:") {
+            sec = v.trim().parse::<u32>().ok();
+        } else if let Some(v) = line.strip_prefix("CapBnd:") {
+            bnd = u64::from_str_radix(v.trim(), 16).ok();
+        } else if let Some(v) = line.strip_prefix("CapEff:") {
+            eff = u64::from_str_radix(v.trim(), 16).ok();
+        }
+    }
+    confinement_ok(nnp, sec, bnd, eff, seccomp_expected, cap_keep)
+}
+
+/// O operador desligou as verificações fail-closed? (variável do ENGINE, lida antes
+/// de `apply_env` limpar o ambiente — um container não a pode forjar.)
+fn insecure_besteffort() -> bool {
+    std::env::var_os("DELONIX_INSECURE_BESTEFFORT").is_some()
 }
 
 /// Desliga o stdio do terminal em modo detached. `stdin` vai sempre para
@@ -1147,6 +1221,43 @@ fn apply_tmpfs(specs: &[String]) {
     }
 }
 
+/// Monta um **tmpfs** em `/run/secrets` e escreve lá os pares chave→valor (0600),
+/// para `--secret-files`. Corre DENTRO do namespace do container (pós-`pivot_root`,
+/// ainda com caps): os valores ficam só em RAM (tmpfs) — nunca tocam o fs do host
+/// nem o do container, nem o ambiente. O mount fica read-only para o container.
+fn write_secret_files(pairs: &[(String, String)]) {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = "/run/secrets";
+    if std::fs::create_dir_all(dir).is_err() {
+        return;
+    }
+    let _ = mount(
+        Some("tmpfs"),
+        dir,
+        Some("tmpfs"),
+        MsFlags::MS_NOSUID | MsFlags::MS_NODEV,
+        Some("mode=0700"),
+    );
+    for (k, v) in pairs {
+        // só nomes de ficheiro seguros (são chaves de env válidas, mas defensivo).
+        if k.is_empty() || k.contains('/') {
+            continue;
+        }
+        let p = format!("{dir}/{k}");
+        if std::fs::write(&p, v).is_ok() {
+            let _ = std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o600));
+        }
+    }
+    // torna o tmpfs só-leitura para o container (os valores já lá estão).
+    let _ = mount(
+        None::<&str>,
+        dir,
+        None::<&str>,
+        MsFlags::MS_REMOUNT | MsFlags::MS_RDONLY | MsFlags::MS_NOSUID | MsFlags::MS_NODEV,
+        None::<&str>,
+    );
+}
+
 /// Escreve os `sysctl`s namespaced (`--sysctl net.x=y`) em `/proc/sys/...` do
 /// container (depois de `/proc` estar montado). Só os que o namespace permite.
 fn apply_sysctls(specs: &[String]) {
@@ -1256,6 +1367,8 @@ fn container_init(
     run_gid: Option<u32>,
     privileged: bool,
     console_sock: Option<(i32, i32)>,
+    secret_files: &[(String, String)],
+    workdir: Option<&str>,
 ) -> isize {
     // User namespace: espera que o PAI escreva uid_map/gid_map antes de continuar
     // (até lá, somos `nobody` sem caps). O byte recebido é o "podes avançar".
@@ -1322,6 +1435,9 @@ fn container_init(
         setup_console(cs);
     }
     apply_tmpfs(tmpfs); // --tmpfs (depois do pivot, ainda com caps)
+    if !secret_files.is_empty() {
+        write_secret_files(secret_files); // --secret-files: tmpfs in-namespace (ainda com caps)
+    }
     // `--read-only`: remonta o rootfs (`/`) só-leitura. Volumes/dev/proc são
     // mounts separados e mantêm-se escrevíveis; o resto fica imutável.
     if read_only {
@@ -1337,11 +1453,29 @@ fn container_init(
     set_no_new_privs(); // nenhum execve ganha privilégios (anti-escalada) — sempre
     drop_capabilities(cap_keep); // largar caps (depois das montagens, antes do exec)
     apply_seccomp(seccomp_unconfined, seccomp_detect); // allowlist (default-deny)
+    // FAIL-CLOSED: confirma que o confinamento ficou MESMO em vigor antes do execve.
+    // Corre ANTES do `setuid` do USER (mais abaixo) e ANTES do `apply_env` (logo lê o
+    // opt-out do ENGINE, não do container). Ver `verify_confinement`.
+    if !insecure_besteffort() {
+        if let Err(e) = verify_confinement(!seccomp_unconfined, cap_keep) {
+            eprintln!("delonix: confinamento NÃO verificado ({e}); a abortar o container");
+            return 126;
+        }
+    }
     if let Some(p) = apparmor {
         apply_apparmor(p); // confinamento MAC (AppArmor) — transita no execve
     }
     if let Some(c) = selinux {
         apply_selinux(c); // confinamento MAC (SELinux) — só em hosts SELinux
+    }
+    // CWD da imagem (OCI `WorkingDir`) — DEPOIS do pivot, ANTES do exec. Sem isto,
+    // entrypoints que operam no CWD (redis/postgres `chown -R .`) correm a partir de `/`
+    // e tocam `/sys` (RO). Se o dir não existir, cria-o (semântica Docker do WORKDIR).
+    if let Some(w) = workdir.filter(|w| !w.is_empty() && *w != "/") {
+        let _ = std::fs::create_dir_all(w);
+        if chdir(w).is_err() {
+            eprintln!("delonix: aviso — falha a entrar no WORKDIR {w}");
+        }
     }
     apply_env(hostname, env); // ambiente limpo + ENV da imagem/stack/CLI
     // `USER` da imagem (≠ root): troca para o uid/gid pedido ANTES do `execve`. Faz-se
@@ -1853,8 +1987,17 @@ fn setup_cgroup(c: &Container, pid: i32) -> Result<()> {
             message: format!("não foi possível criar {cg}"),
         });
     }
-    // device cgroup (eBPF): nega dispositivos de bloco (discos do host). Best-effort.
-    attach_device_filter(cg);
+    // device cgroup (eBPF): nega dispositivos de bloco (discos do host). Best-effort
+    // (kernels sem BPF_CGROUP_DEVICE). Se falhar, avisa em vez de ignorar em silêncio:
+    // a proteção primária mantém-se (sem CAP_MKNOD não se criam device nodes, e o
+    // `bind_devices` recusa block devices), mas o operador deve saber que esta camada
+    // não está activa.
+    if !attach_device_filter(cg) {
+        eprintln!(
+            "delonix: aviso — device cgroup (eBPF) não aplicado em {}; block devices dependem só de caps/seccomp",
+            c.name
+        );
+    }
     write_limit(cg, "memory.max", &c.memory_max)?; // teto de memória (kernel OOM-kill)
     // sem swap além da memória, senão o limite de memória seria contornável;
     // best-effort: o controlador de swap pode estar desligado no sistema.
@@ -2086,6 +2229,30 @@ fn spawn(store: &Store, container: &mut Container, rootfs: &str, spec: &RunSpec<
     let inherit_userns = spec.inherit_userns;
     let run_uid = spec.run_uid;
     let run_gid = spec.run_gid;
+    // --secret-files: lê+decifra os valores AGORA (no host, antes do pivot do filho)
+    // para os escrever num tmpfs in-namespace. Só nomes/raiz tocam fora da memória;
+    // os valores são capturados (move) no closure do clone = memória do filho.
+    let secret_files: Vec<(String, String)> =
+        if container.secret_files && !container.secrets.is_empty() {
+            match delonix_core::SecretStore::open(store.base()) {
+                Ok(ss) => {
+                    let mut map = std::collections::BTreeMap::new();
+                    for n in &container.secrets {
+                        if let Ok(s) = ss.load(n) {
+                            for (k, v) in s.data {
+                                map.insert(k, v);
+                            }
+                        }
+                    }
+                    map.into_iter().collect()
+                }
+                Err(_) => Vec::new(),
+            }
+        } else {
+            Vec::new()
+        };
+    // CWD da imagem (OCI WorkingDir) — capturado p/ o filho fazer `chdir` antes do exec.
+    let workdir = container.workdir.clone();
     let mut stack = vec![0u8; 1024 * 1024];
     let cb = Box::new(move || {
         container_init(
@@ -2114,6 +2281,8 @@ fn spawn(store: &Store, container: &mut Container, rootfs: &str, spec: &RunSpec<
             run_gid,
             privileged,
             console_sock,
+            &secret_files,
+            workdir.as_deref(),
         )
     });
 
@@ -2228,7 +2397,7 @@ fn spawn(store: &Store, container: &mut Container, rootfs: &str, spec: &RunSpec<
     }
 
     let status = waitpid(pid, None).map_err(syserr("waitpid"))?;
-    container.status = Status::Exited(wait_to_code(status));
+    container.status = wait_to_status(status);
     container.pid = None;
     store.save(container)?;
     remove_cgroup(&container.cgroup());
@@ -2435,13 +2604,13 @@ pub fn exec(container: &Container, argv: &[String], tty: bool) -> Result<i32> {
         .filter(|p| safe_to_signal(*p, container.pid_starttime))
         .ok_or_else(|| Error::NotRunning(container.short_id().to_string()))?;
 
-    // Com user namespace, junta-o PRIMEIRO (para o processo ficar mapeado e ganhar
-    // caps nesse ns); depois UTS, NET, PID e MNT (mnt por último).
-    let ns_list: &[&str] = if container.userns {
-        &["user", "uts", "net", "pid", "mnt"]
-    } else {
-        &["uts", "net", "pid", "mnt"]
-    };
+    // Junta o user namespace PRIMEIRO (para ganhar caps nesse ns e poder juntar os
+    // restantes); depois UTS, NET, PID e MNT (mnt por último). Inclui-se SEMPRE o
+    // `user`: a lógica de skip-por-inode abaixo remove-o se já o partilhamos (container
+    // host). Crucial para os containers do INGRESS rootless, que **herdam** o user ns
+    // do holder (não criam o seu) e por isso tinham `container.userns=false` — sem o
+    // setns(user) o setns(uts) dava EPERM (o UTS pertence a esse user ns).
+    let ns_list: &[&str] = &["user", "uts", "net", "pid", "mnt"];
     // Abre os fds no PAI (resolvem-se no contexto do host); herdam-se pela fork.
     // Salta os namespaces que JÁ partilhamos (mesmo inode) — ex.: um container
     // com user ns mas sem rede partilha o `net` do host, e juntá-lo depois de
@@ -2461,6 +2630,10 @@ pub fn exec(container: &Container, argv: &[String], tty: bool) -> Result<i32> {
             .map_err(syserr("open ns"))?;
         fds.push((ns, fd));
     }
+    // Entrámos mesmo num user ns? (i.e., não o partilhávamos já). Se sim, tornamo-nos
+    // uid 0 dentro dele depois dos setns — quer o container o tenha CRIADO (`userns`)
+    // quer o tenha HERDADO do holder do ingress.
+    let joined_userns = fds.iter().any(|(n, _)| *n == "user");
 
     let cargv: Vec<CString> = argv
         .iter()
@@ -2494,10 +2667,10 @@ pub fn exec(container: &Container, argv: &[String], tty: bool) -> Result<i32> {
                     unsafe { libc::_exit(125) };
                 }
             }
-            // Com user namespace, juntámo-lo como nobody (com caps); tornamo-nos
-            // uid 0 DENTRO (igual ao init do container).
+            // Se juntámos um user ns (criado OU herdado), tornamo-nos uid 0 DENTRO
+            // (igual ao init do container).
             // SAFETY: após setns(user) temos CAP_SETUID no user ns do container.
-            if container.userns {
+            if joined_userns {
                 unsafe {
                     libc::setgid(0);
                     libc::setuid(0);
@@ -2531,11 +2704,18 @@ pub fn exec(container: &Container, argv: &[String], tty: bool) -> Result<i32> {
                         }
                     }
                     set_no_new_privs();
-                    drop_capabilities(resolve_cap_keep(&container.cap_drop, &container.cap_add)); // mesmo confinamento
-                    apply_seccomp(
-                        container.seccomp.as_deref() == Some("unconfined"),
-                        container.seccomp.as_deref() == Some("detect"),
-                    );
+                    let exec_keep = resolve_cap_keep(&container.cap_drop, &container.cap_add);
+                    drop_capabilities(exec_keep); // mesmo confinamento
+                    let exec_unconf = container.seccomp.as_deref() == Some("unconfined");
+                    apply_seccomp(exec_unconf, container.seccomp.as_deref() == Some("detect"));
+                    // FAIL-CLOSED: o processo do `exec` tem de ficar tão confinado como
+                    // o init do container; aborta se algum controlo falhou em silêncio.
+                    if !insecure_besteffort() {
+                        if let Err(e) = verify_confinement(!exec_unconf, exec_keep) {
+                            eprintln!("delonix: confinamento do exec NÃO verificado ({e}); a abortar");
+                            unsafe { libc::_exit(126) };
+                        }
+                    }
                     apply_env(&container.name, &container.env); // mesmo ambiente do container
                     if let Some(p) = &container.apparmor {
                         apply_apparmor(p); // mesmo confinamento MAC que o processo de init
@@ -2918,7 +3098,7 @@ pub fn stop(store: &Store, container: &mut Container, timeout_secs: u64) -> Resu
     // Protecção contra reutilização de PID: se o PID já não é o nosso processo
     // (kernel reciclou-o), NÃO enviamos sinais — só limpamos o estado.
     if !safe_to_signal(pid, st) {
-        container.status = Status::Exited(0);
+        container.status = Status::Stopped;
         container.pid = None;
         store.save(container)?;
         remove_cgroup(&container.cgroup());
@@ -2932,14 +3112,12 @@ pub fn stop(store: &Store, container: &mut Container, timeout_secs: u64) -> Resu
         std::thread::sleep(Duration::from_millis(100));
         waited += 1;
     }
-    let code = if safe_to_signal(pid, st) {
+    if safe_to_signal(pid, st) {
         let _ = kill(target, Signal::SIGKILL);
-        137
-    } else {
-        0
-    };
-
-    container.status = Status::Exited(code);
+    }
+    // Paragem INTENCIONAL (pelo utilizador) → sempre Stopped, mesmo que tenha sido
+    // preciso SIGKILL (não é um crash: foi um stop pedido).
+    container.status = Status::Stopped;
     container.pid = None;
     store.save(container)?;
     remove_cgroup(&container.cgroup());
@@ -2979,6 +3157,45 @@ pub fn is_frozen(container: &Container) -> bool {
     std::fs::read_to_string(format!("{}/cgroup.freeze", container.cgroup()))
         .map(|s| s.trim() == "1")
         .unwrap_or(false)
+}
+
+/// Reconcilia o `status` de um container contra a realidade do kernel (sem o
+/// gravar — o chamador grava se devolver `true`). Centraliza a lógica dos 6
+/// estados nas listagens (`ps`, API, Console):
+///   * Running + pid morto  → **Crashed** (morte inesperada; um stop limpo já teria
+///     posto Stopped). pid = None.
+///   * Running + congelado   → **Paused** (freezer do cgroup ativo).
+///   * Paused + descongelado → **Running** (retomado externamente).
+///   * Paused + pid morto    → **Crashed**.
+/// Estados terminais (Stopped/Failed/Crashed) e Created não são tocados.
+pub fn reconcile_status(c: &mut Container) -> bool {
+    match c.status {
+        Status::Running => match c.pid {
+            Some(pid) if !is_alive(pid) => {
+                c.status = Status::Crashed;
+                c.pid = None;
+                true
+            }
+            Some(_) if is_frozen(c) => {
+                c.status = Status::Paused;
+                true
+            }
+            _ => false,
+        },
+        Status::Paused => match c.pid {
+            Some(pid) if !is_alive(pid) => {
+                c.status = Status::Crashed;
+                c.pid = None;
+                true
+            }
+            Some(_) if !is_frozen(c) => {
+                c.status = Status::Running;
+                true
+            }
+            _ => false,
+        },
+        _ => false,
+    }
 }
 
 /// Reescreve, AO VIVO, os limites de cgroup de um container (`docker update`).
@@ -3032,6 +3249,30 @@ mod tests {
         // relativo (resolve a partir do cwd do holder, não do rootfs)
         assert!(!mount_target_safe("etc/passwd"));
         assert!(!mount_target_safe(""));
+    }
+
+    #[test]
+    fn confinement_ok_is_fail_closed() {
+        let keep = (1u64 << 1) | (1u64 << 3); // só caps 1 e 3 na allowlist
+        // estado bom: no_new_privs, seccomp modo filtro, caps ⊆ keep
+        assert!(confinement_ok(Some(1), Some(2), Some(keep), Some(keep), true, keep).is_ok());
+        // NO_NEW_PRIVS inativo → aborta
+        assert!(confinement_ok(Some(0), Some(2), Some(keep), Some(keep), true, keep).is_err());
+        // seccomp esperado mas não em modo filtro (falhou a aplicar) → aborta
+        assert!(confinement_ok(Some(1), Some(0), Some(keep), Some(keep), true, keep).is_err());
+        // cap fora da allowlist persiste no bounding set (capset/capbset falhou) → aborta
+        let leaked = keep | (1u64 << 21); // + CAP_SYS_ADMIN
+        assert!(confinement_ok(Some(1), Some(2), Some(leaked), Some(keep), true, keep).is_err());
+        // …ou no effective
+        assert!(confinement_ok(Some(1), Some(2), Some(keep), Some(leaked), true, keep).is_err());
+        // unconfined (--security-opt seccomp=unconfined): modo 0 é aceite
+        assert!(confinement_ok(Some(1), Some(0), Some(keep), Some(keep), false, keep).is_ok());
+        // campos de caps ausentes = não-verificável = aborta (fail-closed)
+        assert!(confinement_ok(Some(1), Some(2), None, Some(keep), true, keep).is_err());
+        assert!(confinement_ok(Some(1), Some(2), Some(keep), None, true, keep).is_err());
+        // privileged (keep = todas as caps): nada fica "fora" → ok
+        let allcaps = u64::MAX;
+        assert!(confinement_ok(Some(1), Some(2), Some(allcaps), Some(allcaps), true, allcaps).is_ok());
     }
 
     #[test]

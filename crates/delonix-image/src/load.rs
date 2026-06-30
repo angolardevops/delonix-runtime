@@ -34,6 +34,8 @@ struct RawConfigInner {
     env: Option<Vec<String>>,
     #[serde(rename = "User")]
     user: Option<String>,
+    #[serde(rename = "WorkingDir")]
+    working_dir: Option<String>,
 }
 
 /// Converte um caminho `blobs/sha256/<hex>` no digest `sha256:<hex>`.
@@ -84,7 +86,7 @@ pub fn load_docker_archive(store: &ImageStore, tar_path: &Path) -> Result<Image>
         return Err(Error::Invalid("digest do config não confere".into()));
     }
     let raw: RawConfig = serde_json::from_slice(&config_bytes)?;
-    let inner = raw.config.unwrap_or(RawConfigInner { cmd: None, entrypoint: None, env: None, user: None });
+    let inner = raw.config.unwrap_or(RawConfigInner { cmd: None, entrypoint: None, env: None, user: None, working_dir: None });
 
     let image = Image {
         id: config_digest,
@@ -95,6 +97,7 @@ pub fn load_docker_archive(store: &ImageStore, tar_path: &Path) -> Result<Image>
             entrypoint: inner.entrypoint.unwrap_or_default(),
             env: inner.env.unwrap_or_default(),
             user: inner.user.unwrap_or_default(),
+            working_dir: inner.working_dir.unwrap_or_default(),
             cpus: None,
             memory: None,
             security: Vec::new(),

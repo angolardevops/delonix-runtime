@@ -40,6 +40,12 @@ pub struct ImageConfig {
     /// uid/gid antes do `exec` (em rootless, via mapa de subuid `newuidmap`).
     #[serde(default)]
     pub user: String,
+    /// Diretório de trabalho por omissão (Docker/OCI: `WorkingDir`), ex.: `"/data"`,
+    /// `"/app"`. Vazio = `/`. O runtime faz `chdir` para aqui antes do `exec` — sem
+    /// isto, entrypoints que operam no CWD (ex.: o `chown -R` do redis/postgres) correm
+    /// a partir de `/` e tocam `/sys` (RO). [[delonix-rootless-user]]
+    #[serde(default)]
+    pub working_dir: String,
 }
 
 /// Uma imagem registada localmente.
@@ -61,6 +67,19 @@ impl Image {
     /// Os primeiros 12 caracteres do id (hex).
     pub fn short_id(&self) -> String {
         strip(&self.id).chars().take(12).collect()
+    }
+
+    /// A pseudo-imagem `scratch` (Docker): uma base VAZIA, sem layers nem config.
+    /// NÃO se resolve no store nem se puxa de um registry — é o ponto de partida
+    /// vazio para `FROM scratch`. `export_rootfs` sobre ela produz um rootfs vazio.
+    pub fn scratch() -> Self {
+        Image {
+            id: "sha256:scratch".into(), // sentinela; não há blob de config real
+            repo_tags: vec!["scratch:latest".into()],
+            layers: Vec::new(),
+            config: ImageConfig::default(),
+            created_unix: 0,
+        }
     }
 }
 
