@@ -1968,10 +1968,13 @@ fn setup_cgroup_delegated(c: &Container, pid: i32) -> bool {
 }
 
 fn setup_cgroup(c: &Container, pid: i32) -> Result<()> {
-    // --privileged rootless: tenta a delegação cgroup (cpu/memory/pids) no cgroup
-    // delegado do utilizador — necessária p/ o systemd dos nodes Kind. Se conseguir,
-    // está feito; senão cai no caminho normal (best-effort).
-    if c.privileged && (is_rootless() || in_userns()) && setup_cgroup_delegated(c, pid) {
+    // Rootless: tenta SEMPRE a delegação cgroup (cpu/memory/pids) no cgroup
+    // delegado do utilizador (systemd --user com `Delegate=yes`) — é o modelo do
+    // Podman e a forma de ter limites REAIS sem root. Antes só se tentava com
+    // `--privileged` (nodes Kind), deixando TODO container rootless-com-rede sem
+    // memory.max/pids.max/cpu.max — um fork-bomb/leak matava o host. Se a
+    // delegação não existir, devolve false e cai no caminho best-effort abaixo.
+    if (is_rootless() || in_userns()) && setup_cgroup_delegated(c, pid) {
         return Ok(());
     }
     ensure_delonix_slice(); // a slice-pai com os limites agregados (robustez)
@@ -1985,7 +1988,15 @@ fn setup_cgroup(c: &Container, pid: i32) -> Result<()> {
     // delegação de cgroup na mesma; tratamos como rootless.
     if std::fs::create_dir_all(cg).is_err() {
         if is_rootless() || in_userns() {
-            eprintln!("delonix: aviso — rootless sem delegação de cgroup; limites de recursos não aplicados");
+            eprintln!(
+                "delonix: aviso — rootless SEM delegação de cgroup: memory/cpu/pids NÃO são\n\
+                 \x20        aplicados (um fork-bomb ou leak pode afetar o host). Para ter\n\
+                 \x20        limites, corre o engine sob uma sessão systemd --user com\n\
+                 \x20        delegação: `systemctl --user edit --force --full delonix.service`\n\
+                 \x20        com `[Service] Delegate=yes`, ou inicia via `systemd-run --user\n\
+                 \x20        --scope -p Delegate=yes ...`. O isolamento de namespaces/seccomp\n\
+                 \x20        mantém-se intacto."
+            );
             return Ok(());
         }
         return Err(Error::Runtime {
