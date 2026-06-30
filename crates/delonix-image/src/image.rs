@@ -68,6 +68,19 @@ impl Image {
     pub fn short_id(&self) -> String {
         strip(&self.id).chars().take(12).collect()
     }
+
+    /// A pseudo-imagem `scratch` (Docker): uma base VAZIA, sem layers nem config.
+    /// NÃO se resolve no store nem se puxa de um registry — é o ponto de partida
+    /// vazio para `FROM scratch`. `export_rootfs` sobre ela produz um rootfs vazio.
+    pub fn scratch() -> Self {
+        Image {
+            id: "sha256:scratch".into(), // sentinela; não há blob de config real
+            repo_tags: vec!["scratch:latest".into()],
+            layers: Vec::new(),
+            config: ImageConfig::default(),
+            created_unix: 0,
+        }
+    }
 }
 
 /// O armazém de imagens: registos JSON + blobs no CAS.
