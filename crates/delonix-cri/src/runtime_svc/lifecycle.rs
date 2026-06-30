@@ -182,7 +182,8 @@ fn delonix_state(base: &Path, cri_id: &str) -> i32 {
                 ContainerState::ContainerRunning as i32
             }
             S::Running => ContainerState::ContainerExited as i32,
-            S::Exited(_) => ContainerState::ContainerExited as i32,
+            S::Paused => ContainerState::ContainerRunning as i32, // congelado, mas existe
+            S::Stopped | S::Failed(_) | S::Crashed => ContainerState::ContainerExited as i32,
             S::Created => ContainerState::ContainerCreated as i32,
         },
         Err(_) => ContainerState::ContainerCreated as i32,
@@ -195,7 +196,9 @@ fn delonix_exit(base: &Path, cri_id: &str) -> Option<i32> {
     use delonix_core::Status as S;
     let store = delonix_core::Store::open(base.join("containers")).ok()?;
     match store.load(&format!("cri-{cri_id}")).ok()?.status {
-        S::Exited(code) => Some(code),
+        S::Failed(code) => Some(code),
+        S::Stopped => Some(0),
+        S::Crashed => Some(137),
         _ => None,
     }
 }
