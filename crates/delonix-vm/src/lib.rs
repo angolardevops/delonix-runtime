@@ -97,9 +97,11 @@ pub fn exists(base: &Path, name: &str) -> bool {
     store(base).map(|s| s.exists(name)).unwrap_or(false)
 }
 
-/// Converte memória (`"2G"`/`"1024M"`/`"512"`) para MiB.
+/// Converte memória (`"2G"`/`"1024M"`/`"512"`/`"2Gi"`) para MiB.
 fn mem_mib(s: &str) -> u64 {
     let t = s.trim();
+    // Tolera o sufixo `i` do estilo k8s (Gi/Mi): "2Gi" == "2G", "512Mi" == "512M".
+    let t = t.strip_suffix(['i', 'I']).unwrap_or(t);
     let (num, mult) = if let Some(n) = t.strip_suffix(['G', 'g']) {
         (n, 1024)
     } else if let Some(n) = t.strip_suffix(['M', 'm']) {
@@ -107,7 +109,15 @@ fn mem_mib(s: &str) -> u64 {
     } else {
         (t, 1)
     };
-    num.trim().parse::<u64>().unwrap_or(1024) * mult
+    match num.trim().parse::<u64>() {
+        Ok(v) => v * mult,
+        // Não degradar em silêncio: um valor mal-escrito ("2GB", "2 Gi") daria
+        // metade-ish da RAM pedida sem aviso. Avisa e usa um default seguro.
+        Err(_) => {
+            eprintln!("delonix: valor de memória inválido {s:?}; a usar 1024 MiB por omissão");
+            1024
+        }
+    }
 }
 
 /// Aspas para shell (single-quote, escapando `'`).
@@ -137,6 +147,44 @@ fn binary_in_path(name: &str) -> bool {
     std::env::var_os("PATH")
         .map(|paths| std::env::split_paths(&paths).any(|p| p.join(name).is_file()))
         .unwrap_or(false)
+}
+
+/// Extrai o campo `"format"` de um `qemu-img info --output=json`. Função pura
+/// (testável sem `qemu-img`). Ignora a chave distinta `"format-specific"` (o
+/// padrão `"format"` com aspa-a-fechar não casa o prefixo `"format-`).
+fn parse_qemu_format(json: &str) -> Option<String> {
+    let i = json.find("\"format\"")?;
+    let rest = &json[i + "\"format\"".len()..];
+    let colon = rest.find(':')?;
+    let rest = &rest[colon + 1..];
+    let q1 = rest.find('"')?;
+    let q2 = rest[q1 + 1..].find('"')?;
+    let fmt = &rest[q1 + 1..q1 + 1 + q2];
+    (!fmt.is_empty()).then(|| fmt.to_string())
+}
+
+/// Formato REAL do disco base via `qemu-img info` — NÃO confia na extensão. As
+/// cloud images Ubuntu/Debian distribuem-se como `*.img` mas são **qcow2**
+/// internamente; um overlay criado com `-F raw` sobre um backing qcow2 faz o
+/// guest ler o qcow2 como raw → disco corrompido / não-booting, em silêncio.
+/// Cai para a heurística da extensão se o `qemu-img info` não estiver disponível.
+pub fn disk_backing_format(disk: &Path) -> String {
+    if let Ok(out) = Command::new("qemu-img")
+        .args(["info", "--output=json"])
+        .arg(disk)
+        .output()
+    {
+        if out.status.success() {
+            if let Some(fmt) = std::str::from_utf8(&out.stdout).ok().and_then(parse_qemu_format) {
+                return fmt;
+            }
+        }
+    }
+    if disk.extension().and_then(|e| e.to_str()) == Some("qcow2") {
+        "qcow2".into()
+    } else {
+        "raw".into()
+    }
 }
 
 /// Corre uma ferramenta externa (ex.: `qemu-img`), erro se falhar.
@@ -730,11 +778,7 @@ pub fn create(base: &Path, cfg: &VmConfig) -> Result<Vm> {
         .map_err(|_| Error::Invalid(format!("imagem não encontrada: {}", cfg.disk)))?;
     let overlay = vmdir.join(format!("{}.qcow2", cfg.name));
     if !overlay.exists() {
-        let bf = if cfg.disk.ends_with(".qcow2") {
-            "qcow2"
-        } else {
-            "raw"
-        };
+        let bf = disk_backing_format(&disk_path);
         run_tool(
             "qemu-img",
             &[
@@ -744,7 +788,7 @@ pub fn create(base: &Path, cfg: &VmConfig) -> Result<Vm> {
                 "-b",
                 &disk_path.to_string_lossy(),
                 "-F",
-                bf,
+                &bf,
                 &overlay.to_string_lossy(),
             ],
         )?;
@@ -835,7 +879,22 @@ mod tests {
         assert_eq!(mem_mib("2G"), 2048);
         assert_eq!(mem_mib("1024M"), 1024);
         assert_eq!(mem_mib("512"), 512);
+        assert_eq!(mem_mib("2Gi"), 2048); // sufixo k8s tolerado (antes dava 1024)
+        assert_eq!(mem_mib("512Mi"), 512);
         assert_eq!(mem_mib("lixo"), 1024); // fallback robusto
+    }
+
+    #[test]
+    fn parse_qemu_format_extrai_formato_real() {
+        // `.img` que é qcow2 por dentro — o cerne do bug do backing-format.
+        let j = r#"{"virtual-size":2361393152,"filename":"jammy.img","format":"qcow2","actual-size":643825664,"format-specific":{"type":"qcow2","data":{}}}"#;
+        assert_eq!(parse_qemu_format(j).as_deref(), Some("qcow2"));
+        let raw = r#"{"filename":"disco.raw","format":"raw","virtual-size":10}"#;
+        assert_eq!(parse_qemu_format(raw).as_deref(), Some("raw"));
+        // não confunde com a chave "format-specific".
+        let only_spec = r#"{"format-specific":{"type":"qcow2"}}"#;
+        assert_eq!(parse_qemu_format(only_spec), None);
+        assert_eq!(parse_qemu_format("{}"), None);
     }
 
     /// VmConfig mínima para exercitar os helpers de args HPC (S4).
