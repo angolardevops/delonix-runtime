@@ -74,6 +74,17 @@ fn wait_to_code(status: WaitStatus) -> i32 {
     }
 }
 
+/// Converte o `WaitStatus` no [`Status`] terminal correto: saída 0 → Stopped,
+/// saída ≠ 0 → Failed, morto por sinal → Crashed.
+fn wait_to_status(status: WaitStatus) -> Status {
+    match status {
+        WaitStatus::Exited(_, 0) => Status::Stopped,
+        WaitStatus::Exited(_, code) => Status::Failed(code),
+        WaitStatus::Signaled(..) => Status::Crashed,
+        _ => Status::Crashed,
+    }
+}
+
 // ----------------------------------------------------------------------------
 // Criar e correr um container
 // ----------------------------------------------------------------------------
@@ -1147,6 +1158,43 @@ fn apply_tmpfs(specs: &[String]) {
     }
 }
 
+/// Monta um **tmpfs** em `/run/secrets` e escreve lá os pares chave→valor (0600),
+/// para `--secret-files`. Corre DENTRO do namespace do container (pós-`pivot_root`,
+/// ainda com caps): os valores ficam só em RAM (tmpfs) — nunca tocam o fs do host
+/// nem o do container, nem o ambiente. O mount fica read-only para o container.
+fn write_secret_files(pairs: &[(String, String)]) {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = "/run/secrets";
+    if std::fs::create_dir_all(dir).is_err() {
+        return;
+    }
+    let _ = mount(
+        Some("tmpfs"),
+        dir,
+        Some("tmpfs"),
+        MsFlags::MS_NOSUID | MsFlags::MS_NODEV,
+        Some("mode=0700"),
+    );
+    for (k, v) in pairs {
+        // só nomes de ficheiro seguros (são chaves de env válidas, mas defensivo).
+        if k.is_empty() || k.contains('/') {
+            continue;
+        }
+        let p = format!("{dir}/{k}");
+        if std::fs::write(&p, v).is_ok() {
+            let _ = std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o600));
+        }
+    }
+    // torna o tmpfs só-leitura para o container (os valores já lá estão).
+    let _ = mount(
+        None::<&str>,
+        dir,
+        None::<&str>,
+        MsFlags::MS_REMOUNT | MsFlags::MS_RDONLY | MsFlags::MS_NOSUID | MsFlags::MS_NODEV,
+        None::<&str>,
+    );
+}
+
 /// Escreve os `sysctl`s namespaced (`--sysctl net.x=y`) em `/proc/sys/...` do
 /// container (depois de `/proc` estar montado). Só os que o namespace permite.
 fn apply_sysctls(specs: &[String]) {
@@ -1256,6 +1304,8 @@ fn container_init(
     run_gid: Option<u32>,
     privileged: bool,
     console_sock: Option<(i32, i32)>,
+    secret_files: &[(String, String)],
+    workdir: Option<&str>,
 ) -> isize {
     // User namespace: espera que o PAI escreva uid_map/gid_map antes de continuar
     // (até lá, somos `nobody` sem caps). O byte recebido é o "podes avançar".
@@ -1322,6 +1372,9 @@ fn container_init(
         setup_console(cs);
     }
     apply_tmpfs(tmpfs); // --tmpfs (depois do pivot, ainda com caps)
+    if !secret_files.is_empty() {
+        write_secret_files(secret_files); // --secret-files: tmpfs in-namespace (ainda com caps)
+    }
     // `--read-only`: remonta o rootfs (`/`) só-leitura. Volumes/dev/proc são
     // mounts separados e mantêm-se escrevíveis; o resto fica imutável.
     if read_only {
@@ -1342,6 +1395,15 @@ fn container_init(
     }
     if let Some(c) = selinux {
         apply_selinux(c); // confinamento MAC (SELinux) — só em hosts SELinux
+    }
+    // CWD da imagem (OCI `WorkingDir`) — DEPOIS do pivot, ANTES do exec. Sem isto,
+    // entrypoints que operam no CWD (redis/postgres `chown -R .`) correm a partir de `/`
+    // e tocam `/sys` (RO). Se o dir não existir, cria-o (semântica Docker do WORKDIR).
+    if let Some(w) = workdir.filter(|w| !w.is_empty() && *w != "/") {
+        let _ = std::fs::create_dir_all(w);
+        if chdir(w).is_err() {
+            eprintln!("delonix: aviso — falha a entrar no WORKDIR {w}");
+        }
     }
     apply_env(hostname, env); // ambiente limpo + ENV da imagem/stack/CLI
     // `USER` da imagem (≠ root): troca para o uid/gid pedido ANTES do `execve`. Faz-se
@@ -2086,6 +2148,30 @@ fn spawn(store: &Store, container: &mut Container, rootfs: &str, spec: &RunSpec<
     let inherit_userns = spec.inherit_userns;
     let run_uid = spec.run_uid;
     let run_gid = spec.run_gid;
+    // --secret-files: lê+decifra os valores AGORA (no host, antes do pivot do filho)
+    // para os escrever num tmpfs in-namespace. Só nomes/raiz tocam fora da memória;
+    // os valores são capturados (move) no closure do clone = memória do filho.
+    let secret_files: Vec<(String, String)> =
+        if container.secret_files && !container.secrets.is_empty() {
+            match delonix_core::SecretStore::open(store.base()) {
+                Ok(ss) => {
+                    let mut map = std::collections::BTreeMap::new();
+                    for n in &container.secrets {
+                        if let Ok(s) = ss.load(n) {
+                            for (k, v) in s.data {
+                                map.insert(k, v);
+                            }
+                        }
+                    }
+                    map.into_iter().collect()
+                }
+                Err(_) => Vec::new(),
+            }
+        } else {
+            Vec::new()
+        };
+    // CWD da imagem (OCI WorkingDir) — capturado p/ o filho fazer `chdir` antes do exec.
+    let workdir = container.workdir.clone();
     let mut stack = vec![0u8; 1024 * 1024];
     let cb = Box::new(move || {
         container_init(
@@ -2114,6 +2200,8 @@ fn spawn(store: &Store, container: &mut Container, rootfs: &str, spec: &RunSpec<
             run_gid,
             privileged,
             console_sock,
+            &secret_files,
+            workdir.as_deref(),
         )
     });
 
@@ -2228,7 +2316,7 @@ fn spawn(store: &Store, container: &mut Container, rootfs: &str, spec: &RunSpec<
     }
 
     let status = waitpid(pid, None).map_err(syserr("waitpid"))?;
-    container.status = Status::Exited(wait_to_code(status));
+    container.status = wait_to_status(status);
     container.pid = None;
     store.save(container)?;
     remove_cgroup(&container.cgroup());
@@ -2435,13 +2523,13 @@ pub fn exec(container: &Container, argv: &[String], tty: bool) -> Result<i32> {
         .filter(|p| safe_to_signal(*p, container.pid_starttime))
         .ok_or_else(|| Error::NotRunning(container.short_id().to_string()))?;
 
-    // Com user namespace, junta-o PRIMEIRO (para o processo ficar mapeado e ganhar
-    // caps nesse ns); depois UTS, NET, PID e MNT (mnt por último).
-    let ns_list: &[&str] = if container.userns {
-        &["user", "uts", "net", "pid", "mnt"]
-    } else {
-        &["uts", "net", "pid", "mnt"]
-    };
+    // Junta o user namespace PRIMEIRO (para ganhar caps nesse ns e poder juntar os
+    // restantes); depois UTS, NET, PID e MNT (mnt por último). Inclui-se SEMPRE o
+    // `user`: a lógica de skip-por-inode abaixo remove-o se já o partilhamos (container
+    // host). Crucial para os containers do INGRESS rootless, que **herdam** o user ns
+    // do holder (não criam o seu) e por isso tinham `container.userns=false` — sem o
+    // setns(user) o setns(uts) dava EPERM (o UTS pertence a esse user ns).
+    let ns_list: &[&str] = &["user", "uts", "net", "pid", "mnt"];
     // Abre os fds no PAI (resolvem-se no contexto do host); herdam-se pela fork.
     // Salta os namespaces que JÁ partilhamos (mesmo inode) — ex.: um container
     // com user ns mas sem rede partilha o `net` do host, e juntá-lo depois de
@@ -2461,6 +2549,10 @@ pub fn exec(container: &Container, argv: &[String], tty: bool) -> Result<i32> {
             .map_err(syserr("open ns"))?;
         fds.push((ns, fd));
     }
+    // Entrámos mesmo num user ns? (i.e., não o partilhávamos já). Se sim, tornamo-nos
+    // uid 0 dentro dele depois dos setns — quer o container o tenha CRIADO (`userns`)
+    // quer o tenha HERDADO do holder do ingress.
+    let joined_userns = fds.iter().any(|(n, _)| *n == "user");
 
     let cargv: Vec<CString> = argv
         .iter()
@@ -2494,10 +2586,10 @@ pub fn exec(container: &Container, argv: &[String], tty: bool) -> Result<i32> {
                     unsafe { libc::_exit(125) };
                 }
             }
-            // Com user namespace, juntámo-lo como nobody (com caps); tornamo-nos
-            // uid 0 DENTRO (igual ao init do container).
+            // Se juntámos um user ns (criado OU herdado), tornamo-nos uid 0 DENTRO
+            // (igual ao init do container).
             // SAFETY: após setns(user) temos CAP_SETUID no user ns do container.
-            if container.userns {
+            if joined_userns {
                 unsafe {
                     libc::setgid(0);
                     libc::setuid(0);
@@ -2918,7 +3010,7 @@ pub fn stop(store: &Store, container: &mut Container, timeout_secs: u64) -> Resu
     // Protecção contra reutilização de PID: se o PID já não é o nosso processo
     // (kernel reciclou-o), NÃO enviamos sinais — só limpamos o estado.
     if !safe_to_signal(pid, st) {
-        container.status = Status::Exited(0);
+        container.status = Status::Stopped;
         container.pid = None;
         store.save(container)?;
         remove_cgroup(&container.cgroup());
@@ -2932,14 +3024,12 @@ pub fn stop(store: &Store, container: &mut Container, timeout_secs: u64) -> Resu
         std::thread::sleep(Duration::from_millis(100));
         waited += 1;
     }
-    let code = if safe_to_signal(pid, st) {
+    if safe_to_signal(pid, st) {
         let _ = kill(target, Signal::SIGKILL);
-        137
-    } else {
-        0
-    };
-
-    container.status = Status::Exited(code);
+    }
+    // Paragem INTENCIONAL (pelo utilizador) → sempre Stopped, mesmo que tenha sido
+    // preciso SIGKILL (não é um crash: foi um stop pedido).
+    container.status = Status::Stopped;
     container.pid = None;
     store.save(container)?;
     remove_cgroup(&container.cgroup());
@@ -2979,6 +3069,45 @@ pub fn is_frozen(container: &Container) -> bool {
     std::fs::read_to_string(format!("{}/cgroup.freeze", container.cgroup()))
         .map(|s| s.trim() == "1")
         .unwrap_or(false)
+}
+
+/// Reconcilia o `status` de um container contra a realidade do kernel (sem o
+/// gravar — o chamador grava se devolver `true`). Centraliza a lógica dos 6
+/// estados nas listagens (`ps`, API, Console):
+///   * Running + pid morto  → **Crashed** (morte inesperada; um stop limpo já teria
+///     posto Stopped). pid = None.
+///   * Running + congelado   → **Paused** (freezer do cgroup ativo).
+///   * Paused + descongelado → **Running** (retomado externamente).
+///   * Paused + pid morto    → **Crashed**.
+/// Estados terminais (Stopped/Failed/Crashed) e Created não são tocados.
+pub fn reconcile_status(c: &mut Container) -> bool {
+    match c.status {
+        Status::Running => match c.pid {
+            Some(pid) if !is_alive(pid) => {
+                c.status = Status::Crashed;
+                c.pid = None;
+                true
+            }
+            Some(_) if is_frozen(c) => {
+                c.status = Status::Paused;
+                true
+            }
+            _ => false,
+        },
+        Status::Paused => match c.pid {
+            Some(pid) if !is_alive(pid) => {
+                c.status = Status::Crashed;
+                c.pid = None;
+                true
+            }
+            Some(_) if !is_frozen(c) => {
+                c.status = Status::Running;
+                true
+            }
+            _ => false,
+        },
+        _ => false,
+    }
 }
 
 /// Reescreve, AO VIVO, os limites de cgroup de um container (`docker update`).
