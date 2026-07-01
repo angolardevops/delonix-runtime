@@ -127,6 +127,12 @@ pub fn ingress_table_ruleset() -> String {
     // (P12), cujas regras entram no `fwdeny` (correm antes, pré-emptem este accept).
     // Rollback instantâneo: DELONIX_FORWARD_POLICY=accept → volta ao default-allow.
     let policy = if std::env::var("DELONIX_FORWARD_POLICY").ok().as_deref() == Some("accept") {
+        // NET-03: o opt-out reverte o default-deny — não deixar isto silencioso.
+        eprintln!(
+            "delonix: AVISO DE SEGURANÇA — DELONIX_FORWARD_POLICY=accept: o forward do netns\n\
+             \x20        de ingress volta a default-ALLOW (sem `policy drop`). Só para\n\
+             \x20        depuração — NÃO usar em produção."
+        );
         ""
     } else {
         " policy drop;"
@@ -755,6 +761,14 @@ fn do_attach(netns: &str, ip: &str, bridge: &str, gateway: &str) -> Result<()> {
     // origem — senão um container podia falsificar o source-IP e furar a firewall
     // por-IP / o isolamento / a atribuição de fluxos. `insert` põe a regra no topo
     // do `forward`, antes dos jumps por-container. Idempotente (limpa antes).
+    //
+    // NET-06 (limitação conhecida): para um nó Kind PRIVILEGIADO, o tráfego pod→pod
+    // fica dentro do netns do nó (nunca cruza este veth) e o pod→exterior sai com
+    // `saddr`=IP-do-nó (kindnet faz masquerade), por isso nó-único funciona. Um
+    // cenário MULTI-NÓ com routing de pod-CIDR (10.244/16) ENTRE nós seria DROPado
+    // aqui (saddr do pod ≠ IP-do-nó). Enquanto o multi-nó não for suportado, isto é
+    // latente; a correcção será uma excepção de anti-spoof para o pod-CIDR quando o
+    // container é um nó de cluster (a par do trabalho de routing inter-nó).
     clear_antispoof(&vh);
     run_ok(
         "nft",
