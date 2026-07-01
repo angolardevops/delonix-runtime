@@ -764,6 +764,16 @@ pub fn create(base: &Path, cfg: &VmConfig) -> Result<Vm> {
     let st = store(base)?;
 
     let restarting = st.load(&cfg.name).ok();
+    // Anti-clobber (dois subsistemas de VM na MESMA pasta): se já existe um
+    // `<name>.json` que NÃO parseia como Vm declarativa, é um registo QEMU-direto
+    // (`vm run`) — recusar em vez de o sobrescrever e deixar essa VM órfã.
+    if restarting.is_none() && vmdir.join(format!("{}.json", cfg.name)).exists() {
+        return Err(Error::Invalid(format!(
+            "já existe uma VM '{}' criada por `vm run` (QEMU-direto). Remove-a primeiro \
+             (`vm rm {}`) ou usa outro nome — os dois subsistemas partilham a pasta vms/.",
+            cfg.name, cfg.name
+        )));
+    }
     // No restart, honra o backend que a VM já usava; senão escolhe agora.
     let backend: Box<dyn VmBackend> = match &restarting {
         Some(ex) => {
@@ -844,6 +854,20 @@ pub fn remove(base: &Path, name: &str) -> Result<()> {
     st.remove(name)
 }
 
+/// Pára a VM via o SEU backend (CH/libvirt) mas **preserva** registo e disco
+/// (retomável). Ao contrário de `remove`, não apaga nada. Corrige o caso em que
+/// o `vm stop` da CLI (esquema QEMU-direto) não sabia parar uma VM declarativa
+/// libvirt (pid null → domínio ficava vivo, órfão).
+pub fn stop(base: &Path, name: &str) -> Result<()> {
+    let vmdir = vms_dir(base);
+    let st = store(base)?;
+    let mut vm = st.load(name)?;
+    backend_for(&vm).stop(&vmdir, &vm);
+    vm.status = Status::Stopped;
+    vm.pid = None;
+    st.save(name, &vm)
+}
+
 /// Estado actual de uma VM, com `status`/`ip` reconciliados pelo seu backend.
 pub fn status(base: &Path, name: &str) -> Result<Vm> {
     let st = store(base)?;
@@ -883,6 +907,28 @@ mod tests {
         assert_eq!(mem_mib("2Gi"), 2048); // sufixo k8s tolerado (antes dava 1024)
         assert_eq!(mem_mib("512Mi"), 512);
         assert_eq!(mem_mib("lixo"), 1024); // fallback robusto
+    }
+
+    #[test]
+    fn create_recusa_clobber_de_vm_run() {
+        let tmp = std::env::temp_dir().join(format!("dlx-vmclob-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        let vmdir = vms_dir(&tmp);
+        std::fs::create_dir_all(&vmdir).unwrap();
+        // registo QEMU-direto (esquema cru, SEM `backend`) — como o `vm run` grava.
+        std::fs::write(
+            vmdir.join("myvm.json"),
+            br#"{"name":"myvm","pid":1234,"memory":1024,"cpus":1}"#,
+        )
+        .unwrap();
+        let mut cfg = hpc_cfg();
+        cfg.name = "myvm".into();
+        let err = create(&tmp, &cfg).unwrap_err();
+        assert!(
+            format!("{err}").contains("vm run"),
+            "create devia recusar o clobber de um registo QEMU-direto: {err}"
+        );
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     #[test]
