@@ -169,33 +169,44 @@ fn delonix_detached(base: &Path, args: &[&str]) -> Result<bool, Status> {
     Ok(status.success())
 }
 
-/// O estado de execução de um container CRI, lido do `Store` do Delonix.
+/// Carrega um container CRI e **reconcilia** o seu status contra o kernel
+/// (`Running`+pid morto → `Crashed`/`Failed`) antes de o devolver, persistindo a
+/// mudança (best-effort). É o cerne da correção de exit-codes: sem reconciliar,
+/// um container que crashou mas cujo store ainda diz `Running` reportava estado
+/// `Exited` com exit-code 0 → o kubelet (restartPolicy `OnFailure`) NÃO o
+/// reiniciava. Após reconciliar, o crash vira `Crashed` (137) e o kubelet reage.
+fn load_reconciled(base: &Path, cri_id: &str) -> Option<delonix_core::Container> {
+    let store = delonix_core::Store::open(base.join("containers")).ok()?;
+    let mut c = store.load(&format!("cri-{cri_id}")).ok()?;
+    if delonix_runtime::reconcile_status(&mut c) {
+        let _ = store.save(&c); // propaga a reconciliação a outros leitores
+    }
+    Some(c)
+}
+
+/// O estado de execução de um container CRI, lido (e reconciliado) do `Store`.
 fn delonix_state(base: &Path, cri_id: &str) -> i32 {
     use delonix_core::Status as S;
-    let store = match delonix_core::Store::open(base.join("containers")) {
-        Ok(s) => s,
-        Err(_) => return ContainerState::ContainerUnknown as i32,
-    };
-    match store.load(&format!("cri-{cri_id}")) {
-        Ok(c) => match c.status {
+    match load_reconciled(base, cri_id) {
+        Some(c) => match c.status {
             S::Running if c.pid.map(delonix_runtime::is_alive).unwrap_or(false) => {
                 ContainerState::ContainerRunning as i32
             }
-            S::Running => ContainerState::ContainerExited as i32,
+            S::Running => ContainerState::ContainerExited as i32, // defensivo (pós-reconcile)
             S::Paused => ContainerState::ContainerRunning as i32, // congelado, mas existe
             S::Stopped | S::Failed(_) | S::Crashed => ContainerState::ContainerExited as i32,
             S::Created => ContainerState::ContainerCreated as i32,
         },
-        Err(_) => ContainerState::ContainerCreated as i32,
+        None => ContainerState::ContainerUnknown as i32,
     }
 }
 
-/// O código de saída de um container CRI (do `Store` do Delonix), ou `None` se
-/// ainda está a correr/criado. Permite ao kubelet ver a verdadeira causa de saída.
+/// O código de saída de um container CRI (reconciliado), ou `None` se ainda está
+/// a correr/criado. Permite ao kubelet ver a verdadeira causa de saída (137/143/n)
+/// e aplicar a `restartPolicy` — em vez de assumir 0 (`Completed`) para tudo.
 fn delonix_exit(base: &Path, cri_id: &str) -> Option<i32> {
     use delonix_core::Status as S;
-    let store = delonix_core::Store::open(base.join("containers")).ok()?;
-    match store.load(&format!("cri-{cri_id}")).ok()?.status {
+    match load_reconciled(base, cri_id)?.status {
         S::Failed(code) => Some(code),
         S::Stopped => Some(0),
         S::Crashed => Some(137),
@@ -557,7 +568,17 @@ pub fn stop_container(
     // a sua própria deadline, por isso NÃO podemos usar o default longo do
     // `delonix stop`. `timeout=0` → paragem imediata (SIGKILL).
     let secs = timeout.max(0).to_string();
-    let _ = delonix(base, &["stop", "-t", &secs, &format!("cri-{id}")]);
+    let _ = delonix(base, &["stop", "-t", &secs, &format!("cri-{id}")])?;
+    // Verifica que PAROU de facto (reconciliado). Idempotente: já parado/inexistente
+    // = OK. Se continua vivo, propaga erro → o kubelet repete (em vez de assumir
+    // que parou e seguir para o RemoveContainer sobre um processo ainda a correr).
+    if let Some(c) = load_reconciled(base, &id) {
+        let alive = matches!(c.status, delonix_core::Status::Running)
+            && c.pid.map(delonix_runtime::is_alive).unwrap_or(false);
+        if alive {
+            return Err(Status::internal(format!("'cri-{id}' continua a correr após stop")));
+        }
+    }
     Ok(Response::new(StopContainerResponse {}))
 }
 
@@ -565,7 +586,21 @@ pub fn remove_container(
     base: &Path,
     id: String,
 ) -> Result<Response<RemoveContainerResponse>, Status> {
-    let _ = delonix(base, &["rm", "-f", &format!("cri-{id}")]);
+    // SÓ apagar o registo CRI DEPOIS de o runtime remover o container. Antes,
+    // apagava-se o JSON mesmo com o `rm -f` falhado → fuga de rootfs/subuid/netns
+    // sem rasto para o kubelet reptir. Idempotente (contrato CRI): um container
+    // que já não existe conta como removido.
+    let out = delonix(base, &["rm", "-f", &format!("cri-{id}")])?;
+    let gone = out.status.success() || {
+        let e = String::from_utf8_lossy(&out.stderr).to_lowercase();
+        e.contains("no such") || e.contains("não existe") || e.contains("not found")
+    };
+    if !gone {
+        return Err(Status::internal(format!(
+            "remoção de 'cri-{id}' falhou (registo preservado p/ retry): {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        )));
+    }
     let _ = std::fs::remove_file(ct_dir(base).join(format!("{id}.json")));
     Ok(Response::new(RemoveContainerResponse {}))
 }
@@ -864,4 +899,45 @@ pub fn list_pod_sandbox_stats(
         .map(|s| pod_sandbox_stats_for(base, &s))
         .collect();
     Ok(Response::new(ListPodSandboxStatsResponse { stats }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn crashed_container_reporta_137_nao_0() {
+        // Container marcado `Running` no store mas com pid MORTO — simula um crash
+        // ainda não reconciliado. Sem o fix, delonix_exit devolvia None → o kubelet
+        // via exit 0 (Completed) e o restartPolicy OnFailure NÃO reiniciava.
+        let tmp = std::env::temp_dir().join(format!("dlx-cri-exit-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        let store = delonix_core::Store::open(tmp.join("containers")).unwrap();
+        let mut c = delonix_core::Container::new(
+            "cri-abc".into(),
+            "cri-abc".into(),
+            "img:1".into(),
+            vec![],
+            String::new(),
+        );
+        c.status = delonix_core::Status::Running;
+        c.pid = Some(2_000_000); // pid inexistente → morto
+        store.save(&c).unwrap();
+
+        // reconcilia (Running+morto → Crashed) → exit 137 + estado Exited.
+        assert_eq!(delonix_exit(&tmp, "abc"), Some(137), "crash deve reportar 137, não 0");
+        assert_eq!(delonix_state(&tmp, "abc"), ContainerState::ContainerExited as i32);
+
+        // Um container parado limpo → 0 (Completed). Um Failed(n) → n.
+        let mut ok = c.clone();
+        ok.status = delonix_core::Status::Stopped;
+        store.save(&ok).unwrap();
+        assert_eq!(delonix_exit(&tmp, "abc"), Some(0));
+        let mut failed = c.clone();
+        failed.status = delonix_core::Status::Failed(2);
+        store.save(&failed).unwrap();
+        assert_eq!(delonix_exit(&tmp, "abc"), Some(2));
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
 }
