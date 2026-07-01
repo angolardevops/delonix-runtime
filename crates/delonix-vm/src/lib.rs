@@ -831,8 +831,30 @@ pub fn create(base: &Path, cfg: &VmConfig) -> Result<Vm> {
     vm.restart_policy = cfg.restart_policy.clone();
     vm.ip = boot.ip;
     vm.backend = backend.id().to_string();
+    // HONESTIDADE do restart_policy: só o libvirt o materializa (`<on_crash>restart`
+    // no XML). No Cloud Hypervisor não há supervisor no host — avisar em vez de
+    // aceitar em silêncio uma política que não é imposta instantaneamente.
+    if restart_policy_unsupervised(backend.id(), vm.restart_policy.as_deref()) {
+        eprintln!(
+            "delonix: aviso — restart_policy '{}' na VM '{}' (backend {}) NÃO é\n\
+             \x20        supervisionado no host: o reinício ocorre no próximo\n\
+             \x20        `delonix apply`/reconcile (auto-heal), não instantaneamente\n\
+             \x20        no crash. Para reinício imediato usa `--backend libvirt`.",
+            vm.restart_policy.as_deref().unwrap_or(""),
+            cfg.name,
+            backend.id()
+        );
+    }
     st.save(&cfg.name, &vm)?;
     Ok(vm)
+}
+
+/// `true` se a `restart_policy` pede reinício automático (`always`/`on-failure`)
+/// mas o backend NÃO o supervisiona no host (só o libvirt o materializa via XML).
+/// Nos outros o reinício depende do reconcile/apply — o chamador deve avisar.
+/// Função pura — testável.
+pub fn restart_policy_unsupervised(backend_id: &str, policy: Option<&str>) -> bool {
+    backend_id != "libvirt" && matches!(policy, Some("always") | Some("on-failure"))
 }
 
 /// Remove uma VM: pára o VMM (via o seu backend), e apaga overlay/estado.
@@ -907,6 +929,18 @@ mod tests {
         assert_eq!(mem_mib("2Gi"), 2048); // sufixo k8s tolerado (antes dava 1024)
         assert_eq!(mem_mib("512Mi"), 512);
         assert_eq!(mem_mib("lixo"), 1024); // fallback robusto
+    }
+
+    #[test]
+    fn restart_policy_unsupervised_deteta() {
+        // CH/QEMU não supervisionam always/on-failure → avisa.
+        assert!(restart_policy_unsupervised("cloud-hypervisor", Some("always")));
+        assert!(restart_policy_unsupervised("cloud-hypervisor", Some("on-failure")));
+        // libvirt materializa no XML → não avisa.
+        assert!(!restart_policy_unsupervised("libvirt", Some("always")));
+        // sem política ou `no` → nada a avisar.
+        assert!(!restart_policy_unsupervised("cloud-hypervisor", Some("no")));
+        assert!(!restart_policy_unsupervised("cloud-hypervisor", None));
     }
 
     #[test]
