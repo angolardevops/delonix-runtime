@@ -427,6 +427,46 @@ pub fn http_post_json(url: &str, body: &str, token: Option<&str>) -> Result<(u16
     Ok((status, resp.bytes().map_err(reg_err)?.to_vec()))
 }
 
+/// Como [`http_post_json`], mas STREAMING: entrega os bytes da resposta em chunks
+/// ao `on_bytes` à medida que chegam (não espera o fim). Devolve o status HTTP.
+/// Usado pelo transporte HTTP do CLI para comandos de streaming (`logs -f`, …).
+/// Sem timeout (esses comandos correm indefinidamente).
+pub fn http_post_stream(
+    url: &str,
+    body: &str,
+    token: Option<&str>,
+    mut on_bytes: impl FnMut(&[u8]),
+) -> Result<u16> {
+    use std::io::Read;
+    let insecure = std::env::var("DELONIX_API_INSECURE").ok().as_deref() == Some("1");
+    let client = reqwest::blocking::Client::builder()
+        .user_agent("delonix/0.1")
+        .timeout(None)
+        .danger_accept_invalid_certs(insecure)
+        .build()
+        .map_err(reg_err)?;
+    let mut req = client
+        .post(url)
+        .header("Content-Type", "application/json")
+        .body(body.to_string());
+    if let Some(t) = token {
+        req = req.bearer_auth(t);
+    }
+    let mut resp = req.send().map_err(reg_err)?;
+    let status = resp.status().as_u16();
+    let mut buf = [0u8; 8192];
+    loop {
+        let n = resp
+            .read(&mut buf)
+            .map_err(|e| Error::Registry(format!("stream: {e}")))?;
+        if n == 0 {
+            break;
+        }
+        on_bytes(&buf[..n]);
+    }
+    Ok(status)
+}
+
 /// Descarrega `reference` de um registo OCI para o armazém local.
 pub fn pull_from_registry(store: &ImageStore, reference: &str) -> Result<Image> {
     let (host, repo, refr) = parse_reference(reference);
