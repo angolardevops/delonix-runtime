@@ -553,6 +553,16 @@ fn ensure_net_bridge(bridge: &str, gateway: &str) -> Result<()> {
         run_ok("ip", &["-6", "addr", "add", &format!("{}/64", v6_gw(&p)), "dev", bridge]);
         let _ = std::fs::write("/proc/sys/net/ipv6/conf/all/forwarding", "1");
     }
+    // Conectividade INTRA-rede: os containers da MESMA bridge falam-se (modelo
+    // Docker/user-network, como o `delonix0`). Sem esta regra, o `policy drop` do
+    // `forward` cortava TODO o tráfego intra-bridge das redes criadas (`dlxn*`) —
+    // serviços na mesma rede (incl. dentro de um tenant) não se alcançavam. A
+    // micro-segmentação fina faz-se depois com `kind:NetworkPolicy`. Idempotente.
+    let fchain = crate::capture("nft", &["list", "chain", "ip", INGRESS_TABLE, "forward"]).unwrap_or_default();
+    let self_accept = format!("iifname \"{bridge}\" oifname \"{bridge}\" accept");
+    if !fchain.contains(&self_accept) {
+        run_ok("nft", &["add", "rule", "ip", INGRESS_TABLE, "forward", "iifname", bridge, "oifname", bridge, "accept"]);
+    }
     // isolamento entre redes: drop forward entre esta bridge e as outras delonix.
     let listed = crate::capture("ip", &["-o", "link", "show", "type", "bridge"]).unwrap_or_default();
     let fwd = crate::capture("nft", &["list", "chain", "ip", INGRESS_TABLE, "fwdeny"]).unwrap_or_default();
