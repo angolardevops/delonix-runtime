@@ -1,0 +1,18 @@
+[package]
+name = "delonix-runtime-bin"
+version.workspace = true
+edition.workspace = true
+
+# Binário LEAN só-runtime (node/CRI): executa containers a partir de imagens OCI,
+# sem a API/Console/orquestrador do PaaS. Ver crates/delonix-cli para a plataforma.
+[[bin]]
+name = "delonix-runtime"
+path = "src/main.rs"
+
+[dependencies]
+delonix-core = { path = "../delonix-core" }
+delonix-runtime = { path = "../delonix-runtime" }
+delonix-image = { path = "../delonix-image" }
+clap = { workspace = true }
+serde_json = { workspace = true }
+libc = { workspace = true }
