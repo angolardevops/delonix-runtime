@@ -149,18 +149,23 @@ fn binary_in_path(name: &str) -> bool {
         .unwrap_or(false)
 }
 
-/// Extrai o campo `"format"` de um `qemu-img info --output=json`. Função pura
-/// (testável sem `qemu-img`). Ignora a chave distinta `"format-specific"` (o
-/// padrão `"format"` com aspa-a-fechar não casa o prefixo `"format-`).
-fn parse_qemu_format(json: &str) -> Option<String> {
-    let i = json.find("\"format\"")?;
-    let rest = &json[i + "\"format\"".len()..];
-    let colon = rest.find(':')?;
-    let rest = &rest[colon + 1..];
-    let q1 = rest.find('"')?;
-    let q2 = rest[q1 + 1..].find('"')?;
-    let fmt = &rest[q1 + 1..q1 + 1 + q2];
-    (!fmt.is_empty()).then(|| fmt.to_string())
+/// Extrai o formato da linha `file format: <fmt>` do output HUMANO de
+/// `qemu-img info`. Função pura (testável sem `qemu-img`).
+///
+/// NB: usa-se o output humano de propósito — o `--output=json` moderno aninha um
+/// nó `children` com o `"format": "file"` da camada de protocolo ANTES do
+/// `"format"` de topo, e um parse ingénuo apanharia "file" em vez de "qcow2". O
+/// output humano tem uma única linha `file format:` (a de topo).
+fn parse_qemu_format(info: &str) -> Option<String> {
+    for line in info.lines() {
+        if let Some(rest) = line.trim().strip_prefix("file format:") {
+            let f = rest.trim();
+            if !f.is_empty() {
+                return Some(f.to_string());
+            }
+        }
+    }
+    None
 }
 
 /// Formato REAL do disco base via `qemu-img info` — NÃO confia na extensão. As
@@ -169,11 +174,7 @@ fn parse_qemu_format(json: &str) -> Option<String> {
 /// guest ler o qcow2 como raw → disco corrompido / não-booting, em silêncio.
 /// Cai para a heurística da extensão se o `qemu-img info` não estiver disponível.
 pub fn disk_backing_format(disk: &Path) -> String {
-    if let Ok(out) = Command::new("qemu-img")
-        .args(["info", "--output=json"])
-        .arg(disk)
-        .output()
-    {
+    if let Ok(out) = Command::new("qemu-img").arg("info").arg(disk).output() {
         if out.status.success() {
             if let Some(fmt) = std::str::from_utf8(&out.stdout).ok().and_then(parse_qemu_format) {
                 return fmt;
@@ -886,15 +887,13 @@ mod tests {
 
     #[test]
     fn parse_qemu_format_extrai_formato_real() {
-        // `.img` que é qcow2 por dentro — o cerne do bug do backing-format.
-        let j = r#"{"virtual-size":2361393152,"filename":"jammy.img","format":"qcow2","actual-size":643825664,"format-specific":{"type":"qcow2","data":{}}}"#;
-        assert_eq!(parse_qemu_format(j).as_deref(), Some("qcow2"));
-        let raw = r#"{"filename":"disco.raw","format":"raw","virtual-size":10}"#;
+        // Output humano do `qemu-img info` de um `.img` que é qcow2 por dentro
+        // (o cerne do bug do backing-format).
+        let info = "image: jammy.img\nfile format: qcow2\nvirtual size: 2.2 GiB (2361393152 bytes)\ndisk size: 614 MiB\n";
+        assert_eq!(parse_qemu_format(info).as_deref(), Some("qcow2"));
+        let raw = "image: disco.img\nfile format: raw\nvirtual size: 8 MiB\n";
         assert_eq!(parse_qemu_format(raw).as_deref(), Some("raw"));
-        // não confunde com a chave "format-specific".
-        let only_spec = r#"{"format-specific":{"type":"qcow2"}}"#;
-        assert_eq!(parse_qemu_format(only_spec), None);
-        assert_eq!(parse_qemu_format("{}"), None);
+        assert_eq!(parse_qemu_format("image: x\nvirtual size: 8 MiB\n"), None);
     }
 
     /// VmConfig mínima para exercitar os helpers de args HPC (S4).
