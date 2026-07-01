@@ -112,6 +112,12 @@ fn default_subnet() -> String {
 /// histórico — acesso direto ao IP do container a partir de outras redes).
 fn forward_inbound_deny(subnet: &str) {
     if std::env::var_os("DELONIX_FORWARD_OPEN").is_some() {
+        // NET-03: o opt-out reverte para default-allow — não deixar isto silencioso.
+        eprintln!(
+            "delonix: AVISO DE SEGURANÇA — DELONIX_FORWARD_OPEN activo: o inbound-deny do\n\
+             \x20        forward está DESLIGADO (containers acessíveis directamente de outras\n\
+             \x20        redes/host). Só para depuração — NÃO usar em produção."
+        );
         return;
     }
     let drop_needle = format!("ip daddr {subnet} ct state new drop");
