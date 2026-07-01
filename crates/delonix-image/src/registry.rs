@@ -402,6 +402,31 @@ pub fn http_get(url: &str) -> Result<Vec<u8>> {
     Ok(resp.bytes().map_err(reg_err)?.to_vec())
 }
 
+/// POST de um corpo JSON com um Bearer opcional; devolve `(status_http, corpo)`.
+/// Usado pelo TRANSPORTE HTTP do CLI (`DELONIX_HOST=https://…` → `/v2/cli`): o CLI
+/// envia o seu argv à API, que corre o comando na plataforma. Aceita certificados
+/// self-signed só com `DELONIX_API_INSECURE=1` (a Console self-host é self-signed;
+/// um Cloud com TLS válido não precisa).
+pub fn http_post_json(url: &str, body: &str, token: Option<&str>) -> Result<(u16, Vec<u8>)> {
+    let insecure = std::env::var("DELONIX_API_INSECURE").ok().as_deref() == Some("1");
+    let client = reqwest::blocking::Client::builder()
+        .user_agent("delonix/0.1")
+        .timeout(Duration::from_secs(600))
+        .danger_accept_invalid_certs(insecure)
+        .build()
+        .map_err(reg_err)?;
+    let mut req = client
+        .post(url)
+        .header("Content-Type", "application/json")
+        .body(body.to_string());
+    if let Some(t) = token {
+        req = req.bearer_auth(t);
+    }
+    let resp = req.send().map_err(reg_err)?;
+    let status = resp.status().as_u16();
+    Ok((status, resp.bytes().map_err(reg_err)?.to_vec()))
+}
+
 /// Descarrega `reference` de um registo OCI para o armazém local.
 pub fn pull_from_registry(store: &ImageStore, reference: &str) -> Result<Image> {
     let (host, repo, refr) = parse_reference(reference);
