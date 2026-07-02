@@ -39,6 +39,10 @@ struct SandboxRec {
     /// `sysctl`s do pod (`chave=valor`), aplicados aos containers do sandbox.
     #[serde(default)]
     sysctls: Vec<String>,
+    /// IP (endereço, sem CIDR) atribuído pelo IPAM do CNI quando o sandbox foi
+    /// configurado por plugins CNI (rootless, via holder). Vazio = SDN nativo.
+    #[serde(default)]
+    cni_ip: String,
 }
 
 fn sandbox_state(r: &SandboxRec) -> i32 {
@@ -242,9 +246,26 @@ pub fn run_pod_sandbox(
     // Pod REAL do Delonix: um infra container (`pod-cri-<id>`) detém o netns
     // partilhado (estilo "pause"), que os containers do sandbox passam a juntar
     // via `--pod`. É o que dá networking de pod e partilha de namespaces.
+    // CNI (opt-in `DELONIX_CNI=1` + conflist): o sandbox obtém a rede de plugins CNI
+    // reais (a cadeia do cluster, ex. Calico), como no containerd/CRI-O. Rootless →
+    // os plugins correm no holder (dono da netns); a netns chama-se `cri-<id>` para
+    // os containers do sandbox se juntarem via `--pod cri-<id>` (join_argv). Sem a
+    // flag, `enabled_conf()` é None e segue o caminho nativo (SDN) inalterado.
+    let mut cni_ip = String::new();
     if !host_network {
         let pod = format!("cri-{id}");
-        if delonix_runtime::is_rootless() {
+        let cni = delonix_net::cni::enabled_conf();
+        if cni.is_some() && delonix_runtime::is_rootless() {
+            let conf = cni.unwrap();
+            let conf_json = serde_json::to_string(&conf)
+                .map_err(|e| Status::internal(format!("serializar conflist: {e}")))?;
+            match delonix_net::infra::cni_attach_container(&pod, &conf_json) {
+                Ok((_netns, cidr)) => {
+                    cni_ip = cidr.split('/').next().unwrap_or("").to_string();
+                }
+                Err(e) => return Err(Status::internal(format!("CNI ADD do sandbox {pod}: {e}"))),
+            }
+        } else if delonix_runtime::is_rootless() {
             // ROOTLESS: o pod é um netns PARTILHADO do ingress (delonix0 + DHCP +
             // DNS + firewall); os containers do sandbox juntam-se via `--pod`.
             if !delonix_detached(base, &["netns", "attach", &pod])? {
@@ -270,6 +291,7 @@ pub fn run_pod_sandbox(
         host_pid,
         host_ipc,
         sysctls,
+        cni_ip,
     };
     write_rec(&sb_dir(base), &id, &rec)?;
     Ok(Response::new(RunPodSandboxResponse { pod_sandbox_id: id }))
@@ -305,7 +327,13 @@ pub fn remove_pod_sandbox(
     // Remove o pod real do Delonix (infra container + netns), se existia.
     if let Ok(sb) = read_rec::<SandboxRec>(&sb_dir(base), &id) {
         if !sb.host_network {
-            if delonix_runtime::is_rootless() {
+            if !sb.cni_ip.is_empty() {
+                // sandbox configurado por CNI (rootless): DEL dos plugins no holder.
+                if let Some(conf) = delonix_net::cni::enabled_conf() {
+                    let cj = serde_json::to_string(&conf).unwrap_or_default();
+                    let _ = delonix_net::infra::cni_detach_container(&format!("cri-{id}"), &cj);
+                }
+            } else if delonix_runtime::is_rootless() {
                 let _ = delonix(base, &["netns", "detach", &format!("cri-{id}")]);
             } else {
                 let _ = delonix(base, &["pod", "rm", &format!("cri-{id}")]);
@@ -346,6 +374,9 @@ pub fn pod_sandbox_status(
     // IP do pod: o do infra container (`pod-cri-<id>`), que detém o netns.
     let ip = if r.host_network {
         String::new()
+    } else if !r.cni_ip.is_empty() {
+        // sandbox configurado por CNI: o IP veio do IPAM do plugin.
+        r.cni_ip.clone()
     } else if delonix_runtime::is_rootless() {
         // ROOTLESS: IP do netns partilhado do pod no ingress (determinístico).
         delonix_net::infra::container_ip(&format!("cri-{}", r.id))
