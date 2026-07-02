@@ -20,6 +20,7 @@
 use delonix_core::{Error, Result};
 use std::process::{Command, Stdio};
 
+pub mod cni;
 pub mod discover;
 pub mod infra;
 pub mod router;
