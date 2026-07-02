@@ -487,10 +487,20 @@ fn control_loop(listener: std::os::unix::net::UnixListener) -> ! {
 /// `ping`) e devolve a resposta (`ok\n` ou `err: <msg>\n`).
 fn handle_control(line: &str) -> String {
     let parts: Vec<&str> = line.split_whitespace().collect();
+    // CNI (rootless): o plugin corre AQUI, no holder — mapped-root e dono da netns
+    // (o host, uid do utilizador, não teria CAP_NET_ADMIN nela). `cni-add` devolve
+    // o IP atribuído no corpo da resposta (`ok <cidr>`), para o host o registar.
+    if let ["cni-add", netns, id, ifname, hex] = parts.as_slice() {
+        return match do_cni_add(netns, id, ifname, hex) {
+            Ok(ip) => format!("ok {ip}\n"),
+            Err(e) => format!("err: {e}\n"),
+        };
+    }
     let res = match parts.as_slice() {
         ["ping"] => Ok(()),
         ["attach", netns, ip, bridge, gateway] => do_attach(netns, ip, bridge, gateway),
         ["detach", netns] => do_detach(netns),
+        ["cni-del", netns, id, ifname, hex] => do_cni_del(netns, id, ifname, hex),
         // multi-homing ao vivo (rootless): liga/desliga uma rede ADICIONAL a um
         // container já a correr (veth extra para a bridge da rede privada).
         ["attach-extra", netns, ifname, ip, bridge, gateway] => do_attach_extra(netns, ifname, ip, bridge, gateway),
@@ -732,6 +742,41 @@ fn prefix_of(ip: &str) -> String {
     } else {
         INFRA_PREFIX.to_string()
     }
+}
+
+/// CNI rootless (holder): cria uma netns VAZIA e delega a sua configuração aos
+/// plugins CNI (`crate::cni::add`) — a bridge/veth/IPAM são do plugin, não do SDN
+/// nativo. Corre no holder (mapped-root, dono da netns → CAP_NET_ADMIN). Devolve o
+/// IP (CIDR) atribuído pelo IPAM do CNI. `hex` = a conflist JSON em hex.
+fn do_cni_add(netns: &str, id: &str, ifname: &str, hex: &str) -> Result<String> {
+    let netns = sanitize(netns);
+    let bytes = hex_decode(hex).ok_or_else(|| Error::Invalid("conflist hex inválida".into()))?;
+    let conf = crate::cni::parse_config(&String::from_utf8_lossy(&bytes))?;
+    // netns vazia (o plugin move o veth para lá); limpa restos de tentativas.
+    run_ok("ip", &["netns", "del", &netns]);
+    run("ip", &["netns", "add", &netns])?;
+    let path = format!("/run/netns/{netns}");
+    match crate::cni::add(&conf, &crate::cni::plugin_dirs(), id, &path, ifname) {
+        Ok(r) => Ok(r.ips.first().map(|i| i.address.clone()).unwrap_or_default()),
+        Err(e) => {
+            // rollback: não deixa a netns órfã se o plugin falhou.
+            run_ok("ip", &["netns", "del", &netns]);
+            Err(e)
+        }
+    }
+}
+
+/// CNI rootless (holder): corre `DEL` dos plugins e remove a netns. Best-effort.
+fn do_cni_del(netns: &str, id: &str, ifname: &str, hex: &str) -> Result<()> {
+    let netns = sanitize(netns);
+    if let Some(bytes) = hex_decode(hex) {
+        if let Ok(conf) = crate::cni::parse_config(&String::from_utf8_lossy(&bytes)) {
+            let path = format!("/run/netns/{netns}");
+            let _ = crate::cni::del(&conf, &crate::cni::plugin_dirs(), id, &path, ifname);
+        }
+    }
+    run_ok("ip", &["netns", "del", &netns]);
+    Ok(())
 }
 
 /// Cria o netns de um container e liga-o à BRIDGE da sua rede por `veth`: par
@@ -1342,6 +1387,35 @@ pub fn container_ip(id: &str) -> String {
     container_ip_on(INFRA_PREFIX, id)
 }
 
+/// **Liga um container via CNI (rootless)**: garante a infra de pé (ref-count++) e
+/// pede ao holder para correr os plugins CNI (`conf_json` = conflist) na netns do
+/// container. Devolve `(netns, ip_cidr)`. O IP vem do IPAM do plugin. Em falha
+/// desfaz o ref-count. Preserva o rootless-first: o plugin corre no holder (dono
+/// da netns), não no host sem privilégio.
+pub fn cni_attach_container(id: &str, conf_json: &str) -> Result<(String, String)> {
+    acquire()?; // ensure_up + refcount++
+    let netns = sanitize(id);
+    let hex = hex_encode(conf_json.as_bytes());
+    let cmd = format!("cni-add {netns} {netns} {} {hex}", crate::cni::DEFAULT_IFNAME);
+    match control_query(&cmd) {
+        Ok(ip) => Ok((netns, ip)),
+        Err(e) => {
+            release();
+            Err(e)
+        }
+    }
+}
+
+/// **Desliga um container CNI (rootless)**: pede ao holder o `DEL` dos plugins +
+/// remoção da netns, e liberta o ref-count. Best-effort.
+pub fn cni_detach_container(id: &str, conf_json: &str) -> Result<()> {
+    let netns = sanitize(id);
+    let hex = hex_encode(conf_json.as_bytes());
+    let _ = control_send(&format!("cni-del {netns} {netns} {} {hex}", crate::cni::DEFAULT_IFNAME));
+    release();
+    Ok(())
+}
+
 /// **Liga um container a uma rede do ingress** (`net`=`ingress` ou nome de rede
 /// privada): garante a infra de pé (ref-count++), resolve a bridge/gateway e pede
 /// ao holder o netns + `veth` + IP. Devolve `(netns, ip)`. Em falha desfaz o ref-count.
@@ -1663,6 +1737,12 @@ pub fn container_net_bytes(id: &str) -> Option<(u64, u64)> {
 /// Envia um comando ao socket de controlo do holder e espera `ok`. Tenta
 /// brevemente até o socket existir (o holder cria-o ao arrancar).
 fn control_send(cmd: &str) -> Result<()> {
+    control_query(cmd).map(|_| ())
+}
+
+/// Como `control_send`, mas devolve o CORPO da resposta após `ok ` (vazio se só
+/// `ok`). Usado pelo `cni-add`, cuja resposta carrega o IP atribuído pelo IPAM.
+fn control_query(cmd: &str) -> Result<String> {
     use std::io::{Read, Write};
     use std::os::unix::net::UnixStream;
     // Fast-fail se o holder NÃO estiver vivo: sem ele não há ninguém a responder, e
@@ -1690,7 +1770,10 @@ fn control_send(cmd: &str) -> Result<()> {
                 let _ = s.read_to_string(&mut resp);
                 let resp = resp.trim();
                 if resp == "ok" {
-                    return Ok(());
+                    return Ok(String::new());
+                }
+                if let Some(body) = resp.strip_prefix("ok ") {
+                    return Ok(body.trim().to_string());
                 }
                 return Err(Error::Runtime {
                     context: "ingress control",
