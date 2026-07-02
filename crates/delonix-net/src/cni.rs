@@ -306,6 +306,16 @@ pub fn del(
     }
 }
 
+/// A camada CNI está ativa? Opt-in por `DELONIX_CNI=1`. Devolve a conflist default
+/// (`/etc/cni/net.d`) se ativa **e** existir uma config; senão `None` — nesse caso
+/// o chamador usa o SDN nativo, sem qualquer mudança de comportamento.
+pub fn enabled_conf() -> Option<NetConfList> {
+    if std::env::var("DELONIX_CNI").ok().as_deref() != Some("1") {
+        return None;
+    }
+    load_default(Path::new(DEFAULT_CONF_DIR)).ok().flatten()
+}
+
 /// Diretórios de plugins a partir da env `CNI_PATH` (`:`-separada) ou o default.
 pub fn plugin_dirs() -> Vec<PathBuf> {
     match std::env::var("CNI_PATH") {
