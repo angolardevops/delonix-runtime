@@ -1366,7 +1366,19 @@ fn setup_node_cgroup_ns(cid: &str) {
         .map(|s| !s.trim().is_empty())
         .unwrap_or(false);
     if !real_cg2 {
-        // SAFETY: root no userns (caps completas); o umount é só neste mount-ns.
+        // Torna `/` (recursivamente) PRIVADO ANTES do umount, para o umount de
+        // `/sys` NUNCA propagar ao mount-ns do holder — que os `exec` de
+        // `journalctl` da deteção de readiness do Kind usam. Sem isto, um umount
+        // propagado deixava intermitentemente o `/sys` do holder partido → o
+        // `docker logs -f` não surfava a readiness → o Kind pendurava em
+        // "Preparing nodes". SAFETY: root no userns (caps completas), só neste ns.
+        let _ = mount(
+            None::<&str>,
+            "/",
+            None::<&str>,
+            MsFlags::MS_REC | MsFlags::MS_PRIVATE,
+            None::<&str>,
+        );
         let _ = umount2("/sys", MntFlags::empty());
     }
     // 2) Move-nos para um leaf IRMÃO do cgroup do `kind`, sob o SCOPE-pai, e delega
