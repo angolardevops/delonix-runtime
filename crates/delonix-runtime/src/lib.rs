@@ -1347,6 +1347,84 @@ fn apply_ulimits(specs: &[String]) {
 }
 
 #[allow(clippy::too_many_arguments)]
+/// (privileged / node Kind) Dá ao container uma RAIZ DE CGROUP DEDICADA e VAZIA.
+///
+/// No caminho rootless-com-rede o `ip netns exec` monta um sysfs FRESCO sobre
+/// `/sys`, TAPANDO o cgroup2 delegado; e o node herdaria como raiz do seu cgroup-ns
+/// o próprio cgroup-scope onde o `kind` (e helpers do delonix) correm — mas o
+/// kubelet do node aborta se essa raiz tiver processos DIRETOS
+/// (`create-kubelet-cgroup-v2.sh` precisa de escrever o `cgroup.subtree_control`
+/// de topo). Solução: (1) destapar o cgroup2 real (umount do sysfs), (2) mover-nos
+/// para um leaf `<base>/dlx-<id>` VAZIO, (3) `unshare(CLONE_NEWCGROUP)` — a raiz do
+/// cgroup-ns passa a ser o leaf (só o nosso init) e `kind`/`delonix`/helpers ficam
+/// ACIMA dela. Best-effort: o `unshare` final corre SEMPRE (mesmo sem o leaf dá o
+/// cgroup-ns como antes — sem regressão para privileged não-node).
+fn setup_node_cgroup_ns(cid: &str) {
+    // 1) Destapa o cgroup2 real. No caminho rootless-com-rede o `ip netns exec` monta
+    //    um sysfs FRESCO sobre `/sys` (SEM cgroup2 → SEM o ficheiro
+    //    `cgroup.controllers`), tapando o cgroup2 delegado. Deteta-se pela AUSÊNCIA
+    //    desse ficheiro — um cgroup2 real tem-no SEMPRE, mesmo sem controladores
+    //    delegados (ler "não-vazio" dava falso-negativo nesse caso).
+    let real_cg2 = std::path::Path::new("/sys/fs/cgroup/cgroup.controllers").exists();
+    if !real_cg2 {
+        // Higiene: torna `/` (recursivamente) PRIVADO antes do umount para o umount
+        // não escapar deste mount-ns. (O `ip netns exec` já pôs `/` em rslave, logo o
+        // umount NÃO propaga ao mount-ns do holder de qualquer modo — isto é defesa
+        // em profundidade, não a causa da flakiness de readiness.) SAFETY: root no
+        // userns (caps completas), só neste mount-ns.
+        let _ = mount(
+            None::<&str>,
+            "/",
+            None::<&str>,
+            MsFlags::MS_REC | MsFlags::MS_PRIVATE,
+            None::<&str>,
+        );
+        let _ = umount2("/sys", MntFlags::empty());
+    }
+    // 2) Move-nos para um leaf IRMÃO do cgroup do `kind`, sob o SCOPE-pai, e delega
+    //    os controladores do scope ao leaf. O `kind` (e os helpers) correm em
+    //    `<scope>/kind` (ver `paas.rs`), libertando a raiz do `<scope>`; assim o
+    //    leaf `<scope>/dlx-<id>` fica com cpu delegado (o entrypoint do node exige)
+    //    E como raiz do cgroup-ns fica com 0 processos diretos (o kubelet exige).
+    if let Some(base) = std::fs::read_to_string("/proc/self/cgroup").ok().and_then(|s| {
+        s.lines()
+            .find_map(|l| l.strip_prefix("0::").map(|r| format!("/sys/fs/cgroup{}", r.trim())))
+    }) {
+        // scope = pai do cgroup atual (o node herda `<scope>/kind` do `kind`).
+        if let Some(scope) = std::path::Path::new(&base).parent().map(|p| p.to_path_buf()) {
+            let scope = scope.to_string_lossy().to_string();
+            // RACE-CLOSE (determinístico): delegar `subtree_control` com processos
+            // DIRETOS no scope é rejeitado (no-internal-processes) → o `+cpu` não
+            // engatava e o node não ficava Ready (parte da flakiness ~50%, mascarada
+            // pelo retry). Espera (curto) que a raiz do scope fique VAZIA — o `paas.rs`
+            // move o `kind` para `<scope>/kind`, mas fecha-se aqui qualquer janela.
+            for _ in 0..30 {
+                let empty = std::fs::read_to_string(format!("{scope}/cgroup.procs"))
+                    .map(|s| s.trim().is_empty())
+                    .unwrap_or(true); // ilegível → não esperar (best-effort)
+                if empty {
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
+            // Delega os controladores do scope aos filhos. Best-effort: falha silenciosa
+            // em hosts sem esta estrutura de cgroup delegado.
+            for ctrl in ["+cpu", "+memory", "+pids"] {
+                let _ = std::fs::write(format!("{scope}/cgroup.subtree_control"), ctrl);
+            }
+            let leaf = format!("{scope}/dlx-{cid}");
+            if std::fs::create_dir_all(&leaf).is_ok() {
+                let _ = std::fs::write(
+                    format!("{leaf}/cgroup.procs"),
+                    std::process::id().to_string(),
+                );
+            }
+        }
+    }
+    // 3) Ancora a raiz do cgroup-ns no cgroup ATUAL (o leaf, se o move funcionou).
+    let _ = unshare(CloneFlags::CLONE_NEWCGROUP);
+}
+
 fn container_init(
     rootfs: &str,
     hostname: &str,
@@ -1375,6 +1453,8 @@ fn container_init(
     console_sock: Option<(i32, i32)>,
     secret_files: &[(String, String)],
     workdir: Option<&str>,
+    cid: &str,
+    node_cgroup: bool,
 ) -> isize {
     // User namespace: espera que o PAI escreva uid_map/gid_map antes de continuar
     // (até lá, somos `nobody` sem caps). O byte recebido é o "podes avançar".
@@ -1409,6 +1489,15 @@ fn container_init(
     }
     if detach {
         detach_stdio(log_fd);
+    }
+    // Node KIND: ANTES de montar o rootfs (que remonta `/sys`), dá ao node uma raiz
+    // de cgroup-ns dedicada e vazia (destapa o cgroup2 real, move-nos p/ um leaf,
+    // `unshare(NEWCGROUP)`). Assim o cgroup2 que o rootfs vai montar reflete o leaf
+    // como raiz. Gated ao node Kind (label `io.x-k8s.kind.*`), NÃO a todo o
+    // `--privileged` — um container privilegiado normal não deve ter a hierarquia de
+    // cgroup mexida. Best-effort.
+    if node_cgroup {
+        setup_node_cgroup_ns(cid);
     }
     // `setup_rootfs` corre como o criador do user ns (caps completas, mesmo sendo
     // `nobody`): o pivot_root e os ficheiros vão para o overlay do host (que aceita
@@ -2226,10 +2315,11 @@ fn spawn(store: &Store, container: &mut Container, rootfs: &str, spec: &RunSpec<
         flags |= CloneFlags::CLONE_NEWUSER;
     }
     // --privileged: cgroup namespace próprio (o systemd dentro do container vê o
-    // seu cgroup como raiz e pode delegar sub-cgroups).
-    if privileged {
-        flags |= CloneFlags::CLONE_NEWCGROUP;
-    }
+    // seu cgroup como raiz e pode delegar sub-cgroups). NÃO o criamos aqui: o
+    // `container_init` faz `unshare(CLONE_NEWCGROUP)` DEPOIS de se mover para um
+    // leaf dedicado `dlx-<id>` (ver `setup_node_cgroup_ns`), para que a raiz do
+    // cgroup-ns do node fique VAZIA (regra no-internal-processes que o kubelet
+    // exige) — em vez de ancorar no cgroup-scope partilhado com o `kind`.
     // Pipe de sincronização: o filho espera o pai mapear os uid/gid (user ns).
     let sync = if userns {
         let mut fds = [0i32; 2];
@@ -2270,6 +2360,11 @@ fn spawn(store: &Store, container: &mut Container, rootfs: &str, spec: &RunSpec<
         };
     // CWD da imagem (OCI WorkingDir) — capturado p/ o filho fazer `chdir` antes do exec.
     let workdir = container.workdir.clone();
+    // Id do container: usado p/ o leaf de cgroup dedicado do node Kind.
+    let cid = container.id.clone();
+    // Node KIND (label `io.x-k8s.kind.*`): só estes recebem o cgroup-ns dedicado —
+    // um container `--privileged` normal fica com a hierarquia de cgroup intacta.
+    let node_cgroup = privileged && container.labels.keys().any(|k| k.starts_with("io.x-k8s.kind"));
     let mut stack = vec![0u8; 1024 * 1024];
     let cb = Box::new(move || {
         container_init(
@@ -2300,6 +2395,8 @@ fn spawn(store: &Store, container: &mut Container, rootfs: &str, spec: &RunSpec<
             console_sock,
             &secret_files,
             workdir.as_deref(),
+            &cid,
+            node_cgroup,
         )
     });
 
