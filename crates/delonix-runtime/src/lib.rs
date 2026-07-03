@@ -1359,6 +1359,35 @@ fn apply_ulimits(specs: &[String]) {
 /// cgroup-ns passa a ser o leaf (só o nosso init) e `kind`/`delonix`/helpers ficam
 /// ACIMA dela. Best-effort: o `unshare` final corre SEMPRE (mesmo sem o leaf dá o
 /// cgroup-ns como antes — sem regressão para privileged não-node).
+/// Unidades systemd que num nó Kind rootless **falham e esgotam o timeout** (não têm
+/// acesso a kernel-fs/módulos/udev), atrasando o boot ~2min e fazendo o Kind desistir
+/// na deteção de readiness. Mascaramo-las (symlink → `/dev/null`, o mecanismo de
+/// `systemctl mask`) na `/etc/systemd/system/` do rootfs, ANTES de o systemd arrancar.
+/// Nenhuma é necessária ao `containerd`/`kubelet` (os módulos do host já estão
+/// carregados e visíveis). Corre pós-pivot, uid 0 no userns. Best-effort.
+fn mask_slow_node_units() {
+    const UNITS: &[&str] = &[
+        "dev-mqueue.mount",
+        "sys-kernel-debug.mount",
+        "sys-kernel-tracing.mount",
+        "sys-kernel-config.mount",
+        "kmod-static-nodes.service",
+        "systemd-modules-load.service",
+        "systemd-udev-trigger.service",
+        "modprobe@configfs.service",
+        "modprobe@dm_mod.service",
+        "modprobe@fuse.service",
+        "modprobe@loop.service",
+    ];
+    let dir = "/etc/systemd/system";
+    let _ = std::fs::create_dir_all(dir);
+    for u in UNITS {
+        let link = format!("{dir}/{u}");
+        let _ = std::fs::remove_file(&link); // idempotente (restart do nó)
+        let _ = std::os::unix::fs::symlink("/dev/null", &link);
+    }
+}
+
 fn setup_node_cgroup_ns(cid: &str) {
     // 1) Destapa o cgroup2 real. No caminho rootless-com-rede o `ip netns exec` monta
     //    um sysfs FRESCO sobre `/sys` (SEM cgroup2 → SEM o ficheiro
@@ -1520,6 +1549,14 @@ fn container_init(
         setup_dev_userns("/.delonix_old", devices);
         let _ = umount2("/.delonix_old", MntFlags::MNT_DETACH);
         let _ = std::fs::remove_dir("/.delonix_old");
+    }
+    // Nó Kind: mascara as unidades systemd que FALHAM e atrasam o boot num container
+    // rootless (mounts de kernel-fs, modprobe de módulos, udev/modules-load). Sem
+    // isto o boot leva ~2min (cada uma esgota o timeout) e o Kind desiste na deteção
+    // de readiness ("Preparing nodes"). Aqui já estamos pós-pivot (o `/` é o rootfs do
+    // nó), uid 0 no userns e com escrita. Best-effort.
+    if node_cgroup {
+        mask_slow_node_units();
     }
     // --privileged detached (nodes Kind): aloca um `/dev/console` (pty) para o
     // PID 1 e captura-o no log. Tem de ser DEPOIS do `/dev`/devpts montado (acima)
