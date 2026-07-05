@@ -120,6 +120,52 @@ fn mem_mib(s: &str) -> u64 {
     }
 }
 
+/// `MemAvailable` do host em MiB (de `/proc/meminfo`) — memória que pode ser
+/// dada a novos processos sem swap. `None` se ilegível.
+fn host_mem_available_mib() -> Option<u64> {
+    let s = std::fs::read_to_string("/proc/meminfo").ok()?;
+    let kib: u64 = s
+        .lines()
+        .find_map(|l| l.strip_prefix("MemAvailable:"))?
+        .split_whitespace()
+        .next()?
+        .parse()
+        .ok()?;
+    Some(kib / 1024)
+}
+
+/// Controlo de ADMISSÃO de VM: recusa arrancar uma VM se a memória pedida não
+/// couber no `MemAvailable` do host menos uma reserva de segurança. Ao contrário
+/// dos containers (com orçamento na `delonix.slice`), a VM é um processo
+/// (cloud-hypervisor/qemu) que consome RAM do host DIRETAMENTE; sem esta
+/// verificação, agendar 30×2GB num host de 32GB afogava/OOM-mata o host. Como o
+/// `MemAvailable` já desconta as VMs em execução, a N-ésima VM que não caiba é
+/// recusada naturalmente. Reserva afinável por `DELONIX_VM_RESERVE_MIB`
+/// (omissão 2048). Best-effort: se `/proc/meminfo` for ilegível, não bloqueia.
+fn vm_admission_check(cfg: &VmConfig) -> Result<()> {
+    let avail = match host_mem_available_mib() {
+        Some(a) => a,
+        None => return Ok(()),
+    };
+    let reserve = std::env::var("DELONIX_VM_RESERVE_MIB")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(2048u64);
+    let want = mem_mib(&cfg.memory);
+    if want.saturating_add(reserve) > avail {
+        return Err(Error::Runtime {
+            context: "admissão VM",
+            message: format!(
+                "protecção do host: a VM '{}' pede {want} MiB mas o host só tem {avail} MiB \
+                 disponíveis (reserva {reserve} MiB). Pára VMs/containers, reduz a memória, \
+                 ou baixa DELONIX_VM_RESERVE_MIB (por tua conta e risco).",
+                cfg.name
+            ),
+        });
+    }
+    Ok(())
+}
+
 /// Aspas para shell (single-quote, escapando `'`).
 fn shq(s: &str) -> String {
     format!("'{}'", s.replace('\'', "'\\''"))
@@ -785,6 +831,10 @@ pub fn create(base: &Path, cfg: &VmConfig) -> Result<Vm> {
         None => select_backend(cfg.backend.as_deref())?,
     };
 
+    // Admissão: recusa arrancar se não houver RAM no host (anti-overcommit).
+    // Só as VMs que vão MESMO arrancar (não a idempotente já-a-correr acima).
+    vm_admission_check(cfg)?;
+
     let disk_path = std::fs::canonicalize(&cfg.disk)
         .map_err(|_| Error::Invalid(format!("imagem não encontrada: {}", cfg.disk)))?;
     let overlay = vmdir.join(format!("{}.qcow2", cfg.name));
@@ -929,6 +979,45 @@ mod tests {
         assert_eq!(mem_mib("2Gi"), 2048); // sufixo k8s tolerado (antes dava 1024)
         assert_eq!(mem_mib("512Mi"), 512);
         assert_eq!(mem_mib("lixo"), 1024); // fallback robusto
+    }
+
+    fn test_vm_cfg(mem: &str) -> VmConfig {
+        VmConfig {
+            name: "t".into(),
+            disk: String::new(),
+            vcpus: 1,
+            memory: mem.into(),
+            network: String::new(),
+            kernel: None,
+            initrd: None,
+            firmware: None,
+            cmdline: None,
+            seed: None,
+            restart_policy: None,
+            hugepages: false,
+            cpu_affinity: None,
+            devices: vec![],
+            backend: None,
+            net_mode: None,
+            bridge: None,
+        }
+    }
+
+    #[test]
+    fn vm_admission_recusa_quando_nao_cabe() {
+        std::env::set_var("DELONIX_VM_RESERVE_MIB", "0");
+        // Só valida se o host tem MemAvailable legível (senão é no-op best-effort).
+        if host_mem_available_mib().is_some() {
+            assert!(
+                vm_admission_check(&test_vm_cfg("1000000G")).is_err(), // 1 PB — nunca cabe
+                "VM gigante deve ser recusada"
+            );
+        }
+        assert!(
+            vm_admission_check(&test_vm_cfg("1M")).is_ok(), // minúscula — cabe sempre
+            "VM minúscula deve ser admitida"
+        );
+        std::env::remove_var("DELONIX_VM_RESERVE_MIB");
     }
 
     #[test]
