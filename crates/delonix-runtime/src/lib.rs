@@ -2049,6 +2049,49 @@ fn current_cgroup_v2() -> Option<String> {
     Some(format!("/sys/fs/cgroup{rel}"))
 }
 
+/// Destapa o cgroup2 real quando o `/sys` foi TAPADO por um sysfs fresco (o
+/// `ip netns exec` do caminho rootless-com-rede faz isso) — sem o
+/// `cgroup.controllers` visível NENHUMA operação de cgroup funciona e o
+/// container ficava no cgroup HERDADO da sessão (métricas 0 na Console,
+/// limites não aplicados). Mesma técnica do `setup_node_cgroup_ns` (nodes
+/// Kind), agora disponível ao caminho GERAL: torna `/` privado (o umount não
+/// propaga; o `ip netns exec` já pôs `/` em rslave — defesa em profundidade) e
+/// desmonta o `/sys` do netns, revelando o cgroup2 por baixo. Só atua no
+/// mount-ns do CHAMADOR; leitores de `/sys/class/net` (métricas de rede) criam
+/// sempre um mount-ns fresco próprio, pelo que não são afetados. Best-effort.
+pub fn reveal_cgroup2_if_masked() {
+    if std::path::Path::new("/sys/fs/cgroup/cgroup.controllers").exists() {
+        return; // cgroup2 real já visível
+    }
+    let _ = mount(
+        None::<&str>,
+        "/",
+        None::<&str>,
+        MsFlags::MS_REC | MsFlags::MS_PRIVATE,
+        None::<&str>,
+    );
+    let _ = umount2("/sys", MntFlags::empty());
+}
+
+/// Base de cgroup PRÓPRIA do Delonix sob a árvore delegada do systemd --user:
+/// dado o cgroup atual (absoluto, `/sys/fs/cgroup/...`), encontra o ancestral
+/// `user@<uid>.service` (a fronteira de delegação — os ficheiros são do
+/// utilizador e o systemd já ativa `cpu memory pids` no `subtree_control`
+/// dele) e devolve `<ancestral>/dlx-containers`. O cgroup ATUAL da sessão
+/// (ex.: `app-*.scope`) está POVOADO — a regra no-internal-processes recusa
+/// `subtree_control` lá; esta fuga dá-nos uma base VAZIA e delegável.
+fn user_service_base(cur_abs: &str) -> Option<String> {
+    let mut end = 0usize;
+    for seg in cur_abs.split('/') {
+        end += seg.len() + 1; // +1 pelo '/'
+        if seg.starts_with("user@") && seg.ends_with(".service") {
+            // `end-1` = fim do segmento (sem contar o '/' seguinte).
+            return Some(format!("{}/dlx-containers", &cur_abs[..end - 1]));
+        }
+    }
+    None
+}
+
 /// Delegação cgroup ROOTLESS para um container **privileged** (nodes Kind, que
 /// verificam que o controlador `cpu` está delegado). Usa o cgroup DELEGADO do
 /// próprio processo (sob `user@<uid>.service`, escrevível) como base, move o
@@ -2059,25 +2102,55 @@ fn current_cgroup_v2() -> Option<String> {
 /// comportamento atual (sem regressão). Requer o engine num cgroup delegado
 /// (`systemd-run --user --scope -p Delegate=yes` ou serviço de utilizador).
 fn setup_cgroup_delegated(c: &Container, pid: i32) -> bool {
-    let base = match current_cgroup_v2() {
+    let cur = match current_cgroup_v2() {
         Some(b) => b,
         None => return false,
     };
+    // Candidato 1: o cgroup ATUAL como base (funciona quando o delonix corre num
+    // scope `Delegate=yes` DEDICADO, ex.: `systemd-run --user --scope`). Move o
+    // nosso processo para um `dlx-mgr` para libertar a base.
+    if try_delegated_base(&cur, c, pid, true) {
+        return true;
+    }
+    // Candidato 2 (fuga): o cgroup da sessão está POVOADO (a regra
+    // no-internal-processes recusa o `subtree_control`) — usa uma base PRÓPRIA
+    // `<user@uid.service>/dlx-containers` (vazia, delegável; o systemd já ativa
+    // `cpu memory pids` no subtree do `user@`). A regra do ancestral comum
+    // permite mover o pid do scope da sessão para lá (ficheiros do utilizador).
+    if let Some(base) = user_service_base(&cur) {
+        if std::fs::create_dir_all(&base).is_ok() && try_delegated_base(&base, c, pid, false) {
+            return true;
+        }
+    }
+    false
+}
+
+/// Tenta usar `base` como base delegada: move o container para `<base>/dlx-<id>`,
+/// ativa os controladores no `subtree_control` da base e aplica os limites no
+/// leaf. `move_self`: mover o próprio processo p/ `<base>/dlx-mgr` (necessário
+/// quando a base é o cgroup ATUAL — senão os nossos processos bloqueiam o
+/// subtree_control; desnecessário na base-fuga, que começa vazia).
+fn try_delegated_base(base: &str, c: &Container, pid: i32, move_self: bool) -> bool {
     if std::fs::metadata(format!("{base}/cgroup.subtree_control")).is_err() {
         return false; // base não escrevível/delegada
     }
     let leaf = format!("{base}/dlx-{}", c.id);
-    let mgr = format!("{base}/dlx-mgr");
-    if std::fs::create_dir_all(&leaf).is_err() || std::fs::create_dir_all(&mgr).is_err() {
+    if std::fs::create_dir_all(&leaf).is_err() {
         return false;
     }
-    // 1) container → leaf;  2) o nosso processo → mgr (liberta a base de processos).
-    if std::fs::write(format!("{leaf}/cgroup.procs"), pid.to_string()).is_err() {
-        return false;
+    if move_self {
+        // liberta a base de processos DIRETOS (no-internal-processes) antes de
+        // tentar o subtree_control.
+        let mgr = format!("{base}/dlx-mgr");
+        if std::fs::create_dir_all(&mgr).is_ok() {
+            let _ = std::fs::write(format!("{mgr}/cgroup.procs"), std::process::id().to_string());
+        }
     }
-    let _ = std::fs::write(format!("{mgr}/cgroup.procs"), std::process::id().to_string());
-    // 3) delega os controladores aos filhos da base (um a um; falha se a base
-    // ainda tiver processos diretos → scope partilhado → abortar p/ fallback).
+    // 1) Delega os controladores aos filhos da base ANTES de mover o container
+    //    para o leaf: o accounting (memory.current/cpu.stat) só apanha alocações
+    //    feitas COM o controlador ativo — mover primeiro deixava as páginas do
+    //    init por contar (métricas a 0 apesar do leaf certo). Um a um; falha se
+    //    a base tiver processos diretos (scope partilhado) → fallback.
     let mut any = false;
     for ctrl in ["+cpu", "+memory", "+pids"] {
         if std::fs::write(format!("{base}/cgroup.subtree_control"), ctrl).is_ok() {
@@ -2087,9 +2160,15 @@ fn setup_cgroup_delegated(c: &Container, pid: i32) -> bool {
     if !any {
         return false; // sem delegação (no-internal-processes ou sem permissão)
     }
-    // limites best-effort no leaf (agora com os controladores disponíveis).
+    // 2) Limites no leaf (controladores já ativos) — ANTES do processo entrar,
+    //    para o teto valer desde a primeira alocação.
     let _ = std::fs::write(format!("{leaf}/memory.max"), &c.memory_max);
     let _ = std::fs::write(format!("{leaf}/pids.max"), DEFAULT_PIDS_MAX);
+    let _ = std::fs::write(format!("{leaf}/cpu.max"), cpu_max_value(&c.cpus));
+    // 3) Só agora o container entra no leaf.
+    if std::fs::write(format!("{leaf}/cgroup.procs"), pid.to_string()).is_err() {
+        return false;
+    }
     true
 }
 
@@ -2100,7 +2179,12 @@ fn setup_cgroup(c: &Container, pid: i32) -> Result<()> {
     // `--privileged` (nodes Kind), deixando TODO container rootless-com-rede sem
     // memory.max/pids.max/cpu.max — um fork-bomb/leak matava o host. Se a
     // delegação não existir, devolve false e cai no caminho best-effort abaixo.
-    if (is_rootless() || in_userns()) && setup_cgroup_delegated(c, pid) {
+    // EXCETO nodes Kind (privileged + labels io.x-k8s.kind*): esses gerem o
+    // próprio cgroup no FILHO (`setup_node_cgroup_ns` — leaf-irmão com cpu
+    // delegado + raiz de cgroup-ns vazia, invariantes do kubelet). Colocá-los
+    // aqui no pai mudava a base que o filho usa e quebrava essa dança validada.
+    let kind_node = c.labels.keys().any(|k| k.starts_with("io.x-k8s.kind"));
+    if !kind_node && (is_rootless() || in_userns()) && setup_cgroup_delegated(c, pid) {
         return Ok(());
     }
     ensure_delonix_slice(); // a slice-pai com os limites agregados (robustez)
@@ -2538,7 +2622,7 @@ fn spawn(store: &Store, container: &mut Container, rootfs: &str, spec: &RunSpec<
     if let Some(hook) = spec.on_started {
         if let Err(e) = hook(pid.as_raw()) {
             let _ = kill(pid, Signal::SIGKILL);
-            remove_cgroup(&container.cgroup());
+            remove_container_cgroup(container);
             return Err(e);
         }
     }
@@ -2551,7 +2635,7 @@ fn spawn(store: &Store, container: &mut Container, rootfs: &str, spec: &RunSpec<
     container.status = wait_to_status(status);
     container.pid = None;
     store.save(container)?;
-    remove_cgroup(&container.cgroup());
+    remove_container_cgroup(container);
     Ok(())
 }
 
@@ -3252,7 +3336,7 @@ pub fn stop(store: &Store, container: &mut Container, timeout_secs: u64) -> Resu
         container.status = Status::Stopped;
         container.pid = None;
         store.save(container)?;
-        remove_cgroup(&container.cgroup());
+        remove_container_cgroup(container);
         return Ok(());
     }
     let target = Pid::from_raw(pid);
@@ -3271,7 +3355,7 @@ pub fn stop(store: &Store, container: &mut Container, timeout_secs: u64) -> Resu
     container.status = Status::Stopped;
     container.pid = None;
     store.save(container)?;
-    remove_cgroup(&container.cgroup());
+    remove_container_cgroup(container);
     Ok(())
 }
 
@@ -3287,6 +3371,34 @@ fn remove_cgroup(cgroup: &str) {
     }
 }
 
+/// Remove o cgroup do container em TODAS as localizações possíveis: o caminho
+/// root-mode (`Container::cgroup()`) e os leaves delegados rootless — a base
+/// atual (scope dedicado) e a base-fuga `dlx-containers` sob o `user@`.
+/// Best-effort; só remove dirs vazios (o `remove_cgroup` reenta).
+fn remove_container_cgroup(container: &Container) {
+    remove_cgroup(&container.cgroup());
+    if let Some(cur) = current_cgroup_v2() {
+        remove_cgroup(&format!("{cur}/dlx-{}", container.id));
+        if let Some(base) = user_service_base(&cur) {
+            remove_cgroup(&format!("{base}/dlx-{}", container.id));
+        }
+    }
+}
+
+/// Cgroup v2 REAL do container (lido de `/proc/<pid>/cgroup` do init) — cobre
+/// o leaf delegado rootless (`.../dlx-<id>`), onde `Container::cgroup()` (o
+/// caminho root-mode estático) não aponta. Fallback: `cgroup()`.
+pub fn live_cgroup(container: &Container) -> String {
+    if let Some(pid) = container.pid {
+        if let Ok(s) = std::fs::read_to_string(format!("/proc/{pid}/cgroup")) {
+            if let Some(rel) = s.lines().find_map(|l| l.strip_prefix("0::")) {
+                return format!("/sys/fs/cgroup{}", rel.trim());
+            }
+        }
+    }
+    container.cgroup()
+}
+
 /// Suspende (`pause`) ou retoma (`unpause`) um container usando o *freezer* do
 /// cgroup v2 (`cgroup.freeze`): `1` congela todos os processos, `0` retoma. Ao
 /// contrário do `SIGSTOP`, é atómico para a árvore inteira e invisível ao
@@ -3295,7 +3407,7 @@ pub fn set_frozen(container: &Container, frozen: bool) -> Result<()> {
     if !container.pid.map(|p| safe_to_signal(p, container.pid_starttime)).unwrap_or(false) {
         return Err(Error::NotRunning(container.short_id().to_string()));
     }
-    let path = format!("{}/cgroup.freeze", container.cgroup());
+    let path = format!("{}/cgroup.freeze", live_cgroup(container));
     std::fs::write(&path, if frozen { "1" } else { "0" }).map_err(|e| Error::Runtime {
         context: "cgroup.freeze",
         message: format!("{path}: {e}"),
@@ -3305,7 +3417,7 @@ pub fn set_frozen(container: &Container, frozen: bool) -> Result<()> {
 
 /// `true` se o container está congelado (`cgroup.freeze` == 1).
 pub fn is_frozen(container: &Container) -> bool {
-    std::fs::read_to_string(format!("{}/cgroup.freeze", container.cgroup()))
+    std::fs::read_to_string(format!("{}/cgroup.freeze", live_cgroup(container)))
         .map(|s| s.trim() == "1")
         .unwrap_or(false)
 }
@@ -3383,7 +3495,7 @@ pub fn remove(store: &Store, container: &Container, force: bool) -> Result<()> {
             let _ = kill(Pid::from_raw(pid), Signal::SIGKILL);
         }
     }
-    remove_cgroup(&container.cgroup());
+    remove_container_cgroup(container);
     store.remove(&container.id)?;
     Ok(())
 }
@@ -3391,6 +3503,28 @@ pub fn remove(store: &Store, container: &Container, force: bool) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn user_service_base_encontra_a_fronteira_de_delegacao() {
+        // caso normal: sessão de utilizador → base sob o user@<uid>.service.
+        assert_eq!(
+            user_service_base(
+                "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice/app-x.scope"
+            )
+            .as_deref(),
+            Some("/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/dlx-containers")
+        );
+        // o próprio user@ (fim do caminho) também serve de âncora.
+        assert_eq!(
+            user_service_base("/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service")
+                .as_deref(),
+            Some("/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/dlx-containers")
+        );
+        // fora da árvore de sessão (serviço de sistema) → sem fuga.
+        assert_eq!(user_service_base("/sys/fs/cgroup/system.slice/foo.service"), None);
+        // um segmento com "user@" sem o sufixo ".service" não engana o parser.
+        assert_eq!(user_service_base("/sys/fs/cgroup/system.slice/user@fake"), None);
+    }
 
     #[test]
     fn mount_target_rejects_traversal() {
