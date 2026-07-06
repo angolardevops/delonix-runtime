@@ -1012,25 +1012,68 @@ fn do_egress(policy: &str) -> Result<()> {
     }
 }
 
-/// Egress POR-REDE (workspace): bloqueia/permite a saída→Internet de UMA bridge
-/// específica, sem afetar as outras redes. Regra: `forward iifname "<bridge>"
-/// oifname "tap0" drop`. Idempotente (remove as regras antigas dessa bridge antes).
+/// Gera as regras nft (arg-vectors) do egress POR-REDE de uma bridge, na ORDEM
+/// em que devem ficar na chain `fwdeny` (topo→fundo). PURA (testável):
+/// - `deny` → um só `iifname <b> oifname tap0 drop` (denylist total).
+/// - `allow` → nenhuma regra (default-allow).
+/// - `allowlist:<cidr,cidr,...>` (NET-A) → aceita DNS (udp/tcp 53) + cada CIDR,
+///   e DROPA o resto → "nega tudo excepto". O `53` explícito evita ter de deixar
+///   a porta 53 sempre aberta (não há via de DNS-tunneling permanente). Só CIDRs
+///   válidos (`fw_src_ok`) entram — anti-injeção nft; inválidos são saltados.
+fn egress_net_rule_specs(bridge: &str, policy: &str) -> Result<Vec<Vec<String>>> {
+    let base = |extra: &[&str]| -> Vec<String> {
+        let mut v = vec!["ip".into(), INGRESS_TABLE.into(), "fwdeny".into(), "iifname".into(), bridge.to_string(), "oifname".into(), "tap0".into()];
+        v.extend(extra.iter().map(|s| s.to_string()));
+        v
+    };
+    match policy {
+        "allow" => Ok(vec![]),
+        "deny" => Ok(vec![base(&["drop"])]),
+        p if p.starts_with("allowlist:") => {
+            let mut rules = vec![
+                base(&["udp", "dport", "53", "accept"]), // DNS explícito (sem buraco permanente)
+                base(&["tcp", "dport", "53", "accept"]),
+            ];
+            for cidr in p["allowlist:".len()..].split(',').map(|c| c.trim()).filter(|c| !c.is_empty()) {
+                if delonix_core::fw_src_ok(cidr) {
+                    rules.push(base(&["ip", "daddr", cidr, "accept"]));
+                } else {
+                    eprintln!("delonix: egress allowlist — CIDR inválido saltado: {cidr:?}");
+                }
+            }
+            rules.push(base(&["drop"])); // default-deny do resto (fica em ÚLTIMO)
+            Ok(rules)
+        }
+        _ => Err(Error::Invalid(format!("política de egress inválida: {policy}"))),
+    }
+}
+
+/// Egress POR-REDE (workspace): controla a saída→Internet de UMA bridge, sem
+/// afetar as outras. Idempotente (remove as regras antigas dessa bridge antes).
+/// Suporta `deny`/`allow`/`allowlist:<cidrs>` (NET-A).
 fn do_egress_net(bridge: &str, policy: &str) -> Result<()> {
     let bridge = sanitize(bridge);
     let needle_if = format!("iifname \"{bridge}\"");
+    // Remove TODAS as regras de egress antigas desta bridge (drop e accepts de
+    // allowlist prévia) antes de reprogramar — evita acumulação/ordem errada.
     let listed = crate::capture("nft", &["-a", "list", "chain", "ip", INGRESS_TABLE, "fwdeny"]).unwrap_or_default();
     for line in listed.lines() {
-        if line.contains(&needle_if) && line.contains("oifname \"tap0\"") && line.contains("drop") {
+        if line.contains(&needle_if) && line.contains("oifname \"tap0\"") && (line.contains("drop") || line.contains("accept")) {
             if let Some(handle) = line.rsplit("# handle ").next().and_then(|h| h.trim().parse::<u32>().ok()) {
                 run_ok("nft", &["delete", "rule", "ip", INGRESS_TABLE, "fwdeny", "handle", &handle.to_string()]);
             }
         }
     }
-    match policy {
-        "deny" => run("nft", &["add", "rule", "ip", INGRESS_TABLE, "fwdeny", "iifname", &bridge, "oifname", "tap0", "drop"]),
-        "allow" => Ok(()),
-        _ => Err(Error::Invalid(format!("política de egress inválida: {policy}"))),
+    // Aplica na ORDEM correta: `insert` prepende, por isso inserimos em ordem
+    // INVERSA → o resultado no topo→fundo é [accepts…, drop], com os accepts a
+    // ganharem antes do drop final.
+    let specs = egress_net_rule_specs(&bridge, policy)?;
+    for spec in specs.iter().rev() {
+        let mut argv = vec!["insert", "rule"];
+        argv.extend(spec.iter().map(|s| s.as_str()));
+        run("nft", &argv)?;
     }
+    Ok(())
 }
 
 /// Pré-flight de um ruleset `nft` (`nft -c -f -`): devolve `true` se for ACEITE,
@@ -1496,6 +1539,14 @@ pub fn set_egress_policy(deny: bool) -> Result<()> {
 /// por-workspace). Não afeta as outras redes.
 pub fn set_egress_policy_net(bridge: &str, deny: bool) -> Result<()> {
     control_send(&format!("egress-net {} {}", bridge, if deny { "deny" } else { "allow" }))
+}
+
+/// NET-A — egress em modo ALLOWLIST para a bridge `<bridge>`: nega toda a saída→
+/// Internet EXCEPTO DNS (53) e os `cidrs` indicados (lista separada por vírgulas,
+/// sem espaços). É o "nega tudo excepto X" que faltava (o `set_egress_policy_net`
+/// é só denylist). Os CIDRs são validados (`fw_src_ok`) no holder — anti-injeção.
+pub fn set_egress_policy_net_allowlist(bridge: &str, cidrs: &[&str]) -> Result<()> {
+    control_send(&format!("egress-net {} allowlist:{}", bridge, cidrs.join(",")))
 }
 
 /// Ativa/atualiza a proteção DDoS L4 (rate-limit + ct-count por-origem). `conn_rate`
@@ -2166,6 +2217,24 @@ mod tests {
         assert!(a.starts_with("vh"));
         assert!(a.len() <= 15, "IFNAMSIZ: {a}"); // 'vh' + 8 hex = 10
         assert_ne!(a, vh_name("ffffffffffff")); // ids diferentes → nomes diferentes
+    }
+
+    #[test]
+    fn egress_allowlist_gera_dns_cidrs_e_drop_final() {
+        // allow → nenhuma regra.
+        assert!(egress_net_rule_specs("delonix1", "allow").unwrap().is_empty());
+        // deny → um só drop.
+        let d = egress_net_rule_specs("delonix1", "deny").unwrap();
+        assert_eq!(d.len(), 1);
+        assert_eq!(d[0].last().unwrap(), "drop");
+        // allowlist → DNS(53)x2 + 1 CIDR válido + drop final; CIDR inválido saltado.
+        let a = egress_net_rule_specs("delonix1", "allowlist:1.1.1.0/24,lixo;rm").unwrap();
+        assert_eq!(a.len(), 4, "2xDNS + 1 CIDR válido + drop");
+        assert!(a[0].contains(&"53".to_string()) && a[0].last().unwrap() == "accept");
+        assert!(a[2].contains(&"1.1.1.0/24".to_string()) && a[2].last().unwrap() == "accept");
+        assert_eq!(a[3].last().unwrap(), "drop", "o drop fica em ÚLTIMO (default-deny do resto)");
+        // policy inválida → erro.
+        assert!(egress_net_rule_specs("delonix1", "wtf").is_err());
     }
 
     #[test]
