@@ -82,6 +82,12 @@ impl VolumeStore {
     fn dir(&self, name: &str) -> PathBuf {
         self.root.join(name)
     }
+
+    /// O diretório raiz de um volume (`<root>/volumes/<nome>`) — para operações
+    /// de recuperação na CLI (ex.: rm de órfãos/subuids num userns mapeado).
+    pub fn volume_dir(&self, name: &str) -> PathBuf {
+        self.dir(name)
+    }
     fn data_dir(&self, name: &str) -> PathBuf {
         self.dir(name).join("_data")
     }
@@ -205,6 +211,61 @@ impl VolumeStore {
             return Err(Error::NotFound(format!("volume {name}")));
         }
         Ok(serde_json::from_slice(&fs::read(meta)?)?)
+    }
+
+    // ---- Snapshots (Bloco B do plano Odoo) ------------------------------------
+    // Um snapshot é um tar.gz do `_data`, guardado em `<vol>/_snapshots/<snap>.tar.gz`
+    // (sobrevive ao container; NÃO sobrevive ao `volume rm` — é um snapshot, não um
+    // backup externo). Crash-consistente: tira-se com a carga a correr; para
+    // consistência aplicacional (ex.: BD), o backup orquestrado (Bloco C) pára/dump.
+    // Em rootless o tar corre num userns mapeado (dono efetivo dos subuids) — ver a
+    // CLI (`__volsnap`); esta camada só conhece caminhos e listagem.
+
+    /// O diretório de snapshots de um volume.
+    pub fn snapshots_dir(&self, name: &str) -> PathBuf {
+        self.dir(name).join("_snapshots")
+    }
+
+    /// O caminho do ficheiro de um snapshot (valida o nome primeiro).
+    pub fn snapshot_path(&self, volume: &str, snap: &str) -> Result<PathBuf> {
+        if !safe_snapshot_name(snap) {
+            return Err(Error::Invalid(format!(
+                "nome de snapshot inválido: '{snap}' (usa [a-zA-Z0-9._-], sem '/' nem '..')"
+            )));
+        }
+        Ok(self.snapshots_dir(volume).join(format!("{snap}.tar.gz")))
+    }
+
+    /// Lista os snapshots de um volume: `(nome, bytes, mtime-unix)`.
+    pub fn list_snapshots(&self, name: &str) -> Result<Vec<(String, u64, i64)>> {
+        let dir = self.snapshots_dir(name);
+        let mut out = Vec::new();
+        let Ok(rd) = fs::read_dir(&dir) else { return Ok(out) };
+        for e in rd.flatten() {
+            let p = e.path();
+            let Some(fname) = p.file_name().and_then(|f| f.to_str()) else { continue };
+            let Some(snap) = fname.strip_suffix(".tar.gz") else { continue };
+            let md = e.metadata().ok();
+            let size = md.as_ref().map(|m| m.len()).unwrap_or(0);
+            let mtime = md
+                .and_then(|m| m.modified().ok())
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_secs() as i64)
+                .unwrap_or(0);
+            out.push((snap.to_string(), size, mtime));
+        }
+        out.sort_by_key(|s| s.2); // mais antigo primeiro
+        Ok(out)
+    }
+
+    /// Apaga um snapshot.
+    pub fn remove_snapshot(&self, volume: &str, snap: &str) -> Result<()> {
+        let p = self.snapshot_path(volume, snap)?;
+        if !p.exists() {
+            return Err(Error::NotFound(format!("snapshot {snap} do volume {volume}")));
+        }
+        fs::remove_file(p)?;
+        Ok(())
     }
 
     /// Remove um volume (e os seus dados). Desmonta primeiro se for `nfs`.
@@ -404,6 +465,14 @@ fn now_unix() -> u64 {
         .unwrap_or(0)
 }
 
+/// Nome de snapshot seguro: `[A-Za-z0-9._-]+`, sem path traversal.
+pub fn safe_snapshot_name(s: &str) -> bool {
+    !s.is_empty()
+        && s.len() <= 128
+        && !s.starts_with('.')
+        && s.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+}
+
 /// `true` se `path` é um ponto de montagem activo (consulta `/proc/mounts`).
 fn is_mounted(path: &str) -> bool {
     fs::read_to_string("/proc/mounts")
@@ -520,6 +589,36 @@ mod tests {
         let (vs, base) = store();
         assert!(vs.resolve_spec("data:relative").is_err());
         assert!(vs.resolve_spec("oneword").is_err());
+        fs::remove_dir_all(&base).ok();
+    }
+
+    #[test]
+    fn snapshot_names_reject_traversal() {
+        assert!(safe_snapshot_name("pre-upgrade-1"));
+        assert!(safe_snapshot_name("2026.07.06_0300"));
+        for bad in ["", "../x", "a/b", ".oculto", "a b", &"x".repeat(129)] {
+            assert!(!safe_snapshot_name(bad), "aceitou '{bad}'");
+        }
+    }
+
+    #[test]
+    fn snapshot_paths_and_listing() {
+        let (vs, base) = store();
+        vs.create("v1").unwrap();
+        // caminho validado + inexistentes listam vazio
+        assert!(vs.snapshot_path("v1", "../evil").is_err());
+        assert_eq!(vs.list_snapshots("v1").unwrap().len(), 0);
+        // um snapshot "feito" (ficheiro no sítio) aparece na listagem
+        let p = vs.snapshot_path("v1", "s1").unwrap();
+        fs::create_dir_all(p.parent().unwrap()).unwrap();
+        fs::write(&p, b"tar").unwrap();
+        let ls = vs.list_snapshots("v1").unwrap();
+        assert_eq!(ls.len(), 1);
+        assert_eq!(ls[0].0, "s1");
+        assert_eq!(ls[0].1, 3);
+        // remove
+        vs.remove_snapshot("v1", "s1").unwrap();
+        assert!(vs.remove_snapshot("v1", "s1").is_err());
         fs::remove_dir_all(&base).ok();
     }
 }
