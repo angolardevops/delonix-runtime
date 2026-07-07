@@ -1082,6 +1082,77 @@ pub fn is_rootless() -> bool {
 /// Solução (estilo `podman unshare rm`): fork dum filho num user namespace; o pai
 /// mapeia o intervalo de subuid (`newuidmap`); o filho torna-se root NESSE userns
 /// (logo dono efectivo dos subuids) e re-exec `delonix __rmtree <path>` que os apaga.
+/// Re-executa `delonix <args…>` como **root num user namespace mapeado** (o pai
+/// escreve o mapa de subuids via `newuidmap` — mesmo mecanismo do
+/// [`remove_tree_mapped`], generalizado). É a forma de fazer operações de
+/// ficheiros sobre árvores com donos de **subuid** (volumes escritos por
+/// containers rootless): dentro do userns o filho é dono efectivo deles.
+///
+/// Devolve `None` se o mecanismo não se aplica (não-rootless, ou sem os helpers
+/// `newuidmap`/`newgidmap`) — o chamador deve então fazer a operação diretamente.
+/// `Some(true)` = o filho terminou com sucesso; `Some(false)` = falhou.
+pub fn reexec_mapped(args: &[&str]) -> Option<bool> {
+    if !is_rootless() || !have_subid_helpers() {
+        return None;
+    }
+    // Pré-computa TUDO o que aloca ANTES do fork (pós-fork só ops async-signal-safe).
+    let exe = std::env::current_exe().ok()?;
+    let prog = std::ffi::CString::new(exe.as_os_str().as_encoded_bytes()).ok()?;
+    let cargs: Vec<std::ffi::CString> = args
+        .iter()
+        .map(|a| std::ffi::CString::new(*a))
+        .collect::<std::result::Result<_, _>>()
+        .ok()?;
+    let mut argv: Vec<*const libc::c_char> = Vec::with_capacity(cargs.len() + 2);
+    argv.push(prog.as_ptr());
+    argv.extend(cargs.iter().map(|c| c.as_ptr()));
+    argv.push(std::ptr::null());
+    let mut fds = [0i32; 2];
+    if unsafe { libc::pipe(fds.as_mut_ptr()) } != 0 {
+        return Some(false);
+    }
+    let (r, w) = (fds[0], fds[1]);
+    // SAFETY: fork; o filho só faz close/unshare/read/setuid/execv (async-signal-safe;
+    // os CStrings/argv foram construídos acima, antes do fork).
+    match unsafe { libc::fork() } {
+        0 => unsafe {
+            libc::close(w);
+            if libc::unshare(libc::CLONE_NEWUSER) != 0 {
+                libc::_exit(1);
+            }
+            let mut b = [0u8; 1];
+            let _ = libc::read(r, b.as_mut_ptr() as *mut libc::c_void, 1);
+            libc::close(r);
+            libc::setgid(0);
+            libc::setuid(0);
+            libc::execv(prog.as_ptr(), argv.as_ptr());
+            libc::_exit(127);
+        },
+        pid if pid > 0 => {
+            unsafe { libc::close(r) };
+            // pequena espera para o filho fazer unshare antes de mapearmos.
+            std::thread::sleep(std::time::Duration::from_millis(20));
+            let _ = write_userns_maps(pid, true);
+            let ok = unsafe {
+                let go = [1u8; 1];
+                let _ = libc::write(w, go.as_ptr() as *const libc::c_void, 1);
+                libc::close(w);
+                let mut st = 0;
+                libc::waitpid(pid, &mut st, 0);
+                libc::WIFEXITED(st) && libc::WEXITSTATUS(st) == 0
+            };
+            Some(ok)
+        }
+        _ => {
+            unsafe {
+                libc::close(r);
+                libc::close(w);
+            }
+            Some(false)
+        }
+    }
+}
+
 /// Sem rootless/helpers → remoção directa.
 pub fn remove_tree_mapped(path: &std::path::Path) {
     if !is_rootless() || !have_subid_helpers() {
