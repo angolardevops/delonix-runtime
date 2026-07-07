@@ -516,6 +516,9 @@ fn handle_control(line: &str) -> String {
         ["vmtap", tap, bridge, gateway] => do_vmtap(tap, bridge, gateway),
         ["vmtapdel", tap] => do_vmtapdel(tap),
         ["publish", proto, host_port, cip, cport] => do_publish(proto, host_port, cip, cport),
+        ["publish-allow", proto, host_port, cip, cport, cidrs] => {
+            do_publish_allow(proto, host_port, cip, cport, cidrs)
+        }
         ["unpublish", host_port] => do_unpublish(host_port),
         ["firewall", _netns, ip, hex] => do_firewall(ip, hex),
         ["unfirewall", ip] => do_unfirewall(ip),
@@ -971,6 +974,31 @@ fn do_publish(proto: &str, host_port: &str, cip: &str, cport: &str) -> Result<()
         "ip", "daddr", SLIRP_IP, proto, "dport", host_port,
         "dnat", "to", &format!("{cip}:{cport}"),
     ])
+}
+
+/// Como [`do_publish`], mas com uma **allowlist de origem**: só os CIDRs dados
+/// alcançam a `host_port`; o resto é dropado ANTES do DNAT (`insert` no topo da
+/// chain `pre`). Os CIDRs são validados (`fw_src_ok`) — anti-injeção nft. Usado
+/// para expor a DB de uma app só a IPs autorizados (firewall).
+fn do_publish_allow(proto: &str, host_port: &str, cip: &str, cport: &str, cidrs_csv: &str) -> Result<()> {
+    validate_publish(proto, host_port, cip, cport)?;
+    let cidrs: Vec<&str> = cidrs_csv
+        .split(',')
+        .map(|c| c.trim())
+        .filter(|c| !c.is_empty() && delonix_core::fw_src_ok(c))
+        .collect();
+    if cidrs.is_empty() {
+        return Err(Error::Invalid("allowlist vazia ou sem CIDRs válidos".into()));
+    }
+    // drop no topo da `pre`: tráfego para esta host_port cujo saddr NÃO está na
+    // allowlist é descartado antes de chegar à regra de DNAT (que vem depois).
+    let set = format!("{{ {} }}", cidrs.join(", "));
+    run("nft", &[
+        "insert", "rule", "ip", INGRESS_TABLE, "pre",
+        "ip", "daddr", SLIRP_IP, proto, "dport", host_port,
+        "ip", "saddr", "!=", &set, "drop",
+    ])?;
+    do_publish(proto, host_port, cip, cport)
 }
 
 /// Remove o DNAT de uma `host_port` (por handle) da chain `pre`. Best-effort.
@@ -1659,6 +1687,17 @@ pub fn publish_port(cip: &str, spec: &str) -> Result<()> {
     crate::slirp_add_hostfwd(&slirp_sock_path(), &host_port, &host_port, &proto)?;
     // tap0:host_port → container:cont_port (DNAT no netns de infra, via holder).
     control_send(&format!("publish {proto} {host_port} {cip} {cont_port}"))
+}
+
+/// Como [`publish_port`], mas restringe o acesso à `host_port` a uma **allowlist**
+/// de CIDRs (firewall inbound): o resto é dropado antes do DNAT. `spec` é
+/// `hostPort:contPort[/proto]`; `cidrs` são validados no holder (`fw_src_ok`).
+/// Usado para expor a DB de uma app só a IPs autorizados.
+pub fn publish_port_allow(cip: &str, spec: &str, cidrs: &[&str]) -> Result<()> {
+    let (host_port, cont_port, proto) = crate::parse_publish(spec)?;
+    crate::slirp_add_hostfwd(&slirp_sock_path(), &host_port, &host_port, &proto)?;
+    let csv = cidrs.join(",");
+    control_send(&format!("publish-allow {proto} {host_port} {cip} {cont_port} {csv}"))
 }
 
 /// Remove a publicação de uma `host_port`: tira o `add_hostfwd` do slirp e o DNAT
