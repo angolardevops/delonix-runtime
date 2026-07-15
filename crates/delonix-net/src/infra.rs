@@ -1185,19 +1185,22 @@ fn is_port(p: &str) -> bool {
 /// `true` se `ip` é um endereço válido do ESPAÇO de ingress (`10.{200..=254}.x.x`,
 /// unicast): a rede default (10.200) ou uma rede privada (10.201+). Defesa
 /// anti-injeção sem fixar um único `/16`.
+/// Espaço de workloads (`10.200.0.0`–`10.254.255.255`, ver
+/// `delonix_core::workload_net` — partilhado com `delonix-tunnel`, que usa o
+/// MESMO range para o guard "no-bypass" do túnel), excepto os endereços de
+/// rede/broadcast de cada /16 (`.0.0` e `.255.255`), que aqui não são IPs de
+/// workload utilizáveis.
 fn is_ingress_ip(ip: &str) -> bool {
     let o: Vec<&str> = ip.split('.').collect();
     if o.len() != 4 {
         return false;
     }
-    let n: Vec<u16> = match o.iter().map(|x| x.parse::<u16>()).collect::<std::result::Result<_, _>>() {
+    let n: Vec<u8> = match o.iter().map(|x| x.parse::<u8>()).collect::<std::result::Result<_, _>>() {
         Ok(v) => v,
         Err(_) => return false,
     };
-    if n.iter().any(|&x| x > 255) {
-        return false;
-    }
-    n[0] == 10 && (200..=254).contains(&n[1]) && (n[2], n[3]) != (0, 0) && (n[2], n[3]) != (255, 255)
+    let addr = std::net::Ipv4Addr::new(n[0], n[1], n[2], n[3]);
+    delonix_core::workload_net::is_workload_ipv4(addr) && (n[2], n[3]) != (0, 0) && (n[2], n[3]) != (255, 255)
 }
 
 /// Nome do `veth` do lado da bridge para um netns (determinístico, <= 15 chars).
