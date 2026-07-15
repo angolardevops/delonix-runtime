@@ -3,7 +3,7 @@
 
 use crate::cas::strip;
 use crate::image::{Image, ImageStore};
-use delonix_core::{Error, Result};
+use delonix_runtime_core::{Error, Result};
 use nix::mount::{mount, umount2, MntFlags, MsFlags};
 use std::path::{Path, PathBuf};
 

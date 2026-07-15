@@ -10,7 +10,7 @@
 //! Validado end-to-end (dois netns rootless): ping pelo túnel + `tcpdump` no
 //! underlay = só UDP WireGuard cifrado, sem ICMP em claro; handshake completo.
 
-use delonix_core::{Error, Result};
+use delonix_runtime_core::{Error, Result};
 use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};

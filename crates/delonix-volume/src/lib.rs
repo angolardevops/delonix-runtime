@@ -9,7 +9,7 @@
 //! A sintaxe `-v` segue o Docker: `nome:/destino` (volume) ou
 //! `/caminho/host:/destino` (bind), com `:ro` opcional para só-leitura.
 
-use delonix_core::{Error, Mount, Result};
+use delonix_runtime_core::{Error, Mount, Result};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;

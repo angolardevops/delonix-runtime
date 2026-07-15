@@ -12,7 +12,35 @@ use std::ffi::CString;
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
 use std::time::Duration;
 
-use delonix_core::{Container, Error, Mount, Result, Status, Store};
+use delonix_runtime_core::{Container, Error, Mount, Result, Status, Store};
+
+/// RFC3339 com precisão de nanossegundos, p/ o *logging shim* (stdout do
+/// container timestampado). Cópia local deliberada: `delonix-runtime` não
+/// depende de `delonix-core` (PaaS) — este helper é puramente formatação de
+/// tempo, sem nenhuma semântica de auditoria/tenant.
+fn now_rfc3339_nano() -> String {
+    fn rfc3339(secs: u64) -> String {
+        let days = (secs / 86_400) as i64;
+        let rem = secs % 86_400;
+        let (hh, mm, ss) = (rem / 3600, (rem % 3600) / 60, rem % 60);
+        let z = days + 719_468;
+        let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+        let doe = z - era * 146_097;
+        let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+        let y = yoe + era * 400;
+        let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+        let mp = (5 * doy + 2) / 153;
+        let d = doy - (153 * mp + 2) / 5 + 1;
+        let m = if mp < 10 { mp + 3 } else { mp - 9 };
+        let year = if m <= 2 { y + 1 } else { y };
+        format!("{year:04}-{m:02}-{d:02}T{hh:02}:{mm:02}:{ss:02}Z")
+    }
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default();
+    let base = rfc3339(now.as_secs());
+    format!("{}.{:09}Z", &base[..base.len() - 1], now.subsec_nanos())
+}
 
 use nix::fcntl::{open, OFlag};
 use nix::mount::{mount, umount2, MntFlags, MsFlags};
@@ -602,7 +630,7 @@ fn log_shim(read_fd: i32, log_path: String, max_bytes: u64, driver: String, tag:
             line.push(b);
             let full = b == b'\n';
             if full || line.len() >= MAX_LINE {
-                let ts = delonix_core::audit::now_rfc3339_nano();
+                let ts = now_rfc3339_nano();
                 let stream = if full { "F" } else { "P" };
                 let body = String::from_utf8_lossy(line.strip_suffix(b"\n").unwrap_or(&line));
                 let rec = format!("{ts} stdout {stream} {body}\n");
@@ -613,7 +641,7 @@ fn log_shim(read_fd: i32, log_path: String, max_bytes: u64, driver: String, tag:
     }
     // linha final sem `\n` (modo CRI) — emite na mesma como partial.
     if cri && !line.is_empty() {
-        let ts = delonix_core::audit::now_rfc3339_nano();
+        let ts = now_rfc3339_nano();
         let rec = format!("{ts} stdout P {}\n", String::from_utf8_lossy(&line));
         write_block!(rec.as_bytes());
     }
@@ -1967,7 +1995,7 @@ fn parse_mem_bytes(s: &str) -> u64 {
 /// containers mate o host: a slice tem `memory.max`/`cpu.max`/`pids.max` totais,
 /// e o kernel OOM-mata DENTRO da slice (um container), nunca o host. Idempotente.
 pub fn ensure_delonix_slice() {
-    let slice = delonix_core::DELONIX_SLICE;
+    let slice = delonix_runtime_core::DELONIX_SLICE;
     if std::fs::create_dir_all(slice).is_err() {
         return; // sem permissão (rootless) → best-effort
     }
@@ -2011,7 +2039,7 @@ pub fn admission_check(memory_max: &str) -> Result<()> {
         return Ok(()); // sem cgroup delegado → sem orçamento a verificar
     }
     ensure_delonix_slice();
-    let slice = delonix_core::DELONIX_SLICE;
+    let slice = delonix_runtime_core::DELONIX_SLICE;
     let read = |f: &str| -> Option<u64> {
         std::fs::read_to_string(format!("{slice}/{f}")).ok().and_then(|s| s.trim().parse().ok())
     };
@@ -2078,7 +2106,7 @@ pub fn set_slice_cpu_pct(pct: u64) {
     // TODOS os containers da slice). Garante pelo menos ~1% de um core.
     let quota = (slice_full_cpu_quota() * pct.min(100) / 100).max(1_000);
     let _ = std::fs::write(
-        format!("{}/cpu.max", delonix_core::DELONIX_SLICE),
+        format!("{}/cpu.max", delonix_runtime_core::DELONIX_SLICE),
         format!("{quota} 100000"),
     );
 }
@@ -2107,7 +2135,7 @@ pub fn boost_fans() -> bool {
 /// Estado do orçamento agregado do Delonix (para `system info`).
 pub fn slice_budget() -> (u64, u64, u64, f64, u64) {
     ensure_delonix_slice();
-    let slice = delonix_core::DELONIX_SLICE;
+    let slice = delonix_runtime_core::DELONIX_SLICE;
     let read = |f: &str| -> u64 {
         std::fs::read_to_string(format!("{slice}/{f}")).ok().and_then(|s| s.trim().parse().ok()).unwrap_or(0)
     };
@@ -2540,7 +2568,7 @@ fn spawn(store: &Store, container: &mut Container, rootfs: &str, spec: &RunSpec<
     // os valores são capturados (move) no closure do clone = memória do filho.
     let secret_files: Vec<(String, String)> =
         if container.secret_files && !container.secrets.is_empty() {
-            match delonix_core::SecretStore::open(store.base()) {
+            match delonix_runtime_core::SecretStore::open(store.base()) {
                 Ok(ss) => {
                     let mut map = std::collections::BTreeMap::new();
                     for n in &container.secrets {

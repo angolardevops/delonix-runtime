@@ -17,7 +17,7 @@
 //! A ligação ao container faz-se ao estilo CNI: o runtime cria o `netns`
 //! (`CLONE_NEWNET`); [`Net::attach`] configura-o a partir do host, pelo PID.
 
-use delonix_core::{Error, Result};
+use delonix_runtime_core::{Error, Result};
 use std::process::{Command, Stdio};
 
 pub mod cni;
@@ -901,7 +901,7 @@ impl NetworkStore {
 /// Tipos CANÓNICOS da firewall L4 por-container, definidos em `delonix-core`
 /// (onde também são persistidos no `Container` record). Re-exportados aqui para
 /// que `apply_container_firewall` e a API continuem a usar `delonix_net::ContainerFw`.
-pub use delonix_core::{ContainerFw, FwRule};
+pub use delonix_runtime_core::{ContainerFw, FwRule};
 
 /// Nome da chain nft dedicada à firewall de um container (derivado do IP).
 fn cfw_chain(ip: &str) -> String {

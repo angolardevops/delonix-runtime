@@ -2,7 +2,7 @@
 //! conteúdo, em `root/blobs/sha256/<hex>`. O **nome** de um blob é o hash do
 //! que ele contém (o mesmo princípio do git e do registo OCI).
 
-use delonix_core::Result;
+use delonix_runtime_core::Result;
 use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::PathBuf;

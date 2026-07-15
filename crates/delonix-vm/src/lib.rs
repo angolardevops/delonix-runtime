@@ -7,7 +7,7 @@
 //!
 //! O backend é escolhido por VM: explícito (`VmConfig.backend`) ou **auto-deteção**
 //! (prefere o `cloud-hypervisor` se instalado; senão `libvirt`). O estado por-VM
-//! ([`delonix_core::Vm`], persistido em `<base>/vms/<name>.json`) regista o backend
+//! ([`delonix_runtime_core::Vm`], persistido em `<base>/vms/<name>.json`) regista o backend
 //! que a arrancou, para reconciliar liveness/paragem com o backend certo.
 //!
 //! Rede: o Cloud Hypervisor reaproveita o *plumbing* do `delonix-net`
@@ -19,7 +19,7 @@
 use std::path::Path;
 use std::process::Command;
 
-use delonix_core::{Error, JsonStore, Result, Status, Vm};
+use delonix_runtime_core::{Error, JsonStore, Result, Status, Vm};
 use delonix_net::infra;
 
 /// Configuração para arrancar uma microVM (campos planos, independentes do

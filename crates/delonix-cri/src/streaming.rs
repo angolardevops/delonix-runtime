@@ -152,7 +152,7 @@ impl Streamer {
 /// Resolve o `pid` do infra container de um pod sandbox (`pod-cri-<id>`), cujo
 /// netns é onde se faz o proxy TCP do port-forward. `None` se não existir/parado.
 fn pod_sandbox_pid(base: &std::path::Path, sandbox_id: &str) -> Option<i32> {
-    let store = delonix_core::Store::open(base.join("containers")).ok()?;
+    let store = delonix_runtime_core::Store::open(base.join("containers")).ok()?;
     let c = store.load(&format!("pod-cri-{sandbox_id}")).ok()?;
     c.pid.filter(|p| delonix_runtime::is_alive(*p))
 }
@@ -206,7 +206,7 @@ fn random_token() -> String {
 }
 
 fn delonix_bin() -> PathBuf {
-    delonix_core::self_bin()
+    delonix_runtime_core::self_bin()
 }
 
 // ---------------------------------------------------------------------------

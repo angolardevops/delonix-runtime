@@ -17,7 +17,7 @@
 //! binário para [`holder_main`].
 
 use crate::{run, run_ok, SLIRP_IP};
-use delonix_core::{Error, Result};
+use delonix_runtime_core::{Error, Result};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
@@ -985,7 +985,7 @@ fn do_publish_allow(proto: &str, host_port: &str, cip: &str, cport: &str, cidrs_
     let cidrs: Vec<&str> = cidrs_csv
         .split(',')
         .map(|c| c.trim())
-        .filter(|c| !c.is_empty() && delonix_core::fw_src_ok(c))
+        .filter(|c| !c.is_empty() && delonix_runtime_core::fw_src_ok(c))
         .collect();
     if cidrs.is_empty() {
         return Err(Error::Invalid("allowlist vazia ou sem CIDRs válidos".into()));
@@ -1063,7 +1063,7 @@ fn egress_net_rule_specs(bridge: &str, policy: &str) -> Result<Vec<Vec<String>>>
                 base(&["tcp", "dport", "53", "accept"]),
             ];
             for cidr in p["allowlist:".len()..].split(',').map(|c| c.trim()).filter(|c| !c.is_empty()) {
-                if delonix_core::fw_src_ok(cidr) {
+                if delonix_runtime_core::fw_src_ok(cidr) {
                     rules.push(base(&["ip", "daddr", cidr, "accept"]));
                 } else {
                     eprintln!("delonix: egress allowlist — CIDR inválido saltado: {cidr:?}");
@@ -1186,7 +1186,7 @@ fn is_port(p: &str) -> bool {
 /// unicast): a rede default (10.200) ou uma rede privada (10.201+). Defesa
 /// anti-injeção sem fixar um único `/16`.
 /// Espaço de workloads (`10.200.0.0`–`10.254.255.255`, ver
-/// `delonix_core::workload_net` — partilhado com `delonix-tunnel`, que usa o
+/// `delonix_runtime_core::workload_net` — partilhado com `delonix-tunnel`, que usa o
 /// MESMO range para o guard "no-bypass" do túnel), excepto os endereços de
 /// rede/broadcast de cada /16 (`.0.0` e `.255.255`), que aqui não são IPs de
 /// workload utilizáveis.
@@ -1200,7 +1200,7 @@ fn is_ingress_ip(ip: &str) -> bool {
         Err(_) => return false,
     };
     let addr = std::net::Ipv4Addr::new(n[0], n[1], n[2], n[3]);
-    delonix_core::workload_net::is_workload_ipv4(addr) && (n[2], n[3]) != (0, 0) && (n[2], n[3]) != (255, 255)
+    delonix_runtime_core::workload_net::is_workload_ipv4(addr) && (n[2], n[3]) != (0, 0) && (n[2], n[3]) != (255, 255)
 }
 
 /// Nome do `veth` do lado da bridge para um netns (determinístico, <= 15 chars).
@@ -1225,7 +1225,7 @@ fn fw_chain_name(ip: &str) -> String {
 /// no netns de infra. PURA — mesma semântica do modelo root (`apply_container_firewall`),
 /// mas aplicada no ingress. `in` = tráfego PARA o container (daddr==ip); `out` = DELE
 /// (saddr==ip); `src` casa o outro extremo (peer). Testável sem kernel.
-pub fn fw_chain_body(ip: &str, fw: &delonix_core::ContainerFw) -> String {
+pub fn fw_chain_body(ip: &str, fw: &delonix_runtime_core::ContainerFw) -> String {
     let mut body = String::new();
     if fw.enabled {
         for r in &fw.rules {
@@ -1266,7 +1266,7 @@ fn do_firewall(ip: &str, hex: &str) -> Result<()> {
         return Err(Error::Invalid(format!("IP {ip} fora do espaço de ingress (10.200-254.x)")));
     }
     let bytes = hex_decode(hex).ok_or_else(|| Error::Invalid("hex inválido".into()))?;
-    let fw: delonix_core::ContainerFw =
+    let fw: delonix_runtime_core::ContainerFw =
         serde_json::from_slice(&bytes).map_err(|e| Error::Invalid(format!("firewall JSON: {e}")))?;
     let chain = fw_chain_name(ip);
     // garante a chain (regular, só alvo de jump).
@@ -1554,7 +1554,7 @@ pub fn detach_container(id: &str, ip: &str) {
 /// **Aplica a firewall parametrizável de um container NO INGRESS** (o único sítio,
 /// via o bind): traduz a `ContainerFw` (a mesma persistida no record, v0.1.93) para
 /// a chain `fw<hash>` do `dlxing`, chaveada pelo `ip` do container na sua rede.
-pub fn apply_firewall(id: &str, ip: &str, fw: &delonix_core::ContainerFw) -> Result<()> {
+pub fn apply_firewall(id: &str, ip: &str, fw: &delonix_runtime_core::ContainerFw) -> Result<()> {
     let json = serde_json::to_vec(fw).map_err(|e| Error::Invalid(e.to_string()))?;
     control_send(&format!("firewall {} {} {}", sanitize(id), ip, hex_encode(&json)))
 }
@@ -2296,13 +2296,13 @@ mod tests {
 
     #[test]
     fn fw_body_translates_rules_and_policy() {
-        let fw = delonix_core::ContainerFw {
+        let fw = delonix_runtime_core::ContainerFw {
             enabled: true,
             policy_in: "deny".into(),
             policy_out: "allow".into(),
             rules: vec![
-                delonix_core::FwRule { dir: "in".into(), proto: "tcp".into(), port: "8080".into(), src: "10.200.0.0/16".into(), action: "allow".into(), note: String::new() },
-                delonix_core::FwRule { dir: "out".into(), proto: "any".into(), port: String::new(), src: String::new(), action: "deny".into(), note: String::new() },
+                delonix_runtime_core::FwRule { dir: "in".into(), proto: "tcp".into(), port: "8080".into(), src: "10.200.0.0/16".into(), action: "allow".into(), note: String::new() },
+                delonix_runtime_core::FwRule { dir: "out".into(), proto: "any".into(), port: String::new(), src: String::new(), action: "deny".into(), note: String::new() },
             ],
         };
         let body = fw_chain_body("10.200.0.5", &fw);
@@ -2313,7 +2313,7 @@ mod tests {
         // política in=deny → drop final no daddr
         assert!(body.contains("ip daddr 10.200.0.5 drop"), "{body}");
         // disabled → corpo vazio
-        let off = delonix_core::ContainerFw { enabled: false, ..fw };
+        let off = delonix_runtime_core::ContainerFw { enabled: false, ..fw };
         assert!(fw_chain_body("10.200.0.5", &off).is_empty());
     }
 

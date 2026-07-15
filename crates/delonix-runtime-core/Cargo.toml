@@ -1,0 +1,16 @@
+[package]
+name = "delonix-runtime-core"
+version.workspace = true
+edition.workspace = true
+license = "Apache-2.0"
+description = "Tipos partilhados do motor Delonix Runtime (Container/Vm/Status, Secret Manager, Store) — sem qualquer dependência de tenant/licença/billing do PaaS."
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+libc = { workspace = true }
+# CredVault: cifra de credenciais at-rest (usada pelo Secret Manager do runtime,
+# `--secret`). XChaCha20-Poly1305 (AEAD), Rust puro — sem C, compila em musl/aarch64.
+chacha20poly1305 = "0.10"
+getrandom = "0.2"

@@ -1,7 +1,7 @@
 //! O modelo de uma imagem e o seu armazém local.
 
 use crate::cas::{strip, Cas};
-use delonix_core::{Error, Result};
+use delonix_runtime_core::{Error, Result};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;

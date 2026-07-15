@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
-delonix-core = { path = "../delonix-core" }
+delonix-runtime-core = { path = "../delonix-runtime-core" }
 delonix-runtime = { path = "../delonix-runtime" }
 delonix-image = { path = "../delonix-image" }
 delonix-net = { path = "../delonix-net" }

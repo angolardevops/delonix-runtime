@@ -179,8 +179,8 @@ fn delonix_detached(base: &Path, args: &[&str]) -> Result<bool, Status> {
 /// um container que crashou mas cujo store ainda diz `Running` reportava estado
 /// `Exited` com exit-code 0 → o kubelet (restartPolicy `OnFailure`) NÃO o
 /// reiniciava. Após reconciliar, o crash vira `Crashed` (137) e o kubelet reage.
-fn load_reconciled(base: &Path, cri_id: &str) -> Option<delonix_core::Container> {
-    let store = delonix_core::Store::open(base.join("containers")).ok()?;
+fn load_reconciled(base: &Path, cri_id: &str) -> Option<delonix_runtime_core::Container> {
+    let store = delonix_runtime_core::Store::open(base.join("containers")).ok()?;
     let mut c = store.load(&format!("cri-{cri_id}")).ok()?;
     if delonix_runtime::reconcile_status(&mut c) {
         let _ = store.save(&c); // propaga a reconciliação a outros leitores
@@ -190,7 +190,7 @@ fn load_reconciled(base: &Path, cri_id: &str) -> Option<delonix_core::Container>
 
 /// O estado de execução de um container CRI, lido (e reconciliado) do `Store`.
 fn delonix_state(base: &Path, cri_id: &str) -> i32 {
-    use delonix_core::Status as S;
+    use delonix_runtime_core::Status as S;
     match load_reconciled(base, cri_id) {
         Some(c) => match c.status {
             S::Running if c.pid.map(delonix_runtime::is_alive).unwrap_or(false) => {
@@ -209,7 +209,7 @@ fn delonix_state(base: &Path, cri_id: &str) -> i32 {
 /// a correr/criado. Permite ao kubelet ver a verdadeira causa de saída (137/143/n)
 /// e aplicar a `restartPolicy` — em vez de assumir 0 (`Completed`) para tudo.
 fn delonix_exit(base: &Path, cri_id: &str) -> Option<i32> {
-    use delonix_core::Status as S;
+    use delonix_runtime_core::Status as S;
     match load_reconciled(base, cri_id)?.status {
         S::Failed(code) => Some(code),
         S::Stopped => Some(0),
@@ -226,7 +226,7 @@ pub fn run_pod_sandbox(
 ) -> Result<Response<RunPodSandboxResponse>, Status> {
     let cfg = req.config.ok_or_else(|| Status::invalid_argument("sem config"))?;
     let md = cfg.metadata.clone().unwrap_or_default();
-    let id = delonix_core::generate_id();
+    let id = delonix_runtime_core::generate_id();
     // Rede do host? (namespace_options.network == NODE) → sem infra/netns próprio.
     let ns = cfg
         .linux
@@ -381,7 +381,7 @@ pub fn pod_sandbox_status(
         // ROOTLESS: IP do netns partilhado do pod no ingress (determinístico).
         delonix_net::infra::container_ip(&format!("cri-{}", r.id))
     } else {
-        delonix_core::Store::open(base.join("containers"))
+        delonix_runtime_core::Store::open(base.join("containers"))
             .ok()
             .and_then(|s| s.load(&format!("pod-cri-{}", r.id)).ok())
             .and_then(|c| c.ip)
@@ -423,7 +423,7 @@ pub fn create_container(
     if image.is_empty() {
         return Err(Status::invalid_argument("imagem em falta"));
     }
-    let id = delonix_core::generate_id();
+    let id = delonix_runtime_core::generate_id();
     // Security context (CRI) → flags do `delonix run` (aplicadas no start).
     let sc = cfg.linux.as_ref().and_then(|l| l.security_context.as_ref());
     let readonly_rootfs = sc.map(|s| s.readonly_rootfs).unwrap_or(false);
@@ -604,7 +604,7 @@ pub fn stop_container(
     // = OK. Se continua vivo, propaga erro → o kubelet repete (em vez de assumir
     // que parou e seguir para o RemoveContainer sobre um processo ainda a correr).
     if let Some(c) = load_reconciled(base, &id) {
-        let alive = matches!(c.status, delonix_core::Status::Running)
+        let alive = matches!(c.status, delonix_runtime_core::Status::Running)
             && c.pid.map(delonix_runtime::is_alive).unwrap_or(false);
         if alive {
             return Err(Status::internal(format!("'cri-{id}' continua a correr após stop")));
@@ -753,7 +753,7 @@ fn cg_field(cgroup: &str, file: &str, key: &str) -> u64 {
 
 /// O cgroup de um container CRI (`cri-<id>`), via o `Store` do Delonix.
 fn container_cgroup(base: &Path, cri_id: &str) -> Option<String> {
-    let store = delonix_core::Store::open(base.join("containers")).ok()?;
+    let store = delonix_runtime_core::Store::open(base.join("containers")).ok()?;
     store.load(&format!("cri-{cri_id}")).ok().map(|c| c.cgroup())
 }
 
@@ -943,15 +943,15 @@ mod tests {
         // via exit 0 (Completed) e o restartPolicy OnFailure NÃO reiniciava.
         let tmp = std::env::temp_dir().join(format!("dlx-cri-exit-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&tmp);
-        let store = delonix_core::Store::open(tmp.join("containers")).unwrap();
-        let mut c = delonix_core::Container::new(
+        let store = delonix_runtime_core::Store::open(tmp.join("containers")).unwrap();
+        let mut c = delonix_runtime_core::Container::new(
             "cri-abc".into(),
             "cri-abc".into(),
             "img:1".into(),
             vec![],
             String::new(),
         );
-        c.status = delonix_core::Status::Running;
+        c.status = delonix_runtime_core::Status::Running;
         c.pid = Some(2_000_000); // pid inexistente → morto
         store.save(&c).unwrap();
 
@@ -961,11 +961,11 @@ mod tests {
 
         // Um container parado limpo → 0 (Completed). Um Failed(n) → n.
         let mut ok = c.clone();
-        ok.status = delonix_core::Status::Stopped;
+        ok.status = delonix_runtime_core::Status::Stopped;
         store.save(&ok).unwrap();
         assert_eq!(delonix_exit(&tmp, "abc"), Some(0));
         let mut failed = c.clone();
-        failed.status = delonix_core::Status::Failed(2);
+        failed.status = delonix_runtime_core::Status::Failed(2);
         store.save(&failed).unwrap();
         assert_eq!(delonix_exit(&tmp, "abc"), Some(2));
 
