@@ -23,11 +23,9 @@ use std::process::{Command, Stdio};
 pub mod cni;
 pub mod discover;
 pub mod infra;
-pub mod router;
 pub mod wg;
 
 pub use discover::{discover_ports, DiscoveredPort};
-pub use router::Router;
 
 const BRIDGE: &str = "delonix0";
 const TABLE: &str = "delonix"; // tabela nft dedicada (família ip)
