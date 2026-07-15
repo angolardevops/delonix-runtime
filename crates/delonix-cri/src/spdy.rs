@@ -201,7 +201,7 @@ const FLAG_FIN: u8 = 0x01;
 const MAX_DATA: usize = 16 * 1024;
 
 fn delonix_bin() -> PathBuf {
-    delonix_core::self_bin()
+    delonix_runtime_core::self_bin()
 }
 
 /// Constrói um frame de controlo SPDY/3.

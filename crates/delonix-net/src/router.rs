@@ -19,7 +19,7 @@
 //! o IP do router, qual o id da carga) é resolvido por quem constrói o router.
 
 use crate::Net;
-use delonix_core::Result;
+use delonix_runtime_core::Result;
 
 /// O alvo lógico de um Router: identidade legível + o IP que recebe o DNAT do
 /// ingress (IP do infra para um pod; IP do próprio container para standalone).

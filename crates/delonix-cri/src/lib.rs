@@ -187,16 +187,16 @@ fn blob_path(_img: &delonix_image::Image, hex: &str) -> PathBuf {
 
 /// Arranca o servidor CRI num **unix socket** (`addr` = caminho, ou
 /// `unix:///caminho`). Bloqueia a thread (cria o runtime Tokio).
-pub fn serve_blocking(base: PathBuf, addr: &str) -> Result<(), delonix_core::Error> {
+pub fn serve_blocking(base: PathBuf, addr: &str) -> Result<(), delonix_runtime_core::Error> {
     let path = addr.strip_prefix("unix://").unwrap_or(addr).to_string();
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
-        .map_err(|e| delonix_core::Error::Runtime { context: "tokio", message: e.to_string() })?;
+        .map_err(|e| delonix_runtime_core::Error::Runtime { context: "tokio", message: e.to_string() })?;
     rt.block_on(async move {
         let _ = std::fs::remove_file(&path); // limpa um socket antigo
         let uds = tokio::net::UnixListener::bind(&path)
-            .map_err(|e| delonix_core::Error::Runtime { context: "bind", message: e.to_string() })?;
+            .map_err(|e| delonix_runtime_core::Error::Runtime { context: "bind", message: e.to_string() })?;
         let incoming = tokio_stream::wrappers::UnixListenerStream::new(uds);
         eprintln!("delonix-cri (CRI v1) a escutar em unix://{path}");
 
@@ -204,11 +204,11 @@ pub fn serve_blocking(base: PathBuf, addr: &str) -> Result<(), delonix_core::Err
         // porta de loopback. As RPCs devolvem URLs que apontam para cá.
         let stream_listener = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await
-            .map_err(|e| delonix_core::Error::Runtime { context: "bind-stream", message: e.to_string() })?;
+            .map_err(|e| delonix_runtime_core::Error::Runtime { context: "bind-stream", message: e.to_string() })?;
         let stream_port = stream_listener
             .local_addr()
             .map(|a| a.port())
-            .map_err(|e| delonix_core::Error::Runtime { context: "stream-addr", message: e.to_string() })?;
+            .map_err(|e| delonix_runtime_core::Error::Runtime { context: "stream-addr", message: e.to_string() })?;
         let advertised = format!("http://127.0.0.1:{stream_port}");
         let streamer = streaming::Streamer::new(base.clone(), advertised.clone());
         eprintln!("delonix-cri: streaming (exec/attach) em {advertised}");
@@ -224,6 +224,6 @@ pub fn serve_blocking(base: PathBuf, addr: &str) -> Result<(), delonix_core::Err
             .add_service(ImageServiceServer::new(img))
             .serve_with_incoming(incoming)
             .await
-            .map_err(|e| delonix_core::Error::Runtime { context: "serve", message: e.to_string() })
+            .map_err(|e| delonix_runtime_core::Error::Runtime { context: "serve", message: e.to_string() })
     })
 }

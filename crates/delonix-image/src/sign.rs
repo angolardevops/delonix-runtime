@@ -18,7 +18,7 @@ use crate::cas::{sha256_hex, strip};
 use crate::registry::{registry_client, RegistryClient};
 use crate::ImageStore;
 use base64::Engine;
-use delonix_core::{Error, Result};
+use delonix_runtime_core::{Error, Result};
 use serde::Deserialize;
 use std::collections::BTreeMap;
 
