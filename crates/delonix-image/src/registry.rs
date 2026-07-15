@@ -487,15 +487,31 @@ pub fn http_post_stream(
     Ok(status)
 }
 
-/// Descarrega `reference` de um registo OCI para o armazém local.
+/// Descarrega `reference` de um registo OCI para o armazém local. Credenciais
+/// (se existirem) vêm do `delonix login` local (`<root>/auth.json`).
 pub fn pull_from_registry(store: &ImageStore, reference: &str) -> Result<Image> {
+    pull_from_registry_with_creds(store, reference, None)
+}
+
+/// Como [`pull_from_registry`], mas com credenciais explícitas
+/// (`creds_override = Some((user, password))`), usadas EM VEZ do
+/// `delonix login` local — para chamadores que já recebem credenciais de
+/// outra fonte (ex.: o CRI, que recebe `AuthConfig` do kubelet a partir dos
+/// `imagePullSecrets` do Pod — não pode confiar só no `auth.json` local do
+/// nó, que pode nem ter as credenciais daquele tenant). `None` mantém o
+/// comportamento antigo (lookup local).
+pub fn pull_from_registry_with_creds(
+    store: &ImageStore,
+    reference: &str,
+    creds_override: Option<(String, String)>,
+) -> Result<Image> {
     let (host, repo, refr) = parse_reference(reference);
     let http = reqwest::blocking::Client::builder()
         .user_agent("delonix/0.1")
         .timeout(Duration::from_secs(120))
         .build()
         .map_err(reg_err)?;
-    let creds = crate::auth::lookup(store.root(), &host);
+    let creds = creds_override.or_else(|| crate::auth::lookup(store.root(), &host));
     let mut c = Client { http, host: host.clone(), repo: repo.clone(), token: None, creds };
 
     eprintln!("a puxar {repo}:{refr} de {host}...");
@@ -678,7 +694,7 @@ pub fn push_to_registry(store: &ImageStore, source: &str, target: &str) -> Resul
 
 #[cfg(test)]
 mod tests {
-    use super::{layer_media_type, parse_reference, with_prefix};
+    use super::{layer_media_type, parse_reference, pull_from_registry_with_creds, with_prefix};
 
     #[test]
     fn with_prefix_is_idempotent() {
@@ -722,5 +738,85 @@ mod tests {
         let (_, r, t) = parse_reference("alpine@sha256:abc123");
         assert_eq!(r, "library/alpine");
         assert_eq!(t, "sha256:abc123");
+    }
+
+    /// Servidor HTTP mínimo (uma ligação, uma resposta canónica) — o suficiente
+    /// para simular um registo OCI que exige token e capturar o header
+    /// `Authorization` que o cliente enviou ao pedir esse token.
+    fn serve_one(port_tx: std::sync::mpsc::Sender<u16>, resp_after_401: &'static str) -> std::thread::JoinHandle<Option<String>> {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        port_tx.send(port).unwrap();
+        std::thread::spawn(move || {
+            // 1.ª ligação: pedido do manifesto → 401 + WWW-Authenticate a apontar
+            // para o endpoint de token NESTE MESMO servidor.
+            let (mut s1, _) = listener.accept().unwrap();
+            let mut buf = [0u8; 4096];
+            let _ = s1.read(&mut buf);
+            let www = format!(
+                "Bearer realm=\"http://127.0.0.1:{port}/token\",service=\"test\",scope=\"repository:x:pull\""
+            );
+            let body401 = format!(
+                "HTTP/1.1 401 Unauthorized\r\nwww-authenticate: {www}\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+            );
+            let _ = s1.write_all(body401.as_bytes());
+            drop(s1);
+
+            // 2.ª ligação: pedido do TOKEN → é aqui que capturamos o Authorization
+            // (Basic) que o `pull_from_registry_with_creds` gerou a partir das
+            // credenciais (override ou lookup local).
+            let (mut s2, _) = listener.accept().unwrap();
+            let mut buf2 = [0u8; 4096];
+            let n = s2.read(&mut buf2).unwrap_or(0);
+            let req = String::from_utf8_lossy(&buf2[..n]).to_string();
+            let auth_header = req
+                .lines()
+                .find(|l| l.to_ascii_lowercase().starts_with("authorization:"))
+                .map(|l| l.trim().to_string());
+            let _ = s2.write_all(resp_after_401.as_bytes());
+            drop(s2);
+            auth_header
+        })
+    }
+
+    #[test]
+    fn pull_com_creds_override_usa_essas_credenciais_no_token_request() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        // resposta ao pedido de token: 401 de novo (não precisamos de completar o
+        // pull — só de observar o Authorization enviado no pedido de token).
+        let handle = serve_one(tx, "HTTP/1.1 401 Unauthorized\r\ncontent-length: 0\r\nconnection: close\r\n\r\n");
+        let port = rx.recv().unwrap();
+
+        let tmp = std::env::temp_dir().join(format!(
+            "delonix-image-pull-creds-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        let store = crate::ImageStore::open(&tmp).unwrap();
+        // SEM `delonix login` local (auth.json não existe) — se a precedência
+        // estivesse errada (override ignorado, só lookup local), o Authorization
+        // capturado seria None (sem creds nenhumas).
+        let reference = format!("127.0.0.1:{port}/repo:tag");
+        let _ = pull_from_registry_with_creds(
+            &store,
+            &reference,
+            Some(("cri-user".to_string(), "cri-pass".to_string())),
+        ); // espera-se erro (2.º 401) — só nos interessa o Authorization capturado.
+
+        let captured = handle.join().unwrap();
+        let auth = captured.expect("o cliente devia ter pedido um token (com Authorization Basic)");
+        // "Basic " + base64("cri-user:cri-pass")
+        let expected_b64 = {
+            use base64::Engine;
+            base64::engine::general_purpose::STANDARD.encode(b"cri-user:cri-pass")
+        };
+        assert!(
+            auth.to_ascii_lowercase().contains(&format!("basic {}", expected_b64.to_lowercase())),
+            "Authorization capturado não usa as credenciais do override: {auth:?}"
+        );
+
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 }

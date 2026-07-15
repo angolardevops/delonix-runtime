@@ -58,16 +58,54 @@ impl RuntimeService for DelonixRuntime {
         &self,
         _req: Request<StatusRequest>,
     ) -> Result<Response<StatusResponse>, Status> {
-        let cond = |t: &str| RuntimeCondition {
+        let cond = |t: &str, ok: bool, reason: &str, message: &str| RuntimeCondition {
             r#type: t.into(),
-            status: true,
-            reason: String::new(),
-            message: String::new(),
+            status: ok,
+            reason: reason.into(),
+            message: message.into(),
+        };
+        // `RuntimeReady`: chegar até aqui já prova que o servidor CRI está vivo
+        // e a responder — não há mais nada a verificar sem inventar um estado
+        // que não temos.
+        let runtime_ready = cond("RuntimeReady", true, "", "");
+        // `NetworkReady`: ANTES disto era sempre `true` fixo — mascarava
+        // avarias reais da SDN (bridge/slirp/holder em baixo), fazendo o node
+        // ficar `Ready` no K8s mesmo sem rede a funcionar. Agora verifica de
+        // facto, nos DOIS modos (rootless: holder+slirp vivos via pidfiles;
+        // root: existência do bridge `delonix0` via sysfs — leitura, sem
+        // privilégio nenhum).
+        let network_ready = if delonix_runtime::is_rootless() {
+            let st = delonix_net::infra::status();
+            if st.up {
+                cond("NetworkReady", true, "", "")
+            } else {
+                cond(
+                    "NetworkReady",
+                    false,
+                    "InfraDown",
+                    &format!(
+                        "netns de infra rootless em baixo (holder={:?}, slirp={:?})",
+                        st.holder_pid, st.slirp_pid
+                    ),
+                )
+            }
+        } else {
+            let up = std::path::Path::new("/sys/class/net")
+                .join(delonix_net::infra::INFRA_BRIDGE)
+                .exists();
+            if up {
+                cond("NetworkReady", true, "", "")
+            } else {
+                cond(
+                    "NetworkReady",
+                    false,
+                    "BridgeMissing",
+                    &format!("bridge '{}' não existe em /sys/class/net", delonix_net::infra::INFRA_BRIDGE),
+                )
+            }
         };
         Ok(Response::new(StatusResponse {
-            status: Some(RuntimeStatus {
-                conditions: vec![cond("RuntimeReady"), cond("NetworkReady")],
-            }),
+            status: Some(RuntimeStatus { conditions: vec![runtime_ready, network_ready] }),
             info: Default::default(),
             runtime_handlers: vec![],
             features: None,
@@ -284,3 +322,45 @@ impl RuntimeService for DelonixRuntime {
 }
 
 pub mod lifecycle;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// O achado corrigido: `NetworkReady` deixou de ser `true` fixo. Neste
+    /// ambiente de teste não há nenhuma infra rootless (`holder`/`slirp`) a
+    /// correr — por isso `NetworkReady` TEM de vir `false` (com razão
+    /// "InfraDown"), nunca `true`. Antes da correção, este teste falharia
+    /// (a condição vinha sempre `true`, mascarando exactamente este cenário).
+    #[tokio::test]
+    async fn network_ready_reflecte_infra_rootless_real_nao_fabricada() {
+        if !delonix_runtime::is_rootless() {
+            eprintln!("SKIP: teste assume ambiente rootless (uid != 0)");
+            return;
+        }
+        let base = std::env::temp_dir().join(format!(
+            "delonix-cri-status-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        std::fs::create_dir_all(&base).unwrap();
+        let streamer = crate::streaming::Streamer::new(base.clone(), "127.0.0.1:0".to_string());
+        let svc = DelonixRuntime::new(base.clone(), streamer);
+
+        let resp = svc.status(Request::new(StatusRequest { verbose: false })).await.unwrap().into_inner();
+        let status = resp.status.expect("StatusResponse.status devia vir preenchido");
+        let runtime_ready = status.conditions.iter().find(|c| c.r#type == "RuntimeReady").unwrap();
+        assert!(runtime_ready.status, "RuntimeReady devia ser true (o servidor respondeu)");
+
+        let network_ready = status.conditions.iter().find(|c| c.r#type == "NetworkReady").unwrap();
+        assert!(
+            !network_ready.status,
+            "NetworkReady devia ser FALSE (sem infra rootless a correr neste teste) — \
+             se vier true sem verificação real, é a regressão que corrigimos"
+        );
+        assert_eq!(network_ready.reason, "InfraDown");
+        assert!(!network_ready.message.is_empty(), "devia explicar a causa concreta");
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
+}

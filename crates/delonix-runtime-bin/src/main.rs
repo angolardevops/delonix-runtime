@@ -140,21 +140,11 @@ fn effective_command(img: &Image, user: &[String]) -> Vec<String> {
 
 /// `chown -R <uid>:<uid>` de um rootfs FLAT (rootless): sem isto, os ficheiros
 /// pertencem ao uid 0 do host, que fica não-mapeado dentro do user namespace.
+/// Delega em `delonix_runtime::lchown_tree` (usa `lchown`, nunca segue symlinks —
+/// ver nota de segurança lá; não reimplementar isto localmente com
+/// `std::os::unix::fs::chown`, que segue symlinks).
 fn chown_tree(path: &Path, uid: u32) -> Result<()> {
-    use std::os::unix::fs::chown;
-    let mut stack = vec![path.to_path_buf()];
-    while let Some(p) = stack.pop() {
-        let _ = chown(&p, Some(uid), Some(uid));
-        if let Ok(md) = std::fs::symlink_metadata(&p) {
-            if md.is_dir() {
-                if let Ok(rd) = std::fs::read_dir(&p) {
-                    for e in rd.flatten() {
-                        stack.push(e.path());
-                    }
-                }
-            }
-        }
-    }
+    delonix_runtime::lchown_tree(path, uid, uid);
     Ok(())
 }
 
