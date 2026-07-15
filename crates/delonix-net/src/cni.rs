@@ -11,7 +11,7 @@
 //! O *wiring* aos caminhos de attach (root via `Net`, rootless via holder) é feito
 //! por quem chama `add`/`del`.
 
-use delonix_core::{Error, Result};
+use delonix_runtime_core::{Error, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};

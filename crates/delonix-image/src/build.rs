@@ -3,7 +3,7 @@
 
 use crate::cas::strip;
 use crate::image::{now_unix, Image, ImageConfig, ImageStore};
-use delonix_core::{Error, Result};
+use delonix_runtime_core::{Error, Result};
 use std::path::PathBuf;
 
 /// Um passo do build, por ordem (a ordem importa: `COPY` antes do `RUN` que usa).
