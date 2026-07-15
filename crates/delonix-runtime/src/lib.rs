@@ -1719,14 +1719,21 @@ fn container_init(
     127
 }
 
-/// `chown -R <uid>:<gid>` no rootfs do container (caminho `root` já dentro do
-/// pivot_root). Idempotente via um marcador `/.delonix_user_<uid>` — só corre na
-/// 1.ª vez para um dado uid, evitando o custo a cada arranque. Best-effort: erros
+/// `chown -R <uid>:<gid>` de `root` usando **`lchown`** (nunca segue symlinks — um
+/// symlink malicioso dentro da árvore, ex. `usr/x -> /etc/shadow`, não pode fazer-nos
+/// mudar a posse de um ficheiro fora da árvore). Salta `proc`/`sys`/`dev` no
+/// topo (são mounts, não fazem parte do rootfs exportado). Best-effort: erros
 /// individuais são ignorados (ficheiros especiais), o que conta é a árvore da app.
-fn chown_tree_once(root: &str, uid: u32, gid: u32) {
-    let marker = format!("{}/.delonix_user_{uid}", root.trim_end_matches('/'));
-    if std::path::Path::new(&marker).exists() {
-        return;
+///
+/// Público porque é partilhado com `delonix-runtime-bin` (rootfs FLAT rootless) —
+/// **nunca reimplementar isto com `std::fs::chown`/`std::os::unix::fs::chown`**, que
+/// segue symlinks.
+pub fn lchown_tree(root: &std::path::Path, uid: u32, gid: u32) {
+    fn lchown_path(p: &std::path::Path, uid: u32, gid: u32) {
+        if let Ok(c) = std::ffi::CString::new(p.as_os_str().as_encoded_bytes()) {
+            // SAFETY: lchown sobre um caminho válido; não segue symlink.
+            unsafe { libc::lchown(c.as_ptr(), uid, gid); }
+        }
     }
     fn rec(dir: &std::path::Path, uid: u32, gid: u32, depth: u32) {
         if depth > 64 {
@@ -1738,34 +1745,34 @@ fn chown_tree_once(root: &str, uid: u32, gid: u32) {
         };
         for ent in entries.flatten() {
             let p = ent.path();
-            // não segue symlinks (lchown via libc); recursa só em dirs reais.
             let ft = ent.file_type().ok();
-            let cpath = std::ffi::CString::new(p.as_os_str().as_encoded_bytes()).ok();
-            if let Some(c) = &cpath {
-                // SAFETY: lchown sobre um caminho válido; não segue symlink.
-                unsafe { libc::lchown(c.as_ptr(), uid, gid); }
-            }
+            lchown_path(&p, uid, gid);
             if ft.map(|t| t.is_dir()).unwrap_or(false) {
                 rec(&p, uid, gid, depth + 1);
             }
         }
     }
-    let rootp = std::path::Path::new(root);
-    // chown da própria raiz + árvore (exceto /proc, /sys, /dev que são mounts).
-    for top in std::fs::read_dir(rootp).into_iter().flatten().flatten() {
+    for top in std::fs::read_dir(root).into_iter().flatten().flatten() {
         let name = top.file_name();
         if matches!(name.to_str(), Some("proc") | Some("sys") | Some("dev")) {
             continue;
         }
         let p = top.path();
-        if let Ok(c) = std::ffi::CString::new(p.as_os_str().as_encoded_bytes()) {
-            // SAFETY: lchown sobre caminho válido.
-            unsafe { libc::lchown(c.as_ptr(), uid, gid); }
-        }
+        lchown_path(&p, uid, gid);
         if top.file_type().map(|t| t.is_dir()).unwrap_or(false) {
             rec(&p, uid, gid, 0);
         }
     }
+}
+
+/// Como [`lchown_tree`], mas idempotente via um marcador `/.delonix_user_<uid>` —
+/// só corre na 1.ª vez para um dado uid, evitando o custo a cada arranque.
+fn chown_tree_once(root: &str, uid: u32, gid: u32) {
+    let marker = format!("{}/.delonix_user_{uid}", root.trim_end_matches('/'));
+    if std::path::Path::new(&marker).exists() {
+        return;
+    }
+    lchown_tree(std::path::Path::new(root), uid, gid);
     let _ = std::fs::File::create(&marker);
 }
 
@@ -3574,6 +3581,67 @@ pub fn remove(store: &Store, container: &Container, force: bool) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `lchown_tree` NUNCA pode seguir symlinks: um symlink dentro da árvore para
+    /// um ficheiro FORA da árvore (ex. imagem OCI maliciosa `usr/x -> /etc/shadow`)
+    /// não pode fazer-nos tocar na posse desse ficheiro externo. Prova-se sem
+    /// privilégios de root: qualquer chamada real a chown(2)/lchown(2) actualiza o
+    /// ctime do inode visado, mesmo passando o uid/gid já actuais — se o ctime do
+    /// alvo do symlink mudar, a função seguiu o link (bug); se só o ctime do
+    /// PRÓPRIO link mudar, `lchown` foi usado correctamente.
+    #[test]
+    fn lchown_tree_nao_segue_symlinks() {
+        use std::os::unix::fs::MetadataExt;
+
+        let base = std::env::temp_dir().join(format!(
+            "delonix-lchown-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let tree = base.join("tree");
+        let outside = base.join("outside");
+        std::fs::create_dir_all(tree.join("sub")).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+
+        let victim = outside.join("victim.txt");
+        std::fs::write(&victim, b"nao mexer").unwrap();
+        let real_file = tree.join("sub").join("file.txt");
+        std::fs::write(&real_file, b"parte da arvore").unwrap();
+        let link = tree.join("link_to_victim");
+        std::os::unix::fs::symlink(&victim, &link).unwrap();
+
+        // ctime "antes" — dorme 1s porque a resolução de ctime em alguns FS é de 1s.
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+        let victim_ctime_before = std::fs::metadata(&victim).unwrap().ctime();
+        let link_ctime_before = std::fs::symlink_metadata(&link).unwrap().ctime();
+        let file_ctime_before = std::fs::metadata(&real_file).unwrap().ctime();
+
+        let uid = nix::unistd::getuid().as_raw();
+        let gid = nix::unistd::getgid().as_raw();
+        lchown_tree(&tree, uid, gid);
+
+        let victim_ctime_after = std::fs::metadata(&victim).unwrap().ctime();
+        let link_ctime_after = std::fs::symlink_metadata(&link).unwrap().ctime();
+        let file_ctime_after = std::fs::metadata(&real_file).unwrap().ctime();
+
+        assert_eq!(
+            victim_ctime_before, victim_ctime_after,
+            "lchown_tree TOCOU no alvo do symlink fora da árvore — seguiu o link (regressão do bug chown-vs-lchown)"
+        );
+        assert!(
+            link_ctime_after >= link_ctime_before,
+            "o próprio link devia ter sido processado (lchown sobre o link em si)"
+        );
+        assert!(
+            file_ctime_after >= file_ctime_before,
+            "um ficheiro real dentro da árvore devia continuar a ser chown'd normalmente"
+        );
+
+        std::fs::remove_dir_all(&base).ok();
+    }
 
     #[test]
     fn user_service_base_encontra_a_fronteira_de_delegacao() {

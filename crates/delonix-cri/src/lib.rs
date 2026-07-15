@@ -92,14 +92,23 @@ impl ImageService for DelonixImage {
         &self,
         req: Request<PullImageRequest>,
     ) -> Result<Response<PullImageResponse>, Status> {
-        let name = req.into_inner().image.map(|s| s.image).unwrap_or_default();
+        let r = req.into_inner();
+        let name = r.image.map(|s| s.image).unwrap_or_default();
         if name.is_empty() {
             return Err(Status::invalid_argument("image vazia"));
         }
+        // `AuthConfig` vem dos `imagePullSecrets` do Pod (o kubelet resolve-os e
+        // manda aqui) — SEM isto, qualquer registry privado falha porque
+        // `pull_from_registry` só via credenciais locais (`delonix login` no
+        // próprio nó, que normalmente não tem as credenciais do tenant). Só
+        // `username`+`password` são suportados por agora (o schema base do CRI);
+        // `identity_token`/`registry_token`/`auth` (base64 já combinado) ficam
+        // para quando surgir um caso real que precise deles.
+        let creds = r.auth.filter(|a| !a.username.is_empty()).map(|a| (a.username, a.password));
         let base = self.base.clone();
         let img = tokio::task::spawn_blocking(move || {
             let store = images(&base)?;
-            delonix_image::pull_from_registry(&store, &name).map_err(st)
+            delonix_image::pull_from_registry_with_creds(&store, &name, creds).map_err(st)
         })
         .await
         .map_err(st)??;
