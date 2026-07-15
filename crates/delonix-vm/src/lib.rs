@@ -460,7 +460,14 @@ fn boot_ch(vmdir: &Path, cfg: &VmConfig, overlay: &str, tap: &str, mac: &str) ->
         ));
     }
     ch.push("--disk".into());
-    ch.push(format!("path={overlay}"));
+    // `image_type=qcow2,backing_files=on` é OBRIGATÓRIO: versões recentes do
+    // Cloud Hypervisor (achado real via `validate-rootless`, v52) recusam por
+    // omissão qualquer qcow2 com `backing_file` (o overlay por-VM que `create`
+    // gera sempre) com o erro enganador "Maximum disk nesting depth exceeded"
+    // — não é sobre profundidade de nesting real, é o novo opt-in de segurança
+    // do CH para cadeias de backing file. Sem isto, NENHUMA VM com overlay
+    // arranca.
+    ch.push(format!("path={overlay},image_type=qcow2,backing_files=on"));
     if let Some(seed) = &cfg.seed {
         ch.push("--disk".into());
         ch.push(format!("path={seed}"));
