@@ -29,6 +29,8 @@ struct ContainerSpec {
     #[serde(default)]
     volumes: Vec<String>,
     #[serde(default)]
+    ports: Vec<String>,
+    #[serde(default)]
     privileged: bool,
     #[serde(default)]
     env: Vec<String>,
@@ -60,6 +62,12 @@ pub enum ContainerCmd {
         /// Volume/bind mount, `nome:/destino[:ro]` ou `/host:/destino[:ro]`. Repetível.
         #[arg(short = 'v', long = "volume")]
         volumes: Vec<String>,
+        /// Publica uma porta, `hostPort:contPort[/tcp|udp]` ou só `porta`. Repetível.
+        /// Com `--net host` (o default) muda o container para um netns próprio com
+        /// NAT em userspace (slirp4netns, como o podman rootless); com `--net
+        /// <rede>` publica pelo ingress (DNAT nft + hostfwd no slirp único).
+        #[arg(short = 'p', long = "publish")]
+        publish: Vec<String>,
         /// Container privilegiado (todas as caps, seccomp off) — cargas de confiança.
         #[arg(long)]
         privileged: bool,
@@ -85,6 +93,13 @@ pub enum ContainerCmd {
         /// Só imprime os IDs (para compor com `stop`/`rm`).
         #[arg(short, long)]
         quiet: bool,
+    },
+    /// (Re)arranca containers parados/crashados, reutilizando o rootfs
+    /// persistente (as escritas feitas dentro do container sobrevivem, como no
+    /// docker) e a mesma rede/portas/volumes do `run` original. Sempre detached.
+    Start {
+        #[arg(required = true)]
+        ids: Vec<String>,
     },
     /// Pára um ou mais containers (SIGTERM, depois SIGKILL).
     Stop {
@@ -128,10 +143,11 @@ pub enum ContainerCmd {
 pub fn run(action: ContainerCmd) -> Result<()> {
     let (images, store) = open_stores()?;
     match action {
-        ContainerCmd::Run { detach, name, net, volumes, privileged, env, labels, image, command } => {
-            cmd_run(&images, &store, detach, name, &net, volumes, privileged, env, labels, image, command)
+        ContainerCmd::Run { detach, name, net, volumes, publish, privileged, env, labels, image, command } => {
+            cmd_run(&images, &store, detach, name, &net, volumes, publish, privileged, env, labels, image, command)
         }
         ContainerCmd::Ps { all, quiet } => cmd_ps(&store, all, quiet),
+        ContainerCmd::Start { ids } => for_each_id(&ids, |id| cmd_start(&images, &store, id)),
         ContainerCmd::Stop { ids, time } => for_each_id(&ids, |id| cmd_stop(&store, id, time)),
         ContainerCmd::Rm { ids, force } => for_each_id(&ids, |id| cmd_rm(&images, &store, id, force)),
         ContainerCmd::Exec { interactive, tty, id, command } => cmd_exec(&store, &id, interactive, tty, &command),
@@ -160,6 +176,7 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
             Some(name.clone()),
             &spec.network,
             spec.volumes,
+            spec.ports,
             spec.privileged,
             spec.env,
             Vec::new(),
@@ -189,12 +206,20 @@ fn cmd_run(
     name: Option<String>,
     net: &str,
     volumes: Vec<String>,
+    ports: Vec<String>,
     privileged: bool,
     env: Vec<String>,
     labels: Vec<String>,
     image: String,
     command: Vec<String>,
 ) -> Result<()> {
+    // Valida os `-p` ANTES de criar o que quer que seja (erro claro, sem lixo).
+    for spec in &ports {
+        delonix_net::parse_publish(spec)?;
+    }
+    if net == "none" && !ports.is_empty() {
+        return Err(Error::Invalid("-p/--publish não é compatível com --net none (netns sem ligação)".into()));
+    }
     let mounts = resolve_mounts(&volumes)?;
     let img = resolve_or_pull(images, &image)?;
     let id = generate_id();
@@ -250,13 +275,36 @@ fn cmd_run(
         join_netns = Some(format!("/run/netns/{netns}"));
         attached_ip = Some(ip);
     }
+    c.ports = ports.clone();
+
+    // `-p` com rede custom: publica pelo INGRESS (hostfwd no slirp único + DNAT
+    // nft), ANTES do arranque — as regras apontam para o IP atribuído, que já é
+    // conhecido; também é este o caminho que permite (un)publish a quente com o
+    // container a correr. Limpeza no stop/rm (`unpublish_ports`).
+    if let Some(ip) = &attached_ip {
+        for spec in &ports {
+            if let Err(e) = infra::publish_port(ip, spec) {
+                unpublish_ports(&c);
+                infra::detach_container(&id, ip);
+                return Err(e);
+            }
+        }
+    }
+
+    // `-p` sem rede custom (`--net host`, o default): o container deixa de
+    // partilhar a rede do host e ganha um netns próprio com slirp4netns + os
+    // hostfwd pedidos — o comportamento do `docker run -p` (rede NAT por
+    // omissão), no modelo rootless do podman. O slirp morre com o netns.
+    let slirp_ports = if custom_net.is_none() { ports.clone() } else { Vec::new() };
+    let slirp_hook = |pid: i32| -> Result<()> { delonix_net::slirp_attach(pid, &slirp_ports) };
     let spec = RunSpec {
         detach,
-        new_netns: net == "none",
+        new_netns: net == "none" || !slirp_ports.is_empty(),
         join_netns,
         userns: c.userns,
         log_path,
         mounts,
+        on_started: if slirp_ports.is_empty() { None } else { Some(&slirp_hook) },
         ..Default::default()
     };
     runtime::create_with(store, &mut c, &rootfs, &spec)?;
@@ -315,9 +363,91 @@ fn for_each_id(ids: &[String], mut f: impl FnMut(&str) -> Result<()>) -> Result<
     }
 }
 
+/// Remove as publicações de ingress de um container (best-effort, idempotente).
+/// Só o caminho de rede custom deixa regras persistentes (hostfwd no slirp único
+/// + DNAT no holder); no caminho slirp-por-container o processo slirp morre com
+/// o netns do container, não há nada para limpar.
+fn unpublish_ports(c: &Container) {
+    if c.network.is_none() {
+        return;
+    }
+    for spec in &c.ports {
+        if let Ok((host_port, _, _)) = delonix_net::parse_publish(spec) {
+            infra::unpublish_port(&host_port);
+        }
+    }
+}
+
+/// `container start` — rearranca um container parado/crashado com a spec
+/// guardada no `Store` (comando/env/mounts/rede/portas) e o rootfs PERSISTENTE
+/// (rootless: a cópia flat em `containers/<id>/rootfs`; root: remonta o overlay,
+/// cujo `upper` preserva as escritas). É o que falta ao `rm`+`run`: não perde o
+/// estado escrito dentro do container.
+fn cmd_start(images: &ImageStore, store: &Store, id: &str) -> Result<()> {
+    let mut c = find(store, id)?;
+    if runtime::reconcile_status(&mut c) {
+        let _ = store.save(&c);
+    }
+    if matches!(c.status, delonix_runtime_core::Status::Running | delonix_runtime_core::Status::Paused) {
+        return Err(Error::Invalid(format!("{} já está a correr", c.name)));
+    }
+
+    let rootfs = if runtime::is_rootless() {
+        let rfs = images.root().join("containers").join(&c.id).join("rootfs");
+        if !rfs.exists() {
+            return Err(Error::Invalid(format!("rootfs de {} já não existe — usa `run` de novo", c.name)));
+        }
+        rfs.to_string_lossy().into_owned()
+    } else {
+        let img = resolve_or_pull(images, &c.image)?;
+        images.mount_rootfs(&img, &c.id)?.to_string_lossy().into_owned()
+    };
+
+    // Reconstrói a rede exactamente como o `run` original (ver `cmd_run`):
+    // rede custom → attach + publish pelo ingress; `-p` sem rede → netns novo
+    // com slirp4netns + hostfwd; sem nada → rede do host.
+    let mut join_netns = None;
+    if let Some(n) = c.network.clone() {
+        let (netns, ip) = infra::attach_container(&c.id, &n)?;
+        join_netns = Some(format!("/run/netns/{netns}"));
+        for spec in &c.ports {
+            if let Err(e) = infra::publish_port(&ip, spec) {
+                unpublish_ports(&c);
+                infra::detach_container(&c.id, &ip);
+                return Err(e);
+            }
+        }
+        c.ip = Some(ip);
+    }
+    let slirp_ports = if c.network.is_none() { c.ports.clone() } else { Vec::new() };
+    let slirp_hook = |pid: i32| -> Result<()> { delonix_net::slirp_attach(pid, &slirp_ports) };
+
+    let log_path = images
+        .root()
+        .join("containers")
+        .join(&c.id)
+        .join("log")
+        .to_string_lossy()
+        .into_owned();
+    let spec = RunSpec {
+        detach: true,
+        new_netns: !slirp_ports.is_empty(),
+        join_netns,
+        userns: c.userns,
+        log_path: Some(log_path),
+        mounts: c.mounts.clone(),
+        on_started: if slirp_ports.is_empty() { None } else { Some(&slirp_hook) },
+        ..Default::default()
+    };
+    runtime::create_with(store, &mut c, &rootfs, &spec)?;
+    println!("{}", c.id);
+    Ok(())
+}
+
 fn cmd_stop(store: &Store, id: &str, time: u64) -> Result<()> {
     let mut c = find(store, id)?;
     runtime::stop(store, &mut c, time)?;
+    unpublish_ports(&c);
     println!("{}", c.id);
     Ok(())
 }
@@ -325,6 +455,7 @@ fn cmd_stop(store: &Store, id: &str, time: u64) -> Result<()> {
 fn cmd_rm(images: &ImageStore, store: &Store, id: &str, force: bool) -> Result<()> {
     let c = find(store, id)?;
     runtime::remove(store, &c, force)?;
+    unpublish_ports(&c);
     let _ = images.unmount_rootfs(&c.id);
     println!("{}", c.id);
     Ok(())
