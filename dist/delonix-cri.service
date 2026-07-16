@@ -1,0 +1,18 @@
+[Unit]
+Description=Delonix CRI (runtime.v1) — endpoint local para o kubelet
+Documentation=https://github.com/angolardevops/delonix-runtime
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStartPre=/bin/mkdir -p /var/lib/delonix
+Environment=DELONIX_ROOT=/var/lib/delonix
+Environment=DELONIX_CRI_ADDR=unix:///run/delonix-cri.sock
+ExecStart=/usr/local/bin/delonix-cri
+Restart=always
+RestartSec=2
+LimitNOFILE=1048576
+
+[Install]
+WantedBy=multi-user.target
