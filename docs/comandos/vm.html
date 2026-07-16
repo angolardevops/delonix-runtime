@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>delonix vm · Delonix Runtime</title>
+<style>
+:root{--accent:#e8590c;--accent-soft:#fff0e6;--ink:#1a1a2e;--muted:#5a6472;--line:#e6e8ec;
+--bg:#ffffff;--side:#f7f8fa;--code-bg:#0f172a;--code-ink:#e2e8f0;--radius:10px}
+@media (prefers-color-scheme: dark){:root{--ink:#e6e8ee;--muted:#9aa4b2;--line:#252a33;
+--bg:#0d1117;--side:#10151c;--accent-soft:#2a1810;--code-bg:#161b22;--code-ink:#dbe2ea}}
+*{box-sizing:border-box}body{margin:0;font:16px/1.65 -apple-system,'Segoe UI',Roboto,Ubuntu,
+sans-serif;color:var(--ink);background:var(--bg)}
+a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
+.layout{display:flex;min-height:100vh}
+nav.side{width:270px;flex-shrink:0;background:var(--side);border-right:1px solid var(--line);
+padding:1.2rem 1rem 3rem;position:sticky;top:0;height:100vh;overflow-y:auto}
+nav.side .brand{display:flex;align-items:center;gap:.55rem;font-weight:700;font-size:1.12rem;
+margin-bottom:1.1rem;color:var(--ink)}
+nav.side .brand .dot{width:26px;height:26px;border-radius:7px;background:var(--accent);
+display:inline-flex;align-items:center;justify-content:center;color:#fff;font-size:.85rem}
+nav.side h5{margin:1.3rem 0 .3rem;font-size:.72rem;letter-spacing:.09em;text-transform:uppercase;
+color:var(--muted)}
+nav.side a{display:block;padding:.28rem .55rem;border-radius:6px;color:var(--ink);font-size:.93rem}
+nav.side a:hover{background:var(--accent-soft);text-decoration:none}
+nav.side a.on{background:var(--accent-soft);color:var(--accent);font-weight:600}
+main{flex:1;min-width:0;padding:2.2rem 3rem 5rem;max-width:940px}
+main h1{font-size:1.9rem;margin:.2rem 0 .4rem}
+main h2{font-size:1.35rem;margin-top:2.4rem;padding-bottom:.35rem;border-bottom:1px solid var(--line)}
+main h3{font-size:1.05rem;margin-top:1.6rem}
+.tagline{color:var(--muted);font-size:1.05rem;margin-top:0}
+code{background:var(--accent-soft);padding:.1em .35em;border-radius:5px;font-size:.9em}
+pre{background:var(--code-bg);color:var(--code-ink);padding:1rem 1.2rem;border-radius:var(--radius);
+overflow-x:auto;font-size:.86rem;line-height:1.55}
+pre code{background:none;padding:0;color:inherit;font-size:inherit}
+.help pre{border-left:4px solid var(--accent)}
+.ex{margin:.9rem 0}.ex .cap{font-size:.88rem;color:var(--muted);margin-bottom:.25rem}
+table{border-collapse:collapse;width:100%;font-size:.92rem}
+td,th{border:1px solid var(--line);padding:.5rem .7rem;text-align:left;vertical-align:top}
+th{background:var(--side)}
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:1rem;margin:1.4rem 0}
+.card{border:1px solid var(--line);border-radius:var(--radius);padding:1rem 1.1rem}
+.card b{display:block;margin-bottom:.25rem}.card a{font-weight:600}
+.card p{margin:.2rem 0 0;font-size:.88rem;color:var(--muted)}
+.arch{display:flex;flex-direction:column;gap:.6rem;margin:1.4rem 0}
+.arch .row{display:flex;gap:.6rem;flex-wrap:wrap}
+.arch .box{flex:1;min-width:150px;border:1.5px solid var(--accent);border-radius:8px;
+padding:.55rem .8rem;font-size:.85rem;background:var(--accent-soft)}
+.arch .box.mut{border-color:var(--line);background:var(--side)}
+.arch .box b{display:block;font-size:.9rem}
+.pill{display:inline-block;background:var(--accent);color:#fff;border-radius:99px;
+padding:.05rem .6rem;font-size:.75rem;font-weight:600;vertical-align:middle}
+footer{margin-top:4rem;color:var(--muted);font-size:.85rem;border-top:1px solid var(--line);padding-top:1rem}
+@media (max-width:840px){.layout{flex-direction:column}nav.side{width:100%;height:auto;position:static}
+main{padding:1.4rem 1.2rem 4rem}}
+</style>
+</head>
+<body>
+<div class="layout">
+<nav class="side">
+<div class="brand"><span class="dot">▲</span> Delonix Runtime</div>
+<h5>Documentação</h5>
+<a href="../index.html">Início</a><a href="../arquitectura.html">Arquitectura</a><a href="../cri.html">CRI — kubelet sem containerd</a>
+<h5>Referência CLI</h5>
+<a href="../comandos/container.html">delonix container</a><a href="../comandos/image.html">delonix image</a><a href="../comandos/build.html">delonix build</a><a href="../comandos/vm.html" class="on">delonix vm</a><a href="../comandos/volumes.html">delonix volumes</a><a href="../comandos/network.html">delonix network</a><a href="../comandos/stack.html">delonix stack</a><a href="../comandos/cluster.html">delonix cluster</a><a href="../comandos/completion.html">delonix completion</a>
+<h5>Projecto</h5>
+<a href="https://github.com/angolardevops/delonix-runtime">GitHub</a>
+<a href="https://github.com/angolardevops/delonix-runtime/releases">Releases</a>
+</nav>
+<main>
+<h1>delonix vm</h1><p class='tagline'>microVMs declarativas: create, ls, status, stop, rm, apply.</p>
+<p>MicroVMs geridas pelo trait <code>VmBackend</code> — Cloud Hypervisor ou libvirt.
+O <code>create</code> é idempotente (cria ou auto-recupera) e suporta cloud-init por instância:
+<code>--hostname</code>, <code>--ssh-key</code> e <code>--user-data</code> geram um ISO NoCloud
+automaticamente. É a camada que o <code>delonix cluster kubeadm</code> usa para provisionar nós.</p>
+<div class='help'><pre><code>microVMs declarativas: create/ls/stop/rm/status
+
+Usage: delonix vm &lt;COMMAND&gt;
+
+Commands:
+  create  Cria (ou auto-recupera) uma VM
+  ls      Lista as VMs
+  status  Estado actual (reconcilia liveness/IP com o backend)
+  stop    Pára a VM (preserva disco/registo)
+  rm      Remove a VM (pára + apaga overlay/estado)
+  apply   Aplica os documentos `kind: Vm` de um manifesto (`delonix_vm::create` já é idempotente por nome — cria ou auto-recupera)
+  help    Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help  Print help</code></pre></div>
+<h2 id='create'><code>vm create</code></h2>
+<div class='help'><pre><code>Cria (ou auto-recupera) uma VM
+
+Usage: delonix vm create [OPTIONS] --disk &lt;DISK&gt; &lt;NAME&gt;
+
+Arguments:
+  &lt;NAME&gt;  
+
+Options:
+      --disk &lt;DISK&gt;
+          Disco base (qcow2/raw) — vira overlay por-VM
+      --vcpus &lt;VCPUS&gt;
+          [default: 1]
+      --memory &lt;MEMORY&gt;
+          Memória (`&quot;2G&quot;`/`&quot;1024M&quot;`) [default: 1G]
+      --network &lt;NETWORK&gt;
+          Rede do ingress para o tap (`delonix network create` primeiro) [default: bridge]
+      --kernel &lt;KERNEL&gt;
+          Kernel para direct boot
+      --initrd &lt;INITRD&gt;
+          
+      --firmware &lt;FIRMWARE&gt;
+          Firmware, alternativa ao kernel (cloud images)
+      --cmdline &lt;CMDLINE&gt;
+          
+      --seed &lt;SEED&gt;
+          ISO cloud-init (NoCloud) já pronta — se dado, tem prioridade sobre `--hostname`/`--ssh-key`/`--user-data` (esses geram a ISO; este usa-a directamente)
+      --hostname &lt;HOSTNAME&gt;
+          Hostname a aplicar no primeiro boot (gera a ISO NoCloud se nenhum `--seed` explícito for dado)
+      --ssh-key &lt;SSH_KEYS&gt;
+          Chave SSH pública autorizada, `ssh-ed25519 AAAA...` ou `@caminho` para ler de um ficheiro. Repetível
+      --user-data &lt;USER_DATA&gt;
+          `user-data` cloud-init próprio (substitui totalmente o gerado por omissão) — controlo completo para quem precisar
+      --restart-policy &lt;RESTART_POLICY&gt;
+          `no`|`on-failure`|`always`
+      --hugepages
+          
+      --cpu-affinity &lt;CPU_AFFINITY&gt;
+          Afinidade de cores, ex.: `8-15`
+      --device &lt;DEVICES&gt;
+          VFIO PCI passthrough, repetível
+      --backend &lt;BACKEND&gt;
+          `cloud-hypervisor`|`libvirt` (omitir = auto-deteção)
+      --net-mode &lt;NET_MODE&gt;
+          Só libvirt: `user`|`nat`|`bridge`
+      --bridge &lt;BRIDGE&gt;
+          Nome da bridge (net-mode=bridge) ou rede libvirt (nat)
+  -h, --help
+          Print help</code></pre></div>
+<h3>Exemplos</h3><div class="ex"><div class="cap">VM a partir da imagem dourada, com chave SSH</div><pre><code>delonix vm create --name node1 --image k8s-golden --cpus 2 --memory 4096 --ssh-key @~/.ssh/id_ed25519.pub</code></pre></div>
+<h2 id='ls'><code>vm ls</code></h2>
+<div class='help'><pre><code>Lista as VMs
+
+Usage: delonix vm ls
+
+Options:
+  -h, --help  Print help</code></pre></div>
+<h3>Exemplos</h3><div class="ex"><pre><code>delonix vm ls</code></pre></div>
+<h2 id='status'><code>vm status</code></h2>
+<div class='help'><pre><code>Estado actual (reconcilia liveness/IP com o backend)
+
+Usage: delonix vm status &lt;NAME&gt;
+
+Arguments:
+  &lt;NAME&gt;  
+
+Options:
+  -h, --help  Print help</code></pre></div>
+<h3>Exemplos</h3><div class="ex"><div class="cap">Reconcilia liveness/IP com o backend</div><pre><code>delonix vm status node1</code></pre></div>
+<h2 id='stop'><code>vm stop</code></h2>
+<div class='help'><pre><code>Pára a VM (preserva disco/registo)
+
+Usage: delonix vm stop &lt;NAME&gt;
+
+Arguments:
+  &lt;NAME&gt;  
+
+Options:
+  -h, --help  Print help</code></pre></div>
+<h3>Exemplos</h3><div class="ex"><pre><code>delonix vm stop node1</code></pre></div>
+<h2 id='rm'><code>vm rm</code></h2>
+<div class='help'><pre><code>Remove a VM (pára + apaga overlay/estado)
+
+Usage: delonix vm rm &lt;NAME&gt;
+
+Arguments:
+  &lt;NAME&gt;  
+
+Options:
+  -h, --help  Print help</code></pre></div>
+<h3>Exemplos</h3><div class="ex"><pre><code>delonix vm rm node1</code></pre></div>
+<h2 id='apply'><code>vm apply</code></h2>
+<div class='help'><pre><code>Aplica os documentos `kind: Vm` de um manifesto (`delonix_vm::create` já é idempotente por nome — cria ou auto-recupera)
+
+Usage: delonix vm apply [OPTIONS]
+
+Options:
+  -f, --file &lt;FILE&gt;  
+  -h, --help         Print help</code></pre></div>
+<h3>Exemplos</h3><div class="ex"><pre><code>delonix vm apply -f delonix-manifest.yaml</code></pre></div>
+<footer>Delonix Runtime · Apache-2.0 · <a href="https://github.com/angolardevops/delonix-runtime">angolardevops/delonix-runtime</a>
+· Referência gerada do <code>--help</code> real do binário por <code>docs/gen.py</code>.</footer>
+</main>
+</div>
+</body>
+</html>
