@@ -758,7 +758,21 @@ pub fn pull_oci_artifact(root: &std::path::Path, source: &str) -> Result<Vec<u8>
         .layers
         .first()
         .ok_or_else(|| Error::Registry("manifesto de artefacto sem layers".into()))?;
-    c.blob(&layer.digest)
+    let data = c.blob(&layer.digest)?;
+
+    // Achado de auditoria de segurança: o caminho antigo (`pull_from_registry_with_creds`)
+    // já verifica cada blob contra o digest esperado antes de o aceitar — este caminho
+    // (artefactos de blob único, ex. imagens VM) tinha ficado sem essa verificação, o
+    // que deixava um registo comprometido/MITM-ao-conteúdo servir bytes diferentes do
+    // digest anunciado sem detecção. Ver CLAUDE.md.
+    let got = format!("sha256:{}", sha256_hex(&data));
+    let expected = with_prefix(&layer.digest);
+    if got != expected {
+        return Err(Error::Registry(format!(
+            "artefacto corrompido ou adulterado: digest esperado {expected}, obtido {got}"
+        )));
+    }
+    Ok(data)
 }
 
 #[derive(Deserialize)]
@@ -770,7 +784,7 @@ struct ArtifactManifest {
 mod tests {
     use super::{
         layer_media_type, parse_reference, pull_from_registry_with_creds, pull_oci_artifact, push_oci_artifact,
-        with_prefix,
+        sha256_hex, with_prefix,
     };
 
     #[test]
@@ -1027,6 +1041,41 @@ mod tests {
 
         let pulled = pull_oci_artifact(&tmp, &target).expect("pull devia ter sucesso contra o mock");
         assert_eq!(pulled, payload);
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    /// Achado de auditoria de segurança: `pull_oci_artifact` tem de recusar um blob cujo
+    /// conteúdo real não bate certo com o digest declarado no manifesto — simula um
+    /// registo comprometido/adulterado que serve bytes diferentes sob o mesmo digest.
+    #[test]
+    fn pull_oci_artifact_recusa_blob_adulterado() {
+        let (port, _handle) = serve_anon_registry();
+        let tmp = std::env::temp_dir().join(format!(
+            "delonix-image-artifact-tamper-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        std::fs::create_dir_all(&tmp).unwrap();
+
+        let target = format!("127.0.0.1:{port}/vm-images:golden");
+        let payload = b"conteudo-original-legitimo".to_vec();
+        // `push_oci_artifact` devolve o digest do MANIFESTO, não do layer/blob — o que
+        // precisamos adulterar é o blob (o mesmo `layer_digest` que o pull vai buscar).
+        let layer_digest = format!("sha256:{}", sha256_hex(&payload));
+        push_oci_artifact(&tmp, &target, "application/vnd.delonix.vmimage.v1.qcow2", &payload).unwrap();
+
+        // Simula adulteração directa no armazenamento do registo: substitui os bytes
+        // guardados sob o MESMO digest (o manifesto continua a apontar para `layer_digest`,
+        // mas o conteúdo real mudou) — o que um `push_blob` normal nunca faria (dedup
+        // por HEAD), mas um registo comprometido/backend adulterado poderia.
+        let http = reqwest::blocking::Client::new();
+        let put_url = format!("http://127.0.0.1:{port}/v2/vm-images/blobs/uploads/tamper?digest={layer_digest}");
+        let resp = http.put(&put_url).body(b"conteudo-adulterado-pelo-atacante".to_vec()).send().unwrap();
+        assert!(resp.status().is_success());
+
+        let err = pull_oci_artifact(&tmp, &target).expect_err("pull devia recusar o blob adulterado");
+        assert!(format!("{err}").contains("adulterado") || format!("{err}").contains("digest"));
 
         let _ = std::fs::remove_dir_all(&tmp);
     }
