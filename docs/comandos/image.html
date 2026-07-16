@@ -83,6 +83,9 @@ Commands:
   rm      Remove uma imagem local
   export  Exporta um bundle OCI runtime (rootfs + config.json) para `runc`/`crun`
   apply   Aplica os documentos `kind: Image` de um manifesto (`pull` idempotente por referência; `build` reconstrói e substitui a tag a cada apply)
+  login   Autentica num registo OCI (guarda as credenciais em `&lt;root&gt;/auth.json`, formato docker/podman). A password vem SEMPRE do stdin — nunca de um argumento (ficaria no histórico da shell e no /proc)
+  logout  Remove as credenciais guardadas de um registo
+  vm      Imagens VM douradas (`&lt;root&gt;/vm-images/`): ls/pull/push/build. Equivalente a `image --vm &lt;cmd&gt;` (forma antiga, mantida)
   push    (só com `--vm`) Publica uma imagem VM local num registo OCI
   build   (só com `--vm`) Constrói a imagem VM dourada (Ubuntu + kubeadm/kubelet/ kubectl + `delonix-cri`)
   help    Print this message or the help of the given subcommand(s)
