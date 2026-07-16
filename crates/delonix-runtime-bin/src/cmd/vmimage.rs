@@ -434,7 +434,7 @@ pub(crate) fn k8s_customization_steps(
 ) -> Vec<CustomizeOp> {
     let mut ops: Vec<CustomizeOp> = super::k8s_recipes::k8s_host_recipes(k8s_version, extra_packages)
         .into_iter()
-        .map(|r| CustomizeOp::RunCommand(r.apply))
+        .map(|r| CustomizeOp::RunCommand(r.apply_offline().to_string()))
         .collect();
     ops.extend([
         // `delonix-cri` — endpoint CRI para o kubelet (substitui containerd).

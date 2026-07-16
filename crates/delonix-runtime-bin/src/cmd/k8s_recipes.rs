@@ -11,14 +11,26 @@
 //! comum aí não traria benefício real, só risco.
 
 /// Uma receita idempotente: `check` (comando shell; código de saída 0 = já
-/// satisfeita) + `apply` (comando shell que a satisfaz). `cmd::vmimage::build`
-/// usa só `.apply` (a imagem parte sempre de zero, sem precisar de check);
-/// `cmd::cluster::apply` usa os dois via SSH.
+/// satisfeita) + `apply` (comando shell que a satisfaz). `cmd::cluster::apply`
+/// usa `check`+`apply` via SSH em hosts VIVOS; `cmd::vmimage::build` usa
+/// `apply_offline()` — a variante sem efeitos-vivos (`modprobe`/`sysctl
+/// --system`/`swapoff` não fazem sentido no chroot do virt-customize, cujo
+/// kernel é o do HOST de build: só a persistência em /etc interessa, os
+/// efeitos acontecem no primeiro boot da VM).
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct HostRecipe {
     pub name: &'static str,
     pub check: String,
     pub apply: String,
+    /// Variante para customização offline de imagem (None = igual a `apply`).
+    pub offline: Option<String>,
+}
+
+impl HostRecipe {
+    /// O comando a usar num build de imagem (offline): só persistência.
+    pub fn apply_offline(&self) -> &str {
+        self.offline.as_deref().unwrap_or(&self.apply)
+    }
 }
 
 /// A versão do repositório `pkgs.k8s.io` (`stable:/v1.31` por omissão).
@@ -48,6 +60,7 @@ pub(crate) fn k8s_host_recipes(k8s_version: Option<&str>, extra_packages: &[Stri
                  echo 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] \
                  https://pkgs.k8s.io/core:/{repo}/deb/ /' > /etc/apt/sources.list.d/kubernetes.list"
             ),
+            offline: None,
         },
         HostRecipe {
             name: "kubeadm/kubelet/kubectl instalados e retidos",
@@ -55,11 +68,13 @@ pub(crate) fn k8s_host_recipes(k8s_version: Option<&str>, extra_packages: &[Stri
             apply: format!(
                 "apt-get update && apt-get install -y {packages_str} && apt-mark hold kubeadm kubelet kubectl"
             ),
+            offline: None,
         },
         HostRecipe {
             name: "swap desligado",
             check: "! swapon --show | grep -q .".to_string(),
             apply: "swapoff -a && sed -i '/[[:space:]]swap[[:space:]]/d' /etc/fstab".to_string(),
+            offline: Some("sed -i '/[[:space:]]swap[[:space:]]/d' /etc/fstab".to_string()),
         },
         HostRecipe {
             name: "módulos kernel overlay/br_netfilter carregados",
@@ -67,6 +82,7 @@ pub(crate) fn k8s_host_recipes(k8s_version: Option<&str>, extra_packages: &[Stri
             apply: "printf 'overlay\\nbr_netfilter\\n' > /etc/modules-load.d/k8s.conf && \
                     modprobe overlay && modprobe br_netfilter"
                 .to_string(),
+            offline: Some("printf 'overlay\\nbr_netfilter\\n' > /etc/modules-load.d/k8s.conf".to_string()),
         },
         HostRecipe {
             name: "sysctls de rede do kubelet/CNI aplicados",
@@ -75,6 +91,11 @@ pub(crate) fn k8s_host_recipes(k8s_version: Option<&str>, extra_packages: &[Stri
                     net.bridge.bridge-nf-call-ip6tables=1\\n' > /etc/sysctl.d/k8s.conf && \
                     sysctl --system"
                 .to_string(),
+            offline: Some(
+                "printf 'net.bridge.bridge-nf-call-iptables=1\\nnet.ipv4.ip_forward=1\\n\
+                 net.bridge.bridge-nf-call-ip6tables=1\\n' > /etc/sysctl.d/k8s.conf"
+                    .to_string(),
+            ),
         },
     ]
 }
