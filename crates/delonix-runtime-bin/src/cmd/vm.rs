@@ -298,7 +298,9 @@ fn build_meta_data(instance_id: &str, hostname: &str) -> String {
 
 /// Gera (ou reaproveita, via `user_data_override`) o `user-data`/`meta-data` e
 /// empacota-os num ISO NoCloud com `cloud-localds`. Devolve o caminho da ISO.
-fn generate_seed_iso(
+/// `pub(crate)`: reaproveitada por `cmd::cluster::provision_and_apply` (cada
+/// VM provisionada por `delonix cluster kubeadm` precisa do mesmo seed).
+pub(crate) fn generate_seed_iso(
     vm_name: &str,
     hostname: Option<&str>,
     ssh_keys: &[String],
