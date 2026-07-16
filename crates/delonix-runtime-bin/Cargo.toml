@@ -3,16 +3,25 @@ name = "delonix-runtime-bin"
 version.workspace = true
 edition.workspace = true
 
-# Binário LEAN só-runtime (node/CRI): executa containers a partir de imagens OCI,
-# sem a API/Console/orquestrador do PaaS. Ver crates/delonix-cli para a plataforma.
+# O `delonix` — CLI opensource completa deste motor (container/image/build/vm/
+# volumes/network), agrupada em comandos semânticos. Sem a API/Console/tenant
+# do PaaS privado (isso é `delonix-cli`/`delonix-paas`, outro repo).
 [[bin]]
-name = "delonix-runtime"
+name = "delonix"
 path = "src/main.rs"
 
 [dependencies]
 delonix-runtime-core = { path = "../delonix-runtime-core" }
 delonix-runtime = { path = "../delonix-runtime" }
 delonix-image = { path = "../delonix-image" }
+delonix-vm = { path = "../delonix-vm" }
+delonix-volume = { path = "../delonix-volume" }
+delonix-net = { path = "../delonix-net" }
 clap = { workspace = true }
+clap_complete = { version = "4.6", features = ["unstable-dynamic"] }
+serde = { workspace = true }
 serde_json = { workspace = true }
+serde_yaml = "0.9"
+sha2 = { workspace = true }
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls-webpki-roots"] }
 libc = { workspace = true }

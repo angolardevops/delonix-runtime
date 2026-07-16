@@ -3,6 +3,13 @@ name = "delonix-cri"
 version.workspace = true
 edition.workspace = true
 
+# `delonix-cri` — servidor CRI (`runtime.v1`), instalado dentro do guest de uma
+# VM (ex.: a imagem dourada `delonix image --vm build`) para o kubelet falar
+# com o `delonix-runtime` em vez de containerd/CRI-O. Ver `dist/delonix-cri.service`.
+[[bin]]
+name = "delonix-cri"
+path = "src/bin/delonix-cri.rs"
+
 [dependencies]
 delonix-runtime-core = { path = "../delonix-runtime-core" }
 delonix-runtime = { path = "../delonix-runtime" }
