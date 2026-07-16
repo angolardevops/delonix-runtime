@@ -692,9 +692,86 @@ pub fn push_to_registry(store: &ImageStore, source: &str, target: &str) -> Resul
     Ok(digest)
 }
 
+/// Media type do config vazio de um artefacto OCI 1.1 (convenção ORAS/Helm
+/// para artefactos que não são imagens de container).
+const EMPTY_CONFIG_MEDIA_TYPE: &str = "application/vnd.oci.empty.v1+json";
+const EMPTY_CONFIG_BYTES: &[u8] = b"{}";
+
+/// Publica `data` como artefacto OCI 1.1 de **blob único** (config vazio + 1
+/// layer) — usado para imagens de VM (qcow2), que não são imagens de
+/// container (essas usam [`push_to_registry`], com layers/config Docker). Só
+/// generaliza o manifesto: reaproveita o mesmo [`Client`] (auth/upload) já
+/// testado. `root` só é usado para `crate::auth::lookup` (credenciais de
+/// `delonix login`) — sem `ImageStore`/CAS envolvido, é um blob solto.
+pub fn push_oci_artifact(root: &std::path::Path, target: &str, layer_media_type: &str, data: &[u8]) -> Result<String> {
+    let (host, repo, refr) = parse_reference(target);
+    let http = reqwest::blocking::Client::builder()
+        .user_agent("delonix/0.1")
+        .timeout(Duration::from_secs(600))
+        .build()
+        .map_err(reg_err)?;
+    let creds = crate::auth::lookup(root, &host);
+    let mut c = Client { http, host: host.clone(), repo: repo.clone(), token: None, creds };
+
+    eprintln!("a publicar artefacto {repo}:{refr} em {host}...");
+
+    let config_digest = with_prefix(&sha256_hex(EMPTY_CONFIG_BYTES));
+    c.push_blob(&config_digest, EMPTY_CONFIG_BYTES)?;
+
+    let layer_digest = with_prefix(&sha256_hex(data));
+    eprintln!("blob {}  ({} bytes)", &layer_digest[..19.min(layer_digest.len())], data.len());
+    c.push_blob(&layer_digest, data)?;
+
+    let manifest = serde_json::json!({
+        "schemaVersion": 2,
+        "mediaType": "application/vnd.oci.image.manifest.v1+json",
+        "artifactType": layer_media_type,
+        "config": { "mediaType": EMPTY_CONFIG_MEDIA_TYPE, "size": EMPTY_CONFIG_BYTES.len(), "digest": config_digest },
+        "layers": [ { "mediaType": layer_media_type, "size": data.len(), "digest": layer_digest } ],
+    });
+    let manifest_bytes = serde_json::to_vec(&manifest)?;
+    c.push_manifest(&refr, &manifest_bytes, "application/vnd.oci.image.manifest.v1+json")?;
+
+    let digest = format!("sha256:{}", sha256_hex(&manifest_bytes));
+    eprintln!("publicado: {host}/{repo}:{refr}  ({digest})");
+    Ok(digest)
+}
+
+/// Pull de um artefacto publicado por [`push_oci_artifact`] — resolve o
+/// manifesto e devolve os bytes do (único) layer.
+pub fn pull_oci_artifact(root: &std::path::Path, source: &str) -> Result<Vec<u8>> {
+    let (host, repo, refr) = parse_reference(source);
+    let http = reqwest::blocking::Client::builder()
+        .user_agent("delonix/0.1")
+        .timeout(Duration::from_secs(600))
+        .build()
+        .map_err(reg_err)?;
+    let creds = crate::auth::lookup(root, &host);
+    let mut c = Client { http, host, repo, token: None, creds };
+
+    let accept = "application/vnd.oci.image.manifest.v1+json";
+    let url = c.manifest_url(&refr);
+    let manifest_bytes = c.fetch(&url, accept)?.bytes().map_err(reg_err)?.to_vec();
+    let manifest: ArtifactManifest = serde_json::from_slice(&manifest_bytes)
+        .map_err(|e| Error::Registry(format!("manifesto de artefacto inválido: {e}")))?;
+    let layer = manifest
+        .layers
+        .first()
+        .ok_or_else(|| Error::Registry("manifesto de artefacto sem layers".into()))?;
+    c.blob(&layer.digest)
+}
+
+#[derive(Deserialize)]
+struct ArtifactManifest {
+    layers: Vec<Descriptor>,
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{layer_media_type, parse_reference, pull_from_registry_with_creds, with_prefix};
+    use super::{
+        layer_media_type, parse_reference, pull_from_registry_with_creds, pull_oci_artifact, push_oci_artifact,
+        with_prefix,
+    };
 
     #[test]
     fn with_prefix_is_idempotent() {
@@ -816,6 +893,140 @@ mod tests {
             auth.to_ascii_lowercase().contains(&format!("basic {}", expected_b64.to_lowercase())),
             "Authorization capturado não usa as credenciais do override: {auth:?}"
         );
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    /// Mock mínimo de um registo OCI ANÓNIMO (sem desafio 401 — como um
+    /// `ghcr.io` público ou um registo local sem auth): guarda blobs/manifestos
+    /// em memória e serve-os de volta. O suficiente para um round-trip real de
+    /// `push_oci_artifact`→`pull_oci_artifact` sem depender de rede.
+    fn serve_anon_registry() -> (u16, std::thread::JoinHandle<()>) {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+        use std::sync::{Arc, Mutex};
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let blobs: Arc<Mutex<std::collections::HashMap<String, Vec<u8>>>> = Arc::new(Mutex::new(Default::default()));
+        let manifests: Arc<Mutex<std::collections::HashMap<String, Vec<u8>>>> = Arc::new(Mutex::new(Default::default()));
+        let handle = std::thread::spawn(move || {
+            listener.set_nonblocking(false).unwrap();
+            loop {
+                let (mut s, _) = match listener.accept() {
+                    Ok(x) => x,
+                    Err(_) => return,
+                };
+                let mut buf = Vec::new();
+                let mut chunk = [0u8; 8192];
+                // lê cabeçalhos (até \r\n\r\n), depois o corpo pelo Content-Length.
+                let header_end = loop {
+                    let n = s.read(&mut chunk).unwrap_or(0);
+                    if n == 0 {
+                        break None;
+                    }
+                    buf.extend_from_slice(&chunk[..n]);
+                    if let Some(i) = find_subslice(&buf, b"\r\n\r\n") {
+                        break Some(i);
+                    }
+                    if buf.len() > 1_000_000 {
+                        break None;
+                    }
+                };
+                let Some(hend) = header_end else { continue };
+                let head = String::from_utf8_lossy(&buf[..hend]).to_string();
+                let mut lines = head.lines();
+                let first = lines.next().unwrap_or_default();
+                let mut parts = first.split_whitespace();
+                let method = parts.next().unwrap_or_default().to_string();
+                let path = parts.next().unwrap_or_default().to_string();
+                let content_length: usize = head
+                    .lines()
+                    .find(|l| l.to_ascii_lowercase().starts_with("content-length:"))
+                    .and_then(|l| l.split(':').nth(1))
+                    .and_then(|v| v.trim().parse().ok())
+                    .unwrap_or(0);
+                let mut body = buf[hend + 4..].to_vec();
+                while body.len() < content_length {
+                    let n = s.read(&mut chunk).unwrap_or(0);
+                    if n == 0 {
+                        break;
+                    }
+                    body.extend_from_slice(&chunk[..n]);
+                }
+
+                let write_resp = |s: &mut std::net::TcpStream, status: &str, headers: &str, body: &[u8]| {
+                    let head = format!(
+                        "HTTP/1.1 {status}\r\n{headers}content-length: {}\r\nconnection: close\r\n\r\n",
+                        body.len()
+                    );
+                    let _ = s.write_all(head.as_bytes());
+                    let _ = s.write_all(body);
+                };
+
+                if method == "POST" && path.contains("/blobs/uploads/") {
+                    write_resp(&mut s, "202 Accepted", &format!("location: {path}upload-1\r\n"), b"");
+                } else if method == "PUT" && path.contains("/blobs/uploads/") {
+                    let digest = path.split("digest=").nth(1).unwrap_or("").to_string();
+                    blobs.lock().unwrap().insert(digest, body);
+                    write_resp(&mut s, "201 Created", "", b"");
+                } else if method == "HEAD" && path.contains("/blobs/") {
+                    let digest = path.rsplit('/').next().unwrap_or("").to_string();
+                    if blobs.lock().unwrap().contains_key(&digest) {
+                        write_resp(&mut s, "200 OK", "", b"");
+                    } else {
+                        write_resp(&mut s, "404 Not Found", "", b"");
+                    }
+                } else if method == "GET" && path.contains("/blobs/") {
+                    let digest = path.rsplit('/').next().unwrap_or("").to_string();
+                    match blobs.lock().unwrap().get(&digest) {
+                        Some(data) => write_resp(&mut s, "200 OK", "", data),
+                        None => write_resp(&mut s, "404 Not Found", "", b""),
+                    }
+                } else if method == "PUT" && path.contains("/manifests/") {
+                    let refr = path.rsplit('/').next().unwrap_or("").to_string();
+                    manifests.lock().unwrap().insert(refr, body);
+                    write_resp(&mut s, "201 Created", "", b"");
+                } else if method == "GET" && path.contains("/manifests/") {
+                    let refr = path.rsplit('/').next().unwrap_or("").to_string();
+                    match manifests.lock().unwrap().get(&refr) {
+                        Some(data) => write_resp(
+                            &mut s,
+                            "200 OK",
+                            "content-type: application/vnd.oci.image.manifest.v1+json\r\n",
+                            data,
+                        ),
+                        None => write_resp(&mut s, "404 Not Found", "", b""),
+                    }
+                } else {
+                    write_resp(&mut s, "404 Not Found", "", b"");
+                }
+            }
+        });
+        (port, handle)
+    }
+
+    fn find_subslice(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+        haystack.windows(needle.len()).position(|w| w == needle)
+    }
+
+    #[test]
+    fn push_e_pull_oci_artifact_round_trip() {
+        let (port, _handle) = serve_anon_registry();
+        let tmp = std::env::temp_dir().join(format!(
+            "delonix-image-artifact-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        std::fs::create_dir_all(&tmp).unwrap();
+
+        let target = format!("127.0.0.1:{port}/vm-images:golden");
+        let payload = b"qcow2-conteudo-fingido-para-o-teste".to_vec();
+        let digest = push_oci_artifact(&tmp, &target, "application/vnd.delonix.vmimage.v1.qcow2", &payload)
+            .expect("push devia ter sucesso contra o mock");
+        assert!(digest.starts_with("sha256:"));
+
+        let pulled = pull_oci_artifact(&tmp, &target).expect("pull devia ter sucesso contra o mock");
+        assert_eq!(pulled, payload);
 
         let _ = std::fs::remove_dir_all(&tmp);
     }
