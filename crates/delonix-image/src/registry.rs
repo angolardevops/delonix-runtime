@@ -72,7 +72,17 @@ fn reg_err(e: reqwest::Error) -> Error {
 fn parse_reference(input: &str) -> (String, String, String) {
     // tag (`:`) ou digest (`@`) — o `:` tem de estar DEPOIS da última `/`.
     let (name, reference) = if let Some(idx) = input.find('@') {
-        (&input[..idx], input[idx + 1..].to_string())
+        // `repo:tag@digest` (formato combinado, válido em Docker/OCI — o digest
+        // manda na resolução, a tag é só informativa) — cortar a tag ANTES do
+        // `@`, senão `name` fica com a tag lá dentro (`repo:tag`) e a URL do
+        // manifesto sai malformada. Achado ao testar `kindest/node:vX@sha256:…`.
+        let before = &input[..idx];
+        let last_slash = before.rfind('/').map(|i| i + 1).unwrap_or(0);
+        let name = match before[last_slash..].find(':') {
+            Some(colon) => &before[..last_slash + colon],
+            None => before,
+        };
+        (name, input[idx + 1..].to_string())
     } else {
         let last_slash = input.rfind('/').map(|i| i + 1).unwrap_or(0);
         match input[last_slash..].find(':') {
@@ -360,7 +370,12 @@ pub fn registry_client(store: &ImageStore, reference: &str) -> Result<RegistryCl
     let (host, repo, refr) = parse_reference(reference);
     let http = reqwest::blocking::Client::builder()
         .user_agent("delonix/0.1")
-        .timeout(Duration::from_secs(120))
+        // 600s (era 120s) — alinhado com push_to_registry/push_oci_artifact:
+        // blobs de imagens grandes (ex. kindest/node, várias centenas de MB)
+        // não cabem num deadline de 120s; `reqwest` corta a leitura do corpo
+        // a meio, reportado como "error decoding response body" (não é um
+        // erro de parsing — é uma leitura de stream interrompida).
+        .timeout(Duration::from_secs(600))
         .build()
         .map_err(reg_err)?;
     let creds = crate::auth::lookup(store.root(), &host);
@@ -508,7 +523,8 @@ pub fn pull_from_registry_with_creds(
     let (host, repo, refr) = parse_reference(reference);
     let http = reqwest::blocking::Client::builder()
         .user_agent("delonix/0.1")
-        .timeout(Duration::from_secs(120))
+        // 600s — ver o mesmo comentário em `registry_client`.
+        .timeout(Duration::from_secs(600))
         .build()
         .map_err(reg_err)?;
     let creds = creds_override.or_else(|| crate::auth::lookup(store.root(), &host));
@@ -829,6 +845,28 @@ mod tests {
         let (_, r, t) = parse_reference("alpine@sha256:abc123");
         assert_eq!(r, "library/alpine");
         assert_eq!(t, "sha256:abc123");
+    }
+
+    /// Achado ao testar `kindest/node:v1.34.0@sha256:...` (imagem base do
+    /// `kind`) — o ramo `@` de `parse_reference` não cortava a tag antes do
+    /// `@`, deixando `name` (e por isso `repo`) com a tag lá dentro
+    /// (`kindest/node:v1.34.0`), o que produzia uma URL de manifesto
+    /// malformada. `repo:tag@digest` é uma referência válida em Docker/OCI —
+    /// o digest manda na resolução, a tag é só informativa.
+    #[test]
+    fn parses_repo_tag_and_digest_combined() {
+        let (h, r, t) = parse_reference("kindest/node:v1.34.0@sha256:7416a61b42b1662ca6ca89f02028ac1");
+        assert_eq!(h, "registry-1.docker.io");
+        assert_eq!(r, "kindest/node");
+        assert_eq!(t, "sha256:7416a61b42b1662ca6ca89f02028ac1");
+    }
+
+    #[test]
+    fn parses_repo_tag_and_digest_combined_com_registo_explicito() {
+        let (h, r, t) = parse_reference("ghcr.io/owner/app:v1@sha256:deadbeef");
+        assert_eq!(h, "ghcr.io");
+        assert_eq!(r, "owner/app");
+        assert_eq!(t, "sha256:deadbeef");
     }
 
     /// Servidor HTTP mínimo (uma ligação, uma resposta canónica) — o suficiente

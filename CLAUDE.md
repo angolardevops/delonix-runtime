@@ -233,11 +233,102 @@ validate_recusa_endpoint_malicioso_no_manifesto_completo`,
 `registry::tests::pull_oci_artifact_recusa_blob_adulterado`,
 `cmd::build::tests::safe_join_recusa_dot_dot`.
 
+## Cluster modo Kind sem Docker — investigação (GO/NO-GO)
+
+Pedido: `delonix cluster` em modo `kind` (sem `kubeadm`) a funcionar **sem Docker instalado** —
+`delonix` substituiria Docker/Podman como backend do `kind`. Antes de investir no shim de
+compatibilidade Docker (grande — emulação de templates Go, `network create`, `run` com
+`--publish`/`--tmpfs`/`--restart`/`--cgroupns`, `logs -f`), fez-se: (1) investigação empírica da
+superfície real que o `kind` exige de um backend, (2) 2 bugs corrigidos em `delonix image pull`
+que bloqueavam qualquer teste, (3) um spike de validação — a imagem `kindest/node` (systemd +
+containerd aninhado) sequer arranca sob o nosso modelo de isolamento?
+
+### Superfície capturada (referência para a fase do shim)
+
+Investigação empírica (não suposição): `docker` real envolvido num wrapper que regista cada
+invocação, com um `kind create cluster` real de ponta a ponta — **52 invocações capturadas**.
+Comandos usados por um backend "docker": `info --format {{json .}}` (+ variantes `-f {{.Driver}}`,
+`--format '{{json .SecurityOptions}}'`, `-f {{json .DriverStatus }}`), `ps -a --filter
+label=io.x-k8s.kind.cluster=<n> --format {{.Names}}`, `inspect --type=image <ref>`, `pull <ref>`,
+`network ls --filter=name=^kind$ --format={{.ID}}`, `network inspect bridge -f {{ index .Options
+"com.docker.network.driver.mtu" }}`, `network create -d=bridge -o
+com.docker.network.bridge.enable_ip_masquerade=true -o com.docker.network.driver.mtu=1500 --ipv6
+--subnet <cidr> kind`, `run --name <n> --hostname <n> --label io.x-k8s.kind.role=... --privileged
+--security-opt seccomp=unconfined --security-opt apparmor=unconfined --tmpfs /tmp --tmpfs /run
+--volume /var --volume /lib/modules:/lib/modules:ro -e KIND_EXPERIMENTAL_CONTAINERD_SNAPSHOTTER
+--detach --tty --label io.x-k8s.kind.cluster=<n> --net kind --restart=on-failure:1 --init=false
+--cgroupns=private --publish=127.0.0.1:<porta>:6443/TCP -e KUBECONFIG=... <imagem>`, `logs -f
+<n>`, `inspect --format {{ index .Config.Labels "io.x-k8s.kind.role"}} <n>`, `exec --privileged
+[-i] <n> <cmd>` (repetido para `cat`/`mkdir`/`cp /dev/stdin`/`kubeadm init`/`kubectl ...`),
+`inspect -f {{range .NetworkSettings.Networks}}{{.IPAddress}},{{.GlobalIPv6Address}}{{end}} <n>`,
+`inspect --format {{ with (index (index .NetworkSettings.Ports "6443/tcp") 0) }}{{ printf "%s\t%s"
+.HostIp .HostPort }}{{ end }} <n>`, `rm -f -v <n>`.
+
+Templates Go usados pelo `kind` são um conjunto **finito e conhecido** (capturado acima) — a fase
+do shim pode emular por **correspondência exacta das strings**, sem motor de templates Go em Rust.
+
+### 2 bugs corrigidos em `delonix image pull` (`crates/delonix-image/src/registry.rs`)
+
+1. **`parse_reference` não tratava `repo:tag@digest`** (formato combinado, usado pela própria
+   referência `kindest/node:v1.34.0@sha256:...`) — o ramo `@` cortava a referência sem primeiro
+   remover a tag do lado do `repo`, produzindo uma URL de manifesto malformada. Testes de
+   regressão: `parses_repo_tag_and_digest_combined`, `parses_repo_tag_and_digest_combined_com_registo_explicito`.
+2. **Timeout de 120s demasiado curto** em `registry_client`/`pull_from_registry_with_creds` —
+   `kindest/node` tem layers de várias centenas de MB; o `reqwest` cortava a leitura do corpo a
+   meio, reportado como `"error decoding response body"` (não é erro de parsing, é leitura
+   interrompida). Subido para 600s, alinhado com `push_to_registry`/`push_oci_artifact`.
+
+Confirmado com um smoke test real: `delonix image pull kindest/node:v1.34.0@sha256:...` completa
+em ~2min (antes falhava sempre, nos dois bugs).
+
+### Spike GO/NO-GO: `container run --privileged` — resultado: **NO-GO nesta v1**
+
+Achado inesperado antes mesmo do spike: o motor **já tem** lógica dedicada de delegação de
+cgroup2 para nodes Kind (`setup_node_cgroup_ns` em `crates/delonix-runtime/src/lib.rs`), activada
+quando `--privileged` + uma label `io.x-k8s.kind.*` está presente — trabalho não documentado
+antes desta sessão. Para a poder exercitar, adicionou-se uma flag `--label KEY=VAL` (repetível) a
+`delonix container run` (`crates/delonix-runtime-bin/src/cmd/container.rs`) — não existia
+nenhuma forma de definir labels via CLI, só internamente. Ficou como funcionalidade permanente
+(expõe um campo já existente em `Container`, não é específico de Kind).
+
+Com a label e `--privileged`, `kindest/node` **crasha sempre no mesmo ponto**, muito cedo — logo
+a seguir a `INFO: detected cgroup v1` no log do próprio entrypoint da imagem (que corre num host
+100% cgroup v2, confirmado via `stat -fc %T /sys/fs/cgroup` → `cgroup2fs`). O crash reproduz-se
+de forma idêntica em 3 condições diferentes:
+
+1. `--privileged` sem a label Kind (cai no caminho `--privileged` genérico).
+2. `--privileged` + label Kind, sessão rootless sem delegação systemd (motor avisa: "rootless SEM
+   delegação de cgroup").
+3. O mesmo, mas envolto em `systemd-run --user --scope -p Delegate=yes` (delegação pedida
+   explicitamente) — **não muda o resultado**.
+4. Mesmo com `command` sobreposto para `sleep infinity` — não isola nada, porque `--entrypoint`
+   não existe no CLI hoje: `compose_command` mantém sempre o `ENTRYPOINT` da imagem
+   (`/usr/local/bin/entrypoint /sbin/init`) e só a cauda muda, então o script do `kind` corre de
+   qualquer forma.
+
+**Causa-raiz não isolada com 100% de confiança** (precisa da próxima sessão): o log mostra
+"detected cgroup v1" — misdetecção, já que o host é v2-only — e o script morre logo a seguir,
+silenciosamente (sem stack trace; o `Container` também não guarda exit code hoje, gap a
+corrigir). Hipótese mais provável: `/sys/fs/cgroup/cgroup.controllers` não está visível/válido
+de dentro do mount+userns do nosso container no momento em que o script de deteção do `kind`
+corre, levando-o a um caminho de cgroup v1 legado que depois falha contra um kernel só-v2. Para
+confirmar: precisa de um `--entrypoint` override no CLI (não existe) para correr o entrypoint do
+`kindest/node` manualmente com `set -x`, ou copiar/editar o script para instrumentação.
+
+**Conclusão honesta**: a peça mais arriscada de todo o pedido — arrancar `kindest/node`
+(systemd + containerd aninhado) sob o nosso modelo rootless/privileged — **não funciona hoje**.
+O shim de compatibilidade Docker (grande, semanas de trabalho) não deve arrancar antes disto
+estar resolvido, ou arriscamos construir a fachada toda sobre uma fundação que não arranca. A
+próxima sessão deve focar-se em **só** isto: instrumentar o arranque (via `--entrypoint` novo +
+`set -x`) até se perceber exactamente porque é que a deteção de cgroup falha, antes de qualquer
+trabalho no shim `docker`/`network create`/templates Go.
+
 ## Próximas fases (pedidas, não implementadas — cada uma precisa da sua própria sessão de planeamento)
 
 - **`delonix cluster --name <n> --control-plane <n> --workers <n>`** (sem `kubeadm`) — cluster k8s
-  local via `kind` (shell-out à ferramenta já instalada no host). Escopo médio; há precedente de
-  "modo dev" equivalente em `delonix cluster` no `delonix-cli` privado (`delonix-paas`).
+  local via `kind` (shell-out à ferramenta já instalada no host). **Bloqueado** pelo NO-GO do
+  spike acima — o `kindest/node` não arranca sob o nosso `--privileged` hoje; ver secção "Cluster
+  modo Kind sem Docker — investigação". Precisa de instrumentação de arranque antes de continuar.
 - **`etcd: external`** em `delonix cluster apply` — cluster etcd dedicado (TLS entre membros,
   discovery) em vez do `stacked` já suportado.
 - **Paralelizar a preparação de host** em `cluster apply` (hoje sequencial, deliberado nesta v1).
