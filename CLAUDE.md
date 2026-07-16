@@ -85,9 +85,9 @@ container}.rs`) tem um `spec` tipado próprio (`NetworkSpec`, `VolumeSpec`, ...)
 `delonix image --vm ls|pull|push|build` gere imagens VM à parte das imagens de container
 (`ImageStore`) — um `.qcow2` solto + `.json` de metadados por imagem, em `<root>/vm-images/`
 (`crates/delonix-runtime-bin/src/cmd/vmimage.rs`, `VmImageStore`). Prepara o terreno para
-`delonix cluster kubeadm` (abaixo, ainda não implementado): a imagem já vem com `kubeadm`/
-`kubelet`/`kubectl` e o `delonix-cri` a correr como serviço systemd — **arrancar um nó não faz
-nenhuma instalação**, só `kubeadm init`/`kubeadm join` (quando esse comando existir).
+`delonix cluster kubeadm` (secção "Cluster kubeadm" abaixo — já implementado): a imagem já vem
+com `kubeadm`/`kubelet`/`kubectl` e o `delonix-cri` a correr como serviço systemd — **arrancar um
+nó não faz nenhuma instalação**, só `kubeadm init`/`kubeadm join`.
 
 - **`build`**: descarrega a cloud image Ubuntu (`cloud-images.ubuntu.com/releases/<release>/
   release/`, cache em `<root>/vm-images/_base/`, valida contra `SHA256SUMS` — nunca aceita um
@@ -157,6 +157,37 @@ de agir. Nunca dessincroniza de um `.tfstate` porque não há nenhum.
   comandos `kubeadm init`/`join`, e a tentativa real de SSH falha correctamente e com clareza
   (`No route to host` num IP de teste) — não há mais nada para simular sem máquinas verdadeiras.
 
+### `delonix cluster kubeadm --name <n> --control-plane <n> --workers <n>`
+
+Camada por cima de `cluster apply` (pedido original, primeira sessão desta série: "um comando,
+do zero a um cluster a funcionar"). Não escreve nem exige um `cloud.yaml` — provisiona as VMs e
+constrói o `ClusterSpec` em memória, depois chama a MESMA `apply_one` que `cluster apply` usa
+(zero duplicação da lógica kubeadm/SSH/validação de segurança — tudo em `cmd/cluster.rs`,
+`ClusterCmd::Kubeadm`/`provision_and_apply`).
+
+Fluxo: **resolve a imagem VM dourada** (`--vm-image` ou a única existente em
+`VmImageStore` — erro claro se houver 0 ou mais de 1, nunca escolhe às cegas) → **gera ou
+carrega uma chave SSH** (`--ssh-key`, ou `ssh-keygen -t ed25519` não-interactivo em
+`<root>/clusters/<nome>/id_ed25519`) → **cria as VMs sequencialmente**
+(`<nome>-cp1..N`/`<nome>-w1..M`, via `delonix_vm::create` com a imagem dourada como disco +
+`cmd::vm::generate_seed_iso` para o cloud-init por-instância, reaproveitado tal-e-qual de
+`delonix vm create --ssh-key`) → **espera cada VM ficar alcançável por SSH**
+(`wait_for_vm_ssh_ready`: primeiro o IP via `delonix_vm::status`, depois um `ssh_check` real —
+`--boot-timeout`, default 300s) → constrói o `ClusterSpec` (utilizador SSH sempre `delonix`, a
+conta que a imagem dourada já cria) → `validate()` + `apply_one()` (mesmas defesas da auditoria
+de segurança, herdadas automaticamente).
+
+**Limitação conhecida**: só suporta **1 control-plane** por agora — com `--control-plane > 1`
+recusa com erro claro, porque kubeadm HA exige um endpoint estável (LB/VIP) à frente dos
+control-planes, e este comando ainda não provisiona um automaticamente. Para HA hoje, usa
+`delonix cluster apply` com um `controlPlaneEndpoint` externo já preparado.
+
+**Sem teste end-to-end real nesta sessão**: o `virt-customize` do build da imagem dourada está
+bloqueado neste sandbox (pacote `libguestfs-common` em falta, já documentado acima) — sem uma
+imagem local, `delonix cluster kubeadm` não tem o que provisionar. Validado até essa fronteira
+real: parsing de flags, `resolve_vm_image` (0/1/N imagens, com testes automatizados), geração de
+nomes determinísticos (`vm_names`), e o erro claro e correcto quando não há imagem nenhuma.
+
 ## Auditoria de segurança (skill `delonix-runtime-sec`)
 
 Antes de estender `delonix cluster apply`, foi feita uma auditoria ofensiva dedicada (skill nova
@@ -210,6 +241,9 @@ validate_recusa_endpoint_malicioso_no_manifesto_completo`,
 - **`etcd: external`** em `delonix cluster apply` — cluster etcd dedicado (TLS entre membros,
   discovery) em vez do `stacked` já suportado.
 - **Paralelizar a preparação de host** em `cluster apply` (hoje sequencial, deliberado nesta v1).
+- **HA multi-control-plane em `delonix cluster kubeadm`** — hoje só provisiona 1 control-plane;
+  para vários precisa de provisionar/gerir um endpoint estável (LB/VIP) automaticamente, o que
+  ainda não existe. `delonix cluster apply` já suporta HA se o endpoint for externo/manual.
 - **`delonixd`** (daemon opcional em userspace) + **dataplane de ingress/egress próprio** (evitar
   um veth por container — hoje `infra::do_attach` cria sempre 1 veth-par por container,
   confirmado) + **firewall dinâmico** para publish de portas + **eBPF** para observabilidade +

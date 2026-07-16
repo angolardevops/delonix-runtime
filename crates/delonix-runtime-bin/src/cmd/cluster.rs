@@ -11,6 +11,8 @@
 //! estável — LB/VIP — à frente de vários control-planes).
 
 use std::path::PathBuf;
+use std::process::Command;
+use std::time::{Duration, Instant};
 
 use clap::Subcommand;
 use delonix_runtime_core::{Error, Result};
@@ -19,7 +21,8 @@ use serde::Deserialize;
 use super::manifest::{self, ManifestDoc};
 use super::remote::{self, SshTarget};
 use super::util::state_root;
-use super::{k8s_recipes, vmimage};
+use super::vmimage::VmImageStore;
+use super::{k8s_recipes, vm as vm_cmd, vmimage};
 
 #[derive(Debug, Deserialize)]
 struct SshSpec {
@@ -157,12 +160,50 @@ fn target_for(host: &HostSpec, ssh: &SshSpec) -> SshTarget {
     SshTarget { host: host.ip.clone(), user: ssh.user.clone(), key: ssh.key.clone() }
 }
 
+// `Kubeadm` é maior que `Apply` (muitos flags opcionais de provisionamento) —
+// mesma justificação do `#[allow]` já usado em `VmCmd`/`Cmd` (enum de CLI
+// parseado uma vez por invocação, não um hot-path).
+#[allow(clippy::large_enum_variant)]
 #[derive(Subcommand)]
 pub enum ClusterCmd {
     /// Aplica o(s) documento(s) `kind: Cluster` de um manifesto.
     Apply {
         #[arg(short = 'f', long = "file")]
         file: Option<PathBuf>,
+    },
+    /// Provisiona VMs (imagem VM dourada) + bootstrap `kubeadm` — do zero a
+    /// um cluster a funcionar, sem escrever um manifesto à mão.
+    Kubeadm {
+        #[arg(long)]
+        name: String,
+        #[arg(long, default_value_t = 1)]
+        control_plane: u32,
+        #[arg(long, default_value_t = 2)]
+        workers: u32,
+        /// Tag da imagem VM dourada (`delonix image --vm ls`). Omitir = usa a
+        /// única imagem local existente.
+        #[arg(long = "vm-image")]
+        vm_image: Option<String>,
+        /// Rede já criada (`delonix network create`) — sem default mágico.
+        #[arg(long)]
+        network: String,
+        /// Chave SSH privada a usar. Omitir = gera um par ed25519 novo em
+        /// `<root>/clusters/<name>/id_ed25519`.
+        #[arg(long = "ssh-key")]
+        ssh_key: Option<PathBuf>,
+        #[arg(long, default_value_t = 2)]
+        vcpus: u32,
+        #[arg(long, default_value = "2G")]
+        memory: String,
+        #[arg(long = "k8s-version")]
+        k8s_version: Option<String>,
+        #[arg(long, default_value = "10.244.0.0/16")]
+        pod_subnet: String,
+        #[arg(long, default_value = "10.96.0.0/12")]
+        service_subnet: String,
+        /// Segundos a esperar por cada VM ficar alcançável por SSH.
+        #[arg(long, default_value_t = 300)]
+        boot_timeout: u64,
     },
 }
 
@@ -173,6 +214,33 @@ pub fn run(action: ClusterCmd) -> Result<()> {
             let docs = manifest::load(&path)?;
             apply(&docs)
         }
+        ClusterCmd::Kubeadm {
+            name,
+            control_plane,
+            workers,
+            vm_image,
+            network,
+            ssh_key,
+            vcpus,
+            memory,
+            k8s_version,
+            pod_subnet,
+            service_subnet,
+            boot_timeout,
+        } => provision_and_apply(ProvisionArgs {
+            name,
+            control_plane,
+            workers,
+            vm_image,
+            network,
+            ssh_key,
+            vcpus,
+            memory,
+            k8s_version,
+            pod_subnet,
+            service_subnet,
+            boot_timeout,
+        }),
     }
 }
 
@@ -214,6 +282,208 @@ fn apply_one(name: &str, spec: &ClusterSpec) -> Result<()> {
     fetch_kubeconfig(&cp1_target, name)?;
     println!("cluster/{name}: pronto");
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// `delonix cluster kubeadm` — provisiona VMs + chama `apply_one`
+// ---------------------------------------------------------------------------
+
+struct ProvisionArgs {
+    name: String,
+    control_plane: u32,
+    workers: u32,
+    vm_image: Option<String>,
+    network: String,
+    ssh_key: Option<PathBuf>,
+    vcpus: u32,
+    memory: String,
+    k8s_version: Option<String>,
+    pod_subnet: String,
+    service_subnet: String,
+    boot_timeout: u64,
+}
+
+/// Nomes determinísticos das VMs de um papel (`<cluster>-cp1`, `<cluster>-w1`, ...).
+fn vm_names(cluster_name: &str, role: &str, count: u32) -> Vec<String> {
+    (1..=count).map(|i| format!("{cluster_name}-{role}{i}")).collect()
+}
+
+/// Resolve a tag da imagem VM dourada a usar: explícita, ou a única existente
+/// localmente (erro claro se houver 0 ou mais de 1 — nunca escolhe às cegas
+/// entre várias).
+fn resolve_vm_image(store: &VmImageStore, explicit: Option<String>) -> Result<String> {
+    if let Some(tag) = explicit {
+        return Ok(tag);
+    }
+    let mut images = store.list()?;
+    match images.len() {
+        0 => Err(Error::Invalid(
+            "sem imagens VM locais — corre `delonix image --vm build` primeiro, ou passa --vm-image <tag>".into(),
+        )),
+        1 => Ok(images.remove(0).name),
+        n => Err(Error::Invalid(format!(
+            "há {n} imagens VM locais — especifica qual usar com --vm-image <tag> (`delonix image --vm ls`)"
+        ))),
+    }
+}
+
+/// Chave SSH privada a usar: a explícita, ou gera um par ed25519 novo em
+/// `<root>/clusters/<name>/id_ed25519` (`ssh-keygen` não-interactivo, sem
+/// passphrase — automação, mesmo espírito do `BatchMode=yes` já usado em
+/// `remote.rs`). Devolve `(caminho_privada, texto_publica)`.
+fn generate_or_load_ssh_key(name: &str, explicit: Option<PathBuf>) -> Result<(PathBuf, String)> {
+    if let Some(key) = explicit {
+        let pub_path = key.with_extension("pub");
+        let public = std::fs::read_to_string(&pub_path)
+            .map_err(|e| Error::Invalid(format!("não consegui ler a chave pública '{}': {e}", pub_path.display())))?;
+        return Ok((key, public.trim().to_string()));
+    }
+    let dir = state_root().join("clusters").join(name);
+    std::fs::create_dir_all(&dir)?;
+    let key_path = dir.join("id_ed25519");
+    if !key_path.exists() {
+        let status = Command::new("ssh-keygen")
+            .args(["-t", "ed25519", "-N", "", "-f"])
+            .arg(&key_path)
+            .args(["-C", &format!("delonix-cluster-{name}")])
+            .status()
+            .map_err(|e| Error::Invalid(format!("a correr ssh-keygen: {e}")))?;
+        if !status.success() {
+            return Err(Error::Invalid("ssh-keygen falhou".into()));
+        }
+    }
+    let public = std::fs::read_to_string(key_path.with_extension("pub"))?;
+    Ok((key_path, public.trim().to_string()))
+}
+
+/// Espera uma VM ficar alcançável por SSH: primeiro o IP (reconciliado pelo
+/// backend — DHCP/`domifaddr`, tipicamente rápido), depois um `ssh_check`
+/// real (o boot do SO/arranque do sshd demora mais). Devolve o IP.
+fn wait_for_vm_ssh_ready(vm_name: &str, ssh: &SshSpec, timeout: Duration) -> Result<String> {
+    let base = state_root();
+    let deadline = Instant::now() + timeout;
+
+    let ip = loop {
+        let vm = delonix_vm::status(&base, vm_name)?;
+        if let Some(ip) = vm.ip {
+            break ip;
+        }
+        if Instant::now() >= deadline {
+            return Err(Error::Invalid(format!("VM '{vm_name}': sem IP atribuído dentro do --boot-timeout")));
+        }
+        std::thread::sleep(Duration::from_secs(3));
+    };
+
+    let target = SshTarget { host: ip.clone(), user: ssh.user.clone(), key: ssh.key.clone() };
+    loop {
+        if remote::ssh_check(&target, "true") {
+            return Ok(ip);
+        }
+        if Instant::now() >= deadline {
+            return Err(Error::Invalid(format!(
+                "VM '{vm_name}' (ip={ip}): SSH não respondeu dentro do --boot-timeout — o boot pode ainda estar em curso"
+            )));
+        }
+        std::thread::sleep(Duration::from_secs(5));
+    }
+}
+
+fn provision_and_apply(args: ProvisionArgs) -> Result<()> {
+    if args.control_plane == 0 {
+        return Err(Error::Invalid("--control-plane tem de ser >= 1".into()));
+    }
+    let base = state_root();
+    let vm_store = VmImageStore::open(&base)?;
+    let image_tag = resolve_vm_image(&vm_store, args.vm_image.clone())?;
+    let disk = vm_store.qcow2_path(&image_tag);
+    if !disk.exists() {
+        return Err(Error::Invalid(format!("imagem VM '{image_tag}' não tem qcow2 em disco ({})", disk.display())));
+    }
+
+    let (ssh_key_path, ssh_public) = generate_or_load_ssh_key(&args.name, args.ssh_key.clone())?;
+    let ssh = SshSpec { user: "delonix".to_string(), key: Some(ssh_key_path) };
+    let timeout = Duration::from_secs(args.boot_timeout);
+
+    let cp_names = vm_names(&args.name, "cp", args.control_plane);
+    let worker_names = vm_names(&args.name, "w", args.workers);
+
+    println!(
+        "cluster/{}: a provisionar {} control-plane(s) + {} worker(s) a partir de '{image_tag}'...",
+        args.name,
+        cp_names.len(),
+        worker_names.len()
+    );
+
+    let mut control_plane = Vec::with_capacity(cp_names.len());
+    for vm_name in &cp_names {
+        let ip = create_and_wait(vm_name, &disk, &args, &ssh_public, &ssh, timeout)?;
+        control_plane.push(HostSpec { ip, hostname: Some(vm_name.clone()) });
+    }
+    let mut worker_hosts = Vec::with_capacity(worker_names.len());
+    for vm_name in &worker_names {
+        let ip = create_and_wait(vm_name, &disk, &args, &ssh_public, &ssh, timeout)?;
+        worker_hosts.push(HostSpec { ip, hostname: Some(vm_name.clone()) });
+    }
+
+    let control_plane_endpoint = if control_plane.len() == 1 {
+        None
+    } else {
+        return Err(Error::Invalid(
+            "mais de 1 control-plane pedido, mas `delonix cluster kubeadm` ainda não provisiona \
+             um endpoint estável (LB/VIP) automaticamente — usa `delonix cluster apply` com um \
+             `controlPlaneEndpoint` externo já preparado, ou pede só 1 control-plane"
+                .into(),
+        ));
+    };
+
+    let spec = ClusterSpec {
+        ssh,
+        etcd: EtcdSpec::default(),
+        control_plane_endpoint,
+        control_plane,
+        workers: worker_hosts,
+        k8s_version: args.k8s_version,
+        pod_subnet: args.pod_subnet,
+        service_subnet: args.service_subnet,
+    };
+    validate(&spec)?;
+    apply_one(&args.name, &spec)
+}
+
+fn create_and_wait(
+    vm_name: &str,
+    disk: &std::path::Path,
+    args: &ProvisionArgs,
+    ssh_public: &str,
+    ssh: &SshSpec,
+    timeout: Duration,
+) -> Result<String> {
+    println!("cluster/{}: a criar VM {vm_name}...", args.name);
+    let seed = vm_cmd::generate_seed_iso(vm_name, Some(vm_name), std::slice::from_ref(&ssh_public.to_string()), None)?;
+    let cfg = delonix_vm::VmConfig {
+        name: vm_name.to_string(),
+        disk: disk.to_string_lossy().into_owned(),
+        vcpus: args.vcpus,
+        memory: args.memory.clone(),
+        network: args.network.clone(),
+        kernel: None,
+        initrd: None,
+        firmware: None,
+        cmdline: None,
+        seed: Some(seed.to_string_lossy().into_owned()),
+        restart_policy: None,
+        hugepages: false,
+        cpu_affinity: None,
+        devices: Vec::new(),
+        backend: None,
+        net_mode: None,
+        bridge: None,
+    };
+    delonix_vm::create(&state_root(), &cfg)?;
+    println!("cluster/{}: a aguardar SSH em {vm_name}...", args.name);
+    let ip = wait_for_vm_ssh_ready(vm_name, ssh, timeout)?;
+    println!("cluster/{}: {vm_name} pronta (ip={ip})", args.name);
+    Ok(ip)
 }
 
 fn prepare_host(
@@ -353,6 +623,71 @@ fn fetch_kubeconfig(cp1: &SshTarget, cluster_name: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn vm_names_gera_nomes_deterministicos() {
+        assert_eq!(vm_names("prod", "cp", 2), vec!["prod-cp1", "prod-cp2"]);
+        assert_eq!(vm_names("prod", "w", 3), vec!["prod-w1", "prod-w2", "prod-w3"]);
+        assert_eq!(vm_names("prod", "cp", 0), Vec::<String>::new());
+    }
+
+    #[test]
+    fn resolve_vm_image_usa_a_explicita_sem_tocar_no_store() {
+        let tmp = std::env::temp_dir().join(format!("delonix-cluster-resolve-image-test-{}", std::process::id()));
+        let store = VmImageStore::open(&tmp).unwrap();
+        assert_eq!(resolve_vm_image(&store, Some("minha-tag".to_string())).unwrap(), "minha-tag");
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn resolve_vm_image_falha_claro_sem_imagens_locais() {
+        let tmp = std::env::temp_dir().join(format!("delonix-cluster-resolve-image-empty-{}", std::process::id()));
+        let store = VmImageStore::open(&tmp).unwrap();
+        let err = resolve_vm_image(&store, None).unwrap_err();
+        assert!(format!("{err}").contains("build"));
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn resolve_vm_image_usa_a_unica_existente() {
+        let tmp = std::env::temp_dir().join(format!("delonix-cluster-resolve-image-one-{}", std::process::id()));
+        let store = VmImageStore::open(&tmp).unwrap();
+        store
+            .save(&vmimage::VmImage {
+                name: "ubuntu-26.04-k8s".to_string(),
+                tag: "ubuntu-26.04-k8s".to_string(),
+                digest: "sha256:abc".to_string(),
+                size: 1,
+                ubuntu_release: Some("26.04".to_string()),
+                k8s_version: Some("1.31".to_string()),
+                created_unix: 0,
+            })
+            .unwrap();
+        assert_eq!(resolve_vm_image(&store, None).unwrap(), "ubuntu-26.04-k8s");
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn resolve_vm_image_falha_claro_com_multiplas_imagens() {
+        let tmp = std::env::temp_dir().join(format!("delonix-cluster-resolve-image-many-{}", std::process::id()));
+        let store = VmImageStore::open(&tmp).unwrap();
+        for tag in ["a", "b"] {
+            store
+                .save(&vmimage::VmImage {
+                    name: tag.to_string(),
+                    tag: tag.to_string(),
+                    digest: "sha256:abc".to_string(),
+                    size: 1,
+                    ubuntu_release: None,
+                    k8s_version: None,
+                    created_unix: 0,
+                })
+                .unwrap();
+        }
+        let err = resolve_vm_image(&store, None).unwrap_err();
+        assert!(format!("{err}").contains("--vm-image"));
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
 
     const SAMPLE_KUBEADM_INIT_OUTPUT: &str = "\
 Your Kubernetes control-plane has initialized successfully!
