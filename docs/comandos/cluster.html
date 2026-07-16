@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>delonix cluster · Delonix Runtime</title>
+<style>
+:root{--accent:#e8590c;--accent-soft:#fff0e6;--ink:#1a1a2e;--muted:#5a6472;--line:#e6e8ec;
+--bg:#ffffff;--side:#f7f8fa;--code-bg:#0f172a;--code-ink:#e2e8f0;--radius:10px}
+@media (prefers-color-scheme: dark){:root{--ink:#e6e8ee;--muted:#9aa4b2;--line:#252a33;
+--bg:#0d1117;--side:#10151c;--accent-soft:#2a1810;--code-bg:#161b22;--code-ink:#dbe2ea}}
+*{box-sizing:border-box}body{margin:0;font:16px/1.65 -apple-system,'Segoe UI',Roboto,Ubuntu,
+sans-serif;color:var(--ink);background:var(--bg)}
+a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
+.layout{display:flex;min-height:100vh}
+nav.side{width:270px;flex-shrink:0;background:var(--side);border-right:1px solid var(--line);
+padding:1.2rem 1rem 3rem;position:sticky;top:0;height:100vh;overflow-y:auto}
+nav.side .brand{display:flex;align-items:center;gap:.55rem;font-weight:700;font-size:1.12rem;
+margin-bottom:1.1rem;color:var(--ink)}
+nav.side .brand .dot{width:26px;height:26px;border-radius:7px;background:var(--accent);
+display:inline-flex;align-items:center;justify-content:center;color:#fff;font-size:.85rem}
+nav.side h5{margin:1.3rem 0 .3rem;font-size:.72rem;letter-spacing:.09em;text-transform:uppercase;
+color:var(--muted)}
+nav.side a{display:block;padding:.28rem .55rem;border-radius:6px;color:var(--ink);font-size:.93rem}
+nav.side a:hover{background:var(--accent-soft);text-decoration:none}
+nav.side a.on{background:var(--accent-soft);color:var(--accent);font-weight:600}
+main{flex:1;min-width:0;padding:2.2rem 3rem 5rem;max-width:940px}
+main h1{font-size:1.9rem;margin:.2rem 0 .4rem}
+main h2{font-size:1.35rem;margin-top:2.4rem;padding-bottom:.35rem;border-bottom:1px solid var(--line)}
+main h3{font-size:1.05rem;margin-top:1.6rem}
+.tagline{color:var(--muted);font-size:1.05rem;margin-top:0}
+code{background:var(--accent-soft);padding:.1em .35em;border-radius:5px;font-size:.9em}
+pre{background:var(--code-bg);color:var(--code-ink);padding:1rem 1.2rem;border-radius:var(--radius);
+overflow-x:auto;font-size:.86rem;line-height:1.55}
+pre code{background:none;padding:0;color:inherit;font-size:inherit}
+.help pre{border-left:4px solid var(--accent)}
+.ex{margin:.9rem 0}.ex .cap{font-size:.88rem;color:var(--muted);margin-bottom:.25rem}
+table{border-collapse:collapse;width:100%;font-size:.92rem}
+td,th{border:1px solid var(--line);padding:.5rem .7rem;text-align:left;vertical-align:top}
+th{background:var(--side)}
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:1rem;margin:1.4rem 0}
+.card{border:1px solid var(--line);border-radius:var(--radius);padding:1rem 1.1rem}
+.card b{display:block;margin-bottom:.25rem}.card a{font-weight:600}
+.card p{margin:.2rem 0 0;font-size:.88rem;color:var(--muted)}
+.arch{display:flex;flex-direction:column;gap:.6rem;margin:1.4rem 0}
+.arch .row{display:flex;gap:.6rem;flex-wrap:wrap}
+.arch .box{flex:1;min-width:150px;border:1.5px solid var(--accent);border-radius:8px;
+padding:.55rem .8rem;font-size:.85rem;background:var(--accent-soft)}
+.arch .box.mut{border-color:var(--line);background:var(--side)}
+.arch .box b{display:block;font-size:.9rem}
+.pill{display:inline-block;background:var(--accent);color:#fff;border-radius:99px;
+padding:.05rem .6rem;font-size:.75rem;font-weight:600;vertical-align:middle}
+footer{margin-top:4rem;color:var(--muted);font-size:.85rem;border-top:1px solid var(--line);padding-top:1rem}
+@media (max-width:840px){.layout{flex-direction:column}nav.side{width:100%;height:auto;position:static}
+main{padding:1.4rem 1.2rem 4rem}}
+</style>
+</head>
+<body>
+<div class="layout">
+<nav class="side">
+<div class="brand"><span class="dot">▲</span> Delonix Runtime</div>
+<h5>Documentação</h5>
+<a href="../index.html">Início</a><a href="../arquitectura.html">Arquitectura</a><a href="../cri.html">CRI — kubelet sem containerd</a>
+<h5>Referência CLI</h5>
+<a href="../comandos/container.html">delonix container</a><a href="../comandos/image.html">delonix image</a><a href="../comandos/build.html">delonix build</a><a href="../comandos/vm.html">delonix vm</a><a href="../comandos/volumes.html">delonix volumes</a><a href="../comandos/network.html">delonix network</a><a href="../comandos/stack.html">delonix stack</a><a href="../comandos/cluster.html" class="on">delonix cluster</a><a href="../comandos/completion.html">delonix completion</a>
+<h5>Projecto</h5>
+<a href="https://github.com/angolardevops/delonix-runtime">GitHub</a>
+<a href="https://github.com/angolardevops/delonix-runtime/releases">Releases</a>
+</nav>
+<main>
+<h1>delonix cluster</h1><p class='tagline'>Kubernetes de ponta a ponta: bootstrap kubeadm idempotente sobre SSH, ou provisionamento completo de VMs.</p>
+<p>Dois caminhos para um cluster real (não emulado):
+<code>cluster apply</code> faz bootstrap <code>kubeadm</code> em hosts já vivos e alcançáveis por SSH —
+idempotente <em>sem ficheiro de estado</em> (cada passo tem um <code>check</code> e um <code>apply</code>;
+nunca dessincroniza de um .tfstate porque não há nenhum). <code>cluster kubeadm</code> vai mais longe:
+provisiona as VMs a partir da imagem VM dourada, espera pelo SSH e corre o MESMO bootstrap — um
+comando, do zero a um cluster com o <code>delonix-cri</code> como runtime (sem containerd).</p>
+<div class='help'><pre><code>Bootstrap `kubeadm` idempotente sobre SSH (`kind: Cluster`)
+
+Usage: delonix cluster &lt;COMMAND&gt;
+
+Commands:
+  apply    Aplica o(s) documento(s) `kind: Cluster` de um manifesto
+  kubeadm  Provisiona VMs (imagem VM dourada) + bootstrap `kubeadm` — do zero a um cluster a funcionar, sem escrever um manifesto à mão
+  help     Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help  Print help</code></pre></div>
+<h2 id='apply'><code>cluster apply</code></h2>
+<div class='help'><pre><code>Aplica o(s) documento(s) `kind: Cluster` de um manifesto
+
+Usage: delonix cluster apply [OPTIONS]
+
+Options:
+  -f, --file &lt;FILE&gt;  
+  -h, --help         Print help</code></pre></div>
+<p>Todas as entradas do manifesto que chegam a comandos remotos
+(<code>controlPlaneEndpoint</code>, subnets, versão) passam por validação estrita antes de qualquer
+interpolação — a injecção de comandos via manifesto foi um dos CRÍTICOS encontrados e fechados na
+auditoria ofensiva do projecto, com testes a replicar o exploit.</p>
+<h3>Exemplos</h3><div class="ex"><div class="cap">Bootstrap num manifesto `kind: Cluster`</div><pre><code>delonix cluster apply -f cloud.yaml</code></pre></div>
+<h2 id='kubeadm'><code>cluster kubeadm</code></h2>
+<div class='help'><pre><code>Provisiona VMs (imagem VM dourada) + bootstrap `kubeadm` — do zero a um cluster a funcionar, sem escrever um manifesto à mão
+
+Usage: delonix cluster kubeadm [OPTIONS] --name &lt;NAME&gt; --network &lt;NETWORK&gt;
+
+Options:
+      --name &lt;NAME&gt;
+          
+      --control-plane &lt;CONTROL_PLANE&gt;
+          [default: 1]
+      --workers &lt;WORKERS&gt;
+          [default: 2]
+      --vm-image &lt;VM_IMAGE&gt;
+          Tag da imagem VM dourada (`delonix image --vm ls`). Omitir = usa a única imagem local existente
+      --network &lt;NETWORK&gt;
+          Rede já criada (`delonix network create`) — sem default mágico
+      --ssh-key &lt;SSH_KEY&gt;
+          Chave SSH privada a usar. Omitir = gera um par ed25519 novo em `&lt;root&gt;/clusters/&lt;name&gt;/id_ed25519`
+      --vcpus &lt;VCPUS&gt;
+          [default: 2]
+      --memory &lt;MEMORY&gt;
+          [default: 2G]
+      --k8s-version &lt;K8S_VERSION&gt;
+          
+      --pod-subnet &lt;POD_SUBNET&gt;
+          [default: 10.244.0.0/16]
+      --service-subnet &lt;SERVICE_SUBNET&gt;
+          [default: 10.96.0.0/12]
+      --boot-timeout &lt;BOOT_TIMEOUT&gt;
+          Segundos a esperar por cada VM ficar alcançável por SSH [default: 300]
+  -h, --help
+          Print help</code></pre></div>
+<p>Limitação conhecida: por agora só 1 control-plane (HA exige um endpoint
+estável — LB/VIP — que este comando ainda não provisiona; <code>cluster apply</code> já suporta HA
+com um <code>controlPlaneEndpoint</code> externo).</p>
+<h3>Exemplos</h3><div class="ex"><div class="cap">Do zero: 1 control-plane + 2 workers</div><pre><code>delonix cluster kubeadm --name lab --control-plane 1 --workers 2</code></pre></div>
+<footer>Delonix Runtime · Apache-2.0 · <a href="https://github.com/angolardevops/delonix-runtime">angolardevops/delonix-runtime</a>
+· Referência gerada do <code>--help</code> real do binário por <code>docs/gen.py</code>.</footer>
+</main>
+</div>
+</body>
+</html>
