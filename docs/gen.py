@@ -293,7 +293,12 @@ main{padding:1.4rem 1.2rem 4rem}}
 
 def sidebar(active, depth=0):
     p = "../" * depth
-    items_docs = [("index.html", "Início"), ("arquitectura.html", "Arquitectura"), ("cri.html", "CRI — kubelet sem containerd")]
+    items_docs = [
+        ("index.html", "Início"),
+        ("arquitectura.html", "Arquitectura"),
+        ("c4.html", "Modelo C4 e system design"),
+        ("cri.html", "CRI — kubelet sem containerd"),
+    ]
     items_cmd = [(f"comandos/{g}.html", GROUPS[g]["title"]) for g in GROUPS]
     def link(href, label):
         cls = ' class="on"' if href == active else ""
@@ -508,6 +513,35 @@ bootstrap — o cluster resultante corre Kubernetes com o Delonix como runtime d
 """
 
 
+def c4_page():
+    """`c4.html` a partir do ARCHITECTURE.md canónico (Martin): markdown →
+    HTML, blocos ```mermaid → <pre class="mermaid"> renderizados por mermaid.js
+    (CDN). Regenerar sempre que o ARCHITECTURE.md mudar."""
+    import re
+
+    import markdown
+
+    src = open(os.path.join(ROOT, "..", "ARCHITECTURE.md")).read()
+    # separa os blocos mermaid ANTES do markdown (para não serem tratados como código)
+    parts = re.split(r"```mermaid\n(.*?)```", src, flags=re.S)
+    out = []
+    for i, part in enumerate(parts):
+        if i % 2 == 1:
+            out.append(f'<pre class="mermaid">{html.escape(part)}</pre>')
+        else:
+            out.append(markdown.markdown(part, extensions=["tables", "fenced_code"]))
+    body = (
+        "\n".join(out)
+        + """
+<script type="module">
+import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+mermaid.initialize({ startOnLoad: true, theme: matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'default' });
+</script>
+<style>.mermaid{background:transparent;border:1px solid var(--line);padding:1rem}</style>"""
+    )
+    page("c4.html", "Modelo C4 e system design", body)
+
+
 def main():
     ver = subprocess.run([BIN, "--version"], capture_output=True, text=True).stdout.strip().split()[-1]
     cards = "".join(
@@ -517,6 +551,7 @@ def main():
     )
     page("index.html", "Delonix Runtime", INDEX.replace("{ver}", ver).replace("{cards}", cards))
     page("arquitectura.html", "Arquitectura", ARCH)
+    c4_page()
     page("cri.html", "CRI", CRI)
     for n, g in GROUPS.items():
         group_page(n, g)

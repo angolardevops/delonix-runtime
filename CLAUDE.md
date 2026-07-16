@@ -312,8 +312,12 @@ silenciosamente (sem stack trace; o `Container` também não guarda exit code ho
 corrigir). Hipótese mais provável: `/sys/fs/cgroup/cgroup.controllers` não está visível/válido
 de dentro do mount+userns do nosso container no momento em que o script de deteção do `kind`
 corre, levando-o a um caminho de cgroup v1 legado que depois falha contra um kernel só-v2. Para
-confirmar: precisa de um `--entrypoint` override no CLI (não existe) para correr o entrypoint do
+confirmar: precisa de um `--entrypoint` override no CLI para correr o entrypoint do
 `kindest/node` manualmente com `set -x`, ou copiar/editar o script para instrumentação.
+**Actualização (sessão -p/paridade)**: `--entrypoint` JÁ EXISTE no CLI (`cmd_run`, semântica
+docker, `""` limpa), e a causa-raiz provável foi corrigida no motor (fallback bind do /sys do
+host quando montar sysfs novo dá EPERM em `--privileged --net host`, + mountpoint do cgroup2
+criado pós-pivot_root — ver commit `dfe7e0b`). Revalidação do boot do `kindest/node` pendente.
 
 **Conclusão honesta**: a peça mais arriscada de todo o pedido — arrancar `kindest/node`
 (systemd + containerd aninhado) sob o nosso modelo rootless/privileged — **não funciona hoje**.
