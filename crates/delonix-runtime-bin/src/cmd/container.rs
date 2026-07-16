@@ -77,21 +77,27 @@ pub enum ContainerCmd {
         command: Vec<String>,
     },
     /// Lista containers.
+    #[command(visible_alias = "ls")]
     Ps {
         /// Inclui os parados/falhados.
         #[arg(short, long)]
         all: bool,
+        /// Só imprime os IDs (para compor com `stop`/`rm`).
+        #[arg(short, long)]
+        quiet: bool,
     },
-    /// Pára um container (SIGTERM, depois SIGKILL).
+    /// Pára um ou mais containers (SIGTERM, depois SIGKILL).
     Stop {
-        id: String,
+        #[arg(required = true)]
+        ids: Vec<String>,
         /// Segundos até ao SIGKILL.
         #[arg(short, long, default_value_t = 10)]
         time: u64,
     },
-    /// Remove um container.
+    /// Remove um ou mais containers.
     Rm {
-        id: String,
+        #[arg(required = true)]
+        ids: Vec<String>,
         /// Força (mata se estiver a correr).
         #[arg(short, long)]
         force: bool,
@@ -125,9 +131,9 @@ pub fn run(action: ContainerCmd) -> Result<()> {
         ContainerCmd::Run { detach, name, net, volumes, privileged, env, labels, image, command } => {
             cmd_run(&images, &store, detach, name, &net, volumes, privileged, env, labels, image, command)
         }
-        ContainerCmd::Ps { all } => cmd_ps(&store, all),
-        ContainerCmd::Stop { id, time } => cmd_stop(&store, &id, time),
-        ContainerCmd::Rm { id, force } => cmd_rm(&images, &store, &id, force),
+        ContainerCmd::Ps { all, quiet } => cmd_ps(&store, all, quiet),
+        ContainerCmd::Stop { ids, time } => for_each_id(&ids, |id| cmd_stop(&store, id, time)),
+        ContainerCmd::Rm { ids, force } => for_each_id(&ids, |id| cmd_rm(&images, &store, id, force)),
         ContainerCmd::Exec { interactive, tty, id, command } => cmd_exec(&store, &id, interactive, tty, &command),
         ContainerCmd::Logs { id } => cmd_logs(&images, &store, &id),
         ContainerCmd::Apply { file } => {
@@ -265,15 +271,21 @@ fn cmd_run(
     Ok(())
 }
 
-fn cmd_ps(store: &Store, all: bool) -> Result<()> {
+fn cmd_ps(store: &Store, all: bool, quiet: bool) -> Result<()> {
     let mut cs = store.list()?;
-    println!("{:<14}  {:<20}  {:<24}  STATUS", "CONTAINER ID", "NAME", "IMAGE");
+    if !quiet {
+        println!("{:<14}  {:<20}  {:<24}  STATUS", "CONTAINER ID", "NAME", "IMAGE");
+    }
     for c in cs.iter_mut() {
         if runtime::reconcile_status(c) {
             let _ = store.save(c);
         }
         let hidden = matches!(c.status, delonix_runtime_core::Status::Failed(_) | delonix_runtime_core::Status::Crashed);
         if !all && hidden {
+            continue;
+        }
+        if quiet {
+            println!("{}", &c.id[..12.min(c.id.len())]);
             continue;
         }
         println!(
@@ -285,6 +297,22 @@ fn cmd_ps(store: &Store, all: bool) -> Result<()> {
         );
     }
     Ok(())
+}
+
+/// Aplica `f` a cada ID, continuando nos restantes se um falhar (semântica
+/// docker: `rm a b c` remove o que conseguir e devolve o primeiro erro no fim).
+fn for_each_id(ids: &[String], mut f: impl FnMut(&str) -> Result<()>) -> Result<()> {
+    let mut first_err = None;
+    for id in ids {
+        if let Err(e) = f(id) {
+            eprintln!("{id}: {e}");
+            first_err.get_or_insert(e);
+        }
+    }
+    match first_err {
+        Some(e) => Err(e),
+        None => Ok(()),
+    }
 }
 
 fn cmd_stop(store: &Store, id: &str, time: u64) -> Result<()> {
