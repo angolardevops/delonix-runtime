@@ -46,6 +46,20 @@ pub enum ImageCmd {
         #[arg(short = 'f', long = "file")]
         file: Option<PathBuf>,
     },
+    /// Autentica num registo OCI (guarda as credenciais em `<root>/auth.json`,
+    /// formato docker/podman). A password vem SEMPRE do stdin — nunca de um
+    /// argumento (ficaria no histórico da shell e no /proc).
+    Login {
+        /// Registo (ex.: `ghcr.io`, `docker.io`).
+        registry: String,
+        #[arg(short = 'u', long = "username")]
+        username: String,
+        /// Lê a password/token do stdin (única forma suportada).
+        #[arg(long = "password-stdin")]
+        password_stdin: bool,
+    },
+    /// Remove as credenciais guardadas de um registo.
+    Logout { registry: String },
     /// (só com `--vm`) Publica uma imagem VM local num registo OCI.
     Push { name: String, target: String },
     /// (só com `--vm`) Constrói a imagem VM dourada (Ubuntu + kubeadm/kubelet/
@@ -71,6 +85,18 @@ pub enum ImageCmd {
 /// de container). `rm`/`export`/`apply` não fazem sentido para imagens VM
 /// nesta fase — erro claro em vez de um comportamento silenciosamente errado.
 pub fn run(vm: bool, action: ImageCmd) -> Result<()> {
+    // login/logout são agnósticos a container-vs-VM (mesmo auth.json).
+    match &action {
+        ImageCmd::Login { registry, username, password_stdin } => {
+            return cmd_login(registry, username, *password_stdin);
+        }
+        ImageCmd::Logout { registry } => {
+            delonix_image::auth::logout(&super::util::state_root(), registry)?;
+            println!("credenciais de {registry} removidas");
+            return Ok(());
+        }
+        _ => {}
+    }
     if vm {
         return run_vm(action);
     }
@@ -88,7 +114,28 @@ pub fn run(vm: bool, action: ImageCmd) -> Result<()> {
         ImageCmd::Push { .. } | ImageCmd::Build { .. } => {
             Err(Error::Invalid("push/build de imagens são só para VM — usa `delonix image --vm push|build`".into()))
         }
+        ImageCmd::Login { .. } | ImageCmd::Logout { .. } => unreachable!("tratados acima"),
     }
+}
+
+/// `image login` — lê a password do stdin (obrigatório: um argumento ficaria no
+/// histórico da shell e visível em /proc) e delega no `delonix_image::auth`.
+fn cmd_login(registry: &str, username: &str, password_stdin: bool) -> Result<()> {
+    if !password_stdin {
+        return Err(Error::Invalid(
+            "usa --password-stdin (ex.: `gh auth token | delonix image login ghcr.io -u USER --password-stdin`)".into(),
+        ));
+    }
+    let mut pw = String::new();
+    std::io::Read::read_to_string(&mut std::io::stdin(), &mut pw)
+        .map_err(|e| Error::Invalid(format!("a ler a password do stdin: {e}")))?;
+    let pw = pw.trim();
+    if pw.is_empty() {
+        return Err(Error::Invalid("password vazia no stdin".into()));
+    }
+    delonix_image::auth::login(&super::util::state_root(), registry, username, pw)?;
+    println!("login em {registry} guardado (auth.json)");
+    Ok(())
 }
 
 fn run_vm(action: ImageCmd) -> Result<()> {
@@ -105,6 +152,7 @@ fn run_vm(action: ImageCmd) -> Result<()> {
                 "comando não disponível para imagens VM (--vm) — usa ls/pull/push/build".into(),
             ))
         }
+        ImageCmd::Login { .. } | ImageCmd::Logout { .. } => unreachable!("tratados em run()"),
     };
     vmimage::run(mapped)
 }
