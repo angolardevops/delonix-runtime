@@ -1,0 +1,48 @@
+# syntax=docker/dockerfile:1
+# =============================================================================
+# Delonixfile — imagem CLI do delonix-runtime (motor de containers/microVMs
+# rootless-first). Artefacto SECUNDÁRIO: o primário são os binários de host
+# (`make binaries` → releases no ghcr). Esta imagem empacota a CLI `delonix`
+# (+ `delonix-cri`) para uso em CI e como builder do DKS, sem instalar o motor
+# na máquina. Multi-stage, construída por docker/podman.
+#
+# Build:  docker build -f Delonixfile --build-arg DELONIX_VERSION=<tag> -t delonix/runtime:<tag> .
+#   ou:   make image
+# =============================================================================
+
+# --- builder: compila `delonix` + `delonix-cri` da fonte ---------------------
+FROM rust:1-bookworm AS builder
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential cmake pkg-config protobuf-compiler \
+        clang libclang-dev perl \
+        git ca-certificates libssl-dev \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /build
+COPY . .
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/usr/local/cargo/git \
+    --mount=type=cache,target=/build/target \
+    cargo build --release -p delonix-runtime-bin -p delonix-cri \
+    && mkdir -p /out \
+    && cp target/release/delonix target/release/delonix-cri /out/
+
+# --- final: CLI magra --------------------------------------------------------
+FROM debian:bookworm-slim
+ARG DELONIX_VERSION=dev
+LABEL org.opencontainers.image.title="delonix-runtime" \
+      org.opencontainers.image.version="${DELONIX_VERSION}" \
+      org.opencontainers.image.source="https://github.com/angolardevops/delonix-runtime" \
+      org.opencontainers.image.licenses="Apache-2.0" \
+      delonix/runtime.version="${DELONIX_VERSION}"
+
+# Tooling de rede que o motor usa nas operações rootless (nft/iproute2) +
+# uidmap para user namespaces. ca-certificates para pull de imagens (registry).
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates iproute2 iptables nftables uidmap \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /out/delonix     /usr/local/bin/delonix
+COPY --from=builder /out/delonix-cri /usr/local/bin/delonix-cri
+
+ENTRYPOINT ["/usr/local/bin/delonix"]
+CMD ["--help"]

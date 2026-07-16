@@ -1,0 +1,10 @@
+# Contexto de build da imagem CLI (Delonixfile). O builder recompila da fonte
+# com cache mounts próprios — nunca enviar artefactos locais no contexto.
+/target
+/dist
+.git
+node_modules
+**/*.rs.bk
+*.pdb
+.DS_Store
+*.swp
