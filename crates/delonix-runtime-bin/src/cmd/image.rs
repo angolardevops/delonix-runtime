@@ -60,10 +60,47 @@ pub enum ImageCmd {
     },
     /// Remove as credenciais guardadas de um registo.
     Logout { registry: String },
+    /// Imagens VM douradas (`<root>/vm-images/`): ls/pull/push/build.
+    /// Equivalente a `image --vm <cmd>` (forma antiga, mantida).
+    Vm {
+        #[command(subcommand)]
+        action: VmSub,
+    },
     /// (só com `--vm`) Publica uma imagem VM local num registo OCI.
     Push { name: String, target: String },
     /// (só com `--vm`) Constrói a imagem VM dourada (Ubuntu + kubeadm/kubelet/
     /// kubectl + `delonix-cri`).
+    Build {
+        #[arg(short = 't', long = "tag")]
+        tag: String,
+        #[arg(long, default_value = "26.04")]
+        ubuntu_release: String,
+        #[arg(long)]
+        k8s_version: Option<String>,
+        #[arg(long = "extra-package")]
+        extra_packages: Vec<String>,
+        #[arg(long = "extra-run")]
+        extra_run: Vec<String>,
+        #[arg(long)]
+        cri_bin: Option<PathBuf>,
+    },
+}
+
+/// Subcomandos de `image vm` — espelham 1:1 o `cmd::vmimage::VmImageCmd`.
+#[derive(Subcommand)]
+pub enum VmSub {
+    /// Lista as imagens VM locais.
+    Ls,
+    /// Obtém uma imagem VM de um registo OCI (artefacto de blob único).
+    Pull {
+        source: String,
+        /// Nome local (default: derivado da referência).
+        #[arg(long)]
+        name: Option<String>,
+    },
+    /// Publica uma imagem VM local num registo OCI.
+    Push { name: String, target: String },
+    /// Constrói a imagem VM dourada (Ubuntu + kubeadm/kubelet/kubectl + `delonix-cri`).
     Build {
         #[arg(short = 't', long = "tag")]
         tag: String,
@@ -97,6 +134,17 @@ pub fn run(vm: bool, action: ImageCmd) -> Result<()> {
         }
         _ => {}
     }
+    if let ImageCmd::Vm { action } = action {
+        use super::vmimage::{self, VmImageCmd};
+        return vmimage::run(match action {
+            VmSub::Ls => VmImageCmd::Ls,
+            VmSub::Pull { source, name } => VmImageCmd::Pull { source, name },
+            VmSub::Push { name, target } => VmImageCmd::Push { name, target },
+            VmSub::Build { tag, ubuntu_release, k8s_version, extra_packages, extra_run, cri_bin } => {
+                VmImageCmd::Build { tag, ubuntu_release, k8s_version, extra_packages, extra_run, cri_bin }
+            }
+        });
+    }
     if vm {
         return run_vm(action);
     }
@@ -114,7 +162,7 @@ pub fn run(vm: bool, action: ImageCmd) -> Result<()> {
         ImageCmd::Push { .. } | ImageCmd::Build { .. } => {
             Err(Error::Invalid("push/build de imagens são só para VM — usa `delonix image --vm push|build`".into()))
         }
-        ImageCmd::Login { .. } | ImageCmd::Logout { .. } => unreachable!("tratados acima"),
+        ImageCmd::Login { .. } | ImageCmd::Logout { .. } | ImageCmd::Vm { .. } => unreachable!("tratados acima"),
     }
 }
 
@@ -152,7 +200,7 @@ fn run_vm(action: ImageCmd) -> Result<()> {
                 "comando não disponível para imagens VM (--vm) — usa ls/pull/push/build".into(),
             ))
         }
-        ImageCmd::Login { .. } | ImageCmd::Logout { .. } => unreachable!("tratados em run()"),
+        ImageCmd::Login { .. } | ImageCmd::Logout { .. } | ImageCmd::Vm { .. } => unreachable!("tratados em run()"),
     };
     vmimage::run(mapped)
 }
