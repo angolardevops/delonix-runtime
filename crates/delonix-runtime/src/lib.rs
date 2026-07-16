@@ -961,18 +961,38 @@ fn setup_rootfs(
     // EXCEÇÃO --privileged: `/sys` RW + `cgroup2` RW delegado, para o systemd dentro
     // do container (nodes Kind) criar e gerir sub-cgroups. Só com `--privileged`.
     let sys_base = MsFlags::MS_NOSUID | MsFlags::MS_NODEV | MsFlags::MS_NOEXEC;
-    let _ = mount(
+    let fresh_sysfs = mount(
         Some("sysfs"),
         "/sys",
         Some("sysfs"),
         if privileged { sys_base } else { sys_base | MsFlags::MS_RDONLY },
         None::<&str>,
     );
+    if fresh_sysfs.is_err() && privileged {
+        // Montar um sysfs NOVO num user ns só é permitido se o userns for DONO do
+        // netns — com `--net host` (o default) não é, e o kernel devolve EPERM,
+        // deixando o /sys VAZIO (foi isto que impedia o kindest/node de arrancar:
+        // sem /sys/fs/cgroup, o entrypoint do kind "deteta cgroup v1" e morre).
+        // Fallback = o que o runc rootless faz: bind recursivo do /sys do host,
+        // preservado na raiz antiga pelo pivot_root. Só em --privileged (semântica
+        // Docker: --privileged expõe o /sys do host RW); não-privileged mantém o
+        // comportamento de sempre (sem /sys — nunca expor o do host sem pedir).
+        let _ = mount(
+            Some("/.delonix_old/sys"),
+            "/sys",
+            None::<&str>,
+            MsFlags::MS_BIND | MsFlags::MS_REC,
+            None::<&str>,
+        );
+    }
     if privileged {
         // cgroup2 RW por cima de /sys/fs/cgroup. Com CLONE_NEWCGROUP, a vista fica
         // enraizada no cgroup do container (delegado pelo host — pré-requisito
         // cgroup v2 Delegate=yes). nsdelegate deixa o systemd gerir o seu subtree.
-        let _ = std::fs::create_dir_all(format!("{rootfs}/sys/fs/cgroup"));
+        // NOTA: já estamos DEPOIS do pivot_root — o mountpoint cria-se em
+        // `/sys/fs/cgroup` (o `{rootfs}/...` de antes já não resolvia aqui, e o
+        // create_dir_all falhava em silêncio).
+        let _ = std::fs::create_dir_all("/sys/fs/cgroup");
         let _ = mount(
             Some("cgroup2"),
             "/sys/fs/cgroup",
