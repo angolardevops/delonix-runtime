@@ -289,7 +289,7 @@ pub fn valid_ip_in_subnet(prefix: &str, ip: &str) -> bool {
 /// IP determinístico em `10.88.A.B`, derivado do id (evita .0/.1/.255).
 /// Interpreta `hostPort:contPort[/tcp|udp]`, `contPort` ou `hp:cp`. Devolve
 /// `(host_port, cont_port, proto)`.
-fn parse_publish(spec: &str) -> Result<(String, String, String)> {
+pub fn parse_publish(spec: &str) -> Result<(String, String, String)> {
     let (mapping, proto) = match spec.split_once('/') {
         Some((m, p)) => (m, p.to_lowercase()),
         None => (spec, "tcp".to_string()),
