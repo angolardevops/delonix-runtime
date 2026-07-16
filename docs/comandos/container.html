@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>delonix container · Delonix Runtime</title>
+<style>
+:root{--accent:#e8590c;--accent-soft:#fff0e6;--ink:#1a1a2e;--muted:#5a6472;--line:#e6e8ec;
+--bg:#ffffff;--side:#f7f8fa;--code-bg:#0f172a;--code-ink:#e2e8f0;--radius:10px}
+@media (prefers-color-scheme: dark){:root{--ink:#e6e8ee;--muted:#9aa4b2;--line:#252a33;
+--bg:#0d1117;--side:#10151c;--accent-soft:#2a1810;--code-bg:#161b22;--code-ink:#dbe2ea}}
+*{box-sizing:border-box}body{margin:0;font:16px/1.65 -apple-system,'Segoe UI',Roboto,Ubuntu,
+sans-serif;color:var(--ink);background:var(--bg)}
+a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
+.layout{display:flex;min-height:100vh}
+nav.side{width:270px;flex-shrink:0;background:var(--side);border-right:1px solid var(--line);
+padding:1.2rem 1rem 3rem;position:sticky;top:0;height:100vh;overflow-y:auto}
+nav.side .brand{display:flex;align-items:center;gap:.55rem;font-weight:700;font-size:1.12rem;
+margin-bottom:1.1rem;color:var(--ink)}
+nav.side .brand .dot{width:26px;height:26px;border-radius:7px;background:var(--accent);
+display:inline-flex;align-items:center;justify-content:center;color:#fff;font-size:.85rem}
+nav.side h5{margin:1.3rem 0 .3rem;font-size:.72rem;letter-spacing:.09em;text-transform:uppercase;
+color:var(--muted)}
+nav.side a{display:block;padding:.28rem .55rem;border-radius:6px;color:var(--ink);font-size:.93rem}
+nav.side a:hover{background:var(--accent-soft);text-decoration:none}
+nav.side a.on{background:var(--accent-soft);color:var(--accent);font-weight:600}
+main{flex:1;min-width:0;padding:2.2rem 3rem 5rem;max-width:940px}
+main h1{font-size:1.9rem;margin:.2rem 0 .4rem}
+main h2{font-size:1.35rem;margin-top:2.4rem;padding-bottom:.35rem;border-bottom:1px solid var(--line)}
+main h3{font-size:1.05rem;margin-top:1.6rem}
+.tagline{color:var(--muted);font-size:1.05rem;margin-top:0}
+code{background:var(--accent-soft);padding:.1em .35em;border-radius:5px;font-size:.9em}
+pre{background:var(--code-bg);color:var(--code-ink);padding:1rem 1.2rem;border-radius:var(--radius);
+overflow-x:auto;font-size:.86rem;line-height:1.55}
+pre code{background:none;padding:0;color:inherit;font-size:inherit}
+.help pre{border-left:4px solid var(--accent)}
+.ex{margin:.9rem 0}.ex .cap{font-size:.88rem;color:var(--muted);margin-bottom:.25rem}
+table{border-collapse:collapse;width:100%;font-size:.92rem}
+td,th{border:1px solid var(--line);padding:.5rem .7rem;text-align:left;vertical-align:top}
+th{background:var(--side)}
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:1rem;margin:1.4rem 0}
+.card{border:1px solid var(--line);border-radius:var(--radius);padding:1rem 1.1rem}
+.card b{display:block;margin-bottom:.25rem}.card a{font-weight:600}
+.card p{margin:.2rem 0 0;font-size:.88rem;color:var(--muted)}
+.arch{display:flex;flex-direction:column;gap:.6rem;margin:1.4rem 0}
+.arch .row{display:flex;gap:.6rem;flex-wrap:wrap}
+.arch .box{flex:1;min-width:150px;border:1.5px solid var(--accent);border-radius:8px;
+padding:.55rem .8rem;font-size:.85rem;background:var(--accent-soft)}
+.arch .box.mut{border-color:var(--line);background:var(--side)}
+.arch .box b{display:block;font-size:.9rem}
+.pill{display:inline-block;background:var(--accent);color:#fff;border-radius:99px;
+padding:.05rem .6rem;font-size:.75rem;font-weight:600;vertical-align:middle}
+footer{margin-top:4rem;color:var(--muted);font-size:.85rem;border-top:1px solid var(--line);padding-top:1rem}
+@media (max-width:840px){.layout{flex-direction:column}nav.side{width:100%;height:auto;position:static}
+main{padding:1.4rem 1.2rem 4rem}}
+</style>
+</head>
+<body>
+<div class="layout">
+<nav class="side">
+<div class="brand"><span class="dot">▲</span> Delonix Runtime</div>
+<h5>Documentação</h5>
+<a href="../index.html">Início</a><a href="../arquitectura.html">Arquitectura</a><a href="../cri.html">CRI — kubelet sem containerd</a>
+<h5>Referência CLI</h5>
+<a href="../comandos/container.html" class="on">delonix container</a><a href="../comandos/image.html">delonix image</a><a href="../comandos/build.html">delonix build</a><a href="../comandos/vm.html">delonix vm</a><a href="../comandos/volumes.html">delonix volumes</a><a href="../comandos/network.html">delonix network</a><a href="../comandos/stack.html">delonix stack</a><a href="../comandos/cluster.html">delonix cluster</a><a href="../comandos/completion.html">delonix completion</a>
+<h5>Projecto</h5>
+<a href="https://github.com/angolardevops/delonix-runtime">GitHub</a>
+<a href="https://github.com/angolardevops/delonix-runtime/releases">Releases</a>
+</nav>
+<main>
+<h1>delonix container</h1><p class='tagline'>Ciclo de vida de containers: run, ps, start, stop, rm, exec, logs, inspect, stats, apply.</p>
+<p>O grupo <code>container</code> é o dia a dia do runtime — o homólogo do
+<code>docker container</code>. Cada invocação é um processo efémero (sem daemon): o
+<code>run</code> faz <code>clone()</code> directo com os namespaces pedidos e o estado fica em
+JSON no <code>$DELONIX_ROOT</code>. Em rootless, o rootfs do container é uma cópia flat
+<em>persistente</em> — as escritas sobrevivem a <code>stop</code>/<code>start</code>, como no Docker.</p>
+<div class='help'><pre><code>Containers: run/ps/stop/rm/exec/logs
+
+Usage: delonix container &lt;COMMAND&gt;
+
+Commands:
+  run      Corre um container a partir de uma imagem (puxa se faltar)
+  ps       Lista containers [alias: ls]
+  start    (Re)arranca containers parados/crashados, reutilizando o rootfs persistente (as escritas feitas dentro do container sobrevivem, como no docker) e a mesma rede/portas/volumes do `run` original. Sempre detached
+  stop     Pára um ou mais containers (SIGTERM, depois SIGKILL)
+  rm       Remove um ou mais containers
+  exec     Executa um comando dentro de um container a correr
+  inspect  Mostra a spec completa de um ou mais containers (JSON do Store)
+  stats    Uso de recursos (CPU/memória/PIDs) dos containers a correr — uma amostra e sai (sem stream). Sem IDs, mostra todos os que correm
+  logs     Mostra os logs (containers detached)
+  apply    Aplica os documentos `kind: Container` de um manifesto (idempotente por nome — um container já existente com esse nome não é recriado nem verificado quanto a drift de spec, ver `cmd::manifest`)
+  help     Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help  Print help</code></pre></div>
+<h2 id='run'><code>container run</code></h2>
+<div class='help'><pre><code>Corre um container a partir de uma imagem (puxa se faltar)
+
+Usage: delonix container run [OPTIONS] &lt;IMAGE&gt; [COMMAND]...
+
+Arguments:
+  &lt;IMAGE&gt;       Imagem (ex.: `alpine:3.19`)
+  [COMMAND]...  Comando + argumentos (default: o ENTRYPOINT/CMD da imagem)
+
+Options:
+  -d, --detach                   Corre em segundo plano e imprime o ID
+      --name &lt;NAME&gt;              Nome do container (default: `dlx-&lt;id&gt;`)
+      --net &lt;NET&gt;                Rede: `host` (partilha a do host, default), `none` (netns isolado sem ligação), ou o NOME de uma rede criada com `delonix network create` [default: host]
+  -v, --volume &lt;VOLUMES&gt;         Volume/bind mount, `nome:/destino[:ro]` ou `/host:/destino[:ro]`. Repetível
+  -p, --publish &lt;PUBLISH&gt;        Publica uma porta, `hostPort:contPort[/tcp|udp]` ou só `porta`. Repetível. Com `--net host` (o default) muda o container para um netns próprio com NAT em userspace (slirp4netns, como o podman rootless); com `--net &lt;rede&gt;` publica pelo ingress (DNAT nft + hostfwd no slirp único)
+      --privileged               Container privilegiado (todas as caps, seccomp off) — cargas de confiança
+      --entrypoint &lt;ENTRYPOINT&gt;  Sobrepõe o ENTRYPOINT da imagem (o COMMAND passa a ser os argumentos deste binário; `--entrypoint &quot;&quot;` limpa-o e corre só o COMMAND)
+      --rm                       Remove o container quando o processo terminar (em `-d`, um watcher destacado trata da remoção quando o container morrer)
+  -e, --env &lt;ENV&gt;                Variáveis de ambiente adicionais (`KEY=VAL`), repetível
+      --label &lt;LABELS&gt;           Label (`KEY=VAL`), repetível — ex.: `io.x-k8s.kind.role=control-plane` activa a delegação de cgroup2 dedicada a nodes Kind (ver `setup_node_cgroup_ns`)
+  -h, --help                     Print help</code></pre></div>
+<p><strong><code>-p</code> e a rede:</strong> com <code>--net host</code> (o default) o
+container muda para um netns próprio com NAT em userspace (slirp4netns — o modelo do podman
+rootless); com <code>--net &lt;rede&gt;</code> a porta é publicada pelo <em>ingress</em> (hostfwd no
+slirp único + DNAT nft), o caminho que permite trocar portas a quente sem parar o container.
+<code>--net none</code> recusa <code>-p</code>.</p>
+<h3>Exemplos</h3><div class="ex"><div class="cap">Servir nginx na porta 8080 do host (NAT userspace, sem root)</div><pre><code>delonix container run -d --name web -p 8080:80 nginx</code></pre></div><div class="ex"><div class="cap">Correr numa rede criada pelo utilizador, publicando pelo ingress</div><pre><code>delonix network create minha-rede
+delonix container run -d --net minha-rede -p 8443:443 caddy</code></pre></div><div class="ex"><div class="cap">Shell descartável (remove-se sozinho à saída)</div><pre><code>delonix container run --rm -e TERM=xterm alpine sh -c &#x27;echo olá&#x27;</code></pre></div><div class="ex"><div class="cap">Sobrepor o ENTRYPOINT para depurar uma imagem</div><pre><code>delonix container run --rm --entrypoint /bin/sh nginx -c &#x27;nginx -t&#x27;</code></pre></div>
+<h2 id='ps'><code>container ps</code></h2>
+<div class='help'><pre><code>Lista containers
+
+Usage: delonix container ps [OPTIONS]
+
+Options:
+  -a, --all    Inclui os parados/falhados
+  -q, --quiet  Só imprime os IDs (para compor com `stop`/`rm`)
+  -h, --help   Print help</code></pre></div>
+<h3>Exemplos</h3><div class="ex"><div class="cap">Listar (alias `ls` também funciona)</div><pre><code>delonix container ls -a</code></pre></div><div class="ex"><div class="cap">Compor com stop/rm</div><pre><code>delonix container rm -f $(delonix container ps -aq)</code></pre></div>
+<h2 id='start'><code>container start</code></h2>
+<div class='help'><pre><code>(Re)arranca containers parados/crashados, reutilizando o rootfs persistente (as escritas feitas dentro do container sobrevivem, como no docker) e a mesma rede/portas/volumes do `run` original. Sempre detached
+
+Usage: delonix container start &lt;IDS&gt;...
+
+Arguments:
+  &lt;IDS&gt;...  
+
+Options:
+  -h, --help  Print help</code></pre></div>
+<p>Reusa a spec guardada (comando, env, volumes, rede, portas) e o rootfs
+persistente — ao contrário de <code>rm</code>+<code>run</code>, nada do que o container escreveu se perde.</p>
+<h3>Exemplos</h3><div class="ex"><div class="cap">Rearrancar um container parado, preservando o que foi escrito lá dentro</div><pre><code>delonix container start web</code></pre></div>
+<h2 id='stop'><code>container stop</code></h2>
+<div class='help'><pre><code>Pára um ou mais containers (SIGTERM, depois SIGKILL)
+
+Usage: delonix container stop [OPTIONS] &lt;IDS&gt;...
+
+Arguments:
+  &lt;IDS&gt;...  
+
+Options:
+  -t, --time &lt;TIME&gt;  Segundos até ao SIGKILL [default: 10]
+  -h, --help         Print help</code></pre></div>
+<h3>Exemplos</h3><div class="ex"><div class="cap">SIGTERM, e SIGKILL ao fim de 5s</div><pre><code>delonix container stop -t 5 web db</code></pre></div>
+<h2 id='rm'><code>container rm</code></h2>
+<div class='help'><pre><code>Remove um ou mais containers
+
+Usage: delonix container rm [OPTIONS] &lt;IDS&gt;...
+
+Arguments:
+  &lt;IDS&gt;...  
+
+Options:
+  -f, --force  Força (mata se estiver a correr)
+  -h, --help   Print help</code></pre></div>
+<h3>Exemplos</h3><div class="ex"><div class="cap">Forçar remoção de vários</div><pre><code>delonix container rm -f web db cache</code></pre></div>
+<h2 id='exec'><code>container exec</code></h2>
+<div class='help'><pre><code>Executa um comando dentro de um container a correr
+
+Usage: delonix container exec [OPTIONS] &lt;ID&gt; &lt;COMMAND&gt;...
+
+Arguments:
+  &lt;ID&gt;          
+  &lt;COMMAND&gt;...  
+
+Options:
+  -i, --interactive  Interativo (liga o stdin)
+  -t, --tty          Aloca um pseudo-terminal
+  -h, --help         Print help</code></pre></div>
+<h3>Exemplos</h3><div class="ex"><div class="cap">Shell interactiva</div><pre><code>delonix container exec -it web sh</code></pre></div>
+<h2 id='logs'><code>container logs</code></h2>
+<div class='help'><pre><code>Mostra os logs (containers detached)
+
+Usage: delonix container logs [OPTIONS] &lt;ID&gt;
+
+Arguments:
+  &lt;ID&gt;  
+
+Options:
+  -f, --follow  Segue o log em contínuo (sai quando o container parar)
+  -h, --help    Print help</code></pre></div>
+<h3>Exemplos</h3><div class="ex"><div class="cap">Seguir em contínuo (sai quando o container parar)</div><pre><code>delonix container logs -f web</code></pre></div>
+<h2 id='inspect'><code>container inspect</code></h2>
+<div class='help'><pre><code>Mostra a spec completa de um ou mais containers (JSON do Store)
+
+Usage: delonix container inspect &lt;IDS&gt;...
+
+Arguments:
+  &lt;IDS&gt;...  
+
+Options:
+  -h, --help  Print help</code></pre></div>
+<h3>Exemplos</h3><div class="ex"><div class="cap">Spec completa em JSON</div><pre><code>delonix container inspect web | jq .[0].ports</code></pre></div>
+<h2 id='stats'><code>container stats</code></h2>
+<div class='help'><pre><code>Uso de recursos (CPU/memória/PIDs) dos containers a correr — uma amostra e sai (sem stream). Sem IDs, mostra todos os que correm
+
+Usage: delonix container stats [IDS]...
+
+Arguments:
+  [IDS]...  
+
+Options:
+  -h, --help  Print help</code></pre></div>
+<p>CPU%/memória/PIDs lidos do cgroup v2 do próprio container (resolvido por
+<code>/proc/&lt;pid&gt;/cgroup</code>, qualquer que seja a base delegada). Sem delegação de cgroup
+(rootless sem <code>Delegate=yes</code>), a memória cai para o VmRSS do init do container,
+marcada com <code>~</code>.</p>
+<h3>Exemplos</h3><div class="ex"><div class="cap">Uma amostra de todos os que correm</div><pre><code>delonix container stats</code></pre></div>
+<h2 id='apply'><code>container apply</code></h2>
+<div class='help'><pre><code>Aplica os documentos `kind: Container` de um manifesto (idempotente por nome — um container já existente com esse nome não é recriado nem verificado quanto a drift de spec, ver `cmd::manifest`)
+
+Usage: delonix container apply [OPTIONS]
+
+Options:
+  -f, --file &lt;FILE&gt;  
+  -h, --help         Print help</code></pre></div>
+<h3>Exemplos</h3><div class="ex"><div class="cap">Aplicar só os `kind: Container` de um manifesto</div><pre><code>delonix container apply -f delonix-manifest.yaml</code></pre></div>
+<footer>Delonix Runtime · Apache-2.0 · <a href="https://github.com/angolardevops/delonix-runtime">angolardevops/delonix-runtime</a>
+· Referência gerada do <code>--help</code> real do binário por <code>docs/gen.py</code>.</footer>
+</main>
+</div>
+</body>
+</html>

@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>CRI · Delonix Runtime</title>
+<style>
+:root{--accent:#e8590c;--accent-soft:#fff0e6;--ink:#1a1a2e;--muted:#5a6472;--line:#e6e8ec;
+--bg:#ffffff;--side:#f7f8fa;--code-bg:#0f172a;--code-ink:#e2e8f0;--radius:10px}
+@media (prefers-color-scheme: dark){:root{--ink:#e6e8ee;--muted:#9aa4b2;--line:#252a33;
+--bg:#0d1117;--side:#10151c;--accent-soft:#2a1810;--code-bg:#161b22;--code-ink:#dbe2ea}}
+*{box-sizing:border-box}body{margin:0;font:16px/1.65 -apple-system,'Segoe UI',Roboto,Ubuntu,
+sans-serif;color:var(--ink);background:var(--bg)}
+a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
+.layout{display:flex;min-height:100vh}
+nav.side{width:270px;flex-shrink:0;background:var(--side);border-right:1px solid var(--line);
+padding:1.2rem 1rem 3rem;position:sticky;top:0;height:100vh;overflow-y:auto}
+nav.side .brand{display:flex;align-items:center;gap:.55rem;font-weight:700;font-size:1.12rem;
+margin-bottom:1.1rem;color:var(--ink)}
+nav.side .brand .dot{width:26px;height:26px;border-radius:7px;background:var(--accent);
+display:inline-flex;align-items:center;justify-content:center;color:#fff;font-size:.85rem}
+nav.side h5{margin:1.3rem 0 .3rem;font-size:.72rem;letter-spacing:.09em;text-transform:uppercase;
+color:var(--muted)}
+nav.side a{display:block;padding:.28rem .55rem;border-radius:6px;color:var(--ink);font-size:.93rem}
+nav.side a:hover{background:var(--accent-soft);text-decoration:none}
+nav.side a.on{background:var(--accent-soft);color:var(--accent);font-weight:600}
+main{flex:1;min-width:0;padding:2.2rem 3rem 5rem;max-width:940px}
+main h1{font-size:1.9rem;margin:.2rem 0 .4rem}
+main h2{font-size:1.35rem;margin-top:2.4rem;padding-bottom:.35rem;border-bottom:1px solid var(--line)}
+main h3{font-size:1.05rem;margin-top:1.6rem}
+.tagline{color:var(--muted);font-size:1.05rem;margin-top:0}
+code{background:var(--accent-soft);padding:.1em .35em;border-radius:5px;font-size:.9em}
+pre{background:var(--code-bg);color:var(--code-ink);padding:1rem 1.2rem;border-radius:var(--radius);
+overflow-x:auto;font-size:.86rem;line-height:1.55}
+pre code{background:none;padding:0;color:inherit;font-size:inherit}
+.help pre{border-left:4px solid var(--accent)}
+.ex{margin:.9rem 0}.ex .cap{font-size:.88rem;color:var(--muted);margin-bottom:.25rem}
+table{border-collapse:collapse;width:100%;font-size:.92rem}
+td,th{border:1px solid var(--line);padding:.5rem .7rem;text-align:left;vertical-align:top}
+th{background:var(--side)}
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:1rem;margin:1.4rem 0}
+.card{border:1px solid var(--line);border-radius:var(--radius);padding:1rem 1.1rem}
+.card b{display:block;margin-bottom:.25rem}.card a{font-weight:600}
+.card p{margin:.2rem 0 0;font-size:.88rem;color:var(--muted)}
+.arch{display:flex;flex-direction:column;gap:.6rem;margin:1.4rem 0}
+.arch .row{display:flex;gap:.6rem;flex-wrap:wrap}
+.arch .box{flex:1;min-width:150px;border:1.5px solid var(--accent);border-radius:8px;
+padding:.55rem .8rem;font-size:.85rem;background:var(--accent-soft)}
+.arch .box.mut{border-color:var(--line);background:var(--side)}
+.arch .box b{display:block;font-size:.9rem}
+.pill{display:inline-block;background:var(--accent);color:#fff;border-radius:99px;
+padding:.05rem .6rem;font-size:.75rem;font-weight:600;vertical-align:middle}
+footer{margin-top:4rem;color:var(--muted);font-size:.85rem;border-top:1px solid var(--line);padding-top:1rem}
+@media (max-width:840px){.layout{flex-direction:column}nav.side{width:100%;height:auto;position:static}
+main{padding:1.4rem 1.2rem 4rem}}
+</style>
+</head>
+<body>
+<div class="layout">
+<nav class="side">
+<div class="brand"><span class="dot">▲</span> Delonix Runtime</div>
+<h5>Documentação</h5>
+<a href="index.html">Início</a><a href="arquitectura.html">Arquitectura</a><a href="cri.html" class="on">CRI — kubelet sem containerd</a>
+<h5>Referência CLI</h5>
+<a href="comandos/container.html">delonix container</a><a href="comandos/image.html">delonix image</a><a href="comandos/build.html">delonix build</a><a href="comandos/vm.html">delonix vm</a><a href="comandos/volumes.html">delonix volumes</a><a href="comandos/network.html">delonix network</a><a href="comandos/stack.html">delonix stack</a><a href="comandos/cluster.html">delonix cluster</a><a href="comandos/completion.html">delonix completion</a>
+<h5>Projecto</h5>
+<a href="https://github.com/angolardevops/delonix-runtime">GitHub</a>
+<a href="https://github.com/angolardevops/delonix-runtime/releases">Releases</a>
+</nav>
+<main>
+
+<h1>CRI — kubelet sem containerd</h1>
+<p class="tagline">O crate <code>delonix-cri</code> implementa o Container Runtime Interface
+(<code>runtime.v1</code>) do Kubernetes.</p>
+
+<p>O kubelet não sabe correr containers — delega num runtime via CRI (gRPC sobre socket unix).
+Normalmente esse runtime é o containerd ou o CRI-O; com o Delonix, é o binário
+<code>delonix-cri</code>: <em>pods e containers do Kubernetes a correr directamente sobre o motor
+Delonix</em>, sem mais nenhuma peça.</p>
+
+<h2>Como se liga</h2>
+<pre><code># o serviço (a imagem VM dourada já o traz como unit systemd)
+DELONIX_CRI_ADDR=/run/delonix-cri.sock delonix-cri
+
+# o kubelet aponta para lá
+kubelet --container-runtime-endpoint=unix:///run/delonix-cri.sock …</code></pre>
+
+<h2>O que implementa</h2>
+<table>
+<tr><th>Área CRI</th><th>Suporte</th></tr>
+<tr><td>RuntimeService — sandboxes (pods)</td><td>criação do pod sandbox com netns partilhado
+(os containers do pod juntam-se à rede do sandbox via <code>join_netns</code>), labels/annotations,
+estado e remoção</td></tr>
+<tr><td>RuntimeService — containers</td><td>create/start/stop/remove, exec, logs em formato CRI
+(<code>&lt;rfc3339nano&gt; stdout F linha</code>), limites cpu/memória por pod via cgroups v2</td></tr>
+<tr><td>ImageService</td><td>pull (digest verificado), list, status, remove — sobre o
+<code>ImageStore</code> normal do Delonix</td></tr>
+<tr><td>Rede</td><td>compatibilidade CNI (attach/detach por conf JSON)</td></tr>
+</table>
+
+<h2>Do zero a um cluster</h2>
+<p>É esta peça que fecha o ciclo do <code>delonix cluster</code>: a imagem VM dourada
+(<code>delonix image --vm build</code>) já traz kubeadm/kubelet/kubectl e o
+<code>delonix-cri</code> activo; <code>delonix cluster kubeadm</code> provisiona as VMs e faz o
+bootstrap — o cluster resultante corre Kubernetes com o Delonix como runtime de ponta a ponta.</p>
+
+<footer>Delonix Runtime · Apache-2.0 · <a href="https://github.com/angolardevops/delonix-runtime">angolardevops/delonix-runtime</a>
+· Referência gerada do <code>--help</code> real do binário por <code>docs/gen.py</code>.</footer>
+</main>
+</div>
+</body>
+</html>
