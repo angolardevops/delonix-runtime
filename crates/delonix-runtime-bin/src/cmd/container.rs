@@ -66,6 +66,10 @@ pub enum ContainerCmd {
         /// Variáveis de ambiente adicionais (`KEY=VAL`), repetível.
         #[arg(short = 'e', long = "env")]
         env: Vec<String>,
+        /// Label (`KEY=VAL`), repetível — ex.: `io.x-k8s.kind.role=control-plane`
+        /// activa a delegação de cgroup2 dedicada a nodes Kind (ver `setup_node_cgroup_ns`).
+        #[arg(long = "label")]
+        labels: Vec<String>,
         /// Imagem (ex.: `alpine:3.19`).
         image: String,
         /// Comando + argumentos (default: o ENTRYPOINT/CMD da imagem).
@@ -118,8 +122,8 @@ pub enum ContainerCmd {
 pub fn run(action: ContainerCmd) -> Result<()> {
     let (images, store) = open_stores()?;
     match action {
-        ContainerCmd::Run { detach, name, net, volumes, privileged, env, image, command } => {
-            cmd_run(&images, &store, detach, name, &net, volumes, privileged, env, image, command)
+        ContainerCmd::Run { detach, name, net, volumes, privileged, env, labels, image, command } => {
+            cmd_run(&images, &store, detach, name, &net, volumes, privileged, env, labels, image, command)
         }
         ContainerCmd::Ps { all } => cmd_ps(&store, all),
         ContainerCmd::Stop { id, time } => cmd_stop(&store, &id, time),
@@ -152,6 +156,7 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
             spec.volumes,
             spec.privileged,
             spec.env,
+            Vec::new(),
             spec.image,
             spec.command,
         )?;
@@ -180,6 +185,7 @@ fn cmd_run(
     volumes: Vec<String>,
     privileged: bool,
     env: Vec<String>,
+    labels: Vec<String>,
     image: String,
     command: Vec<String>,
 ) -> Result<()> {
@@ -203,6 +209,11 @@ fn cmd_run(
     }
     c.userns = rootless;
     c.privileged = privileged;
+    for l in &labels {
+        if let Some((k, v)) = l.split_once('=') {
+            c.labels.insert(k.to_string(), v.to_string());
+        }
+    }
 
     let log_path = if detach {
         Some(
