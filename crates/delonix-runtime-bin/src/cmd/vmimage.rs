@@ -138,16 +138,54 @@ pub fn run(action: VmImageCmd) -> Result<()> {
     }
 }
 
+/// Formata um tamanho em bytes de forma legível (base 1024: B/KiB/MiB/GiB/TiB).
+fn fmt_size(bytes: u64) -> String {
+    const UNITS: [&str; 5] = ["B", "KiB", "MiB", "GiB", "TiB"];
+    if bytes < 1024 {
+        return format!("{bytes} B");
+    }
+    let mut val = bytes as f64;
+    let mut unit = 0;
+    while val >= 1024.0 && unit < UNITS.len() - 1 {
+        val /= 1024.0;
+        unit += 1;
+    }
+    // 2 casas para GiB+, 1 casa para KiB/MiB — legível sem ruído.
+    let prec = if unit >= 3 { 2 } else { 1 };
+    format!("{val:.prec$} {}", UNITS[unit])
+}
+
+/// Formata um instante unix (segundos) como data/hora LOCAL "AAAA-MM-DD HH:MM".
+/// Usa `localtime_r` (honra `/etc/localtime`/`TZ`); em falha, cai no valor cru.
+fn fmt_local(unix: u64) -> String {
+    let t = unix as libc::time_t;
+    let mut tm: libc::tm = unsafe { std::mem::zeroed() };
+    // SAFETY: `t` é válido; `localtime_r` escreve em `tm` (buffer nosso, do
+    // tamanho certo) e devolve NULL só em erro — que tratamos abaixo.
+    let ok = unsafe { !libc::localtime_r(&t, &mut tm).is_null() };
+    if !ok {
+        return unix.to_string();
+    }
+    format!(
+        "{:04}-{:02}-{:02} {:02}:{:02}",
+        tm.tm_year + 1900,
+        tm.tm_mon + 1,
+        tm.tm_mday,
+        tm.tm_hour,
+        tm.tm_min
+    )
+}
+
 fn cmd_ls(store: &VmImageStore) -> Result<()> {
-    println!("{:<28}  {:<10}  {:<10}  {:<10}  TAMANHO", "NOME", "UBUNTU", "K8S", "CRIADA(unix)");
+    println!("{:<28}  {:<10}  {:<10}  {:<17}  {:>10}", "NOME", "UBUNTU", "K8S", "CRIADA", "TAMANHO");
     for img in store.list()? {
         println!(
-            "{:<28}  {:<10}  {:<10}  {:<10}  {}",
+            "{:<28}  {:<10}  {:<10}  {:<17}  {:>10}",
             img.name,
             img.ubuntu_release.as_deref().unwrap_or("-"),
             img.k8s_version.as_deref().unwrap_or("-"),
-            img.created_unix,
-            img.size
+            fmt_local(img.created_unix),
+            fmt_size(img.size)
         );
     }
     Ok(())
@@ -510,6 +548,27 @@ mod tests {
             .expect("devia haver um RunCommand de apt-get install");
         assert!(install_step.contains("kubeadm"));
         assert!(install_step.contains("htop"));
+    }
+
+    #[test]
+    fn fmt_size_legivel_por_escalao() {
+        assert_eq!(fmt_size(0), "0 B");
+        assert_eq!(fmt_size(512), "512 B");
+        assert_eq!(fmt_size(1024), "1.0 KiB");
+        assert_eq!(fmt_size(1536), "1.5 KiB");
+        assert_eq!(fmt_size(1024 * 1024), "1.0 MiB");
+        assert_eq!(fmt_size(2_555_576_320), "2.38 GiB");
+        assert_eq!(fmt_size(1024_u64.pow(4)), "1.00 TiB");
+    }
+
+    #[test]
+    fn fmt_local_tem_a_forma_data_hora() {
+        // 1784216635 → uma data/hora local; validamos a FORMA (o fuso é do host).
+        let s = fmt_local(1_784_216_635);
+        let b = s.as_bytes();
+        assert_eq!(s.len(), 16, "esperado 'AAAA-MM-DD HH:MM', obtido {s:?}");
+        assert!(b[4] == b'-' && b[7] == b'-' && b[10] == b' ' && b[13] == b':');
+        assert!(s[..4].chars().all(|c| c.is_ascii_digit()));
     }
 
     #[test]
