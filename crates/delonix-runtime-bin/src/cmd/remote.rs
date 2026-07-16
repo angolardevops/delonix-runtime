@@ -46,6 +46,12 @@ fn shell_quote(s: &str) -> String {
 /// interactivo, incluindo de password). Devolve `(sucesso, stdout+stderr)`.
 fn ssh_run_raw(t: &SshTarget, cmd: &str) -> Result<(bool, String)> {
     let mut args = t.conn_args();
+    // `--` separa opções de argumentos posicionais — defesa em profundidade
+    // contra um `host` que comece por `-` ser interpretado como flag do
+    // `ssh` (ex.: `-oProxyCommand=...`). `valid_endpoint` (cmd::cluster) já
+    // recusa esses valores na origem; isto é a segunda camada. Achado de
+    // auditoria de segurança, ver CLAUDE.md.
+    args.push("--".to_string());
     args.push(t.user_host());
     args.push(format!("sudo -n bash -c {}", shell_quote(cmd)));
     let out = Command::new("ssh")
@@ -78,6 +84,7 @@ pub fn ssh_run(t: &SshTarget, cmd: &str) -> Result<String> {
 /// `cmd::cluster::prepare_host` para o `delonix-cri`).
 pub fn scp_to(t: &SshTarget, local: &Path, remote_path: &str) -> Result<()> {
     let mut args = t.conn_args();
+    args.push("--".to_string());
     args.push(local.to_string_lossy().into_owned());
     args.push(format!("{}:{}", t.user_host(), remote_path));
     let status = Command::new("scp")
@@ -95,6 +102,7 @@ pub fn scp_to(t: &SshTarget, local: &Path, remote_path: &str) -> Result<()> {
 /// root-only; `cmd::cluster::fetch_kubeconfig` trata disso).
 pub fn scp_from(t: &SshTarget, remote_path: &str, local: &Path) -> Result<()> {
     let mut args = t.conn_args();
+    args.push("--".to_string());
     args.push(format!("{}:{}", t.user_host(), remote_path));
     args.push(local.to_string_lossy().into_owned());
     let status = Command::new("scp")

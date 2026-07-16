@@ -163,9 +163,30 @@ fn run_steps(steps: &[Step], rootfs: &str, context: &Path, c: &Container, base: 
     Ok(())
 }
 
+/// Resolve um componente `../`/absoluto de forma segura: junta `base` só com
+/// os componentes "normais" de `rel` (rejeita `..`/raiz/prefixo — nunca deixa
+/// escapar de `base`). Mesmo padrão de `safe_rel` em
+/// `delonix-image/src/overlay.rs` (extracção de layers de imagem), aplicado
+/// aqui ao `COPY` do Dockerfile/Delonixfile. **Achado de auditoria de
+/// segurança**: sem isto, `COPY ../../../etc/passwd x` lia ficheiros
+/// arbitrários do host para dentro da imagem, e um `dst` com `..` escrevia
+/// fora do rootfs — ver CLAUDE.md.
+fn safe_join(base: &Path, rel: &str) -> Result<PathBuf> {
+    use std::path::Component;
+    let mut out = base.to_path_buf();
+    for c in Path::new(rel).components() {
+        match c {
+            Component::Normal(s) => out.push(s),
+            Component::CurDir => {}
+            _ => return Err(Error::Invalid(format!("caminho inválido em COPY: '{rel}' (sai do directório permitido)"))),
+        }
+    }
+    Ok(out)
+}
+
 fn copy_into_rootfs(context: &Path, rootfs: &str, src: &str, dst: &str) -> Result<()> {
-    let src_path = context.join(src);
-    let dst_path = Path::new(rootfs).join(dst.trim_start_matches('/'));
+    let src_path = safe_join(context, src)?;
+    let dst_path = safe_join(Path::new(rootfs), dst.trim_start_matches('/'))?;
     if src_path.is_dir() {
         copy_dir_all(&src_path, &dst_path)
     } else {
@@ -195,7 +216,29 @@ fn copy_dir_all(src: &Path, dst: &Path) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::default_build_file;
+    use super::{default_build_file, safe_join};
+    use std::path::Path;
+
+    #[test]
+    fn safe_join_aceita_caminho_normal() {
+        let base = Path::new("/tmp/context");
+        assert_eq!(safe_join(base, "src/app.txt").unwrap(), base.join("src/app.txt"));
+    }
+
+    #[test]
+    fn safe_join_recusa_dot_dot() {
+        let base = Path::new("/tmp/rootfs");
+        assert!(safe_join(base, "../../../etc/passwd").is_err());
+        assert!(safe_join(base, "a/../../b").is_err());
+    }
+
+    #[test]
+    fn safe_join_recusa_absoluto() {
+        // um `dst` absoluto NÃO pode substituir `base` (era o risco antes do fix:
+        // `Path::join` com um componente absoluto ignora `base` por completo).
+        let base = Path::new("/tmp/rootfs");
+        assert!(safe_join(base, "/etc/passwd").is_err());
+    }
 
     #[test]
     fn prefere_delonixfile_quando_existe() {

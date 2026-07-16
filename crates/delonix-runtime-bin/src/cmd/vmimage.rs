@@ -59,7 +59,10 @@ impl VmImageStore {
     }
 
     pub fn base_cache_path(&self, ubuntu_release: &str) -> PathBuf {
-        self.root.join("_base").join(format!("ubuntu-{ubuntu_release}-server-cloudimg-amd64.img"))
+        // `sanitize` (não aplicado aqui antes — achado de auditoria de segurança,
+        // ver CLAUDE.md) elimina `/` de `ubuntu_release`, impedindo que
+        // `--ubuntu-release '../../../etc/cron.d/x'` escreva fora de `_base/`.
+        self.root.join("_base").join(format!("ubuntu-{}-server-cloudimg-amd64.img", Self::sanitize(ubuntu_release)))
     }
 
     pub fn save(&self, img: &VmImage) -> Result<()> {
@@ -189,6 +192,15 @@ fn cmd_build(
     extra_run: Vec<String>,
     cri_bin: Option<PathBuf>,
 ) -> Result<()> {
+    // `k8s_version` entra num `format!` que vira comando `virt-customize --run-command`
+    // (via `k8s_recipes::k8s_host_recipes`) — validar aqui fecha o mesmo achado de
+    // segurança de `cmd::cluster::valid_version` (o repositório apt embutido não pode
+    // conter metacaracteres de shell). Achado de auditoria, ver CLAUDE.md.
+    if let Some(v) = &k8s_version {
+        if !super::cluster::valid_version(v) {
+            return Err(Error::Invalid(format!("--k8s-version '{v}' inválido (só dígitos e pontos, ex.: '1.31')")));
+        }
+    }
     let base = download_ubuntu_base(store, ubuntu_release)?;
     let cri = resolve_cri_bin(cri_bin)?;
 
