@@ -319,13 +319,26 @@ docker, `""` limpa), e a causa-raiz provável foi corrigida no motor (fallback b
 host quando montar sysfs novo dá EPERM em `--privileged --net host`, + mountpoint do cgroup2
 criado pós-pivot_root — ver commit `dfe7e0b`). Revalidação do boot do `kindest/node` pendente.
 
-**Conclusão honesta**: a peça mais arriscada de todo o pedido — arrancar `kindest/node`
-(systemd + containerd aninhado) sob o nosso modelo rootless/privileged — **não funciona hoje**.
-O shim de compatibilidade Docker (grande, semanas de trabalho) não deve arrancar antes disto
-estar resolvido, ou arriscamos construir a fachada toda sobre uma fundação que não arranca. A
-próxima sessão deve focar-se em **só** isto: instrumentar o arranque (via `--entrypoint` novo +
-`set -x`) até se perceber exactamente porque é que a deteção de cgroup falha, antes de qualquer
-trabalho no shim `docker`/`network create`/templates Go.
+**RESOLVIDO — a deteção de cgroup já não é o bloqueio** (sessão -p/paridade, confirmado com
+instrumentação real via `--entrypoint /bin/bash` + `set -x`). Com o fix do sysfs (`dfe7e0b`),
+dentro do container `--privileged` o `/sys/fs/cgroup` é `cgroup2fs` com TODOS os controladores
+(`cpuset cpu io memory hugetlb pids rdma misc dmem`, 41 entradas) — antes estava vazio. O
+entrypoint do `kindest/node`, corrido sob `systemd-run --user --scope -p Delegate=yes`, imprime
+agora **`INFO: detected cgroup v2`** (era "detected cgroup v1" + morte) e avança muito mais:
+userns ✓, mounts shared ✓, cgroup v2 ✓, machine-id ✓, faking DMI "kind" ✓, iptables legacy.
+Também se descobriu, pelo caminho, um **deadlock corrigido**: em modo console (`privileged +
+detach + log_path`), se o init morre antes de enviar o master do pty e um neto reparentado
+segura o socketpair, o `run` pendurava PARA SEMPRE sem log — `recv_fd` ganhou `SO_RCVTIMEO` 10s.
+
+**Novo ponto de falha (mais à frente, tratável)**: o entrypoint morre agora em
+`Failed to list table names in /proc/net/ip_tables_names: Permission denied` — netfilter/iptables
+em rootless. O container não consegue ler/manipular as tabelas do kernel (o `ip_tables_names`
+exige acesso que o userns rootless não dá, mesmo com `--privileged`, porque as caps de rede
+valem só no netns do userns, não no host). Próxima sessão: investigar se um netns próprio com
+as suas tabelas nft/iptables (em vez de `--net host`) mais `CAP_NET_ADMIN` efectivo no userns
+resolve, ou se precisa do modo `--net kind` a funcionar rootless primeiro (bloqueado pela
+limitação do setns, ver secção "CLI"). O shim Docker continua a NÃO dever arrancar antes disto,
+mas o risco de fundação caiu muito: o systemd+cgroup do node já arranca, falta a rede.
 
 ## Próximas fases (pedidas, não implementadas — cada uma precisa da sua própria sessão de planeamento)
 

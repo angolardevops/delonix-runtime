@@ -2692,6 +2692,21 @@ fn spawn(store: &Store, container: &mut Container, rootfs: &str, spec: &RunSpec<
     let log_src: Option<i32> = if let Some((csp, csc)) = console_sock {
         // SAFETY: o pai larga a ponta do filho e recebe o master do init.
         unsafe { libc::close(csc) };
+        // Timeout de recepção: se o init MORRER antes de enviar o master do pty
+        // (ex.: o entrypoint do kindest/node aborta cedo) e um neto reparentado
+        // segurar a ponta do socketpair, o `recvmsg` bloquearia PARA SEMPRE — o
+        // `run` ficava pendurado sem log nem exit. Com SO_RCVTIMEO, ao fim de 10s
+        // desiste (None → sem log, mas o container segue e o status reconcilia).
+        unsafe {
+            let tv = libc::timeval { tv_sec: 10, tv_usec: 0 };
+            libc::setsockopt(
+                csp,
+                libc::SOL_SOCKET,
+                libc::SO_RCVTIMEO,
+                (&tv as *const libc::timeval).cast(),
+                std::mem::size_of::<libc::timeval>() as libc::socklen_t,
+            );
+        }
         let m = recv_fd(csp);
         unsafe { libc::close(csp) };
         m // None se o init não conseguiu alocar o pty (cai sem log, sem bloquear)
