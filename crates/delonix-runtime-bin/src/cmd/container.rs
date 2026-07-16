@@ -71,6 +71,14 @@ pub enum ContainerCmd {
         /// Container privilegiado (todas as caps, seccomp off) — cargas de confiança.
         #[arg(long)]
         privileged: bool,
+        /// Sobrepõe o ENTRYPOINT da imagem (o COMMAND passa a ser os argumentos
+        /// deste binário; `--entrypoint ""` limpa-o e corre só o COMMAND).
+        #[arg(long)]
+        entrypoint: Option<String>,
+        /// Remove o container quando o processo terminar (em `-d`, um watcher
+        /// destacado trata da remoção quando o container morrer).
+        #[arg(long)]
+        rm: bool,
         /// Variáveis de ambiente adicionais (`KEY=VAL`), repetível.
         #[arg(short = 'e', long = "env")]
         env: Vec<String>,
@@ -129,8 +137,21 @@ pub enum ContainerCmd {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true, required = true)]
         command: Vec<String>,
     },
+    /// Mostra a spec completa de um ou mais containers (JSON do Store).
+    Inspect {
+        #[arg(required = true)]
+        ids: Vec<String>,
+    },
+    /// Uso de recursos (CPU/memória/PIDs) dos containers a correr — uma
+    /// amostra e sai (sem stream). Sem IDs, mostra todos os que correm.
+    Stats { ids: Vec<String> },
     /// Mostra os logs (containers detached).
-    Logs { id: String },
+    Logs {
+        id: String,
+        /// Segue o log em contínuo (sai quando o container parar).
+        #[arg(short, long)]
+        follow: bool,
+    },
     /// Aplica os documentos `kind: Container` de um manifesto (idempotente por
     /// nome — um container já existente com esse nome não é recriado nem
     /// verificado quanto a drift de spec, ver `cmd::manifest`).
@@ -143,15 +164,17 @@ pub enum ContainerCmd {
 pub fn run(action: ContainerCmd) -> Result<()> {
     let (images, store) = open_stores()?;
     match action {
-        ContainerCmd::Run { detach, name, net, volumes, publish, privileged, env, labels, image, command } => {
-            cmd_run(&images, &store, detach, name, &net, volumes, publish, privileged, env, labels, image, command)
+        ContainerCmd::Run { detach, name, net, volumes, publish, privileged, entrypoint, rm, env, labels, image, command } => {
+            cmd_run(&images, &store, RunOpts { detach, name, net, volumes, ports: publish, privileged, entrypoint, rm, env, labels, image, command })
         }
         ContainerCmd::Ps { all, quiet } => cmd_ps(&store, all, quiet),
         ContainerCmd::Start { ids } => for_each_id(&ids, |id| cmd_start(&images, &store, id)),
         ContainerCmd::Stop { ids, time } => for_each_id(&ids, |id| cmd_stop(&store, id, time)),
         ContainerCmd::Rm { ids, force } => for_each_id(&ids, |id| cmd_rm(&images, &store, id, force)),
         ContainerCmd::Exec { interactive, tty, id, command } => cmd_exec(&store, &id, interactive, tty, &command),
-        ContainerCmd::Logs { id } => cmd_logs(&images, &store, &id),
+        ContainerCmd::Inspect { ids } => cmd_inspect(&store, &ids),
+        ContainerCmd::Stats { ids } => cmd_stats(&store, &ids),
+        ContainerCmd::Logs { id, follow } => cmd_logs(&images, &store, &id, follow),
         ContainerCmd::Apply { file } => {
             let path = manifest::resolve_path(file)?;
             let docs = manifest::load(&path)?;
@@ -172,16 +195,20 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
         cmd_run(
             &images,
             &store,
-            spec.detach,
-            Some(name.clone()),
-            &spec.network,
-            spec.volumes,
-            spec.ports,
-            spec.privileged,
-            spec.env,
-            Vec::new(),
-            spec.image,
-            spec.command,
+            RunOpts {
+                detach: spec.detach,
+                name: Some(name.clone()),
+                net: spec.network,
+                volumes: spec.volumes,
+                ports: spec.ports,
+                privileged: spec.privileged,
+                entrypoint: None,
+                rm: false,
+                env: spec.env,
+                labels: Vec::new(),
+                image: spec.image,
+                command: spec.command,
+            },
         )?;
         println!("container/{name}: criado");
     }
@@ -198,21 +225,25 @@ fn resolve_mounts(volumes: &[String]) -> Result<Vec<delonix_runtime_core::Mount>
     volumes.iter().map(|spec| vstore.resolve_spec(spec)).collect()
 }
 
-#[allow(clippy::too_many_arguments)]
-fn cmd_run(
-    images: &ImageStore,
-    store: &Store,
+/// Argumentos do `container run` (CLI e manifesto), agrupados — a lista já
+/// passou há muito o limiar do `too_many_arguments`.
+struct RunOpts {
     detach: bool,
     name: Option<String>,
-    net: &str,
+    net: String,
     volumes: Vec<String>,
     ports: Vec<String>,
     privileged: bool,
+    entrypoint: Option<String>,
+    rm: bool,
     env: Vec<String>,
     labels: Vec<String>,
     image: String,
     command: Vec<String>,
-) -> Result<()> {
+}
+
+fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Result<()> {
+    let RunOpts { detach, name, net, volumes, ports, privileged, entrypoint, rm, env, labels, image, command } = opts;
     // Valida os `-p` ANTES de criar o que quer que seja (erro claro, sem lixo).
     for spec in &ports {
         delonix_net::parse_publish(spec)?;
@@ -226,7 +257,18 @@ fn cmd_run(
     let rootless = runtime::is_rootless();
     let rootfs = prepare_rootfs(images, &img, &id)?;
 
-    let cmd = effective_command(&img, &command);
+    // `--entrypoint X` substitui o ENTRYPOINT da imagem (o COMMAND vira os seus
+    // argumentos, sem herdar o CMD da imagem — semântica docker); `--entrypoint ""`
+    // limpa-o e corre só o COMMAND do utilizador.
+    let cmd = match entrypoint.as_deref() {
+        Some("") => command.clone(),
+        Some(e) => {
+            let mut v = vec![e.to_string()];
+            v.extend(command.iter().cloned());
+            v
+        }
+        None => effective_command(&img, &command),
+    };
     if cmd.is_empty() {
         return Err(Error::Invalid("sem comando (a imagem não define ENTRYPOINT/CMD)".into()));
     }
@@ -313,10 +355,55 @@ fn cmd_run(
         c.ip = attached_ip;
         let _ = store.save(&c);
     }
+    if rm {
+        if detach {
+            spawn_rm_watcher(images, store, &c.id);
+        } else {
+            // foreground: o `create_with` só volta depois do waitpid — remove já.
+            let c = find(store, &id)?;
+            unpublish_ports(&c);
+            runtime::remove(store, &c, true)?;
+            let _ = images.unmount_rootfs(&c.id);
+            return Ok(());
+        }
+    }
     if detach {
         println!("{id}");
     }
     Ok(())
+}
+
+/// `--rm` em modo detached: sem daemon, quem remove é um **watcher** próprio —
+/// um processo destacado (setsid, stdio em /dev/null) que sonda o estado do
+/// container ~1x/s via `reconcile_status` e, quando ele deixar de correr, faz a
+/// mesma limpeza do `rm -f`. Morre a seguir; um watcher por container `--rm`.
+fn spawn_rm_watcher(images: &ImageStore, store: &Store, id: &str) {
+    // SAFETY: fork de um processo single-threaded (CLI); o filho só sonda e sai.
+    if unsafe { libc::fork() } == 0 {
+        unsafe {
+            libc::setsid();
+            let null = libc::open(c"/dev/null".as_ptr(), libc::O_RDWR);
+            if null >= 0 {
+                libc::dup2(null, 0);
+                libc::dup2(null, 1);
+                libc::dup2(null, 2);
+                if null > 2 {
+                    libc::close(null);
+                }
+            }
+        }
+        loop {
+            std::thread::sleep(std::time::Duration::from_secs(1));
+            let Ok(mut c) = find(store, id) else { std::process::exit(0) };
+            let _ = runtime::reconcile_status(&mut c);
+            if !matches!(c.status, delonix_runtime_core::Status::Running | delonix_runtime_core::Status::Paused) {
+                unpublish_ports(&c);
+                let _ = runtime::remove(store, &c, true);
+                let _ = images.unmount_rootfs(&c.id);
+                std::process::exit(0);
+            }
+        }
+    }
 }
 
 fn cmd_ps(store: &Store, all: bool, quiet: bool) -> Result<()> {
@@ -468,19 +555,135 @@ fn cmd_exec(store: &Store, id: &str, interactive: bool, tty: bool, command: &[St
     std::process::exit(code);
 }
 
-fn cmd_logs(images: &ImageStore, store: &Store, id: &str) -> Result<()> {
+/// `container inspect` — despeja a spec completa guardada no Store (a fonte de
+/// verdade do runtime), como array JSON à docker.
+fn cmd_inspect(store: &Store, ids: &[String]) -> Result<()> {
+    let mut cs = Vec::new();
+    for id in ids {
+        let mut c = find(store, id)?;
+        if runtime::reconcile_status(&mut c) {
+            let _ = store.save(&c);
+        }
+        cs.push(c);
+    }
+    println!("{}", serde_json::to_string_pretty(&cs).map_err(|e| Error::Invalid(e.to_string()))?);
+    Ok(())
+}
+
+/// Lê a métrica `file` do cgroup v2 do processo `pid` (via `/proc/<pid>/cgroup`
+/// — funciona qualquer que seja a base delegada onde o motor pôs o container).
+fn cgroup_metric(pid: i32, file: &str) -> Option<String> {
+    let rel = std::fs::read_to_string(format!("/proc/{pid}/cgroup"))
+        .ok()?
+        .lines()
+        .find_map(|l| l.strip_prefix("0::").map(str::to_string))?;
+    std::fs::read_to_string(format!("/sys/fs/cgroup{}/{file}", rel.trim())).ok()
+}
+
+/// `cpu.stat` → `usage_usec` (None se o controlador cpu não estiver delegado).
+fn cpu_usage_usec(pid: i32) -> Option<u64> {
+    cgroup_metric(pid, "cpu.stat")?
+        .lines()
+        .find_map(|l| l.strip_prefix("usage_usec "))
+        .and_then(|v| v.trim().parse().ok())
+}
+
+/// `container stats` — uma amostra de CPU/mem/PIDs por container a correr.
+/// CPU% = delta de `usage_usec` em 500ms; memória de `memory.current`; com o
+/// cgroup não-delegado (rootless sem Delegate), cai para o VmRSS do init do
+/// container em `/proc` (só esse processo, marcado com `~`).
+fn cmd_stats(store: &Store, ids: &[String]) -> Result<()> {
+    let mut cs: Vec<Container> = if ids.is_empty() {
+        store.list()?
+    } else {
+        ids.iter().map(|i| find(store, i)).collect::<Result<_>>()?
+    };
+    let mut rows = Vec::new();
+    for c in cs.iter_mut() {
+        if runtime::reconcile_status(c) {
+            let _ = store.save(c);
+        }
+        if !matches!(c.status, delonix_runtime_core::Status::Running | delonix_runtime_core::Status::Paused) {
+            continue;
+        }
+        let Some(pid) = c.pid else { continue };
+        rows.push((c.name.clone(), pid, cpu_usage_usec(pid)));
+    }
+    if rows.is_empty() {
+        println!("(nenhum container a correr)");
+        return Ok(());
+    }
+    std::thread::sleep(std::time::Duration::from_millis(500));
+    println!("{:<20}  {:>6}  {:>12}  {:>6}", "NAME", "CPU%", "MEM", "PIDS");
+    for (name, pid, cpu0) in rows {
+        let cpu = match (cpu0, cpu_usage_usec(pid)) {
+            (Some(a), Some(b)) => format!("{:.1}", (b.saturating_sub(a)) as f64 / 500_000.0 * 100.0),
+            _ => "-".into(),
+        };
+        let (mem, approx) = match cgroup_metric(pid, "memory.current").and_then(|v| v.trim().parse::<u64>().ok()) {
+            Some(b) => (b, false),
+            None => (
+                std::fs::read_to_string(format!("/proc/{pid}/status"))
+                    .ok()
+                    .and_then(|s| {
+                        s.lines()
+                            .find_map(|l| l.strip_prefix("VmRSS:"))
+                            .and_then(|v| v.trim().trim_end_matches(" kB").trim().parse::<u64>().ok())
+                    })
+                    .map(|kb| kb * 1024)
+                    .unwrap_or(0),
+                true,
+            ),
+        };
+        let pids = cgroup_metric(pid, "pids.current").map(|v| v.trim().to_string()).unwrap_or_else(|| "-".into());
+        let mem_h = if mem >= 1 << 30 {
+            format!("{:.2} GiB", mem as f64 / (1u64 << 30) as f64)
+        } else {
+            format!("{:.1} MiB", mem as f64 / (1u64 << 20) as f64)
+        };
+        println!("{:<20}  {:>6}  {:>12}  {:>6}", name, cpu, if approx { format!("~{mem_h}") } else { mem_h }, pids);
+    }
+    Ok(())
+}
+
+fn cmd_logs(images: &ImageStore, store: &Store, id: &str, follow: bool) -> Result<()> {
+    use std::io::{Read, Seek, Write};
     let c = find(store, id)?;
     let p = images.root().join("containers").join(&c.id).join("log");
-    match std::fs::read(&p) {
-        Ok(b) => {
-            use std::io::Write;
-            std::io::stdout().write_all(&b).ok();
-            Ok(())
+    let mut f = std::fs::File::open(&p).map_err(|_| {
+        Error::Invalid(format!("sem logs para {} (só há logs em containers detached)", c.name))
+    })?;
+    let mut out = std::io::stdout();
+    let mut buf = Vec::new();
+    f.read_to_end(&mut buf)?;
+    out.write_all(&buf)?;
+    if !follow {
+        return Ok(());
+    }
+    // `-f`: segue os appends (reabre se o ficheiro encolher — rotação do shim);
+    // termina quando o container deixar de correr e não houver mais nada a ler.
+    let mut pos = f.stream_position()?;
+    loop {
+        out.flush().ok();
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        let len = std::fs::metadata(&p).map(|m| m.len()).unwrap_or(0);
+        if len < pos {
+            f = std::fs::File::open(&p)?;
+            pos = 0;
         }
-        Err(_) => Err(Error::Invalid(format!(
-            "sem logs para {} (só há logs em containers detached)",
-            c.name
-        ))),
+        if len > pos {
+            f.seek(std::io::SeekFrom::Start(pos))?;
+            buf.clear();
+            f.read_to_end(&mut buf)?;
+            pos += buf.len() as u64;
+            out.write_all(&buf)?;
+            continue;
+        }
+        let mut c = find(store, id)?;
+        let _ = runtime::reconcile_status(&mut c);
+        if !matches!(c.status, delonix_runtime_core::Status::Running | delonix_runtime_core::Status::Paused) {
+            return Ok(());
+        }
     }
 }
 
