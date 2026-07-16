@@ -11,7 +11,7 @@
 use std::path::{Path, PathBuf};
 
 use clap::{Parser, Subcommand};
-use delonix_core::{generate_id, Container, Error, Result, Store};
+use delonix_runtime_core::{generate_id, Container, Error, Result, Store};
 use delonix_image::{Image, ImageStore};
 use delonix_runtime::{self as runtime, RunSpec};
 
@@ -233,7 +233,7 @@ fn cmd_ps(store: &Store, all: bool) -> Result<()> {
         if runtime::reconcile_status(c) {
             let _ = store.save(c);
         }
-        let hidden = matches!(c.status, delonix_core::Status::Failed(_) | delonix_core::Status::Crashed);
+        let hidden = matches!(c.status, delonix_runtime_core::Status::Failed(_) | delonix_runtime_core::Status::Crashed);
         if !all && hidden {
             continue;
         }
