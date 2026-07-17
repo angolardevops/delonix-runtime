@@ -124,6 +124,113 @@ pub enum ContainerCmd {
         /// activa a delegação de cgroup2 dedicada a nodes Kind (ver `setup_node_cgroup_ns`).
         #[arg(long = "label")]
         labels: Vec<String>,
+        // ---- recursos (cgroup v2) ----
+        /// Limite de memória (`64M`, `2G`, `max`). Default: `max` (sem teto).
+        #[arg(short = 'm', long)]
+        memory: Option<String>,
+        /// Quota de CPU (nº de cores, ex.: `0.5`, `2`). Default: `1.0`.
+        #[arg(short = 'c', long)]
+        cpus: Option<String>,
+        /// Peso relativo de CPU (`cpu.weight`, 1–10000) sob contenção.
+        #[arg(long = "cpu-weight")]
+        cpu_weight: Option<String>,
+        /// CPUs a que o container fica preso (`cpuset.cpus`, ex.: `0-3`, `0,2`).
+        #[arg(long)]
+        cpuset: Option<String>,
+        /// Peso relativo de I/O (`io.weight`, 1–10000).
+        #[arg(long = "io-weight")]
+        io_weight: Option<String>,
+        // ---- segurança ----
+        /// Rootfs só-de-leitura (as escritas vão para tmpfs/volumes).
+        #[arg(long = "read-only")]
+        read_only: bool,
+        /// Adiciona uma capability (ex.: `NET_ADMIN`). Repetível.
+        #[arg(long = "cap-add")]
+        cap_add: Vec<String>,
+        /// Remove uma capability. Repetível.
+        #[arg(long = "cap-drop")]
+        cap_drop: Vec<String>,
+        /// `seccomp=unconfined` | `apparmor=<perfil>` (estilo docker). Repetível.
+        #[arg(long = "security-opt")]
+        security_opt: Vec<String>,
+        /// Perfil AppArmor a aplicar (`unconfined`, `delonix-default`, ou um nome
+        /// já carregado). `delonix-default` é carregado automaticamente.
+        #[arg(long)]
+        apparmor: Option<String>,
+        /// Contexto/perfil SELinux a aplicar.
+        #[arg(long)]
+        selinux: Option<String>,
+        /// User namespace: liga o mapeamento de subuid (default em rootless).
+        #[arg(long)]
+        userns: bool,
+        /// Desliga a activação automática do user namespace.
+        #[arg(long = "no-userns")]
+        no_userns: bool,
+        /// Partilha o PID namespace do host (`--pid host`).
+        #[arg(long = "host-pid")]
+        host_pid: bool,
+        /// Partilha o IPC namespace do host.
+        #[arg(long = "host-ipc")]
+        host_ipc: bool,
+        /// Modo de deteção: seccomp em log (não bloqueia), para descobrir syscalls.
+        #[arg(long)]
+        detect: bool,
+        // ---- secrets & env ----
+        /// Injecta um secret do cofre (`nome`), como variável de ambiente.
+        /// Repetível. Com `--secret-files`, vai para `/run/secrets/<nome>`.
+        #[arg(long)]
+        secret: Vec<String>,
+        /// Os `--secret` entram como ficheiros em `/run/secrets/` (tmpfs), não env.
+        #[arg(long = "secret-files")]
+        secret_files: bool,
+        /// Carrega variáveis de um ficheiro `.env` (`KEY=VAL` por linha). Repetível.
+        #[arg(long = "env-file")]
+        env_file: Vec<String>,
+        // ---- fs & limites ----
+        /// Monta um tmpfs (`/caminho[:opções]`). Repetível.
+        #[arg(long)]
+        tmpfs: Vec<String>,
+        /// Ulimit (`nofile=1024:2048`). Repetível.
+        #[arg(long)]
+        ulimit: Vec<String>,
+        /// Sysctl do container (`net.core.somaxconn=1024`). Repetível.
+        #[arg(long)]
+        sysctl: Vec<String>,
+        /// Expõe GPUs: `all` | `nvidia` | `dri` (expande para os nós `/dev`).
+        #[arg(long)]
+        gpus: Option<String>,
+        // ---- rede (só com `--net <rede>`) ----
+        /// IP fixo na rede (`--net <rede>`), ex.: `10.89.0.10`.
+        #[arg(long)]
+        ip: Option<String>,
+        /// Alias DNS do container na rede. Repetível.
+        #[arg(long = "network-alias")]
+        network_alias: Vec<String>,
+        /// Limita a resolução DNS a estes containers (isolamento). Repetível.
+        #[arg(long)]
+        knows: Vec<String>,
+        /// O container não resolve NENHUM outro pelo nome.
+        #[arg(long = "knows-none")]
+        knows_none: bool,
+        /// Junta-se ao netns de um pod (`--net <rede>`), partilhando IP/portas.
+        #[arg(long)]
+        pod: Option<String>,
+        /// Limite de banda de saída (`10mbit`, `512kbit`). Só com `--net <rede>`.
+        #[arg(long = "net-bps")]
+        net_bps: Option<String>,
+        /// Burst do limite de banda. Só com `--net-bps`.
+        #[arg(long = "net-burst")]
+        net_burst: Option<String>,
+        // ---- logs ----
+        /// Driver de logs (`json`, `cri`, ...).
+        #[arg(long = "log-driver")]
+        log_driver: Option<String>,
+        /// Caminho do ficheiro de log (override do default).
+        #[arg(long = "log-file")]
+        log_file: Option<String>,
+        /// Formato CRI no ficheiro de log (para o kubelet/`crictl logs`).
+        #[arg(long = "log-cri")]
+        log_cri: bool,
         /// Imagem (ex.: `alpine:3.19`).
         #[arg(add = ArgValueCandidates::new(super::complete::images))]
         image: String,
@@ -308,9 +415,23 @@ pub fn run(action: ContainerCmd) -> Result<()> {
     match action {
         // Tratado no topo de `run` (faz `return`).
         ContainerCmd::Init { .. } => unreachable!("tratado acima"),
-        ContainerCmd::Run { detach, name, net, volumes, publish, privileged, entrypoint, rm, restart, devices, env, labels, image, command } => {
-            cmd_run(&images, &store, RunOpts { detach, name, net, volumes, ports: publish, privileged, entrypoint, rm, restart, devices, env, labels, image, command, quiet: false })
-        }
+        ContainerCmd::Run {
+            detach, name, net, volumes, publish, privileged, entrypoint, rm, restart, devices, env, labels,
+            memory, cpus, cpu_weight, cpuset, io_weight, read_only, cap_add, cap_drop, security_opt, apparmor,
+            selinux, userns, no_userns, host_pid, host_ipc, detect, secret, secret_files, env_file, tmpfs,
+            ulimit, sysctl, gpus, ip, network_alias, knows, knows_none, pod, net_bps, net_burst, log_driver,
+            log_file, log_cri, image, command,
+        } => cmd_run(
+            &images,
+            &store,
+            RunOpts {
+                detach, name, net, volumes, ports: publish, privileged, entrypoint, rm, restart, devices, env,
+                labels, image, command, quiet: false, memory, cpus, cpu_weight, cpuset, io_weight, read_only,
+                cap_add, cap_drop, security_opt, apparmor, selinux, userns, no_userns, host_pid, host_ipc,
+                detect, secret, secret_files, env_file, tmpfs, ulimit, sysctl, gpus, ip, network_alias, knows,
+                knows_none, pod, net_bps, net_burst, log_driver, log_file, log_cri,
+            },
+        ),
         ContainerCmd::Ps { all, quiet } => cmd_ps(&store, all, quiet),
         ContainerCmd::Start { ids } => for_each_id(&ids, |id| cmd_start(&images, &store, id)),
         ContainerCmd::Stop { ids, time } => for_each_id(&ids, |id| cmd_stop(&store, id, time)),
@@ -369,9 +490,69 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
                 image: spec.image,
                 command: spec.command,
                 quiet: false,
+                ..Default::default()
             },
         )?;
         println!("container/{name}: criado");
+    }
+    Ok(())
+}
+
+/// O nome da rede custom, ou `None` para `host`/`none` (os dois modos sem netns
+/// gerido pelo holder).
+fn custom_net_name(net: &str) -> Option<String> {
+    if net != "host" && net != "none" {
+        Some(net.to_string())
+    } else {
+        None
+    }
+}
+
+/// Expande `--gpus <spec>` na lista de nós de dispositivo a expor. `all` = NVIDIA
+/// + DRI; `nvidia` = só `/dev/nvidia*`; `dri` = só `/dev/dri/*`. Inclui só os nós
+/// que EXISTEM no host (um `--gpus all` numa máquina sem GPU não inventa devices).
+fn expand_gpu_devices(spec: &str) -> Vec<String> {
+    let want_nvidia = spec == "all" || spec.contains("nvidia");
+    let want_dri = spec == "all" || spec.contains("dri");
+    let mut out = Vec::new();
+    let mut add_glob = |dir: &str, prefix: &str| {
+        if let Ok(rd) = std::fs::read_dir(dir) {
+            for e in rd.flatten() {
+                let name = e.file_name().to_string_lossy().into_owned();
+                if prefix.is_empty() || name.starts_with(prefix) {
+                    out.push(format!("{dir}/{name}"));
+                }
+            }
+        }
+    };
+    if want_nvidia {
+        add_glob("/dev", "nvidia"); // /dev/nvidia0, /dev/nvidiactl, /dev/nvidia-uvm, …
+    }
+    if want_dri {
+        add_glob("/dev/dri", ""); // /dev/dri/card0, /dev/dri/renderD128, …
+    }
+    out
+}
+
+/// Garante que o perfil AppArmor `profile` está carregado. `unconfined` não faz
+/// nada; `delonix-default` é carregado do perfil embebido; qualquer outro nome
+/// assume-se já carregado no host (não o inventamos).
+fn ensure_apparmor(profile: &str) -> Result<()> {
+    if profile == "unconfined" {
+        return Ok(());
+    }
+    if profile == "delonix-default" {
+        const PROFILE: &str = include_str!("../../../delonix-runtime-bin/data/apparmor-delonix-default");
+        let path = std::env::temp_dir().join("delonix-default.aa");
+        std::fs::write(&path, PROFILE)?;
+        let out = std::process::Command::new("apparmor_parser")
+            .arg("-r")
+            .arg(&path)
+            .output()
+            .map_err(|_| Error::Invalid("apparmor_parser indisponível (AppArmor não suportado neste host?)".into()))?;
+        if !out.status.success() {
+            return Err(Error::Invalid(format!("falha a carregar o perfil AppArmor: {}", String::from_utf8_lossy(&out.stderr).trim())));
+        }
     }
     Ok(())
 }
@@ -388,7 +569,12 @@ fn resolve_mounts(volumes: &[String]) -> Result<Vec<delonix_runtime_core::Mount>
 
 /// Argumentos do `container run` (CLI e manifesto), agrupados — a lista já
 /// passou há muito o limiar do `too_many_arguments`.
-#[derive(Clone, serde::Serialize, serde::Deserialize)]
+///
+/// **`Default` + `#[serde(default)]` em tudo o novo**: os campos novos (paridade
+/// com o `run` do PaaS) foram acrescentados de uma vez; os chamadores internos
+/// que só querem o essencial (`stack apply`, `cluster create`) usam
+/// `..Default::default()` e não têm de os enumerar todos.
+#[derive(Clone, Default, serde::Serialize, serde::Deserialize)]
 pub(crate) struct RunOpts {
     pub(crate) detach: bool,
     pub(crate) name: Option<String>,
@@ -409,12 +595,87 @@ pub(crate) struct RunOpts {
     /// progresso estilo kind — os IDs no meio eram ruido).
     #[serde(default)]
     pub(crate) quiet: bool,
+    // ---- paridade com o `run` do PaaS (todos #[serde(default)]) ----
+    #[serde(default)]
+    pub(crate) memory: Option<String>,
+    #[serde(default)]
+    pub(crate) cpus: Option<String>,
+    #[serde(default)]
+    pub(crate) cpu_weight: Option<String>,
+    #[serde(default)]
+    pub(crate) cpuset: Option<String>,
+    #[serde(default)]
+    pub(crate) io_weight: Option<String>,
+    #[serde(default)]
+    pub(crate) read_only: bool,
+    #[serde(default)]
+    pub(crate) cap_add: Vec<String>,
+    #[serde(default)]
+    pub(crate) cap_drop: Vec<String>,
+    #[serde(default)]
+    pub(crate) security_opt: Vec<String>,
+    #[serde(default)]
+    pub(crate) apparmor: Option<String>,
+    #[serde(default)]
+    pub(crate) selinux: Option<String>,
+    #[serde(default)]
+    pub(crate) userns: bool,
+    #[serde(default)]
+    pub(crate) no_userns: bool,
+    #[serde(default)]
+    pub(crate) host_pid: bool,
+    #[serde(default)]
+    pub(crate) host_ipc: bool,
+    #[serde(default)]
+    pub(crate) detect: bool,
+    #[serde(default)]
+    pub(crate) secret: Vec<String>,
+    #[serde(default)]
+    pub(crate) secret_files: bool,
+    #[serde(default)]
+    pub(crate) env_file: Vec<String>,
+    #[serde(default)]
+    pub(crate) tmpfs: Vec<String>,
+    #[serde(default)]
+    pub(crate) ulimit: Vec<String>,
+    #[serde(default)]
+    pub(crate) sysctl: Vec<String>,
+    #[serde(default)]
+    pub(crate) gpus: Option<String>,
+    #[serde(default)]
+    pub(crate) ip: Option<String>,
+    #[serde(default)]
+    pub(crate) network_alias: Vec<String>,
+    #[serde(default)]
+    pub(crate) knows: Vec<String>,
+    #[serde(default)]
+    pub(crate) knows_none: bool,
+    #[serde(default)]
+    pub(crate) pod: Option<String>,
+    #[serde(default)]
+    pub(crate) net_bps: Option<String>,
+    #[serde(default)]
+    pub(crate) net_burst: Option<String>,
+    #[serde(default)]
+    pub(crate) log_driver: Option<String>,
+    #[serde(default)]
+    pub(crate) log_file: Option<String>,
+    #[serde(default)]
+    pub(crate) log_cri: bool,
 }
 
 pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Result<()> {
     // Cópia intacta para o re-exec (o destructuring a seguir consome as opts).
     let opts_copy = opts.clone();
-    let RunOpts { detach, name, net, volumes, ports, privileged, entrypoint, rm, restart, devices, env, labels, image, command, quiet } = opts;
+    let RunOpts {
+        detach, name, net, volumes, ports, privileged, entrypoint, rm, restart, devices, env, labels, image, command, quiet,
+        memory, cpus, cpu_weight, cpuset, io_weight, read_only, cap_add, cap_drop, security_opt, apparmor, selinux,
+        userns, no_userns, host_pid, host_ipc, detect, secret, secret_files, env_file, tmpfs, ulimit, sysctl, gpus,
+        ip, network_alias, knows, knows_none, pod, net_bps, net_burst, log_driver, log_file, log_cri,
+    } = opts;
+    if net_burst.is_some() && net_bps.is_none() {
+        return Err(Error::Invalid("--net-burst só faz sentido com --net-bps".into()));
+    }
     // Valida os `-p` ANTES de criar o que quer que seja (erro claro, sem lixo).
     for spec in &ports {
         delonix_net::parse_publish(spec)?;
@@ -476,14 +737,26 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
         )));
     }
     // `max` = sem teto de memória (cgroup v2); em k8s o cgroup do pod já limita.
-    let mut c = Container::new(id.clone(), cname, image.clone(), cmd, "max".into());
+    let eff_memory = memory.unwrap_or_else(|| "max".to_string());
+    let mut c = Container::new(id.clone(), cname, image.clone(), cmd, eff_memory);
     c.env = img.config.env.clone();
+    // `--env-file`: cada ficheiro `.env` (KEY=VAL por linha) ANTES do `-e`, para
+    // um `-e` explícito poder sobrepor um valor do ficheiro.
+    for f in &env_file {
+        let content = std::fs::read_to_string(f).map_err(|e| Error::Invalid(format!("--env-file {f}: {e}")))?;
+        for (k, v) in delonix_runtime_core::secret::parse_env_file(&content) {
+            c.env.push(format!("{k}={v}"));
+        }
+    }
     c.env.extend(env);
     if !img.config.working_dir.is_empty() {
         c.workdir = Some(img.config.working_dir.clone());
     }
     c.devices = devices;
-    c.userns = rootless;
+    // `--gpus`: expande `all`/`nvidia`/`dri` para os nós `/dev` que existem no host.
+    if let Some(g) = &gpus {
+        c.devices.extend(expand_gpu_devices(g));
+    }
     c.privileged = privileged;
     for l in &labels {
         if let Some((k, v)) = l.split_once('=') {
@@ -491,16 +764,92 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
         }
     }
 
-    let log_path = if detach {
-        Some(
-            images
-                .root()
-                .join("containers")
-                .join(&id)
-                .join("log")
-                .to_string_lossy()
-                .into_owned(),
-        )
+    // ---- recursos (cgroup v2) ----
+    if let Some(cp) = cpus {
+        c.cpus = cp;
+    }
+    c.cpu_weight = cpu_weight;
+    c.cpuset = cpuset;
+    c.io_weight = io_weight;
+
+    // ---- segurança ----
+    c.read_only = read_only;
+    c.cap_add = cap_add;
+    c.cap_drop = cap_drop;
+    // userns: liga por omissão em rootless; `--no-userns` desliga; `--userns`
+    // força (útil se um dia deixar de ser o default em rootless).
+    c.userns = (rootless || userns) && !no_userns;
+    // `--security-opt seccomp=unconfined` / `apparmor=<perfil>` (estilo docker).
+    let mut apparmor_profile = apparmor;
+    for opt in &security_opt {
+        match opt.split_once('=') {
+            Some(("seccomp", v)) => c.seccomp = Some(v.to_string()),
+            Some(("apparmor", v)) => apparmor_profile = Some(v.to_string()),
+            _ => return Err(Error::Invalid(format!("--security-opt inválido: '{opt}' (seccomp=… | apparmor=…)"))),
+        }
+    }
+    // `--detect`: seccomp em modo log (não bloqueia) — para descobrir syscalls.
+    // Não sobrepõe um `seccomp=` explícito do `--security-opt`.
+    if detect && c.seccomp.is_none() {
+        c.seccomp = Some("detect".to_string());
+    }
+    if let Some(p) = &apparmor_profile {
+        ensure_apparmor(p)?;
+        if p != "unconfined" {
+            c.apparmor = Some(p.clone());
+        }
+    }
+
+    // ---- secrets ----
+    if !secret.is_empty() {
+        let sstore = delonix_runtime_core::SecretStore::open(super::util::state_root())?;
+        c.secrets = secret.clone();
+        c.secret_files = secret_files;
+        // Como env (default) ou como ficheiros em /run/secrets (o motor trata do
+        // tmpfs quando `secret_files`). A resolução para env é aqui.
+        if !secret_files {
+            c.env.extend(sstore.resolve_env(&secret));
+        }
+    }
+
+    // ---- fs & limites ----
+    c.tmpfs = tmpfs;
+    c.ulimits = ulimit;
+    c.sysctls = sysctl;
+
+    // ---- rede ----
+    c.net_aliases = network_alias;
+    if knows_none {
+        c.dns_knows = Some(Vec::new());
+    } else if !knows.is_empty() {
+        c.dns_knows = Some(knows);
+    }
+    c.net_bps = net_bps.clone();
+    c.net_burst = net_burst.clone();
+    // `--ip` e `--pod`: aceites pela paridade de flags, mas o modelo de rede do
+    // runtime (holder + slirp) ainda NÃO os honra — o `attach_container` deriva o
+    // IP do id do container (não aceita um fixo), e o `join_netns` do pod não é
+    // ligado no caminho do `run`. Rejeita-se em vez de aceitar-e-ignorar (que
+    // daria um IP diferente do pedido, em silêncio). São trabalho de motor.
+    if ip.is_some() {
+        return Err(Error::Invalid(
+            "--ip ainda não é suportado: o holder atribui o IP do container (não aceita um fixo). Gap de motor conhecido.".into(),
+        ));
+    }
+    if pod.is_some() {
+        return Err(Error::Invalid(
+            "--pod ainda não é suportado no `run`: juntar-se ao netns de um pod não está ligado neste caminho. Gap de motor conhecido.".into(),
+        ));
+    }
+
+    // ---- logs ----
+    c.log_driver = log_driver;
+
+    // `--log-file` sobrepõe o caminho por omissão (`<root>/containers/<id>/log`).
+    let log_path = if let Some(lf) = &log_file {
+        Some(lf.clone())
+    } else if detach {
+        Some(images.root().join("containers").join(&id).join("log").to_string_lossy().into_owned())
     } else {
         None
     };
@@ -565,6 +914,11 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
         hosts_ip: attached_ip
             .clone()
             .or_else(|| (!slirp_ports.is_empty()).then(|| delonix_net::SLIRP_IP.to_string())),
+        host_pid,
+        host_ipc,
+        apparmor: apparmor_profile.clone(),
+        selinux: selinux.clone(),
+        log_cri,
         ..Default::default()
     };
     // ANTES do ramo supervisionado (que faz `return`): senão os containers com
@@ -584,6 +938,15 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
         c.network = Some(n.clone());
         c.ip = attached_ip;
         let _ = store.save(&c);
+        // `--net-bps`: o shaping vive no veth do lado do holder, que só existe no
+        // caminho de rede custom. Aplica-se agora (o campo já está persistido; um
+        // `container update --net-rate` posterior refá-lo-ia da mesma forma).
+        if let Some(bps) = &net_bps {
+            let rate = delonix_net::parse_net_rate(bps, net_burst.as_deref())?;
+            infra::set_net_rate(&c.id, rate.rate_bit, rate.burst_bytes)?;
+        }
+    } else if net_bps.is_some() {
+        return Err(Error::Invalid("--net-bps só se aplica com `--net <rede>` (o shaping é no veth do ingress)".into()));
     }
     if rm {
         if detach {
@@ -2045,6 +2408,21 @@ mod tests {
         assert_eq!(split_cp_arg("/mnt/disco:1/f"), None);
         // Nome vazio não é container.
         assert_eq!(split_cp_arg(":/etc"), None);
+    }
+
+    #[test]
+    fn custom_net_distingue_host_none_de_rede() {
+        assert_eq!(super::custom_net_name("host"), None);
+        assert_eq!(super::custom_net_name("none"), None);
+        assert_eq!(super::custom_net_name("pnet"), Some("pnet".to_string()));
+    }
+
+    #[test]
+    fn gpus_sem_dispositivos_no_host_da_lista_vazia() {
+        // Num host de teste sem /dev/nvidia* nem /dev/dri, `all` não inventa nada.
+        // (Se a máquina de CI tiver DRI, a lista pode não ser vazia — por isso só
+        // se afirma que NÃO rebenta e que um spec desconhecido dá vazio.)
+        assert!(super::expand_gpu_devices("nenhum-desses").is_empty());
     }
 
     #[test]

@@ -1,0 +1,29 @@
+# Perfil AppArmor por omissão do Delonix Engine (MAC, defesa em profundidade).
+# Carregar: sudo apparmor_parser -r deploy/apparmor/delonix-default
+# Usar:     delonix run --apparmor delonix-default <imagem> ...
+abi <abi/3.0>,
+include <tunables/global>
+
+profile delonix-default flags=(attach_disconnected,mediate_deleted) {
+  include <abstractions/base>
+
+  network,
+  capability,
+  file,
+  umount,
+
+  # Bloquear os vectores de comprometimento do host:
+  deny @{PROC}/sysrq-trigger wklx,           # panic/reboot do host
+  deny @{PROC}/kcore rwklx,                  # RAM do kernel
+  deny @{PROC}/sys/kernel/** wklx,           # sysctls do kernel
+  deny @{PROC}/sysrq-trigger rwklx,
+  deny mount,                                # remontagens
+  deny /sys/firmware/** rwklx,
+  deny /sys/kernel/security/** rwklx,
+
+  # Bloquear acesso directo a discos do host:
+  deny /dev/sd* rwklx,
+  deny /dev/nvme* rwklx,
+  deny /dev/mapper/* rwklx,
+  deny /dev/dm-* rwklx,
+}
