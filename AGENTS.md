@@ -330,15 +330,30 @@ Também se descobriu, pelo caminho, um **deadlock corrigido**: em modo console (
 detach + log_path`), se o init morre antes de enviar o master do pty e um neto reparentado
 segura o socketpair, o `run` pendurava PARA SEMPRE sem log — `recv_fd` ganhou `SO_RCVTIMEO` 10s.
 
-**Novo ponto de falha (mais à frente, tratável)**: o entrypoint morre agora em
-`Failed to list table names in /proc/net/ip_tables_names: Permission denied` — netfilter/iptables
-em rootless. O container não consegue ler/manipular as tabelas do kernel (o `ip_tables_names`
-exige acesso que o userns rootless não dá, mesmo com `--privileged`, porque as caps de rede
-valem só no netns do userns, não no host). Próxima sessão: investigar se um netns próprio com
-as suas tabelas nft/iptables (em vez de `--net host`) mais `CAP_NET_ADMIN` efectivo no userns
-resolve, ou se precisa do modo `--net kind` a funcionar rootless primeiro (bloqueado pela
-limitação do setns, ver secção "CLI"). O shim Docker continua a NÃO dever arrancar antes disto,
-mas o risco de fundação caiu muito: o systemd+cgroup do node já arranca, falta a rede.
+**RESOLVIDO — netfilter já não é o bloqueio** (loop /loop netfilter). Causa isolada: com um netns
+PRÓPRIO (owned pelo userns do container, i.e. `CLONE_NEWNET` e NÃO `--net host`), `CAP_NET_ADMIN`
+é efectivo e o backend **nft funciona** (`nft add table`, `iptables-nft -L/-A` todos OK). O
+backend **legacy NÃO**: lê `/proc/net/ip_tables_names`, um ficheiro `0440` do root do HOST que no
+nosso userns aparece com dono não-mapeado (nobody) → EPERM (o próprio host, como não-root, também
+não o lê). O `select_iptables()` do entrypoint do Kind conta linhas de `iptables-legacy-save` vs
+`iptables-nft-save`; num netns fresco ambos dão 0 e o empate (`legacy >= nft`) cai para legacy —
+o caminho partido. **Fix (`seed_kind_nft` em `container_init`, análogo a `mask_slow_node_units`)**:
+para um nó Kind (`node_cgroup`), semeia UMA regra `iptables-nft -A INPUT -j ACCEPT` (inócua, ANTES
+do `execve`, ainda com CAP_NET_ADMIN) → `iptables-nft-save` reporta ≥1 linha → o Kind escolhe nft.
+
+**ESTADO ACTUAL — o `kindest/node` ARRANCA** (`run --privileged --detach --net none` sob
+`systemd-run --user --scope -p Delegate=yes`, com os dois fixes: sysfs `dfe7e0b` + `seed_kind_nft`):
+`detected cgroup v2` → `setting iptables to detected mode: nft` → `starting init` → `systemd 252
+running in system mode` → `Welcome to Debian GNU/Linux 12` → dezenas de `Reached target`/`Started`
+→ cria a `kubelet.slice`. Container fica **Running**. O NO-GO original (systemd+cgroup do node não
+arranca) está **fechado**.
+
+**Próximo bloqueio — conectividade** (não netfilter): o teste acima usa `--net none` (sem rede), por
+isso o kubelet/containerd não têm ligação e um cluster real não forma. Falta um netns que seja
+(a) owned pelo userns do container (para nft/iptables) E (b) com conectividade. O caminho já existe
+no motor: `--net host -p` cria exactamente isso (netns próprio + slirp4netns, ver `cmd_run`) — a
+próxima fatia é ligar o nó Kind a um netns próprio-com-slirp (ou o `--net kind` a funcionar rootless,
+hoje bloqueado pela limitação do setns). O shim Docker só depois disto.
 
 ## Próximas fases (pedidas, não implementadas — cada uma precisa da sua própria sessão de planeamento)
 
