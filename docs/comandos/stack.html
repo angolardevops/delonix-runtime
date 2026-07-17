@@ -60,9 +60,9 @@ main{padding:1.4rem 1.2rem 4rem}}
 <nav class="side">
 <div class="brand"><span class="dot">▲</span> Delonix Runtime</div>
 <h5>Documentação</h5>
-<a href="../index.html">Início</a><a href="../arquitectura.html">Arquitectura</a><a href="../c4.html">Modelo C4 e system design</a><a href="../cri.html">CRI — kubelet sem containerd</a>
+<a href="../index.html">Início</a><a href="../cheatsheet.html">Cheatsheet</a><a href="../arquitectura.html">Arquitectura</a><a href="../c4.html">Modelo C4 e system design</a><a href="../cri.html">CRI — kubelet sem containerd</a>
 <h5>Referência CLI</h5>
-<a href="../comandos/container.html">delonix container</a><a href="../comandos/image.html">delonix image</a><a href="../comandos/build.html">delonix build</a><a href="../comandos/vm.html">delonix vm</a><a href="../comandos/volumes.html">delonix volumes</a><a href="../comandos/network.html">delonix network</a><a href="../comandos/stack.html" class="on">delonix stack</a><a href="../comandos/cluster.html">delonix cluster</a><a href="../comandos/completion.html">delonix completion</a>
+<a href="../comandos/container.html">delonix container</a><a href="../comandos/image.html">delonix image</a><a href="../comandos/build.html">delonix build</a><a href="../comandos/vm.html">delonix vm</a><a href="../comandos/volumes.html">delonix volumes</a><a href="../comandos/network.html">delonix network</a><a href="../comandos/stack.html" class="on">delonix stack</a><a href="../comandos/cluster.html">delonix cluster</a><a href="../comandos/secret.html">delonix secret</a><a href="../comandos/storage.html">delonix storage</a><a href="../comandos/ingress.html">delonix ingress</a><a href="../comandos/egress.html">delonix egress</a><a href="../comandos/flow.html">delonix flow</a><a href="../comandos/boot.html">delonix boot</a><a href="../comandos/system.html">delonix system</a><a href="../comandos/kube.html">delonix kube</a><a href="../comandos/netns.html">delonix netns</a><a href="../comandos/completion.html">delonix completion</a>
 <h5>Projecto</h5>
 <a href="https://github.com/angolardevops/delonix-runtime">GitHub</a>
 <a href="https://github.com/angolardevops/delonix-runtime/releases">Releases</a>
@@ -76,15 +76,17 @@ Semântica <em>garante-presente</em> (idempotente por nome), não um reconciliad
 rollout nem rollback — fail-fast, o que já foi aplicado fica.</p>
 <div class='help'><pre><code>Aplica um manifesto (`delonix-manifest.yaml`) inteiro — todos os Kinds
 
-Usage: delonix stack &lt;COMMAND&gt;
+Usage: delonix stack [OPTIONS] &lt;COMMAND&gt;
 
 Commands:
-  init   Inicializa um projecto COMPLETO: Delonixfile + manifesto + cluster + README — ficheiros JÁ PREENCHIDOS (imagens incluídas), prontos a usar sem editar nada
-  apply  Aplica todos os Kinds do manifesto (Network → Volume → Image → Vm → Container)
-  help   Print this message or the help of the given subcommand(s)
+  init      Inicializa um projecto COMPLETO: Delonixfile + manifesto + cluster + README — ficheiros JÁ PREENCHIDOS (imagens incluídas), prontos a usar sem editar nada
+  apply     Aplica todos os Kinds do manifesto (Network → Volume → Image → Vm → Container)
+  describe  Detalhe do stack ao estilo `kubectl describe`: cada recurso DECLARADO no manifesto e se está, ou não, presente na máquina
+  help      Print this message or the help of the given subcommand(s)
 
 Options:
-  -h, --help  Print help</code></pre></div>
+      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+  -h, --help          Print help</code></pre></div>
 <h3>Exemplo de manifesto</h3>
 <pre><code>apiVersion: delonix.io/v1
 kind: Network
@@ -110,8 +112,9 @@ spec:
 Usage: delonix stack apply [OPTIONS]
 
 Options:
-  -f, --file &lt;FILE&gt;  
-  -h, --help         Print help</code></pre></div>
+  -f, --file &lt;FILE&gt;   
+      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+  -h, --help          Print help</code></pre></div>
 <h3>Exemplos</h3><div class="ex"><div class="cap">Aplicar o manifesto por omissão (./delonix-manifest.yaml)</div><pre><code>delonix stack apply</code></pre></div><div class="ex"><div class="cap">Manifesto explícito</div><pre><code>delonix stack apply -f infra/stack.yaml</code></pre></div>
 <footer>Delonix Runtime · Apache-2.0 · <a href="https://github.com/angolardevops/delonix-runtime">angolardevops/delonix-runtime</a>
 · Referência gerada do <code>--help</code> real do binário por <code>docs/gen.py</code>.</footer>

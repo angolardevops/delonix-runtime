@@ -60,9 +60,9 @@ main{padding:1.4rem 1.2rem 4rem}}
 <nav class="side">
 <div class="brand"><span class="dot">▲</span> Delonix Runtime</div>
 <h5>Documentação</h5>
-<a href="../index.html">Início</a><a href="../arquitectura.html">Arquitectura</a><a href="../c4.html">Modelo C4 e system design</a><a href="../cri.html">CRI — kubelet sem containerd</a>
+<a href="../index.html">Início</a><a href="../cheatsheet.html">Cheatsheet</a><a href="../arquitectura.html">Arquitectura</a><a href="../c4.html">Modelo C4 e system design</a><a href="../cri.html">CRI — kubelet sem containerd</a>
 <h5>Referência CLI</h5>
-<a href="../comandos/container.html" class="on">delonix container</a><a href="../comandos/image.html">delonix image</a><a href="../comandos/build.html">delonix build</a><a href="../comandos/vm.html">delonix vm</a><a href="../comandos/volumes.html">delonix volumes</a><a href="../comandos/network.html">delonix network</a><a href="../comandos/stack.html">delonix stack</a><a href="../comandos/cluster.html">delonix cluster</a><a href="../comandos/completion.html">delonix completion</a>
+<a href="../comandos/container.html" class="on">delonix container</a><a href="../comandos/image.html">delonix image</a><a href="../comandos/build.html">delonix build</a><a href="../comandos/vm.html">delonix vm</a><a href="../comandos/volumes.html">delonix volumes</a><a href="../comandos/network.html">delonix network</a><a href="../comandos/stack.html">delonix stack</a><a href="../comandos/cluster.html">delonix cluster</a><a href="../comandos/secret.html">delonix secret</a><a href="../comandos/storage.html">delonix storage</a><a href="../comandos/ingress.html">delonix ingress</a><a href="../comandos/egress.html">delonix egress</a><a href="../comandos/flow.html">delonix flow</a><a href="../comandos/boot.html">delonix boot</a><a href="../comandos/system.html">delonix system</a><a href="../comandos/kube.html">delonix kube</a><a href="../comandos/netns.html">delonix netns</a><a href="../comandos/completion.html">delonix completion</a>
 <h5>Projecto</h5>
 <a href="https://github.com/angolardevops/delonix-runtime">GitHub</a>
 <a href="https://github.com/angolardevops/delonix-runtime/releases">Releases</a>
@@ -76,47 +76,92 @@ JSON no <code>$DELONIX_ROOT</code>. Em rootless, o rootfs do container é uma c�
 <em>persistente</em> — as escritas sobrevivem a <code>stop</code>/<code>start</code>, como no Docker.</p>
 <div class='help'><pre><code>Containers: run/ps/stop/rm/exec/logs
 
-Usage: delonix container &lt;COMMAND&gt;
+Usage: delonix container [OPTIONS] &lt;COMMAND&gt;
 
 Commands:
-  init     Inicializa um projecto com Delonixfile + manifesto — ficheiros JÁ PREENCHIDOS (imagens incluídas), prontos a usar sem editar nada
-  run      Corre um container a partir de uma imagem (puxa se faltar)
-  ps       Lista containers [alias: ls]
-  start    (Re)arranca containers parados/crashados, reutilizando o rootfs persistente (as escritas feitas dentro do container sobrevivem, como no docker) e a mesma rede/portas/volumes do `run` original. Sempre detached
-  stop     Pára um ou mais containers (SIGTERM, depois SIGKILL)
-  rm       Remove um ou mais containers
-  exec     Executa um comando dentro de um container a correr
-  inspect  Mostra a spec completa de um ou mais containers (JSON do Store)
-  stats    Uso de recursos (CPU/memória/PIDs) dos containers a correr — uma amostra e sai (sem stream). Sem IDs, mostra todos os que correm
-  logs     Mostra os logs (containers detached)
-  apply    Aplica os documentos `kind: Container` de um manifesto (idempotente por nome — um container já existente com esse nome não é recriado nem verificado quanto a drift de spec, ver `cmd::manifest`)
-  help     Print this message or the help of the given subcommand(s)
+  init         Initialize a project with a Delonixfile + manifest — files ALREADY FILLED IN (images included), ready to use without editing anything
+  run          Run a container from an image (pulls it if missing)
+  ps           List containers [alias: ls]
+  start        (Re)start stopped/crashed containers, reusing the persistent rootfs (writes made inside the container survive, like in docker) and the same network/ports/volumes as the original `run`. Always detached
+  stop         Stop one or more containers (SIGTERM, then SIGKILL)
+  rm           Remove one or more containers
+  pause        Suspend a container&#x27;s processes (cgroup v2 freezer) — the state stays in memory, unlike `stop`. Resume with `unpause`
+  unpause      Resume a container suspended with `pause`
+  commit       Create an image from a container&#x27;s CURRENT rootfs state (whatever was written inside becomes a new layer)
+  ssh          Interactive shell inside a container (shortcut for `exec -t`): with no command, it tries `bash` and falls back to `sh`, which exists in any image
+  healthcheck  Run the image&#x27;s `HEALTHCHECK` inside the container. Exits with 1 if `unhealthy` — usable in a script/CI
+  top          Processes running inside a container (read from `cgroup.procs`)
+  diff         Files changed relative to the image: `A` = created/changed, `D` = deleted
+  cp           Copy files between the host and a container. Exactly one side is `container:/path` (e.g. `delonix container cp web:/etc/nginx.conf .`)
+  exec         Execute a command inside a running container
+  inspect      Show the full spec of one or more containers (Store JSON)
+  describe     Human-readable detail of one or more containers, `kubectl describe`-style (for humans; use `inspect` for script-consumable JSON)
+  update       **Reconfigure a RUNNING container without stopping it** — ports, volumes, networks, and bandwidth cap
+  stats        Resource usage (CPU/memory/PIDs) of the running containers — one sample and exits (no stream). With no IDs, shows all running ones
+  logs         Show the logs (detached containers)
+  apply        Apply the `kind: Container` documents of a manifest (idempotent by name — an existing container with that name is neither recreated nor checked for spec drift, see `cmd::manifest`)
+  help         Print this message or the help of the given subcommand(s)
 
 Options:
-  -h, --help  Print help</code></pre></div>
+      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+  -h, --help          Print help</code></pre></div>
 <h2 id='run'><code>container run</code></h2>
-<div class='help'><pre><code>Corre um container a partir de uma imagem (puxa se faltar)
+<div class='help'><pre><code>Run a container from an image (pulls it if missing)
 
 Usage: delonix container run [OPTIONS] &lt;IMAGE&gt; [COMMAND]...
 
 Arguments:
-  &lt;IMAGE&gt;       Imagem (ex.: `alpine:3.19`)
-  [COMMAND]...  Comando + argumentos (default: o ENTRYPOINT/CMD da imagem)
+  &lt;IMAGE&gt;       Image (e.g. `alpine:3.19`)
+  [COMMAND]...  Command + arguments (default: the image&#x27;s ENTRYPOINT/CMD)
 
 Options:
-  -d, --detach                   Corre em segundo plano e imprime o ID
-      --name &lt;NAME&gt;              Nome do container (default: `dlx-&lt;id&gt;`)
-      --net &lt;NET&gt;                Rede: `host` (partilha a do host, default), `none` (netns isolado sem ligação), ou o NOME de uma rede criada com `delonix network create` [default: host]
-  -v, --volume &lt;VOLUMES&gt;         Volume/bind mount, `nome:/destino[:ro]` ou `/host:/destino[:ro]`. Repetível
-  -p, --publish &lt;PUBLISH&gt;        Publica uma porta, `hostPort:contPort[/tcp|udp]` ou só `porta`. Repetível. Com `--net host` (o default) muda o container para um netns próprio com NAT em userspace (slirp4netns, como o podman rootless); com `--net &lt;rede&gt;` publica pelo ingress (DNAT nft + hostfwd no slirp único)
-      --privileged               Container privilegiado (todas as caps, seccomp off) — cargas de confiança
-      --entrypoint &lt;ENTRYPOINT&gt;  Sobrepõe o ENTRYPOINT da imagem (o COMMAND passa a ser os argumentos deste binário; `--entrypoint &quot;&quot;` limpa-o e corre só o COMMAND)
-      --rm                       Remove o container quando o processo terminar (em `-d`, um watcher destacado trata da remoção quando o container morrer)
-      --restart &lt;RESTART&gt;        Política de reinício (só com `-d`): `no` (default), `on-failure[:max]`, `always`, `unless-stopped`. Um supervisor destacado (um por container, efémero — não há daemon) fica pai do container, captura o exit code real e reinicia-o conforme a política [default: no]
-      --device &lt;DEVICES&gt;         Liga um device do host, `/dev/x[:/dev/y]`. Repetível. O `/dev` do container é um tmpfs com uma lista curada (null/zero/tty/...); isto acrescenta-lhe nós reais do host, como o `docker --device`
-  -e, --env &lt;ENV&gt;                Variáveis de ambiente adicionais (`KEY=VAL`), repetível
-      --label &lt;LABELS&gt;           Label (`KEY=VAL`), repetível — ex.: `io.x-k8s.kind.role=control-plane` activa a delegação de cgroup2 dedicada a nodes Kind (ver `setup_node_cgroup_ns`)
-  -h, --help                     Print help</code></pre></div>
+  -d, --detach                         Run in the background and print the ID
+      --l18n &lt;en|pt&gt;                   Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+      --name &lt;NAME&gt;                    Container name (default: `dlx-&lt;id&gt;`)
+      --net &lt;NET&gt;                      Network: `host` (shares the host&#x27;s, default), `none` (isolated netns with no connectivity), or the NAME of a network created with `delonix network create` [default: host]
+  -v, --volume &lt;VOLUMES&gt;               Volume/bind mount, `name:/target[:ro]` or `/host:/target[:ro]`. Repeatable
+  -p, --publish &lt;PUBLISH&gt;              Publish a port, `hostPort:contPort[/tcp|udp]` or just `port`. Repeatable. With `--net host` (the default) the container moves to its own netns with userspace NAT (slirp4netns, like rootless podman); with `--net &lt;network&gt;` it publishes via the ingress (nft DNAT + hostfwd on the single slirp)
+      --privileged                     Privileged container (all caps, seccomp off) — trusted workloads
+      --entrypoint &lt;ENTRYPOINT&gt;        Override the image&#x27;s ENTRYPOINT (COMMAND becomes the arguments to this binary; `--entrypoint &quot;&quot;` clears it and runs just the COMMAND)
+      --rm                             Remove the container when the process exits (with `-d`, a detached watcher handles removal when the container dies)
+      --restart &lt;RESTART&gt;              Restart policy (only with `-d`): `no` (default), `on-failure[:max]`, `always`, `unless-stopped`. A detached supervisor (one per container, ephemeral — there&#x27;s no daemon) becomes the container&#x27;s parent, captures the real exit code, and restarts it according to the policy [default: no]
+      --device &lt;DEVICES&gt;               Attach a host device, `/dev/x[:/dev/y]`. Repeatable. The container&#x27;s `/dev` is a tmpfs with a curated list (null/zero/tty/...); this adds real host nodes to it, like `docker --device`
+  -e, --env &lt;ENV&gt;                      Additional environment variables (`KEY=VAL`), repeatable
+      --label &lt;LABELS&gt;                 Label (`KEY=VAL`), repeatable — e.g. `io.x-k8s.kind.role=control-plane` enables the dedicated cgroup2 delegation for Kind nodes (see `setup_node_cgroup_ns`)
+  -m, --memory &lt;MEMORY&gt;                Memory limit (`64M`, `2G`, `max`). Default: `max` (no cap)
+  -c, --cpus &lt;CPUS&gt;                    CPU quota (number of cores, e.g. `0.5`, `2`). Default: `1.0`
+      --cpu-weight &lt;CPU_WEIGHT&gt;        Relative CPU weight (`cpu.weight`, 1–10000) under contention
+      --cpuset &lt;CPUSET&gt;                CPUs the container is pinned to (`cpuset.cpus`, e.g. `0-3`, `0,2`)
+      --io-weight &lt;IO_WEIGHT&gt;          Relative I/O weight (`io.weight`, 1–10000)
+      --read-only                      Read-only rootfs (writes go to tmpfs/volumes)
+      --cap-add &lt;CAP_ADD&gt;              Add a capability (e.g. `NET_ADMIN`). Repeatable
+      --cap-drop &lt;CAP_DROP&gt;            Drop a capability. Repeatable
+      --security-opt &lt;SECURITY_OPT&gt;    `seccomp=unconfined` | `apparmor=&lt;profile&gt;` (docker-style). Repeatable
+      --apparmor &lt;APPARMOR&gt;            AppArmor profile to apply (`unconfined`, `delonix-default`, or an already-loaded name). `delonix-default` is loaded automatically
+      --selinux &lt;SELINUX&gt;              SELinux context/profile to apply
+      --userns                         User namespace: enables the subuid mapping (default in rootless)
+      --no-userns                      Disable the automatic activation of the user namespace
+      --host-pid                       Share the host&#x27;s PID namespace (`--pid host`)
+      --host-ipc                       Share the host&#x27;s IPC namespace
+      --detect                         Detection mode: seccomp in log mode (doesn&#x27;t block), to discover syscalls
+      --secret &lt;SECRET&gt;                Inject a secret from the vault (`name`), as an environment variable. Repeatable. With `--secret-files`, it goes to `/run/secrets/&lt;name&gt;`
+      --secret-files                   The `--secret`s come in as files in `/run/secrets/` (tmpfs), not env
+      --env-file &lt;ENV_FILE&gt;            Load variables from a `.env` file (`KEY=VAL` per line). Repeatable
+      --tmpfs &lt;TMPFS&gt;                  Mount a tmpfs (`/path[:options]`). Repeatable
+      --ulimit &lt;ULIMIT&gt;                Ulimit (`nofile=1024:2048`). Repeatable
+      --sysctl &lt;SYSCTL&gt;                Container sysctl (`net.core.somaxconn=1024`). Repeatable
+      --gpus &lt;GPUS&gt;                    Expose GPUs: `all` | `nvidia` | `dri` (expands to the `/dev` nodes)
+      --ip &lt;IP&gt;                        Fixed IP on the network (`--net &lt;network&gt;`), e.g. `10.89.0.10`
+      --network-alias &lt;NETWORK_ALIAS&gt;  The container&#x27;s DNS alias on the network. Repeatable
+      --knows &lt;KNOWS&gt;                  Restrict DNS resolution to these containers (isolation). Repeatable
+      --knows-none                     The container resolves NO other container by name
+      --pod &lt;POD&gt;                      Join a pod&#x27;s netns (`--net &lt;network&gt;`), sharing IP/ports
+      --net-bps &lt;NET_BPS&gt;              Egress bandwidth cap (`10mbit`, `512kbit`). Only with `--net &lt;network&gt;`
+      --net-burst &lt;NET_BURST&gt;          Burst for the bandwidth cap. Only with `--net-bps`
+      --log-driver &lt;LOG_DRIVER&gt;        Log driver (`json`, `cri`, ...)
+      --log-file &lt;LOG_FILE&gt;            Log file path (overrides the default)
+      --log-cri                        CRI format in the log file (for the kubelet/`crictl logs`)
+  -h, --help                           Print help</code></pre></div>
 <p><strong><code>-p</code> e a rede:</strong> com <code>--net host</code> (o default) o
 container muda para um netns próprio com NAT em userspace (slirp4netns — o modelo do podman
 rootless); com <code>--net &lt;rede&gt;</code> a porta é publicada pelo <em>ingress</em> (hostfwd no
@@ -125,30 +170,32 @@ slirp único + DNAT nft), o caminho que permite trocar portas a quente sem parar
 <h3>Exemplos</h3><div class="ex"><div class="cap">Servir nginx na porta 8080 do host (NAT userspace, sem root)</div><pre><code>delonix container run -d --name web -p 8080:80 nginx</code></pre></div><div class="ex"><div class="cap">Correr numa rede criada pelo utilizador, publicando pelo ingress</div><pre><code>delonix network create minha-rede
 delonix container run -d --net minha-rede -p 8443:443 caddy</code></pre></div><div class="ex"><div class="cap">Shell descartável (remove-se sozinho à saída)</div><pre><code>delonix container run --rm -e TERM=xterm alpine sh -c &#x27;echo olá&#x27;</code></pre></div><div class="ex"><div class="cap">Sobrepor o ENTRYPOINT para depurar uma imagem</div><pre><code>delonix container run --rm --entrypoint /bin/sh nginx -c &#x27;nginx -t&#x27;</code></pre></div>
 <h2 id='ps'><code>container ps</code></h2>
-<div class='help'><pre><code>Lista containers
+<div class='help'><pre><code>List containers
 
 Usage: delonix container ps [OPTIONS]
 
 Options:
-  -a, --all    Inclui os parados/falhados
-  -q, --quiet  Só imprime os IDs (para compor com `stop`/`rm`)
-  -h, --help   Print help</code></pre></div>
+  -a, --all           Include stopped/failed ones
+      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+  -q, --quiet         Print only the IDs (to compose with `stop`/`rm`)
+  -h, --help          Print help</code></pre></div>
 <h3>Exemplos</h3><div class="ex"><div class="cap">Listar (alias `ls` também funciona)</div><pre><code>delonix container ls -a</code></pre></div><div class="ex"><div class="cap">Compor com stop/rm</div><pre><code>delonix container rm -f $(delonix container ps -aq)</code></pre></div>
 <h2 id='start'><code>container start</code></h2>
-<div class='help'><pre><code>(Re)arranca containers parados/crashados, reutilizando o rootfs persistente (as escritas feitas dentro do container sobrevivem, como no docker) e a mesma rede/portas/volumes do `run` original. Sempre detached
+<div class='help'><pre><code>(Re)start stopped/crashed containers, reusing the persistent rootfs (writes made inside the container survive, like in docker) and the same network/ports/volumes as the original `run`. Always detached
 
-Usage: delonix container start &lt;IDS&gt;...
+Usage: delonix container start [OPTIONS] &lt;IDS&gt;...
 
 Arguments:
   &lt;IDS&gt;...  
 
 Options:
-  -h, --help  Print help</code></pre></div>
+      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+  -h, --help          Print help</code></pre></div>
 <p>Reusa a spec guardada (comando, env, volumes, rede, portas) e o rootfs
 persistente — ao contrário de <code>rm</code>+<code>run</code>, nada do que o container escreveu se perde.</p>
 <h3>Exemplos</h3><div class="ex"><div class="cap">Rearrancar um container parado, preservando o que foi escrito lá dentro</div><pre><code>delonix container start web</code></pre></div>
 <h2 id='stop'><code>container stop</code></h2>
-<div class='help'><pre><code>Pára um ou mais containers (SIGTERM, depois SIGKILL)
+<div class='help'><pre><code>Stop one or more containers (SIGTERM, then SIGKILL)
 
 Usage: delonix container stop [OPTIONS] &lt;IDS&gt;...
 
@@ -156,11 +203,12 @@ Arguments:
   &lt;IDS&gt;...  
 
 Options:
-  -t, --time &lt;TIME&gt;  Segundos até ao SIGKILL [default: 10]
-  -h, --help         Print help</code></pre></div>
+      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+  -t, --time &lt;TIME&gt;   Seconds until SIGKILL [default: 10]
+  -h, --help          Print help</code></pre></div>
 <h3>Exemplos</h3><div class="ex"><div class="cap">SIGTERM, e SIGKILL ao fim de 5s</div><pre><code>delonix container stop -t 5 web db</code></pre></div>
 <h2 id='rm'><code>container rm</code></h2>
-<div class='help'><pre><code>Remove um ou mais containers
+<div class='help'><pre><code>Remove one or more containers
 
 Usage: delonix container rm [OPTIONS] &lt;IDS&gt;...
 
@@ -168,11 +216,12 @@ Arguments:
   &lt;IDS&gt;...  
 
 Options:
-  -f, --force  Força (mata se estiver a correr)
-  -h, --help   Print help</code></pre></div>
+  -f, --force         Force (kill it if running)
+      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+  -h, --help          Print help</code></pre></div>
 <h3>Exemplos</h3><div class="ex"><div class="cap">Forçar remoção de vários</div><pre><code>delonix container rm -f web db cache</code></pre></div>
 <h2 id='exec'><code>container exec</code></h2>
-<div class='help'><pre><code>Executa um comando dentro de um container a correr
+<div class='help'><pre><code>Execute a command inside a running container
 
 Usage: delonix container exec [OPTIONS] &lt;ID&gt; &lt;COMMAND&gt;...
 
@@ -181,12 +230,13 @@ Arguments:
   &lt;COMMAND&gt;...  
 
 Options:
-  -i, --interactive  Interativo (liga o stdin)
-  -t, --tty          Aloca um pseudo-terminal
-  -h, --help         Print help</code></pre></div>
+  -i, --interactive   Interactive (attaches stdin)
+      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+  -t, --tty           Allocate a pseudo-terminal
+  -h, --help          Print help</code></pre></div>
 <h3>Exemplos</h3><div class="ex"><div class="cap">Shell interactiva</div><pre><code>delonix container exec -it web sh</code></pre></div>
 <h2 id='logs'><code>container logs</code></h2>
-<div class='help'><pre><code>Mostra os logs (containers detached)
+<div class='help'><pre><code>Show the logs (detached containers)
 
 Usage: delonix container logs [OPTIONS] &lt;ID&gt;
 
@@ -194,43 +244,47 @@ Arguments:
   &lt;ID&gt;  
 
 Options:
-  -f, --follow  Segue o log em contínuo (sai quando o container parar)
-  -h, --help    Print help</code></pre></div>
+  -f, --follow        Follow the log continuously (exits when the container stops)
+      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+  -h, --help          Print help</code></pre></div>
 <h3>Exemplos</h3><div class="ex"><div class="cap">Seguir em contínuo (sai quando o container parar)</div><pre><code>delonix container logs -f web</code></pre></div>
 <h2 id='inspect'><code>container inspect</code></h2>
-<div class='help'><pre><code>Mostra a spec completa de um ou mais containers (JSON do Store)
+<div class='help'><pre><code>Show the full spec of one or more containers (Store JSON)
 
-Usage: delonix container inspect &lt;IDS&gt;...
+Usage: delonix container inspect [OPTIONS] &lt;IDS&gt;...
 
 Arguments:
   &lt;IDS&gt;...  
 
 Options:
-  -h, --help  Print help</code></pre></div>
+      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+  -h, --help          Print help</code></pre></div>
 <h3>Exemplos</h3><div class="ex"><div class="cap">Spec completa em JSON</div><pre><code>delonix container inspect web | jq .[0].ports</code></pre></div>
 <h2 id='stats'><code>container stats</code></h2>
-<div class='help'><pre><code>Uso de recursos (CPU/memória/PIDs) dos containers a correr — uma amostra e sai (sem stream). Sem IDs, mostra todos os que correm
+<div class='help'><pre><code>Resource usage (CPU/memory/PIDs) of the running containers — one sample and exits (no stream). With no IDs, shows all running ones
 
-Usage: delonix container stats [IDS]...
+Usage: delonix container stats [OPTIONS] [IDS]...
 
 Arguments:
   [IDS]...  
 
 Options:
-  -h, --help  Print help</code></pre></div>
+      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+  -h, --help          Print help</code></pre></div>
 <p>CPU%/memória/PIDs lidos do cgroup v2 do próprio container (resolvido por
 <code>/proc/&lt;pid&gt;/cgroup</code>, qualquer que seja a base delegada). Sem delegação de cgroup
 (rootless sem <code>Delegate=yes</code>), a memória cai para o VmRSS do init do container,
 marcada com <code>~</code>.</p>
 <h3>Exemplos</h3><div class="ex"><div class="cap">Uma amostra de todos os que correm</div><pre><code>delonix container stats</code></pre></div>
 <h2 id='apply'><code>container apply</code></h2>
-<div class='help'><pre><code>Aplica os documentos `kind: Container` de um manifesto (idempotente por nome — um container já existente com esse nome não é recriado nem verificado quanto a drift de spec, ver `cmd::manifest`)
+<div class='help'><pre><code>Apply the `kind: Container` documents of a manifest (idempotent by name — an existing container with that name is neither recreated nor checked for spec drift, see `cmd::manifest`)
 
 Usage: delonix container apply [OPTIONS]
 
 Options:
-  -f, --file &lt;FILE&gt;  
-  -h, --help         Print help</code></pre></div>
+  -f, --file &lt;FILE&gt;   
+      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+  -h, --help          Print help</code></pre></div>
 <h3>Exemplos</h3><div class="ex"><div class="cap">Aplicar só os `kind: Container` de um manifesto</div><pre><code>delonix container apply -f delonix-manifest.yaml</code></pre></div>
 <footer>Delonix Runtime · Apache-2.0 · <a href="https://github.com/angolardevops/delonix-runtime">angolardevops/delonix-runtime</a>
 · Referência gerada do <code>--help</code> real do binário por <code>docs/gen.py</code>.</footer>

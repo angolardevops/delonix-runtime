@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>delonix build · Delonix Runtime</title>
+<title>delonix flow · Delonix Runtime</title>
 <style>
 :root{--accent:#e8590c;--accent-soft:#fff0e6;--ink:#1a1a2e;--muted:#5a6472;--line:#e6e8ec;
 --bg:#ffffff;--side:#f7f8fa;--code-bg:#0f172a;--code-ink:#e2e8f0;--radius:10px}
@@ -62,32 +62,28 @@ main{padding:1.4rem 1.2rem 4rem}}
 <h5>Documentação</h5>
 <a href="../index.html">Início</a><a href="../cheatsheet.html">Cheatsheet</a><a href="../arquitectura.html">Arquitectura</a><a href="../c4.html">Modelo C4 e system design</a><a href="../cri.html">CRI — kubelet sem containerd</a>
 <h5>Referência CLI</h5>
-<a href="../comandos/container.html">delonix container</a><a href="../comandos/image.html">delonix image</a><a href="../comandos/build.html" class="on">delonix build</a><a href="../comandos/vm.html">delonix vm</a><a href="../comandos/volumes.html">delonix volumes</a><a href="../comandos/network.html">delonix network</a><a href="../comandos/stack.html">delonix stack</a><a href="../comandos/cluster.html">delonix cluster</a><a href="../comandos/secret.html">delonix secret</a><a href="../comandos/storage.html">delonix storage</a><a href="../comandos/ingress.html">delonix ingress</a><a href="../comandos/egress.html">delonix egress</a><a href="../comandos/flow.html">delonix flow</a><a href="../comandos/boot.html">delonix boot</a><a href="../comandos/system.html">delonix system</a><a href="../comandos/kube.html">delonix kube</a><a href="../comandos/netns.html">delonix netns</a><a href="../comandos/completion.html">delonix completion</a>
+<a href="../comandos/container.html">delonix container</a><a href="../comandos/image.html">delonix image</a><a href="../comandos/build.html">delonix build</a><a href="../comandos/vm.html">delonix vm</a><a href="../comandos/volumes.html">delonix volumes</a><a href="../comandos/network.html">delonix network</a><a href="../comandos/stack.html">delonix stack</a><a href="../comandos/cluster.html">delonix cluster</a><a href="../comandos/secret.html">delonix secret</a><a href="../comandos/storage.html">delonix storage</a><a href="../comandos/ingress.html">delonix ingress</a><a href="../comandos/egress.html">delonix egress</a><a href="../comandos/flow.html" class="on">delonix flow</a><a href="../comandos/boot.html">delonix boot</a><a href="../comandos/system.html">delonix system</a><a href="../comandos/kube.html">delonix kube</a><a href="../comandos/netns.html">delonix netns</a><a href="../comandos/completion.html">delonix completion</a>
 <h5>Projecto</h5>
 <a href="https://github.com/angolardevops/delonix-runtime">GitHub</a>
 <a href="https://github.com/angolardevops/delonix-runtime/releases">Releases</a>
 </nav>
 <main>
-<h1>delonix build</h1><p class='tagline'>Constrói uma imagem a partir de um Dockerfile ou Delonixfile.</p>
-<p>Build sem daemon nem BuildKit: sobe um container de trabalho, corre cada
-<code>RUN</code> por <code>exec</code>, aplica <code>COPY</code> no rootfs (confinado ao contexto —
-path traversal é rejeitado) e empacota o resultado. Sem <code>-f</code>, procura primeiro um
-<code>Delonixfile</code> no contexto e só depois um <code>Dockerfile</code> — a gramática é a mesma,
-com extensões (<code>SCAN</code>, <code>CPUS</code>, <code>MEMORY</code>, <code>SECURITY</code>,
-<code>HEALTHCHECK</code>). Limitação conhecida: só single-stage (multi-stage é recusado com erro claro).</p>
-<div class='help'><pre><code>Constrói uma imagem a partir de um Dockerfile
+<h1>delonix flow</h1><p class='tagline'>Tráfego por-container ao vivo — datapath eBPF (degrada para contadores veth).</p>
+<p>Telemetria de rede por container. Quando corre com privilégio (CAP_BPF/root), attacha
+dois classificadores tc/clsact em eBPF às veths da SDN, que contam bytes/pacotes por IP num BPF map
+partilhado — <strong>sem nunca fazer drop</strong> (o nft continua o único enforcer). Sem privilégio
+(o caso rootless comum) diz-o e cai nos contadores veth, que sempre funcionam. <code>--watch</code>
+redesenha a cada 2s.</p>
+<div class='help'><pre><code>Tráfego por-container ao vivo (datapath eBPF; degrada para contadores veth)
 
-Usage: delonix build [OPTIONS] --tag &lt;TAG&gt; [CONTEXT]
-
-Arguments:
-  [CONTEXT]  Contexto de build (default: `.`) — raiz para `COPY` [default: .]
+Usage: delonix flow [OPTIONS]
 
 Options:
-  -f, --file &lt;FILE&gt;   Caminho do Dockerfile (default: `&lt;contexto&gt;/Dockerfile`)
-      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-  -t, --tag &lt;TAG&gt;     Tag da imagem resultante (`repo:tag`)
-  -h, --help          Print help</code></pre></div>
-<h2>Exemplos</h2><div class="ex"><div class="cap">Build com tag</div><pre><code>delonix build -t minha-app:1.0 .</code></pre></div><div class="ex"><div class="cap">Delonixfile explícito</div><pre><code>delonix build -t api:dev -f Delonixfile ./servico</code></pre></div>
+      --iface &lt;IFACE&gt;  Observar só esta interface (default: auto — todas as veths da SDN)
+      --l18n &lt;en|pt&gt;   Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+  -w, --watch          Actualiza continuamente (a cada 2s) em vez de imprimir uma vez
+  -h, --help           Print help</code></pre></div>
+<h2>Exemplos</h2><div class="ex"><div class="cap">Uma amostra</div><pre><code>sudo delonix flow</code></pre></div><div class="ex"><div class="cap">Monitorização contínua</div><pre><code>sudo delonix flow --watch</code></pre></div>
 <footer>Delonix Runtime · Apache-2.0 · <a href="https://github.com/angolardevops/delonix-runtime">angolardevops/delonix-runtime</a>
 · Referência gerada do <code>--help</code> real do binário por <code>docs/gen.py</code>.</footer>
 </main>

@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>delonix volumes · Delonix Runtime</title>
+<title>delonix egress · Delonix Runtime</title>
 <style>
 :root{--accent:#e8590c;--accent-soft:#fff0e6;--ink:#1a1a2e;--muted:#5a6472;--line:#e6e8ec;
 --bg:#ffffff;--side:#f7f8fa;--code-bg:#0f172a;--code-ink:#e2e8f0;--radius:10px}
@@ -62,92 +62,98 @@ main{padding:1.4rem 1.2rem 4rem}}
 <h5>Documentação</h5>
 <a href="../index.html">Início</a><a href="../cheatsheet.html">Cheatsheet</a><a href="../arquitectura.html">Arquitectura</a><a href="../c4.html">Modelo C4 e system design</a><a href="../cri.html">CRI — kubelet sem containerd</a>
 <h5>Referência CLI</h5>
-<a href="../comandos/container.html">delonix container</a><a href="../comandos/image.html">delonix image</a><a href="../comandos/build.html">delonix build</a><a href="../comandos/vm.html">delonix vm</a><a href="../comandos/volumes.html" class="on">delonix volumes</a><a href="../comandos/network.html">delonix network</a><a href="../comandos/stack.html">delonix stack</a><a href="../comandos/cluster.html">delonix cluster</a><a href="../comandos/secret.html">delonix secret</a><a href="../comandos/storage.html">delonix storage</a><a href="../comandos/ingress.html">delonix ingress</a><a href="../comandos/egress.html">delonix egress</a><a href="../comandos/flow.html">delonix flow</a><a href="../comandos/boot.html">delonix boot</a><a href="../comandos/system.html">delonix system</a><a href="../comandos/kube.html">delonix kube</a><a href="../comandos/netns.html">delonix netns</a><a href="../comandos/completion.html">delonix completion</a>
+<a href="../comandos/container.html">delonix container</a><a href="../comandos/image.html">delonix image</a><a href="../comandos/build.html">delonix build</a><a href="../comandos/vm.html">delonix vm</a><a href="../comandos/volumes.html">delonix volumes</a><a href="../comandos/network.html">delonix network</a><a href="../comandos/stack.html">delonix stack</a><a href="../comandos/cluster.html">delonix cluster</a><a href="../comandos/secret.html">delonix secret</a><a href="../comandos/storage.html">delonix storage</a><a href="../comandos/ingress.html">delonix ingress</a><a href="../comandos/egress.html" class="on">delonix egress</a><a href="../comandos/flow.html">delonix flow</a><a href="../comandos/boot.html">delonix boot</a><a href="../comandos/system.html">delonix system</a><a href="../comandos/kube.html">delonix kube</a><a href="../comandos/netns.html">delonix netns</a><a href="../comandos/completion.html">delonix completion</a>
 <h5>Projecto</h5>
 <a href="https://github.com/angolardevops/delonix-runtime">GitHub</a>
 <a href="https://github.com/angolardevops/delonix-runtime/releases">Releases</a>
 </nav>
 <main>
-<h1>delonix volumes</h1><p class='tagline'>Volumes nomeados e bind mounts: create, ls, inspect, rm, apply.</p>
-<p>Wrapper fino sobre o <code>VolumeStore</code>. No <code>container run</code>,
-<code>-v nome:/destino[:ro]</code> resolve para um volume nomeado (criado on-demand) e
-<code>-v /host:/destino[:ro]</code> para um bind mount — a distinção é automática.</p>
-<div class='help'><pre><code>Volumes nomeados: create/ls/rm/inspect
+<h1>delonix egress</h1><p class='tagline'>Firewall de SAÍDA (regras L4 + política de egress→Internet por-rede).</p>
+<p>A outra metade do firewall. Governa a SAÍDA de um container (regras allow/deny + política
+por omissão) e, ao nível da REDE, a política de egress para a Internet: <code>allow</code>/<code>deny</code>,
+ou <code>allowlist</code> (nega tudo excepto DNS e os CIDRs dados). Tudo sobre o mesmo <code>ContainerFw</code>
+/nft do <code>ingress</code>.</p>
+<div class='help'><pre><code>Firewall de SAÍDA (regras L4 + política de egress por-rede) de um container
 
-Usage: delonix volumes [OPTIONS] &lt;COMMAND&gt;
+Usage: delonix egress [OPTIONS] &lt;COMMAND&gt;
 
 Commands:
-  create    Cria um volume nomeado
-  ls        Lista os volumes
-  inspect   Detalhe de um volume (inclui uso real em disco)
-  describe  Detalhe legível de um ou mais volumes, ao estilo `kubectl describe` (para humanos; use `inspect` para a vista compacta de sempre)
-  rm        Remove um volume
-  apply     Aplica os documentos `kind: Volume` de um manifesto (idempotente por nome)
-  snapshot  Snapshots pontuais de um volume (tar.gz sob o volume; seguro em rootless)
-  help      Print this message or the help of the given subcommand(s)
+  allow   Allow outbound traffic from a container: `[proto/]port` to an optional CIDR
+  deny    Deny outbound traffic from a container (same shape as `allow`)
+  policy  Set the default outbound policy when no rule matches
+  net     Govern a whole network&#x27;s egress to the Internet
+  ls      Show the outbound firewall (policy + rules)
+  clear   Remove all outbound rules
+  help    Print this message or the help of the given subcommand(s)
 
 Options:
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
   -h, --help          Print help</code></pre></div>
-<h2 id='create'><code>volumes create</code></h2>
-<div class='help'><pre><code>Cria um volume nomeado
+<h2 id='allow'><code>egress allow</code></h2>
+<div class='help'><pre><code>Allow outbound traffic from a container: `[proto/]port` to an optional CIDR
 
-Usage: delonix volumes create [OPTIONS] &lt;NAME&gt;
+Usage: delonix egress allow [OPTIONS] &lt;CONTAINER&gt; &lt;PORT&gt;
 
 Arguments:
-  &lt;NAME&gt;  
-
-Options:
-      --driver &lt;DRIVER&gt;    `local` (default) ou `nfs` [default: local]
-      --l18n &lt;en|pt&gt;       Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-      --device &lt;DEVICE&gt;    Dispositivo/export (driver `nfs`)
-      --options &lt;OPTIONS&gt;  Opções de montagem adicionais (driver `nfs`)
-      --quota &lt;QUOTA&gt;      Quota (ex.: `2g`) — só é aplicada se `--quota` for dado
-  -h, --help               Print help</code></pre></div>
-<h3>Exemplos</h3><div class="ex"><div class="cap">Com quota e driver nfs disponíveis</div><pre><code>delonix volumes create dados --quota 10G</code></pre></div>
-<h2 id='ls'><code>volumes ls</code></h2>
-<div class='help'><pre><code>Lista os volumes
-
-Usage: delonix volumes ls [OPTIONS]
+  &lt;CONTAINER&gt;  
+  &lt;PORT&gt;       
 
 Options:
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+      --to &lt;TO&gt;       Only to this destination CIDR (default: anywhere)
+      --note &lt;NOTE&gt;   
   -h, --help          Print help</code></pre></div>
-<h3>Exemplos</h3><div class="ex"><pre><code>delonix volumes ls</code></pre></div>
-<h2 id='inspect'><code>volumes inspect</code></h2>
-<div class='help'><pre><code>Detalhe de um volume (inclui uso real em disco)
+<h3>Exemplos</h3><div class="ex"><div class="cap">Só deixar sair HTTPS</div><pre><code>delonix egress allow app tcp/443 --to 0.0.0.0/0</code></pre></div>
+<h2 id='policy'><code>egress policy</code></h2>
+<div class='help'><pre><code>Set the default outbound policy when no rule matches
 
-Usage: delonix volumes inspect [OPTIONS] &lt;NAME&gt;
+Usage: delonix egress policy [OPTIONS] &lt;CONTAINER&gt; &lt;POLICY&gt;
 
 Arguments:
-  &lt;NAME&gt;  
+  &lt;CONTAINER&gt;  
+  &lt;POLICY&gt;     [possible values: allow, deny]
 
 Options:
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
   -h, --help          Print help</code></pre></div>
-<h3>Exemplos</h3><div class="ex"><pre><code>delonix volumes inspect dados</code></pre></div>
-<h2 id='rm'><code>volumes rm</code></h2>
-<div class='help'><pre><code>Remove um volume
+<h3>Exemplos</h3><div class="ex"><div class="cap">Default-deny de saída</div><pre><code>delonix egress policy app deny</code></pre></div>
+<h2 id='net'><code>egress net</code></h2>
+<div class='help'><pre><code>Govern a whole network&#x27;s egress to the Internet
 
-Usage: delonix volumes rm [OPTIONS] &lt;NAME&gt;
+Usage: delonix egress net [OPTIONS] &lt;NETWORK&gt; &lt;MODE&gt;
 
 Arguments:
-  &lt;NAME&gt;  
+  &lt;NETWORK&gt;
+          
+
+  &lt;MODE&gt;
+          Possible values:
+          - allow:     Allow all egress (the default)
+          - deny:      Block all egress to the Internet
+          - allowlist: Deny all egress EXCEPT DNS and the CIDRs given in `--to` (allowlist)
+
+Options:
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+      --to &lt;TO&gt;
+          CIDRs for `allowlist` mode (comma-separated), e.g. `10.0.0.0/8,1.1.1.1/32`
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)</code></pre></div>
+<h3>Exemplos</h3><div class="ex"><div class="cap">Egress de uma rede em allowlist (só DNS + estes CIDRs)</div><pre><code>delonix egress net backend allowlist --to 10.0.0.0/8,1.1.1.1/32</code></pre></div>
+<h2 id='ls'><code>egress ls</code></h2>
+<div class='help'><pre><code>Show the outbound firewall (policy + rules)
+
+Usage: delonix egress ls [OPTIONS] &lt;CONTAINER&gt;
+
+Arguments:
+  &lt;CONTAINER&gt;  
 
 Options:
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
   -h, --help          Print help</code></pre></div>
-<h3>Exemplos</h3><div class="ex"><pre><code>delonix volumes rm dados</code></pre></div>
-<h2 id='apply'><code>volumes apply</code></h2>
-<div class='help'><pre><code>Aplica os documentos `kind: Volume` de um manifesto (idempotente por nome)
-
-Usage: delonix volumes apply [OPTIONS]
-
-Options:
-  -f, --file &lt;FILE&gt;   
-      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-  -h, --help          Print help</code></pre></div>
-<h3>Exemplos</h3><div class="ex"><pre><code>delonix volumes apply -f delonix-manifest.yaml</code></pre></div>
+<h3>Exemplos</h3><div class="ex"><pre><code>delonix egress ls app</code></pre></div>
 <footer>Delonix Runtime · Apache-2.0 · <a href="https://github.com/angolardevops/delonix-runtime">angolardevops/delonix-runtime</a>
 · Referência gerada do <code>--help</code> real do binário por <code>docs/gen.py</code>.</footer>
 </main>

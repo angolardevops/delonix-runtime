@@ -60,9 +60,9 @@ main{padding:1.4rem 1.2rem 4rem}}
 <nav class="side">
 <div class="brand"><span class="dot">▲</span> Delonix Runtime</div>
 <h5>Documentação</h5>
-<a href="../index.html">Início</a><a href="../arquitectura.html">Arquitectura</a><a href="../c4.html">Modelo C4 e system design</a><a href="../cri.html">CRI — kubelet sem containerd</a>
+<a href="../index.html">Início</a><a href="../cheatsheet.html">Cheatsheet</a><a href="../arquitectura.html">Arquitectura</a><a href="../c4.html">Modelo C4 e system design</a><a href="../cri.html">CRI — kubelet sem containerd</a>
 <h5>Referência CLI</h5>
-<a href="../comandos/container.html">delonix container</a><a href="../comandos/image.html">delonix image</a><a href="../comandos/build.html">delonix build</a><a href="../comandos/vm.html">delonix vm</a><a href="../comandos/volumes.html">delonix volumes</a><a href="../comandos/network.html">delonix network</a><a href="../comandos/stack.html">delonix stack</a><a href="../comandos/cluster.html" class="on">delonix cluster</a><a href="../comandos/completion.html">delonix completion</a>
+<a href="../comandos/container.html">delonix container</a><a href="../comandos/image.html">delonix image</a><a href="../comandos/build.html">delonix build</a><a href="../comandos/vm.html">delonix vm</a><a href="../comandos/volumes.html">delonix volumes</a><a href="../comandos/network.html">delonix network</a><a href="../comandos/stack.html">delonix stack</a><a href="../comandos/cluster.html" class="on">delonix cluster</a><a href="../comandos/secret.html">delonix secret</a><a href="../comandos/storage.html">delonix storage</a><a href="../comandos/ingress.html">delonix ingress</a><a href="../comandos/egress.html">delonix egress</a><a href="../comandos/flow.html">delonix flow</a><a href="../comandos/boot.html">delonix boot</a><a href="../comandos/system.html">delonix system</a><a href="../comandos/kube.html">delonix kube</a><a href="../comandos/netns.html">delonix netns</a><a href="../comandos/completion.html">delonix completion</a>
 <h5>Projecto</h5>
 <a href="https://github.com/angolardevops/delonix-runtime">GitHub</a>
 <a href="https://github.com/angolardevops/delonix-runtime/releases">Releases</a>
@@ -77,7 +77,7 @@ provisiona as VMs a partir da imagem VM dourada, espera pelo SSH e corre o MESMO
 comando, do zero a um cluster com o <code>delonix-cri</code> como runtime (sem containerd).</p>
 <div class='help'><pre><code>Bootstrap `kubeadm` idempotente sobre SSH (`kind: Cluster`)
 
-Usage: delonix cluster &lt;COMMAND&gt;
+Usage: delonix cluster [OPTIONS] &lt;COMMAND&gt;
 
 Commands:
   init     Inicializa um projecto com os manifestos de cluster (kind/vm/ssh) — ficheiros JÁ PREENCHIDOS (imagens incluídas), prontos a usar sem editar nada
@@ -89,15 +89,17 @@ Commands:
   help     Print this message or the help of the given subcommand(s)
 
 Options:
-  -h, --help  Print help</code></pre></div>
+      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+  -h, --help          Print help</code></pre></div>
 <h2 id='apply'><code>cluster apply</code></h2>
 <div class='help'><pre><code>Aplica o(s) documento(s) `kind: Cluster` de um manifesto
 
 Usage: delonix cluster apply [OPTIONS]
 
 Options:
-  -f, --file &lt;FILE&gt;  
-  -h, --help         Print help</code></pre></div>
+  -f, --file &lt;FILE&gt;   
+      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+  -h, --help          Print help</code></pre></div>
 <p>Todas as entradas do manifesto que chegam a comandos remotos
 (<code>controlPlaneEndpoint</code>, subnets, versão) passam por validação estrita antes de qualquer
 interpolação — a injecção de comandos via manifesto foi um dos CRÍTICOS encontrados e fechados na
@@ -109,6 +111,8 @@ auditoria ofensiva do projecto, com testes a replicar o exploit.</p>
 Usage: delonix cluster kubeadm [OPTIONS] --name &lt;NAME&gt; --network &lt;NETWORK&gt;
 
 Options:
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
       --name &lt;NAME&gt;
           
       --control-plane &lt;CONTROL_PLANE&gt;
