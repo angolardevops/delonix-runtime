@@ -1820,7 +1820,16 @@ fn slirp_api(sock: &Path, json: &str) -> Result<String> {
         message: e.to_string(),
     })?;
     let _ = s.set_read_timeout(Some(std::time::Duration::from_secs(3)));
-    s.write_all(json.as_bytes()).map_err(|e| Error::Runtime {
+    // O `\n` é OBRIGATÓRIO: o slirp4netns só PARSEIA o comando (e responde) ao ver
+    // uma newline OU o EOF do cliente. Como aqui o cliente fica a LER a resposta
+    // (`read_to_string`) sem fechar a escrita, sem o `\n` o slirp nunca parseava
+    // e o `list_hostfwd` voltava VAZIO ao fim do timeout — pelo que o
+    // `slirp_remove_hostfwd` não achava o `id` e NÃO removia nada. Efeito: a porta
+    // de um cluster/container apagado ficava presa no ingress (visto na 6443 de um
+    // `cluster delete`). O `add_hostfwd` safava-se por parsear no EOF (fire-and-
+    // forget), o que escondia o bug.
+    let line = if json.ends_with('\n') { json.to_string() } else { format!("{json}\n") };
+    s.write_all(line.as_bytes()).map_err(|e| Error::Runtime {
         context: "slirp api write",
         message: e.to_string(),
     })?;
@@ -1836,12 +1845,25 @@ fn slirp_api(sock: &Path, json: &str) -> Result<String> {
 /// `pub` porque o `container update` precisa de despublicar a quente uma porta
 /// do slirp PRÓPRIO de um container (socket `delonix-slirp-<pid>.sock`), e não
 /// só do slirp único do ingress — que é o que [`unpublish_port`] assume.
+/// As entradas de um `list_hostfwd`, tolerante à FORMA da resposta.
+///
+/// O slirp4netns 1.2.1 responde `{"entries":[…]}` — sem o wrapper `return` que
+/// envolve outras respostas (`remove_hostfwd` dá `{"return":{}}`). O parser
+/// antigo procurava SÓ `return.entries` e por isso não achava nada e nunca
+/// removia — a outra metade do bug do port-leak (a 1.ª era o `\n` em falta no
+/// `slirp_api`). Aceita as duas formas para não voltar a partir entre versões.
+fn hostfwd_entries(v: &serde_json::Value) -> Option<&Vec<serde_json::Value>> {
+    v.get("entries")
+        .or_else(|| v.get("return").and_then(|r| r.get("entries")))
+        .and_then(|e| e.as_array())
+}
+
 pub fn slirp_remove_hostfwd(sock: &Path, host_port: &str) -> Result<()> {
     trace_unpublish("slirp_remove_hostfwd", host_port);
     let hp: u32 = host_port.parse().map_err(|_| Error::Invalid("porta inválida".into()))?;
     let listed = slirp_api(sock, r#"{"execute":"list_hostfwd"}"#)?;
     let v: serde_json::Value = serde_json::from_str(&listed).unwrap_or(serde_json::Value::Null);
-    if let Some(entries) = v.get("return").and_then(|r| r.get("entries")).and_then(|e| e.as_array()) {
+    if let Some(entries) = hostfwd_entries(&v) {
         for e in entries {
             if e.get("host_port").and_then(|p| p.as_u64()) == Some(hp as u64) {
                 if let Some(id) = e.get("id").and_then(|i| i.as_u64()) {
@@ -2306,6 +2328,19 @@ fn neigh_ip_local(mac: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn hostfwd_entries_aceita_as_duas_formas() {
+        // slirp4netns 1.2.1: {"entries":[…]} (sem wrapper). Outras versões podem
+        // envolver em {"return":{"entries":[…]}}. Ambas têm de funcionar, senão o
+        // remove nunca acha o id → porta presa.
+        let a: serde_json::Value = serde_json::from_str(r#"{"entries":[{"id":1,"host_port":6443}]}"#).unwrap();
+        let b: serde_json::Value = serde_json::from_str(r#"{"return":{"entries":[{"id":2,"host_port":80}]}}"#).unwrap();
+        assert_eq!(super::hostfwd_entries(&a).map(|e| e.len()), Some(1));
+        assert_eq!(super::hostfwd_entries(&b).map(|e| e.len()), Some(1));
+        let empty: serde_json::Value = serde_json::from_str("{}").unwrap();
+        assert!(super::hostfwd_entries(&empty).is_none());
+    }
+
     use super::*;
 
     #[test]

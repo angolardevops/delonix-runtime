@@ -1391,11 +1391,25 @@ fn publish_with_retry(ip: &str, spec: &str) -> Result<()> {
 /// slirp nunca seria reapado e o bug acima ficaria de pé. Daí ser um parâmetro
 /// explícito em vez de vir do registo.
 fn unpublish_ports(c: &Container, slirp_pid: Option<i32>) {
-    match c.network {
+    match &c.network {
         Some(_) => {
+            // 1) portas: libertar os hostfwd/DNAT no ingress (idempotente — remover
+            //    uma porta que já não lá está é inócuo).
             for spec in &c.ports {
                 if let Ok((host_port, _, _)) = delonix_net::parse_publish(spec) {
                     infra::unpublish_port(&host_port);
+                }
+            }
+            // 2) rede: soltar o veth/IP e baixar o refcount do ingress — SÓ se o
+            //    container estava a correr (tinha pid), que é quando o `attach`
+            //    incrementou o refcount. Assim `stop` faz um detach (balança o
+            //    `attach` que o `start` seguinte fará) e um `rm` de um container JÁ
+            //    parado NÃO faz double-detach — que baixaria o refcount partilhado
+            //    a mais e derrubaria o ingress com outros containers ainda vivos.
+            //    Sem isto o refcount vazava (visto: 8 com 2 clusters).
+            if slirp_pid.is_some() {
+                if let Some(ip) = &c.ip {
+                    infra::detach_container(&c.id, ip);
                 }
             }
         }
