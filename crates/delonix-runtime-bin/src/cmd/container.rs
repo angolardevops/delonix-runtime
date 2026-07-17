@@ -43,6 +43,67 @@ struct ContainerSpec {
     /// `run_supervised`). É o que torna um manifesto resiliente.
     #[serde(default = "default_restart")]
     pub(crate) restart: String,
+    // ---- paridade com o `container run` (todos opcionais, camelCase à k8s) ----
+    #[serde(default)]
+    entrypoint: Option<String>,
+    #[serde(default)]
+    devices: Vec<String>,
+    #[serde(default)]
+    labels: Vec<String>,
+    #[serde(default, rename = "envFile")]
+    env_file: Vec<String>,
+    #[serde(default)]
+    memory: Option<String>,
+    #[serde(default)]
+    cpus: Option<String>,
+    #[serde(default, rename = "cpuWeight")]
+    cpu_weight: Option<String>,
+    #[serde(default)]
+    cpuset: Option<String>,
+    #[serde(default, rename = "ioWeight")]
+    io_weight: Option<String>,
+    #[serde(default, rename = "readOnly")]
+    read_only: bool,
+    #[serde(default, rename = "capAdd")]
+    cap_add: Vec<String>,
+    #[serde(default, rename = "capDrop")]
+    cap_drop: Vec<String>,
+    #[serde(default, rename = "securityOpt")]
+    security_opt: Vec<String>,
+    #[serde(default)]
+    apparmor: Option<String>,
+    #[serde(default)]
+    selinux: Option<String>,
+    #[serde(default)]
+    userns: bool,
+    #[serde(default, rename = "hostPid")]
+    host_pid: bool,
+    #[serde(default, rename = "hostIpc")]
+    host_ipc: bool,
+    #[serde(default)]
+    detect: bool,
+    #[serde(default)]
+    secret: Vec<String>,
+    #[serde(default, rename = "secretFiles")]
+    secret_files: bool,
+    #[serde(default)]
+    tmpfs: Vec<String>,
+    #[serde(default)]
+    ulimit: Vec<String>,
+    #[serde(default)]
+    sysctl: Vec<String>,
+    #[serde(default)]
+    gpus: Option<String>,
+    #[serde(default, rename = "networkAlias")]
+    network_alias: Vec<String>,
+    #[serde(default)]
+    knows: Vec<String>,
+    #[serde(default, rename = "netBps")]
+    net_bps: Option<String>,
+    #[serde(default, rename = "netBurst")]
+    net_burst: Option<String>,
+    #[serde(default, rename = "logDriver")]
+    log_driver: Option<String>,
 }
 
 fn default_restart() -> String {
@@ -481,15 +542,42 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
                 volumes: spec.volumes,
                 ports: spec.ports,
                 privileged: spec.privileged,
-                entrypoint: None,
+                entrypoint: spec.entrypoint,
                 rm: false,
                 restart: spec.restart.clone(),
-                devices: Vec::new(),
+                devices: spec.devices,
                 env: spec.env,
-                labels: Vec::new(),
+                labels: spec.labels,
                 image: spec.image,
                 command: spec.command,
                 quiet: false,
+                memory: spec.memory,
+                cpus: spec.cpus,
+                cpu_weight: spec.cpu_weight,
+                cpuset: spec.cpuset,
+                io_weight: spec.io_weight,
+                read_only: spec.read_only,
+                cap_add: spec.cap_add,
+                cap_drop: spec.cap_drop,
+                security_opt: spec.security_opt,
+                apparmor: spec.apparmor,
+                selinux: spec.selinux,
+                userns: spec.userns,
+                host_pid: spec.host_pid,
+                host_ipc: spec.host_ipc,
+                detect: spec.detect,
+                secret: spec.secret,
+                secret_files: spec.secret_files,
+                env_file: spec.env_file,
+                tmpfs: spec.tmpfs,
+                ulimit: spec.ulimit,
+                sysctl: spec.sysctl,
+                gpus: spec.gpus,
+                network_alias: spec.network_alias,
+                knows: spec.knows,
+                net_bps: spec.net_bps,
+                net_burst: spec.net_burst,
+                log_driver: spec.log_driver,
                 ..Default::default()
             },
         )?;

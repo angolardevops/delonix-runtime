@@ -1,0 +1,14 @@
+# Network — a user-defined network. Containers join it with `--net <name>`.
+# Apply with:  delonix network apply -f examples/network.yaml
+apiVersion: delonix.io/v1
+kind: Network
+metadata:
+  name: appnet
+spec:
+  driver: bridge            # bridge | macvlan | ipvlan | overlay
+  subnet: 10.89.0.0/24      # optional — auto-picked if omitted
+  gateway: ""               # optional — defaults to .1 of the subnet
+  parent: null              # NIC parent, for macvlan/ipvlan (e.g. eth0)
+  vni: null                 # VXLAN id, for overlay
+  peers: []                 # overlay peers: "<ip>" or "<ip>=<wg_pubkey>=<wg_ip>"
+  wg_ip: null               # this node's WireGuard tunnel IP (encrypted overlay)

@@ -1,0 +1,18 @@
+# Image — ensure an image is present: either pull it, or build it. Mutually exclusive.
+# Apply with:  delonix image apply -f examples/image.yaml
+apiVersion: delonix.io/v1
+kind: Image
+metadata:
+  name: app
+spec:
+  pull: alpine:3.19         # pull this reference (idempotent)
+---
+apiVersion: delonix.io/v1
+kind: Image
+metadata:
+  name: app-built
+spec:
+  build:
+    tag: app:dev            # required — the tag to produce
+    context: .              # build context (default ".")
+    file: null              # Delonixfile/Dockerfile path (default: ./Delonixfile then ./Dockerfile)
