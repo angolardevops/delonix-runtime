@@ -1,0 +1,12 @@
+# Volume — a named local volume (data survives `container rm`). For NETWORK
+# storage (NFS/SMB/WebDAV) use `kind: Storage` instead (see examples/storage.yaml).
+# Apply with:  delonix volume apply -f examples/volume.yaml
+apiVersion: delonix.io/v1
+kind: Volume
+metadata:
+  name: appdata
+spec:
+  driver: local             # local | nfs (for nfs, prefer kind: Storage)
+  quota: null               # size cap, e.g. "2g" (hard cap as root, monitored in rootless)
+  device: null              # nfs export "server:/export" (only with driver: nfs)
+  options: null             # mount options, e.g. "vers=4,ro" (only with driver: nfs)
