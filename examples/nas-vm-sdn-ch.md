@@ -31,3 +31,31 @@ com IP descobrível pela DHCP da SDN e alcançável por qualquer container na me
 - `--backend libvirt` daria uma VM NÃO-SDN (rede própria do libvirt); a SDN é o caminho nativo.
 - Para o HOST consumir um serviço da VM (ex.: SMB/NFS), publica-o pelo ingress (DNAT) — igual a um
   container; L3 dentro da SDN já está provado.
+
+## 4. Storage SMB e2e — VM serve samba, container consome (PROVADO)
+
+VM provisionada com samba por cloud-init (`--user-data <ficheiro>`, egress da SDN faz o apt):
+
+    [global]
+      map to guest = Bad User
+      security = user
+    [delonixnas]
+      path = /srv/nas
+      guest ok = yes
+      read only = no
+      force user = root
+
+Como o `mount -t cifs` corre no netns do HOST, publica-se a porta SMB da VM para o host pelo
+ingress e monta-se por `127.0.0.1`:
+
+    delonix netns publish nasvm 4445:445 --ip <ip-da-vm>        # DNAT host:4445 → VM:445
+    sudo -E delonix storage create nastest \                    # mount precisa de CAP_SYS_ADMIN
+      --type cifs --server 127.0.0.1 --share delonixnas \
+      --options "port=4445,guest,vers=3.0"
+    sudo -E delonix container run -v nastest:/nas alpine \
+      sh -c 'cat /nas/hello.txt; echo novo > /nas/from-container.txt'
+      # LÊ o ficheiro criado dentro da VM E ESCREVE de volta — persistido na share da VM.
+
+Fluxo: `VM(samba, SDN) --smb--> ingress:4445 --cifs--> Storage vol --bind--> container`.
+Teardown liberta tudo (unpublish + storage rm desmonta; `--disk`/dados ficam): container rm,
+storage rm, netns unpublish, vm rm.
