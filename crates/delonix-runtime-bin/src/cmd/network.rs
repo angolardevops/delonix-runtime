@@ -129,7 +129,12 @@ fn cmd_ls(store: &NetworkStore) -> Result<()> {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn create_network(
+/// Cria uma rede nos DOIS stores coordenados (registo declarativo + plano
+/// físico do holder, com o MESMO prefixo). É `pub(crate)` para o modo kind
+/// poder criar a rede do cluster — usar só `infra::network_create` deixaria o
+/// `NetworkStore` sem registo e o `run --net <x>` recusaria com
+/// "no such container: network <x>".
+pub(crate) fn create_network(
     store: &NetworkStore,
     name: &str,
     driver: &str,

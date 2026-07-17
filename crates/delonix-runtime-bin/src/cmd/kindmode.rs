@@ -54,6 +54,8 @@ pub(crate) struct KindCluster {
     pub cni: String,
     /// Versão do Kubernetes (ex.: "1.34"). `None` = a que a imagem traz.
     pub k8s_version: Option<String>,
+    /// Quantos workers juntar ao control-plane (0 = só control-plane, sem taint).
+    pub workers: u32,
 }
 
 /// Escreve um ficheiro DENTRO do nó. Vai directo ao rootfs no host (é um
@@ -72,6 +74,17 @@ fn write_node_file(c: &Container, path_in_node: &str, content: &str) -> Result<(
     std::fs::write(&base, content)
         .map_err(|e| Error::Invalid(format!("a escrever {path_in_node} no nó ({}): {e}", base.display())))?;
     Ok(())
+}
+
+/// Lê um ficheiro DE DENTRO do nó (o rootfs é um caminho do host).
+fn read_node_file(c: &Container, path_in_node: &str) -> Result<String> {
+    let p = super::util::state_root()
+        .join("containers")
+        .join(&c.id)
+        .join("rootfs")
+        .join(path_in_node.trim_start_matches('/'));
+    std::fs::read_to_string(&p)
+        .map_err(|e| Error::Invalid(format!("a ler {path_in_node} do nó ({}): {e}", p.display())))
 }
 
 /// Corre um comando dentro do nó e devolve o código de saída.
@@ -100,6 +113,57 @@ fn wait_in_node(c: &Container, what: &str, check: &str, timeout: Duration) -> Re
     Err(Error::Invalid(format!("timeout à espera de {what} no nó ({}s)", timeout.as_secs())))
 }
 
+/// Nome da rede do cluster. Cada cluster tem a SUA — como o `kind`, que cria
+/// uma bridge por cluster. É o que permite aos nós verem-se: sem rede partilhada
+/// um worker nunca alcança o apiserver (com `--net host -p`, cada nó fica num
+/// netns próprio com NAT, isolado dos outros).
+fn cluster_net(name: &str) -> String {
+    format!("dlx-{name}")
+}
+
+/// Arranca UM nó do cluster (control-plane ou worker) na rede partilhada.
+fn boot_node(
+    images: &ImageStore,
+    store: &Store,
+    cfg: &KindCluster,
+    node: &str,
+    role: &str,
+    publish: Vec<String>,
+) -> Result<Container> {
+    eprintln!("a arrancar o nó '{node}' ({role})...");
+    container::cmd_run(
+        images,
+        store,
+        RunOpts {
+            detach: true,
+            name: Some(node.to_string()),
+            // Rede do cluster: é isto que faz os nós verem-se (ver `cluster_net`).
+            net: cluster_net(&cfg.name),
+            volumes: Vec::new(),
+            ports: publish,
+            privileged: true,
+            entrypoint: None,
+            rm: false,
+            // O systemd do nó é o PID 1 e já supervisiona o que corre lá dentro.
+            restart: "no".to_string(),
+            env: Vec::new(),
+            labels: vec![
+                format!("io.x-k8s.kind.role={role}"),
+                format!("io.x-k8s.kind.cluster={}", cfg.name),
+            ],
+            image: cfg.image.clone(),
+            command: Vec::new(),
+        },
+    )?;
+    let c = store
+        .list()?
+        .into_iter()
+        .find(|c| c.name == node)
+        .ok_or_else(|| Error::Invalid(format!("o nó '{node}' não ficou registado no store")))?;
+    wait_in_node(&c, "containerd", "systemctl is-active containerd", Duration::from_secs(90))?;
+    Ok(c)
+}
+
 /// Cria o cluster: arranca o nó control-plane e faz o bootstrap com `kubeadm`.
 pub(crate) fn create(images: &ImageStore, store: &Store, cfg: &KindCluster) -> Result<()> {
     let node = format!("{}-control-plane", cfg.name); // convenção de nomes do kind
@@ -110,40 +174,27 @@ pub(crate) fn create(images: &ImageStore, store: &Store, cfg: &KindCluster) -> R
         )));
     }
 
-    eprintln!("a arrancar o nó '{node}' ({})...", cfg.image);
-    container::cmd_run(
-        images,
-        store,
-        RunOpts {
-            detach: true,
-            name: Some(node.clone()),
-            // `--net host` + `-p`: o `-p` é que dá ao nó um netns PRÓPRIO com
-            // slirp (ver nota 2 no topo) — sem isto o nft não funciona lá dentro.
-            net: "host".to_string(),
-            volumes: Vec::new(),
-            ports: vec![format!("{}:6443", cfg.api_port)],
-            privileged: true,
-            entrypoint: None,
-            rm: false,
-            // O supervisor de restart não serve aqui: o systemd do nó é o PID 1
-            // e já supervisiona o que corre lá dentro.
-            restart: "no".to_string(),
-            env: Vec::new(),
-            labels: vec![
-                "io.x-k8s.kind.role=control-plane".to_string(),
-                format!("io.x-k8s.kind.cluster={}", cfg.name),
-            ],
-            image: cfg.image.clone(),
-            command: Vec::new(),
-        },
-    )?;
+    // A rede do cluster primeiro: os nós têm de nascer todos nela.
+    let net = cluster_net(&cfg.name);
+    let nstore = delonix_net::NetworkStore::open(super::util::state_root())?;
+    if nstore.get(&net).is_err() {
+        // `create_network` (e não `infra::network_create`) porque são DOIS stores
+        // coordenados: o registo declarativo + o plano físico do holder, com o
+        // mesmo prefixo. Só o físico deixava o `run --net` a recusar com
+        // "no such container: network <x>" — apanhado a testar o multi-nó.
+        super::network::create_network(&nstore, &net, "bridge", None, None, "", None, Vec::new(), None)?;
+        eprintln!("rede '{net}' criada");
+    }
 
-    let c = store.list()?.into_iter().find(|c| c.name == node).ok_or_else(|| {
-        Error::Invalid(format!("o nó '{node}' não ficou registado no store"))
+    let c = boot_node(images, store, cfg, &node, "control-plane", vec![format!("{}:6443", cfg.api_port)])?;
+    // O IP REAL do nó na rede do cluster. Com `--net host -p` era o do slirp
+    // (10.0.2.100, igual em todos os nós e inalcançável de fora dele); numa rede
+    // partilhada cada nó tem o seu — e é este que o apiserver anuncia e os
+    // workers usam no `join`.
+    let cp_ip = c.ip.clone().ok_or_else(|| {
+        Error::Invalid(format!("o nó '{node}' não recebeu IP na rede '{net}'"))
     })?;
 
-    eprintln!("à espera do containerd no nó...");
-    wait_in_node(&c, "containerd", "systemctl is-active containerd", Duration::from_secs(90))?;
 
     // --- config do kubeadm: TUDO o que o rootless precisa, numa passagem ---
     //
@@ -180,7 +231,7 @@ pub(crate) fn create(images: &ImageStore, store: &Store, cfg: &KindCluster) -> R
          apiVersion: kubeproxy.config.k8s.io/v1alpha1\n\
          kind: KubeProxyConfiguration\n\
          conntrack:\n  # nf_conntrack_max e um sysctl GLOBAL: nao escrevivel de um userns.\n  maxPerCore: 0\n  min: 0\n",
-        ip = delonix_net::SLIRP_IP,
+        ip = cp_ip,
         pods = cfg.pod_subnet,
         svcs = cfg.service_subnet,
     );
@@ -210,11 +261,14 @@ pub(crate) fn create(images: &ImageStore, store: &Store, cfg: &KindCluster) -> R
     }
 
     // Nó único: sem tirar a taint, nada de utilizador (nem o coredns) agenda.
+    // Com workers, a taint FICA — é para isso que eles existem (é o que o kind faz).
+    if cfg.workers == 0 {
     let _ = node_exec(
         &c,
         "KUBECONFIG=/etc/kubernetes/admin.conf kubectl taint nodes --all \
          node-role.kubernetes.io/control-plane- >/dev/null 2>&1",
     );
+    }
 
     eprintln!("à espera do nó ficar Ready...");
     wait_in_node(
@@ -223,6 +277,58 @@ pub(crate) fn create(images: &ImageStore, store: &Store, cfg: &KindCluster) -> R
         "KUBECONFIG=/etc/kubernetes/admin.conf kubectl get nodes --no-headers 2>/dev/null | grep -qw Ready",
         Duration::from_secs(180),
     )?;
+
+    // --- workers: juntam-se pela rede do cluster (ver `cluster_net`) ---
+    if cfg.workers > 0 {
+        // O token do `join` vale 24h e vem do control-plane. `--print-join-command`
+        // devolve a linha inteira (token + hash do CA) — não a construímos à mão.
+        let join_file = "/kind/join.sh";
+        node_must(
+            &c,
+            "gerar o comando de join",
+            &format!(
+                "KUBECONFIG=/etc/kubernetes/admin.conf kubeadm token create --print-join-command \
+                 > {join_file} 2>/dev/null && chmod +x {join_file}"
+            ),
+        )?;
+        let join_cmd = read_node_file(&c, join_file)?;
+        let join_cmd = join_cmd.trim();
+        for i in 1..=cfg.workers {
+            let wnode = format!("{}-worker{}", cfg.name, if i == 1 { String::new() } else { i.to_string() });
+            let w = boot_node(images, store, cfg, &wnode, "worker", Vec::new())?;
+            // O worker precisa da MESMA receita rootless do control-plane: a
+            // feature gate e o swap valem para qualquer kubelet, não só o do CP.
+            write_node_file(
+                &w,
+                "/kind/delonix-join.conf",
+                "apiVersion: kubelet.config.k8s.io/v1beta1\n\
+                 kind: KubeletConfiguration\n\
+                 cgroupDriver: systemd\n\
+                 failSwapOn: false\n\
+                 featureGates:\n  KubeletInUserNamespace: true\n",
+            )?;
+            eprintln!("a juntar o worker '{wnode}' ao control-plane...");
+            node_must(
+                &w,
+                &format!("join do worker '{wnode}'"),
+                &format!(
+                    "{join_cmd} --config /kind/delonix-join.conf \
+                     --ignore-preflight-errors=Swap,SystemVerification,FileContent--proc-sys-net-bridge-bridge-nf-call-iptables,Mem,NumCPU \
+                     2>&1 | tail -3"
+                ),
+            )?;
+        }
+        eprintln!("à espera dos {} worker(s) ficarem Ready...", cfg.workers);
+        wait_in_node(
+            &c,
+            "workers Ready",
+            &format!(
+                "[ \"$(KUBECONFIG=/etc/kubernetes/admin.conf kubectl get nodes --no-headers 2>/dev/null | grep -cw Ready)\" = \"{}\" ]",
+                cfg.workers + 1
+            ),
+            Duration::from_secs(180),
+        )?;
+    }
 
     write_kubeconfig(&c, &cfg.name, cfg.api_port)?;
     println!("cluster '{}' pronto — kubectl --kubeconfig {} get nodes", cfg.name, kubeconfig_path(&cfg.name).display());
