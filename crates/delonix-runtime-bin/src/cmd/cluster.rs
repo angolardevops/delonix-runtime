@@ -321,6 +321,9 @@ pub enum ClusterCmd {
         #[arg(long, default_value = "default")]
         cni: String,
     },
+    /// Lista os clusters e o estado dos seus nós.
+    #[command(visible_alias = "list")]
+    Ls,
     /// Remove um cluster do modo kind (pára e apaga os nós + kubeconfig).
     Delete {
         #[arg(long, default_value = "delonix")]
@@ -392,6 +395,10 @@ pub fn run(action: ClusterCmd) -> Result<()> {
                 },
             );
         }
+        ClusterCmd::Ls => {
+            let (_, store) = super::util::open_stores()?;
+            return super::kindmode::list(&store);
+        }
         ClusterCmd::Delete { ref name } => {
             let (images, store) = super::util::open_stores()?;
             return super::kindmode::delete(&images, &store, name);
@@ -400,7 +407,7 @@ pub fn run(action: ClusterCmd) -> Result<()> {
     }
     match action {
         // Já tratados acima (modo kind nativo / init) — o topo de `run` faz `return`.
-        ClusterCmd::Create { .. } | ClusterCmd::Delete { .. } | ClusterCmd::Init { .. } => {
+        ClusterCmd::Create { .. } | ClusterCmd::Delete { .. } | ClusterCmd::Init { .. } | ClusterCmd::Ls => {
             unreachable!("tratados acima")
         }
         ClusterCmd::Apply { file } => {
