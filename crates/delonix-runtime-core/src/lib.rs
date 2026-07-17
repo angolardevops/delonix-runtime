@@ -351,10 +351,21 @@ pub struct Container {
     /// Dispositivos a expor (`--device /dev/x[:/dev/y]`), ligados em `/dev`.
     #[serde(default)]
     pub devices: Vec<String>,
-    /// Política de reinício (`no`|`on-failure`|`always`|`unless-stopped`) — usada
-    /// pela unidade `systemd` gerada e pelo supervisor de stacks.
+    /// Política de reinício (`no`|`on-failure[:max]`|`always`|`unless-stopped`).
+    /// Consumida pelo supervisor de `delonix container run -d --restart` (um
+    /// processo destacado por container, que fica PAI do container e por isso
+    /// captura o exit code real); também usada pela unidade `systemd` gerada e
+    /// pelo supervisor de stacks do lado do PaaS.
     #[serde(default)]
     pub restart_policy: Option<String>,
+    /// **Estado desejado**: o utilizador pediu `stop` explicitamente. O
+    /// supervisor de `--restart` NÃO ressuscita um container assim — é a
+    /// semântica do docker (um `docker stop` num container `always` não o
+    /// reinicia; só um `start` o traz de volta). Sem isto, `stop` e supervisor
+    /// entram em guerra: o container volta sozinho e o utilizador não o
+    /// consegue parar. Limpo pelo `run`/`start`.
+    #[serde(default)]
+    pub stopped_by_user: bool,
     /// Volumes/binds montados (persistidos para o **update zero-downtime** poder
     /// recriar o container novo com EXACTAMENTE os mesmos volumes).
     #[serde(default)]
@@ -439,6 +450,7 @@ impl Container {
             sysctls: Vec::new(),
             devices: Vec::new(),
             restart_policy: None,
+            stopped_by_user: false,
             mounts: Vec::new(),
             log_driver: None,
             net_bps: None,
