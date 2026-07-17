@@ -805,10 +805,21 @@ pub(crate) fn port_owner(store: &Store, host_port: &str) -> Result<Option<String
 /// container vivo).
 fn reap_orphan_net(store: &Store) {
     let _ = delonix_net::reap_orphan_slirp();
-    // Portas ainda legitimamente em uso por containers vivos — não lhes tocar.
-    let live: std::collections::HashSet<u32> = store
-        .list()
-        .unwrap_or_default()
+    // FAIL-CLOSED. `store.list()` a falhar dava `unwrap_or_default()` = lista
+    // VAZIA → `live` vazio → o reaper apagava TODOS os hostfwds, incluindo os de
+    // containers vivos. Um reaper que, ao perder a visão do estado, destrói tudo
+    // é pior que reaper nenhum: o cluster ficava a correr com o apiserver
+    // inalcançável (`connection refused` no kubectl) e nada no log a dizer
+    // porquê. Sem certeza do que está vivo, NÃO se reapa — um hostfwd órfão a
+    // mais custa uma porta; apagar os vivos custa o cluster.
+    let all = match store.list() {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("delonix: aviso — não consegui ler o estado ({e}); a saltar a limpeza de portas órfãs");
+            return;
+        }
+    };
+    let live: std::collections::HashSet<u32> = all
         .iter()
         .filter(|c| matches!(c.status, delonix_runtime_core::Status::Running | delonix_runtime_core::Status::Paused))
         .flat_map(|c| c.ports.iter())
