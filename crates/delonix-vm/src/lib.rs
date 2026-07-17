@@ -539,7 +539,34 @@ fn boot_ch(vmdir: &Path, cfg: &VmConfig, overlay: &str, tap: &str, mac: &str) ->
 pub struct LibvirtBackend;
 
 /// URI de ligação do libvirt: sessão do utilizador (rootless) ou sistema (root).
-fn libvirt_uri() -> &'static str {
+/// Which libvirt connection to use for a *new* domain, given its `net_mode`.
+///
+/// `qemu:///session` (per-user libvirt) can ONLY do user-mode networking
+/// (SLIRP/passt): its 10.0.2.x address is invisible to `virsh domifaddr` and
+/// unreachable from the host. NAT and host-bridge networks — the ones that
+/// yield a discoverable, reachable IP — live ONLY in `qemu:///system`. So a VM
+/// that asks for `net_mode: nat|bridge` must go to the system connection even
+/// when we're otherwise rootless (the invoking user needs to be in the
+/// `libvirt` group; otherwise `virsh` fails loudly, which is the honest signal).
+fn libvirt_uri_for(net_mode: Option<&str>) -> &'static str {
+    match net_mode {
+        Some("nat") | Some("network") | Some("bridge") => "qemu:///system",
+        _ if is_rootless() => "qemu:///session",
+        _ => "qemu:///system",
+    }
+}
+
+/// Which connection a *already-defined* domain lives on. `net_mode` isn't
+/// persisted in the `Vm` record, so we discover it: whichever of system/session
+/// knows the domain. Prefer `system` (reachable-IP modes) and fall back to
+/// `session` (user-mode). Returns `session` if neither defines it (harmless —
+/// the caller's virsh op is then a no-op).
+fn libvirt_uri_of(name: &str) -> &'static str {
+    for uri in ["qemu:///system", "qemu:///session"] {
+        if capture("virsh", &["-c", uri, "domstate", name]).is_some() {
+            return uri;
+        }
+    }
     if is_rootless() {
         "qemu:///session"
     } else {
@@ -717,7 +744,7 @@ impl VmBackend for LibvirtBackend {
 
     fn boot(&self, vmdir: &Path, cfg: &VmConfig, overlay: &str) -> Result<Boot> {
         let mac = mac_for(&cfg.name);
-        let uri = libvirt_uri();
+        let uri = libvirt_uri_for(cfg.net_mode.as_deref());
         // overlay como caminho absoluto (o libvirtd pode correr noutro cwd).
         let overlay_abs = std::fs::canonicalize(overlay)
             .map(|p| p.to_string_lossy().into_owned())
@@ -727,7 +754,20 @@ impl VmBackend for LibvirtBackend {
             let net = cfg.bridge.as_deref().unwrap_or("default");
             let _ = Command::new("virsh").args(["-c", uri, "net-start", net]).status();
         }
-        let xml = libvirt_domain_xml(cfg, &overlay_abs, &mac);
+        let mut xml = libvirt_domain_xml(cfg, &overlay_abs, &mac);
+        // On `qemu:///system` the QEMU process runs as the `libvirt-qemu` user,
+        // which cannot read the overlay under a 0700 `$HOME`. A static DAC label
+        // pins QEMU to the invoking uid/gid (the disk owner) and `relabel='no'`
+        // keeps it from chown-ing the disk away from the user. This is what lets
+        // a rootless-owned disk boot under system libvirt (needed for NAT/bridge,
+        // the only modes with a host-reachable IP).
+        if uri == "qemu:///system" && is_rootless() {
+            let (uid, gid) = unsafe { (libc::getuid(), libc::getgid()) };
+            let sec = format!(
+                "  <seclabel type='static' model='dac' relabel='no'>\n    <label>+{uid}:+{gid}</label>\n  </seclabel>\n"
+            );
+            xml = xml.replace("</domain>\n", &format!("{sec}</domain>\n"));
+        }
         let xml_path = vmdir.join(format!("{}.xml", cfg.name));
         std::fs::write(&xml_path, &xml)?;
 
@@ -761,15 +801,15 @@ impl VmBackend for LibvirtBackend {
     }
 
     fn is_running(&self, vm: &Vm) -> bool {
-        self.is_running_uri(libvirt_uri(), &vm.name)
+        self.is_running_uri(libvirt_uri_of(&vm.name), &vm.name)
     }
 
     fn ip(&self, vm: &Vm) -> Option<String> {
-        self.ip_uri(libvirt_uri(), &vm.name)
+        self.ip_uri(libvirt_uri_of(&vm.name), &vm.name)
     }
 
     fn stop(&self, vmdir: &Path, vm: &Vm) {
-        let uri = libvirt_uri();
+        let uri = libvirt_uri_of(&vm.name);
         let _ = Command::new("virsh")
             .args(["-c", uri, "destroy", &vm.name])
             .status();
