@@ -301,7 +301,7 @@ fn cmd_snapshot(store: &VolumeStore, action: SnapshotCmd) -> Result<()> {
             volsnap_run("create", std::path::Path::new(&v.mountpoint), &tarball)?;
             let size = std::fs::metadata(&tarball).map(|m| m.len()).unwrap_or(0);
             println!("snapshot '{snap}' do volume '{volume}' criado ({})", super::output::fmt_size(size));
-            println!("{}", super::output::secundario("(crash-consistente: para consistência de BD, pára/dump o consumidor primeiro)"));
+            println!("{}", super::output::dim("(crash-consistente: para consistência de BD, pára/dump o consumidor primeiro)"));
         }
         SnapshotCmd::Ls { volume } => {
             store.inspect(&volume)?; // valida que o volume existe
@@ -318,7 +318,7 @@ fn cmd_snapshot(store: &VolumeStore, action: SnapshotCmd) -> Result<()> {
             if !tarball.exists() {
                 return Err(Error::NotFound(format!("snapshot {snap} do volume {volume}")));
             }
-            super::output::aviso(&format!("a repor '{volume}' a partir de '{snap}' — pára os consumidores do volume primeiro"));
+            super::output::warn(&format!("a repor '{volume}' a partir de '{snap}' — pára os consumidores do volume primeiro"));
             volsnap_run("restore", std::path::Path::new(&v.mountpoint), &tarball)?;
             println!("volume '{volume}' reposto do snapshot '{snap}'");
         }

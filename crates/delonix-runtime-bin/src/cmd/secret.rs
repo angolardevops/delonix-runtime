@@ -108,7 +108,7 @@ pub fn run(action: SecretCmd) -> Result<()> {
                 println!("  {k}={}", if reveal { v.clone() } else { "••••••".into() });
             }
             if !reveal && !s.data.is_empty() {
-                println!("{}", output::secundario("(valores ocultos — usa --reveal para os mostrar)"));
+                println!("{}", output::dim("(valores ocultos — usa --reveal para os mostrar)"));
             }
         }
         SecretCmd::Set { name, pairs } => {

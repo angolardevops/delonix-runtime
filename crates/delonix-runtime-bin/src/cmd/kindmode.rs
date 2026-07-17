@@ -554,7 +554,7 @@ pub(crate) fn create(images: &ImageStore, store: &Store, cfg: &KindCluster) -> R
     // mesmo teste que o motor faz, `cgroup_limits_apply`) e calam-se TODOS os
     // nós via env — herdada por toda a cadeia de re-exec.
     if !delonix_runtime::cgroup_limits_apply() {
-        super::output::aviso(
+        super::output::warn(
             super::output::tr(
                 "rootless without cgroup delegation: the nodes' CPU/memory/PIDs limits are not enforced \
                  (namespace/seccomp isolation still holds). For limits, run under \
@@ -796,14 +796,14 @@ pub(crate) fn create(images: &ImageStore, store: &Store, cfg: &KindCluster) -> R
         // Não é razão para falhar o cluster: ele ESTÁ de pé e o kubeconfig
         // próprio funciona. Diz-se o que correu mal e como usar à mesma.
         Err(e) => {
-            super::output::aviso(&if super::output::is_pt() {
+            super::output::warn(&if super::output::is_pt() {
                 format!("não consegui instalar o contexto no ~/.kube/config: {e}")
             } else {
                 format!("could not install the context into ~/.kube/config: {e}")
             });
             eprintln!(
                 "   {}",
-                super::output::secundario(&if super::output::is_pt() {
+                super::output::dim(&if super::output::is_pt() {
                     format!("usa: kubectl --kubeconfig {} get nodes", kubeconfig_path(&cfg.name).display())
                 } else {
                     format!("use: kubectl --kubeconfig {} get nodes", kubeconfig_path(&cfg.name).display())
@@ -816,7 +816,7 @@ pub(crate) fn create(images: &ImageStore, store: &Store, cfg: &KindCluster) -> R
     println!();
     println!("{}", super::output::tr("You can now use your cluster:", "Já podes usar o teu cluster:"));
     println!();
-    println!("  {}", super::output::destaque(&format!("kubectl cluster-info --context {ctx}")));
+    println!("  {}", super::output::bold(&format!("kubectl cluster-info --context {ctx}")));
     println!();
     Ok(())
 }
@@ -991,7 +991,7 @@ pub(crate) fn delete(images: &ImageStore, store: &Store, name: &str) -> Result<(
     // ficava a listar um cluster que já não existe, e um `kubectl` distraído
     // apontava para uma porta que entretanto pode ser de OUTRA coisa.
     if let Err(e) = remove_kubecontext(name) {
-        super::output::aviso(&if super::output::is_pt() {
+        super::output::warn(&if super::output::is_pt() {
             format!("não consegui tirar o contexto '{}' do kubeconfig: {e}", context_name(name))
         } else {
             format!("could not remove context '{}' from kubeconfig: {e}", context_name(name))
