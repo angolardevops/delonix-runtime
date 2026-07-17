@@ -602,8 +602,23 @@ impl Network {
 
     /// O octeto-base candidato a partir do nome (intervalo `[100, 239]`, fora de
     /// 88 = default e 90 = VIPs de serviço).
+    /// O 2.º octeto da rede, derivado do nome. **TEM de cair no espaço de
+    /// workload do ingress** (`10.200.x`–`10.254.x`, ver
+    /// `delonix_runtime_core::workload_net`): é lá que o DNAT/firewall do
+    /// ingress aceita publicar portas.
+    ///
+    /// Estava `100 + (fnv32 % 140)` → `10.100.x`–`10.239.x`, e o ingress só
+    /// aceita de 200 para cima: **71% dos nomes de rede geravam uma rede onde o
+    /// `-p` falhava** com "IP ... fora do espaço de ingress". Era uma lotaria —
+    /// `dlx-delonix` calhava em 10.207 (funcionava) e `dlx-delonix-01` em
+    /// 10.173 (rebentava). Os limites vêm da constante partilhada, não de
+    /// números repetidos à mão: essa fronteira também sustenta o guard
+    /// "no-bypass" do túnel, e duplicá-la aqui era o que criou a divergência.
     fn base_for(name: &str) -> u8 {
-        100 + (fnv32(name) % 140) as u8
+        let lo = delonix_runtime_core::workload_net::WORKLOAD_IPV4_LO.octets()[1];
+        let hi = delonix_runtime_core::workload_net::WORKLOAD_IPV4_HI.octets()[1];
+        let span = (hi - lo) as u32 + 1;
+        lo + (fnv32(name) % span) as u8
     }
 }
 
@@ -724,7 +739,12 @@ impl NetworkStore {
             if !used.contains(&base) {
                 break;
             }
-            base = if base >= 239 { 100 } else { base + 1 };
+            // Wrap DENTRO do espaço de workload (não 100..239, que saía dele).
+            base = if base >= delonix_runtime_core::workload_net::WORKLOAD_IPV4_HI.octets()[1] {
+                delonix_runtime_core::workload_net::WORKLOAD_IPV4_LO.octets()[1]
+            } else {
+                base + 1
+            };
         }
         std::fs::write(self.path(name), base.to_string())?;
         self.get(name)
@@ -1980,6 +2000,30 @@ pub fn list_connections(ip2name: &std::collections::HashMap<String, String>) -> 
 
 #[cfg(test)]
 mod tests {
+    /// REGRESSÃO: o prefixo de QUALQUER nome de rede tem de cair no espaço de
+    /// workload do ingress. Estava `100 + (fnv32 % 140)` e o ingress só aceita
+    /// de 200 para cima — 71% dos nomes geravam uma rede onde publicar portas
+    /// falhava ("IP ... fora do espaço de ingress"). Um teste sobre nomes reais
+    /// e aleatórios apanha a divergência mal ela volte.
+    #[test]
+    fn prefixo_de_rede_cai_sempre_no_espaco_de_ingress() {
+        use delonix_runtime_core::workload_net::is_workload_ipv4;
+        let mut nomes: Vec<String> = vec![
+            "kind".into(), "dlx-delonix".into(), "dlx-delonix-01".into(), "backend".into(),
+            "lab-net".into(), "a".into(), "".into(), "rede-com-nome-muito-comprido-mesmo".into(),
+        ];
+        // Cobertura a sério: 500 nomes gerados, não só os que me lembrei.
+        nomes.extend((0..500).map(|i| format!("net-{i}")));
+        for n in &nomes {
+            let base = Network::base_for(n);
+            let ip: std::net::Ipv4Addr = format!("10.{base}.1.2").parse().unwrap();
+            assert!(
+                is_workload_ipv4(ip),
+                "a rede '{n}' ficou em 10.{base}.x — fora do espaço de ingress; o `-p` falharia lá"
+            );
+        }
+    }
+
     use super::*;
 
     #[test]
