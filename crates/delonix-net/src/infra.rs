@@ -1681,6 +1681,16 @@ pub fn infra_join_argv() -> Option<Vec<String>> {
     ])
 }
 
+/// Like [`infra_join_argv`] but enters ONLY the net namespace (`-n`), keeping the
+/// caller's user namespace and its init-ns capabilities. This is what a
+/// privileged caller (root/`CAP_BPF`) needs to load an eBPF program into the
+/// infra netns: entering the holder's userns (`-U`) would namespace the caps
+/// away and the `bpf()` syscall would be refused. `None` if the holder is down.
+pub fn infra_netns_argv() -> Option<Vec<String>> {
+    let holder = read_pid(&holder_pid_path()).filter(|&p| pid_alive(p))?;
+    Some(vec!["nsenter".into(), "-t".into(), holder.to_string(), "-n".into(), "--".into()])
+}
+
 /// Descobre o IP de um MAC na rede de infra — pela tabela `neigh` (ARP) DENTRO do
 /// netns do holder (imediata, ao contrário da leasefile do udhcpd que só é escrita
 /// periodicamente). Usado para reportar o IP que o DHCP atribuiu a uma VM/cliente.
