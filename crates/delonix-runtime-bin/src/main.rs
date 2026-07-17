@@ -114,6 +114,16 @@ enum Cmd {
         #[command(subcommand)]
         action: cmd::netns::NetnsCmd,
     },
+    /// Firewall de ENTRADA (regras L4 + publishes DNAT) de um container na SDN.
+    Ingress {
+        #[command(subcommand)]
+        action: cmd::firewall::IngressCmd,
+    },
+    /// Firewall de SAÍDA (regras L4 + política de egress por-rede) de um container.
+    Egress {
+        #[command(subcommand)]
+        action: cmd::firewall::EgressCmd,
+    },
     /// Persistência no arranque: units systemd para os containers voltarem a subir no boot.
     Boot {
         #[command(subcommand)]
@@ -155,6 +165,8 @@ fn run() -> Result<()> {
         Cmd::Kube { action } => cmd::kube::run(action),
         Cmd::Netns { action } => cmd::netns::run(action),
         Cmd::Boot { action } => cmd::boot::run(action),
+        Cmd::Ingress { action } => cmd::firewall::run_ingress(action),
+        Cmd::Egress { action } => cmd::firewall::run_egress(action),
         Cmd::Cri { addr } => {
             let addr = addr
                 .or_else(|| std::env::var("DELONIX_CRI_ADDR").ok())
