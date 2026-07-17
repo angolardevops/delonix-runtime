@@ -1582,8 +1582,11 @@ fn setup_node_cgroup_ns(cid: &str) {
                 std::thread::sleep(std::time::Duration::from_millis(100));
             }
             // Delega os controladores do scope aos filhos. Best-effort: falha silenciosa
-            // em hosts sem esta estrutura de cgroup delegado.
-            for ctrl in ["+cpu", "+memory", "+pids"] {
+            // em hosts sem esta estrutura de cgroup delegado. `cpuset`/`io` só passam
+            // se o host os delegar à sessão user (drop-in `Delegate=cpu cpuset io
+            // memory pids` no `user@.service` — ver CLAUDE.md); sem isso, o kubelet
+            // marca "missing required cgroups: cpuset" mas o resto funciona.
+            for ctrl in ["+cpuset", "+cpu", "+io", "+memory", "+pids"] {
                 let _ = std::fs::write(format!("{scope}/cgroup.subtree_control"), ctrl);
             }
             let leaf = format!("{scope}/dlx-{cid}");
@@ -2308,7 +2311,7 @@ fn try_delegated_base(base: &str, c: &Container, pid: i32, move_self: bool) -> b
     //    init por contar (métricas a 0 apesar do leaf certo). Um a um; falha se
     //    a base tiver processos diretos (scope partilhado) → fallback.
     let mut any = false;
-    for ctrl in ["+cpu", "+memory", "+pids"] {
+    for ctrl in ["+cpuset", "+cpu", "+io", "+memory", "+pids"] {
         if std::fs::write(format!("{base}/cgroup.subtree_control"), ctrl).is_ok() {
             any = true;
         }
@@ -2429,7 +2432,12 @@ pub struct RunSpec<'a> {
     /// Contexto SELinux a aplicar no `execve` (só em hosts onde o SELinux é o LSM).
     pub selinux: Option<String>,
     /// *Hook* chamado com o PID após o arranque (a Fase 3 configura aí a rede).
+    /// **Com userns corre ANTES de libertar o filho** — ver `spawn`: a rede tem de
+    /// estar pronta antes de o entrypoint arrancar.
     pub on_started: Option<&'a StartedHook<'a>>,
+    /// IP do container a escrever em `/etc/hosts` (mapeado ao hostname), como
+    /// fazem o Docker/Podman. `None` = só as entradas de loopback.
+    pub hosts_ip: Option<String>,
     /// Partilha o *PID namespace* do host (`--host-pid`; CRI `namespace_options.pid
     /// = NODE`): o container vê os processos do host. Por omissão, isolado.
     pub host_pid: bool,
@@ -2497,7 +2505,40 @@ pub fn create_with(
     spawn(store, container, rootfs, spec)
 }
 
+/// Escreve `/etc/hostname` e `/etc/hosts` no rootfs, como o Docker/Podman (que
+/// gerem sempre estes ficheiros). Faz-se no PAI, antes do clone, porque é aqui
+/// que se sabem o nome e o IP; o rootfs é um caminho do host (cópia flat em
+/// rootless, overlay montado em root).
+///
+/// Porquê os dois:
+/// - **`/etc/hostname`**: o `sethostname` do `container_init` não chega num
+///   container com systemd — o systemd RELÊ `/etc/hostname` no arranque e
+///   sobrepõe-no (um nó Kind ficava com o `debuerreotype` da imagem).
+/// - **`/etc/hosts`**: sem ele, `getent ahostsv4 $(hostname)` não resolve — e é
+///   EXACTAMENTE assim que o entrypoint do `kindest/node` descobre o IP do nó
+///   ("detected IPv4 address:"); vinha vazio e o nó não arrancava como control-plane.
+fn write_etc_files(rootfs: &str, hostname: &str, ip: Option<&str>) {
+    let etc = format!("{rootfs}/etc");
+    if std::fs::metadata(&etc).is_err() {
+        return; // imagem sem /etc (ex.: scratch) — nada a fazer
+    }
+    let _ = std::fs::write(format!("{etc}/hostname"), format!("{hostname}\n"));
+    let mut hosts = String::from(
+        "127.0.0.1\tlocalhost\n\
+         ::1\tlocalhost ip6-localhost ip6-loopback\n\
+         fe00::0\tip6-localnet\n\
+         ff00::0\tip6-mcastprefix\n\
+         ff02::1\tip6-allnodes\n\
+         ff02::2\tip6-allrouters\n",
+    );
+    if let Some(ip) = ip {
+        hosts.push_str(&format!("{ip}\t{hostname}\n"));
+    }
+    let _ = std::fs::write(format!("{etc}/hosts"), hosts);
+}
+
 fn spawn(store: &Store, container: &mut Container, rootfs: &str, spec: &RunSpec<'_>) -> Result<()> {
+    write_etc_files(rootfs, &container.name, spec.hosts_ip.as_deref());
     let argv: Vec<CString> = container
         .command
         .iter()
@@ -2688,6 +2729,8 @@ fn spawn(store: &Store, container: &mut Container, rootfs: &str, spec: &RunSpec<
     // GO). Por isso: 1.º userns, 2.º console+log_shim.
 
     // User namespace: o pai mapeia os uid/gid e liberta o filho pelo pipe.
+    // Rede já configurada pelo hook antes do GO? (só no caminho com userns/sync)
+    let mut net_done = false;
     if let Some((r, w)) = sync {
         // SAFETY: o pai fecha o read e usa o write para libertar o filho.
         unsafe {
@@ -2708,12 +2751,28 @@ fn spawn(store: &Store, container: &mut Container, rootfs: &str, spec: &RunSpec<
             let _ = kill(pid, Signal::SIGKILL);
             return Err(e);
         }
+        // REDE ANTES DO GO (ordem crítica): o filho ainda está BLOQUEADO à espera
+        // deste byte, por isso é aqui — e só aqui — que se pode garantir que a
+        // rede está pronta ANTES de o entrypoint correr. Com o hook depois do GO
+        // havia uma race real: o `slirp4netns` configura o `tap0` a partir do PAI
+        // enquanto o filho já corre, e um entrypoint que leia o IP UMA vez no
+        // arranque (ex.: o do `kindest/node`: "detected IPv4 address:") via-o
+        // VAZIO e o nó morria. Docker/podman também só arrancam o processo com a
+        // rede já montada. Sem userns (sync=None) não há ponto de bloqueio: o
+        // hook corre mais abaixo, como antes (a race mantém-se, mas esse caminho
+        // não é o rootless/Kind).
+        let net_err = spec.on_started.and_then(|hook| hook(pid.as_raw()).err());
         // SAFETY: escreve 1 byte (o "podes avançar") e fecha o write.
         unsafe {
             let go = [1u8; 1];
             let _ = libc::write(w, go.as_ptr() as *const libc::c_void, 1);
             libc::close(w);
         }
+        if let Some(e) = net_err {
+            let _ = kill(pid, Signal::SIGKILL);
+            return Err(e);
+        }
+        net_done = true;
     }
 
     // Origem do log: em modo console é o MASTER do pty (recebido do init por
@@ -2789,12 +2848,16 @@ fn spawn(store: &Store, container: &mut Container, rootfs: &str, spec: &RunSpec<
     setup_cgroup(container, pid.as_raw())?;
     store.save(container)?;
 
-    // Configura a rede (ou outro arranque) ANTES de esperar/devolver.
-    if let Some(hook) = spec.on_started {
-        if let Err(e) = hook(pid.as_raw()) {
-            let _ = kill(pid, Signal::SIGKILL);
-            remove_container_cgroup(container);
-            return Err(e);
+    // Configura a rede (ou outro arranque) ANTES de esperar/devolver. Só chega
+    // aqui o caminho SEM userns (sem ponto de sync onde bloquear o filho) — com
+    // userns o hook já correu antes do GO, com o filho parado (ver acima).
+    if !net_done {
+        if let Some(hook) = spec.on_started {
+            if let Err(e) = hook(pid.as_raw()) {
+                let _ = kill(pid, Signal::SIGKILL);
+                remove_container_cgroup(container);
+                return Err(e);
+            }
         }
     }
 
