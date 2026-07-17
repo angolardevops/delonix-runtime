@@ -1507,6 +1507,32 @@ fn mask_slow_node_units() {
     }
 }
 
+/// Nó Kind: semeia UMA regra `iptables-nft` para o `select_iptables` do
+/// entrypoint do Kind escolher o backend **nft**. Sem isto, num netns fresco
+/// tanto `iptables-legacy-save` como `iptables-nft-save` devolvem 0 linhas e o
+/// script do Kind, no empate (`num_legacy >= num_nft`), escolhe `legacy` — que
+/// é INUTILIZÁVEL aqui: o backend legacy lê `/proc/net/ip_tables_names`, um
+/// ficheiro `0440` do root do HOST que, no nosso user namespace, aparece com
+/// dono não-mapeado (nobody) e portanto ilegível → EPERM, e o boot do nó aborta
+/// logo a seguir a "setting iptables to detected mode: legacy". O backend nft
+/// não toca nesse ficheiro e funciona (o netns é NOSSO, temos CAP_NET_ADMIN
+/// efectivo nele). A regra é inócua (a policy de INPUT já é ACCEPT); só serve
+/// para `iptables-nft-save` reportar ≥1 linha e o empate do Kind cair para nft.
+/// Best-effort, ANTES do `execve` do entrypoint (o `select_iptables` corre no
+/// arranque do entrypoint, antes do systemd) e ainda com CAP_NET_ADMIN.
+fn seed_kind_nft() {
+    for bin in ["/usr/sbin/iptables-nft", "/sbin/iptables-nft"] {
+        if std::path::Path::new(bin).exists() {
+            let _ = std::process::Command::new(bin)
+                .args(["-A", "INPUT", "-j", "ACCEPT"])
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status();
+            return;
+        }
+    }
+}
+
 fn setup_node_cgroup_ns(cid: &str) {
     // 1) Destapa o cgroup2 real. No caminho rootless-com-rede o `ip netns exec` monta
     //    um sysfs FRESCO sobre `/sys` (SEM cgroup2 → SEM o ficheiro
@@ -1676,6 +1702,10 @@ fn container_init(
     // nó), uid 0 no userns e com escrita. Best-effort.
     if node_cgroup {
         mask_slow_node_units();
+        // Enviesa o `select_iptables` do Kind para nft (o backend legacy é
+        // ilegível em rootless — ver `seed_kind_nft`). Ainda com CAP_NET_ADMIN,
+        // no netns do nó, antes do `execve` do entrypoint.
+        seed_kind_nft();
     }
     // --privileged detached (nodes Kind): aloca um `/dev/console` (pty) para o
     // PID 1 e captura-o no log. Tem de ser DEPOIS do `/dev`/devpts montado (acima)
