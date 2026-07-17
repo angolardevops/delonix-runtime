@@ -293,6 +293,22 @@ pub fn teardown() {
 /// --user --map-root-user --net --mount`, que corre [`holder_main`] (root no
 /// userns) para montar a `delonix0` + `nft` e depois bloquear. Espera o ficheiro
 /// de estado "ready" antes de devolver o PID host-visível.
+/// Espera que `fd` fique legível, com teto de `timeout_ms`. `true` = legível (ou
+/// EOF, que também é um evento e desbloqueia o `read`); `false` = esgotou o tempo.
+///
+/// Existe para não haver mais `read` nus em fds que dependem de um processo
+/// externo sinalizar: se esse processo nunca sinalizar E nunca fechar o fd (basta
+/// um neto herdá-lo), o `read` fica pendurado para sempre — foi assim que um
+/// `run` ficou preso 1h em `skb_wait_for_more_packets` sem log nem exit.
+/// `poll` não precisa de mexer nas flags do fd (nada de `O_NONBLOCK` a vazar
+/// para quem o herdar).
+fn wait_readable(fd: i32, timeout_ms: i32) -> bool {
+    let mut pfd = libc::pollfd { fd, events: libc::POLLIN, revents: 0 };
+    // SAFETY: `pfd` é válido e vive durante a chamada; poll não retém o ponteiro.
+    // EINTR (sinal) devolve -1 → tratamos como "não ficou pronto", o chamador avisa.
+    unsafe { libc::poll(&mut pfd, 1, timeout_ms) > 0 }
+}
+
 fn start_holder() -> Result<i32> {
     let exe = std::env::current_exe().map_err(|e| Error::Runtime {
         context: "current_exe",
@@ -380,8 +396,20 @@ fn start_slirp(holder_pid: i32) -> Result<()> {
     unsafe { libc::close(wr) };
     match spawned {
         Ok(child) => {
+            // ESPERA COM TETO. Um `read` nu aqui podia pendurar PARA SEMPRE: o EOF
+            // só chega se TODAS as cópias do write-end fecharem, e basta um neto do
+            // slirp herdar o fd para isso nunca acontecer. E o preço subiu: o
+            // `slirp_attach` passou a correr ANTES de libertar o container (a rede
+            // tem de estar pronta antes do entrypoint), por isso um slirp que não
+            // sinalize pendura o `run` inteiro, sem log e sem exit — a mesma classe
+            // do deadlock do `recv_fd` do console. 10s chegam de sobra (o slirp
+            // sinaliza em ms); ao fim disso seguimos e o erro aparece a jusante,
+            // com mensagem, em vez de um processo pendurado para sempre.
+            if !wait_readable(rd, 10_000) {
+                eprintln!("delonix: aviso — slirp4netns não sinalizou pronto em 10s; a rede do container pode não estar operacional");
+            }
             let mut b = [0u8; 1];
-            // SAFETY: lê 1 byte do read-end; bloqueia até o slirp sinalizar pronto.
+            // SAFETY: lê 1 byte do read-end (já legível, ou desistimos acima).
             unsafe {
                 libc::read(rd, b.as_mut_ptr() as *mut libc::c_void, 1);
                 libc::close(rd);

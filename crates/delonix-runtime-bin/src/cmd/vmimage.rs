@@ -432,14 +432,20 @@ pub(crate) struct K8sDeb {
 }
 
 /// Parseia um índice `Packages` (Debian control, blocos separados por linha
-/// vazia) e devolve as entradas de `arch` cuja versão começa por `version_prefix`
-/// (ex.: "1.34."), escolhendo a MAIOR versão por pacote. Função PURA (testável
-/// sem rede). `wanted` filtra por nome; vazio = todos.
+/// vazia) e devolve, por pacote de `wanted`, a MAIOR versão disponível para
+/// `arch`. Função PURA (testável sem rede).
+///
+/// `version_prefix` (ex.: "1.34.") só se aplica aos pacotes de `versioned` — os
+/// componentes que seguem a versão do Kubernetes (kubeadm/kubelet/kubectl). Os
+/// restantes do repo têm versionamento PRÓPRIO (`kubernetes-cni` é 1.7.x,
+/// `cri-tools` é 1.34.x mas independente) e levam só "a mais recente": filtrá-los
+/// pelo prefixo do k8s não devolvia nada.
 pub(crate) fn parse_packages_index(
     index: &str,
     arch: &str,
     version_prefix: &str,
     wanted: &[&str],
+    versioned: &[&str],
 ) -> Vec<K8sDeb> {
     let mut best: std::collections::BTreeMap<String, K8sDeb> = Default::default();
     for block in index.split("\n\n") {
@@ -458,10 +464,14 @@ pub(crate) fn parse_packages_index(
         ) else {
             continue;
         };
-        if *a != arch || !version.starts_with(version_prefix) {
+        if *a != arch {
             continue;
         }
         if !wanted.is_empty() && !wanted.contains(name) {
+            continue;
+        }
+        // O prefixo do k8s só vale para quem segue a versão do k8s.
+        if versioned.contains(name) && !version.starts_with(version_prefix) {
             continue;
         }
         let cand = K8sDeb {
@@ -594,6 +604,9 @@ fn download_k8s_debs(
     // As restantes deps do kubelet (iptables/mount/util-linux/libc6) já vêm na
     // cloud image da Ubuntu — se alguma faltar, o `dpkg -i` falha ALTO no guest,
     // que é o que queremos (nunca instalar meio-instalado em silêncio).
+    // `versioned` seguem a versão do k8s (`--k8s-version 1.34` → `1.34.*`);
+    // `kubernetes-cni` tem versionamento próprio → só "a mais recente".
+    const VERSIONED: [&str; 3] = ["kubeadm", "kubelet", "kubectl"];
     let mut wanted: Vec<&str> = vec!["kubeadm", "kubelet", "kubectl", "kubernetes-cni"];
     for p in extra_packages {
         wanted.push(p.as_str());
@@ -602,7 +615,7 @@ fn download_k8s_debs(
         Some(v) if v != "stable" => format!("{v}."),
         _ => String::new(),
     };
-    let debs = parse_packages_index(&index, arch, &version_prefix, &wanted);
+    let debs = parse_packages_index(&index, arch, &version_prefix, &wanted, &VERSIONED);
     for base in ["kubeadm", "kubelet", "kubectl", "kubernetes-cni"] {
         if !debs.iter().any(|d| d.name == base) {
             return Err(Error::Invalid(format!(
