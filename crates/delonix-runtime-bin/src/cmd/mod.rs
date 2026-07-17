@@ -11,6 +11,7 @@ pub mod network;
 pub mod output;
 pub mod remote;
 pub mod scan;
+pub mod secret;
 pub mod scaffold;
 pub mod stack;
 pub mod system;
