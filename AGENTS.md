@@ -19,7 +19,7 @@ homóloga ao Docker, distinta do `delonix`/`delonixctl` privados do `delonix-paa
 repo/branch/remote, não afectados por nada aqui). Comandos agrupados semanticamente em vez de
 uma lista plana, um módulo por grupo em `crates/delonix-runtime-bin/src/cmd/`:
 
-- `delonix container` — run/ps/stop/rm/exec/logs. `run` aceita `-v/--volume` (nomeado ou bind
+- `delonix container` — run/ps/stop/rm/exec/logs/**update**/**describe**. `run` aceita `-v/--volume` (nomeado ou bind
   mount, via `delonix-volume::VolumeStore::resolve_spec`, testado e funcional) e
   `--net host|none|<rede>`. `host`/`none` — comportamento original, inalterado, testado. `--net
   <rede-custom>` (`delonix-net::infra::attach_container` cria a netns NOMEADA do lado do holder,
@@ -51,6 +51,59 @@ uma lista plana, um módulo por grupo em `crates/delonix-runtime-bin/src/cmd/`:
   driver `bridge` (o único que os containers atacham hoje), `network create` orquestra os dois
   em conjunto; `macvlan`/`ipvlan`/`overlay` só ficam no `NetworkStore` (limitação conhecida).
 - `delonix stack apply [-f delonix-manifest.yaml]` — ver secção "Manifesto/apply" abaixo.
+
+## Output: `ls` estilo docker, `describe` estilo kubectl (`cmd/output.rs`)
+
+Toda a formatação passa por `cmd/output.rs` — `Table` (mede as colunas pelo conteúdo real; antes
+cada grupo tinha larguras hardcoded `{:<20}` e a tabela desalinhava assim que um nome as passava),
+`Describe` (blocos `kubectl`-like) e `fmt_size`/`fmt_local`/`fmt_age`/`fmt_duration_secs`.
+**Sem dependências novas** — não há `comfy-table`/`tabled`/`chrono` na árvore e não vale a pena
+aumentar a superfície de supply-chain de um runtime de containers por um alinhador de colunas.
+
+- `container ls` tem as 7 colunas do `docker ps`. O `Up …` sai do `pid_starttime` do init e **não**
+  do `created_unix`: um container criado ontem e reiniciado há 5 min mostraria "Up 1 day" — falso
+  exactamente quando interessa (a depurar um crash-loop).
+- `fmt_duration_secs` porta o `units.HumanDuration` do docker **à letra**, baldes incluídos (dias
+  até às 2 semanas, semanas até aos 2 meses). É essa escolha de baldes — e não um caso especial —
+  que impede o "1 weeks" que a primeira versão daqui imprimia.
+- **`describe` é aditivo; os `inspect` ficam como estavam.** `describe` = humanos, `inspect` = JSON
+  para scripts. É uma CLI pública: migrar `volumes/network inspect` de texto para JSON seria
+  breaking change e não se fez.
+- `stack describe` não inventa estado: o stack **não tem registo próprio**, por isso parte do
+  manifesto e vai confirmar a presença de cada recurso ao store respectivo (mesma filosofia do
+  `cluster ls`, que deriva das labels). Não faz drift-detection — isso é trabalho de orchestrator.
+
+## Reconfiguração a quente (`delonix container update`)
+
+`container update <id>` muda **portas, volumes, redes e limite de banda sem parar o container** —
+o PID não muda. É a diferença de fundo para o docker (onde mudar uma porta obriga a recriar):
+aqui o dataplane não pertence ao ciclo de vida do processo. Flags: `--publish-add/--publish-rm`,
+`--volume-add/--volume-rm`, `--net-connect/--net-disconnect`, `--net-rate/--net-burst/
+--net-rate-clear`. **Remoções correm antes das adições**, para `--publish-rm 8080 --publish-add
+8080:9000` funcionar num só comando.
+
+Isto ligou APIs do motor que existiam há muito e **nunca tiveram um único chamador** —
+`mount_live`/`unmount_live`, `attach_extra_container`/`detach_extra_container`,
+`set_net_rate`/`clear_net_rate`. Por nunca terem sido chamadas, tinham um bug que só apareceu
+agora (ver abaixo).
+
+**Persistência**: cada operação grava no registo assim que o dataplane confirma, uma a uma, via
+`Store::update` (flock — o CRI é concorrente). Não há transacionalidade: se a terceira falhar, as
+duas primeiras JÁ estão aplicadas no kernel e um registo escrito só no fim ficaria a mentir.
+
+**Limitações conhecidas, por desenho**:
+- `--net-connect`/`--net-rate` exigem `--net <rede>`: o veth e o shaping vivem no netns do holder,
+  que o caminho slirp-por-container (`--net host/none`) não tem.
+- `--publish-add` num container criado **sem `-p` e sem `--net <rede>`** é impossível: o
+  api-socket do slirp só é aberto quando o `run` leva portas (`slirp_attach`). Erro explícito.
+
+**BUG CORRIGIDO ao ligar isto** (`mount_live`/`unmount_live`): gatavam o `setns(user)` em
+`container.userns`, mas esse campo diz se o container **criou** o seu userns — os do ingress
+rootless **herdam** o do holder e ficam com `userns=false` apesar de estarem num userns diferente
+do nosso. Sem o setns, o `unshare(NEWNS)` seguinte dava EPERM e **toda** a montagem a quente
+falhava (código 124). É o mesmo bug que o `exec` já teve e corrigiu — passam a abrir sempre o ns
+`user` e a deixar o skip-por-inode do `open_container_ns` decidir. Lição a reter: **`container.
+userns` não é "está num userns diferente do meu"**; nunca o usar para essa pergunta.
 
 ## Manifesto/apply (`delonix-manifest.yaml`)
 
@@ -458,72 +511,53 @@ até um control-plane Ready (o preflight já passa; falta exercitar o pull+init+
 continua depois destes, mas a fundação — cgroup + netfilter + systemd + containerd + rede — arranca.
 
 
-### EM ABERTO: o publish do nó Kind não chega ao ingress (2026-07-17)
+### RESOLVIDO — as portas publicadas morriam sozinhas: era o `delonix-engine`, não o runtime (2026-07-17)
 
-**Sintoma**: `cluster create` diz "pronto" e o nó fica `Ready` (verificado por
-dentro), mas o `kubectl` do HOST dá `connection refused` — o apiserver não tem
-hostfwd. Um `container run --net <rede> -p` NORMAL publica bem (HTTP 200,
-persistente, dois em simultâneo).
+**Fechado.** Este bug queimou várias sessões porque o diagnóstico registado aqui estava ERRADO em
+ambas as premissas: dizia que "as duas metades do `publish_port` falham em SILÊNCIO" e mandava
+procurar quem chamava `unpublish_port`. Não falham, e não há chamador nenhum.
 
-**Afinado 2 (tábua rasa, 2026-07-17 11:30)**: com TUDO limpo (0 processos
-delonix antigos, holder+slirp novos das 11:25, 0 containers, 0 contextos
-kubectl) o problema PERSISTE — e as três causas que eu suspeitava estão
-DESCARTADAS por medição:
-  * reaper em massa: o único chamador foi REMOVIDO (`grep reap_orphan_hostfwds`
-    → zero callers); o publish passou a reap REACTIVO (só a porta que falha,
-    só quando falha — ver `publish_with_retry`);
-  * slirp reiniciado: NÃO (pid 520637, nascido 11:25:58, o mesmo desde o início);
-  * holder reiniciado: NÃO (mesmo 11:25:58); refcount=5, sem teardown.
-E no entanto: `w1` publica e serve HTTP 200; minutos depois `list_hostfwd` está
-a ZERO e o curl dá 000 — com o container ainda `Running`. Ou seja **algo remove
-os hostfwds sem ser o reaper, sem reiniciar o slirp e sem `stop`/`rm`**.
-Os únicos removedores no código são `unpublish_port` (chamado por
-`unpublish_ports` no stop/rm, e pelo `publish_with_retry` em falha) — e nenhum
-foi accionado para essas portas. **Causa por identificar; não inventar uma.**
-Próximo passo: instrumentar `unpublish_port` + `slirp_add_hostfwd` para
-imprimir chamador e resposta do slirp (o `Ok` já provou não significar
-"aplicado"), e confirmar se o `add_hostfwd` sequer persiste no slirp (pode
-estar a aceitar e a descartar).
+**Sintoma**: porta publicada serve HTTP 200 e ~10–16s depois dá `000`, com o container `Running` e
+sem `stop`/`rm`.
 
-**Afinado (mesma sessão, mais medições)**: o `container start` do nó CHEGA a
-registar o hostfwd (`list_hostfwd` → `6443 -> 10.0.2.100:6443`) — logo o
-mecanismo do `publish_port` corre. Mas nessa altura:
-  * NADA escuta na `6443` do host (`ss -ltn` → 0), apesar de o slirp dizer que
-    tem o hostfwd; e
-  * NÃO há regra DNAT no holder (`nft list table ip delonix_ingress` vazio).
-Ou seja **as duas metades do `publish_port` (slirp_add_hostfwd + control_send
-"publish") falham em SILÊNCIO** — a função devolve `Ok`. Um container normal
-(`web`, 28080) faz as duas bem e serve HTTP 200, portanto não é o código em si:
-é algo no contexto do nó (privileged? re-exec? momento?). Próximo passo
-concreto: instrumentar `publish_port` para imprimir o que o slirp e o control
-socket RESPONDEM, em vez de assumir que `Ok` significa aplicado.
-Nota: o hostfwd apontar para `10.0.2.100` é POR DESENHO (host → slirp → DNAT →
-IP real do container); não é bug — enganou-me a primeira vez.
+**O que se provou, por medição** (não por leitura de código):
+1. O **DNAT fica intacto** (`nft list table ip dlxing` mostra a regra muito depois do `curl` já dar
+   `000`). Só o `hostfwd` do slirp desaparece — não são "as duas metades".
+2. **Nenhum código deste repo o remove**: instrumentados `unpublish_port`, `slirp_remove_hostfwd`,
+   **todos** os comandos não-`list` do `slirp_api` (apanha o `remove_hostfwd` que o
+   `reap_orphan_hostfwds` envia directamente) e o `control_send`. Zero ocorrências, sempre.
+3. Slirp e holder **não reiniciam** (mesmo pid); o `control_loop` do holder não tem nada periódico.
+4. Um hostfwd metido **à mão** pelo api-socket, sem delonix envolvido, **também** desaparece.
+5. **Não é bug do slirp4netns**: um slirp de sala limpa, mesmas flags, alvo `unshare -r -n`,
+   manteve o hostfwd os 33s todos.
 
-**Facto que aponta a causa** (medido, não suposto):
+**Causa-raiz, provada com SIGSTOP** (congelar os engines, sem matar nada):
 ```
-slirp do ingress, list_hostfwd:
-  28080 -> 10.0.2.100:28080     <- `web` (container normal), publicado
-  (nenhuma entrada para o 6443 do nó)
-nó: ports=['6443:6443'] ip=10.210.156.5
+engines A CORRER   → hostfwd criado a t=0,00s · DESAPARECE a t=12,01s
+engines CONGELADOS → hostfwd criado a t=0,00s · PERSISTE os 30s todos
 ```
-Duas coisas de uma vez: (1) o nó não tem hostfwd nenhum; (2) o do `web` aponta
-para `10.0.2.100` — o IP do SLIRP, não o IP do container na rede (`10.210.x`).
-Ou seja, mesmo o publish que "funciona" vai pelo caminho do slirp e não pelo
-DNAT do ingress para o IP real. Suspeita a confirmar: `publish_port` chamado do
-2.º passo do re-exec (dentro do `nsenter -m -n` do holder) não fala com o
-ingress como se espera. NÃO investigado até ao fim — não inventar a causa.
+É o **`delonix-engine` (delonix-paas, produto PRIVADO)** a reapar portas que não são dele:
+`crates/delonix-api/src/ui.rs:12937` chama `reap_orphan_hostfwds(&live)` com um `live` que só tem os
+containers DELE — logo tudo o que a CLI do runtime publica é, para ele, um órfão. Agravante:
+`crates/delonix-api/Cargo.toml:15` fixa `delonix-net` na **tag v0.1.0**, a versão ANTIGA do reaper
+(a do fail-open: lista vazia ⇒ "nada em uso" ⇒ apaga tudo). Por isso é que remover o chamador AQUI
+(`9bbbd11`) não mudou nada: a cópia que corre é a do PaaS.
 
-**Contexto que custou horas a descobrir e não se deve repetir**: processos
-`delonix` de longa duração (supervisores de `--restart`, log shims) continuam a
-correr o BINÁRIO DA ALTURA EM QUE NASCERAM. Um `reap_orphan_net` com o bug
-antigo (`store.list().unwrap_or_default()` → live={} → apaga TODOS os hostfwds)
-sobreviveu ao fix em disco e andou a sabotar os testes do código novo. Antes de
-concluir "o fix não funcionou", correr `pgrep -af '^~/.local/bin/delonix'` e
-matar os processos velhos. Isto é também um problema de PRODUÇÃO real: não há
-forma de dizer aos supervisores para recarregarem o binário.
+**A correcção NÃO é neste repo** (regra de isolamento) — é no `delonix-paas`: o engine não pode
+reapar hostfwds que não criou, e o pin de `delonix-net` tem de subir. Do lado de cá, o que faz
+sentido é defesa em profundidade: **`reap_orphan_hostfwds` é código morto (zero chamadores) e é uma
+armadilha para consumidores** — uma função pública que apaga estado partilhado e falha ABERTO com
+lista vazia. Apagar, ou pôr a fail-closed.
 
-**Também em aberto**: o `refcount` do ingress vaza (16 com 3 containers vivos).
+**Ferramenta que ficou**: `DELONIX_TRACE_UNPUBLISH=<ficheiro|stderr>` regista quem despublica
+(função, porta, pid/ppid/exe + backtrace), no `slirp_api`/`control_send`/`unpublish_port`. Custo
+zero sem a env var. Foi o que permitiu ILIBAR este repo — sem isto voltava-se a suspeitar do código
+errado.
+
+**Continua em aberto**: o `refcount` do ingress vaza (16 com 3 containers vivos).
+
+Ver [docs/RELATORIO-PRE-PRODUCAO.md](docs/RELATORIO-PRE-PRODUCAO.md) para a bateria E2E completa
+(139 PASS / 1 FAIL) e a lista de gaps.
 
 ## Próximas fases (pedidas, não implementadas — cada uma precisa da sua própria sessão de planeamento)
 
