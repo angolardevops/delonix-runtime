@@ -9,6 +9,7 @@ members = [
     "crates/delonix-vm",
     "crates/delonix-volume",
     "crates/delonix-cri",
+    "crates/delonix-scan",
 ]
 
 [workspace.package]

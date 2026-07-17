@@ -1,0 +1,42 @@
+[
+  {
+    "id": "CVE-2022-48174",
+    "package": "busybox",
+    "ecosystem": "Apk",
+    "fixed": "1.37.0",
+    "severity": "high",
+    "summary": "busybox ash: stack overflow na expansao aritmetica de variaveis"
+  },
+  {
+    "id": "CVE-2023-45853",
+    "package": "zlib",
+    "ecosystem": "Apk",
+    "fixed": "1.3",
+    "severity": "medium",
+    "summary": "zlib/minizip: integer overflow em zipOpenNewFileInZip4_64"
+  },
+  {
+    "id": "CVE-2024-6119",
+    "package": "libssl3",
+    "ecosystem": "Apk",
+    "fixed": "3.1.7",
+    "severity": "high",
+    "summary": "OpenSSL: leitura fora dos limites na verificacao de nome (DoS)"
+  },
+  {
+    "id": "CVE-2019-18276",
+    "package": "bash",
+    "ecosystem": "Dpkg",
+    "fixed": "5.1",
+    "severity": "high",
+    "summary": "bash: escalada via drop de privilegios incompleto em binarios setuid"
+  },
+  {
+    "id": "CVE-2021-3999",
+    "package": "libc6",
+    "ecosystem": "Dpkg",
+    "fixed": "2.34",
+    "severity": "high",
+    "summary": "glibc: off-by-one em getcwd permite escrita fora dos limites"
+  }
+]
