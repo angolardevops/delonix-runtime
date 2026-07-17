@@ -1,0 +1,54 @@
+# Container — the everyday workload. Apply with:  delonix container apply -f examples/container.yaml
+# Every field below is optional except `image`; the values shown are the defaults.
+apiVersion: delonix.io/v1
+kind: Container
+metadata:
+  name: web
+spec:
+  image: nginx:alpine         # required — the only mandatory field
+  # command + args override the image ENTRYPOINT/CMD (docker semantics):
+  command: []                 # e.g. ["nginx", "-g", "daemon off;"]
+  entrypoint: null            # override the image ENTRYPOINT ("" clears it)
+  detach: true                # run in the background (a manifest is declarative)
+  restart: always             # no | on-failure[:max] | always | unless-stopped
+  # --- network ---
+  network: host               # host | none | <a network created by `network create`>
+  ports: []                   # ["8080:80"] — gives the container its own netns + slirp NAT
+  networkAlias: []            # DNS aliases on the network
+  knows: []                   # restrict name resolution to these containers (isolation)
+  netBps: null                # egress rate limit (e.g. "10mbit"), only with a custom network
+  netBurst: null              # burst for netBps
+  # --- storage ---
+  volumes: []                 # ["data:/var/lib", "/host/path:/inside:ro"]
+  tmpfs: []                   # ["/scratch"]
+  # --- resources (cgroup v2) ---
+  memory: max                 # 64M | 2G | max (no cap)
+  cpus: "1.0"                 # CPU cores
+  cpuWeight: null             # relative CPU weight under contention (1-10000)
+  cpuset: null                # pin to CPUs, e.g. "0-3"
+  ioWeight: null              # relative I/O weight
+  # --- env & secrets ---
+  env: []                     # ["KEY=value"]
+  envFile: []                 # ["./.env"]
+  secret: []                  # vault secret names (see `delonix secret`); injected as env
+  secretFiles: false          # true → secrets go to /run/secrets/<name> instead of env
+  # --- security ---
+  privileged: false           # all caps, seccomp off — trusted workloads only
+  readOnly: false             # read-only rootfs (writes go to tmpfs/volumes)
+  capAdd: []                  # ["NET_ADMIN"]
+  capDrop: []                 # ["MKNOD"]
+  securityOpt: []             # ["seccomp=unconfined", "apparmor=<profile>"]
+  apparmor: null              # AppArmor profile
+  selinux: null               # SELinux context
+  userns: false               # force the subuid user namespace (default-on in rootless)
+  hostPid: false              # share the host PID namespace
+  hostIpc: false              # share the host IPC namespace
+  detect: false               # seccomp in log mode — discover the syscalls a workload uses
+  # --- devices & limits ---
+  devices: []                 # ["/dev/fuse"]
+  gpus: null                  # all | nvidia | dri
+  ulimit: []                  # ["nofile=1024:2048"]
+  sysctl: []                  # ["net.core.somaxconn=1024"]
+  # --- misc ---
+  labels: []                  # ["tier=frontend"]
+  logDriver: null             # json | cri
