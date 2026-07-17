@@ -3110,9 +3110,20 @@ pub fn exec(container: &Container, argv: &[String], tty: bool) -> Result<i32> {
                         }
                     }
                     set_no_new_privs();
-                    let exec_keep = resolve_cap_keep(&container.cap_drop, &container.cap_add);
+                    // Espelha o confinamento do INIT (ver `spawn`): um container
+                    // `--privileged` mantém TODAS as caps também no `exec` — sem
+                    // isto, `exec` caía sempre no conjunto default (KEPT_CAPS, sem
+                    // CAP_NET_ADMIN), e depurar um nó Kind por dentro (`nft`,
+                    // `iptables`) dava "Operation not permitted" apesar de o init
+                    // ter as caps. Docker/podman: `exec` herda o perfil do container.
+                    let exec_keep = if container.privileged {
+                        all_caps_mask()
+                    } else {
+                        resolve_cap_keep(&container.cap_drop, &container.cap_add)
+                    };
                     drop_capabilities(exec_keep); // mesmo confinamento
-                    let exec_unconf = container.seccomp.as_deref() == Some("unconfined");
+                    let exec_unconf =
+                        container.privileged || container.seccomp.as_deref() == Some("unconfined");
                     apply_seccomp(exec_unconf, container.seccomp.as_deref() == Some("detect"));
                     // FAIL-CLOSED: o processo do `exec` tem de ficar tão confinado como
                     // o init do container; aborta se algum controlo falhou em silêncio.
