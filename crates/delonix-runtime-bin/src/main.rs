@@ -104,6 +104,11 @@ enum Cmd {
         #[command(subcommand)]
         action: cmd::kube::KubeCmd,
     },
+    /// Gestão de baixo nível da infra de ingress rootless (up/status/attach/publish/firewall).
+    Netns {
+        #[command(subcommand)]
+        action: cmd::netns::NetnsCmd,
+    },
     /// Serve o endpoint CRI (`runtime.v1`) num socket unix — substitui o
     /// containerd/CRI-O para um kubelet falar com o Delonix.
     Cri {
@@ -137,6 +142,7 @@ fn run() -> Result<()> {
         Cmd::System { action } => cmd::system::run(action),
         Cmd::Cluster { action } => cmd::cluster::run(action),
         Cmd::Kube { action } => cmd::kube::run(action),
+        Cmd::Netns { action } => cmd::netns::run(action),
         Cmd::Cri { addr } => {
             let addr = addr
                 .or_else(|| std::env::var("DELONIX_CRI_ADDR").ok())

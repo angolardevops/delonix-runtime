@@ -42,6 +42,16 @@ pub enum SystemCmd {
         #[arg(short, long)]
         all: bool,
     },
+    /// Ligações de rede activas por container (via conntrack): quem entra, quem
+    /// sai, e entre containers. Actualiza em contínuo (ver `--no-stream`).
+    Monitor {
+        /// Milissegundos entre actualizações (mínimo 300).
+        #[arg(long, default_value_t = 1000)]
+        interval: u64,
+        /// Uma amostra e sai (sem limpar o ecrã nem repetir).
+        #[arg(long = "no-stream")]
+        no_stream: bool,
+    },
     /// Governador térmico: baixa o orçamento de CPU do Delonix quando o CPU
     /// aquece e repõe-no quando arrefece. Corre em contínuo (ver `--once`).
     Thermal {
@@ -69,8 +79,74 @@ pub fn run(action: SystemCmd) -> Result<()> {
         SystemCmd::Info => cmd_info(),
         SystemCmd::Df => cmd_df(),
         SystemCmd::Prune { all } => cmd_prune(all),
+        SystemCmd::Monitor { interval, no_stream } => cmd_monitor(interval, no_stream),
         SystemCmd::Virt { tune } => cmd_virt(tune),
         SystemCmd::Thermal { high, low, floor, interval, once } => cmd_thermal(high, low, floor, interval, once),
+    }
+}
+
+/// `system monitor` — ligações de rede activas por container, via conntrack.
+///
+/// Lê o conntrack do host (`delonix_net::list_connections`), mapeando cada IP
+/// para o nome do container que o tem, e classifica cada ligação: de fora para
+/// um container (alguém a aceder), de um container para o exterior (egress), ou
+/// entre containers. Actualiza em contínuo salvo `--no-stream`.
+fn cmd_monitor(interval: u64, no_stream: bool) -> Result<()> {
+    use delonix_runtime::is_alive;
+    let (_images, store) = open_stores()?;
+    loop {
+        let conts = store.list().unwrap_or_default();
+        let ip2name: std::collections::HashMap<String, String> = conts
+            .iter()
+            .filter(|c| c.pid.map(is_alive).unwrap_or(false))
+            .filter_map(|c| c.ip.clone().map(|ip| (ip, c.name.clone())))
+            .collect();
+        let conns = delonix_net::list_connections(&ip2name);
+        if !no_stream {
+            print!("\x1b[2J\x1b[H"); // limpa o ecrã
+        }
+        println!(
+            "delonix monitor — {} {}, {} {}\n",
+            ip2name.len(),
+            super::output::tr("containers", "containers"),
+            conns.len(),
+            super::output::tr("active connections (conntrack)", "ligações activas (conntrack)"),
+        );
+        if ip2name.is_empty() {
+            println!("  {}", super::output::dim(super::output::tr("(no running containers with a network)", "(sem containers com rede a correr)")));
+        }
+        let mut ext_in: Vec<&delonix_net::Connection> = conns.iter().filter(|c| c.kind == "external_in").collect();
+        let mut egress: Vec<&delonix_net::Connection> = conns.iter().filter(|c| c.kind == "egress").collect();
+        let internal: Vec<&delonix_net::Connection> = conns.iter().filter(|c| c.kind == "internal").collect();
+        ext_in.sort_by(|a, b| a.container.cmp(&b.container));
+        egress.sort_by(|a, b| a.container.cmp(&b.container));
+        if !ext_in.is_empty() {
+            println!("  ⬇ {}", super::output::tr("INBOUND → CONTAINER (external access)", "DE FORA → CONTAINER (acesso externo)"));
+            for c in &ext_in {
+                println!("    {:<22} ← {}:{}/{}", c.container, c.peer, c.port, c.proto);
+            }
+            println!();
+        }
+        if !egress.is_empty() {
+            println!("  ⬆ {}", super::output::tr("CONTAINER → OUTBOUND (egress)", "CONTAINER → EXTERIOR (saídas)"));
+            for c in &egress {
+                println!("    {:<22} → {}:{}/{}", c.container, c.peer, c.port, c.proto);
+            }
+            println!();
+        }
+        if !internal.is_empty() {
+            println!("  ⇄ {}", super::output::tr("BETWEEN CONTAINERS", "ENTRE CONTAINERS"));
+            for c in &internal {
+                println!("    {} ↔ {}", c.container, c.peer);
+            }
+        }
+        if conns.is_empty() && !ip2name.is_empty() {
+            println!("  {}", super::output::dim(super::output::tr("(no active connections right now)", "(sem ligações activas neste momento)")));
+        }
+        if no_stream {
+            return Ok(());
+        }
+        std::thread::sleep(std::time::Duration::from_millis(interval.max(300)));
     }
 }
 
