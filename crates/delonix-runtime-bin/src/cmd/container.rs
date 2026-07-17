@@ -296,9 +296,6 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
     for spec in &ports {
         delonix_net::parse_publish(spec)?;
     }
-    if !ports.is_empty() {
-        reap_orphan_net(store);
-    }
     if net == "none" && !ports.is_empty() {
         return Err(Error::Invalid("-p/--publish não é compatível com --net none (netns sem ligação)".into()));
     }
@@ -413,7 +410,7 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
     // container a correr. Limpeza no stop/rm (`unpublish_ports`).
     if let Some(ip) = &attached_ip {
         for spec in &ports {
-            if let Err(e) = infra::publish_port(ip, spec) {
+            if let Err(e) = publish_with_retry(ip, spec) {
                 unpublish_ports(&c);
                 infra::detach_container(&id, ip);
                 return Err(e);
@@ -647,9 +644,8 @@ fn run_supervised(
                 Ok(_) => {}
             }
             restarts += 1;
-            // Liberta a porta/slirp da encarnação anterior antes de a reusar —
-            // senão o `add_hostfwd` do restart falha (ver `reap_orphan_net`).
-            reap_orphan_net(store);
+            // A porta da encarnação anterior liberta-se sozinha no `stop`; se
+            // ainda estiver presa, o `publish_with_retry` do restart limpa-a.
             // Backoff exponencial travado (1s→32s), como o docker: um container
             // que crasha em ciclo não pode queimar o nó.
             let backoff = std::cmp::min(1u64 << std::cmp::min(restarts, 5), 32);
@@ -803,30 +799,31 @@ pub(crate) fn port_owner(store: &Store, host_port: &str) -> Result<Option<String
 /// workspace. Barato (uma passagem por `/proc` + 1 query ao api-socket) e
 /// seguro (só mexe em slirps cujo pid-alvo já não existe e em hostfwds sem
 /// container vivo).
-fn reap_orphan_net(store: &Store) {
-    let _ = delonix_net::reap_orphan_slirp();
-    // FAIL-CLOSED. `store.list()` a falhar dava `unwrap_or_default()` = lista
-    // VAZIA → `live` vazio → o reaper apagava TODOS os hostfwds, incluindo os de
-    // containers vivos. Um reaper que, ao perder a visão do estado, destrói tudo
-    // é pior que reaper nenhum: o cluster ficava a correr com o apiserver
-    // inalcançável (`connection refused` no kubectl) e nada no log a dizer
-    // porquê. Sem certeza do que está vivo, NÃO se reapa — um hostfwd órfão a
-    // mais custa uma porta; apagar os vivos custa o cluster.
-    let all = match store.list() {
-        Ok(v) => v,
+/// Publica uma porta; se falhar por a porta estar presa por um **processo
+/// órfão** (o container morreu sem `stop` e o slirp ficou a segurá-la), limpa
+/// SÓ essa e tenta outra vez.
+///
+/// Porquê assim e não a varrer tudo antes: o reaper preventivo corria a CADA
+/// `run` com portas e apagava por omissão — bastava a lista de containers vir
+/// vazia (um erro de leitura, ou uma vista do store sem os registos) para
+/// `live_ports` ficar vazio e ele concluir que NADA está em uso, apagando os
+/// hostfwds de containers VIVOS. Foi isso que pôs o apiserver de um cluster
+/// `Ready` inalcançável e fez dois containers com `-p` nunca coexistirem.
+/// Aqui a limpeza é REACTIVA e cirúrgica: só acontece quando a porta que
+/// queremos falha, e só toca nessa. Sem conflito, não se apaga nada — e um
+/// erro de leitura do estado deixa de poder destruir o que está a funcionar.
+fn publish_with_retry(ip: &str, spec: &str) -> Result<()> {
+    match infra::publish_port(ip, spec) {
+        Ok(()) => Ok(()),
         Err(e) => {
-            eprintln!("delonix: aviso — não consegui ler o estado ({e}); a saltar a limpeza de portas órfãs");
-            return;
+            let (hp, _, _) = delonix_net::parse_publish(spec)?;
+            // Órfãos primeiro (slirp de container morto ainda a segurar a porta),
+            // depois o hostfwd dessa porta em concreto.
+            let _ = delonix_net::reap_orphan_slirp();
+            infra::unpublish_port(&hp);
+            infra::publish_port(ip, spec).map_err(|_| e)
         }
-    };
-    let live: std::collections::HashSet<u32> = all
-        .iter()
-        .filter(|c| matches!(c.status, delonix_runtime_core::Status::Running | delonix_runtime_core::Status::Paused))
-        .flat_map(|c| c.ports.iter())
-        .filter_map(|s| delonix_net::parse_publish(s).ok())
-        .filter_map(|(hp, _, _)| hp.parse::<u32>().ok())
-        .collect();
-    let _ = infra::reap_orphan_hostfwds(&live);
+    }
 }
 
 /// Remove as publicações de ingress de um container (best-effort, idempotente).
