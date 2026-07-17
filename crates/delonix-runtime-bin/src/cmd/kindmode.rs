@@ -45,7 +45,8 @@ pub(crate) const DEFAULT_NODE_IMAGE: &str =
 pub(crate) struct KindCluster {
     pub name: String,
     pub image: String,
-    pub api_port: u16,
+    /// `None` = o delonix escolhe uma livre (ver `pick_api_port`).
+    pub api_port: Option<u16>,
     pub pod_subnet: String,
     pub service_subnet: String,
     /// `default` = a CNI da imagem (kindnet); `none` = não instalar nenhuma
@@ -58,34 +59,80 @@ pub(crate) struct KindCluster {
     pub workers: u32,
 }
 
-/// Escreve um ficheiro DENTRO do nó. Vai directo ao rootfs no host (é um
-/// caminho normal do sistema de ficheiros) em vez de passar por heredocs no
-/// `exec` — o conteúdo é YAML com aspas, `#` e indentação, e passá-lo por uma
-/// shell seria um convite a bugs de escape.
-fn write_node_file(c: &Container, path_in_node: &str, content: &str) -> Result<()> {
-    let base = super::util::state_root()
-        .join("containers")
-        .join(&c.id)
-        .join("rootfs")
-        .join(path_in_node.trim_start_matches('/'));
-    if let Some(dir) = base.parent() {
-        std::fs::create_dir_all(dir)?;
+/// A porta está livre? Verifica os DOIS sítios que importam: nenhum container
+/// vivo a publica (o nosso store) e nada no host a tem presa (bind de teste).
+/// Só o store não chega — um processo qualquer da máquina pode estar lá.
+fn port_free(store: &Store, port: u16) -> bool {
+    if super::container::port_owner(store, &port.to_string()).ok().flatten().is_some() {
+        return false;
     }
-    std::fs::write(&base, content)
-        .map_err(|e| Error::Invalid(format!("a escrever {path_in_node} no nó ({}): {e}", base.display())))?;
-    Ok(())
+    // O bind de teste liberta-se logo a seguir (o listener cai). Há uma janela
+    // de corrida até o slirp a tomar — inevitável sem um alocador central, e
+    // benigna: no pior caso o `run` falha com o erro claro de porta ocupada.
+    std::net::TcpListener::bind(("127.0.0.1", port)).is_ok()
 }
 
-/// Lê um ficheiro DE DENTRO do nó (o rootfs é um caminho do host).
-fn read_node_file(c: &Container, path_in_node: &str) -> Result<String> {
-    let p = super::util::state_root()
-        .join("containers")
-        .join(&c.id)
-        .join("rootfs")
-        .join(path_in_node.trim_start_matches('/'));
-    std::fs::read_to_string(&p)
-        .map_err(|e| Error::Invalid(format!("a ler {path_in_node} do nó ({}): {e}", p.display())))
+/// Escolhe a porta do apiserver.
+///
+/// **Explícito manda; default é esperto.** Com `--api-port` dado, respeita-se e
+/// falha-se claro se estiver ocupada (o utilizador pediu AQUELA porta — dar-lhe
+/// outra em silêncio seria pior que o erro). Sem flag, tenta a 6443 (a
+/// convenção) e, se estiver tomada — tipicamente por outro cluster já a correr —
+/// escolhe uma alta livre em vez de chatear: criar um 2.º cluster não devia
+/// obrigar a inventar portas à mão.
+fn pick_api_port(store: &Store, preferred: Option<u16>, cluster: &str) -> Result<u16> {
+    if let Some(p) = preferred {
+        if !port_free(store, p) {
+            let by = super::container::port_owner(store, &p.to_string())
+                .ok()
+                .flatten()
+                .map(|n| format!(" (pelo container '{n}')"))
+                .unwrap_or_default();
+            return Err(Error::Invalid(format!(
+                "a porta {p} já está em uso{by} — escolhe outra com `--api-port` ou omite a flag \
+                 para o delonix escolher uma livre"
+            )));
+        }
+        return Ok(p);
+    }
+    if port_free(store, DEFAULT_API_PORT) {
+        return Ok(DEFAULT_API_PORT);
+    }
+    // 6443 tomada: procura uma alta livre. O intervalo é dos efémeros altos,
+    // longe das portas de serviço.
+    for p in 36443..36543 {
+        if port_free(store, p) {
+            eprintln!("porta {DEFAULT_API_PORT} ocupada — o cluster '{cluster}' usa a {p}");
+            return Ok(p);
+        }
+    }
+    Err(Error::Invalid(
+        "não encontrei nenhuma porta livre para o apiserver (6443 e 36443-36542 ocupadas)".into(),
+    ))
 }
+
+/// A porta convencional do apiserver — a primeira escolha.
+pub(crate) const DEFAULT_API_PORT: u16 = 6443;
+
+/// Directório do cluster no HOST, montado em `/kind/delonix` dentro de cada nó.
+///
+/// **Porquê um bind mount e não escrever no rootfs**: com `--net <rede>` o
+/// container é criado pelo 2.º passo do re-exec, que corre dentro do MOUNT
+/// namespace do holder — o overlay do rootfs é montado LÁ e é invisível daqui.
+/// Do host, o `merged/` aparece vazio e qualquer ficheiro que lá escrevêssemos
+/// (ou lêssemos) nunca chegaria ao container: foi assim que o kubeadm ficou a
+/// dizer `unable to read config from /kind/delonix-kubeadm.conf` com o ficheiro
+/// a existir no disco. Nenhuma resolução de caminho resolve isto — a montagem
+/// simplesmente não está no nosso namespace.
+/// Um bind mount é montado PELO RUNTIME durante a criação do container, dentro
+/// do namespace certo, e o mesmo directório fica visível dos dois lados: é a
+/// ponte que faltava (e o mecanismo já existia, `-v /host:/dest`).
+fn cluster_dir(name: &str) -> std::path::PathBuf {
+    super::util::state_root().join("clusters").join(name)
+}
+
+/// Onde o `cluster_dir` aparece DENTRO do nó.
+const NODE_SHARED: &str = "/kind/delonix";
 
 /// Corre um comando dentro do nó e devolve o código de saída.
 fn node_exec(c: &Container, script: &str) -> Result<i32> {
@@ -139,7 +186,9 @@ fn boot_node(
             name: Some(node.to_string()),
             // Rede do cluster: é isto que faz os nós verem-se (ver `cluster_net`).
             net: cluster_net(&cfg.name),
-            volumes: Vec::new(),
+            // A ponte host<->nó (ver `cluster_dir`): sem isto não há como pôr o
+            // kubeadm.conf lá dentro nem trazer o join/kubeconfig cá para fora.
+            volumes: vec![format!("{}:{NODE_SHARED}", cluster_dir(&cfg.name).display())],
             ports: publish,
             privileged: true,
             entrypoint: None,
@@ -174,7 +223,9 @@ pub(crate) fn create(images: &ImageStore, store: &Store, cfg: &KindCluster) -> R
         )));
     }
 
-    // A rede do cluster primeiro: os nós têm de nascer todos nela.
+    // O dir partilhado tem de existir ANTES do 1.º nó (é o alvo do bind mount).
+    std::fs::create_dir_all(cluster_dir(&cfg.name))?;
+    // A rede do cluster: os nós têm de nascer todos nela.
     let net = cluster_net(&cfg.name);
     let nstore = delonix_net::NetworkStore::open(super::util::state_root())?;
     if nstore.get(&net).is_err() {
@@ -186,7 +237,10 @@ pub(crate) fn create(images: &ImageStore, store: &Store, cfg: &KindCluster) -> R
         eprintln!("rede '{net}' criada");
     }
 
-    let c = boot_node(images, store, cfg, &node, "control-plane", vec![format!("{}:6443", cfg.api_port)])?;
+    // Resolve a porta ANTES de arrancar o nó: um 2.º cluster não deve rebentar
+    // só porque a 6443 está tomada.
+    let api_port = pick_api_port(store, cfg.api_port, &cfg.name)?;
+    let c = boot_node(images, store, cfg, &node, "control-plane", vec![format!("{api_port}:6443")])?;
     // O IP REAL do nó na rede do cluster. Com `--net host -p` era o do slirp
     // (10.0.2.100, igual em todos os nós e inalcançável de fora dele); numa rede
     // partilhada cada nó tem o seu — e é este que o apiserver anuncia e os
@@ -235,15 +289,17 @@ pub(crate) fn create(images: &ImageStore, store: &Store, cfg: &KindCluster) -> R
         pods = cfg.pod_subnet,
         svcs = cfg.service_subnet,
     );
-    write_node_file(&c, "/kind/delonix-kubeadm.conf", &kubeadm_conf)?;
+    std::fs::write(cluster_dir(&cfg.name).join("kubeadm.conf"), &kubeadm_conf)?;
 
     eprintln!("a correr `kubeadm init` (puxa as imagens do control-plane — pode demorar)...");
     node_must(
         &c,
         "kubeadm init",
-        "kubeadm init --config /kind/delonix-kubeadm.conf \
-         --ignore-preflight-errors=Swap,SystemVerification,FileContent--proc-sys-net-bridge-bridge-nf-call-iptables,Mem,NumCPU \
-         2>&1 | tail -3",
+        &format!(
+            "kubeadm init --config {NODE_SHARED}/kubeadm.conf \
+             --ignore-preflight-errors=Swap,SystemVerification,FileContent--proc-sys-net-bridge-bridge-nf-call-iptables,Mem,NumCPU \
+             2>&1 | tail -3"
+        ),
     )?;
 
     // --- CNI (senão o nó fica NotReady para sempre) ---
@@ -282,25 +338,27 @@ pub(crate) fn create(images: &ImageStore, store: &Store, cfg: &KindCluster) -> R
     if cfg.workers > 0 {
         // O token do `join` vale 24h e vem do control-plane. `--print-join-command`
         // devolve a linha inteira (token + hash do CA) — não a construímos à mão.
-        let join_file = "/kind/join.sh";
+        // O CP escreve o join no dir PARTILHADO — e o host lê-o de lá. Ler do
+        // rootfs não funcionaria (ver `cluster_dir`).
         node_must(
             &c,
             "gerar o comando de join",
             &format!(
                 "KUBECONFIG=/etc/kubernetes/admin.conf kubeadm token create --print-join-command \
-                 > {join_file} 2>/dev/null && chmod +x {join_file}"
+                 > {NODE_SHARED}/join.sh 2>/dev/null"
             ),
         )?;
-        let join_cmd = read_node_file(&c, join_file)?;
-        let join_cmd = join_cmd.trim();
+        let join_cmd = std::fs::read_to_string(cluster_dir(&cfg.name).join("join.sh"))
+            .map_err(|e| Error::Invalid(format!("a ler o comando de join: {e}")))?;
+        let join_cmd = join_cmd.trim().to_string();
         for i in 1..=cfg.workers {
             let wnode = format!("{}-worker{}", cfg.name, if i == 1 { String::new() } else { i.to_string() });
             let w = boot_node(images, store, cfg, &wnode, "worker", Vec::new())?;
             // O worker precisa da MESMA receita rootless do control-plane: a
             // feature gate e o swap valem para qualquer kubelet, não só o do CP.
-            write_node_file(
-                &w,
-                "/kind/delonix-join.conf",
+            let _ = &w; // o config do worker vai pela ponte partilhada
+            std::fs::write(
+                cluster_dir(&cfg.name).join("join-kubelet.conf"),
                 "apiVersion: kubelet.config.k8s.io/v1beta1\n\
                  kind: KubeletConfiguration\n\
                  cgroupDriver: systemd\n\
@@ -312,7 +370,7 @@ pub(crate) fn create(images: &ImageStore, store: &Store, cfg: &KindCluster) -> R
                 &w,
                 &format!("join do worker '{wnode}'"),
                 &format!(
-                    "{join_cmd} --config /kind/delonix-join.conf \
+                    "{join_cmd} --config {NODE_SHARED}/join-kubelet.conf \
                      --ignore-preflight-errors=Swap,SystemVerification,FileContent--proc-sys-net-bridge-bridge-nf-call-iptables,Mem,NumCPU \
                      2>&1 | tail -3"
                 ),
@@ -330,7 +388,7 @@ pub(crate) fn create(images: &ImageStore, store: &Store, cfg: &KindCluster) -> R
         )?;
     }
 
-    write_kubeconfig(&c, &cfg.name, cfg.api_port)?;
+    write_kubeconfig(&c, &cfg.name, api_port)?;
     println!("cluster '{}' pronto — kubectl --kubeconfig {} get nodes", cfg.name, kubeconfig_path(&cfg.name).display());
     Ok(())
 }
@@ -346,17 +404,16 @@ fn write_kubeconfig(c: &Container, name: &str, api_port: u16) -> Result<()> {
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
     }
-    let tmp = format!("/tmp/delonix-kubeconfig-{name}");
+    // O nó escreve no dir PARTILHADO; o host lê de lá (ver `cluster_dir`).
     node_must(
         c,
         "exportar o kubeconfig",
         &format!(
             "sed 's|server: https://.*:6443|server: https://127.0.0.1:{api_port}|' \
-             /etc/kubernetes/admin.conf > {tmp}"
+             /etc/kubernetes/admin.conf > {NODE_SHARED}/kubeconfig.yaml"
         ),
     )?;
-    // O rootfs do nó é um caminho do host — lê-se directamente, sem `cp` remoto.
-    let src = super::util::state_root().join("containers").join(&c.id).join("rootfs").join(tmp.trim_start_matches('/'));
+    let src = cluster_dir(name).join("kubeconfig.yaml");
     let data = std::fs::read(&src)
         .map_err(|e| Error::Invalid(format!("a ler o kubeconfig do nó ({}): {e}", src.display())))?;
     std::fs::write(&path, data)?;
