@@ -12,7 +12,9 @@ use clap::Subcommand;
 use clap_complete::engine::ArgValueCandidates;
 use delonix_net::{infra, NetworkStore};
 use delonix_runtime_core::{fw_port_ok, fw_proto_ok, fw_src_ok, Container, Error, FwRule, Result, Store};
+use serde::Deserialize;
 
+use super::manifest::{self, ManifestDoc};
 use super::output;
 use super::util::{open_stores, state_root};
 
@@ -328,6 +330,99 @@ fn egress_net(network: &str, mode: EgressMode, to: Option<String>) -> Result<()>
             infra::set_egress_policy_net_allowlist(&bridge, &cidrs)?;
             println!("network {network}: egress DENIED except DNS + {}", cidrs.join(", "));
         }
+    }
+    Ok(())
+}
+
+// ---- declarative: `kind: Ingress` / `kind: Egress` ---------------------------
+
+/// A `kind: Ingress`/`Egress` document. Each doc is the DESIRED STATE of one
+/// direction (inbound for `Ingress`, outbound for `Egress`) for its `target`
+/// container — applying it REPLACES that direction's rules and policy, leaving
+/// the other direction untouched, so an `Ingress` and an `Egress` doc compose
+/// on the same container. Allowlist by default (`defaultPolicy: deny`), like a
+/// k8s NetworkPolicy.
+#[derive(Deserialize)]
+struct FwDocSpec {
+    /// Target container (name). Must exist and be on a custom network.
+    target: String,
+    /// `allow` or `deny` when no rule matches. Default `deny` (allowlist).
+    #[serde(default, rename = "defaultPolicy")]
+    default_policy: Option<String>,
+    #[serde(default)]
+    rules: Vec<FwDocRule>,
+}
+
+#[derive(Deserialize)]
+struct FwDocRule {
+    /// `tcp`/`udp`/`any` (default `any`).
+    #[serde(default)]
+    proto: Option<String>,
+    /// Port, range `n-m`, or `*`.
+    port: String,
+    /// Source CIDR (Ingress) — the other end of inbound traffic.
+    #[serde(default)]
+    from: Option<String>,
+    /// Destination CIDR (Egress) — the other end of outbound traffic.
+    #[serde(default)]
+    to: Option<String>,
+    /// `allow` (default) or `deny`.
+    #[serde(default)]
+    action: Option<String>,
+    #[serde(default)]
+    note: Option<String>,
+}
+
+/// Applies every `Ingress` and `Egress` document in the manifest. Called last in
+/// `stack apply` (the target containers must already exist).
+pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
+    let (_images, store) = open_stores()?;
+    apply_kind(&store, docs, "Ingress", "in")?;
+    apply_kind(&store, docs, "Egress", "out")?;
+    Ok(())
+}
+
+fn apply_kind(store: &Store, docs: &[ManifestDoc], kind: &str, dir: &str) -> Result<()> {
+    for doc in manifest::of_kind(docs, kind) {
+        let spec: FwDocSpec = manifest::spec_of(doc)?;
+        let mut c = store.load(&spec.target)?;
+        let ip = require_sdn_ip(&c)?;
+        let mut fw = c.firewall.clone().unwrap_or_default();
+        fw.enabled = true;
+        // Declarative: this direction is fully replaced by the document.
+        fw.rules.retain(|r| r.dir != dir);
+        let policy = spec.default_policy.as_deref().unwrap_or("deny");
+        if !matches!(policy, "allow" | "deny") {
+            return Err(Error::Invalid(format!("{kind}/{}: defaultPolicy must be allow|deny", doc.metadata.name)));
+        }
+        if dir == "in" {
+            fw.policy_in = policy.to_string();
+        } else {
+            fw.policy_out = policy.to_string();
+        }
+        for r in &spec.rules {
+            let proto = r.proto.clone().unwrap_or_else(|| "any".into());
+            if !fw_proto_ok(&proto) {
+                return Err(Error::Invalid(format!("{kind}/{}: invalid proto '{proto}'", doc.metadata.name)));
+            }
+            if !fw_port_ok(&r.port) {
+                return Err(Error::Invalid(format!("{kind}/{}: invalid port '{}'", doc.metadata.name, r.port)));
+            }
+            let src = r.from.clone().or_else(|| r.to.clone()).unwrap_or_default();
+            if !src.is_empty() && !fw_src_ok(&src) {
+                return Err(Error::Invalid(format!("{kind}/{}: invalid CIDR '{src}'", doc.metadata.name)));
+            }
+            let action = r.action.clone().unwrap_or_else(|| "allow".into());
+            if !matches!(action.as_str(), "allow" | "deny") {
+                return Err(Error::Invalid(format!("{kind}/{}: action must be allow|deny", doc.metadata.name)));
+            }
+            fw.rules.push(FwRule { dir: dir.to_string(), proto, port: r.port.clone(), src, action, note: r.note.clone().unwrap_or_default() });
+        }
+        infra::apply_firewall(&c.id, &ip, &fw)?;
+        let n = fw.rules.iter().filter(|r| r.dir == dir).count();
+        c.firewall = Some(fw);
+        store.save(&c)?;
+        println!("{kind}/{}: applied to {} ({n} rule(s), default {policy})", doc.metadata.name, spec.target);
     }
     Ok(())
 }
