@@ -9,6 +9,7 @@ pub mod network;
 pub mod remote;
 pub mod scaffold;
 pub mod stack;
+pub mod system;
 pub mod util;
 pub mod vm;
 pub mod vmimage;
