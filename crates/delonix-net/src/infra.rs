@@ -1734,8 +1734,36 @@ pub fn publish_port_allow(cip: &str, spec: &str, cidrs: &[&str]) -> Result<()> {
 /// Remove a publicação de uma `host_port`: tira o `add_hostfwd` do slirp e o DNAT
 /// da chain `pre`. Best-effort.
 pub fn unpublish_port(host_port: &str) {
+    trace_unpublish("unpublish_port", host_port);
     let _ = slirp_remove_hostfwd(&slirp_sock_path(), host_port);
     let _ = control_send(&format!("unpublish {host_port}"));
+}
+
+/// Regista quem despublicou uma porta, quando `DELONIX_TRACE_UNPUBLISH` está
+/// definido (aponta para um ficheiro; senão vai para o stderr).
+///
+/// Não é debug esquecido no código: há um bug em aberto em que hostfwds de
+/// containers VIVOS desaparecem sem `stop`/`rm`, e a pergunta que o fecha é
+/// "quem os removeu?". Um binário de longa duração (holder, supervisor de
+/// `--restart`, log shim) continua a correr o código de quando NASCEU, por isso
+/// a resposta não se obtém a ler o repo — só instrumentando e reproduzindo.
+/// Custo zero quando a env var não está definida.
+pub fn trace_unpublish(func: &str, host_port: &str) {
+    let Ok(dest) = std::env::var("DELONIX_TRACE_UNPUBLISH") else { return };
+    let pid = std::process::id();
+    let exe = std::fs::read_link("/proc/self/exe").map(|p| p.display().to_string()).unwrap_or_default();
+    let ppid = std::fs::read_to_string("/proc/self/status")
+        .ok()
+        .and_then(|s| s.lines().find(|l| l.starts_with("PPid:")).map(|l| l.trim_start_matches("PPid:").trim().to_string()))
+        .unwrap_or_default();
+    let bt = std::backtrace::Backtrace::force_capture();
+    let line = format!("[trace_unpublish] {func}(port={host_port}) pid={pid} ppid={ppid} exe={exe}\n{bt}\n");
+    if dest == "1" || dest == "stderr" {
+        eprint!("{line}");
+    } else if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&dest) {
+        use std::io::Write;
+        let _ = f.write_all(line.as_bytes());
+    }
 }
 
 /// Reconcilia os `hostfwd` do slirp ÚNICO do ingress contra os ports REALMENTE em
@@ -1780,6 +1808,13 @@ pub fn reap_orphan_hostfwds(live_ports: &std::collections::HashSet<u32>) -> usiz
 fn slirp_api(sock: &Path, json: &str) -> Result<String> {
     use std::io::{Read, Write};
     use std::os::unix::net::UnixStream;
+    // Ponto de estrangulamento de TODOS os comandos ao slirp — inclusive os
+    // `remove_hostfwd` que o `reap_orphan_hostfwds` envia directamente, sem
+    // passar por `slirp_remove_hostfwd`. Instrumentar só as funções nomeadas
+    // deixava esse caminho invisível.
+    if !json.contains("list_hostfwd") {
+        trace_unpublish("slirp_api", json);
+    }
     let mut s = UnixStream::connect(sock).map_err(|e| Error::Runtime {
         context: "slirp api",
         message: e.to_string(),
@@ -1802,6 +1837,7 @@ fn slirp_api(sock: &Path, json: &str) -> Result<String> {
 /// do slirp PRÓPRIO de um container (socket `delonix-slirp-<pid>.sock`), e não
 /// só do slirp único do ingress — que é o que [`unpublish_port`] assume.
 pub fn slirp_remove_hostfwd(sock: &Path, host_port: &str) -> Result<()> {
+    trace_unpublish("slirp_remove_hostfwd", host_port);
     let hp: u32 = host_port.parse().map_err(|_| Error::Invalid("porta inválida".into()))?;
     let listed = slirp_api(sock, r#"{"execute":"list_hostfwd"}"#)?;
     let v: serde_json::Value = serde_json::from_str(&listed).unwrap_or(serde_json::Value::Null);
@@ -1863,6 +1899,11 @@ pub fn container_net_bytes(id: &str) -> Option<(u64, u64)> {
 /// Envia um comando ao socket de controlo do holder e espera `ok`. Tenta
 /// brevemente até o socket existir (o holder cria-o ao arrancar).
 fn control_send(cmd: &str) -> Result<()> {
+    // Só os comandos que DESFAZEM estado — o trace serve para responder a "quem
+    // desligou isto?", e um log de todos os attach/publish afogaria a resposta.
+    if cmd.starts_with("unpublish") || cmd.starts_with("detach") || cmd.starts_with("unfirewall") {
+        trace_unpublish("control_send", cmd);
+    }
     control_query(cmd).map(|_| ())
 }
 
