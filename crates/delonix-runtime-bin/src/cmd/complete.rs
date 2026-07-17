@@ -92,3 +92,11 @@ pub fn clusters() -> Vec<CompletionCandidate> {
     nomes.dedup();
     cands(nomes)
 }
+
+/// Nomes dos segredos do cofre.
+pub fn secrets() -> Vec<CompletionCandidate> {
+    let Ok(store) = delonix_runtime_core::SecretStore::open(state_root()) else {
+        return Vec::new();
+    };
+    cands(store.list().into_iter().map(|s| s.name))
+}
