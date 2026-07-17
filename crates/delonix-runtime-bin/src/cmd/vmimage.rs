@@ -20,6 +20,7 @@ use delonix_runtime_core::{Error, Result};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+use super::output::{self, fmt_local, fmt_size};
 use super::util::state_root;
 
 const VM_IMAGE_MEDIA_TYPE: &str = "application/vnd.delonix.vmimage.v1.qcow2";
@@ -98,6 +99,8 @@ impl VmImageStore {
 pub enum VmImageCmd {
     /// Lista as imagens VM locais.
     Ls,
+    /// Detalhe legível de uma ou mais imagens VM, ao estilo `kubectl describe`.
+    Describe { names: Vec<String> },
     /// Publica uma imagem VM local num registo OCI (artefacto de blob único).
     Push { name: String, target: String },
     /// Puxa uma imagem VM de um registo OCI.
@@ -140,6 +143,7 @@ pub fn run(action: VmImageCmd) -> Result<()> {
     let store = VmImageStore::open(state_root())?;
     match action {
         VmImageCmd::Ls => cmd_ls(&store),
+        VmImageCmd::Describe { names } => cmd_describe(&store, &names),
         VmImageCmd::Push { name, target } => cmd_push(&store, &name, &target),
         VmImageCmd::Pull { source, name } => cmd_pull(&store, &source, name),
         VmImageCmd::Build { tag, ubuntu_release, k8s_version, extra_packages, extra_run, cri_bin, no_compress, offline } => {
@@ -148,57 +152,51 @@ pub fn run(action: VmImageCmd) -> Result<()> {
     }
 }
 
-/// Formata um tamanho em bytes de forma legível (base 1024: B/KiB/MiB/GiB/TiB).
-fn fmt_size(bytes: u64) -> String {
-    const UNITS: [&str; 5] = ["B", "KiB", "MiB", "GiB", "TiB"];
-    if bytes < 1024 {
-        return format!("{bytes} B");
-    }
-    let mut val = bytes as f64;
-    let mut unit = 0;
-    while val >= 1024.0 && unit < UNITS.len() - 1 {
-        val /= 1024.0;
-        unit += 1;
-    }
-    // 2 casas para GiB+, 1 casa para KiB/MiB — legível sem ruído.
-    let prec = if unit >= 3 { 2 } else { 1 };
-    format!("{val:.prec$} {}", UNITS[unit])
-}
-
-/// Formata um instante unix (segundos) como data/hora LOCAL "AAAA-MM-DD HH:MM".
-/// Usa `localtime_r` (honra `/etc/localtime`/`TZ`); em falha, cai no valor cru.
-fn fmt_local(unix: u64) -> String {
-    let t = unix as libc::time_t;
-    let mut tm: libc::tm = unsafe { std::mem::zeroed() };
-    // SAFETY: `t` é válido; `localtime_r` escreve em `tm` (buffer nosso, do
-    // tamanho certo) e devolve NULL só em erro — que tratamos abaixo.
-    let ok = unsafe { !libc::localtime_r(&t, &mut tm).is_null() };
-    if !ok {
-        return unix.to_string();
-    }
-    format!(
-        "{:04}-{:02}-{:02} {:02}:{:02}",
-        tm.tm_year + 1900,
-        tm.tm_mon + 1,
-        tm.tm_mday,
-        tm.tm_hour,
-        tm.tm_min
-    )
-}
-
 fn cmd_ls(store: &VmImageStore) -> Result<()> {
-    println!("{:<28}  {:<10}  {:<10}  {:<17}  {:>10}", "NOME", "UBUNTU", "K8S", "CRIADA", "TAMANHO");
+    let mut t = output::Table::new(&["NAME", "UBUNTU", "K8S", "CREATED", "SIZE"]).right_align(4);
     for img in store.list()? {
-        println!(
-            "{:<28}  {:<10}  {:<10}  {:<17}  {:>10}",
+        t.row(vec![
             img.name,
-            img.ubuntu_release.as_deref().unwrap_or("-"),
-            img.k8s_version.as_deref().unwrap_or("-"),
+            img.ubuntu_release.as_deref().unwrap_or("-").to_string(),
+            img.k8s_version.as_deref().unwrap_or("-").to_string(),
             fmt_local(img.created_unix),
-            fmt_size(img.size)
-        );
+            fmt_size(img.size),
+        ]);
+    }
+    t.print();
+    Ok(())
+}
+
+/// `image --vm describe` — detalhe legível ao estilo `kubectl describe`.
+fn cmd_describe(store: &VmImageStore, names: &[String]) -> Result<()> {
+    for (i, name) in names.iter().enumerate() {
+        let img = store.get(name)?;
+        if i > 0 {
+            println!();
+        }
+        describe_one(store, &img);
     }
     Ok(())
+}
+
+fn describe_one(store: &VmImageStore, img: &VmImage) {
+    let mut d = output::Describe::new();
+    d.field("Name", &img.name);
+    d.field("Tag", &img.tag);
+    d.field("Digest", &img.digest);
+    d.field("Size", fmt_size(img.size));
+    d.field("Created", fmt_local(img.created_unix));
+    d.field("Age", output::fmt_age(img.created_unix));
+    // `pull` NÃO recupera estes metadados (o artefacto OCI só carrega o blob
+    // qcow2) — numa imagem puxada ficam `None`. Ver o gap conhecido no CLAUDE.md.
+    d.field("Ubuntu", img.ubuntu_release.as_deref().unwrap_or("<unknown>"));
+    d.field("K8s", img.k8s_version.as_deref().unwrap_or("<unknown>"));
+    let qcow2 = store.qcow2_path(&img.name);
+    d.field("Path", qcow2.to_string_lossy());
+    // O `size` acima é o do build/pull; este é o que ESTÁ em disco agora. Se
+    // divergirem, o artefacto foi mexido por fora — vale a pena poder ver.
+    d.field_opt("On disk", std::fs::metadata(&qcow2).ok().map(|m| fmt_size(m.len())));
+    d.print();
 }
 
 fn cmd_push(store: &VmImageStore, name: &str, target: &str) -> Result<()> {

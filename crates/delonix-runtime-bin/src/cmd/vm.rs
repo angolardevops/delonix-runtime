@@ -9,6 +9,7 @@ use delonix_vm::VmConfig;
 use serde::Deserialize;
 
 use super::manifest::{self, ManifestDoc};
+use super::output;
 use super::util::state_root;
 
 /// `spec` de `kind: Vm` — espelha `delonix_vm::VmConfig` (menos `name`, que
@@ -136,6 +137,13 @@ pub enum VmCmd {
     Ls,
     /// Estado actual (reconcilia liveness/IP com o backend).
     Status { name: String },
+    /// Detalhe legível de uma ou mais VMs, ao estilo `kubectl describe` (para
+    /// humanos; use `status` para a vista compacta de sempre). Inclui o estado
+    /// AO VIVO — `delonix_vm::status` reconcilia liveness/IP com o backend.
+    Describe {
+        #[arg(required = true)]
+        names: Vec<String>,
+    },
     /// Pára a VM (preserva disco/registo).
     Stop { name: String },
     /// Remove a VM (pára + apaga overlay/estado).
@@ -240,19 +248,22 @@ pub fn run(action: VmCmd) -> Result<()> {
             Ok(())
         }
         VmCmd::Ls => {
-            println!("{:<20}  {:<8}  {:<10}  {:<10}  IP", "NOME", "VCPUS", "MEMORY", "STATUS");
+            let mut t = output::Table::new(&["NAME", "VCPUS", "MEMORY", "STATUS", "IP"])
+                // VCPUS é uma contagem — alinhada à direita como os tamanhos.
+                .right_align(1);
             for vm in delonix_vm::list(&base)? {
-                println!(
-                    "{:<20}  {:<8}  {:<10}  {:<10}  {}",
+                t.row(vec![
                     vm.name,
-                    vm.vcpus,
+                    vm.vcpus.to_string(),
                     vm.memory,
-                    format!("{:?}", vm.status),
-                    vm.ip.unwrap_or_default()
-                );
+                    fmt_vm_status(&vm.status),
+                    vm.ip.unwrap_or_else(|| "<none>".into()),
+                ]);
             }
+            t.print();
             Ok(())
         }
+        VmCmd::Describe { names } => cmd_describe(&base, &names),
         VmCmd::Status { name } => {
             let vm = delonix_vm::status(&base, &name)?;
             println!("nome:     {}", vm.name);
@@ -277,6 +288,74 @@ pub fn run(action: VmCmd) -> Result<()> {
             apply(&docs)
         }
     }
+}
+
+/// Estado de uma VM em texto, sem o `{:?}` cru do enum: `Failed(137)` do
+/// `Debug` viraria "Failed(137)" — legível, mas o `Exited (137)` é o
+/// vocabulário que o resto da CLI já usa (`container ps`). Pura.
+fn fmt_vm_status(status: &delonix_runtime_core::Status) -> String {
+    use delonix_runtime_core::Status as S;
+    match status {
+        S::Created => "Created".to_string(),
+        S::Running => "Running".to_string(),
+        S::Paused => "Paused".to_string(),
+        S::Stopped => "Stopped".to_string(),
+        S::Failed(code) => format!("Exited ({code})"),
+        S::Crashed => "Dead".to_string(),
+    }
+}
+
+/// `vm describe` — detalhe legível ao estilo `kubectl describe`.
+///
+/// Usa `delonix_vm::status` (não o registo cru): reconcilia liveness/IP com o
+/// backend, portanto o que se lê é o estado AO VIVO e não o último que ficou
+/// gravado. É a diferença entre "diz que está Running" e "está Running".
+fn cmd_describe(base: &std::path::Path, names: &[String]) -> Result<()> {
+    for (i, name) in names.iter().enumerate() {
+        let vm = delonix_vm::status(base, name)?;
+        if i > 0 {
+            println!();
+        }
+        describe_one(&vm);
+    }
+    Ok(())
+}
+
+/// Tamanho de um ficheiro em disco, se legível. Um overlay/disco que
+/// desapareceu (apagado à mão) dá `None` e o campo omite o tamanho — melhor
+/// que imprimir `0 B`, que se leria como "vazio" em vez de "não existe".
+fn file_size(path: &str) -> Option<u64> {
+    std::fs::metadata(path).ok().map(|m| m.len())
+}
+
+fn describe_one(vm: &delonix_runtime_core::Vm) {
+    let mut d = output::Describe::new();
+    d.field("Name", &vm.name);
+    d.field("Status", fmt_vm_status(&vm.status));
+    d.field("Backend", &vm.backend);
+    d.field("Created", output::fmt_local(vm.created_unix));
+    d.field("Age", output::fmt_age(vm.created_unix));
+    d.field("PID", vm.pid.map(|p| p.to_string()).unwrap_or_else(|| "<none>".into()));
+    d.field("Restart policy", vm.restart_policy.as_deref().unwrap_or("no"));
+
+    d.section("Resources");
+    d.sub("vCPUs", vm.vcpus.to_string());
+    d.sub("Memory", &vm.memory);
+
+    d.section("Disk");
+    d.sub("Base", &vm.disk);
+    d.sub("Overlay", &vm.overlay);
+    // Tamanho REAL do overlay em disco (o que a VM escreveu por cima da base).
+    d.sub_opt("Overlay size", file_size(&vm.overlay).map(output::fmt_size));
+
+    d.section("Network");
+    d.sub("Network", &vm.network);
+    d.sub("IP", vm.ip.as_deref().unwrap_or("<none>"));
+    d.sub("TAP", if vm.tap.is_empty() { "<none>" } else { &vm.tap });
+    d.sub("MAC", &vm.mac);
+
+    d.field("API socket", &vm.api_socket);
+    d.print();
 }
 
 // ---------------------------------------------------------------------------
@@ -361,7 +440,17 @@ pub(crate) fn generate_seed_iso(
 
 #[cfg(test)]
 mod tests {
-    use super::{build_meta_data, build_user_data};
+    use super::{build_meta_data, build_user_data, fmt_vm_status};
+    use delonix_runtime_core::Status;
+
+    #[test]
+    fn status_de_vm_usa_o_vocabulario_da_cli() {
+        assert_eq!(fmt_vm_status(&Status::Running), "Running");
+        assert_eq!(fmt_vm_status(&Status::Stopped), "Stopped");
+        // `{:?}` daria "Failed(137)"; o resto da CLI diz "Exited (137)".
+        assert_eq!(fmt_vm_status(&Status::Failed(137)), "Exited (137)");
+        assert_eq!(fmt_vm_status(&Status::Crashed), "Dead");
+    }
 
     #[test]
     fn user_data_inclui_hostname_e_chaves() {
