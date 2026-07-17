@@ -17,6 +17,7 @@ delonix-image = { path = "../delonix-image" }
 delonix-vm = { path = "../delonix-vm" }
 delonix-volume = { path = "../delonix-volume" }
 delonix-scan = { path = "../delonix-scan" }
+delonix-cri = { path = "../delonix-cri" }
 # `__volsnap` (tar.gz do _data de um volume, no userns mapeado) — ja no workspace,
 # nao acrescenta nada a arvore de dependencias do repo publico.
 tar = { workspace = true }

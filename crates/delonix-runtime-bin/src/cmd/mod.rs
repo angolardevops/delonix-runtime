@@ -5,6 +5,7 @@ pub mod kindmode;
 pub mod container;
 pub mod image;
 pub mod k8s_recipes;
+pub mod kube;
 pub mod manifest;
 pub mod mapped;
 pub mod network;
