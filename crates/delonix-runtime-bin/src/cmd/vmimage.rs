@@ -775,6 +775,8 @@ pub(crate) fn k8s_customization_steps_offline(
     cri_service: &Path,
 ) -> Vec<CustomizeOp> {
     let mut ops: Vec<CustomizeOp> = Vec::new();
+    // `--copy-in` exige que o directório-alvo JÁ exista no guest.
+    ops.push(CustomizeOp::RunCommand("mkdir -p /tmp/k8s-debs".into()));
     for d in debs {
         ops.push(CustomizeOp::CopyIn(d.clone(), "/tmp/k8s-debs".to_string()));
     }
@@ -938,6 +940,123 @@ mod tests {
             .expect("o --extra-run devia estar na lista");
         assert_eq!(idx_extra, ops.len() - 2, "o --extra-run devia vir logo antes da limpeza");
         assert!(matches!(ops.last(), Some(CustomizeOp::RunCommand(c)) if c.contains("apt-get clean")));
+    }
+
+    /// Um `Packages` reduzido, com a mesma forma do real (várias arquitecturas e
+    /// versões por pacote) — inclui o caso que partiu o 1.º build offline.
+    const PACKAGES_FIXTURE: &str = "\
+Package: cri-tools
+Version: 1.34.0-1.1
+Architecture: amd64
+Filename: amd64/cri-tools_1.34.0-1.1_amd64.deb
+SHA256: aaa1
+
+Package: kubeadm
+Version: 1.34.0-1.1
+Architecture: amd64
+Filename: amd64/kubeadm_1.34.0-1.1_amd64.deb
+SHA256: bbb1
+
+Package: kubeadm
+Version: 1.34.9-1.1
+Architecture: amd64
+Filename: amd64/kubeadm_1.34.9-1.1_amd64.deb
+SHA256: bbb2
+
+Package: kubeadm
+Version: 1.34.9-1.1
+Architecture: arm64
+Filename: arm64/kubeadm_1.34.9-1.1_arm64.deb
+SHA256: bbb3
+
+Package: kubeadm
+Version: 1.33.1-1.1
+Architecture: amd64
+Filename: amd64/kubeadm_1.33.1-1.1_amd64.deb
+SHA256: bbb4
+
+Package: kubernetes-cni
+Version: 1.7.1-1.1
+Architecture: amd64
+Filename: amd64/kubernetes-cni_1.7.1-1.1_amd64.deb
+SHA256: ccc1
+";
+
+    #[test]
+    fn parse_packages_escolhe_maior_versao_da_arch_certa() {
+        let got = parse_packages_index(PACKAGES_FIXTURE, "amd64", "1.34.", &["kubeadm"], &["kubeadm"]);
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].version, "1.34.9-1.1", "devia escolher a maior 1.34.*");
+        assert_eq!(got[0].filename, "amd64/kubeadm_1.34.9-1.1_amd64.deb");
+        assert_eq!(got[0].sha256, "bbb2");
+    }
+
+    #[test]
+    fn parse_packages_ignora_versionamento_proprio_no_filtro_de_versao() {
+        // REGRESSÃO: o `kubernetes-cni` é 1.7.x — filtrá-lo por "1.34." não
+        // devolvia nada e o build offline abortava com "não tem kubernetes-cni".
+        let got = parse_packages_index(
+            PACKAGES_FIXTURE,
+            "amd64",
+            "1.34.",
+            &["kubeadm", "kubernetes-cni"],
+            &["kubeadm"], // só o kubeadm segue a versão do k8s
+        );
+        let cni = got.iter().find(|d| d.name == "kubernetes-cni").expect("cni tem de vir");
+        assert_eq!(cni.version, "1.7.1-1.1");
+        assert!(got.iter().any(|d| d.name == "kubeadm" && d.version == "1.34.9-1.1"));
+    }
+
+    #[test]
+    fn deb_version_lt_compara_numericamente() {
+        assert!(deb_version_lt("1.34.0-1.1", "1.34.9-1.1"));
+        assert!(deb_version_lt("1.33.1-1.1", "1.34.0-1.1"));
+        assert!(deb_version_lt("1.9.0-1.1", "1.10.0-1.1"), "9 < 10 numericamente, não lexicograficamente");
+        assert!(!deb_version_lt("1.34.9-1.1", "1.34.0-1.1"));
+        assert!(!deb_version_lt("1.34.9-1.1", "1.34.9-1.1"));
+    }
+
+    #[test]
+    fn release_sha256_of_le_a_seccao_certa() {
+        let release = "\
+Origin: obs://build.opensuse.org
+MD5Sum:
+ deadbeef 1234 Packages
+SHA256:
+ abc123 4567 Packages
+ def456 89 Release
+Date: Fri, 12 Jun 2026 12:40:56 UTC
+";
+        assert_eq!(release_sha256_of(release, "Packages").as_deref(), Some("abc123"));
+        assert_eq!(release_sha256_of(release, "Release").as_deref(), Some("def456"));
+        assert_eq!(release_sha256_of(release, "nao-existe"), None);
+    }
+
+    #[test]
+    fn steps_offline_instalam_por_dpkg_e_nao_tocam_a_rede() {
+        let debs = vec![PathBuf::from("/tmp/x/kubeadm_1.34.9-1.1_amd64.deb")];
+        let ops = k8s_customization_steps_offline(
+            &debs,
+            &[],
+            &PathBuf::from("/tmp/delonix-cri"),
+            &PathBuf::from("/tmp/delonix-cri.service"),
+        );
+        let cmds: Vec<&str> = ops
+            .iter()
+            .filter_map(|o| match o {
+                CustomizeOp::RunCommand(c) => Some(c.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert!(cmds.iter().any(|c| c.contains("dpkg -i /tmp/k8s-debs/*.deb")));
+        assert!(cmds.iter().any(|c| c.contains("mkdir -p /tmp/k8s-debs")), "o --copy-in exige o dir criado");
+        // A garantia central do modo offline: nada contacta a rede no guest.
+        for c in &cmds {
+            assert!(!c.contains("curl") && !c.contains("apt-get update") && !c.contains("https://"),
+                "passo offline com rede: {c}");
+        }
+        // E o .deb é injectado.
+        assert!(ops.iter().any(|o| matches!(o, CustomizeOp::CopyIn(_, d) if d == "/tmp/k8s-debs")));
     }
 
     #[test]
