@@ -223,6 +223,126 @@ estável — LB/VIP — que este comando ainda não provisiona; <code>cluster ap
 com um <code>controlPlaneEndpoint</code> externo).</p>"""},
         },
     },
+    "secret": {
+        "title": "delonix secret",
+        "tagline": "Cofre de segredos cifrado em repouso — o produtor do `run --secret`.",
+        "intro": """Um cofre local (<code>SecretStore</code>) cifrado com XChaCha20-Poly1305. Os valores
+NUNCA são impressos por omissão (redigidos; <code>--reveal</code> é opt-in). É a fonte dos
+<code>container run --secret</code>/<code>--secret-files</code> e do <code>--password-secret</code> do
+<code>storage</code> — o segredo entra uma vez, nunca fica no histórico do shell nem no manifesto.""",
+        "subs": {
+            "create": {"examples": [("Criar um segredo (valor via stdin, não no argv)", "printf 's3nha' | delonix secret create db-pass")]},
+            "ls": {"examples": [("Listar (valores redigidos)", "delonix secret ls")]},
+            "inspect": {"examples": [("Revelar explicitamente", "delonix secret inspect db-pass --reveal")]},
+            "rotate-key": {"examples": [("Rodar a chave-mestra (re-cifra tudo)", "delonix secret rotate-key")]},
+        },
+    },
+    "storage": {
+        "title": "delonix storage",
+        "tagline": "Volumes de REDE (NFS/CIFS/WebDAV) montáveis, estilo PersistentVolume do k8s.",
+        "intro": """Monta pastas de um NAS (TrueNAS/Synology/Samba/Nextcloud) como volumes nomeados.
+Por baixo é um volume do <code>delonix-volume</code> com driver de rede — <code>mount -t nfs|cifs|davfs</code>.
+A password vem do cofre (<code>--password-secret</code>), nunca do argv. Ligado ao <code>stack apply</code>
+(ordem Network→Volume→<strong>Storage</strong>→Image→Vm→Container). Montar precisa de CAP_SYS_ADMIN.""",
+        "subs": {
+            "create": {"examples": [
+                ("NFS de um TrueNAS", "delonix storage create media --type nfs --server 10.0.0.5 --share /mnt/pool/media"),
+                ("SMB/CIFS com password do cofre", "delonix storage create docs --type cifs --server nas --share docs --username user --password-secret nas-pass"),
+            ]},
+            "ls": {"examples": [("", "delonix storage ls")]},
+            "rm": {"examples": [("Desmonta; os dados ficam no NAS", "delonix storage rm media")]},
+        },
+    },
+    "ingress": {
+        "title": "delonix ingress",
+        "tagline": "Firewall de ENTRADA (regras L4 + publishes DNAT) de um container na SDN.",
+        "intro": """Metade da superfície unificada de firewall (a outra é <code>egress</code>). Edita a
+única fonte de verdade — o <code>ContainerFw</code> por container, aplicado como regras nft na chain de
+ingress. <code>ingress</code> governa a ENTRADA: regras allow/deny por <code>[proto/]porta</code> e CIDR,
+a política por omissão, e os <em>publishes</em> DNAT. Só actua em containers numa rede custom (têm IP na
+<code>delonix0</code>); <code>--net host</code> é recusado.""",
+        "subs": {
+            "allow": {"examples": [("Deixar entrar Postgres só da própria SDN", "delonix ingress allow db tcp/5432 --from 10.219.0.0/16")]},
+            "deny": {"examples": [("Bloquear uma porta específica", "delonix ingress deny web tcp/22")]},
+            "policy": {"examples": [("Default-deny (allowlist)", "delonix ingress policy db deny")]},
+            "publish": {"examples": [("Publicar uma porta pelo ingress (DNAT)", "delonix ingress publish web 8080:80")]},
+            "ls": {"examples": [("Ver regras + publishes", "delonix ingress ls db")]},
+        },
+    },
+    "egress": {
+        "title": "delonix egress",
+        "tagline": "Firewall de SAÍDA (regras L4 + política de egress→Internet por-rede).",
+        "intro": """A outra metade do firewall. Governa a SAÍDA de um container (regras allow/deny + política
+por omissão) e, ao nível da REDE, a política de egress para a Internet: <code>allow</code>/<code>deny</code>,
+ou <code>allowlist</code> (nega tudo excepto DNS e os CIDRs dados). Tudo sobre o mesmo <code>ContainerFw</code>
+/nft do <code>ingress</code>.""",
+        "subs": {
+            "allow": {"examples": [("Só deixar sair HTTPS", "delonix egress allow app tcp/443 --to 0.0.0.0/0")]},
+            "policy": {"examples": [("Default-deny de saída", "delonix egress policy app deny")]},
+            "net": {"examples": [("Egress de uma rede em allowlist (só DNS + estes CIDRs)", "delonix egress net backend allowlist --to 10.0.0.0/8,1.1.1.1/32")]},
+            "ls": {"examples": [("", "delonix egress ls app")]},
+        },
+    },
+    "flow": {
+        "title": "delonix flow",
+        "tagline": "Tráfego por-container ao vivo — datapath eBPF (degrada para contadores veth).",
+        "intro": """Telemetria de rede por container. Quando corre com privilégio (CAP_BPF/root), attacha
+dois classificadores tc/clsact em eBPF às veths da SDN, que contam bytes/pacotes por IP num BPF map
+partilhado — <strong>sem nunca fazer drop</strong> (o nft continua o único enforcer). Sem privilégio
+(o caso rootless comum) diz-o e cai nos contadores veth, que sempre funcionam. <code>--watch</code>
+redesenha a cada 2s.""",
+        "subs": {},
+        "examples": [
+            ("Uma amostra", "sudo delonix flow"),
+            ("Monitorização contínua", "sudo delonix flow --watch"),
+        ],
+    },
+    "boot": {
+        "title": "delonix boot",
+        "tagline": "Persistência no arranque: units systemd para os containers voltarem a subir no boot.",
+        "intro": """<code>boot enable</code> gera uma unit systemd por container em execução (rootless →
+user units + <code>loginctl enable-linger</code>; root → system units), com <code>ExecStart</code>
+=<code>container start</code>. Assim os containers voltam a subir quando o host arranca, sem daemon.""",
+        "subs": {
+            "enable": {"examples": [("Persistir os que correm agora", "delonix boot enable")]},
+            "status": {"examples": [("Ver o que está instalado", "delonix boot status")]},
+            "disable": {"examples": [("Remover as units de boot", "delonix boot disable")]},
+        },
+    },
+    "system": {
+        "title": "delonix system",
+        "tagline": "O motor em si: events, info, df, prune, monitor, thermal.",
+        "intro": """Introspecção e manutenção. <code>system prune</code> é o GC (recupera espaço: containers
+parados, dirs órfãos, imagens dangling, blobs CAS, hostfwds órfãos, redes vazias); <code>system df</code>
+mostra o uso de disco; <code>system monitor</code> segue ligações/conntrack; <code>system events</code> o
+fluxo de eventos.""",
+        "subs": {
+            "prune": {"examples": [("Recuperar espaço (GC)", "delonix system prune")]},
+            "df": {"examples": [("Uso de disco", "delonix system df")]},
+            "info": {"examples": [("", "delonix system info")]},
+        },
+    },
+    "kube": {
+        "title": "delonix kube",
+        "tagline": "Gera manifestos Kubernetes a partir de containers.",
+        "intro": """<code>kube generate</code> produz um manifesto <code>kind: Pod</code> a partir de um
+container existente — a ponte para exportar uma carga do runtime local para um cluster.""",
+        "subs": {
+            "generate": {"examples": [("Pod a partir de um container", "delonix kube generate web > web-pod.yaml")]},
+        },
+    },
+    "netns": {
+        "title": "delonix netns",
+        "tagline": "Gestão de baixo nível da infra de ingress rootless.",
+        "intro": """A camada crua por baixo do <code>ingress</code>/<code>egress</code>: subir/descer o
+holder do ingress, attach/detach de netns, publish/unpublish de portas e firewall por container. A
+maioria dos utilizadores nunca precisa disto — usa os grupos de alto nível — mas está exposto para
+depuração e integração.""",
+        "subs": {
+            "status": {"examples": [("Estado da infra de ingress", "delonix netns status")]},
+            "up": {"examples": [("Subir o holder do ingress", "delonix netns up")]},
+        },
+    },
     "completion": {
         "title": "delonix completion",
         "tagline": "Autocompletion dinâmico para bash, zsh, fish, elvish e powershell.",
@@ -295,6 +415,7 @@ def sidebar(active, depth=0):
     p = "../" * depth
     items_docs = [
         ("index.html", "Início"),
+        ("cheatsheet.html", "Cheatsheet"),
         ("arquitectura.html", "Arquitectura"),
         ("c4.html", "Modelo C4 e system design"),
         ("cri.html", "CRI — kubelet sem containerd"),
@@ -542,6 +663,70 @@ mermaid.initialize({ startOnLoad: true, theme: matchMedia('(prefers-color-scheme
     page("c4.html", "Modelo C4 e system design", body)
 
 
+def subcommands_of(group):
+    """(sub, short-help) de cada subcomando de um grupo, lido do `--help` real."""
+    out, seen, rows = help_of(group), False, []
+    for line in out.splitlines():
+        if line.strip().startswith("Commands:"):
+            seen = True
+            continue
+        if seen:
+            if line.strip().startswith("Options:") or not line.strip():
+                if rows:
+                    break
+                continue
+            m = line.strip().split(None, 1)
+            if m and m[0] not in ("help",) and m[0][0].isalpha():
+                rows.append((m[0], m[1] if len(m) > 1 else ""))
+    return rows
+
+
+# Tarefas comuns — o "cola e corre" no topo do cheatsheet.
+CHEAT_TASKS = [
+    ("Serviço web, sem root, sem daemon", "delonix container run -d --name web -p 8080:80 nginx"),
+    ("Shell descartável", "delonix container run --rm -it alpine sh"),
+    ("Rede própria + publicar pelo ingress", "delonix network create backend\ndelonix container run -d --net backend -p 8443:443 caddy"),
+    ("Trocar uma porta a QUENTE (sem reiniciar)", "delonix container update web --publish-add 9090:80"),
+    ("Firewall: só deixar entrar Postgres da SDN", "delonix ingress allow db tcp/5432 --from 10.219.0.0/16\ndelonix ingress policy db deny"),
+    ("Firewall: egress da rede só p/ DNS + CIDRs", "delonix egress net backend allowlist --to 10.0.0.0/8"),
+    ("Tráfego por container ao vivo (eBPF)", "sudo delonix flow --watch"),
+    ("Volume de rede de um NAS (NFS)", "delonix storage create media --type nfs --server 10.0.0.5 --share /mnt/pool/media"),
+    ("Segredo no cofre (não no argv)", "printf 's3nha' | delonix secret create db-pass"),
+    ("microVM com cloud-init", "delonix vm create node1 --disk base.qcow2 --ssh-key @~/.ssh/id_ed25519.pub"),
+    ("Cluster Kubernetes do zero", "delonix cluster kubeadm --name lab --control-plane 1 --workers 2"),
+    ("Aplicar um manifesto inteiro", "delonix stack apply -f delonix-manifest.yaml"),
+    ("Persistir os containers no arranque", "delonix boot enable"),
+    ("Recuperar espaço (GC)", "delonix system prune"),
+]
+
+
+def cheatsheet_page():
+    body = ["<h1>Cheatsheet</h1><p class='tagline'>Todos os grupos de comandos e subcomandos, "
+            "num só sítio. Gerado do <code>--help</code> real do binário.</p>"]
+    body.append("<h2>Tarefas comuns</h2>")
+    body.append(examples_html(CHEAT_TASKS))
+    body.append("<h2>Todos os grupos</h2>")
+    order = list(GROUPS.keys()) + ["cri"]
+    for g in order:
+        title = GROUPS[g]["title"] if g in GROUPS else "delonix cri"
+        href = f"comandos/{g}.html" if g in GROUPS else "cri.html"
+        subs = subcommands_of(g)
+        head = f"<h3 id='{g}'><a href='{href}'><code>{html.escape(title)}</code></a></h3>"
+        if not subs:
+            tl = GROUPS[g]["tagline"] if g in GROUPS else "Serve o endpoint CRI (runtime.v1) num socket unix."
+            body.append(head + f"<p>{html.escape(tl)}</p>")
+            continue
+        rows = "".join(
+            f"<tr><td><code>{html.escape(g)} {html.escape(s)}</code></td><td>{html.escape(d)}</td></tr>"
+            for s, d in subs
+        )
+        body.append(head + f"<table><tr><th>Comando</th><th>O que faz</th></tr>{rows}</table>")
+    body.append("<h2>Global</h2><p><code>--l18n en|pt</code> — idioma da saída (EN por omissão; "
+                "<code>pt</code> para pt_AO). <code>$DELONIX_ROOT</code> — raiz do estado. "
+                "<code>delonix completion &lt;shell&gt;</code> — autocompletion.</p>")
+    page("cheatsheet.html", "Cheatsheet", "\n".join(body))
+
+
 def main():
     ver = subprocess.run([BIN, "--version"], capture_output=True, text=True).stdout.strip().split()[-1]
     cards = "".join(
@@ -550,6 +735,7 @@ def main():
         for n, g in GROUPS.items()
     )
     page("index.html", "Delonix Runtime", INDEX.replace("{ver}", ver).replace("{cards}", cards))
+    cheatsheet_page()
     page("arquitectura.html", "Arquitectura", ARCH)
     c4_page()
     page("cri.html", "CRI", CRI)
