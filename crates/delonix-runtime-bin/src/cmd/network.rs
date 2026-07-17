@@ -16,6 +16,7 @@
 //! bridge do holder da mesma forma) — limitação conhecida, não bloqueante.
 
 use clap::Subcommand;
+use clap_complete::engine::ArgValueCandidates;
 use delonix_net::{infra, Network, NetworkStore};
 use delonix_runtime_core::Result;
 use serde::Deserialize;
@@ -82,7 +83,10 @@ pub enum NetworkCmd {
         wg_ip: Option<String>,
     },
     /// Detalhe de uma rede.
-    Inspect { name: String },
+    Inspect {
+        #[arg(add = ArgValueCandidates::new(super::complete::networks))]
+        name: String,
+    },
     /// Detalhe legível de uma ou mais redes, ao estilo `kubectl describe`
     /// (para humanos; use `inspect` para a vista compacta de sempre).
     Describe {
@@ -90,7 +94,10 @@ pub enum NetworkCmd {
         names: Vec<String>,
     },
     /// Remove uma rede.
-    Rm { name: String },
+    Rm {
+        #[arg(add = ArgValueCandidates::new(super::complete::networks))]
+        name: String,
+    },
     /// Aplica os documentos `kind: Network` de um manifesto (idempotente por nome).
     Apply {
         #[arg(short = 'f', long = "file")]

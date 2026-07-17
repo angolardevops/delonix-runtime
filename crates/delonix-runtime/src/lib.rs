@@ -2065,6 +2065,32 @@ fn parse_mem_bytes(s: &str) -> u64 {
     }
 }
 
+/// Os limites de cgroup (cpu/memória/pids) vão de facto aplicar-se a um
+/// container novo neste host/sessão?
+///
+/// Espelha EXACTAMENTE a condição que o `spawn` testa — `mkdir` sob a
+/// `delonix.slice` — sem arrancar container nenhum: se conseguirmos criar um
+/// cgroup lá (e limpá-lo já), há delegação; se não, é rootless-sem-delegação e
+/// os limites serão best-effort.
+///
+/// Existe para o chamador poder avisar UMA vez ANTES de arrancar N nós (ex.:
+/// `cluster create`), em vez de deixar cada nó re-exec repetir o mesmo aviso.
+pub fn cgroup_limits_apply() -> bool {
+    let probe = format!("{}/.delonix-probe-{}", delonix_runtime_core::DELONIX_SLICE, std::process::id());
+    match std::fs::create_dir(&probe) {
+        Ok(()) => {
+            let _ = std::fs::remove_dir(&probe);
+            true
+        }
+        // Já existir (corrida) conta como "consigo lá escrever".
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+            let _ = std::fs::remove_dir(&probe);
+            true
+        }
+        Err(_) => false,
+    }
+}
+
 /// Garante a `delonix.slice` com limites AGREGADOS (uma fracção do host) e os
 /// controladores activos para os filhos. É o que impede que a SOMA de todos os
 /// containers mate o host: a slice tem `memory.max`/`cpu.max`/`pids.max` totais,
@@ -2378,16 +2404,31 @@ fn setup_cgroup(c: &Container, pid: i32) -> Result<()> {
     // holder (uid 0 MAPEADO) — `is_rootless()` (geteuid) seria falso, mas não há
     // delegação de cgroup na mesma; tratamos como rootless.
     if std::fs::create_dir_all(cg).is_err() {
+        // `DELONIX_NO_CGROUP_WARN`: o chamador já avisou e não quer o bloco
+        // repetido. É assim que o `cluster create` o cala: cada nó arranca por
+        // um RE-EXEC (processo novo), logo o `Once` abaixo — que só dedup dentro
+        // de UM processo — não chegava; um `--workers 3` mostrava o aviso 4×.
+        // A env var propaga-se pela cadeia de re-exec (os filhos herdam-na), o
+        // `Once` trata do resto (um único processo a arrancar N containers).
         if is_rootless() || in_userns() {
-            eprintln!(
-                "delonix: aviso — rootless SEM delegação de cgroup: memory/cpu/pids NÃO são\n\
-                 \x20        aplicados (um fork-bomb ou leak pode afetar o host). Para ter\n\
-                 \x20        limites, corre o engine sob uma sessão systemd --user com\n\
-                 \x20        delegação: `systemctl --user edit --force --full delonix.service`\n\
-                 \x20        com `[Service] Delegate=yes`, ou inicia via `systemd-run --user\n\
-                 \x20        --scope -p Delegate=yes ...`. O isolamento de namespaces/seccomp\n\
-                 \x20        mantém-se intacto."
-            );
+            // O aviso é sobre o AMBIENTE (não há delegação de cgroup nesta
+            // sessão), não sobre este container — logo UMA vez por processo, e
+            // calável via env quando o chamador já avisou (ver acima).
+            let calado = std::env::var_os("DELONIX_NO_CGROUP_WARN").is_some();
+            if !calado {
+                static AVISO: std::sync::Once = std::sync::Once::new();
+                AVISO.call_once(|| {
+                    eprintln!(
+                        "delonix: aviso — rootless SEM delegação de cgroup: memory/cpu/pids NÃO são\n\
+                         \x20        aplicados (um fork-bomb ou leak pode afetar o host). Para ter\n\
+                         \x20        limites, corre o engine sob uma sessão systemd --user com\n\
+                         \x20        delegação: `systemctl --user edit --force --full delonix.service`\n\
+                         \x20        com `[Service] Delegate=yes`, ou inicia via `systemd-run --user\n\
+                         \x20        --scope -p Delegate=yes ...`. O isolamento de namespaces/seccomp\n\
+                         \x20        mantém-se intacto."
+                    );
+                });
+            }
             return Ok(());
         }
         return Err(Error::Runtime {

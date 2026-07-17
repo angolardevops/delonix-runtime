@@ -15,6 +15,7 @@ use std::process::Command;
 use std::time::{Duration, Instant};
 
 use clap::Subcommand;
+use clap_complete::engine::ArgValueCandidates;
 use delonix_runtime_core::{Error, Result};
 use serde::Deserialize;
 
@@ -345,6 +346,10 @@ pub enum ClusterCmd {
         /// Nós worker a juntar (0 = só control-plane, sem taint — agenda tudo).
         #[arg(long, default_value_t = 0)]
         workers: u32,
+        /// Control-planes do cluster (default 1). Mais que 1 exige um endpoint
+        /// estável à frente deles (LB) — ver o erro se pedires >1.
+        #[arg(long, default_value_t = 1)]
+        control_planes: u32,
         /// Imagem do nó (default: `kindest/node` fixada por digest).
         #[arg(long)]
         image: Option<String>,
@@ -362,7 +367,7 @@ pub enum ClusterCmd {
     Ls,
     /// Remove um cluster do modo kind (pára e apaga os nós + kubeconfig).
     Delete {
-        #[arg(long, default_value = "delonix")]
+        #[arg(long, default_value = "delonix", add = ArgValueCandidates::new(super::complete::clusters))]
         name: String,
     },
     /// Aplica o(s) documento(s) `kind: Cluster` de um manifesto.
@@ -414,7 +419,7 @@ pub fn run(action: ClusterCmd) -> Result<()> {
     match action {
         // Tratado no topo de `run` (faz `return`).
         ClusterCmd::Init { .. } => unreachable!("tratado acima"),
-        ClusterCmd::Create { ref name, api_port, workers, ref image, ref pod_subnet, ref service_subnet, ref cni } => {
+        ClusterCmd::Create { ref name, api_port, workers, control_planes, ref image, ref pod_subnet, ref service_subnet, ref cni } => {
             let (images, store) = super::util::open_stores()?;
             let name = match name {
                 Some(n) => n.clone(),
@@ -429,6 +434,7 @@ pub fn run(action: ClusterCmd) -> Result<()> {
                     api_port,
                     pod_subnet: pod_subnet.clone(),
                     service_subnet: service_subnet.clone(),
+                    control_planes,
                     cni: cni.clone(),
                     k8s_version: None,
                     workers,
@@ -529,6 +535,8 @@ fn apply_kind(name: &str, spec: &ClusterSpec) -> Result<()> {
             cni: spec.cni.clone(),
             k8s_version: spec.k8s_version.clone(),
             workers: spec.workers.count(),
+            // O `> 1` já foi recusado acima, com a mesma razão.
+            control_planes: 1,
         },
     )
 }
