@@ -40,10 +40,6 @@ impl Table {
         self.rows.push(cells);
     }
 
-    pub fn is_empty(&self) -> bool {
-        self.rows.is_empty()
-    }
-
     /// Imprime o cabeçalho e as linhas. Um `ls` sem resultados imprime só o
     /// cabeçalho — é o que o `docker ps` faz, e diz ao utilizador que o comando
     /// correu e não encontrou nada (em vez de silêncio ambíguo).
