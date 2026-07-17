@@ -221,7 +221,7 @@ fn main() {
 
     if let Err(e) = run() {
         // O erro de topo a vermelho (honra NO_COLOR/pipes — ver `output::cor`).
-        cmd::output::erro(&e.to_string());
+        cmd::output::error(&e.to_string());
         std::process::exit(1);
     }
 }
