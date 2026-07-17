@@ -71,6 +71,25 @@ pub enum ImageCmd {
         #[arg(value_name = "PEM")]
         key: PathBuf,
     },
+    /// SBOM + scan de CVE de uma imagem (lê os layers do CAS, sem correr nada).
+    /// Puxa a imagem se faltar. Ver `--sbom`, `--fail-on`, `--update`.
+    Scan {
+        /// Imagem a analisar (dispensável com `--update`).
+        image: Option<String>,
+        /// Lista o SBOM (pacotes instalados) em vez de analisar.
+        #[arg(long)]
+        sbom: bool,
+        /// Falha (exit 1) se houver vulnerabilidades >= esta severidade
+        /// (low|medium|high|critical) — gate para CI.
+        #[arg(long = "fail-on", value_name = "SEV")]
+        fail_on: Option<String>,
+        /// Sincroniza o feed de CVE para a base local (usada depois por cada scan).
+        #[arg(long)]
+        update: bool,
+        /// Fonte do feed para `--update`: URL ou ficheiro (ou $DELONIX_ADVISORY_FEED).
+        #[arg(long = "feed", value_name = "URL|FICHEIRO")]
+        feed: Option<String>,
+    },
     /// Remove uma imagem local.
     Rm {
         #[arg(add = ArgValueCandidates::new(super::complete::images))]
@@ -225,6 +244,14 @@ pub fn run(vm: bool, action: ImageCmd) -> Result<()> {
         ImageCmd::Tag { source, target } => cmd_tag(&images, &source, &target),
         ImageCmd::History { image } => cmd_history(&images, &image),
         ImageCmd::Verify { image, key } => cmd_verify(&images, &image, &key),
+        ImageCmd::Scan { image, sbom, fail_on, update, feed } => {
+            if update {
+                super::scan::cmd_scan_update(feed)
+            } else {
+                let image = image.ok_or_else(|| Error::Invalid("indica a imagem a analisar, ou usa `--update` para sincronizar o feed".into()))?;
+                super::scan::cmd_scan(&image, sbom, fail_on.as_deref())
+            }
+        }
         ImageCmd::Rm { image } => cmd_rm(&images, &image),
         ImageCmd::Export { image, dir } => cmd_export(&images, &image, &dir),
         ImageCmd::Apply { file } => {
@@ -274,7 +301,7 @@ fn run_vm(action: ImageCmd) -> Result<()> {
         ImageCmd::Build { tag, ubuntu_release, k8s_version, extra_packages, extra_run, cri_bin, no_compress, offline } => {
             VmImageCmd::Build { tag, ubuntu_release, k8s_version, extra_packages, extra_run, cri_bin, no_compress, offline }
         }
-        ImageCmd::Tag { .. } | ImageCmd::History { .. } | ImageCmd::Verify { .. } => {
+        ImageCmd::Tag { .. } | ImageCmd::History { .. } | ImageCmd::Verify { .. } | ImageCmd::Scan { .. } => {
             return Err(Error::Invalid(
                 "tag/history/verify são de imagens de container — não se aplicam a imagens VM (--vm)".into(),
             ))
@@ -323,6 +350,11 @@ fn cmd_pull(images: &ImageStore, reference: &str, verify: Option<&std::path::Pat
         let digest = delonix_image::verify_signature(images, reference, &pem)?;
         println!("assinatura válida para {reference} ({digest})");
     }
+    // Política de admissão de CVE (scan-on-pull): off por omissão (sem latência),
+    // opt-in via `DELONIX_SCAN_ON_PULL`. Fecha o "puxa sem olhar para dentro" —
+    // ver `scan::admission_scan_on_pull`. Corre DEPOIS da verificação de
+    // assinatura: primeiro "é quem diz ser", depois "traz coisa perigosa?".
+    super::scan::admission_scan_on_pull(images, reference, &img)?;
     println!("{}", img.short_id());
     Ok(())
 }
