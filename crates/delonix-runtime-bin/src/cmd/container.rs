@@ -294,7 +294,10 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
     }
     let mounts = resolve_mounts(&volumes)?;
     let img = resolve_or_pull(images, &image)?;
-    let id = generate_id();
+    // No 2.º passo do re-exec (ver `reexec_into_netns`) o id TEM de ser o mesmo:
+    // a netns nomeada já foi criada com ele do lado do holder.
+    let id = std::env::var("DELONIX_REEXEC_ID").unwrap_or_else(|_| generate_id());
+    let reexec = std::env::var("DELONIX_REEXEC_ID").is_ok();
     let rootless = runtime::is_rootless();
     let rootfs = prepare_rootfs(images, &img, &id)?;
 
@@ -360,13 +363,18 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
     // tem de se JUNTAR a ela via `RunSpec.join_netns`, não criar a sua própria
     // com `new_netns` — essa era a abordagem errada, tentada e corrigida aqui).
     let custom_net = if net != "host" && net != "none" { Some(net.to_string()) } else { None };
-    let mut join_netns = None;
     let mut attached_ip = None;
     if let Some(n) = &custom_net {
-        delonix_net::NetworkStore::open(super::util::state_root())?.get(n)?;
-        let (netns, ip) = infra::attach_container(&id, n)?;
-        join_netns = Some(format!("/run/netns/{netns}"));
-        attached_ip = Some(ip);
+        if reexec {
+            // 2.º passo: já corremos DENTRO do userns+netns do holder (o `ip netns
+            // exec` do `join_argv` pôs-nos lá). A netns já existe e já é nossa.
+            attached_ip = std::env::var("DELONIX_REEXEC_IP").ok();
+        } else {
+            // 1.º passo: cria a netns do lado do holder e RE-EXECUTA-SE lá dentro.
+            delonix_net::NetworkStore::open(super::util::state_root())?.get(n)?;
+            let (netns, ip) = infra::attach_container(&id, n)?;
+            return reexec_into_netns(&id, &netns, &ip);
+        }
     }
     c.ports = ports.clone();
 
@@ -392,9 +400,13 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
     let slirp_hook = |pid: i32| -> Result<()> { delonix_net::slirp_attach(pid, &slirp_ports) };
     let spec = RunSpec {
         detach,
-        new_netns: net == "none" || !slirp_ports.is_empty(),
-        join_netns,
-        userns: c.userns,
+        // No re-exec já estamos no netns certo: NÃO criar outro (nem juntar-se a
+        // nada — o `ip netns exec` tratou disso).
+        new_netns: !reexec && (net == "none" || !slirp_ports.is_empty()),
+        join_netns: None,
+        userns: c.userns && !reexec,
+        // Herda o user+network namespace do holder em vez de criar os seus.
+        inherit_userns: reexec,
         log_path,
         mounts,
         on_started: if slirp_ports.is_empty() { None } else { Some(&slirp_hook) },
@@ -649,6 +661,58 @@ fn should_restart(policy: &str, status: &delonix_runtime_core::Status, restarts:
 /// A política pede supervisão? (`no` não precisa de supervisor nenhum.)
 fn policy_supervised(policy: &str) -> bool {
     matches!(policy.split(':').next().unwrap_or(""), "always" | "unless-stopped" | "on-failure")
+}
+
+/// **Fecha a limitação conhecida do `--net <rede>` em rootless.**
+///
+/// O problema: `infra::attach_container` cria a netns NOMEADA do lado do holder
+/// (`ip netns add`, dentro do `unshare --user --map-auto --net --mount` dele).
+/// O container tentava juntar-se por `setns("/run/netns/<x>")` e falhava sempre
+/// com "netns do pod indisponível" — por DOIS motivos, não um:
+///   1. `/run/netns/<x>` vive no **mount namespace do holder**: de fora nem o
+///      caminho existe (o `open` falha antes de haver `setns`);
+///   2. mesmo que existisse, a netns é **propriedade do userns do holder** — sem
+///      privilégio nesse userns, o `setns` seria recusado.
+/// Nenhum dos dois se resolve de dentro do `container_init`: é preciso ENTRAR no
+/// userns+mountns do holder ANTES de existir container.
+///
+/// A solução (a que a doc do `delonix-net` já apontava, sem ninguém a ligar):
+/// re-executar o próprio binário através do `infra::join_argv` —
+/// `nsenter -t <holder> -U -m -n --preserve-credentials -- ip netns exec <netns>`
+/// — e correr aí o MESMO comando. O 2.º passo já nasce dentro do userns+netns
+/// certos, por isso não cria namespaces novos (`inherit_userns`).
+///
+/// O `DELONIX_REEXEC_ID` distingue os dois passos E carrega o id: sem ele o 2.º
+/// passo geraria um id novo e a netns criada no 1.º ficaria órfã.
+fn reexec_into_netns(id: &str, netns: &str, ip: &str) -> Result<()> {
+    let prefix = infra::join_argv(id).ok_or_else(|| Error::Runtime {
+        context: "join_argv",
+        message: "infra de ingress em baixo — não há holder onde entrar".into(),
+    })?;
+    let exe = std::env::current_exe().map_err(|e| Error::Runtime {
+        context: "current_exe",
+        message: e.to_string(),
+    })?;
+    // Os argumentos originais, tal e qual (menos o argv[0], que é o `exe`).
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let status = std::process::Command::new(&prefix[0])
+        .args(&prefix[1..])
+        .arg(&exe)
+        .args(&args)
+        .env("DELONIX_REEXEC_ID", id)
+        .env("DELONIX_REEXEC_IP", ip)
+        .env("DELONIX_ROOT", super::util::state_root())
+        .status()
+        .map_err(|e| Error::Runtime { context: "re-exec nsenter", message: e.to_string() })?;
+    if !status.success() {
+        // A netns ficaria pendurada se o 2.º passo falhasse.
+        infra::detach_container(id, ip);
+        return Err(Error::Invalid(format!(
+            "o container não arrancou dentro da rede '{netns}' (exit {:?})",
+            status.code()
+        )));
+    }
+    Ok(())
 }
 
 /// Reapa a rede deixada por containers que já morreram, ANTES de publicar
