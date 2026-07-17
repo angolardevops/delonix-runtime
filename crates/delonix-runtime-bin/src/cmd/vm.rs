@@ -54,6 +54,22 @@ fn default_network() -> String {
 #[allow(clippy::large_enum_variant)]
 #[derive(Subcommand)]
 pub enum VmCmd {
+    /// Inicializa um projecto com manifesto de VM — ficheiros JÁ PREENCHIDOS (imagens
+    /// incluídas), prontos a usar sem editar nada.
+    Init {
+        /// Directório do projecto (default: o actual).
+        #[arg(default_value = ".")]
+        dir: PathBuf,
+        /// Nome do projecto (default: o nome do directório).
+        #[arg(long)]
+        name: Option<String>,
+        /// Imagem a usar. Omitir = preenche com a imagem por omissão.
+        #[arg(long)]
+        image: Option<String>,
+        /// Substitui ficheiros já existentes.
+        #[arg(long)]
+        force: bool,
+    },
     /// Cria (ou auto-recupera) uma VM.
     Create {
         name: String,
@@ -163,8 +179,13 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
 }
 
 pub fn run(action: VmCmd) -> Result<()> {
+    if let VmCmd::Init { dir, name, image, force } = action {
+        return cmd_init(super::scaffold::Target::Vm, dir, name, image, force);
+    }
     let base = state_root();
     match action {
+        // Tratado no topo de `run` (faz `return`).
+        VmCmd::Init { .. } => unreachable!("tratado acima"),
         VmCmd::Create {
             name,
             disk,
@@ -362,4 +383,24 @@ mod tests {
         let md = build_meta_data("vm-1", "myvm");
         assert_eq!(md, "instance-id: vm-1\nlocal-hostname: myvm\n");
     }
+}
+
+/// Trata o `init` deste grupo (ver `cmd::scaffold`).
+fn cmd_init(target: super::scaffold::Target, dir: PathBuf, name: Option<String>, image: Option<String>, force: bool) -> Result<()> {
+    let name = name.unwrap_or_else(|| {
+        // Sem `--name`, usa o nome do DIRECTÓRIO. Não se pode usar `canonicalize`:
+        // o directório ainda não existe (é o `init` que o cria) e falharia sempre,
+        // caindo no fallback — todos os projectos ficavam chamados "app".
+        // `.`/vazio resolvem para o cwd; um caminho novo usa o seu basename.
+        let p = if dir.as_os_str().is_empty() || dir == std::path::Path::new(".") {
+            std::env::current_dir().ok()
+        } else {
+            Some(dir.clone())
+        };
+        p.as_deref()
+            .and_then(|p| p.file_name())
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "app".to_string())
+    });
+    super::scaffold::init(target, &super::scaffold::InitOpts { dir, name, image, force })
 }

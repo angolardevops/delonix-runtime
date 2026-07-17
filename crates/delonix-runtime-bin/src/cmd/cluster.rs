@@ -166,6 +166,22 @@ fn target_for(host: &HostSpec, ssh: &SshSpec) -> SshTarget {
 #[allow(clippy::large_enum_variant)]
 #[derive(Subcommand)]
 pub enum ClusterCmd {
+    /// Inicializa um projecto com os manifestos de cluster (kind/vm/ssh) — ficheiros JÁ PREENCHIDOS (imagens
+    /// incluídas), prontos a usar sem editar nada.
+    Init {
+        /// Directório do projecto (default: o actual).
+        #[arg(default_value = ".")]
+        dir: PathBuf,
+        /// Nome do projecto (default: o nome do directório).
+        #[arg(long)]
+        name: Option<String>,
+        /// Imagem a usar. Omitir = preenche com a imagem por omissão.
+        #[arg(long)]
+        image: Option<String>,
+        /// Substitui ficheiros já existentes.
+        #[arg(long)]
+        force: bool,
+    },
     /// Cria um cluster Kubernetes local **sem manifesto e sem Docker** (modo
     /// kind nativo): arranca os nós `kindest/node` no próprio motor Delonix e
     /// faz o bootstrap com `kubeadm`. Sem flags = 1 control-plane pronto a usar.
@@ -235,8 +251,13 @@ pub enum ClusterCmd {
 }
 
 pub fn run(action: ClusterCmd) -> Result<()> {
+    if let ClusterCmd::Init { dir, name, image, force } = action {
+        return cmd_init(super::scaffold::Target::Cluster, dir, name, image, force);
+    }
     // Modo kind nativo — não toca em SSH/VMs nem precisa de manifesto.
     match action {
+        // Tratado no topo de `run` (faz `return`).
+        ClusterCmd::Init { .. } => unreachable!("tratado acima"),
         ClusterCmd::Create { ref name, api_port, ref image, ref pod_subnet, ref service_subnet, ref cni } => {
             let (images, store) = super::util::open_stores()?;
             return super::kindmode::create(
@@ -249,6 +270,7 @@ pub fn run(action: ClusterCmd) -> Result<()> {
                     pod_subnet: pod_subnet.clone(),
                     service_subnet: service_subnet.clone(),
                     cni: cni.clone(),
+                    k8s_version: None,
                 },
             );
         }
@@ -259,8 +281,10 @@ pub fn run(action: ClusterCmd) -> Result<()> {
         _ => {}
     }
     match action {
-        // Já tratados acima (modo kind nativo) — o match anterior faz `return`.
-        ClusterCmd::Create { .. } | ClusterCmd::Delete { .. } => unreachable!("tratados acima"),
+        // Já tratados acima (modo kind nativo / init) — o topo de `run` faz `return`.
+        ClusterCmd::Create { .. } | ClusterCmd::Delete { .. } | ClusterCmd::Init { .. } => {
+            unreachable!("tratados acima")
+        }
         ClusterCmd::Apply { file } => {
             let path = manifest::resolve_path(file)?;
             let docs = manifest::load(&path)?;
@@ -924,4 +948,24 @@ k8sVersion: \"1.31\"
         assert_eq!(spec.control_plane_endpoint.as_deref(), Some("lb.exemplo.com"));
         assert_eq!(spec.pod_subnet, default_pod_subnet());
     }
+}
+
+/// Trata o `init` deste grupo (ver `cmd::scaffold`).
+fn cmd_init(target: super::scaffold::Target, dir: PathBuf, name: Option<String>, image: Option<String>, force: bool) -> Result<()> {
+    let name = name.unwrap_or_else(|| {
+        // Sem `--name`, usa o nome do DIRECTÓRIO. Não se pode usar `canonicalize`:
+        // o directório ainda não existe (é o `init` que o cria) e falharia sempre,
+        // caindo no fallback — todos os projectos ficavam chamados "app".
+        // `.`/vazio resolvem para o cwd; um caminho novo usa o seu basename.
+        let p = if dir.as_os_str().is_empty() || dir == std::path::Path::new(".") {
+            std::env::current_dir().ok()
+        } else {
+            Some(dir.clone())
+        };
+        p.as_deref()
+            .and_then(|p| p.file_name())
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "app".to_string())
+    });
+    super::scaffold::init(target, &super::scaffold::InitOpts { dir, name, image, force })
 }
