@@ -50,6 +50,16 @@ uma lista plana, um módulo por grupo em `crates/delonix-runtime-bin/src/cmd/`:
   `infra::{network_create_with,network_remove}` (plano físico do holder netns rootless). Para o
   driver `bridge` (o único que os containers atacham hoje), `network create` orquestra os dois
   em conjunto; `macvlan`/`ipvlan`/`overlay` só ficam no `NetworkStore` (limitação conhecida).
+- `delonix storage` — armazenamento de REDE (NFS/CIFS-SMB/WebDAV) montável como volume, estilo
+  PersistentVolume do k8s. `create/ls/inspect/rm/apply` + `kind: Storage`. Uma pasta de um NAS
+  (TrueNAS/Synology/Nextcloud) vira um volume nomeado que qualquer container monta com `-v <nome>:/x`.
+  Por baixo é um volume do `delonix-volume` com driver de rede (o `ensure_mounted` monta via
+  `mount -t nfs|cifs|davfs`); a declaração amigável (server/share/credenciais) é traduzida no
+  device/options por `storage::build_mount`. Password via cofre (`--password-secret` → chave
+  `password` do segredo). Validado end-to-end com NFS real: um container LEU e ESCREVEU num volume de
+  rede e a escrita chegou ao NAS (ver `examples/storage.yaml` + `examples/nas-vm-cloud-config.yaml`,
+  a receita da VM Samba+NFS de validação). **Montar NFS/CIFS precisa de CAP_SYS_ADMIN** (root ou
+  sessão privilegiada) — em rootless puro o `mount -t` falha claro.
 - `delonix stack apply [-f delonix-manifest.yaml]` — ver secção "Manifesto/apply" abaixo.
 
 ## Output: `ls` estilo docker, `describe` estilo kubectl (`cmd/output.rs`)
