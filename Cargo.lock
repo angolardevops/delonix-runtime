@@ -483,6 +483,7 @@ dependencies = [
  "delonix-net",
  "delonix-runtime",
  "delonix-runtime-core",
+ "delonix-scan",
  "delonix-vm",
  "delonix-volume",
  "flate2",
