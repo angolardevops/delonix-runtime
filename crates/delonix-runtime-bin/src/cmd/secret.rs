@@ -31,6 +31,7 @@ pub enum SecretCmd {
     Ls,
     /// Mostra as chaves de um segredo (valores redigidos, salvo `--reveal`).
     Inspect {
+        #[arg(add = clap_complete::engine::ArgValueCandidates::new(super::complete::secrets))]
         name: String,
         /// Revela os VALORES em claro (perigoso — evita em terminais partilhados).
         #[arg(long)]
@@ -38,19 +39,24 @@ pub enum SecretCmd {
     },
     /// Define/actualiza chaves num segredo (cria-o se não existir).
     Set {
+        #[arg(add = clap_complete::engine::ArgValueCandidates::new(super::complete::secrets))]
         name: String,
         /// Pares `KEY=value`.
         pairs: Vec<String>,
     },
     /// Remove uma chave de um segredo (ou o segredo todo com `--all`).
     Unset {
+        #[arg(add = clap_complete::engine::ArgValueCandidates::new(super::complete::secrets))]
         name: String,
         key: Option<String>,
         #[arg(long)]
         all: bool,
     },
     /// Remove um segredo.
-    Rm { name: String },
+    Rm {
+        #[arg(add = clap_complete::engine::ArgValueCandidates::new(super::complete::secrets))]
+        name: String,
+    },
     /// Roda a chave-mestra do host: re-cifra TODOS os segredos com uma chave
     /// nova. Os valores são preservados.
     RotateKey,

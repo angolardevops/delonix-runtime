@@ -280,102 +280,6 @@ fn join_config_yaml(j: &JoinInfo) -> String {
     )
 }
 
-/// Progresso ao estilo do `kind`, com **spinner animado**: cada passo mostra um
-/// braille a girar (` ⠋ A arrancar o control-plane 🕹️ `) numa thread de fundo, e
-/// a linha é reescrita com ` ✓ …` (ou ` ✗ …`) quando fecha.
-///
-/// # Porquê uma thread
-///
-/// O trabalho do passo (`node_exec_capture`) bloqueia o thread principal, às
-/// vezes por minutos (`kubeadm init` puxa imagens). Sem uma thread a animar, a
-/// linha ficava congelada e parecia pendurada. A thread só toca no stderr (o
-/// output do passo vai para um ficheiro capturado, ver `node_exec_capture`), por
-/// isso não há duas escritas a competir pela mesma linha.
-///
-/// **Sem TTY (pipe, CI, `2>&1 | tee`)** não há spinner nem `\r`: imprime-se só a
-/// linha final, uma por passo — o que um log de CI quer.
-struct Progress {
-    tty: bool,
-    msg: String,
-    icon: String,
-    spin: Option<SpinnerHandle>,
-}
-
-struct SpinnerHandle {
-    stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
-    handle: Option<std::thread::JoinHandle<()>>,
-}
-
-/// Frames do spinner (braille, como o `kind`/`spinnies`).
-const SPIN_FRAMES: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-
-impl Progress {
-    fn new() -> Self {
-        // SAFETY: isatty não tem pré-condições; 2 = stderr.
-        let tty = unsafe { libc::isatty(2) } == 1;
-        Self { tty, msg: String::new(), icon: String::new(), spin: None }
-    }
-
-    /// Abre um passo e arranca o spinner (em TTY). `icon` é o emoji do fim.
-    fn step(&mut self, msg: &str, icon: &str) {
-        self.close_line('✗'); // fecha um passo anterior deixado em aberto
-        self.msg = msg.to_string();
-        self.icon = icon.to_string();
-        if !self.tty {
-            return;
-        }
-        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let (s2, msg, icon) = (stop.clone(), self.msg.clone(), self.icon.clone());
-        let handle = std::thread::spawn(move || {
-            use std::io::Write;
-            let mut i = 0usize;
-            while !s2.load(std::sync::atomic::Ordering::Relaxed) {
-                // `\x1b[K` limpa até ao fim da linha (evita restos de um frame
-                // mais longo). Sem `\n` — a linha é reescrita in-place.
-                eprint!("\r {} {msg} {icon}\x1b[K", SPIN_FRAMES[i % SPIN_FRAMES.len()]);
-                let _ = std::io::stderr().flush();
-                i += 1;
-                std::thread::sleep(std::time::Duration::from_millis(90));
-            }
-        });
-        self.spin = Some(SpinnerHandle { stop, handle: Some(handle) });
-    }
-
-    /// Fecha o passo actual com `✓`.
-    fn ok(&mut self) {
-        self.close_line('✓');
-    }
-
-    /// Pára o spinner (se houver) e escreve a linha final com `mark`. Idempotente
-    /// — chamado pelo `ok`, pelo próximo `step` e pelo `Drop`.
-    fn close_line(&mut self, mark: char) {
-        let had_spinner = self.spin.is_some();
-        if let Some(mut s) = self.spin.take() {
-            s.stop.store(true, std::sync::atomic::Ordering::Relaxed);
-            if let Some(h) = s.handle.take() {
-                let _ = h.join();
-            }
-        } else if self.msg.is_empty() {
-            return; // nada aberto
-        }
-        if self.tty {
-            // `\r` + limpar a linha do spinner, depois a linha final.
-            eprintln!("\r {mark} {} {}\x1b[K", self.msg, self.icon);
-        } else if !self.msg.is_empty() {
-            eprintln!(" {mark} {} {}", self.msg, self.icon);
-        }
-        let _ = had_spinner;
-        self.msg.clear();
-    }
-}
-
-impl Drop for Progress {
-    fn drop(&mut self) {
-        // Um passo deixado em aberto (erro a meio) fecha com ✗ em vez de ficar
-        // com o spinner pendurado.
-        self.close_line('✗');
-    }
-}
 
 /// Reis/rainhas de Angola — Ndongo, Kongo, Matamba, Bailundo.
 const REIS: &[&str] = &[
@@ -546,7 +450,7 @@ pub(crate) fn create(images: &ImageStore, store: &Store, cfg: &KindCluster) -> R
     }
 
     super::output::info(&format!("{} \"{}\"", super::output::tr("Creating cluster", "A criar o cluster"), cfg.name));
-    let mut p = Progress::new();
+    let mut p = super::output::Progress::new();
 
     // Cada nó arranca por um re-exec (processo próprio) e, em rootless sem
     // delegação de cgroup, cada um imprimia o mesmo bloco de aviso de 7 linhas —
@@ -970,9 +874,14 @@ pub(crate) fn delete(images: &ImageStore, store: &Store, name: &str) -> Result<(
     if nodes.is_empty() {
         return Err(Error::NotFound(format!("cluster kind '{name}'")));
     }
+    super::output::info(&format!("{} \"{name}\"", super::output::tr("Deleting cluster", "A apagar o cluster")));
+    let mut p = super::output::Progress::new();
     for n in &nodes {
-        eprintln!("{} '{}'...", super::output::tr("removing node", "a remover o nó"), n.name);
+        // Mostra CADA nó a ser removido (portas/rede libertadas, rootfs apagado)
+        // — o delete deixa de parecer mágico, tal como o create.
+        p.step(&format!("{} '{}'", super::output::tr("Removing node", "A remover o nó"), n.name), "🗑️");
         container::remove_container(images, store, n, true)?;
+        p.ok();
     }
     // A rede do cluster (`dlx-<nome>`) foi criada PARA este cluster — some com ele
     // (ao contrário de uma rede de utilizador, que um `container rm` nunca apaga).
@@ -981,22 +890,29 @@ pub(crate) fn delete(images: &ImageStore, store: &Store, name: &str) -> Result<(
     let net = cluster_net(name);
     if let Ok(nstore) = delonix_net::NetworkStore::open(super::util::state_root()) {
         if nstore.get(&net).is_ok() {
+            p.step(&format!("{} '{net}'", super::output::tr("Freeing network", "A libertar a rede")), "🌐");
             let _ = nstore.remove(&net);
             delonix_net::infra::network_remove(&net);
+            p.ok();
         }
     }
+    p.step(super::output::tr("Cleaning up kubeconfig and context", "A limpar o kubeconfig e o contexto"), "🧹");
     let _ = std::fs::remove_file(kubeconfig_path(name));
     let _ = std::fs::remove_dir_all(cluster_dir(name));
     // Tira o contexto do ~/.kube/config — senão o `kubectl config get-contexts`
     // ficava a listar um cluster que já não existe, e um `kubectl` distraído
     // apontava para uma porta que entretanto pode ser de OUTRA coisa.
     if let Err(e) = remove_kubecontext(name) {
+        p.step("", ""); // fecha o passo de limpeza com ✗ antes do aviso
         super::output::warn(&if super::output::is_pt() {
             format!("não consegui tirar o contexto '{}' do kubeconfig: {e}", context_name(name))
         } else {
             format!("could not remove context '{}' from kubeconfig: {e}", context_name(name))
         });
+    } else {
+        p.ok();
     }
+    drop(p);
     println!("{}", if super::output::is_pt() { format!("cluster '{name}' removido ({} nó(s))", nodes.len()) } else { format!("cluster '{name}' removed ({} node(s))", nodes.len()) });
     Ok(())
 }
@@ -1046,7 +962,7 @@ pub(crate) fn list(store: &Store) -> Result<()> {
         clusters.entry(name).or_default().push(c);
     }
     if clusters.is_empty() {
-        println!("(nenhum cluster — cria um com `delonix cluster create`)");
+        println!("{}", super::output::tr("(no clusters — create one with `delonix cluster create`)", "(nenhum cluster — cria um com `delonix cluster create`)"));
         return Ok(());
     }
 
@@ -1055,10 +971,20 @@ pub(crate) fn list(store: &Store) -> Result<()> {
     // mais que `system events`.
     let evs = delonix_runtime_core::events::read(&super::util::state_root());
 
-    println!(
-        "{:<12}  {:<9}  {:>2}  {:>7}  {:<10}  {:<8}  {:<16}  {}",
-        "NOME", "ESTADO", "CP", "WORKERS", "PORTA API", "UPTIME", "ÚLTIMO REINÍCIO", "CRI SOCKET"
-    );
+    // `output::Table` mede as colunas pelo conteúdo — um nome longo como
+    // `kitamba-benguela-81` deixa de empurrar as outras colunas para fora do
+    // alinhamento (o que os `println!` de largura fixa faziam). Nomes completos,
+    // não abreviados.
+    let mut t = super::output::Table::new(&[
+        "NAME",
+        "STATE",
+        "CONTROL-PLANES",
+        "WORKERS",
+        "API PORT",
+        "UPTIME",
+        "LAST RESTART",
+        "CRI SOCKET",
+    ]);
     for (name, nodes) in clusters {
         let cp: Vec<&Container> = nodes
             .iter()
@@ -1108,8 +1034,18 @@ pub(crate) fn list(store: &Store) -> Result<()> {
             })
             .unwrap_or_else(|| "-".into());
 
-        println!("{name:<12}  {estado:<9}  {:>2}  {workers:>7}  {api:<10}  {uptime:<8}  {last:<16}  {cri}", cp.len());
+        t.row(vec![
+            name.clone(),
+            estado,
+            cp.len().to_string(),
+            workers.to_string(),
+            api,
+            uptime,
+            last,
+            cri,
+        ]);
     }
+    t.print();
     Ok(())
 }
 

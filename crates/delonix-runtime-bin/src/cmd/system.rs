@@ -189,9 +189,42 @@ fn cmd_prune(all: bool) -> Result<()> {
         }
     }
 
+    // 6) hostfwds órfãos no ingress — portas de host presas por containers que já
+    //    morreram (ex.: o slirp deixou um hostfwd para trás). `live_ports` = as
+    //    host-ports publicadas por containers VIVOS; o reaper remove todas as
+    //    outras. Aqui é SEGURO (ao contrário do caso do reaper do PaaS num
+    //    ingress partilhado): o `store` deste root É a fonte de verdade de quem
+    //    publica no ingress.
+    let live_ports: HashSet<u32> = store
+        .list()?
+        .iter()
+        .filter(|c| c.pid.map(delonix_runtime::is_alive).unwrap_or(false))
+        .flat_map(|c| c.ports.iter())
+        .filter_map(|p| delonix_net::parse_publish(p).ok().and_then(|(hp, _, _)| hp.parse::<u32>().ok()))
+        .collect();
+    let rmh = delonix_net::infra::reap_orphan_hostfwds(&live_ports);
+    // 7) slirps órfãos (alvo morto) — já reapados no topo por `reap_orphan_slirp`.
+
+    // 8) redes `dlx-*` VAZIAS — auto-criadas para clusters que já foram apagados
+    //    (uma rede de utilizador, sem o prefixo, NUNCA se toca aqui). Livra a
+    //    sub-rede/bridge para reutilizar.
+    let attached: HashSet<String> = store.list()?.iter().filter_map(|c| c.network.clone()).collect();
+    let mut rmn = 0usize;
+    if let Ok(nstore) = delonix_net::NetworkStore::open(super::util::state_root()) {
+        if let Ok(nets) = nstore.list() {
+            for n in nets {
+                if n.name.starts_with("dlx-") && !attached.contains(&n.name) {
+                    let _ = nstore.remove(&n.name);
+                    delonix_net::infra::network_remove(&n.name);
+                    rmn += 1;
+                }
+            }
+        }
+    }
+
     let total = freed + freed_dirs;
     println!(
-        "removidos: {rmc} container(es), {rmd} directório(s) órfão(s), {rmi} imagem(ns), {rmb} blob(s), {rmg} cgroup(s) — {} libertados",
+        "removed: {rmc} container(s), {rmd} orphan dir(s), {rmi} image(s), {rmb} blob(s), {rmg} cgroup(s), {rmh} orphan port(s), {rmn} orphan network(s) — {} freed",
         super::output::fmt_size(total)
     );
     Ok(())
