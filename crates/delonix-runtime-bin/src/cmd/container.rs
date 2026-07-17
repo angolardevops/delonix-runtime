@@ -116,6 +116,11 @@ fn default_true() -> bool {
 fn default_net() -> String {
     "host".to_string()
 }
+/// `host`/`none` are the two built-in networks (no user bridge); anything else
+/// is the name of a custom `delonix network` to attach to.
+fn custom_net_name(net: &str) -> Option<String> {
+    (net != "host" && net != "none").then(|| net.to_string())
+}
 
 #[derive(Subcommand)]
 pub enum ContainerCmd {
@@ -938,7 +943,7 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
     // do holder, independente do processo do container; por isso o container
     // tem de se JUNTAR a ela via `RunSpec.join_netns`, não criar a sua própria
     // com `new_netns` — essa era a abordagem errada, tentada e corrigida aqui).
-    let custom_net = if net != "host" && net != "none" { Some(net.to_string()) } else { None };
+    let custom_net = custom_net_name(&net);
     let mut attached_ip = None;
     if let Some(n) = &custom_net {
         if reexec {
