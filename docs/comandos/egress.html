@@ -60,7 +60,7 @@ main{padding:1.4rem 1.2rem 4rem}}
 <nav class="side">
 <div class="brand"><span class="dot">▲</span> Delonix Runtime</div>
 <h5>Documentação</h5>
-<a href="../index.html">Início</a><a href="../cheatsheet.html">Cheatsheet</a><a href="../arquitectura.html">Arquitectura</a><a href="../c4.html">Modelo C4 e system design</a><a href="../cri.html">CRI — kubelet sem containerd</a>
+<a href="../index.html">Início</a><a href="../cheatsheet.html">Cheatsheet</a><a href="../kinds.html">Kinds e templates</a><a href="../arquitectura.html">Arquitectura</a><a href="../c4.html">Modelo C4 e system design</a><a href="../cri.html">CRI — kubelet sem containerd</a>
 <h5>Referência CLI</h5>
 <a href="../comandos/container.html">delonix container</a><a href="../comandos/image.html">delonix image</a><a href="../comandos/build.html">delonix build</a><a href="../comandos/vm.html">delonix vm</a><a href="../comandos/volumes.html">delonix volumes</a><a href="../comandos/network.html">delonix network</a><a href="../comandos/stack.html">delonix stack</a><a href="../comandos/cluster.html">delonix cluster</a><a href="../comandos/secret.html">delonix secret</a><a href="../comandos/storage.html">delonix storage</a><a href="../comandos/ingress.html">delonix ingress</a><a href="../comandos/egress.html" class="on">delonix egress</a><a href="../comandos/flow.html">delonix flow</a><a href="../comandos/boot.html">delonix boot</a><a href="../comandos/system.html">delonix system</a><a href="../comandos/kube.html">delonix kube</a><a href="../comandos/netns.html">delonix netns</a><a href="../comandos/completion.html">delonix completion</a>
 <h5>Projecto</h5>
@@ -82,6 +82,7 @@ Commands:
   deny    Deny outbound traffic from a container (same shape as `allow`)
   policy  Set the default outbound policy when no rule matches
   net     Govern a whole network&#x27;s egress to the Internet
+  host    Allow a network&#x27;s egress to a HOSTNAME (and `*.hostname`), learnt live from DNS answers — the FQDN allowlist nft/CIDR can&#x27;t express. Repeatable
   ls      Show the outbound firewall (policy + rules)
   clear   Remove all outbound rules
   help    Print this message or the help of the given subcommand(s)
@@ -142,6 +143,23 @@ Options:
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)</code></pre></div>
 <h3>Exemplos</h3><div class="ex"><div class="cap">Egress de uma rede em allowlist (só DNS + estes CIDRs)</div><pre><code>delonix egress net backend allowlist --to 10.0.0.0/8,1.1.1.1/32</code></pre></div>
+<h2 id='host'><code>egress host</code></h2>
+<div class='help'><pre><code>Allow a network&#x27;s egress to a HOSTNAME (and `*.hostname`), learnt live from DNS answers — the FQDN allowlist nft/CIDR can&#x27;t express. Repeatable
+
+Usage: delonix egress host [OPTIONS] &lt;NETWORK&gt; &lt;HOSTNAME&gt;
+
+Arguments:
+  &lt;NETWORK&gt;   
+  &lt;HOSTNAME&gt;  e.g. `github.com` (matches `github.com` and `*.github.com`)
+
+Options:
+      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+  -h, --help          Print help</code></pre></div>
+<p>O que o nft/CIDR não faz: allowlist por <strong>hostname</strong>. O resolver DNS
+interno do ingress passa a snoopar os A-records das respostas e injecta-os num <code>set</code> nft
+por-rede (com timeout = expira com o TTL); o egress aceita esse set + DNS e dropa o resto. 100%
+rootless (sem eBPF) — a FQDN-policy do Cilium, via nftables. Repetível para vários hostnames.</p>
+<h3>Exemplos</h3><div class="ex"><div class="cap">Só deixar sair para o GitHub (e *.github.com), aprendido do DNS</div><pre><code>delonix egress host backend github.com</code></pre></div>
 <h2 id='ls'><code>egress ls</code></h2>
 <div class='help'><pre><code>Show the outbound firewall (policy + rules)
 
