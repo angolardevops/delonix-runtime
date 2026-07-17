@@ -24,7 +24,6 @@ struct {
     __uint(max_entries, 8192);
     __type(key, __u32);      // IPv4 address (network byte order)
     __type(value, struct flow);
-    __uint(pinning, LIBBPF_PIN_BY_NAME);
 } delonix_flows SEC(".maps");
 
 static __always_inline int ipv4_of(struct __sk_buff *skb, int want_src, __u32 *out, __u32 *len)
@@ -44,7 +43,7 @@ static __always_inline int ipv4_of(struct __sk_buff *skb, int want_src, __u32 *o
     return 0;
 }
 
-SEC("tc/tx")
+SEC("tc/ingress")
 int count_tx(struct __sk_buff *skb)
 {
     __u32 ip, len;
@@ -61,7 +60,7 @@ int count_tx(struct __sk_buff *skb)
     return TC_ACT_UNSPEC;
 }
 
-SEC("tc/rx")
+SEC("tc/egress")
 int count_rx(struct __sk_buff *skb)
 {
     __u32 ip, len;

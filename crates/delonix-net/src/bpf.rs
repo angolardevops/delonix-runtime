@@ -14,8 +14,12 @@
 use std::collections::HashMap;
 use std::net::Ipv4Addr;
 
-/// The pinned map name (matches `delonix_flows` in the eBPF source).
-const MAP_NAME: &str = "delonix_flows";
+/// bpffs directory where the shared program + map are pinned. A SINGLE pinned
+/// map is the whole point: attaching the classifiers to N container veths must
+/// accumulate into ONE map, else `bpftool ... name delonix_flows` is ambiguous.
+const PIN_DIR: &str = "/sys/fs/bpf/delonix";
+/// The pinned flow map (read/deleted by explicit path — never by name).
+const MAP_PIN: &str = "/sys/fs/bpf/delonix/delonix_flows";
 
 /// Per-IP counters read out of the BPF map.
 #[derive(Debug, Clone, Copy, Default)]
@@ -78,26 +82,41 @@ fn stage_object() -> Option<std::path::PathBuf> {
     Some(path)
 }
 
-/// Attach the accounting classifiers to `iface` (e.g. `delonix0`). Idempotent:
-/// re-attaching first clears the old clsact qdisc. `run` runs a command,
-/// optionally inside a netns (via the caller's wrapper) — kept as a closure so
-/// the ingress holder can inject `nsenter` without this crate knowing about it.
-pub fn attach<F>(iface: &str, run: F) -> bool
+/// Load the programs + shared map ONCE, pinned under [`PIN_DIR`]. Idempotent: if
+/// the pins already exist, `loadall` fails harmlessly and we keep them. `run`
+/// runs a command (optionally inside a netns via the caller's wrapper).
+fn ensure_loaded<F>(run: &F) -> bool
 where
     F: Fn(&[&str]) -> bool,
 {
+    // Already loaded? (a prior invocation pinned it.)
+    if run(&["bpftool", "prog", "show", "pinned", &format!("{PIN_DIR}/count_tx")]) {
+        return true;
+    }
     let obj = match stage_object() {
         Some(p) => p,
         None => return false,
     };
     let obj = obj.to_string_lossy().into_owned();
-    // Fresh clsact qdisc (ignore failure: may not exist yet).
+    run(&["bpftool", "prog", "loadall", &obj, PIN_DIR, "pinmaps", PIN_DIR])
+}
+
+/// Attach the accounting classifiers to `iface` (a container veth). Loads the
+/// shared pinned program on first use, then hooks `count_tx` at ingress and
+/// `count_rx` at egress. Idempotent: re-clears the clsact qdisc first.
+pub fn attach<F>(iface: &str, run: F) -> bool
+where
+    F: Fn(&[&str]) -> bool,
+{
+    if !ensure_loaded(&run) {
+        return false;
+    }
     let _ = run(&["tc", "qdisc", "del", "dev", iface, "clsact"]);
     if !run(&["tc", "qdisc", "add", "dev", iface, "clsact"]) {
         return false;
     }
-    let ok_tx = run(&["tc", "filter", "add", "dev", iface, "ingress", "bpf", "da", "obj", &obj, "sec", "tc/tx"]);
-    let ok_rx = run(&["tc", "filter", "add", "dev", iface, "egress", "bpf", "da", "obj", &obj, "sec", "tc/rx"]);
+    let ok_tx = run(&["tc", "filter", "add", "dev", iface, "ingress", "bpf", "da", "pinned", &format!("{PIN_DIR}/count_tx")]);
+    let ok_rx = run(&["tc", "filter", "add", "dev", iface, "egress", "bpf", "da", "pinned", &format!("{PIN_DIR}/count_rx")]);
     ok_tx && ok_rx
 }
 
@@ -118,7 +137,7 @@ where
     F: Fn(&[&str]) -> Option<String>,
 {
     let mut out = HashMap::new();
-    let json = match run_capture(&["bpftool", "-j", "map", "dump", "name", MAP_NAME]) {
+    let json = match run_capture(&["bpftool", "-j", "map", "dump", "pinned", MAP_PIN]) {
         Some(j) => j,
         None => return out,
     };
@@ -152,6 +171,20 @@ where
         }
     }
     out
+}
+
+/// Delete one IPv4's entry from the flow map (called when a container is removed
+/// so stale rows don't linger). Best-effort; a missing key is not an error.
+/// `run_capture` runs `bpftool` (the map is a global object — no netns needed).
+pub fn forget<F>(ip: Ipv4Addr, run_capture: F)
+where
+    F: Fn(&[&str]) -> Option<String>,
+{
+    // bpftool wants the key as space-separated hex bytes in map order (network
+    // byte order for the IPv4), e.g. `key 0x0a 0xdb 0xdc 0x90`.
+    let o = ip.octets();
+    let (b0, b1, b2, b3) = (format!("0x{:02x}", o[0]), format!("0x{:02x}", o[1]), format!("0x{:02x}", o[2]), format!("0x{:02x}", o[3]));
+    let _ = run_capture(&["bpftool", "map", "delete", "pinned", MAP_PIN, "key", &b0, &b1, &b2, &b3]);
 }
 
 /// Parse a bpftool byte array (`["0x0a", …]`) into raw bytes.

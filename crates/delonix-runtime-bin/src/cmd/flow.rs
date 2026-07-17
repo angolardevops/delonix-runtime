@@ -1,10 +1,11 @@
 //! `delonix flow` — live per-container traffic, from the eBPF datapath.
 //!
-//! When the eBPF observability datapath is available (privileged run), this
-//! attaches the accounting classifiers to `delonix0` (in the ingress netns) and
-//! shows per-container RX/TX read from the BPF map. When it isn't (the common
+//! When the eBPF datapath is available (privileged run), this attaches the
+//! accounting classifiers to every container veth in the ingress netns, GCs
+//! entries for containers that are gone, and shows per-container RX/TX from the
+//! shared BPF map (`--watch` redraws every 2s). When it isn't (the common
 //! rootless case), it says so plainly and falls back to the per-container veth
-//! counters that always work — the numbers are coarser but nothing is hidden.
+//! counters that always work — coarser, but nothing is hidden.
 
 use std::net::Ipv4Addr;
 use std::process::Command;
@@ -15,25 +16,24 @@ use delonix_runtime_core::Result;
 use super::output;
 use super::util::open_stores;
 
-pub fn run(iface: Option<String>) -> Result<()> {
+pub fn run(iface: Option<String>, watch: bool) -> Result<()> {
     let (_images, store) = open_stores()?;
-    let containers = store.list().unwrap_or_default();
-    // IP → container name, for labelling the flows.
-    let name_of: std::collections::HashMap<String, String> =
-        containers.iter().filter_map(|c| c.ip.clone().filter(|s| !s.is_empty()).map(|ip| (ip, c.name.clone()))).collect();
 
     if !bpf::available() {
         output::warn("eBPF observability inactive");
         println!("  the flow datapath needs CAP_BPF + CAP_NET_ADMIN (run privileged / root install);");
         println!("  the nft firewall and the SDN are unaffected. Falling back to veth counters.\n");
-        return fallback(&containers);
+        return fallback(&store.list().unwrap_or_default());
     }
 
     // Privileged: enter ONLY the infra netns (keep init-ns caps) to attach.
     let netns = infra::infra_netns_argv();
     let run_cmd = |args: &[&str]| -> bool {
         let mut c = wrap(&netns, args);
-        // tc prints to stderr on the pre-clean `qdisc del`; keep it quiet.
+        // These commands are run for their exit status only — silence both
+        // streams (tc warns on the pre-clean `qdisc del`; `bpftool prog show`
+        // prints the program on success).
+        c.stdout(std::process::Stdio::null());
         c.stderr(std::process::Stdio::null());
         c.status().map(|s| s.success()).unwrap_or(false)
     };
@@ -49,32 +49,51 @@ pub fn run(iface: Option<String>) -> Result<()> {
             bpf::attach(t, &run_cmd);
         }
     }
-    // The map is a global kernel object — read it directly (no netns needed).
-    let flows = bpf::flows(capture);
-    if flows.is_empty() {
-        println!("datapath attached — no flows yet (generate some traffic and re-run `delonix flow`).");
-        return Ok(());
+
+    loop {
+        // Refresh the container→IP map each frame: containers come and go.
+        let containers = store.list().unwrap_or_default();
+        let name_of: std::collections::HashMap<String, String> =
+            containers.iter().filter_map(|c| c.ip.clone().filter(|s| !s.is_empty()).map(|ip| (ip, c.name.clone()))).collect();
+        let live: std::collections::HashSet<Ipv4Addr> = name_of.keys().filter_map(|s| s.parse().ok()).collect();
+
+        let flows = bpf::flows(capture);
+        // GC: on a per-veth attach every key IS that veth's container IP, so a key
+        // with no live container is a dead container's leftover — free it.
+        for ip in flows.keys() {
+            if !live.contains(ip) {
+                bpf::forget(*ip, capture);
+            }
+        }
+
+        if watch {
+            print!("\x1b[2J\x1b[H"); // clear + home
+        }
+        render(&flows, &live, &name_of);
+        if !watch {
+            return Ok(());
+        }
+        std::thread::sleep(std::time::Duration::from_secs(2));
     }
+}
 
+/// Render the live-container flows as a table (stale IPs already GC'd out).
+fn render(flows: &std::collections::HashMap<Ipv4Addr, bpf::Flow>, live: &std::collections::HashSet<Ipv4Addr>, name_of: &std::collections::HashMap<String, String>) {
     let mut rows: Vec<(String, Ipv4Addr, bpf::Flow)> = flows
-        .into_iter()
-        .map(|(ip, f)| (name_of.get(&ip.to_string()).cloned().unwrap_or_else(|| "-".into()), ip, f))
+        .iter()
+        .filter(|(ip, _)| live.contains(ip))
+        .map(|(ip, f)| (name_of.get(&ip.to_string()).cloned().unwrap_or_else(|| "-".into()), *ip, *f))
         .collect();
+    if rows.is_empty() {
+        println!("datapath attached — no flows yet (generate some traffic).");
+        return;
+    }
     rows.sort_by(|a, b| (b.2.rx_bytes + b.2.tx_bytes).cmp(&(a.2.rx_bytes + a.2.tx_bytes)));
-
     let mut t = output::Table::new(&["CONTAINER", "IP", "RX PACKETS", "RX BYTES", "TX PACKETS", "TX BYTES"]);
     for (name, ip, f) in rows {
-        t.row(vec![
-            name,
-            ip.to_string(),
-            f.rx_packets.to_string(),
-            human_bytes(f.rx_bytes),
-            f.tx_packets.to_string(),
-            human_bytes(f.tx_bytes),
-        ]);
+        t.row(vec![name, ip.to_string(), f.rx_packets.to_string(), human_bytes(f.rx_bytes), f.tx_packets.to_string(), human_bytes(f.tx_bytes)]);
     }
     t.print();
-    Ok(())
 }
 
 /// Per-container byte counters from the veth (always available, coarser).
