@@ -24,10 +24,20 @@ use super::util::state_root;
 use super::vmimage::VmImageStore;
 use super::{k8s_recipes, vm as vm_cmd, vmimage};
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Default)]
 struct SshSpec {
+    #[serde(default = "default_ssh_user")]
     user: String,
+    /// `keyPath` é o nome canónico (o dos templates); `key` mantém-se aceite
+    /// para não partir manifestos escritos antes desta reestruturação.
+    #[serde(alias = "keyPath")]
     key: Option<PathBuf>,
+    #[serde(default)]
+    port: Option<u16>,
+}
+
+fn default_ssh_user() -> String {
+    "delonix".to_string()
 }
 
 #[derive(Debug, Deserialize)]
@@ -48,6 +58,9 @@ fn default_etcd_mode() -> String {
 
 #[derive(Debug, Clone, Deserialize)]
 struct HostSpec {
+    /// `address` é o nome canónico nos templates; `ip` mantém-se por
+    /// compatibilidade com os manifestos anteriores.
+    #[serde(alias = "address")]
     ip: String,
     hostname: Option<String>,
 }
@@ -60,21 +73,101 @@ impl HostSpec {
 
 #[derive(Debug, Deserialize)]
 struct ClusterSpec {
+    /// **O discriminador**: `kind` (containers aqui), `vm` (VMs douradas) ou
+    /// `ssh` (hosts remotos já vivos). Um só Kind, três caminhos — os campos
+    /// comuns (k8sVersion/podSubnet/cni) partilham-se, os específicos vivem no
+    /// bloco do modo.
+    #[serde(default = "default_mode")]
+    mode: String,
+    #[serde(default)]
     ssh: SshSpec,
     #[serde(default)]
     etcd: EtcdSpec,
     #[serde(rename = "controlPlaneEndpoint")]
     control_plane_endpoint: Option<String>,
-    #[serde(rename = "controlPlane")]
-    control_plane: Vec<HostSpec>,
+    #[serde(rename = "controlPlane", default)]
+    control_plane: NodesSpec,
     #[serde(default)]
-    workers: Vec<HostSpec>,
+    workers: NodesSpec,
     #[serde(rename = "k8sVersion")]
     k8s_version: Option<String>,
     #[serde(rename = "podSubnet", default = "default_pod_subnet")]
     pod_subnet: String,
     #[serde(rename = "serviceSubnet", default = "default_service_subnet")]
     service_subnet: String,
+    /// `default` = a CNI da imagem (kindnet); `none` = não instalar nenhuma.
+    #[serde(default = "default_cni")]
+    cni: String,
+    #[serde(default)]
+    kind: KindModeSpec,
+    #[serde(default)]
+    vm: VmModeSpec,
+}
+
+fn default_mode() -> String {
+    "kind".to_string()
+}
+fn default_cni() -> String {
+    "default".to_string()
+}
+
+/// Os nós de um papel. **Unifica os três modos**: `kind`/`vm` dizem quantos
+/// (`replicas`), `ssh` diz quais (`hosts`) — porque lá as máquinas já existem e
+/// nós não as criamos.
+#[derive(Debug, Default, Deserialize)]
+struct NodesSpec {
+    #[serde(default)]
+    replicas: Option<u32>,
+    #[serde(default)]
+    hosts: Vec<HostSpec>,
+}
+
+impl NodesSpec {
+    /// Quantos nós este papel pede, seja como for que foram declarados.
+    fn count(&self) -> u32 {
+        if !self.hosts.is_empty() {
+            self.hosts.len() as u32
+        } else {
+            self.replicas.unwrap_or(0)
+        }
+    }
+}
+
+/// Bloco `spec.kind` — só lido no `mode: kind`.
+#[derive(Debug, Deserialize)]
+struct KindModeSpec {
+    #[serde(default = "default_node_image")]
+    image: String,
+    #[serde(rename = "apiServerPort", default = "default_api_port")]
+    api_server_port: u16,
+}
+
+impl Default for KindModeSpec {
+    fn default() -> Self {
+        KindModeSpec { image: default_node_image(), api_server_port: default_api_port() }
+    }
+}
+
+fn default_node_image() -> String {
+    super::kindmode::DEFAULT_NODE_IMAGE.to_string()
+}
+fn default_api_port() -> u16 {
+    6443
+}
+
+/// Bloco `spec.vm` — só lido no `mode: vm`.
+#[derive(Debug, Default, Deserialize)]
+struct VmModeSpec {
+    image: Option<String>,
+    network: Option<String>,
+    #[serde(default)]
+    vcpus: Option<u32>,
+    #[serde(default)]
+    memory: Option<String>,
+    #[serde(rename = "sshKey", default)]
+    ssh_key: Option<PathBuf>,
+    #[serde(rename = "bootTimeout", default)]
+    boot_timeout: Option<String>,
 }
 
 fn default_pod_subnet() -> String {
@@ -115,6 +208,26 @@ pub(crate) fn valid_version(s: &str) -> bool {
 }
 
 fn validate(spec: &ClusterSpec) -> Result<()> {
+    if !matches!(spec.mode.as_str(), "kind" | "vm" | "ssh") {
+        return Err(Error::Invalid(format!(
+            "spec.mode '{}' inválido — usa `kind` (containers locais), `vm` (VMs douradas) ou \
+             `ssh` (hosts remotos já vivos)",
+            spec.mode
+        )));
+    }
+    if spec.mode == "ssh" && spec.control_plane.hosts.is_empty() {
+        return Err(Error::Invalid(
+            "spec.mode `ssh` exige `spec.controlPlane.hosts` — este modo NÃO cria máquinas, \
+             elas têm de existir e estar alcançáveis".into(),
+        ));
+    }
+    if spec.mode != "ssh" && !spec.control_plane.hosts.is_empty() {
+        return Err(Error::Invalid(format!(
+            "spec.controlPlane.hosts só faz sentido no `mode: ssh` (aqui é `{}`) — nos modos \
+             kind/vm usa `replicas`, que é o delonix que cria os nós",
+            spec.mode
+        )));
+    }
     if spec.etcd.mode != "stacked" {
         return Err(Error::Invalid(format!(
             "etcd.mode '{}' não suportado nesta versão — só 'stacked' (etcd externo fica para \
@@ -122,10 +235,12 @@ fn validate(spec: &ClusterSpec) -> Result<()> {
             spec.etcd.mode
         )));
     }
-    if spec.control_plane.is_empty() {
-        return Err(Error::Invalid("spec.controlPlane vazio — pelo menos 1 host obrigatório".into()));
+    if spec.control_plane.count() == 0 {
+        return Err(Error::Invalid(
+            "spec.controlPlane vazio — pelo menos 1 nó obrigatório (`replicas: 1` ou 1 host)".into(),
+        ));
     }
-    if spec.control_plane.len() > 1 && spec.control_plane_endpoint.is_none() {
+    if spec.control_plane.count() > 1 && spec.control_plane_endpoint.is_none() {
         return Err(Error::Invalid(
             "spec.controlPlaneEndpoint é obrigatório com mais de 1 control-plane (kubeadm \
              precisa de um endpoint estável — LB/VIP — à frente deles; não inventamos um)"
@@ -148,7 +263,7 @@ fn validate(spec: &ClusterSpec) -> Result<()> {
             return Err(Error::Invalid(format!("spec.k8sVersion '{v}' inválido (só dígitos e pontos, ex.: '1.31')")));
         }
     }
-    for h in spec.control_plane.iter().chain(spec.workers.iter()) {
+    for h in spec.control_plane.hosts.iter().chain(spec.workers.hosts.iter()) {
         if !valid_endpoint(&h.ip) {
             return Err(Error::Invalid(format!("host '{}' tem ip inválido: '{}'", h.label(), h.ip)));
         }
@@ -331,26 +446,99 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
 }
 
 fn apply_one(name: &str, spec: &ClusterSpec) -> Result<()> {
+    validate(spec)?;
+    // O `spec.mode` escolhe o caminho — os campos comuns (k8sVersion/podSubnet/
+    // cni) valem nos três; só o bloco específico do modo muda.
+    match spec.mode.as_str() {
+        "kind" => return apply_kind(name, spec),
+        "vm" => return apply_vm(name, spec),
+        _ => {} // `ssh` segue abaixo (o caminho original)
+    }
+    apply_ssh(name, spec)
+}
+
+/// `mode: kind` — nós em containers nesta máquina (ver `cmd::kindmode`).
+fn apply_kind(name: &str, spec: &ClusterSpec) -> Result<()> {
+    if spec.workers.count() > 0 {
+        return Err(Error::Invalid(
+            "workers no `mode: kind` ainda não estão implementados — usa `workers.replicas: 0` \
+             (um control-plane sem taint agenda tudo) ou `mode: vm`/`ssh` para multi-nó"
+                .into(),
+        ));
+    }
+    if spec.control_plane.count() > 1 {
+        return Err(Error::Invalid(
+            "`mode: kind` só suporta 1 control-plane por agora (HA precisa de um endpoint \
+             estável à frente dos nós — ver cluster-ssh.yaml)"
+                .into(),
+        ));
+    }
+    let (images, store) = super::util::open_stores()?;
+    super::kindmode::create(
+        &images,
+        &store,
+        &super::kindmode::KindCluster {
+            name: name.to_string(),
+            image: spec.kind.image.clone(),
+            api_port: spec.kind.api_server_port,
+            pod_subnet: spec.pod_subnet.clone(),
+            service_subnet: spec.service_subnet.clone(),
+            cni: spec.cni.clone(),
+            k8s_version: spec.k8s_version.clone(),
+        },
+    )
+}
+
+/// `mode: vm` — provisiona VMs da imagem dourada e faz o bootstrap por SSH.
+/// Reaproveita o `provision_and_apply` do `cluster kubeadm` (zero duplicação).
+fn apply_vm(name: &str, spec: &ClusterSpec) -> Result<()> {
+    let network = spec.vm.network.clone().ok_or_else(|| {
+        Error::Invalid("`mode: vm` exige `spec.vm.network` (cria-a antes com `delonix network create`)".into())
+    })?;
+    let boot_timeout = spec
+        .vm
+        .boot_timeout
+        .as_deref()
+        .map(|t| t.trim_end_matches('s').parse::<u64>().unwrap_or(300))
+        .unwrap_or(300);
+    provision_and_apply(ProvisionArgs {
+        name: name.to_string(),
+        control_plane: spec.control_plane.count(),
+        workers: spec.workers.count(),
+        vm_image: spec.vm.image.clone(),
+        network,
+        ssh_key: spec.vm.ssh_key.clone(),
+        vcpus: spec.vm.vcpus.unwrap_or(2),
+        memory: spec.vm.memory.clone().unwrap_or_else(|| "2G".to_string()),
+        k8s_version: spec.k8s_version.clone(),
+        pod_subnet: spec.pod_subnet.clone(),
+        service_subnet: spec.service_subnet.clone(),
+        boot_timeout,
+    })
+}
+
+/// `mode: ssh` — hosts remotos JÁ vivos (o caminho original, inalterado).
+fn apply_ssh(name: &str, spec: &ClusterSpec) -> Result<()> {
     let cri_bin = vmimage::resolve_cri_bin(None)?;
     let cri_service = vmimage::workspace_dist_file("delonix-cri.service")?;
 
-    let all_hosts: Vec<&HostSpec> = spec.control_plane.iter().chain(spec.workers.iter()).collect();
+    let all_hosts: Vec<&HostSpec> = spec.control_plane.hosts.iter().chain(spec.workers.hosts.iter()).collect();
     println!("cluster/{name}: a preparar {} host(s)...", all_hosts.len());
     for h in &all_hosts {
         let target = target_for(h, &spec.ssh);
         prepare_host(&target, &h.label(), spec.k8s_version.as_deref(), &cri_bin, &cri_service)?;
     }
 
-    let cp1 = &spec.control_plane[0];
+    let cp1 = &spec.control_plane.hosts[0];
     let cp1_target = target_for(cp1, &spec.ssh);
     let endpoint = spec.control_plane_endpoint.clone().unwrap_or_else(|| cp1.ip.clone());
     let info = kubeadm_init(&cp1_target, &cp1.label(), &endpoint, spec)?;
 
-    for h in &spec.control_plane[1..] {
+    for h in &spec.control_plane.hosts[1..] {
         let target = target_for(h, &spec.ssh);
         kubeadm_join(&target, &h.label(), &endpoint, &info, true)?;
     }
-    for h in &spec.workers {
+    for h in &spec.workers.hosts {
         let target = target_for(h, &spec.ssh);
         kubeadm_join(&target, &h.label(), &endpoint, &info, false)?;
     }
@@ -477,7 +665,7 @@ fn provision_and_apply(args: ProvisionArgs) -> Result<()> {
     }
 
     let (ssh_key_path, ssh_public) = generate_or_load_ssh_key(&args.name, args.ssh_key.clone())?;
-    let ssh = SshSpec { user: "delonix".to_string(), key: Some(ssh_key_path) };
+    let ssh = SshSpec { user: "delonix".to_string(), key: Some(ssh_key_path), port: None };
     let timeout = Duration::from_secs(args.boot_timeout);
 
     let cp_names = vm_names(&args.name, "cp", args.control_plane);
@@ -512,15 +700,21 @@ fn provision_and_apply(args: ProvisionArgs) -> Result<()> {
         ));
     };
 
+    // O `cluster kubeadm` (flags, sem manifesto) constrói o MESMO ClusterSpec que
+    // um `apply -f` construiria — daí passar pelo `validate`/`apply_one` iguais.
     let spec = ClusterSpec {
+        mode: "ssh".to_string(), // as VMs já foram criadas acima; daqui p/ a frente é SSH
         ssh,
         etcd: EtcdSpec::default(),
         control_plane_endpoint,
-        control_plane,
-        workers: worker_hosts,
+        control_plane: NodesSpec { replicas: None, hosts: control_plane },
+        workers: NodesSpec { replicas: None, hosts: worker_hosts },
         k8s_version: args.k8s_version,
         pod_subnet: args.pod_subnet,
         service_subnet: args.service_subnet,
+        cni: default_cni(),
+        kind: KindModeSpec::default(),
+        vm: VmModeSpec::default(),
     };
     validate(&spec)?;
     apply_one(&args.name, &spec)
