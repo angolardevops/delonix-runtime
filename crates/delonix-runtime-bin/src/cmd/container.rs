@@ -79,6 +79,12 @@ pub enum ContainerCmd {
         /// destacado trata da remoção quando o container morrer).
         #[arg(long)]
         rm: bool,
+        /// Política de reinício (só com `-d`): `no` (default), `on-failure[:max]`,
+        /// `always`, `unless-stopped`. Um supervisor destacado (um por container,
+        /// efémero — não há daemon) fica pai do container, captura o exit code
+        /// real e reinicia-o conforme a política.
+        #[arg(long, default_value = "no")]
+        restart: String,
         /// Variáveis de ambiente adicionais (`KEY=VAL`), repetível.
         #[arg(short = 'e', long = "env")]
         env: Vec<String>,
@@ -164,8 +170,8 @@ pub enum ContainerCmd {
 pub fn run(action: ContainerCmd) -> Result<()> {
     let (images, store) = open_stores()?;
     match action {
-        ContainerCmd::Run { detach, name, net, volumes, publish, privileged, entrypoint, rm, env, labels, image, command } => {
-            cmd_run(&images, &store, RunOpts { detach, name, net, volumes, ports: publish, privileged, entrypoint, rm, env, labels, image, command })
+        ContainerCmd::Run { detach, name, net, volumes, publish, privileged, entrypoint, rm, restart, env, labels, image, command } => {
+            cmd_run(&images, &store, RunOpts { detach, name, net, volumes, ports: publish, privileged, entrypoint, rm, restart, env, labels, image, command })
         }
         ContainerCmd::Ps { all, quiet } => cmd_ps(&store, all, quiet),
         ContainerCmd::Start { ids } => for_each_id(&ids, |id| cmd_start(&images, &store, id)),
@@ -204,6 +210,7 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
                 privileged: spec.privileged,
                 entrypoint: None,
                 rm: false,
+                restart: "no".to_string(),
                 env: spec.env,
                 labels: Vec::new(),
                 image: spec.image,
@@ -236,6 +243,7 @@ struct RunOpts {
     privileged: bool,
     entrypoint: Option<String>,
     rm: bool,
+    restart: String,
     env: Vec<String>,
     labels: Vec<String>,
     image: String,
@@ -243,7 +251,7 @@ struct RunOpts {
 }
 
 fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Result<()> {
-    let RunOpts { detach, name, net, volumes, ports, privileged, entrypoint, rm, env, labels, image, command } = opts;
+    let RunOpts { detach, name, net, volumes, ports, privileged, entrypoint, rm, restart, env, labels, image, command } = opts;
     // Valida os `-p` ANTES de criar o que quer que seja (erro claro, sem lixo).
     for spec in &ports {
         delonix_net::parse_publish(spec)?;
@@ -356,6 +364,13 @@ fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Result<()> {
             .or_else(|| (!slirp_ports.is_empty()).then(|| delonix_net::SLIRP_IP.to_string())),
         ..Default::default()
     };
+    // `--restart`: em vez de a CLI criar o container e sair (deixando-o órfão do
+    // `init`, com o exit code perdido), um SUPERVISOR destacado cria-o e fica
+    // seu pai — ver `run_supervised`.
+    if detach && policy_supervised(&restart) {
+        c.restart_policy = Some(restart.clone());
+        return run_supervised(store, &mut c, &rootfs, &spec, &restart, &id);
+    }
     runtime::create_with(store, &mut c, &rootfs, &spec)?;
     if let Some(n) = &custom_net {
         c.network = Some(n.clone());
@@ -459,6 +474,143 @@ fn for_each_id(ids: &[String], mut f: impl FnMut(&str) -> Result<()>) -> Result<
     }
 }
 
+/// `--restart` em `-d`: cria o container dentro de um **supervisor destacado**
+/// (um por container, efémero — continua a não haver daemon) e mantém a
+/// política de reinício.
+///
+/// Porque tem de ser assim: `waitpid` só é permitido ao PAI. Num `run -d`
+/// normal a CLI cria o container e sai — ele é reparentado ao `init` do host e o
+/// exit code morre lá; o `reconcile_status` só consegue dizer "morreu"
+/// (`Crashed`/137), nunca *porquê*, e `on-failure` não teria como decidir. Aqui
+/// é o supervisor que chama `create_with`, portanto é ele o pai: apanha o
+/// código real (`Failed(n)`) e reinicia conforme a política. É o mesmo papel do
+/// `conmon` do podman, sem processo residente global.
+///
+/// O pai (a CLI) espera pelo primeiro arranque através de um pipe, para manter
+/// a semântica do `run -d`: quando o comando volta, o container JÁ existe.
+fn run_supervised(
+    store: &Store,
+    c: &mut Container,
+    rootfs: &str,
+    spec: &RunSpec<'_>,
+    policy: &str,
+    id: &str,
+) -> Result<()> {
+    let mut fds = [0i32; 2];
+    // SAFETY: pipe() preenche 2 fds; usados só para o handshake de arranque.
+    if unsafe { libc::pipe(fds.as_mut_ptr()) } != 0 {
+        return Err(Error::Runtime { context: "pipe", message: "handshake do supervisor".into() });
+    }
+    let (rd, wr) = (fds[0], fds[1]);
+
+    // SAFETY: fork de um processo single-threaded (CLI).
+    if unsafe { libc::fork() } == 0 {
+        // ---- supervisor ----
+        unsafe {
+            libc::close(rd);
+            libc::setsid(); // sobrevive ao fecho do terminal/CLI
+        }
+        let mut restarts: u32 = 0;
+        let mut first = true;
+        loop {
+            let started = runtime::create_with(store, c, rootfs, spec);
+            if first {
+                // sinaliza o pai: 1 = arrancou, 0 = falhou (e o pai devolve erro)
+                let b = [u8::from(started.is_ok())];
+                // SAFETY: escreve 1 byte no write-end e fecha-o.
+                unsafe {
+                    libc::write(wr, b.as_ptr() as *const libc::c_void, 1);
+                    libc::close(wr);
+                    // Só AGORA larga o stdio: até aqui um erro do `create_with`
+                    // ainda tem de chegar ao utilizador.
+                    let null = libc::open(c"/dev/null".as_ptr(), libc::O_RDWR);
+                    if null >= 0 {
+                        libc::dup2(null, 0);
+                        libc::dup2(null, 1);
+                        libc::dup2(null, 2);
+                        if null > 2 {
+                            libc::close(null);
+                        }
+                    }
+                }
+                first = false;
+            }
+            if started.is_err() {
+                std::process::exit(1);
+            }
+            // Somos o PAI do container: isto captura o exit code REAL e grava-o.
+            let status = match runtime::wait_and_record(store, c) {
+                Ok(s) => s,
+                Err(_) => std::process::exit(1),
+            };
+            if !should_restart(policy, &status, restarts) {
+                std::process::exit(0);
+            }
+            // Estado desejado manda mais que a política: se o registo
+            // desapareceu (`rm -f`) ou o utilizador pediu `stop`, não
+            // ressuscitar — é a semântica do docker.
+            match store.load(&c.id) {
+                Err(_) => std::process::exit(0),
+                Ok(cur) if cur.stopped_by_user => std::process::exit(0),
+                Ok(_) => {}
+            }
+            restarts += 1;
+            // Liberta a porta/slirp da encarnação anterior antes de a reusar —
+            // senão o `add_hostfwd` do restart falha (ver `reap_orphan_net`).
+            reap_orphan_net(store);
+            // Backoff exponencial travado (1s→32s), como o docker: um container
+            // que crasha em ciclo não pode queimar o nó.
+            let backoff = std::cmp::min(1u64 << std::cmp::min(restarts, 5), 32);
+            std::thread::sleep(std::time::Duration::from_secs(backoff));
+        }
+    }
+
+    // ---- pai (CLI): espera o primeiro arranque ----
+    // SAFETY: fecha o write-end e lê o byte de handshake do supervisor.
+    unsafe { libc::close(wr) };
+    let mut b = [0u8; 1];
+    // SAFETY: lê 1 byte; 0 = EOF (supervisor morreu antes de sinalizar).
+    let n = unsafe { libc::read(rd, b.as_mut_ptr() as *mut libc::c_void, 1) };
+    unsafe { libc::close(rd) };
+    if n != 1 || b[0] != 1 {
+        return Err(Error::Runtime {
+            context: "supervisor",
+            message: "o container não arrancou (ver o erro acima)".into(),
+        });
+    }
+    println!("{id}");
+    Ok(())
+}
+
+/// Decide se um container deve ser reiniciado, dada a política, o estado com
+/// que morreu e quantas vezes já foi reiniciado. Função **pura** — a máquina de
+/// estados do restart testa-se sem clonar processos nenhuns.
+///
+/// Semântica docker: `no` nunca; `on-failure[:max]` só em saída ≠ 0 (ou sinal),
+/// até `max` tentativas (sem `max` = sem limite); `always`/`unless-stopped`
+/// sempre. A distinção real entre `always` e `unless-stopped` é o que acontece
+/// ao **rearrancar o host** (o `unless-stopped` não ressuscita um container que
+/// o utilizador parou) — sem um daemon a fazer boot-time reconcile, aqui os
+/// dois comportam-se igual EM VIDA; documentado para não prometer o que não há.
+fn should_restart(policy: &str, status: &delonix_runtime_core::Status, restarts: u32) -> bool {
+    use delonix_runtime_core::Status as S;
+    let failed = matches!(status, S::Failed(_) | S::Crashed);
+    let (kind, max) = match policy.split_once(':') {
+        Some((k, m)) => (k, m.parse::<u32>().ok()),
+        None => (policy, None),
+    };
+    match kind {
+        "always" | "unless-stopped" => true,
+        "on-failure" => failed && max.map(|m| restarts < m).unwrap_or(true),
+        _ => false, // "no" e qualquer coisa desconhecida: não reiniciar
+    }
+}
+
+/// A política pede supervisão? (`no` não precisa de supervisor nenhum.)
+fn policy_supervised(policy: &str) -> bool {
+    matches!(policy.split(':').next().unwrap_or(""), "always" | "unless-stopped" | "on-failure")
+}
+
 /// Reapa a rede deixada por containers que já morreram, ANTES de publicar
 /// portas novas. Sem isto, um `slirp4netns` órfão (o container morreu sem
 /// `stop` — crash, SIGKILL, sessão fechada) fica a segurar a porta de HOST e o
@@ -510,6 +662,12 @@ fn cmd_start(images: &ImageStore, store: &Store, id: &str) -> Result<()> {
     if runtime::reconcile_status(&mut c) {
         c = store.update(&c.id, |cur| runtime::reconcile_status(cur)).unwrap_or(c);
     }
+    // `start` reafirma o estado desejado = a correr (limpa o `stop` do utilizador).
+    let _ = store.update(&c.id, |cur| {
+        cur.stopped_by_user = false;
+        true
+    });
+    c.stopped_by_user = false;
     if matches!(c.status, delonix_runtime_core::Status::Running | delonix_runtime_core::Status::Paused) {
         return Err(Error::Invalid(format!("{} já está a correr", c.name)));
     }
@@ -572,6 +730,13 @@ fn cmd_start(images: &ImageStore, store: &Store, id: &str) -> Result<()> {
 
 fn cmd_stop(store: &Store, id: &str, time: u64) -> Result<()> {
     let mut c = find(store, id)?;
+    // ANTES de parar: marca o estado desejado, senão o supervisor de
+    // `--restart always` ressuscita-o e o utilizador não o consegue parar
+    // (medido: 6 encarnações depois de um `stop`). Ver `Container::stopped_by_user`.
+    let _ = store.update(&c.id, |cur| {
+        cur.stopped_by_user = true;
+        true
+    });
     runtime::stop(store, &mut c, time)?;
     unpublish_ports(&c);
     println!("{}", c.id);
@@ -735,6 +900,7 @@ fn cmd_logs(images: &ImageStore, store: &Store, id: &str, follow: bool) -> Resul
 
 #[cfg(test)]
 mod tests {
+    use super::{policy_supervised, should_restart};
     use super::super::util::compose_command;
 
     fn v(xs: &[&str]) -> Vec<String> {
@@ -763,5 +929,41 @@ mod tests {
     fn plain_cmd_without_entrypoint() {
         assert_eq!(compose_command(&[], &v(&["sleep", "1"]), &[]), v(&["sleep", "1"]));
         assert_eq!(compose_command(&[], &[], &v(&["sh"])), v(&["sh"]));
+    }
+
+    #[test]
+    fn restart_policy_semantica_docker() {
+        use delonix_runtime_core::Status as S;
+        // `no` (e desconhecidas): nunca reinicia, tenha morrido como tiver.
+        for st in [S::Stopped, S::Failed(1), S::Crashed] {
+            assert!(!should_restart("no", &st, 0));
+            assert!(!should_restart("qualquer-coisa", &st, 0));
+        }
+        // `always`/`unless-stopped`: sempre, mesmo em saída limpa.
+        for p in ["always", "unless-stopped"] {
+            assert!(should_restart(p, &S::Stopped, 0));
+            assert!(should_restart(p, &S::Failed(1), 99));
+            assert!(should_restart(p, &S::Crashed, 99));
+        }
+        // `on-failure`: só em falha; saída 0 pára.
+        assert!(!should_restart("on-failure", &S::Stopped, 0));
+        assert!(should_restart("on-failure", &S::Failed(2), 0));
+        assert!(should_restart("on-failure", &S::Crashed, 0));
+        // `on-failure:max` respeita o tecto (o `max` conta REINÍCIOS já feitos).
+        assert!(should_restart("on-failure:3", &S::Failed(1), 2));
+        assert!(!should_restart("on-failure:3", &S::Failed(1), 3));
+        assert!(!should_restart("on-failure:0", &S::Failed(1), 0));
+        // `on-failure` sem `max` não tem tecto.
+        assert!(should_restart("on-failure", &S::Failed(1), 10_000));
+    }
+
+    #[test]
+    fn policy_supervised_so_para_politicas_activas() {
+        assert!(!policy_supervised("no"));
+        assert!(!policy_supervised(""));
+        assert!(policy_supervised("always"));
+        assert!(policy_supervised("unless-stopped"));
+        assert!(policy_supervised("on-failure"));
+        assert!(policy_supervised("on-failure:5"));
     }
 }

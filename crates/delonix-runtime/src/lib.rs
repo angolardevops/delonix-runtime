@@ -2873,6 +2873,35 @@ fn spawn(store: &Store, container: &mut Container, rootfs: &str, spec: &RunSpec<
     Ok(())
 }
 
+/// Espera o container terminar e **regista o estado REAL** (com o exit code) no
+/// `Store`. Devolve o estado final.
+///
+/// Só funciona para quem chamou [`create_with`] — porque `waitpid` só é
+/// permitido ao **pai** do processo. É essa a razão de existir: num `run -d`
+/// normal a CLI sai logo, o container é reparentado ao `init` do host e o
+/// código de saída morre com ele — o `reconcile_status` só consegue depois
+/// dizer "morreu" (`Crashed`/137), nunca *porquê*. Um supervisor que chame
+/// `create_with` e depois isto fica pai do container e captura o código
+/// verdadeiro (`Failed(n)`), que é o que uma política de restart
+/// `on-failure` precisa de saber para decidir.
+pub fn wait_and_record(store: &Store, container: &mut Container) -> Result<Status> {
+    let pid = container.pid.ok_or_else(|| Error::NotRunning(container.short_id().to_string()))?;
+    let st = waitpid(Pid::from_raw(pid), None).map_err(syserr("waitpid"))?;
+    let status = wait_to_status(st);
+    // `update` (flock) e não `save`: o CRI/CLI podem estar a reconciliar o
+    // mesmo container agora — ver `Store::update`.
+    let final_status = status.clone();
+    let _ = store.update(&container.id, |c| {
+        c.status = final_status.clone();
+        c.pid = None;
+        true
+    });
+    container.status = status.clone();
+    container.pid = None;
+    remove_container_cgroup(container);
+    Ok(status)
+}
+
 // ----------------------------------------------------------------------------
 // Exec: correr um comando dentro de um container existente
 // ----------------------------------------------------------------------------
