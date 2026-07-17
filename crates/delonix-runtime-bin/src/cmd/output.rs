@@ -18,27 +18,27 @@ const GAP: usize = 3;
 // Cor
 // ---------------------------------------------------------------------------
 
-/// Códigos ANSI. Só estes quatro: um CLI que usa meia paleta acaba com cada
-/// comando a inventar a sua convenção.
-pub mod cor {
+/// ANSI codes. Just these: a CLI that uses half a palette ends up with each
+/// command inventing its own convention.
+pub mod color {
     pub const RESET: &str = "\x1b[0m";
-    pub const CIANO: &str = "\x1b[36m"; // info
-    pub const AMARELO: &str = "\x1b[33m"; // aviso
-    pub const VERMELHO: &str = "\x1b[31m"; // erro
-    pub const CINZA: &str = "\x1b[90m"; // secundário (timestamps, detalhes)
-    pub const NEGRITO: &str = "\x1b[1m";
+    pub const CYAN: &str = "\x1b[36m"; // info
+    pub const YELLOW: &str = "\x1b[33m"; // warning
+    pub const RED: &str = "\x1b[31m"; // error
+    pub const GRAY: &str = "\x1b[90m"; // secondary (timestamps, details)
+    pub const BOLD: &str = "\x1b[1m";
 }
 
-/// Há cor no stderr?
+/// Is color enabled on stderr?
 ///
-/// Três condições, todas necessárias: é um terminal (num pipe/ficheiro os
-/// códigos ANSI viram lixo — `grep`/`tee`/CI apanham-nos), `NO_COLOR` não está
-/// definida (<https://no-color.org>, a convenção que todo o CLI devia honrar) e
-/// `TERM` não é `dumb`.
-pub fn cor_ligada() -> bool {
-    static LIGADA: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *LIGADA.get_or_init(|| {
-        // SAFETY: isatty não tem pré-condições; 2 = stderr.
+/// Three conditions, all required: it's a terminal (in a pipe/file the ANSI
+/// codes become garbage that `grep`/`tee`/CI would capture), `NO_COLOR` is unset
+/// (<https://no-color.org>, the convention every CLI should honor), and `TERM`
+/// is not `dumb`.
+pub fn color_enabled() -> bool {
+    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ENABLED.get_or_init(|| {
+        // SAFETY: isatty has no preconditions; 2 = stderr.
         let tty = unsafe { libc::isatty(2) } == 1;
         let no_color = std::env::var_os("NO_COLOR").is_some();
         let dumb = std::env::var("TERM").map(|t| t == "dumb").unwrap_or(false);
@@ -46,9 +46,9 @@ pub fn cor_ligada() -> bool {
     })
 }
 
-fn pinta(c: &str, s: &str) -> String {
-    if cor_ligada() {
-        format!("{c}{s}{}", cor::RESET)
+fn paint(c: &str, s: &str) -> String {
+    if color_enabled() {
+        format!("{c}{s}{}", color::RESET)
     } else {
         s.to_string()
     }
@@ -56,26 +56,26 @@ fn pinta(c: &str, s: &str) -> String {
 
 // ---- i18n -----------------------------------------------------------------
 //
-// O runtime é PÚBLICO e opensource — o output é **inglês por omissão** (o que um
-// utilizador internacional espera de um CLI). `--l18n=pt` (ou `DELONIX_L18N=pt`)
-// muda para português de Angola. O locale é global e imutável depois de definido
-// no arranque (`set_lang`, uma vez, em `main`); um `AtomicU8` chega e é lock-free.
+// The runtime is PUBLIC and open source — output is **English by default** (what
+// an international user expects from a CLI). `--l18n=pt` (or `DELONIX_L18N=pt`)
+// switches to Angolan Portuguese. The locale is global and immutable once set at
+// startup (`set_lang`, once, in `main`); an `AtomicU8` suffices and is lock-free.
 
 static LANG: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0); // 0=en, 1=pt
 
-/// Define o locale a partir do valor da flag `--l18n` / `$DELONIX_L18N`.
-/// Qualquer coisa que não seja `pt*` fica em inglês (o default seguro).
+/// Sets the locale from the `--l18n` flag / `$DELONIX_L18N` value.
+/// Anything that isn't `pt*` stays English (the safe default).
 pub fn set_lang(s: &str) {
-    let v = matches!(s.trim().to_lowercase().as_str(), "pt" | "pt_ao" | "pt-ao" | "pt_pt" | "pt-pt");
-    LANG.store(v as u8, std::sync::atomic::Ordering::Relaxed);
+    let is_pt = matches!(s.trim().to_lowercase().as_str(), "pt" | "pt_ao" | "pt-ao" | "pt_pt" | "pt-pt");
+    LANG.store(is_pt as u8, std::sync::atomic::Ordering::Relaxed);
 }
 
 pub fn is_pt() -> bool {
     LANG.load(std::sync::atomic::Ordering::Relaxed) == 1
 }
 
-/// Escolhe a string conforme o locale: `en` por omissão, `pt` com `--l18n=pt`.
-/// Devolve `&str` para compor directamente num `format!`/`println!`.
+/// Picks the string for the active locale: `en` by default, `pt` with `--l18n=pt`.
+/// Returns `&str` to drop straight into a `format!`/`println!`.
 pub fn tr(en: &'static str, pt: &'static str) -> &'static str {
     if is_pt() {
         pt
@@ -84,10 +84,6 @@ pub fn tr(en: &'static str, pt: &'static str) -> &'static str {
     }
 }
 
-/// Prefixos das mensagens, já localizados.
-fn label_info() -> &'static str {
-    "info" // igual em EN/PT
-}
 fn label_warn() -> &'static str {
     tr("warning", "aviso")
 }
@@ -95,28 +91,28 @@ fn label_error() -> &'static str {
     tr("error", "erro")
 }
 
-/// Uma mensagem informativa (ciano).
+/// An informational message (cyan).
 pub fn info(msg: &str) {
-    eprintln!("{} {msg}", pinta(cor::CIANO, label_info()));
+    eprintln!("{} {msg}", paint(color::CYAN, "info")); // "info" is the same in EN/PT
 }
 
-/// Um aviso (amarelo): correu, mas há aqui algo que o utilizador devia saber.
-pub fn aviso(msg: &str) {
-    eprintln!("{} {msg}", pinta(cor::AMARELO, label_warn()));
+/// A warning (yellow): it worked, but there's something the user should know.
+pub fn warn(msg: &str) {
+    eprintln!("{} {msg}", paint(color::YELLOW, label_warn()));
 }
 
-/// Um erro (vermelho).
-pub fn erro(msg: &str) {
-    eprintln!("{} {msg}", pinta(cor::VERMELHO, label_error()));
+/// An error (red).
+pub fn error(msg: &str) {
+    eprintln!("{} {msg}", paint(color::RED, label_error()));
 }
 
-/// Texto secundário (cinza) — para detalhes que não competem com a mensagem.
-pub fn secundario(s: &str) -> String {
-    pinta(cor::CINZA, s)
+/// Secondary text (gray) — for details that shouldn't compete with the message.
+pub fn dim(s: &str) -> String {
+    paint(color::GRAY, s)
 }
 
-pub fn destaque(s: &str) -> String {
-    pinta(cor::NEGRITO, s)
+pub fn bold(s: &str) -> String {
+    paint(color::BOLD, s)
 }
 
 /// Tabela alinhada pelo conteúdo: as colunas ficam com a largura da célula mais

@@ -94,34 +94,34 @@ pub fn scan_image(images: &ImageStore, image: &Image) -> Result<Option<Severity>
     let (db, prov) = load_advisories()?;
     let findings = db.scan(&sbom);
 
-    println!("{}", output::destaque(&format!("Vulnerability Scan · {}", image.short_id())));
+    println!("{}", output::bold(&format!("Vulnerability Scan · {}", image.short_id())));
     let count = |sev: Severity| findings.iter().filter(|f| f.severity == sev).count();
     let (crit, high, med, low) = (count(Severity::Critical), count(Severity::High), count(Severity::Medium), count(Severity::Low));
     println!(
         "  {}   {}   {}",
-        output::secundario(&format!("SBOM: {} pacotes", sbom.len())),
-        output::secundario(&format!("advisories: {}", db.len())),
-        output::secundario(&format!("vulnerabilidades: {}", findings.len())),
+        output::dim(&format!("SBOM: {} pacotes", sbom.len())),
+        output::dim(&format!("advisories: {}", db.len())),
+        output::dim(&format!("vulnerabilidades: {}", findings.len())),
     );
     println!("  {}", sev_line(crit, high, med, low));
 
     // Proveniência HONESTA: sem isto, um "sem vulnerabilidades" contra a base
     // placeholder parecia um atestado de saúde — falsa garantia.
     let stale = delonix_scan::db_is_stale(prov.synced_unix, now_unix(), 14);
-    println!("  {}", output::secundario(&format!("fonte da base: {} ({} advisories)", prov.label, db.len())));
+    println!("  {}", output::dim(&format!("fonte da base: {} ({} advisories)", prov.label, db.len())));
     if prov.placeholder {
-        output::aviso(&format!(
+        output::warn(&format!(
             "base de CVE EMBEBIDA (placeholder, {} entradas) — NÃO é um feed real; um \"sem vulnerabilidades\" não é de confiança. \
              Sincroniza: `delonix image scan --update --feed https://…/osv.json`",
             db.len()
         ));
     } else if stale {
-        output::aviso("base de advisories obsoleta (>14 dias sem sync) — corre `delonix image scan --update`.");
+        output::warn("base de advisories obsoleta (>14 dias sem sync) — corre `delonix image scan --update`.");
     }
 
     if findings.is_empty() {
         if prov.placeholder {
-            println!("  {}", output::secundario("sem correspondências na base placeholder (não conclusivo)"));
+            println!("  {}", output::dim("sem correspondências na base placeholder (não conclusivo)"));
         } else {
             println!("  ✔ sem vulnerabilidades conhecidas");
         }
@@ -141,7 +141,7 @@ pub fn scan_image(images: &ImageStore, image: &Image) -> Result<Option<Severity>
 }
 
 fn sev_line(crit: usize, high: usize, med: usize, low: usize) -> String {
-    if output::cor_ligada() {
+    if output::color_enabled() {
         format!(
             "\x1b[1;31m●\x1b[0m CRITICAL {crit}   \x1b[31m●\x1b[0m HIGH {high}   \x1b[33m●\x1b[0m MEDIUM {med}   \x1b[36m●\x1b[0m LOW {low}"
         )
@@ -237,7 +237,7 @@ pub fn admission_scan_on_pull(images: &ImageStore, reference: &str, img: &Image)
         Ok(w) => w,
         // Sem SBOM (scratch/distroless) ou scan indisponível → não bloquear, avisar.
         Err(e) => {
-            output::aviso(&format!("scan de admissão indisponível ({e}); pull permitido."));
+            output::warn(&format!("scan de admissão indisponível ({e}); pull permitido."));
             return Ok(());
         }
     };
@@ -249,7 +249,7 @@ pub fn admission_scan_on_pull(images: &ImageStore, reference: &str, img: &Image)
         )));
     }
     if policy != "warn" && Severity::parse(&policy).is_none() {
-        output::aviso(&format!("DELONIX_SCAN_ON_PULL='{policy}' inválido (warn|low|medium|high|critical); só reportado."));
+        output::warn(&format!("DELONIX_SCAN_ON_PULL='{policy}' inválido (warn|low|medium|high|critical); só reportado."));
     }
     Ok(())
 }
