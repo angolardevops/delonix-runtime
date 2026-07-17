@@ -498,16 +498,6 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
     Ok(())
 }
 
-/// O nome da rede custom, ou `None` para `host`/`none` (os dois modos sem netns
-/// gerido pelo holder).
-fn custom_net_name(net: &str) -> Option<String> {
-    if net != "host" && net != "none" {
-        Some(net.to_string())
-    } else {
-        None
-    }
-}
-
 /// Expande `--gpus <spec>` na lista de nós de dispositivo a expor. `all` = NVIDIA
 /// + DRI; `nvidia` = só `/dev/nvidia*`; `dri` = só `/dev/dri/*`. Inclui só os nós
 /// que EXISTEM no host (um `--gpus all` numa máquina sem GPU não inventa devices).

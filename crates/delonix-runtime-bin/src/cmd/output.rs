@@ -54,19 +54,60 @@ fn pinta(c: &str, s: &str) -> String {
     }
 }
 
+// ---- i18n -----------------------------------------------------------------
+//
+// O runtime é PÚBLICO e opensource — o output é **inglês por omissão** (o que um
+// utilizador internacional espera de um CLI). `--l18n=pt` (ou `DELONIX_L18N=pt`)
+// muda para português de Angola. O locale é global e imutável depois de definido
+// no arranque (`set_lang`, uma vez, em `main`); um `AtomicU8` chega e é lock-free.
+
+static LANG: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0); // 0=en, 1=pt
+
+/// Define o locale a partir do valor da flag `--l18n` / `$DELONIX_L18N`.
+/// Qualquer coisa que não seja `pt*` fica em inglês (o default seguro).
+pub fn set_lang(s: &str) {
+    let v = matches!(s.trim().to_lowercase().as_str(), "pt" | "pt_ao" | "pt-ao" | "pt_pt" | "pt-pt");
+    LANG.store(v as u8, std::sync::atomic::Ordering::Relaxed);
+}
+
+pub fn is_pt() -> bool {
+    LANG.load(std::sync::atomic::Ordering::Relaxed) == 1
+}
+
+/// Escolhe a string conforme o locale: `en` por omissão, `pt` com `--l18n=pt`.
+/// Devolve `&str` para compor directamente num `format!`/`println!`.
+pub fn tr(en: &'static str, pt: &'static str) -> &'static str {
+    if is_pt() {
+        pt
+    } else {
+        en
+    }
+}
+
+/// Prefixos das mensagens, já localizados.
+fn label_info() -> &'static str {
+    "info" // igual em EN/PT
+}
+fn label_warn() -> &'static str {
+    tr("warning", "aviso")
+}
+fn label_error() -> &'static str {
+    tr("error", "erro")
+}
+
 /// Uma mensagem informativa (ciano).
 pub fn info(msg: &str) {
-    eprintln!("{} {msg}", pinta(cor::CIANO, "info"));
+    eprintln!("{} {msg}", pinta(cor::CIANO, label_info()));
 }
 
 /// Um aviso (amarelo): correu, mas há aqui algo que o utilizador devia saber.
 pub fn aviso(msg: &str) {
-    eprintln!("{} {msg}", pinta(cor::AMARELO, "aviso"));
+    eprintln!("{} {msg}", pinta(cor::AMARELO, label_warn()));
 }
 
 /// Um erro (vermelho).
 pub fn erro(msg: &str) {
-    eprintln!("{} {msg}", pinta(cor::VERMELHO, "erro"));
+    eprintln!("{} {msg}", pinta(cor::VERMELHO, label_error()));
 }
 
 /// Texto secundário (cinza) — para detalhes que não competem com a mensagem.
@@ -436,6 +477,20 @@ mod tests {
         // underflow de u64 → "584 milhões de anos ago".
         let futuro = now_unix() + 3600;
         assert_eq!(fmt_age(futuro), "Less than a second ago");
+    }
+
+    #[test]
+    fn tr_escolhe_por_locale() {
+        set_lang("en");
+        assert_eq!(tr("hello", "olá"), "hello");
+        assert!(!is_pt());
+        set_lang("pt");
+        assert_eq!(tr("hello", "olá"), "olá");
+        assert!(is_pt());
+        // pt_AO e variantes contam como pt; qualquer outra coisa = en (default seguro).
+        set_lang("pt_AO"); assert!(is_pt());
+        set_lang("fr"); assert!(!is_pt());
+        set_lang("en"); // repõe para não afectar outros testes
     }
 
     #[test]
