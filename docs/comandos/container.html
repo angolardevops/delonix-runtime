@@ -111,6 +111,7 @@ Options:
       --privileged               Container privilegiado (todas as caps, seccomp off) — cargas de confiança
       --entrypoint &lt;ENTRYPOINT&gt;  Sobrepõe o ENTRYPOINT da imagem (o COMMAND passa a ser os argumentos deste binário; `--entrypoint &quot;&quot;` limpa-o e corre só o COMMAND)
       --rm                       Remove o container quando o processo terminar (em `-d`, um watcher destacado trata da remoção quando o container morrer)
+      --restart &lt;RESTART&gt;        Política de reinício (só com `-d`): `no` (default), `on-failure[:max]`, `always`, `unless-stopped`. Um supervisor destacado (um por container, efémero — não há daemon) fica pai do container, captura o exit code real e reinicia-o conforme a política [default: no]
   -e, --env &lt;ENV&gt;                Variáveis de ambiente adicionais (`KEY=VAL`), repetível
       --label &lt;LABELS&gt;           Label (`KEY=VAL`), repetível — ex.: `io.x-k8s.kind.role=control-plane` activa a delegação de cgroup2 dedicada a nodes Kind (ver `setup_node_cgroup_ns`)
   -h, --help                     Print help</code></pre></div>

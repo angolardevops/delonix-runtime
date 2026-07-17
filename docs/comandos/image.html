@@ -153,13 +153,22 @@ Options:
 Usage: delonix image build [OPTIONS] --tag &lt;TAG&gt;
 
 Options:
-  -t, --tag &lt;TAG&gt;                        
-      --ubuntu-release &lt;UBUNTU_RELEASE&gt;  [default: 26.04]
-      --k8s-version &lt;K8S_VERSION&gt;        
-      --extra-package &lt;EXTRA_PACKAGES&gt;   
-      --extra-run &lt;EXTRA_RUN&gt;            
-      --cri-bin &lt;CRI_BIN&gt;                
-  -h, --help                             Print help</code></pre></div>
+  -t, --tag &lt;TAG&gt;
+          
+      --ubuntu-release &lt;UBUNTU_RELEASE&gt;
+          [default: 26.04]
+      --k8s-version &lt;K8S_VERSION&gt;
+          
+      --extra-package &lt;EXTRA_PACKAGES&gt;
+          
+      --extra-run &lt;EXTRA_RUN&gt;
+          
+      --cri-bin &lt;CRI_BIN&gt;
+          
+      --no-compress
+          Não comprimir o qcow2 final (maior, mas sem custo de descompressão nas leituras do backing file em runtime)
+  -h, --help
+          Print help</code></pre></div>
 <h3>Exemplos</h3><div class="ex"><div class="cap">Construir a imagem VM dourada (descarrega Ubuntu, valida SHA256SUMS, virt-customize)</div><pre><code>delonix image --vm build --name k8s-golden --k8s-version 1.34</code></pre></div>
 <h2 id='apply'><code>image apply</code></h2>
 <div class='help'><pre><code>Aplica os documentos `kind: Image` de um manifesto (`pull` idempotente por referência; `build` reconstrói e substitui a tag a cada apply)
