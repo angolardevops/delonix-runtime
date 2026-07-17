@@ -552,6 +552,7 @@ fn handle_control(line: &str) -> String {
         ["unfirewall", ip] => do_unfirewall(ip),
         ["egress", policy] => do_egress(policy),
         ["egress-net", bridge, policy] => do_egress_net(bridge, policy),
+        ["egress-host", bridge, suffix] => do_egress_host(bridge, suffix),
         ["l4guard", rate, max] => do_l4guard(rate.parse().unwrap_or(50), max.parse().unwrap_or(200)),
         ["l4guard-clear"] => {
             clear_l4guard();
@@ -1132,6 +1133,142 @@ fn do_egress_net(bridge: &str, policy: &str) -> Result<()> {
     Ok(())
 }
 
+// ---- egress por HOSTNAME (FQDN allowlist via DNS-snooping) -------------------
+//
+// nft só sabe de IPs; para permitir "sai só para *.github.com" o holder vê as
+// respostas DNS que já reencaminha (o resolver do ingress) e injecta os A-records
+// dos hostnames permitidos num `set` nft por-bridge que o egress aceita. É a
+// FQDN-policy do Cilium, mas 100% rootless (nft + DNS no holder, sem eBPF).
+
+/// Allowlist FQDN partilhada entre a thread de controlo (regista em `egress-host`)
+/// e a thread de DNS (popula o set com os A-records). Tuplos `(bridge, set, sufixo)`.
+/// O sufixo `github.com` casa `github.com` E `*.github.com`.
+static FQDN_ALLOW: std::sync::Mutex<Vec<(String, String, String)>> = std::sync::Mutex::new(Vec::new());
+
+/// Nome (curto, <= limite do nft) do set FQDN de uma bridge.
+fn fqdn_set(bridge: &str) -> String {
+    format!("dlxfq{:08x}", crate::fnv32(bridge))
+}
+
+/// Regista um hostname permitido para a saída de uma bridge: cria o set nft (com
+/// `flags timeout` para as entradas expirarem com o TTL), reprograma o egress da
+/// bridge para `DNS + @set + drop`, e memoriza o sufixo para o DNS o popular.
+fn do_egress_host(bridge: &str, suffix: &str) -> Result<()> {
+    let bridge = sanitize(bridge);
+    let suffix = suffix.trim().trim_start_matches("*.").trim_matches('.').to_lowercase();
+    // Anti-injeção: um hostname é [a-z0-9.-], com pelo menos um ponto, <= 253.
+    if suffix.is_empty() || suffix.len() > 253 || !suffix.contains('.') || !suffix.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'-') {
+        return Err(Error::Invalid(format!("hostname inválido: {suffix:?}")));
+    }
+    let set = fqdn_set(&bridge);
+    // Cria o set (idempotente). `flags timeout` permite `add element … timeout`.
+    run_ok("nft", &["add", "set", "ip", INGRESS_TABLE, &set, "{ type ipv4_addr; flags timeout; }"]);
+    // Reprograma o egress desta bridge: remove regras antigas, depois insere
+    // (em ordem inversa, porque `insert` prepende) [dns, dns, @set accept, drop].
+    let needle_if = format!("iifname \"{bridge}\"");
+    let listed = crate::capture("nft", &["-a", "list", "chain", "ip", INGRESS_TABLE, "fwdeny"]).unwrap_or_default();
+    for line in listed.lines() {
+        if line.contains(&needle_if) && line.contains("oifname \"tap0\"") && (line.contains("drop") || line.contains("accept")) {
+            if let Some(h) = line.rsplit("# handle ").next().and_then(|x| x.trim().parse::<u32>().ok()) {
+                run_ok("nft", &["delete", "rule", "ip", INGRESS_TABLE, "fwdeny", "handle", &h.to_string()]);
+            }
+        }
+    }
+    let base = |extra: &[&str]| -> Vec<String> {
+        let mut v = vec!["insert".into(), "rule".into(), "ip".into(), INGRESS_TABLE.into(), "fwdeny".into(), "iifname".into(), bridge.clone(), "oifname".into(), "tap0".into()];
+        v.extend(extra.iter().map(|s| s.to_string()));
+        v
+    };
+    let set_ref = format!("@{set}");
+    for spec in [
+        base(&["drop"]),
+        base(&["ip", "daddr", &set_ref, "accept"]),
+        base(&["tcp", "dport", "53", "accept"]),
+        base(&["udp", "dport", "53", "accept"]),
+    ] {
+        run("nft", &spec.iter().map(|s| s.as_str()).collect::<Vec<_>>())?;
+    }
+    // Memoriza o sufixo (sem duplicar) para a thread de DNS o snoopar.
+    if let Ok(mut g) = FQDN_ALLOW.lock() {
+        if !g.iter().any(|(b, _, s)| *b == bridge && *s == suffix) {
+            g.push((bridge.clone(), set, suffix));
+        }
+    }
+    Ok(())
+}
+
+/// Extrai os IPv4 dos A-records de uma resposta DNS (bounds-checked; tolera
+/// compressão de nomes por saltar via RDLENGTH). PURA — testável sem rede.
+fn parse_a_records(resp: &[u8]) -> Vec<[u8; 4]> {
+    let mut out = Vec::new();
+    if resp.len() < 12 {
+        return out;
+    }
+    let qd = u16::from_be_bytes([resp[4], resp[5]]) as usize;
+    let an = u16::from_be_bytes([resp[6], resp[7]]) as usize;
+    let mut i = 12usize;
+    // saltar as QDCOUNT questões (nome + QTYPE + QCLASS)
+    for _ in 0..qd {
+        i = skip_name(resp, i);
+        i += 4;
+        if i > resp.len() {
+            return out;
+        }
+    }
+    // ler ANCOUNT respostas
+    for _ in 0..an {
+        i = skip_name(resp, i);
+        if i + 10 > resp.len() {
+            break;
+        }
+        let rtype = u16::from_be_bytes([resp[i], resp[i + 1]]);
+        let rdlen = u16::from_be_bytes([resp[i + 8], resp[i + 9]]) as usize;
+        i += 10;
+        if i + rdlen > resp.len() {
+            break;
+        }
+        if rtype == 1 && rdlen == 4 {
+            out.push([resp[i], resp[i + 1], resp[i + 2], resp[i + 3]]);
+        }
+        i += rdlen;
+    }
+    out
+}
+
+/// Avança o offset para lá de um nome DNS (labels ou ponteiro de compressão 0xC0).
+fn skip_name(b: &[u8], mut i: usize) -> usize {
+    while i < b.len() {
+        let len = b[i] as usize;
+        if len == 0 {
+            return i + 1;
+        }
+        if len & 0xc0 == 0xc0 {
+            return i + 2; // ponteiro de compressão: 2 bytes, fim do nome
+        }
+        i += 1 + len;
+    }
+    i
+}
+
+/// Se `name` casa um sufixo permitido, injecta os A-records de `resp` no(s) set(s)
+/// nft correspondente(s), com timeout (renova a cada resolução). Best-effort.
+fn snoop_fqdn(name: &str, resp: &[u8]) {
+    let n = name.trim_end_matches('.').to_lowercase();
+    let sets: Vec<String> = match FQDN_ALLOW.lock() {
+        Ok(g) => g.iter().filter(|(_, _, suf)| n == *suf || n.ends_with(&format!(".{suf}"))).map(|(_, set, _)| set.clone()).collect(),
+        Err(_) => return,
+    };
+    if sets.is_empty() {
+        return;
+    }
+    for ip in parse_a_records(resp) {
+        let ips = format!("{}.{}.{}.{}", ip[0], ip[1], ip[2], ip[3]);
+        for set in &sets {
+            run_ok("nft", &["add", "element", "ip", INGRESS_TABLE, set, &format!("{{ {ips} timeout 1h }}")]);
+        }
+    }
+}
+
 /// Pré-flight de um ruleset `nft` (`nft -c -f -`): devolve `true` se for ACEITE,
 /// SEM o aplicar. É a "regra de ouro" da proteção L4 — só aplicamos depois de o
 /// kernel confirmar que suporta a sintaxe (ex.: `meter`/`ct count`).
@@ -1606,6 +1743,13 @@ pub fn set_egress_policy_net(bridge: &str, deny: bool) -> Result<()> {
 /// é só denylist). Os CIDRs são validados (`fw_src_ok`) no holder — anti-injeção.
 pub fn set_egress_policy_net_allowlist(bridge: &str, cidrs: &[&str]) -> Result<()> {
     control_send(&format!("egress-net {} allowlist:{}", bridge, cidrs.join(",")))
+}
+
+/// Egress por HOSTNAME: só deixa a bridge sair para os IPs que resolverem para
+/// `<suffix>` (ou `*.<suffix>`), aprendidos ao vivo das respostas DNS. Nega o
+/// resto (excepto DNS). Chamar mais que uma vez acrescenta hostnames à allowlist.
+pub fn set_egress_host(bridge: &str, suffix: &str) -> Result<()> {
+    control_send(&format!("egress-host {bridge} {suffix}"))
 }
 
 /// Ativa/atualiza a proteção DDoS L4 (rate-limit + ct-count por-origem). `conn_rate`
@@ -2125,7 +2269,11 @@ fn handle_dns(q: &[u8]) -> Option<Vec<u8>> {
             return Some(r);
         }
     }
-    forward_dns(q)
+    // Nome externo: reencaminha e, se estiver numa allowlist FQDN, aprende os
+    // A-records da resposta para o set nft do egress (antes de a devolver).
+    let resp = forward_dns(q)?;
+    snoop_fqdn(&name, &resp);
+    Some(resp)
 }
 
 /// Reencaminha a query crua para o upstream (DNS do slirp; fallback 1.1.1.1) e
@@ -2338,6 +2486,22 @@ fn neigh_ip_local(mac: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn parse_a_records_extracts_ipv4_answers() {
+        // Resposta DNS para `example.com` com dois A-records (name compression no
+        // answer via ponteiro 0xc00c), mais um AAAA que deve ser ignorado.
+        let resp: Vec<u8> = vec![
+            0x12, 0x34, 0x81, 0x80, 0x00, 0x01, 0x00, 0x03, 0x00, 0x00, 0x00, 0x00, // header: QD=1 AN=3
+            7, b'e', b'x', b'a', b'm', b'p', b'l', b'e', 3, b'c', b'o', b'm', 0, 0x00, 0x01, 0x00, 0x01, // Q
+            0xc0, 0x0c, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0x00, 0x1e, 0x00, 0x04, 93, 184, 216, 34, // A
+            0xc0, 0x0c, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0x00, 0x1e, 0x00, 0x04, 1, 2, 3, 4, // A
+            0xc0, 0x0c, 0x00, 0x1c, 0x00, 0x01, 0x00, 0x00, 0x00, 0x1e, 0x00, 0x10, // AAAA (16 bytes rdata)
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
+        ];
+        let ips = super::parse_a_records(&resp);
+        assert_eq!(ips, vec![[93, 184, 216, 34], [1, 2, 3, 4]]);
+    }
+
     #[test]
     fn hostfwd_entries_aceita_as_duas_formas() {
         // slirp4netns 1.2.1: {"entries":[…]} (sem wrapper). Outras versões podem
