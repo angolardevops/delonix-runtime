@@ -142,44 +142,105 @@ fn delonixfile(o: &InitOpts) -> String {
 
 fn manifest_container(o: &InitOpts) -> String {
     let img = o.image.clone().unwrap_or_else(|| format!("{}:dev", o.name));
-    format!(
-        "# Aplica com:  delonix container apply\n\
-         apiVersion: delonix.io/v1\n\
-         kind: Container\n\
-         metadata:\n  name: {name}\n\
-         spec:\n  \
-         image: {img}\n  \
-         # `always`: um supervisor destacado fica pai do container, captura o\n  \
-         # exit code real e reinicia-o. Um `stop` explícito é respeitado.\n  \
-         restart: always\n  \
-         # `ports` dá ao container uma netns própria com slirp (NAT userspace),\n  \
-         # como o `docker run -p`. Publica no 127.0.0.1 do host por omissão;\n  \
-         # DELONIX_PUBLISH_ADDR=0.0.0.0 expõe à LAN (opt-in explícito).\n  \
-         ports:\n    - \"8080:8080\"\n  \
-         env:\n    - \"APP_ENV=dev\"\n",
-        name = o.name,
-        img = img
-    )
+    // Template COMPLETO: toda a spec de `kind: Container`, com defaults e um
+    // comentário por campo. Apaga o que não precisares — o parser aceita
+    // qualquer subconjunto (só `image` é obrigatório).
+    CONTAINER_REFERENCE.replace("{name}", &o.name).replace("{image}", &img)
 }
+
+/// Referência completa de `kind: Container` (todos os campos que o `apply` lê).
+const CONTAINER_REFERENCE: &str = r#"# Apply with:  delonix container apply
+apiVersion: delonix.io/v1
+kind: Container
+metadata:
+  name: {name}
+spec:
+  image: {image}              # required — the only mandatory field
+  # command + args override the image ENTRYPOINT/CMD (docker semantics):
+  command: []                 # e.g. ["nginx", "-g", "daemon off;"]
+  entrypoint: null            # override the image ENTRYPOINT ("" clears it)
+  detach: true                # run in the background (a manifest is declarative)
+  restart: always             # no | on-failure[:max] | always | unless-stopped
+  # --- network ---
+  network: host               # host | none | <a network created by `network create`>
+  ports: []                   # ["8080:80"] — gives the container its own netns + slirp NAT
+  networkAlias: []            # DNS aliases on the network
+  knows: []                   # restrict name resolution to these containers (isolation)
+  netBps: null                # egress rate limit (e.g. "10mbit"), only with a custom network
+  netBurst: null              # burst for netBps
+  # --- storage ---
+  volumes: []                 # ["data:/var/lib", "/host/path:/inside:ro"]
+  tmpfs: []                   # ["/scratch"]
+  # --- resources (cgroup v2) ---
+  memory: max                 # 64M | 2G | max (no cap)
+  cpus: "1.0"                 # CPU cores
+  cpuWeight: null             # relative CPU weight under contention (1-10000)
+  cpuset: null                # pin to CPUs, e.g. "0-3"
+  ioWeight: null              # relative I/O weight
+  # --- env & secrets ---
+  env: []                     # ["KEY=value"]
+  envFile: []                 # ["./.env"]
+  secret: []                  # vault secret names (see `delonix secret`); injected as env
+  secretFiles: false          # true → secrets go to /run/secrets/<name> instead of env
+  # --- security ---
+  privileged: false           # all caps, seccomp off — trusted workloads only
+  readOnly: false             # read-only rootfs (writes go to tmpfs/volumes)
+  capAdd: []                  # ["NET_ADMIN"]
+  capDrop: []                 # ["MKNOD"]
+  securityOpt: []             # ["seccomp=unconfined", "apparmor=<profile>"]
+  apparmor: null              # AppArmor profile
+  selinux: null               # SELinux context
+  userns: false               # force the subuid user namespace (default-on in rootless)
+  hostPid: false              # share the host PID namespace
+  hostIpc: false              # share the host IPC namespace
+  detect: false               # seccomp in log mode — discover the syscalls a workload uses
+  # --- devices & limits ---
+  devices: []                 # ["/dev/fuse"]
+  gpus: null                  # all | nvidia | dri
+  ulimit: []                  # ["nofile=1024:2048"]
+  sysctl: []                  # ["net.core.somaxconn=1024"]
+  # --- misc ---
+  labels: []                  # ["tier=frontend"]
+  logDriver: null             # json | cri
+"#;
 
 fn manifest_vm(o: &InitOpts) -> String {
     let img = o.image.clone().unwrap_or_else(|| DEFAULT_VM_IMAGE.to_string());
-    format!(
-        "# Aplica com:  delonix vm apply\n\
-         # A imagem VM dourada constrói-se uma vez com:\n\
-         #   delonix image vm build -t {img} --k8s-version 1.34\n\
-         apiVersion: delonix.io/v1\n\
-         kind: Vm\n\
-         metadata:\n  name: {name}\n\
-         spec:\n  \
-         disk: {img}\n  \
-         vcpus: 2\n  \
-         memory: 2G\n  \
-         network: {name}-net\n",
-        name = o.name,
-        img = img
-    )
+    VM_REFERENCE.replace("{name}", &o.name).replace("{image}", &img)
 }
+
+/// Referência completa de `kind: Vm` (espelha `delonix_vm::VmConfig`).
+const VM_REFERENCE: &str = r#"# Apply with:  delonix vm apply
+# The golden VM image is built once with:
+#   delonix image vm build -t {image} --k8s-version 1.34
+apiVersion: delonix.io/v1
+kind: Vm
+metadata:
+  name: {name}
+spec:
+  disk: {image}               # required — base qcow2/raw (an overlay is made per VM)
+  vcpus: 2
+  memory: 2G                  # "2G" | "1024M" (a "…i" suffix is accepted, k8s-style)
+  network: {name}-net         # ingress network for the VM's tap
+  restart_policy: null        # no | on-failure | always
+  # --- boot: firmware (cloud images) OR direct kernel ---
+  firmware: null              # UEFI firmware path (typical for cloud images)
+  kernel: null                # direct kernel boot (alternative to firmware)
+  initrd: null                # initramfs for direct kernel boot
+  cmdline: null               # kernel cmdline for direct boot
+  # --- cloud-init ---
+  seed: null                  # path to a prebuilt NoCloud ISO (hostname/ssh come from here)
+                              # via manifest only a ready seed is accepted; use
+                              # `delonix vm create --user-data …` to generate one.
+  # --- performance / passthrough ---
+  hugepages: false
+  cpu_affinity: null          # pin vCPUs, e.g. "8-15"
+  devices: []                 # VFIO PCI passthrough (sysfs paths)
+  # --- backend selection ---
+  backend: null               # cloud-hypervisor | libvirt | null (auto)
+  net_mode: null              # libvirt only: user | nat | bridge
+  bridge: null                # host bridge / libvirt network
+"#;
 
 fn manifest_stack(o: &InitOpts) -> String {
     let app = o.image.clone().unwrap_or_else(|| format!("{}:dev", o.name));
