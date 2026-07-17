@@ -1,0 +1,56 @@
+#cloud-config
+# A throwaway NAS VM that serves the SAME folder over both NFS and SMB — used to
+# validate `kind: Storage` end-to-end against a real network file server.
+#
+# Boot it:
+#   delonix vm create nas \
+#     --disk k8s-golden \
+#     --network nasnet \
+#     --ssh-key @~/.ssh/id_ed25519.pub \
+#     --user-data examples/nas-vm-cloud-config.yaml
+#
+#   IP=$(delonix vm status nas | awk '/ip:/{print $2}')
+#
+# Then mount its shares as Delonix storage (from the host or a container):
+#   delonix storage create media-nfs --type nfs  --server $IP --share /srv/share
+#   delonix storage create media-smb --type cifs --server $IP --share share \
+#           --username delonix --password delonix
+#   delonix container run --rm -v media-nfs:/m alpine ls -la /m
+#
+# NFS/CIFS mounts need CAP_SYS_ADMIN — run the `storage create` under a user that
+# can mount (or the engine under a privileged session).
+
+hostname: nas
+package_update: true
+packages:
+  - nfs-kernel-server
+  - samba
+
+write_files:
+  # NFS export: the whole /srv/share, read-write, no root squash (test only).
+  - path: /etc/exports
+    content: |
+      /srv/share *(rw,sync,no_subtree_check,no_root_squash,insecure)
+  # Minimal Samba share of the same directory.
+  - path: /etc/samba/smb.conf.d/share.conf
+    content: |
+      [share]
+        path = /srv/share
+        browseable = yes
+        read only = no
+        guest ok = no
+        valid users = delonix
+
+runcmd:
+  # Shared directory with a marker file, world-writable for the test.
+  - [ mkdir, -p, /srv/share ]
+  - [ sh, -c, "echo served-by-the-nas-vm > /srv/share/hello.txt" ]
+  - [ chmod, -R, "0777", /srv/share ]
+  # A user for SMB auth (password `delonix`, matching the golden image convention).
+  - [ sh, -c, "id delonix >/dev/null 2>&1 || useradd -m delonix" ]
+  - [ sh, -c, "printf 'delonix\\ndelonix\\n' | smbpasswd -s -a delonix" ]
+  - [ sh, -c, "grep -q 'include = /etc/samba/smb.conf.d/share.conf' /etc/samba/smb.conf || echo 'include = /etc/samba/smb.conf.d/share.conf' >> /etc/samba/smb.conf" ]
+  # Start both servers.
+  - [ systemctl, enable, --now, nfs-kernel-server ]
+  - [ exportfs, -ra ]
+  - [ systemctl, enable, --now, smbd ]

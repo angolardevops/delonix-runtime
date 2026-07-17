@@ -1,0 +1,51 @@
+# Storage — network folder volumes mounted like Kubernetes PersistentVolumes.
+#
+# A share on a NAS (TrueNAS, Synology, Nextcloud, a plain NFS/Samba box) becomes
+# a named volume that any container mounts with `-v <name>:/path`.
+#
+#   delonix storage apply -f examples/storage.yaml
+#   delonix container run -v media:/srv/media alpine ls /srv/media
+#
+# Each field below is shown with a sensible value; delete what you don't need.
+
+# ── NFS (TrueNAS "Unix (NFS) Shares", or any nfs-kernel-server) ───────────────
+apiVersion: delonix.io/v1
+kind: Storage
+metadata:
+  name: media
+spec:
+  type: nfs                     # nfs | cifs | smb | webdav
+  server: 10.0.0.5              # NAS host or IP
+  share: /mnt/pool/media        # the NFS export path
+  readOnly: false               # true → mounted read-only
+  mountOptions: "vers=4.1,soft" # extra `mount -o` options (optional)
+---
+# ── SMB / CIFS (Samba, Windows shares, TrueNAS "Windows (SMB) Shares") ────────
+apiVersion: delonix.io/v1
+kind: Storage
+metadata:
+  name: backups
+spec:
+  type: cifs                    # `smb` is an alias for `cifs`
+  server: nas.local
+  share: backups                # the SMB share name (no leading slash)
+  username: delonix             # SMB credentials
+  # Prefer a secret over an inline password (it won't leak into shell history):
+  #   delonix secret create nas-creds --from-literal password=s3cr3t
+  passwordSecret: nas-creds     # reads key `password` from this secret
+  # password: s3cr3t            # ...or inline (discouraged)
+  readOnly: false
+  mountOptions: "vers=3.0"
+---
+# ── WebDAV (Nextcloud / ownCloud) ─────────────────────────────────────────────
+apiVersion: delonix.io/v1
+kind: Storage
+metadata:
+  name: cloud
+spec:
+  type: webdav
+  server: cloud.example.com     # host, or a full URL (http://host:port) to override the scheme
+  share: /remote.php/dav/files/delonix   # the path within the WebDAV endpoint
+  username: delonix
+  passwordSecret: cloud-creds
+  readOnly: false
