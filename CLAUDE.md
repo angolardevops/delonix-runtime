@@ -119,21 +119,58 @@ nó não faz nenhuma instalação**, só `kubeadm init`/`kubeadm join`.
      mais rápido — importa porque a golden é o **backing file read-only** das VMs
      (`delonix_vm::create` faz um overlay qcow2 por VM), logo cada leitura do SO base passa pelo
      descompressor. Escapatória: `--no-compress`. Custo total: ~12s de build.
+- **`--offline` (PREFERIR SEMPRE; validado 2026-07-17, build em 1m18s)** — obtém os `.deb` do k8s
+  no **HOST** e corre o `virt-customize` com **`--no-network`**. O appliance nunca precisa de
+  DHCP/DNS, o que **dispensa os workarounds de host** (passt/dhclient) que o caminho online
+  exige — ver "Bloqueio de execução conhecido" abaixo. Validado com o `passt` ATIVO, sem tocar
+  no host.
+  - **Cadeia de confiança: a MESMA do apt, feita no host em vez do guest** — `InRelease`
+    (clearsigned, verificado com `gpgv` contra a `Release.key` do repo, keyring TEMPORÁRIO —
+    nunca toca no do utilizador) → SHA256 do índice `Packages` (declarado no InRelease assinado)
+    → SHA256 de cada `.deb` (declarado no `Packages` autenticado). **Falha FECHADO** em qualquer
+    passo — mesmo princípio do achado CRÍTICO nº3 da auditoria (`pull_oci_artifact` sem digest).
+  - **Porque `dpkg -i` chega** (medido, não suposto): o fecho são só **4 `.deb` do repo k8s**
+    (`kubeadm`/`kubectl`/`kubelet` + `kubernetes-cni`); as restantes deps do kubelet
+    (`iptables`/`mount`/`util-linux`/`libc6`) **já vêm na cloud image**. Se alguma faltar, o
+    `dpkg` falha ALTO — nunca deixa o guest meio-instalado.
+  - **Armadilha (custou um build)**: `kubernetes-cni` tem versionamento PRÓPRIO (1.7.x), não
+    segue o do k8s — o filtro `--k8s-version 1.34` só se aplica aos componentes core
+    (`parse_packages_index`, parâmetro `versioned`). Há teste de regressão.
+  - As receitas sem rede (swap/módulos/sysctls) são partilhadas tal e qual com o caminho online
+    (`k8s_recipes::k8s_config_recipes`) — os dois modos **não divergem**. `k8s_host_recipes()` =
+    as 2 de rede + estas, para o `cluster apply` (hosts vivos) continuar a ver o catálogo todo.
+  - Equivalência com o online **provada**: mesmos pacotes e mesmo estado de hold —
+    `kubeadm`/`kubectl`/`kubelet` `hi` 1.34.9-1.1, `kubernetes-cni` `ii` 1.7.1-1.1.
 - **`push`/`pull`**: publicam/obtêm a imagem como artefacto OCI de blob único (config vazio + 1
   layer, padrão ORAS/Helm) via `delonix_image::registry::{push_oci_artifact,pull_oci_artifact}`
   (`crates/delonix-image/src/registry.rs`) — generaliza o `Client`/auth/upload já usado por
-  `push_to_registry` (imagens de container), sem duplicar a lógica. **Bloqueio conhecido**:
-  publicar de verdade em `ghcr.io/angolardevops/...` exige `docker login ghcr.io` (ou um token
-  `gh` com scope `write:packages` — o actual só tem `repo`/`workflow`) — nunca executado nesta
-  sessão, o código está pronto mas por autenticar.
-- **Bloqueio de execução conhecido (sandbox, não bug)**: `virt-customize` falha aqui na fase de
-  construção do appliance `supermin` — `/usr/lib/guestfs` (caminho genérico) não existe, só
-  `/usr/lib/x86_64-linux-gnu/guestfs` (falta o pacote `libguestfs-common`, que normalmente liga
-  os dois). Confirmado com `supermin --build` manual apontado ao caminho certo (funciona) — o
-  `LIBGUESTFS_PATH` não resolve isto para o `virt-customize` em si (usa outro mecanismo interno
-  de cache de appliance). Corrigir exigiria instalar um pacote no host — não fiz isso
-  unilateralmente. O resto do pipeline (download+SHA256SUMS, `qemu-img convert`, geração da
-  lista de passos) foi validado real até este ponto.
+  `push_to_registry` (imagens de container), sem duplicar a lógica. **RESOLVIDO — publicação real
+  feita e verificada (2026-07-17)**: `ghcr.io/angolardevops/delonix-vm-k8s:1.34` (678 MiB, a
+  golden já optimizada), com round-trip **byte-idêntico** (pull de volta → mesmo sha256, o que
+  exercita também a verificação de digest do `pull_oci_artifact`). Auth via `delonix image login
+  ghcr.io -u angolardevops --password-stdin` (grava em `<root>/auth.json`); o token `gh` precisa
+  do scope `write:packages`. **Gap conhecido**: o `pull` NÃO recupera os metadados
+  (`ubuntu_release`/`k8s_version` ficam `null` — o artefacto OCI só carrega o blob qcow2), por
+  isso um `image vm ls` de uma imagem puxada mostra `-` nessas colunas.
+- **Bloqueios de host do `virt-customize` — DESAPARECEM com `--offline`** (diagnosticados a
+  fundo em 2026-07-17; só afectam o caminho ONLINE, que precisa de DHCP/DNS no appliance):
+  1. **Appliance sem cliente DHCP** → `apt-get install` falha com "Could not resolve host".
+     Causa-raiz: o `supermin.d/packages` pede `isc-dhcp-client`, mas o supermin só COPIA do host
+     e o pacote não estava instalado; o init do appliance tenta `dhclient` e só cai em `dhcpcd`
+     como fallback — que também não está nos `hostfiles`. Fix: `sudo apt install isc-dhcp-client`
+     (é o que o supermin espera; não é revertido por updates, ao contrário de editar o
+     `hostfiles`, que pertence ao pacote `libguestfs0t64`).
+  2. **`passt` não dá lease** → o `dhclient` pendura 300s e o build segue SEM rede. Duas camadas:
+     (a) o AppArmor (`/etc/apparmor.d/usr.bin.passt`) nega criar socket/PID em
+     `/run/user/1000/libguestfs*/` — confirmado por `dmesg | grep 'apparmor.*DENIED.*passt'`; o
+     perfil só permite `owner /tmp/**` e `owner @{HOME}/**`, logo
+     `XDG_RUNTIME_DIR=$HOME/.cache/libguestfs-run` contorna-o SEM tocar no host. (b) Mesmo assim
+     o passt nunca atribui lease (o libguestfs corre-o com `--address 169.254.2.15`), pelo que
+     ainda é preciso tirá-lo do PATH (`sudo mv /usr/bin/passt /usr/bin/passt.off`, com `trap`
+     para restaurar SEMPRE) → o libguestfs cai no slirp do qemu, que funciona.
+  **Conclusão: usar `--offline` e nada disto é preciso.** O `/usr/lib/guestfs` (symlink para
+  `/usr/lib/x86_64-linux-gnu/guestfs`, por faltar `libguestfs-common`) continua a ser preciso
+  nesta máquina, nos dois modos.
 
 `delonix vm create` ganhou `--hostname`/`--ssh-key <chave-ou-@ficheiro>`/`--user-data <ficheiro>`
 — sem `--seed` explícito, gera um ISO NoCloud (`cloud-localds`) por-instância se qualquer um
