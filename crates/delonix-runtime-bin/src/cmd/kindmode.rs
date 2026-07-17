@@ -189,6 +189,16 @@ fn boot_node(
             // A ponte host<->nó (ver `cluster_dir`): sem isto não há como pôr o
             // kubeadm.conf lá dentro nem trazer o join/kubeconfig cá para fora.
             volumes: vec![format!("{}:{NODE_SHARED}", cluster_dir(&cfg.name).display())],
+            // `/dev/fuse`: o entrypoint do Kind escolhe o snapshotter
+            // `fuse-overlayfs` em userns, e sem este device o
+            // `containerd-fuse-overlayfs` morre em ciclo ("fuse: device not
+            // found") — o containerd fica sem conseguir extrair UMA imagem e o
+            // kubeadm falha no preflight com `[ERROR ImagePull]`. O
+            // `--privileged` do Docker expõe o /dev do host inteiro e traz o
+            // fuse de graça; o nosso /dev é um tmpfs com uma lista curada, por
+            // isso pede-se explicitamente. É seguro em rootless: no host o
+            // /dev/fuse é crw-rw-rw-.
+            devices: vec!["/dev/fuse".to_string()],
             ports: publish,
             privileged: true,
             entrypoint: None,
@@ -439,5 +449,117 @@ pub(crate) fn delete(images: &ImageStore, store: &Store, name: &str) -> Result<(
     }
     let _ = std::fs::remove_file(kubeconfig_path(name));
     println!("cluster '{name}' removido ({} nó(s))", nodes.len());
+    Ok(())
+}
+
+/// Há quanto tempo o processo do nó está de pé (segundos). Vem do
+/// `/proc/<pid>/stat` (campo 22: arranque em ticks desde o boot) cruzado com o
+/// `/proc/uptime` — e NÃO do `created_unix` do registo, que é a hora de criação
+/// e não muda num restart (daria "uptime" a crescer para sempre).
+fn node_uptime_secs(pid: i32) -> Option<u64> {
+    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    // O comm pode ter espaços/parênteses; os campos contam-se DEPOIS do ')'.
+    let after = stat.rsplit_once(')')?.1;
+    let start_ticks: u64 = after.split_whitespace().nth(19)?.parse().ok()?;
+    let hz = 100u64; // USER_HZ é 100 em Linux/x86-64
+    let up: f64 = std::fs::read_to_string("/proc/uptime").ok()?.split_whitespace().next()?.parse().ok()?;
+    Some((up as u64).saturating_sub(start_ticks / hz))
+}
+
+fn fmt_dur(mut s: u64) -> String {
+    let d = s / 86400;
+    s %= 86400;
+    let h = s / 3600;
+    s %= 3600;
+    let m = s / 60;
+    if d > 0 {
+        format!("{d}d{h}h")
+    } else if h > 0 {
+        format!("{h}h{m}m")
+    } else if m > 0 {
+        format!("{m}m")
+    } else {
+        format!("{s}s")
+    }
+}
+
+/// `cluster ls` — os clusters do modo kind, agrupados pela label
+/// `io.x-k8s.kind.cluster` dos nós (é ela a fonte de verdade: não há registo de
+/// "cluster" à parte, e inventá-lo criaria estado a dessincronizar).
+pub(crate) fn list(store: &Store) -> Result<()> {
+    use std::collections::BTreeMap;
+    let mut clusters: BTreeMap<String, Vec<Container>> = BTreeMap::new();
+    for mut c in store.list()? {
+        let Some(name) = c.labels.get("io.x-k8s.kind.cluster").cloned() else { continue };
+        if delonix_runtime::reconcile_status(&mut c) {
+            let _ = store.update(&c.id, |cur| delonix_runtime::reconcile_status(cur));
+        }
+        clusters.entry(name).or_default().push(c);
+    }
+    if clusters.is_empty() {
+        println!("(nenhum cluster — cria um com `delonix cluster create`)");
+        return Ok(());
+    }
+
+    // O `last restart` sai do LOG DE EVENTOS (o `Container` não conta reinícios):
+    // o `start`/`die` mais recente de cada nó. É a prova de que o log serve para
+    // mais que `system events`.
+    let evs = delonix_runtime_core::events::read(&super::util::state_root());
+
+    println!(
+        "{:<12}  {:<9}  {:>2}  {:>7}  {:<10}  {:<8}  {:<16}  {}",
+        "NOME", "ESTADO", "CP", "WORKERS", "PORTA API", "UPTIME", "ÚLTIMO REINÍCIO", "CRI SOCKET"
+    );
+    for (name, nodes) in clusters {
+        let cp: Vec<&Container> = nodes
+            .iter()
+            .filter(|c| c.labels.get("io.x-k8s.kind.role").map(|r| r == "control-plane").unwrap_or(false))
+            .collect();
+        let workers = nodes.len() - cp.len();
+        let running = nodes.iter().filter(|c| matches!(c.status, delonix_runtime_core::Status::Running)).count();
+        let estado = if running == nodes.len() {
+            "up".to_string()
+        } else {
+            format!("{running}/{} up", nodes.len())
+        };
+
+        // Porta do apiserver: a publicada pelo control-plane.
+        let api = cp
+            .first()
+            .and_then(|c| c.ports.first())
+            .and_then(|p| delonix_net::parse_publish(p).ok())
+            .map(|(hp, _, _)| hp)
+            .unwrap_or_else(|| "-".into());
+
+        let uptime = cp
+            .first()
+            .and_then(|c| c.pid)
+            .and_then(node_uptime_secs)
+            .map(fmt_dur)
+            .unwrap_or_else(|| "-".into());
+
+        // O reinício mais recente de QUALQUER nó do cluster.
+        let ids: Vec<&str> = nodes.iter().map(|c| c.id.as_str()).collect();
+        let last = evs
+            .iter()
+            .filter(|e| ids.contains(&e.id.as_str()) && (e.action == "start" || e.action == "die"))
+            .map(|e| e.ts)
+            .max()
+            .map(|ts| delonix_runtime_core::fmt_local_ts(ts))
+            .unwrap_or_else(|| "—".into());
+
+        // O socket do CRI é o que ESCREVEMOS no kubeadm.conf do cluster — lê-se
+        // de lá (o dir partilhado), em vez de adivinhar ou de pagar um `exec`.
+        let cri = std::fs::read_to_string(cluster_dir(&name).join("kubeadm.conf"))
+            .ok()
+            .and_then(|t| {
+                t.lines()
+                    .find(|l| l.trim_start().starts_with("criSocket:"))
+                    .and_then(|l| l.split_once(':').map(|(_, v)| v.trim().to_string()))
+            })
+            .unwrap_or_else(|| "-".into());
+
+        println!("{name:<12}  {estado:<9}  {:>2}  {workers:>7}  {api:<10}  {uptime:<8}  {last:<16}  {cri}", cp.len());
+    }
     Ok(())
 }

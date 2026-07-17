@@ -110,6 +110,11 @@ pub enum ContainerCmd {
         /// real e reinicia-o conforme a política.
         #[arg(long, default_value = "no")]
         restart: String,
+        /// Liga um device do host, `/dev/x[:/dev/y]`. Repetível. O `/dev` do
+        /// container é um tmpfs com uma lista curada (null/zero/tty/...); isto
+        /// acrescenta-lhe nós reais do host, como o `docker --device`.
+        #[arg(long = "device")]
+        devices: Vec<String>,
         /// Variáveis de ambiente adicionais (`KEY=VAL`), repetível.
         #[arg(short = 'e', long = "env")]
         env: Vec<String>,
@@ -200,8 +205,8 @@ pub fn run(action: ContainerCmd) -> Result<()> {
     match action {
         // Tratado no topo de `run` (faz `return`).
         ContainerCmd::Init { .. } => unreachable!("tratado acima"),
-        ContainerCmd::Run { detach, name, net, volumes, publish, privileged, entrypoint, rm, restart, env, labels, image, command } => {
-            cmd_run(&images, &store, RunOpts { detach, name, net, volumes, ports: publish, privileged, entrypoint, rm, restart, env, labels, image, command })
+        ContainerCmd::Run { detach, name, net, volumes, publish, privileged, entrypoint, rm, restart, devices, env, labels, image, command } => {
+            cmd_run(&images, &store, RunOpts { detach, name, net, volumes, ports: publish, privileged, entrypoint, rm, restart, devices, env, labels, image, command })
         }
         ContainerCmd::Ps { all, quiet } => cmd_ps(&store, all, quiet),
         ContainerCmd::Start { ids } => for_each_id(&ids, |id| cmd_start(&images, &store, id)),
@@ -241,6 +246,7 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
                 entrypoint: None,
                 rm: false,
                 restart: spec.restart.clone(),
+                devices: Vec::new(),
                 env: spec.env,
                 labels: Vec::new(),
                 image: spec.image,
@@ -275,6 +281,7 @@ pub(crate) struct RunOpts {
     pub(crate) entrypoint: Option<String>,
     pub(crate) rm: bool,
     pub(crate) restart: String,
+    pub(crate) devices: Vec<String>,
     pub(crate) env: Vec<String>,
     pub(crate) labels: Vec<String>,
     pub(crate) image: String,
@@ -284,7 +291,7 @@ pub(crate) struct RunOpts {
 pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Result<()> {
     // Cópia intacta para o re-exec (o destructuring a seguir consome as opts).
     let opts_copy = opts.clone();
-    let RunOpts { detach, name, net, volumes, ports, privileged, entrypoint, rm, restart, env, labels, image, command } = opts;
+    let RunOpts { detach, name, net, volumes, ports, privileged, entrypoint, rm, restart, devices, env, labels, image, command } = opts;
     // Valida os `-p` ANTES de criar o que quer que seja (erro claro, sem lixo).
     for spec in &ports {
         delonix_net::parse_publish(spec)?;
@@ -355,6 +362,7 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
     if !img.config.working_dir.is_empty() {
         c.workdir = Some(img.config.working_dir.clone());
     }
+    c.devices = devices;
     c.userns = rootless;
     c.privileged = privileged;
     for l in &labels {
@@ -845,6 +853,30 @@ fn cmd_start(images: &ImageStore, store: &Store, id: &str) -> Result<()> {
         return Err(Error::Invalid(format!("{} já está a correr", c.name)));
     }
 
+    // Rede custom: o MESMO re-exec de dois passos do `cmd_run` (ver
+    // `reexec_into_netns`). Ficou esquecido no caminho antigo do `join_netns` —
+    // que nunca funcionou em rootless — e um `start` de um container com rede
+    // rebentava com `clone failed: EPERM`. Corrigir só o `run` não chegava: o
+    // `start` cria o container tal como o `run`, e tem exactamente o mesmo
+    // problema de namespaces.
+    let reexec = std::env::var("DELONIX_REEXEC_ID").is_ok();
+    if let Some(n) = c.network.clone() {
+        if !reexec {
+            let (netns, ip) = infra::attach_container(&c.id, &n)?;
+            return reexec_start(&c.id, &netns, &ip);
+        }
+        c.ip = std::env::var("DELONIX_REEXEC_IP").ok();
+        if let Some(ip) = c.ip.clone() {
+            for spec in &c.ports {
+                if let Err(e) = infra::publish_port(&ip, spec) {
+                    unpublish_ports(&c);
+                    infra::detach_container(&c.id, &ip);
+                    return Err(e);
+                }
+            }
+        }
+    }
+
     let rootfs = if runtime::is_rootless() {
         let rfs = images.root().join("containers").join(&c.id).join("rootfs");
         if !rfs.exists() {
@@ -856,22 +888,6 @@ fn cmd_start(images: &ImageStore, store: &Store, id: &str) -> Result<()> {
         images.mount_rootfs(&img, &c.id)?.to_string_lossy().into_owned()
     };
 
-    // Reconstrói a rede exactamente como o `run` original (ver `cmd_run`):
-    // rede custom → attach + publish pelo ingress; `-p` sem rede → netns novo
-    // com slirp4netns + hostfwd; sem nada → rede do host.
-    let mut join_netns = None;
-    if let Some(n) = c.network.clone() {
-        let (netns, ip) = infra::attach_container(&c.id, &n)?;
-        join_netns = Some(format!("/run/netns/{netns}"));
-        for spec in &c.ports {
-            if let Err(e) = infra::publish_port(&ip, spec) {
-                unpublish_ports(&c);
-                infra::detach_container(&c.id, &ip);
-                return Err(e);
-            }
-        }
-        c.ip = Some(ip);
-    }
     let slirp_ports = if c.network.is_none() { c.ports.clone() } else { Vec::new() };
     let slirp_hook = |pid: i32| -> Result<()> { delonix_net::slirp_attach(pid, &slirp_ports) };
 
@@ -884,9 +900,10 @@ fn cmd_start(images: &ImageStore, store: &Store, id: &str) -> Result<()> {
         .into_owned();
     let spec = RunSpec {
         detach: true,
-        new_netns: !slirp_ports.is_empty(),
-        join_netns,
-        userns: c.userns,
+        new_netns: !reexec && !slirp_ports.is_empty(),
+        join_netns: None,
+        userns: c.userns && !reexec,
+        inherit_userns: reexec,
         log_path: Some(log_path),
         mounts: c.mounts.clone(),
         on_started: if slirp_ports.is_empty() { None } else { Some(&slirp_hook) },
@@ -901,6 +918,37 @@ fn cmd_start(images: &ImageStore, store: &Store, id: &str) -> Result<()> {
         &super::util::state_root(), "container", "start", &c.id, &c.name, None,
     );
     println!("{}", c.id);
+    Ok(())
+}
+
+/// O 1.º passo do `start` com rede custom: re-executa-se dentro do netns (ver
+/// `reexec_into_netns`, mesmo mecanismo, sem spec — o container já existe no
+/// store, basta o id).
+fn reexec_start(id: &str, netns: &str, ip: &str) -> Result<()> {
+    let prefix = infra::join_argv(id).ok_or_else(|| Error::Runtime {
+        context: "join_argv",
+        message: "infra de ingress em baixo — não há holder onde entrar".into(),
+    })?;
+    let exe = std::env::current_exe().map_err(|e| Error::Runtime {
+        context: "current_exe",
+        message: e.to_string(),
+    })?;
+    let status = std::process::Command::new(&prefix[0])
+        .args(&prefix[1..])
+        .arg(&exe)
+        .args(["container", "start", id])
+        .env("DELONIX_REEXEC_ID", id)
+        .env("DELONIX_REEXEC_IP", ip)
+        .env("DELONIX_ROOT", super::util::state_root())
+        .status()
+        .map_err(|e| Error::Runtime { context: "re-exec nsenter", message: e.to_string() })?;
+    if !status.success() {
+        infra::detach_container(id, ip);
+        return Err(Error::Invalid(format!(
+            "o container não rearrancou dentro da rede '{netns}' (exit {:?})",
+            status.code()
+        )));
+    }
     Ok(())
 }
 
