@@ -119,6 +119,9 @@ enum Cmd {
         /// Observar só esta interface (default: auto — todas as veths da SDN).
         #[arg(long)]
         iface: Option<String>,
+        /// Actualiza continuamente (a cada 2s) em vez de imprimir uma vez.
+        #[arg(long, short)]
+        watch: bool,
     },
     /// Firewall de ENTRADA (regras L4 + publishes DNAT) de um container na SDN.
     Ingress {
@@ -171,7 +174,7 @@ fn run() -> Result<()> {
         Cmd::Kube { action } => cmd::kube::run(action),
         Cmd::Netns { action } => cmd::netns::run(action),
         Cmd::Boot { action } => cmd::boot::run(action),
-        Cmd::Flow { iface } => cmd::flow::run(iface),
+        Cmd::Flow { iface, watch } => cmd::flow::run(iface, watch),
         Cmd::Ingress { action } => cmd::firewall::run_ingress(action),
         Cmd::Egress { action } => cmd::firewall::run_egress(action),
         Cmd::Cri { addr } => {
