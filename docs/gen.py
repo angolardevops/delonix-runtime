@@ -280,6 +280,13 @@ ou <code>allowlist</code> (nega tudo excepto DNS e os CIDRs dados). Tudo sobre o
             "allow": {"examples": [("Só deixar sair HTTPS", "delonix egress allow app tcp/443 --to 0.0.0.0/0")]},
             "policy": {"examples": [("Default-deny de saída", "delonix egress policy app deny")]},
             "net": {"examples": [("Egress de uma rede em allowlist (só DNS + estes CIDRs)", "delonix egress net backend allowlist --to 10.0.0.0/8,1.1.1.1/32")]},
+            "host": {"examples": [
+                ("Só deixar sair para o GitHub (e *.github.com), aprendido do DNS",
+                 "delonix egress host backend github.com"),
+            ], "notes": """<p>O que o nft/CIDR não faz: allowlist por <strong>hostname</strong>. O resolver DNS
+interno do ingress passa a snoopar os A-records das respostas e injecta-os num <code>set</code> nft
+por-rede (com timeout = expira com o TTL); o egress aceita esse set + DNS e dropa o resto. 100%
+rootless (sem eBPF) — a FQDN-policy do Cilium, via nftables. Repetível para vários hostnames.</p>"""},
             "ls": {"examples": [("", "delonix egress ls app")]},
         },
     },
@@ -416,6 +423,7 @@ def sidebar(active, depth=0):
     items_docs = [
         ("index.html", "Início"),
         ("cheatsheet.html", "Cheatsheet"),
+        ("kinds.html", "Kinds e templates"),
         ("arquitectura.html", "Arquitectura"),
         ("c4.html", "Modelo C4 e system design"),
         ("cri.html", "CRI — kubelet sem containerd"),
@@ -658,7 +666,13 @@ def c4_page():
 import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
 mermaid.initialize({ startOnLoad: true, theme: matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'default' });
 </script>
-<style>.mermaid{background:transparent;border:1px solid var(--line);padding:1rem}</style>"""
+<style>
+/* diagramas maiores: página larga + SVG a preencher a largura, com scroll se preciso */
+main{max-width:1280px}
+.mermaid{background:transparent;border:1px solid var(--line);border-radius:10px;
+  padding:1.2rem;margin:1.4rem 0;overflow-x:auto;text-align:center}
+.mermaid svg{width:100%!important;max-width:1180px!important;height:auto!important;min-height:340px}
+</style>"""
     )
     page("c4.html", "Modelo C4 e system design", body)
 
@@ -700,6 +714,47 @@ CHEAT_TASKS = [
 ]
 
 
+# Kinds do manifesto — cada um com um template COMPLETO e funcional (lido dos
+# `examples/*.yaml`, que são a referência canónica com todos os campos + defaults).
+KINDS_DOC = [
+    ("Network", "network.yaml", "Uma rede de utilizador. Os containers juntam-se com <code>--net &lt;nome&gt;</code>; "
+     "as VMs com <code>network:</code>. Driver <code>bridge</code> é o único a que containers se atacham hoje."),
+    ("Volume", "volume.yaml", "Um volume local nomeado — os dados sobrevivem a <code>container rm</code>. Para "
+     "armazenamento de REDE (NFS/SMB/WebDAV) usa antes <code>kind: Storage</code>."),
+    ("Storage", "storage.yaml", "Um volume de REDE montado de um NAS (TrueNAS/Synology/Samba/Nextcloud), estilo "
+     "PersistentVolume do k8s. A password vem do cofre (<code>--password-secret</code>). Montar precisa de CAP_SYS_ADMIN."),
+    ("Image", "image.yaml", "Pré-puxa (ou constrói) uma imagem antes dos containers que dependem dela. Com "
+     "<code>--vm</code> o mesmo Kind cobre as imagens VM douradas."),
+    ("Vm", "vm.yaml", "Uma microVM declarativa (Cloud Hypervisor ou libvirt), com cloud-init por instância. É a "
+     "camada que o <code>delonix cluster kubeadm</code> usa para provisionar nós."),
+    ("Container", "container.yaml", "A carga do dia a dia. Só <code>image</code> é obrigatório; todos os outros campos "
+     "têm default. Cobre rede, storage, recursos (cgroup v2), segredos, segurança, devices e limites."),
+    ("Ingress / Egress", "firewall.yaml", "Firewall L4 declarativo por direcção (estilo k8s NetworkPolicy). Cada "
+     "documento é o estado desejado de uma direcção de um container-alvo — allowlist + default-deny, idempotente."),
+]
+
+
+def kinds_page():
+    body = ["<h1>Kinds do manifesto</h1><p class='tagline'>Cada Kind com um template COMPLETO e funcional — "
+            "todos os campos, com os defaults e um comentário. Aplica um só com "
+            "<code>delonix &lt;grupo&gt; apply -f</code>, ou todos de uma vez com <code>delonix stack apply</code> "
+            "(ordem por dependência: Network → Volume → Storage → Image → Vm → Container → Ingress → Egress).</p>"]
+    body.append("<p>Semântica <em>garante-presente</em> (idempotente por nome), não um reconciliador: sem diffing, "
+                "rollout nem rollback — fail-fast, o que já foi aplicado fica. Os templates abaixo são os ficheiros "
+                "reais em <a href='https://github.com/angolardevops/delonix-runtime/tree/main/examples'><code>examples/</code></a>.</p>")
+    for kind, fname, intro in KINDS_DOC:
+        anchor = kind.split()[0].lower()
+        body.append(f"<h2 id='{anchor}'>{html.escape(kind)}</h2>")
+        body.append(f"<p>{intro}</p>")
+        path = os.path.join(ROOT, "..", "examples", fname)
+        try:
+            yaml = open(path).read().strip()
+        except OSError:
+            yaml = f"# (exemplo em falta: examples/{fname})"
+        body.append(f"<pre><code>{html.escape(yaml)}</code></pre>")
+    page("kinds.html", "Kinds do manifesto", "\n".join(body))
+
+
 def cheatsheet_page():
     body = ["<h1>Cheatsheet</h1><p class='tagline'>Todos os grupos de comandos e subcomandos, "
             "num só sítio. Gerado do <code>--help</code> real do binário.</p>"]
@@ -736,6 +791,7 @@ def main():
     )
     page("index.html", "Delonix Runtime", INDEX.replace("{ver}", ver).replace("{cards}", cards))
     cheatsheet_page()
+    kinds_page()
     page("arquitectura.html", "Arquitectura", ARCH)
     c4_page()
     page("cri.html", "CRI", CRI)
