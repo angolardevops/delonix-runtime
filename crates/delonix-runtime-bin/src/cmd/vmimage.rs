@@ -123,6 +123,10 @@ pub enum VmImageCmd {
         /// workspace se um `Cargo.toml` for detectado a partir do cwd).
         #[arg(long)]
         cri_bin: Option<PathBuf>,
+        /// Não comprimir o qcow2 final (fica maior, mas sem custo de
+        /// descompressão nas leituras do backing file em runtime).
+        #[arg(long)]
+        no_compress: bool,
     },
 }
 
@@ -132,8 +136,8 @@ pub fn run(action: VmImageCmd) -> Result<()> {
         VmImageCmd::Ls => cmd_ls(&store),
         VmImageCmd::Push { name, target } => cmd_push(&store, &name, &target),
         VmImageCmd::Pull { source, name } => cmd_pull(&store, &source, name),
-        VmImageCmd::Build { tag, ubuntu_release, k8s_version, extra_packages, extra_run, cri_bin } => {
-            cmd_build(&store, &tag, &ubuntu_release, k8s_version, extra_packages, extra_run, cri_bin)
+        VmImageCmd::Build { tag, ubuntu_release, k8s_version, extra_packages, extra_run, cri_bin, no_compress } => {
+            cmd_build(&store, &tag, &ubuntu_release, k8s_version, extra_packages, extra_run, cri_bin, !no_compress)
         }
     }
 }
@@ -229,6 +233,7 @@ fn cmd_build(
     extra_packages: Vec<String>,
     extra_run: Vec<String>,
     cri_bin: Option<PathBuf>,
+    compress: bool,
 ) -> Result<()> {
     // `k8s_version` entra num `format!` que vira comando `virt-customize --run-command`
     // (via `k8s_recipes::k8s_host_recipes`) — validar aqui fecha o mesmo achado de
@@ -256,11 +261,46 @@ fn cmd_build(
     eprintln!("a correr virt-customize ({} passos)...", ops.len());
     run_tool("virt-customize", &args.iter().map(String::as_str).collect::<Vec<_>>())?;
 
-    let data = std::fs::read(&work_qcow2)?;
+    // Encolher o artefacto. Medido numa golden 24.04 (2.38 GiB → 677 MiB, −72%):
+    //  1) `virt-sparsify --in-place` — zera os blocos já libertados (a limpeza do
+    //     apt acima liberta ~367 MiB que, sem isto, continuam a ocupar no qcow2).
+    //  2) `qemu-img convert -c` — a cloud image da Ubuntu VEM comprimida e o
+    //     `convert` inicial (acima, sem `-c`) descomprime-a; sem este passo o
+    //     artefacto final fica ~4x maior que a base. `zstd` em vez do zlib por
+    //     omissão: comprime 5x mais rápido (10s vs 53s), fica menor, e sobretudo
+    //     DESCOMPRIME muito mais rápido — importa porque esta imagem é usada como
+    //     backing file read-only das VMs (`delonix_vm::create` faz um overlay por
+    //     VM), logo cada leitura do SO base passa pelo descompressor.
+    // Sparsify é best-effort: se falhar, seguimos (só perde-se algum tamanho).
+    let final_qcow2 = if compress {
+        eprintln!("a compactar a imagem (sparsify + compressão zstd)...");
+        if let Err(e) = run_tool("virt-sparsify", &["--in-place", &work_qcow2.to_string_lossy()]) {
+            eprintln!("aviso: virt-sparsify falhou ({e}); a comprimir na mesma");
+        }
+        let compressed = work_dir.join("final.qcow2");
+        run_tool(
+            "qemu-img",
+            &[
+                "convert",
+                "-c",
+                "-O",
+                "qcow2",
+                "-o",
+                "compression_type=zstd",
+                &work_qcow2.to_string_lossy(),
+                &compressed.to_string_lossy(),
+            ],
+        )?;
+        compressed
+    } else {
+        work_qcow2
+    };
+
+    let data = std::fs::read(&final_qcow2)?;
     let digest = format!("sha256:{}", hex_sha256(&data));
     let size = data.len() as u64;
-    std::fs::rename(&work_qcow2, store.qcow2_path(tag))
-        .or_else(|_| std::fs::copy(&work_qcow2, store.qcow2_path(tag)).map(|_| ()))?;
+    std::fs::rename(&final_qcow2, store.qcow2_path(tag))
+        .or_else(|_| std::fs::copy(&final_qcow2, store.qcow2_path(tag)).map(|_| ()))?;
     let _ = std::fs::remove_dir_all(&work_dir);
 
     let img = VmImage {
@@ -490,6 +530,19 @@ pub(crate) fn k8s_customization_steps(
         ),
     ]);
     ops.extend(extra_run.iter().cloned().map(CustomizeOp::RunCommand));
+    // Limpeza do apt — SEMPRE no fim (depois do `--extra-run` do utilizador, que
+    // pode instalar mais pacotes). Medido numa golden 24.04: `/var/cache/apt`
+    // (~181 MiB de .deb já instalados) + `/var/lib/apt/lists` (~186 MiB de
+    // índices) = ~367 MiB de puro lixo, que enchiam a raiz a 92%. Um `apt-get
+    // update` regenera os índices se o nó precisar.
+    //
+    // DELIBERADAMENTE aqui e não em `k8s_recipes`: aquele catálogo é PARTILHADO
+    // com `cluster apply`, que prepara hosts VIVOS — limpar a cache apt é uma
+    // preocupação do ARTEFACTO (encolher uma imagem distribuível), não da
+    // preparação de um host.
+    ops.push(CustomizeOp::RunCommand(
+        "apt-get clean && rm -rf /var/lib/apt/lists/*".into(),
+    ));
     ops
 }
 
@@ -576,7 +629,27 @@ mod tests {
         let cri = PathBuf::from("/tmp/delonix-cri");
         let svc = PathBuf::from("/tmp/delonix-cri.service");
         let ops = k8s_customization_steps(None, &[], &["echo oi".to_string()], &cri, &svc);
-        assert!(matches!(ops.last(), Some(CustomizeOp::RunCommand(c)) if c == "echo oi"));
+        // `--extra-run` corre depois de todos os passos base; só a limpeza do apt
+        // vem a seguir (tem de ser a última — o extra-run pode instalar pacotes).
+        let idx_extra = ops
+            .iter()
+            .position(|op| matches!(op, CustomizeOp::RunCommand(c) if c == "echo oi"))
+            .expect("o --extra-run devia estar na lista");
+        assert_eq!(idx_extra, ops.len() - 2, "o --extra-run devia vir logo antes da limpeza");
+        assert!(matches!(ops.last(), Some(CustomizeOp::RunCommand(c)) if c.contains("apt-get clean")));
+    }
+
+    #[test]
+    fn customization_steps_limpam_a_cache_apt_no_fim() {
+        let cri = PathBuf::from("/tmp/delonix-cri");
+        let svc = PathBuf::from("/tmp/delonix-cri.service");
+        let ops = k8s_customization_steps(None, &[], &[], &cri, &svc);
+        // ~367 MiB de .deb + índices que, sem isto, enchiam a raiz da golden a 92%.
+        let last = ops.last().expect("devia haver passos");
+        assert!(
+            matches!(last, CustomizeOp::RunCommand(c) if c.contains("apt-get clean") && c.contains("/var/lib/apt/lists")),
+            "o último passo devia limpar a cache apt, obtido: {last:?}"
+        );
     }
 
     #[test]

@@ -83,6 +83,10 @@ pub enum ImageCmd {
         extra_run: Vec<String>,
         #[arg(long)]
         cri_bin: Option<PathBuf>,
+        /// Não comprimir o qcow2 final (maior, mas sem custo de descompressão
+        /// nas leituras do backing file em runtime).
+        #[arg(long)]
+        no_compress: bool,
     },
 }
 
@@ -114,6 +118,10 @@ pub enum VmSub {
         extra_run: Vec<String>,
         #[arg(long)]
         cri_bin: Option<PathBuf>,
+        /// Não comprimir o qcow2 final (maior, mas sem custo de descompressão
+        /// nas leituras do backing file em runtime).
+        #[arg(long)]
+        no_compress: bool,
     },
 }
 
@@ -140,8 +148,8 @@ pub fn run(vm: bool, action: ImageCmd) -> Result<()> {
             VmSub::Ls => VmImageCmd::Ls,
             VmSub::Pull { source, name } => VmImageCmd::Pull { source, name },
             VmSub::Push { name, target } => VmImageCmd::Push { name, target },
-            VmSub::Build { tag, ubuntu_release, k8s_version, extra_packages, extra_run, cri_bin } => {
-                VmImageCmd::Build { tag, ubuntu_release, k8s_version, extra_packages, extra_run, cri_bin }
+            VmSub::Build { tag, ubuntu_release, k8s_version, extra_packages, extra_run, cri_bin, no_compress } => {
+                VmImageCmd::Build { tag, ubuntu_release, k8s_version, extra_packages, extra_run, cri_bin, no_compress }
             }
         });
     }
@@ -192,8 +200,8 @@ fn run_vm(action: ImageCmd) -> Result<()> {
         ImageCmd::Ls => VmImageCmd::Ls,
         ImageCmd::Pull { image } => VmImageCmd::Pull { source: image, name: None },
         ImageCmd::Push { name, target } => VmImageCmd::Push { name, target },
-        ImageCmd::Build { tag, ubuntu_release, k8s_version, extra_packages, extra_run, cri_bin } => {
-            VmImageCmd::Build { tag, ubuntu_release, k8s_version, extra_packages, extra_run, cri_bin }
+        ImageCmd::Build { tag, ubuntu_release, k8s_version, extra_packages, extra_run, cri_bin, no_compress } => {
+            VmImageCmd::Build { tag, ubuntu_release, k8s_version, extra_packages, extra_run, cri_bin, no_compress }
         }
         ImageCmd::Rm { .. } | ImageCmd::Export { .. } | ImageCmd::Apply { .. } => {
             return Err(Error::Invalid(

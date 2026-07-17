@@ -101,6 +101,24 @@ nó não faz nenhuma instalação**, só `kubeadm init`/`kubeadm join`.
   `delonix`, utilizador `delonix:delonix` em `sudo` com `NOPASSWD`. cloud-init fica ACTIVO na
   imagem (o build só corre uma vez; o cloud-init do primeiro-boot de CADA VM continua a aplicar
   hostname/SSH-keys — ver `delonix vm create` abaixo).
+- **Tamanho do artefacto (medido, golden 24.04: 2.38 GiB → 677 MiB, −72%)** — três passos, todos
+  no fim do `build`, cada um com uma razão concreta:
+  1. **`apt-get clean` + `rm -rf /var/lib/apt/lists/*`** (último `CustomizeOp`, DEPOIS do
+     `--extra-run` do utilizador, que pode instalar mais pacotes). Media na golden: `/var/cache/apt`
+     ~181 MiB + `/var/lib/apt/lists` ~186 MiB = **~367 MiB de lixo** que enchiam a raiz a **92%**
+     (179 MiB livres — perigoso para um nó k8s: o kubelet despeja perto do limite). Depois: 77%,
+     546 MiB livres. Fica em `k8s_customization_steps` e **não** em `k8s_recipes` — aquele catálogo
+     é PARTILHADO com `cluster apply`, que prepara hosts VIVOS; limpar cache é preocupação do
+     ARTEFACTO, não da preparação de um host.
+  2. **`virt-sparsify --in-place`** — zera os blocos que a limpeza libertou (sem isto continuam a
+     ocupar no qcow2). Best-effort: se falhar, o build segue (só perde tamanho).
+  3. **`qemu-img convert -c -o compression_type=zstd`** — a cloud image da Ubuntu **vem comprimida**
+     e o `convert` inicial (sem `-c`) descomprime-a; sem este passo o artefacto fica ~4x maior que
+     a base (593 MiB → 2.38 GiB). **zstd e não o zlib por omissão**: comprime 5x mais rápido
+     (10s vs 53s), fica menor (868 vs 894 MiB no mesmo input), e sobretudo **descomprime** muito
+     mais rápido — importa porque a golden é o **backing file read-only** das VMs
+     (`delonix_vm::create` faz um overlay qcow2 por VM), logo cada leitura do SO base passa pelo
+     descompressor. Escapatória: `--no-compress`. Custo total: ~12s de build.
 - **`push`/`pull`**: publicam/obtêm a imagem como artefacto OCI de blob único (config vazio + 1
   layer, padrão ORAS/Helm) via `delonix_image::registry::{push_oci_artifact,pull_oci_artifact}`
   (`crates/delonix-image/src/registry.rs`) — generaliza o `Client`/auth/upload já usado por
