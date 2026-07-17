@@ -307,6 +307,9 @@ pub enum ClusterCmd {
         /// Porta do host para o apiserver.
         #[arg(long, default_value_t = 6443)]
         api_port: u16,
+        /// Nós worker a juntar (0 = só control-plane, sem taint — agenda tudo).
+        #[arg(long, default_value_t = 0)]
+        workers: u32,
         /// Imagem do nó (default: `kindest/node` fixada por digest).
         #[arg(long)]
         image: Option<String>,
@@ -373,7 +376,7 @@ pub fn run(action: ClusterCmd) -> Result<()> {
     match action {
         // Tratado no topo de `run` (faz `return`).
         ClusterCmd::Init { .. } => unreachable!("tratado acima"),
-        ClusterCmd::Create { ref name, api_port, ref image, ref pod_subnet, ref service_subnet, ref cni } => {
+        ClusterCmd::Create { ref name, api_port, workers, ref image, ref pod_subnet, ref service_subnet, ref cni } => {
             let (images, store) = super::util::open_stores()?;
             return super::kindmode::create(
                 &images,
@@ -386,6 +389,7 @@ pub fn run(action: ClusterCmd) -> Result<()> {
                     service_subnet: service_subnet.clone(),
                     cni: cni.clone(),
                     k8s_version: None,
+                    workers,
                 },
             );
         }
@@ -459,13 +463,6 @@ fn apply_one(name: &str, spec: &ClusterSpec) -> Result<()> {
 
 /// `mode: kind` — nós em containers nesta máquina (ver `cmd::kindmode`).
 fn apply_kind(name: &str, spec: &ClusterSpec) -> Result<()> {
-    if spec.workers.count() > 0 {
-        return Err(Error::Invalid(
-            "workers no `mode: kind` ainda não estão implementados — usa `workers.replicas: 0` \
-             (um control-plane sem taint agenda tudo) ou `mode: vm`/`ssh` para multi-nó"
-                .into(),
-        ));
-    }
     if spec.control_plane.count() > 1 {
         return Err(Error::Invalid(
             "`mode: kind` só suporta 1 control-plane por agora (HA precisa de um endpoint \
@@ -485,6 +482,7 @@ fn apply_kind(name: &str, spec: &ClusterSpec) -> Result<()> {
             service_subnet: spec.service_subnet.clone(),
             cni: spec.cni.clone(),
             k8s_version: spec.k8s_version.clone(),
+            workers: spec.workers.count(),
         },
     )
 }
