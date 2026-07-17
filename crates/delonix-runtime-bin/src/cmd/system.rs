@@ -33,6 +33,15 @@ pub enum SystemCmd {
         #[arg(long)]
         tune: bool,
     },
+    /// Recupera espaço: remove containers parados, imagens sem uso, blobs do
+    /// CAS que ninguém referencia, cgroups vazios e — o que mais espaço liberta
+    /// — **directórios de containers órfãos** (de nós/containers que morreram
+    /// abruptamente sem `rm`, sem entrada no registo).
+    Prune {
+        /// Também remove imagens sem uso que TÊM tag (não só as dangling).
+        #[arg(short, long)]
+        all: bool,
+    },
     /// Governador térmico: baixa o orçamento de CPU do Delonix quando o CPU
     /// aquece e repõe-no quando arrefece. Corre em contínuo (ver `--once`).
     Thermal {
@@ -59,9 +68,133 @@ pub fn run(action: SystemCmd) -> Result<()> {
         SystemCmd::Events { follow, tail } => cmd_events(follow, tail),
         SystemCmd::Info => cmd_info(),
         SystemCmd::Df => cmd_df(),
+        SystemCmd::Prune { all } => cmd_prune(all),
         SystemCmd::Virt { tune } => cmd_virt(tune),
         SystemCmd::Thermal { high, low, floor, interval, once } => cmd_thermal(high, low, floor, interval, once),
     }
+}
+
+/// `system prune` — recupera espaço em disco.
+///
+/// A ordem importa: containers parados primeiro (libertam imagens e blobs),
+/// depois o que deixou de ser referenciado. O passo que mais liberta é o **4**,
+/// os directórios órfãos — o problema real medido nesta máquina: **88
+/// directórios de container em disco contra 4 no registo (~36 GiB)**. Vêm de nós
+/// de cluster e containers que morreram por SIGKILL/crash/sessão-fechada **sem
+/// `rm`**, por isso nunca ninguém os varreu. O `container rm` normal nunca os
+/// apanha (não estão no registo); só um GC explícito como este.
+fn cmd_prune(all: bool) -> Result<()> {
+    use std::collections::HashSet;
+    let (images, store) = open_stores()?;
+
+    // Slirps órfãos (alvo morto) — o reaper SEGURO (nunca o `reap_orphan_hostfwds`
+    // fail-open; ver a história do reaper que apagava portas vivas).
+    let reaped = delonix_net::reap_orphan_slirp();
+    if reaped > 0 {
+        println!("rede: {reaped} slirp(s) órfão(s) reapado(s)");
+    }
+
+    // 1) containers parados (no registo).
+    let mut rmc = 0usize;
+    for c in store.list()? {
+        if c.pid.map(delonix_runtime::is_alive).unwrap_or(false) {
+            continue;
+        }
+        let _ = delonix_runtime::remove(&store, &c, true);
+        let _ = images.unmount_rootfs(&c.id);
+        images.remove_container_dir(&c.id);
+        rmc += 1;
+    }
+
+    // Ids ainda vivos DEPOIS do passo 1 — a base para decidir o que é órfão.
+    let live_ids: HashSet<String> = store.list()?.iter().map(|c| c.id.clone()).collect();
+
+    // 2) imagens dangling (sem tag), ou todas as não usadas com `-a`.
+    let in_use: HashSet<String> = store.list()?.iter().map(|c| c.image.clone()).collect();
+    let mut rmi = 0usize;
+    for img in images.list()? {
+        let dangling = img.repo_tags.is_empty() || img.repo_tags.iter().all(|t| t.contains("<none>"));
+        let used = in_use.contains(&img.id) || img.repo_tags.iter().any(|t| in_use.contains(t));
+        if (dangling || all) && !used {
+            if img.repo_tags.is_empty() {
+                let _ = images.remove(&img.id);
+            } else {
+                for t in &img.repo_tags {
+                    let _ = images.remove(t);
+                }
+            }
+            rmi += 1;
+        }
+    }
+
+    // 3) blobs do CAS que já ninguém referencia.
+    let mut referenced: HashSet<String> = HashSet::new();
+    for img in images.list()? {
+        referenced.insert(delonix_image::cas::strip(&img.id).to_string());
+        for l in &img.layers {
+            referenced.insert(delonix_image::cas::strip(l).to_string());
+        }
+    }
+    let (mut rmb, mut freed) = (0usize, 0u64);
+    let blobs_dir = images.root().join("blobs").join("sha256");
+    if let Ok(rd) = std::fs::read_dir(&blobs_dir) {
+        for e in rd.flatten() {
+            let name = e.file_name().to_string_lossy().into_owned();
+            if name.starts_with('.') || referenced.contains(&name) {
+                continue;
+            }
+            freed += e.metadata().map(|m| m.len()).unwrap_or(0);
+            let _ = std::fs::remove_file(e.path());
+            rmb += 1;
+        }
+    }
+
+    // 4) DIRECTÓRIOS de container órfãos — o grande recuperador de espaço.
+    //
+    // Um `<containers>/<id>/` cujo `<id>` já não está no registo: o container
+    // morreu sem `rm`. Usa-se `remove_tree_mapped` e não `remove_dir_all` porque
+    // o rootfs pode ter ficheiros de SUBUID (escritos por um container rootless)
+    // que o utilizador real não apaga directamente — é exactamente o caminho que
+    // o `__rmtree` desta série passou a suportar de facto.
+    let containers_dir = images.root().join("containers");
+    let (mut rmd, mut freed_dirs) = (0usize, 0u64);
+    if let Ok(rd) = std::fs::read_dir(&containers_dir) {
+        for e in rd.flatten() {
+            // Só directórios cujo nome é um id (as entradas do registo são
+            // `<id>.json`, ficheiros — não entram aqui).
+            if !e.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                continue;
+            }
+            let id = e.file_name().to_string_lossy().into_owned();
+            if live_ids.contains(&id) {
+                continue;
+            }
+            freed_dirs += dir_size(&e.path());
+            delonix_runtime::remove_tree_mapped(&e.path());
+            rmd += 1;
+        }
+    }
+
+    // 5) cgroups VAZIOS órfãos na delonix.slice.
+    let live_cg: HashSet<String> = live_ids.iter().map(|id| format!("delonix-{id}")).collect();
+    let mut rmg = 0usize;
+    if let Ok(rd) = std::fs::read_dir(delonix_runtime_core::DELONIX_SLICE) {
+        for e in rd.flatten() {
+            let name = e.file_name().to_string_lossy().into_owned();
+            // `remove_dir` (não `_all`): só remove se estiver VAZIO — um cgroup
+            // com processos lá dentro recusa, e ainda bem.
+            if name.starts_with("delonix-") && !live_cg.contains(&name) && std::fs::remove_dir(e.path()).is_ok() {
+                rmg += 1;
+            }
+        }
+    }
+
+    let total = freed + freed_dirs;
+    println!(
+        "removidos: {rmc} container(es), {rmd} directório(s) órfão(s), {rmi} imagem(ns), {rmb} blob(s), {rmg} cgroup(s) — {} libertados",
+        super::output::fmt_size(total)
+    );
+    Ok(())
 }
 
 /// `system virt` — detecta virtualização e diz o que há a afinar. Sem `--tune`
