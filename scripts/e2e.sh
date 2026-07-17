@@ -93,8 +93,8 @@ check "volumes ls" ok "$BIN" volumes ls
 check "network ls" ok "$BIN" network ls
 check "vm ls" ok "$BIN" vm ls
 check "cluster ls" ok "$BIN" cluster ls
-check "system state" ok "$BIN" system state
-check "system disk" ok "$BIN" system disk
+check "system info" ok "$BIN" system info
+check "system df" ok "$BIN" system df
 check "system events" ok "$BIN" system events
 check "completion bash" ok "$BIN" completion bash
 
