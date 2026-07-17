@@ -248,6 +248,9 @@ fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Result<()> {
     for spec in &ports {
         delonix_net::parse_publish(spec)?;
     }
+    if !ports.is_empty() {
+        reap_orphan_net(store);
+    }
     if net == "none" && !ports.is_empty() {
         return Err(Error::Invalid("-p/--publish não é compatível com --net none (netns sem ligação)".into()));
     }
@@ -456,6 +459,32 @@ fn for_each_id(ids: &[String], mut f: impl FnMut(&str) -> Result<()>) -> Result<
     }
 }
 
+/// Reapa a rede deixada por containers que já morreram, ANTES de publicar
+/// portas novas. Sem isto, um `slirp4netns` órfão (o container morreu sem
+/// `stop` — crash, SIGKILL, sessão fechada) fica a segurar a porta de HOST e o
+/// `run` seguinte falha com `add_hostfwd: slirp_add_hostfwd failed` — visto 3×
+/// numa só sessão de testes, sempre com limpeza manual à mão.
+///
+/// Os dois reapers já existiam em `delonix-net` (`reap_orphan_slirp`,
+/// `reap_orphan_hostfwds`) mas eram **código morto**: nenhum chamador em todo o
+/// workspace. Barato (uma passagem por `/proc` + 1 query ao api-socket) e
+/// seguro (só mexe em slirps cujo pid-alvo já não existe e em hostfwds sem
+/// container vivo).
+fn reap_orphan_net(store: &Store) {
+    let _ = delonix_net::reap_orphan_slirp();
+    // Portas ainda legitimamente em uso por containers vivos — não lhes tocar.
+    let live: std::collections::HashSet<u32> = store
+        .list()
+        .unwrap_or_default()
+        .iter()
+        .filter(|c| matches!(c.status, delonix_runtime_core::Status::Running | delonix_runtime_core::Status::Paused))
+        .flat_map(|c| c.ports.iter())
+        .filter_map(|s| delonix_net::parse_publish(s).ok())
+        .filter_map(|(hp, _, _)| hp.parse::<u32>().ok())
+        .collect();
+    let _ = infra::reap_orphan_hostfwds(&live);
+}
+
 /// Remove as publicações de ingress de um container (best-effort, idempotente).
 /// Só o caminho de rede custom deixa regras persistentes (hostfwd no slirp único
 /// + DNAT no holder); no caminho slirp-por-container o processo slirp morre com
@@ -553,7 +582,14 @@ fn cmd_rm(images: &ImageStore, store: &Store, id: &str, force: bool) -> Result<(
     let c = find(store, id)?;
     runtime::remove(store, &c, force)?;
     unpublish_ports(&c);
-    let _ = images.unmount_rootfs(&c.id);
+    let _ = images.unmount_rootfs(&c.id); // desmonta/limpa o scratch do overlay
+    // DESTROY definitivo do directório do container (inclui o `rootfs/` flat).
+    // O `unmount_rootfs` PRESERVA-o de propósito (é o estado do container, para
+    // o `start` o reusar); só o `rm` o pode apagar. Sem isto o rootfs ficava
+    // órfão para sempre: 49 directórios (45 GiB) acumulados numa só sessão de
+    // testes, e o kubelet a marcar o nó com `disk-pressure`. A doc do
+    // `remove_container_dir` já dizia "chamado pelo `rm`" — mas não era.
+    images.remove_container_dir(&c.id);
     println!("{}", c.id);
     Ok(())
 }
