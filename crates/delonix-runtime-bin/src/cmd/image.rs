@@ -3,6 +3,7 @@
 use std::path::PathBuf;
 
 use clap::Subcommand;
+use clap_complete::engine::ArgValueCandidates;
 use delonix_image::ImageStore;
 use delonix_runtime_core::{Error, Result};
 use serde::Deserialize;
@@ -47,25 +48,40 @@ pub enum ImageCmd {
     /// (tags/digest/tamanho/layers + o config OCI: entrypoint/cmd/env/workdir).
     /// Com `--vm`, descreve imagens VM douradas.
     Describe {
-        #[arg(required = true)]
+        #[arg(required = true, add = ArgValueCandidates::new(super::complete::images))]
         names: Vec<String>,
     },
     /// Dá outro nome/tag a uma imagem local (não copia nada — é só um nome novo
     /// para o mesmo conteúdo).
-    Tag { source: String, target: String },
+    Tag {
+        #[arg(add = ArgValueCandidates::new(super::complete::images))]
+        source: String,
+        target: String,
+    },
     /// Layers de uma imagem (digest + tamanho), da base para o topo.
-    History { image: String },
+    History {
+        #[arg(add = ArgValueCandidates::new(super::complete::images))]
+        image: String,
+    },
     /// Verifica a assinatura cosign de uma imagem local contra uma chave pública.
     Verify {
+        #[arg(add = ArgValueCandidates::new(super::complete::images))]
         image: String,
         /// Chave pública em PEM.
         #[arg(value_name = "PEM")]
         key: PathBuf,
     },
     /// Remove uma imagem local.
-    Rm { image: String },
+    Rm {
+        #[arg(add = ArgValueCandidates::new(super::complete::images))]
+        image: String,
+    },
     /// Exporta um bundle OCI runtime (rootfs + config.json) para `runc`/`crun`.
-    Export { image: String, dir: PathBuf },
+    Export {
+        #[arg(add = ArgValueCandidates::new(super::complete::images))]
+        image: String,
+        dir: PathBuf,
+    },
     /// Aplica os documentos `kind: Image` de um manifesto (`pull` idempotente
     /// por referência; `build` reconstrói e substitui a tag a cada apply).
     Apply {
@@ -94,7 +110,11 @@ pub enum ImageCmd {
     },
     /// Publica uma imagem local num registo OCI. Sem `target`, publica sob a
     /// própria referência da imagem. Com `--vm`, o `target` é obrigatório.
-    Push { name: String, target: Option<String> },
+    Push {
+        #[arg(add = ArgValueCandidates::new(super::complete::images))]
+        name: String,
+        target: Option<String>,
+    },
     /// (só com `--vm`) Constrói a imagem VM dourada (Ubuntu + kubeadm/kubelet/
     /// kubectl + `delonix-cri`).
     Build {
@@ -378,11 +398,9 @@ fn cmd_ls(images: &ImageStore) -> Result<()> {
     for img in imgs {
         let tag = img.repo_tags.first().cloned().unwrap_or_else(|| "<none>".into());
         t.row(vec![
-            // Truncado: uma referência com digest (`kindest/node:v1.34.0@sha256:7416a…`,
-            // 84 chars) esticava a coluna e empurrava todas as outras para fora
-            // do terminal — a tabela mede pelo conteúdo, logo UMA linha destas
-            // estragava a leitura de todas as restantes.
-            super::output::truncate(&tag, 44),
+            // `display_ref` tira o `@sha256:…` redundante (a tag ja identifica);
+            // o `truncate` e' a rede de seguranca para nomes de repo enormes.
+            super::output::truncate(&super::output::display_ref(&tag), 44),
             img.short_id(),
             // Era o epoch cru (`CRIADA(unix)`) — ilegível numa tabela.
             super::output::fmt_age(img.created_unix),

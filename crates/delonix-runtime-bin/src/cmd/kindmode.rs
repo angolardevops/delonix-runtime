@@ -57,6 +57,8 @@ pub(crate) struct KindCluster {
     pub k8s_version: Option<String>,
     /// Quantos workers juntar ao control-plane (0 = só control-plane, sem taint).
     pub workers: u32,
+    /// Quantos control-planes. >1 exige um endpoint estável à frente deles.
+    pub control_planes: u32,
 }
 
 /// A porta está livre? Verifica os DOIS sítios que importam: nenhum container
@@ -102,7 +104,7 @@ fn pick_api_port(store: &Store, preferred: Option<u16>, cluster: &str) -> Result
     // longe das portas de serviço.
     for p in 36443..36543 {
         if port_free(store, p) {
-            eprintln!("porta {DEFAULT_API_PORT} ocupada — o cluster '{cluster}' usa a {p}");
+            super::output::info(&format!("porta {DEFAULT_API_PORT} ocupada — o cluster '{cluster}' usa a {p}"));
             return Ok(p);
         }
     }
@@ -135,31 +137,208 @@ fn cluster_dir(name: &str) -> std::path::PathBuf {
 const NODE_SHARED: &str = "/kind/delonix";
 
 /// Corre um comando dentro do nó e devolve o código de saída.
+///
+/// **O stdout/stderr do comando é HERDADO** — vai direito ao terminal do
+/// utilizador. Só usar quando se QUER isso; para tudo o resto,
+/// [`node_exec_capture`].
 fn node_exec(c: &Container, script: &str) -> Result<i32> {
     let argv = vec!["/bin/sh".to_string(), "-c".to_string(), script.to_string()];
     delonix_runtime::exec(c, &argv, false)
 }
 
-/// Como [`node_exec`], mas falha com um erro claro se o comando não devolver 0.
+/// Como [`node_exec`], mas **captura** o output em vez de o despejar no terminal.
+/// Devolve `(exit code, output combinado)`.
+///
+/// # Porque assim, e não com um `exec` que capture
+///
+/// O `delonix_runtime::exec` herda o stdio do processo pai e não tem variante de
+/// captura. Em vez de mexer numa API central do motor só por causa disto,
+/// redirecciona-se DENTRO do nó para um ficheiro no directório partilhado (que é
+/// um bind mount, ver `cluster_dir`) e lê-se do host. Zero mudanças no motor.
+///
+/// Era isto que faltava para os logs: o `systemctl is-active` do `wait_in_node`
+/// imprimia `inactive`/`activating`/`active` a cada sondagem, e os erros do
+/// systemd do nó ("System has not been booted with systemd as init system",
+/// "Failed to connect to bus") saíam no meio do output do `cluster create` como
+/// se fossem falhas nossas. São ruído esperado de dentro do nó — pertencem ao
+/// diagnóstico de um passo que falha, não ao caminho feliz.
+fn node_exec_capture(c: &Container, script: &str) -> Result<(i32, String)> {
+    // Ficheiro por-nó: os workers correm em PARALELO e partilham este directório.
+    let out_rel = format!(".out-{}", c.name);
+    let code = node_exec(c, &format!("{{ {script} ; }} >{NODE_SHARED}/{out_rel} 2>&1"))?;
+    let path = cluster_dir_of(c).join(&out_rel);
+    let out = std::fs::read_to_string(&path).unwrap_or_default();
+    let _ = std::fs::remove_file(&path);
+    Ok((code, out))
+}
+
+/// O `cluster_dir` de um nó, a partir da sua label — o `node_exec_capture` não
+/// tem o `cfg` à mão.
+fn cluster_dir_of(c: &Container) -> std::path::PathBuf {
+    let name = c.labels.get("io.x-k8s.kind.cluster").cloned().unwrap_or_default();
+    cluster_dir(&name)
+}
+
+/// Como [`node_exec_capture`], mas falha se o comando não devolver 0 — e aí (e
+/// só aí) mostra o que o nó disse, que é exactamente quando isso interessa.
 fn node_must(c: &Container, what: &str, script: &str) -> Result<()> {
-    match node_exec(c, script)? {
-        0 => Ok(()),
-        code => Err(Error::Invalid(format!("{what} falhou no nó (exit {code})"))),
+    let (code, out) = node_exec_capture(c, script)?;
+    if code == 0 {
+        return Ok(());
     }
+    // As últimas linhas chegam para diagnosticar e não afogam o terminal; o
+    // output inteiro de um `kubeadm init` são centenas de linhas.
+    let tail: Vec<&str> = out.lines().filter(|l| !l.trim().is_empty()).rev().take(12).collect();
+    let detalhe = tail.into_iter().rev().map(|l| format!("\n    {l}")).collect::<String>();
+    Err(Error::Invalid(format!("{what} falhou no nó '{}' (exit {code}){detalhe}", c.name)))
 }
 
 /// Espera por uma condição dentro do nó (comando com exit 0), com timeout.
 fn wait_in_node(c: &Container, what: &str, check: &str, timeout: Duration) -> Result<()> {
     let start = Instant::now();
     while start.elapsed() < timeout {
-        if node_exec(c, check).unwrap_or(1) == 0 {
+        // Captura: o `systemctl is-active` escreve o estado no stdout a cada
+        // sondagem, e sem isto o utilizador via `inactive`/`activating`/`active`
+        // a escorrer pelo terminal durante todo o arranque.
+        if node_exec_capture(c, check).map(|(rc, _)| rc).unwrap_or(1) == 0 {
             return Ok(());
         }
         std::thread::sleep(Duration::from_secs(2));
     }
-    Err(Error::Invalid(format!("timeout à espera de {what} no nó ({}s)", timeout.as_secs())))
+    Err(Error::Invalid(format!(
+        "timeout à espera de {what} no nó '{}' ({}s)",
+        c.name,
+        timeout.as_secs()
+    )))
 }
 
+
+/// Os dados de adesão que o control-plane emite, extraídos do
+/// `kubeadm token create --print-join-command`.
+#[derive(Debug, PartialEq)]
+struct JoinInfo {
+    endpoint: String,
+    token: String,
+    ca_hash: String,
+}
+
+/// Extrai `(endpoint, token, hash do CA)` da linha que o `kubeadm token create
+/// --print-join-command` devolve:
+///
+/// ```text
+/// kubeadm join 10.0.0.2:6443 --token ab.cd --discovery-token-ca-cert-hash sha256:ef…
+/// ```
+///
+/// # Porque é preciso desmontar a linha em vez de a correr
+///
+/// A linha é um comando completo com argumentos posicionais. Corrê-la **e**
+/// juntar-lhe `--config` é o que o kubeadm recusa:
+/// `can not mix '--config' with arguments [discovery-token-ca-cert-hash token]`.
+/// Como o nó rootless PRECISA de config própria, o caminho certo é o contrário:
+/// tirar os dados daqui e pô-los DENTRO de uma `JoinConfiguration`, ficando o
+/// `join` só com `--config`. É o que o `kind` faz.
+fn parse_join_command(s: &str) -> Result<JoinInfo> {
+    let toks: Vec<&str> = s.split_whitespace().collect();
+    let flag = |name: &str| -> Option<String> {
+        toks.iter().position(|t| *t == name).and_then(|i| toks.get(i + 1)).map(|v| v.to_string())
+    };
+    // O endpoint é o 1.º token depois de "join" que não seja uma flag.
+    let endpoint = toks
+        .iter()
+        .position(|t| *t == "join")
+        .and_then(|i| toks.get(i + 1))
+        .filter(|t| !t.starts_with('-'))
+        .map(|t| t.to_string())
+        .ok_or_else(|| Error::Invalid(format!("não consegui ler o endpoint do join: {s:?}")))?;
+    let token = flag("--token").ok_or_else(|| Error::Invalid(format!("join sem --token: {s:?}")))?;
+    let ca_hash = flag("--discovery-token-ca-cert-hash")
+        .ok_or_else(|| Error::Invalid(format!("join sem --discovery-token-ca-cert-hash: {s:?}")))?;
+    Ok(JoinInfo { endpoint, token, ca_hash })
+}
+
+/// A `JoinConfiguration` de um worker.
+///
+/// **Só JoinConfiguration, sem KubeletConfiguration**: o `kubeadm join` puxa o
+/// config do kubelet do ConfigMap `kubelet-config` do cluster, que o `init` já
+/// escreveu com o `KubeletInUserNamespace` e o `failSwapOn: false`. Os workers
+/// herdam a receita rootless sem a repetirem — e repeti-la aqui só criaria duas
+/// fontes de verdade a divergir.
+fn join_config_yaml(j: &JoinInfo) -> String {
+    format!(
+        "apiVersion: kubeadm.k8s.io/v1beta4\n\
+         kind: JoinConfiguration\n\
+         discovery:\n  bootstrapToken:\n    apiServerEndpoint: \"{ep}\"\n    token: \"{tok}\"\n    caCertHashes:\n    - \"{hash}\"\n\
+         nodeRegistration:\n  criSocket: unix:///run/containerd/containerd.sock\n",
+        ep = j.endpoint,
+        tok = j.token,
+        hash = j.ca_hash,
+    )
+}
+
+/// Progresso ao estilo do `kind`: uma linha por passo, marcada com `✓` quando
+/// fecha.
+///
+/// O `kind` mostra ` ⠈⠁ Ensuring node image (…) 🖼` a girar e reescreve a linha
+/// com ` ✓ …` no fim. Aqui não há spinner com thread: escreve-se a linha com
+/// `•`, e no fim reescreve-se com `\r`. Dá o mesmo resultado visível sem uma
+/// thread de animação a competir com o output dos passos.
+///
+/// **Sem TTY (pipe, CI, `2>&1 | tee`) o `\r` não funciona** — aí imprime-se só a
+/// linha final, uma por passo, que é o que um log de CI quer.
+struct Progress {
+    tty: bool,
+    aberto: bool,
+    msg: String,
+    icon: String,
+}
+
+impl Progress {
+    fn new() -> Self {
+        // SAFETY: isatty não tem pré-condições; 2 = stderr.
+        let tty = unsafe { libc::isatty(2) } == 1;
+        Self { tty, aberto: false, msg: String::new(), icon: String::new() }
+    }
+
+    /// Abre um passo. `icon` é o emoji que o `kind` põe no fim da linha.
+    fn step(&mut self, msg: &str, icon: &str) {
+        self.fecha_pendente();
+        self.msg = msg.to_string();
+        self.icon = icon.to_string();
+        if self.tty {
+            eprint!(" • {msg} {icon} ");
+            let _ = std::io::Write::flush(&mut std::io::stderr());
+            self.aberto = true;
+        }
+        // Sem TTY não se escreve nada agora: a linha sai no `ok()`, já com o ✓.
+    }
+
+    /// Fecha o passo actual com `✓`.
+    fn ok(&mut self) {
+        if self.tty && self.aberto {
+            eprint!("\r");
+        }
+        eprintln!(" ✓ {} {}", self.msg, self.icon);
+        self.aberto = false;
+    }
+
+    /// Um passo que falhou fica com `✗` — a linha não pode ficar pendurada com
+    /// o `•` quando o erro aparecer a seguir.
+    fn fecha_pendente(&mut self) {
+        if self.aberto {
+            if self.tty {
+                eprint!("\r");
+            }
+            eprintln!(" ✗ {} {}", self.msg, self.icon);
+            self.aberto = false;
+        }
+    }
+}
+
+impl Drop for Progress {
+    fn drop(&mut self) {
+        self.fecha_pendente();
+    }
+}
 
 /// Reis/rainhas de Angola — Ndongo, Kongo, Matamba, Bailundo.
 const REIS: &[&str] = &[
@@ -214,6 +393,16 @@ pub(crate) fn random_cluster_name(store: &Store) -> Result<String> {
     Err(Error::Invalid("não consegui inventar um nome livre — passa `--name`".into()))
 }
 
+/// Nome do worker `i` (1-based), na convenção do `kind`: o primeiro é
+/// `<cluster>-worker`, os seguintes `<cluster>-worker2`, `-worker3`, …
+fn worker_name(cluster: &str, i: u32) -> String {
+    if i == 1 {
+        format!("{cluster}-worker")
+    } else {
+        format!("{cluster}-worker{i}")
+    }
+}
+
 /// Nome da rede do cluster. Cada cluster tem a SUA — como o `kind`, que cria
 /// uma bridge por cluster. É o que permite aos nós verem-se: sem rede partilhada
 /// um worker nunca alcança o apiserver (com `--net host -p`, cada nó fica num
@@ -231,7 +420,9 @@ fn boot_node(
     role: &str,
     publish: Vec<String>,
 ) -> Result<Container> {
-    eprintln!("a arrancar o nó '{node}' ({role})...");
+    // Sem `eprintln` aqui: o progresso é do chamador (ver `Progress`), e este é
+    // chamado em PARALELO pelos workers — cada um a escrever a sua linha daria
+    // output entrelaçado.
     container::cmd_run(
         images,
         store,
@@ -266,6 +457,8 @@ fn boot_node(
             ],
             image: cfg.image.clone(),
             command: Vec::new(),
+            // O progresso e' do `Progress`; os IDs dos nos no meio eram ruido.
+            quiet: true,
         },
     )?;
     let c = store
@@ -287,6 +480,46 @@ pub(crate) fn create(images: &ImageStore, store: &Store, cfg: &KindCluster) -> R
         )));
     }
 
+    if cfg.control_planes == 0 {
+        return Err(Error::Invalid("--control-planes tem de ser >= 1".into()));
+    }
+    if cfg.control_planes > 1 {
+        // Recusa-se em vez de fingir: com N control-planes e o
+        // `controlPlaneEndpoint` a apontar para o IP do PRIMEIRO, todos os
+        // kubelets e os outros CPs falam com esse nó — se ele morre, morre o
+        // cluster. Isso não é HA, é um single point of failure com 3 nós e a
+        // aparência de HA, que é pior que não ter. HA a sério precisa de um
+        // load-balancer à frente (o `kind` corre um haproxy), e isso ainda não
+        // está feito aqui. O `cluster kubeadm` recusa pela MESMA razão.
+        return Err(Error::Invalid(format!(
+            "--control-planes {} ainda não é suportado: o kubeadm em HA precisa de um endpoint \
+             estável (load-balancer/VIP) à frente dos control-planes, e o delonix ainda não o \
+             provisiona. Usa `--control-planes 1` (e `--workers N` para capacidade).",
+            cfg.control_planes
+        )));
+    }
+
+    super::output::info(&format!("A criar o cluster \"{}\"", cfg.name));
+    let mut p = Progress::new();
+
+    // Cada nó arranca por um re-exec (processo próprio) e, em rootless sem
+    // delegação de cgroup, cada um imprimia o mesmo bloco de aviso de 7 linhas —
+    // 4× num cluster de 4 nós, no meio do progresso. Avisa-se UMA vez aqui (com o
+    // mesmo teste que o motor faz, `cgroup_limits_apply`) e calam-se TODOS os
+    // nós via env — herdada por toda a cadeia de re-exec.
+    if !delonix_runtime::cgroup_limits_apply() {
+        super::output::aviso(
+            "rootless sem delegação de cgroup: os limites de CPU/memória/PIDs dos nós não são aplicados \
+             (o isolamento de namespaces/seccomp mantém-se). Para limites, corre sob \
+             `systemd-run --user --scope -p Delegate=yes`.",
+        );
+    }
+    // SAFETY: single-threaded aqui (antes de qualquer thread de worker); a env
+    // var é lida pelos processos-filhos do re-exec, não por esta thread.
+    unsafe {
+        std::env::set_var("DELONIX_NO_CGROUP_WARN", "1");
+    }
+
     // O dir partilhado tem de existir ANTES do 1.º nó (é o alvo do bind mount).
     std::fs::create_dir_all(cluster_dir(&cfg.name))?;
     // A rede do cluster: os nós têm de nascer todos nela.
@@ -298,13 +531,24 @@ pub(crate) fn create(images: &ImageStore, store: &Store, cfg: &KindCluster) -> R
         // mesmo prefixo. Só o físico deixava o `run --net` a recusar com
         // "no such container: network <x>" — apanhado a testar o multi-nó.
         super::network::create_network(&nstore, &net, "bridge", None, None, "", None, Vec::new(), None)?;
-        eprintln!("rede '{net}' criada");
     }
+
+    // A imagem do nó é garantida UMA vez, aqui, antes de qualquer paralelismo.
+    // Se falta, puxa-se; se já está no store, reaproveita-se (o `resolve` aceita
+    // a referência fixada por digest). **Isto não é cosmético**: os workers
+    // arrancam em paralelo e, sem este passo, N threads chamariam
+    // `resolve_or_pull` ao mesmo tempo e puxavam a MESMA imagem N vezes.
+    let curta = cfg.image.split('@').next().unwrap_or(&cfg.image).to_string();
+    p.step(&format!("A garantir a imagem do nó ({curta})"), "🖼");
+    super::util::resolve_or_pull(images, &cfg.image)?;
+    p.ok();
 
     // Resolve a porta ANTES de arrancar o nó: um 2.º cluster não deve rebentar
     // só porque a 6443 está tomada.
     let api_port = pick_api_port(store, cfg.api_port, &cfg.name)?;
+    p.step(&format!("A preparar os nós ({})", 1 + cfg.workers), "📦");
     let c = boot_node(images, store, cfg, &node, "control-plane", vec![format!("{api_port}:6443")])?;
+    p.ok();
     // O IP REAL do nó na rede do cluster. Com `--net host -p` era o do slirp
     // (10.0.2.100, igual em todos os nós e inalcançável de fora dele); numa rede
     // partilhada cada nó tem o seu — e é este que o apiserver anuncia e os
@@ -321,7 +565,7 @@ pub(crate) fn create(images: &ImageStore, store: &Store, cfg: &KindCluster) -> R
     // nunca fica pronto sem a feature gate) e depois a correr as fases à mão.
     // Um ficheiro de config leva as 3 afinações ANTES de o kubelet arrancar —
     // uma só passagem, sem remendos. É também o que o `kind` faz (/kind/kubeadm.conf).
-    eprintln!("a gerar o config do kubeadm (rootless)...");
+    p.step("A escrever a configuração", "📜");
     let version = cfg.k8s_version.as_deref().map(|v| format!("kubernetesVersion: v{v}\n")).unwrap_or_default();
     let kubeadm_conf = format!(
         "apiVersion: kubeadm.k8s.io/v1beta4\n\
@@ -354,8 +598,11 @@ pub(crate) fn create(images: &ImageStore, store: &Store, cfg: &KindCluster) -> R
         svcs = cfg.service_subnet,
     );
     std::fs::write(cluster_dir(&cfg.name).join("kubeadm.conf"), &kubeadm_conf)?;
+    p.ok();
 
-    eprintln!("a correr `kubeadm init` (puxa as imagens do control-plane — pode demorar)...");
+    // O `kubeadm init` puxa as imagens do control-plane cá dentro — é o passo
+    // mais demorado de todos.
+    p.step("A arrancar o control-plane", "🕹️");
     node_must(
         &c,
         "kubeadm init",
@@ -366,9 +613,11 @@ pub(crate) fn create(images: &ImageStore, store: &Store, cfg: &KindCluster) -> R
         ),
     )?;
 
+    p.ok();
+
     // --- CNI (senão o nó fica NotReady para sempre) ---
     if cfg.cni == "default" {
-        eprintln!("a aplicar a CNI (kindnet)...");
+        p.step("A instalar a CNI (kindnet)", "🔌");
         node_must(
             &c,
             "CNI",
@@ -378,6 +627,7 @@ pub(crate) fn create(images: &ImageStore, store: &Store, cfg: &KindCluster) -> R
                 pods = cfg.pod_subnet
             ),
         )?;
+        p.ok();
     }
 
     // Nó único: sem tirar a taint, nada de utilizador (nem o coredns) agenda.
@@ -390,13 +640,15 @@ pub(crate) fn create(images: &ImageStore, store: &Store, cfg: &KindCluster) -> R
     );
     }
 
-    eprintln!("à espera do nó ficar Ready...");
+    p.step("À espera do control-plane ficar Ready", "⏳");
     wait_in_node(
         &c,
-        "nó Ready",
+        "o control-plane ficar Ready",
         "KUBECONFIG=/etc/kubernetes/admin.conf kubectl get nodes --no-headers 2>/dev/null | grep -qw Ready",
         Duration::from_secs(180),
     )?;
+
+    p.ok();
 
     // --- workers: juntam-se pela rede do cluster (ver `cluster_net`) ---
     if cfg.workers > 0 {
@@ -414,47 +666,209 @@ pub(crate) fn create(images: &ImageStore, store: &Store, cfg: &KindCluster) -> R
         )?;
         let join_cmd = std::fs::read_to_string(cluster_dir(&cfg.name).join("join.sh"))
             .map_err(|e| Error::Invalid(format!("a ler o comando de join: {e}")))?;
-        let join_cmd = join_cmd.trim().to_string();
-        for i in 1..=cfg.workers {
-            let wnode = format!("{}-worker{}", cfg.name, if i == 1 { String::new() } else { i.to_string() });
-            let w = boot_node(images, store, cfg, &wnode, "worker", Vec::new())?;
-            // O worker precisa da MESMA receita rootless do control-plane: a
-            // feature gate e o swap valem para qualquer kubelet, não só o do CP.
-            let _ = &w; // o config do worker vai pela ponte partilhada
-            std::fs::write(
-                cluster_dir(&cfg.name).join("join-kubelet.conf"),
-                "apiVersion: kubelet.config.k8s.io/v1beta1\n\
-                 kind: KubeletConfiguration\n\
-                 cgroupDriver: systemd\n\
-                 failSwapOn: false\n\
-                 featureGates:\n  KubeletInUserNamespace: true\n",
-            )?;
-            eprintln!("a juntar o worker '{wnode}' ao control-plane...");
-            node_must(
-                &w,
-                &format!("join do worker '{wnode}'"),
-                &format!(
-                    "{join_cmd} --config {NODE_SHARED}/join-kubelet.conf \
-                     --ignore-preflight-errors=Swap,SystemVerification,FileContent--proc-sys-net-bridge-bridge-nf-call-iptables,Mem,NumCPU \
-                     2>&1 | tail -3"
-                ),
-            )?;
+        // Desmonta a linha em (endpoint, token, hash) e escreve uma
+        // `JoinConfiguration` — ver `parse_join_command` para o porquê: correr a
+        // linha E passar `--config` é o que o kubeadm recusa com
+        // "can not mix '--config' with arguments [...]", e era isso que fazia
+        // TODOS os workers falharem o join em silêncio (o `cluster create`
+        // seguia e só rebentava no fim, com um "timeout à espera de workers
+        // Ready" que não dizia nada sobre a causa).
+        let join = parse_join_command(&join_cmd)?;
+        let join_yaml = join_config_yaml(&join);
+
+        p.step(&format!("A juntar {} worker(s)", cfg.workers), "🚜");
+        // Em PARALELO: cada worker é independente (arranca, junta-se, acabou) e
+        // em série o tempo somava-se. Cada thread escreve o SEU
+        // `join-<nó>.conf` — um ficheiro partilhado seria uma corrida.
+        let erros: Vec<String> = std::thread::scope(|scope| {
+            let handles: Vec<_> = (1..=cfg.workers)
+                .map(|i| {
+                    let wnode = worker_name(&cfg.name, i);
+                    let join_yaml = &join_yaml;
+                    scope.spawn(move || -> Result<()> {
+                        let conf = format!("join-{wnode}.conf");
+                        std::fs::write(cluster_dir(&cfg.name).join(&conf), join_yaml)?;
+                        let w = boot_node(images, store, cfg, &wnode, "worker", Vec::new())?;
+                        node_must(
+                            &w,
+                            &format!("join do worker '{wnode}'"),
+                            &format!(
+                                "kubeadm join --config {NODE_SHARED}/{conf} \
+                                 --ignore-preflight-errors=Swap,SystemVerification,FileContent--proc-sys-net-bridge-bridge-nf-call-iptables,Mem,NumCPU"
+                            ),
+                        )
+                    })
+                })
+                .collect();
+            handles
+                .into_iter()
+                .filter_map(|h| match h.join() {
+                    Ok(Ok(())) => None,
+                    Ok(Err(e)) => Some(e.to_string()),
+                    // Um panic numa thread não pode passar por "worker ok".
+                    Err(_) => Some("uma thread de worker entrou em panic".to_string()),
+                })
+                .collect()
+        });
+        if !erros.is_empty() {
+            return Err(Error::Invalid(format!("{} worker(s) falharam:\n  {}", erros.len(), erros.join("\n  "))));
         }
-        eprintln!("à espera dos {} worker(s) ficarem Ready...", cfg.workers);
+
+        // Só agora se espera: os joins já devolveram OK, isto é o kubelet de
+        // cada um a registar-se. O timeout escala com o nº de workers — 3 nós a
+        // puxar imagens ao mesmo tempo demoram mais que 1.
+        let espera = Duration::from_secs(180 + 60 * u64::from(cfg.workers));
         wait_in_node(
             &c,
-            "workers Ready",
+            &format!("os {} worker(s) ficarem Ready", cfg.workers),
             &format!(
                 "[ \"$(KUBECONFIG=/etc/kubernetes/admin.conf kubectl get nodes --no-headers 2>/dev/null | grep -cw Ready)\" = \"{}\" ]",
                 cfg.workers + 1
             ),
-            Duration::from_secs(180),
+            espera,
         )?;
+        p.ok();
     }
 
     write_kubeconfig(&c, &cfg.name, api_port)?;
-    println!("cluster '{}' pronto — kubectl --kubeconfig {} get nodes", cfg.name, kubeconfig_path(&cfg.name).display());
+
+    // Instala o contexto no kubeconfig do utilizador — sem isto o cluster só
+    // existe para quem passar `--kubeconfig <ficheiro>` à mão, e não aparece no
+    // `kubectl config get-contexts`. É o que o `kind` faz no fim.
+    let ctx = context_name(&cfg.name);
+    match install_kubecontext(&cfg.name) {
+        Ok(path) => {
+            p.step(&format!("A definir o contexto kubectl para \"{ctx}\""), "📇");
+            p.ok();
+            let _ = path;
+        }
+        // Não é razão para falhar o cluster: ele ESTÁ de pé e o kubeconfig
+        // próprio funciona. Diz-se o que correu mal e como usar à mesma.
+        Err(e) => {
+            super::output::aviso(&format!("não consegui instalar o contexto no ~/.kube/config: {e}"));
+            eprintln!(
+                "   {}",
+                super::output::secundario(&format!("usa: kubectl --kubeconfig {} get nodes", kubeconfig_path(&cfg.name).display()))
+            );
+        }
+    }
+    drop(p);
+
+    println!();
+    println!("Já podes usar o teu cluster:");
+    println!();
+    println!("  {}", super::output::destaque(&format!("kubectl cluster-info --context {ctx}")));
+    println!();
     Ok(())
+}
+
+/// O nome do contexto/cluster/utilizador no kubeconfig. O `kind` usa
+/// `kind-<nome>`; o prefixo diz de quem é o cluster e evita colidir com um
+/// contexto real chamado igual.
+fn context_name(cluster: &str) -> String {
+    format!("delonix-{cluster}")
+}
+
+/// Caminho do kubeconfig do utilizador (`$KUBECONFIG` só com UM ficheiro, senão
+/// o default).
+///
+/// Com `$KUBECONFIG` a listar VÁRIOS ficheiros (`a:b:c`), o kubectl funde-os e
+/// escreve no primeiro — replicar essa precedência aqui era fácil de errar e
+/// silenciosamente destrutivo. Nesse caso não se adivinha: usa-se o default.
+fn user_kubeconfig_path() -> Option<std::path::PathBuf> {
+    if let Some(kc) = std::env::var_os("KUBECONFIG") {
+        let s = kc.to_string_lossy().to_string();
+        if s.is_empty() {
+            return home_kubeconfig();
+        }
+        if s.contains(':') {
+            return home_kubeconfig();
+        }
+        return Some(std::path::PathBuf::from(s));
+    }
+    home_kubeconfig()
+}
+
+fn home_kubeconfig() -> Option<std::path::PathBuf> {
+    std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".kube").join("config"))
+}
+
+/// Funde o kubeconfig do cluster no do utilizador, com as entradas renomeadas
+/// para `delonix-<cluster>`, e passa a ser o contexto actual.
+///
+/// **Não é destrutivo**: lê o que lá está, substitui só as entradas com o NOSSO
+/// nome (um `cluster create` repetido actualiza em vez de duplicar) e mantém
+/// tudo o resto. Escreve em `.tmp` + `rename` — um crash a meio não deixa o
+/// utilizador sem `~/.kube/config`, que seria um estrago sério.
+fn install_kubecontext(cluster: &str) -> Result<std::path::PathBuf> {
+    use serde_yaml::Value;
+    let name = context_name(cluster);
+    let src = kubeconfig_path(cluster);
+    let raw = std::fs::read_to_string(&src).map_err(|e| Error::Invalid(format!("a ler {}: {e}", src.display())))?;
+    let novo: Value = serde_yaml::from_str(&raw).map_err(|e| Error::Invalid(format!("kubeconfig do cluster inválido: {e}")))?;
+
+    let dest = user_kubeconfig_path().ok_or_else(|| Error::Invalid("sem $HOME nem $KUBECONFIG".into()))?;
+    let mut cfg: Value = match std::fs::read_to_string(&dest) {
+        Ok(t) if !t.trim().is_empty() => {
+            serde_yaml::from_str(&t).map_err(|e| Error::Invalid(format!("o {} existente não é YAML válido: {e}", dest.display())))?
+        }
+        // Não existe (ou está vazio): começa-se um kubeconfig do zero.
+        _ => serde_yaml::from_str("apiVersion: v1\nkind: Config\nclusters: []\nusers: []\ncontexts: []\n").unwrap(),
+    };
+
+    // Tira do kubeconfig do cluster o 1.º de cada lista e renomeia-o.
+    let pega = |v: &Value, chave: &str| -> Option<Value> { v.get(chave)?.as_sequence()?.first().cloned() };
+    let mut cl = pega(&novo, "clusters").ok_or_else(|| Error::Invalid("kubeconfig sem clusters".into()))?;
+    let mut us = pega(&novo, "users").ok_or_else(|| Error::Invalid("kubeconfig sem users".into()))?;
+    if let Some(m) = cl.as_mapping_mut() {
+        m.insert("name".into(), name.clone().into());
+    }
+    if let Some(m) = us.as_mapping_mut() {
+        m.insert("name".into(), name.clone().into());
+    }
+    let ctx: Value = serde_yaml::from_str(&format!(
+        "name: {name}\ncontext:\n  cluster: {name}\n  user: {name}\n"
+    ))
+    .map_err(|e| Error::Invalid(e.to_string()))?;
+
+    // Substitui-se a entrada com o nosso nome, se já lá estiver; senão junta-se.
+    let upsert = |cfg: &mut Value, chave: &str, item: Value| {
+        let seq = cfg
+            .as_mapping_mut()
+            .unwrap()
+            .entry(chave.into())
+            .or_insert_with(|| Value::Sequence(vec![]));
+        if !seq.is_sequence() {
+            *seq = Value::Sequence(vec![]);
+        }
+        let s = seq.as_sequence_mut().unwrap();
+        let nome = item.get("name").cloned();
+        if let Some(pos) = s.iter().position(|e| e.get("name") == nome.as_ref()) {
+            s[pos] = item;
+        } else {
+            s.push(item);
+        }
+    };
+    upsert(&mut cfg, "clusters", cl);
+    upsert(&mut cfg, "users", us);
+    upsert(&mut cfg, "contexts", ctx);
+    if let Some(m) = cfg.as_mapping_mut() {
+        m.insert("current-context".into(), name.clone().into());
+        m.entry("apiVersion".into()).or_insert_with(|| "v1".into());
+        m.entry("kind".into()).or_insert_with(|| "Config".into());
+    }
+
+    if let Some(dir) = dest.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    let out = serde_yaml::to_string(&cfg).map_err(|e| Error::Invalid(e.to_string()))?;
+    let tmp = dest.with_extension("delonix.tmp");
+    std::fs::write(&tmp, out)?;
+    // 0600: o kubeconfig traz credenciais de admin do cluster.
+    use std::os::unix::fs::PermissionsExt;
+    let _ = std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o600));
+    std::fs::rename(&tmp, &dest)?;
+    Ok(dest)
 }
 
 fn kubeconfig_path(name: &str) -> std::path::PathBuf {
@@ -502,6 +916,13 @@ pub(crate) fn delete(images: &ImageStore, store: &Store, name: &str) -> Result<(
         container::remove_container(images, store, n, true)?;
     }
     let _ = std::fs::remove_file(kubeconfig_path(name));
+    let _ = std::fs::remove_dir_all(cluster_dir(name));
+    // Tira o contexto do ~/.kube/config — senão o `kubectl config get-contexts`
+    // ficava a listar um cluster que já não existe, e um `kubectl` distraído
+    // apontava para uma porta que entretanto pode ser de OUTRA coisa.
+    if let Err(e) = remove_kubecontext(name) {
+        super::output::aviso(&format!("não consegui tirar o contexto '{}' do kubeconfig: {e}", context_name(name)));
+    }
     println!("cluster '{name}' removido ({} nó(s))", nodes.len());
     Ok(())
 }
@@ -616,4 +1037,101 @@ pub(crate) fn list(store: &Store) -> Result<()> {
         println!("{name:<12}  {estado:<9}  {:>2}  {workers:>7}  {api:<10}  {uptime:<8}  {last:<16}  {cri}", cp.len());
     }
     Ok(())
+}
+
+/// Tira do kubeconfig do utilizador as entradas deste cluster. Best-effort e
+/// idempotente: um cluster que nunca chegou a instalar contexto não é erro.
+fn remove_kubecontext(cluster: &str) -> Result<()> {
+    use serde_yaml::Value;
+    let name = context_name(cluster);
+    let Some(dest) = user_kubeconfig_path() else { return Ok(()) };
+    let Ok(txt) = std::fs::read_to_string(&dest) else { return Ok(()) };
+    if txt.trim().is_empty() {
+        return Ok(());
+    }
+    let mut cfg: Value = serde_yaml::from_str(&txt).map_err(|e| Error::Invalid(format!("{} não é YAML válido: {e}", dest.display())))?;
+    let mut mexeu = false;
+    for chave in ["clusters", "users", "contexts"] {
+        if let Some(seq) = cfg.get_mut(chave).and_then(|v| v.as_sequence_mut()) {
+            let antes = seq.len();
+            seq.retain(|e| e.get("name").and_then(|n| n.as_str()) != Some(name.as_str()));
+            mexeu |= seq.len() != antes;
+        }
+    }
+    // Se o contexto actual era o nosso, deixá-lo apontar para um contexto que já
+    // não existe faria o kubectl falhar em TUDO — tira-se.
+    if cfg.get("current-context").and_then(|v| v.as_str()) == Some(name.as_str()) {
+        if let Some(m) = cfg.as_mapping_mut() {
+            m.remove(Value::from("current-context"));
+        }
+        mexeu = true;
+    }
+    if !mexeu {
+        return Ok(());
+    }
+    let out = serde_yaml::to_string(&cfg).map_err(|e| Error::Invalid(e.to_string()))?;
+    let tmp = dest.with_extension("delonix.tmp");
+    std::fs::write(&tmp, out)?;
+    std::fs::rename(&tmp, &dest)?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn nomes_de_worker_seguem_a_convencao_do_kind() {
+        // O primeiro NÃO leva número — é `-worker`, não `-worker1`.
+        assert_eq!(worker_name("c", 1), "c-worker");
+        assert_eq!(worker_name("c", 2), "c-worker2");
+        assert_eq!(worker_name("c", 3), "c-worker3");
+    }
+
+    #[test]
+    fn parse_do_join_extrai_endpoint_token_e_hash() {
+        let linha = "kubeadm join 10.217.227.44:6443 --token d9rxyc.0nlg8oq9xc53v4r1 \
+                     --discovery-token-ca-cert-hash sha256:4ff6978e882b82bba8ec70ca603c13db";
+        let j = parse_join_command(linha).unwrap();
+        assert_eq!(j.endpoint, "10.217.227.44:6443");
+        assert_eq!(j.token, "d9rxyc.0nlg8oq9xc53v4r1");
+        assert_eq!(j.ca_hash, "sha256:4ff6978e882b82bba8ec70ca603c13db");
+    }
+
+    #[test]
+    fn parse_do_join_tolera_espacos_e_quebras() {
+        // O `--print-join-command` real vem com `\` e newline pelo meio.
+        let linha = "kubeadm join 10.0.0.2:6443 --token ab.cd \\\n\t--discovery-token-ca-cert-hash sha256:ef \n";
+        let j = parse_join_command(linha).unwrap();
+        assert_eq!(j.endpoint, "10.0.0.2:6443");
+        assert_eq!(j.ca_hash, "sha256:ef");
+    }
+
+    #[test]
+    fn parse_do_join_recusa_linha_incompleta() {
+        assert!(parse_join_command("kubeadm join 1.2.3.4:6443 --token ab.cd").is_err());
+        assert!(parse_join_command("kubeadm join --token ab.cd --discovery-token-ca-cert-hash x").is_err());
+        assert!(parse_join_command("").is_err());
+    }
+
+    #[test]
+    fn join_config_nao_leva_kubelet_config() {
+        // O kubelet config vem do ConfigMap do cluster (escrito pelo `init`);
+        // repeti-lo aqui criava duas fontes de verdade a divergir.
+        let j = JoinInfo {
+            endpoint: "10.0.0.2:6443".into(),
+            token: "ab.cd".into(),
+            ca_hash: "sha256:ef".into(),
+        };
+        let y = join_config_yaml(&j);
+        assert!(y.contains("kind: JoinConfiguration"));
+        assert!(y.contains("apiServerEndpoint: \"10.0.0.2:6443\""));
+        assert!(y.contains("- \"sha256:ef\""));
+        assert!(!y.contains("KubeletConfiguration"), "o join não deve trazer KubeletConfiguration");
+    }
+
+    #[test]
+    fn contexto_tem_prefixo_do_produto() {
+        assert_eq!(context_name("njinga-huila-65"), "delonix-njinga-huila-65");
+    }
 }

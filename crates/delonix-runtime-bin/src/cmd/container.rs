@@ -3,6 +3,7 @@
 use std::path::PathBuf;
 
 use clap::Subcommand;
+use clap_complete::engine::ArgValueCandidates;
 use delonix_image::ImageStore;
 use delonix_net::infra;
 use delonix_runtime::{self as runtime, RunSpec};
@@ -83,7 +84,7 @@ pub enum ContainerCmd {
         name: Option<String>,
         /// Rede: `host` (partilha a do host, default), `none` (netns isolado sem
         /// ligação), ou o NOME de uma rede criada com `delonix network create`.
-        #[arg(long, default_value = "host")]
+        #[arg(long, default_value = "host", add = ArgValueCandidates::new(super::complete::networks))]
         net: String,
         /// Volume/bind mount, `nome:/destino[:ro]` ou `/host:/destino[:ro]`. Repetível.
         #[arg(short = 'v', long = "volume")]
@@ -124,6 +125,7 @@ pub enum ContainerCmd {
         #[arg(long = "label")]
         labels: Vec<String>,
         /// Imagem (ex.: `alpine:3.19`).
+        #[arg(add = ArgValueCandidates::new(super::complete::images))]
         image: String,
         /// Comando + argumentos (default: o ENTRYPOINT/CMD da imagem).
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
@@ -143,12 +145,12 @@ pub enum ContainerCmd {
     /// persistente (as escritas feitas dentro do container sobrevivem, como no
     /// docker) e a mesma rede/portas/volumes do `run` original. Sempre detached.
     Start {
-        #[arg(required = true)]
+        #[arg(required = true, add = ArgValueCandidates::new(super::complete::containers))]
         ids: Vec<String>,
     },
     /// Pára um ou mais containers (SIGTERM, depois SIGKILL).
     Stop {
-        #[arg(required = true)]
+        #[arg(required = true, add = ArgValueCandidates::new(super::complete::containers))]
         ids: Vec<String>,
         /// Segundos até ao SIGKILL.
         #[arg(short, long, default_value_t = 10)]
@@ -156,7 +158,7 @@ pub enum ContainerCmd {
     },
     /// Remove um ou mais containers.
     Rm {
-        #[arg(required = true)]
+        #[arg(required = true, add = ArgValueCandidates::new(super::complete::containers))]
         ids: Vec<String>,
         /// Força (mata se estiver a correr).
         #[arg(short, long)]
@@ -165,17 +167,18 @@ pub enum ContainerCmd {
     /// Suspende os processos de um container (freezer do cgroup v2) — o estado
     /// fica em memória, ao contrário do `stop`. Retoma com `unpause`.
     Pause {
-        #[arg(required = true)]
+        #[arg(required = true, add = ArgValueCandidates::new(super::complete::containers))]
         ids: Vec<String>,
     },
     /// Retoma um container suspenso com `pause`.
     Unpause {
-        #[arg(required = true)]
+        #[arg(required = true, add = ArgValueCandidates::new(super::complete::containers))]
         ids: Vec<String>,
     },
     /// Cria uma imagem a partir do estado ACTUAL do rootfs de um container
     /// (o que foi escrito lá dentro passa a ser uma layer nova).
     Commit {
+        #[arg(add = ArgValueCandidates::new(super::complete::containers))]
         id: String,
         /// Tag da imagem nova (ex.: `app:v2`).
         tag: String,
@@ -183,17 +186,27 @@ pub enum ContainerCmd {
     /// Shell interactivo dentro de um container (atalho para `exec -t`): sem
     /// comando, tenta o `bash` e cai no `sh`, que existe em qualquer imagem.
     Ssh {
+        #[arg(add = ArgValueCandidates::new(super::complete::containers))]
         id: String,
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         command: Vec<String>,
     },
     /// Corre o `HEALTHCHECK` da imagem dentro do container. Sai com 1 se
     /// `unhealthy` — dá para usar num script/CI.
-    Healthcheck { id: String },
+    Healthcheck {
+        #[arg(add = ArgValueCandidates::new(super::complete::containers))]
+        id: String,
+    },
     /// Processos a correr dentro de um container (lidos do `cgroup.procs`).
-    Top { id: String },
+    Top {
+        #[arg(add = ArgValueCandidates::new(super::complete::containers))]
+        id: String,
+    },
     /// Ficheiros alterados face à imagem: `A` = criado/alterado, `D` = apagado.
-    Diff { id: String },
+    Diff {
+        #[arg(add = ArgValueCandidates::new(super::complete::containers))]
+        id: String,
+    },
     /// Copia ficheiros entre o host e um container. Exactamente um dos lados é
     /// `container:/caminho` (ex.: `delonix container cp web:/etc/nginx.conf .`).
     Cp { src: String, dst: String },
@@ -205,19 +218,20 @@ pub enum ContainerCmd {
         /// Aloca um pseudo-terminal.
         #[arg(short = 't', long)]
         tty: bool,
+        #[arg(add = ArgValueCandidates::new(super::complete::containers))]
         id: String,
         #[arg(trailing_var_arg = true, allow_hyphen_values = true, required = true)]
         command: Vec<String>,
     },
     /// Mostra a spec completa de um ou mais containers (JSON do Store).
     Inspect {
-        #[arg(required = true)]
+        #[arg(required = true, add = ArgValueCandidates::new(super::complete::containers))]
         ids: Vec<String>,
     },
     /// Detalhe legível de um ou mais containers, ao estilo `kubectl describe`
     /// (para humanos; use `inspect` para JSON consumível por scripts).
     Describe {
-        #[arg(required = true)]
+        #[arg(required = true, add = ArgValueCandidates::new(super::complete::containers))]
         ids: Vec<String>,
     },
     /// **Reconfigura um container A CORRER, sem o parar** — portas, volumes,
@@ -233,6 +247,7 @@ pub enum ContainerCmd {
     /// As mudanças ficam persistidas no registo, logo um `container start`
     /// posterior reproduz a configuração nova, não a original.
     Update {
+        #[arg(add = ArgValueCandidates::new(super::complete::containers))]
         id: String,
         /// Publica mais uma porta a quente, `hostPort:contPort[/tcp|udp]`. Repetível.
         #[arg(short = 'p', long = "publish-add", value_name = "SPEC")]
@@ -264,9 +279,13 @@ pub enum ContainerCmd {
     },
     /// Uso de recursos (CPU/memória/PIDs) dos containers a correr — uma
     /// amostra e sai (sem stream). Sem IDs, mostra todos os que correm.
-    Stats { ids: Vec<String> },
+    Stats {
+        #[arg(add = ArgValueCandidates::new(super::complete::containers))]
+        ids: Vec<String>,
+    },
     /// Mostra os logs (containers detached).
     Logs {
+        #[arg(add = ArgValueCandidates::new(super::complete::containers))]
         id: String,
         /// Segue o log em contínuo (sai quando o container parar).
         #[arg(short, long)]
@@ -290,7 +309,7 @@ pub fn run(action: ContainerCmd) -> Result<()> {
         // Tratado no topo de `run` (faz `return`).
         ContainerCmd::Init { .. } => unreachable!("tratado acima"),
         ContainerCmd::Run { detach, name, net, volumes, publish, privileged, entrypoint, rm, restart, devices, env, labels, image, command } => {
-            cmd_run(&images, &store, RunOpts { detach, name, net, volumes, ports: publish, privileged, entrypoint, rm, restart, devices, env, labels, image, command })
+            cmd_run(&images, &store, RunOpts { detach, name, net, volumes, ports: publish, privileged, entrypoint, rm, restart, devices, env, labels, image, command, quiet: false })
         }
         ContainerCmd::Ps { all, quiet } => cmd_ps(&store, all, quiet),
         ContainerCmd::Start { ids } => for_each_id(&ids, |id| cmd_start(&images, &store, id)),
@@ -349,6 +368,7 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
                 labels: Vec::new(),
                 image: spec.image,
                 command: spec.command,
+                quiet: false,
             },
         )?;
         println!("container/{name}: criado");
@@ -384,12 +404,17 @@ pub(crate) struct RunOpts {
     pub(crate) labels: Vec<String>,
     pub(crate) image: String,
     pub(crate) command: Vec<String>,
+    /// Nao imprimir o ID no fim do `-d`. Para chamadores internos que compoem o
+    /// seu proprio output (ex.: `cluster create`, que arranca N nos e mostra
+    /// progresso estilo kind — os IDs no meio eram ruido).
+    #[serde(default)]
+    pub(crate) quiet: bool,
 }
 
 pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Result<()> {
     // Cópia intacta para o re-exec (o destructuring a seguir consome as opts).
     let opts_copy = opts.clone();
-    let RunOpts { detach, name, net, volumes, ports, privileged, entrypoint, rm, restart, devices, env, labels, image, command } = opts;
+    let RunOpts { detach, name, net, volumes, ports, privileged, entrypoint, rm, restart, devices, env, labels, image, command, quiet } = opts;
     // Valida os `-p` ANTES de criar o que quer que seja (erro claro, sem lixo).
     for spec in &ports {
         delonix_net::parse_publish(spec)?;
@@ -573,7 +598,7 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
             return Ok(());
         }
     }
-    if detach {
+    if detach && !quiet {
         println!("{id}");
     }
     Ok(())
@@ -691,7 +716,10 @@ fn cmd_ps(store: &Store, all: bool, quiet: bool) -> Result<()> {
         };
         t.row(vec![
             short_id(&c.id).to_string(),
-            output::truncate(&c.image, 30),
+            // `display_ref` corta o `@sha256:…` quando ha tag: um
+            // `kindest/node:v1.34.0@sha256:7416a61b…` (84 chars) empurrava as
+            // colunas todas para fora do ecra e o digest nao diz nada a quem le.
+            output::truncate(&output::display_ref(&c.image), 30),
             output::truncate(&format!("\"{}\"", c.command.join(" ")), 22),
             output::fmt_age(c.created_unix),
             fmt_status(&c.status, uptime),

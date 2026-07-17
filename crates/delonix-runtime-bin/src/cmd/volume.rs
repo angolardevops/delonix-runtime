@@ -3,6 +3,7 @@
 use std::path::PathBuf;
 
 use clap::Subcommand;
+use clap_complete::engine::ArgValueCandidates;
 use delonix_runtime_core::Result;
 use delonix_volume::{parse_size_bytes, VolumeStore};
 use serde::Deserialize;
@@ -46,7 +47,10 @@ pub enum VolumeCmd {
     /// Lista os volumes.
     Ls,
     /// Detalhe de um volume (inclui uso real em disco).
-    Inspect { name: String },
+    Inspect {
+        #[arg(add = ArgValueCandidates::new(super::complete::volumes))]
+        name: String,
+    },
     /// Detalhe legível de um ou mais volumes, ao estilo `kubectl describe`
     /// (para humanos; use `inspect` para a vista compacta de sempre).
     Describe {
@@ -54,7 +58,10 @@ pub enum VolumeCmd {
         names: Vec<String>,
     },
     /// Remove um volume.
-    Rm { name: String },
+    Rm {
+        #[arg(add = ArgValueCandidates::new(super::complete::volumes))]
+        name: String,
+    },
     /// Aplica os documentos `kind: Volume` de um manifesto (idempotente por nome).
     Apply {
         #[arg(short = 'f', long = "file")]
