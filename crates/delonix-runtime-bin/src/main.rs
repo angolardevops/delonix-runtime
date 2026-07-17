@@ -114,6 +114,12 @@ enum Cmd {
         #[command(subcommand)]
         action: cmd::netns::NetnsCmd,
     },
+    /// Tráfego por-container ao vivo (datapath eBPF; degrada para contadores veth).
+    Flow {
+        /// Observar só esta interface (default: auto — todas as veths da SDN).
+        #[arg(long)]
+        iface: Option<String>,
+    },
     /// Firewall de ENTRADA (regras L4 + publishes DNAT) de um container na SDN.
     Ingress {
         #[command(subcommand)]
@@ -165,6 +171,7 @@ fn run() -> Result<()> {
         Cmd::Kube { action } => cmd::kube::run(action),
         Cmd::Netns { action } => cmd::netns::run(action),
         Cmd::Boot { action } => cmd::boot::run(action),
+        Cmd::Flow { iface } => cmd::flow::run(iface),
         Cmd::Ingress { action } => cmd::firewall::run_ingress(action),
         Cmd::Egress { action } => cmd::firewall::run_egress(action),
         Cmd::Cri { addr } => {

@@ -20,6 +20,7 @@
 use delonix_runtime_core::{Error, Result};
 use std::process::{Command, Stdio};
 
+pub mod bpf;
 pub mod cni;
 pub mod discover;
 pub mod infra;
