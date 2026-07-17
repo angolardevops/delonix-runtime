@@ -22,6 +22,7 @@ use serde::Deserialize;
 use std::path::PathBuf;
 
 use super::manifest::{self, ManifestDoc};
+use super::output;
 use super::util::state_root;
 
 /// `spec` de `kind: Network` — espelha os campos de `NetworkCmd::Create`.
@@ -75,6 +76,12 @@ pub enum NetworkCmd {
     },
     /// Detalhe de uma rede.
     Inspect { name: String },
+    /// Detalhe legível de uma ou mais redes, ao estilo `kubectl describe`
+    /// (para humanos; use `inspect` para a vista compacta de sempre).
+    Describe {
+        #[arg(required = true)]
+        names: Vec<String>,
+    },
     /// Remove uma rede.
     Rm { name: String },
     /// Aplica os documentos `kind: Network` de um manifesto (idempotente por nome).
@@ -94,6 +101,7 @@ pub fn run(action: NetworkCmd) -> Result<()> {
             Ok(())
         }
         NetworkCmd::Inspect { name } => cmd_inspect(&store, &name),
+        NetworkCmd::Describe { names } => cmd_describe(&store, &names),
         NetworkCmd::Rm { name } => cmd_rm(&store, &name),
         NetworkCmd::Apply { file } => {
             let path = manifest::resolve_path(file)?;
@@ -121,10 +129,11 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
 }
 
 fn cmd_ls(store: &NetworkStore) -> Result<()> {
-    println!("{:<20}  {:<8}  {:<10}  SUBNET", "NOME", "DRIVER", "BRIDGE");
+    let mut t = output::Table::new(&["NAME", "DRIVER", "BRIDGE", "SUBNET"]);
     for n in store.list()? {
-        println!("{:<20}  {:<8}  {:<10}  {}", n.name, n.driver, n.bridge, n.subnet);
+        t.row(vec![n.name, n.driver, n.bridge, n.subnet]);
     }
+    t.print();
     Ok(())
 }
 
@@ -189,6 +198,72 @@ fn cmd_inspect(store: &NetworkStore, name: &str) -> Result<()> {
         println!("peers:    {}", n.peers.join(", "));
     }
     Ok(())
+}
+
+/// `network describe` — detalhe legível ao estilo `kubectl describe`.
+/// Complementa o `inspect` (vista compacta de sempre, estável para scripts).
+fn cmd_describe(store: &NetworkStore, names: &[String]) -> Result<()> {
+    for (i, name) in names.iter().enumerate() {
+        let n = store.get(name)?;
+        if i > 0 {
+            println!();
+        }
+        describe_one(&n);
+    }
+    Ok(())
+}
+
+/// Containers ligados a esta rede, lidos do `Store` — `network` (a rede
+/// primária do `run --net`) ou `extra_networks` (as ligadas depois).
+///
+/// Best-effort de propósito: um erro a abrir/ler o store dá `None`, e o
+/// `describe` omite a secção em vez de afirmar "<none>". A distinção importa —
+/// "não há containers ligados" e "não consegui saber" não são a mesma coisa
+/// numa vista que se usa para decidir se uma rede pode ser removida.
+fn attached_containers(net: &str) -> Option<Vec<String>> {
+    let store = delonix_runtime_core::Store::open(state_root().join("containers")).ok()?;
+    let cs = store.list().ok()?;
+    Some(
+        cs.iter()
+            .filter(|c| c.network.as_deref() == Some(net) || c.extra_networks.iter().any(|e| e.network == net))
+            .map(|c| {
+                // O IP da rede em causa, seja ela a primária ou uma extra.
+                let ip = if c.network.as_deref() == Some(net) {
+                    c.ip.clone()
+                } else {
+                    c.extra_networks.iter().find(|e| e.network == net).map(|e| e.ip.clone())
+                };
+                format!("{} ({}) {}", c.name, super::container::short_id(&c.id), ip.unwrap_or_else(|| "<no ip>".into()))
+            })
+            .collect(),
+    )
+}
+
+fn describe_one(n: &Network) {
+    let mut d = output::Describe::new();
+    d.field("Name", &n.name);
+    d.field("Driver", &n.driver);
+    d.field("Bridge", if n.bridge.is_empty() { "<none>" } else { &n.bridge });
+    d.field("Subnet", &n.subnet);
+    d.field("Gateway", if n.gateway.is_empty() { "<none>" } else { &n.gateway });
+    d.field("Prefix", &n.prefix);
+    // Só nos drivers de LAN física (macvlan/ipvlan).
+    d.field_opt("Parent", n.parent.as_deref());
+    // Só no driver overlay.
+    d.field_opt("VNI", n.vni.map(|v| v.to_string()));
+    d.field_opt("WireGuard IP", n.wg_ip.as_deref());
+    if !n.peers.is_empty() {
+        d.list("Peers", &n.peers);
+    }
+    match attached_containers(&n.name) {
+        Some(cs) => {
+            d.list("Containers", &cs);
+        }
+        None => {
+            d.field("Containers", "<unknown> (não consegui ler o store de containers)");
+        }
+    }
+    d.print();
 }
 
 fn cmd_rm(store: &NetworkStore, name: &str) -> Result<()> {

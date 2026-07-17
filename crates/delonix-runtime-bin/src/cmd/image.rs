@@ -36,6 +36,13 @@ pub enum ImageCmd {
     Pull { image: String },
     /// Lista imagens locais.
     Ls,
+    /// Detalhe legível de uma ou mais imagens, ao estilo `kubectl describe`
+    /// (tags/digest/tamanho/layers + o config OCI: entrypoint/cmd/env/workdir).
+    /// Com `--vm`, descreve imagens VM douradas.
+    Describe {
+        #[arg(required = true)]
+        names: Vec<String>,
+    },
     /// Remove uma imagem local.
     Rm { image: String },
     /// Exporta um bundle OCI runtime (rootfs + config.json) para `runc`/`crun`.
@@ -99,6 +106,11 @@ pub enum ImageCmd {
 pub enum VmSub {
     /// Lista as imagens VM locais.
     Ls,
+    /// Detalhe legível de uma ou mais imagens VM, ao estilo `kubectl describe`.
+    Describe {
+        #[arg(required = true)]
+        names: Vec<String>,
+    },
     /// Obtém uma imagem VM de um registo OCI (artefacto de blob único).
     Pull {
         source: String,
@@ -154,6 +166,7 @@ pub fn run(vm: bool, action: ImageCmd) -> Result<()> {
         use super::vmimage::{self, VmImageCmd};
         return vmimage::run(match action {
             VmSub::Ls => VmImageCmd::Ls,
+            VmSub::Describe { names } => VmImageCmd::Describe { names },
             VmSub::Pull { source, name } => VmImageCmd::Pull { source, name },
             VmSub::Push { name, target } => VmImageCmd::Push { name, target },
             VmSub::Build { tag, ubuntu_release, k8s_version, extra_packages, extra_run, cri_bin, no_compress, offline } => {
@@ -168,6 +181,7 @@ pub fn run(vm: bool, action: ImageCmd) -> Result<()> {
     match action {
         ImageCmd::Pull { image } => cmd_pull(&images, &image),
         ImageCmd::Ls => cmd_ls(&images),
+        ImageCmd::Describe { names } => cmd_describe(&images, &names),
         ImageCmd::Rm { image } => cmd_rm(&images, &image),
         ImageCmd::Export { image, dir } => cmd_export(&images, &image, &dir),
         ImageCmd::Apply { file } => {
@@ -206,6 +220,7 @@ fn run_vm(action: ImageCmd) -> Result<()> {
     use super::vmimage::{self, VmImageCmd};
     let mapped = match action {
         ImageCmd::Ls => VmImageCmd::Ls,
+        ImageCmd::Describe { names } => VmImageCmd::Describe { names },
         ImageCmd::Pull { image } => VmImageCmd::Pull { source: image, name: None },
         ImageCmd::Push { name, target } => VmImageCmd::Push { name, target },
         ImageCmd::Build { tag, ubuntu_release, k8s_version, extra_packages, extra_run, cri_bin, no_compress, offline } => {
@@ -251,13 +266,108 @@ fn cmd_pull(images: &ImageStore, reference: &str) -> Result<()> {
     Ok(())
 }
 
+/// Tamanho de uma imagem = soma dos blobs dos seus layers no CAS.
+///
+/// **Não é o "SIZE" do `docker images`**, que é o rootfs DESCOMPACTADO; aqui é
+/// o que a imagem ocupa mesmo no disco (layers comprimidos, partilhados entre
+/// imagens que os reusem). É a única medida que se obtém sem descompactar tudo,
+/// e é a que responde à pergunta que se faz a um `ls` ("quanto espaço isto
+/// gasta?"). Um layer que falte no CAS não conta — daí `Option` só quando NADA
+/// é legível, para não passar por "0 B" uma imagem cujos blobs desapareceram.
+fn image_size(images: &ImageStore, img: &delonix_image::Image) -> Option<u64> {
+    if img.layers.is_empty() {
+        return None;
+    }
+    let mut total = 0u64;
+    let mut seen_any = false;
+    for l in &img.layers {
+        if let Ok(m) = std::fs::metadata(images.cas().path(l)) {
+            total += m.len();
+            seen_any = true;
+        }
+    }
+    seen_any.then_some(total)
+}
+
 fn cmd_ls(images: &ImageStore) -> Result<()> {
-    println!("{:<24}  {:<16}  CRIADA(unix)", "REPOSITORY:TAG", "IMAGE ID");
-    for img in images.list()? {
+    let mut imgs = images.list()?;
+    // O mais recente primeiro, como no `docker images`.
+    imgs.sort_by(|a, b| b.created_unix.cmp(&a.created_unix));
+    let mut t = super::output::Table::new(&["REPOSITORY:TAG", "IMAGE ID", "CREATED", "SIZE"]).right_align(3);
+    for img in imgs {
         let tag = img.repo_tags.first().cloned().unwrap_or_else(|| "<none>".into());
-        println!("{:<24}  {:<16}  {}", tag, img.short_id(), img.created_unix);
+        t.row(vec![
+            // Truncado: uma referência com digest (`kindest/node:v1.34.0@sha256:7416a…`,
+            // 84 chars) esticava a coluna e empurrava todas as outras para fora
+            // do terminal — a tabela mede pelo conteúdo, logo UMA linha destas
+            // estragava a leitura de todas as restantes.
+            super::output::truncate(&tag, 44),
+            img.short_id(),
+            // Era o epoch cru (`CRIADA(unix)`) — ilegível numa tabela.
+            super::output::fmt_age(img.created_unix),
+            image_size(images, &img).map(super::output::fmt_size).unwrap_or_else(|| "-".into()),
+        ]);
+    }
+    t.print();
+    Ok(())
+}
+
+/// `image describe` — detalhe legível ao estilo `kubectl describe`.
+fn cmd_describe(images: &ImageStore, names: &[String]) -> Result<()> {
+    for (i, name) in names.iter().enumerate() {
+        // `resolve` (não `resolve_or_pull`): descrever não é obter — um
+        // `describe` de uma imagem que não existe deve dizer isso, não passar
+        // minutos a puxar do registo por engano.
+        let img = images.resolve(name)?;
+        if i > 0 {
+            println!();
+        }
+        describe_one(images, &img);
     }
     Ok(())
+}
+
+fn describe_one(images: &ImageStore, img: &delonix_image::Image) {
+    let mut d = super::output::Describe::new();
+    d.field("ID", &img.id);
+    d.field("Short ID", img.short_id());
+    d.list("Tags", &img.repo_tags);
+    d.field("Created", super::output::fmt_local(img.created_unix));
+    d.field("Age", super::output::fmt_age(img.created_unix));
+    d.field(
+        "Size",
+        image_size(images, img).map(super::output::fmt_size).unwrap_or_else(|| "<unknown>".into()),
+    );
+
+    // Layers com o tamanho de cada blob — é o que mostra ONDE está o peso.
+    if img.layers.is_empty() {
+        d.field("Layers", "<none>");
+    } else {
+        d.section("Layers");
+        for l in &img.layers {
+            let sz = std::fs::metadata(images.cas().path(l))
+                .map(|m| super::output::fmt_size(m.len()))
+                .unwrap_or_else(|_| "<missing>".into());
+            d.item(format!("{l}  {sz}"));
+        }
+    }
+
+    let c = &img.config;
+    d.section("Config");
+    d.sub("Entrypoint", if c.entrypoint.is_empty() { "<none>".to_string() } else { c.entrypoint.join(" ") });
+    d.sub("Cmd", if c.cmd.is_empty() { "<none>".to_string() } else { c.cmd.join(" ") });
+    d.sub("Workdir", if c.working_dir.is_empty() { "/" } else { &c.working_dir });
+    d.sub("User", if c.user.is_empty() { "root" } else { &c.user });
+    // Extensões Delonix do Dockerfile/Delonixfile (`CPUS`/`MEMORY`/`SECURITY`/
+    // `HEALTHCHECK`) — omitidas por inteiro nas imagens que não as tenham.
+    d.sub_opt("CPUs", c.cpus.as_deref());
+    d.sub_opt("Memory", c.memory.as_deref());
+    d.sub_opt("Healthcheck", c.healthcheck.as_deref());
+    if !c.security.is_empty() {
+        d.sub("Security", c.security.join(", "));
+    }
+    d.list("Env", &c.env);
+    d.print();
 }
 
 fn cmd_rm(images: &ImageStore, reference: &str) -> Result<()> {
