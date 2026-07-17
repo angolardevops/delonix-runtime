@@ -36,6 +36,15 @@ struct ContainerSpec {
     pub(crate) env: Vec<String>,
     #[serde(default)]
     pub(crate) command: Vec<String>,
+    /// `no` (default) | `on-failure[:max]` | `always` | `unless-stopped` —
+    /// um supervisor destacado fica pai do container e reinicia-o (ver
+    /// `run_supervised`). É o que torna um manifesto resiliente.
+    #[serde(default = "default_restart")]
+    pub(crate) restart: String,
+}
+
+fn default_restart() -> String {
+    "no".to_string()
 }
 
 fn default_true() -> bool {
@@ -47,6 +56,22 @@ fn default_net() -> String {
 
 #[derive(Subcommand)]
 pub enum ContainerCmd {
+    /// Inicializa um projecto com Delonixfile + manifesto — ficheiros JÁ PREENCHIDOS (imagens
+    /// incluídas), prontos a usar sem editar nada.
+    Init {
+        /// Directório do projecto (default: o actual).
+        #[arg(default_value = ".")]
+        dir: PathBuf,
+        /// Nome do projecto (default: o nome do directório).
+        #[arg(long)]
+        name: Option<String>,
+        /// Imagem a usar. Omitir = preenche com a imagem por omissão.
+        #[arg(long)]
+        image: Option<String>,
+        /// Substitui ficheiros já existentes.
+        #[arg(long)]
+        force: bool,
+    },
     /// Corre um container a partir de uma imagem (puxa se faltar).
     Run {
         /// Corre em segundo plano e imprime o ID.
@@ -168,8 +193,13 @@ pub enum ContainerCmd {
 }
 
 pub fn run(action: ContainerCmd) -> Result<()> {
+    if let ContainerCmd::Init { dir, name, image, force } = action {
+        return cmd_init(super::scaffold::Target::Container, dir, name, image, force);
+    }
     let (images, store) = open_stores()?;
     match action {
+        // Tratado no topo de `run` (faz `return`).
+        ContainerCmd::Init { .. } => unreachable!("tratado acima"),
         ContainerCmd::Run { detach, name, net, volumes, publish, privileged, entrypoint, rm, restart, env, labels, image, command } => {
             cmd_run(&images, &store, RunOpts { detach, name, net, volumes, ports: publish, privileged, entrypoint, rm, restart, env, labels, image, command })
         }
@@ -210,7 +240,7 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
                 privileged: spec.privileged,
                 entrypoint: None,
                 rm: false,
-                restart: "no".to_string(),
+                restart: spec.restart.clone(),
                 env: spec.env,
                 labels: Vec::new(),
                 image: spec.image,
@@ -284,6 +314,16 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
         return Err(Error::Invalid("sem comando (a imagem não define ENTRYPOINT/CMD)".into()));
     }
     let cname = name.unwrap_or_else(|| format!("dlx-{}", &id[..8.min(id.len())]));
+    // Nome ÚNICO, como no docker ("name is already in use"). Sem isto criavam-se
+    // vários containers com o mesmo nome: o `find` resolve pelo primeiro, e um
+    // `rm <nome>` só apanhava esse — os outros ficavam órfãos e invisíveis à
+    // gestão por nome (visto a doer: 2x `loja-app` + 2x `loja-db`).
+    if let Some(dup) = store.list()?.iter().find(|c| c.name == cname) {
+        return Err(Error::Invalid(format!(
+            "o nome '{cname}' já está em uso pelo container {} — escolhe outro ou remove-o primeiro",
+            dup.short_id()
+        )));
+    }
     // `max` = sem teto de memória (cgroup v2); em k8s o cgroup do pod já limita.
     let mut c = Container::new(id.clone(), cname, image.clone(), cmd, "max".into());
     c.env = img.config.env.clone();
@@ -976,4 +1016,24 @@ mod tests {
         assert!(policy_supervised("on-failure"));
         assert!(policy_supervised("on-failure:5"));
     }
+}
+
+/// Trata o `init` deste grupo (ver `cmd::scaffold`).
+fn cmd_init(target: super::scaffold::Target, dir: PathBuf, name: Option<String>, image: Option<String>, force: bool) -> Result<()> {
+    let name = name.unwrap_or_else(|| {
+        // Sem `--name`, usa o nome do DIRECTÓRIO. Não se pode usar `canonicalize`:
+        // o directório ainda não existe (é o `init` que o cria) e falharia sempre,
+        // caindo no fallback — todos os projectos ficavam chamados "app".
+        // `.`/vazio resolvem para o cwd; um caminho novo usa o seu basename.
+        let p = if dir.as_os_str().is_empty() || dir == std::path::Path::new(".") {
+            std::env::current_dir().ok()
+        } else {
+            Some(dir.clone())
+        };
+        p.as_deref()
+            .and_then(|p| p.file_name())
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "app".to_string())
+    });
+    super::scaffold::init(target, &super::scaffold::InitOpts { dir, name, image, force })
 }

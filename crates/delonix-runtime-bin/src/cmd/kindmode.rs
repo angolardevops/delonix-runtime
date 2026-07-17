@@ -52,6 +52,26 @@ pub(crate) struct KindCluster {
     /// (o nó fica `NotReady` até o utilizador aplicar a sua — comportamento
     /// do `kubeadm` puro, deliberado e documentado).
     pub cni: String,
+    /// Versão do Kubernetes (ex.: "1.34"). `None` = a que a imagem traz.
+    pub k8s_version: Option<String>,
+}
+
+/// Escreve um ficheiro DENTRO do nó. Vai directo ao rootfs no host (é um
+/// caminho normal do sistema de ficheiros) em vez de passar por heredocs no
+/// `exec` — o conteúdo é YAML com aspas, `#` e indentação, e passá-lo por uma
+/// shell seria um convite a bugs de escape.
+fn write_node_file(c: &Container, path_in_node: &str, content: &str) -> Result<()> {
+    let base = super::util::state_root()
+        .join("containers")
+        .join(&c.id)
+        .join("rootfs")
+        .join(path_in_node.trim_start_matches('/'));
+    if let Some(dir) = base.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    std::fs::write(&base, content)
+        .map_err(|e| Error::Invalid(format!("a escrever {path_in_node} no nó ({}): {e}", base.display())))?;
+    Ok(())
 }
 
 /// Corre um comando dentro do nó e devolve o código de saída.
@@ -125,75 +145,54 @@ pub(crate) fn create(images: &ImageStore, store: &Store, cfg: &KindCluster) -> R
     eprintln!("à espera do containerd no nó...");
     wait_in_node(&c, "containerd", "systemctl is-active containerd", Duration::from_secs(90))?;
 
-    // --- kubelet: as duas afinações sem as quais NÃO arranca em rootless ---
-    eprintln!("a configurar o kubelet (KubeletInUserNamespace, swap)...");
-    node_must(
-        &c,
-        "config do kubelet",
-        "mkdir -p /etc/default && \
-         grep -q fail-swap-on /etc/default/kubelet 2>/dev/null || \
-         echo 'KUBELET_EXTRA_ARGS=--fail-swap-on=false' >> /etc/default/kubelet",
-    )?;
-
-    eprintln!("a correr `kubeadm init` (puxa as imagens do control-plane — pode demorar)...");
-    let init = format!(
-        "kubeadm init \
-         --apiserver-advertise-address={ip} \
-         --pod-network-cidr={pods} \
-         --service-cidr={svcs} \
-         --ignore-preflight-errors=Swap,SystemVerification,FileContent--proc-sys-net-bridge-bridge-nf-call-iptables,Mem,NumCPU \
-         --skip-phases=addon/kube-proxy \
-         2>&1 | tail -5",
+    // --- config do kubeadm: TUDO o que o rootless precisa, numa passagem ---
+    //
+    // Podia-se correr `kubeadm init` com flags e remendar depois, mas isso
+    // obriga o init a FALHAR primeiro (fica 4min à espera de um kubelet que
+    // nunca fica pronto sem a feature gate) e depois a correr as fases à mão.
+    // Um ficheiro de config leva as 3 afinações ANTES de o kubelet arrancar —
+    // uma só passagem, sem remendos. É também o que o `kind` faz (/kind/kubeadm.conf).
+    eprintln!("a gerar o config do kubeadm (rootless)...");
+    let version = cfg.k8s_version.as_deref().map(|v| format!("kubernetesVersion: v{v}\n")).unwrap_or_default();
+    let kubeadm_conf = format!(
+        "apiVersion: kubeadm.k8s.io/v1beta4\n\
+         kind: InitConfiguration\n\
+         localAPIEndpoint:\n  advertiseAddress: {ip}\n  bindPort: 6443\n\
+         nodeRegistration:\n  criSocket: unix:///run/containerd/containerd.sock\n\
+         ---\n\
+         apiVersion: kubeadm.k8s.io/v1beta4\n\
+         kind: ClusterConfiguration\n{version}\
+         networking:\n  podSubnet: {pods}\n  serviceSubnet: {svcs}\n\
+         apiServer:\n  certSANs:\n\
+         \x20 # O kubeconfig exportado aponta para 127.0.0.1:<porta publicada> — o\n\
+         \x20 # apiserver so escuta no IP do slirp (10.0.2.100), que nao existe cá\n\
+         \x20 # fora. Sem estes SANs o `kubectl` do HOST rebenta com\n\
+         \x20 # `x509: certificate is valid for 10.0.2.100, not 127.0.0.1`.\n\
+         \x20 - \"127.0.0.1\"\n  - \"localhost\"\n\
+         ---\n\
+         apiVersion: kubelet.config.k8s.io/v1beta1\n\
+         kind: KubeletConfiguration\n\
+         cgroupDriver: systemd\n\
+         # Um container herda o /proc/swaps do HOST — sem isto o kubelet recusa arrancar.\n\
+         failSwapOn: false\n\
+         featureGates:\n  # O passo decisivo em rootless: sem ele o kubelet morre em `open /dev/kmsg`.\n  KubeletInUserNamespace: true\n\
+         ---\n\
+         apiVersion: kubeproxy.config.k8s.io/v1alpha1\n\
+         kind: KubeProxyConfiguration\n\
+         conntrack:\n  # nf_conntrack_max e um sysctl GLOBAL: nao escrevivel de um userns.\n  maxPerCore: 0\n  min: 0\n",
         ip = delonix_net::SLIRP_IP,
         pods = cfg.pod_subnet,
         svcs = cfg.service_subnet,
     );
-    // O `kubeadm init` arranca o kubelet a meio; a feature gate TEM de estar no
-    // config.yaml ANTES disso. O `kubeadm` só escreve o config.yaml na fase
-    // `kubelet-start`, por isso injecta-se logo a seguir e reinicia-se — é mais
-    // simples (e mais robusto) que adivinhar o ficheiro antes de ele existir.
-    let _ = node_exec(&c, &init);
+    write_node_file(&c, "/kind/delonix-kubeadm.conf", &kubeadm_conf)?;
+
+    eprintln!("a correr `kubeadm init` (puxa as imagens do control-plane — pode demorar)...");
     node_must(
         &c,
-        "feature gate KubeletInUserNamespace",
-        "grep -q KubeletInUserNamespace /var/lib/kubelet/config.yaml 2>/dev/null || \
-         printf 'featureGates:\\n  KubeletInUserNamespace: true\\n' >> /var/lib/kubelet/config.yaml; \
-         systemctl restart kubelet",
-    )?;
-
-    eprintln!("à espera do kubelet ficar saudável...");
-    wait_in_node(
-        &c,
-        "kubelet healthz",
-        "curl -sSf -m 3 http://127.0.0.1:10248/healthz >/dev/null 2>&1",
-        Duration::from_secs(180),
-    )?;
-
-    // Se o `init` abortou antes das fases finais (à espera do kubelet, que só
-    // agora ficou de pé), corre-as. São idempotentes.
-    eprintln!("a completar as fases do kubeadm...");
-    for phase in [
-        "upload-config all",
-        "upload-certs --upload-certs",
-        "mark-control-plane",
-        "bootstrap-token",
-        "kubelet-finalize all",
-        "addon coredns",
-    ] {
-        let _ = node_exec(&c, &format!("KUBECONFIG=/etc/kubernetes/admin.conf kubeadm init phase {phase} >/dev/null 2>&1"));
-    }
-
-    // --- kube-proxy: sem isto entra em CrashLoopBackOff (nf_conntrack_max) ---
-    eprintln!("a instalar o kube-proxy (conntrack ajustado para rootless)...");
-    node_must(
-        &c,
-        "addon kube-proxy",
-        "KUBECONFIG=/etc/kubernetes/admin.conf kubeadm init phase addon kube-proxy >/dev/null 2>&1; \
-         KUBECONFIG=/etc/kubernetes/admin.conf kubectl -n kube-system get cm kube-proxy -o yaml 2>/dev/null \
-           | sed -e 's/^\\( *\\)maxPerCore: .*/\\1maxPerCore: 0/' -e 's/^\\( *\\)min: .*/\\1min: 0/' \
-           | KUBECONFIG=/etc/kubernetes/admin.conf kubectl replace -f - >/dev/null 2>&1; \
-         KUBECONFIG=/etc/kubernetes/admin.conf kubectl -n kube-system delete pod -l k8s-app=kube-proxy >/dev/null 2>&1; \
-         true",
+        "kubeadm init",
+        "kubeadm init --config /kind/delonix-kubeadm.conf \
+         --ignore-preflight-errors=Swap,SystemVerification,FileContent--proc-sys-net-bridge-bridge-nf-call-iptables,Mem,NumCPU \
+         2>&1 | tail -3",
     )?;
 
     // --- CNI (senão o nó fica NotReady para sempre) ---
