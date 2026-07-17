@@ -160,6 +160,60 @@ fn wait_in_node(c: &Container, what: &str, check: &str, timeout: Duration) -> Re
     Err(Error::Invalid(format!("timeout à espera de {what} no nó ({}s)", timeout.as_secs())))
 }
 
+
+/// Reis/rainhas de Angola — Ndongo, Kongo, Matamba, Bailundo.
+const REIS: &[&str] = &[
+    "njinga", "mandume", "ekuikui", "nzinga", "kiluanji", "ngola", "mbandi",
+    "kitamba", "katyavala", "samakaka", "kalandula", "mutu", "hoolo", "soba",
+];
+
+/// Províncias, municípios e comunas de Angola.
+const LUGARES: &[&str] = &[
+    "luanda", "benguela", "huambo", "huila", "bie", "malanje", "uige", "zaire",
+    "cunene", "namibe", "moxico", "bengo", "cuando", "cubango", "viana",
+    "cacuaco", "belas", "talatona", "kilamba", "catumbela", "lobito", "lubango",
+    "chibia", "cazenga", "sumbe", "ndalatando", "menongue", "saurimo", "dundo",
+    "ondjiva", "caxito", "gabela", "quibala", "camacupa", "andulo", "chinguar",
+];
+
+/// Inventa um nome de cluster (rei + lugar + sufixo), evitando os já usados.
+///
+/// Sem isto, o `create` sem `--name` usava sempre "delonix" e colidia à segunda
+/// invocação ("o nó 'delonix-control-plane' já existe"), obrigando o utilizador
+/// a inventar nomes à mão. Um nome legível é melhor que um hash: aparece no
+/// `cluster ls`, nos nós e no kubeconfig — e estes lêem-se e dizem-se.
+///
+/// Aleatoriedade sem dependências novas: nanos do relógio + pid. Não é
+/// criptográfico nem precisa de ser; o que interessa é não colidir, e isso é
+/// garantido pela verificação contra os nomes existentes (o espaço é de ~50k
+/// combinações, a colisão é improvável e, se acontecer, tenta outro).
+pub(crate) fn random_cluster_name(store: &Store) -> Result<String> {
+    let existing: Vec<String> = store
+        .list()?
+        .iter()
+        .filter_map(|c| c.labels.get("io.x-k8s.kind.cluster").cloned())
+        .collect();
+    let mut seed = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.subsec_nanos() as u64)
+        .unwrap_or(0)
+        ^ (std::process::id() as u64) << 20;
+    for _ in 0..50 {
+        seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407); // LCG
+        let r = (seed >> 33) as usize;
+        let name = format!(
+            "{}-{}-{:02}",
+            REIS[r % REIS.len()],
+            LUGARES[(r / REIS.len()) % LUGARES.len()],
+            (r / (REIS.len() * LUGARES.len())) % 100
+        );
+        if !existing.contains(&name) {
+            return Ok(name);
+        }
+    }
+    Err(Error::Invalid("não consegui inventar um nome livre — passa `--name`".into()))
+}
+
 /// Nome da rede do cluster. Cada cluster tem a SUA — como o `kind`, que cria
 /// uma bridge por cluster. É o que permite aos nós verem-se: sem rede partilhada
 /// um worker nunca alcança o apiserver (com `--net host -p`, cada nó fica num

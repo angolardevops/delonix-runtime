@@ -299,9 +299,10 @@ pub enum ClusterCmd {
     /// kind nativo): arranca os nós `kindest/node` no próprio motor Delonix e
     /// faz o bootstrap com `kubeadm`. Sem flags = 1 control-plane pronto a usar.
     Create {
-        /// Nome do cluster (prefixo dos nós e do kubeconfig).
-        #[arg(long, default_value = "delonix")]
-        name: String,
+        /// Nome do cluster (prefixo dos nós e do kubeconfig). Omitir = inventa
+        /// um (rei + lugar de Angola), para dois `create` seguidos não colidirem.
+        #[arg(long)]
+        name: Option<String>,
         /// Porta do host para o apiserver. Omitir = o delonix escolhe uma livre
         /// (tenta a 6443; se estiver tomada por outro cluster, usa uma alta).
         #[arg(long)]
@@ -380,11 +381,15 @@ pub fn run(action: ClusterCmd) -> Result<()> {
         ClusterCmd::Init { .. } => unreachable!("tratado acima"),
         ClusterCmd::Create { ref name, api_port, workers, ref image, ref pod_subnet, ref service_subnet, ref cni } => {
             let (images, store) = super::util::open_stores()?;
+            let name = match name {
+                Some(n) => n.clone(),
+                None => super::kindmode::random_cluster_name(&store)?,
+            };
             return super::kindmode::create(
                 &images,
                 &store,
                 &super::kindmode::KindCluster {
-                    name: name.clone(),
+                    name,
                     image: image.clone().unwrap_or_else(|| super::kindmode::DEFAULT_NODE_IMAGE.to_string()),
                     api_port,
                     pod_subnet: pod_subnet.clone(),
