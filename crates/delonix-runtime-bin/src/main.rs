@@ -33,6 +33,10 @@ enum CompShell {
     about = "Delonix Runtime — motor de containers e microVMs daemonless, rootless-first, kernel-native, em Rust"
 )]
 struct Cli {
+    /// Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable
+    /// via `$DELONIX_L18N`. Global — works before any subcommand.
+    #[arg(long = "l18n", global = true, value_name = "en|pt")]
+    l18n: Option<String>,
     #[command(subcommand)]
     cmd: Cmd,
 }
@@ -104,6 +108,11 @@ enum Cmd {
 
 fn run() -> Result<()> {
     let cli = Cli::parse();
+    // Locale ANTES de qualquer output: a flag `--l18n` tem precedência sobre
+    // `$DELONIX_L18N`; sem nenhum, fica em inglês (o default do repo público).
+    if let Some(l) = cli.l18n.or_else(|| std::env::var("DELONIX_L18N").ok()) {
+        cmd::output::set_lang(&l);
+    }
     match cli.cmd {
         Cmd::Container { action } => cmd::container::run(action),
         Cmd::Image { vm, action } => cmd::image::run(vm, action),
