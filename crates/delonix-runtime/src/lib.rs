@@ -1258,12 +1258,23 @@ pub fn remove_tree_mapped(path: &std::path::Path) {
             // pequena espera para o filho fazer unshare antes de mapearmos.
             std::thread::sleep(std::time::Duration::from_millis(20));
             let _ = write_userns_maps(pid, true);
-            unsafe {
+            let ok = unsafe {
                 let go = [1u8; 1];
                 let _ = libc::write(w, go.as_ptr() as *const libc::c_void, 1);
                 libc::close(w);
                 let mut st = 0;
                 libc::waitpid(pid, &mut st, 0);
+                libc::WIFEXITED(st) && libc::WEXITSTATUS(st) == 0
+            };
+            // O exit status era LIDO E IGNORADO, sem fallback: se o filho falhava
+            // (era o caso — re-executava `delonix __rmtree`, um subcomando que o
+            // binário público não tinha, e o clap devolvia rc=2), a árvore ficava
+            // por apagar em SILÊNCIO e ninguém sabia. O irmão `reexec_mapped` já
+            // verificava; este não. Agora verifica, e ainda tenta o caminho
+            // directo — que resolve o caso comum (ficheiros do nosso próprio uid,
+            // sem subuid pelo meio) mesmo que o re-exec se estrague outra vez.
+            if !ok {
+                let _ = std::fs::remove_dir_all(path);
             }
         }
         _ => {
