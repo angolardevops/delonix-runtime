@@ -33,7 +33,14 @@ fn default_context() -> PathBuf {
 #[derive(Subcommand)]
 pub enum ImageCmd {
     /// Puxa uma imagem de um registo.
-    Pull { image: String },
+    Pull {
+        image: String,
+        /// Verifica a assinatura cosign com esta chave pública (PEM) DEPOIS do
+        /// pull, e falha se não bater. Sem isto, um pull não é autenticado além
+        /// do digest do próprio registo.
+        #[arg(long, value_name = "PEM")]
+        verify: Option<PathBuf>,
+    },
     /// Lista imagens locais.
     Ls,
     /// Detalhe legível de uma ou mais imagens, ao estilo `kubectl describe`
@@ -42,6 +49,18 @@ pub enum ImageCmd {
     Describe {
         #[arg(required = true)]
         names: Vec<String>,
+    },
+    /// Dá outro nome/tag a uma imagem local (não copia nada — é só um nome novo
+    /// para o mesmo conteúdo).
+    Tag { source: String, target: String },
+    /// Layers de uma imagem (digest + tamanho), da base para o topo.
+    History { image: String },
+    /// Verifica a assinatura cosign de uma imagem local contra uma chave pública.
+    Verify {
+        image: String,
+        /// Chave pública em PEM.
+        #[arg(value_name = "PEM")]
+        key: PathBuf,
     },
     /// Remove uma imagem local.
     Rm { image: String },
@@ -73,8 +92,9 @@ pub enum ImageCmd {
         #[command(subcommand)]
         action: VmSub,
     },
-    /// (só com `--vm`) Publica uma imagem VM local num registo OCI.
-    Push { name: String, target: String },
+    /// Publica uma imagem local num registo OCI. Sem `target`, publica sob a
+    /// própria referência da imagem. Com `--vm`, o `target` é obrigatório.
+    Push { name: String, target: Option<String> },
     /// (só com `--vm`) Constrói a imagem VM dourada (Ubuntu + kubeadm/kubelet/
     /// kubectl + `delonix-cri`).
     Build {
@@ -179,9 +199,12 @@ pub fn run(vm: bool, action: ImageCmd) -> Result<()> {
     }
     let (images, _store) = open_stores()?;
     match action {
-        ImageCmd::Pull { image } => cmd_pull(&images, &image),
+        ImageCmd::Pull { image, verify } => cmd_pull(&images, &image, verify.as_deref()),
         ImageCmd::Ls => cmd_ls(&images),
         ImageCmd::Describe { names } => cmd_describe(&images, &names),
+        ImageCmd::Tag { source, target } => cmd_tag(&images, &source, &target),
+        ImageCmd::History { image } => cmd_history(&images, &image),
+        ImageCmd::Verify { image, key } => cmd_verify(&images, &image, &key),
         ImageCmd::Rm { image } => cmd_rm(&images, &image),
         ImageCmd::Export { image, dir } => cmd_export(&images, &image, &dir),
         ImageCmd::Apply { file } => {
@@ -189,9 +212,10 @@ pub fn run(vm: bool, action: ImageCmd) -> Result<()> {
             let docs = manifest::load(&path)?;
             apply(&docs)
         }
-        ImageCmd::Push { .. } | ImageCmd::Build { .. } => {
-            Err(Error::Invalid("push/build de imagens são só para VM — usa `delonix image --vm push|build`".into()))
-        }
+        ImageCmd::Push { name, target } => cmd_push(&images, &name, target.as_deref()),
+        ImageCmd::Build { .. } => Err(Error::Invalid(
+            "`build` neste grupo é só para imagens VM — usa `delonix image --vm build`, ou `delonix build` para imagens de container".into(),
+        )),
         ImageCmd::Login { .. } | ImageCmd::Logout { .. } | ImageCmd::Vm { .. } => unreachable!("tratados acima"),
     }
 }
@@ -221,10 +245,19 @@ fn run_vm(action: ImageCmd) -> Result<()> {
     let mapped = match action {
         ImageCmd::Ls => VmImageCmd::Ls,
         ImageCmd::Describe { names } => VmImageCmd::Describe { names },
-        ImageCmd::Pull { image } => VmImageCmd::Pull { source: image, name: None },
-        ImageCmd::Push { name, target } => VmImageCmd::Push { name, target },
+        ImageCmd::Pull { image, verify: _ } => VmImageCmd::Pull { source: image, name: None },
+        ImageCmd::Push { name, target } => VmImageCmd::Push {
+            name,
+            // Uma imagem VM não tem repo_tags de onde inferir o destino.
+            target: target.ok_or_else(|| Error::Invalid("`image --vm push <nome> <destino>`: o destino é obrigatório".into()))?,
+        },
         ImageCmd::Build { tag, ubuntu_release, k8s_version, extra_packages, extra_run, cri_bin, no_compress, offline } => {
             VmImageCmd::Build { tag, ubuntu_release, k8s_version, extra_packages, extra_run, cri_bin, no_compress, offline }
+        }
+        ImageCmd::Tag { .. } | ImageCmd::History { .. } | ImageCmd::Verify { .. } => {
+            return Err(Error::Invalid(
+                "tag/history/verify são de imagens de container — não se aplicam a imagens VM (--vm)".into(),
+            ))
         }
         ImageCmd::Rm { .. } | ImageCmd::Export { .. } | ImageCmd::Apply { .. } => {
             return Err(Error::Invalid(
@@ -260,9 +293,57 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
     Ok(())
 }
 
-fn cmd_pull(images: &ImageStore, reference: &str) -> Result<()> {
+fn cmd_pull(images: &ImageStore, reference: &str, verify: Option<&std::path::Path>) -> Result<()> {
     let img = delonix_image::pull_from_registry(images, reference)?;
+    // Verifica DEPOIS do pull (a assinatura cosign vive num tag ao lado da
+    // imagem no registo, logo é preciso tê-la cá). Se falhar, o comando falha —
+    // a imagem fica local, mas quem pediu `--verify` sabe que não é de confiança.
+    if let Some(key) = verify {
+        let pem = std::fs::read_to_string(key)?;
+        let digest = delonix_image::verify_signature(images, reference, &pem)?;
+        println!("assinatura válida para {reference} ({digest})");
+    }
     println!("{}", img.short_id());
+    Ok(())
+}
+
+/// `image tag` — outro nome para o mesmo conteúdo (não copia layers).
+fn cmd_tag(images: &ImageStore, source: &str, target: &str) -> Result<()> {
+    images.tag(source, target)?;
+    println!("{source} -> {target}");
+    Ok(())
+}
+
+/// `image history` — os layers da imagem, da base para o topo.
+///
+/// O `#` é a posição no stack (0 = base), como no `docker history`. O tamanho é
+/// o do blob COMPRIMIDO no CAS — ver a nota em `image_size`.
+fn cmd_history(images: &ImageStore, image: &str) -> Result<()> {
+    let img = images.resolve(image)?;
+    let mut t = super::output::Table::new(&["#", "LAYER", "SIZE"]).right_align(2);
+    for (i, dg) in img.layers.iter().enumerate() {
+        let size = std::fs::metadata(images.cas().path(dg)).map(|m| m.len()).unwrap_or(0);
+        t.row(vec![i.to_string(), super::output::truncate(dg, 23), super::output::fmt_size(size)]);
+    }
+    t.print();
+    Ok(())
+}
+
+/// `image verify` — assinatura cosign contra uma chave pública.
+fn cmd_verify(images: &ImageStore, image: &str, key: &std::path::Path) -> Result<()> {
+    let pem = std::fs::read_to_string(key)?;
+    let digest = delonix_image::verify_signature(images, image, &pem)?;
+    println!("OK: assinatura válida para {image} ({digest})");
+    Ok(())
+}
+
+/// `image push` — publica uma imagem de container num registo OCI.
+fn cmd_push(images: &ImageStore, image: &str, destination: Option<&str>) -> Result<()> {
+    // Sem destino, publica sob a própria referência (o caso comum: a imagem já
+    // foi construída com a tag do registo de destino).
+    let dest = destination.unwrap_or(image);
+    let digest = delonix_image::push_to_registry(images, image, dest)?;
+    println!("{dest}  {digest}");
     Ok(())
 }
 

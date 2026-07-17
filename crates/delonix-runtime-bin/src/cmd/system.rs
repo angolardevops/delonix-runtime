@@ -27,6 +27,31 @@ pub enum SystemCmd {
     Info,
     /// Uso de disco por área (imagens, containers, volumes, imagens VM).
     Df,
+    /// Virtualização do host: hipervisor, KVM, virtio — e o que há a afinar.
+    Virt {
+        /// Aplica as afinações recomendadas (precisa de root).
+        #[arg(long)]
+        tune: bool,
+    },
+    /// Governador térmico: baixa o orçamento de CPU do Delonix quando o CPU
+    /// aquece e repõe-no quando arrefece. Corre em contínuo (ver `--once`).
+    Thermal {
+        /// Temperatura (°C) a partir da qual se arrefece.
+        #[arg(long, default_value_t = 85)]
+        high: u64,
+        /// Temperatura (°C) abaixo da qual se restaura.
+        #[arg(long, default_value_t = 70)]
+        low: u64,
+        /// Percentagem mínima de CPU a que se desce.
+        #[arg(long, default_value_t = 40)]
+        floor: u64,
+        /// Segundos entre leituras.
+        #[arg(long, default_value_t = 5)]
+        interval: u64,
+        /// Uma leitura e sai (para cron/scripts, em vez do loop).
+        #[arg(long)]
+        once: bool,
+    },
 }
 
 pub fn run(action: SystemCmd) -> Result<()> {
@@ -34,6 +59,99 @@ pub fn run(action: SystemCmd) -> Result<()> {
         SystemCmd::Events { follow, tail } => cmd_events(follow, tail),
         SystemCmd::Info => cmd_info(),
         SystemCmd::Df => cmd_df(),
+        SystemCmd::Virt { tune } => cmd_virt(tune),
+        SystemCmd::Thermal { high, low, floor, interval, once } => cmd_thermal(high, low, floor, interval, once),
+    }
+}
+
+/// `system virt` — detecta virtualização e diz o que há a afinar. Sem `--tune`
+/// não muda nada: lista as recomendações e o comando para as aplicar.
+fn cmd_virt(tune: bool) -> Result<()> {
+    use delonix_runtime_core::virt;
+    let v = virt::detect();
+    if !v.virtualized {
+        println!("Delonix corre em hardware físico (bare-metal) — sem virtualização detetada.");
+        println!("  Nenhuma afinação de VM a aplicar; o runtime já usa o hardware diretamente.");
+        return Ok(());
+    }
+    let kvm = if v.is_kvm { "   ← KVM nativo: caminho de máximo desempenho disponível" } else { "" };
+    println!("Virtualização detetada: {}{kvm}", v.hypervisor.to_uppercase());
+    println!(
+        "  Aceleração KVM (/dev/kvm): {}",
+        if v.kvm_accel { "sim (virtualização aninhada possível)" } else { "não" }
+    );
+    let join = |xs: &[String], vazio: &str| if xs.is_empty() { vazio.to_string() } else { xs.join(", ") };
+    println!("  Rede virtio-net: {}", join(&v.virtio_net, "(nenhuma)"));
+    println!("  Disco virtio-blk: {}", join(&v.virtio_blk, "(nenhum)"));
+    println!("  Dispositivos no bus virtio: {}", v.virtio_count);
+    println!();
+    if !v.virtio_net.is_empty() {
+        println!(
+            "  ✓ Rede paravirtualizada (virtio-net: {}) — offloads de segmentação/checksum no host.",
+            v.virtio_net.join(", ")
+        );
+    }
+    // A afinação concreta: escalonador de I/O 'none' nos discos virtio-blk — num
+    // guest KVM, escalonar dos dois lados só acrescenta latência.
+    let mut pending: Vec<String> = Vec::new();
+    for dev in &v.virtio_blk {
+        match virt::blk_scheduler(dev) {
+            Some((cur, true)) if tune => match virt::set_blk_scheduler_none(dev) {
+                Ok(_) => println!("  ✓ /dev/{dev}: escalonador de I/O '{cur}' → 'none' (o host KVM já escalona)"),
+                Err(e) => println!("  ✗ /dev/{dev}: não consegui mudar o escalonador ({e}) — corre como root"),
+            },
+            Some((cur, true)) => {
+                pending.push(format!("/dev/{dev}: escalonador de I/O '{cur}' → 'none' (evita escalonar 2× num guest KVM)"))
+            }
+            Some((cur, false)) => println!("  ✓ /dev/{dev}: escalonador de I/O já ótimo ({cur})"),
+            None => {}
+        }
+    }
+    if !tune {
+        if pending.is_empty() {
+            println!("\nSem afinações pendentes — esta VM já está otimizada para o Delonix.");
+        } else {
+            println!("\nAfinações recomendadas (corre `sudo delonix system virt --tune` para aplicar):");
+            for p in &pending {
+                println!("  • {p}");
+            }
+        }
+    }
+    Ok(())
+}
+
+/// `system thermal` — governador térmico sobre a slice de cgroup do Delonix.
+fn cmd_thermal(high: u64, low: u64, floor: u64, interval: u64, once: bool) -> Result<()> {
+    use delonix_runtime::{self as runtime};
+    if high <= low {
+        return Err(delonix_runtime_core::Error::Invalid("--high tem de ser maior que --low".into()));
+    }
+    if runtime::is_rootless() {
+        return Err(delonix_runtime_core::Error::Invalid(
+            "o governador térmico precisa de root (escreve no cgroup do host)".into(),
+        ));
+    }
+    let mut scale = 100u64; // % do orçamento de CPU do Delonix
+    runtime::set_slice_cpu_pct(scale);
+    eprintln!("governador térmico: high={high}°C low={low}°C floor={floor}% (Ctrl-C para sair)");
+    loop {
+        let temp = runtime::max_cpu_temp_c().unwrap_or(0);
+        if temp >= high && scale > floor {
+            scale = floor.max(scale.saturating_sub(20));
+            runtime::set_slice_cpu_pct(scale);
+            let fan = if runtime::boost_fans() { " + ventoinha no máximo" } else { "" };
+            println!("{temp}°C ≥ {high}°C — a arrefecer: CPU do Delonix a {scale}%{fan}");
+        } else if temp <= low && scale < 100 {
+            scale = 100.min(scale + 20);
+            runtime::set_slice_cpu_pct(scale);
+            println!("{temp}°C ≤ {low}°C — a restaurar: CPU do Delonix a {scale}%");
+        } else if once {
+            println!("{temp}°C (high={high}/low={low}) — CPU do Delonix a {scale}% (sem mudança)");
+        }
+        if once {
+            return Ok(());
+        }
+        std::thread::sleep(std::time::Duration::from_secs(interval.max(1)));
     }
 }
 
