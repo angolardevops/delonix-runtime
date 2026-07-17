@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use clap::Subcommand;
 use clap_complete::engine::ArgValueCandidates;
-use delonix_runtime_core::Result;
+use delonix_runtime_core::{Error, Result};
 use delonix_volume::{parse_size_bytes, VolumeStore};
 use serde::Deserialize;
 
@@ -67,6 +67,46 @@ pub enum VolumeCmd {
         #[arg(short = 'f', long = "file")]
         file: Option<PathBuf>,
     },
+    /// Snapshots pontuais de um volume (tar.gz sob o volume; seguro em rootless).
+    Snapshot {
+        #[command(subcommand)]
+        action: SnapshotCmd,
+    },
+}
+
+/// `delonix volumes snapshot` — crash-consistentes (tirados com a carga a
+/// correr). Para consistência aplicacional (ex.: BD), pára/dump o consumidor
+/// primeiro. Em rootless o tar corre num userns mapeado (dono efectivo dos
+/// ficheiros de subuid) — ver `runtime::reexec_mapped`/`__volsnap`.
+#[derive(clap::Subcommand)]
+pub enum SnapshotCmd {
+    /// Cria um snapshot AGORA (nome default: timestamp UTC).
+    Create {
+        #[arg(add = ArgValueCandidates::new(super::complete::volumes))]
+        volume: String,
+        /// Nome do snapshot (default: `AAAAMMDD-HHMMSS`).
+        #[arg(long)]
+        name: Option<String>,
+    },
+    /// Lista os snapshots de um volume.
+    Ls {
+        #[arg(add = ArgValueCandidates::new(super::complete::volumes))]
+        volume: String,
+    },
+    /// Repõe um snapshot NO volume (substitui os dados actuais — pára os
+    /// consumidores primeiro).
+    Restore {
+        #[arg(add = ArgValueCandidates::new(super::complete::volumes))]
+        volume: String,
+        /// Nome do snapshot (ver `snapshot ls`).
+        snap: String,
+    },
+    /// Apaga um snapshot.
+    Rm {
+        #[arg(add = ArgValueCandidates::new(super::complete::volumes))]
+        volume: String,
+        snap: String,
+    },
 }
 
 pub fn run(action: VolumeCmd) -> Result<()> {
@@ -81,6 +121,7 @@ pub fn run(action: VolumeCmd) -> Result<()> {
         VolumeCmd::Inspect { name } => cmd_inspect(&store, &name),
         VolumeCmd::Describe { names } => cmd_describe(&store, &names),
         VolumeCmd::Rm { name } => cmd_rm(&store, &name),
+        VolumeCmd::Snapshot { action } => cmd_snapshot(&store, action),
         VolumeCmd::Apply { file } => {
             let path = manifest::resolve_path(file)?;
             let docs = manifest::load(&path)?;
@@ -208,6 +249,83 @@ fn cmd_inspect(store: &VolumeStore, name: &str) -> Result<()> {
     println!("uso:         {usage} bytes");
     if let Some(q) = v.quota_bytes {
         println!("quota:       {q} bytes");
+    }
+    Ok(())
+}
+
+/// Nome de snapshot por omissão: timestamp UTC `AAAAMMDD-HHMMSS` (sem `chrono` —
+/// o runtime não o traz; usa-se `libc::gmtime_r`).
+fn default_snap_name() -> String {
+    let t = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0) as libc::time_t;
+    let mut tm: libc::tm = unsafe { std::mem::zeroed() };
+    // SAFETY: `t` válido; `gmtime_r` escreve em `tm` (buffer nosso).
+    unsafe { libc::gmtime_r(&t, &mut tm) };
+    format!(
+        "{:04}{:02}{:02}-{:02}{:02}{:02}",
+        tm.tm_year + 1900,
+        tm.tm_mon + 1,
+        tm.tm_mday,
+        tm.tm_hour,
+        tm.tm_min,
+        tm.tm_sec
+    )
+}
+
+/// Corre uma operação de snapshot pelo caminho certo: rootless → re-exec
+/// `__volsnap` num userns mapeado (dono dos subuids); rootful/sem-helpers →
+/// directo. O handler `__volsnap` vive em `cmd::mapped` (ver a nota lá sobre o
+/// contrato de re-exec que faltava ao motor público).
+fn volsnap_run(mode: &str, data: &std::path::Path, tarball: &std::path::Path) -> Result<()> {
+    let d = data.to_string_lossy().to_string();
+    let t = tarball.to_string_lossy().to_string();
+    match delonix_runtime::reexec_mapped(&["__volsnap", mode, &d, &t]) {
+        Some(true) => Ok(()),
+        Some(false) => Err(Error::Runtime {
+            context: "volume snapshot",
+            message: format!("__volsnap {mode} falhou no userns mapeado (vê /etc/subuid)"),
+        }),
+        // Sem rootless/helpers: corre directo (dono já dos ficheiros).
+        None => super::mapped::volsnap(mode, data, tarball),
+    }
+}
+
+fn cmd_snapshot(store: &VolumeStore, action: SnapshotCmd) -> Result<()> {
+    match action {
+        SnapshotCmd::Create { volume, name } => {
+            let v = store.inspect(&volume)?;
+            let snap = name.unwrap_or_else(default_snap_name);
+            let tarball = store.snapshot_path(&volume, &snap)?;
+            if tarball.exists() {
+                return Err(Error::Invalid(format!("o snapshot '{snap}' já existe")));
+            }
+            volsnap_run("create", std::path::Path::new(&v.mountpoint), &tarball)?;
+            let size = std::fs::metadata(&tarball).map(|m| m.len()).unwrap_or(0);
+            println!("snapshot '{snap}' do volume '{volume}' criado ({})", super::output::fmt_size(size));
+            println!("{}", super::output::secundario("(crash-consistente: para consistência de BD, pára/dump o consumidor primeiro)"));
+        }
+        SnapshotCmd::Ls { volume } => {
+            store.inspect(&volume)?; // valida que o volume existe
+            let snaps = store.list_snapshots(&volume)?;
+            let mut t = super::output::Table::new(&["SNAPSHOT", "SIZE", "CREATED"]).right_align(1);
+            for (n, size, ts) in snaps {
+                t.row(vec![n, super::output::fmt_size(size), super::output::fmt_local(ts.max(0) as u64)]);
+            }
+            t.print();
+        }
+        SnapshotCmd::Restore { volume, snap } => {
+            let v = store.inspect(&volume)?;
+            let tarball = store.snapshot_path(&volume, &snap)?;
+            if !tarball.exists() {
+                return Err(Error::NotFound(format!("snapshot {snap} do volume {volume}")));
+            }
+            super::output::aviso(&format!("a repor '{volume}' a partir de '{snap}' — pára os consumidores do volume primeiro"));
+            volsnap_run("restore", std::path::Path::new(&v.mountpoint), &tarball)?;
+            println!("volume '{volume}' reposto do snapshot '{snap}'");
+        }
+        SnapshotCmd::Rm { volume, snap } => {
+            store.remove_snapshot(&volume, &snap)?;
+            println!("snapshot '{snap}' do volume '{volume}' apagado");
+        }
     }
     Ok(())
 }
