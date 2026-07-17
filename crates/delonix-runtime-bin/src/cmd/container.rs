@@ -347,6 +347,10 @@ fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Result<()> {
         log_path,
         mounts,
         on_started: if slirp_ports.is_empty() { None } else { Some(&slirp_hook) },
+        // /etc/hosts: IP da rede custom, ou o do slirp quando `-p` sem rede.
+        hosts_ip: attached_ip
+            .clone()
+            .or_else(|| (!slirp_ports.is_empty()).then(|| delonix_net::SLIRP_IP.to_string())),
         ..Default::default()
     };
     runtime::create_with(store, &mut c, &rootfs, &spec)?;
@@ -524,6 +528,10 @@ fn cmd_start(images: &ImageStore, store: &Store, id: &str) -> Result<()> {
         log_path: Some(log_path),
         mounts: c.mounts.clone(),
         on_started: if slirp_ports.is_empty() { None } else { Some(&slirp_hook) },
+        hosts_ip: c
+            .ip
+            .clone()
+            .or_else(|| (!slirp_ports.is_empty()).then(|| delonix_net::SLIRP_IP.to_string())),
         ..Default::default()
     };
     runtime::create_with(store, &mut c, &rootfs, &spec)?;
