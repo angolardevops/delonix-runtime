@@ -1,0 +1,35 @@
+# kind: Ingress / kind: Egress — firewall L4 declarativo por container (estilo
+# k8s NetworkPolicy, dividido por direcção). Cada documento é o ESTADO DESEJADO
+# de uma direcção do container-alvo: aplicar substitui as regras dessa direcção
+# (allowlist + default-deny), deixando a outra intacta. Aplicado por `stack apply`
+# DEPOIS dos containers existirem. Só actua em containers na SDN (têm IP na delonix0).
+---
+apiVersion: delonix.io/v1
+kind: Ingress
+metadata:
+  name: db-inbound
+spec:
+  target: dbapp            # nome do container-alvo (deve existir, em rede custom)
+  defaultPolicy: deny      # allow | deny (default: deny — só passa o que estiver listado)
+  rules:
+    - proto: tcp           # tcp | udp | any (default: any)
+      port: "5432"         # número, intervalo "n-m", ou "*"
+      from: 10.219.0.0/16  # CIDR de origem (default: qualquer)
+      action: allow        # allow | deny (default: allow)
+      note: postgres-from-sdn
+---
+apiVersion: delonix.io/v1
+kind: Egress
+metadata:
+  name: db-outbound
+spec:
+  target: dbapp
+  defaultPolicy: deny
+  rules:
+    - proto: udp
+      port: "53"
+      note: dns
+    - proto: tcp
+      port: "443"
+      to: 0.0.0.0/0        # CIDR de destino (default: qualquer)
+      note: https-egress

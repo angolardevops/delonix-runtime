@@ -69,7 +69,7 @@ pub fn run(action: StackCmd) -> Result<()> {
 /// Os Kinds do stack, na MESMA ordem do `apply` — quem lê o `describe` vê a
 /// ordem por que as coisas são criadas, o que é metade do diagnóstico quando um
 /// apply pára a meio.
-const KINDS: [&str; 6] = ["Network", "Volume", "Storage", "Image", "Vm", "Container"];
+const KINDS: [&str; 8] = ["Network", "Volume", "Storage", "Image", "Vm", "Container", "Ingress", "Egress"];
 
 fn describe(file: Option<PathBuf>) -> Result<()> {
     let path = manifest::resolve_path(file)?;
@@ -142,6 +142,10 @@ fn presence(kind: &str, name: &str, containers: &[delonix_runtime_core::Containe
             Ok(vm) => ("yes".into(), vm.status.to_string()),
             Err(_) => ("no".into(), "-".into()),
         },
+        // Ingress/Egress não têm store próprio — são directivas de firewall
+        // aplicadas a um container-alvo, não recursos com estado. O `apply`
+        // aplica-as sempre (idempotente); aqui só se assinala a natureza.
+        "Ingress" | "Egress" => ("-".into(), "declarative".into()),
         _ => ("?".into(), "kind não suportado".into()),
     }
 }
@@ -163,6 +167,7 @@ fn apply(file: Option<PathBuf>) -> Result<()> {
     super::image::apply(&docs)?;
     super::vm::apply(&docs)?;
     super::container::apply(&docs)?;
+    super::firewall::apply(&docs)?;
     Ok(())
 }
 
