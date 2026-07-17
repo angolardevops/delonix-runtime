@@ -14,6 +14,70 @@
 /// Espaço entre colunas, como no `docker ps`.
 const GAP: usize = 3;
 
+// ---------------------------------------------------------------------------
+// Cor
+// ---------------------------------------------------------------------------
+
+/// Códigos ANSI. Só estes quatro: um CLI que usa meia paleta acaba com cada
+/// comando a inventar a sua convenção.
+pub mod cor {
+    pub const RESET: &str = "\x1b[0m";
+    pub const CIANO: &str = "\x1b[36m"; // info
+    pub const AMARELO: &str = "\x1b[33m"; // aviso
+    pub const VERMELHO: &str = "\x1b[31m"; // erro
+    pub const CINZA: &str = "\x1b[90m"; // secundário (timestamps, detalhes)
+    pub const NEGRITO: &str = "\x1b[1m";
+}
+
+/// Há cor no stderr?
+///
+/// Três condições, todas necessárias: é um terminal (num pipe/ficheiro os
+/// códigos ANSI viram lixo — `grep`/`tee`/CI apanham-nos), `NO_COLOR` não está
+/// definida (<https://no-color.org>, a convenção que todo o CLI devia honrar) e
+/// `TERM` não é `dumb`.
+pub fn cor_ligada() -> bool {
+    static LIGADA: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *LIGADA.get_or_init(|| {
+        // SAFETY: isatty não tem pré-condições; 2 = stderr.
+        let tty = unsafe { libc::isatty(2) } == 1;
+        let no_color = std::env::var_os("NO_COLOR").is_some();
+        let dumb = std::env::var("TERM").map(|t| t == "dumb").unwrap_or(false);
+        tty && !no_color && !dumb
+    })
+}
+
+fn pinta(c: &str, s: &str) -> String {
+    if cor_ligada() {
+        format!("{c}{s}{}", cor::RESET)
+    } else {
+        s.to_string()
+    }
+}
+
+/// Uma mensagem informativa (ciano).
+pub fn info(msg: &str) {
+    eprintln!("{} {msg}", pinta(cor::CIANO, "info"));
+}
+
+/// Um aviso (amarelo): correu, mas há aqui algo que o utilizador devia saber.
+pub fn aviso(msg: &str) {
+    eprintln!("{} {msg}", pinta(cor::AMARELO, "aviso"));
+}
+
+/// Um erro (vermelho).
+pub fn erro(msg: &str) {
+    eprintln!("{} {msg}", pinta(cor::VERMELHO, "erro"));
+}
+
+/// Texto secundário (cinza) — para detalhes que não competem com a mensagem.
+pub fn secundario(s: &str) -> String {
+    pinta(cor::CINZA, s)
+}
+
+pub fn destaque(s: &str) -> String {
+    pinta(cor::NEGRITO, s)
+}
+
 /// Tabela alinhada pelo conteúdo: as colunas ficam com a largura da célula mais
 /// larga (incluindo o cabeçalho). A última coluna nunca leva padding à direita,
 /// para não deixar espaços em fim de linha.
@@ -90,6 +154,31 @@ impl Table {
 /// prática e não vale a pena uma dependência `unicode-width` por isso.
 fn display_width(s: &str) -> usize {
     s.chars().count()
+}
+
+/// Referência de imagem para MOSTRAR a um humano.
+///
+/// Uma referência fixada por digest (`kindest/node:v1.34.0@sha256:7416a61b…`,
+/// 84 chars) é o que o motor precisa — reprodutibilidade — mas numa tabela só
+/// empurra as colunas todas para fora do ecrã e o digest não diz nada a quem
+/// lê. Com tag presente, o `@sha256:…` é redundante para efeitos de leitura:
+/// mostra-se `kindest/node:v1.34.0`.
+///
+/// **Sem tag** (`repo@sha256:…`) o digest é a ÚNICA identificação que resta —
+/// aí encurta-se, mas nunca se deita fora: `repo@sha256:7416a61b`.
+pub fn display_ref(reference: &str) -> String {
+    let Some((antes, digest)) = reference.split_once("@sha256:") else {
+        return reference.to_string();
+    };
+    // `repo:tag@sha256:…` → a tag identifica; o digest é ruído na tabela.
+    // Cuidado: um `:` no host com porta (`reg:5000/img`) não é uma tag — a tag
+    // vem depois do ÚLTIMO '/'.
+    let tem_tag = antes.rsplit('/').next().map(|ultimo| ultimo.contains(':')).unwrap_or(false);
+    if tem_tag {
+        return antes.to_string();
+    }
+    let curto: String = digest.chars().take(8).collect();
+    format!("{antes}@sha256:{curto}")
 }
 
 /// Trunca com reticências (`…`) se passar de `max` — para COMMAND/PORTS, que
@@ -354,5 +443,34 @@ mod tests {
         assert_eq!(fmt_size(512), "512 B");
         assert_eq!(fmt_size(1536), "1.5 KiB");
         assert_eq!(fmt_size(2 * 1024 * 1024 * 1024), "2.00 GiB");
+    }
+
+    #[test]
+    fn display_ref_corta_o_digest_quando_ha_tag() {
+        // O caso que motivou isto: um kindest/node fixado por digest.
+        assert_eq!(
+            display_ref("kindest/node:v1.34.0@sha256:7416a61b42b1662ca6ca89f02028ac133a309a2a30ba309614e8ec94d976dc5a"),
+            "kindest/node:v1.34.0"
+        );
+        assert_eq!(display_ref("nginx:latest@sha256:abcdef0123"), "nginx:latest");
+        // Sem digest, intacto.
+        assert_eq!(display_ref("alpine:3.19"), "alpine:3.19");
+        assert_eq!(display_ref("nginx"), "nginx");
+    }
+
+    #[test]
+    fn display_ref_sem_tag_encurta_o_digest_mas_nao_o_deita_fora() {
+        // `repo@sha256:…` — o digest é a ÚNICA identificação; encurta-se, não se
+        // remove (senão ficavam duas imagens diferentes com o mesmo nome).
+        assert_eq!(display_ref("myrepo@sha256:7416a61b42b1662ca6ca89f0"), "myrepo@sha256:7416a61b");
+    }
+
+    #[test]
+    fn display_ref_nao_confunde_porta_do_registo_com_tag() {
+        // `reg:5000/img@sha256:…` — o `:5000` é a porta do host, NÃO uma tag.
+        // A tag, se houver, vem depois do último '/'. Aqui não há → encurta o digest.
+        assert_eq!(display_ref("reg:5000/img@sha256:7416a61b42b1662c"), "reg:5000/img@sha256:7416a61b");
+        // Com porta E tag, a tag identifica → corta o digest.
+        assert_eq!(display_ref("reg:5000/img:v2@sha256:7416a61b"), "reg:5000/img:v2");
     }
 }

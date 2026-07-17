@@ -186,7 +186,8 @@ fn main() {
     clap_complete::CompleteEnv::with_factory(<Cli as clap::CommandFactory>::command).complete();
 
     if let Err(e) = run() {
-        eprintln!("delonix: {e}");
+        // O erro de topo a vermelho (honra NO_COLOR/pipes — ver `output::cor`).
+        cmd::output::erro(&e.to_string());
         std::process::exit(1);
     }
 }

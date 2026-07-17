@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use std::process::Command;
 
 use clap::Subcommand;
+use clap_complete::engine::ArgValueCandidates;
 use delonix_runtime_core::{Error, Result};
 use delonix_vm::VmConfig;
 use serde::Deserialize;
@@ -136,18 +137,27 @@ pub enum VmCmd {
     /// Lista as VMs.
     Ls,
     /// Estado actual (reconcilia liveness/IP com o backend).
-    Status { name: String },
+    Status {
+        #[arg(add = ArgValueCandidates::new(super::complete::vms))]
+        name: String,
+    },
     /// Detalhe legível de uma ou mais VMs, ao estilo `kubectl describe` (para
     /// humanos; use `status` para a vista compacta de sempre). Inclui o estado
     /// AO VIVO — `delonix_vm::status` reconcilia liveness/IP com o backend.
     Describe {
-        #[arg(required = true)]
+        #[arg(required = true, add = ArgValueCandidates::new(super::complete::vms))]
         names: Vec<String>,
     },
     /// Pára a VM (preserva disco/registo).
-    Stop { name: String },
+    Stop {
+        #[arg(add = ArgValueCandidates::new(super::complete::vms))]
+        name: String,
+    },
     /// Remove a VM (pára + apaga overlay/estado).
-    Rm { name: String },
+    Rm {
+        #[arg(add = ArgValueCandidates::new(super::complete::vms))]
+        name: String,
+    },
     /// Aplica os documentos `kind: Vm` de um manifesto (`delonix_vm::create` já
     /// é idempotente por nome — cria ou auto-recupera).
     Apply {
