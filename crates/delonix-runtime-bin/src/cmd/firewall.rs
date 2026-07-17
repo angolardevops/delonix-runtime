@@ -10,13 +10,13 @@
 
 use clap::Subcommand;
 use clap_complete::engine::ArgValueCandidates;
-use delonix_net::{infra, NetworkStore};
+use delonix_net::infra;
 use delonix_runtime_core::{fw_port_ok, fw_proto_ok, fw_src_ok, Container, Error, FwRule, Result, Store};
 use serde::Deserialize;
 
 use super::manifest::{self, ManifestDoc};
 use super::output;
-use super::util::{open_stores, state_root};
+use super::util::open_stores;
 
 /// `allow` (accept) or `deny` (drop) — the action baked into a rule or policy.
 #[derive(clap::ValueEnum, Clone, Copy, PartialEq)]
@@ -138,6 +138,14 @@ pub enum EgressCmd {
         #[arg(long)]
         to: Option<String>,
     },
+    /// Allow a network's egress to a HOSTNAME (and `*.hostname`), learnt live from
+    /// DNS answers — the FQDN allowlist nft/CIDR can't express. Repeatable.
+    Host {
+        #[arg(add = ArgValueCandidates::new(super::complete::networks))]
+        network: String,
+        /// e.g. `github.com` (matches `github.com` and `*.github.com`).
+        hostname: String,
+    },
     /// Show the outbound firewall (policy + rules).
     Ls {
         #[arg(add = ArgValueCandidates::new(super::complete::containers))]
@@ -176,6 +184,7 @@ pub fn run_egress(cmd: EgressCmd) -> Result<()> {
         EgressCmd::Deny { container, port, to, note } => add_rule(&store, &container, "out", Action::Deny, &port, to, note),
         EgressCmd::Policy { container, policy } => set_policy(&store, &container, "out", policy),
         EgressCmd::Net { network, mode, to } => egress_net(&network, mode, to),
+        EgressCmd::Host { network, hostname } => egress_host(&network, &hostname),
         EgressCmd::Ls { container } => list_rules(&store, &container, "out"),
         EgressCmd::Clear { container } => clear_dir(&store, &container, "out"),
     }
@@ -309,7 +318,10 @@ fn clear_dir(store: &Store, name: &str, dir: &str) -> Result<()> {
 }
 
 fn egress_net(network: &str, mode: EgressMode, to: Option<String>) -> Result<()> {
-    let bridge = NetworkStore::open(state_root())?.get(network)?.bridge;
+    // A bridge REAL vive no registo do infra (NetDef, `dlxn{:08x}`), NÃO no
+    // NetworkStore (`dlxn{:02x}{:04x}`) — usar a errada faz as regras nft nunca
+    // casarem o tráfego. resolve_net devolve a bridge que o holder criou.
+    let bridge = infra::resolve_net(network)?.0;
     match mode {
         EgressMode::Allow => {
             infra::set_egress_policy_net(&bridge, false)?;
@@ -424,6 +436,14 @@ fn apply_kind(store: &Store, docs: &[ManifestDoc], kind: &str, dir: &str) -> Res
         store.save(&c)?;
         println!("{kind}/{}: applied to {} ({n} rule(s), default {policy})", doc.metadata.name, spec.target);
     }
+    Ok(())
+}
+
+/// `egress host <net> <hostname>` — FQDN allowlist for a network's egress.
+fn egress_host(network: &str, hostname: &str) -> Result<()> {
+    let bridge = infra::resolve_net(network)?.0;
+    infra::set_egress_host(&bridge, hostname)?;
+    println!("network {network}: egress now allows {} (and *.{}) — learnt live from DNS", hostname, hostname);
     Ok(())
 }
 
