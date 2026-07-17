@@ -127,6 +127,12 @@ pub enum VmImageCmd {
         /// descompressão nas leituras do backing file em runtime).
         #[arg(long)]
         no_compress: bool,
+        /// Obter os .deb do k8s no HOST (verificados: assinatura do InRelease +
+        /// SHA256) e instalá-los com `dpkg` — o appliance corre sem rede
+        /// (`--no-network`). Dispensa DHCP/DNS no guest, logo dispensa os
+        /// workarounds de host (passt/dhclient) que o modo online exige.
+        #[arg(long)]
+        offline: bool,
     },
 }
 
@@ -136,8 +142,8 @@ pub fn run(action: VmImageCmd) -> Result<()> {
         VmImageCmd::Ls => cmd_ls(&store),
         VmImageCmd::Push { name, target } => cmd_push(&store, &name, &target),
         VmImageCmd::Pull { source, name } => cmd_pull(&store, &source, name),
-        VmImageCmd::Build { tag, ubuntu_release, k8s_version, extra_packages, extra_run, cri_bin, no_compress } => {
-            cmd_build(&store, &tag, &ubuntu_release, k8s_version, extra_packages, extra_run, cri_bin, !no_compress)
+        VmImageCmd::Build { tag, ubuntu_release, k8s_version, extra_packages, extra_run, cri_bin, no_compress, offline } => {
+            cmd_build(&store, &tag, &ubuntu_release, k8s_version, extra_packages, extra_run, cri_bin, !no_compress, offline)
         }
     }
 }
@@ -234,6 +240,7 @@ fn cmd_build(
     extra_run: Vec<String>,
     cri_bin: Option<PathBuf>,
     compress: bool,
+    offline: bool,
 ) -> Result<()> {
     // `k8s_version` entra num `format!` que vira comando `virt-customize --run-command`
     // (via `k8s_recipes::k8s_host_recipes`) — validar aqui fecha o mesmo achado de
@@ -255,10 +262,23 @@ fn cmd_build(
     run_tool("qemu-img", &["convert", "-O", "qcow2", &base.to_string_lossy(), &work_qcow2.to_string_lossy()])?;
 
     let service_unit = workspace_dist_file("delonix-cri.service")?;
-    let ops = k8s_customization_steps(k8s_version.as_deref(), &extra_packages, &extra_run, &cri, &service_unit);
-    let args = customize_args(&work_qcow2, &ops);
+    let ops = if offline {
+        // Tudo o que precisa de rede acontece AQUI, no host (verificado), para o
+        // appliance poder correr com `--no-network`.
+        eprintln!("modo offline: a obter os .deb do k8s no host...");
+        let debs = download_k8s_debs(&work_dir, &work_dir.join("debs"), k8s_version.as_deref(), "amd64", &extra_packages)?;
+        k8s_customization_steps_offline(&debs, &extra_run, &cri, &service_unit)
+    } else {
+        k8s_customization_steps(k8s_version.as_deref(), &extra_packages, &extra_run, &cri, &service_unit)
+    };
+    let mut args = customize_args(&work_qcow2, &ops);
+    if offline {
+        // Sem isto o libguestfs arranca o passt e o appliance espera por um lease
+        // DHCP que nunca chega em hosts onde o passt está partido (ver CLAUDE.md).
+        args.insert(0, "--no-network".to_string());
+    }
 
-    eprintln!("a correr virt-customize ({} passos)...", ops.len());
+    eprintln!("a correr virt-customize ({} passos{})...", ops.len(), if offline { ", sem rede" } else { "" });
     run_tool("virt-customize", &args.iter().map(String::as_str).collect::<Vec<_>>())?;
 
     // Encolher o artefacto. Medido numa golden 24.04 (2.38 GiB → 677 MiB, −72%):
@@ -389,6 +409,228 @@ fn http_get_text(url: &str) -> Result<String> {
     resp.text().map_err(|e| Error::Invalid(format!("corpo de {url}: {e}")))
 }
 
+// ---------------------------------------------------------------------------
+// Build OFFLINE: descarrega+verifica os .deb do k8s NO HOST
+// ---------------------------------------------------------------------------
+// Assim o `virt-customize` corre com `--no-network` e o appliance nunca precisa
+// de DHCP/DNS — o que remove os workarounds de host (passt/dhclient) que o
+// caminho online exige. A cadeia de confiança é a MESMA do apt, só que feita
+// aqui em vez de dentro do guest:
+//   InRelease (clearsigned, verificado com a Release.key do repo)
+//     → SHA256 do `Packages`  → SHA256 de cada `.deb`
+// Nunca se aceita um ficheiro sem o passo anterior o ter autenticado — o mesmo
+// princípio do achado CRÍTICO nº3 da auditoria (`pull_oci_artifact` sem digest).
+
+/// Um `.deb` do repo `pkgs.k8s.io`, já resolvido a partir de um `Packages` autenticado.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct K8sDeb {
+    pub name: String,
+    pub version: String,
+    /// Caminho relativo à raiz do repo (campo `Filename`).
+    pub filename: String,
+    pub sha256: String,
+}
+
+/// Parseia um índice `Packages` (Debian control, blocos separados por linha
+/// vazia) e devolve as entradas de `arch` cuja versão começa por `version_prefix`
+/// (ex.: "1.34."), escolhendo a MAIOR versão por pacote. Função PURA (testável
+/// sem rede). `wanted` filtra por nome; vazio = todos.
+pub(crate) fn parse_packages_index(
+    index: &str,
+    arch: &str,
+    version_prefix: &str,
+    wanted: &[&str],
+) -> Vec<K8sDeb> {
+    let mut best: std::collections::BTreeMap<String, K8sDeb> = Default::default();
+    for block in index.split("\n\n") {
+        let mut f: std::collections::HashMap<&str, &str> = Default::default();
+        for line in block.lines() {
+            if let Some((k, v)) = line.split_once(": ") {
+                f.insert(k.trim(), v.trim());
+            }
+        }
+        let (Some(name), Some(version), Some(filename), Some(sha), Some(a)) = (
+            f.get("Package"),
+            f.get("Version"),
+            f.get("Filename"),
+            f.get("SHA256"),
+            f.get("Architecture"),
+        ) else {
+            continue;
+        };
+        if *a != arch || !version.starts_with(version_prefix) {
+            continue;
+        }
+        if !wanted.is_empty() && !wanted.contains(name) {
+            continue;
+        }
+        let cand = K8sDeb {
+            name: name.to_string(),
+            version: version.to_string(),
+            filename: filename.to_string(),
+            sha256: sha.to_string(),
+        };
+        best.entry(name.to_string())
+            .and_modify(|cur| {
+                if deb_version_lt(&cur.version, &cand.version) {
+                    *cur = cand.clone();
+                }
+            })
+            .or_insert(cand);
+    }
+    best.into_values().collect()
+}
+
+/// Compara duas versões Debian de forma suficiente para o repo k8s
+/// (`1.34.9-1.1`): compara numericamente os campos separados por `.`/`-`.
+/// Não é o algoritmo completo do dpkg — o repo só usa versões desta forma, e um
+/// empate/formato inesperado degrada para comparação lexicográfica.
+pub(crate) fn deb_version_lt(a: &str, b: &str) -> bool {
+    let parts = |s: &str| -> Vec<u64> {
+        s.split(['.', '-'])
+            .map(|p| p.chars().take_while(|c| c.is_ascii_digit()).collect::<String>())
+            .map(|p| p.parse::<u64>().unwrap_or(0))
+            .collect()
+    };
+    let (pa, pb) = (parts(a), parts(b));
+    match pa.cmp(&pb) {
+        std::cmp::Ordering::Equal => a < b,
+        o => o == std::cmp::Ordering::Less,
+    }
+}
+
+/// Extrai de um `Release` autenticado o SHA256 esperado de um ficheiro
+/// (ex.: "Packages"). Os índices vêm na secção `SHA256:` como
+/// `<sha>  <tamanho>  <caminho>`. Função PURA.
+pub(crate) fn release_sha256_of(release: &str, want_path: &str) -> Option<String> {
+    let mut in_sha = false;
+    for line in release.lines() {
+        if line.starts_with("SHA256:") {
+            in_sha = true;
+            continue;
+        }
+        // outra secção de topo (não indentada) termina o bloco SHA256.
+        if in_sha && !line.starts_with(' ') {
+            in_sha = false;
+        }
+        if !in_sha {
+            continue;
+        }
+        let cols: Vec<&str> = line.split_whitespace().collect();
+        if let [sha, _size, path] = cols[..] {
+            if path == want_path {
+                return Some(sha.to_string());
+            }
+        }
+    }
+    None
+}
+
+/// Verifica o `InRelease` (clearsigned) com a `Release.key` do repo e devolve o
+/// corpo JÁ AUTENTICADO. Usa `gpgv` com um keyring temporário — nunca toca no
+/// keyring do utilizador. Falha fechado: sem assinatura válida, não há build.
+fn verify_inrelease(work: &Path, repo_base: &str) -> Result<String> {
+    let key_armored = http_get_text(&format!("{repo_base}/Release.key"))?;
+    let key_asc = work.join("k8s-release.asc");
+    let keyring = work.join("k8s-release.gpg");
+    std::fs::write(&key_asc, &key_armored)?;
+    // ASCII-armored → keyring binário que o gpgv entende.
+    run_tool(
+        "gpg",
+        &["--batch", "--yes", "--no-default-keyring", "--dearmor", "-o", &keyring.to_string_lossy(), &key_asc.to_string_lossy()],
+    )
+    .map_err(|e| Error::Invalid(format!("a preparar o keyring do repo k8s: {e}")))?;
+
+    let inrelease = work.join("InRelease");
+    stream_download(&format!("{repo_base}/InRelease"), &inrelease)?;
+    run_tool(
+        "gpgv",
+        &["--keyring", &keyring.to_string_lossy(), &inrelease.to_string_lossy()],
+    )
+    .map_err(|_| {
+        Error::Invalid(
+            "assinatura do InRelease do repo k8s NÃO confere com a Release.key — a abortar \
+             (possível repo comprometido ou MITM)"
+                .to_string(),
+        )
+    })?;
+    Ok(std::fs::read_to_string(&inrelease)?)
+}
+
+/// Descarrega para `dest_dir` os `.deb` do k8s (fecho do repo: kubeadm/kubelet/
+/// kubectl + `kubernetes-cni`), com a cadeia apt completa verificada no host.
+/// Devolve os caminhos locais. `arch` é a arquitectura Debian (ex.: "amd64").
+fn download_k8s_debs(
+    work: &Path,
+    dest_dir: &Path,
+    k8s_version: Option<&str>,
+    arch: &str,
+    extra_packages: &[String],
+) -> Result<Vec<PathBuf>> {
+    let repo = super::k8s_recipes::k8s_repo_version(k8s_version);
+    let repo_base = format!("https://pkgs.k8s.io/core:/{repo}/deb");
+    std::fs::create_dir_all(dest_dir)?;
+
+    eprintln!("a verificar a assinatura do repo k8s ({repo})...");
+    let release = verify_inrelease(work, &repo_base)?;
+
+    // `Packages` autenticado pelo SHA256 que consta do InRelease assinado.
+    let want_sha = release_sha256_of(&release, "Packages").ok_or_else(|| {
+        Error::Invalid("InRelease do repo k8s não declara o SHA256 de 'Packages'".to_string())
+    })?;
+    let packages_path = work.join("Packages");
+    stream_download(&format!("{repo_base}/Packages"), &packages_path)?;
+    let got = hex_sha256_file(&packages_path)?;
+    if got != want_sha {
+        return Err(Error::Invalid(format!(
+            "SHA256 do índice Packages não confere (esperado {}, obtido {}) — a abortar",
+            &want_sha[..16.min(want_sha.len())],
+            &got[..16.min(got.len())]
+        )));
+    }
+    let index = std::fs::read_to_string(&packages_path)?;
+
+    // Fecho: os 3 pedidos + `kubernetes-cni` (dep do kubelet dentro do repo).
+    // As restantes deps do kubelet (iptables/mount/util-linux/libc6) já vêm na
+    // cloud image da Ubuntu — se alguma faltar, o `dpkg -i` falha ALTO no guest,
+    // que é o que queremos (nunca instalar meio-instalado em silêncio).
+    let mut wanted: Vec<&str> = vec!["kubeadm", "kubelet", "kubectl", "kubernetes-cni"];
+    for p in extra_packages {
+        wanted.push(p.as_str());
+    }
+    let version_prefix = match k8s_version {
+        Some(v) if v != "stable" => format!("{v}."),
+        _ => String::new(),
+    };
+    let debs = parse_packages_index(&index, arch, &version_prefix, &wanted);
+    for base in ["kubeadm", "kubelet", "kubectl", "kubernetes-cni"] {
+        if !debs.iter().any(|d| d.name == base) {
+            return Err(Error::Invalid(format!(
+                "o repo k8s ({repo}) não tem '{base}' para {arch} — versão inexistente?"
+            )));
+        }
+    }
+
+    let mut out = Vec::new();
+    for d in &debs {
+        let file_name = d.filename.rsplit('/').next().unwrap_or(&d.filename);
+        let dest = dest_dir.join(file_name);
+        eprintln!("  {} {} ({arch})", d.name, d.version);
+        stream_download(&format!("{repo_base}/{}", d.filename), &dest)?;
+        let got = hex_sha256_file(&dest)?;
+        if got != d.sha256 {
+            let _ = std::fs::remove_file(&dest);
+            return Err(Error::Invalid(format!(
+                "SHA256 de {file_name} não confere (esperado {}, obtido {}) — a abortar",
+                &d.sha256[..16.min(d.sha256.len())],
+                &got[..16.min(got.len())]
+            )));
+        }
+        out.push(dest);
+    }
+    Ok(out)
+}
+
 fn hex_sha256(data: &[u8]) -> String {
     let mut h = Sha256::new();
     h.update(data);
@@ -503,6 +745,39 @@ pub(crate) enum CustomizeOp {
 /// `k8s_recipes::k8s_host_recipes` — o MESMO catálogo que `cmd::cluster`
 /// usa via SSH, para a imagem dourada e um host preparado por `cluster
 /// apply` ficarem exactamente iguais.
+/// Como [`k8s_customization_steps`], mas SEM rede no guest: em vez do
+/// repositório apt + `apt-get install`, injecta os `.deb` já descarregados e
+/// verificados no HOST (`download_k8s_debs`) e instala-os com `dpkg -i`. As
+/// restantes receitas (swap/módulos/sysctls) são as MESMAS do caminho online
+/// (`k8s_recipes::k8s_config_recipes`) — não divergem.
+///
+/// `dpkg -i` em vez de `apt-get install ./*.deb`: o apt precisaria de contactar
+/// as listas para resolver deps; as deps do kubelet fora do repo k8s
+/// (iptables/mount/util-linux/libc6) já vêm na cloud image. Se alguma faltar, o
+/// `dpkg` falha ALTO e o build pára — nunca deixa um guest meio-instalado.
+pub(crate) fn k8s_customization_steps_offline(
+    debs: &[PathBuf],
+    extra_run: &[String],
+    cri_bin: &Path,
+    cri_service: &Path,
+) -> Vec<CustomizeOp> {
+    let mut ops: Vec<CustomizeOp> = Vec::new();
+    for d in debs {
+        ops.push(CustomizeOp::CopyIn(d.clone(), "/tmp/k8s-debs".to_string()));
+    }
+    ops.push(CustomizeOp::RunCommand(
+        "dpkg -i /tmp/k8s-debs/*.deb && apt-mark hold kubeadm kubelet kubectl && rm -rf /tmp/k8s-debs"
+            .into(),
+    ));
+    ops.extend(
+        super::k8s_recipes::k8s_config_recipes()
+            .into_iter()
+            .map(|r| CustomizeOp::RunCommand(r.apply_offline().to_string())),
+    );
+    ops.extend(common_customization_steps(extra_run, cri_bin, cri_service));
+    ops
+}
+
 pub(crate) fn k8s_customization_steps(
     k8s_version: Option<&str>,
     extra_packages: &[String],
@@ -514,6 +789,19 @@ pub(crate) fn k8s_customization_steps(
         .into_iter()
         .map(|r| CustomizeOp::RunCommand(r.apply_offline().to_string()))
         .collect();
+    ops.extend(common_customization_steps(extra_run, cri_bin, cri_service));
+    ops
+}
+
+/// A cauda comum aos dois modos (online/offline): `delonix-cri` + contas +
+/// `--extra-run` do utilizador + limpeza do apt. Partilhada para os dois
+/// caminhos nunca divergirem no que produzem.
+fn common_customization_steps(
+    extra_run: &[String],
+    cri_bin: &Path,
+    cri_service: &Path,
+) -> Vec<CustomizeOp> {
+    let mut ops: Vec<CustomizeOp> = Vec::new();
     ops.extend([
         // `delonix-cri` — endpoint CRI para o kubelet (substitui containerd).
         CustomizeOp::CopyIn(cri_bin.to_path_buf(), "/usr/local/bin".to_string()),

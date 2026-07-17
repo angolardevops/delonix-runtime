@@ -87,6 +87,10 @@ pub enum ImageCmd {
         /// nas leituras do backing file em runtime).
         #[arg(long)]
         no_compress: bool,
+        /// Obter os .deb do k8s no HOST (verificados) e instalá-los com `dpkg` —
+        /// o appliance corre sem rede. Dispensa DHCP/DNS no guest.
+        #[arg(long)]
+        offline: bool,
     },
 }
 
@@ -122,6 +126,10 @@ pub enum VmSub {
         /// nas leituras do backing file em runtime).
         #[arg(long)]
         no_compress: bool,
+        /// Obter os .deb do k8s no HOST (verificados) e instalá-los com `dpkg` —
+        /// o appliance corre sem rede. Dispensa DHCP/DNS no guest.
+        #[arg(long)]
+        offline: bool,
     },
 }
 
@@ -148,8 +156,8 @@ pub fn run(vm: bool, action: ImageCmd) -> Result<()> {
             VmSub::Ls => VmImageCmd::Ls,
             VmSub::Pull { source, name } => VmImageCmd::Pull { source, name },
             VmSub::Push { name, target } => VmImageCmd::Push { name, target },
-            VmSub::Build { tag, ubuntu_release, k8s_version, extra_packages, extra_run, cri_bin, no_compress } => {
-                VmImageCmd::Build { tag, ubuntu_release, k8s_version, extra_packages, extra_run, cri_bin, no_compress }
+            VmSub::Build { tag, ubuntu_release, k8s_version, extra_packages, extra_run, cri_bin, no_compress, offline } => {
+                VmImageCmd::Build { tag, ubuntu_release, k8s_version, extra_packages, extra_run, cri_bin, no_compress, offline }
             }
         });
     }
@@ -200,8 +208,8 @@ fn run_vm(action: ImageCmd) -> Result<()> {
         ImageCmd::Ls => VmImageCmd::Ls,
         ImageCmd::Pull { image } => VmImageCmd::Pull { source: image, name: None },
         ImageCmd::Push { name, target } => VmImageCmd::Push { name, target },
-        ImageCmd::Build { tag, ubuntu_release, k8s_version, extra_packages, extra_run, cri_bin, no_compress } => {
-            VmImageCmd::Build { tag, ubuntu_release, k8s_version, extra_packages, extra_run, cri_bin, no_compress }
+        ImageCmd::Build { tag, ubuntu_release, k8s_version, extra_packages, extra_run, cri_bin, no_compress, offline } => {
+            VmImageCmd::Build { tag, ubuntu_release, k8s_version, extra_packages, extra_run, cri_bin, no_compress, offline }
         }
         ImageCmd::Rm { .. } | ImageCmd::Export { .. } | ImageCmd::Apply { .. } => {
             return Err(Error::Invalid(
