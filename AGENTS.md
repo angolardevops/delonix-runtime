@@ -457,6 +457,39 @@ até um control-plane Ready (o preflight já passa; falta exercitar o pull+init+
 `--net kind` rootless (setns) para nós na MESMA rede em vez de slirp isolado por nó. O shim Docker
 continua depois destes, mas a fundação — cgroup + netfilter + systemd + containerd + rede — arranca.
 
+
+### EM ABERTO: o publish do nó Kind não chega ao ingress (2026-07-17)
+
+**Sintoma**: `cluster create` diz "pronto" e o nó fica `Ready` (verificado por
+dentro), mas o `kubectl` do HOST dá `connection refused` — o apiserver não tem
+hostfwd. Um `container run --net <rede> -p` NORMAL publica bem (HTTP 200,
+persistente, dois em simultâneo).
+
+**Facto que aponta a causa** (medido, não suposto):
+```
+slirp do ingress, list_hostfwd:
+  28080 -> 10.0.2.100:28080     <- `web` (container normal), publicado
+  (nenhuma entrada para o 6443 do nó)
+nó: ports=['6443:6443'] ip=10.210.156.5
+```
+Duas coisas de uma vez: (1) o nó não tem hostfwd nenhum; (2) o do `web` aponta
+para `10.0.2.100` — o IP do SLIRP, não o IP do container na rede (`10.210.x`).
+Ou seja, mesmo o publish que "funciona" vai pelo caminho do slirp e não pelo
+DNAT do ingress para o IP real. Suspeita a confirmar: `publish_port` chamado do
+2.º passo do re-exec (dentro do `nsenter -m -n` do holder) não fala com o
+ingress como se espera. NÃO investigado até ao fim — não inventar a causa.
+
+**Contexto que custou horas a descobrir e não se deve repetir**: processos
+`delonix` de longa duração (supervisores de `--restart`, log shims) continuam a
+correr o BINÁRIO DA ALTURA EM QUE NASCERAM. Um `reap_orphan_net` com o bug
+antigo (`store.list().unwrap_or_default()` → live={} → apaga TODOS os hostfwds)
+sobreviveu ao fix em disco e andou a sabotar os testes do código novo. Antes de
+concluir "o fix não funcionou", correr `pgrep -af '^~/.local/bin/delonix'` e
+matar os processos velhos. Isto é também um problema de PRODUÇÃO real: não há
+forma de dizer aos supervisores para recarregarem o binário.
+
+**Também em aberto**: o `refcount` do ingress vaza (16 com 3 containers vivos).
+
 ## Próximas fases (pedidas, não implementadas — cada uma precisa da sua própria sessão de planeamento)
 
 - **`delonix cluster --name <n> --control-plane <n> --workers <n>`** (sem `kubeadm`) — cluster k8s
