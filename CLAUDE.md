@@ -465,6 +465,26 @@ dentro), mas o `kubectl` do HOST dá `connection refused` — o apiserver não t
 hostfwd. Um `container run --net <rede> -p` NORMAL publica bem (HTTP 200,
 persistente, dois em simultâneo).
 
+**Afinado 2 (tábua rasa, 2026-07-17 11:30)**: com TUDO limpo (0 processos
+delonix antigos, holder+slirp novos das 11:25, 0 containers, 0 contextos
+kubectl) o problema PERSISTE — e as três causas que eu suspeitava estão
+DESCARTADAS por medição:
+  * reaper em massa: o único chamador foi REMOVIDO (`grep reap_orphan_hostfwds`
+    → zero callers); o publish passou a reap REACTIVO (só a porta que falha,
+    só quando falha — ver `publish_with_retry`);
+  * slirp reiniciado: NÃO (pid 520637, nascido 11:25:58, o mesmo desde o início);
+  * holder reiniciado: NÃO (mesmo 11:25:58); refcount=5, sem teardown.
+E no entanto: `w1` publica e serve HTTP 200; minutos depois `list_hostfwd` está
+a ZERO e o curl dá 000 — com o container ainda `Running`. Ou seja **algo remove
+os hostfwds sem ser o reaper, sem reiniciar o slirp e sem `stop`/`rm`**.
+Os únicos removedores no código são `unpublish_port` (chamado por
+`unpublish_ports` no stop/rm, e pelo `publish_with_retry` em falha) — e nenhum
+foi accionado para essas portas. **Causa por identificar; não inventar uma.**
+Próximo passo: instrumentar `unpublish_port` + `slirp_add_hostfwd` para
+imprimir chamador e resposta do slirp (o `Ok` já provou não significar
+"aplicado"), e confirmar se o `add_hostfwd` sequer persiste no slirp (pode
+estar a aceitar e a descartar).
+
 **Afinado (mesma sessão, mais medições)**: o `container start` do nó CHEGA a
 registar o hostfwd (`list_hostfwd` → `6443 -> 10.0.2.100:6443`) — logo o
 mecanismo do `publish_port` corre. Mas nessa altura:
