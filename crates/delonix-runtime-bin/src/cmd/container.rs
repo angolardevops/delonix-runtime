@@ -2246,7 +2246,7 @@ fn cmd_update(store: &Store, id: &str, o: UpdateOpts) -> Result<()> {
 }
 
 /// Publish a port on a LIVE container, by the right path for its network.
-fn publish_live(store: &Store, c: &mut Container, spec: &str) -> Result<()> {
+pub(crate) fn publish_live(store: &Store, c: &mut Container, spec: &str) -> Result<()> {
     let (hp, cp, proto) = delonix_net::parse_publish(spec)?;
     if c.ports.iter().any(|p| delonix_net::parse_publish(p).map(|(h, _, _)| h == hp).unwrap_or(false)) {
         return Err(Error::Invalid(format!("'{}' already publishes host port {hp} — unpublish it first (--publish-rm {hp})", c.name)));
@@ -2289,7 +2289,7 @@ fn publish_live(store: &Store, c: &mut Container, spec: &str) -> Result<()> {
 }
 
 /// Unpublish a host port on a LIVE container.
-fn unpublish_live(store: &Store, c: &mut Container, host_port: &str) -> Result<()> {
+pub(crate) fn unpublish_live(store: &Store, c: &mut Container, host_port: &str) -> Result<()> {
     let hit = c
         .ports
         .iter()
