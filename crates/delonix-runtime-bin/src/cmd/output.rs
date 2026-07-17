@@ -226,13 +226,18 @@ pub fn fmt_age_secs(secs: u64) -> String {
 
 /// Duração legível, estilo docker: "5 seconds", "About a minute", "2 hours".
 /// Deliberadamente grosseira — numa tabela, "3 days" é mais útil que "3d 4h 12m".
+///
+/// Porta o `units.HumanDuration` do docker à letra, incluindo a escolha de
+/// baldes que à primeira vista parece arbitrária: os dias vão até às **2
+/// semanas** (não 1), as semanas até aos **2 meses**, os meses até aos **2
+/// anos**. É isso que evita o plural em falso — nenhum balde pode dar "1
+/// weeks"/"1 months", porque cada um começa no 2. A primeira tentativa aqui
+/// usou os limites "óbvios" (1 semana, 1 mês) mais "About a month/year" a
+/// tapar o singular, e imprimia mesmo "1 weeks" para tudo entre 7 e 13 dias.
 pub fn fmt_duration_secs(secs: u64) -> String {
     const MIN: u64 = 60;
     const HOUR: u64 = 60 * MIN;
     const DAY: u64 = 24 * HOUR;
-    const WEEK: u64 = 7 * DAY;
-    const MONTH: u64 = 30 * DAY;
-    const YEAR: u64 = 365 * DAY;
     match secs {
         s if s < 1 => "Less than a second".to_string(),
         1 => "1 second".to_string(),
@@ -240,14 +245,11 @@ pub fn fmt_duration_secs(secs: u64) -> String {
         s if s < 2 * MIN => "About a minute".to_string(),
         s if s < HOUR => format!("{} minutes", s / MIN),
         s if s < 2 * HOUR => "About an hour".to_string(),
-        s if s < DAY => format!("{} hours", s / HOUR),
-        s if s < 2 * DAY => "About a day".to_string(),
-        s if s < WEEK => format!("{} days", s / DAY),
-        s if s < MONTH => format!("{} weeks", s / WEEK),
-        s if s < 2 * MONTH => "About a month".to_string(),
-        s if s < YEAR => format!("{} months", s / MONTH),
-        s if s < 2 * YEAR => "About a year".to_string(),
-        s => format!("{} years", s / YEAR),
+        s if s < 48 * HOUR => format!("{} hours", s / HOUR),
+        s if s < 14 * DAY => format!("{} days", s / DAY),
+        s if s < 60 * DAY => format!("{} weeks", s / (7 * DAY)),
+        s if s < 730 * DAY => format!("{} months", s / (30 * DAY)),
+        s => format!("{} years", s / (365 * DAY)),
     }
 }
 
@@ -319,6 +321,24 @@ mod tests {
         assert_eq!(fmt_age_secs(600), "10 minutes ago");
         assert_eq!(fmt_age_secs(3 * 3600), "3 hours ago");
         assert_eq!(fmt_age_secs(5 * 86400), "5 days ago");
+    }
+
+    #[test]
+    fn nenhum_balde_imprime_um_plural_em_falso() {
+        // Regressão: um `image ls` real mostrou "1 weeks ago" para uma imagem de
+        // 7 dias. Nenhuma duração pode produzir "1 <plural>" — no docker os
+        // baldes de weeks/months/years começam todos no 2, por construção.
+        const DAY: u64 = 86400;
+        for s in [0u64, 1, 30, 90, 3600, 5400, 47 * 3600, 7 * DAY, 13 * DAY, 14 * DAY, 59 * DAY, 60 * DAY, 729 * DAY, 730 * DAY, 3650 * DAY] {
+            let d = fmt_duration_secs(s);
+            assert!(!d.starts_with("1 ") || d == "1 second", "plural em falso para {s}s: {d:?}");
+        }
+        // E os limites de balde, à letra do docker.
+        assert_eq!(fmt_duration_secs(7 * DAY), "7 days");
+        assert_eq!(fmt_duration_secs(13 * DAY), "13 days");
+        assert_eq!(fmt_duration_secs(14 * DAY), "2 weeks");
+        assert_eq!(fmt_duration_secs(60 * DAY), "2 months");
+        assert_eq!(fmt_duration_secs(730 * DAY), "2 years");
     }
 
     #[test]
