@@ -1069,7 +1069,18 @@ fn write_userns_maps(pid: i32, want_range: bool) -> Result<()> {
     // válido. Se os helpers/subuid não existirem, cai no mapa de um só uid (e o
     // chamador degrada para correr como root, com aviso).
     if want_range && euid != 0 && have_subid_helpers() {
-        let _ = std::fs::write(format!("/proc/{pid}/setgroups"), "deny");
+        // NÃO escrever `setgroups=deny` aqui. Só é OBRIGATÓRIO quando um não-root
+        // escreve o `gid_map` À MÃO (ver o ramo abaixo) — o kernel exige-o para
+        // impedir que se largue um grupo restritivo. Com `newgidmap` (helper
+        // setuid, valida contra /etc/subgid) o mapeamento é privilegiado e o
+        // kernel deixa `setgroups` ficar em `allow`.
+        //
+        // Pô-lo em `deny` aqui quebrava metade das imagens oficiais: os
+        // entrypoints que largam privilégio (`su-exec`/`gosu`/`setpriv`) chamam
+        // `setgroups()` ANTES do `setuid()` e levavam EPERM. O `postgres` morria
+        // logo com `failed switching to 'postgres': operation not permitted`,
+        // apesar de o uid alvo estar bem mapeado e de termos CAP_SETUID/SETGID.
+        // O docker/podman rootless também deixam `allow` neste caminho.
         let range = USERNS_RANGE - 1; // 1..USERNS_RANGE delegados aos subuids
         let map_uid = format!("0 {euid} 1 1 {USERNS_UID_BASE} {range}");
         let map_gid = format!("0 {egid} 1 1 {USERNS_UID_BASE} {range}");
