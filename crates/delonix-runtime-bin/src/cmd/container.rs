@@ -466,7 +466,9 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
     if let Some(ip) = &attached_ip {
         for spec in &ports {
             if let Err(e) = publish_with_retry(ip, spec) {
-                unpublish_ports(&c);
+                // Caminho de rede custom: a limpeza e' no ingress, nao ha slirp
+                // proprio para reapar (e o container ainda nem arrancou).
+                unpublish_ports(&c, None);
                 infra::detach_container(&id, ip);
                 return Err(e);
             }
@@ -521,8 +523,9 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
         } else {
             // foreground: o `create_with` só volta depois do waitpid — remove já.
             let c = find(store, &id)?;
-            unpublish_ports(&c);
+            let pid = c.pid;
             runtime::remove(store, &c, true)?;
+            unpublish_ports(&c, pid);
             let _ = images.unmount_rootfs(&c.id);
             return Ok(());
         }
@@ -557,8 +560,9 @@ fn spawn_rm_watcher(images: &ImageStore, store: &Store, id: &str) {
             let Ok(mut c) = find(store, id) else { std::process::exit(0) };
             let _ = runtime::reconcile_status(&mut c);
             if !matches!(c.status, delonix_runtime_core::Status::Running | delonix_runtime_core::Status::Paused) {
-                unpublish_ports(&c);
+                let pid = c.pid;
                 let _ = runtime::remove(store, &c, true);
+                unpublish_ports(&c, pid);
                 let _ = images.unmount_rootfs(&c.id);
                 std::process::exit(0);
             }
@@ -943,17 +947,42 @@ fn publish_with_retry(ip: &str, spec: &str) -> Result<()> {
     }
 }
 
-/// Remove as publicações de ingress de um container (best-effort, idempotente).
-/// Só o caminho de rede custom deixa regras persistentes (hostfwd no slirp único
-/// + DNAT no holder); no caminho slirp-por-container o processo slirp morre com
-/// o netns do container, não há nada para limpar.
-fn unpublish_ports(c: &Container) {
-    if c.network.is_none() {
-        return;
-    }
-    for spec in &c.ports {
-        if let Ok((host_port, _, _)) = delonix_net::parse_publish(spec) {
-            infra::unpublish_port(&host_port);
+/// Larga as portas publicadas por um container (best-effort, idempotente).
+///
+/// Dois caminhos, ambos precisam de limpeza:
+///
+/// - **rede custom**: regras persistentes no ingress (hostfwd no slirp único +
+///   DNAT no holder) — removem-se por porta.
+/// - **slirp-por-container**: mata-se o slirp DELE. Este ramo dizia antes que
+///   "o processo slirp morre com o netns do container, não há nada para limpar"
+///   e fazia `return` já. É falso: o slirp só sai quando NOTA que o netns
+///   desapareceu, e nesse intervalo continua a segurar a porta no host. Media
+///   assim: `stop` seguido de `start` imediato falhava 3 em 3 vezes com
+///   `add_hostfwd: slirp_add_hostfwd failed`, e passava a funcionar sozinho uns
+///   segundos depois.
+///
+/// `slirp_pid` tem de ser o pid do init **de antes** de o parar: `runtime::stop`
+/// e `runtime::remove` põem `container.pid = None`, por isso ler `c.pid` aqui
+/// dentro daria `None` em todos os chamadores que já pararam o container — o
+/// slirp nunca seria reapado e o bug acima ficaria de pé. Daí ser um parâmetro
+/// explícito em vez de vir do registo.
+fn unpublish_ports(c: &Container, slirp_pid: Option<i32>) {
+    match c.network {
+        Some(_) => {
+            for spec in &c.ports {
+                if let Ok((host_port, _, _)) = delonix_net::parse_publish(spec) {
+                    infra::unpublish_port(&host_port);
+                }
+            }
+        }
+        None => {
+            // Sem portas publicadas não há slirp com api-socket a segurar nada.
+            if c.ports.is_empty() {
+                return;
+            }
+            if let Some(pid) = slirp_pid {
+                delonix_net::reap_slirp_for(pid);
+            }
         }
     }
 }
@@ -994,7 +1023,8 @@ fn cmd_start(images: &ImageStore, store: &Store, id: &str) -> Result<()> {
         if let Some(ip) = c.ip.clone() {
             for spec in &c.ports {
                 if let Err(e) = infra::publish_port(&ip, spec) {
-                    unpublish_ports(&c);
+                    // Rede custom: limpeza no ingress, sem slirp proprio.
+                    unpublish_ports(&c, None);
                     infra::detach_container(&c.id, &ip);
                     return Err(e);
                 }
@@ -1086,8 +1116,10 @@ fn cmd_stop(store: &Store, id: &str, time: u64) -> Result<()> {
         cur.stopped_by_user = true;
         true
     });
+    // O pid TEM de ser lido antes do `stop`, que poe `container.pid = None`.
+    let pid = c.pid;
     runtime::stop(store, &mut c, time)?;
-    unpublish_ports(&c);
+    unpublish_ports(&c, pid);
     delonix_runtime_core::events::emit(
         &super::util::state_root(), "container", "stop", &c.id, &c.name, None,
     );
@@ -1098,8 +1130,9 @@ fn cmd_stop(store: &Store, id: &str, time: u64) -> Result<()> {
 /// Remove um container JÁ resolvido (o `cmd_rm` resolve o id primeiro). Extraído
 /// para o `cluster delete` do modo kind poder remover nós sem passar por strings.
 pub(crate) fn remove_container(images: &ImageStore, store: &Store, c: &Container, force: bool) -> Result<()> {
+    let pid = c.pid;
     runtime::remove(store, c, force)?;
-    unpublish_ports(c);
+    unpublish_ports(c, pid);
     let _ = images.unmount_rootfs(&c.id);
     images.remove_container_dir(&c.id);
     Ok(())
@@ -1107,8 +1140,9 @@ pub(crate) fn remove_container(images: &ImageStore, store: &Store, c: &Container
 
 fn cmd_rm(images: &ImageStore, store: &Store, id: &str, force: bool) -> Result<()> {
     let c = find(store, id)?;
+    let pid = c.pid;
     runtime::remove(store, &c, force)?;
-    unpublish_ports(&c);
+    unpublish_ports(&c, pid);
     let _ = images.unmount_rootfs(&c.id); // desmonta/limpa o scratch do overlay
     // DESTROY definitivo do directório do container (inclui o `rootfs/` flat).
     // O `unmount_rootfs` PRESERVA-o de propósito (é o estado do container, para

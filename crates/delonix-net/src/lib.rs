@@ -1797,46 +1797,90 @@ pub fn slirp_attach(pid: i32, publish: &[String]) -> Result<()> {
 /// Barato (uma passagem por /proc) e seguro (só mexe em slirp4netns com alvo morto).
 /// Devolve quantos reapou.
 pub fn reap_orphan_slirp() -> usize {
+    // Alvo morto = órfão. `kill(pid, 0)` == 0 ⇒ existe; ESRCH ⇒ morto.
+    // SAFETY: kill com sinal 0 não envia sinal — só testa a existência do pid.
+    reap_slirp_where(|target| unsafe { libc::kill(target, 0) } != 0)
+}
+
+/// **Mata o slirp4netns de UM container** (o que serve `target_pid`) e espera
+/// que ele largue mesmo a porta de host. Devolve `true` se matou algum.
+///
+/// Existe por causa de uma race 100% reproduzível: o `slirp4netns` só sai
+/// quando NOTA que o netns do alvo desapareceu, e até lá continua a segurar a
+/// porta publicada no host. Um `delonix container stop && delonix container
+/// start` — o idioma de restart mais natural que há — falhava sempre com
+/// `add_hostfwd: slirp_add_hostfwd failed`, e passava a funcionar uns segundos
+/// depois, sozinho. O `stop` tem de largar os recursos que o `run` tomou, de
+/// forma síncrona, em vez de deixar isso ao acaso.
+///
+/// Cirúrgico por desenho: só toca no slirp cujo alvo é EXACTAMENTE este pid.
+/// Ao contrário de [`reap_orphan_slirp`], não depende de o alvo já estar morto
+/// — o chamador é quem o matou.
+pub fn reap_slirp_for(target_pid: i32) -> bool {
+    let n = reap_slirp_where(|target| target == target_pid);
+    if n == 0 {
+        return false;
+    }
+    // Espera curta até o processo sair de facto: o SIGTERM é assíncrono e sem
+    // isto o `start` seguinte voltava a apanhar a porta ainda ocupada — que é
+    // exactamente o bug que este código existe para fechar.
+    for _ in 0..50 {
+        if !slirp_exists_for(target_pid) {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    true
+}
+
+/// Varre `/proc` à procura de processos `slirp4netns` e mata (SIGTERM) aqueles
+/// cujo pid-alvo satisfaz `should_reap`. Devolve quantos matou.
+///
+/// A varredura estava embutida em `reap_orphan_slirp`; foi extraída para que a
+/// reaper cirúrgica ([`reap_slirp_for`]) partilhe exactamente a mesma lógica de
+/// identificação — duas cópias divergiriam no dia em que o argv do slirp mudasse.
+fn reap_slirp_where(should_reap: impl Fn(i32) -> bool) -> usize {
     let mut reaped = 0;
-    let rd = match std::fs::read_dir("/proc") {
-        Ok(r) => r,
-        Err(_) => return 0,
-    };
+    for (pid, target) in list_slirps() {
+        if !should_reap(target) {
+            continue;
+        }
+        // SAFETY: SIGTERM a um slirp4netns identificado pelo seu argv.
+        unsafe {
+            libc::kill(pid, libc::SIGTERM);
+        }
+        let _ = std::fs::remove_file(slirp_container_sock(target));
+        reaped += 1;
+    }
+    reaped
+}
+
+fn slirp_exists_for(target_pid: i32) -> bool {
+    list_slirps().into_iter().any(|(_, t)| t == target_pid)
+}
+
+/// `(pid do slirp, pid do container que serve)` de cada slirp4netns a correr.
+fn list_slirps() -> Vec<(i32, i32)> {
+    let mut out = Vec::new();
+    let Ok(rd) = std::fs::read_dir("/proc") else { return out };
     for e in rd.flatten() {
         let name = e.file_name();
-        let pidstr = name.to_string_lossy();
-        let pid: i32 = match pidstr.parse() {
-            Ok(p) => p,
-            Err(_) => continue, // não é um directório de processo
+        let Ok(pid) = name.to_string_lossy().parse::<i32>() else {
+            continue; // não é um directório de processo
         };
-        let cmdline = match std::fs::read(format!("/proc/{pid}/cmdline")) {
-            Ok(c) => c,
-            Err(_) => continue,
-        };
+        let Ok(cmdline) = std::fs::read(format!("/proc/{pid}/cmdline")) else { continue };
         // cmdline = args separados por NUL. O argv[0] tem de ser slirp4netns.
         let argv: Vec<&[u8]> = cmdline.split(|b| *b == 0).filter(|s| !s.is_empty()).collect();
         if argv.is_empty() || !argv[0].ends_with(b"slirp4netns") {
             continue;
         }
         // o pid-alvo é o penúltimo arg (… <pid> tap0). Acha o último arg numérico.
-        let target: Option<i32> = argv
-            .iter()
-            .rev()
-            .find_map(|a| std::str::from_utf8(a).ok().and_then(|s| s.parse::<i32>().ok()));
-        let Some(target) = target else { continue };
-        // alvo vivo? `kill(pid, 0)` == 0 ⇒ existe. ESRCH ⇒ morto.
-        // SAFETY: kill com sinal 0 não envia sinal — só testa a existência do pid.
-        let alive = unsafe { libc::kill(target, 0) } == 0;
-        if alive {
-            continue;
+        let target = argv.iter().rev().find_map(|a| std::str::from_utf8(a).ok().and_then(|s| s.parse::<i32>().ok()));
+        if let Some(t) = target {
+            out.push((pid, t));
         }
-        // órfão: o container já morreu mas o slirp ficou. Mata-o (liberta a porta).
-        // SAFETY: SIGTERM a um slirp4netns confirmado órfão.
-        unsafe { libc::kill(pid, libc::SIGTERM); }
-        let _ = std::fs::remove_file(std::env::temp_dir().join(format!("delonix-slirp-{target}.sock")));
-        reaped += 1;
     }
-    reaped
+    out
 }
 
 /// Pede ao slirp4netns (via o api-socket JSON) um *host-forward* `host_port` →
