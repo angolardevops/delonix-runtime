@@ -1715,14 +1715,21 @@ pub const SLIRP_DNS: &str = "10.0.2.3";
 /// netns do container (pelo PID) com NAT em *userspace* — **sem root**. Espera o
 /// sinal de pronto (`--ready-fd`) antes de devolver; o processo slirp segue a
 /// vida do container (sai quando o netns desaparece). (A13.)
+/// Caminho do api-socket do slirp PRÓPRIO de um container (caminho
+/// slirp-por-container, sem rede custom), pelo PID do seu init.
+///
+/// **A convenção do nome vive só aqui.** O `container update` precisa deste
+/// caminho para publicar/despublicar portas a quente, e duplicar o `format!`
+/// do lado da CLI faria as duas metades divergirem em silêncio no dia em que
+/// isto mudasse.
+pub fn slirp_container_sock(pid: i32) -> std::path::PathBuf {
+    std::env::temp_dir().join(format!("delonix-slirp-{pid}.sock"))
+}
+
 pub fn slirp_attach(pid: i32, publish: &[String]) -> Result<()> {
     // Se há portas a publicar, abrimos o api-socket do slirp para lhe pedir os
     // *host-forwards* (publicação de portas SEM root, como o Podman rootless).
-    let api_sock = if publish.is_empty() {
-        None
-    } else {
-        Some(std::env::temp_dir().join(format!("delonix-slirp-{pid}.sock")))
-    };
+    let api_sock = if publish.is_empty() { None } else { Some(slirp_container_sock(pid)) };
     let mut fds = [0i32; 2];
     // SAFETY: pipe() preenche 2 fds.
     if unsafe { libc::pipe(fds.as_mut_ptr()) } != 0 {
@@ -1835,7 +1842,7 @@ pub fn reap_orphan_slirp() -> usize {
 /// Pede ao slirp4netns (via o api-socket JSON) um *host-forward* `host_port` →
 /// `guest_port` no IP do container ([`SLIRP_IP`]). É como o Podman publica portas
 /// em rootless. Tenta brevemente até o socket existir (o slirp cria-o ao arrancar).
-fn slirp_add_hostfwd(sock: &std::path::Path, host_port: &str, guest_port: &str, proto: &str) -> Result<()> {
+pub fn slirp_add_hostfwd(sock: &std::path::Path, host_port: &str, guest_port: &str, proto: &str) -> Result<()> {
     use std::io::{Read, Write};
     use std::os::unix::net::UnixStream;
     // SEGURO POR OMISSÃO: liga a porta publicada só ao loopback (127.0.0.1), não a
