@@ -167,6 +167,8 @@ Options:
           
       --no-compress
           Não comprimir o qcow2 final (maior, mas sem custo de descompressão nas leituras do backing file em runtime)
+      --offline
+          Obter os .deb do k8s no HOST (verificados) e instalá-los com `dpkg` — o appliance corre sem rede. Dispensa DHCP/DNS no guest
   -h, --help
           Print help</code></pre></div>
 <h3>Exemplos</h3><div class="ex"><div class="cap">Construir a imagem VM dourada (descarrega Ubuntu, valida SHA256SUMS, virt-customize)</div><pre><code>delonix image --vm build --name k8s-golden --k8s-version 1.34</code></pre></div>

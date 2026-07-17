@@ -80,6 +80,9 @@ comando, do zero a um cluster com o <code>delonix-cri</code> como runtime (sem c
 Usage: delonix cluster &lt;COMMAND&gt;
 
 Commands:
+  init     Inicializa um projecto com os manifestos de cluster (kind/vm/ssh) — ficheiros JÁ PREENCHIDOS (imagens incluídas), prontos a usar sem editar nada
+  create   Cria um cluster Kubernetes local **sem manifesto e sem Docker** (modo kind nativo): arranca os nós `kindest/node` no próprio motor Delonix e faz o bootstrap com `kubeadm`. Sem flags = 1 control-plane pronto a usar
+  delete   Remove um cluster do modo kind (pára e apaga os nós + kubeconfig)
   apply    Aplica o(s) documento(s) `kind: Cluster` de um manifesto
   kubeadm  Provisiona VMs (imagem VM dourada) + bootstrap `kubeadm` — do zero a um cluster a funcionar, sem escrever um manifesto à mão
   help     Print this message or the help of the given subcommand(s)

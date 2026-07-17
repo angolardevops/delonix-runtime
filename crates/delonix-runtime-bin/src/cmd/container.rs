@@ -416,6 +416,11 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
             .or_else(|| (!slirp_ports.is_empty()).then(|| delonix_net::SLIRP_IP.to_string())),
         ..Default::default()
     };
+    // ANTES do ramo supervisionado (que faz `return`): senão os containers com
+    // `--restart` nunca emitiam `create`.
+    delonix_runtime_core::events::emit(
+        &super::util::state_root(), "container", "create", &c.id, &c.name, Some(&image),
+    );
     // `--restart`: em vez de a CLI criar o container e sair (deixando-o órfão do
     // `init`, com o exit code perdido), um SUPERVISOR destacado cria-o e fica
     // seu pai — ver `run_supervised`.
@@ -595,6 +600,12 @@ fn run_supervised(
                 Ok(s) => s,
                 Err(_) => std::process::exit(1),
             };
+            // `die` com o exit code REAL — o supervisor e o unico que o sabe
+            // (e pai do container); um `run -d` normal so veria "Crashed".
+            delonix_runtime_core::events::emit(
+                &super::util::state_root(), "container", "die", &c.id, &c.name,
+                Some(&format!("exit={}", status.exit_code())),
+            );
             if !should_restart(policy, &status, restarts) {
                 std::process::exit(0);
             }
@@ -828,6 +839,9 @@ fn cmd_start(images: &ImageStore, store: &Store, id: &str) -> Result<()> {
         ..Default::default()
     };
     runtime::create_with(store, &mut c, &rootfs, &spec)?;
+    delonix_runtime_core::events::emit(
+        &super::util::state_root(), "container", "start", &c.id, &c.name, None,
+    );
     println!("{}", c.id);
     Ok(())
 }
@@ -843,6 +857,9 @@ fn cmd_stop(store: &Store, id: &str, time: u64) -> Result<()> {
     });
     runtime::stop(store, &mut c, time)?;
     unpublish_ports(&c);
+    delonix_runtime_core::events::emit(
+        &super::util::state_root(), "container", "stop", &c.id, &c.name, None,
+    );
     println!("{}", c.id);
     Ok(())
 }
@@ -869,6 +886,9 @@ fn cmd_rm(images: &ImageStore, store: &Store, id: &str, force: bool) -> Result<(
     // testes, e o kubelet a marcar o nó com `disk-pressure`. A doc do
     // `remove_container_dir` já dizia "chamado pelo `rm`" — mas não era.
     images.remove_container_dir(&c.id);
+    delonix_runtime_core::events::emit(
+        &super::util::state_root(), "container", "remove", &c.id, &c.name, None,
+    );
     println!("{}", c.id);
     Ok(())
 }
