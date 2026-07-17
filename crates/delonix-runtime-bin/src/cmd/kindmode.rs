@@ -104,7 +104,12 @@ fn pick_api_port(store: &Store, preferred: Option<u16>, cluster: &str) -> Result
     // longe das portas de serviço.
     for p in 36443..36543 {
         if port_free(store, p) {
-            super::output::info(&format!("porta {DEFAULT_API_PORT} ocupada — o cluster '{cluster}' usa a {p}"));
+            let msg = if super::output::is_pt() {
+                format!("porta {DEFAULT_API_PORT} ocupada — o cluster '{cluster}' usa a {p}")
+            } else {
+                format!("port {DEFAULT_API_PORT} in use — cluster '{cluster}' uses {p}")
+            };
+            super::output::info(&msg);
             return Ok(p);
         }
     }
@@ -275,68 +280,100 @@ fn join_config_yaml(j: &JoinInfo) -> String {
     )
 }
 
-/// Progresso ao estilo do `kind`: uma linha por passo, marcada com `✓` quando
-/// fecha.
+/// Progresso ao estilo do `kind`, com **spinner animado**: cada passo mostra um
+/// braille a girar (` ⠋ A arrancar o control-plane 🕹️ `) numa thread de fundo, e
+/// a linha é reescrita com ` ✓ …` (ou ` ✗ …`) quando fecha.
 ///
-/// O `kind` mostra ` ⠈⠁ Ensuring node image (…) 🖼` a girar e reescreve a linha
-/// com ` ✓ …` no fim. Aqui não há spinner com thread: escreve-se a linha com
-/// `•`, e no fim reescreve-se com `\r`. Dá o mesmo resultado visível sem uma
-/// thread de animação a competir com o output dos passos.
+/// # Porquê uma thread
 ///
-/// **Sem TTY (pipe, CI, `2>&1 | tee`) o `\r` não funciona** — aí imprime-se só a
-/// linha final, uma por passo, que é o que um log de CI quer.
+/// O trabalho do passo (`node_exec_capture`) bloqueia o thread principal, às
+/// vezes por minutos (`kubeadm init` puxa imagens). Sem uma thread a animar, a
+/// linha ficava congelada e parecia pendurada. A thread só toca no stderr (o
+/// output do passo vai para um ficheiro capturado, ver `node_exec_capture`), por
+/// isso não há duas escritas a competir pela mesma linha.
+///
+/// **Sem TTY (pipe, CI, `2>&1 | tee`)** não há spinner nem `\r`: imprime-se só a
+/// linha final, uma por passo — o que um log de CI quer.
 struct Progress {
     tty: bool,
-    aberto: bool,
     msg: String,
     icon: String,
+    spin: Option<SpinnerHandle>,
 }
+
+struct SpinnerHandle {
+    stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    handle: Option<std::thread::JoinHandle<()>>,
+}
+
+/// Frames do spinner (braille, como o `kind`/`spinnies`).
+const SPIN_FRAMES: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
 impl Progress {
     fn new() -> Self {
         // SAFETY: isatty não tem pré-condições; 2 = stderr.
         let tty = unsafe { libc::isatty(2) } == 1;
-        Self { tty, aberto: false, msg: String::new(), icon: String::new() }
+        Self { tty, msg: String::new(), icon: String::new(), spin: None }
     }
 
-    /// Abre um passo. `icon` é o emoji que o `kind` põe no fim da linha.
+    /// Abre um passo e arranca o spinner (em TTY). `icon` é o emoji do fim.
     fn step(&mut self, msg: &str, icon: &str) {
-        self.fecha_pendente();
+        self.close_line('✗'); // fecha um passo anterior deixado em aberto
         self.msg = msg.to_string();
         self.icon = icon.to_string();
-        if self.tty {
-            eprint!(" • {msg} {icon} ");
-            let _ = std::io::Write::flush(&mut std::io::stderr());
-            self.aberto = true;
+        if !self.tty {
+            return;
         }
-        // Sem TTY não se escreve nada agora: a linha sai no `ok()`, já com o ✓.
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let (s2, msg, icon) = (stop.clone(), self.msg.clone(), self.icon.clone());
+        let handle = std::thread::spawn(move || {
+            use std::io::Write;
+            let mut i = 0usize;
+            while !s2.load(std::sync::atomic::Ordering::Relaxed) {
+                // `\x1b[K` limpa até ao fim da linha (evita restos de um frame
+                // mais longo). Sem `\n` — a linha é reescrita in-place.
+                eprint!("\r {} {msg} {icon}\x1b[K", SPIN_FRAMES[i % SPIN_FRAMES.len()]);
+                let _ = std::io::stderr().flush();
+                i += 1;
+                std::thread::sleep(std::time::Duration::from_millis(90));
+            }
+        });
+        self.spin = Some(SpinnerHandle { stop, handle: Some(handle) });
     }
 
     /// Fecha o passo actual com `✓`.
     fn ok(&mut self) {
-        if self.tty && self.aberto {
-            eprint!("\r");
-        }
-        eprintln!(" ✓ {} {}", self.msg, self.icon);
-        self.aberto = false;
+        self.close_line('✓');
     }
 
-    /// Um passo que falhou fica com `✗` — a linha não pode ficar pendurada com
-    /// o `•` quando o erro aparecer a seguir.
-    fn fecha_pendente(&mut self) {
-        if self.aberto {
-            if self.tty {
-                eprint!("\r");
+    /// Pára o spinner (se houver) e escreve a linha final com `mark`. Idempotente
+    /// — chamado pelo `ok`, pelo próximo `step` e pelo `Drop`.
+    fn close_line(&mut self, mark: char) {
+        let had_spinner = self.spin.is_some();
+        if let Some(mut s) = self.spin.take() {
+            s.stop.store(true, std::sync::atomic::Ordering::Relaxed);
+            if let Some(h) = s.handle.take() {
+                let _ = h.join();
             }
-            eprintln!(" ✗ {} {}", self.msg, self.icon);
-            self.aberto = false;
+        } else if self.msg.is_empty() {
+            return; // nada aberto
         }
+        if self.tty {
+            // `\r` + limpar a linha do spinner, depois a linha final.
+            eprintln!("\r {mark} {} {}\x1b[K", self.msg, self.icon);
+        } else if !self.msg.is_empty() {
+            eprintln!(" {mark} {} {}", self.msg, self.icon);
+        }
+        let _ = had_spinner;
+        self.msg.clear();
     }
 }
 
 impl Drop for Progress {
     fn drop(&mut self) {
-        self.fecha_pendente();
+        // Um passo deixado em aberto (erro a meio) fecha com ✗ em vez de ficar
+        // com o spinner pendurado.
+        self.close_line('✗');
     }
 }
 
@@ -492,15 +529,23 @@ pub(crate) fn create(images: &ImageStore, store: &Store, cfg: &KindCluster) -> R
         // aparência de HA, que é pior que não ter. HA a sério precisa de um
         // load-balancer à frente (o `kind` corre um haproxy), e isso ainda não
         // está feito aqui. O `cluster kubeadm` recusa pela MESMA razão.
-        return Err(Error::Invalid(format!(
-            "--control-planes {} ainda não é suportado: o kubeadm em HA precisa de um endpoint \
-             estável (load-balancer/VIP) à frente dos control-planes, e o delonix ainda não o \
-             provisiona. Usa `--control-planes 1` (e `--workers N` para capacidade).",
-            cfg.control_planes
-        )));
+        let n = cfg.control_planes;
+        return Err(Error::Invalid(if super::output::is_pt() {
+            format!(
+                "--control-planes {n} ainda não é suportado: o kubeadm em HA precisa de um endpoint \
+                 estável (load-balancer/VIP) à frente dos control-planes, e o delonix ainda não o \
+                 provisiona. Usa `--control-planes 1` (e `--workers N` para capacidade)."
+            )
+        } else {
+            format!(
+                "--control-planes {n} is not supported yet: kubeadm HA needs a stable endpoint \
+                 (load-balancer/VIP) in front of the control-planes, which delonix does not provision \
+                 yet. Use `--control-planes 1` (and `--workers N` for capacity)."
+            )
+        }));
     }
 
-    super::output::info(&format!("A criar o cluster \"{}\"", cfg.name));
+    super::output::info(&format!("{} \"{}\"", super::output::tr("Creating cluster", "A criar o cluster"), cfg.name));
     let mut p = Progress::new();
 
     // Cada nó arranca por um re-exec (processo próprio) e, em rootless sem
@@ -510,9 +555,14 @@ pub(crate) fn create(images: &ImageStore, store: &Store, cfg: &KindCluster) -> R
     // nós via env — herdada por toda a cadeia de re-exec.
     if !delonix_runtime::cgroup_limits_apply() {
         super::output::aviso(
-            "rootless sem delegação de cgroup: os limites de CPU/memória/PIDs dos nós não são aplicados \
-             (o isolamento de namespaces/seccomp mantém-se). Para limites, corre sob \
-             `systemd-run --user --scope -p Delegate=yes`.",
+            super::output::tr(
+                "rootless without cgroup delegation: the nodes' CPU/memory/PIDs limits are not enforced \
+                 (namespace/seccomp isolation still holds). For limits, run under \
+                 `systemd-run --user --scope -p Delegate=yes`.",
+                "rootless sem delegação de cgroup: os limites de CPU/memória/PIDs dos nós não são aplicados \
+                 (o isolamento de namespaces/seccomp mantém-se). Para limites, corre sob \
+                 `systemd-run --user --scope -p Delegate=yes`.",
+            ),
         );
     }
     // SAFETY: single-threaded aqui (antes de qualquer thread de worker); a env
@@ -540,14 +590,14 @@ pub(crate) fn create(images: &ImageStore, store: &Store, cfg: &KindCluster) -> R
     // arrancam em paralelo e, sem este passo, N threads chamariam
     // `resolve_or_pull` ao mesmo tempo e puxavam a MESMA imagem N vezes.
     let curta = cfg.image.split('@').next().unwrap_or(&cfg.image).to_string();
-    p.step(&format!("A garantir a imagem do nó ({curta})"), "🖼");
+    p.step(&format!("{} ({curta})", super::output::tr("Ensuring node image", "A garantir a imagem do nó")), "🖼");
     super::util::resolve_or_pull(images, &cfg.image)?;
     p.ok();
 
     // Resolve a porta ANTES de arrancar o nó: um 2.º cluster não deve rebentar
     // só porque a 6443 está tomada.
     let api_port = pick_api_port(store, cfg.api_port, &cfg.name)?;
-    p.step(&format!("A preparar os nós ({})", 1 + cfg.workers), "📦");
+    p.step(&format!("{} ({})", super::output::tr("Preparing nodes", "A preparar os nós"), 1 + cfg.workers), "📦");
     let c = boot_node(images, store, cfg, &node, "control-plane", vec![format!("{api_port}:6443")])?;
     p.ok();
     // O IP REAL do nó na rede do cluster. Com `--net host -p` era o do slirp
@@ -566,7 +616,7 @@ pub(crate) fn create(images: &ImageStore, store: &Store, cfg: &KindCluster) -> R
     // nunca fica pronto sem a feature gate) e depois a correr as fases à mão.
     // Um ficheiro de config leva as 3 afinações ANTES de o kubelet arrancar —
     // uma só passagem, sem remendos. É também o que o `kind` faz (/kind/kubeadm.conf).
-    p.step("A escrever a configuração", "📜");
+    p.step(super::output::tr("Writing configuration", "A escrever a configuração"), "📜");
     let version = cfg.k8s_version.as_deref().map(|v| format!("kubernetesVersion: v{v}\n")).unwrap_or_default();
     let kubeadm_conf = format!(
         "apiVersion: kubeadm.k8s.io/v1beta4\n\
@@ -603,7 +653,7 @@ pub(crate) fn create(images: &ImageStore, store: &Store, cfg: &KindCluster) -> R
 
     // O `kubeadm init` puxa as imagens do control-plane cá dentro — é o passo
     // mais demorado de todos.
-    p.step("A arrancar o control-plane", "🕹️");
+    p.step(super::output::tr("Starting control-plane", "A arrancar o control-plane"), "🕹️");
     node_must(
         &c,
         "kubeadm init",
@@ -618,7 +668,7 @@ pub(crate) fn create(images: &ImageStore, store: &Store, cfg: &KindCluster) -> R
 
     // --- CNI (senão o nó fica NotReady para sempre) ---
     if cfg.cni == "default" {
-        p.step("A instalar a CNI (kindnet)", "🔌");
+        p.step(super::output::tr("Installing CNI (kindnet)", "A instalar a CNI (kindnet)"), "🔌");
         node_must(
             &c,
             "CNI",
@@ -641,7 +691,7 @@ pub(crate) fn create(images: &ImageStore, store: &Store, cfg: &KindCluster) -> R
     );
     }
 
-    p.step("À espera do control-plane ficar Ready", "⏳");
+    p.step(super::output::tr("Waiting for control-plane to be Ready", "À espera do control-plane ficar Ready"), "⏳");
     wait_in_node(
         &c,
         "o control-plane ficar Ready",
@@ -677,7 +727,7 @@ pub(crate) fn create(images: &ImageStore, store: &Store, cfg: &KindCluster) -> R
         let join = parse_join_command(&join_cmd)?;
         let join_yaml = join_config_yaml(&join);
 
-        p.step(&format!("A juntar {} worker(s)", cfg.workers), "🚜");
+        p.step(&format!("{} {} worker(s)", super::output::tr("Joining", "A juntar"), cfg.workers), "🚜");
         // Em PARALELO: cada worker é independente (arranca, junta-se, acabou) e
         // em série o tempo somava-se. Cada thread escreve o SEU
         // `join-<nó>.conf` — um ficheiro partilhado seria uma corrida.
@@ -739,24 +789,32 @@ pub(crate) fn create(images: &ImageStore, store: &Store, cfg: &KindCluster) -> R
     let ctx = context_name(&cfg.name);
     match install_kubecontext(&cfg.name) {
         Ok(path) => {
-            p.step(&format!("A definir o contexto kubectl para \"{ctx}\""), "📇");
+            p.step(&format!("{} \"{ctx}\"", super::output::tr("Setting kubectl context to", "A definir o contexto kubectl para")), "📇");
             p.ok();
             let _ = path;
         }
         // Não é razão para falhar o cluster: ele ESTÁ de pé e o kubeconfig
         // próprio funciona. Diz-se o que correu mal e como usar à mesma.
         Err(e) => {
-            super::output::aviso(&format!("não consegui instalar o contexto no ~/.kube/config: {e}"));
+            super::output::aviso(&if super::output::is_pt() {
+                format!("não consegui instalar o contexto no ~/.kube/config: {e}")
+            } else {
+                format!("could not install the context into ~/.kube/config: {e}")
+            });
             eprintln!(
                 "   {}",
-                super::output::secundario(&format!("usa: kubectl --kubeconfig {} get nodes", kubeconfig_path(&cfg.name).display()))
+                super::output::secundario(&if super::output::is_pt() {
+                    format!("usa: kubectl --kubeconfig {} get nodes", kubeconfig_path(&cfg.name).display())
+                } else {
+                    format!("use: kubectl --kubeconfig {} get nodes", kubeconfig_path(&cfg.name).display())
+                })
             );
         }
     }
     drop(p);
 
     println!();
-    println!("Já podes usar o teu cluster:");
+    println!("{}", super::output::tr("You can now use your cluster:", "Já podes usar o teu cluster:"));
     println!();
     println!("  {}", super::output::destaque(&format!("kubectl cluster-info --context {ctx}")));
     println!();
@@ -896,7 +954,7 @@ fn write_kubeconfig(c: &Container, name: &str, api_port: u16) -> Result<()> {
     let data = std::fs::read(&src)
         .map_err(|e| Error::Invalid(format!("a ler o kubeconfig do nó ({}): {e}", src.display())))?;
     std::fs::write(&path, data)?;
-    eprintln!("kubeconfig: {}", path.display());
+    eprintln!("kubeconfig: {}", path.display());  // rótulo universal
     Ok(())
 }
 
@@ -913,7 +971,7 @@ pub(crate) fn delete(images: &ImageStore, store: &Store, name: &str) -> Result<(
         return Err(Error::NotFound(format!("cluster kind '{name}'")));
     }
     for n in &nodes {
-        eprintln!("a remover o nó '{}'...", n.name);
+        eprintln!("{} '{}'...", super::output::tr("removing node", "a remover o nó"), n.name);
         container::remove_container(images, store, n, true)?;
     }
     let _ = std::fs::remove_file(kubeconfig_path(name));
@@ -922,9 +980,13 @@ pub(crate) fn delete(images: &ImageStore, store: &Store, name: &str) -> Result<(
     // ficava a listar um cluster que já não existe, e um `kubectl` distraído
     // apontava para uma porta que entretanto pode ser de OUTRA coisa.
     if let Err(e) = remove_kubecontext(name) {
-        super::output::aviso(&format!("não consegui tirar o contexto '{}' do kubeconfig: {e}", context_name(name)));
+        super::output::aviso(&if super::output::is_pt() {
+            format!("não consegui tirar o contexto '{}' do kubeconfig: {e}", context_name(name))
+        } else {
+            format!("could not remove context '{}' from kubeconfig: {e}", context_name(name))
+        });
     }
-    println!("cluster '{name}' removido ({} nó(s))", nodes.len());
+    println!("{}", if super::output::is_pt() { format!("cluster '{name}' removido ({} nó(s))", nodes.len()) } else { format!("cluster '{name}' removed ({} node(s))", nodes.len()) });
     Ok(())
 }
 
