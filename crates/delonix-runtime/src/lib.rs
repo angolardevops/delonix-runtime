@@ -3415,7 +3415,16 @@ pub fn mount_live(container: &Container, m: &Mount) -> Result<()> {
         .is_dir();
 
     // fds dos namespaces (abertos no PAI, no contexto do host; herdados pela fork).
-    let user_fd = if container.userns { open_container_ns(pid, "user")? } else { None };
+    //
+    // Abre-se SEMPRE o `user`, sem olhar a `container.userns` — `open_container_ns`
+    // já devolve `None` por comparação de inode quando o ns é o mesmo que o nosso.
+    // O campo `userns` só diz se o container CRIOU o seu; os do ingress rootless
+    // HERDAM o do holder e ficam com `userns=false` apesar de estarem num userns
+    // diferente do nosso. A confiar no campo, saltava-se o `setns(user)` e o
+    // `unshare(NEWNS)` seguinte dava EPERM (sem CAP_SYS_ADMIN no nosso userns) —
+    // exactamente o mesmo bug que o `exec` já teve e corrigiu da mesma maneira
+    // (ver o comentário do `ns_list` em `exec`).
+    let user_fd = open_container_ns(pid, "user")?;
     let mnt_fd = open_container_ns(pid, "mnt")?
         .ok_or_else(|| Error::Invalid("container partilha o mnt ns do host — nada a montar".into()))?;
 
@@ -3500,7 +3509,10 @@ pub fn unmount_live(container: &Container, target: &str) -> Result<()> {
         .pid
         .filter(|p| safe_to_signal(*p, container.pid_starttime))
         .ok_or_else(|| Error::NotRunning(container.short_id().to_string()))?;
-    let user_fd = if container.userns { open_container_ns(pid, "user")? } else { None };
+    // Sempre o `user` (skip-por-inode em `open_container_ns`) — ver a nota
+    // extensa em `mount_live`: `container.userns` não é o mesmo que "está num
+    // userns diferente do meu".
+    let user_fd = open_container_ns(pid, "user")?;
     let mnt_fd = open_container_ns(pid, "mnt")?
         .ok_or_else(|| Error::Invalid("container partilha o mnt ns do host".into()))?;
     let target = target.to_string();

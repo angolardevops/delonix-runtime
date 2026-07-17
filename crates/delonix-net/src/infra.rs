@@ -1794,9 +1794,14 @@ fn slirp_api(sock: &Path, json: &str) -> Result<String> {
     Ok(resp)
 }
 
-/// Remove um `hostfwd` do slirp único: descobre o `id` da entrada com aquela
+/// Remove um `hostfwd` de UM slirp (o único do ingress, ou o de um container no
+/// caminho slirp-por-container): descobre o `id` da entrada com aquela
 /// `host_port` (via `list_hostfwd`) e remove-o.
-fn slirp_remove_hostfwd(sock: &Path, host_port: &str) -> Result<()> {
+///
+/// `pub` porque o `container update` precisa de despublicar a quente uma porta
+/// do slirp PRÓPRIO de um container (socket `delonix-slirp-<pid>.sock`), e não
+/// só do slirp único do ingress — que é o que [`unpublish_port`] assume.
+pub fn slirp_remove_hostfwd(sock: &Path, host_port: &str) -> Result<()> {
     let hp: u32 = host_port.parse().map_err(|_| Error::Invalid("porta inválida".into()))?;
     let listed = slirp_api(sock, r#"{"execute":"list_hostfwd"}"#)?;
     let v: serde_json::Value = serde_json::from_str(&listed).unwrap_or(serde_json::Value::Null);

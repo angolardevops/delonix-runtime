@@ -185,6 +185,48 @@ pub enum ContainerCmd {
         #[arg(required = true)]
         ids: Vec<String>,
     },
+    /// **Reconfigura um container A CORRER, sem o parar** — portas, volumes,
+    /// redes e limite de banda.
+    ///
+    /// Ao contrário do docker (onde mudar uma porta ou um volume obriga a
+    /// recriar o container), aqui o dataplane não pertence ao ciclo de vida do
+    /// processo: as portas são DNAT/hostfwd à frente da rede e os volumes
+    /// entram pela mount API do kernel (`open_tree`/`move_mount`) no mount
+    /// namespace do container já vivo. O PID não muda e o processo nunca é
+    /// interrompido.
+    ///
+    /// As mudanças ficam persistidas no registo, logo um `container start`
+    /// posterior reproduz a configuração nova, não a original.
+    Update {
+        id: String,
+        /// Publica mais uma porta a quente, `hostPort:contPort[/tcp|udp]`. Repetível.
+        #[arg(short = 'p', long = "publish-add", value_name = "SPEC")]
+        publish_add: Vec<String>,
+        /// Despublica uma porta a quente, pela PORTA DE HOST. Repetível.
+        #[arg(long = "publish-rm", value_name = "HOST_PORT")]
+        publish_rm: Vec<String>,
+        /// Monta um volume a quente, `nome:/destino[:ro]` ou `/host:/destino[:ro]`. Repetível.
+        #[arg(short = 'v', long = "volume-add", value_name = "SPEC")]
+        volume_add: Vec<String>,
+        /// Desmonta a quente, pelo caminho de DESTINO dentro do container. Repetível.
+        #[arg(long = "volume-rm", value_name = "TARGET")]
+        volume_rm: Vec<String>,
+        /// Liga o container a uma rede adicional a quente (multi-homing). Repetível.
+        #[arg(long = "net-connect", value_name = "REDE")]
+        net_connect: Vec<String>,
+        /// Desliga o container de uma rede adicional. Repetível.
+        #[arg(long = "net-disconnect", value_name = "REDE")]
+        net_disconnect: Vec<String>,
+        /// Limite de banda, em bit/s com sufixo (`10mbit`, `512kbit`, `1gbit`).
+        #[arg(long = "net-rate", value_name = "RATE")]
+        net_rate: Option<String>,
+        /// Burst do limite de banda (default: `32kb`). Só com `--net-rate`.
+        #[arg(long = "net-burst", value_name = "BURST")]
+        net_burst: Option<String>,
+        /// Remove o limite de banda.
+        #[arg(long = "net-rate-clear", conflicts_with = "net_rate")]
+        net_rate_clear: bool,
+    },
     /// Uso de recursos (CPU/memória/PIDs) dos containers a correr — uma
     /// amostra e sai (sem stream). Sem IDs, mostra todos os que correm.
     Stats { ids: Vec<String> },
@@ -222,6 +264,11 @@ pub fn run(action: ContainerCmd) -> Result<()> {
         ContainerCmd::Exec { interactive, tty, id, command } => cmd_exec(&store, &id, interactive, tty, &command),
         ContainerCmd::Inspect { ids } => cmd_inspect(&store, &ids),
         ContainerCmd::Describe { ids } => cmd_describe(&store, &ids),
+        ContainerCmd::Update { id, publish_add, publish_rm, volume_add, volume_rm, net_connect, net_disconnect, net_rate, net_burst, net_rate_clear } => cmd_update(
+            &store,
+            &id,
+            UpdateOpts { publish_add, publish_rm, volume_add, volume_rm, net_connect, net_disconnect, net_rate, net_burst, net_rate_clear },
+        ),
         ContainerCmd::Stats { ids } => cmd_stats(&store, &ids),
         ContainerCmd::Logs { id, follow } => cmd_logs(&images, &store, &id, follow),
         ContainerCmd::Apply { file } => {
@@ -1204,6 +1251,272 @@ fn describe_one(c: &Container) {
     d.print();
 }
 
+/// Argumentos do `container update`, agrupados (o clippy reclamaria da lista).
+pub(crate) struct UpdateOpts {
+    pub(crate) publish_add: Vec<String>,
+    pub(crate) publish_rm: Vec<String>,
+    pub(crate) volume_add: Vec<String>,
+    pub(crate) volume_rm: Vec<String>,
+    pub(crate) net_connect: Vec<String>,
+    pub(crate) net_disconnect: Vec<String>,
+    pub(crate) net_rate: Option<String>,
+    pub(crate) net_burst: Option<String>,
+    pub(crate) net_rate_clear: bool,
+}
+
+impl UpdateOpts {
+    fn is_empty(&self) -> bool {
+        self.publish_add.is_empty()
+            && self.publish_rm.is_empty()
+            && self.volume_add.is_empty()
+            && self.volume_rm.is_empty()
+            && self.net_connect.is_empty()
+            && self.net_disconnect.is_empty()
+            && self.net_rate.is_none()
+            && !self.net_rate_clear
+    }
+}
+
+/// Converte uma taxa (`10mbit`, `512kbit`, `1gbit`, ou bit/s cru) em bit/s.
+/// Função pura — os sufixos são decimais (k=1000), como no `tc`, e NÃO 1024:
+/// um `10mbit` que desse 10485760 bit/s não seria o que o `tc` programa.
+fn parse_rate_bits(s: &str) -> Result<u64> {
+    let t = s.trim().to_lowercase();
+    let t = t.strip_suffix("bit").unwrap_or(&t);
+    let (num, mult) = match t.strip_suffix('g') {
+        Some(n) => (n, 1_000_000_000u64),
+        None => match t.strip_suffix('m') {
+            Some(n) => (n, 1_000_000),
+            None => match t.strip_suffix('k') {
+                Some(n) => (n, 1_000),
+                None => (t, 1),
+            },
+        },
+    };
+    let v: f64 = num.trim().parse().map_err(|_| Error::Invalid(format!("taxa inválida: {s} (ex.: 10mbit, 512kbit, 1gbit)")))?;
+    if v <= 0.0 {
+        return Err(Error::Invalid(format!("taxa tem de ser positiva: {s}")));
+    }
+    Ok((v * mult as f64) as u64)
+}
+
+/// Converte um tamanho de burst (`32kb`, `1mb`, ou bytes crus) em bytes.
+fn parse_burst_bytes(s: &str) -> Result<u64> {
+    let t = s.trim().to_lowercase();
+    let t = t.strip_suffix('b').unwrap_or(&t);
+    let (num, mult) = match t.strip_suffix('m') {
+        Some(n) => (n, 1_000_000u64),
+        None => match t.strip_suffix('k') {
+            Some(n) => (n, 1_000),
+            None => (t, 1),
+        },
+    };
+    let v: f64 = num.trim().parse().map_err(|_| Error::Invalid(format!("burst inválido: {s} (ex.: 32kb, 1mb)")))?;
+    Ok((v * mult as f64) as u64)
+}
+
+/// Próximo índice de interface livre para uma rede adicional. `eth0` é sempre a
+/// rede primária, por isso as extra começam em 1 — e reutilizamos buracos
+/// deixados por um `--net-disconnect` em vez de contar sempre a subir.
+fn next_extra_idx(c: &Container) -> u32 {
+    (1u32..).find(|i| !c.extra_networks.iter().any(|n| n.idx == *i)).unwrap_or(1)
+}
+
+/// `container update` — reconfiguração A QUENTE de um container a correr.
+///
+/// A ordem das operações é deliberada: **remoções antes de adições**. Um
+/// `--publish-rm 8080 --publish-add 8080:9000` num só comando tem de funcionar
+/// (é o caso de uso óbvio: "muda esta porta para outro destino"); pela ordem
+/// inversa, o add colidiria com a porta que o rm ia libertar.
+///
+/// Cada operação persiste no registo ASSIM QUE o dataplane confirma, uma a uma,
+/// e não num `update` final: se a terceira falhar, as duas primeiras JÁ estão
+/// aplicadas de facto no kernel — um registo escrito só no fim ficaria a mentir
+/// sobre o estado real. Sem transacionalidade nem rollback, portanto; falha
+/// fail-fast e o que passou fica (mesma semântica do `stack apply`).
+fn cmd_update(store: &Store, id: &str, o: UpdateOpts) -> Result<()> {
+    if o.is_empty() {
+        return Err(Error::Invalid("nada a fazer: dá pelo menos uma mudança (--publish-add/--publish-rm/--volume-add/--volume-rm/--net-connect/--net-disconnect/--net-rate/--net-rate-clear)".into()));
+    }
+    let mut c = find(store, id)?;
+    runtime::reconcile_status(&mut c);
+    if !matches!(c.status, Status::Running | Status::Paused) {
+        return Err(Error::Invalid(format!(
+            "o container '{}' não está a correr ({}) — o update a quente actua no processo VIVO. \
+             Arranca-o com `delonix container start {}` primeiro.",
+            c.name, c.status, c.name
+        )));
+    }
+
+    // --- remoções primeiro (ver doc-comment) ---
+    for hp in &o.publish_rm {
+        unpublish_live(store, &mut c, hp)?;
+    }
+    for target in &o.volume_rm {
+        runtime::unmount_live(&c, target)?;
+        let t = target.clone();
+        c = store.update(&c.id, |cur| {
+            let before = cur.mounts.len();
+            cur.mounts.retain(|m| m.target != t);
+            cur.mounts.len() != before
+        })?;
+        println!("{}: volume {target} desmontado a quente", c.name);
+    }
+    for net in &o.net_disconnect {
+        let Some(en) = c.extra_networks.iter().find(|n| &n.network == net).cloned() else {
+            return Err(Error::Invalid(format!("o container '{}' não está ligado à rede adicional '{net}'", c.name)));
+        };
+        infra::detach_extra_container(&c.id, en.idx);
+        let n = net.clone();
+        c = store.update(&c.id, |cur| {
+            let before = cur.extra_networks.len();
+            cur.extra_networks.retain(|x| x.network != n);
+            cur.extra_networks.len() != before
+        })?;
+        println!("{}: desligado da rede {net} (eth{})", c.name, en.idx);
+    }
+
+    // --- adições ---
+    for spec in &o.publish_add {
+        publish_live(store, &mut c, spec)?;
+    }
+    for spec in &o.volume_add {
+        let mounts = resolve_mounts(std::slice::from_ref(spec))?;
+        for m in mounts {
+            if c.mounts.iter().any(|x| x.target == m.target) {
+                return Err(Error::Invalid(format!("já existe um volume montado em {} — desmonta-o primeiro (--volume-rm {})", m.target, m.target)));
+            }
+            runtime::mount_live(&c, &m)?;
+            let mm = m.clone();
+            c = store.update(&c.id, |cur| {
+                cur.mounts.push(mm.clone());
+                true
+            })?;
+            println!("{}: {} montado a quente em {} ({})", c.name, m.source, m.target, if m.readonly { "ro" } else { "rw" });
+        }
+    }
+    for net in &o.net_connect {
+        if c.network.is_none() {
+            return Err(Error::Invalid(format!(
+                "'{}' corre no caminho slirp-por-container (--net host/none), que não tem netns gerido pelo holder — \
+                 ligar redes adicionais a quente só é possível a partir de um container criado com `--net <rede>`",
+                c.name
+            )));
+        }
+        if c.extra_networks.iter().any(|n| &n.network == net) || c.network.as_deref() == Some(net.as_str()) {
+            return Err(Error::Invalid(format!("'{}' já está ligado à rede '{net}'", c.name)));
+        }
+        let idx = next_extra_idx(&c);
+        let (ifname, ip) = infra::attach_extra_container(&c.id, idx, net)?;
+        let en = delonix_runtime_core::ExtraNet { network: net.clone(), ip: ip.clone(), idx };
+        c = store.update(&c.id, |cur| {
+            cur.extra_networks.push(en.clone());
+            true
+        })?;
+        println!("{}: ligado à rede {net} — {ip} em {ifname}", c.name);
+    }
+
+    // --- limite de banda ---
+    if o.net_rate_clear {
+        infra::clear_net_rate(&c.id);
+        c = store.update(&c.id, |cur| {
+            cur.net_bps = None;
+            cur.net_burst = None;
+            true
+        })?;
+        println!("{}: limite de banda removido", c.name);
+    }
+    if let Some(rate) = &o.net_rate {
+        if c.network.is_none() {
+            return Err(Error::Invalid(format!(
+                "'{}' corre no caminho slirp-por-container (--net host/none) — o shaping é feito no veth do lado do \
+                 ingress, que só existe para containers criados com `--net <rede>`",
+                c.name
+            )));
+        }
+        let bits = parse_rate_bits(rate)?;
+        let burst_s = o.net_burst.clone().unwrap_or_else(|| "32kb".to_string());
+        let burst = parse_burst_bytes(&burst_s)?;
+        infra::set_net_rate(&c.id, bits, burst)?;
+        let (r, b) = (rate.clone(), burst_s.clone());
+        store.update(&c.id, |cur| {
+            cur.net_bps = Some(r.clone());
+            cur.net_burst = Some(b.clone());
+            true
+        })?;
+        println!("{}: banda limitada a {rate} (burst {burst_s})", c.name);
+    }
+    Ok(())
+}
+
+/// Publica uma porta num container VIVO, pelo caminho certo para a rede dele.
+fn publish_live(store: &Store, c: &mut Container, spec: &str) -> Result<()> {
+    let (hp, cp, proto) = delonix_net::parse_publish(spec)?;
+    if c.ports.iter().any(|p| delonix_net::parse_publish(p).map(|(h, _, _)| h == hp).unwrap_or(false)) {
+        return Err(Error::Invalid(format!("'{}' já publica a porta de host {hp} — despublica-a primeiro (--publish-rm {hp})", c.name)));
+    }
+    if let Some(owner) = port_owner(store, &hp)? {
+        return Err(Error::Invalid(format!("a porta {hp} já está publicada pelo container '{owner}'")));
+    }
+    match c.network.as_deref() {
+        // Rede custom: DNAT no holder + hostfwd no slirp único (o ingress).
+        Some(_) => {
+            let ip = c.ip.clone().ok_or_else(|| Error::Invalid(format!("'{}' está numa rede custom mas não tem IP no registo", c.name)))?;
+            publish_with_retry(&ip, spec)?;
+        }
+        // Caminho slirp-por-container: pede o hostfwd ao slirp DELE.
+        None => {
+            let pid = c.pid.ok_or_else(|| Error::NotRunning(c.name.clone()))?;
+            let sock = delonix_net::slirp_container_sock(pid);
+            if !sock.exists() {
+                // O api-socket do slirp só é aberto quando o `run` leva `-p`
+                // (ver `slirp_attach`): um container criado sem portas não tem
+                // por onde receber um hostfwd a quente. Erro que ensina, em vez
+                // de um "connection refused" cru vindo do socket.
+                return Err(Error::Invalid(format!(
+                    "'{}' foi criado sem `-p` e sem `--net <rede>`, por isso o seu slirp não tem api-socket aberto — \
+                     não há por onde publicar a quente. Publica pelo menos uma porta no `run`, ou usa `--net <rede>` \
+                     (o ingress aceita publicações a quente sempre).",
+                    c.name
+                )));
+            }
+            delonix_net::slirp_add_hostfwd(&sock, &hp, &cp, &proto)?;
+        }
+    }
+    let s = spec.to_string();
+    *c = store.update(&c.id, |cur| {
+        cur.ports.push(s.clone());
+        true
+    })?;
+    println!("{}: porta {hp}->{cp}/{proto} publicada a quente", c.name);
+    Ok(())
+}
+
+/// Despublica uma porta de host num container VIVO.
+fn unpublish_live(store: &Store, c: &mut Container, host_port: &str) -> Result<()> {
+    let hit = c
+        .ports
+        .iter()
+        .find(|p| delonix_net::parse_publish(p).map(|(h, _, _)| h == host_port).unwrap_or(false))
+        .cloned()
+        .ok_or_else(|| Error::Invalid(format!("'{}' não publica a porta de host {host_port}", c.name)))?;
+    match c.network.as_deref() {
+        Some(_) => infra::unpublish_port(host_port),
+        None => {
+            let pid = c.pid.ok_or_else(|| Error::NotRunning(c.name.clone()))?;
+            let sock = delonix_net::slirp_container_sock(pid);
+            infra::slirp_remove_hostfwd(&sock, host_port)?;
+        }
+    }
+    *c = store.update(&c.id, |cur| {
+        let before = cur.ports.len();
+        cur.ports.retain(|p| p != &hit);
+        cur.ports.len() != before
+    })?;
+    println!("{}: porta {host_port} despublicada a quente", c.name);
+    Ok(())
+}
+
 /// Lê a métrica `file` do cgroup v2 do processo `pid` (via `/proc/<pid>/cgroup`
 /// — funciona qualquer que seja a base delegada onde o motor pôs o container).
 fn cgroup_metric(pid: i32, file: &str) -> Option<String> {
@@ -1323,11 +1636,75 @@ fn cmd_logs(images: &ImageStore, store: &Store, id: &str, follow: bool) -> Resul
 
 #[cfg(test)]
 mod tests {
-    use super::{policy_supervised, should_restart};
     use super::super::util::compose_command;
+    use super::{fmt_ports, fmt_status, next_extra_idx, parse_burst_bytes, parse_rate_bits, policy_supervised, should_restart};
+    use delonix_runtime_core::{Container, ExtraNet, Status};
 
     fn v(xs: &[&str]) -> Vec<String> {
         xs.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn taxas_usam_multiplos_decimais_como_o_tc() {
+        // k/m/g são 1000, não 1024 — é o que o `tc` programa. Um `10mbit` a dar
+        // 10485760 bit/s seria um limite diferente do pedido.
+        assert_eq!(parse_rate_bits("10mbit").unwrap(), 10_000_000);
+        assert_eq!(parse_rate_bits("512kbit").unwrap(), 512_000);
+        assert_eq!(parse_rate_bits("1gbit").unwrap(), 1_000_000_000);
+        assert_eq!(parse_rate_bits("1000").unwrap(), 1000);
+        assert_eq!(parse_rate_bits("  10MBIT ").unwrap(), 10_000_000);
+    }
+
+    #[test]
+    fn taxa_invalida_ou_nao_positiva_e_recusada() {
+        assert!(parse_rate_bits("depressa").is_err());
+        assert!(parse_rate_bits("0").is_err());
+        assert!(parse_rate_bits("-5mbit").is_err());
+        assert!(parse_burst_bytes("grande").is_err());
+    }
+
+    #[test]
+    fn bursts_legiveis() {
+        assert_eq!(parse_burst_bytes("32kb").unwrap(), 32_000);
+        assert_eq!(parse_burst_bytes("1mb").unwrap(), 1_000_000);
+        assert_eq!(parse_burst_bytes("4096").unwrap(), 4096);
+    }
+
+    fn c_com_extras(idxs: &[u32]) -> Container {
+        let mut c = Container::new("id".into(), "t".into(), "img".into(), v(&["sh"]), "max".into());
+        c.extra_networks = idxs.iter().map(|i| ExtraNet { network: format!("n{i}"), ip: "10.0.0.2".into(), idx: *i }).collect();
+        c
+    }
+
+    #[test]
+    fn indice_de_rede_extra_comeca_no_1_e_reutiliza_buracos() {
+        // eth0 é sempre a rede primária, por isso as extra começam em 1.
+        assert_eq!(next_extra_idx(&c_com_extras(&[])), 1);
+        assert_eq!(next_extra_idx(&c_com_extras(&[1, 2])), 3);
+        // Um --net-disconnect da do meio deixa um buraco: reutiliza-se, senão o
+        // índice subia para sempre e os nomes de interface fugiam do eth1..N.
+        assert_eq!(next_extra_idx(&c_com_extras(&[1, 3])), 2);
+    }
+
+    #[test]
+    fn portas_no_formato_do_docker_ps() {
+        assert_eq!(fmt_ports(&v(&["8080:80/tcp"])), "8080->80/tcp");
+        // Sem protocolo explícito, tcp (default do docker).
+        assert_eq!(fmt_ports(&v(&["8080:80"])), "8080->80/tcp");
+        assert_eq!(fmt_ports(&v(&["8080:80", "53:53/udp"])), "8080->80/tcp, 53->53/udp");
+        assert_eq!(fmt_ports(&[]), "");
+    }
+
+    #[test]
+    fn status_no_formato_do_docker_ps() {
+        assert_eq!(fmt_status(&Status::Running, Some(300)), "Up 5 minutes");
+        assert_eq!(fmt_status(&Status::Paused, Some(300)), "Up 5 minutes (Paused)");
+        assert_eq!(fmt_status(&Status::Stopped, None), "Exited (0)");
+        assert_eq!(fmt_status(&Status::Failed(137), None), "Exited (137)");
+        assert_eq!(fmt_status(&Status::Crashed, None), "Dead");
+        assert_eq!(fmt_status(&Status::Created, None), "Created");
+        // Running sem uptime legível não inventa uma duração.
+        assert_eq!(fmt_status(&Status::Running, None), "Up");
     }
 
     #[test]
