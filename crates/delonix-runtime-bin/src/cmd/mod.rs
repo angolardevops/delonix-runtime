@@ -1,5 +1,6 @@
 pub mod build;
 pub mod cluster;
+pub mod kindmode;
 pub mod container;
 pub mod image;
 pub mod k8s_recipes;

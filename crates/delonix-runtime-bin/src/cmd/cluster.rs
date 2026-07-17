@@ -166,6 +166,33 @@ fn target_for(host: &HostSpec, ssh: &SshSpec) -> SshTarget {
 #[allow(clippy::large_enum_variant)]
 #[derive(Subcommand)]
 pub enum ClusterCmd {
+    /// Cria um cluster Kubernetes local **sem manifesto e sem Docker** (modo
+    /// kind nativo): arranca os nós `kindest/node` no próprio motor Delonix e
+    /// faz o bootstrap com `kubeadm`. Sem flags = 1 control-plane pronto a usar.
+    Create {
+        /// Nome do cluster (prefixo dos nós e do kubeconfig).
+        #[arg(long, default_value = "delonix")]
+        name: String,
+        /// Porta do host para o apiserver.
+        #[arg(long, default_value_t = 6443)]
+        api_port: u16,
+        /// Imagem do nó (default: `kindest/node` fixada por digest).
+        #[arg(long)]
+        image: Option<String>,
+        #[arg(long, default_value = "10.244.0.0/16")]
+        pod_subnet: String,
+        #[arg(long, default_value = "10.96.0.0/12")]
+        service_subnet: String,
+        /// `default` (kindnet, da própria imagem) ou `none` (nó fica NotReady
+        /// até aplicares a tua — comportamento do kubeadm puro).
+        #[arg(long, default_value = "default")]
+        cni: String,
+    },
+    /// Remove um cluster do modo kind (pára e apaga os nós + kubeconfig).
+    Delete {
+        #[arg(long, default_value = "delonix")]
+        name: String,
+    },
     /// Aplica o(s) documento(s) `kind: Cluster` de um manifesto.
     Apply {
         #[arg(short = 'f', long = "file")]
@@ -208,7 +235,32 @@ pub enum ClusterCmd {
 }
 
 pub fn run(action: ClusterCmd) -> Result<()> {
+    // Modo kind nativo — não toca em SSH/VMs nem precisa de manifesto.
     match action {
+        ClusterCmd::Create { ref name, api_port, ref image, ref pod_subnet, ref service_subnet, ref cni } => {
+            let (images, store) = super::util::open_stores()?;
+            return super::kindmode::create(
+                &images,
+                &store,
+                &super::kindmode::KindCluster {
+                    name: name.clone(),
+                    image: image.clone().unwrap_or_else(|| super::kindmode::DEFAULT_NODE_IMAGE.to_string()),
+                    api_port,
+                    pod_subnet: pod_subnet.clone(),
+                    service_subnet: service_subnet.clone(),
+                    cni: cni.clone(),
+                },
+            );
+        }
+        ClusterCmd::Delete { ref name } => {
+            let (images, store) = super::util::open_stores()?;
+            return super::kindmode::delete(&images, &store, name);
+        }
+        _ => {}
+    }
+    match action {
+        // Já tratados acima (modo kind nativo) — o match anterior faz `return`.
+        ClusterCmd::Create { .. } | ClusterCmd::Delete { .. } => unreachable!("tratados acima"),
         ClusterCmd::Apply { file } => {
             let path = manifest::resolve_path(file)?;
             let docs = manifest::load(&path)?;
