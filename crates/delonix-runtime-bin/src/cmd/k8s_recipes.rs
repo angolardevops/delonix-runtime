@@ -34,7 +34,7 @@ impl HostRecipe {
 }
 
 /// A versão do repositório `pkgs.k8s.io` (`stable:/v1.31` por omissão).
-fn k8s_repo_version(k8s_version: Option<&str>) -> String {
+pub(crate) fn k8s_repo_version(k8s_version: Option<&str>) -> String {
     match k8s_version {
         Some(v) if v != "stable" => format!("stable:/v{v}"),
         _ => "stable:/v1.31".to_string(),
@@ -50,7 +50,7 @@ pub(crate) fn k8s_host_recipes(k8s_version: Option<&str>, extra_packages: &[Stri
     packages.extend(extra_packages.iter().cloned());
     let packages_str = packages.join(" ");
 
-    vec![
+    let mut all = vec![
         HostRecipe {
             name: "repositório pkgs.k8s.io configurado",
             check: "test -f /etc/apt/sources.list.d/kubernetes.list".to_string(),
@@ -70,6 +70,20 @@ pub(crate) fn k8s_host_recipes(k8s_version: Option<&str>, extra_packages: &[Stri
             ),
             offline: None,
         },
+    ];
+    all.extend(k8s_config_recipes());
+    all
+}
+
+/// As receitas que NÃO precisam de rede — só persistência em `/etc` (swap,
+/// módulos kernel, sysctls). São o subconjunto que o build **offline** da imagem
+/// dourada reutiliza tal e qual (`cmd::vmimage`, `--offline`): lá, o repositório
+/// apt e o `apt-get install` são substituídos por `.deb` já descarregados e
+/// VERIFICADOS no host + `dpkg -i`, para o appliance do `virt-customize` poder
+/// correr com `--no-network`. `k8s_host_recipes` = as 2 de rede + estas, para o
+/// `cluster apply` (hosts vivos) continuar a ver o catálogo completo.
+pub(crate) fn k8s_config_recipes() -> Vec<HostRecipe> {
+    vec![
         HostRecipe {
             name: "swap desligado",
             check: "! swapon --show | grep -q .".to_string(),
@@ -129,5 +143,23 @@ mod tests {
     #[test]
     fn cinco_receitas_por_omissao() {
         assert_eq!(k8s_host_recipes(None, &[]).len(), 5);
+    }
+
+    #[test]
+    fn config_recipes_sao_o_subconjunto_sem_rede() {
+        let config = k8s_config_recipes();
+        assert_eq!(config.len(), 3, "swap + módulos + sysctls");
+        // A garantia que interessa ao build offline: NENHUMA toca a rede.
+        for r in &config {
+            let cmd = r.apply_offline();
+            assert!(
+                !cmd.contains("curl") && !cmd.contains("apt-get") && !cmd.contains("https://"),
+                "receita '{}' precisa de rede: {cmd}",
+                r.name
+            );
+        }
+        // E são exactamente a cauda do catálogo completo (não divergem).
+        let all = k8s_host_recipes(None, &[]);
+        assert_eq!(&all[2..], &config[..], "as 3 finais têm de ser as mesmas");
     }
 }
