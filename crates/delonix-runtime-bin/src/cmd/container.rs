@@ -21,21 +21,21 @@ use super::util::{effective_command, find, open_stores, prepare_rootfs, resolve_
 /// comportamento síncrono do `run` interactivo.
 #[derive(Debug, Deserialize)]
 struct ContainerSpec {
-    image: String,
+    pub(crate) image: String,
     #[serde(default = "default_true")]
-    detach: bool,
+    pub(crate) detach: bool,
     #[serde(default = "default_net")]
     network: String,
     #[serde(default)]
-    volumes: Vec<String>,
+    pub(crate) volumes: Vec<String>,
     #[serde(default)]
-    ports: Vec<String>,
+    pub(crate) ports: Vec<String>,
     #[serde(default)]
-    privileged: bool,
+    pub(crate) privileged: bool,
     #[serde(default)]
-    env: Vec<String>,
+    pub(crate) env: Vec<String>,
     #[serde(default)]
-    command: Vec<String>,
+    pub(crate) command: Vec<String>,
 }
 
 fn default_true() -> bool {
@@ -234,23 +234,23 @@ fn resolve_mounts(volumes: &[String]) -> Result<Vec<delonix_runtime_core::Mount>
 
 /// Argumentos do `container run` (CLI e manifesto), agrupados — a lista já
 /// passou há muito o limiar do `too_many_arguments`.
-struct RunOpts {
-    detach: bool,
-    name: Option<String>,
-    net: String,
-    volumes: Vec<String>,
-    ports: Vec<String>,
-    privileged: bool,
-    entrypoint: Option<String>,
-    rm: bool,
-    restart: String,
-    env: Vec<String>,
-    labels: Vec<String>,
-    image: String,
-    command: Vec<String>,
+pub(crate) struct RunOpts {
+    pub(crate) detach: bool,
+    pub(crate) name: Option<String>,
+    pub(crate) net: String,
+    pub(crate) volumes: Vec<String>,
+    pub(crate) ports: Vec<String>,
+    pub(crate) privileged: bool,
+    pub(crate) entrypoint: Option<String>,
+    pub(crate) rm: bool,
+    pub(crate) restart: String,
+    pub(crate) env: Vec<String>,
+    pub(crate) labels: Vec<String>,
+    pub(crate) image: String,
+    pub(crate) command: Vec<String>,
 }
 
-fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Result<()> {
+pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Result<()> {
     let RunOpts { detach, name, net, volumes, ports, privileged, entrypoint, rm, restart, env, labels, image, command } = opts;
     // Valida os `-p` ANTES de criar o que quer que seja (erro claro, sem lixo).
     for spec in &ports {
@@ -740,6 +740,16 @@ fn cmd_stop(store: &Store, id: &str, time: u64) -> Result<()> {
     runtime::stop(store, &mut c, time)?;
     unpublish_ports(&c);
     println!("{}", c.id);
+    Ok(())
+}
+
+/// Remove um container JÁ resolvido (o `cmd_rm` resolve o id primeiro). Extraído
+/// para o `cluster delete` do modo kind poder remover nós sem passar por strings.
+pub(crate) fn remove_container(images: &ImageStore, store: &Store, c: &Container, force: bool) -> Result<()> {
+    runtime::remove(store, c, force)?;
+    unpublish_ports(c);
+    let _ = images.unmount_rootfs(&c.id);
+    images.remove_container_dir(&c.id);
     Ok(())
 }
 
