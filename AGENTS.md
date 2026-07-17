@@ -348,12 +348,28 @@ running in system mode` → `Welcome to Debian GNU/Linux 12` → dezenas de `Rea
 → cria a `kubelet.slice`. Container fica **Running**. O NO-GO original (systemd+cgroup do node não
 arranca) está **fechado**.
 
-**Próximo bloqueio — conectividade** (não netfilter): o teste acima usa `--net none` (sem rede), por
-isso o kubelet/containerd não têm ligação e um cluster real não forma. Falta um netns que seja
-(a) owned pelo userns do container (para nft/iptables) E (b) com conectividade. O caminho já existe
-no motor: `--net host -p` cria exactamente isso (netns próprio + slirp4netns, ver `cmd_run`) — a
-próxima fatia é ligar o nó Kind a um netns próprio-com-slirp (ou o `--net kind` a funcionar rootless,
-hoje bloqueado pela limitação do setns). O shim Docker só depois disto.
+**Conectividade LIGADA + netfilter validado end-to-end** (loop netfilter, 2ª iteração). Com
+`--net host -p 6443:6443` (netns próprio + slirp4netns — ver `cmd_run`, `new_netns` +
+`slirp_attach`) o nó Kind arranca COM rede: `tap0` `10.0.2.100/24`, resolve `registry.k8s.io`
+(outbound OK), `detected cgroup v2` → `iptables mode: nft` → systemd (0 unidades falhadas) →
+**containerd `active`** (socket `/run/containerd/containerd.sock`). **`kubeadm init phase preflight`
+PASSA** (RC=0) sem UM ERRO de netfilter/iptables — avança até ao pull de imagens. Warnings só de:
+swap, cgroup `cpuset missing` (lacuna de delegação, ver abaixo), hostname `debuerreotype`. Os
+sysctls de bridge estão activos no nó (`bridge-nf-call-iptables=1`, `ip_forward=1`). **Netfilter
+está resolvido de ponta a ponta** para a carga real de k8s.
+
+**Bug corrigido pelo caminho — `exec` largava caps em containers `--privileged`**: `runtime::exec`
+usava `resolve_cap_keep` incondicionalmente (default KEPT_CAPS, sem CAP_NET_ADMIN), ignorando
+`container.privileged` — ao contrário do init (`spawn`, `if privileged { all_caps_mask() }`).
+Depurar netfilter por dentro (`nft`/`iptables` via `delonix container exec`) dava "Operation not
+permitted" apesar de o init ter as caps. Corrigido: `exec` espelha o init (caps completas + seccomp
+unconfined quando privileged). Confirmado: exec CapEff `1ffffffffff`, `nft` via exec OK.
+
+**Próximas fatias (já não netfilter)**: (1) cgroup `cpuset` na delegação (preflight marca-o
+"missing required" — só WARNING, mas fecha-o para um nó limpo); (2) correr `kubeadm init` completo
+até um control-plane Ready (o preflight já passa; falta exercitar o pull+init+CNI reais); (3)
+`--net kind` rootless (setns) para nós na MESMA rede em vez de slirp isolado por nó. O shim Docker
+continua depois destes, mas a fundação — cgroup + netfilter + systemd + containerd + rede — arranca.
 
 ## Próximas fases (pedidas, não implementadas — cada uma precisa da sua própria sessão de planeamento)
 
