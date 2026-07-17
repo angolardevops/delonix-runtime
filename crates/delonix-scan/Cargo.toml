@@ -1,0 +1,12 @@
+[package]
+name = "delonix-scan"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+delonix-runtime-core = { path = "../delonix-runtime-core" }
+delonix-image = { path = "../delonix-image" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tar = { workspace = true }
+flate2 = { workspace = true }
