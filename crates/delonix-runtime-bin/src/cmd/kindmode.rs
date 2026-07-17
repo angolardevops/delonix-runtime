@@ -459,6 +459,7 @@ fn boot_node(
             command: Vec::new(),
             // O progresso e' do `Progress`; os IDs dos nos no meio eram ruido.
             quiet: true,
+            ..Default::default()
         },
     )?;
     let c = store
