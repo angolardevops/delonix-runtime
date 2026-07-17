@@ -138,22 +138,20 @@ impl NodesSpec {
 struct KindModeSpec {
     #[serde(default = "default_node_image")]
     image: String,
-    #[serde(rename = "apiServerPort", default = "default_api_port")]
-    api_server_port: u16,
+    #[serde(rename = "apiServerPort")]
+    api_server_port: Option<u16>,
 }
 
 impl Default for KindModeSpec {
     fn default() -> Self {
-        KindModeSpec { image: default_node_image(), api_server_port: default_api_port() }
+        KindModeSpec { image: default_node_image(), api_server_port: None }
     }
 }
 
 fn default_node_image() -> String {
     super::kindmode::DEFAULT_NODE_IMAGE.to_string()
 }
-fn default_api_port() -> u16 {
-    6443
-}
+
 
 /// Bloco `spec.vm` — só lido no `mode: vm`.
 #[derive(Debug, Default, Deserialize)]
@@ -304,9 +302,10 @@ pub enum ClusterCmd {
         /// Nome do cluster (prefixo dos nós e do kubeconfig).
         #[arg(long, default_value = "delonix")]
         name: String,
-        /// Porta do host para o apiserver.
-        #[arg(long, default_value_t = 6443)]
-        api_port: u16,
+        /// Porta do host para o apiserver. Omitir = o delonix escolhe uma livre
+        /// (tenta a 6443; se estiver tomada por outro cluster, usa uma alta).
+        #[arg(long)]
+        api_port: Option<u16>,
         /// Nós worker a juntar (0 = só control-plane, sem taint — agenda tudo).
         #[arg(long, default_value_t = 0)]
         workers: u32,

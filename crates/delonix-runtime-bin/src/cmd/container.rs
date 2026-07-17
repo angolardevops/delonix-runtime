@@ -264,6 +264,7 @@ fn resolve_mounts(volumes: &[String]) -> Result<Vec<delonix_runtime_core::Mount>
 
 /// Argumentos do `container run` (CLI e manifesto), agrupados — a lista já
 /// passou há muito o limiar do `too_many_arguments`.
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub(crate) struct RunOpts {
     pub(crate) detach: bool,
     pub(crate) name: Option<String>,
@@ -281,6 +282,8 @@ pub(crate) struct RunOpts {
 }
 
 pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Result<()> {
+    // Cópia intacta para o re-exec (o destructuring a seguir consome as opts).
+    let opts_copy = opts.clone();
     let RunOpts { detach, name, net, volumes, ports, privileged, entrypoint, rm, restart, env, labels, image, command } = opts;
     // Valida os `-p` ANTES de criar o que quer que seja (erro claro, sem lixo).
     for spec in &ports {
@@ -291,6 +294,24 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
     }
     if net == "none" && !ports.is_empty() {
         return Err(Error::Invalid("-p/--publish não é compatível com --net none (netns sem ligação)".into()));
+    }
+    // Porta ocupada: falhar AQUI, com um erro que diz quem a tem e o que fazer.
+    // Sem isto, a colisão só rebentava lá ao fundo, no slirp, e despejava JSON
+    // cru (`add_hostfwd: slirp_add_hostfwd failed`) — o utilizador ficava sem
+    // saber que era conflito de porta, nem com quem.
+    // No 2.º passo do re-exec a porta já foi verificada (e o próprio container
+    // ainda não está no store) — verificar aqui daria um falso conflito.
+    if std::env::var("DELONIX_REEXEC_ID").is_err() {
+        for spec in &ports {
+            let (hp, _, _) = delonix_net::parse_publish(spec)?;
+            if let Some(owner) = port_owner(store, &hp)? {
+                return Err(Error::Invalid(format!(
+                    "a porta {hp} já está publicada pelo container '{owner}' — usa outra porta \
+                     (ex.: `-p {}:...`) ou pára esse container primeiro",
+                    hp.parse::<u32>().map(|n| n + 10000).unwrap_or(0)
+                )));
+            }
+        }
     }
     let mounts = resolve_mounts(&volumes)?;
     let img = resolve_or_pull(images, &image)?;
@@ -373,7 +394,7 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
             // 1.º passo: cria a netns do lado do holder e RE-EXECUTA-SE lá dentro.
             delonix_net::NetworkStore::open(super::util::state_root())?.get(n)?;
             let (netns, ip) = infra::attach_container(&id, n)?;
-            return reexec_into_netns(&id, &netns, &ip);
+            return reexec_into_netns(&id, &netns, &ip, &opts_copy);
         }
     }
     c.ports = ports.clone();
@@ -695,7 +716,7 @@ fn policy_supervised(policy: &str) -> bool {
 ///
 /// O `DELONIX_REEXEC_ID` distingue os dois passos E carrega o id: sem ele o 2.º
 /// passo geraria um id novo e a netns criada no 1.º ficaria órfã.
-fn reexec_into_netns(id: &str, netns: &str, ip: &str) -> Result<()> {
+fn reexec_into_netns(id: &str, netns: &str, ip: &str, opts: &RunOpts) -> Result<()> {
     let prefix = infra::join_argv(id).ok_or_else(|| Error::Runtime {
         context: "join_argv",
         message: "infra de ingress em baixo — não há holder onde entrar".into(),
@@ -704,17 +725,26 @@ fn reexec_into_netns(id: &str, netns: &str, ip: &str) -> Result<()> {
         context: "current_exe",
         message: e.to_string(),
     })?;
-    // Os argumentos originais, tal e qual (menos o argv[0], que é o `exe`).
-    let args: Vec<String> = std::env::args().skip(1).collect();
+    // A spec vai por FICHEIRO, não por `std::env::args()`. Reexecutar os
+    // argumentos originais parecia mais simples e estava ERRADO: o `cmd_run`
+    // também é chamado como biblioteca (o modo kind arranca nós assim), e aí os
+    // args do processo são `cluster create ...` — o re-exec corria o `cluster
+    // create` INTEIRO outra vez dentro da netns, recursivamente. Uma forma
+    // interna explícita não depende de quem chamou.
+    let spec_path = super::util::state_root().join(format!(".reexec-{id}.json"));
+    let json = serde_json::to_string(opts).map_err(|e| Error::Invalid(e.to_string()))?;
+    std::fs::write(&spec_path, json)?;
     let status = std::process::Command::new(&prefix[0])
         .args(&prefix[1..])
         .arg(&exe)
-        .args(&args)
+        .args(["netns", "run"])
+        .arg(&spec_path)
         .env("DELONIX_REEXEC_ID", id)
         .env("DELONIX_REEXEC_IP", ip)
         .env("DELONIX_ROOT", super::util::state_root())
-        .status()
-        .map_err(|e| Error::Runtime { context: "re-exec nsenter", message: e.to_string() })?;
+        .status();
+    let _ = std::fs::remove_file(&spec_path);
+    let status = status.map_err(|e| Error::Runtime { context: "re-exec nsenter", message: e.to_string() })?;
     if !status.success() {
         // A netns ficaria pendurada se o 2.º passo falhasse.
         infra::detach_container(id, ip);
@@ -724,6 +754,34 @@ fn reexec_into_netns(id: &str, netns: &str, ip: &str) -> Result<()> {
         )));
     }
     Ok(())
+}
+
+/// O 2.º passo do re-exec (`delonix netns run <spec.json>`, oculto — não é um
+/// subcomando público). Corre JÁ dentro do userns+netns do holder.
+pub(crate) fn run_from_spec(path: &std::path::Path) -> Result<()> {
+    let json = std::fs::read_to_string(path)?;
+    let opts: RunOpts = serde_json::from_str(&json).map_err(|e| Error::Invalid(e.to_string()))?;
+    let (images, store) = open_stores()?;
+    cmd_run(&images, &store, opts)
+}
+
+/// Que container VIVO está a publicar esta porta de host? `None` = livre.
+/// (Só containers vivos contam: os mortos já não a seguram — e se algum
+/// processo órfão a segurar, o `reap_orphan_net` limpa-o antes disto.)
+pub(crate) fn port_owner(store: &Store, host_port: &str) -> Result<Option<String>> {
+    for c in store.list()? {
+        if !matches!(c.status, delonix_runtime_core::Status::Running | delonix_runtime_core::Status::Paused) {
+            continue;
+        }
+        for p in &c.ports {
+            if let Ok((hp, _, _)) = delonix_net::parse_publish(p) {
+                if hp == host_port {
+                    return Ok(Some(c.name));
+                }
+            }
+        }
+    }
+    Ok(None)
 }
 
 /// Reapa a rede deixada por containers que já morreram, ANTES de publicar

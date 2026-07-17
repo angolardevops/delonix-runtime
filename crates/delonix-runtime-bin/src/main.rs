@@ -145,6 +145,16 @@ fn main() {
     if raw.len() == 3 && raw[1] == "netns" && raw[2] == "holder" {
         delonix_net::infra::holder_main(); // nunca retorna
     }
+    // Re-exec oculto do 2.º passo do `--net <rede>` (ver `container::reexec_into_netns`):
+    // já corremos DENTRO do userns+netns do holder; a spec do container vem num
+    // ficheiro. Interceptado ANTES do clap — não é um subcomando público.
+    if raw.len() == 4 && raw[1] == "netns" && raw[2] == "run" {
+        if let Err(e) = cmd::container::run_from_spec(std::path::Path::new(&raw[3])) {
+            eprintln!("delonix: {e}");
+            std::process::exit(1);
+        }
+        std::process::exit(0);
+    }
 
     // Autocompletion dinâmico: se o shell pediu sugestões (env COMPLETE), trata
     // disso e termina; caso contrário, segue o fluxo normal.
