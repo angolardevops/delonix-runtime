@@ -99,6 +99,18 @@ enum Cmd {
         #[command(subcommand)]
         action: cmd::cluster::ClusterCmd,
     },
+    /// Gera manifestos Kubernetes a partir de containers/pods (`generate`).
+    Kube {
+        #[command(subcommand)]
+        action: cmd::kube::KubeCmd,
+    },
+    /// Serve o endpoint CRI (`runtime.v1`) num socket unix — substitui o
+    /// containerd/CRI-O para um kubelet falar com o Delonix.
+    Cri {
+        /// Endereço do socket (default: `$DELONIX_CRI_ADDR` ou `unix:///run/delonix-cri.sock`).
+        #[arg(long)]
+        addr: Option<String>,
+    },
     /// Imprime o script de autocompletion do shell (bash/zsh/fish/...).
     Completion {
         /// Shell alvo.
@@ -124,6 +136,13 @@ fn run() -> Result<()> {
         Cmd::Stack { action } => cmd::stack::run(action),
         Cmd::System { action } => cmd::system::run(action),
         Cmd::Cluster { action } => cmd::cluster::run(action),
+        Cmd::Kube { action } => cmd::kube::run(action),
+        Cmd::Cri { addr } => {
+            let addr = addr
+                .or_else(|| std::env::var("DELONIX_CRI_ADDR").ok())
+                .unwrap_or_else(|| "unix:///run/delonix-cri.sock".to_string());
+            delonix_cri::serve_blocking(cmd::util::state_root(), &addr)
+        }
         Cmd::Completion { shell } => cmd_completion(shell),
     }
 }

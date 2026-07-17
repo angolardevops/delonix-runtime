@@ -479,6 +479,7 @@ version = "0.3.0"
 dependencies = [
  "clap",
  "clap_complete",
+ "delonix-cri",
  "delonix-image",
  "delonix-net",
  "delonix-runtime",
