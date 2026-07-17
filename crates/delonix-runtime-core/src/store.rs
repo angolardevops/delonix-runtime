@@ -9,7 +9,49 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 use std::fs;
 use std::marker::PhantomData;
-use std::path::PathBuf;
+use std::os::unix::io::AsRawFd;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+
+/// Sequência para tornar o ficheiro temporário de [`Store::save`] único POR
+/// ESCRITOR. O pid sozinho não chega: o servidor CRI é multi-thread
+/// (`tokio::spawn_blocking`), logo duas threads do MESMO processo podiam
+/// colidir no mesmo temp.
+static TMP_SEQ: AtomicU64 = AtomicU64::new(0);
+
+/// Trinco exclusivo de ficheiro (`flock`) — sequencia o **read-modify-write**
+/// de um container ENTRE PROCESSOS. Mesmo padrão do `delonix-net::infra`.
+///
+/// Porque é preciso: este runtime é daemonless — N processos (`delonix` na CLI,
+/// o servidor `delonix-cri` que o kubelet chama, e este é CONCORRENTE por
+/// desenho) mutam o mesmo JSON. A escrita atómica (temp+`rename`) evita
+/// ficheiros RASGADOS, mas não evita o **lost update** clássico: dois leitores
+/// lêem o mesmo estado, ambos modificam, ambos gravam — uma das mudanças
+/// desaparece em silêncio (ex.: um `RemoveContainer` desfeito por um reconcile
+/// concorrente que regrava o registo antigo).
+struct FileLock(fs::File);
+
+impl FileLock {
+    /// Adquire o trinco (bloqueia até o obter). `None` se o ficheiro de trinco
+    /// não puder sequer ser aberto — nesse caso o chamador segue sem trinco
+    /// (degradação graciosa: melhor que recusar a operação).
+    fn acquire(path: &Path) -> Option<FileLock> {
+        let f = fs::OpenOptions::new().create(true).write(true).truncate(false).open(path).ok()?;
+        // SAFETY: fd válido e aberto; LOCK_EX bloqueia até o trinco ser nosso.
+        if unsafe { libc::flock(f.as_raw_fd(), libc::LOCK_EX) } != 0 {
+            return None;
+        }
+        Some(FileLock(f))
+    }
+}
+
+impl Drop for FileLock {
+    fn drop(&mut self) {
+        // SAFETY: fd ainda aberto (somos donos do File até aqui). O `close` do
+        // File também libertaria o flock; explícito para não depender disso.
+        unsafe { libc::flock(self.0.as_raw_fd(), libc::LOCK_UN) };
+    }
+}
 
 /// Sanitiza uma chave/id para um nome de ficheiro seguro (`a-z0-9._-`,
 /// preservando maiúsculas). Bloqueia path traversal (`../`, `/etc/passwd`,
@@ -65,13 +107,62 @@ impl Store {
         self.root.join(format!("{}.json", safe_key(id)))
     }
 
+    /// Ficheiro de trinco de um container (ver [`FileLock`]). Fica ao lado do
+    /// estado e NUNCA é apagado — apagá-lo abriria uma janela em que dois
+    /// processos trancam inodes diferentes e ambos entram na secção crítica.
+    fn lock_path(&self, id: &str) -> PathBuf {
+        self.root.join(format!(".{}.lock", safe_key(id)))
+    }
+
     /// Persiste um container (escrita atómica).
+    ///
+    /// O temporário é único **por escritor** (pid + sequência): com um nome
+    /// fixo (`.<id>.tmp`), dois processos a gravar o MESMO container escreviam
+    /// por cima um do outro no mesmo ficheiro e o `rename` publicava um JSON
+    /// entrelaçado — a atomicidade do `rename` não salva nada se o conteúdo do
+    /// temp já vem corrompido.
     pub fn save(&self, c: &Container) -> Result<()> {
         let safe = safe_key(&c.id);
-        let tmp = self.root.join(format!(".{safe}.tmp"));
-        fs::write(&tmp, serde_json::to_vec_pretty(c)?)?;
-        fs::rename(&tmp, self.path(&c.id))?;
-        Ok(())
+        let seq = TMP_SEQ.fetch_add(1, Ordering::Relaxed);
+        let tmp = self.root.join(format!(".{safe}.{}.{seq}.tmp", std::process::id()));
+        let write = || -> Result<()> {
+            fs::write(&tmp, serde_json::to_vec_pretty(c)?)?;
+            fs::rename(&tmp, self.path(&c.id))?;
+            Ok(())
+        };
+        let r = write();
+        if r.is_err() {
+            let _ = fs::remove_file(&tmp); // não deixar lixo se falhou a meio
+        }
+        r
+    }
+
+    /// **Read-modify-write seguro** de um container: tranca (`flock`), relê o
+    /// estado JÁ sob o trinco, aplica `f` e grava — tudo como uma secção
+    /// crítica entre processos.
+    ///
+    /// Usar isto (e não `load` + mutar + `save`) sempre que a mudança dependa
+    /// do estado ACTUAL. O padrão ingénuo perde escritas quando o CRI (que é
+    /// concorrente) e a CLI mexem no mesmo container ao mesmo tempo.
+    ///
+    /// `f` devolve `false` para abortar a gravação (nada muda). O container
+    /// devolvido é o estado final (ou o lido, se abortou).
+    pub fn update<F>(&self, id_or_name: &str, f: F) -> Result<Container>
+    where
+        F: FnOnce(&mut Container) -> bool,
+    {
+        // Resolve o id REAL primeiro (aceita prefixo/nome), para trancar sempre
+        // o mesmo ficheiro de trinco independentemente de como foi referido.
+        let id = self.load(id_or_name)?.id;
+        let _lock = FileLock::acquire(&self.lock_path(&id));
+        // Relê SOB o trinco: entre o resolve e o `flock` outro processo pode ter
+        // gravado; usar o valor lido antes reintroduziria o lost update.
+        let mut c = self.load(&id)?;
+        if !f(&mut c) {
+            return Ok(c);
+        }
+        self.save(&c)?;
+        Ok(c)
     }
 
     /// Carrega um container por id exacto, prefixo de id, ou nome.
@@ -143,7 +234,9 @@ impl<T: Serialize + DeserializeOwned> JsonStore<T> {
     /// Persiste um item sob `key` (escrita atómica).
     pub fn save(&self, key: &str, value: &T) -> Result<()> {
         let safe = safe_key(key);
-        let tmp = self.root.join(format!(".{safe}.tmp"));
+        // Temp único por escritor — ver a nota em `Store::save`.
+        let seq = TMP_SEQ.fetch_add(1, Ordering::Relaxed);
+        let tmp = self.root.join(format!(".{safe}.{}.{seq}.tmp", std::process::id()));
         fs::write(&tmp, serde_json::to_vec_pretty(value)?)?;
         fs::rename(&tmp, self.path(key))?;
         Ok(())
@@ -263,6 +356,75 @@ mod tests {
         assert_eq!(entries.len(), 1, "JsonStore também tem de manter tudo dentro da raiz");
         assert!(store.load(evil_key).is_ok());
 
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// REGRESSÃO (concorrência): `update` sequencia read-modify-write entre
+    /// threads. Sem o `flock`, N incrementos concorrentes perdem-se (lost
+    /// update) e o total final vem < N. Com o trinco, tem de ser exactamente N.
+    #[test]
+    fn update_concorrente_nao_perde_escritas() {
+        let root = tmp_dir("store-update-race");
+        let store = Store::open(&root).unwrap();
+        let mut c = Container::new("race1".into(), "race1".into(), "img".into(), vec!["x".into()], "max".into());
+        c.labels.insert("n".into(), "0".into());
+        store.save(&c).unwrap();
+
+        const N: usize = 24;
+        std::thread::scope(|sc| {
+            for _ in 0..N {
+                let root = root.clone();
+                sc.spawn(move || {
+                    let st = Store::open(&root).unwrap();
+                    st.update("race1", |c| {
+                        let n: u64 = c.labels.get("n").unwrap().parse().unwrap();
+                        // Janela de corrida explícita entre o read e o write:
+                        // sem trinco, garante o lost update.
+                        std::thread::sleep(std::time::Duration::from_millis(2));
+                        c.labels.insert("n".into(), (n + 1).to_string());
+                        true
+                    })
+                    .unwrap();
+                });
+            }
+        });
+
+        let got: usize = store.load("race1").unwrap().labels.get("n").unwrap().parse().unwrap();
+        assert_eq!(got, N, "perderam-se escritas: {got} de {N}");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// REGRESSÃO: o temporário do `save` tem de ser único por escritor. Com um
+    /// nome fixo (`.<id>.tmp`), escritas concorrentes do MESMO container
+    /// entrelaçavam-se no temp e o `rename` publicava JSON corrompido.
+    #[test]
+    fn save_concorrente_nunca_publica_json_corrompido() {
+        let root = tmp_dir("store-save-race");
+        let store = Store::open(&root).unwrap();
+        let base = Container::new("race2".into(), "race2".into(), "img".into(), vec!["x".into()], "max".into());
+        store.save(&base).unwrap();
+
+        std::thread::scope(|sc| {
+            for i in 0..16 {
+                let root = root.clone();
+                sc.spawn(move || {
+                    let st = Store::open(&root).unwrap();
+                    let mut c = Container::new(
+                        "race2".into(),
+                        format!("nome-{}", "a".repeat(i * 7)), // tamanhos diferentes = entrelaçado visível
+                        "img".into(),
+                        vec!["x".into()],
+                        "max".into(),
+                    );
+                    c.labels.insert("k".into(), "v".repeat(i * 11));
+                    st.save(&c).unwrap();
+                    // Cada leitura tem de ver SEMPRE um JSON válido.
+                    st.load("race2").expect("JSON corrompido publicado pelo rename");
+                });
+            }
+        });
+
+        store.load("race2").expect("estado final tem de ser um JSON válido");
         let _ = fs::remove_dir_all(&root);
     }
 }

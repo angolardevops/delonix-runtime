@@ -181,11 +181,14 @@ fn delonix_detached(base: &Path, args: &[&str]) -> Result<bool, Status> {
 /// reiniciava. Após reconciliar, o crash vira `Crashed` (137) e o kubelet reage.
 fn load_reconciled(base: &Path, cri_id: &str) -> Option<delonix_runtime_core::Container> {
     let store = delonix_runtime_core::Store::open(base.join("containers")).ok()?;
-    let mut c = store.load(&format!("cri-{cri_id}")).ok()?;
-    if delonix_runtime::reconcile_status(&mut c) {
-        let _ = store.save(&c); // propaga a reconciliação a outros leitores
-    }
-    Some(c)
+    // `update` (flock + relê sob o trinco), NÃO `load`+`save`: este servidor é
+    // CONCORRENTE (o kubelet emite pedidos em paralelo, cada um numa
+    // `spawn_blocking`) e a CLI mexe no mesmo estado. Com o padrão ingénuo, dois
+    // reconciles simultâneos perdiam escritas — medido: 24 updates concorrentes
+    // → 1 sobrevivente (ver `store::tests::update_concorrente_nao_perde_escritas`).
+    store
+        .update(&format!("cri-{cri_id}"), |c| delonix_runtime::reconcile_status(c))
+        .ok()
 }
 
 /// O estado de execução de um container CRI, lido (e reconciliado) do `Store`.
