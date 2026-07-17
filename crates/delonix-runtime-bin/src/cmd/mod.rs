@@ -6,6 +6,7 @@ pub mod image;
 pub mod k8s_recipes;
 pub mod manifest;
 pub mod network;
+pub mod output;
 pub mod remote;
 pub mod scaffold;
 pub mod stack;

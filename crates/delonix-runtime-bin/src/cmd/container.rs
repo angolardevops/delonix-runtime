@@ -6,11 +6,12 @@ use clap::Subcommand;
 use delonix_image::ImageStore;
 use delonix_net::infra;
 use delonix_runtime::{self as runtime, RunSpec};
-use delonix_runtime_core::{generate_id, Container, Error, Result, Store};
+use delonix_runtime_core::{generate_id, Container, Error, Result, Status, Store};
 use delonix_volume::VolumeStore;
 use serde::Deserialize;
 
 use super::manifest::{self, ManifestDoc};
+use super::output;
 use super::util::{effective_command, find, open_stores, prepare_rootfs, resolve_or_pull};
 
 /// `spec` de `kind: Container` — espelha `ContainerCmd::Run` (menos `name`,
@@ -178,6 +179,12 @@ pub enum ContainerCmd {
         #[arg(required = true)]
         ids: Vec<String>,
     },
+    /// Detalhe legível de um ou mais containers, ao estilo `kubectl describe`
+    /// (para humanos; use `inspect` para JSON consumível por scripts).
+    Describe {
+        #[arg(required = true)]
+        ids: Vec<String>,
+    },
     /// Uso de recursos (CPU/memória/PIDs) dos containers a correr — uma
     /// amostra e sai (sem stream). Sem IDs, mostra todos os que correm.
     Stats { ids: Vec<String> },
@@ -214,6 +221,7 @@ pub fn run(action: ContainerCmd) -> Result<()> {
         ContainerCmd::Rm { ids, force } => for_each_id(&ids, |id| cmd_rm(&images, &store, id, force)),
         ContainerCmd::Exec { interactive, tty, id, command } => cmd_exec(&store, &id, interactive, tty, &command),
         ContainerCmd::Inspect { ids } => cmd_inspect(&store, &ids),
+        ContainerCmd::Describe { ids } => cmd_describe(&store, &ids),
         ContainerCmd::Stats { ids } => cmd_stats(&store, &ids),
         ContainerCmd::Logs { id, follow } => cmd_logs(&images, &store, &id, follow),
         ContainerCmd::Apply { file } => {
@@ -511,32 +519,94 @@ fn spawn_rm_watcher(images: &ImageStore, store: &Store, id: &str) {
     }
 }
 
+/// ID curto, como o do `docker ps` (12 chars).
+pub(crate) fn short_id(id: &str) -> &str {
+    &id[..12.min(id.len())]
+}
+
+/// Coluna STATUS ao estilo do `docker ps`: "Up 5 minutes", "Exited (0)".
+/// `uptime` é o tempo desde o arranque do init (`None` se desconhecido — um
+/// container parado não tem processo de onde o ler).
+fn fmt_status(status: &Status, uptime: Option<u64>) -> String {
+    let up = || match uptime {
+        Some(s) => format!("Up {}", output::fmt_duration_secs(s)),
+        // Running sem uptime legível: o registo é antigo (sem `pid_starttime`)
+        // ou o /proc do init não é legível. Não inventamos uma duração.
+        None => "Up".to_string(),
+    };
+    match status {
+        Status::Created => "Created".to_string(),
+        Status::Running => up(),
+        Status::Paused => format!("{} (Paused)", up()),
+        // Sem `finished_at` no `Container`, não há como dizer "há quanto tempo"
+        // saiu — o docker mostraria "Exited (0) 2 minutes ago". Preferível
+        // mostrar menos do que fabricar um tempo a partir do `created_unix`.
+        Status::Stopped => "Exited (0)".to_string(),
+        Status::Failed(code) => format!("Exited ({code})"),
+        Status::Crashed => "Dead".to_string(),
+    }
+}
+
+/// Coluna PORTS ao estilo do `docker ps`: `8080->80/tcp`, separadas por vírgula.
+///
+/// O docker prefixa o endereço do host (`0.0.0.0:8080->80/tcp`). Aqui não:
+/// o endereço efectivo depende do caminho de publicação (slirp por container
+/// vs DNAT do ingress) e de `DELONIX_PUBLISH_ADDR`, e imprimir um `0.0.0.0`
+/// fixo seria uma afirmação de exposição que pode ser falsa — numa coluna que
+/// se usa exactamente para decidir se algo está exposto.
+fn fmt_ports(ports: &[String]) -> String {
+    ports
+        .iter()
+        .map(|p| {
+            let (spec, proto) = match p.split_once('/') {
+                Some((s, pr)) => (s, pr),
+                None => (p.as_str(), "tcp"),
+            };
+            match spec.split_once(':') {
+                Some((hp, cp)) => format!("{hp}->{cp}/{proto}"),
+                // Só a porta do container (publicada sem porta de host fixa).
+                None => format!("{spec}/{proto}"),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 fn cmd_ps(store: &Store, all: bool, quiet: bool) -> Result<()> {
     let mut cs = store.list()?;
-    if !quiet {
-        println!("{:<14}  {:<20}  {:<24}  STATUS", "CONTAINER ID", "NAME", "IMAGE");
-    }
+    // Ordem estável e útil: o mais recente primeiro, como no `docker ps`.
+    cs.sort_by(|a, b| b.created_unix.cmp(&a.created_unix));
+    let mut t = output::Table::new(&["CONTAINER ID", "IMAGE", "COMMAND", "CREATED", "STATUS", "PORTS", "NAMES"]);
     for c in cs.iter_mut() {
         // `update` (flock) e não `save`: o CRI é concorrente e pode estar a
         // reconciliar o mesmo container agora — ver `Store::update`.
         if runtime::reconcile_status(c) {
             let _ = store.update(&c.id, |cur| runtime::reconcile_status(cur));
         }
-        let hidden = matches!(c.status, delonix_runtime_core::Status::Failed(_) | delonix_runtime_core::Status::Crashed);
+        let hidden = matches!(c.status, Status::Failed(_) | Status::Crashed);
         if !all && hidden {
             continue;
         }
         if quiet {
-            println!("{}", &c.id[..12.min(c.id.len())]);
+            println!("{}", short_id(&c.id));
             continue;
         }
-        println!(
-            "{:<14}  {:<20}  {:<24}  {:?}",
-            &c.id[..12.min(c.id.len())],
-            c.name,
-            c.image,
-            c.status
-        );
+        let uptime = match c.status {
+            Status::Running | Status::Paused => c.pid_starttime.and_then(output::uptime_from_starttime),
+            _ => None,
+        };
+        t.row(vec![
+            short_id(&c.id).to_string(),
+            output::truncate(&c.image, 30),
+            output::truncate(&format!("\"{}\"", c.command.join(" ")), 22),
+            output::fmt_age(c.created_unix),
+            fmt_status(&c.status, uptime),
+            output::truncate(&fmt_ports(&c.ports), 28),
+            c.name.clone(),
+        ]);
+    }
+    if !quiet {
+        t.print();
     }
     Ok(())
 }
@@ -1027,6 +1097,111 @@ fn cmd_inspect(store: &Store, ids: &[String]) -> Result<()> {
     }
     println!("{}", serde_json::to_string_pretty(&cs).map_err(|e| Error::Invalid(e.to_string()))?);
     Ok(())
+}
+
+/// `container describe` — detalhe legível ao estilo `kubectl describe`.
+///
+/// Complementa o `inspect` (JSON, para máquinas/`jq`) em vez de o substituir:
+/// esta é a vista para um humano perceber o estado de um container sem contar
+/// chavetas. O `inspect` continua a ser o contrato estável para scripts.
+fn cmd_describe(store: &Store, ids: &[String]) -> Result<()> {
+    for (i, id) in ids.iter().enumerate() {
+        let mut c = find(store, id)?;
+        if runtime::reconcile_status(&mut c) {
+            c = store.update(&c.id, |cur| runtime::reconcile_status(cur)).unwrap_or(c);
+        }
+        if i > 0 {
+            println!();
+        }
+        describe_one(&c);
+    }
+    Ok(())
+}
+
+fn describe_one(c: &Container) {
+    let mut d = output::Describe::new();
+    d.field("Name", &c.name);
+    d.field("ID", &c.id);
+    d.field("Image", &c.image);
+    d.field("Command", c.command.join(" "));
+    d.field_opt("Workdir", c.workdir.as_deref());
+    d.field("Created", output::fmt_local(c.created_unix));
+
+    let uptime = match c.status {
+        Status::Running | Status::Paused => c.pid_starttime.and_then(output::uptime_from_starttime),
+        _ => None,
+    };
+    d.field("Status", fmt_status(&c.status, uptime));
+    match c.pid {
+        Some(p) => d.field("PID", p.to_string()),
+        None => d.field("PID", "<none>"),
+    };
+    d.field_opt("Pod", c.pod.as_deref());
+
+    d.section("Resources");
+    d.sub("CPUs", &c.cpus);
+    d.sub("Memory", &c.memory_max);
+    d.sub_opt("CPU weight", c.cpu_weight.as_deref());
+    d.sub_opt("Cpuset", c.cpuset.as_deref());
+    d.sub_opt("IO weight", c.io_weight.as_deref());
+    d.sub_opt("Nice", c.nice.map(|n| n.to_string()));
+
+    d.section("Network");
+    d.sub("Mode", c.network.as_deref().unwrap_or("host"));
+    d.sub("IP", c.ip.as_deref().unwrap_or("<none>"));
+    if !c.extra_networks.is_empty() {
+        d.sub("Extra", c.extra_networks.iter().map(|n| format!("{} ({} em eth{})", n.network, n.ip, n.idx)).collect::<Vec<_>>().join(", "));
+    }
+    if !c.net_aliases.is_empty() {
+        d.sub("Aliases", c.net_aliases.join(", "));
+    }
+    if let Some(bps) = &c.net_bps {
+        d.sub("Rate limit", format!("{bps}{}", c.net_burst.as_ref().map(|b| format!(" (burst {b})")).unwrap_or_default()));
+    }
+    d.sub("Ports", if c.ports.is_empty() { "<none>".to_string() } else { fmt_ports(&c.ports) });
+
+    if c.mounts.is_empty() {
+        d.field("Mounts", "<none>");
+    } else {
+        d.section("Mounts");
+        for m in &c.mounts {
+            // Formato do `kubectl describe pod`: "<destino> from <origem> (rw)".
+            d.item(format!("{} from {} ({})", m.target, m.source, if m.readonly { "ro" } else { "rw" }));
+        }
+    }
+
+    d.list("Tmpfs", &c.tmpfs);
+    d.list("Devices", &c.devices);
+    d.list("Env", &c.env);
+    // Só os NOMES dos secrets — o valor nunca é impresso (o `describe` é
+    // rotineiramente colado em issues/chats).
+    d.list("Secrets", &c.secrets);
+
+    if c.labels.is_empty() {
+        d.field("Labels", "<none>");
+    } else {
+        d.section("Labels");
+        for (k, v) in &c.labels {
+            d.item(format!("{k}={v}"));
+        }
+    }
+
+    d.section("Security");
+    d.sub("Privileged", c.privileged.to_string());
+    d.sub("Read-only", c.read_only.to_string());
+    d.sub("Userns", c.userns.to_string());
+    d.sub_opt("Seccomp", c.seccomp.as_deref());
+    d.sub_opt("AppArmor", c.apparmor.as_deref());
+    if !c.cap_add.is_empty() {
+        d.sub("Cap add", c.cap_add.join(", "));
+    }
+    if !c.cap_drop.is_empty() {
+        d.sub("Cap drop", c.cap_drop.join(", "));
+    }
+
+    d.field("Restart policy", c.restart_policy.as_deref().unwrap_or("no"));
+    d.field_opt("Log driver", c.log_driver.as_deref());
+    d.print();
 }
 
 /// Lê a métrica `file` do cgroup v2 do processo `pid` (via `/proc/<pid>/cgroup`
