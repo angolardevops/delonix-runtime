@@ -465,6 +465,21 @@ dentro), mas o `kubectl` do HOST dá `connection refused` — o apiserver não t
 hostfwd. Um `container run --net <rede> -p` NORMAL publica bem (HTTP 200,
 persistente, dois em simultâneo).
 
+**Afinado (mesma sessão, mais medições)**: o `container start` do nó CHEGA a
+registar o hostfwd (`list_hostfwd` → `6443 -> 10.0.2.100:6443`) — logo o
+mecanismo do `publish_port` corre. Mas nessa altura:
+  * NADA escuta na `6443` do host (`ss -ltn` → 0), apesar de o slirp dizer que
+    tem o hostfwd; e
+  * NÃO há regra DNAT no holder (`nft list table ip delonix_ingress` vazio).
+Ou seja **as duas metades do `publish_port` (slirp_add_hostfwd + control_send
+"publish") falham em SILÊNCIO** — a função devolve `Ok`. Um container normal
+(`web`, 28080) faz as duas bem e serve HTTP 200, portanto não é o código em si:
+é algo no contexto do nó (privileged? re-exec? momento?). Próximo passo
+concreto: instrumentar `publish_port` para imprimir o que o slirp e o control
+socket RESPONDEM, em vez de assumir que `Ok` significa aplicado.
+Nota: o hostfwd apontar para `10.0.2.100` é POR DESENHO (host → slirp → DNAT →
+IP real do container); não é bug — enganou-me a primeira vez.
+
 **Facto que aponta a causa** (medido, não suposto):
 ```
 slirp do ingress, list_hostfwd:
