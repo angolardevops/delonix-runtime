@@ -155,6 +155,31 @@ fn main() {
         }
         std::process::exit(0);
     }
+    // Re-exec ocultos MAPEADOS (`__rmtree`, `__volsnap`): já corremos como root
+    // num user namespace com os subuids mapeados (o pai usou `newuidmap` — ver
+    // `delonix_runtime::{remove_tree_mapped, reexec_mapped}`), logo somos donos
+    // efectivos dos ficheiros que o container escreveu.
+    //
+    // **Estas metades faltavam neste binário** e só existiam na CLI privada do
+    // `delonix-paas`: a biblioteca PÚBLICA re-executava `delonix __rmtree` e o
+    // `delonix` público respondia "unrecognized subcommand" (rc=2) — com o
+    // `remove_tree_mapped` a nem olhar para o exit status, a árvore ficava por
+    // apagar em SILÊNCIO. O motor público tem de bastar-se a si próprio.
+    // Interceptados antes do clap, como os `netns` acima.
+    if raw.len() == 3 && raw[1] == "__rmtree" {
+        if let Err(e) = cmd::mapped::rmtree(std::path::Path::new(&raw[2])) {
+            eprintln!("delonix: {e}");
+            std::process::exit(1);
+        }
+        std::process::exit(0);
+    }
+    if raw.len() == 5 && raw[1] == "__volsnap" {
+        if let Err(e) = cmd::mapped::volsnap(&raw[2], std::path::Path::new(&raw[3]), std::path::Path::new(&raw[4])) {
+            eprintln!("delonix: {e}");
+            std::process::exit(1);
+        }
+        std::process::exit(0);
+    }
 
     // Autocompletion dinâmico: se o shell pediu sugestões (env COMPLETE), trata
     // disso e termina; caso contrário, segue o fluxo normal.
