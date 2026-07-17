@@ -75,6 +75,11 @@ enum Cmd {
         #[command(subcommand)]
         action: cmd::network::NetworkCmd,
     },
+    /// Cofre de segredos (cifrado em repouso) — o produtor do `run --secret`.
+    Secret {
+        #[command(subcommand)]
+        action: cmd::secret::SecretCmd,
+    },
     /// Aplica um manifesto (`delonix-manifest.yaml`) inteiro — todos os Kinds.
     Stack {
         #[command(subcommand)]
@@ -106,6 +111,7 @@ fn run() -> Result<()> {
         Cmd::Vm { action } => cmd::vm::run(action),
         Cmd::Volumes { action } => cmd::volume::run(action),
         Cmd::Network { action } => cmd::network::run(action),
+        Cmd::Secret { action } => cmd::secret::run(action),
         Cmd::Stack { action } => cmd::stack::run(action),
         Cmd::System { action } => cmd::system::run(action),
         Cmd::Cluster { action } => cmd::cluster::run(action),
