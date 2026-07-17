@@ -114,6 +114,11 @@ enum Cmd {
         #[command(subcommand)]
         action: cmd::netns::NetnsCmd,
     },
+    /// Persistência no arranque: units systemd para os containers voltarem a subir no boot.
+    Boot {
+        #[command(subcommand)]
+        action: cmd::boot::BootCmd,
+    },
     /// Serve o endpoint CRI (`runtime.v1`) num socket unix — substitui o
     /// containerd/CRI-O para um kubelet falar com o Delonix.
     Cri {
@@ -149,6 +154,7 @@ fn run() -> Result<()> {
         Cmd::Cluster { action } => cmd::cluster::run(action),
         Cmd::Kube { action } => cmd::kube::run(action),
         Cmd::Netns { action } => cmd::netns::run(action),
+        Cmd::Boot { action } => cmd::boot::run(action),
         Cmd::Cri { addr } => {
             let addr = addr
                 .or_else(|| std::env::var("DELONIX_CRI_ADDR").ok())
