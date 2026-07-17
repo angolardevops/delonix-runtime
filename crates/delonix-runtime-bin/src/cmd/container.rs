@@ -416,8 +416,10 @@ fn cmd_ps(store: &Store, all: bool, quiet: bool) -> Result<()> {
         println!("{:<14}  {:<20}  {:<24}  STATUS", "CONTAINER ID", "NAME", "IMAGE");
     }
     for c in cs.iter_mut() {
+        // `update` (flock) e não `save`: o CRI é concorrente e pode estar a
+        // reconciliar o mesmo container agora — ver `Store::update`.
         if runtime::reconcile_status(c) {
-            let _ = store.save(c);
+            let _ = store.update(&c.id, |cur| runtime::reconcile_status(cur));
         }
         let hidden = matches!(c.status, delonix_runtime_core::Status::Failed(_) | delonix_runtime_core::Status::Crashed);
         if !all && hidden {
@@ -477,7 +479,7 @@ fn unpublish_ports(c: &Container) {
 fn cmd_start(images: &ImageStore, store: &Store, id: &str) -> Result<()> {
     let mut c = find(store, id)?;
     if runtime::reconcile_status(&mut c) {
-        let _ = store.save(&c);
+        c = store.update(&c.id, |cur| runtime::reconcile_status(cur)).unwrap_or(c);
     }
     if matches!(c.status, delonix_runtime_core::Status::Running | delonix_runtime_core::Status::Paused) {
         return Err(Error::Invalid(format!("{} já está a correr", c.name)));
@@ -570,7 +572,7 @@ fn cmd_inspect(store: &Store, ids: &[String]) -> Result<()> {
     for id in ids {
         let mut c = find(store, id)?;
         if runtime::reconcile_status(&mut c) {
-            let _ = store.save(&c);
+            c = store.update(&c.id, |cur| runtime::reconcile_status(cur)).unwrap_or(c);
         }
         cs.push(c);
     }
