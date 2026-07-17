@@ -162,6 +162,41 @@ pub enum ContainerCmd {
         #[arg(short, long)]
         force: bool,
     },
+    /// Suspende os processos de um container (freezer do cgroup v2) — o estado
+    /// fica em memória, ao contrário do `stop`. Retoma com `unpause`.
+    Pause {
+        #[arg(required = true)]
+        ids: Vec<String>,
+    },
+    /// Retoma um container suspenso com `pause`.
+    Unpause {
+        #[arg(required = true)]
+        ids: Vec<String>,
+    },
+    /// Cria uma imagem a partir do estado ACTUAL do rootfs de um container
+    /// (o que foi escrito lá dentro passa a ser uma layer nova).
+    Commit {
+        id: String,
+        /// Tag da imagem nova (ex.: `app:v2`).
+        tag: String,
+    },
+    /// Shell interactivo dentro de um container (atalho para `exec -t`): sem
+    /// comando, tenta o `bash` e cai no `sh`, que existe em qualquer imagem.
+    Ssh {
+        id: String,
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        command: Vec<String>,
+    },
+    /// Corre o `HEALTHCHECK` da imagem dentro do container. Sai com 1 se
+    /// `unhealthy` — dá para usar num script/CI.
+    Healthcheck { id: String },
+    /// Processos a correr dentro de um container (lidos do `cgroup.procs`).
+    Top { id: String },
+    /// Ficheiros alterados face à imagem: `A` = criado/alterado, `D` = apagado.
+    Diff { id: String },
+    /// Copia ficheiros entre o host e um container. Exactamente um dos lados é
+    /// `container:/caminho` (ex.: `delonix container cp web:/etc/nginx.conf .`).
+    Cp { src: String, dst: String },
     /// Executa um comando dentro de um container a correr.
     Exec {
         /// Interativo (liga o stdin).
@@ -262,6 +297,14 @@ pub fn run(action: ContainerCmd) -> Result<()> {
         ContainerCmd::Stop { ids, time } => for_each_id(&ids, |id| cmd_stop(&store, id, time)),
         ContainerCmd::Rm { ids, force } => for_each_id(&ids, |id| cmd_rm(&images, &store, id, force)),
         ContainerCmd::Exec { interactive, tty, id, command } => cmd_exec(&store, &id, interactive, tty, &command),
+        ContainerCmd::Pause { ids } => for_each_id(&ids, |id| cmd_freeze(&store, id, true)),
+        ContainerCmd::Unpause { ids } => for_each_id(&ids, |id| cmd_freeze(&store, id, false)),
+        ContainerCmd::Commit { id, tag } => cmd_commit(&images, &store, &id, &tag),
+        ContainerCmd::Ssh { id, command } => cmd_ssh(&store, &id, &command),
+        ContainerCmd::Healthcheck { id } => cmd_healthcheck(&images, &store, &id),
+        ContainerCmd::Top { id } => cmd_top(&store, &id),
+        ContainerCmd::Diff { id } => cmd_diff(&images, &store, &id),
+        ContainerCmd::Cp { src, dst } => cmd_cp(&images, &store, &src, &dst),
         ContainerCmd::Inspect { ids } => cmd_inspect(&store, &ids),
         ContainerCmd::Describe { ids } => cmd_describe(&store, &ids),
         ContainerCmd::Update { id, publish_add, publish_rm, volume_add, volume_rm, net_connect, net_disconnect, net_rate, net_burst, net_rate_clear } => cmd_update(
@@ -1180,6 +1223,245 @@ fn cmd_inspect(store: &Store, ids: &[String]) -> Result<()> {
     Ok(())
 }
 
+/// `container pause`/`unpause` — freezer do cgroup v2.
+///
+/// **Precisa de delegação de cgroup**: em rootless sem ela (`systemd-run --user
+/// --scope -p Delegate=yes`, ou uma unit com `Delegate=yes`), o `cgroup.freeze`
+/// não é escrevível e isto falha — não é bug, é o modelo.
+fn cmd_freeze(store: &Store, id: &str, frozen: bool) -> Result<()> {
+    let c = find(store, id)?;
+    runtime::set_frozen(&c, frozen)?;
+    println!("{}", short_id(&c.id));
+    Ok(())
+}
+
+/// `container commit` — o rootfs actual do container vira uma imagem nova.
+///
+/// **Dois caminhos, os MESMOS do `delonix build`** (ver `cmd::build`): em
+/// rootless o rootfs é FLAT (não há overlay, logo não há upperdir de onde tirar
+/// um diff) e empacota-se o rootfs inteiro com `commit_flat_rootfs`; em root há
+/// overlay e o `commit_upper` tira só a layer do diff, que é bem mais barato.
+///
+/// A versão que estava no PaaS só fazia o caminho do overlay e, em rootless,
+/// rebentava com "falha a empacotar o diff: No such file or directory" — o
+/// upperdir não existe. Portar sem isto seria portar o bug.
+fn cmd_commit(images: &ImageStore, store: &Store, id: &str, tag: &str) -> Result<()> {
+    let c = find(store, id)?;
+    let base = images
+        .resolve(&c.image)
+        .map_err(|_| Error::Invalid(format!("a imagem-base '{}' do container já não existe", c.image)))?;
+    let img = if runtime::is_rootless() {
+        let rootfs = images.root().join("containers").join(&c.id).join("rootfs");
+        if !rootfs.exists() {
+            return Err(Error::Invalid(format!(
+                "'{}' não tem rootfs em disco — foi removido, ou o container nunca chegou a arrancar",
+                c.name
+            )));
+        }
+        images.commit_flat_rootfs(&rootfs, c.command.clone(), c.env.clone(), c.workdir.clone().unwrap_or_default(), tag)?
+    } else {
+        let layer = images.commit_upper(&c.id)?; // tar do upperdir → CAS
+        images.commit_container(&base, layer, c.command.clone(), c.env.clone(), tag)?
+    };
+    println!("{}  {}", img.short_id(), img.repo_tags.join(", "));
+    Ok(())
+}
+
+/// `container ssh` — shell interactivo. Sem comando, tenta o bash e cai no sh.
+fn cmd_ssh(store: &Store, id: &str, command: &[String]) -> Result<()> {
+    let c = find(store, id)?;
+    let argv: Vec<String> = if command.is_empty() {
+        // `exec` no shell: o bash substitui o sh em vez de ficar um pai à espera.
+        vec!["/bin/sh".into(), "-c".into(), "exec /bin/bash 2>/dev/null || exec /bin/sh".into()]
+    } else {
+        command.to_vec()
+    };
+    std::process::exit(runtime::exec(&c, &argv, true)?);
+}
+
+/// `container healthcheck` — corre o `HEALTHCHECK` da imagem lá dentro.
+/// Sai com 1 em `unhealthy`, para servir de gate em scripts/CI.
+fn cmd_healthcheck(images: &ImageStore, store: &Store, id: &str) -> Result<()> {
+    let c = find(store, id)?;
+    let img = images.resolve(&c.image)?;
+    let hc = img
+        .config
+        .healthcheck
+        .clone()
+        .ok_or_else(|| Error::Invalid(format!("a imagem '{}' não define HEALTHCHECK", c.image)))?;
+    if !c.pid.map(runtime::is_alive).unwrap_or(false) {
+        return Err(Error::NotRunning(short_id(&c.id).to_string()));
+    }
+    let code = runtime::exec(&c, &["/bin/sh".to_string(), "-c".to_string(), hc], false)?;
+    if code == 0 {
+        println!("healthy");
+        Ok(())
+    } else {
+        println!("unhealthy (exit {code})");
+        std::process::exit(1);
+    }
+}
+
+/// `container top` — processos do container, via `cgroup.procs`.
+///
+/// Os PIDs são os do HOST (é o que o cgroup lista); dentro do container, com o
+/// seu PID namespace, os números são outros. A coluna diz `HOST-PID` para não
+/// enganar quem compare com um `ps` de dentro.
+fn cmd_top(store: &Store, id: &str) -> Result<()> {
+    let c = find(store, id)?;
+    if !c.pid.map(runtime::is_alive).unwrap_or(false) {
+        return Err(Error::NotRunning(short_id(&c.id).to_string()));
+    }
+    // O `Container::cgroup()` é o caminho que o motor TENTOU usar
+    // (`<slice>/delonix-<id>`); em rootless sem delegação o container não fica
+    // lá. Lê-se o cgroup REAL do init pelo `/proc/<pid>/cgroup` — a mesma
+    // técnica do `cgroup_metric` que o `stats` já usa, e que funciona seja qual
+    // for a base delegada. A versão do PaaS usava o caminho adivinhado e dava
+    // "cgroup.procs: No such file or directory" em qualquer host sem delegação.
+    let pid = c.pid.ok_or_else(|| Error::NotRunning(short_id(&c.id).to_string()))?;
+    let procs = cgroup_metric(pid, "cgroup.procs").ok_or_else(|| {
+        Error::Invalid(format!(
+            "não consigo ler o cgroup.procs de '{}' — o cgroup do container não está acessível (rootless sem delegação?)",
+            c.name
+        ))
+    })?;
+    let mut t = output::Table::new(&["HOST-PID", "STATE", "COMMAND"]);
+    for line in procs.lines() {
+        let pid = line.trim();
+        if pid.is_empty() {
+            continue;
+        }
+        // Campo 3 de /proc/<pid>/stat, depois do comm — que pode ter espaços e
+        // parênteses, daí cortar pelo ÚLTIMO ')'.
+        let state = std::fs::read_to_string(format!("/proc/{pid}/stat"))
+            .ok()
+            .and_then(|s| s.rsplit(')').next().map(|r| r.trim().chars().next().unwrap_or('?').to_string()))
+            .unwrap_or_else(|| "?".into());
+        let cmd = std::fs::read_to_string(format!("/proc/{pid}/cmdline"))
+            .map(|s| s.replace('\0', " ").trim().to_string())
+            .ok()
+            .filter(|s| !s.is_empty())
+            // Um processo de kernel/zombie tem cmdline vazia — o comm é o fallback.
+            .or_else(|| std::fs::read_to_string(format!("/proc/{pid}/comm")).ok().map(|s| s.trim().to_string()))
+            .unwrap_or_default();
+        t.row(vec![pid.to_string(), state, cmd]);
+    }
+    t.print();
+    Ok(())
+}
+
+/// `container diff` — o upperdir do overlay É o diff face à imagem.
+/// Whiteouts (char device 0:0) = `D`(eleted); o resto = `A`(dded/changed).
+fn cmd_diff(images: &ImageStore, store: &Store, id: &str) -> Result<()> {
+    let c = find(store, id)?;
+    let upper = images.root().join("containers").join(&c.id).join("upper");
+    if !upper.exists() {
+        // Rootless usa rootfs FLAT (sem overlay), logo não há upperdir de onde
+        // tirar um diff. Dizê-lo é melhor que imprimir nada e parecer "sem
+        // alterações" — que é uma resposta diferente.
+        return Err(Error::Invalid(format!(
+            "'{}' não tem upperdir de overlay — o `diff` compara o overlay com a imagem, e em rootless o rootfs é flat",
+            c.name
+        )));
+    }
+    fn walk(base: &std::path::Path, dir: &std::path::Path, out: &mut Vec<(char, String)>) -> std::io::Result<()> {
+        use std::os::unix::fs::FileTypeExt;
+        for entry in std::fs::read_dir(dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            let rel = path.strip_prefix(base).unwrap_or(&path).to_string_lossy().to_string();
+            let ft = entry.file_type()?;
+            if ft.is_char_device() {
+                out.push(('D', format!("/{rel}"))); // whiteout do overlay = apagado
+            } else if ft.is_dir() {
+                out.push(('A', format!("/{rel}")));
+                walk(base, &path, out)?;
+            } else {
+                out.push(('A', format!("/{rel}")));
+            }
+        }
+        Ok(())
+    }
+    let mut out = Vec::new();
+    walk(&upper, &upper, &mut out).map_err(|e| Error::Invalid(format!("diff: {e}")))?;
+    out.sort_by(|a, b| a.1.cmp(&b.1));
+    for (k, p) in out {
+        println!("{k} {p}");
+    }
+    Ok(())
+}
+
+/// Raiz do sistema de ficheiros de um container, para o `cp`: se está vivo,
+/// `/proc/<pid>/root` (que respeita os mounts que ele tem, incluindo os que o
+/// `container update --volume-add` meteu a quente); senão, o rootfs em disco.
+fn container_fs_root(images: &ImageStore, c: &Container) -> Result<std::path::PathBuf> {
+    if let Some(pid) = c.pid.filter(|p| runtime::is_alive(*p)) {
+        return Ok(std::path::PathBuf::from(format!("/proc/{pid}/root")));
+    }
+    let dir = images.root().join("containers").join(&c.id);
+    for cand in ["merged", "rootfs"] {
+        let p = dir.join(cand);
+        if p.exists() {
+            return Ok(p);
+        }
+    }
+    Err(Error::Invalid(format!(
+        "container '{}' parado e sem rootfs em disco — arranca-o (`delonix container start {}`)",
+        c.name, c.name
+    )))
+}
+
+fn copy_recursive(src: &std::path::Path, dst: &std::path::Path) -> std::io::Result<()> {
+    if src.is_dir() {
+        std::fs::create_dir_all(dst)?;
+        for entry in std::fs::read_dir(src)? {
+            let entry = entry?;
+            copy_recursive(&entry.path(), &dst.join(entry.file_name()))?;
+        }
+    } else {
+        if let Some(parent) = dst.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::copy(src, dst)?;
+    }
+    Ok(())
+}
+
+/// Separa `nome:/caminho`. `None` = é um caminho de host.
+///
+/// O `:` tem de vir antes de qualquer `/`, senão `./a:b/c` ou um caminho
+/// absoluto com `:` no nome seriam lidos como container.
+fn split_cp_arg(s: &str) -> Option<(String, String)> {
+    let colon = s.find(':')?;
+    if s[..colon].is_empty() || s[..colon].contains('/') {
+        return None;
+    }
+    Some((s[..colon].to_string(), s[colon + 1..].to_string()))
+}
+
+/// `container cp` — copia host↔container. Exactamente um lado é `container:/path`.
+fn cmd_cp(images: &ImageStore, store: &Store, src: &str, dst: &str) -> Result<()> {
+    let join_root = |root: &std::path::Path, p: &str| root.join(p.trim_start_matches('/'));
+    match (split_cp_arg(src), split_cp_arg(dst)) {
+        (Some((name, cpath)), None) => {
+            let c = find(store, &name)?;
+            let root = container_fs_root(images, &c)?;
+            copy_recursive(&join_root(&root, &cpath), std::path::Path::new(dst)).map_err(|e| Error::Invalid(format!("cp: {e}")))?;
+        }
+        (None, Some((name, cpath))) => {
+            let c = find(store, &name)?;
+            let root = container_fs_root(images, &c)?;
+            copy_recursive(std::path::Path::new(src), &join_root(&root, &cpath)).map_err(|e| Error::Invalid(format!("cp: {e}")))?;
+        }
+        _ => {
+            return Err(Error::Invalid(
+                "uso: delonix container cp <SRC> <DST> — exactamente um dos lados é `container:/caminho`".into(),
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// `container describe` — detalhe legível ao estilo `kubectl describe`.
 ///
 /// Complementa o `inspect` (JSON, para máquinas/`jq`) em vez de o substituir:
@@ -1718,6 +2000,23 @@ mod tests {
         // Um --net-disconnect da do meio deixa um buraco: reutiliza-se, senão o
         // índice subia para sempre e os nomes de interface fugiam do eth1..N.
         assert_eq!(next_extra_idx(&c_com_extras(&[1, 3])), 2);
+    }
+
+    #[test]
+    fn cp_distingue_container_de_caminho_de_host() {
+        use super::split_cp_arg;
+        assert_eq!(split_cp_arg("web:/etc/conf"), Some(("web".into(), "/etc/conf".into())));
+        assert_eq!(split_cp_arg("web:relativo"), Some(("web".into(), "relativo".into())));
+        // Caminhos de host puros.
+        assert_eq!(split_cp_arg("/tmp/x"), None);
+        assert_eq!(split_cp_arg("ficheiro.txt"), None);
+        // O ':' TEM de vir antes de qualquer '/', senão um caminho de host com
+        // dois-pontos no nome (`./a:b/c`, `/mnt/disco:1/f`) seria lido como um
+        // container chamado "./a" — e o cp escrevia no sítio errado.
+        assert_eq!(split_cp_arg("./a:b/c"), None);
+        assert_eq!(split_cp_arg("/mnt/disco:1/f"), None);
+        // Nome vazio não é container.
+        assert_eq!(split_cp_arg(":/etc"), None);
     }
 
     #[test]
