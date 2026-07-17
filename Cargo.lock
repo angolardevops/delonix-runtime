@@ -485,12 +485,14 @@ dependencies = [
  "delonix-runtime-core",
  "delonix-vm",
  "delonix-volume",
+ "flate2",
  "libc",
  "reqwest",
  "serde",
  "serde_json",
  "serde_yaml",
  "sha2",
+ "tar",
 ]
 
 [[package]]
