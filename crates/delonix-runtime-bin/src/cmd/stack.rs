@@ -69,7 +69,7 @@ pub fn run(action: StackCmd) -> Result<()> {
 /// Os Kinds do stack, na MESMA ordem do `apply` — quem lê o `describe` vê a
 /// ordem por que as coisas são criadas, o que é metade do diagnóstico quando um
 /// apply pára a meio.
-const KINDS: [&str; 5] = ["Network", "Volume", "Image", "Vm", "Container"];
+const KINDS: [&str; 6] = ["Network", "Volume", "Storage", "Image", "Vm", "Container"];
 
 fn describe(file: Option<PathBuf>) -> Result<()> {
     let path = manifest::resolve_path(file)?;
@@ -123,7 +123,8 @@ fn presence(kind: &str, name: &str, containers: &[delonix_runtime_core::Containe
             }
             None => ("no".into(), "-".into()),
         },
-        "Volume" => match delonix_volume::VolumeStore::open(&root).and_then(|s| s.list()) {
+        // Storage é um volume de rede — vive no mesmo store que os volumes.
+        "Volume" | "Storage" => match delonix_volume::VolumeStore::open(&root).and_then(|s| s.list()) {
             Ok(vs) => yes_no(vs.iter().any(|v| v.name == name)),
             Err(e) => ("?".into(), e.to_string()),
         },
@@ -158,6 +159,7 @@ fn apply(file: Option<PathBuf>) -> Result<()> {
     let docs = manifest::load(&path)?;
     super::network::apply(&docs)?;
     super::volume::apply(&docs)?;
+    super::storage::apply(&docs)?;
     super::image::apply(&docs)?;
     super::vm::apply(&docs)?;
     super::container::apply(&docs)?;

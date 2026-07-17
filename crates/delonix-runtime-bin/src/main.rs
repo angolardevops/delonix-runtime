@@ -84,6 +84,11 @@ enum Cmd {
         #[command(subcommand)]
         action: cmd::secret::SecretCmd,
     },
+    /// Armazenamento de REDE (NFS/CIFS/WebDAV) montável como volume — estilo PV do k8s.
+    Storage {
+        #[command(subcommand)]
+        action: cmd::storage::StorageCmd,
+    },
     /// Aplica um manifesto (`delonix-manifest.yaml`) inteiro — todos os Kinds.
     Stack {
         #[command(subcommand)]
@@ -138,6 +143,7 @@ fn run() -> Result<()> {
         Cmd::Volumes { action } => cmd::volume::run(action),
         Cmd::Network { action } => cmd::network::run(action),
         Cmd::Secret { action } => cmd::secret::run(action),
+        Cmd::Storage { action } => cmd::storage::run(action),
         Cmd::Stack { action } => cmd::stack::run(action),
         Cmd::System { action } => cmd::system::run(action),
         Cmd::Cluster { action } => cmd::cluster::run(action),
