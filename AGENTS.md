@@ -383,6 +383,37 @@ Depurar netfilter por dentro (`nft`/`iptables` via `delonix container exec`) dav
 permitted" apesar de o init ter as caps. Corrigido: `exec` espelha o init (caps completas + seccomp
 unconfined quando privileged). Confirmado: exec CapEff `1ffffffffff`, `nft` via exec OK.
 
+### CLUSTER KUBERNETES REAL A CORRER — `kubeadm init` COMPLETO (2026-07-17)
+
+Um control-plane Kubernetes v1.34 **Ready** sobre o Delonix, rootless, daemonless, **sem Docker**:
+
+```
+NAME   STATUS   ROLES           AGE   VERSION            CONTAINER-RUNTIME
+kadm   Ready    control-plane   8m    v1.34.0            containerd://2.1.3
+etcd / kube-apiserver / kube-controller-manager / kube-scheduler / kube-proxy / kindnet  →  todos 1/1 Running
+```
+
+Provas que interessam: o **kube-proxy programa netfilter** no nosso netns rootless (`nft list tables`
+→ `table ip filter`, `table ip mangle`, `table ip nat`) e o nó regista-se com `INTERNAL-IP 10.0.2.100`.
+
+**A receita que um nó Kind rootless EXIGE** (o `delonix cluster` tem de a gerar; nada disto é bug do
+runtime — é config de kubelet/kube-proxy, e é exactamente o que o `kind` rootless também faz):
+1. **`featureGates: { KubeletInUserNamespace: true }`** no `/var/lib/kubelet/config.yaml`. É O passo
+   decisivo. Sem ele o kubelet morre em `open /dev/kmsg` — e o próprio kubelet diz a solução no log
+   ("running in UserNS, Hint: enable KubeletInUserNamespace feature flag"). Tentar dar-lhe um
+   `/dev/kmsg` NÃO resolve: um bind do kmsg do host é `root:adm 0640` (uid mapeado não abre) e um
+   symlink para `/dev/console` só troca ENOENT por EIO. Com a gate, o kubelet ignora o kmsg.
+2. **`--fail-swap-on=false`** no kubelet: um container herda o `/proc/swaps` do HOST — o fix de swap
+   da imagem VM dourada (fstab) não se aplica aqui.
+3. **`conntrack: { maxPerCore: 0, min: 0 }`** no ConfigMap do kube-proxy: `nf_conntrack_max` é um
+   sysctl global, não escrevível de um userns (`permission denied` → CrashLoopBackOff).
+4. CNI: o `/kind/manifests/default-cni.yaml` da imagem (kindnet) aplica-se tal e qual (só substituir
+   `{{ .PodSubnet }}`); o nó passa a `Ready` ~1min depois.
+
+**Aprendido pelo caminho (leaks de recursos — ver "Produção/HA")**: o kubelet aplicou a taint
+`node.kubernetes.io/disk-pressure` porque **49 rootfs órfãos** (~45 GiB) de spikes anteriores tinham
+enchido o disco a 89%. Directórios de container sobrevivem a mortes abruptas sem ninguém os reapar.
+
 **Próximas fatias (já não netfilter)**: (1) cgroup `cpuset` na delegação (preflight marca-o
 "missing required" — só WARNING, mas fecha-o para um nó limpo); (2) correr `kubeadm init` completo
 até um control-plane Ready (o preflight já passa; falta exercitar o pull+init+CNI reais); (3)
