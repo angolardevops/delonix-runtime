@@ -48,6 +48,13 @@ fn default_driver() -> String {
 pub enum NetworkCmd {
     /// Lista as redes.
     Ls,
+    /// Identidade WireGuard DESTE nó, para o overlay VXLAN cifrado entre nós
+    /// (`network create --driver overlay`). A chave privada fica 0600 em
+    /// `<root>/wg/node.key`; a pública é o que se distribui aos peers.
+    Node {
+        #[command(subcommand)]
+        action: NodeCmd,
+    },
     /// Cria uma rede.
     Create {
         name: String,
@@ -95,6 +102,7 @@ pub fn run(action: NetworkCmd) -> Result<()> {
     let store = NetworkStore::open(state_root())?;
     match action {
         NetworkCmd::Ls => cmd_ls(&store),
+        NetworkCmd::Node { action } => cmd_node(action),
         NetworkCmd::Create { name, driver, parent, subnet, gateway, vni, peers, wg_ip } => {
             let net = create_network(&store, &name, &driver, parent, subnet, &gateway, vni, peers, wg_ip)?;
             println!("{}", net.name);
@@ -270,5 +278,31 @@ fn cmd_rm(store: &NetworkStore, name: &str) -> Result<()> {
     store.remove(name)?;
     infra::network_remove(name);
     println!("{name}");
+    Ok(())
+}
+
+/// Subcomandos de `network node` — a identidade WireGuard do nó local.
+#[derive(clap::Subcommand)]
+pub enum NodeCmd {
+    /// Gera a chave do nó (se ainda não existir) e imprime a pública com o
+    /// contexto de o que fazer com ela. Idempotente.
+    Init,
+    /// Imprime só a chave pública (para compor em scripts).
+    Key,
+}
+
+/// `network node` — `ensure_node_key` é idempotente: gera na primeira vez,
+/// depois lê a que já existe.
+fn cmd_node(action: NodeCmd) -> Result<()> {
+    let key = delonix_net::wg::ensure_node_key()?;
+    match action {
+        NodeCmd::Init => {
+            println!("nó inicializado — chave pública (distribui aos peers do overlay):");
+            println!("  {}", key.public);
+            println!("privada protegida 0600 em <root>/wg/node.key");
+        }
+        // Só a chave, sem ruído: isto costuma ir para dentro doutro comando.
+        NodeCmd::Key => println!("{}", key.public),
+    }
     Ok(())
 }
