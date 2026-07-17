@@ -16,6 +16,7 @@ pub mod scan;
 pub mod secret;
 pub mod scaffold;
 pub mod stack;
+pub mod storage;
 pub mod system;
 pub mod util;
 pub mod vm;

@@ -43,6 +43,21 @@ pub struct Volume {
     pub alert_pct: Option<u8>,
 }
 
+/// Os drivers que montam uma partilha de rede (por oposição a `local`/loopback).
+pub fn is_network_driver(driver: &str) -> bool {
+    matches!(driver, "nfs" | "cifs" | "smb" | "webdav" | "dav")
+}
+
+/// O `-t <fstype>` do `mount` para cada driver de rede. `smb` é um alias de
+/// `cifs` (o kernel só conhece `cifs`); `dav` de `webdav` (`davfs`).
+fn mount_fstype(driver: &str) -> &'static str {
+    match driver {
+        "cifs" | "smb" => "cifs",
+        "webdav" | "dav" => "davfs",
+        _ => "nfs",
+    }
+}
+
 fn default_driver() -> String {
     "local".to_string()
 }
@@ -128,8 +143,10 @@ impl VolumeStore {
             self.ensure_mounted(&v)?;
             return Ok(v);
         }
-        if driver == "nfs" && device.as_deref().unwrap_or("").is_empty() {
-            return Err(Error::Invalid("volume nfs requer um device (servidor:/export)".into()));
+        // Os drivers de rede exigem um `device` (o alvo da montagem): nfs
+        // `servidor:/export`, cifs `//servidor/share`, webdav `https://…`.
+        if is_network_driver(driver) && device.as_deref().unwrap_or("").is_empty() {
+            return Err(Error::Invalid(format!("volume {driver} requer um device (o alvo da montagem)")));
         }
         let data = self.data_dir(name);
         fs::create_dir_all(&data)?;
@@ -152,8 +169,14 @@ impl VolumeStore {
         Ok(vol)
     }
 
-    /// Garante que um volume `nfs` está montado (via `mount -t nfs`). No-op para
-    /// volumes locais ou se já estiver montado. Best-effort: requer `mount.nfs`.
+    /// Garante que um volume de REDE está montado. No-op para volumes locais ou
+    /// se já estiver montado. Best-effort: requer o helper de mount do tipo
+    /// (`mount.nfs`, `mount.cifs`, `mount.davfs`) e, tipicamente, privilégio.
+    ///
+    /// Tipos suportados e o `mount -t` respectivo:
+    /// - `nfs`   → `mount -t nfs   servidor:/export`  (TrueNAS/NFS externo)
+    /// - `cifs`/`smb` → `mount -t cifs //servidor/share` (Samba/Windows/TrueNAS SMB)
+    /// - `webdav`/`dav` → `mount -t davfs https://…`  (Nextcloud/ownCloud WebDAV)
     pub fn ensure_mounted(&self, vol: &Volume) -> Result<()> {
         // Volume com quota DURA (loopback ext4): remonta a imagem se desmontada
         // (ex.: após reinício do host). Best-effort — sem privilégio, no-op.
@@ -161,27 +184,30 @@ impl VolumeStore {
         if vol.quota_bytes.is_some() && img.exists() && !is_mounted(&vol.mountpoint) {
             let _ = Self::run("mount", &["-o", "loop", &img.to_string_lossy(), &vol.mountpoint]);
         }
-        if vol.driver != "nfs" || is_mounted(&vol.mountpoint) {
+        if !is_network_driver(&vol.driver) || is_mounted(&vol.mountpoint) {
             return Ok(());
         }
+        let fstype = mount_fstype(&vol.driver);
         let device = vol
             .device
             .as_ref()
-            .ok_or_else(|| Error::Invalid(format!("volume nfs '{}' sem device", vol.name)))?;
-        let mut args = vec!["-t", "nfs", device.as_str(), vol.mountpoint.as_str()];
+            .ok_or_else(|| Error::Invalid(format!("volume {} '{}' sem device", vol.driver, vol.name)))?;
+        let mut args = vec!["-t", fstype, device.as_str(), vol.mountpoint.as_str()];
         if let Some(o) = &vol.options {
             args.push("-o");
             args.push(o);
         }
+        let ctx: &'static str = match fstype {
+            "cifs" => "mount cifs",
+            "davfs" => "mount webdav",
+            _ => "mount nfs",
+        };
         let out = std::process::Command::new("mount")
             .args(&args)
             .output()
-            .map_err(|e| Error::Runtime { context: "mount nfs", message: e.to_string() })?;
+            .map_err(|e| Error::Runtime { context: ctx, message: e.to_string() })?;
         if !out.status.success() {
-            return Err(Error::Runtime {
-                context: "mount nfs",
-                message: String::from_utf8_lossy(&out.stderr).trim().to_string(),
-            });
+            return Err(Error::Runtime { context: ctx, message: String::from_utf8_lossy(&out.stderr).trim().to_string() });
         }
         Ok(())
     }
@@ -276,7 +302,7 @@ impl VolumeStore {
         }
         if let Ok(v) = self.inspect(name) {
             // desmonta nfs OU o loopback de quota dura antes de apagar os dados.
-            if (v.driver == "nfs" || v.quota_bytes.is_some()) && is_mounted(&v.mountpoint) {
+            if (is_network_driver(&v.driver) || v.quota_bytes.is_some()) && is_mounted(&v.mountpoint) {
                 let _ = std::process::Command::new("umount").arg(&v.mountpoint).output();
             }
         }
