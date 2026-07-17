@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub mod cred_vault;
+pub mod events;
 pub mod secret;
 pub mod typestate;
 pub mod virt;
@@ -19,6 +20,22 @@ mod store;
 pub use error::{Error, Result};
 pub use secret::{Secret, SecretStore};
 pub use store::{JsonStore, Store};
+
+/// Formata um instante unix como data/hora LOCAL "AAAA-MM-DD HH:MM:SS".
+/// Usa `localtime_r` (honra /etc/localtime|TZ); em falha, devolve o valor cru.
+pub fn fmt_local_ts(unix: u64) -> String {
+    let t = unix as libc::time_t;
+    let mut tm: libc::tm = unsafe { std::mem::zeroed() };
+    // SAFETY: `t` é válido; `localtime_r` escreve em `tm` (buffer nosso, do
+    // tamanho certo) e devolve NULL só em erro — tratado a seguir.
+    if unsafe { libc::localtime_r(&t, &mut tm).is_null() } {
+        return unix.to_string();
+    }
+    format!(
+        "{:04}-{:02}-{:02} {:02}:{:02}:{:02}",
+        tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec
+    )
+}
 
 /// Uma montagem a injectar no container (volume nomeado ou *bind mount*).
 ///

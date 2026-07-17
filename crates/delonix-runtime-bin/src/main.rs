@@ -80,6 +80,11 @@ enum Cmd {
         #[command(subcommand)]
         action: cmd::stack::StackCmd,
     },
+    /// O motor em si: eventos, estado e uso de disco.
+    System {
+        #[command(subcommand)]
+        action: cmd::system::SystemCmd,
+    },
     /// Bootstrap `kubeadm` idempotente sobre SSH (`kind: Cluster`).
     Cluster {
         #[command(subcommand)]
@@ -102,6 +107,7 @@ fn run() -> Result<()> {
         Cmd::Volumes { action } => cmd::volume::run(action),
         Cmd::Network { action } => cmd::network::run(action),
         Cmd::Stack { action } => cmd::stack::run(action),
+        Cmd::System { action } => cmd::system::run(action),
         Cmd::Cluster { action } => cmd::cluster::run(action),
         Cmd::Completion { shell } => cmd_completion(shell),
     }
