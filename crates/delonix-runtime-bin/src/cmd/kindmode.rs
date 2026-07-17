@@ -974,6 +974,17 @@ pub(crate) fn delete(images: &ImageStore, store: &Store, name: &str) -> Result<(
         eprintln!("{} '{}'...", super::output::tr("removing node", "a remover o nó"), n.name);
         container::remove_container(images, store, n, true)?;
     }
+    // A rede do cluster (`dlx-<nome>`) foi criada PARA este cluster — some com ele
+    // (ao contrário de uma rede de utilizador, que um `container rm` nunca apaga).
+    // Assim a sub-rede/bridge ficam livres para reutilizar. Volumes NÃO se tocam:
+    // são explícitos, como no docker.
+    let net = cluster_net(name);
+    if let Ok(nstore) = delonix_net::NetworkStore::open(super::util::state_root()) {
+        if nstore.get(&net).is_ok() {
+            let _ = nstore.remove(&net);
+            delonix_net::infra::network_remove(&net);
+        }
+    }
     let _ = std::fs::remove_file(kubeconfig_path(name));
     let _ = std::fs::remove_dir_all(cluster_dir(name));
     // Tira o contexto do ~/.kube/config — senão o `kubectl config get-contexts`
