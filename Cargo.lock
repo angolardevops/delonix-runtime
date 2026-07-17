@@ -508,6 +508,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "delonix-scan"
+version = "0.3.0"
+dependencies = [
+ "delonix-image",
+ "delonix-runtime-core",
+ "flate2",
+ "serde",
+ "serde_json",
+ "tar",
+]
+
+[[package]]
 name = "delonix-vm"
 version = "0.3.0"
 dependencies = [
