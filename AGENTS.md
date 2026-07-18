@@ -70,6 +70,15 @@ cada grupo tinha larguras hardcoded `{:<20}` e a tabela desalinhava assim que um
 **Sem dependências novas** — não há `comfy-table`/`tabled`/`chrono` na árvore e não vale a pena
 aumentar a superfície de supply-chain de um runtime de containers por um alinhador de colunas.
 
+> **Excepção deliberada: `ratatui` (`delonix dash`).** O dashboard interactivo
+> (`delonix dash` + `container/vm/network/storage/image dash`) usa `ratatui`
+> (traz `crossterm`) — a única dependência de UI que quebra a regra acima, por
+> decisão explícita do utilizador (queria um TUI estilo htop, não um snapshot).
+> Está **confinada ao bin** (`delonix-runtime-bin`); os crates de motor
+> continuam dep-limpos (`cargo tree -e normal` deles não a mostra). O modo
+> `delonix dash --once` (snapshot de texto ANSI) não a usa em runtime. Registado
+> aqui para a auditoria futura não a tratar como acidental — ver `cmd/dash.rs`.
+
 - `container ls` tem as 7 colunas do `docker ps`. O `Up …` sai do `pid_starttime` do init e **não**
   do `created_unix`: um container criado ontem e reiniciado há 5 min mostraria "Up 1 day" — falso
   exactamente quando interessa (a depurar um crash-loop).
