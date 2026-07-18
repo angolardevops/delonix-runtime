@@ -68,6 +68,8 @@ uma lista plana, um módulo por grupo em `crates/delonix-runtime-bin/src/cmd/`:
   rede e a escrita chegou ao NAS (ver `examples/storage.yaml` + `examples/nas-vm-cloud-config.yaml`,
   a receita da VM Samba+NFS de validação). **Montar NFS/CIFS precisa de CAP_SYS_ADMIN** (root ou
   sessão privilegiada) — em rootless puro o `mount -t` falha claro.
+- `delonix httproute` — ls/apply/rm do **reverse-proxy L7/HTTP** (`kind: HTTPRoute`). Ver a
+  secção "Reverse-proxy L7" abaixo. **Não confundir** com `delonix ingress` (firewall L4 inbound).
 - `delonix stack apply [-f delonix-manifest.yaml]` — ver secção "Manifesto/apply" abaixo.
 
 ## Output: `ls` estilo docker, `describe` estilo kubectl (`cmd/output.rs`)
@@ -159,6 +161,51 @@ container}.rs`) tem um `spec` tipado próprio (`NetworkSpec`, `VolumeSpec`, ...)
 - Exemplo completo de manifesto e o mapeamento spec↔CLI: ver o doc-comment de
   `crates/delonix-runtime-bin/src/cmd/manifest.rs` e o plano desta sessão
   (`/home/walter/.claude/plans/mellow-cuddling-canyon.md`, mantido para referência histórica).
+
+## Reverse-proxy L7 (`kind: HTTPRoute`)
+
+Reverse-proxy HTTP/HTTPS declarativo **embutido** (nome alinhado ao Gateway API do k8s: `HTTPRoute`
+= L7; `Ingress`/`FirewallPolicy` = firewall L4). Roteia por `Host` + prefixo de path para
+containers backend. Módulos: `cmd/httproute.rs` (schema `HttpRouteSpec` + resolução + `apply`) e
+`cmd/ingress_proxy.rs` (o proxy `hyper` + o ciclo de vida). Superfície: `delonix httproute
+ls/apply/rm` + `kind: HTTPRoute` no `stack apply`.
+
+- **O proxy é `hyper` puro** (server http1 + cliente `hyper-util` legacy), **confinado ao bin** —
+  `hyper`/`hyper-util`/`tokio`/`tokio-rustls`/`rustls-pemfile`/`rcgen`/`bytes`/`http-body-util` são
+  deps do `delonix-runtime-bin`; **já vinham na árvore** (transitivas via `delonix-cri`/`tonic`),
+  logo **zero superfície de supply-chain nova** (excepto `rcgen`/`rustls-pemfile`, minúsculas). Os
+  crates de motor continuam dep-limpos.
+- **Onde corre:** um processo `delonix ingress-proxy` (subcomando OCULTO) lançado **dentro do netns
+  do holder** (`infra::infra_join_argv` + `setsid` detached; o `nsenter` faz EXEC → PID estável e
+  signalável do host). Aí alcança os backends por IP interno; as portas de entrada publicam-se no
+  host via `slirp add_hostfwd` (o proxy escuta `0.0.0.0` e apanha o `SLIRP_IP` — o holder **não tem
+  `input` chain**, logo sem DNAT). Infra persistente como o slirp/holder, só existe quando há um
+  HTTPRoute — respeita o "daemonless".
+- **Reload a quente (SIGHUP):** as rotas vivem numa tabela trocável (`Arc<RwLock<Arc<Vec<Route>>>>`);
+  `httproute apply` num proxy vivo reescreve a config e envia SIGHUP → só as ROTAS recarregam (mesmo
+  PID, sem downtime). **Listeners e TLS ficam FIXOS no arranque** — mudá-los exige `httproute rm` +
+  apply (o apply avisa se detetar mudança de portas). É o substrato do auto-registo de containers.
+- **TLS termina no proxy** (`tokio-rustls`, provider `ring`): `spec.tls.mode: selfSigned` (gera um
+  cert multi-SAN com `rcgen` cobrindo todos os hosts) ou `secretRef` (lê `tls_crt`/`tls_key` — ou
+  `tls.crt`/`tls.key` — de um `kind: Secret`). Limitação v1: **um só cert** (sem selecção por SNI).
+- **Resolução:** `httproute::apply` corre por ÚLTIMO no `stack apply` (precisa dos containers já
+  criados) e resolve cada `backend.service` → `ip:porta` do record. **Só backends com IP na SDN**
+  (numa rede custom) servem — os de `--net host/none` não são alcançáveis pelo proxy; erro claro.
+- **Ciclo de vida** (`ensure_running`/`stop`): idempotente (vivo → SIGHUP; morto → spawn + publish),
+  com **guarda de identidade do PID** (`/proc/<pid>/cmdline` contém `ingress-proxy`, para um PID
+  reciclado não levar SIGHUP/SIGTERM), confirmação de arranque (não declara "a servir" se o proxy
+  caiu no bind) e publish idempotente. `httproute rm` mata o proxy + despublica.
+- **Segurança:** `host`/`path`/`backend.service` passam por `valid_host`/`valid_path_prefix`/
+  `valid_service` antes de qualquer uso; headers **hop-by-hop** (Connection/Transfer-Encoding/
+  Upgrade/…) removidos nos dois sentidos (anti-smuggling); timeouts anti-slowloris (handshake TLS,
+  header-read, backend→504). **WebSocket/upgrade ainda NÃO é tunelado** (follow-up).
+- **Provado E2E** (container `httpd` real numa rede custom): `httproute apply` → proxy no holder →
+  `curl host:<porta>` com `Host` header → backend; HTTPS com `curl -k` (TLS negociado, self-signed);
+  re-apply recarrega por SIGHUP (mesmo PID); `httproute rm` mata e despublica. Ver `examples/httproute.yaml`.
+
+**Próximo (pedido):** **auto-registo** — cada container HTTP que arranca ganha uma rota default +
+FQDN interno (`<nome>.<namespace>.delonix.internal`, DNS do holder) e é adicionado ao proxy por
+SIGHUP, sem reiniciar. Faz do Delonix um substituto do k8s (DNS+ingress) em ambientes pequenos.
 
 ## Imagem VM dourada (`delonix image --vm`)
 
