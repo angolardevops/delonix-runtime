@@ -100,14 +100,19 @@ impl DashData {
         }
         let c_running = containers.iter().filter(|(_, s, _)| *s == Status::Running).count();
 
-        // --- vms ---
-        let vms = delonix_vm::list(&root).unwrap_or_default();
+        // --- vms (estado RECONCILIADO com o backend, como os containers) — uma
+        //     VM morta por fora aparece Stopped, não o Running persistido ---
+        let vms: Vec<delonix_runtime_core::Vm> = delonix_vm::list(&root)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|v| delonix_vm::status(&root, &v.name).unwrap_or(v))
+            .collect();
         let vm_running = vms.iter().filter(|v| v.status == Status::Running).count();
 
         // --- redes / volumes / imagens / segredos ---
         let networks = delonix_net::NetworkStore::open(&root).and_then(|s| s.list()).unwrap_or_default();
         let volumes = delonix_volume::VolumeStore::open(&root).and_then(|s| s.list()).unwrap_or_default();
-        let images = delonix_image::ImageStore::open(&root).and_then(|s| s.list()).map(|v| v.len()).unwrap_or(0);
+        let images = delonix_image::ImageStore::open(&root).and_then(|s| s.list()).unwrap_or_default();
         let secrets = delonix_runtime_core::SecretStore::open(&root).map(|s| s.list().len()).unwrap_or(0);
 
         // --- tiles (por scope) ---
@@ -117,7 +122,7 @@ impl DashData {
                 tile("VMs", format!("{vm_running}/{}", vms.len()), "a correr / total"),
                 tile("REDES", networks.len(), "definidas"),
                 tile("VOLUMES", volumes.len(), "+ storage de rede"),
-                tile("IMAGENS", images, "em cache"),
+                tile("IMAGENS", images.len(), "em cache"),
                 tile("SEGREDOS", secrets, "no cofre"),
             ],
             DashScope::Containers => vec![
@@ -131,7 +136,7 @@ impl DashData {
             ],
             DashScope::Networks => vec![tile("REDES", networks.len(), "definidas")],
             DashScope::Storage => vec![tile("VOLUMES", volumes.len(), "locais + rede")],
-            DashScope::Images => vec![tile("IMAGENS", images, "em cache")],
+            DashScope::Images => vec![tile("IMAGENS", images.len(), "em cache")],
         };
 
         // --- linhas da tabela (por scope) ---
@@ -170,6 +175,12 @@ impl DashData {
         if want_s {
             for vol in &volumes {
                 rows.push(Row { kind: "Volume".into(), name: vol.name.clone(), status: vol.driver.clone(), extra: vol.mountpoint.clone(), ok: true });
+            }
+        }
+        if matches!(scope, DashScope::Images) {
+            for img in &images {
+                let name = img.repo_tags.first().cloned().unwrap_or_else(|| img.short_id());
+                rows.push(Row { kind: "Image".into(), name, status: img.short_id(), extra: format!("{} layers", img.layers.len()), ok: true });
             }
         }
 
@@ -288,17 +299,31 @@ mod tui {
     use std::io::stdout;
 
     pub fn run_interactive(scope: DashScope) -> Result<()> {
-        terminal::enable_raw_mode().ok();
-        let mut so = stdout();
-        execute!(so, terminal::EnterAlternateScreen).ok();
-        let backend = ratatui::backend::CrosstermBackend::new(so);
-        let mut term = Terminal::new(backend).map_err(io_err)?;
+        // Recolhe o PRIMEIRO snapshot ANTES de mexer no terminal: se falhar,
+        // devolve o erro com o terminal ainda intacto (nada de raw mode / alt
+        // screen por limpar). A partir daqui, TODOS os caminhos de saída restauram
+        // o terminal (a função `render` central faz a limpeza uma só vez no fim).
+        let data = DashData::collect(scope)?;
 
+        terminal::enable_raw_mode().ok();
+        execute!(stdout(), terminal::EnterAlternateScreen).ok();
+        let res = render(scope, data);
+        // Restaura SEMPRE (mesmo que `render` tenha devolvido Err) — senão o shell
+        // fica sem echo e no ecrã alternativo.
+        terminal::disable_raw_mode().ok();
+        execute!(stdout(), terminal::LeaveAlternateScreen, ratatui::crossterm::cursor::Show).ok();
+        res
+    }
+
+    /// O loop de desenho propriamente dito. Separado para que `run_interactive`
+    /// possa restaurar o terminal DEPOIS, aconteça o que acontecer aqui dentro.
+    fn render(scope: DashScope, mut data: DashData) -> Result<()> {
+        let backend = ratatui::backend::CrosstermBackend::new(stdout());
+        let mut term = Terminal::new(backend).map_err(io_err)?;
         let mut history: VecDeque<u64> = VecDeque::with_capacity(120);
         let mut last = Instant::now() - Duration::from_secs(2);
-        let mut data = DashData::collect(scope)?;
 
-        let res = loop {
+        loop {
             // Recolhe a cada ~1s (não a cada frame).
             if last.elapsed() >= Duration::from_secs(1) {
                 data = DashData::collect(scope).unwrap_or(data);
@@ -327,12 +352,7 @@ mod tui {
                 Ok(false) => {}
                 Err(e) => break Err(io_err(e)),
             }
-        };
-
-        terminal::disable_raw_mode().ok();
-        execute!(term.backend_mut(), terminal::LeaveAlternateScreen).ok();
-        term.show_cursor().ok();
-        res
+        }
     }
 
     fn io_err(e: std::io::Error) -> delonix_runtime_core::Error {
