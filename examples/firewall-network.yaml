@@ -1,0 +1,34 @@
+# Egress por-REDE declarativo (scope: network) — política de saída de uma rede
+# inteira, allowlist de CIDR/FQDN (FQDN aprendido AO VIVO do DNS) e rate-limit L4.
+# É a forma declarativa do `delonix egress net`/`egress host`/`l4guard` — assim
+# uma rede sai fechada só em YAML, sem CLI.
+#
+#   delonix stack apply -f examples/firewall-network.yaml
+#
+# Nota: scope: network só faz sentido em Egress (não há política de INGRESS
+# por-rede). Para firewall L4 POR-CONTAINER, ver examples/firewall.yaml.
+---
+apiVersion: delonix.io/v1
+kind: Network
+metadata:
+  name: prod-net
+spec:
+  driver: bridge
+  subnet: 10.219.0.0/24
+---
+apiVersion: delonix.io/v1
+kind: Egress
+metadata:
+  name: prod-egress
+spec:
+  scope: network            # o `target` é uma REDE, não um container
+  target: prod-net
+  defaultPolicy: deny        # nega toda a saída excepto o que estiver abaixo (+ DNS)
+  allowCidrs:                # CIDRs de saída permitidos (allowlist)
+    - 10.0.0.0/8
+  fqdnAllowlist:             # FQDNs permitidos (e `*.host`), via DNS-snooping
+    - github.com
+    - pypi.org
+  rateLimit:                 # protecção DDoS L4 (GLOBAL ao ingress rootless)
+    connRate: 200            # novas conexões/segundo
+    connMax: 2000            # conexões concorrentes máximas
