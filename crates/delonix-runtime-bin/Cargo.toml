@@ -26,6 +26,12 @@ hyper = { version = "1", features = ["server", "client", "http1"] }
 hyper-util = { version = "0.1", features = ["tokio", "client-legacy", "http1"] }
 http-body-util = "0.1"
 bytes = "1"
+# TLS do proxy (Fase 3): tokio-rustls já está na árvore (via delonix-cri). O
+# provider é o `ring` (já presente) — não puxamos aws-lc-rs. `rustls-pemfile`
+# carrega cert/chave BYO (PEM do kind: Secret); `rcgen` gera o self-signed.
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "logging", "tls12"] }
+rustls-pemfile = "2"
+rcgen = { version = "0.13", default-features = false, features = ["ring", "pem"] }
 # `__volsnap` (tar.gz do _data de um volume, no userns mapeado) — ja no workspace,
 # nao acrescenta nada a arvore de dependencias do repo publico.
 tar = { workspace = true }
