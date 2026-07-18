@@ -501,8 +501,14 @@ def group_page(name, g):
 
 INDEX = """
 <h1>Delonix Runtime <span class="pill">v{ver}</span></h1>
-<p class="tagline">Motor de containers e microVMs <strong>daemonless</strong>, <strong>rootless-first</strong>,
-kernel-native, em Rust — com CRI próprio para Kubernetes.</p>
+<p class="tagline"><strong>Engine</strong> de containers e microVMs <strong>daemonless</strong>,
+<strong>rootless-first</strong>, kernel-native, em Rust — com CRI próprio para Kubernetes.
+<em>O engine open-source que alimenta o Delonix.</em></p>
+
+<p>Não é um <em>runtime</em> OCI de baixo nível (isso é o <code>runc</code>/<code>crun</code>): é um
+engine COMPLETO de containers <strong>e</strong> VMs — build, run, rede, firewall, storage e
+bootstrap de clusters Kubernetes, tudo num só binário. É a camada aberta (Apache-2.0) sobre a qual
+assenta a plataforma <strong>Delonix</strong>.</p>
 
 <p>O Delonix Runtime faz o trabalho do Docker/Podman sem daemon residente: cada comando é um
 processo efémero que fala directamente com o kernel (namespaces, cgroups v2, pivot_root),
