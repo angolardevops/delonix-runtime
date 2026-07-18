@@ -9,4 +9,4 @@ spec:
   driver: local             # local | nfs (for nfs, prefer kind: Storage)
   quota: null               # size cap, e.g. "2g" (hard cap as root, monitored in rootless)
   device: null              # nfs export "server:/export" (only with driver: nfs)
-  options: null             # mount options, e.g. "vers=4,ro" (only with driver: nfs)
+  mountOptions: null        # mount options, e.g. "vers=4,ro" (only with driver: nfs)  (alias: options)

@@ -97,15 +97,29 @@ fn describe(file: Option<PathBuf>) -> Result<()> {
             continue;
         }
         println!();
-        let mut t = super::output::Table::new(&["KIND", "NAME", "PRESENT", "STATUS"]);
+        let mut t = super::output::Table::new(&["KIND", "NAME", "PRESENT", "STATUS", "LABELS"]);
         for doc in of {
             let name = &doc.metadata.name;
             let (present, status) = presence(kind, name, &containers);
-            t.row(vec![kind.to_string(), name.clone(), present, status]);
+            t.row(vec![kind.to_string(), name.clone(), present, status, fmt_labels(&doc.metadata)]);
         }
         t.print();
     }
     Ok(())
+}
+
+/// `key=value` dos labels de `metadata` (mais um `+N anno` se houver anotações),
+/// ou `-` se não houver nenhum — a coluna organizacional do `describe`.
+fn fmt_labels(meta: &manifest::Metadata) -> String {
+    let mut parts: Vec<String> = meta.labels.iter().map(|(k, v)| format!("{k}={v}")).collect();
+    if !meta.annotations.is_empty() {
+        parts.push(format!("+{} anno", meta.annotations.len()));
+    }
+    if parts.is_empty() {
+        "-".to_string()
+    } else {
+        parts.join(",")
+    }
 }
 
 /// `(presente, estado)` de um recurso declarado. **Não é um reconciliador**: só

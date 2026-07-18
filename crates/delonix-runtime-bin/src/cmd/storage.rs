@@ -89,6 +89,10 @@ struct StorageSpec {
     mount_options: Option<String>,
 }
 
+/// Nomes aceites no `spec` de `kind: Storage`, para o aviso de campos desconhecidos.
+pub(crate) const STORAGE_SPEC_FIELDS: &[&str] =
+    &["type", "server", "share", "username", "password", "passwordSecret", "readOnly", "mountOptions"];
+
 /// Os parâmetros de mount derivados de uma declaração de storage.
 struct MountSpec {
     driver: String,
@@ -195,6 +199,7 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
     let store = VolumeStore::open(state_root())?;
     for doc in manifest::of_kind(docs, "Storage") {
         let name = &doc.metadata.name;
+        manifest::warn_unknown_fields(doc, STORAGE_SPEC_FIELDS);
         let spec: StorageSpec = manifest::spec_of(doc)?;
         let pw = resolve_password(spec.password, spec.password_secret)?;
         let m = build_mount(
