@@ -82,6 +82,7 @@ Commands:
   init      Inicializa um projecto COMPLETO: Delonixfile + manifesto + cluster + README — ficheiros JÁ PREENCHIDOS (imagens incluídas), prontos a usar sem editar nada
   apply     Aplica todos os Kinds do manifesto (Network → Volume → Image → Vm → Container)
   describe  Detalhe do stack ao estilo `kubectl describe`: cada recurso DECLARADO no manifesto e se está, ou não, presente na máquina
+  validate  Valida o manifesto SEM tocar em nada (dry-run): resolve as referências cruzadas (`Container.network`/`.volumes`, `Vm.network`, `Ingress/Egress. target`) contra o que o manifesto declara MAIS o que já existe nos stores. Sai com erro se alguma referência ficar por resolver — é a rede de segurança contra um `apply` que só falharia a meio (fail-fast, sem rollback)
   help      Print this message or the help of the given subcommand(s)
 
 Options:
@@ -106,6 +107,27 @@ spec:
   ports: [ "5432:5432" ]
   env: [ "POSTGRES_PASSWORD=segredo" ]
 </code></pre>
+<h2 id='init'><code>stack init</code></h2>
+<div class='help'><pre><code>Inicializa um projecto COMPLETO: Delonixfile + manifesto + cluster + README — ficheiros JÁ PREENCHIDOS (imagens incluídas), prontos a usar sem editar nada
+
+Usage: delonix stack init [OPTIONS] [DIR]
+
+Arguments:
+  [DIR]  Directório do projecto (default: o actual) [default: .]
+
+Options:
+      --l18n &lt;en|pt&gt;         Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+      --name &lt;NAME&gt;          Nome do projecto (default: o nome do directório)
+      --image &lt;IMAGE&gt;        Imagem a usar. Omitir = preenche com a imagem por omissão
+      --force                Substitui ficheiros já existentes
+  -t, --template &lt;TEMPLATE&gt;  Gera um PROJECTO completo de uma stack (ex.: `python`) com boas práticas, em vez do scaffold genérico. `--template list` mostra os disponíveis
+  -h, --help                 Print help</code></pre></div>
+<p><code>--template &lt;nome&gt;</code> gera um projecto real e funcional de uma
+linguagem/framework, com boas práticas (multi-stage não-root, healthcheck, testes, dotfiles) e já
+delonix-native (Delonixfile + manifesto). Sem <code>--template</code>, o <code>init</code> gera o
+scaffold genérico. Os tokens <code>__NAME__</code>/<code>__MODULE__</code> são substituídos pelo nome
+do projecto.</p>
+<h3>Exemplos</h3><div class="ex"><div class="cap">Projecto COMPLETO de uma stack (FastAPI): código + Delonixfile + manifesto + testes</div><pre><code>delonix stack init myapi --template python</code></pre></div><div class="ex"><div class="cap">Ver os templates disponíveis</div><pre><code>delonix stack init --template list</code></pre></div>
 <h2 id='apply'><code>stack apply</code></h2>
 <div class='help'><pre><code>Aplica todos os Kinds do manifesto (Network → Volume → Image → Vm → Container)
 

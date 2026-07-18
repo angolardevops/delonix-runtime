@@ -21,6 +21,10 @@ use std::path::{Path, PathBuf};
 
 use delonix_runtime_core::{Error, Result};
 
+// Templates embebidos pelo `build.rs`: `TEMPLATES: &[(&str, &[(&str, &str)])]`
+// = [(nome, [(caminho-relativo, conteúdo)])].
+include!(concat!(env!("OUT_DIR"), "/templates.rs"));
+
 /// Imagens por omissão — é isto que preenche o projecto quando NÃO se passa
 /// `--image`. Fixadas por digest onde a reprodutibilidade importa.
 const DEFAULT_APP_BASE: &str = "alpine:3.20";
@@ -44,6 +48,68 @@ pub(crate) struct InitOpts {
     /// "sem passarmos o --image já preenche as imagens").
     pub image: Option<String>,
     pub force: bool,
+    /// `--template <nome>`: em vez do scaffold genérico, gera um PROJECTO COMPLETO
+    /// de uma linguagem/framework (ex.: `python`) com boas práticas — código,
+    /// Delonixfile, manifesto, testes e dotfiles. `list` mostra os disponíveis.
+    pub template: Option<String>,
+}
+
+/// Porta por omissão exposta pelos templates de app.
+const TEMPLATE_PORT: &str = "8000";
+
+/// Nomes dos templates disponíveis, para o `--help`/erros.
+pub(crate) fn template_names() -> Vec<&'static str> {
+    TEMPLATES.iter().map(|(n, _)| *n).collect()
+}
+
+/// Deriva um módulo Python válido a partir do nome do projecto: minúsculas,
+/// `[a-z0-9_]`, e nunca a começar por dígito (senão não é um identificador).
+fn python_module(name: &str) -> String {
+    let mut m: String = name.chars().map(|c| if c.is_ascii_alphanumeric() { c.to_ascii_lowercase() } else { '_' }).collect();
+    if m.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(true) {
+        m.insert(0, 'a');
+    }
+    m
+}
+
+/// Substitui os tokens `__NAME__`/`__MODULE__`/`__PORT__` (em conteúdos E caminhos).
+fn subst(s: &str, o: &InitOpts, module: &str) -> String {
+    s.replace("__NAME__", &o.name).replace("__MODULE__", module).replace("__PORT__", TEMPLATE_PORT)
+}
+
+/// Gera um projecto a partir de um template embebido (`--template <nome>`).
+fn render_template(tname: &str, o: &InitOpts) -> Result<()> {
+    if tname == "list" {
+        println!("templates disponíveis: {}", template_names().join(", "));
+        return Ok(());
+    }
+    let files = TEMPLATES
+        .iter()
+        .find(|(n, _)| *n == tname)
+        .map(|(_, f)| *f)
+        .ok_or_else(|| Error::Invalid(format!("template '{tname}' não existe — disponíveis: {}", template_names().join(", "))))?;
+    let module = python_module(&o.name);
+    std::fs::create_dir_all(&o.dir)?;
+    let mut n = 0;
+    for (rel, content) in files {
+        let dest = o.dir.join(subst(rel, o, &module));
+        n += usize::from(write_file(&dest, &subst(content, o, &module), o.force)?);
+    }
+    if n == 0 {
+        eprintln!("nada a fazer (tudo já existia)");
+        return Ok(());
+    }
+    let cd = if o.dir == Path::new(".") { String::new() } else { format!("cd {} && ", o.dir.display()) };
+    println!(
+        "pronto. Projecto '{}' ({tname}) em {}. Agora:\n  \
+         {cd}delonix build -t {}:dev .        # constrói a imagem (Delonixfile)\n  \
+         {cd}delonix stack apply              # sobe a app\n  \
+         {cd}curl localhost:{TEMPLATE_PORT}/api/v1/health/live",
+        o.name,
+        o.dir.display(),
+        o.name
+    );
+    Ok(())
 }
 
 /// Escreve um ficheiro, recusando-se a destruir trabalho sem `--force`.
@@ -61,6 +127,11 @@ fn write_file(path: &Path, content: &str, force: bool) -> Result<bool> {
 }
 
 pub(crate) fn init(target: Target, o: &InitOpts) -> Result<()> {
+    // `--template <nome>` gera um projecto completo de uma stack (código +
+    // Delonixfile + manifesto + testes), em vez do scaffold genérico.
+    if let Some(t) = &o.template {
+        return render_template(t, o);
+    }
     std::fs::create_dir_all(&o.dir)?;
     let mut n = 0;
     match target {

@@ -175,6 +175,15 @@ de containers a esses drivers é trabalho futuro.""",
 Semântica <em>garante-presente</em> (idempotente por nome), não um reconciliador: sem diffing,
 rollout nem rollback — fail-fast, o que já foi aplicado fica.""",
         "subs": {
+            "init": {"examples": [
+                ("Projecto COMPLETO de uma stack (FastAPI): código + Delonixfile + manifesto + testes",
+                 "delonix stack init myapi --template python"),
+                ("Ver os templates disponíveis", "delonix stack init --template list"),
+            ], "notes": """<p><code>--template &lt;nome&gt;</code> gera um projecto real e funcional de uma
+linguagem/framework, com boas práticas (multi-stage não-root, healthcheck, testes, dotfiles) e já
+delonix-native (Delonixfile + manifesto). Sem <code>--template</code>, o <code>init</code> gera o
+scaffold genérico. Os tokens <code>__NAME__</code>/<code>__MODULE__</code> são substituídos pelo nome
+do projecto.</p>"""},
             "apply": {"examples": [
                 ("Aplicar o manifesto por omissão (./delonix-manifest.yaml)", "delonix stack apply"),
                 ("Manifesto explícito", "delonix stack apply -f infra/stack.yaml"),
