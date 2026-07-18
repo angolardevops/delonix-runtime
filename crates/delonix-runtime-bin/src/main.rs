@@ -158,6 +158,15 @@ enum Cmd {
         /// Shell alvo.
         shell: CompShell,
     },
+    /// (interno) O reverse-proxy L7 embutido que serve os `kind: HTTPRoute`. NÃO é
+    /// para uso manual — o `stack apply` lança-o dentro do netns do holder (ver
+    /// `cmd::httproute`/`cmd::ingress_proxy`).
+    #[command(hide = true)]
+    IngressProxy {
+        /// Ficheiro JSON com a `ProxyConfig` (listeners + rotas já resolvidas).
+        #[arg(long)]
+        config: std::path::PathBuf,
+    },
 }
 
 fn run() -> Result<()> {
@@ -185,6 +194,7 @@ fn run() -> Result<()> {
         Cmd::Flow { iface, watch } => cmd::flow::run(iface, watch),
         Cmd::Ingress { action } => cmd::firewall::run_ingress(action),
         Cmd::Egress { action } => cmd::firewall::run_egress(action),
+        Cmd::IngressProxy { config } => cmd::ingress_proxy::run(&config),
         Cmd::Cri { addr } => {
             let addr = addr
                 .or_else(|| std::env::var("DELONIX_CRI_ADDR").ok())

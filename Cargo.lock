@@ -571,6 +571,7 @@ dependencies = [
 name = "delonix-runtime-bin"
 version = "0.3.0"
 dependencies = [
+ "bytes",
  "clap",
  "clap_complete",
  "delonix-cri",
@@ -582,6 +583,9 @@ dependencies = [
  "delonix-vm",
  "delonix-volume",
  "flate2",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
  "libc",
  "ratatui",
  "reqwest",
@@ -590,6 +594,7 @@ dependencies = [
  "serde_yaml",
  "sha2",
  "tar",
+ "tokio",
 ]
 
 [[package]]
