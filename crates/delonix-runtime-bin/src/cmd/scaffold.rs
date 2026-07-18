@@ -57,12 +57,19 @@ pub(crate) struct InitOpts {
     pub up: bool,
 }
 
-/// Porta por omissão exposta pelos templates de app.
-const TEMPLATE_PORT: &str = "8000";
-
 /// Nomes dos templates disponíveis, para o `--help`/erros.
 pub(crate) fn template_names() -> Vec<&'static str> {
     TEMPLATES.iter().map(|(n, _)| *n).collect()
+}
+
+/// `(porta, health-path)` de um template (do `template.meta` embebido pelo
+/// build.rs). Default `8000` + o health das apps se o template não o declarar.
+fn template_meta(name: &str) -> (&'static str, &'static str) {
+    TEMPLATE_META
+        .iter()
+        .find(|(n, _, _)| *n == name)
+        .map(|(_, p, h)| (*p, *h))
+        .unwrap_or(("8000", "/api/v1/health/live"))
 }
 
 /// Deriva um módulo Python válido a partir do nome do projecto: minúsculas,
@@ -76,8 +83,8 @@ fn python_module(name: &str) -> String {
 }
 
 /// Substitui os tokens `__NAME__`/`__MODULE__`/`__PORT__` (em conteúdos E caminhos).
-fn subst(s: &str, o: &InitOpts, module: &str) -> String {
-    s.replace("__NAME__", &o.name).replace("__MODULE__", module).replace("__PORT__", TEMPLATE_PORT)
+fn subst(s: &str, o: &InitOpts, module: &str, port: &str) -> String {
+    s.replace("__NAME__", &o.name).replace("__MODULE__", module).replace("__PORT__", port)
 }
 
 /// Gera um projecto a partir de um template embebido. `show_next` imprime os
@@ -93,11 +100,12 @@ fn render_template(tname: &str, o: &InitOpts, show_next: bool) -> Result<()> {
         .map(|(_, f)| *f)
         .ok_or_else(|| Error::Invalid(format!("template '{tname}' não existe — disponíveis: {}", template_names().join(", "))))?;
     let module = python_module(&o.name);
+    let (port, health) = template_meta(tname);
     std::fs::create_dir_all(&o.dir)?;
     let mut n = 0;
     for (rel, content) in files {
-        let dest = o.dir.join(subst(rel, o, &module));
-        n += usize::from(write_file(&dest, &subst(content, o, &module), o.force)?);
+        let dest = o.dir.join(subst(rel, o, &module, port));
+        n += usize::from(write_file(&dest, &subst(content, o, &module, port), o.force)?);
     }
     if n == 0 {
         eprintln!("nada a fazer (tudo já existia)");
@@ -109,7 +117,7 @@ fn render_template(tname: &str, o: &InitOpts, show_next: bool) -> Result<()> {
         println!(
             "  {cd}delonix build -t {}:dev .        # constrói a imagem (Delonixfile)\n  \
              {cd}delonix stack apply              # sobe a app\n  \
-             {cd}curl localhost:{TEMPLATE_PORT}/api/v1/health/live",
+             {cd}curl localhost:{port}{health}",
             o.name
         );
     }
@@ -191,10 +199,9 @@ fn prompt_yes(question: &str, default_yes: bool) -> bool {
 
 /// Constrói a imagem, arranca o container e espera ficar saudável — cada etapa
 /// com progresso animado (estilo `cluster create`). Um só comando até estar UP.
-fn build_and_up(name: &str, dir: &Path) -> Result<()> {
+fn build_and_up(name: &str, dir: &Path, port: &str, health: &str) -> Result<()> {
     let exe = std::env::current_exe().map_err(|e| Error::Invalid(e.to_string()))?;
     let tag = format!("{name}:dev");
-    let port = TEMPLATE_PORT;
     let mut p = super::output::Progress::new();
 
     p.step(&format!("Building image {tag}"), "🔨");
@@ -207,10 +214,10 @@ fn build_and_up(name: &str, dir: &Path) -> Result<()> {
     p.ok();
 
     p.step("Waiting until healthy", "❤️ ");
-    wait_health(port)?;
+    wait_health(port, health)?;
     p.ok();
 
-    println!("\n✨ {name} is UP → http://localhost:{port}/api/v1/health/live");
+    println!("\n✨ {name} is UP → http://localhost:{port}{health}");
     println!("   logs:  delonix container logs -f {name}");
     println!("   stop:  delonix container rm -f {name}");
     Ok(())
@@ -231,10 +238,10 @@ fn run_quiet(exe: &Path, dir: &Path, args: &[&str]) -> Result<()> {
     }
 }
 
-/// Espera que `/api/v1/health/live` responda 200 (até ~40s).
-fn wait_health(port: &str) -> Result<()> {
+/// Espera que `health` responda 200 (até ~40s).
+fn wait_health(port: &str, health: &str) -> Result<()> {
     for _ in 0..80 {
-        if http_ok(port, "/api/v1/health/live") {
+        if http_ok(port, health) {
             return Ok(());
         }
         std::thread::sleep(std::time::Duration::from_millis(500));
@@ -275,7 +282,8 @@ pub(crate) fn init(target: Target, o: &InitOpts) -> Result<()> {
         let do_up = o.up || (stdin_is_tty() && prompt_yes("Build and start it now?", true));
         render_template(t, o, !do_up)?;
         if do_up {
-            build_and_up(&o.name, &o.dir)?;
+            let (port, health) = template_meta(t);
+            build_and_up(&o.name, &o.dir, port, health)?;
         }
         return Ok(());
     }
