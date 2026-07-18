@@ -89,7 +89,11 @@ pub fn conditions_for(doc: &ManifestDoc, env: &Env) -> Vec<Condition> {
         "Storage" => storage(doc, env),
         "Volume" => volume(doc, env),
         "Network" => network(doc),
-        "Vm" => vm(doc, env),
+        "Vm" => {
+            let mut c = vm(doc, env);
+            c.extend(vm_volumes(doc));
+            c
+        }
         _ => Vec::new(),
     }
 }
@@ -182,6 +186,23 @@ fn vm(doc: &ManifestDoc, env: &Env) -> Vec<Condition> {
     }
 }
 
+/// `Vm.VolumesRequireLibvirt` — `spec.volumes` só é materializável pelo backend
+/// libvirt (virtio-9p; o Cloud Hypervisor não o suporta). O apply auto-selecciona
+/// libvirt quando não há backend explícito; isto assinala o caso em que o
+/// utilizador FORÇA `backend: cloud-hypervisor` com volumes (o boot recusaria).
+fn vm_volumes(doc: &ManifestDoc) -> Vec<Condition> {
+    let has_volumes = doc.spec.get("volumes").and_then(|v| v.as_sequence()).is_some_and(|s| !s.is_empty());
+    if has_volumes && spec_str(doc, &["backend"]) == Some("cloud-hypervisor") {
+        vec![Condition::bad(
+            "VolumesRequireLibvirt",
+            "BackendCloudHypervisor",
+            "spec.volumes usa virtio-9p, que só o backend libvirt materializa — remove `backend: cloud-hypervisor` (o apply escolhe libvirt sozinho quando há volumes)".to_string(),
+        )]
+    } else {
+        Vec::new()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -238,6 +259,16 @@ mod tests {
         }
         let c = conditions_for(&doc("Network", "driver: bridge"), &env(false, true, true, true));
         assert!(c[0].ok);
+    }
+
+    #[test]
+    fn vm_volumes_com_ch_explicito_exige_libvirt() {
+        // volumes + backend cloud-hypervisor explícito → condition.
+        let c = conditions_for(&doc("Vm", "disk: d\nbackend: cloud-hypervisor\nvolumes: [ { name: x, mountPath: /x } ]"), &env(false, true, true, true));
+        assert!(c.iter().any(|x| x.reason == "BackendCloudHypervisor" && x.kind == "VolumesRequireLibvirt"), "{c:?}");
+        // volumes sem backend explícito (auto → libvirt) → sem esta condition.
+        let c = conditions_for(&doc("Vm", "disk: d\nvolumes: [ { name: x, mountPath: /x } ]"), &env(false, true, true, true));
+        assert!(!c.iter().any(|x| x.kind == "VolumesRequireLibvirt"), "{c:?}");
     }
 
     #[test]

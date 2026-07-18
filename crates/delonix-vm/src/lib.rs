@@ -73,6 +73,28 @@ pub struct VmConfig {
     /// Nome da bridge do host (modo `net_mode = "bridge"`) ou da rede libvirt (modo
     /// `"nat"`; default `"default"`).
     pub bridge: Option<String>,
+    /// Volumes/Storage partilhados para dentro da VM (via **virtio-9p**). Cada um
+    /// já vem RESOLVIDO pelo bin (o nome do `Volume`/`Storage` → directório no
+    /// host). Só o backend **libvirt** os materializa (o Cloud Hypervisor não faz
+    /// 9p) — ver `create`. Fecha o gap "montar um NAS numa VM sem cloud-init/XML".
+    pub volumes: Vec<VmVolume>,
+}
+
+/// Um directório do host partilhado para dentro da VM por virtio-9p. Isto é o que
+/// liga o `kind: Volume`/`kind: Storage` a uma VM sem o utilizador escrever
+/// cloud-init nem XML: o bin resolve o nome → `source` (o `_data` do volume, ou o
+/// mountpoint de um Storage de rede), e o motor gera o `<filesystem>` do domínio
+/// **e** o `mount` no guest (via cloud-init) a partir destes campos planos.
+#[derive(Debug, Clone)]
+pub struct VmVolume {
+    /// Tag 9p (curta, única na VM) — o guest monta por este tag.
+    pub tag: String,
+    /// Directório NO HOST a partilhar (resolvido pelo bin).
+    pub source: String,
+    /// Ponto de montagem DENTRO do guest (ex.: `/mnt/dados`).
+    pub mount_path: String,
+    /// Montar só-de-leitura.
+    pub read_only: bool,
 }
 
 // ===========================================================================
@@ -373,6 +395,17 @@ impl VmBackend for CloudHypervisorBackend {
     }
 
     fn boot(&self, vmdir: &Path, cfg: &VmConfig, overlay: &str) -> Result<Boot> {
+        // O Cloud Hypervisor não suporta virtio-9p (só virtio-fs, que exige o
+        // daemon virtiofsd, ainda não ligado). `spec.volumes` numa VM CH é um
+        // erro claro em vez de um mount silenciosamente ignorado — o bin
+        // auto-selecciona libvirt quando há volumes, por isso isto só dispara
+        // se o utilizador FORÇAR `backend: cloud-hypervisor` com volumes.
+        if !cfg.volumes.is_empty() {
+            return Err(Error::Invalid(format!(
+                "VM '{}': spec.volumes precisa do backend libvirt (o Cloud Hypervisor não faz virtio-9p) — remove `backend: cloud-hypervisor` ou os volumes",
+                cfg.name
+            )));
+        }
         // Rede privada própria quando nomeada (≠ ingress partilhado): garante o seu
         // bridge isolado + DHCP antes do attach. O SDN das VMs vive aqui.
         if !matches!(cfg.network.as_str(), "" | "ingress" | "bridge" | "default") {
@@ -654,6 +687,18 @@ pub fn libvirt_domain_xml(cfg: &VmConfig, overlay: &str, mac: &str) -> String {
         s.push_str("      <target dev='sda' bus='sata'/>\n");
         s.push_str("      <readonly/>\n    </disk>\n");
     }
+    // volumes/Storage partilhados por virtio-9p — o utilizador NÃO escreve este
+    // XML: vem do `spec.volumes` já resolvido. O guest monta por `<target dir=tag>`
+    // (o mount é injectado no cloud-init, ver `cmd::vm::build_user_data`).
+    for v in &cfg.volumes {
+        s.push_str("    <filesystem type='mount' accessmode='passthrough'>\n");
+        s.push_str(&format!("      <source dir='{}'/>\n", xml_escape(&v.source)));
+        s.push_str(&format!("      <target dir='{}'/>\n", xml_escape(&v.tag)));
+        if v.read_only {
+            s.push_str("      <readonly/>\n");
+        }
+        s.push_str("    </filesystem>\n");
+    }
     // rede: abstraída pelo YAML (net_mode) → `<interface>` virtio. Sem XML à mão.
     s.push_str(&libvirt_interface_xml(cfg, mac));
     // consola série (logs de boot).
@@ -875,7 +920,18 @@ pub fn create(base: &Path, cfg: &VmConfig) -> Result<Vm> {
             }
             backend_for(ex)
         }
-        None => select_backend(cfg.backend.as_deref())?,
+        None => {
+            // Volumes ⇒ libvirt: só ele materializa virtio-9p (o Cloud Hypervisor
+            // não faz 9p e recusaria no `boot`). A regra vive AQUI (no motor) e não
+            // só no bin, para qualquer consumidor da API a herdar. Sem volumes,
+            // mantém-se a auto-detecção normal.
+            let want = match cfg.backend.as_deref() {
+                Some(b) => Some(b),
+                None if !cfg.volumes.is_empty() => Some("libvirt"),
+                None => None,
+            };
+            select_backend(want)?
+        }
     };
 
     // Admissão: recusa arrancar se não houver RAM no host (anti-overcommit).
@@ -1047,7 +1103,26 @@ mod tests {
             backend: None,
             net_mode: None,
             bridge: None,
+            volumes: vec![],
         }
+    }
+
+    #[test]
+    fn libvirt_xml_partilha_volumes_por_9p() {
+        let mut cfg = test_vm_cfg("1G");
+        cfg.volumes = vec![
+            VmVolume { tag: "dados".into(), source: "/srv/dados".into(), mount_path: "/mnt/dados".into(), read_only: false },
+            VmVolume { tag: "ro".into(), source: "/srv/ro".into(), mount_path: "/mnt/ro".into(), read_only: true },
+        ];
+        let xml = libvirt_domain_xml(&cfg, "/tmp/overlay.qcow2", "52:54:00:00:00:01");
+        assert!(xml.contains("<filesystem type='mount' accessmode='passthrough'>"), "{xml}");
+        assert!(xml.contains("<source dir='/srv/dados'/>"), "{xml}");
+        assert!(xml.contains("<target dir='dados'/>"), "{xml}");
+        // O só-de-leitura (2.º volume) leva `<readonly/>` no seu bloco.
+        let ro_idx = xml.find("<target dir='ro'/>").unwrap();
+        assert!(xml[ro_idx..].starts_with("<target dir='ro'/>\n      <readonly/>"), "{xml}");
+        // Sem volumes → sem <filesystem>.
+        assert!(!libvirt_domain_xml(&test_vm_cfg("1G"), "/tmp/o.qcow2", "52:54:00:00:00:02").contains("<filesystem"));
     }
 
     #[test]
@@ -1132,6 +1207,7 @@ mod tests {
             backend: None,
             net_mode: None,
             bridge: None,
+            volumes: vec![],
         }
     }
 

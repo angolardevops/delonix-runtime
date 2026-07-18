@@ -1,0 +1,35 @@
+# VM com volumes/Storage montados — fecha o gap "dar storage a uma VM sem
+# escrever cloud-init nem XML de libvirt". O `spec.volumes` refere um
+# `kind: Volume` (local) ou `kind: Storage` (NAS de rede) por NOME; o motor
+# partilha-o para dentro da VM por **virtio-9p** e injecta o mount no guest.
+#
+#   delonix stack apply -f examples/vm-volumes.yaml
+#
+# Notas:
+#  * Só o backend **libvirt** materializa 9p — o apply escolhe-o sozinho quando
+#    há volumes (o Cloud Hypervisor não suporta 9p).
+#  * O Storage/Volume tem de existir antes da VM (o stack aplica-os primeiro; o
+#    `stack validate` confirma a referência).
+---
+# Um Storage de rede (NAS) — vira o directório partilhado para a VM.
+apiVersion: delonix.io/v1
+kind: Storage
+metadata:
+  name: dados-nas
+spec:
+  type: nfs
+  server: 10.0.0.5
+  share: /mnt/pool/dados
+---
+apiVersion: delonix.io/v1
+kind: Vm
+metadata:
+  name: app-vm
+spec:
+  disk: k8s-golden           # imagem base (qcow2/raw)
+  vcpus: 2
+  memory: 2G
+  volumes:
+    - name: dados-nas        # o kind: Storage acima
+      mountPath: /mnt/dados  # onde a VM o monta
+      readOnly: false
