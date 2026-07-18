@@ -1,0 +1,19 @@
+# Delonix manifest — declarative deploy. Apply with:
+#   delonix build -t __NAME__:dev .
+#   delonix stack apply
+apiVersion: delonix.io/v1
+kind: Container
+metadata:
+  name: __NAME__
+  labels:
+    app: __NAME__
+spec:
+  image: __NAME__:dev
+  restart: always
+  ports:
+    - "__PORT__:__PORT__"
+  memory: 256M
+  cpus: "1.0"
+  readOnly: true
+  tmpfs:
+    - "/tmp"

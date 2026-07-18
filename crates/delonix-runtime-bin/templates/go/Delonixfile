@@ -1,0 +1,18 @@
+# Delonixfile — same grammar as a Dockerfile, with Delonix extensions.
+# Build with:  delonix build -t __NAME__:dev .
+#
+# Single-stage (`delonix build` is single-stage) — so the final image carries the
+# Go toolchain (~350 MB). For a slim prod image, multi-stage build to scratch/
+# distroless once delonix build supports it. The binary is static (CGO off).
+FROM golang:1.23-alpine
+ENV CGO_ENABLED=0
+WORKDIR /app
+COPY go.mod ./
+RUN go mod download
+COPY cmd ./cmd
+COPY internal ./internal
+RUN go build -o /app/server ./cmd/__NAME__
+EXPOSE __PORT__
+# Delonix extension: the runtime probes this to mark the container healthy.
+HEALTHCHECK CMD wget -qO- http://127.0.0.1:__PORT__/api/v1/health/live || exit 1
+CMD ["/app/server"]
