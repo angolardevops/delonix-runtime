@@ -398,6 +398,17 @@ fn validate_graph_with(
                         issues.push(format!("{} '{name}' → volume '{vref}' não é declarado (Volume/Storage) nem existe", doc.kind));
                     }
                 }
+                // `Vm.volumes` é uma lista de OBJECTOS `{name, mountPath}` (não a
+                // sintaxe-string docker do Container) — resolve `name` de cada um.
+                if is_vm {
+                    if let Some(seq) = doc.spec.get("volumes").and_then(|v| v.as_sequence()) {
+                        for vname in seq.iter().filter_map(|it| it.get("name")).filter_map(|v| v.as_str()) {
+                            if !volumes.contains(vname) {
+                                issues.push(format!("Vm '{name}' → volume '{vname}' não é declarado (Volume/Storage) nem existe"));
+                            }
+                        }
+                    }
+                }
                 // `Container.secret: [nomes]` — cada um tem de ser um Secret.
                 if let Some(seq) = doc.spec.get("secret").and_then(|v| v.as_sequence()) {
                     for sref in seq.iter().filter_map(|v| v.as_str()) {
@@ -589,6 +600,26 @@ spec: {}
         );
         assert_eq!(issues.len(), 1);
         assert!(issues[0].contains("declarado mais do que uma vez"), "{issues:?}");
+    }
+
+    #[test]
+    fn vm_volumes_object_style_valida_a_referencia() {
+        // `Vm.volumes` são objectos {name, mountPath} — a ref tem de ser resolvida.
+        let issues = check(
+            "\
+apiVersion: delonix.io/v1
+kind: Storage
+metadata: { name: dados }
+spec: { type: nfs, server: h, share: /s }
+---
+apiVersion: delonix.io/v1
+kind: Vm
+metadata: { name: v }
+spec: { disk: d, volumes: [ { name: dados, mountPath: /mnt/d }, { name: fantasma, mountPath: /mnt/f } ] }
+",
+        );
+        assert_eq!(issues.len(), 1, "{issues:?}");
+        assert!(issues[0].contains("volume 'fantasma'"), "{issues:?}");
     }
 
     #[test]
