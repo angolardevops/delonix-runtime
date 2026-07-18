@@ -1,0 +1,54 @@
+# kind: HTTPRoute — reverse-proxy L7/HTTP declarativo. NÃO confundir com o
+# kind: Ingress deste runtime (que é firewall L4 inbound por-container). Aqui o
+# nome segue o Gateway API do Kubernetes: HTTPRoute = roteamento HTTP por
+# Host/path para containers backend; Ingress/FirewallPolicy = firewall L4.
+#
+# O proxy (hyper embutido) corre dentro do netns do holder — alcança os backends
+# por IP interno — e publica as portas de entrada no host. TLS termina no proxy.
+# Ciclo 100% YAML: sem CLI, sem cert colado à mão (self-signed ou kind: Secret).
+#
+# Aplicar com:  delonix stack apply -f httproute.yaml
+# (os containers backend têm de existir — declara-os no mesmo stack).
+---
+apiVersion: delonix.io/v1
+kind: Network
+metadata:
+  name: appnet
+spec:
+  driver: bridge           # rede custom: dá IP interno aos backends (o proxy alcança-os por IP)
+---
+apiVersion: delonix.io/v1
+kind: Container
+metadata:
+  name: web
+spec:
+  image: "nginx:1.27-alpine"
+  network: appnet          # numa rede custom, para o proxy o alcançar por IP
+---
+apiVersion: delonix.io/v1
+kind: Container
+metadata:
+  name: api
+spec:
+  image: "hashicorp/http-echo:latest"
+  command: ["-listen=:3000", "-text=hello from api"]
+  network: appnet
+---
+apiVersion: delonix.io/v1
+kind: HTTPRoute
+metadata:
+  name: loja
+spec:
+  entrypoints:
+    - { port: 80 }
+    - { port: 443, tls: true }
+  tls:
+    mode: selfSigned       # selfSigned (default) | secretRef
+    # secretRef: loja-cert # kind: Secret com as chaves tls.crt / tls.key (PEM)
+  rules:
+    - host: loja.exemplo.ao   # casa pelo Host: header (omitir = qualquer Host)
+      paths:
+        - path: /             # prefixo de path
+          backend: { service: web, port: 80 }
+        - path: /api          # prefixos mais específicos ganham
+          backend: { service: api, port: 3000 }
