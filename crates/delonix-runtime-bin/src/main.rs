@@ -133,6 +133,11 @@ enum Cmd {
         #[command(subcommand)]
         action: cmd::firewall::EgressCmd,
     },
+    /// Reverse-proxy L7/HTTP (`kind: HTTPRoute`): ls/apply/rm.
+    Httproute {
+        #[command(subcommand)]
+        action: cmd::httproute::HttpRouteCmd,
+    },
     /// Persistência no arranque: units systemd para os containers voltarem a subir no boot.
     Boot {
         #[command(subcommand)]
@@ -195,6 +200,7 @@ fn run() -> Result<()> {
         Cmd::Ingress { action } => cmd::firewall::run_ingress(action),
         Cmd::Egress { action } => cmd::firewall::run_egress(action),
         Cmd::IngressProxy { config } => cmd::ingress_proxy::run(&config),
+        Cmd::Httproute { action } => cmd::httproute::run(action),
         Cmd::Cri { addr } => {
             let addr = addr
                 .or_else(|| std::env::var("DELONIX_CRI_ADDR").ok())
