@@ -7,6 +7,7 @@ use clap::Subcommand;
 use clap_complete::engine::ArgValueCandidates;
 use delonix_runtime_core::{Error, Result};
 use delonix_vm::VmConfig;
+use delonix_volume::VolumeStore;
 use serde::Deserialize;
 
 use super::manifest::{self, ManifestDoc};
@@ -45,6 +46,24 @@ struct VmSpec {
     #[serde(rename = "netMode", alias = "net_mode")]
     net_mode: Option<String>,
     bridge: Option<String>,
+    /// Volumes/Storage a montar dentro da VM (virtio-9p) — fecha o gap de dar
+    /// storage a uma VM sem escrever cloud-init/XML. Ver `VmVolumeSpec`.
+    #[serde(default)]
+    volumes: Vec<VmVolumeSpec>,
+}
+
+/// Uma entrada de `spec.volumes` de uma VM: refere um `Volume`/`Storage` por
+/// nome e diz onde montá-lo no guest.
+#[derive(Debug, Deserialize)]
+struct VmVolumeSpec {
+    /// Nome de um `kind: Volume` ou `kind: Storage` (resolvido no apply).
+    name: String,
+    /// Ponto de montagem no guest (ex.: `/mnt/dados`).
+    #[serde(rename = "mountPath")]
+    mount_path: String,
+    /// Montar só-de-leitura.
+    #[serde(default, rename = "readOnly")]
+    read_only: bool,
 }
 
 /// Nomes de campo aceites no `spec` de `kind: Vm` (canónicos + aliases legados),
@@ -53,7 +72,7 @@ struct VmSpec {
 pub(crate) const VM_SPEC_FIELDS: &[&str] = &[
     "disk", "vcpus", "memory", "network", "kernel", "initrd", "firmware", "cmdline", "seed",
     "restartPolicy", "restart_policy", "hugepages", "cpuAffinity", "cpu_affinity", "devices",
-    "backend", "netMode", "net_mode", "bridge",
+    "backend", "netMode", "net_mode", "bridge", "volumes",
 ];
 
 fn default_vcpus() -> u32 {
@@ -189,12 +208,95 @@ pub enum VmCmd {
     },
 }
 
+/// Tag 9p base a partir do nome do volume: `[a-zA-Z0-9_]`, ≤31 chars (limite do
+/// 9p). Como `.` e `-` colapsam ambos em `_`, dois nomes distintos podem gerar a
+/// mesma base — a unicidade é garantida por `resolve_vm_volumes` (sufixo por
+/// índice), não aqui.
+fn vol_tag(name: &str) -> String {
+    let mut t: String = name.chars().map(|c| if c.is_ascii_alphanumeric() || c == '_' { c } else { '_' }).collect();
+    t.truncate(31);
+    t
+}
+
+/// Um `mountPath` de volume tem de ser um caminho absoluto SEM caracteres que
+/// partam a sequência de fluxo YAML do cloud-init (`,`/`]`/`#`/`"`) nem control
+/// chars — senão a entrada `mounts` fica malformada e o volume não monta em
+/// silêncio depois do boot.
+fn valid_mount_path(p: &str) -> bool {
+    p.starts_with('/') && !p.chars().any(|c| c.is_control() || matches!(c, ',' | ']' | '[' | '#' | '"'))
+}
+
+/// Resolve `spec.volumes` (nomes de Volume/Storage) para `VmVolume` com o
+/// directório no host, garantindo que um Storage de rede está montado antes de o
+/// partilhar por 9p. Tags únicas (sufixo `_N` em colisão). O `Volume`/`Storage`
+/// tem de já existir (o `stack apply` aplica-os antes da VM; o `validate_graph`
+/// já confirma a referência).
+fn resolve_vm_volumes(base: &std::path::Path, specs: &[VmVolumeSpec]) -> Result<Vec<delonix_vm::VmVolume>> {
+    if specs.is_empty() {
+        return Ok(Vec::new());
+    }
+    let store = VolumeStore::open(base)?;
+    let mut used_tags: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut out = Vec::with_capacity(specs.len());
+    for v in specs {
+        if !valid_mount_path(&v.mount_path) {
+            return Err(Error::Invalid(format!(
+                "spec.volumes: mountPath {:?} inválido (tem de ser um caminho absoluto sem , ] [ # \" nem control chars)",
+                v.mount_path
+            )));
+        }
+        let vol = store
+            .inspect(&v.name)
+            .map_err(|_| Error::Invalid(format!("spec.volumes: volume/storage '{}' não existe (cria-o antes da VM)", v.name)))?;
+        // Se for um Storage de rede, garante a montagem no host antes de partilhar.
+        store.ensure_mounted(&vol)?;
+        // Unicidade da tag: `.` e `-` colapsam em `_`, por isso nomes distintos
+        // podem colidir — desambigua com um sufixo `_N` estável por ordem.
+        let base_tag = vol_tag(&v.name);
+        let mut tag = base_tag.clone();
+        let mut n = 1;
+        while used_tags.contains(&tag) {
+            let suffix = format!("_{n}");
+            let keep = 31usize.saturating_sub(suffix.len());
+            tag = format!("{}{suffix}", &base_tag[..base_tag.len().min(keep)]);
+            n += 1;
+        }
+        used_tags.insert(tag.clone());
+        out.push(delonix_vm::VmVolume {
+            tag,
+            source: vol.mountpoint.clone(),
+            mount_path: v.mount_path.clone(),
+            read_only: v.read_only,
+        });
+    }
+    Ok(out)
+}
+
 pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
     let base = state_root();
     for doc in manifest::of_kind(docs, "Vm") {
         let name = &doc.metadata.name;
         manifest::warn_unknown_fields(doc, VM_SPEC_FIELDS);
         let spec: VmSpec = manifest::spec_of(doc)?;
+
+        // Resolve cada volume (nome de Volume/Storage → directório no host) e
+        // garante que um Storage de rede está montado antes de o partilhar.
+        let vm_volumes = resolve_vm_volumes(&base, &spec.volumes)?;
+
+        // NB: a regra "volumes ⇒ libvirt" vive no motor (`delonix_vm::create`),
+        // para qualquer consumidor da API a herdar — aqui passa-se o backend tal
+        // como declarado (com CH explícito + volumes, o motor recusa com erro claro).
+
+        // Se há volumes e não foi dado um seed próprio, gera um seed com os mounts
+        // 9p (senão o `<filesystem>` existe mas o guest não o monta sozinho).
+        let seed = match spec.seed {
+            Some(s) => Some(s),
+            None if !vm_volumes.is_empty() => {
+                Some(generate_seed_iso(name, None, &[], None, &vm_volumes)?.to_string_lossy().into_owned())
+            }
+            None => None,
+        };
+
         let cfg = VmConfig {
             name: name.clone(),
             disk: spec.disk,
@@ -205,7 +307,7 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
             initrd: spec.initrd,
             firmware: spec.firmware,
             cmdline: spec.cmdline,
-            seed: spec.seed,
+            seed,
             restart_policy: spec.restart_policy,
             hugepages: spec.hugepages,
             cpu_affinity: spec.cpu_affinity,
@@ -213,6 +315,7 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
             backend: spec.backend,
             net_mode: spec.net_mode,
             bridge: spec.bridge,
+            volumes: vm_volumes,
         };
         delonix_vm::create(&base, &cfg)?;
         println!("vm/{name}: garantida");
@@ -253,7 +356,7 @@ pub fn run(action: VmCmd) -> Result<()> {
             let seed = match seed {
                 Some(s) => Some(s),
                 None if hostname.is_some() || !ssh_keys.is_empty() || user_data.is_some() => {
-                    let iso = generate_seed_iso(&name, hostname.as_deref(), &ssh_keys, user_data.as_deref())?;
+                    let iso = generate_seed_iso(&name, hostname.as_deref(), &ssh_keys, user_data.as_deref(), &[])?;
                     Some(iso.to_string_lossy().into_owned())
                 }
                 None => None,
@@ -276,6 +379,7 @@ pub fn run(action: VmCmd) -> Result<()> {
                 backend,
                 net_mode,
                 bridge,
+                volumes: vec![],
             };
             let vm = delonix_vm::create(&base, &cfg)?;
             println!("{}", vm.name);
@@ -412,7 +516,7 @@ fn resolve_ssh_key(spec: &str) -> Result<String> {
 /// `package_update: false`/`package_upgrade: false` porque a imagem dourada
 /// já vem pronta (ver `cmd::vmimage`); não faz sentido gastar o primeiro boot
 /// a `apt update`.
-fn build_user_data(hostname: &str, ssh_keys: &[String]) -> String {
+fn build_user_data(hostname: &str, ssh_keys: &[String], volumes: &[delonix_vm::VmVolume]) -> String {
     let mut out = String::from("#cloud-config\n");
     out.push_str(&format!("hostname: {hostname}\n"));
     out.push_str("package_update: false\n");
@@ -421,6 +525,22 @@ fn build_user_data(hostname: &str, ssh_keys: &[String]) -> String {
         out.push_str("ssh_authorized_keys:\n");
         for k in ssh_keys {
             out.push_str(&format!("  - {k}\n"));
+        }
+    }
+    // Monta cada volume 9p partilhado pelo `<filesystem>` do domínio. O
+    // `_netdev` evita bloquear o boot se o share não estiver pronto; `trans=virtio`
+    // + `9p2000.L` é o dialecto que o libvirt/QEMU expõem. Assim o guest monta o
+    // NAS/volume SEM o utilizador escrever fstab nem cloud-init à mão.
+    if !volumes.is_empty() {
+        out.push_str("mounts:\n");
+        for v in volumes {
+            let mode = if v.read_only { "ro" } else { "rw" };
+            // `mount_path` entre aspas (validado sem `"` em `valid_mount_path`) e
+            // `tag` saneada (`vol_tag`) — a sequência de fluxo YAML não parte.
+            out.push_str(&format!(
+                "  - [ \"{}\", \"{}\", 9p, \"trans=virtio,version=9p2000.L,{mode},_netdev\", \"0\", \"0\" ]\n",
+                v.tag, v.mount_path
+            ));
         }
     }
     out
@@ -439,6 +559,7 @@ pub(crate) fn generate_seed_iso(
     hostname: Option<&str>,
     ssh_keys: &[String],
     user_data_override: Option<&std::path::Path>,
+    volumes: &[delonix_vm::VmVolume],
 ) -> Result<PathBuf> {
     let hostname = hostname.unwrap_or(vm_name).to_string();
     let work_dir = state_root().join("vms").join(vm_name);
@@ -449,10 +570,20 @@ pub(crate) fn generate_seed_iso(
         Some(p) => {
             std::fs::copy(p, &user_data_path)
                 .map_err(|e| Error::Invalid(format!("não consegui copiar --user-data '{}': {e}", p.display())))?;
+            // O user-data próprio do utilizador substitui TUDO — não há onde
+            // injectar os mounts dos volumes sem os fundir. Avisa em vez de os
+            // perder em silêncio (o `<filesystem>` fica no XML, mas o guest não
+            // os monta sozinho sem uma entrada `mounts:`).
+            if !volumes.is_empty() {
+                eprintln!(
+                    "AVISO: VM '{vm_name}': --user-data/seed próprio não inclui os mounts dos volumes 9p — acrescenta-os manualmente (tags: {})",
+                    volumes.iter().map(|v| v.tag.as_str()).collect::<Vec<_>>().join(", ")
+                );
+            }
         }
         None => {
             let resolved_keys: Result<Vec<String>> = ssh_keys.iter().map(|s| resolve_ssh_key(s)).collect();
-            let content = build_user_data(&hostname, &resolved_keys?);
+            let content = build_user_data(&hostname, &resolved_keys?, volumes);
             std::fs::write(&user_data_path, content)?;
         }
     }
@@ -508,7 +639,7 @@ mod tests {
 
     #[test]
     fn user_data_inclui_hostname_e_chaves() {
-        let ud = build_user_data("myvm", &["ssh-ed25519 AAAA foo".to_string()]);
+        let ud = build_user_data("myvm", &["ssh-ed25519 AAAA foo".to_string()], &[]);
         assert!(ud.starts_with("#cloud-config\n"));
         assert!(ud.contains("hostname: myvm\n"));
         assert!(ud.contains("ssh_authorized_keys:\n  - ssh-ed25519 AAAA foo\n"));
@@ -517,8 +648,40 @@ mod tests {
 
     #[test]
     fn user_data_sem_chaves_nao_tem_seccao_ssh() {
-        let ud = build_user_data("myvm", &[]);
+        let ud = build_user_data("myvm", &[], &[]);
         assert!(!ud.contains("ssh_authorized_keys"));
+    }
+
+    #[test]
+    fn user_data_com_volumes_injecta_mounts_9p() {
+        let vols = vec![
+            delonix_vm::VmVolume { tag: "dados".into(), source: "/srv/dados".into(), mount_path: "/mnt/dados".into(), read_only: false },
+            delonix_vm::VmVolume { tag: "ro".into(), source: "/srv/ro".into(), mount_path: "/mnt/ro".into(), read_only: true },
+        ];
+        let ud = build_user_data("myvm", &[], &vols);
+        assert!(ud.contains("mounts:\n"));
+        assert!(ud.contains("[ \"dados\", \"/mnt/dados\", 9p, \"trans=virtio,version=9p2000.L,rw,_netdev\", \"0\", \"0\" ]"), "{ud}");
+        assert!(ud.contains("[ \"ro\", \"/mnt/ro\", 9p, \"trans=virtio,version=9p2000.L,ro,_netdev\", \"0\", \"0\" ]"), "{ud}");
+        // Sem volumes → sem secção mounts.
+        assert!(!build_user_data("myvm", &[], &[]).contains("mounts:"));
+    }
+
+    #[test]
+    fn vol_tag_saneia_e_trunca() {
+        assert_eq!(super::vol_tag("nas-creds.db"), "nas_creds_db");
+        assert_eq!(super::vol_tag(&"x".repeat(40)).len(), 31);
+        // `.` e `-` colapsam ambos em `_` → base igual (a unicidade é no resolve).
+        assert_eq!(super::vol_tag("nas.creds"), super::vol_tag("nas-creds"));
+    }
+
+    #[test]
+    fn valid_mount_path_rejeita_relativos_e_chars_que_partem_o_yaml() {
+        assert!(super::valid_mount_path("/mnt/dados"));
+        assert!(super::valid_mount_path("/mnt/com espaco")); // espaço é ok (vai entre aspas)
+        assert!(!super::valid_mount_path("relativo/x")); // não absoluto
+        for bad in ["/mnt/a,b", "/mnt/a]b", "/mnt/a\"b", "/mnt/a#b", "/mnt/a\nb"] {
+            assert!(!super::valid_mount_path(bad), "{bad:?} devia ser rejeitado");
+        }
     }
 
     #[test]
