@@ -137,6 +137,12 @@ fn custom_net_name(net: &str) -> Option<String> {
 
 #[derive(Subcommand)]
 pub enum ContainerCmd {
+    /// Dashboard (KPIs + tabela + problemas) dos containers — TUI interactivo, ou
+    /// `--once` para um snapshot de texto.
+    Dash {
+        #[arg(long)]
+        once: bool,
+    },
     /// Initialize a project with a Delonixfile + manifest — files ALREADY FILLED IN (images
     /// included), ready to use without editing anything.
     Init {
@@ -497,10 +503,14 @@ pub fn run(action: ContainerCmd) -> Result<()> {
     if let ContainerCmd::Init { dir, name, image, force, template, up } = action {
         return cmd_init(super::scaffold::Target::Container, dir, name, image, force, template, up);
     }
+    if let ContainerCmd::Dash { once } = action {
+        return super::dash::run(super::dash::DashScope::Containers, once);
+    }
     let (images, store) = open_stores()?;
     match action {
         // Handled at the top of `run` (returns early).
         ContainerCmd::Init { .. } => unreachable!("tratado acima"),
+        ContainerCmd::Dash { .. } => unreachable!("tratado acima"),
         ContainerCmd::Run {
             detach, name, net, volumes, publish, privileged, entrypoint, rm, restart, devices, env, labels,
             memory, cpus, cpu_weight, cpuset, io_weight, read_only, cap_add, cap_drop, security_opt, apparmor,
