@@ -66,11 +66,37 @@ pub struct Dockerfile {
 /// Analisa um Dockerfile. **Compatível com o Docker** (FROM/RUN/CMD/ENTRYPOINT/
 /// ENV/WORKDIR/COPY; LABEL/EXPOSE/USER/ARG/ADD/MAINTAINER/VOLUME aceites e
 /// ignorados) **mais extensões Delonix** (SCAN/CPUS/MEMORY/SECURITY).
+/// Junta linhas físicas que terminam em `\` numa só linha lógica (continuações,
+/// como o Docker) — devolve `(índice 0-based da 1.ª linha física, linha lógica)`.
+/// Uma linha de continuação é concatenada com um espaço no lugar do `\<newline>`.
+fn join_continuations(text: &str) -> Vec<(usize, String)> {
+    let mut out = Vec::new();
+    let mut cur = String::new();
+    let mut start = 0usize;
+    for (i, raw) in text.lines().enumerate() {
+        if cur.is_empty() {
+            start = i;
+        }
+        let t = raw.trim_end();
+        if let Some(head) = t.strip_suffix('\\') {
+            cur.push_str(head);
+            cur.push(' ');
+        } else {
+            cur.push_str(t);
+            out.push((start, std::mem::take(&mut cur)));
+        }
+    }
+    if !cur.is_empty() {
+        out.push((start, cur)); // último `\` sem linha a seguir — não perder o conteúdo
+    }
+    out
+}
+
 pub fn parse_dockerfile(text: &str) -> Result<Dockerfile> {
     let mut df = Dockerfile::default();
     let mut stages: Vec<Stage> = Vec::new(); // todos os estágios, na ordem
-    for (n, raw) in text.lines().enumerate() {
-        let line = raw.trim();
+    for (n, line) in join_continuations(text) {
+        let line = line.trim();
         if line.is_empty() || line.starts_with('#') {
             continue;
         }
@@ -101,8 +127,10 @@ pub fn parse_dockerfile(text: &str) -> Result<Dockerfile> {
             "CMD" => df.cmd = parse_cmd(rest),
             "ENTRYPOINT" => df.entrypoint = parse_cmd(rest),
             "ENV" => {
-                let (key, val) = parse_env(rest);
-                stages.last_mut().unwrap().steps.push(Step::Env { key, val });
+                // `ENV k1=v1 k2="v 2" …` (múltiplas vars) OU o legado `ENV k v`.
+                for (key, val) in parse_env_pairs(rest) {
+                    stages.last_mut().unwrap().steps.push(Step::Env { key, val });
+                }
             }
             "WORKDIR" => {
                 stages.last_mut().unwrap().steps.push(Step::Workdir(rest.to_string()));
@@ -177,14 +205,42 @@ pub fn parse_dockerfile(text: &str) -> Result<Dockerfile> {
 }
 
 /// `ENV K=V` ou `ENV K V` → (chave, valor).
-fn parse_env(rest: &str) -> (String, String) {
-    if let Some((k, v)) = rest.split_once('=') {
-        (k.trim().to_string(), v.trim().trim_matches('"').to_string())
-    } else if let Some((k, v)) = rest.split_once(char::is_whitespace) {
-        (k.trim().to_string(), v.trim().to_string())
-    } else {
-        (rest.to_string(), String::new())
+/// Faz o parse de um `ENV` num ou mais pares `(chave, valor)`, à Docker:
+/// - **legado** `ENV chave valor com espaços` (sem `=`): um só par, o resto é o valor.
+/// - **multi-var** `ENV k1=v1 k2="v 2" k3=v3`: tokeniza por espaços RESPEITANDO
+///   aspas (para valores com espaços), cada token parte no 1.º `=`.
+fn parse_env_pairs(rest: &str) -> Vec<(String, String)> {
+    let rest = rest.trim();
+    if !rest.contains('=') {
+        return match rest.split_once(char::is_whitespace) {
+            Some((k, v)) => vec![(k.trim().to_string(), v.trim().to_string())],
+            None => vec![(rest.to_string(), String::new())],
+        };
     }
+    let mut out = Vec::new();
+    let mut tok = String::new();
+    let mut in_quote = false;
+    let mut push = |t: &mut String| {
+        if let Some((k, v)) = t.split_once('=') {
+            out.push((k.trim().to_string(), v.to_string()));
+        }
+        t.clear();
+    };
+    for ch in rest.chars() {
+        match ch {
+            '"' => in_quote = !in_quote,
+            c if c.is_whitespace() && !in_quote => {
+                if !tok.is_empty() {
+                    push(&mut tok);
+                }
+            }
+            c => tok.push(c),
+        }
+    }
+    if !tok.is_empty() {
+        push(&mut tok);
+    }
+    out
 }
 
 /// `CMD ["a","b"]` (JSON) ou `CMD a b` (shell) → vector de argumentos.
@@ -399,5 +455,37 @@ impl ImageStore {
         self.enforce_tag_uniqueness(&img)?;
         self.save(&img)?;
         Ok(img)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{join_continuations, parse_env_pairs};
+
+    #[test]
+    fn join_continuations_coalesces_backslash_lines() {
+        let df = "RUN apt install \\\n    a \\\n    b\nENV X=1";
+        let lines: Vec<String> = join_continuations(df).into_iter().map(|(_, l)| l).collect();
+        assert_eq!(lines.len(), 2, "3 linhas físicas do RUN → 1 lógica, + o ENV");
+        assert!(lines[0].starts_with("RUN apt install") && lines[0].contains(" a ") && lines[0].contains(" b"));
+        assert_eq!(lines[1], "ENV X=1");
+    }
+
+    #[test]
+    fn parse_env_pairs_handles_multi_var_and_quotes() {
+        // Multi-var numa linha — o bug que perdia o PATH.
+        let p = parse_env_pairs("A=1 B=2 PATH=/app/.venv/bin:$PATH");
+        assert_eq!(p, vec![
+            ("A".into(), "1".into()),
+            ("B".into(), "2".into()),
+            ("PATH".into(), "/app/.venv/bin:$PATH".into()),
+        ]);
+        // Valor com espaços entre aspas.
+        assert_eq!(parse_env_pairs(r#"MSG="hello world" K=v"#), vec![
+            ("MSG".into(), "hello world".into()),
+            ("K".into(), "v".into()),
+        ]);
+        // Legado `ENV chave valor` (sem `=`).
+        assert_eq!(parse_env_pairs("GREETING olá mundo"), vec![("GREETING".into(), "olá mundo".into())]);
     }
 }

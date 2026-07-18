@@ -147,7 +147,7 @@ fn run_steps(steps: &[Step], rootfs: &str, context: &Path, c: &Container, base: 
                         "COPY --from=<estágio> requer build multi-stage, não suportado nesta versão".into(),
                     ));
                 }
-                copy_into_rootfs(context, rootfs, src, dst)?;
+                copy_into_rootfs(context, rootfs, src, dst, &cur_workdir)?;
             }
             Step::Run(cmdline) => {
                 let exports: String = cur_env.iter().map(|kv| format!("export {kv}; ")).collect();
@@ -184,12 +184,26 @@ fn safe_join(base: &Path, rel: &str) -> Result<PathBuf> {
     Ok(out)
 }
 
-fn copy_into_rootfs(context: &Path, rootfs: &str, src: &str, dst: &str) -> Result<()> {
+fn copy_into_rootfs(context: &Path, rootfs: &str, src: &str, dst: &str, workdir: &str) -> Result<()> {
     let src_path = safe_join(context, src)?;
-    let dst_path = safe_join(Path::new(rootfs), dst.trim_start_matches('/'))?;
+    // Semântica Docker do destino: um `dst` relativo resolve-se contra o WORKDIR
+    // (`COPY x ./` → WORKDIR/x, não a raiz do rootfs); um `dst` que termina em `/`
+    // (ou é um directório) mantém o basename do `src` lá dentro.
+    let dir_dest = dst.ends_with('/') || dst == "." || dst == "./";
+    let abs_dst = if dst.starts_with('/') {
+        dst.to_string()
+    } else {
+        format!("{}/{}", workdir.trim_end_matches('/'), dst)
+    };
+    let mut dst_path = safe_join(Path::new(rootfs), abs_dst.trim_start_matches('/'))?;
     if src_path.is_dir() {
         copy_dir_all(&src_path, &dst_path)
     } else {
+        if dir_dest || dst_path.is_dir() {
+            if let Some(name) = src_path.file_name() {
+                dst_path.push(name);
+            }
+        }
         if let Some(parent) = dst_path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| Error::Invalid(format!("mkdir {}: {e}", parent.display())))?;
         }
