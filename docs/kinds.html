@@ -85,7 +85,7 @@ spec:
   parent: null              # NIC parent, for macvlan/ipvlan (e.g. eth0)
   vni: null                 # VXLAN id, for overlay
   peers: []                 # overlay peers: &quot;&lt;ip&gt;&quot; or &quot;&lt;ip&gt;=&lt;wg_pubkey&gt;=&lt;wg_ip&gt;&quot;
-  wg_ip: null               # this node&#x27;s WireGuard tunnel IP (encrypted overlay)</code></pre>
+  wgIp: null                # this node&#x27;s WireGuard tunnel IP (encrypted overlay)  (alias: wg_ip)</code></pre>
 <h2 id='volume'>Volume</h2>
 <p>Um volume local nomeado — os dados sobrevivem a <code>container rm</code>. Para armazenamento de REDE (NFS/SMB/WebDAV) usa antes <code>kind: Storage</code>.</p>
 <pre><code># Volume — a named local volume (data survives `container rm`). For NETWORK
@@ -99,7 +99,7 @@ spec:
   driver: local             # local | nfs (for nfs, prefer kind: Storage)
   quota: null               # size cap, e.g. &quot;2g&quot; (hard cap as root, monitored in rootless)
   device: null              # nfs export &quot;server:/export&quot; (only with driver: nfs)
-  options: null             # mount options, e.g. &quot;vers=4,ro&quot; (only with driver: nfs)</code></pre>
+  mountOptions: null        # mount options, e.g. &quot;vers=4,ro&quot; (only with driver: nfs)  (alias: options)</code></pre>
 <h2 id='storage'>Storage</h2>
 <p>Um volume de REDE montado de um NAS (TrueNAS/Synology/Samba/Nextcloud), estilo PersistentVolume do k8s. A password vem do cofre (<code>--password-secret</code>). Montar precisa de CAP_SYS_ADMIN.</p>
 <pre><code># Storage — network folder volumes mounted like Kubernetes PersistentVolumes.
@@ -187,7 +187,7 @@ spec:
   vcpus: 2
   memory: 2G                  # &quot;2G&quot; | &quot;1024M&quot; (a &quot;…i&quot; suffix is accepted, k8s-style)
   network: node1-net          # ingress network for the VM&#x27;s tap
-  restart_policy: null        # no | on-failure | always
+  restartPolicy: null         # no | on-failure | always  (alias: restart_policy)
   # --- boot: firmware (cloud images) OR direct kernel ---
   firmware: null              # UEFI firmware path (typical for cloud images)
   kernel: null                # direct kernel boot (alternative to firmware)
@@ -197,11 +197,11 @@ spec:
   seed: null                  # path to a prebuilt NoCloud ISO (hostname/ssh come from here)
   # --- performance / passthrough ---
   hugepages: false
-  cpu_affinity: null          # pin vCPUs, e.g. &quot;8-15&quot;
+  cpuAffinity: null           # pin vCPUs, e.g. &quot;8-15&quot;  (alias: cpu_affinity)
   devices: []                 # VFIO PCI passthrough (sysfs paths)
   # --- backend selection ---
   backend: null               # cloud-hypervisor | libvirt | null (auto)
-  net_mode: null              # libvirt only: user | nat | bridge
+  netMode: null               # libvirt only: user | nat | bridge  (alias: net_mode)
   bridge: null                # host bridge / libvirt network</code></pre>
 <h2 id='container'>Container</h2>
 <p>A carga do dia a dia. Só <code>image</code> é obrigatório; todos os outros campos têm default. Cobre rede, storage, recursos (cgroup v2), segredos, segurança, devices e limites.</p>
@@ -217,7 +217,7 @@ spec:
   command: []                 # e.g. [&quot;nginx&quot;, &quot;-g&quot;, &quot;daemon off;&quot;]
   entrypoint: null            # override the image ENTRYPOINT (&quot;&quot; clears it)
   detach: true                # run in the background (a manifest is declarative)
-  restart: always             # no | on-failure[:max] | always | unless-stopped
+  restartPolicy: always       # no | on-failure[:max] | always | unless-stopped  (alias: restart)
   # --- network ---
   network: host               # host | none | &lt;a network created by `network create`&gt;
   ports: []                   # [&quot;8080:80&quot;] — gives the container its own netns + slirp NAT
