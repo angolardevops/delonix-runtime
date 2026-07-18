@@ -101,7 +101,7 @@ pub fn build_from_spec(context: &Path, dockerfile_path: &Path, tag: &str) -> Res
             let mut env = base.config.env.clone();
             env.extend(df.env.iter().cloned());
             let workdir = df.workdir.clone().unwrap_or_else(|| base.config.working_dir.clone());
-            images.commit_flat_rootfs(Path::new(&rootfs), cmd, env, workdir, tag)
+            commit_flat_rootless(&images, &rootfs, &id, cmd, env, workdir, tag)
         } else {
             let layer = images.commit_upper(&c.id)?;
             images.build_image(&base, layer, &df, tag)
@@ -114,6 +114,62 @@ pub fn build_from_spec(context: &Path, dockerfile_path: &Path, tag: &str) -> Res
     let _ = images.unmount_rootfs(&c.id);
 
     commit_result
+}
+
+/// Empacota e faz commit do rootfs FLAT de um build **rootless**, empacotando
+/// DENTRO do userns mapeado quando há subuid.
+///
+/// Motivo: um `RUN` com `apt`/`dpkg` deixa ficheiros de subuid de modo restrito
+/// (`aux-cache` 0600, dirs `partial` 0700) que o utilizador REAL não lê — o tar
+/// in-process de `commit_flat_rootfs` dava `Permission denied` no fim de um build
+/// que já tinha passado todos os RUN. Aqui re-executamos `delonix __buildtar`
+/// como root num userns com os subuids mapeados (`reexec_mapped`, o mesmo
+/// mecanismo dos snapshots de volume): lá dentro somos donos de tudo, o tar sai
+/// completo e legível, e o pai lê-o de volta (fica 0644) para o gravar no CAS.
+///
+/// `reexec_mapped` devolve `None` quando não se aplica — rootless **single-uid**
+/// (sem `newuidmap`): aí os ficheiros do RUN pertencem ao NOSSO uid e o caminho
+/// in-process lê-os na mesma, por isso caímos para `commit_flat_rootfs`.
+fn commit_flat_rootless(
+    images: &delonix_image::ImageStore,
+    rootfs: &str,
+    id: &str,
+    cmd: Vec<String>,
+    env: Vec<String>,
+    workdir: String,
+    tag: &str,
+) -> Result<Image> {
+    let tar_path = std::env::temp_dir().join(format!("delonix-build-{id}.tar"));
+    let tar_str = tar_path.to_string_lossy().to_string();
+    let result = match runtime::reexec_mapped(&["__buildtar", rootfs, &tar_str]) {
+        Some(true) => {
+            let bytes = std::fs::read(&tar_path)
+                .map_err(|e| Error::Invalid(format!("ler tar do build (userns mapeado): {e}")))?;
+            images.commit_flat_rootfs_from_tar(bytes, cmd, env, workdir, tag)
+        }
+        Some(false) => Err(Error::Invalid(
+            "empacotar rootfs dentro do userns mapeado falhou (delonix __buildtar)".into(),
+        )),
+        // Sem subuid (rootless single-uid): os ficheiros do RUN são do nosso uid.
+        None => images.commit_flat_rootfs(Path::new(rootfs), cmd, env, workdir, tag),
+    };
+    let _ = std::fs::remove_file(&tar_path); // best-effort, nunca esconde o result
+    result
+}
+
+/// Sintetiza um `export KEY='VALUE'; ` seguro para o `/bin/sh -c` de cada `RUN`.
+/// O **valor** vai entre plicas (single-quotes) porque as imagens base trazem
+/// ENV com espaços — o clássico é `PHPIZE_DEPS="autoconf dpkg-dev file g++ …"`
+/// de toda a imagem `php`/`frankenphp`. Sem as plicas, `export PHPIZE_DEPS=autoconf
+/// dpkg-dev …` faz o shell tratar `dpkg-dev` como um segundo nome a exportar →
+/// `export: dpkg-dev: bad variable name`, e **todo** o `RUN` dessa imagem falha.
+/// Plicas dentro do valor viram `'\''` (fecha, escapa uma plica literal, reabre).
+fn sh_export(kv: &str) -> String {
+    match kv.split_once('=') {
+        Some((key, val)) => format!("export {key}='{}'; ", val.replace('\'', "'\\''")),
+        // Sem `=` não é uma atribuição — deixa como está (caso degenerado).
+        None => format!("export {kv}; "),
+    }
 }
 
 /// Corre os passos do Dockerfile por ordem, mantendo um acumulador local de
@@ -150,7 +206,7 @@ fn run_steps(steps: &[Step], rootfs: &str, context: &Path, c: &Container, base: 
                 copy_into_rootfs(context, rootfs, src, dst, &cur_workdir)?;
             }
             Step::Run(cmdline) => {
-                let exports: String = cur_env.iter().map(|kv| format!("export {kv}; ")).collect();
+                let exports: String = cur_env.iter().map(|kv| sh_export(kv)).collect();
                 let shell = format!("mkdir -p {cur_workdir} && cd {cur_workdir}; {exports}{cmdline}");
                 let argv = vec!["/bin/sh".to_string(), "-c".to_string(), shell];
                 let code = runtime::exec(c, &argv, false)?;
@@ -230,8 +286,25 @@ fn copy_dir_all(src: &Path, dst: &Path) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{default_build_file, safe_join};
+    use super::{default_build_file, safe_join, sh_export};
     use std::path::Path;
+
+    #[test]
+    fn sh_export_cita_valor_com_espacos() {
+        // Regressão: `PHPIZE_DEPS` (imagem php/frankenphp) tem espaços — sem plicas
+        // o shell tratava `dpkg-dev` como nome a exportar e TODO o RUN falhava
+        // ("export: dpkg-dev: bad variable name").
+        assert_eq!(
+            sh_export("PHPIZE_DEPS=autoconf dpkg-dev file g++"),
+            "export PHPIZE_DEPS='autoconf dpkg-dev file g++'; "
+        );
+        // Sem espaços continua correcto.
+        assert_eq!(sh_export("PATH=/usr/bin"), "export PATH='/usr/bin'; ");
+        // Uma plica literal no valor é escapada (fecha/escapa/reabre).
+        assert_eq!(sh_export("MSG=it's ok"), "export MSG='it'\\''s ok'; ");
+        // `=` no valor (ex.: base64) só parte no primeiro.
+        assert_eq!(sh_export("K=a=b=c"), "export K='a=b=c'; ");
+    }
 
     #[test]
     fn safe_join_aceita_caminho_normal() {
