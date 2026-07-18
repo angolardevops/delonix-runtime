@@ -234,7 +234,9 @@ fn apply(file: Option<PathBuf>) -> Result<()> {
         )));
     }
     // Secrets primeiro: `Storage.passwordSecret` e `Container.secret` referem-nos.
-    super::secret::apply(&docs)?;
+    // `base` = pasta do manifesto, para o `fromEnvFile` resolver ao lado dele.
+    let base = path.parent().unwrap_or_else(|| std::path::Path::new("."));
+    super::secret::apply(&docs, base)?;
     super::network::apply(&docs)?;
     super::volume::apply(&docs)?;
     super::storage::apply(&docs)?;
@@ -346,6 +348,26 @@ fn validate_graph_with(
     containers.extend(existing_containers.iter().cloned());
     secrets.extend(existing_secrets.iter().cloned());
 
+    // Chaves conhecidas de cada Secret DECLARADO inline (stringData). `None` = as
+    // chaves não são conhecíveis em validação (usa `fromEnvFile`, cujo ficheiro
+    // não se lê aqui) — nesse caso não se valida a presença de chave nenhuma
+    // (nunca um falso positivo). Só para o `Storage.passwordSecret`, que lê a
+    // chave `password` específica.
+    let mut declared_secret_keys: std::collections::HashMap<String, Option<HashSet<String>>> =
+        std::collections::HashMap::new();
+    for doc in docs.iter().filter(|d| d.kind == "Secret") {
+        let has_env_file = doc.spec.get("fromEnvFile").is_some_and(|v| !v.is_null());
+        let keys = if has_env_file {
+            None
+        } else {
+            doc.spec
+                .get("stringData")
+                .and_then(|v| v.as_mapping())
+                .map(|m| m.keys().filter_map(|k| k.as_str()).map(str::to_string).collect())
+        };
+        declared_secret_keys.insert(doc.metadata.name.clone(), keys);
+    }
+
     let mut issues = Vec::new();
 
     // Duplicados dentro do manifesto (mesmo Kind + nome) — o `apply` criaria um e
@@ -383,10 +405,19 @@ fn validate_graph_with(
                 }
             }
             "Storage" => {
-                // `Storage.passwordSecret` referencia um Secret (chave `password`).
+                // `Storage.passwordSecret` referencia um Secret (o mount lê a
+                // chave `password` desse Secret — `storage::resolve_password`).
                 if let Some(sref) = doc.spec.get("passwordSecret").and_then(|v| v.as_str()) {
                     if !secrets.contains(sref) {
                         issues.push(format!("Storage '{name}' → passwordSecret '{sref}' não é um Secret declarado nem existente"));
+                    } else if let Some(Some(keys)) = declared_secret_keys.get(sref) {
+                        // Só quando conhecemos as chaves (Secret inline sem fromEnvFile):
+                        // aí podemos afirmar com certeza que falta a `password`.
+                        if !keys.contains("password") {
+                            issues.push(format!(
+                                "Storage '{name}' → passwordSecret '{sref}': o Secret não declara a chave 'password' (o mount lê exactamente essa chave)"
+                            ));
+                        }
                     }
                 }
             }
@@ -581,6 +612,59 @@ spec: { type: nfs, server: h, share: /s, passwordSecret: outro-fantasma }
         assert_eq!(issues.len(), 2, "{issues:?}");
         assert!(issues.iter().any(|i| i.contains("secret 'fantasma'")), "{issues:?}");
         assert!(issues.iter().any(|i| i.contains("passwordSecret 'outro-fantasma'")), "{issues:?}");
+    }
+
+    #[test]
+    fn storage_passwordsecret_sem_chave_password_e_sinalizado() {
+        // O Secret existe mas declara só `token` (inline) — o mount leria `password`.
+        let issues = check(
+            "\
+apiVersion: delonix.io/v1
+kind: Secret
+metadata: { name: creds }
+spec: { stringData: { token: x } }
+---
+apiVersion: delonix.io/v1
+kind: Storage
+metadata: { name: nas }
+spec: { type: cifs, server: h, share: /s, passwordSecret: creds }
+",
+        );
+        assert_eq!(issues.len(), 1, "{issues:?}");
+        assert!(issues[0].contains("não declara a chave 'password'"), "{issues:?}");
+
+        // Com a chave `password` presente → sem problemas.
+        let ok = check(
+            "\
+apiVersion: delonix.io/v1
+kind: Secret
+metadata: { name: creds }
+spec: { stringData: { password: x } }
+---
+apiVersion: delonix.io/v1
+kind: Storage
+metadata: { name: nas }
+spec: { type: cifs, server: h, share: /s, passwordSecret: creds }
+",
+        );
+        assert!(ok.is_empty(), "{ok:?}");
+
+        // Secret via fromEnvFile → chaves desconhecidas em validação → NÃO se
+        // arrisca um falso positivo (mesmo sem sabermos se tem `password`).
+        let unknown = check(
+            "\
+apiVersion: delonix.io/v1
+kind: Secret
+metadata: { name: creds }
+spec: { fromEnvFile: ./x.env }
+---
+apiVersion: delonix.io/v1
+kind: Storage
+metadata: { name: nas }
+spec: { type: cifs, server: h, share: /s, passwordSecret: creds }
+",
+        );
+        assert!(unknown.is_empty(), "{unknown:?}");
     }
 
     #[test]
