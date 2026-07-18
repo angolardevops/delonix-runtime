@@ -627,11 +627,8 @@ fn ensure_net_bridge(bridge: &str, gateway: &str) -> Result<()> {
     // netns efémero). Só no `!exists` (bridge nova): idempotente e barato.
     if !exists {
         if let Some(def) = network_list().into_iter().find(|d| d.bridge == bridge) {
-            if let Some(pol) = def.egress.policy.clone() {
-                let _ = do_egress_net(bridge, &pol);
-            }
-            for host in def.egress.hosts {
-                let _ = do_egress_host(bridge, &host);
+            if def.egress.policy.is_some() || !def.egress.hosts.is_empty() {
+                let _ = apply_egress_from_state(bridge, &def.egress);
             }
         }
     }
@@ -1082,72 +1079,20 @@ fn do_egress(policy: &str) -> Result<()> {
     }
 }
 
-/// Gera as regras nft (arg-vectors) do egress POR-REDE de uma bridge, na ORDEM
-/// em que devem ficar na chain `fwdeny` (topo→fundo). PURA (testável):
-/// - `deny` → um só `iifname <b> oifname tap0 drop` (denylist total).
-/// - `allow` → nenhuma regra (default-allow).
-/// - `allowlist:<cidr,cidr,...>` (NET-A) → aceita DNS (udp/tcp 53) + cada CIDR,
-///   e DROPA o resto → "nega tudo excepto". O `53` explícito evita ter de deixar
-///   a porta 53 sempre aberta (não há via de DNS-tunneling permanente). Só CIDRs
-///   válidos (`fw_src_ok`) entram — anti-injeção nft; inválidos são saltados.
-fn egress_net_rule_specs(bridge: &str, policy: &str) -> Result<Vec<Vec<String>>> {
-    let base = |extra: &[&str]| -> Vec<String> {
-        let mut v = vec!["ip".into(), INGRESS_TABLE.into(), "fwdeny".into(), "iifname".into(), bridge.to_string(), "oifname".into(), "tap0".into()];
-        v.extend(extra.iter().map(|s| s.to_string()));
-        v
-    };
-    match policy {
-        "allow" => Ok(vec![]),
-        "deny" => Ok(vec![base(&["drop"])]),
-        p if p.starts_with("allowlist:") => {
-            let mut rules = vec![
-                base(&["udp", "dport", "53", "accept"]), // DNS explícito (sem buraco permanente)
-                base(&["tcp", "dport", "53", "accept"]),
-            ];
-            for cidr in p["allowlist:".len()..].split(',').map(|c| c.trim()).filter(|c| !c.is_empty()) {
-                if delonix_runtime_core::fw_src_ok(cidr) {
-                    rules.push(base(&["ip", "daddr", cidr, "accept"]));
-                } else {
-                    eprintln!("delonix: egress allowlist — CIDR inválido saltado: {cidr:?}");
-                }
-            }
-            rules.push(base(&["drop"])); // default-deny do resto (fica em ÚLTIMO)
-            Ok(rules)
-        }
-        _ => Err(Error::Invalid(format!("política de egress inválida: {policy}"))),
-    }
-}
-
 /// Egress POR-REDE (workspace): controla a saída→Internet de UMA bridge, sem
 /// afetar as outras. Idempotente (remove as regras antigas dessa bridge antes).
 /// Suporta `deny`/`allow`/`allowlist:<cidrs>` (NET-A).
 fn do_egress_net(bridge: &str, policy: &str) -> Result<()> {
+    if !(policy == "allow" || policy == "deny" || policy.starts_with("allowlist:")) {
+        return Err(Error::Invalid(format!("política de egress inválida: {policy}")));
+    }
+    let norm = (policy != "allow").then(|| policy.to_string());
     let bridge = sanitize(bridge);
-    let needle_if = format!("iifname \"{bridge}\"");
-    // Remove TODAS as regras de egress antigas desta bridge (drop e accepts de
-    // allowlist prévia) antes de reprogramar — evita acumulação/ordem errada.
-    let listed = crate::capture("nft", &["-a", "list", "chain", "ip", INGRESS_TABLE, "fwdeny"]).unwrap_or_default();
-    for line in listed.lines() {
-        if line.contains(&needle_if) && line.contains("oifname \"tap0\"") && (line.contains("drop") || line.contains("accept")) {
-            if let Some(handle) = line.rsplit("# handle ").next().and_then(|h| h.trim().parse::<u32>().ok()) {
-                run_ok("nft", &["delete", "rule", "ip", INGRESS_TABLE, "fwdeny", "handle", &handle.to_string()]);
-            }
-        }
-    }
-    // Aplica na ORDEM correta: `insert` prepende, por isso inserimos em ordem
-    // INVERSA → o resultado no topo→fundo é [accepts…, drop], com os accepts a
-    // ganharem antes do drop final.
-    let specs = egress_net_rule_specs(&bridge, policy)?;
-    for spec in specs.iter().rev() {
-        let mut argv = vec!["insert", "rule"];
-        argv.extend(spec.iter().map(|s| s.as_str()));
-        run("nft", &argv)?;
-    }
-    // Persiste a intenção (sobrevive ao respawn do holder). `allow` = sem política.
-    update_netdef_egress(&bridge, |e| {
-        e.policy = if policy == "allow" { None } else { Some(policy.to_string()) };
-    });
-    Ok(())
+    // Persiste a nova política e re-aplica a chain COMPLETA (política + hosts
+    // FQDN existentes) — para `egress net` e `egress host` comporem.
+    let state = update_netdef_egress(&bridge, |e| e.policy = norm.clone())
+        .unwrap_or(EgressState { policy: norm, hosts: Vec::new() });
+    apply_egress_from_state(&bridge, &state)
 }
 
 // ---- egress por HOSTNAME (FQDN allowlist via DNS-snooping) -------------------
@@ -1177,47 +1122,15 @@ fn do_egress_host(bridge: &str, suffix: &str) -> Result<()> {
     if suffix.is_empty() || suffix.len() > 253 || !suffix.contains('.') || !suffix.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'-') {
         return Err(Error::Invalid(format!("hostname inválido: {suffix:?}")));
     }
-    let set = fqdn_set(&bridge);
-    // Cria o set (idempotente). `flags timeout` permite `add element … timeout`.
-    run_ok("nft", &["add", "set", "ip", INGRESS_TABLE, &set, "{ type ipv4_addr; flags timeout; }"]);
-    // Reprograma o egress desta bridge: remove regras antigas, depois insere
-    // (em ordem inversa, porque `insert` prepende) [dns, dns, @set accept, drop].
-    let needle_if = format!("iifname \"{bridge}\"");
-    let listed = crate::capture("nft", &["-a", "list", "chain", "ip", INGRESS_TABLE, "fwdeny"]).unwrap_or_default();
-    for line in listed.lines() {
-        if line.contains(&needle_if) && line.contains("oifname \"tap0\"") && (line.contains("drop") || line.contains("accept")) {
-            if let Some(h) = line.rsplit("# handle ").next().and_then(|x| x.trim().parse::<u32>().ok()) {
-                run_ok("nft", &["delete", "rule", "ip", INGRESS_TABLE, "fwdeny", "handle", &h.to_string()]);
-            }
-        }
-    }
-    let base = |extra: &[&str]| -> Vec<String> {
-        let mut v = vec!["insert".into(), "rule".into(), "ip".into(), INGRESS_TABLE.into(), "fwdeny".into(), "iifname".into(), bridge.clone(), "oifname".into(), "tap0".into()];
-        v.extend(extra.iter().map(|s| s.to_string()));
-        v
-    };
-    let set_ref = format!("@{set}");
-    for spec in [
-        base(&["drop"]),
-        base(&["ip", "daddr", &set_ref, "accept"]),
-        base(&["tcp", "dport", "53", "accept"]),
-        base(&["udp", "dport", "53", "accept"]),
-    ] {
-        run("nft", &spec.iter().map(|s| s.as_str()).collect::<Vec<_>>())?;
-    }
-    // Memoriza o sufixo (sem duplicar) para a thread de DNS o snoopar.
-    if let Ok(mut g) = FQDN_ALLOW.lock() {
-        if !g.iter().any(|(b, _, s)| *b == bridge && *s == suffix) {
-            g.push((bridge.clone(), set, suffix.clone()));
-        }
-    }
-    // Persiste o hostname (sobrevive ao respawn do holder).
-    update_netdef_egress(&bridge, |e| {
+    // Persiste o hostname e re-aplica a chain COMPLETA (compõe com a política CIDR
+    // se houver). `apply_egress_from_state` cria o set e regista no FQDN_ALLOW.
+    let state = update_netdef_egress(&bridge, |e| {
         if !e.hosts.contains(&suffix) {
-            e.hosts.push(suffix);
+            e.hosts.push(suffix.clone());
         }
-    });
-    Ok(())
+    })
+    .unwrap_or(EgressState { policy: None, hosts: vec![suffix] });
+    apply_egress_from_state(&bridge, &state)
 }
 
 /// Extrai os IPv4 dos A-records de uma resposta DNS (bounds-checked; tolera
@@ -1554,16 +1467,97 @@ pub struct EgressState {
     pub hosts: Vec<String>,
 }
 
-/// Actualiza (e persiste) a intenção de egress da rede cuja bridge é `bridge`.
-/// Sem efeito se nenhuma `NetDef` corresponder (ex.: a bridge default `delonix0`).
-fn update_netdef_egress(bridge: &str, mutate: impl FnOnce(&mut EgressState)) {
+/// Actualiza (e persiste) a intenção de egress da rede cuja bridge é `bridge`,
+/// devolvendo o estado resultante. `None` se nenhuma `NetDef` corresponder (ex.:
+/// a bridge default `delonix0`, que não é persistida).
+fn update_netdef_egress(bridge: &str, mutate: impl FnOnce(&mut EgressState)) -> Option<EgressState> {
     for mut def in network_list() {
         if def.bridge == bridge {
             mutate(&mut def.egress);
             if let Ok(json) = serde_json::to_vec_pretty(&def) {
                 let _ = std::fs::write(netdef_path(&def.name), json);
             }
-            return;
+            return Some(def.egress);
+        }
+    }
+    None
+}
+
+/// Constrói a chain de egress COMPLETA de uma bridge a partir do estado combinado
+/// (política CIDR + hosts FQDN), para que `egress net allowlist` e `egress host`
+/// COMPONHAM em vez de um reprogramar por cima do outro. Remove as regras antigas
+/// da bridge e reinsere na ordem certa: DNS → CIDRs → @set FQDN → drop. `allow`
+/// sem hosts = default-allow (nada). `deny` sem hosts = drop total. Qualquer host
+/// força modo allowlist (os hosts são allows explícitos).
+fn apply_egress_from_state(bridge: &str, state: &EgressState) -> Result<()> {
+    let bridge = sanitize(bridge);
+    // Remove todas as regras de egress antigas desta bridge (drop + accepts).
+    let needle_if = format!("iifname \"{bridge}\"");
+    let listed = crate::capture("nft", &["-a", "list", "chain", "ip", INGRESS_TABLE, "fwdeny"]).unwrap_or_default();
+    for line in listed.lines() {
+        if line.contains(&needle_if) && line.contains("oifname \"tap0\"") && (line.contains("drop") || line.contains("accept")) {
+            if let Some(h) = line.rsplit("# handle ").next().and_then(|x| x.trim().parse::<u32>().ok()) {
+                run_ok("nft", &["delete", "rule", "ip", INGRESS_TABLE, "fwdeny", "handle", &h.to_string()]);
+            }
+        }
+    }
+    // Cria o set FQDN + regista os sufixos ANTES de inserir a regra `@set`.
+    if !state.hosts.is_empty() {
+        let set = fqdn_set(&bridge);
+        run_ok("nft", &["add", "set", "ip", INGRESS_TABLE, &set, "{ type ipv4_addr; flags timeout; }"]);
+        fqdn_register(&bridge, &set, &state.hosts);
+    }
+    // `insert` prepende → inserir em ordem INVERSA para o topo→fundo ficar certo.
+    for spec in egress_specs(&bridge, state).iter().rev() {
+        run("nft", &spec.iter().map(|s| s.as_str()).collect::<Vec<_>>())?;
+    }
+    Ok(())
+}
+
+/// Constrói os arg-vectors `nft insert rule …` do egress de uma bridge a partir do
+/// estado combinado (política CIDR + hosts FQDN), na ordem topo→fundo. **PURA**
+/// (sem I/O — testável): DNS → CIDRs da allowlist → `@set` FQDN → drop. `allow`
+/// sem hosts → vazio (default-allow); `deny` sem hosts → só drop. `bridge` já vem
+/// sanitizado.
+fn egress_specs(bridge: &str, state: &EgressState) -> Vec<Vec<String>> {
+    let policy = state.policy.as_deref().unwrap_or("allow");
+    let has_hosts = !state.hosts.is_empty();
+    let base = |extra: &[&str]| -> Vec<String> {
+        let mut v = vec!["insert".into(), "rule".into(), "ip".into(), INGRESS_TABLE.into(), "fwdeny".into(), "iifname".into(), bridge.to_string(), "oifname".into(), "tap0".into()];
+        v.extend(extra.iter().map(|s| s.to_string()));
+        v
+    };
+    if policy == "allow" && !has_hosts {
+        return Vec::new();
+    }
+    if policy == "deny" && !has_hosts {
+        return vec![base(&["drop"])];
+    }
+    let mut specs = vec![base(&["udp", "dport", "53", "accept"]), base(&["tcp", "dport", "53", "accept"])];
+    if let Some(cidrs) = policy.strip_prefix("allowlist:") {
+        for cidr in cidrs.split(',').map(|c| c.trim()).filter(|c| !c.is_empty()) {
+            if delonix_runtime_core::fw_src_ok(cidr) {
+                specs.push(base(&["ip", "daddr", cidr, "accept"]));
+            } else {
+                eprintln!("delonix: egress allowlist — CIDR inválido saltado: {cidr:?}");
+            }
+        }
+    }
+    if has_hosts {
+        specs.push(base(&["ip", "daddr", &format!("@{}", fqdn_set(bridge)), "accept"]));
+    }
+    specs.push(base(&["drop"])); // default-deny do resto (fica em ÚLTIMO)
+    specs
+}
+
+/// Regista (sem duplicar) os sufixos FQDN de uma bridge no [`FQDN_ALLOW`] para a
+/// thread de DNS os snoopar. Chamado no apply e na re-aplicação pós-respawn.
+fn fqdn_register(bridge: &str, set: &str, hosts: &[String]) {
+    if let Ok(mut g) = FQDN_ALLOW.lock() {
+        for h in hosts {
+            if !g.iter().any(|(b, _, s)| b == bridge && s == h) {
+                g.push((bridge.to_string(), set.to_string(), h.clone()));
+            }
         }
     }
 }
@@ -2600,21 +2594,28 @@ mod tests {
     }
 
     #[test]
-    fn egress_allowlist_gera_dns_cidrs_e_drop_final() {
-        // allow → nenhuma regra.
-        assert!(egress_net_rule_specs("delonix1", "allow").unwrap().is_empty());
-        // deny → um só drop.
-        let d = egress_net_rule_specs("delonix1", "deny").unwrap();
+    fn egress_specs_compoem_cidrs_e_fqdn() {
+        use super::EgressState;
+        let st = |policy: Option<&str>, hosts: &[&str]| EgressState {
+            policy: policy.map(String::from),
+            hosts: hosts.iter().map(|s| s.to_string()).collect(),
+        };
+        // allow, sem hosts → nenhuma regra (default-allow).
+        assert!(super::egress_specs("dlx1", &st(None, &[])).is_empty());
+        // deny, sem hosts → um só drop.
+        let d = super::egress_specs("dlx1", &st(Some("deny"), &[]));
         assert_eq!(d.len(), 1);
         assert_eq!(d[0].last().unwrap(), "drop");
-        // allowlist → DNS(53)x2 + 1 CIDR válido + drop final; CIDR inválido saltado.
-        let a = egress_net_rule_specs("delonix1", "allowlist:1.1.1.0/24,lixo;rm").unwrap();
-        assert_eq!(a.len(), 4, "2xDNS + 1 CIDR válido + drop");
-        assert!(a[0].contains(&"53".to_string()) && a[0].last().unwrap() == "accept");
-        assert!(a[2].contains(&"1.1.1.0/24".to_string()) && a[2].last().unwrap() == "accept");
-        assert_eq!(a[3].last().unwrap(), "drop", "o drop fica em ÚLTIMO (default-deny do resto)");
-        // policy inválida → erro.
-        assert!(egress_net_rule_specs("delonix1", "wtf").is_err());
+        // allowlist + host COMPÕEM: 2xDNS + 1 CIDR válido + @set + drop (CIDR mau saltado).
+        let a = super::egress_specs("dlx1", &st(Some("allowlist:1.1.1.0/24,lixo;rm"), &["github.com"]));
+        assert_eq!(a.len(), 5, "2xDNS + 1 CIDR + @set FQDN + drop");
+        assert!(a[2].contains(&"1.1.1.0/24".to_string()));
+        assert!(a[3].iter().any(|x| x.starts_with("@dlxfq")), "a regra @set do FQDN está presente");
+        assert_eq!(a[4].last().unwrap(), "drop");
+        // só host (sem política CIDR) → 2xDNS + @set + drop.
+        let h = super::egress_specs("dlx1", &st(None, &["example.com"]));
+        assert_eq!(h.len(), 4);
+        assert!(h[2].iter().any(|x| x.starts_with("@dlxfq")));
     }
 
     #[test]
