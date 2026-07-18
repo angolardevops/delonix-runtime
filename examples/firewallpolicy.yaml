@@ -1,0 +1,38 @@
+# kind: FirewallPolicy — a forma UNIFICADA do firewall declarativo. A direcção
+# vem de `spec.direction` (ingress|egress) em vez do nome do Kind. Resolve a
+# confusão de que, aqui, `kind: Ingress` é firewall L4 (não o Ingress L7/HTTP do
+# k8s). `kind: Ingress`/`kind: Egress` continuam a funcionar como alias — este é
+# só a superfície unificada equivalente.
+#
+#   delonix stack apply -f examples/firewallpolicy.yaml
+---
+apiVersion: delonix.io/v1
+kind: FirewallPolicy
+metadata:
+  name: db-inbound
+spec:
+  direction: ingress         # = kind: Ingress
+  target: dbapp              # container-alvo (na SDN)
+  defaultPolicy: deny
+  rules:
+    - proto: tcp
+      port: "5432"
+      from: 10.219.0.0/16
+      note: postgres-from-sdn
+---
+apiVersion: delonix.io/v1
+kind: FirewallPolicy
+metadata:
+  name: db-outbound
+spec:
+  direction: egress          # = kind: Egress
+  target: dbapp
+  defaultPolicy: deny
+  rules:
+    - proto: udp
+      port: "53"
+      note: dns
+    - proto: tcp
+      port: "443"
+      to: 0.0.0.0/0
+      note: https
