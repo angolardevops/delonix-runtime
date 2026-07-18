@@ -87,6 +87,33 @@ pub fn volsnap_restore(data: &Path, tarball: &Path) -> Result<()> {
     Ok(())
 }
 
+/// `__buildtar <rootfs> <out>` — empacota um rootfs FLAT (build rootless) num
+/// tar NÃO-comprimido, corrido DENTRO do userns mapeado.
+///
+/// Porque mapeado: um `RUN` com `apt-get install` (dpkg) deixa ficheiros de
+/// subuid com modos restritos (`/var/cache/ldconfig/aux-cache` 0600, dirs
+/// `.../partial` 0700). O `commit_flat_rootfs` a empacotar como utilizador REAL
+/// não os consegue ler → `Permission denied` e o build inteiro falha no fim
+/// (depois de todos os RUN passarem — o pior sítio para falhar). Aqui somos root
+/// no userns (donos efectivos dos subuids), logo lemos tudo; e a tar regista uid
+/// 0, não o número do subuid — mais correcto para um layer OCI.
+///
+/// Tar NÃO-comprimido de propósito: o `commit_flat_rootfs_from_tar` usa o digest
+/// deste tar como `diff_id` (o OCI exige o digest do tar DEScomprimido). O `out`
+/// fica com modo legível a todos (0644) para o pai — que não é dono do subuid —
+/// o conseguir ler de volta.
+pub fn buildtar(rootfs: &Path, out: &Path) -> Result<()> {
+    if let Some(dir) = out.parent() {
+        std::fs::create_dir_all(dir).map_err(io_err("build tar"))?;
+    }
+    let f = std::fs::File::create(out).map_err(io_err("build tar"))?;
+    let mut b = tar::Builder::new(f);
+    b.follow_symlinks(false);
+    b.append_dir_all(".", rootfs).map_err(io_err("build tar"))?;
+    b.finish().map_err(io_err("build tar"))?;
+    Ok(())
+}
+
 /// Despacha `__volsnap <modo> <data> <tarball>`.
 pub fn volsnap(mode: &str, data: &Path, tarball: &Path) -> Result<()> {
     match mode {
@@ -161,6 +188,28 @@ mod tests {
         let ino_antes = std::fs::metadata(&data).unwrap().rt_ino();
         volsnap_restore(&data, &tar).unwrap();
         assert_eq!(ino_antes, std::fs::metadata(&data).unwrap().rt_ino(), "o inode do _data mudou");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn buildtar_empacota_o_rootfs() {
+        let base = tmpdir("buildtar");
+        let rootfs = base.join("rootfs");
+        std::fs::create_dir_all(rootfs.join("etc")).unwrap();
+        std::fs::write(rootfs.join("etc/hostname"), b"delonix").unwrap();
+        std::fs::write(rootfs.join("app"), b"bin").unwrap();
+        let out = base.join("layer.tar");
+
+        buildtar(&rootfs, &out).unwrap();
+        assert!(out.exists(), "o tar devia existir");
+
+        // O tar contém as entradas do rootfs (verifica re-lendo).
+        let mut a = tar::Archive::new(std::fs::File::open(&out).unwrap());
+        let mut nomes: Vec<String> =
+            a.entries().unwrap().map(|e| e.unwrap().path().unwrap().to_string_lossy().into_owned()).collect();
+        nomes.sort();
+        assert!(nomes.iter().any(|n| n.ends_with("etc/hostname")), "faltou etc/hostname: {nomes:?}");
+        assert!(nomes.iter().any(|n| n.ends_with("app")), "faltou app: {nomes:?}");
         let _ = std::fs::remove_dir_all(&base);
     }
 

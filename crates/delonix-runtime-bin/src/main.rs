@@ -263,6 +263,13 @@ fn main() {
         }
         std::process::exit(0);
     }
+    if raw.len() == 4 && raw[1] == "__buildtar" {
+        if let Err(e) = cmd::mapped::buildtar(std::path::Path::new(&raw[2]), std::path::Path::new(&raw[3])) {
+            eprintln!("delonix: {e}");
+            std::process::exit(1);
+        }
+        std::process::exit(0);
+    }
 
     // Autocompletion dinâmico: se o shell pediu sugestões (env COMPLETE), trata
     // disso e termina; caso contrário, segue o fluxo normal.

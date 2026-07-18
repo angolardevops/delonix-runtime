@@ -389,7 +389,25 @@ impl ImageStore {
                 .map_err(|e| Error::Invalid(format!("empacotar rootfs: {e}")))?;
             b.finish().map_err(|e| Error::Invalid(format!("fechar tar: {e}")))?;
         }
-        let layer = self.cas().write(&buf)?; // tar não-comprimido → diff_id = digest
+        self.commit_flat_rootfs_from_tar(buf, cmd, env, workdir, tag)
+    }
+
+    /// Como [`commit_flat_rootfs`], mas recebe o tar do rootfs **já construído**
+    /// (não-comprimido). Existe porque, em rootless com subuid, o rootfs de um
+    /// `RUN` que corra `apt`/`dpkg` tem ficheiros de modo restrito que o
+    /// utilizador real não lê — o tar tem de ser feito DENTRO do userns mapeado
+    /// (`delonix __buildtar`, ver `cmd::mapped::buildtar`) e o resultado entregue
+    /// aqui. O caminho in-process de [`commit_flat_rootfs`] fica para quando não
+    /// há subuid (rootless single-uid) ou para root.
+    pub fn commit_flat_rootfs_from_tar(
+        &self,
+        tar_bytes: Vec<u8>,
+        cmd: Vec<String>,
+        env: Vec<String>,
+        workdir: String,
+        tag: &str,
+    ) -> Result<Image> {
+        let layer = self.cas().write(&tar_bytes)?; // tar não-comprimido → diff_id = digest
         let diff_ids = vec![format!("sha256:{}", strip(&layer))];
         let created = now_unix();
         let config_json = serde_json::json!({
