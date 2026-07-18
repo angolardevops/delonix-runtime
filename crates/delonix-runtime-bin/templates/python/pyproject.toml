@@ -9,7 +9,8 @@ dependencies = [
     "pydantic-settings>=2.6",
 ]
 
-[project.optional-dependencies]
+# PEP 735 dev dependency group — installed by `uv sync`, excluded by `--no-dev`.
+[dependency-groups]
 dev = [
     "pytest>=8.3",
     "httpx>=0.27",
@@ -17,12 +18,19 @@ dev = [
 ]
 
 [build-system]
-requires = ["setuptools>=68"]
-build-backend = "setuptools.build_meta"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
-[tool.setuptools.packages.find]
-where = ["src"]
+[tool.hatch.build.targets.wheel]
+packages = ["src/__MODULE__"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
