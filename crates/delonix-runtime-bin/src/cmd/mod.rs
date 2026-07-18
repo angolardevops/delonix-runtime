@@ -7,6 +7,7 @@ pub mod complete;
 pub mod conditions;
 pub mod dash;
 pub mod httproute;
+pub mod ingress_proxy;
 pub mod kindmode;
 pub mod container;
 pub mod image;
