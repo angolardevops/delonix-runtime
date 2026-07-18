@@ -251,6 +251,9 @@ fn apply(file: Option<PathBuf>) -> Result<()> {
     super::vm::apply(&docs)?;
     super::container::apply(&docs)?;
     super::firewall::apply(&docs)?;
+    // HTTPRoute POR ÚLTIMO: precisa dos containers backend já criados (com IP) para
+    // resolver as rotas; sobe/recarrega o reverse-proxy L7.
+    super::httproute::apply(&docs)?;
     // Depois de criar tudo, diz o que foi criado mas NÃO vai funcionar como
     // aparenta sem um pré-requisito de host (mount de rede em rootless, etc.) —
     // é aqui, no fluxo real de criação, que o utilizador precisa de o saber.

@@ -13,10 +13,64 @@
 //! (F1) entrega só o **parsing + validação** (schema, `valid_*`, grafo de
 //! referências); o proxy e o ciclo de vida vêm nas fases seguintes.
 
+use clap::Subcommand;
 use serde::Deserialize;
 
 use super::manifest::{self, ManifestDoc};
 use delonix_runtime_core::{Error, Result};
+
+/// `delonix httproute` — inspeccionar/derrubar o reverse-proxy L7 dos HTTPRoute.
+/// (O `apply` faz-se por `stack apply`/`<kind> apply` — este grupo é operação.)
+#[derive(Subcommand)]
+pub enum HttpRouteCmd {
+    /// Estado do proxy + rotas activas (da config em vigor).
+    Ls,
+    /// Aplica os HTTPRoute de um manifesto (sobe/recarrega o proxy).
+    Apply {
+        /// Ficheiro do manifesto (default `./delonix-manifest.yaml`).
+        #[arg(short, long)]
+        file: Option<std::path::PathBuf>,
+    },
+    /// Pára o proxy e despublica as portas (teardown).
+    Rm,
+}
+
+pub fn run(action: HttpRouteCmd) -> Result<()> {
+    match action {
+        HttpRouteCmd::Ls => {
+            if !ingress_proxy::is_running() {
+                println!("httproute: proxy parado (nenhum HTTPRoute activo)");
+                return Ok(());
+            }
+            let cfg = std::fs::read(ingress_proxy::config_path())
+                .ok()
+                .and_then(|b| serde_json::from_slice::<ProxyConfig>(&b).ok());
+            match cfg {
+                Some(c) => {
+                    println!("httproute: proxy A SERVIR — {} listener(s), {} rota(s)", c.listeners.len(), c.routes.len());
+                    for l in &c.listeners {
+                        println!("  listener :{} {}", l.port, if l.tls { "(TLS)" } else { "" });
+                    }
+                    for r in &c.routes {
+                        println!("  {} {} → {}", if r.host.is_empty() { "*" } else { &r.host }, r.path, r.backend);
+                    }
+                }
+                None => println!("httproute: proxy a correr mas a config não leu"),
+            }
+            Ok(())
+        }
+        HttpRouteCmd::Apply { file } => {
+            let path = manifest::resolve_path(file)?;
+            let docs = manifest::load(&path)?;
+            apply(&docs)
+        }
+        HttpRouteCmd::Rm => {
+            ingress_proxy::stop()?;
+            println!("httproute: proxy parado e portas despublicadas");
+            Ok(())
+        }
+    }
+}
 
 /// `spec` de `kind: HTTPRoute`.
 #[derive(Debug, Clone, Deserialize)]
@@ -203,6 +257,131 @@ pub fn parse_and_validate(docs: &[ManifestDoc]) -> Result<Vec<(String, HttpRoute
         out.push((doc.metadata.name.clone(), spec));
     }
     Ok(out)
+}
+
+// ============================================================================
+// Aplicação (Fase 4b): resolve os HTTPRoute numa ProxyConfig (backends→ip:porta,
+// TLS) e garante o reverse-proxy a servir (ver `cmd::ingress_proxy`).
+// ============================================================================
+
+use super::ingress_proxy::{self, Listener, ProxyConfig, Route, TlsMaterial};
+
+/// Mapa nome-de-container → IP na SDN (do record). Só containers com IP (numa
+/// rede custom) servem de backend — os de `--net host/none` não têm IP alcançável
+/// pelo proxy no netns do holder.
+fn container_ips() -> std::collections::HashMap<String, String> {
+    let mut m = std::collections::HashMap::new();
+    if let Ok((_, cstore)) = super::util::open_stores() {
+        if let Ok(list) = cstore.list() {
+            for c in list {
+                if let Some(ip) = c.ip {
+                    m.insert(c.name, ip);
+                }
+            }
+        }
+    }
+    m
+}
+
+/// Lê o par cert/chave (PEM) de um `kind: Secret`. Aceita as chaves estilo k8s
+/// (`tls.crt`/`tls.key`) OU a variante com `_` (o cofre não permite `.` nas
+/// chaves de env — ver `valid_env_key`), o que for encontrado.
+fn tls_from_secret(name: &str) -> Result<TlsMaterial> {
+    let store = delonix_runtime_core::SecretStore::open(super::util::state_root())?;
+    let s = store.load(name)?;
+    let pick = |a: &str, b: &str| s.data.get(a).or_else(|| s.data.get(b)).cloned();
+    let cert = pick("tls_crt", "tls.crt")
+        .ok_or_else(|| Error::Invalid(format!("Secret '{name}': falta a chave tls_crt/tls.crt (cert PEM)")))?;
+    let key = pick("tls_key", "tls.key")
+        .ok_or_else(|| Error::Invalid(format!("Secret '{name}': falta a chave tls_key/tls.key (chave PEM)")))?;
+    Ok(TlsMaterial { cert_pem: cert, key_pem: key })
+}
+
+/// Resolve TODOS os HTTPRoute do manifesto numa única `ProxyConfig` (um proxy
+/// serve todas as rotas). `None` = não há HTTPRoute (nada a fazer).
+fn resolve_config(specs: &[(String, HttpRouteSpec)]) -> Result<Option<ProxyConfig>> {
+    if specs.is_empty() {
+        return Ok(None);
+    }
+    let ips = container_ips();
+    let mut listeners: Vec<Listener> = Vec::new();
+    let mut routes: Vec<Route> = Vec::new();
+    let mut all_hosts: Vec<String> = Vec::new();
+    let mut tls_material: Option<TlsMaterial> = None;
+    let mut secret_ref: Option<String> = None;
+
+    for (name, spec) in specs {
+        // Listeners: os declarados, ou o default (:80, e :443 tls se houver spec.tls).
+        let eps = if spec.entrypoints.is_empty() {
+            let mut d = vec![Entrypoint { port: 80, tls: false }];
+            if spec.tls.is_some() {
+                d.push(Entrypoint { port: 443, tls: true });
+            }
+            d
+        } else {
+            spec.entrypoints.clone()
+        };
+        for ep in eps {
+            // Dedup por porta; se colidir, TLS ganha (mais restritivo/seguro).
+            match listeners.iter_mut().find(|l| l.port == ep.port) {
+                Some(l) => l.tls = l.tls || ep.tls,
+                None => listeners.push(Listener { port: ep.port, tls: ep.tls }),
+            }
+        }
+        // TLS: memoriza o secretRef (resolve-se no fim) ou marca self-signed.
+        if let Some(tls) = &spec.tls {
+            if tls.mode.as_deref() == Some("secretRef") {
+                secret_ref = tls.secret_ref.clone();
+            }
+        }
+        // Rotas: resolve cada backend para ip:porta do record.
+        for rule in &spec.rules {
+            if let Some(h) = &rule.host {
+                all_hosts.push(h.clone());
+            }
+            for pr in &rule.paths {
+                let ip = ips.get(&pr.backend.service).ok_or_else(|| {
+                    Error::Invalid(format!(
+                        "HTTPRoute '{name}': backend '{}' não tem IP na SDN (existe e está numa rede custom?)",
+                        pr.backend.service
+                    ))
+                })?;
+                routes.push(Route {
+                    host: rule.host.clone().unwrap_or_default(),
+                    path: pr.path.clone(),
+                    backend: format!("{ip}:{}", pr.backend.port),
+                });
+            }
+        }
+    }
+
+    // Material TLS, se algum listener termina TLS.
+    if listeners.iter().any(|l| l.tls) {
+        tls_material = Some(match secret_ref {
+            Some(sref) => tls_from_secret(&sref)?,
+            None => ingress_proxy::self_signed_pem(&all_hosts)?,
+        });
+    }
+
+    Ok(Some(ProxyConfig { listeners, routes, tls: tls_material }))
+}
+
+/// `stack apply` (e o auto-registo, mais tarde): resolve os HTTPRoute e garante o
+/// proxy a servir. Chamado DEPOIS dos containers existirem (precisa dos IPs).
+pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
+    let specs = parse_and_validate(docs)?;
+    let Some(cfg) = resolve_config(&specs)? else {
+        return Ok(()); // sem HTTPRoute — nada a fazer
+    };
+    ingress_proxy::ensure_running(&cfg)?;
+    println!(
+        "httproute: {} rota(s) em {} listener(s){} — proxy {}",
+        cfg.routes.len(),
+        cfg.listeners.len(),
+        if cfg.tls.is_some() { " (TLS)" } else { "" },
+        if ingress_proxy::is_running() { "a servir" } else { "arrancado" }
+    );
+    Ok(())
 }
 
 #[cfg(test)]
