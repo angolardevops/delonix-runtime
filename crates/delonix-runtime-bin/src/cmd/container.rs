@@ -110,7 +110,7 @@ struct ContainerSpec {
 
 /// Nomes aceites no `spec` de `kind: Container` (canónicos + aliases), para o
 /// aviso de campos desconhecidos. Alinhado com `ContainerSpec` pelo teste
-/// `container_spec_conhece_todos_os_campos_do_exemplo`.
+/// `manifest::tests::examples_nao_tem_campos_desconhecidos`.
 pub(crate) const CONTAINER_SPEC_FIELDS: &[&str] = &[
     "image", "detach", "network", "volumes", "ports", "privileged", "env", "command",
     "restartPolicy", "restart", "entrypoint", "devices", "labels", "envFile", "memory", "cpus",
@@ -545,11 +545,14 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
     let (images, store) = open_stores()?;
     for doc in manifest::of_kind(docs, "Container") {
         let name = &doc.metadata.name;
+        // Avisa de gralhas ANTES do early-continue: um manifesto re-aplicado
+        // contra um recurso já existente também deve ver o aviso (senão a
+        // gralha nunca aparece depois da primeira criação).
+        manifest::warn_unknown_fields(doc, CONTAINER_SPEC_FIELDS);
         if store.list()?.iter().any(|c| &c.name == name) {
             println!("container/{name}: already exists, nothing to do");
             continue;
         }
-        manifest::warn_unknown_fields(doc, CONTAINER_SPEC_FIELDS);
         let spec: ContainerSpec = manifest::spec_of(doc)?;
         cmd_run(
             &images,

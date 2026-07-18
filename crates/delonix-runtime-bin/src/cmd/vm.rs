@@ -49,7 +49,7 @@ struct VmSpec {
 
 /// Nomes de campo aceites no `spec` de `kind: Vm` (canónicos + aliases legados),
 /// para o aviso de campos desconhecidos. Mantém-se alinhado com `VmSpec` pelo
-/// teste `vm_spec_conhece_todos_os_campos_do_exemplo`.
+/// teste `manifest::tests::examples_nao_tem_campos_desconhecidos`.
 pub(crate) const VM_SPEC_FIELDS: &[&str] = &[
     "disk", "vcpus", "memory", "network", "kernel", "initrd", "firmware", "cmdline", "seed",
     "restartPolicy", "restart_policy", "hugepages", "cpuAffinity", "cpu_affinity", "devices",
