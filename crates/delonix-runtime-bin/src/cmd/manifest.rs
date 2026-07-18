@@ -66,9 +66,14 @@ const SUPPORTED_API_VERSION: &str = "delonix.io/v1";
 /// usa. Devolve a forma canónica se conhecida, senão o `kind` tal e qual (Kinds
 /// desconhecidos são tratados a jusante, ver `cmd::stack::describe`).
 pub fn canonical_kind(kind: &str) -> &str {
-    match kind {
-        "Vm" | "VM" | "VirtualMachine" | "virtualmachine" => "Vm",
-        other => other,
+    // Case-insensitive de propósito: `Vm`/`VM`/`vm`/`VirtualMachine`/`virtualMachine`
+    // (qualquer casing) resolvem todos para o `Vm` canónico — meia-medida
+    // (só alguns casings) seria pior do que nada, deixando um `kind: vm` a ser
+    // ignorado em silêncio pelo `stack apply`.
+    let lower = kind.to_ascii_lowercase();
+    match lower.as_str() {
+        "vm" | "virtualmachine" => "Vm",
+        _ => kind,
     }
 }
 
@@ -224,6 +229,17 @@ spec: { disk: k8s-golden }
     }
 
     #[test]
+    fn canonical_kind_e_case_insensitive_para_vm() {
+        // Qualquer casing plausível de outra ferramenta resolve para `Vm`.
+        for k in ["Vm", "VM", "vm", "VirtualMachine", "virtualMachine", "VIRTUALMACHINE"] {
+            assert_eq!(canonical_kind(k), "Vm", "kind {k:?} devia canonicalizar para Vm");
+        }
+        // Kinds não-Vm passam intactos (não inventamos sinónimos).
+        assert_eq!(canonical_kind("Container"), "Container");
+        assert_eq!(canonical_kind("Storage"), "Storage");
+    }
+
+    #[test]
     fn metadata_labels_annotations_opcionais() {
         let text = "\
 apiVersion: delonix.io/v1
@@ -291,7 +307,17 @@ spec: { image: alpine, memroy: 2G, restartPolicy: always }
             if path.extension().and_then(|e| e.to_str()) != Some("yaml") {
                 continue;
             }
-            let Ok(docs) = load(&path) else { continue }; // cloud-config etc. não são manifestos
+            let text = std::fs::read_to_string(&path).unwrap();
+            // Distinguir "não é um manifesto delonix" (cloud-config, sem
+            // apiVersion — saltar) de "é um manifesto e está PARTIDO" (tem o
+            // marcador mas o load falha — o teste TEM de falhar, senão um
+            // example malformado passa despercebido). Sem esta distinção, o
+            // guard ficava vacuamente verde para um example partido.
+            if !text.contains(SUPPORTED_API_VERSION) {
+                continue;
+            }
+            let docs = load(&path)
+                .unwrap_or_else(|e| panic!("{}: é um manifesto delonix mas não parseia: {e}", path.display()));
             for doc in &docs {
                 let Some(known) = fields_for(&doc.kind) else { continue };
                 let unknown = unknown_fields(doc, known);
@@ -302,6 +328,25 @@ spec: { image: alpine, memroy: 2G, restartPolicy: always }
                 );
             }
         }
+    }
+
+    #[test]
+    fn manifesto_marcado_mas_partido_falha_load_nao_e_saltado() {
+        // Contrato do drift-guard (Fix #1): um ficheiro que TEM o marcador
+        // `delonix.io/v1` mas está partido (aqui, falta `metadata.name`) tem de
+        // dar Err no load — é isso que distingue um example malformado (o guard
+        // FALHA) de um cloud-config sem marcador (o guard salta).
+        let text = "\
+apiVersion: delonix.io/v1
+kind: Container
+metadata: {}
+spec: { image: alpine }
+";
+        assert!(text.contains(SUPPORTED_API_VERSION));
+        let p = std::env::temp_dir().join(format!("delonix-manifest-partido-{}.yaml", std::process::id()));
+        std::fs::write(&p, text).unwrap();
+        assert!(load(&p).is_err(), "manifesto marcado mas sem metadata.name devia falhar o load");
+        let _ = std::fs::remove_file(&p);
     }
 
     #[test]
