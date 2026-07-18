@@ -1,0 +1,33 @@
+# Delonixfile — Laravel + FrankenPHP (single binary, production-grade server).
+# Build with:  delonix build -t __NAME__:dev .
+FROM dunglas/frankenphp:php8.3
+ENV APP_ENV=production \
+    APP_DEBUG=false \
+    COMPOSER_ALLOW_SUPERUSER=1
+WORKDIR /app
+# unzip lets Composer extract dist packages (the image has neither unzip nor ext-zip).
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends unzip \
+    && rm -rf /var/lib/apt/lists/*
+# The frankenphp image already ships everything Laravel needs to boot with
+# SQLite (pdo_sqlite, mbstring, openssl, tokenizer, ctype, curl, dom, opcache).
+# Need more (intl, pcntl, redis…)? `install-php-extensions <ext>` is in the image.
+# Composer — the FrankenPHP image doesn't bundle it. Fetch via PHP (no curl dep).
+RUN php -r "copy('https://getcomposer.org/installer','/tmp/composer-setup.php');" \
+    && php /tmp/composer-setup.php --install-dir=/usr/local/bin --filename=composer \
+    && rm /tmp/composer-setup.php
+COPY . .
+# Install, then bake a runnable app: env + sqlite DB + app key.
+# Deliberately NO `config:cache`: a cached config freezes APP_KEY/APP_ENV into
+# bootstrap/cache and would make runtime overrides (e.g. an APP_KEY injected via
+# `delonix secret`, as the manifest suggests) silently ineffective. Cache config
+# from an entrypoint at container start if you want it, not at build time.
+RUN composer install --no-dev --optimize-autoloader --no-interaction \
+    && cp .env.example .env \
+    && touch database/database.sqlite \
+    && php artisan key:generate \
+    && php artisan config:cache
+EXPOSE __PORT__
+# Delonix extension: the runtime probes this to mark the container healthy.
+HEALTHCHECK CMD php -r "exit((@file_get_contents('http://127.0.0.1:__PORT__/api/v1/health/live'))!==false?0:1);"
+CMD ["frankenphp", "php-server", "--listen", "0.0.0.0:__PORT__", "--root", "public/"]

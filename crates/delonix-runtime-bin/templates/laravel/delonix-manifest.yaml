@@ -1,0 +1,17 @@
+apiVersion: delonix.io/v1
+kind: Container
+metadata:
+  name: __NAME__
+  labels: { app: __NAME__ }
+spec:
+  image: __NAME__:dev
+  restart: always
+  ports:
+    - "__PORT__:__PORT__"
+  env:
+    - "APP_ENV=production"
+    - "APP_DEBUG=false"
+    # APP_KEY is baked at build; in production inject it via `delonix secret`:
+    # - "APP_KEY=base64:..."
+  memory: 512M
+  cpus: "1.0"
