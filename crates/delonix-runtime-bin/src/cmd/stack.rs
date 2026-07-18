@@ -116,26 +116,32 @@ fn describe(file: Option<PathBuf>) -> Result<()> {
         t.print();
     }
 
-    // Conditions de honestidade: pré-requisitos de privilégio/host em falta que
-    // fariam um recurso ser criado mas não funcionar como aparenta (mount de
-    // rede em rootless, quota dura sem root, driver de rede sem plano físico,
-    // restart numa VM Cloud Hypervisor). Só se mostram as que estão em falta —
-    // é a superfície accionável de "o que falta para isto funcionar de verdade".
+    print_missing_conditions(&docs);
+    Ok(())
+}
+
+/// Imprime as conditions de honestidade EM FALTA (pré-requisitos de privilégio/
+/// host que fariam um recurso ser criado mas não funcionar como aparenta: mount
+/// de rede em rootless, quota dura sem root, driver de rede sem plano físico,
+/// restart numa VM Cloud Hypervisor). Só as que estão em falta — é a superfície
+/// accionável de "o que falta para isto funcionar de verdade". Partilhado pelo
+/// `describe` E pelo fim do `apply`: quem corre `apply` (o fluxo real de criação)
+/// TEM de ver isto na hora, não só se por acaso correr `describe` depois.
+fn print_missing_conditions(docs: &[manifest::ManifestDoc]) {
     let env = super::conditions::Env::probe();
     let mut header = false;
-    for doc in &docs {
+    for doc in docs {
         for c in super::conditions::conditions_for(doc, &env) {
             if !c.ok {
                 if !header {
-                    println!();
-                    println!("Conditions (atenção — pré-requisitos em falta):");
+                    eprintln!();
+                    eprintln!("Conditions (atenção — pré-requisitos em falta):");
                     header = true;
                 }
-                println!("  {} '{}': {}=False ({}) — {}", doc.kind, doc.metadata.name, c.kind, c.reason, c.message);
+                eprintln!("  {} '{}': {}=False ({}) — {}", doc.kind, doc.metadata.name, c.kind, c.reason, c.message);
             }
         }
     }
-    Ok(())
 }
 
 /// `key=value` dos labels de `metadata` (mais um `+N anno` se houver anotações),
@@ -226,6 +232,10 @@ fn apply(file: Option<PathBuf>) -> Result<()> {
     super::vm::apply(&docs)?;
     super::container::apply(&docs)?;
     super::firewall::apply(&docs)?;
+    // Depois de criar tudo, diz o que foi criado mas NÃO vai funcionar como
+    // aparenta sem um pré-requisito de host (mount de rede em rootless, etc.) —
+    // é aqui, no fluxo real de criação, que o utilizador precisa de o saber.
+    print_missing_conditions(&docs);
     Ok(())
 }
 
