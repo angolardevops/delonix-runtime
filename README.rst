@@ -2,13 +2,18 @@
 Delonix Runtime
 ===============
 
-A **daemonless, rootless-first, kernel-native** container and microVM runtime,
-written in Rust. Delonix creates and manages Linux containers directly through
-namespaces, cgroups v2 and nftables — no supervising daemon, not even a monitor
-per container — plus declarative microVMs on Cloud Hypervisor or libvirt/KVM. It
-is homologous to Docker/Podman, with **rootless operation as a first-class design
-goal** rather than an afterthought, and it ships its own Kubernetes CRI so a
-``kubelet`` can talk to it with no containerd in between.
+A **daemonless, rootless-first, kernel-native** container and microVM **engine**,
+written in Rust — *the open-source engine at the foundation of the Delonix
+platform.* It creates and manages Linux containers directly through namespaces,
+cgroups v2 and nftables — no supervising daemon, not even a monitor per container
+— plus declarative microVMs on Cloud Hypervisor or libvirt/KVM. It is homologous
+to Docker/Podman, with **rootless operation as a first-class design goal** rather
+than an afterthought, and it ships its own Kubernetes CRI so a ``kubelet`` can
+talk to it with no containerd in between.
+
+Not a low-level OCI *runtime* (that's ``runc``/``crun``): Delonix is a full
+container **and** VM engine — build, run, network, firewall, store, and
+bootstrap Kubernetes clusters, from one binary.
 
 :Version: 0.3.0
 :License: Apache-2.0

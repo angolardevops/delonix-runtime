@@ -30,7 +30,7 @@ enum CompShell {
 #[command(
     name = "delonix",
     version,
-    about = "Delonix Runtime — motor de containers e microVMs daemonless, rootless-first, kernel-native, em Rust"
+    about = "Delonix Runtime — a daemonless, rootless-first container & microVM engine (kernel-native, Rust). The open-source engine that powers Delonix."
 )]
 struct Cli {
     /// Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable
