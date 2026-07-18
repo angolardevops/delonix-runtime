@@ -18,6 +18,9 @@ struct VolumeSpec {
     #[serde(default = "default_driver")]
     driver: String,
     device: Option<String>,
+    /// Canónico `mountOptions` (uniforme com `kind: Storage`); `options`
+    /// continua aceite (retrocompat).
+    #[serde(rename = "mountOptions", alias = "options")]
     options: Option<String>,
     quota: Option<String>,
 }
@@ -25,6 +28,11 @@ struct VolumeSpec {
 fn default_driver() -> String {
     "local".to_string()
 }
+
+/// Nomes aceites no `spec` de `kind: Volume` (canónicos + aliases), para o
+/// aviso de campos desconhecidos.
+pub(crate) const VOLUME_SPEC_FIELDS: &[&str] =
+    &["driver", "device", "mountOptions", "options", "quota"];
 
 #[derive(Subcommand)]
 pub enum VolumeCmd {
@@ -136,6 +144,7 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
     let store = VolumeStore::open(state_root())?;
     for doc in manifest::of_kind(docs, "Volume") {
         let name = &doc.metadata.name;
+        manifest::warn_unknown_fields(doc, VOLUME_SPEC_FIELDS);
         let spec: VolumeSpec = manifest::spec_of(doc)?;
         create_volume(&store, name, &spec.driver, spec.device, spec.options, spec.quota)?;
         println!("volume/{name}: garantido");
@@ -220,7 +229,17 @@ fn describe_one(store: &VolumeStore, v: &delonix_volume::Volume) {
 
 #[cfg(test)]
 mod tests {
-    use super::fmt_usage;
+    use super::{fmt_usage, VolumeSpec};
+
+    #[test]
+    fn volumespec_aceita_options_legado_e_mountoptions_canonico() {
+        let legado: VolumeSpec =
+            serde_yaml::from_str("driver: nfs\noptions: vers=4,ro\n").unwrap();
+        assert_eq!(legado.options.as_deref(), Some("vers=4,ro"));
+        let canon: VolumeSpec =
+            serde_yaml::from_str("driver: nfs\nmountOptions: vers=4,ro\n").unwrap();
+        assert_eq!(canon.options.as_deref(), Some("vers=4,ro"));
+    }
 
     #[test]
     fn usage_sem_quota_mostra_so_o_uso() {

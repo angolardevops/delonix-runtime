@@ -19,6 +19,9 @@ struct ImageSpec {
     build: Option<BuildSpec>,
 }
 
+/// Nomes aceites no `spec` de `kind: Image`, para o aviso de campos desconhecidos.
+pub(crate) const IMAGE_SPEC_FIELDS: &[&str] = &["pull", "build"];
+
 #[derive(Debug, Deserialize)]
 struct BuildSpec {
     #[serde(default = "default_context")]
@@ -320,6 +323,7 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
     let (images, _store) = open_stores()?;
     for doc in manifest::of_kind(docs, "Image") {
         let name = &doc.metadata.name;
+        manifest::warn_unknown_fields(doc, IMAGE_SPEC_FIELDS);
         let spec: ImageSpec = manifest::spec_of(doc)?;
         match (spec.pull, spec.build) {
             (Some(reference), None) => {

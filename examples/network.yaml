@@ -11,4 +11,4 @@ spec:
   parent: null              # NIC parent, for macvlan/ipvlan (e.g. eth0)
   vni: null                 # VXLAN id, for overlay
   peers: []                 # overlay peers: "<ip>" or "<ip>=<wg_pubkey>=<wg_ip>"
-  wg_ip: null               # this node's WireGuard tunnel IP (encrypted overlay)
+  wgIp: null                # this node's WireGuard tunnel IP (encrypted overlay)  (alias: wg_ip)
