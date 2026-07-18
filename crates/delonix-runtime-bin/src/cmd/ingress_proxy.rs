@@ -34,6 +34,28 @@ use delonix_runtime_core::{Error, Result};
 pub struct ProxyConfig {
     pub listeners: Vec<Listener>,
     pub routes: Vec<Route>,
+    /// Material TLS já resolvido pela Fase 4 (self-signed gerado OU cert/chave do
+    /// `kind: Secret`). Presente ⇒ os listeners `tls: true` terminam TLS com ele.
+    #[serde(default)]
+    pub tls: Option<TlsMaterial>,
+}
+
+/// Cert + chave em PEM, prontos a carregar no rustls (a Fase 4 resolve-os).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TlsMaterial {
+    #[serde(rename = "certPem")]
+    pub cert_pem: String,
+    #[serde(rename = "keyPem")]
+    pub key_pem: String,
+}
+
+/// Gera um par cert+chave **self-signed** (PEM) para os `hosts` dados (SANs).
+/// Usado pela Fase 4 quando `tls.mode: selfSigned`. Sem hosts → `localhost`.
+pub fn self_signed_pem(hosts: &[String]) -> Result<TlsMaterial> {
+    let sans: Vec<String> = if hosts.is_empty() { vec!["localhost".into()] } else { hosts.to_vec() };
+    let ck = rcgen::generate_simple_self_signed(sans)
+        .map_err(|e| Error::Runtime { context: "self-signed cert", message: e.to_string() })?;
+    Ok(TlsMaterial { cert_pem: ck.cert.pem(), key_pem: ck.key_pair.serialize_pem() })
 }
 
 /// Uma porta de escuta do proxy.
@@ -60,6 +82,10 @@ type RespBody = BoxBody<Bytes, Box<dyn std::error::Error + Send + Sync>>;
 /// Teto de tempo para o backend responder (senão 504) — evita que um backend
 /// pendurado prenda a ligação/task para sempre (slowloris do lado do backend).
 const BACKEND_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+/// Teto para o cliente enviar os headers completos — corta o slowloris clássico.
+const HEADER_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+/// Teto para o handshake TLS completar — corta o slowloris de handshake.
+const TLS_HANDSHAKE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
 
 /// Remove os headers **hop-by-hop** (RFC 7230 §6.1) de um `HeaderMap`, incluindo
 /// os tokens listados no próprio `Connection:`. Um proxy NÃO os pode reencaminhar:
@@ -180,11 +206,38 @@ async fn handle(
     }
 }
 
-/// Aceita ligações numa porta e serve cada uma (http1) com o handler de rota.
+/// Serve UMA ligação já estabelecida (TCP ou TLS): `io` é qualquer IO que o hyper
+/// saiba ler/escrever. Genérico para não duplicar o caminho TLS e o plano.
+async fn serve_io<I>(
+    io: I,
+    cfg: Arc<ProxyConfig>,
+    client: Client<hyper_util::client::legacy::connect::HttpConnector, Incoming>,
+) where
+    I: hyper::rt::Read + hyper::rt::Write + Unpin + 'static,
+{
+    let svc = service_fn(move |req| handle(req, cfg.clone(), client.clone()));
+    // NOTA: WebSocket/`Connection: Upgrade` ainda NÃO é tunelado — o cliente
+    // hyper-util legacy não estabelece a ligação trocada, e nós removemos o header
+    // `Upgrade` (hop-by-hop) no encaminhamento. Tunelar upgrades (hyper::upgrade::on
+    // nos dois lados + cópia bidireccional) é um follow-up; hoje só HTTP
+    // request/response é proxiado.
+    //
+    // `header_read_timeout` corta o slowloris clássico (headers a conta-gotas) — o
+    // `timer` é obrigatório para o hyper o poder aplicar.
+    let _ = hyper::server::conn::http1::Builder::new()
+        .timer(hyper_util::rt::TokioTimer::new())
+        .header_read_timeout(HEADER_READ_TIMEOUT)
+        .serve_connection(io, svc)
+        .await;
+}
+
+/// Aceita ligações numa porta e serve cada uma. Com `tls` presente, faz o
+/// handshake TLS antes de servir (termina TLS no proxy); senão, HTTP simples.
 async fn accept_loop(
     listener: TcpListener,
     cfg: Arc<ProxyConfig>,
     client: Client<hyper_util::client::legacy::connect::HttpConnector, Incoming>,
+    tls: Option<tokio_rustls::TlsAcceptor>,
 ) {
     loop {
         let (stream, _peer) = match listener.accept().await {
@@ -198,17 +251,45 @@ async fn accept_loop(
         };
         let cfg = cfg.clone();
         let client = client.clone();
+        let tls = tls.clone();
         tokio::task::spawn(async move {
-            let io = TokioIo::new(stream);
-            let svc = service_fn(move |req| handle(req, cfg.clone(), client.clone()));
-            // NOTA: WebSocket/`Connection: Upgrade` ainda NÃO é tunelado — o cliente
-            // hyper-util legacy não estabelece a ligação trocada, e nós removemos o
-            // header `Upgrade` (hop-by-hop) no encaminhamento. Tunelar upgrades
-            // (hyper::upgrade::on nos dois lados + cópia bidireccional) é um
-            // follow-up; hoje só HTTP request/response é proxiado.
-            let _ = hyper::server::conn::http1::Builder::new().serve_connection(io, svc).await;
+            match tls {
+                // Timeout no handshake: um cliente que abre TCP e nunca completa o
+                // ClientHello não pode segurar a task para sempre (slowloris TLS).
+                Some(acceptor) => match tokio::time::timeout(TLS_HANDSHAKE_TIMEOUT, acceptor.accept(stream)).await {
+                    Ok(Ok(tls_stream)) => serve_io(TokioIo::new(tls_stream), cfg, client).await,
+                    Ok(Err(e)) => eprintln!("ingress-proxy: handshake TLS falhou: {e}"),
+                    Err(_) => { /* handshake não completou a tempo — descarta */ }
+                },
+                None => serve_io(TokioIo::new(stream), cfg, client).await,
+            }
         });
     }
+}
+
+/// Constrói o `ServerConfig` do rustls a partir do PEM (cert-chain + chave). O
+/// provider criptográfico (`ring`) tem de estar instalado (ver `run`).
+///
+/// **Limitação v1 (SNI):** um ÚNICO cert serve todos os hosts (`with_single_cert`).
+/// Para vários hosts com certs distintos era preciso um `ResolvesServerCert` por
+/// SNI — follow-up. Hoje o self-signed cobre todos os hosts do HTTPRoute num só
+/// cert (multi-SAN), e o modo BYO assume um cert que sirva todos os hosts.
+fn build_server_config(tls: &TlsMaterial) -> Result<Arc<tokio_rustls::rustls::ServerConfig>> {
+    use tokio_rustls::rustls::ServerConfig;
+    let certs: Vec<_> = rustls_pemfile::certs(&mut tls.cert_pem.as_bytes())
+        .collect::<std::result::Result<_, _>>()
+        .map_err(|e| Error::Invalid(format!("cert TLS inválido (PEM): {e}")))?;
+    if certs.is_empty() {
+        return Err(Error::Invalid("cert TLS vazio (nenhum CERTIFICATE no PEM)".into()));
+    }
+    let key = rustls_pemfile::private_key(&mut tls.key_pem.as_bytes())
+        .map_err(|e| Error::Invalid(format!("chave TLS inválida (PEM): {e}")))?
+        .ok_or_else(|| Error::Invalid("chave TLS ausente (nenhuma PRIVATE KEY no PEM)".into()))?;
+    let cfg = ServerConfig::builder()
+        .with_no_client_auth()
+        .with_single_cert(certs, key)
+        .map_err(|e| Error::Invalid(format!("cert/chave TLS incompatíveis: {e}")))?;
+    Ok(Arc::new(cfg))
 }
 
 /// Núcleo assíncrono: bind de cada listener (HTTP; TLS fica p/ a Fase 3) + servir.
@@ -217,18 +298,38 @@ async fn serve(cfg: ProxyConfig) -> Result<()> {
     let client: Client<_, Incoming> =
         Client::builder(TokioExecutor::new()).build(hyper_util::client::legacy::connect::HttpConnector::new());
 
+    // Um só ServerConfig TLS partilhado por todos os listeners TLS (se houver
+    // material). Construído UMA vez — o rustls guarda-o num Arc.
+    let tls_acceptor: Option<tokio_rustls::TlsAcceptor> = match &cfg.tls {
+        Some(mat) => Some(tokio_rustls::TlsAcceptor::from(build_server_config(mat)?)),
+        None => None,
+    };
+
     let mut handles = Vec::new();
     for l in &cfg.listeners {
-        if l.tls {
-            eprintln!("ingress-proxy: listener :{} pede TLS — ainda não suportado (Fase 3), a saltar", l.port);
-            continue;
-        }
+        let acceptor = if l.tls {
+            match &tls_acceptor {
+                Some(a) => Some(a.clone()),
+                None => {
+                    return Err(Error::Invalid(format!(
+                        "listener :{} pede TLS mas a config não tem material TLS (cert/chave)",
+                        l.port
+                    )));
+                }
+            }
+        } else {
+            None
+        };
         let addr = SocketAddr::from(([0, 0, 0, 0], l.port));
         let listener = TcpListener::bind(addr)
             .await
             .map_err(|e| Error::Runtime { context: "ingress-proxy bind", message: format!("{addr}: {e}") })?;
-        eprintln!("ingress-proxy: a escutar em {addr} ({} rota(s))", cfg.routes.len());
-        handles.push(tokio::spawn(accept_loop(listener, cfg.clone(), client.clone())));
+        eprintln!(
+            "ingress-proxy: a escutar em {addr} ({}, {} rota(s))",
+            if l.tls { "https" } else { "http" },
+            cfg.routes.len()
+        );
+        handles.push(tokio::spawn(accept_loop(listener, cfg.clone(), client.clone(), acceptor)));
     }
     if handles.is_empty() {
         return Err(Error::Invalid("ingress-proxy: nenhum listener HTTP para servir".into()));
@@ -246,6 +347,10 @@ pub fn run(config_path: &Path) -> Result<()> {
         .map_err(|e| Error::Invalid(format!("ingress-proxy: não li a config {}: {e}", config_path.display())))?;
     let cfg: ProxyConfig = serde_json::from_slice(&bytes)
         .map_err(|e| Error::Invalid(format!("ingress-proxy: config inválida: {e}")))?;
+    // Instala o provider criptográfico do rustls (ring) — o `ServerConfig::builder`
+    // usa o default do processo; sem isto, entra em pânico. Idempotente (ignora se
+    // já instalado por outra parte do processo).
+    let _ = tokio_rustls::rustls::crypto::ring::default_provider().install_default();
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
@@ -283,10 +388,33 @@ mod tests {
     }
 
     #[test]
+    fn self_signed_gera_pem_valido() {
+        let mat = self_signed_pem(&["loja.exemplo.ao".into()]).unwrap();
+        assert!(mat.cert_pem.contains("BEGIN CERTIFICATE"));
+        assert!(mat.key_pem.contains("PRIVATE KEY"));
+        // E o rustls consegue construir um ServerConfig com ele.
+        let _ = tokio_rustls::rustls::crypto::ring::default_provider().install_default();
+        assert!(build_server_config(&mat).is_ok());
+    }
+
+    #[test]
+    fn config_com_tls_roundtrip_json() {
+        let cfg = ProxyConfig {
+            listeners: vec![Listener { port: 443, tls: true }],
+            routes: vec![r("loja.ex", "/", "10.0.0.2:8080")],
+            tls: Some(TlsMaterial { cert_pem: "C".into(), key_pem: "K".into() }),
+        };
+        let js = serde_json::to_string(&cfg).unwrap();
+        let back: ProxyConfig = serde_json::from_str(&js).unwrap();
+        assert_eq!(back.tls.unwrap().cert_pem, "C");
+    }
+
+    #[test]
     fn config_roundtrip_json() {
         let cfg = ProxyConfig {
             listeners: vec![Listener { port: 80, tls: false }, Listener { port: 443, tls: true }],
             routes: vec![r("loja.ex", "/", "10.0.0.2:8080")],
+            tls: None,
         };
         let js = serde_json::to_string(&cfg).unwrap();
         let back: ProxyConfig = serde_json::from_str(&js).unwrap();
