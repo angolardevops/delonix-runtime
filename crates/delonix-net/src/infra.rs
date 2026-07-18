@@ -524,6 +524,11 @@ fn handle_control(line: &str) -> String {
             Err(e) => format!("err: {e}\n"),
         };
     }
+    // Query: IPs FQDN actualmente aprendidos (no set nft) da bridge — para o
+    // `egress show`. Corre no holder (dono do netns onde o set vive).
+    if let ["egress-show", bridge] = parts.as_slice() {
+        return format!("ok {}\n", egress_set_members(bridge).join(","));
+    }
     let res = match parts.as_slice() {
         ["ping"] => Ok(()),
         ["attach", netns, ip, bridge, gateway] => do_attach(netns, ip, bridge, gateway),
@@ -1548,6 +1553,32 @@ fn egress_specs(bridge: &str, state: &EgressState) -> Vec<Vec<String>> {
     }
     specs.push(base(&["drop"])); // default-deny do resto (fica em ÚLTIMO)
     specs
+}
+
+/// IPs actualmente no set FQDN de uma bridge (aprendidos das respostas DNS).
+/// Corre DENTRO do holder (o set vive no netns de infra). Extrai os IPv4 do dump.
+fn egress_set_members(bridge: &str) -> Vec<String> {
+    let set = fqdn_set(&sanitize(bridge));
+    let dump = crate::capture("nft", &["list", "set", "ip", INGRESS_TABLE, &set]).unwrap_or_default();
+    let mut ips = Vec::new();
+    for tok in dump.split(|c: char| !(c.is_ascii_digit() || c == '.')) {
+        if tok.split('.').filter(|o| !o.is_empty()).count() == 4 && tok.parse::<std::net::Ipv4Addr>().is_ok() {
+            ips.push(tok.to_string());
+        }
+    }
+    ips.sort();
+    ips.dedup();
+    ips
+}
+
+/// IPs FQDN aprendidos ao vivo para uma bridge — pergunta ao holder (`egress show`
+/// do lado do CLI). Vazio se o holder estiver em baixo.
+pub fn egress_members(bridge: &str) -> Vec<String> {
+    // `control_query` já devolve o corpo (sem o prefixo `ok `).
+    match control_query(&format!("egress-show {bridge}")) {
+        Ok(body) => body.split(',').map(str::trim).filter(|s| !s.is_empty()).map(String::from).collect(),
+        Err(_) => Vec::new(),
+    }
 }
 
 /// Regista (sem duplicar) os sufixos FQDN de uma bridge no [`FQDN_ALLOW`] para a
