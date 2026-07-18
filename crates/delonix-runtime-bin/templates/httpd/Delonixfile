@@ -1,0 +1,11 @@
+# Delonixfile — production-ready Apache httpd.
+# Build with:  delonix build -t __NAME__:dev .
+FROM httpd:2.4-alpine
+# Listen on __PORT__ and harden a little (no version banner).
+RUN sed -i 's/^Listen 80$/Listen __PORT__/' /usr/local/apache2/conf/httpd.conf && \
+    printf '\nServerTokens Prod\nServerSignature Off\nTraceEnable Off\n' >> /usr/local/apache2/conf/httpd.conf
+COPY public /usr/local/apache2/htdocs
+EXPOSE __PORT__
+# Delonix extension: the runtime probes this to mark the container healthy.
+HEALTHCHECK CMD wget -qO- http://127.0.0.1:__PORT__/healthz || exit 1
+CMD ["httpd-foreground"]
