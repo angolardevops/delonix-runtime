@@ -47,6 +47,9 @@ pub struct Env {
     pub mount_cifs: bool,
     /// Helper `mount.davfs` presente no PATH.
     pub mount_davfs: bool,
+    /// Binário `cloud-hypervisor` disponível — decide o backend AUTO da VM
+    /// (presente → CH; ausente → cai para libvirt). Espelha `select_backend`.
+    pub cloud_hypervisor: bool,
 }
 
 impl Env {
@@ -58,14 +61,20 @@ impl Env {
             mount_nfs: which("mount.nfs"),
             mount_cifs: which("mount.cifs"),
             mount_davfs: which("mount.davfs"),
+            cloud_hypervisor: which("cloud-hypervisor"),
         }
     }
 }
 
-/// `binário está no PATH?` — varre `$PATH` sem shell-out nem deps novas.
+/// `binário está no PATH?` — varre `$PATH` MAIS os directórios sbin canónicos.
+/// Os helpers de mount (`mount.nfs`/`mount.cifs`/`mount.davfs`) vivem em
+/// `/sbin`/`/usr/sbin`, que muitas vezes NÃO estão no `$PATH` de uma sessão de
+/// utilizador — sem os incluir, a condition reportaria `MountHelperMissing`
+/// quando o helper existe (honestidade a virar desinformação).
 fn which(bin: &str) -> bool {
-    let Some(path) = std::env::var_os("PATH") else { return false };
-    std::env::split_paths(&path).any(|dir| dir.join(bin).is_file())
+    let path = std::env::var_os("PATH").unwrap_or_default();
+    let sbins = ["/sbin", "/usr/sbin", "/usr/local/sbin"].map(std::path::PathBuf::from);
+    std::env::split_paths(&path).chain(sbins).any(|dir| dir.join(bin).is_file())
 }
 
 /// Lê um campo string de topo do `spec` cru, aceitando qualquer um de `keys`
@@ -80,7 +89,7 @@ pub fn conditions_for(doc: &ManifestDoc, env: &Env) -> Vec<Condition> {
         "Storage" => storage(doc, env),
         "Volume" => volume(doc, env),
         "Network" => network(doc),
-        "Vm" => vm(doc),
+        "Vm" => vm(doc, env),
         _ => Vec::new(),
     }
 }
@@ -149,13 +158,19 @@ fn network(doc: &ManifestDoc) -> Vec<Condition> {
 /// `Vm.RestartSupervised` — só o backend libvirt materializa a política de
 /// restart (via `<on_crash>` no XML); o Cloud Hypervisor (default do auto) não a
 /// supervisiona. Sem `restartPolicy` (ou `no`), não há nada a assinalar.
-fn vm(doc: &ManifestDoc) -> Vec<Condition> {
+fn vm(doc: &ManifestDoc, env: &Env) -> Vec<Condition> {
     let policy = spec_str(doc, &["restartPolicy", "restart_policy"]).unwrap_or("no");
     if policy.is_empty() || policy == "no" {
         return Vec::new();
     }
-    // `backend` ausente = auto, que prefere Cloud Hypervisor (ver select_backend).
-    let backend = spec_str(doc, &["backend"]).unwrap_or("cloud-hypervisor");
+    // Que backend ARRANCA de facto — espelha `select_backend`: explícito manda;
+    // no auto (backend ausente) prefere-se Cloud Hypervisor SE o binário existir,
+    // senão cai para libvirt. Só o libvirt supervisiona o restart.
+    let backend = match spec_str(doc, &["backend"]) {
+        Some(b) => b.to_string(),
+        None if env.cloud_hypervisor => "cloud-hypervisor".to_string(),
+        None => "libvirt".to_string(),
+    };
     if backend == "libvirt" {
         vec![Condition::ok("RestartSupervised")]
     } else {
@@ -182,7 +197,8 @@ mod tests {
     }
 
     fn env(rootless: bool, nfs: bool, cifs: bool, davfs: bool) -> Env {
-        Env { rootless, mount_nfs: nfs, mount_cifs: cifs, mount_davfs: davfs }
+        // cloud_hypervisor: true por defeito nos testes que não o exercitam.
+        Env { rootless, mount_nfs: nfs, mount_cifs: cifs, mount_davfs: davfs, cloud_hypervisor: true }
     }
 
     #[test]
@@ -232,6 +248,11 @@ mod tests {
         // alias legado restart_policy + backend libvirt → supervisionado.
         let c = conditions_for(&doc("Vm", "disk: d\nrestart_policy: always\nbackend: libvirt"), &env(false, true, true, true));
         assert!(c[0].ok);
+        // Fix #3: backend AUSENTE (auto) num host SEM cloud-hypervisor → cai para
+        // libvirt → supervisionado (não avisa BackendCloudHypervisor à toa).
+        let sem_ch = Env { rootless: false, mount_nfs: true, mount_cifs: true, mount_davfs: true, cloud_hypervisor: false };
+        let c = conditions_for(&doc("Vm", "disk: d\nrestartPolicy: always"), &sem_ch);
+        assert!(c[0].ok, "sem cloud-hypervisor o auto cai para libvirt, que supervisiona");
         // sem restartPolicy (ou `no`) → nenhuma condition.
         assert!(conditions_for(&doc("Vm", "disk: d"), &env(false, true, true, true)).is_empty());
         assert!(conditions_for(&doc("Vm", "disk: d\nrestartPolicy: no"), &env(false, true, true, true)).is_empty());
