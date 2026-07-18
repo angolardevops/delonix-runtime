@@ -86,8 +86,10 @@ pub fn run(action: StackCmd) -> Result<()> {
 /// Os Kinds do stack, na MESMA ordem do `apply` — quem lê o `describe` vê a
 /// ordem por que as coisas são criadas, o que é metade do diagnóstico quando um
 /// apply pára a meio.
-const KINDS: [&str; 10] =
-    ["Secret", "Network", "Volume", "Storage", "Image", "Vm", "Container", "Ingress", "Egress", "FirewallPolicy"];
+const KINDS: [&str; 11] = [
+    "Secret", "Network", "Volume", "Storage", "Image", "Vm", "Container", "Ingress", "Egress",
+    "FirewallPolicy", "HTTPRoute",
+];
 
 fn describe(file: Option<PathBuf>) -> Result<()> {
     let path = manifest::resolve_path(file)?;
@@ -208,6 +210,7 @@ fn presence(kind: &str, name: &str, containers: &[delonix_runtime_core::Containe
         // aplicadas a um container-alvo, não recursos com estado. O `apply`
         // aplica-as sempre (idempotente); aqui só se assinala a natureza.
         "Ingress" | "Egress" | "FirewallPolicy" => ("-".into(), "declarative".into()),
+        "HTTPRoute" => ("-".into(), "declarative".into()),
         _ => ("?".into(), "kind não suportado".into()),
     }
 }
@@ -461,6 +464,40 @@ fn validate_graph_with(
                     } else if !containers.contains(target) {
                         issues.push(format!("{} '{name}' → target '{target}' não é um Container declarado nem existente", doc.kind));
                     }
+                }
+            }
+            "HTTPRoute" => {
+                // Cada backend.service tem de ser um Container declarado/existente;
+                // o tls.secretRef (se usado) um Secret. Reusa o parser tipado para
+                // não duplicar o schema (e apanha logo um spec inválido).
+                match manifest::spec_of::<super::httproute::HttpRouteSpec>(doc) {
+                    Ok(spec) => {
+                        if let Err(e) = super::httproute::validate_spec(name, &spec) {
+                            issues.push(e.to_string());
+                        }
+                        for rule in &spec.rules {
+                            for pr in &rule.paths {
+                                if !containers.contains(&pr.backend.service) {
+                                    issues.push(format!(
+                                        "HTTPRoute '{name}' → backend '{}' não é um Container declarado nem existente",
+                                        pr.backend.service
+                                    ));
+                                }
+                            }
+                        }
+                        if let Some(tls) = &spec.tls {
+                            if tls.mode.as_deref() == Some("secretRef") {
+                                if let Some(sref) = &tls.secret_ref {
+                                    if !secrets.contains(sref) {
+                                        issues.push(format!(
+                                            "HTTPRoute '{name}' → tls.secretRef '{sref}' não é um Secret declarado nem existente"
+                                        ));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Err(e) => issues.push(e.to_string()),
                 }
             }
             _ => {}

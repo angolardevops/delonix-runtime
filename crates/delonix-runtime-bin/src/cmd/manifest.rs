@@ -300,6 +300,7 @@ spec: { image: alpine, memroy: 2G, restartPolicy: always }
                 "Image" => Some(crate::cmd::image::IMAGE_SPEC_FIELDS),
                 "Secret" => Some(crate::cmd::secret::SECRET_SPEC_FIELDS),
                 "Ingress" | "Egress" | "FirewallPolicy" => Some(crate::cmd::firewall::FW_SPEC_FIELDS),
+                "HTTPRoute" => Some(crate::cmd::httproute::HTTP_ROUTE_SPEC_FIELDS),
                 _ => None, // Cluster tem specs aninhados próprios; fora deste guard.
             }
         };
