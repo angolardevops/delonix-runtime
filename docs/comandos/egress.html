@@ -84,6 +84,7 @@ Commands:
   net     Govern a whole network&#x27;s egress to the Internet
   host    Allow a network&#x27;s egress to a HOSTNAME (and `*.hostname`), learnt live from DNS answers — the FQDN allowlist nft/CIDR can&#x27;t express. Repeatable
   ls      Show the outbound firewall (policy + rules)
+  show    Show a NETWORK&#x27;s egress policy: CIDR allowlist, FQDN hosts, and the IPs currently learnt from DNS for those hosts
   clear   Remove all outbound rules
   help    Print this message or the help of the given subcommand(s)
 
@@ -160,6 +161,18 @@ interno do ingress passa a snoopar os A-records das respostas e injecta-os num <
 por-rede (com timeout = expira com o TTL); o egress aceita esse set + DNS e dropa o resto. 100%
 rootless (sem eBPF) — a FQDN-policy do Cilium, via nftables. Repetível para vários hostnames.</p>
 <h3>Exemplos</h3><div class="ex"><div class="cap">Só deixar sair para o GitHub (e *.github.com), aprendido do DNS</div><pre><code>delonix egress host backend github.com</code></pre></div>
+<h2 id='show'><code>egress show</code></h2>
+<div class='help'><pre><code>Show a NETWORK&#x27;s egress policy: CIDR allowlist, FQDN hosts, and the IPs currently learnt from DNS for those hosts
+
+Usage: delonix egress show [OPTIONS] &lt;NETWORK&gt;
+
+Arguments:
+  &lt;NETWORK&gt;  
+
+Options:
+      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+  -h, --help          Print help</code></pre></div>
+<h3>Exemplos</h3><div class="ex"><div class="cap">Ver a política de egress de uma rede + os IPs FQDN aprendidos ao vivo</div><pre><code>delonix egress show backend</code></pre></div>
 <h2 id='ls'><code>egress ls</code></h2>
 <div class='help'><pre><code>Show the outbound firewall (policy + rules)
 
