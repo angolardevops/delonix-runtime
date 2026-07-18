@@ -363,18 +363,48 @@ fn egress_net(network: &str, mode: EgressMode, to: Option<String>) -> Result<()>
 /// k8s NetworkPolicy.
 #[derive(Deserialize)]
 struct FwDocSpec {
-    /// Target container (name). Must exist and be on a custom network.
+    /// `container` (default) ou `network`. Em `network` (só `Egress`), o `target`
+    /// é o NOME DE UMA REDE e aplica-se a política de egress por-rede + allowlist
+    /// de CIDR/FQDN + rate-limit L4 — não regras L4 por-container.
+    #[serde(default)]
+    scope: Option<String>,
+    /// `container` (default): nome do container. `network`: nome da rede.
     target: String,
     /// `allow` or `deny` when no rule matches. Default `deny` (allowlist).
     #[serde(default, rename = "defaultPolicy")]
     default_policy: Option<String>,
     #[serde(default)]
     rules: Vec<FwDocRule>,
+    // ---- só `scope: network` (Egress por-rede) --------------------------------
+    /// CIDRs permitidos quando `defaultPolicy: deny` (allowlist de saída, além do
+    /// DNS). Traduz para `set_egress_policy_net_allowlist`.
+    #[serde(default, rename = "allowCidrs")]
+    allow_cidrs: Vec<String>,
+    /// FQDNs permitidos (e `*.fqdn`), aprendidos AO VIVO do DNS (DNS-snooping).
+    /// Traduz para `set_egress_host` por host.
+    #[serde(default, rename = "fqdnAllowlist")]
+    fqdn_allowlist: Vec<String>,
+    /// Protecção L4 (conn-rate/conn-max) — **GLOBAL** ao ingress rootless, não
+    /// por-rede (a API do motor `set_l4_guard` é global). Traduz para `set_l4_guard`.
+    #[serde(default, rename = "rateLimit")]
+    rate_limit: Option<RateLimitSpec>,
+}
+
+/// `spec.rateLimit` — a protecção DDoS L4 do ingress (global).
+#[derive(Deserialize)]
+struct RateLimitSpec {
+    /// Novas conexões por segundo permitidas (0 = sem limite de taxa).
+    #[serde(default, rename = "connRate")]
+    conn_rate: u32,
+    /// Máximo de conexões concorrentes (0 = sem limite).
+    #[serde(default, rename = "connMax")]
+    conn_max: u32,
 }
 
 /// Nomes aceites no `spec` de `kind: Ingress`/`Egress`, para o aviso de campos
 /// desconhecidos (o `rules[]` é validado pela desserialização de `FwDocRule`).
-pub(crate) const FW_SPEC_FIELDS: &[&str] = &["target", "defaultPolicy", "rules"];
+pub(crate) const FW_SPEC_FIELDS: &[&str] =
+    &["scope", "target", "defaultPolicy", "rules", "allowCidrs", "fqdnAllowlist", "rateLimit"];
 
 #[derive(Deserialize)]
 struct FwDocRule {
@@ -409,6 +439,20 @@ fn apply_kind(store: &Store, docs: &[ManifestDoc], kind: &str, dir: &str) -> Res
     for doc in manifest::of_kind(docs, kind) {
         manifest::warn_unknown_fields(doc, FW_SPEC_FIELDS);
         let spec: FwDocSpec = manifest::spec_of(doc)?;
+
+        // scope: network — política de egress POR-REDE (Egress apenas). O `target`
+        // é o nome de uma rede; liga às APIs de motor que só tinham CLI.
+        if spec.scope.as_deref() == Some("network") {
+            if dir != "out" {
+                return Err(Error::Invalid(format!(
+                    "{kind}/{}: scope: network só é suportado em Egress (não há política de INGRESS por-rede)",
+                    doc.metadata.name
+                )));
+            }
+            apply_network_egress(kind, &doc.metadata.name, &spec)?;
+            continue;
+        }
+
         let mut c = store.load(&spec.target)?;
         let ip = require_sdn_ip(&c)?;
         let mut fw = c.firewall.clone().unwrap_or_default();
@@ -451,6 +495,74 @@ fn apply_kind(store: &Store, docs: &[ManifestDoc], kind: &str, dir: &str) -> Res
     Ok(())
 }
 
+/// Aplica um `Egress` de `scope: network` — política de egress por-rede + CIDR/
+/// FQDN allowlist + rate-limit L4. Espelha exactamente o `egress net`/`egress
+/// host`/`l4guard` da CLI, mas de forma declarativa. **Estado desejado**: cada
+/// campo é aplicado tal como está no documento.
+fn apply_network_egress(kind: &str, name: &str, spec: &FwDocSpec) -> Result<()> {
+    if !spec.rules.is_empty() {
+        return Err(Error::Invalid(format!(
+            "{kind}/{name}: `rules` é só para scope: container — em scope: network usa allowCidrs/fqdnAllowlist"
+        )));
+    }
+    // A bridge REAL vive no registo do infra (não no NetworkStore) — ver egress_net.
+    let bridge = infra::resolve_net(&spec.target)?.0;
+
+    let policy = spec.default_policy.as_deref().unwrap_or("allow");
+    if !matches!(policy, "allow" | "deny") {
+        return Err(Error::Invalid(format!("{kind}/{name}: defaultPolicy must be allow|deny")));
+    }
+    // deny + allowCidrs → allowlist (nega tudo excepto DNS + estes CIDRs).
+    if policy == "deny" && !spec.allow_cidrs.is_empty() {
+        for c in &spec.allow_cidrs {
+            if !fw_src_ok(c) {
+                return Err(Error::Invalid(format!("{kind}/{name}: invalid CIDR '{c}'")));
+            }
+        }
+        let cidrs: Vec<&str> = spec.allow_cidrs.iter().map(String::as_str).collect();
+        infra::set_egress_policy_net_allowlist(&bridge, &cidrs)?;
+    } else {
+        // allow → sem restrição; deny (sem CIDRs) → nega tudo (só o DNS passa).
+        infra::set_egress_policy_net(&bridge, policy == "deny")?;
+    }
+
+    // FQDN allowlist — aprendida ao vivo do DNS (DNS-snooping), acrescenta a `*.host`.
+    for host in &spec.fqdn_allowlist {
+        if !fw_host_ok(host) {
+            return Err(Error::Invalid(format!("{kind}/{name}: hostname inválido '{host}'")));
+        }
+        infra::set_egress_host(&bridge, host)?;
+    }
+
+    // rate-limit L4 (GLOBAL — não por-rede). 0/0 = sem guard.
+    if let Some(rl) = &spec.rate_limit {
+        infra::set_l4_guard(rl.conn_rate, rl.conn_max)?;
+    }
+
+    let extras = format!(
+        "{} CIDR + {} FQDN{}",
+        spec.allow_cidrs.len(),
+        spec.fqdn_allowlist.len(),
+        if spec.rate_limit.is_some() { " + rateLimit" } else { "" }
+    );
+    println!("{kind}/{name}: egress por-rede aplicado a '{}' (default {policy}, {extras})", spec.target);
+    Ok(())
+}
+
+/// Um hostname/FQDN válido para a allowlist de egress (labels alfanuméricas +
+/// hífen, separadas por `.`, ≤253). Recusa o que possa injectar num set nft.
+fn fw_host_ok(h: &str) -> bool {
+    !h.is_empty()
+        && h.len() <= 253
+        && h.split('.').all(|l| {
+            !l.is_empty()
+                && l.len() <= 63
+                && l.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+                && !l.starts_with('-')
+                && !l.ends_with('-')
+        })
+}
+
 /// `egress show <net>` — the network's egress policy (CIDR allowlist + FQDN hosts
 /// + the IPs currently learnt from DNS for those hosts).
 fn egress_show(network: &str) -> Result<()> {
@@ -486,6 +598,18 @@ fn egress_host(network: &str, hostname: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fw_host_ok_aceita_fqdn_valido_recusa_lixo() {
+        assert!(fw_host_ok("github.com"));
+        assert!(fw_host_ok("sub.dominio-x.example.co"));
+        assert!(!fw_host_ok("")); // vazio
+        assert!(!fw_host_ok("a b.com")); // espaço
+        assert!(!fw_host_ok("x;rm -rf.com")); // injecção
+        assert!(!fw_host_ok("-lead.com")); // label começa por hífen
+        assert!(!fw_host_ok("trail-.com")); // label termina por hífen
+        assert!(!fw_host_ok("a..b")); // label vazio
+    }
 
     #[test]
     fn parse_port_spec_defaults_proto_to_any() {
