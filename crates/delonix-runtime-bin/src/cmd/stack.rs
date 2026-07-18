@@ -86,7 +86,8 @@ pub fn run(action: StackCmd) -> Result<()> {
 /// Os Kinds do stack, na MESMA ordem do `apply` — quem lê o `describe` vê a
 /// ordem por que as coisas são criadas, o que é metade do diagnóstico quando um
 /// apply pára a meio.
-const KINDS: [&str; 9] = ["Secret", "Network", "Volume", "Storage", "Image", "Vm", "Container", "Ingress", "Egress"];
+const KINDS: [&str; 10] =
+    ["Secret", "Network", "Volume", "Storage", "Image", "Vm", "Container", "Ingress", "Egress", "FirewallPolicy"];
 
 fn describe(file: Option<PathBuf>) -> Result<()> {
     let path = manifest::resolve_path(file)?;
@@ -206,7 +207,7 @@ fn presence(kind: &str, name: &str, containers: &[delonix_runtime_core::Containe
         // Ingress/Egress não têm store próprio — são directivas de firewall
         // aplicadas a um container-alvo, não recursos com estado. O `apply`
         // aplica-as sempre (idempotente); aqui só se assinala a natureza.
-        "Ingress" | "Egress" => ("-".into(), "declarative".into()),
+        "Ingress" | "Egress" | "FirewallPolicy" => ("-".into(), "declarative".into()),
         _ => ("?".into(), "kind não suportado".into()),
     }
 }
@@ -435,7 +436,14 @@ fn validate_graph_with(
                     }
                 }
             }
-            "Ingress" | "Egress" => {
+            "Ingress" | "Egress" | "FirewallPolicy" => {
+                // FirewallPolicy exige `direction` — apanha-o AQUI (antes do apply
+                // criar nada) em vez de só no apply.
+                if doc.kind == "FirewallPolicy"
+                    && !matches!(doc.spec.get("direction").and_then(|v| v.as_str()), Some("ingress" | "egress" | "in" | "out"))
+                {
+                    issues.push(format!("FirewallPolicy '{name}' → direction obrigatório e ∈ {{ingress, egress}}"));
+                }
                 let scope = doc.spec.get("scope").and_then(|v| v.as_str()).unwrap_or("container");
                 if !matches!(scope, "container" | "network") {
                     // Mensagem coerente com o apply (que também rejeita o scope).
@@ -576,6 +584,31 @@ spec: { image: nginx, volumes: [\"semvolume:/x\", \"/host/ok:/y\"] }
         );
         assert_eq!(issues.len(), 1, "{issues:?}");
         assert!(issues[0].contains("volume 'semvolume'"), "{issues:?}");
+    }
+
+    #[test]
+    fn firewallpolicy_valida_target_como_ingress_egress() {
+        // FirewallPolicy resolve o target da mesma forma (scope-aware) que Ingress/Egress.
+        let issues = check(
+            "\
+apiVersion: delonix.io/v1
+kind: Container
+metadata: { name: dbapp }
+spec: { image: postgres }
+---
+apiVersion: delonix.io/v1
+kind: FirewallPolicy
+metadata: { name: ok }
+spec: { direction: ingress, target: dbapp }
+---
+apiVersion: delonix.io/v1
+kind: FirewallPolicy
+metadata: { name: bad }
+spec: { direction: egress, target: fantasma }
+",
+        );
+        assert_eq!(issues.len(), 1, "{issues:?}");
+        assert!(issues[0].contains("target 'fantasma'"), "{issues:?}");
     }
 
     #[test]
