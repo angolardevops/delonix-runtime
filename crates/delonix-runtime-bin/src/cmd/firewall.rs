@@ -372,6 +372,10 @@ struct FwDocSpec {
     rules: Vec<FwDocRule>,
 }
 
+/// Nomes aceites no `spec` de `kind: Ingress`/`Egress`, para o aviso de campos
+/// desconhecidos (o `rules[]` é validado pela desserialização de `FwDocRule`).
+pub(crate) const FW_SPEC_FIELDS: &[&str] = &["target", "defaultPolicy", "rules"];
+
 #[derive(Deserialize)]
 struct FwDocRule {
     /// `tcp`/`udp`/`any` (default `any`).
@@ -403,6 +407,7 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
 
 fn apply_kind(store: &Store, docs: &[ManifestDoc], kind: &str, dir: &str) -> Result<()> {
     for doc in manifest::of_kind(docs, kind) {
+        manifest::warn_unknown_fields(doc, FW_SPEC_FIELDS);
         let spec: FwDocSpec = manifest::spec_of(doc)?;
         let mut c = store.load(&spec.target)?;
         let ip = require_sdn_ip(&c)?;

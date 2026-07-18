@@ -10,7 +10,7 @@ spec:
   command: []                 # e.g. ["nginx", "-g", "daemon off;"]
   entrypoint: null            # override the image ENTRYPOINT ("" clears it)
   detach: true                # run in the background (a manifest is declarative)
-  restart: always             # no | on-failure[:max] | always | unless-stopped
+  restartPolicy: always       # no | on-failure[:max] | always | unless-stopped  (alias: restart)
   # --- network ---
   network: host               # host | none | <a network created by `network create`>
   ports: []                   # ["8080:80"] — gives the container its own netns + slirp NAT

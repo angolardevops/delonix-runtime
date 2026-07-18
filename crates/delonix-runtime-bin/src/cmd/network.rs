@@ -38,12 +38,20 @@ struct NetworkSpec {
     vni: Option<u32>,
     #[serde(default)]
     peers: Vec<String>,
+    /// Canónico `wgIp` (camelCase, uniforme com o resto do schema); `wg_ip`
+    /// continua aceite (retrocompat).
+    #[serde(rename = "wgIp", alias = "wg_ip")]
     wg_ip: Option<String>,
 }
 
 fn default_driver() -> String {
     "bridge".to_string()
 }
+
+/// Nomes aceites no `spec` de `kind: Network` (canónicos + aliases), para o
+/// aviso de campos desconhecidos.
+pub(crate) const NETWORK_SPEC_FIELDS: &[&str] =
+    &["driver", "parent", "subnet", "gateway", "vni", "peers", "wgIp", "wg_ip"];
 
 #[derive(Subcommand)]
 pub enum NetworkCmd {
@@ -136,6 +144,7 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
             println!("network/{name}: já existe, nada a fazer");
             continue;
         }
+        manifest::warn_unknown_fields(doc, NETWORK_SPEC_FIELDS);
         let spec: NetworkSpec = manifest::spec_of(doc)?;
         create_network(&store, name, &spec.driver, spec.parent, spec.subnet, &spec.gateway, spec.vni, spec.peers, spec.wg_ip)?;
         println!("network/{name}: criada");
@@ -312,4 +321,19 @@ fn cmd_node(action: NodeCmd) -> Result<()> {
         NodeCmd::Key => println!("{}", key.public),
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::NetworkSpec;
+
+    #[test]
+    fn networkspec_aceita_wg_ip_legado_e_wgip_canonico() {
+        let legado: NetworkSpec =
+            serde_yaml::from_str("driver: overlay\nwg_ip: 10.9.0.1\n").unwrap();
+        assert_eq!(legado.wg_ip.as_deref(), Some("10.9.0.1"));
+        let canon: NetworkSpec =
+            serde_yaml::from_str("driver: overlay\nwgIp: 10.9.0.1\n").unwrap();
+        assert_eq!(canon.wg_ip.as_deref(), Some("10.9.0.1"));
+    }
 }

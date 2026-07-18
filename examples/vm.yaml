@@ -10,7 +10,7 @@ spec:
   vcpus: 2
   memory: 2G                  # "2G" | "1024M" (a "…i" suffix is accepted, k8s-style)
   network: node1-net          # ingress network for the VM's tap
-  restart_policy: null        # no | on-failure | always
+  restartPolicy: null         # no | on-failure | always  (alias: restart_policy)
   # --- boot: firmware (cloud images) OR direct kernel ---
   firmware: null              # UEFI firmware path (typical for cloud images)
   kernel: null                # direct kernel boot (alternative to firmware)
@@ -20,9 +20,9 @@ spec:
   seed: null                  # path to a prebuilt NoCloud ISO (hostname/ssh come from here)
   # --- performance / passthrough ---
   hugepages: false
-  cpu_affinity: null          # pin vCPUs, e.g. "8-15"
+  cpuAffinity: null           # pin vCPUs, e.g. "8-15"  (alias: cpu_affinity)
   devices: []                 # VFIO PCI passthrough (sysfs paths)
   # --- backend selection ---
   backend: null               # cloud-hypervisor | libvirt | null (auto)
-  net_mode: null              # libvirt only: user | nat | bridge
+  netMode: null               # libvirt only: user | nat | bridge  (alias: net_mode)
   bridge: null                # host bridge / libvirt network

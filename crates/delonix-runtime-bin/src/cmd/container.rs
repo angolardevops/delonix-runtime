@@ -40,8 +40,10 @@ struct ContainerSpec {
     pub(crate) command: Vec<String>,
     /// `no` (default) | `on-failure[:max]` | `always` | `unless-stopped` —
     /// a detached supervisor becomes the container's parent and restarts it (see
-    /// `run_supervised`). This is what makes a manifest resilient.
-    #[serde(default = "default_restart")]
+    /// `run_supervised`). This is what makes a manifest resilient. Canonical
+    /// field name is `restartPolicy` (uniform with `kind: Vm`); the legacy
+    /// `restart` stays accepted so existing manifests don't break.
+    #[serde(rename = "restartPolicy", alias = "restart", default = "default_restart")]
     pub(crate) restart: String,
     // ---- parity with `container run` (all optional, k8s-style camelCase) ----
     #[serde(default)]
@@ -105,6 +107,17 @@ struct ContainerSpec {
     #[serde(default, rename = "logDriver")]
     log_driver: Option<String>,
 }
+
+/// Nomes aceites no `spec` de `kind: Container` (canónicos + aliases), para o
+/// aviso de campos desconhecidos. Alinhado com `ContainerSpec` pelo teste
+/// `container_spec_conhece_todos_os_campos_do_exemplo`.
+pub(crate) const CONTAINER_SPEC_FIELDS: &[&str] = &[
+    "image", "detach", "network", "volumes", "ports", "privileged", "env", "command",
+    "restartPolicy", "restart", "entrypoint", "devices", "labels", "envFile", "memory", "cpus",
+    "cpuWeight", "cpuset", "ioWeight", "readOnly", "capAdd", "capDrop", "securityOpt", "apparmor",
+    "selinux", "userns", "hostPid", "hostIpc", "detect", "secret", "secretFiles", "tmpfs", "ulimit",
+    "sysctl", "gpus", "networkAlias", "knows", "netBps", "netBurst", "logDriver",
+];
 
 fn default_restart() -> String {
     "no".to_string()
@@ -536,6 +549,7 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
             println!("container/{name}: already exists, nothing to do");
             continue;
         }
+        manifest::warn_unknown_fields(doc, CONTAINER_SPEC_FIELDS);
         let spec: ContainerSpec = manifest::spec_of(doc)?;
         cmd_run(
             &images,
@@ -2450,8 +2464,21 @@ fn cmd_logs(images: &ImageStore, store: &Store, id: &str, follow: bool) -> Resul
 #[cfg(test)]
 mod tests {
     use super::super::util::compose_command;
-    use super::{fmt_ports, fmt_status, next_extra_idx, parse_burst_bytes, parse_rate_bits, policy_supervised, should_restart};
+    use super::{fmt_ports, fmt_status, next_extra_idx, parse_burst_bytes, parse_rate_bits, policy_supervised, should_restart, ContainerSpec};
     use delonix_runtime_core::{Container, ExtraNet, Status};
+
+    #[test]
+    fn containerspec_aceita_restart_legado_e_restartpolicy_canonico() {
+        let legado: ContainerSpec =
+            serde_yaml::from_str("image: alpine\nrestart: always\n").unwrap();
+        assert_eq!(legado.restart, "always");
+        let canon: ContainerSpec =
+            serde_yaml::from_str("image: alpine\nrestartPolicy: always\n").unwrap();
+        assert_eq!(canon.restart, "always");
+        // Sem o campo → o default `no`.
+        let vazio: ContainerSpec = serde_yaml::from_str("image: alpine\n").unwrap();
+        assert_eq!(vazio.restart, "no");
+    }
 
     fn v(xs: &[&str]) -> Vec<String> {
         xs.iter().map(|s| s.to_string()).collect()

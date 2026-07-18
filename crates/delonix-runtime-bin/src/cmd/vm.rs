@@ -29,16 +29,32 @@ struct VmSpec {
     firmware: Option<String>,
     cmdline: Option<String>,
     seed: Option<String>,
+    /// Canónico `restartPolicy` (uniforme com `Container`); `restart_policy`
+    /// mantém-se aceite para não partir manifestos anteriores.
+    #[serde(rename = "restartPolicy", alias = "restart_policy")]
     restart_policy: Option<String>,
     #[serde(default)]
     hugepages: bool,
+    /// Canónico `cpuAffinity`; `cpu_affinity` continua aceite (retrocompat).
+    #[serde(rename = "cpuAffinity", alias = "cpu_affinity")]
     cpu_affinity: Option<String>,
     #[serde(default)]
     devices: Vec<String>,
     backend: Option<String>,
+    /// Canónico `netMode`; `net_mode` continua aceite (retrocompat).
+    #[serde(rename = "netMode", alias = "net_mode")]
     net_mode: Option<String>,
     bridge: Option<String>,
 }
+
+/// Nomes de campo aceites no `spec` de `kind: Vm` (canónicos + aliases legados),
+/// para o aviso de campos desconhecidos. Mantém-se alinhado com `VmSpec` pelo
+/// teste `vm_spec_conhece_todos_os_campos_do_exemplo`.
+pub(crate) const VM_SPEC_FIELDS: &[&str] = &[
+    "disk", "vcpus", "memory", "network", "kernel", "initrd", "firmware", "cmdline", "seed",
+    "restartPolicy", "restart_policy", "hugepages", "cpuAffinity", "cpu_affinity", "devices",
+    "backend", "netMode", "net_mode", "bridge",
+];
 
 fn default_vcpus() -> u32 {
     1
@@ -170,6 +186,7 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
     let base = state_root();
     for doc in manifest::of_kind(docs, "Vm") {
         let name = &doc.metadata.name;
+        manifest::warn_unknown_fields(doc, VM_SPEC_FIELDS);
         let spec: VmSpec = manifest::spec_of(doc)?;
         let cfg = VmConfig {
             name: name.clone(),
@@ -450,8 +467,28 @@ pub(crate) fn generate_seed_iso(
 
 #[cfg(test)]
 mod tests {
-    use super::{build_meta_data, build_user_data, fmt_vm_status};
+    use super::{build_meta_data, build_user_data, fmt_vm_status, VmSpec};
     use delonix_runtime_core::Status;
+
+    #[test]
+    fn vmspec_aceita_snake_case_legado_e_camel_case_canonico() {
+        // Legado (snake_case) — não pode partir.
+        let legado: VmSpec = serde_yaml::from_str(
+            "disk: d\nrestart_policy: always\ncpu_affinity: 0-3\nnet_mode: nat\n",
+        )
+        .unwrap();
+        assert_eq!(legado.restart_policy.as_deref(), Some("always"));
+        assert_eq!(legado.cpu_affinity.as_deref(), Some("0-3"));
+        assert_eq!(legado.net_mode.as_deref(), Some("nat"));
+        // Canónico (camelCase) — a forma nova dos exemplos.
+        let canon: VmSpec = serde_yaml::from_str(
+            "disk: d\nrestartPolicy: always\ncpuAffinity: 0-3\nnetMode: nat\n",
+        )
+        .unwrap();
+        assert_eq!(canon.restart_policy.as_deref(), Some("always"));
+        assert_eq!(canon.cpu_affinity.as_deref(), Some("0-3"));
+        assert_eq!(canon.net_mode.as_deref(), Some("nat"));
+    }
 
     #[test]
     fn status_de_vm_usa_o_vocabulario_da_cli() {
