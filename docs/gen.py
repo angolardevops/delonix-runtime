@@ -287,6 +287,7 @@ ou <code>allowlist</code> (nega tudo excepto DNS e os CIDRs dados). Tudo sobre o
 interno do ingress passa a snoopar os A-records das respostas e injecta-os num <code>set</code> nft
 por-rede (com timeout = expira com o TTL); o egress aceita esse set + DNS e dropa o resto. 100%
 rootless (sem eBPF) — a FQDN-policy do Cilium, via nftables. Repetível para vários hostnames.</p>"""},
+            "show": {"examples": [("Ver a política de egress de uma rede + os IPs FQDN aprendidos ao vivo", "delonix egress show backend")]},
             "ls": {"examples": [("", "delonix egress ls app")]},
         },
     },

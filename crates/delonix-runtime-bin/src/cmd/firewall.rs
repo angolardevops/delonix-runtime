@@ -151,6 +151,12 @@ pub enum EgressCmd {
         #[arg(add = ArgValueCandidates::new(super::complete::containers))]
         container: String,
     },
+    /// Show a NETWORK's egress policy: CIDR allowlist, FQDN hosts, and the IPs
+    /// currently learnt from DNS for those hosts.
+    Show {
+        #[arg(add = ArgValueCandidates::new(super::complete::networks))]
+        network: String,
+    },
     /// Remove all outbound rules.
     Clear {
         #[arg(add = ArgValueCandidates::new(super::complete::containers))]
@@ -185,6 +191,7 @@ pub fn run_egress(cmd: EgressCmd) -> Result<()> {
         EgressCmd::Policy { container, policy } => set_policy(&store, &container, "out", policy),
         EgressCmd::Net { network, mode, to } => egress_net(&network, mode, to),
         EgressCmd::Host { network, hostname } => egress_host(&network, &hostname),
+        EgressCmd::Show { network } => egress_show(&network),
         EgressCmd::Ls { container } => list_rules(&store, &container, "out"),
         EgressCmd::Clear { container } => clear_dir(&store, &container, "out"),
     }
@@ -435,6 +442,30 @@ fn apply_kind(store: &Store, docs: &[ManifestDoc], kind: &str, dir: &str) -> Res
         c.firewall = Some(fw);
         store.save(&c)?;
         println!("{kind}/{}: applied to {} ({n} rule(s), default {policy})", doc.metadata.name, spec.target);
+    }
+    Ok(())
+}
+
+/// `egress show <net>` — the network's egress policy (CIDR allowlist + FQDN hosts
+/// + the IPs currently learnt from DNS for those hosts).
+fn egress_show(network: &str) -> Result<()> {
+    let def = infra::network_get(network).ok_or_else(|| Error::NotFound(format!("network '{network}'")))?;
+    let policy = def.egress.policy.as_deref().unwrap_or("allow (default — no egress restriction)");
+    println!("egress for network {} (bridge {}):", output::bold(network), def.bridge);
+    println!("  policy: {policy}");
+    if def.egress.hosts.is_empty() {
+        println!("  FQDN allowlist: (none)");
+    } else {
+        println!("  FQDN allowlist ({} host(s)):", def.egress.hosts.len());
+        for h in &def.egress.hosts {
+            println!("    {h}  (and *.{h})");
+        }
+        let learnt = infra::egress_members(&def.bridge);
+        if learnt.is_empty() {
+            println!("  learnt IPs (live): (none yet — resolve a host from a container)");
+        } else {
+            println!("  learnt IPs (live): {}", learnt.join(", "));
+        }
     }
     Ok(())
 }
