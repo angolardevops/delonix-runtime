@@ -1,0 +1,16 @@
+# Delonixfile — Next.js (App Router) + TypeScript, pnpm-managed.
+# Build with:  delonix build -t __NAME__:dev .
+FROM node:20-slim
+ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1
+WORKDIR /app
+RUN corepack enable
+COPY package.json ./
+COPY tsconfig.json ./
+COPY next.config.mjs ./
+COPY app ./app
+# --prod=false: devDeps (typescript/@types) are needed to build.
+RUN pnpm install --prod=false && pnpm build
+EXPOSE __PORT__
+# Delonix extension: the runtime probes this to mark the container healthy.
+HEALTHCHECK CMD node -e "require('http').get('http://127.0.0.1:__PORT__/api/v1/health/live',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"
+CMD ["/app/node_modules/.bin/next", "start", "-p", "__PORT__"]
