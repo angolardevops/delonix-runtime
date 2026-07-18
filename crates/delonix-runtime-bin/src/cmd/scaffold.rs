@@ -52,6 +52,9 @@ pub(crate) struct InitOpts {
     /// de uma linguagem/framework (ex.: `python`) com boas práticas — código,
     /// Delonixfile, manifesto, testes e dotfiles. `list` mostra os disponíveis.
     pub template: Option<String>,
+    /// `--up`: depois de gerar, constrói a imagem, arranca o container e espera
+    /// que fique saudável — tudo com progresso animado, num só comando.
+    pub up: bool,
 }
 
 /// Porta por omissão exposta pelos templates de app.
@@ -77,8 +80,9 @@ fn subst(s: &str, o: &InitOpts, module: &str) -> String {
     s.replace("__NAME__", &o.name).replace("__MODULE__", module).replace("__PORT__", TEMPLATE_PORT)
 }
 
-/// Gera um projecto a partir de um template embebido (`--template <nome>`).
-fn render_template(tname: &str, o: &InitOpts) -> Result<()> {
+/// Gera um projecto a partir de um template embebido. `show_next` imprime os
+/// passos seguintes (build/apply/curl) — suprime-se quando o `--up` os vai fazer.
+fn render_template(tname: &str, o: &InitOpts, show_next: bool) -> Result<()> {
     if tname == "list" {
         println!("templates disponíveis: {}", template_names().join(", "));
         return Ok(());
@@ -99,16 +103,16 @@ fn render_template(tname: &str, o: &InitOpts) -> Result<()> {
         eprintln!("nada a fazer (tudo já existia)");
         return Ok(());
     }
-    let cd = if o.dir == Path::new(".") { String::new() } else { format!("cd {} && ", o.dir.display()) };
-    println!(
-        "pronto. Projecto '{}' ({tname}) em {}. Agora:\n  \
-         {cd}delonix build -t {}:dev .        # constrói a imagem (Delonixfile)\n  \
-         {cd}delonix stack apply              # sobe a app\n  \
-         {cd}curl localhost:{TEMPLATE_PORT}/api/v1/health/live",
-        o.name,
-        o.dir.display(),
-        o.name
-    );
+    println!("pronto. Projecto '{}' ({tname}) em {}.", o.name, o.dir.display());
+    if show_next {
+        let cd = if o.dir == Path::new(".") { String::new() } else { format!("cd {} && ", o.dir.display()) };
+        println!(
+            "  {cd}delonix build -t {}:dev .        # constrói a imagem (Delonixfile)\n  \
+             {cd}delonix stack apply              # sobe a app\n  \
+             {cd}curl localhost:{TEMPLATE_PORT}/api/v1/health/live",
+            o.name
+        );
+    }
     Ok(())
 }
 
@@ -126,11 +130,154 @@ fn write_file(path: &Path, content: &str, force: bool) -> Result<bool> {
     Ok(true)
 }
 
+/// stdin é um terminal interactivo? (menu/perguntas só fazem sentido num TTY).
+fn stdin_is_tty() -> bool {
+    unsafe { libc::isatty(0) == 1 }
+}
+
+/// Menu numerado dos templates + a opção "genérico". `Some(nome)` = template;
+/// `None` = scaffold genérico. Reprompt em input inválido; aceita número ou nome.
+fn choose_template_interactive() -> Result<Option<String>> {
+    use std::io::Write;
+    let names = template_names();
+    eprintln!("\nChoose a template (Enter for the generic scaffold):");
+    for (i, n) in names.iter().enumerate() {
+        eprintln!("  {}) {}", i + 1, n);
+    }
+    eprintln!("  {}) generic — Delonixfile + manifest, no app code", names.len() + 1);
+    loop {
+        eprint!("> ");
+        let _ = std::io::stderr().flush();
+        let mut line = String::new();
+        if std::io::stdin().read_line(&mut line).unwrap_or(0) == 0 {
+            return Ok(None);
+        }
+        let s = line.trim();
+        if s.is_empty() {
+            return Ok(None);
+        }
+        if let Ok(k) = s.parse::<usize>() {
+            if (1..=names.len()).contains(&k) {
+                return Ok(Some(names[k - 1].to_string()));
+            }
+            if k == names.len() + 1 {
+                return Ok(None);
+            }
+        } else if names.contains(&s) {
+            return Ok(Some(s.to_string()));
+        }
+        eprintln!("invalid — pick 1..{}", names.len() + 1);
+    }
+}
+
+/// Pergunta sim/não. Em não-TTY devolve o default (sem bloquear scripts).
+fn prompt_yes(question: &str, default_yes: bool) -> bool {
+    use std::io::Write;
+    if !stdin_is_tty() {
+        return default_yes;
+    }
+    eprint!("{question} {} ", if default_yes { "[Y/n]" } else { "[y/N]" });
+    let _ = std::io::stderr().flush();
+    let mut line = String::new();
+    if std::io::stdin().read_line(&mut line).unwrap_or(0) == 0 {
+        return default_yes;
+    }
+    match line.trim().to_ascii_lowercase().as_str() {
+        "" => default_yes,
+        "y" | "yes" | "s" | "sim" => true,
+        _ => false,
+    }
+}
+
+/// Constrói a imagem, arranca o container e espera ficar saudável — cada etapa
+/// com progresso animado (estilo `cluster create`). Um só comando até estar UP.
+fn build_and_up(name: &str, dir: &Path) -> Result<()> {
+    let exe = std::env::current_exe().map_err(|e| Error::Invalid(e.to_string()))?;
+    let tag = format!("{name}:dev");
+    let port = TEMPLATE_PORT;
+    let mut p = super::output::Progress::new();
+
+    p.step(&format!("Building image {tag}"), "🔨");
+    run_quiet(&exe, dir, &["build", "-t", &tag, "."])?;
+    p.ok();
+
+    p.step(&format!("Starting container {name}"), "🚀");
+    let _ = run_quiet(&exe, dir, &["container", "rm", name, "-f"]);
+    run_quiet(&exe, dir, &["container", "run", "--name", name, "-d", "-p", &format!("{port}:{port}"), &tag])?;
+    p.ok();
+
+    p.step("Waiting until healthy", "❤️ ");
+    wait_health(port)?;
+    p.ok();
+
+    println!("\n✨ {name} is UP → http://localhost:{port}/api/v1/health/live");
+    println!("   logs:  delonix container logs -f {name}");
+    println!("   stop:  delonix container rm -f {name}");
+    Ok(())
+}
+
+/// Corre `delonix <args>` em `dir`, capturando a saída (o spinner é que fala).
+/// O erro traz a saída capturada para o diagnóstico.
+fn run_quiet(exe: &Path, dir: &Path, args: &[&str]) -> Result<()> {
+    let out = std::process::Command::new(exe)
+        .args(args)
+        .current_dir(dir)
+        .output()
+        .map_err(|e| Error::Invalid(e.to_string()))?;
+    if out.status.success() {
+        Ok(())
+    } else {
+        Err(Error::Invalid(format!("`delonix {}` falhou:\n{}", args.join(" "), String::from_utf8_lossy(&out.stderr).trim())))
+    }
+}
+
+/// Espera que `/api/v1/health/live` responda 200 (até ~40s).
+fn wait_health(port: &str) -> Result<()> {
+    for _ in 0..80 {
+        if http_ok(port, "/api/v1/health/live") {
+            return Ok(());
+        }
+        std::thread::sleep(std::time::Duration::from_millis(500));
+    }
+    Err(Error::Invalid("o container arrancou mas não ficou saudável em 40s — vê `delonix container logs`".into()))
+}
+
+/// GET mínimo a `127.0.0.1:port` (HTTP/1.0); `true` se a resposta é `200`.
+fn http_ok(port: &str, path: &str) -> bool {
+    use std::io::{Read, Write};
+    let Ok(mut s) = std::net::TcpStream::connect(format!("127.0.0.1:{port}")) else {
+        return false;
+    };
+    let _ = s.set_read_timeout(Some(std::time::Duration::from_secs(2)));
+    let req = format!("GET {path} HTTP/1.0\r\nHost: localhost\r\nConnection: close\r\n\r\n");
+    if s.write_all(req.as_bytes()).is_err() {
+        return false;
+    }
+    let mut buf = [0u8; 128];
+    matches!(s.read(&mut buf), Ok(n) if String::from_utf8_lossy(&buf[..n]).contains(" 200 "))
+}
+
 pub(crate) fn init(target: Target, o: &InitOpts) -> Result<()> {
-    // `--template <nome>` gera um projecto completo de uma stack (código +
-    // Delonixfile + manifesto + testes), em vez do scaffold genérico.
-    if let Some(t) = &o.template {
-        return render_template(t, o);
+    // `--template list` só lista.
+    if o.template.as_deref() == Some("list") {
+        return render_template("list", o, false);
+    }
+    // Sem `--template` num TTY interactivo: abre o menu. Em não-TTY (scripts/CI)
+    // cai no scaffold genérico, como sempre.
+    let chosen: Option<String> = match &o.template {
+        Some(t) => Some(t.clone()),
+        None if stdin_is_tty() => choose_template_interactive()?,
+        None => None,
+    };
+    // Um template (via flag ou menu) → projecto completo; opcionalmente
+    // build+run animado (`--up`, ou a pergunta interactiva).
+    if let Some(t) = &chosen {
+        let do_up = o.up || (stdin_is_tty() && prompt_yes("Build and start it now?", true));
+        render_template(t, o, !do_up)?;
+        if do_up {
+            build_and_up(&o.name, &o.dir)?;
+        }
+        return Ok(());
     }
     std::fs::create_dir_all(&o.dir)?;
     let mut n = 0;

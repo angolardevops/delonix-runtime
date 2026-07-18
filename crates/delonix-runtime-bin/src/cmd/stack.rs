@@ -34,6 +34,9 @@ pub enum StackCmd {
         /// em vez do scaffold genérico. `--template list` mostra os disponíveis.
         #[arg(long, short = 't')]
         template: Option<String>,
+        /// Depois de gerar, constrói a imagem, arranca e espera ficar saudável.
+        #[arg(long)]
+        up: bool,
     },
     /// Aplica todos os Kinds do manifesto (Network → Volume → Image → Vm → Container).
     Apply {
@@ -68,8 +71,8 @@ pub enum StackCmd {
 }
 
 pub fn run(action: StackCmd) -> Result<()> {
-    if let StackCmd::Init { dir, name, image, force, template } = action {
-        return cmd_init(super::scaffold::Target::Stack, dir, name, image, force, template);
+    if let StackCmd::Init { dir, name, image, force, template, up } = action {
+        return cmd_init(super::scaffold::Target::Stack, dir, name, image, force, template, up);
     }
     match action {
         // Tratado no topo de `run` (faz `return`).
@@ -435,7 +438,7 @@ fn validate_graph_with(
 }
 
 /// Trata o `init` deste grupo (ver `cmd::scaffold`).
-fn cmd_init(target: super::scaffold::Target, dir: PathBuf, name: Option<String>, image: Option<String>, force: bool, template: Option<String>) -> Result<()> {
+fn cmd_init(target: super::scaffold::Target, dir: PathBuf, name: Option<String>, image: Option<String>, force: bool, template: Option<String>, up: bool) -> Result<()> {
     let name = name.unwrap_or_else(|| {
         // Sem `--name`, usa o nome do DIRECTÓRIO. Não se pode usar `canonicalize`:
         // o directório ainda não existe (é o `init` que o cria) e falharia sempre,
@@ -451,7 +454,7 @@ fn cmd_init(target: super::scaffold::Target, dir: PathBuf, name: Option<String>,
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_else(|| "app".to_string())
     });
-    super::scaffold::init(target, &super::scaffold::InitOpts { dir, name, image, force, template })
+    super::scaffold::init(target, &super::scaffold::InitOpts { dir, name, image, force, template, up })
 }
 
 #[cfg(test)]
