@@ -208,32 +208,62 @@ pub enum VmCmd {
     },
 }
 
-/// Tag 9p a partir do nome do volume: `[a-zA-Z0-9_]`, ≤31 chars (limite do 9p),
-/// determinística. Evita chars problemáticos no `<target dir=…>` e no mount.
+/// Tag 9p base a partir do nome do volume: `[a-zA-Z0-9_]`, ≤31 chars (limite do
+/// 9p). Como `.` e `-` colapsam ambos em `_`, dois nomes distintos podem gerar a
+/// mesma base — a unicidade é garantida por `resolve_vm_volumes` (sufixo por
+/// índice), não aqui.
 fn vol_tag(name: &str) -> String {
     let mut t: String = name.chars().map(|c| if c.is_ascii_alphanumeric() || c == '_' { c } else { '_' }).collect();
     t.truncate(31);
     t
 }
 
+/// Um `mountPath` de volume tem de ser um caminho absoluto SEM caracteres que
+/// partam a sequência de fluxo YAML do cloud-init (`,`/`]`/`#`/`"`) nem control
+/// chars — senão a entrada `mounts` fica malformada e o volume não monta em
+/// silêncio depois do boot.
+fn valid_mount_path(p: &str) -> bool {
+    p.starts_with('/') && !p.chars().any(|c| c.is_control() || matches!(c, ',' | ']' | '[' | '#' | '"'))
+}
+
 /// Resolve `spec.volumes` (nomes de Volume/Storage) para `VmVolume` com o
 /// directório no host, garantindo que um Storage de rede está montado antes de o
-/// partilhar por 9p. O `Volume`/`Storage` tem de já existir (o `stack apply`
-/// aplica-os antes da VM; o `validate_graph` já confirma a referência).
+/// partilhar por 9p. Tags únicas (sufixo `_N` em colisão). O `Volume`/`Storage`
+/// tem de já existir (o `stack apply` aplica-os antes da VM; o `validate_graph`
+/// já confirma a referência).
 fn resolve_vm_volumes(base: &std::path::Path, specs: &[VmVolumeSpec]) -> Result<Vec<delonix_vm::VmVolume>> {
     if specs.is_empty() {
         return Ok(Vec::new());
     }
     let store = VolumeStore::open(base)?;
+    let mut used_tags: std::collections::HashSet<String> = std::collections::HashSet::new();
     let mut out = Vec::with_capacity(specs.len());
     for v in specs {
+        if !valid_mount_path(&v.mount_path) {
+            return Err(Error::Invalid(format!(
+                "spec.volumes: mountPath {:?} inválido (tem de ser um caminho absoluto sem , ] [ # \" nem control chars)",
+                v.mount_path
+            )));
+        }
         let vol = store
             .inspect(&v.name)
             .map_err(|_| Error::Invalid(format!("spec.volumes: volume/storage '{}' não existe (cria-o antes da VM)", v.name)))?;
         // Se for um Storage de rede, garante a montagem no host antes de partilhar.
         store.ensure_mounted(&vol)?;
+        // Unicidade da tag: `.` e `-` colapsam em `_`, por isso nomes distintos
+        // podem colidir — desambigua com um sufixo `_N` estável por ordem.
+        let base_tag = vol_tag(&v.name);
+        let mut tag = base_tag.clone();
+        let mut n = 1;
+        while used_tags.contains(&tag) {
+            let suffix = format!("_{n}");
+            let keep = 31usize.saturating_sub(suffix.len());
+            tag = format!("{}{suffix}", &base_tag[..base_tag.len().min(keep)]);
+            n += 1;
+        }
+        used_tags.insert(tag.clone());
         out.push(delonix_vm::VmVolume {
-            tag: vol_tag(&v.name),
+            tag,
             source: vol.mountpoint.clone(),
             mount_path: v.mount_path.clone(),
             read_only: v.read_only,
@@ -253,13 +283,9 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
         // garante que um Storage de rede está montado antes de o partilhar.
         let vm_volumes = resolve_vm_volumes(&base, &spec.volumes)?;
 
-        // Volumes ⇒ libvirt (o Cloud Hypervisor não faz virtio-9p). Sem backend
-        // explícito, força-se libvirt; com CH explícito, o motor recusa (erro claro).
-        let backend = match spec.backend {
-            Some(b) => Some(b),
-            None if !vm_volumes.is_empty() => Some("libvirt".to_string()),
-            None => None,
-        };
+        // NB: a regra "volumes ⇒ libvirt" vive no motor (`delonix_vm::create`),
+        // para qualquer consumidor da API a herdar — aqui passa-se o backend tal
+        // como declarado (com CH explícito + volumes, o motor recusa com erro claro).
 
         // Se há volumes e não foi dado um seed próprio, gera um seed com os mounts
         // 9p (senão o `<filesystem>` existe mas o guest não o monta sozinho).
@@ -286,7 +312,7 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
             hugepages: spec.hugepages,
             cpu_affinity: spec.cpu_affinity,
             devices: spec.devices,
-            backend,
+            backend: spec.backend,
             net_mode: spec.net_mode,
             bridge: spec.bridge,
             volumes: vm_volumes,
@@ -509,8 +535,10 @@ fn build_user_data(hostname: &str, ssh_keys: &[String], volumes: &[delonix_vm::V
         out.push_str("mounts:\n");
         for v in volumes {
             let mode = if v.read_only { "ro" } else { "rw" };
+            // `mount_path` entre aspas (validado sem `"` em `valid_mount_path`) e
+            // `tag` saneada (`vol_tag`) — a sequência de fluxo YAML não parte.
             out.push_str(&format!(
-                "  - [ {}, {}, 9p, \"trans=virtio,version=9p2000.L,{mode},_netdev\", \"0\", \"0\" ]\n",
+                "  - [ \"{}\", \"{}\", 9p, \"trans=virtio,version=9p2000.L,{mode},_netdev\", \"0\", \"0\" ]\n",
                 v.tag, v.mount_path
             ));
         }
@@ -632,8 +660,8 @@ mod tests {
         ];
         let ud = build_user_data("myvm", &[], &vols);
         assert!(ud.contains("mounts:\n"));
-        assert!(ud.contains("[ dados, /mnt/dados, 9p, \"trans=virtio,version=9p2000.L,rw,_netdev\", \"0\", \"0\" ]"), "{ud}");
-        assert!(ud.contains("[ ro, /mnt/ro, 9p, \"trans=virtio,version=9p2000.L,ro,_netdev\", \"0\", \"0\" ]"), "{ud}");
+        assert!(ud.contains("[ \"dados\", \"/mnt/dados\", 9p, \"trans=virtio,version=9p2000.L,rw,_netdev\", \"0\", \"0\" ]"), "{ud}");
+        assert!(ud.contains("[ \"ro\", \"/mnt/ro\", 9p, \"trans=virtio,version=9p2000.L,ro,_netdev\", \"0\", \"0\" ]"), "{ud}");
         // Sem volumes → sem secção mounts.
         assert!(!build_user_data("myvm", &[], &[]).contains("mounts:"));
     }
@@ -642,6 +670,18 @@ mod tests {
     fn vol_tag_saneia_e_trunca() {
         assert_eq!(super::vol_tag("nas-creds.db"), "nas_creds_db");
         assert_eq!(super::vol_tag(&"x".repeat(40)).len(), 31);
+        // `.` e `-` colapsam ambos em `_` → base igual (a unicidade é no resolve).
+        assert_eq!(super::vol_tag("nas.creds"), super::vol_tag("nas-creds"));
+    }
+
+    #[test]
+    fn valid_mount_path_rejeita_relativos_e_chars_que_partem_o_yaml() {
+        assert!(super::valid_mount_path("/mnt/dados"));
+        assert!(super::valid_mount_path("/mnt/com espaco")); // espaço é ok (vai entre aspas)
+        assert!(!super::valid_mount_path("relativo/x")); // não absoluto
+        for bad in ["/mnt/a,b", "/mnt/a]b", "/mnt/a\"b", "/mnt/a#b", "/mnt/a\nb"] {
+            assert!(!super::valid_mount_path(bad), "{bad:?} devia ser rejeitado");
+        }
     }
 
     #[test]

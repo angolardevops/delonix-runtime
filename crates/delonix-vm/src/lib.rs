@@ -920,7 +920,18 @@ pub fn create(base: &Path, cfg: &VmConfig) -> Result<Vm> {
             }
             backend_for(ex)
         }
-        None => select_backend(cfg.backend.as_deref())?,
+        None => {
+            // Volumes ⇒ libvirt: só ele materializa virtio-9p (o Cloud Hypervisor
+            // não faz 9p e recusaria no `boot`). A regra vive AQUI (no motor) e não
+            // só no bin, para qualquer consumidor da API a herdar. Sem volumes,
+            // mantém-se a auto-detecção normal.
+            let want = match cfg.backend.as_deref() {
+                Some(b) => Some(b),
+                None if !cfg.volumes.is_empty() => Some("libvirt"),
+                None => None,
+            };
+            select_backend(want)?
+        }
     };
 
     // Admissão: recusa arrancar se não houver RAM no host (anti-overcommit).
