@@ -984,6 +984,14 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
     // default), in podman's rootless model. The slirp dies with the netns.
     let slirp_ports = if custom_net.is_none() { ports.clone() } else { Vec::new() };
     let slirp_hook = |pid: i32| -> Result<()> { delonix_net::slirp_attach(pid, &slirp_ports) };
+    // DNS para o /etc/resolv.conf: numa rede custom é o gateway (o resolver do
+    // ingress); com `-p` (slirp) é o DNS do slirp; em `--net host` fica `None`
+    // (o runtime copia o resolv.conf do host).
+    let dns = match &custom_net {
+        Some(n) => infra::resolve_net(n).ok().map(|(_, _, gw)| gw),
+        None if !slirp_ports.is_empty() => Some(delonix_net::SLIRP_DNS.to_string()),
+        None => None,
+    };
     let spec = RunSpec {
         detach,
         // On re-exec we're already in the right netns: DON'T create another (nor join
@@ -1000,6 +1008,7 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
         hosts_ip: attached_ip
             .clone()
             .or_else(|| (!slirp_ports.is_empty()).then(|| delonix_net::SLIRP_IP.to_string())),
+        dns,
         host_pid,
         host_ipc,
         apparmor: apparmor_profile.clone(),
@@ -1568,6 +1577,13 @@ fn cmd_start(images: &ImageStore, store: &Store, id: &str) -> Result<()> {
 
     let slirp_ports = if c.network.is_none() { c.ports.clone() } else { Vec::new() };
     let slirp_hook = |pid: i32| -> Result<()> { delonix_net::slirp_attach(pid, &slirp_ports) };
+    // resolv.conf: gateway da rede custom (resolver do ingress), DNS do slirp com
+    // `-p`, ou o do host (`--net host`) — ver o `run`.
+    let dns = match &c.network {
+        Some(n) => infra::resolve_net(n).ok().map(|(_, _, gw)| gw),
+        None if !slirp_ports.is_empty() => Some(delonix_net::SLIRP_DNS.to_string()),
+        None => None,
+    };
 
     let log_path = images
         .root()
@@ -1589,6 +1605,7 @@ fn cmd_start(images: &ImageStore, store: &Store, id: &str) -> Result<()> {
             .ip
             .clone()
             .or_else(|| (!slirp_ports.is_empty()).then(|| delonix_net::SLIRP_IP.to_string())),
+        dns,
         ..Default::default()
     };
     runtime::create_with(store, &mut c, &rootfs, &spec)?;

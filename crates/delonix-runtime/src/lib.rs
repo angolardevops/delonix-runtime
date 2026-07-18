@@ -2501,6 +2501,12 @@ pub struct RunSpec<'a> {
     /// IP do container a escrever em `/etc/hosts` (mapeado ao hostname), como
     /// fazem o Docker/Podman. `None` = só as entradas de loopback.
     pub hosts_ip: Option<String>,
+    /// Servidor DNS a escrever em `/etc/resolv.conf` do container (Docker/Podman
+    /// geram sempre este ficheiro). Numa rede custom é o *gateway* — o resolver
+    /// interno do ingress, que resolve nomes de containers/VMs e reencaminha o
+    /// resto; com `-p` (slirp) é o DNS do slirp. `None` → copia-se o do host
+    /// (containers `--net host` herdam o DNS da máquina).
+    pub dns: Option<String>,
     /// Partilha o *PID namespace* do host (`--host-pid`; CRI `namespace_options.pid
     /// = NODE`): o container vê os processos do host. Por omissão, isolado.
     pub host_pid: bool,
@@ -2580,12 +2586,25 @@ pub fn create_with(
 /// - **`/etc/hosts`**: sem ele, `getent ahostsv4 $(hostname)` não resolve — e é
 ///   EXACTAMENTE assim que o entrypoint do `kindest/node` descobre o IP do nó
 ///   ("detected IPv4 address:"); vinha vazio e o nó não arrancava como control-plane.
-fn write_etc_files(rootfs: &str, hostname: &str, ip: Option<&str>) {
+fn write_etc_files(rootfs: &str, hostname: &str, ip: Option<&str>, dns: Option<&str>) {
     let etc = format!("{rootfs}/etc");
     if std::fs::metadata(&etc).is_err() {
         return; // imagem sem /etc (ex.: scratch) — nada a fazer
     }
     let _ = std::fs::write(format!("{etc}/hostname"), format!("{hostname}\n"));
+    // `/etc/resolv.conf`: sem ele o resolver da libc cai em 127.0.0.1 e NADA
+    // resolve por nome (só por IP). Numa rede custom aponta-se para o gateway (o
+    // resolver do ingress); em `--net host` copia-se o do host. Como o Docker.
+    match dns {
+        Some(server) => {
+            let _ = std::fs::write(format!("{etc}/resolv.conf"), format!("nameserver {server}\noptions ndots:0\n"));
+        }
+        None => {
+            if let Ok(host_resolv) = std::fs::read("/etc/resolv.conf") {
+                let _ = std::fs::write(format!("{etc}/resolv.conf"), host_resolv);
+            }
+        }
+    }
     let mut hosts = String::from(
         "127.0.0.1\tlocalhost\n\
          ::1\tlocalhost ip6-localhost ip6-loopback\n\
@@ -2601,7 +2620,7 @@ fn write_etc_files(rootfs: &str, hostname: &str, ip: Option<&str>) {
 }
 
 fn spawn(store: &Store, container: &mut Container, rootfs: &str, spec: &RunSpec<'_>) -> Result<()> {
-    write_etc_files(rootfs, &container.name, spec.hosts_ip.as_deref());
+    write_etc_files(rootfs, &container.name, spec.hosts_ip.as_deref(), spec.dns.as_deref());
     let argv: Vec<CString> = container
         .command
         .iter()
