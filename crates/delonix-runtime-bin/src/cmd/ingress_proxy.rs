@@ -400,6 +400,199 @@ pub fn run(config_path: &Path) -> Result<()> {
     rt.block_on(serve(cfg, config_path.to_path_buf()))
 }
 
+// ============================================================================
+// Ciclo de vida (host-side): arrancar/recarregar/parar o proxy no netns do holder.
+// O proxy é infra persistente (como o slirp/holder), lançado só quando há um
+// HTTPRoute — respeita o 'daemonless' (não corre sem carga declarada).
+// ============================================================================
+
+/// Pasta de estado do proxy (`<root>/httproute/`). No mesmo sistema de ficheiros
+/// que o holder vê (a mount-ns do holder é cópia da do host) — o proxy lá dentro
+/// lê a MESMA config que aqui escrevemos.
+fn proxy_dir() -> std::path::PathBuf {
+    crate::cmd::util::state_root().join("httproute")
+}
+/// Caminho canónico da `ProxyConfig` (o proxy relê-o no SIGHUP).
+pub fn config_path() -> std::path::PathBuf {
+    proxy_dir().join("config.json")
+}
+fn pid_path() -> std::path::PathBuf {
+    proxy_dir().join("proxy.pid")
+}
+fn log_path() -> std::path::PathBuf {
+    proxy_dir().join("proxy.log")
+}
+
+/// PID do proxy se estiver VIVO **e for mesmo o nosso** (o `/proc/<pid>/cmdline`
+/// contém `ingress-proxy`), senão `None` (e limpa um pidfile órfão). A guarda de
+/// identidade é essencial: sem ela, um PID reciclado pelo kernel faria o
+/// `SIGHUP`/`SIGTERM` atingir um processo alheio (SIGHUP default = terminar).
+fn running_pid() -> Option<i32> {
+    let pid: i32 = std::fs::read_to_string(pid_path()).ok()?.trim().parse().ok()?;
+    let is_ours = std::fs::read(format!("/proc/{pid}/cmdline"))
+        .map(|c| String::from_utf8_lossy(&c).contains("ingress-proxy"))
+        .unwrap_or(false);
+    if is_ours {
+        Some(pid)
+    } else {
+        let _ = std::fs::remove_file(pid_path()); // morto OU PID reciclado — órfão
+        None
+    }
+}
+
+/// Escreve a config e **garante o proxy a servir**: se já está vivo, recarrega a
+/// quente (SIGHUP); senão, arranca-o no netns do holder e publica as portas.
+/// Idempotente — é o que o `stack apply`/auto-registo chamam sempre.
+pub fn ensure_running(cfg: &ProxyConfig) -> Result<()> {
+    std::fs::create_dir_all(proxy_dir())
+        .map_err(|e| Error::Runtime { context: "httproute dir", message: e.to_string() })?;
+    // Captura os listeners ACTUAIS ANTES de sobrescrever a config (senão o prev
+    // seria já o novo).
+    let prev_ports = prev_listener_ports();
+    let json = serde_json::to_vec_pretty(cfg)
+        .map_err(|e| Error::Runtime { context: "serialize config", message: e.to_string() })?;
+    std::fs::write(config_path(), &json)
+        .map_err(|e| Error::Runtime { context: "escrever config", message: e.to_string() })?;
+
+    if let Some(pid) = running_pid() {
+        // Vivo → recarrega as rotas a quente (SIGHUP). As portas já estão publicadas.
+        // AVISO: o SIGHUP só recarrega ROTAS; mudar entrypoints/TLS exige reiniciar
+        // (`httproute rm` + apply). Detetamos a mudança do conjunto de portas para
+        // não mentir que o novo listener está a servir.
+        if let Some(prev) = prev_ports {
+            let now: std::collections::BTreeSet<u16> = cfg.listeners.iter().map(|l| l.port).collect();
+            if prev != now {
+                eprintln!(
+                    "httproute: AVISO — mudança de listeners ({prev:?} → {now:?}) NÃO tem efeito a quente; \
+                     o SIGHUP só recarrega rotas. Faz `httproute rm` + apply para religar as portas."
+                );
+            }
+        }
+        // SAFETY: SIGHUP a um pid que confirmámos vivo E nosso (guarda de cmdline).
+        unsafe { libc::kill(pid, libc::SIGHUP) };
+        eprintln!("httproute: proxy #{pid} recarregado (SIGHUP)");
+        return Ok(());
+    }
+    spawn_proxy()?;
+    publish_listeners(cfg)?;
+    Ok(())
+}
+
+/// As portas dos listeners da config ACTUALMENTE em vigor (antes de a
+/// sobrescrevermos) — para detetar uma mudança de listeners no re-apply.
+fn prev_listener_ports() -> Option<std::collections::BTreeSet<u16>> {
+    let bytes = std::fs::read(config_path()).ok()?;
+    let cfg: ProxyConfig = serde_json::from_slice(&bytes).ok()?;
+    Some(cfg.listeners.iter().map(|l| l.port).collect())
+}
+
+/// Arranca o proxy DENTRO do netns do holder (via `infra_join_argv`), detached
+/// (setsid, stdio para um log), e grava o pidfile.
+fn spawn_proxy() -> Result<()> {
+    use std::os::unix::process::CommandExt;
+    // Garante o holder de pé (o proxy vive no netns dele).
+    delonix_net::infra::ensure_up()?;
+    let join = delonix_net::infra::infra_join_argv()
+        .ok_or_else(|| Error::Runtime { context: "holder", message: "ingress holder em baixo".into() })?;
+    let self_exe = std::env::current_exe()
+        .map_err(|e| Error::Runtime { context: "current_exe", message: e.to_string() })?;
+    let cfg_path = config_path();
+
+    // argv = nsenter … -- <delonix> ingress-proxy --config <config>
+    let mut argv: Vec<String> = join;
+    argv.push(self_exe.to_string_lossy().into_owned());
+    argv.push("ingress-proxy".into());
+    argv.push("--config".into());
+    argv.push(cfg_path.to_string_lossy().into_owned());
+
+    let log = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(log_path())
+        .map_err(|e| Error::Runtime { context: "abrir log do proxy", message: e.to_string() })?;
+    let log2 = log.try_clone().map_err(|e| Error::Runtime { context: "clone log", message: e.to_string() })?;
+
+    let mut cmd = std::process::Command::new(&argv[0]);
+    cmd.args(&argv[1..])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::from(log))
+        .stderr(std::process::Stdio::from(log2));
+    // SAFETY: setsid no filho (pós-fork, pré-exec) destaca-o da sessão/terminal
+    // do CLI para sobreviver à saída deste. O nsenter faz EXEC (não fork) do
+    // proxy, por isso este PID torna-se o do proxy — signalável do host.
+    unsafe {
+        cmd.pre_exec(|| {
+            libc::setsid();
+            Ok(())
+        });
+    }
+    let child = cmd.spawn().map_err(|e| Error::Runtime {
+        context: "spawn ingress-proxy",
+        message: format!("{}: {e}", argv.join(" ")),
+    })?;
+    std::fs::write(pid_path(), child.id().to_string())
+        .map_err(|e| Error::Runtime { context: "escrever pidfile", message: e.to_string() })?;
+    // Confirma que arrancou de facto (não morreu logo no bind): dá-lhe um instante
+    // e verifica o /proc. Se caiu, aponta o log — não declarar 'a servir' a mentir.
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    if !std::path::Path::new(&format!("/proc/{}", child.id())).exists() {
+        return Err(Error::Runtime {
+            context: "ingress-proxy",
+            message: format!("o proxy caiu logo ao arrancar (porta ocupada?) — ver {}", log_path().display()),
+        });
+    }
+    eprintln!("httproute: proxy arrancado (#{}) no netns do holder", child.id());
+    Ok(())
+}
+
+/// Publica as portas de entrada no host (slirp `add_hostfwd`): o proxy escuta em
+/// `0.0.0.0:<porta>` no netns do holder e apanha o tráfego entregue em `SLIRP_IP`.
+/// (Sem DNAT — o holder não tem `input` chain a filtrar entregas locais.)
+fn publish_listeners(cfg: &ProxyConfig) -> Result<()> {
+    let sock = delonix_net::infra::slirp_sock_path();
+    for l in &cfg.listeners {
+        let p = l.port.to_string();
+        // Best-effort/idempotente: se a porta JÁ tem hostfwd (proxy anterior que
+        // crashou sem teardown), o slirp recusa 'already exists' — não é fatal, o
+        // estado desejado (porta publicada) já está. Só avisa noutros erros.
+        if let Err(e) = delonix_net::slirp_add_hostfwd(&sock, &p, &p, "tcp") {
+            let msg = e.to_string();
+            if msg.contains("already") || msg.to_lowercase().contains("exist") {
+                eprintln!("httproute: porta :{p} já publicada — mantida");
+            } else {
+                eprintln!("httproute: aviso ao publicar :{p}: {e}");
+            }
+        }
+    }
+    Ok(())
+}
+
+/// **Pára o proxy e despublica as portas** (teardown do `httproute rm`). Lê os
+/// portos da config antes de a apagar. Best-effort/idempotente.
+pub fn stop() -> Result<()> {
+    // Despublica as portas conhecidas (da config, se ainda existir).
+    if let Ok(bytes) = std::fs::read(config_path()) {
+        if let Ok(cfg) = serde_json::from_slice::<ProxyConfig>(&bytes) {
+            let sock = delonix_net::infra::slirp_sock_path();
+            for l in &cfg.listeners {
+                let _ = delonix_net::infra::slirp_remove_hostfwd(&sock, &l.port.to_string());
+            }
+        }
+    }
+    if let Some(pid) = running_pid() {
+        // SAFETY: SIGTERM a um pid confirmado vivo e nosso.
+        unsafe { libc::kill(pid, libc::SIGTERM) };
+    }
+    let _ = std::fs::remove_file(pid_path());
+    let _ = std::fs::remove_file(config_path());
+    Ok(())
+}
+
+/// Está o proxy a correr? (para o `httproute ls`/describe).
+pub fn is_running() -> bool {
+    running_pid().is_some()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
