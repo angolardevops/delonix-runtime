@@ -390,13 +390,14 @@ struct FwDocSpec {
     rate_limit: Option<RateLimitSpec>,
 }
 
-/// `spec.rateLimit` — a protecção DDoS L4 do ingress (global).
+/// `spec.rateLimit` — a protecção DDoS L4 do ingress (global). `{connRate: 0,
+/// connMax: 0}` DESLIGA o guard explicitamente (clear_l4_guard).
 #[derive(Deserialize)]
 struct RateLimitSpec {
-    /// Novas conexões por segundo permitidas (0 = sem limite de taxa).
+    /// Novas conexões por segundo permitidas.
     #[serde(default, rename = "connRate")]
     conn_rate: u32,
-    /// Máximo de conexões concorrentes (0 = sem limite).
+    /// Máximo de conexões concorrentes.
     #[serde(default, rename = "connMax")]
     conn_max: u32,
 }
@@ -440,9 +441,19 @@ fn apply_kind(store: &Store, docs: &[ManifestDoc], kind: &str, dir: &str) -> Res
         manifest::warn_unknown_fields(doc, FW_SPEC_FIELDS);
         let spec: FwDocSpec = manifest::spec_of(doc)?;
 
+        // Valida o scope explicitamente — uma gralha (`netowrk`) não pode cair em
+        // silêncio no caminho container e falhar depois com 'container não existe'.
+        let scope = spec.scope.as_deref().unwrap_or("container");
+        if !matches!(scope, "container" | "network") {
+            return Err(Error::Invalid(format!(
+                "{kind}/{}: scope inválido '{scope}' (usa container|network)",
+                doc.metadata.name
+            )));
+        }
+
         // scope: network — política de egress POR-REDE (Egress apenas). O `target`
         // é o nome de uma rede; liga às APIs de motor que só tinham CLI.
-        if spec.scope.as_deref() == Some("network") {
+        if scope == "network" {
             if dir != "out" {
                 return Err(Error::Invalid(format!(
                     "{kind}/{}: scope: network só é suportado em Egress (não há política de INGRESS por-rede)",
@@ -505,20 +516,36 @@ fn apply_network_egress(kind: &str, name: &str, spec: &FwDocSpec) -> Result<()> 
             "{kind}/{name}: `rules` é só para scope: container — em scope: network usa allowCidrs/fqdnAllowlist"
         )));
     }
-    // A bridge REAL vive no registo do infra (não no NetworkStore) — ver egress_net.
-    let bridge = infra::resolve_net(&spec.target)?.0;
-
     let policy = spec.default_policy.as_deref().unwrap_or("allow");
     if !matches!(policy, "allow" | "deny") {
         return Err(Error::Invalid(format!("{kind}/{name}: defaultPolicy must be allow|deny")));
     }
-    // deny + allowCidrs → allowlist (nega tudo excepto DNS + estes CIDRs).
-    if policy == "deny" && !spec.allow_cidrs.is_empty() {
-        for c in &spec.allow_cidrs {
-            if !fw_src_ok(c) {
-                return Err(Error::Invalid(format!("{kind}/{name}: invalid CIDR '{c}'")));
-            }
+    // A allowlist (CIDR/FQDN) SÓ tem efeito com `deny` — com `allow` a saída fica
+    // aberta e a lista seria descartada em silêncio (o utilizador pensaria que
+    // fechou a rede). Erro claro em vez de aparência falsa de restrição.
+    if policy == "allow" && (!spec.allow_cidrs.is_empty() || !spec.fqdn_allowlist.is_empty()) {
+        return Err(Error::Invalid(format!(
+            "{kind}/{name}: allowCidrs/fqdnAllowlist só fazem sentido com defaultPolicy: deny (com allow a saída fica aberta)"
+        )));
+    }
+    // VALIDA TUDO antes de aplicar QUALQUER coisa (falha-antes-de-tocar): um CIDR
+    // ou FQDN inválido a meio não pode deixar o egress em estado parcial.
+    for c in &spec.allow_cidrs {
+        if !fw_src_ok(c) {
+            return Err(Error::Invalid(format!("{kind}/{name}: invalid CIDR '{c}'")));
         }
+    }
+    for host in &spec.fqdn_allowlist {
+        if !fw_host_ok(host) {
+            return Err(Error::Invalid(format!("{kind}/{name}: hostname inválido '{host}'")));
+        }
+    }
+
+    // A bridge REAL vive no registo do infra (não no NetworkStore) — ver egress_net.
+    let bridge = infra::resolve_net(&spec.target)?.0;
+
+    if policy == "deny" && !spec.allow_cidrs.is_empty() {
+        // deny + allowCidrs → allowlist (nega tudo excepto DNS + estes CIDRs).
         let cidrs: Vec<&str> = spec.allow_cidrs.iter().map(String::as_str).collect();
         infra::set_egress_policy_net_allowlist(&bridge, &cidrs)?;
     } else {
@@ -528,15 +555,17 @@ fn apply_network_egress(kind: &str, name: &str, spec: &FwDocSpec) -> Result<()> 
 
     // FQDN allowlist — aprendida ao vivo do DNS (DNS-snooping), acrescenta a `*.host`.
     for host in &spec.fqdn_allowlist {
-        if !fw_host_ok(host) {
-            return Err(Error::Invalid(format!("{kind}/{name}: hostname inválido '{host}'")));
-        }
         infra::set_egress_host(&bridge, host)?;
     }
 
-    // rate-limit L4 (GLOBAL — não por-rede). 0/0 = sem guard.
+    // rate-limit L4 (GLOBAL — não por-rede). `{0,0}` = desligar EXPLICITAMENTE o
+    // guard (clear_l4_guard), não "l4guard 0 0" (cuja semântica do zero é ambígua).
     if let Some(rl) = &spec.rate_limit {
-        infra::set_l4_guard(rl.conn_rate, rl.conn_max)?;
+        if rl.conn_rate == 0 && rl.conn_max == 0 {
+            infra::clear_l4_guard()?;
+        } else {
+            infra::set_l4_guard(rl.conn_rate, rl.conn_max)?;
+        }
     }
 
     let extras = format!(
@@ -598,6 +627,43 @@ fn egress_host(network: &str, hostname: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn net_spec(policy: &str, cidrs: &[&str], fqdns: &[&str], rules: Vec<FwDocRule>) -> FwDocSpec {
+        FwDocSpec {
+            scope: Some("network".into()),
+            target: "n".into(),
+            default_policy: Some(policy.into()),
+            rules,
+            allow_cidrs: cidrs.iter().map(|s| s.to_string()).collect(),
+            fqdn_allowlist: fqdns.iter().map(|s| s.to_string()).collect(),
+            rate_limit: None,
+        }
+    }
+
+    #[test]
+    fn network_egress_recusa_allowlist_com_policy_allow() {
+        // #1: allow + allowlist = restrição só na aparência → erro claro.
+        let e = apply_network_egress("Egress", "e", &net_spec("allow", &["10.0.0.0/8"], &[], vec![])).unwrap_err();
+        assert!(e.to_string().contains("só fazem sentido com defaultPolicy: deny"), "{e}");
+        let e = apply_network_egress("Egress", "e", &net_spec("allow", &[], &["github.com"], vec![])).unwrap_err();
+        assert!(e.to_string().contains("só fazem sentido com defaultPolicy: deny"), "{e}");
+    }
+
+    #[test]
+    fn network_egress_valida_tudo_antes_de_tocar_no_motor() {
+        // Estes erros disparam ANTES do resolve_net (que precisaria do ingress a
+        // correr) — validação pura, testável sem infra.
+        // #3: CIDR inválido.
+        assert!(apply_network_egress("Egress", "e", &net_spec("deny", &["nope"], &[], vec![]))
+            .unwrap_err().to_string().contains("invalid CIDR"));
+        // #3: FQDN inválido (injecção).
+        assert!(apply_network_egress("Egress", "e", &net_spec("deny", &[], &["x;rm -rf"], vec![]))
+            .unwrap_err().to_string().contains("hostname inválido"));
+        // `rules` em scope network.
+        let rules = vec![FwDocRule { proto: None, port: "80".into(), from: None, to: None, action: None, note: None }];
+        assert!(apply_network_egress("Egress", "e", &net_spec("deny", &[], &[], rules))
+            .unwrap_err().to_string().contains("`rules` é só para scope: container"));
+    }
 
     #[test]
     fn fw_host_ok_aceita_fqdn_valido_recusa_lixo() {
