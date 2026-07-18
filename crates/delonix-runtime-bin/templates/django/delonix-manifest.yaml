@@ -1,0 +1,16 @@
+apiVersion: delonix.io/v1
+kind: Container
+metadata:
+  name: __NAME__
+  labels: { app: __NAME__ }
+spec:
+  image: __NAME__:dev
+  restart: always
+  ports:
+    - "__PORT__:__PORT__"
+  env:
+    - "DEBUG=false"
+    - "ALLOWED_HOSTS=*"
+    # - "SECRET_KEY=..."   # set via `delonix secret` in production
+  memory: 512M
+  cpus: "1.0"

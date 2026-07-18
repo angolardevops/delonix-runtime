@@ -1,0 +1,20 @@
+[project]
+name = "__NAME__"
+version = "0.1.0"
+description = "A Django project scaffolded by `delonix ... init --template django`."
+requires-python = ">=3.11"
+dependencies = [
+    "django>=5.1",
+    "gunicorn>=23.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "pytest-django>=4.9",
+    "ruff>=0.7",
+]
+
+# Not a package — a Django project is run via manage.py, so uv installs deps only.
+[tool.uv]
+package = false
