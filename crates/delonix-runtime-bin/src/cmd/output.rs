@@ -152,6 +152,20 @@ impl Table {
         }
     }
 
+    /// Como `print`, mas devolve a tabela inteira (cabeçalho + linhas) como String
+    /// — para compor dentro doutra saída (ex.: o `dash` mete a tabela num painel).
+    pub fn render_all(&self) -> String {
+        let widths = self.widths();
+        let mut out = String::new();
+        out.push_str(&self.render(&self.headers, &widths));
+        out.push('\n');
+        for r in &self.rows {
+            out.push_str(&self.render(r, &widths));
+            out.push('\n');
+        }
+        out
+    }
+
     fn widths(&self) -> Vec<usize> {
         let mut w: Vec<usize> = self.headers.iter().map(|h| display_width(h)).collect();
         for r in &self.rows {
