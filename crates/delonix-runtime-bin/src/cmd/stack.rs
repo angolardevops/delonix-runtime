@@ -436,9 +436,13 @@ fn validate_graph_with(
                 }
             }
             "Ingress" | "Egress" => {
-                if let Some(target) = doc.spec.get("target").and_then(|v| v.as_str()) {
+                let scope = doc.spec.get("scope").and_then(|v| v.as_str()).unwrap_or("container");
+                if !matches!(scope, "container" | "network") {
+                    // Mensagem coerente com o apply (que também rejeita o scope).
+                    issues.push(format!("{} '{name}' → scope inválido '{scope}' (usa container|network)", doc.kind));
+                } else if let Some(target) = doc.spec.get("target").and_then(|v| v.as_str()) {
                     // scope: network → o target é uma REDE; senão, um Container.
-                    if doc.spec.get("scope").and_then(|v| v.as_str()) == Some("network") {
+                    if scope == "network" {
                         if !networks.contains(target) {
                             issues.push(format!("{} '{name}' (scope network) → target '{target}' não é uma Network declarada nem existente", doc.kind));
                         }
