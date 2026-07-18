@@ -31,3 +31,7 @@ serde_yaml = "0.9"
 sha2 = { workspace = true }
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls-webpki-roots"] }
 libc = { workspace = true }
+# `delonix dash` — TUI interactivo (tiles/tabela/gráfico estilo htop). Só o BIN a
+# usa (os crates de motor ficam dep-limpos); o modo `--once` (snapshot de texto)
+# não precisa de tty. ratatui traz o crossterm.
+ratatui = "0.29"

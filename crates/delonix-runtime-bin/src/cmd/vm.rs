@@ -91,6 +91,11 @@ fn default_network() -> String {
 #[allow(clippy::large_enum_variant)]
 #[derive(Subcommand)]
 pub enum VmCmd {
+    /// Dashboard (KPIs + tabela) das VMs — TUI interactivo, ou `--once` snapshot.
+    Dash {
+        #[arg(long)]
+        once: bool,
+    },
     /// Inicializa um projecto com manifesto de VM — ficheiros JÁ PREENCHIDOS (imagens
     /// incluídas), prontos a usar sem editar nada.
     Init {
@@ -327,10 +332,14 @@ pub fn run(action: VmCmd) -> Result<()> {
     if let VmCmd::Init { dir, name, image, force, template, up } = action {
         return cmd_init(super::scaffold::Target::Vm, dir, name, image, force, template, up);
     }
+    if let VmCmd::Dash { once } = action {
+        return super::dash::run(super::dash::DashScope::Vms, once);
+    }
     let base = state_root();
     match action {
         // Tratado no topo de `run` (faz `return`).
         VmCmd::Init { .. } => unreachable!("tratado acima"),
+        VmCmd::Dash { .. } => unreachable!("tratado acima"),
         VmCmd::Create {
             name,
             disk,

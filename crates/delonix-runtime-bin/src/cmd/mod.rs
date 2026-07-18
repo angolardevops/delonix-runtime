@@ -5,6 +5,7 @@ pub mod build;
 pub mod cluster;
 pub mod complete;
 pub mod conditions;
+pub mod dash;
 pub mod kindmode;
 pub mod container;
 pub mod image;

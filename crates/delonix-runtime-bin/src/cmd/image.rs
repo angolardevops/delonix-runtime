@@ -36,6 +36,11 @@ fn default_context() -> PathBuf {
 
 #[derive(Subcommand)]
 pub enum ImageCmd {
+    /// Dashboard (KPIs + tabela) das imagens — TUI interactivo, ou `--once` snapshot.
+    Dash {
+        #[arg(long)]
+        once: bool,
+    },
     /// Puxa uma imagem de um registo.
     Pull {
         image: String,
@@ -214,6 +219,9 @@ pub enum VmSub {
 pub fn run(vm: bool, action: ImageCmd) -> Result<()> {
     // login/logout são agnósticos a container-vs-VM (mesmo auth.json).
     match &action {
+        ImageCmd::Dash { once } => {
+            return super::dash::run(super::dash::DashScope::Images, *once);
+        }
         ImageCmd::Login { registry, username, password_stdin } => {
             return cmd_login(registry, username, *password_stdin);
         }
@@ -241,6 +249,7 @@ pub fn run(vm: bool, action: ImageCmd) -> Result<()> {
     }
     let (images, _store) = open_stores()?;
     match action {
+        ImageCmd::Dash { .. } => unreachable!("tratado no topo de run"),
         ImageCmd::Pull { image, verify } => cmd_pull(&images, &image, verify.as_deref()),
         ImageCmd::Ls => cmd_ls(&images),
         ImageCmd::Describe { names } => cmd_describe(&images, &names),
@@ -293,6 +302,7 @@ fn cmd_login(registry: &str, username: &str, password_stdin: bool) -> Result<()>
 fn run_vm(action: ImageCmd) -> Result<()> {
     use super::vmimage::{self, VmImageCmd};
     let mapped = match action {
+        ImageCmd::Dash { .. } => unreachable!("tratado no topo de run"),
         ImageCmd::Ls => VmImageCmd::Ls,
         ImageCmd::Describe { names } => VmImageCmd::Describe { names },
         ImageCmd::Pull { image, verify: _ } => VmImageCmd::Pull { source: image, name: None },
