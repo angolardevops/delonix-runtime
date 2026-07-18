@@ -622,6 +622,19 @@ fn ensure_net_bridge(bridge: &str, gateway: &str) -> Result<()> {
     }
     // servidor DHCP da rede (para VMs/clientes que peçam IP).
     start_dhcp(bridge, &prefix_of(gateway));
+    // Re-aplica a intenção de egress PERSISTIDA quando a bridge é (re)criada — é o
+    // que a faz sobreviver ao respawn do holder (o nft e o registry FQDN vivem no
+    // netns efémero). Só no `!exists` (bridge nova): idempotente e barato.
+    if !exists {
+        if let Some(def) = network_list().into_iter().find(|d| d.bridge == bridge) {
+            if let Some(pol) = def.egress.policy.clone() {
+                let _ = do_egress_net(bridge, &pol);
+            }
+            for host in def.egress.hosts {
+                let _ = do_egress_host(bridge, &host);
+            }
+        }
+    }
     Ok(())
 }
 
@@ -1130,6 +1143,10 @@ fn do_egress_net(bridge: &str, policy: &str) -> Result<()> {
         argv.extend(spec.iter().map(|s| s.as_str()));
         run("nft", &argv)?;
     }
+    // Persiste a intenção (sobrevive ao respawn do holder). `allow` = sem política.
+    update_netdef_egress(&bridge, |e| {
+        e.policy = if policy == "allow" { None } else { Some(policy.to_string()) };
+    });
     Ok(())
 }
 
@@ -1191,9 +1208,15 @@ fn do_egress_host(bridge: &str, suffix: &str) -> Result<()> {
     // Memoriza o sufixo (sem duplicar) para a thread de DNS o snoopar.
     if let Ok(mut g) = FQDN_ALLOW.lock() {
         if !g.iter().any(|(b, _, s)| *b == bridge && *s == suffix) {
-            g.push((bridge.clone(), set, suffix));
+            g.push((bridge.clone(), set, suffix.clone()));
         }
     }
+    // Persiste o hostname (sobrevive ao respawn do holder).
+    update_netdef_egress(&bridge, |e| {
+        if !e.hosts.contains(&suffix) {
+            e.hosts.push(suffix);
+        }
+    });
     Ok(())
 }
 
@@ -1513,6 +1536,36 @@ pub struct NetDef {
     pub name: String,
     pub bridge: String,
     pub prefix: String, // ex.: "10.201"
+    /// Intenção de egress da rede, PERSISTIDA para sobreviver ao respawn do
+    /// holder (o nft e o registry FQDN vivem num netns efémero). Re-aplicada em
+    /// [`ensure_net_bridge`] quando a bridge é recriada.
+    #[serde(default)]
+    pub egress: EgressState,
+}
+
+/// Política de egress de uma rede, guardada na [`NetDef`].
+#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
+pub struct EgressState {
+    /// `deny` | `allow` | `allowlist:<cidrs>`. `None` = default (allow).
+    #[serde(default)]
+    pub policy: Option<String>,
+    /// Sufixos FQDN permitidos (`egress host`).
+    #[serde(default)]
+    pub hosts: Vec<String>,
+}
+
+/// Actualiza (e persiste) a intenção de egress da rede cuja bridge é `bridge`.
+/// Sem efeito se nenhuma `NetDef` corresponder (ex.: a bridge default `delonix0`).
+fn update_netdef_egress(bridge: &str, mutate: impl FnOnce(&mut EgressState)) {
+    for mut def in network_list() {
+        if def.bridge == bridge {
+            mutate(&mut def.egress);
+            if let Ok(json) = serde_json::to_vec_pretty(&def) {
+                let _ = std::fs::write(netdef_path(&def.name), json);
+            }
+            return;
+        }
+    }
 }
 
 fn networks_dir() -> PathBuf {
@@ -1572,6 +1625,7 @@ pub fn network_create(name: &str) -> Result<NetDef> {
         name: name.to_string(),
         bridge: format!("dlxn{:08x}", crate::fnv32(name)),
         prefix,
+        egress: EgressState::default(),
     };
     std::fs::create_dir_all(networks_dir()).map_err(|e| Error::Runtime {
         context: "networks dir",
@@ -1593,6 +1647,7 @@ pub fn network_create_with(name: &str, prefix: &str) -> Result<NetDef> {
         name: name.to_string(),
         bridge: format!("dlxn{:08x}", crate::fnv32(name)),
         prefix: prefix.to_string(),
+        egress: EgressState::default(),
     };
     std::fs::create_dir_all(networks_dir()).map_err(|e| Error::Runtime {
         context: "networks dir",
