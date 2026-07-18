@@ -140,11 +140,13 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
     let store = NetworkStore::open(state_root())?;
     for doc in manifest::of_kind(docs, "Network") {
         let name = &doc.metadata.name;
+        // Avisa de gralhas ANTES do early-continue (ver container::apply): um
+        // re-apply contra uma rede já existente também deve ver o aviso.
+        manifest::warn_unknown_fields(doc, NETWORK_SPEC_FIELDS);
         if store.get(name).is_ok() {
             println!("network/{name}: já existe, nada a fazer");
             continue;
         }
-        manifest::warn_unknown_fields(doc, NETWORK_SPEC_FIELDS);
         let spec: NetworkSpec = manifest::spec_of(doc)?;
         create_network(&store, name, &spec.driver, spec.parent, spec.subnet, &spec.gateway, spec.vni, spec.peers, spec.wg_ip)?;
         println!("network/{name}: criada");
