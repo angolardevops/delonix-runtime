@@ -6,12 +6,15 @@
 //! **Os valores nunca são impressos** por omissão (`inspect` redige-os; `--reveal`
 //! é opt-in explícito) — um `secret` é rotineiramente colado em issues/chats.
 
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use clap::Subcommand;
 use delonix_runtime_core::secret::{parse_env_file, valid_name};
 use delonix_runtime_core::{Error, Result, Secret, SecretStore};
+use serde::Deserialize;
 
+use super::manifest::{self, ManifestDoc};
 use super::output;
 use super::util::state_root;
 
@@ -60,6 +63,66 @@ pub enum SecretCmd {
     /// Roda a chave-mestra do host: re-cifra TODOS os segredos com uma chave
     /// nova. Os valores são preservados.
     RotateKey,
+    /// Aplica os documentos `kind: Secret` de um manifesto (declarativo — cria o
+    /// segredo sem precisar de `secret create` na CLI).
+    Apply {
+        #[arg(short = 'f', long = "file")]
+        file: Option<PathBuf>,
+    },
+}
+
+/// `spec` de `kind: Secret` — um saco de pares chave/valor cifrados at-rest,
+/// consumido por `Container.secret` (env/ficheiros) e `Storage.passwordSecret`
+/// (chave `password`). Fecha o gap "sem CLI": declara-se o segredo em YAML em vez
+/// de `delonix secret create`.
+#[derive(Debug, Deserialize)]
+struct SecretSpec {
+    /// Pares `CHAVE: valor` inline. **Plaintext no manifesto** — cómodo para dev,
+    /// mas o valor fica em claro no ficheiro; para produção preferir `fromEnvFile`
+    /// (fora do controlo de versões) ou o `secret create` da CLI. Avisado no apply.
+    #[serde(default, rename = "stringData")]
+    string_data: BTreeMap<String, String>,
+    /// Caminho de um ficheiro `KEY=value` (ex.: `.env`) — mantém os valores FORA
+    /// do manifesto. Aplicado ANTES do `stringData` (inline sobrepõe o ficheiro).
+    #[serde(default, rename = "fromEnvFile")]
+    from_env_file: Option<PathBuf>,
+}
+
+/// Nomes aceites no `spec` de `kind: Secret`, para o aviso de campos desconhecidos.
+pub(crate) const SECRET_SPEC_FIELDS: &[&str] = &["stringData", "fromEnvFile"];
+
+/// Aplica os documentos `kind: Secret` (chamado por `secret apply` e por
+/// `stack apply`). Idempotente: `SecretStore::save` cria ou substitui.
+pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
+    let store = SecretStore::open(state_root())?;
+    for doc in manifest::of_kind(docs, "Secret") {
+        let name = &doc.metadata.name;
+        manifest::warn_unknown_fields(doc, SECRET_SPEC_FIELDS);
+        let spec: SecretSpec = manifest::spec_of(doc)?;
+
+        let mut data = BTreeMap::new();
+        if let Some(f) = &spec.from_env_file {
+            let content = std::fs::read_to_string(f)
+                .map_err(|e| Error::Invalid(format!("Secret '{name}': fromEnvFile {}: {e}", f.display())))?;
+            data.extend(parse_env_file(&content));
+        }
+        // Inline sobrepõe o ficheiro. Aviso: os valores ficam em claro no manifesto.
+        if !spec.string_data.is_empty() {
+            eprintln!(
+                "AVISO: Secret '{name}': stringData tem valores em CLARO no manifesto — não commites isto num repo; usa fromEnvFile ou `delonix secret create` para produção"
+            );
+            data.extend(spec.string_data);
+        }
+        if data.is_empty() {
+            return Err(Error::Invalid(format!(
+                "Secret '{name}': vazio — indica stringData e/ou fromEnvFile"
+            )));
+        }
+        let n = data.len();
+        store.save(&Secret { name: name.clone(), data, updated_unix: now_unix() })?;
+        println!("secret/{name}: garantido ({n} chave(s))");
+    }
+    Ok(())
 }
 
 fn now_unix() -> u64 {
@@ -153,6 +216,11 @@ pub fn run(action: SecretCmd) -> Result<()> {
         SecretCmd::RotateKey => {
             store.rotate_key()?;
             println!("chave-mestra rodada — todos os segredos re-cifrados com a nova chave");
+        }
+        SecretCmd::Apply { file } => {
+            let path = manifest::resolve_path(file)?;
+            let docs = manifest::load(&path)?;
+            return apply(&docs);
         }
     }
     Ok(())
