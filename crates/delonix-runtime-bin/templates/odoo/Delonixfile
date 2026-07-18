@@ -1,0 +1,9 @@
+# Delonixfile — Odoo 19 (official image). Odoo IS the image; PostgreSQL and the
+# network that wires them live in delonix-manifest.yaml — bring the whole thing
+# up with `delonix stack apply` (Odoo needs a database to boot; a bare
+# `container run` of this image alone will not become healthy).
+# Build with:  delonix build -t __NAME__:dev .
+FROM odoo:19
+# Your custom modules land here — Odoo scans /mnt/extra-addons on startup.
+COPY addons /mnt/extra-addons
+# health: Odoo's built-in /web/health (see delonix-manifest.yaml + template.meta).

@@ -1,0 +1,65 @@
+# Odoo 19 + PostgreSQL, wired over a Delonix bridge network.
+# Bring the WHOLE stack up (network → volumes → db → odoo) with one command:
+#     delonix stack apply
+# Odoo will not boot without the database, so `stack apply` (not a lone
+# `container run`) is the way in.
+---
+apiVersion: delonix.io/v1
+kind: Network
+metadata:
+  name: __NAME__-net
+spec:
+  driver: bridge
+---
+apiVersion: delonix.io/v1
+kind: Volume
+metadata:
+  name: __NAME__-dbdata
+spec:
+  driver: local
+---
+apiVersion: delonix.io/v1
+kind: Volume
+metadata:
+  name: __NAME__-odoo
+spec:
+  driver: local
+---
+apiVersion: delonix.io/v1
+kind: Container
+metadata:
+  name: __NAME__-db
+  labels: { app: __NAME__, tier: db }
+spec:
+  image: postgres:16
+  restart: always
+  network: __NAME__-net
+  networkAlias: [db]          # Odoo reaches PostgreSQL at host `db`
+  env:
+    - "POSTGRES_USER=odoo"
+    - "POSTGRES_PASSWORD=odoo"
+    - "POSTGRES_DB=postgres"  # Odoo creates its own DBs; keep the bootstrap DB
+  volumes:
+    - "__NAME__-dbdata:/var/lib/postgresql/data"
+  memory: 512M
+  cpus: "1.0"
+---
+apiVersion: delonix.io/v1
+kind: Container
+metadata:
+  name: __NAME__
+  labels: { app: __NAME__, tier: web }
+spec:
+  image: __NAME__:dev
+  restart: always
+  network: __NAME__-net
+  ports:
+    - "__PORT__:8069"
+  env:
+    - "HOST=db"               # matches the db container's networkAlias
+    - "USER=odoo"
+    - "PASSWORD=odoo"
+  volumes:
+    - "__NAME__-odoo:/var/lib/odoo"
+  memory: 1G
+  cpus: "2.0"
