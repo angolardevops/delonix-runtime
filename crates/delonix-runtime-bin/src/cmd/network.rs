@@ -11,9 +11,13 @@
 //! `bridge` (o único que os containers atacham hoje via `infra::
 //! attach_container`), `network create` orquestra os dois EM CONJUNTO, com o
 //! `NetworkStore` como fonte da verdade do prefixo (`infra::network_create_with`
-//! existe precisamente para alinhar os dois — ver o comentário lá). Os drivers
-//! `macvlan`/`ipvlan`/`overlay` só ficam no `NetworkStore` (não passam pela
-//! bridge do holder da mesma forma) — limitação conhecida, não bloqueante.
+//! existe precisamente para alinhar os dois — ver o comentário lá). O driver
+//! `overlay` TAMBÉM orquestra os dois: além do registo, sobe o plano físico no
+//! holder (bridge + uplink VXLAN + WireGuard se cifrado — ver `realize_overlay`),
+//! porque é realizável sem privilégio de host. Já `macvlan`/`ipvlan` só ficam no
+//! `NetworkStore`: o plano físico deles precisa de CAP_NET_ADMIN na init-netns do
+//! host, que o modelo rootless não tem — o `create` regista mas AVISA alto que a
+//! rede não foi realizada (Realized=False), em vez de fingir sucesso.
 
 use clap::Subcommand;
 use clap_complete::engine::ArgValueCandidates;
@@ -201,16 +205,97 @@ pub(crate) fn create_network(
             let subnet = subnet.ok_or_else(|| {
                 delonix_runtime_core::Error::Invalid(format!("--subnet é obrigatório para driver {driver}"))
             })?;
-            store.create_lan(name, driver, &parent, &subnet, gateway)
+            let net = store.create_lan(name, driver, &parent, &subnet, gateway)?;
+            // HONESTIDADE (não um no-op silencioso): macvlan/ipvlan põem o container
+            // DIRECTAMENTE na LAN física do `parent` — isso exige criar a
+            // sub-interface na init-netns do host com CAP_NET_ADMIN, privilégio que
+            // uma sessão rootless (o modelo por omissão deste motor) não tem. O
+            // registo declarativo fica gravado (intenção preservada p/ um host
+            // privilegiado), mas o plano físico NÃO é realizado — dizê-lo alto.
+            eprintln!(
+                "aviso: rede '{name}' (driver {driver}) registada mas NÃO realizada — \
+                 condition Realized=False reason=DriverNotImplemented. macvlan/ipvlan \
+                 precisam de privilégio na init-netns do host (CAP_NET_ADMIN), que o \
+                 modelo rootless não tem; containers NÃO conseguirão atachar-se a ela. \
+                 Para rede multi-nó rootless use driver 'overlay'."
+            );
+            Ok(net)
         }
         "overlay" => {
             let vni = vni.ok_or_else(|| delonix_runtime_core::Error::Invalid("--vni é obrigatório para driver overlay".into()))?;
-            store.create_overlay(name, vni, &peers, wg_ip.as_deref())
+            let net = store.create_overlay(name, vni, &peers, wg_ip.as_deref())?;
+            // Plano físico rootless (holder netns): bridge + uplink VXLAN + WG (se
+            // cifrado). Ao contrário de macvlan/ipvlan, o overlay É realizável sem
+            // privilégio de host — vive todo no netns do holder.
+            if let Err(e) = realize_overlay(&net) {
+                eprintln!(
+                    "aviso: rede overlay '{name}' registada mas o uplink físico não \
+                     subiu ({e}) — condition Realized=False. Reconcilia no próximo \
+                     'network create' quando o holder/pares estiverem disponíveis."
+                );
+            }
+            Ok(net)
         }
         other => Err(delonix_runtime_core::Error::Invalid(format!(
             "driver desconhecido: '{other}' (use bridge|macvlan|ipvlan|overlay)"
         ))),
     }
+}
+
+/// **Realiza o plano físico de uma rede overlay** no holder netns rootless:
+/// (1) bridge do holder alinhada ao prefixo que o `NetworkStore` decidiu;
+/// (2) uplink VXLAN (`dlxvx<vni>`) a masterizar essa bridge + FDB dos pares;
+/// (3) WireGuard, SE o overlay é cifrado (`wg_ip` presente) — cifra o transporte
+///     VXLAN entre nós (o FDB passa a apontar para os `wg_ip` em vez dos `node_ip`).
+///
+/// Espelha `delonix_net::Net::ensure_vxlan`/`ensure_overlay_wg` (o caminho antigo
+/// root/host-netns), mas conduzido pelo control-socket do holder — o único com
+/// CAP_NET_ADMIN no netns de infra. Idempotente. Requer o holder de pé
+/// (`ensure_up`). Só faz sentido chamar quando `net.driver == "overlay"`.
+fn realize_overlay(net: &Network) -> Result<()> {
+    const WG_PORT: u16 = 51820;
+    let Some(vni) = net.vni else { return Ok(()) };
+    let Some(dev) = net.vxlan_dev() else { return Ok(()) };
+    // Overlay CIFRADO (wg_ip deste nó presente) EXIGE o `wg` no host. Falha ANTES
+    // de subir o VXLAN: senão o FDB apontaria para os wg_ip dos pares (só
+    // alcançáveis pelo túnel) sem túnel nenhum a subir → uplink silenciosamente
+    // blackholed. Erro acionável em vez de um overlay que finge estar de pé.
+    let encrypted = net.wg_ip.is_some();
+    if encrypted && !delonix_net::wg::available() {
+        return Err(delonix_runtime_core::Error::Invalid(
+            "overlay cifrado (wg_ip) mas 'wg' indisponível no host — instala \
+             wireguard-tools + o módulo do kernel, ou remove wg_ip para transporte \
+             VXLAN plano (não cifrado)"
+                .into(),
+        ));
+    }
+    // Parse dos peers UMA vez (reusado no FDB e no loop WG).
+    let parsed: Vec<(String, Option<(String, String)>)> =
+        net.peers.iter().map(|p| delonix_net::parse_overlay_peer(p)).collect();
+    // Holder de pé (sem incrementar o ref-count — o uplink é infra persistente,
+    // não uma carga; morre com o `network rm` → `netdel`, não com um release).
+    infra::ensure_up()?;
+    // A bridge/gateway vêm do plano físico alinhado ao prefixo do NetworkStore.
+    infra::network_create_with(&net.name, &net.prefix)?;
+    let (bridge, _prefix, gateway) = infra::resolve_net(&net.name)?;
+    // FDB: `wg_ip` de cada par se cifrado, senão o `node_ip` plano.
+    let dsts: Vec<String> = parsed
+        .iter()
+        .map(|(node_ip, wg)| wg.as_ref().map(|(_pubkey, wgip)| wgip.clone()).unwrap_or_else(|| node_ip.clone()))
+        .collect();
+    infra::set_vxlan(&dev, vni, &bridge, &gateway, &dsts)?;
+    // WireGuard só no overlay CIFRADO (a disponibilidade já foi garantida acima).
+    if let Some(my_wg_ip) = net.wg_ip.as_deref() {
+        let key = delonix_net::wg::ensure_node_key()?;
+        let iface = format!("wgo{vni:06x}"); // <= 15 chars
+        infra::set_wg_iface(&iface, &key.private, WG_PORT, &format!("{my_wg_ip}/24"))?;
+        for (node_ip, wg) in &parsed {
+            if let Some((pubkey, wgip)) = wg {
+                infra::set_wg_peer(&iface, pubkey, &format!("{node_ip}:{WG_PORT}"), &[format!("{wgip}/32")])?;
+            }
+        }
+    }
+    Ok(())
 }
 
 fn cmd_inspect(store: &NetworkStore, name: &str) -> Result<()> {

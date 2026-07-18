@@ -575,6 +575,9 @@ fn handle_control(line: &str) -> String {
                 allowed_ips: allowed.split(',').map(str::to_string).collect(),
             },
         ),
+        // Uplink VXLAN de uma rede overlay (o L2 partilhado entre nós). `dsts` = os
+        // destinos do FDB (`wg_ip` se cifrado, senão `node_ip`; `-` = sem pares).
+        ["vxlan", dev, vni, bridge, gateway, dsts] => do_vxlan(dev, vni, bridge, gateway, dsts),
         _ => Err(Error::Invalid(format!("comando de controlo inválido: {line:?}"))),
     };
     match res {
@@ -995,6 +998,54 @@ fn do_vmtap(tap: &str, bridge: &str, gateway: &str) -> Result<()> {
 /// Remove o `tap` de uma VM (no `vm rm`/stop). Best-effort.
 fn do_vmtapdel(tap: &str) -> Result<()> {
     run_ok("ip", &["link", "del", &sanitize(tap)]);
+    Ok(())
+}
+
+/// Um destino de FDB só pode ser um IP (v4/v6): dígitos hex, `.`, `:`. Rejeita
+/// tudo o resto ANTES de o passar ao `bridge`/`ip`. Vai por argv (não shell), mas
+/// mantemos a disciplina `valid_*` da auditoria — um destino com espaço/`;`/`|`
+/// nunca chega a um comando. (Um valor vazio já foi filtrado pelo chamador.)
+fn valid_fdb_dst(dst: &str) -> bool {
+    !dst.is_empty()
+        && dst.len() <= 45 // teto de um IPv6 textual
+        && dst.chars().all(|c| c.is_ascii_hexdigit() || c == '.' || c == ':')
+}
+
+/// **Sobe o uplink VXLAN de uma rede overlay** no netns de infra (porta de
+/// `crate::Net::ensure_vxlan` para o modelo holder rootless): garante a `<bridge>`
+/// da rede, cria o device `<dev>` (id `<vni>`, porta 4789, `nolearning`) a
+/// masterizá-la, e semeia o FDB com uma entrada "broadcast" (`00:…:00`) por cada
+/// destino dos pares (`dsts_csv` = `wg_ip` se o overlay é cifrado, senão `node_ip`;
+/// `-` = ainda sem pares). Idempotente: só cria o que falta, só semeia FDB novo.
+fn do_vxlan(dev: &str, vni: &str, bridge: &str, gateway: &str, dsts_csv: &str) -> Result<()> {
+    let dev = sanitize(dev);
+    let bridge = sanitize(bridge);
+    let vni: u32 = vni.parse().map_err(|_| Error::Invalid(format!("vni inválido: {vni}")))?;
+    // A bridge da overlay é uma bridge de rede normal do holder — mesma função que
+    // o `attach`/`vmtap` usam, para containers e VXLAN partilharem o mesmo L2.
+    ensure_net_bridge(&bridge, gateway)?;
+    let exists = crate::capture("ip", &["link", "show", &dev])
+        .map(|o| o.contains(dev.as_str()))
+        .unwrap_or(false);
+    if !exists {
+        run("ip", &[
+            "link", "add", &dev, "type", "vxlan", "id", &vni.to_string(),
+            "dstport", crate::VXLAN_PORT, "nolearning",
+        ])?;
+        run_ok("ip", &["link", "set", &dev, "master", &bridge]);
+        run_ok("ip", &["link", "set", &dev, "up"]);
+    }
+    if dsts_csv != "-" {
+        let have = crate::capture("bridge", &["fdb", "show", "dev", &dev]).unwrap_or_default();
+        for dst in dsts_csv.split(',').map(str::trim).filter(|d| valid_fdb_dst(d)) {
+            // Match EXACTO por token (não `contains`): senão 10.0.0.5 seria "já
+            // presente" por ser substring de um 10.0.0.50 no FDB → nunca semeado.
+            let present = have.lines().any(|l| l.split_whitespace().any(|t| t == dst));
+            if !present {
+                run_ok("bridge", &["fdb", "append", "00:00:00:00:00:00", "dev", &dev, "dst", dst]);
+            }
+        }
+    }
     Ok(())
 }
 
@@ -1854,6 +1905,23 @@ pub fn set_wg_iface(iface: &str, private_key: &str, listen_port: u16, addr_cidr:
 /// Adiciona um peer WireGuard (outro nó) à interface do overlay.
 pub fn set_wg_peer(iface: &str, public_key: &str, endpoint: &str, allowed_ips: &[String]) -> Result<()> {
     control_send(&format!("wg-peer {iface} {public_key} {endpoint} {}", allowed_ips.join(",")))
+}
+
+/// **Realiza o uplink VXLAN de uma rede overlay** no netns de infra: bridge +
+/// device VXLAN (`<dev>`/`<vni>`) + FDB dos pares (`dsts` = `wg_ip` se cifrado,
+/// senão `node_ip`). O gateway alinha a subnet à decidida pelo `NetworkStore`.
+/// Requer o holder de pé (`ensure_up` antes). Idempotente. Ver [`do_vxlan`].
+pub fn set_vxlan(dev: &str, vni: u32, bridge: &str, gateway: &str, dsts: &[String]) -> Result<()> {
+    // Valida os destinos AQUI, ANTES de os interpolar na linha do control-socket
+    // (disciplina valid_* da auditoria — validar antes do `format!`/socket, não só
+    // holder-side): um dst com espaço/newline malformaria a linha ou tentaria
+    // smuggling de um 2.º comando. `do_vxlan` revalida, mas a fronteira é esta.
+    if let Some(bad) = dsts.iter().find(|d| !valid_fdb_dst(d)) {
+        return Err(Error::Invalid(format!("destino de par overlay inválido: {bad:?} (só IPs)")));
+    }
+    // CSV num único token (o control-loop faz `split_whitespace`); `-` = sem pares.
+    let csv = if dsts.is_empty() { "-".to_string() } else { dsts.join(",") };
+    control_send(&format!("vxlan {dev} {vni} {bridge} {gateway} {csv}"))
 }
 
 /// Remove a firewall de um container do ingress (best-effort).
@@ -2716,6 +2784,48 @@ mod tests {
         assert!(ip.starts_with(&format!("{INFRA_PREFIX}.")), "{ip}");
         assert!(crate::valid_ip_in_subnet(INFRA_PREFIX, &ip), "{ip}");
         assert_eq!(ip, container_ip("0a0b0c0d1122")); // determinístico
+    }
+
+    #[test]
+    fn valid_fdb_dst_accepts_only_ips() {
+        // IPv4/IPv6 textuais — aceites.
+        assert!(valid_fdb_dst("10.0.0.1"));
+        assert!(valid_fdb_dst("192.168.1.254"));
+        assert!(valid_fdb_dst("fd00::1"));
+        assert!(valid_fdb_dst("2001:db8::a2f"));
+        // Injeção / lixo — recusado (o dst vai a argv do `bridge fdb`, mas mantemos
+        // a disciplina valid_* da auditoria: nada com espaço/`;`/`|`/`$` passa).
+        assert!(!valid_fdb_dst(""));
+        assert!(!valid_fdb_dst("10.0.0.1; rm -rf /"));
+        assert!(!valid_fdb_dst("$(curl evil)"));
+        assert!(!valid_fdb_dst("10.0.0.1 dev eth0"));
+        assert!(!valid_fdb_dst(&"a".repeat(46))); // acima do teto IPv6 textual
+    }
+
+    #[test]
+    fn fdb_presence_is_exact_token_not_substring() {
+        // A saída real do `bridge fdb show`: cada destino é um token isolado.
+        let have = "00:00:00:00:00:00 dst 10.0.0.50 self permanent\n\
+                    1a:2b:3c:4d:5e:6f master br0 permanent";
+        let present = |dst: &str| have.lines().any(|l| l.split_whitespace().any(|t| t == dst));
+        assert!(present("10.0.0.50")); // presente de facto
+        assert!(!present("10.0.0.5")); // NÃO presente — apesar de ser substring de 10.0.0.50
+    }
+
+    #[test]
+    fn set_vxlan_empty_peers_uses_sentinel_token() {
+        // Sem pares, o CSV colapsaria a nada e o control-loop (split_whitespace)
+        // veria 5 tokens em vez de 6 — o sentinela `-` mantém a aridade. (Não toca
+        // no holder: só validamos a forma do comando, montando-o à mão como o wrapper.)
+        let dsts: Vec<String> = Vec::new();
+        let csv = if dsts.is_empty() { "-".to_string() } else { dsts.join(",") };
+        assert_eq!(csv, "-");
+        let cmd = format!("vxlan dlxvx0042 66 dlxn0000002a 10.201.0.1 {csv}");
+        assert_eq!(cmd.split_whitespace().count(), 6);
+        // Com pares, um único token CSV (sem espaços) preserva a aridade.
+        let csv2 = ["10.0.0.2".to_string(), "10.0.0.3".to_string()].join(",");
+        let cmd2 = format!("vxlan dlxvx0042 66 dlxn0000002a 10.201.0.1 {csv2}");
+        assert_eq!(cmd2.split_whitespace().count(), 6);
     }
 
     #[test]

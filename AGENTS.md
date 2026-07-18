@@ -47,9 +47,17 @@ uma lista plana, um módulo por grupo em `crates/delonix-runtime-bin/src/cmd/`:
 - `delonix volumes` — create/ls/rm/inspect, wrapper fino sobre `VolumeStore`.
 - `delonix network` — ls/create/rm/inspect. **Dois stores em paralelo, deliberado**:
   `NetworkStore` (registo declarativo rico — drivers bridge/macvlan/ipvlan/overlay) e
-  `infra::{network_create_with,network_remove}` (plano físico do holder netns rootless). Para o
-  driver `bridge` (o único que os containers atacham hoje), `network create` orquestra os dois
-  em conjunto; `macvlan`/`ipvlan`/`overlay` só ficam no `NetworkStore` (limitação conhecida).
+  `infra::{network_create_with,network_remove}` (plano físico do holder netns rootless). Para os
+  drivers `bridge` E `overlay`, `network create` orquestra os dois em conjunto — o `overlay` sobe
+  o plano físico no holder (bridge + uplink VXLAN `dlxvx<vni>` a masterizá-la + FDB dos pares +
+  WireGuard se cifrado, ver `realize_overlay`/`infra::set_vxlan`), porque é realizável sem
+  privilégio de host (vive todo no netns do holder). Provado ao vivo: `network create --driver
+  overlay --vni 42 --peer …` cria o device VXLAN (`id 42 dstport 4789 nolearning`, master na
+  bridge) e semeia o FDB com os pares — validado até à fronteira single-node (o forwarding
+  inter-nó exige um 2.º nó real, não testável no sandbox). Já `macvlan`/`ipvlan` só ficam no
+  `NetworkStore` e o `create` **AVISA alto** que a rede NÃO foi realizada (Realized=False,
+  reason=DriverNotImplemented) em vez de fingir sucesso — o plano físico deles precisa de
+  CAP_NET_ADMIN na init-netns do host, que o modelo rootless não tem.
 - `delonix storage` — armazenamento de REDE (NFS/CIFS-SMB/WebDAV) montável como volume, estilo
   PersistentVolume do k8s. `create/ls/inspect/rm/apply` + `kind: Storage`. Uma pasta de um NAS
   (TrueNAS/Synology/Nextcloud) vira um volume nomeado que qualquer container monta com `-v <nome>:/x`.
