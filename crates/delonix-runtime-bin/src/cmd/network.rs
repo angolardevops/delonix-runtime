@@ -55,6 +55,11 @@ pub(crate) const NETWORK_SPEC_FIELDS: &[&str] =
 
 #[derive(Subcommand)]
 pub enum NetworkCmd {
+    /// Dashboard (KPIs + tabela) das redes — TUI interactivo, ou `--once` snapshot.
+    Dash {
+        #[arg(long)]
+        once: bool,
+    },
     /// Lista as redes.
     Ls,
     /// Identidade WireGuard DESTE nó, para o overlay VXLAN cifrado entre nós
@@ -116,6 +121,7 @@ pub enum NetworkCmd {
 pub fn run(action: NetworkCmd) -> Result<()> {
     let store = NetworkStore::open(state_root())?;
     match action {
+        NetworkCmd::Dash { once } => super::dash::run(super::dash::DashScope::Networks, once),
         NetworkCmd::Ls => cmd_ls(&store),
         NetworkCmd::Node { action } => cmd_node(action),
         NetworkCmd::Create { name, driver, parent, subnet, gateway, vni, peers, wg_ip } => {

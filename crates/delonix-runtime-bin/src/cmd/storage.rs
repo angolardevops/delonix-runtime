@@ -20,6 +20,11 @@ use super::util::state_root;
 
 #[derive(Subcommand)]
 pub enum StorageCmd {
+    /// Dashboard (KPIs + tabela) do storage/volumes — TUI, ou `--once` snapshot.
+    Dash {
+        #[arg(long)]
+        once: bool,
+    },
     /// Cria (e monta) um armazenamento de rede.
     Create {
         name: String,
@@ -154,6 +159,7 @@ fn resolve_password(password: Option<String>, secret: Option<String>) -> Result<
 pub fn run(action: StorageCmd) -> Result<()> {
     let store = VolumeStore::open(state_root())?;
     match action {
+        StorageCmd::Dash { once } => return super::dash::run(super::dash::DashScope::Storage, once),
         StorageCmd::Create { name, r#type, server, share, username, password, password_secret, read_only, options } => {
             let pw = resolve_password(password, password_secret)?;
             let m = build_mount(&r#type, &server, &share, username.as_deref(), pw.as_deref(), read_only, options.as_deref())?;
