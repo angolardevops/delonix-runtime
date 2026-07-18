@@ -405,7 +405,7 @@ struct RateLimitSpec {
 /// Nomes aceites no `spec` de `kind: Ingress`/`Egress`, para o aviso de campos
 /// desconhecidos (o `rules[]` é validado pela desserialização de `FwDocRule`).
 pub(crate) const FW_SPEC_FIELDS: &[&str] =
-    &["scope", "target", "defaultPolicy", "rules", "allowCidrs", "fqdnAllowlist", "rateLimit"];
+    &["direction", "scope", "target", "defaultPolicy", "rules", "allowCidrs", "fqdnAllowlist", "rateLimit"];
 
 #[derive(Deserialize)]
 struct FwDocRule {
@@ -431,13 +431,41 @@ struct FwDocRule {
 /// `stack apply` (the target containers must already exist).
 pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
     let (_images, store) = open_stores()?;
-    apply_kind(&store, docs, "Ingress", "in")?;
-    apply_kind(&store, docs, "Egress", "out")?;
+    apply_kind(&store, docs, "in")?; // kind: Ingress
+    apply_kind(&store, docs, "out")?; // kind: Egress
+    // kind: FirewallPolicy — a forma UNIFICADA (a direcção vem do `spec.direction`
+    // em vez do nome do Kind, resolvendo a confusão de que aqui `Ingress` é
+    // firewall L4, não o Ingress L7/HTTP do k8s). Aplica a MESMA lógica.
+    for doc in manifest::of_kind(docs, "FirewallPolicy") {
+        let dir = match doc.spec.get("direction").and_then(|v| v.as_str()) {
+            Some("ingress") | Some("in") => "in",
+            Some("egress") | Some("out") => "out",
+            other => {
+                return Err(Error::Invalid(format!(
+                    "FirewallPolicy/{}: direction obrigatório e ∈ {{ingress, egress}} (veio {other:?})",
+                    doc.metadata.name
+                )));
+            }
+        };
+        apply_fw_doc(&store, doc, dir)?;
+    }
     Ok(())
 }
 
-fn apply_kind(store: &Store, docs: &[ManifestDoc], kind: &str, dir: &str) -> Result<()> {
+fn apply_kind(store: &Store, docs: &[ManifestDoc], dir: &str) -> Result<()> {
+    // `dir` "in" → o Kind Ingress; "out" → o Kind Egress.
+    let kind = if dir == "in" { "Ingress" } else { "Egress" };
     for doc in manifest::of_kind(docs, kind) {
+        apply_fw_doc(store, doc, dir)?;
+    }
+    Ok(())
+}
+
+/// Aplica UM documento de firewall (Ingress/Egress/FirewallPolicy) na direcção
+/// `dir` ("in"/"out"). O rótulo nas mensagens usa o Kind real do documento.
+fn apply_fw_doc(store: &Store, doc: &ManifestDoc, dir: &str) -> Result<()> {
+    let kind = doc.kind.as_str();
+    {
         manifest::warn_unknown_fields(doc, FW_SPEC_FIELDS);
         let spec: FwDocSpec = manifest::spec_of(doc)?;
 
@@ -460,8 +488,7 @@ fn apply_kind(store: &Store, docs: &[ManifestDoc], kind: &str, dir: &str) -> Res
                     doc.metadata.name
                 )));
             }
-            apply_network_egress(kind, &doc.metadata.name, &spec)?;
-            continue;
+            return apply_network_egress(kind, &doc.metadata.name, &spec);
         }
 
         let mut c = store.load(&spec.target)?;
