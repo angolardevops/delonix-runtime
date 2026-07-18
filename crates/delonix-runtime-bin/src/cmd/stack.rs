@@ -436,8 +436,17 @@ fn validate_graph_with(
                 }
             }
             "Ingress" | "Egress" => {
-                if let Some(target) = doc.spec.get("target").and_then(|v| v.as_str()) {
-                    if !containers.contains(target) {
+                let scope = doc.spec.get("scope").and_then(|v| v.as_str()).unwrap_or("container");
+                if !matches!(scope, "container" | "network") {
+                    // Mensagem coerente com o apply (que também rejeita o scope).
+                    issues.push(format!("{} '{name}' → scope inválido '{scope}' (usa container|network)", doc.kind));
+                } else if let Some(target) = doc.spec.get("target").and_then(|v| v.as_str()) {
+                    // scope: network → o target é uma REDE; senão, um Container.
+                    if scope == "network" {
+                        if !networks.contains(target) {
+                            issues.push(format!("{} '{name}' (scope network) → target '{target}' não é uma Network declarada nem existente", doc.kind));
+                        }
+                    } else if !containers.contains(target) {
                         issues.push(format!("{} '{name}' → target '{target}' não é um Container declarado nem existente", doc.kind));
                     }
                 }
@@ -567,6 +576,31 @@ spec: { image: nginx, volumes: [\"semvolume:/x\", \"/host/ok:/y\"] }
         );
         assert_eq!(issues.len(), 1, "{issues:?}");
         assert!(issues[0].contains("volume 'semvolume'"), "{issues:?}");
+    }
+
+    #[test]
+    fn egress_scope_network_valida_target_contra_redes() {
+        // scope: network → o target tem de ser uma Network (não um container).
+        let issues = check(
+            "\
+apiVersion: delonix.io/v1
+kind: Network
+metadata: { name: prod-net }
+spec: { driver: bridge }
+---
+apiVersion: delonix.io/v1
+kind: Egress
+metadata: { name: e1 }
+spec: { scope: network, target: prod-net, defaultPolicy: deny }
+---
+apiVersion: delonix.io/v1
+kind: Egress
+metadata: { name: e2 }
+spec: { scope: network, target: rede-fantasma, defaultPolicy: deny }
+",
+        );
+        assert_eq!(issues.len(), 1, "{issues:?}");
+        assert!(issues[0].contains("scope network") && issues[0].contains("rede-fantasma"), "{issues:?}");
     }
 
     #[test]
