@@ -781,7 +781,7 @@ fn create_and_wait(
     timeout: Duration,
 ) -> Result<String> {
     println!("cluster/{}: a criar VM {vm_name}...", args.name);
-    let seed = vm_cmd::generate_seed_iso(vm_name, Some(vm_name), std::slice::from_ref(&ssh_public.to_string()), None)?;
+    let seed = vm_cmd::generate_seed_iso(vm_name, Some(vm_name), std::slice::from_ref(&ssh_public.to_string()), None, &[])?;
     let cfg = delonix_vm::VmConfig {
         name: vm_name.to_string(),
         disk: disk.to_string_lossy().into_owned(),
@@ -800,6 +800,7 @@ fn create_and_wait(
         backend: None,
         net_mode: None,
         bridge: None,
+        volumes: vec![],
     };
     delonix_vm::create(&state_root(), &cfg)?;
     println!("cluster/{}: a aguardar SSH em {vm_name}...", args.name);
