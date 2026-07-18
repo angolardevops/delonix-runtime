@@ -1,0 +1,17 @@
+# Delonixfile — NestJS + TypeScript, pnpm-managed.
+# Build with:  delonix build -t __NAME__:dev .
+FROM node:20-slim
+ENV NODE_ENV=production
+WORKDIR /app
+RUN corepack enable
+COPY package.json ./
+COPY tsconfig.json ./
+COPY nest-cli.json ./
+COPY src ./src
+# --prod=false: install devDeps too (nest CLI/tsc are needed to build), even with
+# NODE_ENV=production; then drop them from the runtime image.
+RUN pnpm install --prod=false && pnpm build && pnpm prune --prod
+EXPOSE __PORT__
+# Delonix extension: the runtime probes this to mark the container healthy.
+HEALTHCHECK CMD node -e "require('http').get('http://127.0.0.1:__PORT__/api/v1/health/live',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"
+CMD ["node", "dist/main.js"]
