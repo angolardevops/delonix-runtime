@@ -1,0 +1,10 @@
+# Delonixfile — production-ready HAProxy (L7 load balancer / reverse proxy).
+# Build with:  delonix build -t __NAME__:dev .
+FROM haproxy:3.0-alpine
+COPY haproxy.cfg /usr/local/etc/haproxy/haproxy.cfg
+# Validate the config at build time — fail fast on a typo.
+RUN haproxy -c -f /usr/local/etc/haproxy/haproxy.cfg
+EXPOSE __PORT__
+# Delonix extension: the runtime probes this to mark the container healthy.
+HEALTHCHECK CMD wget -qO- http://127.0.0.1:__PORT__/healthz || exit 1
+CMD ["haproxy", "-f", "/usr/local/etc/haproxy/haproxy.cfg"]
