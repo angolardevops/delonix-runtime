@@ -7,7 +7,7 @@
 //! é opt-in explícito) — um `secret` é rotineiramente colado em issues/chats.
 
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use clap::Subcommand;
 use delonix_runtime_core::secret::{parse_env_file, valid_name};
@@ -91,9 +91,21 @@ struct SecretSpec {
 /// Nomes aceites no `spec` de `kind: Secret`, para o aviso de campos desconhecidos.
 pub(crate) const SECRET_SPEC_FIELDS: &[&str] = &["stringData", "fromEnvFile"];
 
+/// Lê e parseia um ficheiro `KEY=value`, resolvendo o caminho relativo a `base`
+/// (o CWD para a CLI `secret create`; a pasta do MANIFESTO para `kind: Secret` —
+/// senão um `fromEnvFile: ./app.env` procuraria no CWD de quem corre o comando,
+/// não ao lado do manifesto). Partilhado por `create` e `apply`.
+fn load_env_file(base: &Path, f: &Path) -> Result<BTreeMap<String, String>> {
+    let path = if f.is_absolute() { f.to_path_buf() } else { base.join(f) };
+    let content = std::fs::read_to_string(&path)
+        .map_err(|e| Error::Invalid(format!("env-file {}: {e}", path.display())))?;
+    Ok(parse_env_file(&content))
+}
+
 /// Aplica os documentos `kind: Secret` (chamado por `secret apply` e por
-/// `stack apply`). Idempotente: `SecretStore::save` cria ou substitui.
-pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
+/// `stack apply`). Idempotente: `SecretStore::save` cria ou substitui. `base` é a
+/// pasta do manifesto, para resolver `fromEnvFile` relativo a ele.
+pub fn apply(docs: &[ManifestDoc], base: &Path) -> Result<()> {
     let store = SecretStore::open(state_root())?;
     for doc in manifest::of_kind(docs, "Secret") {
         let name = &doc.metadata.name;
@@ -102,9 +114,7 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
 
         let mut data = BTreeMap::new();
         if let Some(f) = &spec.from_env_file {
-            let content = std::fs::read_to_string(f)
-                .map_err(|e| Error::Invalid(format!("Secret '{name}': fromEnvFile {}: {e}", f.display())))?;
-            data.extend(parse_env_file(&content));
+            data.extend(load_env_file(base, f)?);
         }
         // Inline sobrepõe o ficheiro. Aviso: os valores ficam em claro no manifesto.
         if !spec.string_data.is_empty() {
@@ -139,16 +149,27 @@ fn parse_kv(s: &str) -> Option<(String, String)> {
 }
 
 pub fn run(action: SecretCmd) -> Result<()> {
+    // `Apply` não usa o cofre aberto abaixo (abre o seu próprio) e resolve os
+    // caminhos relativos à pasta do MANIFESTO — tratado à parte, antes de abrir o
+    // store (evita uma abertura de cofre desnecessária). Mesmo padrão do `stack::run`.
+    if let SecretCmd::Apply { file } = action {
+        let path = manifest::resolve_path(file)?;
+        let docs = manifest::load(&path)?;
+        let base = path.parent().unwrap_or_else(|| Path::new("."));
+        return apply(&docs, base);
+    }
     let mut store = SecretStore::open(state_root())?;
     match action {
+        // Tratado no topo (faz `return`).
+        SecretCmd::Apply { .. } => unreachable!("tratado acima"),
         SecretCmd::Create { name, from_literal, from_env_file } => {
             if !valid_name(&name) {
                 return Err(Error::Invalid(format!("nome de segredo inválido: {name:?}")));
             }
             let mut data = std::collections::BTreeMap::new();
             if let Some(f) = from_env_file {
-                let content = std::fs::read_to_string(&f).map_err(|e| Error::Invalid(format!("--from-env-file {}: {e}", f.display())))?;
-                data.extend(parse_env_file(&content));
+                // CLI: caminho relativo ao CWD de quem corre o comando.
+                data.extend(load_env_file(Path::new("."), &f)?);
             }
             for lit in &from_literal {
                 let (k, v) = parse_kv(lit).ok_or_else(|| Error::Invalid(format!("--from-literal inválido: {lit:?} (usa KEY=value)")))?;
@@ -216,11 +237,6 @@ pub fn run(action: SecretCmd) -> Result<()> {
         SecretCmd::RotateKey => {
             store.rotate_key()?;
             println!("chave-mestra rodada — todos os segredos re-cifrados com a nova chave");
-        }
-        SecretCmd::Apply { file } => {
-            let path = manifest::resolve_path(file)?;
-            let docs = manifest::load(&path)?;
-            return apply(&docs);
         }
     }
     Ok(())
