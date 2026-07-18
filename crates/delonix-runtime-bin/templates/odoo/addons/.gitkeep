@@ -1,0 +1,3 @@
+# Drop your custom Odoo modules in this folder — one directory per module
+# (each with its own __manifest__.py). They are copied to /mnt/extra-addons by
+# the Delonixfile and picked up on the next `delonix build`.

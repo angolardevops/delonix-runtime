@@ -1,0 +1,12 @@
+/vendor
+/node_modules
+.env
+.git
+.gitignore
+database/*.sqlite
+database/*.sqlite-journal
+storage/logs/*.log
+storage/framework/cache/data/*
+storage/framework/sessions/*
+storage/framework/views/*.php
+bootstrap/cache/*.php
