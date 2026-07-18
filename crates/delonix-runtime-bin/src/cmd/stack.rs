@@ -83,7 +83,7 @@ pub fn run(action: StackCmd) -> Result<()> {
 /// Os Kinds do stack, na MESMA ordem do `apply` — quem lê o `describe` vê a
 /// ordem por que as coisas são criadas, o que é metade do diagnóstico quando um
 /// apply pára a meio.
-const KINDS: [&str; 8] = ["Network", "Volume", "Storage", "Image", "Vm", "Container", "Ingress", "Egress"];
+const KINDS: [&str; 9] = ["Secret", "Network", "Volume", "Storage", "Image", "Vm", "Container", "Ingress", "Egress"];
 
 fn describe(file: Option<PathBuf>) -> Result<()> {
     let path = manifest::resolve_path(file)?;
@@ -190,6 +190,10 @@ fn presence(kind: &str, name: &str, containers: &[delonix_runtime_core::Containe
             Ok(s) => yes_no(s.resolve(name).is_ok()),
             Err(e) => ("?".into(), e.to_string()),
         },
+        "Secret" => match delonix_runtime_core::SecretStore::open(&root) {
+            Ok(s) => yes_no(s.list().iter().any(|sec| sec.name == name)),
+            Err(e) => ("?".into(), e.to_string()),
+        },
         // `status` (e não o registo cru) para o estado vir reconciliado com o
         // backend — uma VM que morreu por fora aparece como Stopped, não Running.
         "Vm" => match delonix_vm::status(&root, name) {
@@ -229,6 +233,8 @@ fn apply(file: Option<PathBuf>) -> Result<()> {
             issues.len()
         )));
     }
+    // Secrets primeiro: `Storage.passwordSecret` e `Container.secret` referem-nos.
+    super::secret::apply(&docs)?;
     super::network::apply(&docs)?;
     super::volume::apply(&docs)?;
     super::storage::apply(&docs)?;
@@ -309,8 +315,11 @@ fn validate_graph(docs: &[manifest::ManifestDoc]) -> Vec<String> {
         .and_then(|(_, cstore)| cstore.list())
         .map(|cs| cs.into_iter().map(|c| c.name).collect())
         .unwrap_or_default();
+    let existing_secrets: Vec<String> = delonix_runtime_core::SecretStore::open(&root)
+        .map(|s| s.list().into_iter().map(|sec| sec.name).collect())
+        .unwrap_or_default();
 
-    validate_graph_with(docs, &existing_networks, &existing_volumes, &existing_containers)
+    validate_graph_with(docs, &existing_networks, &existing_volumes, &existing_containers, &existing_secrets)
 }
 
 /// Núcleo PURO de `validate_graph`: recebe o que já existe na máquina como
@@ -321,6 +330,7 @@ fn validate_graph_with(
     existing_networks: &[String],
     existing_volumes: &[String],
     existing_containers: &[String],
+    existing_secrets: &[String],
 ) -> Vec<String> {
     use std::collections::HashSet;
 
@@ -330,9 +340,11 @@ fn validate_graph_with(
     let mut networks = declared(&["Network"]);
     let mut volumes = declared(&["Volume", "Storage"]);
     let mut containers = declared(&["Container"]);
+    let mut secrets = declared(&["Secret"]);
     networks.extend(existing_networks.iter().cloned());
     volumes.extend(existing_volumes.iter().cloned());
     containers.extend(existing_containers.iter().cloned());
+    secrets.extend(existing_secrets.iter().cloned());
 
     let mut issues = Vec::new();
 
@@ -359,6 +371,22 @@ fn validate_graph_with(
                 for vref in volume_refs(doc) {
                     if !volumes.contains(&vref) {
                         issues.push(format!("{} '{name}' → volume '{vref}' não é declarado (Volume/Storage) nem existe", doc.kind));
+                    }
+                }
+                // `Container.secret: [nomes]` — cada um tem de ser um Secret.
+                if let Some(seq) = doc.spec.get("secret").and_then(|v| v.as_sequence()) {
+                    for sref in seq.iter().filter_map(|v| v.as_str()) {
+                        if !secrets.contains(sref) {
+                            issues.push(format!("{} '{name}' → secret '{sref}' não é um Secret declarado nem existente", doc.kind));
+                        }
+                    }
+                }
+            }
+            "Storage" => {
+                // `Storage.passwordSecret` referencia um Secret (chave `password`).
+                if let Some(sref) = doc.spec.get("passwordSecret").and_then(|v| v.as_str()) {
+                    if !secrets.contains(sref) {
+                        issues.push(format!("Storage '{name}' → passwordSecret '{sref}' não é um Secret declarado nem existente"));
                     }
                 }
             }
@@ -418,7 +446,7 @@ mod tests {
 
     fn check(yaml: &str) -> Vec<String> {
         // Nada "existente" na máquina — o teste vê só o que o manifesto declara.
-        validate_graph_with(&docs(yaml), &[], &[], &[])
+        validate_graph_with(&docs(yaml), &[], &[], &[], &[])
     }
 
     #[test]
@@ -530,6 +558,32 @@ spec: {}
     }
 
     #[test]
+    fn secret_por_declarar_e_sinalizado_em_container_e_storage() {
+        let issues = check(
+            "\
+apiVersion: delonix.io/v1
+kind: Secret
+metadata: { name: creds }
+spec: { stringData: { password: x } }
+---
+apiVersion: delonix.io/v1
+kind: Container
+metadata: { name: web }
+spec: { image: nginx, secret: [creds, fantasma] }
+---
+apiVersion: delonix.io/v1
+kind: Storage
+metadata: { name: nas }
+spec: { type: nfs, server: h, share: /s, passwordSecret: outro-fantasma }
+",
+        );
+        // `creds` resolve; `fantasma` (container) e `outro-fantasma` (storage) não.
+        assert_eq!(issues.len(), 2, "{issues:?}");
+        assert!(issues.iter().any(|i| i.contains("secret 'fantasma'")), "{issues:?}");
+        assert!(issues.iter().any(|i| i.contains("passwordSecret 'outro-fantasma'")), "{issues:?}");
+    }
+
+    #[test]
     fn recurso_ja_existente_na_maquina_resolve_a_referencia() {
         let d = docs(
             "\
@@ -540,7 +594,7 @@ spec: { image: nginx, network: prod-net }
 ",
         );
         // prod-net não está no manifesto, mas existe na máquina → resolvido.
-        let issues = validate_graph_with(&d, &["prod-net".to_string()], &[], &[]);
+        let issues = validate_graph_with(&d, &["prod-net".to_string()], &[], &[], &[]);
         assert!(issues.is_empty(), "{issues:?}");
     }
 }
