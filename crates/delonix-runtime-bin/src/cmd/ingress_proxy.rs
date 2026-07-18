@@ -79,6 +79,12 @@ pub struct Route {
 /// O corpo de resposta unificado (proxiado OU gerado localmente p/ 404/502).
 type RespBody = BoxBody<Bytes, Box<dyn std::error::Error + Send + Sync>>;
 
+/// Tabela de rotas partilhada e **trocável a quente**: o `SIGHUP` relê a config e
+/// substitui o `Arc` interno (os listeners continuam de pé). Cada pedido lê um
+/// snapshot (`clone` do Arc) sob um read-lock curtíssimo — o auto-registo de
+/// containers (rota nova sem reiniciar o proxy) assenta nisto.
+type SharedRoutes = Arc<std::sync::RwLock<Arc<Vec<Route>>>>;
+
 /// Teto de tempo para o backend responder (senão 504) — evita que um backend
 /// pendurado prenda a ligação/task para sempre (slowloris do lado do backend).
 const BACKEND_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
@@ -154,12 +160,14 @@ fn text_response(code: StatusCode, msg: &str) -> Response<RespBody> {
 /// devolve 404 (sem rota) / 502 (backend inacessível).
 async fn handle(
     req: Request<Incoming>,
-    cfg: Arc<ProxyConfig>,
+    routes: SharedRoutes,
     client: Client<hyper_util::client::legacy::connect::HttpConnector, Incoming>,
 ) -> std::result::Result<Response<RespBody>, Infallible> {
     let host = req_host(&req);
     let path = req.uri().path().to_string();
-    let Some(route) = pick_route(&cfg.routes, &host, &path) else {
+    // Snapshot das rotas (o SIGHUP pode trocá-las a qualquer momento).
+    let snapshot = routes.read().map(|g| g.clone()).unwrap_or_else(|p| p.into_inner().clone());
+    let Some(route) = pick_route(&snapshot, &host, &path) else {
         return Ok(text_response(StatusCode::NOT_FOUND, "delonix: sem rota para este host/path\n"));
     };
     let backend = route.backend.clone();
@@ -210,12 +218,12 @@ async fn handle(
 /// saiba ler/escrever. Genérico para não duplicar o caminho TLS e o plano.
 async fn serve_io<I>(
     io: I,
-    cfg: Arc<ProxyConfig>,
+    routes: SharedRoutes,
     client: Client<hyper_util::client::legacy::connect::HttpConnector, Incoming>,
 ) where
     I: hyper::rt::Read + hyper::rt::Write + Unpin + 'static,
 {
-    let svc = service_fn(move |req| handle(req, cfg.clone(), client.clone()));
+    let svc = service_fn(move |req| handle(req, routes.clone(), client.clone()));
     // NOTA: WebSocket/`Connection: Upgrade` ainda NÃO é tunelado — o cliente
     // hyper-util legacy não estabelece a ligação trocada, e nós removemos o header
     // `Upgrade` (hop-by-hop) no encaminhamento. Tunelar upgrades (hyper::upgrade::on
@@ -235,7 +243,7 @@ async fn serve_io<I>(
 /// handshake TLS antes de servir (termina TLS no proxy); senão, HTTP simples.
 async fn accept_loop(
     listener: TcpListener,
-    cfg: Arc<ProxyConfig>,
+    routes: SharedRoutes,
     client: Client<hyper_util::client::legacy::connect::HttpConnector, Incoming>,
     tls: Option<tokio_rustls::TlsAcceptor>,
 ) {
@@ -249,7 +257,7 @@ async fn accept_loop(
                 continue;
             }
         };
-        let cfg = cfg.clone();
+        let routes = routes.clone();
         let client = client.clone();
         let tls = tls.clone();
         tokio::task::spawn(async move {
@@ -257,11 +265,11 @@ async fn accept_loop(
                 // Timeout no handshake: um cliente que abre TCP e nunca completa o
                 // ClientHello não pode segurar a task para sempre (slowloris TLS).
                 Some(acceptor) => match tokio::time::timeout(TLS_HANDSHAKE_TIMEOUT, acceptor.accept(stream)).await {
-                    Ok(Ok(tls_stream)) => serve_io(TokioIo::new(tls_stream), cfg, client).await,
+                    Ok(Ok(tls_stream)) => serve_io(TokioIo::new(tls_stream), routes, client).await,
                     Ok(Err(e)) => eprintln!("ingress-proxy: handshake TLS falhou: {e}"),
                     Err(_) => { /* handshake não completou a tempo — descarta */ }
                 },
-                None => serve_io(TokioIo::new(stream), cfg, client).await,
+                None => serve_io(TokioIo::new(stream), routes, client).await,
             }
         });
     }
@@ -292,9 +300,11 @@ fn build_server_config(tls: &TlsMaterial) -> Result<Arc<tokio_rustls::rustls::Se
     Ok(Arc::new(cfg))
 }
 
-/// Núcleo assíncrono: bind de cada listener (HTTP; TLS fica p/ a Fase 3) + servir.
-async fn serve(cfg: ProxyConfig) -> Result<()> {
-    let cfg = Arc::new(cfg);
+/// Núcleo assíncrono: bind de cada listener + servir, com a tabela de rotas
+/// trocável a quente por `SIGHUP` (relê `config_path`). Os listeners e o material
+/// TLS ficam FIXOS no arranque (mudá-los exige reiniciar); só as ROTAS recarregam
+/// — é o que o auto-registo de containers precisa.
+async fn serve(cfg: ProxyConfig, config_path: std::path::PathBuf) -> Result<()> {
     let client: Client<_, Incoming> =
         Client::builder(TokioExecutor::new()).build(hyper_util::client::legacy::connect::HttpConnector::new());
 
@@ -304,6 +314,38 @@ async fn serve(cfg: ProxyConfig) -> Result<()> {
         Some(mat) => Some(tokio_rustls::TlsAcceptor::from(build_server_config(mat)?)),
         None => None,
     };
+
+    // Tabela de rotas partilhada e trocável a quente.
+    let routes: SharedRoutes = Arc::new(std::sync::RwLock::new(Arc::new(cfg.routes.clone())));
+
+    // SIGHUP → relê a config e substitui SÓ as rotas (listeners/TLS ficam).
+    {
+        let routes = routes.clone();
+        let path = config_path.clone();
+        tokio::spawn(async move {
+            let Ok(mut hup) = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::hangup()) else {
+                return;
+            };
+            while hup.recv().await.is_some() {
+                match std::fs::read(&path).ok().and_then(|b| serde_json::from_slice::<ProxyConfig>(&b).ok()) {
+                    Some(newcfg) => {
+                        let n = newcfg.routes.len();
+                        match routes.write() {
+                            // Larga o write-lock ANTES do eprintln (o I/O de stderr
+                            // não pode bloquear os handlers que fazem `read()`).
+                            Ok(mut g) => *g = Arc::new(newcfg.routes),
+                            Err(_) => {
+                                eprintln!("ingress-proxy: lock de rotas envenenado — reload ignorado");
+                                continue;
+                            }
+                        }
+                        eprintln!("ingress-proxy: rotas recarregadas ({n} rota(s))");
+                    }
+                    None => eprintln!("ingress-proxy: SIGHUP mas a config não releu — rotas mantidas"),
+                }
+            }
+        });
+    }
 
     let mut handles = Vec::new();
     for l in &cfg.listeners {
@@ -329,7 +371,7 @@ async fn serve(cfg: ProxyConfig) -> Result<()> {
             if l.tls { "https" } else { "http" },
             cfg.routes.len()
         );
-        handles.push(tokio::spawn(accept_loop(listener, cfg.clone(), client.clone(), acceptor)));
+        handles.push(tokio::spawn(accept_loop(listener, routes.clone(), client.clone(), acceptor)));
     }
     if handles.is_empty() {
         return Err(Error::Invalid("ingress-proxy: nenhum listener HTTP para servir".into()));
@@ -355,7 +397,7 @@ pub fn run(config_path: &Path) -> Result<()> {
         .enable_all()
         .build()
         .map_err(|e| Error::Runtime { context: "ingress-proxy runtime", message: e.to_string() })?;
-    rt.block_on(serve(cfg))
+    rt.block_on(serve(cfg, config_path.to_path_buf()))
 }
 
 #[cfg(test)]
