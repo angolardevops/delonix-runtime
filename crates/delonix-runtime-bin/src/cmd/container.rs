@@ -152,6 +152,10 @@ pub enum ContainerCmd {
         /// Overwrite existing files.
         #[arg(long)]
         force: bool,
+        /// Gera um PROJECTO completo de uma stack (ex.: `python`) com boas práticas,
+        /// em vez do scaffold genérico. `--template list` mostra os disponíveis.
+        #[arg(long, short = 't')]
+        template: Option<String>,
     },
     /// Run a container from an image (pulls it if missing).
     Run {
@@ -487,8 +491,8 @@ pub enum ContainerCmd {
 }
 
 pub fn run(action: ContainerCmd) -> Result<()> {
-    if let ContainerCmd::Init { dir, name, image, force } = action {
-        return cmd_init(super::scaffold::Target::Container, dir, name, image, force);
+    if let ContainerCmd::Init { dir, name, image, force, template } = action {
+        return cmd_init(super::scaffold::Target::Container, dir, name, image, force, template);
     }
     let (images, store) = open_stores()?;
     match action {
@@ -2644,7 +2648,7 @@ mod tests {
 }
 
 /// Handles this group's `init` (see `cmd::scaffold`).
-fn cmd_init(target: super::scaffold::Target, dir: PathBuf, name: Option<String>, image: Option<String>, force: bool) -> Result<()> {
+fn cmd_init(target: super::scaffold::Target, dir: PathBuf, name: Option<String>, image: Option<String>, force: bool, template: Option<String>) -> Result<()> {
     let name = name.unwrap_or_else(|| {
         // Without `--name`, uses the DIRECTORY name. `canonicalize` can't be used:
         // the directory doesn't exist yet (it's `init` that creates it) and would
@@ -2660,5 +2664,5 @@ fn cmd_init(target: super::scaffold::Target, dir: PathBuf, name: Option<String>,
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_else(|| "app".to_string())
     });
-    super::scaffold::init(target, &super::scaffold::InitOpts { dir, name, image, force })
+    super::scaffold::init(target, &super::scaffold::InitOpts { dir, name, image, force, template })
 }

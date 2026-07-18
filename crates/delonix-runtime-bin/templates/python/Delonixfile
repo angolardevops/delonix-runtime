@@ -1,0 +1,20 @@
+# Delonixfile — same grammar as a Dockerfile, with Delonix extensions.
+# Build with:  delonix build -t __NAME__:dev .
+#
+# Single-stage on purpose: `delonix build` is single-stage (no multi-stage yet)
+# and one instruction per line (no `\` continuations). No non-root USER: in
+# Delonix's rootless model the container's uid 0 is ALREADY an unprivileged host
+# uid (subuid-mapped), so it is not the host root — a dedicated user adds nothing
+# here and its `chown` would make the flat rootfs unreadable to the packer.
+FROM python:3.12-slim
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PYTHONPATH=/app/src
+WORKDIR /app
+# delonix COPY takes the FINAL destination path (it doesn't append the filename
+# like Docker's `COPY x ./`), so give explicit absolute destinations.
+COPY pyproject.toml /app/pyproject.toml
+COPY src /app/src
+RUN pip install --no-cache-dir /app
+EXPOSE __PORT__
+# Delonix extension: the runtime probes this to mark the container healthy.
+HEALTHCHECK CMD python -c "import urllib.request;urllib.request.urlopen('http://127.0.0.1:__PORT__/api/v1/health/live')" || exit 1
+CMD ["uvicorn", "__MODULE__.main:app", "--host", "0.0.0.0", "--port", "__PORT__"]

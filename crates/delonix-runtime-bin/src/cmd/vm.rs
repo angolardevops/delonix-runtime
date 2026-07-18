@@ -87,6 +87,10 @@ pub enum VmCmd {
         /// Substitui ficheiros já existentes.
         #[arg(long)]
         force: bool,
+        /// Gera um PROJECTO completo de uma stack (ex.: `python`) com boas práticas,
+        /// em vez do scaffold genérico. `--template list` mostra os disponíveis.
+        #[arg(long, short = 't')]
+        template: Option<String>,
     },
     /// Cria (ou auto-recupera) uma VM.
     Create {
@@ -214,8 +218,8 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
 }
 
 pub fn run(action: VmCmd) -> Result<()> {
-    if let VmCmd::Init { dir, name, image, force } = action {
-        return cmd_init(super::scaffold::Target::Vm, dir, name, image, force);
+    if let VmCmd::Init { dir, name, image, force, template } = action {
+        return cmd_init(super::scaffold::Target::Vm, dir, name, image, force, template);
     }
     let base = state_root();
     match action {
@@ -522,7 +526,7 @@ mod tests {
 }
 
 /// Trata o `init` deste grupo (ver `cmd::scaffold`).
-fn cmd_init(target: super::scaffold::Target, dir: PathBuf, name: Option<String>, image: Option<String>, force: bool) -> Result<()> {
+fn cmd_init(target: super::scaffold::Target, dir: PathBuf, name: Option<String>, image: Option<String>, force: bool, template: Option<String>) -> Result<()> {
     let name = name.unwrap_or_else(|| {
         // Sem `--name`, usa o nome do DIRECTÓRIO. Não se pode usar `canonicalize`:
         // o directório ainda não existe (é o `init` que o cria) e falharia sempre,
@@ -538,5 +542,5 @@ fn cmd_init(target: super::scaffold::Target, dir: PathBuf, name: Option<String>,
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_else(|| "app".to_string())
     });
-    super::scaffold::init(target, &super::scaffold::InitOpts { dir, name, image, force })
+    super::scaffold::init(target, &super::scaffold::InitOpts { dir, name, image, force, template })
 }

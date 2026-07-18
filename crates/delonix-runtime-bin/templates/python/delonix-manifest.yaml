@@ -1,0 +1,23 @@
+# Delonix manifest — declarative deploy of the app. Apply with:
+#   delonix build -t __NAME__:dev .     # build the image first (Delonixfile)
+#   delonix stack apply                 # then bring it up
+apiVersion: delonix.io/v1
+kind: Container
+metadata:
+  name: __NAME__
+  labels:
+    app: __NAME__
+spec:
+  image: __NAME__:dev         # built from the Delonixfile
+  restart: always
+  ports:
+    - "__PORT__:__PORT__"     # host:container — reachable at http://localhost:__PORT__
+  env:
+    - "APP_ENV=production"
+  # Resources (cgroup v2). Tune for your workload.
+  memory: 512M
+  cpus: "1.0"
+  # Read-only rootfs + a writable tmpfs is a good default for a stateless API.
+  readOnly: true
+  tmpfs:
+    - "/tmp"
