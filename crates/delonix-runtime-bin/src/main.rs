@@ -145,6 +145,14 @@ enum Cmd {
         #[arg(long)]
         addr: Option<String>,
     },
+    /// Dashboard de resumo/KPIs do runtime (TUI interactivo estilo htop). Global,
+    /// ou por grupo (`delonix container dash`, `vm dash`, ...).
+    Dash {
+        /// Imprime UM snapshot de texto e sai (sem TUI) — para scripts/CI. É o
+        /// default quando o stdout não é um terminal.
+        #[arg(long)]
+        once: bool,
+    },
     /// Imprime o script de autocompletion do shell (bash/zsh/fish/...).
     Completion {
         /// Shell alvo.
@@ -183,6 +191,7 @@ fn run() -> Result<()> {
                 .unwrap_or_else(|| "unix:///run/delonix-cri.sock".to_string());
             delonix_cri::serve_blocking(cmd::util::state_root(), &addr)
         }
+        Cmd::Dash { once } => cmd::dash::run(cmd::dash::DashScope::Global, once),
         Cmd::Completion { shell } => cmd_completion(shell),
     }
 }
