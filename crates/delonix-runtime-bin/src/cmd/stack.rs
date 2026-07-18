@@ -437,14 +437,18 @@ fn validate_graph_with(
                 }
             }
             "Ingress" | "Egress" | "FirewallPolicy" => {
-                // FirewallPolicy exige `direction` — apanha-o AQUI (antes do apply
-                // criar nada) em vez de só no apply.
-                if doc.kind == "FirewallPolicy"
-                    && !matches!(doc.spec.get("direction").and_then(|v| v.as_str()), Some("ingress" | "egress" | "in" | "out"))
-                {
-                    issues.push(format!("FirewallPolicy '{name}' → direction obrigatório e ∈ {{ingress, egress}}"));
-                }
                 let scope = doc.spec.get("scope").and_then(|v| v.as_str()).unwrap_or("container");
+                // FirewallPolicy exige `direction` ∈ {ingress, egress} — apanha-o
+                // AQUI (antes do apply criar nada) em vez de só no apply.
+                if doc.kind == "FirewallPolicy" {
+                    let dir = doc.spec.get("direction").and_then(|v| v.as_str());
+                    if !matches!(dir, Some("ingress" | "egress")) {
+                        issues.push(format!("FirewallPolicy '{name}' → direction obrigatório e ∈ {{ingress, egress}}"));
+                    } else if dir == Some("ingress") && scope == "network" {
+                        // Mesma incompatibilidade que o apply rejeita — apanha-a antes.
+                        issues.push(format!("FirewallPolicy '{name}' → scope: network só é suportado com direction: egress"));
+                    }
+                }
                 if !matches!(scope, "container" | "network") {
                     // Mensagem coerente com o apply (que também rejeita o scope).
                     issues.push(format!("{} '{name}' → scope inválido '{scope}' (usa container|network)", doc.kind));
@@ -609,6 +613,28 @@ spec: { direction: egress, target: fantasma }
         );
         assert_eq!(issues.len(), 1, "{issues:?}");
         assert!(issues[0].contains("target 'fantasma'"), "{issues:?}");
+    }
+
+    #[test]
+    fn firewallpolicy_direction_e_scope_incompativel_apanhados_no_validate() {
+        // direction inválida.
+        let i = check("apiVersion: delonix.io/v1\nkind: FirewallPolicy\nmetadata: { name: a }\nspec: { direction: sideways, target: x }\n");
+        assert!(i.iter().any(|s| s.contains("direction obrigatório")), "{i:?}");
+        // ingress + scope: network é incompatível (só egress) — apanhado ANTES do apply.
+        let i = check(
+            "\
+apiVersion: delonix.io/v1
+kind: Network
+metadata: { name: n }
+spec: { driver: bridge }
+---
+apiVersion: delonix.io/v1
+kind: FirewallPolicy
+metadata: { name: b }
+spec: { direction: ingress, scope: network, target: n }
+",
+        );
+        assert!(i.iter().any(|s| s.contains("scope: network só é suportado com direction: egress")), "{i:?}");
     }
 
     #[test]

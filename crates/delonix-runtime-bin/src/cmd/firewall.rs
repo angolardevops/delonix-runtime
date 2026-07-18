@@ -438,8 +438,8 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
     // firewall L4, não o Ingress L7/HTTP do k8s). Aplica a MESMA lógica.
     for doc in manifest::of_kind(docs, "FirewallPolicy") {
         let dir = match doc.spec.get("direction").and_then(|v| v.as_str()) {
-            Some("ingress") | Some("in") => "in",
-            Some("egress") | Some("out") => "out",
+            Some("ingress") => "in",
+            Some("egress") => "out",
             other => {
                 return Err(Error::Invalid(format!(
                     "FirewallPolicy/{}: direction obrigatório e ∈ {{ingress, egress}} (veio {other:?})",
@@ -465,71 +465,69 @@ fn apply_kind(store: &Store, docs: &[ManifestDoc], dir: &str) -> Result<()> {
 /// `dir` ("in"/"out"). O rótulo nas mensagens usa o Kind real do documento.
 fn apply_fw_doc(store: &Store, doc: &ManifestDoc, dir: &str) -> Result<()> {
     let kind = doc.kind.as_str();
-    {
-        manifest::warn_unknown_fields(doc, FW_SPEC_FIELDS);
-        let spec: FwDocSpec = manifest::spec_of(doc)?;
+    manifest::warn_unknown_fields(doc, FW_SPEC_FIELDS);
+    let spec: FwDocSpec = manifest::spec_of(doc)?;
 
-        // Valida o scope explicitamente — uma gralha (`netowrk`) não pode cair em
-        // silêncio no caminho container e falhar depois com 'container não existe'.
-        let scope = spec.scope.as_deref().unwrap_or("container");
-        if !matches!(scope, "container" | "network") {
+    // Valida o scope explicitamente — uma gralha (`netowrk`) não pode cair em
+    // silêncio no caminho container e falhar depois com 'container não existe'.
+    let scope = spec.scope.as_deref().unwrap_or("container");
+    if !matches!(scope, "container" | "network") {
+        return Err(Error::Invalid(format!(
+            "{kind}/{}: scope inválido '{scope}' (usa container|network)",
+            doc.metadata.name
+        )));
+    }
+
+    // scope: network — política de egress POR-REDE (Egress apenas). O `target`
+    // é o nome de uma rede; liga às APIs de motor que só tinham CLI.
+    if scope == "network" {
+        if dir != "out" {
             return Err(Error::Invalid(format!(
-                "{kind}/{}: scope inválido '{scope}' (usa container|network)",
+                "{kind}/{}: scope: network só é suportado em Egress (não há política de INGRESS por-rede)",
                 doc.metadata.name
             )));
         }
-
-        // scope: network — política de egress POR-REDE (Egress apenas). O `target`
-        // é o nome de uma rede; liga às APIs de motor que só tinham CLI.
-        if scope == "network" {
-            if dir != "out" {
-                return Err(Error::Invalid(format!(
-                    "{kind}/{}: scope: network só é suportado em Egress (não há política de INGRESS por-rede)",
-                    doc.metadata.name
-                )));
-            }
-            return apply_network_egress(kind, &doc.metadata.name, &spec);
-        }
-
-        let mut c = store.load(&spec.target)?;
-        let ip = require_sdn_ip(&c)?;
-        let mut fw = c.firewall.clone().unwrap_or_default();
-        fw.enabled = true;
-        // Declarative: this direction is fully replaced by the document.
-        fw.rules.retain(|r| r.dir != dir);
-        let policy = spec.default_policy.as_deref().unwrap_or("deny");
-        if !matches!(policy, "allow" | "deny") {
-            return Err(Error::Invalid(format!("{kind}/{}: defaultPolicy must be allow|deny", doc.metadata.name)));
-        }
-        if dir == "in" {
-            fw.policy_in = policy.to_string();
-        } else {
-            fw.policy_out = policy.to_string();
-        }
-        for r in &spec.rules {
-            let proto = r.proto.clone().unwrap_or_else(|| "any".into());
-            if !fw_proto_ok(&proto) {
-                return Err(Error::Invalid(format!("{kind}/{}: invalid proto '{proto}'", doc.metadata.name)));
-            }
-            if !fw_port_ok(&r.port) {
-                return Err(Error::Invalid(format!("{kind}/{}: invalid port '{}'", doc.metadata.name, r.port)));
-            }
-            let src = r.from.clone().or_else(|| r.to.clone()).unwrap_or_default();
-            if !src.is_empty() && !fw_src_ok(&src) {
-                return Err(Error::Invalid(format!("{kind}/{}: invalid CIDR '{src}'", doc.metadata.name)));
-            }
-            let action = r.action.clone().unwrap_or_else(|| "allow".into());
-            if !matches!(action.as_str(), "allow" | "deny") {
-                return Err(Error::Invalid(format!("{kind}/{}: action must be allow|deny", doc.metadata.name)));
-            }
-            fw.rules.push(FwRule { dir: dir.to_string(), proto, port: r.port.clone(), src, action, note: r.note.clone().unwrap_or_default() });
-        }
-        infra::apply_firewall(&c.id, &ip, &fw)?;
-        let n = fw.rules.iter().filter(|r| r.dir == dir).count();
-        c.firewall = Some(fw);
-        store.save(&c)?;
-        println!("{kind}/{}: applied to {} ({n} rule(s), default {policy})", doc.metadata.name, spec.target);
+        return apply_network_egress(kind, &doc.metadata.name, &spec);
     }
+
+    let mut c = store.load(&spec.target)?;
+    let ip = require_sdn_ip(&c)?;
+    let mut fw = c.firewall.clone().unwrap_or_default();
+    fw.enabled = true;
+    // Declarative: this direction is fully replaced by the document.
+    fw.rules.retain(|r| r.dir != dir);
+    let policy = spec.default_policy.as_deref().unwrap_or("deny");
+    if !matches!(policy, "allow" | "deny") {
+        return Err(Error::Invalid(format!("{kind}/{}: defaultPolicy must be allow|deny", doc.metadata.name)));
+    }
+    if dir == "in" {
+        fw.policy_in = policy.to_string();
+    } else {
+        fw.policy_out = policy.to_string();
+    }
+    for r in &spec.rules {
+        let proto = r.proto.clone().unwrap_or_else(|| "any".into());
+        if !fw_proto_ok(&proto) {
+            return Err(Error::Invalid(format!("{kind}/{}: invalid proto '{proto}'", doc.metadata.name)));
+        }
+        if !fw_port_ok(&r.port) {
+            return Err(Error::Invalid(format!("{kind}/{}: invalid port '{}'", doc.metadata.name, r.port)));
+        }
+        let src = r.from.clone().or_else(|| r.to.clone()).unwrap_or_default();
+        if !src.is_empty() && !fw_src_ok(&src) {
+            return Err(Error::Invalid(format!("{kind}/{}: invalid CIDR '{src}'", doc.metadata.name)));
+        }
+        let action = r.action.clone().unwrap_or_else(|| "allow".into());
+        if !matches!(action.as_str(), "allow" | "deny") {
+            return Err(Error::Invalid(format!("{kind}/{}: action must be allow|deny", doc.metadata.name)));
+        }
+        fw.rules.push(FwRule { dir: dir.to_string(), proto, port: r.port.clone(), src, action, note: r.note.clone().unwrap_or_default() });
+    }
+    infra::apply_firewall(&c.id, &ip, &fw)?;
+    let n = fw.rules.iter().filter(|r| r.dir == dir).count();
+    c.firewall = Some(fw);
+    store.save(&c)?;
+    println!("{kind}/{}: applied to {} ({n} rule(s), default {policy})", doc.metadata.name, spec.target);
     Ok(())
 }
 
