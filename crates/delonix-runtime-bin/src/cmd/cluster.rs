@@ -1207,5 +1207,5 @@ fn cmd_init(target: super::scaffold::Target, dir: PathBuf, name: Option<String>,
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_else(|| "app".to_string())
     });
-    super::scaffold::init(target, &super::scaffold::InitOpts { dir, name, image, force, template: None })
+    super::scaffold::init(target, &super::scaffold::InitOpts { dir, name, image, force, template: None, up: false })
 }
