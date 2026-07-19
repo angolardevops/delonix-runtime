@@ -128,6 +128,10 @@ fn router(state: AppState) -> Router {
         // Scan de CVE (texto, via CLI) + SBOM (estruturado, via biblioteca).
         .route("/v1/images/scan", get(scan_image))
         .route("/v1/images/sbom", get(sbom_image))
+        // Redes: create/rm (ciclo de vida da rede) — shell-out à CLI. publish/
+        // unpublish (DNAT) NÃO entram aqui — dívida `Net::`/`infra::` no PaaS.
+        .route("/v1/networks", post(create_network))
+        .route("/v1/networks/:name", axum::routing::delete(delete_network))
         .with_state(state)
 }
 
@@ -722,6 +726,38 @@ async fn sbom_image(State(s): State<AppState>, Query(q): Query<RefQuery>) -> Res
     }
 }
 
+/// Corpo de `POST /v1/networks`.
+#[derive(serde::Deserialize)]
+struct NetworkBody {
+    name: String,
+}
+
+async fn create_network(State(s): State<AppState>, Json(b): Json<NetworkBody>) -> Response {
+    if !valid_arg(&b.name) {
+        return err_response(Error::Invalid("nome de rede inválido".to_string()));
+    }
+    match run_cli(
+        s.bin,
+        s.base,
+        vec!["network".into(), "create".into(), b.name],
+    )
+    .await
+    {
+        Ok((ok, out)) => Json(serde_json::json!({ "ok": ok, "output": out })).into_response(),
+        Err(e) => err_response(e),
+    }
+}
+
+async fn delete_network(State(s): State<AppState>, Path(name): Path<String>) -> Response {
+    if !valid_arg(&name) {
+        return err_response(Error::Invalid("nome de rede inválido".to_string()));
+    }
+    match run_cli(s.bin, s.base, vec!["network".into(), "rm".into(), name]).await {
+        Ok((ok, out)) => Json(serde_json::json!({ "ok": ok, "output": out })).into_response(),
+        Err(e) => err_response(e),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1111,6 +1147,26 @@ mod tests {
                 resp.status(),
                 StatusCode::BAD_REQUEST,
                 "build devia recusar {bad}"
+            );
+        }
+        // network create: nome inválido (`-`/vazio) → 400.
+        for bad in [r#"{"name":""}"#, r#"{"name":"-net"}"#] {
+            let resp = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri("/v1/networks")
+                        .header("content-type", "application/json")
+                        .body(Body::from(bad))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                resp.status(),
+                StatusCode::BAD_REQUEST,
+                "network create devia recusar {bad}"
             );
         }
     }
