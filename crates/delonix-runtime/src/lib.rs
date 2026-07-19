@@ -625,6 +625,13 @@ fn resolve_cap_keep(cap_drop: &[String], cap_add: &[String]) -> u64 {
         }
         m
     };
+    // `--cap-add ALL` (docker) / a tradução CRI de `privileged` → mantém TODAS as
+    // capabilities. Sem este ramo, `cap_num("ALL")` devolvia `None` e o `ALL` era
+    // silenciosamente ignorado — um container "privilegiado" via CRI ficava sem
+    // CAP_SYS_ADMIN (ex.: `sethostname` dava EPERM apesar de o CRI o pedir).
+    if cap_add.iter().any(|c| c.eq_ignore_ascii_case("all")) {
+        return all_caps_mask();
+    }
     for c in cap_add {
         if let Some(n) = cap_num(c) {
             keep |= 1u64 << n;
@@ -2952,9 +2959,16 @@ fn write_etc_files(rootfs: &str, hostname: &str, ip: Option<&str>, dns: Option<&
 }
 
 fn spawn(store: &Store, container: &mut Container, rootfs: &str, spec: &RunSpec<'_>) -> Result<()> {
+    // `--hostname` (CRI `PodSandboxConfig.hostname`) sobrepõe-se ao nome do
+    // container na UTS namespace e nos `/etc/hostname`+`/etc/hosts`; sem ele,
+    // usa-se o nome (comportamento histórico).
+    let hostname = container
+        .hostname
+        .clone()
+        .unwrap_or_else(|| container.name.clone());
     write_etc_files(
         rootfs,
-        &container.name,
+        &hostname,
         spec.hosts_ip.as_deref(),
         spec.dns.as_deref(),
     );
@@ -2971,7 +2985,6 @@ fn spawn(store: &Store, container: &mut Container, rootfs: &str, spec: &RunSpec<
     }
 
     let rootfs_owned = rootfs.to_string();
-    let hostname = container.name.clone();
     let detach = spec.detach;
     let mounts = spec.mounts.clone();
     let apparmor = spec.apparmor.clone();
@@ -3683,6 +3696,27 @@ pub fn exec(container: &Container, argv: &[String], tty: bool) -> Result<i32> {
                     apply_env(&container.name, &container.env); // mesmo ambiente do container
                     if let Some(p) = &container.apparmor {
                         apply_apparmor(p); // mesmo confinamento MAC que o processo de init
+                    }
+                    // `--user` (CRI `RunAsUser`/`RunAsUserName`): o `exec` corre como o
+                    // MESMO utilizador do processo de init — é o que o CRI conformance
+                    // verifica (`execSync id -u` == RunAsUser). Sem isto, o `exec`
+                    // ficava sempre uid 0 do userns e o `id -u` reportava 0. setgid
+                    // ANTES de setuid (depois de largar o uid já não se muda de grupo).
+                    if let Some(uid) = container.run_uid.filter(|u| *u != 0) {
+                        let gid = container.run_gid.unwrap_or(uid);
+                        // SAFETY: uid/gid mapeados no userns do container (o init já
+                        // mapeou o intervalo no arranque); setgroups/setgid/setuid
+                        // sucedem enquanto somos root no userns.
+                        unsafe {
+                            libc::setgroups(1, [gid].as_ptr());
+                            if libc::setgid(gid) != 0 {
+                                eprintln!("delonix: exec setgid({gid}) falhou");
+                            }
+                            if libc::setuid(uid) != 0 {
+                                eprintln!("delonix: exec setuid({uid}) falhou");
+                                libc::_exit(126);
+                            }
+                        }
                     }
                     let _ = execvp(&cargv[0], &cargv);
                     unsafe { libc::_exit(127) };
