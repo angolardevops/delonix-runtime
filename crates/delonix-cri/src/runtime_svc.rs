@@ -338,6 +338,18 @@ mod tests {
             eprintln!("SKIP: teste assume ambiente rootless (uid != 0)");
             return;
         }
+        // `status()` sonda a infra rootless GLOBAL (`delonix_net::infra::status()`
+        // lê `<base_root>/ingress/holder.pid`, resolvido por `DELONIX_ROOT`/
+        // `XDG_DATA_HOME`, NÃO pelo `base` temporário deste teste). Se o operador
+        // tiver infra REAL a correr (ex.: um holder de sessões anteriores neste
+        // dev box), `NetworkReady` vem `true` com razão — e não há como forçar
+        // "InfraDown" sem DERRUBAR essa infra viva, o que um teste unitário nunca
+        // pode fazer. Neste caso salta-se; num runner limpo (infra em baixo, o caso
+        // que importa para a regressão) o teste corre e valida o caminho `false`.
+        if delonix_net::infra::status().up {
+            eprintln!("SKIP: infra rootless ambiente a correr — não se pode provar InfraDown sem a derrubar");
+            return;
+        }
         let base = std::env::temp_dir().join(format!(
             "delonix-cri-status-test-{}-{}",
             std::process::id(),
