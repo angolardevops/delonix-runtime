@@ -233,6 +233,29 @@ fn cmd_prune(all: bool) -> Result<()> {
     // Ids ainda vivos DEPOIS do passo 1 — a base para decidir o que é órfão.
     let live_ids: HashSet<String> = store.list()?.iter().map(|c| c.id.clone()).collect();
 
+    // 1b) marcadores de ref do ingress órfãos — o leak "16 refs com 3 containers
+    //     vivos". Um container que morre por SIGKILL/crash sem `rm` deixa o seu
+    //     marcador de ref a segurar a infra partilhada para sempre. `live` = ids
+    //     de containers a correr + os pods CRI (`cri-*`) e VMs (`vm-*`), geridos
+    //     por outros stores — preservados, nunca reapados aqui. O reaper liberta
+    //     só os marcadores sem dono vivo e derruba a infra se ficar vazia; NUNCA
+    //     toca num id vivo.
+    let mut live_refs: HashSet<String> = store
+        .list()?
+        .iter()
+        .filter(|c| c.pid.map(delonix_runtime::is_alive).unwrap_or(false))
+        .map(|c| c.id.clone())
+        .collect();
+    for id in delonix_net::infra::attached_refs() {
+        if id.starts_with("cri-") || id.starts_with("vm-") {
+            live_refs.insert(id);
+        }
+    }
+    let reaped_refs = delonix_net::infra::reap_orphan_refs(&live_refs);
+    if reaped_refs > 0 {
+        println!("rede: {reaped_refs} ref(s) de ingress órfã(s) reapada(s)");
+    }
+
     // 2) imagens dangling (sem tag), ou todas as não usadas com `-a`.
     let in_use: HashSet<String> = store.list()?.iter().map(|c| c.image.clone()).collect();
     let mut rmi = 0usize;
@@ -283,21 +306,10 @@ fn cmd_prune(all: bool) -> Result<()> {
     // o `__rmtree` desta série passou a suportar de facto.
     let containers_dir = images.root().join("containers");
     let (mut rmd, mut freed_dirs) = (0usize, 0u64);
-    if let Ok(rd) = std::fs::read_dir(&containers_dir) {
-        for e in rd.flatten() {
-            // Só directórios cujo nome é um id (as entradas do registo são
-            // `<id>.json`, ficheiros — não entram aqui).
-            if !e.file_type().map(|t| t.is_dir()).unwrap_or(false) {
-                continue;
-            }
-            let id = e.file_name().to_string_lossy().into_owned();
-            if live_ids.contains(&id) {
-                continue;
-            }
-            freed_dirs += dir_size(&e.path());
-            delonix_runtime::remove_tree_mapped(&e.path());
-            rmd += 1;
-        }
+    for path in orphan_container_dirs(&containers_dir, &live_ids) {
+        freed_dirs += dir_size(&path);
+        delonix_runtime::remove_tree_mapped(&path);
+        rmd += 1;
     }
 
     // 5) cgroups VAZIOS órfãos na delonix.slice.
@@ -507,6 +519,31 @@ fn cmd_events(follow: bool, tail: Option<usize>) -> Result<()> {
     }
 }
 
+/// **PURA** — subdirectórios (nome = id) de `containers_dir` cujo id NÃO está em
+/// `live` (containers registados): os órfãos a reapar. Núcleo reapável do passo 4
+/// do `prune`, isolado do `remove_tree_mapped` (que precisa de subuid) para poder
+/// ser testado a seco, sem privilégio. Só directórios contam — as entradas do
+/// registo são ficheiros `<id>.json` e nunca entram aqui. **Nunca devolve um id
+/// vivo.**
+fn orphan_container_dirs(
+    containers_dir: &std::path::Path,
+    live: &std::collections::HashSet<String>,
+) -> Vec<std::path::PathBuf> {
+    let mut out = Vec::new();
+    if let Ok(rd) = std::fs::read_dir(containers_dir) {
+        for e in rd.flatten() {
+            if !e.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                continue;
+            }
+            let id = e.file_name().to_string_lossy().into_owned();
+            if !live.contains(&id) {
+                out.push(e.path());
+            }
+        }
+    }
+    out
+}
+
 /// Soma recursiva do tamanho de um directório (aparente, como o `du`).
 fn dir_size(p: &std::path::Path) -> u64 {
     let Ok(rd) = std::fs::read_dir(p) else {
@@ -641,4 +678,82 @@ fn cmd_info() -> Result<()> {
 #[allow(dead_code)]
 fn store_only() -> Result<Store> {
     Store::open(Store::default_root())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::orphan_container_dirs;
+    use std::collections::HashSet;
+    use std::path::PathBuf;
+
+    /// Dir temporário único (sem depender do crate `tempfile`).
+    fn tmp_dir(tag: &str) -> PathBuf {
+        // SAFETY: getpid() não tem pré-condições.
+        let uniq = format!(
+            "delonix-prune-{tag}-{}-{}",
+            unsafe { libc::getpid() },
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        );
+        let d = std::env::temp_dir().join(uniq);
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    /// STRESS do reaper de rootfs órfãos: create→destroy de N directórios de
+    /// container ao nível do disco, cruzados com o "Store" (conjunto de ids
+    /// vivos). Assevera que o reaper apanha TODOS os órfãos (containers mortos sem
+    /// `rm`), preserva os vivos, e que depois de os apagar ZERO órfãos ficam.
+    /// Corre sem privilégio — testa a DECISÃO (`orphan_container_dirs`), não o
+    /// `remove_tree_mapped` (que precisa de subuid).
+    #[test]
+    fn stress_reaper_rootfs_orfaos_deixa_zero() {
+        const N: usize = 300;
+        let root = tmp_dir("rootfs");
+        let containers = root.join("containers");
+        std::fs::create_dir_all(&containers).unwrap();
+
+        // N directórios de container mortos + M vivos, e alguns ficheiros
+        // `<id>.json` (entradas do registo) que NÃO são directórios e têm de ser
+        // ignorados pelo reaper.
+        for i in 0..N {
+            std::fs::create_dir_all(containers.join(format!("dead{i}"))).unwrap();
+        }
+        let live: HashSet<String> = (0..5).map(|i| format!("alive{i}")).collect();
+        for id in &live {
+            let d = containers.join(id);
+            std::fs::create_dir_all(&d).unwrap();
+            std::fs::write(d.join("rootfs-marker"), b"x").unwrap();
+        }
+        std::fs::write(containers.join("alive0.json"), b"{}").unwrap();
+        std::fs::write(containers.join("dead0.json"), b"{}").unwrap();
+
+        // O reaper vê exactamente os N órfãos (nenhum vivo, nenhum ficheiro).
+        let orphans = orphan_container_dirs(&containers, &live);
+        assert_eq!(
+            orphans.len(),
+            N,
+            "todos os `dead*` são órfãos, ficheiros ignorados"
+        );
+        for id in &live {
+            let p = containers.join(id);
+            assert!(!orphans.contains(&p), "container vivo NUNCA é reapado");
+        }
+
+        // Apaga-os e reconfirma: ZERO órfãos ficam, os vivos intactos.
+        for p in &orphans {
+            std::fs::remove_dir_all(p).unwrap();
+        }
+        assert!(
+            orphan_container_dirs(&containers, &live).is_empty(),
+            "após o reap, zero directórios órfãos"
+        );
+        for id in &live {
+            assert!(containers.join(id).is_dir(), "vivo preservado no disco");
+        }
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
 }
