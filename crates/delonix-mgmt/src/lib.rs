@@ -125,6 +125,9 @@ fn router(state: AppState) -> Router {
         .route("/v1/images/pull", post(pull_image))
         // Build a partir de um Delonixfile colado (materializa + `delonix build`).
         .route("/v1/images/build", post(build_image))
+        // Scan de CVE (texto, via CLI) + SBOM (estruturado, via biblioteca).
+        .route("/v1/images/scan", get(scan_image))
+        .route("/v1/images/sbom", get(sbom_image))
         .with_state(state)
 }
 
@@ -679,6 +682,42 @@ async fn build_image(State(s): State<AppState>, Json(b): Json<BuildBody>) -> Res
     let _ = tokio::task::spawn_blocking(move || std::fs::remove_dir_all(&dir_c)).await;
     match result {
         Ok((ok, out)) => Json(serde_json::json!({ "ok": ok, "output": out })).into_response(),
+        Err(e) => err_response(e),
+    }
+}
+
+async fn scan_image(State(s): State<AppState>, Query(q): Query<RefQuery>) -> Response {
+    // `image scan <ref>` (texto). A ref é posicional — `-` inicial viraria flag.
+    if q.reference.is_empty() || q.reference.starts_with('-') {
+        return err_response(Error::Invalid("referência de imagem inválida".to_string()));
+    }
+    match run_cli(
+        s.bin,
+        s.base,
+        vec!["image".into(), "scan".into(), q.reference],
+    )
+    .await
+    {
+        Ok((ok, out)) => Json(serde_json::json!({ "ok": ok, "output": out })).into_response(),
+        Err(e) => err_response(e),
+    }
+}
+
+async fn sbom_image(State(s): State<AppState>, Query(q): Query<RefQuery>) -> Response {
+    if q.reference.is_empty() {
+        return err_response(Error::Invalid("referência de imagem vazia".to_string()));
+    }
+    // SBOM é uma chamada de BIBLIOTECA (lê os layers do CAS, não corre nada) — como
+    // as leituras de volume/container. 404 se a imagem não existir localmente.
+    let out = with_image_store(s.base, move |store| {
+        let img = store.resolve(&q.reference)?;
+        // `extract` falha → imagem existe mas sem gestor de pacotes legível (lista
+        // vazia), tal como o handler antigo distinguia de "não encontrada".
+        Ok(delonix_scan::extract_sbom(store, &img).unwrap_or_default())
+    })
+    .await;
+    match out {
+        Ok(pkgs) => Json(pkgs).into_response(),
         Err(e) => err_response(e),
     }
 }
