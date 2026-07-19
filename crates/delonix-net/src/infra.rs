@@ -42,7 +42,7 @@ pub const INGRESS_TABLE: &str = "dlxing";
 /// está definido — crucial porque o holder corre com uid mapeado a 0 no userns
 /// (senão resolveria para `/var/lib/delonix` em vez do armazém do utilizador). O
 /// pai passa sempre `DELONIX_ROOT` ao holder para os caminhos baterem certo.
-fn base_root() -> PathBuf {
+pub(crate) fn base_root() -> PathBuf {
     if let Some(root) = std::env::var_os("DELONIX_ROOT") {
         return PathBuf::from(root);
     }
@@ -1844,7 +1844,7 @@ pub fn cni_detach_container(id: &str, conf_json: &str) -> Result<()> {
 /// ao holder o netns + `veth` + IP. Devolve `(netns, ip)`. Em falha desfaz o ref-count.
 pub fn attach_container(id: &str, net: &str, namespace: &str) -> Result<(String, String)> {
     let (bridge, prefix, gateway) = resolve_net(net)?;
-    let ip = container_ip_on(&prefix, id);
+    let ip = crate::ipam::allocate(&prefix, id)?; // lease único (anti-colisão), estável por id
     acquire()?; // ensure_up + refcount++
     let netns = sanitize(id);
     // `namespace` sanitizado (vai a um token do control-line): sem espaços/lixo.
@@ -1872,7 +1872,7 @@ pub fn attach_container(id: &str, net: &str, namespace: &str) -> Result<(String,
 /// Devolve `(ifname, ip)`.
 pub fn attach_extra_container(id: &str, idx: u32, net: &str) -> Result<(String, String)> {
     let (bridge, prefix, gateway) = resolve_net(net)?;
-    let ip = container_ip_on(&prefix, id);
+    let ip = crate::ipam::allocate(&prefix, id)?; // lease único na rede adicional
     let ifname = format!("eth{idx}");
     let netns = sanitize(id);
     control_send(&format!("attach-extra {netns} {ifname} {ip} {bridge} {gateway}"))?;
@@ -1907,6 +1907,7 @@ pub fn detach_container(id: &str, ip: &str) {
     let netns = sanitize(id);
     let _ = control_send(&format!("unfirewall {ip}"));
     let _ = control_send(&format!("detach {netns}"));
+    crate::ipam::release(&crate::ipam::prefix_of(ip), id); // liberta o lease de IP
     release(); // refcount-- (teardown no 0)
 }
 
