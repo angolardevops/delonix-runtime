@@ -2292,7 +2292,7 @@ fn cmd_update(store: &Store, id: &str, o: UpdateOpts) -> Result<()> {
         let Some(en) = c.extra_networks.iter().find(|n| &n.network == net).cloned() else {
             return Err(Error::Invalid(format!("container '{}' is not attached to the extra network '{net}'", c.name)));
         };
-        infra::detach_extra_container(&c.id, en.idx);
+        infra::detach_extra_container(&c.id, en.idx, &en.ip);
         let n = net.clone();
         c = store.update(&c.id, |cur| {
             let before = cur.extra_networks.len();
