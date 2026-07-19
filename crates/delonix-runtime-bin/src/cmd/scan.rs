@@ -27,7 +27,10 @@ struct Provenance {
 }
 
 fn now_unix() -> u64 {
-    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
 }
 
 /// Carrega a base de advisories: a sincronizada (`<root>/advisories.json`) tem
@@ -41,18 +44,46 @@ fn load_advisories() -> Result<(AdvisoryDb, Provenance)> {
             .ok()
             .and_then(|m| serde_json::from_str::<serde_json::Value>(&m).ok())
             .map(|m| {
-                let src = m.get("source").and_then(|v| v.as_str()).unwrap_or("desconhecida").to_string();
-                (format!("sincronizada de {src}"), m.get("synced_unix").and_then(|v| v.as_u64()))
+                let src = m
+                    .get("source")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("desconhecida")
+                    .to_string();
+                (
+                    format!("sincronizada de {src}"),
+                    m.get("synced_unix").and_then(|v| v.as_u64()),
+                )
             })
             .unwrap_or_else(|| ("sincronizada".into(), None));
-        return Ok((db, Provenance { label, synced_unix, placeholder: false }));
+        return Ok((
+            db,
+            Provenance {
+                label,
+                synced_unix,
+                placeholder: false,
+            },
+        ));
     }
     if let Ok(path) = std::env::var("DELONIX_ADVISORIES") {
         let db = AdvisoryDb::load(&std::fs::read_to_string(&path)?)?;
-        return Ok((db, Provenance { label: format!("$DELONIX_ADVISORIES ({path})"), synced_unix: None, placeholder: false }));
+        return Ok((
+            db,
+            Provenance {
+                label: format!("$DELONIX_ADVISORIES ({path})"),
+                synced_unix: None,
+                placeholder: false,
+            },
+        ));
     }
     let db = AdvisoryDb::load(EMBEDDED_ADVISORIES)?;
-    Ok((db, Provenance { label: "base EMBEBIDA (placeholder)".into(), synced_unix: None, placeholder: true }))
+    Ok((
+        db,
+        Provenance {
+            label: "base EMBEBIDA (placeholder)".into(),
+            synced_unix: None,
+            placeholder: true,
+        },
+    ))
 }
 
 /// `image scan <image>` — dashboard de vulnerabilidades. Puxa a imagem se faltar
@@ -71,7 +102,11 @@ pub fn cmd_scan(image: &str, sbom: bool, fail_on: Option<&str>) -> Result<()> {
         let pkgs = delonix_scan::extract_sbom(&images, &img)?;
         let mut t = output::Table::new(&["PACKAGE", "VERSION", "ECOSYSTEM"]);
         for p in &pkgs {
-            t.row(vec![p.name.clone(), p.version.clone(), format!("{:?}", p.ecosystem)]);
+            t.row(vec![
+                p.name.clone(),
+                p.version.clone(),
+                format!("{:?}", p.ecosystem),
+            ]);
         }
         println!("SBOM de {} — {} pacotes:", img.short_id(), pkgs.len());
         t.print();
@@ -79,7 +114,11 @@ pub fn cmd_scan(image: &str, sbom: bool, fail_on: Option<&str>) -> Result<()> {
     }
     let worst = scan_image(&images, &img)?;
     if let Some(threshold) = fail_on {
-        let th = Severity::parse(threshold).ok_or_else(|| Error::Invalid(format!("severidade inválida: {threshold} (low|medium|high|critical)")))?;
+        let th = Severity::parse(threshold).ok_or_else(|| {
+            Error::Invalid(format!(
+                "severidade inválida: {threshold} (low|medium|high|critical)"
+            ))
+        })?;
         if worst.map(|w| w >= th).unwrap_or(false) {
             std::process::exit(1);
         }
@@ -94,9 +133,17 @@ pub fn scan_image(images: &ImageStore, image: &Image) -> Result<Option<Severity>
     let (db, prov) = load_advisories()?;
     let findings = db.scan(&sbom);
 
-    println!("{}", output::bold(&format!("Vulnerability Scan · {}", image.short_id())));
+    println!(
+        "{}",
+        output::bold(&format!("Vulnerability Scan · {}", image.short_id()))
+    );
     let count = |sev: Severity| findings.iter().filter(|f| f.severity == sev).count();
-    let (crit, high, med, low) = (count(Severity::Critical), count(Severity::High), count(Severity::Medium), count(Severity::Low));
+    let (crit, high, med, low) = (
+        count(Severity::Critical),
+        count(Severity::High),
+        count(Severity::Medium),
+        count(Severity::Low),
+    );
     println!(
         "  {}   {}   {}",
         output::dim(&format!("SBOM: {} pacotes", sbom.len())),
@@ -108,7 +155,14 @@ pub fn scan_image(images: &ImageStore, image: &Image) -> Result<Option<Severity>
     // Proveniência HONESTA: sem isto, um "sem vulnerabilidades" contra a base
     // placeholder parecia um atestado de saúde — falsa garantia.
     let stale = delonix_scan::db_is_stale(prov.synced_unix, now_unix(), 14);
-    println!("  {}", output::dim(&format!("fonte da base: {} ({} advisories)", prov.label, db.len())));
+    println!(
+        "  {}",
+        output::dim(&format!(
+            "fonte da base: {} ({} advisories)",
+            prov.label,
+            db.len()
+        ))
+    );
     if prov.placeholder {
         output::warn(&format!(
             "base de CVE EMBEBIDA (placeholder, {} entradas) — NÃO é um feed real; um \"sem vulnerabilidades\" não é de confiança. \
@@ -121,7 +175,10 @@ pub fn scan_image(images: &ImageStore, image: &Image) -> Result<Option<Severity>
 
     if findings.is_empty() {
         if prov.placeholder {
-            println!("  {}", output::dim("sem correspondências na base placeholder (não conclusivo)"));
+            println!(
+                "  {}",
+                output::dim("sem correspondências na base placeholder (não conclusivo)")
+            );
         } else {
             println!("  ✔ sem vulnerabilidades conhecidas");
         }
@@ -134,7 +191,13 @@ pub fn scan_image(images: &ImageStore, image: &Image) -> Result<Option<Severity>
         if f.severity > worst {
             worst = f.severity;
         }
-        t.row(vec![format!("{:?}", f.severity), f.package.clone(), f.version.clone(), f.fixed.clone(), f.id.clone()]);
+        t.row(vec![
+            format!("{:?}", f.severity),
+            f.package.clone(),
+            f.version.clone(),
+            f.fixed.clone(),
+            f.id.clone(),
+        ]);
     }
     t.print();
     Ok(Some(worst))
@@ -157,7 +220,11 @@ pub fn cmd_scan_update(feed: Option<String>) -> Result<()> {
     let (images, _store) = open_stores()?;
     let source = feed
         .or_else(|| std::env::var("DELONIX_ADVISORY_FEED").ok())
-        .ok_or_else(|| Error::Invalid("indica a fonte: --feed <url|ficheiro> (ou $DELONIX_ADVISORY_FEED)".into()))?;
+        .ok_or_else(|| {
+            Error::Invalid(
+                "indica a fonte: --feed <url|ficheiro> (ou $DELONIX_ADVISORY_FEED)".into(),
+            )
+        })?;
     eprintln!("a sincronizar o feed de CVE de {source}…");
     let raw = if source.starts_with("http://") || source.starts_with("https://") {
         delonix_image::http_get(&source)?
@@ -166,22 +233,36 @@ pub fn cmd_scan_update(feed: Option<String>) -> Result<()> {
         std::fs::read(path)?
     };
     let text = String::from_utf8_lossy(&raw);
-    let value: serde_json::Value = serde_json::from_str(&text).map_err(|e| Error::Invalid(format!("feed inválido: {e}")))?;
+    let value: serde_json::Value =
+        serde_json::from_str(&text).map_err(|e| Error::Invalid(format!("feed inválido: {e}")))?;
     // OSV: objeto `{"vulns":…}` ou array cujo 1.º elemento tem `affected`.
     let is_osv = value.get("vulns").is_some()
-        || value.as_array().and_then(|a| a.first()).map(|e| e.get("affected").is_some()).unwrap_or(false);
+        || value
+            .as_array()
+            .and_then(|a| a.first())
+            .map(|e| e.get("affected").is_some())
+            .unwrap_or(false);
     let incoming: Vec<serde_json::Value> = if is_osv {
         let advs = delonix_scan::advisories_from_osv(&text)?;
-        eprintln!("→ feed OSV detectado: {} advisories convertidas (Alpine/Debian/Ubuntu)", advs.len());
-        advs.iter().filter_map(|a| serde_json::to_value(a).ok()).collect()
+        eprintln!(
+            "→ feed OSV detectado: {} advisories convertidas (Alpine/Debian/Ubuntu)",
+            advs.len()
+        );
+        advs.iter()
+            .filter_map(|a| serde_json::to_value(a).ok())
+            .collect()
     } else {
-        serde_json::from_value(value).map_err(|e| Error::Invalid(format!("feed nativo inválido: {e}")))?
+        serde_json::from_value(value)
+            .map_err(|e| Error::Invalid(format!("feed nativo inválido: {e}")))?
     };
 
     let dst = images.root().join("advisories.json");
     let mut by_id: BTreeMap<String, serde_json::Value> = BTreeMap::new();
     // Arranca do embebido + do que já existir (para nunca perder advisories).
-    for src in [EMBEDDED_ADVISORIES.to_string(), std::fs::read_to_string(&dst).unwrap_or_default()] {
+    for src in [
+        EMBEDDED_ADVISORIES.to_string(),
+        std::fs::read_to_string(&dst).unwrap_or_default(),
+    ] {
         if let Ok(arr) = serde_json::from_str::<Vec<serde_json::Value>>(&src) {
             for a in arr {
                 if let Some(id) = a.get("id").and_then(|v| v.as_str()) {
@@ -204,8 +285,14 @@ pub fn cmd_scan_update(feed: Option<String>) -> Result<()> {
     AdvisoryDb::load(&json)?; // valida o schema antes de gravar
     std::fs::write(&dst, &json)?;
     let meta = serde_json::json!({ "source": source, "synced_unix": now_unix(), "count": merged.len(), "format": if is_osv { "osv" } else { "native" } });
-    let _ = std::fs::write(images.root().join("advisories.meta.json"), serde_json::to_string_pretty(&meta).unwrap_or_default());
-    println!("base de advisories sincronizada: {} entradas ({added} novas) de {source}", merged.len());
+    let _ = std::fs::write(
+        images.root().join("advisories.meta.json"),
+        serde_json::to_string_pretty(&meta).unwrap_or_default(),
+    );
+    println!(
+        "base de advisories sincronizada: {} entradas ({added} novas) de {source}",
+        merged.len()
+    );
     Ok(())
 }
 
@@ -232,12 +319,16 @@ pub fn admission_scan_on_pull(images: &ImageStore, reference: &str, img: &Image)
     if policy.is_empty() {
         return Ok(());
     }
-    eprintln!("→ política de admissão: scan de CVE de '{reference}' (DELONIX_SCAN_ON_PULL={policy})…");
+    eprintln!(
+        "→ política de admissão: scan de CVE de '{reference}' (DELONIX_SCAN_ON_PULL={policy})…"
+    );
     let worst = match scan_image(images, img) {
         Ok(w) => w,
         // Sem SBOM (scratch/distroless) ou scan indisponível → não bloquear, avisar.
         Err(e) => {
-            output::warn(&format!("scan de admissão indisponível ({e}); pull permitido."));
+            output::warn(&format!(
+                "scan de admissão indisponível ({e}); pull permitido."
+            ));
             return Ok(());
         }
     };

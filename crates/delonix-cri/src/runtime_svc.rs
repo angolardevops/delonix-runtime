@@ -39,8 +39,9 @@ where
 
 #[tonic::async_trait]
 impl RuntimeService for DelonixRuntime {
-    type GetContainerEventsStream =
-        std::pin::Pin<Box<dyn tokio_stream::Stream<Item = Result<ContainerEventResponse, Status>> + Send>>;
+    type GetContainerEventsStream = std::pin::Pin<
+        Box<dyn tokio_stream::Stream<Item = Result<ContainerEventResponse, Status>> + Send>,
+    >;
 
     async fn version(
         &self,
@@ -100,12 +101,17 @@ impl RuntimeService for DelonixRuntime {
                     "NetworkReady",
                     false,
                     "BridgeMissing",
-                    &format!("bridge '{}' não existe em /sys/class/net", delonix_net::infra::INFRA_BRIDGE),
+                    &format!(
+                        "bridge '{}' não existe em /sys/class/net",
+                        delonix_net::infra::INFRA_BRIDGE
+                    ),
                 )
             }
         };
         Ok(Response::new(StatusResponse {
-            status: Some(RuntimeStatus { conditions: vec![runtime_ready, network_ready] }),
+            status: Some(RuntimeStatus {
+                conditions: vec![runtime_ready, network_ready],
+            }),
             info: Default::default(),
             runtime_handlers: vec![],
             features: None,
@@ -252,7 +258,9 @@ impl RuntimeService for DelonixRuntime {
         let req = r.into_inner();
         // Encaminha portas do host para dentro do netns do pod (proxy TCP via
         // setns). Devolve a URL de streaming; o cliente abre uma stream por porta.
-        let url = self.streamer.prepare_port_forward(req.pod_sandbox_id, req.port);
+        let url = self
+            .streamer
+            .prepare_port_forward(req.pod_sandbox_id, req.port);
         Ok(Response::new(PortForwardResponse { url }))
     }
     async fn container_stats(
@@ -305,13 +313,17 @@ impl RuntimeService for DelonixRuntime {
         &self,
         _r: Request<ListMetricDescriptorsRequest>,
     ) -> Result<Response<ListMetricDescriptorsResponse>, Status> {
-        Ok(Response::new(ListMetricDescriptorsResponse { descriptors: vec![] }))
+        Ok(Response::new(ListMetricDescriptorsResponse {
+            descriptors: vec![],
+        }))
     }
     async fn list_pod_sandbox_metrics(
         &self,
         _r: Request<ListPodSandboxMetricsRequest>,
     ) -> Result<Response<ListPodSandboxMetricsResponse>, Status> {
-        Ok(Response::new(ListPodSandboxMetricsResponse { pod_metrics: vec![] }))
+        Ok(Response::new(ListPodSandboxMetricsResponse {
+            pod_metrics: vec![],
+        }))
     }
     async fn runtime_config(
         &self,
@@ -353,25 +365,48 @@ mod tests {
         let base = std::env::temp_dir().join(format!(
             "delonix-cri-status-test-{}-{}",
             std::process::id(),
-            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
         ));
         std::fs::create_dir_all(&base).unwrap();
         let streamer = crate::streaming::Streamer::new(base.clone(), "127.0.0.1:0".to_string());
         let svc = DelonixRuntime::new(base.clone(), streamer);
 
-        let resp = svc.status(Request::new(StatusRequest { verbose: false })).await.unwrap().into_inner();
-        let status = resp.status.expect("StatusResponse.status devia vir preenchido");
-        let runtime_ready = status.conditions.iter().find(|c| c.r#type == "RuntimeReady").unwrap();
-        assert!(runtime_ready.status, "RuntimeReady devia ser true (o servidor respondeu)");
+        let resp = svc
+            .status(Request::new(StatusRequest { verbose: false }))
+            .await
+            .unwrap()
+            .into_inner();
+        let status = resp
+            .status
+            .expect("StatusResponse.status devia vir preenchido");
+        let runtime_ready = status
+            .conditions
+            .iter()
+            .find(|c| c.r#type == "RuntimeReady")
+            .unwrap();
+        assert!(
+            runtime_ready.status,
+            "RuntimeReady devia ser true (o servidor respondeu)"
+        );
 
-        let network_ready = status.conditions.iter().find(|c| c.r#type == "NetworkReady").unwrap();
+        let network_ready = status
+            .conditions
+            .iter()
+            .find(|c| c.r#type == "NetworkReady")
+            .unwrap();
         assert!(
             !network_ready.status,
             "NetworkReady devia ser FALSE (sem infra rootless a correr neste teste) — \
              se vier true sem verificação real, é a regressão que corrigimos"
         );
         assert_eq!(network_ready.reason, "InfraDown");
-        assert!(!network_ready.message.is_empty(), "devia explicar a causa concreta");
+        assert!(
+            !network_ready.message.is_empty(),
+            "devia explicar a causa concreta"
+        );
 
         let _ = std::fs::remove_dir_all(&base);
     }

@@ -79,9 +79,18 @@ pub fn run(action: SystemCmd) -> Result<()> {
         SystemCmd::Info => cmd_info(),
         SystemCmd::Df => cmd_df(),
         SystemCmd::Prune { all } => cmd_prune(all),
-        SystemCmd::Monitor { interval, no_stream } => cmd_monitor(interval, no_stream),
+        SystemCmd::Monitor {
+            interval,
+            no_stream,
+        } => cmd_monitor(interval, no_stream),
         SystemCmd::Virt { tune } => cmd_virt(tune),
-        SystemCmd::Thermal { high, low, floor, interval, once } => cmd_thermal(high, low, floor, interval, once),
+        SystemCmd::Thermal {
+            high,
+            low,
+            floor,
+            interval,
+            once,
+        } => cmd_thermal(high, low, floor, interval, once),
     }
 }
 
@@ -110,38 +119,77 @@ fn cmd_monitor(interval: u64, no_stream: bool) -> Result<()> {
             ip2name.len(),
             super::output::tr("containers", "containers"),
             conns.len(),
-            super::output::tr("active connections (conntrack)", "ligações activas (conntrack)"),
+            super::output::tr(
+                "active connections (conntrack)",
+                "ligações activas (conntrack)"
+            ),
         );
         if ip2name.is_empty() {
-            println!("  {}", super::output::dim(super::output::tr("(no running containers with a network)", "(sem containers com rede a correr)")));
+            println!(
+                "  {}",
+                super::output::dim(super::output::tr(
+                    "(no running containers with a network)",
+                    "(sem containers com rede a correr)"
+                ))
+            );
         }
-        let mut ext_in: Vec<&delonix_net::Connection> = conns.iter().filter(|c| c.kind == "external_in").collect();
-        let mut egress: Vec<&delonix_net::Connection> = conns.iter().filter(|c| c.kind == "egress").collect();
-        let internal: Vec<&delonix_net::Connection> = conns.iter().filter(|c| c.kind == "internal").collect();
+        let mut ext_in: Vec<&delonix_net::Connection> =
+            conns.iter().filter(|c| c.kind == "external_in").collect();
+        let mut egress: Vec<&delonix_net::Connection> =
+            conns.iter().filter(|c| c.kind == "egress").collect();
+        let internal: Vec<&delonix_net::Connection> =
+            conns.iter().filter(|c| c.kind == "internal").collect();
         ext_in.sort_by(|a, b| a.container.cmp(&b.container));
         egress.sort_by(|a, b| a.container.cmp(&b.container));
         if !ext_in.is_empty() {
-            println!("  ⬇ {}", super::output::tr("INBOUND → CONTAINER (external access)", "DE FORA → CONTAINER (acesso externo)"));
+            println!(
+                "  ⬇ {}",
+                super::output::tr(
+                    "INBOUND → CONTAINER (external access)",
+                    "DE FORA → CONTAINER (acesso externo)"
+                )
+            );
             for c in &ext_in {
-                println!("    {:<22} ← {}:{}/{}", c.container, c.peer, c.port, c.proto);
+                println!(
+                    "    {:<22} ← {}:{}/{}",
+                    c.container, c.peer, c.port, c.proto
+                );
             }
             println!();
         }
         if !egress.is_empty() {
-            println!("  ⬆ {}", super::output::tr("CONTAINER → OUTBOUND (egress)", "CONTAINER → EXTERIOR (saídas)"));
+            println!(
+                "  ⬆ {}",
+                super::output::tr(
+                    "CONTAINER → OUTBOUND (egress)",
+                    "CONTAINER → EXTERIOR (saídas)"
+                )
+            );
             for c in &egress {
-                println!("    {:<22} → {}:{}/{}", c.container, c.peer, c.port, c.proto);
+                println!(
+                    "    {:<22} → {}:{}/{}",
+                    c.container, c.peer, c.port, c.proto
+                );
             }
             println!();
         }
         if !internal.is_empty() {
-            println!("  ⇄ {}", super::output::tr("BETWEEN CONTAINERS", "ENTRE CONTAINERS"));
+            println!(
+                "  ⇄ {}",
+                super::output::tr("BETWEEN CONTAINERS", "ENTRE CONTAINERS")
+            );
             for c in &internal {
                 println!("    {} ↔ {}", c.container, c.peer);
             }
         }
         if conns.is_empty() && !ip2name.is_empty() {
-            println!("  {}", super::output::dim(super::output::tr("(no active connections right now)", "(sem ligações activas neste momento)")));
+            println!(
+                "  {}",
+                super::output::dim(super::output::tr(
+                    "(no active connections right now)",
+                    "(sem ligações activas neste momento)"
+                ))
+            );
         }
         if no_stream {
             return Ok(());
@@ -189,7 +237,8 @@ fn cmd_prune(all: bool) -> Result<()> {
     let in_use: HashSet<String> = store.list()?.iter().map(|c| c.image.clone()).collect();
     let mut rmi = 0usize;
     for img in images.list()? {
-        let dangling = img.repo_tags.is_empty() || img.repo_tags.iter().all(|t| t.contains("<none>"));
+        let dangling =
+            img.repo_tags.is_empty() || img.repo_tags.iter().all(|t| t.contains("<none>"));
         let used = in_use.contains(&img.id) || img.repo_tags.iter().any(|t| in_use.contains(t));
         if (dangling || all) && !used {
             if img.repo_tags.is_empty() {
@@ -259,7 +308,10 @@ fn cmd_prune(all: bool) -> Result<()> {
             let name = e.file_name().to_string_lossy().into_owned();
             // `remove_dir` (não `_all`): só remove se estiver VAZIO — um cgroup
             // com processos lá dentro recusa, e ainda bem.
-            if name.starts_with("delonix-") && !live_cg.contains(&name) && std::fs::remove_dir(e.path()).is_ok() {
+            if name.starts_with("delonix-")
+                && !live_cg.contains(&name)
+                && std::fs::remove_dir(e.path()).is_ok()
+            {
                 rmg += 1;
             }
         }
@@ -276,7 +328,11 @@ fn cmd_prune(all: bool) -> Result<()> {
         .iter()
         .filter(|c| c.pid.map(delonix_runtime::is_alive).unwrap_or(false))
         .flat_map(|c| c.ports.iter())
-        .filter_map(|p| delonix_net::parse_publish(p).ok().and_then(|(hp, _, _)| hp.parse::<u32>().ok()))
+        .filter_map(|p| {
+            delonix_net::parse_publish(p)
+                .ok()
+                .and_then(|(hp, _, _)| hp.parse::<u32>().ok())
+        })
         .collect();
     let rmh = delonix_net::infra::reap_orphan_hostfwds(&live_ports);
     // 7) slirps órfãos (alvo morto) — já reapados no topo por `reap_orphan_slirp`.
@@ -284,7 +340,11 @@ fn cmd_prune(all: bool) -> Result<()> {
     // 8) redes `dlx-*` VAZIAS — auto-criadas para clusters que já foram apagados
     //    (uma rede de utilizador, sem o prefixo, NUNCA se toca aqui). Livra a
     //    sub-rede/bridge para reutilizar.
-    let attached: HashSet<String> = store.list()?.iter().filter_map(|c| c.network.clone()).collect();
+    let attached: HashSet<String> = store
+        .list()?
+        .iter()
+        .filter_map(|c| c.network.clone())
+        .collect();
     let mut rmn = 0usize;
     if let Ok(nstore) = delonix_net::NetworkStore::open(super::util::state_root()) {
         if let Ok(nets) = nstore.list() {
@@ -316,13 +376,30 @@ fn cmd_virt(tune: bool) -> Result<()> {
         println!("  Nenhuma afinação de VM a aplicar; o runtime já usa o hardware diretamente.");
         return Ok(());
     }
-    let kvm = if v.is_kvm { "   ← KVM nativo: caminho de máximo desempenho disponível" } else { "" };
-    println!("Virtualização detetada: {}{kvm}", v.hypervisor.to_uppercase());
+    let kvm = if v.is_kvm {
+        "   ← KVM nativo: caminho de máximo desempenho disponível"
+    } else {
+        ""
+    };
+    println!(
+        "Virtualização detetada: {}{kvm}",
+        v.hypervisor.to_uppercase()
+    );
     println!(
         "  Aceleração KVM (/dev/kvm): {}",
-        if v.kvm_accel { "sim (virtualização aninhada possível)" } else { "não" }
+        if v.kvm_accel {
+            "sim (virtualização aninhada possível)"
+        } else {
+            "não"
+        }
     );
-    let join = |xs: &[String], vazio: &str| if xs.is_empty() { vazio.to_string() } else { xs.join(", ") };
+    let join = |xs: &[String], vazio: &str| {
+        if xs.is_empty() {
+            vazio.to_string()
+        } else {
+            xs.join(", ")
+        }
+    };
     println!("  Rede virtio-net: {}", join(&v.virtio_net, "(nenhuma)"));
     println!("  Disco virtio-blk: {}", join(&v.virtio_blk, "(nenhum)"));
     println!("  Dispositivos no bus virtio: {}", v.virtio_count);
@@ -353,7 +430,9 @@ fn cmd_virt(tune: bool) -> Result<()> {
         if pending.is_empty() {
             println!("\nSem afinações pendentes — esta VM já está otimizada para o Delonix.");
         } else {
-            println!("\nAfinações recomendadas (corre `sudo delonix system virt --tune` para aplicar):");
+            println!(
+                "\nAfinações recomendadas (corre `sudo delonix system virt --tune` para aplicar):"
+            );
             for p in &pending {
                 println!("  • {p}");
             }
@@ -366,7 +445,9 @@ fn cmd_virt(tune: bool) -> Result<()> {
 fn cmd_thermal(high: u64, low: u64, floor: u64, interval: u64, once: bool) -> Result<()> {
     use delonix_runtime::{self as runtime};
     if high <= low {
-        return Err(delonix_runtime_core::Error::Invalid("--high tem de ser maior que --low".into()));
+        return Err(delonix_runtime_core::Error::Invalid(
+            "--high tem de ser maior que --low".into(),
+        ));
     }
     if runtime::is_rootless() {
         return Err(delonix_runtime_core::Error::Invalid(
@@ -381,7 +462,11 @@ fn cmd_thermal(high: u64, low: u64, floor: u64, interval: u64, once: bool) -> Re
         if temp >= high && scale > floor {
             scale = floor.max(scale.saturating_sub(20));
             runtime::set_slice_cpu_pct(scale);
-            let fan = if runtime::boost_fans() { " + ventoinha no máximo" } else { "" };
+            let fan = if runtime::boost_fans() {
+                " + ventoinha no máximo"
+            } else {
+                ""
+            };
             println!("{temp}°C ≥ {high}°C — a arrefecer: CPU do Delonix a {scale}%{fan}");
         } else if temp <= low && scale < 100 {
             scale = 100.min(scale + 20);
@@ -424,7 +509,9 @@ fn cmd_events(follow: bool, tail: Option<usize>) -> Result<()> {
 
 /// Soma recursiva do tamanho de um directório (aparente, como o `du`).
 fn dir_size(p: &std::path::Path) -> u64 {
-    let Ok(rd) = std::fs::read_dir(p) else { return 0 };
+    let Ok(rd) = std::fs::read_dir(p) else {
+        return 0;
+    };
     rd.flatten()
         .map(|e| {
             let path = e.path();
@@ -482,7 +569,11 @@ fn cmd_df() -> Result<()> {
         ("imagens VM", root.join("vm-images")),
     ] {
         let size = dir_size(&dir);
-        let recl = if label == "containers" { human(orphan) } else { "-".to_string() };
+        let recl = if label == "containers" {
+            human(orphan)
+        } else {
+            "-".to_string()
+        };
         println!("{label:<16}  {:>10}  {recl:>12}", human(size));
     }
     if orphan_n > 0 {
@@ -509,7 +600,14 @@ fn cmd_info() -> Result<()> {
     println!("Delonix Runtime {}", env!("CARGO_PKG_VERSION"));
     println!("  raiz de estado:     {}", state_root().display());
     let rootless = delonix_runtime::is_rootless();
-    println!("  modo:               {}", if rootless { "rootless (sem daemon)" } else { "root (sem daemon)" });
+    println!(
+        "  modo:               {}",
+        if rootless {
+            "rootless (sem daemon)"
+        } else {
+            "root (sem daemon)"
+        }
+    );
     // Isto é a pergunta nº1 quando os limites "não funcionam".
     let delegated = std::path::Path::new("/sys/fs/cgroup/cgroup.controllers").exists()
         && std::fs::read_to_string("/sys/fs/cgroup/cgroup.subtree_control")
@@ -517,7 +615,11 @@ fn cmd_info() -> Result<()> {
             .unwrap_or(false);
     println!(
         "  cgroup2 delegado:   {}",
-        if delegated { "sim" } else { "não — memory/cpu/pids NÃO são aplicados (corre sob systemd-run --user --scope -p Delegate=yes)" }
+        if delegated {
+            "sim"
+        } else {
+            "não — memory/cpu/pids NÃO são aplicados (corre sob systemd-run --user --scope -p Delegate=yes)"
+        }
     );
     let infra = delonix_net::infra::status();
     println!(
@@ -528,7 +630,10 @@ fn cmd_info() -> Result<()> {
         }
     );
     println!("  containers:         {} ({running} a correr)", cs.len());
-    println!("  eventos:            {}", events::read(&state_root()).len());
+    println!(
+        "  eventos:            {}",
+        events::read(&state_root()).len()
+    );
     Ok(())
 }
 

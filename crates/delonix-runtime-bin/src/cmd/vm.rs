@@ -70,9 +70,26 @@ struct VmVolumeSpec {
 /// para o aviso de campos desconhecidos. Mantém-se alinhado com `VmSpec` pelo
 /// teste `manifest::tests::examples_nao_tem_campos_desconhecidos`.
 pub(crate) const VM_SPEC_FIELDS: &[&str] = &[
-    "disk", "vcpus", "memory", "network", "kernel", "initrd", "firmware", "cmdline", "seed",
-    "restartPolicy", "restart_policy", "hugepages", "cpuAffinity", "cpu_affinity", "devices",
-    "backend", "netMode", "net_mode", "bridge", "volumes",
+    "disk",
+    "vcpus",
+    "memory",
+    "network",
+    "kernel",
+    "initrd",
+    "firmware",
+    "cmdline",
+    "seed",
+    "restartPolicy",
+    "restart_policy",
+    "hugepages",
+    "cpuAffinity",
+    "cpu_affinity",
+    "devices",
+    "backend",
+    "netMode",
+    "net_mode",
+    "bridge",
+    "volumes",
 ];
 
 fn default_vcpus() -> u32 {
@@ -218,7 +235,16 @@ pub enum VmCmd {
 /// mesma base — a unicidade é garantida por `resolve_vm_volumes` (sufixo por
 /// índice), não aqui.
 fn vol_tag(name: &str) -> String {
-    let mut t: String = name.chars().map(|c| if c.is_ascii_alphanumeric() || c == '_' { c } else { '_' }).collect();
+    let mut t: String = name
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
     t.truncate(31);
     t
 }
@@ -228,7 +254,10 @@ fn vol_tag(name: &str) -> String {
 /// chars — senão a entrada `mounts` fica malformada e o volume não monta em
 /// silêncio depois do boot.
 fn valid_mount_path(p: &str) -> bool {
-    p.starts_with('/') && !p.chars().any(|c| c.is_control() || matches!(c, ',' | ']' | '[' | '#' | '"'))
+    p.starts_with('/')
+        && !p
+            .chars()
+            .any(|c| c.is_control() || matches!(c, ',' | ']' | '[' | '#' | '"'))
 }
 
 /// Resolve `spec.volumes` (nomes de Volume/Storage) para `VmVolume` com o
@@ -236,7 +265,10 @@ fn valid_mount_path(p: &str) -> bool {
 /// partilhar por 9p. Tags únicas (sufixo `_N` em colisão). O `Volume`/`Storage`
 /// tem de já existir (o `stack apply` aplica-os antes da VM; o `validate_graph`
 /// já confirma a referência).
-fn resolve_vm_volumes(base: &std::path::Path, specs: &[VmVolumeSpec]) -> Result<Vec<delonix_vm::VmVolume>> {
+fn resolve_vm_volumes(
+    base: &std::path::Path,
+    specs: &[VmVolumeSpec],
+) -> Result<Vec<delonix_vm::VmVolume>> {
     if specs.is_empty() {
         return Ok(Vec::new());
     }
@@ -250,9 +282,12 @@ fn resolve_vm_volumes(base: &std::path::Path, specs: &[VmVolumeSpec]) -> Result<
                 v.mount_path
             )));
         }
-        let vol = store
-            .inspect(&v.name)
-            .map_err(|_| Error::Invalid(format!("spec.volumes: volume/storage '{}' não existe (cria-o antes da VM)", v.name)))?;
+        let vol = store.inspect(&v.name).map_err(|_| {
+            Error::Invalid(format!(
+                "spec.volumes: volume/storage '{}' não existe (cria-o antes da VM)",
+                v.name
+            ))
+        })?;
         // Se for um Storage de rede, garante a montagem no host antes de partilhar.
         store.ensure_mounted(&vol)?;
         // Unicidade da tag: `.` e `-` colapsam em `_`, por isso nomes distintos
@@ -296,9 +331,11 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
         // 9p (senão o `<filesystem>` existe mas o guest não o monta sozinho).
         let seed = match spec.seed {
             Some(s) => Some(s),
-            None if !vm_volumes.is_empty() => {
-                Some(generate_seed_iso(name, None, &[], None, &vm_volumes)?.to_string_lossy().into_owned())
-            }
+            None if !vm_volumes.is_empty() => Some(
+                generate_seed_iso(name, None, &[], None, &vm_volumes)?
+                    .to_string_lossy()
+                    .into_owned(),
+            ),
             None => None,
         };
 
@@ -329,8 +366,24 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
 }
 
 pub fn run(action: VmCmd) -> Result<()> {
-    if let VmCmd::Init { dir, name, image, force, template, up } = action {
-        return cmd_init(super::scaffold::Target::Vm, dir, name, image, force, template, up);
+    if let VmCmd::Init {
+        dir,
+        name,
+        image,
+        force,
+        template,
+        up,
+    } = action
+    {
+        return cmd_init(
+            super::scaffold::Target::Vm,
+            dir,
+            name,
+            image,
+            force,
+            template,
+            up,
+        );
     }
     if let VmCmd::Dash { once } = action {
         return super::dash::run(super::dash::DashScope::Vms, once);
@@ -365,7 +418,13 @@ pub fn run(action: VmCmd) -> Result<()> {
             let seed = match seed {
                 Some(s) => Some(s),
                 None if hostname.is_some() || !ssh_keys.is_empty() || user_data.is_some() => {
-                    let iso = generate_seed_iso(&name, hostname.as_deref(), &ssh_keys, user_data.as_deref(), &[])?;
+                    let iso = generate_seed_iso(
+                        &name,
+                        hostname.as_deref(),
+                        &ssh_keys,
+                        user_data.as_deref(),
+                        &[],
+                    )?;
                     Some(iso.to_string_lossy().into_owned())
                 }
                 None => None,
@@ -482,8 +541,16 @@ fn describe_one(vm: &delonix_runtime_core::Vm) {
     d.field("Backend", &vm.backend);
     d.field("Created", output::fmt_local(vm.created_unix));
     d.field("Age", output::fmt_age(vm.created_unix));
-    d.field("PID", vm.pid.map(|p| p.to_string()).unwrap_or_else(|| "<none>".into()));
-    d.field("Restart policy", vm.restart_policy.as_deref().unwrap_or("no"));
+    d.field(
+        "PID",
+        vm.pid
+            .map(|p| p.to_string())
+            .unwrap_or_else(|| "<none>".into()),
+    );
+    d.field(
+        "Restart policy",
+        vm.restart_policy.as_deref().unwrap_or("no"),
+    );
 
     d.section("Resources");
     d.sub("vCPUs", vm.vcpus.to_string());
@@ -525,7 +592,11 @@ fn resolve_ssh_key(spec: &str) -> Result<String> {
 /// `package_update: false`/`package_upgrade: false` porque a imagem dourada
 /// já vem pronta (ver `cmd::vmimage`); não faz sentido gastar o primeiro boot
 /// a `apt update`.
-fn build_user_data(hostname: &str, ssh_keys: &[String], volumes: &[delonix_vm::VmVolume]) -> String {
+fn build_user_data(
+    hostname: &str,
+    ssh_keys: &[String],
+    volumes: &[delonix_vm::VmVolume],
+) -> String {
     let mut out = String::from("#cloud-config\n");
     out.push_str(&format!("hostname: {hostname}\n"));
     out.push_str("package_update: false\n");
@@ -577,8 +648,12 @@ pub(crate) fn generate_seed_iso(
     let user_data_path = work_dir.join("user-data");
     match user_data_override {
         Some(p) => {
-            std::fs::copy(p, &user_data_path)
-                .map_err(|e| Error::Invalid(format!("não consegui copiar --user-data '{}': {e}", p.display())))?;
+            std::fs::copy(p, &user_data_path).map_err(|e| {
+                Error::Invalid(format!(
+                    "não consegui copiar --user-data '{}': {e}",
+                    p.display()
+                ))
+            })?;
             // O user-data próprio do utilizador substitui TUDO — não há onde
             // injectar os mounts dos volumes sem os fundir. Avisa em vez de os
             // perder em silêncio (o `<filesystem>` fica no XML, mas o guest não
@@ -591,7 +666,8 @@ pub(crate) fn generate_seed_iso(
             }
         }
         None => {
-            let resolved_keys: Result<Vec<String>> = ssh_keys.iter().map(|s| resolve_ssh_key(s)).collect();
+            let resolved_keys: Result<Vec<String>> =
+                ssh_keys.iter().map(|s| resolve_ssh_key(s)).collect();
             let content = build_user_data(&hostname, &resolved_keys?, volumes);
             std::fs::write(&user_data_path, content)?;
         }
@@ -607,7 +683,10 @@ pub(crate) fn generate_seed_iso(
         .status()
         .map_err(|e| Error::Invalid(format!("a correr cloud-localds: {e}")))?;
     if !status.success() {
-        return Err(Error::Invalid(format!("cloud-localds falhou (exit {:?})", status.code())));
+        return Err(Error::Invalid(format!(
+            "cloud-localds falhou (exit {:?})",
+            status.code()
+        )));
     }
     Ok(iso_path)
 }
@@ -664,8 +743,18 @@ mod tests {
     #[test]
     fn user_data_com_volumes_injecta_mounts_9p() {
         let vols = vec![
-            delonix_vm::VmVolume { tag: "dados".into(), source: "/srv/dados".into(), mount_path: "/mnt/dados".into(), read_only: false },
-            delonix_vm::VmVolume { tag: "ro".into(), source: "/srv/ro".into(), mount_path: "/mnt/ro".into(), read_only: true },
+            delonix_vm::VmVolume {
+                tag: "dados".into(),
+                source: "/srv/dados".into(),
+                mount_path: "/mnt/dados".into(),
+                read_only: false,
+            },
+            delonix_vm::VmVolume {
+                tag: "ro".into(),
+                source: "/srv/ro".into(),
+                mount_path: "/mnt/ro".into(),
+                read_only: true,
+            },
         ];
         let ud = build_user_data("myvm", &[], &vols);
         assert!(ud.contains("mounts:\n"));
@@ -701,7 +790,15 @@ mod tests {
 }
 
 /// Trata o `init` deste grupo (ver `cmd::scaffold`).
-fn cmd_init(target: super::scaffold::Target, dir: PathBuf, name: Option<String>, image: Option<String>, force: bool, template: Option<String>, up: bool) -> Result<()> {
+fn cmd_init(
+    target: super::scaffold::Target,
+    dir: PathBuf,
+    name: Option<String>,
+    image: Option<String>,
+    force: bool,
+    template: Option<String>,
+    up: bool,
+) -> Result<()> {
     let name = name.unwrap_or_else(|| {
         // Sem `--name`, usa o nome do DIRECTÓRIO. Não se pode usar `canonicalize`:
         // o directório ainda não existe (é o `init` que o cria) e falharia sempre,
@@ -717,5 +814,15 @@ fn cmd_init(target: super::scaffold::Target, dir: PathBuf, name: Option<String>,
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_else(|| "app".to_string())
     });
-    super::scaffold::init(target, &super::scaffold::InitOpts { dir, name, image, force, template, up })
+    super::scaffold::init(
+        target,
+        &super::scaffold::InitOpts {
+            dir,
+            name,
+            image,
+            force,
+            template,
+            up,
+        },
+    )
 }

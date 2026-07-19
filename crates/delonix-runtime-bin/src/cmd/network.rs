@@ -54,8 +54,9 @@ fn default_driver() -> String {
 
 /// Nomes aceites no `spec` de `kind: Network` (canónicos + aliases), para o
 /// aviso de campos desconhecidos.
-pub(crate) const NETWORK_SPEC_FIELDS: &[&str] =
-    &["driver", "parent", "subnet", "gateway", "vni", "peers", "wgIp", "wg_ip"];
+pub(crate) const NETWORK_SPEC_FIELDS: &[&str] = &[
+    "driver", "parent", "subnet", "gateway", "vni", "peers", "wgIp", "wg_ip",
+];
 
 #[derive(Subcommand)]
 pub enum NetworkCmd {
@@ -128,8 +129,19 @@ pub fn run(action: NetworkCmd) -> Result<()> {
         NetworkCmd::Dash { once } => super::dash::run(super::dash::DashScope::Networks, once),
         NetworkCmd::Ls => cmd_ls(&store),
         NetworkCmd::Node { action } => cmd_node(action),
-        NetworkCmd::Create { name, driver, parent, subnet, gateway, vni, peers, wg_ip } => {
-            let net = create_network(&store, &name, &driver, parent, subnet, &gateway, vni, peers, wg_ip)?;
+        NetworkCmd::Create {
+            name,
+            driver,
+            parent,
+            subnet,
+            gateway,
+            vni,
+            peers,
+            wg_ip,
+        } => {
+            let net = create_network(
+                &store, &name, &driver, parent, subnet, &gateway, vni, peers, wg_ip,
+            )?;
             println!("{}", net.name);
             Ok(())
         }
@@ -158,7 +170,17 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
             continue;
         }
         let spec: NetworkSpec = manifest::spec_of(doc)?;
-        create_network(&store, name, &spec.driver, spec.parent, spec.subnet, &spec.gateway, spec.vni, spec.peers, spec.wg_ip)?;
+        create_network(
+            &store,
+            name,
+            &spec.driver,
+            spec.parent,
+            spec.subnet,
+            &spec.gateway,
+            spec.vni,
+            spec.peers,
+            spec.wg_ip,
+        )?;
         println!("network/{name}: criada");
     }
     Ok(())
@@ -200,10 +222,14 @@ pub(crate) fn create_network(
         }
         "macvlan" | "ipvlan" => {
             let parent = parent.ok_or_else(|| {
-                delonix_runtime_core::Error::Invalid(format!("--parent é obrigatório para driver {driver}"))
+                delonix_runtime_core::Error::Invalid(format!(
+                    "--parent é obrigatório para driver {driver}"
+                ))
             })?;
             let subnet = subnet.ok_or_else(|| {
-                delonix_runtime_core::Error::Invalid(format!("--subnet é obrigatório para driver {driver}"))
+                delonix_runtime_core::Error::Invalid(format!(
+                    "--subnet é obrigatório para driver {driver}"
+                ))
             })?;
             let net = store.create_lan(name, driver, &parent, &subnet, gateway)?;
             // HONESTIDADE (não um no-op silencioso): macvlan/ipvlan põem o container
@@ -222,7 +248,11 @@ pub(crate) fn create_network(
             Ok(net)
         }
         "overlay" => {
-            let vni = vni.ok_or_else(|| delonix_runtime_core::Error::Invalid("--vni é obrigatório para driver overlay".into()))?;
+            let vni = vni.ok_or_else(|| {
+                delonix_runtime_core::Error::Invalid(
+                    "--vni é obrigatório para driver overlay".into(),
+                )
+            })?;
             let net = store.create_overlay(name, vni, &peers, wg_ip.as_deref())?;
             // Plano físico rootless (holder netns): bridge + uplink VXLAN + WG (se
             // cifrado). Ao contrário de macvlan/ipvlan, o overlay É realizável sem
@@ -255,7 +285,9 @@ pub(crate) fn create_network(
 fn realize_overlay(net: &Network) -> Result<()> {
     const WG_PORT: u16 = 51820;
     let Some(vni) = net.vni else { return Ok(()) };
-    let Some(dev) = net.vxlan_dev() else { return Ok(()) };
+    let Some(dev) = net.vxlan_dev() else {
+        return Ok(());
+    };
     // Overlay CIFRADO (wg_ip deste nó presente) EXIGE o `wg` no host. Falha ANTES
     // de subir o VXLAN: senão o FDB apontaria para os wg_ip dos pares (só
     // alcançáveis pelo túnel) sem túnel nenhum a subir → uplink silenciosamente
@@ -270,8 +302,11 @@ fn realize_overlay(net: &Network) -> Result<()> {
         ));
     }
     // Parse dos peers UMA vez (reusado no FDB e no loop WG).
-    let parsed: Vec<(String, Option<(String, String)>)> =
-        net.peers.iter().map(|p| delonix_net::parse_overlay_peer(p)).collect();
+    let parsed: Vec<(String, Option<(String, String)>)> = net
+        .peers
+        .iter()
+        .map(|p| delonix_net::parse_overlay_peer(p))
+        .collect();
     // Holder de pé (sem incrementar o ref-count — o uplink é infra persistente,
     // não uma carga; morre com o `network rm` → `netdel`, não com um release).
     infra::ensure_up()?;
@@ -281,7 +316,11 @@ fn realize_overlay(net: &Network) -> Result<()> {
     // FDB: `wg_ip` de cada par se cifrado, senão o `node_ip` plano.
     let dsts: Vec<String> = parsed
         .iter()
-        .map(|(node_ip, wg)| wg.as_ref().map(|(_pubkey, wgip)| wgip.clone()).unwrap_or_else(|| node_ip.clone()))
+        .map(|(node_ip, wg)| {
+            wg.as_ref()
+                .map(|(_pubkey, wgip)| wgip.clone())
+                .unwrap_or_else(|| node_ip.clone())
+        })
         .collect();
     infra::set_vxlan(&dev, vni, &bridge, &gateway, &dsts)?;
     // WireGuard só no overlay CIFRADO (a disponibilidade já foi garantida acima).
@@ -291,7 +330,12 @@ fn realize_overlay(net: &Network) -> Result<()> {
         infra::set_wg_iface(&iface, &key.private, WG_PORT, &format!("{my_wg_ip}/24"))?;
         for (node_ip, wg) in &parsed {
             if let Some((pubkey, wgip)) = wg {
-                infra::set_wg_peer(&iface, pubkey, &format!("{node_ip}:{WG_PORT}"), &[format!("{wgip}/32")])?;
+                infra::set_wg_peer(
+                    &iface,
+                    pubkey,
+                    &format!("{node_ip}:{WG_PORT}"),
+                    &[format!("{wgip}/32")],
+                )?;
             }
         }
     }
@@ -342,15 +386,26 @@ fn attached_containers(net: &str) -> Option<Vec<String>> {
     let cs = store.list().ok()?;
     Some(
         cs.iter()
-            .filter(|c| c.network.as_deref() == Some(net) || c.extra_networks.iter().any(|e| e.network == net))
+            .filter(|c| {
+                c.network.as_deref() == Some(net)
+                    || c.extra_networks.iter().any(|e| e.network == net)
+            })
             .map(|c| {
                 // O IP da rede em causa, seja ela a primária ou uma extra.
                 let ip = if c.network.as_deref() == Some(net) {
                     c.ip.clone()
                 } else {
-                    c.extra_networks.iter().find(|e| e.network == net).map(|e| e.ip.clone())
+                    c.extra_networks
+                        .iter()
+                        .find(|e| e.network == net)
+                        .map(|e| e.ip.clone())
                 };
-                format!("{} ({}) {}", c.name, super::container::short_id(&c.id), ip.unwrap_or_else(|| "<no ip>".into()))
+                format!(
+                    "{} ({}) {}",
+                    c.name,
+                    super::container::short_id(&c.id),
+                    ip.unwrap_or_else(|| "<no ip>".into())
+                )
             })
             .collect(),
     )
@@ -360,9 +415,23 @@ fn describe_one(n: &Network) {
     let mut d = output::Describe::new();
     d.field("Name", &n.name);
     d.field("Driver", &n.driver);
-    d.field("Bridge", if n.bridge.is_empty() { "<none>" } else { &n.bridge });
+    d.field(
+        "Bridge",
+        if n.bridge.is_empty() {
+            "<none>"
+        } else {
+            &n.bridge
+        },
+    );
     d.field("Subnet", &n.subnet);
-    d.field("Gateway", if n.gateway.is_empty() { "<none>" } else { &n.gateway });
+    d.field(
+        "Gateway",
+        if n.gateway.is_empty() {
+            "<none>"
+        } else {
+            &n.gateway
+        },
+    );
     d.field("Prefix", &n.prefix);
     // Só nos drivers de LAN física (macvlan/ipvlan).
     d.field_opt("Parent", n.parent.as_deref());
@@ -377,7 +446,10 @@ fn describe_one(n: &Network) {
             d.list("Containers", &cs);
         }
         None => {
-            d.field("Containers", "<unknown> (não consegui ler o store de containers)");
+            d.field(
+                "Containers",
+                "<unknown> (não consegui ler o store de containers)",
+            );
         }
     }
     d.print();
@@ -425,8 +497,7 @@ mod tests {
         let legado: NetworkSpec =
             serde_yaml::from_str("driver: overlay\nwg_ip: 10.9.0.1\n").unwrap();
         assert_eq!(legado.wg_ip.as_deref(), Some("10.9.0.1"));
-        let canon: NetworkSpec =
-            serde_yaml::from_str("driver: overlay\nwgIp: 10.9.0.1\n").unwrap();
+        let canon: NetworkSpec = serde_yaml::from_str("driver: overlay\nwgIp: 10.9.0.1\n").unwrap();
         assert_eq!(canon.wg_ip.as_deref(), Some("10.9.0.1"));
     }
 }

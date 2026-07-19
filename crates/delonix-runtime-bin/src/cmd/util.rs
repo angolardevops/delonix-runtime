@@ -36,7 +36,11 @@ pub(crate) fn resolve_or_pull(images: &ImageStore, reference: &str) -> Result<Im
 /// Comando efetivo (função pura): ENTRYPOINT + (args do utilizador, senão CMD da
 /// imagem) — a mesma semântica do Docker/OCI (o `run <cmd>` substitui o CMD, não o
 /// ENTRYPOINT).
-pub(crate) fn compose_command(entrypoint: &[String], cmd: &[String], user: &[String]) -> Vec<String> {
+pub(crate) fn compose_command(
+    entrypoint: &[String],
+    cmd: &[String],
+    user: &[String],
+) -> Vec<String> {
     let mut v = entrypoint.to_vec();
     if user.is_empty() {
         v.extend(cmd.iter().cloned());

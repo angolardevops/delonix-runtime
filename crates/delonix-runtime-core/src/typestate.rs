@@ -69,11 +69,21 @@ impl<S> Phase<S> {
 impl Phase<Created> {
     /// Cria uma fase nova no estado `Created`.
     pub fn new(id: impl Into<String>) -> Self {
-        Phase { id: id.into(), pid: None, code: None, _state: PhantomData }
+        Phase {
+            id: id.into(),
+            pid: None,
+            code: None,
+            _state: PhantomData,
+        }
     }
     /// `Created → Running`. Consome a fase (a anterior deixa de ser utilizável).
     pub fn start(self, pid: i32) -> Phase<Running> {
-        Phase { id: self.id, pid: Some(pid), code: None, _state: PhantomData }
+        Phase {
+            id: self.id,
+            pid: Some(pid),
+            code: None,
+            _state: PhantomData,
+        }
     }
     /// O [`Status`](crate::Status) correspondente.
     pub fn status(&self) -> Status {
@@ -88,7 +98,12 @@ impl Phase<Running> {
     }
     /// `Running → Stopped`, guardando o código de saída.
     pub fn stop(self, code: i32) -> Phase<Stopped> {
-        Phase { id: self.id, pid: None, code: Some(code), _state: PhantomData }
+        Phase {
+            id: self.id,
+            pid: None,
+            code: Some(code),
+            _state: PhantomData,
+        }
     }
     /// O [`Status`](crate::Status) correspondente.
     pub fn status(&self) -> Status {
@@ -103,7 +118,12 @@ impl Phase<Stopped> {
     }
     /// `Stopped → Created` (restart): reutiliza o id, limpa pid/código.
     pub fn restart(self) -> Phase<Created> {
-        Phase { id: self.id, pid: None, code: None, _state: PhantomData }
+        Phase {
+            id: self.id,
+            pid: None,
+            code: None,
+            _state: PhantomData,
+        }
     }
     /// O [`Status`](crate::Status) correspondente: código 0 → Stopped, ≠0 → Failed.
     pub fn status(&self) -> Status {

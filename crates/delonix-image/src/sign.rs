@@ -68,23 +68,25 @@ fn p256_point_from_pem(pem: &str) -> Result<Vec<u8>> {
         }
     }
     if b64.is_empty() {
-        return Err(Error::Invalid("chave pública PEM inválida (sem bloco PUBLIC KEY)".into()));
+        return Err(Error::Invalid(
+            "chave pública PEM inválida (sem bloco PUBLIC KEY)".into(),
+        ));
     }
     let der = base64::engine::general_purpose::STANDARD
         .decode(&b64)
         .map_err(|e| Error::Invalid(format!("chave pública base64 inválida: {e}")))?;
     if der.len() < 65 || der[der.len() - 65] != 0x04 {
-        return Err(Error::Invalid("chave pública não parece um ponto P-256 não-comprimido".into()));
+        return Err(Error::Invalid(
+            "chave pública não parece um ponto P-256 não-comprimido".into(),
+        ));
     }
     Ok(der[der.len() - 65..].to_vec())
 }
 
 /// Verifica uma assinatura ECDSA-P256-SHA256 (DER) sobre `msg` com o `ponto`.
 fn verify_ecdsa_p256(point: &[u8], msg: &[u8], sig_der: &[u8]) -> bool {
-    let key = ring::signature::UnparsedPublicKey::new(
-        &ring::signature::ECDSA_P256_SHA256_ASN1,
-        point,
-    );
+    let key =
+        ring::signature::UnparsedPublicKey::new(&ring::signature::ECDSA_P256_SHA256_ASN1, point);
     key.verify(msg, sig_der).is_ok()
 }
 
@@ -144,11 +146,12 @@ mod tests {
         use ring::signature::{EcdsaKeyPair, KeyPair, ECDSA_P256_SHA256_ASN1_SIGNING};
         let rng = SystemRandom::new();
         let pkcs8 = EcdsaKeyPair::generate_pkcs8(&ECDSA_P256_SHA256_ASN1_SIGNING, &rng).unwrap();
-        let kp = EcdsaKeyPair::from_pkcs8(&ECDSA_P256_SHA256_ASN1_SIGNING, pkcs8.as_ref(), &rng).unwrap();
+        let kp = EcdsaKeyPair::from_pkcs8(&ECDSA_P256_SHA256_ASN1_SIGNING, pkcs8.as_ref(), &rng)
+            .unwrap();
         let msg = b"delonix container image signature payload";
         let sig = kp.sign(&rng, msg).unwrap();
         let point = kp.public_key().as_ref(); // ponto não-comprimido 04||X||Y
-        // assinatura genuína confere; mensagem adulterada não.
+                                              // assinatura genuína confere; mensagem adulterada não.
         assert!(verify_ecdsa_p256(point, msg, sig.as_ref()));
         assert!(!verify_ecdsa_p256(point, b"tampered", sig.as_ref()));
     }

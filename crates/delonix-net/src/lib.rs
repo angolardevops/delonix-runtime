@@ -84,7 +84,11 @@ fn used_10_octets() -> std::collections::HashSet<u8> {
 /// defaults de Docker/Podman e das redes de utilizador mais comuns).
 fn pick_free_base() -> u8 {
     let used = used_10_octets();
-    (200..=239).chain(11..=87).chain(91..=199).find(|b| !used.contains(b)).unwrap_or(201)
+    (200..=239)
+        .chain(11..=87)
+        .chain(91..=199)
+        .find(|b| !used.contains(b))
+        .unwrap_or(201)
 }
 
 /// O `prefix`/`gateway`/`subnet` da rede por omissão (derivados do octeto-base).
@@ -128,8 +132,20 @@ fn forward_inbound_deny(subnet: &str) {
         }
     }
     // 1.º: deixa passar o tráfego de portas publicadas (DNAT); 2.º: nega o resto.
-    run_ok("nft", &["add", "rule", "ip", TABLE, "forward", "ip", "daddr", subnet, "ct", "status", "dnat", "accept"]);
-    run_ok("nft", &["add", "rule", "ip", TABLE, "forward", "ip", "daddr", subnet, "ct", "state", "new", "drop"]);
+    run_ok(
+        "nft",
+        &[
+            "add", "rule", "ip", TABLE, "forward", "ip", "daddr", subnet, "ct", "status", "dnat",
+            "accept",
+        ],
+    );
+    run_ok(
+        "nft",
+        &[
+            "add", "rule", "ip", TABLE, "forward", "ip", "daddr", subnet, "ct", "state", "new",
+            "drop",
+        ],
+    );
 }
 
 /// O gestor de rede do Delonix.
@@ -189,7 +205,10 @@ pub fn parse_overlay_peer(s: &str) -> (String, Option<(String, String)>) {
             let pubkey = &s[first + 1..last];
             let wgip = &s[last + 1..];
             if !pubkey.is_empty() && !wgip.is_empty() {
-                return (node.to_string(), Some((pubkey.to_string(), wgip.to_string())));
+                return (
+                    node.to_string(),
+                    Some((pubkey.to_string(), wgip.to_string())),
+                );
             }
             (node.to_string(), None)
         }
@@ -212,7 +231,11 @@ fn list_delonix_bridges() -> Vec<String> {
     let mut names = Vec::new();
     for line in out.lines() {
         // formato: "N: nome: <...>" (o nome pode ter "@" para o peer).
-        if let Some(name) = line.split(':').nth(1).map(|s| s.trim().split('@').next().unwrap_or("").trim()) {
+        if let Some(name) = line
+            .split(':')
+            .nth(1)
+            .map(|s| s.trim().split('@').next().unwrap_or("").trim())
+        {
             if name == BRIDGE || name.starts_with("dlxn") {
                 names.push(name.to_string());
             }
@@ -239,12 +262,28 @@ fn netns_name(id: &str) -> String {
 /// da tabela ROOT, pelo handle (idempotência). Espelho de `infra.rs::clear_antispoof`
 /// para o caminho root/legacy. Best-effort.
 fn clear_antispoof_root(hv: &str) {
-    let listed = capture("nft", &["-a", "list", "chain", "ip", TABLE, "forward"]).unwrap_or_default();
+    let listed =
+        capture("nft", &["-a", "list", "chain", "ip", TABLE, "forward"]).unwrap_or_default();
     let needle = format!("iifname \"{hv}\"");
     for line in listed.lines() {
         if line.contains(&needle) && line.contains("saddr") && line.contains("drop") {
-            if let Some(h) = line.rsplit("# handle ").next().and_then(|x| x.trim().parse::<u32>().ok()) {
-                run_ok("nft", &["delete", "rule", "ip", TABLE, "forward", "handle", &h.to_string()]);
+            if let Some(h) = line
+                .rsplit("# handle ")
+                .next()
+                .and_then(|x| x.trim().parse::<u32>().ok())
+            {
+                run_ok(
+                    "nft",
+                    &[
+                        "delete",
+                        "rule",
+                        "ip",
+                        TABLE,
+                        "forward",
+                        "handle",
+                        &h.to_string(),
+                    ],
+                );
             }
         }
     }
@@ -272,7 +311,11 @@ pub fn valid_ip_in_subnet(prefix: &str, ip: &str) -> bool {
     if oct.len() != 4 {
         return false;
     }
-    let nums: Vec<u16> = match oct.iter().map(|o| o.parse::<u16>()).collect::<std::result::Result<_, _>>() {
+    let nums: Vec<u16> = match oct
+        .iter()
+        .map(|o| o.parse::<u16>())
+        .collect::<std::result::Result<_, _>>()
+    {
         Ok(v) => v,
         Err(_) => return false,
     };
@@ -297,7 +340,9 @@ pub fn parse_publish(spec: &str) -> Result<(String, String, String)> {
         None => (spec, "tcp".to_string()),
     };
     if proto != "tcp" && proto != "udp" {
-        return Err(Error::Invalid(format!("protocolo inválido em '{spec}' (tcp|udp)")));
+        return Err(Error::Invalid(format!(
+            "protocolo inválido em '{spec}' (tcp|udp)"
+        )));
     }
     let (host_port, cont_port) = match mapping.rsplit_once(':') {
         Some((h, c)) => (h.trim(), c.trim()),
@@ -305,7 +350,9 @@ pub fn parse_publish(spec: &str) -> Result<(String, String, String)> {
     };
     let valid = |p: &str| !p.is_empty() && p.chars().all(|c| c.is_ascii_digit());
     if !valid(host_port) || !valid(cont_port) {
-        return Err(Error::Invalid(format!("porta inválida em '{spec}' (ex.: 8080:80)")));
+        return Err(Error::Invalid(format!(
+            "porta inválida em '{spec}' (ex.: 8080:80)"
+        )));
     }
     Ok((host_port.to_string(), cont_port.to_string(), proto))
 }
@@ -358,7 +405,9 @@ fn parse_rate_bits(s: &str) -> Result<u64> {
         .parse()
         .map_err(|_| Error::Invalid(format!("--net-bps inválido: '{s}'")))?;
     if !n.is_finite() || n <= 0.0 {
-        return Err(Error::Invalid(format!("--net-bps tem de ser positivo: '{s}'")));
+        return Err(Error::Invalid(format!(
+            "--net-bps tem de ser positivo: '{s}'"
+        )));
     }
     Ok((n * mult as f64) as u64)
 }
@@ -392,7 +441,10 @@ pub fn parse_net_rate(rate: &str, burst: Option<&str>) -> Result<NetRate> {
         }
         None => (rate_bit / 8 / 10).max(16 * 1024),
     };
-    Ok(NetRate { rate_bit, burst_bytes })
+    Ok(NetRate {
+        rate_bit,
+        burst_bytes,
+    })
 }
 
 /// VIP estável de um serviço (hash FNV-1a → `10.90.a.b`), fora da subnet dos
@@ -456,7 +508,13 @@ fn ipv4_to_u32(ip: &str) -> Option<u32> {
 }
 
 fn u32_to_ipv4(n: u32) -> String {
-    format!("{}.{}.{}.{}", (n >> 24) & 0xff, (n >> 16) & 0xff, (n >> 8) & 0xff, n & 0xff)
+    format!(
+        "{}.{}.{}.{}",
+        (n >> 24) & 0xff,
+        (n >> 16) & 0xff,
+        (n >> 8) & 0xff,
+        n & 0xff
+    )
 }
 
 /// Aloca um IP determinístico dentro de uma subnet CIDR (ex.: `192.168.1.0/24`),
@@ -472,7 +530,7 @@ pub fn alloc_ip_cidr(subnet: &str, id: &str) -> Option<String> {
     let net = ipv4_to_u32(base)? & (u32::MAX << (32 - plen));
     let host_bits = 32 - plen;
     let size = 1u32 << host_bits; // total de endereços
-    // Hosts utilizáveis: [2 .. size-2] (salta rede, .1=gateway e broadcast).
+                                  // Hosts utilizáveis: [2 .. size-2] (salta rede, .1=gateway e broadcast).
     let usable = size.saturating_sub(3);
     if usable == 0 {
         return None;
@@ -485,7 +543,10 @@ pub fn alloc_ip_cidr(subnet: &str, id: &str) -> Option<String> {
 
 /// O comprimento do prefixo (`/24`) de uma subnet CIDR, ou `24` por omissão.
 pub fn cidr_prefix_len(subnet: &str) -> u32 {
-    subnet.rsplit_once('/').and_then(|(_, p)| p.parse().ok()).unwrap_or(24)
+    subnet
+        .rsplit_once('/')
+        .and_then(|(_, p)| p.parse().ok())
+        .unwrap_or(24)
 }
 
 /// Hash FNV-1a de 32 bits (para derivar a subnet/bridge de uma rede pelo nome).
@@ -588,7 +649,13 @@ impl Network {
     /// Constrói uma rede `overlay`: igual a uma bridge de utilizador (mesmo
     /// `/16`/gateway/veth), mas com um uplink VXLAN (`vni`) escravizado à bridge
     /// e FDB para os `peers` — o segmento L2 estende-se a vários nós.
-    fn overlay_with_base(name: &str, base: u8, vni: u32, peers: Vec<String>, wg_ip: Option<String>) -> Self {
+    fn overlay_with_base(
+        name: &str,
+        base: u8,
+        vni: u32,
+        peers: Vec<String>,
+        wg_ip: Option<String>,
+    ) -> Self {
         let mut n = Self::user_with_base(name, base);
         n.driver = DRIVER_OVERLAY.to_string();
         n.vni = Some(vni);
@@ -678,7 +745,10 @@ impl NetworkStore {
                 kv.insert(k.trim(), v.trim().to_string());
             }
         }
-        let driver = kv.get("driver").map(String::as_str).unwrap_or(DRIVER_BRIDGE);
+        let driver = kv
+            .get("driver")
+            .map(String::as_str)
+            .unwrap_or(DRIVER_BRIDGE);
         match driver {
             DRIVER_MACVLAN | DRIVER_IPVLAN => {
                 let parent = kv.get("parent").cloned().ok_or_else(|| {
@@ -701,9 +771,17 @@ impl NetworkStore {
                     .ok_or_else(|| Error::Invalid(format!("rede '{name}' (overlay) sem vni")))?;
                 let peers: Vec<String> = kv
                     .get("peers")
-                    .map(|p| p.split(',').filter(|s| !s.trim().is_empty()).map(|s| s.trim().to_string()).collect())
+                    .map(|p| {
+                        p.split(',')
+                            .filter(|s| !s.trim().is_empty())
+                            .map(|s| s.trim().to_string())
+                            .collect()
+                    })
                     .unwrap_or_default();
-                let wg_ip = kv.get("wgip").map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+                let wg_ip = kv
+                    .get("wgip")
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty());
                 Ok(Network::overlay_with_base(name, base, vni, peers, wg_ip))
             }
             _ => {
@@ -735,9 +813,14 @@ impl NetworkStore {
     /// Cria uma rede de utilizador (subnet livre, sem colisão com as existentes).
     pub fn create(&self, name: &str) -> Result<Network> {
         if name.is_empty() || name == DEFAULT_NET {
-            return Err(Error::Invalid("'bridge' é a rede por omissão (reservada)".into()));
+            return Err(Error::Invalid(
+                "'bridge' é a rede por omissão (reservada)".into(),
+            ));
         }
-        if !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+        if !name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+        {
             return Err(Error::Invalid(format!("nome de rede inválido: '{name}'")));
         }
         if self.path(name).exists() {
@@ -771,9 +854,14 @@ impl NetworkStore {
     /// prefixo. Idempotente: se a rede já existe, devolve-a tal como está.
     pub fn create_with_base(&self, name: &str, base: u8) -> Result<Network> {
         if name.is_empty() || name == DEFAULT_NET {
-            return Err(Error::Invalid("'bridge' é a rede por omissão (reservada)".into()));
+            return Err(Error::Invalid(
+                "'bridge' é a rede por omissão (reservada)".into(),
+            ));
         }
-        if !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+        if !name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+        {
             return Err(Error::Invalid(format!("nome de rede inválido: '{name}'")));
         }
         if self.path(name).exists() {
@@ -809,14 +897,25 @@ impl NetworkStore {
     /// utilizador (`/16` próprio), mas estende-se a vários nós pelo `vni` e pela
     /// lista de `peers` (IPs dos outros nós Delonix). Sem peers, é local mas já
     /// pronta para juntar nós (basta recriar com os mesmos `vni`/`peers` lá).
-    pub fn create_overlay(&self, name: &str, vni: u32, peers: &[String], wg_ip: Option<&str>) -> Result<Network> {
+    pub fn create_overlay(
+        &self,
+        name: &str,
+        vni: u32,
+        peers: &[String],
+        wg_ip: Option<&str>,
+    ) -> Result<Network> {
         if name.is_empty() || name == DEFAULT_NET {
-            return Err(Error::Invalid("'bridge' é a rede por omissão (reservada)".into()));
+            return Err(Error::Invalid(
+                "'bridge' é a rede por omissão (reservada)".into(),
+            ));
         }
         if name == "host" || name == "none" {
             return Err(Error::Invalid(format!("'{name}' é um driver reservado")));
         }
-        if !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+        if !name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+        {
             return Err(Error::Invalid(format!("nome de rede inválido: '{name}'")));
         }
         if self.path(name).exists() {
@@ -856,18 +955,28 @@ impl NetworkStore {
             .collect();
         peers.push(peer.to_string());
         // re-persiste substituindo SÓ a linha `peers=` (preserva base/vni/wgip).
-        let raw = std::fs::read_to_string(self.path(name))
-            .map_err(|e| Error::Runtime { context: "ler overlay", message: e.to_string() })?;
+        let raw = std::fs::read_to_string(self.path(name)).map_err(|e| Error::Runtime {
+            context: "ler overlay",
+            message: e.to_string(),
+        })?;
         let new_line = format!("peers={}", peers.join(","));
         let mut out: Vec<String> = raw
             .lines()
-            .map(|l| if l.starts_with("peers=") { new_line.clone() } else { l.to_string() })
+            .map(|l| {
+                if l.starts_with("peers=") {
+                    new_line.clone()
+                } else {
+                    l.to_string()
+                }
+            })
             .collect();
         if !out.iter().any(|l| l.starts_with("peers=")) {
             out.push(new_line);
         }
-        std::fs::write(self.path(name), out.join("\n") + "\n")
-            .map_err(|e| Error::Runtime { context: "escrever overlay", message: e.to_string() })?;
+        std::fs::write(self.path(name), out.join("\n") + "\n").map_err(|e| Error::Runtime {
+            context: "escrever overlay",
+            message: e.to_string(),
+        })?;
         self.get(name)
     }
 
@@ -883,12 +992,17 @@ impl NetworkStore {
         gateway: &str,
     ) -> Result<Network> {
         if name.is_empty() || name == DEFAULT_NET {
-            return Err(Error::Invalid("'bridge' é a rede por omissão (reservada)".into()));
+            return Err(Error::Invalid(
+                "'bridge' é a rede por omissão (reservada)".into(),
+            ));
         }
         if name == "host" || name == "none" {
             return Err(Error::Invalid(format!("'{name}' é um driver reservado")));
         }
-        if !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+        if !name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+        {
             return Err(Error::Invalid(format!("nome de rede inválido: '{name}'")));
         }
         if driver != DRIVER_MACVLAN && driver != DRIVER_IPVLAN {
@@ -898,10 +1012,14 @@ impl NetworkStore {
             return Err(Error::Invalid(format!("a rede '{name}' já existe")));
         }
         if !link_exists(parent) {
-            return Err(Error::Invalid(format!("NIC-pai '{parent}' não existe no host")));
+            return Err(Error::Invalid(format!(
+                "NIC-pai '{parent}' não existe no host"
+            )));
         }
         if alloc_ip_cidr(subnet, "deadbeef").is_none() {
-            return Err(Error::Invalid(format!("subnet inválida: '{subnet}' (ex.: 192.168.1.0/24)")));
+            return Err(Error::Invalid(format!(
+                "subnet inválida: '{subnet}' (ex.: 192.168.1.0/24)"
+            )));
         }
         // AVISO DE SEGURANÇA (consentimento informado): macvlan/ipvlan põem o container
         // DIRETAMENTE na LAN física do `parent`, com IP/MAC próprios. O tráfego egressa
@@ -915,9 +1033,8 @@ impl NetworkStore {
              do anti-spoof e do isolamento do Delonix. Usa uma rede `bridge` se precisares \
              de filtragem."
         );
-        let body = format!(
-            "driver={driver}\nparent={parent}\nsubnet={subnet}\ngateway={gateway}\n"
-        );
+        let body =
+            format!("driver={driver}\nparent={parent}\nsubnet={subnet}\ngateway={gateway}\n");
         std::fs::write(self.path(name), body)?;
         self.get(name)
     }
@@ -962,7 +1079,12 @@ impl Net {
         for dir in ["daddr", "saddr"] {
             let needle = format!("ip {dir} {ip} jump {chain}");
             if !fwd.contains(&needle) {
-                run_ok("nft", &["add", "rule", "ip", TABLE, "forward", "ip", dir, ip, "jump", &chain]);
+                run_ok(
+                    "nft",
+                    &[
+                        "add", "rule", "ip", TABLE, "forward", "ip", dir, ip, "jump", &chain,
+                    ],
+                );
             }
         }
         // reconstrói o corpo da chain (regras + política default).
@@ -973,8 +1095,11 @@ impl Net {
                 if !r.nft_safe() {
                     continue;
                 }
-                let (self_dir, peer_dir) =
-                    if r.dir == "out" { ("saddr", "daddr") } else { ("daddr", "saddr") };
+                let (self_dir, peer_dir) = if r.dir == "out" {
+                    ("saddr", "daddr")
+                } else {
+                    ("daddr", "saddr")
+                };
                 let mut line = format!("ip {self_dir} {ip}");
                 if !r.src.is_empty() && r.src != "0.0.0.0/0" && r.src != "*" {
                     line.push_str(&format!(" ip {peer_dir} {}", r.src));
@@ -985,7 +1110,11 @@ impl Net {
                         line.push_str(&format!(" dport {}", r.port));
                     }
                 }
-                line.push_str(if r.action == "allow" { " accept" } else { " drop" });
+                line.push_str(if r.action == "allow" {
+                    " accept"
+                } else {
+                    " drop"
+                });
                 body.push_str(&format!("\t\t{line}\n"));
             }
             // política por omissão (drop final na direção indicada).
@@ -1012,7 +1141,10 @@ impl Net {
             for line in out.lines() {
                 if line.contains(&format!("jump {chain}")) {
                     if let Some(h) = line.rsplit("handle ").next().map(|s| s.trim()) {
-                        run_ok("nft", &["delete", "rule", "ip", TABLE, "forward", "handle", h]);
+                        run_ok(
+                            "nft",
+                            &["delete", "rule", "ip", TABLE, "forward", "handle", h],
+                        );
                     }
                 }
             }
@@ -1026,7 +1158,10 @@ impl Net {
         let subnet = default_subnet();
         if !link_exists(BRIDGE) {
             run("ip", &["link", "add", BRIDGE, "type", "bridge"])?;
-            run("ip", &["addr", "add", &format!("{gateway}/16"), "dev", BRIDGE])?;
+            run(
+                "ip",
+                &["addr", "add", &format!("{gateway}/16"), "dev", BRIDGE],
+            )?;
             run("ip", &["link", "set", BRIDGE, "up"])?;
         }
         let _ = std::fs::write("/proc/sys/net/ipv4/ip_forward", "1");
@@ -1086,13 +1221,38 @@ impl Net {
         }
         if !link_exists(&net.bridge) {
             run("ip", &["link", "add", &net.bridge, "type", "bridge"])?;
-            run("ip", &["addr", "add", &format!("{}/16", net.gateway), "dev", &net.bridge])?;
+            run(
+                "ip",
+                &[
+                    "addr",
+                    "add",
+                    &format!("{}/16", net.gateway),
+                    "dev",
+                    &net.bridge,
+                ],
+            )?;
             run("ip", &["link", "set", &net.bridge, "up"])?;
         }
         // MASQUERADE da subnet desta rede (saída para a Internet).
         if let Ok(out) = capture("nft", &["list", "chain", "ip", TABLE, "postrouting"]) {
             if !out.contains(&net.subnet) {
-                run_ok("nft", &["add", "rule", "ip", TABLE, "postrouting", "ip", "saddr", &net.subnet, "oifname", "!=", &net.bridge, "masquerade"]);
+                run_ok(
+                    "nft",
+                    &[
+                        "add",
+                        "rule",
+                        "ip",
+                        TABLE,
+                        "postrouting",
+                        "ip",
+                        "saddr",
+                        &net.subnet,
+                        "oifname",
+                        "!=",
+                        &net.bridge,
+                        "masquerade",
+                    ],
+                );
             }
         }
         // A1: default-deny de entrada também na subnet desta rede (idempotente).
@@ -1119,14 +1279,24 @@ impl Net {
     /// nó tem de criar a mesma overlay (mesmo `vni`) listando os outros como peers.
     fn ensure_vxlan(&self, net: &Network) -> Result<()> {
         let Some(vni) = net.vni else { return Ok(()) };
-        let Some(dev) = net.vxlan_dev() else { return Ok(()) };
+        let Some(dev) = net.vxlan_dev() else {
+            return Ok(());
+        };
         if !link_exists(&dev) {
             // `nolearning` + FDB manual = controlo determinístico do flooding.
             run(
                 "ip",
                 &[
-                    "link", "add", &dev, "type", "vxlan", "id", &vni.to_string(),
-                    "dstport", VXLAN_PORT, "nolearning",
+                    "link",
+                    "add",
+                    &dev,
+                    "type",
+                    "vxlan",
+                    "id",
+                    &vni.to_string(),
+                    "dstport",
+                    VXLAN_PORT,
+                    "nolearning",
                 ],
             )?;
             run_ok("ip", &["link", "set", &dev, "master", &net.bridge]);
@@ -1141,7 +1311,18 @@ impl Net {
             let (node_ip, wg) = parse_overlay_peer(peer);
             let dst = wg.map(|(_, wgip)| wgip).unwrap_or(node_ip);
             if !have.contains(dst.as_str()) {
-                run_ok("bridge", &["fdb", "append", "00:00:00:00:00:00", "dev", &dev, "dst", &dst]);
+                run_ok(
+                    "bridge",
+                    &[
+                        "fdb",
+                        "append",
+                        "00:00:00:00:00:00",
+                        "dev",
+                        &dev,
+                        "dst",
+                        &dst,
+                    ],
+                );
             }
         }
         Ok(())
@@ -1153,7 +1334,9 @@ impl Net {
     /// O `ensure_vxlan` já aponta o FDB para os `wg_ip` dos peers, por isso o UDP
     /// do VXLAN (4789) viaja pelo túnel wg. Sem `wg` no host → degrada (não cifra).
     fn ensure_overlay_wg(&self, net: &Network) -> Result<()> {
-        let Some(my_wg_ip) = net.wg_ip.as_deref() else { return Ok(()) };
+        let Some(my_wg_ip) = net.wg_ip.as_deref() else {
+            return Ok(());
+        };
         let Some(vni) = net.vni else { return Ok(()) };
         if !crate::wg::available() {
             return Ok(());
@@ -1185,7 +1368,12 @@ impl Net {
         for (i, o) in [(a, b), (b, a)] {
             let needle = format!("iifname \"{i}\" oifname \"{o}\"");
             if !have.contains(&needle) {
-                run_ok("nft", &["add", "rule", "ip", TABLE, "forward", "iifname", i, "oifname", o, "drop"]);
+                run_ok(
+                    "nft",
+                    &[
+                        "add", "rule", "ip", TABLE, "forward", "iifname", i, "oifname", o, "drop",
+                    ],
+                );
             }
         }
     }
@@ -1198,7 +1386,13 @@ impl Net {
 
     /// Como [`Net::attach_on`], mas permite **fixar o IP** (`Some(ip)`); `None`
     /// deriva o IP do id (comportamento por omissão). Valida o IP na subnet.
-    pub fn attach_on_ip(&self, net: &Network, pid: i32, id: &str, ip: Option<&str>) -> Result<String> {
+    pub fn attach_on_ip(
+        &self,
+        net: &Network,
+        pid: i32,
+        id: &str,
+        ip: Option<&str>,
+    ) -> Result<String> {
         self.ensure_network(net)?;
         // Caminho macvlan/ipvlan: cria a sub-interface sobre o NIC-pai e move-a
         // para o netns do container (sem veth, sem bridge — o container fica na
@@ -1228,14 +1422,23 @@ impl Net {
         // Dá um nome ao netns do container (bind-mount de /proc/<pid>/ns/net).
         run("ip", &["netns", "attach", &ns, &pid.to_string()])?;
         // Cria o par veth e move uma ponta para o netns do container.
-        run("ip", &["link", "add", &hv, "type", "veth", "peer", "name", &pv])?;
+        run(
+            "ip",
+            &["link", "add", &hv, "type", "veth", "peer", "name", &pv],
+        )?;
         run("ip", &["link", "set", &pv, "netns", &ns])?;
         // Dentro do container: renomeia para eth0, dá IP, rota e liga.
         run("ip", &["-n", &ns, "link", "set", &pv, "name", "eth0"])?;
-        run("ip", &["-n", &ns, "addr", "add", &format!("{ip}/16"), "dev", "eth0"])?;
+        run(
+            "ip",
+            &["-n", &ns, "addr", "add", &format!("{ip}/16"), "dev", "eth0"],
+        )?;
         run("ip", &["-n", &ns, "link", "set", "eth0", "up"])?;
         run("ip", &["-n", &ns, "link", "set", "lo", "up"])?;
-        run("ip", &["-n", &ns, "route", "add", "default", "via", &net.gateway])?;
+        run(
+            "ip",
+            &["-n", &ns, "route", "add", "default", "via", &net.gateway],
+        )?;
         // No host: liga a ponta à bridge desta rede e levanta.
         run("ip", &["link", "set", &hv, "master", &net.bridge])?;
         run("ip", &["link", "set", &hv, "up"])?;
@@ -1247,7 +1450,10 @@ impl Net {
         clear_antispoof_root(&hv);
         run_ok(
             "nft",
-            &["insert", "rule", "ip", TABLE, "forward", "iifname", &hv, "ip", "saddr", "!=", &ip, "drop"],
+            &[
+                "insert", "rule", "ip", TABLE, "forward", "iifname", &hv, "ip", "saddr", "!=", &ip,
+                "drop",
+            ],
         );
         Ok(ip)
     }
@@ -1255,9 +1461,10 @@ impl Net {
     /// Liga um container a uma rede `macvlan`/`ipvlan`: cria a sub-interface no
     /// host (sobre o `parent`), move-a para o netns, dá IP (da LAN) + rota.
     fn attach_lan(&self, net: &Network, pid: i32, id: &str, ip: Option<&str>) -> Result<String> {
-        let parent = net.parent.as_deref().ok_or_else(|| {
-            Error::Invalid(format!("rede '{}' sem NIC-pai", net.name))
-        })?;
+        let parent = net
+            .parent
+            .as_deref()
+            .ok_or_else(|| Error::Invalid(format!("rede '{}' sem NIC-pai", net.name)))?;
         let ip = match ip {
             Some(want) => want.to_string(),
             None => alloc_ip_cidr(&net.subnet, id).ok_or_else(|| {
@@ -1274,14 +1481,33 @@ impl Net {
         };
         run("ip", &["netns", "attach", &ns, &pid.to_string()])?;
         // Cria a sub-interface sobre o NIC-pai e empurra-a para o netns.
-        run("ip", &["link", "add", &dev, "link", parent, "type", kind, "mode", mode])?;
+        run(
+            "ip",
+            &[
+                "link", "add", &dev, "link", parent, "type", kind, "mode", mode,
+            ],
+        )?;
         run("ip", &["link", "set", &dev, "netns", &ns])?;
         run("ip", &["-n", &ns, "link", "set", &dev, "name", "eth0"])?;
-        run("ip", &["-n", &ns, "addr", "add", &format!("{ip}/{plen}"), "dev", "eth0"])?;
+        run(
+            "ip",
+            &[
+                "-n",
+                &ns,
+                "addr",
+                "add",
+                &format!("{ip}/{plen}"),
+                "dev",
+                "eth0",
+            ],
+        )?;
         run("ip", &["-n", &ns, "link", "set", "eth0", "up"])?;
         run("ip", &["-n", &ns, "link", "set", "lo", "up"])?;
         if !net.gateway.is_empty() {
-            run_ok("ip", &["-n", &ns, "route", "add", "default", "via", &net.gateway]);
+            run_ok(
+                "ip",
+                &["-n", &ns, "route", "add", "default", "via", &net.gateway],
+            );
         }
         Ok(ip)
     }
@@ -1297,7 +1523,17 @@ impl Net {
         run_ok("ip", &["link", "del", &hv]); // remove o par veth
         run_ok("ip", &["netns", "del", &ns]); // remove o nome do netns
         let ip = ip.map(String::from).unwrap_or_else(|| alloc_ip(id));
-        run_ok("nft", &["delete", "element", "ip", TABLE, "blocked", &format!("{{ {ip} }}")]);
+        run_ok(
+            "nft",
+            &[
+                "delete",
+                "element",
+                "ip",
+                TABLE,
+                "blocked",
+                &format!("{{ {ip} }}"),
+            ],
+        );
         self.unpublish_all(&ip); // remove as regras DNAT de portas publicadas
         self.remove_container_firewall(&ip); // remove a chain/jumps de firewall L4
         ipam::release(&ipam::prefix_of(&ip), id); // liberta o lease de IP para reuso
@@ -1310,7 +1546,14 @@ impl Net {
     /// a interface primária. NÃO mexe na rota por omissão (essa pertence à rede
     /// primária). Devolve o IP atribuído (fixo se `Some`, senão derivado). O netns
     /// já tem nome (a rede primária fê-lo); se não, nomeia-o pelo `pid`.
-    pub fn attach_extra(&self, net: &Network, pid: i32, id: &str, ip: Option<&str>, idx: u32) -> Result<String> {
+    pub fn attach_extra(
+        &self,
+        net: &Network,
+        pid: i32,
+        id: &str,
+        ip: Option<&str>,
+        idx: u32,
+    ) -> Result<String> {
         self.ensure_network(net)?;
         let ip = match ip {
             Some(want) => {
@@ -1334,10 +1577,16 @@ impl Net {
         if !std::path::Path::new(&format!("/var/run/netns/{ns}")).exists() {
             run("ip", &["netns", "attach", &ns, &pid.to_string()])?;
         }
-        run("ip", &["link", "add", &hv, "type", "veth", "peer", "name", &pv])?;
+        run(
+            "ip",
+            &["link", "add", &hv, "type", "veth", "peer", "name", &pv],
+        )?;
         run("ip", &["link", "set", &pv, "netns", &ns])?;
         run("ip", &["-n", &ns, "link", "set", &pv, "name", &eth])?;
-        run("ip", &["-n", &ns, "addr", "add", &format!("{ip}/16"), "dev", &eth])?;
+        run(
+            "ip",
+            &["-n", &ns, "addr", "add", &format!("{ip}/16"), "dev", &eth],
+        )?;
         run("ip", &["-n", &ns, "link", "set", &eth, "up"])?;
         // Liga a ponta do host à bridge desta rede (sem tocar na rota default).
         run("ip", &["link", "set", &hv, "master", &net.bridge])?;
@@ -1351,7 +1600,17 @@ impl Net {
     pub fn detach_extra(&self, id: &str, idx: u32, ip: &str) -> Result<()> {
         let hv = host_veth_n(id, idx);
         run_ok("ip", &["link", "del", &hv]);
-        run_ok("nft", &["delete", "element", "ip", TABLE, "blocked", &format!("{{ {ip} }}")]);
+        run_ok(
+            "nft",
+            &[
+                "delete",
+                "element",
+                "ip",
+                TABLE,
+                "blocked",
+                &format!("{{ {ip} }}"),
+            ],
+        );
         self.unpublish_all(ip);
         ipam::release(&ipam::prefix_of(ip), id); // liberta o lease da rede extra
         Ok(())
@@ -1361,14 +1620,19 @@ impl Net {
     /// regras nft (masquerade + isolamento). Best-effort.
     pub fn remove_network(&self, net: &Network) -> Result<()> {
         if net.name == DEFAULT_NET {
-            return Err(Error::Invalid("a rede 'bridge' por omissão não se remove (usa `network prune`)".into()));
+            return Err(Error::Invalid(
+                "a rede 'bridge' por omissão não se remove (usa `network prune`)".into(),
+            ));
         }
         // regras de forward (isolamento) que mencionam esta bridge.
         if let Ok(out) = capture("nft", &["-a", "list", "chain", "ip", TABLE, "forward"]) {
             for line in out.lines() {
                 if line.contains(&format!("\"{}\"", net.bridge)) {
                     if let Some(h) = line.rsplit("# handle ").next() {
-                        run_ok("nft", &["delete", "rule", "ip", TABLE, "forward", "handle", h.trim()]);
+                        run_ok(
+                            "nft",
+                            &["delete", "rule", "ip", TABLE, "forward", "handle", h.trim()],
+                        );
                     }
                 }
             }
@@ -1378,7 +1642,18 @@ impl Net {
             for line in out.lines() {
                 if line.contains(&net.subnet) {
                     if let Some(h) = line.rsplit("# handle ").next() {
-                        run_ok("nft", &["delete", "rule", "ip", TABLE, "postrouting", "handle", h.trim()]);
+                        run_ok(
+                            "nft",
+                            &[
+                                "delete",
+                                "rule",
+                                "ip",
+                                TABLE,
+                                "postrouting",
+                                "handle",
+                                h.trim(),
+                            ],
+                        );
                     }
                 }
             }
@@ -1406,18 +1681,85 @@ impl Net {
             .filter(|a| a.parse::<std::net::Ipv4Addr>().is_ok())
         {
             Some(ref ip) if ip == "0.0.0.0" => {
-                run("nft", &["add", "rule", "ip", TABLE, "prerouting", &proto, "dport", &host_port, "dnat", "to", &to])?;
+                run(
+                    "nft",
+                    &[
+                        "add",
+                        "rule",
+                        "ip",
+                        TABLE,
+                        "prerouting",
+                        &proto,
+                        "dport",
+                        &host_port,
+                        "dnat",
+                        "to",
+                        &to,
+                    ],
+                )?;
             }
             Some(ip) => {
-                run("nft", &["add", "rule", "ip", TABLE, "prerouting", "ip", "daddr", &ip, &proto, "dport", &host_port, "dnat", "to", &to])?;
+                run(
+                    "nft",
+                    &[
+                        "add",
+                        "rule",
+                        "ip",
+                        TABLE,
+                        "prerouting",
+                        "ip",
+                        "daddr",
+                        &ip,
+                        &proto,
+                        "dport",
+                        &host_port,
+                        "dnat",
+                        "to",
+                        &to,
+                    ],
+                )?;
             }
             None => {} // loopback-only (default seguro): sem DNAT na prerouting externa
         }
         // Do próprio host (curl localhost:porta) — sempre.
-        run("nft", &["add", "rule", "ip", TABLE, "output", "ip", "daddr", "127.0.0.0/8", &proto, "dport", &host_port, "dnat", "to", &to])?;
+        run(
+            "nft",
+            &[
+                "add",
+                "rule",
+                "ip",
+                TABLE,
+                "output",
+                "ip",
+                "daddr",
+                "127.0.0.0/8",
+                &proto,
+                "dport",
+                &host_port,
+                "dnat",
+                "to",
+                &to,
+            ],
+        )?;
         // Hairpin: tráfego vindo do loopback tem de ser masquerade, senão o
         // container responde a 127.0.0.1 (a SI próprio) e a resposta nunca volta.
-        run("nft", &["add", "rule", "ip", TABLE, "postrouting", "ip", "saddr", "127.0.0.0/8", "ip", "daddr", container_ip, "masquerade"])?;
+        run(
+            "nft",
+            &[
+                "add",
+                "rule",
+                "ip",
+                TABLE,
+                "postrouting",
+                "ip",
+                "saddr",
+                "127.0.0.0/8",
+                "ip",
+                "daddr",
+                container_ip,
+                "masquerade",
+            ],
+        )?;
         Ok(())
     }
 
@@ -1433,7 +1775,10 @@ impl Net {
                     {
                         if let Some(handle) = line.rsplit("# handle ").next() {
                             let handle = handle.trim();
-                            run_ok("nft", &["delete", "rule", "ip", TABLE, chain, "handle", handle]);
+                            run_ok(
+                                "nft",
+                                &["delete", "rule", "ip", TABLE, chain, "handle", handle],
+                            );
                         }
                     }
                 }
@@ -1451,7 +1796,18 @@ impl Net {
                         && line.contains(&format!("dport {host_port} "))
                     {
                         if let Some(handle) = line.rsplit("# handle ").next() {
-                            run_ok("nft", &["delete", "rule", "ip", TABLE, chain, "handle", handle.trim()]);
+                            run_ok(
+                                "nft",
+                                &[
+                                    "delete",
+                                    "rule",
+                                    "ip",
+                                    TABLE,
+                                    chain,
+                                    "handle",
+                                    handle.trim(),
+                                ],
+                            );
                         }
                     }
                 }
@@ -1469,11 +1825,24 @@ impl Net {
             for line in out.lines() {
                 let l = line.trim();
                 if let Some(i) = l.find("dnat to ") {
-                    let to = l[i + 8..].split_whitespace().next().unwrap_or("").to_string();
+                    let to = l[i + 8..]
+                        .split_whitespace()
+                        .next()
+                        .unwrap_or("")
+                        .to_string();
                     let proto = if l.starts_with("udp") { "udp" } else { "tcp" }.to_string();
-                    let dport = l.split("dport ").nth(1).and_then(|x| x.split_whitespace().next()).unwrap_or("").to_string();
+                    let dport = l
+                        .split("dport ")
+                        .nth(1)
+                        .and_then(|x| x.split_whitespace().next())
+                        .unwrap_or("")
+                        .to_string();
                     if !to.is_empty() && !dport.is_empty() {
-                        s.dnat.push(DnatRule { proto, host_port: dport, to });
+                        s.dnat.push(DnatRule {
+                            proto,
+                            host_port: dport,
+                            to,
+                        });
                     }
                 }
             }
@@ -1497,8 +1866,20 @@ impl Net {
             for line in out.lines() {
                 let l = line.trim();
                 if l.contains("drop") && l.contains("iifname") && l.contains("oifname") {
-                    let a = l.split("iifname ").nth(1).and_then(|x| x.split_whitespace().next()).unwrap_or("").trim_matches('"').to_string();
-                    let b = l.split("oifname ").nth(1).and_then(|x| x.split_whitespace().next()).unwrap_or("").trim_matches('"').to_string();
+                    let a = l
+                        .split("iifname ")
+                        .nth(1)
+                        .and_then(|x| x.split_whitespace().next())
+                        .unwrap_or("")
+                        .trim_matches('"')
+                        .to_string();
+                    let b = l
+                        .split("oifname ")
+                        .nth(1)
+                        .and_then(|x| x.split_whitespace().next())
+                        .unwrap_or("")
+                        .trim_matches('"')
+                        .to_string();
                     if !a.is_empty() && !b.is_empty() {
                         s.isolation.push(format!("{a} ✗ {b}"));
                     }
@@ -1509,7 +1890,11 @@ impl Net {
             for line in out.lines() {
                 let l = line.trim();
                 if l.contains("masquerade") {
-                    if let Some(sub) = l.split("saddr ").nth(1).and_then(|x| x.split_whitespace().next()) {
+                    if let Some(sub) = l
+                        .split("saddr ")
+                        .nth(1)
+                        .and_then(|x| x.split_whitespace().next())
+                    {
                         s.masquerade.push(sub.to_string());
                     }
                 }
@@ -1560,19 +1945,37 @@ impl Net {
             for b in backends {
                 if let Some((ipp, w)) = b.rsplit_once('#') {
                     let n: usize = w.parse().unwrap_or(1).clamp(1, 64);
-                    for _ in 0..n { out.push(ipp.to_string()); }
+                    for _ in 0..n {
+                        out.push(ipp.to_string());
+                    }
                 } else {
                     out.push(b.clone());
                 }
             }
             out
         };
-        let strip = |b: &str| b.rsplit_once('#').map(|(a, _)| a.to_string()).unwrap_or_else(|| b.to_string());
+        let strip = |b: &str| {
+            b.rsplit_once('#')
+                .map(|(a, _)| a.to_string())
+                .unwrap_or_else(|| b.to_string())
+        };
         let rule = if backends.len() == 1 {
-            format!("add rule ip {TABLE} prerouting ip daddr {vip} dnat to {}\n", strip(&backends[0]))
+            format!(
+                "add rule ip {TABLE} prerouting ip daddr {vip} dnat to {}\n",
+                strip(&backends[0])
+            )
         } else {
-            let pool = if algo == "weighted" { expand() } else { backends.iter().map(|b| strip(b)).collect() };
-            let map = pool.iter().enumerate().map(|(i, ip)| format!("{i} : {ip}")).collect::<Vec<_>>().join(", ");
+            let pool = if algo == "weighted" {
+                expand()
+            } else {
+                backends.iter().map(|b| strip(b)).collect()
+            };
+            let map = pool
+                .iter()
+                .enumerate()
+                .map(|(i, ip)| format!("{i} : {ip}"))
+                .collect::<Vec<_>>()
+                .join(", ");
             let selector = match algo {
                 "random" => format!("numgen random mod {}", pool.len()),
                 "ip-hash" | "sticky" => format!("jhash ip saddr mod {}", pool.len()),
@@ -1591,7 +1994,18 @@ impl Net {
             for line in out.lines() {
                 if line.contains(&needle) && line.contains("dnat") {
                     if let Some(handle) = line.rsplit("# handle ").next() {
-                        run_ok("nft", &["delete", "rule", "ip", TABLE, "prerouting", "handle", handle.trim()]);
+                        run_ok(
+                            "nft",
+                            &[
+                                "delete",
+                                "rule",
+                                "ip",
+                                TABLE,
+                                "prerouting",
+                                "handle",
+                                handle.trim(),
+                            ],
+                        );
                     }
                 }
             }
@@ -1608,16 +2022,29 @@ impl Net {
         let _ = std::fs::write("/proc/sys/net/bridge/bridge-nf-call-iptables", "1");
         for (a, b) in [(from_ip, to_ip), (to_ip, from_ip)] {
             let needle = format!("ip saddr {a} ip daddr {b} ");
-            let have = capture("nft", &["-a", "list", "chain", "ip", TABLE, "forward"]).unwrap_or_default();
+            let have = capture("nft", &["-a", "list", "chain", "ip", TABLE, "forward"])
+                .unwrap_or_default();
             if deny {
-                if !have.lines().any(|l| l.contains(&needle) && l.contains("drop")) {
-                    run("nft", &["add", "rule", "ip", TABLE, "forward", "ip", "saddr", a, "ip", "daddr", b, "drop"])?;
+                if !have
+                    .lines()
+                    .any(|l| l.contains(&needle) && l.contains("drop"))
+                {
+                    run(
+                        "nft",
+                        &[
+                            "add", "rule", "ip", TABLE, "forward", "ip", "saddr", a, "ip", "daddr",
+                            b, "drop",
+                        ],
+                    )?;
                 }
             } else {
                 for line in have.lines() {
                     if line.contains(&needle) && line.contains("drop") {
                         if let Some(h) = line.rsplit("# handle ").next() {
-                            run_ok("nft", &["delete", "rule", "ip", TABLE, "forward", "handle", h.trim()]);
+                            run_ok(
+                                "nft",
+                                &["delete", "rule", "ip", TABLE, "forward", "handle", h.trim()],
+                            );
                         }
                     }
                 }
@@ -1656,9 +2083,18 @@ impl Net {
         let r = rate.tc_rate();
         let b = rate.tc_burst();
         // DOWNLOAD: TBF no egress (a raiz do veth do host).
-        run("tc", &["qdisc", "add", "dev", &hv, "root", "tbf", "rate", &r, "burst", &b, "latency", "50ms"])?;
+        run(
+            "tc",
+            &[
+                "qdisc", "add", "dev", &hv, "root", "tbf", "rate", &r, "burst", &b, "latency",
+                "50ms",
+            ],
+        )?;
         // UPLOAD: qdisc de ingress + filtro que aplica `police`+`drop` a tudo.
-        run("tc", &["qdisc", "add", "dev", &hv, "handle", "ffff:", "ingress"])?;
+        run(
+            "tc",
+            &["qdisc", "add", "dev", &hv, "handle", "ffff:", "ingress"],
+        )?;
         run(
             "tc",
             &[
@@ -1676,7 +2112,10 @@ impl Net {
     pub fn clear_net_rate(&self, id: &str) {
         let hv = host_veth(id);
         run_ok("tc", &["qdisc", "del", "dev", &hv, "root"]);
-        run_ok("tc", &["qdisc", "del", "dev", &hv, "handle", "ffff:", "ingress"]);
+        run_ok(
+            "tc",
+            &["qdisc", "del", "dev", &hv, "handle", "ffff:", "ingress"],
+        );
     }
 
     /// Importa um ficheiro `iptables-save`: lê, resume a intenção do utilizador
@@ -1750,11 +2189,18 @@ pub fn slirp_container_sock(pid: i32) -> std::path::PathBuf {
 pub fn slirp_attach(pid: i32, publish: &[String]) -> Result<()> {
     // Se há portas a publicar, abrimos o api-socket do slirp para lhe pedir os
     // *host-forwards* (publicação de portas SEM root, como o Podman rootless).
-    let api_sock = if publish.is_empty() { None } else { Some(slirp_container_sock(pid)) };
+    let api_sock = if publish.is_empty() {
+        None
+    } else {
+        Some(slirp_container_sock(pid))
+    };
     let mut fds = [0i32; 2];
     // SAFETY: pipe() preenche 2 fds.
     if unsafe { libc::pipe(fds.as_mut_ptr()) } != 0 {
-        return Err(Error::Runtime { context: "pipe", message: "slirp ready-fd".into() });
+        return Err(Error::Runtime {
+            context: "pipe",
+            message: "slirp ready-fd".into(),
+        });
     }
     let (rd, wr) = (fds[0], fds[1]);
     let mut args = vec![
@@ -1804,7 +2250,10 @@ pub fn slirp_attach(pid: i32, publish: &[String]) -> Result<()> {
         Err(e) => {
             // SAFETY: fecha o read-end no erro.
             unsafe { libc::close(rd) };
-            Err(Error::Runtime { context: "slirp4netns", message: e.to_string() })
+            Err(Error::Runtime {
+                context: "slirp4netns",
+                message: e.to_string(),
+            })
         }
     }
 }
@@ -1883,20 +2332,31 @@ fn slirp_exists_for(target_pid: i32) -> bool {
 /// `(pid do slirp, pid do container que serve)` de cada slirp4netns a correr.
 fn list_slirps() -> Vec<(i32, i32)> {
     let mut out = Vec::new();
-    let Ok(rd) = std::fs::read_dir("/proc") else { return out };
+    let Ok(rd) = std::fs::read_dir("/proc") else {
+        return out;
+    };
     for e in rd.flatten() {
         let name = e.file_name();
         let Ok(pid) = name.to_string_lossy().parse::<i32>() else {
             continue; // não é um directório de processo
         };
-        let Ok(cmdline) = std::fs::read(format!("/proc/{pid}/cmdline")) else { continue };
+        let Ok(cmdline) = std::fs::read(format!("/proc/{pid}/cmdline")) else {
+            continue;
+        };
         // cmdline = args separados por NUL. O argv[0] tem de ser slirp4netns.
-        let argv: Vec<&[u8]> = cmdline.split(|b| *b == 0).filter(|s| !s.is_empty()).collect();
+        let argv: Vec<&[u8]> = cmdline
+            .split(|b| *b == 0)
+            .filter(|s| !s.is_empty())
+            .collect();
         if argv.is_empty() || !argv[0].ends_with(b"slirp4netns") {
             continue;
         }
         // o pid-alvo é o penúltimo arg (… <pid> tap0). Acha o último arg numérico.
-        let target = argv.iter().rev().find_map(|a| std::str::from_utf8(a).ok().and_then(|s| s.parse::<i32>().ok()));
+        let target = argv.iter().rev().find_map(|a| {
+            std::str::from_utf8(a)
+                .ok()
+                .and_then(|s| s.parse::<i32>().ok())
+        });
         if let Some(t) = target {
             out.push((pid, t));
         }
@@ -1907,7 +2367,12 @@ fn list_slirps() -> Vec<(i32, i32)> {
 /// Pede ao slirp4netns (via o api-socket JSON) um *host-forward* `host_port` →
 /// `guest_port` no IP do container ([`SLIRP_IP`]). É como o Podman publica portas
 /// em rootless. Tenta brevemente até o socket existir (o slirp cria-o ao arrancar).
-pub fn slirp_add_hostfwd(sock: &std::path::Path, host_port: &str, guest_port: &str, proto: &str) -> Result<()> {
+pub fn slirp_add_hostfwd(
+    sock: &std::path::Path,
+    host_port: &str,
+    guest_port: &str,
+    proto: &str,
+) -> Result<()> {
     use std::io::{Read, Write};
     use std::os::unix::net::UnixStream;
     // SEGURO POR OMISSÃO: liga a porta publicada só ao loopback (127.0.0.1), não a
@@ -1943,11 +2408,17 @@ pub fn slirp_add_hostfwd(sock: &std::path::Path, host_port: &str, guest_port: &s
             }
         }
     }
-    Err(Error::Runtime { context: "slirp api-socket", message: last })
+    Err(Error::Runtime {
+        context: "slirp api-socket",
+        message: last,
+    })
 }
 
 fn reg_io(e: &std::io::Error) -> Error {
-    Error::Runtime { context: "slirp hostfwd", message: e.to_string() }
+    Error::Runtime {
+        context: "slirp hostfwd",
+        message: e.to_string(),
+    }
 }
 
 /// Aplica um *ruleset* nftables via `nft -f -` (stdin).
@@ -1963,11 +2434,7 @@ fn apply_nft(ruleset: &str) -> Result<()> {
             context: "spawn nft",
             message: e.to_string(),
         })?;
-    child
-        .stdin
-        .take()
-        .unwrap()
-        .write_all(ruleset.as_bytes())?;
+    child.stdin.take().unwrap().write_all(ruleset.as_bytes())?;
     let out = child.wait_with_output()?;
     if !out.status.success() {
         return Err(Error::Runtime {
@@ -2052,17 +2519,35 @@ pub fn list_connections(ip2name: &std::collections::HashMap<String, String>) -> 
         if is_cont(r_src) && !is_cont(o_src) && o_src != "127.0.0.1" {
             let c = ip2name[r_src].clone();
             if seen.insert(format!("in:{o_src}:{c}:{port}")) {
-                out.push(Connection { kind: "external_in".into(), container: c, peer: o_src.into(), port, proto });
+                out.push(Connection {
+                    kind: "external_in".into(),
+                    container: c,
+                    peer: o_src.into(),
+                    port,
+                    proto,
+                });
             }
         } else if is_cont(o_src) && !is_cont(o_dst) && o_dst != "127.0.0.1" {
             let c = ip2name[o_src].clone();
             if seen.insert(format!("out:{c}:{o_dst}")) {
-                out.push(Connection { kind: "egress".into(), container: c, peer: o_dst.into(), port, proto });
+                out.push(Connection {
+                    kind: "egress".into(),
+                    container: c,
+                    peer: o_dst.into(),
+                    port,
+                    proto,
+                });
             }
         } else if is_cont(o_src) && is_cont(o_dst) {
             let (a, b) = (ip2name[o_src].clone(), ip2name[o_dst].clone());
             if seen.insert(format!("int:{a}:{b}")) {
-                out.push(Connection { kind: "internal".into(), container: a, peer: b, port, proto });
+                out.push(Connection {
+                    kind: "internal".into(),
+                    container: a,
+                    peer: b,
+                    port,
+                    proto,
+                });
             }
         }
     }
@@ -2081,8 +2566,14 @@ mod tests {
     fn prefixo_de_rede_cai_sempre_no_espaco_de_ingress() {
         use delonix_runtime_core::workload_net::is_workload_ipv4;
         let mut nomes: Vec<String> = vec![
-            "kind".into(), "dlx-delonix".into(), "dlx-delonix-01".into(), "backend".into(),
-            "lab-net".into(), "a".into(), "".into(), "rede-com-nome-muito-comprido-mesmo".into(),
+            "kind".into(),
+            "dlx-delonix".into(),
+            "dlx-delonix-01".into(),
+            "backend".into(),
+            "lab-net".into(),
+            "a".into(),
+            "".into(),
+            "rede-com-nome-muito-comprido-mesmo".into(),
         ];
         // Cobertura a sério: 500 nomes gerados, não só os que me lembrei.
         nomes.extend((0..500).map(|i| format!("net-{i}")));
@@ -2122,16 +2613,24 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("dlx-addpeer-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let store = NetworkStore::open(&dir).unwrap();
-        store.create_overlay("ov", 7, &[], Some("10.250.0.1")).unwrap();
+        store
+            .create_overlay("ov", 7, &[], Some("10.250.0.1"))
+            .unwrap();
         // aprende um peer
-        let n = store.add_overlay_peer("ov", "10.0.0.2=PUB2=10.250.0.2").unwrap();
+        let n = store
+            .add_overlay_peer("ov", "10.0.0.2=PUB2=10.250.0.2")
+            .unwrap();
         assert_eq!(n.peers, vec!["10.0.0.2=PUB2=10.250.0.2"]);
         assert_eq!(n.wg_ip.as_deref(), Some("10.250.0.1")); // preserva wgip
-        // rotação: mesmo node_ip, chave nova → SUBSTITUI (não duplica)
-        let n2 = store.add_overlay_peer("ov", "10.0.0.2=PUBNEW=10.250.0.2").unwrap();
+                                                            // rotação: mesmo node_ip, chave nova → SUBSTITUI (não duplica)
+        let n2 = store
+            .add_overlay_peer("ov", "10.0.0.2=PUBNEW=10.250.0.2")
+            .unwrap();
         assert_eq!(n2.peers, vec!["10.0.0.2=PUBNEW=10.250.0.2"]);
         // 2º peer distinto → adiciona
-        let n3 = store.add_overlay_peer("ov", "10.0.0.3=PUB3=10.250.0.3").unwrap();
+        let n3 = store
+            .add_overlay_peer("ov", "10.0.0.3=PUB3=10.250.0.3")
+            .unwrap();
         assert_eq!(n3.peers.len(), 2);
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -2142,7 +2641,9 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         let store = NetworkStore::open(&dir).unwrap();
         let peers = vec!["10.0.0.2=PUB2=10.250.0.2".to_string()];
-        let n = store.create_overlay("ov", 42, &peers, Some("10.250.0.1")).unwrap();
+        let n = store
+            .create_overlay("ov", 42, &peers, Some("10.250.0.1"))
+            .unwrap();
         assert_eq!(n.wg_ip.as_deref(), Some("10.250.0.1"));
         // recarrega do disco → wg_ip persiste
         let n2 = store.get("ov").unwrap();
@@ -2160,11 +2661,18 @@ mod tests {
         assert!(ip.starts_with("10.88."));
         // ids que partilham os 8 primeiros hex DERIVAM o mesmo IP — era a raiz da
         // colisão. O `ipam::allocate` é que os separa (testado em `ipam::tests`).
-        assert_eq!(derive_ip_in("10.88", "deadbeef1234"), derive_ip_in("10.88", "deadbeef9999"));
+        assert_eq!(
+            derive_ip_in("10.88", "deadbeef1234"),
+            derive_ip_in("10.88", "deadbeef9999")
+        );
         // o último octeto nunca é 0/1/255
         for id in ["00000000", "00000001", "000000ff"] {
-            let last: u8 =
-                derive_ip_in("10.88", id).rsplit('.').next().unwrap().parse().unwrap();
+            let last: u8 = derive_ip_in("10.88", id)
+                .rsplit('.')
+                .next()
+                .unwrap()
+                .parse()
+                .unwrap();
             assert!(last >= 2 && last != 255, "id {id} -> {last}");
         }
     }
@@ -2193,10 +2701,16 @@ mod tests {
         // a base por omissão nunca pode ser 88 (Podman) nem cair em 172/16 (Docker
         // não é 10.x). pick_free_base escolhe sempre fora dos octetos usados.
         let used = used_10_octets();
-        assert!(used.contains(&88), "Podman (10.88) tem de estar marcado como usado");
+        assert!(
+            used.contains(&88),
+            "Podman (10.88) tem de estar marcado como usado"
+        );
         assert!(used.contains(&90), "VIPs (10.90) reservado");
         let base = pick_free_base();
-        assert!(!used.contains(&base), "a base escolhida ({base}) colide com algo já usado");
+        assert!(
+            !used.contains(&base),
+            "a base escolhida ({base}) colide com algo já usado"
+        );
         assert!(base != 88 && base != 90);
     }
 
@@ -2244,7 +2758,13 @@ mod tests {
 
         // burst explícito é respeitado; o formato `tc` é o esperado.
         let r = parse_net_rate("1mbit", Some("32k")).unwrap();
-        assert_eq!(r, NetRate { rate_bit: 1_000_000, burst_bytes: 32 * 1024 });
+        assert_eq!(
+            r,
+            NetRate {
+                rate_bit: 1_000_000,
+                burst_bytes: 32 * 1024
+            }
+        );
         assert_eq!(r.tc_rate(), "1000000bit");
         assert_eq!(r.tc_burst(), "32768");
         assert!(parse_net_rate("1mbit", Some("0")).is_err());

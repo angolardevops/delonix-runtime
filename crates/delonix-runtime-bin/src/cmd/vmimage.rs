@@ -48,7 +48,15 @@ impl VmImageStore {
     }
 
     fn sanitize(name: &str) -> String {
-        name.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '.' { c } else { '_' }).collect()
+        name.chars()
+            .map(|c| {
+                if c.is_ascii_alphanumeric() || c == '-' || c == '.' {
+                    c
+                } else {
+                    '_'
+                }
+            })
+            .collect()
     }
 
     fn meta_path(&self, name: &str) -> PathBuf {
@@ -63,7 +71,10 @@ impl VmImageStore {
         // `sanitize` (não aplicado aqui antes — achado de auditoria de segurança,
         // ver CLAUDE.md) elimina `/` de `ubuntu_release`, impedindo que
         // `--ubuntu-release '../../../etc/cron.d/x'` escreva fora de `_base/`.
-        self.root.join("_base").join(format!("ubuntu-{}-server-cloudimg-amd64.img", Self::sanitize(ubuntu_release)))
+        self.root.join("_base").join(format!(
+            "ubuntu-{}-server-cloudimg-amd64.img",
+            Self::sanitize(ubuntu_release)
+        ))
     }
 
     pub fn save(&self, img: &VmImage) -> Result<()> {
@@ -104,7 +115,11 @@ pub enum VmImageCmd {
     /// Publica uma imagem VM local num registo OCI (artefacto de blob único).
     Push { name: String, target: String },
     /// Puxa uma imagem VM de um registo OCI.
-    Pull { source: String, #[arg(long)] name: Option<String> },
+    Pull {
+        source: String,
+        #[arg(long)]
+        name: Option<String>,
+    },
     /// Constrói a imagem dourada: Ubuntu cloud image + kubeadm/kubelet/kubectl
     /// + `delonix-cri` (endpoint CRI para o kubelet), via `virt-customize`.
     Build {
@@ -146,9 +161,26 @@ pub fn run(action: VmImageCmd) -> Result<()> {
         VmImageCmd::Describe { names } => cmd_describe(&store, &names),
         VmImageCmd::Push { name, target } => cmd_push(&store, &name, &target),
         VmImageCmd::Pull { source, name } => cmd_pull(&store, &source, name),
-        VmImageCmd::Build { tag, ubuntu_release, k8s_version, extra_packages, extra_run, cri_bin, no_compress, offline } => {
-            cmd_build(&store, &tag, &ubuntu_release, k8s_version, extra_packages, extra_run, cri_bin, !no_compress, offline)
-        }
+        VmImageCmd::Build {
+            tag,
+            ubuntu_release,
+            k8s_version,
+            extra_packages,
+            extra_run,
+            cri_bin,
+            no_compress,
+            offline,
+        } => cmd_build(
+            &store,
+            &tag,
+            &ubuntu_release,
+            k8s_version,
+            extra_packages,
+            extra_run,
+            cri_bin,
+            !no_compress,
+            offline,
+        ),
     }
 }
 
@@ -189,13 +221,19 @@ fn describe_one(store: &VmImageStore, img: &VmImage) {
     d.field("Age", output::fmt_age(img.created_unix));
     // `pull` NÃO recupera estes metadados (o artefacto OCI só carrega o blob
     // qcow2) — numa imagem puxada ficam `None`. Ver o gap conhecido no CLAUDE.md.
-    d.field("Ubuntu", img.ubuntu_release.as_deref().unwrap_or("<unknown>"));
+    d.field(
+        "Ubuntu",
+        img.ubuntu_release.as_deref().unwrap_or("<unknown>"),
+    );
     d.field("K8s", img.k8s_version.as_deref().unwrap_or("<unknown>"));
     let qcow2 = store.qcow2_path(&img.name);
     d.field("Path", qcow2.to_string_lossy());
     // O `size` acima é o do build/pull; este é o que ESTÁ em disco agora. Se
     // divergirem, o artefacto foi mexido por fora — vale a pena poder ver.
-    d.field_opt("On disk", std::fs::metadata(&qcow2).ok().map(|m| fmt_size(m.len())));
+    d.field_opt(
+        "On disk",
+        std::fs::metadata(&qcow2).ok().map(|m| fmt_size(m.len())),
+    );
     d.print();
 }
 
@@ -203,7 +241,12 @@ fn cmd_push(store: &VmImageStore, name: &str, target: &str) -> Result<()> {
     let img = store.get(name)?;
     let data = std::fs::read(store.qcow2_path(name))
         .map_err(|e| Error::Invalid(format!("não consegui ler o qcow2 de '{name}': {e}")))?;
-    let digest = delonix_image::registry::push_oci_artifact(&state_root(), target, VM_IMAGE_MEDIA_TYPE, &data)?;
+    let digest = delonix_image::registry::push_oci_artifact(
+        &state_root(),
+        target,
+        VM_IMAGE_MEDIA_TYPE,
+        &data,
+    )?;
     println!("{digest}");
     let _ = img;
     Ok(())
@@ -246,28 +289,52 @@ fn cmd_build(
     // conter metacaracteres de shell). Achado de auditoria, ver CLAUDE.md.
     if let Some(v) = &k8s_version {
         if !super::cluster::valid_version(v) {
-            return Err(Error::Invalid(format!("--k8s-version '{v}' inválido (só dígitos e pontos, ex.: '1.31')")));
+            return Err(Error::Invalid(format!(
+                "--k8s-version '{v}' inválido (só dígitos e pontos, ex.: '1.31')"
+            )));
         }
     }
     let base = download_ubuntu_base(store, ubuntu_release)?;
     let cri = resolve_cri_bin(cri_bin)?;
 
-    let work_dir = std::env::temp_dir().join(format!("delonix-vmimage-build-{}", std::process::id()));
+    let work_dir =
+        std::env::temp_dir().join(format!("delonix-vmimage-build-{}", std::process::id()));
     std::fs::create_dir_all(&work_dir)?;
     let work_qcow2 = work_dir.join("work.qcow2");
 
     eprintln!("a preparar imagem de trabalho (achatada, sem backing file)...");
-    run_tool("qemu-img", &["convert", "-O", "qcow2", &base.to_string_lossy(), &work_qcow2.to_string_lossy()])?;
+    run_tool(
+        "qemu-img",
+        &[
+            "convert",
+            "-O",
+            "qcow2",
+            &base.to_string_lossy(),
+            &work_qcow2.to_string_lossy(),
+        ],
+    )?;
 
     let service_unit = workspace_dist_file("delonix-cri.service")?;
     let ops = if offline {
         // Tudo o que precisa de rede acontece AQUI, no host (verificado), para o
         // appliance poder correr com `--no-network`.
         eprintln!("modo offline: a obter os .deb do k8s no host...");
-        let debs = download_k8s_debs(&work_dir, &work_dir.join("debs"), k8s_version.as_deref(), "amd64", &extra_packages)?;
+        let debs = download_k8s_debs(
+            &work_dir,
+            &work_dir.join("debs"),
+            k8s_version.as_deref(),
+            "amd64",
+            &extra_packages,
+        )?;
         k8s_customization_steps_offline(&debs, &extra_run, &cri, &service_unit)
     } else {
-        k8s_customization_steps(k8s_version.as_deref(), &extra_packages, &extra_run, &cri, &service_unit)
+        k8s_customization_steps(
+            k8s_version.as_deref(),
+            &extra_packages,
+            &extra_run,
+            &cri,
+            &service_unit,
+        )
     };
     let mut args = customize_args(&work_qcow2, &ops);
     if offline {
@@ -276,8 +343,15 @@ fn cmd_build(
         args.insert(0, "--no-network".to_string());
     }
 
-    eprintln!("a correr virt-customize ({} passos{})...", ops.len(), if offline { ", sem rede" } else { "" });
-    run_tool("virt-customize", &args.iter().map(String::as_str).collect::<Vec<_>>())?;
+    eprintln!(
+        "a correr virt-customize ({} passos{})...",
+        ops.len(),
+        if offline { ", sem rede" } else { "" }
+    );
+    run_tool(
+        "virt-customize",
+        &args.iter().map(String::as_str).collect::<Vec<_>>(),
+    )?;
 
     // Encolher o artefacto. Medido numa golden 24.04 (2.38 GiB → 677 MiB, −72%):
     //  1) `virt-sparsify --in-place` — zera os blocos já libertados (a limpeza do
@@ -292,7 +366,10 @@ fn cmd_build(
     // Sparsify é best-effort: se falhar, seguimos (só perde-se algum tamanho).
     let final_qcow2 = if compress {
         eprintln!("a compactar a imagem (sparsify + compressão zstd)...");
-        if let Err(e) = run_tool("virt-sparsify", &["--in-place", &work_qcow2.to_string_lossy()]) {
+        if let Err(e) = run_tool(
+            "virt-sparsify",
+            &["--in-place", &work_qcow2.to_string_lossy()],
+        ) {
             eprintln!("aviso: virt-sparsify falhou ({e}); a comprimir na mesma");
         }
         let compressed = work_dir.join("final.qcow2");
@@ -378,14 +455,19 @@ fn stream_download(url: &str, dest: &Path) -> Result<()> {
         .timeout(std::time::Duration::from_secs(3600))
         .build()
         .map_err(|e| Error::Invalid(format!("cliente HTTP: {e}")))?;
-    let mut resp = client.get(url).send().map_err(|e| Error::Invalid(format!("GET {url}: {e}")))?;
+    let mut resp = client
+        .get(url)
+        .send()
+        .map_err(|e| Error::Invalid(format!("GET {url}: {e}")))?;
     if !resp.status().is_success() {
         return Err(Error::Invalid(format!("GET {url}: HTTP {}", resp.status())));
     }
     let mut file = std::fs::File::create(dest)?;
     let mut buf = [0u8; 1 << 20];
     loop {
-        let n = resp.read(&mut buf).map_err(|e| Error::Invalid(format!("a ler resposta: {e}")))?;
+        let n = resp
+            .read(&mut buf)
+            .map_err(|e| Error::Invalid(format!("a ler resposta: {e}")))?;
         if n == 0 {
             break;
         }
@@ -400,11 +482,15 @@ fn http_get_text(url: &str) -> Result<String> {
         .timeout(std::time::Duration::from_secs(60))
         .build()
         .map_err(|e| Error::Invalid(format!("cliente HTTP: {e}")))?;
-    let resp = client.get(url).send().map_err(|e| Error::Invalid(format!("GET {url}: {e}")))?;
+    let resp = client
+        .get(url)
+        .send()
+        .map_err(|e| Error::Invalid(format!("GET {url}: {e}")))?;
     if !resp.status().is_success() {
         return Err(Error::Invalid(format!("GET {url}: HTTP {}", resp.status())));
     }
-    resp.text().map_err(|e| Error::Invalid(format!("corpo de {url}: {e}")))
+    resp.text()
+        .map_err(|e| Error::Invalid(format!("corpo de {url}: {e}")))
 }
 
 // ---------------------------------------------------------------------------
@@ -496,7 +582,11 @@ pub(crate) fn parse_packages_index(
 pub(crate) fn deb_version_lt(a: &str, b: &str) -> bool {
     let parts = |s: &str| -> Vec<u64> {
         s.split(['.', '-'])
-            .map(|p| p.chars().take_while(|c| c.is_ascii_digit()).collect::<String>())
+            .map(|p| {
+                p.chars()
+                    .take_while(|c| c.is_ascii_digit())
+                    .collect::<String>()
+            })
             .map(|p| p.parse::<u64>().unwrap_or(0))
             .collect()
     };
@@ -545,7 +635,15 @@ fn verify_inrelease(work: &Path, repo_base: &str) -> Result<String> {
     // ASCII-armored → keyring binário que o gpgv entende.
     run_tool(
         "gpg",
-        &["--batch", "--yes", "--no-default-keyring", "--dearmor", "-o", &keyring.to_string_lossy(), &key_asc.to_string_lossy()],
+        &[
+            "--batch",
+            "--yes",
+            "--no-default-keyring",
+            "--dearmor",
+            "-o",
+            &keyring.to_string_lossy(),
+            &key_asc.to_string_lossy(),
+        ],
     )
     .map_err(|e| Error::Invalid(format!("a preparar o keyring do repo k8s: {e}")))?;
 
@@ -553,7 +651,11 @@ fn verify_inrelease(work: &Path, repo_base: &str) -> Result<String> {
     stream_download(&format!("{repo_base}/InRelease"), &inrelease)?;
     run_tool(
         "gpgv",
-        &["--keyring", &keyring.to_string_lossy(), &inrelease.to_string_lossy()],
+        &[
+            "--keyring",
+            &keyring.to_string_lossy(),
+            &inrelease.to_string_lossy(),
+        ],
     )
     .map_err(|_| {
         Error::Invalid(
@@ -667,7 +769,10 @@ fn hex(bytes: &[u8]) -> String {
 }
 
 fn now_unix() -> u64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
 }
 
 // ---------------------------------------------------------------------------
@@ -677,7 +782,10 @@ fn now_unix() -> u64 {
 pub(crate) fn resolve_cri_bin(explicit: Option<PathBuf>) -> Result<PathBuf> {
     if let Some(p) = explicit {
         if !p.exists() {
-            return Err(Error::Invalid(format!("--cri-bin '{}' não existe", p.display())));
+            return Err(Error::Invalid(format!(
+                "--cri-bin '{}' não existe",
+                p.display()
+            )));
         }
         return Ok(p);
     }
@@ -692,9 +800,19 @@ pub(crate) fn resolve_cri_bin(explicit: Option<PathBuf>) -> Result<PathBuf> {
     }
     // Conveniência de dev: workspace do código-fonte a partir do cwd.
     if let Some(workspace_root) = find_workspace_root() {
-        eprintln!("a compilar delonix-cri (release) a partir de {}...", workspace_root.display());
+        eprintln!(
+            "a compilar delonix-cri (release) a partir de {}...",
+            workspace_root.display()
+        );
         let status = Command::new("cargo")
-            .args(["build", "--release", "-p", "delonix-cri", "--bin", "delonix-cri"])
+            .args([
+                "build",
+                "--release",
+                "-p",
+                "delonix-cri",
+                "--bin",
+                "delonix-cri",
+            ])
             .current_dir(&workspace_root)
             .status()
             .map_err(|e| Error::Invalid(format!("a correr cargo build: {e}")))?;
@@ -798,10 +916,11 @@ pub(crate) fn k8s_customization_steps(
     cri_bin: &Path,
     cri_service: &Path,
 ) -> Vec<CustomizeOp> {
-    let mut ops: Vec<CustomizeOp> = super::k8s_recipes::k8s_host_recipes(k8s_version, extra_packages)
-        .into_iter()
-        .map(|r| CustomizeOp::RunCommand(r.apply_offline().to_string()))
-        .collect();
+    let mut ops: Vec<CustomizeOp> =
+        super::k8s_recipes::k8s_host_recipes(k8s_version, extra_packages)
+            .into_iter()
+            .map(|r| CustomizeOp::RunCommand(r.apply_offline().to_string()))
+            .collect();
     ops.extend(common_customization_steps(extra_run, cri_bin, cri_service));
     ops
 }
@@ -879,7 +998,10 @@ fn run_tool(bin: &str, args: &[&str]) -> Result<()> {
         .status()
         .map_err(|e| Error::Invalid(format!("a correr {bin}: {e}")))?;
     if !status.success() {
-        return Err(Error::Invalid(format!("{bin} falhou (exit {:?})", status.code())));
+        return Err(Error::Invalid(format!(
+            "{bin} falhou (exit {:?})",
+            status.code()
+        )));
     }
     Ok(())
 }
@@ -936,8 +1058,14 @@ mod tests {
             .iter()
             .position(|op| matches!(op, CustomizeOp::RunCommand(c) if c == "echo oi"))
             .expect("o --extra-run devia estar na lista");
-        assert_eq!(idx_extra, ops.len() - 2, "o --extra-run devia vir logo antes da limpeza");
-        assert!(matches!(ops.last(), Some(CustomizeOp::RunCommand(c)) if c.contains("apt-get clean")));
+        assert_eq!(
+            idx_extra,
+            ops.len() - 2,
+            "o --extra-run devia vir logo antes da limpeza"
+        );
+        assert!(
+            matches!(ops.last(), Some(CustomizeOp::RunCommand(c)) if c.contains("apt-get clean"))
+        );
     }
 
     /// Um `Packages` reduzido, com a mesma forma do real (várias arquitecturas e
@@ -982,9 +1110,18 @@ SHA256: ccc1
 
     #[test]
     fn parse_packages_escolhe_maior_versao_da_arch_certa() {
-        let got = parse_packages_index(PACKAGES_FIXTURE, "amd64", "1.34.", &["kubeadm"], &["kubeadm"]);
+        let got = parse_packages_index(
+            PACKAGES_FIXTURE,
+            "amd64",
+            "1.34.",
+            &["kubeadm"],
+            &["kubeadm"],
+        );
         assert_eq!(got.len(), 1);
-        assert_eq!(got[0].version, "1.34.9-1.1", "devia escolher a maior 1.34.*");
+        assert_eq!(
+            got[0].version, "1.34.9-1.1",
+            "devia escolher a maior 1.34.*"
+        );
         assert_eq!(got[0].filename, "amd64/kubeadm_1.34.9-1.1_amd64.deb");
         assert_eq!(got[0].sha256, "bbb2");
     }
@@ -1000,16 +1137,24 @@ SHA256: ccc1
             &["kubeadm", "kubernetes-cni"],
             &["kubeadm"], // só o kubeadm segue a versão do k8s
         );
-        let cni = got.iter().find(|d| d.name == "kubernetes-cni").expect("cni tem de vir");
+        let cni = got
+            .iter()
+            .find(|d| d.name == "kubernetes-cni")
+            .expect("cni tem de vir");
         assert_eq!(cni.version, "1.7.1-1.1");
-        assert!(got.iter().any(|d| d.name == "kubeadm" && d.version == "1.34.9-1.1"));
+        assert!(got
+            .iter()
+            .any(|d| d.name == "kubeadm" && d.version == "1.34.9-1.1"));
     }
 
     #[test]
     fn deb_version_lt_compara_numericamente() {
         assert!(deb_version_lt("1.34.0-1.1", "1.34.9-1.1"));
         assert!(deb_version_lt("1.33.1-1.1", "1.34.0-1.1"));
-        assert!(deb_version_lt("1.9.0-1.1", "1.10.0-1.1"), "9 < 10 numericamente, não lexicograficamente");
+        assert!(
+            deb_version_lt("1.9.0-1.1", "1.10.0-1.1"),
+            "9 < 10 numericamente, não lexicograficamente"
+        );
         assert!(!deb_version_lt("1.34.9-1.1", "1.34.0-1.1"));
         assert!(!deb_version_lt("1.34.9-1.1", "1.34.9-1.1"));
     }
@@ -1025,8 +1170,14 @@ SHA256:
  def456 89 Release
 Date: Fri, 12 Jun 2026 12:40:56 UTC
 ";
-        assert_eq!(release_sha256_of(release, "Packages").as_deref(), Some("abc123"));
-        assert_eq!(release_sha256_of(release, "Release").as_deref(), Some("def456"));
+        assert_eq!(
+            release_sha256_of(release, "Packages").as_deref(),
+            Some("abc123")
+        );
+        assert_eq!(
+            release_sha256_of(release, "Release").as_deref(),
+            Some("def456")
+        );
         assert_eq!(release_sha256_of(release, "nao-existe"), None);
     }
 
@@ -1046,15 +1197,24 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
                 _ => None,
             })
             .collect();
-        assert!(cmds.iter().any(|c| c.contains("dpkg -i /tmp/k8s-debs/*.deb")));
-        assert!(cmds.iter().any(|c| c.contains("mkdir -p /tmp/k8s-debs")), "o --copy-in exige o dir criado");
+        assert!(cmds
+            .iter()
+            .any(|c| c.contains("dpkg -i /tmp/k8s-debs/*.deb")));
+        assert!(
+            cmds.iter().any(|c| c.contains("mkdir -p /tmp/k8s-debs")),
+            "o --copy-in exige o dir criado"
+        );
         // A garantia central do modo offline: nada contacta a rede no guest.
         for c in &cmds {
-            assert!(!c.contains("curl") && !c.contains("apt-get update") && !c.contains("https://"),
-                "passo offline com rede: {c}");
+            assert!(
+                !c.contains("curl") && !c.contains("apt-get update") && !c.contains("https://"),
+                "passo offline com rede: {c}"
+            );
         }
         // E o .deb é injectado.
-        assert!(ops.iter().any(|o| matches!(o, CustomizeOp::CopyIn(_, d) if d == "/tmp/k8s-debs")));
+        assert!(ops
+            .iter()
+            .any(|o| matches!(o, CustomizeOp::CopyIn(_, d) if d == "/tmp/k8s-debs")));
     }
 
     #[test]
@@ -1075,7 +1235,9 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
         let cri = PathBuf::from("/tmp/delonix-cri");
         let svc = PathBuf::from("/tmp/delonix-cri.service");
         let ops = k8s_customization_steps(None, &[], &[], &cri, &svc);
-        assert!(ops.iter().any(|op| matches!(op, CustomizeOp::RootPassword(p) if p == "delonix")));
+        assert!(ops
+            .iter()
+            .any(|op| matches!(op, CustomizeOp::RootPassword(p) if p == "delonix")));
         assert!(ops.iter().any(|op| matches!(op, CustomizeOp::Password{user,password} if user=="delonix" && password=="delonix")));
     }
 
@@ -1089,13 +1251,26 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
         let args = customize_args(Path::new("/tmp/disk.qcow2"), &ops);
         assert_eq!(args[0], "-a");
         assert_eq!(args[1], "/tmp/disk.qcow2");
-        assert!(args.windows(2).any(|w| w == ["--run-command".to_string(), "apt-get install -y a b".to_string()]));
-        assert!(args.windows(2).any(|w| w == ["--copy-in".to_string(), "/host/bin:/usr/local/bin".to_string()]));
-        assert!(args.windows(2).any(|w| w == ["--root-password".to_string(), "password:x".to_string()]));
+        assert!(args.windows(2).any(|w| w
+            == [
+                "--run-command".to_string(),
+                "apt-get install -y a b".to_string()
+            ]));
+        assert!(args.windows(2).any(|w| w
+            == [
+                "--copy-in".to_string(),
+                "/host/bin:/usr/local/bin".to_string()
+            ]));
+        assert!(args
+            .windows(2)
+            .any(|w| w == ["--root-password".to_string(), "password:x".to_string()]));
     }
 
     #[test]
     fn hex_sha256_e_consistente() {
-        assert_eq!(hex_sha256(b"abc"), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+        assert_eq!(
+            hex_sha256(b"abc"),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
     }
 }

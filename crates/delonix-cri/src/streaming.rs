@@ -84,7 +84,14 @@ impl Streamer {
         let token = random_token();
         let mut m = self.pforwards.lock().unwrap();
         m.retain(|_, p| Instant::now().duration_since(p.created) < Duration::from_secs(300));
-        m.insert(token.clone(), PfPending { pod_sandbox_id, ports, created: Instant::now() });
+        m.insert(
+            token.clone(),
+            PfPending {
+                pod_sandbox_id,
+                ports,
+                created: Instant::now(),
+            },
+        );
         format!("{}/portforward/{}", self.advertised, token)
     }
 
@@ -104,7 +111,16 @@ impl Streamer {
         purge_expired(&mut m);
         m.insert(
             token.clone(),
-            Pending { container_id, cmd, tty, stdin, stdout, stderr, attach: false, created: Instant::now() },
+            Pending {
+                container_id,
+                cmd,
+                tty,
+                stdin,
+                stdout,
+                stderr,
+                attach: false,
+                created: Instant::now(),
+            },
         );
         format!("{}/exec/{}", self.advertised, token)
     }
@@ -168,7 +184,11 @@ async fn portforward_upgrade(
         return axum::http::StatusCode::NOT_FOUND.into_response();
     };
     let Some(pid) = pod_sandbox_pid(&st.base, &p.pod_sandbox_id) else {
-        return (axum::http::StatusCode::CONFLICT, "pod sandbox sem netns vivo").into_response();
+        return (
+            axum::http::StatusCode::CONFLICT,
+            "pod sandbox sem netns vivo",
+        )
+            .into_response();
     };
     crate::spdy::handle_port_forward(req, pid)
 }
@@ -242,15 +262,15 @@ async fn exec_upgrade(
             Err(e) => return e.into_response(),
         };
         let (cmd, tty, attach) = (p.cmd, p.tty, p.attach);
-        return ws.protocols(["v5.channel.k8s.io", "v4.channel.k8s.io"]).on_upgrade(
-            move |socket| async move {
+        return ws
+            .protocols(["v5.channel.k8s.io", "v4.channel.k8s.io"])
+            .on_upgrade(move |socket| async move {
                 if tty {
                     exec_tty(socket, base, name, cmd, attach).await;
                 } else {
                     exec_pipes(socket, base, name, cmd, attach).await;
                 }
-            },
-        );
+            });
     }
     axum::http::StatusCode::BAD_REQUEST.into_response()
 }
@@ -289,11 +309,19 @@ fn err_frame(msg: &str) -> Message {
 // Exec com TTY: pty externo ↔ WebSocket (tudo no canal 1/stdout).
 // ---------------------------------------------------------------------------
 
-async fn exec_tty(mut socket: WebSocket, base: PathBuf, name: String, cmd: Vec<String>, attach: bool) {
+async fn exec_tty(
+    mut socket: WebSocket,
+    base: PathBuf,
+    name: String,
+    cmd: Vec<String>,
+    attach: bool,
+) {
     let (master, slave) = match open_pty() {
         Some(p) => p,
         None => {
-            let _ = socket.send(err_frame("delonix-cri: falha a alocar pty")).await;
+            let _ = socket
+                .send(err_frame("delonix-cri: falha a alocar pty"))
+                .await;
             return;
         }
     };
@@ -318,7 +346,10 @@ async fn exec_tty(mut socket: WebSocket, base: PathBuf, name: String, cmd: Vec<S
 
     // Lança `delonix exec -t <name> <cmd>` com o slave como stdio.
     let mut command = std::process::Command::new(delonix_bin());
-    command.env("DELONIX_ROOT", &base).env("DELONIX_INTERNAL", "1").args(subprocess_args(attach, &cmd, &name, true));
+    command
+        .env("DELONIX_ROOT", &base)
+        .env("DELONIX_INTERNAL", "1")
+        .args(subprocess_args(attach, &cmd, &name, true));
     // SAFETY: dup do slave; cada Stdio fica dono do fd e fecha-o.
     unsafe {
         command
@@ -332,7 +363,9 @@ async fn exec_tty(mut socket: WebSocket, base: PathBuf, name: String, cmd: Vec<S
         Ok(c) => c,
         Err(e) => {
             unsafe { libc::close(master) };
-            let _ = socket.send(err_frame(&format!("delonix-cri: exec falhou: {e}"))).await;
+            let _ = socket
+                .send(err_frame(&format!("delonix-cri: exec falhou: {e}")))
+                .await;
             return;
         }
     };
@@ -415,7 +448,13 @@ async fn exec_tty(mut socket: WebSocket, base: PathBuf, name: String, cmd: Vec<S
 // Exec sem TTY: stdin/stdout/stderr separados (canais 0/1/2).
 // ---------------------------------------------------------------------------
 
-async fn exec_pipes(mut socket: WebSocket, base: PathBuf, name: String, cmd: Vec<String>, attach: bool) {
+async fn exec_pipes(
+    mut socket: WebSocket,
+    base: PathBuf,
+    name: String,
+    cmd: Vec<String>,
+    attach: bool,
+) {
     let mut command = std::process::Command::new(delonix_bin());
     command
         .env("DELONIX_ROOT", &base)
@@ -427,7 +466,9 @@ async fn exec_pipes(mut socket: WebSocket, base: PathBuf, name: String, cmd: Vec
     let mut child = match command.spawn() {
         Ok(c) => c,
         Err(e) => {
-            let _ = socket.send(err_frame(&format!("delonix-cri: exec falhou: {e}"))).await;
+            let _ = socket
+                .send(err_frame(&format!("delonix-cri: exec falhou: {e}")))
+                .await;
             return;
         }
     };
@@ -526,7 +567,13 @@ pub(crate) fn open_pty() -> Option<(i32, i32)> {
     ws.ws_col = 80;
     // SAFETY: openpty preenche master/slave; restantes ponteiros nulos = defaults.
     let r = unsafe {
-        libc::openpty(&mut master, &mut slave, std::ptr::null_mut(), std::ptr::null(), &ws)
+        libc::openpty(
+            &mut master,
+            &mut slave,
+            std::ptr::null_mut(),
+            std::ptr::null(),
+            &ws,
+        )
     };
     if r == 0 {
         Some((master, slave))

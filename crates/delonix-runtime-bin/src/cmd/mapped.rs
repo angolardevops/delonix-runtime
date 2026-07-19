@@ -27,7 +27,10 @@ use std::path::Path;
 use delonix_runtime_core::{Error, Result};
 
 fn io_err(context: &'static str) -> impl Fn(std::io::Error) -> Error {
-    move |e: std::io::Error| Error::Runtime { context, message: e.to_string() }
+    move |e: std::io::Error| Error::Runtime {
+        context,
+        message: e.to_string(),
+    }
 }
 
 /// `__rmtree <path>` — apaga uma árvore inteira, incluindo ficheiros de subuid.
@@ -58,8 +61,11 @@ pub fn volsnap_create(data: &Path, tarball: &Path) -> Result<()> {
     let enc = flate2::write::GzEncoder::new(f, flate2::Compression::default());
     let mut b = tar::Builder::new(enc);
     b.follow_symlinks(false); // symlinks entram como symlinks, não o alvo
-    b.append_dir_all(".", data).map_err(io_err("volume snapshot"))?;
-    b.into_inner().and_then(|enc| enc.finish()).map_err(io_err("volume snapshot"))?;
+    b.append_dir_all(".", data)
+        .map_err(io_err("volume snapshot"))?;
+    b.into_inner()
+        .and_then(|enc| enc.finish())
+        .map_err(io_err("volume snapshot"))?;
     std::fs::rename(&tmp, tarball).map_err(io_err("volume snapshot"))?;
     Ok(())
 }
@@ -119,7 +125,9 @@ pub fn volsnap(mode: &str, data: &Path, tarball: &Path) -> Result<()> {
     match mode {
         "create" => volsnap_create(data, tarball),
         "restore" => volsnap_restore(data, tarball),
-        other => Err(Error::Invalid(format!("__volsnap: modo desconhecido '{other}' (create|restore)"))),
+        other => Err(Error::Invalid(format!(
+            "__volsnap: modo desconhecido '{other}' (create|restore)"
+        ))),
     }
 }
 
@@ -170,8 +178,14 @@ mod tests {
         std::fs::write(data.join("intruso"), b"a apagar").unwrap();
         volsnap_restore(&data, &tar).unwrap();
 
-        assert_eq!(std::fs::read(data.join("sub/ficheiro")).unwrap(), b"conteudo");
-        assert!(!data.join("intruso").exists(), "o restore tem de limpar o que não estava no snapshot");
+        assert_eq!(
+            std::fs::read(data.join("sub/ficheiro")).unwrap(),
+            b"conteudo"
+        );
+        assert!(
+            !data.join("intruso").exists(),
+            "o restore tem de limpar o que não estava no snapshot"
+        );
         let _ = std::fs::remove_dir_all(&base);
     }
 
@@ -187,7 +201,11 @@ mod tests {
         volsnap_create(&data, &tar).unwrap();
         let ino_antes = std::fs::metadata(&data).unwrap().rt_ino();
         volsnap_restore(&data, &tar).unwrap();
-        assert_eq!(ino_antes, std::fs::metadata(&data).unwrap().rt_ino(), "o inode do _data mudou");
+        assert_eq!(
+            ino_antes,
+            std::fs::metadata(&data).unwrap().rt_ino(),
+            "o inode do _data mudou"
+        );
         let _ = std::fs::remove_dir_all(&base);
     }
 
@@ -205,11 +223,20 @@ mod tests {
 
         // O tar contém as entradas do rootfs (verifica re-lendo).
         let mut a = tar::Archive::new(std::fs::File::open(&out).unwrap());
-        let mut nomes: Vec<String> =
-            a.entries().unwrap().map(|e| e.unwrap().path().unwrap().to_string_lossy().into_owned()).collect();
+        let mut nomes: Vec<String> = a
+            .entries()
+            .unwrap()
+            .map(|e| e.unwrap().path().unwrap().to_string_lossy().into_owned())
+            .collect();
         nomes.sort();
-        assert!(nomes.iter().any(|n| n.ends_with("etc/hostname")), "faltou etc/hostname: {nomes:?}");
-        assert!(nomes.iter().any(|n| n.ends_with("app")), "faltou app: {nomes:?}");
+        assert!(
+            nomes.iter().any(|n| n.ends_with("etc/hostname")),
+            "faltou etc/hostname: {nomes:?}"
+        );
+        assert!(
+            nomes.iter().any(|n| n.ends_with("app")),
+            "faltou app: {nomes:?}"
+        );
         let _ = std::fs::remove_dir_all(&base);
     }
 
@@ -217,7 +244,10 @@ mod tests {
     fn volsnap_modo_invalido_e_erro_claro() {
         let d = tmpdir("snap-modo");
         let err = volsnap("destruir", &d, &d.join("t.tar.gz")).unwrap_err();
-        assert!(format!("{err}").contains("modo desconhecido"), "erro pouco claro: {err}");
+        assert!(
+            format!("{err}").contains("modo desconhecido"),
+            "erro pouco claro: {err}"
+        );
         let _ = std::fs::remove_dir_all(&d);
     }
 
