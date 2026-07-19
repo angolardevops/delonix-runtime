@@ -1229,11 +1229,6 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
             "--ip ainda não é suportado: o holder atribui o IP do container (não aceita um fixo). Gap de motor conhecido.".into(),
         ));
     }
-    if pod.is_some() {
-        return Err(Error::Invalid(
-            "--pod ainda não é suportado no `run`: juntar-se ao netns de um pod não está ligado neste caminho. Gap de motor conhecido.".into(),
-        ));
-    }
 
     // ---- logs ----
     c.log_driver = log_driver;
@@ -1290,7 +1285,22 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
                     );
                 }
             }
-            return reexec_into_netns(&id, &netns, &ip, &opts_copy);
+            return reexec_into_netns(&id, &netns, &ip, &opts_copy, true);
+        }
+    }
+    // `--pod <name>`: junta-se ao netns PARTILHADO do pod sandbox (modelo "pause"),
+    // usado pelo servidor CRI (`delonix-cri`). O netns do pod já existe (o CRI fê-lo
+    // com `netns attach cri-<pod>`); cada container do pod junta-se a ESSE netns
+    // (IP/portas partilhados) em vez de criar o seu. Mesmo mecanismo de re-exec do
+    // `--net <custom>`, mas a ENTRAR no netns do POD (não num com o nome deste
+    // container). NÃO destaca o netns em caso de falha — pertence ao pod, não a este
+    // container (outros containers do pod partilham-no).
+    if let Some(pn) = &pod {
+        if reexec {
+            attached_ip = std::env::var("DELONIX_REEXEC_IP").ok();
+        } else {
+            let ip = infra::container_ip(pn);
+            return reexec_into_netns(&id, pn, &ip, &opts_copy, false);
         }
     }
     c.ports = ports.clone();
@@ -1326,6 +1336,11 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
     // (o runtime copia o resolv.conf do host).
     let dns = match &custom_net {
         Some(n) => infra::resolve_net(n).ok().map(|(_, _, gw)| gw),
+        // Container de POD (`--pod`): está em delonix0 como qualquer container de rede
+        // custom → o resolver é o DNS do holder no gateway da infra. Sem isto o
+        // `/etc/resolv.conf` ficava por escrever (o re-exec corre no mount-ns do holder,
+        // onde o `/etc/resolv.conf` do host não existe) e NADA resolvia por nome no pod.
+        None if pod.is_some() => Some(infra::INFRA_GATEWAY.to_string()),
         None if !slirp_ports.is_empty() => Some(delonix_net::SLIRP_DNS.to_string()),
         None => None,
     };
@@ -1767,8 +1782,16 @@ fn policy_supervised(policy: &str) -> bool {
 /// The `DELONIX_REEXEC_ID` distinguishes the two passes AND carries the id:
 /// without it the 2nd pass would generate a new id and the netns created in the
 /// 1st would be orphaned.
-fn reexec_into_netns(id: &str, netns: &str, ip: &str, opts: &RunOpts) -> Result<()> {
-    let prefix = infra::join_argv(id).ok_or_else(|| Error::Runtime {
+fn reexec_into_netns(
+    id: &str,
+    netns: &str,
+    ip: &str,
+    opts: &RunOpts,
+    detach_on_fail: bool,
+) -> Result<()> {
+    // Entra no netns `netns` (o do container em `--net <custom>`, onde
+    // `netns == sanitize(id)`; o do POD partilhado em `--pod`, onde difere do `id`).
+    let prefix = infra::join_argv(netns).ok_or_else(|| Error::Runtime {
         context: "join_argv",
         message: "infra de ingress em baixo — não há holder onde entrar".into(),
     })?;
@@ -1800,8 +1823,11 @@ fn reexec_into_netns(id: &str, netns: &str, ip: &str, opts: &RunOpts) -> Result<
         message: e.to_string(),
     })?;
     if !status.success() {
-        // The netns would be left hanging if the 2nd pass failed.
-        infra::detach_container(id, ip);
+        // Só destaca se ESTE container é dono do netns (`--net <custom>`); num pod o
+        // netns pertence ao sandbox e é partilhado — destacá-lo derrubaria os pares.
+        if detach_on_fail {
+            infra::detach_container(id, ip);
+        }
         return Err(Error::Invalid(format!(
             "o container não arrancou dentro da rede '{netns}' (exit {:?})",
             status.code()
