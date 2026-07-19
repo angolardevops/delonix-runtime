@@ -6,6 +6,7 @@ pub mod cluster;
 pub mod complete;
 pub mod conditions;
 pub mod dash;
+pub mod dependency;
 pub mod httproute;
 pub mod ingress_proxy;
 pub mod kindmode;
