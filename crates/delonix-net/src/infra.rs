@@ -1418,7 +1418,7 @@ fn do_unpublish(host_port: &str) -> Result<()> {
         if line.contains(&needle) {
             if let Some(handle) = line
                 .rsplit("# handle ")
-                .nth(0)
+                .next()
                 .and_then(|h| h.trim().parse::<u32>().ok())
             {
                 run_ok(
@@ -1948,7 +1948,7 @@ fn hex_encode(bytes: &[u8]) -> String {
 
 /// Hex-decode; `None` se o comprimento for ímpar ou houver dígitos inválidos.
 fn hex_decode(s: &str) -> Option<Vec<u8>> {
-    if s.len() % 2 != 0 {
+    if !s.len().is_multiple_of(2) {
         return None;
     }
     (0..s.len())

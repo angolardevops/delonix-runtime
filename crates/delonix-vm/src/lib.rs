@@ -67,7 +67,7 @@ pub struct VmConfig {
     /// ingress). Abstrai o `<interface>` do domínio — o utilizador NUNCA escreve XML:
     ///   * `None`/`"user"` — rede user-mode (SLIRP/passt): egress, sem IP de entrada.
     ///   * `"nat"`         — rede NAT gerida pelo libvirt (`<source network=…>`, DHCP +
-    ///                       IP via `virsh domifaddr`). Requer `qemu:///system` (root).
+    ///     IP via `virsh domifaddr`). Requer `qemu:///system` (root).
     ///   * `"bridge"`      — liga a uma bridge do host (`bridge` abaixo).
     pub net_mode: Option<String>,
     /// Nome da bridge do host (modo `net_mode = "bridge"`) ou da rede libvirt (modo
