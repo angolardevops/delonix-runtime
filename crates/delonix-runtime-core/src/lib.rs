@@ -80,7 +80,7 @@ pub struct FwRule {
 
 /// Configuração de firewall L4 de um container, aplicada via nftables e
 /// persistida no [`Container`] para que a Console possa LER as regras reais.
-#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ContainerFw {
     #[serde(default)]
     pub enabled: bool,
@@ -91,6 +91,33 @@ pub struct ContainerFw {
     pub policy_out: String,
     #[serde(default)]
     pub rules: Vec<FwRule>,
+    /// Namespace lógico do container (default `default`). Quando o container NÃO
+    /// tem política de entrada explícita (sem `rules` de entrada e `policy_in` !=
+    /// `deny`), a entrada aplica o **isolamento de namespace**: aceita a mesma
+    /// namespace (`@dlxns_<ns>`) e dropa NOVAS ligações de containers de outra
+    /// namespace (`@dlxall` + `ct state new`). Uma política explícita (Dependency/
+    /// Ingress) é autoritativa e substitui isto (ver `fw_chain_body`).
+    #[serde(default = "default_namespace")]
+    pub namespace: String,
+}
+
+/// Namespace por omissão (`default`) — tudo em `default` = SDN aberta (a mesma
+/// namespace contém todos), preservando o comportamento anterior a namespaces.
+pub fn default_namespace() -> String {
+    "default".to_string()
+}
+
+impl Default for ContainerFw {
+    fn default() -> Self {
+        // `namespace` NUNCA vazio (o derive daria ""); tudo o resto é o zero-value.
+        ContainerFw {
+            enabled: false,
+            policy_in: String::new(),
+            policy_out: String::new(),
+            rules: Vec::new(),
+            namespace: default_namespace(),
+        }
+    }
 }
 
 /// `proto` aceite numa regra de firewall (interpolado em nft): vazio, any, tcp, udp.
