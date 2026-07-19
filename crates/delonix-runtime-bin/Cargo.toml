@@ -18,6 +18,7 @@ delonix-vm = { path = "../delonix-vm" }
 delonix-volume = { path = "../delonix-volume" }
 delonix-scan = { path = "../delonix-scan" }
 delonix-cri = { path = "../delonix-cri" }
+delonix-mgmt = { path = "../delonix-mgmt" }
 # Reverse-proxy L7 embutido (`delonix ingress-proxy`, kind: HTTPRoute) — hyper puro
 # + hyper-util. JÁ estão na árvore do bin (transitivos via delonix-cri/tonic), por
 # isso não acrescentam superfície de supply-chain nova; só passam a deps directas.

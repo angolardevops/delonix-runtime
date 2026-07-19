@@ -547,6 +547,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "delonix-mgmt"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "delonix-runtime-core",
+ "delonix-volume",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tower 0.5.3",
+]
+
+[[package]]
 name = "delonix-net"
 version = "0.3.0"
 dependencies = [
@@ -576,6 +593,7 @@ dependencies = [
  "clap_complete",
  "delonix-cri",
  "delonix-image",
+ "delonix-mgmt",
  "delonix-net",
  "delonix-runtime",
  "delonix-runtime-core",
