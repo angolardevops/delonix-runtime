@@ -1897,17 +1897,18 @@ fn unpublish_ports(c: &Container, slirp_pid: Option<i32>) {
                     infra::unpublish_port(&host_port);
                 }
             }
-            // 2) network: release the veth/IP and drop the ingress refcount — ONLY if
-            //    the container was running (had a pid), which is when `attach`
-            //    incremented the refcount. This way `stop` does one detach (balancing
-            //    the `attach` the next `start` will do) and an `rm` of an ALREADY
-            //    stopped container does NOT double-detach — which would drop the shared
-            //    refcount too far and tear down the ingress with other containers still
-            //    alive. Without this the refcount leaked (seen: 8 with 2 clusters).
-            if slirp_pid.is_some() {
-                if let Some(ip) = &c.ip {
-                    infra::detach_container(&c.id, ip);
-                }
+            // 2) network: release the veth/IP and drop the ingress ref marker.
+            //    ALWAYS detach when there's an ip — `infra::release` is now
+            //    IDEMPOTENT (a per-id marker set, not a blind counter), so `stop`
+            //    then `rm` of the same container no longer double-counts, and a
+            //    container that died ABRUPTLY (no `stop`, `reconcile_status` already
+            //    nulled the pid) still gets its marker released here. The old guard
+            //    `slirp_pid.is_some()` skipped the detach precisely in that abrupt
+            //    path → the ref leaked (seen: 16 with 3 containers alive). The
+            //    `system prune` reaper (`reap_orphan_refs`) is the backstop for
+            //    containers that die and are never `rm`'d at all.
+            if let Some(ip) = &c.ip {
+                infra::detach_container(&c.id, ip);
             }
         }
         None => {
