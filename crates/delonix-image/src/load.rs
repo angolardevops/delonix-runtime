@@ -3,11 +3,16 @@
 use crate::cas::sha256_hex;
 use crate::image::{now_unix, Image, ImageConfig, ImageStore};
 use delonix_runtime_core::{Error, Result};
+use oci_spec::image::ImageConfiguration;
 use serde::Deserialize;
 use std::io::Read;
 use std::path::Path;
 
-/// Uma entrada do `manifest.json` legacy do `docker save`.
+/// Uma entrada do `manifest.json` legacy do `docker save`. NÃO é um tipo OCI —
+/// o `manifest.json` do `docker save` é um formato Docker legacy (array de
+/// `{Config, RepoTags, Layers}` com caminhos `blobs/sha256/...`), que o
+/// `oci-spec` não modela; por isso fica hand-rolled de propósito. O blob de
+/// config apontado por ele já é um `ImageConfiguration` OCI (ver abaixo).
 #[derive(Deserialize)]
 struct DockerManifest {
     #[serde(rename = "Config")]
@@ -16,26 +21,6 @@ struct DockerManifest {
     repo_tags: Option<Vec<String>>,
     #[serde(rename = "Layers")]
     layers: Vec<String>,
-}
-
-/// O blob de config OCI (só os campos que usamos).
-#[derive(Deserialize)]
-struct RawConfig {
-    config: Option<RawConfigInner>,
-}
-
-#[derive(Deserialize)]
-struct RawConfigInner {
-    #[serde(rename = "Cmd")]
-    cmd: Option<Vec<String>>,
-    #[serde(rename = "Entrypoint")]
-    entrypoint: Option<Vec<String>>,
-    #[serde(rename = "Env")]
-    env: Option<Vec<String>>,
-    #[serde(rename = "User")]
-    user: Option<String>,
-    #[serde(rename = "WorkingDir")]
-    working_dir: Option<String>,
 }
 
 /// Converte um caminho `blobs/sha256/<hex>` no digest `sha256:<hex>`.
@@ -85,25 +70,20 @@ pub fn load_docker_archive(store: &ImageStore, tar_path: &Path) -> Result<Image>
     if sha256_hex(&config_bytes) != crate::cas::strip(&config_digest) {
         return Err(Error::Invalid("digest do config não confere".into()));
     }
-    let raw: RawConfig = serde_json::from_slice(&config_bytes)?;
-    let inner = raw.config.unwrap_or(RawConfigInner {
-        cmd: None,
-        entrypoint: None,
-        env: None,
-        user: None,
-        working_dir: None,
-    });
+    // Lê a config de execução do blob de config OCI (`ImageConfiguration`).
+    let oci_config: ImageConfiguration = serde_json::from_slice(&config_bytes)?;
+    let inner = oci_config.config().clone().unwrap_or_default();
 
     let image = Image {
         id: config_digest,
         repo_tags: manifest.repo_tags.unwrap_or_default(),
         layers: manifest.layers.iter().map(|l| path_to_digest(l)).collect(),
         config: ImageConfig {
-            cmd: inner.cmd.unwrap_or_default(),
-            entrypoint: inner.entrypoint.unwrap_or_default(),
-            env: inner.env.unwrap_or_default(),
-            user: inner.user.unwrap_or_default(),
-            working_dir: inner.working_dir.unwrap_or_default(),
+            cmd: inner.cmd().clone().unwrap_or_default(),
+            entrypoint: inner.entrypoint().clone().unwrap_or_default(),
+            env: inner.env().clone().unwrap_or_default(),
+            user: inner.user().clone().unwrap_or_default(),
+            working_dir: inner.working_dir().clone().unwrap_or_default(),
             cpus: None,
             memory: None,
             security: Vec::new(),

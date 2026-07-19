@@ -30,3 +30,5 @@ clap = { version = "4", features = ["derive"] }
 sha2 = "0.10"
 tar = "0.4"
 flate2 = "1"
+# Tipos OCI canónicos (image/distribution) — evita structs hand-rolled do schema.
+oci-spec = { version = "0.10.0", default-features = false }

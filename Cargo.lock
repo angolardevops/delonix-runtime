@@ -593,6 +593,7 @@ dependencies = [
  "delonix-runtime-core",
  "flate2",
  "nix",
+ "oci-spec",
  "reqwest",
  "ring",
  "serde",
