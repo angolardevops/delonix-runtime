@@ -2505,16 +2505,53 @@ fn forward_dns(q: &[u8]) -> Option<Vec<u8>> {
 
 /// Resolve um nome do ingress (container OU VM) → IPv4. Aceita `nome` e
 /// `nome.delonix.io`. Lê os records dos containers e as metas das VMs.
-fn dns_resolve(name: &str) -> Option<[u8; 4]> {
-    let n = name.trim_end_matches('.').trim_end_matches(".delonix.io").to_lowercase();
-    if n.is_empty() {
+/// Separa um nome DNS interno em `(container, namespace_opcional)`. Aceita os
+/// esquemas: `<nome>`, `<nome>.delonix.io` (legado, qualquer namespace) e
+/// `<nome>.<namespace>.delonix.internal` (com verificação de namespace). PURA
+/// (testável). Devolve `None` se ficar vazio.
+pub fn parse_internal_name(name: &str) -> Option<(String, Option<String>)> {
+    let n = name.trim_end_matches('.').to_lowercase();
+    // SÓ `.delonix.internal` faz matching por namespace (`<nome>.<namespace>`) — um
+    // domínio EXTERNO `foo.com` NÃO pode ser sequestrado por um container 'foo' na
+    // namespace 'com'. Os nomes de container não têm `.`, logo o último segmento é a
+    // namespace.
+    if let Some(core) = n.strip_suffix(".delonix.internal") {
+        if core.is_empty() {
+            return None;
+        }
+        return match core.rsplit_once('.') {
+            Some((cname, ns)) if !cname.is_empty() && !ns.is_empty() => {
+                Some((cname.to_string(), Some(ns.to_string())))
+            }
+            _ => Some((core.to_string(), None)),
+        };
+    }
+    // `.delonix.io` (legado) e nomes SIMPLES: casam o nome INTEIRO, sem dividir em
+    // namespace (preserva o comportamento antigo — um `foo.com` sem container 'foo.com'
+    // não casa e reencaminha).
+    let core = n.strip_suffix(".delonix.io").unwrap_or(&n);
+    if core.is_empty() {
         return None;
     }
-    // containers: <base>/containers/*.json (name + ip)
+    Some((core.to_string(), None))
+}
+
+fn dns_resolve(name: &str) -> Option<[u8; 4]> {
+    let (cname, want_ns) = parse_internal_name(name)?;
+    let n = cname; // nome do container a casar
+    // containers: <base>/containers/*.json (name + ip [+ namespace])
     if let Ok(rd) = std::fs::read_dir(base_root().join("containers")) {
         for e in rd.flatten() {
             let Ok(v) = serde_json::from_slice::<serde_json::Value>(&std::fs::read(e.path()).unwrap_or_default()) else { continue };
             if v["name"].as_str().map(|s| s.to_lowercase()).as_deref() == Some(n.as_str()) {
+                // Esquema com namespace (`.delonix.internal`): só resolve se a
+                // namespace do container coincidir (isolamento também no DNS).
+                if let Some(want) = &want_ns {
+                    let cns = v["namespace"].as_str().unwrap_or("default");
+                    if cns != want {
+                        continue;
+                    }
+                }
                 if let Some(ip) = v["ip"].as_str().and_then(parse_v4) {
                     return Some(ip);
                 }
@@ -2881,6 +2918,28 @@ mod tests {
         assert!(!valid_fdb_dst("$(curl evil)"));
         assert!(!valid_fdb_dst("10.0.0.1 dev eth0"));
         assert!(!valid_fdb_dst(&"a".repeat(46))); // acima do teto IPv6 textual
+    }
+
+    #[test]
+    fn parse_internal_name_handles_all_schemes() {
+        // <nome> simples → sem namespace (qualquer)
+        assert_eq!(parse_internal_name("web"), Some(("web".into(), None)));
+        // legado .delonix.io → nome INTEIRO, sem namespace
+        assert_eq!(parse_internal_name("web.delonix.io"), Some(("web".into(), None)));
+        // FQDN interno com namespace → verifica
+        assert_eq!(
+            parse_internal_name("web.data.delonix.internal"),
+            Some(("web".into(), Some("data".into())))
+        );
+        // trailing dot + maiúsculas normalizadas
+        assert_eq!(parse_internal_name("API.PROD.delonix.internal."), Some(("api".into(), Some("prod".into()))));
+        // ANTI-SEQUESTRO: um domínio externo com ponto NÃO é dividido em namespace
+        // (fica como nome inteiro; não casa nenhum container 'foo.com' → reencaminha).
+        assert_eq!(parse_internal_name("foo.com"), Some(("foo.com".into(), None)));
+        assert_eq!(parse_internal_name("api.github.com"), Some(("api.github.com".into(), None)));
+        // só o sufixo → None
+        assert_eq!(parse_internal_name(".delonix.internal"), None);
+        assert_eq!(parse_internal_name(""), None);
     }
 
     #[test]
