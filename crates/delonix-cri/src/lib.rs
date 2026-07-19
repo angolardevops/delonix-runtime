@@ -146,6 +146,7 @@ impl ImageService for DelonixImage {
         })
         .await
         .map_err(st)??;
+        delonix_runtime_core::metrics::inc_image_pulled();
         Ok(Response::new(PullImageResponse { image_ref: img.id }))
     }
 
@@ -226,6 +227,18 @@ fn blob_path(_img: &delonix_image::Image, hex: &str) -> PathBuf {
 
 /// Arranca o servidor CRI num **unix socket** (`addr` = caminho, ou
 /// `unix:///caminho`). Bloqueia a thread (cria o runtime Tokio).
+/// `GET /metrics` — corpo em formato OpenMetrics (o que o `prometheus-client`
+/// produz), a partir do registo partilhado em `delonix-runtime-core`.
+async fn metrics_handler() -> impl axum::response::IntoResponse {
+    (
+        [(
+            axum::http::header::CONTENT_TYPE,
+            "application/openmetrics-text; version=1.0.0; charset=utf-8",
+        )],
+        delonix_runtime_core::metrics::encode(),
+    )
+}
+
 pub fn serve_blocking(base: PathBuf, addr: &str) -> Result<(), delonix_runtime_core::Error> {
     let path = addr.strip_prefix("unix://").unwrap_or(addr).to_string();
     let rt = tokio::runtime::Builder::new_multi_thread()
@@ -268,6 +281,26 @@ pub fn serve_blocking(base: PathBuf, addr: &str) -> Result<(), delonix_runtime_c
         tokio::spawn(async move {
             let _ = axum::serve(stream_listener, app).await;
         });
+
+        // Métricas Prometheus (OPCIONAL): listener HTTP dedicado, como o
+        // containerd/CRI-O. Off por omissão; ligado por `DELONIX_METRICS_ADDR`
+        // (ex.: `0.0.0.0:9100`). Não vive no socket gRPC — o Prometheus fala HTTP.
+        if let Some(maddr) = std::env::var_os("DELONIX_METRICS_ADDR") {
+            let maddr = maddr.to_string_lossy().into_owned();
+            tokio::spawn(async move {
+                match tokio::net::TcpListener::bind(&maddr).await {
+                    Ok(l) => {
+                        tracing::info!(addr = %maddr, "delonix-cri: /metrics a escutar");
+                        let app = axum::Router::new()
+                            .route("/metrics", axum::routing::get(metrics_handler));
+                        let _ = axum::serve(l, app).await;
+                    }
+                    Err(e) => {
+                        tracing::error!(addr = %maddr, error = %e, "delonix-cri: bind de /metrics falhou")
+                    }
+                }
+            });
+        }
 
         let img = DelonixImage { base: base.clone() };
         let rtsvc = runtime_svc::DelonixRuntime::new(base, streamer);

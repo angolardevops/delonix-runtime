@@ -11,6 +11,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 pub mod cred_vault;
 mod error;
 pub mod events;
+pub mod metrics;
 pub mod secret;
 mod store;
 pub mod telemetry;
