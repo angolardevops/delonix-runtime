@@ -28,6 +28,7 @@ hyper = "1"
 hyper-util = { version = "0.1", features = ["tokio"] }
 flate2 = { workspace = true, features = ["zlib-rs"] }
 libc = "0.2"
+tracing = { workspace = true }
 
 [build-dependencies]
 tonic-build = "0.12"

@@ -248,6 +248,7 @@ fn cmd_completion(shell: CompShell) -> Result<()> {
 }
 
 fn main() {
+    delonix_runtime_core::telemetry::init();
     // Re-exec oculto do holder de netns (`delonix netns holder`, invocado pelo
     // próprio `delonix-net::infra::start_holder` via `unshare` — nunca pelo
     // utilizador). Tem de ser interceptado ANTES do clap parsear (não é um

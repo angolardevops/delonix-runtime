@@ -13,6 +13,7 @@ mod error;
 pub mod events;
 pub mod secret;
 mod store;
+pub mod telemetry;
 pub mod typestate;
 pub mod virt;
 pub mod workload_net;
