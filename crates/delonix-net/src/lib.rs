@@ -1353,6 +1353,7 @@ impl Net {
         run_ok("ip", &["link", "del", &hv]);
         run_ok("nft", &["delete", "element", "ip", TABLE, "blocked", &format!("{{ {ip} }}")]);
         self.unpublish_all(ip);
+        ipam::release(&ipam::prefix_of(ip), id); // liberta o lease da rede extra
         Ok(())
     }
 

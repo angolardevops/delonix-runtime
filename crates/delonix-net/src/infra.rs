@@ -1894,11 +1894,13 @@ pub fn clear_net_rate(id: &str) {
 }
 
 /// **Desliga um container de uma rede adicional** (multi-homing ao vivo): pede ao
-/// holder a remoção do `veth` extra. Best-effort.
-pub fn detach_extra_container(id: &str, idx: u32) {
+/// holder a remoção do `veth` extra e liberta o lease de IP nessa rede. `ip` é o
+/// IP do container na rede adicional (do record `ExtraNet`). Best-effort.
+pub fn detach_extra_container(id: &str, idx: u32, ip: &str) {
     let netns = sanitize(id);
     let ifname = format!("eth{idx}");
     let _ = control_send(&format!("detach-extra {netns} {ifname}"));
+    crate::ipam::release(&crate::ipam::prefix_of(ip), id); // liberta o lease da rede extra
 }
 
 /// **Desliga um container do ingress**: limpa a firewall (no seu `ip`), pede o

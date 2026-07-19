@@ -309,6 +309,33 @@ mod tests {
     }
 
     #[test]
+    fn multi_homing_lease_por_rede_e_release_isolado() {
+        // Um container multi-homed tem um lease em CADA /16 (rede primária + extra),
+        // no ficheiro de prefixo respetivo. O disconnect da rede extra
+        // (`detach_extra_container`, que agora recebe o ip) tem de libertar SÓ o
+        // lease da extra, sem tocar no da primária. Regressão do leak v1.
+        with_root("multihoming", || {
+            let id = "cafebabe0001";
+            let primary = allocate("10.88", id).unwrap(); // rede primária
+            let extra = allocate("10.204", id).unwrap(); // rede adicional
+            assert_eq!(prefix_of(&primary), "10.88");
+            assert_eq!(prefix_of(&extra), "10.204");
+            // disconnect da extra: liberta só o lease de 10.204 (via prefix_of(ip)).
+            release(&prefix_of(&extra), id);
+            assert_eq!(
+                lookup("10.204", id),
+                None,
+                "lease da rede extra tem de sair"
+            );
+            assert_eq!(
+                lookup("10.88", id).as_deref(),
+                Some(primary.as_str()),
+                "o lease da rede primária NÃO pode ser afetado"
+            );
+        });
+    }
+
+    #[test]
     fn prefix_of_extrai_o_16() {
         assert_eq!(prefix_of("10.88.3.7"), "10.88");
         assert_eq!(prefix_of("10.200.255.254"), "10.200");
