@@ -801,6 +801,11 @@ pub fn container_status(
             Some(_) => "Error".into(),
             None => String::new(),
         },
+        // Preserva os atributos do CreateContainer — o spec de conformância
+        // `preserving container attributes` exige que labels/annotations voltem
+        // tal como foram definidos; com `..Default::default()` vinham vazios.
+        labels: r.labels.clone(),
+        annotations: r.annotations.clone(),
         ..Default::default()
     };
     Ok(Response::new(ContainerStatusResponse {

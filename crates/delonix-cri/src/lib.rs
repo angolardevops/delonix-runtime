@@ -79,16 +79,21 @@ impl ImageService for DelonixImage {
             .map_err(st)??;
         let images = list
             .into_iter()
-            .map(|i| Image {
-                id: i.id.clone(),
-                repo_tags: i.repo_tags.clone(),
-                repo_digests: vec![],
-                size: layer_size(&i),
-                spec: Some(ImageSpec {
-                    image: i.id.clone(),
+            .map(|i| {
+                let (uid, username) = image_user(&i.config.user);
+                Image {
+                    id: i.id.clone(),
+                    repo_tags: i.repo_tags.clone(),
+                    repo_digests: vec![],
+                    size: layer_size(&i),
+                    uid,
+                    username,
+                    spec: Some(ImageSpec {
+                        image: i.id.clone(),
+                        ..Default::default()
+                    }),
                     ..Default::default()
-                }),
-                ..Default::default()
+                }
             })
             .collect();
         Ok(Response::new(ListImagesResponse { images }))
@@ -103,15 +108,20 @@ impl ImageService for DelonixImage {
         let found = tokio::task::spawn_blocking(move || images(&base).ok()?.resolve(&name).ok())
             .await
             .map_err(st)?;
-        let image = found.map(|i| Image {
-            id: i.id.clone(),
-            repo_tags: i.repo_tags.clone(),
-            size: layer_size(&i),
-            spec: Some(ImageSpec {
-                image: i.id.clone(),
+        let image = found.map(|i| {
+            let (uid, username) = image_user(&i.config.user);
+            Image {
+                id: i.id.clone(),
+                repo_tags: i.repo_tags.clone(),
+                size: layer_size(&i),
+                uid,
+                username,
+                spec: Some(ImageSpec {
+                    image: i.id.clone(),
+                    ..Default::default()
+                }),
                 ..Default::default()
-            }),
-            ..Default::default()
+            }
         });
         Ok(Response::new(ImageStatusResponse {
             image,
@@ -202,6 +212,24 @@ impl ImageService for DelonixImage {
 }
 
 /// Tamanho (bytes) dos layers de uma imagem, somando os blobs do CAS.
+/// Mapeia o `user` do config OCI da imagem para os campos `uid`/`username` do
+/// `Image` do CRI (o `crictl`/kubelet usam-nos para validar RunAsNonRoot). Regra:
+/// `""` (sem USER) → root, `uid = 0`; `"uid[:gid]"` numérico → `uid`; um nome →
+/// `username` (resolvido no runtime contra o `/etc/passwd` da imagem). O spec de
+/// conformância `image status … should not have Uid|Username empty` exige que UM
+/// dos dois venha preenchido — antes vinham ambos vazios.
+fn image_user(user: &str) -> (Option<Int64Value>, String) {
+    let u = user.trim();
+    if u.is_empty() {
+        return (Some(Int64Value { value: 0 }), String::new());
+    }
+    let uid_part = u.split(':').next().unwrap_or(u);
+    match uid_part.parse::<i64>() {
+        Ok(uid) => (Some(Int64Value { value: uid }), String::new()),
+        Err(_) => (None, u.to_string()),
+    }
+}
+
 fn layer_size(img: &delonix_image::Image) -> u64 {
     let mut total = 0u64;
     for l in &img.layers {
