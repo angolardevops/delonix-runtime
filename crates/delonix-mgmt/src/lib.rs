@@ -123,6 +123,8 @@ fn router(state: AppState) -> Router {
         .route("/v1/images", get(list_images).delete(delete_image))
         // Pull (opcionalmente com scan de CVE a seguir) — shell-out à CLI.
         .route("/v1/images/pull", post(pull_image))
+        // Build a partir de um Delonixfile colado (materializa + `delonix build`).
+        .route("/v1/images/build", post(build_image))
         .with_state(state)
 }
 
@@ -612,6 +614,75 @@ async fn pull_image(State(s): State<AppState>, Json(b): Json<PullBody>) -> Respo
     Json(serde_json::json!({ "ok": ok, "output": out })).into_response()
 }
 
+/// Corpo de `POST /v1/images/build`.
+#[derive(serde::Deserialize)]
+struct BuildBody {
+    /// Conteúdo do Delonixfile (colado; os `RUN` correm durante o build).
+    delonixfile: String,
+    /// Tag da imagem resultante (`repo:tag`).
+    tag: String,
+}
+
+/// Contador monótono por-processo para nomear work dirs de build únicos.
+static BUILD_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+async fn build_image(State(s): State<AppState>, Json(b): Json<BuildBody>) -> Response {
+    // `-t <tag>`: um valor começado por `-` seria lido como flag. Recusa no limite.
+    if b.tag.is_empty() || b.tag.starts_with('-') {
+        return err_response(Error::Invalid("tag inválida".to_string()));
+    }
+    if b.delonixfile.trim().is_empty() {
+        return err_response(Error::Invalid("Delonixfile vazio".to_string()));
+    }
+    // Work dir ÚNICO por-build (contexto onde o `COPY` resolve): `pid-seq` isola
+    // builds concorrentes — sem isto, dois builds em paralelo partilhariam o
+    // `Delonixfile`/contexto (TOCTOU: um constrói o Delonixfile do outro). Limpo no
+    // fim. O nome deriva só de `s.base`+pid+contador — nunca de input do utilizador.
+    let seq = BUILD_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let dir = s
+        .base
+        .join("_mgmt_build")
+        .join(format!("{}-{}", std::process::id(), seq));
+    let file = dir.join("Delonixfile");
+    let (dir_w, file_w, content) = (dir.clone(), file.clone(), b.delonixfile);
+    let prep = tokio::task::spawn_blocking(move || {
+        std::fs::create_dir_all(&dir_w)?;
+        std::fs::write(&file_w, content)
+    })
+    .await;
+    match prep {
+        Ok(Ok(())) => {}
+        Ok(Err(e)) => {
+            return err_response(Error::Runtime {
+                context: "build-prep",
+                message: e.to_string(),
+            })
+        }
+        Err(e) => {
+            return err_response(Error::Runtime {
+                context: "join",
+                message: e.to_string(),
+            })
+        }
+    }
+    let args = vec![
+        "build".to_string(),
+        "-t".to_string(),
+        b.tag,
+        "-f".to_string(),
+        file.to_string_lossy().into_owned(),
+        dir.to_string_lossy().into_owned(),
+    ];
+    let result = run_cli(s.bin, s.base, args).await;
+    // Limpa o work dir (best-effort) — não deixa Delonixfiles/contextos a acumular.
+    let dir_c = dir.clone();
+    let _ = tokio::task::spawn_blocking(move || std::fs::remove_dir_all(&dir_c)).await;
+    match result {
+        Ok((ok, out)) => Json(serde_json::json!({ "ok": ok, "output": out })).into_response(),
+        Err(e) => err_response(e),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -977,6 +1048,30 @@ mod tests {
                 resp.status(),
                 StatusCode::BAD_REQUEST,
                 "pull devia recusar {bad}"
+            );
+        }
+        // build: tag inválida ou Delonixfile vazio → 400 (antes de escrever/exec).
+        for bad in [
+            r#"{"delonixfile":"FROM x","tag":""}"#,
+            r#"{"delonixfile":"FROM x","tag":"-t"}"#,
+            r#"{"delonixfile":"","tag":"ok:1"}"#,
+        ] {
+            let resp = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri("/v1/images/build")
+                        .header("content-type", "application/json")
+                        .body(Body::from(bad))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                resp.status(),
+                StatusCode::BAD_REQUEST,
+                "build devia recusar {bad}"
             );
         }
     }
