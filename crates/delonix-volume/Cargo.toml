@@ -2,6 +2,7 @@
 name = "delonix-volume"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
 
 [dependencies]
 delonix-runtime-core = { path = "../delonix-runtime-core" }
