@@ -132,10 +132,9 @@ pub fn ingress_table_ruleset() -> String {
     // Rollback instantâneo: DELONIX_FORWARD_POLICY=accept → volta ao default-allow.
     let policy = if std::env::var("DELONIX_FORWARD_POLICY").ok().as_deref() == Some("accept") {
         // NET-03: o opt-out reverte o default-deny — não deixar isto silencioso.
-        eprintln!(
-            "delonix: AVISO DE SEGURANÇA — DELONIX_FORWARD_POLICY=accept: o forward do netns\n\
-             \x20        de ingress volta a default-ALLOW (sem `policy drop`). Só para\n\
-             \x20        depuração — NÃO usar em produção."
+        tracing::warn!(
+            "AVISO DE SEGURANÇA — DELONIX_FORWARD_POLICY=accept: o forward do netns de ingress \
+             volta a default-ALLOW (sem `policy drop`). Só para depuração — NÃO usar em produção."
         );
         ""
     } else {
@@ -507,7 +506,7 @@ fn start_slirp(holder_pid: i32) -> Result<()> {
             // sinaliza em ms); ao fim disso seguimos e o erro aparece a jusante,
             // com mensagem, em vez de um processo pendurado para sempre.
             if !wait_readable(rd, 10_000) {
-                eprintln!("delonix: aviso — slirp4netns não sinalizou pronto em 10s; a rede do container pode não estar operacional");
+                tracing::warn!("slirp4netns não sinalizou pronto em 10s; a rede do container pode não estar operacional");
             }
             let mut b = [0u8; 1];
             // SAFETY: lê 1 byte do read-end (já legível, ou desistimos acima).
@@ -2197,7 +2196,7 @@ fn egress_specs(bridge: &str, state: &EgressState) -> Vec<Vec<String>> {
             if delonix_runtime_core::fw_src_ok(cidr) {
                 specs.push(base(&["ip", "daddr", cidr, "accept"]));
             } else {
-                eprintln!("delonix: egress allowlist — CIDR inválido saltado: {cidr:?}");
+                tracing::warn!(cidr = ?cidr, "egress allowlist — CIDR inválido saltado");
             }
         }
     }
