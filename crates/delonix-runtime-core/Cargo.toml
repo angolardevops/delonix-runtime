@@ -16,4 +16,8 @@ chacha20poly1305 = "0.10"
 getrandom = "0.2"
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
+opentelemetry = { workspace = true }
+opentelemetry_sdk = { workspace = true }
+opentelemetry-otlp = { workspace = true }
+tracing-opentelemetry = { workspace = true }
 prometheus-client = "0.25"
