@@ -159,23 +159,81 @@ pub fn ingress_table_ruleset() -> String {
 }
 
 // ---- ref-count (ciclo de vida partilhado pelos containers, Fase 3) ----------
+//
+// Modelo de CONJUNTO (não um contador inteiro). Cada container/pod que entra na
+// infra de ingress deixa um MARCADOR (um ficheiro em `<ingress>/refs/`, cujo
+// nome é o hex do id); o "ref-count" é a CARDINALIDADE do conjunto. Porquê um
+// conjunto e não um `i64`:
+//   - `release` fica IDEMPOTENTE por-id — remover um marcador que já não existe
+//     é um no-op, logo um `stop` seguido de um `rm` (dois detaches para o mesmo
+//     id) NÃO derruba a infra cedo demais, e um container morto abruptamente que
+//     só é reapado mais tarde não conta a dobrar.
+//   - permite um REAPER DETERMINÍSTICO: cruzar os marcadores com os ids VIVOS
+//     (Store + pods CRI) e libertar só os órfãos (marcador sem dono vivo). Um
+//     contador cego nunca saberia QUAIS libertar.
+// Fecha o leak "16 refs com 3 containers vivos": cada caminho de saída (rm
+// normal, container morto, erro a meio) remove o marcador do SEU id, e o que
+// escapar (morte abrupta sem `rm`) é apanhado pelo reaper.
 
-/// Próximo valor do contador dado o atual e o passo (`+1` no acquire, `-1` no
-/// release), nunca abaixo de 0. PURA — o coração testável do *ref-count*.
-pub fn next_refcount(current: i64, delta: i64) -> i64 {
-    (current + delta).max(0)
+/// Diretório com um marcador por container/pod atachado à infra de ingress.
+fn refs_dir() -> PathBuf {
+    ingress_dir().join("refs")
 }
 
+/// Nome de ficheiro do marcador de um id — hex do id, reversível e sempre seguro
+/// em disco. Ao contrário de [`sanitize`] NÃO trunca: o id tem de sobreviver ao
+/// round-trip para o reaper o cruzar com o Store sem colisões.
+fn ref_marker_name(id: &str) -> String {
+    hex_encode(id.as_bytes())
+}
+
+/// Regista o marcador de `id` em `dir` (idempotente). Núcleo testável: recebe o
+/// dir explícito, não toca no caminho global nem no kernel.
+fn ref_add_in(dir: &Path, id: &str) {
+    let _ = std::fs::create_dir_all(dir);
+    let _ = std::fs::write(dir.join(ref_marker_name(id)), id.as_bytes());
+}
+
+/// Remove o marcador de `id` em `dir` (idempotente). Núcleo testável.
+fn ref_remove_in(dir: &Path, id: &str) {
+    let _ = std::fs::remove_file(dir.join(ref_marker_name(id)));
+}
+
+/// Lê os ids ATACHADOS a partir dos marcadores em `dir` (decodifica o hex do
+/// nome). Núcleo testável.
+fn refs_in(dir: &Path) -> Vec<String> {
+    let Ok(rd) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    rd.flatten()
+        .filter_map(|e| {
+            let name = e.file_name().to_string_lossy().into_owned();
+            hex_decode(&name).and_then(|b| String::from_utf8(b).ok())
+        })
+        .collect()
+}
+
+/// **PURA** — quais dos ids ATACHADOS já não têm dono vivo (candidatos a reap).
+/// É o coração do reaper determinístico do ref-count: um marcador cujo id não
+/// está em `live` (containers a correr + pods CRI, montado pelo chamador) perdeu
+/// o dono e deve ser liberto. Não toca em disco nem no kernel — testável a seco.
+pub fn orphan_refs(attached: &[String], live: &std::collections::HashSet<String>) -> Vec<String> {
+    attached
+        .iter()
+        .filter(|id| !live.contains(*id))
+        .cloned()
+        .collect()
+}
+
+/// Ids atualmente atachados à infra de ingress (para o chamador — ex.: `system
+/// prune` — preservar os que sabe estarem vivos ao montar o `live` do reaper).
+pub fn attached_refs() -> Vec<String> {
+    refs_in(&refs_dir())
+}
+
+/// Nº de containers a usar a infra (cardinalidade do conjunto de marcadores).
 fn read_refcount() -> i64 {
-    std::fs::read_to_string(refcount_path())
-        .ok()
-        .and_then(|s| s.trim().parse::<i64>().ok())
-        .unwrap_or(0)
-}
-
-fn write_refcount(n: i64) {
-    let _ = std::fs::create_dir_all(ingress_dir());
-    let _ = std::fs::write(refcount_path(), n.to_string());
+    refs_in(&refs_dir()).len() as i64
 }
 
 /// Trinco exclusivo de ficheiro (`flock`) à volta das operações de ref-count, para
@@ -209,22 +267,44 @@ impl Drop for FileLock {
 }
 
 /// Incrementa o ref-count e garante a infra de pé no 1.º utilizador. Chamar uma
-/// vez por container que entra na rede de ingress (Fase 3).
-pub fn acquire() -> Result<()> {
+/// vez por container/pod que entra na rede de ingress (Fase 3). `id` = id do
+/// container/pod — a MESMA chave que `release`/o reaper usam para o cruzar com o
+/// Store; idempotente (atachar duas vezes o mesmo id não conta a dobrar).
+pub fn acquire(id: &str) -> Result<()> {
     let _lock = FileLock::acquire();
-    ensure_up()?; // idempotente — robusto mesmo com ref-count stale
-    write_refcount(next_refcount(read_refcount(), 1));
+    ensure_up()?; // idempotente — robusto mesmo com marcadores stale
+    ref_add_in(&refs_dir(), id);
     Ok(())
 }
 
-/// Decrementa o ref-count e derruba a infra quando o último utilizador sai.
-pub fn release() {
+/// Decrementa o ref-count (remove o marcador de `id`, **idempotente**) e derruba
+/// a infra quando sai o ÚLTIMO utilizador. Seguro em qualquer caminho de saída:
+/// `stop` e depois `rm` do mesmo container não derrubam a infra a dobrar.
+pub fn release(id: &str) {
     let _lock = FileLock::acquire();
-    let n = next_refcount(read_refcount(), -1);
-    write_refcount(n);
-    if n == 0 {
+    ref_remove_in(&refs_dir(), id);
+    if refs_in(&refs_dir()).is_empty() {
         teardown();
     }
+}
+
+/// **Reaper determinístico do ref-count**: liberta os marcadores cujo id NÃO
+/// está entre os vivos (`live` = ids de containers a correr + pods CRI, montado
+/// pelo chamador — como `reap_orphan_hostfwds` recebe as `live_ports`). Devolve
+/// quantos libertou; derruba a infra se ficar sem marcadores. **Nunca toca num
+/// id vivo.** Fecha o leak dos marcadores deixados por mortes abruptas que nunca
+/// chegaram a passar por `detach_container`.
+pub fn reap_orphan_refs(live: &std::collections::HashSet<String>) -> usize {
+    let _lock = FileLock::acquire();
+    let dir = refs_dir();
+    let orphans = orphan_refs(&refs_in(&dir), live);
+    for id in &orphans {
+        ref_remove_in(&dir, id);
+    }
+    if refs_in(&dir).is_empty() {
+        teardown();
+    }
+    orphans.len()
 }
 
 // ---- estado / observação ----------------------------------------------------
@@ -291,7 +371,9 @@ pub fn teardown() {
     let _ = std::fs::remove_file(slirp_sock_path());
     let _ = std::fs::remove_file(control_sock_path());
     let _ = std::fs::remove_file(status_path());
-    write_refcount(0); // estado limpo — evita ref-count stale a saltar o ensure_up
+    // Estado limpo — sem marcadores stale a segurar a infra no próximo ciclo.
+    let _ = std::fs::remove_dir_all(refs_dir());
+    let _ = std::fs::remove_file(refcount_path()); // legado (contador inteiro antigo)
 }
 
 /// Arranca o **holder**: re-exec do próprio binário dentro de `unshare
@@ -2310,7 +2392,7 @@ pub fn container_ip(id: &str) -> String {
 /// desfaz o ref-count. Preserva o rootless-first: o plugin corre no holder (dono
 /// da netns), não no host sem privilégio.
 pub fn cni_attach_container(id: &str, conf_json: &str) -> Result<(String, String)> {
-    acquire()?; // ensure_up + refcount++
+    acquire(id)?; // ensure_up + marcador de ref para `id`
     let netns = sanitize(id);
     let hex = hex_encode(conf_json.as_bytes());
     let cmd = format!(
@@ -2320,7 +2402,7 @@ pub fn cni_attach_container(id: &str, conf_json: &str) -> Result<(String, String
     match control_query(&cmd) {
         Ok(ip) => Ok((netns, ip)),
         Err(e) => {
-            release();
+            release(id);
             Err(e)
         }
     }
@@ -2335,7 +2417,7 @@ pub fn cni_detach_container(id: &str, conf_json: &str) -> Result<()> {
         "cni-del {netns} {netns} {} {hex}",
         crate::cni::DEFAULT_IFNAME
     ));
-    release();
+    release(id);
     Ok(())
 }
 
@@ -2345,7 +2427,7 @@ pub fn cni_detach_container(id: &str, conf_json: &str) -> Result<()> {
 pub fn attach_container(id: &str, net: &str, namespace: &str) -> Result<(String, String)> {
     let (bridge, prefix, gateway) = resolve_net(net)?;
     let ip = crate::ipam::allocate(&prefix, id)?; // lease único (anti-colisão), estável por id
-    acquire()?; // ensure_up + refcount++
+    acquire(id)?; // ensure_up + marcador de ref para `id`
     let netns = sanitize(id);
     // `namespace` sanitizado (vai a um token do control-line): sem espaços/lixo.
     let ns = sanitize(if namespace.is_empty() {
@@ -2364,7 +2446,7 @@ pub fn attach_container(id: &str, net: &str, namespace: &str) -> Result<(String,
     match control_send(&cmd) {
         Ok(()) => Ok((netns, ip)),
         Err(e) => {
-            release(); // desfaz o ref-count se o attach falhou
+            release(id); // desfaz o marcador de ref se o attach falhou
             Err(e)
         }
     }
@@ -2416,7 +2498,7 @@ pub fn detach_container(id: &str, ip: &str) {
     let _ = control_send(&format!("unfirewall {ip}"));
     let _ = control_send(&format!("detach {netns}"));
     crate::ipam::release(&crate::ipam::prefix_of(ip), id); // liberta o lease de IP
-    release(); // refcount-- (teardown no 0)
+    release(id); // remove o marcador de ref (teardown quando fica vazio)
 }
 
 /// **Aplica a firewall parametrizável de um container NO INGRESS** (o único sítio,
@@ -2552,12 +2634,15 @@ pub fn name_hash(s: &str) -> u32 {
 /// (que o QEMU usa). O guest obtém IP por DHCP (pool da rede; gateway = ingress).
 pub fn vm_attach(vm: &str, net: &str) -> Result<String> {
     let (bridge, _prefix, gateway) = resolve_net(net)?;
-    acquire()?;
+    // Chave de ref `vm-<nome>` — namespace próprio, distinto dos ids de container
+    // e dos pods `cri-*`; o reaper do `prune` preserva os `vm-*` (geridos por
+    // outro store) tal como os `cri-*`.
+    acquire(&format!("vm-{vm}"))?;
     let tap = vm_tap_name(vm);
     match control_send(&format!("vmtap {tap} {bridge} {gateway}")) {
         Ok(()) => Ok(tap),
         Err(e) => {
-            release();
+            release(&format!("vm-{vm}"));
             Err(e)
         }
     }
@@ -2566,7 +2651,7 @@ pub fn vm_attach(vm: &str, net: &str) -> Result<String> {
 /// **Desliga uma VM do ingress**: remove o `tap` e baixa o ref-count. Best-effort.
 pub fn vm_detach(vm: &str) {
     let _ = control_send(&format!("vmtapdel {}", vm_tap_name(vm)));
-    release();
+    release(&format!("vm-{vm}"));
 }
 
 /// `argv` para correr um processo (o QEMU) DENTRO do netns de infra do holder
@@ -3408,12 +3493,83 @@ mod tests {
 
     use super::*;
 
+    /// Dir temporário único (sem depender do crate `tempfile`) — o teste corre
+    /// SEM privilégio: só mexe em ficheiros-marcador, nunca em namespaces.
+    fn tmp_refs_dir(tag: &str) -> PathBuf {
+        // SAFETY: getpid()/gettid() não têm pré-condições.
+        let uniq = format!(
+            "delonix-refs-{tag}-{}-{}",
+            unsafe { libc::getpid() },
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        );
+        let dir = std::env::temp_dir().join(uniq).join("refs");
+        let _ = std::fs::remove_dir_all(dir.parent().unwrap());
+        dir
+    }
+
+    /// STRESS do ref-count (modelo de conjunto): create→destroy de N recursos ao
+    /// nível dos marcadores da infra, sem privilégio. Assevera que o "refcount"
+    /// (cardinalidade do conjunto) volta SEMPRE a 0 e que o reaper determinístico
+    /// apanha os órfãos deixados por mortes abruptas, preservando os vivos.
     #[test]
-    fn refcount_never_goes_negative() {
-        assert_eq!(next_refcount(0, 1), 1);
-        assert_eq!(next_refcount(3, 1), 4);
-        assert_eq!(next_refcount(1, -1), 0);
-        assert_eq!(next_refcount(0, -1), 0); // release a mais não passa de 0
+    fn stress_refcount_volta_a_zero_e_reaper_apanha_orfaos() {
+        use std::collections::HashSet;
+        const N: usize = 500;
+        let dir = tmp_refs_dir("stress");
+
+        // 1) Ciclo balanceado: cada id atacha e destaca — refcount volta a 0.
+        for i in 0..N {
+            ref_add_in(&dir, &format!("c{i}"));
+        }
+        assert_eq!(refs_in(&dir).len(), N, "N attaches → N marcadores");
+        for i in 0..N {
+            ref_remove_in(&dir, &format!("c{i}"));
+        }
+        assert_eq!(refs_in(&dir).len(), 0, "N detaches balanceados → 0");
+
+        // 2) Idempotência: atachar/destacar a dobrar (stop+rm do mesmo id) não
+        //    desalinha o contador nem derruba a infra cedo demais.
+        ref_add_in(&dir, "x");
+        ref_add_in(&dir, "x");
+        assert_eq!(refs_in(&dir).len(), 1, "atachar 2x o mesmo id conta 1");
+        ref_remove_in(&dir, "x");
+        ref_remove_in(&dir, "x"); // 2.º detach é no-op
+        assert_eq!(refs_in(&dir).len(), 0, "detach idempotente");
+
+        // 3) Mortes abruptas: N atacham e NENHUM destaca (o `pid` foi a None sem
+        //    passar por `stop`/`rm`). O reaper cruza com os vivos e liberta só os
+        //    órfãos. `alive` e o pod CRI `cri-pod1` têm de sobreviver.
+        for i in 0..N {
+            ref_add_in(&dir, &format!("dead{i}"));
+        }
+        ref_add_in(&dir, "alive");
+        ref_add_in(&dir, "cri-pod1");
+        let live: HashSet<String> = ["alive".to_string(), "cri-pod1".to_string()]
+            .into_iter()
+            .collect();
+        let orphans = orphan_refs(&refs_in(&dir), &live);
+        assert_eq!(orphans.len(), N, "todos os `dead*` são órfãos");
+        for id in &orphans {
+            ref_remove_in(&dir, id);
+        }
+        let remaining: HashSet<String> = refs_in(&dir).into_iter().collect();
+        assert_eq!(remaining.len(), 2, "só os vivos ficam");
+        assert!(remaining.contains("alive"), "container vivo preservado");
+        assert!(remaining.contains("cri-pod1"), "pod CRI vivo preservado");
+
+        // 4) Round-trip do id via hex do marcador (ids longos/com `-` não colidem
+        //    nem se truncam — o reaper precisa do id EXACTO para cruzar).
+        let long = "cri-9f8e7d6c5b4a39281706abcdef0123456789";
+        ref_add_in(&dir, long);
+        assert!(
+            refs_in(&dir).iter().any(|s| s == long),
+            "id sobrevive round-trip"
+        );
+
+        let _ = std::fs::remove_dir_all(dir.parent().unwrap());
     }
 
     #[test]
