@@ -103,7 +103,8 @@ fn router(state: AppState) -> Router {
         .route("/v1/volumes", get(list_volumes).post(create_volume))
         .route("/v1/volumes/:name", get(get_volume).delete(delete_volume))
         // Containers: leitura (list/get) por biblioteca; mutação (abaixo) por CLI.
-        .route("/v1/containers", get(list_containers))
+        // `POST` = `run` (recebe o spec em JSON e reconstrói os args da CLI).
+        .route("/v1/containers", get(list_containers).post(run_container))
         .route(
             "/v1/containers/:id",
             get(get_container).delete(delete_container),
@@ -416,6 +417,106 @@ async fn container_exec_ep(
         b.cmd,
     ];
     match run_cli(s.bin, s.base, args).await {
+        Ok((ok, out)) => Json(serde_json::json!({ "ok": ok, "output": out })).into_response(),
+        Err(e) => err_response(e),
+    }
+}
+
+/// Corpo de `POST /v1/containers` (run). Espelha o `ContainerRunSpec` do PaaS — o
+/// contrato são os nomes dos campos (o PaaS serializa o seu spec, este desserializa).
+#[derive(serde::Deserialize)]
+struct RunSpecBody {
+    image: String,
+    #[serde(default)]
+    name: String,
+    #[serde(default)]
+    ports: Vec<String>,
+    #[serde(default)]
+    env: Vec<String>,
+    #[serde(default)]
+    network: String,
+    #[serde(default)]
+    memory: String,
+    #[serde(default)]
+    restart: String,
+    #[serde(default)]
+    command: Vec<String>,
+    #[serde(default)]
+    volumes: Vec<String>,
+    #[serde(default)]
+    knows: Vec<String>,
+    #[serde(default)]
+    knows_none: bool,
+}
+
+/// Reconstrói os args `delonix container run -d …` a partir do spec — função PURA
+/// (testável sem kernel). Os filtros são os MESMOS que o `InProcessRuntime` do PaaS
+/// já usava; a única diferença de nome de flag é deliberada: o binário do runtime
+/// usa `--net` (o do PaaS, com shim docker, usava `--network`).
+fn build_run_args(spec: RunSpecBody) -> Vec<String> {
+    let mut args: Vec<String> = vec!["container".into(), "run".into(), "-d".into()];
+    if !spec.name.is_empty() {
+        args.push("--name".into());
+        args.push(spec.name);
+    }
+    if !spec.network.is_empty() && spec.network != "none" {
+        // O CLI do runtime usa `--net` (não `--network`). Forma `--net=<v>` para o
+        // valor nunca escapar para um token novo.
+        args.push(format!("--net={}", spec.network));
+    }
+    for p in &spec.ports {
+        if p.chars()
+            .all(|c| c.is_ascii_digit() || matches!(c, ':' | '/'))
+        {
+            args.push("-p".into());
+            args.push(p.clone());
+        }
+    }
+    for e in spec.env {
+        args.push("-e".into());
+        args.push(e);
+    }
+    for v in spec.volumes {
+        if !v.is_empty() && !v.contains("..") {
+            args.push("-v".into());
+            args.push(v);
+        }
+    }
+    if spec.knows_none {
+        args.push("--knows-none".into());
+    } else {
+        for k in spec.knows {
+            if !k.is_empty() {
+                args.push("--knows".into());
+                args.push(k);
+            }
+        }
+    }
+    if !spec.memory.is_empty() {
+        args.push("-m".into());
+        args.push(spec.memory);
+    }
+    if !spec.restart.is_empty() {
+        args.push("--restart".into());
+        args.push(spec.restart);
+    }
+    args.push(spec.image);
+    args.extend(spec.command);
+    args
+}
+
+async fn run_container(State(s): State<AppState>, Json(spec): Json<RunSpecBody>) -> Response {
+    // `image` é obrigatória e um valor começado por `-` seria lido pelo clap como
+    // uma flag (é o argumento POSICIONAL final) — recusa no limite. O mesmo para
+    // `name` (valor de `--name`). Os restantes campos ou têm charset próprio
+    // (ports) ou são valores de opção sem ambiguidade posicional.
+    if spec.image.is_empty() || spec.image.starts_with('-') {
+        return err_response(Error::Invalid("imagem inválida".to_string()));
+    }
+    if spec.name.starts_with('-') {
+        return err_response(Error::Invalid("nome inválido".to_string()));
+    }
+    match run_cli(s.bin, s.base, build_run_args(spec)).await {
         Ok((ok, out)) => Json(serde_json::json!({ "ok": ok, "output": out })).into_response(),
         Err(e) => err_response(e),
     }
@@ -776,6 +877,7 @@ mod tests {
         }
         // Acção desconhecida → 400 (allowlist).
         let resp = app
+            .clone()
             .oneshot(
                 Request::builder()
                     .method("POST")
@@ -787,6 +889,91 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+
+        // run: imagem vazia ou começada por `-` (viraria flag posicional) → 400.
+        for bad in [
+            r#"{"image":""}"#,
+            r#"{"image":"-rm"}"#,
+            r#"{"image":"x","name":"-p"}"#,
+        ] {
+            let resp = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri("/v1/containers")
+                        .header("content-type", "application/json")
+                        .body(Body::from(bad))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                resp.status(),
+                StatusCode::BAD_REQUEST,
+                "run devia recusar {bad}"
+            );
+        }
+    }
+
+    #[test]
+    fn build_run_args_usa_net_nao_network_e_respeita_filtros() {
+        let spec = RunSpecBody {
+            image: "nginx:latest".into(),
+            name: "web".into(),
+            ports: vec!["8080:80".into(), "mau;porta".into()], // 2.ª é filtrada
+            env: vec!["K=v".into()],
+            network: "minha-rede".into(),
+            memory: "256m".into(),
+            restart: "always".into(),
+            command: vec!["nginx".into(), "-g".into(), "daemon off;".into()],
+            volumes: vec!["dados:/var".into(), "mau/../x:/y".into()], // 2.ª filtrada
+            knows: vec!["db".into()],
+            knows_none: false,
+        };
+        let args = build_run_args(spec);
+        // Flag de rede é `--net=…` (do runtime), NUNCA `--network`.
+        assert!(
+            args.contains(&"--net=minha-rede".to_string()),
+            "args: {args:?}"
+        );
+        assert!(
+            !args.iter().any(|a| a.starts_with("--network")),
+            "não pode usar --network"
+        );
+        // Filtros preservados: porta inválida e volume com `..` caem fora.
+        assert!(args.contains(&"8080:80".to_string()));
+        assert!(!args.iter().any(|a| a.contains("mau;porta")));
+        assert!(args.contains(&"dados:/var".to_string()));
+        assert!(!args.iter().any(|a| a.contains("..")));
+        // A imagem vem antes do command (posicional final), e o command a seguir.
+        let img = args.iter().position(|a| a == "nginx:latest").unwrap();
+        let cmd = args.iter().position(|a| a == "daemon off;").unwrap();
+        assert!(img < cmd, "imagem antes do command");
+        assert!(args.contains(&"--knows".to_string()) && args.contains(&"db".to_string()));
+    }
+
+    #[test]
+    fn build_run_args_knows_none_tem_precedencia() {
+        let spec = RunSpecBody {
+            image: "x".into(),
+            name: String::new(),
+            ports: vec![],
+            env: vec![],
+            network: String::new(),
+            memory: String::new(),
+            restart: String::new(),
+            command: vec![],
+            volumes: vec![],
+            knows: vec!["db".into()],
+            knows_none: true,
+        };
+        let args = build_run_args(spec);
+        assert!(args.contains(&"--knows-none".to_string()));
+        assert!(
+            !args.contains(&"--knows".to_string()),
+            "knows-none exclui knows"
+        );
     }
 
     #[tokio::test]
