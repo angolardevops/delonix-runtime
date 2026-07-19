@@ -111,6 +111,9 @@ fn router(state: AppState) -> Router {
         // Mutação de container: rm/start/stop/restart/pause/unpause — shell-out à
         // CLI do runtime (paridade total de limpeza), não uma chamada ao Store.
         .route("/v1/containers/:id/action", post(container_action_ep))
+        // Logs (request/response, não streaming) + exec não-interactivo.
+        .route("/v1/containers/:id/logs", get(container_logs_ep))
+        .route("/v1/containers/:id/exec", post(container_exec_ep))
         // Imagens: list + rmi. A referência (`nginx:latest`, `library/nginx`,
         // `sha256:…`) NÃO cabe num segmento de path (tem `/` e `:`) → vai por
         // query (`?ref=…`). Não há risco de traversal: `ImageStore::remove`
@@ -364,6 +367,55 @@ async fn container_action_ep(
         other => return err_response(Error::Invalid(format!("acção desconhecida: {other}"))),
     };
     match run_cli(s.bin, s.base, vec!["container".to_string(), sub, id]).await {
+        Ok((ok, out)) => Json(serde_json::json!({ "ok": ok, "output": out })).into_response(),
+        Err(e) => err_response(e),
+    }
+}
+
+async fn container_logs_ep(State(s): State<AppState>, Path(id): Path<String>) -> Response {
+    if !valid_arg(&id) {
+        return err_response(Error::Invalid("id de container inválido".to_string()));
+    }
+    // `logs` request/response (não streaming); a saída vem tal e qual, mesmo se o
+    // container não existir (o cliente ignora o `ok`, como o InProcessRuntime).
+    match run_cli(
+        s.bin,
+        s.base,
+        vec!["container".to_string(), "logs".to_string(), id],
+    )
+    .await
+    {
+        Ok((ok, out)) => Json(serde_json::json!({ "ok": ok, "output": out })).into_response(),
+        Err(e) => err_response(e),
+    }
+}
+
+/// Corpo de `POST /v1/containers/:id/exec`.
+#[derive(serde::Deserialize)]
+struct ExecBody {
+    cmd: String,
+}
+
+async fn container_exec_ep(
+    State(s): State<AppState>,
+    Path(id): Path<String>,
+    Json(b): Json<ExecBody>,
+) -> Response {
+    if !valid_arg(&id) {
+        return err_response(Error::Invalid("id de container inválido".to_string()));
+    }
+    // `exec <id> sh -c <cmd>`: o `cmd` é passado como UM argumento a `sh -c` DENTRO
+    // do container — corre no container, nunca no shell do host (é `Command::args`,
+    // sem shell nossa). Exec é, por natureza, execução arbitrária no container.
+    let args = vec![
+        "container".to_string(),
+        "exec".to_string(),
+        id,
+        "sh".to_string(),
+        "-c".to_string(),
+        b.cmd,
+    ];
+    match run_cli(s.bin, s.base, args).await {
         Ok((ok, out)) => Json(serde_json::json!({ "ok": ok, "output": out })).into_response(),
         Err(e) => err_response(e),
     }
