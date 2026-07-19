@@ -14,3 +14,5 @@ libc = { workspace = true }
 # `--secret`). XChaCha20-Poly1305 (AEAD), Rust puro — sem C, compila em musl/aarch64.
 chacha20poly1305 = "0.10"
 getrandom = "0.2"
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
