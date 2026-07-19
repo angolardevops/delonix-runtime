@@ -5,9 +5,10 @@
 //! fala só HTTP com este socket no mesmo host. Complementa o CRI (`delonix-cri`,
 //! que serve o kubelet): este serve a *gestão* do produto (volumes/containers/…).
 //!
-//! Fatia 1: **volumes** (a mais isolada — sem streaming nem estado de rede). As
-//! restantes superfícies migram uma de cada vez. O contrato é o próprio tipo serde
-//! `delonix_volume::Volume` (o cliente desserializa o mesmo shape).
+//! As superfícies migram uma de cada vez. Feito: **volumes** (CRUD) e a **leitura
+//! de containers** (list/get). O contrato é o próprio tipo serde de cada recurso
+//! (`delonix_volume::Volume`, `delonix_runtime_core::Container`) — o cliente
+//! desserializa o mesmo shape.
 
 use std::path::PathBuf;
 
@@ -16,7 +17,7 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::{Json, Router};
-use delonix_runtime_core::Error;
+use delonix_runtime_core::{Error, Store};
 use delonix_volume::VolumeStore;
 
 /// Estado partilhado dos handlers: a raiz do estado do runtime (`$DELONIX_ROOT`).
@@ -82,6 +83,11 @@ fn router(state: AppState) -> Router {
         .route("/_ping", get(ping))
         .route("/v1/volumes", get(list_volumes).post(create_volume))
         .route("/v1/volumes/:name", get(get_volume).delete(delete_volume))
+        // Containers: fatia de LEITURA (list/get). As mutações (rm/start/stop/…)
+        // não são simples chamadas ao Store — precisam do caminho real do motor
+        // (matar o processo, limpar namespaces/cgroups) — migram numa fatia própria.
+        .route("/v1/containers", get(list_containers))
+        .route("/v1/containers/:id", get(get_container))
         .with_state(state)
 }
 
@@ -189,6 +195,46 @@ async fn delete_volume(State(s): State<AppState>, Path(name): Path<String>) -> R
     }
     match with_store(s.base, move |store| store.remove(&name)).await {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(e) => err_response(e),
+    }
+}
+
+// ---- Containers (leitura) --------------------------------------------------
+
+/// Corre uma operação síncrona do `Store` de containers numa thread de bloqueio.
+/// O store vive em `<base>/containers` (mesma resolução que a CLI usa em
+/// `util::open_stores`).
+async fn with_container_store<T, F>(base: PathBuf, f: F) -> Result<T, Error>
+where
+    T: Send + 'static,
+    F: FnOnce(&Store) -> Result<T, Error> + Send + 'static,
+{
+    tokio::task::spawn_blocking(move || {
+        let store = Store::open(base.join("containers"))?;
+        f(&store)
+    })
+    .await
+    .map_err(|e| Error::Runtime {
+        context: "join",
+        message: e.to_string(),
+    })?
+}
+
+async fn list_containers(State(s): State<AppState>) -> Response {
+    match with_container_store(s.base, |store| store.list()).await {
+        Ok(cs) => Json(cs).into_response(),
+        Err(e) => err_response(e),
+    }
+}
+
+async fn get_container(State(s): State<AppState>, Path(id): Path<String>) -> Response {
+    // Mesma defesa de fronteira dos volumes: o `Store::load` faz `root.join(id)`
+    // antes de cair no varrimento por nome/prefixo — um `..` no path escaparia.
+    if !valid_name(&id) {
+        return err_response(Error::Invalid("id de container inválido".to_string()));
+    }
+    match with_container_store(s.base, move |store| store.load(&id)).await {
+        Ok(c) => Json(c).into_response(),
         Err(e) => err_response(e),
     }
 }
@@ -320,6 +366,110 @@ mod tests {
             .body(Body::empty())
             .unwrap();
         let resp = router(st).oneshot(del).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn containers_lista_vazia_e_get_inexistente_da_404() {
+        let (st, _d) = test_state();
+        let app = router(st);
+
+        // Sem containers criados → lista vazia.
+        let resp = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/v1/containers")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(body_json(resp).await.as_array().unwrap().len(), 0);
+
+        // GET de um container inexistente → 404.
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .uri("/v1/containers/nada")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn containers_devolve_container_populado() {
+        use delonix_runtime_core::Container;
+        let (st, dir) = test_state();
+        // Persiste um container real no store (`<base>/containers`), como a CLI faz.
+        let store = Store::open(dir.path().join("containers")).unwrap();
+        let c = Container::new(
+            "abc123def456".to_string(),
+            "web".to_string(),
+            "nginx:latest".to_string(),
+            vec![
+                "nginx".to_string(),
+                "-g".to_string(),
+                "daemon off;".to_string(),
+            ],
+            "512m".to_string(),
+        );
+        store.save(&c).unwrap();
+
+        let app = router(st);
+        // Aparece na listagem, com os campos intactos.
+        let resp = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/v1/containers")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let arr = body_json(resp).await;
+        let arr = arr.as_array().unwrap();
+        assert_eq!(arr.len(), 1);
+        assert_eq!(arr[0]["name"], "web");
+        assert_eq!(arr[0]["image"], "nginx:latest");
+
+        // GET por id exacto → o mesmo container.
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .uri("/v1/containers/abc123def456")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let got = body_json(resp).await;
+        assert_eq!(got["id"], "abc123def456");
+        assert_eq!(got["name"], "web");
+        assert_eq!(got["command"][0], "nginx");
+    }
+
+    #[tokio::test]
+    async fn container_get_com_dot_dot_da_400() {
+        let (st, _d) = test_state();
+        // `..` no path do id tem de ser recusado no limite (o `Store::load` faz
+        // `root.join(id)` antes do varrimento — um `..` escaparia da raiz).
+        let resp = router(st)
+            .oneshot(
+                Request::builder()
+                    .uri("/v1/containers/..")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
         assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
     }
 
