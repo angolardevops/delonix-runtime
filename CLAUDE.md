@@ -228,6 +228,40 @@ a DB, a DB não fica acessível aos outros apps de uma rede partilhada (`cmd/dep
   `kind: Ingress` explícito **e** de `Dependency` avisa (o Dependency é autoritativo e substitui a
   direção de entrada). Remover a `Dependency` **não** desprotege o `to` ("garante presente").
 
+## Isolamento de namespace (`metadata.namespace` / `--namespace`)
+
+Namespace lógico de **isolamento** (default `default`), estilo k8s: containers de namespaces
+diferentes **não se alcançam** (mesmo na MESMA rede); só um `kind: Dependency` fura a fronteira,
+e num só sentido. Superfície: `container run --namespace <ns>` + `metadata.namespace` no manifesto.
+Núcleo em `ContainerFw.namespace` + `infra::fw_chain_body`/`ns_set_join`.
+
+- **Modelo unificado por-container** (decisão de desenho — nftables `accept` não é terminal entre
+  base chains, o que impede uma chain `nsdeny` separada de compor com o Dependency): o isolamento
+  vive na chain dedicada de CADA container (first-match terminal). Um container fora do `default`
+  ganha, na entrada: `ip saddr @dlxns_<ns> accept` (mesma namespace) + `ip saddr @dlxall ct state
+  new drop` (dropa NOVAS ligações de containers de OUTRA namespace). O `ct new` isenta o retorno
+  (established), e o `@dlxall` limita o drop a fontes-container (gateway/DNS/internet passam).
+- **Sets nft**: `@dlxall` (todos os IPs de container) + `@dlxns_<hash>` por namespace, mantidos no
+  `do_attach` (`ns_set_join`: remove o IP de qualquer `@dlxns` anterior → re-attach/mudança de ns
+  corrige-se sem cleanup no detach). O membership é dinâmico — as regras `@set` avaliam a
+  composição actual, sem re-aplicar a chain quando um peer entra.
+- **Composição com Dependency/Ingress**: uma política EXPLÍCITA é autoritativa e substitui o
+  default de namespace (`has_explicit_in` short-circuita as regras de namespace). Assim um
+  `Dependency app→db` fura a parede (allow do IP do app na chain do db) e o **sentido inverso**
+  db→app fica bloqueado pela regra de namespace do app — a garantia dirigida que o Dependency
+  sozinho não dava.
+- **Provado E2E** (bateria de isolação, 4 containers, 2 namespaces): same-ns → OPEN; cross-ns →
+  BLOQUEADO (timeout); Dependency fura o cross-ns; sentido inverso bloqueado; retorno flui. O
+  `container start` **re-aplica** a firewall persistida (o isolamento sobrevive ao reinício).
+- **`default` = SDN aberta** (tudo na mesma namespace) → **comportamento inalterado** para quem não
+  usa namespaces. Attach de `default` mantém a forma de 5 tokens do control-line (compat com um
+  holder antigo num upgrade in-place; só attaches namespaced exigem o holder novo).
+- **Limitações v1 (conhecidas)**: (1) o isolamento **não é reconstruído num respawn do holder** —
+  os sets/chains recriam-se vazios e os containers vivos não se re-atacham sozinhos (reiniciar cada
+  um repõe); (2) **pods (CRI) e VMs** ainda ficam em `default` (attach por caminhos distintos);
+  (3) `default↔não-default` é **assimétrico** (o `default` é o namespace "público" — alcançável de
+  dentro de qualquer namespace, mas não alcança para dentro delas). Fechar (1)/(2) é o próximo passo.
+
 ## Imagem VM dourada (`delonix image --vm`)
 
 `delonix image --vm ls|pull|push|build` gere imagens VM à parte das imagens de container
