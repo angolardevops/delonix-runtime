@@ -24,6 +24,7 @@ pub mod bpf;
 pub mod cni;
 pub mod discover;
 pub mod infra;
+pub mod ipam;
 pub mod wg;
 
 pub use discover::{discover_ports, DiscoveredPort};
@@ -413,8 +414,11 @@ pub fn service_vip(key: &str) -> String {
     format!("10.90.{a}.{b}")
 }
 
-/// IP determinístico num `/16` arbitrário (`<prefix>.A.B`), derivado do id.
-pub fn alloc_ip_in(prefix: &str, id: &str) -> String {
+/// IP **preferido** (determinístico, puro) num `/16` arbitrário (`<prefix>.A.B`),
+/// derivado do id. É só o ponto de partida: sozinho colide por aniversário aos
+/// ~300 containers (32 bits do id → 16 bits de host). A unicidade real vem do
+/// registo de leases + sondagem em [`ipam::allocate`]; ver [`alloc_ip_in`].
+pub fn derive_ip_in(prefix: &str, id: &str) -> String {
     let hex = &id[..id.len().min(8)];
     let n = u32::from_str_radix(hex, 16).unwrap_or(2);
     let a = ((n >> 8) & 0xff) as u8;
@@ -426,6 +430,16 @@ pub fn alloc_ip_in(prefix: &str, id: &str) -> String {
         b = 254;
     }
     format!("{prefix}.{a}.{b}")
+}
+
+/// IP de um container no `/16` de `prefix`, para **recomputar** o IP a partir do
+/// id (limpeza: detach/publish/firewall/egress). Consulta o lease persistido
+/// primeiro (o IP REAL atribuído no attach, que pode ter sido sondado por cima de
+/// uma colisão) e só cai no IP derivado do hash se não houver lease (container
+/// pré-registo ou ainda não atacado). **Não cria** lease — quem aloca é
+/// [`ipam::allocate`], chamado nos pontos de attach.
+pub fn alloc_ip_in(prefix: &str, id: &str) -> String {
+    ipam::lookup(prefix, id).unwrap_or_else(|| derive_ip_in(prefix, id))
 }
 
 pub fn alloc_ip(id: &str) -> String {
@@ -1200,9 +1214,12 @@ impl Net {
                         net.subnet, net.name
                     )));
                 }
+                // Regista o IP fixado para a sondagem de outros containers o ver
+                // como ocupado (senão auto-alocaria por cima dele).
+                ipam::reserve(&net.prefix, id, want);
                 want.to_string()
             }
-            None => alloc_ip_in(&net.prefix, id),
+            None => ipam::allocate(&net.prefix, id)?,
         };
         let ns = netns_name(id);
         let hv = host_veth(id);
@@ -1283,6 +1300,7 @@ impl Net {
         run_ok("nft", &["delete", "element", "ip", TABLE, "blocked", &format!("{{ {ip} }}")]);
         self.unpublish_all(&ip); // remove as regras DNAT de portas publicadas
         self.remove_container_firewall(&ip); // remove a chain/jumps de firewall L4
+        ipam::release(&ipam::prefix_of(&ip), id); // liberta o lease de IP para reuso
         Ok(())
     }
 
@@ -1302,9 +1320,10 @@ impl Net {
                         net.subnet, net.name
                     )));
                 }
+                ipam::reserve(&net.prefix, id, want);
                 want.to_string()
             }
-            None => alloc_ip_in(&net.prefix, id),
+            None => ipam::allocate(&net.prefix, id)?,
         };
         let ns = netns_name(id);
         let hv = host_veth_n(id, idx);
@@ -2133,15 +2152,18 @@ mod tests {
 
     #[test]
     fn ip_is_deterministic_and_avoids_reserved() {
-        // prefixo fixo (a default é auto-detectada/persistida em runtime).
-        let ip = alloc_ip_in("10.88", "0000000a00000000");
+        // prefixo fixo (a default é auto-detectada/persistida em runtime). O IP
+        // DERIVADO (hash puro) é estável e evita reservados — é só o ponto de
+        // partida; a unicidade real vem do lease + sondagem (ver `ipam`).
+        let ip = derive_ip_in("10.88", "0000000a00000000");
         assert!(ip.starts_with("10.88."));
-        // o mesmo id -> o mesmo IP
-        assert_eq!(alloc_ip_in("10.88", "deadbeef1234"), alloc_ip_in("10.88", "deadbeef9999"));
+        // ids que partilham os 8 primeiros hex DERIVAM o mesmo IP — era a raiz da
+        // colisão. O `ipam::allocate` é que os separa (testado em `ipam::tests`).
+        assert_eq!(derive_ip_in("10.88", "deadbeef1234"), derive_ip_in("10.88", "deadbeef9999"));
         // o último octeto nunca é 0/1/255
         for id in ["00000000", "00000001", "000000ff"] {
             let last: u8 =
-                alloc_ip_in("10.88", id).rsplit('.').next().unwrap().parse().unwrap();
+                derive_ip_in("10.88", id).rsplit('.').next().unwrap().parse().unwrap();
             assert!(last >= 2 && last != 255, "id {id} -> {last}");
         }
     }
