@@ -207,6 +207,23 @@ ls/apply/rm` + `kind: HTTPRoute` no `stack apply`.
 FQDN interno (`<nome>.<namespace>.delonix.internal`, DNS do holder) e é adicionado ao proxy por
 SIGHUP, sem reiniciar. Faz do Delonix um substituto do k8s (DNS+ingress) em ambientes pequenos.
 
+## DNS interno / descoberta de serviço (`<nome>.<namespace>.delonix.internal`)
+
+O DNS do holder (`infra::dns_server_main`/`dns_resolve`) resolve nomes de container/VM para o IP
+da SDN — descoberta de serviço estilo k8s (CoreDNS), sem nada a configurar. Esquemas:
+
+- **`<nome>`** (simples) e **`<nome>.delonix.io`** (legado) → resolvem o container por nome, em
+  QUALQUER namespace (comportamento de sempre, preservado).
+- **`<nome>.<namespace>.delonix.internal`** → resolve E **verifica a namespace** (isolamento também
+  no DNS: resolver com a namespace errada dá **NXDOMAIN**). `parse_internal_name` (pura, testada)
+  separa nome/namespace.
+- **Anti-sequestro**: a divisão por namespace só se aplica ao sufixo `.delonix.internal` — um
+  domínio EXTERNO (`api.github.com`) **nunca** é sequestrado por um container `api` na ns `github.com`;
+  fica como nome-inteiro (não casa) e reencaminha.
+- **Provado E2E**: `api.prod.delonix.internal` → IP correcto; `api` simples resolve; namespace
+  errada → NXDOMAIN. É a fundação do **auto-registo** (cada container HTTP ganha FQDN + rota no
+  proxy — próxima fatia).
+
 ## Alcançabilidade dirigida (`kind: Dependency` / `KnowDepends`)
 
 `kind: Dependency` (alias `KnowDepends`) — comunicação **DIRIGIDA** entre containers, ao contrário
