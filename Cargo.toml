@@ -32,3 +32,7 @@ tar = "0.4"
 flate2 = "1"
 # Tipos OCI canónicos (image/distribution) — evita structs hand-rolled do schema.
 oci-spec = { version = "0.10.0", default-features = false }
+# Observabilidade: logging estruturado (fundação C1). Texto por omissão, JSON via
+# DELONIX_LOG_FORMAT=json; nível por DELONIX_LOG/RUST_LOG (env-filter).
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }

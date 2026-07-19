@@ -6,14 +6,16 @@
 use std::path::PathBuf;
 
 fn main() {
+    delonix_runtime_core::telemetry::init();
     let base = std::env::var_os("DELONIX_ROOT")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("/var/lib/delonix"));
     let addr = std::env::var("DELONIX_CRI_ADDR")
         .unwrap_or_else(|_| "unix:///run/delonix-cri.sock".to_string());
 
+    tracing::info!(%addr, root = %base.display(), "delonix-cri a arrancar");
     if let Err(e) = delonix_cri::serve_blocking(base, &addr) {
-        eprintln!("delonix-cri: {e}");
+        tracing::error!(error = %e, "delonix-cri terminou com erro");
         std::process::exit(1);
     }
 }
