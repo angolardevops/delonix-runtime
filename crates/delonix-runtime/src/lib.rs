@@ -793,6 +793,10 @@ const MAX_LOG_BYTES: u64 = 1024 * 1024;
 /// pipe) e escreve-o em `log_path`, **rodando** quando passa [`MAX_LOG_BYTES`]
 /// (renomeia para `.1` e recomeça). Corre num processo próprio que sobrevive ao
 /// `delonix run` (reparentado ao init) e termina quando o container fecha o pipe.
+// `written` é escrito no fim do macro `write_block!` e lido no INÍCIO da iteração
+// SEGUINTE (contabilidade de rotação entre chamadas); a análise de fluxo do rustc
+// não vê essa leitura cross-iteração e marca a última escrita como "unused".
+#[allow(unused_assignments)]
 fn log_shim(
     read_fd: i32,
     log_path: String,
@@ -1927,6 +1931,10 @@ fn setup_node_cgroup_ns(cid: &str) {
     let _ = unshare(CloneFlags::CLONE_NEWCGROUP);
 }
 
+// FIXME(follow-up): 29 argumentos posicionais — smell real. Refatorar para um
+// `ContainerInitSpec` tipado (agrupa rootfs/hostname/argv/limites/flags) numa
+// mudança dedicada e revista; não misturar com o gate de lint.
+#[allow(clippy::too_many_arguments)]
 fn container_init(
     rootfs: &str,
     hostname: &str,
@@ -4194,6 +4202,7 @@ pub fn is_frozen(container: &Container) -> bool {
 ///   * Running + congelado   → **Paused** (freezer do cgroup ativo).
 ///   * Paused + descongelado → **Running** (retomado externamente).
 ///   * Paused + pid morto    → **Crashed**.
+///
 /// Estados terminais (Stopped/Failed/Crashed) e Created não são tocados.
 pub fn reconcile_status(c: &mut Container) -> bool {
     // `safe_to_signal` (não `is_alive` cru) para fechar a janela de reutilização

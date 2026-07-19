@@ -265,8 +265,7 @@ pub fn run_pod_sandbox(
     if !host_network {
         let pod = format!("cri-{id}");
         let cni = delonix_net::cni::enabled_conf();
-        if cni.is_some() && delonix_runtime::is_rootless() {
-            let conf = cni.unwrap();
+        if let Some(conf) = cni.filter(|_| delonix_runtime::is_rootless()) {
             let conf_json = serde_json::to_string(&conf)
                 .map_err(|e| Status::internal(format!("serializar conflist: {e}")))?;
             match delonix_net::infra::cni_attach_container(&pod, &conf_json) {
