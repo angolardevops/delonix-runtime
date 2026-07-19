@@ -204,7 +204,11 @@ const FLAG_FIN: u8 = 0x01;
 const MAX_DATA: usize = 16 * 1024;
 
 fn delonix_bin() -> PathBuf {
-    delonix_runtime_core::self_bin()
+    // A CLI `delonix`, NÃO `current_exe()` (o próprio `delonix-cri`): reinvocá-lo
+    // com `container exec` cairia em `serve_blocking`, que rouba o socket e o
+    // processo de exec fica pendurado a servir para sempre (o hang do critest em
+    // "exec tty=false stdin=false"). Ver `crate::cli_bin`.
+    crate::cli_bin()
 }
 
 /// Constrói um frame de controlo SPDY/3.
