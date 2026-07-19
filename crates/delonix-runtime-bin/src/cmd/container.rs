@@ -178,6 +178,11 @@ pub enum ContainerCmd {
         /// no connectivity), or the NAME of a network created with `delonix network create`.
         #[arg(long, default_value = "host", add = ArgValueCandidates::new(super::complete::networks))]
         net: String,
+        /// Logical ISOLATION namespace (default `default`). Containers in different
+        /// namespaces cannot reach each other (even on the same network); only a
+        /// `kind: Dependency` crosses the boundary.
+        #[arg(long)]
+        namespace: Option<String>,
         /// Volume/bind mount, `name:/target[:ro]` or `/host:/target[:ro]`. Repeatable.
         #[arg(short = 'v', long = "volume")]
         volumes: Vec<String>,
@@ -516,12 +521,12 @@ pub fn run(action: ContainerCmd) -> Result<()> {
             memory, cpus, cpu_weight, cpuset, io_weight, read_only, cap_add, cap_drop, security_opt, apparmor,
             selinux, userns, no_userns, host_pid, host_ipc, detect, secret, secret_files, env_file, tmpfs,
             ulimit, sysctl, gpus, ip, network_alias, knows, knows_none, pod, net_bps, net_burst, log_driver,
-            log_file, log_cri, image, command,
+            log_file, log_cri, image, command, namespace,
         } => cmd_run(
             &images,
             &store,
             RunOpts {
-                detach, name, net, volumes, ports: publish, privileged, entrypoint, rm, restart, devices, env,
+                detach, name, net, namespace, volumes, ports: publish, privileged, entrypoint, rm, restart, devices, env,
                 labels, image, command, quiet: false, memory, cpus, cpu_weight, cpuset, io_weight, read_only,
                 cap_add, cap_drop, security_opt, apparmor, selinux, userns, no_userns, host_pid, host_ipc,
                 detect, secret, secret_files, env_file, tmpfs, ulimit, sysctl, gpus, ip, network_alias, knows,
@@ -578,6 +583,7 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
                 detach: spec.detach,
                 name: Some(name.clone()),
                 net: spec.network,
+                namespace: doc.metadata.namespace.clone(),
                 volumes: spec.volumes,
                 ports: spec.ports,
                 privileged: spec.privileged,
@@ -698,6 +704,9 @@ pub(crate) struct RunOpts {
     pub(crate) detach: bool,
     pub(crate) name: Option<String>,
     pub(crate) net: String,
+    /// Namespace lógico de ISOLAMENTO (default `default`). Ver [[isolamento de namespace]].
+    #[serde(default)]
+    pub(crate) namespace: Option<String>,
     pub(crate) volumes: Vec<String>,
     pub(crate) ports: Vec<String>,
     pub(crate) privileged: bool,
@@ -787,11 +796,15 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
     // Intact copy for the re-exec (the destructuring below consumes opts).
     let opts_copy = opts.clone();
     let RunOpts {
-        detach, name, net, volumes, ports, privileged, entrypoint, rm, restart, devices, env, labels, image, command, quiet,
+        detach, name, net, namespace, volumes, ports, privileged, entrypoint, rm, restart, devices, env, labels, image, command, quiet,
         memory, cpus, cpu_weight, cpuset, io_weight, read_only, cap_add, cap_drop, security_opt, apparmor, selinux,
         userns, no_userns, host_pid, host_ipc, detect, secret, secret_files, env_file, tmpfs, ulimit, sysctl, gpus,
         ip, network_alias, knows, knows_none, pod, net_bps, net_burst, log_driver, log_file, log_cri,
     } = opts;
+    // Namespace de isolamento (default `default`). Vai a um nome de set nft (via
+    // `dlxns_set`, que o HASHEIA → seguro) e a um token do control-line (que o
+    // `attach_container` sanitiza). Aqui só garantimos não-vazio.
+    let namespace = namespace.filter(|s| !s.trim().is_empty()).unwrap_or_else(|| "default".into());
     if net_burst.is_some() && net_bps.is_none() {
         return Err(Error::Invalid("--net-burst only makes sense together with --net-bps".into()));
     }
@@ -858,6 +871,7 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
     // `max` = no memory cap (cgroup v2); in k8s the pod's cgroup already limits.
     let eff_memory = memory.unwrap_or_else(|| "max".to_string());
     let mut c = Container::new(id.clone(), cname, image.clone(), cmd, eff_memory);
+    c.namespace = namespace.clone();
     c.env = img.config.env.clone();
     // `--env-file`: each `.env` file (KEY=VAL per line) BEFORE `-e`, so an
     // explicit `-e` can override a value from the file.
@@ -990,7 +1004,7 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
         } else {
             // 1st pass: creates the netns on the holder's side and RE-EXECUTES itself inside it.
             delonix_net::NetworkStore::open(super::util::state_root())?.get(n)?;
-            let (netns, ip) = infra::attach_container(&id, n)?;
+            let (netns, ip) = infra::attach_container(&id, n, &namespace)?;
             return reexec_into_netns(&id, &netns, &ip, &opts_copy);
         }
     }
@@ -1066,6 +1080,20 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
     if let Some(n) = &custom_net {
         c.network = Some(n.clone());
         c.ip = attached_ip;
+        // Isolamento de namespace: um container fora do `default` ganha o fw de
+        // namespace (o fw_chain_body emite same-ns accept + cross-ns `ct new` drop).
+        // Em `default` não se aplica nada — SDN aberta, comportamento inalterado.
+        if c.namespace != "default" {
+            if let Some(ip) = c.ip.clone() {
+                let mut fw = c.firewall.clone().unwrap_or_default();
+                fw.enabled = true;
+                fw.namespace = c.namespace.clone();
+                match infra::apply_firewall(&c.id, &ip, &fw) {
+                    Ok(()) => c.firewall = Some(fw),
+                    Err(e) => eprintln!("aviso: isolamento de namespace '{}' não aplicado: {e}", c.namespace),
+                }
+            }
+        }
         let _ = store.save(&c);
         // `--net-bps`: the shaping lives on the veth on the holder's side, which only
         // exists on the custom-network path. Applied now (the field is already
@@ -1582,7 +1610,7 @@ fn cmd_start(images: &ImageStore, store: &Store, id: &str) -> Result<()> {
     let reexec = std::env::var("DELONIX_REEXEC_ID").is_ok();
     if let Some(n) = c.network.clone() {
         if !reexec {
-            let (netns, ip) = infra::attach_container(&c.id, &n)?;
+            let (netns, ip) = infra::attach_container(&c.id, &n, &c.namespace)?;
             return reexec_start(&c.id, &netns, &ip);
         }
         c.ip = std::env::var("DELONIX_REEXEC_IP").ok();
@@ -1593,6 +1621,16 @@ fn cmd_start(images: &ImageStore, store: &Store, id: &str) -> Result<()> {
                     unpublish_ports(&c, None);
                     infra::detach_container(&c.id, &ip);
                     return Err(e);
+                }
+            }
+            // Re-aplica a firewall persistida (isolamento de namespace, Dependency,
+            // Ingress) — a chain nft vive no netns EFÉMERO do holder, por isso um
+            // container reiniciado perderia o isolamento sem isto. Best-effort.
+            if let Some(fw) = &c.firewall {
+                if fw.enabled {
+                    if let Err(e) = infra::apply_firewall(&c.id, &ip, fw) {
+                        eprintln!("aviso: firewall/isolamento de '{}' não reaplicado no start: {e}", c.name);
+                    }
                 }
             }
         }

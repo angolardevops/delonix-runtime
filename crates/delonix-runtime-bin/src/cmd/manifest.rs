@@ -18,6 +18,11 @@ use serde::Deserialize;
 #[derive(Debug, Clone, Deserialize)]
 pub struct Metadata {
     pub name: String,
+    /// Namespace lógico de ISOLAMENTO (default `default`). Recursos de namespaces
+    /// diferentes não se alcançam (só um `kind: Dependency` fura). Ver a secção
+    /// "isolamento de namespace" no CLAUDE.md.
+    #[serde(default)]
+    pub namespace: Option<String>,
     /// Rótulos livres para agrupar/seleccionar recursos (estilo k8s). Opcional —
     /// o runtime é single-tenant, não há namespaces; isto é só organização.
     #[serde(default)]
