@@ -12,6 +12,8 @@ sha2 = { workspace = true }
 tar = { workspace = true }
 flate2 = { workspace = true }
 nix = { workspace = true }
+# Tipos OCI canónicos do schema image (manifesto/config/index/descritor).
+oci-spec = { workspace = true, features = ["image"] }
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls-webpki-roots", "json"] }
 zstd = "0.13"
 base64 = "0.22"

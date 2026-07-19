@@ -6,61 +6,29 @@
 //! índice multi-arch) → blob de config → blobs de layers → guarda no CAS, tal
 //! como o `load_docker_archive`.
 
-use crate::cas::{sha256_hex, strip};
+use crate::cas::sha256_hex;
 use crate::image::{now_unix, Image, ImageConfig, ImageStore};
 use delonix_runtime_core::{Error, Result};
-use serde::Deserialize;
+// Tipos OCI canónicos (crate `oci-spec`, feature `image`) — substituem os structs
+// hand-rolled do schema OCI/distribution que existiam aqui (C3-IMG).
+use oci_spec::image::{
+    Descriptor, DescriptorBuilder, Digest, ImageConfiguration, ImageIndex, ImageManifest,
+    ImageManifestBuilder, MediaType,
+};
+use std::str::FromStr;
 use std::time::Duration;
+
+/// Converte um erro do `oci-spec` (construção/validação de tipos OCI) num
+/// [`Error::Registry`], para não vazar o tipo de erro da crate externa.
+fn oci_err(e: impl std::fmt::Display) -> Error {
+    Error::Registry(format!("oci-spec: {e}"))
+}
 
 /// Tipos de média aceites ao pedir um manifesto (índice OU manifesto de imagem).
 const ACCEPT_MANIFEST: &str = "application/vnd.oci.image.index.v1+json, \
      application/vnd.docker.distribution.manifest.list.v2+json, \
      application/vnd.oci.image.manifest.v1+json, \
      application/vnd.docker.distribution.manifest.v2+json";
-
-#[derive(Deserialize)]
-struct Index {
-    manifests: Vec<IndexEntry>,
-}
-#[derive(Deserialize)]
-struct IndexEntry {
-    digest: String,
-    #[serde(default)]
-    platform: Option<Platform>,
-}
-#[derive(Deserialize)]
-struct Platform {
-    architecture: String,
-    os: String,
-}
-#[derive(Deserialize)]
-struct Manifest {
-    config: Descriptor,
-    layers: Vec<Descriptor>,
-}
-#[derive(Deserialize)]
-struct Descriptor {
-    digest: String,
-    #[serde(rename = "mediaType")]
-    media_type: Option<String>,
-}
-#[derive(Deserialize)]
-struct RawConfig {
-    config: Option<RawInner>,
-}
-#[derive(Deserialize)]
-struct RawInner {
-    #[serde(rename = "Cmd")]
-    cmd: Option<Vec<String>>,
-    #[serde(rename = "Entrypoint")]
-    entrypoint: Option<Vec<String>>,
-    #[serde(rename = "Env")]
-    env: Option<Vec<String>>,
-    #[serde(rename = "User")]
-    user: Option<String>,
-    #[serde(rename = "WorkingDir")]
-    working_dir: Option<String>,
-}
 
 fn reg_err(e: reqwest::Error) -> Error {
     Error::Registry(e.to_string())
@@ -382,6 +350,23 @@ fn with_prefix(digest: &str) -> String {
     }
 }
 
+/// Media types Docker schema-2 (mantidos para bater byte-a-byte com o que o
+/// `docker`/registos esperam; no `oci_spec` viram `MediaType::Other(...)`).
+const DOCKER_CONFIG_MEDIA_TYPE: &str = "application/vnd.docker.container.image.v1+json";
+const DOCKER_MANIFEST_MEDIA_TYPE: &str = "application/vnd.docker.distribution.manifest.v2+json";
+
+/// Constrói um [`Descriptor`] OCI (`oci_spec`) a partir de um mediaType, tamanho
+/// e digest (com ou sem prefixo `sha256:`). Centraliza a validação do digest
+/// (`Digest::from_str`) e a construção via builder.
+fn descriptor(media_type: &str, size: usize, digest: &str) -> Result<Descriptor> {
+    DescriptorBuilder::default()
+        .media_type(media_type)
+        .size(size as u64)
+        .digest(Digest::from_str(&with_prefix(digest)).map_err(oci_err)?)
+        .build()
+        .map_err(oci_err)
+}
+
 /// O mediaType de um layer pelo seu *magic number* (gzip/zstd/tar simples).
 fn layer_media_type(data: &[u8]) -> &'static str {
     if data.starts_with(&[0x1f, 0x8b]) {
@@ -592,79 +577,79 @@ pub fn pull_from_registry_with_creds(
 
     let manifest_bytes = if content_type.contains("index") || content_type.contains("manifest.list")
     {
-        let index: Index = serde_json::from_slice(&body)?;
+        // Índice multi-arch (`oci_spec::image::ImageIndex`) — escolhe a entrada
+        // linux/<arch> (ou a primeira, em falta de match).
+        let index: ImageIndex = serde_json::from_slice(&body)?;
         let arch = target_arch();
         let pick = index
-            .manifests
+            .manifests()
             .iter()
             .find(|m| {
-                m.platform
+                m.platform()
                     .as_ref()
-                    .map(|p| p.os == "linux" && p.architecture == arch)
+                    .map(|p| p.os().to_string() == "linux" && p.architecture().to_string() == arch)
                     .unwrap_or(false)
             })
-            .or_else(|| index.manifests.first())
+            .or_else(|| index.manifests().first())
             .ok_or_else(|| Error::Registry("índice de manifestos vazio".into()))?;
         eprintln!("plataforma escolhida: linux/{arch}");
-        let purl = c.manifest_url(&pick.digest);
+        let purl = c.manifest_url(pick.digest().as_ref());
         let r = c.fetch(&purl, ACCEPT_MANIFEST)?;
         r.bytes().map_err(reg_err)?.to_vec()
     } else {
         body
     };
 
-    let manifest: Manifest = serde_json::from_slice(&manifest_bytes)?;
+    // Manifesto de imagem (`oci_spec::image::ImageManifest`) — schema OCI/Docker v2.
+    let manifest: ImageManifest = serde_json::from_slice(&manifest_bytes)?;
 
     // 2) blob de config (= id da imagem)
-    let config_bytes = c.blob(&manifest.config.digest)?;
-    if sha256_hex(&config_bytes) != strip(&manifest.config.digest) {
+    let config_digest_str = manifest.config().digest().to_string();
+    let config_bytes = c.blob(&config_digest_str)?;
+    if sha256_hex(&config_bytes) != manifest.config().digest().digest() {
         return Err(Error::Registry("digest do config não confere".into()));
     }
     let config_digest = store.cas().write(&config_bytes)?;
 
     // 3) layers (ignora layers "foreign"/Windows)
     let real_layers: Vec<&Descriptor> = manifest
-        .layers
+        .layers()
         .iter()
-        .filter(|l| !l.media_type.as_deref().unwrap_or("").contains("foreign"))
+        .filter(|l| !l.media_type().to_string().contains("foreign"))
         .collect();
     let total = real_layers.len();
     let mut layers = Vec::with_capacity(total);
     for (i, l) in real_layers.iter().enumerate() {
+        let ldigest = l.digest().to_string();
         eprintln!(
             "layer {}/{}  {}",
             i + 1,
             total,
-            &l.digest[..l.digest.len().min(19)]
+            &ldigest[..ldigest.len().min(19)]
         );
-        let data = c.blob(&l.digest)?;
+        let data = c.blob(&ldigest)?;
         let dg = store.cas().write(&data)?;
-        if dg != l.digest {
-            return Err(Error::Registry(format!("layer corrompido: {}", l.digest)));
+        if dg != ldigest {
+            return Err(Error::Registry(format!("layer corrompido: {ldigest}")));
         }
         layers.push(dg);
     }
 
-    // 4) monta e guarda
-    let raw: RawConfig = serde_json::from_slice(&config_bytes)?;
-    let inner = raw.config.unwrap_or(RawInner {
-        cmd: None,
-        entrypoint: None,
-        env: None,
-        user: None,
-        working_dir: None,
-    });
+    // 4) monta e guarda — lê a config de execução (Cmd/Env/Entrypoint/User/WorkingDir)
+    // do blob de config OCI (`oci_spec::image::ImageConfiguration`).
+    let oci_config: ImageConfiguration = serde_json::from_slice(&config_bytes)?;
+    let inner = oci_config.config().clone().unwrap_or_default();
     let repo_tags = store.merged_tags(&config_digest, reference);
     let image = Image {
         id: config_digest,
         repo_tags,
         layers,
         config: ImageConfig {
-            cmd: inner.cmd.unwrap_or_default(),
-            entrypoint: inner.entrypoint.unwrap_or_default(),
-            env: inner.env.unwrap_or_default(),
-            user: inner.user.unwrap_or_default(),
-            working_dir: inner.working_dir.unwrap_or_default(),
+            cmd: inner.cmd().clone().unwrap_or_default(),
+            entrypoint: inner.entrypoint().clone().unwrap_or_default(),
+            env: inner.env().clone().unwrap_or_default(),
+            user: inner.user().clone().unwrap_or_default(),
+            working_dir: inner.working_dir().clone().unwrap_or_default(),
             cpus: None,
             memory: None,
             security: Vec::new(),
@@ -688,30 +673,30 @@ pub fn pull_from_registry_with_creds(
 /// blob). Devolve `(bytes, digest)`. Usado pelo servidor OCI do register interno
 /// para servir `docker pull` sem re-empacotar nada.
 pub fn build_manifest(store: &ImageStore, image: &Image) -> Result<(Vec<u8>, String)> {
-    let config_data = store.cas().read(&image.id)?;
-    let config_desc = serde_json::json!({
-        "mediaType": "application/vnd.docker.container.image.v1+json",
-        "size": config_data.len(),
-        "digest": with_prefix(&image.id),
-    });
-    let mut layer_descs = Vec::with_capacity(image.layers.len());
-    for dg in &image.layers {
-        let data = store.cas().read(dg)?;
-        layer_descs.push(serde_json::json!({
-            "mediaType": layer_media_type(&data),
-            "size": data.len(),
-            "digest": with_prefix(dg),
-        }));
-    }
-    let manifest = serde_json::json!({
-        "schemaVersion": 2,
-        "mediaType": "application/vnd.docker.distribution.manifest.v2+json",
-        "config": config_desc,
-        "layers": layer_descs,
-    });
+    let manifest = docker_manifest(store, image)?;
     let bytes = serde_json::to_vec(&manifest)?;
     let digest = format!("sha256:{}", crate::cas::sha256_hex(&bytes));
     Ok((bytes, digest))
+}
+
+/// Constrói o [`ImageManifest`] Docker schema-2 de uma imagem local (config +
+/// descritores dos layers, mediaType detetado por magic number). Partilhado por
+/// [`build_manifest`] (servir) e [`push_to_registry`] (publicar).
+fn docker_manifest(store: &ImageStore, image: &Image) -> Result<ImageManifest> {
+    let config_data = store.cas().read(&image.id)?;
+    let config_desc = descriptor(DOCKER_CONFIG_MEDIA_TYPE, config_data.len(), &image.id)?;
+    let mut layer_descs = Vec::with_capacity(image.layers.len());
+    for dg in &image.layers {
+        let data = store.cas().read(dg)?;
+        layer_descs.push(descriptor(layer_media_type(&data), data.len(), dg)?);
+    }
+    ImageManifestBuilder::default()
+        .schema_version(2u32)
+        .media_type(DOCKER_MANIFEST_MEDIA_TYPE)
+        .config(config_desc)
+        .layers(layer_descs)
+        .build()
+        .map_err(oci_err)
 }
 
 pub fn push_to_registry(store: &ImageStore, source: &str, target: &str) -> Result<String> {
@@ -733,39 +718,23 @@ pub fn push_to_registry(store: &ImageStore, source: &str, target: &str) -> Resul
 
     eprintln!("a publicar {repo}:{refr} em {host}...");
 
-    // 1) descritor do config + envio do blob de config.
+    // 1) envio do blob de config.
     let config_data = store.cas().read(&image.id)?;
-    let config_desc = serde_json::json!({
-        "mediaType": "application/vnd.docker.container.image.v1+json",
-        "size": config_data.len(),
-        "digest": with_prefix(&image.id),
-    });
     c.push_blob(&with_prefix(&image.id), &config_data)?;
 
-    // 2) descritores + envio dos layers (os que faltarem no registo).
+    // 2) envio dos layers (os que faltarem no registo).
     let total = image.layers.len();
-    let mut layer_descs = Vec::with_capacity(total);
     for (i, dg) in image.layers.iter().enumerate() {
         let data = store.cas().read(dg)?;
         eprintln!("layer {}/{}  {}", i + 1, total, &dg[..dg.len().min(19)]);
         c.push_blob(&with_prefix(dg), &data)?;
-        layer_descs.push(serde_json::json!({
-            "mediaType": layer_media_type(&data),
-            "size": data.len(),
-            "digest": with_prefix(dg),
-        }));
     }
 
-    // 3) manifesto schema-2 + publicação sob a tag.
-    let media_type = "application/vnd.docker.distribution.manifest.v2+json";
-    let manifest = serde_json::json!({
-        "schemaVersion": 2,
-        "mediaType": media_type,
-        "config": config_desc,
-        "layers": layer_descs,
-    });
+    // 3) manifesto Docker schema-2 (`oci_spec::image::ImageManifest`) + publicação
+    // sob a tag. Mesma construção partilhada por `build_manifest`.
+    let manifest = docker_manifest(store, &image)?;
     let manifest_bytes = serde_json::to_vec(&manifest)?;
-    c.push_manifest(&refr, &manifest_bytes, media_type)?;
+    c.push_manifest(&refr, &manifest_bytes, DOCKER_MANIFEST_MEDIA_TYPE)?;
 
     let digest = format!("sha256:{}", sha256_hex(&manifest_bytes));
     eprintln!("publicado: {host}/{repo}:{refr}  ({digest})");
@@ -817,19 +786,26 @@ pub fn push_oci_artifact(
     );
     c.push_blob(&layer_digest, data)?;
 
-    let manifest = serde_json::json!({
-        "schemaVersion": 2,
-        "mediaType": "application/vnd.oci.image.manifest.v1+json",
-        "artifactType": layer_media_type,
-        "config": { "mediaType": EMPTY_CONFIG_MEDIA_TYPE, "size": EMPTY_CONFIG_BYTES.len(), "digest": config_digest },
-        "layers": [ { "mediaType": layer_media_type, "size": data.len(), "digest": layer_digest } ],
-    });
+    // Manifesto de artefacto OCI 1.1 (`oci_spec::image::ImageManifest` com
+    // `artifactType` + config vazio `EmptyJSON`), padrão ORAS/Helm.
+    let manifest = ImageManifestBuilder::default()
+        .schema_version(2u32)
+        .media_type(MediaType::ImageManifest)
+        .artifact_type(MediaType::from(layer_media_type))
+        .config(descriptor(
+            EMPTY_CONFIG_MEDIA_TYPE,
+            EMPTY_CONFIG_BYTES.len(),
+            &config_digest,
+        )?)
+        .layers(vec![descriptor(
+            layer_media_type,
+            data.len(),
+            &layer_digest,
+        )?])
+        .build()
+        .map_err(oci_err)?;
     let manifest_bytes = serde_json::to_vec(&manifest)?;
-    c.push_manifest(
-        &refr,
-        &manifest_bytes,
-        "application/vnd.oci.image.manifest.v1+json",
-    )?;
+    c.push_manifest(&refr, &manifest_bytes, MediaType::ImageManifest.as_ref())?;
 
     let digest = format!("sha256:{}", sha256_hex(&manifest_bytes));
     eprintln!("publicado: {host}/{repo}:{refr}  ({digest})");
@@ -857,13 +833,14 @@ pub fn pull_oci_artifact(root: &std::path::Path, source: &str) -> Result<Vec<u8>
     let accept = "application/vnd.oci.image.manifest.v1+json";
     let url = c.manifest_url(&refr);
     let manifest_bytes = c.fetch(&url, accept)?.bytes().map_err(reg_err)?.to_vec();
-    let manifest: ArtifactManifest = serde_json::from_slice(&manifest_bytes)
+    let manifest: ImageManifest = serde_json::from_slice(&manifest_bytes)
         .map_err(|e| Error::Registry(format!("manifesto de artefacto inválido: {e}")))?;
     let layer = manifest
-        .layers
+        .layers()
         .first()
         .ok_or_else(|| Error::Registry("manifesto de artefacto sem layers".into()))?;
-    let data = c.blob(&layer.digest)?;
+    let layer_digest = layer.digest().to_string();
+    let data = c.blob(&layer_digest)?;
 
     // Achado de auditoria de segurança: o caminho antigo (`pull_from_registry_with_creds`)
     // já verifica cada blob contra o digest esperado antes de o aceitar — este caminho
@@ -871,18 +848,12 @@ pub fn pull_oci_artifact(root: &std::path::Path, source: &str) -> Result<Vec<u8>
     // que deixava um registo comprometido/MITM-ao-conteúdo servir bytes diferentes do
     // digest anunciado sem detecção. Ver CLAUDE.md.
     let got = format!("sha256:{}", sha256_hex(&data));
-    let expected = with_prefix(&layer.digest);
-    if got != expected {
+    if got != layer_digest {
         return Err(Error::Registry(format!(
-            "artefacto corrompido ou adulterado: digest esperado {expected}, obtido {got}"
+            "artefacto corrompido ou adulterado: digest esperado {layer_digest}, obtido {got}"
         )));
     }
     Ok(data)
-}
-
-#[derive(Deserialize)]
-struct ArtifactManifest {
-    layers: Vec<Descriptor>,
 }
 
 #[cfg(test)]
@@ -1251,5 +1222,83 @@ mod tests {
         assert!(format!("{err}").contains("adulterado") || format!("{err}").contains("digest"));
 
         let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    /// Round-trip determinístico do MANIFESTO pelos tipos `oci_spec::image`
+    /// (C3-IMG): parte-se de bytes de manifesto FIXOS (Docker schema-2, digests
+    /// reais de 64 hex), parseia-se com `ImageManifest`, confirma-se a estrutura
+    /// (digest do config, ordem/digests/mediaType dos layers) e re-serializa-se —
+    /// a re-serialização tem de ser IDEMPOTENTE (digest estável) e o re-parse tem
+    /// de dar um `ImageManifest` igual. Sem rede: prova que a migração para
+    /// `oci-spec` preserva o schema no caminho de pull/push.
+    #[test]
+    fn manifesto_round_trip_via_oci_spec_preserva_estrutura_e_digest() {
+        use oci_spec::image::ImageManifest;
+
+        // Manifesto Docker schema-2 canónico (config + 2 layers, ordem base→topo).
+        const MANIFEST: &str = r#"{
+  "schemaVersion": 2,
+  "mediaType": "application/vnd.docker.distribution.manifest.v2+json",
+  "config": {
+    "mediaType": "application/vnd.docker.container.image.v1+json",
+    "size": 1470,
+    "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  "layers": [
+    {
+      "mediaType": "application/vnd.docker.image.rootfs.diff.tar.gzip",
+      "size": 3336911,
+      "digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+    },
+    {
+      "mediaType": "application/vnd.docker.image.rootfs.diff.tar.gzip",
+      "size": 145,
+      "digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222"
+    }
+  ]
+}"#;
+
+        // 1) parse.
+        let m: ImageManifest = serde_json::from_str(MANIFEST).expect("parse do manifesto");
+        assert_eq!(m.schema_version(), 2);
+        assert_eq!(
+            m.config().digest().to_string(),
+            "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        );
+        assert_eq!(
+            m.config().media_type().to_string(),
+            "application/vnd.docker.container.image.v1+json"
+        );
+        // ordem dos layers preservada (base=0 → topo).
+        let layer_digests: Vec<String> =
+            m.layers().iter().map(|l| l.digest().to_string()).collect();
+        assert_eq!(
+            layer_digests,
+            vec![
+                "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+                    .to_string(),
+                "sha256:2222222222222222222222222222222222222222222222222222222222222222"
+                    .to_string(),
+            ]
+        );
+        assert!(m
+            .layers()
+            .iter()
+            .all(|l| l.media_type().to_string().ends_with(".tar.gzip")));
+
+        // 2) re-serialização idempotente (digest estável).
+        let bytes1 = serde_json::to_vec(&m).expect("serialize 1");
+        let m2: ImageManifest = serde_json::from_slice(&bytes1).expect("re-parse");
+        let bytes2 = serde_json::to_vec(&m2).expect("serialize 2");
+        assert_eq!(
+            sha256_hex(&bytes1),
+            sha256_hex(&bytes2),
+            "a re-serialização do manifesto tem de ser byte-idêntica (digest estável)"
+        );
+        // 3) o re-parse é estruturalmente igual (PartialEq de ImageManifest).
+        assert_eq!(
+            m, m2,
+            "round-trip do manifesto tem de preservar a estrutura"
+        );
     }
 }

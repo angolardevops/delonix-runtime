@@ -51,4 +51,4 @@ libc = { workspace = true }
 # usa (os crates de motor ficam dep-limpos); o modo `--once` (snapshot de texto)
 # não precisa de tty. ratatui traz o crossterm.
 ratatui = "0.29"
-oci-spec = { version = "0.10.0", default-features = false, features = ["runtime"] }
+oci-spec = { workspace = true, features = ["runtime"] }
