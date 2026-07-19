@@ -121,6 +121,8 @@ fn router(state: AppState) -> Router {
         // resolve por varrimento linear (compara tags/prefixo de id) e o ficheiro
         // que apaga usa o `id` sanitizado, nunca o `ref` cru.
         .route("/v1/images", get(list_images).delete(delete_image))
+        // Pull (opcionalmente com scan de CVE a seguir) — shell-out à CLI.
+        .route("/v1/images/pull", post(pull_image))
         .with_state(state)
 }
 
@@ -567,6 +569,49 @@ async fn delete_image(State(s): State<AppState>, Query(q): Query<RefQuery>) -> R
     }
 }
 
+/// Corpo de `POST /v1/images/pull`.
+#[derive(serde::Deserialize)]
+struct PullBody {
+    #[serde(rename = "ref")]
+    reference: String,
+    /// Corre também um scan de CVE depois do pull (e anexa a saída).
+    #[serde(default)]
+    scan_after: bool,
+}
+
+async fn pull_image(State(s): State<AppState>, Json(b): Json<PullBody>) -> Response {
+    // A referência é o argumento POSICIONAL de `image pull` — um `-` inicial seria
+    // lido como flag. Recusa no limite. (Refs válidas têm `/`/`:`, nunca `-` no
+    // início.)
+    if b.reference.is_empty() || b.reference.starts_with('-') {
+        return err_response(Error::Invalid("referência de imagem inválida".to_string()));
+    }
+    let (ok, mut out) = match run_cli(
+        s.bin.clone(),
+        s.base.clone(),
+        vec!["image".into(), "pull".into(), b.reference.clone()],
+    )
+    .await
+    {
+        Ok(r) => r,
+        Err(e) => return err_response(e),
+    };
+    // Auto-scan opcional a seguir ao pull (só se o pull correu bem).
+    if ok && b.scan_after {
+        if let Ok((_so, sout)) = run_cli(
+            s.bin,
+            s.base,
+            vec!["image".into(), "scan".into(), b.reference],
+        )
+        .await
+        {
+            out.push_str("\n--- scan (CVE) ---\n");
+            out.push_str(&sout);
+        }
+    }
+    Json(serde_json::json!({ "ok": ok, "output": out })).into_response()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -912,6 +957,26 @@ mod tests {
                 resp.status(),
                 StatusCode::BAD_REQUEST,
                 "run devia recusar {bad}"
+            );
+        }
+        // pull: ref vazia ou começada por `-` → 400 (antes de qualquer exec).
+        for bad in [r#"{"ref":""}"#, r#"{"ref":"-x"}"#] {
+            let resp = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri("/v1/images/pull")
+                        .header("content-type", "application/json")
+                        .body(Body::from(bad))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                resp.status(),
+                StatusCode::BAD_REQUEST,
+                "pull devia recusar {bad}"
             );
         }
     }
