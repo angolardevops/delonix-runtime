@@ -1,0 +1,23 @@
+[package]
+name = "delonix-mgmt"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "API de gestão local do Delonix Runtime (HTTP+JSON sobre unix socket)."
+repository = "https://github.com/angolardevops/delonix-runtime"
+
+[dependencies]
+delonix-runtime-core = { path = "../delonix-runtime-core" }
+delonix-volume = { path = "../delonix-volume" }
+axum = "0.7"
+tokio = { version = "1", features = ["rt-multi-thread", "net", "macros", "sync"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+hyper = { version = "1", features = ["server", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio", "server"] }
+tower = { version = "0.5", features = ["util"] }
+
+[dev-dependencies]
+tempfile = "3"
+tower = { version = "0.5", features = ["util"] }
+http-body-util = "0.1"
