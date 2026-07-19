@@ -5,11 +5,11 @@
 //! fala só HTTP com este socket no mesmo host. Complementa o CRI (`delonix-cri`,
 //! que serve o kubelet): este serve a *gestão* do produto (volumes/containers/…).
 //!
-//! As superfícies migram uma de cada vez. Feito: **volumes** (CRUD), **containers**
-//! (list/get por biblioteca + rm/start/stop/restart/pause/unpause por shell-out à
-//! CLI) e **imagens** (list + rmi). O contrato de LEITURA é o próprio tipo serde de
-//! cada recurso (`delonix_volume::Volume`, `delonix_runtime_core::Container`,
-//! `delonix_image::Image`); as MUTAÇÕES devolvem `{ok, output}`.
+//! Superfícies expostas: **volumes** (CRUD), **containers** (list/get + run/rm/
+//! action/logs/exec + reconfig parcial), **imagens** (list/rmi/pull/build/scan/
+//! sbom), **redes** (create/rm) e **VMs** (só stop/rm — subsistema divergente). O
+//! contrato de LEITURA é o próprio tipo serde de cada recurso (`Volume`,
+//! `Container`, `Image`, `Package`); as MUTAÇÕES devolvem `{ok, output}`.
 
 use std::path::PathBuf;
 
@@ -132,6 +132,14 @@ fn router(state: AppState) -> Router {
         // unpublish (DNAT) NÃO entram aqui — dívida `Net::`/`infra::` no PaaS.
         .route("/v1/networks", post(create_network))
         .route("/v1/networks/:name", axum::routing::delete(delete_network))
+        // Reconfig a quente de container: SÓ o subconjunto que o `container update`
+        // do runtime suporta (publish-add/publish-rm). Os campos que o
+        // `ContainerUpdateSpec` do PaaS tem mas o runtime NÃO (memory/cpus/restart/
+        // dns/hosts) são recusados do lado do PaaS, não chegam aqui.
+        .route("/v1/containers/:id/reconfig", post(reconfig_container))
+        // VMs (subsistema delonix-vm): SÓ stop/rm (o runtime não tem `vm run`/
+        // `vm start`; `vm create` é outro modelo). Ver a nota no PaaS.
+        .route("/v1/vms/:name/action", post(vm_action_ep))
         .with_state(state)
 }
 
@@ -753,6 +761,78 @@ async fn delete_network(State(s): State<AppState>, Path(name): Path<String>) -> 
         return err_response(Error::Invalid("nome de rede inválido".to_string()));
     }
     match run_cli(s.bin, s.base, vec!["network".into(), "rm".into(), name]).await {
+        Ok((ok, out)) => Json(serde_json::json!({ "ok": ok, "output": out })).into_response(),
+        Err(e) => err_response(e),
+    }
+}
+
+/// Corpo de `POST /v1/containers/:id/reconfig`. Só o subconjunto que o `container
+/// update` do runtime suporta — o PaaS recusa os restantes campos antes de chamar.
+#[derive(serde::Deserialize)]
+struct ReconfigBody {
+    #[serde(default)]
+    publish_add: Vec<String>,
+    #[serde(default)]
+    publish_rm: Vec<String>,
+}
+
+async fn reconfig_container(
+    State(s): State<AppState>,
+    Path(id): Path<String>,
+    Json(b): Json<ReconfigBody>,
+) -> Response {
+    if !valid_arg(&id) {
+        return err_response(Error::Invalid("id de container inválido".to_string()));
+    }
+    let mut args = vec!["container".to_string(), "update".to_string(), id];
+    // As portas têm charset próprio (dígitos/`:`/`/`) — não podem virar flag.
+    for p in &b.publish_add {
+        if p.chars()
+            .all(|c| c.is_ascii_digit() || matches!(c, ':' | '/'))
+        {
+            args.push("--publish-add".into());
+            args.push(p.clone());
+        }
+    }
+    for p in &b.publish_rm {
+        if p.chars()
+            .all(|c| c.is_ascii_digit() || matches!(c, ':' | '/'))
+        {
+            args.push("--publish-rm".into());
+            args.push(p.clone());
+        }
+    }
+    match run_cli(s.bin, s.base, args).await {
+        Ok((ok, out)) => Json(serde_json::json!({ "ok": ok, "output": out })).into_response(),
+        Err(e) => err_response(e),
+    }
+}
+
+/// Corpo de `POST /v1/vms/:name/action`. Só `stop`/`rm` (o runtime não tem
+/// `vm start`; `vm run`/`vm create` são outro subsistema — recusados no PaaS).
+#[derive(serde::Deserialize)]
+struct VmActionBody {
+    action: String,
+}
+
+async fn vm_action_ep(
+    State(s): State<AppState>,
+    Path(name): Path<String>,
+    Json(b): Json<VmActionBody>,
+) -> Response {
+    if !valid_arg(&name) {
+        return err_response(Error::Invalid("nome de VM inválido".to_string()));
+    }
+    let sub = match b.action.as_str() {
+        "stop" => "stop",
+        "rm" | "remove" => "rm",
+        other => {
+            return err_response(Error::Invalid(format!(
+                "acção de VM não suportada: {other}"
+            )))
+        }
+    };
+    match run_cli(s.bin, s.base, vec!["vm".into(), sub.into(), name]).await {
         Ok((ok, out)) => Json(serde_json::json!({ "ok": ok, "output": out })).into_response(),
         Err(e) => err_response(e),
     }
