@@ -1930,6 +1930,7 @@ impl Net {
     ///   cliente cai sempre no mesmo backend, enquanto o pool não mudar).
     /// - `weighted` — backends `ip:port#peso` (peso ≥1); repete o backend no map
     ///   proporcionalmente ao peso (sem peso → round-robin).
+    ///
     /// nftables faz a seleção no kernel (zero cópia em userspace). `least-conn` não é
     /// expressável só com `dnat`/`numgen` — fica para o caminho L7 (follow-up).
     pub fn set_service_lb_algo(&self, vip: &str, backends: &[String], algo: &str) -> Result<()> {
