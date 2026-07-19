@@ -139,6 +139,7 @@ pub fn ingress_table_ruleset() -> String {
     };
     format!(
         "table ip {INGRESS_TABLE} {{\n\
+         \x20 set {DLXALL_SET} {{ type ipv4_addr; }}\n\
          \x20 chain pre {{ type nat hook prerouting priority -100; }}\n\
          \x20 chain post {{ type nat hook postrouting priority 100; oifname \"tap0\" masquerade; }}\n\
          \x20 chain fwdeny {{ type filter hook forward priority -10; }}\n\
@@ -1384,35 +1385,57 @@ fn fw_chain_name(ip: &str) -> String {
 /// (saddr==ip); `src` casa o outro extremo (peer). Testável sem kernel.
 pub fn fw_chain_body(ip: &str, fw: &delonix_runtime_core::ContainerFw) -> String {
     let mut body = String::new();
-    if fw.enabled {
-        for r in &fw.rules {
-            // Defesa contra injeção nft: salta regras com campos inseguros
-            // (src/proto/port são interpolados na ruleset alimentada a `nft -f`).
-            if !r.nft_safe() {
-                continue;
-            }
-            let (self_dir, peer_dir) = if r.dir == "out" { ("saddr", "daddr") } else { ("daddr", "saddr") };
-            let mut line = format!("ip {self_dir} {ip}");
-            if !r.src.is_empty() && r.src != "0.0.0.0/0" && r.src != "*" {
-                line.push_str(&format!(" ip {peer_dir} {}", r.src));
-            }
-            if !r.proto.is_empty() && r.proto != "any" {
-                line.push_str(&format!(" {}", r.proto));
-                if !r.port.is_empty() && r.port != "*" {
-                    line.push_str(&format!(" dport {}", r.port));
-                }
-            }
-            line.push_str(if r.action == "allow" { " accept" } else { " drop" });
-            body.push_str(&format!("\t\t{line}\n"));
+    if !fw.enabled {
+        return body; // chain vazia = aberto (comportamento anterior a fw/namespace)
+    }
+    for r in &fw.rules {
+        // Defesa contra injeção nft: salta regras com campos inseguros
+        // (src/proto/port são interpolados na ruleset alimentada a `nft -f`).
+        if !r.nft_safe() {
+            continue;
         }
-        if fw.policy_in == "deny" {
-            body.push_str(&format!("\t\tip daddr {ip} drop\n"));
+        let (self_dir, peer_dir) = if r.dir == "out" { ("saddr", "daddr") } else { ("daddr", "saddr") };
+        let mut line = format!("ip {self_dir} {ip}");
+        if !r.src.is_empty() && r.src != "0.0.0.0/0" && r.src != "*" {
+            line.push_str(&format!(" ip {peer_dir} {}", r.src));
         }
-        if fw.policy_out == "deny" {
-            body.push_str(&format!("\t\tip saddr {ip} drop\n"));
+        if !r.proto.is_empty() && r.proto != "any" {
+            line.push_str(&format!(" {}", r.proto));
+            if !r.port.is_empty() && r.port != "*" {
+                line.push_str(&format!(" dport {}", r.port));
+            }
         }
+        line.push_str(if r.action == "allow" { " accept" } else { " drop" });
+        body.push_str(&format!("\t\t{line}\n"));
+    }
+    // Isolamento de NAMESPACE na ENTRADA — só quando NÃO há política de entrada
+    // explícita (uma Dependency/Ingress é autoritativa e substitui isto): aceita a
+    // mesma namespace e dropa NOVAS ligações de containers de OUTRA namespace. O
+    // `ct state new` isenta o retorno (established/related), e o `@dlxall` limita o
+    // drop a fontes que SÃO containers da SDN (deixa passar gateway/DNS/internet).
+    // As regras EXPLÍCITAS acima têm precedência (first-match terminal na chain).
+    let has_explicit_in = fw.policy_in == "deny" || fw.rules.iter().any(|r| r.dir == "in");
+    if !has_explicit_in {
+        let nsset = dlxns_set(&fw.namespace);
+        body.push_str(&format!("\t\tip daddr {ip} ip saddr @{nsset} accept\n"));
+        body.push_str(&format!("\t\tip daddr {ip} ip saddr @{DLXALL_SET} ct state new drop\n"));
+    }
+    if fw.policy_in == "deny" {
+        body.push_str(&format!("\t\tip daddr {ip} drop\n"));
+    }
+    if fw.policy_out == "deny" {
+        body.push_str(&format!("\t\tip saddr {ip} drop\n"));
     }
     body
+}
+
+/// Set nft com TODOS os IPs de containers da SDN (para o isolamento de namespace
+/// só afetar tráfego container↔container, não gateway/DNS/internet).
+pub const DLXALL_SET: &str = "dlxall";
+
+/// Nome (curto, ≤ limite do nft) do set de IPs de uma namespace lógica.
+pub fn dlxns_set(ns: &str) -> String {
+    format!("dlxns{:08x}", crate::fnv32(ns))
 }
 
 /// Aplica a firewall de um container no `dlxing` (corre no holder): garante a chain
@@ -2742,6 +2765,7 @@ mod tests {
                 delonix_runtime_core::FwRule { dir: "in".into(), proto: "tcp".into(), port: "8080".into(), src: "10.200.0.0/16".into(), action: "allow".into(), note: String::new() },
                 delonix_runtime_core::FwRule { dir: "out".into(), proto: "any".into(), port: String::new(), src: String::new(), action: "deny".into(), note: String::new() },
             ],
+            namespace: "default".into(),
         };
         let body = fw_chain_body("10.200.0.5", &fw);
         // regra in: daddr==ip, peer saddr==src, tcp dport 8080 accept
@@ -2750,9 +2774,26 @@ mod tests {
         assert!(body.contains("ip saddr 10.200.0.5 drop"), "{body}");
         // política in=deny → drop final no daddr
         assert!(body.contains("ip daddr 10.200.0.5 drop"), "{body}");
+        // política de entrada EXPLÍCITA (deny) → NÃO emite regras de namespace.
+        assert!(!body.contains("@dlxall"), "{body}");
         // disabled → corpo vazio
         let off = delonix_runtime_core::ContainerFw { enabled: false, ..fw };
         assert!(fw_chain_body("10.200.0.5", &off).is_empty());
+    }
+
+    #[test]
+    fn fw_body_emits_namespace_isolation_when_no_explicit_ingress() {
+        // enabled, sem regras de entrada e policy_in != deny → isolamento de namespace.
+        let fw = delonix_runtime_core::ContainerFw {
+            enabled: true,
+            namespace: "web".into(),
+            ..Default::default()
+        };
+        let body = fw_chain_body("10.200.0.7", &fw);
+        let nsset = dlxns_set("web");
+        // same-ns accept + cross-ns (container) NEW drop, com ct state new.
+        assert!(body.contains(&format!("ip daddr 10.200.0.7 ip saddr @{nsset} accept")), "{body}");
+        assert!(body.contains("ip daddr 10.200.0.7 ip saddr @dlxall ct state new drop"), "{body}");
     }
 
     #[test]
