@@ -187,8 +187,11 @@ pub fn reserve(prefix: &str, id: &str, ip: &str) {
         .iter()
         .find(|(other_id, v)| v.as_str() == ip && other_id.as_str() != id)
     {
-        eprintln!(
-            "delonix: AVISO — IP fixado {ip} já está em lease para '{}'; '{id}' vai colidir na rede",
+        tracing::warn!(
+            ip = %ip,
+            container_id = %id,
+            held_by = %other.0,
+            "IP fixado {ip} já está em lease para '{}'; '{id}' vai colidir na rede",
             other.0
         );
     }

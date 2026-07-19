@@ -136,7 +136,7 @@ fn mem_mib(s: &str) -> u64 {
         // Não degradar em silêncio: um valor mal-escrito ("2GB", "2 Gi") daria
         // metade-ish da RAM pedida sem aviso. Avisa e usa um default seguro.
         Err(_) => {
-            eprintln!("delonix: valor de memória inválido {s:?}; a usar 1024 MiB por omissão");
+            tracing::warn!(value = ?s, "valor de memória inválido; a usar 1024 MiB por omissão");
             1024
         }
     }
@@ -1002,11 +1002,13 @@ pub fn create(base: &Path, cfg: &VmConfig) -> Result<Vm> {
     // no XML). No Cloud Hypervisor não há supervisor no host — avisar em vez de
     // aceitar em silêncio uma política que não é imposta instantaneamente.
     if restart_policy_unsupervised(backend.id(), vm.restart_policy.as_deref()) {
-        eprintln!(
-            "delonix: aviso — restart_policy '{}' na VM '{}' (backend {}) NÃO é\n\
-             \x20        supervisionado no host: o reinício ocorre no próximo\n\
-             \x20        `delonix apply`/reconcile (auto-heal), não instantaneamente\n\
-             \x20        no crash. Para reinício imediato usa `--backend libvirt`.",
+        tracing::warn!(
+            vm = %cfg.name,
+            backend = %backend.id(),
+            restart_policy = %vm.restart_policy.as_deref().unwrap_or(""),
+            "restart_policy '{}' na VM '{}' (backend {}) NÃO é supervisionado no host: o reinício \
+             ocorre no próximo `delonix apply`/reconcile (auto-heal), não instantaneamente no \
+             crash. Para reinício imediato usa `--backend libvirt`.",
             vm.restart_policy.as_deref().unwrap_or(""),
             cfg.name,
             backend.id()
