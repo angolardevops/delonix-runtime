@@ -198,13 +198,23 @@ async fn portforward_upgrade(
 /// diferença exec/attach que de outra forma estaria espalhada pelos handlers.
 pub fn subprocess_args(attach: bool, cmd: &[String], name: &str, tty: bool) -> Vec<String> {
     if attach {
-        vec!["logs".into(), "-f".into(), name.to_string()]
+        vec![
+            "container".into(),
+            "logs".into(),
+            "-f".into(),
+            name.to_string(),
+        ]
     } else if tty {
-        let mut a = vec!["exec".into(), "-t".into(), name.to_string()];
+        let mut a = vec![
+            "container".into(),
+            "exec".into(),
+            "-t".into(),
+            name.to_string(),
+        ];
         a.extend(cmd.iter().cloned());
         a
     } else {
-        let mut a = vec!["exec".into(), name.to_string()];
+        let mut a = vec!["container".into(), "exec".into(), name.to_string()];
         a.extend(cmd.iter().cloned());
         a
     }
@@ -226,7 +236,7 @@ fn random_token() -> String {
 }
 
 fn delonix_bin() -> PathBuf {
-    delonix_runtime_core::self_bin()
+    crate::cli_bin()
 }
 
 // ---------------------------------------------------------------------------
