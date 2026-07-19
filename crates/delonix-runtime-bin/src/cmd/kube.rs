@@ -28,7 +28,9 @@ fn cmd_generate(store: &Store, name: &str) -> Result<()> {
     let all = store.list()?;
     // Aceita um nome de pod (gera todos os membros) ou um único container.
     let members: Vec<Container> = if store.load(&format!("pod-{name}")).is_ok() {
-        all.into_iter().filter(|c| c.pod.as_deref() == Some(name) && !c.name.starts_with("pod-")).collect()
+        all.into_iter()
+            .filter(|c| c.pod.as_deref() == Some(name) && !c.name.starts_with("pod-"))
+            .collect()
     } else {
         vec![store.load(name)?]
     };
@@ -82,14 +84,26 @@ mod tests {
     use super::*;
 
     fn ctr(name: &str, image: &str, cmd: &[&str], cpus: &str, mem: &str) -> Container {
-        let mut c = Container::new("id".into(), name.into(), image.into(), cmd.iter().map(|s| s.to_string()).collect(), mem.into());
+        let mut c = Container::new(
+            "id".into(),
+            name.into(),
+            image.into(),
+            cmd.iter().map(|s| s.to_string()).collect(),
+            mem.into(),
+        );
         c.cpus = cpus.into();
         c
     }
 
     #[test]
     fn gera_pod_com_recursos_e_args() {
-        let c = ctr("web", "nginx:1.27", &["nginx", "-g", "daemon off;"], "0.5", "256M");
+        let c = ctr(
+            "web",
+            "nginx:1.27",
+            &["nginx", "-g", "daemon off;"],
+            "0.5",
+            "256M",
+        );
         let y = pod_manifest("web", &[c]);
         assert!(y.contains("kind: Pod"));
         assert!(y.contains("name: web"));
@@ -105,6 +119,9 @@ mod tests {
         // `memory_max = "max"` (sem teto) não deve gerar um `memory: "maxi"` inválido.
         let c = ctr("x", "alpine", &["sh"], "1", "max");
         let y = pod_manifest("x", &[c]);
-        assert!(!y.contains("memory:"), "não devia haver limite de memória: {y}");
+        assert!(
+            !y.contains("memory:"),
+            "não devia haver limite de memória: {y}"
+        );
     }
 }

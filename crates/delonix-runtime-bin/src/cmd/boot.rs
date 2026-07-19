@@ -30,13 +30,23 @@ pub enum BootCmd {
 pub fn run(action: BootCmd) -> Result<()> {
     let (_images, store) = open_stores()?;
     let rootless = runtime::is_rootless();
-    let exe = std::env::current_exe().map(|p| p.to_string_lossy().into_owned()).unwrap_or_else(|_| "delonix".into());
+    let exe = std::env::current_exe()
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_else(|_| "delonix".into());
     let root = ImageStore::default_root();
     let (unit_dir, user_mode, wanted_by) = if rootless {
         let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
-        (std::path::PathBuf::from(home).join(".config/systemd/user"), true, "default.target")
+        (
+            std::path::PathBuf::from(home).join(".config/systemd/user"),
+            true,
+            "default.target",
+        )
     } else {
-        (std::path::PathBuf::from("/etc/systemd/system"), false, "multi-user.target")
+        (
+            std::path::PathBuf::from("/etc/systemd/system"),
+            false,
+            "multi-user.target",
+        )
     };
     let sysctl = |args: &[&str]| -> bool {
         let mut c = std::process::Command::new("systemctl");
@@ -47,7 +57,17 @@ pub fn run(action: BootCmd) -> Result<()> {
     };
 
     match action {
-        BootCmd::Enable { restart } => enable(&store, &unit_dir, &exe, &root.display().to_string(), wanted_by, rootless, user_mode, restart, &sysctl),
+        BootCmd::Enable { restart } => enable(
+            &store,
+            &unit_dir,
+            &exe,
+            &root.display().to_string(),
+            wanted_by,
+            rootless,
+            user_mode,
+            restart,
+            &sysctl,
+        ),
         BootCmd::Disable => {
             let mut n = 0;
             if let Ok(rd) = std::fs::read_dir(&unit_dir) {
@@ -66,7 +86,14 @@ pub fn run(action: BootCmd) -> Result<()> {
             Ok(())
         }
         BootCmd::Status => {
-            println!("mode:  {}", if rootless { "rootless (user units + linger)" } else { "root (system units)" });
+            println!(
+                "mode:  {}",
+                if rootless {
+                    "rootless (user units + linger)"
+                } else {
+                    "root (system units)"
+                }
+            );
             println!("dir:   {}", unit_dir.display());
             let mut any = false;
             if let Ok(rd) = std::fs::read_dir(&unit_dir) {
@@ -106,7 +133,11 @@ fn enable(
         if !c.pid.map(runtime::is_alive).unwrap_or(false) {
             continue;
         }
-        let rp = if restart == "no" { c.restart_policy.as_deref().unwrap_or("always").to_string() } else { restart.clone() };
+        let rp = if restart == "no" {
+            c.restart_policy.as_deref().unwrap_or("always").to_string()
+        } else {
+            restart.clone()
+        };
         let unit = format!(
             "[Unit]\nDescription=Delonix container {name}\nAfter=network-online.target\nWants=network-online.target\n\n\
              [Service]\nType=forking\nRestart={rp}\nTimeoutStopSec=15\nEnvironment=DELONIX_INTERNAL=1\nEnvironment=DELONIX_ROOT={root}\n\
@@ -133,10 +164,16 @@ fn enable(
     if rootless {
         // linger: user units start at boot without a login session.
         if let Ok(user) = std::env::var("USER") {
-            let _ = std::process::Command::new("loginctl").args(["enable-linger", &user]).status();
+            let _ = std::process::Command::new("loginctl")
+                .args(["enable-linger", &user])
+                .status();
         }
     }
-    println!("boot: enabled {} unit(s){}:", installed.len(), if rootless { " (user + linger)" } else { "" });
+    println!(
+        "boot: enabled {} unit(s){}:",
+        installed.len(),
+        if rootless { " (user + linger)" } else { "" }
+    );
     for u in &installed {
         println!("  {u}");
     }

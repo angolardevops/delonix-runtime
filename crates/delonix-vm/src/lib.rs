@@ -19,8 +19,8 @@
 use std::path::Path;
 use std::process::Command;
 
-use delonix_runtime_core::{Error, JsonStore, Result, Status, Vm};
 use delonix_net::infra;
+use delonix_runtime_core::{Error, JsonStore, Result, Status, Vm};
 
 /// Configuração para arrancar uma microVM (campos planos, independentes do
 /// `orchestrator` — a CLI traduz o `VmSpec` para isto).
@@ -244,7 +244,10 @@ fn parse_qemu_format(info: &str) -> Option<String> {
 pub fn disk_backing_format(disk: &Path) -> String {
     if let Ok(out) = Command::new("qemu-img").arg("info").arg(disk).output() {
         if out.status.success() {
-            if let Some(fmt) = std::str::from_utf8(&out.stdout).ok().and_then(parse_qemu_format) {
+            if let Some(fmt) = std::str::from_utf8(&out.stdout)
+                .ok()
+                .and_then(parse_qemu_format)
+            {
                 return fmt;
             }
         }
@@ -341,7 +344,8 @@ pub fn select_backend(want: Option<&str>) -> Result<Box<dyn VmBackend>> {
                 return Ok(Box::new(lv));
             }
             Err(Error::Invalid(
-                "nenhum backend de VM disponível: instala 'cloud-hypervisor' ou 'libvirt'+'qemu'".into(),
+                "nenhum backend de VM disponível: instala 'cloud-hypervisor' ou 'libvirt'+'qemu'"
+                    .into(),
             ))
         }
     }
@@ -509,7 +513,7 @@ fn boot_ch(vmdir: &Path, cfg: &VmConfig, overlay: &str, tap: &str, mac: &str) ->
     ch.push(cpus_arg(cfg)); // boot=N [+ affinity para NUMA/CPU pinning]
     ch.push("--memory".into());
     ch.push(memory_arg(cfg)); // size=XM [+ hugepages=on]
-    // SR-IOV / VFIO: passa cada dispositivo PCI pré-ligado ao vfio-pci.
+                              // SR-IOV / VFIO: passa cada dispositivo PCI pré-ligado ao vfio-pci.
     for dev in &cfg.devices {
         ch.push("--device".into());
         ch.push(format!("path={dev}"));
@@ -623,7 +627,9 @@ pub fn libvirt_domain_xml(cfg: &VmConfig, overlay: &str, mac: &str) -> String {
     s.push_str("<domain type='kvm'>\n");
     s.push_str(&format!("  <name>{name}</name>\n"));
     s.push_str(&format!("  <memory unit='KiB'>{kib}</memory>\n"));
-    s.push_str(&format!("  <currentMemory unit='KiB'>{kib}</currentMemory>\n"));
+    s.push_str(&format!(
+        "  <currentMemory unit='KiB'>{kib}</currentMemory>\n"
+    ));
     // hugepages (HPC): suporta a RAM do domínio em hugepages do host.
     if cfg.hugepages {
         s.push_str("  <memoryBacking>\n    <hugepages/>\n  </memoryBacking>\n");
@@ -649,7 +655,10 @@ pub fn libvirt_domain_xml(cfg: &VmConfig, overlay: &str, mac: &str) -> String {
             .cmdline
             .clone()
             .unwrap_or_else(|| "console=ttyS0 root=/dev/vda1 rw".into());
-        s.push_str(&format!("    <cmdline>{}</cmdline>\n", xml_escape(&cmdline)));
+        s.push_str(&format!(
+            "    <cmdline>{}</cmdline>\n",
+            xml_escape(&cmdline)
+        ));
     } else if let Some(fw) = &cfg.firmware {
         s.push_str(&format!(
             "    <loader readonly='yes' type='pflash'>{}</loader>\n",
@@ -692,7 +701,10 @@ pub fn libvirt_domain_xml(cfg: &VmConfig, overlay: &str, mac: &str) -> String {
     // (o mount é injectado no cloud-init, ver `cmd::vm::build_user_data`).
     for v in &cfg.volumes {
         s.push_str("    <filesystem type='mount' accessmode='passthrough'>\n");
-        s.push_str(&format!("      <source dir='{}'/>\n", xml_escape(&v.source)));
+        s.push_str(&format!(
+            "      <source dir='{}'/>\n",
+            xml_escape(&v.source)
+        ));
         s.push_str(&format!("      <target dir='{}'/>\n", xml_escape(&v.tag)));
         if v.read_only {
             s.push_str("      <readonly/>\n");
@@ -797,7 +809,9 @@ impl VmBackend for LibvirtBackend {
         // Modo NAT: garante a rede libvirt ativa (best-effort; ignora se já o está).
         if matches!(cfg.net_mode.as_deref(), Some("nat") | Some("network")) {
             let net = cfg.bridge.as_deref().unwrap_or("default");
-            let _ = Command::new("virsh").args(["-c", uri, "net-start", net]).status();
+            let _ = Command::new("virsh")
+                .args(["-c", uri, "net-start", net])
+                .status();
         }
         let mut xml = libvirt_domain_xml(cfg, &overlay_abs, &mac);
         // On `qemu:///system` the QEMU process runs as the `libvirt-qemu` user,
@@ -1111,18 +1125,37 @@ mod tests {
     fn libvirt_xml_partilha_volumes_por_9p() {
         let mut cfg = test_vm_cfg("1G");
         cfg.volumes = vec![
-            VmVolume { tag: "dados".into(), source: "/srv/dados".into(), mount_path: "/mnt/dados".into(), read_only: false },
-            VmVolume { tag: "ro".into(), source: "/srv/ro".into(), mount_path: "/mnt/ro".into(), read_only: true },
+            VmVolume {
+                tag: "dados".into(),
+                source: "/srv/dados".into(),
+                mount_path: "/mnt/dados".into(),
+                read_only: false,
+            },
+            VmVolume {
+                tag: "ro".into(),
+                source: "/srv/ro".into(),
+                mount_path: "/mnt/ro".into(),
+                read_only: true,
+            },
         ];
         let xml = libvirt_domain_xml(&cfg, "/tmp/overlay.qcow2", "52:54:00:00:00:01");
-        assert!(xml.contains("<filesystem type='mount' accessmode='passthrough'>"), "{xml}");
+        assert!(
+            xml.contains("<filesystem type='mount' accessmode='passthrough'>"),
+            "{xml}"
+        );
         assert!(xml.contains("<source dir='/srv/dados'/>"), "{xml}");
         assert!(xml.contains("<target dir='dados'/>"), "{xml}");
         // O só-de-leitura (2.º volume) leva `<readonly/>` no seu bloco.
         let ro_idx = xml.find("<target dir='ro'/>").unwrap();
-        assert!(xml[ro_idx..].starts_with("<target dir='ro'/>\n      <readonly/>"), "{xml}");
+        assert!(
+            xml[ro_idx..].starts_with("<target dir='ro'/>\n      <readonly/>"),
+            "{xml}"
+        );
         // Sem volumes → sem <filesystem>.
-        assert!(!libvirt_domain_xml(&test_vm_cfg("1G"), "/tmp/o.qcow2", "52:54:00:00:00:02").contains("<filesystem"));
+        assert!(
+            !libvirt_domain_xml(&test_vm_cfg("1G"), "/tmp/o.qcow2", "52:54:00:00:00:02")
+                .contains("<filesystem")
+        );
     }
 
     #[test]
@@ -1145,8 +1178,14 @@ mod tests {
     #[test]
     fn restart_policy_unsupervised_deteta() {
         // CH/QEMU não supervisionam always/on-failure → avisa.
-        assert!(restart_policy_unsupervised("cloud-hypervisor", Some("always")));
-        assert!(restart_policy_unsupervised("cloud-hypervisor", Some("on-failure")));
+        assert!(restart_policy_unsupervised(
+            "cloud-hypervisor",
+            Some("always")
+        ));
+        assert!(restart_policy_unsupervised(
+            "cloud-hypervisor",
+            Some("on-failure")
+        ));
         // libvirt materializa no XML → não avisa.
         assert!(!restart_policy_unsupervised("libvirt", Some("always")));
         // sem política ou `no` → nada a avisar.

@@ -287,14 +287,20 @@ fn main() {
         std::process::exit(0);
     }
     if raw.len() == 5 && raw[1] == "__volsnap" {
-        if let Err(e) = cmd::mapped::volsnap(&raw[2], std::path::Path::new(&raw[3]), std::path::Path::new(&raw[4])) {
+        if let Err(e) = cmd::mapped::volsnap(
+            &raw[2],
+            std::path::Path::new(&raw[3]),
+            std::path::Path::new(&raw[4]),
+        ) {
             eprintln!("delonix: {e}");
             std::process::exit(1);
         }
         std::process::exit(0);
     }
     if raw.len() == 4 && raw[1] == "__buildtar" {
-        if let Err(e) = cmd::mapped::buildtar(std::path::Path::new(&raw[2]), std::path::Path::new(&raw[3])) {
+        if let Err(e) =
+            cmd::mapped::buildtar(std::path::Path::new(&raw[2]), std::path::Path::new(&raw[3]))
+        {
             eprintln!("delonix: {e}");
             std::process::exit(1);
         }

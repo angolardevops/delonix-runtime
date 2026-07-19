@@ -47,7 +47,9 @@ fn main() {
 
 fn which(bin: &str) -> Option<PathBuf> {
     let path = std::env::var_os("PATH")?;
-    std::env::split_paths(&path).map(|p| p.join(bin)).find(|p| p.exists())
+    std::env::split_paths(&path)
+        .map(|p| p.join(bin))
+        .find(|p| p.exists())
 }
 
 /// Locate a directory that contains `bpf/bpf_helpers.h`. Prefer libbpf-dev
@@ -59,7 +61,9 @@ fn find_bpf_include() -> Option<PathBuf> {
     let rel = Command::new("uname").arg("-r").output().ok()?;
     let ver = String::from_utf8_lossy(&rel.stdout);
     let ver = ver.trim();
-    let cand = PathBuf::from(format!("/usr/src/linux-headers-{ver}/tools/bpf/resolve_btfids/libbpf/include"));
+    let cand = PathBuf::from(format!(
+        "/usr/src/linux-headers-{ver}/tools/bpf/resolve_btfids/libbpf/include"
+    ));
     if cand.join("bpf/bpf_helpers.h").exists() {
         return Some(cand);
     }

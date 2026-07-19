@@ -11,7 +11,9 @@
 use clap::Subcommand;
 use clap_complete::engine::ArgValueCandidates;
 use delonix_net::infra;
-use delonix_runtime_core::{fw_port_ok, fw_proto_ok, fw_src_ok, Container, Error, FwRule, Result, Store};
+use delonix_runtime_core::{
+    fw_port_ok, fw_proto_ok, fw_src_ok, Container, Error, FwRule, Result, Store,
+};
 use serde::Deserialize;
 
 use super::manifest::{self, ManifestDoc};
@@ -167,14 +169,27 @@ pub enum EgressCmd {
 pub fn run_ingress(cmd: IngressCmd) -> Result<()> {
     let (_images, store) = open_stores()?;
     match cmd {
-        IngressCmd::Allow { container, port, from, note } => add_rule(&store, &container, "in", Action::Allow, &port, from, note),
-        IngressCmd::Deny { container, port, from, note } => add_rule(&store, &container, "in", Action::Deny, &port, from, note),
+        IngressCmd::Allow {
+            container,
+            port,
+            from,
+            note,
+        } => add_rule(&store, &container, "in", Action::Allow, &port, from, note),
+        IngressCmd::Deny {
+            container,
+            port,
+            from,
+            note,
+        } => add_rule(&store, &container, "in", Action::Deny, &port, from, note),
         IngressCmd::Policy { container, policy } => set_policy(&store, &container, "in", policy),
         IngressCmd::Publish { container, spec } => {
             let mut c = store.load(&container)?;
             super::container::publish_live(&store, &mut c, &spec)
         }
-        IngressCmd::Unpublish { container, host_port } => {
+        IngressCmd::Unpublish {
+            container,
+            host_port,
+        } => {
             let mut c = store.load(&container)?;
             super::container::unpublish_live(&store, &mut c, &host_port)
         }
@@ -186,8 +201,18 @@ pub fn run_ingress(cmd: IngressCmd) -> Result<()> {
 pub fn run_egress(cmd: EgressCmd) -> Result<()> {
     let (_images, store) = open_stores()?;
     match cmd {
-        EgressCmd::Allow { container, port, to, note } => add_rule(&store, &container, "out", Action::Allow, &port, to, note),
-        EgressCmd::Deny { container, port, to, note } => add_rule(&store, &container, "out", Action::Deny, &port, to, note),
+        EgressCmd::Allow {
+            container,
+            port,
+            to,
+            note,
+        } => add_rule(&store, &container, "out", Action::Allow, &port, to, note),
+        EgressCmd::Deny {
+            container,
+            port,
+            to,
+            note,
+        } => add_rule(&store, &container, "out", Action::Deny, &port, to, note),
         EgressCmd::Policy { container, policy } => set_policy(&store, &container, "out", policy),
         EgressCmd::Net { network, mode, to } => egress_net(&network, mode, to),
         EgressCmd::Host { network, hostname } => egress_host(&network, &hostname),
@@ -205,10 +230,14 @@ fn parse_port_spec(spec: &str) -> Result<(String, String)> {
         None => ("any".to_string(), spec.to_string()),
     };
     if !fw_proto_ok(&proto) {
-        return Err(Error::Invalid(format!("invalid proto '{proto}' (tcp|udp|any)")));
+        return Err(Error::Invalid(format!(
+            "invalid proto '{proto}' (tcp|udp|any)"
+        )));
     }
     if !fw_port_ok(&port) {
-        return Err(Error::Invalid(format!("invalid port '{port}' (1-65535, a range n-m, or *)")));
+        return Err(Error::Invalid(format!(
+            "invalid port '{port}' (1-65535, a range n-m, or *)"
+        )));
     }
     Ok((proto, port))
 }
@@ -223,7 +252,15 @@ fn require_sdn_ip(c: &Container) -> Result<String> {
     })
 }
 
-fn add_rule(store: &Store, name: &str, dir: &str, action: Action, port_spec: &str, cidr: Option<String>, note: Option<String>) -> Result<()> {
+fn add_rule(
+    store: &Store,
+    name: &str,
+    dir: &str,
+    action: Action,
+    port_spec: &str,
+    cidr: Option<String>,
+    note: Option<String>,
+) -> Result<()> {
     let (proto, port) = parse_port_spec(port_spec)?;
     let src = cidr.unwrap_or_default();
     if !src.is_empty() && !fw_src_ok(&src) {
@@ -245,7 +282,11 @@ fn add_rule(store: &Store, name: &str, dir: &str, action: Action, port_spec: &st
     c.firewall = Some(fw);
     store.save(&c)?;
     let arrow = if dir == "in" { "inbound" } else { "outbound" };
-    println!("{}: {arrow} rule added ({})", c.name, output::bold(&format!("{} {port_spec}", action.as_str())));
+    println!(
+        "{}: {arrow} rule added ({})",
+        c.name,
+        output::bold(&format!("{} {port_spec}", action.as_str()))
+    );
     Ok(())
 }
 
@@ -270,17 +311,46 @@ fn set_policy(store: &Store, name: &str, dir: &str, policy: Action) -> Result<()
 fn list_rules(store: &Store, name: &str, dir: &str) -> Result<()> {
     let c = store.load(name)?;
     let fw = c.firewall.clone().unwrap_or_default();
-    let policy = if dir == "in" { &fw.policy_in } else { &fw.policy_out };
-    let default = if policy.is_empty() { "allow (default)" } else { policy.as_str() };
+    let policy = if dir == "in" {
+        &fw.policy_in
+    } else {
+        &fw.policy_out
+    };
+    let default = if policy.is_empty() {
+        "allow (default)"
+    } else {
+        policy.as_str()
+    };
     let arrow = if dir == "in" { "INBOUND" } else { "OUTBOUND" };
-    println!("{} firewall for {} — default policy: {}", arrow, c.name, default);
-    let mut t = output::Table::new(&["PROTO", "PORT", if dir == "in" { "FROM" } else { "TO" }, "ACTION", "NOTE"]);
+    println!(
+        "{} firewall for {} — default policy: {}",
+        arrow, c.name, default
+    );
+    let mut t = output::Table::new(&[
+        "PROTO",
+        "PORT",
+        if dir == "in" { "FROM" } else { "TO" },
+        "ACTION",
+        "NOTE",
+    ]);
     for r in fw.rules.iter().filter(|r| r.dir == dir) {
-        t.row(vec![or_any(&r.proto), or_any(&r.port), or_any(&r.src), r.action.clone(), r.note.clone()]);
+        t.row(vec![
+            or_any(&r.proto),
+            or_any(&r.port),
+            or_any(&r.src),
+            r.action.clone(),
+            r.note.clone(),
+        ]);
     }
     if dir == "in" {
         for p in &c.ports {
-            t.row(vec!["publish".into(), p.clone(), "0.0.0.0/0".into(), "allow".into(), "DNAT".into()]);
+            t.row(vec![
+                "publish".into(),
+                p.clone(),
+                "0.0.0.0/0".into(),
+                "allow".into(),
+                "DNAT".into(),
+            ]);
         }
     }
     t.print();
@@ -339,15 +409,23 @@ fn egress_net(network: &str, mode: EgressMode, to: Option<String>) -> Result<()>
             println!("network {network}: egress to the Internet DENIED");
         }
         EgressMode::Allowlist => {
-            let raw = to.ok_or_else(|| Error::Invalid("allowlist mode needs `--to <cidr,...>`".into()))?;
-            let cidrs: Vec<&str> = raw.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()).collect();
+            let raw =
+                to.ok_or_else(|| Error::Invalid("allowlist mode needs `--to <cidr,...>`".into()))?;
+            let cidrs: Vec<&str> = raw
+                .split(',')
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty())
+                .collect();
             for c in &cidrs {
                 if !fw_src_ok(c) {
                     return Err(Error::Invalid(format!("invalid CIDR '{c}'")));
                 }
             }
             infra::set_egress_policy_net_allowlist(&bridge, &cidrs)?;
-            println!("network {network}: egress DENIED except DNS + {}", cidrs.join(", "));
+            println!(
+                "network {network}: egress DENIED except DNS + {}",
+                cidrs.join(", ")
+            );
         }
     }
     Ok(())
@@ -404,8 +482,16 @@ struct RateLimitSpec {
 
 /// Nomes aceites no `spec` de `kind: Ingress`/`Egress`, para o aviso de campos
 /// desconhecidos (o `rules[]` é validado pela desserialização de `FwDocRule`).
-pub(crate) const FW_SPEC_FIELDS: &[&str] =
-    &["direction", "scope", "target", "defaultPolicy", "rules", "allowCidrs", "fqdnAllowlist", "rateLimit"];
+pub(crate) const FW_SPEC_FIELDS: &[&str] = &[
+    "direction",
+    "scope",
+    "target",
+    "defaultPolicy",
+    "rules",
+    "allowCidrs",
+    "fqdnAllowlist",
+    "rateLimit",
+];
 
 #[derive(Deserialize)]
 struct FwDocRule {
@@ -433,9 +519,9 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
     let (_images, store) = open_stores()?;
     apply_kind(&store, docs, "in")?; // kind: Ingress
     apply_kind(&store, docs, "out")?; // kind: Egress
-    // kind: FirewallPolicy — a forma UNIFICADA (a direcção vem do `spec.direction`
-    // em vez do nome do Kind, resolvendo a confusão de que aqui `Ingress` é
-    // firewall L4, não o Ingress L7/HTTP do k8s). Aplica a MESMA lógica.
+                                      // kind: FirewallPolicy — a forma UNIFICADA (a direcção vem do `spec.direction`
+                                      // em vez do nome do Kind, resolvendo a confusão de que aqui `Ingress` é
+                                      // firewall L4, não o Ingress L7/HTTP do k8s). Aplica a MESMA lógica.
     for doc in manifest::of_kind(docs, "FirewallPolicy") {
         let dir = match doc.spec.get("direction").and_then(|v| v.as_str()) {
             Some("ingress") => "in",
@@ -498,7 +584,10 @@ fn apply_fw_doc(store: &Store, doc: &ManifestDoc, dir: &str) -> Result<()> {
     fw.rules.retain(|r| r.dir != dir);
     let policy = spec.default_policy.as_deref().unwrap_or("deny");
     if !matches!(policy, "allow" | "deny") {
-        return Err(Error::Invalid(format!("{kind}/{}: defaultPolicy must be allow|deny", doc.metadata.name)));
+        return Err(Error::Invalid(format!(
+            "{kind}/{}: defaultPolicy must be allow|deny",
+            doc.metadata.name
+        )));
     }
     if dir == "in" {
         fw.policy_in = policy.to_string();
@@ -508,26 +597,48 @@ fn apply_fw_doc(store: &Store, doc: &ManifestDoc, dir: &str) -> Result<()> {
     for r in &spec.rules {
         let proto = r.proto.clone().unwrap_or_else(|| "any".into());
         if !fw_proto_ok(&proto) {
-            return Err(Error::Invalid(format!("{kind}/{}: invalid proto '{proto}'", doc.metadata.name)));
+            return Err(Error::Invalid(format!(
+                "{kind}/{}: invalid proto '{proto}'",
+                doc.metadata.name
+            )));
         }
         if !fw_port_ok(&r.port) {
-            return Err(Error::Invalid(format!("{kind}/{}: invalid port '{}'", doc.metadata.name, r.port)));
+            return Err(Error::Invalid(format!(
+                "{kind}/{}: invalid port '{}'",
+                doc.metadata.name, r.port
+            )));
         }
         let src = r.from.clone().or_else(|| r.to.clone()).unwrap_or_default();
         if !src.is_empty() && !fw_src_ok(&src) {
-            return Err(Error::Invalid(format!("{kind}/{}: invalid CIDR '{src}'", doc.metadata.name)));
+            return Err(Error::Invalid(format!(
+                "{kind}/{}: invalid CIDR '{src}'",
+                doc.metadata.name
+            )));
         }
         let action = r.action.clone().unwrap_or_else(|| "allow".into());
         if !matches!(action.as_str(), "allow" | "deny") {
-            return Err(Error::Invalid(format!("{kind}/{}: action must be allow|deny", doc.metadata.name)));
+            return Err(Error::Invalid(format!(
+                "{kind}/{}: action must be allow|deny",
+                doc.metadata.name
+            )));
         }
-        fw.rules.push(FwRule { dir: dir.to_string(), proto, port: r.port.clone(), src, action, note: r.note.clone().unwrap_or_default() });
+        fw.rules.push(FwRule {
+            dir: dir.to_string(),
+            proto,
+            port: r.port.clone(),
+            src,
+            action,
+            note: r.note.clone().unwrap_or_default(),
+        });
     }
     infra::apply_firewall(&c.id, &ip, &fw)?;
     let n = fw.rules.iter().filter(|r| r.dir == dir).count();
     c.firewall = Some(fw);
     store.save(&c)?;
-    println!("{kind}/{}: applied to {} ({n} rule(s), default {policy})", doc.metadata.name, spec.target);
+    println!(
+        "{kind}/{}: applied to {} ({n} rule(s), default {policy})",
+        doc.metadata.name, spec.target
+    );
     Ok(())
 }
 
@@ -536,9 +647,16 @@ fn apply_fw_doc(store: &Store, doc: &ManifestDoc, dir: &str) -> Result<()> {
 /// Usado pelo `kind: Dependency` ('A conhece B' compila para: em B, ingress
 /// default-deny + allow do IP de A) sem duplicar a construção do `ContainerFw`.
 /// As `allows` já vêm com `dir="in"`.
-pub(crate) fn apply_container_ingress(store: &Store, target: &str, policy: &str, allows: &[FwRule]) -> Result<()> {
+pub(crate) fn apply_container_ingress(
+    store: &Store,
+    target: &str,
+    policy: &str,
+    allows: &[FwRule],
+) -> Result<()> {
     if !matches!(policy, "allow" | "deny") {
-        return Err(Error::Invalid(format!("ingress de '{target}': policy tem de ser allow|deny")));
+        return Err(Error::Invalid(format!(
+            "ingress de '{target}': policy tem de ser allow|deny"
+        )));
     }
     let mut c = store.load(target)?;
     let ip = require_sdn_ip(&c)?;
@@ -565,7 +683,9 @@ fn apply_network_egress(kind: &str, name: &str, spec: &FwDocSpec) -> Result<()> 
     }
     let policy = spec.default_policy.as_deref().unwrap_or("allow");
     if !matches!(policy, "allow" | "deny") {
-        return Err(Error::Invalid(format!("{kind}/{name}: defaultPolicy must be allow|deny")));
+        return Err(Error::Invalid(format!(
+            "{kind}/{name}: defaultPolicy must be allow|deny"
+        )));
     }
     // A allowlist (CIDR/FQDN) SÓ tem efeito com `deny` — com `allow` a saída fica
     // aberta e a lista seria descartada em silêncio (o utilizador pensaria que
@@ -584,7 +704,9 @@ fn apply_network_egress(kind: &str, name: &str, spec: &FwDocSpec) -> Result<()> 
     }
     for host in &spec.fqdn_allowlist {
         if !fw_host_ok(host) {
-            return Err(Error::Invalid(format!("{kind}/{name}: hostname inválido '{host}'")));
+            return Err(Error::Invalid(format!(
+                "{kind}/{name}: hostname inválido '{host}'"
+            )));
         }
     }
 
@@ -619,9 +741,16 @@ fn apply_network_egress(kind: &str, name: &str, spec: &FwDocSpec) -> Result<()> 
         "{} CIDR + {} FQDN{}",
         spec.allow_cidrs.len(),
         spec.fqdn_allowlist.len(),
-        if spec.rate_limit.is_some() { " + rateLimit" } else { "" }
+        if spec.rate_limit.is_some() {
+            " + rateLimit"
+        } else {
+            ""
+        }
     );
-    println!("{kind}/{name}: egress por-rede aplicado a '{}' (default {policy}, {extras})", spec.target);
+    println!(
+        "{kind}/{name}: egress por-rede aplicado a '{}' (default {policy}, {extras})",
+        spec.target
+    );
     Ok(())
 }
 
@@ -642,9 +771,18 @@ fn fw_host_ok(h: &str) -> bool {
 /// `egress show <net>` — the network's egress policy (CIDR allowlist + FQDN hosts
 /// + the IPs currently learnt from DNS for those hosts).
 fn egress_show(network: &str) -> Result<()> {
-    let def = infra::network_get(network).ok_or_else(|| Error::NotFound(format!("network '{network}'")))?;
-    let policy = def.egress.policy.as_deref().unwrap_or("allow (default — no egress restriction)");
-    println!("egress for network {} (bridge {}):", output::bold(network), def.bridge);
+    let def = infra::network_get(network)
+        .ok_or_else(|| Error::NotFound(format!("network '{network}'")))?;
+    let policy = def
+        .egress
+        .policy
+        .as_deref()
+        .unwrap_or("allow (default — no egress restriction)");
+    println!(
+        "egress for network {} (bridge {}):",
+        output::bold(network),
+        def.bridge
+    );
     println!("  policy: {policy}");
     if def.egress.hosts.is_empty() {
         println!("  FQDN allowlist: (none)");
@@ -667,7 +805,10 @@ fn egress_show(network: &str) -> Result<()> {
 fn egress_host(network: &str, hostname: &str) -> Result<()> {
     let bridge = infra::resolve_net(network)?.0;
     infra::set_egress_host(&bridge, hostname)?;
-    println!("network {network}: egress now allows {} (and *.{}) — learnt live from DNS", hostname, hostname);
+    println!(
+        "network {network}: egress now allows {} (and *.{}) — learnt live from DNS",
+        hostname, hostname
+    );
     Ok(())
 }
 
@@ -690,10 +831,28 @@ mod tests {
     #[test]
     fn network_egress_recusa_allowlist_com_policy_allow() {
         // #1: allow + allowlist = restrição só na aparência → erro claro.
-        let e = apply_network_egress("Egress", "e", &net_spec("allow", &["10.0.0.0/8"], &[], vec![])).unwrap_err();
-        assert!(e.to_string().contains("só fazem sentido com defaultPolicy: deny"), "{e}");
-        let e = apply_network_egress("Egress", "e", &net_spec("allow", &[], &["github.com"], vec![])).unwrap_err();
-        assert!(e.to_string().contains("só fazem sentido com defaultPolicy: deny"), "{e}");
+        let e = apply_network_egress(
+            "Egress",
+            "e",
+            &net_spec("allow", &["10.0.0.0/8"], &[], vec![]),
+        )
+        .unwrap_err();
+        assert!(
+            e.to_string()
+                .contains("só fazem sentido com defaultPolicy: deny"),
+            "{e}"
+        );
+        let e = apply_network_egress(
+            "Egress",
+            "e",
+            &net_spec("allow", &[], &["github.com"], vec![]),
+        )
+        .unwrap_err();
+        assert!(
+            e.to_string()
+                .contains("só fazem sentido com defaultPolicy: deny"),
+            "{e}"
+        );
     }
 
     #[test]
@@ -701,15 +860,34 @@ mod tests {
         // Estes erros disparam ANTES do resolve_net (que precisaria do ingress a
         // correr) — validação pura, testável sem infra.
         // #3: CIDR inválido.
-        assert!(apply_network_egress("Egress", "e", &net_spec("deny", &["nope"], &[], vec![]))
-            .unwrap_err().to_string().contains("invalid CIDR"));
+        assert!(
+            apply_network_egress("Egress", "e", &net_spec("deny", &["nope"], &[], vec![]))
+                .unwrap_err()
+                .to_string()
+                .contains("invalid CIDR")
+        );
         // #3: FQDN inválido (injecção).
-        assert!(apply_network_egress("Egress", "e", &net_spec("deny", &[], &["x;rm -rf"], vec![]))
-            .unwrap_err().to_string().contains("hostname inválido"));
+        assert!(
+            apply_network_egress("Egress", "e", &net_spec("deny", &[], &["x;rm -rf"], vec![]))
+                .unwrap_err()
+                .to_string()
+                .contains("hostname inválido")
+        );
         // `rules` em scope network.
-        let rules = vec![FwDocRule { proto: None, port: "80".into(), from: None, to: None, action: None, note: None }];
-        assert!(apply_network_egress("Egress", "e", &net_spec("deny", &[], &[], rules))
-            .unwrap_err().to_string().contains("`rules` é só para scope: container"));
+        let rules = vec![FwDocRule {
+            proto: None,
+            port: "80".into(),
+            from: None,
+            to: None,
+            action: None,
+            note: None,
+        }];
+        assert!(
+            apply_network_egress("Egress", "e", &net_spec("deny", &[], &[], rules))
+                .unwrap_err()
+                .to_string()
+                .contains("`rules` é só para scope: container")
+        );
     }
 
     #[test]
@@ -726,9 +904,18 @@ mod tests {
 
     #[test]
     fn parse_port_spec_defaults_proto_to_any() {
-        assert_eq!(parse_port_spec("5432").unwrap(), ("any".into(), "5432".into()));
-        assert_eq!(parse_port_spec("tcp/5432").unwrap(), ("tcp".into(), "5432".into()));
-        assert_eq!(parse_port_spec("udp/*").unwrap(), ("udp".into(), "*".into()));
+        assert_eq!(
+            parse_port_spec("5432").unwrap(),
+            ("any".into(), "5432".into())
+        );
+        assert_eq!(
+            parse_port_spec("tcp/5432").unwrap(),
+            ("tcp".into(), "5432".into())
+        );
+        assert_eq!(
+            parse_port_spec("udp/*").unwrap(),
+            ("udp".into(), "*".into())
+        );
     }
 
     #[test]

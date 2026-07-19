@@ -34,7 +34,8 @@ pub struct DiscoveredPort {
 /// ficheiro ilegível (processo morto, sem permissões) é simplesmente saltado.
 pub fn discover_ports(pid: i32) -> Vec<DiscoveredPort> {
     // (proto, porta) -> inode do socket em escuta. Dedup por (proto, porta).
-    let mut seen: std::collections::BTreeMap<(String, u16), u64> = std::collections::BTreeMap::new();
+    let mut seen: std::collections::BTreeMap<(String, u16), u64> =
+        std::collections::BTreeMap::new();
     // (ficheiro, proto, só-LISTEN). TCP conta apenas o estado LISTEN (0A); UDP não
     // tem "listen", por isso conta os sockets ligados (sem extremo remoto).
     for (file, proto, listen_only) in [
@@ -44,7 +45,9 @@ pub fn discover_ports(pid: i32) -> Vec<DiscoveredPort> {
         ("udp6", "udp", false),
     ] {
         let path = format!("/proc/{pid}/net/{file}");
-        let Ok(content) = std::fs::read_to_string(&path) else { continue };
+        let Ok(content) = std::fs::read_to_string(&path) else {
+            continue;
+        };
         for (port, inode) in parse_listen_ports(&content, listen_only) {
             seen.entry((proto.to_string(), port)).or_insert(inode);
         }
@@ -83,7 +86,11 @@ fn inode_comm_map(pid: i32) -> std::collections::BTreeMap<u64, String> {
             Err(_) => continue,
         };
         // só processos na MESMA netns que a carga.
-        if std::fs::read_link(format!("/proc/{p}/ns/net")).ok().as_deref() != Some(target.as_path()) {
+        if std::fs::read_link(format!("/proc/{p}/ns/net"))
+            .ok()
+            .as_deref()
+            != Some(target.as_path())
+        {
             continue;
         }
         let comm = std::fs::read_to_string(format!("/proc/{p}/comm"))
@@ -97,7 +104,8 @@ fn inode_comm_map(pid: i32) -> std::collections::BTreeMap<u64, String> {
                 if let Ok(link) = std::fs::read_link(fd.path()) {
                     let s = link.to_string_lossy();
                     // formato "socket:[12345]"
-                    if let Some(num) = s.strip_prefix("socket:[").and_then(|x| x.strip_suffix("]")) {
+                    if let Some(num) = s.strip_prefix("socket:[").and_then(|x| x.strip_suffix("]"))
+                    {
                         if let Ok(inode) = num.parse::<u64>() {
                             map.entry(inode).or_insert_with(|| comm.clone());
                         }
@@ -124,8 +132,12 @@ fn parse_listen_ports(table: &str, listen_only: bool) -> Vec<(u16, u64)> {
         if cols.len() < 4 {
             continue;
         }
-        let Some((_, lport_hex)) = cols[1].rsplit_once(':') else { continue };
-        let Ok(lport) = u16::from_str_radix(lport_hex, 16) else { continue };
+        let Some((_, lport_hex)) = cols[1].rsplit_once(':') else {
+            continue;
+        };
+        let Ok(lport) = u16::from_str_radix(lport_hex, 16) else {
+            continue;
+        };
         if lport == 0 {
             continue;
         }
@@ -173,7 +185,9 @@ mod tests {
   11: 0100007F:C001 0200000A:0035 01 00000000:00000000 00:00000000 00000000  1000        0 56789 2 0000 0
 ";
 
-    fn ports_only(v: Vec<(u16, u64)>) -> Vec<u16> { v.into_iter().map(|(p, _)| p).collect() }
+    fn ports_only(v: Vec<(u16, u64)>) -> Vec<u16> {
+        v.into_iter().map(|(p, _)| p).collect()
+    }
 
     #[test]
     fn tcp_lists_only_listen_sockets() {

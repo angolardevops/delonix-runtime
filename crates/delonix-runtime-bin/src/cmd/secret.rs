@@ -96,7 +96,11 @@ pub(crate) const SECRET_SPEC_FIELDS: &[&str] = &["stringData", "fromEnvFile"];
 /// senão um `fromEnvFile: ./app.env` procuraria no CWD de quem corre o comando,
 /// não ao lado do manifesto). Partilhado por `create` e `apply`.
 fn load_env_file(base: &Path, f: &Path) -> Result<BTreeMap<String, String>> {
-    let path = if f.is_absolute() { f.to_path_buf() } else { base.join(f) };
+    let path = if f.is_absolute() {
+        f.to_path_buf()
+    } else {
+        base.join(f)
+    };
     let content = std::fs::read_to_string(&path)
         .map_err(|e| Error::Invalid(format!("env-file {}: {e}", path.display())))?;
     Ok(parse_env_file(&content))
@@ -129,14 +133,21 @@ pub fn apply(docs: &[ManifestDoc], base: &Path) -> Result<()> {
             )));
         }
         let n = data.len();
-        store.save(&Secret { name: name.clone(), data, updated_unix: now_unix() })?;
+        store.save(&Secret {
+            name: name.clone(),
+            data,
+            updated_unix: now_unix(),
+        })?;
         println!("secret/{name}: garantido ({n} chave(s))");
     }
     Ok(())
 }
 
 fn now_unix() -> u64 {
-    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
 }
 
 /// Separa `KEY=value` (o `=` do PRIMEIRO sinal; o valor pode conter `=`).
@@ -162,9 +173,15 @@ pub fn run(action: SecretCmd) -> Result<()> {
     match action {
         // Tratado no topo (faz `return`).
         SecretCmd::Apply { .. } => unreachable!("tratado acima"),
-        SecretCmd::Create { name, from_literal, from_env_file } => {
+        SecretCmd::Create {
+            name,
+            from_literal,
+            from_env_file,
+        } => {
             if !valid_name(&name) {
-                return Err(Error::Invalid(format!("nome de segredo inválido: {name:?}")));
+                return Err(Error::Invalid(format!(
+                    "nome de segredo inválido: {name:?}"
+                )));
             }
             let mut data = std::collections::BTreeMap::new();
             if let Some(f) = from_env_file {
@@ -172,21 +189,33 @@ pub fn run(action: SecretCmd) -> Result<()> {
                 data.extend(load_env_file(Path::new("."), &f)?);
             }
             for lit in &from_literal {
-                let (k, v) = parse_kv(lit).ok_or_else(|| Error::Invalid(format!("--from-literal inválido: {lit:?} (usa KEY=value)")))?;
+                let (k, v) = parse_kv(lit).ok_or_else(|| {
+                    Error::Invalid(format!("--from-literal inválido: {lit:?} (usa KEY=value)"))
+                })?;
                 data.insert(k, v);
             }
             if data.is_empty() {
-                return Err(Error::Invalid("segredo vazio — usa --from-literal KEY=value e/ou --from-env-file".into()));
+                return Err(Error::Invalid(
+                    "segredo vazio — usa --from-literal KEY=value e/ou --from-env-file".into(),
+                ));
             }
             let n = data.len();
-            store.save(&Secret { name: name.clone(), data, updated_unix: now_unix() })?;
+            store.save(&Secret {
+                name: name.clone(),
+                data,
+                updated_unix: now_unix(),
+            })?;
             println!("segredo '{name}' criado ({n} chave(s))");
         }
         SecretCmd::Ls => {
             let mut t = output::Table::new(&["NAME", "KEYS", "NAMES"]).right_align(1);
             for s in store.list() {
                 let keys: Vec<&str> = s.data.keys().map(String::as_str).collect();
-                t.row(vec![s.name.clone(), s.data.len().to_string(), keys.join(", ")]);
+                t.row(vec![
+                    s.name.clone(),
+                    s.data.len().to_string(),
+                    keys.join(", "),
+                ]);
             }
             t.print();
         }
@@ -195,20 +224,35 @@ pub fn run(action: SecretCmd) -> Result<()> {
             println!("Name:  {}", s.name);
             for (k, v) in &s.data {
                 // Redacção por omissão — o valor só sai com --reveal explícito.
-                println!("  {k}={}", if reveal { v.clone() } else { "••••••".into() });
+                println!(
+                    "  {k}={}",
+                    if reveal {
+                        v.clone()
+                    } else {
+                        "••••••".into()
+                    }
+                );
             }
             if !reveal && !s.data.is_empty() {
-                println!("{}", output::dim("(valores ocultos — usa --reveal para os mostrar)"));
+                println!(
+                    "{}",
+                    output::dim("(valores ocultos — usa --reveal para os mostrar)")
+                );
             }
         }
         SecretCmd::Set { name, pairs } => {
             if pairs.is_empty() {
                 return Err(Error::Invalid("indica pelo menos um KEY=value".into()));
             }
-            let mut s = store.load(&name).unwrap_or_else(|_| Secret { name: name.clone(), ..Default::default() });
+            let mut s = store.load(&name).unwrap_or_else(|_| Secret {
+                name: name.clone(),
+                ..Default::default()
+            });
             s.name = name.clone();
             for p in &pairs {
-                let (k, v) = parse_kv(p).ok_or_else(|| Error::Invalid(format!("par inválido: {p:?} (usa KEY=value)")))?;
+                let (k, v) = parse_kv(p).ok_or_else(|| {
+                    Error::Invalid(format!("par inválido: {p:?} (usa KEY=value)"))
+                })?;
                 s.data.insert(k, v);
             }
             s.updated_unix = now_unix();
@@ -221,10 +265,13 @@ pub fn run(action: SecretCmd) -> Result<()> {
                 println!("segredo '{name}' removido");
                 return Ok(());
             }
-            let k = key.ok_or_else(|| Error::Invalid("indica a chave a remover (ou --all)".into()))?;
+            let k =
+                key.ok_or_else(|| Error::Invalid("indica a chave a remover (ou --all)".into()))?;
             let mut s = store.load(&name)?;
             if s.data.remove(&k).is_none() {
-                return Err(Error::Invalid(format!("chave '{k}' não existe em '{name}'")));
+                return Err(Error::Invalid(format!(
+                    "chave '{k}' não existe em '{name}'"
+                )));
             }
             s.updated_unix = now_unix();
             store.save(&s)?;
@@ -250,7 +297,10 @@ mod tests {
     fn parse_kv_corta_no_primeiro_igual() {
         assert_eq!(parse_kv("K=v"), Some(("K".into(), "v".into())));
         // O valor pode conter '=' (ex.: um token base64 com padding).
-        assert_eq!(parse_kv("TOKEN=ab==cd"), Some(("TOKEN".into(), "ab==cd".into())));
+        assert_eq!(
+            parse_kv("TOKEN=ab==cd"),
+            Some(("TOKEN".into(), "ab==cd".into()))
+        );
         // Chave vazia não é válida.
         assert_eq!(parse_kv("=v"), None);
         assert_eq!(parse_kv("semigual"), None);

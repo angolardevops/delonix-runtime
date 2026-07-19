@@ -17,12 +17,18 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 fn rt(ctx: &'static str, e: impl std::fmt::Display) -> Error {
-    Error::Runtime { context: ctx, message: e.to_string() }
+    Error::Runtime {
+        context: ctx,
+        message: e.to_string(),
+    }
 }
 
 /// Corre `prog args`; devolve stdout (trim) ou erro com o stderr.
 fn out(prog: &str, args: &[&str]) -> Result<String> {
-    let o = Command::new(prog).args(args).output().map_err(|e| rt("spawn", e))?;
+    let o = Command::new(prog)
+        .args(args)
+        .output()
+        .map_err(|e| rt("spawn", e))?;
     if !o.status.success() {
         return Err(Error::Runtime {
             context: "cmd",
@@ -52,7 +58,12 @@ pub fn pubkey(private: &str) -> Result<String> {
         .stderr(Stdio::null())
         .spawn()
         .map_err(|e| rt("spawn wg pubkey", e))?;
-    child.stdin.take().unwrap().write_all(private.as_bytes()).map_err(|e| rt("stdin", e))?;
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(private.as_bytes())
+        .map_err(|e| rt("stdin", e))?;
     let o = child.wait_with_output().map_err(|e| rt("wait", e))?;
     Ok(String::from_utf8_lossy(&o.stdout).trim().to_string())
 }
@@ -102,7 +113,12 @@ pub fn ensure_node_key() -> Result<WgKey> {
 /// que tem CAP_NET_ADMIN no netns de infra). Idempotente. A privada vai por
 /// ficheiro temporário 0600 (não na linha de comando / `ps`). `addr_cidr` ex.:
 /// `"10.99.0.1/24"`.
-pub fn ensure_iface(name: &str, private_key: &str, listen_port: u16, addr_cidr: &str) -> Result<()> {
+pub fn ensure_iface(
+    name: &str,
+    private_key: &str,
+    listen_port: u16,
+    addr_cidr: &str,
+) -> Result<()> {
     let _ = run("ip", &["link", "del", name]); // limpa restos (best-effort)
     run("ip", &["link", "add", name, "type", "wireguard"])?;
     let dir = wg_dir();
@@ -111,7 +127,14 @@ pub fn ensure_iface(name: &str, private_key: &str, listen_port: u16, addr_cidr: 
     write_0600(&kf, private_key)?;
     let res = run(
         "wg",
-        &["set", name, "private-key", &kf.to_string_lossy(), "listen-port", &listen_port.to_string()],
+        &[
+            "set",
+            name,
+            "private-key",
+            &kf.to_string_lossy(),
+            "listen-port",
+            &listen_port.to_string(),
+        ],
     );
     let _ = std::fs::remove_file(&kf);
     res?;
@@ -133,17 +156,27 @@ pub fn set_peer(name: &str, p: &Peer) -> Result<()> {
     run(
         "wg",
         &[
-            "set", name, "peer", &p.public,
-            "allowed-ips", &allowed,
-            "endpoint", &p.endpoint,
-            "persistent-keepalive", "25",
+            "set",
+            name,
+            "peer",
+            &p.public,
+            "allowed-ips",
+            &allowed,
+            "endpoint",
+            &p.endpoint,
+            "persistent-keepalive",
+            "25",
         ],
     )
 }
 
 /// Está o WireGuard disponível neste host? (`wg`/`ip` + módulo de kernel).
 pub fn available() -> bool {
-    Command::new("wg").arg("--version").output().map(|o| o.status.success()).unwrap_or(false)
+    Command::new("wg")
+        .arg("--version")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
 }
 
 #[cfg(test)]

@@ -73,17 +73,22 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
         .collect();
 
     // Agrupa por ALVO: cada `to` junta os `allow` de todos os `from` que o conhecem.
-    let mut by_target: std::collections::BTreeMap<String, Vec<FwRule>> = std::collections::BTreeMap::new();
+    let mut by_target: std::collections::BTreeMap<String, Vec<FwRule>> =
+        std::collections::BTreeMap::new();
     for doc in &deps {
         manifest::warn_unknown_fields(doc, DEPENDENCY_SPEC_FIELDS);
         let spec: DependencySpec = manifest::spec_of(doc)?;
         let name = &doc.metadata.name;
         if spec.to.is_empty() {
-            return Err(Error::Invalid(format!("Dependency '{name}': `to` não pode ser vazio")));
+            return Err(Error::Invalid(format!(
+                "Dependency '{name}': `to` não pode ser vazio"
+            )));
         }
         let proto = spec.proto.clone().unwrap_or_else(|| "any".into());
         if !delonix_runtime_core::fw_proto_ok(&proto) {
-            return Err(Error::Invalid(format!("Dependency '{name}': proto inválido '{proto}'")));
+            return Err(Error::Invalid(format!(
+                "Dependency '{name}': proto inválido '{proto}'"
+            )));
         }
         let from_ip = ips.get(&spec.from).ok_or_else(|| {
             Error::Invalid(format!(
@@ -92,15 +97,23 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
             ))
         })?;
         // Portas: vazio = qualquer; senão uma regra por porta.
-        let ports: Vec<String> = if spec.ports.is_empty() { vec![String::new()] } else { spec.ports.clone() };
+        let ports: Vec<String> = if spec.ports.is_empty() {
+            vec![String::new()]
+        } else {
+            spec.ports.clone()
+        };
         for port in &ports {
             if !delonix_runtime_core::fw_port_ok(port) {
-                return Err(Error::Invalid(format!("Dependency '{name}': porta inválida '{port}'")));
+                return Err(Error::Invalid(format!(
+                    "Dependency '{name}': porta inválida '{port}'"
+                )));
             }
         }
         for target in &spec.to {
             if target == &spec.from {
-                return Err(Error::Invalid(format!("Dependency '{name}': from e to são o mesmo ('{target}')")));
+                return Err(Error::Invalid(format!(
+                    "Dependency '{name}': from e to são o mesmo ('{target}')"
+                )));
             }
             if !ips.contains_key(target) {
                 return Err(Error::Invalid(format!(
@@ -144,7 +157,10 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
             );
         }
         super::firewall::apply_container_ingress(&store, target, "deny", allows)?;
-        println!("Dependency: '{target}' protegido (ingress default-deny) + {} allow(s)", allows.len());
+        println!(
+            "Dependency: '{target}' protegido (ingress default-deny) + {} allow(s)",
+            allows.len()
+        );
     }
     Ok(())
 }

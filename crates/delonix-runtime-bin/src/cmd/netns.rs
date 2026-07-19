@@ -120,13 +120,18 @@ pub fn run(action: NetnsCmd) -> Result<()> {
             Ok(())
         }
         NetnsCmd::Exec { name, command } => {
-            let argv = infra::join_argv(&name)
-                .ok_or_else(|| Error::Runtime { context: "ingress", message: "infra is not up".into() })?;
+            let argv = infra::join_argv(&name).ok_or_else(|| Error::Runtime {
+                context: "ingress",
+                message: "infra is not up".into(),
+            })?;
             let status = std::process::Command::new(&argv[0])
                 .args(&argv[1..])
                 .args(&command)
                 .status()
-                .map_err(|e| Error::Runtime { context: "netns exec", message: e.to_string() })?;
+                .map_err(|e| Error::Runtime {
+                    context: "netns exec",
+                    message: e.to_string(),
+                })?;
             std::process::exit(status.code().unwrap_or(1));
         }
         NetnsCmd::Publish { name, spec, ip } => {
@@ -147,10 +152,15 @@ pub fn run(action: NetnsCmd) -> Result<()> {
                 println!("ingress firewall removed for '{name}'");
                 return Ok(());
             }
-            let json = spec.ok_or_else(|| Error::Invalid("missing --spec <json> or --clear".into()))?;
-            let fw: ContainerFw = serde_json::from_str(&json).map_err(|e| Error::Invalid(format!("firewall JSON: {e}")))?;
+            let json =
+                spec.ok_or_else(|| Error::Invalid("missing --spec <json> or --clear".into()))?;
+            let fw: ContainerFw = serde_json::from_str(&json)
+                .map_err(|e| Error::Invalid(format!("firewall JSON: {e}")))?;
             infra::apply_firewall(&name, &ip, &fw)?;
-            println!("ingress firewall applied for '{name}' ({} rule(s))", fw.rules.len());
+            println!(
+                "ingress firewall applied for '{name}' ({} rule(s))",
+                fw.rules.len()
+            );
             Ok(())
         }
     }

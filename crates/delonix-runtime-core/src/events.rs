@@ -53,8 +53,19 @@ impl Event {
     /// Linha para consumo humano (`system events`).
     pub fn to_line(&self) -> String {
         let when = crate::fmt_local_ts(self.ts);
-        let detail = self.detail.as_deref().map(|d| format!(" ({d})")).unwrap_or_default();
-        format!("{when}  {:<9} {:<7} {}  {}{}", self.kind, self.action, self.short_id(), self.name, detail)
+        let detail = self
+            .detail
+            .as_deref()
+            .map(|d| format!(" ({d})"))
+            .unwrap_or_default();
+        format!(
+            "{when}  {:<9} {:<7} {}  {}{}",
+            self.kind,
+            self.action,
+            self.short_id(),
+            self.name,
+            detail
+        )
     }
 
     fn short_id(&self) -> &str {
@@ -81,13 +92,19 @@ pub fn emit(root: &Path, kind: &str, action: &str, id: &str, name: &str, detail:
         name: name.to_string(),
         detail: detail.map(str::to_string),
     };
-    let Ok(mut line) = serde_json::to_string(&ev) else { return };
+    let Ok(mut line) = serde_json::to_string(&ev) else {
+        return;
+    };
     line.push('\n');
     let p = path(root);
     rotate_if_needed(&p);
     let _ = std::fs::create_dir_all(root);
     // `O_APPEND`: a atomicidade vem do kernel, não de um trinco nosso.
-    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&p) {
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&p)
+    {
         let _ = f.write_all(line.as_bytes());
     }
 }
@@ -105,8 +122,12 @@ fn rotate_if_needed(p: &Path) {
 /// corrompidas são saltadas em silêncio: um evento ilegível não pode esconder
 /// os outros.
 pub fn read(root: &Path) -> Vec<Event> {
-    let Ok(data) = std::fs::read_to_string(path(root)) else { return Vec::new() };
-    data.lines().filter_map(|l| serde_json::from_str::<Event>(l).ok()).collect()
+    let Ok(data) = std::fs::read_to_string(path(root)) else {
+        return Vec::new();
+    };
+    data.lines()
+        .filter_map(|l| serde_json::from_str::<Event>(l).ok())
+        .collect()
 }
 
 /// O tamanho actual do log (para o `-f` saber onde continuar).
@@ -118,7 +139,9 @@ pub fn size(root: &Path) -> u64 {
 pub fn read_from(root: &Path, offset: u64) -> (Vec<Event>, u64) {
     use std::io::{Read, Seek, SeekFrom};
     let p = path(root);
-    let Ok(mut f) = std::fs::File::open(&p) else { return (Vec::new(), offset) };
+    let Ok(mut f) = std::fs::File::open(&p) else {
+        return (Vec::new(), offset);
+    };
     let len = f.metadata().map(|m| m.len()).unwrap_or(0);
     // Encolheu = rodou; recomeça do princípio para não perder o ficheiro novo.
     let start = if len < offset { 0 } else { offset };
@@ -129,7 +152,10 @@ pub fn read_from(root: &Path, offset: u64) -> (Vec<Event>, u64) {
     if f.read_to_string(&mut buf).is_err() {
         return (Vec::new(), offset);
     }
-    let evs = buf.lines().filter_map(|l| serde_json::from_str::<Event>(l).ok()).collect();
+    let evs = buf
+        .lines()
+        .filter_map(|l| serde_json::from_str::<Event>(l).ok())
+        .collect();
     (evs, start + buf.len() as u64)
 }
 
@@ -148,7 +174,14 @@ mod tests {
     fn emit_e_read_fazem_round_trip() {
         let root = tmp("rt");
         emit(&root, "container", "create", "abc123def456", "web", None);
-        emit(&root, "container", "die", "abc123def456", "web", Some("exit=42"));
+        emit(
+            &root,
+            "container",
+            "die",
+            "abc123def456",
+            "web",
+            Some("exit=42"),
+        );
         let evs = read(&root);
         assert_eq!(evs.len(), 2);
         assert_eq!(evs[0].action, "create");
@@ -167,12 +200,24 @@ mod tests {
             for i in 0..N {
                 let root = root.clone();
                 sc.spawn(move || {
-                    emit(&root, "container", "start", &format!("id{i:04}"), &format!("nome-{i}"), None);
+                    emit(
+                        &root,
+                        "container",
+                        "start",
+                        &format!("id{i:04}"),
+                        &format!("nome-{i}"),
+                        None,
+                    );
                 });
             }
         });
         let evs = read(&root);
-        assert_eq!(evs.len(), N, "perderam-se ou corromperam-se eventos: {} de {N}", evs.len());
+        assert_eq!(
+            evs.len(),
+            N,
+            "perderam-se ou corromperam-se eventos: {} de {N}",
+            evs.len()
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 

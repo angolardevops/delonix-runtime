@@ -16,7 +16,12 @@ fn main() {
     let mut meta = String::from("pub static TEMPLATE_META: &[(&str, &str, &str)] = &[\n");
 
     let mut names: Vec<PathBuf> = std::fs::read_dir(&root)
-        .map(|rd| rd.flatten().map(|e| e.path()).filter(|p| p.is_dir()).collect())
+        .map(|rd| {
+            rd.flatten()
+                .map(|e| e.path())
+                .filter(|p| p.is_dir())
+                .collect()
+        })
         .unwrap_or_default();
     names.sort();
 
@@ -44,7 +49,13 @@ fn main() {
         for (rel, abs) in files {
             // include_str! wants a path relative to THIS file (build.rs) or
             // absolute; use absolute so it works regardless of OUT_DIR.
-            writeln!(out, "        ({:?}, include_str!({:?})),", rel, abs.to_string_lossy()).unwrap();
+            writeln!(
+                out,
+                "        ({:?}, include_str!({:?})),",
+                rel,
+                abs.to_string_lossy()
+            )
+            .unwrap();
         }
         out.push_str("    ]),\n");
     }
@@ -58,7 +69,9 @@ fn main() {
 
 /// Collect `(relative-path, absolute-path)` of every file under `dir`.
 fn collect(base: &Path, dir: &Path, out: &mut Vec<(String, PathBuf)>) {
-    let Ok(rd) = std::fs::read_dir(dir) else { return };
+    let Ok(rd) = std::fs::read_dir(dir) else {
+        return;
+    };
     for e in rd.flatten() {
         let p = e.path();
         if p.is_dir() {

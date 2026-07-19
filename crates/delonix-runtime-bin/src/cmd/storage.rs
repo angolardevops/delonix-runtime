@@ -95,8 +95,16 @@ struct StorageSpec {
 }
 
 /// Nomes aceites no `spec` de `kind: Storage`, para o aviso de campos desconhecidos.
-pub(crate) const STORAGE_SPEC_FIELDS: &[&str] =
-    &["type", "server", "share", "username", "password", "passwordSecret", "readOnly", "mountOptions"];
+pub(crate) const STORAGE_SPEC_FIELDS: &[&str] = &[
+    "type",
+    "server",
+    "share",
+    "username",
+    "password",
+    "passwordSecret",
+    "readOnly",
+    "mountOptions",
+];
 
 /// Os parâmetros de mount derivados de uma declaração de storage.
 struct MountSpec {
@@ -108,16 +116,42 @@ struct MountSpec {
 /// Constrói `(driver, device, options)` a partir da declaração amigável.
 /// **Função pura** (a resolução de secret é feita antes, por quem chama) para o
 /// mapeamento tipo→device/options ser testável sem tocar no cofre nem montar.
-fn build_mount(r#type: &str, server: &str, share: &str, username: Option<&str>, password: Option<&str>, read_only: bool, extra: Option<&str>) -> Result<MountSpec> {
+fn build_mount(
+    r#type: &str,
+    server: &str,
+    share: &str,
+    username: Option<&str>,
+    password: Option<&str>,
+    read_only: bool,
+    extra: Option<&str>,
+) -> Result<MountSpec> {
     let (driver, device) = match r#type {
         "nfs" => ("nfs", format!("{server}:{share}")),
-        "cifs" | "smb" => ("cifs", format!("//{server}/{}", share.trim_start_matches('/'))),
+        "cifs" | "smb" => (
+            "cifs",
+            format!("//{server}/{}", share.trim_start_matches('/')),
+        ),
         "webdav" => {
             // server pode já vir com esquema; senão assume https.
-            let base = if server.contains("://") { server.to_string() } else { format!("https://{server}") };
-            ("davfs", format!("{}/{}", base.trim_end_matches('/'), share.trim_start_matches('/')))
+            let base = if server.contains("://") {
+                server.to_string()
+            } else {
+                format!("https://{server}")
+            };
+            (
+                "davfs",
+                format!(
+                    "{}/{}",
+                    base.trim_end_matches('/'),
+                    share.trim_start_matches('/')
+                ),
+            )
         }
-        other => return Err(Error::Invalid(format!("tipo de storage desconhecido: '{other}' (nfs|cifs|smb|webdav)"))),
+        other => {
+            return Err(Error::Invalid(format!(
+                "tipo de storage desconhecido: '{other}' (nfs|cifs|smb|webdav)"
+            )))
+        }
     };
     // Opções: credenciais (cifs), ro, e as extra do utilizador — por esta ordem.
     let mut opts: Vec<String> = Vec::new();
@@ -137,8 +171,16 @@ fn build_mount(r#type: &str, server: &str, share: &str, username: Option<&str>, 
             opts.push(e.to_string());
         }
     }
-    let options = if opts.is_empty() { None } else { Some(opts.join(",")) };
-    Ok(MountSpec { driver: driver.to_string(), device, options })
+    let options = if opts.is_empty() {
+        None
+    } else {
+        Some(opts.join(","))
+    };
+    Ok(MountSpec {
+        driver: driver.to_string(),
+        device,
+        options,
+    })
 }
 
 /// Resolve a password: inline `--password`, ou a chave `password` de um segredo.
@@ -159,18 +201,46 @@ fn resolve_password(password: Option<String>, secret: Option<String>) -> Result<
 pub fn run(action: StorageCmd) -> Result<()> {
     let store = VolumeStore::open(state_root())?;
     match action {
-        StorageCmd::Dash { once } => return super::dash::run(super::dash::DashScope::Storage, once),
-        StorageCmd::Create { name, r#type, server, share, username, password, password_secret, read_only, options } => {
+        StorageCmd::Dash { once } => {
+            return super::dash::run(super::dash::DashScope::Storage, once)
+        }
+        StorageCmd::Create {
+            name,
+            r#type,
+            server,
+            share,
+            username,
+            password,
+            password_secret,
+            read_only,
+            options,
+        } => {
             let pw = resolve_password(password, password_secret)?;
-            let m = build_mount(&r#type, &server, &share, username.as_deref(), pw.as_deref(), read_only, options.as_deref())?;
+            let m = build_mount(
+                &r#type,
+                &server,
+                &share,
+                username.as_deref(),
+                pw.as_deref(),
+                read_only,
+                options.as_deref(),
+            )?;
             let v = store.create_with(&name, &m.driver, Some(m.device.clone()), m.options)?;
-            println!("storage '{}' criado e montado ({} · {})", v.name, m.driver, m.device);
+            println!(
+                "storage '{}' criado e montado ({} · {})",
+                v.name, m.driver, m.device
+            );
         }
         StorageCmd::Ls => {
             let mut t = output::Table::new(&["NAME", "TYPE", "DEVICE", "MOUNTPOINT"]);
             for v in store.list()? {
                 if delonix_volume::is_network_driver(&v.driver) {
-                    t.row(vec![v.name, v.driver, v.device.unwrap_or_default(), v.mountpoint]);
+                    t.row(vec![
+                        v.name,
+                        v.driver,
+                        v.device.unwrap_or_default(),
+                        v.mountpoint,
+                    ]);
                 }
             }
             t.print();
@@ -229,7 +299,16 @@ mod tests {
 
     #[test]
     fn nfs_forma_servidor_export() {
-        let m = build_mount("nfs", "10.0.0.5", "/mnt/pool/media", None, None, false, None).unwrap();
+        let m = build_mount(
+            "nfs",
+            "10.0.0.5",
+            "/mnt/pool/media",
+            None,
+            None,
+            false,
+            None,
+        )
+        .unwrap();
         assert_eq!(m.driver, "nfs");
         assert_eq!(m.device, "10.0.0.5:/mnt/pool/media");
         assert!(m.options.is_none());
@@ -237,7 +316,16 @@ mod tests {
 
     #[test]
     fn cifs_forma_unc_com_credenciais_e_ro() {
-        let m = build_mount("smb", "nas.local", "media", Some("alice"), Some("s3cr3t"), true, Some("vers=3.0")).unwrap();
+        let m = build_mount(
+            "smb",
+            "nas.local",
+            "media",
+            Some("alice"),
+            Some("s3cr3t"),
+            true,
+            Some("vers=3.0"),
+        )
+        .unwrap();
         assert_eq!(m.driver, "cifs"); // smb é alias de cifs
         assert_eq!(m.device, "//nas.local/media");
         let o = m.options.unwrap();
@@ -249,14 +337,35 @@ mod tests {
 
     #[test]
     fn webdav_monta_url_https_por_omissao() {
-        let m = build_mount("webdav", "cloud.example.com", "/remote.php/dav/files/alice", Some("alice"), None, false, None).unwrap();
+        let m = build_mount(
+            "webdav",
+            "cloud.example.com",
+            "/remote.php/dav/files/alice",
+            Some("alice"),
+            None,
+            false,
+            None,
+        )
+        .unwrap();
         assert_eq!(m.driver, "davfs");
-        assert_eq!(m.device, "https://cloud.example.com/remote.php/dav/files/alice");
+        assert_eq!(
+            m.device,
+            "https://cloud.example.com/remote.php/dav/files/alice"
+        );
     }
 
     #[test]
     fn webdav_respeita_esquema_explicito() {
-        let m = build_mount("webdav", "http://192.168.1.10:8080", "dav", None, None, false, None).unwrap();
+        let m = build_mount(
+            "webdav",
+            "http://192.168.1.10:8080",
+            "dav",
+            None,
+            None,
+            false,
+            None,
+        )
+        .unwrap();
         assert_eq!(m.device, "http://192.168.1.10:8080/dav");
     }
 

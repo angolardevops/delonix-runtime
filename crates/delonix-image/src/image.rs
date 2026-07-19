@@ -196,8 +196,12 @@ impl ImageStore {
             if other.id == img.id {
                 continue;
             }
-            let kept: Vec<String> =
-                other.repo_tags.iter().filter(|t| !tags.contains(t)).cloned().collect();
+            let kept: Vec<String> = other
+                .repo_tags
+                .iter()
+                .filter(|t| !tags.contains(t))
+                .cloned()
+                .collect();
             if kept.len() == other.repo_tags.len() {
                 continue; // nada para remover
             }

@@ -144,7 +144,12 @@ fn apply_filter_logged(prog: &seccompiler::BpfProgram) {
     };
     // SAFETY: `fprog` aponta para um programa BPF válido; NO_NEW_PRIVS já está set.
     let rc = unsafe {
-        libc::syscall(libc::SYS_seccomp, SET_MODE_FILTER, FLAG_LOG, &fprog as *const _)
+        libc::syscall(
+            libc::SYS_seccomp,
+            SET_MODE_FILTER,
+            FLAG_LOG,
+            &fprog as *const _,
+        )
     };
     if rc != 0 {
         // recurso: aplica sem o flag de log (segurança mantém-se).
@@ -236,69 +241,244 @@ fn allowed_syscalls() -> Vec<i64> {
     // condicionalmente — em aarch64 usam-se as variantes `*at`/`clone`.
     let mut v: Vec<i64> = vec![
         // ficheiros / FS
-        SYS_read, SYS_write, SYS_openat, SYS_close, SYS_close_range, SYS_fstat,
-        SYS_newfstatat, SYS_statx, SYS_ppoll, SYS_lseek, SYS_pread64,
-        SYS_pwrite64, SYS_readv, SYS_writev, SYS_preadv, SYS_pwritev, SYS_preadv2, SYS_pwritev2,
-        SYS_faccessat, SYS_faccessat2, SYS_dup, SYS_dup3, SYS_pipe2,
-        SYS_fcntl, SYS_flock, SYS_fsync, SYS_fdatasync, SYS_truncate, SYS_ftruncate, 
-        SYS_getdents64, SYS_getcwd, SYS_chdir, SYS_fchdir, SYS_renameat, SYS_renameat2,
-        SYS_mkdirat, SYS_linkat, SYS_unlinkat,
-        SYS_symlinkat, SYS_readlinkat, SYS_fchmod,
-        SYS_fchmodat, SYS_fchown, SYS_fchownat, SYS_umask, 
-        SYS_utimensat, SYS_statfs, SYS_fstatfs, SYS_sync, SYS_syncfs,
-        SYS_sync_file_range, SYS_fallocate, SYS_readahead, SYS_openat2, 
-        SYS_mknodat, SYS_splice, SYS_tee, SYS_vmsplice, SYS_copy_file_range,
+        SYS_read,
+        SYS_write,
+        SYS_openat,
+        SYS_close,
+        SYS_close_range,
+        SYS_fstat,
+        SYS_newfstatat,
+        SYS_statx,
+        SYS_ppoll,
+        SYS_lseek,
+        SYS_pread64,
+        SYS_pwrite64,
+        SYS_readv,
+        SYS_writev,
+        SYS_preadv,
+        SYS_pwritev,
+        SYS_preadv2,
+        SYS_pwritev2,
+        SYS_faccessat,
+        SYS_faccessat2,
+        SYS_dup,
+        SYS_dup3,
+        SYS_pipe2,
+        SYS_fcntl,
+        SYS_flock,
+        SYS_fsync,
+        SYS_fdatasync,
+        SYS_truncate,
+        SYS_ftruncate,
+        SYS_getdents64,
+        SYS_getcwd,
+        SYS_chdir,
+        SYS_fchdir,
+        SYS_renameat,
+        SYS_renameat2,
+        SYS_mkdirat,
+        SYS_linkat,
+        SYS_unlinkat,
+        SYS_symlinkat,
+        SYS_readlinkat,
+        SYS_fchmod,
+        SYS_fchmodat,
+        SYS_fchown,
+        SYS_fchownat,
+        SYS_umask,
+        SYS_utimensat,
+        SYS_statfs,
+        SYS_fstatfs,
+        SYS_sync,
+        SYS_syncfs,
+        SYS_sync_file_range,
+        SYS_fallocate,
+        SYS_readahead,
+        SYS_openat2,
+        SYS_mknodat,
+        SYS_splice,
+        SYS_tee,
+        SYS_vmsplice,
+        SYS_copy_file_range,
         // xattr
-        SYS_getxattr, SYS_lgetxattr, SYS_fgetxattr, SYS_setxattr, SYS_lsetxattr, SYS_fsetxattr,
-        SYS_listxattr, SYS_llistxattr, SYS_flistxattr, SYS_removexattr, SYS_lremovexattr,
+        SYS_getxattr,
+        SYS_lgetxattr,
+        SYS_fgetxattr,
+        SYS_setxattr,
+        SYS_lsetxattr,
+        SYS_fsetxattr,
+        SYS_listxattr,
+        SYS_llistxattr,
+        SYS_flistxattr,
+        SYS_removexattr,
+        SYS_lremovexattr,
         SYS_fremovexattr,
         // memória
-        SYS_mmap, SYS_munmap, SYS_mprotect, SYS_mremap, SYS_msync, SYS_mincore, SYS_madvise,
-        SYS_brk, SYS_mlock, SYS_munlock, SYS_mlockall, SYS_munlockall, SYS_mlock2, SYS_memfd_create,
+        SYS_mmap,
+        SYS_munmap,
+        SYS_mprotect,
+        SYS_mremap,
+        SYS_msync,
+        SYS_mincore,
+        SYS_madvise,
+        SYS_brk,
+        SYS_mlock,
+        SYS_munlock,
+        SYS_mlockall,
+        SYS_munlockall,
+        SYS_mlock2,
+        SYS_memfd_create,
         SYS_membarrier,
         // processos / threads
-        SYS_clone3, SYS_execve, SYS_execveat, SYS_exit, SYS_exit_group,
-        SYS_wait4, SYS_waitid, SYS_kill, SYS_tgkill, SYS_tkill, SYS_getpid, SYS_getppid, SYS_gettid,
-        SYS_set_tid_address, SYS_set_robust_list, SYS_get_robust_list, SYS_rseq, SYS_futex,
-        SYS_prctl, SYS_personality, SYS_getrandom, SYS_uname, SYS_sysinfo,
-        SYS_getcpu, SYS_capget, SYS_capset,
+        SYS_clone3,
+        SYS_execve,
+        SYS_execveat,
+        SYS_exit,
+        SYS_exit_group,
+        SYS_wait4,
+        SYS_waitid,
+        SYS_kill,
+        SYS_tgkill,
+        SYS_tkill,
+        SYS_getpid,
+        SYS_getppid,
+        SYS_gettid,
+        SYS_set_tid_address,
+        SYS_set_robust_list,
+        SYS_get_robust_list,
+        SYS_rseq,
+        SYS_futex,
+        SYS_prctl,
+        SYS_personality,
+        SYS_getrandom,
+        SYS_uname,
+        SYS_sysinfo,
+        SYS_getcpu,
+        SYS_capget,
+        SYS_capset,
         // ids / credenciais (sem privilégio extra — NO_NEW_PRIVS+caps já limitam)
-        SYS_getuid, SYS_geteuid, SYS_getgid, SYS_getegid, SYS_setuid, SYS_setgid, SYS_setreuid,
-        SYS_setregid, SYS_setresuid, SYS_setresgid, SYS_getresuid, SYS_getresgid, SYS_setfsuid,
-        SYS_setfsgid, SYS_getgroups, SYS_setgroups, SYS_getpgid, SYS_setpgid, 
-        SYS_getsid, SYS_setsid, SYS_getpriority, SYS_setpriority,
+        SYS_getuid,
+        SYS_geteuid,
+        SYS_getgid,
+        SYS_getegid,
+        SYS_setuid,
+        SYS_setgid,
+        SYS_setreuid,
+        SYS_setregid,
+        SYS_setresuid,
+        SYS_setresgid,
+        SYS_getresuid,
+        SYS_getresgid,
+        SYS_setfsuid,
+        SYS_setfsgid,
+        SYS_getgroups,
+        SYS_setgroups,
+        SYS_getpgid,
+        SYS_setpgid,
+        SYS_getsid,
+        SYS_setsid,
+        SYS_getpriority,
+        SYS_setpriority,
         // limites / scheduling
-        SYS_getrlimit, SYS_setrlimit, SYS_prlimit64, SYS_getrusage, SYS_sched_yield,
-        SYS_sched_getaffinity, SYS_sched_setaffinity, SYS_sched_getparam, SYS_sched_setparam,
-        SYS_sched_getscheduler, SYS_sched_setscheduler, SYS_sched_get_priority_max,
-        SYS_sched_get_priority_min, SYS_sched_rr_get_interval,
+        SYS_getrlimit,
+        SYS_setrlimit,
+        SYS_prlimit64,
+        SYS_getrusage,
+        SYS_sched_yield,
+        SYS_sched_getaffinity,
+        SYS_sched_setaffinity,
+        SYS_sched_getparam,
+        SYS_sched_setparam,
+        SYS_sched_getscheduler,
+        SYS_sched_setscheduler,
+        SYS_sched_get_priority_max,
+        SYS_sched_get_priority_min,
+        SYS_sched_rr_get_interval,
         // sinais
-        SYS_rt_sigaction, SYS_rt_sigprocmask, SYS_rt_sigpending, SYS_rt_sigtimedwait,
-        SYS_rt_sigqueueinfo, SYS_rt_sigreturn, SYS_rt_sigsuspend, SYS_sigaltstack, 
-        SYS_signalfd4, SYS_restart_syscall,
+        SYS_rt_sigaction,
+        SYS_rt_sigprocmask,
+        SYS_rt_sigpending,
+        SYS_rt_sigtimedwait,
+        SYS_rt_sigqueueinfo,
+        SYS_rt_sigreturn,
+        SYS_rt_sigsuspend,
+        SYS_sigaltstack,
+        SYS_signalfd4,
+        SYS_restart_syscall,
         // tempo / timers
-        SYS_nanosleep, SYS_clock_nanosleep, SYS_clock_gettime, SYS_clock_getres, SYS_gettimeofday,
-        SYS_times, SYS_timer_create, SYS_timer_settime, SYS_timer_gettime,
-        SYS_timer_getoverrun, SYS_timer_delete, SYS_timerfd_create, SYS_timerfd_settime,
-        SYS_timerfd_gettime, SYS_getitimer, SYS_setitimer,
+        SYS_nanosleep,
+        SYS_clock_nanosleep,
+        SYS_clock_gettime,
+        SYS_clock_getres,
+        SYS_gettimeofday,
+        SYS_times,
+        SYS_timer_create,
+        SYS_timer_settime,
+        SYS_timer_gettime,
+        SYS_timer_getoverrun,
+        SYS_timer_delete,
+        SYS_timerfd_create,
+        SYS_timerfd_settime,
+        SYS_timerfd_gettime,
+        SYS_getitimer,
+        SYS_setitimer,
         // epoll / eventfd / inotify
-        SYS_pselect6, SYS_epoll_create1, SYS_epoll_ctl,
-        SYS_epoll_pwait, SYS_eventfd2, 
-        SYS_inotify_init1, SYS_inotify_add_watch, SYS_inotify_rm_watch,
+        SYS_pselect6,
+        SYS_epoll_create1,
+        SYS_epoll_ctl,
+        SYS_epoll_pwait,
+        SYS_eventfd2,
+        SYS_inotify_init1,
+        SYS_inotify_add_watch,
+        SYS_inotify_rm_watch,
         // AIO clássico (libaio) — o nginx & cia usam-no; o Docker permite-o por
         // omissão. (io_uring fica DE FORA, como no Docker, por ser mais sensível.)
-        SYS_io_setup, SYS_io_destroy, SYS_io_getevents, SYS_io_submit, SYS_io_cancel,
+        SYS_io_setup,
+        SYS_io_destroy,
+        SYS_io_getevents,
+        SYS_io_submit,
+        SYS_io_cancel,
         // rede
-        SYS_socket, SYS_socketpair, SYS_bind, SYS_listen, SYS_accept, SYS_accept4, SYS_connect,
-        SYS_getsockname, SYS_getpeername, SYS_sendto, SYS_recvfrom, SYS_sendmsg, SYS_recvmsg,
-        SYS_sendmmsg, SYS_recvmmsg, SYS_shutdown, SYS_setsockopt, SYS_getsockopt,
+        SYS_socket,
+        SYS_socketpair,
+        SYS_bind,
+        SYS_listen,
+        SYS_accept,
+        SYS_accept4,
+        SYS_connect,
+        SYS_getsockname,
+        SYS_getpeername,
+        SYS_sendto,
+        SYS_recvfrom,
+        SYS_sendmsg,
+        SYS_recvmsg,
+        SYS_sendmmsg,
+        SYS_recvmmsg,
+        SYS_shutdown,
+        SYS_setsockopt,
+        SYS_getsockopt,
         // IPC (System V + POSIX mq)
-        SYS_shmget, SYS_shmat, SYS_shmdt, SYS_shmctl, SYS_semget, SYS_semop, SYS_semctl,
-        SYS_semtimedop, SYS_msgget, SYS_msgsnd, SYS_msgrcv, SYS_msgctl, SYS_mq_open,
-        SYS_mq_unlink, SYS_mq_timedsend, SYS_mq_timedreceive, SYS_mq_notify, SYS_mq_getsetattr,
+        SYS_shmget,
+        SYS_shmat,
+        SYS_shmdt,
+        SYS_shmctl,
+        SYS_semget,
+        SYS_semop,
+        SYS_semctl,
+        SYS_semtimedop,
+        SYS_msgget,
+        SYS_msgsnd,
+        SYS_msgrcv,
+        SYS_msgctl,
+        SYS_mq_open,
+        SYS_mq_unlink,
+        SYS_mq_timedsend,
+        SYS_mq_timedreceive,
+        SYS_mq_notify,
+        SYS_mq_getsetattr,
         // ioctl
         SYS_ioctl,
-        ];
+    ];
     #[cfg(target_arch = "x86_64")]
     v.extend_from_slice(&[
         SYS_access,
@@ -367,16 +547,46 @@ fn cap_num(name: &str) -> Option<u8> {
     let n = name.trim().to_ascii_uppercase();
     let n = n.strip_prefix("CAP_").unwrap_or(&n);
     Some(match n {
-        "CHOWN" => 0, "DAC_OVERRIDE" => 1, "DAC_READ_SEARCH" => 2, "FOWNER" => 3,
-        "FSETID" => 4, "KILL" => 5, "SETGID" => 6, "SETUID" => 7, "SETPCAP" => 8,
-        "LINUX_IMMUTABLE" => 9, "NET_BIND_SERVICE" => 10, "NET_BROADCAST" => 11,
-        "NET_ADMIN" => 12, "NET_RAW" => 13, "IPC_LOCK" => 14, "IPC_OWNER" => 15,
-        "SYS_MODULE" => 16, "SYS_RAWIO" => 17, "SYS_CHROOT" => 18, "SYS_PTRACE" => 19,
-        "SYS_PACCT" => 20, "SYS_ADMIN" => 21, "SYS_BOOT" => 22, "SYS_NICE" => 23,
-        "SYS_RESOURCE" => 24, "SYS_TIME" => 25, "SYS_TTY_CONFIG" => 26, "MKNOD" => 27,
-        "LEASE" => 28, "AUDIT_WRITE" => 29, "AUDIT_CONTROL" => 30, "SETFCAP" => 31,
-        "MAC_OVERRIDE" => 32, "MAC_ADMIN" => 33, "SYSLOG" => 34, "WAKE_ALARM" => 35,
-        "BLOCK_SUSPEND" => 36, "AUDIT_READ" => 37, "PERFMON" => 38, "BPF" => 39,
+        "CHOWN" => 0,
+        "DAC_OVERRIDE" => 1,
+        "DAC_READ_SEARCH" => 2,
+        "FOWNER" => 3,
+        "FSETID" => 4,
+        "KILL" => 5,
+        "SETGID" => 6,
+        "SETUID" => 7,
+        "SETPCAP" => 8,
+        "LINUX_IMMUTABLE" => 9,
+        "NET_BIND_SERVICE" => 10,
+        "NET_BROADCAST" => 11,
+        "NET_ADMIN" => 12,
+        "NET_RAW" => 13,
+        "IPC_LOCK" => 14,
+        "IPC_OWNER" => 15,
+        "SYS_MODULE" => 16,
+        "SYS_RAWIO" => 17,
+        "SYS_CHROOT" => 18,
+        "SYS_PTRACE" => 19,
+        "SYS_PACCT" => 20,
+        "SYS_ADMIN" => 21,
+        "SYS_BOOT" => 22,
+        "SYS_NICE" => 23,
+        "SYS_RESOURCE" => 24,
+        "SYS_TIME" => 25,
+        "SYS_TTY_CONFIG" => 26,
+        "MKNOD" => 27,
+        "LEASE" => 28,
+        "AUDIT_WRITE" => 29,
+        "AUDIT_CONTROL" => 30,
+        "SETFCAP" => 31,
+        "MAC_OVERRIDE" => 32,
+        "MAC_ADMIN" => 33,
+        "SYSLOG" => 34,
+        "WAKE_ALARM" => 35,
+        "BLOCK_SUSPEND" => 36,
+        "AUDIT_READ" => 37,
+        "PERFMON" => 38,
+        "BPF" => 39,
         "CHECKPOINT_RESTORE" => 40,
         _ => return None,
     })
@@ -463,8 +673,16 @@ fn drop_capabilities(keep: u64) {
     };
     let (lo, hi) = ((keep & 0xffff_ffff) as u32, (keep >> 32) as u32);
     let data = [
-        CapData { effective: lo, permitted: lo, inheritable: 0 },
-        CapData { effective: hi, permitted: hi, inheritable: 0 },
+        CapData {
+            effective: lo,
+            permitted: lo,
+            inheritable: 0,
+        },
+        CapData {
+            effective: hi,
+            permitted: hi,
+            inheritable: 0,
+        },
     ];
     // SAFETY: capset com cabeçalho v3 válido e 2 estruturas de dados; reduzir as
     // próprias caps a um subconjunto é sempre permitido.
@@ -491,7 +709,9 @@ fn confinement_ok(
     }
     // 2 = SECCOMP_MODE_FILTER. (`detect` também aplica um filtro → modo 2.)
     if seccomp_expected && seccomp_mode != Some(2) {
-        return Err(format!("seccomp não está em modo filtro (Seccomp={seccomp_mode:?})"));
+        return Err(format!(
+            "seccomp não está em modo filtro (Seccomp={seccomp_mode:?})"
+        ));
     }
     let bnd = cap_bnd.ok_or_else(|| "CapBnd ausente em /proc/self/status".to_string())?;
     let eff = cap_eff.ok_or_else(|| "CapEff ausente em /proc/self/status".to_string())?;
@@ -573,7 +793,14 @@ const MAX_LOG_BYTES: u64 = 1024 * 1024;
 /// pipe) e escreve-o em `log_path`, **rodando** quando passa [`MAX_LOG_BYTES`]
 /// (renomeia para `.1` e recomeça). Corre num processo próprio que sobrevive ao
 /// `delonix run` (reparentado ao init) e termina quando o container fecha o pipe.
-fn log_shim(read_fd: i32, log_path: String, max_bytes: u64, driver: String, tag: String, cri: bool) -> ! {
+fn log_shim(
+    read_fd: i32,
+    log_path: String,
+    max_bytes: u64,
+    driver: String,
+    tag: String,
+    cri: bool,
+) -> ! {
     // Driver journald/syslog: encaminha cada linha para o syslog (que o journald
     // capta), em vez do ficheiro. `--log-driver journald|syslog`.
     if driver == "journald" || driver == "syslog" {
@@ -657,7 +884,13 @@ fn log_shim_syslog(read_fd: i32, tag: String) -> ! {
     // o tag tem de viver enquanto o syslog estiver aberto -> fuga deliberada.
     let ctag = std::ffi::CString::new(tag).unwrap_or_default();
     // SAFETY: openlog com um ponteiro válido que sobrevive ao processo (leaked).
-    unsafe { libc::openlog(Box::leak(ctag.into_boxed_c_str()).as_ptr(), libc::LOG_PID, libc::LOG_USER) };
+    unsafe {
+        libc::openlog(
+            Box::leak(ctag.into_boxed_c_str()).as_ptr(),
+            libc::LOG_PID,
+            libc::LOG_USER,
+        )
+    };
     // SAFETY: `read_fd` é a ponta de leitura do pipe.
     let mut reader = unsafe { std::fs::File::from_raw_fd(read_fd) };
     let mut buf = [0u8; 8192];
@@ -697,7 +930,10 @@ fn log_shim_syslog(read_fd: i32, tag: String) -> ! {
 /// relativo/`..` montaria sobre o filesystem do HOST.
 fn mount_target_safe(target: &str) -> bool {
     let p = std::path::Path::new(target);
-    p.is_absolute() && !p.components().any(|c| matches!(c, std::path::Component::ParentDir))
+    p.is_absolute()
+        && !p
+            .components()
+            .any(|c| matches!(c, std::path::Component::ParentDir))
 }
 
 fn bind_volume(rootfs: &str, m: &Mount) -> nix::Result<()> {
@@ -711,7 +947,11 @@ fn bind_volume(rootfs: &str, m: &Mount) -> nix::Result<()> {
         if let Some(parent) = std::path::Path::new(&dst).parent() {
             let _ = std::fs::create_dir_all(parent);
         }
-        let _ = std::fs::OpenOptions::new().create(true).write(true).truncate(false).open(&dst);
+        let _ = std::fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(false)
+            .open(&dst);
     } else {
         let _ = std::fs::create_dir_all(&dst);
     }
@@ -726,11 +966,18 @@ fn bind_volume(rootfs: &str, m: &Mount) -> nix::Result<()> {
     // `mount`, logo sem isto um volume podia trazer binários setuid ou device
     // nodes para dentro do container. `rdonly` adicional se pedido. (`noexec` NÃO,
     // para não partir volumes com executáveis legítimos, ex.: código.)
-    let mut rflags = MsFlags::MS_BIND | MsFlags::MS_REMOUNT | MsFlags::MS_NOSUID | MsFlags::MS_NODEV;
+    let mut rflags =
+        MsFlags::MS_BIND | MsFlags::MS_REMOUNT | MsFlags::MS_NOSUID | MsFlags::MS_NODEV;
     if m.readonly {
         rflags |= MsFlags::MS_RDONLY;
     }
-    mount(None::<&str>, dst.as_str(), None::<&str>, rflags, None::<&str>)?;
+    mount(
+        None::<&str>,
+        dst.as_str(),
+        None::<&str>,
+        rflags,
+        None::<&str>,
+    )?;
     Ok(())
 }
 
@@ -757,7 +1004,7 @@ fn setup_dev(rootfs: &str) -> nix::Result<()> {
     for name in ESSENTIAL_DEVS {
         let target = format!("{dev}/{name}");
         let _ = std::fs::File::create(&target); // ponto de montagem (temos CAP_DAC_OVERRIDE)
-        // bind do nó real do host (sobrevive ao pivot_root).
+                                                // bind do nó real do host (sobrevive ao pivot_root).
         let _ = mount(
             Some(format!("/dev/{name}").as_str()),
             target.as_str(),
@@ -865,7 +1112,9 @@ fn bind_devices(src_prefix: &str, rootfs: &str, devices: &[String]) {
             Ok(st) => {
                 let mode = st.st_mode & libc::S_IFMT;
                 if mode == libc::S_IFBLK {
-                    eprintln!("delonix: --device {host}: dispositivo de bloco recusado (só char devices)");
+                    eprintln!(
+                        "delonix: --device {host}: dispositivo de bloco recusado (só char devices)"
+                    );
                     continue;
                 }
             }
@@ -884,7 +1133,13 @@ fn bind_devices(src_prefix: &str, rootfs: &str, devices: &[String]) {
             let _ = std::fs::create_dir_all(parent);
         }
         let _ = std::fs::File::create(&target); // ponto de montagem
-        let _ = mount(Some(src.as_str()), target.as_str(), None::<&str>, MsFlags::MS_BIND, None::<&str>);
+        let _ = mount(
+            Some(src.as_str()),
+            target.as_str(),
+            None::<&str>,
+            MsFlags::MS_BIND,
+            None::<&str>,
+        );
     }
 }
 
@@ -952,7 +1207,13 @@ fn setup_rootfs(
             None::<&str>,
         )?;
     } else {
-        mount(Some("proc"), "/proc", Some("proc"), MsFlags::empty(), None::<&str>)?;
+        mount(
+            Some("proc"),
+            "/proc",
+            Some("proc"),
+            MsFlags::empty(),
+            None::<&str>,
+        )?;
     }
     apply_sysctls(sysctls); // --sysctl: ANTES de /proc/sys ficar só-leitura (B13)
     mask_proc_paths();
@@ -965,7 +1226,11 @@ fn setup_rootfs(
         Some("sysfs"),
         "/sys",
         Some("sysfs"),
-        if privileged { sys_base } else { sys_base | MsFlags::MS_RDONLY },
+        if privileged {
+            sys_base
+        } else {
+            sys_base | MsFlags::MS_RDONLY
+        },
         None::<&str>,
     );
     if fresh_sysfs.is_err() && privileged {
@@ -1110,8 +1375,12 @@ fn write_userns_maps(pid: i32, want_range: bool) -> Result<()> {
 /// `true` se os helpers `newuidmap`/`newgidmap` existem (necessários p/ mapear um
 /// intervalo de subuids em rootless — o caminho do `USER` da imagem ≠ root).
 fn have_subid_helpers() -> bool {
-    ["/usr/bin/newuidmap", "/bin/newuidmap"].iter().any(|p| std::path::Path::new(p).exists())
-        && ["/usr/bin/newgidmap", "/bin/newgidmap"].iter().any(|p| std::path::Path::new(p).exists())
+    ["/usr/bin/newuidmap", "/bin/newuidmap"]
+        .iter()
+        .any(|p| std::path::Path::new(p).exists())
+        && ["/usr/bin/newgidmap", "/bin/newgidmap"]
+            .iter()
+            .any(|p| std::path::Path::new(p).exists())
 }
 
 /// Corre `newuidmap`/`newgidmap <pid> <map...>` (os args do mapa são tripletos
@@ -1122,9 +1391,18 @@ fn run_idmap(tool: &str, pid: i32, map: &str) -> Result<()> {
     for tok in map.split_whitespace() {
         cmd.arg(tok);
     }
-    let st = cmd.status().map_err(|e| Error::Runtime { context: "idmap", message: format!("{tool}: {e}") })?;
+    let st = cmd.status().map_err(|e| Error::Runtime {
+        context: "idmap",
+        message: format!("{tool}: {e}"),
+    })?;
     if !st.success() {
-        return Err(Error::Runtime { context: "idmap", message: format!("{tool} falhou (código {:?}) — verifica /etc/subuid e /etc/subgid", st.code()) });
+        return Err(Error::Runtime {
+            context: "idmap",
+            message: format!(
+                "{tool} falhou (código {:?}) — verifica /etc/subuid e /etc/subgid",
+                st.code()
+            ),
+        });
     }
     Ok(())
 }
@@ -1220,15 +1498,22 @@ pub fn remove_tree_mapped(path: &std::path::Path) {
     }
     // Pré-computa TUDO o que aloca ANTES do fork (no filho pós-fork, num processo que
     // possa ter threads, alocar pode deadlockar — só ops async-signal-safe lá).
-    let exe = std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("/usr/local/bin/delonix"));
+    let exe = std::env::current_exe()
+        .unwrap_or_else(|_| std::path::PathBuf::from("/usr/local/bin/delonix"));
     let prog = match std::ffi::CString::new(exe.as_os_str().as_encoded_bytes()) {
         Ok(p) => p,
-        Err(_) => { let _ = std::fs::remove_dir_all(path); return; }
+        Err(_) => {
+            let _ = std::fs::remove_dir_all(path);
+            return;
+        }
     };
     let a1 = std::ffi::CString::new("__rmtree").unwrap();
     let a2 = match std::ffi::CString::new(path.as_os_str().as_encoded_bytes()) {
         Ok(p) => p,
-        Err(_) => { let _ = std::fs::remove_dir_all(path); return; }
+        Err(_) => {
+            let _ = std::fs::remove_dir_all(path);
+            return;
+        }
     };
     let argv = [prog.as_ptr(), a1.as_ptr(), a2.as_ptr(), std::ptr::null()];
     let mut fds = [0i32; 2];
@@ -1334,7 +1619,10 @@ fn apply_env(hostname: &str, env: &[String]) {
     for k in keys {
         std::env::remove_var(k);
     }
-    std::env::set_var("PATH", "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin");
+    std::env::set_var(
+        "PATH",
+        "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+    );
     std::env::set_var("HOME", "/root");
     std::env::set_var("HOSTNAME", hostname);
     std::env::set_var("TERM", "xterm");
@@ -1473,14 +1761,21 @@ fn apply_ulimits(specs: &[String]) {
         }
     };
     for spec in specs {
-        let Some((name, vals)) = spec.split_once('=') else { continue };
-        let Some(res) = rlimit_resource(name.trim()) else { continue };
+        let Some((name, vals)) = spec.split_once('=') else {
+            continue;
+        };
+        let Some(res) = rlimit_resource(name.trim()) else {
+            continue;
+        };
         let (soft, hard) = match vals.split_once(':') {
             Some((s, h)) => (s, h),
             None => (vals, vals),
         };
         if let (Some(rc), Some(rm)) = (parse(soft.trim()), parse(hard.trim())) {
-            let rl = libc::rlimit { rlim_cur: rc, rlim_max: rm };
+            let rl = libc::rlimit {
+                rlim_cur: rc,
+                rlim_max: rm,
+            };
             // SAFETY: `res` é um RLIMIT_* válido e `rl` está inicializado.
             unsafe { libc::setrlimit(res, &rl) };
         }
@@ -1582,12 +1877,20 @@ fn setup_node_cgroup_ns(cid: &str) {
     //    `<scope>/kind` (ver `paas.rs`), libertando a raiz do `<scope>`; assim o
     //    leaf `<scope>/dlx-<id>` fica com cpu delegado (o entrypoint do node exige)
     //    E como raiz do cgroup-ns fica com 0 processos diretos (o kubelet exige).
-    if let Some(base) = std::fs::read_to_string("/proc/self/cgroup").ok().and_then(|s| {
-        s.lines()
-            .find_map(|l| l.strip_prefix("0::").map(|r| format!("/sys/fs/cgroup{}", r.trim())))
-    }) {
+    if let Some(base) = std::fs::read_to_string("/proc/self/cgroup")
+        .ok()
+        .and_then(|s| {
+            s.lines().find_map(|l| {
+                l.strip_prefix("0::")
+                    .map(|r| format!("/sys/fs/cgroup{}", r.trim()))
+            })
+        })
+    {
         // scope = pai do cgroup atual (o node herda `<scope>/kind` do `kind`).
-        if let Some(scope) = std::path::Path::new(&base).parent().map(|p| p.to_path_buf()) {
+        if let Some(scope) = std::path::Path::new(&base)
+            .parent()
+            .map(|p| p.to_path_buf())
+        {
             let scope = scope.to_string_lossy().to_string();
             // RACE-CLOSE (determinístico): delegar `subtree_control` com processos
             // DIRETOS no scope é rejeitado (no-internal-processes) → o `+cpu` não
@@ -1702,7 +2005,9 @@ fn container_init(
     // `nobody`): o pivot_root e os ficheiros vão para o overlay do host (que aceita
     // o uid do host). Sem user ns, monta logo o `/dev` (bind dos nós reais do host).
     // Com user ns, o `/dev` é montado a seguir, já depois do setuid — ver abaixo.
-    if let Err(e) = setup_rootfs(rootfs, hostname, mounts, userns, devices, sysctls, host_pid, privileged) {
+    if let Err(e) = setup_rootfs(
+        rootfs, hostname, mounts, userns, devices, sysctls, host_pid, privileged,
+    ) {
         eprintln!("delonix: falha a preparar o rootfs: {e}");
         return 126;
     }
@@ -1759,9 +2064,9 @@ fn container_init(
     set_no_new_privs(); // nenhum execve ganha privilégios (anti-escalada) — sempre
     drop_capabilities(cap_keep); // largar caps (depois das montagens, antes do exec)
     apply_seccomp(seccomp_unconfined, seccomp_detect); // allowlist (default-deny)
-    // FAIL-CLOSED: confirma que o confinamento ficou MESMO em vigor antes do execve.
-    // Corre ANTES do `setuid` do USER (mais abaixo) e ANTES do `apply_env` (logo lê o
-    // opt-out do ENGINE, não do container). Ver `verify_confinement`.
+                                                       // FAIL-CLOSED: confirma que o confinamento ficou MESMO em vigor antes do execve.
+                                                       // Corre ANTES do `setuid` do USER (mais abaixo) e ANTES do `apply_env` (logo lê o
+                                                       // opt-out do ENGINE, não do container). Ver `verify_confinement`.
     if !insecure_besteffort() {
         if let Err(e) = verify_confinement(!seccomp_unconfined, cap_keep) {
             eprintln!("delonix: confinamento NÃO verificado ({e}); a abortar o container");
@@ -1784,12 +2089,12 @@ fn container_init(
         }
     }
     apply_env(hostname, env); // ambiente limpo + ENV da imagem/stack/CLI
-    // `USER` da imagem (≠ root): troca para o uid/gid pedido ANTES do `execve`. Faz-se
-    // por último — depois das montagens/caps/seccomp, que precisaram de uid 0. Estamos
-    // dentro do user namespace (root do ns), logo temos CAP_CHOWN/SETUID sobre o
-    // intervalo mapeado: damos a posse do rootfs ao uid (uma vez; marcador para não
-    // repetir) e largamos privilégios. setgid ANTES de setuid (depois de setuid já não
-    // se pode mudar de grupo). Ex.: o Elasticsearch recusa correr como root.
+                              // `USER` da imagem (≠ root): troca para o uid/gid pedido ANTES do `execve`. Faz-se
+                              // por último — depois das montagens/caps/seccomp, que precisaram de uid 0. Estamos
+                              // dentro do user namespace (root do ns), logo temos CAP_CHOWN/SETUID sobre o
+                              // intervalo mapeado: damos a posse do rootfs ao uid (uma vez; marcador para não
+                              // repetir) e largamos privilégios. setgid ANTES de setuid (depois de setuid já não
+                              // se pode mudar de grupo). Ex.: o Elasticsearch recusa correr como root.
     if let Some(uid) = run_uid {
         if uid != 0 {
             let gid = run_gid.unwrap_or(uid);
@@ -1835,7 +2140,9 @@ pub fn lchown_tree(root: &std::path::Path, uid: u32, gid: u32) {
     fn lchown_path(p: &std::path::Path, uid: u32, gid: u32) {
         if let Ok(c) = std::ffi::CString::new(p.as_os_str().as_encoded_bytes()) {
             // SAFETY: lchown sobre um caminho válido; não segue symlink.
-            unsafe { libc::lchown(c.as_ptr(), uid, gid); }
+            unsafe {
+                libc::lchown(c.as_ptr(), uid, gid);
+            }
         }
     }
     fn rec(dir: &std::path::Path, uid: u32, gid: u32, depth: u32) {
@@ -1905,13 +2212,13 @@ fn attach_device_filter(cgroup: &str) -> bool {
     // Programa: r2 = ctx->access_type; tipo = r2 & 0xffff;
     //           se tipo == 1 (BLK) -> r0=0 (negar); senão r0=1 (permitir).
     let insns: [u64; 7] = [
-        bpf_insn(0x61, 2, 1, 0, 0),        // LDX_W r2 = *(u32*)(r1+0)
-        bpf_insn(0x54, 2, 0, 0, 0xffff),   // AND32 r2 &= 0xffff
-        bpf_insn(0x15, 2, 0, 2, 1),        // JEQ r2,1 -> +2 (BLK = negar)
-        bpf_insn(0xb7, 0, 0, 0, 1),        // MOV r0 = 1 (permitir)
-        bpf_insn(0x95, 0, 0, 0, 0),        // EXIT
-        bpf_insn(0xb7, 0, 0, 0, 0),        // MOV r0 = 0 (negar)
-        bpf_insn(0x95, 0, 0, 0, 0),        // EXIT
+        bpf_insn(0x61, 2, 1, 0, 0),      // LDX_W r2 = *(u32*)(r1+0)
+        bpf_insn(0x54, 2, 0, 0, 0xffff), // AND32 r2 &= 0xffff
+        bpf_insn(0x15, 2, 0, 2, 1),      // JEQ r2,1 -> +2 (BLK = negar)
+        bpf_insn(0xb7, 0, 0, 0, 1),      // MOV r0 = 1 (permitir)
+        bpf_insn(0x95, 0, 0, 0, 0),      // EXIT
+        bpf_insn(0xb7, 0, 0, 0, 0),      // MOV r0 = 0 (negar)
+        bpf_insn(0x95, 0, 0, 0, 0),      // EXIT
     ];
     let license = b"GPL\0";
     let mut log = [0u8; 4096];
@@ -1947,7 +2254,7 @@ fn attach_device_filter(cgroup: &str) -> bool {
     at[0..4].copy_from_slice(&(cg_fd as u32).to_ne_bytes()); // target_fd (cgroup)
     at[4..8].copy_from_slice(&(prog_fd as u32).to_ne_bytes()); // attach_bpf_fd
     at[8..12].copy_from_slice(&BPF_CGROUP_DEVICE.to_ne_bytes()); // attach_type
-    // SAFETY: bpf(PROG_ATTACH) liga o programa ao cgroup.
+                                                                 // SAFETY: bpf(PROG_ATTACH) liga o programa ao cgroup.
     let r = unsafe { libc::syscall(libc::SYS_bpf, BPF_PROG_ATTACH, at.as_ptr(), at.len()) };
     unsafe {
         libc::close(prog_fd as i32);
@@ -2000,7 +2307,9 @@ fn host_mem_bytes() -> u64 {
 }
 
 fn host_ncpu() -> u64 {
-    std::thread::available_parallelism().map(|n| n.get() as u64).unwrap_or(1)
+    std::thread::available_parallelism()
+        .map(|n| n.get() as u64)
+        .unwrap_or(1)
 }
 
 /// Tecto agregado de I/O de disco da slice em bytes/s (`DELONIX_IO_MAX_BPS`,
@@ -2076,7 +2385,11 @@ fn parse_mem_bytes(s: &str) -> u64 {
 /// Existe para o chamador poder avisar UMA vez ANTES de arrancar N nós (ex.:
 /// `cluster create`), em vez de deixar cada nó re-exec repetir o mesmo aviso.
 pub fn cgroup_limits_apply() -> bool {
-    let probe = format!("{}/.delonix-probe-{}", delonix_runtime_core::DELONIX_SLICE, std::process::id());
+    let probe = format!(
+        "{}/.delonix-probe-{}",
+        delonix_runtime_core::DELONIX_SLICE,
+        std::process::id()
+    );
     match std::fs::create_dir(&probe) {
         Ok(()) => {
             let _ = std::fs::remove_dir(&probe);
@@ -2142,7 +2455,9 @@ pub fn admission_check(memory_max: &str) -> Result<()> {
     ensure_delonix_slice();
     let slice = delonix_runtime_core::DELONIX_SLICE;
     let read = |f: &str| -> Option<u64> {
-        std::fs::read_to_string(format!("{slice}/{f}")).ok().and_then(|s| s.trim().parse().ok())
+        std::fs::read_to_string(format!("{slice}/{f}"))
+            .ok()
+            .and_then(|s| s.trim().parse().ok())
     };
     if let (Some(cap), Some(cur)) = (read("memory.max"), read("memory.current")) {
         let want = parse_mem_bytes(memory_max);
@@ -2238,7 +2553,10 @@ pub fn slice_budget() -> (u64, u64, u64, f64, u64) {
     ensure_delonix_slice();
     let slice = delonix_runtime_core::DELONIX_SLICE;
     let read = |f: &str| -> u64 {
-        std::fs::read_to_string(format!("{slice}/{f}")).ok().and_then(|s| s.trim().parse().ok()).unwrap_or(0)
+        std::fs::read_to_string(format!("{slice}/{f}"))
+            .ok()
+            .and_then(|s| s.trim().parse().ok())
+            .unwrap_or(0)
     };
     (
         read("memory.max"),
@@ -2350,7 +2668,10 @@ fn try_delegated_base(base: &str, c: &Container, pid: i32, move_self: bool) -> b
         // tentar o subtree_control.
         let mgr = format!("{base}/dlx-mgr");
         if std::fs::create_dir_all(&mgr).is_ok() {
-            let _ = std::fs::write(format!("{mgr}/cgroup.procs"), std::process::id().to_string());
+            let _ = std::fs::write(
+                format!("{mgr}/cgroup.procs"),
+                std::process::id().to_string(),
+            );
         }
     }
     // 1) Delega os controladores aos filhos da base ANTES de mover o container
@@ -2448,12 +2769,12 @@ fn setup_cgroup(c: &Container, pid: i32) -> Result<()> {
         );
     }
     write_limit(cg, "memory.max", &c.memory_max)?; // teto de memória (kernel OOM-kill)
-    // sem swap além da memória, senão o limite de memória seria contornável;
-    // best-effort: o controlador de swap pode estar desligado no sistema.
+                                                   // sem swap além da memória, senão o limite de memória seria contornável;
+                                                   // best-effort: o controlador de swap pode estar desligado no sistema.
     let _ = std::fs::write(format!("{cg}/memory.swap.max"), "0");
     write_limit(cg, "cpu.max", &cpu_max_value(&c.cpus))?; // teto de CPU
     write_limit(cg, "pids.max", DEFAULT_PIDS_MAX)?; // anti fork-bomb
-    // --- escalonamento / QoS (cgroup v2, best-effort) ---
+                                                    // --- escalonamento / QoS (cgroup v2, best-effort) ---
     if let Some(w) = &c.cpu_weight {
         let _ = std::fs::write(format!("{cg}/cpu.weight"), w); // prioridade de CPU
     }
@@ -2597,7 +2918,10 @@ fn write_etc_files(rootfs: &str, hostname: &str, ip: Option<&str>, dns: Option<&
     // resolver do ingress); em `--net host` copia-se o do host. Como o Docker.
     match dns {
         Some(server) => {
-            let _ = std::fs::write(format!("{etc}/resolv.conf"), format!("nameserver {server}\noptions ndots:0\n"));
+            let _ = std::fs::write(
+                format!("{etc}/resolv.conf"),
+                format!("nameserver {server}\noptions ndots:0\n"),
+            );
         }
         None => {
             if let Ok(host_resolv) = std::fs::read("/etc/resolv.conf") {
@@ -2620,11 +2944,19 @@ fn write_etc_files(rootfs: &str, hostname: &str, ip: Option<&str>, dns: Option<&
 }
 
 fn spawn(store: &Store, container: &mut Container, rootfs: &str, spec: &RunSpec<'_>) -> Result<()> {
-    write_etc_files(rootfs, &container.name, spec.hosts_ip.as_deref(), spec.dns.as_deref());
+    write_etc_files(
+        rootfs,
+        &container.name,
+        spec.hosts_ip.as_deref(),
+        spec.dns.as_deref(),
+    );
     let argv: Vec<CString> = container
         .command
         .iter()
-        .map(|a| CString::new(a.as_str()).map_err(|_| Error::Invalid(format!("argumento inválido: {a:?}"))))
+        .map(|a| {
+            CString::new(a.as_str())
+                .map_err(|_| Error::Invalid(format!("argumento inválido: {a:?}")))
+        })
         .collect::<Result<_>>()?;
     if argv.is_empty() {
         return Err(Error::Invalid("comando vazio".into()));
@@ -2725,7 +3057,10 @@ fn spawn(store: &Store, container: &mut Container, rootfs: &str, spec: &RunSpec<
         let mut fds = [0i32; 2];
         // SAFETY: pipe() preenche o array de 2 fds.
         if unsafe { libc::pipe(fds.as_mut_ptr()) } != 0 {
-            return Err(Error::Runtime { context: "pipe", message: "falha a criar pipe".into() });
+            return Err(Error::Runtime {
+                context: "pipe",
+                message: "falha a criar pipe".into(),
+            });
         }
         Some((fds[0], fds[1]))
     } else {
@@ -2764,7 +3099,11 @@ fn spawn(store: &Store, container: &mut Container, rootfs: &str, spec: &RunSpec<
     let cid = container.id.clone();
     // Node KIND (label `io.x-k8s.kind.*`): só estes recebem o cgroup-ns dedicado —
     // um container `--privileged` normal fica com a hierarquia de cgroup intacta.
-    let node_cgroup = privileged && container.labels.keys().any(|k| k.starts_with("io.x-k8s.kind"));
+    let node_cgroup = privileged
+        && container
+            .labels
+            .keys()
+            .any(|k| k.starts_with("io.x-k8s.kind"));
     let mut stack = vec![0u8; 1024 * 1024];
     let cb = Box::new(move || {
         container_init(
@@ -2869,7 +3208,10 @@ fn spawn(store: &Store, container: &mut Container, rootfs: &str, spec: &RunSpec<
         // `run` ficava pendurado sem log nem exit. Com SO_RCVTIMEO, ao fim de 10s
         // desiste (None → sem log, mas o container segue e o status reconcilia).
         unsafe {
-            let tv = libc::timeval { tv_sec: 10, tv_usec: 0 };
+            let tv = libc::timeval {
+                tv_sec: 10,
+                tv_usec: 0,
+            };
             libc::setsockopt(
                 csp,
                 libc::SOL_SOCKET,
@@ -2967,7 +3309,9 @@ fn spawn(store: &Store, container: &mut Container, rootfs: &str, spec: &RunSpec<
 /// verdadeiro (`Failed(n)`), que é o que uma política de restart
 /// `on-failure` precisa de saber para decidir.
 pub fn wait_and_record(store: &Store, container: &mut Container) -> Result<Status> {
-    let pid = container.pid.ok_or_else(|| Error::NotRunning(container.short_id().to_string()))?;
+    let pid = container
+        .pid
+        .ok_or_else(|| Error::NotRunning(container.short_id().to_string()))?;
     let st = waitpid(Pid::from_raw(pid), None).map_err(syserr("waitpid"))?;
     let status = wait_to_status(st);
     // `update` (flock) e não `save`: o CRI/CLI podem estar a reconciliar o
@@ -3016,7 +3360,9 @@ fn open_pty_in_container() -> Option<(i32, i32, String)> {
             libc::close(m);
             return None;
         }
-        let path = std::ffi::CStr::from_ptr(buf.as_ptr()).to_string_lossy().into_owned();
+        let path = std::ffi::CStr::from_ptr(buf.as_ptr())
+            .to_string_lossy()
+            .into_owned();
         let s = libc::open(buf.as_ptr(), libc::O_RDWR | libc::O_NOCTTY);
         if s < 0 {
             libc::close(m);
@@ -3052,7 +3398,13 @@ fn setup_console(console_sock: (i32, i32)) {
     // `/dev/console` = bind do nó do slave (char device do pty). É o que o systemd
     // abre por nome para imprimir o estado do boot. Best-effort.
     let _ = std::fs::File::create("/dev/console"); // ponto de montagem
-    let _ = mount(Some(path.as_str()), "/dev/console", None::<&str>, MsFlags::MS_BIND, None::<&str>);
+    let _ = mount(
+        Some(path.as_str()),
+        "/dev/console",
+        None::<&str>,
+        MsFlags::MS_BIND,
+        None::<&str>,
+    );
     // Sessão nova + controlling tty no slave + stdio = slave (modelo runc
     // `terminal:true`). O PID 1 (filho da clone) não é líder de grupo → o setsid
     // sucede; o systemd herda isto e escreve para o pty capturado.
@@ -3139,7 +3491,11 @@ fn pump_fd(from: i32, to: i32) {
         let mut off = 0isize;
         while off < n {
             let w = unsafe {
-                libc::write(to, buf.as_ptr().offset(off) as *const libc::c_void, (n - off) as usize)
+                libc::write(
+                    to,
+                    buf.as_ptr().offset(off) as *const libc::c_void,
+                    (n - off) as usize,
+                )
             };
             if w <= 0 {
                 return;
@@ -3206,8 +3562,12 @@ pub fn exec(container: &Container, argv: &[String], tty: bool) -> Result<i32> {
                 continue; // já estamos neste namespace
             }
         }
-        let fd = open(target.as_str(), OFlag::O_RDONLY | OFlag::O_CLOEXEC, Mode::empty())
-            .map_err(syserr("open ns"))?;
+        let fd = open(
+            target.as_str(),
+            OFlag::O_RDONLY | OFlag::O_CLOEXEC,
+            Mode::empty(),
+        )
+        .map_err(syserr("open ns"))?;
         fds.push((ns, fd));
     }
     // Entrámos mesmo num user ns? (i.e., não o partilhávamos já). Se sim, tornamo-nos
@@ -3217,7 +3577,10 @@ pub fn exec(container: &Container, argv: &[String], tty: bool) -> Result<i32> {
 
     let cargv: Vec<CString> = argv
         .iter()
-        .map(|a| CString::new(a.as_str()).map_err(|_| Error::Invalid(format!("argumento inválido: {a:?}"))))
+        .map(|a| {
+            CString::new(a.as_str())
+                .map_err(|_| Error::Invalid(format!("argumento inválido: {a:?}")))
+        })
         .collect::<Result<_>>()?;
 
     // `exec -t`: o neto aloca um pty no devpts DO container e passa o master ao
@@ -3303,7 +3666,9 @@ pub fn exec(container: &Container, argv: &[String], tty: bool) -> Result<i32> {
                     // o init do container; aborta se algum controlo falhou em silêncio.
                     if !insecure_besteffort() {
                         if let Err(e) = verify_confinement(!exec_unconf, exec_keep) {
-                            eprintln!("delonix: confinamento do exec NÃO verificado ({e}); a abortar");
+                            eprintln!(
+                                "delonix: confinamento do exec NÃO verificado ({e}); a abortar"
+                            );
                             unsafe { libc::_exit(126) };
                         }
                     }
@@ -3436,7 +3801,12 @@ fn move_mount_to(dfd: RawFd, target: &str) -> nix::Result<()> {
 /// (nosuid/nodev sempre, rdonly opcional) no mount destacado antes de o anexar.
 fn mount_setattr_fd(dfd: RawFd, attr_set: u64) -> nix::Result<()> {
     let empty = CString::new("").unwrap();
-    let attr = MountAttr { attr_set, attr_clr: 0, propagation: 0, userns_fd: 0 };
+    let attr = MountAttr {
+        attr_set,
+        attr_clr: 0,
+        propagation: 0,
+        userns_fd: 0,
+    };
     // SAFETY: dfd válido, struct do tamanho declarado, flags válidas.
     let r = unsafe {
         libc::syscall(
@@ -3465,8 +3835,12 @@ fn open_container_ns(pid: i32, ns: &str) -> Result<Option<OwnedFd>> {
             return Ok(None);
         }
     }
-    let fd = open(target.as_str(), OFlag::O_RDONLY | OFlag::O_CLOEXEC, Mode::empty())
-        .map_err(syserr("open ns"))?;
+    let fd = open(
+        target.as_str(),
+        OFlag::O_RDONLY | OFlag::O_CLOEXEC,
+        Mode::empty(),
+    )
+    .map_err(syserr("open ns"))?;
     // SAFETY: fd >= 0 do kernel; posse transferida ao OwnedFd.
     Ok(Some(unsafe { OwnedFd::from_raw_fd(fd) }))
 }
@@ -3475,7 +3849,10 @@ fn open_container_ns(pid: i32, ns: &str) -> Result<Option<OwnedFd>> {
 /// comentário do módulo para a sequência setns/unshare/open_tree/move_mount.
 pub fn mount_live(container: &Container, m: &Mount) -> Result<()> {
     if !mount_target_safe(&m.target) {
-        return Err(Error::Invalid(format!("alvo de montagem inseguro: {}", m.target)));
+        return Err(Error::Invalid(format!(
+            "alvo de montagem inseguro: {}",
+            m.target
+        )));
     }
     let pid = container
         .pid
@@ -3496,8 +3873,9 @@ pub fn mount_live(container: &Container, m: &Mount) -> Result<()> {
     // exactamente o mesmo bug que o `exec` já teve e corrigiu da mesma maneira
     // (ver o comentário do `ns_list` em `exec`).
     let user_fd = open_container_ns(pid, "user")?;
-    let mnt_fd = open_container_ns(pid, "mnt")?
-        .ok_or_else(|| Error::Invalid("container partilha o mnt ns do host — nada a montar".into()))?;
+    let mnt_fd = open_container_ns(pid, "mnt")?.ok_or_else(|| {
+        Error::Invalid("container partilha o mnt ns do host — nada a montar".into())
+    })?;
 
     let mut attr = MOUNT_ATTR_NOSUID | MOUNT_ATTR_NODEV;
     if m.readonly {
@@ -3532,7 +3910,10 @@ pub fn mount_live(container: &Container, m: &Mount) -> Result<()> {
             // 3) clona a subárvore-fonte (visível: ainda vemos a árvore do host).
             let dfd = match open_tree_clone(&source, true) {
                 Ok(f) => f,
-                Err(e) => fail(123, &format!("open_tree: {e} (kernel suporta a nova mount API?)")),
+                Err(e) => fail(
+                    123,
+                    &format!("open_tree: {e} (kernel suporta a nova mount API?)"),
+                ),
             };
             if mount_setattr_fd(dfd.as_raw_fd(), attr).is_err() {
                 fail(122, "mount_setattr");
@@ -3574,7 +3955,9 @@ pub fn mount_live(container: &Container, m: &Mount) -> Result<()> {
 /// do container e faz `umount2(target, MNT_DETACH)` (lazy: não falha se ocupado).
 pub fn unmount_live(container: &Container, target: &str) -> Result<()> {
     if !mount_target_safe(target) {
-        return Err(Error::Invalid(format!("alvo de desmontagem inseguro: {target}")));
+        return Err(Error::Invalid(format!(
+            "alvo de desmontagem inseguro: {target}"
+        )));
     }
     let pid = container
         .pid
@@ -3612,7 +3995,9 @@ pub fn unmount_live(container: &Container, target: &str) -> Result<()> {
             let status = waitpid(child, None).map_err(syserr("waitpid"))?;
             match status {
                 WaitStatus::Exited(_, 0) => Ok(()),
-                _ => Err(Error::Invalid(format!("falha a desmontar {target} no container vivo"))),
+                _ => Err(Error::Invalid(format!(
+                    "falha a desmontar {target} no container vivo"
+                ))),
             }
         }
     }
@@ -3627,17 +4012,24 @@ pub fn unmount_live(container: &Container, target: &str) -> Result<()> {
 /// a partir do `pid` do init, lendo o `ppid` (campo 4 de `/proc/<pid>/stat`).
 fn container_pids(container: &Container) -> Vec<i32> {
     if let Ok(procs) = std::fs::read_to_string(format!("{}/cgroup.procs", container.cgroup())) {
-        let v: Vec<i32> = procs.lines().filter_map(|l| l.trim().parse().ok()).collect();
+        let v: Vec<i32> = procs
+            .lines()
+            .filter_map(|l| l.trim().parse().ok())
+            .collect();
         if !v.is_empty() {
             return v;
         }
     }
-    let Some(root) = container.pid else { return Vec::new() };
+    let Some(root) = container.pid else {
+        return Vec::new();
+    };
     // mapa ppid→[filhos] a partir de /proc, depois BFS desde o init.
     let mut children: std::collections::HashMap<i32, Vec<i32>> = std::collections::HashMap::new();
     if let Ok(rd) = std::fs::read_dir("/proc") {
         for e in rd.flatten() {
-            let Ok(pid) = e.file_name().to_string_lossy().parse::<i32>() else { continue };
+            let Ok(pid) = e.file_name().to_string_lossy().parse::<i32>() else {
+                continue;
+            };
             if let Ok(stat) = std::fs::read_to_string(format!("/proc/{pid}/stat")) {
                 // campo 4 (ppid) vem DEPOIS do `comm` entre parênteses — fatia após ')'.
                 if let Some(rest) = stat.rsplit(')').next() {
@@ -3772,7 +4164,11 @@ pub fn live_cgroup(container: &Container) -> String {
 /// contrário do `SIGSTOP`, é atómico para a árvore inteira e invisível ao
 /// processo (não pode ser apanhado/ignorado).
 pub fn set_frozen(container: &Container, frozen: bool) -> Result<()> {
-    if !container.pid.map(|p| safe_to_signal(p, container.pid_starttime)).unwrap_or(false) {
+    if !container
+        .pid
+        .map(|p| safe_to_signal(p, container.pid_starttime))
+        .unwrap_or(false)
+    {
         return Err(Error::NotRunning(container.short_id().to_string()));
     }
     let path = format!("{}/cgroup.freeze", live_cgroup(container));
@@ -3836,7 +4232,11 @@ pub fn reconcile_status(c: &mut Container) -> bool {
 /// Reescreve, AO VIVO, os limites de cgroup de um container (`docker update`).
 /// Se o container estiver parado, não há cgroup — só o registo muda (na CLI), e
 /// os novos limites aplicam-se no próximo `start`.
-pub fn update_limits(container: &Container, memory: Option<&str>, cpus: Option<&str>) -> Result<()> {
+pub fn update_limits(
+    container: &Container,
+    memory: Option<&str>,
+    cpus: Option<&str>,
+) -> Result<()> {
     let cg = container.cgroup();
     if !std::path::Path::new(&cg).exists() {
         return Ok(());
@@ -3950,9 +4350,15 @@ mod tests {
             Some("/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/dlx-containers")
         );
         // fora da árvore de sessão (serviço de sistema) → sem fuga.
-        assert_eq!(user_service_base("/sys/fs/cgroup/system.slice/foo.service"), None);
+        assert_eq!(
+            user_service_base("/sys/fs/cgroup/system.slice/foo.service"),
+            None
+        );
         // um segmento com "user@" sem o sufixo ".service" não engana o parser.
-        assert_eq!(user_service_base("/sys/fs/cgroup/system.slice/user@fake"), None);
+        assert_eq!(
+            user_service_base("/sys/fs/cgroup/system.slice/user@fake"),
+            None
+        );
     }
 
     #[test]
@@ -3972,7 +4378,7 @@ mod tests {
     #[test]
     fn confinement_ok_is_fail_closed() {
         let keep = (1u64 << 1) | (1u64 << 3); // só caps 1 e 3 na allowlist
-        // estado bom: no_new_privs, seccomp modo filtro, caps ⊆ keep
+                                              // estado bom: no_new_privs, seccomp modo filtro, caps ⊆ keep
         assert!(confinement_ok(Some(1), Some(2), Some(keep), Some(keep), true, keep).is_ok());
         // NO_NEW_PRIVS inativo → aborta
         assert!(confinement_ok(Some(0), Some(2), Some(keep), Some(keep), true, keep).is_err());
@@ -3990,7 +4396,15 @@ mod tests {
         assert!(confinement_ok(Some(1), Some(2), Some(keep), None, true, keep).is_err());
         // privileged (keep = todas as caps): nada fica "fora" → ok
         let allcaps = u64::MAX;
-        assert!(confinement_ok(Some(1), Some(2), Some(allcaps), Some(allcaps), true, allcaps).is_ok());
+        assert!(confinement_ok(
+            Some(1),
+            Some(2),
+            Some(allcaps),
+            Some(allcaps),
+            true,
+            allcaps
+        )
+        .is_ok());
     }
 
     #[test]
@@ -4007,7 +4421,10 @@ mod tests {
         // SYS_ADMIN(21), SYS_MODULE(16), SYS_BOOT(22), MKNOD(27), SYS_RAWIO(17),
         // SYS_PTRACE(19), BPF(39) NÃO podem estar na allowlist.
         for dangerous in [21u8, 16, 22, 27, 17, 19, 39] {
-            assert!(!KEPT_CAPS.contains(&dangerous), "cap {dangerous} não devia ser mantida");
+            assert!(
+                !KEPT_CAPS.contains(&dangerous),
+                "cap {dangerous} não devia ser mantida"
+            );
         }
     }
 
@@ -4036,7 +4453,10 @@ mod tests {
             libc::SYS_unshare,
             libc::SYS_keyctl,
         ] {
-            assert!(!allowed.contains(&nr), "syscall {nr} perigoso NÃO devia estar na allowlist");
+            assert!(
+                !allowed.contains(&nr),
+                "syscall {nr} perigoso NÃO devia estar na allowlist"
+            );
         }
         // comuns/essenciais: DENTRO da allowlist.
         for nr in [
@@ -4048,7 +4468,10 @@ mod tests {
             libc::SYS_execve,
             libc::SYS_exit_group,
         ] {
-            assert!(allowed.contains(&nr), "syscall {nr} essencial DEVIA estar na allowlist");
+            assert!(
+                allowed.contains(&nr),
+                "syscall {nr} essencial DEVIA estar na allowlist"
+            );
         }
     }
 
@@ -4067,11 +4490,21 @@ mod tests {
     #[test]
     fn sysctl_allowlist_so_aceita_namespaced() {
         // namespaced (seguros) → permitidos.
-        for k in ["net.ipv4.ip_forward", "kernel.shmmax", "kernel.sem", "fs.mqueue.msg_max"] {
+        for k in [
+            "net.ipv4.ip_forward",
+            "kernel.shmmax",
+            "kernel.sem",
+            "fs.mqueue.msg_max",
+        ] {
             assert!(sysctl_namespaced(k), "{k} devia ser permitido");
         }
         // globais ao host / travessia → recusados.
-        for k in ["kernel.hostname", "vm.swappiness", "kernel.core_pattern", "net/../kernel.x"] {
+        for k in [
+            "kernel.hostname",
+            "vm.swappiness",
+            "kernel.core_pattern",
+            "net/../kernel.x",
+        ] {
             assert!(!sysctl_namespaced(k), "{k} NÃO devia ser permitido");
         }
     }

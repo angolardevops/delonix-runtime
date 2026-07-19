@@ -29,7 +29,10 @@ pub struct VirtInfo {
 }
 
 fn read_trim(p: &str) -> String {
-    std::fs::read_to_string(p).unwrap_or_default().trim().to_string()
+    std::fs::read_to_string(p)
+        .unwrap_or_default()
+        .trim()
+        .to_string()
 }
 
 /// Decide o nome do hipervisor a partir dos sinais do DMI/CPU. Função pura
@@ -49,7 +52,11 @@ fn classify(
         "kvm".into()
     } else if vl.contains("qemu") || vl.contains("red hat") {
         // Vendor QEMU/Red Hat com virtio é, na prática, sempre acelerado por KVM.
-        if has_virtio { "kvm".into() } else { "qemu".into() }
+        if has_virtio {
+            "kvm".into()
+        } else {
+            "qemu".into()
+        }
     } else if vl.contains("vmware") {
         "vmware".into()
     } else if pl.contains("virtualbox") || vl.contains("innotek") || vl.contains("oracle") {
@@ -180,7 +187,10 @@ mod tests {
 
     #[test]
     fn kvm_via_qemu_vendor_with_virtio() {
-        assert_eq!(classify("Standard PC (Q35 + ICH9, 2009)", "QEMU", "", true, true), "kvm");
+        assert_eq!(
+            classify("Standard PC (Q35 + ICH9, 2009)", "QEMU", "", true, true),
+            "kvm"
+        );
     }
 
     #[test]
@@ -190,9 +200,18 @@ mod tests {
 
     #[test]
     fn vmware_and_vbox_and_hyperv() {
-        assert_eq!(classify("VMware Virtual Platform", "VMware, Inc.", "", true, false), "vmware");
-        assert_eq!(classify("VirtualBox", "innotek GmbH", "", true, false), "virtualbox");
-        assert_eq!(classify("Virtual Machine", "Microsoft Corporation", "", true, false), "hyper-v");
+        assert_eq!(
+            classify("VMware Virtual Platform", "VMware, Inc.", "", true, false),
+            "vmware"
+        );
+        assert_eq!(
+            classify("VirtualBox", "innotek GmbH", "", true, false),
+            "virtualbox"
+        );
+        assert_eq!(
+            classify("Virtual Machine", "Microsoft Corporation", "", true, false),
+            "hyper-v"
+        );
     }
 
     #[test]
@@ -202,11 +221,17 @@ mod tests {
 
     #[test]
     fn bare_metal_is_none() {
-        assert_eq!(classify("HP ZBook Power 15.6", "HP", "", false, false), "none");
+        assert_eq!(
+            classify("HP ZBook Power 15.6", "HP", "", false, false),
+            "none"
+        );
     }
 
     #[test]
     fn unknown_hypervisor_flag_only() {
-        assert_eq!(classify("Some Cloud Instance", "Cloud Co", "", true, false), "unknown");
+        assert_eq!(
+            classify("Some Cloud Instance", "Cloud Co", "", true, false),
+            "unknown"
+        );
     }
 }

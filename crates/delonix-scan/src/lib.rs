@@ -9,8 +9,8 @@
 //! Pensado para correr **antes do build** (analisar a base `FROM`) e em **imagens
 //! já existentes** — exactamente como o `trivy`/`grype`, mas embutido no engine.
 
-use delonix_runtime_core::{Error, Result};
 use delonix_image::{Image, ImageStore};
+use delonix_runtime_core::{Error, Result};
 use serde::{Deserialize, Serialize};
 use std::io::Read;
 
@@ -118,7 +118,11 @@ fn parse_apk(db: &str) -> Vec<Package> {
             name = Some(n.trim().to_string());
         } else if let Some(v) = line.strip_prefix("V:") {
             if let Some(n) = name.take() {
-                out.push(Package { name: n, version: v.trim().to_string(), ecosystem: Ecosystem::Apk });
+                out.push(Package {
+                    name: n,
+                    version: v.trim().to_string(),
+                    ecosystem: Ecosystem::Apk,
+                });
             }
         }
     }
@@ -134,7 +138,11 @@ fn parse_dpkg(db: &str) -> Vec<Package> {
             name = Some(n.trim().to_string());
         } else if let Some(v) = line.strip_prefix("Version:") {
             if let Some(n) = name.clone() {
-                out.push(Package { name: n, version: v.trim().to_string(), ecosystem: Ecosystem::Dpkg });
+                out.push(Package {
+                    name: n,
+                    version: v.trim().to_string(),
+                    ecosystem: Ecosystem::Dpkg,
+                });
             }
         } else if line.is_empty() {
             name = None;
@@ -214,7 +222,9 @@ pub fn version_lt(a: &str, b: &str) -> bool {
             (Some(_), None) => return false, // b acabou -> a > b
             (Some((da, sa)), Some((db, sb))) => {
                 let ord = if *da && *db {
-                    sa.parse::<u64>().unwrap_or(0).cmp(&sb.parse::<u64>().unwrap_or(0))
+                    sa.parse::<u64>()
+                        .unwrap_or(0)
+                        .cmp(&sb.parse::<u64>().unwrap_or(0))
                 } else {
                     sa.cmp(sb)
                 };
@@ -306,7 +316,11 @@ fn map_osv_ecosystem(s: &str) -> Option<Ecosystem> {
 /// cai no default do chamador.
 fn osv_severity_label(obj: &serde_json::Value) -> Option<Severity> {
     for key in ["database_specific", "ecosystem_specific"] {
-        if let Some(s) = obj.get(key).and_then(|d| d.get("severity")).and_then(|v| v.as_str()) {
+        if let Some(s) = obj
+            .get(key)
+            .and_then(|d| d.get("severity"))
+            .and_then(|v| v.as_str())
+        {
             if let Some(sev) = Severity::parse(s) {
                 return Some(sev);
             }
@@ -337,8 +351,8 @@ fn osv_first_fixed(affected: &serde_json::Value) -> Option<String> {
 /// (Alpine→apk, Debian/Ubuntu→dpkg); os restantes são ignorados. Sem rótulo de
 /// severidade, assume `Medium`. Função pura — testável sem rede.
 pub fn advisories_from_osv(json: &str) -> Result<Vec<Advisory>> {
-    let v: serde_json::Value =
-        serde_json::from_str(json).map_err(|e| Error::Invalid(format!("feed OSV inválido: {e}")))?;
+    let v: serde_json::Value = serde_json::from_str(json)
+        .map_err(|e| Error::Invalid(format!("feed OSV inválido: {e}")))?;
     let vulns = if let Some(arr) = v.as_array() {
         arr.clone()
     } else if let Some(arr) = v.get("vulns").and_then(|x| x.as_array()) {
@@ -367,13 +381,17 @@ pub fn advisories_from_osv(json: &str) -> Result<Vec<Advisory>> {
             continue;
         };
         for aff in affected {
-            let Some(pkg) = aff.get("package") else { continue };
+            let Some(pkg) = aff.get("package") else {
+                continue;
+            };
             let name = pkg.get("name").and_then(|x| x.as_str()).unwrap_or("");
             let eco = pkg.get("ecosystem").and_then(|x| x.as_str()).unwrap_or("");
             let (Some(ecosystem), false) = (map_osv_ecosystem(eco), name.is_empty()) else {
                 continue;
             };
-            let Some(fixed) = osv_first_fixed(aff) else { continue };
+            let Some(fixed) = osv_first_fixed(aff) else {
+                continue;
+            };
             let severity = osv_severity_label(aff)
                 .or(vuln_sev)
                 .unwrap_or(Severity::Medium);
@@ -433,8 +451,16 @@ mod tests {
     #[test]
     fn matches_only_vulnerable() {
         let sbom = vec![
-            Package { name: "busybox".into(), version: "1.36.1-r20".into(), ecosystem: Ecosystem::Apk },
-            Package { name: "zlib".into(), version: "1.3.1-r0".into(), ecosystem: Ecosystem::Apk },
+            Package {
+                name: "busybox".into(),
+                version: "1.36.1-r20".into(),
+                ecosystem: Ecosystem::Apk,
+            },
+            Package {
+                name: "zlib".into(),
+                version: "1.3.1-r0".into(),
+                ecosystem: Ecosystem::Apk,
+            },
         ];
         let db = AdvisoryDb::load(
             r#"[
@@ -486,9 +512,13 @@ mod tests {
         assert_eq!(advs.len(), 1);
         assert_eq!(advs[0].ecosystem, Ecosystem::Dpkg);
         assert_eq!(advs[0].severity, Severity::Medium); // sem rótulo → default
-        // as advisories convertidas cruzam com um SBOM real.
+                                                        // as advisories convertidas cruzam com um SBOM real.
         let db = AdvisoryDb::load(&serde_json::to_string(&advs_json(&advs)).unwrap()).unwrap();
-        let sbom = vec![Package { name: "libc6".into(), version: "2.36-9".into(), ecosystem: Ecosystem::Dpkg }];
+        let sbom = vec![Package {
+            name: "libc6".into(),
+            version: "2.36-9".into(),
+            ecosystem: Ecosystem::Dpkg,
+        }];
         assert_eq!(db.scan(&sbom).len(), 1);
     }
 
