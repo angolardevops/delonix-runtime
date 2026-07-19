@@ -150,6 +150,14 @@ enum Cmd {
         #[arg(long)]
         addr: Option<String>,
     },
+    /// Serve a API de GESTÃO (HTTP+JSON) num socket unix — a superfície que um
+    /// control-plane externo (delonix-paas) consome para operar o motor sem link
+    /// directo aos crates. Distinta do `cri` (que serve o kubelet).
+    Api {
+        /// Endereço do socket (default: `$DELONIX_API_ADDR` ou `unix:///run/delonix-mgmt.sock`).
+        #[arg(long)]
+        addr: Option<String>,
+    },
     /// Dashboard de resumo/KPIs do runtime (TUI interactivo estilo htop). Global,
     /// ou por grupo (`delonix container dash`, `vm dash`, ...).
     Dash {
@@ -206,6 +214,12 @@ fn run() -> Result<()> {
                 .or_else(|| std::env::var("DELONIX_CRI_ADDR").ok())
                 .unwrap_or_else(|| "unix:///run/delonix-cri.sock".to_string());
             delonix_cri::serve_blocking(cmd::util::state_root(), &addr)
+        }
+        Cmd::Api { addr } => {
+            let addr = addr
+                .or_else(|| std::env::var("DELONIX_API_ADDR").ok())
+                .unwrap_or_else(|| "unix:///run/delonix-mgmt.sock".to_string());
+            delonix_mgmt::serve_blocking(cmd::util::state_root(), &addr)
         }
         Cmd::Dash { once } => cmd::dash::run(cmd::dash::DashScope::Global, once),
         Cmd::Completion { shell } => cmd_completion(shell),
