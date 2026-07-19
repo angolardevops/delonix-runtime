@@ -105,7 +105,7 @@ pub fn run(action: NetnsCmd) -> Result<()> {
             Ok(())
         }
         NetnsCmd::Attach { name, ip } => {
-            let (netns, assigned) = infra::attach_container(&name, "ingress")?;
+            let (netns, assigned) = infra::attach_container(&name, "ingress", "default")?;
             println!(
                 "attached '{netns}' → {} on {} (refcount {})",
                 ip.unwrap_or(assigned),
