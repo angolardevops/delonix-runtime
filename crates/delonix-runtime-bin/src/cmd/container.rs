@@ -54,6 +54,10 @@ struct ContainerSpec {
     pub(crate) restart: String,
     // ---- parity with `container run` (all optional, k8s-style camelCase) ----
     #[serde(default)]
+    hostname: Option<String>,
+    #[serde(default)]
+    user: Option<String>,
+    #[serde(default)]
     entrypoint: Option<String>,
     #[serde(default)]
     devices: Vec<String>,
@@ -129,6 +133,8 @@ pub(crate) const CONTAINER_SPEC_FIELDS: &[&str] = &[
     "command",
     "restartPolicy",
     "restart",
+    "hostname",
+    "user",
     "entrypoint",
     "devices",
     "labels",
@@ -221,6 +227,14 @@ pub enum ContainerCmd {
         /// Container name (default: `dlx-<id>`).
         #[arg(long)]
         name: Option<String>,
+        /// Hostname inside the container (UTS namespace + `/etc/hostname`). Default:
+        /// the container name (docker `--hostname`).
+        #[arg(long)]
+        hostname: Option<String>,
+        /// Run the process as this user: `uid[:gid]` or `name[:group]` (docker
+        /// `--user`). Names are resolved in the image's `/etc/passwd`/`/etc/group`.
+        #[arg(short = 'u', long)]
+        user: Option<String>,
         /// Network: `host` (shares the host's, default), `none` (isolated netns with
         /// no connectivity), or the NAME of a network created with `delonix network create`.
         #[arg(long, default_value = "host", add = ArgValueCandidates::new(super::complete::networks))]
@@ -587,6 +601,8 @@ pub fn run(action: ContainerCmd) -> Result<()> {
         ContainerCmd::Run {
             detach,
             name,
+            hostname,
+            user,
             net,
             volumes,
             publish,
@@ -640,6 +656,8 @@ pub fn run(action: ContainerCmd) -> Result<()> {
             RunOpts {
                 detach,
                 name,
+                hostname,
+                user,
                 net,
                 namespace,
                 expose,
@@ -767,6 +785,8 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
             RunOpts {
                 detach: spec.detach,
                 name: Some(name.clone()),
+                hostname: spec.hostname,
+                user: spec.user,
                 net: spec.network,
                 namespace: doc.metadata.namespace.clone(),
                 expose: spec.expose,
@@ -889,6 +909,75 @@ fn resolve_mounts(volumes: &[String]) -> Result<Vec<delonix_runtime_core::Mount>
         .collect()
 }
 
+/// Resolve `--user <uid[:gid]|name[:group]>` into `(uid, Option<gid>)`.
+///
+/// The user part is a number (used verbatim) or a name looked up in the image's
+/// `/etc/passwd` — returning its uid AND its primary gid, which becomes the gid
+/// when no `:group` is given (like docker/`RunAsUsername`, where the runtime MUST
+/// resolve the user in the image). The optional group part is a number or a name
+/// looked up in `/etc/group`. A name that doesn't exist in the image is an error
+/// (never invented) — the CRI `RunAsUserName` contract requires it.
+fn resolve_run_user(rootfs: &str, spec: &str) -> Result<(u32, Option<u32>)> {
+    let (user_part, group_part) = match spec.split_once(':') {
+        Some((u, g)) => (u, Some(g)),
+        None => (spec, None),
+    };
+    if user_part.is_empty() {
+        return Err(Error::Invalid("--user: utilizador vazio".into()));
+    }
+    let (uid, primary_gid) = if let Ok(n) = user_part.parse::<u32>() {
+        (n, None)
+    } else {
+        let (uid, gid) = passwd_lookup(rootfs, user_part).ok_or_else(|| {
+            Error::Invalid(format!(
+                "--user: utilizador '{user_part}' não existe na imagem (/etc/passwd)"
+            ))
+        })?;
+        (uid, Some(gid))
+    };
+    let gid = match group_part {
+        Some(g) if !g.is_empty() => Some(if let Ok(n) = g.parse::<u32>() {
+            n
+        } else {
+            group_lookup(rootfs, g).ok_or_else(|| {
+                Error::Invalid(format!(
+                    "--user: grupo '{g}' não existe na imagem (/etc/group)"
+                ))
+            })?
+        }),
+        _ => primary_gid,
+    };
+    Ok((uid, gid))
+}
+
+/// Look up `name` in `<rootfs>/etc/passwd`, returning `(uid, primary_gid)`.
+/// Format: `name:passwd:uid:gid:gecos:home:shell`.
+fn passwd_lookup(rootfs: &str, name: &str) -> Option<(u32, u32)> {
+    let content = std::fs::read_to_string(format!("{rootfs}/etc/passwd")).ok()?;
+    for line in content.lines() {
+        let mut f = line.split(':');
+        if f.next() == Some(name) {
+            let uid = f.nth(1)?.parse().ok()?; // skip passwd field, then uid
+            let gid = f.next()?.parse().ok()?;
+            return Some((uid, gid));
+        }
+    }
+    None
+}
+
+/// Look up `name` in `<rootfs>/etc/group`, returning its gid.
+/// Format: `name:passwd:gid:members`.
+fn group_lookup(rootfs: &str, name: &str) -> Option<u32> {
+    let content = std::fs::read_to_string(format!("{rootfs}/etc/group")).ok()?;
+    for line in content.lines() {
+        let mut f = line.split(':');
+        if f.next() == Some(name) {
+            return f.nth(1)?.parse().ok(); // skip passwd field, then gid
+        }
+    }
+    None
+}
+
 /// Arguments for `container run` (CLI and manifest), grouped — the list passed
 /// the `too_many_arguments` threshold long ago.
 ///
@@ -900,6 +989,12 @@ fn resolve_mounts(volumes: &[String]) -> Result<Vec<delonix_runtime_core::Mount>
 pub(crate) struct RunOpts {
     pub(crate) detach: bool,
     pub(crate) name: Option<String>,
+    /// Hostname interno (`--hostname`). `None` = usa o nome do container.
+    #[serde(default)]
+    pub(crate) hostname: Option<String>,
+    /// Utilizador do processo (`--user`, `uid[:gid]`|`nome[:grupo]`). `None` = root.
+    #[serde(default)]
+    pub(crate) user: Option<String>,
     pub(crate) net: String,
     /// Namespace lógico de ISOLAMENTO (default `default`). Ver [[isolamento de namespace]].
     #[serde(default)]
@@ -998,6 +1093,8 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
     let RunOpts {
         detach,
         name,
+        hostname,
+        user,
         net,
         namespace,
         expose,
@@ -1150,6 +1247,18 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
         if let Some((k, v)) = l.split_once('=') {
             c.labels.insert(k.to_string(), v.to_string());
         }
+    }
+    // `--hostname`: sobrepõe o nome do container na UTS namespace (o motor lê
+    // `c.hostname`). Vazio = usa o nome (histórico).
+    c.hostname = hostname.filter(|h| !h.trim().is_empty());
+    // `--user <uid[:gid]|nome[:grupo]>`: resolve contra o `/etc/passwd`/`/etc/group`
+    // da imagem (nomes) ou usa os números; o motor troca para o uid/gid antes do
+    // `execve` (`RunSpec.run_uid`/`run_gid`). É o fio do CRI `RunAsUser`/`RunAsGroup`/
+    // `RunAsUserName`.
+    if let Some(u) = &user {
+        let (uid, gid) = resolve_run_user(&rootfs, u)?;
+        c.run_uid = Some(uid);
+        c.run_gid = gid;
     }
 
     // ---- resources (cgroup v2) ----
@@ -1370,7 +1479,8 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
         apparmor: apparmor_profile.clone(),
         selinux: selinux.clone(),
         log_cri,
-        ..Default::default()
+        run_uid: c.run_uid,
+        run_gid: c.run_gid,
     };
     // BEFORE the supervised branch (which returns): otherwise containers with
     // `--restart` would never emit `create`.
@@ -2071,6 +2181,10 @@ fn cmd_start(images: &ImageStore, store: &Store, id: &str) -> Result<()> {
             .clone()
             .or_else(|| (!slirp_ports.is_empty()).then(|| delonix_net::SLIRP_IP.to_string())),
         dns,
+        // Reproduz o `--user` do `run` original (o `--hostname` vem de `c.hostname`,
+        // lido pelo motor). Sem isto, um `start` corria como root.
+        run_uid: c.run_uid,
+        run_gid: c.run_gid,
         ..Default::default()
     };
     runtime::create_with(store, &mut c, &rootfs, &spec)?;

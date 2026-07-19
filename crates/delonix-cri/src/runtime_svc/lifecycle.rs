@@ -22,6 +22,10 @@ struct SandboxRec {
     uid: String,
     attempt: u32,
     created_at: i64,
+    /// Hostname do pod (`PodSandboxConfig.hostname`) — aplicado a cada container do
+    /// sandbox via `delonix run --hostname`. Vazio só quando a rede é do NÓ.
+    #[serde(default)]
+    hostname: String,
     log_directory: String,
     #[serde(default)]
     stopped: bool,
@@ -83,6 +87,16 @@ struct ContainerRec {
     cap_drop: Vec<String>,
     #[serde(default)]
     apparmor: Option<String>,
+    /// `RunAsUser` (uid numérico) do security context. `None` = root (histórico).
+    #[serde(default)]
+    run_as_user: Option<i64>,
+    /// `RunAsGroup` (gid numérico). Só válido com `run_as_user`/`run_as_username`.
+    #[serde(default)]
+    run_as_group: Option<i64>,
+    /// `RunAsUserName`: o utilizador resolve-se no `/etc/passwd` da imagem (o
+    /// `delonix run --user <nome>` fá-lo). Vazio = não usado.
+    #[serde(default)]
+    run_as_username: String,
 }
 
 /// `true` se o perfil AppArmor está carregado no host (em
@@ -310,6 +324,7 @@ pub fn run_pod_sandbox(
         uid: md.uid,
         attempt: md.attempt,
         created_at: now_ns(),
+        hostname: cfg.hostname,
         log_directory: cfg.log_directory,
         stopped: false,
         labels: cfg.labels,
@@ -495,6 +510,19 @@ pub fn create_container(
                 _ => Some(s.strip_prefix("localhost/").unwrap_or(s).to_string()),
             }
         });
+    // RunAsUser/RunAsGroup/RunAsUserName (→ `delonix run --user`, aplicado no start).
+    // `Int64Value` é opcional (a AUSÊNCIA da mensagem = não especificado).
+    let run_as_user = sc.and_then(|s| s.run_as_user.as_ref()).map(|v| v.value);
+    let run_as_group = sc.and_then(|s| s.run_as_group.as_ref()).map(|v| v.value);
+    let run_as_username = sc.map(|s| s.run_as_username.clone()).unwrap_or_default();
+    // Contrato CRI: `run_as_group` só pode existir com `run_as_user` OU
+    // `run_as_username`; senão o runtime DEVE falhar (spec do proto). Valida-se no
+    // CreateContainer, como o restante security context.
+    if run_as_group.is_some() && run_as_user.is_none() && run_as_username.is_empty() {
+        return Err(Status::invalid_argument(
+            "run_as_group especificado sem run_as_user nem run_as_username",
+        ));
+    }
     // Valida JÁ no CreateContainer (como o runc): um perfil AppArmor que não esteja
     // carregado no host faz a criação falhar (o cri-tools verifica-o aqui).
     if let Some(p) = &apparmor {
@@ -545,6 +573,9 @@ pub fn create_container(
         cap_add,
         cap_drop,
         apparmor,
+        run_as_user,
+        run_as_group,
+        run_as_username,
     };
     write_rec(&ct_dir(base), &id, &rec)?;
     delonix_runtime_core::metrics::inc_container_created();
@@ -579,6 +610,12 @@ pub fn start_container(
         if !sb.host_network {
             args.push("--pod".into());
             args.push(format!("cri-{}", rec.sandbox_id));
+        }
+        // Hostname do pod (`PodSandboxConfig.hostname`) — o CRI conformance verifica
+        // que `hostname`/`/etc/hostname` dentro do container batem com o do sandbox.
+        if !sb.hostname.is_empty() {
+            args.push("--hostname".into());
+            args.push(sb.hostname.clone());
         }
         // Namespaces de host herdados do pod sandbox.
         if sb.host_pid {
@@ -617,6 +654,24 @@ pub fn start_container(
     if let Some(prof) = &rec.apparmor {
         args.push("--apparmor".into());
         args.push(prof.clone());
+    }
+    // RunAsUser/RunAsGroup/RunAsUserName → `--user <user[:group]>`. O `--user` do
+    // `delonix run` resolve um NOME contra o `/etc/passwd` da imagem (contrato
+    // `RunAsUserName`) e aceita um uid numérico (`RunAsUser`); o grupo é o
+    // `RunAsGroup` numérico. `RunAsUserName` tem precedência sobre `RunAsUser`
+    // (o proto proíbe os dois ao mesmo tempo).
+    let user_part = if !rec.run_as_username.is_empty() {
+        Some(rec.run_as_username.clone())
+    } else {
+        rec.run_as_user.map(|u| u.to_string())
+    };
+    if let Some(u) = user_part {
+        let spec = match rec.run_as_group {
+            Some(g) => format!("{u}:{g}"),
+            None => u,
+        };
+        args.push("--user".into());
+        args.push(spec);
     }
     // `--` separa as flags dos posicionais: impede que um `image`/`command` vindo
     // do pedido CRI e começado por `-` seja interpretado como flag (injecção).

@@ -466,6 +466,20 @@ pub struct Container {
     /// `GET /api/containers/:id/firewall`, em vez de regras hardcoded.
     #[serde(default)]
     pub firewall: Option<ContainerFw>,
+    /// Hostname a definir na UTS namespace do container (`--hostname`; CRI
+    /// `PodSandboxConfig.hostname`). `None` = usa o nome do container (comportamento
+    /// histórico). Persistido para o `start` reproduzir o mesmo hostname.
+    #[serde(default)]
+    pub hostname: Option<String>,
+    /// UID para o qual trocar antes do `exec` (`--user`; CRI `run_as_user`/
+    /// `run_as_username` resolvido na imagem). `None`/`Some(0)` = corre como root
+    /// (histórico). Persistido para o `start` reproduzir. [[RunAsUser]]
+    #[serde(default)]
+    pub run_uid: Option<u32>,
+    /// GID para o qual trocar antes do `exec` (`--user <uid>:<gid>`; CRI
+    /// `run_as_group`). `None` = usa o grupo primário do UID. Persistido.
+    #[serde(default)]
+    pub run_gid: Option<u32>,
 }
 
 fn default_cpus() -> String {
@@ -532,6 +546,9 @@ impl Container {
             net_burst: None,
             nice: None,
             firewall: None,
+            hostname: None,
+            run_uid: None,
+            run_gid: None,
         }
     }
 
