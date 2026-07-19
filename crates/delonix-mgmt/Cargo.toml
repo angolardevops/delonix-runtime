@@ -10,6 +10,7 @@ repository = "https://github.com/angolardevops/delonix-runtime"
 delonix-runtime-core = { path = "../delonix-runtime-core" }
 delonix-volume = { path = "../delonix-volume" }
 delonix-image = { path = "../delonix-image" }
+delonix-scan = { path = "../delonix-scan" }
 axum = "0.7"
 tokio = { version = "1", features = ["rt-multi-thread", "net", "macros", "sync"] }
 serde = { workspace = true }

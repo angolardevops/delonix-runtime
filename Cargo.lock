@@ -553,6 +553,7 @@ dependencies = [
  "axum",
  "delonix-image",
  "delonix-runtime-core",
+ "delonix-scan",
  "delonix-volume",
  "http-body-util",
  "hyper",
