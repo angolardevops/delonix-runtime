@@ -454,6 +454,114 @@ pub fn uptime_from_starttime(starttime_jiffies: u64) -> Option<u64> {
     Some(now_unix().saturating_sub(started_unix))
 }
 
+/// Progresso ao estilo do `kind`, com **spinner animado**: cada passo mostra um
+/// braille a girar (` ⠋ A arrancar o control-plane 🕹️ `) numa thread de fundo, e
+/// a linha é reescrita com ` ✓ …` (ou ` ✗ …`) quando fecha.
+///
+/// # Porquê uma thread
+///
+/// O trabalho do passo (`node_exec_capture`) bloqueia o thread principal, às
+/// vezes por minutos (`kubeadm init` puxa imagens). Sem uma thread a animar, a
+/// linha ficava congelada e parecia pendurada. A thread só toca no stderr (o
+/// output do passo vai para um ficheiro capturado, ver `node_exec_capture`), por
+/// isso não há duas escritas a competir pela mesma linha.
+///
+/// **Sem TTY (pipe, CI, `2>&1 | tee`)** não há spinner nem `\r`: imprime-se só a
+/// linha final, uma por passo — o que um log de CI quer.
+pub struct Progress {
+    tty: bool,
+    msg: String,
+    icon: String,
+    spin: Option<SpinnerHandle>,
+}
+
+struct SpinnerHandle {
+    stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    handle: Option<std::thread::JoinHandle<()>>,
+}
+
+/// Frames do spinner (braille, como o `kind`/`spinnies`).
+const SPIN_FRAMES: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+
+impl Progress {
+    pub fn new() -> Self {
+        // SAFETY: isatty não tem pré-condições; 2 = stderr.
+        let tty = unsafe { libc::isatty(2) } == 1;
+        Self {
+            tty,
+            msg: String::new(),
+            icon: String::new(),
+            spin: None,
+        }
+    }
+
+    /// Abre um passo e arranca o spinner (em TTY). `icon` é o emoji do fim.
+    pub fn step(&mut self, msg: &str, icon: &str) {
+        self.close_line('✗'); // fecha um passo anterior deixado em aberto
+        self.msg = msg.to_string();
+        self.icon = icon.to_string();
+        if !self.tty {
+            return;
+        }
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let (s2, msg, icon) = (stop.clone(), self.msg.clone(), self.icon.clone());
+        let handle = std::thread::spawn(move || {
+            use std::io::Write;
+            let mut i = 0usize;
+            while !s2.load(std::sync::atomic::Ordering::Relaxed) {
+                // `\x1b[K` limpa até ao fim da linha (evita restos de um frame
+                // mais longo). Sem `\n` — a linha é reescrita in-place.
+                eprint!(
+                    "\r {} {msg} {icon}\x1b[K",
+                    SPIN_FRAMES[i % SPIN_FRAMES.len()]
+                );
+                let _ = std::io::stderr().flush();
+                i += 1;
+                std::thread::sleep(std::time::Duration::from_millis(90));
+            }
+        });
+        self.spin = Some(SpinnerHandle {
+            stop,
+            handle: Some(handle),
+        });
+    }
+
+    /// Fecha o passo actual com `✓`.
+    pub fn ok(&mut self) {
+        self.close_line('✓');
+    }
+
+    /// Pára o spinner (se houver) e escreve a linha final com `mark`. Idempotente
+    /// — chamado pelo `ok`, pelo próximo `step` e pelo `Drop`.
+    fn close_line(&mut self, mark: char) {
+        let had_spinner = self.spin.is_some();
+        if let Some(mut s) = self.spin.take() {
+            s.stop.store(true, std::sync::atomic::Ordering::Relaxed);
+            if let Some(h) = s.handle.take() {
+                let _ = h.join();
+            }
+        } else if self.msg.is_empty() {
+            return; // nada aberto
+        }
+        if self.tty {
+            // `\r` + limpar a linha do spinner, depois a linha final.
+            eprintln!("\r {mark} {} {}\x1b[K", self.msg, self.icon);
+        } else if !self.msg.is_empty() {
+            eprintln!(" {mark} {} {}", self.msg, self.icon);
+        }
+        let _ = had_spinner;
+        self.msg.clear();
+    }
+}
+
+impl Drop for Progress {
+    fn drop(&mut self) {
+        // Um passo deixado em aberto (erro a meio) fecha com ✗ em vez de ficar
+        // com o spinner pendurado.
+        self.close_line('✗');
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -601,113 +709,5 @@ mod tests {
             display_ref("reg:5000/img:v2@sha256:7416a61b"),
             "reg:5000/img:v2"
         );
-    }
-}
-
-/// Progresso ao estilo do `kind`, com **spinner animado**: cada passo mostra um
-/// braille a girar (` ⠋ A arrancar o control-plane 🕹️ `) numa thread de fundo, e
-/// a linha é reescrita com ` ✓ …` (ou ` ✗ …`) quando fecha.
-///
-/// # Porquê uma thread
-///
-/// O trabalho do passo (`node_exec_capture`) bloqueia o thread principal, às
-/// vezes por minutos (`kubeadm init` puxa imagens). Sem uma thread a animar, a
-/// linha ficava congelada e parecia pendurada. A thread só toca no stderr (o
-/// output do passo vai para um ficheiro capturado, ver `node_exec_capture`), por
-/// isso não há duas escritas a competir pela mesma linha.
-///
-/// **Sem TTY (pipe, CI, `2>&1 | tee`)** não há spinner nem `\r`: imprime-se só a
-/// linha final, uma por passo — o que um log de CI quer.
-pub struct Progress {
-    tty: bool,
-    msg: String,
-    icon: String,
-    spin: Option<SpinnerHandle>,
-}
-
-struct SpinnerHandle {
-    stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
-    handle: Option<std::thread::JoinHandle<()>>,
-}
-
-/// Frames do spinner (braille, como o `kind`/`spinnies`).
-const SPIN_FRAMES: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-
-impl Progress {
-    pub fn new() -> Self {
-        // SAFETY: isatty não tem pré-condições; 2 = stderr.
-        let tty = unsafe { libc::isatty(2) } == 1;
-        Self {
-            tty,
-            msg: String::new(),
-            icon: String::new(),
-            spin: None,
-        }
-    }
-
-    /// Abre um passo e arranca o spinner (em TTY). `icon` é o emoji do fim.
-    pub fn step(&mut self, msg: &str, icon: &str) {
-        self.close_line('✗'); // fecha um passo anterior deixado em aberto
-        self.msg = msg.to_string();
-        self.icon = icon.to_string();
-        if !self.tty {
-            return;
-        }
-        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let (s2, msg, icon) = (stop.clone(), self.msg.clone(), self.icon.clone());
-        let handle = std::thread::spawn(move || {
-            use std::io::Write;
-            let mut i = 0usize;
-            while !s2.load(std::sync::atomic::Ordering::Relaxed) {
-                // `\x1b[K` limpa até ao fim da linha (evita restos de um frame
-                // mais longo). Sem `\n` — a linha é reescrita in-place.
-                eprint!(
-                    "\r {} {msg} {icon}\x1b[K",
-                    SPIN_FRAMES[i % SPIN_FRAMES.len()]
-                );
-                let _ = std::io::stderr().flush();
-                i += 1;
-                std::thread::sleep(std::time::Duration::from_millis(90));
-            }
-        });
-        self.spin = Some(SpinnerHandle {
-            stop,
-            handle: Some(handle),
-        });
-    }
-
-    /// Fecha o passo actual com `✓`.
-    pub fn ok(&mut self) {
-        self.close_line('✓');
-    }
-
-    /// Pára o spinner (se houver) e escreve a linha final com `mark`. Idempotente
-    /// — chamado pelo `ok`, pelo próximo `step` e pelo `Drop`.
-    fn close_line(&mut self, mark: char) {
-        let had_spinner = self.spin.is_some();
-        if let Some(mut s) = self.spin.take() {
-            s.stop.store(true, std::sync::atomic::Ordering::Relaxed);
-            if let Some(h) = s.handle.take() {
-                let _ = h.join();
-            }
-        } else if self.msg.is_empty() {
-            return; // nada aberto
-        }
-        if self.tty {
-            // `\r` + limpar a linha do spinner, depois a linha final.
-            eprintln!("\r {mark} {} {}\x1b[K", self.msg, self.icon);
-        } else if !self.msg.is_empty() {
-            eprintln!(" {mark} {} {}", self.msg, self.icon);
-        }
-        let _ = had_spinner;
-        self.msg.clear();
-    }
-}
-
-impl Drop for Progress {
-    fn drop(&mut self) {
-        // Um passo deixado em aberto (erro a meio) fecha com ✗ em vez de ficar
-        // com o spinner pendurado.
-        self.close_line('✗');
     }
 }

@@ -498,7 +498,7 @@ fn image_size(images: &ImageStore, img: &delonix_image::Image) -> Option<u64> {
 fn cmd_ls(images: &ImageStore) -> Result<()> {
     let mut imgs = images.list()?;
     // O mais recente primeiro, como no `docker images`.
-    imgs.sort_by(|a, b| b.created_unix.cmp(&a.created_unix));
+    imgs.sort_by_key(|i| std::cmp::Reverse(i.created_unix));
     let mut t = super::output::Table::new(&["REPOSITORY:TAG", "IMAGE ID", "CREATED", "SIZE"])
         .right_align(3);
     for img in imgs {

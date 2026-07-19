@@ -48,7 +48,7 @@ pub fn run(iface: Option<String>, watch: bool) -> Result<()> {
             None => infra_veths(&netns),
         };
         for t in &targets {
-            bpf::attach(t, &run_cmd);
+            bpf::attach(t, run_cmd);
         }
     }
 
@@ -110,7 +110,7 @@ fn render(
         println!("datapath attached — no flows yet (generate some traffic).");
         return;
     }
-    rows.sort_by(|a, b| (b.2.rx_bytes + b.2.tx_bytes).cmp(&(a.2.rx_bytes + a.2.tx_bytes)));
+    rows.sort_by_key(|r| std::cmp::Reverse(r.2.rx_bytes + r.2.tx_bytes));
     let mut t = output::Table::new(&[
         "CONTAINER",
         "IP",

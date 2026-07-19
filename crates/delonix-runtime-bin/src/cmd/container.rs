@@ -178,6 +178,10 @@ fn custom_net_name(net: &str) -> Option<String> {
     (net != "host" && net != "none").then(|| net.to_string())
 }
 
+// FIXME(follow-up): variantes com grande disparidade de tamanho (≥880 B). Boxar as
+// variantes gordas é uma optimização real mas desajeitada com `#[derive(Subcommand)]`
+// do clap — fica para mudança dedicada; o custo aqui é uma CLI de vida curta.
+#[allow(clippy::large_enum_variant)]
 #[derive(Subcommand)]
 pub enum ContainerCmd {
     /// Dashboard (KPIs + tabela + problemas) dos containers — TUI interactivo, ou
@@ -813,8 +817,8 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
     Ok(())
 }
 
-/// Expand `--gpus <spec>` into the list of device nodes to expose. `all` = NVIDIA
-/// + DRI; `nvidia` = only `/dev/nvidia*`; `dri` = only `/dev/dri/*`. Includes only
+/// Expand `--gpus <spec>` into the list of device nodes to expose. `all` = NVIDIA +
+/// DRI; `nvidia` = only `/dev/nvidia*`; `dri` = only `/dev/dri/*`. Includes only
 /// the nodes that EXIST on the host (a `--gpus all` on a GPU-less machine invents
 /// no devices).
 fn expand_gpu_devices(spec: &str) -> Vec<String> {
@@ -1524,7 +1528,7 @@ fn fmt_ports(ports: &[String]) -> String {
 fn cmd_ps(store: &Store, all: bool, quiet: bool) -> Result<()> {
     let mut cs = store.list()?;
     // Stable, useful order: most recent first, like `docker ps`.
-    cs.sort_by(|a, b| b.created_unix.cmp(&a.created_unix));
+    cs.sort_by_key(|c| std::cmp::Reverse(c.created_unix));
     let mut t = output::Table::new(&[
         "CONTAINER ID",
         "IMAGE",
@@ -1538,7 +1542,7 @@ fn cmd_ps(store: &Store, all: bool, quiet: bool) -> Result<()> {
         // `update` (flock) and not `save`: the CRI is concurrent and may be
         // reconciling the same container right now — see `Store::update`.
         if runtime::reconcile_status(c) {
-            let _ = store.update(&c.id, |cur| runtime::reconcile_status(cur));
+            let _ = store.update(&c.id, runtime::reconcile_status);
         }
         let hidden = matches!(c.status, Status::Failed(_) | Status::Crashed);
         if !all && hidden {
@@ -1750,6 +1754,7 @@ fn policy_supervised(policy: &str) -> bool {
 ///      the path doesn't even exist (the `open` fails before there's any `setns`);
 ///   2. even if it did, the netns is **owned by the holder's userns** — without
 ///      privilege in that userns, the `setns` would be refused.
+///
 /// Neither is solvable from inside `container_init`: you have to ENTER the
 /// holder's userns+mountns BEFORE the container exists.
 ///
@@ -1925,9 +1930,7 @@ fn unpublish_ports(c: &Container, slirp_pid: Option<i32>) {
 fn cmd_start(images: &ImageStore, store: &Store, id: &str) -> Result<()> {
     let mut c = find(store, id)?;
     if runtime::reconcile_status(&mut c) {
-        c = store
-            .update(&c.id, |cur| runtime::reconcile_status(cur))
-            .unwrap_or(c);
+        c = store.update(&c.id, runtime::reconcile_status).unwrap_or(c);
     }
     // `start` reasserts the desired state = running (clears the user's `stop`).
     let _ = store.update(&c.id, |cur| {
@@ -2180,9 +2183,7 @@ fn cmd_inspect(store: &Store, ids: &[String]) -> Result<()> {
     for id in ids {
         let mut c = find(store, id)?;
         if runtime::reconcile_status(&mut c) {
-            c = store
-                .update(&c.id, |cur| runtime::reconcile_status(cur))
-                .unwrap_or(c);
+            c = store.update(&c.id, runtime::reconcile_status).unwrap_or(c);
         }
         cs.push(c);
     }
@@ -2474,9 +2475,7 @@ fn cmd_describe(store: &Store, ids: &[String]) -> Result<()> {
     for (i, id) in ids.iter().enumerate() {
         let mut c = find(store, id)?;
         if runtime::reconcile_status(&mut c) {
-            c = store
-                .update(&c.id, |cur| runtime::reconcile_status(cur))
-                .unwrap_or(c);
+            c = store.update(&c.id, runtime::reconcile_status).unwrap_or(c);
         }
         if i > 0 {
             println!();
@@ -3063,6 +3062,44 @@ fn cmd_logs(images: &ImageStore, store: &Store, id: &str, follow: bool) -> Resul
     }
 }
 
+/// Handles this group's `init` (see `cmd::scaffold`).
+fn cmd_init(
+    target: super::scaffold::Target,
+    dir: PathBuf,
+    name: Option<String>,
+    image: Option<String>,
+    force: bool,
+    template: Option<String>,
+    up: bool,
+) -> Result<()> {
+    let name = name.unwrap_or_else(|| {
+        // Without `--name`, uses the DIRECTORY name. `canonicalize` can't be used:
+        // the directory doesn't exist yet (it's `init` that creates it) and would
+        // always fail, falling into the fallback — every project would be called "app".
+        // `.`/empty resolve to the cwd; a new path uses its basename.
+        let p = if dir.as_os_str().is_empty() || dir == std::path::Path::new(".") {
+            std::env::current_dir().ok()
+        } else {
+            Some(dir.clone())
+        };
+        p.as_deref()
+            .and_then(|p| p.file_name())
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "app".to_string())
+    });
+    super::scaffold::init(
+        target,
+        &super::scaffold::InitOpts {
+            dir,
+            name,
+            image,
+            force,
+            template,
+            up,
+        },
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::util::compose_command;
@@ -3271,42 +3308,4 @@ mod tests {
         assert!(policy_supervised("on-failure"));
         assert!(policy_supervised("on-failure:5"));
     }
-}
-
-/// Handles this group's `init` (see `cmd::scaffold`).
-fn cmd_init(
-    target: super::scaffold::Target,
-    dir: PathBuf,
-    name: Option<String>,
-    image: Option<String>,
-    force: bool,
-    template: Option<String>,
-    up: bool,
-) -> Result<()> {
-    let name = name.unwrap_or_else(|| {
-        // Without `--name`, uses the DIRECTORY name. `canonicalize` can't be used:
-        // the directory doesn't exist yet (it's `init` that creates it) and would
-        // always fail, falling into the fallback — every project would be called "app".
-        // `.`/empty resolve to the cwd; a new path uses its basename.
-        let p = if dir.as_os_str().is_empty() || dir == std::path::Path::new(".") {
-            std::env::current_dir().ok()
-        } else {
-            Some(dir.clone())
-        };
-        p.as_deref()
-            .and_then(|p| p.file_name())
-            .map(|n| n.to_string_lossy().into_owned())
-            .unwrap_or_else(|| "app".to_string())
-    });
-    super::scaffold::init(
-        target,
-        &super::scaffold::InitOpts {
-            dir,
-            name,
-            image,
-            force,
-            template,
-            up,
-        },
-    )
 }
