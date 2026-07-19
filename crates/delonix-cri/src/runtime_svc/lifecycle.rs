@@ -144,7 +144,7 @@ fn list_recs<T: for<'de> Deserialize<'de>>(dir: &Path) -> Vec<T> {
 }
 
 fn delonix_bin() -> PathBuf {
-    std::env::current_exe().unwrap_or_else(|_| PathBuf::from("delonix"))
+    crate::cli_bin()
 }
 
 /// Corre o binário `delonix` (single-threaded) com o `DELONIX_ROOT` da CRI.
@@ -317,7 +317,7 @@ pub fn stop_pod_sandbox(
     // pára os containers do sandbox e marca-o NotReady.
     for c in list_recs::<ContainerRec>(&ct_dir(base)) {
         if c.sandbox_id == id {
-            let _ = delonix(base, &["stop", &format!("cri-{}", c.id)]);
+            let _ = delonix(base, &["container", "stop", &format!("cri-{}", c.id)]);
         }
     }
     if let Ok(mut r) = read_rec::<SandboxRec>(&sb_dir(base), &id) {
@@ -333,7 +333,7 @@ pub fn remove_pod_sandbox(
 ) -> Result<Response<RemovePodSandboxResponse>, Status> {
     for c in list_recs::<ContainerRec>(&ct_dir(base)) {
         if c.sandbox_id == id {
-            let _ = delonix(base, &["rm", "-f", &format!("cri-{}", c.id)]);
+            let _ = delonix(base, &["container", "rm", "-f", &format!("cri-{}", c.id)]);
             let _ = std::fs::remove_file(ct_dir(base).join(format!("{}.json", c.id)));
         }
     }
@@ -541,7 +541,13 @@ pub fn start_container(
 ) -> Result<Response<StartContainerResponse>, Status> {
     let mut rec: ContainerRec = read_rec(&ct_dir(base), &id)?;
     let name = format!("cri-{id}");
-    let mut args: Vec<String> = vec!["run".into(), "-d".into(), "--name".into(), name];
+    let mut args: Vec<String> = vec![
+        "container".into(),
+        "run".into(),
+        "-d".into(),
+        "--name".into(),
+        name,
+    ];
     // Logs no caminho/formato que o kubelet/crictl esperam (CRI), se houver.
     if !rec.log_path.is_empty() {
         if let Some(dir) = std::path::Path::new(&rec.log_path).parent() {
@@ -622,7 +628,10 @@ pub fn stop_container(
     // a sua própria deadline, por isso NÃO podemos usar o default longo do
     // `delonix stop`. `timeout=0` → paragem imediata (SIGKILL).
     let secs = timeout.max(0).to_string();
-    let _ = delonix(base, &["stop", "-t", &secs, &format!("cri-{id}")])?;
+    let _ = delonix(
+        base,
+        &["container", "stop", "-t", &secs, &format!("cri-{id}")],
+    )?;
     // Verifica que PAROU de facto (reconciliado). Idempotente: já parado/inexistente
     // = OK. Se continua vivo, propaga erro → o kubelet repete (em vez de assumir
     // que parou e seguir para o RemoveContainer sobre um processo ainda a correr).
@@ -646,7 +655,7 @@ pub fn remove_container(
     // apagava-se o JSON mesmo com o `rm -f` falhado → fuga de rootfs/subuid/netns
     // sem rasto para o kubelet reptir. Idempotente (contrato CRI): um container
     // que já não existe conta como removido.
-    let out = delonix(base, &["rm", "-f", &format!("cri-{id}")])?;
+    let out = delonix(base, &["container", "rm", "-f", &format!("cri-{id}")])?;
     let gone = out.status.success() || {
         let e = String::from_utf8_lossy(&out.stderr).to_lowercase();
         e.contains("no such") || e.contains("não existe") || e.contains("not found")
@@ -758,6 +767,7 @@ pub fn exec_sync(
             .arg(delonix_bin());
     }
     let out = command
+        .arg("container")
         .arg("exec")
         .arg(&name)
         .args(&cmd)
