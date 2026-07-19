@@ -1,0 +1,39 @@
+# kind: Dependency (alias: KnowDepends) — alcançabilidade DIRIGIDA entre containers.
+# Ao contrário de uma Network (bidirecional), abre UM sentido: `from` alcança `to`,
+# mas `to` NÃO inicia para `from`. Caso clássico: a app conhece a DB, a DB não
+# conhece a app — a DB deixa de ficar exposta a todos os containers da rede.
+#
+# Compila para firewall L4 por-container: no `to`, ingress default-deny (protege) +
+# allow do IP do `from`. Várias Dependency para o mesmo `to` acumulam os allow.
+# Aplicar com `delonix stack apply -f dependency.yaml`.
+---
+apiVersion: delonix.io/v1
+kind: Network
+metadata: { name: appnet }
+spec:
+  driver: bridge
+---
+apiVersion: delonix.io/v1
+kind: Container
+metadata: { name: db }
+spec:
+  image: "postgres:16"
+  network: appnet
+  env: { POSTGRES_PASSWORD: dev }
+---
+apiVersion: delonix.io/v1
+kind: Container
+metadata: { name: app }
+spec:
+  image: "alpine:3.19"
+  network: appnet
+  command: ["sleep", "infinity"]
+---
+apiVersion: delonix.io/v1
+kind: Dependency
+metadata: { name: app-knows-db }
+spec:
+  from: app          # quem inicia (o "conhecedor")
+  to: db             # alvo protegido (aceita um nome ou uma lista: [db, cache])
+  ports: ["5432"]    # opcional — vazio = qualquer porta
+  proto: tcp         # opcional — default any

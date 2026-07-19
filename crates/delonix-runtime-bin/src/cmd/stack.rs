@@ -86,9 +86,9 @@ pub fn run(action: StackCmd) -> Result<()> {
 /// Os Kinds do stack, na MESMA ordem do `apply` — quem lê o `describe` vê a
 /// ordem por que as coisas são criadas, o que é metade do diagnóstico quando um
 /// apply pára a meio.
-const KINDS: [&str; 11] = [
+const KINDS: [&str; 12] = [
     "Secret", "Network", "Volume", "Storage", "Image", "Vm", "Container", "Ingress", "Egress",
-    "FirewallPolicy", "HTTPRoute",
+    "FirewallPolicy", "HTTPRoute", "Dependency",
 ];
 
 fn describe(file: Option<PathBuf>) -> Result<()> {
@@ -211,6 +211,7 @@ fn presence(kind: &str, name: &str, containers: &[delonix_runtime_core::Containe
         // aplica-as sempre (idempotente); aqui só se assinala a natureza.
         "Ingress" | "Egress" | "FirewallPolicy" => ("-".into(), "declarative".into()),
         "HTTPRoute" => ("-".into(), "declarative".into()),
+        "Dependency" => ("-".into(), "declarative".into()),
         _ => ("?".into(), "kind não suportado".into()),
     }
 }
@@ -251,6 +252,9 @@ fn apply(file: Option<PathBuf>) -> Result<()> {
     super::vm::apply(&docs)?;
     super::container::apply(&docs)?;
     super::firewall::apply(&docs)?;
+    // Dependency (alcançabilidade dirigida) — depois do firewall e dos containers
+    // (precisa dos IPs); compila para ingress default-deny + allows no `to`.
+    super::dependency::apply(&docs)?;
     // HTTPRoute POR ÚLTIMO: precisa dos containers backend já criados (com IP) para
     // resolver as rotas; sobe/recarrega o reverse-proxy L7.
     super::httproute::apply(&docs)?;
@@ -501,6 +505,31 @@ fn validate_graph_with(
                         }
                     }
                     Err(e) => issues.push(e.to_string()),
+                }
+            }
+            "Dependency" => {
+                // `from` e cada `to` têm de ser containers declarados/existentes.
+                let from = doc.spec.get("from").and_then(|v| v.as_str());
+                match from {
+                    Some(f) if !containers.contains(f) => {
+                        issues.push(format!("Dependency '{name}' → from '{f}' não é um Container declarado nem existente"));
+                    }
+                    None => issues.push(format!("Dependency '{name}' → `from` obrigatório")),
+                    _ => {}
+                }
+                // `to` pode ser escalar OU lista.
+                let tos: Vec<&str> = match doc.spec.get("to") {
+                    Some(v) if v.is_string() => v.as_str().into_iter().collect(),
+                    Some(v) => v.as_sequence().map(|s| s.iter().filter_map(|x| x.as_str()).collect()).unwrap_or_default(),
+                    None => Vec::new(),
+                };
+                if tos.is_empty() {
+                    issues.push(format!("Dependency '{name}' → `to` não pode ser vazio"));
+                }
+                for t in tos {
+                    if !containers.contains(t) {
+                        issues.push(format!("Dependency '{name}' → to '{t}' não é um Container declarado nem existente"));
+                    }
                 }
             }
             _ => {}
