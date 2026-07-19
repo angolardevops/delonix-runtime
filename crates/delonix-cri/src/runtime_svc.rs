@@ -37,6 +37,18 @@ where
         .map_err(|e| Status::internal(e.to_string()))?
 }
 
+/// Nome do pod a partir dos metadados do sandbox, para os campos das spans.
+/// `""` quando ausente (o `crictl`/`kubelet` nem sempre preenchem tudo) — melhor
+/// uma span sem nome do que instrumentação a entrar em pânico num `unwrap`.
+fn pod_meta_name(m: Option<&PodSandboxMetadata>) -> &str {
+    m.map(|m| m.name.as_str()).unwrap_or("")
+}
+
+/// Idem para o nome do container a partir dos metadados do `ContainerConfig`.
+fn ctr_meta_name(m: Option<&ContainerMetadata>) -> &str {
+    m.map(|m| m.name.as_str()).unwrap_or("")
+}
+
 #[tonic::async_trait]
 impl RuntimeService for DelonixRuntime {
     type GetContainerEventsStream = std::pin::Pin<
@@ -118,6 +130,16 @@ impl RuntimeService for DelonixRuntime {
         }))
     }
 
+    // --- ciclo de vida de pods/containers: instrumentado com spans `tracing`.
+    // Cada handler abre uma span (exportada por OTLP quando `DELONIX_OTLP_ENDPOINT`
+    // está definido — ver `delonix_runtime_core::telemetry`) com o id do recurso.
+    // Os campos leem-se de `r.get_ref()` (avaliado na ENTRADA da span, antes de
+    // `into_inner()` consumir o pedido); `skip_all` evita despejar o `Request`
+    // inteiro (não-`Debug`/verboso) e o `self`.
+    #[tracing::instrument(name = "cri.run_pod_sandbox", skip_all, fields(
+        pod = pod_meta_name(r.get_ref().config.as_ref().and_then(|c| c.metadata.as_ref())),
+        runtime_handler = %r.get_ref().runtime_handler,
+    ))]
     async fn run_pod_sandbox(
         &self,
         r: Request<RunPodSandboxRequest>,
@@ -125,6 +147,9 @@ impl RuntimeService for DelonixRuntime {
         let (base, req) = (self.base.clone(), r.into_inner());
         blocking(move || lifecycle::run_pod_sandbox(&base, req)).await
     }
+    #[tracing::instrument(name = "cri.stop_pod_sandbox", skip_all, fields(
+        pod = %r.get_ref().pod_sandbox_id,
+    ))]
     async fn stop_pod_sandbox(
         &self,
         r: Request<StopPodSandboxRequest>,
@@ -132,6 +157,9 @@ impl RuntimeService for DelonixRuntime {
         let (base, id) = (self.base.clone(), r.into_inner().pod_sandbox_id);
         blocking(move || lifecycle::stop_pod_sandbox(&base, id)).await
     }
+    #[tracing::instrument(name = "cri.remove_pod_sandbox", skip_all, fields(
+        pod = %r.get_ref().pod_sandbox_id,
+    ))]
     async fn remove_pod_sandbox(
         &self,
         r: Request<RemovePodSandboxRequest>,
@@ -139,6 +167,9 @@ impl RuntimeService for DelonixRuntime {
         let (base, id) = (self.base.clone(), r.into_inner().pod_sandbox_id);
         blocking(move || lifecycle::remove_pod_sandbox(&base, id)).await
     }
+    #[tracing::instrument(name = "cri.pod_sandbox_status", skip_all, fields(
+        pod = %r.get_ref().pod_sandbox_id,
+    ))]
     async fn pod_sandbox_status(
         &self,
         r: Request<PodSandboxStatusRequest>,
@@ -146,6 +177,7 @@ impl RuntimeService for DelonixRuntime {
         let (base, id) = (self.base.clone(), r.into_inner().pod_sandbox_id);
         blocking(move || lifecycle::pod_sandbox_status(&base, id)).await
     }
+    #[tracing::instrument(name = "cri.list_pod_sandbox", skip_all)]
     async fn list_pod_sandbox(
         &self,
         _r: Request<ListPodSandboxRequest>,
@@ -153,6 +185,10 @@ impl RuntimeService for DelonixRuntime {
         let base = self.base.clone();
         blocking(move || lifecycle::list_pod_sandbox(&base)).await
     }
+    #[tracing::instrument(name = "cri.create_container", skip_all, fields(
+        pod = %r.get_ref().pod_sandbox_id,
+        container = ctr_meta_name(r.get_ref().config.as_ref().and_then(|c| c.metadata.as_ref())),
+    ))]
     async fn create_container(
         &self,
         r: Request<CreateContainerRequest>,
@@ -160,6 +196,9 @@ impl RuntimeService for DelonixRuntime {
         let (base, req) = (self.base.clone(), r.into_inner());
         blocking(move || lifecycle::create_container(&base, req)).await
     }
+    #[tracing::instrument(name = "cri.start_container", skip_all, fields(
+        container = %r.get_ref().container_id,
+    ))]
     async fn start_container(
         &self,
         r: Request<StartContainerRequest>,
@@ -167,6 +206,10 @@ impl RuntimeService for DelonixRuntime {
         let (base, id) = (self.base.clone(), r.into_inner().container_id);
         blocking(move || lifecycle::start_container(&base, id)).await
     }
+    #[tracing::instrument(name = "cri.stop_container", skip_all, fields(
+        container = %r.get_ref().container_id,
+        timeout = r.get_ref().timeout,
+    ))]
     async fn stop_container(
         &self,
         r: Request<StopContainerRequest>,
@@ -175,6 +218,9 @@ impl RuntimeService for DelonixRuntime {
         let (base, id, timeout) = (self.base.clone(), req.container_id, req.timeout);
         blocking(move || lifecycle::stop_container(&base, id, timeout)).await
     }
+    #[tracing::instrument(name = "cri.remove_container", skip_all, fields(
+        container = %r.get_ref().container_id,
+    ))]
     async fn remove_container(
         &self,
         r: Request<RemoveContainerRequest>,
@@ -182,6 +228,7 @@ impl RuntimeService for DelonixRuntime {
         let (base, id) = (self.base.clone(), r.into_inner().container_id);
         blocking(move || lifecycle::remove_container(&base, id)).await
     }
+    #[tracing::instrument(name = "cri.list_containers", skip_all)]
     async fn list_containers(
         &self,
         _r: Request<ListContainersRequest>,
@@ -189,6 +236,9 @@ impl RuntimeService for DelonixRuntime {
         let base = self.base.clone();
         blocking(move || lifecycle::list_containers(&base)).await
     }
+    #[tracing::instrument(name = "cri.container_status", skip_all, fields(
+        container = %r.get_ref().container_id,
+    ))]
     async fn container_status(
         &self,
         r: Request<ContainerStatusRequest>,

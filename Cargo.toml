@@ -36,3 +36,22 @@ oci-spec = { version = "0.10.0", default-features = false }
 # DELONIX_LOG_FORMAT=json; nível por DELONIX_LOG/RUST_LOG (env-filter).
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+# Observabilidade — 3.ª perna: spans distribuídos via OpenTelemetry (OTLP). Só
+# activo quando `DELONIX_OTLP_ENDPOINT` está definido (ver `telemetry::init`).
+# Versões alinhadas entre si (a compat OTel↔tracing-opentelemetry é frágil):
+# opentelemetry/otlp/sdk 0.32.x + tracing-opentelemetry 0.33.x.
+# Transporte OTLP por HTTP/protobuf, exportador em batch numa THREAD dedicada
+# (`futures_executor::block_on`, sem runtime tokio ambiente — ver a nuance
+# CLI-sync em `telemetry.rs`). Cliente `reqwest` em modo BLOQUEANTE e SEM backend
+# de TLS (endpoint em texto simples, típico de um collector local em
+# `http://…:4318`): evita arrastar aws-lc-sys/openssl/native-tls (C + licença
+# OpenSSL) — mantém a supply-chain de um runtime público mínima e justificada.
+# Um endpoint `https://` não é suportado por desenho (erro claro em runtime).
+opentelemetry = "0.32"
+opentelemetry_sdk = "0.32"
+opentelemetry-otlp = { version = "0.32", default-features = false, features = [
+    "trace",
+    "http-proto",
+    "reqwest-blocking-client",
+] }
+tracing-opentelemetry = { version = "0.33", default-features = false }
