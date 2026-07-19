@@ -100,6 +100,10 @@ async fn serve_over_uds(uds: tokio::net::UnixListener, app: Router) -> Result<()
 fn router(state: AppState) -> Router {
     Router::new()
         .route("/_ping", get(ping))
+        // `GET /metrics` — o MESMO registo Prometheus partilhado que o `delonix-cri`
+        // expõe (definido em `delonix-runtime-core::metrics`). Só render, zero métricas
+        // novas: o control-plane pode fazer scrape do motor por este socket de gestão.
+        .route("/metrics", get(metrics))
         .route("/v1/volumes", get(list_volumes).post(create_volume))
         .route("/v1/volumes/:name", get(get_volume).delete(delete_volume))
         // Containers: leitura (list/get) por biblioteca; mutação (abaixo) por CLI.
@@ -145,6 +149,19 @@ fn router(state: AppState) -> Router {
 
 async fn ping() -> &'static str {
     "delonix-mgmt ok"
+}
+
+/// `GET /metrics` — corpo OpenMetrics do registo Prometheus PARTILHADO em
+/// `delonix-runtime-core` (o mesmo que o `delonix-cri` serve). Sem métricas
+/// próprias: só render, para o control-plane fazer scrape via o socket de gestão.
+async fn metrics() -> impl IntoResponse {
+    (
+        [(
+            axum::http::header::CONTENT_TYPE,
+            "application/openmetrics-text; version=1.0.0; charset=utf-8",
+        )],
+        delonix_runtime_core::metrics::encode(),
+    )
 }
 
 /// Nome de volume seguro no LIMITE da API (defesa contra path traversal). É
@@ -877,6 +894,31 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn metrics_expoe_o_registo_partilhado() {
+        let (st, _d) = test_state();
+        let resp = router(st)
+            .oneshot(
+                Request::builder()
+                    .uri("/metrics")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(
+            resp.headers()
+                .get(axum::http::header::CONTENT_TYPE)
+                .unwrap(),
+            "application/openmetrics-text; version=1.0.0; charset=utf-8"
+        );
+        let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+        let body = String::from_utf8_lossy(&bytes);
+        // O `delonix_build_info` do registo partilhado tem de estar sempre presente.
+        assert!(body.contains("delonix_build_info"), "corpo: {body}");
     }
 
     #[tokio::test]
