@@ -551,6 +551,7 @@ name = "delonix-mgmt"
 version = "0.1.0"
 dependencies = [
  "axum",
+ "delonix-image",
  "delonix-runtime-core",
  "delonix-volume",
  "http-body-util",

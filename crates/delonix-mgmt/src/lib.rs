@@ -5,18 +5,20 @@
 //! fala só HTTP com este socket no mesmo host. Complementa o CRI (`delonix-cri`,
 //! que serve o kubelet): este serve a *gestão* do produto (volumes/containers/…).
 //!
-//! As superfícies migram uma de cada vez. Feito: **volumes** (CRUD) e a **leitura
-//! de containers** (list/get). O contrato é o próprio tipo serde de cada recurso
-//! (`delonix_volume::Volume`, `delonix_runtime_core::Container`) — o cliente
+//! As superfícies migram uma de cada vez. Feito: **volumes** (CRUD), **leitura de
+//! containers** (list/get) e **imagens** (list + rmi). O contrato é o próprio tipo
+//! serde de cada recurso (`delonix_volume::Volume`,
+//! `delonix_runtime_core::Container`, `delonix_image::Image`) — o cliente
 //! desserializa o mesmo shape.
 
 use std::path::PathBuf;
 
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::{Json, Router};
+use delonix_image::ImageStore;
 use delonix_runtime_core::{Error, Store};
 use delonix_volume::VolumeStore;
 
@@ -88,6 +90,12 @@ fn router(state: AppState) -> Router {
         // (matar o processo, limpar namespaces/cgroups) — migram numa fatia própria.
         .route("/v1/containers", get(list_containers))
         .route("/v1/containers/:id", get(get_container))
+        // Imagens: list + rmi. A referência (`nginx:latest`, `library/nginx`,
+        // `sha256:…`) NÃO cabe num segmento de path (tem `/` e `:`) → vai por
+        // query (`?ref=…`). Não há risco de traversal: `ImageStore::remove`
+        // resolve por varrimento linear (compara tags/prefixo de id) e o ficheiro
+        // que apaga usa o `id` sanitizado, nunca o `ref` cru.
+        .route("/v1/images", get(list_images).delete(delete_image))
         .with_state(state)
 }
 
@@ -235,6 +243,51 @@ async fn get_container(State(s): State<AppState>, Path(id): Path<String>) -> Res
     }
     match with_container_store(s.base, move |store| store.load(&id)).await {
         Ok(c) => Json(c).into_response(),
+        Err(e) => err_response(e),
+    }
+}
+
+// ---- Imagens (list + rmi) --------------------------------------------------
+
+/// Corre uma operação síncrona do `ImageStore` numa thread de bloqueio. O store
+/// resolve `<base>/images` internamente (recebe a base, como o `VolumeStore`).
+async fn with_image_store<T, F>(base: PathBuf, f: F) -> Result<T, Error>
+where
+    T: Send + 'static,
+    F: FnOnce(&ImageStore) -> Result<T, Error> + Send + 'static,
+{
+    tokio::task::spawn_blocking(move || {
+        let store = ImageStore::open(&base)?;
+        f(&store)
+    })
+    .await
+    .map_err(|e| Error::Runtime {
+        context: "join",
+        message: e.to_string(),
+    })?
+}
+
+async fn list_images(State(s): State<AppState>) -> Response {
+    match with_image_store(s.base, |store| store.list()).await {
+        Ok(imgs) => Json(imgs).into_response(),
+        Err(e) => err_response(e),
+    }
+}
+
+/// Query de `DELETE /v1/images?ref=…`. `ref` é palavra-reservada em Rust.
+#[derive(serde::Deserialize)]
+struct RefQuery {
+    #[serde(rename = "ref")]
+    reference: String,
+}
+
+async fn delete_image(State(s): State<AppState>, Query(q): Query<RefQuery>) -> Response {
+    if q.reference.is_empty() {
+        return err_response(Error::Invalid("referência de imagem vazia".to_string()));
+    }
+    match with_image_store(s.base, move |store| store.remove(&q.reference)).await {
+        // `remove` devolve "untagged: …" ou "deleted: …" — devolve-o tal e qual.
+        Ok(result) => Json(serde_json::json!({ "result": result })).into_response(),
         Err(e) => err_response(e),
     }
 }
@@ -454,6 +507,70 @@ mod tests {
         assert_eq!(got["id"], "abc123def456");
         assert_eq!(got["name"], "web");
         assert_eq!(got["command"][0], "nginx");
+    }
+
+    #[tokio::test]
+    async fn imagens_list_e_rmi() {
+        use delonix_image::{Image, ImageConfig, ImageStore};
+        let (st, dir) = test_state();
+        let store = ImageStore::open(dir.path()).unwrap();
+        store
+            .save(&Image {
+                id: "sha256:aabbccddeeff00112233".to_string(),
+                repo_tags: vec!["nginx:latest".to_string()],
+                layers: vec![],
+                config: ImageConfig::default(),
+                created_unix: 1,
+            })
+            .unwrap();
+
+        let app = router(st);
+        // Lista mostra a imagem.
+        let resp = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/v1/images")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let arr = body_json(resp).await;
+        assert_eq!(arr.as_array().unwrap().len(), 1);
+        assert_eq!(arr[0]["repo_tags"][0], "nginx:latest");
+
+        // rmi por tag (ref vai por query, com `:` e potencialmente `/`).
+        let resp = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("DELETE")
+                    .uri("/v1/images?ref=nginx:latest")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert!(body_json(resp).await["result"]
+            .as_str()
+            .unwrap()
+            .contains("deleted"));
+
+        // Já não existe → rmi de novo dá 404.
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("DELETE")
+                    .uri("/v1/images?ref=nginx:latest")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
     }
 
     #[tokio::test]
