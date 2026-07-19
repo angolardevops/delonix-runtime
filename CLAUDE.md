@@ -203,9 +203,18 @@ ls/apply/rm` + `kind: HTTPRoute` no `stack apply`.
   `curl host:<porta>` com `Host` header → backend; HTTPS com `curl -k` (TLS negociado, self-signed);
   re-apply recarrega por SIGHUP (mesmo PID); `httproute rm` mata e despublica. Ver `examples/httproute.yaml`.
 
-**Próximo (pedido):** **auto-registo** — cada container HTTP que arranca ganha uma rota default +
-FQDN interno (`<nome>.<namespace>.delonix.internal`, DNS do holder) e é adicionado ao proxy por
-SIGHUP, sem reiniciar. Faz do Delonix um substituto do k8s (DNS+ingress) em ambientes pequenos.
+**Auto-registo de containers (`container run --expose <porta>`) — FEITO.** Um container com
+`--expose` é auto-registado no proxy L7 sob o FQDN interno `<nome>.<namespace>.delonix.internal`,
+com reload a quente (SIGHUP), removido no `container rm`. A config final compõe-se de DUAS fontes
+que **nunca se apagam**: **MANUAL** (`kind: HTTPRoute` → `set_manual`/`manual.json`) + **AUTO**
+(`--expose` → `auto_register`/`auto.json`, read-modify-write sob **flock** contra lost-update).
+`rebuild()` une as duas → `ensure_running` (ou `stop` se ficou tudo vazio). `httproute rm` limpa só
+a parte MANUAL (as auto sobrevivem). As auto-rotas servem-se em **:8080** (não :80 — em rootless o
+slirp não publica portas <1024). O `--expose` exige `--net <rede>` (avisa senão) e re-regista no
+`start`. Provado E2E: `--expose` → `curl host:8080 -H 'Host: <fqdn>'` → container; múltiplas
+auto-rotas + MANUAL coexistem no mesmo proxy. **Limitação**: adicionar uma auto-rota com o proxy JÁ
+noutro listener não liga a porta nova (SIGHUP recarrega só rotas — herdado dos listeners-fixos).
+Faz do Delonix um substituto do k8s (DNS+ingress) em ambientes pequenos.
 
 ## DNS interno / descoberta de serviço (`<nome>.<namespace>.delonix.internal`)
 
