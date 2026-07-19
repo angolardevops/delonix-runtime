@@ -374,6 +374,11 @@ pub struct Container {
     /// sets nft `@dlxns_<ns>`/`@dlxall` no attach. [[isolamento de namespace]]
     #[serde(default = "default_namespace")]
     pub namespace: String,
+    /// Porta HTTP auto-registada no proxy L7 (`--expose`), sob o FQDN interno
+    /// `<nome>.<namespace>.delonix.internal`. `None` = não exposta. Persistida para
+    /// re-registar no `start` e des-registar no `rm`.
+    #[serde(default)]
+    pub expose: Option<u16>,
     /// Redes ADICIONAIS a que o container está ligado (multi-homing, via
     /// `network connect`). Cada uma é uma interface `eth<idx>` própria.
     #[serde(default)]
@@ -493,6 +498,7 @@ impl Container {
             ip: None,
             network: None,
             namespace: default_namespace(),
+            expose: None,
             extra_networks: Vec::new(),
             net_aliases: Vec::new(),
             dns_knows: None,

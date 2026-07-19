@@ -28,6 +28,9 @@ struct ContainerSpec {
     pub(crate) detach: bool,
     #[serde(default = "default_net")]
     network: String,
+    /// Porta HTTP a auto-registar no proxy L7 (FQDN interno). Ver `--expose`.
+    #[serde(default)]
+    expose: Option<u16>,
     #[serde(default)]
     pub(crate) volumes: Vec<String>,
     #[serde(default)]
@@ -116,7 +119,7 @@ pub(crate) const CONTAINER_SPEC_FIELDS: &[&str] = &[
     "restartPolicy", "restart", "entrypoint", "devices", "labels", "envFile", "memory", "cpus",
     "cpuWeight", "cpuset", "ioWeight", "readOnly", "capAdd", "capDrop", "securityOpt", "apparmor",
     "selinux", "userns", "hostPid", "hostIpc", "detect", "secret", "secretFiles", "tmpfs", "ulimit",
-    "sysctl", "gpus", "networkAlias", "knows", "netBps", "netBurst", "logDriver",
+    "sysctl", "gpus", "networkAlias", "knows", "netBps", "netBurst", "logDriver", "expose",
 ];
 
 fn default_restart() -> String {
@@ -183,6 +186,11 @@ pub enum ContainerCmd {
         /// `kind: Dependency` crosses the boundary.
         #[arg(long)]
         namespace: Option<String>,
+        /// Auto-register this container's HTTP port in the L7 proxy under its internal
+        /// FQDN `<name>.<namespace>.delonix.internal` (reachable via the proxy). Needs
+        /// `--net <network>`. Removed automatically on `container rm`.
+        #[arg(long)]
+        expose: Option<u16>,
         /// Volume/bind mount, `name:/target[:ro]` or `/host:/target[:ro]`. Repeatable.
         #[arg(short = 'v', long = "volume")]
         volumes: Vec<String>,
@@ -521,12 +529,12 @@ pub fn run(action: ContainerCmd) -> Result<()> {
             memory, cpus, cpu_weight, cpuset, io_weight, read_only, cap_add, cap_drop, security_opt, apparmor,
             selinux, userns, no_userns, host_pid, host_ipc, detect, secret, secret_files, env_file, tmpfs,
             ulimit, sysctl, gpus, ip, network_alias, knows, knows_none, pod, net_bps, net_burst, log_driver,
-            log_file, log_cri, image, command, namespace,
+            log_file, log_cri, image, command, namespace, expose,
         } => cmd_run(
             &images,
             &store,
             RunOpts {
-                detach, name, net, namespace, volumes, ports: publish, privileged, entrypoint, rm, restart, devices, env,
+                detach, name, net, namespace, expose, volumes, ports: publish, privileged, entrypoint, rm, restart, devices, env,
                 labels, image, command, quiet: false, memory, cpus, cpu_weight, cpuset, io_weight, read_only,
                 cap_add, cap_drop, security_opt, apparmor, selinux, userns, no_userns, host_pid, host_ipc,
                 detect, secret, secret_files, env_file, tmpfs, ulimit, sysctl, gpus, ip, network_alias, knows,
@@ -584,6 +592,7 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
                 name: Some(name.clone()),
                 net: spec.network,
                 namespace: doc.metadata.namespace.clone(),
+                expose: spec.expose,
                 volumes: spec.volumes,
                 ports: spec.ports,
                 privileged: spec.privileged,
@@ -707,6 +716,9 @@ pub(crate) struct RunOpts {
     /// Namespace lógico de ISOLAMENTO (default `default`). Ver [[isolamento de namespace]].
     #[serde(default)]
     pub(crate) namespace: Option<String>,
+    /// Porta HTTP a auto-registar no proxy L7 sob o FQDN interno (`--expose`).
+    #[serde(default)]
+    pub(crate) expose: Option<u16>,
     pub(crate) volumes: Vec<String>,
     pub(crate) ports: Vec<String>,
     pub(crate) privileged: bool,
@@ -796,7 +808,7 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
     // Intact copy for the re-exec (the destructuring below consumes opts).
     let opts_copy = opts.clone();
     let RunOpts {
-        detach, name, net, namespace, volumes, ports, privileged, entrypoint, rm, restart, devices, env, labels, image, command, quiet,
+        detach, name, net, namespace, expose, volumes, ports, privileged, entrypoint, rm, restart, devices, env, labels, image, command, quiet,
         memory, cpus, cpu_weight, cpuset, io_weight, read_only, cap_add, cap_drop, security_opt, apparmor, selinux,
         userns, no_userns, host_pid, host_ipc, detect, secret, secret_files, env_file, tmpfs, ulimit, sysctl, gpus,
         ip, network_alias, knows, knows_none, pod, net_bps, net_burst, log_driver, log_file, log_cri,
@@ -995,6 +1007,11 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
     // to JOIN it via `RunSpec.join_netns`, not create its own with `new_netns` —
     // that was the wrong approach, tried and corrected here).
     let custom_net = custom_net_name(&net);
+    // `--expose` precisa de um IP na SDN (rede custom) — o proxy alcança o backend
+    // por esse IP. Com `--net host/none` não há IP → avisa em vez de ignorar mudo.
+    if expose.is_some() && custom_net.is_none() {
+        eprintln!("aviso: --expose exige `--net <rede>` (o proxy alcança o container pelo IP da SDN) — ignorado");
+    }
     let mut attached_ip = None;
     if let Some(n) = &custom_net {
         if reexec {
@@ -1005,6 +1022,15 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
             // 1st pass: creates the netns on the holder's side and RE-EXECUTES itself inside it.
             delonix_net::NetworkStore::open(super::util::state_root())?.get(n)?;
             let (netns, ip) = infra::attach_container(&id, n, &namespace)?;
+            // `--expose`: auto-registo no proxy L7 AQUI, no lado do HOST — o spawn do
+            // proxy é por `nsenter` para o holder, que falha do processo já
+            // reexec'd (dentro do netns do container). O `c.expose` persiste-se
+            // depois, no bloco custom_net da passagem reexec.
+            if let Some(port) = expose {
+                if let Err(e) = super::ingress_proxy::auto_register(&c.name, &namespace, &ip, port) {
+                    eprintln!("aviso: --expose de '{}' não registado no proxy: {e}", c.name);
+                }
+            }
             return reexec_into_netns(&id, &netns, &ip, &opts_copy);
         }
     }
@@ -1093,6 +1119,12 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
                     Err(e) => eprintln!("aviso: isolamento de namespace '{}' não aplicado: {e}", c.namespace),
                 }
             }
+        }
+        // `--expose <porta>`: persiste no record (para re-registar no `start` e
+        // des-registar no `rm`). O auto-registo no proxy JÁ foi feito na 1.ª
+        // passagem (host), porque o spawn por nsenter não corre do reexec.
+        if let Some(port) = expose {
+            c.expose = Some(port);
         }
         let _ = store.save(&c);
         // `--net-bps`: the shaping lives on the veth on the holder's side, which only
@@ -1611,6 +1643,11 @@ fn cmd_start(images: &ImageStore, store: &Store, id: &str) -> Result<()> {
     if let Some(n) = c.network.clone() {
         if !reexec {
             let (netns, ip) = infra::attach_container(&c.id, &n, &c.namespace)?;
+            // Re-registo no proxy L7 (`--expose`) AQUI, no host — o spawn por
+            // nsenter não corre do processo reexec'd.
+            if let Some(port) = c.expose {
+                let _ = super::ingress_proxy::auto_register(&c.name, &c.namespace, &ip, port);
+            }
             return reexec_start(&c.id, &netns, &ip);
         }
         c.ip = std::env::var("DELONIX_REEXEC_IP").ok();
@@ -1755,6 +1792,10 @@ fn cmd_rm(images: &ImageStore, store: &Store, id: &str, force: bool) -> Result<(
     let pid = c.pid;
     runtime::remove(store, &c, force)?;
     unpublish_ports(&c, pid);
+    // Des-registo do proxy L7 se estava exposto (`--expose`) — remove a rota + SIGHUP.
+    if c.expose.is_some() {
+        super::ingress_proxy::auto_deregister(&c.name);
+    }
     let _ = images.unmount_rootfs(&c.id); // unmounts/cleans up the overlay scratch
     // Definitive DESTROY of the container's directory (including the flat `rootfs/`).
     // `unmount_rootfs` PRESERVES it on purpose (it's the container's state, for
