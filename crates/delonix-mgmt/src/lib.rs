@@ -5,32 +5,49 @@
 //! fala só HTTP com este socket no mesmo host. Complementa o CRI (`delonix-cri`,
 //! que serve o kubelet): este serve a *gestão* do produto (volumes/containers/…).
 //!
-//! As superfícies migram uma de cada vez. Feito: **volumes** (CRUD), **leitura de
-//! containers** (list/get) e **imagens** (list + rmi). O contrato é o próprio tipo
-//! serde de cada recurso (`delonix_volume::Volume`,
-//! `delonix_runtime_core::Container`, `delonix_image::Image`) — o cliente
-//! desserializa o mesmo shape.
+//! As superfícies migram uma de cada vez. Feito: **volumes** (CRUD), **containers**
+//! (list/get por biblioteca + rm/start/stop/restart/pause/unpause por shell-out à
+//! CLI) e **imagens** (list + rmi). O contrato de LEITURA é o próprio tipo serde de
+//! cada recurso (`delonix_volume::Volume`, `delonix_runtime_core::Container`,
+//! `delonix_image::Image`); as MUTAÇÕES devolvem `{ok, output}`.
 
 use std::path::PathBuf;
 
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use axum::routing::get;
+use axum::routing::{get, post};
 use axum::{Json, Router};
 use delonix_image::ImageStore;
 use delonix_runtime_core::{Error, Store};
 use delonix_volume::VolumeStore;
 
-/// Estado partilhado dos handlers: a raiz do estado do runtime (`$DELONIX_ROOT`).
+/// Estado partilhado dos handlers.
 #[derive(Clone)]
 struct AppState {
+    /// A raiz do estado do runtime (`$DELONIX_ROOT`).
     base: PathBuf,
+    /// O binário da CLI do runtime (`delonix`) para as MUTAÇÕES. Ao contrário das
+    /// leituras (chamadas de biblioteca ao Store), uma mutação de container
+    /// (rm/stop/start/…) tem de reusar o caminho REAL do motor — matar o processo,
+    /// limpar cgroups/namespaces, despublicar portas, desligar redes — que vive na
+    /// CLI. Chamar a própria CLI garante paridade total, em vez de reimplementar
+    /// essa limpeza aqui. É a mesma decisão que o `InProcessRuntime` do PaaS já
+    /// tomava; a arquitectura Runtime-como-serviço só MOVE esse shell-out para aqui.
+    bin: PathBuf,
 }
 
 /// Arranca a API de gestão a escutar num unix socket (bloqueante). `addr` aceita
 /// um caminho ou `unix:///caminho`. Mesmo padrão do `delonix-cri::serve_blocking`.
 pub fn serve_blocking(base: PathBuf, addr: &str) -> Result<(), Error> {
+    // O binário para as mutações é o PRÓPRIO executável (este processo É o
+    // `delonix api`); fallback para "delonix" no PATH se `current_exe` falhar.
+    let bin = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("delonix"));
+    serve_blocking_with(base, bin, addr)
+}
+
+/// Como [`serve_blocking`], mas com o binário da CLI explícito (para testes).
+pub fn serve_blocking_with(base: PathBuf, bin: PathBuf, addr: &str) -> Result<(), Error> {
     let path = addr.strip_prefix("unix://").unwrap_or(addr).to_string();
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -46,7 +63,7 @@ pub fn serve_blocking(base: PathBuf, addr: &str) -> Result<(), Error> {
             message: e.to_string(),
         })?;
         eprintln!("delonix-mgmt (API de gestão) a escutar em unix://{path}");
-        serve_over_uds(uds, router(AppState { base })).await
+        serve_over_uds(uds, router(AppState { base, bin })).await
     })
 }
 
@@ -85,11 +102,15 @@ fn router(state: AppState) -> Router {
         .route("/_ping", get(ping))
         .route("/v1/volumes", get(list_volumes).post(create_volume))
         .route("/v1/volumes/:name", get(get_volume).delete(delete_volume))
-        // Containers: fatia de LEITURA (list/get). As mutações (rm/start/stop/…)
-        // não são simples chamadas ao Store — precisam do caminho real do motor
-        // (matar o processo, limpar namespaces/cgroups) — migram numa fatia própria.
+        // Containers: leitura (list/get) por biblioteca; mutação (abaixo) por CLI.
         .route("/v1/containers", get(list_containers))
-        .route("/v1/containers/:id", get(get_container))
+        .route(
+            "/v1/containers/:id",
+            get(get_container).delete(delete_container),
+        )
+        // Mutação de container: rm/start/stop/restart/pause/unpause — shell-out à
+        // CLI do runtime (paridade total de limpeza), não uma chamada ao Store.
+        .route("/v1/containers/:id/action", post(container_action_ep))
         // Imagens: list + rmi. A referência (`nginx:latest`, `library/nginx`,
         // `sha256:…`) NÃO cabe num segmento de path (tem `/` e `:`) → vai por
         // query (`?ref=…`). Não há risco de traversal: `ImageStore::remove`
@@ -247,6 +268,107 @@ async fn get_container(State(s): State<AppState>, Path(id): Path<String>) -> Res
     }
 }
 
+/// Argumento seguro para passar à CLI: além do `valid_name` (sem `..`/`/`), recusa
+/// um `-` inicial — senão o `clap` da CLI interpretaria o id como uma flag (ex.: um
+/// id `--rm`). Os args da CLI não sofrem injecção de shell (`Command::args`, não uma
+/// string), mas podem ser lidos como opções — daí a barreira contra `-`.
+fn valid_arg(s: &str) -> bool {
+    valid_name(s) && !s.starts_with('-')
+}
+
+/// Corre a CLI do runtime (`delonix …`) com `DELONIX_ROOT` na base, e devolve
+/// `(sucesso, saída combinada)`. Bloqueante → corre em `spawn_blocking`.
+async fn run_cli(bin: PathBuf, base: PathBuf, args: Vec<String>) -> Result<(bool, String), Error> {
+    tokio::task::spawn_blocking(move || {
+        let out = std::process::Command::new(&bin)
+            .env("DELONIX_ROOT", &base)
+            .args(&args)
+            .output()
+            .map_err(|e| Error::Runtime {
+                context: "cli",
+                message: e.to_string(),
+            })?;
+        let mut s = String::from_utf8_lossy(&out.stdout).into_owned();
+        s.push_str(&String::from_utf8_lossy(&out.stderr));
+        Ok((out.status.success(), s.trim().to_string()))
+    })
+    .await
+    .map_err(|e| Error::Runtime {
+        context: "join",
+        message: e.to_string(),
+    })?
+}
+
+/// Query de `DELETE /v1/containers/:id?force=<bool>`.
+#[derive(serde::Deserialize)]
+struct ForceQuery {
+    #[serde(default)]
+    force: bool,
+}
+
+async fn delete_container(
+    State(s): State<AppState>,
+    Path(id): Path<String>,
+    Query(q): Query<ForceQuery>,
+) -> Response {
+    if !valid_arg(&id) {
+        return err_response(Error::Invalid("id de container inválido".to_string()));
+    }
+    let mut args = vec!["container".to_string(), "rm".to_string()];
+    if q.force {
+        args.push("-f".to_string());
+    }
+    args.push(id);
+    match run_cli(s.bin, s.base, args).await {
+        Ok((ok, out)) => Json(serde_json::json!({ "ok": ok, "output": out })).into_response(),
+        Err(e) => err_response(e),
+    }
+}
+
+/// Corpo de `POST /v1/containers/:id/action`.
+#[derive(serde::Deserialize)]
+struct ActionBody {
+    action: String,
+}
+
+async fn container_action_ep(
+    State(s): State<AppState>,
+    Path(id): Path<String>,
+    Json(b): Json<ActionBody>,
+) -> Response {
+    if !valid_arg(&id) {
+        return err_response(Error::Invalid("id de container inválido".to_string()));
+    }
+    // Só acções conhecidas (allowlist) chegam à CLI. `remove` = `rm -f`.
+    let sub = match b.action.as_str() {
+        "start" | "stop" | "restart" | "pause" | "unpause" => b.action.clone(),
+        "remove" | "rm" => {
+            match run_cli(
+                s.bin,
+                s.base,
+                vec![
+                    "container".to_string(),
+                    "rm".to_string(),
+                    "-f".to_string(),
+                    id,
+                ],
+            )
+            .await
+            {
+                Ok((ok, out)) => {
+                    return Json(serde_json::json!({ "ok": ok, "output": out })).into_response()
+                }
+                Err(e) => return err_response(e),
+            }
+        }
+        other => return err_response(Error::Invalid(format!("acção desconhecida: {other}"))),
+    };
+    match run_cli(s.bin, s.base, vec!["container".to_string(), sub, id]).await {
+        Ok((ok, out)) => Json(serde_json::json!({ "ok": ok, "output": out })).into_response(),
+        Err(e) => err_response(e),
+    }
+}
+
 // ---- Imagens (list + rmi) --------------------------------------------------
 
 /// Corre uma operação síncrona do `ImageStore` numa thread de bloqueio. O store
@@ -305,6 +427,9 @@ mod tests {
         (
             AppState {
                 base: dir.path().to_path_buf(),
+                // `/bin/false`: as mutações reais provam-se no e2e cross-processo;
+                // os testes de unidade cobrem só a validação (recusa ANTES do exec).
+                bin: PathBuf::from("/bin/false"),
             },
             dir,
         )
@@ -571,6 +696,45 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn mutacao_de_container_valida_o_id_antes_do_exec() {
+        let (st, _d) = test_state();
+        let app = router(st);
+        // `..` e um `-` inicial (que a CLI leria como flag) → 400, sem exec. (Um
+        // `a/b` nem chega ao handler — vira 2 segmentos e o router dá 404.)
+        for bad in ["..", "-rf"] {
+            let resp = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method("DELETE")
+                        .uri(format!("/v1/containers/{bad}?force=true"))
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                resp.status(),
+                StatusCode::BAD_REQUEST,
+                "delete devia recusar {bad:?}"
+            );
+        }
+        // Acção desconhecida → 400 (allowlist).
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/v1/containers/web/action")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"action":"detonar"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
     }
 
     #[tokio::test]
