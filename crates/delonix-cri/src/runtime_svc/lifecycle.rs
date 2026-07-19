@@ -113,6 +113,20 @@ fn st<E: std::fmt::Display>(e: E) -> Status {
     Status::internal(e.to_string())
 }
 
+/// `true` se o stderr de um `delonix container rm/stop` indica que o alvo **não
+/// existe** — o contrato CRI exige que `RemoveContainer`/`StopContainer` sejam
+/// IDEMPOTENTES (um container ausente conta como já removido/parado). A mensagem
+/// canónica do `delonix` é "container não encontrado"; cobrimos também as
+/// variantes docker/inglês para robustez.
+fn stderr_not_found(stderr: &[u8]) -> bool {
+    let e = String::from_utf8_lossy(stderr).to_lowercase();
+    e.contains("não encontrado")
+        || e.contains("nao encontrado")
+        || e.contains("not found")
+        || e.contains("no such")
+        || e.contains("não existe")
+}
+
 fn write_rec<T: Serialize>(dir: &Path, id: &str, rec: &T) -> Result<(), Status> {
     std::fs::create_dir_all(dir).map_err(st)?;
     let bytes = serde_json::to_vec_pretty(rec).map_err(st)?;
@@ -628,10 +642,14 @@ pub fn stop_container(
     // a sua própria deadline, por isso NÃO podemos usar o default longo do
     // `delonix stop`. `timeout=0` → paragem imediata (SIGKILL).
     let secs = timeout.max(0).to_string();
-    let _ = delonix(
+    let out = delonix(
         base,
         &["container", "stop", "-t", &secs, &format!("cri-{id}")],
     )?;
+    // Contrato CRI: parar um container que já não existe é sucesso (idempotente).
+    if !out.status.success() && stderr_not_found(&out.stderr) {
+        return Ok(Response::new(StopContainerResponse {}));
+    }
     // Verifica que PAROU de facto (reconciliado). Idempotente: já parado/inexistente
     // = OK. Se continua vivo, propaga erro → o kubelet repete (em vez de assumir
     // que parou e seguir para o RemoveContainer sobre um processo ainda a correr).
@@ -656,10 +674,7 @@ pub fn remove_container(
     // sem rasto para o kubelet reptir. Idempotente (contrato CRI): um container
     // que já não existe conta como removido.
     let out = delonix(base, &["container", "rm", "-f", &format!("cri-{id}")])?;
-    let gone = out.status.success() || {
-        let e = String::from_utf8_lossy(&out.stderr).to_lowercase();
-        e.contains("no such") || e.contains("não existe") || e.contains("not found")
-    };
+    let gone = out.status.success() || stderr_not_found(&out.stderr);
     if !gone {
         return Err(Status::internal(format!(
             "remoção de 'cri-{id}' falhou (registo preservado p/ retry): {}",
