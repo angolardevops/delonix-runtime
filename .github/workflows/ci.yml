@@ -1,0 +1,61 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Uma execução por ref — cancela a anterior ainda a correr (poupa runners).
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  # ---- Estilo: rustfmt tem de estar aplicado (ver .git-blame-ignore-revs) ----
+  fmt:
+    name: rustfmt
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # rustup honra o rust-toolchain.toml (canal + componentes rustfmt/clippy).
+      - name: Instala toolchain fixada
+        run: rustup show
+      - run: cargo fmt --all --check
+
+  # ---- Lint: clippy a falhar em QUALQUER warning (gate estrito) ----
+  clippy:
+    name: clippy -D warnings
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Instala toolchain fixada
+        run: rustup show
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+  # ---- Testes: a suite toda (os testes que exigem privilégio auto-skipam) ----
+  test:
+    name: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Instala toolchain fixada
+        run: rustup show
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --workspace --locked
+      - run: cargo test --workspace --locked --no-fail-fast
+
+  # ---- Supply-chain: advisories RUSTSEC + licenças + fontes (ver deny.toml) ----
+  deny:
+    name: cargo-deny
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check advisories licenses sources

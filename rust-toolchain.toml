@@ -1,0 +1,5 @@
+# MSRV / toolchain fixado para builds reprodutíveis (dev + CI usam o mesmo).
+# Subir de propósito, num commit dedicado — nunca deixar flutuar para "stable".
+[toolchain]
+channel = "1.96.0"
+components = ["rustfmt", "clippy"]

@@ -1,0 +1,51 @@
+# cargo-deny — rede de segurança de supply-chain de um runtime de containers.
+# Corrido no CI (`cargo deny check`) e localmente. Schema v2.
+
+[advisories]
+version = 2
+# RUSTSEC + yanked são negados por omissão no schema v2. Um advisory só passa se
+# for listado aqui com justificação e data de revisão — nunca silenciar às cegas.
+yanked = "deny"
+# Só `unmaintained` (não são vulnerabilidades). Cada um com razão e revisão — um
+# CVE/`unsound` real continua a FALHAR o gate. Rever a cada bump de deps.
+ignore = [
+    # rustls-pemfile arquivado; "no safe upgrade". FIXME(follow-up): migrar para
+    # `rustls-pki-types::PemObject` (dep DIRECTA do bin, no proxy TLS). Nossa a fechar.
+    "RUSTSEC-2025-0134",
+    # paste (macro) não mantido — TRANSITIVO via `ratatui` (TUI do `delonix dash`);
+    # sem acção do nosso lado até o ratatui o largar. Sai quando o upstream sair.
+    "RUSTSEC-2024-0436",
+]
+
+[licenses]
+version = 2
+# Só licenças permissivas — compatíveis com Apache-2.0 (a licença deste repo).
+# Copyleft forte (GPL/AGPL) NÃO entra: um runtime público não pode arrastar
+# obrigações de redistribuição de fonte para quem o embute.
+allow = [
+    "Apache-2.0",
+    "MIT",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "0BSD",
+    "BSL-1.0",
+    "Unicode-3.0",
+    "CDLA-Permissive-2.0",
+    "Unlicense",
+]
+confidence-threshold = 0.9
+
+[bans]
+# Duplicados de versão são inevitáveis com ~215 deps transitivas — avisar, não
+# bloquear (apertar para "deny" seria ruído sem sinal de segurança).
+multiple-versions = "warn"
+wildcards = "warn"
+
+[sources]
+# Nada de fontes não confiáveis. Hoje a árvore é 100% crates.io + path interno
+# (sem deps git) — se um dia entrar um git, tem de ser adicionado aqui a sério.
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
