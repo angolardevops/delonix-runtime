@@ -73,6 +73,8 @@ pub fn canonical_kind(kind: &str) -> &str {
     let lower = kind.to_ascii_lowercase();
     match lower.as_str() {
         "vm" | "virtualmachine" => "Vm",
+        // `KnowDepends` é o nome que o utilizador pediu; `Dependency` é o canónico.
+        "knowdepends" | "dependency" => "Dependency",
         _ => kind,
     }
 }
@@ -301,6 +303,7 @@ spec: { image: alpine, memroy: 2G, restartPolicy: always }
                 "Secret" => Some(crate::cmd::secret::SECRET_SPEC_FIELDS),
                 "Ingress" | "Egress" | "FirewallPolicy" => Some(crate::cmd::firewall::FW_SPEC_FIELDS),
                 "HTTPRoute" => Some(crate::cmd::httproute::HTTP_ROUTE_SPEC_FIELDS),
+                "Dependency" => Some(crate::cmd::dependency::DEPENDENCY_SPEC_FIELDS),
                 _ => None, // Cluster tem specs aninhados próprios; fora deste guard.
             }
         };

@@ -531,6 +531,28 @@ fn apply_fw_doc(store: &Store, doc: &ManifestDoc, dir: &str) -> Result<()> {
     Ok(())
 }
 
+/// **Núcleo partilhado de ingress por-container**: substitui a direção `in` de um
+/// container (default-policy + regras `allow`), preservando as regras de saída.
+/// Usado pelo `kind: Dependency` ('A conhece B' compila para: em B, ingress
+/// default-deny + allow do IP de A) sem duplicar a construção do `ContainerFw`.
+/// As `allows` já vêm com `dir="in"`.
+pub(crate) fn apply_container_ingress(store: &Store, target: &str, policy: &str, allows: &[FwRule]) -> Result<()> {
+    if !matches!(policy, "allow" | "deny") {
+        return Err(Error::Invalid(format!("ingress de '{target}': policy tem de ser allow|deny")));
+    }
+    let mut c = store.load(target)?;
+    let ip = require_sdn_ip(&c)?;
+    let mut fw = c.firewall.clone().unwrap_or_default();
+    fw.enabled = true;
+    fw.rules.retain(|r| r.dir != "in"); // declarativo: a direção `in` é substituída
+    fw.policy_in = policy.to_string();
+    fw.rules.extend(allows.iter().cloned());
+    infra::apply_firewall(&c.id, &ip, &fw)?;
+    c.firewall = Some(fw);
+    store.save(&c)?;
+    Ok(())
+}
+
 /// Aplica um `Egress` de `scope: network` — política de egress por-rede + CIDR/
 /// FQDN allowlist + rate-limit L4. Espelha exactamente o `egress net`/`egress
 /// host`/`l4guard` da CLI, mas de forma declarativa. **Estado desejado**: cada
