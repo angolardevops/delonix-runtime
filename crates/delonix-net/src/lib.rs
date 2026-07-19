@@ -118,10 +118,10 @@ fn default_subnet() -> String {
 fn forward_inbound_deny(subnet: &str) {
     if std::env::var_os("DELONIX_FORWARD_OPEN").is_some() {
         // NET-03: o opt-out reverte para default-allow — não deixar isto silencioso.
-        eprintln!(
-            "delonix: AVISO DE SEGURANÇA — DELONIX_FORWARD_OPEN activo: o inbound-deny do\n\
-             \x20        forward está DESLIGADO (containers acessíveis directamente de outras\n\
-             \x20        redes/host). Só para depuração — NÃO usar em produção."
+        tracing::warn!(
+            "AVISO DE SEGURANÇA — DELONIX_FORWARD_OPEN activo: o inbound-deny do forward está \
+             DESLIGADO (containers acessíveis directamente de outras redes/host). Só para \
+             depuração — NÃO usar em produção."
         );
         return;
     }
@@ -1027,11 +1027,13 @@ impl NetworkStore {
         // Delonix: SEM firewall por-container, SEM anti-spoof, SEM isolamento inter-rede.
         // É a natureza do macvlan, não um bug — mas o operador tem de o saber. Para
         // isolamento FILTRADO, usa uma rede `bridge` (default). Ver `is_lan_driver`.
-        eprintln!(
-            "delonix: AVISO DE SEGURANÇA — a rede '{name}' ({driver}) é NÃO-FILTRADA: os \
-             containers ficam diretamente na LAN física de '{parent}', FORA do firewall, \
-             do anti-spoof e do isolamento do Delonix. Usa uma rede `bridge` se precisares \
-             de filtragem."
+        tracing::warn!(
+            network = %name,
+            driver = %driver,
+            parent = %parent,
+            "AVISO DE SEGURANÇA — a rede é NÃO-FILTRADA: os containers ficam diretamente na LAN \
+             física de '{parent}', FORA do firewall, do anti-spoof e do isolamento do Delonix. \
+             Usa uma rede `bridge` se precisares de filtragem."
         );
         let body =
             format!("driver={driver}\nparent={parent}\nsubnet={subnet}\ngateway={gateway}\n");

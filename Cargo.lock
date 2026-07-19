@@ -601,6 +601,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "tar",
+ "tracing",
  "zstd",
 ]
 
@@ -632,6 +633,7 @@ dependencies = [
  "proptest",
  "serde",
  "serde_json",
+ "tracing",
 ]
 
 [[package]]
@@ -713,6 +715,7 @@ dependencies = [
  "delonix-net",
  "delonix-runtime-core",
  "libc",
+ "tracing",
 ]
 
 [[package]]

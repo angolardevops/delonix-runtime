@@ -562,7 +562,7 @@ pub fn pull_from_registry_with_creds(
         creds,
     };
 
-    eprintln!("a puxar {repo}:{refr} de {host}...");
+    tracing::info!(repo = %repo, reference = %refr, host = %host, "a puxar {repo}:{refr} de {host}");
 
     // 1) manifesto (pode ser um índice multi-arch)
     let murl = c.manifest_url(&refr);
@@ -592,7 +592,7 @@ pub fn pull_from_registry_with_creds(
             })
             .or_else(|| index.manifests().first())
             .ok_or_else(|| Error::Registry("índice de manifestos vazio".into()))?;
-        eprintln!("plataforma escolhida: linux/{arch}");
+        tracing::info!(arch = %arch, "plataforma escolhida: linux/{arch}");
         let purl = c.manifest_url(pick.digest().as_ref());
         let r = c.fetch(&purl, ACCEPT_MANIFEST)?;
         r.bytes().map_err(reg_err)?.to_vec()
@@ -621,11 +621,13 @@ pub fn pull_from_registry_with_creds(
     let mut layers = Vec::with_capacity(total);
     for (i, l) in real_layers.iter().enumerate() {
         let ldigest = l.digest().to_string();
-        eprintln!(
-            "layer {}/{}  {}",
-            i + 1,
+        tracing::debug!(
+            index = i + 1,
             total,
-            &ldigest[..ldigest.len().min(19)]
+            digest = %&ldigest[..ldigest.len().min(19)],
+            "a puxar layer {}/{}",
+            i + 1,
+            total
         );
         let data = c.blob(&ldigest)?;
         let dg = store.cas().write(&data)?;
@@ -716,7 +718,7 @@ pub fn push_to_registry(store: &ImageStore, source: &str, target: &str) -> Resul
         creds,
     };
 
-    eprintln!("a publicar {repo}:{refr} em {host}...");
+    tracing::info!(repo = %repo, reference = %refr, host = %host, "a publicar {repo}:{refr} em {host}");
 
     // 1) envio do blob de config.
     let config_data = store.cas().read(&image.id)?;
@@ -726,7 +728,14 @@ pub fn push_to_registry(store: &ImageStore, source: &str, target: &str) -> Resul
     let total = image.layers.len();
     for (i, dg) in image.layers.iter().enumerate() {
         let data = store.cas().read(dg)?;
-        eprintln!("layer {}/{}  {}", i + 1, total, &dg[..dg.len().min(19)]);
+        tracing::debug!(
+            index = i + 1,
+            total,
+            digest = %&dg[..dg.len().min(19)],
+            "a publicar layer {}/{}",
+            i + 1,
+            total
+        );
         c.push_blob(&with_prefix(dg), &data)?;
     }
 
@@ -737,7 +746,7 @@ pub fn push_to_registry(store: &ImageStore, source: &str, target: &str) -> Resul
     c.push_manifest(&refr, &manifest_bytes, DOCKER_MANIFEST_MEDIA_TYPE)?;
 
     let digest = format!("sha256:{}", sha256_hex(&manifest_bytes));
-    eprintln!("publicado: {host}/{repo}:{refr}  ({digest})");
+    tracing::info!(host = %host, repo = %repo, reference = %refr, digest = %digest, "publicado: {host}/{repo}:{refr}");
     Ok(digest)
 }
 
@@ -773,16 +782,16 @@ pub fn push_oci_artifact(
         creds,
     };
 
-    eprintln!("a publicar artefacto {repo}:{refr} em {host}...");
+    tracing::info!(repo = %repo, reference = %refr, host = %host, "a publicar artefacto {repo}:{refr} em {host}");
 
     let config_digest = with_prefix(&sha256_hex(EMPTY_CONFIG_BYTES));
     c.push_blob(&config_digest, EMPTY_CONFIG_BYTES)?;
 
     let layer_digest = with_prefix(&sha256_hex(data));
-    eprintln!(
-        "blob {}  ({} bytes)",
-        &layer_digest[..19.min(layer_digest.len())],
-        data.len()
+    tracing::debug!(
+        digest = %&layer_digest[..19.min(layer_digest.len())],
+        bytes = data.len(),
+        "a publicar blob"
     );
     c.push_blob(&layer_digest, data)?;
 
@@ -808,7 +817,7 @@ pub fn push_oci_artifact(
     c.push_manifest(&refr, &manifest_bytes, MediaType::ImageManifest.as_ref())?;
 
     let digest = format!("sha256:{}", sha256_hex(&manifest_bytes));
-    eprintln!("publicado: {host}/{repo}:{refr}  ({digest})");
+    tracing::info!(host = %host, repo = %repo, reference = %refr, digest = %digest, "publicado: {host}/{repo}:{refr}");
     Ok(digest)
 }
 
