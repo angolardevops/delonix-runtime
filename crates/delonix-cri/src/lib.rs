@@ -21,8 +21,8 @@ use cri::runtime_service_server::RuntimeServiceServer;
 use cri::*;
 
 mod runtime_svc;
-pub mod streaming;
 pub mod spdy;
+pub mod streaming;
 
 const RUNTIME_NAME: &str = "delonix";
 const RUNTIME_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -62,7 +62,10 @@ impl ImageService for DelonixImage {
                 repo_tags: i.repo_tags.clone(),
                 repo_digests: vec![],
                 size: layer_size(&i),
-                spec: Some(ImageSpec { image: i.id.clone(), ..Default::default() }),
+                spec: Some(ImageSpec {
+                    image: i.id.clone(),
+                    ..Default::default()
+                }),
                 ..Default::default()
             })
             .collect();
@@ -82,10 +85,16 @@ impl ImageService for DelonixImage {
             id: i.id.clone(),
             repo_tags: i.repo_tags.clone(),
             size: layer_size(&i),
-            spec: Some(ImageSpec { image: i.id.clone(), ..Default::default() }),
+            spec: Some(ImageSpec {
+                image: i.id.clone(),
+                ..Default::default()
+            }),
             ..Default::default()
         });
-        Ok(Response::new(ImageStatusResponse { image, info: Default::default() }))
+        Ok(Response::new(ImageStatusResponse {
+            image,
+            info: Default::default(),
+        }))
     }
 
     async fn pull_image(
@@ -104,7 +113,10 @@ impl ImageService for DelonixImage {
         // `username`+`password` são suportados por agora (o schema base do CRI);
         // `identity_token`/`registry_token`/`auth` (base64 já combinado) ficam
         // para quando surgir um caso real que precise deles.
-        let creds = r.auth.filter(|a| !a.username.is_empty()).map(|a| (a.username, a.password));
+        let creds = r
+            .auth
+            .filter(|a| !a.username.is_empty())
+            .map(|a| (a.username, a.password));
         let base = self.base.clone();
         let img = tokio::task::spawn_blocking(move || {
             let store = images(&base)?;
@@ -153,7 +165,9 @@ impl ImageService for DelonixImage {
             .unwrap_or(0);
         let fs = FilesystemUsage {
             timestamp: now,
-            fs_id: Some(FilesystemIdentifier { mountpoint: self.base.to_string_lossy().into_owned() }),
+            fs_id: Some(FilesystemIdentifier {
+                mountpoint: self.base.to_string_lossy().into_owned(),
+            }),
             used_bytes: Some(UInt64Value { value: used }),
             inodes_used: Some(UInt64Value { value: 0 }),
         };
@@ -178,7 +192,10 @@ fn layer_size(img: &delonix_image::Image) -> u64 {
 }
 
 fn blob_path(_img: &delonix_image::Image, hex: &str) -> PathBuf {
-    delonix_image::ImageStore::default_root().join("blobs").join("sha256").join(hex)
+    delonix_image::ImageStore::default_root()
+        .join("blobs")
+        .join("sha256")
+        .join(hex)
 }
 
 // ---------------------------------------------------------------------------
@@ -192,11 +209,18 @@ pub fn serve_blocking(base: PathBuf, addr: &str) -> Result<(), delonix_runtime_c
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
-        .map_err(|e| delonix_runtime_core::Error::Runtime { context: "tokio", message: e.to_string() })?;
+        .map_err(|e| delonix_runtime_core::Error::Runtime {
+            context: "tokio",
+            message: e.to_string(),
+        })?;
     rt.block_on(async move {
         let _ = std::fs::remove_file(&path); // limpa um socket antigo
-        let uds = tokio::net::UnixListener::bind(&path)
-            .map_err(|e| delonix_runtime_core::Error::Runtime { context: "bind", message: e.to_string() })?;
+        let uds = tokio::net::UnixListener::bind(&path).map_err(|e| {
+            delonix_runtime_core::Error::Runtime {
+                context: "bind",
+                message: e.to_string(),
+            }
+        })?;
         let incoming = tokio_stream::wrappers::UnixListenerStream::new(uds);
         eprintln!("delonix-cri (CRI v1) a escutar em unix://{path}");
 
@@ -204,11 +228,17 @@ pub fn serve_blocking(base: PathBuf, addr: &str) -> Result<(), delonix_runtime_c
         // porta de loopback. As RPCs devolvem URLs que apontam para cá.
         let stream_listener = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await
-            .map_err(|e| delonix_runtime_core::Error::Runtime { context: "bind-stream", message: e.to_string() })?;
+            .map_err(|e| delonix_runtime_core::Error::Runtime {
+                context: "bind-stream",
+                message: e.to_string(),
+            })?;
         let stream_port = stream_listener
             .local_addr()
             .map(|a| a.port())
-            .map_err(|e| delonix_runtime_core::Error::Runtime { context: "stream-addr", message: e.to_string() })?;
+            .map_err(|e| delonix_runtime_core::Error::Runtime {
+                context: "stream-addr",
+                message: e.to_string(),
+            })?;
         let advertised = format!("http://127.0.0.1:{stream_port}");
         let streamer = streaming::Streamer::new(base.clone(), advertised.clone());
         eprintln!("delonix-cri: streaming (exec/attach) em {advertised}");
@@ -224,6 +254,9 @@ pub fn serve_blocking(base: PathBuf, addr: &str) -> Result<(), delonix_runtime_c
             .add_service(ImageServiceServer::new(img))
             .serve_with_incoming(incoming)
             .await
-            .map_err(|e| delonix_runtime_core::Error::Runtime { context: "serve", message: e.to_string() })
+            .map_err(|e| delonix_runtime_core::Error::Runtime {
+                context: "serve",
+                message: e.to_string(),
+            })
     })
 }

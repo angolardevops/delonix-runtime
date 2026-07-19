@@ -71,8 +71,24 @@ pub enum StackCmd {
 }
 
 pub fn run(action: StackCmd) -> Result<()> {
-    if let StackCmd::Init { dir, name, image, force, template, up } = action {
-        return cmd_init(super::scaffold::Target::Stack, dir, name, image, force, template, up);
+    if let StackCmd::Init {
+        dir,
+        name,
+        image,
+        force,
+        template,
+        up,
+    } = action
+    {
+        return cmd_init(
+            super::scaffold::Target::Stack,
+            dir,
+            name,
+            image,
+            force,
+            template,
+            up,
+        );
     }
     match action {
         // Tratado no topo de `run` (faz `return`).
@@ -87,8 +103,18 @@ pub fn run(action: StackCmd) -> Result<()> {
 /// ordem por que as coisas são criadas, o que é metade do diagnóstico quando um
 /// apply pára a meio.
 const KINDS: [&str; 12] = [
-    "Secret", "Network", "Volume", "Storage", "Image", "Vm", "Container", "Ingress", "Egress",
-    "FirewallPolicy", "HTTPRoute", "Dependency",
+    "Secret",
+    "Network",
+    "Volume",
+    "Storage",
+    "Image",
+    "Vm",
+    "Container",
+    "Ingress",
+    "Egress",
+    "FirewallPolicy",
+    "HTTPRoute",
+    "Dependency",
 ];
 
 fn describe(file: Option<PathBuf>) -> Result<()> {
@@ -102,10 +128,17 @@ fn describe(file: Option<PathBuf>) -> Result<()> {
 
     // Kinds que o manifesto traz mas o stack não sabe aplicar: melhor dizê-lo do
     // que ignorar em silêncio (o `apply` também os ignoraria, sem avisar).
-    let desconhecidos: Vec<&str> = docs.iter().map(|doc| doc.kind.as_str()).filter(|k| !KINDS.contains(k)).collect();
+    let desconhecidos: Vec<&str> = docs
+        .iter()
+        .map(|doc| doc.kind.as_str())
+        .filter(|k| !KINDS.contains(k))
+        .collect();
     if !desconhecidos.is_empty() {
         println!();
-        println!("AVISO: kinds não suportados pelo stack (ignorados pelo `apply`): {}", desconhecidos.join(", "));
+        println!(
+            "AVISO: kinds não suportados pelo stack (ignorados pelo `apply`): {}",
+            desconhecidos.join(", ")
+        );
     }
 
     let (_, cstore) = super::util::open_stores()?;
@@ -121,7 +154,13 @@ fn describe(file: Option<PathBuf>) -> Result<()> {
         for doc in of {
             let name = &doc.metadata.name;
             let (present, status) = presence(kind, name, &containers);
-            t.row(vec![kind.to_string(), name.clone(), present, status, fmt_labels(&doc.metadata)]);
+            t.row(vec![
+                kind.to_string(),
+                name.clone(),
+                present,
+                status,
+                fmt_labels(&doc.metadata),
+            ]);
         }
         t.print();
     }
@@ -148,7 +187,10 @@ fn print_missing_conditions(docs: &[manifest::ManifestDoc]) {
                     eprintln!("Conditions (atenção — pré-requisitos em falta):");
                     header = true;
                 }
-                eprintln!("  {} '{}': {}=False ({}) — {}", doc.kind, doc.metadata.name, c.kind, c.reason, c.message);
+                eprintln!(
+                    "  {} '{}': {}=False ({}) — {}",
+                    doc.kind, doc.metadata.name, c.kind, c.reason, c.message
+                );
             }
         }
     }
@@ -157,7 +199,11 @@ fn print_missing_conditions(docs: &[manifest::ManifestDoc]) {
 /// `key=value` dos labels de `metadata` (mais um `+N anno` se houver anotações),
 /// ou `-` se não houver nenhum — a coluna organizacional do `describe`.
 fn fmt_labels(meta: &manifest::Metadata) -> String {
-    let mut parts: Vec<String> = meta.labels.iter().map(|(k, v)| format!("{k}={v}")).collect();
+    let mut parts: Vec<String> = meta
+        .labels
+        .iter()
+        .map(|(k, v)| format!("{k}={v}"))
+        .collect();
     if !meta.annotations.is_empty() {
         parts.push(format!("+{} anno", meta.annotations.len()));
     }
@@ -172,7 +218,11 @@ fn fmt_labels(meta: &manifest::Metadata) -> String {
 /// responde "existe algo com este nome?", nunca compara a spec declarada com a
 /// real (drift-detection é trabalho de um orchestrator, deliberadamente fora do
 /// escopo deste runtime — ver `cmd::manifest`).
-fn presence(kind: &str, name: &str, containers: &[delonix_runtime_core::Container]) -> (String, String) {
+fn presence(
+    kind: &str,
+    name: &str,
+    containers: &[delonix_runtime_core::Container],
+) -> (String, String) {
     let root = super::util::state_root();
     match kind {
         "Container" => match containers.iter().find(|c| c.name == name) {
@@ -184,10 +234,12 @@ fn presence(kind: &str, name: &str, containers: &[delonix_runtime_core::Containe
             None => ("no".into(), "-".into()),
         },
         // Storage é um volume de rede — vive no mesmo store que os volumes.
-        "Volume" | "Storage" => match delonix_volume::VolumeStore::open(&root).and_then(|s| s.list()) {
-            Ok(vs) => yes_no(vs.iter().any(|v| v.name == name)),
-            Err(e) => ("?".into(), e.to_string()),
-        },
+        "Volume" | "Storage" => {
+            match delonix_volume::VolumeStore::open(&root).and_then(|s| s.list()) {
+                Ok(vs) => yes_no(vs.iter().any(|v| v.name == name)),
+                Err(e) => ("?".into(), e.to_string()),
+            }
+        }
         "Network" => match delonix_net::NetworkStore::open(&root).and_then(|s| s.list()) {
             Ok(ns) => yes_no(ns.iter().any(|n| n.name == name)),
             Err(e) => ("?".into(), e.to_string()),
@@ -271,7 +323,10 @@ fn validate(file: Option<PathBuf>) -> Result<()> {
     let docs = manifest::load(&path)?;
     let issues = validate_graph(&docs);
     if issues.is_empty() {
-        println!("stack validate: OK — {} documento(s), todas as referências resolvidas", docs.len());
+        println!(
+            "stack validate: OK — {} documento(s), todas as referências resolvidas",
+            docs.len()
+        );
         Ok(())
     } else {
         for i in &issues {
@@ -335,7 +390,13 @@ fn validate_graph(docs: &[manifest::ManifestDoc]) -> Vec<String> {
         .map(|s| s.list().into_iter().map(|sec| sec.name).collect())
         .unwrap_or_default();
 
-    validate_graph_with(docs, &existing_networks, &existing_volumes, &existing_containers, &existing_secrets)
+    validate_graph_with(
+        docs,
+        &existing_networks,
+        &existing_volumes,
+        &existing_containers,
+        &existing_secrets,
+    )
 }
 
 /// Núcleo PURO de `validate_graph`: recebe o que já existe na máquina como
@@ -351,7 +412,10 @@ fn validate_graph_with(
     use std::collections::HashSet;
 
     let declared = |kinds: &[&str]| -> HashSet<String> {
-        docs.iter().filter(|d| kinds.contains(&d.kind.as_str())).map(|d| d.metadata.name.clone()).collect()
+        docs.iter()
+            .filter(|d| kinds.contains(&d.kind.as_str()))
+            .map(|d| d.metadata.name.clone())
+            .collect()
     };
     let mut networks = declared(&["Network"]);
     let mut volumes = declared(&["Volume", "Storage"]);
@@ -377,7 +441,12 @@ fn validate_graph_with(
             doc.spec
                 .get("stringData")
                 .and_then(|v| v.as_mapping())
-                .map(|m| m.keys().filter_map(|k| k.as_str()).map(str::to_string).collect())
+                .map(|m| {
+                    m.keys()
+                        .filter_map(|k| k.as_str())
+                        .map(str::to_string)
+                        .collect()
+                })
         };
         declared_secret_keys.insert(doc.metadata.name.clone(), keys);
     }
@@ -390,7 +459,10 @@ fn validate_graph_with(
     for doc in docs {
         let key = (doc.kind.clone(), doc.metadata.name.clone());
         if !seen.insert(key) {
-            issues.push(format!("{} '{}' declarado mais do que uma vez", doc.kind, doc.metadata.name));
+            issues.push(format!(
+                "{} '{}' declarado mais do que uma vez",
+                doc.kind, doc.metadata.name
+            ));
         }
     }
 
@@ -401,7 +473,10 @@ fn validate_graph_with(
                 let is_vm = doc.kind == "Vm";
                 if let Some(net) = doc.spec.get("network").and_then(|v| v.as_str()) {
                     if !is_builtin_net(net, is_vm) && !networks.contains(net) {
-                        issues.push(format!("{} '{name}' → network '{net}' não é declarada nem existe", doc.kind));
+                        issues.push(format!(
+                            "{} '{name}' → network '{net}' não é declarada nem existe",
+                            doc.kind
+                        ));
                     }
                 }
                 for vref in volume_refs(doc) {
@@ -413,7 +488,11 @@ fn validate_graph_with(
                 // sintaxe-string docker do Container) — resolve `name` de cada um.
                 if is_vm {
                     if let Some(seq) = doc.spec.get("volumes").and_then(|v| v.as_sequence()) {
-                        for vname in seq.iter().filter_map(|it| it.get("name")).filter_map(|v| v.as_str()) {
+                        for vname in seq
+                            .iter()
+                            .filter_map(|it| it.get("name"))
+                            .filter_map(|v| v.as_str())
+                        {
                             if !volumes.contains(vname) {
                                 issues.push(format!("Vm '{name}' → volume '{vname}' não é declarado (Volume/Storage) nem existe"));
                             }
@@ -447,7 +526,11 @@ fn validate_graph_with(
                 }
             }
             "Ingress" | "Egress" | "FirewallPolicy" => {
-                let scope = doc.spec.get("scope").and_then(|v| v.as_str()).unwrap_or("container");
+                let scope = doc
+                    .spec
+                    .get("scope")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("container");
                 // FirewallPolicy exige `direction` ∈ {ingress, egress} — apanha-o
                 // AQUI (antes do apply criar nada) em vez de só no apply.
                 if doc.kind == "FirewallPolicy" {
@@ -461,7 +544,10 @@ fn validate_graph_with(
                 }
                 if !matches!(scope, "container" | "network") {
                     // Mensagem coerente com o apply (que também rejeita o scope).
-                    issues.push(format!("{} '{name}' → scope inválido '{scope}' (usa container|network)", doc.kind));
+                    issues.push(format!(
+                        "{} '{name}' → scope inválido '{scope}' (usa container|network)",
+                        doc.kind
+                    ));
                 } else if let Some(target) = doc.spec.get("target").and_then(|v| v.as_str()) {
                     // scope: network → o target é uma REDE; senão, um Container.
                     if scope == "network" {
@@ -520,7 +606,10 @@ fn validate_graph_with(
                 // `to` pode ser escalar OU lista.
                 let tos: Vec<&str> = match doc.spec.get("to") {
                     Some(v) if v.is_string() => v.as_str().into_iter().collect(),
-                    Some(v) => v.as_sequence().map(|s| s.iter().filter_map(|x| x.as_str()).collect()).unwrap_or_default(),
+                    Some(v) => v
+                        .as_sequence()
+                        .map(|s| s.iter().filter_map(|x| x.as_str()).collect())
+                        .unwrap_or_default(),
                     None => Vec::new(),
                 };
                 if tos.is_empty() {
@@ -539,7 +628,15 @@ fn validate_graph_with(
 }
 
 /// Trata o `init` deste grupo (ver `cmd::scaffold`).
-fn cmd_init(target: super::scaffold::Target, dir: PathBuf, name: Option<String>, image: Option<String>, force: bool, template: Option<String>, up: bool) -> Result<()> {
+fn cmd_init(
+    target: super::scaffold::Target,
+    dir: PathBuf,
+    name: Option<String>,
+    image: Option<String>,
+    force: bool,
+    template: Option<String>,
+    up: bool,
+) -> Result<()> {
     let name = name.unwrap_or_else(|| {
         // Sem `--name`, usa o nome do DIRECTÓRIO. Não se pode usar `canonicalize`:
         // o directório ainda não existe (é o `init` que o cria) e falharia sempre,
@@ -555,7 +652,17 @@ fn cmd_init(target: super::scaffold::Target, dir: PathBuf, name: Option<String>,
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_else(|| "app".to_string())
     });
-    super::scaffold::init(target, &super::scaffold::InitOpts { dir, name, image, force, template, up })
+    super::scaffold::init(
+        target,
+        &super::scaffold::InitOpts {
+            dir,
+            name,
+            image,
+            force,
+            template,
+            up,
+        },
+    )
 }
 
 #[cfg(test)]
@@ -571,8 +678,10 @@ mod tests {
         use std::sync::atomic::{AtomicU64, Ordering};
         static SEQ: AtomicU64 = AtomicU64::new(0);
         let n = SEQ.fetch_add(1, Ordering::Relaxed);
-        let p = std::env::temp_dir()
-            .join(format!("delonix-stack-test-{}-{n}.yaml", std::process::id()));
+        let p = std::env::temp_dir().join(format!(
+            "delonix-stack-test-{}-{n}.yaml",
+            std::process::id()
+        ));
         std::fs::write(&p, yaml).unwrap();
         let d = manifest::load(&p).unwrap();
         let _ = std::fs::remove_file(&p);
@@ -609,7 +718,10 @@ metadata: { name: web-in }
 spec: { target: web }
 ",
         );
-        assert!(issues.is_empty(), "esperava grafo íntegro, veio: {issues:?}");
+        assert!(
+            issues.is_empty(),
+            "esperava grafo íntegro, veio: {issues:?}"
+        );
     }
 
     #[test]
@@ -688,7 +800,10 @@ spec: { direction: egress, target: fantasma }
     fn firewallpolicy_direction_e_scope_incompativel_apanhados_no_validate() {
         // direction inválida.
         let i = check("apiVersion: delonix.io/v1\nkind: FirewallPolicy\nmetadata: { name: a }\nspec: { direction: sideways, target: x }\n");
-        assert!(i.iter().any(|s| s.contains("direction obrigatório")), "{i:?}");
+        assert!(
+            i.iter().any(|s| s.contains("direction obrigatório")),
+            "{i:?}"
+        );
         // ingress + scope: network é incompatível (só egress) — apanhado ANTES do apply.
         let i = check(
             "\
@@ -703,7 +818,11 @@ metadata: { name: b }
 spec: { direction: ingress, scope: network, target: n }
 ",
         );
-        assert!(i.iter().any(|s| s.contains("scope: network só é suportado com direction: egress")), "{i:?}");
+        assert!(
+            i.iter()
+                .any(|s| s.contains("scope: network só é suportado com direction: egress")),
+            "{i:?}"
+        );
     }
 
     #[test]
@@ -728,7 +847,10 @@ spec: { scope: network, target: rede-fantasma, defaultPolicy: deny }
 ",
         );
         assert_eq!(issues.len(), 1, "{issues:?}");
-        assert!(issues[0].contains("scope network") && issues[0].contains("rede-fantasma"), "{issues:?}");
+        assert!(
+            issues[0].contains("scope network") && issues[0].contains("rede-fantasma"),
+            "{issues:?}"
+        );
     }
 
     #[test]
@@ -761,7 +883,10 @@ spec: {}
 ",
         );
         assert_eq!(issues.len(), 1);
-        assert!(issues[0].contains("declarado mais do que uma vez"), "{issues:?}");
+        assert!(
+            issues[0].contains("declarado mais do que uma vez"),
+            "{issues:?}"
+        );
     }
 
     #[test]
@@ -806,8 +931,16 @@ spec: { type: nfs, server: h, share: /s, passwordSecret: outro-fantasma }
         );
         // `creds` resolve; `fantasma` (container) e `outro-fantasma` (storage) não.
         assert_eq!(issues.len(), 2, "{issues:?}");
-        assert!(issues.iter().any(|i| i.contains("secret 'fantasma'")), "{issues:?}");
-        assert!(issues.iter().any(|i| i.contains("passwordSecret 'outro-fantasma'")), "{issues:?}");
+        assert!(
+            issues.iter().any(|i| i.contains("secret 'fantasma'")),
+            "{issues:?}"
+        );
+        assert!(
+            issues
+                .iter()
+                .any(|i| i.contains("passwordSecret 'outro-fantasma'")),
+            "{issues:?}"
+        );
     }
 
     #[test]
@@ -827,7 +960,10 @@ spec: { type: cifs, server: h, share: /s, passwordSecret: creds }
 ",
         );
         assert_eq!(issues.len(), 1, "{issues:?}");
-        assert!(issues[0].contains("não declara a chave 'password'"), "{issues:?}");
+        assert!(
+            issues[0].contains("não declara a chave 'password'"),
+            "{issues:?}"
+        );
 
         // Com a chave `password` presente → sem problemas.
         let ok = check(

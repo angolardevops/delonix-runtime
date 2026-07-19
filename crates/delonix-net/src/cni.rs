@@ -118,7 +118,9 @@ pub struct CniError {
 /// Lista os ficheiros de config CNI num diretório, por ordem alfabética (o CNI
 /// escolhe o primeiro). Aceita `*.conflist` e `*.conf`. Diretório ausente → vazio.
 pub fn list_conf_files(dir: &Path) -> Vec<PathBuf> {
-    let Ok(rd) = std::fs::read_dir(dir) else { return Vec::new() };
+    let Ok(rd) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
     let mut out: Vec<PathBuf> = rd
         .flatten()
         .map(|e| e.path())
@@ -136,19 +138,35 @@ pub fn list_conf_files(dir: &Path) -> Vec<PathBuf> {
 /// Parseia uma config CNI, aceitando tanto `*.conflist` (com `plugins[]`) como um
 /// `*.conf` de plugin único (normalizado para uma lista de um só plugin).
 pub fn parse_config(text: &str) -> Result<NetConfList> {
-    let v: Value = serde_json::from_str(text).map_err(|e| Error::Invalid(format!("config CNI inválida: {e}")))?;
+    let v: Value = serde_json::from_str(text)
+        .map_err(|e| Error::Invalid(format!("config CNI inválida: {e}")))?;
     if v.get("plugins").is_some() {
-        return serde_json::from_value(v).map_err(|e| Error::Invalid(format!("conflist CNI inválida: {e}")));
+        return serde_json::from_value(v)
+            .map_err(|e| Error::Invalid(format!("conflist CNI inválida: {e}")));
     }
     // `*.conf` de plugin único: o próprio objeto é o plugin.
-    let cni_version = v.get("cniVersion").and_then(|s| s.as_str()).unwrap_or("1.0.0").to_string();
-    let name = v.get("name").and_then(|s| s.as_str()).unwrap_or("cni").to_string();
-    Ok(NetConfList { cni_version, name, plugins: vec![v] })
+    let cni_version = v
+        .get("cniVersion")
+        .and_then(|s| s.as_str())
+        .unwrap_or("1.0.0")
+        .to_string();
+    let name = v
+        .get("name")
+        .and_then(|s| s.as_str())
+        .unwrap_or("cni")
+        .to_string();
+    Ok(NetConfList {
+        cni_version,
+        name,
+        plugins: vec![v],
+    })
 }
 
 /// Descobre e carrega a primeira config CNI do diretório dado. `None` se não houver.
 pub fn load_default(conf_dir: &Path) -> Result<Option<NetConfList>> {
-    let Some(first) = list_conf_files(conf_dir).into_iter().next() else { return Ok(None) };
+    let Some(first) = list_conf_files(conf_dir).into_iter().next() else {
+        return Ok(None);
+    };
     let text = std::fs::read_to_string(&first)
         .map_err(|e| Error::Invalid(format!("ler {}: {e}", first.display())))?;
     Ok(Some(parse_config(&text)?))
@@ -165,7 +183,11 @@ pub fn resolve_plugin(cni_path: &[PathBuf], typ: &str) -> Option<PathBuf> {
 
 /// Constrói as variáveis de ambiente do protocolo CNI para uma invocação.
 fn build_env(cmd: Command_, t: Target, cni_path: &[PathBuf]) -> Vec<(String, String)> {
-    let path = cni_path.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join(":");
+    let path = cni_path
+        .iter()
+        .map(|p| p.display().to_string())
+        .collect::<Vec<_>>()
+        .join(":");
     vec![
         ("CNI_COMMAND".into(), cmd.as_str().into()),
         ("CNI_CONTAINERID".into(), t.container_id.into()),
@@ -177,7 +199,12 @@ fn build_env(cmd: Command_, t: Target, cni_path: &[PathBuf]) -> Vec<(String, Str
 
 /// Constrói o JSON de stdin para um plugin: a sua config, com `cniVersion`/`name`
 /// da lista injetados e o `prevResult` do plugin anterior (encadeamento CNI).
-fn plugin_input(plugin: &Value, name: &str, cni_version: &str, prev: Option<&CniResult>) -> Result<String> {
+fn plugin_input(
+    plugin: &Value,
+    name: &str,
+    cni_version: &str,
+    prev: Option<&CniResult>,
+) -> Result<String> {
     let mut obj = plugin.clone();
     let map = obj
         .as_object_mut()
@@ -185,7 +212,10 @@ fn plugin_input(plugin: &Value, name: &str, cni_version: &str, prev: Option<&Cni
     map.insert("cniVersion".into(), json!(cni_version));
     map.insert("name".into(), json!(name));
     if let Some(p) = prev {
-        map.insert("prevResult".into(), serde_json::to_value(p).unwrap_or(Value::Null));
+        map.insert(
+            "prevResult".into(),
+            serde_json::to_value(p).unwrap_or(Value::Null),
+        );
     }
     serde_json::to_string(&obj).map_err(|e| Error::Invalid(format!("serializar config CNI: {e}")))
 }
@@ -209,7 +239,11 @@ fn parse_error(stdout: &str) -> Option<CniError> {
 
 /// Invoca um binário de plugin com a config por stdin e o ambiente CNI. Devolve
 /// `(sucesso, stdout, stderr)`.
-fn invoke(plugin: &Path, envs: &[(String, String)], stdin_json: &str) -> Result<(bool, String, String)> {
+fn invoke(
+    plugin: &Path,
+    envs: &[(String, String)],
+    stdin_json: &str,
+) -> Result<(bool, String, String)> {
     use std::io::Write;
     let mut child = Command::new(plugin)
         .envs(envs.iter().map(|(k, v)| (k.as_str(), v.as_str())))
@@ -217,16 +251,26 @@ fn invoke(plugin: &Path, envs: &[(String, String)], stdin_json: &str) -> Result<
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .map_err(|e| Error::Runtime { context: "cni-spawn", message: format!("{}: {e}", plugin.display()) })?;
+        .map_err(|e| Error::Runtime {
+            context: "cni-spawn",
+            message: format!("{}: {e}", plugin.display()),
+        })?;
     child
         .stdin
         .take()
-        .ok_or_else(|| Error::Runtime { context: "cni-stdin", message: "sem stdin".into() })?
+        .ok_or_else(|| Error::Runtime {
+            context: "cni-stdin",
+            message: "sem stdin".into(),
+        })?
         .write_all(stdin_json.as_bytes())
-        .map_err(|e| Error::Runtime { context: "cni-stdin", message: e.to_string() })?;
-    let out = child
-        .wait_with_output()
-        .map_err(|e| Error::Runtime { context: "cni-wait", message: e.to_string() })?;
+        .map_err(|e| Error::Runtime {
+            context: "cni-stdin",
+            message: e.to_string(),
+        })?;
+    let out = child.wait_with_output().map_err(|e| Error::Runtime {
+        context: "cni-wait",
+        message: e.to_string(),
+    })?;
     Ok((
         out.status.success(),
         String::from_utf8_lossy(&out.stdout).into_owned(),
@@ -273,7 +317,11 @@ pub fn add(
     netns: &str,
     ifname: &str,
 ) -> Result<CniResult> {
-    let target = Target { container_id, netns, ifname };
+    let target = Target {
+        container_id,
+        netns,
+        ifname,
+    };
     let mut prev: Option<CniResult> = None;
     for plugin in &net.plugins {
         let r = run_one(Command_::Add, plugin, net, cni_path, target, prev.as_ref())?;
@@ -291,7 +339,11 @@ pub fn del(
     netns: &str,
     ifname: &str,
 ) -> Result<()> {
-    let target = Target { container_id, netns, ifname };
+    let target = Target {
+        container_id,
+        netns,
+        ifname,
+    };
     let mut first_err: Option<Error> = None;
     for plugin in net.plugins.iter().rev() {
         if let Err(e) = run_one(Command_::Del, plugin, net, cni_path, target, None) {
@@ -359,9 +411,18 @@ mod tests {
     #[test]
     fn build_env_tem_as_5_variaveis() {
         let dirs = vec![PathBuf::from("/opt/cni/bin"), PathBuf::from("/usr/lib/cni")];
-        let t = Target { container_id: "abc123", netns: "/proc/42/ns/net", ifname: "eth0" };
+        let t = Target {
+            container_id: "abc123",
+            netns: "/proc/42/ns/net",
+            ifname: "eth0",
+        };
         let env = build_env(Command_::Add, t, &dirs);
-        let get = |k: &str| env.iter().find(|(a, _)| a == k).map(|(_, v)| v.clone()).unwrap();
+        let get = |k: &str| {
+            env.iter()
+                .find(|(a, _)| a == k)
+                .map(|(_, v)| v.clone())
+                .unwrap()
+        };
         assert_eq!(get("CNI_COMMAND"), "ADD");
         assert_eq!(get("CNI_CONTAINERID"), "abc123");
         assert_eq!(get("CNI_NETNS"), "/proc/42/ns/net");
@@ -380,7 +441,13 @@ mod tests {
         assert_eq!(v1["bridge"], "cni0");
         assert!(v1.get("prevResult").is_none());
         // 2.º plugin: com prevResult do 1.º.
-        let prev = CniResult { ips: vec![IpConf { address: "10.0.0.5/24".into(), ..Default::default() }], ..Default::default() };
+        let prev = CniResult {
+            ips: vec![IpConf {
+                address: "10.0.0.5/24".into(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
         let s2 = plugin_input(&net.plugins[1], &net.name, &net.cni_version, Some(&prev)).unwrap();
         let v2: Value = serde_json::from_str(&s2).unwrap();
         assert_eq!(v2["prevResult"]["ips"][0]["address"], "10.0.0.5/24");
@@ -407,7 +474,8 @@ mod tests {
 
     #[test]
     fn parse_error_le_o_erro_estruturado() {
-        let e = parse_error(r#"{ "cniVersion":"1.0.0", "code": 7, "msg": "sem IP livre" }"#).unwrap();
+        let e =
+            parse_error(r#"{ "cniVersion":"1.0.0", "code": 7, "msg": "sem IP livre" }"#).unwrap();
         assert_eq!(e.code, 7);
         assert_eq!(e.msg, "sem IP livre");
     }
@@ -467,7 +535,8 @@ esac
         std::fs::write(&plugin, script).unwrap();
         std::fs::set_permissions(&plugin, std::fs::Permissions::from_mode(0o755)).unwrap();
 
-        let net = parse_config(r#"{"cniVersion":"1.0.0","name":"t","plugins":[{"type":"faux"}]}"#).unwrap();
+        let net = parse_config(r#"{"cniVersion":"1.0.0","name":"t","plugins":[{"type":"faux"}]}"#)
+            .unwrap();
         let dirs = vec![bindir.clone()];
         let r = add(&net, &dirs, "cid", "/proc/1/ns/net", "eth0").unwrap();
         assert_eq!(r.ips[0].address, "10.9.9.9/24");

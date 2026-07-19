@@ -46,7 +46,11 @@ struct ContainerSpec {
     /// `run_supervised`). This is what makes a manifest resilient. Canonical
     /// field name is `restartPolicy` (uniform with `kind: Vm`); the legacy
     /// `restart` stays accepted so existing manifests don't break.
-    #[serde(rename = "restartPolicy", alias = "restart", default = "default_restart")]
+    #[serde(
+        rename = "restartPolicy",
+        alias = "restart",
+        default = "default_restart"
+    )]
     pub(crate) restart: String,
     // ---- parity with `container run` (all optional, k8s-style camelCase) ----
     #[serde(default)]
@@ -115,11 +119,47 @@ struct ContainerSpec {
 /// aviso de campos desconhecidos. Alinhado com `ContainerSpec` pelo teste
 /// `manifest::tests::examples_nao_tem_campos_desconhecidos`.
 pub(crate) const CONTAINER_SPEC_FIELDS: &[&str] = &[
-    "image", "detach", "network", "volumes", "ports", "privileged", "env", "command",
-    "restartPolicy", "restart", "entrypoint", "devices", "labels", "envFile", "memory", "cpus",
-    "cpuWeight", "cpuset", "ioWeight", "readOnly", "capAdd", "capDrop", "securityOpt", "apparmor",
-    "selinux", "userns", "hostPid", "hostIpc", "detect", "secret", "secretFiles", "tmpfs", "ulimit",
-    "sysctl", "gpus", "networkAlias", "knows", "netBps", "netBurst", "logDriver", "expose",
+    "image",
+    "detach",
+    "network",
+    "volumes",
+    "ports",
+    "privileged",
+    "env",
+    "command",
+    "restartPolicy",
+    "restart",
+    "entrypoint",
+    "devices",
+    "labels",
+    "envFile",
+    "memory",
+    "cpus",
+    "cpuWeight",
+    "cpuset",
+    "ioWeight",
+    "readOnly",
+    "capAdd",
+    "capDrop",
+    "securityOpt",
+    "apparmor",
+    "selinux",
+    "userns",
+    "hostPid",
+    "hostIpc",
+    "detect",
+    "secret",
+    "secretFiles",
+    "tmpfs",
+    "ulimit",
+    "sysctl",
+    "gpus",
+    "networkAlias",
+    "knows",
+    "netBps",
+    "netBurst",
+    "logDriver",
+    "expose",
 ];
 
 fn default_restart() -> String {
@@ -513,8 +553,24 @@ pub enum ContainerCmd {
 }
 
 pub fn run(action: ContainerCmd) -> Result<()> {
-    if let ContainerCmd::Init { dir, name, image, force, template, up } = action {
-        return cmd_init(super::scaffold::Target::Container, dir, name, image, force, template, up);
+    if let ContainerCmd::Init {
+        dir,
+        name,
+        image,
+        force,
+        template,
+        up,
+    } = action
+    {
+        return cmd_init(
+            super::scaffold::Target::Container,
+            dir,
+            name,
+            image,
+            force,
+            template,
+            up,
+        );
     }
     if let ContainerCmd::Dash { once } = action {
         return super::dash::run(super::dash::DashScope::Containers, once);
@@ -525,27 +581,123 @@ pub fn run(action: ContainerCmd) -> Result<()> {
         ContainerCmd::Init { .. } => unreachable!("tratado acima"),
         ContainerCmd::Dash { .. } => unreachable!("tratado acima"),
         ContainerCmd::Run {
-            detach, name, net, volumes, publish, privileged, entrypoint, rm, restart, devices, env, labels,
-            memory, cpus, cpu_weight, cpuset, io_weight, read_only, cap_add, cap_drop, security_opt, apparmor,
-            selinux, userns, no_userns, host_pid, host_ipc, detect, secret, secret_files, env_file, tmpfs,
-            ulimit, sysctl, gpus, ip, network_alias, knows, knows_none, pod, net_bps, net_burst, log_driver,
-            log_file, log_cri, image, command, namespace, expose,
+            detach,
+            name,
+            net,
+            volumes,
+            publish,
+            privileged,
+            entrypoint,
+            rm,
+            restart,
+            devices,
+            env,
+            labels,
+            memory,
+            cpus,
+            cpu_weight,
+            cpuset,
+            io_weight,
+            read_only,
+            cap_add,
+            cap_drop,
+            security_opt,
+            apparmor,
+            selinux,
+            userns,
+            no_userns,
+            host_pid,
+            host_ipc,
+            detect,
+            secret,
+            secret_files,
+            env_file,
+            tmpfs,
+            ulimit,
+            sysctl,
+            gpus,
+            ip,
+            network_alias,
+            knows,
+            knows_none,
+            pod,
+            net_bps,
+            net_burst,
+            log_driver,
+            log_file,
+            log_cri,
+            image,
+            command,
+            namespace,
+            expose,
         } => cmd_run(
             &images,
             &store,
             RunOpts {
-                detach, name, net, namespace, expose, volumes, ports: publish, privileged, entrypoint, rm, restart, devices, env,
-                labels, image, command, quiet: false, memory, cpus, cpu_weight, cpuset, io_weight, read_only,
-                cap_add, cap_drop, security_opt, apparmor, selinux, userns, no_userns, host_pid, host_ipc,
-                detect, secret, secret_files, env_file, tmpfs, ulimit, sysctl, gpus, ip, network_alias, knows,
-                knows_none, pod, net_bps, net_burst, log_driver, log_file, log_cri,
+                detach,
+                name,
+                net,
+                namespace,
+                expose,
+                volumes,
+                ports: publish,
+                privileged,
+                entrypoint,
+                rm,
+                restart,
+                devices,
+                env,
+                labels,
+                image,
+                command,
+                quiet: false,
+                memory,
+                cpus,
+                cpu_weight,
+                cpuset,
+                io_weight,
+                read_only,
+                cap_add,
+                cap_drop,
+                security_opt,
+                apparmor,
+                selinux,
+                userns,
+                no_userns,
+                host_pid,
+                host_ipc,
+                detect,
+                secret,
+                secret_files,
+                env_file,
+                tmpfs,
+                ulimit,
+                sysctl,
+                gpus,
+                ip,
+                network_alias,
+                knows,
+                knows_none,
+                pod,
+                net_bps,
+                net_burst,
+                log_driver,
+                log_file,
+                log_cri,
             },
         ),
         ContainerCmd::Ps { all, quiet } => cmd_ps(&store, all, quiet),
         ContainerCmd::Start { ids } => for_each_id(&ids, |id| cmd_start(&images, &store, id)),
         ContainerCmd::Stop { ids, time } => for_each_id(&ids, |id| cmd_stop(&store, id, time)),
-        ContainerCmd::Rm { ids, force } => for_each_id(&ids, |id| cmd_rm(&images, &store, id, force)),
-        ContainerCmd::Exec { interactive, tty, id, command } => cmd_exec(&store, &id, interactive, tty, &command),
+        ContainerCmd::Rm { ids, force } => {
+            for_each_id(&ids, |id| cmd_rm(&images, &store, id, force))
+        }
+        ContainerCmd::Exec {
+            interactive,
+            tty,
+            id,
+            command,
+        } => cmd_exec(&store, &id, interactive, tty, &command),
         ContainerCmd::Pause { ids } => for_each_id(&ids, |id| cmd_freeze(&store, id, true)),
         ContainerCmd::Unpause { ids } => for_each_id(&ids, |id| cmd_freeze(&store, id, false)),
         ContainerCmd::Commit { id, tag } => cmd_commit(&images, &store, &id, &tag),
@@ -556,10 +708,31 @@ pub fn run(action: ContainerCmd) -> Result<()> {
         ContainerCmd::Cp { src, dst } => cmd_cp(&images, &store, &src, &dst),
         ContainerCmd::Inspect { ids } => cmd_inspect(&store, &ids),
         ContainerCmd::Describe { ids } => cmd_describe(&store, &ids),
-        ContainerCmd::Update { id, publish_add, publish_rm, volume_add, volume_rm, net_connect, net_disconnect, net_rate, net_burst, net_rate_clear } => cmd_update(
+        ContainerCmd::Update {
+            id,
+            publish_add,
+            publish_rm,
+            volume_add,
+            volume_rm,
+            net_connect,
+            net_disconnect,
+            net_rate,
+            net_burst,
+            net_rate_clear,
+        } => cmd_update(
             &store,
             &id,
-            UpdateOpts { publish_add, publish_rm, volume_add, volume_rm, net_connect, net_disconnect, net_rate, net_burst, net_rate_clear },
+            UpdateOpts {
+                publish_add,
+                publish_rm,
+                volume_add,
+                volume_rm,
+                net_connect,
+                net_disconnect,
+                net_rate,
+                net_burst,
+                net_rate_clear,
+            },
         ),
         ContainerCmd::Stats { ids } => cmd_stats(&store, &ids),
         ContainerCmd::Logs { id, follow } => cmd_logs(&images, &store, &id, follow),
@@ -675,16 +848,24 @@ fn ensure_apparmor(profile: &str) -> Result<()> {
         return Ok(());
     }
     if profile == "delonix-default" {
-        const PROFILE: &str = include_str!("../../../delonix-runtime-bin/data/apparmor-delonix-default");
+        const PROFILE: &str =
+            include_str!("../../../delonix-runtime-bin/data/apparmor-delonix-default");
         let path = std::env::temp_dir().join("delonix-default.aa");
         std::fs::write(&path, PROFILE)?;
         let out = std::process::Command::new("apparmor_parser")
             .arg("-r")
             .arg(&path)
             .output()
-            .map_err(|_| Error::Invalid("apparmor_parser unavailable (AppArmor not supported on this host?)".into()))?;
+            .map_err(|_| {
+                Error::Invalid(
+                    "apparmor_parser unavailable (AppArmor not supported on this host?)".into(),
+                )
+            })?;
         if !out.status.success() {
-            return Err(Error::Invalid(format!("failed to load AppArmor profile: {}", String::from_utf8_lossy(&out.stderr).trim())));
+            return Err(Error::Invalid(format!(
+                "failed to load AppArmor profile: {}",
+                String::from_utf8_lossy(&out.stderr).trim()
+            )));
         }
     }
     Ok(())
@@ -698,7 +879,10 @@ fn resolve_mounts(volumes: &[String]) -> Result<Vec<delonix_runtime_core::Mount>
         return Ok(Vec::new());
     }
     let vstore = VolumeStore::open(super::util::state_root())?;
-    volumes.iter().map(|spec| vstore.resolve_spec(spec)).collect()
+    volumes
+        .iter()
+        .map(|spec| vstore.resolve_spec(spec))
+        .collect()
 }
 
 /// Arguments for `container run` (CLI and manifest), grouped — the list passed
@@ -808,24 +992,76 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
     // Intact copy for the re-exec (the destructuring below consumes opts).
     let opts_copy = opts.clone();
     let RunOpts {
-        detach, name, net, namespace, expose, volumes, ports, privileged, entrypoint, rm, restart, devices, env, labels, image, command, quiet,
-        memory, cpus, cpu_weight, cpuset, io_weight, read_only, cap_add, cap_drop, security_opt, apparmor, selinux,
-        userns, no_userns, host_pid, host_ipc, detect, secret, secret_files, env_file, tmpfs, ulimit, sysctl, gpus,
-        ip, network_alias, knows, knows_none, pod, net_bps, net_burst, log_driver, log_file, log_cri,
+        detach,
+        name,
+        net,
+        namespace,
+        expose,
+        volumes,
+        ports,
+        privileged,
+        entrypoint,
+        rm,
+        restart,
+        devices,
+        env,
+        labels,
+        image,
+        command,
+        quiet,
+        memory,
+        cpus,
+        cpu_weight,
+        cpuset,
+        io_weight,
+        read_only,
+        cap_add,
+        cap_drop,
+        security_opt,
+        apparmor,
+        selinux,
+        userns,
+        no_userns,
+        host_pid,
+        host_ipc,
+        detect,
+        secret,
+        secret_files,
+        env_file,
+        tmpfs,
+        ulimit,
+        sysctl,
+        gpus,
+        ip,
+        network_alias,
+        knows,
+        knows_none,
+        pod,
+        net_bps,
+        net_burst,
+        log_driver,
+        log_file,
+        log_cri,
     } = opts;
     // Namespace de isolamento (default `default`). Vai a um nome de set nft (via
     // `dlxns_set`, que o HASHEIA → seguro) e a um token do control-line (que o
     // `attach_container` sanitiza). Aqui só garantimos não-vazio.
-    let namespace = namespace.filter(|s| !s.trim().is_empty()).unwrap_or_else(|| "default".into());
+    let namespace = namespace
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| "default".into());
     if net_burst.is_some() && net_bps.is_none() {
-        return Err(Error::Invalid("--net-burst only makes sense together with --net-bps".into()));
+        return Err(Error::Invalid(
+            "--net-burst only makes sense together with --net-bps".into(),
+        ));
     }
     // Validate the `-p`s BEFORE creating anything (clear error, no leftovers).
     for spec in &ports {
         delonix_net::parse_publish(spec)?;
     }
     if net == "none" && !ports.is_empty() {
-        return Err(Error::Invalid("-p/--publish is not compatible with --net none (netns has no connectivity)".into()));
+        return Err(Error::Invalid(
+            "-p/--publish is not compatible with --net none (netns has no connectivity)".into(),
+        ));
     }
     // Port taken: fail HERE, with an error that says who holds it and what to do.
     // Without this, the collision only blew up deep down in the slirp and dumped
@@ -867,7 +1103,9 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
         None => effective_command(&img, &command),
     };
     if cmd.is_empty() {
-        return Err(Error::Invalid("no command (the image defines no ENTRYPOINT/CMD)".into()));
+        return Err(Error::Invalid(
+            "no command (the image defines no ENTRYPOINT/CMD)".into(),
+        ));
     }
     let cname = name.unwrap_or_else(|| format!("dlx-{}", &id[..8.min(id.len())]));
     // UNIQUE name, like docker ("name is already in use"). Without this, several
@@ -888,7 +1126,8 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
     // `--env-file`: each `.env` file (KEY=VAL per line) BEFORE `-e`, so an
     // explicit `-e` can override a value from the file.
     for f in &env_file {
-        let content = std::fs::read_to_string(f).map_err(|e| Error::Invalid(format!("--env-file {f}: {e}")))?;
+        let content = std::fs::read_to_string(f)
+            .map_err(|e| Error::Invalid(format!("--env-file {f}: {e}")))?;
         for (k, v) in delonix_runtime_core::secret::parse_env_file(&content) {
             c.env.push(format!("{k}={v}"));
         }
@@ -930,7 +1169,11 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
         match opt.split_once('=') {
             Some(("seccomp", v)) => c.seccomp = Some(v.to_string()),
             Some(("apparmor", v)) => apparmor_profile = Some(v.to_string()),
-            _ => return Err(Error::Invalid(format!("invalid --security-opt: '{opt}' (seccomp=… | apparmor=…)"))),
+            _ => {
+                return Err(Error::Invalid(format!(
+                    "invalid --security-opt: '{opt}' (seccomp=… | apparmor=…)"
+                )))
+            }
         }
     }
     // `--detect`: seccomp in log mode (doesn't block) — to discover syscalls.
@@ -995,7 +1238,15 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
     let log_path = if let Some(lf) = &log_file {
         Some(lf.clone())
     } else if detach {
-        Some(images.root().join("containers").join(&id).join("log").to_string_lossy().into_owned())
+        Some(
+            images
+                .root()
+                .join("containers")
+                .join(&id)
+                .join("log")
+                .to_string_lossy()
+                .into_owned(),
+        )
     } else {
         None
     };
@@ -1027,8 +1278,12 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
             // reexec'd (dentro do netns do container). O `c.expose` persiste-se
             // depois, no bloco custom_net da passagem reexec.
             if let Some(port) = expose {
-                if let Err(e) = super::ingress_proxy::auto_register(&c.name, &namespace, &ip, port) {
-                    eprintln!("aviso: --expose de '{}' não registado no proxy: {e}", c.name);
+                if let Err(e) = super::ingress_proxy::auto_register(&c.name, &namespace, &ip, port)
+                {
+                    eprintln!(
+                        "aviso: --expose de '{}' não registado no proxy: {e}",
+                        c.name
+                    );
                 }
             }
             return reexec_into_netns(&id, &netns, &ip, &opts_copy);
@@ -1056,7 +1311,11 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
     // stops sharing the host's network and gets its own netns with slirp4netns +
     // the requested hostfwds — the behavior of `docker run -p` (NAT network by
     // default), in podman's rootless model. The slirp dies with the netns.
-    let slirp_ports = if custom_net.is_none() { ports.clone() } else { Vec::new() };
+    let slirp_ports = if custom_net.is_none() {
+        ports.clone()
+    } else {
+        Vec::new()
+    };
     let slirp_hook = |pid: i32| -> Result<()> { delonix_net::slirp_attach(pid, &slirp_ports) };
     // DNS para o /etc/resolv.conf: numa rede custom é o gateway (o resolver do
     // ingress); com `-p` (slirp) é o DNS do slirp; em `--net host` fica `None`
@@ -1077,7 +1336,11 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
         inherit_userns: reexec,
         log_path,
         mounts,
-        on_started: if slirp_ports.is_empty() { None } else { Some(&slirp_hook) },
+        on_started: if slirp_ports.is_empty() {
+            None
+        } else {
+            Some(&slirp_hook)
+        },
         // /etc/hosts: the custom network's IP, or the slirp's when `-p` without a network.
         hosts_ip: attached_ip
             .clone()
@@ -1093,7 +1356,12 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
     // BEFORE the supervised branch (which returns): otherwise containers with
     // `--restart` would never emit `create`.
     delonix_runtime_core::events::emit(
-        &super::util::state_root(), "container", "create", &c.id, &c.name, Some(&image),
+        &super::util::state_root(),
+        "container",
+        "create",
+        &c.id,
+        &c.name,
+        Some(&image),
     );
     // `--restart`: instead of the CLI creating the container and exiting (leaving
     // it orphaned from `init`, with the exit code lost), a detached SUPERVISOR
@@ -1116,7 +1384,10 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
                 fw.namespace = c.namespace.clone();
                 match infra::apply_firewall(&c.id, &ip, &fw) {
                     Ok(()) => c.firewall = Some(fw),
-                    Err(e) => eprintln!("aviso: isolamento de namespace '{}' não aplicado: {e}", c.namespace),
+                    Err(e) => eprintln!(
+                        "aviso: isolamento de namespace '{}' não aplicado: {e}",
+                        c.namespace
+                    ),
                 }
             }
         }
@@ -1135,7 +1406,9 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
             infra::set_net_rate(&c.id, rate.rate_bit, rate.burst_bytes)?;
         }
     } else if net_bps.is_some() {
-        return Err(Error::Invalid("--net-bps only applies with `--net <network>` (shaping is on the ingress veth)".into()));
+        return Err(Error::Invalid(
+            "--net-bps only applies with `--net <network>` (shaping is on the ingress veth)".into(),
+        ));
     }
     if rm {
         if detach {
@@ -1177,9 +1450,14 @@ fn spawn_rm_watcher(images: &ImageStore, store: &Store, id: &str) {
         }
         loop {
             std::thread::sleep(std::time::Duration::from_secs(1));
-            let Ok(mut c) = find(store, id) else { std::process::exit(0) };
+            let Ok(mut c) = find(store, id) else {
+                std::process::exit(0)
+            };
             let _ = runtime::reconcile_status(&mut c);
-            if !matches!(c.status, delonix_runtime_core::Status::Running | delonix_runtime_core::Status::Paused) {
+            if !matches!(
+                c.status,
+                delonix_runtime_core::Status::Running | delonix_runtime_core::Status::Paused
+            ) {
                 let pid = c.pid;
                 let _ = runtime::remove(store, &c, true);
                 unpublish_ports(&c, pid);
@@ -1247,7 +1525,15 @@ fn cmd_ps(store: &Store, all: bool, quiet: bool) -> Result<()> {
     let mut cs = store.list()?;
     // Stable, useful order: most recent first, like `docker ps`.
     cs.sort_by(|a, b| b.created_unix.cmp(&a.created_unix));
-    let mut t = output::Table::new(&["CONTAINER ID", "IMAGE", "COMMAND", "CREATED", "STATUS", "PORTS", "NAMES"]);
+    let mut t = output::Table::new(&[
+        "CONTAINER ID",
+        "IMAGE",
+        "COMMAND",
+        "CREATED",
+        "STATUS",
+        "PORTS",
+        "NAMES",
+    ]);
     for c in cs.iter_mut() {
         // `update` (flock) and not `save`: the CRI is concurrent and may be
         // reconciling the same container right now — see `Store::update`.
@@ -1263,7 +1549,9 @@ fn cmd_ps(store: &Store, all: bool, quiet: bool) -> Result<()> {
             continue;
         }
         let uptime = match c.status {
-            Status::Running | Status::Paused => c.pid_starttime.and_then(output::uptime_from_starttime),
+            Status::Running | Status::Paused => {
+                c.pid_starttime.and_then(output::uptime_from_starttime)
+            }
             _ => None,
         };
         t.row(vec![
@@ -1326,7 +1614,10 @@ fn run_supervised(
     let mut fds = [0i32; 2];
     // SAFETY: pipe() fills 2 fds; used only for the startup handshake.
     if unsafe { libc::pipe(fds.as_mut_ptr()) } != 0 {
-        return Err(Error::Runtime { context: "pipe", message: "handshake do supervisor".into() });
+        return Err(Error::Runtime {
+            context: "pipe",
+            message: "handshake do supervisor".into(),
+        });
     }
     let (rd, wr) = (fds[0], fds[1]);
 
@@ -1373,7 +1664,11 @@ fn run_supervised(
             // `die` with the REAL exit code — the supervisor is the only one that
             // knows it (and the container's parent); a normal `run -d` would only see "Crashed".
             delonix_runtime_core::events::emit(
-                &super::util::state_root(), "container", "die", &c.id, &c.name,
+                &super::util::state_root(),
+                "container",
+                "die",
+                &c.id,
+                &c.name,
                 Some(&format!("exit={}", status.exit_code())),
             );
             if !should_restart(policy, &status, restarts) {
@@ -1439,7 +1734,10 @@ fn should_restart(policy: &str, status: &delonix_runtime_core::Status, restarts:
 
 /// Does the policy require supervision? (`no` needs no supervisor at all.)
 fn policy_supervised(policy: &str) -> bool {
-    matches!(policy.split(':').next().unwrap_or(""), "always" | "unless-stopped" | "on-failure")
+    matches!(
+        policy.split(':').next().unwrap_or(""),
+        "always" | "unless-stopped" | "on-failure"
+    )
 }
 
 /// **Closes the known limitation of `--net <network>` in rootless.**
@@ -1492,7 +1790,10 @@ fn reexec_into_netns(id: &str, netns: &str, ip: &str, opts: &RunOpts) -> Result<
         .env("DELONIX_ROOT", super::util::state_root())
         .status();
     let _ = std::fs::remove_file(&spec_path);
-    let status = status.map_err(|e| Error::Runtime { context: "re-exec nsenter", message: e.to_string() })?;
+    let status = status.map_err(|e| Error::Runtime {
+        context: "re-exec nsenter",
+        message: e.to_string(),
+    })?;
     if !status.success() {
         // The netns would be left hanging if the 2nd pass failed.
         infra::detach_container(id, ip);
@@ -1518,7 +1819,10 @@ pub(crate) fn run_from_spec(path: &std::path::Path) -> Result<()> {
 /// process holds it, `reap_orphan_net` clears it before this.)
 pub(crate) fn port_owner(store: &Store, host_port: &str) -> Result<Option<String>> {
     for c in store.list()? {
-        if !matches!(c.status, delonix_runtime_core::Status::Running | delonix_runtime_core::Status::Paused) {
+        if !matches!(
+            c.status,
+            delonix_runtime_core::Status::Running | delonix_runtime_core::Status::Paused
+        ) {
             continue;
         }
         for p in &c.ports {
@@ -1621,7 +1925,9 @@ fn unpublish_ports(c: &Container, slirp_pid: Option<i32>) {
 fn cmd_start(images: &ImageStore, store: &Store, id: &str) -> Result<()> {
     let mut c = find(store, id)?;
     if runtime::reconcile_status(&mut c) {
-        c = store.update(&c.id, |cur| runtime::reconcile_status(cur)).unwrap_or(c);
+        c = store
+            .update(&c.id, |cur| runtime::reconcile_status(cur))
+            .unwrap_or(c);
     }
     // `start` reasserts the desired state = running (clears the user's `stop`).
     let _ = store.update(&c.id, |cur| {
@@ -1629,7 +1935,10 @@ fn cmd_start(images: &ImageStore, store: &Store, id: &str) -> Result<()> {
         true
     });
     c.stopped_by_user = false;
-    if matches!(c.status, delonix_runtime_core::Status::Running | delonix_runtime_core::Status::Paused) {
+    if matches!(
+        c.status,
+        delonix_runtime_core::Status::Running | delonix_runtime_core::Status::Paused
+    ) {
         return Err(Error::Invalid(format!("{} is already running", c.name)));
     }
 
@@ -1666,7 +1975,10 @@ fn cmd_start(images: &ImageStore, store: &Store, id: &str) -> Result<()> {
             if let Some(fw) = &c.firewall {
                 if fw.enabled {
                     if let Err(e) = infra::apply_firewall(&c.id, &ip, fw) {
-                        eprintln!("aviso: firewall/isolamento de '{}' não reaplicado no start: {e}", c.name);
+                        eprintln!(
+                            "aviso: firewall/isolamento de '{}' não reaplicado no start: {e}",
+                            c.name
+                        );
                     }
                 }
             }
@@ -1676,15 +1988,25 @@ fn cmd_start(images: &ImageStore, store: &Store, id: &str) -> Result<()> {
     let rootfs = if runtime::is_rootless() {
         let rfs = images.root().join("containers").join(&c.id).join("rootfs");
         if !rfs.exists() {
-            return Err(Error::Invalid(format!("rootfs of {} no longer exists — use `run` again", c.name)));
+            return Err(Error::Invalid(format!(
+                "rootfs of {} no longer exists — use `run` again",
+                c.name
+            )));
         }
         rfs.to_string_lossy().into_owned()
     } else {
         let img = resolve_or_pull(images, &c.image)?;
-        images.mount_rootfs(&img, &c.id)?.to_string_lossy().into_owned()
+        images
+            .mount_rootfs(&img, &c.id)?
+            .to_string_lossy()
+            .into_owned()
     };
 
-    let slirp_ports = if c.network.is_none() { c.ports.clone() } else { Vec::new() };
+    let slirp_ports = if c.network.is_none() {
+        c.ports.clone()
+    } else {
+        Vec::new()
+    };
     let slirp_hook = |pid: i32| -> Result<()> { delonix_net::slirp_attach(pid, &slirp_ports) };
     // resolv.conf: gateway da rede custom (resolver do ingress), DNS do slirp com
     // `-p`, ou o do host (`--net host`) — ver o `run`.
@@ -1709,7 +2031,11 @@ fn cmd_start(images: &ImageStore, store: &Store, id: &str) -> Result<()> {
         inherit_userns: reexec,
         log_path: Some(log_path),
         mounts: c.mounts.clone(),
-        on_started: if slirp_ports.is_empty() { None } else { Some(&slirp_hook) },
+        on_started: if slirp_ports.is_empty() {
+            None
+        } else {
+            Some(&slirp_hook)
+        },
         hosts_ip: c
             .ip
             .clone()
@@ -1719,7 +2045,12 @@ fn cmd_start(images: &ImageStore, store: &Store, id: &str) -> Result<()> {
     };
     runtime::create_with(store, &mut c, &rootfs, &spec)?;
     delonix_runtime_core::events::emit(
-        &super::util::state_root(), "container", "start", &c.id, &c.name, None,
+        &super::util::state_root(),
+        "container",
+        "start",
+        &c.id,
+        &c.name,
+        None,
     );
     println!("{}", c.id);
     Ok(())
@@ -1745,7 +2076,10 @@ fn reexec_start(id: &str, netns: &str, ip: &str) -> Result<()> {
         .env("DELONIX_REEXEC_IP", ip)
         .env("DELONIX_ROOT", super::util::state_root())
         .status()
-        .map_err(|e| Error::Runtime { context: "re-exec nsenter", message: e.to_string() })?;
+        .map_err(|e| Error::Runtime {
+            context: "re-exec nsenter",
+            message: e.to_string(),
+        })?;
     if !status.success() {
         infra::detach_container(id, ip);
         return Err(Error::Invalid(format!(
@@ -1770,7 +2104,12 @@ fn cmd_stop(store: &Store, id: &str, time: u64) -> Result<()> {
     runtime::stop(store, &mut c, time)?;
     unpublish_ports(&c, pid);
     delonix_runtime_core::events::emit(
-        &super::util::state_root(), "container", "stop", &c.id, &c.name, None,
+        &super::util::state_root(),
+        "container",
+        "stop",
+        &c.id,
+        &c.name,
+        None,
     );
     println!("{}", c.id);
     Ok(())
@@ -1778,7 +2117,12 @@ fn cmd_stop(store: &Store, id: &str, time: u64) -> Result<()> {
 
 /// Remove an ALREADY resolved container (`cmd_rm` resolves the id first). Extracted
 /// so kind mode's `cluster delete` can remove nodes without going through strings.
-pub(crate) fn remove_container(images: &ImageStore, store: &Store, c: &Container, force: bool) -> Result<()> {
+pub(crate) fn remove_container(
+    images: &ImageStore,
+    store: &Store,
+    c: &Container,
+    force: bool,
+) -> Result<()> {
     let pid = c.pid;
     runtime::remove(store, c, force)?;
     unpublish_ports(c, pid);
@@ -1797,21 +2141,32 @@ fn cmd_rm(images: &ImageStore, store: &Store, id: &str, force: bool) -> Result<(
         super::ingress_proxy::auto_deregister(&c.name);
     }
     let _ = images.unmount_rootfs(&c.id); // unmounts/cleans up the overlay scratch
-    // Definitive DESTROY of the container's directory (including the flat `rootfs/`).
-    // `unmount_rootfs` PRESERVES it on purpose (it's the container's state, for
-    // `start` to reuse); only `rm` may delete it. Without this the rootfs was left
-    // orphaned forever: 49 directories (45 GiB) piled up in a single test session,
-    // and the kubelet marked the node with `disk-pressure`. The `remove_container_dir`
-    // doc already said "called by `rm`" — but it wasn't.
+                                          // Definitive DESTROY of the container's directory (including the flat `rootfs/`).
+                                          // `unmount_rootfs` PRESERVES it on purpose (it's the container's state, for
+                                          // `start` to reuse); only `rm` may delete it. Without this the rootfs was left
+                                          // orphaned forever: 49 directories (45 GiB) piled up in a single test session,
+                                          // and the kubelet marked the node with `disk-pressure`. The `remove_container_dir`
+                                          // doc already said "called by `rm`" — but it wasn't.
     images.remove_container_dir(&c.id);
     delonix_runtime_core::events::emit(
-        &super::util::state_root(), "container", "remove", &c.id, &c.name, None,
+        &super::util::state_root(),
+        "container",
+        "remove",
+        &c.id,
+        &c.name,
+        None,
     );
     println!("{}", c.id);
     Ok(())
 }
 
-fn cmd_exec(store: &Store, id: &str, interactive: bool, tty: bool, command: &[String]) -> Result<()> {
+fn cmd_exec(
+    store: &Store,
+    id: &str,
+    interactive: bool,
+    tty: bool,
+    command: &[String],
+) -> Result<()> {
     let c = find(store, id)?;
     let _ = interactive; // stdin is inherited; the flag keeps CLI parity
     let code = runtime::exec(&c, command, tty)?;
@@ -1825,11 +2180,16 @@ fn cmd_inspect(store: &Store, ids: &[String]) -> Result<()> {
     for id in ids {
         let mut c = find(store, id)?;
         if runtime::reconcile_status(&mut c) {
-            c = store.update(&c.id, |cur| runtime::reconcile_status(cur)).unwrap_or(c);
+            c = store
+                .update(&c.id, |cur| runtime::reconcile_status(cur))
+                .unwrap_or(c);
         }
         cs.push(c);
     }
-    println!("{}", serde_json::to_string_pretty(&cs).map_err(|e| Error::Invalid(e.to_string()))?);
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&cs).map_err(|e| Error::Invalid(e.to_string()))?
+    );
     Ok(())
 }
 
@@ -1857,9 +2217,12 @@ fn cmd_freeze(store: &Store, id: &str, frozen: bool) -> Result<()> {
 /// upperdir doesn't exist. Porting without this would be porting the bug.
 fn cmd_commit(images: &ImageStore, store: &Store, id: &str, tag: &str) -> Result<()> {
     let c = find(store, id)?;
-    let base = images
-        .resolve(&c.image)
-        .map_err(|_| Error::Invalid(format!("the container's base image '{}' no longer exists", c.image)))?;
+    let base = images.resolve(&c.image).map_err(|_| {
+        Error::Invalid(format!(
+            "the container's base image '{}' no longer exists",
+            c.image
+        ))
+    })?;
     let img = if runtime::is_rootless() {
         let rootfs = images.root().join("containers").join(&c.id).join("rootfs");
         if !rootfs.exists() {
@@ -1868,7 +2231,13 @@ fn cmd_commit(images: &ImageStore, store: &Store, id: &str, tag: &str) -> Result
                 c.name
             )));
         }
-        images.commit_flat_rootfs(&rootfs, c.command.clone(), c.env.clone(), c.workdir.clone().unwrap_or_default(), tag)?
+        images.commit_flat_rootfs(
+            &rootfs,
+            c.command.clone(),
+            c.env.clone(),
+            c.workdir.clone().unwrap_or_default(),
+            tag,
+        )?
     } else {
         let layer = images.commit_upper(&c.id)?; // tar do upperdir → CAS
         images.commit_container(&base, layer, c.command.clone(), c.env.clone(), tag)?
@@ -1882,7 +2251,11 @@ fn cmd_ssh(store: &Store, id: &str, command: &[String]) -> Result<()> {
     let c = find(store, id)?;
     let argv: Vec<String> = if command.is_empty() {
         // `exec` in the shell: bash replaces sh instead of leaving a parent waiting.
-        vec!["/bin/sh".into(), "-c".into(), "exec /bin/bash 2>/dev/null || exec /bin/sh".into()]
+        vec![
+            "/bin/sh".into(),
+            "-c".into(),
+            "exec /bin/bash 2>/dev/null || exec /bin/sh".into(),
+        ]
     } else {
         command.to_vec()
     };
@@ -1928,7 +2301,9 @@ fn cmd_top(store: &Store, id: &str) -> Result<()> {
     // technique as the `cgroup_metric` that `stats` already uses, and which works
     // whatever the delegated base is. The PaaS version used the guessed path and
     // gave "cgroup.procs: No such file or directory" on any host without delegation.
-    let pid = c.pid.ok_or_else(|| Error::NotRunning(short_id(&c.id).to_string()))?;
+    let pid = c
+        .pid
+        .ok_or_else(|| Error::NotRunning(short_id(&c.id).to_string()))?;
     let procs = cgroup_metric(pid, "cgroup.procs").ok_or_else(|| {
         Error::Invalid(format!(
             "não consigo ler o cgroup.procs de '{}' — o cgroup do container não está acessível (rootless sem delegação?)",
@@ -1945,14 +2320,22 @@ fn cmd_top(store: &Store, id: &str) -> Result<()> {
         // parentheses, hence cutting at the LAST ')'.
         let state = std::fs::read_to_string(format!("/proc/{pid}/stat"))
             .ok()
-            .and_then(|s| s.rsplit(')').next().map(|r| r.trim().chars().next().unwrap_or('?').to_string()))
+            .and_then(|s| {
+                s.rsplit(')')
+                    .next()
+                    .map(|r| r.trim().chars().next().unwrap_or('?').to_string())
+            })
             .unwrap_or_else(|| "?".into());
         let cmd = std::fs::read_to_string(format!("/proc/{pid}/cmdline"))
             .map(|s| s.replace('\0', " ").trim().to_string())
             .ok()
             .filter(|s| !s.is_empty())
             // A kernel/zombie process has an empty cmdline — comm is the fallback.
-            .or_else(|| std::fs::read_to_string(format!("/proc/{pid}/comm")).ok().map(|s| s.trim().to_string()))
+            .or_else(|| {
+                std::fs::read_to_string(format!("/proc/{pid}/comm"))
+                    .ok()
+                    .map(|s| s.trim().to_string())
+            })
             .unwrap_or_default();
         t.row(vec![pid.to_string(), state, cmd]);
     }
@@ -1974,12 +2357,20 @@ fn cmd_diff(images: &ImageStore, store: &Store, id: &str) -> Result<()> {
             c.name
         )));
     }
-    fn walk(base: &std::path::Path, dir: &std::path::Path, out: &mut Vec<(char, String)>) -> std::io::Result<()> {
+    fn walk(
+        base: &std::path::Path,
+        dir: &std::path::Path,
+        out: &mut Vec<(char, String)>,
+    ) -> std::io::Result<()> {
         use std::os::unix::fs::FileTypeExt;
         for entry in std::fs::read_dir(dir)? {
             let entry = entry?;
             let path = entry.path();
-            let rel = path.strip_prefix(base).unwrap_or(&path).to_string_lossy().to_string();
+            let rel = path
+                .strip_prefix(base)
+                .unwrap_or(&path)
+                .to_string_lossy()
+                .to_string();
             let ft = entry.file_type()?;
             if ft.is_char_device() {
                 out.push(('D', format!("/{rel}"))); // overlay whiteout = deleted
@@ -2056,12 +2447,14 @@ fn cmd_cp(images: &ImageStore, store: &Store, src: &str, dst: &str) -> Result<()
         (Some((name, cpath)), None) => {
             let c = find(store, &name)?;
             let root = container_fs_root(images, &c)?;
-            copy_recursive(&join_root(&root, &cpath), std::path::Path::new(dst)).map_err(|e| Error::Invalid(format!("cp: {e}")))?;
+            copy_recursive(&join_root(&root, &cpath), std::path::Path::new(dst))
+                .map_err(|e| Error::Invalid(format!("cp: {e}")))?;
         }
         (None, Some((name, cpath))) => {
             let c = find(store, &name)?;
             let root = container_fs_root(images, &c)?;
-            copy_recursive(std::path::Path::new(src), &join_root(&root, &cpath)).map_err(|e| Error::Invalid(format!("cp: {e}")))?;
+            copy_recursive(std::path::Path::new(src), &join_root(&root, &cpath))
+                .map_err(|e| Error::Invalid(format!("cp: {e}")))?;
         }
         _ => {
             return Err(Error::Invalid(
@@ -2081,7 +2474,9 @@ fn cmd_describe(store: &Store, ids: &[String]) -> Result<()> {
     for (i, id) in ids.iter().enumerate() {
         let mut c = find(store, id)?;
         if runtime::reconcile_status(&mut c) {
-            c = store.update(&c.id, |cur| runtime::reconcile_status(cur)).unwrap_or(c);
+            c = store
+                .update(&c.id, |cur| runtime::reconcile_status(cur))
+                .unwrap_or(c);
         }
         if i > 0 {
             println!();
@@ -2123,15 +2518,38 @@ fn describe_one(c: &Container) {
     d.sub("Mode", c.network.as_deref().unwrap_or("host"));
     d.sub("IP", c.ip.as_deref().unwrap_or("<none>"));
     if !c.extra_networks.is_empty() {
-        d.sub("Extra", c.extra_networks.iter().map(|n| format!("{} ({} em eth{})", n.network, n.ip, n.idx)).collect::<Vec<_>>().join(", "));
+        d.sub(
+            "Extra",
+            c.extra_networks
+                .iter()
+                .map(|n| format!("{} ({} em eth{})", n.network, n.ip, n.idx))
+                .collect::<Vec<_>>()
+                .join(", "),
+        );
     }
     if !c.net_aliases.is_empty() {
         d.sub("Aliases", c.net_aliases.join(", "));
     }
     if let Some(bps) = &c.net_bps {
-        d.sub("Rate limit", format!("{bps}{}", c.net_burst.as_ref().map(|b| format!(" (burst {b})")).unwrap_or_default()));
+        d.sub(
+            "Rate limit",
+            format!(
+                "{bps}{}",
+                c.net_burst
+                    .as_ref()
+                    .map(|b| format!(" (burst {b})"))
+                    .unwrap_or_default()
+            ),
+        );
     }
-    d.sub("Ports", if c.ports.is_empty() { "<none>".to_string() } else { fmt_ports(&c.ports) });
+    d.sub(
+        "Ports",
+        if c.ports.is_empty() {
+            "<none>".to_string()
+        } else {
+            fmt_ports(&c.ports)
+        },
+    );
 
     if c.mounts.is_empty() {
         d.field("Mounts", "<none>");
@@ -2139,7 +2557,12 @@ fn describe_one(c: &Container) {
         d.section("Mounts");
         for m in &c.mounts {
             // `kubectl describe pod` format: "<target> from <source> (rw)".
-            d.item(format!("{} from {} ({})", m.target, m.source, if m.readonly { "ro" } else { "rw" }));
+            d.item(format!(
+                "{} from {} ({})",
+                m.target,
+                m.source,
+                if m.readonly { "ro" } else { "rw" }
+            ));
         }
     }
 
@@ -2172,7 +2595,10 @@ fn describe_one(c: &Container) {
         d.sub("Cap drop", c.cap_drop.join(", "));
     }
 
-    d.field("Restart policy", c.restart_policy.as_deref().unwrap_or("no"));
+    d.field(
+        "Restart policy",
+        c.restart_policy.as_deref().unwrap_or("no"),
+    );
     d.field_opt("Log driver", c.log_driver.as_deref());
     d.print();
 }
@@ -2219,7 +2645,10 @@ fn parse_rate_bits(s: &str) -> Result<u64> {
             },
         },
     };
-    let v: f64 = num.trim().parse().map_err(|_| Error::Invalid(format!("invalid rate: {s} (e.g. 10mbit, 512kbit, 1gbit)")))?;
+    let v: f64 = num
+        .trim()
+        .parse()
+        .map_err(|_| Error::Invalid(format!("invalid rate: {s} (e.g. 10mbit, 512kbit, 1gbit)")))?;
     if v <= 0.0 {
         return Err(Error::Invalid(format!("taxa tem de ser positiva: {s}")));
     }
@@ -2237,7 +2666,10 @@ fn parse_burst_bytes(s: &str) -> Result<u64> {
             None => (t, 1),
         },
     };
-    let v: f64 = num.trim().parse().map_err(|_| Error::Invalid(format!("invalid burst: {s} (e.g. 32kb, 1mb)")))?;
+    let v: f64 = num
+        .trim()
+        .parse()
+        .map_err(|_| Error::Invalid(format!("invalid burst: {s} (e.g. 32kb, 1mb)")))?;
     Ok((v * mult as f64) as u64)
 }
 
@@ -2245,7 +2677,9 @@ fn parse_burst_bytes(s: &str) -> Result<u64> {
 /// primary network, so the extras start at 1 — and we reuse holes left by a
 /// `--net-disconnect` instead of always counting upward.
 fn next_extra_idx(c: &Container) -> u32 {
-    (1u32..).find(|i| !c.extra_networks.iter().any(|n| n.idx == *i)).unwrap_or(1)
+    (1u32..)
+        .find(|i| !c.extra_networks.iter().any(|n| n.idx == *i))
+        .unwrap_or(1)
 }
 
 /// `container update` — HOT reconfiguration of a running container.
@@ -2290,7 +2724,10 @@ fn cmd_update(store: &Store, id: &str, o: UpdateOpts) -> Result<()> {
     }
     for net in &o.net_disconnect {
         let Some(en) = c.extra_networks.iter().find(|n| &n.network == net).cloned() else {
-            return Err(Error::Invalid(format!("container '{}' is not attached to the extra network '{net}'", c.name)));
+            return Err(Error::Invalid(format!(
+                "container '{}' is not attached to the extra network '{net}'",
+                c.name
+            )));
         };
         infra::detach_extra_container(&c.id, en.idx, &en.ip);
         let n = net.clone();
@@ -2310,7 +2747,10 @@ fn cmd_update(store: &Store, id: &str, o: UpdateOpts) -> Result<()> {
         let mounts = resolve_mounts(std::slice::from_ref(spec))?;
         for m in mounts {
             if c.mounts.iter().any(|x| x.target == m.target) {
-                return Err(Error::Invalid(format!("a volume is already mounted at {} — unmount it first (--volume-rm {})", m.target, m.target)));
+                return Err(Error::Invalid(format!(
+                    "a volume is already mounted at {} — unmount it first (--volume-rm {})",
+                    m.target, m.target
+                )));
             }
             runtime::mount_live(&c, &m)?;
             let mm = m.clone();
@@ -2318,7 +2758,13 @@ fn cmd_update(store: &Store, id: &str, o: UpdateOpts) -> Result<()> {
                 cur.mounts.push(mm.clone());
                 true
             })?;
-            println!("{}: {} hot-mounted at {} ({})", c.name, m.source, m.target, if m.readonly { "ro" } else { "rw" });
+            println!(
+                "{}: {} hot-mounted at {} ({})",
+                c.name,
+                m.source,
+                m.target,
+                if m.readonly { "ro" } else { "rw" }
+            );
         }
     }
     for net in &o.net_connect {
@@ -2329,12 +2775,21 @@ fn cmd_update(store: &Store, id: &str, o: UpdateOpts) -> Result<()> {
                 c.name
             )));
         }
-        if c.extra_networks.iter().any(|n| &n.network == net) || c.network.as_deref() == Some(net.as_str()) {
-            return Err(Error::Invalid(format!("'{}' is already attached to network '{net}'", c.name)));
+        if c.extra_networks.iter().any(|n| &n.network == net)
+            || c.network.as_deref() == Some(net.as_str())
+        {
+            return Err(Error::Invalid(format!(
+                "'{}' is already attached to network '{net}'",
+                c.name
+            )));
         }
         let idx = next_extra_idx(&c);
         let (ifname, ip) = infra::attach_extra_container(&c.id, idx, net)?;
-        let en = delonix_runtime_core::ExtraNet { network: net.clone(), ip: ip.clone(), idx };
+        let en = delonix_runtime_core::ExtraNet {
+            network: net.clone(),
+            ip: ip.clone(),
+            idx,
+        };
         c = store.update(&c.id, |cur| {
             cur.extra_networks.push(en.clone());
             true
@@ -2378,16 +2833,30 @@ fn cmd_update(store: &Store, id: &str, o: UpdateOpts) -> Result<()> {
 /// Publish a port on a LIVE container, by the right path for its network.
 pub(crate) fn publish_live(store: &Store, c: &mut Container, spec: &str) -> Result<()> {
     let (hp, cp, proto) = delonix_net::parse_publish(spec)?;
-    if c.ports.iter().any(|p| delonix_net::parse_publish(p).map(|(h, _, _)| h == hp).unwrap_or(false)) {
-        return Err(Error::Invalid(format!("'{}' already publishes host port {hp} — unpublish it first (--publish-rm {hp})", c.name)));
+    if c.ports.iter().any(|p| {
+        delonix_net::parse_publish(p)
+            .map(|(h, _, _)| h == hp)
+            .unwrap_or(false)
+    }) {
+        return Err(Error::Invalid(format!(
+            "'{}' already publishes host port {hp} — unpublish it first (--publish-rm {hp})",
+            c.name
+        )));
     }
     if let Some(owner) = port_owner(store, &hp)? {
-        return Err(Error::Invalid(format!("port {hp} is already published by container '{owner}'")));
+        return Err(Error::Invalid(format!(
+            "port {hp} is already published by container '{owner}'"
+        )));
     }
     match c.network.as_deref() {
         // Custom network: DNAT on the holder + hostfwd on the single slirp (the ingress).
         Some(_) => {
-            let ip = c.ip.clone().ok_or_else(|| Error::Invalid(format!("'{}' is on a custom network but has no IP in the record", c.name)))?;
+            let ip = c.ip.clone().ok_or_else(|| {
+                Error::Invalid(format!(
+                    "'{}' is on a custom network but has no IP in the record",
+                    c.name
+                ))
+            })?;
             publish_with_retry(&ip, spec)?;
         }
         // Per-container slirp path: requests the hostfwd from ITS slirp.
@@ -2423,9 +2892,18 @@ pub(crate) fn unpublish_live(store: &Store, c: &mut Container, host_port: &str) 
     let hit = c
         .ports
         .iter()
-        .find(|p| delonix_net::parse_publish(p).map(|(h, _, _)| h == host_port).unwrap_or(false))
+        .find(|p| {
+            delonix_net::parse_publish(p)
+                .map(|(h, _, _)| h == host_port)
+                .unwrap_or(false)
+        })
         .cloned()
-        .ok_or_else(|| Error::Invalid(format!("'{}' does not publish host port {host_port}", c.name)))?;
+        .ok_or_else(|| {
+            Error::Invalid(format!(
+                "'{}' does not publish host port {host_port}",
+                c.name
+            ))
+        })?;
     match c.network.as_deref() {
         Some(_) => infra::unpublish_port(host_port),
         None => {
@@ -2476,7 +2954,10 @@ fn cmd_stats(store: &Store, ids: &[String]) -> Result<()> {
         if runtime::reconcile_status(c) {
             let _ = store.save(c);
         }
-        if !matches!(c.status, delonix_runtime_core::Status::Running | delonix_runtime_core::Status::Paused) {
+        if !matches!(
+            c.status,
+            delonix_runtime_core::Status::Running | delonix_runtime_core::Status::Paused
+        ) {
             continue;
         }
         let Some(pid) = c.pid else { continue };
@@ -2487,34 +2968,50 @@ fn cmd_stats(store: &Store, ids: &[String]) -> Result<()> {
         return Ok(());
     }
     std::thread::sleep(std::time::Duration::from_millis(500));
-    println!("{:<20}  {:>6}  {:>12}  {:>6}", "NAME", "CPU%", "MEM", "PIDS");
+    println!(
+        "{:<20}  {:>6}  {:>12}  {:>6}",
+        "NAME", "CPU%", "MEM", "PIDS"
+    );
     for (name, pid, cpu0) in rows {
         let cpu = match (cpu0, cpu_usage_usec(pid)) {
-            (Some(a), Some(b)) => format!("{:.1}", (b.saturating_sub(a)) as f64 / 500_000.0 * 100.0),
+            (Some(a), Some(b)) => {
+                format!("{:.1}", (b.saturating_sub(a)) as f64 / 500_000.0 * 100.0)
+            }
             _ => "-".into(),
         };
-        let (mem, approx) = match cgroup_metric(pid, "memory.current").and_then(|v| v.trim().parse::<u64>().ok()) {
-            Some(b) => (b, false),
-            None => (
-                std::fs::read_to_string(format!("/proc/{pid}/status"))
-                    .ok()
-                    .and_then(|s| {
-                        s.lines()
-                            .find_map(|l| l.strip_prefix("VmRSS:"))
-                            .and_then(|v| v.trim().trim_end_matches(" kB").trim().parse::<u64>().ok())
-                    })
-                    .map(|kb| kb * 1024)
-                    .unwrap_or(0),
-                true,
-            ),
-        };
-        let pids = cgroup_metric(pid, "pids.current").map(|v| v.trim().to_string()).unwrap_or_else(|| "-".into());
+        let (mem, approx) =
+            match cgroup_metric(pid, "memory.current").and_then(|v| v.trim().parse::<u64>().ok()) {
+                Some(b) => (b, false),
+                None => (
+                    std::fs::read_to_string(format!("/proc/{pid}/status"))
+                        .ok()
+                        .and_then(|s| {
+                            s.lines()
+                                .find_map(|l| l.strip_prefix("VmRSS:"))
+                                .and_then(|v| {
+                                    v.trim().trim_end_matches(" kB").trim().parse::<u64>().ok()
+                                })
+                        })
+                        .map(|kb| kb * 1024)
+                        .unwrap_or(0),
+                    true,
+                ),
+            };
+        let pids = cgroup_metric(pid, "pids.current")
+            .map(|v| v.trim().to_string())
+            .unwrap_or_else(|| "-".into());
         let mem_h = if mem >= 1 << 30 {
             format!("{:.2} GiB", mem as f64 / (1u64 << 30) as f64)
         } else {
             format!("{:.1} MiB", mem as f64 / (1u64 << 20) as f64)
         };
-        println!("{:<20}  {:>6}  {:>12}  {:>6}", name, cpu, if approx { format!("~{mem_h}") } else { mem_h }, pids);
+        println!(
+            "{:<20}  {:>6}  {:>12}  {:>6}",
+            name,
+            cpu,
+            if approx { format!("~{mem_h}") } else { mem_h },
+            pids
+        );
     }
     Ok(())
 }
@@ -2524,7 +3021,10 @@ fn cmd_logs(images: &ImageStore, store: &Store, id: &str, follow: bool) -> Resul
     let c = find(store, id)?;
     let p = images.root().join("containers").join(&c.id).join("log");
     let mut f = std::fs::File::open(&p).map_err(|_| {
-        Error::Invalid(format!("no logs for {} (only detached containers have logs)", c.name))
+        Error::Invalid(format!(
+            "no logs for {} (only detached containers have logs)",
+            c.name
+        ))
     })?;
     let mut out = std::io::stdout();
     let mut buf = Vec::new();
@@ -2554,7 +3054,10 @@ fn cmd_logs(images: &ImageStore, store: &Store, id: &str, follow: bool) -> Resul
         }
         let mut c = find(store, id)?;
         let _ = runtime::reconcile_status(&mut c);
-        if !matches!(c.status, delonix_runtime_core::Status::Running | delonix_runtime_core::Status::Paused) {
+        if !matches!(
+            c.status,
+            delonix_runtime_core::Status::Running | delonix_runtime_core::Status::Paused
+        ) {
             return Ok(());
         }
     }
@@ -2563,7 +3066,10 @@ fn cmd_logs(images: &ImageStore, store: &Store, id: &str, follow: bool) -> Resul
 #[cfg(test)]
 mod tests {
     use super::super::util::compose_command;
-    use super::{fmt_ports, fmt_status, next_extra_idx, parse_burst_bytes, parse_rate_bits, policy_supervised, should_restart, ContainerSpec};
+    use super::{
+        fmt_ports, fmt_status, next_extra_idx, parse_burst_bytes, parse_rate_bits,
+        policy_supervised, should_restart, ContainerSpec,
+    };
     use delonix_runtime_core::{Container, ExtraNet, Status};
 
     #[test]
@@ -2610,8 +3116,21 @@ mod tests {
     }
 
     fn c_com_extras(idxs: &[u32]) -> Container {
-        let mut c = Container::new("id".into(), "t".into(), "img".into(), v(&["sh"]), "max".into());
-        c.extra_networks = idxs.iter().map(|i| ExtraNet { network: format!("n{i}"), ip: "10.0.0.2".into(), idx: *i }).collect();
+        let mut c = Container::new(
+            "id".into(),
+            "t".into(),
+            "img".into(),
+            v(&["sh"]),
+            "max".into(),
+        );
+        c.extra_networks = idxs
+            .iter()
+            .map(|i| ExtraNet {
+                network: format!("n{i}"),
+                ip: "10.0.0.2".into(),
+                idx: *i,
+            })
+            .collect();
         c
     }
 
@@ -2628,8 +3147,14 @@ mod tests {
     #[test]
     fn cp_distingue_container_de_caminho_de_host() {
         use super::split_cp_arg;
-        assert_eq!(split_cp_arg("web:/etc/conf"), Some(("web".into(), "/etc/conf".into())));
-        assert_eq!(split_cp_arg("web:relativo"), Some(("web".into(), "relativo".into())));
+        assert_eq!(
+            split_cp_arg("web:/etc/conf"),
+            Some(("web".into(), "/etc/conf".into()))
+        );
+        assert_eq!(
+            split_cp_arg("web:relativo"),
+            Some(("web".into(), "relativo".into()))
+        );
         // Pure host paths.
         assert_eq!(split_cp_arg("/tmp/x"), None);
         assert_eq!(split_cp_arg("ficheiro.txt"), None);
@@ -2662,14 +3187,20 @@ mod tests {
         assert_eq!(fmt_ports(&v(&["8080:80/tcp"])), "8080->80/tcp");
         // Without an explicit protocol, tcp (docker's default).
         assert_eq!(fmt_ports(&v(&["8080:80"])), "8080->80/tcp");
-        assert_eq!(fmt_ports(&v(&["8080:80", "53:53/udp"])), "8080->80/tcp, 53->53/udp");
+        assert_eq!(
+            fmt_ports(&v(&["8080:80", "53:53/udp"])),
+            "8080->80/tcp, 53->53/udp"
+        );
         assert_eq!(fmt_ports(&[]), "");
     }
 
     #[test]
     fn status_no_formato_do_docker_ps() {
         assert_eq!(fmt_status(&Status::Running, Some(300)), "Up 5 minutes");
-        assert_eq!(fmt_status(&Status::Paused, Some(300)), "Up 5 minutes (Paused)");
+        assert_eq!(
+            fmt_status(&Status::Paused, Some(300)),
+            "Up 5 minutes (Paused)"
+        );
         assert_eq!(fmt_status(&Status::Stopped, None), "Exited (0)");
         assert_eq!(fmt_status(&Status::Failed(137), None), "Exited (137)");
         assert_eq!(fmt_status(&Status::Crashed, None), "Dead");
@@ -2698,7 +3229,10 @@ mod tests {
 
     #[test]
     fn plain_cmd_without_entrypoint() {
-        assert_eq!(compose_command(&[], &v(&["sleep", "1"]), &[]), v(&["sleep", "1"]));
+        assert_eq!(
+            compose_command(&[], &v(&["sleep", "1"]), &[]),
+            v(&["sleep", "1"])
+        );
         assert_eq!(compose_command(&[], &[], &v(&["sh"])), v(&["sh"]));
     }
 
@@ -2740,7 +3274,15 @@ mod tests {
 }
 
 /// Handles this group's `init` (see `cmd::scaffold`).
-fn cmd_init(target: super::scaffold::Target, dir: PathBuf, name: Option<String>, image: Option<String>, force: bool, template: Option<String>, up: bool) -> Result<()> {
+fn cmd_init(
+    target: super::scaffold::Target,
+    dir: PathBuf,
+    name: Option<String>,
+    image: Option<String>,
+    force: bool,
+    template: Option<String>,
+    up: bool,
+) -> Result<()> {
     let name = name.unwrap_or_else(|| {
         // Without `--name`, uses the DIRECTORY name. `canonicalize` can't be used:
         // the directory doesn't exist yet (it's `init` that creates it) and would
@@ -2756,5 +3298,15 @@ fn cmd_init(target: super::scaffold::Target, dir: PathBuf, name: Option<String>,
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_else(|| "app".to_string())
     });
-    super::scaffold::init(target, &super::scaffold::InitOpts { dir, name, image, force, template, up })
+    super::scaffold::init(
+        target,
+        &super::scaffold::InitOpts {
+            dir,
+            name,
+            image,
+            force,
+            template,
+            up,
+        },
+    )
 }

@@ -34,45 +34,112 @@ pub struct Detected {
 /// fim `index.html` (site estático) como *fallback*.
 pub fn detect(dir: &Path) -> Option<Detected> {
     let has = |f: &str| dir.join(f).exists();
-    let read = |f: &str| std::fs::read_to_string(dir.join(f)).unwrap_or_default().to_lowercase();
+    let read = |f: &str| {
+        std::fs::read_to_string(dir.join(f))
+            .unwrap_or_default()
+            .to_lowercase()
+    };
     let glob1 = |ext: &str| {
         std::fs::read_dir(dir).ok().and_then(|rd| {
-            rd.flatten().any(|e| e.path().extension().and_then(|x| x.to_str()) == Some(ext)).then_some(())
+            rd.flatten()
+                .any(|e| e.path().extension().and_then(|x| x.to_str()) == Some(ext))
+                .then_some(())
         })
     };
 
     // Go
     if has("go.mod") {
-        return Some(Detected { stack: "go", framework: None, proxy_template: "go", default_port: 8080, builder: "paketo-buildpacks/go", marker: "go.mod" });
+        return Some(Detected {
+            stack: "go",
+            framework: None,
+            proxy_template: "go",
+            default_port: 8080,
+            builder: "paketo-buildpacks/go",
+            marker: "go.mod",
+        });
     }
     // Rust
     if has("Cargo.toml") {
-        return Some(Detected { stack: "rust", framework: None, proxy_template: "rust", default_port: 8080, builder: "paketo-buildpacks/rust", marker: "Cargo.toml" });
+        return Some(Detected {
+            stack: "rust",
+            framework: None,
+            proxy_template: "rust",
+            default_port: 8080,
+            builder: "paketo-buildpacks/rust",
+            marker: "Cargo.toml",
+        });
     }
     // Java (Maven/Gradle) → Spring por omissão
     if has("pom.xml") || has("build.gradle") || has("build.gradle.kts") {
-        let marker = if has("pom.xml") { "pom.xml" } else { "build.gradle" };
-        return Some(Detected { stack: "java", framework: Some("spring"), proxy_template: "java-spring", default_port: 8080, builder: "paketo-buildpacks/java", marker });
+        let marker = if has("pom.xml") {
+            "pom.xml"
+        } else {
+            "build.gradle"
+        };
+        return Some(Detected {
+            stack: "java",
+            framework: Some("spring"),
+            proxy_template: "java-spring",
+            default_port: 8080,
+            builder: "paketo-buildpacks/java",
+            marker,
+        });
     }
     // .NET
     if has("global.json") || glob1("csproj").is_some() {
-        return Some(Detected { stack: "dotnet", framework: None, proxy_template: "dotnet", default_port: 8080, builder: "paketo-buildpacks/dotnet-core", marker: "*.csproj" });
+        return Some(Detected {
+            stack: "dotnet",
+            framework: None,
+            proxy_template: "dotnet",
+            default_port: 8080,
+            builder: "paketo-buildpacks/dotnet-core",
+            marker: "*.csproj",
+        });
     }
     // Node — sub-detecção SPA vs servidor
     if has("package.json") {
         let pkg = read("package.json");
-        let is_spa = ["react", "vue", "@angular", "svelte", "vite"].iter().any(|f| pkg.contains(f))
-            && !["express", "fastify", "next", "koa", "nest"].iter().any(|f| pkg.contains(f));
+        let is_spa = ["react", "vue", "@angular", "svelte", "vite"]
+            .iter()
+            .any(|f| pkg.contains(f))
+            && !["express", "fastify", "next", "koa", "nest"]
+                .iter()
+                .any(|f| pkg.contains(f));
         return Some(if is_spa {
-            Detected { stack: "node", framework: Some("spa"), proxy_template: "spa", default_port: 80, builder: "paketo-buildpacks/nodejs", marker: "package.json" }
+            Detected {
+                stack: "node",
+                framework: Some("spa"),
+                proxy_template: "spa",
+                default_port: 80,
+                builder: "paketo-buildpacks/nodejs",
+                marker: "package.json",
+            }
         } else {
-            Detected { stack: "node", framework: Some("express"), proxy_template: "node-express", default_port: 3000, builder: "paketo-buildpacks/nodejs", marker: "package.json" }
+            Detected {
+                stack: "node",
+                framework: Some("express"),
+                proxy_template: "node-express",
+                default_port: 3000,
+                builder: "paketo-buildpacks/nodejs",
+                marker: "package.json",
+            }
         });
     }
     // Python — sub-detecção django/fastapi/flask
     if has("requirements.txt") || has("pyproject.toml") || has("Pipfile") {
-        let marker = if has("requirements.txt") { "requirements.txt" } else if has("pyproject.toml") { "pyproject.toml" } else { "Pipfile" };
-        let deps = format!("{}{}{}", read("requirements.txt"), read("pyproject.toml"), read("Pipfile"));
+        let marker = if has("requirements.txt") {
+            "requirements.txt"
+        } else if has("pyproject.toml") {
+            "pyproject.toml"
+        } else {
+            "Pipfile"
+        };
+        let deps = format!(
+            "{}{}{}",
+            read("requirements.txt"),
+            read("pyproject.toml"),
+            read("Pipfile")
+        );
         let (framework, template, port) = if deps.contains("django") {
             ("django", "py-django", 8000)
         } else if deps.contains("fastapi") {
@@ -82,13 +149,31 @@ pub fn detect(dir: &Path) -> Option<Detected> {
         } else {
             ("fastapi", "py-fastapi", 8000) // omissão razoável para Python web
         };
-        return Some(Detected { stack: "python", framework: Some(framework), proxy_template: template, default_port: port, builder: "paketo-buildpacks/python", marker });
+        return Some(Detected {
+            stack: "python",
+            framework: Some(framework),
+            proxy_template: template,
+            default_port: port,
+            builder: "paketo-buildpacks/python",
+            marker,
+        });
     }
     // Ruby → Rails se o Gemfile o mencionar
     if has("Gemfile") {
         let gem = read("Gemfile");
-        let framework = if gem.contains("rails") { Some("rails") } else { None };
-        return Some(Detected { stack: "ruby", framework, proxy_template: "ruby-rails", default_port: 3000, builder: "paketo-buildpacks/ruby", marker: "Gemfile" });
+        let framework = if gem.contains("rails") {
+            Some("rails")
+        } else {
+            None
+        };
+        return Some(Detected {
+            stack: "ruby",
+            framework,
+            proxy_template: "ruby-rails",
+            default_port: 3000,
+            builder: "paketo-buildpacks/ruby",
+            marker: "Gemfile",
+        });
     }
     // PHP → Laravel se o composer.json o mencionar; WordPress se houver wp-config
     if has("composer.json") || has("wp-config.php") {
@@ -100,11 +185,25 @@ pub fn detect(dir: &Path) -> Option<Detected> {
         } else {
             (None, "php-laravel")
         };
-        return Some(Detected { stack: "php", framework, proxy_template: template, default_port: 8080, builder: "paketo-buildpacks/php", marker: "composer.json" });
+        return Some(Detected {
+            stack: "php",
+            framework,
+            proxy_template: template,
+            default_port: 8080,
+            builder: "paketo-buildpacks/php",
+            marker: "composer.json",
+        });
     }
     // Site estático (fallback) — só se houver index.html e nenhum manifesto acima.
     if has("index.html") {
-        return Some(Detected { stack: "static", framework: None, proxy_template: "static", default_port: 80, builder: "paketo-buildpacks/web-servers", marker: "index.html" });
+        return Some(Detected {
+            stack: "static",
+            framework: None,
+            proxy_template: "static",
+            default_port: 80,
+            builder: "paketo-buildpacks/web-servers",
+            marker: "index.html",
+        });
     }
     None
 }
@@ -126,13 +225,33 @@ mod tests {
 
     #[test]
     fn detects_node_express_and_spa() {
-        let d = scratch("node-exp", &[("package.json", r#"{"dependencies":{"express":"4"}}"#)]);
+        let d = scratch(
+            "node-exp",
+            &[("package.json", r#"{"dependencies":{"express":"4"}}"#)],
+        );
         let got = detect(&d).unwrap();
-        assert_eq!((got.stack, got.framework, got.proxy_template, got.default_port), ("node", Some("express"), "node-express", 3000));
+        assert_eq!(
+            (
+                got.stack,
+                got.framework,
+                got.proxy_template,
+                got.default_port
+            ),
+            ("node", Some("express"), "node-express", 3000)
+        );
 
-        let s = scratch("node-spa", &[("package.json", r#"{"dependencies":{"react":"18","vite":"5"}}"#)]);
+        let s = scratch(
+            "node-spa",
+            &[(
+                "package.json",
+                r#"{"dependencies":{"react":"18","vite":"5"}}"#,
+            )],
+        );
         let got = detect(&s).unwrap();
-        assert_eq!((got.stack, got.framework, got.proxy_template), ("node", Some("spa"), "spa"));
+        assert_eq!(
+            (got.stack, got.framework, got.proxy_template),
+            ("node", Some("spa"), "spa")
+        );
     }
 
     #[test]
@@ -145,17 +264,50 @@ mod tests {
         ] {
             let d = scratch(&format!("py-{fw}"), &[("requirements.txt", deps)]);
             let got = detect(&d).unwrap();
-            assert_eq!((got.stack, got.framework.unwrap(), got.proxy_template, got.default_port), ("python", fw, tpl, port));
+            assert_eq!(
+                (
+                    got.stack,
+                    got.framework.unwrap(),
+                    got.proxy_template,
+                    got.default_port
+                ),
+                ("python", fw, tpl, port)
+            );
         }
     }
 
     #[test]
     fn detects_compiled_and_jvm_and_static() {
-        assert_eq!(detect(&scratch("go", &[("go.mod", "module x")])).unwrap().proxy_template, "go");
-        assert_eq!(detect(&scratch("rs", &[("Cargo.toml", "[package]")])).unwrap().proxy_template, "rust");
-        assert_eq!(detect(&scratch("java", &[("pom.xml", "<project/>")])).unwrap().proxy_template, "java-spring");
-        assert_eq!(detect(&scratch("ruby", &[("Gemfile", "gem 'rails'")])).unwrap().framework, Some("rails"));
-        assert_eq!(detect(&scratch("static", &[("index.html", "<h1>oi</h1>")])).unwrap().stack, "static");
+        assert_eq!(
+            detect(&scratch("go", &[("go.mod", "module x")]))
+                .unwrap()
+                .proxy_template,
+            "go"
+        );
+        assert_eq!(
+            detect(&scratch("rs", &[("Cargo.toml", "[package]")]))
+                .unwrap()
+                .proxy_template,
+            "rust"
+        );
+        assert_eq!(
+            detect(&scratch("java", &[("pom.xml", "<project/>")]))
+                .unwrap()
+                .proxy_template,
+            "java-spring"
+        );
+        assert_eq!(
+            detect(&scratch("ruby", &[("Gemfile", "gem 'rails'")]))
+                .unwrap()
+                .framework,
+            Some("rails")
+        );
+        assert_eq!(
+            detect(&scratch("static", &[("index.html", "<h1>oi</h1>")]))
+                .unwrap()
+                .stack,
+            "static"
+        );
     }
 
     #[test]

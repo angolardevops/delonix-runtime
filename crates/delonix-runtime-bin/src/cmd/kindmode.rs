@@ -65,7 +65,11 @@ pub(crate) struct KindCluster {
 /// vivo a publica (o nosso store) e nada no host a tem presa (bind de teste).
 /// Só o store não chega — um processo qualquer da máquina pode estar lá.
 fn port_free(store: &Store, port: u16) -> bool {
-    if super::container::port_owner(store, &port.to_string()).ok().flatten().is_some() {
+    if super::container::port_owner(store, &port.to_string())
+        .ok()
+        .flatten()
+        .is_some()
+    {
         return false;
     }
     // O bind de teste liberta-se logo a seguir (o listener cai). Há uma janela
@@ -170,7 +174,10 @@ fn node_exec(c: &Container, script: &str) -> Result<i32> {
 fn node_exec_capture(c: &Container, script: &str) -> Result<(i32, String)> {
     // Ficheiro por-nó: os workers correm em PARALELO e partilham este directório.
     let out_rel = format!(".out-{}", c.name);
-    let code = node_exec(c, &format!("{{ {script} ; }} >{NODE_SHARED}/{out_rel} 2>&1"))?;
+    let code = node_exec(
+        c,
+        &format!("{{ {script} ; }} >{NODE_SHARED}/{out_rel} 2>&1"),
+    )?;
     let path = cluster_dir_of(c).join(&out_rel);
     let out = std::fs::read_to_string(&path).unwrap_or_default();
     let _ = std::fs::remove_file(&path);
@@ -180,7 +187,11 @@ fn node_exec_capture(c: &Container, script: &str) -> Result<(i32, String)> {
 /// O `cluster_dir` de um nó, a partir da sua label — o `node_exec_capture` não
 /// tem o `cfg` à mão.
 fn cluster_dir_of(c: &Container) -> std::path::PathBuf {
-    let name = c.labels.get("io.x-k8s.kind.cluster").cloned().unwrap_or_default();
+    let name = c
+        .labels
+        .get("io.x-k8s.kind.cluster")
+        .cloned()
+        .unwrap_or_default();
     cluster_dir(&name)
 }
 
@@ -193,9 +204,21 @@ fn node_must(c: &Container, what: &str, script: &str) -> Result<()> {
     }
     // As últimas linhas chegam para diagnosticar e não afogam o terminal; o
     // output inteiro de um `kubeadm init` são centenas de linhas.
-    let tail: Vec<&str> = out.lines().filter(|l| !l.trim().is_empty()).rev().take(12).collect();
-    let detalhe = tail.into_iter().rev().map(|l| format!("\n    {l}")).collect::<String>();
-    Err(Error::Invalid(format!("{what} falhou no nó '{}' (exit {code}){detalhe}", c.name)))
+    let tail: Vec<&str> = out
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .rev()
+        .take(12)
+        .collect();
+    let detalhe = tail
+        .into_iter()
+        .rev()
+        .map(|l| format!("\n    {l}"))
+        .collect::<String>();
+    Err(Error::Invalid(format!(
+        "{what} falhou no nó '{}' (exit {code}){detalhe}",
+        c.name
+    )))
 }
 
 /// Espera por uma condição dentro do nó (comando com exit 0), com timeout.
@@ -216,7 +239,6 @@ fn wait_in_node(c: &Container, what: &str, check: &str, timeout: Duration) -> Re
         timeout.as_secs()
     )))
 }
-
 
 /// Os dados de adesão que o control-plane emite, extraídos do
 /// `kubeadm token create --print-join-command`.
@@ -245,7 +267,10 @@ struct JoinInfo {
 fn parse_join_command(s: &str) -> Result<JoinInfo> {
     let toks: Vec<&str> = s.split_whitespace().collect();
     let flag = |name: &str| -> Option<String> {
-        toks.iter().position(|t| *t == name).and_then(|i| toks.get(i + 1)).map(|v| v.to_string())
+        toks.iter()
+            .position(|t| *t == name)
+            .and_then(|i| toks.get(i + 1))
+            .map(|v| v.to_string())
     };
     // O endpoint é o 1.º token depois de "join" que não seja uma flag.
     let endpoint = toks
@@ -255,10 +280,15 @@ fn parse_join_command(s: &str) -> Result<JoinInfo> {
         .filter(|t| !t.starts_with('-'))
         .map(|t| t.to_string())
         .ok_or_else(|| Error::Invalid(format!("não consegui ler o endpoint do join: {s:?}")))?;
-    let token = flag("--token").ok_or_else(|| Error::Invalid(format!("join sem --token: {s:?}")))?;
+    let token =
+        flag("--token").ok_or_else(|| Error::Invalid(format!("join sem --token: {s:?}")))?;
     let ca_hash = flag("--discovery-token-ca-cert-hash")
         .ok_or_else(|| Error::Invalid(format!("join sem --discovery-token-ca-cert-hash: {s:?}")))?;
-    Ok(JoinInfo { endpoint, token, ca_hash })
+    Ok(JoinInfo {
+        endpoint,
+        token,
+        ca_hash,
+    })
 }
 
 /// A `JoinConfiguration` de um worker.
@@ -280,20 +310,62 @@ fn join_config_yaml(j: &JoinInfo) -> String {
     )
 }
 
-
 /// Reis/rainhas de Angola — Ndongo, Kongo, Matamba, Bailundo.
 const REIS: &[&str] = &[
-    "njinga", "mandume", "ekuikui", "nzinga", "kiluanji", "ngola", "mbandi",
-    "kitamba", "katyavala", "samakaka", "kalandula", "mutu", "hoolo", "soba",
+    "njinga",
+    "mandume",
+    "ekuikui",
+    "nzinga",
+    "kiluanji",
+    "ngola",
+    "mbandi",
+    "kitamba",
+    "katyavala",
+    "samakaka",
+    "kalandula",
+    "mutu",
+    "hoolo",
+    "soba",
 ];
 
 /// Províncias, municípios e comunas de Angola.
 const LUGARES: &[&str] = &[
-    "luanda", "benguela", "huambo", "huila", "bie", "malanje", "uige", "zaire",
-    "cunene", "namibe", "moxico", "bengo", "cuando", "cubango", "viana",
-    "cacuaco", "belas", "talatona", "kilamba", "catumbela", "lobito", "lubango",
-    "chibia", "cazenga", "sumbe", "ndalatando", "menongue", "saurimo", "dundo",
-    "ondjiva", "caxito", "gabela", "quibala", "camacupa", "andulo", "chinguar",
+    "luanda",
+    "benguela",
+    "huambo",
+    "huila",
+    "bie",
+    "malanje",
+    "uige",
+    "zaire",
+    "cunene",
+    "namibe",
+    "moxico",
+    "bengo",
+    "cuando",
+    "cubango",
+    "viana",
+    "cacuaco",
+    "belas",
+    "talatona",
+    "kilamba",
+    "catumbela",
+    "lobito",
+    "lubango",
+    "chibia",
+    "cazenga",
+    "sumbe",
+    "ndalatando",
+    "menongue",
+    "saurimo",
+    "dundo",
+    "ondjiva",
+    "caxito",
+    "gabela",
+    "quibala",
+    "camacupa",
+    "andulo",
+    "chinguar",
 ];
 
 /// Inventa um nome de cluster (rei + lugar + sufixo), evitando os já usados.
@@ -319,7 +391,9 @@ pub(crate) fn random_cluster_name(store: &Store) -> Result<String> {
         .unwrap_or(0)
         ^ (std::process::id() as u64) << 20;
     for _ in 0..50 {
-        seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407); // LCG
+        seed = seed
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407); // LCG
         let r = (seed >> 33) as usize;
         let name = format!(
             "{}-{}-{:02}",
@@ -331,7 +405,9 @@ pub(crate) fn random_cluster_name(store: &Store) -> Result<String> {
             return Ok(name);
         }
     }
-    Err(Error::Invalid("não consegui inventar um nome livre — passa `--name`".into()))
+    Err(Error::Invalid(
+        "não consegui inventar um nome livre — passa `--name`".into(),
+    ))
 }
 
 /// Nome do worker `i` (1-based), na convenção do `kind`: o primeiro é
@@ -374,7 +450,10 @@ fn boot_node(
             net: cluster_net(&cfg.name),
             // A ponte host<->nó (ver `cluster_dir`): sem isto não há como pôr o
             // kubeadm.conf lá dentro nem trazer o join/kubeconfig cá para fora.
-            volumes: vec![format!("{}:{NODE_SHARED}", cluster_dir(&cfg.name).display())],
+            volumes: vec![format!(
+                "{}:{NODE_SHARED}",
+                cluster_dir(&cfg.name).display()
+            )],
             // `/dev/fuse`: o entrypoint do Kind escolhe o snapshotter
             // `fuse-overlayfs` em userns, e sem este device o
             // `containerd-fuse-overlayfs` morre em ciclo ("fuse: device not
@@ -408,7 +487,12 @@ fn boot_node(
         .into_iter()
         .find(|c| c.name == node)
         .ok_or_else(|| Error::Invalid(format!("o nó '{node}' não ficou registado no store")))?;
-    wait_in_node(&c, "containerd", "systemctl is-active containerd", Duration::from_secs(90))?;
+    wait_in_node(
+        &c,
+        "containerd",
+        "systemctl is-active containerd",
+        Duration::from_secs(90),
+    )?;
     Ok(c)
 }
 
@@ -449,7 +533,11 @@ pub(crate) fn create(images: &ImageStore, store: &Store, cfg: &KindCluster) -> R
         }));
     }
 
-    super::output::info(&format!("{} \"{}\"", super::output::tr("Creating cluster", "A criar o cluster"), cfg.name));
+    super::output::info(&format!(
+        "{} \"{}\"",
+        super::output::tr("Creating cluster", "A criar o cluster"),
+        cfg.name
+    ));
     let mut p = super::output::Progress::new();
 
     // Cada nó arranca por um re-exec (processo próprio) e, em rootless sem
@@ -485,7 +573,17 @@ pub(crate) fn create(images: &ImageStore, store: &Store, cfg: &KindCluster) -> R
         // coordenados: o registo declarativo + o plano físico do holder, com o
         // mesmo prefixo. Só o físico deixava o `run --net` a recusar com
         // "no such container: network <x>" — apanhado a testar o multi-nó.
-        super::network::create_network(&nstore, &net, "bridge", None, None, "", None, Vec::new(), None)?;
+        super::network::create_network(
+            &nstore,
+            &net,
+            "bridge",
+            None,
+            None,
+            "",
+            None,
+            Vec::new(),
+            None,
+        )?;
     }
 
     // A imagem do nó é garantida UMA vez, aqui, antes de qualquer paralelismo.
@@ -493,25 +591,50 @@ pub(crate) fn create(images: &ImageStore, store: &Store, cfg: &KindCluster) -> R
     // a referência fixada por digest). **Isto não é cosmético**: os workers
     // arrancam em paralelo e, sem este passo, N threads chamariam
     // `resolve_or_pull` ao mesmo tempo e puxavam a MESMA imagem N vezes.
-    let curta = cfg.image.split('@').next().unwrap_or(&cfg.image).to_string();
-    p.step(&format!("{} ({curta})", super::output::tr("Ensuring node image", "A garantir a imagem do nó")), "🖼");
+    let curta = cfg
+        .image
+        .split('@')
+        .next()
+        .unwrap_or(&cfg.image)
+        .to_string();
+    p.step(
+        &format!(
+            "{} ({curta})",
+            super::output::tr("Ensuring node image", "A garantir a imagem do nó")
+        ),
+        "🖼",
+    );
     super::util::resolve_or_pull(images, &cfg.image)?;
     p.ok();
 
     // Resolve a porta ANTES de arrancar o nó: um 2.º cluster não deve rebentar
     // só porque a 6443 está tomada.
     let api_port = pick_api_port(store, cfg.api_port, &cfg.name)?;
-    p.step(&format!("{} ({})", super::output::tr("Preparing nodes", "A preparar os nós"), 1 + cfg.workers), "📦");
-    let c = boot_node(images, store, cfg, &node, "control-plane", vec![format!("{api_port}:6443")])?;
+    p.step(
+        &format!(
+            "{} ({})",
+            super::output::tr("Preparing nodes", "A preparar os nós"),
+            1 + cfg.workers
+        ),
+        "📦",
+    );
+    let c = boot_node(
+        images,
+        store,
+        cfg,
+        &node,
+        "control-plane",
+        vec![format!("{api_port}:6443")],
+    )?;
     p.ok();
     // O IP REAL do nó na rede do cluster. Com `--net host -p` era o do slirp
     // (10.0.2.100, igual em todos os nós e inalcançável de fora dele); numa rede
     // partilhada cada nó tem o seu — e é este que o apiserver anuncia e os
     // workers usam no `join`.
-    let cp_ip = c.ip.clone().ok_or_else(|| {
-        Error::Invalid(format!("o nó '{node}' não recebeu IP na rede '{net}'"))
-    })?;
-
+    let cp_ip = c
+        .ip
+        .clone()
+        .ok_or_else(|| Error::Invalid(format!("o nó '{node}' não recebeu IP na rede '{net}'")))?;
 
     // --- config do kubeadm: TUDO o que o rootless precisa, numa passagem ---
     //
@@ -520,8 +643,15 @@ pub(crate) fn create(images: &ImageStore, store: &Store, cfg: &KindCluster) -> R
     // nunca fica pronto sem a feature gate) e depois a correr as fases à mão.
     // Um ficheiro de config leva as 3 afinações ANTES de o kubelet arrancar —
     // uma só passagem, sem remendos. É também o que o `kind` faz (/kind/kubeadm.conf).
-    p.step(super::output::tr("Writing configuration", "A escrever a configuração"), "📜");
-    let version = cfg.k8s_version.as_deref().map(|v| format!("kubernetesVersion: v{v}\n")).unwrap_or_default();
+    p.step(
+        super::output::tr("Writing configuration", "A escrever a configuração"),
+        "📜",
+    );
+    let version = cfg
+        .k8s_version
+        .as_deref()
+        .map(|v| format!("kubernetesVersion: v{v}\n"))
+        .unwrap_or_default();
     let kubeadm_conf = format!(
         "apiVersion: kubeadm.k8s.io/v1beta4\n\
          kind: InitConfiguration\n\
@@ -557,7 +687,10 @@ pub(crate) fn create(images: &ImageStore, store: &Store, cfg: &KindCluster) -> R
 
     // O `kubeadm init` puxa as imagens do control-plane cá dentro — é o passo
     // mais demorado de todos.
-    p.step(super::output::tr("Starting control-plane", "A arrancar o control-plane"), "🕹️");
+    p.step(
+        super::output::tr("Starting control-plane", "A arrancar o control-plane"),
+        "🕹️",
+    );
     node_must(
         &c,
         "kubeadm init",
@@ -572,7 +705,10 @@ pub(crate) fn create(images: &ImageStore, store: &Store, cfg: &KindCluster) -> R
 
     // --- CNI (senão o nó fica NotReady para sempre) ---
     if cfg.cni == "default" {
-        p.step(super::output::tr("Installing CNI (kindnet)", "A instalar a CNI (kindnet)"), "🔌");
+        p.step(
+            super::output::tr("Installing CNI (kindnet)", "A instalar a CNI (kindnet)"),
+            "🔌",
+        );
         node_must(
             &c,
             "CNI",
@@ -588,14 +724,20 @@ pub(crate) fn create(images: &ImageStore, store: &Store, cfg: &KindCluster) -> R
     // Nó único: sem tirar a taint, nada de utilizador (nem o coredns) agenda.
     // Com workers, a taint FICA — é para isso que eles existem (é o que o kind faz).
     if cfg.workers == 0 {
-    let _ = node_exec(
-        &c,
-        "KUBECONFIG=/etc/kubernetes/admin.conf kubectl taint nodes --all \
+        let _ = node_exec(
+            &c,
+            "KUBECONFIG=/etc/kubernetes/admin.conf kubectl taint nodes --all \
          node-role.kubernetes.io/control-plane- >/dev/null 2>&1",
-    );
+        );
     }
 
-    p.step(super::output::tr("Waiting for control-plane to be Ready", "À espera do control-plane ficar Ready"), "⏳");
+    p.step(
+        super::output::tr(
+            "Waiting for control-plane to be Ready",
+            "À espera do control-plane ficar Ready",
+        ),
+        "⏳",
+    );
     wait_in_node(
         &c,
         "o control-plane ficar Ready",
@@ -631,7 +773,14 @@ pub(crate) fn create(images: &ImageStore, store: &Store, cfg: &KindCluster) -> R
         let join = parse_join_command(&join_cmd)?;
         let join_yaml = join_config_yaml(&join);
 
-        p.step(&format!("{} {} worker(s)", super::output::tr("Joining", "A juntar"), cfg.workers), "🚜");
+        p.step(
+            &format!(
+                "{} {} worker(s)",
+                super::output::tr("Joining", "A juntar"),
+                cfg.workers
+            ),
+            "🚜",
+        );
         // Em PARALELO: cada worker é independente (arranca, junta-se, acabou) e
         // em série o tempo somava-se. Cada thread escreve o SEU
         // `join-<nó>.conf` — um ficheiro partilhado seria uma corrida.
@@ -666,7 +815,11 @@ pub(crate) fn create(images: &ImageStore, store: &Store, cfg: &KindCluster) -> R
                 .collect()
         });
         if !erros.is_empty() {
-            return Err(Error::Invalid(format!("{} worker(s) falharam:\n  {}", erros.len(), erros.join("\n  "))));
+            return Err(Error::Invalid(format!(
+                "{} worker(s) falharam:\n  {}",
+                erros.len(),
+                erros.join("\n  ")
+            )));
         }
 
         // Só agora se espera: os joins já devolveram OK, isto é o kubelet de
@@ -693,7 +846,16 @@ pub(crate) fn create(images: &ImageStore, store: &Store, cfg: &KindCluster) -> R
     let ctx = context_name(&cfg.name);
     match install_kubecontext(&cfg.name) {
         Ok(path) => {
-            p.step(&format!("{} \"{ctx}\"", super::output::tr("Setting kubectl context to", "A definir o contexto kubectl para")), "📇");
+            p.step(
+                &format!(
+                    "{} \"{ctx}\"",
+                    super::output::tr(
+                        "Setting kubectl context to",
+                        "A definir o contexto kubectl para"
+                    )
+                ),
+                "📇",
+            );
             p.ok();
             let _ = path;
         }
@@ -708,9 +870,15 @@ pub(crate) fn create(images: &ImageStore, store: &Store, cfg: &KindCluster) -> R
             eprintln!(
                 "   {}",
                 super::output::dim(&if super::output::is_pt() {
-                    format!("usa: kubectl --kubeconfig {} get nodes", kubeconfig_path(&cfg.name).display())
+                    format!(
+                        "usa: kubectl --kubeconfig {} get nodes",
+                        kubeconfig_path(&cfg.name).display()
+                    )
                 } else {
-                    format!("use: kubectl --kubeconfig {} get nodes", kubeconfig_path(&cfg.name).display())
+                    format!(
+                        "use: kubectl --kubeconfig {} get nodes",
+                        kubeconfig_path(&cfg.name).display()
+                    )
                 })
             );
         }
@@ -718,9 +886,18 @@ pub(crate) fn create(images: &ImageStore, store: &Store, cfg: &KindCluster) -> R
     drop(p);
 
     println!();
-    println!("{}", super::output::tr("You can now use your cluster:", "Já podes usar o teu cluster:"));
+    println!(
+        "{}",
+        super::output::tr(
+            "You can now use your cluster:",
+            "Já podes usar o teu cluster:"
+        )
+    );
     println!();
-    println!("  {}", super::output::bold(&format!("kubectl cluster-info --context {ctx}")));
+    println!(
+        "  {}",
+        super::output::bold(&format!("kubectl cluster-info --context {ctx}"))
+    );
     println!();
     Ok(())
 }
@@ -767,22 +944,34 @@ fn install_kubecontext(cluster: &str) -> Result<std::path::PathBuf> {
     use serde_yaml::Value;
     let name = context_name(cluster);
     let src = kubeconfig_path(cluster);
-    let raw = std::fs::read_to_string(&src).map_err(|e| Error::Invalid(format!("a ler {}: {e}", src.display())))?;
-    let novo: Value = serde_yaml::from_str(&raw).map_err(|e| Error::Invalid(format!("kubeconfig do cluster inválido: {e}")))?;
+    let raw = std::fs::read_to_string(&src)
+        .map_err(|e| Error::Invalid(format!("a ler {}: {e}", src.display())))?;
+    let novo: Value = serde_yaml::from_str(&raw)
+        .map_err(|e| Error::Invalid(format!("kubeconfig do cluster inválido: {e}")))?;
 
-    let dest = user_kubeconfig_path().ok_or_else(|| Error::Invalid("sem $HOME nem $KUBECONFIG".into()))?;
+    let dest =
+        user_kubeconfig_path().ok_or_else(|| Error::Invalid("sem $HOME nem $KUBECONFIG".into()))?;
     let mut cfg: Value = match std::fs::read_to_string(&dest) {
-        Ok(t) if !t.trim().is_empty() => {
-            serde_yaml::from_str(&t).map_err(|e| Error::Invalid(format!("o {} existente não é YAML válido: {e}", dest.display())))?
-        }
+        Ok(t) if !t.trim().is_empty() => serde_yaml::from_str(&t).map_err(|e| {
+            Error::Invalid(format!(
+                "o {} existente não é YAML válido: {e}",
+                dest.display()
+            ))
+        })?,
         // Não existe (ou está vazio): começa-se um kubeconfig do zero.
-        _ => serde_yaml::from_str("apiVersion: v1\nkind: Config\nclusters: []\nusers: []\ncontexts: []\n").unwrap(),
+        _ => serde_yaml::from_str(
+            "apiVersion: v1\nkind: Config\nclusters: []\nusers: []\ncontexts: []\n",
+        )
+        .unwrap(),
     };
 
     // Tira do kubeconfig do cluster o 1.º de cada lista e renomeia-o.
-    let pega = |v: &Value, chave: &str| -> Option<Value> { v.get(chave)?.as_sequence()?.first().cloned() };
-    let mut cl = pega(&novo, "clusters").ok_or_else(|| Error::Invalid("kubeconfig sem clusters".into()))?;
-    let mut us = pega(&novo, "users").ok_or_else(|| Error::Invalid("kubeconfig sem users".into()))?;
+    let pega =
+        |v: &Value, chave: &str| -> Option<Value> { v.get(chave)?.as_sequence()?.first().cloned() };
+    let mut cl =
+        pega(&novo, "clusters").ok_or_else(|| Error::Invalid("kubeconfig sem clusters".into()))?;
+    let mut us =
+        pega(&novo, "users").ok_or_else(|| Error::Invalid("kubeconfig sem users".into()))?;
     if let Some(m) = cl.as_mapping_mut() {
         m.insert("name".into(), name.clone().into());
     }
@@ -835,7 +1024,9 @@ fn install_kubecontext(cluster: &str) -> Result<std::path::PathBuf> {
 }
 
 fn kubeconfig_path(name: &str) -> std::path::PathBuf {
-    super::util::state_root().join("clusters").join(format!("{name}-kubeconfig.yaml"))
+    super::util::state_root()
+        .join("clusters")
+        .join(format!("{name}-kubeconfig.yaml"))
 }
 
 /// Traz o `admin.conf` do nó para o host, com o endereço reescrito para a porta
@@ -855,10 +1046,11 @@ fn write_kubeconfig(c: &Container, name: &str, api_port: u16) -> Result<()> {
         ),
     )?;
     let src = cluster_dir(name).join("kubeconfig.yaml");
-    let data = std::fs::read(&src)
-        .map_err(|e| Error::Invalid(format!("a ler o kubeconfig do nó ({}): {e}", src.display())))?;
+    let data = std::fs::read(&src).map_err(|e| {
+        Error::Invalid(format!("a ler o kubeconfig do nó ({}): {e}", src.display()))
+    })?;
     std::fs::write(&path, data)?;
-    eprintln!("kubeconfig: {}", path.display());  // rótulo universal
+    eprintln!("kubeconfig: {}", path.display()); // rótulo universal
     Ok(())
 }
 
@@ -874,12 +1066,22 @@ pub(crate) fn delete(images: &ImageStore, store: &Store, name: &str) -> Result<(
     if nodes.is_empty() {
         return Err(Error::NotFound(format!("cluster kind '{name}'")));
     }
-    super::output::info(&format!("{} \"{name}\"", super::output::tr("Deleting cluster", "A apagar o cluster")));
+    super::output::info(&format!(
+        "{} \"{name}\"",
+        super::output::tr("Deleting cluster", "A apagar o cluster")
+    ));
     let mut p = super::output::Progress::new();
     for n in &nodes {
         // Mostra CADA nó a ser removido (portas/rede libertadas, rootfs apagado)
         // — o delete deixa de parecer mágico, tal como o create.
-        p.step(&format!("{} '{}'", super::output::tr("Removing node", "A remover o nó"), n.name), "🗑️");
+        p.step(
+            &format!(
+                "{} '{}'",
+                super::output::tr("Removing node", "A remover o nó"),
+                n.name
+            ),
+            "🗑️",
+        );
         container::remove_container(images, store, n, true)?;
         p.ok();
     }
@@ -890,13 +1092,25 @@ pub(crate) fn delete(images: &ImageStore, store: &Store, name: &str) -> Result<(
     let net = cluster_net(name);
     if let Ok(nstore) = delonix_net::NetworkStore::open(super::util::state_root()) {
         if nstore.get(&net).is_ok() {
-            p.step(&format!("{} '{net}'", super::output::tr("Freeing network", "A libertar a rede")), "🌐");
+            p.step(
+                &format!(
+                    "{} '{net}'",
+                    super::output::tr("Freeing network", "A libertar a rede")
+                ),
+                "🌐",
+            );
             let _ = nstore.remove(&net);
             delonix_net::infra::network_remove(&net);
             p.ok();
         }
     }
-    p.step(super::output::tr("Cleaning up kubeconfig and context", "A limpar o kubeconfig e o contexto"), "🧹");
+    p.step(
+        super::output::tr(
+            "Cleaning up kubeconfig and context",
+            "A limpar o kubeconfig e o contexto",
+        ),
+        "🧹",
+    );
     let _ = std::fs::remove_file(kubeconfig_path(name));
     let _ = std::fs::remove_dir_all(cluster_dir(name));
     // Tira o contexto do ~/.kube/config — senão o `kubectl config get-contexts`
@@ -905,15 +1119,28 @@ pub(crate) fn delete(images: &ImageStore, store: &Store, name: &str) -> Result<(
     if let Err(e) = remove_kubecontext(name) {
         p.step("", ""); // fecha o passo de limpeza com ✗ antes do aviso
         super::output::warn(&if super::output::is_pt() {
-            format!("não consegui tirar o contexto '{}' do kubeconfig: {e}", context_name(name))
+            format!(
+                "não consegui tirar o contexto '{}' do kubeconfig: {e}",
+                context_name(name)
+            )
         } else {
-            format!("could not remove context '{}' from kubeconfig: {e}", context_name(name))
+            format!(
+                "could not remove context '{}' from kubeconfig: {e}",
+                context_name(name)
+            )
         });
     } else {
         p.ok();
     }
     drop(p);
-    println!("{}", if super::output::is_pt() { format!("cluster '{name}' removido ({} nó(s))", nodes.len()) } else { format!("cluster '{name}' removed ({} node(s))", nodes.len()) });
+    println!(
+        "{}",
+        if super::output::is_pt() {
+            format!("cluster '{name}' removido ({} nó(s))", nodes.len())
+        } else {
+            format!("cluster '{name}' removed ({} node(s))", nodes.len())
+        }
+    );
     Ok(())
 }
 
@@ -927,7 +1154,12 @@ fn node_uptime_secs(pid: i32) -> Option<u64> {
     let after = stat.rsplit_once(')')?.1;
     let start_ticks: u64 = after.split_whitespace().nth(19)?.parse().ok()?;
     let hz = 100u64; // USER_HZ é 100 em Linux/x86-64
-    let up: f64 = std::fs::read_to_string("/proc/uptime").ok()?.split_whitespace().next()?.parse().ok()?;
+    let up: f64 = std::fs::read_to_string("/proc/uptime")
+        .ok()?
+        .split_whitespace()
+        .next()?
+        .parse()
+        .ok()?;
     Some((up as u64).saturating_sub(start_ticks / hz))
 }
 
@@ -955,14 +1187,22 @@ pub(crate) fn list(store: &Store) -> Result<()> {
     use std::collections::BTreeMap;
     let mut clusters: BTreeMap<String, Vec<Container>> = BTreeMap::new();
     for mut c in store.list()? {
-        let Some(name) = c.labels.get("io.x-k8s.kind.cluster").cloned() else { continue };
+        let Some(name) = c.labels.get("io.x-k8s.kind.cluster").cloned() else {
+            continue;
+        };
         if delonix_runtime::reconcile_status(&mut c) {
             let _ = store.update(&c.id, |cur| delonix_runtime::reconcile_status(cur));
         }
         clusters.entry(name).or_default().push(c);
     }
     if clusters.is_empty() {
-        println!("{}", super::output::tr("(no clusters — create one with `delonix cluster create`)", "(nenhum cluster — cria um com `delonix cluster create`)"));
+        println!(
+            "{}",
+            super::output::tr(
+                "(no clusters — create one with `delonix cluster create`)",
+                "(nenhum cluster — cria um com `delonix cluster create`)"
+            )
+        );
         return Ok(());
     }
 
@@ -988,10 +1228,18 @@ pub(crate) fn list(store: &Store) -> Result<()> {
     for (name, nodes) in clusters {
         let cp: Vec<&Container> = nodes
             .iter()
-            .filter(|c| c.labels.get("io.x-k8s.kind.role").map(|r| r == "control-plane").unwrap_or(false))
+            .filter(|c| {
+                c.labels
+                    .get("io.x-k8s.kind.role")
+                    .map(|r| r == "control-plane")
+                    .unwrap_or(false)
+            })
             .collect();
         let workers = nodes.len() - cp.len();
-        let running = nodes.iter().filter(|c| matches!(c.status, delonix_runtime_core::Status::Running)).count();
+        let running = nodes
+            .iter()
+            .filter(|c| matches!(c.status, delonix_runtime_core::Status::Running))
+            .count();
         let estado = if running == nodes.len() {
             "up".to_string()
         } else {
@@ -1054,12 +1302,17 @@ pub(crate) fn list(store: &Store) -> Result<()> {
 fn remove_kubecontext(cluster: &str) -> Result<()> {
     use serde_yaml::Value;
     let name = context_name(cluster);
-    let Some(dest) = user_kubeconfig_path() else { return Ok(()) };
-    let Ok(txt) = std::fs::read_to_string(&dest) else { return Ok(()) };
+    let Some(dest) = user_kubeconfig_path() else {
+        return Ok(());
+    };
+    let Ok(txt) = std::fs::read_to_string(&dest) else {
+        return Ok(());
+    };
     if txt.trim().is_empty() {
         return Ok(());
     }
-    let mut cfg: Value = serde_yaml::from_str(&txt).map_err(|e| Error::Invalid(format!("{} não é YAML válido: {e}", dest.display())))?;
+    let mut cfg: Value = serde_yaml::from_str(&txt)
+        .map_err(|e| Error::Invalid(format!("{} não é YAML válido: {e}", dest.display())))?;
     let mut mexeu = false;
     for chave in ["clusters", "users", "contexts"] {
         if let Some(seq) = cfg.get_mut(chave).and_then(|v| v.as_sequence_mut()) {
@@ -1120,7 +1373,10 @@ mod tests {
     #[test]
     fn parse_do_join_recusa_linha_incompleta() {
         assert!(parse_join_command("kubeadm join 1.2.3.4:6443 --token ab.cd").is_err());
-        assert!(parse_join_command("kubeadm join --token ab.cd --discovery-token-ca-cert-hash x").is_err());
+        assert!(
+            parse_join_command("kubeadm join --token ab.cd --discovery-token-ca-cert-hash x")
+                .is_err()
+        );
         assert!(parse_join_command("").is_err());
     }
 
@@ -1137,7 +1393,10 @@ mod tests {
         assert!(y.contains("kind: JoinConfiguration"));
         assert!(y.contains("apiServerEndpoint: \"10.0.0.2:6443\""));
         assert!(y.contains("- \"sha256:ef\""));
-        assert!(!y.contains("KubeletConfiguration"), "o join não deve trazer KubeletConfiguration");
+        assert!(
+            !y.contains("KubeletConfiguration"),
+            "o join não deve trazer KubeletConfiguration"
+        );
     }
 
     #[test]

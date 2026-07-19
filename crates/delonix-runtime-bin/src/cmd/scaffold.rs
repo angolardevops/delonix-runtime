@@ -75,7 +75,16 @@ fn template_meta(name: &str) -> (&'static str, &'static str) {
 /// Deriva um módulo Python válido a partir do nome do projecto: minúsculas,
 /// `[a-z0-9_]`, e nunca a começar por dígito (senão não é um identificador).
 fn python_module(name: &str) -> String {
-    let mut m: String = name.chars().map(|c| if c.is_ascii_alphanumeric() { c.to_ascii_lowercase() } else { '_' }).collect();
+    let mut m: String = name
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() {
+                c.to_ascii_lowercase()
+            } else {
+                '_'
+            }
+        })
+        .collect();
     if m.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(true) {
         m.insert(0, 'a');
     }
@@ -84,7 +93,9 @@ fn python_module(name: &str) -> String {
 
 /// Substitui os tokens `__NAME__`/`__MODULE__`/`__PORT__` (em conteúdos E caminhos).
 fn subst(s: &str, o: &InitOpts, module: &str, port: &str) -> String {
-    s.replace("__NAME__", &o.name).replace("__MODULE__", module).replace("__PORT__", port)
+    s.replace("__NAME__", &o.name)
+        .replace("__MODULE__", module)
+        .replace("__PORT__", port)
 }
 
 /// Gera um projecto a partir de um template embebido. `show_next` imprime os
@@ -98,22 +109,39 @@ fn render_template(tname: &str, o: &InitOpts, show_next: bool) -> Result<()> {
         .iter()
         .find(|(n, _)| *n == tname)
         .map(|(_, f)| *f)
-        .ok_or_else(|| Error::Invalid(format!("template '{tname}' não existe — disponíveis: {}", template_names().join(", "))))?;
+        .ok_or_else(|| {
+            Error::Invalid(format!(
+                "template '{tname}' não existe — disponíveis: {}",
+                template_names().join(", ")
+            ))
+        })?;
     let module = python_module(&o.name);
     let (port, health) = template_meta(tname);
     std::fs::create_dir_all(&o.dir)?;
     let mut n = 0;
     for (rel, content) in files {
         let dest = o.dir.join(subst(rel, o, &module, port));
-        n += usize::from(write_file(&dest, &subst(content, o, &module, port), o.force)?);
+        n += usize::from(write_file(
+            &dest,
+            &subst(content, o, &module, port),
+            o.force,
+        )?);
     }
     if n == 0 {
         eprintln!("nada a fazer (tudo já existia)");
         return Ok(());
     }
-    println!("pronto. Projecto '{}' ({tname}) em {}.", o.name, o.dir.display());
+    println!(
+        "pronto. Projecto '{}' ({tname}) em {}.",
+        o.name,
+        o.dir.display()
+    );
     if show_next {
-        let cd = if o.dir == Path::new(".") { String::new() } else { format!("cd {} && ", o.dir.display()) };
+        let cd = if o.dir == Path::new(".") {
+            String::new()
+        } else {
+            format!("cd {} && ", o.dir.display())
+        };
         println!(
             "  {cd}delonix build -t {}:dev .        # constrói a imagem (Delonixfile)\n  \
              {cd}delonix stack apply              # sobe a app\n  \
@@ -127,13 +155,17 @@ fn render_template(tname: &str, o: &InitOpts, show_next: bool) -> Result<()> {
 /// Escreve um ficheiro, recusando-se a destruir trabalho sem `--force`.
 fn write_file(path: &Path, content: &str, force: bool) -> Result<bool> {
     if path.exists() && !force {
-        eprintln!("  já existe, saltado: {}  (usa --force para substituir)", path.display());
+        eprintln!(
+            "  já existe, saltado: {}  (usa --force para substituir)",
+            path.display()
+        );
         return Ok(false);
     }
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
     }
-    std::fs::write(path, content).map_err(|e| Error::Invalid(format!("a escrever {}: {e}", path.display())))?;
+    std::fs::write(path, content)
+        .map_err(|e| Error::Invalid(format!("a escrever {}: {e}", path.display())))?;
     eprintln!("  criado: {}", path.display());
     Ok(true)
 }
@@ -152,7 +184,10 @@ fn choose_template_interactive() -> Result<Option<String>> {
     for (i, n) in names.iter().enumerate() {
         eprintln!("  {}) {}", i + 1, n);
     }
-    eprintln!("  {}) generic — Delonixfile + manifest, no app code", names.len() + 1);
+    eprintln!(
+        "  {}) generic — Delonixfile + manifest, no app code",
+        names.len() + 1
+    );
     loop {
         eprint!("> ");
         let _ = std::io::stderr().flush();
@@ -184,7 +219,10 @@ fn prompt_yes(question: &str, default_yes: bool) -> bool {
     if !stdin_is_tty() {
         return default_yes;
     }
-    eprint!("{question} {} ", if default_yes { "[Y/n]" } else { "[y/N]" });
+    eprint!(
+        "{question} {} ",
+        if default_yes { "[Y/n]" } else { "[y/N]" }
+    );
     let _ = std::io::stderr().flush();
     let mut line = String::new();
     if std::io::stdin().read_line(&mut line).unwrap_or(0) == 0 {
@@ -210,7 +248,20 @@ fn build_and_up(name: &str, dir: &Path, port: &str, health: &str) -> Result<()> 
 
     p.step(&format!("Starting container {name}"), "🚀");
     let _ = run_quiet(&exe, dir, &["container", "rm", name, "-f"]);
-    run_quiet(&exe, dir, &["container", "run", "--name", name, "-d", "-p", &format!("{port}:{port}"), &tag])?;
+    run_quiet(
+        &exe,
+        dir,
+        &[
+            "container",
+            "run",
+            "--name",
+            name,
+            "-d",
+            "-p",
+            &format!("{port}:{port}"),
+            &tag,
+        ],
+    )?;
     p.ok();
 
     p.step("Waiting until healthy", "❤️ ");
@@ -234,7 +285,11 @@ fn run_quiet(exe: &Path, dir: &Path, args: &[&str]) -> Result<()> {
     if out.status.success() {
         Ok(())
     } else {
-        Err(Error::Invalid(format!("`delonix {}` falhou:\n{}", args.join(" "), String::from_utf8_lossy(&out.stderr).trim())))
+        Err(Error::Invalid(format!(
+            "`delonix {}` falhou:\n{}",
+            args.join(" "),
+            String::from_utf8_lossy(&out.stderr).trim()
+        )))
     }
 }
 
@@ -246,7 +301,9 @@ fn wait_health(port: &str, health: &str) -> Result<()> {
         }
         std::thread::sleep(std::time::Duration::from_millis(500));
     }
-    Err(Error::Invalid("o container arrancou mas não ficou saudável em 40s — vê `delonix container logs`".into()))
+    Err(Error::Invalid(
+        "o container arrancou mas não ficou saudável em 40s — vê `delonix container logs`".into(),
+    ))
 }
 
 /// GET mínimo a `127.0.0.1:port` (HTTP/1.0); `true` se a resposta é `200`.
@@ -291,22 +348,62 @@ pub(crate) fn init(target: Target, o: &InitOpts) -> Result<()> {
     let mut n = 0;
     match target {
         Target::Container => {
-            n += usize::from(write_file(&o.dir.join("Delonixfile"), &delonixfile(o), o.force)?);
-            n += usize::from(write_file(&o.dir.join("delonix-manifest.yaml"), &manifest_container(o), o.force)?);
+            n += usize::from(write_file(
+                &o.dir.join("Delonixfile"),
+                &delonixfile(o),
+                o.force,
+            )?);
+            n += usize::from(write_file(
+                &o.dir.join("delonix-manifest.yaml"),
+                &manifest_container(o),
+                o.force,
+            )?);
         }
         Target::Vm => {
-            n += usize::from(write_file(&o.dir.join("delonix-manifest.yaml"), &manifest_vm(o), o.force)?);
+            n += usize::from(write_file(
+                &o.dir.join("delonix-manifest.yaml"),
+                &manifest_vm(o),
+                o.force,
+            )?);
         }
         Target::Cluster => {
-            n += usize::from(write_file(&o.dir.join("cluster-kind.yaml"), &cluster_kind(o), o.force)?);
-            n += usize::from(write_file(&o.dir.join("cluster-vm.yaml"), &cluster_vm(o), o.force)?);
-            n += usize::from(write_file(&o.dir.join("cluster-ssh.yaml"), &cluster_ssh(o), o.force)?);
+            n += usize::from(write_file(
+                &o.dir.join("cluster-kind.yaml"),
+                &cluster_kind(o),
+                o.force,
+            )?);
+            n += usize::from(write_file(
+                &o.dir.join("cluster-vm.yaml"),
+                &cluster_vm(o),
+                o.force,
+            )?);
+            n += usize::from(write_file(
+                &o.dir.join("cluster-ssh.yaml"),
+                &cluster_ssh(o),
+                o.force,
+            )?);
         }
         Target::Stack => {
-            n += usize::from(write_file(&o.dir.join("Delonixfile"), &delonixfile(o), o.force)?);
-            n += usize::from(write_file(&o.dir.join("delonix-manifest.yaml"), &manifest_stack(o), o.force)?);
-            n += usize::from(write_file(&o.dir.join("cluster-kind.yaml"), &cluster_kind(o), o.force)?);
-            n += usize::from(write_file(&o.dir.join(".dockerignore"), DOCKERIGNORE, o.force)?);
+            n += usize::from(write_file(
+                &o.dir.join("Delonixfile"),
+                &delonixfile(o),
+                o.force,
+            )?);
+            n += usize::from(write_file(
+                &o.dir.join("delonix-manifest.yaml"),
+                &manifest_stack(o),
+                o.force,
+            )?);
+            n += usize::from(write_file(
+                &o.dir.join("cluster-kind.yaml"),
+                &cluster_kind(o),
+                o.force,
+            )?);
+            n += usize::from(write_file(
+                &o.dir.join(".dockerignore"),
+                DOCKERIGNORE,
+                o.force,
+            )?);
             n += usize::from(write_file(&o.dir.join("README.md"), &readme(o), o.force)?);
         }
     }
@@ -319,7 +416,11 @@ pub(crate) fn init(target: Target, o: &InitOpts) -> Result<()> {
 }
 
 fn next_steps(target: Target, o: &InitOpts) -> String {
-    let cd = if o.dir == Path::new(".") { String::new() } else { format!("cd {} && ", o.dir.display()) };
+    let cd = if o.dir == Path::new(".") {
+        String::new()
+    } else {
+        format!("cd {} && ", o.dir.display())
+    };
     match target {
         Target::Container => format!("pronto. Agora:\n  {cd}delonix build -t {}:dev .\n  {cd}delonix container apply", o.name),
         Target::Vm => format!("pronto. Agora:\n  {cd}delonix vm apply"),
@@ -338,7 +439,10 @@ fn next_steps(target: Target, o: &InitOpts) -> String {
 // ---------------------------------------------------------------- templates
 
 fn delonixfile(o: &InitOpts) -> String {
-    let base = o.image.clone().unwrap_or_else(|| DEFAULT_APP_BASE.to_string());
+    let base = o
+        .image
+        .clone()
+        .unwrap_or_else(|| DEFAULT_APP_BASE.to_string());
     format!(
         "# Delonixfile — mesma gramática do Dockerfile, com extensões Delonix.\n\
          # Constrói com:  delonix build -t {name}:dev .\n\
@@ -371,7 +475,9 @@ fn manifest_container(o: &InitOpts) -> String {
     // Template COMPLETO: toda a spec de `kind: Container`, com defaults e um
     // comentário por campo. Apaga o que não precisares — o parser aceita
     // qualquer subconjunto (só `image` é obrigatório).
-    CONTAINER_REFERENCE.replace("{name}", &o.name).replace("{image}", &img)
+    CONTAINER_REFERENCE
+        .replace("{name}", &o.name)
+        .replace("{image}", &img)
 }
 
 /// Referência completa de `kind: Container` (todos os campos que o `apply` lê).
@@ -431,8 +537,13 @@ spec:
 "#;
 
 fn manifest_vm(o: &InitOpts) -> String {
-    let img = o.image.clone().unwrap_or_else(|| DEFAULT_VM_IMAGE.to_string());
-    VM_REFERENCE.replace("{name}", &o.name).replace("{image}", &img)
+    let img = o
+        .image
+        .clone()
+        .unwrap_or_else(|| DEFAULT_VM_IMAGE.to_string());
+    VM_REFERENCE
+        .replace("{name}", &o.name)
+        .replace("{image}", &img)
 }
 
 /// Referência completa de `kind: Vm` (espelha `delonix_vm::VmConfig`).
@@ -523,7 +634,10 @@ fn manifest_stack(o: &InitOpts) -> String {
 }
 
 fn cluster_kind(o: &InitOpts) -> String {
-    let img = o.image.clone().unwrap_or_else(|| super::kindmode::DEFAULT_NODE_IMAGE.to_string());
+    let img = o
+        .image
+        .clone()
+        .unwrap_or_else(|| super::kindmode::DEFAULT_NODE_IMAGE.to_string());
     format!(
         "# Cluster Kubernetes LOCAL, em containers — sem Docker e sem o binário `kind`.\n\
          #   delonix cluster create --name {name}       # não precisa deste ficheiro\n\
@@ -611,7 +725,8 @@ fn cluster_ssh(o: &InitOpts) -> String {
     )
 }
 
-const DOCKERIGNORE: &str = "# Fora do contexto de build (menos bytes a copiar, imagem mais pequena).\n\
+const DOCKERIGNORE: &str =
+    "# Fora do contexto de build (menos bytes a copiar, imagem mais pequena).\n\
                             .git\n\
                             target/\n\
                             node_modules/\n\

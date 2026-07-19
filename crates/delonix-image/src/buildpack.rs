@@ -84,10 +84,19 @@ mod tests {
     fn selects_builder_family() {
         assert_eq!(
             builder_images("auto"),
-            ("paketobuildpacks/builder-jammy-base", "paketobuildpacks/run-jammy-base")
+            (
+                "paketobuildpacks/builder-jammy-base",
+                "paketobuildpacks/run-jammy-base"
+            )
         );
-        assert_eq!(builder_images("paketo").0, "paketobuildpacks/builder-jammy-base");
-        assert_eq!(builder_images("heroku"), ("heroku/builder:24", "heroku/heroku:24"));
+        assert_eq!(
+            builder_images("paketo").0,
+            "paketobuildpacks/builder-jammy-base"
+        );
+        assert_eq!(
+            builder_images("heroku"),
+            ("heroku/builder:24", "heroku/heroku:24")
+        );
     }
 
     #[test]
@@ -104,7 +113,13 @@ mod tests {
         assert_eq!(args.last().unwrap(), "shop:latest"); // output ref é o posicional final
 
         let mounts = plan.mounts();
-        assert_eq!(mounts[0], ("/src/shop".to_string(), "/workspace".to_string()));
-        assert_eq!(mounts[1], ("cnb-cache-shop".to_string(), "/cache".to_string()));
+        assert_eq!(
+            mounts[0],
+            ("/src/shop".to_string(), "/workspace".to_string())
+        );
+        assert_eq!(
+            mounts[1],
+            ("cnb-cache-shop".to_string(), "/cache".to_string())
+        );
     }
 }

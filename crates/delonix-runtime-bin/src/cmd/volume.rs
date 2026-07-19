@@ -120,7 +120,13 @@ pub enum SnapshotCmd {
 pub fn run(action: VolumeCmd) -> Result<()> {
     let store = VolumeStore::open(state_root())?;
     match action {
-        VolumeCmd::Create { name, driver, device, options, quota } => {
+        VolumeCmd::Create {
+            name,
+            driver,
+            device,
+            options,
+            quota,
+        } => {
             let vol = create_volume(&store, &name, &driver, device, options, quota)?;
             println!("{}", vol.name);
             Ok(())
@@ -146,7 +152,14 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
         let name = &doc.metadata.name;
         manifest::warn_unknown_fields(doc, VOLUME_SPEC_FIELDS);
         let spec: VolumeSpec = manifest::spec_of(doc)?;
-        create_volume(&store, name, &spec.driver, spec.device, spec.options, spec.quota)?;
+        create_volume(
+            &store,
+            name,
+            &spec.driver,
+            spec.device,
+            spec.options,
+            spec.quota,
+        )?;
         println!("volume/{name}: garantido");
     }
     Ok(())
@@ -190,7 +203,11 @@ fn fmt_usage(used: u64, quota: Option<u64>) -> String {
     match quota {
         Some(q) if q > 0 => {
             let pct = (used as f64 / q as f64 * 100.0).round() as u64;
-            format!("{} / {} ({pct}%)", output::fmt_size(used), output::fmt_size(q))
+            format!(
+                "{} / {} ({pct}%)",
+                output::fmt_size(used),
+                output::fmt_size(q)
+            )
         }
         // Quota 0 = sem espaço nenhum; imprimir "(inf%)" seria pior que só o uso.
         Some(_) => format!("{} / 0 B", output::fmt_size(used)),
@@ -219,7 +236,12 @@ fn describe_one(store: &VolumeStore, v: &delonix_volume::Volume) {
     d.field("Created", output::fmt_local(v.created_unix));
     d.field("Age", output::fmt_age(v.created_unix));
     d.field("Usage", fmt_usage(store.usage(&v.name), v.quota_bytes));
-    d.field("Quota", v.quota_bytes.map(output::fmt_size).unwrap_or_else(|| "<none>".into()));
+    d.field(
+        "Quota",
+        v.quota_bytes
+            .map(output::fmt_size)
+            .unwrap_or_else(|| "<none>".into()),
+    );
     d.field_opt("Alert at", v.alert_pct.map(|p| format!("{p}%")));
     // Só existem no driver `nfs` — omitidos por inteiro no `local`.
     d.field_opt("Device", v.device.as_deref());
@@ -233,8 +255,7 @@ mod tests {
 
     #[test]
     fn volumespec_aceita_options_legado_e_mountoptions_canonico() {
-        let legado: VolumeSpec =
-            serde_yaml::from_str("driver: nfs\noptions: vers=4,ro\n").unwrap();
+        let legado: VolumeSpec = serde_yaml::from_str("driver: nfs\noptions: vers=4,ro\n").unwrap();
         assert_eq!(legado.options.as_deref(), Some("vers=4,ro"));
         let canon: VolumeSpec =
             serde_yaml::from_str("driver: nfs\nmountOptions: vers=4,ro\n").unwrap();
@@ -248,7 +269,10 @@ mod tests {
 
     #[test]
     fn usage_com_quota_mostra_percentagem() {
-        assert_eq!(fmt_usage(512 * 1024 * 1024, Some(1024 * 1024 * 1024)), "512.0 MiB / 1.00 GiB (50%)");
+        assert_eq!(
+            fmt_usage(512 * 1024 * 1024, Some(1024 * 1024 * 1024)),
+            "512.0 MiB / 1.00 GiB (50%)"
+        );
     }
 
     #[test]
@@ -275,7 +299,10 @@ fn cmd_inspect(store: &VolumeStore, name: &str) -> Result<()> {
 /// Nome de snapshot por omissão: timestamp UTC `AAAAMMDD-HHMMSS` (sem `chrono` —
 /// o runtime não o traz; usa-se `libc::gmtime_r`).
 fn default_snap_name() -> String {
-    let t = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0) as libc::time_t;
+    let t = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0) as libc::time_t;
     let mut tm: libc::tm = unsafe { std::mem::zeroed() };
     // SAFETY: `t` válido; `gmtime_r` escreve em `tm` (buffer nosso).
     unsafe { libc::gmtime_r(&t, &mut tm) };
@@ -319,15 +346,27 @@ fn cmd_snapshot(store: &VolumeStore, action: SnapshotCmd) -> Result<()> {
             }
             volsnap_run("create", std::path::Path::new(&v.mountpoint), &tarball)?;
             let size = std::fs::metadata(&tarball).map(|m| m.len()).unwrap_or(0);
-            println!("snapshot '{snap}' do volume '{volume}' criado ({})", super::output::fmt_size(size));
-            println!("{}", super::output::dim("(crash-consistente: para consistência de BD, pára/dump o consumidor primeiro)"));
+            println!(
+                "snapshot '{snap}' do volume '{volume}' criado ({})",
+                super::output::fmt_size(size)
+            );
+            println!(
+                "{}",
+                super::output::dim(
+                    "(crash-consistente: para consistência de BD, pára/dump o consumidor primeiro)"
+                )
+            );
         }
         SnapshotCmd::Ls { volume } => {
             store.inspect(&volume)?; // valida que o volume existe
             let snaps = store.list_snapshots(&volume)?;
             let mut t = super::output::Table::new(&["SNAPSHOT", "SIZE", "CREATED"]).right_align(1);
             for (n, size, ts) in snaps {
-                t.row(vec![n, super::output::fmt_size(size), super::output::fmt_local(ts.max(0) as u64)]);
+                t.row(vec![
+                    n,
+                    super::output::fmt_size(size),
+                    super::output::fmt_local(ts.max(0) as u64),
+                ]);
             }
             t.print();
         }
@@ -335,9 +374,13 @@ fn cmd_snapshot(store: &VolumeStore, action: SnapshotCmd) -> Result<()> {
             let v = store.inspect(&volume)?;
             let tarball = store.snapshot_path(&volume, &snap)?;
             if !tarball.exists() {
-                return Err(Error::NotFound(format!("snapshot {snap} do volume {volume}")));
+                return Err(Error::NotFound(format!(
+                    "snapshot {snap} do volume {volume}"
+                )));
             }
-            super::output::warn(&format!("a repor '{volume}' a partir de '{snap}' — pára os consumidores do volume primeiro"));
+            super::output::warn(&format!(
+                "a repor '{volume}' a partir de '{snap}' — pára os consumidores do volume primeiro"
+            ));
             volsnap_run("restore", std::path::Path::new(&v.mountpoint), &tarball)?;
             println!("volume '{volume}' reposto do snapshot '{snap}'");
         }

@@ -222,7 +222,11 @@ pub fn run(vm: bool, action: ImageCmd) -> Result<()> {
         ImageCmd::Dash { once } => {
             return super::dash::run(super::dash::DashScope::Images, *once);
         }
-        ImageCmd::Login { registry, username, password_stdin } => {
+        ImageCmd::Login {
+            registry,
+            username,
+            password_stdin,
+        } => {
             return cmd_login(registry, username, *password_stdin);
         }
         ImageCmd::Logout { registry } => {
@@ -239,9 +243,25 @@ pub fn run(vm: bool, action: ImageCmd) -> Result<()> {
             VmSub::Describe { names } => VmImageCmd::Describe { names },
             VmSub::Pull { source, name } => VmImageCmd::Pull { source, name },
             VmSub::Push { name, target } => VmImageCmd::Push { name, target },
-            VmSub::Build { tag, ubuntu_release, k8s_version, extra_packages, extra_run, cri_bin, no_compress, offline } => {
-                VmImageCmd::Build { tag, ubuntu_release, k8s_version, extra_packages, extra_run, cri_bin, no_compress, offline }
-            }
+            VmSub::Build {
+                tag,
+                ubuntu_release,
+                k8s_version,
+                extra_packages,
+                extra_run,
+                cri_bin,
+                no_compress,
+                offline,
+            } => VmImageCmd::Build {
+                tag,
+                ubuntu_release,
+                k8s_version,
+                extra_packages,
+                extra_run,
+                cri_bin,
+                no_compress,
+                offline,
+            },
         });
     }
     if vm {
@@ -305,26 +325,51 @@ fn run_vm(action: ImageCmd) -> Result<()> {
         ImageCmd::Dash { .. } => unreachable!("tratado no topo de run"),
         ImageCmd::Ls => VmImageCmd::Ls,
         ImageCmd::Describe { names } => VmImageCmd::Describe { names },
-        ImageCmd::Pull { image, verify: _ } => VmImageCmd::Pull { source: image, name: None },
+        ImageCmd::Pull { image, verify: _ } => VmImageCmd::Pull {
+            source: image,
+            name: None,
+        },
         ImageCmd::Push { name, target } => VmImageCmd::Push {
             name,
             // Uma imagem VM não tem repo_tags de onde inferir o destino.
-            target: target.ok_or_else(|| Error::Invalid("`image --vm push <nome> <destino>`: o destino é obrigatório".into()))?,
+            target: target.ok_or_else(|| {
+                Error::Invalid("`image --vm push <nome> <destino>`: o destino é obrigatório".into())
+            })?,
         },
-        ImageCmd::Build { tag, ubuntu_release, k8s_version, extra_packages, extra_run, cri_bin, no_compress, offline } => {
-            VmImageCmd::Build { tag, ubuntu_release, k8s_version, extra_packages, extra_run, cri_bin, no_compress, offline }
-        }
-        ImageCmd::Tag { .. } | ImageCmd::History { .. } | ImageCmd::Verify { .. } | ImageCmd::Scan { .. } => {
-            return Err(Error::Invalid(
-                "tag/history/verify são de imagens de container — não se aplicam a imagens VM (--vm)".into(),
-            ))
-        }
+        ImageCmd::Build {
+            tag,
+            ubuntu_release,
+            k8s_version,
+            extra_packages,
+            extra_run,
+            cri_bin,
+            no_compress,
+            offline,
+        } => VmImageCmd::Build {
+            tag,
+            ubuntu_release,
+            k8s_version,
+            extra_packages,
+            extra_run,
+            cri_bin,
+            no_compress,
+            offline,
+        },
+        ImageCmd::Tag { .. }
+        | ImageCmd::History { .. }
+        | ImageCmd::Verify { .. }
+        | ImageCmd::Scan { .. } => return Err(Error::Invalid(
+            "tag/history/verify são de imagens de container — não se aplicam a imagens VM (--vm)"
+                .into(),
+        )),
         ImageCmd::Rm { .. } | ImageCmd::Export { .. } | ImageCmd::Apply { .. } => {
             return Err(Error::Invalid(
                 "comando não disponível para imagens VM (--vm) — usa ls/pull/push/build".into(),
             ))
         }
-        ImageCmd::Login { .. } | ImageCmd::Logout { .. } | ImageCmd::Vm { .. } => unreachable!("tratados em run()"),
+        ImageCmd::Login { .. } | ImageCmd::Logout { .. } | ImageCmd::Vm { .. } => {
+            unreachable!("tratados em run()")
+        }
     };
     vmimage::run(mapped)
 }
@@ -341,14 +386,22 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
                 println!("image/{name}: garantida ({reference})");
             }
             (None, Some(b)) => {
-                let file = b.file.unwrap_or_else(|| super::build::default_build_file(&b.context));
+                let file = b
+                    .file
+                    .unwrap_or_else(|| super::build::default_build_file(&b.context));
                 let img = super::build::build_from_spec(&b.context, &file, &b.tag)?;
                 println!("image/{name}: construída ({})", img.short_id());
             }
             (Some(_), Some(_)) => {
-                return Err(Error::Invalid(format!("image/{name}: spec tem `pull` E `build` — só um dos dois")))
+                return Err(Error::Invalid(format!(
+                    "image/{name}: spec tem `pull` E `build` — só um dos dois"
+                )))
             }
-            (None, None) => return Err(Error::Invalid(format!("image/{name}: spec sem `pull` nem `build`"))),
+            (None, None) => {
+                return Err(Error::Invalid(format!(
+                    "image/{name}: spec sem `pull` nem `build`"
+                )))
+            }
         }
     }
     Ok(())
@@ -388,8 +441,14 @@ fn cmd_history(images: &ImageStore, image: &str) -> Result<()> {
     let img = images.resolve(image)?;
     let mut t = super::output::Table::new(&["#", "LAYER", "SIZE"]).right_align(2);
     for (i, dg) in img.layers.iter().enumerate() {
-        let size = std::fs::metadata(images.cas().path(dg)).map(|m| m.len()).unwrap_or(0);
-        t.row(vec![i.to_string(), super::output::truncate(dg, 23), super::output::fmt_size(size)]);
+        let size = std::fs::metadata(images.cas().path(dg))
+            .map(|m| m.len())
+            .unwrap_or(0);
+        t.row(vec![
+            i.to_string(),
+            super::output::truncate(dg, 23),
+            super::output::fmt_size(size),
+        ]);
     }
     t.print();
     Ok(())
@@ -440,9 +499,14 @@ fn cmd_ls(images: &ImageStore) -> Result<()> {
     let mut imgs = images.list()?;
     // O mais recente primeiro, como no `docker images`.
     imgs.sort_by(|a, b| b.created_unix.cmp(&a.created_unix));
-    let mut t = super::output::Table::new(&["REPOSITORY:TAG", "IMAGE ID", "CREATED", "SIZE"]).right_align(3);
+    let mut t = super::output::Table::new(&["REPOSITORY:TAG", "IMAGE ID", "CREATED", "SIZE"])
+        .right_align(3);
     for img in imgs {
-        let tag = img.repo_tags.first().cloned().unwrap_or_else(|| "<none>".into());
+        let tag = img
+            .repo_tags
+            .first()
+            .cloned()
+            .unwrap_or_else(|| "<none>".into());
         t.row(vec![
             // `display_ref` tira o `@sha256:…` redundante (a tag ja identifica);
             // o `truncate` e' a rede de seguranca para nomes de repo enormes.
@@ -450,7 +514,9 @@ fn cmd_ls(images: &ImageStore) -> Result<()> {
             img.short_id(),
             // Era o epoch cru (`CRIADA(unix)`) — ilegível numa tabela.
             super::output::fmt_age(img.created_unix),
-            image_size(images, &img).map(super::output::fmt_size).unwrap_or_else(|| "-".into()),
+            image_size(images, &img)
+                .map(super::output::fmt_size)
+                .unwrap_or_else(|| "-".into()),
         ]);
     }
     t.print();
@@ -481,7 +547,9 @@ fn describe_one(images: &ImageStore, img: &delonix_image::Image) {
     d.field("Age", super::output::fmt_age(img.created_unix));
     d.field(
         "Size",
-        image_size(images, img).map(super::output::fmt_size).unwrap_or_else(|| "<unknown>".into()),
+        image_size(images, img)
+            .map(super::output::fmt_size)
+            .unwrap_or_else(|| "<unknown>".into()),
     );
 
     // Layers com o tamanho de cada blob — é o que mostra ONDE está o peso.
@@ -499,9 +567,30 @@ fn describe_one(images: &ImageStore, img: &delonix_image::Image) {
 
     let c = &img.config;
     d.section("Config");
-    d.sub("Entrypoint", if c.entrypoint.is_empty() { "<none>".to_string() } else { c.entrypoint.join(" ") });
-    d.sub("Cmd", if c.cmd.is_empty() { "<none>".to_string() } else { c.cmd.join(" ") });
-    d.sub("Workdir", if c.working_dir.is_empty() { "/" } else { &c.working_dir });
+    d.sub(
+        "Entrypoint",
+        if c.entrypoint.is_empty() {
+            "<none>".to_string()
+        } else {
+            c.entrypoint.join(" ")
+        },
+    );
+    d.sub(
+        "Cmd",
+        if c.cmd.is_empty() {
+            "<none>".to_string()
+        } else {
+            c.cmd.join(" ")
+        },
+    );
+    d.sub(
+        "Workdir",
+        if c.working_dir.is_empty() {
+            "/"
+        } else {
+            &c.working_dir
+        },
+    );
     d.sub("User", if c.user.is_empty() { "root" } else { &c.user });
     // Extensões Delonix do Dockerfile/Delonixfile (`CPUS`/`MEMORY`/`SECURITY`/
     // `HEALTHCHECK`) — omitidas por inteiro nas imagens que não as tenham.
@@ -524,11 +613,16 @@ fn cmd_rm(images: &ImageStore, reference: &str) -> Result<()> {
 /// Escreve um bundle OCI runtime mínimo (rootfs + config.json) para `runc`/`crun`.
 fn cmd_export(images: &ImageStore, reference: &str, dir: &std::path::Path) -> Result<()> {
     let img = resolve_or_pull(images, reference)?;
-    std::fs::create_dir_all(dir).map_err(|e| Error::Invalid(format!("mkdir {}: {e}", dir.display())))?;
+    std::fs::create_dir_all(dir)
+        .map_err(|e| Error::Invalid(format!("mkdir {}: {e}", dir.display())))?;
     let rootfs = dir.join("rootfs");
     images.export_rootfs(&img, &rootfs)?;
     let args = effective_command(&img, &[]);
-    let args = if args.is_empty() { vec!["/bin/sh".to_string()] } else { args };
+    let args = if args.is_empty() {
+        vec!["/bin/sh".to_string()]
+    } else {
+        args
+    };
     let cwd = if img.config.working_dir.is_empty() {
         "/".to_string()
     } else {

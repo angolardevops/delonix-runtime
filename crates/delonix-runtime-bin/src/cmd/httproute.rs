@@ -47,12 +47,25 @@ pub fn run(action: HttpRouteCmd) -> Result<()> {
                 .and_then(|b| serde_json::from_slice::<ProxyConfig>(&b).ok());
             match cfg {
                 Some(c) => {
-                    println!("httproute: proxy A SERVIR — {} listener(s), {} rota(s)", c.listeners.len(), c.routes.len());
+                    println!(
+                        "httproute: proxy A SERVIR — {} listener(s), {} rota(s)",
+                        c.listeners.len(),
+                        c.routes.len()
+                    );
                     for l in &c.listeners {
-                        println!("  listener :{} {}", l.port, if l.tls { "(TLS)" } else { "" });
+                        println!(
+                            "  listener :{} {}",
+                            l.port,
+                            if l.tls { "(TLS)" } else { "" }
+                        );
                     }
                     for r in &c.routes {
-                        println!("  {} {} → {}", if r.host.is_empty() { "*" } else { &r.host }, r.path, r.backend);
+                        println!(
+                            "  {} {} → {}",
+                            if r.host.is_empty() { "*" } else { &r.host },
+                            r.path,
+                            r.backend
+                        );
                     }
                 }
                 None => println!("httproute: proxy a correr mas a config não leu"),
@@ -185,7 +198,8 @@ pub fn valid_path_prefix(p: &str) -> bool {
 pub fn valid_service(s: &str) -> bool {
     !s.is_empty()
         && s.len() <= 128
-        && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.')
+        && s.chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.')
 }
 
 /// Valida um `HttpRouteSpec` já desserializado (chamado no apply e reutilizável no
@@ -194,17 +208,24 @@ pub fn validate_spec(name: &str, spec: &HttpRouteSpec) -> Result<()> {
     let err = |m: String| Error::Invalid(format!("HTTPRoute '{name}': {m}"));
 
     if spec.rules.is_empty() {
-        return Err(err("spec.rules não pode ser vazio (nada para rotear)".into()));
+        return Err(err(
+            "spec.rules não pode ser vazio (nada para rotear)".into()
+        ));
     }
     // TLS: se algum entrypoint pede tls, ou mode: secretRef, o spec.tls tem de
     // fazer sentido.
     if let Some(tls) = &spec.tls {
         let mode = tls.mode.as_deref().unwrap_or("selfSigned");
         if !matches!(mode, "selfSigned" | "secretRef") {
-            return Err(err(format!("tls.mode inválido '{mode}' (usa selfSigned|secretRef)")));
+            return Err(err(format!(
+                "tls.mode inválido '{mode}' (usa selfSigned|secretRef)"
+            )));
         }
         if mode == "secretRef" && tls.secret_ref.as_deref().unwrap_or("").is_empty() {
-            return Err(err("tls.mode: secretRef exige tls.secretRef (nome do Secret com tls.crt/tls.key)".into()));
+            return Err(err(
+                "tls.mode: secretRef exige tls.secretRef (nome do Secret com tls.crt/tls.key)"
+                    .into(),
+            ));
         }
     }
     // Um entrypoint com tls: true exige spec.tls definido (senão não há cert).
@@ -213,12 +234,16 @@ pub fn validate_spec(name: &str, spec: &HttpRouteSpec) -> Result<()> {
             return Err(err("entrypoint com port: 0 inválido".into()));
         }
         if ep.tls && spec.tls.is_none() {
-            return Err(err(format!("entrypoint :{} pede tls mas spec.tls não está definido", ep.port)));
+            return Err(err(format!(
+                "entrypoint :{} pede tls mas spec.tls não está definido",
+                ep.port
+            )));
         }
     }
     // Pares (host, path) exactamente iguais tornam uma das rotas morta em silêncio
     // (o matcher da F2 escolhe uma) — apanha o conflito já na validação.
-    let mut seen_routes: std::collections::HashSet<(String, String)> = std::collections::HashSet::new();
+    let mut seen_routes: std::collections::HashSet<(String, String)> =
+        std::collections::HashSet::new();
     // Regras: cada host (se presente) e cada path/backend válidos.
     for (i, rule) in spec.rules.iter().enumerate() {
         if let Some(host) = &rule.host {
@@ -227,17 +252,27 @@ pub fn validate_spec(name: &str, spec: &HttpRouteSpec) -> Result<()> {
             }
         }
         if rule.paths.is_empty() {
-            return Err(err(format!("rules[{i}] sem paths (nada para rotear neste host)")));
+            return Err(err(format!(
+                "rules[{i}] sem paths (nada para rotear neste host)"
+            )));
         }
         for (j, pr) in rule.paths.iter().enumerate() {
             if !valid_path_prefix(&pr.path) {
-                return Err(err(format!("rules[{i}].paths[{j}].path inválido '{}'", pr.path)));
+                return Err(err(format!(
+                    "rules[{i}].paths[{j}].path inválido '{}'",
+                    pr.path
+                )));
             }
             if !valid_service(&pr.backend.service) {
-                return Err(err(format!("rules[{i}].paths[{j}].backend.service inválido '{}'", pr.backend.service)));
+                return Err(err(format!(
+                    "rules[{i}].paths[{j}].backend.service inválido '{}'",
+                    pr.backend.service
+                )));
             }
             if pr.backend.port == 0 {
-                return Err(err(format!("rules[{i}].paths[{j}].backend.port: 0 inválido")));
+                return Err(err(format!(
+                    "rules[{i}].paths[{j}].backend.port: 0 inválido"
+                )));
             }
             let route_key = (rule.host.clone().unwrap_or_default(), pr.path.clone());
             if !seen_routes.insert(route_key) {
@@ -296,11 +331,20 @@ fn tls_from_secret(name: &str) -> Result<TlsMaterial> {
     let store = delonix_runtime_core::SecretStore::open(super::util::state_root())?;
     let s = store.load(name)?;
     let pick = |a: &str, b: &str| s.data.get(a).or_else(|| s.data.get(b)).cloned();
-    let cert = pick("tls_crt", "tls.crt")
-        .ok_or_else(|| Error::Invalid(format!("Secret '{name}': falta a chave tls_crt/tls.crt (cert PEM)")))?;
-    let key = pick("tls_key", "tls.key")
-        .ok_or_else(|| Error::Invalid(format!("Secret '{name}': falta a chave tls_key/tls.key (chave PEM)")))?;
-    Ok(TlsMaterial { cert_pem: cert, key_pem: key })
+    let cert = pick("tls_crt", "tls.crt").ok_or_else(|| {
+        Error::Invalid(format!(
+            "Secret '{name}': falta a chave tls_crt/tls.crt (cert PEM)"
+        ))
+    })?;
+    let key = pick("tls_key", "tls.key").ok_or_else(|| {
+        Error::Invalid(format!(
+            "Secret '{name}': falta a chave tls_key/tls.key (chave PEM)"
+        ))
+    })?;
+    Ok(TlsMaterial {
+        cert_pem: cert,
+        key_pem: key,
+    })
 }
 
 /// Resolve TODOS os HTTPRoute do manifesto numa única `ProxyConfig` (um proxy
@@ -319,9 +363,15 @@ fn resolve_config(specs: &[(String, HttpRouteSpec)]) -> Result<Option<ProxyConfi
     for (name, spec) in specs {
         // Listeners: os declarados, ou o default (:80, e :443 tls se houver spec.tls).
         let eps = if spec.entrypoints.is_empty() {
-            let mut d = vec![Entrypoint { port: 80, tls: false }];
+            let mut d = vec![Entrypoint {
+                port: 80,
+                tls: false,
+            }];
             if spec.tls.is_some() {
-                d.push(Entrypoint { port: 443, tls: true });
+                d.push(Entrypoint {
+                    port: 443,
+                    tls: true,
+                });
             }
             d
         } else {
@@ -331,7 +381,10 @@ fn resolve_config(specs: &[(String, HttpRouteSpec)]) -> Result<Option<ProxyConfi
             // Dedup por porta; se colidir, TLS ganha (mais restritivo/seguro).
             match listeners.iter_mut().find(|l| l.port == ep.port) {
                 Some(l) => l.tls = l.tls || ep.tls,
-                None => listeners.push(Listener { port: ep.port, tls: ep.tls }),
+                None => listeners.push(Listener {
+                    port: ep.port,
+                    tls: ep.tls,
+                }),
             }
         }
         // TLS: memoriza o secretRef (resolve-se no fim) ou marca self-signed.
@@ -369,7 +422,11 @@ fn resolve_config(specs: &[(String, HttpRouteSpec)]) -> Result<Option<ProxyConfi
         });
     }
 
-    Ok(Some(ProxyConfig { listeners, routes, tls: tls_material }))
+    Ok(Some(ProxyConfig {
+        listeners,
+        routes,
+        tls: tls_material,
+    }))
 }
 
 /// `stack apply` (e o auto-registo, mais tarde): resolve os HTTPRoute e garante o
@@ -387,7 +444,11 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
         cfg.routes.len(),
         cfg.listeners.len(),
         if cfg.tls.is_some() { " (TLS)" } else { "" },
-        if ingress_proxy::is_running() { "a servir" } else { "arrancado" }
+        if ingress_proxy::is_running() {
+            "a servir"
+        } else {
+            "arrancado"
+        }
     );
     Ok(())
 }
@@ -491,9 +552,8 @@ mod tests {
 
     #[test]
     fn backend_service_malicioso_rejeitado() {
-        let r = parse(
-            "rules:\n  - paths:\n      - backend: { service: \"web; rm -rf\", port: 80 }\n",
-        );
+        let r =
+            parse("rules:\n  - paths:\n      - backend: { service: \"web; rm -rf\", port: 80 }\n");
         assert!(r.is_err());
     }
 }

@@ -73,7 +73,12 @@ pub fn networks() -> Vec<CompletionCandidate> {
 }
 
 pub fn vms() -> Vec<CompletionCandidate> {
-    cands(delonix_vm::list(&state_root()).unwrap_or_default().into_iter().map(|v| v.name))
+    cands(
+        delonix_vm::list(&state_root())
+            .unwrap_or_default()
+            .into_iter()
+            .map(|v| v.name),
+    )
 }
 
 /// Clusters do modo kind — derivados da label dos nós, que é a fonte de verdade

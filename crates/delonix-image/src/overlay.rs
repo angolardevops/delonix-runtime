@@ -55,16 +55,26 @@ fn apply_layer_flat(data: &[u8], dest: &Path) -> Result<()> {
     let mut ar = tar::Archive::new(reader);
     ar.set_preserve_permissions(true);
     ar.set_overwrite(true);
-    for entry in ar.entries().map_err(|e| Error::Invalid(format!("tar: {e}")))? {
+    for entry in ar
+        .entries()
+        .map_err(|e| Error::Invalid(format!("tar: {e}")))?
+    {
         let mut entry = entry.map_err(|e| Error::Invalid(format!("tar entry: {e}")))?;
-        let path = entry.path().map_err(|e| Error::Invalid(format!("tar path: {e}")))?.into_owned();
+        let path = entry
+            .path()
+            .map_err(|e| Error::Invalid(format!("tar path: {e}")))?
+            .into_owned();
         let name = path.file_name().and_then(|s| s.to_str()).unwrap_or("");
         if let Some(target) = name.strip_prefix(".wh.") {
-            let parent = path.parent().map(|p| dest.join(p)).unwrap_or_else(|| dest.to_path_buf());
+            let parent = path
+                .parent()
+                .map(|p| dest.join(p))
+                .unwrap_or_else(|| dest.to_path_buf());
             if target == ".wh..opq" {
                 if let Ok(rd) = std::fs::read_dir(&parent) {
                     for e in rd.flatten() {
-                        let _ = std::fs::remove_dir_all(e.path()).or_else(|_| std::fs::remove_file(e.path()));
+                        let _ = std::fs::remove_dir_all(e.path())
+                            .or_else(|_| std::fs::remove_file(e.path()));
                     }
                 }
             } else {
@@ -306,7 +316,8 @@ mod tests {
             fh.set_size(content.len() as u64);
             fh.set_mode(0o644);
             fh.set_cksum();
-            b.append_data(&mut fh, "ro/libc.so.6", &content[..]).unwrap();
+            b.append_data(&mut fh, "ro/libc.so.6", &content[..])
+                .unwrap();
             b.finish().unwrap();
         }
         let dir = std::env::temp_dir().join(format!("delonix-flat-ro-{}", std::process::id()));
@@ -317,8 +328,14 @@ mod tests {
             dir.join("ro/libc.so.6").exists(),
             "ficheiro dentro de directório read-only tem de ser extraído (bug rootless)"
         );
-        let mode = std::fs::metadata(dir.join("ro")).unwrap().permissions().mode();
-        assert!(mode & 0o200 != 0, "o directório tem de ficar gravável pelo dono (fix)");
+        let mode = std::fs::metadata(dir.join("ro"))
+            .unwrap()
+            .permissions()
+            .mode();
+        assert!(
+            mode & 0o200 != 0,
+            "o directório tem de ficar gravável pelo dono (fix)"
+        );
         std::fs::remove_dir_all(&dir).ok();
     }
 
@@ -342,7 +359,8 @@ mod tests {
             fh.set_size(content.len() as u64);
             fh.set_mode(0o644);
             fh.set_cksum();
-            b.append_data(&mut fh, "cfgdir/config.toml", &content[..]).unwrap();
+            b.append_data(&mut fh, "cfgdir/config.toml", &content[..])
+                .unwrap();
             b.finish().unwrap();
         }
         let dir = std::env::temp_dir().join(format!("delonix-flat-nox-{}", std::process::id()));
@@ -353,7 +371,10 @@ mod tests {
             dir.join("cfgdir/config.toml").exists(),
             "ficheiro num dir 0644 (sem x) tem de ser extraído (regressão Kind/containerd)"
         );
-        let mode = std::fs::metadata(dir.join("cfgdir")).unwrap().permissions().mode();
+        let mode = std::fs::metadata(dir.join("cfgdir"))
+            .unwrap()
+            .permissions()
+            .mode();
         assert_eq!(mode & 0o300, 0o300, "o dir tem de ficar com w+x do dono");
         std::fs::remove_dir_all(&dir).ok();
     }
@@ -383,7 +404,10 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         extract_layer(&zstd_bytes, &dir).unwrap();
-        assert_eq!(std::fs::read_to_string(dir.join("hello.txt")).unwrap(), "camada");
+        assert_eq!(
+            std::fs::read_to_string(dir.join("hello.txt")).unwrap(),
+            "camada"
+        );
 
         // o caminho gzip continua a funcionar
         let mut gz = Vec::new();
@@ -396,7 +420,10 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         extract_layer(&gz, &dir).unwrap();
-        assert_eq!(std::fs::read_to_string(dir.join("hello.txt")).unwrap(), "camada");
+        assert_eq!(
+            std::fs::read_to_string(dir.join("hello.txt")).unwrap(),
+            "camada"
+        );
         std::fs::remove_dir_all(&dir).ok();
     }
 }

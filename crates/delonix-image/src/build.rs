@@ -13,7 +13,11 @@ pub enum Step {
     Run(String),
     /// `COPY [--from=<stage>] <src> <dst>` — copia do *contexto* de build (ou de
     /// um estágio anterior, se `from` estiver presente — build multi-stage).
-    Copy { src: String, dst: String, from: Option<String> },
+    Copy {
+        src: String,
+        dst: String,
+        from: Option<String>,
+    },
     /// `ENV K=V` (ou `ENV K V`) — define uma variável (afecta os `RUN` seguintes).
     Env { key: String, val: String },
     /// `WORKDIR <dir>` — directório de trabalho dos `RUN` seguintes.
@@ -121,19 +125,35 @@ pub fn parse_dockerfile(text: &str) -> Result<Dockerfile> {
                     (Some(kw), Some(nm)) if kw.eq_ignore_ascii_case("as") => Some(nm.to_string()),
                     _ => None,
                 };
-                stages.push(Stage { name, from, steps: Vec::new() });
+                stages.push(Stage {
+                    name,
+                    from,
+                    steps: Vec::new(),
+                });
             }
-            "RUN" => stages.last_mut().unwrap().steps.push(Step::Run(rest.to_string())),
+            "RUN" => stages
+                .last_mut()
+                .unwrap()
+                .steps
+                .push(Step::Run(rest.to_string())),
             "CMD" => df.cmd = parse_cmd(rest),
             "ENTRYPOINT" => df.entrypoint = parse_cmd(rest),
             "ENV" => {
                 // `ENV k1=v1 k2="v 2" …` (múltiplas vars) OU o legado `ENV k v`.
                 for (key, val) in parse_env_pairs(rest) {
-                    stages.last_mut().unwrap().steps.push(Step::Env { key, val });
+                    stages
+                        .last_mut()
+                        .unwrap()
+                        .steps
+                        .push(Step::Env { key, val });
                 }
             }
             "WORKDIR" => {
-                stages.last_mut().unwrap().steps.push(Step::Workdir(rest.to_string()));
+                stages
+                    .last_mut()
+                    .unwrap()
+                    .steps
+                    .push(Step::Workdir(rest.to_string()));
             }
             "COPY" | "ADD" => {
                 // `COPY [--from=<estágio>] <src> <dst>`
@@ -150,7 +170,10 @@ pub fn parse_dockerfile(text: &str) -> Result<Dockerfile> {
                     })
                     .collect();
                 if parts.len() < 2 {
-                    return Err(Error::Invalid(format!("linha {}: {instr} precisa de src e dst", n + 1)));
+                    return Err(Error::Invalid(format!(
+                        "linha {}: {instr} precisa de src e dst",
+                        n + 1
+                    )));
                 }
                 stages.last_mut().unwrap().steps.push(Step::Copy {
                     src: parts[0].to_string(),
@@ -189,7 +212,9 @@ pub fn parse_dockerfile(text: &str) -> Result<Dockerfile> {
         }
     }
     // O último estágio é o final (a imagem resultante); os anteriores são intermédios.
-    let last = stages.pop().ok_or_else(|| Error::Invalid("Dockerfile sem instrução FROM".into()))?;
+    let last = stages
+        .pop()
+        .ok_or_else(|| Error::Invalid("Dockerfile sem instrução FROM".into()))?;
     df.from = last.from;
     df.steps = last.steps;
     df.stages = stages;
@@ -284,7 +309,10 @@ impl ImageStore {
                 }
             }
         }
-        base.layers.iter().map(|l| format!("sha256:{}", strip(l))).collect()
+        base.layers
+            .iter()
+            .map(|l| format!("sha256:{}", strip(l)))
+            .collect()
     }
 
     /// Empacota o `upperdir` de um container de construção como tar -> CAS.
@@ -318,7 +346,11 @@ impl ImageStore {
     ) -> Result<Image> {
         let mut layers = base.layers.clone();
         layers.push(new_layer);
-        let cmd = if df.cmd.is_empty() { base.config.cmd.clone() } else { df.cmd.clone() };
+        let cmd = if df.cmd.is_empty() {
+            base.config.cmd.clone()
+        } else {
+            df.cmd.clone()
+        };
         let entrypoint = if df.entrypoint.is_empty() {
             base.config.entrypoint.clone()
         } else {
@@ -344,7 +376,10 @@ impl ImageStore {
         } else {
             df.security.clone()
         };
-        let healthcheck = df.healthcheck.clone().or_else(|| base.config.healthcheck.clone());
+        let healthcheck = df
+            .healthcheck
+            .clone()
+            .or_else(|| base.config.healthcheck.clone());
         let workdir = df.workdir.clone().unwrap_or_default();
         let config_json = serde_json::json!({
             // Campos standard do config de imagem OCI/Docker (interop).
@@ -362,7 +397,17 @@ impl ImageStore {
             id,
             repo_tags,
             layers,
-            config: ImageConfig { cmd, entrypoint, env, cpus, memory, security, healthcheck, user: String::new(), working_dir: workdir.clone() },
+            config: ImageConfig {
+                cmd,
+                entrypoint,
+                env,
+                cpus,
+                memory,
+                security,
+                healthcheck,
+                user: String::new(),
+                working_dir: workdir.clone(),
+            },
             created_unix: created,
         };
         self.enforce_tag_uniqueness(&img)?;
@@ -387,7 +432,8 @@ impl ImageStore {
             b.follow_symlinks(false);
             b.append_dir_all(".", rootfs)
                 .map_err(|e| Error::Invalid(format!("empacotar rootfs: {e}")))?;
-            b.finish().map_err(|e| Error::Invalid(format!("fechar tar: {e}")))?;
+            b.finish()
+                .map_err(|e| Error::Invalid(format!("fechar tar: {e}")))?;
         }
         self.commit_flat_rootfs_from_tar(buf, cmd, env, workdir, tag)
     }
@@ -423,7 +469,17 @@ impl ImageStore {
             id,
             repo_tags,
             layers: vec![layer],
-            config: ImageConfig { cmd, entrypoint: Vec::new(), env, cpus: None, memory: None, security: Vec::new(), healthcheck: None, user: String::new(), working_dir: workdir },
+            config: ImageConfig {
+                cmd,
+                entrypoint: Vec::new(),
+                env,
+                cpus: None,
+                memory: None,
+                security: Vec::new(),
+                healthcheck: None,
+                user: String::new(),
+                working_dir: workdir,
+            },
             created_unix: created,
         };
         self.enforce_tag_uniqueness(&img)?;
@@ -467,7 +523,17 @@ impl ImageStore {
             id,
             repo_tags,
             layers,
-            config: ImageConfig { cmd, entrypoint, env, cpus, memory, security, healthcheck, user: String::new(), working_dir: workdir.clone() },
+            config: ImageConfig {
+                cmd,
+                entrypoint,
+                env,
+                cpus,
+                memory,
+                security,
+                healthcheck,
+                user: String::new(),
+                working_dir: workdir.clone(),
+            },
             created_unix: created,
         };
         self.enforce_tag_uniqueness(&img)?;
@@ -484,8 +550,16 @@ mod tests {
     fn join_continuations_coalesces_backslash_lines() {
         let df = "RUN apt install \\\n    a \\\n    b\nENV X=1";
         let lines: Vec<String> = join_continuations(df).into_iter().map(|(_, l)| l).collect();
-        assert_eq!(lines.len(), 2, "3 linhas físicas do RUN → 1 lógica, + o ENV");
-        assert!(lines[0].starts_with("RUN apt install") && lines[0].contains(" a ") && lines[0].contains(" b"));
+        assert_eq!(
+            lines.len(),
+            2,
+            "3 linhas físicas do RUN → 1 lógica, + o ENV"
+        );
+        assert!(
+            lines[0].starts_with("RUN apt install")
+                && lines[0].contains(" a ")
+                && lines[0].contains(" b")
+        );
         assert_eq!(lines[1], "ENV X=1");
     }
 
@@ -493,17 +567,26 @@ mod tests {
     fn parse_env_pairs_handles_multi_var_and_quotes() {
         // Multi-var numa linha — o bug que perdia o PATH.
         let p = parse_env_pairs("A=1 B=2 PATH=/app/.venv/bin:$PATH");
-        assert_eq!(p, vec![
-            ("A".into(), "1".into()),
-            ("B".into(), "2".into()),
-            ("PATH".into(), "/app/.venv/bin:$PATH".into()),
-        ]);
+        assert_eq!(
+            p,
+            vec![
+                ("A".into(), "1".into()),
+                ("B".into(), "2".into()),
+                ("PATH".into(), "/app/.venv/bin:$PATH".into()),
+            ]
+        );
         // Valor com espaços entre aspas.
-        assert_eq!(parse_env_pairs(r#"MSG="hello world" K=v"#), vec![
-            ("MSG".into(), "hello world".into()),
-            ("K".into(), "v".into()),
-        ]);
+        assert_eq!(
+            parse_env_pairs(r#"MSG="hello world" K=v"#),
+            vec![
+                ("MSG".into(), "hello world".into()),
+                ("K".into(), "v".into()),
+            ]
+        );
         // Legado `ENV chave valor` (sem `=`).
-        assert_eq!(parse_env_pairs("GREETING olá mundo"), vec![("GREETING".into(), "olá mundo".into())]);
+        assert_eq!(
+            parse_env_pairs("GREETING olá mundo"),
+            vec![("GREETING".into(), "olá mundo".into())]
+        );
     }
 }

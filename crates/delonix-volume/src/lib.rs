@@ -146,7 +146,9 @@ impl VolumeStore {
         // Os drivers de rede exigem um `device` (o alvo da montagem): nfs
         // `servidor:/export`, cifs `//servidor/share`, webdav `https://…`.
         if is_network_driver(driver) && device.as_deref().unwrap_or("").is_empty() {
-            return Err(Error::Invalid(format!("volume {driver} requer um device (o alvo da montagem)")));
+            return Err(Error::Invalid(format!(
+                "volume {driver} requer um device (o alvo da montagem)"
+            )));
         }
         let data = self.data_dir(name);
         fs::create_dir_all(&data)?;
@@ -182,16 +184,18 @@ impl VolumeStore {
         // (ex.: após reinício do host). Best-effort — sem privilégio, no-op.
         let img = self.loop_img(&vol.name);
         if vol.quota_bytes.is_some() && img.exists() && !is_mounted(&vol.mountpoint) {
-            let _ = Self::run("mount", &["-o", "loop", &img.to_string_lossy(), &vol.mountpoint]);
+            let _ = Self::run(
+                "mount",
+                &["-o", "loop", &img.to_string_lossy(), &vol.mountpoint],
+            );
         }
         if !is_network_driver(&vol.driver) || is_mounted(&vol.mountpoint) {
             return Ok(());
         }
         let fstype = mount_fstype(&vol.driver);
-        let device = vol
-            .device
-            .as_ref()
-            .ok_or_else(|| Error::Invalid(format!("volume {} '{}' sem device", vol.driver, vol.name)))?;
+        let device = vol.device.as_ref().ok_or_else(|| {
+            Error::Invalid(format!("volume {} '{}' sem device", vol.driver, vol.name))
+        })?;
         let mut args = vec!["-t", fstype, device.as_str(), vol.mountpoint.as_str()];
         if let Some(o) = &vol.options {
             args.push("-o");
@@ -205,9 +209,15 @@ impl VolumeStore {
         let out = std::process::Command::new("mount")
             .args(&args)
             .output()
-            .map_err(|e| Error::Runtime { context: ctx, message: e.to_string() })?;
+            .map_err(|e| Error::Runtime {
+                context: ctx,
+                message: e.to_string(),
+            })?;
         if !out.status.success() {
-            return Err(Error::Runtime { context: ctx, message: String::from_utf8_lossy(&out.stderr).trim().to_string() });
+            return Err(Error::Runtime {
+                context: ctx,
+                message: String::from_utf8_lossy(&out.stderr).trim().to_string(),
+            });
         }
         Ok(())
     }
@@ -266,11 +276,17 @@ impl VolumeStore {
     pub fn list_snapshots(&self, name: &str) -> Result<Vec<(String, u64, i64)>> {
         let dir = self.snapshots_dir(name);
         let mut out = Vec::new();
-        let Ok(rd) = fs::read_dir(&dir) else { return Ok(out) };
+        let Ok(rd) = fs::read_dir(&dir) else {
+            return Ok(out);
+        };
         for e in rd.flatten() {
             let p = e.path();
-            let Some(fname) = p.file_name().and_then(|f| f.to_str()) else { continue };
-            let Some(snap) = fname.strip_suffix(".tar.gz") else { continue };
+            let Some(fname) = p.file_name().and_then(|f| f.to_str()) else {
+                continue;
+            };
+            let Some(snap) = fname.strip_suffix(".tar.gz") else {
+                continue;
+            };
             let md = e.metadata().ok();
             let size = md.as_ref().map(|m| m.len()).unwrap_or(0);
             let mtime = md
@@ -288,7 +304,9 @@ impl VolumeStore {
     pub fn remove_snapshot(&self, volume: &str, snap: &str) -> Result<()> {
         let p = self.snapshot_path(volume, snap)?;
         if !p.exists() {
-            return Err(Error::NotFound(format!("snapshot {snap} do volume {volume}")));
+            return Err(Error::NotFound(format!(
+                "snapshot {snap} do volume {volume}"
+            )));
         }
         fs::remove_file(p)?;
         Ok(())
@@ -302,8 +320,12 @@ impl VolumeStore {
         }
         if let Ok(v) = self.inspect(name) {
             // desmonta nfs OU o loopback de quota dura antes de apagar os dados.
-            if (is_network_driver(&v.driver) || v.quota_bytes.is_some()) && is_mounted(&v.mountpoint) {
-                let _ = std::process::Command::new("umount").arg(&v.mountpoint).output();
+            if (is_network_driver(&v.driver) || v.quota_bytes.is_some())
+                && is_mounted(&v.mountpoint)
+            {
+                let _ = std::process::Command::new("umount")
+                    .arg(&v.mountpoint)
+                    .output();
             }
         }
         fs::remove_dir_all(dir)?;
@@ -356,11 +378,18 @@ impl VolumeStore {
         let out = std::process::Command::new(cmd)
             .args(args)
             .output()
-            .map_err(|e| Error::Runtime { context: "quota", message: format!("{cmd}: {e}") })?;
+            .map_err(|e| Error::Runtime {
+                context: "quota",
+                message: format!("{cmd}: {e}"),
+            })?;
         if !out.status.success() {
             return Err(Error::Runtime {
                 context: "quota",
-                message: format!("{cmd} {}: {}", args.join(" "), String::from_utf8_lossy(&out.stderr).trim()),
+                message: format!(
+                    "{cmd} {}: {}",
+                    args.join(" "),
+                    String::from_utf8_lossy(&out.stderr).trim()
+                ),
             });
         }
         Ok(())
@@ -373,7 +402,10 @@ impl VolumeStore {
             .output()
             .ok()?;
         let s = String::from_utf8_lossy(&out.stdout);
-        s.lines().next().map(|l| l.trim().to_string()).filter(|l| !l.is_empty())
+        s.lines()
+            .next()
+            .map(|l| l.trim().to_string())
+            .filter(|l| !l.is_empty())
     }
 
     /// Garante a imagem ext4 (privileged) com `quota` bytes montada em `_data`.
@@ -391,8 +423,14 @@ impl VolumeStore {
                 ));
             }
             // imagem esparsa do tamanho da quota → ext4 → mount por loop.
-            Self::run("truncate", &["-s", &quota.to_string(), &img.to_string_lossy()])?;
-            Self::run("mkfs.ext4", &["-q", "-F", "-m", "0", &img.to_string_lossy()])?;
+            Self::run(
+                "truncate",
+                &["-s", &quota.to_string(), &img.to_string_lossy()],
+            )?;
+            Self::run(
+                "mkfs.ext4",
+                &["-q", "-F", "-m", "0", &img.to_string_lossy()],
+            )?;
             fs::create_dir_all(&data)?;
             Self::run("mount", &["-o", "loop", &img.to_string_lossy(), &data_s])?;
             return Ok(());
@@ -404,7 +442,10 @@ impl VolumeStore {
         let cur = fs::metadata(&img).map(|m| m.len()).unwrap_or(0);
         if quota > cur {
             // CRESCER a quente: aumenta a imagem e o fs (online).
-            Self::run("truncate", &["-s", &quota.to_string(), &img.to_string_lossy()])?;
+            Self::run(
+                "truncate",
+                &["-s", &quota.to_string(), &img.to_string_lossy()],
+            )?;
             let dev = Self::loop_dev(&img).ok_or_else(|| Error::Runtime {
                 context: "quota",
                 message: "loop device não encontrado".into(),
@@ -415,16 +456,28 @@ impl VolumeStore {
             // ENCOLHER: ext4 não encolhe online — faz offline (desmonta/resize/monta).
             // Recusa se ocupado (container a usar) ou se a quota < uso atual.
             if self.usage(name) > quota {
-                return Err(Error::Invalid("a nova quota é menor que o uso atual — liberta espaço primeiro".into()));
+                return Err(Error::Invalid(
+                    "a nova quota é menor que o uso atual — liberta espaço primeiro".into(),
+                ));
             }
-            if std::process::Command::new("umount").arg(&data_s).output().map(|o| !o.status.success()).unwrap_or(true) {
-                return Err(Error::Invalid("volume em uso — pára os containers para encolher a quota".into()));
+            if std::process::Command::new("umount")
+                .arg(&data_s)
+                .output()
+                .map(|o| !o.status.success())
+                .unwrap_or(true)
+            {
+                return Err(Error::Invalid(
+                    "volume em uso — pára os containers para encolher a quota".into(),
+                ));
             }
             let blocks = format!("{}s", quota / 512); // resize2fs aceita tamanho em sectores
-            // resize2fs precisa de e2fsck antes de encolher; loop temporário.
+                                                      // resize2fs precisa de e2fsck antes de encolher; loop temporário.
             Self::run("e2fsck", &["-f", "-y", &img.to_string_lossy()]).ok();
             Self::run("resize2fs", &[&img.to_string_lossy(), &blocks])?;
-            Self::run("truncate", &["-s", &quota.to_string(), &img.to_string_lossy()])?;
+            Self::run(
+                "truncate",
+                &["-s", &quota.to_string(), &img.to_string_lossy()],
+            )?;
             Self::run("mount", &["-o", "loop", &img.to_string_lossy(), &data_s])?;
         }
         Ok(())
@@ -433,7 +486,13 @@ impl VolumeStore {
     /// Define (ou remove) a quota de um volume. `privileged` (modelo root) ativa o
     /// cap DURO por loopback ext4; senão fica em modo MONITOR (só persiste o limite).
     /// `quota=None` remove o limite (não desfaz um loopback já criado).
-    pub fn set_quota(&self, name: &str, quota: Option<u64>, alert_pct: Option<u8>, privileged: bool) -> Result<Volume> {
+    pub fn set_quota(
+        &self,
+        name: &str,
+        quota: Option<u64>,
+        alert_pct: Option<u8>,
+        privileged: bool,
+    ) -> Result<Volume> {
         let mut vol = self.inspect(name)?;
         if let (Some(q), true) = (quota, privileged) {
             self.apply_loopback(name, q)?;
@@ -461,7 +520,9 @@ impl VolumeStore {
         let target = parts[1];
         let readonly = parts.get(2).map(|o| *o == "ro").unwrap_or(false);
         if !target.starts_with('/') {
-            return Err(Error::Invalid(format!("destino deve ser absoluto: {target:?}")));
+            return Err(Error::Invalid(format!(
+                "destino deve ser absoluto: {target:?}"
+            )));
         }
 
         let source = if src.starts_with('/') || src.starts_with('.') {
@@ -496,7 +557,8 @@ pub fn safe_snapshot_name(s: &str) -> bool {
     !s.is_empty()
         && s.len() <= 128
         && !s.starts_with('.')
-        && s.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+        && s.chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
 }
 
 /// `true` se `path` é um ponto de montagem activo (consulta `/proc/mounts`).

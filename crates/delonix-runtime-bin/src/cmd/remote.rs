@@ -74,7 +74,10 @@ pub fn ssh_run(t: &SshTarget, cmd: &str) -> Result<String> {
     if ok {
         Ok(out)
     } else {
-        Err(Error::Invalid(format!("[{}] comando falhou: {cmd}\n{out}", t.host)))
+        Err(Error::Invalid(format!(
+            "[{}] comando falhou: {cmd}\n{out}",
+            t.host
+        )))
     }
 }
 
@@ -92,7 +95,10 @@ pub fn scp_to(t: &SshTarget, local: &Path, remote_path: &str) -> Result<()> {
         .status()
         .map_err(|e| Error::Invalid(format!("a correr scp para {}: {e}", t.host)))?;
     if !status.success() {
-        return Err(Error::Invalid(format!("scp para {}:{remote_path} falhou", t.host)));
+        return Err(Error::Invalid(format!(
+            "scp para {}:{remote_path} falhou",
+            t.host
+        )));
     }
     Ok(())
 }
@@ -110,7 +116,10 @@ pub fn scp_from(t: &SshTarget, remote_path: &str, local: &Path) -> Result<()> {
         .status()
         .map_err(|e| Error::Invalid(format!("a correr scp de {}: {e}", t.host)))?;
     if !status.success() {
-        return Err(Error::Invalid(format!("scp de {}:{remote_path} falhou", t.host)));
+        return Err(Error::Invalid(format!(
+            "scp de {}:{remote_path} falhou",
+            t.host
+        )));
     }
     Ok(())
 }

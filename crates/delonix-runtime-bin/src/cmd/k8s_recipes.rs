@@ -44,9 +44,16 @@ pub(crate) fn k8s_repo_version(k8s_version: Option<&str>) -> String {
 /// Constrói o catálogo — `extra_packages` estende a lista de pacotes
 /// instalados na receita `kubeadm/kubelet/kubectl` sem tocar nesta função
 /// (é a parte "100% parametrizada" do pipeline).
-pub(crate) fn k8s_host_recipes(k8s_version: Option<&str>, extra_packages: &[String]) -> Vec<HostRecipe> {
+pub(crate) fn k8s_host_recipes(
+    k8s_version: Option<&str>,
+    extra_packages: &[String],
+) -> Vec<HostRecipe> {
     let repo = k8s_repo_version(k8s_version);
-    let mut packages = vec!["kubeadm".to_string(), "kubelet".to_string(), "kubectl".to_string()];
+    let mut packages = vec![
+        "kubeadm".to_string(),
+        "kubelet".to_string(),
+        "kubectl".to_string(),
+    ];
     packages.extend(extra_packages.iter().cloned());
     let packages_str = packages.join(" ");
 
@@ -96,7 +103,9 @@ pub(crate) fn k8s_config_recipes() -> Vec<HostRecipe> {
             apply: "printf 'overlay\\nbr_netfilter\\n' > /etc/modules-load.d/k8s.conf && \
                     modprobe overlay && modprobe br_netfilter"
                 .to_string(),
-            offline: Some("printf 'overlay\\nbr_netfilter\\n' > /etc/modules-load.d/k8s.conf".to_string()),
+            offline: Some(
+                "printf 'overlay\\nbr_netfilter\\n' > /etc/modules-load.d/k8s.conf".to_string(),
+            ),
         },
         HostRecipe {
             name: "sysctls de rede do kubelet/CNI aplicados",
@@ -121,7 +130,10 @@ mod tests {
     #[test]
     fn extra_packages_entram_na_receita_de_instalacao() {
         let recipes = k8s_host_recipes(None, &["ipvsadm".to_string()]);
-        let install = recipes.iter().find(|r| r.name.contains("instalados")).unwrap();
+        let install = recipes
+            .iter()
+            .find(|r| r.name.contains("instalados"))
+            .unwrap();
         assert!(install.apply.contains("ipvsadm"));
         assert!(install.apply.contains("kubeadm"));
     }
@@ -129,14 +141,20 @@ mod tests {
     #[test]
     fn k8s_version_explicita_entra_no_repo() {
         let recipes = k8s_host_recipes(Some("1.30"), &[]);
-        let repo_step = recipes.iter().find(|r| r.name.contains("repositório")).unwrap();
+        let repo_step = recipes
+            .iter()
+            .find(|r| r.name.contains("repositório"))
+            .unwrap();
         assert!(repo_step.apply.contains("stable:/v1.30"));
     }
 
     #[test]
     fn sem_versao_usa_stable_v1_31() {
         let recipes = k8s_host_recipes(None, &[]);
-        let repo_step = recipes.iter().find(|r| r.name.contains("repositório")).unwrap();
+        let repo_step = recipes
+            .iter()
+            .find(|r| r.name.contains("repositório"))
+            .unwrap();
         assert!(repo_step.apply.contains("stable:/v1.31"));
     }
 

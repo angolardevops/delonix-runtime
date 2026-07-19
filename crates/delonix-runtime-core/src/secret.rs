@@ -46,7 +46,8 @@ pub fn valid_env_key(k: &str) -> bool {
 pub fn valid_name(n: &str) -> bool {
     !n.is_empty()
         && n.len() <= 64
-        && n.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+        && n.chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
 }
 
 /// Cabeçalho dos ficheiros cifrados (distingue do formato legado plaintext JSON).
@@ -89,7 +90,10 @@ impl SecretStore {
     /// Persiste um segredo (escrita atómica + chmod 0600).
     pub fn save(&self, s: &Secret) -> Result<()> {
         if !valid_name(&s.name) {
-            return Err(Error::Invalid(format!("nome de segredo inválido: {:?}", s.name)));
+            return Err(Error::Invalid(format!(
+                "nome de segredo inválido: {:?}",
+                s.name
+            )));
         }
         for k in s.data.keys() {
             if !valid_env_key(k) {
@@ -267,9 +271,17 @@ mod tests {
         let s = SecretStore::open(&dir).unwrap();
         let mut data = BTreeMap::new();
         data.insert("DB_PASS".to_string(), "xyz".to_string());
-        s.save(&Secret { name: "db".into(), data, updated_unix: 1 }).unwrap();
+        s.save(&Secret {
+            name: "db".into(),
+            data,
+            updated_unix: 1,
+        })
+        .unwrap();
         // ficheiro 0600
-        let mode = std::fs::metadata(dir.join("secrets/db.json")).unwrap().permissions().mode();
+        let mode = std::fs::metadata(dir.join("secrets/db.json"))
+            .unwrap()
+            .permissions()
+            .mode();
         assert_eq!(mode & 0o777, 0o600);
         let env = s.resolve_env(&["db".to_string(), "missing".to_string()]);
         assert_eq!(env, vec!["DB_PASS=xyz".to_string()]);
@@ -283,7 +295,13 @@ mod tests {
         let store = SecretStore::open(&dir).unwrap();
         let mut data = BTreeMap::new();
         data.insert("TOKEN".to_string(), "PLAINTEXT-MARKER-XYZ".to_string());
-        store.save(&Secret { name: "app".into(), data, updated_unix: 1 }).unwrap();
+        store
+            .save(&Secret {
+                name: "app".into(),
+                data,
+                updated_unix: 1,
+            })
+            .unwrap();
 
         // o valor NÃO aparece em claro no disco (cifrado at-rest).
         let raw = std::fs::read(dir.join("secrets/app.json")).unwrap();
@@ -291,14 +309,25 @@ mod tests {
             !String::from_utf8_lossy(&raw).contains("PLAINTEXT-MARKER-XYZ"),
             "o valor do segredo vazou em claro no disco!"
         );
-        assert!(raw.starts_with(SEALED_MAGIC), "ficheiro devia ter o cabeçalho cifrado");
+        assert!(
+            raw.starts_with(SEALED_MAGIC),
+            "ficheiro devia ter o cabeçalho cifrado"
+        );
         // round-trip decifra corretamente.
-        assert_eq!(store.load("app").unwrap().data.get("TOKEN").unwrap(), "PLAINTEXT-MARKER-XYZ");
+        assert_eq!(
+            store.load("app").unwrap().data.get("TOKEN").unwrap(),
+            "PLAINTEXT-MARKER-XYZ"
+        );
 
         // retrocompatibilidade: um ficheiro plaintext JSON antigo continua legível.
         let mut old = BTreeMap::new();
         old.insert("K".to_string(), "v".to_string());
-        let legacy = serde_json::to_vec(&Secret { name: "old".into(), data: old, updated_unix: 0 }).unwrap();
+        let legacy = serde_json::to_vec(&Secret {
+            name: "old".into(),
+            data: old,
+            updated_unix: 0,
+        })
+        .unwrap();
         std::fs::write(dir.join("secrets/old.json"), &legacy).unwrap();
         assert_eq!(store.load("old").unwrap().data.get("K").unwrap(), "v");
         assert_eq!(store.list().len(), 2);
@@ -313,12 +342,24 @@ mod tests {
         let mut data = BTreeMap::new();
         data.insert("DB_PASS".to_string(), "xyz".to_string());
         data.insert("DB_USER".to_string(), "admin".to_string());
-        store.save(&Secret { name: "db".into(), data, updated_unix: 1 }).unwrap();
+        store
+            .save(&Secret {
+                name: "db".into(),
+                data,
+                updated_unix: 1,
+            })
+            .unwrap();
         let out = dir.join("run-secrets");
         store.materialize(&["db".to_string()], &out).unwrap();
         assert_eq!(std::fs::read_to_string(out.join("DB_PASS")).unwrap(), "xyz");
-        assert_eq!(std::fs::read_to_string(out.join("DB_USER")).unwrap(), "admin");
-        let fmode = std::fs::metadata(out.join("DB_PASS")).unwrap().permissions().mode();
+        assert_eq!(
+            std::fs::read_to_string(out.join("DB_USER")).unwrap(),
+            "admin"
+        );
+        let fmode = std::fs::metadata(out.join("DB_PASS"))
+            .unwrap()
+            .permissions()
+            .mode();
         assert_eq!(fmode & 0o777, 0o600);
         let dmode = std::fs::metadata(&out).unwrap().permissions().mode();
         assert_eq!(dmode & 0o777, 0o700);
@@ -332,10 +373,22 @@ mod tests {
         let mut store = SecretStore::open(&dir).unwrap();
         let mut d1 = BTreeMap::new();
         d1.insert("A".to_string(), "1".to_string());
-        store.save(&Secret { name: "s1".into(), data: d1, updated_unix: 1 }).unwrap();
+        store
+            .save(&Secret {
+                name: "s1".into(),
+                data: d1,
+                updated_unix: 1,
+            })
+            .unwrap();
         let mut d2 = BTreeMap::new();
         d2.insert("B".to_string(), "2".to_string());
-        store.save(&Secret { name: "s2".into(), data: d2, updated_unix: 1 }).unwrap();
+        store
+            .save(&Secret {
+                name: "s2".into(),
+                data: d2,
+                updated_unix: 1,
+            })
+            .unwrap();
 
         let key_before = std::fs::read(dir.join("tunnels/keyring.key")).unwrap();
         store.rotate_key().unwrap();

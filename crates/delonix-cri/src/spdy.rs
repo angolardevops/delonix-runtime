@@ -139,7 +139,10 @@ impl Default for Inflater {
 
 impl Inflater {
     pub fn new() -> Self {
-        Self { d: Decompress::new(true), dict_set: false }
+        Self {
+            d: Decompress::new(true),
+            dict_set: false,
+        }
     }
 
     /// Descomprime um bloco de cabeçalhos. Em SPDY o dicionário só pode ser
@@ -236,17 +239,29 @@ fn select_proto(headers: &header::HeaderMap) -> String {
             offered.extend(s.split(',').map(|x| x.trim().to_string()));
         }
     }
-    for pref in ["v4.channel.k8s.io", "v5.channel.k8s.io", "v3.channel.k8s.io"] {
+    for pref in [
+        "v4.channel.k8s.io",
+        "v5.channel.k8s.io",
+        "v3.channel.k8s.io",
+    ] {
         if offered.iter().any(|o| o == pref) {
             return pref.to_string();
         }
     }
-    offered.into_iter().next().unwrap_or_else(|| "v4.channel.k8s.io".into())
+    offered
+        .into_iter()
+        .next()
+        .unwrap_or_else(|| "v4.channel.k8s.io".into())
 }
 
 /// Handler do `POST` com `Upgrade: SPDY/3.1`. Responde `101` e corre o SPDY na
 /// ligação atualizada.
-pub fn handle_exec(mut req: axum::extract::Request, base: PathBuf, name: String, p: Pending) -> Response {
+pub fn handle_exec(
+    mut req: axum::extract::Request,
+    base: PathBuf,
+    name: String,
+    p: Pending,
+) -> Response {
     let proto = select_proto(req.headers());
     let Some(on_upgrade) = req.extensions_mut().remove::<OnUpgrade>() else {
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
@@ -295,7 +310,11 @@ fn finish(tx: &UnboundedSender<Out>, error_sid: u32, code: i32) {
         .to_string()
         .into_bytes()
     };
-    let _ = tx.send(Out::Data { sid: error_sid, fin: true, buf });
+    let _ = tx.send(Out::Data {
+        sid: error_sid,
+        fin: true,
+        buf,
+    });
     let _ = tx.send(Out::Goaway(error_sid));
     let _ = tx.send(Out::Close);
 }
@@ -311,7 +330,9 @@ async fn flush_stream<W: AsyncWrite + Unpin>(
     initial: i64,
     pend: &mut Pend,
 ) -> std::io::Result<()> {
-    let Some(entry) = pend.get_mut(&sid) else { return Ok(()) };
+    let Some(entry) = pend.get_mut(&sid) else {
+        return Ok(());
+    };
     let sw = win.entry(sid).or_insert(initial);
     loop {
         if entry.2 {
@@ -328,7 +349,8 @@ async fn flush_stream<W: AsyncWrite + Unpin>(
         }
         let chunk: Vec<u8> = entry.0.drain(..n).collect();
         let fin = entry.0.is_empty() && entry.1;
-        wr.write_all(&data_frame(sid, if fin { FLAG_FIN } else { 0 }, &chunk)).await?;
+        wr.write_all(&data_frame(sid, if fin { FLAG_FIN } else { 0 }, &chunk))
+            .await?;
         *sw -= n as i64;
         *session_win -= n as i64;
         if fin {
@@ -362,23 +384,49 @@ async fn writer_task<W: AsyncWrite + Unpin>(mut wr: W, mut rx: UnboundedReceiver
                     wr.write_all(&ctrl(SYN_REPLY, 0, &payload)).await?;
                 }
                 Out::Data { sid, fin, buf } => {
-                    let e = pend.entry(sid).or_insert_with(|| (VecDeque::new(), false, false));
+                    let e = pend
+                        .entry(sid)
+                        .or_insert_with(|| (VecDeque::new(), false, false));
                     e.0.extend(buf);
                     if fin {
                         e.1 = true;
                     }
-                    flush_stream(&mut wr, sid, &mut session_win, &mut win, initial_win, &mut pend).await?;
+                    flush_stream(
+                        &mut wr,
+                        sid,
+                        &mut session_win,
+                        &mut win,
+                        initial_win,
+                        &mut pend,
+                    )
+                    .await?;
                 }
                 Out::Credit { sid, delta } => {
                     if sid == 0 {
                         session_win += delta;
                         let sids: Vec<u32> = pend.keys().copied().collect();
                         for s in sids {
-                            flush_stream(&mut wr, s, &mut session_win, &mut win, initial_win, &mut pend).await?;
+                            flush_stream(
+                                &mut wr,
+                                s,
+                                &mut session_win,
+                                &mut win,
+                                initial_win,
+                                &mut pend,
+                            )
+                            .await?;
                         }
                     } else {
                         *win.entry(sid).or_insert(initial_win) += delta;
-                        flush_stream(&mut wr, sid, &mut session_win, &mut win, initial_win, &mut pend).await?;
+                        flush_stream(
+                            &mut wr,
+                            sid,
+                            &mut session_win,
+                            &mut win,
+                            initial_win,
+                            &mut pend,
+                        )
+                        .await?;
                     }
                 }
                 Out::SendWu { sid, delta } => {
@@ -467,7 +515,11 @@ fn spawn_and_pump(
             return Input::None;
         };
         let mut cmd = Command::new(delonix_bin());
-        cmd.env("DELONIX_ROOT", base).env("DELONIX_INTERNAL", "1").args(crate::streaming::subprocess_args(p.attach, &p.cmd, name, true));
+        cmd.env("DELONIX_ROOT", base)
+            .env("DELONIX_INTERNAL", "1")
+            .args(crate::streaming::subprocess_args(
+                p.attach, &p.cmd, name, true,
+            ));
         unsafe {
             cmd.stdin(Stdio::from_raw_fd(libc::dup(slave)))
                 .stdout(Stdio::from_raw_fd(libc::dup(slave)))
@@ -491,7 +543,14 @@ fn spawn_and_pump(
                 if n <= 0 {
                     break;
                 }
-                if tx.send(Out::Data { sid: stdout_sid, fin: false, buf: buf[..n as usize].to_vec() }).is_err() {
+                if tx
+                    .send(Out::Data {
+                        sid: stdout_sid,
+                        fin: false,
+                        buf: buf[..n as usize].to_vec(),
+                    })
+                    .is_err()
+                {
                     break;
                 }
             }
@@ -506,8 +565,10 @@ fn spawn_and_pump(
     } else {
         let mut cmd = Command::new(delonix_bin());
         cmd.env("DELONIX_ROOT", base)
-        .env("DELONIX_INTERNAL", "1")
-            .args(crate::streaming::subprocess_args(p.attach, &p.cmd, name, false))
+            .env("DELONIX_INTERNAL", "1")
+            .args(crate::streaming::subprocess_args(
+                p.attach, &p.cmd, name, false,
+            ))
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
@@ -521,15 +582,35 @@ fn spawn_and_pump(
         let stdin = child.stdin.take();
         let mut handles = Vec::new();
         for (sid, src) in [
-            (stdout_sid, child.stdout.take().map(|s| Box::new(s) as Box<dyn std::io::Read + Send>)),
-            (stderr_sid, child.stderr.take().map(|s| Box::new(s) as Box<dyn std::io::Read + Send>)),
+            (
+                stdout_sid,
+                child
+                    .stdout
+                    .take()
+                    .map(|s| Box::new(s) as Box<dyn std::io::Read + Send>),
+            ),
+            (
+                stderr_sid,
+                child
+                    .stderr
+                    .take()
+                    .map(|s| Box::new(s) as Box<dyn std::io::Read + Send>),
+            ),
         ] {
             if let Some(mut r) = src {
                 let tx = out_tx.clone();
                 handles.push(std::thread::spawn(move || {
                     let mut buf = [0u8; 8192];
                     while let Ok(n) = r.read(&mut buf) {
-                        if n == 0 || tx.send(Out::Data { sid, fin: false, buf: buf[..n].to_vec() }).is_err() {
+                        if n == 0
+                            || tx
+                                .send(Out::Data {
+                                    sid,
+                                    fin: false,
+                                    buf: buf[..n].to_vec(),
+                                })
+                                .is_err()
+                        {
                             break;
                         }
                     }
@@ -561,7 +642,8 @@ where
     tokio::spawn(writer_task(wr, out_rx));
 
     let mut inf = Inflater::new();
-    let (mut error_sid, mut stdout_sid, mut stderr_sid, mut stdin_sid, mut resize_sid) = (0u32, 0, 0, 0, 0);
+    let (mut error_sid, mut stdout_sid, mut stderr_sid, mut stdin_sid, mut resize_sid) =
+        (0u32, 0, 0, 0, 0);
     let (mut have_error, mut have_stdout, mut have_stderr, mut have_stdin, mut have_resize) =
         (false, false, false, false, false);
     let want_stdout = p.stdout;
@@ -586,7 +668,8 @@ where
                     if payload.len() < 10 {
                         continue;
                     }
-                    let sid = u32::from_be_bytes([payload[0], payload[1], payload[2], payload[3]]) & 0x7fff_ffff;
+                    let sid = u32::from_be_bytes([payload[0], payload[1], payload[2], payload[3]])
+                        & 0x7fff_ffff;
                     let headers = decode_nv(&inf.block(&payload[10..]));
                     let stype = headers
                         .iter()
@@ -609,7 +692,15 @@ where
                         && (!want_resize || have_resize);
                     if ready && !started {
                         started = true;
-                        input = spawn_and_pump(&base, &name, &p, out_tx.clone(), stdout_sid, stderr_sid, error_sid);
+                        input = spawn_and_pump(
+                            &base,
+                            &name,
+                            &p,
+                            out_tx.clone(),
+                            stdout_sid,
+                            stderr_sid,
+                            error_sid,
+                        );
                     }
                 }
                 SETTINGS => {
@@ -618,14 +709,22 @@ where
                 }
                 PING => {
                     if payload.len() >= 4 {
-                        let _ = out_tx.send(Out::Ping(u32::from_be_bytes([payload[0], payload[1], payload[2], payload[3]])));
+                        let _ = out_tx.send(Out::Ping(u32::from_be_bytes([
+                            payload[0], payload[1], payload[2], payload[3],
+                        ])));
                     }
                 }
                 WINDOW_UPDATE => {
                     if payload.len() >= 8 {
-                        let sid = u32::from_be_bytes([payload[0], payload[1], payload[2], payload[3]]) & 0x7fff_ffff;
-                        let delta = u32::from_be_bytes([payload[4], payload[5], payload[6], payload[7]]);
-                        let _ = out_tx.send(Out::Credit { sid, delta: delta as i64 });
+                        let sid =
+                            u32::from_be_bytes([payload[0], payload[1], payload[2], payload[3]])
+                                & 0x7fff_ffff;
+                        let delta =
+                            u32::from_be_bytes([payload[4], payload[5], payload[6], payload[7]]);
+                        let _ = out_tx.send(Out::Credit {
+                            sid,
+                            delta: delta as i64,
+                        });
                     }
                 }
                 GOAWAY => break,
@@ -638,8 +737,14 @@ where
             if have_stdin && sid == stdin_sid {
                 input.write_stdin(&payload);
                 if !payload.is_empty() {
-                    let _ = out_tx.send(Out::SendWu { sid, delta: payload.len() as u32 });
-                    let _ = out_tx.send(Out::SendWu { sid: 0, delta: payload.len() as u32 });
+                    let _ = out_tx.send(Out::SendWu {
+                        sid,
+                        delta: payload.len() as u32,
+                    });
+                    let _ = out_tx.send(Out::SendWu {
+                        sid: 0,
+                        delta: payload.len() as u32,
+                    });
                 }
                 if flags & FLAG_FIN != 0 {
                     input.close_stdin();
@@ -677,7 +782,8 @@ fn connect_in_netns(pid: i32, port: u16) -> std::io::Result<std::net::TcpStream>
         })();
         let _ = tx.send(res);
     });
-    rx.recv().unwrap_or_else(|_| Err(std::io::Error::other("netns connect thread morreu")))
+    rx.recv()
+        .unwrap_or_else(|_| Err(std::io::Error::other("netns connect thread morreu")))
 }
 
 pub fn handle_port_forward(mut req: axum::extract::Request, pid: i32) -> Response {
@@ -724,9 +830,15 @@ where
                     if payload.len() < 10 {
                         continue;
                     }
-                    let sid = u32::from_be_bytes([payload[0], payload[1], payload[2], payload[3]]) & 0x7fff_ffff;
+                    let sid = u32::from_be_bytes([payload[0], payload[1], payload[2], payload[3]])
+                        & 0x7fff_ffff;
                     let headers = decode_nv(&inf.block(&payload[10..]));
-                    let get = |k: &str| headers.iter().find(|(n, _)| n.eq_ignore_ascii_case(k)).map(|(_, v)| v.clone());
+                    let get = |k: &str| {
+                        headers
+                            .iter()
+                            .find(|(n, _)| n.eq_ignore_ascii_case(k))
+                            .map(|(_, v)| v.clone())
+                    };
                     let stype = get("streamtype").unwrap_or_default().to_ascii_lowercase();
                     let port: u16 = get("port").and_then(|p| p.trim().parse().ok()).unwrap_or(0);
                     let _ = out_tx.send(Out::SynReply(sid));
@@ -735,7 +847,8 @@ where
                             Ok(std_sock) => {
                                 let _ = std_sock.set_nonblocking(true);
                                 if let Ok(sock) = tokio::net::TcpStream::from_std(std_sock) {
-                                    let (cli_tx, cli_rx) = tokio::sync::mpsc::unbounded_channel::<Vec<u8>>();
+                                    let (cli_tx, cli_rx) =
+                                        tokio::sync::mpsc::unbounded_channel::<Vec<u8>>();
                                     data_sinks.insert(sid, cli_tx);
                                     tokio::spawn(pump_socket(sock, sid, out_tx.clone(), cli_rx));
                                 }
@@ -743,7 +856,11 @@ where
                             Err(e) => {
                                 // reporta no próprio data stream e fecha-o.
                                 let msg = format!("port-forward {port}: {e}");
-                                let _ = out_tx.send(Out::Data { sid, fin: true, buf: msg.into_bytes() });
+                                let _ = out_tx.send(Out::Data {
+                                    sid,
+                                    fin: true,
+                                    buf: msg.into_bytes(),
+                                });
                             }
                         }
                     }
@@ -751,14 +868,22 @@ where
                 }
                 PING => {
                     if payload.len() >= 4 {
-                        let _ = out_tx.send(Out::Ping(u32::from_be_bytes([payload[0], payload[1], payload[2], payload[3]])));
+                        let _ = out_tx.send(Out::Ping(u32::from_be_bytes([
+                            payload[0], payload[1], payload[2], payload[3],
+                        ])));
                     }
                 }
                 WINDOW_UPDATE => {
                     if payload.len() >= 8 {
-                        let sid = u32::from_be_bytes([payload[0], payload[1], payload[2], payload[3]]) & 0x7fff_ffff;
-                        let delta = u32::from_be_bytes([payload[4], payload[5], payload[6], payload[7]]);
-                        let _ = out_tx.send(Out::Credit { sid, delta: delta as i64 });
+                        let sid =
+                            u32::from_be_bytes([payload[0], payload[1], payload[2], payload[3]])
+                                & 0x7fff_ffff;
+                        let delta =
+                            u32::from_be_bytes([payload[4], payload[5], payload[6], payload[7]]);
+                        let _ = out_tx.send(Out::Credit {
+                            sid,
+                            delta: delta as i64,
+                        });
                     }
                 }
                 GOAWAY => break,
@@ -772,8 +897,14 @@ where
                 if !payload.is_empty() {
                     let _ = sink.send(payload);
                     // reabastece a janela (como no exec — o cliente não o faz).
-                    let _ = out_tx.send(Out::SendWu { sid, delta: len as u32 });
-                    let _ = out_tx.send(Out::SendWu { sid: 0, delta: len as u32 });
+                    let _ = out_tx.send(Out::SendWu {
+                        sid,
+                        delta: len as u32,
+                    });
+                    let _ = out_tx.send(Out::SendWu {
+                        sid: 0,
+                        delta: len as u32,
+                    });
                 }
                 if flags & FLAG_FIN != 0 {
                     data_sinks.remove(&sid); // fecha a escrita para o socket
@@ -801,13 +932,24 @@ async fn pump_socket(
                 match sr.read(&mut buf).await {
                     Ok(0) | Err(_) => break,
                     Ok(n) => {
-                        if out_tx.send(Out::Data { sid, fin: false, buf: buf[..n].to_vec() }).is_err() {
+                        if out_tx
+                            .send(Out::Data {
+                                sid,
+                                fin: false,
+                                buf: buf[..n].to_vec(),
+                            })
+                            .is_err()
+                        {
                             break;
                         }
                     }
                 }
             }
-            let _ = out_tx.send(Out::Data { sid, fin: true, buf: Vec::new() });
+            let _ = out_tx.send(Out::Data {
+                sid,
+                fin: true,
+                buf: Vec::new(),
+            });
         })
     };
     // cliente → socket

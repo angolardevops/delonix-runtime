@@ -21,7 +21,9 @@ pub fn run(iface: Option<String>, watch: bool) -> Result<()> {
 
     if !bpf::available() {
         output::warn("eBPF observability inactive");
-        println!("  the flow datapath needs CAP_BPF + CAP_NET_ADMIN (run privileged / root install);");
+        println!(
+            "  the flow datapath needs CAP_BPF + CAP_NET_ADMIN (run privileged / root install);"
+        );
         println!("  the nft firewall and the SDN are unaffected. Falling back to veth counters.\n");
         return fallback(&store.list().unwrap_or_default());
     }
@@ -53,9 +55,16 @@ pub fn run(iface: Option<String>, watch: bool) -> Result<()> {
     loop {
         // Refresh the container→IP map each frame: containers come and go.
         let containers = store.list().unwrap_or_default();
-        let name_of: std::collections::HashMap<String, String> =
-            containers.iter().filter_map(|c| c.ip.clone().filter(|s| !s.is_empty()).map(|ip| (ip, c.name.clone()))).collect();
-        let live: std::collections::HashSet<Ipv4Addr> = name_of.keys().filter_map(|s| s.parse().ok()).collect();
+        let name_of: std::collections::HashMap<String, String> = containers
+            .iter()
+            .filter_map(|c| {
+                c.ip.clone()
+                    .filter(|s| !s.is_empty())
+                    .map(|ip| (ip, c.name.clone()))
+            })
+            .collect();
+        let live: std::collections::HashSet<Ipv4Addr> =
+            name_of.keys().filter_map(|s| s.parse().ok()).collect();
 
         let flows = bpf::flows(capture);
         // GC: on a per-veth attach every key IS that veth's container IP, so a key
@@ -78,20 +87,47 @@ pub fn run(iface: Option<String>, watch: bool) -> Result<()> {
 }
 
 /// Render the live-container flows as a table (stale IPs already GC'd out).
-fn render(flows: &std::collections::HashMap<Ipv4Addr, bpf::Flow>, live: &std::collections::HashSet<Ipv4Addr>, name_of: &std::collections::HashMap<String, String>) {
+fn render(
+    flows: &std::collections::HashMap<Ipv4Addr, bpf::Flow>,
+    live: &std::collections::HashSet<Ipv4Addr>,
+    name_of: &std::collections::HashMap<String, String>,
+) {
     let mut rows: Vec<(String, Ipv4Addr, bpf::Flow)> = flows
         .iter()
         .filter(|(ip, _)| live.contains(ip))
-        .map(|(ip, f)| (name_of.get(&ip.to_string()).cloned().unwrap_or_else(|| "-".into()), *ip, *f))
+        .map(|(ip, f)| {
+            (
+                name_of
+                    .get(&ip.to_string())
+                    .cloned()
+                    .unwrap_or_else(|| "-".into()),
+                *ip,
+                *f,
+            )
+        })
         .collect();
     if rows.is_empty() {
         println!("datapath attached — no flows yet (generate some traffic).");
         return;
     }
     rows.sort_by(|a, b| (b.2.rx_bytes + b.2.tx_bytes).cmp(&(a.2.rx_bytes + a.2.tx_bytes)));
-    let mut t = output::Table::new(&["CONTAINER", "IP", "RX PACKETS", "RX BYTES", "TX PACKETS", "TX BYTES"]);
+    let mut t = output::Table::new(&[
+        "CONTAINER",
+        "IP",
+        "RX PACKETS",
+        "RX BYTES",
+        "TX PACKETS",
+        "TX BYTES",
+    ]);
     for (name, ip, f) in rows {
-        t.row(vec![name, ip.to_string(), f.rx_packets.to_string(), human_bytes(f.rx_bytes), f.tx_packets.to_string(), human_bytes(f.tx_bytes)]);
+        t.row(vec![
+            name,
+            ip.to_string(),
+            f.rx_packets.to_string(),
+            human_bytes(f.rx_bytes),
+            f.tx_packets.to_string(),
+            human_bytes(f.tx_bytes),
+        ]);
     }
     t.print();
 }
@@ -102,7 +138,12 @@ fn fallback(containers: &[delonix_runtime_core::Container]) -> Result<()> {
     let mut any = false;
     for c in containers {
         if let Some((rx, tx)) = infra::container_net_bytes(&c.id) {
-            t.row(vec![c.name.clone(), c.ip.clone().unwrap_or_else(|| "-".into()), human_bytes(rx), human_bytes(tx)]);
+            t.row(vec![
+                c.name.clone(),
+                c.ip.clone().unwrap_or_else(|| "-".into()),
+                human_bytes(rx),
+                human_bytes(tx),
+            ]);
             any = true;
         }
     }

@@ -27,10 +27,20 @@ pub struct Condition {
 
 impl Condition {
     fn ok(kind: &'static str) -> Self {
-        Condition { kind, ok: true, reason: "", message: String::new() }
+        Condition {
+            kind,
+            ok: true,
+            reason: "",
+            message: String::new(),
+        }
     }
     fn bad(kind: &'static str, reason: &'static str, message: impl Into<String>) -> Self {
-        Condition { kind, ok: false, reason, message: message.into() }
+        Condition {
+            kind,
+            ok: false,
+            reason,
+            message: message.into(),
+        }
     }
 }
 
@@ -74,13 +84,16 @@ impl Env {
 fn which(bin: &str) -> bool {
     let path = std::env::var_os("PATH").unwrap_or_default();
     let sbins = ["/sbin", "/usr/sbin", "/usr/local/sbin"].map(std::path::PathBuf::from);
-    std::env::split_paths(&path).chain(sbins).any(|dir| dir.join(bin).is_file())
+    std::env::split_paths(&path)
+        .chain(sbins)
+        .any(|dir| dir.join(bin).is_file())
 }
 
 /// Lê um campo string de topo do `spec` cru, aceitando qualquer um de `keys`
 /// (para cobrir o canónico E o alias legado — ex.: `restartPolicy`/`restart_policy`).
 fn spec_str<'a>(doc: &'a ManifestDoc, keys: &[&str]) -> Option<&'a str> {
-    keys.iter().find_map(|k| doc.spec.get(k).and_then(|v| v.as_str()))
+    keys.iter()
+        .find_map(|k| doc.spec.get(k).and_then(|v| v.as_str()))
 }
 
 /// As conditions de um documento. Vazio = nada a assinalar (o caso comum).
@@ -191,7 +204,11 @@ fn vm(doc: &ManifestDoc, env: &Env) -> Vec<Condition> {
 /// libvirt quando não há backend explícito; isto assinala o caso em que o
 /// utilizador FORÇA `backend: cloud-hypervisor` com volumes (o boot recusaria).
 fn vm_volumes(doc: &ManifestDoc) -> Vec<Condition> {
-    let has_volumes = doc.spec.get("volumes").and_then(|v| v.as_sequence()).is_some_and(|s| !s.is_empty());
+    let has_volumes = doc
+        .spec
+        .get("volumes")
+        .and_then(|v| v.as_sequence())
+        .is_some_and(|s| !s.is_empty());
     if has_volumes && spec_str(doc, &["backend"]) == Some("cloud-hypervisor") {
         vec![Condition::bad(
             "VolumesRequireLibvirt",
@@ -212,14 +229,25 @@ mod tests {
         ManifestDoc {
             api_version: "delonix.io/v1".into(),
             kind: kind.into(),
-            metadata: Metadata { name: "t".into(), namespace: None, labels: Default::default(), annotations: Default::default() },
+            metadata: Metadata {
+                name: "t".into(),
+                namespace: None,
+                labels: Default::default(),
+                annotations: Default::default(),
+            },
             spec: serde_yaml::from_str(spec_yaml).unwrap(),
         }
     }
 
     fn env(rootless: bool, nfs: bool, cifs: bool, davfs: bool) -> Env {
         // cloud_hypervisor: true por defeito nos testes que não o exercitam.
-        Env { rootless, mount_nfs: nfs, mount_cifs: cifs, mount_davfs: davfs, cloud_hypervisor: true }
+        Env {
+            rootless,
+            mount_nfs: nfs,
+            mount_cifs: cifs,
+            mount_davfs: davfs,
+            cloud_hypervisor: true,
+        }
     }
 
     #[test]
@@ -233,7 +261,10 @@ mod tests {
     #[test]
     fn storage_root_sem_helper_assinala_helper_em_falta() {
         // cifs precisa de mount.cifs; ausente → MountHelperMissing.
-        let c = conditions_for(&doc("Storage", "type: cifs"), &env(false, true, false, true));
+        let c = conditions_for(
+            &doc("Storage", "type: cifs"),
+            &env(false, true, false, true),
+        );
         assert_eq!(c[0].reason, "MountHelperMissing");
         // com o helper presente → OK.
         let c = conditions_for(&doc("Storage", "type: cifs"), &env(false, true, true, true));
@@ -248,44 +279,89 @@ mod tests {
         let c = conditions_for(&doc("Volume", "quota: 2g"), &env(false, true, true, true));
         assert!(c[0].ok);
         // sem quota → nenhuma condition.
-        assert!(conditions_for(&doc("Volume", "driver: local"), &env(true, true, true, true)).is_empty());
+        assert!(conditions_for(
+            &doc("Volume", "driver: local"),
+            &env(true, true, true, true)
+        )
+        .is_empty());
     }
 
     #[test]
     fn network_driver_nao_implementado_e_assinalado() {
         for d in ["macvlan", "ipvlan", "overlay"] {
-            let c = conditions_for(&doc("Network", &format!("driver: {d}")), &env(false, true, true, true));
+            let c = conditions_for(
+                &doc("Network", &format!("driver: {d}")),
+                &env(false, true, true, true),
+            );
             assert_eq!(c[0].reason, "DriverNotImplemented", "driver {d}");
         }
-        let c = conditions_for(&doc("Network", "driver: bridge"), &env(false, true, true, true));
+        let c = conditions_for(
+            &doc("Network", "driver: bridge"),
+            &env(false, true, true, true),
+        );
         assert!(c[0].ok);
     }
 
     #[test]
     fn vm_volumes_com_ch_explicito_exige_libvirt() {
         // volumes + backend cloud-hypervisor explícito → condition.
-        let c = conditions_for(&doc("Vm", "disk: d\nbackend: cloud-hypervisor\nvolumes: [ { name: x, mountPath: /x } ]"), &env(false, true, true, true));
-        assert!(c.iter().any(|x| x.reason == "BackendCloudHypervisor" && x.kind == "VolumesRequireLibvirt"), "{c:?}");
+        let c = conditions_for(
+            &doc(
+                "Vm",
+                "disk: d\nbackend: cloud-hypervisor\nvolumes: [ { name: x, mountPath: /x } ]",
+            ),
+            &env(false, true, true, true),
+        );
+        assert!(
+            c.iter()
+                .any(|x| x.reason == "BackendCloudHypervisor" && x.kind == "VolumesRequireLibvirt"),
+            "{c:?}"
+        );
         // volumes sem backend explícito (auto → libvirt) → sem esta condition.
-        let c = conditions_for(&doc("Vm", "disk: d\nvolumes: [ { name: x, mountPath: /x } ]"), &env(false, true, true, true));
-        assert!(!c.iter().any(|x| x.kind == "VolumesRequireLibvirt"), "{c:?}");
+        let c = conditions_for(
+            &doc("Vm", "disk: d\nvolumes: [ { name: x, mountPath: /x } ]"),
+            &env(false, true, true, true),
+        );
+        assert!(
+            !c.iter().any(|x| x.kind == "VolumesRequireLibvirt"),
+            "{c:?}"
+        );
     }
 
     #[test]
     fn vm_restart_no_cloud_hypervisor_nao_e_supervisionado() {
         // backend ausente (auto → CH) + restartPolicy canónico → não supervisionado.
-        let c = conditions_for(&doc("Vm", "disk: d\nrestartPolicy: always"), &env(false, true, true, true));
+        let c = conditions_for(
+            &doc("Vm", "disk: d\nrestartPolicy: always"),
+            &env(false, true, true, true),
+        );
         assert_eq!(c[0].reason, "BackendCloudHypervisor");
         // alias legado restart_policy + backend libvirt → supervisionado.
-        let c = conditions_for(&doc("Vm", "disk: d\nrestart_policy: always\nbackend: libvirt"), &env(false, true, true, true));
+        let c = conditions_for(
+            &doc("Vm", "disk: d\nrestart_policy: always\nbackend: libvirt"),
+            &env(false, true, true, true),
+        );
         assert!(c[0].ok);
         // Fix #3: backend AUSENTE (auto) num host SEM cloud-hypervisor → cai para
         // libvirt → supervisionado (não avisa BackendCloudHypervisor à toa).
-        let sem_ch = Env { rootless: false, mount_nfs: true, mount_cifs: true, mount_davfs: true, cloud_hypervisor: false };
+        let sem_ch = Env {
+            rootless: false,
+            mount_nfs: true,
+            mount_cifs: true,
+            mount_davfs: true,
+            cloud_hypervisor: false,
+        };
         let c = conditions_for(&doc("Vm", "disk: d\nrestartPolicy: always"), &sem_ch);
-        assert!(c[0].ok, "sem cloud-hypervisor o auto cai para libvirt, que supervisiona");
+        assert!(
+            c[0].ok,
+            "sem cloud-hypervisor o auto cai para libvirt, que supervisiona"
+        );
         // sem restartPolicy (ou `no`) → nenhuma condition.
         assert!(conditions_for(&doc("Vm", "disk: d"), &env(false, true, true, true)).is_empty());
-        assert!(conditions_for(&doc("Vm", "disk: d\nrestartPolicy: no"), &env(false, true, true, true)).is_empty());
+        assert!(conditions_for(
+            &doc("Vm", "disk: d\nrestartPolicy: no"),
+            &env(false, true, true, true)
+        )
+        .is_empty());
     }
 }

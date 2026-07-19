@@ -89,7 +89,10 @@ struct ContainerRec {
 /// `/sys/kernel/security/apparmor/profiles`).
 fn apparmor_loaded(profile: &str) -> bool {
     std::fs::read_to_string("/sys/kernel/security/apparmor/profiles")
-        .map(|s| s.lines().any(|l| l.split_whitespace().next() == Some(profile)))
+        .map(|s| {
+            s.lines()
+                .any(|l| l.split_whitespace().next() == Some(profile))
+        })
         .unwrap_or(false)
 }
 
@@ -187,7 +190,9 @@ fn load_reconciled(base: &Path, cri_id: &str) -> Option<delonix_runtime_core::Co
     // reconciles simultâneos perdiam escritas — medido: 24 updates concorrentes
     // → 1 sobrevivente (ver `store::tests::update_concorrente_nao_perde_escritas`).
     store
-        .update(&format!("cri-{cri_id}"), |c| delonix_runtime::reconcile_status(c))
+        .update(&format!("cri-{cri_id}"), |c| {
+            delonix_runtime::reconcile_status(c)
+        })
         .ok()
 }
 
@@ -227,7 +232,9 @@ pub fn run_pod_sandbox(
     base: &Path,
     req: RunPodSandboxRequest,
 ) -> Result<Response<RunPodSandboxResponse>, Status> {
-    let cfg = req.config.ok_or_else(|| Status::invalid_argument("sem config"))?;
+    let cfg = req
+        .config
+        .ok_or_else(|| Status::invalid_argument("sem config"))?;
     let md = cfg.metadata.clone().unwrap_or_default();
     let id = delonix_runtime_core::generate_id();
     // Rede do host? (namespace_options.network == NODE) → sem infra/netns próprio.
@@ -272,11 +279,15 @@ pub fn run_pod_sandbox(
             // ROOTLESS: o pod é um netns PARTILHADO do ingress (delonix0 + DHCP +
             // DNS + firewall); os containers do sandbox juntam-se via `--pod`.
             if !delonix_detached(base, &["netns", "attach", &pod])? {
-                return Err(Status::internal(format!("falha a criar o sandbox de ingress {pod}")));
+                return Err(Status::internal(format!(
+                    "falha a criar o sandbox de ingress {pod}"
+                )));
             }
         } else if !delonix_detached(base, &["pod", "create", &pod, "--network"])? {
             // ROOT: infra container (`pod-cri-<id>`) detém o netns (estilo "pause").
-            return Err(Status::internal(format!("falha a criar o pod sandbox {pod}")));
+            return Err(Status::internal(format!(
+                "falha a criar o pod sandbox {pod}"
+            )));
         }
     }
     let rec = SandboxRec {
@@ -365,7 +376,10 @@ fn to_pod_sandbox(r: &SandboxRec) -> PodSandbox {
 }
 
 pub fn list_pod_sandbox(base: &Path) -> Result<Response<ListPodSandboxResponse>, Status> {
-    let items = list_recs::<SandboxRec>(&sb_dir(base)).iter().map(to_pod_sandbox).collect();
+    let items = list_recs::<SandboxRec>(&sb_dir(base))
+        .iter()
+        .map(to_pod_sandbox)
+        .collect();
     Ok(Response::new(ListPodSandboxResponse { items }))
 }
 
@@ -400,7 +414,10 @@ pub fn pod_sandbox_status(
         }),
         state: sandbox_state(&r),
         created_at: r.created_at,
-        network: Some(PodSandboxNetworkStatus { ip, additional_ips: vec![] }),
+        network: Some(PodSandboxNetworkStatus {
+            ip,
+            additional_ips: vec![],
+        }),
         linux: None,
         labels: r.labels.clone(),
         annotations: r.annotations.clone(),
@@ -420,7 +437,9 @@ pub fn create_container(
     base: &Path,
     req: CreateContainerRequest,
 ) -> Result<Response<CreateContainerResponse>, Status> {
-    let cfg = req.config.ok_or_else(|| Status::invalid_argument("sem config"))?;
+    let cfg = req
+        .config
+        .ok_or_else(|| Status::invalid_argument("sem config"))?;
     let md = cfg.metadata.unwrap_or_default();
     let image = cfg.image.map(|s| s.image).unwrap_or_default();
     if image.is_empty() {
@@ -444,13 +463,15 @@ pub fn create_container(
     // formato `unconfined` | `localhost/<perfil>` | `runtime/default` | `<perfil>`).
     let apparmor = sc
         .and_then(|s| s.apparmor.as_ref())
-        .and_then(|p| match security_profile::ProfileType::try_from(p.profile_type) {
-            Ok(security_profile::ProfileType::Unconfined) => Some("unconfined".to_string()),
-            Ok(security_profile::ProfileType::Localhost) if !p.localhost_ref.is_empty() => {
-                Some(p.localhost_ref.clone())
-            }
-            _ => None,
-        })
+        .and_then(
+            |p| match security_profile::ProfileType::try_from(p.profile_type) {
+                Ok(security_profile::ProfileType::Unconfined) => Some("unconfined".to_string()),
+                Ok(security_profile::ProfileType::Localhost) if !p.localhost_ref.is_empty() => {
+                    Some(p.localhost_ref.clone())
+                }
+                _ => None,
+            },
+        )
         .or_else(|| {
             #[allow(deprecated)] // suporte intencional ao campo CRI depreciado
             let s = sc.map(|s| s.apparmor_profile.as_str()).unwrap_or("");
@@ -476,9 +497,7 @@ pub fn create_container(
         let lp = cfg.log_path.clone();
         if lp.is_empty() {
             String::new()
-        } else if lp.starts_with('/')
-            || lp.split('/').any(|seg| seg == ".." || seg == ".")
-        {
+        } else if lp.starts_with('/') || lp.split('/').any(|seg| seg == ".." || seg == ".") {
             return Err(Status::invalid_argument(
                 "log_path inválido: tem de ser relativo e sem '..'",
             ));
@@ -586,7 +605,9 @@ pub fn start_container(
     args.extend(rec.args.iter().cloned());
     let argv: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
     if !delonix_detached(base, &argv)? {
-        return Err(Status::internal(format!("falha a arrancar o container {id}")));
+        return Err(Status::internal(format!(
+            "falha a arrancar o container {id}"
+        )));
     }
     rec.started = true;
     write_rec(&ct_dir(base), &id, &rec)?;
@@ -610,7 +631,9 @@ pub fn stop_container(
         let alive = matches!(c.status, delonix_runtime_core::Status::Running)
             && c.pid.map(delonix_runtime::is_alive).unwrap_or(false);
         if alive {
-            return Err(Status::internal(format!("'cri-{id}' continua a correr após stop")));
+            return Err(Status::internal(format!(
+                "'cri-{id}' continua a correr após stop"
+            )));
         }
     }
     Ok(Response::new(StopContainerResponse {}))
@@ -643,8 +666,14 @@ fn to_container(base: &Path, r: &ContainerRec) -> Container {
     Container {
         id: r.id.clone(),
         pod_sandbox_id: r.sandbox_id.clone(),
-        metadata: Some(ContainerMetadata { name: r.name.clone(), attempt: r.attempt }),
-        image: Some(ImageSpec { image: r.image.clone(), ..Default::default() }),
+        metadata: Some(ContainerMetadata {
+            name: r.name.clone(),
+            attempt: r.attempt,
+        }),
+        image: Some(ImageSpec {
+            image: r.image.clone(),
+            ..Default::default()
+        }),
         image_ref: r.image.clone(),
         state: delonix_state(base, &r.id),
         created_at: r.created_at,
@@ -672,13 +701,19 @@ pub fn container_status(
     let exit = delonix_exit(base, &r.id);
     let status = ContainerStatus {
         id: r.id.clone(),
-        metadata: Some(ContainerMetadata { name: r.name.clone(), attempt: r.attempt }),
+        metadata: Some(ContainerMetadata {
+            name: r.name.clone(),
+            attempt: r.attempt,
+        }),
         state: delonix_state(base, &r.id),
         created_at: r.created_at,
         started_at: if r.started { r.created_at } else { 0 },
         finished_at: if exit.is_some() { now_ns() } else { 0 },
         exit_code: exit.unwrap_or(0),
-        image: Some(ImageSpec { image: r.image.clone(), ..Default::default() }),
+        image: Some(ImageSpec {
+            image: r.image.clone(),
+            ..Default::default()
+        }),
         image_ref: r.image.clone(),
         log_path: r.log_path.clone(),
         reason: match exit {
@@ -688,7 +723,10 @@ pub fn container_status(
         },
         ..Default::default()
     };
-    Ok(Response::new(ContainerStatusResponse { status: Some(status), info: Default::default() }))
+    Ok(Response::new(ContainerStatusResponse {
+        status: Some(status),
+        info: Default::default(),
+    }))
 }
 
 // ---------------------------------------------------------------------------
@@ -709,7 +747,9 @@ pub fn exec_sync(
     // Delega no binário `delonix exec` (single-threaded; faz setns ao container).
     // O timeout (segundos, >0) é imposto pelo coreutil `timeout` por robustez.
     let mut command = Command::new(delonix_bin());
-    command.env("DELONIX_ROOT", base).env("DELONIX_INTERNAL", "1");
+    command
+        .env("DELONIX_ROOT", base)
+        .env("DELONIX_INTERNAL", "1");
     if timeout > 0 {
         command = Command::new("timeout");
         command
@@ -718,7 +758,12 @@ pub fn exec_sync(
             .arg(timeout.to_string())
             .arg(delonix_bin());
     }
-    let out = command.arg("exec").arg(&name).args(&cmd).output().map_err(st)?;
+    let out = command
+        .arg("exec")
+        .arg(&name)
+        .args(&cmd)
+        .output()
+        .map_err(st)?;
     // `timeout` devolve 124 quando expira → mapeia para um exit code distinto.
     let exit_code = out.status.code().unwrap_or(-1);
     Ok(Response::new(ExecSyncResponse {
@@ -757,7 +802,10 @@ fn cg_field(cgroup: &str, file: &str, key: &str) -> u64 {
 /// O cgroup de um container CRI (`cri-<id>`), via o `Store` do Delonix.
 fn container_cgroup(base: &Path, cri_id: &str) -> Option<String> {
     let store = delonix_runtime_core::Store::open(base.join("containers")).ok()?;
-    store.load(&format!("cri-{cri_id}")).ok().map(|c| c.cgroup())
+    store
+        .load(&format!("cri-{cri_id}"))
+        .ok()
+        .map(|c| c.cgroup())
 }
 
 /// Soma o `VmRSS` (bytes) de todos os processos do cgroup, lendo `/proc`. É a
@@ -774,7 +822,11 @@ fn cgroup_rss_bytes(cgroup: &str) -> u64 {
         if let Ok(status) = std::fs::read_to_string(format!("/proc/{}/status", pid.trim())) {
             for l in status.lines() {
                 if let Some(rest) = l.strip_prefix("VmRSS:") {
-                    if let Some(kb) = rest.split_whitespace().next().and_then(|v| v.parse::<u64>().ok()) {
+                    if let Some(kb) = rest
+                        .split_whitespace()
+                        .next()
+                        .and_then(|v| v.parse::<u64>().ok())
+                    {
                         total += kb * 1024;
                     }
                 }
@@ -820,7 +872,10 @@ fn container_stats_for(base: &Path, r: &ContainerRec) -> ContainerStats {
     ContainerStats {
         attributes: Some(ContainerAttributes {
             id: r.id.clone(),
-            metadata: Some(ContainerMetadata { name: r.name.clone(), attempt: r.attempt }),
+            metadata: Some(ContainerMetadata {
+                name: r.name.clone(),
+                attempt: r.attempt,
+            }),
             labels: r.labels.clone(),
             annotations: r.annotations.clone(),
         }),
@@ -841,7 +896,11 @@ fn container_stats_for(base: &Path, r: &ContainerRec) -> ContainerStats {
         writable_layer: Some(FilesystemUsage {
             timestamp: ts,
             fs_id: Some(FilesystemIdentifier {
-                mountpoint: base.join("containers").join(format!("cri-{}", r.id)).to_string_lossy().into_owned(),
+                mountpoint: base
+                    .join("containers")
+                    .join(format!("cri-{}", r.id))
+                    .to_string_lossy()
+                    .into_owned(),
             }),
             used_bytes: u64v(0),
             inodes_used: u64v(0),
@@ -849,23 +908,30 @@ fn container_stats_for(base: &Path, r: &ContainerRec) -> ContainerStats {
         swap: Some(SwapUsage {
             timestamp: ts,
             swap_available_bytes: u64v(0),
-            swap_usage_bytes: u64v(cg.as_deref().map(|c| cg_u64(c, "memory.swap.current")).unwrap_or(0)),
+            swap_usage_bytes: u64v(
+                cg.as_deref()
+                    .map(|c| cg_u64(c, "memory.swap.current"))
+                    .unwrap_or(0),
+            ),
         }),
     }
 }
 
-pub fn container_stats(base: &Path, id: String) -> Result<Response<ContainerStatsResponse>, Status> {
+pub fn container_stats(
+    base: &Path,
+    id: String,
+) -> Result<Response<ContainerStatsResponse>, Status> {
     let r: ContainerRec = read_rec(&ct_dir(base), &id)?;
-    Ok(Response::new(ContainerStatsResponse { stats: Some(container_stats_for(base, &r)) }))
+    Ok(Response::new(ContainerStatsResponse {
+        stats: Some(container_stats_for(base, &r)),
+    }))
 }
 
 pub fn list_container_stats(
     base: &Path,
     filter: Option<ContainerStatsFilter>,
 ) -> Result<Response<ListContainerStatsResponse>, Status> {
-    let (fid, fsb) = filter
-        .map(|f| (f.id, f.pod_sandbox_id))
-        .unwrap_or_default();
+    let (fid, fsb) = filter.map(|f| (f.id, f.pod_sandbox_id)).unwrap_or_default();
     let stats = list_recs::<ContainerRec>(&ct_dir(base))
         .into_iter()
         .filter(|r| (fid.is_empty() || r.id == fid) && (fsb.is_empty() || r.sandbox_id == fsb))
@@ -883,9 +949,27 @@ fn pod_sandbox_stats_for(base: &Path, sb: &SandboxRec) -> PodSandboxStats {
         .map(|r| container_stats_for(base, &r))
         .collect();
     let sum = |pick: &dyn Fn(&ContainerStats) -> u64| conts.iter().map(pick).sum::<u64>();
-    let cpu_ns = sum(&|c| c.cpu.as_ref().and_then(|x| x.usage_core_nano_seconds.as_ref()).map(|v| v.value).unwrap_or(0));
-    let mem = sum(&|c| c.memory.as_ref().and_then(|x| x.usage_bytes.as_ref()).map(|v| v.value).unwrap_or(0));
-    let ws = sum(&|c| c.memory.as_ref().and_then(|x| x.working_set_bytes.as_ref()).map(|v| v.value).unwrap_or(0));
+    let cpu_ns = sum(&|c| {
+        c.cpu
+            .as_ref()
+            .and_then(|x| x.usage_core_nano_seconds.as_ref())
+            .map(|v| v.value)
+            .unwrap_or(0)
+    });
+    let mem = sum(&|c| {
+        c.memory
+            .as_ref()
+            .and_then(|x| x.usage_bytes.as_ref())
+            .map(|v| v.value)
+            .unwrap_or(0)
+    });
+    let ws = sum(&|c| {
+        c.memory
+            .as_ref()
+            .and_then(|x| x.working_set_bytes.as_ref())
+            .map(|v| v.value)
+            .unwrap_or(0)
+    });
     PodSandboxStats {
         attributes: Some(PodSandboxAttributes {
             id: sb.id.clone(),
@@ -899,7 +983,11 @@ fn pod_sandbox_stats_for(base: &Path, sb: &SandboxRec) -> PodSandboxStats {
             annotations: sb.annotations.clone(),
         }),
         linux: Some(LinuxPodSandboxStats {
-            cpu: Some(CpuUsage { timestamp: ts, usage_core_nano_seconds: u64v(cpu_ns), usage_nano_cores: u64v(0) }),
+            cpu: Some(CpuUsage {
+                timestamp: ts,
+                usage_core_nano_seconds: u64v(cpu_ns),
+                usage_nano_cores: u64v(0),
+            }),
             memory: Some(MemoryUsage {
                 timestamp: ts,
                 working_set_bytes: u64v(ws),
@@ -910,16 +998,24 @@ fn pod_sandbox_stats_for(base: &Path, sb: &SandboxRec) -> PodSandboxStats {
                 major_page_faults: u64v(0),
             }),
             network: None,
-            process: Some(ProcessUsage { timestamp: ts, process_count: u64v(conts.len() as u64) }),
+            process: Some(ProcessUsage {
+                timestamp: ts,
+                process_count: u64v(conts.len() as u64),
+            }),
             containers: conts,
         }),
         windows: None,
     }
 }
 
-pub fn pod_sandbox_stats(base: &Path, id: String) -> Result<Response<PodSandboxStatsResponse>, Status> {
+pub fn pod_sandbox_stats(
+    base: &Path,
+    id: String,
+) -> Result<Response<PodSandboxStatsResponse>, Status> {
     let sb: SandboxRec = read_rec(&sb_dir(base), &id)?;
-    Ok(Response::new(PodSandboxStatsResponse { stats: Some(pod_sandbox_stats_for(base, &sb)) }))
+    Ok(Response::new(PodSandboxStatsResponse {
+        stats: Some(pod_sandbox_stats_for(base, &sb)),
+    }))
 }
 
 pub fn list_pod_sandbox_stats(
@@ -959,8 +1055,15 @@ mod tests {
         store.save(&c).unwrap();
 
         // reconcilia (Running+morto → Crashed) → exit 137 + estado Exited.
-        assert_eq!(delonix_exit(&tmp, "abc"), Some(137), "crash deve reportar 137, não 0");
-        assert_eq!(delonix_state(&tmp, "abc"), ContainerState::ContainerExited as i32);
+        assert_eq!(
+            delonix_exit(&tmp, "abc"),
+            Some(137),
+            "crash deve reportar 137, não 0"
+        );
+        assert_eq!(
+            delonix_state(&tmp, "abc"),
+            ContainerState::ContainerExited as i32
+        );
 
         // Um container parado limpo → 0 (Completed). Um Failed(n) → n.
         let mut ok = c.clone();

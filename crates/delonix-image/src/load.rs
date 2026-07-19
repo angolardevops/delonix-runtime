@@ -86,7 +86,13 @@ pub fn load_docker_archive(store: &ImageStore, tar_path: &Path) -> Result<Image>
         return Err(Error::Invalid("digest do config não confere".into()));
     }
     let raw: RawConfig = serde_json::from_slice(&config_bytes)?;
-    let inner = raw.config.unwrap_or(RawConfigInner { cmd: None, entrypoint: None, env: None, user: None, working_dir: None });
+    let inner = raw.config.unwrap_or(RawConfigInner {
+        cmd: None,
+        entrypoint: None,
+        env: None,
+        user: None,
+        working_dir: None,
+    });
 
     let image = Image {
         id: config_digest,

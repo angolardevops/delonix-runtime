@@ -89,12 +89,16 @@ pub fn load(path: &Path) -> Result<Vec<ManifestDoc>> {
     let text = std::fs::read_to_string(path)
         .map_err(|e| Error::Invalid(format!("não consegui ler {}: {e}", path.display())))?;
     if text.trim().is_empty() {
-        return Err(Error::Invalid(format!("{} está vazio (sem documentos YAML)", path.display())));
+        return Err(Error::Invalid(format!(
+            "{} está vazio (sem documentos YAML)",
+            path.display()
+        )));
     }
     let mut docs = Vec::new();
     for de in serde_yaml::Deserializer::from_str(&text) {
-        let mut doc = ManifestDoc::deserialize(de)
-            .map_err(|e| Error::Invalid(format!("manifesto inválido em {}: {e}", path.display())))?;
+        let mut doc = ManifestDoc::deserialize(de).map_err(|e| {
+            Error::Invalid(format!("manifesto inválido em {}: {e}", path.display()))
+        })?;
         // Canonicaliza cedo: todo o resto (of_kind, stack::KINDS, describe) fala
         // só a forma canónica, e um `kind: VirtualMachine` passa a ser um `Vm`.
         let canon = canonical_kind(&doc.kind);
@@ -110,7 +114,10 @@ pub fn load(path: &Path) -> Result<Vec<ManifestDoc>> {
         docs.push(doc);
     }
     if docs.is_empty() {
-        return Err(Error::Invalid(format!("{} está vazio (sem documentos YAML)", path.display())));
+        return Err(Error::Invalid(format!(
+            "{} está vazio (sem documentos YAML)",
+            path.display()
+        )));
     }
     Ok(docs)
 }
@@ -122,8 +129,12 @@ pub fn of_kind<'a>(docs: &'a [ManifestDoc], kind: &str) -> Vec<&'a ManifestDoc> 
 
 /// Re-desserializa o `spec` cru de um documento para o tipo tipado do seu Kind.
 pub fn spec_of<T: for<'de> Deserialize<'de>>(doc: &ManifestDoc) -> Result<T> {
-    serde_yaml::from_value(doc.spec.clone())
-        .map_err(|e| Error::Invalid(format!("{} '{}': spec inválido: {e}", doc.kind, doc.metadata.name)))
+    serde_yaml::from_value(doc.spec.clone()).map_err(|e| {
+        Error::Invalid(format!(
+            "{} '{}': spec inválido: {e}",
+            doc.kind, doc.metadata.name
+        ))
+    })
 }
 
 /// Avisa (stderr, NÃO erro) por cada chave de topo do `spec` que não conste em
@@ -150,7 +161,9 @@ pub fn warn_unknown_fields(doc: &ManifestDoc, known: &[&str]) {
 /// não constam em `known`. Separado para os testes de drift (`examples/` nunca
 /// deve produzir chaves desconhecidas) poderem afirmar sobre o resultado.
 pub fn unknown_fields(doc: &ManifestDoc, known: &[&str]) -> Vec<String> {
-    let serde_yaml::Value::Mapping(map) = &doc.spec else { return Vec::new() };
+    let serde_yaml::Value::Mapping(map) = &doc.spec else {
+        return Vec::new();
+    };
     map.keys()
         .filter_map(|k| k.as_str())
         .filter(|key| !known.contains(key))
@@ -180,7 +193,8 @@ kind: Container
 metadata: { name: web }
 spec: { image: \"alpine:3.19\" }
 ";
-        let p = std::env::temp_dir().join(format!("delonix-manifest-test-{}.yaml", std::process::id()));
+        let p =
+            std::env::temp_dir().join(format!("delonix-manifest-test-{}.yaml", std::process::id()));
         std::fs::write(&p, text).unwrap();
         let docs = load(&p).unwrap();
         assert_eq!(docs.len(), 3);
@@ -203,7 +217,10 @@ kind: Volume
 metadata: { name: b }
 spec: {}
 ";
-        let p = std::env::temp_dir().join(format!("delonix-manifest-test2-{}.yaml", std::process::id()));
+        let p = std::env::temp_dir().join(format!(
+            "delonix-manifest-test2-{}.yaml",
+            std::process::id()
+        ));
         std::fs::write(&p, text).unwrap();
         let docs = load(&p).unwrap();
         assert_eq!(of_kind(&docs, "Network").len(), 1);
@@ -225,7 +242,10 @@ kind: VM
 metadata: { name: node2 }
 spec: { disk: k8s-golden }
 ";
-        let p = std::env::temp_dir().join(format!("delonix-manifest-vm-alias-{}.yaml", std::process::id()));
+        let p = std::env::temp_dir().join(format!(
+            "delonix-manifest-vm-alias-{}.yaml",
+            std::process::id()
+        ));
         std::fs::write(&p, text).unwrap();
         let docs = load(&p).unwrap();
         // Ambos os sinónimos passam a ser o `Vm` canónico, apanhados por `of_kind`.
@@ -238,8 +258,19 @@ spec: { disk: k8s-golden }
     #[test]
     fn canonical_kind_e_case_insensitive_para_vm() {
         // Qualquer casing plausível de outra ferramenta resolve para `Vm`.
-        for k in ["Vm", "VM", "vm", "VirtualMachine", "virtualMachine", "VIRTUALMACHINE"] {
-            assert_eq!(canonical_kind(k), "Vm", "kind {k:?} devia canonicalizar para Vm");
+        for k in [
+            "Vm",
+            "VM",
+            "vm",
+            "VirtualMachine",
+            "virtualMachine",
+            "VIRTUALMACHINE",
+        ] {
+            assert_eq!(
+                canonical_kind(k),
+                "Vm",
+                "kind {k:?} devia canonicalizar para Vm"
+            );
         }
         // Kinds não-Vm passam intactos (não inventamos sinónimos).
         assert_eq!(canonical_kind("Container"), "Container");
@@ -262,11 +293,18 @@ kind: Volume
 metadata: { name: sem-labels }
 spec: {}
 ";
-        let p = std::env::temp_dir().join(format!("delonix-manifest-meta-{}.yaml", std::process::id()));
+        let p =
+            std::env::temp_dir().join(format!("delonix-manifest-meta-{}.yaml", std::process::id()));
         std::fs::write(&p, text).unwrap();
         let docs = load(&p).unwrap();
-        assert_eq!(docs[0].metadata.labels.get("tier").map(String::as_str), Some("frontend"));
-        assert_eq!(docs[0].metadata.annotations.get("note").map(String::as_str), Some("exemplo"));
+        assert_eq!(
+            docs[0].metadata.labels.get("tier").map(String::as_str),
+            Some("frontend")
+        );
+        assert_eq!(
+            docs[0].metadata.annotations.get("note").map(String::as_str),
+            Some("exemplo")
+        );
         // Sem bloco labels/annotations → mapas vazios, nunca erro.
         assert!(docs[1].metadata.labels.is_empty());
         assert!(docs[1].metadata.annotations.is_empty());
@@ -281,7 +319,10 @@ kind: Container
 metadata: { name: web }
 spec: { image: alpine, memroy: 2G, restartPolicy: always }
 ";
-        let p = std::env::temp_dir().join(format!("delonix-manifest-unknown-{}.yaml", std::process::id()));
+        let p = std::env::temp_dir().join(format!(
+            "delonix-manifest-unknown-{}.yaml",
+            std::process::id()
+        ));
         std::fs::write(&p, text).unwrap();
         let docs = load(&p).unwrap();
         let unknown = unknown_fields(&docs[0], crate::cmd::container::CONTAINER_SPEC_FIELDS);
@@ -306,7 +347,9 @@ spec: { image: alpine, memroy: 2G, restartPolicy: always }
                 "Network" => Some(crate::cmd::network::NETWORK_SPEC_FIELDS),
                 "Image" => Some(crate::cmd::image::IMAGE_SPEC_FIELDS),
                 "Secret" => Some(crate::cmd::secret::SECRET_SPEC_FIELDS),
-                "Ingress" | "Egress" | "FirewallPolicy" => Some(crate::cmd::firewall::FW_SPEC_FIELDS),
+                "Ingress" | "Egress" | "FirewallPolicy" => {
+                    Some(crate::cmd::firewall::FW_SPEC_FIELDS)
+                }
                 "HTTPRoute" => Some(crate::cmd::httproute::HTTP_ROUTE_SPEC_FIELDS),
                 "Dependency" => Some(crate::cmd::dependency::DEPENDENCY_SPEC_FIELDS),
                 _ => None, // Cluster tem specs aninhados próprios; fora deste guard.
@@ -326,15 +369,24 @@ spec: { image: alpine, memroy: 2G, restartPolicy: always }
             if !text.contains(SUPPORTED_API_VERSION) {
                 continue;
             }
-            let docs = load(&path)
-                .unwrap_or_else(|e| panic!("{}: é um manifesto delonix mas não parseia: {e}", path.display()));
+            let docs = load(&path).unwrap_or_else(|e| {
+                panic!(
+                    "{}: é um manifesto delonix mas não parseia: {e}",
+                    path.display()
+                )
+            });
             for doc in &docs {
-                let Some(known) = fields_for(&doc.kind) else { continue };
+                let Some(known) = fields_for(&doc.kind) else {
+                    continue;
+                };
                 let unknown = unknown_fields(doc, known);
                 assert!(
                     unknown.is_empty(),
                     "{}: {} '{}' tem campos desconhecidos {:?} — actualiza a const *_SPEC_FIELDS",
-                    path.display(), doc.kind, doc.metadata.name, unknown
+                    path.display(),
+                    doc.kind,
+                    doc.metadata.name,
+                    unknown
                 );
             }
         }
@@ -353,15 +405,24 @@ metadata: {}
 spec: { image: alpine }
 ";
         assert!(text.contains(SUPPORTED_API_VERSION));
-        let p = std::env::temp_dir().join(format!("delonix-manifest-partido-{}.yaml", std::process::id()));
+        let p = std::env::temp_dir().join(format!(
+            "delonix-manifest-partido-{}.yaml",
+            std::process::id()
+        ));
         std::fs::write(&p, text).unwrap();
-        assert!(load(&p).is_err(), "manifesto marcado mas sem metadata.name devia falhar o load");
+        assert!(
+            load(&p).is_err(),
+            "manifesto marcado mas sem metadata.name devia falhar o load"
+        );
         let _ = std::fs::remove_file(&p);
     }
 
     #[test]
     fn ficheiro_vazio_e_erro_claro() {
-        let p = std::env::temp_dir().join(format!("delonix-manifest-empty-{}.yaml", std::process::id()));
+        let p = std::env::temp_dir().join(format!(
+            "delonix-manifest-empty-{}.yaml",
+            std::process::id()
+        ));
         std::fs::write(&p, "").unwrap();
         let err = load(&p).unwrap_err();
         assert!(format!("{err}").contains("vazio"));
@@ -370,7 +431,8 @@ spec: { image: alpine }
 
     #[test]
     fn resolve_path_sem_flag_nem_ficheiro_e_erro_claro() {
-        let dir = std::env::temp_dir().join(format!("delonix-manifest-resolve-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("delonix-manifest-resolve-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let orig = std::env::current_dir().unwrap();
         std::env::set_current_dir(&dir).unwrap();

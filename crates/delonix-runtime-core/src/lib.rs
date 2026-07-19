@@ -9,13 +9,13 @@ use serde::{Deserialize, Serialize};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub mod cred_vault;
+mod error;
 pub mod events;
 pub mod secret;
+mod store;
 pub mod typestate;
 pub mod virt;
 pub mod workload_net;
-mod error;
-mod store;
 
 pub use error::{Error, Result};
 pub use secret::{Secret, SecretStore};
@@ -33,7 +33,12 @@ pub fn fmt_local_ts(unix: u64) -> String {
     }
     format!(
         "{:04}-{:02}-{:02} {:02}:{:02}:{:02}",
-        tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec
+        tm.tm_year + 1900,
+        tm.tm_mon + 1,
+        tm.tm_mday,
+        tm.tm_hour,
+        tm.tm_min,
+        tm.tm_sec
     )
 }
 
@@ -130,7 +135,11 @@ pub fn fw_port_ok(p: &str) -> bool {
     if p.is_empty() || p == "*" {
         return true;
     }
-    let num_ok = |s: &str| s.parse::<u32>().map(|n| (1..=65535).contains(&n)).unwrap_or(false);
+    let num_ok = |s: &str| {
+        s.parse::<u32>()
+            .map(|n| (1..=65535).contains(&n))
+            .unwrap_or(false)
+    };
     match p.split_once('-') {
         Some((a, b)) => num_ok(a) && num_ok(b),
         None => num_ok(p),
@@ -143,10 +152,17 @@ pub fn fw_src_ok(s: &str) -> bool {
     if s.is_empty() || s == "*" || s == "0.0.0.0/0" {
         return true;
     }
-    if s.len() > 64 || !s.bytes().all(|b| b.is_ascii_hexdigit() || matches!(b, b'.' | b':' | b'/')) {
+    if s.len() > 64
+        || !s
+            .bytes()
+            .all(|b| b.is_ascii_hexdigit() || matches!(b, b'.' | b':' | b'/'))
+    {
         return false;
     }
-    let (addr, mask) = s.split_once('/').map(|(a, m)| (a, Some(m))).unwrap_or((s, None));
+    let (addr, mask) = s
+        .split_once('/')
+        .map(|(a, m)| (a, Some(m)))
+        .unwrap_or((s, None));
     if let Some(m) = mask {
         match m.parse::<u32>() {
             Ok(n) if n <= 128 => {}
@@ -680,14 +696,33 @@ mod tests {
         assert!(!fw_port_ok("80; flush ruleset"));
         assert!(!fw_port_ok("99999"));
         // src (o vetor crítico)
-        assert!(fw_src_ok("10.0.0.0/16") && fw_src_ok("192.168.1.1") && fw_src_ok("0.0.0.0/0") && fw_src_ok("*"));
-        assert!(!fw_src_ok("1.2.3.4 accept; }; chain forward { policy drop; }"));
+        assert!(
+            fw_src_ok("10.0.0.0/16")
+                && fw_src_ok("192.168.1.1")
+                && fw_src_ok("0.0.0.0/0")
+                && fw_src_ok("*")
+        );
+        assert!(!fw_src_ok(
+            "1.2.3.4 accept; }; chain forward { policy drop; }"
+        ));
         assert!(!fw_src_ok("1.2.3.4\n\t\taccept"));
         assert!(!fw_src_ok("$(reboot)"));
         // regra completa
-        let bad = FwRule { src: "x; flush ruleset".into(), proto: "tcp".into(), port: "80".into(), ..Default::default() };
+        let bad = FwRule {
+            src: "x; flush ruleset".into(),
+            proto: "tcp".into(),
+            port: "80".into(),
+            ..Default::default()
+        };
         assert!(!bad.nft_safe());
-        let good = FwRule { src: "10.0.0.0/16".into(), proto: "tcp".into(), port: "443".into(), dir: "in".into(), action: "allow".into(), note: String::new() };
+        let good = FwRule {
+            src: "10.0.0.0/16".into(),
+            proto: "tcp".into(),
+            port: "443".into(),
+            dir: "in".into(),
+            action: "allow".into(),
+            note: String::new(),
+        };
         assert!(good.nft_safe());
     }
 
@@ -713,7 +748,10 @@ mod tests {
         let c = sample("0123456789abcdef", "web");
         assert_eq!(c.short_id(), "0123456789ab");
         // aninhado sob a delonix.slice (limites agregados — protecção do host).
-        assert_eq!(c.cgroup(), "/sys/fs/cgroup/delonix.slice/delonix-0123456789abcdef");
+        assert_eq!(
+            c.cgroup(),
+            "/sys/fs/cgroup/delonix.slice/delonix-0123456789abcdef"
+        );
         assert_eq!(c.status, Status::Created);
     }
 

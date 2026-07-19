@@ -47,9 +47,9 @@ fn random_bytes(buf: &mut [u8]) -> Result<()> {
 pub fn valid_cred_name(name: &str) -> bool {
     !name.is_empty()
         && name.len() <= 96
-        && name
-            .bytes()
-            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || matches!(b, b'.' | b'_' | b'-' | b':'))
+        && name.bytes().all(|b| {
+            b.is_ascii_lowercase() || b.is_ascii_digit() || matches!(b, b'.' | b'_' | b'-' | b':')
+        })
 }
 
 fn write_0600(path: &Path, bytes: &[u8]) -> Result<()> {
@@ -132,7 +132,9 @@ impl CredVault {
     /// Cifra e persiste uma credencial (sobrescreve se existir).
     pub fn put(&self, name: &str, value: &str) -> Result<()> {
         if !valid_cred_name(name) {
-            return Err(Error::Invalid(format!("nome de credencial inválido: {name}")));
+            return Err(Error::Invalid(format!(
+                "nome de credencial inválido: {name}"
+            )));
         }
         write_0600(&self.cred_path(name), &self.seal(value.as_bytes())?)?;
         Ok(())
@@ -145,9 +147,11 @@ impl CredVault {
             Err(ref e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
             Err(e) => return Err(Error::Io(e)),
         };
-        let pt = self
-            .unseal(&blob)
-            .map_err(|_| Error::Invalid(format!("falha a decifrar {name} (chave errada/corrompido?)")))?;
+        let pt = self.unseal(&blob).map_err(|_| {
+            Error::Invalid(format!(
+                "falha a decifrar {name} (chave errada/corrompido?)"
+            ))
+        })?;
         let s = String::from_utf8(pt)
             .map_err(|_| Error::Invalid(format!("credencial {name} não é UTF-8")))?;
         Ok(Some(s))
@@ -236,7 +240,10 @@ mod tests {
         let base = tmp_base();
         let v = CredVault::open(&base).unwrap();
         v.put("ngrok", "super-secret-token").unwrap();
-        assert_eq!(v.get("ngrok").unwrap().as_deref(), Some("super-secret-token"));
+        assert_eq!(
+            v.get("ngrok").unwrap().as_deref(),
+            Some("super-secret-token")
+        );
         assert!(v.exists("ngrok"));
         assert_eq!(v.get("inexistente").unwrap(), None);
         let _ = fs::remove_dir_all(&base);
@@ -249,7 +256,10 @@ mod tests {
         v.put("pinggy", "PLAINTEXT-MARKER-123").unwrap();
         let raw = fs::read(base.join("tunnels/cred/pinggy.bin")).unwrap();
         let as_str = String::from_utf8_lossy(&raw);
-        assert!(!as_str.contains("PLAINTEXT-MARKER-123"), "token vazou em claro no disco!");
+        assert!(
+            !as_str.contains("PLAINTEXT-MARKER-123"),
+            "token vazou em claro no disco!"
+        );
         // permissões 0600
         let mode = fs::metadata(base.join("tunnels/cred/pinggy.bin"))
             .unwrap()

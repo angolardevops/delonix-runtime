@@ -189,7 +189,11 @@ impl Client {
         if status.is_success() {
             Ok(resp)
         } else if status == reqwest::StatusCode::NOT_FOUND {
-            Err(Error::NotFound(format!("image {}:{}", self.repo, url.rsplit('/').next().unwrap_or(""))))
+            Err(Error::NotFound(format!(
+                "image {}:{}",
+                self.repo,
+                url.rsplit('/').next().unwrap_or("")
+            )))
         } else {
             Err(Error::Registry(format!("HTTP {status} em {url}")))
         }
@@ -204,8 +208,9 @@ impl Client {
             .ok_or_else(|| Error::Registry("autenticação sem `realm`".into()))?;
         let scope = match force_scope {
             Some(s) => s.to_string(),
-            None => extract(www, "scope")
-                .unwrap_or_else(|| format!("repository:{}:pull", self.repo)),
+            None => {
+                extract(www, "scope").unwrap_or_else(|| format!("repository:{}:pull", self.repo))
+            }
         };
         let mut url = format!("{realm}?scope={scope}");
         if let Some(service) = extract(www, "service") {
@@ -218,7 +223,10 @@ impl Client {
         }
         let resp = req.send().map_err(reg_err)?;
         if !resp.status().is_success() {
-            return Err(Error::Registry(format!("falha a obter token: HTTP {}", resp.status())));
+            return Err(Error::Registry(format!(
+                "falha a obter token: HTTP {}",
+                resp.status()
+            )));
         }
         let v: serde_json::Value = resp.json().map_err(reg_err)?;
         v.get("token")
@@ -229,11 +237,23 @@ impl Client {
     }
 
     fn manifest_url(&self, reference: &str) -> String {
-        format!("{}://{}/v2/{}/manifests/{}", scheme_for(&self.host), self.host, self.repo, reference)
+        format!(
+            "{}://{}/v2/{}/manifests/{}",
+            scheme_for(&self.host),
+            self.host,
+            self.repo,
+            reference
+        )
     }
 
     fn blob(&mut self, digest: &str) -> Result<Vec<u8>> {
-        let url = format!("{}://{}/v2/{}/blobs/{}", scheme_for(&self.host), self.host, self.repo, digest);
+        let url = format!(
+            "{}://{}/v2/{}/blobs/{}",
+            scheme_for(&self.host),
+            self.host,
+            self.repo,
+            digest
+        );
         let resp = self.fetch(&url, "*/*")?;
         Ok(resp.bytes().map_err(reg_err)?.to_vec())
     }
@@ -272,7 +292,13 @@ impl Client {
 
     /// `true` se o blob já existe no registo (evita reenviá-lo — dedup remota).
     fn blob_exists(&mut self, digest: &str) -> Result<bool> {
-        let url = format!("{}://{}/v2/{}/blobs/{}", scheme_for(&self.host), self.host, self.repo, digest);
+        let url = format!(
+            "{}://{}/v2/{}/blobs/{}",
+            scheme_for(&self.host),
+            self.host,
+            self.repo,
+            digest
+        );
         let resp = self.write_req(&|http| http.head(&url))?;
         Ok(resp.status().is_success())
     }
@@ -283,7 +309,12 @@ impl Client {
         if self.blob_exists(digest)? {
             return Ok(());
         }
-        let start = format!("{}://{}/v2/{}/blobs/uploads/", scheme_for(&self.host), self.host, self.repo);
+        let start = format!(
+            "{}://{}/v2/{}/blobs/uploads/",
+            scheme_for(&self.host),
+            self.host,
+            self.repo
+        );
         let resp = self.write_req(&|http| http.post(&start))?;
         if resp.status() != reqwest::StatusCode::ACCEPTED {
             return Err(Error::Registry(format!(
@@ -314,7 +345,9 @@ impl Client {
         })?;
         if !resp.status().is_success() {
             let status = resp.status();
-            return Err(Error::Registry(format!("PUT de blob {digest}: HTTP {status}")));
+            return Err(Error::Registry(format!(
+                "PUT de blob {digest}: HTTP {status}"
+            )));
         }
         Ok(())
     }
@@ -332,7 +365,9 @@ impl Client {
             let status = resp.status();
             let detail = resp.text().unwrap_or_default();
             let detail = detail.chars().take(200).collect::<String>();
-            return Err(Error::Registry(format!("PUT de manifesto: HTTP {status} {detail}")));
+            return Err(Error::Registry(format!(
+                "PUT de manifesto: HTTP {status} {detail}"
+            )));
         }
         Ok(())
     }
@@ -380,7 +415,13 @@ pub fn registry_client(store: &ImageStore, reference: &str) -> Result<RegistryCl
         .map_err(reg_err)?;
     let creds = crate::auth::lookup(store.root(), &host);
     Ok(RegistryClient {
-        inner: Client { http, host, repo, token: None, creds },
+        inner: Client {
+            http,
+            host,
+            repo,
+            token: None,
+            creds,
+        },
         reference: refr,
     })
 }
@@ -528,7 +569,13 @@ pub fn pull_from_registry_with_creds(
         .build()
         .map_err(reg_err)?;
     let creds = creds_override.or_else(|| crate::auth::lookup(store.root(), &host));
-    let mut c = Client { http, host: host.clone(), repo: repo.clone(), token: None, creds };
+    let mut c = Client {
+        http,
+        host: host.clone(),
+        repo: repo.clone(),
+        token: None,
+        creds,
+    };
 
     eprintln!("a puxar {repo}:{refr} de {host}...");
 
@@ -584,7 +631,12 @@ pub fn pull_from_registry_with_creds(
     let total = real_layers.len();
     let mut layers = Vec::with_capacity(total);
     for (i, l) in real_layers.iter().enumerate() {
-        eprintln!("layer {}/{}  {}", i + 1, total, &l.digest[..l.digest.len().min(19)]);
+        eprintln!(
+            "layer {}/{}  {}",
+            i + 1,
+            total,
+            &l.digest[..l.digest.len().min(19)]
+        );
         let data = c.blob(&l.digest)?;
         let dg = store.cas().write(&data)?;
         if dg != l.digest {
@@ -595,7 +647,13 @@ pub fn pull_from_registry_with_creds(
 
     // 4) monta e guarda
     let raw: RawConfig = serde_json::from_slice(&config_bytes)?;
-    let inner = raw.config.unwrap_or(RawInner { cmd: None, entrypoint: None, env: None, user: None, working_dir: None });
+    let inner = raw.config.unwrap_or(RawInner {
+        cmd: None,
+        entrypoint: None,
+        env: None,
+        user: None,
+        working_dir: None,
+    });
     let repo_tags = store.merged_tags(&config_digest, reference);
     let image = Image {
         id: config_digest,
@@ -665,7 +723,13 @@ pub fn push_to_registry(store: &ImageStore, source: &str, target: &str) -> Resul
         .build()
         .map_err(reg_err)?;
     let creds = crate::auth::lookup(store.root(), &host);
-    let mut c = Client { http, host: host.clone(), repo: repo.clone(), token: None, creds };
+    let mut c = Client {
+        http,
+        host: host.clone(),
+        repo: repo.clone(),
+        token: None,
+        creds,
+    };
 
     eprintln!("a publicar {repo}:{refr} em {host}...");
 
@@ -719,7 +783,12 @@ const EMPTY_CONFIG_BYTES: &[u8] = b"{}";
 /// generaliza o manifesto: reaproveita o mesmo [`Client`] (auth/upload) já
 /// testado. `root` só é usado para `crate::auth::lookup` (credenciais de
 /// `delonix login`) — sem `ImageStore`/CAS envolvido, é um blob solto.
-pub fn push_oci_artifact(root: &std::path::Path, target: &str, layer_media_type: &str, data: &[u8]) -> Result<String> {
+pub fn push_oci_artifact(
+    root: &std::path::Path,
+    target: &str,
+    layer_media_type: &str,
+    data: &[u8],
+) -> Result<String> {
     let (host, repo, refr) = parse_reference(target);
     let http = reqwest::blocking::Client::builder()
         .user_agent("delonix/0.1")
@@ -727,7 +796,13 @@ pub fn push_oci_artifact(root: &std::path::Path, target: &str, layer_media_type:
         .build()
         .map_err(reg_err)?;
     let creds = crate::auth::lookup(root, &host);
-    let mut c = Client { http, host: host.clone(), repo: repo.clone(), token: None, creds };
+    let mut c = Client {
+        http,
+        host: host.clone(),
+        repo: repo.clone(),
+        token: None,
+        creds,
+    };
 
     eprintln!("a publicar artefacto {repo}:{refr} em {host}...");
 
@@ -735,7 +810,11 @@ pub fn push_oci_artifact(root: &std::path::Path, target: &str, layer_media_type:
     c.push_blob(&config_digest, EMPTY_CONFIG_BYTES)?;
 
     let layer_digest = with_prefix(&sha256_hex(data));
-    eprintln!("blob {}  ({} bytes)", &layer_digest[..19.min(layer_digest.len())], data.len());
+    eprintln!(
+        "blob {}  ({} bytes)",
+        &layer_digest[..19.min(layer_digest.len())],
+        data.len()
+    );
     c.push_blob(&layer_digest, data)?;
 
     let manifest = serde_json::json!({
@@ -746,7 +825,11 @@ pub fn push_oci_artifact(root: &std::path::Path, target: &str, layer_media_type:
         "layers": [ { "mediaType": layer_media_type, "size": data.len(), "digest": layer_digest } ],
     });
     let manifest_bytes = serde_json::to_vec(&manifest)?;
-    c.push_manifest(&refr, &manifest_bytes, "application/vnd.oci.image.manifest.v1+json")?;
+    c.push_manifest(
+        &refr,
+        &manifest_bytes,
+        "application/vnd.oci.image.manifest.v1+json",
+    )?;
 
     let digest = format!("sha256:{}", sha256_hex(&manifest_bytes));
     eprintln!("publicado: {host}/{repo}:{refr}  ({digest})");
@@ -763,7 +846,13 @@ pub fn pull_oci_artifact(root: &std::path::Path, source: &str) -> Result<Vec<u8>
         .build()
         .map_err(reg_err)?;
     let creds = crate::auth::lookup(root, &host);
-    let mut c = Client { http, host, repo, token: None, creds };
+    let mut c = Client {
+        http,
+        host,
+        repo,
+        token: None,
+        creds,
+    };
 
     let accept = "application/vnd.oci.image.manifest.v1+json";
     let url = c.manifest_url(&refr);
@@ -799,8 +888,8 @@ struct ArtifactManifest {
 #[cfg(test)]
 mod tests {
     use super::{
-        layer_media_type, parse_reference, pull_from_registry_with_creds, pull_oci_artifact, push_oci_artifact,
-        sha256_hex, with_prefix,
+        layer_media_type, parse_reference, pull_from_registry_with_creds, pull_oci_artifact,
+        push_oci_artifact, sha256_hex, with_prefix,
     };
 
     #[test]
@@ -855,7 +944,8 @@ mod tests {
     /// o digest manda na resolução, a tag é só informativa.
     #[test]
     fn parses_repo_tag_and_digest_combined() {
-        let (h, r, t) = parse_reference("kindest/node:v1.34.0@sha256:7416a61b42b1662ca6ca89f02028ac1");
+        let (h, r, t) =
+            parse_reference("kindest/node:v1.34.0@sha256:7416a61b42b1662ca6ca89f02028ac1");
         assert_eq!(h, "registry-1.docker.io");
         assert_eq!(r, "kindest/node");
         assert_eq!(t, "sha256:7416a61b42b1662ca6ca89f02028ac1");
@@ -872,7 +962,10 @@ mod tests {
     /// Servidor HTTP mínimo (uma ligação, uma resposta canónica) — o suficiente
     /// para simular um registo OCI que exige token e capturar o header
     /// `Authorization` que o cliente enviou ao pedir esse token.
-    fn serve_one(port_tx: std::sync::mpsc::Sender<u16>, resp_after_401: &'static str) -> std::thread::JoinHandle<Option<String>> {
+    fn serve_one(
+        port_tx: std::sync::mpsc::Sender<u16>,
+        resp_after_401: &'static str,
+    ) -> std::thread::JoinHandle<Option<String>> {
         use std::io::{Read, Write};
         use std::net::TcpListener;
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -915,13 +1008,19 @@ mod tests {
         let (tx, rx) = std::sync::mpsc::channel();
         // resposta ao pedido de token: 401 de novo (não precisamos de completar o
         // pull — só de observar o Authorization enviado no pedido de token).
-        let handle = serve_one(tx, "HTTP/1.1 401 Unauthorized\r\ncontent-length: 0\r\nconnection: close\r\n\r\n");
+        let handle = serve_one(
+            tx,
+            "HTTP/1.1 401 Unauthorized\r\ncontent-length: 0\r\nconnection: close\r\n\r\n",
+        );
         let port = rx.recv().unwrap();
 
         let tmp = std::env::temp_dir().join(format!(
             "delonix-image-pull-creds-test-{}-{}",
             std::process::id(),
-            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
         ));
         let store = crate::ImageStore::open(&tmp).unwrap();
         // SEM `delonix login` local (auth.json não existe) — se a precedência
@@ -942,7 +1041,8 @@ mod tests {
             base64::engine::general_purpose::STANDARD.encode(b"cri-user:cri-pass")
         };
         assert!(
-            auth.to_ascii_lowercase().contains(&format!("basic {}", expected_b64.to_lowercase())),
+            auth.to_ascii_lowercase()
+                .contains(&format!("basic {}", expected_b64.to_lowercase())),
             "Authorization capturado não usa as credenciais do override: {auth:?}"
         );
 
@@ -959,8 +1059,10 @@ mod tests {
         use std::sync::{Arc, Mutex};
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
-        let blobs: Arc<Mutex<std::collections::HashMap<String, Vec<u8>>>> = Arc::new(Mutex::new(Default::default()));
-        let manifests: Arc<Mutex<std::collections::HashMap<String, Vec<u8>>>> = Arc::new(Mutex::new(Default::default()));
+        let blobs: Arc<Mutex<std::collections::HashMap<String, Vec<u8>>>> =
+            Arc::new(Mutex::new(Default::default()));
+        let manifests: Arc<Mutex<std::collections::HashMap<String, Vec<u8>>>> =
+            Arc::new(Mutex::new(Default::default()));
         let handle = std::thread::spawn(move || {
             listener.set_nonblocking(false).unwrap();
             loop {
@@ -1006,7 +1108,10 @@ mod tests {
                     body.extend_from_slice(&chunk[..n]);
                 }
 
-                let write_resp = |s: &mut std::net::TcpStream, status: &str, headers: &str, body: &[u8]| {
+                let write_resp = |s: &mut std::net::TcpStream,
+                                  status: &str,
+                                  headers: &str,
+                                  body: &[u8]| {
                     let head = format!(
                         "HTTP/1.1 {status}\r\n{headers}content-length: {}\r\nconnection: close\r\n\r\n",
                         body.len()
@@ -1016,7 +1121,12 @@ mod tests {
                 };
 
                 if method == "POST" && path.contains("/blobs/uploads/") {
-                    write_resp(&mut s, "202 Accepted", &format!("location: {path}upload-1\r\n"), b"");
+                    write_resp(
+                        &mut s,
+                        "202 Accepted",
+                        &format!("location: {path}upload-1\r\n"),
+                        b"",
+                    );
                 } else if method == "PUT" && path.contains("/blobs/uploads/") {
                     let digest = path.split("digest=").nth(1).unwrap_or("").to_string();
                     blobs.lock().unwrap().insert(digest, body);
@@ -1067,17 +1177,26 @@ mod tests {
         let tmp = std::env::temp_dir().join(format!(
             "delonix-image-artifact-test-{}-{}",
             std::process::id(),
-            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
         ));
         std::fs::create_dir_all(&tmp).unwrap();
 
         let target = format!("127.0.0.1:{port}/vm-images:golden");
         let payload = b"qcow2-conteudo-fingido-para-o-teste".to_vec();
-        let digest = push_oci_artifact(&tmp, &target, "application/vnd.delonix.vmimage.v1.qcow2", &payload)
-            .expect("push devia ter sucesso contra o mock");
+        let digest = push_oci_artifact(
+            &tmp,
+            &target,
+            "application/vnd.delonix.vmimage.v1.qcow2",
+            &payload,
+        )
+        .expect("push devia ter sucesso contra o mock");
         assert!(digest.starts_with("sha256:"));
 
-        let pulled = pull_oci_artifact(&tmp, &target).expect("pull devia ter sucesso contra o mock");
+        let pulled =
+            pull_oci_artifact(&tmp, &target).expect("pull devia ter sucesso contra o mock");
         assert_eq!(pulled, payload);
 
         let _ = std::fs::remove_dir_all(&tmp);
@@ -1092,7 +1211,10 @@ mod tests {
         let tmp = std::env::temp_dir().join(format!(
             "delonix-image-artifact-tamper-test-{}-{}",
             std::process::id(),
-            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
         ));
         std::fs::create_dir_all(&tmp).unwrap();
 
@@ -1101,18 +1223,31 @@ mod tests {
         // `push_oci_artifact` devolve o digest do MANIFESTO, não do layer/blob — o que
         // precisamos adulterar é o blob (o mesmo `layer_digest` que o pull vai buscar).
         let layer_digest = format!("sha256:{}", sha256_hex(&payload));
-        push_oci_artifact(&tmp, &target, "application/vnd.delonix.vmimage.v1.qcow2", &payload).unwrap();
+        push_oci_artifact(
+            &tmp,
+            &target,
+            "application/vnd.delonix.vmimage.v1.qcow2",
+            &payload,
+        )
+        .unwrap();
 
         // Simula adulteração directa no armazenamento do registo: substitui os bytes
         // guardados sob o MESMO digest (o manifesto continua a apontar para `layer_digest`,
         // mas o conteúdo real mudou) — o que um `push_blob` normal nunca faria (dedup
         // por HEAD), mas um registo comprometido/backend adulterado poderia.
         let http = reqwest::blocking::Client::new();
-        let put_url = format!("http://127.0.0.1:{port}/v2/vm-images/blobs/uploads/tamper?digest={layer_digest}");
-        let resp = http.put(&put_url).body(b"conteudo-adulterado-pelo-atacante".to_vec()).send().unwrap();
+        let put_url = format!(
+            "http://127.0.0.1:{port}/v2/vm-images/blobs/uploads/tamper?digest={layer_digest}"
+        );
+        let resp = http
+            .put(&put_url)
+            .body(b"conteudo-adulterado-pelo-atacante".to_vec())
+            .send()
+            .unwrap();
         assert!(resp.status().is_success());
 
-        let err = pull_oci_artifact(&tmp, &target).expect_err("pull devia recusar o blob adulterado");
+        let err =
+            pull_oci_artifact(&tmp, &target).expect_err("pull devia recusar o blob adulterado");
         assert!(format!("{err}").contains("adulterado") || format!("{err}").contains("digest"));
 
         let _ = std::fs::remove_dir_all(&tmp);

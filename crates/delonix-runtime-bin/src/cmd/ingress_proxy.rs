@@ -52,10 +52,19 @@ pub struct TlsMaterial {
 /// Gera um par cert+chave **self-signed** (PEM) para os `hosts` dados (SANs).
 /// Usado pela Fase 4 quando `tls.mode: selfSigned`. Sem hosts → `localhost`.
 pub fn self_signed_pem(hosts: &[String]) -> Result<TlsMaterial> {
-    let sans: Vec<String> = if hosts.is_empty() { vec!["localhost".into()] } else { hosts.to_vec() };
-    let ck = rcgen::generate_simple_self_signed(sans)
-        .map_err(|e| Error::Runtime { context: "self-signed cert", message: e.to_string() })?;
-    Ok(TlsMaterial { cert_pem: ck.cert.pem(), key_pem: ck.key_pair.serialize_pem() })
+    let sans: Vec<String> = if hosts.is_empty() {
+        vec!["localhost".into()]
+    } else {
+        hosts.to_vec()
+    };
+    let ck = rcgen::generate_simple_self_signed(sans).map_err(|e| Error::Runtime {
+        context: "self-signed cert",
+        message: e.to_string(),
+    })?;
+    Ok(TlsMaterial {
+        cert_pem: ck.cert.pem(),
+        key_pem: ck.key_pair.serialize_pem(),
+    })
 }
 
 /// Uma porta de escuta do proxy.
@@ -113,8 +122,14 @@ fn strip_hop_by_hop(headers: &mut hyper::HeaderMap) {
         }
     }
     const HOP: [&str; 8] = [
-        "connection", "keep-alive", "proxy-authenticate", "proxy-authorization", "te", "trailer",
-        "transfer-encoding", "upgrade",
+        "connection",
+        "keep-alive",
+        "proxy-authenticate",
+        "proxy-authorization",
+        "te",
+        "trailer",
+        "transfer-encoding",
+        "upgrade",
     ];
     for h in HOP {
         headers.remove(h);
@@ -153,7 +168,10 @@ fn text_response(code: StatusCode, msg: &str) -> Response<RespBody> {
     let body = Full::new(Bytes::from(msg.to_string()))
         .map_err(|e: Infallible| match e {})
         .boxed();
-    Response::builder().status(code).body(body).expect("resposta estática válida")
+    Response::builder()
+        .status(code)
+        .body(body)
+        .expect("resposta estática válida")
 }
 
 /// Trata um pedido: casa a rota e encaminha (streaming) para o backend, ou
@@ -166,16 +184,26 @@ async fn handle(
     let host = req_host(&req);
     let path = req.uri().path().to_string();
     // Snapshot das rotas (o SIGHUP pode trocá-las a qualquer momento).
-    let snapshot = routes.read().map(|g| g.clone()).unwrap_or_else(|p| p.into_inner().clone());
+    let snapshot = routes
+        .read()
+        .map(|g| g.clone())
+        .unwrap_or_else(|p| p.into_inner().clone());
     let Some(route) = pick_route(&snapshot, &host, &path) else {
-        return Ok(text_response(StatusCode::NOT_FOUND, "delonix: sem rota para este host/path\n"));
+        return Ok(text_response(
+            StatusCode::NOT_FOUND,
+            "delonix: sem rota para este host/path\n",
+        ));
     };
     let backend = route.backend.clone();
 
     // Reconstrói o pedido para o backend: mesma method/headers/corpo, URI absoluta
     // `http://<backend><path?query>`. O corpo (`Incoming`) é reencaminhado sem
     // bufferizar (streaming) — hyper transfere-o à medida que chega.
-    let pq = req.uri().path_and_query().map(|p| p.as_str()).unwrap_or("/");
+    let pq = req
+        .uri()
+        .path_and_query()
+        .map(|p| p.as_str())
+        .unwrap_or("/");
     let uri = format!("http://{backend}{pq}");
     let (parts, mut headers, body) = {
         let (p, b) = req.into_parts();
@@ -190,7 +218,12 @@ async fn handle(
     }
     let out_req = match out.body(body) {
         Ok(r) => r,
-        Err(_) => return Ok(text_response(StatusCode::BAD_GATEWAY, "delonix: pedido inválido\n")),
+        Err(_) => {
+            return Ok(text_response(
+                StatusCode::BAD_GATEWAY,
+                "delonix: pedido inválido\n",
+            ))
+        }
     };
 
     // Teto de tempo: um backend pendurado não pode prender a ligação para sempre.
@@ -200,7 +233,9 @@ async fn handle(
             // os hop-by-hop antes de a devolver ao cliente.
             let (mut rparts, body) = resp.into_parts();
             strip_hop_by_hop(&mut rparts.headers);
-            let body = body.map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>).boxed();
+            let body = body
+                .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
+                .boxed();
             Ok(Response::from_parts(rparts, body))
         }
         Ok(Err(e)) => Ok(text_response(
@@ -209,7 +244,10 @@ async fn handle(
         )),
         Err(_elapsed) => Ok(text_response(
             StatusCode::GATEWAY_TIMEOUT,
-            &format!("delonix: backend {backend} não respondeu em {}s\n", BACKEND_TIMEOUT.as_secs()),
+            &format!(
+                "delonix: backend {backend} não respondeu em {}s\n",
+                BACKEND_TIMEOUT.as_secs()
+            ),
         )),
     }
 }
@@ -264,11 +302,16 @@ async fn accept_loop(
             match tls {
                 // Timeout no handshake: um cliente que abre TCP e nunca completa o
                 // ClientHello não pode segurar a task para sempre (slowloris TLS).
-                Some(acceptor) => match tokio::time::timeout(TLS_HANDSHAKE_TIMEOUT, acceptor.accept(stream)).await {
-                    Ok(Ok(tls_stream)) => serve_io(TokioIo::new(tls_stream), routes, client).await,
-                    Ok(Err(e)) => eprintln!("ingress-proxy: handshake TLS falhou: {e}"),
-                    Err(_) => { /* handshake não completou a tempo — descarta */ }
-                },
+                Some(acceptor) => {
+                    match tokio::time::timeout(TLS_HANDSHAKE_TIMEOUT, acceptor.accept(stream)).await
+                    {
+                        Ok(Ok(tls_stream)) => {
+                            serve_io(TokioIo::new(tls_stream), routes, client).await
+                        }
+                        Ok(Err(e)) => eprintln!("ingress-proxy: handshake TLS falhou: {e}"),
+                        Err(_) => { /* handshake não completou a tempo — descarta */ }
+                    }
+                }
                 None => serve_io(TokioIo::new(stream), routes, client).await,
             }
         });
@@ -288,7 +331,9 @@ fn build_server_config(tls: &TlsMaterial) -> Result<Arc<tokio_rustls::rustls::Se
         .collect::<std::result::Result<_, _>>()
         .map_err(|e| Error::Invalid(format!("cert TLS inválido (PEM): {e}")))?;
     if certs.is_empty() {
-        return Err(Error::Invalid("cert TLS vazio (nenhum CERTIFICATE no PEM)".into()));
+        return Err(Error::Invalid(
+            "cert TLS vazio (nenhum CERTIFICATE no PEM)".into(),
+        ));
     }
     let key = rustls_pemfile::private_key(&mut tls.key_pem.as_bytes())
         .map_err(|e| Error::Invalid(format!("chave TLS inválida (PEM): {e}")))?
@@ -305,8 +350,8 @@ fn build_server_config(tls: &TlsMaterial) -> Result<Arc<tokio_rustls::rustls::Se
 /// TLS ficam FIXOS no arranque (mudá-los exige reiniciar); só as ROTAS recarregam
 /// — é o que o auto-registo de containers precisa.
 async fn serve(cfg: ProxyConfig, config_path: std::path::PathBuf) -> Result<()> {
-    let client: Client<_, Incoming> =
-        Client::builder(TokioExecutor::new()).build(hyper_util::client::legacy::connect::HttpConnector::new());
+    let client: Client<_, Incoming> = Client::builder(TokioExecutor::new())
+        .build(hyper_util::client::legacy::connect::HttpConnector::new());
 
     // Um só ServerConfig TLS partilhado por todos os listeners TLS (se houver
     // material). Construído UMA vez — o rustls guarda-o num Arc.
@@ -323,11 +368,16 @@ async fn serve(cfg: ProxyConfig, config_path: std::path::PathBuf) -> Result<()> 
         let routes = routes.clone();
         let path = config_path.clone();
         tokio::spawn(async move {
-            let Ok(mut hup) = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::hangup()) else {
+            let Ok(mut hup) =
+                tokio::signal::unix::signal(tokio::signal::unix::SignalKind::hangup())
+            else {
                 return;
             };
             while hup.recv().await.is_some() {
-                match std::fs::read(&path).ok().and_then(|b| serde_json::from_slice::<ProxyConfig>(&b).ok()) {
+                match std::fs::read(&path)
+                    .ok()
+                    .and_then(|b| serde_json::from_slice::<ProxyConfig>(&b).ok())
+                {
                     Some(newcfg) => {
                         let n = newcfg.routes.len();
                         match routes.write() {
@@ -335,13 +385,17 @@ async fn serve(cfg: ProxyConfig, config_path: std::path::PathBuf) -> Result<()> 
                             // não pode bloquear os handlers que fazem `read()`).
                             Ok(mut g) => *g = Arc::new(newcfg.routes),
                             Err(_) => {
-                                eprintln!("ingress-proxy: lock de rotas envenenado — reload ignorado");
+                                eprintln!(
+                                    "ingress-proxy: lock de rotas envenenado — reload ignorado"
+                                );
                                 continue;
                             }
                         }
                         eprintln!("ingress-proxy: rotas recarregadas ({n} rota(s))");
                     }
-                    None => eprintln!("ingress-proxy: SIGHUP mas a config não releu — rotas mantidas"),
+                    None => {
+                        eprintln!("ingress-proxy: SIGHUP mas a config não releu — rotas mantidas")
+                    }
                 }
             }
         });
@@ -363,18 +417,26 @@ async fn serve(cfg: ProxyConfig, config_path: std::path::PathBuf) -> Result<()> 
             None
         };
         let addr = SocketAddr::from(([0, 0, 0, 0], l.port));
-        let listener = TcpListener::bind(addr)
-            .await
-            .map_err(|e| Error::Runtime { context: "ingress-proxy bind", message: format!("{addr}: {e}") })?;
+        let listener = TcpListener::bind(addr).await.map_err(|e| Error::Runtime {
+            context: "ingress-proxy bind",
+            message: format!("{addr}: {e}"),
+        })?;
         eprintln!(
             "ingress-proxy: a escutar em {addr} ({}, {} rota(s))",
             if l.tls { "https" } else { "http" },
             cfg.routes.len()
         );
-        handles.push(tokio::spawn(accept_loop(listener, routes.clone(), client.clone(), acceptor)));
+        handles.push(tokio::spawn(accept_loop(
+            listener,
+            routes.clone(),
+            client.clone(),
+            acceptor,
+        )));
     }
     if handles.is_empty() {
-        return Err(Error::Invalid("ingress-proxy: nenhum listener HTTP para servir".into()));
+        return Err(Error::Invalid(
+            "ingress-proxy: nenhum listener HTTP para servir".into(),
+        ));
     }
     for h in handles {
         let _ = h.await;
@@ -385,8 +447,12 @@ async fn serve(cfg: ProxyConfig, config_path: std::path::PathBuf) -> Result<()> 
 /// Ponto de entrada do subcomando `delonix ingress-proxy --config <ficheiro>`.
 /// Lê a `ProxyConfig` (JSON) e corre o servidor até morrer (bloqueia).
 pub fn run(config_path: &Path) -> Result<()> {
-    let bytes = std::fs::read(config_path)
-        .map_err(|e| Error::Invalid(format!("ingress-proxy: não li a config {}: {e}", config_path.display())))?;
+    let bytes = std::fs::read(config_path).map_err(|e| {
+        Error::Invalid(format!(
+            "ingress-proxy: não li a config {}: {e}",
+            config_path.display()
+        ))
+    })?;
     let cfg: ProxyConfig = serde_json::from_slice(&bytes)
         .map_err(|e| Error::Invalid(format!("ingress-proxy: config inválida: {e}")))?;
     // Instala o provider criptográfico do rustls (ring) — o `ServerConfig::builder`
@@ -396,7 +462,10 @@ pub fn run(config_path: &Path) -> Result<()> {
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
-        .map_err(|e| Error::Runtime { context: "ingress-proxy runtime", message: e.to_string() })?;
+        .map_err(|e| Error::Runtime {
+            context: "ingress-proxy runtime",
+            message: e.to_string(),
+        })?;
     rt.block_on(serve(cfg, config_path.to_path_buf()))
 }
 
@@ -467,18 +536,26 @@ fn read_auto() -> Vec<AutoRoute> {
 /// `f` recebe a lista actual e devolve a nova. Devolve `true` se mudou.
 fn with_auto_locked(f: impl FnOnce(&mut Vec<AutoRoute>)) -> Result<bool> {
     use std::os::unix::io::AsRawFd;
-    std::fs::create_dir_all(proxy_dir())
-        .map_err(|e| Error::Runtime { context: "httproute dir", message: e.to_string() })?;
+    std::fs::create_dir_all(proxy_dir()).map_err(|e| Error::Runtime {
+        context: "httproute dir",
+        message: e.to_string(),
+    })?;
     // Um ficheiro de lock dedicado (o flock é no fd; o conteúdo fica na auto.json).
     let lock = std::fs::OpenOptions::new()
         .create(true)
         .write(true)
         .truncate(false)
         .open(proxy_dir().join("auto.lock"))
-        .map_err(|e| Error::Runtime { context: "auto.lock", message: e.to_string() })?;
+        .map_err(|e| Error::Runtime {
+            context: "auto.lock",
+            message: e.to_string(),
+        })?;
     // SAFETY: flock(LOCK_EX) no fd do lock; libertado ao fechar (fim do escopo).
     if unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX) } != 0 {
-        return Err(Error::Runtime { context: "flock auto", message: "não obtive o lock".into() });
+        return Err(Error::Runtime {
+            context: "flock auto",
+            message: "não obtive o lock".into(),
+        });
     }
     let mut auto = read_auto();
     let before = auto.clone();
@@ -486,8 +563,14 @@ fn with_auto_locked(f: impl FnOnce(&mut Vec<AutoRoute>)) -> Result<bool> {
     if auto == before {
         return Ok(false);
     }
-    std::fs::write(auto_path(), serde_json::to_vec_pretty(&auto).unwrap_or_default())
-        .map_err(|e| Error::Runtime { context: "escrever auto", message: e.to_string() })?;
+    std::fs::write(
+        auto_path(),
+        serde_json::to_vec_pretty(&auto).unwrap_or_default(),
+    )
+    .map_err(|e| Error::Runtime {
+        context: "escrever auto",
+        message: e.to_string(),
+    })?;
     Ok(true)
 }
 
@@ -499,33 +582,58 @@ fn rebuild() -> Result<()> {
     let manual = read_manual();
     let auto = read_auto();
 
-    let mut listeners: Vec<Listener> = manual.as_ref().map(|m| m.listeners.clone()).unwrap_or_default();
-    let mut routes: Vec<Route> = manual.as_ref().map(|m| m.routes.clone()).unwrap_or_default();
+    let mut listeners: Vec<Listener> = manual
+        .as_ref()
+        .map(|m| m.listeners.clone())
+        .unwrap_or_default();
+    let mut routes: Vec<Route> = manual
+        .as_ref()
+        .map(|m| m.routes.clone())
+        .unwrap_or_default();
     let tls = manual.as_ref().and_then(|m| m.tls.clone());
 
     // As auto-rotas servem-se em HTTP na porta AUTO_HTTP_PORT (FQDN interno). NÃO
     // :80 — em rootless o slirp não publica portas privilegiadas (add_hostfwd
     // recusa <1024). Garante o listener se houver alguma auto-rota.
     if !auto.is_empty() && !listeners.iter().any(|l| l.port == AUTO_HTTP_PORT) {
-        listeners.push(Listener { port: AUTO_HTTP_PORT, tls: false });
+        listeners.push(Listener {
+            port: AUTO_HTTP_PORT,
+            tls: false,
+        });
     }
     for a in &auto {
-        routes.push(Route { host: a.fqdn(), path: "/".into(), backend: format!("{}:{}", a.ip, a.port) });
+        routes.push(Route {
+            host: a.fqdn(),
+            path: "/".into(),
+            backend: format!("{}:{}", a.ip, a.port),
+        });
     }
 
     if listeners.is_empty() || routes.is_empty() {
         // Nada declarado (nem manual nem auto) → o proxy não tem razão de existir.
         return stop();
     }
-    ensure_running(&ProxyConfig { listeners, routes, tls })
+    ensure_running(&ProxyConfig {
+        listeners,
+        routes,
+        tls,
+    })
 }
 
 /// Escreve a parte MANUAL (do `httproute apply`) e recompõe a config final.
 pub fn set_manual(cfg: &ProxyConfig) -> Result<()> {
-    std::fs::create_dir_all(proxy_dir())
-        .map_err(|e| Error::Runtime { context: "httproute dir", message: e.to_string() })?;
-    std::fs::write(manual_path(), serde_json::to_vec_pretty(cfg).unwrap_or_default())
-        .map_err(|e| Error::Runtime { context: "escrever manual", message: e.to_string() })?;
+    std::fs::create_dir_all(proxy_dir()).map_err(|e| Error::Runtime {
+        context: "httproute dir",
+        message: e.to_string(),
+    })?;
+    std::fs::write(
+        manual_path(),
+        serde_json::to_vec_pretty(cfg).unwrap_or_default(),
+    )
+    .map_err(|e| Error::Runtime {
+        context: "escrever manual",
+        message: e.to_string(),
+    })?;
     rebuild()
 }
 
@@ -542,7 +650,12 @@ pub fn clear_manual() -> Result<bool> {
 /// **Auto-regista** um container HTTP no proxy (`container run --expose`): junta/
 /// actualiza a sua `AutoRoute` e recompõe a config (SIGHUP a quente). Idempotente.
 pub fn auto_register(name: &str, namespace: &str, ip: &str, port: u16) -> Result<()> {
-    let entry = AutoRoute { name: name.to_string(), namespace: namespace.to_string(), ip: ip.to_string(), port };
+    let entry = AutoRoute {
+        name: name.to_string(),
+        namespace: namespace.to_string(),
+        ip: ip.to_string(),
+        port,
+    };
     with_auto_locked(|auto| {
         auto.retain(|a| a.name != name); // substitui uma entrada anterior do mesmo nome
         auto.push(entry.clone());
@@ -566,7 +679,11 @@ pub fn auto_deregister(name: &str) {
 /// identidade é essencial: sem ela, um PID reciclado pelo kernel faria o
 /// `SIGHUP`/`SIGTERM` atingir um processo alheio (SIGHUP default = terminar).
 fn running_pid() -> Option<i32> {
-    let pid: i32 = std::fs::read_to_string(pid_path()).ok()?.trim().parse().ok()?;
+    let pid: i32 = std::fs::read_to_string(pid_path())
+        .ok()?
+        .trim()
+        .parse()
+        .ok()?;
     let is_ours = std::fs::read(format!("/proc/{pid}/cmdline"))
         .map(|c| String::from_utf8_lossy(&c).contains("ingress-proxy"))
         .unwrap_or(false);
@@ -582,15 +699,21 @@ fn running_pid() -> Option<i32> {
 /// quente (SIGHUP); senão, arranca-o no netns do holder e publica as portas.
 /// Idempotente — é o que o `stack apply`/auto-registo chamam sempre.
 pub fn ensure_running(cfg: &ProxyConfig) -> Result<()> {
-    std::fs::create_dir_all(proxy_dir())
-        .map_err(|e| Error::Runtime { context: "httproute dir", message: e.to_string() })?;
+    std::fs::create_dir_all(proxy_dir()).map_err(|e| Error::Runtime {
+        context: "httproute dir",
+        message: e.to_string(),
+    })?;
     // Captura os listeners ACTUAIS ANTES de sobrescrever a config (senão o prev
     // seria já o novo).
     let prev_ports = prev_listener_ports();
-    let json = serde_json::to_vec_pretty(cfg)
-        .map_err(|e| Error::Runtime { context: "serialize config", message: e.to_string() })?;
-    std::fs::write(config_path(), &json)
-        .map_err(|e| Error::Runtime { context: "escrever config", message: e.to_string() })?;
+    let json = serde_json::to_vec_pretty(cfg).map_err(|e| Error::Runtime {
+        context: "serialize config",
+        message: e.to_string(),
+    })?;
+    std::fs::write(config_path(), &json).map_err(|e| Error::Runtime {
+        context: "escrever config",
+        message: e.to_string(),
+    })?;
 
     if let Some(pid) = running_pid() {
         // Vivo → recarrega as rotas a quente (SIGHUP). As portas já estão publicadas.
@@ -598,7 +721,8 @@ pub fn ensure_running(cfg: &ProxyConfig) -> Result<()> {
         // (`httproute rm` + apply). Detetamos a mudança do conjunto de portas para
         // não mentir que o novo listener está a servir.
         if let Some(prev) = prev_ports {
-            let now: std::collections::BTreeSet<u16> = cfg.listeners.iter().map(|l| l.port).collect();
+            let now: std::collections::BTreeSet<u16> =
+                cfg.listeners.iter().map(|l| l.port).collect();
             if prev != now {
                 eprintln!(
                     "httproute: AVISO — mudança de listeners ({prev:?} → {now:?}) NÃO tem efeito a quente; \
@@ -630,10 +754,14 @@ fn spawn_proxy() -> Result<()> {
     use std::os::unix::process::CommandExt;
     // Garante o holder de pé (o proxy vive no netns dele).
     delonix_net::infra::ensure_up()?;
-    let join = delonix_net::infra::infra_join_argv()
-        .ok_or_else(|| Error::Runtime { context: "holder", message: "ingress holder em baixo".into() })?;
-    let self_exe = std::env::current_exe()
-        .map_err(|e| Error::Runtime { context: "current_exe", message: e.to_string() })?;
+    let join = delonix_net::infra::infra_join_argv().ok_or_else(|| Error::Runtime {
+        context: "holder",
+        message: "ingress holder em baixo".into(),
+    })?;
+    let self_exe = std::env::current_exe().map_err(|e| Error::Runtime {
+        context: "current_exe",
+        message: e.to_string(),
+    })?;
     let cfg_path = config_path();
 
     // argv = nsenter … -- <delonix> ingress-proxy --config <config>
@@ -647,8 +775,14 @@ fn spawn_proxy() -> Result<()> {
         .create(true)
         .append(true)
         .open(log_path())
-        .map_err(|e| Error::Runtime { context: "abrir log do proxy", message: e.to_string() })?;
-    let log2 = log.try_clone().map_err(|e| Error::Runtime { context: "clone log", message: e.to_string() })?;
+        .map_err(|e| Error::Runtime {
+            context: "abrir log do proxy",
+            message: e.to_string(),
+        })?;
+    let log2 = log.try_clone().map_err(|e| Error::Runtime {
+        context: "clone log",
+        message: e.to_string(),
+    })?;
 
     let mut cmd = std::process::Command::new(&argv[0]);
     cmd.args(&argv[1..])
@@ -668,18 +802,26 @@ fn spawn_proxy() -> Result<()> {
         context: "spawn ingress-proxy",
         message: format!("{}: {e}", argv.join(" ")),
     })?;
-    std::fs::write(pid_path(), child.id().to_string())
-        .map_err(|e| Error::Runtime { context: "escrever pidfile", message: e.to_string() })?;
+    std::fs::write(pid_path(), child.id().to_string()).map_err(|e| Error::Runtime {
+        context: "escrever pidfile",
+        message: e.to_string(),
+    })?;
     // Confirma que arrancou de facto (não morreu logo no bind): dá-lhe um instante
     // e verifica o /proc. Se caiu, aponta o log — não declarar 'a servir' a mentir.
     std::thread::sleep(std::time::Duration::from_millis(300));
     if !std::path::Path::new(&format!("/proc/{}", child.id())).exists() {
         return Err(Error::Runtime {
             context: "ingress-proxy",
-            message: format!("o proxy caiu logo ao arrancar (porta ocupada?) — ver {}", log_path().display()),
+            message: format!(
+                "o proxy caiu logo ao arrancar (porta ocupada?) — ver {}",
+                log_path().display()
+            ),
         });
     }
-    eprintln!("httproute: proxy arrancado (#{}) no netns do holder", child.id());
+    eprintln!(
+        "httproute: proxy arrancado (#{}) no netns do holder",
+        child.id()
+    );
     Ok(())
 }
 
@@ -740,7 +882,11 @@ mod tests {
     use super::*;
 
     fn r(host: &str, path: &str, backend: &str) -> Route {
-        Route { host: host.to_string(), path: path.to_string(), backend: backend.to_string() }
+        Route {
+            host: host.to_string(),
+            path: path.to_string(),
+            backend: backend.to_string(),
+        }
     }
 
     #[test]
@@ -751,11 +897,20 @@ mod tests {
             r("loja.ex", "/api", "10.0.0.3:80"), // host específico, /api (mais longo)
         ];
         // /api na loja → a rota /api (prefixo mais longo)
-        assert_eq!(pick_route(&routes, "loja.ex", "/api/x").unwrap().backend, "10.0.0.3:80");
+        assert_eq!(
+            pick_route(&routes, "loja.ex", "/api/x").unwrap().backend,
+            "10.0.0.3:80"
+        );
         // / na loja → a rota host-específica, não a de qualquer-host
-        assert_eq!(pick_route(&routes, "loja.ex", "/home").unwrap().backend, "10.0.0.2:80");
+        assert_eq!(
+            pick_route(&routes, "loja.ex", "/home").unwrap().backend,
+            "10.0.0.2:80"
+        );
         // outro host → só casa a de qualquer-host
-        assert_eq!(pick_route(&routes, "outro.ex", "/api").unwrap().backend, "10.0.0.1:80");
+        assert_eq!(
+            pick_route(&routes, "outro.ex", "/api").unwrap().backend,
+            "10.0.0.1:80"
+        );
     }
 
     #[test]
@@ -777,9 +932,15 @@ mod tests {
     #[test]
     fn config_com_tls_roundtrip_json() {
         let cfg = ProxyConfig {
-            listeners: vec![Listener { port: 443, tls: true }],
+            listeners: vec![Listener {
+                port: 443,
+                tls: true,
+            }],
             routes: vec![r("loja.ex", "/", "10.0.0.2:8080")],
-            tls: Some(TlsMaterial { cert_pem: "C".into(), key_pem: "K".into() }),
+            tls: Some(TlsMaterial {
+                cert_pem: "C".into(),
+                key_pem: "K".into(),
+            }),
         };
         let js = serde_json::to_string(&cfg).unwrap();
         let back: ProxyConfig = serde_json::from_str(&js).unwrap();
@@ -789,7 +950,16 @@ mod tests {
     #[test]
     fn config_roundtrip_json() {
         let cfg = ProxyConfig {
-            listeners: vec![Listener { port: 80, tls: false }, Listener { port: 443, tls: true }],
+            listeners: vec![
+                Listener {
+                    port: 80,
+                    tls: false,
+                },
+                Listener {
+                    port: 443,
+                    tls: true,
+                },
+            ],
             routes: vec![r("loja.ex", "/", "10.0.0.2:8080")],
             tls: None,
         };

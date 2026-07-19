@@ -51,7 +51,8 @@ fn object_bytes() -> Option<&'static [u8]> {
 }
 
 fn tool_exists(bin: &str) -> bool {
-    std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()).any(|p| p.join(bin).exists())
+    std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())
+        .any(|p| p.join(bin).exists())
 }
 
 /// Effective root, or `CAP_BPF` (bit 39) set in the effective capability set.
@@ -90,7 +91,13 @@ where
     F: Fn(&[&str]) -> bool,
 {
     // Already loaded? (a prior invocation pinned it.)
-    if run(&["bpftool", "prog", "show", "pinned", &format!("{PIN_DIR}/count_tx")]) {
+    if run(&[
+        "bpftool",
+        "prog",
+        "show",
+        "pinned",
+        &format!("{PIN_DIR}/count_tx"),
+    ]) {
         return true;
     }
     let obj = match stage_object() {
@@ -98,7 +105,9 @@ where
         None => return false,
     };
     let obj = obj.to_string_lossy().into_owned();
-    run(&["bpftool", "prog", "loadall", &obj, PIN_DIR, "pinmaps", PIN_DIR])
+    run(&[
+        "bpftool", "prog", "loadall", &obj, PIN_DIR, "pinmaps", PIN_DIR,
+    ])
 }
 
 /// Attach the accounting classifiers to `iface` (a container veth). Loads the
@@ -115,8 +124,30 @@ where
     if !run(&["tc", "qdisc", "add", "dev", iface, "clsact"]) {
         return false;
     }
-    let ok_tx = run(&["tc", "filter", "add", "dev", iface, "ingress", "bpf", "da", "pinned", &format!("{PIN_DIR}/count_tx")]);
-    let ok_rx = run(&["tc", "filter", "add", "dev", iface, "egress", "bpf", "da", "pinned", &format!("{PIN_DIR}/count_rx")]);
+    let ok_tx = run(&[
+        "tc",
+        "filter",
+        "add",
+        "dev",
+        iface,
+        "ingress",
+        "bpf",
+        "da",
+        "pinned",
+        &format!("{PIN_DIR}/count_tx"),
+    ]);
+    let ok_rx = run(&[
+        "tc",
+        "filter",
+        "add",
+        "dev",
+        iface,
+        "egress",
+        "bpf",
+        "da",
+        "pinned",
+        &format!("{PIN_DIR}/count_rx"),
+    ]);
     ok_tx && ok_rx
 }
 
@@ -183,8 +214,15 @@ where
     // bpftool wants the key as space-separated hex bytes in map order (network
     // byte order for the IPv4), e.g. `key 0x0a 0xdb 0xdc 0x90`.
     let o = ip.octets();
-    let (b0, b1, b2, b3) = (format!("0x{:02x}", o[0]), format!("0x{:02x}", o[1]), format!("0x{:02x}", o[2]), format!("0x{:02x}", o[3]));
-    let _ = run_capture(&["bpftool", "map", "delete", "pinned", MAP_PIN, "key", &b0, &b1, &b2, &b3]);
+    let (b0, b1, b2, b3) = (
+        format!("0x{:02x}", o[0]),
+        format!("0x{:02x}", o[1]),
+        format!("0x{:02x}", o[2]),
+        format!("0x{:02x}", o[3]),
+    );
+    let _ = run_capture(&[
+        "bpftool", "map", "delete", "pinned", MAP_PIN, "key", &b0, &b1, &b2, &b3,
+    ]);
 }
 
 /// Parse a bpftool byte array (`["0x0a", …]`) into raw bytes.

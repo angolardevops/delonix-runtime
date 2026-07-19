@@ -90,9 +90,13 @@ fn dict_list(text: &str, key: &str) -> Vec<String> {
         let pat = format!("{quote}{key}{quote}");
         let Some(i) = text.find(&pat) else { continue };
         let rest = &text[i + pat.len()..];
-        let Some(rest) = rest.trim_start().strip_prefix(':') else { continue };
+        let Some(rest) = rest.trim_start().strip_prefix(':') else {
+            continue;
+        };
         let Some(open) = rest.find('[') else { continue };
-        let Some(close) = rest[open..].find(']') else { continue };
+        let Some(close) = rest[open..].find(']') else {
+            continue;
+        };
         let inner = &rest[open + 1..open + close];
         return inner
             .split(',')
@@ -125,7 +129,10 @@ pub fn parse_requirements(text: &str) -> Vec<PyDep> {
         let line = line.split(';').next().unwrap_or(line).trim();
         let (name, version) = match line.split_once("==") {
             Some((n, v)) => (n, v.trim()),
-            None => (line.split(&['>', '<', '~', '!'][..]).next().unwrap_or(line), ""),
+            None => (
+                line.split(&['>', '<', '~', '!'][..]).next().unwrap_or(line),
+                "",
+            ),
         };
         let name = name.split('[').next().unwrap_or(name).trim();
         if name.is_empty() {
@@ -218,7 +225,13 @@ pub fn scan_module_dir(dir: &Path) -> Result<ModuleReport> {
         files += 1;
         risks.extend(lint_python(rel, text));
     })?;
-    Ok(ModuleReport { module, manifest, deps, risks, files })
+    Ok(ModuleReport {
+        module,
+        manifest,
+        deps,
+        risks,
+        files,
+    })
 }
 
 /// Faz o scan de uma raiz: o próprio diretório se for um módulo, senão cada
@@ -229,7 +242,10 @@ pub fn scan_modules_root(dir: &Path) -> Result<Vec<ModuleReport>> {
     }
     let mut out = Vec::new();
     for e in std::fs::read_dir(dir)
-        .map_err(|e| Error::Runtime { context: "scan módulos", message: e.to_string() })?
+        .map_err(|e| Error::Runtime {
+            context: "scan módulos",
+            message: e.to_string(),
+        })?
         .flatten()
     {
         let p = e.path();
@@ -250,7 +266,10 @@ pub fn scan_modules_root(dir: &Path) -> Result<Vec<ModuleReport>> {
 /// Symlinks NÃO são seguidos (um módulo não devia ter symlinks para fora).
 fn walk_py(root: &Path, dir: &Path, f: &mut impl FnMut(&str, &str)) -> Result<()> {
     for e in std::fs::read_dir(dir)
-        .map_err(|e| Error::Runtime { context: "scan módulos", message: e.to_string() })?
+        .map_err(|e| Error::Runtime {
+            context: "scan módulos",
+            message: e.to_string(),
+        })?
         .flatten()
     {
         let p = e.path();
@@ -261,7 +280,11 @@ fn walk_py(root: &Path, dir: &Path, f: &mut impl FnMut(&str, &str)) -> Result<()
             walk_py(root, &p, f)?;
         } else if p.extension().and_then(|x| x.to_str()) == Some("py") {
             if let Ok(text) = std::fs::read_to_string(&p) {
-                let rel = p.strip_prefix(root).unwrap_or(&p).to_string_lossy().to_string();
+                let rel = p
+                    .strip_prefix(root)
+                    .unwrap_or(&p)
+                    .to_string_lossy()
+                    .to_string();
                 f(&rel, &text);
             }
         }
@@ -296,10 +319,34 @@ mod tests {
         let deps = parse_requirements(
             "requests==2.31.0\nPyYAML>=6\npandas[excel]==2.2.0 ; python_version>'3.9'\n# comentário\n-r outro.txt\nNum2Words\n",
         );
-        assert_eq!(deps[0], PyDep { name: "requests".into(), version: "2.31.0".into() });
-        assert_eq!(deps[1], PyDep { name: "pyyaml".into(), version: String::new() });
-        assert_eq!(deps[2], PyDep { name: "pandas".into(), version: "2.2.0".into() });
-        assert_eq!(deps[3], PyDep { name: "num2words".into(), version: String::new() });
+        assert_eq!(
+            deps[0],
+            PyDep {
+                name: "requests".into(),
+                version: "2.31.0".into()
+            }
+        );
+        assert_eq!(
+            deps[1],
+            PyDep {
+                name: "pyyaml".into(),
+                version: String::new()
+            }
+        );
+        assert_eq!(
+            deps[2],
+            PyDep {
+                name: "pandas".into(),
+                version: "2.2.0".into()
+            }
+        );
+        assert_eq!(
+            deps[3],
+            PyDep {
+                name: "num2words".into(),
+                version: String::new()
+            }
+        );
         assert_eq!(deps.len(), 4);
     }
 
@@ -321,7 +368,11 @@ mod tests {
         std::fs::write(m.join("__manifest__.py"), MANIFEST).unwrap();
         std::fs::write(m.join("requirements.txt"), "requests==2.31.0\n").unwrap();
         std::fs::write(m.join("models/ok.py"), "def f():\n    return 1\n").unwrap();
-        std::fs::write(m.join("models/mau.py"), "import pickle\npickle.loads(data)\n").unwrap();
+        std::fs::write(
+            m.join("models/mau.py"),
+            "import pickle\npickle.loads(data)\n",
+        )
+        .unwrap();
         let reports = scan_modules_root(&dir).unwrap();
         assert_eq!(reports.len(), 1);
         let r = &reports[0];
@@ -329,7 +380,7 @@ mod tests {
         assert_eq!(r.deps.len(), 1);
         assert_eq!(r.worst(), Some(Severity::Critical));
         assert_eq!(r.files, 3); // __manifest__.py + models/{ok,mau}.py
-        // raiz que É o módulo também funciona
+                                // raiz que É o módulo também funciona
         let direct = scan_modules_root(&m).unwrap();
         assert_eq!(direct.len(), 1);
         std::fs::remove_dir_all(&dir).ok();

@@ -36,7 +36,12 @@ impl FileLock {
     /// não puder sequer ser aberto — nesse caso o chamador segue sem trinco
     /// (degradação graciosa: melhor que recusar a operação).
     fn acquire(path: &Path) -> Option<FileLock> {
-        let f = fs::OpenOptions::new().create(true).write(true).truncate(false).open(path).ok()?;
+        let f = fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(false)
+            .open(path)
+            .ok()?;
         // SAFETY: fd válido e aberto; LOCK_EX bloqueia até o trinco ser nosso.
         if unsafe { libc::flock(f.as_raw_fd(), libc::LOCK_EX) } != 0 {
             return None;
@@ -61,7 +66,13 @@ impl Drop for FileLock {
 /// aqui antes de entrar num `PathBuf::join`.
 pub(crate) fn safe_key(key: &str) -> String {
     key.chars()
-        .map(|c| if c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-') { c } else { '-' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-') {
+                c
+            } else {
+                '-'
+            }
+        })
         .collect()
 }
 
@@ -100,7 +111,10 @@ impl Store {
     /// O diretório-base (`$DELONIX_ROOT`) — o pai de `containers`. Usado por
     /// subsistemas que vivem ao lado (ex.: [`crate::SecretStore`] em `<base>/secrets`).
     pub fn base(&self) -> PathBuf {
-        self.root.parent().map(|p| p.to_path_buf()).unwrap_or_else(|| self.root.clone())
+        self.root
+            .parent()
+            .map(|p| p.to_path_buf())
+            .unwrap_or_else(|| self.root.clone())
     }
 
     fn path(&self, id: &str) -> PathBuf {
@@ -124,7 +138,9 @@ impl Store {
     pub fn save(&self, c: &Container) -> Result<()> {
         let safe = safe_key(&c.id);
         let seq = TMP_SEQ.fetch_add(1, Ordering::Relaxed);
-        let tmp = self.root.join(format!(".{safe}.{}.{seq}.tmp", std::process::id()));
+        let tmp = self
+            .root
+            .join(format!(".{safe}.{}.{seq}.tmp", std::process::id()));
         let write = || -> Result<()> {
             fs::write(&tmp, serde_json::to_vec_pretty(c)?)?;
             fs::rename(&tmp, self.path(&c.id))?;
@@ -236,7 +252,9 @@ impl<T: Serialize + DeserializeOwned> JsonStore<T> {
         let safe = safe_key(key);
         // Temp único por escritor — ver a nota em `Store::save`.
         let seq = TMP_SEQ.fetch_add(1, Ordering::Relaxed);
-        let tmp = self.root.join(format!(".{safe}.{}.{seq}.tmp", std::process::id()));
+        let tmp = self
+            .root
+            .join(format!(".{safe}.{}.{seq}.tmp", std::process::id()));
         fs::write(&tmp, serde_json::to_vec_pretty(value)?)?;
         fs::rename(&tmp, self.path(key))?;
         Ok(())
@@ -291,7 +309,10 @@ mod tests {
         std::env::temp_dir().join(format!(
             "delonix-store-test-{tag}-{}-{}",
             std::process::id(),
-            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
         ))
     }
 
@@ -314,30 +335,52 @@ mod tests {
     #[test]
     fn store_path_traversal_nunca_escreve_fora_da_raiz() {
         let root = tmp_dir("store-path");
-        let outside = root.parent().unwrap().join(format!(
-            "delonix-store-test-VICTIM-{}",
-            std::process::id()
-        ));
+        let outside = root
+            .parent()
+            .unwrap()
+            .join(format!("delonix-store-test-VICTIM-{}", std::process::id()));
         let store = Store::open(&root).unwrap();
 
         // um "id" malicioso vindo de um handler HTTP não validado.
-        let evil_id = format!("../{}/pwned", outside.file_name().unwrap().to_str().unwrap());
-        let c = Container::new(evil_id.clone(), "x".into(), "img".into(), vec![], "256M".into());
+        let evil_id = format!(
+            "../{}/pwned",
+            outside.file_name().unwrap().to_str().unwrap()
+        );
+        let c = Container::new(
+            evil_id.clone(),
+            "x".into(),
+            "img".into(),
+            vec![],
+            "256M".into(),
+        );
         store.save(&c).unwrap();
 
         // o ficheiro TEM de ficar dentro de `root` — nunca em `outside`.
-        assert!(!outside.exists(), "save com id malicioso escreveu FORA da raiz do Store");
-        let entries: Vec<_> = fs::read_dir(&root).unwrap().flatten().collect();
-        assert_eq!(entries.len(), 1, "devia existir exactamente 1 ficheiro dentro da raiz sanitizada");
         assert!(
-            entries[0].path().to_string_lossy().starts_with(root.to_string_lossy().as_ref()),
+            !outside.exists(),
+            "save com id malicioso escreveu FORA da raiz do Store"
+        );
+        let entries: Vec<_> = fs::read_dir(&root).unwrap().flatten().collect();
+        assert_eq!(
+            entries.len(),
+            1,
+            "devia existir exactamente 1 ficheiro dentro da raiz sanitizada"
+        );
+        assert!(
+            entries[0]
+                .path()
+                .to_string_lossy()
+                .starts_with(root.to_string_lossy().as_ref()),
             "ficheiro escrito fora da raiz esperada"
         );
 
         // load/remove com o MESMO id malicioso continuam a resolver para dentro
         // da raiz (consistência: save/load/remove sanitizam da mesma forma).
         let loaded = store.load(&evil_id).unwrap();
-        assert_eq!(loaded.id, evil_id, "o conteúdo persistido continua correcto (só o PATH em disco é sanitizado)");
+        assert_eq!(
+            loaded.id, evil_id,
+            "o conteúdo persistido continua correcto (só o PATH em disco é sanitizado)"
+        );
         store.remove(&evil_id).unwrap();
         assert_eq!(fs::read_dir(&root).unwrap().flatten().count(), 0);
 
@@ -353,7 +396,11 @@ mod tests {
         store.save(evil_key, &"conteudo".to_string()).unwrap();
 
         let entries: Vec<_> = fs::read_dir(&root).unwrap().flatten().collect();
-        assert_eq!(entries.len(), 1, "JsonStore também tem de manter tudo dentro da raiz");
+        assert_eq!(
+            entries.len(),
+            1,
+            "JsonStore também tem de manter tudo dentro da raiz"
+        );
         assert!(store.load(evil_key).is_ok());
 
         let _ = fs::remove_dir_all(&root);
@@ -366,7 +413,13 @@ mod tests {
     fn update_concorrente_nao_perde_escritas() {
         let root = tmp_dir("store-update-race");
         let store = Store::open(&root).unwrap();
-        let mut c = Container::new("race1".into(), "race1".into(), "img".into(), vec!["x".into()], "max".into());
+        let mut c = Container::new(
+            "race1".into(),
+            "race1".into(),
+            "img".into(),
+            vec!["x".into()],
+            "max".into(),
+        );
         c.labels.insert("n".into(), "0".into());
         store.save(&c).unwrap();
 
@@ -389,7 +442,14 @@ mod tests {
             }
         });
 
-        let got: usize = store.load("race1").unwrap().labels.get("n").unwrap().parse().unwrap();
+        let got: usize = store
+            .load("race1")
+            .unwrap()
+            .labels
+            .get("n")
+            .unwrap()
+            .parse()
+            .unwrap();
         assert_eq!(got, N, "perderam-se escritas: {got} de {N}");
         let _ = fs::remove_dir_all(&root);
     }
@@ -401,7 +461,13 @@ mod tests {
     fn save_concorrente_nunca_publica_json_corrompido() {
         let root = tmp_dir("store-save-race");
         let store = Store::open(&root).unwrap();
-        let base = Container::new("race2".into(), "race2".into(), "img".into(), vec!["x".into()], "max".into());
+        let base = Container::new(
+            "race2".into(),
+            "race2".into(),
+            "img".into(),
+            vec!["x".into()],
+            "max".into(),
+        );
         store.save(&base).unwrap();
 
         std::thread::scope(|sc| {
@@ -419,12 +485,15 @@ mod tests {
                     c.labels.insert("k".into(), "v".repeat(i * 11));
                     st.save(&c).unwrap();
                     // Cada leitura tem de ver SEMPRE um JSON válido.
-                    st.load("race2").expect("JSON corrompido publicado pelo rename");
+                    st.load("race2")
+                        .expect("JSON corrompido publicado pelo rename");
                 });
             }
         });
 
-        store.load("race2").expect("estado final tem de ser um JSON válido");
+        store
+            .load("race2")
+            .expect("estado final tem de ser um JSON válido");
         let _ = fs::remove_dir_all(&root);
     }
 }

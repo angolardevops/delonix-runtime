@@ -9,7 +9,8 @@ fn main() {
     let base = std::env::var_os("DELONIX_ROOT")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("/var/lib/delonix"));
-    let addr = std::env::var("DELONIX_CRI_ADDR").unwrap_or_else(|_| "unix:///run/delonix-cri.sock".to_string());
+    let addr = std::env::var("DELONIX_CRI_ADDR")
+        .unwrap_or_else(|_| "unix:///run/delonix-cri.sock".to_string());
 
     if let Err(e) = delonix_cri::serve_blocking(base, &addr) {
         eprintln!("delonix-cri: {e}");

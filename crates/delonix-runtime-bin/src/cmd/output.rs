@@ -66,7 +66,10 @@ static LANG: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0); 
 /// Sets the locale from the `--l18n` flag / `$DELONIX_L18N` value.
 /// Anything that isn't `pt*` stays English (the safe default).
 pub fn set_lang(s: &str) {
-    let is_pt = matches!(s.trim().to_lowercase().as_str(), "pt" | "pt_ao" | "pt-ao" | "pt_pt" | "pt-pt");
+    let is_pt = matches!(
+        s.trim().to_lowercase().as_str(),
+        "pt" | "pt_ao" | "pt-ao" | "pt_pt" | "pt-pt"
+    );
     LANG.store(is_pt as u8, std::sync::atomic::Ordering::Relaxed);
 }
 
@@ -127,7 +130,11 @@ pub struct Table {
 
 impl Table {
     pub fn new(headers: &[&str]) -> Self {
-        Self { headers: headers.iter().map(|h| h.to_string()).collect(), rows: Vec::new(), right: Vec::new() }
+        Self {
+            headers: headers.iter().map(|h| h.to_string()).collect(),
+            rows: Vec::new(),
+            right: Vec::new(),
+        }
     }
 
     /// Alinha à direita a coluna `idx` (para tamanhos/contagens).
@@ -137,7 +144,11 @@ impl Table {
     }
 
     pub fn row(&mut self, cells: Vec<String>) {
-        debug_assert_eq!(cells.len(), self.headers.len(), "linha com aridade diferente do cabeçalho");
+        debug_assert_eq!(
+            cells.len(),
+            self.headers.len(),
+            "linha com aridade diferente do cabeçalho"
+        );
         self.rows.push(cells);
     }
 
@@ -224,7 +235,11 @@ pub fn display_ref(reference: &str) -> String {
     // `repo:tag@sha256:…` → a tag identifica; o digest é ruído na tabela.
     // Cuidado: um `:` no host com porta (`reg:5000/img`) não é uma tag — a tag
     // vem depois do ÚLTIMO '/'.
-    let tem_tag = antes.rsplit('/').next().map(|ultimo| ultimo.contains(':')).unwrap_or(false);
+    let tem_tag = antes
+        .rsplit('/')
+        .next()
+        .map(|ultimo| ultimo.contains(':'))
+        .unwrap_or(false);
     if tem_tag {
         return antes.to_string();
     }
@@ -303,7 +318,12 @@ impl Describe {
     /// Par chave/valor indentado dentro de uma secção.
     pub fn sub(&mut self, key: &str, val: impl AsRef<str>) -> &mut Self {
         let k = format!("{key}:");
-        self.lines.push(format!("  {k:<w$}{v}", k = k, v = val.as_ref(), w = KEY_W - 2));
+        self.lines.push(format!(
+            "  {k:<w$}{v}",
+            k = k,
+            v = val.as_ref(),
+            w = KEY_W - 2
+        ));
         self
     }
 
@@ -350,11 +370,21 @@ pub fn fmt_local(unix: u64) -> String {
     if !ok {
         return unix.to_string();
     }
-    format!("{:04}-{:02}-{:02} {:02}:{:02}", tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min)
+    format!(
+        "{:04}-{:02}-{:02} {:02}:{:02}",
+        tm.tm_year + 1900,
+        tm.tm_mon + 1,
+        tm.tm_mday,
+        tm.tm_hour,
+        tm.tm_min
+    )
 }
 
 pub fn now_unix() -> u64 {
-    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
 }
 
 /// Idade relativa ao estilo do `docker ps` — "About a minute ago", "3 hours
@@ -402,7 +432,8 @@ pub fn fmt_age(created_unix: u64) -> String {
 /// Instante do boot (unix, segundos), do campo `btime` de `/proc/stat`.
 fn boot_unix() -> Option<u64> {
     let s = std::fs::read_to_string("/proc/stat").ok()?;
-    s.lines().find_map(|l| l.strip_prefix("btime ")?.trim().parse().ok())
+    s.lines()
+        .find_map(|l| l.strip_prefix("btime ")?.trim().parse().ok())
 }
 
 /// Há quantos segundos o processo de init do container arrancou, a partir do
@@ -469,9 +500,28 @@ mod tests {
         // 7 dias. Nenhuma duração pode produzir "1 <plural>" — no docker os
         // baldes de weeks/months/years começam todos no 2, por construção.
         const DAY: u64 = 86400;
-        for s in [0u64, 1, 30, 90, 3600, 5400, 47 * 3600, 7 * DAY, 13 * DAY, 14 * DAY, 59 * DAY, 60 * DAY, 729 * DAY, 730 * DAY, 3650 * DAY] {
+        for s in [
+            0u64,
+            1,
+            30,
+            90,
+            3600,
+            5400,
+            47 * 3600,
+            7 * DAY,
+            13 * DAY,
+            14 * DAY,
+            59 * DAY,
+            60 * DAY,
+            729 * DAY,
+            730 * DAY,
+            3650 * DAY,
+        ] {
             let d = fmt_duration_secs(s);
-            assert!(!d.starts_with("1 ") || d == "1 second", "plural em falso para {s}s: {d:?}");
+            assert!(
+                !d.starts_with("1 ") || d == "1 second",
+                "plural em falso para {s}s: {d:?}"
+            );
         }
         // E os limites de balde, à letra do docker.
         assert_eq!(fmt_duration_secs(7 * DAY), "7 days");
@@ -498,8 +548,10 @@ mod tests {
         assert_eq!(tr("hello", "olá"), "olá");
         assert!(is_pt());
         // pt_AO e variantes contam como pt; qualquer outra coisa = en (default seguro).
-        set_lang("pt_AO"); assert!(is_pt());
-        set_lang("fr"); assert!(!is_pt());
+        set_lang("pt_AO");
+        assert!(is_pt());
+        set_lang("fr");
+        assert!(!is_pt());
         set_lang("en"); // repõe para não afectar outros testes
     }
 
@@ -517,7 +569,10 @@ mod tests {
             display_ref("kindest/node:v1.34.0@sha256:7416a61b42b1662ca6ca89f02028ac133a309a2a30ba309614e8ec94d976dc5a"),
             "kindest/node:v1.34.0"
         );
-        assert_eq!(display_ref("nginx:latest@sha256:abcdef0123"), "nginx:latest");
+        assert_eq!(
+            display_ref("nginx:latest@sha256:abcdef0123"),
+            "nginx:latest"
+        );
         // Sem digest, intacto.
         assert_eq!(display_ref("alpine:3.19"), "alpine:3.19");
         assert_eq!(display_ref("nginx"), "nginx");
@@ -527,16 +582,25 @@ mod tests {
     fn display_ref_sem_tag_encurta_o_digest_mas_nao_o_deita_fora() {
         // `repo@sha256:…` — o digest é a ÚNICA identificação; encurta-se, não se
         // remove (senão ficavam duas imagens diferentes com o mesmo nome).
-        assert_eq!(display_ref("myrepo@sha256:7416a61b42b1662ca6ca89f0"), "myrepo@sha256:7416a61b");
+        assert_eq!(
+            display_ref("myrepo@sha256:7416a61b42b1662ca6ca89f0"),
+            "myrepo@sha256:7416a61b"
+        );
     }
 
     #[test]
     fn display_ref_nao_confunde_porta_do_registo_com_tag() {
         // `reg:5000/img@sha256:…` — o `:5000` é a porta do host, NÃO uma tag.
         // A tag, se houver, vem depois do último '/'. Aqui não há → encurta o digest.
-        assert_eq!(display_ref("reg:5000/img@sha256:7416a61b42b1662c"), "reg:5000/img@sha256:7416a61b");
+        assert_eq!(
+            display_ref("reg:5000/img@sha256:7416a61b42b1662c"),
+            "reg:5000/img@sha256:7416a61b"
+        );
         // Com porta E tag, a tag identifica → corta o digest.
-        assert_eq!(display_ref("reg:5000/img:v2@sha256:7416a61b"), "reg:5000/img:v2");
+        assert_eq!(
+            display_ref("reg:5000/img:v2@sha256:7416a61b"),
+            "reg:5000/img:v2"
+        );
     }
 }
 
@@ -573,7 +637,12 @@ impl Progress {
     pub fn new() -> Self {
         // SAFETY: isatty não tem pré-condições; 2 = stderr.
         let tty = unsafe { libc::isatty(2) } == 1;
-        Self { tty, msg: String::new(), icon: String::new(), spin: None }
+        Self {
+            tty,
+            msg: String::new(),
+            icon: String::new(),
+            spin: None,
+        }
     }
 
     /// Abre um passo e arranca o spinner (em TTY). `icon` é o emoji do fim.
@@ -592,13 +661,19 @@ impl Progress {
             while !s2.load(std::sync::atomic::Ordering::Relaxed) {
                 // `\x1b[K` limpa até ao fim da linha (evita restos de um frame
                 // mais longo). Sem `\n` — a linha é reescrita in-place.
-                eprint!("\r {} {msg} {icon}\x1b[K", SPIN_FRAMES[i % SPIN_FRAMES.len()]);
+                eprint!(
+                    "\r {} {msg} {icon}\x1b[K",
+                    SPIN_FRAMES[i % SPIN_FRAMES.len()]
+                );
                 let _ = std::io::stderr().flush();
                 i += 1;
                 std::thread::sleep(std::time::Duration::from_millis(90));
             }
         });
-        self.spin = Some(SpinnerHandle { stop, handle: Some(handle) });
+        self.spin = Some(SpinnerHandle {
+            stop,
+            handle: Some(handle),
+        });
     }
 
     /// Fecha o passo actual com `✓`.

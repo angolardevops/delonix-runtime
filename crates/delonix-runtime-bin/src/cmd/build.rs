@@ -52,7 +52,10 @@ pub(crate) fn default_build_file(context: &Path) -> PathBuf {
 }
 
 pub fn run(args: BuildArgs) -> Result<()> {
-    let file = args.file.clone().unwrap_or_else(|| default_build_file(&args.context));
+    let file = args
+        .file
+        .clone()
+        .unwrap_or_else(|| default_build_file(&args.context));
     let img = build_from_spec(&args.context, &file, &args.tag)?;
     println!("{}", img.short_id());
     Ok(())
@@ -63,8 +66,12 @@ pub fn run(args: BuildArgs) -> Result<()> {
 /// image apply` (`kind: Image`, `spec.build`) sem duplicar lógica.
 pub fn build_from_spec(context: &Path, dockerfile_path: &Path, tag: &str) -> Result<Image> {
     let (images, store) = open_stores()?;
-    let text = std::fs::read_to_string(dockerfile_path)
-        .map_err(|e| Error::Invalid(format!("não consegui ler {}: {e}", dockerfile_path.display())))?;
+    let text = std::fs::read_to_string(dockerfile_path).map_err(|e| {
+        Error::Invalid(format!(
+            "não consegui ler {}: {e}",
+            dockerfile_path.display()
+        ))
+    })?;
     let df = parse_dockerfile(&text)?;
     if !df.stages.is_empty() {
         return Err(Error::Invalid(
@@ -89,7 +96,11 @@ pub fn build_from_spec(context: &Path, dockerfile_path: &Path, tag: &str) -> Res
         "max".into(),
     );
     c.userns = rootless;
-    let spec = RunSpec { detach: true, userns: rootless, ..Default::default() };
+    let spec = RunSpec {
+        detach: true,
+        userns: rootless,
+        ..Default::default()
+    };
     runtime::create_with(&store, &mut c, &rootfs, &spec)?;
 
     let steps_result = run_steps(&df.steps, &rootfs, context, &c, &base);
@@ -97,10 +108,17 @@ pub fn build_from_spec(context: &Path, dockerfile_path: &Path, tag: &str) -> Res
     let commit_result = steps_result.and_then(|()| {
         let _ = runtime::stop(&store, &mut c, 5);
         if rootless {
-            let cmd = if df.cmd.is_empty() { base.config.cmd.clone() } else { df.cmd.clone() };
+            let cmd = if df.cmd.is_empty() {
+                base.config.cmd.clone()
+            } else {
+                df.cmd.clone()
+            };
             let mut env = base.config.env.clone();
             env.extend(df.env.iter().cloned());
-            let workdir = df.workdir.clone().unwrap_or_else(|| base.config.working_dir.clone());
+            let workdir = df
+                .workdir
+                .clone()
+                .unwrap_or_else(|| base.config.working_dir.clone());
             commit_flat_rootless(&images, &rootfs, &id, cmd, env, workdir, tag)
         } else {
             let layer = images.commit_upper(&c.id)?;
@@ -176,7 +194,13 @@ fn sh_export(kv: &str) -> String {
 /// ENV/WORKDIR (o `runtime::exec` não tem noção de ambiente por-chamada — cada
 /// `RUN` sintetiza `cd <workdir> && export ... ; <cmd>` num `/bin/sh -c`, tal
 /// como o shell-form do Docker já implica).
-fn run_steps(steps: &[Step], rootfs: &str, context: &Path, c: &Container, base: &Image) -> Result<()> {
+fn run_steps(
+    steps: &[Step],
+    rootfs: &str,
+    context: &Path,
+    c: &Container,
+    base: &Image,
+) -> Result<()> {
     let mut cur_env: Vec<String> = base.config.env.clone();
     let mut cur_workdir = if base.config.working_dir.is_empty() {
         "/".to_string()
@@ -207,11 +231,14 @@ fn run_steps(steps: &[Step], rootfs: &str, context: &Path, c: &Container, base: 
             }
             Step::Run(cmdline) => {
                 let exports: String = cur_env.iter().map(|kv| sh_export(kv)).collect();
-                let shell = format!("mkdir -p {cur_workdir} && cd {cur_workdir}; {exports}{cmdline}");
+                let shell =
+                    format!("mkdir -p {cur_workdir} && cd {cur_workdir}; {exports}{cmdline}");
                 let argv = vec!["/bin/sh".to_string(), "-c".to_string(), shell];
                 let code = runtime::exec(c, &argv, false)?;
                 if code != 0 {
-                    return Err(Error::Invalid(format!("RUN falhou (exit {code}): {cmdline}")));
+                    return Err(Error::Invalid(format!(
+                        "RUN falhou (exit {code}): {cmdline}"
+                    )));
                 }
             }
         }
@@ -234,13 +261,23 @@ fn safe_join(base: &Path, rel: &str) -> Result<PathBuf> {
         match c {
             Component::Normal(s) => out.push(s),
             Component::CurDir => {}
-            _ => return Err(Error::Invalid(format!("caminho inválido em COPY: '{rel}' (sai do directório permitido)"))),
+            _ => {
+                return Err(Error::Invalid(format!(
+                    "caminho inválido em COPY: '{rel}' (sai do directório permitido)"
+                )))
+            }
         }
     }
     Ok(out)
 }
 
-fn copy_into_rootfs(context: &Path, rootfs: &str, src: &str, dst: &str, workdir: &str) -> Result<()> {
+fn copy_into_rootfs(
+    context: &Path,
+    rootfs: &str,
+    src: &str,
+    dst: &str,
+    workdir: &str,
+) -> Result<()> {
     let src_path = safe_join(context, src)?;
     // Semântica Docker do destino: um `dst` relativo resolve-se contra o WORKDIR
     // (`COPY x ./` → WORKDIR/x, não a raiz do rootfs); um `dst` que termina em `/`
@@ -261,19 +298,30 @@ fn copy_into_rootfs(context: &Path, rootfs: &str, src: &str, dst: &str, workdir:
             }
         }
         if let Some(parent) = dst_path.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| Error::Invalid(format!("mkdir {}: {e}", parent.display())))?;
+            std::fs::create_dir_all(parent)
+                .map_err(|e| Error::Invalid(format!("mkdir {}: {e}", parent.display())))?;
         }
-        std::fs::copy(&src_path, &dst_path)
-            .map_err(|e| Error::Invalid(format!("COPY {} -> {}: {e}", src_path.display(), dst_path.display())))?;
+        std::fs::copy(&src_path, &dst_path).map_err(|e| {
+            Error::Invalid(format!(
+                "COPY {} -> {}: {e}",
+                src_path.display(),
+                dst_path.display()
+            ))
+        })?;
         Ok(())
     }
 }
 
 fn copy_dir_all(src: &Path, dst: &Path) -> Result<()> {
-    std::fs::create_dir_all(dst).map_err(|e| Error::Invalid(format!("mkdir {}: {e}", dst.display())))?;
-    for entry in std::fs::read_dir(src).map_err(|e| Error::Invalid(format!("ler {}: {e}", src.display())))? {
+    std::fs::create_dir_all(dst)
+        .map_err(|e| Error::Invalid(format!("mkdir {}: {e}", dst.display())))?;
+    for entry in
+        std::fs::read_dir(src).map_err(|e| Error::Invalid(format!("ler {}: {e}", src.display())))?
+    {
         let entry = entry.map_err(|e| Error::Invalid(e.to_string()))?;
-        let ty = entry.file_type().map_err(|e| Error::Invalid(e.to_string()))?;
+        let ty = entry
+            .file_type()
+            .map_err(|e| Error::Invalid(e.to_string()))?;
         let target = dst.join(entry.file_name());
         if ty.is_dir() {
             copy_dir_all(&entry.path(), &target)?;
@@ -309,7 +357,10 @@ mod tests {
     #[test]
     fn safe_join_aceita_caminho_normal() {
         let base = Path::new("/tmp/context");
-        assert_eq!(safe_join(base, "src/app.txt").unwrap(), base.join("src/app.txt"));
+        assert_eq!(
+            safe_join(base, "src/app.txt").unwrap(),
+            base.join("src/app.txt")
+        );
     }
 
     #[test]
