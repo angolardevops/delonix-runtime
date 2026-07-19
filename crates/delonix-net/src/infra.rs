@@ -532,7 +532,9 @@ fn handle_control(line: &str) -> String {
     }
     let res = match parts.as_slice() {
         ["ping"] => Ok(()),
-        ["attach", netns, ip, bridge, gateway] => do_attach(netns, ip, bridge, gateway),
+        // 5 tokens = namespace `default` (compat com o cliente antigo); 6 = namespaced.
+        ["attach", netns, ip, bridge, gateway] => do_attach(netns, ip, bridge, gateway, "default"),
+        ["attach", netns, ip, bridge, gateway, ns] => do_attach(netns, ip, bridge, gateway, ns),
         ["detach", netns] => do_detach(netns),
         ["cni-del", netns, id, ifname, hex] => do_cni_del(netns, id, ifname, hex),
         // multi-homing ao vivo (rootless): liga/desliga uma rede ADICIONAL a um
@@ -833,7 +835,31 @@ fn do_cni_del(netns: &str, id: &str, ifname: &str, hex: &str) -> Result<()> {
 /// Cria o netns de um container e liga-o à BRIDGE da sua rede por `veth`: par
 /// `<vh>`↔`eth0`, `vh` na bridge, `eth0` no netns com `<ip>/16` e rota default
 /// pelo `<gateway>` (= o ingress). Cria a bridge da rede se faltar. Corre no holder.
-fn do_attach(netns: &str, ip: &str, bridge: &str, gateway: &str) -> Result<()> {
+/// Regista o IP de um container nos sets de namespace: `@dlxall` (todos os IPs de
+/// container) + `@dlxns_<ns>` (a namespace do container). Antes, **remove-o de
+/// qualquer `@dlxns_*` anterior** — assim uma re-attach (ou mudança de namespace)
+/// fica correcta sem precisar de cleanup no detach. Best-effort/idempotente.
+fn ns_set_join(ip: &str, ns: &str) {
+    if !is_ingress_ip(ip) {
+        return; // só IPs da SDN
+    }
+    let elem = format!("{{ {ip} }}");
+    run_ok("nft", &["add", "element", "ip", INGRESS_TABLE, DLXALL_SET, &elem]);
+    // tira o IP de qualquer namespace anterior (nome do set = 2.º token de "set X {").
+    let sets = crate::capture("nft", &["list", "sets", "ip", INGRESS_TABLE]).unwrap_or_default();
+    for line in sets.lines() {
+        if let Some(name) = line.split_whitespace().nth(1) {
+            if name.starts_with("dlxns") {
+                run_ok("nft", &["delete", "element", "ip", INGRESS_TABLE, name, &elem]);
+            }
+        }
+    }
+    let nsset = dlxns_set(ns);
+    run_ok("nft", &["add", "set", "ip", INGRESS_TABLE, &nsset, "{ type ipv4_addr; }"]);
+    run_ok("nft", &["add", "element", "ip", INGRESS_TABLE, &nsset, &elem]);
+}
+
+fn do_attach(netns: &str, ip: &str, bridge: &str, gateway: &str, namespace: &str) -> Result<()> {
     let netns = sanitize(netns);
     let bridge = sanitize(bridge);
     ensure_net_bridge(&bridge, gateway)?;
@@ -880,6 +906,10 @@ fn do_attach(netns: &str, ip: &str, bridge: &str, gateway: &str) -> Result<()> {
         "nft",
         &["insert", "rule", "ip", INGRESS_TABLE, "fwdeny", "iifname", &vh, "ip", "saddr", "!=", ip, "drop"],
     );
+    // Isolamento de namespace: regista o IP em @dlxall + @dlxns_<ns> (o
+    // fw_chain_body do container referencia estes sets). Comportamento inalterado
+    // para tudo em `default` (a mesma namespace contém todos = SDN aberta).
+    ns_set_join(ip, namespace);
     Ok(())
 }
 
@@ -1812,12 +1842,22 @@ pub fn cni_detach_container(id: &str, conf_json: &str) -> Result<()> {
 /// **Liga um container a uma rede do ingress** (`net`=`ingress` ou nome de rede
 /// privada): garante a infra de pé (ref-count++), resolve a bridge/gateway e pede
 /// ao holder o netns + `veth` + IP. Devolve `(netns, ip)`. Em falha desfaz o ref-count.
-pub fn attach_container(id: &str, net: &str) -> Result<(String, String)> {
+pub fn attach_container(id: &str, net: &str, namespace: &str) -> Result<(String, String)> {
     let (bridge, prefix, gateway) = resolve_net(net)?;
     let ip = container_ip_on(&prefix, id);
     acquire()?; // ensure_up + refcount++
     let netns = sanitize(id);
-    match control_send(&format!("attach {netns} {ip} {bridge} {gateway}")) {
+    // `namespace` sanitizado (vai a um token do control-line): sem espaços/lixo.
+    let ns = sanitize(if namespace.is_empty() { "default" } else { namespace });
+    // Compat de upgrade: `default` mantém a forma de 5 tokens (um holder ANTIGO,
+    // pré-namespaces, ainda a aceita); só attaches namespaced levam o 6.º token e
+    // exigem o holder novo. Minimiza a quebra num upgrade in-place do binário.
+    let cmd = if ns == "default" {
+        format!("attach {netns} {ip} {bridge} {gateway}")
+    } else {
+        format!("attach {netns} {ip} {bridge} {gateway} {ns}")
+    };
+    match control_send(&cmd) {
         Ok(()) => Ok((netns, ip)),
         Err(e) => {
             release(); // desfaz o ref-count se o attach falhou

@@ -368,6 +368,12 @@ pub struct Container {
     /// utilizador). `None` = sem rede.
     #[serde(default)]
     pub network: Option<String>,
+    /// Namespace lógico de ISOLAMENTO (default `default`). Containers de namespaces
+    /// diferentes NÃO se alcançam (mesmo na mesma rede); só um `kind: Dependency`
+    /// fura a fronteira. Propaga-se ao `ContainerFw.namespace` e ao registo nos
+    /// sets nft `@dlxns_<ns>`/`@dlxall` no attach. [[isolamento de namespace]]
+    #[serde(default = "default_namespace")]
+    pub namespace: String,
     /// Redes ADICIONAIS a que o container está ligado (multi-homing, via
     /// `network connect`). Cada uma é uma interface `eth<idx>` própria.
     #[serde(default)]
@@ -486,6 +492,7 @@ impl Container {
             userns: false,
             ip: None,
             network: None,
+            namespace: default_namespace(),
             extra_networks: Vec::new(),
             net_aliases: Vec::new(),
             dns_knows: None,

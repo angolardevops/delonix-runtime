@@ -212,7 +212,7 @@ mod tests {
         ManifestDoc {
             api_version: "delonix.io/v1".into(),
             kind: kind.into(),
-            metadata: Metadata { name: "t".into(), labels: Default::default(), annotations: Default::default() },
+            metadata: Metadata { name: "t".into(), namespace: None, labels: Default::default(), annotations: Default::default() },
             spec: serde_yaml::from_str(spec_yaml).unwrap(),
         }
     }
