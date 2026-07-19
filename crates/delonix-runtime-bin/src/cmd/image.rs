@@ -6,6 +6,11 @@ use clap::Subcommand;
 use clap_complete::engine::ArgValueCandidates;
 use delonix_image::ImageStore;
 use delonix_runtime_core::{Error, Result};
+use oci_spec::runtime::{
+    get_default_maskedpaths, get_default_mounts, get_default_namespaces,
+    get_default_readonly_paths, Capability, LinuxBuilder, LinuxCapabilitiesBuilder, ProcessBuilder,
+    RootBuilder, Spec, SpecBuilder, User,
+};
 use serde::Deserialize;
 
 use super::manifest::{self, ManifestDoc};
@@ -628,31 +633,152 @@ fn cmd_export(images: &ImageStore, reference: &str, dir: &std::path::Path) -> Re
     } else {
         img.config.working_dir.clone()
     };
-    let spec = serde_json::json!({
-        "ociVersion": "1.0.2",
-        "process": {
-            "terminal": false,
-            "user": { "uid": 0, "gid": 0 },
-            "args": args,
-            "env": img.config.env,
-            "cwd": cwd,
-            "capabilities": {
-                "bounding": ["CAP_CHOWN","CAP_DAC_OVERRIDE","CAP_FOWNER","CAP_SETGID","CAP_SETUID","CAP_NET_BIND_SERVICE"]
-            },
-            "noNewPrivileges": true
-        },
-        "root": { "path": "rootfs", "readonly": false },
-        "hostname": "delonix",
-        "linux": {
-            "namespaces": [
-                {"type": "pid"}, {"type": "ipc"}, {"type": "uts"}, {"type": "mount"}
-            ]
-        }
-    });
+    let spec = build_runtime_spec(args, img.config.env.clone(), cwd)?;
     let cfg = dir.join("config.json");
-    std::fs::write(&cfg, serde_json::to_vec_pretty(&spec).unwrap_or_default())
+    let json = serde_json::to_vec_pretty(&spec)
+        .map_err(|e| Error::Invalid(format!("serializar spec OCI: {e}")))?;
+    std::fs::write(&cfg, json)
         .map_err(|e| Error::Invalid(format!("escrever {}: {e}", cfg.display())))?;
     println!("bundle OCI em {}", dir.display());
     println!("corre com:  runc run -b {} delonix-oci", dir.display());
     Ok(())
+}
+
+/// Constrói um `config.json` de **runtime OCI conformante** a partir dos tipos
+/// canónicos do `oci-spec` (em vez do JSON à mão de antes, que estava incompleto).
+/// PURA — sem IO — para ser validada por teste de round-trip contra o próprio
+/// `oci_spec::runtime::Spec`.
+///
+/// Difere do bundle mínimo anterior em três pontos que o tornavam **não-funcional**
+/// com `runc`/`crun` (não só não-conformante):
+/// 1. **`mounts`** — antes não existia NENHUM. Sem `/proc`, `/sys`, `/dev/pts`,
+///    `/dev/shm`, `/dev/mqueue` o container arrancava sem `/proc` e a maioria das
+///    cargas partia. Passa a usar o conjunto-padrão do `runc spec`.
+/// 2. **Capabilities** — antes só `bounding` estava definido, logo o processo (uid 0)
+///    ficava com o conjunto EFETIVO vazio (nem `chown` nem bind <1024). Agora o
+///    mesmo conjunto vai a bounding+effective+permitted; inheritable/ambient vazios
+///    (mínimo privilégio, coerente com `noNewPrivileges`).
+/// 3. **`maskedPaths`/`readonlyPaths`** — endurecimento-padrão (`/proc/kcore`, …)
+///    que o bundle anterior omitia por completo.
+fn build_runtime_spec(args: Vec<String>, env: Vec<String>, cwd: String) -> Result<Spec> {
+    let mkerr = |what: &'static str| {
+        move |e: oci_spec::OciSpecError| Error::Invalid(format!("{what}: {e}"))
+    };
+
+    // A mesma postura de capacidades do bundle anterior, mas aplicada aos três
+    // conjuntos que a tornam EFETIVA (não só ao teto `bounding`).
+    let caps: std::collections::HashSet<Capability> = [
+        Capability::Chown,
+        Capability::DacOverride,
+        Capability::Fowner,
+        Capability::Setgid,
+        Capability::Setuid,
+        Capability::NetBindService,
+    ]
+    .into_iter()
+    .collect();
+    let capabilities = LinuxCapabilitiesBuilder::default()
+        .bounding(caps.clone())
+        .effective(caps.clone())
+        .permitted(caps)
+        .inheritable(std::collections::HashSet::new())
+        .ambient(std::collections::HashSet::new())
+        .build()
+        .map_err(mkerr("capabilities"))?;
+
+    let process = ProcessBuilder::default()
+        .terminal(false)
+        .user(User::default()) // uid 0 / gid 0 — como antes
+        .args(args)
+        .env(env)
+        .cwd(cwd)
+        .capabilities(capabilities)
+        .no_new_privileges(true)
+        .build()
+        .map_err(mkerr("process"))?;
+
+    let root = RootBuilder::default()
+        .path("rootfs")
+        .readonly(false)
+        .build()
+        .map_err(mkerr("root"))?;
+
+    // Namespaces/masked/readonly-paths padrão do `runc spec` — o alvo de
+    // conformidade. (Inclui um network namespace isolado, como o `runc spec`; quem
+    // quiser rede-do-host edita o `config.json`.)
+    let linux = LinuxBuilder::default()
+        .namespaces(get_default_namespaces())
+        .masked_paths(get_default_maskedpaths())
+        .readonly_paths(get_default_readonly_paths())
+        .build()
+        .map_err(mkerr("linux"))?;
+
+    SpecBuilder::default()
+        .version("1.0.2")
+        .hostname("delonix")
+        .root(root)
+        .process(process)
+        .mounts(get_default_mounts())
+        .linux(linux)
+        .build()
+        .map_err(mkerr("spec"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Conformidade OCI-runtime do bundle exportado: serializa e **volta a
+    /// desserializar** pelo `oci_spec::runtime::Spec` canónico — se o nosso JSON
+    /// divergisse do schema, o round-trip falhava aqui.
+    #[test]
+    fn bundle_exportado_e_conformante_oci_runtime() {
+        let spec = build_runtime_spec(
+            vec![
+                "/bin/sh".to_string(),
+                "-c".to_string(),
+                "echo hi".to_string(),
+            ],
+            vec!["PATH=/usr/bin".to_string()],
+            "/work".to_string(),
+        )
+        .expect("build spec");
+
+        let json = serde_json::to_vec(&spec).expect("serializar");
+        let parsed: Spec = serde_json::from_slice(&json).expect("round-trip pelo tipo canónico");
+
+        // ociVersion presente e semânticamente válido.
+        assert_eq!(parsed.version(), "1.0.2");
+
+        // O FIX central: mounts padrão presentes — em particular `/proc`, sem o qual
+        // o container arrancava partido. Antes deste commit não havia mounts nenhuns.
+        let mounts = parsed.mounts().as_ref().expect("mounts");
+        assert!(
+            mounts
+                .iter()
+                .any(|m| m.destination() == std::path::Path::new("/proc")),
+            "bundle tem de montar /proc (era a lacuna que o tornava não-funcional)"
+        );
+        assert!(
+            mounts.len() >= 5,
+            "conjunto de mounts padrão do runc (proc/sys/dev/pts/shm/…)"
+        );
+
+        // Processo: args/env/cwd propagados e capacidades EFETIVAS (não só bounding).
+        let proc = parsed.process().as_ref().expect("process");
+        assert_eq!(proc.args().as_ref().unwrap()[0], "/bin/sh");
+        assert_eq!(proc.cwd(), std::path::Path::new("/work"));
+        assert_eq!(proc.no_new_privileges(), Some(true));
+        let caps = proc.capabilities().as_ref().expect("capabilities");
+        let eff = caps.effective().as_ref().expect("effective caps");
+        assert!(
+            eff.contains(&Capability::NetBindService),
+            "as capacidades têm de ir ao conjunto EFETIVO, não só ao bounding"
+        );
+
+        // Endurecimento padrão que o bundle anterior omitia.
+        let linux = parsed.linux().as_ref().expect("linux");
+        assert!(!linux.masked_paths().as_ref().expect("masked").is_empty());
+        assert!(!linux.namespaces().as_ref().expect("namespaces").is_empty());
+    }
 }
