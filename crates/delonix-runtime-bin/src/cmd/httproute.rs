@@ -65,8 +65,14 @@ pub fn run(action: HttpRouteCmd) -> Result<()> {
             apply(&docs)
         }
         HttpRouteCmd::Rm => {
-            ingress_proxy::stop()?;
-            println!("httproute: proxy parado e portas despublicadas");
+            // Remove só as rotas MANUAIS; as auto-registadas (`--expose`) sobrevivem
+            // e o proxy só pára se nada mais restar.
+            ingress_proxy::clear_manual()?;
+            if ingress_proxy::is_running() {
+                println!("httproute: rotas manuais removidas — proxy mantém-se (há rotas auto-registadas)");
+            } else {
+                println!("httproute: proxy parado e portas despublicadas");
+            }
             Ok(())
         }
     }
@@ -373,7 +379,9 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
     let Some(cfg) = resolve_config(&specs)? else {
         return Ok(()); // sem HTTPRoute — nada a fazer
     };
-    ingress_proxy::ensure_running(&cfg)?;
+    // Escreve a parte MANUAL e recompõe (compõe com as rotas auto-registadas de
+    // containers `--expose`, sem que uma apague a outra).
+    ingress_proxy::set_manual(&cfg)?;
     println!(
         "httproute: {} rota(s) em {} listener(s){} — proxy {}",
         cfg.routes.len(),

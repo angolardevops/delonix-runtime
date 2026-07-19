@@ -422,6 +422,144 @@ fn pid_path() -> std::path::PathBuf {
 fn log_path() -> std::path::PathBuf {
     proxy_dir().join("proxy.log")
 }
+/// Porta HTTP das auto-rotas (`--expose`). **Não-privilegiada** — em rootless o
+/// slirp recusa publicar portas <1024. Alcança-se com `Host: <fqdn>` em `:8080`.
+const AUTO_HTTP_PORT: u16 = 8080;
+
+/// A parte MANUAL da config (rotas/listeners/TLS dos `kind: HTTPRoute`).
+fn manual_path() -> std::path::PathBuf {
+    proxy_dir().join("manual.json")
+}
+/// As rotas AUTO-REGISTADAS de containers (`container run --expose`).
+fn auto_path() -> std::path::PathBuf {
+    proxy_dir().join("auto.json")
+}
+
+/// Uma rota auto-registada de um container HTTP: o FQDN interno
+/// `<nome>.<namespace>.delonix.internal` → `<ip>:<porta>`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AutoRoute {
+    pub name: String,
+    pub namespace: String,
+    pub ip: String,
+    pub port: u16,
+}
+
+impl AutoRoute {
+    /// O FQDN interno deste container (o `Host` que o casa no proxy + o nome DNS).
+    pub fn fqdn(&self) -> String {
+        format!("{}.{}.delonix.internal", self.name, self.namespace)
+    }
+}
+
+fn read_manual() -> Option<ProxyConfig> {
+    serde_json::from_slice(&std::fs::read(manual_path()).ok()?).ok()
+}
+fn read_auto() -> Vec<AutoRoute> {
+    std::fs::read(auto_path())
+        .ok()
+        .and_then(|b| serde_json::from_slice(&b).ok())
+        .unwrap_or_default()
+}
+
+/// Read-modify-write da `auto.json` sob **flock exclusivo** — dois
+/// `container run --expose` em paralelo não podem perder uma rota (lost update).
+/// `f` recebe a lista actual e devolve a nova. Devolve `true` se mudou.
+fn with_auto_locked(f: impl FnOnce(&mut Vec<AutoRoute>)) -> Result<bool> {
+    use std::os::unix::io::AsRawFd;
+    std::fs::create_dir_all(proxy_dir())
+        .map_err(|e| Error::Runtime { context: "httproute dir", message: e.to_string() })?;
+    // Um ficheiro de lock dedicado (o flock é no fd; o conteúdo fica na auto.json).
+    let lock = std::fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(false)
+        .open(proxy_dir().join("auto.lock"))
+        .map_err(|e| Error::Runtime { context: "auto.lock", message: e.to_string() })?;
+    // SAFETY: flock(LOCK_EX) no fd do lock; libertado ao fechar (fim do escopo).
+    if unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX) } != 0 {
+        return Err(Error::Runtime { context: "flock auto", message: "não obtive o lock".into() });
+    }
+    let mut auto = read_auto();
+    let before = auto.clone();
+    f(&mut auto);
+    if auto == before {
+        return Ok(false);
+    }
+    std::fs::write(auto_path(), serde_json::to_vec_pretty(&auto).unwrap_or_default())
+        .map_err(|e| Error::Runtime { context: "escrever auto", message: e.to_string() })?;
+    Ok(true)
+}
+
+/// **Compõe a config final** a partir da parte MANUAL (HTTPRoute) + as rotas
+/// AUTO-REGISTADAS, e garante o proxy a servir (ou pára-o se ficou tudo vazio).
+/// É o ponto único que o `httproute apply` e o auto-registo chamam — nenhuma
+/// fonte apaga a outra.
+fn rebuild() -> Result<()> {
+    let manual = read_manual();
+    let auto = read_auto();
+
+    let mut listeners: Vec<Listener> = manual.as_ref().map(|m| m.listeners.clone()).unwrap_or_default();
+    let mut routes: Vec<Route> = manual.as_ref().map(|m| m.routes.clone()).unwrap_or_default();
+    let tls = manual.as_ref().and_then(|m| m.tls.clone());
+
+    // As auto-rotas servem-se em HTTP na porta AUTO_HTTP_PORT (FQDN interno). NÃO
+    // :80 — em rootless o slirp não publica portas privilegiadas (add_hostfwd
+    // recusa <1024). Garante o listener se houver alguma auto-rota.
+    if !auto.is_empty() && !listeners.iter().any(|l| l.port == AUTO_HTTP_PORT) {
+        listeners.push(Listener { port: AUTO_HTTP_PORT, tls: false });
+    }
+    for a in &auto {
+        routes.push(Route { host: a.fqdn(), path: "/".into(), backend: format!("{}:{}", a.ip, a.port) });
+    }
+
+    if listeners.is_empty() || routes.is_empty() {
+        // Nada declarado (nem manual nem auto) → o proxy não tem razão de existir.
+        return stop();
+    }
+    ensure_running(&ProxyConfig { listeners, routes, tls })
+}
+
+/// Escreve a parte MANUAL (do `httproute apply`) e recompõe a config final.
+pub fn set_manual(cfg: &ProxyConfig) -> Result<()> {
+    std::fs::create_dir_all(proxy_dir())
+        .map_err(|e| Error::Runtime { context: "httproute dir", message: e.to_string() })?;
+    std::fs::write(manual_path(), serde_json::to_vec_pretty(cfg).unwrap_or_default())
+        .map_err(|e| Error::Runtime { context: "escrever manual", message: e.to_string() })?;
+    rebuild()
+}
+
+/// Remove a parte MANUAL (no `httproute rm`) e recompõe — as rotas
+/// auto-registadas de containers `--expose` SOBREVIVEM (o proxy só pára se nada
+/// mais restar). Devolve `true` se havia rotas manuais.
+pub fn clear_manual() -> Result<bool> {
+    let had = manual_path().exists();
+    let _ = std::fs::remove_file(manual_path());
+    rebuild()?;
+    Ok(had)
+}
+
+/// **Auto-regista** um container HTTP no proxy (`container run --expose`): junta/
+/// actualiza a sua `AutoRoute` e recompõe a config (SIGHUP a quente). Idempotente.
+pub fn auto_register(name: &str, namespace: &str, ip: &str, port: u16) -> Result<()> {
+    let entry = AutoRoute { name: name.to_string(), namespace: namespace.to_string(), ip: ip.to_string(), port };
+    with_auto_locked(|auto| {
+        auto.retain(|a| a.name != name); // substitui uma entrada anterior do mesmo nome
+        auto.push(entry.clone());
+    })?;
+    rebuild()
+}
+
+/// **Remove** o auto-registo de um container (no `container rm`/stop) e recompõe.
+/// Best-effort — se o container não estava registado, não faz nada.
+pub fn auto_deregister(name: &str) {
+    match with_auto_locked(|auto| auto.retain(|a| a.name != name)) {
+        Ok(true) => {
+            let _ = rebuild();
+        }
+        _ => {} // não estava registado (ou lock falhou) — nada a recompor
+    }
+}
 
 /// PID do proxy se estiver VIVO **e for mesmo o nosso** (o `/proc/<pid>/cmdline`
 /// contém `ingress-proxy`), senão `None` (e limpa um pidfile órfão). A guarda de
@@ -585,6 +723,10 @@ pub fn stop() -> Result<()> {
     }
     let _ = std::fs::remove_file(pid_path());
     let _ = std::fs::remove_file(config_path());
+    // Teardown total: também as fontes (manual + auto), senão um arranque seguinte
+    // reergueria rotas fantasma.
+    let _ = std::fs::remove_file(manual_path());
+    let _ = std::fs::remove_file(auto_path());
     Ok(())
 }
 
