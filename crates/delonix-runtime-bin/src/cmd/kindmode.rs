@@ -1191,7 +1191,7 @@ pub(crate) fn list(store: &Store) -> Result<()> {
             continue;
         };
         if delonix_runtime::reconcile_status(&mut c) {
-            let _ = store.update(&c.id, |cur| delonix_runtime::reconcile_status(cur));
+            let _ = store.update(&c.id, delonix_runtime::reconcile_status);
         }
         clusters.entry(name).or_default().push(c);
     }
@@ -1268,7 +1268,7 @@ pub(crate) fn list(store: &Store) -> Result<()> {
             .filter(|e| ids.contains(&e.id.as_str()) && (e.action == "start" || e.action == "die"))
             .map(|e| e.ts)
             .max()
-            .map(|ts| delonix_runtime_core::fmt_local_ts(ts))
+            .map(delonix_runtime_core::fmt_local_ts)
             .unwrap_or_else(|| "—".into());
 
         // O socket do CRI é o que ESCREVEMOS no kubeadm.conf do cluster — lê-se

@@ -666,11 +666,10 @@ pub fn auto_register(name: &str, namespace: &str, ip: &str, port: u16) -> Result
 /// **Remove** o auto-registo de um container (no `container rm`/stop) e recompõe.
 /// Best-effort — se o container não estava registado, não faz nada.
 pub fn auto_deregister(name: &str) {
-    match with_auto_locked(|auto| auto.retain(|a| a.name != name)) {
-        Ok(true) => {
-            let _ = rebuild();
-        }
-        _ => {} // não estava registado (ou lock falhou) — nada a recompor
+    // `Ok(true)` = removeu algo → recompõe; `Ok(false)`/`Err` = não estava
+    // registado (ou o lock falhou) — nada a recompor.
+    if let Ok(true) = with_auto_locked(|auto| auto.retain(|a| a.name != name)) {
+        let _ = rebuild();
     }
 }
 

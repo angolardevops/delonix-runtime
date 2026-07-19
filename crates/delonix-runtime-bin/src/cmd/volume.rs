@@ -249,39 +249,6 @@ fn describe_one(store: &VolumeStore, v: &delonix_volume::Volume) {
     d.print();
 }
 
-#[cfg(test)]
-mod tests {
-    use super::{fmt_usage, VolumeSpec};
-
-    #[test]
-    fn volumespec_aceita_options_legado_e_mountoptions_canonico() {
-        let legado: VolumeSpec = serde_yaml::from_str("driver: nfs\noptions: vers=4,ro\n").unwrap();
-        assert_eq!(legado.options.as_deref(), Some("vers=4,ro"));
-        let canon: VolumeSpec =
-            serde_yaml::from_str("driver: nfs\nmountOptions: vers=4,ro\n").unwrap();
-        assert_eq!(canon.options.as_deref(), Some("vers=4,ro"));
-    }
-
-    #[test]
-    fn usage_sem_quota_mostra_so_o_uso() {
-        assert_eq!(fmt_usage(1536, None), "1.5 KiB");
-    }
-
-    #[test]
-    fn usage_com_quota_mostra_percentagem() {
-        assert_eq!(
-            fmt_usage(512 * 1024 * 1024, Some(1024 * 1024 * 1024)),
-            "512.0 MiB / 1.00 GiB (50%)"
-        );
-    }
-
-    #[test]
-    fn usage_com_quota_zero_nao_divide_por_zero() {
-        // Uma quota 0 daria `inf%`/NaN na percentagem — degrada para o uso cru.
-        assert_eq!(fmt_usage(100, Some(0)), "100 B / 0 B");
-    }
-}
-
 fn cmd_inspect(store: &VolumeStore, name: &str) -> Result<()> {
     let v = store.inspect(name)?;
     let usage = store.usage(name);
@@ -396,4 +363,37 @@ fn cmd_rm(store: &VolumeStore, name: &str) -> Result<()> {
     store.remove(name)?;
     println!("{name}");
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{fmt_usage, VolumeSpec};
+
+    #[test]
+    fn volumespec_aceita_options_legado_e_mountoptions_canonico() {
+        let legado: VolumeSpec = serde_yaml::from_str("driver: nfs\noptions: vers=4,ro\n").unwrap();
+        assert_eq!(legado.options.as_deref(), Some("vers=4,ro"));
+        let canon: VolumeSpec =
+            serde_yaml::from_str("driver: nfs\nmountOptions: vers=4,ro\n").unwrap();
+        assert_eq!(canon.options.as_deref(), Some("vers=4,ro"));
+    }
+
+    #[test]
+    fn usage_sem_quota_mostra_so_o_uso() {
+        assert_eq!(fmt_usage(1536, None), "1.5 KiB");
+    }
+
+    #[test]
+    fn usage_com_quota_mostra_percentagem() {
+        assert_eq!(
+            fmt_usage(512 * 1024 * 1024, Some(1024 * 1024 * 1024)),
+            "512.0 MiB / 1.00 GiB (50%)"
+        );
+    }
+
+    #[test]
+    fn usage_com_quota_zero_nao_divide_por_zero() {
+        // Uma quota 0 daria `inf%`/NaN na percentagem — degrada para o uso cru.
+        assert_eq!(fmt_usage(100, Some(0)), "100 B / 0 B");
+    }
 }

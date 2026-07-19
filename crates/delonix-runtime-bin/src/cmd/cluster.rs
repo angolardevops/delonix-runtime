@@ -33,7 +33,11 @@ struct SshSpec {
     /// para não partir manifestos escritos antes desta reestruturação.
     #[serde(alias = "keyPath")]
     key: Option<PathBuf>,
+    // FIXME(RELATORIO FAIL#1): parseado mas AINDA não ligado ao `conn_args()` — o
+    // SSH vai sempre à 22. Aceite e ignorado de propósito (não partir manifestos que
+    // o definam); ligar ou remover do schema é decisão pendente, em commit dedicado.
     #[serde(default)]
+    #[allow(dead_code)]
     port: Option<u16>,
 }
 
@@ -1096,6 +1100,42 @@ fn fetch_kubeconfig(cp1: &SshTarget, cluster_name: &str) -> Result<()> {
     Ok(())
 }
 
+/// Trata o `init` deste grupo (ver `cmd::scaffold`).
+fn cmd_init(
+    target: super::scaffold::Target,
+    dir: PathBuf,
+    name: Option<String>,
+    image: Option<String>,
+    force: bool,
+) -> Result<()> {
+    let name = name.unwrap_or_else(|| {
+        // Sem `--name`, usa o nome do DIRECTÓRIO. Não se pode usar `canonicalize`:
+        // o directório ainda não existe (é o `init` que o cria) e falharia sempre,
+        // caindo no fallback — todos os projectos ficavam chamados "app".
+        // `.`/vazio resolvem para o cwd; um caminho novo usa o seu basename.
+        let p = if dir.as_os_str().is_empty() || dir == std::path::Path::new(".") {
+            std::env::current_dir().ok()
+        } else {
+            Some(dir.clone())
+        };
+        p.as_deref()
+            .and_then(|p| p.file_name())
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "app".to_string())
+    });
+    super::scaffold::init(
+        target,
+        &super::scaffold::InitOpts {
+            dir,
+            name,
+            image,
+            force,
+            template: None,
+            up: false,
+        },
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1391,40 +1431,4 @@ k8sVersion: \"1.31\"
         let spec: ClusterSpec = serde_yaml::from_str("mode: ssh").unwrap();
         assert_eq!(spec.ssh.user, "delonix");
     }
-}
-
-/// Trata o `init` deste grupo (ver `cmd::scaffold`).
-fn cmd_init(
-    target: super::scaffold::Target,
-    dir: PathBuf,
-    name: Option<String>,
-    image: Option<String>,
-    force: bool,
-) -> Result<()> {
-    let name = name.unwrap_or_else(|| {
-        // Sem `--name`, usa o nome do DIRECTÓRIO. Não se pode usar `canonicalize`:
-        // o directório ainda não existe (é o `init` que o cria) e falharia sempre,
-        // caindo no fallback — todos os projectos ficavam chamados "app".
-        // `.`/vazio resolvem para o cwd; um caminho novo usa o seu basename.
-        let p = if dir.as_os_str().is_empty() || dir == std::path::Path::new(".") {
-            std::env::current_dir().ok()
-        } else {
-            Some(dir.clone())
-        };
-        p.as_deref()
-            .and_then(|p| p.file_name())
-            .map(|n| n.to_string_lossy().into_owned())
-            .unwrap_or_else(|| "app".to_string())
-    });
-    super::scaffold::init(
-        target,
-        &super::scaffold::InitOpts {
-            dir,
-            name,
-            image,
-            force,
-            template: None,
-            up: false,
-        },
-    )
 }

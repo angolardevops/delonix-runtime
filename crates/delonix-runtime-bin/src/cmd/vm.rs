@@ -691,6 +691,44 @@ pub(crate) fn generate_seed_iso(
     Ok(iso_path)
 }
 
+/// Trata o `init` deste grupo (ver `cmd::scaffold`).
+fn cmd_init(
+    target: super::scaffold::Target,
+    dir: PathBuf,
+    name: Option<String>,
+    image: Option<String>,
+    force: bool,
+    template: Option<String>,
+    up: bool,
+) -> Result<()> {
+    let name = name.unwrap_or_else(|| {
+        // Sem `--name`, usa o nome do DIRECTÓRIO. Não se pode usar `canonicalize`:
+        // o directório ainda não existe (é o `init` que o cria) e falharia sempre,
+        // caindo no fallback — todos os projectos ficavam chamados "app".
+        // `.`/vazio resolvem para o cwd; um caminho novo usa o seu basename.
+        let p = if dir.as_os_str().is_empty() || dir == std::path::Path::new(".") {
+            std::env::current_dir().ok()
+        } else {
+            Some(dir.clone())
+        };
+        p.as_deref()
+            .and_then(|p| p.file_name())
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "app".to_string())
+    });
+    super::scaffold::init(
+        target,
+        &super::scaffold::InitOpts {
+            dir,
+            name,
+            image,
+            force,
+            template,
+            up,
+        },
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::{build_meta_data, build_user_data, fmt_vm_status, VmSpec};
@@ -787,42 +825,4 @@ mod tests {
         let md = build_meta_data("vm-1", "myvm");
         assert_eq!(md, "instance-id: vm-1\nlocal-hostname: myvm\n");
     }
-}
-
-/// Trata o `init` deste grupo (ver `cmd::scaffold`).
-fn cmd_init(
-    target: super::scaffold::Target,
-    dir: PathBuf,
-    name: Option<String>,
-    image: Option<String>,
-    force: bool,
-    template: Option<String>,
-    up: bool,
-) -> Result<()> {
-    let name = name.unwrap_or_else(|| {
-        // Sem `--name`, usa o nome do DIRECTÓRIO. Não se pode usar `canonicalize`:
-        // o directório ainda não existe (é o `init` que o cria) e falharia sempre,
-        // caindo no fallback — todos os projectos ficavam chamados "app".
-        // `.`/vazio resolvem para o cwd; um caminho novo usa o seu basename.
-        let p = if dir.as_os_str().is_empty() || dir == std::path::Path::new(".") {
-            std::env::current_dir().ok()
-        } else {
-            Some(dir.clone())
-        };
-        p.as_deref()
-            .and_then(|p| p.file_name())
-            .map(|n| n.to_string_lossy().into_owned())
-            .unwrap_or_else(|| "app".to_string())
-    });
-    super::scaffold::init(
-        target,
-        &super::scaffold::InitOpts {
-            dir,
-            name,
-            image,
-            force,
-            template,
-            up,
-        },
-    )
 }
