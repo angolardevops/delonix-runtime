@@ -207,6 +207,27 @@ ls/apply/rm` + `kind: HTTPRoute` no `stack apply`.
 FQDN interno (`<nome>.<namespace>.delonix.internal`, DNS do holder) e é adicionado ao proxy por
 SIGHUP, sem reiniciar. Faz do Delonix um substituto do k8s (DNS+ingress) em ambientes pequenos.
 
+## Alcançabilidade dirigida (`kind: Dependency` / `KnowDepends`)
+
+`kind: Dependency` (alias `KnowDepends`) — comunicação **DIRIGIDA** entre containers, ao contrário
+da `Network` (bidirecional). `spec: { from, to (escalar ou lista), ports?, proto? }`: `from`
+alcança `to`, mas `to` não fica exposta aos outros containers da rede. Caso clássico: a app conhece
+a DB, a DB não fica acessível aos outros apps de uma rede partilhada (`cmd/dependency.rs`).
+
+- **Açúcar sobre o firewall L4 por-container** (zero dataplane novo): compila para, no `to`, ingress
+  **default-deny** (protege) + um `allow` do IP do `from`. Reutiliza `ContainerFw`/`infra::
+  apply_firewall` via `firewall::apply_container_ingress` (helper partilhado). Várias `Dependency`
+  para o mesmo `to` **acumulam** os `allow`. O retorno da conversa flui porque a SDN é stateful.
+- **Alias de Kind** `KnowDepends`→`Dependency` (`canonical_kind`). Grafo valida `from`/`to` como
+  containers; `stack apply` corre-o após o firewall (precisa dos IPs). Ver `examples/dependency.yaml`.
+- **Provado E2E**: rede aberta (app E other alcançam db) → após `Dependency app→db`, app OK e other
+  BLOQUEADO (timeout).
+- **Semântica v1 e limites**: garante "`to` protegido, só os `from` declarados o alcançam". O
+  bloqueio do **sentido inverso** (`to` não INICIA para `from`) completa-se com **Namespaces**
+  (isolamento default-deny universal — próxima fatia). Um `to` que seja simultaneamente alvo de um
+  `kind: Ingress` explícito **e** de `Dependency` avisa (o Dependency é autoritativo e substitui a
+  direção de entrada). Remover a `Dependency` **não** desprotege o `to` ("garante presente").
+
 ## Imagem VM dourada (`delonix image --vm`)
 
 `delonix image --vm ls|pull|push|build` gere imagens VM à parte das imagens de container
