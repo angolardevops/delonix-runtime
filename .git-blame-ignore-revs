@@ -1,0 +1,5 @@
+# Reformatação em massa — ignorar no git blame.
+# Configurar: git config blame.ignoreRevsFile .git-blame-ignore-revs
+
+# style: aplica rustfmt a todo o workspace
+c3d8ba6f03d1c744545de86dbd5a10975af0ffe5
