@@ -84,6 +84,21 @@ Highlights
 Install
 =======
 
+One command — installs the binary **and** everything the runtime needs on the
+host (slirp4netns, uidmap/subuid ranges, nftables, VM backend), so a fresh
+machine is fully functional with no manual steps. Works on Debian/Ubuntu,
+Fedora/RHEL, openSUSE and Arch families (uses ``sudo`` for packages):
+
+.. code-block:: bash
+
+   curl -fsSL https://github.com/angolardevops/delonix-runtime/releases/latest/download/install.sh | bash
+
+Useful flags (pass after ``bash -s --``): ``--no-vm`` skips the microVM stack,
+``--with-cri`` also installs ``delonix-cri`` (Kubernetes node), ``--user``
+installs to ``~/.local/bin``, ``--version vX.Y.Z`` pins a release.
+
+Manual alternative (binary only — you install the runtime deps yourself):
+
 .. code-block:: bash
 
    curl -fL -o ~/.local/bin/delonix \
