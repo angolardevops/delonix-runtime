@@ -78,6 +78,9 @@ pub struct VmConfig {
     /// host). Só o backend **libvirt** os materializa (o Cloud Hypervisor não faz
     /// 9p) — ver `create`. Fecha o gap "montar um NAS numa VM sem cloud-init/XML".
     pub volumes: Vec<VmVolume>,
+    /// Consola gráfica VNC (`--vnc`) — **só backend libvirt** (o Cloud Hypervisor
+    /// não tem display). Liga em `127.0.0.1` numa porta auto; ver `vm vnc`.
+    pub vnc: bool,
 }
 
 /// Um directório do host partilhado para dentro da VM por virtio-9p. Isto é o que
@@ -751,6 +754,11 @@ pub fn libvirt_domain_xml(cfg: &VmConfig, overlay: &str, mac: &str) -> String {
     // consola série (logs de boot).
     s.push_str("    <serial type='pty'><target type='isa-serial' port='0'/></serial>\n");
     s.push_str("    <console type='pty'><target type='serial' port='0'/></console>\n");
+    // VNC (opt-in): porta auto, só no loopback (o `vm vnc` reporta host:porta).
+    if cfg.vnc {
+        s.push_str("    <graphics type='vnc' port='-1' autoport='yes' listen='127.0.0.1'/>\n");
+        s.push_str("    <video><model type='virtio' heads='1'/></video>\n");
+    }
     // VFIO: passagem de dispositivos PCI (SR-IOV VF, GPU).
     for dev in &cfg.devices {
         if let Some((dom, bus, slot, func)) = parse_pci_addr(dev) {
@@ -1155,6 +1163,7 @@ mod tests {
             net_mode: None,
             bridge: None,
             volumes: vec![],
+            vnc: false,
         }
     }
 
@@ -1284,6 +1293,7 @@ mod tests {
             net_mode: None,
             bridge: None,
             volumes: vec![],
+            vnc: false,
         }
     }
 
