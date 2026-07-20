@@ -199,16 +199,16 @@ pub enum VmCmd {
         #[arg(long)]
         bridge: Option<String>,
     },
-    /// Descarrega uma imagem VM dourada de um registo OCI — sem argumento,
-    /// a imagem OFICIAL do Delonix (pronta para `vm create`/`cluster kubeadm`).
+    /// Pull a golden VM image from an OCI registry — with no argument, the
+    /// OFFICIAL Delonix image (ready for `vm create`/`cluster kubeadm`).
     Pull {
-        /// Referência OCI (default: a imagem oficial do Delonix).
+        /// OCI reference (default: the official Delonix image).
         source: Option<String>,
-        /// Nome local (default: derivado da referência).
+        /// Local name (default: derived from the reference).
         #[arg(long)]
         name: Option<String>,
     },
-    /// Publica uma imagem VM dourada local num registo OCI (`vm push <nome> <destino>`).
+    /// Push a local golden VM image to an OCI registry (`vm push <name> <target>`).
     Push { name: String, target: String },
     /// Lista as VMs.
     Ls,
