@@ -4,6 +4,13 @@
 > (regenerado automaticamente pelo pipeline de release a cada tag publicada).
 > Não editar à mão — edita a nota da release respectiva.
 
+## v0.6.2 — corrige o "delonix delonix" na 1.ª linha do --version
+
+O clap prepõe o nome do binário ao `long_version`; o cartão da v0.6.1 também
+o incluía e a primeira linha saía "delonix delonix 0.6.1". Só o fix.
+
+---
+
 ## v0.6.1 — `--version` rico: identidade do build + por onde começar
 
 - **`delonix --version`** passa a cartão de visita: versão, **commit e data de
