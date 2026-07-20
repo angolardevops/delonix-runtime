@@ -47,128 +47,121 @@ struct Cli {
 #[allow(clippy::large_enum_variant)]
 #[derive(Subcommand)]
 enum Cmd {
-    /// Containers: run/ps/stop/rm/exec/logs.
+    /// Containers: run/ps/stop/rm/exec/logs/update/describe.
     Container {
         #[command(subcommand)]
         action: cmd::container::ContainerCmd,
     },
-    /// Imagens: pull/ls/rm/export. Com `--vm`: imagens VM douradas
-    /// (ls/pull/push/build) em vez de imagens de container.
+    /// OCI images: pull/ls/rm/export (with `--vm`: golden VM images — ls/pull/push/build).
     Image {
-        /// Opera sobre imagens VM (`<root>/vm-images/`) em vez de imagens de
-        /// container — activa os subcomandos `push`/`build`.
+        /// Operate on VM images (`<root>/vm-images/`) instead of container images — enables the `push`/`build` subcommands.
         #[arg(long)]
         vm: bool,
         #[command(subcommand)]
         action: cmd::image::ImageCmd,
     },
-    /// Constrói uma imagem a partir de um Dockerfile.
+    /// Build an image from a Dockerfile or Delonixfile.
     Build(cmd::build::BuildArgs),
-    /// microVMs declarativas: create/ls/stop/rm/status.
+    /// Declarative microVMs: create/ls/stop/rm/status.
     Vm {
         #[command(subcommand)]
         action: cmd::vm::VmCmd,
     },
-    /// Volumes nomeados: create/ls/rm/inspect.
+    /// Named volumes and bind mounts: create/ls/rm/inspect.
     Volumes {
         #[command(subcommand)]
         action: cmd::volume::VolumeCmd,
     },
-    /// Redes de utilizador: ls/create/rm/inspect.
+    /// User networks: ls/create/rm/inspect.
     Network {
         #[command(subcommand)]
         action: cmd::network::NetworkCmd,
     },
-    /// Cofre de segredos (cifrado em repouso) — o produtor do `run --secret`.
+    /// Encrypted-at-rest secret vault — the producer of `run --secret`.
     Secret {
         #[command(subcommand)]
         action: cmd::secret::SecretCmd,
     },
-    /// Armazenamento de REDE (NFS/CIFS/WebDAV) montável como volume — estilo PV do k8s.
+    /// NETWORK storage (NFS/CIFS/WebDAV) mountable as a volume — k8s PersistentVolume style.
     Storage {
         #[command(subcommand)]
         action: cmd::storage::StorageCmd,
     },
-    /// Aplica um manifesto (`delonix-manifest.yaml`) inteiro — todos os Kinds.
+    /// Apply a whole manifest (`delonix-manifest.yaml`) — every Kind, in dependency order.
     Stack {
         #[command(subcommand)]
         action: cmd::stack::StackCmd,
     },
-    /// O motor em si: eventos, estado e uso de disco.
+    /// The engine itself: events, state and disk usage.
     System {
         #[command(subcommand)]
         action: cmd::system::SystemCmd,
     },
-    /// Bootstrap `kubeadm` idempotente sobre SSH (`kind: Cluster`).
+    /// Idempotent `kubeadm` bootstrap over SSH (`kind: Cluster`), or full VM provisioning.
     Cluster {
         #[command(subcommand)]
         action: cmd::cluster::ClusterCmd,
     },
-    /// Gera manifestos Kubernetes a partir de containers/pods (`generate`).
+    /// Generate Kubernetes manifests from containers/pods (`generate`).
     Kube {
         #[command(subcommand)]
         action: cmd::kube::KubeCmd,
     },
-    /// Gestão de baixo nível da infra de ingress rootless (up/status/attach/publish/firewall).
+    /// Low-level management of the rootless ingress infra (up/status/attach/publish/firewall).
     Netns {
         #[command(subcommand)]
         action: cmd::netns::NetnsCmd,
     },
-    /// Tráfego por-container ao vivo (datapath eBPF; degrada para contadores veth).
+    /// Live per-container traffic (eBPF datapath; degrades to veth counters).
     Flow {
-        /// Observar só esta interface (default: auto — todas as veths da SDN).
+        /// Watch only this interface (default: auto — every SDN veth).
         #[arg(long)]
         iface: Option<String>,
-        /// Actualiza continuamente (a cada 2s) em vez de imprimir uma vez.
+        /// Refresh continuously (every 2s) instead of printing once.
         #[arg(long, short)]
         watch: bool,
     },
-    /// Firewall de ENTRADA (regras L4 + publishes DNAT) de um container na SDN.
+    /// INBOUND firewall (L4 rules + DNAT publishes) for a container on the SDN.
     Ingress {
         #[command(subcommand)]
         action: cmd::firewall::IngressCmd,
     },
-    /// Firewall de SAÍDA (regras L4 + política de egress por-rede) de um container.
+    /// OUTBOUND firewall (L4 rules + per-network egress policy) for a container.
     Egress {
         #[command(subcommand)]
         action: cmd::firewall::EgressCmd,
     },
-    /// Reverse-proxy L7/HTTP (`kind: HTTPRoute`): ls/apply/rm.
+    /// Embedded L7/HTTP reverse-proxy (`kind: HTTPRoute`): ls/apply/rm.
     Httproute {
         #[command(subcommand)]
         action: cmd::httproute::HttpRouteCmd,
     },
-    /// Persistência no arranque: units systemd para os containers voltarem a subir no boot.
+    /// Boot persistence: systemd units so containers come back up after a reboot.
     Boot {
         #[command(subcommand)]
         action: cmd::boot::BootCmd,
     },
-    /// Serve o endpoint CRI (`runtime.v1`) num socket unix — substitui o
-    /// containerd/CRI-O para um kubelet falar com o Delonix.
+    /// Serve the CRI endpoint (`runtime.v1`) on a unix socket — replaces containerd/CRI-O for a kubelet.
     Cri {
-        /// Endereço do socket (default: `$DELONIX_CRI_ADDR` ou `unix:///run/delonix-cri.sock`).
+        /// Socket address (default: `$DELONIX_CRI_ADDR` or `unix:///run/delonix-cri.sock`).
         #[arg(long)]
         addr: Option<String>,
     },
-    /// Serve a API de GESTÃO (HTTP+JSON) num socket unix — a superfície que um
-    /// control-plane externo (delonix-paas) consome para operar o motor sem link
-    /// directo aos crates. Distinta do `cri` (que serve o kubelet).
+    /// Serve the MANAGEMENT API (HTTP+JSON) on a unix socket — the surface an external control-plane consumes to operate the engine.
     Api {
-        /// Endereço do socket (default: `$DELONIX_API_ADDR` ou `unix:///run/delonix-mgmt.sock`).
+        /// Socket address (default: `$DELONIX_API_ADDR` or `unix:///run/delonix-mgmt.sock`).
         #[arg(long)]
         addr: Option<String>,
     },
-    /// Dashboard de resumo/KPIs do runtime (TUI interactivo estilo htop). Global,
-    /// ou por grupo (`delonix container dash`, `vm dash`, ...).
+    /// Runtime summary/KPI dashboard (interactive htop-style TUI) — global, or per group (`container dash`, `vm dash`, ...).
     Dash {
-        /// Imprime UM snapshot de texto e sai (sem TUI) — para scripts/CI. É o
-        /// default quando o stdout não é um terminal.
+        /// Print ONE text snapshot and exit (no TUI) — for scripts/CI; the default when stdout is not a terminal.
         #[arg(long)]
         once: bool,
     },
-    /// Imprime o script de autocompletion do shell (bash/zsh/fish/...).
+    /// Print the shell autocompletion script (bash/zsh/fish/...).
     Completion {
-        /// Shell alvo.
+        /// Target shell.
         shell: CompShell,
     },
     /// (interno) O reverse-proxy L7 embutido que serve os `kind: HTTPRoute`. NÃO é
@@ -183,12 +176,22 @@ enum Cmd {
 }
 
 fn run() -> Result<()> {
-    let cli = Cli::parse();
-    // Locale ANTES de qualquer output: a flag `--l18n` tem precedência sobre
-    // `$DELONIX_L18N`; sem nenhum, fica em inglês (o default do repo público).
-    if let Some(l) = cli.l18n.or_else(|| std::env::var("DELONIX_L18N").ok()) {
+    // Língua ANTES do parse do clap: o help é gerado DURANTE o parse, logo a
+    // decisão tem de vir de um peek ao argv/ambiente (`--l18n` tem precedência
+    // sobre `$DELONIX_L18N`; sem nenhum, inglês — o default do repo público).
+    if let Some(l) = cmd::po::peek_lang() {
         cmd::output::set_lang(&l);
     }
+    let mut command = <Cli as clap::CommandFactory>::command();
+    if cmd::output::is_pt() {
+        // Fonte do help em EN; em pt, reescreve about/help via o catálogo pt.po.
+        command = cmd::po::translate_help(command);
+    }
+    let cli = match <Cli as clap::FromArgMatches>::from_arg_matches(&command.get_matches()) {
+        Ok(v) => v,
+        Err(e) => e.exit(),
+    };
+    let _ = cli.l18n; // já consumida pelo peek (fica no schema p/ o help)
     match cli.cmd {
         Cmd::Container { action } => cmd::container::run(action),
         Cmd::Image { vm, action } => cmd::image::run(vm, action),

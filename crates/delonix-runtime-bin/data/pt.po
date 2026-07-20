@@ -1,0 +1,156 @@
+# Delonix Runtime — catálogo pt_AO (português).
+# Embutido no binário (include_str! em cmd/po.rs); formato gettext standard.
+# A FONTE do código é 100% inglês — cada string nova de UI/help entra aqui
+# com o EN como msgid. `delonix --l18n=pt` (ou DELONIX_L18N=pt) activa-o.
+msgid ""
+msgstr ""
+"Project-Id-Version: delonix-runtime\n"
+"Language: pt_AO\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+
+# ---- help: comandos de topo (main.rs) --------------------------------------
+
+msgid "Delonix Runtime — a daemonless, rootless-first container & microVM engine (kernel-native, Rust). The open-source engine that powers Delonix."
+msgstr "Delonix Runtime — motor de containers e microVMs daemonless, rootless-first (kernel-native, Rust). O motor open-source que alimenta o Delonix."
+
+msgid "Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand."
+msgstr "Língua do output: `en` (default) ou `pt` (português, pt_AO). Também via `$DELONIX_L18N`. Global — funciona antes de qualquer subcomando."
+
+msgid "Containers: run/ps/stop/rm/exec/logs/update/describe."
+msgstr "Containers: run/ps/stop/rm/exec/logs/update/describe."
+
+msgid "OCI images: pull/ls/rm/export (with `--vm`: golden VM images — ls/pull/push/build)."
+msgstr "Imagens OCI: pull/ls/rm/export (com `--vm`: imagens VM douradas — ls/pull/push/build)."
+
+msgid "Operate on VM images (`<root>/vm-images/`) instead of container images — enables the `push`/`build` subcommands."
+msgstr "Opera sobre imagens VM (`<root>/vm-images/`) em vez de imagens de container — activa os subcomandos `push`/`build`."
+
+msgid "Build an image from a Dockerfile or Delonixfile."
+msgstr "Constrói uma imagem a partir de um Dockerfile ou Delonixfile."
+
+msgid "Declarative microVMs: create/ls/stop/rm/status."
+msgstr "microVMs declarativas: create/ls/stop/rm/status."
+
+msgid "Named volumes and bind mounts: create/ls/rm/inspect."
+msgstr "Volumes nomeados e bind mounts: create/ls/rm/inspect."
+
+msgid "User networks: ls/create/rm/inspect."
+msgstr "Redes de utilizador: ls/create/rm/inspect."
+
+msgid "Encrypted-at-rest secret vault — the producer of `run --secret`."
+msgstr "Cofre de segredos (cifrado em repouso) — o produtor do `run --secret`."
+
+msgid "NETWORK storage (NFS/CIFS/WebDAV) mountable as a volume — k8s PersistentVolume style."
+msgstr "Armazenamento de REDE (NFS/CIFS/WebDAV) montável como volume — estilo PersistentVolume do k8s."
+
+msgid "Apply a whole manifest (`delonix-manifest.yaml`) — every Kind, in dependency order."
+msgstr "Aplica um manifesto (`delonix-manifest.yaml`) inteiro — todos os Kinds, por ordem de dependência."
+
+msgid "The engine itself: events, state and disk usage."
+msgstr "O motor em si: eventos, estado e uso de disco."
+
+msgid "Idempotent `kubeadm` bootstrap over SSH (`kind: Cluster`), or full VM provisioning."
+msgstr "Bootstrap `kubeadm` idempotente sobre SSH (`kind: Cluster`), ou provisionamento completo de VMs."
+
+msgid "Generate Kubernetes manifests from containers/pods (`generate`)."
+msgstr "Gera manifestos Kubernetes a partir de containers/pods (`generate`)."
+
+msgid "Low-level management of the rootless ingress infra (up/status/attach/publish/firewall)."
+msgstr "Gestão de baixo nível da infra de ingress rootless (up/status/attach/publish/firewall)."
+
+msgid "Live per-container traffic (eBPF datapath; degrades to veth counters)."
+msgstr "Tráfego por-container ao vivo (datapath eBPF; degrada para contadores veth)."
+
+msgid "Watch only this interface (default: auto — every SDN veth)."
+msgstr "Observar só esta interface (default: auto — todas as veths da SDN)."
+
+msgid "Refresh continuously (every 2s) instead of printing once."
+msgstr "Actualiza continuamente (a cada 2s) em vez de imprimir uma vez."
+
+msgid "INBOUND firewall (L4 rules + DNAT publishes) for a container on the SDN."
+msgstr "Firewall de ENTRADA (regras L4 + publishes DNAT) de um container na SDN."
+
+msgid "OUTBOUND firewall (L4 rules + per-network egress policy) for a container."
+msgstr "Firewall de SAÍDA (regras L4 + política de egress por-rede) de um container."
+
+msgid "Embedded L7/HTTP reverse-proxy (`kind: HTTPRoute`): ls/apply/rm."
+msgstr "Reverse-proxy L7/HTTP embutido (`kind: HTTPRoute`): ls/apply/rm."
+
+msgid "Boot persistence: systemd units so containers come back up after a reboot."
+msgstr "Persistência no arranque: units systemd para os containers voltarem a subir no boot."
+
+msgid "Serve the CRI endpoint (`runtime.v1`) on a unix socket — replaces containerd/CRI-O for a kubelet."
+msgstr "Serve o endpoint CRI (`runtime.v1`) num socket unix — substitui o containerd/CRI-O para um kubelet."
+
+msgid "Socket address (default: `$DELONIX_CRI_ADDR` or `unix:///run/delonix-cri.sock`)."
+msgstr "Endereço do socket (default: `$DELONIX_CRI_ADDR` ou `unix:///run/delonix-cri.sock`)."
+
+msgid "Serve the MANAGEMENT API (HTTP+JSON) on a unix socket — the surface an external control-plane consumes to operate the engine."
+msgstr "Serve a API de GESTÃO (HTTP+JSON) num socket unix — a superfície que um control-plane externo consome para operar o motor."
+
+msgid "Socket address (default: `$DELONIX_API_ADDR` or `unix:///run/delonix-mgmt.sock`)."
+msgstr "Endereço do socket (default: `$DELONIX_API_ADDR` ou `unix:///run/delonix-mgmt.sock`)."
+
+msgid "Runtime summary/KPI dashboard (interactive htop-style TUI) — global, or per group (`container dash`, `vm dash`, ...)."
+msgstr "Dashboard de resumo/KPIs do runtime (TUI interactivo estilo htop) — global, ou por grupo (`container dash`, `vm dash`, ...)."
+
+msgid "Print ONE text snapshot and exit (no TUI) — for scripts/CI; the default when stdout is not a terminal."
+msgstr "Imprime UM snapshot de texto e sai (sem TUI) — para scripts/CI; o default quando o stdout não é um terminal."
+
+msgid "Print the shell autocompletion script (bash/zsh/fish/...)."
+msgstr "Imprime o script de autocompletion do shell (bash/zsh/fish/...)."
+
+msgid "Target shell."
+msgstr "Shell alvo."
+
+# ---- help: grupo ingress/egress (cmd/firewall.rs) --------------------------
+
+msgid "Allow inbound traffic to a container: `[proto/]port` from an optional CIDR."
+msgstr "Permite tráfego de entrada para um container: `[proto/]porta` de um CIDR opcional."
+
+msgid "Deny inbound traffic to a container (same shape as `allow`)."
+msgstr "Nega tráfego de entrada para um container (mesma forma do `allow`)."
+
+msgid "Set the default inbound policy when no rule matches."
+msgstr "Define a política de entrada default quando nenhuma regra casa."
+
+msgid "Publish a host port to the container (DNAT through the ingress)."
+msgstr "Publica uma porta do host para o container (DNAT pelo ingress)."
+
+msgid "Remove a published host port."
+msgstr "Remove uma porta do host publicada."
+
+msgid "Show the inbound firewall (policy + rules) and published ports."
+msgstr "Mostra a firewall de entrada (política + regras) e as portas publicadas."
+
+msgid "Container to inspect (omit to list every container's inbound state)."
+msgstr "Container a inspeccionar (omite para listar o estado de entrada de todos)."
+
+msgid "Remove all inbound rules (keeps published ports)."
+msgstr "Remove todas as regras de entrada (mantém as portas publicadas)."
+
+msgid "Allow outbound traffic from a container: `[proto/]port` to an optional CIDR."
+msgstr "Permite tráfego de saída de um container: `[proto/]porta` para um CIDR opcional."
+
+msgid "Deny outbound traffic from a container (same shape as `allow`)."
+msgstr "Nega tráfego de saída de um container (mesma forma do `allow`)."
+
+msgid "Set the default outbound policy when no rule matches."
+msgstr "Define a política de saída default quando nenhuma regra casa."
+
+msgid "Govern a whole network's egress to the Internet."
+msgstr "Governa o egress de uma rede inteira para a Internet."
+
+msgid "Show the outbound firewall (policy + rules)."
+msgstr "Mostra a firewall de saída (política + regras)."
+
+msgid "Container to inspect (omit to list every container's outbound state)."
+msgstr "Container a inspeccionar (omite para listar o estado de saída de todos)."
+
+# ---- mensagens de runtime --------------------------------------------------
+
+msgid "warning"
+msgstr "aviso"
+
+msgid "error"
+msgstr "erro"
