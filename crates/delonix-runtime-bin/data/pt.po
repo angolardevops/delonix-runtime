@@ -529,3 +529,9 @@ msgstr "porta {default} ocupada — o cluster '{cluster}' usa a {p}"
 msgid "no free port found for the apiserver (6443 and 36443-36542 all taken)"
 msgstr "não encontrei nenhuma porta livre para o apiserver (6443 e 36443-36542 ocupadas)"
 
+
+msgid "container '{name}' exited immediately — see `delonix container logs {name}`"
+msgstr "o container '{name}' saiu imediatamente — vê `delonix container logs {name}`"
+
+msgid "rootless with the default `--net host` cannot bind ports below 1024 — if the image binds one (nginx, httpd, ...), publish it (`-p 8080:80`) or use `--net <network>`"
+msgstr "rootless com o default `--net host` não consegue bind de portas abaixo de 1024 — se a imagem usa uma (nginx, httpd, ...), publica-a (`-p 8080:80`) ou usa `--net <rede>`"

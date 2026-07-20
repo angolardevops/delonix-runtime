@@ -1582,6 +1582,31 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
     }
     if detach && !quiet {
         println!("{id}");
+        // Morte à nascença: um `-d` bem sucedido com o init já morto engana —
+        // o utilizador só descobria ao fazer `curl`/`ps` mais tarde. 400ms
+        // chegam para apanhar os crashes imediatos (bind <1024 em `--net host`
+        // rootless, entrypoint partido) sem atrasar o caminho feliz de forma
+        // perceptível. Aviso com a causa mais provável, não erro: o container
+        // ficou registado e os logs têm a história completa.
+        std::thread::sleep(std::time::Duration::from_millis(400));
+        if let Ok(cur) = find(store, &id) {
+            let dead = match cur.pid {
+                // SAFETY: kill(pid, 0) não envia sinal — só testa a existência.
+                Some(p) => (unsafe { libc::kill(p, 0) } != 0),
+                None => true,
+            };
+            if dead {
+                super::output::warn(&super::po::tf(
+                    "container '{name}' exited immediately — see `delonix container logs {name}`",
+                    &[("name", &cur.name)],
+                ));
+                if runtime::is_rootless() && custom_net.is_none() && ports.is_empty() {
+                    super::output::warn(super::po::t(
+                        "rootless with the default `--net host` cannot bind ports below 1024 — if the image binds one (nginx, httpd, ...), publish it (`-p 8080:80`) or use `--net <network>`",
+                    ));
+                }
+            }
+        }
     }
     Ok(())
 }
