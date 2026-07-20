@@ -147,6 +147,12 @@ Options:
           Nome da bridge (net-mode=bridge) ou rede libvirt (nat)
       --vnc
           VNC graphical console (libvirt backend only — Cloud Hypervisor has no display)
+      --console
+          After starting, attach to the serial console to watch the boot live (Ctrl-] to detach)
+      --wait
+          After starting, wait (with a spinner) until the VM has an IP, up to --boot-timeout
+      --boot-timeout &lt;BOOT_TIMEOUT&gt;
+          Seconds to wait with --wait (default 120) [default: 120]
   -h, --help
           Print help</code></pre></div>
 <h3>Exemplos</h3><div class="ex"><div class="cap">VM a partir da imagem dourada, com chave SSH</div><pre><code>delonix vm create --name node1 --image k8s-golden --cpus 2 --memory 4096 --ssh-key @~/.ssh/id_ed25519.pub</code></pre></div>
