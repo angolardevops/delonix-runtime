@@ -92,6 +92,7 @@ pub(crate) const VM_SPEC_FIELDS: &[&str] = &[
     "net_mode",
     "bridge",
     "volumes",
+    "vnc",
 ];
 
 fn default_vcpus() -> u32 {
