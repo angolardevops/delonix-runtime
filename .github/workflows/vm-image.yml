@@ -59,8 +59,14 @@ jobs:
             --offline
           ./target/release/delonix image --vm ls
       - name: Login no ghcr e push
+        env:
+          # Um PAT com `write:packages` (secret GHCR_TOKEN) tem precedência; sem
+          # ele, o GITHUB_TOKEN — que só publica quando as "Workflow permissions"
+          # do repo estão em "Read and write" (Settings → Actions → General).
+          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
-          echo "${{ github.token }}" | ./target/release/delonix image login ghcr.io \
+          echo "${GHCR_TOKEN:-$GITHUB_TOKEN}" | ./target/release/delonix image login ghcr.io \
             -u "${{ github.actor }}" --password-stdin
           ./target/release/delonix image --vm push \
             "delonix-vm-k8s:${{ inputs.k8s_version }}" \
