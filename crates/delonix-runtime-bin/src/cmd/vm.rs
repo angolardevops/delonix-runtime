@@ -583,7 +583,12 @@ fn resolve_ssh_key(spec: &str) -> Result<String> {
     match spec.strip_prefix('@') {
         Some(path) => std::fs::read_to_string(path)
             .map(|s| s.trim().to_string())
-            .map_err(|e| Error::Invalid(format!("não consegui ler a chave SSH de '{path}': {e}"))),
+            .map_err(|e| {
+                Error::Invalid(format!(
+                    "{} '{path}': {e}",
+                    super::po::t("could not read the SSH key from")
+                ))
+            }),
         None => Ok(spec.trim().to_string()),
     }
 }

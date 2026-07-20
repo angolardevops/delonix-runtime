@@ -184,7 +184,10 @@ fn print_missing_conditions(docs: &[manifest::ManifestDoc]) {
             if !c.ok {
                 if !header {
                     eprintln!();
-                    eprintln!("Conditions (atenção — pré-requisitos em falta):");
+                    eprintln!(
+                        "{}",
+                        super::po::t("Conditions (attention — missing prerequisites):")
+                    );
                     header = true;
                 }
                 eprintln!(

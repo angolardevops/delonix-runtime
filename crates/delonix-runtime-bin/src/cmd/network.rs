@@ -166,7 +166,10 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
         // re-apply contra uma rede já existente também deve ver o aviso.
         manifest::warn_unknown_fields(doc, NETWORK_SPEC_FIELDS);
         if store.get(name).is_ok() {
-            println!("network/{name}: já existe, nada a fazer");
+            println!(
+                "network/{name}: {}",
+                super::po::t("already exists, nothing to do")
+            );
             continue;
         }
         let spec: NetworkSpec = manifest::spec_of(doc)?;
@@ -478,7 +481,10 @@ fn cmd_node(action: NodeCmd) -> Result<()> {
     let key = delonix_net::wg::ensure_node_key()?;
     match action {
         NodeCmd::Init => {
-            println!("nó inicializado — chave pública (distribui aos peers do overlay):");
+            println!(
+                "{}",
+                super::po::t("node initialized — public key (hand it to the overlay peers):")
+            );
             println!("  {}", key.public);
             println!("privada protegida 0600 em <root>/wg/node.key");
         }

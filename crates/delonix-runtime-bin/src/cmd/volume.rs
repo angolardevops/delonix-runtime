@@ -309,7 +309,10 @@ fn cmd_snapshot(store: &VolumeStore, action: SnapshotCmd) -> Result<()> {
             let snap = name.unwrap_or_else(default_snap_name);
             let tarball = store.snapshot_path(&volume, &snap)?;
             if tarball.exists() {
-                return Err(Error::Invalid(format!("o snapshot '{snap}' já existe")));
+                return Err(Error::Invalid(super::po::tf(
+                    "snapshot '{snap}' already exists",
+                    &[("snap", &snap)],
+                )));
             }
             volsnap_run("create", std::path::Path::new(&v.mountpoint), &tarball)?;
             let size = std::fs::metadata(&tarball).map(|m| m.len()).unwrap_or(0);

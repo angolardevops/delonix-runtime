@@ -338,7 +338,10 @@ fn run_vm(action: ImageCmd) -> Result<()> {
             name,
             // Uma imagem VM não tem repo_tags de onde inferir o destino.
             target: target.ok_or_else(|| {
-                Error::Invalid("`image --vm push <nome> <destino>`: o destino é obrigatório".into())
+                Error::Invalid(
+                    super::po::t("`image --vm push <name> <dest>`: the destination is required")
+                        .into(),
+                )
             })?,
         },
         ImageCmd::Build {
@@ -395,7 +398,11 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
                     .file
                     .unwrap_or_else(|| super::build::default_build_file(&b.context));
                 let img = super::build::build_from_spec(&b.context, &file, &b.tag)?;
-                println!("image/{name}: construída ({})", img.short_id());
+                println!(
+                    "image/{name}: {} ({})",
+                    super::po::t("built"),
+                    img.short_id()
+                );
             }
             (Some(_), Some(_)) => {
                 return Err(Error::Invalid(format!(

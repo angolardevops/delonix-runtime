@@ -1178,13 +1178,19 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
                 // facto, depois as saídas possíveis como comandos prontos a
                 // copiar — quem bate neste erro resolve-o sem ir ao --help.
                 let alt = hp.parse::<u32>().map(|n| n + 10000).unwrap_or(18080);
-                return Err(Error::Invalid(format!(
-                    "a porta {hp} já está publicada pelo container '{owner}'\n\
+                return Err(Error::Invalid(super::po::tf(
+                    "port {hp} is already published by container '{owner}'\n\
                      \n\
-                     resolve com UMA destas opções:\n\
-                     \x20 delonix container stop {owner}    # pára quem segura a porta {hp}\n\
-                     \x20 delonix container run -p {alt}:{cp} ...    # ou publica noutra porta\n\
-                     \x20 delonix container update {owner} --publish-rm {hp}    # ou despublica-a a quente"
+                     fix it with ONE of these:\n\
+                     \x20 delonix container stop {owner}    # stops whoever holds port {hp}\n\
+                     \x20 delonix container run -p {alt}:{cp} ...    # or publish on another port\n\
+                     \x20 delonix container update {owner} --publish-rm {hp}    # or hot-unpublish it",
+                    &[
+                        ("hp", hp.as_str()),
+                        ("owner", owner.as_str()),
+                        ("alt", &alt.to_string()),
+                        ("cp", cp.as_str()),
+                    ],
                 )));
             }
         }
@@ -1232,9 +1238,9 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
     // an `rm <name>` only caught that one — the rest were left orphaned and invisible
     // to management by name (seen the hard way: 2x `loja-app` + 2x `loja-db`).
     if let Some(dup) = store.list()?.iter().find(|c| c.name == cname) {
-        return Err(Error::Invalid(format!(
-            "o nome '{cname}' já está em uso pelo container {} — escolhe outro ou remove-o primeiro",
-            dup.short_id()
+        return Err(Error::Invalid(super::po::tf(
+            "the name '{name}' is already in use by container {id} — pick another or remove it first",
+            &[("name", cname.as_str()), ("id", &dup.short_id())],
         )));
     }
     // `max` = no memory cap (cgroup v2); in k8s the pod's cgroup already limits.
@@ -1387,7 +1393,11 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
     // `--expose` precisa de um IP na SDN (rede custom) — o proxy alcança o backend
     // por esse IP. Com `--net host/none` não há IP → avisa em vez de ignorar mudo.
     if expose.is_some() && custom_net.is_none() {
-        eprintln!("aviso: --expose exige `--net <rede>` (o proxy alcança o container pelo IP da SDN) — ignorado");
+        eprintln!(
+            "{} {}",
+            super::po::t("warning:"),
+            super::po::t("--expose requires `--net <network>` (the proxy reaches the container via its SDN IP) — ignored")
+        );
     }
     let mut attached_ip = None;
     if let Some(n) = &custom_net {

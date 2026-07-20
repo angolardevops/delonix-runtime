@@ -239,8 +239,12 @@ fn describe_one(store: &VmImageStore, img: &VmImage) {
 
 fn cmd_push(store: &VmImageStore, name: &str, target: &str) -> Result<()> {
     let img = store.get(name)?;
-    let data = std::fs::read(store.qcow2_path(name))
-        .map_err(|e| Error::Invalid(format!("não consegui ler o qcow2 de '{name}': {e}")))?;
+    let data = std::fs::read(store.qcow2_path(name)).map_err(|e| {
+        Error::Invalid(format!(
+            "{} '{name}': {e}",
+            super::po::t("could not read the qcow2 of")
+        ))
+    })?;
     let digest = delonix_image::registry::push_oci_artifact(
         &state_root(),
         target,
@@ -302,7 +306,10 @@ fn cmd_build(
     std::fs::create_dir_all(&work_dir)?;
     let work_qcow2 = work_dir.join("work.qcow2");
 
-    eprintln!("a preparar imagem de trabalho (achatada, sem backing file)...");
+    eprintln!(
+        "{}",
+        super::po::t("preparing the working image (flattened, no backing file)...")
+    );
     run_tool(
         "qemu-img",
         &[
@@ -365,12 +372,22 @@ fn cmd_build(
     //     VM), logo cada leitura do SO base passa pelo descompressor.
     // Sparsify é best-effort: se falhar, seguimos (só perde-se algum tamanho).
     let final_qcow2 = if compress {
-        eprintln!("a compactar a imagem (sparsify + compressão zstd)...");
+        eprintln!(
+            "{}",
+            super::po::t("compacting the image (sparsify + zstd compression)...")
+        );
         if let Err(e) = run_tool(
             "virt-sparsify",
             &["--in-place", &work_qcow2.to_string_lossy()],
         ) {
-            eprintln!("aviso: virt-sparsify falhou ({e}); a comprimir na mesma");
+            eprintln!(
+                "{} {}",
+                super::po::t("warning:"),
+                super::po::tf(
+                    "virt-sparsify failed ({err}); compressing anyway",
+                    &[("err", &e.to_string())]
+                )
+            );
         }
         let compressed = work_dir.join("final.qcow2");
         run_tool(
@@ -436,7 +453,12 @@ fn download_ubuntu_base(store: &VmImageStore, release: &str) -> Result<PathBuf> 
         .lines()
         .find(|l| l.trim_end().ends_with(&img_name))
         .and_then(|l| l.split_whitespace().next())
-        .ok_or_else(|| Error::Invalid(format!("SHA256SUMS não tem entrada para {img_name}")))?
+        .ok_or_else(|| {
+            Error::Invalid(format!(
+                "{} {img_name}",
+                super::po::t("SHA256SUMS has no entry for")
+            ))
+        })?
         .to_string();
     let got = hex_sha256_file(&tmp)?;
     if got != expected {
@@ -645,7 +667,12 @@ fn verify_inrelease(work: &Path, repo_base: &str) -> Result<String> {
             &key_asc.to_string_lossy(),
         ],
     )
-    .map_err(|e| Error::Invalid(format!("a preparar o keyring do repo k8s: {e}")))?;
+    .map_err(|e| {
+        Error::Invalid(format!(
+            "{}: {e}",
+            super::po::t("preparing the k8s repo keyring")
+        ))
+    })?;
 
     let inrelease = work.join("InRelease");
     stream_download(&format!("{repo_base}/InRelease"), &inrelease)?;
@@ -686,7 +713,10 @@ fn download_k8s_debs(
 
     // `Packages` autenticado pelo SHA256 que consta do InRelease assinado.
     let want_sha = release_sha256_of(&release, "Packages").ok_or_else(|| {
-        Error::Invalid("InRelease do repo k8s não declara o SHA256 de 'Packages'".to_string())
+        Error::Invalid(
+            super::po::t("the k8s repo InRelease does not declare the SHA256 of 'Packages'")
+                .to_string(),
+        )
     })?;
     let packages_path = work.join("Packages");
     stream_download(&format!("{repo_base}/Packages"), &packages_path)?;

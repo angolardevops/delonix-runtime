@@ -642,7 +642,13 @@ fn apply_ssh(name: &str, spec: &ClusterSpec) -> Result<()> {
         .iter()
         .chain(spec.workers.hosts.iter())
         .collect();
-    println!("cluster/{name}: a preparar {} host(s)...", all_hosts.len());
+    println!(
+        "cluster/{name}: {}",
+        super::po::tf(
+            "preparing {n} host(s)...",
+            &[("n", &all_hosts.len().to_string())]
+        )
+    );
     for h in &all_hosts {
         let target = target_for(h, &spec.ssh);
         prepare_host(
@@ -672,7 +678,7 @@ fn apply_ssh(name: &str, spec: &ClusterSpec) -> Result<()> {
     }
 
     fetch_kubeconfig(&cp1_target, name)?;
-    println!("cluster/{name}: pronto");
+    println!("cluster/{name}: {}", super::po::t("ready"));
     Ok(())
 }
 
@@ -887,7 +893,11 @@ fn create_and_wait(
     ssh: &SshSpec,
     timeout: Duration,
 ) -> Result<String> {
-    println!("cluster/{}: a criar VM {vm_name}...", args.name);
+    println!(
+        "cluster/{}: {}",
+        args.name,
+        super::po::tf("creating VM {vm}...", &[("vm", &vm_name)])
+    );
     let seed = vm_cmd::generate_seed_iso(
         vm_name,
         Some(vm_name),
@@ -916,7 +926,11 @@ fn create_and_wait(
         volumes: vec![],
     };
     delonix_vm::create(&state_root(), &cfg)?;
-    println!("cluster/{}: a aguardar SSH em {vm_name}...", args.name);
+    println!(
+        "cluster/{}: {}",
+        args.name,
+        super::po::tf("waiting for SSH on {vm}...", &[("vm", &vm_name)])
+    );
     let ip = wait_for_vm_ssh_ready(vm_name, ssh, timeout)?;
     println!("cluster/{}: {vm_name} pronta (ip={ip})", args.name);
     Ok(ip)
@@ -931,18 +945,25 @@ fn prepare_host(
 ) -> Result<()> {
     for r in k8s_recipes::k8s_host_recipes(k8s_version, &[]) {
         if remote::ssh_check(target, &r.check) {
-            println!("[{label}] {}: já satisfeito (SKIP)", r.name);
+            println!(
+                "[{label}] {}: {}",
+                r.name,
+                super::po::t("already satisfied (SKIP)")
+            );
             continue;
         }
-        println!("[{label}] {}: a aplicar...", r.name);
+        println!("[{label}] {}: {}", r.name, super::po::t("applying..."));
         remote::ssh_run(target, &r.apply)?;
         println!("[{label}] {}: OK", r.name);
     }
 
     if remote::ssh_check(target, "systemctl is-active --quiet delonix-cri") {
-        println!("[{label}] delonix-cri: já satisfeito (SKIP)");
+        println!(
+            "[{label}] delonix-cri: {}",
+            super::po::t("already satisfied (SKIP)")
+        );
     } else {
-        println!("[{label}] delonix-cri: a instalar...");
+        println!("[{label}] delonix-cri: {}", super::po::t("installing..."));
         remote::scp_to(target, cri_bin, "/tmp/delonix-cri")?;
         remote::ssh_run(
             target,
@@ -973,7 +994,8 @@ fn kubeadm_init(
 ) -> Result<JoinInfo> {
     if remote::ssh_check(cp1, "test -f /etc/kubernetes/admin.conf") {
         println!(
-            "[{label}] kubeadm init: já satisfeito (SKIP) — a recuperar credenciais de join..."
+            "[{label}] kubeadm init: {}",
+            super::po::t("already satisfied (SKIP) — recovering join credentials...")
         );
         return recover_join_info(cp1);
     }
@@ -987,7 +1009,10 @@ fn kubeadm_init(
          --pod-network-cidr={} --service-cidr={}{k8s_ver_flag}",
         spec.pod_subnet, spec.service_subnet
     );
-    println!("[{label}] kubeadm init: a correr (pode demorar alguns minutos)...");
+    println!(
+        "[{label}] kubeadm init: {}",
+        super::po::t("running (this can take a few minutes)...")
+    );
     let out = remote::ssh_run(cp1, &cmd)?;
     println!("[{label}] kubeadm init: OK");
     parse_join_info(&out)
@@ -1018,7 +1043,9 @@ fn recover_join_info(cp1: &SshTarget) -> Result<JoinInfo> {
 /// uma amostra real de output.
 fn parse_join_info(output: &str) -> Result<JoinInfo> {
     let token = extract_after(output, "--token ").ok_or_else(|| {
-        Error::Invalid("não consegui extrair --token do output do kubeadm init".into())
+        Error::Invalid(
+            super::po::t("could not extract --token from the kubeadm init output").into(),
+        )
     })?;
     let ca_cert_hash =
         extract_after(output, "--discovery-token-ca-cert-hash ").ok_or_else(|| {
@@ -1050,7 +1077,10 @@ fn kubeadm_join(
     as_control_plane: bool,
 ) -> Result<()> {
     if remote::ssh_check(target, "test -f /etc/kubernetes/kubelet.conf") {
-        println!("[{label}] kubeadm join: já satisfeito (SKIP)");
+        println!(
+            "[{label}] kubeadm join: {}",
+            super::po::t("already satisfied (SKIP)")
+        );
         return Ok(());
     }
     let mut cmd = format!(
@@ -1060,12 +1090,13 @@ fn kubeadm_join(
     if as_control_plane {
         let key = info.certificate_key.as_ref().ok_or_else(|| {
             Error::Invalid(format!(
-                "[{label}] sem certificate-key disponível para join de control-plane"
+                "[{label}] {}",
+                super::po::t("no certificate-key available for a control-plane join")
             ))
         })?;
         cmd.push_str(&format!(" --control-plane --certificate-key {key}"));
     }
-    println!("[{label}] kubeadm join: a correr...");
+    println!("[{label}] kubeadm join: {}", super::po::t("running..."));
     remote::ssh_run(target, &cmd)?;
     println!("[{label}] kubeadm join: OK");
     Ok(())
@@ -1092,8 +1123,11 @@ fn fetch_kubeconfig(cp1: &SshTarget, cluster_name: &str) -> Result<()> {
             std::fs::create_dir_all(&kube_dir)?;
             std::fs::copy(&dest, &kube_config)?;
             println!(
-                "também copiado para {} (não existia ainda)",
-                kube_config.display()
+                "{}",
+                super::po::tf(
+                    "also copied to {path} (it did not exist yet)",
+                    &[("path", &kube_config.display().to_string())]
+                )
             );
         }
     }

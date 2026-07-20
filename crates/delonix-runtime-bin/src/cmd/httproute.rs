@@ -68,7 +68,10 @@ pub fn run(action: HttpRouteCmd) -> Result<()> {
                         );
                     }
                 }
-                None => println!("httproute: proxy a correr mas a config não leu"),
+                None => println!(
+                    "httproute: {}",
+                    super::po::t("proxy running but its config would not parse")
+                ),
             }
             Ok(())
         }
