@@ -30,12 +30,12 @@ fn extract_layer(data: &[u8], dest: &Path) -> Result<()> {
         tar::Archive::new(gz).unpack(dest)
     } else if is_zstd {
         let zd = zstd::stream::read::Decoder::new(data)
-            .map_err(|e| Error::Invalid(format!("falha a abrir zstd: {e}")))?;
+            .map_err(|e| Error::Invalid(format!("failed to open zstd: {e}")))?;
         tar::Archive::new(zd).unpack(dest)
     } else {
         tar::Archive::new(data).unpack(dest)
     };
-    result.map_err(|e| Error::Invalid(format!("falha a extrair layer: {e}")))
+    result.map_err(|e| Error::Invalid(format!("failed to extract layer: {e}")))
 }
 
 /// Aplica um *layer* a um destino FLAT (não overlay), tratando os *whiteouts*
@@ -205,7 +205,7 @@ impl ImageStore {
     pub fn mount_rootfs(&self, image: &Image, container_id: &str) -> Result<PathBuf> {
         let lowers = self.ensure_layers(image)?;
         if lowers.is_empty() {
-            return Err(Error::Invalid("imagem sem layers".into()));
+            return Err(Error::Invalid("image has no layers".into()));
         }
         let base = self.container_dir(container_id);
         let upper = base.join("upper");

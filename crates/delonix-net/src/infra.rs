@@ -133,8 +133,8 @@ pub fn ingress_table_ruleset() -> String {
     let policy = if std::env::var("DELONIX_FORWARD_POLICY").ok().as_deref() == Some("accept") {
         // NET-03: o opt-out reverte o default-deny — não deixar isto silencioso.
         tracing::warn!(
-            "AVISO DE SEGURANÇA — DELONIX_FORWARD_POLICY=accept: o forward do netns de ingress \
-             volta a default-ALLOW (sem `policy drop`). Só para depuração — NÃO usar em produção."
+            "SECURITY WARNING — DELONIX_FORWARD_POLICY=accept: the ingress netns forward \
+             reverts to default-ALLOW (no `policy drop`). For debugging only — do NOT use in production."
         );
         ""
     } else {
@@ -442,7 +442,7 @@ fn start_holder() -> Result<i32> {
             teardown();
             return Err(Error::Runtime {
                 context: "ingress holder",
-                message: "o holder do netns morreu ao arrancar".into(),
+                message: "the netns holder died during startup".into(),
             });
         }
         match std::fs::read_to_string(status_path()) {
@@ -460,7 +460,7 @@ fn start_holder() -> Result<i32> {
     teardown();
     Err(Error::Runtime {
         context: "ingress holder",
-        message: "timeout à espera do holder do netns".into(),
+        message: "timeout waiting for the netns holder".into(),
     })
 }
 
@@ -506,7 +506,7 @@ fn start_slirp(holder_pid: i32) -> Result<()> {
             // sinaliza em ms); ao fim disso seguimos e o erro aparece a jusante,
             // com mensagem, em vez de um processo pendurado para sempre.
             if !wait_readable(rd, 10_000) {
-                tracing::warn!("slirp4netns não sinalizou pronto em 10s; a rede do container pode não estar operacional");
+                tracing::warn!("slirp4netns did not signal ready within 10s; the container network may not be operational");
             }
             let mut b = [0u8; 1];
             // SAFETY: lê 1 byte do read-end (já legível, ou desistimos acima).
@@ -694,9 +694,7 @@ fn handle_control(line: &str) -> String {
         // Uplink VXLAN de uma rede overlay (o L2 partilhado entre nós). `dsts` = os
         // destinos do FDB (`wg_ip` se cifrado, senão `node_ip`; `-` = sem pares).
         ["vxlan", dev, vni, bridge, gateway, dsts] => do_vxlan(dev, vni, bridge, gateway, dsts),
-        _ => Err(Error::Invalid(format!(
-            "comando de controlo inválido: {line:?}"
-        ))),
+        _ => Err(Error::Invalid(format!("invalid control command: {line:?}"))),
     };
     match res {
         Ok(()) => "ok\n".to_string(),
@@ -992,7 +990,7 @@ fn prefix_of(ip: &str) -> String {
 /// IP (CIDR) atribuído pelo IPAM do CNI. `hex` = a conflist JSON em hex.
 fn do_cni_add(netns: &str, id: &str, ifname: &str, hex: &str) -> Result<String> {
     let netns = sanitize(netns);
-    let bytes = hex_decode(hex).ok_or_else(|| Error::Invalid("conflist hex inválida".into()))?;
+    let bytes = hex_decode(hex).ok_or_else(|| Error::Invalid("invalid conflist hex".into()))?;
     let conf = crate::cni::parse_config(&String::from_utf8_lossy(&bytes))?;
     // netns vazia (o plugin move o veth para lá); limpa restos de tentativas.
     run_ok("ip", &["netns", "del", &netns]);
@@ -1344,7 +1342,7 @@ fn do_vxlan(dev: &str, vni: &str, bridge: &str, gateway: &str, dsts_csv: &str) -
     let bridge = sanitize(bridge);
     let vni: u32 = vni
         .parse()
-        .map_err(|_| Error::Invalid(format!("vni inválido: {vni}")))?;
+        .map_err(|_| Error::Invalid(format!("invalid vni: {vni}")))?;
     // A bridge da overlay é uma bridge de rede normal do holder — mesma função que
     // o `attach`/`vmtap` usam, para containers e VXLAN partilharem o mesmo L2.
     ensure_net_bridge(&bridge, gateway)?;
@@ -1404,7 +1402,7 @@ fn do_netdel(bridge: &str) -> Result<()> {
     let bridge = sanitize(bridge);
     if bridge == INFRA_BRIDGE {
         return Err(Error::Invalid(
-            "a bridge default do ingress não se remove".into(),
+            "the default ingress bridge cannot be removed".into(),
         ));
     }
     run_ok("ip", &["link", "del", &bridge]);
@@ -1455,9 +1453,7 @@ fn do_publish_allow(
         .filter(|c| !c.is_empty() && delonix_runtime_core::fw_src_ok(c))
         .collect();
     if cidrs.is_empty() {
-        return Err(Error::Invalid(
-            "allowlist vazia ou sem CIDRs válidos".into(),
-        ));
+        return Err(Error::Invalid("empty allowlist or no valid CIDRs".into()));
     }
     // drop no topo da `pre`: tráfego para esta host_port cujo saddr NÃO está na
     // allowlist é descartado antes de chegar à regra de DNAT (que vem depois).
@@ -1489,7 +1485,7 @@ fn do_publish_allow(
 /// Remove o DNAT de uma `host_port` (por handle) da chain `pre`. Best-effort.
 fn do_unpublish(host_port: &str) -> Result<()> {
     if !is_port(host_port) {
-        return Err(Error::Invalid(format!("porta inválida: {host_port}")));
+        return Err(Error::Invalid(format!("invalid port: {host_port}")));
     }
     // lista a chain com handles e apaga a(s) regra(s) que casam a dport.
     let listed = crate::capture("nft", &["-a", "list", "chain", "ip", INGRESS_TABLE, "pre"])
@@ -1568,9 +1564,7 @@ fn do_egress(policy: &str) -> Result<()> {
             ],
         ),
         "allow" => Ok(()),
-        _ => Err(Error::Invalid(format!(
-            "política de egress inválida: {policy}"
-        ))),
+        _ => Err(Error::Invalid(format!("invalid egress policy: {policy}"))),
     }
 }
 
@@ -1579,9 +1573,7 @@ fn do_egress(policy: &str) -> Result<()> {
 /// Suporta `deny`/`allow`/`allowlist:<cidrs>` (NET-A).
 fn do_egress_net(bridge: &str, policy: &str) -> Result<()> {
     if !(policy == "allow" || policy == "deny" || policy.starts_with("allowlist:")) {
-        return Err(Error::Invalid(format!(
-            "política de egress inválida: {policy}"
-        )));
+        return Err(Error::Invalid(format!("invalid egress policy: {policy}")));
     }
     let norm = (policy != "allow").then(|| policy.to_string());
     let bridge = sanitize(bridge);
@@ -1630,7 +1622,7 @@ fn do_egress_host(bridge: &str, suffix: &str) -> Result<()> {
             .bytes()
             .all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'-')
     {
-        return Err(Error::Invalid(format!("hostname inválido: {suffix:?}")));
+        return Err(Error::Invalid(format!("invalid hostname: {suffix:?}")));
     }
     // Persiste o hostname e re-aplica a chain COMPLETA (compõe com a política CIDR
     // se houver). `apply_egress_from_state` cria o set e regista no FQDN_ALLOW.
@@ -1814,14 +1806,14 @@ fn clear_l4guard() {
 /// contra injeção): protocolo `tcp`/`udp`, portas numéricas, IP na subnet de infra.
 fn validate_publish(proto: &str, host_port: &str, cip: &str, cport: &str) -> Result<()> {
     if proto != "tcp" && proto != "udp" {
-        return Err(Error::Invalid(format!("protocolo inválido: {proto}")));
+        return Err(Error::Invalid(format!("invalid protocol: {proto}")));
     }
     if !is_port(host_port) || !is_port(cport) {
-        return Err(Error::Invalid("porta inválida (1..65535)".into()));
+        return Err(Error::Invalid("invalid port (1..65535)".into()));
     }
     if !is_ingress_ip(cip) {
         return Err(Error::Invalid(format!(
-            "IP {cip} fora do espaço de ingress (10.200-254.x)"
+            "IP {cip} outside the ingress space (10.200-254.x)"
         )));
     }
     Ok(())
@@ -1951,10 +1943,10 @@ pub fn dlxns_set(ns: &str) -> String {
 fn do_firewall(ip: &str, hex: &str) -> Result<()> {
     if !is_ingress_ip(ip) {
         return Err(Error::Invalid(format!(
-            "IP {ip} fora do espaço de ingress (10.200-254.x)"
+            "IP {ip} outside the ingress space (10.200-254.x)"
         )));
     }
-    let bytes = hex_decode(hex).ok_or_else(|| Error::Invalid("hex inválido".into()))?;
+    let bytes = hex_decode(hex).ok_or_else(|| Error::Invalid("invalid hex".into()))?;
     let fw: delonix_runtime_core::ContainerFw = serde_json::from_slice(&bytes)
         .map_err(|e| Error::Invalid(format!("firewall JSON: {e}")))?;
     let chain = fw_chain_name(ip);
@@ -2196,7 +2188,7 @@ fn egress_specs(bridge: &str, state: &EgressState) -> Vec<Vec<String>> {
             if delonix_runtime_core::fw_src_ok(cidr) {
                 specs.push(base(&["ip", "daddr", cidr, "accept"]));
             } else {
-                tracing::warn!(cidr = ?cidr, "egress allowlist — CIDR inválido saltado");
+                tracing::warn!(cidr = ?cidr, "egress allowlist — invalid CIDR skipped");
             }
         }
     }
@@ -2281,7 +2273,7 @@ pub fn resolve_net(name: &str) -> Result<(String, String, String)> {
         ));
     }
     let def =
-        network_get(name).ok_or_else(|| Error::NotFound(format!("rede de ingress '{name}'")))?;
+        network_get(name).ok_or_else(|| Error::NotFound(format!("ingress network '{name}'")))?;
     let gw = gateway_of(&def.prefix);
     Ok((def.bridge, def.prefix, gw))
 }
@@ -2318,7 +2310,7 @@ pub fn network_create(name: &str) -> Result<NetDef> {
     let prefix = (201..=254)
         .map(|o| format!("10.{o}"))
         .find(|p| !used.contains(p))
-        .ok_or_else(|| Error::Invalid("sem prefixos /16 livres para redes de ingress".into()))?;
+        .ok_or_else(|| Error::Invalid("no free /16 prefixes for ingress networks".into()))?;
     let def = NetDef {
         name: name.to_string(),
         bridge: format!("dlxn{:08x}", crate::fnv32(name)),
@@ -2599,7 +2591,7 @@ pub fn set_vxlan(dev: &str, vni: u32, bridge: &str, gateway: &str, dsts: &[Strin
     // smuggling de um 2.º comando. `do_vxlan` revalida, mas a fronteira é esta.
     if let Some(bad) = dsts.iter().find(|d| !valid_fdb_dst(d)) {
         return Err(Error::Invalid(format!(
-            "destino de par overlay inválido: {bad:?} (só IPs)"
+            "invalid overlay peer destination: {bad:?} (IPs only)"
         )));
     }
     // CSV num único token (o control-loop faz `split_whitespace`); `-` = sem pares.
@@ -2896,7 +2888,7 @@ pub fn slirp_remove_hostfwd(sock: &Path, host_port: &str) -> Result<()> {
     trace_unpublish("slirp_remove_hostfwd", host_port);
     let hp: u32 = host_port
         .parse()
-        .map_err(|_| Error::Invalid("porta inválida".into()))?;
+        .map_err(|_| Error::Invalid("invalid port".into()))?;
     let listed = slirp_api(sock, r#"{"execute":"list_hostfwd"}"#)?;
     let v: serde_json::Value = serde_json::from_str(&listed).unwrap_or(serde_json::Value::Null);
     if let Some(entries) = hostfwd_entries(&v) {
@@ -2979,11 +2971,11 @@ fn control_query(cmd: &str) -> Result<String> {
     if status().holder_pid.is_none() {
         return Err(Error::Runtime {
             context: "control socket",
-            message: "ingress holder em baixo".into(),
+            message: "ingress holder is down".into(),
         });
     }
     let sock = control_sock_path();
-    let mut last = String::from("socket de controlo indisponível");
+    let mut last = String::from("control socket unavailable");
     for _ in 0..50 {
         match UnixStream::connect(&sock) {
             Ok(mut s) => {

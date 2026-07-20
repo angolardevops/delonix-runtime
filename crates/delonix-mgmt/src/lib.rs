@@ -62,7 +62,7 @@ pub fn serve_blocking_with(base: PathBuf, bin: PathBuf, addr: &str) -> Result<()
             context: "bind",
             message: e.to_string(),
         })?;
-        eprintln!("delonix-mgmt (API de gestão) a escutar em unix://{path}");
+        eprintln!("delonix-mgmt (management API) listening on unix://{path}");
         serve_over_uds(uds, router(AppState { base, bin })).await
     })
 }
@@ -181,7 +181,7 @@ fn valid_name(name: &str) -> bool {
 
 /// Erro 400 padrão para um nome de volume inválido.
 fn invalid_name() -> Response {
-    err_response(Error::Invalid("nome de volume inválido".to_string()))
+    err_response(Error::Invalid("invalid volume name".to_string()))
 }
 
 /// Mapeia um `Error` do motor para (código HTTP, corpo JSON) — o cliente
@@ -300,7 +300,7 @@ async fn get_container(State(s): State<AppState>, Path(id): Path<String>) -> Res
     // Mesma defesa de fronteira dos volumes: o `Store::load` faz `root.join(id)`
     // antes de cair no varrimento por nome/prefixo — um `..` no path escaparia.
     if !valid_name(&id) {
-        return err_response(Error::Invalid("id de container inválido".to_string()));
+        return err_response(Error::Invalid("invalid container id".to_string()));
     }
     match with_container_store(s.base, move |store| store.load(&id)).await {
         Ok(c) => Json(c).into_response(),
@@ -352,7 +352,7 @@ async fn delete_container(
     Query(q): Query<ForceQuery>,
 ) -> Response {
     if !valid_arg(&id) {
-        return err_response(Error::Invalid("id de container inválido".to_string()));
+        return err_response(Error::Invalid("invalid container id".to_string()));
     }
     let mut args = vec!["container".to_string(), "rm".to_string()];
     if q.force {
@@ -377,7 +377,7 @@ async fn container_action_ep(
     Json(b): Json<ActionBody>,
 ) -> Response {
     if !valid_arg(&id) {
-        return err_response(Error::Invalid("id de container inválido".to_string()));
+        return err_response(Error::Invalid("invalid container id".to_string()));
     }
     // Só acções conhecidas (allowlist) chegam à CLI. `remove` = `rm -f`.
     let sub = match b.action.as_str() {
@@ -401,7 +401,7 @@ async fn container_action_ep(
                 Err(e) => return err_response(e),
             }
         }
-        other => return err_response(Error::Invalid(format!("acção desconhecida: {other}"))),
+        other => return err_response(Error::Invalid(format!("unknown action: {other}"))),
     };
     match run_cli(s.bin, s.base, vec!["container".to_string(), sub, id]).await {
         Ok((ok, out)) => Json(serde_json::json!({ "ok": ok, "output": out })).into_response(),
@@ -411,7 +411,7 @@ async fn container_action_ep(
 
 async fn container_logs_ep(State(s): State<AppState>, Path(id): Path<String>) -> Response {
     if !valid_arg(&id) {
-        return err_response(Error::Invalid("id de container inválido".to_string()));
+        return err_response(Error::Invalid("invalid container id".to_string()));
     }
     // `logs` request/response (não streaming); a saída vem tal e qual, mesmo se o
     // container não existir (o cliente ignora o `ok`, como o InProcessRuntime).
@@ -439,7 +439,7 @@ async fn container_exec_ep(
     Json(b): Json<ExecBody>,
 ) -> Response {
     if !valid_arg(&id) {
-        return err_response(Error::Invalid("id de container inválido".to_string()));
+        return err_response(Error::Invalid("invalid container id".to_string()));
     }
     // `exec <id> sh -c <cmd>`: o `cmd` é passado como UM argumento a `sh -c` DENTRO
     // do container — corre no container, nunca no shell do host (é `Command::args`,
@@ -547,10 +547,10 @@ async fn run_container(State(s): State<AppState>, Json(spec): Json<RunSpecBody>)
     // `name` (valor de `--name`). Os restantes campos ou têm charset próprio
     // (ports) ou são valores de opção sem ambiguidade posicional.
     if spec.image.is_empty() || spec.image.starts_with('-') {
-        return err_response(Error::Invalid("imagem inválida".to_string()));
+        return err_response(Error::Invalid("invalid image".to_string()));
     }
     if spec.name.starts_with('-') {
-        return err_response(Error::Invalid("nome inválido".to_string()));
+        return err_response(Error::Invalid("invalid name".to_string()));
     }
     match run_cli(s.bin, s.base, build_run_args(spec)).await {
         Ok((ok, out)) => Json(serde_json::json!({ "ok": ok, "output": out })).into_response(),
@@ -594,7 +594,7 @@ struct RefQuery {
 
 async fn delete_image(State(s): State<AppState>, Query(q): Query<RefQuery>) -> Response {
     if q.reference.is_empty() {
-        return err_response(Error::Invalid("referência de imagem vazia".to_string()));
+        return err_response(Error::Invalid("empty image reference".to_string()));
     }
     match with_image_store(s.base, move |store| store.remove(&q.reference)).await {
         // `remove` devolve "untagged: …" ou "deleted: …" — devolve-o tal e qual.
@@ -618,7 +618,7 @@ async fn pull_image(State(s): State<AppState>, Json(b): Json<PullBody>) -> Respo
     // lido como flag. Recusa no limite. (Refs válidas têm `/`/`:`, nunca `-` no
     // início.)
     if b.reference.is_empty() || b.reference.starts_with('-') {
-        return err_response(Error::Invalid("referência de imagem inválida".to_string()));
+        return err_response(Error::Invalid("invalid image reference".to_string()));
     }
     let (ok, mut out) = match run_cli(
         s.bin.clone(),
@@ -661,10 +661,10 @@ static BUILD_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::n
 async fn build_image(State(s): State<AppState>, Json(b): Json<BuildBody>) -> Response {
     // `-t <tag>`: um valor começado por `-` seria lido como flag. Recusa no limite.
     if b.tag.is_empty() || b.tag.starts_with('-') {
-        return err_response(Error::Invalid("tag inválida".to_string()));
+        return err_response(Error::Invalid("invalid tag".to_string()));
     }
     if b.delonixfile.trim().is_empty() {
-        return err_response(Error::Invalid("Delonixfile vazio".to_string()));
+        return err_response(Error::Invalid("empty Delonixfile".to_string()));
     }
     // Work dir ÚNICO por-build (contexto onde o `COPY` resolve): `pid-seq` isola
     // builds concorrentes — sem isto, dois builds em paralelo partilhariam o
@@ -718,7 +718,7 @@ async fn build_image(State(s): State<AppState>, Json(b): Json<BuildBody>) -> Res
 async fn scan_image(State(s): State<AppState>, Query(q): Query<RefQuery>) -> Response {
     // `image scan <ref>` (texto). A ref é posicional — `-` inicial viraria flag.
     if q.reference.is_empty() || q.reference.starts_with('-') {
-        return err_response(Error::Invalid("referência de imagem inválida".to_string()));
+        return err_response(Error::Invalid("invalid image reference".to_string()));
     }
     match run_cli(
         s.bin,
@@ -734,7 +734,7 @@ async fn scan_image(State(s): State<AppState>, Query(q): Query<RefQuery>) -> Res
 
 async fn sbom_image(State(s): State<AppState>, Query(q): Query<RefQuery>) -> Response {
     if q.reference.is_empty() {
-        return err_response(Error::Invalid("referência de imagem vazia".to_string()));
+        return err_response(Error::Invalid("empty image reference".to_string()));
     }
     // SBOM é uma chamada de BIBLIOTECA (lê os layers do CAS, não corre nada) — como
     // as leituras de volume/container. 404 se a imagem não existir localmente.
@@ -759,7 +759,7 @@ struct NetworkBody {
 
 async fn create_network(State(s): State<AppState>, Json(b): Json<NetworkBody>) -> Response {
     if !valid_arg(&b.name) {
-        return err_response(Error::Invalid("nome de rede inválido".to_string()));
+        return err_response(Error::Invalid("invalid network name".to_string()));
     }
     match run_cli(
         s.bin,
@@ -775,7 +775,7 @@ async fn create_network(State(s): State<AppState>, Json(b): Json<NetworkBody>) -
 
 async fn delete_network(State(s): State<AppState>, Path(name): Path<String>) -> Response {
     if !valid_arg(&name) {
-        return err_response(Error::Invalid("nome de rede inválido".to_string()));
+        return err_response(Error::Invalid("invalid network name".to_string()));
     }
     match run_cli(s.bin, s.base, vec!["network".into(), "rm".into(), name]).await {
         Ok((ok, out)) => Json(serde_json::json!({ "ok": ok, "output": out })).into_response(),
@@ -799,7 +799,7 @@ async fn reconfig_container(
     Json(b): Json<ReconfigBody>,
 ) -> Response {
     if !valid_arg(&id) {
-        return err_response(Error::Invalid("id de container inválido".to_string()));
+        return err_response(Error::Invalid("invalid container id".to_string()));
     }
     let mut args = vec!["container".to_string(), "update".to_string(), id];
     // As portas têm charset próprio (dígitos/`:`/`/`) — não podem virar flag.
@@ -838,16 +838,12 @@ async fn vm_action_ep(
     Json(b): Json<VmActionBody>,
 ) -> Response {
     if !valid_arg(&name) {
-        return err_response(Error::Invalid("nome de VM inválido".to_string()));
+        return err_response(Error::Invalid("invalid VM name".to_string()));
     }
     let sub = match b.action.as_str() {
         "stop" => "stop",
         "rm" | "remove" => "rm",
-        other => {
-            return err_response(Error::Invalid(format!(
-                "acção de VM não suportada: {other}"
-            )))
-        }
+        other => return err_response(Error::Invalid(format!("unsupported VM action: {other}"))),
     };
     match run_cli(s.bin, s.base, vec!["vm".into(), sub.into(), name]).await {
         Ok((ok, out)) => Json(serde_json::json!({ "ok": ok, "output": out })).into_response(),

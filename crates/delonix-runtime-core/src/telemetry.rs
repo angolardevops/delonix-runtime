@@ -130,7 +130,7 @@ where
             tracing::warn!(
                 error = %e,
                 endpoint = %endpoint,
-                "OTLP: exportador não construiu — a seguir só com logs (fmt)"
+                "OTLP: exporter failed to build — continuing with logs only (fmt)"
             );
             return None;
         }

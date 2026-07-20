@@ -186,7 +186,7 @@ async fn portforward_upgrade(
     let Some(pid) = pod_sandbox_pid(&st.base, &p.pod_sandbox_id) else {
         return (
             axum::http::StatusCode::CONFLICT,
-            "pod sandbox sem netns vivo",
+            "pod sandbox has no live netns",
         )
             .into_response();
     };
@@ -330,7 +330,7 @@ async fn exec_tty(
         Some(p) => p,
         None => {
             let _ = socket
-                .send(err_frame("delonix-cri: falha a alocar pty"))
+                .send(err_frame("delonix-cri: failed to allocate pty"))
                 .await;
             return;
         }
@@ -374,7 +374,7 @@ async fn exec_tty(
         Err(e) => {
             unsafe { libc::close(master) };
             let _ = socket
-                .send(err_frame(&format!("delonix-cri: exec falhou: {e}")))
+                .send(err_frame(&format!("delonix-cri: exec failed: {e}")))
                 .await;
             return;
         }
@@ -477,7 +477,7 @@ async fn exec_pipes(
         Ok(c) => c,
         Err(e) => {
             let _ = socket
-                .send(err_frame(&format!("delonix-cri: exec falhou: {e}")))
+                .send(err_frame(&format!("delonix-cri: exec failed: {e}")))
                 .await;
             return;
         }

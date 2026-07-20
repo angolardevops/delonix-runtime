@@ -139,10 +139,10 @@ pub fn list_conf_files(dir: &Path) -> Vec<PathBuf> {
 /// `*.conf` de plugin único (normalizado para uma lista de um só plugin).
 pub fn parse_config(text: &str) -> Result<NetConfList> {
     let v: Value = serde_json::from_str(text)
-        .map_err(|e| Error::Invalid(format!("config CNI inválida: {e}")))?;
+        .map_err(|e| Error::Invalid(format!("invalid CNI config: {e}")))?;
     if v.get("plugins").is_some() {
         return serde_json::from_value(v)
-            .map_err(|e| Error::Invalid(format!("conflist CNI inválida: {e}")));
+            .map_err(|e| Error::Invalid(format!("invalid CNI conflist: {e}")));
     }
     // `*.conf` de plugin único: o próprio objeto é o plugin.
     let cni_version = v
@@ -168,7 +168,7 @@ pub fn load_default(conf_dir: &Path) -> Result<Option<NetConfList>> {
         return Ok(None);
     };
     let text = std::fs::read_to_string(&first)
-        .map_err(|e| Error::Invalid(format!("ler {}: {e}", first.display())))?;
+        .map_err(|e| Error::Invalid(format!("read {}: {e}", first.display())))?;
     Ok(Some(parse_config(&text)?))
 }
 
@@ -208,7 +208,7 @@ fn plugin_input(
     let mut obj = plugin.clone();
     let map = obj
         .as_object_mut()
-        .ok_or_else(|| Error::Invalid("plugin CNI não é um objeto JSON".into()))?;
+        .ok_or_else(|| Error::Invalid("CNI plugin is not a JSON object".into()))?;
     map.insert("cniVersion".into(), json!(cni_version));
     map.insert("name".into(), json!(name));
     if let Some(p) = prev {
@@ -217,7 +217,7 @@ fn plugin_input(
             serde_json::to_value(p).unwrap_or(Value::Null),
         );
     }
-    serde_json::to_string(&obj).map_err(|e| Error::Invalid(format!("serializar config CNI: {e}")))
+    serde_json::to_string(&obj).map_err(|e| Error::Invalid(format!("serialize CNI config: {e}")))
 }
 
 /// Parseia o resultado (stdout) de um plugin bem-sucedido.
@@ -225,7 +225,7 @@ fn parse_result(stdout: &str) -> Result<CniResult> {
     if stdout.trim().is_empty() {
         return Ok(CniResult::default());
     }
-    serde_json::from_str(stdout).map_err(|e| Error::Invalid(format!("resultado CNI inválido: {e}")))
+    serde_json::from_str(stdout).map_err(|e| Error::Invalid(format!("invalid CNI result: {e}")))
 }
 
 /// Tenta extrair o erro estruturado que um plugin escreve no stdout ao falhar.
@@ -260,7 +260,7 @@ fn invoke(
         .take()
         .ok_or_else(|| Error::Runtime {
             context: "cni-stdin",
-            message: "sem stdin".into(),
+            message: "no stdin".into(),
         })?
         .write_all(stdin_json.as_bytes())
         .map_err(|e| Error::Runtime {
@@ -290,9 +290,9 @@ fn run_one(
     let typ = plugin
         .get("type")
         .and_then(|t| t.as_str())
-        .ok_or_else(|| Error::Invalid("plugin CNI sem campo `type`".into()))?;
+        .ok_or_else(|| Error::Invalid("CNI plugin without a `type` field".into()))?;
     let bin = resolve_plugin(cni_path, typ)
-        .ok_or_else(|| Error::Invalid(format!("plugin CNI `{typ}` não encontrado no CNI_PATH")))?;
+        .ok_or_else(|| Error::Invalid(format!("CNI plugin `{typ}` not found in CNI_PATH")))?;
     let envs = build_env(cmd, target, cni_path);
     let stdin_json = plugin_input(plugin, &net.name, &net.cni_version, prev)?;
     let (ok, stdout, stderr) = invoke(&bin, &envs, &stdin_json)?;
@@ -327,7 +327,7 @@ pub fn add(
         let r = run_one(Command_::Add, plugin, net, cni_path, target, prev.as_ref())?;
         prev = Some(r);
     }
-    prev.ok_or_else(|| Error::Invalid("conflist CNI sem plugins".into()))
+    prev.ok_or_else(|| Error::Invalid("CNI conflist has no plugins".into()))
 }
 
 /// `DEL`: corre a cadeia por **ordem inversa** (spec CNI). Best-effort: continua

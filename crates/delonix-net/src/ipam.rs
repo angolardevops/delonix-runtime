@@ -136,7 +136,7 @@ pub fn allocate(prefix: &str, id: &str) -> Result<String> {
     } else {
         probe_free(prefix, &preferred, &used).ok_or_else(|| Error::Runtime {
             context: "ipam",
-            message: format!("sem IP livre no /16 de {prefix} (registo cheio)"),
+            message: format!("no free IP in the {prefix} /16 (registry full)"),
         })?
     };
     map.insert(id.to_string(), ip.clone());
@@ -191,7 +191,7 @@ pub fn reserve(prefix: &str, id: &str, ip: &str) {
             ip = %ip,
             container_id = %id,
             held_by = %other.0,
-            "IP fixado {ip} já está em lease para '{}'; '{id}' vai colidir na rede",
+            "pinned IP {ip} is already leased to '{}'; '{id}' will collide on the network",
             other.0
         );
     }

@@ -205,13 +205,13 @@ pub fn scan_module_dir(dir: &Path) -> Result<ModuleReport> {
     let module = dir
         .file_name()
         .and_then(|f| f.to_str())
-        .unwrap_or("modulo")
+        .unwrap_or("module")
         .to_string();
     let manifest_text = std::fs::read_to_string(dir.join("__manifest__.py"))
         .or_else(|_| std::fs::read_to_string(dir.join("__openerp__.py")))
         .map_err(|_| {
             Error::Invalid(format!(
-                "'{module}' não é um módulo Odoo (sem __manifest__.py)"
+                "'{module}' is not an Odoo module (no __manifest__.py)"
             ))
         })?;
     let manifest = parse_odoo_manifest(&manifest_text);
@@ -243,7 +243,7 @@ pub fn scan_modules_root(dir: &Path) -> Result<Vec<ModuleReport>> {
     let mut out = Vec::new();
     for e in std::fs::read_dir(dir)
         .map_err(|e| Error::Runtime {
-            context: "scan módulos",
+            context: "module scan",
             message: e.to_string(),
         })?
         .flatten()
@@ -255,7 +255,7 @@ pub fn scan_modules_root(dir: &Path) -> Result<Vec<ModuleReport>> {
     }
     if out.is_empty() {
         return Err(Error::Invalid(
-            "nenhum módulo Odoo encontrado (diretórios com __manifest__.py)".into(),
+            "no Odoo module found (directories with __manifest__.py)".into(),
         ));
     }
     out.sort_by(|a, b| a.module.cmp(&b.module));
@@ -267,7 +267,7 @@ pub fn scan_modules_root(dir: &Path) -> Result<Vec<ModuleReport>> {
 fn walk_py(root: &Path, dir: &Path, f: &mut impl FnMut(&str, &str)) -> Result<()> {
     for e in std::fs::read_dir(dir)
         .map_err(|e| Error::Runtime {
-            context: "scan módulos",
+            context: "module scan",
             message: e.to_string(),
         })?
         .flatten()
