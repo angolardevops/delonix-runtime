@@ -209,6 +209,15 @@ pub enum VmCmd {
         /// VNC graphical console (libvirt backend only — Cloud Hypervisor has no display).
         #[arg(long)]
         vnc: bool,
+        /// After starting, attach to the serial console to watch the boot live (Ctrl-] to detach).
+        #[arg(long)]
+        console: bool,
+        /// After starting, wait (with a spinner) until the VM has an IP, up to --boot-timeout.
+        #[arg(long)]
+        wait: bool,
+        /// Seconds to wait with --wait (default 120).
+        #[arg(long = "boot-timeout", default_value_t = 120)]
+        boot_timeout: u64,
     },
     /// Pull a golden VM image from an OCI registry — with no argument, the
     /// OFFICIAL Delonix image (ready for `vm create`/`cluster kubeadm`).
@@ -451,6 +460,9 @@ pub fn run(action: VmCmd) -> Result<()> {
             net_mode,
             bridge,
             vnc,
+            console,
+            wait,
+            boot_timeout,
         } => {
             // Sem --disk: a imagem VM dourada única (mesma resolução do
             // `cluster kubeadm` — 0 ou várias imagens dão erro claro, nunca
@@ -500,6 +512,18 @@ pub fn run(action: VmCmd) -> Result<()> {
             };
             let vm = delonix_vm::create(&base, &cfg)?;
             println!("{}", vm.name);
+            // Boot dinâmico: --console anexa à consola serial (vê o boot ao
+            // vivo); --wait mostra um spinner até a VM ganhar IP.
+            if console {
+                return cmd_console(&base, &vm.name);
+            }
+            if wait {
+                wait_for_boot(
+                    &base,
+                    &vm.name,
+                    std::time::Duration::from_secs(boot_timeout),
+                );
+            }
             Ok(())
         }
         VmCmd::Pull { source, name } => {
@@ -591,6 +615,68 @@ fn fmt_vm_status(status: &delonix_runtime_core::Status) -> String {
 /// Usa `delonix_vm::status` (não o registo cru): reconcilia liveness/IP com o
 /// backend, portanto o que se lê é o estado AO VIVO e não o último que ficou
 /// gravado. É a diferença entre "diz que está Running" e "está Running".
+/// Espera (com spinner) a VM ganhar IP — o sinal de que a rede subiu e o boot
+/// avançou. Só faz sentido em modos com IP visível (CH, ou libvirt nat/bridge);
+/// em user-mode (libvirt session, SLIRP) nunca há IP, por isso avisa e aponta
+/// para a consola em vez de esperar em vão o timeout inteiro.
+fn wait_for_boot(base: &std::path::Path, name: &str, timeout: std::time::Duration) {
+    let deadline = std::time::Instant::now() + timeout;
+    let frames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+    let tty = super::output::color_enabled();
+    let mut i = 0usize;
+    loop {
+        if let Ok(vm) = delonix_vm::status(base, name) {
+            if let Some(ip) = vm.ip.filter(|s| !s.is_empty()) {
+                if tty {
+                    eprint!("\r\x1b[K");
+                }
+                super::output::info(&super::po::tf(
+                    "vm '{name}' is up — ip {ip}",
+                    &[("name", name), ("ip", &ip)],
+                ));
+                return;
+            }
+            // libvirt user-mode nunca dá IP: não vale a pena esperar o timeout.
+            if vm.backend.contains("libvirt") && vm.ip.is_none() {
+                // dá uns segundos ao arranque e depois orienta.
+                if std::time::Instant::now()
+                    >= deadline.min(std::time::Instant::now() + std::time::Duration::from_secs(3))
+                {
+                    if tty {
+                        eprint!("\r\x1b[K");
+                    }
+                    super::output::info(&super::po::tf(
+                        "vm '{name}' started (user-mode network, no reachable IP) — `delonix vm console {name}` to log in",
+                        &[("name", name)],
+                    ));
+                    return;
+                }
+            }
+        }
+        if std::time::Instant::now() >= deadline {
+            if tty {
+                eprint!("\r\x1b[K");
+            }
+            super::output::warn(&super::po::tf(
+                "vm '{name}' still booting after the timeout — `delonix vm console {name}` to watch",
+                &[("name", name)],
+            ));
+            return;
+        }
+        if tty {
+            eprint!(
+                "\r\x1b[K{} {}",
+                frames[i % 10],
+                super::po::tf("booting '{name}'...", &[("name", name)])
+            );
+            use std::io::Write;
+            let _ = std::io::stderr().flush();
+        }
+        i += 1;
+        std::thread::sleep(std::time::Duration::from_millis(400));
+    }
+}
+
 /// `delonix vm vnc <name>` — o endereço VNC de uma VM gráfica (criada com
 /// `--vnc`, backend libvirt). O Cloud Hypervisor não tem display — nesse caso
 /// aponta para `vm console` (serial). Não abre cliente nenhum; imprime o
