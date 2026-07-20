@@ -50,6 +50,8 @@ struct VmSpec {
     /// storage a uma VM sem escrever cloud-init/XML. Ver `VmVolumeSpec`.
     #[serde(default)]
     volumes: Vec<VmVolumeSpec>,
+    #[serde(default)]
+    vnc: bool,
 }
 
 /// Uma entrada de `spec.volumes` de uma VM: refere um `Volume`/`Storage` por
@@ -203,6 +205,9 @@ pub enum VmCmd {
         /// Nome da bridge (net-mode=bridge) ou rede libvirt (nat).
         #[arg(long)]
         bridge: Option<String>,
+        /// VNC graphical console (libvirt backend only — Cloud Hypervisor has no display).
+        #[arg(long)]
+        vnc: bool,
     },
     /// Pull a golden VM image from an OCI registry — with no argument, the
     /// OFFICIAL Delonix image (ready for `vm create`/`cluster kubeadm`).
@@ -220,6 +225,11 @@ pub enum VmCmd {
     /// Attach to the VM's serial console (interactive terminal) — works with no
     /// IP (boot logs, login). Escape: Ctrl-] .
     Console {
+        #[arg(add = ArgValueCandidates::new(super::complete::vms))]
+        name: String,
+    },
+    /// Print the VNC address of a graphical VM (created with `--vnc`, libvirt).
+    Vnc {
         #[arg(add = ArgValueCandidates::new(super::complete::vms))]
         name: String,
     },
@@ -382,6 +392,7 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
             net_mode: spec.net_mode,
             bridge: spec.bridge,
             volumes: vm_volumes,
+            vnc: spec.vnc,
         };
         delonix_vm::create(&base, &cfg)?;
         println!("vm/{name}: garantida");
@@ -438,6 +449,7 @@ pub fn run(action: VmCmd) -> Result<()> {
             backend,
             net_mode,
             bridge,
+            vnc,
         } => {
             // Sem --disk: a imagem VM dourada única (mesma resolução do
             // `cluster kubeadm` — 0 ou várias imagens dão erro claro, nunca
@@ -483,6 +495,7 @@ pub fn run(action: VmCmd) -> Result<()> {
                 net_mode,
                 bridge,
                 volumes: vec![],
+                vnc,
             };
             let vm = delonix_vm::create(&base, &cfg)?;
             println!("{}", vm.name);
@@ -515,6 +528,7 @@ pub fn run(action: VmCmd) -> Result<()> {
         }
         VmCmd::Describe { names } => cmd_describe(&base, &names),
         VmCmd::Console { name } => cmd_console(&base, &name),
+        VmCmd::Vnc { name } => cmd_vnc(&base, &name),
         VmCmd::Status { name } => {
             // Sem argumento: o estado reconciliado de TODAS (consistente com
             // `ingress ls`/`egress ls` sem argumento).
@@ -576,6 +590,51 @@ fn fmt_vm_status(status: &delonix_runtime_core::Status) -> String {
 /// Usa `delonix_vm::status` (não o registo cru): reconcilia liveness/IP com o
 /// backend, portanto o que se lê é o estado AO VIVO e não o último que ficou
 /// gravado. É a diferença entre "diz que está Running" e "está Running".
+/// `delonix vm vnc <name>` — o endereço VNC de uma VM gráfica (criada com
+/// `--vnc`, backend libvirt). O Cloud Hypervisor não tem display — nesse caso
+/// aponta para `vm console` (serial). Não abre cliente nenhum; imprime o
+/// endereço para o utilizador ligar com o seu (`vncviewer`, Remmina, ...).
+fn cmd_vnc(base: &std::path::Path, name: &str) -> Result<()> {
+    let vm = delonix_vm::status(base, name)?;
+    let backend = vm.backend.as_str();
+    if !(backend.contains("libvirt") || backend.contains("qemu") || backend.contains("kvm")) {
+        return Err(Error::Invalid(super::po::tf(
+            "VM '{name}' uses Cloud Hypervisor, which has no VNC — use `delonix vm console {name}` (serial), or recreate with `--backend libvirt --vnc`",
+            &[("name", name)],
+        )));
+    }
+    // `virsh vncdisplay` devolve `:N` (porta = 5900 + N) ou `127.0.0.1:N`.
+    let out = std::process::Command::new("virsh")
+        .args(["vncdisplay", name])
+        .output()
+        .map_err(|e| Error::Runtime {
+            context: "virsh vncdisplay",
+            message: e.to_string(),
+        })?;
+    let disp = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    if !out.status.success() || disp.is_empty() {
+        return Err(Error::Invalid(super::po::tf(
+            "no VNC display for '{name}' — was it created with `--vnc`?",
+            &[("name", name)],
+        )));
+    }
+    // Normaliza ":N" -> "127.0.0.1:590N" (o N é o índice do display).
+    let addr = if let Some(rest) = disp.strip_prefix(':') {
+        match rest.parse::<u32>() {
+            Ok(n) => format!("127.0.0.1:{}", 5900 + n),
+            Err(_) => disp.clone(),
+        }
+    } else {
+        disp.clone()
+    };
+    println!("{addr}");
+    super::output::info(&super::po::tf(
+        "connect with a VNC client, e.g. `vncviewer {addr}`",
+        &[("addr", &addr)],
+    ));
+    Ok(())
+}
+
 /// `delonix vm console <name>` — terminal serial interactivo da VM. Não precisa
 /// de IP (é como um cabo série): serve para ver o boot e fazer login mesmo sem
 /// rede. Cloud Hypervisor: liga ao socket UNIX do serial e faz de ponte com o
