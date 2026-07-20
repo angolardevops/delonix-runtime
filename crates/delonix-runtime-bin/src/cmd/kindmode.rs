@@ -310,63 +310,9 @@ fn join_config_yaml(j: &JoinInfo) -> String {
     )
 }
 
-/// Reis/rainhas de Angola — Ndongo, Kongo, Matamba, Bailundo.
-const REIS: &[&str] = &[
-    "njinga",
-    "mandume",
-    "ekuikui",
-    "nzinga",
-    "kiluanji",
-    "ngola",
-    "mbandi",
-    "kitamba",
-    "katyavala",
-    "samakaka",
-    "kalandula",
-    "mutu",
-    "hoolo",
-    "soba",
-];
-
-/// Províncias, municípios e comunas de Angola.
-const LUGARES: &[&str] = &[
-    "luanda",
-    "benguela",
-    "huambo",
-    "huila",
-    "bie",
-    "malanje",
-    "uige",
-    "zaire",
-    "cunene",
-    "namibe",
-    "moxico",
-    "bengo",
-    "cuando",
-    "cubango",
-    "viana",
-    "cacuaco",
-    "belas",
-    "talatona",
-    "kilamba",
-    "catumbela",
-    "lobito",
-    "lubango",
-    "chibia",
-    "cazenga",
-    "sumbe",
-    "ndalatando",
-    "menongue",
-    "saurimo",
-    "dundo",
-    "ondjiva",
-    "caxito",
-    "gabela",
-    "quibala",
-    "camacupa",
-    "andulo",
-    "chinguar",
-];
+// Reis/rainhas + lugares de Angola: listas PARTILHADAS com os nomes
+// auto-gerados de containers — ver `cmd/names.rs` (uma só fonte de verdade).
+use super::names::{LUGARES, REIS};
 
 /// Inventa um nome de cluster (rei + lugar + sufixo), evitando os já usados.
 ///
