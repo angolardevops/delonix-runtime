@@ -81,7 +81,8 @@ Usage: delonix-x86_64-v3-linux stack [OPTIONS] &lt;COMMAND&gt;
 Commands:
   init      Inicializa um projecto COMPLETO: Delonixfile + manifesto + cluster + README — ficheiros JÁ PREENCHIDOS (imagens incluídas), prontos a usar sem editar nada
   apply     Aplica todos os Kinds do manifesto (Network → Volume → Image → Vm → Container)
-  describe  Detalhe do stack ao estilo `kubectl describe`: cada recurso DECLARADO no manifesto e se está, ou não, presente na máquina
+  ls        Detalhe do stack ao estilo `kubectl describe`: cada recurso DECLARADO no manifesto e se está, ou não, presente na máquina
+  describe  
   validate  Valida o manifesto SEM tocar em nada (dry-run): resolve as referências cruzadas (`Container.network`/`.volumes`, `Vm.network`, `Ingress/Egress. target`) contra o que o manifesto declara MAIS o que já existe nos stores. Sai com erro se alguma referência ficar por resolver — é a rede de segurança contra um `apply` que só falharia a meio (fail-fast, sem rollback)
   help      Print this message or the help of the given subcommand(s)
 
