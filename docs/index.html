@@ -69,7 +69,7 @@ main{padding:1.4rem 1.2rem 4rem}}
 </nav>
 <main>
 
-<h1>Delonix Runtime <span class="pill">v0.6.2</span></h1>
+<h1>Delonix Runtime <span class="pill">v0.7.2</span></h1>
 <p class="tagline"><strong>Engine</strong> de containers e microVMs <strong>daemonless</strong>,
 <strong>rootless-first</strong>, kernel-native, em Rust — com CRI próprio para Kubernetes.
 <em>O engine open-source que alimenta o Delonix.</em></p>
@@ -87,6 +87,11 @@ publish de portas, o que permite <em>trocar portas e volumes a quente</em>, sem 
 container.</p>
 
 <h2>Instalar</h2>
+<p>Um comando instala o binário <strong>e</strong> todas as dependências de runtime
+(rede rootless, VMs, tuning de kernel), escolhendo a variante certa para o teu CPU.
+Funciona em Debian/Ubuntu, Fedora/RHEL, openSUSE e Arch:</p>
+<pre><code>curl -fsSL https://github.com/angolardevops/delonix-runtime/releases/latest/download/install.sh | bash</code></pre>
+<p>Alternativa (só o binário, dependências por tua conta):</p>
 <pre><code>curl -fL -o ~/.local/bin/delonix \
   https://github.com/angolardevops/delonix-runtime/releases/latest/download/delonix-x86_64-linux
 chmod +x ~/.local/bin/delonix

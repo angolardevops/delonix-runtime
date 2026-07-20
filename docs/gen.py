@@ -527,6 +527,11 @@ publish de portas, o que permite <em>trocar portas e volumes a quente</em>, sem 
 container.</p>
 
 <h2>Instalar</h2>
+<p>Um comando instala o binário <strong>e</strong> todas as dependências de runtime
+(rede rootless, VMs, tuning de kernel), escolhendo a variante certa para o teu CPU.
+Funciona em Debian/Ubuntu, Fedora/RHEL, openSUSE e Arch:</p>
+<pre><code>curl -fsSL https://github.com/angolardevops/delonix-runtime/releases/latest/download/install.sh | bash</code></pre>
+<p>Alternativa (só o binário, dependências por tua conta):</p>
 <pre><code>curl -fL -o ~/.local/bin/delonix \\
   https://github.com/angolardevops/delonix-runtime/releases/latest/download/delonix-x86_64-linux
 chmod +x ~/.local/bin/delonix
