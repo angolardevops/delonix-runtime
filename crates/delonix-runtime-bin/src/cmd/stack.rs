@@ -55,6 +55,13 @@ pub enum StackCmd {
     /// A coluna que interessa é a de PRESENÇA: um `apply` é fail-fast e sem
     /// rollback, logo um stack meio-aplicado é um estado normal e é exactamente
     /// isto que o mostra.
+    /// List the structure the manifest composes (containers, volumes,
+    /// networks, ...) and whether each resource exists — the tabular summary
+    /// of `describe`.
+    Ls {
+        #[arg(short = 'f', long = "file")]
+        file: Option<PathBuf>,
+    },
     Describe {
         #[arg(short = 'f', long = "file")]
         file: Option<PathBuf>,
@@ -94,6 +101,7 @@ pub fn run(action: StackCmd) -> Result<()> {
         // Tratado no topo de `run` (faz `return`).
         StackCmd::Init { .. } => unreachable!("tratado acima"),
         StackCmd::Apply { file } => apply(file),
+        StackCmd::Ls { file } => ls(file),
         StackCmd::Describe { file } => describe(file),
         StackCmd::Validate { file } => validate(file),
     }
@@ -116,6 +124,27 @@ const KINDS: [&str; 12] = [
     "HTTPRoute",
     "Dependency",
 ];
+
+/// `stack ls` — a estrutura que o manifesto compõe, numa TABELA única
+/// (kind→nome→presença→status), reutilizando exactamente a resolução do
+/// `describe` (`presence` consulta os stores reais; o stack não tem registo
+/// próprio, por desenho — ver CLAUDE.md).
+fn ls(file: Option<PathBuf>) -> Result<()> {
+    let path = manifest::resolve_path(file)?;
+    let docs = manifest::load(&path)?;
+    let (_, cstore) = super::util::open_stores()?;
+    let containers = cstore.list().unwrap_or_default();
+    let mut t = super::output::Table::new(&["KIND", "NAME", "PRESENT", "STATUS"]);
+    for kind in KINDS {
+        for doc in manifest::of_kind(&docs, kind) {
+            let name = &doc.metadata.name;
+            let (present, status) = presence(kind, name, &containers);
+            t.row(vec![kind.to_string(), name.clone(), present, status]);
+        }
+    }
+    t.print();
+    Ok(())
+}
 
 fn describe(file: Option<PathBuf>) -> Result<()> {
     let path = manifest::resolve_path(file)?;
