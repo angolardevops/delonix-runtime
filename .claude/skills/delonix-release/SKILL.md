@@ -26,7 +26,10 @@ glibc 2.35). O trabalho local é: notas → bump → tag → monitorizar → val
    docs embebe o `--help` real — depois de a release publicar, descarregar o
    binário publicado e regenerar:
    `curl -fL -o /tmp/dlx https://github.com/angolardevops/delonix-runtime/releases/latest/download/delonix-x86_64-linux && chmod +x /tmp/dlx && python3 docs/gen.py /tmp/dlx`
-   — comitar as páginas alteradas.
+   — comitar as páginas alteradas. Armadilha: o `gen.py` importa o módulo
+   `markdown` e o pip do sistema está bloqueado (PEP 668) — usar um venv
+   descartável (`python3 -m venv /tmp/v && /tmp/v/bin/pip install markdown &&
+   /tmp/v/bin/python docs/gen.py /tmp/dlx`).
 5. **Commit + tag + push** —
    `git commit … && git push origin main && git tag vX.Y.Z && git push origin vX.Y.Z`.
    (Se o push der 403 "denied to <outra-conta>": o gh tem múltiplas contas; usar
