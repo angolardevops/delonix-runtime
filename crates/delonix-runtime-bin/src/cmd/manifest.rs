@@ -86,8 +86,13 @@ pub fn canonical_kind(kind: &str) -> &str {
 
 /// Carrega TODOS os documentos (`---`-separados) de um manifesto.
 pub fn load(path: &Path) -> Result<Vec<ManifestDoc>> {
-    let text = std::fs::read_to_string(path)
-        .map_err(|e| Error::Invalid(format!("não consegui ler {}: {e}", path.display())))?;
+    let text = std::fs::read_to_string(path).map_err(|e| {
+        Error::Invalid(format!(
+            "{} {}: {e}",
+            super::po::t("could not read"),
+            path.display()
+        ))
+    })?;
     if text.trim().is_empty() {
         return Err(Error::Invalid(format!(
             "{} está vazio (sem documentos YAML)",

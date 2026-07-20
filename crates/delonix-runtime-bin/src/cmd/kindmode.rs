@@ -92,11 +92,11 @@ fn pick_api_port(store: &Store, preferred: Option<u16>, cluster: &str) -> Result
             let by = super::container::port_owner(store, &p.to_string())
                 .ok()
                 .flatten()
-                .map(|n| format!(" (pelo container '{n}')"))
+                .map(|n| super::po::tf(" (by container '{name}')", &[("name", &n)]))
                 .unwrap_or_default();
-            return Err(Error::Invalid(format!(
-                "a porta {p} já está em uso{by} — escolhe outra com `--api-port` ou omite a flag \
-                 para o delonix escolher uma livre"
+            return Err(Error::Invalid(super::po::tf(
+                "port {p} is already in use{by} — pick another with `--api-port` or drop the flag so delonix picks a free one",
+                &[("p", &p.to_string()), ("by", &by)],
             )));
         }
         return Ok(p);
@@ -108,17 +108,20 @@ fn pick_api_port(store: &Store, preferred: Option<u16>, cluster: &str) -> Result
     // longe das portas de serviço.
     for p in 36443..36543 {
         if port_free(store, p) {
-            let msg = if super::output::is_pt() {
-                format!("porta {DEFAULT_API_PORT} ocupada — o cluster '{cluster}' usa a {p}")
-            } else {
-                format!("port {DEFAULT_API_PORT} in use — cluster '{cluster}' uses {p}")
-            };
-            super::output::info(&msg);
+            super::output::info(&super::po::tf(
+                "port {default} in use — cluster '{cluster}' uses {p}",
+                &[
+                    ("default", &DEFAULT_API_PORT.to_string()),
+                    ("cluster", cluster),
+                    ("p", &p.to_string()),
+                ],
+            ));
             return Ok(p);
         }
     }
     Err(Error::Invalid(
-        "não encontrei nenhuma porta livre para o apiserver (6443 e 36443-36542 ocupadas)".into(),
+        super::po::t("no free port found for the apiserver (6443 and 36443-36542 all taken)")
+            .into(),
     ))
 }
 
@@ -279,7 +282,12 @@ fn parse_join_command(s: &str) -> Result<JoinInfo> {
         .and_then(|i| toks.get(i + 1))
         .filter(|t| !t.starts_with('-'))
         .map(|t| t.to_string())
-        .ok_or_else(|| Error::Invalid(format!("não consegui ler o endpoint do join: {s:?}")))?;
+        .ok_or_else(|| {
+            Error::Invalid(format!(
+                "{}: {s:?}",
+                super::po::t("could not read the join endpoint")
+            ))
+        })?;
     let token =
         flag("--token").ok_or_else(|| Error::Invalid(format!("join sem --token: {s:?}")))?;
     let ca_hash = flag("--discovery-token-ca-cert-hash")
@@ -432,7 +440,12 @@ fn boot_node(
         .list()?
         .into_iter()
         .find(|c| c.name == node)
-        .ok_or_else(|| Error::Invalid(format!("o nó '{node}' não ficou registado no store")))?;
+        .ok_or_else(|| {
+            Error::Invalid(super::po::tf(
+                "node '{node}' was not registered in the store",
+                &[("node", node)],
+            ))
+        })?;
     wait_in_node(
         &c,
         "containerd",
@@ -565,10 +578,12 @@ pub(crate) fn create(images: &ImageStore, store: &Store, cfg: &KindCluster) -> R
     // (10.0.2.100, igual em todos os nós e inalcançável de fora dele); numa rede
     // partilhada cada nó tem o seu — e é este que o apiserver anuncia e os
     // workers usam no `join`.
-    let cp_ip = c
-        .ip
-        .clone()
-        .ok_or_else(|| Error::Invalid(format!("o nó '{node}' não recebeu IP na rede '{net}'")))?;
+    let cp_ip = c.ip.clone().ok_or_else(|| {
+        Error::Invalid(super::po::tf(
+            "node '{node}' got no IP on network '{net}'",
+            &[("node", &node), ("net", &net)],
+        ))
+    })?;
 
     // --- config do kubeadm: TUDO o que o rootless precisa, numa passagem ---
     //
@@ -950,7 +965,11 @@ fn write_kubeconfig(c: &Container, name: &str, api_port: u16) -> Result<()> {
     )?;
     let src = cluster_dir(name).join("kubeconfig.yaml");
     let data = std::fs::read(&src).map_err(|e| {
-        Error::Invalid(format!("a ler o kubeconfig do nó ({}): {e}", src.display()))
+        Error::Invalid(format!(
+            "{} ({}): {e}",
+            super::po::t("reading the node kubeconfig"),
+            src.display()
+        ))
     })?;
     std::fs::write(&path, data)?;
     eprintln!("kubeconfig: {}", path.display()); // rótulo universal
@@ -1195,8 +1214,13 @@ fn remove_kubecontext(cluster: &str) -> Result<()> {
     if txt.trim().is_empty() {
         return Ok(());
     }
-    let mut cfg: Value = serde_yaml::from_str(&txt)
-        .map_err(|e| Error::Invalid(format!("{} não é YAML válido: {e}", dest.display())))?;
+    let mut cfg: Value = serde_yaml::from_str(&txt).map_err(|e| {
+        Error::Invalid(format!(
+            "{} {}: {e}",
+            dest.display(),
+            super::po::t("is not valid YAML")
+        ))
+    })?;
     let mut mexeu = false;
     for chave in ["clusters", "users", "contexts"] {
         if let Some(seq) = cfg.get_mut(chave).and_then(|v| v.as_sequence_mut()) {

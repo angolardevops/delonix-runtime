@@ -341,7 +341,7 @@ fn build_server_config(tls: &TlsMaterial) -> Result<Arc<tokio_rustls::rustls::Se
     let cfg = ServerConfig::builder()
         .with_no_client_auth()
         .with_single_cert(certs, key)
-        .map_err(|e| Error::Invalid(format!("cert/chave TLS incompatíveis: {e}")))?;
+        .map_err(|e| Error::Invalid(format!("{}: {e}", super::po::t("mismatched TLS cert/key"))))?;
     Ok(Arc::new(cfg))
 }
 
@@ -394,7 +394,10 @@ async fn serve(cfg: ProxyConfig, config_path: std::path::PathBuf) -> Result<()> 
                         eprintln!("ingress-proxy: rotas recarregadas ({n} rota(s))");
                     }
                     None => {
-                        eprintln!("ingress-proxy: SIGHUP mas a config não releu — rotas mantidas")
+                        eprintln!(
+                            "ingress-proxy: {}",
+                            super::po::t("SIGHUP but the config would not re-parse — routes kept")
+                        )
                     }
                 }
             }
@@ -837,9 +840,21 @@ fn publish_listeners(cfg: &ProxyConfig) -> Result<()> {
         if let Err(e) = delonix_net::slirp_add_hostfwd(&sock, &p, &p, "tcp") {
             let msg = e.to_string();
             if msg.contains("already") || msg.to_lowercase().contains("exist") {
-                eprintln!("httproute: porta :{p} já publicada — mantida");
+                eprintln!(
+                    "httproute: {}",
+                    super::po::tf(
+                        "port :{p} already published — kept",
+                        &[("p", &p.to_string())]
+                    )
+                );
             } else {
-                eprintln!("httproute: aviso ao publicar :{p}: {e}");
+                eprintln!(
+                    "httproute: {}",
+                    super::po::tf(
+                        "warning while publishing :{p}: {err}",
+                        &[("p", &p.to_string()), ("err", &e.to_string())]
+                    )
+                );
             }
         }
     }
