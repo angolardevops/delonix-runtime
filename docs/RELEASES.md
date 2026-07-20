@@ -4,6 +4,18 @@
 > (regenerado automaticamente pelo pipeline de release a cada tag publicada).
 > Não editar à mão — edita a nota da release respectiva.
 
+## v0.6.1 — `--version` rico: identidade do build + por onde começar
+
+- **`delonix --version`** passa a cartão de visita: versão, **commit e data de
+  build** (injectados em build-time, com `SOURCE_DATE_EPOCH` respeitado para
+  reprodutibilidade), a descrição do motor, um bloco **get started** com os 5
+  fluxos principais (container / vm / cluster / stack / dash) e o link das
+  docs. Traduzido via catálogo (`--l18n=pt`).
+- **`-V`** mantém a linha curta e estável (`delonix X.Y.Z`) — scripts que
+  fazem parse não partem.
+
+---
+
 ## v0.6.0 — stack ls, stop idempotente, instalador animado
 
 Resultado de um varrimento completo da CLI (157 comandos/subcomandos
