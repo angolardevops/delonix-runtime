@@ -799,7 +799,14 @@ def cheatsheet_page():
 
 
 def main():
-    ver = subprocess.run([BIN, "--version"], capture_output=True, text=True).stdout.strip().split()[-1]
+    # Só a 1.ª linha: desde a v0.6.1 o --version é um cartão multi-linha e o
+    # último token do output inteiro deixou de ser a versão.
+    ver = (
+        subprocess.run([BIN, "--version"], capture_output=True, text=True)
+        .stdout.strip()
+        .splitlines()[0]
+        .split()[-1]
+    )
     cards = "".join(
         f'<div class="card"><b><a href="comandos/{n}.html">{html.escape(g["title"])}</a></b>'
         f'<p>{html.escape(g["tagline"])}</p></div>'
