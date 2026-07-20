@@ -942,6 +942,21 @@ fn build_user_data(
             out.push_str(&format!("  - {k}\n"));
         }
     }
+    // Auto-login na consola serial (ttyS0) como o utilizador `delonix` da golden:
+    // o `vm console` entra directo, sem pedir password (escolha do utilizador —
+    // a consola serial de uma VM de dev é acesso local, como no multipass/kind).
+    // Sem isto, o cloud-init reconfigura o getty e a consola passa a pedir login.
+    out.push_str("write_files:\n");
+    out.push_str("  - path: /etc/systemd/system/serial-getty@ttyS0.service.d/autologin.conf\n");
+    out.push_str("    content: |\n");
+    out.push_str("      [Service]\n");
+    out.push_str("      ExecStart=\n");
+    out.push_str(
+        "      ExecStart=-/sbin/agetty --autologin delonix --keep-baud 115200,57600,38400,9600 - $TERM\n",
+    );
+    out.push_str("runcmd:\n");
+    out.push_str("  - [ systemctl, daemon-reload ]\n");
+    out.push_str("  - [ systemctl, restart, serial-getty@ttyS0 ]\n");
     // Monta cada volume 9p partilhado pelo `<filesystem>` do domínio. O
     // `_netdev` evita bloquear o boot se o share não estiver pronto; `trans=virtio`
     // + `9p2000.L` é o dialecto que o libvirt/QEMU expõem. Assim o guest monta o
@@ -1121,6 +1136,16 @@ mod tests {
     fn user_data_sem_chaves_nao_tem_seccao_ssh() {
         let ud = build_user_data("myvm", &[], &[]);
         assert!(!ud.contains("ssh_authorized_keys"));
+    }
+
+    #[test]
+    fn user_data_configura_autologin_serial() {
+        // A consola serial entra directo como `delonix` (o `vm console` sem
+        // pedir password) — o cloud-init reconfiguraria o getty senão.
+        let ud = build_user_data("myvm", &[], &[]);
+        assert!(ud.contains("serial-getty@ttyS0.service.d/autologin.conf"));
+        assert!(ud.contains("--autologin delonix"));
+        assert!(ud.contains("restart, serial-getty@ttyS0"));
     }
 
     #[test]
