@@ -194,7 +194,13 @@ fn cmd_prune(all: bool) -> Result<()> {
     // fail-open; ver a história do reaper que apagava portas vivas).
     let reaped = delonix_net::reap_orphan_slirp();
     if reaped > 0 {
-        println!("rede: {reaped} slirp(s) órfão(s) reapado(s)");
+        println!(
+            "{}",
+            super::po::tf(
+                "net: {n} orphan slirp(s) reaped",
+                &[("n", &reaped.to_string())]
+            )
+        );
     }
 
     // 1) containers parados (no registo).
@@ -232,7 +238,13 @@ fn cmd_prune(all: bool) -> Result<()> {
     }
     let reaped_refs = delonix_net::infra::reap_orphan_refs(&live_refs);
     if reaped_refs > 0 {
-        println!("rede: {reaped_refs} ref(s) de ingress órfã(s) reapada(s)");
+        println!(
+            "{}",
+            super::po::tf(
+                "net: {n} orphan ingress ref(s) reaped",
+                &[("n", &reaped_refs.to_string())]
+            )
+        );
     }
 
     // 2) imagens dangling (sem tag), ou todas as não usadas com `-a`.
@@ -351,8 +363,20 @@ fn cmd_prune(all: bool) -> Result<()> {
 
     let total = freed + freed_dirs;
     println!(
-        "removed: {rmc} container(s), {rmd} orphan dir(s), {rmi} image(s), {rmb} blob(s), {rmg} cgroup(s), {rmh} orphan port(s), {rmn} orphan network(s) — {} freed",
-        super::output::fmt_size(total)
+        "{}",
+        super::po::tf(
+            "removed: {c} container(s), {d} orphan dir(s), {i} image(s), {b} blob(s), {g} cgroup(s), {p} orphan port(s), {n} orphan network(s) — {size} freed",
+            &[
+                ("c", &rmc.to_string()),
+                ("d", &rmd.to_string()),
+                ("i", &rmi.to_string()),
+                ("b", &rmb.to_string()),
+                ("g", &rmg.to_string()),
+                ("p", &rmh.to_string()),
+                ("n", &rmn.to_string()),
+                ("size", &super::output::fmt_size(total)),
+            ]
+        )
     );
     Ok(())
 }
@@ -363,8 +387,18 @@ fn cmd_virt(tune: bool) -> Result<()> {
     use delonix_runtime_core::virt;
     let v = virt::detect();
     if !v.virtualized {
-        println!("Delonix corre em hardware físico (bare-metal) — sem virtualização detetada.");
-        println!("  Nenhuma afinação de VM a aplicar; o runtime já usa o hardware diretamente.");
+        println!(
+            "{}",
+            super::po::t(
+                "Delonix runs on physical hardware (bare-metal) — no virtualization detected."
+            )
+        );
+        println!(
+            "  {}",
+            super::po::t(
+                "No VM tuning to apply; the runtime already talks to the hardware directly."
+            )
+        );
         return Ok(());
     }
     let kvm = if v.is_kvm {
@@ -373,15 +407,17 @@ fn cmd_virt(tune: bool) -> Result<()> {
         ""
     };
     println!(
-        "Virtualização detetada: {}{kvm}",
+        "{}: {}{kvm}",
+        super::po::t("Detected virtualization"),
         v.hypervisor.to_uppercase()
     );
     println!(
-        "  Aceleração KVM (/dev/kvm): {}",
+        "  {}: {}",
+        super::po::t("KVM acceleration (/dev/kvm)"),
         if v.kvm_accel {
-            "sim (virtualização aninhada possível)"
+            super::po::t("yes (nested virtualization possible)")
         } else {
-            "não"
+            super::po::t("no")
         }
     );
     let join = |xs: &[String], vazio: &str| {
@@ -391,14 +427,29 @@ fn cmd_virt(tune: bool) -> Result<()> {
             xs.join(", ")
         }
     };
-    println!("  Rede virtio-net: {}", join(&v.virtio_net, "(nenhuma)"));
-    println!("  Disco virtio-blk: {}", join(&v.virtio_blk, "(nenhum)"));
-    println!("  Dispositivos no bus virtio: {}", v.virtio_count);
+    println!(
+        "  {}: {}",
+        super::po::t("virtio-net network"),
+        join(&v.virtio_net, super::po::t("(none)"))
+    );
+    println!(
+        "  {}: {}",
+        super::po::t("virtio-blk disk"),
+        join(&v.virtio_blk, super::po::t("(none)"))
+    );
+    println!(
+        "  {}: {}",
+        super::po::t("Devices on the virtio bus"),
+        v.virtio_count
+    );
     println!();
     if !v.virtio_net.is_empty() {
         println!(
-            "  ✓ Rede paravirtualizada (virtio-net: {}) — offloads de segmentação/checksum no host.",
-            v.virtio_net.join(", ")
+            "  ✓ {}",
+            super::po::tf(
+                "Paravirtualized network (virtio-net: {ifs}) — segmentation/checksum offloads on the host.",
+                &[("ifs", &v.virtio_net.join(", "))]
+            )
         );
     }
     // A afinação concreta: escalonador de I/O 'none' nos discos virtio-blk — num
@@ -407,22 +458,47 @@ fn cmd_virt(tune: bool) -> Result<()> {
     for dev in &v.virtio_blk {
         match virt::blk_scheduler(dev) {
             Some((cur, true)) if tune => match virt::set_blk_scheduler_none(dev) {
-                Ok(_) => println!("  ✓ /dev/{dev}: escalonador de I/O '{cur}' → 'none' (o host KVM já escalona)"),
-                Err(e) => println!("  ✗ /dev/{dev}: não consegui mudar o escalonador ({e}) — corre como root"),
+                Ok(_) => println!(
+                    "  ✓ /dev/{dev}: {}",
+                    super::po::tf(
+                        "I/O scheduler '{cur}' → 'none' (the KVM host already schedules)",
+                        &[("cur", &cur)]
+                    )
+                ),
+                Err(e) => println!(
+                    "  ✗ /dev/{dev}: {}",
+                    super::po::tf(
+                        "could not change the scheduler ({err}) — run as root",
+                        &[("err", &e.to_string())]
+                    )
+                ),
             },
-            Some((cur, true)) => {
-                pending.push(format!("/dev/{dev}: escalonador de I/O '{cur}' → 'none' (evita escalonar 2× num guest KVM)"))
-            }
-            Some((cur, false)) => println!("  ✓ /dev/{dev}: escalonador de I/O já ótimo ({cur})"),
+            Some((cur, true)) => pending.push(format!(
+                "/dev/{dev}: {}",
+                super::po::tf(
+                    "I/O scheduler '{cur}' → 'none' (avoids double scheduling in a KVM guest)",
+                    &[("cur", &cur)]
+                )
+            )),
+            Some((cur, false)) => println!(
+                "  ✓ /dev/{dev}: {}",
+                super::po::tf("I/O scheduler already optimal ({cur})", &[("cur", &cur)])
+            ),
             None => {}
         }
     }
     if !tune {
         if pending.is_empty() {
-            println!("\nSem afinações pendentes — esta VM já está otimizada para o Delonix.");
+            println!(
+                "\n{}",
+                super::po::t("No pending tuning — this VM is already optimized for Delonix.")
+            );
         } else {
             println!(
-                "\nAfinações recomendadas (corre `sudo delonix system virt --tune` para aplicar):"
+                "\n{}",
+                super::po::t(
+                    "Recommended tuning (run `sudo delonix system virt --tune` to apply):"
+                )
             );
             for p in &pending {
                 println!("  • {p}");
@@ -437,34 +513,50 @@ fn cmd_thermal(high: u64, low: u64, floor: u64, interval: u64, once: bool) -> Re
     use delonix_runtime::{self as runtime};
     if high <= low {
         return Err(delonix_runtime_core::Error::Invalid(
-            "--high tem de ser maior que --low".into(),
+            super::po::t("--high must be greater than --low").into(),
         ));
     }
     if runtime::is_rootless() {
         return Err(delonix_runtime_core::Error::Invalid(
-            "o governador térmico precisa de root (escreve no cgroup do host)".into(),
+            super::po::t("the thermal governor needs root (it writes to the host cgroup)").into(),
         ));
     }
     let mut scale = 100u64; // % do orçamento de CPU do Delonix
     runtime::set_slice_cpu_pct(scale);
-    eprintln!("governador térmico: high={high}°C low={low}°C floor={floor}% (Ctrl-C para sair)");
+    eprintln!(
+        "{}: high={high}°C low={low}°C floor={floor}% (Ctrl-C {})",
+        super::po::t("thermal governor"),
+        super::po::t("to exit")
+    );
     loop {
         let temp = runtime::max_cpu_temp_c().unwrap_or(0);
         if temp >= high && scale > floor {
             scale = floor.max(scale.saturating_sub(20));
             runtime::set_slice_cpu_pct(scale);
             let fan = if runtime::boost_fans() {
-                " + ventoinha no máximo"
+                super::po::t(" + fans at max")
             } else {
                 ""
             };
-            println!("{temp}°C ≥ {high}°C — a arrefecer: CPU do Delonix a {scale}%{fan}");
+            println!(
+                "{temp}°C ≥ {high}°C — {}: {}{fan}",
+                super::po::t("cooling down"),
+                super::po::tf("Delonix CPU at {pct}%", &[("pct", &scale.to_string())])
+            );
         } else if temp <= low && scale < 100 {
             scale = 100.min(scale + 20);
             runtime::set_slice_cpu_pct(scale);
-            println!("{temp}°C ≤ {low}°C — a restaurar: CPU do Delonix a {scale}%");
+            println!(
+                "{temp}°C ≤ {low}°C — {}: {}",
+                super::po::t("restoring"),
+                super::po::tf("Delonix CPU at {pct}%", &[("pct", &scale.to_string())])
+            );
         } else if once {
-            println!("{temp}°C (high={high}/low={low}) — CPU do Delonix a {scale}% (sem mudança)");
+            println!(
+                "{temp}°C (high={high}/low={low}) — {} ({})",
+                super::po::tf("Delonix CPU at {pct}%", &[("pct", &scale.to_string())]),
+                super::po::t("no change")
+            );
         }
         if once {
             return Ok(());
@@ -576,13 +668,18 @@ fn cmd_df() -> Result<()> {
         }
     }
 
-    println!("{:<16}  {:>10}  {:>12}", "ÁREA", "TAMANHO", "RECUPERÁVEL");
+    println!(
+        "{:<16}  {:>10}  {:>12}",
+        super::po::t("AREA"),
+        super::po::t("SIZE"),
+        super::po::t("RECLAIMABLE")
+    );
     for (label, dir) in [
-        ("imagens", root.join("blobs")),
+        (super::po::t("images"), root.join("blobs")),
         ("layers", root.join("layers")),
         ("containers", containers_dir.clone()),
         ("volumes", root.join("volumes")),
-        ("imagens VM", root.join("vm-images")),
+        (super::po::t("VM images"), root.join("vm-images")),
     ] {
         let size = dir_size(&dir);
         let recl = if label == "containers" {
@@ -594,9 +691,11 @@ fn cmd_df() -> Result<()> {
     }
     if orphan_n > 0 {
         println!(
-            "\n{orphan_n} directório(s) de container órfão(s) — {} recuperáveis.\n\
-             São restos de containers mortos abruptamente (o `rm` normal limpa-os).",
-            human(orphan)
+            "\n{}",
+            super::po::tf(
+                "{n} orphan container dir(s) — {size} reclaimable.\nLeftovers from abruptly killed containers (a normal `rm` cleans them).",
+                &[("n", &orphan_n.to_string()), ("size", &human(orphan))]
+            )
         );
     }
     Ok(())
@@ -614,14 +713,19 @@ fn cmd_info() -> Result<()> {
         .count();
 
     println!("Delonix Runtime {}", env!("CARGO_PKG_VERSION"));
-    println!("  raiz de estado:     {}", state_root().display());
+    println!(
+        "  {:<19} {}",
+        super::po::t("state root:"),
+        state_root().display()
+    );
     let rootless = delonix_runtime::is_rootless();
     println!(
-        "  modo:               {}",
+        "  {:<19} {}",
+        super::po::t("mode:"),
         if rootless {
-            "rootless (sem daemon)"
+            super::po::t("rootless (daemonless)")
         } else {
-            "root (sem daemon)"
+            super::po::t("root (daemonless)")
         }
     );
     // Isto é a pergunta nº1 quando os limites "não funcionam".
@@ -630,24 +734,32 @@ fn cmd_info() -> Result<()> {
             .map(|s| s.contains("memory"))
             .unwrap_or(false);
     println!(
-        "  cgroup2 delegado:   {}",
+        "  {:<19} {}",
+        super::po::t("cgroup2 delegated:"),
         if delegated {
-            "sim"
+            super::po::t("yes")
         } else {
-            "não — memory/cpu/pids NÃO são aplicados (corre sob systemd-run --user --scope -p Delegate=yes)"
+            super::po::t("no — memory/cpu/pids are NOT enforced (run under systemd-run --user --scope -p Delegate=yes)")
         }
     );
     let infra = delonix_net::infra::status();
     println!(
-        "  infra de rede:      {}",
+        "  {:<19} {}",
+        super::po::t("network infra:"),
         match infra.holder_pid {
-            Some(p) => format!("de pé (holder pid {p})"),
-            None => "em baixo (sobe sozinha quando precisar)".to_string(),
+            Some(p) => super::po::tf("up (holder pid {pid})", &[("pid", &p.to_string())]),
+            None => super::po::t("down (comes up on demand)").to_string(),
         }
     );
-    println!("  containers:         {} ({running} a correr)", cs.len());
     println!(
-        "  eventos:            {}",
+        "  {:<19} {} ({running} {})",
+        super::po::t("containers:"),
+        cs.len(),
+        super::po::t("running")
+    );
+    println!(
+        "  {:<19} {}",
+        super::po::t("events:"),
         events::read(&state_root()).len()
     );
     Ok(())

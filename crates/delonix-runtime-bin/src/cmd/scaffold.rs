@@ -102,7 +102,11 @@ fn subst(s: &str, o: &InitOpts, module: &str, port: &str) -> String {
 /// passos seguintes (build/apply/curl) — suprime-se quando o `--up` os vai fazer.
 fn render_template(tname: &str, o: &InitOpts, show_next: bool) -> Result<()> {
     if tname == "list" {
-        println!("templates disponíveis: {}", template_names().join(", "));
+        println!(
+            "{}: {}",
+            super::po::t("available templates"),
+            template_names().join(", ")
+        );
         return Ok(());
     }
     let files = TEMPLATES
@@ -128,7 +132,10 @@ fn render_template(tname: &str, o: &InitOpts, show_next: bool) -> Result<()> {
         )?);
     }
     if n == 0 {
-        eprintln!("nada a fazer (tudo já existia)");
+        eprintln!(
+            "{}",
+            super::po::t("nothing to do (everything already existed)")
+        );
         return Ok(());
     }
     println!(
@@ -408,7 +415,10 @@ pub(crate) fn init(target: Target, o: &InitOpts) -> Result<()> {
         }
     }
     if n == 0 {
-        eprintln!("nada a fazer (tudo já existia)");
+        eprintln!(
+            "{}",
+            super::po::t("nothing to do (everything already existed)")
+        );
         return Ok(());
     }
     println!("{}", next_steps(target, o));

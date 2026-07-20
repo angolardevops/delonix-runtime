@@ -70,7 +70,7 @@ pub(crate) fn find(store: &Store, q: &str) -> Result<Container> {
     let all = store.list()?;
     all.into_iter()
         .find(|c| c.id == q || c.id.starts_with(q) || c.name == q)
-        .ok_or_else(|| Error::Invalid(format!("container não encontrado: {q}")))
+        .ok_or_else(|| Error::Invalid(format!("{}: {q}", super::po::t("container not found"))))
 }
 
 /// Prepara o rootfs de um novo container a partir de uma imagem: FLAT (export +

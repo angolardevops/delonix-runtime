@@ -265,8 +265,9 @@ pub fn run(action: SecretCmd) -> Result<()> {
                 println!("segredo '{name}' removido");
                 return Ok(());
             }
-            let k =
-                key.ok_or_else(|| Error::Invalid("indica a chave a remover (ou --all)".into()))?;
+            let k = key.ok_or_else(|| {
+                Error::Invalid(super::po::t("say which key to remove (or --all)").into())
+            })?;
             let mut s = store.load(&name)?;
             if s.data.remove(&k).is_none() {
                 return Err(Error::Invalid(format!(
