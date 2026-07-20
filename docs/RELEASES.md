@@ -4,6 +4,30 @@
 > (regenerado automaticamente pelo pipeline de release a cada tag publicada).
 > Não editar à mão — edita a nota da release respectiva.
 
+## v0.7.2 — VMs de ponta a ponta: pull com progresso, rede default corrigida
+
+O fluxo `vm pull && vm create dev` corre agora sem qualquer setup manual.
+
+- **Barra de progresso no `vm pull`** — o download da golden (~680 MiB) passou
+  a streaming com uma barra animada (`[vm pull] <ref> ██████░░ 58% 393/678 MiB`),
+  redesenhada em tempo real; só em tty (pipes/CI ficam limpos). Antes o pull
+  parecia pendurado até acabar.
+- **Default de rede corrigido** — `vm create` defaultava para `--network bridge`,
+  tratada como uma rede PRIVADA a criar antes (`vm create dev` falhava com
+  "ingress network 'bridge'"). Passa a `ingress`, a rede default do sistema
+  (bridge `delonix0`/10.200, sempre presente). Erro de rede inexistente agora
+  diz como a criar.
+- Help do `vm pull`/`vm push` em inglês (fonte), traduzido via catálogo.
+
+Fluxo completo, sem fricção:
+
+```
+delonix vm pull        # a golden oficial do ghcr, com barra de progresso
+delonix vm create dev  # cria a VM sobre ela, rede ingress default
+```
+
+---
+
 ## v0.7.1 — VMs sem fricção: vm pull da imagem oficial, --disk opcional, vm init corrigido
 
 Correcções e UX nascidas de uso real do grupo `vm`:
