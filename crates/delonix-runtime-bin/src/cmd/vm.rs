@@ -1016,14 +1016,7 @@ pub(crate) fn generate_seed_iso(
     let net_cfg_path = work_dir.join("network-config");
     std::fs::write(
         &net_cfg_path,
-        "version: 2
-ethernets:
-  eth-all:
-    match:
-      name: "e
-            * "
-    dhcp4: true
-",
+        "version: 2\nethernets:\n  eth-all:\n    match:\n      name: \"e*\"\n    dhcp4: true\n",
     )?;
 
     let iso_path = work_dir.join("seed.iso");
