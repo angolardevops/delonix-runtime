@@ -183,9 +183,10 @@ fn long_version_text() -> &'static str {
     use cmd::po::t;
     // Leak deliberado e único: o clap builder exige &'static str (sem a feature
     // "string"), e isto corre uma vez por processo — não é fuga acumulável.
+    // O clap imprime "<nome> <long_version>" — o texto NÃO repete o nome.
     Box::leak(
         format!(
-            "delonix {v}\n\
+            "{v}\n\
          {tag}\n\
          commit: {hash} · built: {date} · {lic}\n\
          \n\
