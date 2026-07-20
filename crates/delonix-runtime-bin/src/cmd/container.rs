@@ -1240,7 +1240,7 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
     if let Some(dup) = store.list()?.iter().find(|c| c.name == cname) {
         return Err(Error::Invalid(super::po::tf(
             "the name '{name}' is already in use by container {id} — pick another or remove it first",
-            &[("name", cname.as_str()), ("id", &dup.short_id())],
+            &[("name", cname.as_str()), ("id", dup.short_id())],
         )));
     }
     // `max` = no memory cap (cgroup v2); in k8s the pod's cgroup already limits.
