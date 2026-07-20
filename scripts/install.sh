@@ -61,10 +61,10 @@ else
 fi
 msg()   { printf 'install/delonix: %s\n' "$*"; }
 step()  { printf '[%s] %s: %s\n' "$1" "$2" "$3"; }                    # estado neutro
-skip()  { printf '[%s] %s: %sjá satisfeito (SKIP)%s\n' "$1" "$2" "$C_SKIP" "$C_0"; }
+skip()  { printf '[%s] %s: %salready satisfied (SKIP)%s\n' "$1" "$2" "$C_SKIP" "$C_0"; }
 stepok(){ printf '[%s] %s: %sOK%s\n' "$1" "$2" "$C_OK" "$C_0"; }
-warn()  { printf '%sAVISO%s %s\n' "$C_WARN" "$C_0" "$*" >&2; }
-die()   { printf '%sERRO%s %s\n' "$C_ERR" "$C_0" "$*" >&2; exit 1; }
+warn()  { printf '%swarning%s %s\n' "$C_WARN" "$C_0" "$*" >&2; }
+die()   { printf '%serror%s %s\n' "$C_ERR" "$C_0" "$*" >&2; exit 1; }
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -95,10 +95,10 @@ if [ "$(id -u)" -eq 0 ]; then
 else
   command -v sudo >/dev/null 2>&1 || die "this script needs root for packages/config — install sudo or run as root"
   SUDO="sudo"
-  msg "alguns passos precisam de root — o sudo pode pedir a tua password"
+  msg "some steps need root — sudo may ask for your password"
   # Autentica JÁ: assim, um falhanço de pkg_install mais à frente significa
   # mesmo "pacote indisponível", nunca "sudo falhou em silêncio".
-  sudo -v || die "autenticação sudo falhou — corre de novo e introduz a password, ou corre como root"
+  sudo -v || die "sudo authentication failed — run again and enter your password, or run as root"
 fi
 
 # ------------------------------------------------------------ detecção de distro
@@ -126,7 +126,7 @@ if [ -z "$PKG" ]; then
   done
 fi
 [ -n "$PKG" ] || die "unsupported distro (need apt, dnf, zypper or pacman). Deps to install manually: slirp4netns uidmap nftables iproute2 conntrack"
-msg "a preparar o host ($DISTRO_NAME, gestor $PKG)..."
+msg "preparing the host ($DISTRO_NAME, $PKG package manager)..."
 
 # ---------------------------------------------------- detecção de hardware
 # Serve duas decisões concretas: (a) que variante do binário descarregar
@@ -151,11 +151,11 @@ if grep -qm1 avx2 /proc/cpuinfo && grep -qm1 bmi2 /proc/cpuinfo && grep -qm1 fma
   CPU_VARIANT="-v3"
 fi
 if [ -n "$CPU_VARIANT" ]; then VARIANT_LABEL="x86-64-v3 (AVX2)"; else VARIANT_LABEL="x86-64 baseline"; fi
-step host cpu "${CPU_MODEL:-desconhecido} (${NCPU} cpus, $VARIANT_LABEL)"
-step host recursos "${RAM_GB}GB RAM · ${DISK_FREE_GB:-?}GB livres em $REAL_HOME"
+step host cpu "${CPU_MODEL:-unknown} (${NCPU} cpus, $VARIANT_LABEL)"
+step host resources "${RAM_GB}GB RAM · ${DISK_FREE_GB:-?}GB free at $REAL_HOME"
 [ -n "$GPU_INFO" ] && step host gpu "$GPU_INFO"
-[ "${RAM_GB:-8}" != '?' ] && [ "${RAM_GB:-8}" -lt 2 ] 2>/dev/null && warn "menos de 2GB de RAM — VMs ficam apertadas; containers OK"
-[ -n "$DISK_FREE_GB" ] && [ "$DISK_FREE_GB" -lt 10 ] 2>/dev/null && warn "menos de 10GB livres — pulls de imagens e rootfs enchem o disco depressa (o kubelet despeja pods sob disk-pressure)"
+[ "${RAM_GB:-8}" != '?' ] && [ "${RAM_GB:-8}" -lt 2 ] 2>/dev/null && warn "less than 2GB of RAM — VMs will be tight; containers are fine"
+[ -n "$DISK_FREE_GB" ] && [ "$DISK_FREE_GB" -lt 10 ] 2>/dev/null && warn "less than 10GB free — image pulls and container rootfs fill the disk fast (the kubelet evicts pods under disk pressure)"
 
 PKG_UPDATED=0
 pkg_install() {
@@ -184,9 +184,9 @@ require_dep() {
   # $1 = fase; $2 = comando que tem de existir no fim; $3 = candidatos; $4 = razão
   local phase="$1" cmd="$2" pkgs="$3" why="$4"
   if has_cmd "$cmd"; then skip "$phase" "$cmd"; return 0; fi
-  step "$phase" "$cmd" "a instalar ($why)..."
-  pkg_install "$pkgs" || die "não consegui instalar '$pkgs' — instala com o teu gestor de pacotes e volta a correr"
-  has_cmd "$cmd" || die "'$pkgs' instalado mas '$cmd' continua ausente"
+  step "$phase" "$cmd" "installing ($why)..."
+  pkg_install "$pkgs" || die "could not install '$pkgs' — install it with your package manager and re-run"
+  has_cmd "$cmd" || die "'$pkgs' installed but '$cmd' is still missing"
   stepok "$phase" "$cmd"
 }
 
@@ -197,7 +197,7 @@ optional_dep() {
   if pkg_install "$pkgs" && has_cmd "$cmd"; then
     stepok "$phase" "$cmd"
   else
-    warn "$cmd indisponível nesta distro — $why não vai funcionar até o instalares"
+    warn "$cmd unavailable on this distro — $why will not work until you install it"
   fi
 }
 
@@ -216,7 +216,7 @@ if [ "$WITH_BINARY" = 1 ]; then
   else
     BASE_URL="https://github.com/$REPO/releases/download/$VERSION"
   fi
-  command -v curl >/dev/null 2>&1 || require_dep deps curl curl "download de releases"
+  command -v curl >/dev/null 2>&1 || require_dep deps curl curl "release downloads"
   TMP=$(mktemp -d)
   trap 'rm -rf "$TMP"' EXIT
   # Variante optimizada para o CPU (x86-64-v3: AVX2/BMI2/FMA) quando ele a
@@ -224,7 +224,7 @@ if [ "$WITH_BINARY" = 1 ]; then
   fetch_asset() { # $1 nome-base (delonix|delonix-cri) → devolve o nome descarregado
     local base="$1" asset="$1-x86_64${CPU_VARIANT}-linux"
     if [ -n "$CPU_VARIANT" ] && ! curl -fsSL -o "$TMP/$asset" "$BASE_URL/$asset" 2>/dev/null; then
-      warn "$asset não existe nesta release — a usar o binário genérico"
+      warn "$asset is not in this release — falling back to the generic binary"
       asset="$base-x86_64-linux"
       curl -fsSL -o "$TMP/$asset" "$BASE_URL/$asset"
     elif [ -z "$CPU_VARIANT" ]; then
@@ -234,39 +234,39 @@ if [ "$WITH_BINARY" = 1 ]; then
   }
   verify_asset() { # nunca instalar um download sem conferir contra o SHA256SUMS
     ( cd "$TMP" && grep -E " $1\$" SHA256SUMS | sha256sum -c - >/dev/null 2>&1 ) \
-      || die "verificação SHA256 FALHOU para $1 — download corrompido ou adulterado, a abortar"
+      || die "SHA256 verification FAILED for $1 — corrupted or tampered download, aborting"
   }
-  step binario delonix "a descarregar ($VERSION, $VARIANT_LABEL)..."
+  step binary delonix "downloading ($VERSION, $VARIANT_LABEL)..."
   curl -fsSL -o "$TMP/SHA256SUMS" "$BASE_URL/SHA256SUMS"
   DELONIX_ASSET=$(fetch_asset delonix)
   verify_asset "$DELONIX_ASSET"
-  step binario delonix "sha256 verificado ($DELONIX_ASSET)"
+  step binary delonix "sha256 verified ($DELONIX_ASSET)"
   $BIN_SUDO install -m 0755 "$TMP/$DELONIX_ASSET" "$BIN_DIR/delonix"
-  stepok binario "delonix -> $BIN_DIR/delonix"
+  stepok binary "delonix -> $BIN_DIR/delonix"
   if [ "$WITH_CRI" = 1 ]; then
     CRI_ASSET=$(fetch_asset delonix-cri)
     verify_asset "$CRI_ASSET"
     $BIN_SUDO install -m 0755 "$TMP/$CRI_ASSET" "$BIN_DIR/delonix-cri"
-    stepok binario "delonix-cri -> $BIN_DIR/delonix-cri"
+    stepok binary "delonix-cri -> $BIN_DIR/delonix-cri"
   fi
-  case ":$PATH:" in *":$BIN_DIR:"*) ;; *) warn "$BIN_DIR não está no teu PATH" ;; esac
+  case ":$PATH:" in *":$BIN_DIR:"*) ;; *) warn "$BIN_DIR is not in your PATH" ;; esac
   # Um delonix ANTIGO mais à frente no PATH faz sombra ao acabado de instalar
   # (caso real: um build 0.3.0 em ~/.local/bin escondia o 0.4.2 e ressuscitava
   # bugs já corrigidos). Detectar e dizer alto qual apagar.
   ACTIVE=$(command -v delonix 2>/dev/null || true)
   if [ -n "$ACTIVE" ] && [ "$ACTIVE" != "$BIN_DIR/delonix" ]; then
-    warn "outro delonix faz sombra ao instalado: '$ACTIVE' ($("$ACTIVE" --version 2>/dev/null || echo versão desconhecida)) vem primeiro no PATH — remove-o (rm $ACTIVE) para usares o $BIN_DIR/delonix"
+    warn "another delonix shadows the one just installed: '$ACTIVE' ($("$ACTIVE" --version 2>/dev/null || echo unknown version)) comes first in PATH — remove it (rm $ACTIVE) to use $BIN_DIR/delonix"
   fi
 else
   BIN_DIR=$(dirname "$(command -v delonix 2>/dev/null || echo /usr/local/bin/delonix)")
 fi
 
 # ------------------------------------------------- dependências core (containers)
-require_dep deps slirp4netns slirp4netns                    "rede rootless / portas publicadas"
-require_dep deps newuidmap   "uidmap|shadow-utils|shadow"   "containers rootless multi-uid (imagens com utilizador não-root)"
-require_dep deps nft         nftables                       "firewall/DNAT da SDN"
-require_dep deps ip          "iproute2|iproute"             "interfaces da SDN (veth/bridge)"
-optional_dep deps conntrack  "conntrack|conntrack-tools"    "limpeza de ligações ao despublicar portas"
+require_dep deps slirp4netns slirp4netns                    "rootless networking / published ports"
+require_dep deps newuidmap   "uidmap|shadow-utils|shadow"   "multi-uid rootless containers (images with non-root users)"
+require_dep deps nft         nftables                       "SDN firewall / port DNAT"
+require_dep deps ip          "iproute2|iproute"             "SDN interfaces (veth/bridge)"
+optional_dep deps conntrack  "conntrack|conntrack-tools"    "connection cleanup on port unpublish"
 
 # ------------------------------------------------------------- subuid / subgid
 # Sem um intervalo de subuids, o userns rootless só mapeia 1 uid — qualquer
@@ -277,7 +277,7 @@ ensure_subid() {
     skip rootless "${file#/etc/}"
     return 0
   fi
-  step rootless "${file#/etc/}" "a adicionar intervalo 100000-165535 para $REAL_USER..."
+  step rootless "${file#/etc/}" "adding range 100000-165535 for $REAL_USER..."
   if command -v usermod >/dev/null 2>&1 && $SUDO usermod "$flag" 100000-165535 "$REAL_USER" 2>/dev/null; then
     stepok rootless "${file#/etc/}"
   else
@@ -294,20 +294,20 @@ ensure_subid /etc/subgid --add-subgids
 # pode criar user namespaces — o delonix morreria logo no unshare(). O perfil
 # unconfined+userns é o mecanismo OFICIAL do Ubuntu para autorizar uma app.
 if [ "$(sysctl -n kernel.apparmor_restrict_unprivileged_userns 2>/dev/null || echo 0)" = 1 ]; then
-  step rootless apparmor "o host restringe userns não-privilegiados — a instalar perfil..."
+  step rootless apparmor "the host restricts unprivileged userns — installing profile..."
   if command -v apparmor_parser >/dev/null 2>&1; then
     printf 'abi <abi/4.0>,\ninclude <tunables/global>\nprofile delonix %s/delonix flags=(unconfined) {\n  userns,\n}\n' "$BIN_DIR" \
       | $SUDO tee /etc/apparmor.d/delonix >/dev/null
     $SUDO apparmor_parser -r /etc/apparmor.d/delonix \
       && stepok rootless apparmor \
-      || warn "não consegui carregar o perfil AppArmor — containers rootless podem falhar no arranque"
+      || warn "could not load the AppArmor profile — rootless containers may fail to start"
   else
-    warn "apparmor_parser ausente com a restrição de userns activa — instala o apparmor ou põe kernel.apparmor_restrict_unprivileged_userns=0"
+    warn "apparmor_parser missing while the userns restriction is active — install apparmor or set kernel.apparmor_restrict_unprivileged_userns=0"
   fi
 fi
 # Debian antigo: userns desligado por sysctl dedicado.
 if [ "$(sysctl -n kernel.unprivileged_userns_clone 2>/dev/null || echo 1)" = 0 ]; then
-  step rootless userns "a activar kernel.unprivileged_userns_clone..."
+  step rootless userns "enabling kernel.unprivileged_userns_clone..."
   echo 'kernel.unprivileged_userns_clone=1' | $SUDO tee /etc/sysctl.d/99-delonix-userns.conf >/dev/null
   $SUDO sysctl -q kernel.unprivileged_userns_clone=1
   stepok rootless userns
@@ -316,23 +316,38 @@ fi
 # ------------------------------------------------------------ dependências de VM
 NEED_RELOGIN=0
 if [ "$WITH_VM" = 1 ]; then
-  optional_dep vm qemu-img     "qemu-utils|qemu-img|qemu-tools"                    "discos overlay de VM"
-  optional_dep vm cloud-localds "cloud-image-utils|cloud-utils"                     "seed ISOs de cloud-init (vm create --ssh-key/--user-data)"
+  optional_dep vm qemu-img     "qemu-utils|qemu-img|qemu-tools"                    "VM overlay disks"
+  optional_dep vm cloud-localds "cloud-image-utils|cloud-utils"                     "cloud-init seed ISOs (vm create --ssh-key/--user-data)"
   # Backend preferido onde a distro o empacota (Fedora/Arch/openSUSE); nas
   # famílias Debian não existe no arquivo — o libvirt abaixo é o fallback
   # que o delonix auto-detecta.
+  # Backend PREFERIDO do motor (delonix-vm tenta-o primeiro; virsh é fallback).
+  # Onde a distro não o empacota (famílias Debian/Ubuntu), instala o binário
+  # ESTÁTICO oficial do upstream — HTTPS do repo oficial; o upstream não publica
+  # checksums, por isso não há verificação de hash (fica anotado).
   if ! command -v cloud-hypervisor >/dev/null 2>&1; then
-    pkg_install cloud-hypervisor >/dev/null 2>&1 \
-      && stepok vm cloud-hypervisor \
-      || step vm cloud-hypervisor "não empacotado nesta distro — o backend será o libvirt"
+    if pkg_install cloud-hypervisor >/dev/null 2>&1; then
+      stepok vm cloud-hypervisor
+    else
+      step vm cloud-hypervisor "not packaged on this distro — fetching the official static binary..."
+      CH_URL="https://github.com/cloud-hypervisor/cloud-hypervisor/releases/latest/download/cloud-hypervisor-static"
+      if curl -fsSL -o /tmp/cloud-hypervisor-static.$$ "$CH_URL" \
+         && $SUDO install -m 0755 /tmp/cloud-hypervisor-static.$$ /usr/local/bin/cloud-hypervisor; then
+        rm -f /tmp/cloud-hypervisor-static.$$
+        stepok vm "cloud-hypervisor -> /usr/local/bin/cloud-hypervisor ($(/usr/local/bin/cloud-hypervisor --version 2>/dev/null | head -1))"
+      else
+        rm -f /tmp/cloud-hypervisor-static.$$
+        warn "could not fetch cloud-hypervisor — the libvirt backend below remains the fallback"
+      fi
+    fi
   else
     skip vm cloud-hypervisor
   fi
-  optional_dep vm virsh "libvirt-clients|libvirt-client|libvirt"                    "backend de VM libvirt"
+  optional_dep vm virsh "libvirt-clients|libvirt-client|libvirt"                    "libvirt VM backend (fallback)"
   if ! command -v qemu-system-x86_64 >/dev/null 2>&1 && [ ! -e /usr/libexec/qemu-kvm ]; then
-    step vm qemu-kvm "a instalar..."
+    step vm qemu-kvm "installing..."
     pkg_install "qemu-system-x86|qemu-kvm|qemu-base|qemu" >/dev/null 2>&1 \
-      && stepok vm qemu-kvm || warn "não consegui instalar o QEMU — VMs libvirt não vão arrancar"
+      && stepok vm qemu-kvm || warn "could not install QEMU — libvirt VMs will not start"
   else
     skip vm qemu-kvm
   fi
@@ -341,16 +356,16 @@ if [ "$WITH_VM" = 1 ]; then
   if command -v systemctl >/dev/null 2>&1; then
     $SUDO systemctl enable --now libvirtd.socket >/dev/null 2>&1 \
       || $SUDO systemctl enable --now libvirtd >/dev/null 2>&1 \
-      || warn "não consegui activar o libvirtd — arranca-o manualmente antes de criar VMs"
+      || warn "could not enable libvirtd — start it manually before creating VMs"
   fi
   # Acesso a /dev/kvm e ao socket do libvirt sem sudo.
   for grp in kvm libvirt; do
     if getent group "$grp" >/dev/null 2>&1 && ! id -nG "$REAL_USER" | tr ' ' '\n' | grep -qx "$grp"; then
-      $SUDO usermod -aG "$grp" "$REAL_USER" && { stepok vm "grupo $grp ($REAL_USER adicionado)"; NEED_RELOGIN=1; }
+      $SUDO usermod -aG "$grp" "$REAL_USER" && { stepok vm "group $grp ($REAL_USER added)"; NEED_RELOGIN=1; }
     fi
   done
   if [ ! -e /dev/kvm ]; then
-    warn "/dev/kvm não existe — virtualização por hardware desligada (activa VT-x/AMD-V na BIOS) ou estás numa VM sem nested virt"
+    warn "/dev/kvm does not exist — hardware virtualization is off (enable VT-x/AMD-V in the BIOS) or you are in a VM without nested virt"
   fi
 fi
 
@@ -368,11 +383,11 @@ fi
 #   max_map_count   — bases de dados/JVMs em containers (Elasticsearch exige-o).
 #   ping_group_range — ping dentro de containers rootless sem CAP_NET_RAW.
 if [ "$WITH_TUNE" = 1 ]; then
-  step kernel modulos "a carregar overlay/br_netfilter/tun..."
+  step kernel modules "loading overlay/br_netfilter/tun..."
   printf '%s\n' overlay br_netfilter tun | $SUDO tee /etc/modules-load.d/delonix.conf >/dev/null
   for m in overlay br_netfilter tun; do $SUDO modprobe "$m" 2>/dev/null || true; done
-  stepok kernel modulos
-  step kernel sysctls "a aplicar (inotify/ip_forward/bridge-nf/max_map_count)..."
+  stepok kernel modules
+  step kernel sysctls "applying (inotify/ip_forward/bridge-nf/max_map_count)..."
   $SUDO tee /etc/sysctl.d/99-delonix.conf >/dev/null <<'SYSCTL'
 # Delonix Runtime — tuning para containers/k8s/VMs (gerado pelo install.sh).
 fs.inotify.max_user_watches = 1048576
@@ -387,45 +402,45 @@ SYSCTL
   if $SUDO sysctl -q -p /etc/sysctl.d/99-delonix.conf >/dev/null 2>&1; then
     stepok kernel sysctls
   else
-    warn "alguns sysctls não aplicaram (kernel sem o módulo?) — voltam a tentar no próximo boot"
+    warn "some sysctls did not apply (kernel without the module?) — they retry on next boot"
   fi
 fi
 
 # ------------------------------------------------------------ completion (bash)
 if [ "$WITH_BINARY" = 1 ] && [ -d /etc/bash_completion.d ] && [ -x "$BIN_DIR/delonix" ]; then
   "$BIN_DIR/delonix" completion bash 2>/dev/null | $SUDO tee /etc/bash_completion.d/delonix >/dev/null \
-    && stepok binario "bash completion" || true
+    && stepok binary "bash completion" || true
 fi
 
 # ----------------------------------------------------------------- verificação
-msg "a verificar a instalação..."
+msg "verifying the installation..."
 FAIL=0
 check() { # $1 descrição, $2.. comando
   local desc="$1"; shift
-  if "$@" >/dev/null 2>&1; then stepok verificar "$desc"; else
-    printf '[verificar] %s: %sFALHOU%s\n' "$desc" "$C_ERR" "$C_0"; FAIL=1
+  if "$@" >/dev/null 2>&1; then stepok verify "$desc"; else
+    printf '[verify] %s: %sFAILED%s\n' "$desc" "$C_ERR" "$C_0"; FAIL=1
   fi
 }
 [ "$WITH_BINARY" = 1 ] && check "delonix ($("$BIN_DIR/delonix" --version 2>/dev/null || echo '?'))" "$BIN_DIR/delonix" --version
 check "slirp4netns"                    has_cmd slirp4netns
 check "newuidmap"                      has_cmd newuidmap
-check "newuidmap privilegiado"         sh -c 'nm=$(command -v newuidmap) && { [ -u "$nm" ] || getcap "$nm" 2>/dev/null | grep -q cap_setuid; }'
+check "newuidmap privileged"           sh -c 'nm=$(command -v newuidmap) && { [ -u "$nm" ] || getcap "$nm" 2>/dev/null | grep -q cap_setuid; }'
 check "nft"                            has_cmd nft
-check "subuid de $REAL_USER"           grep -q "^$REAL_USER:" /etc/subuid
-check "subgid de $REAL_USER"           grep -q "^$REAL_USER:" /etc/subgid
+check "subuid range for $REAL_USER"    grep -q "^$REAL_USER:" /etc/subuid
+check "subgid range for $REAL_USER"    grep -q "^$REAL_USER:" /etc/subgid
 check "/dev/net/tun"                   test -e /dev/net/tun
 check "user namespaces"                unshare -r -n true
 if [ "$WITH_VM" = 1 ]; then
-  check "backend de VM (cloud-hypervisor ou virsh)" sh -c 'command -v cloud-hypervisor || command -v virsh'
+  check "VM backend (cloud-hypervisor or virsh)" sh -c 'command -v cloud-hypervisor || command -v virsh'
 fi
 
 echo
 if [ "$FAIL" = 0 ]; then
-  msg "pronto"
+  msg "ready"
   echo "    delonix container run -d -p 8080:80 nginx && curl localhost:8080"
 else
-  warn "instalação terminou com avisos — revê as linhas FALHOU acima"
+  warn "installation finished with warnings — review the FAILED lines above"
 fi
 if [ "$NEED_RELOGIN" = 1 ]; then
-  warn "termina a sessão e volta a entrar (ou 'newgrp kvm') para os novos grupos terem efeito"
+  warn "log out and back in (or run 'newgrp kvm') for the new group memberships to take effect"
 fi
