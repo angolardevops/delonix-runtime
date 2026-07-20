@@ -84,6 +84,8 @@ Commands:
   pull      Pull a golden VM image from an OCI registry — with no argument, the OFFICIAL Delonix image (ready for `vm create`/`cluster kubeadm`)
   push      Push a local golden VM image to an OCI registry (`vm push &lt;name&gt; &lt;target&gt;`)
   ls        Lista as VMs
+  console   Attach to the VM&#x27;s serial console (interactive terminal) — works with no IP (boot logs, login). Escape: Ctrl-] 
+  vnc       Print the VNC address of a graphical VM (created with `--vnc`, libvirt)
   status    Estado actual (reconcilia liveness/IP com o backend)
   describe  Detalhe legível de uma ou mais VMs, ao estilo `kubectl describe` (para humanos; use `status` para a vista compacta de sempre). Inclui o estado AO VIVO — `delonix_vm::status` reconcilia liveness/IP com o backend
   stop      Pára a VM (preserva disco/registo)
@@ -143,6 +145,8 @@ Options:
           Só libvirt: `user`|`nat`|`bridge`
       --bridge &lt;BRIDGE&gt;
           Nome da bridge (net-mode=bridge) ou rede libvirt (nat)
+      --vnc
+          VNC graphical console (libvirt backend only — Cloud Hypervisor has no display)
   -h, --help
           Print help</code></pre></div>
 <h3>Exemplos</h3><div class="ex"><div class="cap">VM a partir da imagem dourada, com chave SSH</div><pre><code>delonix vm create --name node1 --image k8s-golden --cpus 2 --memory 4096 --ssh-key @~/.ssh/id_ed25519.pub</code></pre></div>
