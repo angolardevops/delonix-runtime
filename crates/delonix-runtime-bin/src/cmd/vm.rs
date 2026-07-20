@@ -662,8 +662,11 @@ fn cmd_console(base: &std::path::Path, name: &str) -> Result<()> {
     // Cloud Hypervisor: ponte tty<->socket.
     let sock = delonix_vm::console_socket(base, name);
     if !sock.exists() {
+        // A VM está viva mas foi arrancada por um binário antigo (serial em
+        // ficheiro, não socket). Um `create` idempotente não a re-arranca; é
+        // preciso parar e deixar o `create` re-arrancar com o socket.
         return Err(Error::Invalid(super::po::tf(
-            "no console socket for VM '{name}' (created before this feature? recreate it)",
+            "no console socket for VM '{name}' — it was started by an older delonix; run `delonix vm stop {name} && delonix vm create {name}` to restart it with a console",
             &[("name", name)],
         )));
     }
