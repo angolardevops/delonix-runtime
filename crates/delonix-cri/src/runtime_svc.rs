@@ -97,7 +97,7 @@ impl RuntimeService for DelonixRuntime {
                     false,
                     "InfraDown",
                     &format!(
-                        "netns de infra rootless em baixo (holder={:?}, slirp={:?})",
+                        "rootless infra netns is down (holder={:?}, slirp={:?})",
                         st.holder_pid, st.slirp_pid
                     ),
                 )
@@ -114,7 +114,7 @@ impl RuntimeService for DelonixRuntime {
                     false,
                     "BridgeMissing",
                     &format!(
-                        "bridge '{}' não existe em /sys/class/net",
+                        "bridge '{}' does not exist in /sys/class/net",
                         delonix_net::infra::INFRA_BRIDGE
                     ),
                 )
@@ -271,7 +271,7 @@ impl RuntimeService for DelonixRuntime {
     async fn exec(&self, r: Request<ExecRequest>) -> Result<Response<ExecResponse>, Status> {
         let req = r.into_inner();
         if req.cmd.is_empty() {
-            return Err(Status::invalid_argument("exec sem comando"));
+            return Err(Status::invalid_argument("exec without a command"));
         }
         // Regista o pedido e devolve a URL do servidor de streaming. O cliente
         // (kubelet/crictl) faz upgrade (SPDY ou WebSocket) lá e nós corremos

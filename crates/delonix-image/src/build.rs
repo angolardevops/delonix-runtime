@@ -112,7 +112,7 @@ pub fn parse_dockerfile(text: &str) -> Result<Dockerfile> {
             // permite extensões/metadados antes do 1.º FROM serem ignorados? Não:
             // qualquer passo antes de FROM é erro (como no Docker).
             return Err(Error::Invalid(format!(
-                "Dockerfile linha {}: `{instr}` antes de qualquer FROM",
+                "Dockerfile line {}: `{instr}` before any FROM",
                 n + 1
             )));
         }
@@ -171,7 +171,7 @@ pub fn parse_dockerfile(text: &str) -> Result<Dockerfile> {
                     .collect();
                 if parts.len() < 2 {
                     return Err(Error::Invalid(format!(
-                        "linha {}: {instr} precisa de src e dst",
+                        "line {}: {instr} requires src and dst",
                         n + 1
                     )));
                 }
@@ -205,7 +205,7 @@ pub fn parse_dockerfile(text: &str) -> Result<Dockerfile> {
             | "SHELL" | "ONBUILD" => {}
             other => {
                 return Err(Error::Invalid(format!(
-                    "Dockerfile linha {}: instrução desconhecida `{other}`",
+                    "Dockerfile line {}: unknown instruction `{other}`",
                     n + 1
                 )))
             }
@@ -214,7 +214,7 @@ pub fn parse_dockerfile(text: &str) -> Result<Dockerfile> {
     // O último estágio é o final (a imagem resultante); os anteriores são intermédios.
     let last = stages
         .pop()
-        .ok_or_else(|| Error::Invalid("Dockerfile sem instrução FROM".into()))?;
+        .ok_or_else(|| Error::Invalid("Dockerfile has no FROM instruction".into()))?;
     df.from = last.from;
     df.steps = last.steps;
     df.stages = stages;
@@ -327,10 +327,10 @@ impl ImageStore {
             let mut builder = tar::Builder::new(&mut buf);
             builder
                 .append_dir_all(".", &upper)
-                .map_err(|e| Error::Invalid(format!("falha a empacotar o diff: {e}")))?;
+                .map_err(|e| Error::Invalid(format!("failed to pack the diff: {e}")))?;
             builder
                 .finish()
-                .map_err(|e| Error::Invalid(format!("falha a fechar o tar: {e}")))?;
+                .map_err(|e| Error::Invalid(format!("failed to close the tar: {e}")))?;
         }
         self.cas().write(&buf)
     }

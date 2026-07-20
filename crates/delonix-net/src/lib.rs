@@ -119,9 +119,9 @@ fn forward_inbound_deny(subnet: &str) {
     if std::env::var_os("DELONIX_FORWARD_OPEN").is_some() {
         // NET-03: o opt-out reverte para default-allow — não deixar isto silencioso.
         tracing::warn!(
-            "AVISO DE SEGURANÇA — DELONIX_FORWARD_OPEN activo: o inbound-deny do forward está \
-             DESLIGADO (containers acessíveis directamente de outras redes/host). Só para \
-             depuração — NÃO usar em produção."
+            "SECURITY WARNING — DELONIX_FORWARD_OPEN is active: the forward inbound-deny is \
+             OFF (containers directly reachable from other networks/the host). For \
+             debugging only — do NOT use in production."
         );
         return;
     }
@@ -341,7 +341,7 @@ pub fn parse_publish(spec: &str) -> Result<(String, String, String)> {
     };
     if proto != "tcp" && proto != "udp" {
         return Err(Error::Invalid(format!(
-            "protocolo inválido em '{spec}' (tcp|udp)"
+            "invalid protocol in '{spec}' (tcp|udp)"
         )));
     }
     let (host_port, cont_port) = match mapping.rsplit_once(':') {
@@ -351,7 +351,7 @@ pub fn parse_publish(spec: &str) -> Result<(String, String, String)> {
     let valid = |p: &str| !p.is_empty() && p.chars().all(|c| c.is_ascii_digit());
     if !valid(host_port) || !valid(cont_port) {
         return Err(Error::Invalid(format!(
-            "porta inválida em '{spec}' (ex.: 8080:80)"
+            "invalid port in '{spec}' (e.g. 8080:80)"
         )));
     }
     Ok((host_port.to_string(), cont_port.to_string(), proto))
@@ -403,11 +403,9 @@ fn parse_rate_bits(s: &str) -> Result<u64> {
     let n: f64 = num
         .trim()
         .parse()
-        .map_err(|_| Error::Invalid(format!("--net-bps inválido: '{s}'")))?;
+        .map_err(|_| Error::Invalid(format!("invalid --net-bps: '{s}'")))?;
     if !n.is_finite() || n <= 0.0 {
-        return Err(Error::Invalid(format!(
-            "--net-bps tem de ser positivo: '{s}'"
-        )));
+        return Err(Error::Invalid(format!("--net-bps must be positive: '{s}'")));
     }
     Ok((n * mult as f64) as u64)
 }
@@ -433,9 +431,9 @@ pub fn parse_net_rate(rate: &str, burst: Option<&str>) -> Result<NetRate> {
     let burst_bytes = match burst {
         Some(b) => {
             let v = parse_size_bytes(b)
-                .ok_or_else(|| Error::Invalid(format!("--net-burst inválido: '{b}'")))?;
+                .ok_or_else(|| Error::Invalid(format!("invalid --net-burst: '{b}'")))?;
             if v == 0 {
-                return Err(Error::Invalid("--net-burst não pode ser zero".into()));
+                return Err(Error::Invalid("--net-burst cannot be zero".into()));
             }
             v
         }
@@ -752,10 +750,10 @@ impl NetworkStore {
         match driver {
             DRIVER_MACVLAN | DRIVER_IPVLAN => {
                 let parent = kv.get("parent").cloned().ok_or_else(|| {
-                    Error::Invalid(format!("rede '{name}' ({driver}) sem parent"))
+                    Error::Invalid(format!("network '{name}' ({driver}) has no parent"))
                 })?;
                 let subnet = kv.get("subnet").cloned().ok_or_else(|| {
-                    Error::Invalid(format!("rede '{name}' ({driver}) sem subnet"))
+                    Error::Invalid(format!("network '{name}' ({driver}) has no subnet"))
                 })?;
                 let gateway = kv.get("gateway").cloned().unwrap_or_default();
                 Ok(Network::lan(name, driver, &parent, &subnet, &gateway))
@@ -764,11 +762,10 @@ impl NetworkStore {
                 let base: u8 = kv
                     .get("base")
                     .and_then(|b| b.parse().ok())
-                    .ok_or_else(|| Error::Invalid(format!("rede '{name}' corrompida")))?;
-                let vni: u32 = kv
-                    .get("vni")
-                    .and_then(|v| v.parse().ok())
-                    .ok_or_else(|| Error::Invalid(format!("rede '{name}' (overlay) sem vni")))?;
+                    .ok_or_else(|| Error::Invalid(format!("network '{name}' is corrupted")))?;
+                let vni: u32 = kv.get("vni").and_then(|v| v.parse().ok()).ok_or_else(|| {
+                    Error::Invalid(format!("network '{name}' (overlay) has no vni"))
+                })?;
                 let peers: Vec<String> = kv
                     .get("peers")
                     .map(|p| {
@@ -788,7 +785,7 @@ impl NetworkStore {
                 let base: u8 = kv
                     .get("base")
                     .and_then(|b| b.parse().ok())
-                    .ok_or_else(|| Error::Invalid(format!("rede '{name}' corrompida")))?;
+                    .ok_or_else(|| Error::Invalid(format!("network '{name}' is corrupted")))?;
                 Ok(Network::user_with_base(name, base))
             }
         }
@@ -814,17 +811,17 @@ impl NetworkStore {
     pub fn create(&self, name: &str) -> Result<Network> {
         if name.is_empty() || name == DEFAULT_NET {
             return Err(Error::Invalid(
-                "'bridge' é a rede por omissão (reservada)".into(),
+                "'bridge' is the default network (reserved)".into(),
             ));
         }
         if !name
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
         {
-            return Err(Error::Invalid(format!("nome de rede inválido: '{name}'")));
+            return Err(Error::Invalid(format!("invalid network name: '{name}'")));
         }
         if self.path(name).exists() {
-            return Err(Error::Invalid(format!("a rede '{name}' já existe")));
+            return Err(Error::Invalid(format!("network '{name}' already exists")));
         }
         let used: Vec<u8> = self
             .list()?
@@ -855,21 +852,21 @@ impl NetworkStore {
     pub fn create_with_base(&self, name: &str, base: u8) -> Result<Network> {
         if name.is_empty() || name == DEFAULT_NET {
             return Err(Error::Invalid(
-                "'bridge' é a rede por omissão (reservada)".into(),
+                "'bridge' is the default network (reserved)".into(),
             ));
         }
         if !name
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
         {
-            return Err(Error::Invalid(format!("nome de rede inválido: '{name}'")));
+            return Err(Error::Invalid(format!("invalid network name: '{name}'")));
         }
         if self.path(name).exists() {
             return self.get(name);
         }
         if !(1..=254).contains(&base) {
             return Err(Error::Invalid(format!(
-                "octeto-base /16 inválido: {base} (1..=254)"
+                "invalid /16 base octet: {base} (1..=254)"
             )));
         }
         std::fs::write(self.path(name), base.to_string())?;
@@ -906,23 +903,23 @@ impl NetworkStore {
     ) -> Result<Network> {
         if name.is_empty() || name == DEFAULT_NET {
             return Err(Error::Invalid(
-                "'bridge' é a rede por omissão (reservada)".into(),
+                "'bridge' is the default network (reserved)".into(),
             ));
         }
         if name == "host" || name == "none" {
-            return Err(Error::Invalid(format!("'{name}' é um driver reservado")));
+            return Err(Error::Invalid(format!("'{name}' is a reserved driver")));
         }
         if !name
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
         {
-            return Err(Error::Invalid(format!("nome de rede inválido: '{name}'")));
+            return Err(Error::Invalid(format!("invalid network name: '{name}'")));
         }
         if self.path(name).exists() {
-            return Err(Error::Invalid(format!("a rede '{name}' já existe")));
+            return Err(Error::Invalid(format!("network '{name}' already exists")));
         }
         if vni == 0 || vni > 0x00ff_ffff {
-            return Err(Error::Invalid("VNI inválido (1..16777215)".into()));
+            return Err(Error::Invalid("invalid VNI (1..16777215)".into()));
         }
         let base = self.free_base(name)?;
         let wgip_line = wg_ip.map(|w| format!("wgip={w}\n")).unwrap_or_default();
@@ -941,11 +938,11 @@ impl NetworkStore {
     pub fn add_overlay_peer(&self, name: &str, peer: &str) -> Result<Network> {
         let net = self.get(name)?;
         if net.driver != DRIVER_OVERLAY {
-            return Err(Error::Invalid(format!("'{name}' não é um overlay")));
+            return Err(Error::Invalid(format!("'{name}' is not an overlay")));
         }
         let (new_ip, _) = parse_overlay_peer(peer);
         if new_ip.is_empty() {
-            return Err(Error::Invalid("peer inválido (falta node_ip)".into()));
+            return Err(Error::Invalid("invalid peer (missing node_ip)".into()));
         }
         let mut peers: Vec<String> = net
             .peers
@@ -956,7 +953,7 @@ impl NetworkStore {
         peers.push(peer.to_string());
         // re-persiste substituindo SÓ a linha `peers=` (preserva base/vni/wgip).
         let raw = std::fs::read_to_string(self.path(name)).map_err(|e| Error::Runtime {
-            context: "ler overlay",
+            context: "read overlay",
             message: e.to_string(),
         })?;
         let new_line = format!("peers={}", peers.join(","));
@@ -974,7 +971,7 @@ impl NetworkStore {
             out.push(new_line);
         }
         std::fs::write(self.path(name), out.join("\n") + "\n").map_err(|e| Error::Runtime {
-            context: "escrever overlay",
+            context: "write overlay",
             message: e.to_string(),
         })?;
         self.get(name)
@@ -993,32 +990,32 @@ impl NetworkStore {
     ) -> Result<Network> {
         if name.is_empty() || name == DEFAULT_NET {
             return Err(Error::Invalid(
-                "'bridge' é a rede por omissão (reservada)".into(),
+                "'bridge' is the default network (reserved)".into(),
             ));
         }
         if name == "host" || name == "none" {
-            return Err(Error::Invalid(format!("'{name}' é um driver reservado")));
+            return Err(Error::Invalid(format!("'{name}' is a reserved driver")));
         }
         if !name
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
         {
-            return Err(Error::Invalid(format!("nome de rede inválido: '{name}'")));
+            return Err(Error::Invalid(format!("invalid network name: '{name}'")));
         }
         if driver != DRIVER_MACVLAN && driver != DRIVER_IPVLAN {
-            return Err(Error::Invalid(format!("driver desconhecido: '{driver}'")));
+            return Err(Error::Invalid(format!("unknown driver: '{driver}'")));
         }
         if self.path(name).exists() {
-            return Err(Error::Invalid(format!("a rede '{name}' já existe")));
+            return Err(Error::Invalid(format!("network '{name}' already exists")));
         }
         if !link_exists(parent) {
             return Err(Error::Invalid(format!(
-                "NIC-pai '{parent}' não existe no host"
+                "parent NIC '{parent}' does not exist on the host"
             )));
         }
         if alloc_ip_cidr(subnet, "deadbeef").is_none() {
             return Err(Error::Invalid(format!(
-                "subnet inválida: '{subnet}' (ex.: 192.168.1.0/24)"
+                "invalid subnet: '{subnet}' (e.g. 192.168.1.0/24)"
             )));
         }
         // AVISO DE SEGURANÇA (consentimento informado): macvlan/ipvlan põem o container
@@ -1031,9 +1028,9 @@ impl NetworkStore {
             network = %name,
             driver = %driver,
             parent = %parent,
-            "AVISO DE SEGURANÇA — a rede é NÃO-FILTRADA: os containers ficam diretamente na LAN \
-             física de '{parent}', FORA do firewall, do anti-spoof e do isolamento do Delonix. \
-             Usa uma rede `bridge` se precisares de filtragem."
+            "SECURITY WARNING — this network is UNFILTERED: containers sit directly on the \
+             physical LAN of '{parent}', OUTSIDE Delonix's firewall, anti-spoof and isolation. \
+             Use a `bridge` network if you need filtering."
         );
         let body =
             format!("driver={driver}\nparent={parent}\nsubnet={subnet}\ngateway={gateway}\n");
@@ -1211,7 +1208,9 @@ impl Net {
         if net.is_lan_driver() {
             if let Some(parent) = &net.parent {
                 if !link_exists(parent) {
-                    return Err(Error::Invalid(format!("NIC-pai '{parent}' não existe")));
+                    return Err(Error::Invalid(format!(
+                        "parent NIC '{parent}' does not exist"
+                    )));
                 }
                 run_ok("ip", &["link", "set", parent, "up"]);
             }
@@ -1406,7 +1405,7 @@ impl Net {
             Some(want) => {
                 if !valid_ip_in_subnet(&net.prefix, want) {
                     return Err(Error::Invalid(format!(
-                        "IP {want} fora da subnet {} da rede '{}'",
+                        "IP {want} outside subnet {} of network '{}'",
                         net.subnet, net.name
                     )));
                 }
@@ -1466,12 +1465,11 @@ impl Net {
         let parent = net
             .parent
             .as_deref()
-            .ok_or_else(|| Error::Invalid(format!("rede '{}' sem NIC-pai", net.name)))?;
+            .ok_or_else(|| Error::Invalid(format!("network '{}' has no parent NIC", net.name)))?;
         let ip = match ip {
             Some(want) => want.to_string(),
-            None => alloc_ip_cidr(&net.subnet, id).ok_or_else(|| {
-                Error::Invalid(format!("não há IP livre na subnet {}", net.subnet))
-            })?,
+            None => alloc_ip_cidr(&net.subnet, id)
+                .ok_or_else(|| Error::Invalid(format!("no free IP in subnet {}", net.subnet)))?,
         };
         let plen = cidr_prefix_len(&net.subnet);
         let ns = netns_name(id);
@@ -1561,7 +1559,7 @@ impl Net {
             Some(want) => {
                 if !valid_ip_in_subnet(&net.prefix, want) {
                     return Err(Error::Invalid(format!(
-                        "IP {want} fora da subnet {} da rede '{}'",
+                        "IP {want} outside subnet {} of network '{}'",
                         net.subnet, net.name
                     )));
                 }
@@ -1623,7 +1621,7 @@ impl Net {
     pub fn remove_network(&self, net: &Network) -> Result<()> {
         if net.name == DEFAULT_NET {
             return Err(Error::Invalid(
-                "a rede 'bridge' por omissão não se remove (usa `network prune`)".into(),
+                "the default 'bridge' network cannot be removed (use `network prune`)".into(),
             ));
         }
         // regras de forward (isolamento) que mencionam esta bridge.
@@ -2143,7 +2141,7 @@ impl Net {
             }
         }
         let mut report = format!(
-            "iptables-save: {tables} tabela(s), {chains} chain(s), {rules} regra(s) — intenção preservada"
+            "iptables-save: {tables} table(s), {chains} chain(s), {rules} rule(s) — intent preserved"
         );
         if let Some(rule) = sample {
             // `iptables-translate` mostra o equivalente nft (dry-run).
@@ -2151,7 +2149,7 @@ impl Net {
             if let Ok(nft) = capture("iptables-translate", &args) {
                 let nft = nft.trim();
                 if !nft.is_empty() {
-                    report.push_str(&format!("\n  exemplo: {rule}\n     -> nft {nft}"));
+                    report.push_str(&format!("\n  example: {rule}\n     -> nft {nft}"));
                 }
             }
         }
@@ -2400,7 +2398,7 @@ pub fn slirp_add_hostfwd(
                 if resp.contains("\"error\"") {
                     return Err(Error::Runtime {
                         context: "slirp hostfwd",
-                        message: format!("porta {host_port}: {}", resp.trim()),
+                        message: format!("port {host_port}: {}", resp.trim()),
                     });
                 }
                 return Ok(()); // {"return":{}} = sucesso

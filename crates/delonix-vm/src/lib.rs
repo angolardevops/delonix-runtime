@@ -136,7 +136,7 @@ fn mem_mib(s: &str) -> u64 {
         // Não degradar em silêncio: um valor mal-escrito ("2GB", "2 Gi") daria
         // metade-ish da RAM pedida sem aviso. Avisa e usa um default seguro.
         Err(_) => {
-            tracing::warn!(value = ?s, "valor de memória inválido; a usar 1024 MiB por omissão");
+            tracing::warn!(value = ?s, "invalid memory value; defaulting to 1024 MiB");
             1024
         }
     }
@@ -176,11 +176,11 @@ fn vm_admission_check(cfg: &VmConfig) -> Result<()> {
     let want = mem_mib(&cfg.memory);
     if want.saturating_add(reserve) > avail {
         return Err(Error::Runtime {
-            context: "admissão VM",
+            context: "VM admission",
             message: format!(
-                "protecção do host: a VM '{}' pede {want} MiB mas o host só tem {avail} MiB \
-                 disponíveis (reserva {reserve} MiB). Pára VMs/containers, reduz a memória, \
-                 ou baixa DELONIX_VM_RESERVE_MIB (por tua conta e risco).",
+                "host protection: VM '{}' asks for {want} MiB but the host only has {avail} MiB \
+                 available (reserve {reserve} MiB). Stop VMs/containers, reduce the memory, \
+                 or lower DELONIX_VM_RESERVE_MIB (at your own risk).",
                 cfg.name
             ),
         });
@@ -271,7 +271,7 @@ fn run_tool(prog: &str, args: &[&str]) -> Result<()> {
     if !st.success() {
         return Err(Error::Runtime {
             context: "vm-tool",
-            message: format!("{prog} falhou"),
+            message: format!("{prog} failed"),
         });
     }
     Ok(())
@@ -332,7 +332,7 @@ pub fn select_backend(want: Option<&str>) -> Result<Box<dyn VmBackend>> {
         }
         Some("libvirt") | Some("kvm") | Some("qemu") => Ok(Box::new(LibvirtBackend)),
         Some(other) if !other.is_empty() => Err(Error::Invalid(format!(
-            "backend de VM desconhecido: '{other}' (usa 'cloud-hypervisor' ou 'libvirt')"
+            "unknown VM backend: '{other}' (use 'cloud-hypervisor' or 'libvirt')"
         ))),
         _ => {
             let ch = CloudHypervisorBackend;
@@ -344,8 +344,7 @@ pub fn select_backend(want: Option<&str>) -> Result<Box<dyn VmBackend>> {
                 return Ok(Box::new(lv));
             }
             Err(Error::Invalid(
-                "nenhum backend de VM disponível: instala 'cloud-hypervisor' ou 'libvirt'+'qemu'"
-                    .into(),
+                "no VM backend available: install 'cloud-hypervisor' or 'libvirt'+'qemu'".into(),
             ))
         }
     }
@@ -406,7 +405,7 @@ impl VmBackend for CloudHypervisorBackend {
         // se o utilizador FORÇAR `backend: cloud-hypervisor` com volumes.
         if !cfg.volumes.is_empty() {
             return Err(Error::Invalid(format!(
-                "VM '{}': spec.volumes precisa do backend libvirt (o Cloud Hypervisor não faz virtio-9p) — remove `backend: cloud-hypervisor` ou os volumes",
+                "VM '{}': spec.volumes requires the libvirt backend (Cloud Hypervisor does not do virtio-9p) — remove `backend: cloud-hypervisor` or the volumes",
                 cfg.name
             )));
         }
@@ -460,7 +459,7 @@ impl VmBackend for CloudHypervisorBackend {
 fn boot_ch(vmdir: &Path, cfg: &VmConfig, overlay: &str, tap: &str, mac: &str) -> Result<i32> {
     let join = infra::infra_join_argv().ok_or_else(|| Error::Runtime {
         context: "vm",
-        message: "o ingress (infra rootless) não está de pé".into(),
+        message: "the ingress (rootless infra) is not up".into(),
     })?;
     let sock = vmdir.join(format!("{}.sock", cfg.name));
     let serial = vmdir.join(format!("{}.serial", cfg.name));
@@ -493,7 +492,7 @@ fn boot_ch(vmdir: &Path, cfg: &VmConfig, overlay: &str, tap: &str, mac: &str) ->
         ch.push(fw.clone());
     } else {
         return Err(Error::Invalid(
-            "VM sem 'kernel' nem 'firmware' — o Cloud Hypervisor precisa de um para arrancar (ex.: firmware: rust-hypervisor-fw para cloud images)".into(),
+            "VM without 'kernel' or 'firmware' — Cloud Hypervisor needs one to boot (e.g. firmware: rust-hypervisor-fw for cloud images)".into(),
         ));
     }
     ch.push("--disk".into());
@@ -545,7 +544,7 @@ fn boot_ch(vmdir: &Path, cfg: &VmConfig, overlay: &str, tap: &str, mac: &str) ->
     if !st.success() {
         return Err(Error::Runtime {
             context: "vm",
-            message: "falha a lançar o cloud-hypervisor (KVM/binário disponível?)".into(),
+            message: "failed to launch cloud-hypervisor (KVM/binary available?)".into(),
         });
     }
     // espera curta pelo pidfile.
@@ -562,7 +561,7 @@ fn boot_ch(vmdir: &Path, cfg: &VmConfig, overlay: &str, tap: &str, mac: &str) ->
     if pid <= 0 {
         return Err(Error::Runtime {
             context: "vm",
-            message: "o cloud-hypervisor não reportou PID (verifica o log da VM)".into(),
+            message: "cloud-hypervisor did not report a PID (check the VM log)".into(),
         });
     }
     Ok(pid)
@@ -847,7 +846,7 @@ impl VmBackend for LibvirtBackend {
         if !st.success() && !self.is_running_uri(uri, &cfg.name) {
             return Err(Error::Runtime {
                 context: "vm",
-                message: "falha a arrancar o domínio libvirt (KVM/permissões/imagem?)".into(),
+                message: "failed to start the libvirt domain (KVM/permissions/image?)".into(),
             });
         }
         Ok(Boot {
@@ -921,8 +920,8 @@ pub fn create(base: &Path, cfg: &VmConfig) -> Result<Vm> {
     // (`vm run`) — recusar em vez de o sobrescrever e deixar essa VM órfã.
     if restarting.is_none() && vmdir.join(format!("{}.json", cfg.name)).exists() {
         return Err(Error::Invalid(format!(
-            "já existe uma VM '{}' criada por `vm run` (QEMU-direto). Remove-a primeiro \
-             (`vm rm {}`) ou usa outro nome — os dois subsistemas partilham a pasta vms/.",
+            "a VM '{}' created by `vm run` (direct-QEMU) already exists. Remove it first \
+             (`vm rm {}`) or use another name — the two subsystems share the vms/ folder.",
             cfg.name, cfg.name
         )));
     }
@@ -953,7 +952,7 @@ pub fn create(base: &Path, cfg: &VmConfig) -> Result<Vm> {
     vm_admission_check(cfg)?;
 
     let disk_path = std::fs::canonicalize(&cfg.disk)
-        .map_err(|_| Error::Invalid(format!("imagem não encontrada: {}", cfg.disk)))?;
+        .map_err(|_| Error::Invalid(format!("image not found: {}", cfg.disk)))?;
     let overlay = vmdir.join(format!("{}.qcow2", cfg.name));
     if !overlay.exists() {
         let bf = disk_backing_format(&disk_path);
@@ -1006,9 +1005,9 @@ pub fn create(base: &Path, cfg: &VmConfig) -> Result<Vm> {
             vm = %cfg.name,
             backend = %backend.id(),
             restart_policy = %vm.restart_policy.as_deref().unwrap_or(""),
-            "restart_policy '{}' na VM '{}' (backend {}) NÃO é supervisionado no host: o reinício \
-             ocorre no próximo `delonix apply`/reconcile (auto-heal), não instantaneamente no \
-             crash. Para reinício imediato usa `--backend libvirt`.",
+            "restart_policy '{}' on VM '{}' (backend {}) is NOT supervised on the host: the restart \
+             happens on the next `delonix apply`/reconcile (auto-heal), not instantly on \
+             crash. For immediate restart use `--backend libvirt`.",
             vm.restart_policy.as_deref().unwrap_or(""),
             cfg.name,
             backend.id()

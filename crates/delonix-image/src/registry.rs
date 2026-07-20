@@ -163,7 +163,7 @@ impl Client {
                 url.rsplit('/').next().unwrap_or("")
             )))
         } else {
-            Err(Error::Registry(format!("HTTP {status} em {url}")))
+            Err(Error::Registry(format!("HTTP {status} at {url}")))
         }
     }
 
@@ -173,7 +173,7 @@ impl Client {
     /// permitirem.
     fn get_token(&self, www: &str, force_scope: Option<&str>) -> Result<String> {
         let realm = extract(www, "realm")
-            .ok_or_else(|| Error::Registry("autenticação sem `realm`".into()))?;
+            .ok_or_else(|| Error::Registry("authentication without `realm`".into()))?;
         let scope = match force_scope {
             Some(s) => s.to_string(),
             None => {
@@ -192,7 +192,7 @@ impl Client {
         let resp = req.send().map_err(reg_err)?;
         if !resp.status().is_success() {
             return Err(Error::Registry(format!(
-                "falha a obter token: HTTP {}",
+                "failed to obtain token: HTTP {}",
                 resp.status()
             )));
         }
@@ -201,7 +201,7 @@ impl Client {
             .or_else(|| v.get("access_token"))
             .and_then(|t| t.as_str())
             .map(String::from)
-            .ok_or_else(|| Error::Registry("resposta de autenticação sem token".into()))
+            .ok_or_else(|| Error::Registry("authentication response without token".into()))
     }
 
     fn manifest_url(&self, reference: &str) -> String {
@@ -286,7 +286,7 @@ impl Client {
         let resp = self.write_req(&|http| http.post(&start))?;
         if resp.status() != reqwest::StatusCode::ACCEPTED {
             return Err(Error::Registry(format!(
-                "abertura de upload: HTTP {} (faça `delonix login {}`?)",
+                "upload start: HTTP {} (run `delonix login {}`?)",
                 resp.status(),
                 self.host
             )));
@@ -295,7 +295,7 @@ impl Client {
             .headers()
             .get(reqwest::header::LOCATION)
             .and_then(|v| v.to_str().ok())
-            .ok_or_else(|| Error::Registry("upload sem cabeçalho Location".into()))?
+            .ok_or_else(|| Error::Registry("upload without Location header".into()))?
             .to_string();
         // Location pode vir absoluto ou relativo ao host.
         let base = if location.starts_with("http") {
@@ -313,9 +313,7 @@ impl Client {
         })?;
         if !resp.status().is_success() {
             let status = resp.status();
-            return Err(Error::Registry(format!(
-                "PUT de blob {digest}: HTTP {status}"
-            )));
+            return Err(Error::Registry(format!("blob PUT {digest}: HTTP {status}")));
         }
         Ok(())
     }
@@ -334,7 +332,7 @@ impl Client {
             let detail = resp.text().unwrap_or_default();
             let detail = detail.chars().take(200).collect::<String>();
             return Err(Error::Registry(format!(
-                "PUT de manifesto: HTTP {status} {detail}"
+                "manifest PUT: HTTP {status} {detail}"
             )));
         }
         Ok(())
@@ -438,7 +436,7 @@ pub fn http_get(url: &str) -> Result<Vec<u8>> {
         .map_err(reg_err)?;
     let resp = client.get(url).send().map_err(reg_err)?;
     if !resp.status().is_success() {
-        return Err(Error::Registry(format!("HTTP {} em {url}", resp.status())));
+        return Err(Error::Registry(format!("HTTP {} at {url}", resp.status())));
     }
     Ok(resp.bytes().map_err(reg_err)?.to_vec())
 }
@@ -562,7 +560,7 @@ pub fn pull_from_registry_with_creds(
         creds,
     };
 
-    tracing::info!(repo = %repo, reference = %refr, host = %host, "a puxar {repo}:{refr} de {host}");
+    tracing::info!(repo = %repo, reference = %refr, host = %host, "pulling {repo}:{refr} from {host}");
 
     // 1) manifesto (pode ser um índice multi-arch)
     let murl = c.manifest_url(&refr);
@@ -591,8 +589,8 @@ pub fn pull_from_registry_with_creds(
                     .unwrap_or(false)
             })
             .or_else(|| index.manifests().first())
-            .ok_or_else(|| Error::Registry("índice de manifestos vazio".into()))?;
-        tracing::info!(arch = %arch, "plataforma escolhida: linux/{arch}");
+            .ok_or_else(|| Error::Registry("empty manifest index".into()))?;
+        tracing::info!(arch = %arch, "platform selected: linux/{arch}");
         let purl = c.manifest_url(pick.digest().as_ref());
         let r = c.fetch(&purl, ACCEPT_MANIFEST)?;
         r.bytes().map_err(reg_err)?.to_vec()
@@ -607,7 +605,7 @@ pub fn pull_from_registry_with_creds(
     let config_digest_str = manifest.config().digest().to_string();
     let config_bytes = c.blob(&config_digest_str)?;
     if sha256_hex(&config_bytes) != manifest.config().digest().digest() {
-        return Err(Error::Registry("digest do config não confere".into()));
+        return Err(Error::Registry("config digest mismatch".into()));
     }
     let config_digest = store.cas().write(&config_bytes)?;
 
@@ -625,14 +623,14 @@ pub fn pull_from_registry_with_creds(
             index = i + 1,
             total,
             digest = %&ldigest[..ldigest.len().min(19)],
-            "a puxar layer {}/{}",
+            "pulling layer {}/{}",
             i + 1,
             total
         );
         let data = c.blob(&ldigest)?;
         let dg = store.cas().write(&data)?;
         if dg != ldigest {
-            return Err(Error::Registry(format!("layer corrompido: {ldigest}")));
+            return Err(Error::Registry(format!("corrupted layer: {ldigest}")));
         }
         layers.push(dg);
     }
@@ -718,7 +716,7 @@ pub fn push_to_registry(store: &ImageStore, source: &str, target: &str) -> Resul
         creds,
     };
 
-    tracing::info!(repo = %repo, reference = %refr, host = %host, "a publicar {repo}:{refr} em {host}");
+    tracing::info!(repo = %repo, reference = %refr, host = %host, "pushing {repo}:{refr} to {host}");
 
     // 1) envio do blob de config.
     let config_data = store.cas().read(&image.id)?;
@@ -732,7 +730,7 @@ pub fn push_to_registry(store: &ImageStore, source: &str, target: &str) -> Resul
             index = i + 1,
             total,
             digest = %&dg[..dg.len().min(19)],
-            "a publicar layer {}/{}",
+            "pushing layer {}/{}",
             i + 1,
             total
         );
@@ -746,7 +744,7 @@ pub fn push_to_registry(store: &ImageStore, source: &str, target: &str) -> Resul
     c.push_manifest(&refr, &manifest_bytes, DOCKER_MANIFEST_MEDIA_TYPE)?;
 
     let digest = format!("sha256:{}", sha256_hex(&manifest_bytes));
-    tracing::info!(host = %host, repo = %repo, reference = %refr, digest = %digest, "publicado: {host}/{repo}:{refr}");
+    tracing::info!(host = %host, repo = %repo, reference = %refr, digest = %digest, "pushed: {host}/{repo}:{refr}");
     Ok(digest)
 }
 
@@ -782,7 +780,7 @@ pub fn push_oci_artifact(
         creds,
     };
 
-    tracing::info!(repo = %repo, reference = %refr, host = %host, "a publicar artefacto {repo}:{refr} em {host}");
+    tracing::info!(repo = %repo, reference = %refr, host = %host, "pushing artifact {repo}:{refr} to {host}");
 
     let config_digest = with_prefix(&sha256_hex(EMPTY_CONFIG_BYTES));
     c.push_blob(&config_digest, EMPTY_CONFIG_BYTES)?;
@@ -791,7 +789,7 @@ pub fn push_oci_artifact(
     tracing::debug!(
         digest = %&layer_digest[..19.min(layer_digest.len())],
         bytes = data.len(),
-        "a publicar blob"
+        "pushing blob"
     );
     c.push_blob(&layer_digest, data)?;
 
@@ -817,7 +815,7 @@ pub fn push_oci_artifact(
     c.push_manifest(&refr, &manifest_bytes, MediaType::ImageManifest.as_ref())?;
 
     let digest = format!("sha256:{}", sha256_hex(&manifest_bytes));
-    tracing::info!(host = %host, repo = %repo, reference = %refr, digest = %digest, "publicado: {host}/{repo}:{refr}");
+    tracing::info!(host = %host, repo = %repo, reference = %refr, digest = %digest, "pushed: {host}/{repo}:{refr}");
     Ok(digest)
 }
 
@@ -843,11 +841,11 @@ pub fn pull_oci_artifact(root: &std::path::Path, source: &str) -> Result<Vec<u8>
     let url = c.manifest_url(&refr);
     let manifest_bytes = c.fetch(&url, accept)?.bytes().map_err(reg_err)?.to_vec();
     let manifest: ImageManifest = serde_json::from_slice(&manifest_bytes)
-        .map_err(|e| Error::Registry(format!("manifesto de artefacto inválido: {e}")))?;
+        .map_err(|e| Error::Registry(format!("invalid artifact manifest: {e}")))?;
     let layer = manifest
         .layers()
         .first()
-        .ok_or_else(|| Error::Registry("manifesto de artefacto sem layers".into()))?;
+        .ok_or_else(|| Error::Registry("artifact manifest has no layers".into()))?;
     let layer_digest = layer.digest().to_string();
     let data = c.blob(&layer_digest)?;
 
@@ -859,7 +857,7 @@ pub fn pull_oci_artifact(root: &std::path::Path, source: &str) -> Result<Vec<u8>
     let got = format!("sha256:{}", sha256_hex(&data));
     if got != layer_digest {
         return Err(Error::Registry(format!(
-            "artefacto corrompido ou adulterado: digest esperado {layer_digest}, obtido {got}"
+            "artifact corrupted or tampered: expected digest {layer_digest}, got {got}"
         )));
     }
     Ok(data)
@@ -1228,7 +1226,7 @@ mod tests {
 
         let err =
             pull_oci_artifact(&tmp, &target).expect_err("pull devia recusar o blob adulterado");
-        assert!(format!("{err}").contains("adulterado") || format!("{err}").contains("digest"));
+        assert!(format!("{err}").contains("tampered") || format!("{err}").contains("digest"));
 
         let _ = std::fs::remove_dir_all(&tmp);
     }

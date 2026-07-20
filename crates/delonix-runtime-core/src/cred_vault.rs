@@ -82,7 +82,7 @@ impl CredVault {
                 Ok(k)
             }
             Ok(_) => Err(Error::Invalid(format!(
-                "chave-mestra corrompida em {}",
+                "corrupted master key at {}",
                 key_path.display()
             ))),
             Err(ref e) if e.kind() == std::io::ErrorKind::NotFound => {
@@ -111,7 +111,7 @@ impl CredVault {
         random_bytes(&mut nonce)?;
         let ct = Self::cipher(&self.key)
             .encrypt(XNonce::from_slice(&nonce), plaintext)
-            .map_err(|_| Error::Invalid("falha a cifrar".into()))?;
+            .map_err(|_| Error::Invalid("failed to encrypt".into()))?;
         let mut blob = Vec::with_capacity(NONCE_LEN + ct.len());
         blob.extend_from_slice(&nonce);
         blob.extend_from_slice(&ct);
@@ -121,20 +121,18 @@ impl CredVault {
     /// Decifra um blob `nonce(24) || ciphertext` produzido por [`CredVault::seal`].
     pub fn unseal(&self, blob: &[u8]) -> Result<Vec<u8>> {
         if blob.len() < NONCE_LEN + 16 {
-            return Err(Error::Invalid("blob cifrado corrompido".into()));
+            return Err(Error::Invalid("corrupted encrypted blob".into()));
         }
         let (nonce, ct) = blob.split_at(NONCE_LEN);
         Self::cipher(&self.key)
             .decrypt(XNonce::from_slice(nonce), ct)
-            .map_err(|_| Error::Invalid("falha a decifrar (chave errada?)".into()))
+            .map_err(|_| Error::Invalid("failed to decrypt (wrong key?)".into()))
     }
 
     /// Cifra e persiste uma credencial (sobrescreve se existir).
     pub fn put(&self, name: &str, value: &str) -> Result<()> {
         if !valid_cred_name(name) {
-            return Err(Error::Invalid(format!(
-                "nome de credencial inválido: {name}"
-            )));
+            return Err(Error::Invalid(format!("invalid credential name: {name}")));
         }
         write_0600(&self.cred_path(name), &self.seal(value.as_bytes())?)?;
         Ok(())
@@ -148,12 +146,10 @@ impl CredVault {
             Err(e) => return Err(Error::Io(e)),
         };
         let pt = self.unseal(&blob).map_err(|_| {
-            Error::Invalid(format!(
-                "falha a decifrar {name} (chave errada/corrompido?)"
-            ))
+            Error::Invalid(format!("failed to decrypt {name} (wrong key/corrupted?)"))
         })?;
         let s = String::from_utf8(pt)
-            .map_err(|_| Error::Invalid(format!("credencial {name} não é UTF-8")))?;
+            .map_err(|_| Error::Invalid(format!("credential {name} is not UTF-8")))?;
         Ok(Some(s))
     }
 
@@ -210,7 +206,7 @@ impl CredVault {
             random_bytes(&mut nonce)?;
             let ct = cipher
                 .encrypt(XNonce::from_slice(&nonce), v.as_bytes())
-                .map_err(|_| Error::Invalid("falha a recifrar na rotação".into()))?;
+                .map_err(|_| Error::Invalid("failed to re-encrypt during rotation".into()))?;
             let mut blob = Vec::with_capacity(NONCE_LEN + ct.len());
             blob.extend_from_slice(&nonce);
             blob.extend_from_slice(&ct);

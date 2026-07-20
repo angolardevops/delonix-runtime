@@ -154,7 +154,7 @@ fn write_rec<T: Serialize>(dir: &Path, id: &str, rec: &T) -> Result<(), Status> 
 }
 fn read_rec<T: for<'de> Deserialize<'de>>(dir: &Path, id: &str) -> Result<T, Status> {
     let data = std::fs::read(dir.join(format!("{id}.json")))
-        .map_err(|_| Status::not_found(format!("{id} não encontrado")))?;
+        .map_err(|_| Status::not_found(format!("{id} not found")))?;
     serde_json::from_slice(&data).map_err(st)
 }
 fn list_recs<T: for<'de> Deserialize<'de>>(dir: &Path) -> Vec<T> {
@@ -262,7 +262,7 @@ pub fn run_pod_sandbox(
 ) -> Result<Response<RunPodSandboxResponse>, Status> {
     let cfg = req
         .config
-        .ok_or_else(|| Status::invalid_argument("sem config"))?;
+        .ok_or_else(|| Status::invalid_argument("missing config"))?;
     let md = cfg.metadata.clone().unwrap_or_default();
     let id = delonix_runtime_core::generate_id();
     // Rede do host? (namespace_options.network == NODE) → sem infra/netns próprio.
@@ -295,25 +295,25 @@ pub fn run_pod_sandbox(
         let cni = delonix_net::cni::enabled_conf();
         if let Some(conf) = cni.filter(|_| delonix_runtime::is_rootless()) {
             let conf_json = serde_json::to_string(&conf)
-                .map_err(|e| Status::internal(format!("serializar conflist: {e}")))?;
+                .map_err(|e| Status::internal(format!("serializing conflist: {e}")))?;
             match delonix_net::infra::cni_attach_container(&pod, &conf_json) {
                 Ok((_netns, cidr)) => {
                     cni_ip = cidr.split('/').next().unwrap_or("").to_string();
                 }
-                Err(e) => return Err(Status::internal(format!("CNI ADD do sandbox {pod}: {e}"))),
+                Err(e) => return Err(Status::internal(format!("CNI ADD of sandbox {pod}: {e}"))),
             }
         } else if delonix_runtime::is_rootless() {
             // ROOTLESS: o pod é um netns PARTILHADO do ingress (delonix0 + DHCP +
             // DNS + firewall); os containers do sandbox juntam-se via `--pod`.
             if !delonix_detached(base, &["netns", "attach", &pod])? {
                 return Err(Status::internal(format!(
-                    "falha a criar o sandbox de ingress {pod}"
+                    "failed to create the ingress sandbox {pod}"
                 )));
             }
         } else if !delonix_detached(base, &["pod", "create", &pod, "--network"])? {
             // ROOT: infra container (`pod-cri-<id>`) detém o netns (estilo "pause").
             return Err(Status::internal(format!(
-                "falha a criar o pod sandbox {pod}"
+                "failed to create the pod sandbox {pod}"
             )));
         }
     }
@@ -468,7 +468,7 @@ pub fn create_container(
 ) -> Result<Response<CreateContainerResponse>, Status> {
     let cfg = req
         .config
-        .ok_or_else(|| Status::invalid_argument("sem config"))?;
+        .ok_or_else(|| Status::invalid_argument("missing config"))?;
     let md = cfg.metadata.unwrap_or_default();
     let image = cfg.image.map(|s| s.image).unwrap_or_default();
     if image.is_empty() {
@@ -520,7 +520,7 @@ pub fn create_container(
     // CreateContainer, como o restante security context.
     if run_as_group.is_some() && run_as_user.is_none() && run_as_username.is_empty() {
         return Err(Status::invalid_argument(
-            "run_as_group especificado sem run_as_user nem run_as_username",
+            "run_as_group specified without run_as_user or run_as_username",
         ));
     }
     // Valida JÁ no CreateContainer (como o runc): um perfil AppArmor que não esteja
@@ -528,7 +528,7 @@ pub fn create_container(
     if let Some(p) = &apparmor {
         if p != "unconfined" && p != "delonix-default" && !apparmor_loaded(p) {
             return Err(Status::invalid_argument(format!(
-                "perfil AppArmor '{p}' não está carregado no host"
+                "AppArmor profile '{p}' is not loaded on the host"
             )));
         }
     }
@@ -541,7 +541,7 @@ pub fn create_container(
             String::new()
         } else if lp.starts_with('/') || lp.split('/').any(|seg| seg == ".." || seg == ".") {
             return Err(Status::invalid_argument(
-                "log_path inválido: tem de ser relativo e sem '..'",
+                "invalid log_path: must be relative and without '..'",
             ));
         } else {
             let dir = read_rec::<SandboxRec>(&sb_dir(base), &req.pod_sandbox_id)
@@ -681,9 +681,7 @@ pub fn start_container(
     args.extend(rec.args.iter().cloned());
     let argv: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
     if !delonix_detached(base, &argv)? {
-        return Err(Status::internal(format!(
-            "falha a arrancar o container {id}"
-        )));
+        return Err(Status::internal(format!("failed to start container {id}")));
     }
     rec.started = true;
     write_rec(&ct_dir(base), &id, &rec)?;
@@ -715,7 +713,7 @@ pub fn stop_container(
             && c.pid.map(delonix_runtime::is_alive).unwrap_or(false);
         if alive {
             return Err(Status::internal(format!(
-                "'cri-{id}' continua a correr após stop"
+                "'cri-{id}' is still running after stop"
             )));
         }
     }
@@ -734,7 +732,7 @@ pub fn remove_container(
     let gone = out.status.success() || stderr_not_found(&out.stderr);
     if !gone {
         return Err(Status::internal(format!(
-            "remoção de 'cri-{id}' falhou (registo preservado p/ retry): {}",
+            "removal of 'cri-{id}' failed (record preserved for retry): {}",
             String::from_utf8_lossy(&out.stderr).trim()
         )));
     }
@@ -826,7 +824,7 @@ pub fn exec_sync(
     timeout: i64,
 ) -> Result<Response<ExecSyncResponse>, Status> {
     if cmd.is_empty() {
-        return Err(Status::invalid_argument("exec_sync sem comando"));
+        return Err(Status::invalid_argument("exec_sync without a command"));
     }
     let name = format!("cri-{id}");
     // Delega no binário `delonix exec` (single-threaded; faz setns ao container).

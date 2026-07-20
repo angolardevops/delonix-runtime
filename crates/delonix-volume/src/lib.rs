@@ -136,7 +136,7 @@ impl VolumeStore {
         options: Option<String>,
     ) -> Result<Volume> {
         if !Self::valid_name(name) {
-            return Err(Error::Invalid(format!("nome de volume inválido: {name:?}")));
+            return Err(Error::Invalid(format!("invalid volume name: {name:?}")));
         }
         if self.meta_path(name).exists() {
             let v = self.inspect(name)?;
@@ -147,7 +147,7 @@ impl VolumeStore {
         // `servidor:/export`, cifs `//servidor/share`, webdav `https://…`.
         if is_network_driver(driver) && device.as_deref().unwrap_or("").is_empty() {
             return Err(Error::Invalid(format!(
-                "volume {driver} requer um device (o alvo da montagem)"
+                "{driver} volume requires a device (the mount target)"
             )));
         }
         let data = self.data_dir(name);
@@ -194,7 +194,10 @@ impl VolumeStore {
         }
         let fstype = mount_fstype(&vol.driver);
         let device = vol.device.as_ref().ok_or_else(|| {
-            Error::Invalid(format!("volume {} '{}' sem device", vol.driver, vol.name))
+            Error::Invalid(format!(
+                "{} volume '{}' has no device",
+                vol.driver, vol.name
+            ))
         })?;
         let mut args = vec!["-t", fstype, device.as_str(), vol.mountpoint.as_str()];
         if let Some(o) = &vol.options {
@@ -266,7 +269,7 @@ impl VolumeStore {
     pub fn snapshot_path(&self, volume: &str, snap: &str) -> Result<PathBuf> {
         if !safe_snapshot_name(snap) {
             return Err(Error::Invalid(format!(
-                "nome de snapshot inválido: '{snap}' (usa [a-zA-Z0-9._-], sem '/' nem '..')"
+                "invalid snapshot name: '{snap}' (use [a-zA-Z0-9._-], no '/' or '..')"
             )));
         }
         Ok(self.snapshots_dir(volume).join(format!("{snap}.tar.gz")))
@@ -305,7 +308,7 @@ impl VolumeStore {
         let p = self.snapshot_path(volume, snap)?;
         if !p.exists() {
             return Err(Error::NotFound(format!(
-                "snapshot {snap} do volume {volume}"
+                "snapshot {snap} of volume {volume}"
             )));
         }
         fs::remove_file(p)?;
@@ -419,7 +422,7 @@ impl VolumeStore {
             // só criamos loopback sobre um `_data` VAZIO (senão esconderíamos dados).
             if self.usage(name) > 0 {
                 return Err(Error::Invalid(
-                    "quota dura (loopback) só no volume vazio; cria com --quota ou esvazia primeiro".into(),
+                    "hard quota (loopback) only on an empty volume; create with --quota or empty it first".into(),
                 ));
             }
             // imagem esparsa do tamanho da quota → ext4 → mount por loop.
@@ -448,7 +451,7 @@ impl VolumeStore {
             )?;
             let dev = Self::loop_dev(&img).ok_or_else(|| Error::Runtime {
                 context: "quota",
-                message: "loop device não encontrado".into(),
+                message: "loop device not found".into(),
             })?;
             Self::run("losetup", &["-c", &dev])?; // reconhece o novo tamanho do backing
             Self::run("resize2fs", &[&dev])?; // online grow
@@ -457,7 +460,7 @@ impl VolumeStore {
             // Recusa se ocupado (container a usar) ou se a quota < uso atual.
             if self.usage(name) > quota {
                 return Err(Error::Invalid(
-                    "a nova quota é menor que o uso atual — liberta espaço primeiro".into(),
+                    "the new quota is smaller than the current usage — free up space first".into(),
                 ));
             }
             if std::process::Command::new("umount")
@@ -467,7 +470,7 @@ impl VolumeStore {
                 .unwrap_or(true)
             {
                 return Err(Error::Invalid(
-                    "volume em uso — pára os containers para encolher a quota".into(),
+                    "volume in use — stop the containers to shrink the quota".into(),
                 ));
             }
             let blocks = format!("{}s", quota / 512); // resize2fs aceita tamanho em sectores
@@ -513,7 +516,7 @@ impl VolumeStore {
         let parts: Vec<&str> = spec.split(':').collect();
         if parts.len() < 2 || parts.len() > 3 {
             return Err(Error::Invalid(format!(
-                "spec de volume inválida: {spec:?} (usa origem:/destino[:ro])"
+                "invalid volume spec: {spec:?} (use source:/target[:ro])"
             )));
         }
         let src = parts[0];
@@ -521,14 +524,14 @@ impl VolumeStore {
         let readonly = parts.get(2).map(|o| *o == "ro").unwrap_or(false);
         if !target.starts_with('/') {
             return Err(Error::Invalid(format!(
-                "destino deve ser absoluto: {target:?}"
+                "target must be absolute: {target:?}"
             )));
         }
 
         let source = if src.starts_with('/') || src.starts_with('.') {
             // bind mount de um caminho do host
             let p = fs::canonicalize(src)
-                .map_err(|_| Error::Invalid(format!("caminho de bind inexistente: {src}")))?;
+                .map_err(|_| Error::Invalid(format!("bind path does not exist: {src}")))?;
             p.to_string_lossy().into_owned()
         } else {
             // volume nomeado (cria a pedido, como o Docker; monta o NFS se for o caso)

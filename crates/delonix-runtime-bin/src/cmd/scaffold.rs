@@ -604,7 +604,7 @@ fn manifest_stack(o: &InitOpts) -> String {
          #   `127.0.0.1` — testado e funcional em rootless. As alternativas HOJE não\n\
          #   servem para um scaffold que tem de funcionar à primeira:\n\
          #     * `network: <rede>` (isolamento + DNS por nome) tem uma limitação\n\
-         #       CONHECIDA em rootless — o `setns` falha (\"netns do pod indisponível\"),\n\
+         #       CONHECIDA em rootless — o `setns` falha (\"pod netns unavailable\"),\n\
          #       porque a netns vive no userns do holder. Só funciona como root.\n\
          #     * `ports:` dá ao container uma netns PRÓPRIA com slirp — óptimo para\n\
          #       expor ao mundo, mas o slirp corre com `--disable-host-loopback`, por\n\

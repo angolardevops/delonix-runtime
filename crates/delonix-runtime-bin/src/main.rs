@@ -307,7 +307,7 @@ fn main() {
     // ficheiro. Interceptado ANTES do clap — não é um subcomando público.
     if raw.len() == 4 && raw[1] == "netns" && raw[2] == "run" {
         if let Err(e) = cmd::container::run_from_spec(std::path::Path::new(&raw[3])) {
-            eprintln!("delonix: {e}");
+            eprintln!("delonix: {}", cmd::po::t_dyn(&e.to_string()));
             std::process::exit(1);
         }
         std::process::exit(0);
@@ -325,7 +325,7 @@ fn main() {
     // Interceptados antes do clap, como os `netns` acima.
     if raw.len() == 3 && raw[1] == "__rmtree" {
         if let Err(e) = cmd::mapped::rmtree(std::path::Path::new(&raw[2])) {
-            eprintln!("delonix: {e}");
+            eprintln!("delonix: {}", cmd::po::t_dyn(&e.to_string()));
             std::process::exit(1);
         }
         std::process::exit(0);
@@ -336,7 +336,7 @@ fn main() {
             std::path::Path::new(&raw[3]),
             std::path::Path::new(&raw[4]),
         ) {
-            eprintln!("delonix: {e}");
+            eprintln!("delonix: {}", cmd::po::t_dyn(&e.to_string()));
             std::process::exit(1);
         }
         std::process::exit(0);
@@ -345,7 +345,7 @@ fn main() {
         if let Err(e) =
             cmd::mapped::buildtar(std::path::Path::new(&raw[2]), std::path::Path::new(&raw[3]))
         {
-            eprintln!("delonix: {e}");
+            eprintln!("delonix: {}", cmd::po::t_dyn(&e.to_string()));
             std::process::exit(1);
         }
         std::process::exit(0);

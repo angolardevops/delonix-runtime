@@ -94,7 +94,7 @@ impl Phase<Created> {
 impl Phase<Running> {
     /// O `pid` do init (existe só no estado `Running`).
     pub fn pid(&self) -> i32 {
-        self.pid.expect("Phase<Running> tem sempre pid")
+        self.pid.expect("Phase<Running> always has a pid")
     }
     /// `Running → Stopped`, guardando o código de saída.
     pub fn stop(self, code: i32) -> Phase<Stopped> {
@@ -114,7 +114,7 @@ impl Phase<Running> {
 impl Phase<Stopped> {
     /// O código de saída (existe só no estado `Stopped`).
     pub fn exit_code(&self) -> i32 {
-        self.code.expect("Phase<Stopped> tem sempre código")
+        self.code.expect("Phase<Stopped> always has an exit code")
     }
     /// `Stopped → Created` (restart): reutiliza o id, limpa pid/código.
     pub fn restart(self) -> Phase<Created> {

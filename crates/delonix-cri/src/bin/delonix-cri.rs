@@ -13,9 +13,9 @@ fn main() {
     let addr = std::env::var("DELONIX_CRI_ADDR")
         .unwrap_or_else(|_| "unix:///run/delonix-cri.sock".to_string());
 
-    tracing::info!(%addr, root = %base.display(), "delonix-cri a arrancar");
+    tracing::info!(%addr, root = %base.display(), "delonix-cri starting");
     if let Err(e) = delonix_cri::serve_blocking(base, &addr) {
-        tracing::error!(error = %e, "delonix-cri terminou com erro");
+        tracing::error!(error = %e, "delonix-cri exited with error");
         std::process::exit(1);
     }
 }

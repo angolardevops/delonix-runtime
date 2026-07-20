@@ -136,7 +136,7 @@ impl ImageService for DelonixImage {
         let r = req.into_inner();
         let name = r.image.map(|s| s.image).unwrap_or_default();
         if name.is_empty() {
-            return Err(Status::invalid_argument("image vazia"));
+            return Err(Status::invalid_argument("empty image"));
         }
         // `AuthConfig` vem dos `imagePullSecrets` do Pod (o kubelet resolve-os e
         // manda aqui) — SEM isto, qualquer registry privado falha porque
@@ -285,7 +285,7 @@ pub fn serve_blocking(base: PathBuf, addr: &str) -> Result<(), delonix_runtime_c
             }
         })?;
         let incoming = tokio_stream::wrappers::UnixListenerStream::new(uds);
-        eprintln!("delonix-cri (CRI v1) a escutar em unix://{path}");
+        eprintln!("delonix-cri (CRI v1) listening on unix://{path}");
 
         // Servidor de streaming (exec/attach/port-forward): HTTP/WebSocket numa
         // porta de loopback. As RPCs devolvem URLs que apontam para cá.
@@ -304,7 +304,7 @@ pub fn serve_blocking(base: PathBuf, addr: &str) -> Result<(), delonix_runtime_c
             })?;
         let advertised = format!("http://127.0.0.1:{stream_port}");
         let streamer = streaming::Streamer::new(base.clone(), advertised.clone());
-        eprintln!("delonix-cri: streaming (exec/attach) em {advertised}");
+        eprintln!("delonix-cri: streaming (exec/attach) at {advertised}");
         let app = streamer.clone().router();
         tokio::spawn(async move {
             let _ = axum::serve(stream_listener, app).await;
@@ -318,13 +318,13 @@ pub fn serve_blocking(base: PathBuf, addr: &str) -> Result<(), delonix_runtime_c
             tokio::spawn(async move {
                 match tokio::net::TcpListener::bind(&maddr).await {
                     Ok(l) => {
-                        tracing::info!(addr = %maddr, "delonix-cri: /metrics a escutar");
+                        tracing::info!(addr = %maddr, "delonix-cri: /metrics listening");
                         let app = axum::Router::new()
                             .route("/metrics", axum::routing::get(metrics_handler));
                         let _ = axum::serve(l, app).await;
                     }
                     Err(e) => {
-                        tracing::error!(addr = %maddr, error = %e, "delonix-cri: bind de /metrics falhou")
+                        tracing::error!(addr = %maddr, error = %e, "delonix-cri: /metrics bind failed")
                     }
                 }
             });

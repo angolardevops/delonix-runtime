@@ -54,7 +54,15 @@ pub fn tf(en: &'static str, subs: &[(&str, &str)]) -> String {
     out
 }
 
-/// Variante para strings DINÂMICAS (o help do clap chega como `String`).
+/// Variante para strings DINÂMICAS — o help do clap e o PRINTER DE ERROS do
+/// main.rs (mensagens dos crates de MOTOR chegam como texto já formatado; os
+/// crates não podem depender deste catálogo, por isso a tradução acontece à
+/// saída, por lookup do texto EN completo — mensagens com valores interpolados
+/// não casam e saem em EN, limitação conhecida e documentada).
+pub fn t_dyn(s: &str) -> String {
+    t_owned(s)
+}
+
 fn t_owned(s: &str) -> String {
     if !super::output::is_pt() {
         return s.to_string();

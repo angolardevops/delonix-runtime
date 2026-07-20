@@ -51,24 +51,24 @@ pub fn load_docker_archive(store: &ImageStore, tar_path: &Path) -> Result<Image>
             let expected = path_to_digest(&name);
             if digest != expected {
                 return Err(Error::Invalid(format!(
-                    "blob corrompido: {name} tem sha256 {digest}"
+                    "corrupted blob: {name} has sha256 {digest}"
                 )));
             }
         }
     }
 
-    let manifest_bytes =
-        manifest_bytes.ok_or_else(|| Error::Invalid("manifest.json em falta no arquivo".into()))?;
+    let manifest_bytes = manifest_bytes
+        .ok_or_else(|| Error::Invalid("manifest.json missing from the archive".into()))?;
     let manifests: Vec<DockerManifest> = serde_json::from_slice(&manifest_bytes)?;
     let manifest = manifests
         .into_iter()
         .next()
-        .ok_or_else(|| Error::Invalid("manifest.json vazio".into()))?;
+        .ok_or_else(|| Error::Invalid("empty manifest.json".into()))?;
 
     let config_digest = path_to_digest(&manifest.config);
     let config_bytes = store.cas().read(&config_digest)?;
     if sha256_hex(&config_bytes) != crate::cas::strip(&config_digest) {
-        return Err(Error::Invalid("digest do config não confere".into()));
+        return Err(Error::Invalid("config digest mismatch".into()));
     }
     // Lê a config de execução do blob de config OCI (`ImageConfiguration`).
     let oci_config: ImageConfiguration = serde_json::from_slice(&config_bytes)?;

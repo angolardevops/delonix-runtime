@@ -561,3 +561,750 @@ msgstr "dashboard estilo htop"
 
 msgid "docs"
 msgstr "docs"
+
+# ---- mensagens dos crates de MOTOR (traduzidas no printer de erros do bin;
+# as interpoladas não casam no lookup e saem em EN — limitação documentada) --
+
+msgid "corrupted master key at {}"
+msgstr "chave-mestra corrompida em {}"
+
+msgid "failed to encrypt"
+msgstr "falha a cifrar"
+
+msgid "corrupted encrypted blob"
+msgstr "blob cifrado corrompido"
+
+msgid "failed to decrypt (wrong key?)"
+msgstr "falha a decifrar (chave errada?)"
+
+msgid "invalid credential name: {name}"
+msgstr "nome de credencial inválido: {name}"
+
+msgid "failed to decrypt {name} (wrong key/corrupted?)"
+msgstr "falha a decifrar {name} (chave errada/corrompido?)"
+
+msgid "credential {name} is not UTF-8"
+msgstr "credencial {name} não é UTF-8"
+
+msgid "failed to re-encrypt during rotation"
+msgstr "falha a recifrar na rotação"
+
+msgid "invalid secret name: {:?}"
+msgstr "nome de segredo inválido: {:?}"
+
+msgid "invalid env key: {k:?}"
+msgstr "chave de env inválida: {k:?}"
+
+msgid "secret {name}"
+msgstr "segredo {name}"
+
+msgid "Runtime build information"
+msgstr "Informação de build do runtime"
+
+msgid "CRI pod sandboxes created (total)"
+msgstr "Pod sandboxes CRI criados (total)"
+
+msgid "CRI containers created (total)"
+msgstr "Containers CRI criados (total)"
+
+msgid "Images pulled via CRI (total)"
+msgstr "Imagens puxadas via CRI (total)"
+
+msgid "OTLP: exporter failed to build — continuing with logs only (fmt)"
+msgstr "OTLP: exportador não construiu — a seguir só com logs (fmt)"
+
+msgid "Phase<Running> always has a pid"
+msgstr "Phase<Running> tem sempre pid"
+
+msgid "Phase<Stopped> always has an exit code"
+msgstr "Phase<Stopped> tem sempre código"
+
+msgid "delonix: architecture without seccomp support; aborting the container"
+msgstr "delonix: arquitectura sem suporte seccomp; a abortar o container"
+
+msgid "delonix: failed to build the seccomp filter: {e}; aborting"
+msgstr "delonix: falha a construir o filtro seccomp: {e}; a abortar"
+
+msgid "delonix: failed to apply seccomp: {e}; aborting the container"
+msgstr "delonix: falha a aplicar o seccomp: {e}; a abortar o container"
+
+msgid "NO_NEW_PRIVS inactive ({no_new_privs:?})"
+msgstr "NO_NEW_PRIVS inativo ({no_new_privs:?})"
+
+msgid "seccomp is not in filter mode (Seccomp={seccomp_mode:?})"
+msgstr "seccomp não está em modo filtro (Seccomp={seccomp_mode:?})"
+
+msgid "CapBnd missing from /proc/self/status"
+msgstr "CapBnd ausente em /proc/self/status"
+
+msgid "CapEff missing from /proc/self/status"
+msgstr "CapEff ausente em /proc/self/status"
+
+msgid "capabilities outside the allowlist persist (bnd_extra={extra_bnd:#x} eff_extra={extra_eff:#x})"
+msgstr "capabilities fora da allowlist persistem (bnd_extra={extra_bnd:#x} eff_extra={extra_eff:#x})"
+
+msgid "/proc/self/status unreadable: {e}"
+msgstr "/proc/self/status ilegível: {e}"
+
+msgid "delonix: --device {host}: block device refused (char devices only)"
+msgstr "delonix: --device {host}: dispositivo de bloco recusado (só char devices)"
+
+msgid "delonix: --device {host}: node does not exist, ignored"
+msgstr "delonix: --device {host}: nó inexistente, ignorado"
+
+msgid "{tool} failed (code {:?}) — check /etc/subuid and /etc/subgid"
+msgstr "{tool} falhou (código {:?}) — verifica /etc/subuid e /etc/subgid"
+
+msgid "delonix: --sysctl {k}: not namespaced; refused (affects the host)"
+msgstr "delonix: --sysctl {k}: não-namespaced; recusado (afecta o host)"
+
+msgid "delonix: failed to join the pod netns"
+msgstr "delonix: falha a juntar ao netns do pod"
+
+msgid "delonix: pod netns unavailable"
+msgstr "delonix: netns do pod indisponível"
+
+msgid "delonix: failed to prepare the rootfs: {e}"
+msgstr "delonix: falha a preparar o rootfs: {e}"
+
+msgid "delonix: confinement NOT verified ({e}); aborting the container"
+msgstr "delonix: confinamento NÃO verificado ({e}); a abortar o container"
+
+msgid "delonix: warning — failed to enter WORKDIR {w}"
+msgstr "delonix: aviso — falha a entrar no WORKDIR {w}"
+
+msgid "delonix: setgid({gid}) failed"
+msgstr "delonix: setgid({gid}) falhou"
+
+msgid "delonix: setuid({uid}) failed — the image USER is not mapped (subuid?)"
+msgstr "delonix: setuid({uid}) falhou — o USER da imagem não está mapeado (subuid?)"
+
+msgid "delonix: exec failed: {:?}"
+msgstr "delonix: exec falhou: {:?}"
+
+msgid "admission"
+msgstr "admissão"
+
+msgid "host protection: load average too high ({load1:.1} > {limit:.0}) — try again later"
+msgstr "protecção do host: carga média demasiado alta ({load1:.1} > {limit:.0}) — tenta mais tarde"
+
+msgid "host protection: Delonix memory budget exhausted ({} MiB used of {} MiB; this container requests {}). Stop containers or raise DELONIX_RESERVE_PCT."
+msgstr "protecção do host: orçamento de memória do Delonix esgotado ({} MiB usados de {} MiB; este container pede {}). Pára containers ou sobe DELONIX_RESERVE_PCT."
+
+msgid "delonix: warning — rootless WITHOUT cgroup delegation: memory/cpu/pids are\n         NOT enforced (a fork-bomb or leak may affect the host). To get\n         limits, run the engine under a systemd --user session with\n         delegation: `systemctl --user edit --force --full delonix.service`\n         with `[Service] Delegate=yes`, or start it via `systemd-run --user\n         --scope -p Delegate=yes ...`. Namespace/seccomp isolation\n         remains intact."
+msgstr "delonix: aviso — rootless SEM delegação de cgroup: memory/cpu/pids NÃO são\n         aplicados (um fork-bomb ou leak pode afetar o host). Para ter\n         limites, corre o engine sob uma sessão systemd --user com\n         delegação: `systemctl --user edit --force --full delonix.service`\n         com `[Service] Delegate=yes`, ou inicia via `systemd-run --user\n         --scope -p Delegate=yes ...`. O isolamento de namespaces/seccomp\n         mantém-se intacto."
+
+msgid "could not create {cg}"
+msgstr "não foi possível criar {cg}"
+
+msgid "delonix: warning — device cgroup (eBPF) not applied on {}; block devices rely on caps/seccomp only"
+msgstr "delonix: aviso — device cgroup (eBPF) não aplicado em {}; block devices dependem só de caps/seccomp"
+
+msgid "invalid argument: {a:?}"
+msgstr "argumento inválido: {a:?}"
+
+msgid "empty command"
+msgstr "comando vazio"
+
+msgid "failed to create pipe"
+msgstr "falha a criar pipe"
+
+msgid "delonix: setns({ns}) failed: {e}"
+msgstr "delonix: setns({ns}) falhou: {e}"
+
+msgid "delonix: exec confinement NOT verified ({e}); aborting"
+msgstr "delonix: confinamento do exec NÃO verificado ({e}); a abortar"
+
+msgid "delonix: exec setgid({gid}) failed"
+msgstr "delonix: exec setgid({gid}) falhou"
+
+msgid "delonix: exec setuid({uid}) failed"
+msgstr "delonix: exec setuid({uid}) falhou"
+
+msgid "unsafe mount target: {}"
+msgstr "alvo de montagem inseguro: {}"
+
+msgid "mount source does not exist: {}"
+msgstr "fonte de montagem inexistente: {}"
+
+msgid "container shares the host mnt ns — nothing to mount"
+msgstr "container partilha o mnt ns do host — nada a montar"
+
+msgid "open_tree: {e} (does the kernel support the new mount API?)"
+msgstr "open_tree: {e} (kernel suporta a nova mount API?)"
+
+msgid "failed to mount {} → {} in the live container (code {code})"
+msgstr "falha a montar {} → {} no container vivo (código {code})"
+
+msgid "live mount interrupted"
+msgstr "montagem ao vivo interrompida"
+
+msgid "unsafe unmount target: {target}"
+msgstr "alvo de desmontagem inseguro: {target}"
+
+msgid "container shares the host mnt ns"
+msgstr "container partilha o mnt ns do host"
+
+msgid "failed to unmount {target} in the live container"
+msgstr "falha a desmontar {target} no container vivo"
+
+msgid "no processes in the container"
+msgstr "sem processos no container"
+
+msgid "container {} is running (use --force)"
+msgstr "o container {} está a correr (usa --force)"
+
+msgid "Dockerfile line {}: `{instr}` before any FROM"
+msgstr "Dockerfile linha {}: `{instr}` antes de qualquer FROM"
+
+msgid "line {}: {instr} requires src and dst"
+msgstr "linha {}: {instr} precisa de src e dst"
+
+msgid "Dockerfile line {}: unknown instruction `{other}`"
+msgstr "Dockerfile linha {}: instrução desconhecida `{other}`"
+
+msgid "Dockerfile has no FROM instruction"
+msgstr "Dockerfile sem instrução FROM"
+
+msgid "failed to pack the diff: {e}"
+msgstr "falha a empacotar o diff: {e}"
+
+msgid "failed to close the tar: {e}"
+msgstr "falha a fechar o tar: {e}"
+
+msgid "corrupted blob: {name} has sha256 {digest}"
+msgstr "blob corrompido: {name} tem sha256 {digest}"
+
+msgid "manifest.json missing from the archive"
+msgstr "manifest.json em falta no arquivo"
+
+msgid "empty manifest.json"
+msgstr "manifest.json vazio"
+
+msgid "config digest mismatch"
+msgstr "digest do config não confere"
+
+msgid "failed to open zstd: {e}"
+msgstr "falha a abrir zstd: {e}"
+
+msgid "failed to extract layer: {e}"
+msgstr "falha a extrair layer: {e}"
+
+msgid "image has no layers"
+msgstr "imagem sem layers"
+
+msgid "invalid PEM public key (no PUBLIC KEY block)"
+msgstr "chave pública PEM inválida (sem bloco PUBLIC KEY)"
+
+msgid "invalid base64 public key: {e}"
+msgstr "chave pública base64 inválida: {e}"
+
+msgid "public key does not look like an uncompressed P-256 point"
+msgstr "chave pública não parece um ponto P-256 não-comprimido"
+
+msgid "image not signed: no cosign signature for {reference} ({digest})"
+msgstr "imagem não assinada: não há assinatura cosign para {reference} ({digest})"
+
+msgid "invalid signature manifest: {e}"
+msgstr "manifesto de assinatura inválido: {e}"
+
+msgid "invalid signature payload: {e}"
+msgstr "payload de assinatura inválido: {e}"
+
+msgid "invalid signature: no signature for {reference} matches the given key"
+msgstr "assinatura inválida: nenhuma assinatura de {reference} confere com a chave dada"
+
+msgid "HTTP {status} at {url}"
+msgstr "HTTP {status} em {url}"
+
+msgid "HTTP {} at {url}"
+msgstr "HTTP {} em {url}"
+
+msgid "authentication without `realm`"
+msgstr "autenticação sem `realm`"
+
+msgid "failed to obtain token: HTTP {}"
+msgstr "falha a obter token: HTTP {}"
+
+msgid "authentication response without token"
+msgstr "resposta de autenticação sem token"
+
+msgid "upload start: HTTP {} (run `delonix login {}`?)"
+msgstr "abertura de upload: HTTP {} (faça `delonix login {}`?)"
+
+msgid "upload without Location header"
+msgstr "upload sem cabeçalho Location"
+
+msgid "blob PUT {digest}: HTTP {status}"
+msgstr "PUT de blob {digest}: HTTP {status}"
+
+msgid "manifest PUT: HTTP {status} {detail}"
+msgstr "PUT de manifesto: HTTP {status} {detail}"
+
+msgid "pulling {repo}:{refr} from {host}"
+msgstr "a puxar {repo}:{refr} de {host}"
+
+msgid "platform selected: linux/{arch}"
+msgstr "plataforma escolhida: linux/{arch}"
+
+msgid "empty manifest index"
+msgstr "índice de manifestos vazio"
+
+msgid "corrupted layer: {ldigest}"
+msgstr "layer corrompido: {ldigest}"
+
+msgid "pushing {repo}:{refr} to {host}"
+msgstr "a publicar {repo}:{refr} em {host}"
+
+msgid "pushed: {host}/{repo}:{refr}"
+msgstr "publicado: {host}/{repo}:{refr}"
+
+msgid "pushing artifact {repo}:{refr} to {host}"
+msgstr "a publicar artefacto {repo}:{refr} em {host}"
+
+msgid "invalid artifact manifest: {e}"
+msgstr "manifesto de artefacto inválido: {e}"
+
+msgid "artifact manifest has no layers"
+msgstr "manifesto de artefacto sem layers"
+
+msgid "artifact corrupted or tampered: expected digest {layer_digest}, got {got}"
+msgstr "artefacto corrompido ou adulterado: digest esperado {layer_digest}, obtido {got}"
+
+msgid "pulling layer {}/{}"
+msgstr "a puxar layer {}/{}"
+
+msgid "pushing layer {}/{}"
+msgstr "a publicar layer {}/{}"
+
+msgid "pushing blob"
+msgstr "a publicar blob"
+
+msgid "invalid CNI config: {e}"
+msgstr "config CNI inválida: {e}"
+
+msgid "invalid CNI conflist: {e}"
+msgstr "conflist CNI inválida: {e}"
+
+msgid "read {}: {e}"
+msgstr "ler {}: {e}"
+
+msgid "CNI plugin is not a JSON object"
+msgstr "plugin CNI não é um objeto JSON"
+
+msgid "serialize CNI config: {e}"
+msgstr "serializar config CNI: {e}"
+
+msgid "invalid CNI result: {e}"
+msgstr "resultado CNI inválido: {e}"
+
+msgid "no stdin"
+msgstr "sem stdin"
+
+msgid "CNI plugin without a `type` field"
+msgstr "plugin CNI sem campo `type`"
+
+msgid "CNI plugin `{typ}` not found in CNI_PATH"
+msgstr "plugin CNI `{typ}` não encontrado no CNI_PATH"
+
+msgid "CNI conflist has no plugins"
+msgstr "conflist CNI sem plugins"
+
+msgid "no free IP in the {prefix} /16 (registry full)"
+msgstr "sem IP livre no /16 de {prefix} (registo cheio)"
+
+msgid "pinned IP {ip} is already leased to '{}'; '{id}' will collide on the network"
+msgstr "IP fixado {ip} já está em lease para '{}'; '{id}' vai colidir na rede"
+
+msgid "SECURITY WARNING — DELONIX_FORWARD_OPEN is active: the forward inbound-deny is OFF (containers directly reachable from other networks/the host). For debugging only — do NOT use in production."
+msgstr "AVISO DE SEGURANÇA — DELONIX_FORWARD_OPEN activo: o inbound-deny do forward está DESLIGADO (containers acessíveis directamente de outras redes/host). Só para depuração — NÃO usar em produção."
+
+msgid "invalid protocol in '{spec}' (tcp|udp)"
+msgstr "protocolo inválido em '{spec}' (tcp|udp)"
+
+msgid "invalid port in '{spec}' (e.g. 8080:80)"
+msgstr "porta inválida em '{spec}' (ex.: 8080:80)"
+
+msgid "invalid --net-bps: '{s}'"
+msgstr "--net-bps inválido: '{s}'"
+
+msgid "--net-bps must be positive: '{s}'"
+msgstr "--net-bps tem de ser positivo: '{s}'"
+
+msgid "invalid --net-burst: '{b}'"
+msgstr "--net-burst inválido: '{b}'"
+
+msgid "--net-burst cannot be zero"
+msgstr "--net-burst não pode ser zero"
+
+msgid "network '{name}' ({driver}) has no parent"
+msgstr "rede '{name}' ({driver}) sem parent"
+
+msgid "network '{name}' ({driver}) has no subnet"
+msgstr "rede '{name}' ({driver}) sem subnet"
+
+msgid "network '{name}' is corrupted"
+msgstr "rede '{name}' corrompida"
+
+msgid "network '{name}' (overlay) has no vni"
+msgstr "rede '{name}' (overlay) sem vni"
+
+msgid "'bridge' is the default network (reserved)"
+msgstr "'bridge' é a rede por omissão (reservada)"
+
+msgid "invalid network name: '{name}'"
+msgstr "nome de rede inválido: '{name}'"
+
+msgid "network '{name}' already exists"
+msgstr "a rede '{name}' já existe"
+
+msgid "invalid /16 base octet: {base} (1..=254)"
+msgstr "octeto-base /16 inválido: {base} (1..=254)"
+
+msgid "'{name}' is a reserved driver"
+msgstr "'{name}' é um driver reservado"
+
+msgid "invalid VNI (1..16777215)"
+msgstr "VNI inválido (1..16777215)"
+
+msgid "'{name}' is not an overlay"
+msgstr "'{name}' não é um overlay"
+
+msgid "invalid peer (missing node_ip)"
+msgstr "peer inválido (falta node_ip)"
+
+msgid "read overlay"
+msgstr "ler overlay"
+
+msgid "write overlay"
+msgstr "escrever overlay"
+
+msgid "unknown driver: '{driver}'"
+msgstr "driver desconhecido: '{driver}'"
+
+msgid "parent NIC '{parent}' does not exist on the host"
+msgstr "NIC-pai '{parent}' não existe no host"
+
+msgid "invalid subnet: '{subnet}' (e.g. 192.168.1.0/24)"
+msgstr "subnet inválida: '{subnet}' (ex.: 192.168.1.0/24)"
+
+msgid "SECURITY WARNING — this network is UNFILTERED: containers sit directly on the physical LAN of '{parent}', OUTSIDE Delonix's firewall, anti-spoof and isolation. Use a `bridge` network if you need filtering."
+msgstr "AVISO DE SEGURANÇA — a rede é NÃO-FILTRADA: os containers ficam diretamente na LAN física de '{parent}', FORA do firewall, do anti-spoof e do isolamento do Delonix. Usa uma rede `bridge` se precisares de filtragem."
+
+msgid "parent NIC '{parent}' does not exist"
+msgstr "NIC-pai '{parent}' não existe"
+
+msgid "IP {want} outside subnet {} of network '{}'"
+msgstr "IP {want} fora da subnet {} da rede '{}'"
+
+msgid "network '{}' has no parent NIC"
+msgstr "rede '{}' sem NIC-pai"
+
+msgid "no free IP in subnet {}"
+msgstr "não há IP livre na subnet {}"
+
+msgid "the default 'bridge' network cannot be removed (use `network prune`)"
+msgstr "a rede 'bridge' por omissão não se remove (usa `network prune`)"
+
+msgid "iptables-save: {tables} table(s), {chains} chain(s), {rules} rule(s) — intent preserved"
+msgstr "iptables-save: {tables} tabela(s), {chains} chain(s), {rules} regra(s) — intenção preservada"
+
+msgid "\n  example: {rule}\n     -> nft {nft}"
+msgstr "\n  exemplo: {rule}\n     -> nft {nft}"
+
+msgid "port {host_port}: {}"
+msgstr "porta {host_port}: {}"
+
+msgid "SECURITY WARNING — DELONIX_FORWARD_POLICY=accept: the ingress netns forward reverts to default-ALLOW (no `policy drop`). For debugging only — do NOT use in production."
+msgstr "AVISO DE SEGURANÇA — DELONIX_FORWARD_POLICY=accept: o forward do netns de ingress volta a default-ALLOW (sem `policy drop`). Só para depuração — NÃO usar em produção."
+
+msgid "the netns holder died during startup"
+msgstr "o holder do netns morreu ao arrancar"
+
+msgid "timeout waiting for the netns holder"
+msgstr "timeout à espera do holder do netns"
+
+msgid "slirp4netns did not signal ready within 10s; the container network may not be operational"
+msgstr "slirp4netns não sinalizou pronto em 10s; a rede do container pode não estar operacional"
+
+msgid "invalid control command: {line:?}"
+msgstr "comando de controlo inválido: {line:?}"
+
+msgid "invalid conflist hex"
+msgstr "conflist hex inválida"
+
+msgid "invalid vni: {vni}"
+msgstr "vni inválido: {vni}"
+
+msgid "the default ingress bridge cannot be removed"
+msgstr "a bridge default do ingress não se remove"
+
+msgid "empty allowlist or no valid CIDRs"
+msgstr "allowlist vazia ou sem CIDRs válidos"
+
+msgid "invalid port: {host_port}"
+msgstr "porta inválida: {host_port}"
+
+msgid "invalid egress policy: {policy}"
+msgstr "política de egress inválida: {policy}"
+
+msgid "invalid hostname: {suffix:?}"
+msgstr "hostname inválido: {suffix:?}"
+
+msgid "invalid protocol: {proto}"
+msgstr "protocolo inválido: {proto}"
+
+msgid "invalid port (1..65535)"
+msgstr "porta inválida (1..65535)"
+
+msgid "IP {cip} outside the ingress space (10.200-254.x)"
+msgstr "IP {cip} fora do espaço de ingress (10.200-254.x)"
+
+msgid "IP {ip} outside the ingress space (10.200-254.x)"
+msgstr "IP {ip} fora do espaço de ingress (10.200-254.x)"
+
+msgid "invalid hex"
+msgstr "hex inválido"
+
+msgid "egress allowlist — invalid CIDR skipped"
+msgstr "egress allowlist — CIDR inválido saltado"
+
+msgid "ingress network '{name}'"
+msgstr "rede de ingress '{name}'"
+
+msgid "no free /16 prefixes for ingress networks"
+msgstr "sem prefixos /16 livres para redes de ingress"
+
+msgid "invalid overlay peer destination: {bad:?} (IPs only)"
+msgstr "destino de par overlay inválido: {bad:?} (só IPs)"
+
+msgid "invalid port"
+msgstr "porta inválida"
+
+msgid "ingress holder is down"
+msgstr "ingress holder em baixo"
+
+msgid "control socket unavailable"
+msgstr "socket de controlo indisponível"
+
+msgid "invalid memory value; defaulting to 1024 MiB"
+msgstr "valor de memória inválido; a usar 1024 MiB por omissão"
+
+msgid "VM admission"
+msgstr "admissão VM"
+
+msgid "host protection: VM '{}' asks for {want} MiB but the host only has {avail} MiB available (reserve {reserve} MiB). Stop VMs/containers, reduce the memory, or lower DELONIX_VM_RESERVE_MIB (at your own risk)."
+msgstr "protecção do host: a VM '{}' pede {want} MiB mas o host só tem {avail} MiB disponíveis (reserva {reserve} MiB). Pára VMs/containers, reduz a memória, ou baixa DELONIX_VM_RESERVE_MIB (por tua conta e risco)."
+
+msgid "{prog} failed"
+msgstr "{prog} falhou"
+
+msgid "unknown VM backend: '{other}' (use 'cloud-hypervisor' or 'libvirt')"
+msgstr "backend de VM desconhecido: '{other}' (usa 'cloud-hypervisor' ou 'libvirt')"
+
+msgid "no VM backend available: install 'cloud-hypervisor' or 'libvirt'+'qemu'"
+msgstr "nenhum backend de VM disponível: instala 'cloud-hypervisor' ou 'libvirt'+'qemu'"
+
+msgid "VM '{}': spec.volumes requires the libvirt backend (Cloud Hypervisor does not do virtio-9p) — remove `backend: cloud-hypervisor` or the volumes"
+msgstr "VM '{}': spec.volumes precisa do backend libvirt (o Cloud Hypervisor não faz virtio-9p) — remove `backend: cloud-hypervisor` ou os volumes"
+
+msgid "the ingress (rootless infra) is not up"
+msgstr "o ingress (infra rootless) não está de pé"
+
+msgid "VM without 'kernel' or 'firmware' — Cloud Hypervisor needs one to boot (e.g. firmware: rust-hypervisor-fw for cloud images)"
+msgstr "VM sem 'kernel' nem 'firmware' — o Cloud Hypervisor precisa de um para arrancar (ex.: firmware: rust-hypervisor-fw para cloud images)"
+
+msgid "failed to launch cloud-hypervisor (KVM/binary available?)"
+msgstr "falha a lançar o cloud-hypervisor (KVM/binário disponível?)"
+
+msgid "cloud-hypervisor did not report a PID (check the VM log)"
+msgstr "o cloud-hypervisor não reportou PID (verifica o log da VM)"
+
+msgid "failed to start the libvirt domain (KVM/permissions/image?)"
+msgstr "falha a arrancar o domínio libvirt (KVM/permissões/imagem?)"
+
+msgid "a VM '{}' created by `vm run` (direct-QEMU) already exists. Remove it first (`vm rm {}`) or use another name — the two subsystems share the vms/ folder."
+msgstr "já existe uma VM '{}' criada por `vm run` (QEMU-direto). Remove-a primeiro (`vm rm {}`) ou usa outro nome — os dois subsistemas partilham a pasta vms/."
+
+msgid "image not found: {}"
+msgstr "imagem não encontrada: {}"
+
+msgid "restart_policy '{}' on VM '{}' (backend {}) is NOT supervised on the host: the restart happens on the next `delonix apply`/reconcile (auto-heal), not instantly on crash. For immediate restart use `--backend libvirt`."
+msgstr "restart_policy '{}' na VM '{}' (backend {}) NÃO é supervisionado no host: o reinício ocorre no próximo `delonix apply`/reconcile (auto-heal), não instantaneamente no crash. Para reinício imediato usa `--backend libvirt`."
+
+msgid "invalid volume name: {name:?}"
+msgstr "nome de volume inválido: {name:?}"
+
+msgid "{driver} volume requires a device (the mount target)"
+msgstr "volume {driver} requer um device (o alvo da montagem)"
+
+msgid "{} volume '{}' has no device"
+msgstr "volume {} '{}' sem device"
+
+msgid "invalid snapshot name: '{snap}' (use [a-zA-Z0-9._-], no '/' or '..')"
+msgstr "nome de snapshot inválido: '{snap}' (usa [a-zA-Z0-9._-], sem '/' nem '..')"
+
+msgid "snapshot {snap} of volume {volume}"
+msgstr "snapshot {snap} do volume {volume}"
+
+msgid "hard quota (loopback) only on an empty volume; create with --quota or empty it first"
+msgstr "quota dura (loopback) só no volume vazio; cria com --quota ou esvazia primeiro"
+
+msgid "loop device not found"
+msgstr "loop device não encontrado"
+
+msgid "the new quota is smaller than the current usage — free up space first"
+msgstr "a nova quota é menor que o uso atual — liberta espaço primeiro"
+
+msgid "volume in use — stop the containers to shrink the quota"
+msgstr "volume em uso — pára os containers para encolher a quota"
+
+msgid "invalid volume spec: {spec:?} (use source:/target[:ro])"
+msgstr "spec de volume inválida: {spec:?} (usa origem:/destino[:ro])"
+
+msgid "target must be absolute: {target:?}"
+msgstr "destino deve ser absoluto: {target:?}"
+
+msgid "bind path does not exist: {src}"
+msgstr "caminho de bind inexistente: {src}"
+
+msgid "empty SBOM: no apk/dpkg package database in the image"
+msgstr "SBOM vazio: sem base de dados de pacotes apk/dpkg na imagem"
+
+msgid "invalid OSV feed: {e}"
+msgstr "feed OSV inválido: {e}"
+
+msgid "OSV feed: expected an array or a {\"vulns\":[…]} object"
+msgstr "feed OSV: esperado um array ou um objeto {\"vulns\":[…]}"
+
+msgid "module"
+msgstr "modulo"
+
+msgid "'{module}' is not an Odoo module (no __manifest__.py)"
+msgstr "'{module}' não é um módulo Odoo (sem __manifest__.py)"
+
+msgid "module scan"
+msgstr "scan módulos"
+
+msgid "no Odoo module found (directories with __manifest__.py)"
+msgstr "nenhum módulo Odoo encontrado (diretórios com __manifest__.py)"
+
+msgid "delonix-cri (CRI v1) listening on unix://{path}"
+msgstr "delonix-cri (CRI v1) a escutar em unix://{path}"
+
+msgid "delonix-cri: streaming (exec/attach) at {advertised}"
+msgstr "delonix-cri: streaming (exec/attach) em {advertised}"
+
+msgid "delonix-cri: /metrics listening"
+msgstr "delonix-cri: /metrics a escutar"
+
+msgid "delonix-cri: /metrics bind failed"
+msgstr "delonix-cri: bind de /metrics falhou"
+
+msgid "delonix-cri starting"
+msgstr "delonix-cri a arrancar"
+
+msgid "delonix-cri exited with error"
+msgstr "delonix-cri terminou com erro"
+
+msgid "rootless infra netns is down (holder={:?}, slirp={:?})"
+msgstr "netns de infra rootless em baixo (holder={:?}, slirp={:?})"
+
+msgid "bridge '{}' does not exist in /sys/class/net"
+msgstr "bridge '{}' não existe em /sys/class/net"
+
+msgid "exec without a command"
+msgstr "exec sem comando"
+
+msgid "pod sandbox has no live netns"
+msgstr "pod sandbox sem netns vivo"
+
+msgid "delonix-cri: failed to allocate pty"
+msgstr "delonix-cri: falha a alocar pty"
+
+msgid "delonix-cri: exec failed: {e}"
+msgstr "delonix-cri: exec falhou: {e}"
+
+msgid "netns connect thread died"
+msgstr "netns connect thread morreu"
+
+msgid "{id} not found"
+msgstr "{id} não encontrado"
+
+msgid "missing config"
+msgstr "sem config"
+
+msgid "serializing conflist: {e}"
+msgstr "serializar conflist: {e}"
+
+msgid "CNI ADD of sandbox {pod}: {e}"
+msgstr "CNI ADD do sandbox {pod}: {e}"
+
+msgid "failed to create the ingress sandbox {pod}"
+msgstr "falha a criar o sandbox de ingress {pod}"
+
+msgid "failed to create the pod sandbox {pod}"
+msgstr "falha a criar o pod sandbox {pod}"
+
+msgid "run_as_group specified without run_as_user or run_as_username"
+msgstr "run_as_group especificado sem run_as_user nem run_as_username"
+
+msgid "AppArmor profile '{p}' is not loaded on the host"
+msgstr "perfil AppArmor '{p}' não está carregado no host"
+
+msgid "invalid log_path: must be relative and without '..'"
+msgstr "log_path inválido: tem de ser relativo e sem '..'"
+
+msgid "failed to start container {id}"
+msgstr "falha a arrancar o container {id}"
+
+msgid "'cri-{id}' is still running after stop"
+msgstr "'cri-{id}' continua a correr após stop"
+
+msgid "removal of 'cri-{id}' failed (record preserved for retry): {}"
+msgstr "remoção de 'cri-{id}' falhou (registo preservado p/ retry): {}"
+
+msgid "exec_sync without a command"
+msgstr "exec_sync sem comando"
+
+msgid "delonix-mgmt (management API) listening on unix://{path}"
+msgstr "delonix-mgmt (API de gestão) a escutar em unix://{path}"
+
+msgid "invalid volume name"
+msgstr "nome de volume inválido"
+
+msgid "invalid container id"
+msgstr "id de container inválido"
+
+msgid "unknown action: {other}"
+msgstr "acção desconhecida: {other}"
+
+msgid "invalid image"
+msgstr "imagem inválida"
+
+msgid "invalid name"
+msgstr "nome inválido"
+
+msgid "empty image reference"
+msgstr "referência de imagem vazia"
+
+msgid "invalid image reference"
+msgstr "referência de imagem inválida"
+
+msgid "invalid tag"
+msgstr "tag inválida"
+
+msgid "empty Delonixfile"
+msgstr "Delonixfile vazio"
+
+msgid "invalid network name"
+msgstr "nome de rede inválido"
+
+msgid "invalid VM name"
+msgstr "nome de VM inválido"
+
+msgid "unsupported VM action: {other}"
+msgstr "acção de VM não suportada: {other}"
+
+msgid "empty image"
+msgstr "image vazia"
