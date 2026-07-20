@@ -1338,3 +1338,18 @@ msgstr "a VM '{name}' não está a correr — arranca-a primeiro"
 
 msgid "no console socket for VM '{name}' (created before this feature? recreate it)"
 msgstr "sem socket de consola para a VM '{name}' (criada antes desta funcionalidade? recria-a)"
+
+msgid "Print the VNC address of a graphical VM (created with `--vnc`, libvirt)."
+msgstr "Imprime o endereço VNC de uma VM gráfica (criada com `--vnc`, libvirt)."
+
+msgid "VNC graphical console (libvirt backend only — Cloud Hypervisor has no display)."
+msgstr "Consola gráfica VNC (só backend libvirt — o Cloud Hypervisor não tem display)."
+
+msgid "VM '{name}' uses Cloud Hypervisor, which has no VNC — use `delonix vm console {name}` (serial), or recreate with `--backend libvirt --vnc`"
+msgstr "a VM '{name}' usa o Cloud Hypervisor, que não tem VNC — usa `delonix vm console {name}` (serial), ou recria com `--backend libvirt --vnc`"
+
+msgid "no VNC display for '{name}' — was it created with `--vnc`?"
+msgstr "sem display VNC para '{name}' — foi criada com `--vnc`?"
+
+msgid "connect with a VNC client, e.g. `vncviewer {addr}`"
+msgstr "liga com um cliente VNC, ex.: `vncviewer {addr}`"
