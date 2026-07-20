@@ -226,3 +226,306 @@ msgstr "A limpar o kubeconfig e o contexto"
 
 msgid "(no clusters — create one with `delonix cluster create`)"
 msgstr "(nenhum cluster — cria um com `delonix cluster create`)"
+
+# ---- mensagens de runtime dos comandos (fase 3b) ---------------------------
+
+msgid "preparing {n} host(s)..."
+msgstr "a preparar {n} host(s)..."
+
+msgid "ready"
+msgstr "pronto"
+
+msgid "creating VM {vm}..."
+msgstr "a criar VM {vm}..."
+
+msgid "waiting for SSH on {vm}..."
+msgstr "a aguardar SSH em {vm}..."
+
+msgid "already satisfied (SKIP)"
+msgstr "já satisfeito (SKIP)"
+
+msgid "applying..."
+msgstr "a aplicar..."
+
+msgid "installing..."
+msgstr "a instalar..."
+
+msgid "already satisfied (SKIP) — recovering join credentials..."
+msgstr "já satisfeito (SKIP) — a recuperar credenciais de join..."
+
+msgid "running (this can take a few minutes)..."
+msgstr "a correr (pode demorar alguns minutos)..."
+
+msgid "no certificate-key available for a control-plane join"
+msgstr "sem certificate-key disponível para join de control-plane"
+
+msgid "running..."
+msgstr "a correr..."
+
+msgid "also copied to {path} (it did not exist yet)"
+msgstr "também copiado para {path} (não existia ainda)"
+
+msgid "could not extract --token from the kubeadm init output"
+msgstr "não consegui extrair --token do output do kubeadm init"
+
+msgid "warning:"
+msgstr "aviso:"
+
+msgid "--expose requires `--net <network>` (the proxy reaches the container via its SDN IP) — ignored"
+msgstr "--expose exige `--net <rede>` (o proxy alcança o container pelo IP da SDN) — ignorado"
+
+msgid "`image --vm push <name> <dest>`: the destination is required"
+msgstr "`image --vm push <nome> <destino>`: o destino é obrigatório"
+
+msgid "built"
+msgstr "construída"
+
+msgid "say which key to remove (or --all)"
+msgstr "indica a chave a remover (ou --all)"
+
+msgid "proxy running but its config would not parse"
+msgstr "proxy a correr mas a config não leu"
+
+msgid "container not found"
+msgstr "container não encontrado"
+
+msgid "could not read"
+msgstr "não consegui ler"
+
+msgid "already exists, nothing to do"
+msgstr "já existe, nada a fazer"
+
+msgid "node initialized — public key (hand it to the overlay peers):"
+msgstr "nó inicializado — chave pública (distribui aos peers do overlay):"
+
+msgid "snapshot '{snap}' already exists"
+msgstr "o snapshot '{snap}' já existe"
+
+msgid "image '{img}' is not local — pulling…"
+msgstr "imagem '{img}' não está local — a puxar…"
+
+msgid "Conditions (attention — missing prerequisites):"
+msgstr "Conditions (atenção — pré-requisitos em falta):"
+
+msgid "mismatched TLS cert/key"
+msgstr "cert/chave TLS incompatíveis"
+
+msgid "SIGHUP but the config would not re-parse — routes kept"
+msgstr "SIGHUP mas a config não releu — rotas mantidas"
+
+msgid "port :{p} already published — kept"
+msgstr "porta :{p} já publicada — mantida"
+
+msgid "warning while publishing :{p}: {err}"
+msgstr "aviso ao publicar :{p}: {err}"
+
+msgid "available templates"
+msgstr "templates disponíveis"
+
+msgid "nothing to do (everything already existed)"
+msgstr "nada a fazer (tudo já existia)"
+
+msgid "secret '{name}' has no 'password' key"
+msgstr "o segredo '{name}' não tem a chave 'password'"
+
+msgid "could not read the qcow2 of"
+msgstr "não consegui ler o qcow2 de"
+
+msgid "preparing the working image (flattened, no backing file)..."
+msgstr "a preparar imagem de trabalho (achatada, sem backing file)..."
+
+msgid "compacting the image (sparsify + zstd compression)..."
+msgstr "a compactar a imagem (sparsify + compressão zstd)..."
+
+msgid "virt-sparsify failed ({err}); compressing anyway"
+msgstr "virt-sparsify falhou ({err}); a comprimir na mesma"
+
+msgid "SHA256SUMS has no entry for"
+msgstr "SHA256SUMS não tem entrada para"
+
+msgid "preparing the k8s repo keyring"
+msgstr "a preparar o keyring do repo k8s"
+
+msgid "the k8s repo InRelease does not declare the SHA256 of 'Packages'"
+msgstr "InRelease do repo k8s não declara o SHA256 de 'Packages'"
+
+msgid "could not read the SSH key from"
+msgstr "não consegui ler a chave SSH de"
+
+msgid "port {hp} is already published by container '{owner}'\n\nfix it with ONE of these:\n  delonix container stop {owner}    # stops whoever holds port {hp}\n  delonix container run -p {alt}:{cp} ...    # or publish on another port\n  delonix container update {owner} --publish-rm {hp}    # or hot-unpublish it"
+msgstr "a porta {hp} já está publicada pelo container '{owner}'\n\nresolve com UMA destas opções:\n  delonix container stop {owner}    # pára quem segura a porta {hp}\n  delonix container run -p {alt}:{cp} ...    # ou publica noutra porta\n  delonix container update {owner} --publish-rm {hp}    # ou despublica-a a quente"
+
+msgid "the name '{name}' is already in use by container {id} — pick another or remove it first"
+msgstr "o nome '{name}' já está em uso pelo container {id} — escolhe outro ou remove-o primeiro"
+
+msgid "net: {n} orphan slirp(s) reaped"
+msgstr "rede: {n} slirp(s) órfão(s) reapado(s)"
+
+msgid "net: {n} orphan ingress ref(s) reaped"
+msgstr "rede: {n} ref(s) de ingress órfã(s) reapada(s)"
+
+msgid "Delonix runs on physical hardware (bare-metal) — no virtualization detected."
+msgstr "Delonix corre em hardware físico (bare-metal) — sem virtualização detetada."
+
+msgid "No VM tuning to apply; the runtime already talks to the hardware directly."
+msgstr "Nenhuma afinação de VM a aplicar; o runtime já usa o hardware diretamente."
+
+msgid "Detected virtualization"
+msgstr "Virtualização detetada"
+
+msgid "KVM acceleration (/dev/kvm)"
+msgstr "Aceleração KVM (/dev/kvm)"
+
+msgid "yes (nested virtualization possible)"
+msgstr "sim (virtualização aninhada possível)"
+
+msgid "no"
+msgstr "não"
+
+msgid "yes"
+msgstr "sim"
+
+msgid "virtio-net network"
+msgstr "Rede virtio-net"
+
+msgid "virtio-blk disk"
+msgstr "Disco virtio-blk"
+
+msgid "(none)"
+msgstr "(nenhum)"
+
+msgid "Devices on the virtio bus"
+msgstr "Dispositivos no bus virtio"
+
+msgid "Paravirtualized network (virtio-net: {ifs}) — segmentation/checksum offloads on the host."
+msgstr "Rede paravirtualizada (virtio-net: {ifs}) — offloads de segmentação/checksum no host."
+
+msgid "I/O scheduler '{cur}' → 'none' (the KVM host already schedules)"
+msgstr "escalonador de I/O '{cur}' → 'none' (o host KVM já escalona)"
+
+msgid "could not change the scheduler ({err}) — run as root"
+msgstr "não consegui mudar o escalonador ({err}) — corre como root"
+
+msgid "I/O scheduler '{cur}' → 'none' (avoids double scheduling in a KVM guest)"
+msgstr "escalonador de I/O '{cur}' → 'none' (evita escalonar 2× num guest KVM)"
+
+msgid "I/O scheduler already optimal ({cur})"
+msgstr "escalonador de I/O já ótimo ({cur})"
+
+msgid "No pending tuning — this VM is already optimized for Delonix."
+msgstr "Sem afinações pendentes — esta VM já está otimizada para o Delonix."
+
+msgid "Recommended tuning (run `sudo delonix system virt --tune` to apply):"
+msgstr "Afinações recomendadas (corre `sudo delonix system virt --tune` para aplicar):"
+
+msgid "--high must be greater than --low"
+msgstr "--high tem de ser maior que --low"
+
+msgid "the thermal governor needs root (it writes to the host cgroup)"
+msgstr "o governador térmico precisa de root (escreve no cgroup do host)"
+
+msgid "thermal governor"
+msgstr "governador térmico"
+
+msgid "to exit"
+msgstr "para sair"
+
+msgid " + fans at max"
+msgstr " + ventoinha no máximo"
+
+msgid "cooling down"
+msgstr "a arrefecer"
+
+msgid "Delonix CPU at {pct}%"
+msgstr "CPU do Delonix a {pct}%"
+
+msgid "restoring"
+msgstr "a restaurar"
+
+msgid "no change"
+msgstr "sem mudança"
+
+msgid "AREA"
+msgstr "ÁREA"
+
+msgid "SIZE"
+msgstr "TAMANHO"
+
+msgid "RECLAIMABLE"
+msgstr "RECUPERÁVEL"
+
+msgid "images"
+msgstr "imagens"
+
+msgid "VM images"
+msgstr "imagens VM"
+
+msgid "{n} orphan container dir(s) — {size} reclaimable.\nLeftovers from abruptly killed containers (a normal `rm` cleans them)."
+msgstr "{n} directório(s) de container órfão(s) — {size} recuperáveis.\nSão restos de containers mortos abruptamente (o `rm` normal limpa-os)."
+
+msgid "state root:"
+msgstr "raiz de estado:"
+
+msgid "mode:"
+msgstr "modo:"
+
+msgid "rootless (daemonless)"
+msgstr "rootless (sem daemon)"
+
+msgid "root (daemonless)"
+msgstr "root (sem daemon)"
+
+msgid "cgroup2 delegated:"
+msgstr "cgroup2 delegado:"
+
+msgid "no — memory/cpu/pids are NOT enforced (run under systemd-run --user --scope -p Delegate=yes)"
+msgstr "não — memory/cpu/pids NÃO são aplicados (corre sob systemd-run --user --scope -p Delegate=yes)"
+
+msgid "network infra:"
+msgstr "infra de rede:"
+
+msgid "up (holder pid {pid})"
+msgstr "de pé (holder pid {pid})"
+
+msgid "down (comes up on demand)"
+msgstr "em baixo (sobe sozinha quando precisar)"
+
+msgid "containers:"
+msgstr "containers:"
+
+msgid "running"
+msgstr "a correr"
+
+msgid "events:"
+msgstr "eventos:"
+
+msgid "removed: {c} container(s), {d} orphan dir(s), {i} image(s), {b} blob(s), {g} cgroup(s), {p} orphan port(s), {n} orphan network(s) — {size} freed"
+msgstr "removido: {c} container(s), {d} dir(s) órfão(s), {i} imagem(ns), {b} blob(s), {g} cgroup(s), {p} porta(s) órfã(s), {n} rede(s) órfã(s) — {size} libertados"
+
+msgid "could not read the join endpoint"
+msgstr "não consegui ler o endpoint do join"
+
+msgid "node '{node}' was not registered in the store"
+msgstr "o nó '{node}' não ficou registado no store"
+
+msgid "node '{node}' got no IP on network '{net}'"
+msgstr "o nó '{node}' não recebeu IP na rede '{net}'"
+
+msgid "reading the node kubeconfig"
+msgstr "a ler o kubeconfig do nó"
+
+msgid "is not valid YAML"
+msgstr "não é YAML válido"
+
+msgid " (by container '{name}')"
+msgstr " (pelo container '{name}')"
+
+msgid "port {p} is already in use{by} — pick another with `--api-port` or drop the flag so delonix picks a free one"
+msgstr "a porta {p} já está em uso{by} — escolhe outra com `--api-port` ou omite a flag para o delonix escolher uma livre"
+
+msgid "port {default} in use — cluster '{cluster}' uses {p}"
+msgstr "porta {default} ocupada — o cluster '{cluster}' usa a {p}"
+
+msgid "no free port found for the apiserver (6443 and 36443-36542 all taken)"
+msgstr "não encontrei nenhuma porta livre para o apiserver (6443 e 36443-36542 ocupadas)"
+

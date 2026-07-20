@@ -40,6 +40,20 @@ pub fn t(en: &'static str) -> &'static str {
     }
 }
 
+/// `t()` para TEMPLATES com valores: o `format!` exige literais em
+/// compile-time, logo mensagens interpoladas traduzem o template e substituem
+/// os placeholders NOMEADOS depois (`{name}` — nomeados de propósito: uma
+/// tradução pode reordená-los, coisa que `{}` posicionais não permitem).
+///
+///   tf("port {port} is taken by '{owner}'", &[("port", &hp), ("owner", &ow)])
+pub fn tf(en: &'static str, subs: &[(&str, &str)]) -> String {
+    let mut out = t(en).to_string();
+    for (k, v) in subs {
+        out = out.replace(&format!("{{{k}}}"), v);
+    }
+    out
+}
+
 /// Variante para strings DINÂMICAS (o help do clap chega como `String`).
 fn t_owned(s: &str) -> String {
     if !super::output::is_pt() {

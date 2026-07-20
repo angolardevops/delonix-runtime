@@ -191,11 +191,12 @@ fn resolve_password(password: Option<String>, secret: Option<String>) -> Result<
     let Some(name) = secret else { return Ok(None) };
     let store = delonix_runtime_core::SecretStore::open(state_root())?;
     let s = store.load(&name)?;
-    s.data
-        .get("password")
-        .cloned()
-        .map(Some)
-        .ok_or_else(|| Error::Invalid(format!("o segredo '{name}' não tem a chave 'password'")))
+    s.data.get("password").cloned().map(Some).ok_or_else(|| {
+        Error::Invalid(super::po::tf(
+            "secret '{name}' has no 'password' key",
+            &[("name", &name)],
+        ))
+    })
 }
 
 pub fn run(action: StorageCmd) -> Result<()> {

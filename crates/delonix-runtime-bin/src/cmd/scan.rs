@@ -93,7 +93,10 @@ pub fn cmd_scan(image: &str, sbom: bool, fail_on: Option<&str>) -> Result<()> {
     let img = match images.resolve(image) {
         Ok(img) => img,
         Err(Error::NotFound(_)) => {
-            eprintln!("imagem '{image}' não está local — a puxar…");
+            eprintln!(
+                "{}",
+                super::po::tf("image '{img}' is not local — pulling…", &[("img", &image)])
+            );
             resolve_or_pull(&images, image)?
         }
         Err(e) => return Err(e),
