@@ -476,6 +476,12 @@ fn default_ch_firmware() -> Option<String> {
     None
 }
 
+/// Caminho do socket UNIX da consola serial de uma VM Cloud Hypervisor
+/// (`<base>/vms/<name>.console`). O `delonix vm console` liga-se aqui.
+pub fn console_socket(base: &Path, name: &str) -> std::path::PathBuf {
+    base.join("vms").join(format!("{name}.console"))
+}
+
 fn boot_ch(vmdir: &Path, cfg: &VmConfig, overlay: &str, tap: &str, mac: &str) -> Result<i32> {
     let join = infra::infra_join_argv().ok_or_else(|| Error::Runtime {
         context: "vm",
@@ -543,10 +549,16 @@ fn boot_ch(vmdir: &Path, cfg: &VmConfig, overlay: &str, tap: &str, mac: &str) ->
     }
     ch.push("--net".into());
     ch.push(format!("tap={tap},mac={mac}"));
+    // Serial num SOCKET UNIX (não um ficheiro de log): é o que permite uma
+    // consola INTERACTIVA (`delonix vm console`) — o CH aceita bytes nos dois
+    // sentidos pelo socket. O boot e o getty (ttyS0) aparecem aqui.
+    let console = console_socket(vmdir.parent().unwrap_or(vmdir), &cfg.name);
+    let _ = std::fs::remove_file(&console);
     ch.push("--serial".into());
-    ch.push(format!("file={}", serial.display()));
+    ch.push(format!("socket={}", console.display()));
     ch.push("--console".into());
     ch.push("off".into());
+    let _ = &serial; // (o ficheiro de log de serial deu lugar ao socket)
 
     // background dentro do netns; sem pid-ns ⇒ o $! é o PID real no host.
     let ch_str = ch.iter().map(|a| shq(a)).collect::<Vec<_>>().join(" ");

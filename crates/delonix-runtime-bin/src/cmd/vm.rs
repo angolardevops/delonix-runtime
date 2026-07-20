@@ -217,6 +217,12 @@ pub enum VmCmd {
     Push { name: String, target: String },
     /// Lista as VMs.
     Ls,
+    /// Attach to the VM's serial console (interactive terminal) — works with no
+    /// IP (boot logs, login). Escape: Ctrl-] .
+    Console {
+        #[arg(add = ArgValueCandidates::new(super::complete::vms))]
+        name: String,
+    },
     /// Estado actual (reconcilia liveness/IP com o backend).
     Status {
         /// VM a consultar (omite para o estado de TODAS).
@@ -508,6 +514,7 @@ pub fn run(action: VmCmd) -> Result<()> {
             Ok(())
         }
         VmCmd::Describe { names } => cmd_describe(&base, &names),
+        VmCmd::Console { name } => cmd_console(&base, &name),
         VmCmd::Status { name } => {
             // Sem argumento: o estado reconciliado de TODAS (consistente com
             // `ingress ls`/`egress ls` sem argumento).
@@ -569,6 +576,120 @@ fn fmt_vm_status(status: &delonix_runtime_core::Status) -> String {
 /// Usa `delonix_vm::status` (não o registo cru): reconcilia liveness/IP com o
 /// backend, portanto o que se lê é o estado AO VIVO e não o último que ficou
 /// gravado. É a diferença entre "diz que está Running" e "está Running".
+/// `delonix vm console <name>` — terminal serial interactivo da VM. Não precisa
+/// de IP (é como um cabo série): serve para ver o boot e fazer login mesmo sem
+/// rede. Cloud Hypervisor: liga ao socket UNIX do serial e faz de ponte com o
+/// tty local (raw mode); libvirt: delega no `virsh console` (que já o faz).
+fn cmd_console(base: &std::path::Path, name: &str) -> Result<()> {
+    let vm = delonix_vm::status(base, name)?;
+    if !matches!(vm.status, delonix_runtime_core::Status::Running) {
+        return Err(Error::Invalid(super::po::tf(
+            "VM '{name}' is not running — start it first",
+            &[("name", name)],
+        )));
+    }
+    let backend = vm.backend.as_str();
+    if backend.contains("libvirt") || backend.contains("qemu") || backend.contains("kvm") {
+        // O virsh já dá uma consola raw interactiva; substituímos o processo.
+        use std::os::unix::process::CommandExt;
+        let err = std::process::Command::new("virsh")
+            .args(["console", name])
+            .exec();
+        return Err(Error::Runtime {
+            context: "virsh console",
+            message: err.to_string(),
+        });
+    }
+    // Cloud Hypervisor: ponte tty<->socket.
+    let sock = delonix_vm::console_socket(base, name);
+    if !sock.exists() {
+        return Err(Error::Invalid(super::po::tf(
+            "no console socket for VM '{name}' (created before this feature? recreate it)",
+            &[("name", name)],
+        )));
+    }
+    console_bridge(&sock)
+}
+
+/// Guarda o modo do tty de stdin e repõe-no no `Drop` (mesmo com Ctrl-C, panic
+/// ou saída da VM) — sem isto o terminal ficaria em raw depois de sair.
+struct RawTty(libc::termios);
+impl RawTty {
+    fn enable() -> Option<Self> {
+        // SAFETY: tcgetattr/tcsetattr sobre o fd 0 (stdin); sem pré-condições.
+        unsafe {
+            if libc::isatty(0) != 1 {
+                return None;
+            }
+            let mut t: libc::termios = std::mem::zeroed();
+            if libc::tcgetattr(0, &mut t) != 0 {
+                return None;
+            }
+            let orig = t;
+            libc::cfmakeraw(&mut t);
+            libc::tcsetattr(0, libc::TCSANOW, &t);
+            Some(RawTty(orig))
+        }
+    }
+}
+impl Drop for RawTty {
+    fn drop(&mut self) {
+        // SAFETY: repõe o termios original guardado.
+        unsafe {
+            libc::tcsetattr(0, libc::TCSANOW, &self.0);
+        }
+    }
+}
+
+/// Liga stdin/stdout ao socket da consola, byte a byte, até `Ctrl-]` (0x1d) no
+/// stdin — a mesma tecla de escape do `telnet`.
+fn console_bridge(sock: &std::path::Path) -> Result<()> {
+    use std::io::{Read, Write};
+    use std::os::unix::net::UnixStream;
+    let stream = UnixStream::connect(sock).map_err(|e| Error::Runtime {
+        context: "vm console",
+        message: e.to_string(),
+    })?;
+    let _raw = RawTty::enable();
+    eprintln!("[connected to '{}' — escape: Ctrl-]]\r", sock.display());
+
+    // socket -> stdout, numa thread.
+    let mut rd = stream.try_clone().map_err(|e| Error::Runtime {
+        context: "vm console",
+        message: e.to_string(),
+    })?;
+    let reader = std::thread::spawn(move || {
+        let mut buf = [0u8; 4096];
+        let mut out = std::io::stdout();
+        while let Ok(n) = rd.read(&mut buf) {
+            if n == 0 || out.write_all(&buf[..n]).is_err() || out.flush().is_err() {
+                break;
+            }
+        }
+    });
+
+    // stdin -> socket, no fio principal; Ctrl-] (0x1d) sai.
+    let mut wr = stream;
+    let mut stdin = std::io::stdin();
+    let mut buf = [0u8; 4096];
+    loop {
+        let n = match stdin.read(&mut buf) {
+            Ok(0) | Err(_) => break,
+            Ok(n) => n,
+        };
+        if buf[..n].contains(&0x1d) {
+            break;
+        }
+        if wr.write_all(&buf[..n]).is_err() {
+            break;
+        }
+    }
+    let _ = wr.shutdown(std::net::Shutdown::Both);
+    let _ = reader.join();
+    eprintln!("\r\n[console closed]\r");
+    Ok(())
+}
+
 fn cmd_describe(base: &std::path::Path, names: &[String]) -> Result<()> {
     for (i, name) in names.iter().enumerate() {
         let vm = delonix_vm::status(base, name)?;
