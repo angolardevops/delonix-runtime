@@ -250,6 +250,13 @@ if [ "$WITH_BINARY" = 1 ]; then
     stepok binario "delonix-cri -> $BIN_DIR/delonix-cri"
   fi
   case ":$PATH:" in *":$BIN_DIR:"*) ;; *) warn "$BIN_DIR não está no teu PATH" ;; esac
+  # Um delonix ANTIGO mais à frente no PATH faz sombra ao acabado de instalar
+  # (caso real: um build 0.3.0 em ~/.local/bin escondia o 0.4.2 e ressuscitava
+  # bugs já corrigidos). Detectar e dizer alto qual apagar.
+  ACTIVE=$(command -v delonix 2>/dev/null || true)
+  if [ -n "$ACTIVE" ] && [ "$ACTIVE" != "$BIN_DIR/delonix" ]; then
+    warn "outro delonix faz sombra ao instalado: '$ACTIVE' ($("$ACTIVE" --version 2>/dev/null || echo versão desconhecida)) vem primeiro no PATH — remove-o (rm $ACTIVE) para usares o $BIN_DIR/delonix"
+  fi
 else
   BIN_DIR=$(dirname "$(command -v delonix 2>/dev/null || echo /usr/local/bin/delonix)")
 fi
