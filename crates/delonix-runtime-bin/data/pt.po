@@ -154,3 +154,75 @@ msgstr "aviso"
 
 msgid "error"
 msgstr "erro"
+
+# ---- mensagens migradas do tr() inline -------------------------------------
+
+msgid "active connections (conntrack)"
+msgstr "ligações activas (conntrack)"
+
+msgid "(no running containers with a network)"
+msgstr "(sem containers com rede a correr)"
+
+msgid "INBOUND → CONTAINER (external access)"
+msgstr "DE FORA → CONTAINER (acesso externo)"
+
+msgid "CONTAINER → OUTBOUND (egress)"
+msgstr "CONTAINER → EXTERIOR (saídas)"
+
+msgid "BETWEEN CONTAINERS"
+msgstr "ENTRE CONTAINERS"
+
+msgid "(no active connections right now)"
+msgstr "(sem ligações activas neste momento)"
+
+msgid "Creating cluster"
+msgstr "A criar o cluster"
+
+msgid "rootless without cgroup delegation: the nodes' CPU/memory/PIDs limits are not enforced \
+                 (namespace/seccomp isolation still holds). For limits, run under \
+                 `systemd-run --user --scope -p Delegate=yes`."
+msgstr "rootless sem delegação de cgroup: os limites de CPU/memória/PIDs dos nós não são aplicados \
+                 (o isolamento de namespaces/seccomp mantém-se). Para limites, corre sob \
+                 `systemd-run --user --scope -p Delegate=yes`."
+
+msgid "Ensuring node image"
+msgstr "A garantir a imagem do nó"
+
+msgid "Preparing nodes"
+msgstr "A preparar os nós"
+
+msgid "Writing configuration"
+msgstr "A escrever a configuração"
+
+msgid "Starting control-plane"
+msgstr "A arrancar o control-plane"
+
+msgid "Installing CNI (kindnet)"
+msgstr "A instalar a CNI (kindnet)"
+
+msgid "Waiting for control-plane to be Ready"
+msgstr "À espera do control-plane ficar Ready"
+
+msgid "Joining"
+msgstr "A juntar"
+
+msgid "Setting kubectl context to"
+msgstr "A definir o contexto kubectl para"
+
+msgid "You can now use your cluster:"
+msgstr "Já podes usar o teu cluster:"
+
+msgid "Deleting cluster"
+msgstr "A apagar o cluster"
+
+msgid "Removing node"
+msgstr "A remover o nó"
+
+msgid "Freeing network"
+msgstr "A libertar a rede"
+
+msgid "Cleaning up kubeconfig and context"
+msgstr "A limpar o kubeconfig e o contexto"
+
+msgid "(no clusters — create one with `delonix cluster create`)"
+msgstr "(nenhum cluster — cria um com `delonix cluster create`)"

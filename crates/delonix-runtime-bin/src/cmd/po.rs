@@ -25,15 +25,29 @@ fn catalog() -> &'static HashMap<String, String> {
     CAT.get_or_init(|| parse_po(PT_PO))
 }
 
-/// Traduz `en` para a língua activa. Sem tradução no catálogo (ou em inglês),
-/// devolve o próprio `en` — a UI nunca fica muda por um msgid em falta.
-pub fn t(en: &str) -> String {
+/// Traduz `en` para a língua activa — o substituto directo do antigo
+/// `tr(en, pt)`: mesma assinatura de retorno (`&'static str`, possível porque
+/// o catálogo vive num `OnceLock` estático), mas com o PT no `data/pt.po` em
+/// vez de espalhado pelo código. Sem tradução (ou em inglês), devolve o
+/// próprio `en` — a UI nunca fica muda por um msgid em falta.
+pub fn t(en: &'static str) -> &'static str {
     if !super::output::is_pt() {
-        return en.to_string();
+        return en;
     }
     match catalog().get(en) {
+        Some(pt) if !pt.is_empty() => pt.as_str(),
+        _ => en,
+    }
+}
+
+/// Variante para strings DINÂMICAS (o help do clap chega como `String`).
+fn t_owned(s: &str) -> String {
+    if !super::output::is_pt() {
+        return s.to_string();
+    }
+    match catalog().get(s) {
         Some(pt) if !pt.is_empty() => pt.clone(),
-        _ => en.to_string(),
+        _ => s.to_string(),
     }
 }
 
@@ -110,12 +124,12 @@ fn unquote(s: &str) -> String {
 /// doc-comment na ajuda curta, mas no catálogo os msgids ficam com pontuação
 /// natural — se o lookup exacto falhar, tenta com `.` e volta a tirá-lo.
 fn t_help(s: &str) -> String {
-    let direct = t(s);
+    let direct = t_owned(s);
     if direct != s {
         return direct;
     }
     let with_dot = format!("{s}.");
-    let translated = t(&with_dot);
+    let translated = t_owned(&with_dot);
     if translated != with_dot {
         translated.trim_end_matches('.').to_string()
     } else {

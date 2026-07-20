@@ -117,20 +117,14 @@ fn cmd_monitor(interval: u64, no_stream: bool) -> Result<()> {
         println!(
             "delonix monitor — {} {}, {} {}\n",
             ip2name.len(),
-            super::output::tr("containers", "containers"),
+            super::po::t("containers"),
             conns.len(),
-            super::output::tr(
-                "active connections (conntrack)",
-                "ligações activas (conntrack)"
-            ),
+            super::po::t("active connections (conntrack)"),
         );
         if ip2name.is_empty() {
             println!(
                 "  {}",
-                super::output::dim(super::output::tr(
-                    "(no running containers with a network)",
-                    "(sem containers com rede a correr)"
-                ))
+                super::output::dim(super::po::t("(no running containers with a network)"))
             );
         }
         let mut ext_in: Vec<&delonix_net::Connection> =
@@ -144,10 +138,7 @@ fn cmd_monitor(interval: u64, no_stream: bool) -> Result<()> {
         if !ext_in.is_empty() {
             println!(
                 "  ⬇ {}",
-                super::output::tr(
-                    "INBOUND → CONTAINER (external access)",
-                    "DE FORA → CONTAINER (acesso externo)"
-                )
+                super::po::t("INBOUND → CONTAINER (external access)")
             );
             for c in &ext_in {
                 println!(
@@ -158,13 +149,7 @@ fn cmd_monitor(interval: u64, no_stream: bool) -> Result<()> {
             println!();
         }
         if !egress.is_empty() {
-            println!(
-                "  ⬆ {}",
-                super::output::tr(
-                    "CONTAINER → OUTBOUND (egress)",
-                    "CONTAINER → EXTERIOR (saídas)"
-                )
-            );
+            println!("  ⬆ {}", super::po::t("CONTAINER → OUTBOUND (egress)"));
             for c in &egress {
                 println!(
                     "    {:<22} → {}:{}/{}",
@@ -174,10 +159,7 @@ fn cmd_monitor(interval: u64, no_stream: bool) -> Result<()> {
             println!();
         }
         if !internal.is_empty() {
-            println!(
-                "  ⇄ {}",
-                super::output::tr("BETWEEN CONTAINERS", "ENTRE CONTAINERS")
-            );
+            println!("  ⇄ {}", super::po::t("BETWEEN CONTAINERS"));
             for c in &internal {
                 println!("    {} ↔ {}", c.container, c.peer);
             }
@@ -185,10 +167,7 @@ fn cmd_monitor(interval: u64, no_stream: bool) -> Result<()> {
         if conns.is_empty() && !ip2name.is_empty() {
             println!(
                 "  {}",
-                super::output::dim(super::output::tr(
-                    "(no active connections right now)",
-                    "(sem ligações activas neste momento)"
-                ))
+                super::output::dim(super::po::t("(no active connections right now)"))
             );
         }
         if no_stream {

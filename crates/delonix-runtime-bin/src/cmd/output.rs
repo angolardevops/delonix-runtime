@@ -77,21 +77,15 @@ pub fn is_pt() -> bool {
     LANG.load(std::sync::atomic::Ordering::Relaxed) == 1
 }
 
-/// Picks the string for the active locale: `en` by default, `pt` with `--l18n=pt`.
-/// Returns `&str` to drop straight into a `format!`/`println!`.
-pub fn tr(en: &'static str, pt: &'static str) -> &'static str {
-    if is_pt() {
-        pt
-    } else {
-        en
-    }
-}
+// (o antigo `tr(en, pt)` inline morreu a favor do catálogo `data/pt.po` —
+// ver `cmd::po::t`; os pares espalhados pelo código eram intraduzíveis por
+// ferramentas e impossíveis de rever num sítio só.)
 
 fn label_warn() -> &'static str {
-    tr("warning", "aviso")
+    super::po::t("warning")
 }
 fn label_error() -> &'static str {
-    tr("error", "erro")
+    super::po::t("error")
 }
 
 /// An informational message (cyan).
@@ -648,12 +642,11 @@ mod tests {
     }
 
     #[test]
-    fn tr_escolhe_por_locale() {
+    fn locale_reconhece_variantes_pt() {
+        // A tradução em si vive no catálogo (`cmd::po`); aqui só o locale.
         set_lang("en");
-        assert_eq!(tr("hello", "olá"), "hello");
         assert!(!is_pt());
         set_lang("pt");
-        assert_eq!(tr("hello", "olá"), "olá");
         assert!(is_pt());
         // pt_AO e variantes contam como pt; qualquer outra coisa = en (default seguro).
         set_lang("pt_AO");
