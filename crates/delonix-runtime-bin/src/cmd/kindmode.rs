@@ -481,7 +481,7 @@ pub(crate) fn create(images: &ImageStore, store: &Store, cfg: &KindCluster) -> R
 
     super::output::info(&format!(
         "{} \"{}\"",
-        super::output::tr("Creating cluster", "A criar o cluster"),
+        super::po::t("Creating cluster"),
         cfg.name
     ));
     let mut p = super::output::Progress::new();
@@ -493,14 +493,9 @@ pub(crate) fn create(images: &ImageStore, store: &Store, cfg: &KindCluster) -> R
     // nós via env — herdada por toda a cadeia de re-exec.
     if !delonix_runtime::cgroup_limits_apply() {
         super::output::warn(
-            super::output::tr(
-                "rootless without cgroup delegation: the nodes' CPU/memory/PIDs limits are not enforced \
+            super::po::t("rootless without cgroup delegation: the nodes' CPU/memory/PIDs limits are not enforced \
                  (namespace/seccomp isolation still holds). For limits, run under \
-                 `systemd-run --user --scope -p Delegate=yes`.",
-                "rootless sem delegação de cgroup: os limites de CPU/memória/PIDs dos nós não são aplicados \
-                 (o isolamento de namespaces/seccomp mantém-se). Para limites, corre sob \
-                 `systemd-run --user --scope -p Delegate=yes`.",
-            ),
+                 `systemd-run --user --scope -p Delegate=yes`."),
         );
     }
     // SAFETY: single-threaded aqui (antes de qualquer thread de worker); a env
@@ -544,10 +539,7 @@ pub(crate) fn create(images: &ImageStore, store: &Store, cfg: &KindCluster) -> R
         .unwrap_or(&cfg.image)
         .to_string();
     p.step(
-        &format!(
-            "{} ({curta})",
-            super::output::tr("Ensuring node image", "A garantir a imagem do nó")
-        ),
+        &format!("{} ({curta})", super::po::t("Ensuring node image")),
         "🖼",
     );
     super::util::resolve_or_pull(images, &cfg.image)?;
@@ -557,11 +549,7 @@ pub(crate) fn create(images: &ImageStore, store: &Store, cfg: &KindCluster) -> R
     // só porque a 6443 está tomada.
     let api_port = pick_api_port(store, cfg.api_port, &cfg.name)?;
     p.step(
-        &format!(
-            "{} ({})",
-            super::output::tr("Preparing nodes", "A preparar os nós"),
-            1 + cfg.workers
-        ),
+        &format!("{} ({})", super::po::t("Preparing nodes"), 1 + cfg.workers),
         "📦",
     );
     let c = boot_node(
@@ -589,10 +577,7 @@ pub(crate) fn create(images: &ImageStore, store: &Store, cfg: &KindCluster) -> R
     // nunca fica pronto sem a feature gate) e depois a correr as fases à mão.
     // Um ficheiro de config leva as 3 afinações ANTES de o kubelet arrancar —
     // uma só passagem, sem remendos. É também o que o `kind` faz (/kind/kubeadm.conf).
-    p.step(
-        super::output::tr("Writing configuration", "A escrever a configuração"),
-        "📜",
-    );
+    p.step(super::po::t("Writing configuration"), "📜");
     let version = cfg
         .k8s_version
         .as_deref()
@@ -633,10 +618,7 @@ pub(crate) fn create(images: &ImageStore, store: &Store, cfg: &KindCluster) -> R
 
     // O `kubeadm init` puxa as imagens do control-plane cá dentro — é o passo
     // mais demorado de todos.
-    p.step(
-        super::output::tr("Starting control-plane", "A arrancar o control-plane"),
-        "🕹️",
-    );
+    p.step(super::po::t("Starting control-plane"), "🕹️");
     node_must(
         &c,
         "kubeadm init",
@@ -651,10 +633,7 @@ pub(crate) fn create(images: &ImageStore, store: &Store, cfg: &KindCluster) -> R
 
     // --- CNI (senão o nó fica NotReady para sempre) ---
     if cfg.cni == "default" {
-        p.step(
-            super::output::tr("Installing CNI (kindnet)", "A instalar a CNI (kindnet)"),
-            "🔌",
-        );
+        p.step(super::po::t("Installing CNI (kindnet)"), "🔌");
         node_must(
             &c,
             "CNI",
@@ -677,13 +656,7 @@ pub(crate) fn create(images: &ImageStore, store: &Store, cfg: &KindCluster) -> R
         );
     }
 
-    p.step(
-        super::output::tr(
-            "Waiting for control-plane to be Ready",
-            "À espera do control-plane ficar Ready",
-        ),
-        "⏳",
-    );
+    p.step(super::po::t("Waiting for control-plane to be Ready"), "⏳");
     wait_in_node(
         &c,
         "o control-plane ficar Ready",
@@ -720,11 +693,7 @@ pub(crate) fn create(images: &ImageStore, store: &Store, cfg: &KindCluster) -> R
         let join_yaml = join_config_yaml(&join);
 
         p.step(
-            &format!(
-                "{} {} worker(s)",
-                super::output::tr("Joining", "A juntar"),
-                cfg.workers
-            ),
+            &format!("{} {} worker(s)", super::po::t("Joining"), cfg.workers),
             "🚜",
         );
         // Em PARALELO: cada worker é independente (arranca, junta-se, acabou) e
@@ -793,13 +762,7 @@ pub(crate) fn create(images: &ImageStore, store: &Store, cfg: &KindCluster) -> R
     match install_kubecontext(&cfg.name) {
         Ok(path) => {
             p.step(
-                &format!(
-                    "{} \"{ctx}\"",
-                    super::output::tr(
-                        "Setting kubectl context to",
-                        "A definir o contexto kubectl para"
-                    )
-                ),
+                &format!("{} \"{ctx}\"", super::po::t("Setting kubectl context to")),
                 "📇",
             );
             p.ok();
@@ -832,13 +795,7 @@ pub(crate) fn create(images: &ImageStore, store: &Store, cfg: &KindCluster) -> R
     drop(p);
 
     println!();
-    println!(
-        "{}",
-        super::output::tr(
-            "You can now use your cluster:",
-            "Já podes usar o teu cluster:"
-        )
-    );
+    println!("{}", super::po::t("You can now use your cluster:"));
     println!();
     println!(
         "  {}",
@@ -1012,20 +969,13 @@ pub(crate) fn delete(images: &ImageStore, store: &Store, name: &str) -> Result<(
     if nodes.is_empty() {
         return Err(Error::NotFound(format!("cluster kind '{name}'")));
     }
-    super::output::info(&format!(
-        "{} \"{name}\"",
-        super::output::tr("Deleting cluster", "A apagar o cluster")
-    ));
+    super::output::info(&format!("{} \"{name}\"", super::po::t("Deleting cluster")));
     let mut p = super::output::Progress::new();
     for n in &nodes {
         // Mostra CADA nó a ser removido (portas/rede libertadas, rootfs apagado)
         // — o delete deixa de parecer mágico, tal como o create.
         p.step(
-            &format!(
-                "{} '{}'",
-                super::output::tr("Removing node", "A remover o nó"),
-                n.name
-            ),
+            &format!("{} '{}'", super::po::t("Removing node"), n.name),
             "🗑️",
         );
         container::remove_container(images, store, n, true)?;
@@ -1039,10 +989,7 @@ pub(crate) fn delete(images: &ImageStore, store: &Store, name: &str) -> Result<(
     if let Ok(nstore) = delonix_net::NetworkStore::open(super::util::state_root()) {
         if nstore.get(&net).is_ok() {
             p.step(
-                &format!(
-                    "{} '{net}'",
-                    super::output::tr("Freeing network", "A libertar a rede")
-                ),
+                &format!("{} '{net}'", super::po::t("Freeing network")),
                 "🌐",
             );
             let _ = nstore.remove(&net);
@@ -1050,13 +997,7 @@ pub(crate) fn delete(images: &ImageStore, store: &Store, name: &str) -> Result<(
             p.ok();
         }
     }
-    p.step(
-        super::output::tr(
-            "Cleaning up kubeconfig and context",
-            "A limpar o kubeconfig e o contexto",
-        ),
-        "🧹",
-    );
+    p.step(super::po::t("Cleaning up kubeconfig and context"), "🧹");
     let _ = std::fs::remove_file(kubeconfig_path(name));
     let _ = std::fs::remove_dir_all(cluster_dir(name));
     // Tira o contexto do ~/.kube/config — senão o `kubectl config get-contexts`
@@ -1144,10 +1085,7 @@ pub(crate) fn list(store: &Store) -> Result<()> {
     if clusters.is_empty() {
         println!(
             "{}",
-            super::output::tr(
-                "(no clusters — create one with `delonix cluster create`)",
-                "(nenhum cluster — cria um com `delonix cluster create`)"
-            )
+            super::po::t("(no clusters — create one with `delonix cluster create`)")
         );
         return Ok(());
     }
