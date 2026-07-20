@@ -14,7 +14,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.4.0"
+version = "0.4.1"
 edition = "2021"
 license = "Apache-2.0"
 repository = "https://github.com/angolardevops/delonix-runtime"
@@ -55,3 +55,12 @@ opentelemetry-otlp = { version = "0.32", default-features = false, features = [
     "reqwest-blocking-client",
 ] }
 tracing-opentelemetry = { version = "0.33", default-features = false }
+
+# Perfil de release dos binários publicados: LTO thin + 1 codegen unit dão
+# um binário mais pequeno e mais rápido (inlining entre crates — o caminho
+# quente hash/serde/parsing beneficia) por custo só em tempo de build no CI.
+# O strip é feito no workflow de release, não aqui (os builds locais mantêm
+# símbolos para depurar).
+[profile.release]
+lto = "thin"
+codegen-units = 1

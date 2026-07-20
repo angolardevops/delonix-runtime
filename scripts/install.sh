@@ -17,6 +17,7 @@
 #
 # Flags:
 #   --no-vm        não instala as dependências de VMs (libvirt/qemu/cloud-init)
+#   --no-tune      não aplica o tuning de kernel (sysctls/módulos)
 #   --no-binary    só dependências/configuração (usa um binário já instalado)
 #   --with-cri     instala também o delonix-cri (nó Kubernetes)
 #   --user         binário em ~/.local/bin em vez de /usr/local/bin
@@ -37,6 +38,7 @@ set -euo pipefail
 REPO="angolardevops/delonix-runtime"
 VERSION="latest"
 WITH_VM=1
+WITH_TUNE=1
 WITH_BINARY=1
 WITH_CRI=0
 USER_INSTALL=0
@@ -54,6 +56,7 @@ die()  { printf '\033[1;31m ✗ \033[0m %s\n' "$*" >&2; exit 1; }
 while [ $# -gt 0 ]; do
   case "$1" in
     --no-vm)      WITH_VM=0 ;;
+    --no-tune)    WITH_TUNE=0 ;;
     --no-binary)  WITH_BINARY=0 ;;
     --with-cri)   WITH_CRI=1 ;;
     --user)       USER_INSTALL=1 ;;
@@ -86,12 +89,16 @@ else
 fi
 
 # ------------------------------------------------------------ detecção de distro
+# NUNCA fazer `source /etc/os-release` no shell principal: ele define VERSION/
+# NAME/ID e esmagava as nossas variáveis (bug real da v0.4.0 — o instalador
+# tentava descarregar a release "18.1", a versão do SO). Subshell isola tudo.
 PKG=""
 if [ -r /etc/os-release ]; then
-  . /etc/os-release
-  DISTRO_IDS="${ID:-} ${ID_LIKE:-}"
+  DISTRO_IDS=$(. /etc/os-release; echo "${ID:-} ${ID_LIKE:-}")
+  DISTRO_NAME=$(. /etc/os-release; echo "${PRETTY_NAME:-unknown}")
 else
   DISTRO_IDS=""
+  DISTRO_NAME="unknown"
 fi
 case " $DISTRO_IDS " in
   *" debian "*|*" ubuntu "*) PKG=apt ;;
@@ -106,7 +113,33 @@ if [ -z "$PKG" ]; then
   done
 fi
 [ -n "$PKG" ] || die "unsupported distro (need apt, dnf, zypper or pacman). Deps to install manually: slirp4netns uidmap nftables iproute2 conntrack"
-msg "Distro family: $PKG (${PRETTY_NAME:-unknown})"
+msg "Distro family: $PKG ($DISTRO_NAME)"
+
+# ---------------------------------------------------- detecção de hardware
+# Serve duas decisões concretas: (a) que variante do binário descarregar
+# (x86-64-v3 quando o CPU tem AVX2 — Zen 2+/Haswell+); (b) avisos de
+# capacidade (RAM/disco) ANTES de o utilizador bater neles em produção —
+# a lição do kubelet a despejar por disk-pressure ficou aprendida.
+CPU_MODEL=$(sed -n 's/^model name[^:]*: //p' /proc/cpuinfo | head -1)
+NCPU=$(nproc 2>/dev/null || echo '?')
+RAM_GB=$(awk '/MemTotal/ {printf "%d", $2/1048576}' /proc/meminfo 2>/dev/null || echo '?')
+DISK_FREE_GB=$(df -k --output=avail "$REAL_HOME" 2>/dev/null | tail -1 | awk '{printf "%d", $1/1048576}')
+GPU_INFO=""
+if command -v lspci >/dev/null 2>&1; then
+  GPU_INFO=$(lspci 2>/dev/null | grep -Ei 'vga|3d controller' | sed 's/^[0-9a-f:.]* //' | paste -sd '; ' -)
+elif [ -d /sys/class/drm ] && ls /sys/class/drm/card[0-9] >/dev/null 2>&1; then
+  GPU_INFO="present (install pciutils for details)"
+fi
+CPU_VARIANT=""
+# x86-64-v3 = AVX2+BMI2+FMA. O teu binário genérico continua a ser o fallback.
+if grep -qm1 avx2 /proc/cpuinfo && grep -qm1 bmi2 /proc/cpuinfo && grep -qm1 fma /proc/cpuinfo; then
+  CPU_VARIANT="-v3"
+fi
+if [ -n "$CPU_VARIANT" ]; then VARIANT_LABEL="x86-64-v3 (AVX2)"; else VARIANT_LABEL="x86-64 baseline"; fi
+msg "Hardware: ${CPU_MODEL:-unknown CPU} (${NCPU} cpus, $VARIANT_LABEL) · ${RAM_GB}GB RAM · ${DISK_FREE_GB:-?}GB free on home"
+[ -n "$GPU_INFO" ] && msg "GPU: $GPU_INFO"
+[ "${RAM_GB:-8}" != '?' ] && [ "${RAM_GB:-8}" -lt 2 ] 2>/dev/null && warn "less than 2GB of RAM — VMs will be tight; containers are fine"
+[ -n "$DISK_FREE_GB" ] && [ "$DISK_FREE_GB" -lt 10 ] 2>/dev/null && warn "less than 10GB free — image pulls and container rootfs can fill the disk fast (kubelet evicts pods under disk pressure)"
 
 PKG_UPDATED=0
 pkg_install() {
@@ -170,22 +203,34 @@ if [ "$WITH_BINARY" = 1 ]; then
   command -v curl >/dev/null 2>&1 || require_dep curl curl "downloading releases"
   TMP=$(mktemp -d)
   trap 'rm -rf "$TMP"' EXIT
-  msg "Downloading delonix ($VERSION) ..."
-  curl -fsSL -o "$TMP/delonix-x86_64-linux" "$BASE_URL/delonix-x86_64-linux"
+  # Variante optimizada para o CPU (x86-64-v3: AVX2/BMI2/FMA) quando ele a
+  # suporta; releases antigas podem não a ter — fallback para o genérico.
+  fetch_asset() { # $1 nome-base (delonix|delonix-cri) → devolve o nome descarregado
+    local base="$1" asset="$1-x86_64${CPU_VARIANT}-linux"
+    if [ -n "$CPU_VARIANT" ] && ! curl -fsSL -o "$TMP/$asset" "$BASE_URL/$asset" 2>/dev/null; then
+      warn "$asset not in this release — falling back to the generic binary"
+      asset="$base-x86_64-linux"
+      curl -fsSL -o "$TMP/$asset" "$BASE_URL/$asset"
+    elif [ -z "$CPU_VARIANT" ]; then
+      curl -fsSL -o "$TMP/$asset" "$BASE_URL/$asset"
+    fi
+    echo "$asset"
+  }
+  verify_asset() { # nunca instalar um download sem conferir contra o SHA256SUMS
+    ( cd "$TMP" && grep -E " $1\$" SHA256SUMS | sha256sum -c - >/dev/null 2>&1 ) \
+      || die "SHA256 verification FAILED for $1 — corrupted or tampered download, aborting"
+  }
+  msg "Downloading delonix ($VERSION, $VARIANT_LABEL) ..."
   curl -fsSL -o "$TMP/SHA256SUMS" "$BASE_URL/SHA256SUMS"
-  if [ "$WITH_CRI" = 1 ]; then
-    curl -fsSL -o "$TMP/delonix-cri-x86_64-linux" "$BASE_URL/delonix-cri-x86_64-linux"
-  fi
-  # Verificação de integridade — nunca instalar um download sem conferir.
-  ( cd "$TMP"
-    grep -E ' (delonix|delonix-cri)-x86_64-linux$' SHA256SUMS \
-      | { [ "$WITH_CRI" = 1 ] && cat || grep -v cri; } \
-      | sha256sum -c - >/dev/null ) || die "SHA256 verification FAILED — corrupted or tampered download, aborting"
-  ok "SHA256 verified"
-  $BIN_SUDO install -m 0755 "$TMP/delonix-x86_64-linux" "$BIN_DIR/delonix"
+  DELONIX_ASSET=$(fetch_asset delonix)
+  verify_asset "$DELONIX_ASSET"
+  ok "SHA256 verified ($DELONIX_ASSET)"
+  $BIN_SUDO install -m 0755 "$TMP/$DELONIX_ASSET" "$BIN_DIR/delonix"
   ok "delonix -> $BIN_DIR/delonix"
   if [ "$WITH_CRI" = 1 ]; then
-    $BIN_SUDO install -m 0755 "$TMP/delonix-cri-x86_64-linux" "$BIN_DIR/delonix-cri"
+    CRI_ASSET=$(fetch_asset delonix-cri)
+    verify_asset "$CRI_ASSET"
+    $BIN_SUDO install -m 0755 "$TMP/$CRI_ASSET" "$BIN_DIR/delonix-cri"
     ok "delonix-cri -> $BIN_DIR/delonix-cri"
   fi
   case ":$PATH:" in *":$BIN_DIR:"*) ;; *) warn "$BIN_DIR is not in your PATH" ;; esac
@@ -284,6 +329,41 @@ if [ "$WITH_VM" = 1 ]; then
   done
   if [ ! -e /dev/kvm ]; then
     warn "/dev/kvm does not exist — hardware virtualization is disabled (enable VT-x/AMD-V in the BIOS) or you are inside a VM without nested virt"
+  fi
+fi
+
+# ------------------------------------------------- tuning de kernel (opt-out)
+# Sysctls/módulos que containers, Kubernetes e VMs exigem ou esgotam depressa.
+# Cada linha tem uma razão concreta — nada de "tuning" de folclore:
+#   inotify         — kubelet/hot-reload esgotam os defaults com poucas dezenas
+#                     de containers ("too many open files" enganador).
+#   ip_forward      — NAT do libvirt e CNI de k8s precisam de routing no host.
+#   overlay         — overlayfs das imagens (carregado on-demand, mas em boot
+#                     lockdown/containers aninhados o autoload falha).
+#   br_netfilter + bridge-nf-call — requisito documentado do kubeadm (o
+#                     kube-proxy precisa de ver tráfego bridged no netfilter).
+#   tun             — slirp4netns/VMs precisam de /dev/net/tun desde o boot.
+#   max_map_count   — bases de dados/JVMs em containers (Elasticsearch exige-o).
+#   ping_group_range — ping dentro de containers rootless sem CAP_NET_RAW.
+if [ "$WITH_TUNE" = 1 ]; then
+  msg "Applying kernel tuning for containers/Kubernetes/VMs..."
+  printf '%s\n' overlay br_netfilter tun | $SUDO tee /etc/modules-load.d/delonix.conf >/dev/null
+  for m in overlay br_netfilter tun; do $SUDO modprobe "$m" 2>/dev/null || true; done
+  $SUDO tee /etc/sysctl.d/99-delonix.conf >/dev/null <<'SYSCTL'
+# Delonix Runtime — tuning para containers/k8s/VMs (gerado pelo install.sh).
+fs.inotify.max_user_watches = 1048576
+fs.inotify.max_user_instances = 8192
+net.ipv4.ip_forward = 1
+net.bridge.bridge-nf-call-iptables = 1
+net.bridge.bridge-nf-call-ip6tables = 1
+vm.max_map_count = 262144
+net.core.somaxconn = 4096
+net.ipv4.ping_group_range = 0 2147483647
+SYSCTL
+  if $SUDO sysctl -q -p /etc/sysctl.d/99-delonix.conf >/dev/null 2>&1; then
+    ok "kernel tuned (persisted in /etc/sysctl.d/99-delonix.conf + /etc/modules-load.d/delonix.conf)"
+  else
+    warn "some sysctls did not apply (kernel without the module?) — they will retry on next boot"
   fi
 fi
 
