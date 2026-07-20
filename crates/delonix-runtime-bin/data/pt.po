@@ -535,3 +535,29 @@ msgstr "o container '{name}' saiu imediatamente — vê `delonix container logs 
 
 msgid "rootless with the default `--net host` cannot bind ports below 1024 — if the image binds one (nginx, httpd, ...), publish it (`-p 8080:80`) or use `--net <network>`"
 msgstr "rootless com o default `--net host` não consegue bind de portas abaixo de 1024 — se a imagem usa uma (nginx, httpd, ...), publica-a (`-p 8080:80`) ou usa `--net <rede>`"
+
+# ---- --version rico ---------------------------------------------------------
+
+msgid "daemonless, rootless-first container & microVM engine (kernel-native, Rust)"
+msgstr "motor de containers e microVMs daemonless, rootless-first (kernel-native, Rust)"
+
+msgid "get started"
+msgstr "por onde começar"
+
+msgid "a web service in seconds"
+msgstr "um serviço web em segundos"
+
+msgid "declarative microVMs"
+msgstr "microVMs declarativas"
+
+msgid "local Kubernetes (kind mode, no Docker)"
+msgstr "Kubernetes local (modo kind, sem Docker)"
+
+msgid "a complete declarative project"
+msgstr "um projecto declarativo completo"
+
+msgid "htop-style dashboard"
+msgstr "dashboard estilo htop"
+
+msgid "docs"
+msgstr "docs"
