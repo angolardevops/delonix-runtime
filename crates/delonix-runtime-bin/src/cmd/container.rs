@@ -1172,12 +1172,19 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
     // itself isn't in the store yet) — checking here would give a false conflict.
     if std::env::var("DELONIX_REEXEC_ID").is_err() {
         for spec in &ports {
-            let (hp, _, _) = delonix_net::parse_publish(spec)?;
+            let (hp, cp, _) = delonix_net::parse_publish(spec)?;
             if let Some(owner) = port_owner(store, &hp)? {
+                // Estruturada como as receitas do `cluster apply`: primeiro o
+                // facto, depois as saídas possíveis como comandos prontos a
+                // copiar — quem bate neste erro resolve-o sem ir ao --help.
+                let alt = hp.parse::<u32>().map(|n| n + 10000).unwrap_or(18080);
                 return Err(Error::Invalid(format!(
-                    "a porta {hp} já está publicada pelo container '{owner}' — usa outra porta \
-                     (ex.: `-p {}:...`) ou pára esse container primeiro",
-                    hp.parse::<u32>().map(|n| n + 10000).unwrap_or(0)
+                    "a porta {hp} já está publicada pelo container '{owner}'\n\
+                     \n\
+                     resolve com UMA destas opções:\n\
+                     \x20 delonix container stop {owner}    # pára quem segura a porta {hp}\n\
+                     \x20 delonix container run -p {alt}:{cp} ...    # ou publica noutra porta\n\
+                     \x20 delonix container update {owner} --publish-rm {hp}    # ou despublica-a a quente"
                 )));
             }
         }
@@ -1208,7 +1215,18 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
             "no command (the image defines no ENTRYPOINT/CMD)".into(),
         ));
     }
-    let cname = name.unwrap_or_else(|| format!("dlx-{}", &id[..8.min(id.len())]));
+    // Nome default no padrão angolano (rei + lugar, como os clusters kind-mode
+    // e as VMs) — derivado do `id` para as DUAS passagens do re-exec chegarem
+    // ao mesmo nome (o id viaja no DELONIX_REEXEC_ID; ver `names::derived_name`).
+    // `dlx-<id>` fica só como último recurso se as 50 tentativas colidirem.
+    let cname = match name {
+        Some(n) => n,
+        None => {
+            let existing: Vec<String> = store.list()?.iter().map(|c| c.name.clone()).collect();
+            super::names::derived_name(&id, |n| existing.iter().any(|e| e == n))
+                .unwrap_or_else(|| format!("dlx-{}", &id[..8.min(id.len())]))
+        }
+    };
     // UNIQUE name, like docker ("name is already in use"). Without this, several
     // containers with the same name got created: `find` resolves to the first, and
     // an `rm <name>` only caught that one — the rest were left orphaned and invisible
