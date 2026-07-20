@@ -30,6 +30,7 @@ enum CompShell {
 #[command(
     name = "delonix",
     version,
+    long_version = long_version_text(),
     about = "Delonix Runtime — a daemonless, rootless-first container & microVM engine (kernel-native, Rust). The open-source engine that powers Delonix."
 )]
 struct Cli {
@@ -173,6 +174,39 @@ enum Cmd {
         #[arg(long)]
         config: std::path::PathBuf,
     },
+}
+
+/// O cartão de visita do `--version` (o `-V` mantém a linha curta e estável
+/// para scripts): identidade do build + o que fazer a seguir. É a primeira
+/// coisa que um utilizador novo corre — merece apontar o caminho.
+fn long_version_text() -> String {
+    use cmd::po::t;
+    format!(
+        "delonix {v}\n\
+         {tag}\n\
+         commit: {hash} · built: {date} · {lic}\n\
+         \n\
+         {try_}:\n\
+         \x20 delonix container run -d -p 8080:80 nginx   # {c1}\n\
+         \x20 delonix vm create --name dev ...            # {c2}\n\
+         \x20 delonix cluster create                      # {c3}\n\
+         \x20 delonix stack init && delonix stack apply   # {c4}\n\
+         \x20 delonix dash                                # {c5}\n\
+         \n\
+         {docs}: https://angolardevops.github.io/delonix-runtime/ · delonix <group> --help",
+        v = env!("CARGO_PKG_VERSION"),
+        tag = t("daemonless, rootless-first container & microVM engine (kernel-native, Rust)"),
+        hash = env!("DELONIX_GIT_HASH"),
+        date = env!("DELONIX_BUILD_DATE"),
+        lic = "Apache-2.0",
+        try_ = t("get started"),
+        c1 = t("a web service in seconds"),
+        c2 = t("declarative microVMs"),
+        c3 = t("local Kubernetes (kind mode, no Docker)"),
+        c4 = t("a complete declarative project"),
+        c5 = t("htop-style dashboard"),
+        docs = t("docs"),
+    )
 }
 
 fn run() -> Result<()> {

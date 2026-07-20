@@ -65,6 +65,29 @@ fn main() {
 
     let dest = PathBuf::from(std::env::var("OUT_DIR").unwrap()).join("templates.rs");
     std::fs::write(dest, out).unwrap();
+
+    // Metadados de build para o `--version` rico: hash git curto + data UTC.
+    // Sem dependências — shell-out com fallbacks (um build de tarball sem .git
+    // continua a compilar). SOURCE_DATE_EPOCH respeitado (builds reprodutíveis).
+    let hash = std::process::Command::new("git")
+        .args(["rev-parse", "--short=9", "HEAD"])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .unwrap_or_else(|| "unknown".into());
+    let date = std::process::Command::new("date")
+        .args(["-u", "+%Y-%m-%d"])
+        .env_remove("TZ")
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .unwrap_or_else(|| "unknown".into());
+    println!("cargo:rustc-env=DELONIX_GIT_HASH={hash}");
+    println!("cargo:rustc-env=DELONIX_BUILD_DATE={date}");
+    // Re-corre quando o HEAD muda — sem isto o hash fossiliza entre commits.
+    println!("cargo::rerun-if-changed=../../.git/HEAD");
 }
 
 /// Collect `(relative-path, absolute-path)` of every file under `dir`.
