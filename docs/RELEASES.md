@@ -4,6 +4,26 @@
 > (regenerado automaticamente pelo pipeline de release a cada tag publicada).
 > Não editar à mão — edita a nota da release respectiva.
 
+## v0.7.1 — VMs sem fricção: vm pull da imagem oficial, --disk opcional, vm init corrigido
+
+Correcções e UX nascidas de uso real do grupo `vm`:
+
+- **`delonix vm pull`** (novo) — sem argumento, descarrega a **imagem VM
+  dourada oficial** (`ghcr.io/angolardevops/delonix-vm-k8s:1.34`: Ubuntu 24.04
+  + kubeadm/kubelet/kubectl + `delonix-cri` como serviço); com argumento,
+  qualquer referência OCI. **`vm push <nome> <destino>`** publica uma golden
+  local. Delegam na lógica do `image --vm` (zero duplicação).
+- **`vm create --disk` opcional** — sem a flag, usa a imagem dourada local
+  única (0 ou várias dão erro claro com o comando para resolver). O fluxo
+  completo passou a: `delonix vm pull && delonix vm create dev`.
+- **`vm init` deixou de criar containers** — o menu de templates (apps em
+  containers: django/nginx/...) aparecia em `vm init` e, escolhido um
+  template, construía e arrancava um *container*. O menu agora aplica-se só
+  a `container/stack init`; `vm init`/`cluster init` geram o scaffold do alvo.
+- Exemplo do cartão `--version` corrigido para a sintaxe real (`vm create dev`).
+
+---
+
 ## v0.7.0 — fonte 100% EN completa: mensagens do motor no catálogo pt.po
 
 Fecha a migração i18n iniciada na v0.5.0: **todo o código de utilizador fala
