@@ -177,7 +177,7 @@ fn apply_seccomp(unconfined: bool, detect: bool) {
     let arch = match std::env::consts::ARCH.try_into() {
         Ok(a) => a,
         Err(_) => {
-            eprintln!("delonix: arquitectura sem suporte seccomp; a abortar o container");
+            eprintln!("delonix: architecture without seccomp support; aborting the container");
             unsafe { libc::_exit(126) };
         }
     };
@@ -219,14 +219,14 @@ fn apply_seccomp(unconfined: bool, detect: bool) {
     {
         Ok(p) => p,
         Err(e) => {
-            eprintln!("delonix: falha a construir o filtro seccomp: {e}; a abortar");
+            eprintln!("delonix: failed to build the seccomp filter: {e}; aborting");
             unsafe { libc::_exit(126) };
         }
     };
     if detect {
         apply_filter_logged(&prog); // B12: regista os syscalls negados
     } else if let Err(e) = apply_filter(&prog) {
-        eprintln!("delonix: falha a aplicar o seccomp: {e}; a abortar o container");
+        eprintln!("delonix: failed to apply seccomp: {e}; aborting the container");
         unsafe { libc::_exit(126) };
     }
 }
@@ -712,21 +712,21 @@ fn confinement_ok(
     cap_keep: u64,
 ) -> std::result::Result<(), String> {
     if no_new_privs != Some(1) {
-        return Err(format!("NO_NEW_PRIVS inativo ({no_new_privs:?})"));
+        return Err(format!("NO_NEW_PRIVS inactive ({no_new_privs:?})"));
     }
     // 2 = SECCOMP_MODE_FILTER. (`detect` também aplica um filtro → modo 2.)
     if seccomp_expected && seccomp_mode != Some(2) {
         return Err(format!(
-            "seccomp não está em modo filtro (Seccomp={seccomp_mode:?})"
+            "seccomp is not in filter mode (Seccomp={seccomp_mode:?})"
         ));
     }
-    let bnd = cap_bnd.ok_or_else(|| "CapBnd ausente em /proc/self/status".to_string())?;
-    let eff = cap_eff.ok_or_else(|| "CapEff ausente em /proc/self/status".to_string())?;
+    let bnd = cap_bnd.ok_or_else(|| "CapBnd missing from /proc/self/status".to_string())?;
+    let eff = cap_eff.ok_or_else(|| "CapEff missing from /proc/self/status".to_string())?;
     let extra_bnd = bnd & !cap_keep;
     let extra_eff = eff & !cap_keep;
     if extra_bnd != 0 || extra_eff != 0 {
         return Err(format!(
-            "capabilities fora da allowlist persistem (bnd_extra={extra_bnd:#x} eff_extra={extra_eff:#x})"
+            "capabilities outside the allowlist persist (bnd_extra={extra_bnd:#x} eff_extra={extra_eff:#x})"
         ));
     }
     Ok(())
@@ -741,7 +741,7 @@ fn confinement_ok(
 /// `DELONIX_INSECURE_BESTEFFORT=1`.
 fn verify_confinement(seccomp_expected: bool, cap_keep: u64) -> std::result::Result<(), String> {
     let status = std::fs::read_to_string("/proc/self/status")
-        .map_err(|e| format!("/proc/self/status ilegível: {e}"))?;
+        .map_err(|e| format!("/proc/self/status unreadable: {e}"))?;
     let (mut nnp, mut sec, mut bnd, mut eff) = (None, None, None, None);
     for line in status.lines() {
         if let Some(v) = line.strip_prefix("NoNewPrivs:") {
@@ -1123,14 +1123,12 @@ fn bind_devices(src_prefix: &str, rootfs: &str, devices: &[String]) {
             Ok(st) => {
                 let mode = st.st_mode & libc::S_IFMT;
                 if mode == libc::S_IFBLK {
-                    eprintln!(
-                        "delonix: --device {host}: dispositivo de bloco recusado (só char devices)"
-                    );
+                    eprintln!("delonix: --device {host}: block device refused (char devices only)");
                     continue;
                 }
             }
             Err(_) => {
-                eprintln!("delonix: --device {host}: nó inexistente, ignorado");
+                eprintln!("delonix: --device {host}: node does not exist, ignored");
                 continue;
             }
         }
@@ -1410,7 +1408,7 @@ fn run_idmap(tool: &str, pid: i32, map: &str) -> Result<()> {
         return Err(Error::Runtime {
             context: "idmap",
             message: format!(
-                "{tool} falhou (código {:?}) — verifica /etc/subuid e /etc/subgid",
+                "{tool} failed (code {:?}) — check /etc/subuid and /etc/subgid",
                 st.code()
             ),
         });
@@ -1716,7 +1714,7 @@ fn apply_sysctls(specs: &[String]) {
             // isto corre antes de `/proc/sys` ficar RO e antes de largar caps,
             // um container poderia escrever knobs do kernel do HOST.
             if !sysctl_namespaced(k) {
-                eprintln!("delonix: --sysctl {k}: não-namespaced; recusado (afecta o host)");
+                eprintln!("delonix: --sysctl {k}: not namespaced; refused (affects the host)");
                 continue;
             }
             let path = format!("/proc/sys/{}", k.replace('.', "/"));
@@ -1994,12 +1992,12 @@ fn container_init(
                 // SAFETY: fd válido; setns(NEWNET) junta o netns do pod.
                 let owned = unsafe { OwnedFd::from_raw_fd(fd) };
                 if setns(owned, CloneFlags::CLONE_NEWNET).is_err() {
-                    eprintln!("delonix: falha a juntar ao netns do pod");
+                    eprintln!("delonix: failed to join the pod netns");
                     return 125;
                 }
             }
             Err(_) => {
-                eprintln!("delonix: netns do pod indisponível");
+                eprintln!("delonix: pod netns unavailable");
                 return 125;
             }
         }
@@ -2023,7 +2021,7 @@ fn container_init(
     if let Err(e) = setup_rootfs(
         rootfs, hostname, mounts, userns, devices, sysctls, host_pid, privileged,
     ) {
-        eprintln!("delonix: falha a preparar o rootfs: {e}");
+        eprintln!("delonix: failed to prepare the rootfs: {e}");
         return 126;
     }
     if userns {
@@ -2084,7 +2082,7 @@ fn container_init(
                                                        // opt-out do ENGINE, não do container). Ver `verify_confinement`.
     if !insecure_besteffort() {
         if let Err(e) = verify_confinement(!seccomp_unconfined, cap_keep) {
-            eprintln!("delonix: confinamento NÃO verificado ({e}); a abortar o container");
+            eprintln!("delonix: confinement NOT verified ({e}); aborting the container");
             return 126;
         }
     }
@@ -2100,7 +2098,7 @@ fn container_init(
     if let Some(w) = workdir.filter(|w| !w.is_empty() && *w != "/") {
         let _ = std::fs::create_dir_all(w);
         if chdir(w).is_err() {
-            eprintln!("delonix: aviso — falha a entrar no WORKDIR {w}");
+            eprintln!("delonix: warning — failed to enter WORKDIR {w}");
         }
     }
     apply_env(hostname, env); // ambiente limpo + ENV da imagem/stack/CLI
@@ -2128,17 +2126,19 @@ fn container_init(
             unsafe {
                 libc::setgroups(1, [gid].as_ptr());
                 if libc::setgid(gid) != 0 {
-                    eprintln!("delonix: setgid({gid}) falhou");
+                    eprintln!("delonix: setgid({gid}) failed");
                 }
                 if libc::setuid(uid) != 0 {
-                    eprintln!("delonix: setuid({uid}) falhou — o USER da imagem não está mapeado (subuid?)");
+                    eprintln!(
+                        "delonix: setuid({uid}) failed — the image USER is not mapped (subuid?)"
+                    );
                     return 126;
                 }
             }
         }
     }
     let _ = execvp(&argv[0], argv);
-    eprintln!("delonix: exec falhou: {:?}", argv[0]);
+    eprintln!("delonix: exec failed: {:?}", argv[0]);
     127
 }
 
@@ -2478,11 +2478,11 @@ pub fn admission_check(memory_max: &str) -> Result<()> {
         let want = parse_mem_bytes(memory_max);
         if cur.saturating_add(want) > cap {
             return Err(Error::Runtime {
-                context: "admissão",
+                context: "admission",
                 message: format!(
-                    "protecção do host: orçamento de memória do Delonix esgotado \
-                     ({} MiB usados de {} MiB; este container pede {}). \
-                     Pára containers ou sobe DELONIX_RESERVE_PCT.",
+                    "host protection: Delonix memory budget exhausted \
+                     ({} MiB used of {} MiB; this container requests {}). \
+                     Stop containers or raise DELONIX_RESERVE_PCT.",
                     cur / 1048576,
                     cap / 1048576,
                     memory_max
@@ -2494,9 +2494,9 @@ pub fn admission_check(memory_max: &str) -> Result<()> {
         let limit = host_ncpu() as f64 * 4.0;
         if load1 > limit {
             return Err(Error::Runtime {
-                context: "admissão",
+                context: "admission",
                 message: format!(
-                    "protecção do host: carga média demasiado alta ({load1:.1} > {limit:.0}) — tenta mais tarde"
+                    "host protection: load average too high ({load1:.1} > {limit:.0}) — try again later"
                 ),
             });
         }
@@ -2755,13 +2755,13 @@ fn setup_cgroup(c: &Container, pid: i32) -> Result<()> {
                 static AVISO: std::sync::Once = std::sync::Once::new();
                 AVISO.call_once(|| {
                     eprintln!(
-                        "delonix: aviso — rootless SEM delegação de cgroup: memory/cpu/pids NÃO são\n\
-                         \x20        aplicados (um fork-bomb ou leak pode afetar o host). Para ter\n\
-                         \x20        limites, corre o engine sob uma sessão systemd --user com\n\
-                         \x20        delegação: `systemctl --user edit --force --full delonix.service`\n\
-                         \x20        com `[Service] Delegate=yes`, ou inicia via `systemd-run --user\n\
-                         \x20        --scope -p Delegate=yes ...`. O isolamento de namespaces/seccomp\n\
-                         \x20        mantém-se intacto."
+                        "delonix: warning — rootless WITHOUT cgroup delegation: memory/cpu/pids are\n\
+                         \x20        NOT enforced (a fork-bomb or leak may affect the host). To get\n\
+                         \x20        limits, run the engine under a systemd --user session with\n\
+                         \x20        delegation: `systemctl --user edit --force --full delonix.service`\n\
+                         \x20        with `[Service] Delegate=yes`, or start it via `systemd-run --user\n\
+                         \x20        --scope -p Delegate=yes ...`. Namespace/seccomp isolation\n\
+                         \x20        remains intact."
                     );
                 });
             }
@@ -2769,7 +2769,7 @@ fn setup_cgroup(c: &Container, pid: i32) -> Result<()> {
         }
         return Err(Error::Runtime {
             context: "cgroup",
-            message: format!("não foi possível criar {cg}"),
+            message: format!("could not create {cg}"),
         });
     }
     // device cgroup (eBPF): nega dispositivos de bloco (discos do host). Best-effort
@@ -2779,7 +2779,7 @@ fn setup_cgroup(c: &Container, pid: i32) -> Result<()> {
     // não está activa.
     if !attach_device_filter(cg) {
         eprintln!(
-            "delonix: aviso — device cgroup (eBPF) não aplicado em {}; block devices dependem só de caps/seccomp",
+            "delonix: warning — device cgroup (eBPF) not applied on {}; block devices rely on caps/seccomp only",
             c.name
         );
     }
@@ -2976,12 +2976,11 @@ fn spawn(store: &Store, container: &mut Container, rootfs: &str, spec: &RunSpec<
         .command
         .iter()
         .map(|a| {
-            CString::new(a.as_str())
-                .map_err(|_| Error::Invalid(format!("argumento inválido: {a:?}")))
+            CString::new(a.as_str()).map_err(|_| Error::Invalid(format!("invalid argument: {a:?}")))
         })
         .collect::<Result<_>>()?;
     if argv.is_empty() {
-        return Err(Error::Invalid("comando vazio".into()));
+        return Err(Error::Invalid("empty command".into()));
     }
 
     let rootfs_owned = rootfs.to_string();
@@ -3080,7 +3079,7 @@ fn spawn(store: &Store, container: &mut Container, rootfs: &str, spec: &RunSpec<
         if unsafe { libc::pipe(fds.as_mut_ptr()) } != 0 {
             return Err(Error::Runtime {
                 context: "pipe",
-                message: "falha a criar pipe".into(),
+                message: "failed to create pipe".into(),
             });
         }
         Some((fds[0], fds[1]))
@@ -3599,8 +3598,7 @@ pub fn exec(container: &Container, argv: &[String], tty: bool) -> Result<i32> {
     let cargv: Vec<CString> = argv
         .iter()
         .map(|a| {
-            CString::new(a.as_str())
-                .map_err(|_| Error::Invalid(format!("argumento inválido: {a:?}")))
+            CString::new(a.as_str()).map_err(|_| Error::Invalid(format!("invalid argument: {a:?}")))
         })
         .collect::<Result<_>>()?;
 
@@ -3627,7 +3625,7 @@ pub fn exec(container: &Container, argv: &[String], tty: bool) -> Result<i32> {
                 // SAFETY: fd válido herdado; `OwnedFd` fecha-o após o `setns`.
                 let owned = unsafe { OwnedFd::from_raw_fd(*fd) };
                 if let Err(e) = setns(owned, CloneFlags::empty()) {
-                    eprintln!("delonix: setns({ns}) falhou: {e}");
+                    eprintln!("delonix: setns({ns}) failed: {e}");
                     unsafe { libc::_exit(125) };
                 }
             }
@@ -3687,9 +3685,7 @@ pub fn exec(container: &Container, argv: &[String], tty: bool) -> Result<i32> {
                     // o init do container; aborta se algum controlo falhou em silêncio.
                     if !insecure_besteffort() {
                         if let Err(e) = verify_confinement(!exec_unconf, exec_keep) {
-                            eprintln!(
-                                "delonix: confinamento do exec NÃO verificado ({e}); a abortar"
-                            );
+                            eprintln!("delonix: exec confinement NOT verified ({e}); aborting");
                             unsafe { libc::_exit(126) };
                         }
                     }
@@ -3710,10 +3706,10 @@ pub fn exec(container: &Container, argv: &[String], tty: bool) -> Result<i32> {
                         unsafe {
                             libc::setgroups(1, [gid].as_ptr());
                             if libc::setgid(gid) != 0 {
-                                eprintln!("delonix: exec setgid({gid}) falhou");
+                                eprintln!("delonix: exec setgid({gid}) failed");
                             }
                             if libc::setuid(uid) != 0 {
-                                eprintln!("delonix: exec setuid({uid}) falhou");
+                                eprintln!("delonix: exec setuid({uid}) failed");
                                 libc::_exit(126);
                             }
                         }
@@ -3891,17 +3887,14 @@ fn open_container_ns(pid: i32, ns: &str) -> Result<Option<OwnedFd>> {
 /// comentário do módulo para a sequência setns/unshare/open_tree/move_mount.
 pub fn mount_live(container: &Container, m: &Mount) -> Result<()> {
     if !mount_target_safe(&m.target) {
-        return Err(Error::Invalid(format!(
-            "alvo de montagem inseguro: {}",
-            m.target
-        )));
+        return Err(Error::Invalid(format!("unsafe mount target: {}", m.target)));
     }
     let pid = container
         .pid
         .filter(|p| safe_to_signal(*p, container.pid_starttime))
         .ok_or_else(|| Error::NotRunning(container.short_id().to_string()))?;
     let src_is_dir = std::fs::metadata(&m.source)
-        .map_err(|_| Error::Invalid(format!("fonte de montagem inexistente: {}", m.source)))?
+        .map_err(|_| Error::Invalid(format!("mount source does not exist: {}", m.source)))?
         .is_dir();
 
     // fds dos namespaces (abertos no PAI, no contexto do host; herdados pela fork).
@@ -3916,7 +3909,7 @@ pub fn mount_live(container: &Container, m: &Mount) -> Result<()> {
     // (ver o comentário do `ns_list` em `exec`).
     let user_fd = open_container_ns(pid, "user")?;
     let mnt_fd = open_container_ns(pid, "mnt")?.ok_or_else(|| {
-        Error::Invalid("container partilha o mnt ns do host — nada a montar".into())
+        Error::Invalid("container shares the host mnt ns — nothing to mount".into())
     })?;
 
     let mut attr = MOUNT_ATTR_NOSUID | MOUNT_ATTR_NODEV;
@@ -3954,7 +3947,7 @@ pub fn mount_live(container: &Container, m: &Mount) -> Result<()> {
                 Ok(f) => f,
                 Err(e) => fail(
                     123,
-                    &format!("open_tree: {e} (kernel suporta a nova mount API?)"),
+                    &format!("open_tree: {e} (does the kernel support the new mount API?)"),
                 ),
             };
             if mount_setattr_fd(dfd.as_raw_fd(), attr).is_err() {
@@ -3984,10 +3977,10 @@ pub fn mount_live(container: &Container, m: &Mount) -> Result<()> {
             match status {
                 WaitStatus::Exited(_, 0) => Ok(()),
                 WaitStatus::Exited(_, code) => Err(Error::Invalid(format!(
-                    "falha a montar {} → {} no container vivo (código {code})",
+                    "failed to mount {} → {} in the live container (code {code})",
                     m.source, m.target
                 ))),
-                _ => Err(Error::Invalid("montagem ao vivo interrompida".into())),
+                _ => Err(Error::Invalid("live mount interrupted".into())),
             }
         }
     }
@@ -3997,9 +3990,7 @@ pub fn mount_live(container: &Container, m: &Mount) -> Result<()> {
 /// do container e faz `umount2(target, MNT_DETACH)` (lazy: não falha se ocupado).
 pub fn unmount_live(container: &Container, target: &str) -> Result<()> {
     if !mount_target_safe(target) {
-        return Err(Error::Invalid(format!(
-            "alvo de desmontagem inseguro: {target}"
-        )));
+        return Err(Error::Invalid(format!("unsafe unmount target: {target}")));
     }
     let pid = container
         .pid
@@ -4010,7 +4001,7 @@ pub fn unmount_live(container: &Container, target: &str) -> Result<()> {
     // userns diferente do meu".
     let user_fd = open_container_ns(pid, "user")?;
     let mnt_fd = open_container_ns(pid, "mnt")?
-        .ok_or_else(|| Error::Invalid("container partilha o mnt ns do host".into()))?;
+        .ok_or_else(|| Error::Invalid("container shares the host mnt ns".into()))?;
     let target = target.to_string();
 
     // SAFETY: o filho só faz syscalls simples e `_exit`.
@@ -4038,7 +4029,7 @@ pub fn unmount_live(container: &Container, target: &str) -> Result<()> {
             match status {
                 WaitStatus::Exited(_, 0) => Ok(()),
                 _ => Err(Error::Invalid(format!(
-                    "falha a desmontar {target} no container vivo"
+                    "failed to unmount {target} in the live container"
                 ))),
             }
         }
@@ -4109,7 +4100,7 @@ pub fn set_priority(container: &Container, nice: i32) -> Result<(usize, usize)> 
     let _ = pid;
     let pids = container_pids(container);
     if pids.is_empty() {
-        return Err(Error::Invalid("sem processos no container".into()));
+        return Err(Error::Invalid("no processes in the container".into()));
     }
     let mut applied = 0usize;
     for p in &pids {
@@ -4299,7 +4290,7 @@ pub fn remove(store: &Store, container: &Container, force: bool) -> Result<()> {
         if safe_to_signal(pid, container.pid_starttime) {
             if !force {
                 return Err(Error::Invalid(format!(
-                    "o container {} está a correr (usa --force)",
+                    "container {} is running (use --force)",
                     container.short_id()
                 )));
             }

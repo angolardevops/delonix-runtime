@@ -90,14 +90,11 @@ impl SecretStore {
     /// Persiste um segredo (escrita atómica + chmod 0600).
     pub fn save(&self, s: &Secret) -> Result<()> {
         if !valid_name(&s.name) {
-            return Err(Error::Invalid(format!(
-                "nome de segredo inválido: {:?}",
-                s.name
-            )));
+            return Err(Error::Invalid(format!("invalid secret name: {:?}", s.name)));
         }
         for k in s.data.keys() {
             if !valid_env_key(k) {
-                return Err(Error::Invalid(format!("chave de env inválida: {k:?}")));
+                return Err(Error::Invalid(format!("invalid env key: {k:?}")));
             }
         }
         // valor cifrado at-rest: cabeçalho || nonce || ciphertext.
@@ -114,7 +111,7 @@ impl SecretStore {
     pub fn load(&self, name: &str) -> Result<Secret> {
         let p = self.path(name);
         if !p.exists() {
-            return Err(Error::NotFound(format!("segredo {name}")));
+            return Err(Error::NotFound(format!("secret {name}")));
         }
         self.decode(&fs::read(p)?)
     }
@@ -140,7 +137,7 @@ impl SecretStore {
     pub fn remove(&self, name: &str) -> Result<()> {
         let p = self.path(name);
         if !p.exists() {
-            return Err(Error::NotFound(format!("segredo {name}")));
+            return Err(Error::NotFound(format!("secret {name}")));
         }
         fs::remove_file(p)?;
         Ok(())

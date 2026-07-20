@@ -787,7 +787,7 @@ fn connect_in_netns(pid: i32, port: u16) -> std::io::Result<std::net::TcpStream>
         let _ = tx.send(res);
     });
     rx.recv()
-        .unwrap_or_else(|_| Err(std::io::Error::other("netns connect thread morreu")))
+        .unwrap_or_else(|_| Err(std::io::Error::other("netns connect thread died")))
 }
 
 pub fn handle_port_forward(mut req: axum::extract::Request, pid: i32) -> Response {

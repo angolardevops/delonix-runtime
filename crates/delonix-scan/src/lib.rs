@@ -178,7 +178,7 @@ pub fn extract_sbom(images: &ImageStore, image: &Image) -> Result<Vec<Package>> 
     }
     if pkgs.is_empty() {
         return Err(Error::Invalid(
-            "SBOM vazio: sem base de dados de pacotes apk/dpkg na imagem".into(),
+            "empty SBOM: no apk/dpkg package database in the image".into(),
         ));
     }
     pkgs.sort_by(|a, b| a.name.cmp(&b.name));
@@ -351,15 +351,15 @@ fn osv_first_fixed(affected: &serde_json::Value) -> Option<String> {
 /// (Alpine→apk, Debian/Ubuntu→dpkg); os restantes são ignorados. Sem rótulo de
 /// severidade, assume `Medium`. Função pura — testável sem rede.
 pub fn advisories_from_osv(json: &str) -> Result<Vec<Advisory>> {
-    let v: serde_json::Value = serde_json::from_str(json)
-        .map_err(|e| Error::Invalid(format!("feed OSV inválido: {e}")))?;
+    let v: serde_json::Value =
+        serde_json::from_str(json).map_err(|e| Error::Invalid(format!("invalid OSV feed: {e}")))?;
     let vulns = if let Some(arr) = v.as_array() {
         arr.clone()
     } else if let Some(arr) = v.get("vulns").and_then(|x| x.as_array()) {
         arr.clone()
     } else {
         return Err(Error::Invalid(
-            "feed OSV: esperado um array ou um objeto {\"vulns\":[…]}".into(),
+            "OSV feed: expected an array or a {\"vulns\":[…]} object".into(),
         ));
     };
     let mut out = Vec::new();

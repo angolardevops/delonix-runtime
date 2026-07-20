@@ -27,24 +27,24 @@ static METRICS: LazyLock<Metrics> = LazyLock::new(|| {
     // `delonix_build_info{version="…"} 1` — sempre presente, dá ao scrape uma série
     // estável para correlacionar versão do runtime (padrão `*_build_info`).
     let build = Info::new(vec![("version", env!("CARGO_PKG_VERSION"))]);
-    registry.register("build", "Informação de build do runtime", build);
+    registry.register("build", "Runtime build information", build);
 
     let pod_sandboxes_created = Counter::default();
     registry.register(
         "cri_pod_sandboxes_created",
-        "Pod sandboxes CRI criados (total)",
+        "CRI pod sandboxes created (total)",
         pod_sandboxes_created.clone(),
     );
     let containers_created = Counter::default();
     registry.register(
         "cri_containers_created",
-        "Containers CRI criados (total)",
+        "CRI containers created (total)",
         containers_created.clone(),
     );
     let images_pulled = Counter::default();
     registry.register(
         "cri_images_pulled",
-        "Imagens puxadas via CRI (total)",
+        "Images pulled via CRI (total)",
         images_pulled.clone(),
     );
 

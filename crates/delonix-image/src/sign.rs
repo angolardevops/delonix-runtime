@@ -69,15 +69,15 @@ fn p256_point_from_pem(pem: &str) -> Result<Vec<u8>> {
     }
     if b64.is_empty() {
         return Err(Error::Invalid(
-            "chave pública PEM inválida (sem bloco PUBLIC KEY)".into(),
+            "invalid PEM public key (no PUBLIC KEY block)".into(),
         ));
     }
     let der = base64::engine::general_purpose::STANDARD
         .decode(&b64)
-        .map_err(|e| Error::Invalid(format!("chave pública base64 inválida: {e}")))?;
+        .map_err(|e| Error::Invalid(format!("invalid base64 public key: {e}")))?;
     if der.len() < 65 || der[der.len() - 65] != 0x04 {
         return Err(Error::Invalid(
-            "chave pública não parece um ponto P-256 não-comprimido".into(),
+            "public key does not look like an uncompressed P-256 point".into(),
         ));
     }
     Ok(der[der.len() - 65..].to_vec())
@@ -106,11 +106,11 @@ pub fn verify_signature(store: &ImageStore, reference: &str, pubkey_pem: &str) -
     let sig_tag = format!("sha256-{hex}.sig");
     let sig_bytes = c.get_manifest(&sig_tag).map_err(|_| {
         Error::Invalid(format!(
-            "imagem não assinada: não há assinatura cosign para {reference} ({digest})"
+            "image not signed: no cosign signature for {reference} ({digest})"
         ))
     })?;
     let sig_manifest: SigManifest = serde_json::from_slice(&sig_bytes)
-        .map_err(|e| Error::Invalid(format!("manifesto de assinatura inválido: {e}")))?;
+        .map_err(|e| Error::Invalid(format!("invalid signature manifest: {e}")))?;
 
     // 3) + 4) para cada layer: payload + assinatura na anotação.
     for layer in &sig_manifest.layers {
@@ -126,13 +126,13 @@ pub fn verify_signature(store: &ImageStore, reference: &str, pubkey_pem: &str) -
         }
         // liga a assinatura A ESTA imagem (anti-reutilização).
         let parsed: Payload = serde_json::from_slice(&payload)
-            .map_err(|e| Error::Invalid(format!("payload de assinatura inválido: {e}")))?;
+            .map_err(|e| Error::Invalid(format!("invalid signature payload: {e}")))?;
         if strip(&parsed.critical.image.docker_manifest_digest) == hex {
             return Ok(digest);
         }
     }
     Err(Error::Invalid(format!(
-        "assinatura inválida: nenhuma assinatura de {reference} confere com a chave dada"
+        "invalid signature: no signature for {reference} matches the given key"
     )))
 }
 
