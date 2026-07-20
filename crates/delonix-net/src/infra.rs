@@ -2272,8 +2272,11 @@ pub fn resolve_net(name: &str) -> Result<(String, String, String)> {
             INFRA_GATEWAY.to_string(),
         ));
     }
-    let def =
-        network_get(name).ok_or_else(|| Error::NotFound(format!("ingress network '{name}'")))?;
+    let def = network_get(name).ok_or_else(|| {
+        Error::NotFound(format!(
+            "ingress network '{name}' does not exist — create it with `delonix network create {name}`, or use the default network"
+        ))
+    })?;
     let gw = gateway_of(&def.prefix);
     Ok((def.bridge, def.prefix, gw))
 }
