@@ -1336,8 +1336,8 @@ msgstr "Liga à consola serial da VM (terminal interactivo) — funciona sem IP 
 msgid "VM '{name}' is not running — start it first"
 msgstr "a VM '{name}' não está a correr — arranca-a primeiro"
 
-msgid "no console socket for VM '{name}' (created before this feature? recreate it)"
-msgstr "sem socket de consola para a VM '{name}' (criada antes desta funcionalidade? recria-a)"
+msgid "no console socket for VM '{name}' — it was started by an older delonix; run `delonix vm stop {name} && delonix vm create {name}` to restart it with a console"
+msgstr "sem socket de consola para a VM '{name}' — foi arrancada por um delonix antigo; corre `delonix vm stop {name} && delonix vm create {name}` para a re-arrancar com consola"
 
 msgid "Print the VNC address of a graphical VM (created with `--vnc`, libvirt)."
 msgstr "Imprime o endereço VNC de uma VM gráfica (criada com `--vnc`, libvirt)."
