@@ -1353,3 +1353,24 @@ msgstr "sem display VNC para '{name}' — foi criada com `--vnc`?"
 
 msgid "connect with a VNC client, e.g. `vncviewer {addr}`"
 msgstr "liga com um cliente VNC, ex.: `vncviewer {addr}`"
+
+msgid "After starting, attach to the serial console to watch the boot live (Ctrl-] to detach)."
+msgstr "Depois de arrancar, liga à consola serial para ver o boot ao vivo (Ctrl-] para sair)."
+
+msgid "After starting, wait (with a spinner) until the VM has an IP, up to --boot-timeout."
+msgstr "Depois de arrancar, espera (com spinner) até a VM ter IP, até ao --boot-timeout."
+
+msgid "Seconds to wait with --wait (default 120)."
+msgstr "Segundos a esperar com --wait (default 120)."
+
+msgid "vm '{name}' is up — ip {ip}"
+msgstr "a vm '{name}' está de pé — ip {ip}"
+
+msgid "vm '{name}' started (user-mode network, no reachable IP) — `delonix vm console {name}` to log in"
+msgstr "a vm '{name}' arrancou (rede user-mode, sem IP alcançável) — `delonix vm console {name}` para entrar"
+
+msgid "vm '{name}' still booting after the timeout — `delonix vm console {name}` to watch"
+msgstr "a vm '{name}' ainda a arrancar após o timeout — `delonix vm console {name}` para acompanhar"
+
+msgid "booting '{name}'..."
+msgstr "a arrancar '{name}'..."
