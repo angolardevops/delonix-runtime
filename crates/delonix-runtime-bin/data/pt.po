@@ -1329,3 +1329,12 @@ msgstr "Nome local (default: derivado da referência)."
 
 msgid "Push a local golden VM image to an OCI registry (`vm push <name> <target>`)."
 msgstr "Publica uma imagem VM dourada local num registo OCI (`vm push <nome> <destino>`)."
+
+msgid "Attach to the VM's serial console (interactive terminal) — works with no IP (boot logs, login). Escape: Ctrl-] ."
+msgstr "Liga à consola serial da VM (terminal interactivo) — funciona sem IP (logs de boot, login). Sair: Ctrl-] ."
+
+msgid "VM '{name}' is not running — start it first"
+msgstr "a VM '{name}' não está a correr — arranca-a primeiro"
+
+msgid "no console socket for VM '{name}' (created before this feature? recreate it)"
+msgstr "sem socket de consola para a VM '{name}' (criada antes desta funcionalidade? recria-a)"
