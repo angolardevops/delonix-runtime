@@ -99,7 +99,11 @@ fn default_memory() -> String {
     "1G".to_string()
 }
 fn default_network() -> String {
-    "bridge".to_string()
+    // A rede default do ingress (bridge delonix0/10.200, sempre presente) — NÃO
+    // "bridge", que `resolve_net` trataria como uma rede PRIVADA a criar antes
+    // (o `vm create dev` falhava com "ingress network 'bridge'" — o default
+    // apontava para uma rede que ninguém tinha criado).
+    "ingress".to_string()
 }
 
 // `Create` é maior que as outras variantes (muitos flags opcionais de VM) — é um
@@ -148,8 +152,9 @@ pub enum VmCmd {
         /// Memória (`"2G"`/`"1024M"`).
         #[arg(long, default_value = "1G")]
         memory: String,
-        /// Rede do ingress para o tap (`delonix network create` primeiro).
-        #[arg(long, default_value = "bridge")]
+        /// Ingress network for the tap (default: the system ingress network; a
+        /// custom network must be created first with `delonix network create`).
+        #[arg(long, default_value = "ingress")]
         network: String,
         /// Kernel para direct boot.
         #[arg(long)]
