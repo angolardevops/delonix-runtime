@@ -982,9 +982,26 @@ pub fn create(base: &Path, cfg: &VmConfig) -> Result<Vm> {
             // não faz 9p e recusaria no `boot`). A regra vive AQUI (no motor) e não
             // só no bin, para qualquer consumidor da API a herdar. Sem volumes,
             // mantém-se a auto-detecção normal.
+            //
+            // Cloud image (boot por FIRMWARE, sem kernel explícito) ⇒ preferir
+            // libvirt. O `rust-hypervisor-fw` do Cloud Hypervisor não carrega o
+            // initrd das cloud images Ubuntu (o initrd via EFI LoadFile2 não
+            // está implementado no firmware minimalista) → o kernel arranca mas
+            // entra em pânico "Unable to mount root fs" (LABEL=cloudimg-rootfs
+            // não resolve sem udev do initrd). O libvirt (UEFI/SeaBIOS completo)
+            // boota-as. O CH fica para DIRECT-KERNEL boot (nós k8s com kernel
+            // próprio), onde é o melhor. Só se libvirt existir; senão o CH com
+            // um aviso (melhor tentar que recusar).
             let want = match cfg.backend.as_deref() {
                 Some(b) => Some(b),
                 None if !cfg.volumes.is_empty() => Some("libvirt"),
+                None if cfg.kernel.is_none() && LibvirtBackend.available() => Some("libvirt"),
+                None if cfg.kernel.is_none() => {
+                    eprintln!(
+                        "warning: booting a cloud image on Cloud Hypervisor (libvirt not found) —                          if it panics on 'unable to mount root fs', install libvirt+qemu"
+                    );
+                    None
+                }
                 None => None,
             };
             select_backend(want)?
