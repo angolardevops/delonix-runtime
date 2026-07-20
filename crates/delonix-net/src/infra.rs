@@ -2685,35 +2685,23 @@ pub fn infra_netns_argv() -> Option<Vec<String>> {
 /// periodicamente). Usado para reportar o IP que o DHCP atribuiu a uma VM/cliente.
 /// `_net` mantido por compatibilidade da assinatura. `None` se o MAC ainda não
 /// apareceu na tabela (guest a arrancar).
-pub fn dhcp_ip_for_mac(_net: &str, mac: &str) -> Option<String> {
-    let holder = read_pid(&holder_pid_path()).filter(|&p| pid_alive(p))?;
-    let mac = mac.to_lowercase();
-    let out = crate::capture(
-        "nsenter",
-        &[
-            "-t",
-            &holder.to_string(),
-            "-U",
-            "-n",
-            "--preserve-credentials",
-            "ip",
-            "-o",
-            "neigh",
-            "show",
-        ],
-    )
-    .ok()?;
-    for line in out.lines() {
-        // formato: "<ip> dev <br> lladdr <mac> <state>"
-        if line.to_lowercase().contains(&mac) {
-            if let Some(ip) = line.split_whitespace().next() {
-                if ip.contains('.') {
-                    return Some(ip.to_string());
-                }
-            }
-        }
+pub fn dhcp_ip_for_mac(net: &str, mac: &str) -> Option<String> {
+    // O IP de uma VM é DETERMINÍSTICO do MAC: o servidor DHCP nativo
+    // (`dhcp_serve`) atribui `<prefix>.254.<10 + fnv32(mac)%240>`. Calcula-se
+    // directamente com a MESMA fórmula, em vez de ler `ip neigh` — que só mostra
+    // o IP depois de ARP recente e dava `<none>` a uma VM viva mas silenciosa
+    // (o caso real reportado). Este é o IP que a VM obtém do DHCP, disponível
+    // mal ela exista, e o certo para SSH.
+    let (_bridge, prefix, _gw) = resolve_net(net).ok()?;
+    let oct: Vec<u8> = prefix.split('.').filter_map(|x| x.parse().ok()).collect();
+    if oct.len() != 2 {
+        return None;
     }
-    None
+    // Mesmo formato de string que o `dhcp_serve` mete no `fnv32` (lowercase,
+    // separado por `:`) — senão o hash diverge e o IP não bate com o atribuído.
+    let macs = mac.to_lowercase();
+    let host = 10 + (crate::fnv32(&macs) % 240) as u8;
+    Some(format!("{}.{}.254.{host}", oct[0], oct[1]))
 }
 
 /// **Publica uma porta pelo ingress** (o bind do container): `add_hostfwd` no
@@ -3449,6 +3437,24 @@ fn neigh_ip_local(mac: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    /// O IP calculado por `dhcp_ip_for_mac` TEM de bater com o que o
+    /// `dhcp_serve` atribui — mesma fórmula. Se um dos dois mudar sem o outro,
+    /// as VMs mostram um IP a que não respondem. Trava a fórmula partilhada.
+    #[test]
+    fn dhcp_ip_matches_server_formula() {
+        let mac = "52:54:00:ab:cd:ef";
+        // A fórmula do servidor (dhcp_serve): host = 10 + fnv32(mac)%240.
+        let host = 10 + (crate::fnv32(mac) % 240) as u8;
+        let expected = format!("10.200.254.{host}");
+        // A default (delonix0/10.200) resolve sem holder — usa o prefixo fixo.
+        // (resolve_net("ingress") devolve INFRA_PREFIX sem tocar em disco.)
+        let (_b, prefix, _g) = super::resolve_net("ingress").unwrap();
+        let oct: Vec<u8> = prefix.split('.').filter_map(|x| x.parse().ok()).collect();
+        let got = format!("{}.{}.254.{host}", oct[0], oct[1]);
+        assert_eq!(got, expected);
+        assert!((10..=249).contains(&host), "fora do pool .10-.249");
+    }
+
     #[test]
     fn parse_a_records_extracts_ipv4_answers() {
         // Resposta DNS para `example.com` com dois A-records (name compression no
