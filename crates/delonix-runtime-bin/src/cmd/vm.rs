@@ -635,21 +635,20 @@ fn wait_for_boot(base: &std::path::Path, name: &str, timeout: std::time::Duratio
                 ));
                 return;
             }
-            // libvirt user-mode nunca dá IP: não vale a pena esperar o timeout.
-            if vm.backend.contains("libvirt") && vm.ip.is_none() {
-                // dá uns segundos ao arranque e depois orienta.
-                if std::time::Instant::now()
-                    >= deadline.min(std::time::Instant::now() + std::time::Duration::from_secs(3))
-                {
-                    if tty {
-                        eprint!("\r\x1b[K");
-                    }
-                    super::output::info(&super::po::tf(
-                        "vm '{name}' started (user-mode network, no reachable IP) — `delonix vm console {name}` to log in",
-                        &[("name", name)],
-                    ));
-                    return;
+            // libvirt user-mode nunca dá IP: após um curto arranque, orienta
+            // para a consola em vez de esperar o timeout inteiro em vão.
+            if vm.backend.contains("libvirt")
+                && vm.ip.is_none()
+                && start.elapsed() >= std::time::Duration::from_secs(3)
+            {
+                if tty {
+                    eprint!("\r\x1b[K");
                 }
+                super::output::info(&super::po::tf(
+                    "vm '{name}' started (user-mode network, no reachable IP) — `delonix vm console {name}` to log in",
+                    &[("name", name)],
+                ));
+                return;
             }
         }
         if std::time::Instant::now() >= deadline {
