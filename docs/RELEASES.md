@@ -4,6 +4,37 @@
 > (regenerado automaticamente pelo pipeline de release a cada tag publicada).
 > Não editar à mão — edita a nota da release respectiva.
 
+## v0.7.7 — rede da VM: internet por omissão e NAT/SSH suave
+
+Corrige os dois pontos de rede que faltavam para uma VM utilizável.
+
+- **Internet na VM por omissão.** `vm create` sem `--hostname`/`--ssh-key` não
+  gerava seed cloud-init, e a cloud image sem datasource não configurava a rede
+  — a VM ficava sem IP nem rota (`ping: Network is unreachable`). Agora o seed é
+  **sempre** gerado, com um network-config que faz DHCP em qualquer interface
+  ethernet. A VM tem egress/internet out-of-the-box.
+- **`--net-mode nat` suave (IP pingável do host + SSH).** Garante a rede libvirt
+  `default`: define-a se não existir (virbr0, NAT, 192.168.122.0/24, DHCP),
+  arranca-a e põe autostart. Aviso claro e accionável se faltar o grupo
+  `libvirt` (`sudo usermod -aG libvirt $USER && newgrp libvirt`).
+
+Dois fluxos:
+
+```
+# VM com internet + acesso por consola:
+delonix vm create dev && delonix vm console dev
+
+# VM pingável + SSH do host:
+delonix vm create dev --net-mode nat --ssh-key ~/.ssh/id_ed25519.pub
+delonix vm ls                       # IP 192.168.122.x
+ssh delonix@<ip>
+```
+
+Não confundir com ingress/egress do delonix (firewall L4 da SDN de containers):
+a rede da VM libvirt é a do próprio QEMU.
+
+---
+
 ## v0.7.6 — boot da VM dinâmico (a sério desta vez)
 
 O boot dinâmico do `vm create` (planeado para a v0.7.5) tinha ficado de fora —
