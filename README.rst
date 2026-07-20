@@ -161,6 +161,8 @@ real ``--help``) at https://angolardevops.github.io/delonix-runtime/cheatsheet.h
      - Inbound firewall (L4 rules + DNAT publishes) for a container on the SDN.
    * - ``egress``
      - Outbound firewall (L4 rules + per-network egress-to-Internet policy).
+   * - ``httproute``
+     - Embedded L7/HTTP(S) reverse-proxy (``kind: HTTPRoute``) with hot reload and container auto-registration (``run --expose``).
    * - ``flow``
      - Live per-container traffic via the eBPF datapath (degrades to veth counters).
    * - ``stack``
@@ -177,8 +179,23 @@ real ``--help``) at https://angolardevops.github.io/delonix-runtime/cheatsheet.h
      - Low-level management of the rootless ingress infra.
    * - ``cri``
      - Serve the Kubernetes CRI (``runtime.v1``) on a unix socket.
+   * - ``api``
+     - Serve the management API (HTTP+JSON) for external control-planes.
+   * - ``dash``
+     - Interactive htop-style TUI dashboard (global or per group; ``--once`` for scripts).
    * - ``completion``
      - Dynamic autocompletion for bash/zsh/fish/elvish/powershell.
+
+Languages
+=========
+
+The CLI speaks **English by default**. ``--l18n=pt`` (or ``DELONIX_L18N=pt``)
+switches everything — including ``--help`` — to Portuguese, served from a
+standard gettext catalog embedded in the binary
+(`data/pt.po <crates/delonix-runtime-bin/data/pt.po>`_). Adding a language is
+adding a ``.po`` file; no code changes. Containers started without ``--name``
+get readable names drawn from Angolan kings, queens and places
+(``njinga-benguela-07``) — the project's naming identity.
 
 Manifests
 =========
@@ -216,7 +233,7 @@ in dependency order by ``delonix stack apply``. Ensure-present semantics
 Architecture
 ============
 
-Nine crates, one binary, no residing process:
+Ten crates, one binary, no residing process:
 
 .. list-table::
    :header-rows: 1
@@ -238,6 +255,8 @@ Nine crates, one binary, no residing process:
      - Named volumes, bind mounts, quotas, network drivers (NFS/CIFS/WebDAV).
    * - ``delonix-cri``
      - CRI ``runtime.v1`` server — the kubelet talks to Delonix.
+   * - ``delonix-mgmt``
+     - Management API (HTTP+JSON over a unix socket) for external control-planes, plus the shared Prometheus registry and OpenTelemetry spans.
    * - ``delonix-scan``
      - SBOM + CVE scanning (``image scan`` and scan-on-pull enforcement).
 
@@ -245,6 +264,15 @@ See the `architecture page
 <https://angolardevops.github.io/delonix-runtime/arquitectura.html>`_ and the
 `C4 model <https://angolardevops.github.io/delonix-runtime/c4.html>`_ for the
 full picture.
+
+Appendix — features by release
+==============================
+
+The complete, always-current changelog lives in
+`docs/RELEASES.md <docs/RELEASES.md>`_ — one section per release, newest
+first, **regenerated automatically by the release pipeline** on every
+published tag (source of truth: ``docs/releases/<tag>.md``, the same notes
+published on GitHub Releases).
 
 License
 =======
