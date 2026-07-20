@@ -723,7 +723,7 @@ pub(crate) fn resolve_vm_image(store: &VmImageStore, explicit: Option<String>) -
         )),
         1 => Ok(images.remove(0).name),
         n => Err(Error::Invalid(super::po::tf(
-            "{n} local VM images — say which one to use (`delonix image --vm ls`)",
+            "{n} local VM images — say which one: `--vm-image <tag>` (cluster) or `--disk <path>` (vm create); see `delonix image --vm ls`",
             &[("n", &n.to_string())],
         ))),
     }

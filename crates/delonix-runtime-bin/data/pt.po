@@ -1315,5 +1315,5 @@ msgstr "os templates de app criam apps em containers — usa `delonix stack init
 msgid "no local VM images — run `delonix image --vm build` (or `pull`) first, or pass the image/disk explicitly"
 msgstr "sem imagens VM locais — corre `delonix image --vm build` (ou `pull`) primeiro, ou passa a imagem/disco explicitamente"
 
-msgid "{n} local VM images — say which one to use (`delonix image --vm ls`)"
-msgstr "há {n} imagens VM locais — especifica qual usar (`delonix image --vm ls`)"
+msgid "{n} local VM images — say which one: `--vm-image <tag>` (cluster) or `--disk <path>` (vm create); see `delonix image --vm ls`"
+msgstr "há {n} imagens VM locais — especifica qual: `--vm-image <tag>` (cluster) ou `--disk <caminho>` (vm create); vê `delonix image --vm ls`"
