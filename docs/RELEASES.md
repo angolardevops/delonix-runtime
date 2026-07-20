@@ -4,6 +4,26 @@
 > (regenerado automaticamente pelo pipeline de release a cada tag publicada).
 > Não editar à mão — edita a nota da release respectiva.
 
+## v0.7.0 — fonte 100% EN completa: mensagens do motor no catálogo pt.po
+
+Fecha a migração i18n iniciada na v0.5.0: **todo o código de utilizador fala
+inglês** — agora incluindo os 9 crates de motor (~250 mensagens convertidas:
+net, runtime, image, cri, core, vm, mgmt, volume, scan).
+
+- **Catálogo `pt.po` com 429 mensagens.** `--l18n=pt` traduz o help completo,
+  as mensagens dos comandos e as mensagens ESTÁTICAS dos crates de motor —
+  estas últimas traduzidas à saída, no printer de erros do binário (os crates
+  de motor não dependem do catálogo).
+- **Limitação documentada**: mensagens de motor com valores interpolados não
+  casam no lookup e saem em inglês.
+- Preservados deliberadamente: padrões de matching de stderr do CRI (lógica
+  de idempotência, cobrem PT antigo e EN novo), fixtures e asserts de teste.
+
+Resta da migração apenas os comentários do código (PT→EN), sem impacto no
+utilizador.
+
+---
+
 ## v0.6.2 — corrige o "delonix delonix" na 1.ª linha do --version
 
 O clap prepõe o nome do binário ao `long_version`; o cartão da v0.6.1 também
