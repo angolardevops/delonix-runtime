@@ -199,6 +199,17 @@ pub enum VmCmd {
         #[arg(long)]
         bridge: Option<String>,
     },
+    /// Descarrega uma imagem VM dourada de um registo OCI — sem argumento,
+    /// a imagem OFICIAL do Delonix (pronta para `vm create`/`cluster kubeadm`).
+    Pull {
+        /// Referência OCI (default: a imagem oficial do Delonix).
+        source: Option<String>,
+        /// Nome local (default: derivado da referência).
+        #[arg(long)]
+        name: Option<String>,
+    },
+    /// Publica uma imagem VM dourada local num registo OCI (`vm push <nome> <destino>`).
+    Push { name: String, target: String },
     /// Lista as VMs.
     Ls,
     /// Estado actual (reconcilia liveness/IP com o backend).
@@ -465,6 +476,15 @@ pub fn run(action: VmCmd) -> Result<()> {
             let vm = delonix_vm::create(&base, &cfg)?;
             println!("{}", vm.name);
             Ok(())
+        }
+        VmCmd::Pull { source, name } => {
+            let store = super::vmimage::VmImageStore::open(super::util::state_root())?;
+            let src = source.unwrap_or_else(|| super::vmimage::OFFICIAL_VM_IMAGE.to_string());
+            super::vmimage::cmd_pull(&store, &src, name)
+        }
+        VmCmd::Push { name, target } => {
+            let store = super::vmimage::VmImageStore::open(super::util::state_root())?;
+            super::vmimage::cmd_push(&store, &name, &target)
         }
         VmCmd::Ls => {
             let mut t = output::Table::new(&["NAME", "VCPUS", "MEMORY", "STATUS", "IP"])
