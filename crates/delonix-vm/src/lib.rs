@@ -636,6 +636,14 @@ fn libvirt_uri_for(net_mode: Option<&str>) -> &'static str {
 /// knows the domain. Prefer `system` (reachable-IP modes) and fall back to
 /// `session` (user-mode). Returns `session` if neither defines it (harmless —
 /// the caller's virsh op is then a no-op).
+/// A URI da conexão libvirt (`qemu:///system` ou `.../session`) onde o domínio
+/// `name` vive — para o bin (`vm console`/`vm vnc`) falar com o virsh na
+/// conexão CERTA (senão `virsh console` sem `-c` usa a default e dá "failed to
+/// get domain" quando o domínio está na outra).
+pub fn libvirt_uri(name: &str) -> String {
+    libvirt_uri_of(name).to_string()
+}
+
 fn libvirt_uri_of(name: &str) -> &'static str {
     for uri in ["qemu:///system", "qemu:///session"] {
         if capture("virsh", &["-c", uri, "domstate", name]).is_some() {

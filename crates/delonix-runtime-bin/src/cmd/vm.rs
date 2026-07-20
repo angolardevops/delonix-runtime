@@ -604,8 +604,9 @@ fn cmd_vnc(base: &std::path::Path, name: &str) -> Result<()> {
         )));
     }
     // `virsh vncdisplay` devolve `:N` (porta = 5900 + N) ou `127.0.0.1:N`.
+    let uri = delonix_vm::libvirt_uri(name);
     let out = std::process::Command::new("virsh")
-        .args(["vncdisplay", name])
+        .args(["-c", &uri, "vncdisplay", name])
         .output()
         .map_err(|e| Error::Runtime {
             context: "virsh vncdisplay",
@@ -651,8 +652,9 @@ fn cmd_console(base: &std::path::Path, name: &str) -> Result<()> {
     if backend.contains("libvirt") || backend.contains("qemu") || backend.contains("kvm") {
         // O virsh já dá uma consola raw interactiva; substituímos o processo.
         use std::os::unix::process::CommandExt;
+        let uri = delonix_vm::libvirt_uri(name);
         let err = std::process::Command::new("virsh")
-            .args(["console", name])
+            .args(["-c", &uri, "console", name])
             .exec();
         return Err(Error::Runtime {
             context: "virsh console",
