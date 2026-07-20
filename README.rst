@@ -93,9 +93,16 @@ Fedora/RHEL, openSUSE and Arch families (uses ``sudo`` for packages):
 
    curl -fsSL https://github.com/angolardevops/delonix-runtime/releases/latest/download/install.sh | bash
 
+The installer detects your hardware (CPU features, RAM, disk, GPU) and picks
+the best binary for it — an ``x86-64-v3`` (AVX2) build on modern CPUs, the
+generic ``x86-64`` everywhere else — and applies the kernel tuning that
+containers, Kubernetes and VMs need (inotify limits, ip_forward,
+``br_netfilter``, ``overlay``/``tun`` modules, ...).
+
 Useful flags (pass after ``bash -s --``): ``--no-vm`` skips the microVM stack,
-``--with-cri`` also installs ``delonix-cri`` (Kubernetes node), ``--user``
-installs to ``~/.local/bin``, ``--version vX.Y.Z`` pins a release.
+``--no-tune`` skips kernel tuning, ``--with-cri`` also installs ``delonix-cri``
+(Kubernetes node), ``--user`` installs to ``~/.local/bin``, ``--version
+vX.Y.Z`` pins a release.
 
 Manual alternative (binary only — you install the runtime deps yourself):
 
