@@ -626,7 +626,7 @@ fn wait_for_boot(base: &std::path::Path, name: &str, timeout: std::time::Duratio
     let mut i = 0usize;
     loop {
         if let Ok(vm) = delonix_vm::status(base, name) {
-            if let Some(ip) = vm.ip.filter(|s| !s.is_empty()) {
+            if let Some(ip) = vm.ip.clone().filter(|s| !s.is_empty()) {
                 if tty {
                     eprint!("\r\x1b[K");
                 }
