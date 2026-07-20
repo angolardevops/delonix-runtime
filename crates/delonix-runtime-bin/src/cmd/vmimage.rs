@@ -237,7 +237,12 @@ fn describe_one(store: &VmImageStore, img: &VmImage) {
     d.print();
 }
 
-fn cmd_push(store: &VmImageStore, name: &str, target: &str) -> Result<()> {
+/// A imagem VM dourada OFICIAL do Delonix (Ubuntu 24.04 + kubeadm/kubelet/
+/// kubectl + delonix-cri como serviço systemd) — publicada e validada com
+/// round-trip byte-idêntico; ver CLAUDE.md, secção "Imagem VM dourada".
+pub(crate) const OFFICIAL_VM_IMAGE: &str = "ghcr.io/angolardevops/delonix-vm-k8s:1.34";
+
+pub(crate) fn cmd_push(store: &VmImageStore, name: &str, target: &str) -> Result<()> {
     let img = store.get(name)?;
     let data = std::fs::read(store.qcow2_path(name)).map_err(|e| {
         Error::Invalid(format!(
@@ -256,7 +261,7 @@ fn cmd_push(store: &VmImageStore, name: &str, target: &str) -> Result<()> {
     Ok(())
 }
 
-fn cmd_pull(store: &VmImageStore, source: &str, name: Option<String>) -> Result<()> {
+pub(crate) fn cmd_pull(store: &VmImageStore, source: &str, name: Option<String>) -> Result<()> {
     let data = delonix_image::registry::pull_oci_artifact(&state_root(), source)?;
     let name = name.unwrap_or_else(|| source.rsplit('/').next().unwrap_or(source).to_string());
     let digest = format!("sha256:{}", hex_sha256(&data));
