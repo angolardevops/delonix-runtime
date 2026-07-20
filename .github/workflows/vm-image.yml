@@ -1,0 +1,71 @@
+# Constrói a imagem VM dourada oficial e publica-a no ghcr — a que o
+# `delonix vm pull` (sem argumento) descarrega. Reprodutível e independente
+# de qualquer máquina de desenvolvimento: corre no runner, com o binário
+# construído do próprio commit.
+#
+# Disparo MANUAL (`workflow_dispatch`) — publicar a imagem oficial é uma
+# decisão explícita, não um efeito de cada push. O `GITHUB_TOKEN` do Actions
+# já traz `packages: write`, por isso não são precisos segredos.
+#
+# Nota: o `virt-customize` corre com o modo `--offline` do delonix (obtém os
+# .deb do k8s no host, verificados, e instala-os sem rede no appliance) — é o
+# caminho que dispensa DHCP/DNS no guest. Os runners Linux do GitHub têm
+# /dev/kvm (nested virt); sem ele, o libguestfs cai para TCG (mais lento, mas
+# funciona).
+name: VM image (golden)
+
+on:
+  workflow_dispatch:
+    inputs:
+      k8s_version:
+        description: "Versão do Kubernetes (tag da imagem)"
+        default: "1.34"
+      ubuntu_release:
+        description: "Cloud image Ubuntu base"
+        default: "24.04"
+      image:
+        description: "Repositório OCI de destino"
+        default: "ghcr.io/angolardevops/delonix-vm-k8s"
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Ferramentas de build da golden
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y protobuf-compiler libguestfs-tools qemu-utils cloud-image-utils
+          # O supermin/libguestfs precisa de ler o kernel do host (runners: 0600).
+          sudo chmod 0644 /boot/vmlinuz-* || true
+      - name: Instala toolchain fixada
+        run: rustup show
+      - uses: Swatinem/rust-cache@v2
+      - name: Compila delonix + delonix-cri
+        run: cargo build --release --locked -p delonix-runtime-bin -p delonix-cri
+      - name: Constrói a imagem VM dourada (offline)
+        env:
+          LIBGUESTFS_BACKEND: direct
+        run: |
+          ./target/release/delonix image --vm build \
+            --tag "delonix-vm-k8s:${{ inputs.k8s_version }}" \
+            --ubuntu-release "${{ inputs.ubuntu_release }}" \
+            --k8s-version "${{ inputs.k8s_version }}" \
+            --cri-bin ./target/release/delonix-cri \
+            --offline
+          ./target/release/delonix image --vm ls
+      - name: Login no ghcr e push
+        run: |
+          echo "${{ github.token }}" | ./target/release/delonix image login ghcr.io \
+            -u "${{ github.actor }}" --password-stdin
+          ./target/release/delonix image --vm push \
+            "delonix-vm-k8s:${{ inputs.k8s_version }}" \
+            "${{ inputs.image }}:${{ inputs.k8s_version }}"
+      - name: Sumário
+        run: |
+          echo "### Imagem VM dourada publicada" >> "$GITHUB_STEP_SUMMARY"
+          echo "\`${{ inputs.image }}:${{ inputs.k8s_version }}\` — testa com \`delonix vm pull\`." >> "$GITHUB_STEP_SUMMARY"
