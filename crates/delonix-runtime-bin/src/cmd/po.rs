@@ -28,14 +28,13 @@ fn catalog() -> &'static HashMap<String, String> {
 /// Traduz `en` para a língua activa. Sem tradução no catálogo (ou em inglês),
 /// devolve o próprio `en` — a UI nunca fica muda por um msgid em falta.
 pub fn t(en: &str) -> String {
-    if super::output::is_pt() {
-        if let Some(pt) = catalog().get(en) {
-            if !pt.is_empty() {
-                return pt.clone();
-            }
-        }
+    if !super::output::is_pt() {
+        return en.to_string();
     }
-    en.to_string()
+    match catalog().get(en) {
+        Some(pt) if !pt.is_empty() => pt.clone(),
+        _ => en.to_string(),
+    }
 }
 
 /// Parser do subconjunto de `.po` que usamos: entradas `msgid`/`msgstr`, com
@@ -71,11 +70,9 @@ fn parse_po(src: &str) -> HashMap<String, String> {
                 2 => val.push_str(&unquote(line)),
                 _ => {}
             }
-        } else if line.is_empty() || line.starts_with('#') {
-            if state == 2 {
-                flush(&mut id, &mut val);
-                state = 0;
-            }
+        } else if (line.is_empty() || line.starts_with('#')) && state == 2 {
+            flush(&mut id, &mut val);
+            state = 0;
         }
     }
     if state == 2 {
