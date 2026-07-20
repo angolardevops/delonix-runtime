@@ -356,14 +356,21 @@ nó não faz nenhuma instalação**, só `kubeadm init`/`kubeadm join`.
 - **`push`/`pull`**: publicam/obtêm a imagem como artefacto OCI de blob único (config vazio + 1
   layer, padrão ORAS/Helm) via `delonix_image::registry::{push_oci_artifact,pull_oci_artifact}`
   (`crates/delonix-image/src/registry.rs`) — generaliza o `Client`/auth/upload já usado por
-  `push_to_registry` (imagens de container), sem duplicar a lógica. **RESOLVIDO — publicação real
-  feita e verificada (2026-07-17)**: `ghcr.io/angolardevops/delonix-vm-k8s:1.34` (678 MiB, a
-  golden já optimizada), com round-trip **byte-idêntico** (pull de volta → mesmo sha256, o que
-  exercita também a verificação de digest do `pull_oci_artifact`). Auth via `delonix image login
-  ghcr.io -u angolardevops --password-stdin` (grava em `<root>/auth.json`); o token `gh` precisa
-  do scope `write:packages`. **Gap conhecido**: o `pull` NÃO recupera os metadados
-  (`ubuntu_release`/`k8s_version` ficam `null` — o artefacto OCI só carrega o blob qcow2), por
-  isso um `image vm ls` de uma imagem puxada mostra `-` nessas colunas.
+  `push_to_registry` (imagens de container), sem duplicar a lógica. **PUBLICADA E VALIDADA
+  (2026-07-20) via CI** — `ghcr.io/angolardevops/delonix-vm-k8s:1.34` (678.8 MiB, golden
+  optimizada), PÚBLICA, com `delonix vm pull` (sem argumento) a descarregá-la de ponta a ponta.
+  O caminho oficial de publicação é o workflow `.github/workflows/vm-image.yml` (disparo manual,
+  `workflow_dispatch`): constrói a golden com o binário do próprio commit (`image --vm build
+  --offline`) e publica no ghcr. **Lições da publicação real** (a nota anterior dizia "publicada
+  em 2026-07-17" mas o package NÃO existia — nunca chegou ao ghcr): (1) o **`virt-customize`
+  FUNCIONA em CI** — o bloqueio de `libguestfs` era só do sandbox local, um runner `ubuntu-24.04`
+  limpo constrói a golden sem os workarounds; (2) o push do PRIMEIRO package de um nome novo no
+  namespace de um **user** (não org) EXIGE um **PAT classic com `write:packages`** (secret
+  `GHCR_TOKEN`) — o `GITHUB_TOKEN` do workflow dá **403 Forbidden** mesmo com "Workflow
+  permissions: Read and write", porque não pode CRIAR packages novos de user; (3) o primeiro push
+  cria o package **privado** — tornar público é um passo manual na UI depois. **Gap conhecido**:
+  o `pull` NÃO recupera os metadados (`ubuntu_release`/`k8s_version` ficam `null` — o artefacto OCI
+  só carrega o blob qcow2), por isso um `image vm ls` de uma imagem puxada mostra `-` nessas colunas.
 - **Bloqueios de host do `virt-customize` — DESAPARECEM com `--offline`** (diagnosticados a
   fundo em 2026-07-17; só afectam o caminho ONLINE, que precisa de DHCP/DNS no appliance):
   1. **Appliance sem cliente DHCP** → `apt-get install` falha com "Could not resolve host".
