@@ -92,8 +92,9 @@ pub enum IngressCmd {
     },
     /// Show the inbound firewall (policy + rules) and published ports.
     Ls {
+        /// Container to inspect (omit to list every container's inbound state).
         #[arg(add = ArgValueCandidates::new(super::complete::containers))]
-        container: String,
+        container: Option<String>,
     },
     /// Remove all inbound rules (keeps published ports).
     Clear {
@@ -150,8 +151,9 @@ pub enum EgressCmd {
     },
     /// Show the outbound firewall (policy + rules).
     Ls {
+        /// Container to inspect (omit to list every container's outbound state).
         #[arg(add = ArgValueCandidates::new(super::complete::containers))]
-        container: String,
+        container: Option<String>,
     },
     /// Show a NETWORK's egress policy: CIDR allowlist, FQDN hosts, and the IPs
     /// currently learnt from DNS for those hosts.
@@ -193,7 +195,10 @@ pub fn run_ingress(cmd: IngressCmd) -> Result<()> {
             let mut c = store.load(&container)?;
             super::container::unpublish_live(&store, &mut c, &host_port)
         }
-        IngressCmd::Ls { container } => list_rules(&store, &container, "in"),
+        IngressCmd::Ls { container } => match container {
+            Some(c) => list_rules(&store, &c, "in"),
+            None => list_all(&store, "in"),
+        },
         IngressCmd::Clear { container } => clear_dir(&store, &container, "in"),
     }
 }
@@ -217,7 +222,10 @@ pub fn run_egress(cmd: EgressCmd) -> Result<()> {
         EgressCmd::Net { network, mode, to } => egress_net(&network, mode, to),
         EgressCmd::Host { network, hostname } => egress_host(&network, &hostname),
         EgressCmd::Show { network } => egress_show(&network),
-        EgressCmd::Ls { container } => list_rules(&store, &container, "out"),
+        EgressCmd::Ls { container } => match container {
+            Some(c) => list_rules(&store, &c, "out"),
+            None => list_all(&store, "out"),
+        },
         EgressCmd::Clear { container } => clear_dir(&store, &container, "out"),
     }
 }
@@ -305,6 +313,42 @@ fn set_policy(store: &Store, name: &str, dir: &str, policy: Action) -> Result<()
     store.save(&c)?;
     let arrow = if dir == "in" { "inbound" } else { "outbound" };
     println!("{}: default {arrow} policy = {}", c.name, policy.as_str());
+    Ok(())
+}
+
+/// Overview of every container's firewall state in one table — `ls` without an
+/// argument, like `docker ps`. Per-container detail stays in `ls <container>`.
+fn list_all(store: &Store, dir: &str) -> Result<()> {
+    let mut t = output::Table::new(&[
+        "NAME",
+        "POLICY",
+        "RULES",
+        if dir == "in" { "PUBLISHED" } else { "NETWORKS" },
+    ]);
+    for c in store.list()? {
+        let fw = c.firewall.clone().unwrap_or_default();
+        let policy = if dir == "in" {
+            &fw.policy_in
+        } else {
+            &fw.policy_out
+        };
+        let policy = if policy.is_empty() {
+            "allow (default)".to_string()
+        } else {
+            policy.clone()
+        };
+        let rules = fw.rules.iter().filter(|r| r.dir == dir).count();
+        let last = if dir == "in" {
+            c.ports.join(", ")
+        } else {
+            // Rede principal + extras (multi-homing) — os alvos da política de egress.
+            let mut nets: Vec<String> = c.network.clone().into_iter().collect();
+            nets.extend(c.extra_networks.iter().map(|e| e.network.clone()));
+            nets.join(", ")
+        };
+        t.row(vec![c.name.clone(), policy, rules.to_string(), last]);
+    }
+    t.print();
     Ok(())
 }
 
