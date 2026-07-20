@@ -1317,3 +1317,15 @@ msgstr "sem imagens VM locais — corre `delonix image --vm build` (ou `pull`) p
 
 msgid "{n} local VM images — say which one: `--vm-image <tag>` (cluster) or `--disk <path>` (vm create); see `delonix image --vm ls`"
 msgstr "há {n} imagens VM locais — especifica qual: `--vm-image <tag>` (cluster) ou `--disk <caminho>` (vm create); vê `delonix image --vm ls`"
+
+msgid "Pull a golden VM image from an OCI registry — with no argument, the OFFICIAL Delonix image (ready for `vm create`/`cluster kubeadm`)."
+msgstr "Descarrega uma imagem VM dourada de um registo OCI — sem argumento, a imagem OFICIAL do Delonix (pronta para `vm create`/`cluster kubeadm`)."
+
+msgid "OCI reference (default: the official Delonix image)."
+msgstr "Referência OCI (default: a imagem oficial do Delonix)."
+
+msgid "Local name (default: derived from the reference)."
+msgstr "Nome local (default: derivado da referência)."
+
+msgid "Push a local golden VM image to an OCI registry (`vm push <name> <target>`)."
+msgstr "Publica uma imagem VM dourada local num registo OCI (`vm push <nome> <destino>`)."
