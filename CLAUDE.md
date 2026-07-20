@@ -19,7 +19,11 @@ homóloga ao Docker, distinta do `delonix`/`delonixctl` privados do `delonix-paa
 repo/branch/remote, não afectados por nada aqui). Comandos agrupados semanticamente em vez de
 uma lista plana, um módulo por grupo em `crates/delonix-runtime-bin/src/cmd/`:
 
-- `delonix container` — run/ps/stop/rm/exec/logs/**update**/**describe**. `run` aceita `-v/--volume` (nomeado ou bind
+- `delonix container` — run/ps/stop/rm/exec/logs/**update**/**describe**. **Nome default
+  angolano**: sem `--name`, o container chama-se `<rei>-<lugar>-NN` (ex.:
+  `njinga-benguela-07`) — listas partilhadas com o kind-mode em `cmd/names.rs`;
+  DETERMINÍSTICO do id (as 2 passagens do re-exec de `--net` convergem sem transporte),
+  colisão avança para a próxima combinação, `dlx-<id>` só como último recurso. `run` aceita `-v/--volume` (nomeado ou bind
   mount, via `delonix-volume::VolumeStore::resolve_spec`, testado e funcional) e
   `--net host|none|<rede>`. `host`/`none` — comportamento original, inalterado, testado. `--net
   <rede-custom>` (`delonix-net::infra::attach_container` cria a netns NOMEADA do lado do holder,
