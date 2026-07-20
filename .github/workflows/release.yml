@@ -68,3 +68,22 @@ jobs:
           else
             gh release create "$GITHUB_REF_NAME" dist-release/* --title "$GITHUB_REF_NAME" --generate-notes
           fi
+      # Documentação DINÂMICA por release: o apêndice docs/RELEASES.md (features
+      # por release) regenera-se das notas e é comitado no main — a doc nunca
+      # fica atrás da release. [skip ci] evita re-disparar a CI por isto.
+      - name: Actualiza o apêndice de releases no main
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git fetch origin main
+          git checkout -B main origin/main
+          bash scripts/gen-releases.sh
+          if ! git diff --quiet -- docs/RELEASES.md; then
+            git add docs/RELEASES.md
+            git commit -m "docs(releases): apêndice actualizado para ${GITHUB_REF_NAME} [skip ci]"
+            git push origin main
+          else
+            echo "docs/RELEASES.md já actualizado — nada a comitar"
+          fi
