@@ -16,6 +16,7 @@ pub mod kindmode;
 pub mod kube;
 pub mod manifest;
 pub mod mapped;
+pub mod names;
 pub mod netns;
 pub mod network;
 pub mod output;
