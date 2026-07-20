@@ -59,12 +59,47 @@ if [ -t 1 ]; then
 else
   C_OK=""; C_SKIP=""; C_WARN=""; C_ERR=""; C_0=""
 fi
+# Limpeza única no EXIT: TMP (se criado) + repor o cursor que o spin esconde.
+CLEANUP_TMP=""
+cleanup() {
+  [ -n "$CLEANUP_TMP" ] && rm -rf "$CLEANUP_TMP"
+  [ -t 1 ] && printf '\033[?25h'
+  return 0
+}
+trap cleanup EXIT
+
 msg()   { printf 'install/delonix: %s\n' "$*"; }
 step()  { printf '[%s] %s: %s\n' "$1" "$2" "$3"; }                    # estado neutro
 skip()  { printf '[%s] %s: %salready satisfied (SKIP)%s\n' "$1" "$2" "$C_SKIP" "$C_0"; }
 stepok(){ printf '[%s] %s: %sOK%s\n' "$1" "$2" "$C_OK" "$C_0"; }
 warn()  { printf '%swarning%s %s\n' "$C_WARN" "$C_0" "$*" >&2; }
 die()   { printf '%serror%s %s\n' "$C_ERR" "$C_0" "$*" >&2; exit 1; }
+
+# Corre um comando com um SPINNER animado na linha do passo (só em tty; em
+# pipe/CI degrada para a linha estática de sempre). O comando corre em
+# background no MESMO shell (funções e variáveis visíveis); devolve o rc dele.
+#   spin <fase> <nome> <texto-em-curso> <cmd...>
+SPIN_FRAMES=('⠋' '⠙' '⠹' '⠸' '⠼' '⠴' '⠦' '⠧' '⠇' '⠏')
+spin() {
+  local phase="$1" name="$2" doing="$3"; shift 3
+  if [ ! -t 1 ]; then
+    step "$phase" "$name" "$doing"
+    "$@"
+    return $?
+  fi
+  "$@" &
+  local pid=$! i=0
+  printf '\033[?25l'
+  while kill -0 "$pid" 2>/dev/null; do
+    printf '\r\033[K[%s] %s: %s %s' "$phase" "$name" "$doing" "${SPIN_FRAMES[i % 10]}"
+    i=$((i + 1))
+    sleep 0.1
+  done
+  local rc=0
+  wait "$pid" || rc=$?
+  printf '\r\033[K\033[?25h'
+  return $rc
+}
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -180,12 +215,24 @@ pkg_install() {
   return 1
 }
 
+# O índice de pacotes actualiza-se UMA vez, no shell principal — o spin corre
+# o pkg_install em subshell e a mutação de PKG_UPDATED perder-se-ia lá dentro.
+pkg_update_once() {
+  [ "$PKG_UPDATED" = 1 ] && return 0
+  case "$PKG" in
+    apt) $SUDO apt-get update -qq >/dev/null 2>&1 || true ;;
+    pacman) $SUDO pacman -Sy --noconfirm >/dev/null 2>&1 || true ;;
+  esac
+  PKG_UPDATED=1
+}
+
 require_dep() {
   # $1 = fase; $2 = comando que tem de existir no fim; $3 = candidatos; $4 = razão
   local phase="$1" cmd="$2" pkgs="$3" why="$4"
   if has_cmd "$cmd"; then skip "$phase" "$cmd"; return 0; fi
-  step "$phase" "$cmd" "installing ($why)..."
-  pkg_install "$pkgs" || die "could not install '$pkgs' — install it with your package manager and re-run"
+  pkg_update_once
+  spin "$phase" "$cmd" "installing ($why)..." pkg_install "$pkgs" \
+    || die "could not install '$pkgs' — install it with your package manager and re-run"
   has_cmd "$cmd" || die "'$pkgs' installed but '$cmd' is still missing"
   stepok "$phase" "$cmd"
 }
@@ -193,8 +240,8 @@ require_dep() {
 optional_dep() {
   local phase="$1" cmd="$2" pkgs="$3" why="$4"
   if has_cmd "$cmd"; then skip "$phase" "$cmd"; return 0; fi
-  step "$phase" "$cmd" "a instalar ($why)..."
-  if pkg_install "$pkgs" && has_cmd "$cmd"; then
+  pkg_update_once
+  if spin "$phase" "$cmd" "installing ($why)..." pkg_install "$pkgs" && has_cmd "$cmd"; then
     stepok "$phase" "$cmd"
   else
     warn "$cmd unavailable on this distro — $why will not work until you install it"
@@ -218,7 +265,7 @@ if [ "$WITH_BINARY" = 1 ]; then
   fi
   command -v curl >/dev/null 2>&1 || require_dep deps curl curl "release downloads"
   TMP=$(mktemp -d)
-  trap 'rm -rf "$TMP"' EXIT
+  CLEANUP_TMP="$TMP"
   # Variante optimizada para o CPU (x86-64-v3: AVX2/BMI2/FMA) quando ele a
   # suporta; releases antigas podem não a ter — fallback para o genérico.
   fetch_asset() { # $1 nome-base (delonix|delonix-cri) → devolve o nome descarregado
@@ -236,15 +283,22 @@ if [ "$WITH_BINARY" = 1 ]; then
     ( cd "$TMP" && grep -E " $1\$" SHA256SUMS | sha256sum -c - >/dev/null 2>&1 ) \
       || die "SHA256 verification FAILED for $1 — corrupted or tampered download, aborting"
   }
-  step binary delonix "downloading ($VERSION, $VARIANT_LABEL)..."
-  curl -fsSL -o "$TMP/SHA256SUMS" "$BASE_URL/SHA256SUMS"
-  DELONIX_ASSET=$(fetch_asset delonix)
+  dl_main() {
+    curl -fsSL -o "$TMP/SHA256SUMS" "$BASE_URL/SHA256SUMS"
+    fetch_asset delonix > "$TMP/.asset-delonix"
+  }
+  spin binary delonix "downloading ($VERSION, $VARIANT_LABEL)..." dl_main \
+    || die "download failed — check the network and that the release exists"
+  DELONIX_ASSET=$(cat "$TMP/.asset-delonix")
   verify_asset "$DELONIX_ASSET"
   step binary delonix "sha256 verified ($DELONIX_ASSET)"
   $BIN_SUDO install -m 0755 "$TMP/$DELONIX_ASSET" "$BIN_DIR/delonix"
   stepok binary "delonix -> $BIN_DIR/delonix"
   if [ "$WITH_CRI" = 1 ]; then
-    CRI_ASSET=$(fetch_asset delonix-cri)
+    dl_cri() { fetch_asset delonix-cri > "$TMP/.asset-cri"; }
+    spin binary delonix-cri "downloading..." dl_cri \
+      || die "delonix-cri download failed"
+    CRI_ASSET=$(cat "$TMP/.asset-cri")
     verify_asset "$CRI_ASSET"
     $BIN_SUDO install -m 0755 "$TMP/$CRI_ASSET" "$BIN_DIR/delonix-cri"
     stepok binary "delonix-cri -> $BIN_DIR/delonix-cri"
@@ -329,10 +383,12 @@ if [ "$WITH_VM" = 1 ]; then
     if pkg_install cloud-hypervisor >/dev/null 2>&1; then
       stepok vm cloud-hypervisor
     else
-      step vm cloud-hypervisor "not packaged on this distro — fetching the official static binary..."
       CH_URL="https://github.com/cloud-hypervisor/cloud-hypervisor/releases/latest/download/cloud-hypervisor-static"
-      if curl -fsSL -o /tmp/cloud-hypervisor-static.$$ "$CH_URL" \
-         && $SUDO install -m 0755 /tmp/cloud-hypervisor-static.$$ /usr/local/bin/cloud-hypervisor; then
+      fetch_ch() {
+        curl -fsSL -o /tmp/cloud-hypervisor-static.$$ "$CH_URL" \
+          && $SUDO install -m 0755 /tmp/cloud-hypervisor-static.$$ /usr/local/bin/cloud-hypervisor
+      }
+      if spin vm cloud-hypervisor "not packaged on this distro — fetching the official static binary..." fetch_ch; then
         rm -f /tmp/cloud-hypervisor-static.$$
         stepok vm "cloud-hypervisor -> /usr/local/bin/cloud-hypervisor ($(/usr/local/bin/cloud-hypervisor --version 2>/dev/null | head -1))"
       else
