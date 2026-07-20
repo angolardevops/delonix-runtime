@@ -73,9 +73,9 @@ main{padding:1.4rem 1.2rem 4rem}}
 parados, dirs órfãos, imagens dangling, blobs CAS, hostfwds órfãos, redes vazias); <code>system df</code>
 mostra o uso de disco; <code>system monitor</code> segue ligações/conntrack; <code>system events</code> o
 fluxo de eventos.</p>
-<div class='help'><pre><code>O motor em si: eventos, estado e uso de disco
+<div class='help'><pre><code>The engine itself: events, state and disk usage
 
-Usage: delonix system [OPTIONS] &lt;COMMAND&gt;
+Usage: delonix-x86_64-v3-linux system [OPTIONS] &lt;COMMAND&gt;
 
 Commands:
   events   Eventos do motor (create/start/die/remove/…), do mais antigo ao mais recente. Sem daemon, o registo é um log append-only partilhado — cada comando acrescenta a sua linha (ver `delonix_runtime_core::events`)
@@ -93,7 +93,7 @@ Options:
 <h2 id='prune'><code>system prune</code></h2>
 <div class='help'><pre><code>Recupera espaço: remove containers parados, imagens sem uso, blobs do CAS que ninguém referencia, cgroups vazios e — o que mais espaço liberta — **directórios de containers órfãos** (de nós/containers que morreram abruptamente sem `rm`, sem entrada no registo)
 
-Usage: delonix system prune [OPTIONS]
+Usage: delonix-x86_64-v3-linux system prune [OPTIONS]
 
 Options:
   -a, --all           Também remove imagens sem uso que TÊM tag (não só as dangling)
@@ -103,7 +103,7 @@ Options:
 <h2 id='df'><code>system df</code></h2>
 <div class='help'><pre><code>Uso de disco por área (imagens, containers, volumes, imagens VM)
 
-Usage: delonix system df [OPTIONS]
+Usage: delonix-x86_64-v3-linux system df [OPTIONS]
 
 Options:
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
@@ -112,7 +112,7 @@ Options:
 <h2 id='info'><code>system info</code></h2>
 <div class='help'><pre><code>Estado do motor: rootless?, delegação de cgroup, infra de rede, contagens
 
-Usage: delonix system info [OPTIONS]
+Usage: delonix-x86_64-v3-linux system info [OPTIONS]
 
 Options:
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand

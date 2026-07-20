@@ -74,14 +74,14 @@ dois classificadores tc/clsact em eBPF às veths da SDN, que contam bytes/pacote
 partilhado — <strong>sem nunca fazer drop</strong> (o nft continua o único enforcer). Sem privilégio
 (o caso rootless comum) diz-o e cai nos contadores veth, que sempre funcionam. <code>--watch</code>
 redesenha a cada 2s.</p>
-<div class='help'><pre><code>Tráfego por-container ao vivo (datapath eBPF; degrada para contadores veth)
+<div class='help'><pre><code>Live per-container traffic (eBPF datapath; degrades to veth counters)
 
-Usage: delonix flow [OPTIONS]
+Usage: delonix-x86_64-v3-linux flow [OPTIONS]
 
 Options:
-      --iface &lt;IFACE&gt;  Observar só esta interface (default: auto — todas as veths da SDN)
+      --iface &lt;IFACE&gt;  Watch only this interface (default: auto — every SDN veth)
       --l18n &lt;en|pt&gt;   Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-  -w, --watch          Actualiza continuamente (a cada 2s) em vez de imprimir uma vez
+  -w, --watch          Refresh continuously (every 2s) instead of printing once
   -h, --help           Print help</code></pre></div>
 <h2>Exemplos</h2><div class="ex"><div class="cap">Uma amostra</div><pre><code>sudo delonix flow</code></pre></div><div class="ex"><div class="cap">Monitorização contínua</div><pre><code>sudo delonix flow --watch</code></pre></div>
 <footer>Delonix Runtime · Apache-2.0 · <a href="https://github.com/angolardevops/delonix-runtime">angolardevops/delonix-runtime</a>

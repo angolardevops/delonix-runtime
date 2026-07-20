@@ -75,9 +75,9 @@ idempotente <em>sem ficheiro de estado</em> (cada passo tem um <code>check</code
 nunca dessincroniza de um .tfstate porque não há nenhum). <code>cluster kubeadm</code> vai mais longe:
 provisiona as VMs a partir da imagem VM dourada, espera pelo SSH e corre o MESMO bootstrap — um
 comando, do zero a um cluster com o <code>delonix-cri</code> como runtime (sem containerd).</p>
-<div class='help'><pre><code>Bootstrap `kubeadm` idempotente sobre SSH (`kind: Cluster`)
+<div class='help'><pre><code>Idempotent `kubeadm` bootstrap over SSH (`kind: Cluster`), or full VM provisioning
 
-Usage: delonix cluster [OPTIONS] &lt;COMMAND&gt;
+Usage: delonix-x86_64-v3-linux cluster [OPTIONS] &lt;COMMAND&gt;
 
 Commands:
   init     Inicializa um projecto com os manifestos de cluster (kind/vm/ssh) — ficheiros JÁ PREENCHIDOS (imagens incluídas), prontos a usar sem editar nada
@@ -94,7 +94,7 @@ Options:
 <h2 id='apply'><code>cluster apply</code></h2>
 <div class='help'><pre><code>Aplica o(s) documento(s) `kind: Cluster` de um manifesto
 
-Usage: delonix cluster apply [OPTIONS]
+Usage: delonix-x86_64-v3-linux cluster apply [OPTIONS]
 
 Options:
   -f, --file &lt;FILE&gt;   
@@ -108,7 +108,7 @@ auditoria ofensiva do projecto, com testes a replicar o exploit.</p>
 <h2 id='kubeadm'><code>cluster kubeadm</code></h2>
 <div class='help'><pre><code>Provisiona VMs (imagem VM dourada) + bootstrap `kubeadm` — do zero a um cluster a funcionar, sem escrever um manifesto à mão
 
-Usage: delonix cluster kubeadm [OPTIONS] --name &lt;NAME&gt; --network &lt;NETWORK&gt;
+Usage: delonix-x86_64-v3-linux cluster kubeadm [OPTIONS] --name &lt;NAME&gt; --network &lt;NETWORK&gt;
 
 Options:
       --l18n &lt;en|pt&gt;

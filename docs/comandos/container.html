@@ -74,11 +74,12 @@ main{padding:1.4rem 1.2rem 4rem}}
 <code>run</code> faz <code>clone()</code> directo com os namespaces pedidos e o estado fica em
 JSON no <code>$DELONIX_ROOT</code>. Em rootless, o rootfs do container é uma cópia flat
 <em>persistente</em> — as escritas sobrevivem a <code>stop</code>/<code>start</code>, como no Docker.</p>
-<div class='help'><pre><code>Containers: run/ps/stop/rm/exec/logs
+<div class='help'><pre><code>Containers: run/ps/stop/rm/exec/logs/update/describe
 
-Usage: delonix container [OPTIONS] &lt;COMMAND&gt;
+Usage: delonix-x86_64-v3-linux container [OPTIONS] &lt;COMMAND&gt;
 
 Commands:
+  dash         Dashboard (KPIs + tabela + problemas) dos containers — TUI interactivo, ou `--once` para um snapshot de texto
   init         Initialize a project with a Delonixfile + manifest — files ALREADY FILLED IN (images included), ready to use without editing anything
   run          Run a container from an image (pulls it if missing)
   ps           List containers [alias: ls]
@@ -108,7 +109,7 @@ Options:
 <h2 id='run'><code>container run</code></h2>
 <div class='help'><pre><code>Run a container from an image (pulls it if missing)
 
-Usage: delonix container run [OPTIONS] &lt;IMAGE&gt; [COMMAND]...
+Usage: delonix-x86_64-v3-linux container run [OPTIONS] &lt;IMAGE&gt; [COMMAND]...
 
 Arguments:
   &lt;IMAGE&gt;       Image (e.g. `alpine:3.19`)
@@ -118,7 +119,11 @@ Options:
   -d, --detach                         Run in the background and print the ID
       --l18n &lt;en|pt&gt;                   Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
       --name &lt;NAME&gt;                    Container name (default: `dlx-&lt;id&gt;`)
+      --hostname &lt;HOSTNAME&gt;            Hostname inside the container (UTS namespace + `/etc/hostname`). Default: the container name (docker `--hostname`)
+  -u, --user &lt;USER&gt;                    Run the process as this user: `uid[:gid]` or `name[:group]` (docker `--user`). Names are resolved in the image&#x27;s `/etc/passwd`/`/etc/group`
       --net &lt;NET&gt;                      Network: `host` (shares the host&#x27;s, default), `none` (isolated netns with no connectivity), or the NAME of a network created with `delonix network create` [default: host]
+      --namespace &lt;NAMESPACE&gt;          Logical ISOLATION namespace (default `default`). Containers in different namespaces cannot reach each other (even on the same network); only a `kind: Dependency` crosses the boundary
+      --expose &lt;EXPOSE&gt;                Auto-register this container&#x27;s HTTP port in the L7 proxy under its internal FQDN `&lt;name&gt;.&lt;namespace&gt;.delonix.internal` (reachable via the proxy). Needs `--net &lt;network&gt;`. Removed automatically on `container rm`
   -v, --volume &lt;VOLUMES&gt;               Volume/bind mount, `name:/target[:ro]` or `/host:/target[:ro]`. Repeatable
   -p, --publish &lt;PUBLISH&gt;              Publish a port, `hostPort:contPort[/tcp|udp]` or just `port`. Repeatable. With `--net host` (the default) the container moves to its own netns with userspace NAT (slirp4netns, like rootless podman); with `--net &lt;network&gt;` it publishes via the ingress (nft DNAT + hostfwd on the single slirp)
       --privileged                     Privileged container (all caps, seccomp off) — trusted workloads
@@ -172,7 +177,7 @@ delonix container run -d --net minha-rede -p 8443:443 caddy</code></pre></div><d
 <h2 id='ps'><code>container ps</code></h2>
 <div class='help'><pre><code>List containers
 
-Usage: delonix container ps [OPTIONS]
+Usage: delonix-x86_64-v3-linux container ps [OPTIONS]
 
 Options:
   -a, --all           Include stopped/failed ones
@@ -183,7 +188,7 @@ Options:
 <h2 id='start'><code>container start</code></h2>
 <div class='help'><pre><code>(Re)start stopped/crashed containers, reusing the persistent rootfs (writes made inside the container survive, like in docker) and the same network/ports/volumes as the original `run`. Always detached
 
-Usage: delonix container start [OPTIONS] &lt;IDS&gt;...
+Usage: delonix-x86_64-v3-linux container start [OPTIONS] &lt;IDS&gt;...
 
 Arguments:
   &lt;IDS&gt;...  
@@ -197,7 +202,7 @@ persistente — ao contrário de <code>rm</code>+<code>run</code>, nada do que o
 <h2 id='stop'><code>container stop</code></h2>
 <div class='help'><pre><code>Stop one or more containers (SIGTERM, then SIGKILL)
 
-Usage: delonix container stop [OPTIONS] &lt;IDS&gt;...
+Usage: delonix-x86_64-v3-linux container stop [OPTIONS] &lt;IDS&gt;...
 
 Arguments:
   &lt;IDS&gt;...  
@@ -210,7 +215,7 @@ Options:
 <h2 id='rm'><code>container rm</code></h2>
 <div class='help'><pre><code>Remove one or more containers
 
-Usage: delonix container rm [OPTIONS] &lt;IDS&gt;...
+Usage: delonix-x86_64-v3-linux container rm [OPTIONS] &lt;IDS&gt;...
 
 Arguments:
   &lt;IDS&gt;...  
@@ -223,7 +228,7 @@ Options:
 <h2 id='exec'><code>container exec</code></h2>
 <div class='help'><pre><code>Execute a command inside a running container
 
-Usage: delonix container exec [OPTIONS] &lt;ID&gt; &lt;COMMAND&gt;...
+Usage: delonix-x86_64-v3-linux container exec [OPTIONS] &lt;ID&gt; &lt;COMMAND&gt;...
 
 Arguments:
   &lt;ID&gt;          
@@ -238,7 +243,7 @@ Options:
 <h2 id='logs'><code>container logs</code></h2>
 <div class='help'><pre><code>Show the logs (detached containers)
 
-Usage: delonix container logs [OPTIONS] &lt;ID&gt;
+Usage: delonix-x86_64-v3-linux container logs [OPTIONS] &lt;ID&gt;
 
 Arguments:
   &lt;ID&gt;  
@@ -251,7 +256,7 @@ Options:
 <h2 id='inspect'><code>container inspect</code></h2>
 <div class='help'><pre><code>Show the full spec of one or more containers (Store JSON)
 
-Usage: delonix container inspect [OPTIONS] &lt;IDS&gt;...
+Usage: delonix-x86_64-v3-linux container inspect [OPTIONS] &lt;IDS&gt;...
 
 Arguments:
   &lt;IDS&gt;...  
@@ -263,7 +268,7 @@ Options:
 <h2 id='stats'><code>container stats</code></h2>
 <div class='help'><pre><code>Resource usage (CPU/memory/PIDs) of the running containers — one sample and exits (no stream). With no IDs, shows all running ones
 
-Usage: delonix container stats [OPTIONS] [IDS]...
+Usage: delonix-x86_64-v3-linux container stats [OPTIONS] [IDS]...
 
 Arguments:
   [IDS]...  
@@ -279,7 +284,7 @@ marcada com <code>~</code>.</p>
 <h2 id='apply'><code>container apply</code></h2>
 <div class='help'><pre><code>Apply the `kind: Container` documents of a manifest (idempotent by name — an existing container with that name is neither recreated nor checked for spec drift, see `cmd::manifest`)
 
-Usage: delonix container apply [OPTIONS]
+Usage: delonix-x86_64-v3-linux container apply [OPTIONS]
 
 Options:
   -f, --file &lt;FILE&gt;   

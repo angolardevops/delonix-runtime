@@ -73,11 +73,12 @@ main{padding:1.4rem 1.2rem 4rem}}
 verificação de digest no pull. Com <code>--vm</code>, o MESMO grupo opera sobre as
 <strong>imagens VM douradas</strong> (um <code>.qcow2</code> + metadados por imagem): Ubuntu cloud
 image + kubeadm/kubelet/kubectl + <code>delonix-cri</code> — a base do <code>delonix cluster</code>.</p>
-<div class='help'><pre><code>Imagens: pull/ls/rm/export. Com `--vm`: imagens VM douradas (ls/pull/push/build) em vez de imagens de container
+<div class='help'><pre><code>OCI images: pull/ls/rm/export (with `--vm`: golden VM images — ls/pull/push/build)
 
-Usage: delonix image [OPTIONS] &lt;COMMAND&gt;
+Usage: delonix-x86_64-v3-linux image [OPTIONS] &lt;COMMAND&gt;
 
 Commands:
+  dash      Dashboard (KPIs + tabela) das imagens — TUI interactivo, ou `--once` snapshot
   pull      Puxa uma imagem de um registo
   ls        Lista imagens locais
   describe  Detalhe legível de uma ou mais imagens, ao estilo `kubectl describe` (tags/digest/tamanho/layers + o config OCI: entrypoint/cmd/env/workdir). Com `--vm`, descreve imagens VM douradas
@@ -97,12 +98,12 @@ Commands:
 
 Options:
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-      --vm            Opera sobre imagens VM (`&lt;root&gt;/vm-images/`) em vez de imagens de container — activa os subcomandos `push`/`build`
+      --vm            Operate on VM images (`&lt;root&gt;/vm-images/`) instead of container images — enables the `push`/`build` subcommands
   -h, --help          Print help</code></pre></div>
 <h2 id='pull'><code>image pull</code></h2>
 <div class='help'><pre><code>Puxa uma imagem de um registo
 
-Usage: delonix image pull [OPTIONS] &lt;IMAGE&gt;
+Usage: delonix-x86_64-v3-linux image pull [OPTIONS] &lt;IMAGE&gt;
 
 Arguments:
   &lt;IMAGE&gt;  
@@ -115,7 +116,7 @@ Options:
 <h2 id='ls'><code>image ls</code></h2>
 <div class='help'><pre><code>Lista imagens locais
 
-Usage: delonix image ls [OPTIONS]
+Usage: delonix-x86_64-v3-linux image ls [OPTIONS]
 
 Options:
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
@@ -124,7 +125,7 @@ Options:
 <h2 id='rm'><code>image rm</code></h2>
 <div class='help'><pre><code>Remove uma imagem local
 
-Usage: delonix image rm [OPTIONS] &lt;IMAGE&gt;
+Usage: delonix-x86_64-v3-linux image rm [OPTIONS] &lt;IMAGE&gt;
 
 Arguments:
   &lt;IMAGE&gt;  
@@ -136,7 +137,7 @@ Options:
 <h2 id='export'><code>image export</code></h2>
 <div class='help'><pre><code>Exporta um bundle OCI runtime (rootfs + config.json) para `runc`/`crun`
 
-Usage: delonix image export [OPTIONS] &lt;IMAGE&gt; &lt;DIR&gt;
+Usage: delonix-x86_64-v3-linux image export [OPTIONS] &lt;IMAGE&gt; &lt;DIR&gt;
 
 Arguments:
   &lt;IMAGE&gt;  
@@ -149,7 +150,7 @@ Options:
 <h2 id='push'><code>image push</code></h2>
 <div class='help'><pre><code>Publica uma imagem local num registo OCI. Sem `target`, publica sob a própria referência da imagem. Com `--vm`, o `target` é obrigatório
 
-Usage: delonix image push [OPTIONS] &lt;NAME&gt; [TARGET]
+Usage: delonix-x86_64-v3-linux image push [OPTIONS] &lt;NAME&gt; [TARGET]
 
 Arguments:
   &lt;NAME&gt;    
@@ -162,7 +163,7 @@ Options:
 <h2 id='build'><code>image build</code></h2>
 <div class='help'><pre><code>(só com `--vm`) Constrói a imagem VM dourada (Ubuntu + kubeadm/kubelet/ kubectl + `delonix-cri`)
 
-Usage: delonix image build [OPTIONS] --tag &lt;TAG&gt;
+Usage: delonix-x86_64-v3-linux image build [OPTIONS] --tag &lt;TAG&gt;
 
 Options:
       --l18n &lt;en|pt&gt;
@@ -189,7 +190,7 @@ Options:
 <h2 id='apply'><code>image apply</code></h2>
 <div class='help'><pre><code>Aplica os documentos `kind: Image` de um manifesto (`pull` idempotente por referência; `build` reconstrói e substitui a tag a cada apply)
 
-Usage: delonix image apply [OPTIONS]
+Usage: delonix-x86_64-v3-linux image apply [OPTIONS]
 
 Options:
   -f, --file &lt;FILE&gt;   
