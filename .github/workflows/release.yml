@@ -30,16 +30,27 @@ jobs:
       - name: Instala toolchain fixada
         run: rustup show
       - uses: Swatinem/rust-cache@v2
-      - name: Compila (release)
+      - name: Compila (release, x86-64 genérico)
         run: cargo build --release --locked -p delonix-runtime-bin -p delonix-cri
-      - name: Prepara assets
+      - name: Guarda binários genéricos
         run: |
           mkdir -p dist-release
           cp target/release/delonix     dist-release/delonix-x86_64-linux
           cp target/release/delonix-cri dist-release/delonix-cri-x86_64-linux
-          strip dist-release/delonix-x86_64-linux dist-release/delonix-cri-x86_64-linux
+      # Variante x86-64-v3 (AVX2/BMI2/FMA — Zen 2+/Haswell+): o instalador
+      # escolhe-a automaticamente quando o CPU a suporta; o genérico continua
+      # a ser o fallback universal. target-cpu diferente ⇒ rebuild completo.
+      - name: Compila (release, x86-64-v3)
+        env:
+          RUSTFLAGS: "-C target-cpu=x86-64-v3"
+        run: cargo build --release --locked -p delonix-runtime-bin -p delonix-cri
+      - name: Prepara assets
+        run: |
+          cp target/release/delonix     dist-release/delonix-x86_64-v3-linux
+          cp target/release/delonix-cri dist-release/delonix-cri-x86_64-v3-linux
+          strip dist-release/delonix-*-linux
           cp scripts/install.sh dist-release/install.sh
-          cd dist-release && sha256sum delonix-x86_64-linux delonix-cri-x86_64-linux install.sh > SHA256SUMS
+          cd dist-release && sha256sum delonix-x86_64-linux delonix-x86_64-v3-linux delonix-cri-x86_64-linux delonix-cri-x86_64-v3-linux install.sh > SHA256SUMS
       - name: Sanidade — o binário arranca e reporta a versão da tag
         run: |
           V=$(dist-release/delonix-x86_64-linux --version)
