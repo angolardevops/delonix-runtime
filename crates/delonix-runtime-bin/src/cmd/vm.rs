@@ -475,9 +475,15 @@ pub fn run(action: VmCmd) -> Result<()> {
                     store.qcow2_path(&tag).to_string_lossy().into_owned()
                 }
             };
+            // SEMPRE um seed cloud-init (a menos de `--seed` explícito). Sem
+            // datasource, o cloud-init da cloud image não corre a fase de rede
+            // e a VM fica sem IP nem rota ("Network is unreachable" no guest,
+            // caso real). O seed mínimo (network-config DHCP + hostname = nome
+            // da VM) faz o cloud-init subir a rede e aplicar as ssh-keys/hostname
+            // quando dados.
             let seed = match seed {
                 Some(s) => Some(s),
-                None if hostname.is_some() || !ssh_keys.is_empty() || user_data.is_some() => {
+                None => {
                     let iso = generate_seed_iso(
                         &name,
                         hostname.as_deref(),
@@ -487,7 +493,6 @@ pub fn run(action: VmCmd) -> Result<()> {
                     )?;
                     Some(iso.to_string_lossy().into_owned())
                 }
-                None => None,
             };
             let cfg = VmConfig {
                 name,
@@ -1005,8 +1010,25 @@ pub(crate) fn generate_seed_iso(
     let meta_data_path = work_dir.join("meta-data");
     std::fs::write(&meta_data_path, build_meta_data(vm_name, &hostname))?;
 
+    // network-config (NoCloud v2): DHCP em qualquer interface ethernet — sem
+    // isto a cloud image pode não configurar a rede e a VM fica sem IP.
+    // `match name: "e*"` cobre eth0/ens2/enp0s2/... (nomes previsíveis ou não).
+    let net_cfg_path = work_dir.join("network-config");
+    std::fs::write(
+        &net_cfg_path,
+        "version: 2
+ethernets:
+  eth-all:
+    match:
+      name: "e
+            * "
+    dhcp4: true
+",
+    )?;
+
     let iso_path = work_dir.join("seed.iso");
     let status = Command::new("cloud-localds")
+        .arg(format!("--network-config={}", net_cfg_path.display()))
         .arg(&iso_path)
         .arg(&user_data_path)
         .arg(&meta_data_path)
