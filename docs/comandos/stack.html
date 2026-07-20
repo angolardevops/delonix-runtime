@@ -74,9 +74,9 @@ main{padding:1.4rem 1.2rem 4rem}}
 <code>Image</code>, <code>Vm</code>, <code>Container</code> — aplicados por essa ordem de dependência.
 Semântica <em>garante-presente</em> (idempotente por nome), não um reconciliador: sem diffing,
 rollout nem rollback — fail-fast, o que já foi aplicado fica.</p>
-<div class='help'><pre><code>Aplica um manifesto (`delonix-manifest.yaml`) inteiro — todos os Kinds
+<div class='help'><pre><code>Apply a whole manifest (`delonix-manifest.yaml`) — every Kind, in dependency order
 
-Usage: delonix stack [OPTIONS] &lt;COMMAND&gt;
+Usage: delonix-x86_64-v3-linux stack [OPTIONS] &lt;COMMAND&gt;
 
 Commands:
   init      Inicializa um projecto COMPLETO: Delonixfile + manifesto + cluster + README — ficheiros JÁ PREENCHIDOS (imagens incluídas), prontos a usar sem editar nada
@@ -110,7 +110,7 @@ spec:
 <h2 id='init'><code>stack init</code></h2>
 <div class='help'><pre><code>Inicializa um projecto COMPLETO: Delonixfile + manifesto + cluster + README — ficheiros JÁ PREENCHIDOS (imagens incluídas), prontos a usar sem editar nada
 
-Usage: delonix stack init [OPTIONS] [DIR]
+Usage: delonix-x86_64-v3-linux stack init [OPTIONS] [DIR]
 
 Arguments:
   [DIR]  Directório do projecto (default: o actual) [default: .]
@@ -121,6 +121,7 @@ Options:
       --image &lt;IMAGE&gt;        Imagem a usar. Omitir = preenche com a imagem por omissão
       --force                Substitui ficheiros já existentes
   -t, --template &lt;TEMPLATE&gt;  Gera um PROJECTO completo de uma stack (ex.: `python`) com boas práticas, em vez do scaffold genérico. `--template list` mostra os disponíveis
+      --up                   Depois de gerar, constrói a imagem, arranca e espera ficar saudável
   -h, --help                 Print help</code></pre></div>
 <p><code>--template &lt;nome&gt;</code> gera um projecto real e funcional de uma
 linguagem/framework, com boas práticas (multi-stage não-root, healthcheck, testes, dotfiles) e já
@@ -131,7 +132,7 @@ do projecto.</p>
 <h2 id='apply'><code>stack apply</code></h2>
 <div class='help'><pre><code>Aplica todos os Kinds do manifesto (Network → Volume → Image → Vm → Container)
 
-Usage: delonix stack apply [OPTIONS]
+Usage: delonix-x86_64-v3-linux stack apply [OPTIONS]
 
 Options:
   -f, --file &lt;FILE&gt;   
