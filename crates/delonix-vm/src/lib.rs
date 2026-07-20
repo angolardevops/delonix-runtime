@@ -841,6 +841,41 @@ fn parse_pci_addr(dev: &str) -> Option<(String, String, String, String)> {
     ))
 }
 
+/// Garante uma rede libvirt NAT pronta (`--net-mode nat` → IP pingável do host).
+/// Best-effort: se `net` não existe e é a `default`, define a rede NAT padrão
+/// (virbr0, 192.168.122.0/24, DHCP); depois `net-start` + `net-autostart`. Um
+/// aviso claro se a conexão de sistema for inacessível (falta o grupo libvirt).
+fn ensure_libvirt_network(uri: &str, net: &str) {
+    // Conexão de sistema acessível? (NAT vive em qemu:///system.)
+    if capture("virsh", &["-c", uri, "net-list", "--all"]).is_none() {
+        eprintln!(
+            "warning: cannot reach {uri} for NAT networking — add yourself to the 'libvirt' group              (`sudo usermod -aG libvirt $USER && newgrp libvirt`) and retry"
+        );
+        return;
+    }
+    let exists = capture("virsh", &["-c", uri, "net-info", net]).is_some();
+    if !exists && net == "default" {
+        // XML da rede NAT padrão do libvirt (a que a maioria das distros traz).
+        let xml = "<network>\n  <name>default</name>\n  <forward mode='nat'/>\n                     <bridge name='virbr0' stp='on' delay='0'/>\n                     <ip address='192.168.122.1' netmask='255.255.255.0'>\n                       <dhcp><range start='192.168.122.2' end='192.168.122.254'/></dhcp>\n                     </ip>\n</network>\n";
+        let path = std::env::temp_dir().join(format!(
+            "delonix-libvirt-default-{}.xml",
+            std::process::id()
+        ));
+        if std::fs::write(&path, xml).is_ok() {
+            let _ = Command::new("virsh")
+                .args(["-c", uri, "net-define", &path.to_string_lossy()])
+                .status();
+            let _ = std::fs::remove_file(&path);
+        }
+    }
+    let _ = Command::new("virsh")
+        .args(["-c", uri, "net-start", net])
+        .status();
+    let _ = Command::new("virsh")
+        .args(["-c", uri, "net-autostart", net])
+        .status();
+}
+
 impl VmBackend for LibvirtBackend {
     fn id(&self) -> &'static str {
         "libvirt"
@@ -857,12 +892,13 @@ impl VmBackend for LibvirtBackend {
         let overlay_abs = std::fs::canonicalize(overlay)
             .map(|p| p.to_string_lossy().into_owned())
             .unwrap_or_else(|_| overlay.to_string());
-        // Modo NAT: garante a rede libvirt ativa (best-effort; ignora se já o está).
+        // Modo NAT: garante a rede libvirt DEFINIDA + activa + autostart. Sem
+        // isto, `vm create --net-mode nat` falhava em instalações onde a rede
+        // `default` não vem criada (libvirt minimalista) ou está parada — o
+        // caminho para um IP pingável do host + SSH.
         if matches!(cfg.net_mode.as_deref(), Some("nat") | Some("network")) {
             let net = cfg.bridge.as_deref().unwrap_or("default");
-            let _ = Command::new("virsh")
-                .args(["-c", uri, "net-start", net])
-                .status();
+            ensure_libvirt_network(uri, net);
         }
         let mut xml = libvirt_domain_xml(cfg, &overlay_abs, &mac);
         // On `qemu:///system` the QEMU process runs as the `libvirt-qemu` user,
