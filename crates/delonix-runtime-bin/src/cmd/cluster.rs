@@ -896,7 +896,7 @@ fn create_and_wait(
     println!(
         "cluster/{}: {}",
         args.name,
-        super::po::tf("creating VM {vm}...", &[("vm", &vm_name)])
+        super::po::tf("creating VM {vm}...", &[("vm", vm_name)])
     );
     let seed = vm_cmd::generate_seed_iso(
         vm_name,
@@ -929,7 +929,7 @@ fn create_and_wait(
     println!(
         "cluster/{}: {}",
         args.name,
-        super::po::tf("waiting for SSH on {vm}...", &[("vm", &vm_name)])
+        super::po::tf("waiting for SSH on {vm}...", &[("vm", vm_name)])
     );
     let ip = wait_for_vm_ssh_ready(vm_name, ssh, timeout)?;
     println!("cluster/{}: {vm_name} pronta (ip={ip})", args.name);

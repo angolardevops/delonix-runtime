@@ -95,7 +95,7 @@ pub fn cmd_scan(image: &str, sbom: bool, fail_on: Option<&str>) -> Result<()> {
         Err(Error::NotFound(_)) => {
             eprintln!(
                 "{}",
-                super::po::tf("image '{img}' is not local — pulling…", &[("img", &image)])
+                super::po::tf("image '{img}' is not local — pulling…", &[("img", image)])
             );
             resolve_or_pull(&images, image)?
         }
