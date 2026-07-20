@@ -619,7 +619,8 @@ fn fmt_vm_status(status: &delonix_runtime_core::Status) -> String {
 /// em user-mode (libvirt session, SLIRP) nunca há IP, por isso avisa e aponta
 /// para a consola em vez de esperar em vão o timeout inteiro.
 fn wait_for_boot(base: &std::path::Path, name: &str, timeout: std::time::Duration) {
-    let deadline = std::time::Instant::now() + timeout;
+    let start = std::time::Instant::now();
+    let deadline = start + timeout;
     let frames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
     let tty = super::output::color_enabled();
     let mut i = 0usize;
