@@ -215,6 +215,21 @@ impl Client {
     }
 
     fn blob(&mut self, digest: &str) -> Result<Vec<u8>> {
+        self.blob_with_progress(digest, None)
+    }
+
+    /// Descarrega um blob em STREAMING, chamando `progress(bytes_lidos, total)` à
+    /// medida que avança — o total vem do `Content-Length` (pode faltar em
+    /// respostas chunked, daí o `Option`). Ler em pedaços em vez de `.bytes()`
+    /// (que carrega tudo antes de devolver) é o que permite uma barra de
+    /// progresso: um artefacto VM tem centenas de MB e sem isto o `pull` parece
+    /// pendurado. O crate de motor só REPORTA os bytes; quem desenha é o bin.
+    fn blob_with_progress(
+        &mut self,
+        digest: &str,
+        progress: Option<&dyn Fn(u64, Option<u64>)>,
+    ) -> Result<Vec<u8>> {
+        use std::io::Read;
         let url = format!(
             "{}://{}/v2/{}/blobs/{}",
             scheme_for(&self.host),
@@ -222,8 +237,25 @@ impl Client {
             self.repo,
             digest
         );
-        let resp = self.fetch(&url, "*/*")?;
-        Ok(resp.bytes().map_err(reg_err)?.to_vec())
+        let mut resp = self.fetch(&url, "*/*")?;
+        let total = resp.content_length();
+        let mut buf: Vec<u8> = Vec::with_capacity(total.unwrap_or(0) as usize);
+        let mut chunk = [0u8; 65536];
+        let mut done: u64 = 0;
+        loop {
+            let n = resp
+                .read(&mut chunk)
+                .map_err(|e| Error::Registry(format!("blob read: {e}")))?;
+            if n == 0 {
+                break;
+            }
+            buf.extend_from_slice(&chunk[..n]);
+            done += n as u64;
+            if let Some(p) = progress {
+                p(done, total);
+            }
+        }
+        Ok(buf)
     }
 
     // ---- push (escrita): blobs + manifesto ----------------------------------
@@ -822,6 +854,16 @@ pub fn push_oci_artifact(
 /// Pull de um artefacto publicado por [`push_oci_artifact`] — resolve o
 /// manifesto e devolve os bytes do (único) layer.
 pub fn pull_oci_artifact(root: &std::path::Path, source: &str) -> Result<Vec<u8>> {
+    pull_oci_artifact_with_progress(root, source, None)
+}
+
+/// Como [`pull_oci_artifact`], mas com um callback de progresso do download do
+/// blob (`(bytes_lidos, total)`), para uma barra de progresso no chamador.
+pub fn pull_oci_artifact_with_progress(
+    root: &std::path::Path,
+    source: &str,
+    progress: Option<&dyn Fn(u64, Option<u64>)>,
+) -> Result<Vec<u8>> {
     let (host, repo, refr) = parse_reference(source);
     let http = reqwest::blocking::Client::builder()
         .user_agent("delonix/0.1")
@@ -847,7 +889,7 @@ pub fn pull_oci_artifact(root: &std::path::Path, source: &str) -> Result<Vec<u8>
         .first()
         .ok_or_else(|| Error::Registry("artifact manifest has no layers".into()))?;
     let layer_digest = layer.digest().to_string();
-    let data = c.blob(&layer_digest)?;
+    let data = c.blob_with_progress(&layer_digest, progress)?;
 
     // Achado de auditoria de segurança: o caminho antigo (`pull_from_registry_with_creds`)
     // já verifica cada blob contra o digest esperado antes de o aceitar — este caminho
