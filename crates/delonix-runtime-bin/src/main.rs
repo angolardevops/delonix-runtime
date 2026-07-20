@@ -179,10 +179,13 @@ enum Cmd {
 /// O cartão de visita do `--version` (o `-V` mantém a linha curta e estável
 /// para scripts): identidade do build + o que fazer a seguir. É a primeira
 /// coisa que um utilizador novo corre — merece apontar o caminho.
-fn long_version_text() -> String {
+fn long_version_text() -> &'static str {
     use cmd::po::t;
-    format!(
-        "delonix {v}\n\
+    // Leak deliberado e único: o clap builder exige &'static str (sem a feature
+    // "string"), e isto corre uma vez por processo — não é fuga acumulável.
+    Box::leak(
+        format!(
+            "delonix {v}\n\
          {tag}\n\
          commit: {hash} · built: {date} · {lic}\n\
          \n\
@@ -194,18 +197,20 @@ fn long_version_text() -> String {
          \x20 delonix dash                                # {c5}\n\
          \n\
          {docs}: https://angolardevops.github.io/delonix-runtime/ · delonix <group> --help",
-        v = env!("CARGO_PKG_VERSION"),
-        tag = t("daemonless, rootless-first container & microVM engine (kernel-native, Rust)"),
-        hash = env!("DELONIX_GIT_HASH"),
-        date = env!("DELONIX_BUILD_DATE"),
-        lic = "Apache-2.0",
-        try_ = t("get started"),
-        c1 = t("a web service in seconds"),
-        c2 = t("declarative microVMs"),
-        c3 = t("local Kubernetes (kind mode, no Docker)"),
-        c4 = t("a complete declarative project"),
-        c5 = t("htop-style dashboard"),
-        docs = t("docs"),
+            v = env!("CARGO_PKG_VERSION"),
+            tag = t("daemonless, rootless-first container & microVM engine (kernel-native, Rust)"),
+            hash = env!("DELONIX_GIT_HASH"),
+            date = env!("DELONIX_BUILD_DATE"),
+            lic = "Apache-2.0",
+            try_ = t("get started"),
+            c1 = t("a web service in seconds"),
+            c2 = t("declarative microVMs"),
+            c3 = t("local Kubernetes (kind mode, no Docker)"),
+            c4 = t("a complete declarative project"),
+            c5 = t("htop-style dashboard"),
+            docs = t("docs"),
+        )
+        .into_boxed_str(),
     )
 }
 
