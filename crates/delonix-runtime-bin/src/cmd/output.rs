@@ -337,6 +337,45 @@ impl Describe {
 }
 
 /// Formata um tamanho em bytes de forma legível (base 1024: B/KiB/MiB/GiB/TiB).
+/// Uma barra de progresso de download numa linha, reescrita com `\r` (só em
+/// tty; fora de um terminal — pipes/CI — não imprime nada, para não encher os
+/// logs de linhas de progresso). `done`/`total` em bytes; `total` ausente
+/// (resposta sem Content-Length) mostra só os bytes já lidos.
+///
+/// Barato de chamar a cada pedaço: o desenho real é feito pelo chamador, que
+/// deve estrangular a frequência (ver `cmd::vmimage`); aqui só formatamos.
+pub fn progress_bar(label: &str, done: u64, total: Option<u64>) {
+    if !color_enabled() {
+        return;
+    }
+    const WIDTH: usize = 24;
+    match total {
+        Some(t) if t > 0 => {
+            let frac = (done as f64 / t as f64).clamp(0.0, 1.0);
+            let filled = (frac * WIDTH as f64).round() as usize;
+            let bar: String = "█".repeat(filled) + &"░".repeat(WIDTH - filled);
+            eprint!(
+                "\r\x1b[K{label}  {bar}  {:>3}%  {} / {}",
+                (frac * 100.0) as u32,
+                fmt_size(done),
+                fmt_size(t)
+            );
+        }
+        _ => {
+            eprint!("\r\x1b[K{label}  {} downloaded", fmt_size(done));
+        }
+    }
+    use std::io::Write;
+    let _ = std::io::stderr().flush();
+}
+
+/// Fecha a linha da [`progress_bar`] (limpa-a e emite o `\n`), em tty.
+pub fn progress_done() {
+    if color_enabled() {
+        eprintln!("\r\x1b[K");
+    }
+}
+
 pub fn fmt_size(bytes: u64) -> String {
     const UNITS: [&str; 5] = ["B", "KiB", "MiB", "GiB", "TiB"];
     if bytes < 1024 {
