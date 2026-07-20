@@ -81,6 +81,8 @@ Commands:
   dash      Dashboard (KPIs + tabela) das VMs — TUI interactivo, ou `--once` snapshot
   init      Inicializa um projecto com manifesto de VM — ficheiros JÁ PREENCHIDOS (imagens incluídas), prontos a usar sem editar nada
   create    Cria (ou auto-recupera) uma VM
+  pull      Pull a golden VM image from an OCI registry — with no argument, the OFFICIAL Delonix image (ready for `vm create`/`cluster kubeadm`)
+  push      Push a local golden VM image to an OCI registry (`vm push &lt;name&gt; &lt;target&gt;`)
   ls        Lista as VMs
   status    Estado actual (reconcilia liveness/IP com o backend)
   describe  Detalhe legível de uma ou mais VMs, ao estilo `kubectl describe` (para humanos; use `status` para a vista compacta de sempre). Inclui o estado AO VIVO — `delonix_vm::status` reconcilia liveness/IP com o backend
@@ -95,14 +97,14 @@ Options:
 <h2 id='create'><code>vm create</code></h2>
 <div class='help'><pre><code>Cria (ou auto-recupera) uma VM
 
-Usage: delonix-x86_64-v3-linux vm create [OPTIONS] --disk &lt;DISK&gt; &lt;NAME&gt;
+Usage: delonix-x86_64-v3-linux vm create [OPTIONS] &lt;NAME&gt;
 
 Arguments:
   &lt;NAME&gt;  
 
 Options:
       --disk &lt;DISK&gt;
-          Disco base (qcow2/raw) — vira overlay por-VM
+          Disco base (qcow2/raw) — vira overlay por-VM. Omite para usar a imagem VM dourada local (se houver exactamente uma; `image --vm ls`)
       --l18n &lt;en|pt&gt;
           Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
       --vcpus &lt;VCPUS&gt;
@@ -110,7 +112,7 @@ Options:
       --memory &lt;MEMORY&gt;
           Memória (`&quot;2G&quot;`/`&quot;1024M&quot;`) [default: 1G]
       --network &lt;NETWORK&gt;
-          Rede do ingress para o tap (`delonix network create` primeiro) [default: bridge]
+          Ingress network for the tap (default: the system ingress network; a custom network must be created first with `delonix network create`) [default: ingress]
       --kernel &lt;KERNEL&gt;
           Kernel para direct boot
       --initrd &lt;INITRD&gt;
