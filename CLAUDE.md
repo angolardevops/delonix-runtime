@@ -737,6 +737,28 @@ Ver [docs/RELATORIO-PRE-PRODUCAO.md](docs/RELATORIO-PRE-PRODUCAO.md) para a bate
   no repo, confirmado por grep). É uma mudança de filosofia (o produto é daemonless por desenho)
   e um dataplane novo de raiz — meses de trabalho de um crate dedicado, não uma sessão.
 
+## i18n (fonte EN + catálogo pt.po embutido) — `cmd/po.rs`
+
+Desde a v0.5.0, **a fonte de strings de utilizador é 100% EN** e as traduções vivem
+num catálogo gettext embutido (`crates/delonix-runtime-bin/data/pt.po`, 171 msgids),
+activado por `--l18n=pt`/`DELONIX_L18N=pt`. Regras para não regredir:
+
+- **String nova de UI = EN no código + entrada no `pt.po`.** Nunca voltar aos pares
+  inline `tr(en, pt)` (morreram na fase 3a) nem a `if is_pt()` manuais.
+- `po::t(&'static str)` para strings fixas; `po::tf(template, &[(nome, valor)])` para
+  interpoladas — o `format!` exige literais, logo traduz-se o TEMPLATE com
+  placeholders NOMEADOS (`{port}`) e substitui-se depois (nomeados de propósito:
+  uma tradução pode reordená-los).
+- **O help do clap traduz-se em runtime**: a língua decide-se com `po::peek_lang()`
+  ANTES do parse (o help gera-se durante), e `po::translate_help` reescreve
+  about/help do `Command` inteiro. Armadilha conhecida: o derive REMOVE o ponto
+  final do help curto — `t_help` compensa (lookup com e sem `.`).
+- Parser `.po` próprio (~50 linhas, testado) — sem crate `gettext` (regra de
+  supply-chain). `parse_po` cobre msgid/msgstr multi-linha + escapes.
+- **Pendente**: mensagens de erro dos crates de MOTOR (não podem depender do bin;
+  a via desenhada é traduzir no printer de erros do `main.rs` por lookup do texto
+  EN) e os comentários dos 8 crates PT→EN (tarefa própria).
+
 ## Regra de ouro: fronteira com o PaaS
 
 Este código **não pode depender de nada privado**. Antes de qualquer commit:
