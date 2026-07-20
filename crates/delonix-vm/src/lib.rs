@@ -456,6 +456,26 @@ impl VmBackend for CloudHypervisorBackend {
 
 /// Arranca o `cloud-hypervisor` DENTRO do netns de infra, em background, e devolve
 /// o PID (real, visível no host).
+/// Localiza o `rust-hypervisor-fw` que o instalador coloca (ou um apontado por
+/// `$DELONIX_HYPERVISOR_FW`), para o Cloud Hypervisor bootar cloud images sem
+/// `--firmware` explícito. Devolve o 1.º caminho existente, ou `None`.
+fn default_ch_firmware() -> Option<String> {
+    if let Ok(p) = std::env::var("DELONIX_HYPERVISOR_FW") {
+        if !p.is_empty() && Path::new(&p).exists() {
+            return Some(p);
+        }
+    }
+    for p in [
+        "/usr/local/share/delonix/hypervisor-fw",
+        "/usr/share/delonix/hypervisor-fw",
+    ] {
+        if Path::new(p).exists() {
+            return Some(p.to_string());
+        }
+    }
+    None
+}
+
 fn boot_ch(vmdir: &Path, cfg: &VmConfig, overlay: &str, tap: &str, mac: &str) -> Result<i32> {
     let join = infra::infra_join_argv().ok_or_else(|| Error::Runtime {
         context: "vm",
@@ -487,12 +507,16 @@ fn boot_ch(vmdir: &Path, cfg: &VmConfig, overlay: &str, tap: &str, mac: &str) ->
                 .clone()
                 .unwrap_or_else(|| "console=ttyS0 root=/dev/vda1 rw".into()),
         );
-    } else if let Some(fw) = &cfg.firmware {
+    } else if let Some(fw) = cfg.firmware.clone().or_else(default_ch_firmware) {
+        // Sem kernel nem firmware explícito: uma cloud image (a golden) precisa
+        // de firmware para o CH bootar (ao contrário do libvirt, que cai para
+        // BIOS). Resolve-se o `rust-hypervisor-fw` que o instalador fornece —
+        // assim `vm create` com a golden arranca sem flags.
         ch.push("--firmware".into());
-        ch.push(fw.clone());
+        ch.push(fw);
     } else {
         return Err(Error::Invalid(
-            "VM without 'kernel' or 'firmware' — Cloud Hypervisor needs one to boot (e.g. firmware: rust-hypervisor-fw for cloud images)".into(),
+            "VM without 'kernel' or 'firmware' and no rust-hypervisor-fw found — reinstall (curl install.sh) to fetch it, pass `--firmware <path>`, or use `--backend libvirt`".into(),
         ));
     }
     ch.push("--disk".into());

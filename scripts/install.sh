@@ -399,6 +399,28 @@ if [ "$WITH_VM" = 1 ]; then
   else
     skip vm cloud-hypervisor
   fi
+  # Firmware do Cloud Hypervisor (rust-hypervisor-fw): o CH não tem BIOS, por
+  # isso uma cloud image (a golden `delonix vm pull`) só arranca com firmware.
+  # O motor procura-o em /usr/local/share/delonix/hypervisor-fw — sem ele,
+  # `vm create` de uma cloud image falharia. Binário minúsculo (~150 KB).
+  FW_DEST=/usr/local/share/delonix/hypervisor-fw
+  if [ ! -e "$FW_DEST" ]; then
+    FW_URL="https://github.com/cloud-hypervisor/rust-hypervisor-firmware/releases/latest/download/hypervisor-fw"
+    fetch_fw() {
+      $SUDO mkdir -p /usr/local/share/delonix \
+        && curl -fsSL -o /tmp/hypervisor-fw.$$ "$FW_URL" \
+        && $SUDO install -m 0644 /tmp/hypervisor-fw.$$ "$FW_DEST"
+    }
+    if spin vm hypervisor-fw "fetching the Cloud Hypervisor firmware (boots cloud images)..." fetch_fw; then
+      rm -f /tmp/hypervisor-fw.$$
+      stepok vm "hypervisor-fw -> $FW_DEST"
+    else
+      rm -f /tmp/hypervisor-fw.$$
+      warn "could not fetch rust-hypervisor-fw — `vm create` of a cloud image will need --firmware or --backend libvirt"
+    fi
+  else
+    skip vm hypervisor-fw
+  fi
   optional_dep vm virsh "libvirt-clients|libvirt-client|libvirt"                    "libvirt VM backend (fallback)"
   if ! command -v qemu-system-x86_64 >/dev/null 2>&1 && [ ! -e /usr/libexec/qemu-kvm ]; then
     step vm qemu-kvm "installing..."
