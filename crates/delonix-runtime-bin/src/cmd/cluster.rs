@@ -711,18 +711,20 @@ fn vm_names(cluster_name: &str, role: &str, count: u32) -> Vec<String> {
 /// Resolve a tag da imagem VM dourada a usar: explícita, ou a única existente
 /// localmente (erro claro se houver 0 ou mais de 1 — nunca escolhe às cegas
 /// entre várias).
-fn resolve_vm_image(store: &VmImageStore, explicit: Option<String>) -> Result<String> {
+pub(crate) fn resolve_vm_image(store: &VmImageStore, explicit: Option<String>) -> Result<String> {
     if let Some(tag) = explicit {
         return Ok(tag);
     }
     let mut images = store.list()?;
     match images.len() {
         0 => Err(Error::Invalid(
-            "sem imagens VM locais — corre `delonix image --vm build` primeiro, ou passa --vm-image <tag>".into(),
+            super::po::t("no local VM images — run `delonix image --vm build` (or `pull`) first, or pass the image/disk explicitly")
+                .into(),
         )),
         1 => Ok(images.remove(0).name),
-        n => Err(Error::Invalid(format!(
-            "há {n} imagens VM locais — especifica qual usar com --vm-image <tag> (`delonix image --vm ls`)"
+        n => Err(Error::Invalid(super::po::tf(
+            "{n} local VM images — say which one to use (`delonix image --vm ls`)",
+            &[("n", &n.to_string())],
         ))),
     }
 }

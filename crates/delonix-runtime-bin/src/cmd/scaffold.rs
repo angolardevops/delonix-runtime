@@ -335,9 +335,23 @@ pub(crate) fn init(target: Target, o: &InitOpts) -> Result<()> {
     }
     // Sem `--template` num TTY interactivo: abre o menu. Em não-TTY (scripts/CI)
     // cai no scaffold genérico, como sempre.
+    // O menu/flag de templates é de APPS EM CONTAINERS (django/nginx/...): só
+    // faz sentido em `container init`/`stack init`. Em `vm init`/`cluster init`
+    // o utilizador quer o scaffold do ALVO — antes disto, escolher um template
+    // em `vm init` construía e arrancava um CONTAINER (visto ao vivo: gunicorn
+    // a correr onde se esperava uma VM).
+    let templates_apply = matches!(target, Target::Container | Target::Stack);
+    if !templates_apply && o.template.is_some() && o.template.as_deref() != Some("list") {
+        return Err(delonix_runtime_core::Error::Invalid(
+            super::po::t(
+                "app templates scaffold containerized apps — use `delonix stack init --template <t>`; this command scaffolds a VM/cluster project",
+            )
+            .into(),
+        ));
+    }
     let chosen: Option<String> = match &o.template {
         Some(t) => Some(t.clone()),
-        None if stdin_is_tty() => choose_template_interactive()?,
+        None if templates_apply && stdin_is_tty() => choose_template_interactive()?,
         None => None,
     };
     // Um template (via flag ou menu) → projecto completo; opcionalmente

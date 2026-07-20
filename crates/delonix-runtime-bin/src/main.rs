@@ -192,7 +192,7 @@ fn long_version_text() -> &'static str {
          \n\
          {try_}:\n\
          \x20 delonix container run -d -p 8080:80 nginx   # {c1}\n\
-         \x20 delonix vm create --name dev ...            # {c2}\n\
+         \x20 delonix vm create dev                       # {c2}\n\
          \x20 delonix cluster create                      # {c3}\n\
          \x20 delonix stack init && delonix stack apply   # {c4}\n\
          \x20 delonix dash                                # {c5}\n\

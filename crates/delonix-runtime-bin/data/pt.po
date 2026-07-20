@@ -1307,4 +1307,13 @@ msgid "unsupported VM action: {other}"
 msgstr "acção de VM não suportada: {other}"
 
 msgid "empty image"
-msgstr "image vazia"
+msgstr "imagem vazia"
+
+msgid "app templates scaffold containerized apps — use `delonix stack init --template <t>`; this command scaffolds a VM/cluster project"
+msgstr "os templates de app criam apps em containers — usa `delonix stack init --template <t>`; este comando cria um projecto de VM/cluster"
+
+msgid "no local VM images — run `delonix image --vm build` (or `pull`) first, or pass the image/disk explicitly"
+msgstr "sem imagens VM locais — corre `delonix image --vm build` (ou `pull`) primeiro, ou passa a imagem/disco explicitamente"
+
+msgid "{n} local VM images — say which one to use (`delonix image --vm ls`)"
+msgstr "há {n} imagens VM locais — especifica qual usar (`delonix image --vm ls`)"

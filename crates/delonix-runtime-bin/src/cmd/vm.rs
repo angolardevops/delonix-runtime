@@ -139,9 +139,10 @@ pub enum VmCmd {
     /// Cria (ou auto-recupera) uma VM.
     Create {
         name: String,
-        /// Disco base (qcow2/raw) — vira overlay por-VM.
+        /// Disco base (qcow2/raw) — vira overlay por-VM. Omite para usar a
+        /// imagem VM dourada local (se houver exactamente uma; `image --vm ls`).
         #[arg(long)]
-        disk: String,
+        disk: Option<String>,
         #[arg(long, default_value_t = 1)]
         vcpus: u32,
         /// Memória (`"2G"`/`"1024M"`).
@@ -416,6 +417,17 @@ pub fn run(action: VmCmd) -> Result<()> {
             net_mode,
             bridge,
         } => {
+            // Sem --disk: a imagem VM dourada única (mesma resolução do
+            // `cluster kubeadm` — 0 ou várias imagens dão erro claro, nunca
+            // uma escolha às cegas).
+            let disk = match disk {
+                Some(d) => d,
+                None => {
+                    let store = super::vmimage::VmImageStore::open(super::util::state_root())?;
+                    let tag = super::cluster::resolve_vm_image(&store, None)?;
+                    store.qcow2_path(&tag).to_string_lossy().into_owned()
+                }
+            };
             let seed = match seed {
                 Some(s) => Some(s),
                 None if hostname.is_some() || !ssh_keys.is_empty() || user_data.is_some() => {
