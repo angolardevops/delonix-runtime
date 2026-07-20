@@ -98,8 +98,9 @@ pub enum SnapshotCmd {
     },
     /// Lista os snapshots de um volume.
     Ls {
+        /// Volume a consultar (omite para os snapshots de TODOS).
         #[arg(add = ArgValueCandidates::new(super::complete::volumes))]
-        volume: String,
+        volume: Option<String>,
     },
     /// Repõe um snapshot NO volume (substitui os dados actuais — pára os
     /// consumidores primeiro).
@@ -328,15 +329,25 @@ fn cmd_snapshot(store: &VolumeStore, action: SnapshotCmd) -> Result<()> {
             );
         }
         SnapshotCmd::Ls { volume } => {
-            store.inspect(&volume)?; // valida que o volume existe
-            let snaps = store.list_snapshots(&volume)?;
-            let mut t = super::output::Table::new(&["SNAPSHOT", "SIZE", "CREATED"]).right_align(1);
-            for (n, size, ts) in snaps {
-                t.row(vec![
-                    n,
-                    super::output::fmt_size(size),
-                    super::output::fmt_local(ts.max(0) as u64),
-                ]);
+            // Sem argumento: snapshots de TODOS os volumes, com coluna VOLUME.
+            let vols: Vec<String> = match volume {
+                Some(v) => {
+                    store.inspect(&v)?; // valida que o volume existe
+                    vec![v]
+                }
+                None => store.list()?.into_iter().map(|v| v.name).collect(),
+            };
+            let mut t = super::output::Table::new(&["VOLUME", "SNAPSHOT", "SIZE", "CREATED"])
+                .right_align(2);
+            for v in vols {
+                for (n, size, ts) in store.list_snapshots(&v)? {
+                    t.row(vec![
+                        v.clone(),
+                        n,
+                        super::output::fmt_size(size),
+                        super::output::fmt_local(ts.max(0) as u64),
+                    ]);
+                }
             }
             t.print();
         }

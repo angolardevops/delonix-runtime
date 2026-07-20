@@ -202,8 +202,9 @@ pub enum VmCmd {
     Ls,
     /// Estado actual (reconcilia liveness/IP com o backend).
     Status {
+        /// VM a consultar (omite para o estado de TODAS).
         #[arg(add = ArgValueCandidates::new(super::complete::vms))]
-        name: String,
+        name: Option<String>,
     },
     /// Detalhe legível de uma ou mais VMs, ao estilo `kubectl describe` (para
     /// humanos; use `status` para a vista compacta de sempre). Inclui o estado
@@ -471,11 +472,26 @@ pub fn run(action: VmCmd) -> Result<()> {
         }
         VmCmd::Describe { names } => cmd_describe(&base, &names),
         VmCmd::Status { name } => {
-            let vm = delonix_vm::status(&base, &name)?;
-            println!("nome:     {}", vm.name);
-            println!("status:   {:?}", vm.status);
-            println!("backend:  {}", vm.backend);
-            println!("ip:       {}", vm.ip.unwrap_or_default());
+            // Sem argumento: o estado reconciliado de TODAS (consistente com
+            // `ingress ls`/`egress ls` sem argumento).
+            let names: Vec<String> = match name {
+                Some(n) => vec![n],
+                None => delonix_vm::list(&base)?
+                    .into_iter()
+                    .map(|v| v.name)
+                    .collect(),
+            };
+            let mut t = output::Table::new(&["NAME", "STATUS", "BACKEND", "IP"]);
+            for n in names {
+                let vm = delonix_vm::status(&base, &n)?;
+                t.row(vec![
+                    vm.name,
+                    format!("{:?}", vm.status),
+                    vm.backend,
+                    vm.ip.unwrap_or_default(),
+                ]);
+            }
+            t.print();
             Ok(())
         }
         VmCmd::Stop { name } => {

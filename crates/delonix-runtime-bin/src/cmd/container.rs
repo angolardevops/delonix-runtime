@@ -1733,17 +1733,19 @@ fn cmd_ps(store: &Store, all: bool, quiet: bool) -> Result<()> {
 /// Apply `f` to each ID, continuing with the rest if one fails (docker
 /// semantics: `rm a b c` removes what it can and returns the first error at the end).
 fn for_each_id(ids: &[String], mut f: impl FnMut(&str) -> Result<()>) -> Result<()> {
-    let mut first_err = None;
+    let mut failed = false;
     for id in ids {
         if let Err(e) = f(id) {
+            // Cada falha sai AQUI com o contexto do id; devolver o erro fazia o
+            // main imprimi-lo segunda vez, sem contexto (mensagem duplicada).
             eprintln!("{id}: {e}");
-            first_err.get_or_insert(e);
+            failed = true;
         }
     }
-    match first_err {
-        Some(e) => Err(e),
-        None => Ok(()),
+    if failed {
+        std::process::exit(1);
     }
+    Ok(())
 }
 
 /// `--restart` with `-d`: creates the container inside a **detached supervisor**
@@ -2273,7 +2275,15 @@ fn cmd_stop(store: &Store, id: &str, time: u64) -> Result<()> {
     });
     // The pid MUST be read before `stop`, which sets `container.pid = None`.
     let pid = c.pid;
-    runtime::stop(store, &mut c, time)?;
+    // Idempotent like docker: stopping an already-stopped container succeeds
+    // (it broke the natural `stop X && rm X` idiom, RC=1 for a no-op).
+    if let Err(e) = runtime::stop(store, &mut c, time) {
+        if matches!(e, delonix_runtime_core::Error::NotRunning(_)) {
+            println!("{}", c.name);
+            return Ok(());
+        }
+        return Err(e);
+    }
     unpublish_ports(&c, pid);
     delonix_runtime_core::events::emit(
         &super::util::state_root(),
