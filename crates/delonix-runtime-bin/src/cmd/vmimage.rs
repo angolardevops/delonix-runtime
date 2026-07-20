@@ -262,7 +262,24 @@ pub(crate) fn cmd_push(store: &VmImageStore, name: &str, target: &str) -> Result
 }
 
 pub(crate) fn cmd_pull(store: &VmImageStore, source: &str, name: Option<String>) -> Result<()> {
-    let data = delonix_image::registry::pull_oci_artifact(&state_root(), source)?;
+    // Barra de progresso do download (a golden tem centenas de MB): o motor
+    // reporta (bytes, total) a cada 64KB; redesenhamos no máximo a cada ~2MB
+    // para não martelar o terminal. Só desenha em tty (ver `output`).
+    let label = format!("[vm pull] {source}");
+    let last = std::cell::Cell::new(0u64);
+    let on_progress = move |done: u64, total: Option<u64>| {
+        let finished = total.map(|t| done >= t).unwrap_or(false);
+        if finished || done.wrapping_sub(last.get()) >= 2 * 1024 * 1024 {
+            last.set(done);
+            super::output::progress_bar(&label, done, total);
+        }
+    };
+    let data = delonix_image::registry::pull_oci_artifact_with_progress(
+        &state_root(),
+        source,
+        Some(&on_progress),
+    )?;
+    super::output::progress_done();
     let name = name.unwrap_or_else(|| source.rsplit('/').next().unwrap_or(source).to_string());
     let digest = format!("sha256:{}", hex_sha256(&data));
     std::fs::write(store.qcow2_path(&name), &data)?;
