@@ -4,6 +4,67 @@
 > (regenerado automaticamente pelo pipeline de release a cada tag publicada).
 > Não editar à mão — edita a nota da release respectiva.
 
+## v0.7.21 — pods reais multi-container (`kind: Pod`), netns + IPC + UTS partilhados
+
+Culminação (e correcção + validação E2E) da série de **pods reais multi-container**
+iniciada em v0.7.19/v0.7.20: N containers a partilhar as namespaces de um pod, como
+no Kubernetes.
+
+### `delonix pod` / `kind: Pod` — N containers, namespaces partilhadas
+
+Um pod agrupa N containers que **partilham as namespaces do pod** e vivem/morrem como
+uma unidade:
+
+- **Rede (netns)** — mesmo IP, `localhost` entre si (Fase 1, v0.7.19).
+- **IPC** (System V/POSIX shm/queues) + **UTS** (hostname) — reais e privadas ao pod
+  (Fase 2, v0.7.20).
+- **PID** (`shareProcessNamespace`) — o campo está no schema; a implementação é a fatia
+  seguinte.
+
+Superfície: `delonix pod create -f <manifesto>` / `ls` / `describe` / `rm` / `logs`, e
+**`kind: Pod`** no manifesto (mesmo schema `spec.containers[]` do `kind: Container`, mas
+com N containers) + grupo `pods:` no `kind: Stack` + `--dry-run`.
+
+**Como funciona** (rootless, daemonless): o pod tem uma netns SDN nomeada no holder
+(`pod-<nome>`, com IP na `delonix0`); cada container junta-a via o re-exec `nsenter …
+ip netns exec` (`--pod`). O 1.º container segura o ipc/uts; os restantes fazem `setns`
+de `/proc/<pid>/ns/{ipc,uts}` — possível em rootless **porque o re-exec já os põe no
+userns do holder, onde o `setns` tem privilégio**. Membership derivada dos labels
+(`delonix.io/pod=<nome>`), sem registo novo — como `cluster`/`stack`. Tapa também o gap
+do CRI root-mode (que chamava um `delonix pod create/rm` inexistente).
+
+### Validação E2E (rootless, real)
+
+Pod de 2 containers `alpine`, leitura directa de `/proc/<pid>/ns/*` no host:
+
+| namespace | container a | container b | host | |
+|---|---|---|---|---|
+| net | `4026533752` | `4026533752` | `4026531833` | **partilhada** |
+| ipc | `4026533818` | `4026533818` | `4026531839` | **partilhada** |
+| uts | `4026533817` | `4026533817` | `4026531838` | **partilhada** |
+| pid | `…819` | `…822` | `…836` | separada (Fase 3) |
+
+hostname e IP iguais nos dois; `pod rm -f` limpa tudo sem tocar noutros containers. Ou
+seja: o `setns` de IPC/UTS através do userns do holder **funciona mesmo em rootless**.
+
+### Correcção (o que motivou esta release)
+
+- **`pod rm` propaga falhas** em vez de sucesso silencioso — apanhado pelo E2E: `pod rm`
+  (sem `-f`) dizia `removed` mas os containers continuavam a correr (o `cmd_rm` sem force
+  recusa um container a correr e o erro era engolido). Agora reporta a falha com erro
+  claro (aponta para `pod rm -f`) e só desmonta a netns partilhada quando **todos** os
+  membros saem — coerente com o invariante "sem falha silenciosa".
+
+### Limitações conhecidas
+
+- **PID partilhado (`shareProcessNamespace`)** ainda não implementado — obriga a
+  reestruturar o `container_init` (`setns(pid)` + `fork`), fatia dedicada seguinte.
+- `delonix container exec` **não entra na ipc-ns** do container (gap pré-existente do
+  `exec`, não dos pods) — a partilha de IPC do pod é real na mesma (validada host-side).
+- `--expose` (auto-registo no proxy L7) por-pod ainda não ligado aos membros.
+
+---
+
 ## v0.7.18 — `vm bridge`: VM↔container por IP directo (EXPERIMENTAL, root, opt-in)
 
 ### VM — `delonix vm bridge`/`unbridge`
