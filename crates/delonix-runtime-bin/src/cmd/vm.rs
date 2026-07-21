@@ -503,7 +503,7 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
                     name,
                     spec.hostname.as_deref(),
                     &spec.ssh_keys,
-                    spec.user_data.as_deref(),
+                    spec.user_data.as_deref().map(std::path::Path::new),
                     &vm_volumes,
                 )?
                 .to_string_lossy()
