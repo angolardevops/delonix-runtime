@@ -1,26 +1,26 @@
-//! Handlers dos re-exec **mapeados** (`__rmtree`, `__volsnap`) — as metades que
-//! faltavam ao contrato do próprio motor.
+//! Handlers for the **mapped** re-execs (`__rmtree`, `__volsnap`) — the halves
+//! that were missing from the engine's own contract.
 //!
-//! # Porque isto existe
+//! # Why this exists
 //!
-//! Em rootless com subuid, os ficheiros escritos por um container pertencem a
-//! uids **mapeados** (ex.: uid 0 do container → 100000 no host). O utilizador
-//! real não os consegue apagar nem ler. A solução (a mesma do `podman unshare`):
-//! `delonix-runtime` faz fork de um filho num user namespace, mapeia-lhe o
-//! intervalo de subuid com `newuidmap`, e o filho — já root NESSE userns, logo
-//! dono efectivo dos subuids — re-executa `delonix __rmtree <path>` ou
-//! `delonix __volsnap <modo> <data> <tarball>`.
+//! In rootless with subuid, the files a container writes belong to **mapped**
+//! uids (e.g. the container's uid 0 → 100000 on the host). The real user cannot
+//! delete or read them. The solution (the same as `podman unshare`):
+//! `delonix-runtime` forks a child in a user namespace, maps its subuid range
+//! with `newuidmap`, and the child — now root IN THAT userns, hence the
+//! effective owner of the subuids — re-executes `delonix __rmtree <path>` or
+//! `delonix __volsnap <mode> <data> <tarball>`.
 //!
-//! **O contrato estava meio implementado no repo público**: a biblioteca
-//! (`delonix_runtime::{remove_tree_mapped, reexec_mapped}`) fazia o re-exec, mas
-//! os subcomandos só existiam na CLI PRIVADA do `delonix-paas`. Um utilizador do
-//! `delonix` público apanhava o filho a morrer com "unrecognized subcommand
-//! '__rmtree'" (rc=2) — e como o `remove_tree_mapped` nem sequer olhava para o
-//! exit status, a árvore ficava por apagar **em silêncio**. Verificado a correr:
+//! **The contract was half-implemented in the public repo**: the library
+//! (`delonix_runtime::{remove_tree_mapped, reexec_mapped}`) did the re-exec, but
+//! the subcommands only existed in `delonix-paas`'s PRIVATE CLI. A user of the
+//! public `delonix` caught the child dying with "unrecognized subcommand
+//! '__rmtree'" (rc=2) — and since `remove_tree_mapped` did not even look at the
+//! exit status, the tree was left unremoved **silently**. Verified running:
 //! `delonix __rmtree /x` → rc=2.
 //!
-//! Não são subcomandos públicos: o `main` intercepta-os antes do clap (como o
-//! `netns holder`), e o utilizador nunca os invoca à mão.
+//! They are not public subcommands: `main` intercepts them before clap (like
+//! `netns holder`), and the user never invokes them by hand.
 
 use std::path::Path;
 
@@ -33,13 +33,13 @@ fn io_err(context: &'static str) -> impl Fn(std::io::Error) -> Error {
     }
 }
 
-/// `__rmtree <path>` — apaga uma árvore inteira, incluindo ficheiros de subuid.
+/// `__rmtree <path>` — deletes an entire tree, including subuid files.
 ///
-/// Já corremos como root num userns mapeado (o pai usou `newuidmap`), por isso um
-/// `remove_dir_all` normal chega: dentro deste userns somos donos dos subuids.
+/// We already run as root in a mapped userns (the parent used `newuidmap`), so a
+/// normal `remove_dir_all` is enough: inside this userns we own the subuids.
 pub fn rmtree(path: &Path) -> Result<()> {
     std::fs::remove_dir_all(path).or_else(|e| {
-        // Já não existir é sucesso — o objectivo é "não estar lá".
+        // Already not existing is success — the goal is "not being there".
         if e.kind() == std::io::ErrorKind::NotFound {
             Ok(())
         } else {
@@ -48,10 +48,10 @@ pub fn rmtree(path: &Path) -> Result<()> {
     })
 }
 
-/// `__volsnap create <data> <tarball>` — tar.gz do `_data` de um volume.
+/// `__volsnap create <data> <tarball>` — tar.gz of a volume's `_data`.
 ///
-/// Escreve num `.tmp` e faz `rename`: um crash a meio não deixa um snapshot
-/// truncado a fingir-se de bom.
+/// Writes to a `.tmp` and does a `rename`: a crash midway does not leave a
+/// truncated snapshot pretending to be good.
 pub fn volsnap_create(data: &Path, tarball: &Path) -> Result<()> {
     if let Some(dir) = tarball.parent() {
         std::fs::create_dir_all(dir).map_err(io_err("volume snapshot"))?;
@@ -60,7 +60,7 @@ pub fn volsnap_create(data: &Path, tarball: &Path) -> Result<()> {
     let f = std::fs::File::create(&tmp).map_err(io_err("volume snapshot"))?;
     let enc = flate2::write::GzEncoder::new(f, flate2::Compression::default());
     let mut b = tar::Builder::new(enc);
-    b.follow_symlinks(false); // symlinks entram como symlinks, não o alvo
+    b.follow_symlinks(false); // symlinks go in as symlinks, not the target
     b.append_dir_all(".", data)
         .map_err(io_err("volume snapshot"))?;
     b.into_inner()
@@ -70,11 +70,11 @@ pub fn volsnap_create(data: &Path, tarball: &Path) -> Result<()> {
     Ok(())
 }
 
-/// `__volsnap restore <data> <tarball>` — repõe o `_data` a partir do tar.gz.
+/// `__volsnap restore <data> <tarball>` — restores `_data` from the tar.gz.
 ///
-/// Limpa o CONTEÚDO e não o próprio `_data` (mantém o inode/mountpoint: pode
-/// estar montado num container a correr). Donos e permissões preservados — no
-/// userns mapeado o chown dos subuids funciona.
+/// Clears the CONTENTS and not `_data` itself (keeps the inode/mountpoint: it
+/// may be mounted in a running container). Owners and permissions preserved — in
+/// the mapped userns the subuid chown works.
 pub fn volsnap_restore(data: &Path, tarball: &Path) -> Result<()> {
     let f = std::fs::File::open(tarball).map_err(io_err("volume restore"))?;
     for e in std::fs::read_dir(data).map_err(io_err("volume restore"))? {
@@ -93,21 +93,21 @@ pub fn volsnap_restore(data: &Path, tarball: &Path) -> Result<()> {
     Ok(())
 }
 
-/// `__buildtar <rootfs> <out>` — empacota um rootfs FLAT (build rootless) num
-/// tar NÃO-comprimido, corrido DENTRO do userns mapeado.
+/// `__buildtar <rootfs> <out>` — packs a FLAT rootfs (rootless build) into an
+/// UNCOMPRESSED tar, run INSIDE the mapped userns.
 ///
-/// Porque mapeado: um `RUN` com `apt-get install` (dpkg) deixa ficheiros de
-/// subuid com modos restritos (`/var/cache/ldconfig/aux-cache` 0600, dirs
-/// `.../partial` 0700). O `commit_flat_rootfs` a empacotar como utilizador REAL
-/// não os consegue ler → `Permission denied` e o build inteiro falha no fim
-/// (depois de todos os RUN passarem — o pior sítio para falhar). Aqui somos root
-/// no userns (donos efectivos dos subuids), logo lemos tudo; e a tar regista uid
-/// 0, não o número do subuid — mais correcto para um layer OCI.
+/// Why mapped: a `RUN` with `apt-get install` (dpkg) leaves subuid files with
+/// restrictive modes (`/var/cache/ldconfig/aux-cache` 0600, `.../partial` dirs
+/// 0700). `commit_flat_rootfs` packing as the REAL user cannot read them →
+/// `Permission denied` and the whole build fails at the end (after every RUN
+/// passes — the worst place to fail). Here we are root in the userns (effective
+/// owners of the subuids), so we read everything; and the tar records uid 0, not
+/// the subuid number — more correct for an OCI layer.
 ///
-/// Tar NÃO-comprimido de propósito: o `commit_flat_rootfs_from_tar` usa o digest
-/// deste tar como `diff_id` (o OCI exige o digest do tar DEScomprimido). O `out`
-/// fica com modo legível a todos (0644) para o pai — que não é dono do subuid —
-/// o conseguir ler de volta.
+/// UNCOMPRESSED tar on purpose: `commit_flat_rootfs_from_tar` uses this tar's
+/// digest as the `diff_id` (OCI requires the digest of the UNcompressed tar).
+/// `out` is left world-readable (0644) so the parent — which does not own the
+/// subuid — can read it back.
 pub fn buildtar(rootfs: &Path, out: &Path) -> Result<()> {
     if let Some(dir) = out.parent() {
         std::fs::create_dir_all(dir).map_err(io_err("build tar"))?;
@@ -120,7 +120,7 @@ pub fn buildtar(rootfs: &Path, out: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Despacha `__volsnap <modo> <data> <tarball>`.
+/// Dispatches `__volsnap <mode> <data> <tarball>`.
 pub fn volsnap(mode: &str, data: &Path, tarball: &Path) -> Result<()> {
     match mode {
         "create" => volsnap_create(data, tarball),
@@ -153,8 +153,8 @@ mod tests {
 
     #[test]
     fn rmtree_e_idempotente() {
-        // O objectivo é "não estar lá" — apagar o que já não existe é sucesso,
-        // senão um `container rm` repetido falhava sem razão.
+        // The goal is "not being there" — deleting what no longer exists is
+        // success, otherwise a repeated `container rm` would fail for no reason.
         let d = tmpdir("rm-idem");
         std::fs::remove_dir_all(&d).unwrap();
         rmtree(&d).unwrap();
@@ -170,10 +170,10 @@ mod tests {
 
         volsnap_create(&data, &tar).unwrap();
         assert!(tar.exists(), "o snapshot devia existir");
-        // Sem .tmp deixado para trás.
+        // No .tmp left behind.
         assert!(!tar.with_extension("tar.gz.tmp").exists());
 
-        // Mexe no _data e repõe.
+        // Touch _data and restore.
         std::fs::write(data.join("sub/ficheiro"), b"estragado").unwrap();
         std::fs::write(data.join("intruso"), b"a apagar").unwrap();
         volsnap_restore(&data, &tar).unwrap();
@@ -191,8 +191,8 @@ mod tests {
 
     #[test]
     fn volsnap_restore_mantem_o_proprio_data() {
-        // O `_data` pode estar montado num container vivo: limpa-se o conteúdo,
-        // nunca o directório (senão o mount ficava a apontar para um inode morto).
+        // `_data` may be mounted in a live container: the contents are cleared,
+        // never the directory (otherwise the mount would point at a dead inode).
         let base = tmpdir("snap-inode");
         let data = base.join("_data");
         std::fs::create_dir_all(&data).unwrap();
@@ -221,7 +221,7 @@ mod tests {
         buildtar(&rootfs, &out).unwrap();
         assert!(out.exists(), "o tar devia existir");
 
-        // O tar contém as entradas do rootfs (verifica re-lendo).
+        // The tar contains the rootfs entries (verify by re-reading).
         let mut a = tar::Archive::new(std::fs::File::open(&out).unwrap());
         let mut nomes: Vec<String> = a
             .entries()

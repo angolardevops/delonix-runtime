@@ -290,8 +290,8 @@ fn require_sdn_ip(c: &Container) -> Result<String> {
     })
 }
 
-/// `""`, `0.0.0.0/0` e `*` significam todos "de/para qualquer lado" — a
-/// dataplane trata-os igual (ver `fw_chain_body`); normaliza para comparar.
+/// `""`, `0.0.0.0/0` and `*` all mean "from/to anywhere" — the
+/// dataplane treats them alike (see `fw_chain_body`); normalize to compare.
 fn norm_any(s: &str) -> &str {
     if s == "0.0.0.0/0" || s == "*" {
         ""
@@ -300,14 +300,14 @@ fn norm_any(s: &str) -> &str {
     }
 }
 
-/// `true` se dois valores de um campo se sobrepõem no sentido first-match:
-/// iguais, ou um deles é um dos coringas dados. (Aproximação conservadora — não
-/// parseia ranges `n-m`; serve o AVISO de sombra, não a substituição exacta.)
+/// `true` if two values of a field overlap in the first-match sense:
+/// equal, or one is one of the given wildcards. (Conservative approximation — does
+/// not parse `n-m` ranges; serves the shadow WARNING, not exact replacement.)
 fn field_overlaps(a: &str, b: &str, wilds: &[&str]) -> bool {
     a == b || wilds.contains(&a) || wilds.contains(&b)
 }
 
-/// O spec `[proto/]porta` de uma regra, para reproduzir no `ingress rm`.
+/// A rule's `[proto/]port` spec, to reproduce in `ingress rm`.
 fn rule_spec(r: &FwRule) -> String {
     if r.proto.is_empty() || r.proto == "any" {
         r.port.clone()
@@ -334,11 +334,11 @@ fn add_rule(
     let ip = require_sdn_ip(&c)?;
     let mut fw = c.firewall.clone().unwrap_or_default();
     fw.enabled = true;
-    // O ÚLTIMO comando ganha (semântica ufw): uma regra nova para o MESMO match
-    // (dir/proto/porta/origem) SUBSTITUI a existente. Sem isto, `deny 8069`
-    // seguido de `allow 8069` deixava o serviço bloqueado para sempre — as
-    // regras acumulavam e a chain nft é first-match terminal: o deny antigo,
-    // acima, ganhava sempre (bug report real).
+    // The LAST command wins (ufw semantics): a new rule for the SAME match
+    // (dir/proto/port/source) REPLACES the existing one. Without this, `deny 8069`
+    // followed by `allow 8069` left the service blocked forever — the rules
+    // accumulated and the nft chain is first-match terminal: the old deny,
+    // above, always won (real bug report).
     let same_match = |r: &FwRule| {
         r.dir == dir && r.proto == proto && r.port == port && norm_any(&r.src) == norm_any(&src)
     };
@@ -357,10 +357,10 @@ fn add_rule(
         action: action.as_str().to_string(),
         note: note.unwrap_or_default(),
     });
-    // Sombra: uma regra ANTERIOR sobreposta (ex.: `deny any/8069` vs
-    // `allow tcp/8069`) com acção contrária continua a casar primeiro — a regra
-    // nova nunca chega a ser avaliada. Avisar aqui evita o "apliquei o allow e
-    // continua bloqueado" sem explicação.
+    // Shadow: an EARLIER overlapping rule (e.g. `deny any/8069` vs
+    // `allow tcp/8069`) with the opposite action still matches first — the new
+    // rule never gets evaluated. Warning here avoids the "I applied the allow and
+    // it stays blocked" without explanation.
     let shadow = fw
         .rules
         .iter()
@@ -406,10 +406,10 @@ fn add_rule(
     Ok(())
 }
 
-/// Remove regra(s) que casem com `[proto/]porta` (+ CIDR, se dado). Os coringas
-/// do SPEC funcionam como filtro: `rm c 8069` (proto `any`) remove as regras
-/// tcp/udp/any dessa porta; `rm c '*'` remove todas; sem `--from`, qualquer
-/// origem. Complementa o `clear` (tudo-ou-nada) com remoção cirúrgica.
+/// Remove rule(s) matching `[proto/]port` (+ CIDR, if given). The SPEC's
+/// wildcards work as a filter: `rm c 8069` (proto `any`) removes the tcp/udp/any
+/// rules for that port; `rm c '*'` removes all; without `--from`, any source.
+/// Complements `clear` (all-or-nothing) with surgical removal.
 fn remove_rule(
     store: &Store,
     name: &str,
@@ -441,8 +441,8 @@ fn remove_rule(
             c.name
         )));
     }
-    // Mesma regra do `clear`: sem regras e sem políticas explícitas, a firewall
-    // desaparece por inteiro (chain limpa) em vez de ficar um registo vazio.
+    // Same rule as `clear`: with no rules and no explicit policies, the firewall
+    // disappears entirely (clean chain) instead of leaving an empty record.
     let empty = fw.rules.is_empty() && fw.policy_in.is_empty() && fw.policy_out.is_empty();
     if empty {
         infra::clear_firewall(&ip);
@@ -510,7 +510,7 @@ fn list_all(store: &Store, dir: &str) -> Result<()> {
         let last = if dir == "in" {
             c.ports.join(", ")
         } else {
-            // Rede principal + extras (multi-homing) — os alvos da política de egress.
+            // Main network + extras (multi-homing) — the targets of the egress policy.
             let mut nets: Vec<String> = c.network.clone().into_iter().collect();
             nets.extend(c.extra_networks.iter().map(|e| e.network.clone()));
             nets.join(", ")
@@ -608,9 +608,9 @@ fn clear_dir(store: &Store, name: &str, dir: &str) -> Result<()> {
 }
 
 fn egress_net(network: &str, mode: EgressMode, to: Option<String>) -> Result<()> {
-    // A bridge REAL vive no registo do infra (NetDef, `dlxn{:08x}`), NÃO no
-    // NetworkStore (`dlxn{:02x}{:04x}`) — usar a errada faz as regras nft nunca
-    // casarem o tráfego. resolve_net devolve a bridge que o holder criou.
+    // The REAL bridge lives in the infra registry (NetDef, `dlxn{:08x}`), NOT in
+    // the NetworkStore (`dlxn{:02x}{:04x}`) — using the wrong one makes the nft
+    // rules never match traffic. resolve_net returns the bridge the holder created.
     let bridge = infra::resolve_net(network)?.0;
     match mode {
         EgressMode::Allow => {
@@ -654,47 +654,47 @@ fn egress_net(network: &str, mode: EgressMode, to: Option<String>) -> Result<()>
 /// k8s NetworkPolicy.
 #[derive(Deserialize)]
 struct FwDocSpec {
-    /// `container` (default) ou `network`. Em `network` (só `Egress`), o `target`
-    /// é o NOME DE UMA REDE e aplica-se a política de egress por-rede + allowlist
-    /// de CIDR/FQDN + rate-limit L4 — não regras L4 por-container.
+    /// `container` (default) or `network`. In `network` (only `Egress`), the `target`
+    /// is a NETWORK NAME and the per-network egress policy + CIDR/FQDN allowlist +
+    /// L4 rate-limit apply — not per-container L4 rules.
     #[serde(default)]
     scope: Option<String>,
-    /// `container` (default): nome do container. `network`: nome da rede.
+    /// `container` (default): container name. `network`: network name.
     target: String,
     /// `allow` or `deny` when no rule matches. Default `deny` (allowlist).
     #[serde(default, rename = "defaultPolicy")]
     default_policy: Option<String>,
     #[serde(default)]
     rules: Vec<FwDocRule>,
-    // ---- só `scope: network` (Egress por-rede) --------------------------------
-    /// CIDRs permitidos quando `defaultPolicy: deny` (allowlist de saída, além do
-    /// DNS). Traduz para `set_egress_policy_net_allowlist`.
+    // ---- only `scope: network` (per-network Egress) ---------------------------
+    /// CIDRs allowed when `defaultPolicy: deny` (egress allowlist, besides
+    /// DNS). Translates to `set_egress_policy_net_allowlist`.
     #[serde(default, rename = "allowCidrs")]
     allow_cidrs: Vec<String>,
-    /// FQDNs permitidos (e `*.fqdn`), aprendidos AO VIVO do DNS (DNS-snooping).
-    /// Traduz para `set_egress_host` por host.
+    /// FQDNs allowed (and `*.fqdn`), learnt LIVE from DNS (DNS-snooping).
+    /// Translates to `set_egress_host` per host.
     #[serde(default, rename = "fqdnAllowlist")]
     fqdn_allowlist: Vec<String>,
-    /// Protecção L4 (conn-rate/conn-max) — **GLOBAL** ao ingress rootless, não
-    /// por-rede (a API do motor `set_l4_guard` é global). Traduz para `set_l4_guard`.
+    /// L4 protection (conn-rate/conn-max) — **GLOBAL** to the rootless ingress, not
+    /// per-network (the engine API `set_l4_guard` is global). Translates to `set_l4_guard`.
     #[serde(default, rename = "rateLimit")]
     rate_limit: Option<RateLimitSpec>,
 }
 
-/// `spec.rateLimit` — a protecção DDoS L4 do ingress (global). `{connRate: 0,
-/// connMax: 0}` DESLIGA o guard explicitamente (clear_l4_guard).
+/// `spec.rateLimit` — the ingress L4 DDoS protection (global). `{connRate: 0,
+/// connMax: 0}` explicitly TURNS OFF the guard (clear_l4_guard).
 #[derive(Deserialize)]
 struct RateLimitSpec {
-    /// Novas conexões por segundo permitidas.
+    /// New connections per second allowed.
     #[serde(default, rename = "connRate")]
     conn_rate: u32,
-    /// Máximo de conexões concorrentes.
+    /// Maximum concurrent connections.
     #[serde(default, rename = "connMax")]
     conn_max: u32,
 }
 
-/// Nomes aceites no `spec` de `kind: Ingress`/`Egress`, para o aviso de campos
-/// desconhecidos (o `rules[]` é validado pela desserialização de `FwDocRule`).
+/// Names accepted in the `spec` of `kind: Ingress`/`Egress`, for the unknown-field
+/// warning (the `rules[]` is validated by `FwDocRule`'s deserialization).
 pub(crate) const FW_SPEC_FIELDS: &[&str] = &[
     "direction",
     "scope",
@@ -732,9 +732,9 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
     let (_images, store) = open_stores()?;
     apply_kind(&store, docs, "in")?; // kind: Ingress
     apply_kind(&store, docs, "out")?; // kind: Egress
-                                      // kind: FirewallPolicy — a forma UNIFICADA (a direcção vem do `spec.direction`
-                                      // em vez do nome do Kind, resolvendo a confusão de que aqui `Ingress` é
-                                      // firewall L4, não o Ingress L7/HTTP do k8s). Aplica a MESMA lógica.
+                                      // kind: FirewallPolicy — the UNIFIED form (the direction comes from `spec.direction`
+                                      // instead of the Kind name, resolving the confusion that here `Ingress` is
+                                      // L4 firewall, not the k8s L7/HTTP Ingress). Applies the SAME logic.
     for doc in manifest::of_kind(docs, "FirewallPolicy") {
         let dir = match doc.spec.get("direction").and_then(|v| v.as_str()) {
             Some("ingress") => "in",
@@ -752,7 +752,7 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
 }
 
 fn apply_kind(store: &Store, docs: &[ManifestDoc], dir: &str) -> Result<()> {
-    // `dir` "in" → o Kind Ingress; "out" → o Kind Egress.
+    // `dir` "in" → the Ingress Kind; "out" → the Egress Kind.
     let kind = if dir == "in" { "Ingress" } else { "Egress" };
     for doc in manifest::of_kind(docs, kind) {
         apply_fw_doc(store, doc, dir)?;
@@ -760,15 +760,15 @@ fn apply_kind(store: &Store, docs: &[ManifestDoc], dir: &str) -> Result<()> {
     Ok(())
 }
 
-/// Aplica UM documento de firewall (Ingress/Egress/FirewallPolicy) na direcção
-/// `dir` ("in"/"out"). O rótulo nas mensagens usa o Kind real do documento.
+/// Applies ONE firewall document (Ingress/Egress/FirewallPolicy) in the `dir`
+/// direction ("in"/"out"). The label in messages uses the document's real Kind.
 fn apply_fw_doc(store: &Store, doc: &ManifestDoc, dir: &str) -> Result<()> {
     let kind = doc.kind.as_str();
     manifest::warn_unknown_fields(doc, FW_SPEC_FIELDS);
     let spec: FwDocSpec = manifest::spec_of(doc)?;
 
-    // Valida o scope explicitamente — uma gralha (`netowrk`) não pode cair em
-    // silêncio no caminho container e falhar depois com 'container não existe'.
+    // Validate the scope explicitly — a typo (`netowrk`) must not fall silently
+    // into the container path and fail later with 'container does not exist'.
     let scope = spec.scope.as_deref().unwrap_or("container");
     if !matches!(scope, "container" | "network") {
         return Err(Error::Invalid(format!(
@@ -777,8 +777,8 @@ fn apply_fw_doc(store: &Store, doc: &ManifestDoc, dir: &str) -> Result<()> {
         )));
     }
 
-    // scope: network — política de egress POR-REDE (Egress apenas). O `target`
-    // é o nome de uma rede; liga às APIs de motor que só tinham CLI.
+    // scope: network — PER-NETWORK egress policy (Egress only). The `target`
+    // is a network name; wires up the engine APIs that only had a CLI.
     if scope == "network" {
         if dir != "out" {
             return Err(Error::Invalid(format!(
@@ -855,11 +855,11 @@ fn apply_fw_doc(store: &Store, doc: &ManifestDoc, dir: &str) -> Result<()> {
     Ok(())
 }
 
-/// **Núcleo partilhado de ingress por-container**: substitui a direção `in` de um
-/// container (default-policy + regras `allow`), preservando as regras de saída.
-/// Usado pelo `kind: Dependency` ('A conhece B' compila para: em B, ingress
-/// default-deny + allow do IP de A) sem duplicar a construção do `ContainerFw`.
-/// As `allows` já vêm com `dir="in"`.
+/// **Shared per-container ingress core**: replaces a container's `in` direction
+/// (default-policy + `allow` rules), preserving the outbound rules. Used by
+/// `kind: Dependency` ('A knows B' compiles to: on B, ingress default-deny +
+/// allow of A's IP) without duplicating the `ContainerFw` construction.
+/// The `allows` already come with `dir="in"`.
 pub(crate) fn apply_container_ingress(
     store: &Store,
     target: &str,
@@ -875,7 +875,7 @@ pub(crate) fn apply_container_ingress(
     let ip = require_sdn_ip(&c)?;
     let mut fw = c.firewall.clone().unwrap_or_default();
     fw.enabled = true;
-    fw.rules.retain(|r| r.dir != "in"); // declarativo: a direção `in` é substituída
+    fw.rules.retain(|r| r.dir != "in"); // declarative: the `in` direction is replaced
     fw.policy_in = policy.to_string();
     fw.rules.extend(allows.iter().cloned());
     infra::apply_firewall(&c.id, &ip, &fw)?;
@@ -884,10 +884,10 @@ pub(crate) fn apply_container_ingress(
     Ok(())
 }
 
-/// Aplica um `Egress` de `scope: network` — política de egress por-rede + CIDR/
-/// FQDN allowlist + rate-limit L4. Espelha exactamente o `egress net`/`egress
-/// host`/`l4guard` da CLI, mas de forma declarativa. **Estado desejado**: cada
-/// campo é aplicado tal como está no documento.
+/// Applies a `scope: network` `Egress` — per-network egress policy + CIDR/
+/// FQDN allowlist + L4 rate-limit. Mirrors exactly the CLI's `egress net`/`egress
+/// host`/`l4guard`, but declaratively. **Desired state**: each field is applied
+/// exactly as it stands in the document.
 fn apply_network_egress(kind: &str, name: &str, spec: &FwDocSpec) -> Result<()> {
     if !spec.rules.is_empty() {
         return Err(Error::Invalid(format!(
@@ -900,16 +900,16 @@ fn apply_network_egress(kind: &str, name: &str, spec: &FwDocSpec) -> Result<()> 
             "{kind}/{name}: defaultPolicy must be allow|deny"
         )));
     }
-    // A allowlist (CIDR/FQDN) SÓ tem efeito com `deny` — com `allow` a saída fica
-    // aberta e a lista seria descartada em silêncio (o utilizador pensaria que
-    // fechou a rede). Erro claro em vez de aparência falsa de restrição.
+    // The allowlist (CIDR/FQDN) ONLY takes effect with `deny` — with `allow` egress
+    // stays open and the list would be silently discarded (the user would think
+    // they closed the network). Clear error instead of a false show of restriction.
     if policy == "allow" && (!spec.allow_cidrs.is_empty() || !spec.fqdn_allowlist.is_empty()) {
         return Err(Error::Invalid(format!(
             "{kind}/{name}: allowCidrs/fqdnAllowlist só fazem sentido com defaultPolicy: deny (com allow a saída fica aberta)"
         )));
     }
-    // VALIDA TUDO antes de aplicar QUALQUER coisa (falha-antes-de-tocar): um CIDR
-    // ou FQDN inválido a meio não pode deixar o egress em estado parcial.
+    // VALIDATE EVERYTHING before applying ANYTHING (fail-before-touching): an
+    // invalid CIDR or FQDN midway must not leave egress in a partial state.
     for c in &spec.allow_cidrs {
         if !fw_src_ok(c) {
             return Err(Error::Invalid(format!("{kind}/{name}: invalid CIDR '{c}'")));
@@ -923,25 +923,25 @@ fn apply_network_egress(kind: &str, name: &str, spec: &FwDocSpec) -> Result<()> 
         }
     }
 
-    // A bridge REAL vive no registo do infra (não no NetworkStore) — ver egress_net.
+    // The REAL bridge lives in the infra registry (not the NetworkStore) — see egress_net.
     let bridge = infra::resolve_net(&spec.target)?.0;
 
     if policy == "deny" && !spec.allow_cidrs.is_empty() {
-        // deny + allowCidrs → allowlist (nega tudo excepto DNS + estes CIDRs).
+        // deny + allowCidrs → allowlist (denies everything except DNS + these CIDRs).
         let cidrs: Vec<&str> = spec.allow_cidrs.iter().map(String::as_str).collect();
         infra::set_egress_policy_net_allowlist(&bridge, &cidrs)?;
     } else {
-        // allow → sem restrição; deny (sem CIDRs) → nega tudo (só o DNS passa).
+        // allow → no restriction; deny (no CIDRs) → deny everything (only DNS passes).
         infra::set_egress_policy_net(&bridge, policy == "deny")?;
     }
 
-    // FQDN allowlist — aprendida ao vivo do DNS (DNS-snooping), acrescenta a `*.host`.
+    // FQDN allowlist — learnt live from DNS (DNS-snooping), adds `*.host`.
     for host in &spec.fqdn_allowlist {
         infra::set_egress_host(&bridge, host)?;
     }
 
-    // rate-limit L4 (GLOBAL — não por-rede). `{0,0}` = desligar EXPLICITAMENTE o
-    // guard (clear_l4_guard), não "l4guard 0 0" (cuja semântica do zero é ambígua).
+    // L4 rate-limit (GLOBAL — not per-network). `{0,0}` = EXPLICITLY turn off the
+    // guard (clear_l4_guard), not "l4guard 0 0" (whose zero semantics is ambiguous).
     if let Some(rl) = &spec.rate_limit {
         if rl.conn_rate == 0 && rl.conn_max == 0 {
             infra::clear_l4_guard()?;
@@ -967,8 +967,8 @@ fn apply_network_egress(kind: &str, name: &str, spec: &FwDocSpec) -> Result<()> 
     Ok(())
 }
 
-/// Um hostname/FQDN válido para a allowlist de egress (labels alfanuméricas +
-/// hífen, separadas por `.`, ≤253). Recusa o que possa injectar num set nft.
+/// A valid hostname/FQDN for the egress allowlist (alphanumeric labels +
+/// hyphen, separated by `.`, ≤253). Rejects anything that could inject into an nft set.
 fn fw_host_ok(h: &str) -> bool {
     !h.is_empty()
         && h.len() <= 253
@@ -1040,9 +1040,9 @@ mod tests {
         }
     }
 
-    // Regressão do bug report: `deny 8069` seguido de `allow 8069` acumulava e
-    // o deny (acima, first-match) ganhava para sempre. A substituição compara
-    // com norm_any: origem ""/"0.0.0.0/0"/"*" são o mesmo match.
+    // Bug-report regression: `deny 8069` followed by `allow 8069` accumulated and
+    // the deny (above, first-match) won forever. The replacement compares with
+    // norm_any: source ""/"0.0.0.0/0"/"*" are the same match.
     #[test]
     fn norm_any_iguala_as_tres_formas_de_qualquer_origem() {
         assert_eq!(norm_any(""), norm_any("0.0.0.0/0"));
@@ -1052,7 +1052,7 @@ mod tests {
 
     #[test]
     fn field_overlaps_apanha_coringas_e_iguais() {
-        // `deny any/8069` sombreia `allow tcp/8069` — o aviso tem de disparar.
+        // `deny any/8069` shadows `allow tcp/8069` — the warning must fire.
         assert!(field_overlaps("any", "tcp", &["any", ""]));
         assert!(field_overlaps("8069", "8069", &["*", ""]));
         assert!(field_overlaps("*", "8069", &["*", ""]));
@@ -1083,7 +1083,7 @@ mod tests {
 
     #[test]
     fn network_egress_recusa_allowlist_com_policy_allow() {
-        // #1: allow + allowlist = restrição só na aparência → erro claro.
+        // #1: allow + allowlist = restriction only in appearance → clear error.
         let e = apply_network_egress(
             "Egress",
             "e",
@@ -1110,23 +1110,23 @@ mod tests {
 
     #[test]
     fn network_egress_valida_tudo_antes_de_tocar_no_motor() {
-        // Estes erros disparam ANTES do resolve_net (que precisaria do ingress a
-        // correr) — validação pura, testável sem infra.
-        // #3: CIDR inválido.
+        // These errors fire BEFORE resolve_net (which would need the ingress
+        // running) — pure validation, testable without infra.
+        // #3: invalid CIDR.
         assert!(
             apply_network_egress("Egress", "e", &net_spec("deny", &["nope"], &[], vec![]))
                 .unwrap_err()
                 .to_string()
                 .contains("invalid CIDR")
         );
-        // #3: FQDN inválido (injecção).
+        // #3: invalid FQDN (injection).
         assert!(
             apply_network_egress("Egress", "e", &net_spec("deny", &[], &["x;rm -rf"], vec![]))
                 .unwrap_err()
                 .to_string()
                 .contains("hostname inválido")
         );
-        // `rules` em scope network.
+        // `rules` in scope network.
         let rules = vec![FwDocRule {
             proto: None,
             port: "80".into(),
@@ -1147,12 +1147,12 @@ mod tests {
     fn fw_host_ok_aceita_fqdn_valido_recusa_lixo() {
         assert!(fw_host_ok("github.com"));
         assert!(fw_host_ok("sub.dominio-x.example.co"));
-        assert!(!fw_host_ok("")); // vazio
-        assert!(!fw_host_ok("a b.com")); // espaço
-        assert!(!fw_host_ok("x;rm -rf.com")); // injecção
-        assert!(!fw_host_ok("-lead.com")); // label começa por hífen
-        assert!(!fw_host_ok("trail-.com")); // label termina por hífen
-        assert!(!fw_host_ok("a..b")); // label vazio
+        assert!(!fw_host_ok("")); // empty
+        assert!(!fw_host_ok("a b.com")); // space
+        assert!(!fw_host_ok("x;rm -rf.com")); // injection
+        assert!(!fw_host_ok("-lead.com")); // label starts with a hyphen
+        assert!(!fw_host_ok("trail-.com")); // label ends with a hyphen
+        assert!(!fw_host_ok("a..b")); // empty label
     }
 
     #[test]

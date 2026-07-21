@@ -1,39 +1,39 @@
-//! Catálogo partilhado das "receitas" de preparação de um host para
-//! `kubeadm`/`kubelet`/`kubectl` — a parte tecnicamente sensível (repositório
-//! apt assinado, pacotes certos, swap, módulos kernel, sysctls) que TEM de
-//! ficar idêntica entre `cmd::vmimage::build` (aplica-as offline, uma vez,
-//! via `virt-customize`, na imagem dourada) e `cmd::cluster::apply` (aplica-as
-//! ao vivo, via SSH, em hosts arbitrários) — nunca diverge entre os dois
-//! pipelines. Conta (`delonix` user/root password) e instalação do binário
-//! `delonix-cri` ficam FORA daqui, deliberadamente: usam mecanismos nativos
-//! diferentes em cada transporte (flags `--root-password` do virt-customize
-//! vs `chpasswd` por SSH; `--copy-in` vs `scp`) — forçar um shell-command
-//! comum aí não traria benefício real, só risco.
+//! Shared catalogue of the "recipes" for preparing a host for
+//! `kubeadm`/`kubelet`/`kubectl` — the technically sensitive part (signed
+//! apt repository, the right packages, swap, kernel modules, sysctls) that MUST
+//! stay identical between `cmd::vmimage::build` (applies them offline, once,
+//! via `virt-customize`, in the golden image) and `cmd::cluster::apply` (applies them
+//! live, over SSH, on arbitrary hosts) — never diverges between the two
+//! pipelines. The account (`delonix` user/root password) and installation of the
+//! `delonix-cri` binary stay OUT of here, deliberately: they use different native
+//! mechanisms per transport (virt-customize's `--root-password` flags
+//! vs `chpasswd` over SSH; `--copy-in` vs `scp`) — forcing a common
+//! shell-command there would bring no real benefit, only risk.
 
-/// Uma receita idempotente: `check` (comando shell; código de saída 0 = já
-/// satisfeita) + `apply` (comando shell que a satisfaz). `cmd::cluster::apply`
-/// usa `check`+`apply` via SSH em hosts VIVOS; `cmd::vmimage::build` usa
-/// `apply_offline()` — a variante sem efeitos-vivos (`modprobe`/`sysctl
-/// --system`/`swapoff` não fazem sentido no chroot do virt-customize, cujo
-/// kernel é o do HOST de build: só a persistência em /etc interessa, os
-/// efeitos acontecem no primeiro boot da VM).
+/// An idempotent recipe: `check` (shell command; exit code 0 = already
+/// satisfied) + `apply` (shell command that satisfies it). `cmd::cluster::apply`
+/// uses `check`+`apply` over SSH on LIVE hosts; `cmd::vmimage::build` uses
+/// `apply_offline()` — the variant with no live effects (`modprobe`/`sysctl
+/// --system`/`swapoff` make no sense in the virt-customize chroot, whose
+/// kernel is the build HOST's: only persistence in /etc matters, the
+/// effects happen on the VM's first boot).
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct HostRecipe {
     pub name: &'static str,
     pub check: String,
     pub apply: String,
-    /// Variante para customização offline de imagem (None = igual a `apply`).
+    /// Variant for offline image customization (None = same as `apply`).
     pub offline: Option<String>,
 }
 
 impl HostRecipe {
-    /// O comando a usar num build de imagem (offline): só persistência.
+    /// The command to use in an image build (offline): persistence only.
     pub fn apply_offline(&self) -> &str {
         self.offline.as_deref().unwrap_or(&self.apply)
     }
 }
 
-/// A versão do repositório `pkgs.k8s.io` (`stable:/v1.31` por omissão).
+/// The version of the `pkgs.k8s.io` repository (`stable:/v1.31` by default).
 pub(crate) fn k8s_repo_version(k8s_version: Option<&str>) -> String {
     match k8s_version {
         Some(v) if v != "stable" => format!("stable:/v{v}"),
@@ -41,9 +41,9 @@ pub(crate) fn k8s_repo_version(k8s_version: Option<&str>) -> String {
     }
 }
 
-/// Constrói o catálogo — `extra_packages` estende a lista de pacotes
-/// instalados na receita `kubeadm/kubelet/kubectl` sem tocar nesta função
-/// (é a parte "100% parametrizada" do pipeline).
+/// Builds the catalogue — `extra_packages` extends the list of packages
+/// installed in the `kubeadm/kubelet/kubectl` recipe without touching this function
+/// (it is the "100% parameterized" part of the pipeline).
 pub(crate) fn k8s_host_recipes(
     k8s_version: Option<&str>,
     extra_packages: &[String],
@@ -82,13 +82,13 @@ pub(crate) fn k8s_host_recipes(
     all
 }
 
-/// As receitas que NÃO precisam de rede — só persistência em `/etc` (swap,
-/// módulos kernel, sysctls). São o subconjunto que o build **offline** da imagem
-/// dourada reutiliza tal e qual (`cmd::vmimage`, `--offline`): lá, o repositório
-/// apt e o `apt-get install` são substituídos por `.deb` já descarregados e
-/// VERIFICADOS no host + `dpkg -i`, para o appliance do `virt-customize` poder
-/// correr com `--no-network`. `k8s_host_recipes` = as 2 de rede + estas, para o
-/// `cluster apply` (hosts vivos) continuar a ver o catálogo completo.
+/// The recipes that do NOT need network — only persistence in `/etc` (swap,
+/// kernel modules, sysctls). They are the subset that the golden image's **offline**
+/// build reuses as-is (`cmd::vmimage`, `--offline`): there, the apt
+/// repository and the `apt-get install` are replaced by `.deb`s already downloaded and
+/// VERIFIED on the host + `dpkg -i`, so the `virt-customize` appliance can
+/// run with `--no-network`. `k8s_host_recipes` = the 2 network ones + these, so
+/// `cluster apply` (live hosts) keeps seeing the full catalogue.
 pub(crate) fn k8s_config_recipes() -> Vec<HostRecipe> {
     vec![
         HostRecipe {
@@ -167,7 +167,7 @@ mod tests {
     fn config_recipes_sao_o_subconjunto_sem_rede() {
         let config = k8s_config_recipes();
         assert_eq!(config.len(), 3, "swap + módulos + sysctls");
-        // A garantia que interessa ao build offline: NENHUMA toca a rede.
+        // The guarantee that matters to the offline build: NONE touches the network.
         for r in &config {
             let cmd = r.apply_offline();
             assert!(
@@ -176,7 +176,7 @@ mod tests {
                 r.name
             );
         }
-        // E são exactamente a cauda do catálogo completo (não divergem).
+        // And they are exactly the tail of the full catalogue (they do not diverge).
         let all = k8s_host_recipes(None, &[]);
         assert_eq!(&all[2..], &config[..], "as 3 finais têm de ser as mesmas");
     }

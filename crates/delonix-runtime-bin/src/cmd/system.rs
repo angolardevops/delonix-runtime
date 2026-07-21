@@ -1,8 +1,8 @@
-//! `delonix system` — o motor em si: eventos, estado e uso de disco.
+//! `delonix system` — the engine itself: events, state and disk usage.
 //!
-//! É um GRUPO, não comandos soltos: `events`/`info`/`df` são sobre o motor, não
-//! sobre um container ou uma imagem em particular — tal como no docker
-//! (`docker system ...`). O que é por-objecto continua no grupo do objecto
+//! It is a GROUP, not standalone commands: `events`/`info`/`df` are about the
+//! engine, not about a particular container or image — just like docker
+//! (`docker system ...`). Whatever is per-object stays in the object's group
 //! (`container stats`, `image ls`).
 
 use clap::Subcommand;
@@ -12,62 +12,62 @@ use super::util::{open_stores, state_root};
 
 #[derive(Subcommand)]
 pub enum SystemCmd {
-    /// Eventos do motor (create/start/die/remove/…), do mais antigo ao mais
-    /// recente. Sem daemon, o registo é um log append-only partilhado — cada
-    /// comando acrescenta a sua linha (ver `delonix_runtime_core::events`).
+    /// Engine events (create/start/die/remove/…), from oldest to most
+    /// recent. With no daemon, the log is a shared append-only file — each
+    /// command appends its own line (see `delonix_runtime_core::events`).
     Events {
-        /// Segue em contínuo (Ctrl-C para sair).
+        /// Follow continuously (Ctrl-C to exit).
         #[arg(short, long)]
         follow: bool,
-        /// Mostra só os últimos N (default: todos).
+        /// Show only the last N (default: all).
         #[arg(short = 'n', long)]
         tail: Option<usize>,
     },
-    /// Estado do motor: rootless?, delegação de cgroup, infra de rede, contagens.
+    /// Engine state: rootless?, cgroup delegation, network infra, counts.
     Info,
-    /// Uso de disco por área (imagens, containers, volumes, imagens VM).
+    /// Disk usage by area (images, containers, volumes, VM images).
     Df,
-    /// Virtualização do host: hipervisor, KVM, virtio — e o que há a afinar.
+    /// Host virtualization: hypervisor, KVM, virtio — and what there is to tune.
     Virt {
-        /// Aplica as afinações recomendadas (precisa de root).
+        /// Apply the recommended tuning (needs root).
         #[arg(long)]
         tune: bool,
     },
-    /// Recupera espaço: remove containers parados, imagens sem uso, blobs do
-    /// CAS que ninguém referencia, cgroups vazios e — o que mais espaço liberta
-    /// — **directórios de containers órfãos** (de nós/containers que morreram
-    /// abruptamente sem `rm`, sem entrada no registo).
+    /// Reclaim space: remove stopped containers, unused images, CAS blobs
+    /// nobody references, empty cgroups and — the biggest space saver
+    /// — **orphan container directories** (from nodes/containers that died
+    /// abruptly without `rm`, with no registry entry).
     Prune {
-        /// Também remove imagens sem uso que TÊM tag (não só as dangling).
+        /// Also remove unused images that DO have a tag (not just the dangling ones).
         #[arg(short, long)]
         all: bool,
     },
-    /// Ligações de rede activas por container (via conntrack): quem entra, quem
-    /// sai, e entre containers. Actualiza em contínuo (ver `--no-stream`).
+    /// Active network connections per container (via conntrack): who comes in,
+    /// who goes out, and between containers. Refreshes continuously (see `--no-stream`).
     Monitor {
-        /// Milissegundos entre actualizações (mínimo 300).
+        /// Milliseconds between refreshes (minimum 300).
         #[arg(long, default_value_t = 1000)]
         interval: u64,
-        /// Uma amostra e sai (sem limpar o ecrã nem repetir).
+        /// One sample and exit (without clearing the screen or repeating).
         #[arg(long = "no-stream")]
         no_stream: bool,
     },
-    /// Governador térmico: baixa o orçamento de CPU do Delonix quando o CPU
-    /// aquece e repõe-no quando arrefece. Corre em contínuo (ver `--once`).
+    /// Thermal governor: lowers Delonix's CPU budget when the CPU heats
+    /// up and restores it when it cools down. Runs continuously (see `--once`).
     Thermal {
-        /// Temperatura (°C) a partir da qual se arrefece.
+        /// Temperature (°C) at or above which it cools down.
         #[arg(long, default_value_t = 85)]
         high: u64,
-        /// Temperatura (°C) abaixo da qual se restaura.
+        /// Temperature (°C) below which it restores.
         #[arg(long, default_value_t = 70)]
         low: u64,
-        /// Percentagem mínima de CPU a que se desce.
+        /// Minimum CPU percentage it drops to.
         #[arg(long, default_value_t = 40)]
         floor: u64,
-        /// Segundos entre leituras.
+        /// Seconds between readings.
         #[arg(long, default_value_t = 5)]
         interval: u64,
-        /// Uma leitura e sai (para cron/scripts, em vez do loop).
+        /// One reading and exit (for cron/scripts, instead of the loop).
         #[arg(long)]
         once: bool,
     },
@@ -94,12 +94,12 @@ pub fn run(action: SystemCmd) -> Result<()> {
     }
 }
 
-/// `system monitor` — ligações de rede activas por container, via conntrack.
+/// `system monitor` — active network connections per container, via conntrack.
 ///
-/// Lê o conntrack do host (`delonix_net::list_connections`), mapeando cada IP
-/// para o nome do container que o tem, e classifica cada ligação: de fora para
-/// um container (alguém a aceder), de um container para o exterior (egress), ou
-/// entre containers. Actualiza em contínuo salvo `--no-stream`.
+/// Reads the host conntrack (`delonix_net::list_connections`), mapping each IP
+/// to the name of the container that owns it, and classifies each connection: from
+/// outside into a container (someone accessing), from a container to the outside (egress), or
+/// between containers. Refreshes continuously unless `--no-stream`.
 fn cmd_monitor(interval: u64, no_stream: bool) -> Result<()> {
     use delonix_runtime::is_alive;
     let (_images, store) = open_stores()?;
@@ -112,7 +112,7 @@ fn cmd_monitor(interval: u64, no_stream: bool) -> Result<()> {
             .collect();
         let conns = delonix_net::list_connections(&ip2name);
         if !no_stream {
-            print!("\x1b[2J\x1b[H"); // limpa o ecrã
+            print!("\x1b[2J\x1b[H"); // clear the screen
         }
         println!(
             "delonix monitor — {} {}, {} {}\n",
@@ -177,21 +177,21 @@ fn cmd_monitor(interval: u64, no_stream: bool) -> Result<()> {
     }
 }
 
-/// `system prune` — recupera espaço em disco.
+/// `system prune` — reclaims disk space.
 ///
-/// A ordem importa: containers parados primeiro (libertam imagens e blobs),
-/// depois o que deixou de ser referenciado. O passo que mais liberta é o **4**,
-/// os directórios órfãos — o problema real medido nesta máquina: **88
-/// directórios de container em disco contra 4 no registo (~36 GiB)**. Vêm de nós
-/// de cluster e containers que morreram por SIGKILL/crash/sessão-fechada **sem
-/// `rm`**, por isso nunca ninguém os varreu. O `container rm` normal nunca os
-/// apanha (não estão no registo); só um GC explícito como este.
+/// Order matters: stopped containers first (they free images and blobs),
+/// then whatever is no longer referenced. The step that frees the most is **4**,
+/// the orphan directories — the real problem measured on this machine: **88
+/// container directories on disk against 4 in the registry (~36 GiB)**. They come from
+/// cluster nodes and containers that died from SIGKILL/crash/closed-session **without
+/// `rm`**, so nobody ever swept them. The normal `container rm` never
+/// catches them (they aren't in the registry); only an explicit GC like this one.
 fn cmd_prune(all: bool) -> Result<()> {
     use std::collections::HashSet;
     let (images, store) = open_stores()?;
 
-    // Slirps órfãos (alvo morto) — o reaper SEGURO (nunca o `reap_orphan_hostfwds`
-    // fail-open; ver a história do reaper que apagava portas vivas).
+    // Orphan slirps (dead target) — the SAFE reaper (never the fail-open
+    // `reap_orphan_hostfwds`; see the history of the reaper that deleted live ports).
     let reaped = delonix_net::reap_orphan_slirp();
     if reaped > 0 {
         println!(
@@ -203,7 +203,7 @@ fn cmd_prune(all: bool) -> Result<()> {
         );
     }
 
-    // 1) containers parados (no registo).
+    // 1) stopped containers (in the registry).
     let mut rmc = 0usize;
     for c in store.list()? {
         if c.pid.map(delonix_runtime::is_alive).unwrap_or(false) {
@@ -215,16 +215,16 @@ fn cmd_prune(all: bool) -> Result<()> {
         rmc += 1;
     }
 
-    // Ids ainda vivos DEPOIS do passo 1 — a base para decidir o que é órfão.
+    // Ids still alive AFTER step 1 — the basis for deciding what is orphan.
     let live_ids: HashSet<String> = store.list()?.iter().map(|c| c.id.clone()).collect();
 
-    // 1b) marcadores de ref do ingress órfãos — o leak "16 refs com 3 containers
-    //     vivos". Um container que morre por SIGKILL/crash sem `rm` deixa o seu
-    //     marcador de ref a segurar a infra partilhada para sempre. `live` = ids
-    //     de containers a correr + os pods CRI (`cri-*`) e VMs (`vm-*`), geridos
-    //     por outros stores — preservados, nunca reapados aqui. O reaper liberta
-    //     só os marcadores sem dono vivo e derruba a infra se ficar vazia; NUNCA
-    //     toca num id vivo.
+    // 1b) orphan ingress ref markers — the "16 refs with 3 live
+    //     containers" leak. A container that dies from SIGKILL/crash without `rm` leaves its
+    //     ref marker holding the shared infra forever. `live` = ids
+    //     of running containers + the CRI pods (`cri-*`) and VMs (`vm-*`), managed
+    //     by other stores — preserved, never reaped here. The reaper frees
+    //     only the markers with no live owner and tears down the infra if it becomes empty; it NEVER
+    //     touches a live id.
     let mut live_refs: HashSet<String> = store
         .list()?
         .iter()
@@ -247,7 +247,7 @@ fn cmd_prune(all: bool) -> Result<()> {
         );
     }
 
-    // 2) imagens dangling (sem tag), ou todas as não usadas com `-a`.
+    // 2) dangling images (no tag), or all unused ones with `-a`.
     let in_use: HashSet<String> = store.list()?.iter().map(|c| c.image.clone()).collect();
     let mut rmi = 0usize;
     for img in images.list()? {
@@ -266,7 +266,7 @@ fn cmd_prune(all: bool) -> Result<()> {
         }
     }
 
-    // 3) blobs do CAS que já ninguém referencia.
+    // 3) CAS blobs that nobody references anymore.
     let mut referenced: HashSet<String> = HashSet::new();
     for img in images.list()? {
         referenced.insert(delonix_image::cas::strip(&img.id).to_string());
@@ -288,13 +288,13 @@ fn cmd_prune(all: bool) -> Result<()> {
         }
     }
 
-    // 4) DIRECTÓRIOS de container órfãos — o grande recuperador de espaço.
+    // 4) orphan container DIRECTORIES — the big space reclaimer.
     //
-    // Um `<containers>/<id>/` cujo `<id>` já não está no registo: o container
-    // morreu sem `rm`. Usa-se `remove_tree_mapped` e não `remove_dir_all` porque
-    // o rootfs pode ter ficheiros de SUBUID (escritos por um container rootless)
-    // que o utilizador real não apaga directamente — é exactamente o caminho que
-    // o `__rmtree` desta série passou a suportar de facto.
+    // A `<containers>/<id>/` whose `<id>` is no longer in the registry: the container
+    // died without `rm`. We use `remove_tree_mapped` and not `remove_dir_all` because
+    // the rootfs may hold SUBUID files (written by a rootless container)
+    // that the real user cannot delete directly — it is exactly the path that
+    // this series' `__rmtree` came to actually support.
     let containers_dir = images.root().join("containers");
     let (mut rmd, mut freed_dirs) = (0usize, 0u64);
     for path in orphan_container_dirs(&containers_dir, &live_ids) {
@@ -303,14 +303,14 @@ fn cmd_prune(all: bool) -> Result<()> {
         rmd += 1;
     }
 
-    // 5) cgroups VAZIOS órfãos na delonix.slice.
+    // 5) orphan EMPTY cgroups in delonix.slice.
     let live_cg: HashSet<String> = live_ids.iter().map(|id| format!("delonix-{id}")).collect();
     let mut rmg = 0usize;
     if let Ok(rd) = std::fs::read_dir(delonix_runtime_core::DELONIX_SLICE) {
         for e in rd.flatten() {
             let name = e.file_name().to_string_lossy().into_owned();
-            // `remove_dir` (não `_all`): só remove se estiver VAZIO — um cgroup
-            // com processos lá dentro recusa, e ainda bem.
+            // `remove_dir` (not `_all`): only removes if EMPTY — a cgroup
+            // with processes inside refuses, and rightly so.
             if name.starts_with("delonix-")
                 && !live_cg.contains(&name)
                 && std::fs::remove_dir(e.path()).is_ok()
@@ -320,12 +320,12 @@ fn cmd_prune(all: bool) -> Result<()> {
         }
     }
 
-    // 6) hostfwds órfãos no ingress — portas de host presas por containers que já
-    //    morreram (ex.: o slirp deixou um hostfwd para trás). `live_ports` = as
-    //    host-ports publicadas por containers VIVOS; o reaper remove todas as
-    //    outras. Aqui é SEGURO (ao contrário do caso do reaper do PaaS num
-    //    ingress partilhado): o `store` deste root É a fonte de verdade de quem
-    //    publica no ingress.
+    // 6) orphan hostfwds in the ingress — host ports held by containers that already
+    //    died (e.g.: slirp left a hostfwd behind). `live_ports` = the
+    //    host ports published by LIVE containers; the reaper removes all the
+    //    others. Here it is SAFE (unlike the PaaS reaper case on a
+    //    shared ingress): this root's `store` IS the source of truth about who
+    //    publishes on the ingress.
     let live_ports: HashSet<u32> = store
         .list()?
         .iter()
@@ -338,11 +338,11 @@ fn cmd_prune(all: bool) -> Result<()> {
         })
         .collect();
     let rmh = delonix_net::infra::reap_orphan_hostfwds(&live_ports);
-    // 7) slirps órfãos (alvo morto) — já reapados no topo por `reap_orphan_slirp`.
+    // 7) orphan slirps (dead target) — already reaped at the top by `reap_orphan_slirp`.
 
-    // 8) redes `dlx-*` VAZIAS — auto-criadas para clusters que já foram apagados
-    //    (uma rede de utilizador, sem o prefixo, NUNCA se toca aqui). Livra a
-    //    sub-rede/bridge para reutilizar.
+    // 8) EMPTY `dlx-*` networks — auto-created for clusters that have been deleted
+    //    (a user network, without the prefix, is NEVER touched here). Frees the
+    //    subnet/bridge for reuse.
     let attached: HashSet<String> = store
         .list()?
         .iter()
@@ -381,8 +381,8 @@ fn cmd_prune(all: bool) -> Result<()> {
     Ok(())
 }
 
-/// `system virt` — detecta virtualização e diz o que há a afinar. Sem `--tune`
-/// não muda nada: lista as recomendações e o comando para as aplicar.
+/// `system virt` — detects virtualization and says what to tune. Without `--tune`
+/// it changes nothing: it lists the recommendations and the command to apply them.
 fn cmd_virt(tune: bool) -> Result<()> {
     use delonix_runtime_core::virt;
     let v = virt::detect();
@@ -452,8 +452,8 @@ fn cmd_virt(tune: bool) -> Result<()> {
             )
         );
     }
-    // A afinação concreta: escalonador de I/O 'none' nos discos virtio-blk — num
-    // guest KVM, escalonar dos dois lados só acrescenta latência.
+    // The concrete tuning: I/O scheduler 'none' on virtio-blk disks — in a
+    // KVM guest, scheduling on both sides only adds latency.
     let mut pending: Vec<String> = Vec::new();
     for dev in &v.virtio_blk {
         match virt::blk_scheduler(dev) {
@@ -508,7 +508,7 @@ fn cmd_virt(tune: bool) -> Result<()> {
     Ok(())
 }
 
-/// `system thermal` — governador térmico sobre a slice de cgroup do Delonix.
+/// `system thermal` — thermal governor over Delonix's cgroup slice.
 fn cmd_thermal(high: u64, low: u64, floor: u64, interval: u64, once: bool) -> Result<()> {
     use delonix_runtime::{self as runtime};
     if high <= low {
@@ -521,7 +521,7 @@ fn cmd_thermal(high: u64, low: u64, floor: u64, interval: u64, once: bool) -> Re
             super::po::t("the thermal governor needs root (it writes to the host cgroup)").into(),
         ));
     }
-    let mut scale = 100u64; // % do orçamento de CPU do Delonix
+    let mut scale = 100u64; // % of Delonix's CPU budget
     runtime::set_slice_cpu_pct(scale);
     eprintln!(
         "{}: high={high}°C low={low}°C floor={floor}% (Ctrl-C {})",
@@ -575,8 +575,8 @@ fn cmd_events(follow: bool, tail: Option<usize>) -> Result<()> {
     if !follow {
         return Ok(());
     }
-    // `-f`: sonda o crescimento do ficheiro. Sem daemon não há push — mas o
-    // custo é um `stat` por segundo, e o log é a única fonte de verdade.
+    // `-f`: polls the file's growth. With no daemon there is no push — but the
+    // cost is one `stat` per second, and the log is the only source of truth.
     let mut offset = events::size(&root);
     loop {
         std::thread::sleep(std::time::Duration::from_secs(1));
@@ -590,12 +590,12 @@ fn cmd_events(follow: bool, tail: Option<usize>) -> Result<()> {
     }
 }
 
-/// **PURA** — subdirectórios (nome = id) de `containers_dir` cujo id NÃO está em
-/// `live` (containers registados): os órfãos a reapar. Núcleo reapável do passo 4
-/// do `prune`, isolado do `remove_tree_mapped` (que precisa de subuid) para poder
-/// ser testado a seco, sem privilégio. Só directórios contam — as entradas do
-/// registo são ficheiros `<id>.json` e nunca entram aqui. **Nunca devolve um id
-/// vivo.**
+/// **PURE** — subdirectories (name = id) of `containers_dir` whose id is NOT in
+/// `live` (registered containers): the orphans to reap. The reapable core of step 4
+/// of `prune`, isolated from `remove_tree_mapped` (which needs subuid) so it can
+/// be tested dry, without privilege. Only directories count — registry
+/// entries are `<id>.json` files and never enter here. **It never returns a live
+/// id.**
 fn orphan_container_dirs(
     containers_dir: &std::path::Path,
     live: &std::collections::HashSet<String>,
@@ -615,7 +615,7 @@ fn orphan_container_dirs(
     out
 }
 
-/// Soma recursiva do tamanho de um directório (aparente, como o `du`).
+/// Recursive sum of a directory's size (apparent, like `du`).
 fn dir_size(p: &std::path::Path) -> u64 {
     let Ok(rd) = std::fs::read_dir(p) else {
         return 0;
@@ -626,7 +626,7 @@ fn dir_size(p: &std::path::Path) -> u64 {
             match e.file_type() {
                 Ok(t) if t.is_dir() => dir_size(&path),
                 Ok(t) if t.is_file() => e.metadata().map(|m| m.len()).unwrap_or(0),
-                _ => 0, // symlinks não contam (contariam duas vezes)
+                _ => 0, // symlinks don't count (they would count twice)
             }
         })
         .sum()
@@ -645,9 +645,9 @@ fn human(b: u64) -> String {
     format!("{v:.1} {}", U[i])
 }
 
-/// `system df` — onde está o disco. Existe por uma razão concreta: rootfs
-/// órfãos chegaram a acumular 45 GiB sem nada os reportar, até o kubelet marcar
-/// o nó com `disk-pressure`. O `RECUPERÁVEL` é a coluna que interessa.
+/// `system df` — where the disk is. It exists for a concrete reason: orphan
+/// rootfs dirs once piled up 45 GiB with nothing reporting them, until the kubelet marked
+/// the node with `disk-pressure`. The `RECLAIMABLE` column is the one that matters.
 fn cmd_df() -> Result<()> {
     let root = state_root();
     let (_, store) = open_stores()?;
@@ -701,9 +701,9 @@ fn cmd_df() -> Result<()> {
     Ok(())
 }
 
-/// `system info` — o que o motor É nesta máquina. Sem isto, diagnosticar
-/// "porque é que os limites não se aplicam" ou "porque é que o `-p` falha"
-/// obriga a ler código.
+/// `system info` — what the engine IS on this machine. Without it, diagnosing
+/// "why the limits don't apply" or "why `-p` fails"
+/// forces reading code.
 fn cmd_info() -> Result<()> {
     let (_, store) = open_stores()?;
     let cs = store.list()?;
@@ -728,7 +728,7 @@ fn cmd_info() -> Result<()> {
             super::po::t("root (daemonless)")
         }
     );
-    // Isto é a pergunta nº1 quando os limites "não funcionam".
+    // This is the #1 question when the limits "don't work".
     let delegated = std::path::Path::new("/sys/fs/cgroup/cgroup.controllers").exists()
         && std::fs::read_to_string("/sys/fs/cgroup/cgroup.subtree_control")
             .map(|s| s.contains("memory"))
@@ -765,7 +765,7 @@ fn cmd_info() -> Result<()> {
     Ok(())
 }
 
-/// Atalho para o `Store` — o `system` mexe em contagens, não em ciclo de vida.
+/// Shortcut for the `Store` — `system` deals in counts, not lifecycle.
 #[allow(dead_code)]
 fn store_only() -> Result<Store> {
     Store::open(Store::default_root())
@@ -777,9 +777,9 @@ mod tests {
     use std::collections::HashSet;
     use std::path::PathBuf;
 
-    /// Dir temporário único (sem depender do crate `tempfile`).
+    /// Unique temp dir (without depending on the `tempfile` crate).
     fn tmp_dir(tag: &str) -> PathBuf {
-        // SAFETY: getpid() não tem pré-condições.
+        // SAFETY: getpid() has no preconditions.
         let uniq = format!(
             "delonix-prune-{tag}-{}-{}",
             unsafe { libc::getpid() },
@@ -793,12 +793,12 @@ mod tests {
         d
     }
 
-    /// STRESS do reaper de rootfs órfãos: create→destroy de N directórios de
-    /// container ao nível do disco, cruzados com o "Store" (conjunto de ids
-    /// vivos). Assevera que o reaper apanha TODOS os órfãos (containers mortos sem
-    /// `rm`), preserva os vivos, e que depois de os apagar ZERO órfãos ficam.
-    /// Corre sem privilégio — testa a DECISÃO (`orphan_container_dirs`), não o
-    /// `remove_tree_mapped` (que precisa de subuid).
+    /// STRESS test of the orphan-rootfs reaper: create→destroy of N container
+    /// directories at the disk level, crossed with the "Store" (set of live
+    /// ids). Asserts that the reaper catches ALL the orphans (containers killed without
+    /// `rm`), preserves the live ones, and that after deleting them ZERO orphans remain.
+    /// Runs without privilege — it tests the DECISION (`orphan_container_dirs`), not
+    /// `remove_tree_mapped` (which needs subuid).
     #[test]
     fn stress_reaper_rootfs_orfaos_deixa_zero() {
         const N: usize = 300;
@@ -806,9 +806,9 @@ mod tests {
         let containers = root.join("containers");
         std::fs::create_dir_all(&containers).unwrap();
 
-        // N directórios de container mortos + M vivos, e alguns ficheiros
-        // `<id>.json` (entradas do registo) que NÃO são directórios e têm de ser
-        // ignorados pelo reaper.
+        // N dead container directories + M live ones, and some `<id>.json`
+        // files (registry entries) that are NOT directories and must be
+        // ignored by the reaper.
         for i in 0..N {
             std::fs::create_dir_all(containers.join(format!("dead{i}"))).unwrap();
         }
@@ -821,7 +821,7 @@ mod tests {
         std::fs::write(containers.join("alive0.json"), b"{}").unwrap();
         std::fs::write(containers.join("dead0.json"), b"{}").unwrap();
 
-        // O reaper vê exactamente os N órfãos (nenhum vivo, nenhum ficheiro).
+        // The reaper sees exactly the N orphans (none live, no files).
         let orphans = orphan_container_dirs(&containers, &live);
         assert_eq!(
             orphans.len(),
@@ -833,7 +833,7 @@ mod tests {
             assert!(!orphans.contains(&p), "container vivo NUNCA é reapado");
         }
 
-        // Apaga-os e reconfirma: ZERO órfãos ficam, os vivos intactos.
+        // Delete them and reconfirm: ZERO orphans remain, the live ones intact.
         for p in &orphans {
             std::fs::remove_dir_all(p).unwrap();
         }

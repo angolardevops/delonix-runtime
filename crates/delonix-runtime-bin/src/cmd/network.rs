@@ -1,23 +1,24 @@
 //! `delonix network` — ls/create/rm/inspect.
 //!
-//! **Nota (dois stores em paralelo, deliberado, não um bug):** `NetworkStore`
-//! (`delonix_net::NetworkStore`) é o registo declarativo "rico" (drivers
-//! bridge/macvlan/ipvlan/overlay, VNI, peers WireGuard), persistido em
-//! `<root>/networks/<nome>`. `infra::{network_create_with,network_remove}`
-//! (`delonix_net::infra`) é o plano FÍSICO ligado ao holder netns rootless
-//! (bridge real + prefixo), persistido separadamente em
-//! `<ingress_dir>/networks/<nome>.json` — é o que `container run --net <nome>`
-//! e `vm create --network <nome>` realmente usam para atachar. Para o driver
-//! `bridge` (o único que os containers atacham hoje via `infra::
-//! attach_container`), `network create` orquestra os dois EM CONJUNTO, com o
-//! `NetworkStore` como fonte da verdade do prefixo (`infra::network_create_with`
-//! existe precisamente para alinhar os dois — ver o comentário lá). O driver
-//! `overlay` TAMBÉM orquestra os dois: além do registo, sobe o plano físico no
-//! holder (bridge + uplink VXLAN + WireGuard se cifrado — ver `realize_overlay`),
-//! porque é realizável sem privilégio de host. Já `macvlan`/`ipvlan` só ficam no
-//! `NetworkStore`: o plano físico deles precisa de CAP_NET_ADMIN na init-netns do
-//! host, que o modelo rootless não tem — o `create` regista mas AVISA alto que a
-//! rede não foi realizada (Realized=False), em vez de fingir sucesso.
+//! **Note (two stores in parallel, deliberate, not a bug):** `NetworkStore`
+//! (`delonix_net::NetworkStore`) is the "rich" declarative registry (drivers
+//! bridge/macvlan/ipvlan/overlay, VNI, WireGuard peers), persisted in
+//! `<root>/networks/<name>`. `infra::{network_create_with,network_remove}`
+//! (`delonix_net::infra`) is the PHYSICAL plane tied to the rootless holder netns
+//! (real bridge + prefix), persisted separately in
+//! `<ingress_dir>/networks/<name>.json` — it is what `container run --net <name>`
+//! and `vm create --network <name>` actually use to attach. For the `bridge`
+//! driver (the only one containers attach to today via `infra::
+//! attach_container`), `network create` orchestrates both TOGETHER, with the
+//! `NetworkStore` as the source of truth for the prefix (`infra::network_create_with`
+//! exists precisely to align the two — see the comment there). The `overlay`
+//! driver ALSO orchestrates both: besides the registry, it brings up the physical
+//! plane in the holder (bridge + VXLAN uplink + WireGuard if encrypted — see
+//! `realize_overlay`), because it is realizable without host privilege. Whereas
+//! `macvlan`/`ipvlan` only stay in the `NetworkStore`: their physical plane needs
+//! CAP_NET_ADMIN in the host init-netns, which the rootless model does not have —
+//! `create` registers but WARNS loudly that the network was not realized
+//! (Realized=False), instead of faking success.
 
 use clap::Subcommand;
 use clap_complete::engine::ArgValueCandidates;
@@ -30,7 +31,7 @@ use super::manifest::{self, ManifestDoc};
 use super::output;
 use super::util::state_root;
 
-/// `spec` de `kind: Network` — espelha os campos de `NetworkCmd::Create`.
+/// `spec` for `kind: Network` — mirrors the fields of `NetworkCmd::Create`.
 #[derive(Debug, Deserialize)]
 struct NetworkSpec {
     #[serde(default = "default_driver")]
@@ -42,8 +43,8 @@ struct NetworkSpec {
     vni: Option<u32>,
     #[serde(default)]
     peers: Vec<String>,
-    /// Canónico `wgIp` (camelCase, uniforme com o resto do schema); `wg_ip`
-    /// continua aceite (retrocompat).
+    /// Canonical `wgIp` (camelCase, uniform with the rest of the schema); `wg_ip`
+    /// is still accepted (backward compat).
     #[serde(rename = "wgIp", alias = "wg_ip")]
     wg_ip: Option<String>,
 }
@@ -52,71 +53,71 @@ fn default_driver() -> String {
     "bridge".to_string()
 }
 
-/// Nomes aceites no `spec` de `kind: Network` (canónicos + aliases), para o
-/// aviso de campos desconhecidos.
+/// Names accepted in the `spec` of `kind: Network` (canonical + aliases), for the
+/// unknown-fields warning.
 pub(crate) const NETWORK_SPEC_FIELDS: &[&str] = &[
     "driver", "parent", "subnet", "gateway", "vni", "peers", "wgIp", "wg_ip",
 ];
 
 #[derive(Subcommand)]
 pub enum NetworkCmd {
-    /// Dashboard (KPIs + tabela) das redes — TUI interactivo, ou `--once` snapshot.
+    /// Dashboard (KPIs + table) of the networks — interactive TUI, or `--once` snapshot.
     Dash {
         #[arg(long)]
         once: bool,
     },
-    /// Lista as redes.
+    /// List the networks.
     Ls,
-    /// Identidade WireGuard DESTE nó, para o overlay VXLAN cifrado entre nós
-    /// (`network create --driver overlay`). A chave privada fica 0600 em
-    /// `<root>/wg/node.key`; a pública é o que se distribui aos peers.
+    /// WireGuard identity of THIS node, for the encrypted VXLAN overlay between nodes
+    /// (`network create --driver overlay`). The private key stays 0600 in
+    /// `<root>/wg/node.key`; the public one is what you hand out to the peers.
     Node {
         #[command(subcommand)]
         action: NodeCmd,
     },
-    /// Cria uma rede.
+    /// Create a network.
     Create {
         name: String,
-        /// `bridge` (default, filtrada pelo firewall) | `macvlan` | `ipvlan` (NÃO
-        /// filtrados, ver aviso) | `overlay` (VXLAN inter-nó).
+        /// `bridge` (default, filtered by the firewall) | `macvlan` | `ipvlan` (NOT
+        /// filtered, see warning) | `overlay` (inter-node VXLAN).
         #[arg(long, default_value = "bridge")]
         driver: String,
-        /// NIC-pai do host (obrigatório p/ macvlan/ipvlan).
+        /// Host parent NIC (required for macvlan/ipvlan).
         #[arg(long)]
         parent: Option<String>,
-        /// Subnet (obrigatório p/ macvlan/ipvlan, ex.: `192.168.1.0/24`).
+        /// Subnet (required for macvlan/ipvlan, e.g.: `192.168.1.0/24`).
         #[arg(long)]
         subnet: Option<String>,
         /// Gateway (macvlan/ipvlan).
         #[arg(long, default_value = "")]
         gateway: String,
-        /// VXLAN Network Identifier (obrigatório p/ overlay).
+        /// VXLAN Network Identifier (required for overlay).
         #[arg(long)]
         vni: Option<u32>,
-        /// Nó-par (`<ip>` ou `<ip>=<wg_pubkey>=<wg_ip>`), repetível (overlay).
+        /// Peer node (`<ip>` or `<ip>=<wg_pubkey>=<wg_ip>`), repeatable (overlay).
         #[arg(long = "peer")]
         peers: Vec<String>,
-        /// IP de túnel WireGuard deste nó (overlay cifrado).
+        /// WireGuard tunnel IP of this node (encrypted overlay).
         #[arg(long)]
         wg_ip: Option<String>,
     },
-    /// Detalhe de uma rede.
+    /// Detail of a network.
     Inspect {
         #[arg(add = ArgValueCandidates::new(super::complete::networks))]
         name: String,
     },
-    /// Detalhe legível de uma ou mais redes, ao estilo `kubectl describe`
-    /// (para humanos; use `inspect` para a vista compacta de sempre).
+    /// Readable detail of one or more networks, `kubectl describe` style
+    /// (for humans; use `inspect` for the usual compact view).
     Describe {
         #[arg(required = true)]
         names: Vec<String>,
     },
-    /// Remove uma rede.
+    /// Remove a network.
     Rm {
         #[arg(add = ArgValueCandidates::new(super::complete::networks))]
         name: String,
     },
-    /// Aplica os documentos `kind: Network` de um manifesto (idempotente por nome).
+    /// Apply the `kind: Network` documents of a manifest (idempotent by name).
     Apply {
         #[arg(short = 'f', long = "file")]
         file: Option<PathBuf>,
@@ -156,14 +157,14 @@ pub fn run(action: NetworkCmd) -> Result<()> {
     }
 }
 
-/// Aplica os documentos `kind: Network` (chamado por `network apply` e por
-/// `stack apply`, que já tem os documentos carregados de antemão).
+/// Apply the `kind: Network` documents (called by `network apply` and by
+/// `stack apply`, which already has the documents loaded beforehand).
 pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
     let store = NetworkStore::open(state_root())?;
     for doc in manifest::of_kind(docs, "Network") {
         let name = &doc.metadata.name;
-        // Avisa de gralhas ANTES do early-continue (ver container::apply): um
-        // re-apply contra uma rede já existente também deve ver o aviso.
+        // Warn about typos BEFORE the early-continue (see container::apply): a
+        // re-apply against an already existing network must also see the warning.
         manifest::warn_unknown_fields(doc, NETWORK_SPEC_FIELDS);
         if store.get(name).is_ok() {
             println!(
@@ -199,10 +200,10 @@ fn cmd_ls(store: &NetworkStore) -> Result<()> {
 }
 
 #[allow(clippy::too_many_arguments)]
-/// Cria uma rede nos DOIS stores coordenados (registo declarativo + plano
-/// físico do holder, com o MESMO prefixo). É `pub(crate)` para o modo kind
-/// poder criar a rede do cluster — usar só `infra::network_create` deixaria o
-/// `NetworkStore` sem registo e o `run --net <x>` recusaria com
+/// Create a network in BOTH coordinated stores (declarative registry + the
+/// holder's physical plane, with the SAME prefix). It is `pub(crate)` so the kind
+/// mode can create the cluster network — using only `infra::network_create` would
+/// leave the `NetworkStore` without a record and `run --net <x>` would refuse with
 /// "no such container: network <x>".
 pub(crate) fn create_network(
     store: &NetworkStore,
@@ -218,8 +219,8 @@ pub(crate) fn create_network(
     match driver {
         "bridge" => {
             let net = store.create(name)?;
-            // Realiza fisicamente (bridge real do holder rootless) — alinhada
-            // ao MESMO prefixo que o NetworkStore acabou de decidir.
+            // Realize it physically (real bridge of the rootless holder) — aligned
+            // to the SAME prefix the NetworkStore just decided.
             infra::network_create_with(name, &net.prefix)?;
             Ok(net)
         }
@@ -235,12 +236,12 @@ pub(crate) fn create_network(
                 ))
             })?;
             let net = store.create_lan(name, driver, &parent, &subnet, gateway)?;
-            // HONESTIDADE (não um no-op silencioso): macvlan/ipvlan põem o container
-            // DIRECTAMENTE na LAN física do `parent` — isso exige criar a
-            // sub-interface na init-netns do host com CAP_NET_ADMIN, privilégio que
-            // uma sessão rootless (o modelo por omissão deste motor) não tem. O
-            // registo declarativo fica gravado (intenção preservada p/ um host
-            // privilegiado), mas o plano físico NÃO é realizado — dizê-lo alto.
+            // HONESTY (not a silent no-op): macvlan/ipvlan put the container
+            // DIRECTLY on the physical LAN of `parent` — that requires creating the
+            // sub-interface in the host init-netns with CAP_NET_ADMIN, a privilege
+            // that a rootless session (this engine's default model) does not have.
+            // The declarative record is saved (intent preserved for a privileged
+            // host), but the physical plane is NOT realized — say it loudly.
             eprintln!(
                 "aviso: rede '{name}' (driver {driver}) registada mas NÃO realizada — \
                  condition Realized=False reason=DriverNotImplemented. macvlan/ipvlan \
@@ -257,9 +258,9 @@ pub(crate) fn create_network(
                 )
             })?;
             let net = store.create_overlay(name, vni, &peers, wg_ip.as_deref())?;
-            // Plano físico rootless (holder netns): bridge + uplink VXLAN + WG (se
-            // cifrado). Ao contrário de macvlan/ipvlan, o overlay É realizável sem
-            // privilégio de host — vive todo no netns do holder.
+            // Rootless physical plane (holder netns): bridge + VXLAN uplink + WG (if
+            // encrypted). Unlike macvlan/ipvlan, the overlay IS realizable without
+            // host privilege — it lives entirely in the holder netns.
             if let Err(e) = realize_overlay(&net) {
                 eprintln!(
                     "aviso: rede overlay '{name}' registada mas o uplink físico não \
@@ -275,26 +276,29 @@ pub(crate) fn create_network(
     }
 }
 
-/// **Realiza o plano físico de uma rede overlay** no holder netns rootless:
-/// (1) bridge do holder alinhada ao prefixo que o `NetworkStore` decidiu;
-/// (2) uplink VXLAN (`dlxvx<vni>`) a masterizar essa bridge + FDB dos pares;
-/// (3) WireGuard, SE o overlay é cifrado (`wg_ip` presente) — cifra o transporte
-///     VXLAN entre nós (o FDB passa a apontar para os `wg_ip` em vez dos `node_ip`).
+/// **Realizes the physical plane of an overlay network** in the rootless holder
+/// netns:
+/// (1) holder bridge aligned to the prefix the `NetworkStore` decided;
+/// (2) VXLAN uplink (`dlxvx<vni>`) mastering that bridge + FDB of the peers;
+/// (3) WireGuard, IF the overlay is encrypted (`wg_ip` present) — encrypts the
+///     VXLAN transport between nodes (the FDB then points to the `wg_ip` instead of
+///     the `node_ip`).
 ///
-/// Espelha `delonix_net::Net::ensure_vxlan`/`ensure_overlay_wg` (o caminho antigo
-/// root/host-netns), mas conduzido pelo control-socket do holder — o único com
-/// CAP_NET_ADMIN no netns de infra. Idempotente. Requer o holder de pé
-/// (`ensure_up`). Só faz sentido chamar quando `net.driver == "overlay"`.
+/// Mirrors `delonix_net::Net::ensure_vxlan`/`ensure_overlay_wg` (the old
+/// root/host-netns path), but driven through the holder's control socket — the only
+/// one with CAP_NET_ADMIN in the infra netns. Idempotent. Requires the holder up
+/// (`ensure_up`). It only makes sense to call when `net.driver == "overlay"`.
 fn realize_overlay(net: &Network) -> Result<()> {
     const WG_PORT: u16 = 51820;
     let Some(vni) = net.vni else { return Ok(()) };
     let Some(dev) = net.vxlan_dev() else {
         return Ok(());
     };
-    // Overlay CIFRADO (wg_ip deste nó presente) EXIGE o `wg` no host. Falha ANTES
-    // de subir o VXLAN: senão o FDB apontaria para os wg_ip dos pares (só
-    // alcançáveis pelo túnel) sem túnel nenhum a subir → uplink silenciosamente
-    // blackholed. Erro acionável em vez de um overlay que finge estar de pé.
+    // ENCRYPTED overlay (this node's wg_ip present) REQUIRES `wg` on the host. Fail
+    // BEFORE bringing up the VXLAN: otherwise the FDB would point to the peers'
+    // wg_ip (only reachable through the tunnel) with no tunnel coming up → uplink
+    // silently blackholed. An actionable error instead of an overlay that pretends
+    // to be up.
     let encrypted = net.wg_ip.is_some();
     if encrypted && !delonix_net::wg::available() {
         return Err(delonix_runtime_core::Error::Invalid(
@@ -304,19 +308,21 @@ fn realize_overlay(net: &Network) -> Result<()> {
                 .into(),
         ));
     }
-    // Parse dos peers UMA vez (reusado no FDB e no loop WG).
+    // Parse the peers ONCE (reused in the FDB and in the WG loop).
     let parsed: Vec<(String, Option<(String, String)>)> = net
         .peers
         .iter()
         .map(|p| delonix_net::parse_overlay_peer(p))
         .collect();
-    // Holder de pé (sem incrementar o ref-count — o uplink é infra persistente,
-    // não uma carga; morre com o `network rm` → `netdel`, não com um release).
+    // Holder up (without incrementing the ref-count — the uplink is persistent
+    // infra, not a workload; it dies with `network rm` → `netdel`, not with a
+    // release).
     infra::ensure_up()?;
-    // A bridge/gateway vêm do plano físico alinhado ao prefixo do NetworkStore.
+    // The bridge/gateway come from the physical plane aligned to the NetworkStore
+    // prefix.
     infra::network_create_with(&net.name, &net.prefix)?;
     let (bridge, _prefix, gateway) = infra::resolve_net(&net.name)?;
-    // FDB: `wg_ip` de cada par se cifrado, senão o `node_ip` plano.
+    // FDB: `wg_ip` of each peer if encrypted, otherwise the plain `node_ip`.
     let dsts: Vec<String> = parsed
         .iter()
         .map(|(node_ip, wg)| {
@@ -326,7 +332,8 @@ fn realize_overlay(net: &Network) -> Result<()> {
         })
         .collect();
     infra::set_vxlan(&dev, vni, &bridge, &gateway, &dsts)?;
-    // WireGuard só no overlay CIFRADO (a disponibilidade já foi garantida acima).
+    // WireGuard only in the ENCRYPTED overlay (availability was already ensured
+    // above).
     if let Some(my_wg_ip) = net.wg_ip.as_deref() {
         let key = delonix_net::wg::ensure_node_key()?;
         let iface = format!("wgo{vni:06x}"); // <= 15 chars
@@ -364,8 +371,8 @@ fn cmd_inspect(store: &NetworkStore, name: &str) -> Result<()> {
     Ok(())
 }
 
-/// `network describe` — detalhe legível ao estilo `kubectl describe`.
-/// Complementa o `inspect` (vista compacta de sempre, estável para scripts).
+/// `network describe` — readable detail in `kubectl describe` style.
+/// Complements `inspect` (the usual compact view, stable for scripts).
 fn cmd_describe(store: &NetworkStore, names: &[String]) -> Result<()> {
     for (i, name) in names.iter().enumerate() {
         let n = store.get(name)?;
@@ -377,13 +384,13 @@ fn cmd_describe(store: &NetworkStore, names: &[String]) -> Result<()> {
     Ok(())
 }
 
-/// Containers ligados a esta rede, lidos do `Store` — `network` (a rede
-/// primária do `run --net`) ou `extra_networks` (as ligadas depois).
+/// Containers attached to this network, read from the `Store` — `network` (the
+/// primary network of `run --net`) or `extra_networks` (those attached later).
 ///
-/// Best-effort de propósito: um erro a abrir/ler o store dá `None`, e o
-/// `describe` omite a secção em vez de afirmar "<none>". A distinção importa —
-/// "não há containers ligados" e "não consegui saber" não são a mesma coisa
-/// numa vista que se usa para decidir se uma rede pode ser removida.
+/// Best-effort on purpose: an error opening/reading the store yields `None`, and
+/// `describe` omits the section instead of asserting "<none>". The distinction
+/// matters — "there are no attached containers" and "I couldn't tell" are not the
+/// same thing in a view used to decide whether a network can be removed.
 fn attached_containers(net: &str) -> Option<Vec<String>> {
     let store = delonix_runtime_core::Store::open(state_root().join("containers")).ok()?;
     let cs = store.list().ok()?;
@@ -394,7 +401,7 @@ fn attached_containers(net: &str) -> Option<Vec<String>> {
                     || c.extra_networks.iter().any(|e| e.network == net)
             })
             .map(|c| {
-                // O IP da rede em causa, seja ela a primária ou uma extra.
+                // The IP on the network in question, be it the primary or an extra.
                 let ip = if c.network.as_deref() == Some(net) {
                     c.ip.clone()
                 } else {
@@ -436,9 +443,9 @@ fn describe_one(n: &Network) {
         },
     );
     d.field("Prefix", &n.prefix);
-    // Só nos drivers de LAN física (macvlan/ipvlan).
+    // Only on the physical-LAN drivers (macvlan/ipvlan).
     d.field_opt("Parent", n.parent.as_deref());
-    // Só no driver overlay.
+    // Only on the overlay driver.
     d.field_opt("VNI", n.vni.map(|v| v.to_string()));
     d.field_opt("WireGuard IP", n.wg_ip.as_deref());
     if !n.peers.is_empty() {
@@ -465,18 +472,18 @@ fn cmd_rm(store: &NetworkStore, name: &str) -> Result<()> {
     Ok(())
 }
 
-/// Subcomandos de `network node` — a identidade WireGuard do nó local.
+/// Subcommands of `network node` — the WireGuard identity of the local node.
 #[derive(clap::Subcommand)]
 pub enum NodeCmd {
-    /// Gera a chave do nó (se ainda não existir) e imprime a pública com o
-    /// contexto de o que fazer com ela. Idempotente.
+    /// Generate the node key (if it does not exist yet) and print the public one
+    /// with the context of what to do with it. Idempotent.
     Init,
-    /// Imprime só a chave pública (para compor em scripts).
+    /// Print only the public key (for composing in scripts).
     Key,
 }
 
-/// `network node` — `ensure_node_key` é idempotente: gera na primeira vez,
-/// depois lê a que já existe.
+/// `network node` — `ensure_node_key` is idempotent: generates on the first time,
+/// then reads the one that already exists.
 fn cmd_node(action: NodeCmd) -> Result<()> {
     let key = delonix_net::wg::ensure_node_key()?;
     match action {
@@ -488,7 +495,7 @@ fn cmd_node(action: NodeCmd) -> Result<()> {
             println!("  {}", key.public);
             println!("privada protegida 0600 em <root>/wg/node.key");
         }
-        // Só a chave, sem ruído: isto costuma ir para dentro doutro comando.
+        // Just the key, no noise: this usually goes into another command.
         NodeCmd::Key => println!("{}", key.public),
     }
     Ok(())

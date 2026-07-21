@@ -1,10 +1,10 @@
-//! `delonix secret` — cofre de segredos do runtime (Secret Manager, estilo
-//! docker/k8s). Wrapper fino sobre `delonix_runtime_core::SecretStore`, que já
-//! cifra em repouso (XChaCha20-Poly1305 sob uma chave-mestra local).
+//! `delonix secret` — runtime secret vault (Secret Manager, docker/k8s
+//! style). Thin wrapper over `delonix_runtime_core::SecretStore`, which already
+//! encrypts at rest (XChaCha20-Poly1305 under a local master key).
 //!
-//! É o produtor dos segredos que o `container run --secret <nome>` consome.
-//! **Os valores nunca são impressos** por omissão (`inspect` redige-os; `--reveal`
-//! é opt-in explícito) — um `secret` é rotineiramente colado em issues/chats.
+//! It is the producer of the secrets that `container run --secret <name>` consumes.
+//! **Values are never printed** by default (`inspect` redacts them; `--reveal`
+//! is explicit opt-in) — a `secret` is routinely pasted into issues/chats.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -20,34 +20,34 @@ use super::util::state_root;
 
 #[derive(Subcommand)]
 pub enum SecretCmd {
-    /// Cria/substitui um segredo a partir de literais e/ou um ficheiro `.env`.
+    /// Create/replace a secret from literals and/or a `.env` file.
     Create {
         name: String,
-        /// Par `KEY=value`. Repetível.
+        /// `KEY=value` pair. Repeatable.
         #[arg(long = "from-literal")]
         from_literal: Vec<String>,
-        /// Carrega linhas `KEY=value` de um ficheiro (ex.: `.env`).
+        /// Load `KEY=value` lines from a file (e.g. `.env`).
         #[arg(long = "from-env-file")]
         from_env_file: Option<PathBuf>,
     },
-    /// Lista os segredos (nome + nº de chaves; valores NUNCA mostrados).
+    /// List the secrets (name + number of keys; values NEVER shown).
     Ls,
-    /// Mostra as chaves de um segredo (valores redigidos, salvo `--reveal`).
+    /// Show the keys of a secret (values redacted, unless `--reveal`).
     Inspect {
         #[arg(add = clap_complete::engine::ArgValueCandidates::new(super::complete::secrets))]
         name: String,
-        /// Revela os VALORES em claro (perigoso — evita em terminais partilhados).
+        /// Reveal the VALUES in cleartext (dangerous — avoid on shared terminals).
         #[arg(long)]
         reveal: bool,
     },
-    /// Define/actualiza chaves num segredo (cria-o se não existir).
+    /// Set/update keys in a secret (creates it if it does not exist).
     Set {
         #[arg(add = clap_complete::engine::ArgValueCandidates::new(super::complete::secrets))]
         name: String,
-        /// Pares `KEY=value`.
+        /// `KEY=value` pairs.
         pairs: Vec<String>,
     },
-    /// Remove uma chave de um segredo (ou o segredo todo com `--all`).
+    /// Remove a key from a secret (or the whole secret with `--all`).
     Unset {
         #[arg(add = clap_complete::engine::ArgValueCandidates::new(super::complete::secrets))]
         name: String,
@@ -55,46 +55,46 @@ pub enum SecretCmd {
         #[arg(long)]
         all: bool,
     },
-    /// Remove um segredo.
+    /// Remove a secret.
     Rm {
         #[arg(add = clap_complete::engine::ArgValueCandidates::new(super::complete::secrets))]
         name: String,
     },
-    /// Roda a chave-mestra do host: re-cifra TODOS os segredos com uma chave
-    /// nova. Os valores são preservados.
+    /// Rotate the host master key: re-encrypt ALL secrets with a new key.
+    /// The values are preserved.
     RotateKey,
-    /// Aplica os documentos `kind: Secret` de um manifesto (declarativo — cria o
-    /// segredo sem precisar de `secret create` na CLI).
+    /// Apply the `kind: Secret` documents from a manifest (declarative — creates
+    /// the secret without needing `secret create` on the CLI).
     Apply {
         #[arg(short = 'f', long = "file")]
         file: Option<PathBuf>,
     },
 }
 
-/// `spec` de `kind: Secret` — um saco de pares chave/valor cifrados at-rest,
-/// consumido por `Container.secret` (env/ficheiros) e `Storage.passwordSecret`
-/// (chave `password`). Fecha o gap "sem CLI": declara-se o segredo em YAML em vez
-/// de `delonix secret create`.
+/// `spec` of `kind: Secret` — a bag of key/value pairs encrypted at-rest,
+/// consumed by `Container.secret` (env/files) and `Storage.passwordSecret`
+/// (`password` key). Closes the "no CLI" gap: the secret is declared in YAML
+/// instead of `delonix secret create`.
 #[derive(Debug, Deserialize)]
 struct SecretSpec {
-    /// Pares `CHAVE: valor` inline. **Plaintext no manifesto** — cómodo para dev,
-    /// mas o valor fica em claro no ficheiro; para produção preferir `fromEnvFile`
-    /// (fora do controlo de versões) ou o `secret create` da CLI. Avisado no apply.
+    /// Inline `KEY: value` pairs. **Plaintext in the manifest** — convenient for
+    /// dev, but the value stays in cleartext in the file; for production prefer
+    /// `fromEnvFile` (outside version control) or the CLI's `secret create`. Warned at apply.
     #[serde(default, rename = "stringData")]
     string_data: BTreeMap<String, String>,
-    /// Caminho de um ficheiro `KEY=value` (ex.: `.env`) — mantém os valores FORA
-    /// do manifesto. Aplicado ANTES do `stringData` (inline sobrepõe o ficheiro).
+    /// Path to a `KEY=value` file (e.g. `.env`) — keeps the values OUT of the
+    /// manifest. Applied BEFORE `stringData` (inline overrides the file).
     #[serde(default, rename = "fromEnvFile")]
     from_env_file: Option<PathBuf>,
 }
 
-/// Nomes aceites no `spec` de `kind: Secret`, para o aviso de campos desconhecidos.
+/// Names accepted in the `kind: Secret` `spec`, for the unknown-field warning.
 pub(crate) const SECRET_SPEC_FIELDS: &[&str] = &["stringData", "fromEnvFile"];
 
-/// Lê e parseia um ficheiro `KEY=value`, resolvendo o caminho relativo a `base`
-/// (o CWD para a CLI `secret create`; a pasta do MANIFESTO para `kind: Secret` —
-/// senão um `fromEnvFile: ./app.env` procuraria no CWD de quem corre o comando,
-/// não ao lado do manifesto). Partilhado por `create` e `apply`.
+/// Reads and parses a `KEY=value` file, resolving the path relative to `base`
+/// (the CWD for the `secret create` CLI; the MANIFEST folder for `kind: Secret` —
+/// otherwise a `fromEnvFile: ./app.env` would look in the CWD of whoever runs the
+/// command, not next to the manifest). Shared by `create` and `apply`.
 fn load_env_file(base: &Path, f: &Path) -> Result<BTreeMap<String, String>> {
     let path = if f.is_absolute() {
         f.to_path_buf()
@@ -106,9 +106,9 @@ fn load_env_file(base: &Path, f: &Path) -> Result<BTreeMap<String, String>> {
     Ok(parse_env_file(&content))
 }
 
-/// Aplica os documentos `kind: Secret` (chamado por `secret apply` e por
-/// `stack apply`). Idempotente: `SecretStore::save` cria ou substitui. `base` é a
-/// pasta do manifesto, para resolver `fromEnvFile` relativo a ele.
+/// Applies the `kind: Secret` documents (called by `secret apply` and by
+/// `stack apply`). Idempotent: `SecretStore::save` creates or replaces. `base` is
+/// the manifest folder, to resolve `fromEnvFile` relative to it.
 pub fn apply(docs: &[ManifestDoc], base: &Path) -> Result<()> {
     let store = SecretStore::open(state_root())?;
     for doc in manifest::of_kind(docs, "Secret") {
@@ -120,7 +120,7 @@ pub fn apply(docs: &[ManifestDoc], base: &Path) -> Result<()> {
         if let Some(f) = &spec.from_env_file {
             data.extend(load_env_file(base, f)?);
         }
-        // Inline sobrepõe o ficheiro. Aviso: os valores ficam em claro no manifesto.
+        // Inline overrides the file. Warning: the values stay in cleartext in the manifest.
         if !spec.string_data.is_empty() {
             eprintln!(
                 "AVISO: Secret '{name}': stringData tem valores em CLARO no manifesto — não commites isto num repo; usa fromEnvFile ou `delonix secret create` para produção"
@@ -150,7 +150,7 @@ fn now_unix() -> u64 {
         .unwrap_or(0)
 }
 
-/// Separa `KEY=value` (o `=` do PRIMEIRO sinal; o valor pode conter `=`).
+/// Splits `KEY=value` (at the FIRST `=`; the value may contain `=`).
 fn parse_kv(s: &str) -> Option<(String, String)> {
     let (k, v) = s.split_once('=')?;
     if k.is_empty() {
@@ -160,9 +160,9 @@ fn parse_kv(s: &str) -> Option<(String, String)> {
 }
 
 pub fn run(action: SecretCmd) -> Result<()> {
-    // `Apply` não usa o cofre aberto abaixo (abre o seu próprio) e resolve os
-    // caminhos relativos à pasta do MANIFESTO — tratado à parte, antes de abrir o
-    // store (evita uma abertura de cofre desnecessária). Mesmo padrão do `stack::run`.
+    // `Apply` does not use the vault opened below (it opens its own) and resolves
+    // the paths relative to the MANIFEST folder — handled separately, before opening
+    // the store (avoids an unnecessary vault open). Same pattern as `stack::run`.
     if let SecretCmd::Apply { file } = action {
         let path = manifest::resolve_path(file)?;
         let docs = manifest::load(&path)?;
@@ -171,7 +171,7 @@ pub fn run(action: SecretCmd) -> Result<()> {
     }
     let mut store = SecretStore::open(state_root())?;
     match action {
-        // Tratado no topo (faz `return`).
+        // Handled at the top (does a `return`).
         SecretCmd::Apply { .. } => unreachable!("tratado acima"),
         SecretCmd::Create {
             name,
@@ -185,7 +185,7 @@ pub fn run(action: SecretCmd) -> Result<()> {
             }
             let mut data = std::collections::BTreeMap::new();
             if let Some(f) = from_env_file {
-                // CLI: caminho relativo ao CWD de quem corre o comando.
+                // CLI: path relative to the CWD of whoever runs the command.
                 data.extend(load_env_file(Path::new("."), &f)?);
             }
             for lit in &from_literal {
@@ -223,7 +223,7 @@ pub fn run(action: SecretCmd) -> Result<()> {
             let s = store.load(&name)?;
             println!("Name:  {}", s.name);
             for (k, v) in &s.data {
-                // Redacção por omissão — o valor só sai com --reveal explícito.
+                // Redaction by default — the value only comes out with explicit --reveal.
                 println!(
                     "  {k}={}",
                     if reveal {
@@ -297,12 +297,12 @@ mod tests {
     #[test]
     fn parse_kv_corta_no_primeiro_igual() {
         assert_eq!(parse_kv("K=v"), Some(("K".into(), "v".into())));
-        // O valor pode conter '=' (ex.: um token base64 com padding).
+        // The value may contain '=' (e.g. a base64 token with padding).
         assert_eq!(
             parse_kv("TOKEN=ab==cd"),
             Some(("TOKEN".into(), "ab==cd".into()))
         );
-        // Chave vazia não é válida.
+        // An empty key is not valid.
         assert_eq!(parse_kv("=v"), None);
         assert_eq!(parse_kv("semigual"), None);
     }

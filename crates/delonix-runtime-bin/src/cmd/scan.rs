@@ -1,13 +1,13 @@
-//! `delonix image scan` — SBOM + scan de CVE, e a política de admissão no pull.
+//! `delonix image scan` — SBOM + CVE scan, and the admission policy on pull.
 //!
-//! O motor (`delonix-scan`) faz o trabalho: extrai o SBOM lendo os layers do CAS
-//! (apk/dpkg, sem montar nem correr) e cruza-o com uma base de advisories OSV.
-//! Aqui liga-se isso à CLI e aos pontos de decisão (scan-on-pull).
+//! The engine (`delonix-scan`) does the work: it extracts the SBOM by reading the layers
+//! from the CAS (apk/dpkg, without mounting or running) and cross-references it with an OSV
+//! advisory database. Here that is wired to the CLI and to the decision points (scan-on-pull).
 //!
-//! **Proveniência honesta**: a base EMBEBIDA é um placeholder de 5 entradas — um
-//! "sem vulnerabilidades" contra ela NÃO é um atestado de saúde, e o output
-//! di-lo explicitamente. Só um feed OSV sincronizado (`scan --update`) dá uma
-//! resposta de confiança.
+//! **Honest provenance**: the EMBEDDED database is a 5-entry placeholder — a
+//! "no vulnerabilities" against it is NOT a clean bill of health, and the output
+//! says so explicitly. Only a synced OSV feed (`scan --update`) gives a
+//! trustworthy answer.
 
 use delonix_image::{Image, ImageStore};
 use delonix_runtime_core::{Error, Result};
@@ -16,8 +16,8 @@ use delonix_scan::{AdvisoryDb, Severity};
 use super::output;
 use super::util::{open_stores, resolve_or_pull, state_root};
 
-/// A base placeholder embebida — 5 entradas, para o scan não rebentar sem um
-/// feed sincronizado. NUNCA é apresentada como definitiva (ver `Provenance`).
+/// The embedded placeholder database — 5 entries, so the scan doesn't blow up without a
+/// synced feed. It is NEVER presented as definitive (see `Provenance`).
 const EMBEDDED_ADVISORIES: &str = include_str!("../../../delonix-scan/data/advisories.json");
 
 struct Provenance {
@@ -33,8 +33,8 @@ fn now_unix() -> u64 {
         .unwrap_or(0)
 }
 
-/// Carrega a base de advisories: a sincronizada (`<root>/advisories.json`) tem
-/// precedência; senão `$DELONIX_ADVISORIES`; senão a placeholder embebida.
+/// Loads the advisory database: the synced one (`<root>/advisories.json`) takes
+/// precedence; otherwise `$DELONIX_ADVISORIES`; otherwise the embedded placeholder.
 fn load_advisories() -> Result<(AdvisoryDb, Provenance)> {
     let root = state_root();
     let synced = root.join("advisories.json");
@@ -86,8 +86,8 @@ fn load_advisories() -> Result<(AdvisoryDb, Provenance)> {
     ))
 }
 
-/// `image scan <image>` — dashboard de vulnerabilidades. Puxa a imagem se faltar
-/// (como o `docker scout`).
+/// `image scan <image>` — vulnerability dashboard. Pulls the image if missing
+/// (like `docker scout`).
 pub fn cmd_scan(image: &str, sbom: bool, fail_on: Option<&str>) -> Result<()> {
     let (images, _store) = open_stores()?;
     let img = match images.resolve(image) {
@@ -129,8 +129,8 @@ pub fn cmd_scan(image: &str, sbom: bool, fail_on: Option<&str>) -> Result<()> {
     Ok(())
 }
 
-/// Analisa uma imagem e imprime o dashboard. Devolve a pior severidade
-/// encontrada (`None` = nenhuma). Reutilizável pelo scan-on-pull.
+/// Scans an image and prints the dashboard. Returns the worst severity
+/// found (`None` = none). Reusable by scan-on-pull.
 pub fn scan_image(images: &ImageStore, image: &Image) -> Result<Option<Severity>> {
     let sbom = delonix_scan::extract_sbom(images, image)?;
     let (db, prov) = load_advisories()?;
@@ -155,8 +155,8 @@ pub fn scan_image(images: &ImageStore, image: &Image) -> Result<Option<Severity>
     );
     println!("  {}", sev_line(crit, high, med, low));
 
-    // Proveniência HONESTA: sem isto, um "sem vulnerabilidades" contra a base
-    // placeholder parecia um atestado de saúde — falsa garantia.
+    // HONEST provenance: without this, a "no vulnerabilities" against the placeholder
+    // database looked like a clean bill of health — a false guarantee.
     let stale = delonix_scan::db_is_stale(prov.synced_unix, now_unix(), 14);
     println!(
         "  {}",
@@ -216,8 +216,8 @@ fn sev_line(crit: usize, high: usize, med: usize, low: usize) -> String {
     }
 }
 
-/// `image scan --update` — sincroniza um feed OSV (ou nativo) para
-/// `<root>/advisories.json`, fundindo com o que já existe (nunca perde entradas).
+/// `image scan --update` — syncs an OSV (or native) feed to
+/// `<root>/advisories.json`, merging with what already exists (never loses entries).
 pub fn cmd_scan_update(feed: Option<String>) -> Result<()> {
     use std::collections::BTreeMap;
     let (images, _store) = open_stores()?;
@@ -238,7 +238,7 @@ pub fn cmd_scan_update(feed: Option<String>) -> Result<()> {
     let text = String::from_utf8_lossy(&raw);
     let value: serde_json::Value =
         serde_json::from_str(&text).map_err(|e| Error::Invalid(format!("feed inválido: {e}")))?;
-    // OSV: objeto `{"vulns":…}` ou array cujo 1.º elemento tem `affected`.
+    // OSV: `{"vulns":…}` object or an array whose 1st element has `affected`.
     let is_osv = value.get("vulns").is_some()
         || value
             .as_array()
@@ -261,7 +261,7 @@ pub fn cmd_scan_update(feed: Option<String>) -> Result<()> {
 
     let dst = images.root().join("advisories.json");
     let mut by_id: BTreeMap<String, serde_json::Value> = BTreeMap::new();
-    // Arranca do embebido + do que já existir (para nunca perder advisories).
+    // Starts from the embedded + whatever already exists (to never lose advisories).
     for src in [
         EMBEDDED_ADVISORIES.to_string(),
         std::fs::read_to_string(&dst).unwrap_or_default(),
@@ -285,7 +285,7 @@ pub fn cmd_scan_update(feed: Option<String>) -> Result<()> {
     }
     let merged: Vec<serde_json::Value> = by_id.into_values().collect();
     let json = serde_json::to_string_pretty(&merged)?;
-    AdvisoryDb::load(&json)?; // valida o schema antes de gravar
+    AdvisoryDb::load(&json)?; // validates the schema before writing
     std::fs::write(&dst, &json)?;
     let meta = serde_json::json!({ "source": source, "synced_unix": now_unix(), "count": merged.len(), "format": if is_osv { "osv" } else { "native" } });
     let _ = std::fs::write(
@@ -299,7 +299,7 @@ pub fn cmd_scan_update(feed: Option<String>) -> Result<()> {
     Ok(())
 }
 
-/// A política de admissão rejeita? `worst >= threshold`.
+/// Does the admission policy reject? `worst >= threshold`.
 pub fn admission_rejects(worst: Option<Severity>, policy: &str) -> bool {
     match Severity::parse(policy) {
         Some(th) => worst.map(|w| w >= th).unwrap_or(false),
@@ -307,13 +307,13 @@ pub fn admission_rejects(worst: Option<Severity>, policy: &str) -> bool {
     }
 }
 
-/// **Política de admissão de CVE no pull** (supply-chain). Controlada por
-/// `DELONIX_SCAN_ON_PULL`: unset/vazio = off (sem latência); `warn` = scan +
-/// reporta; `low|medium|high|critical` = GATE fail-closed — remove a imagem e
-/// recusa se houver uma vulnerabilidade >= essa severidade.
+/// **CVE admission policy on pull** (supply-chain). Controlled by
+/// `DELONIX_SCAN_ON_PULL`: unset/empty = off (no latency); `warn` = scan +
+/// report; `low|medium|high|critical` = fail-closed GATE — removes the image and
+/// refuses if there is a vulnerability >= that severity.
 ///
-/// É o mecanismo de enforcement que a auditoria supply-chain apontava em falta:
-/// sem isto, um `pull` aceita qualquer imagem sem olhar para o que traz dentro.
+/// It is the enforcement mechanism the supply-chain audit flagged as missing:
+/// without this, a `pull` accepts any image without looking at what it brings inside.
 pub fn admission_scan_on_pull(images: &ImageStore, reference: &str, img: &Image) -> Result<()> {
     let policy = match std::env::var("DELONIX_SCAN_ON_PULL") {
         Ok(p) => p.trim().to_lowercase(),
@@ -327,7 +327,7 @@ pub fn admission_scan_on_pull(images: &ImageStore, reference: &str, img: &Image)
     );
     let worst = match scan_image(images, img) {
         Ok(w) => w,
-        // Sem SBOM (scratch/distroless) ou scan indisponível → não bloquear, avisar.
+        // No SBOM (scratch/distroless) or scan unavailable → don't block, warn.
         Err(e) => {
             output::warn(&format!(
                 "scan de admissão indisponível ({e}); pull permitido."
@@ -336,7 +336,7 @@ pub fn admission_scan_on_pull(images: &ImageStore, reference: &str, img: &Image)
         }
     };
     if admission_rejects(worst, &policy) {
-        let _ = images.remove(reference); // desfaz o pull (fail-closed)
+        let _ = images.remove(reference); // undoes the pull (fail-closed)
         return Err(Error::Invalid(format!(
             "imagem '{reference}' RECUSADA pela política de admissão: vulnerabilidade >= {policy} \
              (DELONIX_SCAN_ON_PULL). Imagem removida. Corrige a imagem ou ajusta a política."
@@ -354,19 +354,19 @@ mod tests {
 
     #[test]
     fn admissao_rejeita_por_severidade() {
-        // Gate `high`: rejeita critical/high, aceita medium/low/nada.
+        // Gate `high`: rejects critical/high, accepts medium/low/nothing.
         assert!(admission_rejects(Some(Severity::Critical), "high"));
         assert!(admission_rejects(Some(Severity::High), "high"));
         assert!(!admission_rejects(Some(Severity::Medium), "high"));
         assert!(!admission_rejects(Some(Severity::Low), "high"));
         assert!(!admission_rejects(None, "high"));
-        // `warn` não é uma severidade → nunca rejeita (só reporta).
+        // `warn` is not a severity → never rejects (only reports).
         assert!(!admission_rejects(Some(Severity::Critical), "warn"));
     }
 
     #[test]
     fn base_embebida_parseia() {
-        // Se o placeholder embebido não parsear, todo o scan falha em silêncio.
+        // If the embedded placeholder doesn't parse, the whole scan fails silently.
         assert!(AdvisoryDb::load(EMBEDDED_ADVISORIES).is_ok());
     }
 }

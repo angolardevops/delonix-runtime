@@ -1,12 +1,12 @@
-//! Nomes auto-gerados no padrão angolano — reis/rainhas + lugares de Angola.
+//! Auto-generated names in the Angolan pattern — kings/queens + places in Angola.
 //!
-//! É a identidade de nomeação do produto inteiro: os clusters kind-mode já a
-//! usavam (`random_cluster_name`) e os containers juntam-se-lhe aqui, em vez
-//! do `dlx-<hash>` ilegível. Um nome que se lê e se diz aparece no `ls`, nos
-//! logs e nas conversas de equipa — `njinga-benguela-07` conta uma história,
-//! `dlx-a1fef9d5` não.
+//! It's the naming identity of the whole product: the kind-mode clusters already
+//! used it (`random_cluster_name`) and containers join it here, instead of the
+//! unreadable `dlx-<hash>`. A name that can be read and spoken shows up in `ls`, in
+//! the logs, and in team conversations — `njinga-benguela-07` tells a story,
+//! `dlx-a1fef9d5` doesn't.
 
-/// Reis/rainhas de Angola — Ndongo, Kongo, Matamba, Bailundo.
+/// Kings/queens of Angola — Ndongo, Kongo, Matamba, Bailundo.
 pub(crate) const REIS: &[&str] = &[
     "njinga",
     "mandume",
@@ -24,7 +24,7 @@ pub(crate) const REIS: &[&str] = &[
     "soba",
 ];
 
-/// Províncias, municípios e comunas de Angola.
+/// Provinces, municipalities, and communes of Angola.
 pub(crate) const LUGARES: &[&str] = &[
     "luanda",
     "benguela",
@@ -64,14 +64,14 @@ pub(crate) const LUGARES: &[&str] = &[
     "chinguar",
 ];
 
-/// Deriva um nome `<rei>-<lugar>-<NN>` DETERMINÍSTICO a partir de `seed`
-/// (o id do container), saltando os que `taken` acusar como ocupados.
+/// Derives a DETERMINISTIC name `<king>-<place>-<NN>` from `seed`
+/// (the container's id), skipping the ones that `taken` reports as occupied.
 ///
-/// Determinístico de propósito, não aleatório: o `run --net <rede>` re-executa
-/// o processo (2 passagens, ver `reexec_into_netns`) e as duas têm de chegar
-/// ao MESMO nome sem o transportar por fora — o id já viaja no
-/// `DELONIX_REEXEC_ID`, o nome deriva dele. FNV-1a semeia, um LCG itera; ~50k
-/// combinações e 50 tentativas contra os nomes existentes chegam de sobra.
+/// Deterministic on purpose, not random: `run --net <network>` re-executes
+/// the process (2 passes, see `reexec_into_netns`) and both have to arrive
+/// at the SAME name without carrying it externally — the id already travels in
+/// `DELONIX_REEXEC_ID`, the name derives from it. FNV-1a seeds, an LCG iterates; ~50k
+/// combinations and 50 attempts against the existing names are more than enough.
 pub(crate) fn derived_name<F: Fn(&str) -> bool>(seed: &str, taken: F) -> Option<String> {
     let mut h: u64 = 0xcbf29ce484222325;
     for b in seed.bytes() {
@@ -102,7 +102,7 @@ mod tests {
 
     #[test]
     fn mesmo_seed_da_o_mesmo_nome() {
-        // A garantia de que as duas passagens do re-exec convergem.
+        // The guarantee that the two re-exec passes converge.
         let a = derived_name("abc123", |_| false).unwrap();
         let b = derived_name("abc123", |_| false).unwrap();
         assert_eq!(a, b);

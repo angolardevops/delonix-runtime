@@ -1407,3 +1407,554 @@ msgstr "uma regra anterior sobreposta ({action} {spec}) continua a casar primeir
 
 msgid "{name}: {n} {arrow} rule(s) removed ({spec})"
 msgstr "{name}: {n} regra(s) {arrow} removida(s) ({spec})"
+
+# ---- help dos subcomandos do bin (comentários /// traduzidos p/ EN; fase 2) ----
+
+msgid "Dashboard (KPIs + table) of images — interactive TUI, or `--once` snapshot."
+msgstr "Dashboard (KPIs + tabela) das imagens — TUI interactivo, ou `--once` snapshot."
+
+msgid "Pull an image from a registry."
+msgstr "Puxa uma imagem de um registo."
+
+msgid "Verify the cosign signature with this public key (PEM) AFTER the pull, and fail if it does not match. Without this, a pull is not authenticated beyond the registry's own digest."
+msgstr "Verifica a assinatura cosign com esta chave pública (PEM) DEPOIS do pull, e falha se não bater. Sem isto, um pull não é autenticado além do digest do próprio registo."
+
+msgid "List local images."
+msgstr "Lista imagens locais."
+
+msgid "Human-readable detail of one or more images, `kubectl describe`-style (tags/digest/size/layers + the OCI config: entrypoint/cmd/env/workdir). With `--vm`, describes golden VM images."
+msgstr "Detalhe legível de uma ou mais imagens, ao estilo `kubectl describe` (tags/digest/tamanho/layers + o config OCI: entrypoint/cmd/env/workdir). Com `--vm`, descreve imagens VM douradas."
+
+msgid "Give another name/tag to a local image (copies nothing — it's just a new name for the same content)."
+msgstr "Dá outro nome/tag a uma imagem local (não copia nada — é só um nome novo para o mesmo conteúdo)."
+
+msgid "Layers of an image (digest + size), from base to top."
+msgstr "Layers de uma imagem (digest + tamanho), da base para o topo."
+
+msgid "Verify the cosign signature of a local image against a public key."
+msgstr "Verifica a assinatura cosign de uma imagem local contra uma chave pública."
+
+msgid "Public key in PEM."
+msgstr "Chave pública em PEM."
+
+msgid "SBOM + CVE scan of an image (reads the layers from the CAS, without running anything). Pulls the image if missing. See `--sbom`, `--fail-on`, `--update`."
+msgstr "SBOM + scan de CVE de uma imagem (lê os layers do CAS, sem correr nada). Puxa a imagem se faltar. Ver `--sbom`, `--fail-on`, `--update`."
+
+msgid "Image to scan (optional with `--update`)."
+msgstr "Imagem a analisar (dispensável com `--update`)."
+
+msgid "List the SBOM (installed packages) instead of scanning."
+msgstr "Lista o SBOM (pacotes instalados) em vez de analisar."
+
+msgid "Fail (exit 1) if there are vulnerabilities >= this severity (low|medium|high|critical) — gate for CI."
+msgstr "Falha (exit 1) se houver vulnerabilidades >= esta severidade (low|medium|high|critical) — gate para CI."
+
+msgid "Sync the CVE feed to the local database (used afterwards by each scan)."
+msgstr "Sincroniza o feed de CVE para a base local (usada depois por cada scan)."
+
+msgid "Feed source for `--update`: URL or file (or $DELONIX_ADVISORY_FEED)."
+msgstr "Fonte do feed para `--update`: URL ou ficheiro (ou $DELONIX_ADVISORY_FEED)."
+
+msgid "Remove a local image."
+msgstr "Remove uma imagem local."
+
+msgid "Export an OCI runtime bundle (rootfs + config.json) for `runc`/`crun`."
+msgstr "Exporta um bundle OCI runtime (rootfs + config.json) para `runc`/`crun`."
+
+msgid "Apply the `kind: Image` documents of a manifest (`pull` idempotent by reference; `build` rebuilds and replaces the tag on each apply)."
+msgstr "Aplica os documentos `kind: Image` de um manifesto (`pull` idempotente por referência; `build` reconstrói e substitui a tag a cada apply)."
+
+msgid "Authenticate to an OCI registry (stores the credentials in `<root>/auth.json`, docker/podman format). The password ALWAYS comes from stdin — never from an argument (it would end up in the shell history and in /proc)."
+msgstr "Autentica num registo OCI (guarda as credenciais em `<root>/auth.json`, formato docker/podman). A password vem SEMPRE do stdin — nunca de um argumento (ficaria no histórico da shell e no /proc)."
+
+msgid "Registry (e.g. `ghcr.io`, `docker.io`)."
+msgstr "Registo (ex.: `ghcr.io`, `docker.io`)."
+
+msgid "Read the password/token from stdin (the only supported way)."
+msgstr "Lê a password/token do stdin (única forma suportada)."
+
+msgid "Remove the stored credentials of a registry."
+msgstr "Remove as credenciais guardadas de um registo."
+
+msgid "Golden VM images (`<root>/vm-images/`): ls/pull/push/build. Equivalent to `image --vm <cmd>` (old form, kept)."
+msgstr "Imagens VM douradas (`<root>/vm-images/`): ls/pull/push/build. Equivalente a `image --vm <cmd>` (forma antiga, mantida)."
+
+msgid "Publish a local image to an OCI registry. Without `target`, publishes under the image's own reference. With `--vm`, `target` is required."
+msgstr "Publica uma imagem local num registo OCI. Sem `target`, publica sob a própria referência da imagem. Com `--vm`, o `target` é obrigatório."
+
+msgid "(only with `--vm`) Build the golden VM image (Ubuntu + kubeadm/kubelet/ kubectl + `delonix-cri`)."
+msgstr "(só com `--vm`) Constrói a imagem VM dourada (Ubuntu + kubeadm/kubelet/ kubectl + `delonix-cri`)."
+
+msgid "Do not compress the final qcow2 (larger, but with no decompression cost on backing-file reads at runtime)."
+msgstr "Não comprimir o qcow2 final (maior, mas sem custo de descompressão nas leituras do backing file em runtime)."
+
+msgid "Fetch the k8s .deb packages on the HOST (verified) and install them with `dpkg` — the appliance runs without network. No DHCP/DNS needed in the guest."
+msgstr "Obter os .deb do k8s no HOST (verificados) e instalá-los com `dpkg` — o appliance corre sem rede. Dispensa DHCP/DNS no guest."
+
+msgid "List the local VM images."
+msgstr "Lista as imagens VM locais."
+
+msgid "Human-readable detail of one or more VM images, `kubectl describe`-style."
+msgstr "Detalhe legível de uma ou mais imagens VM, ao estilo `kubectl describe`."
+
+msgid "Fetch a VM image from an OCI registry (single-blob artifact)."
+msgstr "Obtém uma imagem VM de um registo OCI (artefacto de blob único)."
+
+msgid "Publish a local VM image to an OCI registry."
+msgstr "Publica uma imagem VM local num registo OCI."
+
+msgid "Build the golden VM image (Ubuntu + kubeadm/kubelet/kubectl + `delonix-cri`)."
+msgstr "Constrói a imagem VM dourada (Ubuntu + kubeadm/kubelet/kubectl + `delonix-cri`)."
+
+msgid "Dashboard (KPIs + table) of the networks — interactive TUI, or `--once` snapshot."
+msgstr "Dashboard (KPIs + tabela) das redes — TUI interactivo, ou `--once` snapshot."
+
+msgid "List the networks."
+msgstr "Lista as redes."
+
+msgid "WireGuard identity of THIS node, for the encrypted VXLAN overlay between nodes (`network create --driver overlay`). The private key stays 0600 in `<root>/wg/node.key`; the public one is what you hand out to the peers."
+msgstr "Identidade WireGuard DESTE nó, para o overlay VXLAN cifrado entre nós (`network create --driver overlay`). A chave privada fica 0600 em `<root>/wg/node.key`; a pública é o que se distribui aos peers."
+
+msgid "Create a network."
+msgstr "Cria uma rede."
+
+msgid "`bridge` (default, filtered by the firewall) | `macvlan` | `ipvlan` (NOT filtered, see warning) | `overlay` (inter-node VXLAN)."
+msgstr "`bridge` (default, filtrada pelo firewall) | `macvlan` | `ipvlan` (NÃO filtrados, ver aviso) | `overlay` (VXLAN inter-nó)."
+
+msgid "Host parent NIC (required for macvlan/ipvlan)."
+msgstr "NIC-pai do host (obrigatório p/ macvlan/ipvlan)."
+
+msgid "Subnet (required for macvlan/ipvlan, e.g.: `192.168.1.0/24`)."
+msgstr "Subnet (obrigatório p/ macvlan/ipvlan, ex.: `192.168.1.0/24`)."
+
+msgid "VXLAN Network Identifier (required for overlay)."
+msgstr "VXLAN Network Identifier (obrigatório p/ overlay)."
+
+msgid "Peer node (`<ip>` or `<ip>=<wg_pubkey>=<wg_ip>`), repeatable (overlay)."
+msgstr "Nó-par (`<ip>` ou `<ip>=<wg_pubkey>=<wg_ip>`), repetível (overlay)."
+
+msgid "WireGuard tunnel IP of this node (encrypted overlay)."
+msgstr "IP de túnel WireGuard deste nó (overlay cifrado)."
+
+msgid "Detail of a network."
+msgstr "Detalhe de uma rede."
+
+msgid "Readable detail of one or more networks, `kubectl describe` style (for humans; use `inspect` for the usual compact view)."
+msgstr "Detalhe legível de uma ou mais redes, ao estilo `kubectl describe` (para humanos; use `inspect` para a vista compacta de sempre)."
+
+msgid "Remove a network."
+msgstr "Remove uma rede."
+
+msgid "Apply the `kind: Network` documents of a manifest (idempotent by name)."
+msgstr "Aplica os documentos `kind: Network` de um manifesto (idempotente por nome)."
+
+msgid "Generate the node key (if it does not exist yet) and print the public one with the context of what to do with it. Idempotent."
+msgstr "Gera a chave do nó (se ainda não existir) e imprime a pública com o contexto de o que fazer com ela. Idempotente."
+
+msgid "Print only the public key (for composing in scripts)."
+msgstr "Imprime só a chave pública (para compor em scripts)."
+
+msgid "State of the proxy + active routes (from the config in effect)."
+msgstr "Estado do proxy + rotas activas (da config em vigor)."
+
+msgid "Apply the HTTPRoutes of a manifest (brings up/reloads the proxy)."
+msgstr "Aplica os HTTPRoute de um manifesto (sobe/recarrega o proxy)."
+
+msgid "Manifest file (default `./delonix-manifest.yaml`)."
+msgstr "Ficheiro do manifesto (default `./delonix-manifest.yaml`)."
+
+msgid "Stop the proxy and unpublish the ports (teardown)."
+msgstr "Pára o proxy e despublica as portas (teardown)."
+
+msgid "Storage/volumes dashboard (KPIs + table) — TUI, or --once snapshot."
+msgstr "Dashboard (KPIs + tabela) do storage/volumes — TUI, ou --once snapshot."
+
+msgid "Create (and mount) a network storage."
+msgstr "Cria (e monta) um armazenamento de rede."
+
+msgid "Type: nfs | cifs/smb (Samba/Windows) | webdav (Nextcloud/ownCloud)."
+msgstr "Tipo: nfs | cifs/smb (Samba/Windows) | webdav (Nextcloud/ownCloud)."
+
+msgid "Server (host/IP), or the base URL in the webdav case."
+msgstr "Servidor (host/IP), ou o URL base no caso do webdav."
+
+msgid "Export/share: NFS path (/mnt/pool/media), CIFS share name (media), or the path in the WebDAV URL (/remote.php/dav/...)."
+msgstr "Export/partilha: caminho NFS (/mnt/pool/media), nome da share CIFS (media), ou o caminho no URL WebDAV (/remote.php/dav/...)."
+
+msgid "User (cifs/webdav)."
+msgstr "Utilizador (cifs/webdav)."
+
+msgid "Password (cifs/webdav) — prefer --password-secret to avoid exposing it."
+msgstr "Password (cifs/webdav) — preferir --password-secret para não a expor."
+
+msgid "Vault secret with the password key (cifs/webdav) — does not leak in shell history."
+msgstr "Segredo do cofre com a chave password (cifs/webdav) — não vaza no histórico."
+
+msgid "Mount read-only."
+msgstr "Monta só-de-leitura."
+
+msgid "Extra mount options (vers=4.1,soft), appended to the derived ones."
+msgstr "Opções de mount extra (vers=4.1,soft), acrescentadas às derivadas."
+
+msgid "List the network storages (volumes with a network driver)."
+msgstr "Lista os armazenamentos de rede (volumes com driver de rede)."
+
+msgid "Details of a storage."
+msgstr "Detalhe de um armazenamento."
+
+msgid "Remove (and unmount) a storage. The DATA stays on the NAS — only the local mount is torn down, like docker."
+msgstr "Remove (e desmonta) um armazenamento. Os DADOS ficam no NAS — só se desliga a montagem local, como o docker."
+
+msgid "Apply the kind: Storage documents from a manifest."
+msgstr "Aplica os documentos kind: Storage de um manifesto."
+
+msgid "Create a named volume."
+msgstr "Cria um volume nomeado."
+
+msgid "local (default) or nfs."
+msgstr "local (default) ou nfs."
+
+msgid "Device/export (nfs driver)."
+msgstr "Dispositivo/export (driver nfs)."
+
+msgid "Additional mount options (nfs driver)."
+msgstr "Opções de montagem adicionais (driver nfs)."
+
+msgid "Quota (e.g. 2g) — only applied if --quota is given."
+msgstr "Quota (ex.: 2g) — só é aplicada se --quota for dado."
+
+msgid "List the volumes."
+msgstr "Lista os volumes."
+
+msgid "Details of a volume (includes real on-disk usage)."
+msgstr "Detalhe de um volume (inclui uso real em disco)."
+
+msgid "Readable detail of one or more volumes, kubectl describe style (for humans; use inspect for the usual compact view)."
+msgstr "Detalhe legível de um ou mais volumes, ao estilo kubectl describe (para humanos; use inspect para a vista compacta de sempre)."
+
+msgid "Remove a volume."
+msgstr "Remove um volume."
+
+msgid "Apply the kind: Volume documents from a manifest (idempotent by name)."
+msgstr "Aplica os documentos kind: Volume de um manifesto (idempotente por nome)."
+
+msgid "Point-in-time snapshots of a volume (tar.gz under the volume; safe in rootless)."
+msgstr "Snapshots pontuais de um volume (tar.gz sob o volume; seguro em rootless)."
+
+msgid "Create a snapshot NOW (default name: UTC timestamp)."
+msgstr "Cria um snapshot AGORA (nome default: timestamp UTC)."
+
+msgid "Snapshot name (default: YYYYMMDD-HHMMSS)."
+msgstr "Nome do snapshot (default: AAAAMMDD-HHMMSS)."
+
+msgid "List the snapshots of a volume."
+msgstr "Lista os snapshots de um volume."
+
+msgid "Volume to query (omit for the snapshots of ALL)."
+msgstr "Volume a consultar (omite para os snapshots de TODOS)."
+
+msgid "Restore a snapshot INTO the volume (replaces the current data — stop the consumers first)."
+msgstr "Repõe um snapshot NO volume (substitui os dados actuais — pára os consumidores primeiro)."
+
+msgid "Snapshot name (see snapshot ls)."
+msgstr "Nome do snapshot (ver snapshot ls)."
+
+msgid "Delete a snapshot."
+msgstr "Apaga um snapshot."
+
+msgid "Create/replace a secret from literals and/or a .env file."
+msgstr "Cria/substitui um segredo a partir de literais e/ou um ficheiro .env."
+
+msgid "KEY=value pair. Repeatable."
+msgstr "Par KEY=value. Repetível."
+
+msgid "Load KEY=value lines from a file (e.g. .env)."
+msgstr "Carrega linhas KEY=value de um ficheiro (ex.: .env)."
+
+msgid "List the secrets (name + number of keys; values NEVER shown)."
+msgstr "Lista os segredos (nome + nº de chaves; valores NUNCA mostrados)."
+
+msgid "Show the keys of a secret (values redacted, unless --reveal)."
+msgstr "Mostra as chaves de um segredo (valores redigidos, salvo --reveal)."
+
+msgid "Reveal the VALUES in cleartext (dangerous — avoid on shared terminals)."
+msgstr "Revela os VALORES em claro (perigoso — evita em terminais partilhados)."
+
+msgid "Set/update keys in a secret (creates it if it does not exist)."
+msgstr "Define/actualiza chaves num segredo (cria-o se não existir)."
+
+msgid "KEY=value pairs."
+msgstr "Pares KEY=value."
+
+msgid "Remove a key from a secret (or the whole secret with --all)."
+msgstr "Remove uma chave de um segredo (ou o segredo todo com --all)."
+
+msgid "Remove a secret."
+msgstr "Remove um segredo."
+
+msgid "Rotate the host master key: re-encrypt ALL secrets with a new key. The values are preserved."
+msgstr "Roda a chave-mestra do host: re-cifra TODOS os segredos com uma chave nova. Os valores são preservados."
+
+msgid "Apply the kind: Secret documents from a manifest (declarative — creates the secret without needing secret create on the CLI)."
+msgstr "Aplica os documentos kind: Secret de um manifesto (declarativo — cria o segredo sem precisar de secret create na CLI)."
+
+msgid "Initialize a project with the cluster manifests (kind/vm/ssh) — files ALREADY FILLED IN (images included), ready to use without editing anything."
+msgstr "Inicializa um projecto com os manifestos de cluster (kind/vm/ssh) — ficheiros JÁ PREENCHIDOS (imagens incluídas), prontos a usar sem editar nada."
+
+msgid "Project directory (default: the current one)."
+msgstr "Directório do projecto (default: o actual)."
+
+msgid "Project name (default: the directory name)."
+msgstr "Nome do projecto (default: o nome do directório)."
+
+msgid "Image to use. Omit = fills in with the default image."
+msgstr "Imagem a usar. Omitir = preenche com a imagem por omissão."
+
+msgid "Overwrite existing files."
+msgstr "Substitui ficheiros já existentes."
+
+msgid "Create a local Kubernetes cluster **without a manifest and without Docker** (native kind mode): starts the `kindest/node` nodes in the Delonix engine itself and bootstraps them with `kubeadm`. No flags = 1 control-plane ready to use."
+msgstr "Cria um cluster Kubernetes local **sem manifesto e sem Docker** (modo kind nativo): arranca os nós `kindest/node` no próprio motor Delonix e faz o bootstrap com `kubeadm`. Sem flags = 1 control-plane pronto a usar."
+
+msgid "Cluster name (prefix of the nodes and the kubeconfig). Omit = invents one (Angolan king + place), so two `create`s in a row do not collide."
+msgstr "Nome do cluster (prefixo dos nós e do kubeconfig). Omitir = inventa um (rei + lugar de Angola), para dois `create` seguidos não colidirem."
+
+msgid "Host port for the apiserver. Omit = delonix picks a free one (tries 6443; if taken by another cluster, uses a high one)."
+msgstr "Porta do host para o apiserver. Omitir = o delonix escolhe uma livre (tenta a 6443; se estiver tomada por outro cluster, usa uma alta)."
+
+msgid "Worker nodes to join (0 = control-plane only, untainted — schedules everything)."
+msgstr "Nós worker a juntar (0 = só control-plane, sem taint — agenda tudo)."
+
+msgid "Cluster control-planes (default 1). More than 1 requires a stable endpoint in front of them (LB) — see the error if you ask for >1."
+msgstr "Control-planes do cluster (default 1). Mais que 1 exige um endpoint estável à frente deles (LB) — ver o erro se pedires >1."
+
+msgid "Node image (default: `kindest/node` pinned by digest)."
+msgstr "Imagem do nó (default: `kindest/node` fixada por digest)."
+
+msgid "`default` (kindnet, from the image itself) or `none` (node stays NotReady until you apply yours — plain kubeadm behavior)."
+msgstr "`default` (kindnet, da própria imagem) ou `none` (nó fica NotReady até aplicares a tua — comportamento do kubeadm puro)."
+
+msgid "List the clusters and the state of their nodes."
+msgstr "Lista os clusters e o estado dos seus nós."
+
+msgid "Remove a kind-mode cluster (stops and deletes the nodes + kubeconfig)."
+msgstr "Remove um cluster do modo kind (pára e apaga os nós + kubeconfig)."
+
+msgid "Apply the `kind: Cluster` document(s) of a manifest."
+msgstr "Aplica o(s) documento(s) `kind: Cluster` de um manifesto."
+
+msgid "Provision VMs (golden VM image) + `kubeadm` bootstrap — from zero to a working cluster, without writing a manifest by hand."
+msgstr "Provisiona VMs (imagem VM dourada) + bootstrap `kubeadm` — do zero a um cluster a funcionar, sem escrever um manifesto à mão."
+
+msgid "Tag of the golden VM image (`delonix image --vm ls`). Omit = uses the only local image that exists."
+msgstr "Tag da imagem VM dourada (`delonix image --vm ls`). Omitir = usa a única imagem local existente."
+
+msgid "Already-created network (`delonix network create`) — no magic default."
+msgstr "Rede já criada (`delonix network create`) — sem default mágico."
+
+msgid "Private SSH key to use. Omit = generates a new ed25519 pair in `<root>/clusters/<name>/id_ed25519`."
+msgstr "Chave SSH privada a usar. Omitir = gera um par ed25519 novo em `<root>/clusters/<name>/id_ed25519`."
+
+msgid "Seconds to wait for each VM to become reachable over SSH."
+msgstr "Segundos a esperar por cada VM ficar alcançável por SSH."
+
+msgid "Dashboard (KPIs + table + problems) of the containers — interactive TUI, or `--once` for a text snapshot."
+msgstr "Dashboard (KPIs + tabela + problemas) dos containers — TUI interactivo, ou `--once` para um snapshot de texto."
+
+msgid "Generate a complete PROJECT for a stack (e.g. `python`) with best practices, instead of the generic scaffold. `--template list` shows the available ones."
+msgstr "Gera um PROJECTO completo de uma stack (ex.: `python`) com boas práticas, em vez do scaffold genérico. `--template list` mostra os disponíveis."
+
+msgid "After generating, build the image, start it, and wait until it's healthy."
+msgstr "Depois de gerar, constrói a imagem, arranca e espera ficar saudável."
+
+msgid "Engine events (create/start/die/remove/…), from oldest to most recent. With no daemon, the log is a shared append-only file — each command appends its own line (see `delonix_runtime_core::events`)."
+msgstr "Eventos do motor (create/start/die/remove/…), do mais antigo ao mais recente. Sem daemon, o registo é um log append-only partilhado — cada comando acrescenta a sua linha (ver `delonix_runtime_core::events`)."
+
+msgid "Follow continuously (Ctrl-C to exit)."
+msgstr "Segue em contínuo (Ctrl-C para sair)."
+
+msgid "Show only the last N (default: all)."
+msgstr "Mostra só os últimos N (default: todos)."
+
+msgid "Engine state: rootless?, cgroup delegation, network infra, counts."
+msgstr "Estado do motor: rootless?, delegação de cgroup, infra de rede, contagens."
+
+msgid "Disk usage by area (images, containers, volumes, VM images)."
+msgstr "Uso de disco por área (imagens, containers, volumes, imagens VM)."
+
+msgid "Host virtualization: hypervisor, KVM, virtio — and what there is to tune."
+msgstr "Virtualização do host: hipervisor, KVM, virtio — e o que há a afinar."
+
+msgid "Apply the recommended tuning (needs root)."
+msgstr "Aplica as afinações recomendadas (precisa de root)."
+
+msgid "Reclaim space: remove stopped containers, unused images, CAS blobs nobody references, empty cgroups and — the biggest space saver — **orphan container directories** (from nodes/containers that died abruptly without `rm`, with no registry entry)."
+msgstr "Recupera espaço: remove containers parados, imagens sem uso, blobs do CAS que ninguém referencia, cgroups vazios e — o que mais espaço liberta — **directórios de containers órfãos** (de nós/containers que morreram abruptamente sem `rm`, sem entrada no registo)."
+
+msgid "Also remove unused images that DO have a tag (not just the dangling ones)."
+msgstr "Também remove imagens sem uso que TÊM tag (não só as dangling)."
+
+msgid "Active network connections per container (via conntrack): who comes in, who goes out, and between containers. Refreshes continuously (see `--no-stream`)."
+msgstr "Ligações de rede activas por container (via conntrack): quem entra, quem sai, e entre containers. Actualiza em contínuo (ver `--no-stream`)."
+
+msgid "Milliseconds between refreshes (minimum 300)."
+msgstr "Milissegundos entre actualizações (mínimo 300)."
+
+msgid "One sample and exit (without clearing the screen or repeating)."
+msgstr "Uma amostra e sai (sem limpar o ecrã nem repetir)."
+
+msgid "Thermal governor: lowers Delonix's CPU budget when the CPU heats up and restores it when it cools down. Runs continuously (see `--once`)."
+msgstr "Governador térmico: baixa o orçamento de CPU do Delonix quando o CPU aquece e repõe-no quando arrefece. Corre em contínuo (ver `--once`)."
+
+msgid "Temperature (°C) at or above which it cools down."
+msgstr "Temperatura (°C) a partir da qual se arrefece."
+
+msgid "Temperature (°C) below which it restores."
+msgstr "Temperatura (°C) abaixo da qual se restaura."
+
+msgid "Minimum CPU percentage it drops to."
+msgstr "Percentagem mínima de CPU a que se desce."
+
+msgid "Seconds between readings."
+msgstr "Segundos entre leituras."
+
+msgid "One reading and exit (for cron/scripts, instead of the loop)."
+msgstr "Uma leitura e sai (para cron/scripts, em vez do loop)."
+
+msgid "(internal) The embedded L7 reverse-proxy that serves the `kind: HTTPRoute`. NOT for manual use — `stack apply` launches it inside the holder's netns (see `cmd::httproute`/`cmd::ingress_proxy`)."
+msgstr "(interno) O reverse-proxy L7 embutido que serve os `kind: HTTPRoute`. NÃO é para uso manual — o `stack apply` lança-o dentro do netns do holder (ver `cmd::httproute`/`cmd::ingress_proxy`)."
+
+msgid "JSON file with the `ProxyConfig` (listeners + already-resolved routes)."
+msgstr "Ficheiro JSON com a `ProxyConfig` (listeners + rotas já resolvidas)."
+
+msgid "Human-readable detail of one or more VM images, `kubectl describe` style."
+msgstr "Detalhe legível de uma ou mais imagens VM, ao estilo `kubectl describe`."
+
+msgid "Publish a local VM image to an OCI registry (single-blob artifact)."
+msgstr "Publica uma imagem VM local num registo OCI (artefacto de blob único)."
+
+msgid "Pull a VM image from an OCI registry."
+msgstr "Puxa uma imagem VM de um registo OCI."
+
+msgid "Build the golden image: Ubuntu cloud image + kubeadm/kubelet/kubectl + `delonix-cri` (CRI endpoint for the kubelet), via `virt-customize`."
+msgstr "Constrói a imagem dourada: Ubuntu cloud image + kubeadm/kubelet/kubectl + `delonix-cri` (endpoint CRI para o kubelet), via `virt-customize`."
+
+msgid "Kubernetes version (e.g. `1.31`) — omit to use the latest stable."
+msgstr "Versão do Kubernetes (ex.: `1.31`) — omitir usa a última estável."
+
+msgid "Extra apt package, repeatable — extensibility without touching the code."
+msgstr "Pacote apt adicional, repetível — extensibilidade sem tocar no código."
+
+msgid "Extra command to run inside the guest during the build, repeatable."
+msgstr "Comando adicional a correr dentro do guest durante o build, repetível."
+
+msgid "Explicit path of the `delonix-cri` binary to install (otherwise: looks next to the current `delonix`, then tries to build from the workspace if a `Cargo.toml` is detected from the cwd)."
+msgstr "Caminho explícito do binário `delonix-cri` a instalar (senão: procura ao lado do `delonix` actual, depois tenta compilar do workspace se um `Cargo.toml` for detectado a partir do cwd)."
+
+msgid "Do not compress the final qcow2 (larger, but no decompression cost on backing-file reads at runtime)."
+msgstr "Não comprimir o qcow2 final (fica maior, mas sem custo de descompressão nas leituras do backing file em runtime)."
+
+msgid "Fetch the k8s .deb files on the HOST (verified: InRelease signature + SHA256) and install them with `dpkg` — the appliance runs without network (`--no-network`). Dispenses with DHCP/DNS in the guest, so it dispenses with the host workarounds (passt/dhclient) the online mode requires."
+msgstr "Obter os .deb do k8s no HOST (verificados: assinatura do InRelease + SHA256) e instalá-los com `dpkg` — o appliance corre sem rede (`--no-network`). Dispensa DHCP/DNS no guest, logo dispensa os workarounds de host (passt/dhclient) que o modo online exige."
+
+msgid "Build context (default: `.`) — root for `COPY`."
+msgstr "Contexto de build (default: `.`) — raiz para `COPY`."
+
+msgid "Path of the Dockerfile (default: `<context>/Dockerfile`)."
+msgstr "Caminho do Dockerfile (default: `<contexto>/Dockerfile`)."
+
+msgid "Tag of the resulting image (`repo:tag`)."
+msgstr "Tag da imagem resultante (`repo:tag`)."
+
+msgid "Dashboard (KPIs + table) of the VMs — interactive TUI, or `--once` snapshot."
+msgstr "Dashboard (KPIs + tabela) das VMs — TUI interactivo, ou `--once` snapshot."
+
+msgid "Bootstrap a project with a VM manifest — files ALREADY FILLED IN (images included), ready to use without editing anything."
+msgstr "Inicializa um projecto com manifesto de VM — ficheiros JÁ PREENCHIDOS (imagens incluídas), prontos a usar sem editar nada."
+
+msgid "After generating, build the image, start it, and wait until healthy."
+msgstr "Depois de gerar, constrói a imagem, arranca e espera ficar saudável."
+
+msgid "Create (or auto-recover) a VM."
+msgstr "Cria (ou auto-recupera) uma VM."
+
+msgid "Base disk (qcow2/raw) — becomes a per-VM overlay. Omit to use the local golden VM image (if there is exactly one; `image --vm ls`)."
+msgstr "Disco base (qcow2/raw) — vira overlay por-VM. Omite para usar a imagem VM dourada local (se houver exactamente uma; `image --vm ls`)."
+
+msgid "Memory (`\"2G\"`/`\"1024M\"`)."
+msgstr "Memória (`\"2G\"`/`\"1024M\"`)."
+
+msgid "Kernel for direct boot."
+msgstr "Kernel para direct boot."
+
+msgid "Firmware, alternative to the kernel (cloud images)."
+msgstr "Firmware, alternativa ao kernel (cloud images)."
+
+msgid "Ready-made cloud-init (NoCloud) ISO — if given, takes priority over `--hostname`/`--ssh-key`/`--user-data` (those generate the ISO; this uses it directly)."
+msgstr "ISO cloud-init (NoCloud) já pronta — se dado, tem prioridade sobre `--hostname`/`--ssh-key`/`--user-data` (esses geram a ISO; este usa-a directamente)."
+
+msgid "Hostname to apply on first boot (generates the NoCloud ISO if no explicit `--seed` is given)."
+msgstr "Hostname a aplicar no primeiro boot (gera a ISO NoCloud se nenhum `--seed` explícito for dado)."
+
+msgid "Authorized public SSH key, `ssh-ed25519 AAAA...` or `@path` to read from a file. Repeatable."
+msgstr "Chave SSH pública autorizada, `ssh-ed25519 AAAA...` ou `@caminho` para ler de um ficheiro. Repetível."
+
+msgid "Your own cloud-init `user-data` (fully replaces the default-generated one) — full control for whoever needs it."
+msgstr "`user-data` cloud-init próprio (substitui totalmente o gerado por omissão) — controlo completo para quem precisar."
+
+msgid "Core affinity, e.g. `8-15`."
+msgstr "Afinidade de cores, ex.: `8-15`."
+
+msgid "VFIO PCI passthrough, repeatable."
+msgstr "VFIO PCI passthrough, repetível."
+
+msgid "`cloud-hypervisor`|`libvirt` (omit = auto-detection)."
+msgstr "`cloud-hypervisor`|`libvirt` (omitir = auto-deteção)."
+
+msgid "libvirt only: `user`|`nat`|`bridge`."
+msgstr "Só libvirt: `user`|`nat`|`bridge`."
+
+msgid "Bridge name (net-mode=bridge) or libvirt network (nat)."
+msgstr "Nome da bridge (net-mode=bridge) ou rede libvirt (nat)."
+
+msgid "List the VMs."
+msgstr "Lista as VMs."
+
+msgid "Current state (reconciles liveness/IP with the backend)."
+msgstr "Estado actual (reconcilia liveness/IP com o backend)."
+
+msgid "VM to query (omit for the state of ALL)."
+msgstr "VM a consultar (omite para o estado de TODAS)."
+
+msgid "Human-readable detail of one or more VMs, `kubectl describe` style (for humans; use `status` for the usual compact view). Includes the LIVE state — `delonix_vm::status` reconciles liveness/IP with the backend."
+msgstr "Detalhe legível de uma ou mais VMs, ao estilo `kubectl describe` (para humanos; use `status` para a vista compacta de sempre). Inclui o estado AO VIVO — `delonix_vm::status` reconcilia liveness/IP com o backend."
+
+msgid "Stop the VM (preserves disk/record)."
+msgstr "Pára a VM (preserva disco/registo)."
+
+msgid "Remove the VM (stops + deletes overlay/state)."
+msgstr "Remove a VM (pára + apaga overlay/estado)."
+
+msgid "Apply the `kind: Vm` documents of a manifest (`delonix_vm::create` is already idempotent by name — creates or auto-recovers)."
+msgstr "Aplica os documentos `kind: Vm` de um manifesto (`delonix_vm::create` já é idempotente por nome — cria ou auto-recupera)."
+
+msgid "Initializes a COMPLETE project: Delonixfile + manifest + cluster + README — files ALREADY FILLED IN (images included), ready to use without editing anything."
+msgstr "Inicializa um projecto COMPLETO: Delonixfile + manifesto + cluster + README — ficheiros JÁ PREENCHIDOS (imagens incluídas), prontos a usar sem editar nada."
+
+msgid "Overwrites already existing files."
+msgstr "Substitui ficheiros já existentes."
+
+msgid "Generates a complete PROJECT for a stack (e.g. `python`) with best practices, instead of the generic scaffold. `--template list` shows the available ones."
+msgstr "Gera um PROJECTO completo de uma stack (ex.: `python`) com boas práticas, em vez do scaffold genérico. `--template list` mostra os disponíveis."
+
+msgid "After generating, builds the image, starts it and waits for it to become healthy."
+msgstr "Depois de gerar, constrói a imagem, arranca e espera ficar saudável."
+
+msgid "Applies all the manifest Kinds (Network → Volume → Image → Vm → Container)."
+msgstr "Aplica todos os Kinds do manifesto (Network → Volume → Image → Vm → Container)."
+
+msgid "Stack detail in `kubectl describe` style: each resource DECLARED in the manifest and whether or not it is present on the machine. **The stack has no state of its own** — there is no registry of \"stacks\", only a manifest and the resources it creates. That is why this `describe` always starts from the file and goes to confirm each resource against the respective store, instead of inventing a new registry that would drift out of sync (the same reason `cluster ls` derives its state from the container labels). The column that matters is PRESENCE: an `apply` is fail-fast and without rollback, so a half-applied stack is a normal state and this is exactly what it shows."
+msgstr "Detalhe do stack ao estilo `kubectl describe`: cada recurso DECLARADO no manifesto e se está, ou não, presente na máquina. **O stack não tem estado próprio** — não há registo de \"stacks\", só um manifesto e os recursos que ele cria. Por isso este `describe` parte sempre do ficheiro e vai confirmar cada recurso ao store respectivo, em vez de inventar um registo novo a dessincronizar (a mesma razão pela qual o `cluster ls` deriva o estado das labels dos containers). A coluna que interessa é a de PRESENÇA: um `apply` é fail-fast e sem rollback, logo um stack meio-aplicado é um estado normal e é exactamente isto que o mostra."
+
+msgid "Validates the manifest WITHOUT touching anything (dry-run): resolves the cross-references (`Container.network`/`.volumes`, `Vm.network`, `Ingress/Egress.target`) against what the manifest declares PLUS what already exists in the stores. Exits with an error if any reference is left unresolved — it is the safety net against an `apply` that would only fail halfway through (fail-fast, no rollback)."
+msgstr "Valida o manifesto SEM tocar em nada (dry-run): resolve as referências cruzadas (`Container.network`/`.volumes`, `Vm.network`, `Ingress/Egress.target`) contra o que o manifesto declara MAIS o que já existe nos stores. Sai com erro se alguma referência ficar por resolver — é a rede de segurança contra um `apply` que só falharia a meio (fail-fast, sem rollback)."

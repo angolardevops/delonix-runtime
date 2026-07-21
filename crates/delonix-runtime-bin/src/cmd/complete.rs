@@ -1,27 +1,27 @@
-//! Candidatos de autocompletion para NOMES DE RECURSOS — containers, imagens,
-//! volumes, redes, VMs, clusters.
+//! Autocompletion candidates for RESOURCE NAMES — containers, images,
+//! volumes, networks, VMs, clusters.
 //!
-//! O `clap_complete` dinâmico já completa comandos/subcomandos/flags a partir da
-//! definição do `Cli`. O que faltava era o TAB sobre os argumentos: `delonix
-//! container stop <TAB>` não sugeria nada, e o utilizador tinha de ir a um
-//! `container ls` copiar o nome à mão — precisamente o que o docker/podman
-//! poupam.
+//! The dynamic `clap_complete` already completes commands/subcommands/flags from
+//! the `Cli` definition. What was missing was TAB over the arguments: `delonix
+//! container stop <TAB>` suggested nothing, and the user had to go to a
+//! `container ls` to copy the name by hand — exactly what docker/podman
+//! spare you.
 //!
-//! # Porque é barato fazer isto aqui (e não seria num cliente remoto)
+//! # Why it is cheap to do this here (and would not be in a remote client)
 //!
-//! Cada candidato sai de um Store LOCAL em disco (`$DELONIX_ROOT/…`), lido
-//! directamente. Não há daemon a contactar nem rede pelo meio, por isso um TAB
-//! custa uma leitura de directório. (Um cliente HTTP do PaaS não podia fazer o
-//! mesmo sem uma chamada de rede por cada TAB — é por isso que o `delonixctl`
-//! deliberadamente não completa nomes.)
+//! Each candidate comes from a LOCAL on-disk Store (`$DELONIX_ROOT/…`), read
+//! directly. There is no daemon to contact nor network in between, so a TAB
+//! costs one directory read. (A PaaS HTTP client could not do the same
+//! without a network call per TAB — which is why `delonixctl`
+//! deliberately does not complete names.)
 //!
-//! # Regra: falhar em SILÊNCIO
+//! # Rule: fail SILENTLY
 //!
-//! Um completer NUNCA pode escrever no terminal nem entrar em pânico — está a
-//! correr no meio da linha de comandos do utilizador, a cada TAB. Se o store
-//! não abre (raiz inexistente, permissões, estado a meio de uma escrita), a
-//! resposta certa é "não tenho sugestões", não um erro no meio do prompt. Daí o
-//! `unwrap_or_default()` em todo o lado.
+//! A completer must NEVER write to the terminal nor panic — it is running
+//! in the middle of the user's command line, on every TAB. If the store
+//! does not open (nonexistent root, permissions, state mid-write), the
+//! right answer is "I have no suggestions", not an error in the middle of the
+//! prompt. Hence the `unwrap_or_default()` everywhere.
 
 use clap_complete::engine::CompletionCandidate;
 
@@ -31,9 +31,9 @@ fn cands<I: IntoIterator<Item = String>>(nomes: I) -> Vec<CompletionCandidate> {
     nomes.into_iter().map(CompletionCandidate::new).collect()
 }
 
-/// Containers a correr **e** parados: o `start`/`rm` querem os parados, o
-/// `exec`/`logs` os vivos. Filtrar por estado aqui daria um TAB que "esconde" o
-/// container que o utilizador está mesmo a tentar escrever.
+/// Containers running **and** stopped: `start`/`rm` want the stopped ones, the
+/// `exec`/`logs` the live ones. Filtering by state here would give a TAB that "hides"
+/// the container the user is actually trying to type.
 pub fn containers() -> Vec<CompletionCandidate> {
     let Ok(store) = delonix_runtime_core::Store::open(state_root().join("containers")) else {
         return Vec::new();
@@ -41,9 +41,9 @@ pub fn containers() -> Vec<CompletionCandidate> {
     cands(store.list().unwrap_or_default().into_iter().map(|c| c.name))
 }
 
-/// Imagens locais, pela sua referência legível (sem o `@sha256:…` quando há
-/// tag — ver `output::display_ref`; um digest de 71 chars não se completa com
-/// TAB, escreve-se).
+/// Local images, by their readable reference (without the `@sha256:…` when there
+/// is a tag — see `output::display_ref`; a 71-char digest is not completed with
+/// TAB, you type it).
 pub fn images() -> Vec<CompletionCandidate> {
     let Ok(store) = delonix_image::ImageStore::open(state_root()) else {
         return Vec::new();
@@ -81,8 +81,8 @@ pub fn vms() -> Vec<CompletionCandidate> {
     )
 }
 
-/// Clusters do modo kind — derivados da label dos nós, que é a fonte de verdade
-/// (não há registo de "cluster" à parte; ver `cmd::kindmode::list`).
+/// Kind-mode clusters — derived from the nodes' label, which is the source of truth
+/// (there is no separate "cluster" record; see `cmd::kindmode::list`).
 pub fn clusters() -> Vec<CompletionCandidate> {
     let Ok(store) = delonix_runtime_core::Store::open(state_root().join("containers")) else {
         return Vec::new();
@@ -98,7 +98,7 @@ pub fn clusters() -> Vec<CompletionCandidate> {
     cands(nomes)
 }
 
-/// Nomes dos segredos do cofre.
+/// Names of the vault secrets.
 pub fn secrets() -> Vec<CompletionCandidate> {
     let Ok(store) = delonix_runtime_core::SecretStore::open(state_root()) else {
         return Vec::new();

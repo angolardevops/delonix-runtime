@@ -1,4 +1,4 @@
-//! `delonix volumes` — volumes nomeados (create/ls/rm/inspect).
+//! `delonix volumes` — named volumes (create/ls/rm/inspect).
 
 use std::path::PathBuf;
 
@@ -12,14 +12,14 @@ use super::manifest::{self, ManifestDoc};
 use super::output;
 use super::util::state_root;
 
-/// `spec` de `kind: Volume` — espelha os campos de `VolumeCmd::Create`.
+/// `spec` of `kind: Volume` — mirrors the fields of `VolumeCmd::Create`.
 #[derive(Debug, Deserialize)]
 struct VolumeSpec {
     #[serde(default = "default_driver")]
     driver: String,
     device: Option<String>,
-    /// Canónico `mountOptions` (uniforme com `kind: Storage`); `options`
-    /// continua aceite (retrocompat).
+    /// Canonical `mountOptions` (uniform with `kind: Storage`); `options`
+    /// is still accepted (backward-compat).
     #[serde(rename = "mountOptions", alias = "options")]
     options: Option<String>,
     quota: Option<String>,
@@ -29,88 +29,88 @@ fn default_driver() -> String {
     "local".to_string()
 }
 
-/// Nomes aceites no `spec` de `kind: Volume` (canónicos + aliases), para o
-/// aviso de campos desconhecidos.
+/// Names accepted in the `kind: Volume` `spec` (canonical + aliases), for the
+/// unknown-field warning.
 pub(crate) const VOLUME_SPEC_FIELDS: &[&str] =
     &["driver", "device", "mountOptions", "options", "quota"];
 
 #[derive(Subcommand)]
 pub enum VolumeCmd {
-    /// Cria um volume nomeado.
+    /// Create a named volume.
     Create {
         name: String,
-        /// `local` (default) ou `nfs`.
+        /// `local` (default) or `nfs`.
         #[arg(long, default_value = "local")]
         driver: String,
-        /// Dispositivo/export (driver `nfs`).
+        /// Device/export (`nfs` driver).
         #[arg(long)]
         device: Option<String>,
-        /// Opções de montagem adicionais (driver `nfs`).
+        /// Additional mount options (`nfs` driver).
         #[arg(long)]
         options: Option<String>,
-        /// Quota (ex.: `2g`) — só é aplicada se `--quota` for dado.
+        /// Quota (e.g. `2g`) — only applied if `--quota` is given.
         #[arg(long)]
         quota: Option<String>,
     },
-    /// Lista os volumes.
+    /// List the volumes.
     Ls,
-    /// Detalhe de um volume (inclui uso real em disco).
+    /// Details of a volume (includes real on-disk usage).
     Inspect {
         #[arg(add = ArgValueCandidates::new(super::complete::volumes))]
         name: String,
     },
-    /// Detalhe legível de um ou mais volumes, ao estilo `kubectl describe`
-    /// (para humanos; use `inspect` para a vista compacta de sempre).
+    /// Readable detail of one or more volumes, `kubectl describe` style
+    /// (for humans; use `inspect` for the usual compact view).
     Describe {
         #[arg(required = true)]
         names: Vec<String>,
     },
-    /// Remove um volume.
+    /// Remove a volume.
     Rm {
         #[arg(add = ArgValueCandidates::new(super::complete::volumes))]
         name: String,
     },
-    /// Aplica os documentos `kind: Volume` de um manifesto (idempotente por nome).
+    /// Apply the `kind: Volume` documents from a manifest (idempotent by name).
     Apply {
         #[arg(short = 'f', long = "file")]
         file: Option<PathBuf>,
     },
-    /// Snapshots pontuais de um volume (tar.gz sob o volume; seguro em rootless).
+    /// Point-in-time snapshots of a volume (tar.gz under the volume; safe in rootless).
     Snapshot {
         #[command(subcommand)]
         action: SnapshotCmd,
     },
 }
 
-/// `delonix volumes snapshot` — crash-consistentes (tirados com a carga a
-/// correr). Para consistência aplicacional (ex.: BD), pára/dump o consumidor
-/// primeiro. Em rootless o tar corre num userns mapeado (dono efectivo dos
-/// ficheiros de subuid) — ver `runtime::reexec_mapped`/`__volsnap`.
+/// `delonix volumes snapshot` — crash-consistent (taken with the workload
+/// running). For application consistency (e.g. a DB), stop/dump the consumer
+/// first. In rootless the tar runs in a mapped userns (effective owner of the
+/// subuid files) — see `runtime::reexec_mapped`/`__volsnap`.
 #[derive(clap::Subcommand)]
 pub enum SnapshotCmd {
-    /// Cria um snapshot AGORA (nome default: timestamp UTC).
+    /// Create a snapshot NOW (default name: UTC timestamp).
     Create {
         #[arg(add = ArgValueCandidates::new(super::complete::volumes))]
         volume: String,
-        /// Nome do snapshot (default: `AAAAMMDD-HHMMSS`).
+        /// Snapshot name (default: `YYYYMMDD-HHMMSS`).
         #[arg(long)]
         name: Option<String>,
     },
-    /// Lista os snapshots de um volume.
+    /// List the snapshots of a volume.
     Ls {
-        /// Volume a consultar (omite para os snapshots de TODOS).
+        /// Volume to query (omit for the snapshots of ALL).
         #[arg(add = ArgValueCandidates::new(super::complete::volumes))]
         volume: Option<String>,
     },
-    /// Repõe um snapshot NO volume (substitui os dados actuais — pára os
-    /// consumidores primeiro).
+    /// Restore a snapshot INTO the volume (replaces the current data — stop the
+    /// consumers first).
     Restore {
         #[arg(add = ArgValueCandidates::new(super::complete::volumes))]
         volume: String,
-        /// Nome do snapshot (ver `snapshot ls`).
+        /// Snapshot name (see `snapshot ls`).
         snap: String,
     },
-    /// Apaga um snapshot.
+    /// Delete a snapshot.
     Rm {
         #[arg(add = ArgValueCandidates::new(super::complete::volumes))]
         volume: String,
@@ -145,8 +145,8 @@ pub fn run(action: VolumeCmd) -> Result<()> {
     }
 }
 
-/// Aplica os documentos `kind: Volume` (`create`/`create_with` já são
-/// idempotentes por nome — não precisa de um check de existência à parte).
+/// Applies the `kind: Volume` documents (`create`/`create_with` are already
+/// idempotent by name — no separate existence check needed).
 pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
     let store = VolumeStore::open(state_root())?;
     for doc in manifest::of_kind(docs, "Volume") {
@@ -196,10 +196,10 @@ fn cmd_ls(store: &VolumeStore) -> Result<()> {
     Ok(())
 }
 
-/// Uso em disco, com o denominador da quota quando existe: `"1.5 KiB"` ou
-/// `"1.5 KiB / 2.0 GiB (0%)"`. Função **pura** (o `usage`/`quota_bytes` reais
-/// vêm do store) para a aritmética da percentagem ser testável — incluindo a
-/// quota 0, que não pode dividir por zero.
+/// On-disk usage, with the quota denominator when present: `"1.5 KiB"` or
+/// `"1.5 KiB / 2.0 GiB (0%)"`. **Pure** function (the real `usage`/`quota_bytes`
+/// come from the store) so the percentage arithmetic is testable — including
+/// quota 0, which cannot divide by zero.
 fn fmt_usage(used: u64, quota: Option<u64>) -> String {
     match quota {
         Some(q) if q > 0 => {
@@ -210,14 +210,14 @@ fn fmt_usage(used: u64, quota: Option<u64>) -> String {
                 output::fmt_size(q)
             )
         }
-        // Quota 0 = sem espaço nenhum; imprimir "(inf%)" seria pior que só o uso.
+        // Quota 0 = no space at all; printing "(inf%)" would be worse than just usage.
         Some(_) => format!("{} / 0 B", output::fmt_size(used)),
         None => output::fmt_size(used),
     }
 }
 
-/// `volumes describe` — detalhe legível ao estilo `kubectl describe`.
-/// Complementa o `inspect` (vista compacta de sempre, estável para scripts).
+/// `volumes describe` — readable detail in `kubectl describe` style.
+/// Complements `inspect` (the usual compact view, stable for scripts).
 fn cmd_describe(store: &VolumeStore, names: &[String]) -> Result<()> {
     for (i, name) in names.iter().enumerate() {
         let v = store.inspect(name)?;
@@ -244,7 +244,7 @@ fn describe_one(store: &VolumeStore, v: &delonix_volume::Volume) {
             .unwrap_or_else(|| "<none>".into()),
     );
     d.field_opt("Alert at", v.alert_pct.map(|p| format!("{p}%")));
-    // Só existem no driver `nfs` — omitidos por inteiro no `local`.
+    // Only exist in the `nfs` driver — omitted entirely for `local`.
     d.field_opt("Device", v.device.as_deref());
     d.field_opt("Options", v.options.as_deref());
     d.print();
@@ -264,15 +264,15 @@ fn cmd_inspect(store: &VolumeStore, name: &str) -> Result<()> {
     Ok(())
 }
 
-/// Nome de snapshot por omissão: timestamp UTC `AAAAMMDD-HHMMSS` (sem `chrono` —
-/// o runtime não o traz; usa-se `libc::gmtime_r`).
+/// Default snapshot name: UTC timestamp `YYYYMMDD-HHMMSS` (no `chrono` — the
+/// runtime does not bring it in; uses `libc::gmtime_r`).
 fn default_snap_name() -> String {
     let t = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0) as libc::time_t;
     let mut tm: libc::tm = unsafe { std::mem::zeroed() };
-    // SAFETY: `t` válido; `gmtime_r` escreve em `tm` (buffer nosso).
+    // SAFETY: `t` is valid; `gmtime_r` writes into `tm` (our buffer).
     unsafe { libc::gmtime_r(&t, &mut tm) };
     format!(
         "{:04}{:02}{:02}-{:02}{:02}{:02}",
@@ -285,10 +285,10 @@ fn default_snap_name() -> String {
     )
 }
 
-/// Corre uma operação de snapshot pelo caminho certo: rootless → re-exec
-/// `__volsnap` num userns mapeado (dono dos subuids); rootful/sem-helpers →
-/// directo. O handler `__volsnap` vive em `cmd::mapped` (ver a nota lá sobre o
-/// contrato de re-exec que faltava ao motor público).
+/// Runs a snapshot operation via the right path: rootless → re-exec
+/// `__volsnap` in a mapped userns (owner of the subuids); rootful/no-helpers →
+/// direct. The `__volsnap` handler lives in `cmd::mapped` (see the note there on
+/// the re-exec contract that the public engine was missing).
 fn volsnap_run(mode: &str, data: &std::path::Path, tarball: &std::path::Path) -> Result<()> {
     let d = data.to_string_lossy().to_string();
     let t = tarball.to_string_lossy().to_string();
@@ -298,7 +298,7 @@ fn volsnap_run(mode: &str, data: &std::path::Path, tarball: &std::path::Path) ->
             context: "volume snapshot",
             message: format!("__volsnap {mode} falhou no userns mapeado (vê /etc/subuid)"),
         }),
-        // Sem rootless/helpers: corre directo (dono já dos ficheiros).
+        // No rootless/helpers: run direct (already owner of the files).
         None => super::mapped::volsnap(mode, data, tarball),
     }
 }
@@ -329,10 +329,10 @@ fn cmd_snapshot(store: &VolumeStore, action: SnapshotCmd) -> Result<()> {
             );
         }
         SnapshotCmd::Ls { volume } => {
-            // Sem argumento: snapshots de TODOS os volumes, com coluna VOLUME.
+            // No argument: snapshots of ALL volumes, with a VOLUME column.
             let vols: Vec<String> = match volume {
                 Some(v) => {
-                    store.inspect(&v)?; // valida que o volume existe
+                    store.inspect(&v)?; // validates that the volume exists
                     vec![v]
                 }
                 None => store.list()?.into_iter().map(|v| v.name).collect(),
@@ -407,7 +407,7 @@ mod tests {
 
     #[test]
     fn usage_com_quota_zero_nao_divide_por_zero() {
-        // Uma quota 0 daria `inf%`/NaN na percentagem — degrada para o uso cru.
+        // A quota of 0 would give `inf%`/NaN in the percentage — degrades to raw usage.
         assert_eq!(fmt_usage(100, Some(0)), "100 B / 0 B");
     }
 }
