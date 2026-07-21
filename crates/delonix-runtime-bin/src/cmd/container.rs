@@ -9,7 +9,7 @@ use delonix_net::infra;
 use delonix_runtime::{self as runtime, RunSpec};
 use delonix_runtime_core::{generate_id, Container, Error, Result, Status, Store};
 use delonix_volume::VolumeStore;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use super::manifest::{self, ManifestDoc};
 use super::output;
@@ -21,7 +21,7 @@ use super::util::{effective_command, find, open_stores, prepare_rootfs, resolve_
 /// foreground would block waiting for the process to exit — dangerous for a
 /// declarative command. Pass `detach: false` explicitly in the YAML if you want
 /// the synchronous behavior of the interactive `run`.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 struct ContainerSpec {
     pub(crate) image: String,
     #[serde(default = "default_true")]
@@ -1075,6 +1075,13 @@ pub fn run(action: ContainerCmd) -> Result<()> {
             apply(&docs)
         }
     }
+}
+
+/// Dry-run: the FLAT spec with every `#[serde(default)]` materialized (the Pod
+/// shape falls back to the raw spec — see `manifest::filled_spec`).
+pub fn spec_with_defaults(doc: &ManifestDoc) -> Result<serde_yaml::Value> {
+    let spec: ContainerSpec = manifest::spec_of(doc)?;
+    serde_yaml::to_value(spec).map_err(|e| Error::Invalid(format!("dry-run: {e}")))
 }
 
 pub fn apply(docs: &[ManifestDoc]) -> Result<()> {

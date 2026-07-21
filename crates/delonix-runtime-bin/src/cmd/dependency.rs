@@ -21,13 +21,13 @@
 //! container, or clear its firewall by hand. (`kind: Ingress` is now the L7 HTTP
 //! Ingress — unrelated to this L4 firewall.)
 
-use serde::{Deserialize, Deserializer};
+use serde::{Deserialize, Deserializer, Serialize};
 
 use super::manifest::{self, ManifestDoc};
 use delonix_runtime_core::{Error, FwRule, Result};
 
 /// `spec` of `kind: Dependency`.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct DependencySpec {
     /// Container/VM that INITIATES the connection (the one that "knows"). Gains access to `to`.
     pub from: String,
@@ -63,6 +63,12 @@ fn string_or_vec<'de, D: Deserializer<'de>>(d: D) -> std::result::Result<Vec<Str
 /// Resolves the manifest's `kind: Dependency` and applies them. Runs in
 /// `stack apply` AFTER the containers exist (it needs the IPs). Idempotent
 /// ("ensure present" — reapplies the desired ingress state of each `to`).
+/// Dry-run: the spec with every `#[serde(default)]` materialized.
+pub fn spec_with_defaults(doc: &ManifestDoc) -> Result<serde_yaml::Value> {
+    let spec: DependencySpec = manifest::spec_of(doc)?;
+    serde_yaml::to_value(spec).map_err(|e| Error::Invalid(format!("dry-run: {e}")))
+}
+
 pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
     let deps = manifest::of_kind(docs, "Dependency");
     if deps.is_empty() {

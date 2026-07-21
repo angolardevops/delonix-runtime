@@ -13,30 +13,30 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use delonix_runtime_core::{Error, Result};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Metadata {
     pub name: String,
     /// Logical ISOLATION namespace (default `default`). Resources of different
     /// namespaces do not reach each other (only a `kind: Dependency` breaks through). See the
     /// "namespace isolation" section in CLAUDE.md.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub namespace: Option<String>,
     /// Free labels to group/select resources (k8s style). Optional —
     /// the runtime is single-tenant, there are no namespaces; this is just organization.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub labels: BTreeMap<String, String>,
     /// Free annotations (notes, prereqs, references) — never interpreted by the
     /// runtime, only carried through to the `describe`.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub annotations: BTreeMap<String, String>,
 }
 
 /// A manifest document — `spec` stays raw (`serde_yaml::Value`) until the
 /// right Kind's group re-deserializes it into its typed type (`ContainerSpec`,
 /// `VmSpec`, ...). Avoids this module having to know the 5 spec types.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ManifestDoc {
     #[serde(rename = "apiVersion")]
     pub api_version: String,
@@ -44,6 +44,50 @@ pub struct ManifestDoc {
     pub metadata: Metadata,
     #[serde(default)]
     pub spec: serde_yaml::Value,
+}
+
+/// Renders the docs as YAML with every default materialized (dry-run,
+/// `kubectl apply --dry-run=client -o yaml` style). Each doc's spec is
+/// round-tripped through its typed struct so the `#[serde(default)]`s appear;
+/// Kinds without a typed renderer fall back to the raw spec (still shown). Stacks
+/// are already expanded and Kinds canonicalized by `load`, so the output is
+/// exactly what WOULD be applied.
+pub fn render_with_defaults(docs: &[ManifestDoc]) -> Result<String> {
+    let mut out = String::new();
+    for (i, doc) in docs.iter().enumerate() {
+        if i > 0 {
+            out.push_str("---\n");
+        }
+        let mut d = doc.clone();
+        d.spec = filled_spec(doc)?;
+        out.push_str(&serde_yaml::to_string(&d).map_err(|e| {
+            Error::Invalid(format!(
+                "dry-run: falha a serializar {} '{}': {e}",
+                doc.kind, doc.metadata.name
+            ))
+        })?);
+    }
+    Ok(out)
+}
+
+/// Round-trips a doc's spec through its typed struct so `#[serde(default)]`s
+/// materialize. Kinds not yet wired fall back to the raw spec.
+fn filled_spec(doc: &ManifestDoc) -> Result<serde_yaml::Value> {
+    use crate::cmd;
+    match doc.kind.as_str() {
+        "Network" => cmd::network::spec_with_defaults(doc),
+        "Volume" => cmd::volume::spec_with_defaults(doc),
+        "Storage" => cmd::storage::spec_with_defaults(doc),
+        // Secret is intentionally left as raw (no typed round-trip) — no need to
+        // reformat its `stringData` through the renderer.
+        "Image" => cmd::image::spec_with_defaults(doc),
+        "Dependency" => cmd::dependency::spec_with_defaults(doc),
+        // Flat `kind: Container` only (the Pod shape has nested structs — raw for now).
+        "Container" if doc.spec.get("containers").is_none() => {
+            cmd::container::spec_with_defaults(doc)
+        }
+        _ => Ok(doc.spec.clone()),
+    }
 }
 
 /// explicit `-f <file>`, or `./delonix-manifest.yaml` by default.
@@ -560,6 +604,27 @@ spec: { image: alpine }
         assert!(format!("{err}").contains("sem manifesto"));
         std::env::set_current_dir(orig).unwrap();
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn dry_run_render_fills_container_defaults() {
+        let yaml = "\
+apiVersion: delonix.io/v1
+kind: Container
+metadata: { name: web }
+spec: { image: nginx }
+";
+        let dir = std::env::temp_dir();
+        let p = dir.join(format!("delonix-dryrun-{}.yaml", std::process::id()));
+        std::fs::write(&p, yaml).unwrap();
+        let docs = load(&p).unwrap();
+        let _ = std::fs::remove_file(&p);
+        let out = render_with_defaults(&docs).unwrap();
+        // The user only wrote `image: nginx`; the defaults must materialize.
+        assert!(out.contains("image: nginx"));
+        assert!(out.contains("detach: true"), "veio:\n{out}"); // default_true
+        assert!(out.contains("network: host"), "veio:\n{out}"); // default_net
+        assert!(out.contains("restartPolicy: no"), "veio:\n{out}"); // renamed default
     }
 
     #[test]

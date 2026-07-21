@@ -24,7 +24,7 @@ use clap::Subcommand;
 use clap_complete::engine::ArgValueCandidates;
 use delonix_net::{infra, Network, NetworkStore};
 use delonix_runtime_core::Result;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 use super::manifest::{self, ManifestDoc};
@@ -32,7 +32,7 @@ use super::output;
 use super::util::state_root;
 
 /// `spec` for `kind: Network` — mirrors the fields of `NetworkCmd::Create`.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 struct NetworkSpec {
     #[serde(default = "default_driver")]
     driver: String,
@@ -159,6 +159,13 @@ pub fn run(action: NetworkCmd) -> Result<()> {
 
 /// Apply the `kind: Network` documents (called by `network apply` and by
 /// `stack apply`, which already has the documents loaded beforehand).
+/// Dry-run: the spec with every `#[serde(default)]` materialized.
+pub fn spec_with_defaults(doc: &ManifestDoc) -> Result<serde_yaml::Value> {
+    let spec: NetworkSpec = manifest::spec_of(doc)?;
+    serde_yaml::to_value(spec)
+        .map_err(|e| delonix_runtime_core::Error::Invalid(format!("dry-run: {e}")))
+}
+
 pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
     let store = NetworkStore::open(state_root())?;
     for doc in manifest::of_kind(docs, "Network") {
