@@ -302,7 +302,171 @@ pub fn parse_and_validate(docs: &[ManifestDoc]) -> Result<Vec<(String, HttpRoute
         validate_spec(&doc.metadata.name, &spec)?;
         out.push((doc.metadata.name.clone(), spec));
     }
+    // `kind: Ingress` (k8s-shaped) compiles to the SAME L7 proxy — the k8s
+    // Ingress IS the reverse-proxy, so it shares HTTPRoute's whole pipeline.
+    for doc in manifest::of_kind(docs, "Ingress") {
+        manifest::warn_unknown_fields(doc, INGRESS_SPEC_FIELDS);
+        let spec = ingress_spec_of(doc)?;
+        validate_spec(&doc.metadata.name, &spec)?;
+        out.push((doc.metadata.name.clone(), spec));
+    }
     Ok(out)
+}
+
+/// Parses a `kind: Ingress` doc and converts it to the internal `HttpRouteSpec`
+/// — so the stack graph validation reuses the SAME backend/secret checks.
+pub fn ingress_spec_of(doc: &ManifestDoc) -> Result<HttpRouteSpec> {
+    let ing: IngressSpec = manifest::spec_of(doc)?;
+    ingress_to_httproute(&doc.metadata.name, ing)
+}
+
+// ============================================================================
+// `kind: Ingress` — Kubernetes-shaped L7 HTTP Ingress (host/path → backend).
+// Compiles to an `HttpRouteSpec` (the embedded reverse-proxy). This is the k8s
+// networking.k8s.io/v1 Ingress schema; the L4 firewall that used to own this
+// Kind now lives under `kind: FirewallPolicy` (direction: ingress).
+// ============================================================================
+
+/// Field names accepted in a `kind: Ingress` `spec` (unknown-field warning).
+pub(crate) const INGRESS_SPEC_FIELDS: &[&str] = &[
+    "rules",
+    "tls",
+    "defaultBackend",
+    "ingressClassName",
+    "entrypoints",
+];
+
+#[derive(Debug, Deserialize)]
+struct IngressSpec {
+    #[serde(default)]
+    rules: Vec<IngressRule>,
+    /// k8s TLS block (a LIST). v1 uses a SINGLE cert (no SNI) — the first entry wins.
+    #[serde(default)]
+    tls: Vec<IngressTls>,
+    /// Catch-all backend when no rule matches (→ a `host: any, path: /` route).
+    #[serde(default, rename = "defaultBackend")]
+    default_backend: Option<IngressBackend>,
+    /// Accepted for k8s fidelity; the embedded proxy is the only ingress class.
+    #[serde(default, rename = "ingressClassName")]
+    #[allow(dead_code)]
+    ingress_class_name: Option<String>,
+    /// delonix extension: listener ports. Omit → 80 (+ 443 when `tls` is set).
+    #[serde(default)]
+    entrypoints: Vec<Entrypoint>,
+}
+
+#[derive(Debug, Deserialize)]
+struct IngressRule {
+    #[serde(default)]
+    host: Option<String>,
+    #[serde(default)]
+    http: Option<IngressHttp>,
+}
+
+#[derive(Debug, Deserialize)]
+struct IngressHttp {
+    #[serde(default)]
+    paths: Vec<IngressPath>,
+}
+
+#[derive(Debug, Deserialize)]
+struct IngressPath {
+    #[serde(default = "default_path")]
+    path: String,
+    /// `Prefix` (default) | `Exact` | `ImplementationSpecific`. The proxy matches
+    /// by prefix; `Exact` is accepted but treated as prefix (documented limitation).
+    #[serde(default, rename = "pathType")]
+    #[allow(dead_code)]
+    path_type: Option<String>,
+    backend: IngressBackend,
+}
+
+#[derive(Debug, Deserialize)]
+struct IngressBackend {
+    service: IngressServiceRef,
+}
+
+#[derive(Debug, Deserialize)]
+struct IngressServiceRef {
+    name: String,
+    port: IngressServicePort,
+}
+
+#[derive(Debug, Deserialize)]
+struct IngressServicePort {
+    #[serde(default)]
+    number: Option<u16>,
+    /// Named ports are not supported — use `number`.
+    #[serde(default)]
+    #[allow(dead_code)]
+    name: Option<String>,
+}
+
+/// Converts a k8s-shaped `IngressSpec` into the internal `HttpRouteSpec`.
+fn ingress_to_httproute(name: &str, ing: IngressSpec) -> Result<HttpRouteSpec> {
+    let port_of = |b: &IngressBackend| -> Result<u16> {
+        b.service.port.number.ok_or_else(|| {
+            Error::Invalid(format!(
+                "Ingress/{name}: backend service '{}' — named ports are not supported, use port.number",
+                b.service.name
+            ))
+        })
+    };
+    let mut rules = Vec::new();
+    for r in &ing.rules {
+        let paths = r.http.as_ref().map(|h| h.paths.as_slice()).unwrap_or(&[]);
+        let mut prules = Vec::new();
+        for p in paths {
+            prules.push(PathRule {
+                path: p.path.clone(),
+                backend: Backend {
+                    service: p.backend.service.name.clone(),
+                    port: port_of(&p.backend)?,
+                },
+            });
+        }
+        rules.push(RouteRule {
+            host: r.host.clone(),
+            paths: prules,
+        });
+    }
+    // defaultBackend → a catch-all route (any host, path `/`).
+    if let Some(db) = &ing.default_backend {
+        rules.push(RouteRule {
+            host: None,
+            paths: vec![PathRule {
+                path: "/".to_string(),
+                backend: Backend {
+                    service: db.service.name.clone(),
+                    port: port_of(db)?,
+                },
+            }],
+        });
+    }
+    // k8s TLS is a list (SNI); v1 serves a single cert — the first entry decides
+    // selfSigned vs secretRef.
+    let tls = ing.tls.into_iter().next().map(|t| TlsSpec {
+        mode: Some(if t.secret_name.is_some() {
+            "secretRef".to_string()
+        } else {
+            "selfSigned".to_string()
+        }),
+        secret_ref: t.secret_name,
+    });
+    Ok(HttpRouteSpec {
+        entrypoints: ing.entrypoints,
+        tls,
+        rules,
+    })
+}
+
+#[derive(Debug, Deserialize)]
+struct IngressTls {
+    #[serde(default)]
+    #[allow(dead_code)]
+    hosts: Vec<String>,
+    #[serde(default, rename = "secretName")]
+    secret_name: Option<String>,
 }
 
 // ============================================================================
@@ -491,6 +655,75 @@ mod tests {
             "rules:\n  - host: x.example\n    paths:\n      - { path: /, backend: { service: a, port: 80 } }\n  - host: x.example\n    paths:\n      - { path: /, backend: { service: b, port: 81 } }\n",
         );
         assert!(r.is_err());
+    }
+
+    #[test]
+    fn ingress_k8s_shape_compiles_to_httproute() {
+        let yaml = "\
+ingressClassName: delonix
+tls:
+  - hosts: [shop.example.ao]
+    secretName: shop-tls
+rules:
+  - host: shop.example.ao
+    http:
+      paths:
+        - path: /
+          pathType: Prefix
+          backend:
+            service:
+              name: web
+              port: { number: 80 }
+        - path: /api
+          backend:
+            service:
+              name: api
+              port: { number: 8080 }
+";
+        let ing: IngressSpec = serde_yaml::from_str(yaml).unwrap();
+        let hr = ingress_to_httproute("shop", ing).unwrap();
+        assert_eq!(hr.rules.len(), 1);
+        assert_eq!(hr.rules[0].host.as_deref(), Some("shop.example.ao"));
+        assert_eq!(hr.rules[0].paths.len(), 2);
+        assert_eq!(hr.rules[0].paths[0].path, "/");
+        assert_eq!(hr.rules[0].paths[0].backend.service, "web");
+        assert_eq!(hr.rules[0].paths[0].backend.port, 80);
+        assert_eq!(hr.rules[0].paths[1].backend.service, "api");
+        assert_eq!(hr.rules[0].paths[1].backend.port, 8080);
+        let tls = hr.tls.unwrap();
+        assert_eq!(tls.mode.as_deref(), Some("secretRef"));
+        assert_eq!(tls.secret_ref.as_deref(), Some("shop-tls"));
+    }
+
+    #[test]
+    fn ingress_default_backend_becomes_catch_all() {
+        let yaml = "\
+defaultBackend:
+  service:
+    name: fallback
+    port: { number: 8080 }
+";
+        let ing: IngressSpec = serde_yaml::from_str(yaml).unwrap();
+        let hr = ingress_to_httproute("x", ing).unwrap();
+        assert_eq!(hr.rules.len(), 1);
+        assert!(hr.rules[0].host.is_none());
+        assert_eq!(hr.rules[0].paths[0].path, "/");
+        assert_eq!(hr.rules[0].paths[0].backend.service, "fallback");
+    }
+
+    #[test]
+    fn ingress_named_port_is_rejected() {
+        let yaml = "\
+rules:
+  - http:
+      paths:
+        - backend:
+            service:
+              name: web
+              port: { name: http }
+";
+        let ing: IngressSpec = serde_yaml::from_str(yaml).unwrap();
+        assert!(ingress_to_httproute("x", ing).is_err());
     }
 
     #[test]

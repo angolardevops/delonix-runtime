@@ -11,14 +11,15 @@
 //! `app`'s IP. The reverse direction (db→app) is never opened, and the return
 //! of the app↔db conversation flows because the SDN is stateful (`ct state
 //! established,related accept`). Reuses the same `ContainerFw`/`infra::apply_firewall`
-//! as `kind: Ingress` — zero new dataplane. Multiple `Dependency` for the same
-//! `to` ACCUMULATE the `allow`s.
+//! as `kind: FirewallPolicy` — zero new dataplane. Multiple `Dependency` for the
+//! same `to` ACCUMULATE the `allow`s.
 //!
 //! **Teardown ("ensure present", not a reconciler):** removing the `Dependency`
 //! from a manifest and reapplying does NOT unprotect the `to` — the default-deny
-//! ingress stays (same semantics as `kind: Ingress`). To reopen, apply an
-//! `Ingress` with `defaultPolicy: allow` to the container, or clear its firewall
-//! by hand.
+//! ingress stays (same L4 firewall as `kind: FirewallPolicy`). To reopen, apply a
+//! `FirewallPolicy` (direction: ingress) with `defaultPolicy: allow` to the
+//! container, or clear its firewall by hand. (`kind: Ingress` is now the L7 HTTP
+//! Ingress — unrelated to this L4 firewall.)
 
 use serde::{Deserialize, Deserializer};
 
@@ -136,16 +137,16 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
         }
     }
 
-    // Targets that ALSO have an explicit Ingress/FirewallPolicy(ingress): the
-    // Dependency runs afterwards and replaces the `in` direction, so it deletes
-    // those rules. Warn instead of losing them silently (composing the two
-    // sources is a follow-up — see review).
+    // Targets that ALSO have an explicit inbound firewall (`FirewallPolicy`,
+    // direction: ingress): the Dependency runs afterwards and replaces the `in`
+    // direction, so it deletes those rules. Warn instead of losing them silently
+    // (composing the two sources is a follow-up — see review). NB: `kind: Ingress`
+    // is now the L7 HTTP Ingress (no `target`), so it is NOT a firewall source here.
     let explicit_ingress: std::collections::HashSet<&str> = docs
         .iter()
         .filter(|d| {
-            d.kind == "Ingress"
-                || (d.kind == "FirewallPolicy"
-                    && d.spec.get("direction").and_then(|v| v.as_str()) == Some("ingress"))
+            d.kind == "FirewallPolicy"
+                && d.spec.get("direction").and_then(|v| v.as_str()) == Some("ingress")
         })
         .filter_map(|d| d.spec.get("target").and_then(|v| v.as_str()))
         .collect();
