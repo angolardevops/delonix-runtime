@@ -572,6 +572,47 @@ comprometido ou TLS-stripping passaria. Aceite como risco documentado (mesma
 natureza do cloud-hypervisor que já se instalava assim); fechar exigiria os
 upstreams publicarem/pinar-se um digest.
 
+## Auditoria E2E ampla (14 finders × verificação adversarial) — achados ABERTOS
+
+Auditoria ofensiva de todo o ecossistema (~50k LOC, 9 crates: bugs/gaps/design/
+performance/concorrência/memória/recursos), 14 finders por subsistema, cada
+achado passado por 2 céticos adversariais. **Relatório completo em
+[docs/AUDITORIA-E2E.md](docs/AUDITORIA-E2E.md)** — 24 achados confirmados (6 HIGH,
+12 MEDIUM, 6 LOW) + 11 por-verificar (a corrida bateu no limite de sessão a meio
+da verificação; os subsistemas de maior risco — `runtime/lib.rs` 104 unsafe,
+`net/infra.rs` — ficaram sem 2.º par de olhos adversarial, precisam de 2.ª corrida).
+
+**Padrão dominante dos HIGH — escrita/eliminação de ficheiros fora do sandbox por
+input não-confiável** (nenhum RCE novo; a fronteira rootless→root e a validação de
+CLI/manifesto das auditorias anteriores mantêm-se sólidas). Ainda **por corrigir**:
+
+1. **Path traversal em whiteouts OCI** (`delonix-image/overlay.rs:81`) — o ramo de
+   whiteout de `apply_layer_flat` usa o `entry.path()` CRU do tar (nunca passa por
+   `safe_rel`, ao contrário do ramo de extracção) em `remove_dir_all`/`remove_file`.
+   Uma imagem com `../../../home/<u>/.wh..wh..opq` apaga o home do utilizador num
+   `container run` rootless normal. Ambos os céticos confirmaram.
+2. **IDs de CRI sem validação** (`delonix-cri/lifecycle.rs:745`) — `container_id`/
+   `pod_sandbox_id` viram path (`{id}.json`) sem whitelist; um `../` num pedido do
+   kubelet apaga/lê ficheiros arbitrários (root nos nós k8s). O `log_path` ali ao
+   lado JÁ é validado — o id não.
+3. **O fix da auditoria #2 (`valid_vm_name`) está INCOMPLETO** — está na fronteira
+   do motor (`delonix_vm::create`), mas `generate_seed_iso` (bin, `cmd/vm.rs:1043`)
+   corre ANTES com o nome cru: `create_dir_all`+escrita da seed.iso (conteúdo
+   controlado via `--user-data`) fora do state-dir, depois `create()` rejeita —
+   tarde demais. Falta validar em `generate_seed_iso`/nos call-sites e no
+   `metadata.name` do manifesto.
+4. **API de gestão sem autenticação de peer** (`delonix-mgmt/lib.rs:63`) — o socket
+   unix não valida `SO_PEERCRED` (ao contrário do control socket do holder).
+5. **COPY do build é lexical** (`cmd/build.rs:282`) — `safe_join` não resolve
+   symlinks; um symlink plantado num `RUN` anterior desvia a escrita para fora.
+6. **kubeconfig cluster-admin em `/tmp` 0644** (`cmd/cluster.rs:1115`).
+
+MEDIUM/LOW (password CIFS em argv world-readable, prune que derruba o ingress a
+meio de um `run`, match de path-prefix do proxy sem fronteira de segmento, admission
+gate `DELONIX_SCAN_ON_PULL` fail-OPEN, buffering de blob sem limite → OOM, etc.) e
+os detalhes/correcções de cada um: ver o relatório. **Nada disto foi corrigido
+ainda** — é a lista de trabalho de segurança a seguir.
+
 ## Ciclo de vida VM no libvirt (`vm stop/rm`) — managed save, órfãos, `--force`
 
 Bug report real (host kaeso-sys-01): `vm rm dev` vazava o stderr cru do `virsh`
