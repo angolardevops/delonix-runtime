@@ -381,7 +381,14 @@ spec: { image: alpine, memroy: 2G, restartPolicy: always }
                 )
             });
             for doc in &docs {
-                let Some(known) = fields_for(&doc.kind) else {
+                // A Pod-shaped `kind: Container` (has `spec.containers`) uses a
+                // different top-level field set than the flat one.
+                let known = if doc.kind == "Container" && doc.spec.get("containers").is_some() {
+                    Some(crate::cmd::container::POD_SPEC_FIELDS)
+                } else {
+                    fields_for(&doc.kind)
+                };
+                let Some(known) = known else {
                     continue;
                 };
                 let unknown = unknown_fields(doc, known);
