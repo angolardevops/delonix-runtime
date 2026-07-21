@@ -83,6 +83,7 @@ fn filled_spec(doc: &ManifestDoc) -> Result<serde_yaml::Value> {
         "Image" => cmd::image::spec_with_defaults(doc),
         "Dependency" => cmd::dependency::spec_with_defaults(doc),
         "Vm" => cmd::vm::spec_with_defaults(doc),
+        "Pod" => cmd::pod::spec_with_defaults(doc),
         "HTTPRoute" => cmd::httproute::spec_with_defaults(doc),
         "Ingress" => cmd::httproute::ingress_spec_with_defaults(doc),
         "Egress" | "FirewallPolicy" => cmd::firewall::spec_with_defaults(doc),
@@ -129,6 +130,7 @@ pub fn canonical_kind(kind: &str) -> &str {
         // `KnowDepends` is the name the user asked for; `Dependency` is the canonical one.
         "knowdepends" | "dependency" => "Dependency",
         "stack" => "Stack",
+        "pod" => "Pod",
         _ => kind,
     }
 }
@@ -154,6 +156,8 @@ struct StackSpec {
     vms: Vec<StackItem>,
     #[serde(default)]
     containers: Vec<StackItem>,
+    #[serde(default)]
+    pods: Vec<StackItem>,
     #[serde(default)]
     ingress: Vec<StackItem>,
     #[serde(default)]
@@ -185,6 +189,7 @@ pub const STACK_SPEC_FIELDS: &[&str] = &[
     "images",
     "vms",
     "containers",
+    "pods",
     "ingress",
     "egress",
     "firewallPolicies",
@@ -207,6 +212,7 @@ fn expand_stack(doc: &ManifestDoc) -> Result<Vec<ManifestDoc>> {
         ("Image", spec.images),
         ("Vm", spec.vms),
         ("Container", spec.containers),
+        ("Pod", spec.pods),
         ("Ingress", spec.ingress),
         ("Egress", spec.egress),
         ("FirewallPolicy", spec.firewall_policies),
@@ -501,6 +507,7 @@ spec: { image: alpine, memroy: 2G, restartPolicy: always }
         let fields_for = |kind: &str| -> Option<&'static [&'static str]> {
             match kind {
                 "Container" => Some(crate::cmd::container::CONTAINER_SPEC_FIELDS),
+                "Pod" => Some(crate::cmd::container::POD_SPEC_FIELDS),
                 "Vm" => Some(crate::cmd::vm::VM_SPEC_FIELDS),
                 "Volume" => Some(crate::cmd::volume::VOLUME_SPEC_FIELDS),
                 "Storage" => Some(crate::cmd::storage::STORAGE_SPEC_FIELDS),

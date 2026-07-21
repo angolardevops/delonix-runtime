@@ -124,7 +124,7 @@ pub fn run(action: StackCmd) -> Result<()> {
 /// The stack Kinds, in the SAME order as `apply` — whoever reads `describe` sees
 /// the order in which things are created, which is half the diagnosis when an
 /// apply stops halfway.
-const KINDS: [&str; 12] = [
+const KINDS: [&str; 13] = [
     "Secret",
     "Network",
     "Volume",
@@ -132,6 +132,7 @@ const KINDS: [&str; 12] = [
     "Image",
     "Vm",
     "Container",
+    "Pod",
     "Ingress",
     "Egress",
     "FirewallPolicy",
@@ -279,6 +280,23 @@ fn presence(
             }
             None => ("no".into(), "-".into()),
         },
+        // A Pod is present if it has member containers (label `delonix.io/pod`).
+        "Pod" => {
+            let members = containers
+                .iter()
+                .filter(|c| {
+                    c.labels
+                        .get(super::pod::POD_LABEL)
+                        .map(|v| v == name)
+                        .unwrap_or(false)
+                })
+                .count();
+            if members == 0 {
+                ("no".into(), "-".into())
+            } else {
+                ("yes".into(), format!("{members} container(s)"))
+            }
+        }
         // Storage is a network volume — it lives in the same store as the volumes.
         "Volume" | "Storage" => {
             match delonix_volume::VolumeStore::open(&root).and_then(|s| s.list()) {
@@ -349,6 +367,7 @@ fn apply(file: Option<PathBuf>) -> Result<()> {
     super::image::apply(&docs)?;
     super::vm::apply(&docs)?;
     super::container::apply(&docs)?;
+    super::pod::apply(&docs)?;
     super::firewall::apply(&docs)?;
     // Dependency (directed reachability) — after the firewall and the containers
     // (it needs the IPs); compiles to default-deny ingress + allows on the `to`.

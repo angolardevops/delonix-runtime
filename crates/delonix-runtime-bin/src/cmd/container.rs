@@ -191,10 +191,12 @@ fn custom_net_name(net: &str) -> Option<String> {
 // spec stays fully supported (back-compat); the two shapes never mix.
 // ===========================================================================
 
-/// k8s-like Pod spec, parsed when `spec.containers` is present.
+/// k8s-like Pod spec: `spec.containers[]`. Used by `kind: Container` (Pod shape,
+/// 1 container) AND by `kind: Pod` (N containers sharing the pod's namespaces —
+/// see `cmd::pod`).
 #[derive(Debug, Deserialize, Serialize)]
-struct PodSpec {
-    containers: Vec<PodContainer>,
+pub(crate) struct PodSpec {
+    pub(crate) containers: Vec<PodContainer>,
     #[serde(default)]
     volumes: Vec<PodVolume>,
     /// delonix extension: network to attach (`host`|`none`|`<custom>`). Default `host`.
@@ -210,11 +212,16 @@ struct PodSpec {
     expose: Option<u16>,
     #[serde(default = "default_true")]
     detach: bool,
+    /// k8s `shareProcessNamespace`: the pod's containers see each other's
+    /// processes (shared PID namespace). Default `false`, like k8s. Honored by
+    /// `kind: Pod` (see `cmd::pod`); ignored for a single `kind: Container`.
+    #[serde(default, rename = "shareProcessNamespace")]
+    pub(crate) share_process_namespace: bool,
 }
 
 /// One entry of `spec.containers[]`.
 #[derive(Debug, Deserialize, Serialize)]
-struct PodContainer {
+pub(crate) struct PodContainer {
     #[serde(default)]
     #[allow(dead_code)] // accepted for k8s fidelity; delonix names the whole pod
     name: Option<String>,
@@ -309,7 +316,7 @@ struct PodCapabilities {
 
 /// One entry of the Pod-level `spec.volumes[]` (referenced by `volumeMounts`).
 #[derive(Debug, Deserialize, Serialize)]
-struct PodVolume {
+pub(crate) struct PodVolume {
     name: String,
     #[serde(default, rename = "hostPath")]
     host_path: Option<PodHostPath>,
@@ -347,6 +354,7 @@ pub(crate) const POD_SPEC_FIELDS: &[&str] = &[
     "hostname",
     "expose",
     "detach",
+    "shareProcessNamespace",
 ];
 
 /// k8s CPU quantity → docker-style core count: `"500m"` → `"0.5"`, `"2"` → `"2"`.
@@ -359,9 +367,9 @@ fn cpu_quantity_to_cores(q: &str) -> String {
     q.trim().to_string()
 }
 
-/// Normalizes a Pod-shaped spec (k8s-like) into the flat [`RunOpts`]. v1 accepts
-/// exactly one container. Maps command/args, structured ports/env,
-/// volumeMounts+volumes, resources and securityContext to the docker-style fields.
+/// Normalizes a Pod-shaped spec (k8s-like) into the flat [`RunOpts`]. `kind:
+/// Container` accepts exactly one container (multi-container is `kind: Pod` — see
+/// `cmd::pod`); the per-container mapping lives in [`container_to_run_opts`].
 fn pod_to_run_opts(name: &str, namespace: Option<String>, pod: PodSpec) -> Result<RunOpts> {
     if pod.containers.is_empty() {
         return Err(Error::Invalid(format!(
@@ -370,11 +378,82 @@ fn pod_to_run_opts(name: &str, namespace: Option<String>, pod: PodSpec) -> Resul
     }
     if pod.containers.len() > 1 {
         return Err(Error::Invalid(format!(
-            "Container '{name}': multi-container pods are not supported yet — declare a single container (found {})",
+            "Container '{name}': a `kind: Container` runs a single container — use `kind: Pod` for {} containers sharing a namespace",
             pod.containers.len()
         )));
     }
     let c = pod.containers.into_iter().next().unwrap();
+    container_to_run_opts(
+        name,
+        namespace,
+        c,
+        &pod.volumes,
+        pod.network,
+        &pod.restart_policy,
+        pod.hostname,
+        pod.expose,
+        pod.detach,
+    )
+}
+
+/// Builds the [`RunOpts`] for EACH container of a `kind: Pod`, wired to the shared
+/// pod netns `pod_netns` (via `--pod`) and labelled for membership
+/// (`delonix.io/pod=<name>`). All containers share the pod's network (same IP,
+/// localhost between them) and hostname. Reuses [`container_to_run_opts`] so the
+/// k8s→docker mapping is identical to the single-container path.
+pub(crate) fn pod_member_run_opts(
+    pod_name: &str,
+    namespace: Option<String>,
+    pod: PodSpec,
+    pod_netns: &str,
+) -> Result<Vec<RunOpts>> {
+    if pod.containers.is_empty() {
+        return Err(Error::Invalid(format!(
+            "Pod '{pod_name}': spec.containers is empty"
+        )));
+    }
+    let hostname = pod.hostname.clone().unwrap_or_else(|| pod_name.to_string());
+    let mut out = Vec::with_capacity(pod.containers.len());
+    for (i, c) in pod.containers.into_iter().enumerate() {
+        let member = c.name.clone().unwrap_or_else(|| format!("c{i}"));
+        let cname = format!("{pod_name}-{member}");
+        // `network = "host"`: irrelevant here — the `pod` field makes the
+        // container JOIN the pod's shared netns regardless (see `cmd_run`).
+        let mut opts = container_to_run_opts(
+            &cname,
+            namespace.clone(),
+            c,
+            &pod.volumes,
+            "host".to_string(),
+            &pod.restart_policy,
+            Some(hostname.clone()),
+            None,
+            true,
+        )?;
+        opts.pod = Some(pod_netns.to_string());
+        opts.labels.push(format!("delonix.io/pod={pod_name}"));
+        opts.labels
+            .push(format!("delonix.io/pod-role=app.{member}"));
+        out.push(opts);
+    }
+    Ok(out)
+}
+
+/// Normalizes ONE Pod container (k8s-shaped) into the flat [`RunOpts`], resolving
+/// its `volumeMounts` against the pod-level `volumes`. Shared by the single
+/// `kind: Container` and each member of a `kind: Pod`.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn container_to_run_opts(
+    name: &str,
+    namespace: Option<String>,
+    c: PodContainer,
+    pod_volumes: &[PodVolume],
+    network: String,
+    restart_policy: &str,
+    hostname: Option<String>,
+    expose: Option<u16>,
+    detach: bool,
+) -> Result<RunOpts> {
     if c.working_dir.is_some() {
         output::warn(super::po::t(
             "kind: Container: `workingDir` is not applied yet (ignored)",
@@ -414,7 +493,7 @@ fn pod_to_run_opts(name: &str, namespace: Option<String>, pod: PodSpec) -> Resul
 
     // volumeMounts resolved against the pod volumes; emptyDir → tmpfs (ephemeral).
     let vmap: std::collections::HashMap<&str, &PodVolume> =
-        pod.volumes.iter().map(|v| (v.name.as_str(), v)).collect();
+        pod_volumes.iter().map(|v| (v.name.as_str(), v)).collect();
     let mut volumes = Vec::new();
     let mut tmpfs = Vec::new();
     for m in &c.volume_mounts {
@@ -461,7 +540,7 @@ fn pod_to_run_opts(name: &str, namespace: Option<String>, pod: PodSpec) -> Resul
     }
 
     // restartPolicy: k8s → delonix (delonix values pass through).
-    let restart = match pod.restart_policy.as_str() {
+    let restart = match restart_policy {
         "Always" => "always",
         "OnFailure" => "on-failure",
         "Never" => "no",
@@ -470,13 +549,13 @@ fn pod_to_run_opts(name: &str, namespace: Option<String>, pod: PodSpec) -> Resul
     .to_string();
 
     Ok(RunOpts {
-        detach: pod.detach,
+        detach,
         name: Some(name.to_string()),
-        hostname: pod.hostname,
+        hostname,
         user,
-        net: pod.network,
+        net: network,
         namespace,
-        expose: pod.expose,
+        expose,
         volumes,
         ports,
         privileged,
@@ -2647,7 +2726,7 @@ fn reexec_start(id: &str, netns: &str, ip: &str) -> Result<()> {
     Ok(())
 }
 
-fn cmd_stop(store: &Store, id: &str, time: u64) -> Result<()> {
+pub(crate) fn cmd_stop(store: &Store, id: &str, time: u64) -> Result<()> {
     let mut c = find(store, id)?;
     // BEFORE stopping: mark the desired state, otherwise the `--restart always`
     // supervisor resurrects it and the user can't stop it (measured: 6
@@ -2696,7 +2775,7 @@ pub(crate) fn remove_container(
     Ok(())
 }
 
-fn cmd_rm(images: &ImageStore, store: &Store, id: &str, force: bool) -> Result<()> {
+pub(crate) fn cmd_rm(images: &ImageStore, store: &Store, id: &str, force: bool) -> Result<()> {
     let c = find(store, id)?;
     let pid = c.pid;
     runtime::remove(store, &c, force)?;
@@ -3584,7 +3663,7 @@ fn cmd_stats(store: &Store, ids: &[String]) -> Result<()> {
     Ok(())
 }
 
-fn cmd_logs(images: &ImageStore, store: &Store, id: &str, follow: bool) -> Result<()> {
+pub(crate) fn cmd_logs(images: &ImageStore, store: &Store, id: &str, follow: bool) -> Result<()> {
     use std::io::{Read, Seek, Write};
     let c = find(store, id)?;
     let p = images.root().join("containers").join(&c.id).join("log");
@@ -3944,5 +4023,31 @@ restartPolicy: OnFailure
         let yaml = "containers:\n  - image: a\n  - image: b\n";
         let pod: super::PodSpec = serde_yaml::from_str(yaml).unwrap();
         assert!(super::pod_to_run_opts("x", None, pod).is_err());
+    }
+
+    #[test]
+    fn pod_member_run_opts_wires_shared_netns_and_labels() {
+        // `kind: Pod` (multi-container): each member joins the SAME netns and is
+        // labelled for membership.
+        let yaml = "\
+containers:
+  - name: web
+    image: nginx
+    ports: [{ containerPort: 80, hostPort: 8080 }]
+  - name: side
+    image: busybox
+";
+        let pod: super::PodSpec = serde_yaml::from_str(yaml).unwrap();
+        let opts = super::pod_member_run_opts("myapp", None, pod, "pod-myapp").unwrap();
+        assert_eq!(opts.len(), 2);
+        for o in &opts {
+            assert_eq!(o.pod.as_deref(), Some("pod-myapp"));
+            assert!(o.labels.iter().any(|l| l == "delonix.io/pod=myapp"));
+            // All members share the pod hostname.
+            assert_eq!(o.hostname.as_deref(), Some("myapp"));
+        }
+        assert_eq!(opts[0].name.as_deref(), Some("myapp-web"));
+        assert_eq!(opts[1].name.as_deref(), Some("myapp-side"));
+        assert_eq!(opts[0].ports, vec!["8080:80/tcp"]);
     }
 }

@@ -53,6 +53,11 @@ enum Cmd {
         #[command(subcommand)]
         action: cmd::container::ContainerCmd,
     },
+    /// Real multi-container pods (N containers sharing a netns): create/ls/describe/rm/logs.
+    Pod {
+        #[command(subcommand)]
+        action: cmd::pod::PodCmd,
+    },
     /// OCI images: pull/ls/rm/export (with `--vm`: golden VM images — ls/pull/push/build).
     Image {
         /// Operate on VM images (`<root>/vm-images/`) instead of container images — enables the `push`/`build` subcommands.
@@ -236,6 +241,7 @@ fn run() -> Result<()> {
     let _ = cli.l18n; // already consumed by the peek (kept in the schema for the help)
     match cli.cmd {
         Cmd::Container { action } => cmd::container::run(action),
+        Cmd::Pod { action } => cmd::pod::run(action),
         Cmd::Image { vm, action } => cmd::image::run(vm, action),
         Cmd::Build(args) => cmd::build::run(args),
         Cmd::Vm { action } => cmd::vm::run(action),
