@@ -646,7 +646,7 @@ pub fn libvirt_uri(name: &str) -> String {
 
 fn libvirt_uri_of(name: &str) -> &'static str {
     for uri in ["qemu:///system", "qemu:///session"] {
-        if capture("virsh", &["-c", uri, "domstate", name]).is_some() {
+        if capture("virsh", &["-c", uri, "domstate", "--", name]).is_some() {
             return uri;
         }
     }
@@ -853,26 +853,40 @@ fn ensure_libvirt_network(uri: &str, net: &str) {
         );
         return;
     }
-    let exists = capture("virsh", &["-c", uri, "net-info", net]).is_some();
+    let exists = capture("virsh", &["-c", uri, "net-info", "--", net]).is_some();
     if !exists && net == "default" {
         // XML da rede NAT padrão do libvirt (a que a maioria das distros traz).
         let xml = "<network>\n  <name>default</name>\n  <forward mode='nat'/>\n                     <bridge name='virbr0' stp='on' delay='0'/>\n                     <ip address='192.168.122.1' netmask='255.255.255.0'>\n                       <dhcp><range start='192.168.122.2' end='192.168.122.254'/></dhcp>\n                     </ip>\n</network>\n";
+        // Achado de auditoria: um nome PREVISÍVEL em /tmp (world-writable)
+        // permitia a outro utilizador local pré-criar um symlink e desviar a
+        // escrita. `create_new` (O_EXCL) falha se o caminho já existir — sem
+        // seguir symlinks — e 0600 fecha a leitura por outros.
+        use std::io::Write as _;
+        use std::os::unix::fs::OpenOptionsExt as _;
         let path = std::env::temp_dir().join(format!(
             "delonix-libvirt-default-{}.xml",
             std::process::id()
         ));
-        if std::fs::write(&path, xml).is_ok() {
-            let _ = Command::new("virsh")
-                .args(["-c", uri, "net-define", &path.to_string_lossy()])
-                .status();
+        let _ = std::fs::remove_file(&path); // limpa um resto NOSSO de uma corrida anterior
+        if let Ok(mut f) = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&path)
+        {
+            if f.write_all(xml.as_bytes()).is_ok() {
+                let _ = Command::new("virsh")
+                    .args(["-c", uri, "net-define", &path.to_string_lossy()])
+                    .status();
+            }
             let _ = std::fs::remove_file(&path);
         }
     }
     let _ = Command::new("virsh")
-        .args(["-c", uri, "net-start", net])
+        .args(["-c", uri, "net-start", "--", net])
         .status();
     let _ = Command::new("virsh")
-        .args(["-c", uri, "net-autostart", net])
+        .args(["-c", uri, "net-autostart", "--", net])
         .status();
 }
 
@@ -919,12 +933,12 @@ impl VmBackend for LibvirtBackend {
 
         // Idempotente: se o domínio já existe (auto-heal), só (re)arranca; senão
         // define + arranca. `virsh start` num domínio já a correr é no-op benigno.
-        let defined = capture("virsh", &["-c", uri, "domstate", &cfg.name]).is_some();
+        let defined = capture("virsh", &["-c", uri, "domstate", "--", &cfg.name]).is_some();
         if !defined {
             run_tool("virsh", &["-c", uri, "define", &xml_path.to_string_lossy()])?;
         }
         let st = Command::new("virsh")
-            .args(["-c", uri, "start", &cfg.name])
+            .args(["-c", uri, "start", "--", &cfg.name])
             .status()
             .map_err(|e| Error::Runtime {
                 context: "libvirt",
@@ -957,10 +971,10 @@ impl VmBackend for LibvirtBackend {
     fn stop(&self, vmdir: &Path, vm: &Vm) {
         let uri = libvirt_uri_of(&vm.name);
         let _ = Command::new("virsh")
-            .args(["-c", uri, "destroy", &vm.name])
+            .args(["-c", uri, "destroy", "--", &vm.name])
             .status();
         let _ = Command::new("virsh")
-            .args(["-c", uri, "undefine", &vm.name])
+            .args(["-c", uri, "undefine", "--", &vm.name])
             .status();
         let _ = std::fs::remove_file(vmdir.join(format!("{}.xml", vm.name)));
     }
@@ -968,14 +982,14 @@ impl VmBackend for LibvirtBackend {
 
 impl LibvirtBackend {
     fn is_running_uri(&self, uri: &str, name: &str) -> bool {
-        capture("virsh", &["-c", uri, "domstate", name])
+        capture("virsh", &["-c", uri, "domstate", "--", name])
             .map(|s| s == "running")
             .unwrap_or(false)
     }
 
     /// IP via `virsh domifaddr` (pode estar vazio em rede user-mode sem agente).
     fn ip_uri(&self, uri: &str, name: &str) -> Option<String> {
-        let out = capture("virsh", &["-c", uri, "domifaddr", name])?;
+        let out = capture("virsh", &["-c", uri, "domifaddr", "--", name])?;
         // formato: "Name  MAC  Protocol  Address"; pega o 1.º IPv4 (a.b.c.d/p).
         for line in out.lines() {
             if let Some(field) = line.split_whitespace().last() {
@@ -997,7 +1011,35 @@ impl LibvirtBackend {
 /// Garante a microVM (idempotente): se já existe e está viva, não faz nada; se
 /// existe mas morreu, re-arranca reutilizando o overlay (auto-heal) com o MESMO
 /// backend; senão, escolhe o backend (explícito/auto), cria o overlay e arranca.
+/// Valida o NOME de uma VM antes de o usar em CAMINHOS de ficheiro, no
+/// `hostname` do cloud-init e no argv do `virsh`. Achado de auditoria: o nome
+/// (vindo do CLI OU de `metadata.name` de um manifesto NÃO-confiado via
+/// `stack apply -f`) fluía cru para `state_root/vms/<name>` (seed) e para o
+/// overlay `<name>.qcow2` — um `metadata.name: "../../.ssh/authorized_keys"`
+/// escrevia/sobrescrevia ficheiros FORA do directório de estado, como o
+/// utilizador. Também impede um nome começado por `-` (que o `virsh` leria
+/// como opção) e caracteres de controlo (injecção no YAML do cloud-init).
+/// Whitelist estrita: `[A-Za-z0-9._-]`, não vazio, não começa por `-`/`.`,
+/// sem `..`. Mesmo espírito das `valid_*` da auditoria do `cluster`.
+pub fn valid_vm_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 64
+        && !name.starts_with('-')
+        && !name.starts_with('.')
+        && name != ".."
+        && !name.contains("..")
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+}
+
 pub fn create(base: &Path, cfg: &VmConfig) -> Result<Vm> {
+    if !valid_vm_name(&cfg.name) {
+        return Err(Error::Invalid(format!(
+            "invalid VM name '{}' — use letters, digits, '.', '_' or '-' (no '/', '..', or leading '-')",
+            cfg.name
+        )));
+    }
     let vmdir = vms_dir(base);
     std::fs::create_dir_all(&vmdir)?;
     let st = store(base)?;
@@ -1202,6 +1244,24 @@ mod tests {
         assert_eq!(mem_mib("2Gi"), 2048); // sufixo k8s tolerado (antes dava 1024)
         assert_eq!(mem_mib("512Mi"), 512);
         assert_eq!(mem_mib("lixo"), 1024); // fallback robusto
+    }
+
+    #[test]
+    fn valid_vm_name_recusa_exploits() {
+        // Path traversal (seed/overlay fora do state dir), via CLI ou manifesto.
+        assert!(!super::valid_vm_name("../../.ssh/authorized_keys"));
+        assert!(!super::valid_vm_name("a/b"));
+        assert!(!super::valid_vm_name(".."));
+        assert!(!super::valid_vm_name("a..b"));
+        // Argv do virsh: nome começado por '-' vira opção.
+        assert!(!super::valid_vm_name("-c"));
+        // Injecção no YAML do cloud-init (hostname) / controlo.
+        assert!(!super::valid_vm_name("x\nruncmd:\n  - evil"));
+        assert!(!super::valid_vm_name(""));
+        // Nomes legítimos passam intactos (sem regressão).
+        assert!(super::valid_vm_name("dev"));
+        assert!(super::valid_vm_name("kadm-cp1"));
+        assert!(super::valid_vm_name("my.vm_02"));
     }
 
     fn test_vm_cfg(mem: &str) -> VmConfig {
