@@ -138,6 +138,7 @@ Usage: delonix-x86_64-linux stack apply [OPTIONS]
 Options:
   -f, --file &lt;FILE&gt;   
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+      --dry-run       Don&#x27;t apply anything — print the full manifest with every default filled in (like `kubectl apply --dry-run=client -o yaml`). Stacks are expanded and Kinds canonicalized, so you see exactly what WOULD run
   -h, --help          Print help</code></pre></div>
 <h3>Exemplos</h3><div class="ex"><div class="cap">Aplicar o manifesto por omissão (./delonix-manifest.yaml)</div><pre><code>delonix stack apply</code></pre></div><div class="ex"><div class="cap">Manifesto explícito</div><pre><code>delonix stack apply -f infra/stack.yaml</code></pre></div>
 <footer>Delonix Runtime · Apache-2.0 · <a href="https://github.com/angolardevops/delonix-runtime">angolardevops/delonix-runtime</a>
