@@ -572,6 +572,35 @@ comprometido ou TLS-stripping passaria. Aceite como risco documentado (mesma
 natureza do cloud-hypervisor que já se instalava assim); fechar exigiria os
 upstreams publicarem/pinar-se um digest.
 
+## Ciclo de vida VM no libvirt (`vm stop/rm`) — managed save, órfãos, `--force`
+
+Bug report real (host kaeso-sys-01): `vm rm dev` vazava o stderr cru do `virsh`
+("Failed to destroy… not running" + "Refusing to undefine while domain managed
+save image exists"), apagava o registo local NA MESMA e deixava o domínio
+**órfão** no libvirt; o `vm stop` seguinte respondia "no such container" (o
+substantivo errado). Corrigido em `delonix-vm` (`libvirt_cleanup`/`quiet`/
+`libvirt_poweroff`/`libvirt_domain_uri`) + `cmd/vm.rs`:
+
+- **`undefine` leva sempre `--managed-save --snapshots-metadata --nvram`**
+  (fallback para o simples em virsh antigo) — era a causa-raiz da recusa; o
+  `destroy` só corre se o domínio NÃO estiver "shut off". Nada do `virsh` vaza
+  cru: `quiet()` captura stdout+stderr e compõe a mensagem (sem o prefixo
+  `error: ` do virsh).
+- **`VmBackend::stop` devolve `Result`** e o `rm` **preserva o registo local se
+  a limpeza no backend falhar** (erro claro + hint); `vm rm -f/--force`
+  descarta o estado local na mesma. Sem órfãos silenciosos em nenhum sentido:
+  `rm`/`stop` também reconhecem um domínio libvirt SEM registo local (órfão de
+  antes do fix) e limpam-no/desligam-no.
+- **`Error::VmNotFound`** ("no such VM: … (see `delonix vm ls`)") em
+  `stop`/`remove`/`status` — o `NotFound` partilhado diz "no such container".
+  Armadilha a reter: **`JsonStore::remove` é idempotente** (ausência = Ok),
+  por isso o "não existia" tem de se decidir ANTES (flag `existed`), não pelo
+  retorno do `st.remove`. `vm rm <inexistente>` agora é erro, como no docker.
+- Aliases: `vm down` = `stop`, `vm delete` = `rm`. Testes:
+  `quiet_captura_o_stderr_sem_o_prefixo_error`,
+  `stop_e_remove_de_vm_inexistente_dizem_no_such_vm`. Validado ao vivo: o
+  órfão `dev` real (shut off + managed save) foi removido em silêncio.
+
 ## Cluster modo Kind sem Docker — investigação (GO/NO-GO)
 
 Pedido: `delonix cluster` em modo `kind` (sem `kubeadm`) a funcionar **sem Docker instalado** —

@@ -1377,3 +1377,9 @@ msgstr "a arrancar '{name}'..."
 
 msgid "--network-alias is recorded but the internal DNS does not resolve aliases yet — only the container name resolves"
 msgstr "--network-alias é gravado mas o DNS interno ainda não resolve aliases — só o nome do container resolve"
+
+msgid "Remove the local state even if the libvirt cleanup fails."
+msgstr "Remove o estado local mesmo que a limpeza no libvirt falhe."
+
+msgid "the VM record was kept; `delonix vm rm --force {name}` discards it anyway"
+msgstr "o registo da VM foi preservado; `delonix vm rm --force {name}` descarta-o na mesma"
