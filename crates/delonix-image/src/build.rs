@@ -1,78 +1,78 @@
-//! Construção de imagens: um `Dockerfile` mínimo (`FROM`/`RUN`/`CMD`) e a
-//! captura do *diff* de uma construção como um novo *layer* content-addressed.
+//! Image building: a minimal `Dockerfile` (`FROM`/`RUN`/`CMD`) and
+//! capturing the *diff* of a build as a new content-addressed *layer*.
 
 use crate::cas::strip;
 use crate::image::{now_unix, Image, ImageConfig, ImageStore};
 use delonix_runtime_core::{Error, Result};
 use std::path::PathBuf;
 
-/// Um passo do build, por ordem (a ordem importa: `COPY` antes do `RUN` que usa).
+/// A build step, in order (order matters: `COPY` before the `RUN` that uses it).
 #[derive(Debug, Clone)]
 pub enum Step {
-    /// `RUN <cmd>` — executa um comando (com o `ENV`/`WORKDIR` acumulados).
+    /// `RUN <cmd>` — executes a command (with the accumulated `ENV`/`WORKDIR`).
     Run(String),
-    /// `COPY [--from=<stage>] <src> <dst>` — copia do *contexto* de build (ou de
-    /// um estágio anterior, se `from` estiver presente — build multi-stage).
+    /// `COPY [--from=<stage>] <src> <dst>` — copies from the build *context* (or from
+    /// a previous stage, if `from` is present — multi-stage build).
     Copy {
         src: String,
         dst: String,
         from: Option<String>,
     },
-    /// `ENV K=V` (ou `ENV K V`) — define uma variável (afecta os `RUN` seguintes).
+    /// `ENV K=V` (or `ENV K V`) — sets a variable (affects the following `RUN`s).
     Env { key: String, val: String },
-    /// `WORKDIR <dir>` — directório de trabalho dos `RUN` seguintes.
+    /// `WORKDIR <dir>` — working directory of the following `RUN`s.
     Workdir(String),
 }
 
-/// Um estágio intermédio de um build multi-stage (`FROM x AS nome`).
+/// An intermediate stage of a multi-stage build (`FROM x AS name`).
 #[derive(Debug, Clone)]
 pub struct Stage {
-    /// Nome do estágio (`AS <nome>`), ou `None`.
+    /// Stage name (`AS <name>`), or `None`.
     pub name: Option<String>,
-    /// A imagem base do estágio (`FROM`).
+    /// The stage's base image (`FROM`).
     pub from: String,
-    /// Os passos do estágio.
+    /// The stage's steps.
     pub steps: Vec<Step>,
 }
 
-/// Um `Dockerfile` analisado — compatível com o Docker, com extensões Delonix.
-/// Os campos `from`/`steps`/`cmd`/… descrevem o **estágio final** (a imagem
-/// resultante); `stages` tem os estágios intermédios (build multi-stage).
+/// A parsed `Dockerfile` — Docker-compatible, with Delonix extensions.
+/// The fields `from`/`steps`/`cmd`/… describe the **final stage** (the resulting
+/// image); `stages` holds the intermediate stages (multi-stage build).
 #[derive(Debug, Default)]
 pub struct Dockerfile {
-    /// Estágios intermédios (todos menos o último), por ordem.
+    /// Intermediate stages (all but the last), in order.
     pub stages: Vec<Stage>,
-    /// A imagem base do estágio final (`FROM`).
+    /// The base image of the final stage (`FROM`).
     pub from: String,
-    /// Os passos do estágio final, por ordem.
+    /// The steps of the final stage, in order.
     pub steps: Vec<Step>,
-    /// O comando por omissão (`CMD`).
+    /// The default command (`CMD`).
     pub cmd: Vec<String>,
-    /// O ponto de entrada (`ENTRYPOINT`).
+    /// The entry point (`ENTRYPOINT`).
     pub entrypoint: Vec<String>,
-    /// O `ENV` acumulado (para o config da imagem).
+    /// The accumulated `ENV` (for the image config).
     pub env: Vec<String>,
-    /// O `WORKDIR` final (para o config da imagem).
+    /// The final `WORKDIR` (for the image config).
     pub workdir: Option<String>,
-    // --- extensões Delonix (que o Dockerfile NÃO tem) ---
-    /// `SCAN fail-on=<sev>` — porta de vulnerabilidades antes do build.
+    // --- Delonix extensions (which the Dockerfile does NOT have) ---
+    /// `SCAN fail-on=<sev>` — vulnerability gate before the build.
     pub scan_fail_on: Option<String>,
-    /// `CPUS <n>` — limite de CPU embebido na imagem (obrigatório no Delonix).
+    /// `CPUS <n>` — CPU limit embedded in the image (mandatory in Delonix).
     pub cpus: Option<String>,
-    /// `MEMORY <n>` — limite de memória embebido na imagem.
+    /// `MEMORY <n>` — memory limit embedded in the image.
     pub memory: Option<String>,
-    /// `SECURITY <opção>...` — postura de segurança por omissão (ex.: `userns`).
+    /// `SECURITY <option>...` — default security posture (e.g. `userns`).
     pub security: Vec<String>,
-    /// `HEALTHCHECK ... CMD <cmd>` — comando de saúde (a parte após `CMD`).
+    /// `HEALTHCHECK ... CMD <cmd>` — health command (the part after `CMD`).
     pub healthcheck: Option<String>,
 }
 
-/// Analisa um Dockerfile. **Compatível com o Docker** (FROM/RUN/CMD/ENTRYPOINT/
-/// ENV/WORKDIR/COPY; LABEL/EXPOSE/USER/ARG/ADD/MAINTAINER/VOLUME aceites e
-/// ignorados) **mais extensões Delonix** (SCAN/CPUS/MEMORY/SECURITY).
-/// Junta linhas físicas que terminam em `\` numa só linha lógica (continuações,
-/// como o Docker) — devolve `(índice 0-based da 1.ª linha física, linha lógica)`.
-/// Uma linha de continuação é concatenada com um espaço no lugar do `\<newline>`.
+/// Parses a Dockerfile. **Docker-compatible** (FROM/RUN/CMD/ENTRYPOINT/
+/// ENV/WORKDIR/COPY; LABEL/EXPOSE/USER/ARG/ADD/MAINTAINER/VOLUME accepted and
+/// ignored) **plus Delonix extensions** (SCAN/CPUS/MEMORY/SECURITY).
+/// Joins physical lines ending in `\` into a single logical line (continuations,
+/// like Docker) — returns `(0-based index of the 1st physical line, logical line)`.
+/// A continuation line is concatenated with a space in place of the `\<newline>`.
 fn join_continuations(text: &str) -> Vec<(usize, String)> {
     let mut out = Vec::new();
     let mut cur = String::new();
@@ -91,14 +91,14 @@ fn join_continuations(text: &str) -> Vec<(usize, String)> {
         }
     }
     if !cur.is_empty() {
-        out.push((start, cur)); // último `\` sem linha a seguir — não perder o conteúdo
+        out.push((start, cur)); // trailing `\` with no line after — do not lose the content
     }
     out
 }
 
 pub fn parse_dockerfile(text: &str) -> Result<Dockerfile> {
     let mut df = Dockerfile::default();
-    let mut stages: Vec<Stage> = Vec::new(); // todos os estágios, na ordem
+    let mut stages: Vec<Stage> = Vec::new(); // all stages, in order
     for (n, line) in join_continuations(text) {
         let line = line.trim();
         if line.is_empty() || line.starts_with('#') {
@@ -107,10 +107,10 @@ pub fn parse_dockerfile(text: &str) -> Result<Dockerfile> {
         let (instr, rest) = line.split_once(char::is_whitespace).unwrap_or((line, ""));
         let rest = rest.trim();
         let instr_up = instr.to_ascii_uppercase();
-        // Os passos vão para o ESTÁGIO actual (o último de `stages`); FROM abre um novo.
+        // The steps go to the current STAGE (the last of `stages`); FROM opens a new one.
         if instr_up != "FROM" && stages.is_empty() {
-            // permite extensões/metadados antes do 1.º FROM serem ignorados? Não:
-            // qualquer passo antes de FROM é erro (como no Docker).
+            // allow extensions/metadata before the 1st FROM to be ignored? No:
+            // any step before FROM is an error (like in Docker).
             return Err(Error::Invalid(format!(
                 "Dockerfile line {}: `{instr}` before any FROM",
                 n + 1
@@ -118,7 +118,7 @@ pub fn parse_dockerfile(text: &str) -> Result<Dockerfile> {
         }
         match instr_up.as_str() {
             "FROM" => {
-                // `FROM <img> [AS <nome>]`
+                // `FROM <img> [AS <name>]`
                 let mut it = rest.split_whitespace();
                 let from = it.next().unwrap_or("").to_string();
                 let name = match (it.next(), it.next()) {
@@ -139,7 +139,7 @@ pub fn parse_dockerfile(text: &str) -> Result<Dockerfile> {
             "CMD" => df.cmd = parse_cmd(rest),
             "ENTRYPOINT" => df.entrypoint = parse_cmd(rest),
             "ENV" => {
-                // `ENV k1=v1 k2="v 2" …` (múltiplas vars) OU o legado `ENV k v`.
+                // `ENV k1=v1 k2="v 2" …` (multiple vars) OR the legacy `ENV k v`.
                 for (key, val) in parse_env_pairs(rest) {
                     stages
                         .last_mut()
@@ -156,7 +156,7 @@ pub fn parse_dockerfile(text: &str) -> Result<Dockerfile> {
                     .push(Step::Workdir(rest.to_string()));
             }
             "COPY" | "ADD" => {
-                // `COPY [--from=<estágio>] <src> <dst>`
+                // `COPY [--from=<stage>] <src> <dst>`
                 let mut from_stage: Option<String> = None;
                 let parts: Vec<&str> = rest
                     .split_whitespace()
@@ -181,7 +181,7 @@ pub fn parse_dockerfile(text: &str) -> Result<Dockerfile> {
                     from: from_stage,
                 });
             }
-            // --- extensões Delonix (aplicam-se à imagem final) ---
+            // --- Delonix extensions (apply to the final image) ---
             "SCAN" => {
                 df.scan_fail_on = rest
                     .split_whitespace()
@@ -191,7 +191,7 @@ pub fn parse_dockerfile(text: &str) -> Result<Dockerfile> {
             "CPUS" => df.cpus = Some(rest.to_string()),
             "MEMORY" => df.memory = Some(rest.to_string()),
             "SECURITY" => df.security = rest.split_whitespace().map(|s| s.to_string()).collect(),
-            // HEALTHCHECK [opções] CMD <cmd> | HEALTHCHECK NONE (A17).
+            // HEALTHCHECK [options] CMD <cmd> | HEALTHCHECK NONE (A17).
             "HEALTHCHECK" => {
                 let r = rest.trim();
                 if r.eq_ignore_ascii_case("NONE") {
@@ -200,7 +200,7 @@ pub fn parse_dockerfile(text: &str) -> Result<Dockerfile> {
                     df.healthcheck = Some(r[idx + 4..].trim().to_string());
                 }
             }
-            // compatibilidade: aceites mas sem efeito de build (metadados)
+            // compatibility: accepted but with no build effect (metadata)
             "LABEL" | "EXPOSE" | "USER" | "ARG" | "MAINTAINER" | "VOLUME" | "STOPSIGNAL"
             | "SHELL" | "ONBUILD" => {}
             other => {
@@ -211,14 +211,14 @@ pub fn parse_dockerfile(text: &str) -> Result<Dockerfile> {
             }
         }
     }
-    // O último estágio é o final (a imagem resultante); os anteriores são intermédios.
+    // The last stage is the final one (the resulting image); the earlier ones are intermediate.
     let last = stages
         .pop()
         .ok_or_else(|| Error::Invalid("Dockerfile has no FROM instruction".into()))?;
     df.from = last.from;
     df.steps = last.steps;
     df.stages = stages;
-    // ENV/WORKDIR do estágio final → config da imagem.
+    // ENV/WORKDIR of the final stage → image config.
     for s in &df.steps {
         match s {
             Step::Env { key, val } => df.env.push(format!("{key}={val}")),
@@ -229,11 +229,11 @@ pub fn parse_dockerfile(text: &str) -> Result<Dockerfile> {
     Ok(df)
 }
 
-/// `ENV K=V` ou `ENV K V` → (chave, valor).
-/// Faz o parse de um `ENV` num ou mais pares `(chave, valor)`, à Docker:
-/// - **legado** `ENV chave valor com espaços` (sem `=`): um só par, o resto é o valor.
-/// - **multi-var** `ENV k1=v1 k2="v 2" k3=v3`: tokeniza por espaços RESPEITANDO
-///   aspas (para valores com espaços), cada token parte no 1.º `=`.
+/// `ENV K=V` or `ENV K V` → (key, value).
+/// Parses an `ENV` into one or more `(key, value)` pairs, Docker-style:
+/// - **legacy** `ENV key value with spaces` (without `=`): a single pair, the rest is the value.
+/// - **multi-var** `ENV k1=v1 k2="v 2" k3=v3`: tokenizes by spaces RESPECTING
+///   quotes (for values with spaces), each token splits on the 1st `=`.
 fn parse_env_pairs(rest: &str) -> Vec<(String, String)> {
     let rest = rest.trim();
     if !rest.contains('=') {
@@ -268,7 +268,7 @@ fn parse_env_pairs(rest: &str) -> Vec<(String, String)> {
     out
 }
 
-/// `CMD ["a","b"]` (JSON) ou `CMD a b` (shell) → vector de argumentos.
+/// `CMD ["a","b"]` (JSON) or `CMD a b` (shell) → vector of arguments.
 fn parse_cmd(rest: &str) -> Vec<String> {
     if rest.starts_with('[') {
         serde_json::from_str::<Vec<String>>(rest).unwrap_or_default()
@@ -277,7 +277,7 @@ fn parse_cmd(rest: &str) -> Vec<String> {
     }
 }
 
-/// A arquitectura no vocabulário OCI (`amd64`, `arm64`, ...).
+/// The architecture in OCI vocabulary (`amd64`, `arm64`, ...).
 fn oci_arch() -> &'static str {
     match std::env::consts::ARCH {
         "x86_64" => "amd64",
@@ -288,9 +288,9 @@ fn oci_arch() -> &'static str {
 }
 
 impl ImageStore {
-    /// Os `diff_ids` (digests NÃO-comprimidos) dos layers da base, lidos do seu
-    /// config ORIGINAL no CAS (uma imagem puxada traz-nos correctos). Recorre aos
-    /// digests guardados se o config não os tiver (ex.: base `scratch`).
+    /// The `diff_ids` (UNCOMPRESSED digests) of the base's layers, read from its
+    /// ORIGINAL config in the CAS (a pulled image brings them correct). Falls back to the
+    /// stored digests if the config lacks them (e.g. a `scratch` base).
     fn base_diff_ids(&self, base: &Image) -> Vec<String> {
         if let Ok(bytes) = self.cas().read(&base.id) {
             if let Ok(v) = serde_json::from_slice::<serde_json::Value>(&bytes) {
@@ -315,7 +315,7 @@ impl ImageStore {
             .collect()
     }
 
-    /// Empacota o `upperdir` de um container de construção como tar -> CAS.
+    /// Packs a build container's `upperdir` as a tar -> CAS.
     pub fn commit_upper(&self, container_id: &str) -> Result<String> {
         let upper: PathBuf = self
             .root()
@@ -335,8 +335,8 @@ impl ImageStore {
         self.cas().write(&buf)
     }
 
-    /// Cria a imagem final: layers(base) + novo layer, com o config derivado do
-    /// Dockerfile (Cmd, Env e — extensões Delonix — limites de CPU/memória).
+    /// Creates the final image: layers(base) + new layer, with the config derived from the
+    /// Dockerfile (Cmd, Env and — Delonix extensions — CPU/memory limits).
     pub fn build_image(
         &self,
         base: &Image,
@@ -356,19 +356,19 @@ impl ImageStore {
         } else {
             df.entrypoint.clone()
         };
-        // Env = o da base + o do Dockerfile.
+        // Env = the base's + the Dockerfile's.
         let mut env = base.config.env.clone();
         env.extend(df.env.iter().cloned());
-        // herda os limites da base se o Dockerfile não os redefinir.
+        // inherit the base's limits if the Dockerfile does not redefine them.
         let cpus = df.cpus.clone().or_else(|| base.config.cpus.clone());
         let memory = df.memory.clone().or_else(|| base.config.memory.clone());
 
         let created = now_unix();
-        // `diff_ids` VÁLIDOS p/ Docker/OCI: os layers da base vêm do config
-        // ORIGINAL da base (digests NÃO-comprimidos, que o Docker valida ao
-        // descomprimir cada blob); o novo layer é um tar não-comprimido, por isso
-        // o seu diff_id = o próprio digest. Assim uma imagem construída pelo
-        // Delonix é puxável pelo Docker (não só pelo Delonix). Ver A1 (push).
+        // `diff_ids` VALID for Docker/OCI: the base's layers come from the base's
+        // ORIGINAL config (UNCOMPRESSED digests, which Docker validates by
+        // decompressing each blob); the new layer is an uncompressed tar, so
+        // its diff_id = the digest itself. This way an image built by
+        // Delonix is pullable by Docker (not only by Delonix). See A1 (push).
         let mut diff_ids: Vec<String> = self.base_diff_ids(base);
         diff_ids.push(format!("sha256:{}", strip(layers.last().unwrap())));
         let security = if df.security.is_empty() {
@@ -382,12 +382,12 @@ impl ImageStore {
             .or_else(|| base.config.healthcheck.clone());
         let workdir = df.workdir.clone().unwrap_or_default();
         let config_json = serde_json::json!({
-            // Campos standard do config de imagem OCI/Docker (interop).
+            // Standard OCI/Docker image config fields (interop).
             "architecture": oci_arch(),
             "os": "linux",
             "config": { "Cmd": cmd, "Entrypoint": entrypoint, "Env": env, "Cpus": cpus, "Memory": memory, "Security": security },
             "rootfs": { "type": "layers", "diff_ids": diff_ids },
-            // Extensão Delonix (ignorada pelo Docker):
+            // Delonix extension (ignored by Docker):
             "created_unix": created,
         });
         let id = self.cas().write(&serde_json::to_vec(&config_json)?)?;
@@ -415,9 +415,9 @@ impl ImageStore {
         Ok(img)
     }
 
-    /// Cria uma imagem a partir de um rootfs FLAT (modo *rootless*/vfs): empacota
-    /// TODO o directório como **um único layer** (squash) — não há overlay, logo
-    /// não há diff. Config OCI válido (1 diff_id). Usado pelo `build` rootless.
+    /// Creates an image from a FLAT rootfs (*rootless*/vfs mode): packs
+    /// the ENTIRE directory as **a single layer** (squash) — there is no overlay, hence
+    /// no diff. Valid OCI config (1 diff_id). Used by the rootless `build`.
     pub fn commit_flat_rootfs(
         &self,
         rootfs: &std::path::Path,
@@ -438,13 +438,13 @@ impl ImageStore {
         self.commit_flat_rootfs_from_tar(buf, cmd, env, workdir, tag)
     }
 
-    /// Como [`commit_flat_rootfs`], mas recebe o tar do rootfs **já construído**
-    /// (não-comprimido). Existe porque, em rootless com subuid, o rootfs de um
-    /// `RUN` que corra `apt`/`dpkg` tem ficheiros de modo restrito que o
-    /// utilizador real não lê — o tar tem de ser feito DENTRO do userns mapeado
-    /// (`delonix __buildtar`, ver `cmd::mapped::buildtar`) e o resultado entregue
-    /// aqui. O caminho in-process de [`commit_flat_rootfs`] fica para quando não
-    /// há subuid (rootless single-uid) ou para root.
+    /// Like [`commit_flat_rootfs`], but receives the rootfs tar **already built**
+    /// (uncompressed). It exists because, in rootless with subuid, the rootfs of a
+    /// `RUN` running `apt`/`dpkg` has restricted-mode files that the
+    /// real user cannot read — the tar has to be made INSIDE the mapped userns
+    /// (`delonix __buildtar`, see `cmd::mapped::buildtar`) and the result delivered
+    /// here. The in-process path of [`commit_flat_rootfs`] is for when there is
+    /// no subuid (rootless single-uid) or for root.
     pub fn commit_flat_rootfs_from_tar(
         &self,
         tar_bytes: Vec<u8>,
@@ -453,7 +453,7 @@ impl ImageStore {
         workdir: String,
         tag: &str,
     ) -> Result<Image> {
-        let layer = self.cas().write(&tar_bytes)?; // tar não-comprimido → diff_id = digest
+        let layer = self.cas().write(&tar_bytes)?; // uncompressed tar → diff_id = digest
         let diff_ids = vec![format!("sha256:{}", strip(&layer))];
         let created = now_unix();
         let config_json = serde_json::json!({
@@ -487,10 +487,10 @@ impl ImageStore {
         Ok(img)
     }
 
-    /// Cria uma imagem a partir do estado de um container (`docker commit`): o
-    /// `new_layer` é o diff (upperdir) já empacotado por [`commit_upper`], sobre
-    /// os layers da `base`; `cmd`/`env` são os do container. Config OCI válido
-    /// (puxável pelo Docker), tal como o `build`.
+    /// Creates an image from a container's state (`docker commit`): the
+    /// `new_layer` is the diff (upperdir) already packed by [`commit_upper`], over
+    /// the `base`'s layers; `cmd`/`env` are the container's. Valid OCI config
+    /// (pullable by Docker), just like `build`.
     pub fn commit_container(
         &self,
         base: &Image,
@@ -565,7 +565,7 @@ mod tests {
 
     #[test]
     fn parse_env_pairs_handles_multi_var_and_quotes() {
-        // Multi-var numa linha — o bug que perdia o PATH.
+        // Multi-var on one line — the bug that lost the PATH.
         let p = parse_env_pairs("A=1 B=2 PATH=/app/.venv/bin:$PATH");
         assert_eq!(
             p,
@@ -575,7 +575,7 @@ mod tests {
                 ("PATH".into(), "/app/.venv/bin:$PATH".into()),
             ]
         );
-        // Valor com espaços entre aspas.
+        // Value with spaces between quotes.
         assert_eq!(
             parse_env_pairs(r#"MSG="hello world" K=v"#),
             vec![
@@ -583,7 +583,7 @@ mod tests {
                 ("K".into(), "v".into()),
             ]
         );
-        // Legado `ENV chave valor` (sem `=`).
+        // Legacy `ENV key value` (without `=`).
         assert_eq!(
             parse_env_pairs("GREETING olá mundo"),
             vec![("GREETING".into(), "olá mundo".into())]

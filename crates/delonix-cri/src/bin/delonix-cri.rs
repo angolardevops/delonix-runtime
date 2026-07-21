@@ -1,7 +1,7 @@
-//! `delonix-cri` — ponto de entrada standalone do servidor CRI. Corre dentro
-//! do guest de uma VM (ex.: a imagem dourada `delonix image --vm build`,
-//! `dist/delonix-cri.service`) e expõe um socket unix que o `kubelet` fala
-//! via `--container-runtime-endpoint=unix:///run/delonix-cri.sock`.
+//! `delonix-cri` — standalone entry point for the CRI server. Runs inside a
+//! VM guest (e.g. the golden image `delonix image --vm build`,
+//! `dist/delonix-cri.service`) and exposes a unix socket that the `kubelet`
+//! speaks to via `--container-runtime-endpoint=unix:///run/delonix-cri.sock`.
 
 use std::path::PathBuf;
 

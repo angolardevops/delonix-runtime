@@ -1,43 +1,43 @@
-//! `discover` — auto-descoberta das **portas internas** (do entrypoint) de uma
-//! carga, lendo os sockets em escuta do seu *network namespace* através de
+//! `discover` — auto-discovery of a workload's **internal ports** (from the
+//! entrypoint), reading the listening sockets of its *network namespace* through
 //! `/proc/<pid>/net/{tcp,tcp6,udp,udp6}`.
 //!
-//! É **namespace-aware sem entrar no netns**: `/proc/<pid>/net/*` reflecte sempre
-//! o netns do processo `pid` (host-visível). Logo, a partir do processo da API
-//! (mesmo utilizador, rootless) lê-se directamente a tabela de sockets do
-//! container — sem `nsenter`, sem passar pelo holder. Para um **pod**, basta ler
-//! o `pid` do infra ("pause"): os membros partilham o netns, portanto as suas
-//! portas aparecem todas na mesma tabela.
+//! It is **namespace-aware without entering the netns**: `/proc/<pid>/net/*` always
+//! reflects the netns of process `pid` (host-visible). So, from the API process
+//! (same user, rootless), the container's socket table is read directly — no
+//! `nsenter`, no going through the holder. For a **pod**, it is enough to read
+//! the infra ("pause") `pid`: the members share the netns, so their ports
+//! all show up in the same table.
 //!
-//! O resultado alimenta o auto-mapping: cada porta descoberta vira um candidato a
-//! regra de firewall/ingress na Console, que o operador pode **publicar** (DNAT
-//! pelo ingress) com um clique. A descoberta é puramente observacional —
-//! best-effort e nunca falha: se não conseguir ler, devolve vazio.
+//! The result feeds the auto-mapping: each discovered port becomes a candidate
+//! firewall/ingress rule in the Console, which the operator can **publish** (DNAT
+//! through the ingress) with one click. Discovery is purely observational —
+//! best-effort and never fails: if it can't read, it returns empty.
 
 use serde::{Deserialize, Serialize};
 
-/// Uma porta interna descoberta em escuta no netns de uma carga.
+/// An internal port discovered listening in a workload's netns.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct DiscoveredPort {
-    /// `tcp` ou `udp`.
+    /// `tcp` or `udp`.
     pub proto: String,
-    /// Porta local em escuta (1..=65535).
+    /// Local listening port (1..=65535).
     pub port: u16,
-    /// Nome do processo a escutar (C1, "se possível"): mapeado do inode do socket
-    /// para o `comm` do processo na mesma netns. `None` se não resolvido.
+    /// Name of the listening process (C1, "if possible"): mapped from the socket inode
+    /// to the process `comm` in the same netns. `None` if not resolved.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub process: Option<String>,
 }
 
-/// Lê as portas em escuta no netns do processo `pid` (host-visível). Junta IPv4 e
-/// IPv6 (deduplicado por `(proto, porta)`) e ordena por porta. Best-effort: um
-/// ficheiro ilegível (processo morto, sem permissões) é simplesmente saltado.
+/// Reads the listening ports in the netns of process `pid` (host-visible). Merges IPv4 and
+/// IPv6 (deduplicated by `(proto, port)`) and sorts by port. Best-effort: an
+/// unreadable file (dead process, no permissions) is simply skipped.
 pub fn discover_ports(pid: i32) -> Vec<DiscoveredPort> {
-    // (proto, porta) -> inode do socket em escuta. Dedup por (proto, porta).
+    // (proto, port) -> inode of the listening socket. Dedup by (proto, port).
     let mut seen: std::collections::BTreeMap<(String, u16), u64> =
         std::collections::BTreeMap::new();
-    // (ficheiro, proto, só-LISTEN). TCP conta apenas o estado LISTEN (0A); UDP não
-    // tem "listen", por isso conta os sockets ligados (sem extremo remoto).
+    // (file, proto, listen-only). TCP counts only the LISTEN state (0A); UDP has
+    // no "listen", so it counts bound sockets (with no remote endpoint).
     for (file, proto, listen_only) in [
         ("tcp", "tcp", true),
         ("tcp6", "tcp", true),
@@ -52,7 +52,7 @@ pub fn discover_ports(pid: i32) -> Vec<DiscoveredPort> {
             seen.entry((proto.to_string(), port)).or_insert(inode);
         }
     }
-    // mapa inode -> nome do processo (comm) dos processos na MESMA netns que `pid`.
+    // inode -> process name (comm) map of processes in the SAME netns as `pid`.
     let inode_comm = inode_comm_map(pid);
     let mut out: Vec<DiscoveredPort> = seen
         .into_iter()
@@ -66,9 +66,9 @@ pub fn discover_ports(pid: i32) -> Vec<DiscoveredPort> {
     out
 }
 
-/// Mapa `inode do socket -> comm` dos processos que partilham a NETNS de `pid` (os
-/// processos da carga). Best-effort: lê o ns/net alvo, varre `/proc/<p>` com a mesma
-/// netns e mapeia os fds `socket:[inode]` → `comm`. `BTreeMap` vazio se nada resolver.
+/// `socket inode -> comm` map of the processes sharing `pid`'s NETNS (the
+/// workload's processes). Best-effort: reads the target ns/net, scans `/proc/<p>` with the
+/// same netns and maps the `socket:[inode]` fds → `comm`. Empty `BTreeMap` if nothing resolves.
 fn inode_comm_map(pid: i32) -> std::collections::BTreeMap<u64, String> {
     let mut map = std::collections::BTreeMap::new();
     let target = match std::fs::read_link(format!("/proc/{pid}/ns/net")) {
@@ -85,7 +85,7 @@ fn inode_comm_map(pid: i32) -> std::collections::BTreeMap<u64, String> {
             Ok(p) => p,
             Err(_) => continue,
         };
-        // só processos na MESMA netns que a carga.
+        // only processes in the SAME netns as the workload.
         if std::fs::read_link(format!("/proc/{p}/ns/net"))
             .ok()
             .as_deref()
@@ -103,7 +103,7 @@ fn inode_comm_map(pid: i32) -> std::collections::BTreeMap<u64, String> {
             for fd in fds.flatten() {
                 if let Ok(link) = std::fs::read_link(fd.path()) {
                     let s = link.to_string_lossy();
-                    // formato "socket:[12345]"
+                    // format "socket:[12345]"
                     if let Some(num) = s.strip_prefix("socket:[").and_then(|x| x.strip_suffix("]"))
                     {
                         if let Ok(inode) = num.parse::<u64>() {
@@ -117,14 +117,14 @@ fn inode_comm_map(pid: i32) -> std::collections::BTreeMap<u64, String> {
     map
 }
 
-/// Parser PURO de uma tabela `/proc/net/{tcp,tcp6,udp,udp6}`: devolve as portas
-/// locais em escuta. Formato (após o cabeçalho):
-/// `sl  local_address rem_address st tx_queue ...` — onde `local_address` é
-/// `HEXIP:HEXPORT` e `st` é o estado (`0A` = TCP_LISTEN).
+/// PURE parser of a `/proc/net/{tcp,tcp6,udp,udp6}` table: returns the local
+/// listening ports. Format (after the header):
+/// `sl  local_address rem_address st tx_queue ...` — where `local_address` is
+/// `HEXIP:HEXPORT` and `st` is the state (`0A` = TCP_LISTEN).
 ///
-/// - `listen_only = true`  (TCP): só conta sockets em estado `0A` (LISTEN).
-/// - `listen_only = false` (UDP): conta sockets ligados a uma porta com extremo
-///   remoto vazio (`rem_port == 0`) — i.e. servidores, não clientes conectados.
+/// - `listen_only = true`  (TCP): only counts sockets in state `0A` (LISTEN).
+/// - `listen_only = false` (UDP): counts sockets bound to a port with an empty
+///   remote endpoint (`rem_port == 0`) — i.e. servers, not connected clients.
 fn parse_listen_ports(table: &str, listen_only: bool) -> Vec<(u16, u64)> {
     let mut ports: Vec<(u16, u64)> = Vec::new();
     for line in table.lines().skip(1) {
@@ -154,7 +154,7 @@ fn parse_listen_ports(table: &str, listen_only: bool) -> Vec<(u16, u64)> {
                 continue;
             }
         }
-        // inode do socket = 10.ª coluna (índice 9) em /proc/net/{tcp,udp}.
+        // socket inode = 10th column (index 9) in /proc/net/{tcp,udp}.
         let inode = cols.get(9).and_then(|s| s.parse::<u64>().ok()).unwrap_or(0);
         if !ports.iter().any(|(p, _)| *p == lport) {
             ports.push((lport, inode));
@@ -167,9 +167,9 @@ fn parse_listen_ports(table: &str, listen_only: bool) -> Vec<(u16, u64)> {
 mod tests {
     use super::*;
 
-    // Amostra real de /proc/net/tcp: um servidor em LISTEN na :8080 (1F90), uma
-    // ligação ESTABLISHED (01) na :8080 que NÃO deve contar como nova porta, e um
-    // socket em LISTEN na :22 (0016).
+    // Real sample of /proc/net/tcp: a server LISTENing on :8080 (1F90), an
+    // ESTABLISHED (01) connection on :8080 that should NOT count as a new port, and a
+    // socket LISTENing on :22 (0016).
     const TCP: &str = "\
   sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode
    0: 00000000:1F90 00000000:0000 0A 00000000:00000000 00:00000000 00000000  1000        0 12345 1 0000 100 0 0 10 0
@@ -177,8 +177,8 @@ mod tests {
    2: 00000000:0016 00000000:0000 0A 00000000:00000000 00:00000000 00000000     0        0 34567 1 0000 100 0 0 10 0
 ";
 
-    // UDP: um servidor ligado na :53 (0035, sem remoto) e um cliente conectado
-    // na :C001 (porta remota != 0) que NÃO deve contar.
+    // UDP: a server bound on :53 (0035, no remote) and a connected client
+    // on :C001 (remote port != 0) that should NOT count.
     const UDP: &str = "\
   sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode ref pointer drops
   10: 00000000:0035 00000000:0000 07 00000000:00000000 00:00000000 00000000  1000        0 45678 2 0000 0
@@ -193,18 +193,18 @@ mod tests {
     fn tcp_lists_only_listen_sockets() {
         let mut p = ports_only(parse_listen_ports(TCP, true));
         p.sort_unstable();
-        assert_eq!(p, vec![22, 8080]); // 0016, 1F90 — a ligação ESTABLISHED é ignorada
+        assert_eq!(p, vec![22, 8080]); // 0016, 1F90 — the ESTABLISHED connection is ignored
     }
 
     #[test]
     fn udp_lists_only_bound_servers() {
         let p = ports_only(parse_listen_ports(UDP, false));
-        assert_eq!(p, vec![53]); // 0035; o cliente conectado (rem != 0) é ignorado
+        assert_eq!(p, vec![53]); // 0035; the connected client (rem != 0) is ignored
     }
 
     #[test]
     fn parses_socket_inode() {
-        // a 1.ª linha LISTEN do TCP tem inode 12345 (col 9).
+        // the 1st TCP LISTEN line has inode 12345 (col 9).
         let v = parse_listen_ports(TCP, true);
         assert!(v.iter().any(|(p, ino)| *p == 8080 && *ino == 12345));
     }

@@ -1,7 +1,7 @@
-//! Armazém de estado dos containers — um ficheiro JSON por container.
+//! Container state store — one JSON file per container.
 //!
-//! Reaproveita o padrão de *snapshot* JSON do `kvstore` (Mês 3): cada container
-//! é persistido em `root/<id>.json`, com escrita atómica (ficheiro temporário +
+//! Reuses the JSON *snapshot* pattern of the `kvstore` (Month 3): each container
+//! is persisted in `root/<id>.json`, with atomic writes (temporary file +
 //! `rename`).
 
 use crate::{Container, Error, Result};
@@ -13,28 +13,28 @@ use std::os::unix::io::AsRawFd;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-/// Sequência para tornar o ficheiro temporário de [`Store::save`] único POR
-/// ESCRITOR. O pid sozinho não chega: o servidor CRI é multi-thread
-/// (`tokio::spawn_blocking`), logo duas threads do MESMO processo podiam
-/// colidir no mesmo temp.
+/// Sequence to make the temporary file of [`Store::save`] unique PER
+/// WRITER. The pid alone is not enough: the CRI server is multi-threaded
+/// (`tokio::spawn_blocking`), so two threads of the SAME process could
+/// collide on the same temp.
 static TMP_SEQ: AtomicU64 = AtomicU64::new(0);
 
-/// Trinco exclusivo de ficheiro (`flock`) — sequencia o **read-modify-write**
-/// de um container ENTRE PROCESSOS. Mesmo padrão do `delonix-net::infra`.
+/// Exclusive file lock (`flock`) — sequences the **read-modify-write**
+/// of a container BETWEEN PROCESSES. Same pattern as `delonix-net::infra`.
 ///
-/// Porque é preciso: este runtime é daemonless — N processos (`delonix` na CLI,
-/// o servidor `delonix-cri` que o kubelet chama, e este é CONCORRENTE por
-/// desenho) mutam o mesmo JSON. A escrita atómica (temp+`rename`) evita
-/// ficheiros RASGADOS, mas não evita o **lost update** clássico: dois leitores
-/// lêem o mesmo estado, ambos modificam, ambos gravam — uma das mudanças
-/// desaparece em silêncio (ex.: um `RemoveContainer` desfeito por um reconcile
-/// concorrente que regrava o registo antigo).
+/// Why it is needed: this runtime is daemonless — N processes (`delonix` on the CLI,
+/// the `delonix-cri` server that the kubelet calls, and this one is CONCURRENT by
+/// design) mutate the same JSON. The atomic write (temp+`rename`) avoids
+/// TORN files, but does not avoid the classic **lost update**: two readers
+/// read the same state, both modify, both write — one of the changes
+/// disappears silently (e.g.: a `RemoveContainer` undone by a concurrent
+/// reconcile that rewrites the old record).
 struct FileLock(fs::File);
 
 impl FileLock {
-    /// Adquire o trinco (bloqueia até o obter). `None` se o ficheiro de trinco
-    /// não puder sequer ser aberto — nesse caso o chamador segue sem trinco
-    /// (degradação graciosa: melhor que recusar a operação).
+    /// Acquires the lock (blocks until it gets it). `None` if the lock file
+    /// cannot even be opened — in that case the caller proceeds without a lock
+    /// (graceful degradation: better than refusing the operation).
     fn acquire(path: &Path) -> Option<FileLock> {
         let f = fs::OpenOptions::new()
             .create(true)
@@ -42,7 +42,7 @@ impl FileLock {
             .truncate(false)
             .open(path)
             .ok()?;
-        // SAFETY: fd válido e aberto; LOCK_EX bloqueia até o trinco ser nosso.
+        // SAFETY: valid, open fd; LOCK_EX blocks until the lock is ours.
         if unsafe { libc::flock(f.as_raw_fd(), libc::LOCK_EX) } != 0 {
             return None;
         }
@@ -52,18 +52,18 @@ impl FileLock {
 
 impl Drop for FileLock {
     fn drop(&mut self) {
-        // SAFETY: fd ainda aberto (somos donos do File até aqui). O `close` do
-        // File também libertaria o flock; explícito para não depender disso.
+        // SAFETY: fd still open (we own the File until here). The File's `close`
+        // would also release the flock; explicit so as not to depend on that.
         unsafe { libc::flock(self.0.as_raw_fd(), libc::LOCK_UN) };
     }
 }
 
-/// Sanitiza uma chave/id para um nome de ficheiro seguro (`a-z0-9._-`,
-/// preservando maiúsculas). Bloqueia path traversal (`../`, `/etc/passwd`,
-/// separadores) mapeando qualquer carácter fora dessa allowlist para `-`.
-/// Partilhado por [`Store`] e [`JsonStore`] — **todo** id/chave vindo de fora
-/// (ex.: `Path<String>` de handlers axum em `delonix-api`) tem de passar por
-/// aqui antes de entrar num `PathBuf::join`.
+/// Sanitizes a key/id into a safe file name (`a-z0-9._-`,
+/// preserving uppercase). Blocks path traversal (`../`, `/etc/passwd`,
+/// separators) by mapping any character outside that allowlist to `-`.
+/// Shared by [`Store`] and [`JsonStore`] — **every** id/key coming from outside
+/// (e.g.: `Path<String>` of axum handlers in `delonix-api`) must pass through
+/// here before entering a `PathBuf::join`.
 pub(crate) fn safe_key(key: &str) -> String {
     key.chars()
         .map(|c| {
@@ -76,28 +76,28 @@ pub(crate) fn safe_key(key: &str) -> String {
         .collect()
 }
 
-/// O armazém de estado, enraizado num directório.
+/// The state store, rooted in a directory.
 pub struct Store {
     root: PathBuf,
 }
 
 impl Store {
-    /// Abre (criando) o armazém no directório `root`.
+    /// Opens (creating) the store in the `root` directory.
     pub fn open(root: impl Into<PathBuf>) -> Result<Self> {
         let root = root.into();
         fs::create_dir_all(&root)?;
         Ok(Self { root })
     }
 
-    /// `$DELONIX_ROOT/containers`, ou — **rootless** (sem privilégios) — o armazém
-    /// do utilizador (`$XDG_DATA_HOME/delonix` ou `~/.local/share/delonix`), ou
-    /// `/var/lib/delonix/containers` quando root. Consistente com
-    /// `ImageStore::default_root` para o `run` rootless funcionar sem `sudo`.
+    /// `$DELONIX_ROOT/containers`, or — **rootless** (without privileges) — the user's
+    /// store (`$XDG_DATA_HOME/delonix` or `~/.local/share/delonix`), or
+    /// `/var/lib/delonix/containers` when root. Consistent with
+    /// `ImageStore::default_root` so rootless `run` works without `sudo`.
     pub fn default_root() -> PathBuf {
         if let Some(root) = std::env::var_os("DELONIX_ROOT") {
             return PathBuf::from(root).join("containers");
         }
-        // SAFETY: geteuid() é sempre seguro e não falha.
+        // SAFETY: geteuid() is always safe and does not fail.
         if unsafe { libc::geteuid() } != 0 {
             let base = std::env::var_os("XDG_DATA_HOME")
                 .map(PathBuf::from)
@@ -108,8 +108,8 @@ impl Store {
         PathBuf::from("/var/lib/delonix/containers")
     }
 
-    /// O diretório-base (`$DELONIX_ROOT`) — o pai de `containers`. Usado por
-    /// subsistemas que vivem ao lado (ex.: [`crate::SecretStore`] em `<base>/secrets`).
+    /// The base directory (`$DELONIX_ROOT`) — the parent of `containers`. Used by
+    /// subsystems that live alongside (e.g.: [`crate::SecretStore`] in `<base>/secrets`).
     pub fn base(&self) -> PathBuf {
         self.root
             .parent()
@@ -121,20 +121,20 @@ impl Store {
         self.root.join(format!("{}.json", safe_key(id)))
     }
 
-    /// Ficheiro de trinco de um container (ver [`FileLock`]). Fica ao lado do
-    /// estado e NUNCA é apagado — apagá-lo abriria uma janela em que dois
-    /// processos trancam inodes diferentes e ambos entram na secção crítica.
+    /// Lock file of a container (see [`FileLock`]). It lives alongside the
+    /// state and is NEVER deleted — deleting it would open a window in which two
+    /// processes lock different inodes and both enter the critical section.
     fn lock_path(&self, id: &str) -> PathBuf {
         self.root.join(format!(".{}.lock", safe_key(id)))
     }
 
-    /// Persiste um container (escrita atómica).
+    /// Persists a container (atomic write).
     ///
-    /// O temporário é único **por escritor** (pid + sequência): com um nome
-    /// fixo (`.<id>.tmp`), dois processos a gravar o MESMO container escreviam
-    /// por cima um do outro no mesmo ficheiro e o `rename` publicava um JSON
-    /// entrelaçado — a atomicidade do `rename` não salva nada se o conteúdo do
-    /// temp já vem corrompido.
+    /// The temporary is unique **per writer** (pid + sequence): with a
+    /// fixed name (`.<id>.tmp`), two processes writing the SAME container would write
+    /// over each other in the same file and the `rename` would publish an
+    /// interleaved JSON — the atomicity of the `rename` saves nothing if the temp's
+    /// content already comes corrupted.
     pub fn save(&self, c: &Container) -> Result<()> {
         let safe = safe_key(&c.id);
         let seq = TMP_SEQ.fetch_add(1, Ordering::Relaxed);
@@ -148,31 +148,31 @@ impl Store {
         };
         let r = write();
         if r.is_err() {
-            let _ = fs::remove_file(&tmp); // não deixar lixo se falhou a meio
+            let _ = fs::remove_file(&tmp); // do not leave junk if it failed half-way
         }
         r
     }
 
-    /// **Read-modify-write seguro** de um container: tranca (`flock`), relê o
-    /// estado JÁ sob o trinco, aplica `f` e grava — tudo como uma secção
-    /// crítica entre processos.
+    /// **Safe read-modify-write** of a container: locks (`flock`), re-reads the
+    /// state ALREADY under the lock, applies `f` and writes — all as one critical
+    /// section between processes.
     ///
-    /// Usar isto (e não `load` + mutar + `save`) sempre que a mudança dependa
-    /// do estado ACTUAL. O padrão ingénuo perde escritas quando o CRI (que é
-    /// concorrente) e a CLI mexem no mesmo container ao mesmo tempo.
+    /// Use this (and not `load` + mutate + `save`) whenever the change depends
+    /// on the CURRENT state. The naive pattern loses writes when the CRI (which is
+    /// concurrent) and the CLI touch the same container at the same time.
     ///
-    /// `f` devolve `false` para abortar a gravação (nada muda). O container
-    /// devolvido é o estado final (ou o lido, se abortou).
+    /// `f` returns `false` to abort the write (nothing changes). The container
+    /// returned is the final state (or the one read, if it aborted).
     pub fn update<F>(&self, id_or_name: &str, f: F) -> Result<Container>
     where
         F: FnOnce(&mut Container) -> bool,
     {
-        // Resolve o id REAL primeiro (aceita prefixo/nome), para trancar sempre
-        // o mesmo ficheiro de trinco independentemente de como foi referido.
+        // Resolve the REAL id first (accepts prefix/name), to always lock
+        // the same lock file regardless of how it was referenced.
         let id = self.load(id_or_name)?.id;
         let _lock = FileLock::acquire(&self.lock_path(&id));
-        // Relê SOB o trinco: entre o resolve e o `flock` outro processo pode ter
-        // gravado; usar o valor lido antes reintroduziria o lost update.
+        // Re-read UNDER the lock: between the resolve and the `flock` another process may have
+        // written; using the value read before would reintroduce the lost update.
         let mut c = self.load(&id)?;
         if !f(&mut c) {
             return Ok(c);
@@ -181,7 +181,7 @@ impl Store {
         Ok(c)
     }
 
-    /// Carrega um container por id exacto, prefixo de id, ou nome.
+    /// Loads a container by exact id, id prefix, or name.
     pub fn load(&self, id_or_name: &str) -> Result<Container> {
         let exact = self.path(id_or_name);
         if exact.exists() {
@@ -195,7 +195,7 @@ impl Store {
         Err(Error::NotFound(id_or_name.to_string()))
     }
 
-    /// Lista todos os containers, do mais recente para o mais antigo.
+    /// Lists all containers, from most recent to oldest.
     pub fn list(&self) -> Result<Vec<Container>> {
         let mut out = Vec::new();
         for entry in fs::read_dir(&self.root)? {
@@ -212,7 +212,7 @@ impl Store {
         Ok(out)
     }
 
-    /// Remove o ficheiro de estado de um container.
+    /// Removes the state file of a container.
     pub fn remove(&self, id: &str) -> Result<()> {
         let p = self.path(id);
         if !p.exists() {
@@ -223,17 +223,17 @@ impl Store {
     }
 }
 
-/// Armazém genérico tipado — um ficheiro JSON por item, indexado por uma chave
-/// (nome). Reaproveita o mesmo padrão atómico (temp + `rename`) do [`Store`],
-/// para tipos que não são `Container`: VMs ([`crate::Vm`]) e os manifestos
-/// aplicados (estado desejado do daemon `reconcile`).
+/// Generic typed store — one JSON file per item, indexed by a key
+/// (name). Reuses the same atomic pattern (temp + `rename`) as [`Store`],
+/// for types that are not `Container`: VMs ([`crate::Vm`]) and the applied
+/// manifests (desired state of the `reconcile` daemon).
 pub struct JsonStore<T> {
     root: PathBuf,
     _t: PhantomData<T>,
 }
 
 impl<T: Serialize + DeserializeOwned> JsonStore<T> {
-    /// Abre (criando) o armazém no directório `root`.
+    /// Opens (creating) the store in the `root` directory.
     pub fn open(root: impl Into<PathBuf>) -> Result<Self> {
         let root = root.into();
         fs::create_dir_all(&root)?;
@@ -247,10 +247,10 @@ impl<T: Serialize + DeserializeOwned> JsonStore<T> {
         self.root.join(format!("{}.json", safe_key(key)))
     }
 
-    /// Persiste um item sob `key` (escrita atómica).
+    /// Persists an item under `key` (atomic write).
     pub fn save(&self, key: &str, value: &T) -> Result<()> {
         let safe = safe_key(key);
-        // Temp único por escritor — ver a nota em `Store::save`.
+        // Temp unique per writer — see the note in `Store::save`.
         let seq = TMP_SEQ.fetch_add(1, Ordering::Relaxed);
         let tmp = self
             .root
@@ -260,7 +260,7 @@ impl<T: Serialize + DeserializeOwned> JsonStore<T> {
         Ok(())
     }
 
-    /// Carrega um item por chave exacta.
+    /// Loads an item by exact key.
     pub fn load(&self, key: &str) -> Result<T> {
         let p = self.path(key);
         if !p.exists() {
@@ -269,12 +269,12 @@ impl<T: Serialize + DeserializeOwned> JsonStore<T> {
         Ok(serde_json::from_slice(&fs::read(p)?)?)
     }
 
-    /// `true` se existe um item com esta chave.
+    /// `true` if an item with this key exists.
     pub fn exists(&self, key: &str) -> bool {
         self.path(key).exists()
     }
 
-    /// Lista todos os itens (ordem do sistema de ficheiros).
+    /// Lists all items (filesystem order).
     pub fn list(&self) -> Result<Vec<T>> {
         let mut out = Vec::new();
         for entry in fs::read_dir(&self.root)? {
@@ -290,7 +290,7 @@ impl<T: Serialize + DeserializeOwned> JsonStore<T> {
         Ok(out)
     }
 
-    /// Remove o item de uma chave (idempotente: ausência não é erro).
+    /// Removes the item of a key (idempotent: absence is not an error).
     pub fn remove(&self, key: &str) -> Result<()> {
         let p = self.path(key);
         if p.exists() {
@@ -318,16 +318,16 @@ mod tests {
 
     #[test]
     fn safe_key_neutraliza_path_traversal() {
-        // `.` é um carácter permitido (ids/nomes legítimos têm pontos), mas `/`
-        // é SEMPRE substituído — por isso "../" nunca sobrevive como separador:
-        // o resultado é sempre UM SÓ componente de nome de ficheiro, mesmo que
-        // contenha ".." like a substring. `PathBuf::join` só interpreta ".."
-        // como travessia quando é um componente inteiro (delimitado por `/`);
-        // dentro de um único componente sem `/`, é só texto inofensivo.
+        // `.` is an allowed character (legitimate ids/names have dots), but `/`
+        // is ALWAYS replaced — so "../" never survives as a separator:
+        // the result is always ONE SINGLE file name component, even if it
+        // contains ".." like a substring. `PathBuf::join` only interprets ".."
+        // as traversal when it is a whole component (delimited by `/`);
+        // within a single component without `/`, it is just harmless text.
         assert_eq!(safe_key("../../etc/passwd"), "..-..-etc-passwd");
         assert_eq!(safe_key("a/../../b"), "a-..-..-b");
         assert!(!safe_key("../../../root/.ssh/authorized_keys").contains('/'));
-        // ids normais (hex/uuid) passam intactos — sem regressão de comportamento.
+        // normal ids (hex/uuid) pass through intact — no behavior regression.
         assert_eq!(safe_key("a1b2c3d4e5f6"), "a1b2c3d4e5f6");
         assert_eq!(safe_key("my-container_v1.2"), "my-container_v1.2");
     }
@@ -341,7 +341,7 @@ mod tests {
             .join(format!("delonix-store-test-VICTIM-{}", std::process::id()));
         let store = Store::open(&root).unwrap();
 
-        // um "id" malicioso vindo de um handler HTTP não validado.
+        // a malicious "id" coming from an unvalidated HTTP handler.
         let evil_id = format!(
             "../{}/pwned",
             outside.file_name().unwrap().to_str().unwrap()
@@ -355,7 +355,7 @@ mod tests {
         );
         store.save(&c).unwrap();
 
-        // o ficheiro TEM de ficar dentro de `root` — nunca em `outside`.
+        // the file MUST stay inside `root` — never in `outside`.
         assert!(
             !outside.exists(),
             "save com id malicioso escreveu FORA da raiz do Store"
@@ -374,8 +374,8 @@ mod tests {
             "ficheiro escrito fora da raiz esperada"
         );
 
-        // load/remove com o MESMO id malicioso continuam a resolver para dentro
-        // da raiz (consistência: save/load/remove sanitizam da mesma forma).
+        // load/remove with the SAME malicious id still resolve to inside
+        // the root (consistency: save/load/remove sanitize the same way).
         let loaded = store.load(&evil_id).unwrap();
         assert_eq!(
             loaded.id, evil_id,
@@ -406,9 +406,9 @@ mod tests {
         let _ = fs::remove_dir_all(&root);
     }
 
-    /// REGRESSÃO (concorrência): `update` sequencia read-modify-write entre
-    /// threads. Sem o `flock`, N incrementos concorrentes perdem-se (lost
-    /// update) e o total final vem < N. Com o trinco, tem de ser exactamente N.
+    /// REGRESSION (concurrency): `update` sequences read-modify-write between
+    /// threads. Without the `flock`, N concurrent increments are lost (lost
+    /// update) and the final total comes out < N. With the lock, it must be exactly N.
     #[test]
     fn update_concorrente_nao_perde_escritas() {
         let root = tmp_dir("store-update-race");
@@ -431,8 +431,8 @@ mod tests {
                     let st = Store::open(&root).unwrap();
                     st.update("race1", |c| {
                         let n: u64 = c.labels.get("n").unwrap().parse().unwrap();
-                        // Janela de corrida explícita entre o read e o write:
-                        // sem trinco, garante o lost update.
+                        // Explicit race window between the read and the write:
+                        // without a lock, guarantees the lost update.
                         std::thread::sleep(std::time::Duration::from_millis(2));
                         c.labels.insert("n".into(), (n + 1).to_string());
                         true
@@ -454,9 +454,9 @@ mod tests {
         let _ = fs::remove_dir_all(&root);
     }
 
-    /// REGRESSÃO: o temporário do `save` tem de ser único por escritor. Com um
-    /// nome fixo (`.<id>.tmp`), escritas concorrentes do MESMO container
-    /// entrelaçavam-se no temp e o `rename` publicava JSON corrompido.
+    /// REGRESSION: the `save` temporary must be unique per writer. With a
+    /// fixed name (`.<id>.tmp`), concurrent writes of the SAME container
+    /// interleaved in the temp and the `rename` published corrupted JSON.
     #[test]
     fn save_concorrente_nunca_publica_json_corrompido() {
         let root = tmp_dir("store-save-race");
@@ -477,14 +477,14 @@ mod tests {
                     let st = Store::open(&root).unwrap();
                     let mut c = Container::new(
                         "race2".into(),
-                        format!("nome-{}", "a".repeat(i * 7)), // tamanhos diferentes = entrelaçado visível
+                        format!("nome-{}", "a".repeat(i * 7)), // different sizes = visible interleaving
                         "img".into(),
                         vec!["x".into()],
                         "max".into(),
                     );
                     c.labels.insert("k".into(), "v".repeat(i * 11));
                     st.save(&c).unwrap();
-                    // Cada leitura tem de ver SEMPRE um JSON válido.
+                    // Each read must ALWAYS see a valid JSON.
                     st.load("race2")
                         .expect("JSON corrompido publicado pelo rename");
                 });

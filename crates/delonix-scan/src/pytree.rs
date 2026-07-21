@@ -1,22 +1,22 @@
-//! Scan de árvores de **módulos Odoo** (Python) — o gate zero-trust do plano
-//! Odoo (Bloco D). Três vertentes, todas em funções puras (testáveis sem IO):
+//! Scanning of **Odoo module** (Python) trees — the zero-trust gate of the Odoo
+//! plan (Block D). Three aspects, all in pure functions (testable without IO):
 //!
-//! 1. **Manifesto** — extrai `name`/`version`/`depends` do `__manifest__.py`
-//!    (dict literal Python; extração best-effort por análise textual, sem
-//!    interpretar Python — nunca EXECUTAMOS código do módulo).
-//! 2. **Dependências PyPI** — `requirements.txt`/`external_dependencies` →
-//!    pacotes para cruzar com a BD de advisories (ecossistema [`Ecosystem::PyPi`];
-//!    o feed OSV `PyPI` é aceite no `advisories_from_osv`).
-//! 3. **Lints de risco** — padrões perigosos em `.py` (exec dinâmico, shell,
-//!    deserialização insegura, rede crua) com severidade — a base do gate
-//!    "Critical/High bloqueiam" (decisão assinada nº 2).
+//! 1. **Manifest** — extracts `name`/`version`/`depends` from `__manifest__.py`
+//!    (Python literal dict; best-effort extraction via textual analysis, without
+//!    interpreting Python — we NEVER EXECUTE the module's code).
+//! 2. **PyPI dependencies** — `requirements.txt`/`external_dependencies` →
+//!    packages to cross-reference with the advisory DB (ecosystem [`Ecosystem::PyPi`];
+//!    the OSV `PyPI` feed is accepted in `advisories_from_osv`).
+//! 3. **Risk lints** — dangerous patterns in `.py` (dynamic exec, shell,
+//!    unsafe deserialization, raw networking) with severity — the basis of the gate
+//!    "Critical/High block" (signed decision no. 2).
 
 use crate::Severity;
 use delonix_runtime_core::{Error, Result};
 use serde::Serialize;
 use std::path::Path;
 
-/// O manifesto de um módulo Odoo (extração best-effort, sem executar Python).
+/// The manifest of an Odoo module (best-effort extraction, without executing Python).
 #[derive(Serialize, Clone, Debug, Default)]
 pub struct OdooManifest {
     pub name: Option<String>,
@@ -24,49 +24,49 @@ pub struct OdooManifest {
     pub depends: Vec<String>,
 }
 
-/// Uma dependência Python declarada (`requirements.txt`).
+/// A declared Python dependency (`requirements.txt`).
 #[derive(Serialize, Clone, Debug, PartialEq, Eq)]
 pub struct PyDep {
     pub name: String,
-    /// Versão fixada (`==`); vazio se não fixada (range/sem pin).
+    /// Pinned version (`==`); empty if not pinned (range/no pin).
     pub version: String,
 }
 
-/// Um achado dos lints de risco.
+/// A finding from the risk lints.
 #[derive(Serialize, Clone, Debug)]
 pub struct RiskFinding {
-    /// Caminho relativo do ficheiro dentro do módulo.
+    /// Relative path of the file within the module.
     pub file: String,
-    /// Linha (1-based).
+    /// Line (1-based).
     pub line: usize,
-    /// O padrão que disparou (ex.: `os.system(`).
+    /// The pattern that fired (e.g. `os.system(`).
     pub pattern: String,
     pub severity: Severity,
-    /// A linha ofensora (aparada, máx. 160 chars).
+    /// The offending line (trimmed, max 160 chars).
     pub snippet: String,
 }
 
-/// O relatório de UM módulo Odoo.
+/// The report of ONE Odoo module.
 #[derive(Serialize, Clone, Debug)]
 pub struct ModuleReport {
-    /// Nome do diretório do módulo.
+    /// Name of the module's directory.
     pub module: String,
     pub manifest: OdooManifest,
     pub deps: Vec<PyDep>,
     pub risks: Vec<RiskFinding>,
-    /// Nº de ficheiros analisados.
+    /// Number of files analyzed.
     pub files: usize,
 }
 
 impl ModuleReport {
-    /// A pior severidade dos riscos (`None` = sem riscos).
+    /// The worst severity among the risks (`None` = no risks).
     pub fn worst(&self) -> Option<Severity> {
         self.risks.iter().map(|r| r.severity).max()
     }
 }
 
-/// Extrai um valor string de um dict literal Python: `'chave': 'valor'` ou
-/// `"chave": "valor"`. Best-effort textual (chaves do manifesto Odoo são simples).
+/// Extracts a string value from a Python literal dict: `'key': 'value'` or
+/// `"key": "value"`. Best-effort textual (Odoo manifest keys are simple).
 fn dict_str(text: &str, key: &str) -> Option<String> {
     for quote in ['\'', '"'] {
         let pat = format!("{quote}{key}{quote}");
@@ -84,7 +84,7 @@ fn dict_str(text: &str, key: &str) -> Option<String> {
     None
 }
 
-/// Extrai uma lista de strings: `'chave': ['a', 'b']`.
+/// Extracts a list of strings: `'key': ['a', 'b']`.
 fn dict_list(text: &str, key: &str) -> Vec<String> {
     for quote in ['\'', '"'] {
         let pat = format!("{quote}{key}{quote}");
@@ -107,7 +107,7 @@ fn dict_list(text: &str, key: &str) -> Vec<String> {
     Vec::new()
 }
 
-/// Analisa o texto de um `__manifest__.py` (sem executar Python).
+/// Parses the text of a `__manifest__.py` (without executing Python).
 pub fn parse_odoo_manifest(text: &str) -> OdooManifest {
     OdooManifest {
         name: dict_str(text, "name"),
@@ -116,8 +116,8 @@ pub fn parse_odoo_manifest(text: &str) -> OdooManifest {
     }
 }
 
-/// Analisa um `requirements.txt`: linhas `nome==versão` (pins) e `nome` (sem pin);
-/// comentários e flags (`-r`, `--índices`) são ignorados.
+/// Parses a `requirements.txt`: `name==version` lines (pins) and `name` (no pin);
+/// comments and flags (`-r`, `--indices`) are ignored.
 pub fn parse_requirements(text: &str) -> Vec<PyDep> {
     let mut out = Vec::new();
     for line in text.lines() {
@@ -125,7 +125,7 @@ pub fn parse_requirements(text: &str) -> Vec<PyDep> {
         if line.is_empty() || line.starts_with('-') {
             continue;
         }
-        // corta extras/markers: `pkg[extra]==1.0; python_version…`
+        // strips extras/markers: `pkg[extra]==1.0; python_version…`
         let line = line.split(';').next().unwrap_or(line).trim();
         let (name, version) = match line.split_once("==") {
             Some((n, v)) => (n, v.trim()),
@@ -139,7 +139,7 @@ pub fn parse_requirements(text: &str) -> Vec<PyDep> {
             continue;
         }
         out.push(PyDep {
-            // nomes PyPI são case-insensitive e `-`≡`_` (PEP 503)
+            // PyPI names are case-insensitive and `-`≡`_` (PEP 503)
             name: name.to_ascii_lowercase().replace('_', "-"),
             version: version.to_string(),
         });
@@ -147,11 +147,11 @@ pub fn parse_requirements(text: &str) -> Vec<PyDep> {
     out
 }
 
-/// Os padrões de risco e a sua severidade. A filosofia: código de módulo NUNCA
-/// devia precisar de exec dinâmico/shell/deserialização insegura — quando
-/// aparece, ou é malícia ou é um acidente à espera de acontecer.
+/// The risk patterns and their severity. The philosophy: module code should
+/// NEVER need dynamic exec/shell/unsafe deserialization — when it shows up,
+/// it's either malice or an accident waiting to happen.
 const RISK_PATTERNS: &[(&str, Severity)] = &[
-    // execução dinâmica / shell — a via direta de RCE
+    // dynamic execution / shell — the direct path to RCE
     ("eval(", Severity::Critical),
     ("exec(", Severity::Critical),
     ("os.system(", Severity::Critical),
@@ -159,26 +159,26 @@ const RISK_PATTERNS: &[(&str, Severity)] = &[
     ("__import__(", Severity::High),
     ("subprocess.", Severity::High),
     ("ctypes.", Severity::High),
-    // deserialização insegura — RCE por payload
+    // unsafe deserialization — RCE via payload
     ("pickle.loads(", Severity::Critical),
     ("pickle.load(", Severity::High),
     ("marshal.loads(", Severity::Critical),
-    ("yaml.load(", Severity::High), // sem SafeLoader
-    // rede crua a partir do módulo (exfiltração/beacon)
+    ("yaml.load(", Severity::High), // without SafeLoader
+    // raw networking from the module (exfiltration/beacon)
     ("socket.socket(", Severity::High),
-    // ofuscação clássica
+    // classic obfuscation
     ("base64.b64decode(", Severity::Medium),
     ("codecs.decode(", Severity::Medium),
 ];
 
-/// Linta o TEXTO de um ficheiro Python. `file` é o caminho relativo p/ o relatório.
+/// Lints the TEXT of a Python file. `file` is the relative path for the report.
 pub fn lint_python(file: &str, text: &str) -> Vec<RiskFinding> {
     let mut out = Vec::new();
     for (i, line) in text.lines().enumerate() {
-        let code = line.split('#').next().unwrap_or(""); // ignora comentários
+        let code = line.split('#').next().unwrap_or(""); // ignore comments
         for (pat, sev) in RISK_PATTERNS {
             if code.contains(pat) {
-                // exceção: `yaml.load(` com SafeLoader é o uso correto
+                // exception: `yaml.load(` with SafeLoader is the correct usage
                 if *pat == "yaml.load(" && code.contains("SafeLoader") {
                     continue;
                 }
@@ -195,12 +195,12 @@ pub fn lint_python(file: &str, text: &str) -> Vec<RiskFinding> {
     out
 }
 
-/// `true` se o diretório É um módulo Odoo (tem `__manifest__.py`/`__openerp__.py`).
+/// `true` if the directory IS an Odoo module (has `__manifest__.py`/`__openerp__.py`).
 pub fn is_odoo_module(dir: &Path) -> bool {
     dir.join("__manifest__.py").is_file() || dir.join("__openerp__.py").is_file()
 }
 
-/// Faz o scan de UM módulo (diretório com `__manifest__.py`).
+/// Scans ONE module (directory with `__manifest__.py`).
 pub fn scan_module_dir(dir: &Path) -> Result<ModuleReport> {
     let module = dir
         .file_name()
@@ -234,8 +234,8 @@ pub fn scan_module_dir(dir: &Path) -> Result<ModuleReport> {
     })
 }
 
-/// Faz o scan de uma raiz: o próprio diretório se for um módulo, senão cada
-/// subdiretório que o seja (layout de repositório de addons).
+/// Scans a root: the directory itself if it is a module, otherwise each
+/// subdirectory that is one (addons repository layout).
 pub fn scan_modules_root(dir: &Path) -> Result<Vec<ModuleReport>> {
     if is_odoo_module(dir) {
         return Ok(vec![scan_module_dir(dir)?]);
@@ -262,8 +262,8 @@ pub fn scan_modules_root(dir: &Path) -> Result<Vec<ModuleReport>> {
     Ok(out)
 }
 
-/// Percorre os `.py` de uma árvore chamando `f(caminho_relativo, texto)`.
-/// Symlinks NÃO são seguidos (um módulo não devia ter symlinks para fora).
+/// Walks the `.py` files of a tree, calling `f(relative_path, text)`.
+/// Symlinks are NOT followed (a module shouldn't have symlinks pointing outside).
 fn walk_py(root: &Path, dir: &Path, f: &mut impl FnMut(&str, &str)) -> Result<()> {
     for e in std::fs::read_dir(dir)
         .map_err(|e| Error::Runtime {
@@ -380,7 +380,7 @@ mod tests {
         assert_eq!(r.deps.len(), 1);
         assert_eq!(r.worst(), Some(Severity::Critical));
         assert_eq!(r.files, 3); // __manifest__.py + models/{ok,mau}.py
-                                // raiz que É o módulo também funciona
+                                // a root that IS the module also works
         let direct = scan_modules_root(&m).unwrap();
         assert_eq!(direct.len(), 1);
         std::fs::remove_dir_all(&dir).ok();

@@ -1,32 +1,32 @@
-//! Registo OCI interno (Distribution `registry:2`) gerido pelo Delonix — Pilar 1, **Bloco E**.
+//! Internal OCI registry (Distribution `registry:2`) managed by Delonix — Pillar 1, **Block E**.
 //!
-//! Um registo local é o **alvo do *exporter*** dos Cloud Native Buildpacks (rootless, sem
-//! daemon, o lifecycle exporta para um registo, não para um socket Docker) e o substrato do
-//! **cache** e do **build remoto**. Aqui está só a **lógica pura** (endereço, ref de imagem,
-//! argumentos do `delonix run` que sobem o registo); a CLI conduz a execução (`delonix
-//! registry up/status/down`), que exige runtime+rede — E2E por validar neste ambiente.
+//! A local registry is the **target of the *exporter*** of Cloud Native Buildpacks (rootless, no
+//! daemon — the lifecycle exports to a registry, not to a Docker socket) and the substrate of the
+//! **cache** and the **remote build**. Here lives only the **pure logic** (address, image ref,
+//! `delonix run` arguments that bring up the registry); the CLI drives the execution (`delonix
+//! registry up/status/down`), which requires runtime+network — E2E yet to be validated in this environment.
 
-/// Nome do container do registo interno.
+/// Name of the internal registry container.
 pub const NAME: &str = "delonix-registry";
-/// Imagem do registo (Distribution).
+/// Registry image (Distribution).
 pub const IMAGE: &str = "registry:2";
-/// Volume nomeado para a persistência do registo.
+/// Named volume for registry persistence.
 pub const DATA_VOLUME: &str = "delonix-registry-data";
-/// Porta por omissão (publicada em loopback).
+/// Default port (published on loopback).
 pub const DEFAULT_PORT: u16 = 5000;
 
-/// Endereço do registo interno (sempre loopback — não exposto à rede).
+/// Address of the internal registry (always loopback — not exposed to the network).
 pub fn addr(port: u16) -> String {
     format!("127.0.0.1:{port}")
 }
 
-/// Referência OCI de uma imagem de app no registo interno (`<addr>/<name>:latest`).
+/// OCI reference of an app image in the internal registry (`<addr>/<name>:latest`).
 pub fn image_ref(addr: &str, name: &str) -> String {
     format!("{addr}/{name}:latest")
 }
 
-/// Argumentos do `delonix run` que sobem o registo interno (detached, em loopback, com
-/// volume persistente). A porta do host mapeia para a 5000 interna do `registry:2`.
+/// `delonix run` arguments that bring up the internal registry (detached, on loopback, with
+/// a persistent volume). The host port maps to the 5000 internal to `registry:2`.
 pub fn run_args(port: u16) -> Vec<String> {
     vec![
         "run".into(),
@@ -34,10 +34,10 @@ pub fn run_args(port: u16) -> Vec<String> {
         "--name".into(),
         NAME.into(),
         "-p".into(),
-        // O publish do engine é loopback-only POR OMISSÃO (DNAT só na chain `output`,
-        // 127.0.0.0/8); exposição externa exige DELONIX_PUBLISH_ADDR. Por isso `port:5000`
-        // já fica restrito ao loopback — sem precisar do prefixo `127.0.0.1:` (Docker-style,
-        // ainda não suportado pelo parser de `-p`).
+        // The engine's publish is loopback-only BY DEFAULT (DNAT only on the `output` chain,
+        // 127.0.0.0/8); external exposure requires DELONIX_PUBLISH_ADDR. So `port:5000`
+        // is already restricted to loopback — without needing the `127.0.0.1:` prefix (Docker-style,
+        // not yet supported by the `-p` parser).
         format!("{port}:5000"),
         "-v".into(),
         format!("{DATA_VOLUME}:/var/lib/registry"),
@@ -61,8 +61,8 @@ mod tests {
         assert_eq!(a[0], "run");
         assert!(a.contains(&"-d".to_string()));
         assert!(a.windows(2).any(|w| w == ["--name", NAME]));
-        assert!(a.contains(&"5000:5000".to_string())); // loopback-only é o default do publish
-        assert!(a.contains(&format!("{DATA_VOLUME}:/var/lib/registry"))); // persistente
+        assert!(a.contains(&"5000:5000".to_string())); // loopback-only is the publish default
+        assert!(a.contains(&format!("{DATA_VOLUME}:/var/lib/registry"))); // persistent
         assert_eq!(a.last().unwrap(), IMAGE);
     }
 }

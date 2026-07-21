@@ -1,15 +1,16 @@
-//! Servidor **SPDY/3.1** para o protocolo *remotecommand* do Kubernetes — o que
-//! o `crictl`/`kubelet` usam HOJE para `exec`/`attach` (tentam SPDY antes de
-//! WebSocket). Complementa o servidor WebSocket em [`crate::streaming`].
+//! **SPDY/3.1** server for the Kubernetes *remotecommand* protocol — what
+//! `crictl`/`kubelet` use TODAY for `exec`/`attach` (they try SPDY before
+//! WebSocket). Complements the WebSocket server in [`crate::streaming`].
 //!
-//! Fluxo: o cliente faz `POST` com `Upgrade: SPDY/3.1`; respondemos `101` e a
-//! ligação passa a SPDY. O cliente abre uma *stream* por canal (com um cabeçalho
-//! `streamType` = error/stdin/stdout/stderr/resize); nós corremos `delonix exec`
-//! e movemos os bytes entre as streams e o processo. O canal `error` transporta
-//! o `metav1.Status` final (com o exit code, protocolo v4). C2.
+//! Flow: the client does a `POST` with `Upgrade: SPDY/3.1`; we reply `101` and
+//! the connection switches to SPDY. The client opens one *stream* per channel
+//! (with a `streamType` header = error/stdin/stdout/stderr/resize); we run
+//! `delonix exec` and move the bytes between the streams and the process. The
+//! `error` channel carries the final `metav1.Status` (with the exit code,
+//! protocol v4). C2.
 //!
-//! Os cabeçalhos SPDY são comprimidos com zlib + o **dicionário fixo SPDY/3**
-//! (`spdy3.dict`, adler32 0xe3c6a7c2). Exige o backend `zlib-rs` do `flate2`.
+//! SPDY headers are compressed with zlib + the **fixed SPDY/3 dictionary**
+//! (`spdy3.dict`, adler32 0xe3c6a7c2). Requires the `zlib-rs` backend of `flate2`.
 #![allow(clippy::result_large_err)]
 
 use std::collections::{HashMap, VecDeque};
@@ -28,12 +29,12 @@ use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
 use crate::streaming::{apply_resize, open_pty, write_all as write_fd, Pending};
 
-/// Dicionário fixo SPDY/3 (1423 bytes) usado na (de)compressão de cabeçalhos.
+/// Fixed SPDY/3 dictionary (1423 bytes) used in header (de)compression.
 static SPDY3_DICT: &[u8] = include_bytes!("spdy3.dict");
 
 // ---------------------------------------------------------------------------
-// Codificação de blocos Nome/Valor (SPDY/3): u32 count, depois pares
-// (u32 len + nome, u32 len + valor).
+// Name/Value block encoding (SPDY/3): u32 count, then pairs
+// (u32 len + name, u32 len + value).
 // ---------------------------------------------------------------------------
 
 fn encode_nv(pairs: &[(String, String)]) -> Vec<u8> {
@@ -81,8 +82,8 @@ fn decode_nv(buf: &[u8]) -> Vec<(String, String)> {
 }
 
 // ---------------------------------------------------------------------------
-// (De)compressão zlib contínua com dicionário e Z_SYNC_FLUSH. O estado é
-// partilhado por todos os frames de cabeçalhos numa direção.
+// Continuous zlib (de)compression with dictionary and Z_SYNC_FLUSH. The state
+// is shared by all header frames in one direction.
 // ---------------------------------------------------------------------------
 
 pub struct Deflater {
@@ -102,8 +103,8 @@ impl Deflater {
         Self { c }
     }
 
-    /// Comprime um bloco NV, devolvendo os bytes (terminados pelo marcador de
-    /// sync 00 00 ff ff) para concatenar no frame de controlo.
+    /// Compresses an NV block, returning the bytes (terminated by the sync
+    /// marker 00 00 ff ff) to concatenate into the control frame.
     pub fn block(&mut self, nv: &[u8]) -> Vec<u8> {
         let mut out = Vec::with_capacity(nv.len() / 2 + 32);
         let mut input = nv;
@@ -116,10 +117,10 @@ impl Deflater {
             out.extend_from_slice(&tmp[..co]);
             input = &input[ci..];
             if co == tmp.len() {
-                continue; // buffer cheio: mais saída pendente
+                continue; // buffer full: more output pending
             }
             if input.is_empty() {
-                break; // tudo consumido e flush emitido
+                break; // everything consumed and flush emitted
             }
         }
         out
@@ -145,8 +146,8 @@ impl Inflater {
         }
     }
 
-    /// Descomprime um bloco de cabeçalhos. Em SPDY o dicionário só pode ser
-    /// instalado quando o zlib o pede (`Z_NEED_DICT`).
+    /// Decompresses a header block. In SPDY the dictionary can only be
+    /// installed when zlib asks for it (`Z_NEED_DICT`).
     pub fn block(&mut self, comp: &[u8]) -> Vec<u8> {
         let mut out = Vec::with_capacity(comp.len() * 4 + 64);
         let mut input = comp;
@@ -162,13 +163,13 @@ impl Inflater {
                 Ok(Status::StreamEnd) => break,
                 Ok(_) => {
                     if co == tmp.len() {
-                        continue; // mais saída pendente
+                        continue; // more output pending
                     }
                     if input.is_empty() {
                         break;
                     }
                     if co == 0 && ci == 0 {
-                        // precisa de dicionário antes de progredir
+                        // needs the dictionary before making progress
                         if !self.dict_set && self.d.set_dictionary(SPDY3_DICT).is_ok() {
                             self.dict_set = true;
                             continue;
@@ -177,7 +178,7 @@ impl Inflater {
                     }
                 }
                 Err(_) => {
-                    // Z_NEED_DICT (ou erro): instala o dicionário e continua.
+                    // Z_NEED_DICT (or error): install the dictionary and continue.
                     if !self.dict_set && self.d.set_dictionary(SPDY3_DICT).is_ok() {
                         self.dict_set = true;
                         continue;
@@ -191,7 +192,7 @@ impl Inflater {
 }
 
 // ===========================================================================
-// Servidor SPDY/3.1 — framing, upgrade e ponte com `delonix exec`.
+// SPDY/3.1 server — framing, upgrade and bridge with `delonix exec`.
 // ===========================================================================
 
 const SYN_STREAM: u16 = 1;
@@ -204,17 +205,17 @@ const FLAG_FIN: u8 = 0x01;
 const MAX_DATA: usize = 16 * 1024;
 
 fn delonix_bin() -> PathBuf {
-    // A CLI `delonix`, NÃO `current_exe()` (o próprio `delonix-cri`): reinvocá-lo
-    // com `container exec` cairia em `serve_blocking`, que rouba o socket e o
-    // processo de exec fica pendurado a servir para sempre (o hang do critest em
-    // "exec tty=false stdin=false"). Ver `crate::cli_bin`.
+    // The `delonix` CLI, NOT `current_exe()` (`delonix-cri` itself): reinvoking it
+    // with `container exec` would fall into `serve_blocking`, which steals the
+    // socket and the exec process hangs serving forever (the critest hang on
+    // "exec tty=false stdin=false"). See `crate::cli_bin`.
     crate::cli_bin()
 }
 
-/// Constrói um frame de controlo SPDY/3.
+/// Builds a SPDY/3 control frame.
 fn ctrl(kind: u16, flags: u8, payload: &[u8]) -> Vec<u8> {
     let mut f = Vec::with_capacity(8 + payload.len());
-    f.extend_from_slice(&(0x8000u16 | 3).to_be_bytes()); // bit de controlo + versão 3
+    f.extend_from_slice(&(0x8000u16 | 3).to_be_bytes()); // control bit + version 3
     f.extend_from_slice(&kind.to_be_bytes());
     f.push(flags);
     let len = payload.len() as u32;
@@ -223,7 +224,7 @@ fn ctrl(kind: u16, flags: u8, payload: &[u8]) -> Vec<u8> {
     f
 }
 
-/// Constrói um frame de dados SPDY.
+/// Builds a SPDY data frame.
 fn data_frame(sid: u32, flags: u8, data: &[u8]) -> Vec<u8> {
     let mut f = Vec::with_capacity(8 + data.len());
     f.extend_from_slice(&(sid & 0x7fff_ffff).to_be_bytes());
@@ -234,8 +235,8 @@ fn data_frame(sid: u32, flags: u8, data: &[u8]) -> Vec<u8> {
     f
 }
 
-/// Seleciona a versão do subprotocolo remotecommand (preferimos v4: traz o
-/// exit code no stream de erro).
+/// Selects the remotecommand subprotocol version (we prefer v4: it carries the
+/// exit code on the error stream).
 fn select_proto(headers: &header::HeaderMap) -> String {
     let mut offered: Vec<String> = Vec::new();
     for v in headers.get_all("x-stream-protocol-version") {
@@ -258,8 +259,8 @@ fn select_proto(headers: &header::HeaderMap) -> String {
         .unwrap_or_else(|| "v4.channel.k8s.io".into())
 }
 
-/// Handler do `POST` com `Upgrade: SPDY/3.1`. Responde `101` e corre o SPDY na
-/// ligação atualizada.
+/// Handler for the `POST` with `Upgrade: SPDY/3.1`. Replies `101` and runs SPDY
+/// on the upgraded connection.
 pub fn handle_exec(
     mut req: axum::extract::Request,
     base: PathBuf,
@@ -285,21 +286,21 @@ pub fn handle_exec(
 }
 
 // ---------------------------------------------------------------------------
-// Mensagens para a tarefa de escrita (única dona do socket de saída + zlib).
+// Messages for the writer task (sole owner of the output socket + zlib).
 // ---------------------------------------------------------------------------
 
 enum Out {
     SynReply(u32),
     Data { sid: u32, fin: bool, buf: Vec<u8> },
-    Credit { sid: u32, delta: i64 }, // recebemos WINDOW_UPDATE → cresce a nossa janela
-    SendWu { sid: u32, delta: u32 }, // reabastece o cliente
+    Credit { sid: u32, delta: i64 }, // we received WINDOW_UPDATE → grow our window
+    SendWu { sid: u32, delta: u32 }, // replenish the client
     Ping(u32),
     Goaway(u32),
     Close,
 }
 
-/// Estado final no stream de erro (v4): em código 0, fecha vazio (= sucesso); em
-/// código != 0, escreve o `metav1.Status` com o exit code.
+/// Final state on the error stream (v4): on code 0, closes empty (= success); on
+/// code != 0, writes the `metav1.Status` with the exit code.
 fn finish(tx: &UnboundedSender<Out>, error_sid: u32, code: i32) {
     let buf = if code == 0 {
         Vec::new()
@@ -323,9 +324,9 @@ fn finish(tx: &UnboundedSender<Out>, error_sid: u32, code: i32) {
     let _ = tx.send(Out::Close);
 }
 
-type Pend = HashMap<u32, (VecDeque<u8>, bool, bool)>; // sid -> (buffer, fin_pendente, fin_enviado)
+type Pend = HashMap<u32, (VecDeque<u8>, bool, bool)>; // sid -> (buffer, fin_pending, fin_sent)
 
-/// Escoa o máximo de dados pendentes de uma stream respeitando as janelas.
+/// Drains as much of a stream's pending data as possible, respecting the windows.
 async fn flush_stream<W: AsyncWrite + Unpin>(
     wr: &mut W,
     sid: u32,
@@ -340,7 +341,7 @@ async fn flush_stream<W: AsyncWrite + Unpin>(
     let sw = win.entry(sid).or_insert(initial);
     loop {
         if entry.2 {
-            break; // FIN já enviado
+            break; // FIN already sent
         }
         let avail = (*sw).min(*session_win).max(0) as usize;
         let n = entry.0.len().min(avail).min(MAX_DATA);
@@ -349,7 +350,7 @@ async fn flush_stream<W: AsyncWrite + Unpin>(
                 wr.write_all(&data_frame(sid, FLAG_FIN, &[])).await?;
                 entry.2 = true;
             }
-            break; // sem janela ou sem dados
+            break; // no window or no data
         }
         let chunk: Vec<u8> = entry.0.drain(..n).collect();
         let fin = entry.0.is_empty() && entry.1;
@@ -367,11 +368,11 @@ async fn flush_stream<W: AsyncWrite + Unpin>(
 
 async fn writer_task<W: AsyncWrite + Unpin>(mut wr: W, mut rx: UnboundedReceiver<Out>) {
     let mut comp = Deflater::new();
-    // O `docker/spdystream` (cliente do kubelet/crictl) anuncia uma janela de
-    // 64 KB via SETTINGS mas NÃO faz controlo de fluxo de saída — nunca envia
-    // WINDOW_UPDATE. Se respeitássemos a janela, travávamos exatamente aos 64 KB.
-    // Enviamos livremente (o backpressure do TCP regula o ritmo); mantemos o
-    // contador só para honrar créditos extra que um cliente conforme envie.
+    // `docker/spdystream` (the kubelet/crictl client) advertises a 64 KB window
+    // via SETTINGS but does NOT do outbound flow control — it never sends
+    // WINDOW_UPDATE. If we honored the window, we'd stall at exactly 64 KB. We
+    // send freely (TCP backpressure regulates the pace); we keep the counter only
+    // to honor extra credits that a conformant client might send.
     let mut session_win: i64 = i64::MAX / 4;
     let initial_win: i64 = i64::MAX / 4;
     let mut win: HashMap<u32, i64> = HashMap::new();
@@ -464,7 +465,7 @@ async fn writer_task<W: AsyncWrite + Unpin>(mut wr: W, mut rx: UnboundedReceiver
 }
 
 // ---------------------------------------------------------------------------
-// Encaminhamento do stdin/resize para o processo.
+// Forwarding stdin/resize to the process.
 // ---------------------------------------------------------------------------
 
 enum Input {
@@ -502,8 +503,8 @@ impl Input {
     }
 }
 
-/// Lança `delonix exec` e arranca o bombeamento de saída para as streams. Devolve
-/// o destino do stdin.
+/// Launches `delonix exec` and starts pumping output to the streams. Returns
+/// the stdin destination.
 fn spawn_and_pump(
     base: &Path,
     name: &str,
@@ -634,7 +635,7 @@ fn spawn_and_pump(
 }
 
 // ---------------------------------------------------------------------------
-// Loop principal: lê frames SPDY, gere streams e move os dados.
+// Main loop: reads SPDY frames, manages streams and moves the data.
 // ---------------------------------------------------------------------------
 
 async fn run_exec<S>(io: S, base: PathBuf, name: String, p: Pending)
@@ -708,8 +709,8 @@ where
                     }
                 }
                 SETTINGS => {
-                    // Ignoramos o INITIAL_WINDOW_SIZE de propósito: o cliente
-                    // anuncia-o mas não reabastece (ver writer_task).
+                    // We ignore INITIAL_WINDOW_SIZE on purpose: the client
+                    // advertises it but does not replenish (see writer_task).
                 }
                 PING => {
                     if payload.len() >= 4 {
@@ -762,23 +763,23 @@ where
 }
 
 // ===========================================================================
-// PortForward (issue #14): proxy TCP entre as streams SPDY e portas DENTRO do
-// netns do pod. O cliente abre, por porta, uma stream `error` e uma `data`
-// (header `port`). Para cada `data`, ligamos um TCP a `127.0.0.1:<porta>` no
-// netns do pod (via `setns` numa thread dedicada) e movemos os bytes nos dois
-// sentidos.
+// PortForward (issue #14): TCP proxy between the SPDY streams and ports INSIDE
+// the pod's netns. The client opens, per port, an `error` stream and a `data`
+// one (`port` header). For each `data`, we connect a TCP to `127.0.0.1:<port>`
+// in the pod's netns (via `setns` on a dedicated thread) and move the bytes in
+// both directions.
 // ===========================================================================
 
-/// Liga um TCP a `127.0.0.1:<port>` DENTRO do netns do processo `pid`. Faz
-/// `setns(CLONE_NEWNET)` numa thread descartável (só essa thread muda de netns)
-/// e devolve o socket já ligado (válido em todo o processo).
+/// Connects a TCP to `127.0.0.1:<port>` INSIDE the netns of process `pid`. Does
+/// `setns(CLONE_NEWNET)` on a throwaway thread (only that thread changes netns)
+/// and returns the already-connected socket (valid across the whole process).
 fn connect_in_netns(pid: i32, port: u16) -> std::io::Result<std::net::TcpStream> {
     use std::os::fd::AsRawFd;
     let (tx, rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
         let res = (|| -> std::io::Result<std::net::TcpStream> {
             let f = std::fs::File::open(format!("/proc/{pid}/ns/net"))?;
-            // SAFETY: fd válido; setns muda só o netns DESTA thread.
+            // SAFETY: valid fd; setns changes only THIS thread's netns.
             if unsafe { libc::setns(f.as_raw_fd(), libc::CLONE_NEWNET) } != 0 {
                 return Err(std::io::Error::last_os_error());
             }
@@ -817,7 +818,7 @@ where
     tokio::spawn(writer_task(wr, out_rx));
 
     let mut inf = Inflater::new();
-    // sid -> canal que alimenta o socket com os bytes vindos do cliente.
+    // sid -> channel that feeds the socket with the bytes coming from the client.
     let mut data_sinks: HashMap<u32, UnboundedSender<Vec<u8>>> = HashMap::new();
 
     let mut hdr = [0u8; 8];
@@ -858,7 +859,7 @@ where
                                 }
                             }
                             Err(e) => {
-                                // reporta no próprio data stream e fecha-o.
+                                // report on the data stream itself and close it.
                                 let msg = format!("port-forward {port}: {e}");
                                 let _ = out_tx.send(Out::Data {
                                     sid,
@@ -868,7 +869,7 @@ where
                             }
                         }
                     }
-                    // streams `error`: só SynReply (já feito); ficam abertas/vazias.
+                    // `error` streams: only SynReply (already done); stay open/empty.
                 }
                 PING => {
                     if payload.len() >= 4 {
@@ -894,13 +895,13 @@ where
                 _ => {}
             }
         } else {
-            // DATA frame do cliente → escreve no socket da porta respectiva.
+            // DATA frame from the client → write to the socket of the respective port.
             let sid = u32::from_be_bytes([hdr[0], hdr[1], hdr[2], hdr[3]]) & 0x7fff_ffff;
             let flags = hdr[4];
             if let Some(sink) = data_sinks.get(&sid) {
                 if !payload.is_empty() {
                     let _ = sink.send(payload);
-                    // reabastece a janela (como no exec — o cliente não o faz).
+                    // replenish the window (like in exec — the client doesn't do it).
                     let _ = out_tx.send(Out::SendWu {
                         sid,
                         delta: len as u32,
@@ -911,15 +912,15 @@ where
                     });
                 }
                 if flags & FLAG_FIN != 0 {
-                    data_sinks.remove(&sid); // fecha a escrita para o socket
+                    data_sinks.remove(&sid); // close writes to the socket
                 }
             }
         }
     }
 }
 
-/// Bombeia um socket TCP do pod ↔ stream SPDY `data`: socket→cliente (Out::Data)
-/// e cliente(cli_rx)→socket. Termina quando qualquer lado fecha.
+/// Pumps a pod TCP socket ↔ SPDY `data` stream: socket→client (Out::Data)
+/// and client(cli_rx)→socket. Ends when either side closes.
 async fn pump_socket(
     sock: tokio::net::TcpStream,
     sid: u32,
@@ -927,7 +928,7 @@ async fn pump_socket(
     mut cli_rx: UnboundedReceiver<Vec<u8>>,
 ) {
     let (mut sr, mut sw) = sock.into_split();
-    // socket → cliente
+    // socket → client
     let up = {
         let out_tx = out_tx.clone();
         tokio::spawn(async move {
@@ -956,7 +957,7 @@ async fn pump_socket(
             });
         })
     };
-    // cliente → socket
+    // client → socket
     while let Some(chunk) = cli_rx.recv().await {
         if sw.write_all(&chunk).await.is_err() {
             break;
@@ -972,7 +973,7 @@ mod tests {
 
     #[test]
     fn dict_adler_is_canonical() {
-        // Adler-32 do dicionário SPDY/3 canónico.
+        // Adler-32 of the canonical SPDY/3 dictionary.
         let mut c = Compress::new(Compression::default(), true);
         let adler = c.set_dictionary(SPDY3_DICT).unwrap();
         assert_eq!(adler, 0xe3c6a7c2, "dicionário SPDY/3 errado");
@@ -980,7 +981,7 @@ mod tests {
 
     #[test]
     fn nv_roundtrip_through_zlib_dict() {
-        // Dois blocos seguidos (estado contínuo), como num fluxo SPDY real.
+        // Two blocks in a row (continuous state), as in a real SPDY stream.
         let mut def = Deflater::new();
         let mut inf = Inflater::new();
 

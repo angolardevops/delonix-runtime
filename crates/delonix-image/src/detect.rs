@@ -1,37 +1,37 @@
-//! Detecção automática de stack (Pilar 1, **Bloco C**) — a fundação do "git push deploy".
+//! Automatic stack detection (Pillar 1, **Block C**) — the foundation of "git push deploy".
 //!
-//! Dada uma pasta de projecto, descobre a linguagem/framework por **ficheiros-marcador**
-//! (`package.json`, `go.mod`, `requirements.txt`, …) e devolve, além da stack, o **template
-//! de proxy** (id em `proxy-templates.json`), a **porta** por omissão e o **buildpack
-//! Paketo** sugerido — tudo o que o `delonix deploy` precisa para buildar sem Dockerfile.
+//! Given a project folder, it discovers the language/framework by **marker files**
+//! (`package.json`, `go.mod`, `requirements.txt`, …) and returns, besides the stack, the **proxy
+//! template** (id in `proxy-templates.json`), the default **port** and the suggested **Paketo
+//! buildpack** — everything `delonix deploy` needs to build without a Dockerfile.
 //!
-//! Lógica pura, sem rede: 100% testável. A escolha do builder CNB e a execução do
-//! lifecycle são o Bloco B.
+//! Pure logic, no network: 100% testable. Choosing the CNB builder and running the
+//! lifecycle are Block B.
 
 use std::path::Path;
 
-/// O resultado da detecção de uma pasta de projecto.
+/// The result of detecting a project folder.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Detected {
-    /// Família da stack: `node`, `python`, `go`, `ruby`, `rust`, `java`, `php`, `dotnet`, `static`.
+    /// Stack family: `node`, `python`, `go`, `ruby`, `rust`, `java`, `php`, `dotnet`, `static`.
     pub stack: &'static str,
-    /// Framework concreto, quando detectável (`express`, `django`, `fastapi`, `rails`, …).
+    /// Concrete framework, when detectable (`express`, `django`, `fastapi`, `rails`, …).
     pub framework: Option<&'static str>,
-    /// Id do template de proxy (`proxy-templates.json`): `node-express`, `py-django`, …
+    /// Id of the proxy template (`proxy-templates.json`): `node-express`, `py-django`, …
     pub proxy_template: &'static str,
-    /// Porta por omissão da app (alvo do ingress).
+    /// Default port of the app (ingress target).
     pub default_port: u16,
-    /// Buildpack Paketo sugerido (informativo até o Bloco B correr o lifecycle).
+    /// Suggested Paketo buildpack (informative until Block B runs the lifecycle).
     pub builder: &'static str,
-    /// Ficheiro-marcador que disparou a detecção.
+    /// Marker file that triggered the detection.
     pub marker: &'static str,
 }
 
-/// Detecta a stack de um directório de projecto. `None` se nenhum marcador for reconhecido.
+/// Detects the stack of a project directory. `None` if no marker is recognised.
 ///
-/// Ordem de prioridade: manifestos de linguagem explícitos primeiro (go.mod, Cargo.toml,
-/// pom/gradle, *.csproj), depois `package.json` (Node/SPA), depois Python/Ruby/PHP, e por
-/// fim `index.html` (site estático) como *fallback*.
+/// Priority order: explicit language manifests first (go.mod, Cargo.toml,
+/// pom/gradle, *.csproj), then `package.json` (Node/SPA), then Python/Ruby/PHP, and
+/// finally `index.html` (static site) as a *fallback*.
 pub fn detect(dir: &Path) -> Option<Detected> {
     let has = |f: &str| dir.join(f).exists();
     let read = |f: &str| {
@@ -69,7 +69,7 @@ pub fn detect(dir: &Path) -> Option<Detected> {
             marker: "Cargo.toml",
         });
     }
-    // Java (Maven/Gradle) → Spring por omissão
+    // Java (Maven/Gradle) → Spring by default
     if has("pom.xml") || has("build.gradle") || has("build.gradle.kts") {
         let marker = if has("pom.xml") {
             "pom.xml"
@@ -96,7 +96,7 @@ pub fn detect(dir: &Path) -> Option<Detected> {
             marker: "*.csproj",
         });
     }
-    // Node — sub-detecção SPA vs servidor
+    // Node — SPA vs server sub-detection
     if has("package.json") {
         let pkg = read("package.json");
         let is_spa = ["react", "vue", "@angular", "svelte", "vite"]
@@ -125,7 +125,7 @@ pub fn detect(dir: &Path) -> Option<Detected> {
             }
         });
     }
-    // Python — sub-detecção django/fastapi/flask
+    // Python — django/fastapi/flask sub-detection
     if has("requirements.txt") || has("pyproject.toml") || has("Pipfile") {
         let marker = if has("requirements.txt") {
             "requirements.txt"
@@ -147,7 +147,7 @@ pub fn detect(dir: &Path) -> Option<Detected> {
         } else if deps.contains("flask") {
             ("flask", "py-flask", 5000)
         } else {
-            ("fastapi", "py-fastapi", 8000) // omissão razoável para Python web
+            ("fastapi", "py-fastapi", 8000) // reasonable default for Python web
         };
         return Some(Detected {
             stack: "python",
@@ -158,7 +158,7 @@ pub fn detect(dir: &Path) -> Option<Detected> {
             marker,
         });
     }
-    // Ruby → Rails se o Gemfile o mencionar
+    // Ruby → Rails if the Gemfile mentions it
     if has("Gemfile") {
         let gem = read("Gemfile");
         let framework = if gem.contains("rails") {
@@ -175,7 +175,7 @@ pub fn detect(dir: &Path) -> Option<Detected> {
             marker: "Gemfile",
         });
     }
-    // PHP → Laravel se o composer.json o mencionar; WordPress se houver wp-config
+    // PHP → Laravel if the composer.json mentions it; WordPress if wp-config exists
     if has("composer.json") || has("wp-config.php") {
         let comp = read("composer.json");
         let (framework, template) = if has("wp-config.php") {
@@ -194,7 +194,7 @@ pub fn detect(dir: &Path) -> Option<Detected> {
             marker: "composer.json",
         });
     }
-    // Site estático (fallback) — só se houver index.html e nenhum manifesto acima.
+    // Static site (fallback) — only if there is an index.html and no manifest above.
     if has("index.html") {
         return Some(Detected {
             stack: "static",
@@ -212,7 +212,7 @@ pub fn detect(dir: &Path) -> Option<Detected> {
 mod tests {
     use super::*;
 
-    /// Cria um directório temporário com os ficheiros (nome→conteúdo) dados.
+    /// Creates a temporary directory with the given files (name→content).
     fn scratch(name: &str, files: &[(&str, &str)]) -> std::path::PathBuf {
         let dir = std::env::temp_dir().join(format!("dlx-detect-{name}"));
         let _ = std::fs::remove_dir_all(&dir);
@@ -260,7 +260,7 @@ mod tests {
             ("Django==5.0", "django", "py-django", 8000),
             ("fastapi==0.110", "fastapi", "py-fastapi", 8000),
             ("Flask==3.0", "flask", "py-flask", 5000),
-            ("requests==2", "fastapi", "py-fastapi", 8000), // sem framework → default
+            ("requests==2", "fastapi", "py-fastapi", 8000), // no framework → default
         ] {
             let d = scratch(&format!("py-{fw}"), &[("requirements.txt", deps)]);
             let got = detect(&d).unwrap();
@@ -312,10 +312,10 @@ mod tests {
 
     #[test]
     fn precedence_compiled_over_static_and_none_when_empty() {
-        // go.mod + index.html → Go ganha (manifesto de linguagem tem prioridade).
+        // go.mod + index.html → Go wins (language manifest has priority).
         let d = scratch("prec", &[("go.mod", "module x"), ("index.html", "<h1/>")]);
         assert_eq!(detect(&d).unwrap().stack, "go");
-        // pasta vazia → None.
+        // empty folder → None.
         assert!(detect(&scratch("empty", &[])).is_none());
     }
 }

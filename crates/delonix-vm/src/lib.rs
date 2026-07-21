@@ -1,20 +1,20 @@
-//! `delonix-vm` — runtime de microVMs com **backend selecionável**:
+//! `delonix-vm` — microVM runtime with a **selectable backend**:
 //!
-//! * **Cloud Hypervisor** (VMM em Rust sobre `/dev/kvm`, corre rootless DENTRO do
-//!   netns de infra do ingress — o `tap` vive lá) — o backend histórico.
-//! * **libvirt/KVM** (QEMU gerido pelo `libvirtd` via `virsh`) — 2.º backend, para
-//!   hosts onde o libvirt já é o padrão de virtualização.
+//! * **Cloud Hypervisor** (Rust VMM on top of `/dev/kvm`, runs rootless INSIDE the
+//!   ingress infra netns — the `tap` lives there) — the historical backend.
+//! * **libvirt/KVM** (QEMU managed by `libvirtd` via `virsh`) — 2nd backend, for
+//!   hosts where libvirt is already the virtualization standard.
 //!
-//! O backend é escolhido por VM: explícito (`VmConfig.backend`) ou **auto-deteção**
-//! (prefere o `cloud-hypervisor` se instalado; senão `libvirt`). O estado por-VM
-//! ([`delonix_runtime_core::Vm`], persistido em `<base>/vms/<name>.json`) regista o backend
-//! que a arrancou, para reconciliar liveness/paragem com o backend certo.
+//! The backend is chosen per VM: explicit (`VmConfig.backend`) or **auto-detection**
+//! (prefers `cloud-hypervisor` if installed; otherwise `libvirt`). The per-VM state
+//! ([`delonix_runtime_core::Vm`], persisted in `<base>/vms/<name>.json`) records the backend
+//! that started it, in order to reconcile liveness/shutdown with the right backend.
 //!
-//! Rede: o Cloud Hypervisor reaproveita o *plumbing* do `delonix-net`
-//! (`infra::vm_attach` cria um `tap` na bridge do ingress + DHCP). O libvirt corre o
-//! QEMU sob o `libvirtd` (netns do host), por isso usa, no MVP, **rede user-mode**
-//! (SLIRP/passt: egress sem `tap`); a integração com a bridge do ingress (inbound
-//! pelo SDN) é um follow-up.
+//! Networking: Cloud Hypervisor reuses the `delonix-net` *plumbing*
+//! (`infra::vm_attach` creates a `tap` on the ingress bridge + DHCP). libvirt runs
+//! QEMU under `libvirtd` (host netns), so it uses, in the MVP, **user-mode networking**
+//! (SLIRP/passt: egress without a `tap`); integration with the ingress bridge (inbound
+//! via the SDN) is a follow-up.
 
 use std::path::Path;
 use std::process::Command;
@@ -22,86 +22,86 @@ use std::process::Command;
 use delonix_net::infra;
 use delonix_runtime_core::{Error, JsonStore, Result, Status, Vm};
 
-/// Configuração para arrancar uma microVM (campos planos, independentes do
-/// `orchestrator` — a CLI traduz o `VmSpec` para isto).
+/// Configuration to boot a microVM (flat fields, independent of the
+/// `orchestrator` — the CLI translates the `VmSpec` into this).
 #[derive(Debug, Clone)]
 pub struct VmConfig {
-    /// Nome (chave de persistência e do `tap`/MAC determinísticos).
+    /// Name (persistence key and of the deterministic `tap`/MAC).
     pub name: String,
-    /// Disco base (qcow2/raw) — torna-se overlay por-VM.
+    /// Base disk (qcow2/raw) — becomes a per-VM overlay.
     pub disk: String,
     /// vCPUs.
     pub vcpus: u32,
-    /// Memória (ex.: `"2G"`, `"1024M"`).
+    /// Memory (e.g. `"2G"`, `"1024M"`).
     pub memory: String,
-    /// Rede do ingress para o `tap`.
+    /// Ingress network for the `tap`.
     pub network: String,
-    /// Kernel para *direct boot* (vmlinux/bzImage).
+    /// Kernel for *direct boot* (vmlinux/bzImage).
     pub kernel: Option<String>,
-    /// Initrd/initramfs (com `kernel`).
+    /// Initrd/initramfs (with `kernel`).
     pub initrd: Option<String>,
-    /// Firmware (alternativa ao kernel: rust-hypervisor-fw/EDK2 — para cloud images).
+    /// Firmware (alternative to the kernel: rust-hypervisor-fw/EDK2 — for cloud images).
     pub firmware: Option<String>,
-    /// Linha de comando do kernel (com `kernel`).
+    /// Kernel command line (with `kernel`).
     pub cmdline: Option<String>,
-    /// ISO de *seed* cloud-init (NoCloud) — disco secundário.
+    /// cloud-init *seed* ISO (NoCloud) — secondary disk.
     pub seed: Option<String>,
-    /// Política de reinício normalizada (`"no"`|`"on-failure"`|`"always"`).
+    /// Normalized restart policy (`"no"`|`"on-failure"`|`"always"`).
     pub restart_policy: Option<String>,
     // --- HPC (S4) ---------------------------------------------------------
-    /// Suporta a memória da VM em *hugepages* (`--memory …,hugepages=on`). Reduz
-    /// TLB misses e jitter em cargas HPC. Requer hugepages reservadas no host.
+    /// Backs the VM memory with *hugepages* (`--memory …,hugepages=on`). Reduces
+    /// TLB misses and jitter in HPC workloads. Requires hugepages reserved on the host.
     pub hugepages: bool,
-    /// Afinidade de CPU (NUMA/pinning): lista de CPUs do host (ex.: `"8-15"`) a que
-    /// TODAS as vCPUs são fixadas (`--cpus …,affinity=<vcpu>@[<lista>]`). Evita a
-    /// migração de vCPUs entre cores/nós NUMA — determinismo de latência.
+    /// CPU affinity (NUMA/pinning): list of host CPUs (e.g. `"8-15"`) to which
+    /// ALL vCPUs are pinned (`--cpus …,affinity=<vcpu>@[<list>]`). Avoids
+    /// vCPU migration between cores/NUMA nodes — latency determinism.
     pub cpu_affinity: Option<String>,
-    /// Passagem de dispositivos PCI (SR-IOV VF, GPU, …) por VFIO: caminhos sysfs
-    /// (ex.: `/sys/bus/pci/devices/0000:65:00.1`). O VF tem de estar pré-ligado ao
-    /// `vfio-pci` no host. Cada um vira `--device path=…`.
+    /// PCI device passthrough (SR-IOV VF, GPU, …) via VFIO: sysfs paths
+    /// (e.g. `/sys/bus/pci/devices/0000:65:00.1`). The VF must be pre-bound to
+    /// `vfio-pci` on the host. Each one becomes a `--device path=…`.
     pub devices: Vec<String>,
-    /// Backend de virtualização: `Some("cloud-hypervisor")`, `Some("libvirt")` ou
-    /// `None` (auto-deteção). Default histórico = cloud-hypervisor.
+    /// Virtualization backend: `Some("cloud-hypervisor")`, `Some("libvirt")` or
+    /// `None` (auto-detection). Historical default = cloud-hypervisor.
     pub backend: Option<String>,
-    /// Modo de rede do backend **libvirt** (o Cloud Hypervisor usa sempre o `tap` do
-    /// ingress). Abstrai o `<interface>` do domínio — o utilizador NUNCA escreve XML:
-    ///   * `None`/`"user"` — rede user-mode (SLIRP/passt): egress, sem IP de entrada.
-    ///   * `"nat"`         — rede NAT gerida pelo libvirt (`<source network=…>`, DHCP +
-    ///     IP via `virsh domifaddr`). Requer `qemu:///system` (root).
-    ///   * `"bridge"`      — liga a uma bridge do host (`bridge` abaixo).
+    /// Network mode of the **libvirt** backend (Cloud Hypervisor always uses the
+    /// ingress `tap`). Abstracts the domain's `<interface>` — the user NEVER writes XML:
+    ///   * `None`/`"user"` — user-mode network (SLIRP/passt): egress, no inbound IP.
+    ///   * `"nat"`         — NAT network managed by libvirt (`<source network=…>`, DHCP +
+    ///     IP via `virsh domifaddr`). Requires `qemu:///system` (root).
+    ///   * `"bridge"`      — attaches to a host bridge (`bridge` below).
     pub net_mode: Option<String>,
-    /// Nome da bridge do host (modo `net_mode = "bridge"`) ou da rede libvirt (modo
+    /// Name of the host bridge (mode `net_mode = "bridge"`) or of the libvirt network (mode
     /// `"nat"`; default `"default"`).
     pub bridge: Option<String>,
-    /// Volumes/Storage partilhados para dentro da VM (via **virtio-9p**). Cada um
-    /// já vem RESOLVIDO pelo bin (o nome do `Volume`/`Storage` → directório no
-    /// host). Só o backend **libvirt** os materializa (o Cloud Hypervisor não faz
-    /// 9p) — ver `create`. Fecha o gap "montar um NAS numa VM sem cloud-init/XML".
+    /// Volumes/Storage shared into the VM (via **virtio-9p**). Each one
+    /// comes already RESOLVED by the bin (the `Volume`/`Storage` name → host
+    /// directory). Only the **libvirt** backend materializes them (Cloud Hypervisor does not do
+    /// 9p) — see `create`. Closes the gap "mount a NAS into a VM without cloud-init/XML".
     pub volumes: Vec<VmVolume>,
-    /// Consola gráfica VNC (`--vnc`) — **só backend libvirt** (o Cloud Hypervisor
-    /// não tem display). Liga em `127.0.0.1` numa porta auto; ver `vm vnc`.
+    /// VNC graphical console (`--vnc`) — **libvirt backend only** (Cloud Hypervisor
+    /// has no display). Binds to `127.0.0.1` on an auto port; see `vm vnc`.
     pub vnc: bool,
 }
 
-/// Um directório do host partilhado para dentro da VM por virtio-9p. Isto é o que
-/// liga o `kind: Volume`/`kind: Storage` a uma VM sem o utilizador escrever
-/// cloud-init nem XML: o bin resolve o nome → `source` (o `_data` do volume, ou o
-/// mountpoint de um Storage de rede), e o motor gera o `<filesystem>` do domínio
-/// **e** o `mount` no guest (via cloud-init) a partir destes campos planos.
+/// A host directory shared into the VM via virtio-9p. This is what
+/// connects `kind: Volume`/`kind: Storage` to a VM without the user writing
+/// cloud-init or XML: the bin resolves the name → `source` (the volume's `_data`, or the
+/// mountpoint of a network Storage), and the engine generates the domain's `<filesystem>`
+/// **and** the `mount` in the guest (via cloud-init) from these flat fields.
 #[derive(Debug, Clone)]
 pub struct VmVolume {
-    /// Tag 9p (curta, única na VM) — o guest monta por este tag.
+    /// 9p tag (short, unique in the VM) — the guest mounts by this tag.
     pub tag: String,
-    /// Directório NO HOST a partilhar (resolvido pelo bin).
+    /// Directory ON THE HOST to share (resolved by the bin).
     pub source: String,
-    /// Ponto de montagem DENTRO do guest (ex.: `/mnt/dados`).
+    /// Mount point INSIDE the guest (e.g. `/mnt/dados`).
     pub mount_path: String,
-    /// Montar só-de-leitura.
+    /// Mount read-only.
     pub read_only: bool,
 }
 
 // ===========================================================================
-// Helpers partilhados
+// Shared helpers
 // ===========================================================================
 
 fn vms_dir(base: &Path) -> std::path::PathBuf {
@@ -112,20 +112,20 @@ fn store(base: &Path) -> Result<JsonStore<Vm>> {
     JsonStore::open(vms_dir(base))
 }
 
-/// `true` se o PID está vivo (existe `/proc/<pid>`).
+/// `true` if the PID is alive (`/proc/<pid>` exists).
 fn is_alive(pid: i32) -> bool {
     pid > 0 && Path::new(&format!("/proc/{pid}")).exists()
 }
 
-/// `true` se já existe uma VM com este nome.
+/// `true` if a VM with this name already exists.
 pub fn exists(base: &Path, name: &str) -> bool {
     store(base).map(|s| s.exists(name)).unwrap_or(false)
 }
 
-/// Converte memória (`"2G"`/`"1024M"`/`"512"`/`"2Gi"`) para MiB.
+/// Converts memory (`"2G"`/`"1024M"`/`"512"`/`"2Gi"`) to MiB.
 fn mem_mib(s: &str) -> u64 {
     let t = s.trim();
-    // Tolera o sufixo `i` do estilo k8s (Gi/Mi): "2Gi" == "2G", "512Mi" == "512M".
+    // Tolerates the k8s-style `i` suffix (Gi/Mi): "2Gi" == "2G", "512Mi" == "512M".
     let t = t.strip_suffix(['i', 'I']).unwrap_or(t);
     let (num, mult) = if let Some(n) = t.strip_suffix(['G', 'g']) {
         (n, 1024)
@@ -136,8 +136,8 @@ fn mem_mib(s: &str) -> u64 {
     };
     match num.trim().parse::<u64>() {
         Ok(v) => v * mult,
-        // Não degradar em silêncio: um valor mal-escrito ("2GB", "2 Gi") daria
-        // metade-ish da RAM pedida sem aviso. Avisa e usa um default seguro.
+        // Do not degrade silently: a mistyped value ("2GB", "2 Gi") would give
+        // roughly half of the requested RAM without warning. Warn and use a safe default.
         Err(_) => {
             tracing::warn!(value = ?s, "invalid memory value; defaulting to 1024 MiB");
             1024
@@ -145,8 +145,8 @@ fn mem_mib(s: &str) -> u64 {
     }
 }
 
-/// `MemAvailable` do host em MiB (de `/proc/meminfo`) — memória que pode ser
-/// dada a novos processos sem swap. `None` se ilegível.
+/// The host's `MemAvailable` in MiB (from `/proc/meminfo`) — memory that can be
+/// given to new processes without swapping. `None` if unreadable.
 fn host_mem_available_mib() -> Option<u64> {
     let s = std::fs::read_to_string("/proc/meminfo").ok()?;
     let kib: u64 = s
@@ -159,14 +159,14 @@ fn host_mem_available_mib() -> Option<u64> {
     Some(kib / 1024)
 }
 
-/// Controlo de ADMISSÃO de VM: recusa arrancar uma VM se a memória pedida não
-/// couber no `MemAvailable` do host menos uma reserva de segurança. Ao contrário
-/// dos containers (com orçamento na `delonix.slice`), a VM é um processo
-/// (cloud-hypervisor/qemu) que consome RAM do host DIRETAMENTE; sem esta
-/// verificação, agendar 30×2GB num host de 32GB afogava/OOM-mata o host. Como o
-/// `MemAvailable` já desconta as VMs em execução, a N-ésima VM que não caiba é
-/// recusada naturalmente. Reserva afinável por `DELONIX_VM_RESERVE_MIB`
-/// (omissão 2048). Best-effort: se `/proc/meminfo` for ilegível, não bloqueia.
+/// VM ADMISSION control: refuses to boot a VM if the requested memory does not
+/// fit in the host's `MemAvailable` minus a safety reserve. Unlike
+/// containers (with a budget in `delonix.slice`), a VM is a process
+/// (cloud-hypervisor/qemu) that consumes host RAM DIRECTLY; without this
+/// check, scheduling 30×2GB on a 32GB host would drown/OOM-kill the host. Since
+/// `MemAvailable` already discounts the running VMs, the Nth VM that does not fit is
+/// refused naturally. Reserve tunable via `DELONIX_VM_RESERVE_MIB`
+/// (default 2048). Best-effort: if `/proc/meminfo` is unreadable, it does not block.
 fn vm_admission_check(cfg: &VmConfig) -> Result<()> {
     let avail = match host_mem_available_mib() {
         Some(a) => a,
@@ -191,12 +191,12 @@ fn vm_admission_check(cfg: &VmConfig) -> Result<()> {
     Ok(())
 }
 
-/// Aspas para shell (single-quote, escapando `'`).
+/// Shell quoting (single-quote, escaping `'`).
 fn shq(s: &str) -> String {
     format!("'{}'", s.replace('\'', "'\\''"))
 }
 
-/// MAC determinístico (prefixo QEMU/KVM `52:54:00`) derivado do nome.
+/// Deterministic MAC (QEMU/KVM prefix `52:54:00`) derived from the name.
 fn mac_for(name: &str) -> String {
     let h = infra::name_hash(name);
     format!(
@@ -207,26 +207,26 @@ fn mac_for(name: &str) -> String {
     )
 }
 
-/// `true` se a correr sem privilégios de root (euid ≠ 0).
+/// `true` if running without root privileges (euid ≠ 0).
 fn is_rootless() -> bool {
-    // SAFETY: geteuid não tem efeitos colaterais.
+    // SAFETY: geteuid has no side effects.
     unsafe { libc::geteuid() != 0 }
 }
 
-/// `true` se um binário existe no `PATH`.
+/// `true` if a binary exists in `PATH`.
 fn binary_in_path(name: &str) -> bool {
     std::env::var_os("PATH")
         .map(|paths| std::env::split_paths(&paths).any(|p| p.join(name).is_file()))
         .unwrap_or(false)
 }
 
-/// Extrai o formato da linha `file format: <fmt>` do output HUMANO de
-/// `qemu-img info`. Função pura (testável sem `qemu-img`).
+/// Extracts the format from the `file format: <fmt>` line of the HUMAN output of
+/// `qemu-img info`. Pure function (testable without `qemu-img`).
 ///
-/// NB: usa-se o output humano de propósito — o `--output=json` moderno aninha um
-/// nó `children` com o `"format": "file"` da camada de protocolo ANTES do
-/// `"format"` de topo, e um parse ingénuo apanharia "file" em vez de "qcow2". O
-/// output humano tem uma única linha `file format:` (a de topo).
+/// NB: the human output is used on purpose — the modern `--output=json` nests a
+/// `children` node with the protocol layer's `"format": "file"` BEFORE the
+/// top-level `"format"`, and a naive parse would catch "file" instead of "qcow2". The
+/// human output has a single `file format:` line (the top-level one).
 fn parse_qemu_format(info: &str) -> Option<String> {
     for line in info.lines() {
         if let Some(rest) = line.trim().strip_prefix("file format:") {
@@ -239,11 +239,11 @@ fn parse_qemu_format(info: &str) -> Option<String> {
     None
 }
 
-/// Formato REAL do disco base via `qemu-img info` — NÃO confia na extensão. As
-/// cloud images Ubuntu/Debian distribuem-se como `*.img` mas são **qcow2**
-/// internamente; um overlay criado com `-F raw` sobre um backing qcow2 faz o
-/// guest ler o qcow2 como raw → disco corrompido / não-booting, em silêncio.
-/// Cai para a heurística da extensão se o `qemu-img info` não estiver disponível.
+/// The REAL format of the base disk via `qemu-img info` — does NOT trust the extension.
+/// Ubuntu/Debian cloud images are distributed as `*.img` but are **qcow2**
+/// internally; an overlay created with `-F raw` over a qcow2 backing makes the
+/// guest read the qcow2 as raw → corrupted / non-booting disk, silently.
+/// Falls back to the extension heuristic if `qemu-img info` is not available.
 pub fn disk_backing_format(disk: &Path) -> String {
     if let Ok(out) = Command::new("qemu-img").arg("info").arg(disk).output() {
         if out.status.success() {
@@ -262,7 +262,7 @@ pub fn disk_backing_format(disk: &Path) -> String {
     }
 }
 
-/// Corre uma ferramenta externa (ex.: `qemu-img`), erro se falhar.
+/// Runs an external tool (e.g. `qemu-img`), error if it fails.
 fn run_tool(prog: &str, args: &[&str]) -> Result<()> {
     let st = Command::new(prog)
         .args(args)
@@ -280,7 +280,7 @@ fn run_tool(prog: &str, args: &[&str]) -> Result<()> {
     Ok(())
 }
 
-/// Corre um comando e captura o stdout (trimmed), ou `None` em falha.
+/// Runs a command and captures stdout (trimmed), or `None` on failure.
 fn capture(prog: &str, args: &[&str]) -> Option<String> {
     let out = Command::new(prog).args(args).output().ok()?;
     if !out.status.success() {
@@ -293,44 +293,44 @@ fn capture(prog: &str, args: &[&str]) -> Option<String> {
 // Backend trait
 // ===========================================================================
 
-/// O que um backend produziu ao arrancar uma VM — persistido na [`Vm`].
+/// What a backend produced when booting a VM — persisted in the [`Vm`].
 pub struct Boot {
-    /// PID do VMM no host (Cloud Hypervisor). `None` quando gerido por um daemon
-    /// (libvirt) — aí a liveness vem de `is_running`.
+    /// PID of the VMM on the host (Cloud Hypervisor). `None` when managed by a daemon
+    /// (libvirt) — there the liveness comes from `is_running`.
     pub pid: Option<i32>,
-    /// Interface `tap` (ou `"user"` para rede user-mode do libvirt).
+    /// `tap` interface (or `"user"` for libvirt user-mode networking).
     pub tap: String,
-    /// MAC da NIC.
+    /// NIC MAC.
     pub mac: String,
-    /// Socket de controlo (API do Cloud Hypervisor; vazio no libvirt).
+    /// Control socket (Cloud Hypervisor API; empty on libvirt).
     pub api_socket: String,
-    /// IP da VM, se conhecido no arranque.
+    /// The VM's IP, if known at boot.
     pub ip: Option<String>,
 }
 
-/// Mecanismo de virtualização por trás de uma microVM. Permite ter o Cloud
-/// Hypervisor e o libvirt/KVM lado a lado (escolhido por VM).
+/// The virtualization mechanism behind a microVM. Allows having Cloud
+/// Hypervisor and libvirt/KVM side by side (chosen per VM).
 pub trait VmBackend {
-    /// Identificador estável persistido na [`Vm`].
+    /// Stable identifier persisted in the [`Vm`].
     fn id(&self) -> &'static str;
-    /// `true` se o backend tem as ferramentas necessárias instaladas.
+    /// `true` if the backend has the required tools installed.
     fn available(&self) -> bool;
-    /// Cria a rede (se aplicável) e arranca a VM a partir do `overlay`. A criação
-    /// do overlay e a idempotência são tratadas por [`create`].
+    /// Creates the network (if applicable) and boots the VM from the `overlay`. The overlay
+    /// creation and idempotency are handled by [`create`].
     fn boot(&self, vmdir: &Path, cfg: &VmConfig, overlay: &str) -> Result<Boot>;
-    /// A VM ainda está viva?
+    /// Is the VM still alive?
     fn is_running(&self, vm: &Vm) -> bool;
-    /// IP atual da VM (pode mudar/resolver-se mais tarde por DHCP).
+    /// Current IP of the VM (may change/resolve later via DHCP).
     fn ip(&self, vm: &Vm) -> Option<String>;
-    /// Pára a VM e liberta os recursos de rede. Devolve `Err` quando o backend
-    /// RECUSOU a limpeza (ex.: libvirt) — o chamador decide se aborta (para não
-    /// apagar registo local de uma VM que continua definida no hipervisor) ou
-    /// se ignora (`vm rm --force`).
+    /// Stops the VM and frees the network resources. Returns `Err` when the backend
+    /// REFUSED the cleanup (e.g. libvirt) — the caller decides whether to abort (so as not to
+    /// delete the local record of a VM that is still defined in the hypervisor) or
+    /// to ignore it (`vm rm --force`).
     fn stop(&self, vmdir: &Path, vm: &Vm) -> Result<()>;
 }
 
-/// Seleciona um backend a partir de um pedido explícito ou por auto-deteção
-/// (prefere cloud-hypervisor se instalado; senão libvirt).
+/// Selects a backend from an explicit request or by auto-detection
+/// (prefers cloud-hypervisor if installed; otherwise libvirt).
 pub fn select_backend(want: Option<&str>) -> Result<Box<dyn VmBackend>> {
     match want.map(|s| s.trim().to_lowercase()).as_deref() {
         Some("cloud-hypervisor") | Some("ch") | Some("cloudhypervisor") => {
@@ -356,7 +356,7 @@ pub fn select_backend(want: Option<&str>) -> Result<Box<dyn VmBackend>> {
     }
 }
 
-/// O backend que arrancou uma VM já persistida (para liveness/stop).
+/// The backend that started an already-persisted VM (for liveness/stop).
 fn backend_for(vm: &Vm) -> Box<dyn VmBackend> {
     match vm.backend.as_str() {
         "libvirt" => Box::new(LibvirtBackend),
@@ -368,8 +368,8 @@ fn backend_for(vm: &Vm) -> Box<dyn VmBackend> {
 // Backend: Cloud Hypervisor
 // ===========================================================================
 
-/// Constrói o argumento `--memory` do Cloud Hypervisor (com `hugepages=on` se
-/// pedido). Função pura — testada sem hardware.
+/// Builds the Cloud Hypervisor `--memory` argument (with `hugepages=on` if
+/// requested). Pure function — tested without hardware.
 fn memory_arg(cfg: &VmConfig) -> String {
     let mut a = format!("size={}M", mem_mib(&cfg.memory));
     if cfg.hugepages {
@@ -378,9 +378,9 @@ fn memory_arg(cfg: &VmConfig) -> String {
     a
 }
 
-/// Constrói o argumento `--cpus` do Cloud Hypervisor. Com `cpu_affinity`, fixa
-/// cada vCPU à mesma lista de CPUs do host (`affinity=0@[lista],1@[lista],…`).
-/// Função pura — testada sem hardware.
+/// Builds the Cloud Hypervisor `--cpus` argument. With `cpu_affinity`, pins
+/// each vCPU to the same list of host CPUs (`affinity=0@[list],1@[list],…`).
+/// Pure function — tested without hardware.
 fn cpus_arg(cfg: &VmConfig) -> String {
     let n = cfg.vcpus.max(1);
     let mut a = format!("boot={n}");
@@ -391,7 +391,7 @@ fn cpus_arg(cfg: &VmConfig) -> String {
     a
 }
 
-/// Backend histórico: Cloud Hypervisor dentro do netns de infra (rootless).
+/// Historical backend: Cloud Hypervisor inside the infra netns (rootless).
 pub struct CloudHypervisorBackend;
 
 impl VmBackend for CloudHypervisorBackend {
@@ -404,19 +404,19 @@ impl VmBackend for CloudHypervisorBackend {
     }
 
     fn boot(&self, vmdir: &Path, cfg: &VmConfig, overlay: &str) -> Result<Boot> {
-        // O Cloud Hypervisor não suporta virtio-9p (só virtio-fs, que exige o
-        // daemon virtiofsd, ainda não ligado). `spec.volumes` numa VM CH é um
-        // erro claro em vez de um mount silenciosamente ignorado — o bin
-        // auto-selecciona libvirt quando há volumes, por isso isto só dispara
-        // se o utilizador FORÇAR `backend: cloud-hypervisor` com volumes.
+        // Cloud Hypervisor does not support virtio-9p (only virtio-fs, which requires the
+        // virtiofsd daemon, not yet wired up). `spec.volumes` on a CH VM is a
+        // clear error instead of a silently ignored mount — the bin
+        // auto-selects libvirt when there are volumes, so this only fires
+        // if the user FORCES `backend: cloud-hypervisor` with volumes.
         if !cfg.volumes.is_empty() {
             return Err(Error::Invalid(format!(
                 "VM '{}': spec.volumes requires the libvirt backend (Cloud Hypervisor does not do virtio-9p) — remove `backend: cloud-hypervisor` or the volumes",
                 cfg.name
             )));
         }
-        // Rede privada própria quando nomeada (≠ ingress partilhado): garante o seu
-        // bridge isolado + DHCP antes do attach. O SDN das VMs vive aqui.
+        // Own private network when named (≠ shared ingress): ensures its
+        // isolated bridge + DHCP before the attach. The VMs' SDN lives here.
         if !matches!(cfg.network.as_str(), "" | "ingress" | "bridge" | "default") {
             let _ = infra::network_create(&cfg.network);
         }
@@ -450,7 +450,7 @@ impl VmBackend for CloudHypervisorBackend {
     fn stop(&self, _vmdir: &Path, vm: &Vm) -> Result<()> {
         if let Some(pid) = vm.pid {
             if pid > 0 {
-                // SAFETY: enviar SIGTERM a um PID é seguro; ignora-se o erro.
+                // SAFETY: sending SIGTERM to a PID is safe; the error is ignored.
                 unsafe {
                     libc::kill(pid, libc::SIGTERM);
                 }
@@ -461,11 +461,11 @@ impl VmBackend for CloudHypervisorBackend {
     }
 }
 
-/// Arranca o `cloud-hypervisor` DENTRO do netns de infra, em background, e devolve
-/// o PID (real, visível no host).
-/// Localiza o `rust-hypervisor-fw` que o instalador coloca (ou um apontado por
-/// `$DELONIX_HYPERVISOR_FW`), para o Cloud Hypervisor bootar cloud images sem
-/// `--firmware` explícito. Devolve o 1.º caminho existente, ou `None`.
+/// Boots `cloud-hypervisor` INSIDE the infra netns, in the background, and returns
+/// the PID (real, visible on the host).
+/// Locates the `rust-hypervisor-fw` that the installer places (or one pointed to by
+/// `$DELONIX_HYPERVISOR_FW`), so Cloud Hypervisor can boot cloud images without an
+/// explicit `--firmware`. Returns the 1st existing path, or `None`.
 fn default_ch_firmware() -> Option<String> {
     if let Ok(p) = std::env::var("DELONIX_HYPERVISOR_FW") {
         if !p.is_empty() && Path::new(&p).exists() {
@@ -483,8 +483,8 @@ fn default_ch_firmware() -> Option<String> {
     None
 }
 
-/// Caminho do socket UNIX da consola serial de uma VM Cloud Hypervisor
-/// (`<base>/vms/<name>.console`). O `delonix vm console` liga-se aqui.
+/// Path of the UNIX socket of the serial console of a Cloud Hypervisor VM
+/// (`<base>/vms/<name>.console`). `delonix vm console` connects here.
 pub fn console_socket(base: &Path, name: &str) -> std::path::PathBuf {
     base.join("vms").join(format!("{name}.console"))
 }
@@ -506,7 +506,7 @@ fn boot_ch(vmdir: &Path, cfg: &VmConfig, overlay: &str, tap: &str, mac: &str) ->
         "--api-socket".into(),
         sock.to_string_lossy().into_owned(),
     ];
-    // Arranque: kernel (direct boot) OU firmware (cloud images com bootloader).
+    // Boot: kernel (direct boot) OR firmware (cloud images with a bootloader).
     if let Some(k) = &cfg.kernel {
         ch.push("--kernel".into());
         ch.push(k.clone());
@@ -521,10 +521,10 @@ fn boot_ch(vmdir: &Path, cfg: &VmConfig, overlay: &str, tap: &str, mac: &str) ->
                 .unwrap_or_else(|| "console=ttyS0 root=/dev/vda1 rw".into()),
         );
     } else if let Some(fw) = cfg.firmware.clone().or_else(default_ch_firmware) {
-        // Sem kernel nem firmware explícito: uma cloud image (a golden) precisa
-        // de firmware para o CH bootar (ao contrário do libvirt, que cai para
-        // BIOS). Resolve-se o `rust-hypervisor-fw` que o instalador fornece —
-        // assim `vm create` com a golden arranca sem flags.
+        // Without an explicit kernel or firmware: a cloud image (the golden) needs
+        // firmware for CH to boot (unlike libvirt, which falls back to
+        // BIOS). The `rust-hypervisor-fw` that the installer provides is resolved —
+        // so `vm create` with the golden boots without flags.
         ch.push("--firmware".into());
         ch.push(fw);
     } else {
@@ -533,41 +533,41 @@ fn boot_ch(vmdir: &Path, cfg: &VmConfig, overlay: &str, tap: &str, mac: &str) ->
         ));
     }
     ch.push("--disk".into());
-    // `image_type=qcow2,backing_files=on` é OBRIGATÓRIO: versões recentes do
-    // Cloud Hypervisor (achado real via `validate-rootless`, v52) recusam por
-    // omissão qualquer qcow2 com `backing_file` (o overlay por-VM que `create`
-    // gera sempre) com o erro enganador "Maximum disk nesting depth exceeded"
-    // — não é sobre profundidade de nesting real, é o novo opt-in de segurança
-    // do CH para cadeias de backing file. Sem isto, NENHUMA VM com overlay
-    // arranca.
+    // `image_type=qcow2,backing_files=on` is MANDATORY: recent versions of
+    // Cloud Hypervisor (real finding via `validate-rootless`, v52) refuse by
+    // default any qcow2 with a `backing_file` (the per-VM overlay that `create`
+    // always generates) with the misleading error "Maximum disk nesting depth exceeded"
+    // — it is not about real nesting depth, it is CH's new security opt-in
+    // for backing file chains. Without this, NO VM with an overlay
+    // boots.
     ch.push(format!("path={overlay},image_type=qcow2,backing_files=on"));
     if let Some(seed) = &cfg.seed {
         ch.push("--disk".into());
         ch.push(format!("path={seed}"));
     }
     ch.push("--cpus".into());
-    ch.push(cpus_arg(cfg)); // boot=N [+ affinity para NUMA/CPU pinning]
+    ch.push(cpus_arg(cfg)); // boot=N [+ affinity for NUMA/CPU pinning]
     ch.push("--memory".into());
     ch.push(memory_arg(cfg)); // size=XM [+ hugepages=on]
-                              // SR-IOV / VFIO: passa cada dispositivo PCI pré-ligado ao vfio-pci.
+                              // SR-IOV / VFIO: passes each PCI device pre-bound to vfio-pci.
     for dev in &cfg.devices {
         ch.push("--device".into());
         ch.push(format!("path={dev}"));
     }
     ch.push("--net".into());
     ch.push(format!("tap={tap},mac={mac}"));
-    // Serial num SOCKET UNIX (não um ficheiro de log): é o que permite uma
-    // consola INTERACTIVA (`delonix vm console`) — o CH aceita bytes nos dois
-    // sentidos pelo socket. O boot e o getty (ttyS0) aparecem aqui.
+    // Serial on a UNIX SOCKET (not a log file): this is what enables an
+    // INTERACTIVE console (`delonix vm console`) — CH accepts bytes in both
+    // directions over the socket. The boot and the getty (ttyS0) appear here.
     let console = console_socket(vmdir.parent().unwrap_or(vmdir), &cfg.name);
     let _ = std::fs::remove_file(&console);
     ch.push("--serial".into());
     ch.push(format!("socket={}", console.display()));
     ch.push("--console".into());
     ch.push("off".into());
-    let _ = &serial; // (o ficheiro de log de serial deu lugar ao socket)
+    let _ = &serial; // (the serial log file gave way to the socket)
 
-    // background dentro do netns; sem pid-ns ⇒ o $! é o PID real no host.
+    // background inside the netns; no pid-ns ⇒ $! is the real PID on the host.
     let ch_str = ch.iter().map(|a| shq(a)).collect::<Vec<_>>().join(" ");
     let script = format!(
         "{ch_str} </dev/null >>{log} 2>&1 & echo $! > {pid}",
@@ -590,7 +590,7 @@ fn boot_ch(vmdir: &Path, cfg: &VmConfig, overlay: &str, tap: &str, mac: &str) ->
             message: "failed to launch cloud-hypervisor (KVM/binary available?)".into(),
         });
     }
-    // espera curta pelo pidfile.
+    // short wait for the pidfile.
     for _ in 0..20 {
         if pidfile.exists() {
             break;
@@ -614,10 +614,10 @@ fn boot_ch(vmdir: &Path, cfg: &VmConfig, overlay: &str, tap: &str, mac: &str) ->
 // Backend: libvirt / KVM (QEMU sob libvirtd, via virsh)
 // ===========================================================================
 
-/// 2.º backend: QEMU/KVM gerido pelo `libvirtd`, controlado por `virsh`.
+/// 2nd backend: QEMU/KVM managed by `libvirtd`, controlled via `virsh`.
 pub struct LibvirtBackend;
 
-/// URI de ligação do libvirt: sessão do utilizador (rootless) ou sistema (root).
+/// libvirt connection URI: user session (rootless) or system (root).
 /// Which libvirt connection to use for a *new* domain, given its `net_mode`.
 ///
 /// `qemu:///session` (per-user libvirt) can ONLY do user-mode networking
@@ -640,10 +640,10 @@ fn libvirt_uri_for(net_mode: Option<&str>) -> &'static str {
 /// knows the domain. Prefer `system` (reachable-IP modes) and fall back to
 /// `session` (user-mode). Returns `session` if neither defines it (harmless —
 /// the caller's virsh op is then a no-op).
-/// A URI da conexão libvirt (`qemu:///system` ou `.../session`) onde o domínio
-/// `name` vive — para o bin (`vm console`/`vm vnc`) falar com o virsh na
-/// conexão CERTA (senão `virsh console` sem `-c` usa a default e dá "failed to
-/// get domain" quando o domínio está na outra).
+/// The URI of the libvirt connection (`qemu:///system` or `.../session`) where the domain
+/// `name` lives — so the bin (`vm console`/`vm vnc`) talks to virsh on the
+/// RIGHT connection (otherwise `virsh console` without `-c` uses the default and gives "failed to
+/// get domain" when the domain is on the other one).
 pub fn libvirt_uri(name: &str) -> String {
     libvirt_uri_of(name).to_string()
 }
@@ -659,18 +659,18 @@ fn libvirt_uri_of(name: &str) -> &'static str {
     }
 }
 
-/// A conexão onde o domínio `name` está DEFINIDO, se em alguma — ao contrário
-/// de [`libvirt_uri_of`], **sem** fallback. `None` = o libvirt não conhece a VM.
+/// The connection where the domain `name` is DEFINED, if any — unlike
+/// [`libvirt_uri_of`], **without** a fallback. `None` = libvirt does not know the VM.
 fn libvirt_domain_uri(name: &str) -> Option<&'static str> {
     ["qemu:///system", "qemu:///session"]
         .into_iter()
         .find(|uri| capture("virsh", &["-c", uri, "domstate", "--", name]).is_some())
 }
 
-/// Corre um comando capturando stdout E stderr — nada do `virsh` vaza cru para
-/// o terminal (era o `error: Failed to destroy domain …` que aparecia no meio
-/// do output do `vm rm`). Em falha devolve a 1.ª linha útil do stderr, sem o
-/// prefixo `error: ` do virsh, para compor mensagens claras.
+/// Runs a command capturing stdout AND stderr — nothing from `virsh` leaks raw to
+/// the terminal (it was the `error: Failed to destroy domain …` that appeared in the middle
+/// of the `vm rm` output). On failure it returns the 1st useful stderr line, without the
+/// virsh `error: ` prefix, to compose clear messages.
 fn quiet(prog: &str, args: &[&str]) -> std::result::Result<String, String> {
     match Command::new(prog).args(args).output() {
         Ok(out) if out.status.success() => {
@@ -690,9 +690,9 @@ fn quiet(prog: &str, args: &[&str]) -> std::result::Result<String, String> {
     }
 }
 
-/// Desliga o domínio (`virsh destroy`) apenas se NÃO estiver já "shut off" —
-/// idempotente e silencioso (destroy num domínio parado é erro no virsh, e era
-/// uma das mensagens cruas que o `vm rm` deixava escapar).
+/// Powers off the domain (`virsh destroy`) only if it is NOT already "shut off" —
+/// idempotent and silent (destroy on a stopped domain is an error in virsh, and was
+/// one of the raw messages that `vm rm` let escape).
 fn libvirt_poweroff(uri: &str, name: &str) -> Result<()> {
     let state = capture("virsh", &["-c", uri, "domstate", "--", name]).unwrap_or_default();
     if state.is_empty() || state == "shut off" {
@@ -706,13 +706,13 @@ fn libvirt_poweroff(uri: &str, name: &str) -> Result<()> {
         })
 }
 
-/// Remove por completo o domínio libvirt `name`, se existir: desliga-o e faz
-/// `undefine` com os flags que limpam estado agarrado ao domínio (managed
-/// save, metadados de snapshots, NVRAM). Sem `--managed-save`, um domínio
-/// suspenso pelo host (`virsh managedsave`/libvirt-guests no shutdown) faz o
-/// virsh RECUSAR o undefine — e a versão antiga ignorava essa recusa, apagava
-/// o registo local na mesma e deixava a VM órfã no libvirt. Idempotente:
-/// domínio inexistente → `Ok`.
+/// Completely removes the libvirt domain `name`, if it exists: powers it off and does
+/// `undefine` with the flags that clean up state attached to the domain (managed
+/// save, snapshot metadata, NVRAM). Without `--managed-save`, a domain
+/// suspended by the host (`virsh managedsave`/libvirt-guests at shutdown) makes
+/// virsh REFUSE the undefine — and the old version ignored that refusal, deleted
+/// the local record anyway and left the VM orphaned in libvirt. Idempotent:
+/// non-existent domain → `Ok`.
 fn libvirt_cleanup(name: &str) -> Result<()> {
     let Some(uri) = libvirt_domain_uri(name) else {
         return Ok(());
@@ -735,8 +735,8 @@ fn libvirt_cleanup(name: &str) -> Result<()> {
     {
         return Ok(());
     }
-    // virsh antigo sem algum dos flags acima: o undefine simples ainda cobre o
-    // caso comum (sem managed save).
+    // old virsh without some of the flags above: the plain undefine still covers the
+    // common case (without managed save).
     quiet("virsh", &["-c", uri, "undefine", "--", name])
         .map(|_| ())
         .map_err(|msg| Error::Runtime {
@@ -745,12 +745,12 @@ fn libvirt_cleanup(name: &str) -> Result<()> {
         })
 }
 
-/// Gera o XML do domínio libvirt (KVM). **Função pura** — testada sem daemon.
+/// Generates the libvirt (KVM) domain XML. **Pure function** — tested without a daemon.
 ///
-/// Cobre: vCPUs (+ pinning via `<cputune>`), memória (+ hugepages via
-/// `<memoryBacking>`), disco virtio (overlay qcow2), seed cloud-init (cdrom),
-/// rede user-mode virtio (egress rootless), consola série, e passagem VFIO de
-/// dispositivos PCI (`<hostdev>`).
+/// Covers: vCPUs (+ pinning via `<cputune>`), memory (+ hugepages via
+/// `<memoryBacking>`), virtio disk (qcow2 overlay), cloud-init seed (cdrom),
+/// virtio user-mode network (rootless egress), serial console, and VFIO passthrough of
+/// PCI devices (`<hostdev>`).
 pub fn libvirt_domain_xml(cfg: &VmConfig, overlay: &str, mac: &str) -> String {
     let mib = mem_mib(&cfg.memory);
     let kib = mib * 1024;
@@ -764,12 +764,12 @@ pub fn libvirt_domain_xml(cfg: &VmConfig, overlay: &str, mac: &str) -> String {
     s.push_str(&format!(
         "  <currentMemory unit='KiB'>{kib}</currentMemory>\n"
     ));
-    // hugepages (HPC): suporta a RAM do domínio em hugepages do host.
+    // hugepages (HPC): backs the domain's RAM with host hugepages.
     if cfg.hugepages {
         s.push_str("  <memoryBacking>\n    <hugepages/>\n  </memoryBacking>\n");
     }
     s.push_str(&format!("  <vcpu placement='static'>{vcpus}</vcpu>\n"));
-    // CPU pinning (NUMA/determinismo): fixa cada vCPU à lista de CPUs do host.
+    // CPU pinning (NUMA/determinism): pins each vCPU to the list of host CPUs.
     if let Some(list) = &cfg.cpu_affinity {
         let list = xml_escape(list);
         s.push_str("  <cputune>\n");
@@ -778,7 +778,7 @@ pub fn libvirt_domain_xml(cfg: &VmConfig, overlay: &str, mac: &str) -> String {
         }
         s.push_str("  </cputune>\n");
     }
-    // Boot: firmware (cloud images) ou kernel direto.
+    // Boot: firmware (cloud images) or direct kernel.
     s.push_str("  <os>\n    <type arch='x86_64' machine='q35'>hvm</type>\n");
     if let Some(k) = &cfg.kernel {
         s.push_str(&format!("    <kernel>{}</kernel>\n", xml_escape(k)));
@@ -806,7 +806,7 @@ pub fn libvirt_domain_xml(cfg: &VmConfig, overlay: &str, mac: &str) -> String {
     s.push_str("  <cpu mode='host-passthrough' check='none'/>\n");
     s.push_str("  <clock offset='utc'/>\n");
     s.push_str("  <on_poweroff>destroy</on_poweroff>\n");
-    // política de reinício: 'always'/'on-failure' → restart no crash.
+    // restart policy: 'always'/'on-failure' → restart on crash.
     let on_crash = match cfg.restart_policy.as_deref() {
         Some("always") | Some("on-failure") => "restart",
         _ => "destroy",
@@ -816,13 +816,13 @@ pub fn libvirt_domain_xml(cfg: &VmConfig, overlay: &str, mac: &str) -> String {
     ));
     s.push_str("  <devices>\n");
     s.push_str("    <emulator>/usr/bin/qemu-system-x86_64</emulator>\n");
-    // disco principal: overlay qcow2 via virtio (vda).
+    // main disk: qcow2 overlay via virtio (vda).
     s.push_str("    <disk type='file' device='disk'>\n");
     s.push_str("      <driver name='qemu' type='qcow2'/>\n");
     s.push_str(&format!("      <source file='{}'/>\n", xml_escape(overlay)));
     s.push_str("      <target dev='vda' bus='virtio'/>\n");
     s.push_str("    </disk>\n");
-    // seed cloud-init (NoCloud) como cdrom.
+    // cloud-init seed (NoCloud) as cdrom.
     if let Some(seed) = &cfg.seed {
         s.push_str("    <disk type='file' device='cdrom'>\n");
         s.push_str("      <driver name='qemu' type='raw'/>\n");
@@ -830,9 +830,9 @@ pub fn libvirt_domain_xml(cfg: &VmConfig, overlay: &str, mac: &str) -> String {
         s.push_str("      <target dev='sda' bus='sata'/>\n");
         s.push_str("      <readonly/>\n    </disk>\n");
     }
-    // volumes/Storage partilhados por virtio-9p — o utilizador NÃO escreve este
-    // XML: vem do `spec.volumes` já resolvido. O guest monta por `<target dir=tag>`
-    // (o mount é injectado no cloud-init, ver `cmd::vm::build_user_data`).
+    // volumes/Storage shared via virtio-9p — the user does NOT write this
+    // XML: it comes from `spec.volumes` already resolved. The guest mounts by `<target dir=tag>`
+    // (the mount is injected into cloud-init, see `cmd::vm::build_user_data`).
     for v in &cfg.volumes {
         s.push_str("    <filesystem type='mount' accessmode='passthrough'>\n");
         s.push_str(&format!(
@@ -845,17 +845,17 @@ pub fn libvirt_domain_xml(cfg: &VmConfig, overlay: &str, mac: &str) -> String {
         }
         s.push_str("    </filesystem>\n");
     }
-    // rede: abstraída pelo YAML (net_mode) → `<interface>` virtio. Sem XML à mão.
+    // network: abstracted by the YAML (net_mode) → virtio `<interface>`. No hand-written XML.
     s.push_str(&libvirt_interface_xml(cfg, mac));
-    // consola série (logs de boot).
+    // serial console (boot logs).
     s.push_str("    <serial type='pty'><target type='isa-serial' port='0'/></serial>\n");
     s.push_str("    <console type='pty'><target type='serial' port='0'/></console>\n");
-    // VNC (opt-in): porta auto, só no loopback (o `vm vnc` reporta host:porta).
+    // VNC (opt-in): auto port, loopback only (`vm vnc` reports host:port).
     if cfg.vnc {
         s.push_str("    <graphics type='vnc' port='-1' autoport='yes' listen='127.0.0.1'/>\n");
         s.push_str("    <video><model type='virtio' heads='1'/></video>\n");
     }
-    // VFIO: passagem de dispositivos PCI (SR-IOV VF, GPU).
+    // VFIO: PCI device passthrough (SR-IOV VF, GPU).
     for dev in &cfg.devices {
         if let Some((dom, bus, slot, func)) = parse_pci_addr(dev) {
             s.push_str("    <hostdev mode='subsystem' type='pci' managed='yes'>\n      <source>\n");
@@ -870,15 +870,15 @@ pub fn libvirt_domain_xml(cfg: &VmConfig, overlay: &str, mac: &str) -> String {
     s
 }
 
-/// Gera o `<interface>` do domínio libvirt a partir do `net_mode` do YAML — assim a
-/// rede fica 100% abstraída (sem XML à mão). **Função pura** — testada sem daemon.
+/// Generates the libvirt domain's `<interface>` from the YAML `net_mode` — so the
+/// network is 100% abstracted (no hand-written XML). **Pure function** — tested without a daemon.
 fn libvirt_interface_xml(cfg: &VmConfig, mac: &str) -> String {
     let mac = xml_escape(mac);
     let model = "      <model type='virtio'/>\n    </interface>\n";
     match cfg.net_mode.as_deref().unwrap_or("user") {
         "nat" | "network" => {
-            // rede NAT gerida pelo libvirt (DHCP + IP via domifaddr). `bridge` = nome
-            // da rede libvirt (default "default").
+            // NAT network managed by libvirt (DHCP + IP via domifaddr). `bridge` = name
+            // of the libvirt network (default "default").
             let net = cfg.bridge.as_deref().unwrap_or("default");
             format!(
                 "    <interface type='network'>\n      <source network='{}'/>\n      <mac address='{mac}'/>\n{model}",
@@ -886,7 +886,7 @@ fn libvirt_interface_xml(cfg: &VmConfig, mac: &str) -> String {
             )
         }
         "bridge" => {
-            // liga a uma bridge do host pré-existente.
+            // attaches to a pre-existing host bridge.
             let br = cfg.bridge.as_deref().unwrap_or("virbr0");
             format!(
                 "    <interface type='bridge'>\n      <source bridge='{}'/>\n      <mac address='{mac}'/>\n{model}",
@@ -894,13 +894,13 @@ fn libvirt_interface_xml(cfg: &VmConfig, mac: &str) -> String {
             )
         }
         _ => {
-            // user-mode (SLIRP/passt): egress sem tap — rootless-friendly (default).
+            // user-mode (SLIRP/passt): egress without a tap — rootless-friendly (default).
             format!("    <interface type='user'>\n      <mac address='{mac}'/>\n{model}")
         }
     }
 }
 
-/// Escapa os 5 caracteres especiais de XML.
+/// Escapes the 5 special XML characters.
 fn xml_escape(s: &str) -> String {
     s.replace('&', "&amp;")
         .replace('<', "&lt;")
@@ -909,8 +909,8 @@ fn xml_escape(s: &str) -> String {
         .replace('\'', "&apos;")
 }
 
-/// Extrai `(domain, bus, slot, func)` de um caminho/endereço PCI
-/// (`/sys/bus/pci/devices/0000:65:00.1` ou `0000:65:00.1`). Função pura.
+/// Extracts `(domain, bus, slot, func)` from a PCI path/address
+/// (`/sys/bus/pci/devices/0000:65:00.1` or `0000:65:00.1`). Pure function.
 fn parse_pci_addr(dev: &str) -> Option<(String, String, String, String)> {
     let bdf = dev.rsplit('/').next().unwrap_or(dev); // 0000:65:00.1
     let (rest, func) = bdf.rsplit_once('.')?;
@@ -929,12 +929,12 @@ fn parse_pci_addr(dev: &str) -> Option<(String, String, String, String)> {
     ))
 }
 
-/// Garante uma rede libvirt NAT pronta (`--net-mode nat` → IP pingável do host).
-/// Best-effort: se `net` não existe e é a `default`, define a rede NAT padrão
-/// (virbr0, 192.168.122.0/24, DHCP); depois `net-start` + `net-autostart`. Um
-/// aviso claro se a conexão de sistema for inacessível (falta o grupo libvirt).
+/// Ensures a ready NAT libvirt network (`--net-mode nat` → host-pingable IP).
+/// Best-effort: if `net` does not exist and is the `default`, it defines the standard NAT
+/// network (virbr0, 192.168.122.0/24, DHCP); then `net-start` + `net-autostart`. A
+/// clear warning if the system connection is unreachable (missing the libvirt group).
 fn ensure_libvirt_network(uri: &str, net: &str) {
-    // Conexão de sistema acessível? (NAT vive em qemu:///system.)
+    // System connection reachable? (NAT lives in qemu:///system.)
     if capture("virsh", &["-c", uri, "net-list", "--all"]).is_none() {
         eprintln!(
             "warning: cannot reach {uri} for NAT networking — add yourself to the 'libvirt' group              (`sudo usermod -aG libvirt $USER && newgrp libvirt`) and retry"
@@ -943,19 +943,19 @@ fn ensure_libvirt_network(uri: &str, net: &str) {
     }
     let exists = capture("virsh", &["-c", uri, "net-info", "--", net]).is_some();
     if !exists && net == "default" {
-        // XML da rede NAT padrão do libvirt (a que a maioria das distros traz).
+        // XML of the standard libvirt NAT network (the one most distros ship).
         let xml = "<network>\n  <name>default</name>\n  <forward mode='nat'/>\n                     <bridge name='virbr0' stp='on' delay='0'/>\n                     <ip address='192.168.122.1' netmask='255.255.255.0'>\n                       <dhcp><range start='192.168.122.2' end='192.168.122.254'/></dhcp>\n                     </ip>\n</network>\n";
-        // Achado de auditoria: um nome PREVISÍVEL em /tmp (world-writable)
-        // permitia a outro utilizador local pré-criar um symlink e desviar a
-        // escrita. `create_new` (O_EXCL) falha se o caminho já existir — sem
-        // seguir symlinks — e 0600 fecha a leitura por outros.
+        // Audit finding: a PREDICTABLE name in /tmp (world-writable)
+        // allowed another local user to pre-create a symlink and divert the
+        // write. `create_new` (O_EXCL) fails if the path already exists — without
+        // following symlinks — and 0600 closes reading by others.
         use std::io::Write as _;
         use std::os::unix::fs::OpenOptionsExt as _;
         let path = std::env::temp_dir().join(format!(
             "delonix-libvirt-default-{}.xml",
             std::process::id()
         ));
-        let _ = std::fs::remove_file(&path); // limpa um resto NOSSO de uma corrida anterior
+        let _ = std::fs::remove_file(&path); // cleans up a leftover OF OURS from a previous run
         if let Ok(mut f) = std::fs::OpenOptions::new()
             .write(true)
             .create_new(true)
@@ -990,14 +990,14 @@ impl VmBackend for LibvirtBackend {
     fn boot(&self, vmdir: &Path, cfg: &VmConfig, overlay: &str) -> Result<Boot> {
         let mac = mac_for(&cfg.name);
         let uri = libvirt_uri_for(cfg.net_mode.as_deref());
-        // overlay como caminho absoluto (o libvirtd pode correr noutro cwd).
+        // overlay as an absolute path (libvirtd may run in another cwd).
         let overlay_abs = std::fs::canonicalize(overlay)
             .map(|p| p.to_string_lossy().into_owned())
             .unwrap_or_else(|_| overlay.to_string());
-        // Modo NAT: garante a rede libvirt DEFINIDA + activa + autostart. Sem
-        // isto, `vm create --net-mode nat` falhava em instalações onde a rede
-        // `default` não vem criada (libvirt minimalista) ou está parada — o
-        // caminho para um IP pingável do host + SSH.
+        // NAT mode: ensures the libvirt network is DEFINED + active + autostart. Without
+        // this, `vm create --net-mode nat` failed on installations where the
+        // `default` network is not created (minimalist libvirt) or is stopped — the
+        // path to a host-pingable IP + SSH.
         if matches!(cfg.net_mode.as_deref(), Some("nat") | Some("network")) {
             let net = cfg.bridge.as_deref().unwrap_or("default");
             ensure_libvirt_network(uri, net);
@@ -1019,8 +1019,8 @@ impl VmBackend for LibvirtBackend {
         let xml_path = vmdir.join(format!("{}.xml", cfg.name));
         std::fs::write(&xml_path, &xml)?;
 
-        // Idempotente: se o domínio já existe (auto-heal), só (re)arranca; senão
-        // define + arranca. `virsh start` num domínio já a correr é no-op benigno.
+        // Idempotent: if the domain already exists (auto-heal), it just (re)starts; otherwise
+        // define + start. `virsh start` on an already-running domain is a benign no-op.
         let defined = capture("virsh", &["-c", uri, "domstate", "--", &cfg.name]).is_some();
         if !defined {
             run_tool("virsh", &["-c", uri, "define", &xml_path.to_string_lossy()])?;
@@ -1032,7 +1032,7 @@ impl VmBackend for LibvirtBackend {
                 context: "libvirt",
                 message: format!("virsh start: {e}"),
             })?;
-        // 'start' falha se já estiver a correr — toleramos isso (auto-heal).
+        // 'start' fails if it is already running — we tolerate that (auto-heal).
         if !st.success() && !self.is_running_uri(uri, &cfg.name) {
             return Err(Error::Runtime {
                 context: "vm",
@@ -1040,7 +1040,7 @@ impl VmBackend for LibvirtBackend {
             });
         }
         Ok(Boot {
-            pid: None, // gerido pelo libvirtd — liveness via virsh domstate
+            pid: None, // managed by libvirtd — liveness via virsh domstate
             ip: self.ip_uri(uri, &cfg.name),
             tap: "user".into(),
             mac,
@@ -1070,10 +1070,10 @@ impl LibvirtBackend {
             .unwrap_or(false)
     }
 
-    /// IP via `virsh domifaddr` (pode estar vazio em rede user-mode sem agente).
+    /// IP via `virsh domifaddr` (may be empty in user-mode networking without an agent).
     fn ip_uri(&self, uri: &str, name: &str) -> Option<String> {
         let out = capture("virsh", &["-c", uri, "domifaddr", "--", name])?;
-        // formato: "Name  MAC  Protocol  Address"; pega o 1.º IPv4 (a.b.c.d/p).
+        // format: "Name  MAC  Protocol  Address"; take the 1st IPv4 (a.b.c.d/p).
         for line in out.lines() {
             if let Some(field) = line.split_whitespace().last() {
                 if let Some((ip, _)) = field.split_once('/') {
@@ -1088,22 +1088,22 @@ impl LibvirtBackend {
 }
 
 // ===========================================================================
-// Ciclo de vida (genérico, delega no backend)
+// Lifecycle (generic, delegates to the backend)
 // ===========================================================================
 
-/// Garante a microVM (idempotente): se já existe e está viva, não faz nada; se
-/// existe mas morreu, re-arranca reutilizando o overlay (auto-heal) com o MESMO
-/// backend; senão, escolhe o backend (explícito/auto), cria o overlay e arranca.
-/// Valida o NOME de uma VM antes de o usar em CAMINHOS de ficheiro, no
-/// `hostname` do cloud-init e no argv do `virsh`. Achado de auditoria: o nome
-/// (vindo do CLI OU de `metadata.name` de um manifesto NÃO-confiado via
-/// `stack apply -f`) fluía cru para `state_root/vms/<name>` (seed) e para o
-/// overlay `<name>.qcow2` — um `metadata.name: "../../.ssh/authorized_keys"`
-/// escrevia/sobrescrevia ficheiros FORA do directório de estado, como o
-/// utilizador. Também impede um nome começado por `-` (que o `virsh` leria
-/// como opção) e caracteres de controlo (injecção no YAML do cloud-init).
-/// Whitelist estrita: `[A-Za-z0-9._-]`, não vazio, não começa por `-`/`.`,
-/// sem `..`. Mesmo espírito das `valid_*` da auditoria do `cluster`.
+/// Ensures the microVM (idempotent): if it already exists and is alive, does nothing; if
+/// it exists but died, re-boots reusing the overlay (auto-heal) with the SAME
+/// backend; otherwise, chooses the backend (explicit/auto), creates the overlay and boots.
+/// Validates a VM's NAME before using it in file PATHS, in the
+/// cloud-init `hostname` and in the `virsh` argv. Audit finding: the name
+/// (coming from the CLI OR from `metadata.name` of an UNTRUSTED manifest via
+/// `stack apply -f`) flowed raw into `state_root/vms/<name>` (seed) and into the
+/// overlay `<name>.qcow2` — a `metadata.name: "../../.ssh/authorized_keys"`
+/// wrote/overwrote files OUTSIDE the state directory, as the
+/// user. It also prevents a name starting with `-` (which `virsh` would read
+/// as an option) and control characters (injection in the cloud-init YAML).
+/// Strict whitelist: `[A-Za-z0-9._-]`, non-empty, does not start with `-`/`.`,
+/// no `..`. Same spirit as the `valid_*` of the `cluster` audit.
 pub fn valid_vm_name(name: &str) -> bool {
     !name.is_empty()
         && name.len() <= 64
@@ -1128,9 +1128,9 @@ pub fn create(base: &Path, cfg: &VmConfig) -> Result<Vm> {
     let st = store(base)?;
 
     let restarting = st.load(&cfg.name).ok();
-    // Anti-clobber (dois subsistemas de VM na MESMA pasta): se já existe um
-    // `<name>.json` que NÃO parseia como Vm declarativa, é um registo QEMU-direto
-    // (`vm run`) — recusar em vez de o sobrescrever e deixar essa VM órfã.
+    // Anti-clobber (two VM subsystems in the SAME folder): if a
+    // `<name>.json` that does NOT parse as a declarative Vm already exists, it is a direct-QEMU
+    // record (`vm run`) — refuse instead of overwriting it and leaving that VM orphaned.
     if restarting.is_none() && vmdir.join(format!("{}.json", cfg.name)).exists() {
         return Err(Error::Invalid(format!(
             "a VM '{}' created by `vm run` (direct-QEMU) already exists. Remove it first \
@@ -1138,29 +1138,29 @@ pub fn create(base: &Path, cfg: &VmConfig) -> Result<Vm> {
             cfg.name, cfg.name
         )));
     }
-    // No restart, honra o backend que a VM já usava; senão escolhe agora.
+    // On restart, honor the backend the VM already used; otherwise choose now.
     let backend: Box<dyn VmBackend> = match &restarting {
         Some(ex) => {
             if backend_for(ex).is_running(ex) {
-                return Ok(ex.clone()); // já a correr — idempotente
+                return Ok(ex.clone()); // already running — idempotent
             }
             backend_for(ex)
         }
         None => {
-            // Volumes ⇒ libvirt: só ele materializa virtio-9p (o Cloud Hypervisor
-            // não faz 9p e recusaria no `boot`). A regra vive AQUI (no motor) e não
-            // só no bin, para qualquer consumidor da API a herdar. Sem volumes,
-            // mantém-se a auto-detecção normal.
+            // Volumes ⇒ libvirt: only it materializes virtio-9p (Cloud Hypervisor
+            // does not do 9p and would refuse in `boot`). The rule lives HERE (in the engine) and not
+            // only in the bin, so any consumer of the API inherits it. Without volumes,
+            // the normal auto-detection is kept.
             //
-            // Cloud image (boot por FIRMWARE, sem kernel explícito) ⇒ preferir
-            // libvirt. O `rust-hypervisor-fw` do Cloud Hypervisor não carrega o
-            // initrd das cloud images Ubuntu (o initrd via EFI LoadFile2 não
-            // está implementado no firmware minimalista) → o kernel arranca mas
-            // entra em pânico "Unable to mount root fs" (LABEL=cloudimg-rootfs
-            // não resolve sem udev do initrd). O libvirt (UEFI/SeaBIOS completo)
-            // boota-as. O CH fica para DIRECT-KERNEL boot (nós k8s com kernel
-            // próprio), onde é o melhor. Só se libvirt existir; senão o CH com
-            // um aviso (melhor tentar que recusar).
+            // Cloud image (boot via FIRMWARE, without an explicit kernel) ⇒ prefer
+            // libvirt. Cloud Hypervisor's `rust-hypervisor-fw` does not load the
+            // initrd of Ubuntu cloud images (the initrd via EFI LoadFile2 is
+            // not implemented in the minimalist firmware) → the kernel boots but
+            // panics "Unable to mount root fs" (LABEL=cloudimg-rootfs
+            // does not resolve without the initrd's udev). libvirt (full UEFI/SeaBIOS)
+            // boots them. CH is left for DIRECT-KERNEL boot (k8s nodes with their own
+            // kernel), where it is the best. Only if libvirt exists; otherwise CH with
+            // a warning (better to try than to refuse).
             let want = match cfg.backend.as_deref() {
                 Some(b) => Some(b),
                 None if !cfg.volumes.is_empty() => Some("libvirt"),
@@ -1177,8 +1177,8 @@ pub fn create(base: &Path, cfg: &VmConfig) -> Result<Vm> {
         }
     };
 
-    // Admissão: recusa arrancar se não houver RAM no host (anti-overcommit).
-    // Só as VMs que vão MESMO arrancar (não a idempotente já-a-correr acima).
+    // Admission: refuses to boot if there is no RAM on the host (anti-overcommit).
+    // Only the VMs that will REALLY boot (not the idempotent already-running one above).
     vm_admission_check(cfg)?;
 
     let disk_path = std::fs::canonicalize(&cfg.disk)
@@ -1227,9 +1227,9 @@ pub fn create(base: &Path, cfg: &VmConfig) -> Result<Vm> {
     vm.restart_policy = cfg.restart_policy.clone();
     vm.ip = boot.ip;
     vm.backend = backend.id().to_string();
-    // HONESTIDADE do restart_policy: só o libvirt o materializa (`<on_crash>restart`
-    // no XML). No Cloud Hypervisor não há supervisor no host — avisar em vez de
-    // aceitar em silêncio uma política que não é imposta instantaneamente.
+    // restart_policy HONESTY: only libvirt materializes it (`<on_crash>restart`
+    // in the XML). On Cloud Hypervisor there is no supervisor on the host — warn instead of
+    // silently accepting a policy that is not enforced instantly.
     if restart_policy_unsupervised(backend.id(), vm.restart_policy.as_deref()) {
         tracing::warn!(
             vm = %cfg.name,
@@ -1247,34 +1247,34 @@ pub fn create(base: &Path, cfg: &VmConfig) -> Result<Vm> {
     Ok(vm)
 }
 
-/// `true` se a `restart_policy` pede reinício automático (`always`/`on-failure`)
-/// mas o backend NÃO o supervisiona no host (só o libvirt o materializa via XML).
-/// Nos outros o reinício depende do reconcile/apply — o chamador deve avisar.
-/// Função pura — testável.
+/// `true` if the `restart_policy` requests automatic restart (`always`/`on-failure`)
+/// but the backend does NOT supervise it on the host (only libvirt materializes it via XML).
+/// On the others the restart depends on reconcile/apply — the caller should warn.
+/// Pure function — testable.
 pub fn restart_policy_unsupervised(backend_id: &str, policy: Option<&str>) -> bool {
     backend_id != "libvirt" && matches!(policy, Some("always") | Some("on-failure"))
 }
 
-/// Remove uma VM: pára o VMM (via o seu backend), e apaga overlay/estado.
+/// Removes a VM: stops the VMM (via its backend), and deletes overlay/state.
 ///
-/// Se a limpeza no backend falhar (ex.: o libvirt recusa o undefine), o registo
-/// local fica **INTACTO** e o erro sobe — a versão antiga apagava o registo na
-/// mesma e a VM ficava órfã no libvirt, invisível a `vm ls`/`vm stop`. Cobre
-/// também o inverso: sem registo local mas com domínio órfão no libvirt (um
-/// `rm` antigo interrompido), o `remove` limpa o domínio na mesma.
+/// If the backend cleanup fails (e.g. libvirt refuses the undefine), the local
+/// record stays **INTACT** and the error propagates — the old version deleted the record
+/// anyway and the VM was orphaned in libvirt, invisible to `vm ls`/`vm stop`. It also covers
+/// the reverse: no local record but with an orphaned domain in libvirt (an
+/// old interrupted `rm`), `remove` cleans up the domain anyway.
 pub fn remove(base: &Path, name: &str) -> Result<()> {
     remove_inner(base, name, false)
 }
 
-/// Como [`remove`], mas apaga o estado local MESMO que a limpeza no backend
-/// falhe (o `vm rm --force`) — o utilizador assume resolver o resto no libvirt.
+/// Like [`remove`], but deletes the local state EVEN if the backend cleanup
+/// fails (the `vm rm --force`) — the user takes on resolving the rest in libvirt.
 pub fn remove_force(base: &Path, name: &str) -> Result<()> {
     remove_inner(base, name, true)
 }
 
 fn remove_inner(base: &Path, name: &str, force: bool) -> Result<()> {
-    // Um nome que `create` recusaria não pode existir — e não pode, sobretudo,
-    // fluir para os caminhos apagados abaixo (o `remove_dir_all` do seed dir).
+    // A name that `create` would refuse cannot exist — and above all, it cannot
+    // flow into the paths deleted below (the seed dir's `remove_dir_all`).
     if !valid_vm_name(name) {
         return Err(Error::VmNotFound(name.to_string()));
     }
@@ -1284,14 +1284,14 @@ fn remove_inner(base: &Path, name: &str, force: bool) -> Result<()> {
         Ok(vm) => {
             if let Err(e) = backend_for(&vm).stop(&vmdir, &vm) {
                 if !force {
-                    return Err(e); // registo intacto — o rm pode repetir-se
+                    return Err(e); // record intact — the rm can be retried
                 }
             }
             true
         }
         Err(_) => {
-            // Sem registo: pode haver um domínio libvirt órfão com este nome —
-            // limpa-o, e o tap do ingress por segurança.
+            // No record: there may be an orphaned libvirt domain with this name —
+            // clean it up, and the ingress tap for safety.
             let orphan = libvirt_domain_uri(name).is_some();
             if let Err(e) = libvirt_cleanup(name) {
                 if !force {
@@ -1305,30 +1305,30 @@ fn remove_inner(base: &Path, name: &str, force: bool) -> Result<()> {
     for ext in ["qcow2", "sock", "sock.lock", "serial", "log", "pid", "xml"] {
         let _ = std::fs::remove_file(vmdir.join(format!("{name}.{ext}")));
     }
-    // O directório seed do cloud-init (`vms/<name>/`, de `generate_seed_iso`)
-    // também é da VM — ficava para trás e acumulava lixo por nome.
+    // The cloud-init seed directory (`vms/<name>/`, from `generate_seed_iso`)
+    // also belongs to the VM — it was left behind and accumulated junk per name.
     let _ = std::fs::remove_dir_all(vmdir.join(name));
     if !existed {
-        // Nem registo local nem domínio no libvirt — o `st.remove` abaixo é
-        // idempotente (ausência não é erro) e diria Ok; um `rm` de algo que
-        // não existe deve dizê-lo, como o docker.
+        // Neither a local record nor a domain in libvirt — the `st.remove` below is
+        // idempotent (absence is not an error) and would say Ok; an `rm` of something that
+        // does not exist should say so, like docker.
         return Err(Error::VmNotFound(name.to_string()));
     }
     st.remove(name)
 }
 
-/// Pára a VM via o SEU backend (CH/libvirt) mas **preserva** registo e disco
-/// (retomável). Ao contrário de `remove`, não apaga nada. Corrige o caso em que
-/// o `vm stop` da CLI (esquema QEMU-direto) não sabia parar uma VM declarativa
-/// libvirt (pid null → domínio ficava vivo, órfão).
+/// Stops the VM via ITS backend (CH/libvirt) but **preserves** the record and disk
+/// (resumable). Unlike `remove`, it deletes nothing. Fixes the case where
+/// the CLI's `vm stop` (direct-QEMU scheme) did not know how to stop a declarative
+/// libvirt VM (pid null → the domain stayed alive, orphaned).
 pub fn stop(base: &Path, name: &str) -> Result<()> {
     let vmdir = vms_dir(base);
     let st = store(base)?;
     let mut vm = match st.load(name) {
         Ok(vm) => vm,
-        // Sem registo local, mas com domínio no libvirt (órfão de um `rm`
-        // antigo): desliga-o na mesma — a intenção é inequívoca e responder
-        // "no such VM" a uma VM que o libvirt lista seria mentira.
+        // No local record, but with a domain in libvirt (orphaned from an old
+        // `rm`): power it off anyway — the intent is unambiguous and answering
+        // "no such VM" for a VM that libvirt lists would be a lie.
         Err(Error::NotFound(_)) => {
             return match libvirt_domain_uri(name) {
                 Some(uri) => libvirt_poweroff(uri, name),
@@ -1343,7 +1343,7 @@ pub fn stop(base: &Path, name: &str) -> Result<()> {
     st.save(name, &vm)
 }
 
-/// Estado actual de uma VM, com `status`/`ip` reconciliados pelo seu backend.
+/// Current state of a VM, with `status`/`ip` reconciled by its backend.
 pub fn status(base: &Path, name: &str) -> Result<Vm> {
     let st = store(base)?;
     let mut vm = st.load(name).map_err(|e| match e {
@@ -1355,15 +1355,15 @@ pub fn status(base: &Path, name: &str) -> Result<Vm> {
         vm.status = Status::Running;
         vm.ip = backend.ip(&vm).or(vm.ip);
     } else {
-        // Uma VM desligada = Stopped (o guest pode ter feito shutdown limpo; ao
-        // contrário dos containers, a VM é autónoma — não se assume crash).
+        // A powered-off VM = Stopped (the guest may have done a clean shutdown;
+        // unlike containers, the VM is autonomous — a crash is not assumed).
         vm.status = Status::Stopped;
         vm.pid = None;
     }
     Ok(vm)
 }
 
-/// Lista todas as VMs, com estado reconciliado.
+/// Lists all VMs, with reconciled state.
 pub fn list(base: &Path) -> Result<Vec<Vm>> {
     let st = store(base)?;
     let mut out = Vec::new();
@@ -1382,24 +1382,24 @@ mod tests {
         assert_eq!(mem_mib("2G"), 2048);
         assert_eq!(mem_mib("1024M"), 1024);
         assert_eq!(mem_mib("512"), 512);
-        assert_eq!(mem_mib("2Gi"), 2048); // sufixo k8s tolerado (antes dava 1024)
+        assert_eq!(mem_mib("2Gi"), 2048); // k8s suffix tolerated (before it gave 1024)
         assert_eq!(mem_mib("512Mi"), 512);
-        assert_eq!(mem_mib("lixo"), 1024); // fallback robusto
+        assert_eq!(mem_mib("lixo"), 1024); // robust fallback
     }
 
     #[test]
     fn valid_vm_name_recusa_exploits() {
-        // Path traversal (seed/overlay fora do state dir), via CLI ou manifesto.
+        // Path traversal (seed/overlay outside the state dir), via CLI or manifest.
         assert!(!super::valid_vm_name("../../.ssh/authorized_keys"));
         assert!(!super::valid_vm_name("a/b"));
         assert!(!super::valid_vm_name(".."));
         assert!(!super::valid_vm_name("a..b"));
-        // Argv do virsh: nome começado por '-' vira opção.
+        // virsh argv: a name starting with '-' becomes an option.
         assert!(!super::valid_vm_name("-c"));
-        // Injecção no YAML do cloud-init (hostname) / controlo.
+        // Injection in the cloud-init YAML (hostname) / control.
         assert!(!super::valid_vm_name("x\nruncmd:\n  - evil"));
         assert!(!super::valid_vm_name(""));
-        // Nomes legítimos passam intactos (sem regressão).
+        // Legitimate names pass through intact (no regression).
         assert!(super::valid_vm_name("dev"));
         assert!(super::valid_vm_name("kadm-cp1"));
         assert!(super::valid_vm_name("my.vm_02"));
@@ -1407,8 +1407,8 @@ mod tests {
 
     #[test]
     fn quiet_captura_o_stderr_sem_o_prefixo_error() {
-        // O `virsh` prefixa cada linha com `error: ` — a mensagem composta não
-        // deve repetir isso, nem vazar o stderr cru para o terminal.
+        // `virsh` prefixes each line with `error: ` — the composed message must
+        // not repeat that, nor leak the raw stderr to the terminal.
         let err = super::quiet("sh", &["-c", "echo 'error: boom' >&2; exit 1"]).unwrap_err();
         assert_eq!(err, "boom");
         let ok = super::quiet("sh", &["-c", "echo out"]).unwrap();
@@ -1417,15 +1417,15 @@ mod tests {
 
     #[test]
     fn stop_e_remove_de_vm_inexistente_dizem_no_such_vm() {
-        // Regressão do bug report: `vm stop dev` sem registo respondia
-        // "no such container: dev" — substantivo errado para uma VM — e o
-        // `vm rm` de um nome inexistente devolvia sucesso silencioso.
+        // Regression from the bug report: `vm stop dev` without a record answered
+        // "no such container: dev" — wrong noun for a VM — and
+        // `vm rm` of a non-existent name returned silent success.
         let base = std::env::temp_dir().join(format!("delonix-vm-test-{}", std::process::id()));
         let _ = std::fs::create_dir_all(&base);
         for res in [super::stop(&base, "nope"), super::remove(&base, "nope")] {
             match res {
                 Err(Error::VmNotFound(n)) => assert_eq!(n, "nope"),
-                other => panic!("esperava VmNotFound, veio {other:?}"),
+                other => panic!("expected VmNotFound, got {other:?}"),
             }
         }
         let _ = std::fs::remove_dir_all(&base);
@@ -1479,13 +1479,13 @@ mod tests {
         );
         assert!(xml.contains("<source dir='/srv/dados'/>"), "{xml}");
         assert!(xml.contains("<target dir='dados'/>"), "{xml}");
-        // O só-de-leitura (2.º volume) leva `<readonly/>` no seu bloco.
+        // The read-only one (2nd volume) carries `<readonly/>` in its block.
         let ro_idx = xml.find("<target dir='ro'/>").unwrap();
         assert!(
             xml[ro_idx..].starts_with("<target dir='ro'/>\n      <readonly/>"),
             "{xml}"
         );
-        // Sem volumes → sem <filesystem>.
+        // Without volumes → no <filesystem>.
         assert!(
             !libvirt_domain_xml(&test_vm_cfg("1G"), "/tmp/o.qcow2", "52:54:00:00:00:02")
                 .contains("<filesystem")
@@ -1495,23 +1495,23 @@ mod tests {
     #[test]
     fn vm_admission_recusa_quando_nao_cabe() {
         std::env::set_var("DELONIX_VM_RESERVE_MIB", "0");
-        // Só valida se o host tem MemAvailable legível (senão é no-op best-effort).
+        // Only validates if the host has a readable MemAvailable (otherwise it is a best-effort no-op).
         if host_mem_available_mib().is_some() {
             assert!(
-                vm_admission_check(&test_vm_cfg("1000000G")).is_err(), // 1 PB — nunca cabe
-                "VM gigante deve ser recusada"
+                vm_admission_check(&test_vm_cfg("1000000G")).is_err(), // 1 PB — never fits
+                "giant VM must be refused"
             );
         }
         assert!(
-            vm_admission_check(&test_vm_cfg("1M")).is_ok(), // minúscula — cabe sempre
-            "VM minúscula deve ser admitida"
+            vm_admission_check(&test_vm_cfg("1M")).is_ok(), // tiny — always fits
+            "tiny VM must be admitted"
         );
         std::env::remove_var("DELONIX_VM_RESERVE_MIB");
     }
 
     #[test]
     fn restart_policy_unsupervised_deteta() {
-        // CH/QEMU não supervisionam always/on-failure → avisa.
+        // CH/QEMU do not supervise always/on-failure → warns.
         assert!(restart_policy_unsupervised(
             "cloud-hypervisor",
             Some("always")
@@ -1520,9 +1520,9 @@ mod tests {
             "cloud-hypervisor",
             Some("on-failure")
         ));
-        // libvirt materializa no XML → não avisa.
+        // libvirt materializes it in the XML → does not warn.
         assert!(!restart_policy_unsupervised("libvirt", Some("always")));
-        // sem política ou `no` → nada a avisar.
+        // no policy or `no` → nothing to warn about.
         assert!(!restart_policy_unsupervised("cloud-hypervisor", Some("no")));
         assert!(!restart_policy_unsupervised("cloud-hypervisor", None));
     }
@@ -1533,7 +1533,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&tmp);
         let vmdir = vms_dir(&tmp);
         std::fs::create_dir_all(&vmdir).unwrap();
-        // registo QEMU-direto (esquema cru, SEM `backend`) — como o `vm run` grava.
+        // direct-QEMU record (raw scheme, WITHOUT `backend`) — as `vm run` writes it.
         std::fs::write(
             vmdir.join("myvm.json"),
             br#"{"name":"myvm","pid":1234,"memory":1024,"cpus":1}"#,
@@ -1544,15 +1544,15 @@ mod tests {
         let err = create(&tmp, &cfg).unwrap_err();
         assert!(
             format!("{err}").contains("vm run"),
-            "create devia recusar o clobber de um registo QEMU-direto: {err}"
+            "create should refuse the clobber of a direct-QEMU record: {err}"
         );
         let _ = std::fs::remove_dir_all(&tmp);
     }
 
     #[test]
     fn parse_qemu_format_extrai_formato_real() {
-        // Output humano do `qemu-img info` de um `.img` que é qcow2 por dentro
-        // (o cerne do bug do backing-format).
+        // Human output of `qemu-img info` for a `.img` that is qcow2 inside
+        // (the core of the backing-format bug).
         let info = "image: jammy.img\nfile format: qcow2\nvirtual size: 2.2 GiB (2361393152 bytes)\ndisk size: 614 MiB\n";
         assert_eq!(parse_qemu_format(info).as_deref(), Some("qcow2"));
         let raw = "image: disco.img\nfile format: raw\nvirtual size: 8 MiB\n";
@@ -1560,7 +1560,7 @@ mod tests {
         assert_eq!(parse_qemu_format("image: x\nvirtual size: 8 MiB\n"), None);
     }
 
-    /// VmConfig mínima para exercitar os helpers de args HPC (S4).
+    /// Minimal VmConfig to exercise the HPC args helpers (S4).
     fn hpc_cfg() -> VmConfig {
         VmConfig {
             name: "v".into(),
@@ -1598,7 +1598,7 @@ mod tests {
         let mut c = hpc_cfg();
         assert_eq!(cpus_arg(&c), "boot=4");
         c.cpu_affinity = Some("8-15".into());
-        // cada uma das 4 vCPUs fixada à lista 8-15 do host.
+        // each of the 4 vCPUs pinned to the host's 8-15 list.
         assert_eq!(
             cpus_arg(&c),
             "boot=4,affinity=0@[8-15]:1@[8-15]:2@[8-15]:3@[8-15]"
@@ -1658,13 +1658,13 @@ mod tests {
         let mut c = hpc_cfg();
         // default = user-mode (egress, rootless).
         assert!(libvirt_interface_xml(&c, "52:54:00:00:00:01").contains("type='user'"));
-        // nat → rede libvirt (default "default") com IP via domifaddr.
+        // nat → libvirt network (default "default") with IP via domifaddr.
         c.net_mode = Some("nat".into());
         let nat = libvirt_interface_xml(&c, "52:54:00:00:00:01");
         assert!(nat.contains("type='network'") && nat.contains("source network='default'"));
         c.bridge = Some("dlxnat".into());
         assert!(libvirt_interface_xml(&c, "52:54:00:00:00:01").contains("source network='dlxnat'"));
-        // bridge → bridge do host.
+        // bridge → host bridge.
         c.net_mode = Some("bridge".into());
         c.bridge = Some("br0".into());
         let br = libvirt_interface_xml(&c, "52:54:00:00:00:01");

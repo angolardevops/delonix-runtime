@@ -1,11 +1,12 @@
-//! `delonix-cri` — servidor **CRI** (Container Runtime Interface) do Kubernetes.
+//! `delonix-cri` — Kubernetes **CRI** (Container Runtime Interface) server.
 //!
-//! Implementa o gRPC `runtime.v1` (RuntimeService + ImageService) sobre o engine
-//! Delonix, para que um **kubelet** (ou o `crictl`) use o Delonix como runtime de
-//! nó. Os stubs são gerados de `proto/api.proto` (CRI v1, sem gogoproto). C2.
+//! Implements the `runtime.v1` gRPC (RuntimeService + ImageService) over the
+//! Delonix engine, so that a **kubelet** (or `crictl`) can use Delonix as the
+//! node runtime. The stubs are generated from `proto/api.proto` (CRI v1, no
+//! gogoproto). C2.
 //!
-//! O padrão gRPC do tonic devolve `Result<Response<T>, Status>`; o `Status` é
-//! grande por natureza, logo silenciamos `result_large_err` em toda a crate.
+//! The tonic gRPC pattern returns `Result<Response<T>, Status>`; `Status` is
+//! large by nature, so we silence `result_large_err` across the whole crate.
 #![allow(clippy::result_large_err)]
 
 use std::path::PathBuf;
@@ -27,19 +28,19 @@ pub mod streaming;
 const RUNTIME_NAME: &str = "delonix";
 const RUNTIME_VERSION: &str = env!("CARGO_PKG_VERSION");
 
-/// Erro genérico → `Status` gRPC.
+/// Generic error → gRPC `Status`.
 fn st<E: std::fmt::Display>(e: E) -> Status {
     Status::internal(e.to_string())
 }
 
-/// Resolve o binário da CLI `delonix` (a que o CRI delega o ciclo de vida —
-/// single-threaded). NUNCA `current_exe()`, que é o próprio `delonix-cri`:
-/// reinvocá-lo cairia outra vez em [`serve_blocking`], que faz `remove_file`+
-/// `bind` do socket e o ROUBA ao servidor (o cliente vê "malformed header:
-/// missing HTTP content-type"). Ordem: (1) `DELONIX_BIN` explícito; (2) um
-/// `delonix` irmão do executável (a imagem dourada instala ambos em
-/// `/usr/local/bin`; um build de dev tem os dois em `target/<perfil>/`);
-/// (3) `delonix` no PATH.
+/// Resolves the `delonix` CLI binary (the one the CRI delegates the lifecycle to
+/// — single-threaded). NEVER `current_exe()`, which is `delonix-cri` itself:
+/// reinvoking it would fall back into [`serve_blocking`], which does
+/// `remove_file`+`bind` on the socket and STEALS it from the server (the client
+/// sees "malformed header: missing HTTP content-type"). Order: (1) explicit
+/// `DELONIX_BIN`; (2) a `delonix` sibling of the executable (the golden image
+/// installs both in `/usr/local/bin`; a dev build has both in
+/// `target/<profile>/`); (3) `delonix` on the PATH.
 pub(crate) fn cli_bin() -> PathBuf {
     if let Some(p) = std::env::var_os("DELONIX_BIN") {
         return PathBuf::from(p);
@@ -54,13 +55,13 @@ pub(crate) fn cli_bin() -> PathBuf {
     PathBuf::from("delonix")
 }
 
-/// Abre o armazém de imagens na raiz dada.
+/// Opens the image store at the given root.
 fn images(base: &PathBuf) -> Result<delonix_image::ImageStore, Status> {
     delonix_image::ImageStore::open(base).map_err(st)
 }
 
 // ---------------------------------------------------------------------------
-// ImageService — totalmente funcional sobre o engine Delonix.
+// ImageService — fully functional over the Delonix engine.
 // ---------------------------------------------------------------------------
 
 pub struct DelonixImage {
@@ -138,13 +139,14 @@ impl ImageService for DelonixImage {
         if name.is_empty() {
             return Err(Status::invalid_argument("empty image"));
         }
-        // `AuthConfig` vem dos `imagePullSecrets` do Pod (o kubelet resolve-os e
-        // manda aqui) — SEM isto, qualquer registry privado falha porque
-        // `pull_from_registry` só via credenciais locais (`delonix login` no
-        // próprio nó, que normalmente não tem as credenciais do tenant). Só
-        // `username`+`password` são suportados por agora (o schema base do CRI);
-        // `identity_token`/`registry_token`/`auth` (base64 já combinado) ficam
-        // para quando surgir um caso real que precise deles.
+        // `AuthConfig` comes from the Pod's `imagePullSecrets` (the kubelet
+        // resolves them and sends them here) — WITHOUT this, any private registry
+        // fails because `pull_from_registry` only uses local credentials
+        // (`delonix login` on the node itself, which usually does not have the
+        // tenant's credentials). Only `username`+`password` are supported for now
+        // (the base CRI schema); `identity_token`/`registry_token`/`auth`
+        // (already-combined base64) are left for when a real case that needs them
+        // shows up.
         let creds = r
             .auth
             .filter(|a| !a.username.is_empty())
@@ -166,8 +168,8 @@ impl ImageService for DelonixImage {
     ) -> Result<Response<RemoveImageResponse>, Status> {
         let name = req.into_inner().image.map(|s| s.image).unwrap_or_default();
         let base = self.base.clone();
-        // CRI: RemoveImage é IDEMPOTENTE — remover uma imagem inexistente é sucesso
-        // (o kubelet chama-o em ciclos de GC sem garantir que ainda existe).
+        // CRI: RemoveImage is IDEMPOTENT — removing a nonexistent image is success
+        // (the kubelet calls it in GC cycles without guaranteeing it still exists).
         tokio::task::spawn_blocking(move || {
             if let Ok(store) = images(&base) {
                 let _ = store.remove(&name);
@@ -211,13 +213,13 @@ impl ImageService for DelonixImage {
     }
 }
 
-/// Tamanho (bytes) dos layers de uma imagem, somando os blobs do CAS.
-/// Mapeia o `user` do config OCI da imagem para os campos `uid`/`username` do
-/// `Image` do CRI (o `crictl`/kubelet usam-nos para validar RunAsNonRoot). Regra:
-/// `""` (sem USER) → root, `uid = 0`; `"uid[:gid]"` numérico → `uid`; um nome →
-/// `username` (resolvido no runtime contra o `/etc/passwd` da imagem). O spec de
-/// conformância `image status … should not have Uid|Username empty` exige que UM
-/// dos dois venha preenchido — antes vinham ambos vazios.
+/// Size (bytes) of an image's layers, summing the CAS blobs.
+/// Maps the image OCI config's `user` to the `uid`/`username` fields of the CRI
+/// `Image` (`crictl`/kubelet use them to validate RunAsNonRoot). Rule:
+/// `""` (no USER) → root, `uid = 0`; numeric `"uid[:gid]"` → `uid`; a name →
+/// `username` (resolved at runtime against the image's `/etc/passwd`). The
+/// conformance spec `image status … should not have Uid|Username empty` requires
+/// that ONE of the two be filled — before, both came back empty.
 fn image_user(user: &str) -> (Option<Int64Value>, String) {
     let u = user.trim();
     if u.is_empty() {
@@ -234,7 +236,7 @@ fn layer_size(img: &delonix_image::Image) -> u64 {
     let mut total = 0u64;
     for l in &img.layers {
         let hex = l.strip_prefix("sha256:").unwrap_or(l);
-        // o caminho do blob é <root>/blobs/sha256/<hex>; usamos o store via path.
+        // the blob path is <root>/blobs/sha256/<hex>; we use the store via path.
         if let Ok(meta) = std::fs::metadata(blob_path(img, hex)) {
             total += meta.len();
         }
@@ -250,13 +252,13 @@ fn blob_path(_img: &delonix_image::Image, hex: &str) -> PathBuf {
 }
 
 // ---------------------------------------------------------------------------
-// Arranque do servidor (unix socket), com ambos os serviços.
+// Server startup (unix socket), with both services.
 // ---------------------------------------------------------------------------
 
-/// Arranca o servidor CRI num **unix socket** (`addr` = caminho, ou
-/// `unix:///caminho`). Bloqueia a thread (cria o runtime Tokio).
-/// `GET /metrics` — corpo em formato OpenMetrics (o que o `prometheus-client`
-/// produz), a partir do registo partilhado em `delonix-runtime-core`.
+/// Starts the CRI server on a **unix socket** (`addr` = path, or
+/// `unix:///path`). Blocks the thread (creates the Tokio runtime).
+/// `GET /metrics` — body in OpenMetrics format (what `prometheus-client`
+/// produces), from the shared registry in `delonix-runtime-core`.
 async fn metrics_handler() -> impl axum::response::IntoResponse {
     (
         [(
@@ -277,7 +279,7 @@ pub fn serve_blocking(base: PathBuf, addr: &str) -> Result<(), delonix_runtime_c
             message: e.to_string(),
         })?;
     rt.block_on(async move {
-        let _ = std::fs::remove_file(&path); // limpa um socket antigo
+        let _ = std::fs::remove_file(&path); // clean up an old socket
         let uds = tokio::net::UnixListener::bind(&path).map_err(|e| {
             delonix_runtime_core::Error::Runtime {
                 context: "bind",
@@ -287,8 +289,8 @@ pub fn serve_blocking(base: PathBuf, addr: &str) -> Result<(), delonix_runtime_c
         let incoming = tokio_stream::wrappers::UnixListenerStream::new(uds);
         eprintln!("delonix-cri (CRI v1) listening on unix://{path}");
 
-        // Servidor de streaming (exec/attach/port-forward): HTTP/WebSocket numa
-        // porta de loopback. As RPCs devolvem URLs que apontam para cá.
+        // Streaming server (exec/attach/port-forward): HTTP/WebSocket on a
+        // loopback port. The RPCs return URLs pointing here.
         let stream_listener = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await
             .map_err(|e| delonix_runtime_core::Error::Runtime {
@@ -310,9 +312,10 @@ pub fn serve_blocking(base: PathBuf, addr: &str) -> Result<(), delonix_runtime_c
             let _ = axum::serve(stream_listener, app).await;
         });
 
-        // Métricas Prometheus (OPCIONAL): listener HTTP dedicado, como o
-        // containerd/CRI-O. Off por omissão; ligado por `DELONIX_METRICS_ADDR`
-        // (ex.: `0.0.0.0:9100`). Não vive no socket gRPC — o Prometheus fala HTTP.
+        // Prometheus metrics (OPTIONAL): a dedicated HTTP listener, like
+        // containerd/CRI-O. Off by default; enabled by `DELONIX_METRICS_ADDR`
+        // (e.g. `0.0.0.0:9100`). Does not live on the gRPC socket — Prometheus
+        // speaks HTTP.
         if let Some(maddr) = std::env::var_os("DELONIX_METRICS_ADDR") {
             let maddr = maddr.to_string_lossy().into_owned();
             tokio::spawn(async move {
