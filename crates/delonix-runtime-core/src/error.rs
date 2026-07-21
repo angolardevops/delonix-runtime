@@ -26,6 +26,12 @@ pub enum Error {
     #[error("no such container: {0}")]
     NotFound(String),
 
+    /// Não existe nenhuma VM com o nome dado. Variante própria porque o
+    /// [`Error::NotFound`] partilhado diz "no such container" — num
+    /// `vm stop`/`vm rm` isso confundia (o utilizador nem mexeu em containers).
+    #[error("no such VM: {0} (see `delonix vm ls`)")]
+    VmNotFound(String),
+
     /// O container existe mas não está em execução.
     #[error("container is not running: {0}")]
     NotRunning(String),
