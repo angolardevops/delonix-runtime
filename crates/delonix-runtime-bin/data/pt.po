@@ -1964,3 +1964,44 @@ msgstr "IP estático (modo nat do libvirt): reserva DHCP na rede libvirt."
 
 msgid "user-mode network: this VM will have no reachable IP — join the `libvirt` group (nat mode then becomes the default), or pass `--net-mode nat|bridge`"
 msgstr "rede user-mode: esta VM não terá IP alcançável — entra no grupo `libvirt` (o modo nat passa a ser o default), ou usa `--net-mode nat|bridge`"
+
+# ---- vm create/console: progresso por etapa + próximos passos + escape da consola ----
+
+msgid "Creating VM '{name}'…"
+msgstr "A criar a VM '{name}'…"
+
+msgid "preparing the overlay disk"
+msgstr "a preparar o disco overlay"
+
+msgid "configuring the network"
+msgstr "a configurar a rede"
+
+msgid "defining the domain"
+msgstr "a definir o domínio"
+
+msgid "starting the VM"
+msgstr "a arrancar a VM"
+
+msgid "✓ VM '{name}' is up."
+msgstr "✓ VM '{name}' no ar."
+
+msgid "Next steps:"
+msgstr "Próximos passos:"
+
+msgid "open the serial console (back to host: Ctrl+])"
+msgstr "abre a consola série (voltar ao host: Ctrl+])"
+
+msgid "state, backend and IP"
+msgstr "estado, backend e IP"
+
+msgid "full details"
+msgstr "detalhes completos"
+
+msgid "stop it (keeps the disk)"
+msgstr "pára-a (mantém o disco)"
+
+msgid "Console of '{name}'. To return to the host: press Ctrl+]  (exit/logout only restarts the session — autologin re-enters)."
+msgstr "Consola de '{name}'. Para voltar ao host: prima Ctrl+]  (exit/logout apenas reinicia a sessão — o autologin volta a entrar)."
+
+msgid "Back to the host shell."
+msgstr "De volta ao shell do host."

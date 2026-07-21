@@ -266,22 +266,47 @@ pub fn disk_backing_format(disk: &Path) -> String {
     }
 }
 
-/// Runs an external tool (e.g. `qemu-img`), error if it fails.
-fn run_tool(prog: &str, args: &[&str]) -> Result<()> {
-    let st = Command::new(prog)
+/// Runs an external tool (e.g. `qemu-img`/`virsh`) CAPTURING stdout+stderr
+/// (nothing leaks raw to the terminal) — surfacing the captured stderr in the
+/// error. The `create` progress UI wants clean staged lines, not the raw
+/// `Formatting '...qcow2'` / `Domain 'x' defined` chatter of `qemu-img`/`virsh`.
+fn run_quiet(prog: &str, args: &[&str]) -> Result<()> {
+    let out = Command::new(prog)
         .args(args)
-        .status()
+        .output()
         .map_err(|e| Error::Runtime {
             context: "vm-tool",
             message: format!("{prog}: {e}"),
         })?;
-    if !st.success() {
+    if !out.status.success() {
+        let err = String::from_utf8_lossy(&out.stderr);
+        let err = err.trim().trim_start_matches("error: ").trim();
         return Err(Error::Runtime {
             context: "vm-tool",
-            message: format!("{prog} failed"),
+            message: if err.is_empty() {
+                format!("{prog} failed")
+            } else {
+                format!("{prog}: {err}")
+            },
         });
     }
     Ok(())
+}
+
+/// Stages emitted by [`create_with`] so a caller can render step-by-step
+/// progress. The engine emits ONLY the enum — the user-facing text and its
+/// translation stay in `delonix-runtime-bin` (project rule: UI strings live in
+/// the bin, not in the mechanism crates).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CreateStage {
+    /// Preparing the per-VM overlay disk (`qemu-img create`).
+    Disk,
+    /// Ensuring/attaching the network (libvirt NAT net, or the SDN tap).
+    Network,
+    /// Defining the domain in the hypervisor.
+    Define,
+    /// Starting the domain.
+    Start,
 }
 
 /// Runs a command and captures stdout (trimmed), or `None` on failure.
@@ -320,8 +345,15 @@ pub trait VmBackend {
     /// `true` if the backend has the required tools installed.
     fn available(&self) -> bool;
     /// Creates the network (if applicable) and boots the VM from the `overlay`. The overlay
-    /// creation and idempotency are handled by [`create`].
-    fn boot(&self, vmdir: &Path, cfg: &VmConfig, overlay: &str) -> Result<Boot>;
+    /// creation and idempotency are handled by [`create`]. `on` receives the
+    /// sub-stages (network/define/start) for a progress UI.
+    fn boot(
+        &self,
+        vmdir: &Path,
+        cfg: &VmConfig,
+        overlay: &str,
+        on: &dyn Fn(CreateStage),
+    ) -> Result<Boot>;
     /// Is the VM still alive?
     fn is_running(&self, vm: &Vm) -> bool;
     /// Current IP of the VM (may change/resolve later via DHCP).
@@ -407,7 +439,13 @@ impl VmBackend for CloudHypervisorBackend {
         binary_in_path("cloud-hypervisor")
     }
 
-    fn boot(&self, vmdir: &Path, cfg: &VmConfig, overlay: &str) -> Result<Boot> {
+    fn boot(
+        &self,
+        vmdir: &Path,
+        cfg: &VmConfig,
+        overlay: &str,
+        on: &dyn Fn(CreateStage),
+    ) -> Result<Boot> {
         // Cloud Hypervisor does not support virtio-9p (only virtio-fs, which requires the
         // virtiofsd daemon, not yet wired up). `spec.volumes` on a CH VM is a
         // clear error instead of a silently ignored mount — the bin
@@ -421,11 +459,13 @@ impl VmBackend for CloudHypervisorBackend {
         }
         // Own private network when named (≠ shared ingress): ensures its
         // isolated bridge + DHCP before the attach. The VMs' SDN lives here.
+        on(CreateStage::Network);
         if !matches!(cfg.network.as_str(), "" | "ingress" | "bridge" | "default") {
             let _ = infra::network_create(&cfg.network);
         }
         let tap = infra::vm_attach(&cfg.name, &cfg.network)?;
         let mac = mac_for(&cfg.name);
+        on(CreateStage::Start);
         let pid = match boot_ch(vmdir, cfg, overlay, &tap, &mac) {
             Ok(p) => p,
             Err(e) => {
@@ -1024,17 +1064,19 @@ fn ensure_libvirt_network(uri: &str, net: &str) {
             if f.write_all(xml.as_bytes()).is_ok() {
                 let _ = Command::new("virsh")
                     .args(["-c", uri, "net-define", &path.to_string_lossy()])
-                    .status();
+                    .output();
             }
             let _ = std::fs::remove_file(&path);
         }
     }
+    // `.output()` (not `.status()`) so the "Network default started / marked as
+    // autostarted" chatter does not leak into the clean `vm create` progress.
     let _ = Command::new("virsh")
         .args(["-c", uri, "net-start", "--", net])
-        .status();
+        .output();
     let _ = Command::new("virsh")
         .args(["-c", uri, "net-autostart", "--", net])
-        .status();
+        .output();
 }
 
 impl VmBackend for LibvirtBackend {
@@ -1046,7 +1088,13 @@ impl VmBackend for LibvirtBackend {
         binary_in_path("virsh") && binary_in_path("qemu-system-x86_64")
     }
 
-    fn boot(&self, vmdir: &Path, cfg: &VmConfig, overlay: &str) -> Result<Boot> {
+    fn boot(
+        &self,
+        vmdir: &Path,
+        cfg: &VmConfig,
+        overlay: &str,
+        on: &dyn Fn(CreateStage),
+    ) -> Result<Boot> {
         // Effective net mode: with no explicit `--net-mode`, prefer `nat`
         // whenever the SYSTEM connection is usable (libvirt group) — user-mode
         // (session) NEVER yields a reachable/visible IP, and silently landing
@@ -1083,6 +1131,7 @@ impl VmBackend for LibvirtBackend {
         // `default` network is not created (minimalist libvirt) or is stopped — the
         // path to a host-pingable IP + SSH.
         if matches!(cfg.net_mode.as_deref(), Some("nat") | Some("network")) {
+            on(CreateStage::Network);
             let net = cfg.bridge.as_deref().unwrap_or("default");
             ensure_libvirt_network(uri, net);
             // Static IP: DHCP reservation MAC→IP on the libvirt network, BEFORE
@@ -1112,17 +1161,19 @@ impl VmBackend for LibvirtBackend {
         // define + start. `virsh start` on an already-running domain is a benign no-op.
         let defined = capture("virsh", &["-c", uri, "domstate", "--", &cfg.name]).is_some();
         if !defined {
-            run_tool("virsh", &["-c", uri, "define", &xml_path.to_string_lossy()])?;
+            on(CreateStage::Define);
+            run_quiet("virsh", &["-c", uri, "define", &xml_path.to_string_lossy()])?;
         }
-        let st = Command::new("virsh")
+        on(CreateStage::Start);
+        let out = Command::new("virsh")
             .args(["-c", uri, "start", "--", &cfg.name])
-            .status()
+            .output()
             .map_err(|e| Error::Runtime {
                 context: "libvirt",
                 message: format!("virsh start: {e}"),
             })?;
         // 'start' fails if it is already running — we tolerate that (auto-heal).
-        if !st.success() && !self.is_running_uri(uri, &cfg.name) {
+        if !out.status.success() && !self.is_running_uri(uri, &cfg.name) {
             return Err(Error::Runtime {
                 context: "vm",
                 message: "failed to start the libvirt domain (KVM/permissions/image?)".into(),
@@ -1211,6 +1262,13 @@ pub fn valid_vm_name(name: &str) -> bool {
 }
 
 pub fn create(base: &Path, cfg: &VmConfig) -> Result<Vm> {
+    create_with(base, cfg, &|_| {})
+}
+
+/// [`create`] with a progress callback: `on` fires once per [`CreateStage`] as
+/// the VM is built (disk → network → define → start), so the CLI can render
+/// step-by-step progress. The engine emits only the enum; the text lives in the bin.
+pub fn create_with(base: &Path, cfg: &VmConfig, on: &dyn Fn(CreateStage)) -> Result<Vm> {
     if !valid_vm_name(&cfg.name) {
         return Err(Error::Invalid(format!(
             "invalid VM name '{}' — use letters, digits, '.', '_' or '-' (no '/', '..', or leading '-')",
@@ -1279,8 +1337,9 @@ pub fn create(base: &Path, cfg: &VmConfig) -> Result<Vm> {
         .map_err(|_| Error::Invalid(format!("image not found: {}", cfg.disk)))?;
     let overlay = vmdir.join(format!("{}.qcow2", cfg.name));
     if !overlay.exists() {
+        on(CreateStage::Disk);
         let bf = disk_backing_format(&disk_path);
-        run_tool(
+        run_quiet(
             "qemu-img",
             &[
                 "create",
@@ -1295,7 +1354,7 @@ pub fn create(base: &Path, cfg: &VmConfig) -> Result<Vm> {
         )?;
     }
 
-    let boot = match backend.boot(&vmdir, cfg, &overlay.to_string_lossy()) {
+    let boot = match backend.boot(&vmdir, cfg, &overlay.to_string_lossy(), on) {
         Ok(b) => b,
         Err(e) => {
             if restarting.is_none() {
