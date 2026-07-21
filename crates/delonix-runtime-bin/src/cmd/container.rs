@@ -192,7 +192,7 @@ fn custom_net_name(net: &str) -> Option<String> {
 // ===========================================================================
 
 /// k8s-like Pod spec, parsed when `spec.containers` is present.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 struct PodSpec {
     containers: Vec<PodContainer>,
     #[serde(default)]
@@ -213,7 +213,7 @@ struct PodSpec {
 }
 
 /// One entry of `spec.containers[]`.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 struct PodContainer {
     #[serde(default)]
     #[allow(dead_code)] // accepted for k8s fidelity; delonix names the whole pod
@@ -242,7 +242,7 @@ struct PodContainer {
     tty: bool,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 struct PodPort {
     #[serde(rename = "containerPort")]
     container_port: u16,
@@ -254,14 +254,14 @@ struct PodPort {
     host_ip: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 struct PodEnvVar {
     name: String,
     #[serde(default)]
     value: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 struct PodVolumeMount {
     name: String,
     #[serde(rename = "mountPath")]
@@ -270,7 +270,7 @@ struct PodVolumeMount {
     read_only: bool,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 struct PodResources {
     #[serde(default)]
     limits: Option<PodResourceList>,
@@ -279,7 +279,7 @@ struct PodResources {
     requests: Option<PodResourceList>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 struct PodResourceList {
     #[serde(default)]
     cpu: Option<String>,
@@ -287,7 +287,7 @@ struct PodResourceList {
     memory: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 struct PodSecurityContext {
     #[serde(default)]
     privileged: bool,
@@ -299,7 +299,7 @@ struct PodSecurityContext {
     capabilities: Option<PodCapabilities>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 struct PodCapabilities {
     #[serde(default)]
     add: Vec<String>,
@@ -308,7 +308,7 @@ struct PodCapabilities {
 }
 
 /// One entry of the Pod-level `spec.volumes[]` (referenced by `volumeMounts`).
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 struct PodVolume {
     name: String,
     #[serde(default, rename = "hostPath")]
@@ -322,17 +322,17 @@ struct PodVolume {
     source: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 struct PodHostPath {
     path: String,
 }
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 struct PodEmptyDir {
     #[serde(default)]
     #[allow(dead_code)] // "" | "Memory" — delonix maps emptyDir to tmpfs either way
     medium: Option<String>,
 }
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 struct PodPvc {
     #[serde(rename = "claimName")]
     claim_name: String,
@@ -1077,10 +1077,15 @@ pub fn run(action: ContainerCmd) -> Result<()> {
     }
 }
 
-/// Dry-run: the FLAT spec with every `#[serde(default)]` materialized (the Pod
-/// shape falls back to the raw spec — see `manifest::filled_spec`).
+/// Dry-run: the FLAT spec with every `#[serde(default)]` materialized.
 pub fn spec_with_defaults(doc: &ManifestDoc) -> Result<serde_yaml::Value> {
     let spec: ContainerSpec = manifest::spec_of(doc)?;
+    serde_yaml::to_value(spec).map_err(|e| Error::Invalid(format!("dry-run: {e}")))
+}
+
+/// Dry-run: the Pod-shaped spec with defaults materialized (round-trips `PodSpec`).
+pub fn pod_spec_with_defaults(doc: &ManifestDoc) -> Result<serde_yaml::Value> {
+    let spec: PodSpec = manifest::spec_of(doc)?;
     serde_yaml::to_value(spec).map_err(|e| Error::Invalid(format!("dry-run: {e}")))
 }
 

@@ -1,7 +1,7 @@
 //! `kind: HTTPRoute` — declarative L7/HTTP reverse-proxy (routing by Host/path to
-//! backend containers), distinct from `kind: Ingress` (which is an *inbound*
-//! per-container L4 firewall — see `cmd/firewall.rs`). The name follows the
-//! Kubernetes Gateway API: `HTTPRoute` = L7, `Ingress`/`FirewallPolicy` = L4.
+//! backend containers). `kind: Ingress` (k8s-shaped) ALSO compiles here (see
+//! `ingress_to_httproute`); the L4 firewall lives under `kind: FirewallPolicy`
+//! (see `cmd/firewall.rs`).
 //!
 //! **Architecture** (see `cmd/ingress_proxy.rs` / `realize` in Phase 4): the schema
 //! here is the declarative surface; the physical plane is an embedded `hyper`
@@ -15,7 +15,7 @@
 //! the proxy and the lifecycle come in the following phases.
 
 use clap::Subcommand;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use super::manifest::{self, ManifestDoc};
 use delonix_runtime_core::{Error, Result};
@@ -96,7 +96,7 @@ pub fn run(action: HttpRouteCmd) -> Result<()> {
 }
 
 /// `spec` for `kind: HTTPRoute`.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct HttpRouteSpec {
     /// Entry points (ports where the proxy listens). Default: `[{port: 80}]`,
     /// plus an implicit `{port: 443, tls: true}` if `spec.tls` is defined.
@@ -111,7 +111,7 @@ pub struct HttpRouteSpec {
 }
 
 /// An entry point (proxy listen port).
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Entrypoint {
     pub port: u16,
     /// `true` = terminate TLS on this port (requires `spec.tls`). Default `false`.
@@ -120,7 +120,7 @@ pub struct Entrypoint {
 }
 
 /// Proxy TLS configuration.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct TlsSpec {
     /// `selfSigned` (default) or `secretRef`.
     #[serde(default)]
@@ -133,7 +133,7 @@ pub struct TlsSpec {
 
 /// A routing rule: matches by `host` (optional — empty = any Host) and
 /// dispatches by path prefix to a backend.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct RouteRule {
     /// Host name to match (e.g.: `loja.exemplo.ao`). Empty/omitted = any Host.
     #[serde(default)]
@@ -144,7 +144,7 @@ pub struct RouteRule {
 }
 
 /// A path prefix and the backend it forwards to.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct PathRule {
     /// Path prefix (e.g.: `/`, `/api`). Default `/`.
     #[serde(default = "default_path")]
@@ -157,7 +157,7 @@ fn default_path() -> String {
 }
 
 /// The destination of a path: a container (by name) and the port it listens on.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Backend {
     /// Name of the backend container (resolved to the record's IP at apply time).
     pub service: String,
@@ -320,6 +320,19 @@ pub fn ingress_spec_of(doc: &ManifestDoc) -> Result<HttpRouteSpec> {
     ingress_to_httproute(&doc.metadata.name, ing)
 }
 
+/// Dry-run: the `kind: HTTPRoute` spec with defaults materialized.
+pub fn spec_with_defaults(doc: &ManifestDoc) -> Result<serde_yaml::Value> {
+    let spec: HttpRouteSpec = manifest::spec_of(doc)?;
+    serde_yaml::to_value(spec).map_err(|e| Error::Invalid(format!("dry-run: {e}")))
+}
+
+/// Dry-run: the `kind: Ingress` spec with defaults materialized — in its OWN k8s
+/// shape (not the converted HttpRouteSpec), since that is what the user wrote.
+pub fn ingress_spec_with_defaults(doc: &ManifestDoc) -> Result<serde_yaml::Value> {
+    let spec: IngressSpec = manifest::spec_of(doc)?;
+    serde_yaml::to_value(spec).map_err(|e| Error::Invalid(format!("dry-run: {e}")))
+}
+
 // ============================================================================
 // `kind: Ingress` — Kubernetes-shaped L7 HTTP Ingress (host/path → backend).
 // Compiles to an `HttpRouteSpec` (the embedded reverse-proxy). This is the k8s
@@ -336,7 +349,7 @@ pub(crate) const INGRESS_SPEC_FIELDS: &[&str] = &[
     "entrypoints",
 ];
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 struct IngressSpec {
     #[serde(default)]
     rules: Vec<IngressRule>,
@@ -355,7 +368,7 @@ struct IngressSpec {
     entrypoints: Vec<Entrypoint>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 struct IngressRule {
     #[serde(default)]
     host: Option<String>,
@@ -363,13 +376,13 @@ struct IngressRule {
     http: Option<IngressHttp>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 struct IngressHttp {
     #[serde(default)]
     paths: Vec<IngressPath>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 struct IngressPath {
     #[serde(default = "default_path")]
     path: String,
@@ -381,18 +394,18 @@ struct IngressPath {
     backend: IngressBackend,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 struct IngressBackend {
     service: IngressServiceRef,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 struct IngressServiceRef {
     name: String,
     port: IngressServicePort,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 struct IngressServicePort {
     #[serde(default)]
     number: Option<u16>,
@@ -460,7 +473,7 @@ fn ingress_to_httproute(name: &str, ing: IngressSpec) -> Result<HttpRouteSpec> {
     })
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 struct IngressTls {
     #[serde(default)]
     #[allow(dead_code)]
