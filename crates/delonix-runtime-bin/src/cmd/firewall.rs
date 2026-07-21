@@ -730,11 +730,12 @@ struct FwDocRule {
 /// `stack apply` (the target containers must already exist).
 pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
     let (_images, store) = open_stores()?;
-    apply_kind(&store, docs, "in")?; // kind: Ingress
+    // NB: `kind: Ingress` is NO LONGER firewall — it is now the k8s-shaped L7/HTTP
+    // Ingress (see `cmd::httproute`). Inbound L4 firewall lives under
+    // `kind: FirewallPolicy` (direction: ingress). `kind: Egress` (outbound) stays.
     apply_kind(&store, docs, "out")?; // kind: Egress
                                       // kind: FirewallPolicy — the UNIFIED form (the direction comes from `spec.direction`
-                                      // instead of the Kind name, resolving the confusion that here `Ingress` is
-                                      // L4 firewall, not the k8s L7/HTTP Ingress). Applies the SAME logic.
+                                      // instead of the Kind name). Applies the SAME logic; the canonical inbound form.
     for doc in manifest::of_kind(docs, "FirewallPolicy") {
         let dir = match doc.spec.get("direction").and_then(|v| v.as_str()) {
             Some("ingress") => "in",

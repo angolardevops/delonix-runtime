@@ -459,9 +459,10 @@ spec: { image: alpine, memroy: 2G, restartPolicy: always }
                 "Network" => Some(crate::cmd::network::NETWORK_SPEC_FIELDS),
                 "Image" => Some(crate::cmd::image::IMAGE_SPEC_FIELDS),
                 "Secret" => Some(crate::cmd::secret::SECRET_SPEC_FIELDS),
-                "Ingress" | "Egress" | "FirewallPolicy" => {
-                    Some(crate::cmd::firewall::FW_SPEC_FIELDS)
-                }
+                // `Ingress` is now the k8s-shaped L7 Ingress (→ HTTPRoute); the
+                // L4 firewall keeps `Egress`/`FirewallPolicy`.
+                "Ingress" => Some(crate::cmd::httproute::INGRESS_SPEC_FIELDS),
+                "Egress" | "FirewallPolicy" => Some(crate::cmd::firewall::FW_SPEC_FIELDS),
                 "HTTPRoute" => Some(crate::cmd::httproute::HTTP_ROUTE_SPEC_FIELDS),
                 "Dependency" => Some(crate::cmd::dependency::DEPENDENCY_SPEC_FIELDS),
                 _ => None, // Cluster has its own nested specs; outside this guard.

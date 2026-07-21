@@ -1,0 +1,37 @@
+# kind: Ingress — Kubernetes-shaped L7/HTTP Ingress (host/path → backend service).
+# This is the networking.k8s.io/v1 Ingress schema; it compiles to the embedded L7
+# reverse-proxy (same engine as kind: HTTPRoute). Apply with:
+#   delonix httproute apply -f examples/ingress.yaml   (or `stack apply`)
+#
+# NOTE: `kind: Ingress` used to be the L4 firewall — that moved to
+# `kind: FirewallPolicy` (direction: ingress); see examples/firewall.yaml.
+# Backends must be containers WITH an IP on a custom SDN network (not --net host/none).
+apiVersion: delonix.io/v1
+kind: Ingress
+metadata:
+  name: shop
+spec:
+  ingressClassName: delonix        # accepted for k8s fidelity (the embedded proxy)
+  tls:                             # v1 serves a SINGLE cert (no SNI) — first entry wins
+    - hosts: [shop.example.ao]
+      secretName: shop-tls         # a kind: Secret with tls.crt/tls.key; omit → self-signed
+  rules:
+    - host: shop.example.ao
+      http:
+        paths:
+          - path: /
+            pathType: Prefix       # matched by prefix (Exact accepted, treated as prefix)
+            backend:
+              service:
+                name: web          # a container name (resolved to its SDN IP at apply)
+                port:
+                  number: 80
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: api
+                port:
+                  number: 8080
+  # defaultBackend:                # optional catch-all when no rule matches
+  #   service: { name: web, port: { number: 80 } }
