@@ -147,6 +147,21 @@ não entra em nenhum crate de mecanismo). Cada grupo (`cmd/{network,volume,image
 container}.rs`) tem um `spec` tipado próprio (`NetworkSpec`, `VolumeSpec`, ...) e uma função
 `pub fn apply(docs: &[ManifestDoc])` que filtra o seu Kind e aplica.
 
+**Aproximação ao k8s (4 fatias, todas em main).** (1) **`kind: Container` forma de Pod** —
+`spec.containers[]` (k8s) com `env:[{name,value}]`/`ports:[{containerPort,hostPort}]`/`resources.
+limits`/`securityContext`/`volumeMounts`+`volumes`, normalizado para o `RunOpts` interno
+(`container::pod_to_run_opts`); v1 = 1 container (>1 erro), a forma PLANA continua (back-compat),
+detetado por `spec.containers` presente. (2) **`kind: Stack`** agrupa recursos num só doc
+(`spec.{networks,volumes,storage,secrets,images,vms,containers,ingress,egress,firewallPolicies,
+httpRoutes,dependencies}`), **expandido em `manifest::load`** para os docs individuais em ordem de
+dependência (herda a namespace) — o Stack não sobrevive ao load, tudo o resto (apply/ls/describe +
+apply por-Kind) vê os filhos. (3) **`kind: Ingress` = Ingress L7 k8s** (ver secção do reverse-proxy;
+firewall foi para `FirewallPolicy`). (4) **`stack apply --dry-run`** — `manifest::render_with_
+defaults` faz round-trip do spec pelo struct tipado (materializa os `#[serde(default)]`) e imprime
+o YAML completo sem aplicar (estilo `kubectl --dry-run=client -o yaml`); precisou de `Serialize` nos
+specs simples (Network/Volume/Storage/Image/Dependency/Container-flat + Metadata/ManifestDoc), os
+Kinds com nested (Vm/HTTPRoute/Ingress/Firewall/Container-pod/Secret) caem no spec cru — extensível.
+
 - **`delonix <container|image|vm|volumes|network> apply [-f ficheiro]`** — aplica só os
   documentos do Kind desse grupo (ignora os outros). Sem `-f`, usa `./delonix-manifest.yaml`
   (erro claro se não existir).
