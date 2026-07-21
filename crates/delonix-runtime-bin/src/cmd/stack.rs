@@ -751,9 +751,9 @@ metadata: { name: web }
 spec: { image: nginx, network: appnet, volumes: [\"data:/var\", \"/host/x:/y:ro\"] }
 ---
 apiVersion: delonix.io/v1
-kind: Ingress
+kind: FirewallPolicy
 metadata: { name: web-in }
-spec: { target: web }
+spec: { direction: ingress, target: web }
 ",
         );
         assert!(
