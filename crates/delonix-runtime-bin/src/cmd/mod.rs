@@ -21,6 +21,7 @@ pub mod netns;
 pub mod network;
 pub mod output;
 pub mod po;
+pub mod pod;
 pub mod remote;
 pub mod scaffold;
 pub mod scan;

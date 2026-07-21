@@ -1,0 +1,26 @@
+# kind: Pod — a REAL multi-container pod: N containers sharing the pod's network
+# namespace (same IP, localhost between them), like a Kubernetes Pod. Apply with:
+#   delonix pod create -f examples/pod-multi.yaml      (or `stack apply`)
+# Manage as a unit:  delonix pod ls | describe web-app | logs web-app | rm web-app
+#
+# Same k8s-shaped schema as `kind: Container` (spec.containers[]), but here N
+# containers are allowed and they share the pod sandbox. The web + sidecar reach
+# each other on `localhost` (shared netns). IPC/UTS/PID sharing
+# (shareProcessNamespace) are honored by later runtime slices.
+apiVersion: delonix.io/v1
+kind: Pod
+metadata:
+  name: web-app
+  namespace: default
+spec:
+  shareProcessNamespace: false     # true → containers see each other's processes
+  containers:
+    - name: web
+      image: nginx:latest
+      ports:
+        - containerPort: 80
+          hostPort: 8080           # published on the pod's shared IP
+    - name: sidecar
+      image: busybox:latest
+      # Reaches the web container on localhost — they share the pod's netns.
+      command: ["sh", "-c", "while true; do wget -qO- http://localhost:80/ >/dev/null 2>&1; sleep 10; done"]

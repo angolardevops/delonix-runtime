@@ -26,16 +26,29 @@ uma lista plana, um módulo por grupo em `crates/delonix-runtime-bin/src/cmd/`:
   colisão avança para a próxima combinação, `dlx-<id>` só como último recurso. `run` aceita `-v/--volume` (nomeado ou bind
   mount, via `delonix-volume::VolumeStore::resolve_spec`, testado e funcional) e
   `--net host|none|<rede>`. `host`/`none` — comportamento original, inalterado, testado. `--net
-  <rede-custom>` (`delonix-net::infra::attach_container` cria a netns NOMEADA do lado do holder,
-  `RunSpec.join_netns` faz o container juntar-se a ela via `setns`) **está com uma limitação
-  conhecida em rootless**: o `setns` falha com "netns do pod indisponível" — a netns fica dentro
-  do userns mapeado do HOLDER (`unshare --user --map-root-user`, ver `infra::start_holder`), e o
-  processo do container, sem privilégio nesse userns, não a consegue abrir. A doc do próprio
-  `delonix-net` já aponta o mecanismo certo ("re-exec via `nsenter … ip netns exec`", ver
-  `RunSpec.inherit_userns`), mas **não há hoje nenhum caminho no `delonix-runtime`/
-  `delonix-runtime-bin` que faça esse re-exec para um container `run` normal** — só existe para
-  o holder se auto-relançar. Fechar isto é trabalho de motor (crate `delonix-runtime`), não de
-  CLI — ficou fora desta reestruturação; documentado aqui para não se repetir a investigação.
+  <rede-custom>` **FUNCIONA em rootless** via o **re-exec `nsenter … ip netns exec`** (a nota
+  antiga dizia que não existia — ESTAVA DESACTUALIZADA): `infra::attach_container` cria a netns
+  NOMEADA do lado do holder e `reexec_into_netns` (`cmd/container.rs`) re-executa o binário via
+  `infra::join_argv` (`nsenter -t <holder_pid> -U -m -n … ip netns exec <netns>`); a 2ª passagem
+  corre com `RunSpec.inherit_userns` (suprime `CLONE_NEWNET`/`CLONE_NEWUSER`, herda os do holder —
+  o processo passa a ter privilégio no userns do holder). O `RunSpec.join_netns` por `setns`
+  (que falhava com "netns do pod indisponível") é **código morto** — abandonado a favor do
+  re-exec. **`--pod <netns>`** usa o MESMO mecanismo para juntar N containers à netns partilhada
+  de um pod (ver `delonix pod` / `kind: Pod` abaixo).
+- `delonix pod` — **pods reais multi-container** (create/ls/describe/rm/logs). N containers
+  partilham a **netns do pod** (mesmo IP, `localhost` entre si), como um Pod do k8s. `cmd/pod.rs`:
+  cria uma netns SDN NOMEADA no holder (`pod-<nome>`, via `infra::attach_container`) e corre cada
+  container com `--pod pod-<nome>` (o re-exec acima) + label `delonix.io/pod=<nome>`. **Membership
+  sem store novo** — o estado deriva dos labels (`Store::list`), como `cluster`/`stack`. `rm`
+  remove todos os membros + `detach` da netns. Reutiliza a normalização k8s→docker do
+  `kind: Container` (`container::container_to_run_opts`/`pod_member_run_opts`); o `kind: Container`
+  continua a aceitar SÓ 1 container (>1 → usa `kind: Pod`). **`kind: Pod`** no manifesto (mesmo
+  schema `PodSpec`, N containers) + grupo `pods:` no `kind: Stack` + `--dry-run`. **Também tapa o
+  gap do CRI root-mode** (`delonix-cri` chamava `delonix pod create/rm` que não existia). Partilha
+  de **netns feita (Fase 1)**; **IPC/UTS/PID** (`shareProcessNamespace`, campo já no schema) vêm em
+  fatias seguintes — o pause container que segura essas namespaces + os peers a juntá-las por
+  `setns` (agora possível porque o re-exec já os põe no userns do holder, onde o `setns` tem
+  privilégio — a razão pela qual o `setns` antigo falhava deixou de valer).
 - `delonix image` — pull/ls/rm/export (bundle OCI para `runc`/`crun`).
 - `delonix build -t <tag> [-f Dockerfile|Delonixfile] [contexto]` — único grupo com orquestração
   nova (as outras têm API pronta nas crates, isto é "ligar os fios"): sobe um container de
