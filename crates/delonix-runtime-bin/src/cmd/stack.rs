@@ -42,6 +42,11 @@ pub enum StackCmd {
     Apply {
         #[arg(short = 'f', long = "file")]
         file: Option<PathBuf>,
+        /// Don't apply anything — print the full manifest with every default
+        /// filled in (like `kubectl apply --dry-run=client -o yaml`). Stacks are
+        /// expanded and Kinds canonicalized, so you see exactly what WOULD run.
+        #[arg(long = "dry-run")]
+        dry_run: bool,
     },
     /// Stack detail in `kubectl describe` style: each resource DECLARED in the
     /// manifest and whether or not it is present on the machine.
@@ -100,7 +105,16 @@ pub fn run(action: StackCmd) -> Result<()> {
     match action {
         // Handled at the top of `run` (it does a `return`).
         StackCmd::Init { .. } => unreachable!("tratado acima"),
-        StackCmd::Apply { file } => apply(file),
+        StackCmd::Apply { file, dry_run } => {
+            if dry_run {
+                let path = manifest::resolve_path(file)?;
+                let docs = manifest::load(&path)?;
+                print!("{}", manifest::render_with_defaults(&docs)?);
+                Ok(())
+            } else {
+                apply(file)
+            }
+        }
         StackCmd::Ls { file } => ls(file),
         StackCmd::Describe { file } => describe(file),
         StackCmd::Validate { file } => validate(file),

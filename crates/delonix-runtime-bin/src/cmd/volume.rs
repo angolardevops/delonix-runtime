@@ -6,14 +6,14 @@ use clap::Subcommand;
 use clap_complete::engine::ArgValueCandidates;
 use delonix_runtime_core::{Error, Result};
 use delonix_volume::{parse_size_bytes, VolumeStore};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use super::manifest::{self, ManifestDoc};
 use super::output;
 use super::util::state_root;
 
 /// `spec` of `kind: Volume` — mirrors the fields of `VolumeCmd::Create`.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 struct VolumeSpec {
     #[serde(default = "default_driver")]
     driver: String,
@@ -147,6 +147,12 @@ pub fn run(action: VolumeCmd) -> Result<()> {
 
 /// Applies the `kind: Volume` documents (`create`/`create_with` are already
 /// idempotent by name — no separate existence check needed).
+/// Dry-run: the spec with every `#[serde(default)]` materialized.
+pub fn spec_with_defaults(doc: &ManifestDoc) -> Result<serde_yaml::Value> {
+    let spec: VolumeSpec = manifest::spec_of(doc)?;
+    serde_yaml::to_value(spec).map_err(|e| Error::Invalid(format!("dry-run: {e}")))
+}
+
 pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
     let store = VolumeStore::open(state_root())?;
     for doc in manifest::of_kind(docs, "Volume") {

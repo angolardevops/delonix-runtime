@@ -11,23 +11,29 @@ use oci_spec::runtime::{
     get_default_readonly_paths, Capability, LinuxBuilder, LinuxCapabilitiesBuilder, ProcessBuilder,
     RootBuilder, Spec, SpecBuilder, User,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use super::manifest::{self, ManifestDoc};
 use super::util::{effective_command, open_stores, resolve_or_pull};
 
 /// `spec` of `kind: Image` — either `pull: <ref>` or `build: {...}` (mutually
 /// exclusive; clear error if both are missing).
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 struct ImageSpec {
     pull: Option<String>,
     build: Option<BuildSpec>,
 }
 
+/// Dry-run: the spec with every `#[serde(default)]` materialized.
+pub fn spec_with_defaults(doc: &ManifestDoc) -> Result<serde_yaml::Value> {
+    let spec: ImageSpec = manifest::spec_of(doc)?;
+    serde_yaml::to_value(spec).map_err(|e| Error::Invalid(format!("dry-run: {e}")))
+}
+
 /// Field names accepted in the `spec` of `kind: Image`, for the unknown-field warning.
 pub(crate) const IMAGE_SPEC_FIELDS: &[&str] = &["pull", "build"];
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 struct BuildSpec {
     #[serde(default = "default_context")]
     context: PathBuf,

@@ -12,7 +12,7 @@ use std::path::PathBuf;
 use clap::Subcommand;
 use delonix_runtime_core::{Error, Result};
 use delonix_volume::VolumeStore;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use super::manifest::{self, ManifestDoc};
 use super::output;
@@ -75,7 +75,7 @@ pub enum StorageCmd {
 }
 
 /// `spec` of `kind: Storage`.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 struct StorageSpec {
     /// `nfs` | `cifs`/`smb` | `webdav`.
     r#type: String,
@@ -272,6 +272,12 @@ pub fn run(action: StorageCmd) -> Result<()> {
 
 /// Applies the `kind: Storage` from a manifest (idempotent by name — the
 /// store's `create_with` does not recreate one that already exists).
+/// Dry-run: the spec with every `#[serde(default)]` materialized.
+pub fn spec_with_defaults(doc: &ManifestDoc) -> Result<serde_yaml::Value> {
+    let spec: StorageSpec = manifest::spec_of(doc)?;
+    serde_yaml::to_value(spec).map_err(|e| Error::Invalid(format!("dry-run: {e}")))
+}
+
 pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
     let store = VolumeStore::open(state_root())?;
     for doc in manifest::of_kind(docs, "Storage") {
