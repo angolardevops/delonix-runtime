@@ -76,7 +76,7 @@ rootless (bridge dentro do netns do holder). Drivers <code>macvlan</code>/<code>
 de containers a esses drivers é trabalho futuro.</p>
 <div class='help'><pre><code>User networks: ls/create/rm/inspect
 
-Usage: delonix-x86_64-v3-linux network [OPTIONS] &lt;COMMAND&gt;
+Usage: delonix-x86_64-linux network [OPTIONS] &lt;COMMAND&gt;
 
 Commands:
   dash      Dashboard (KPIs + tabela) das redes — TUI interactivo, ou `--once` snapshot
@@ -95,7 +95,7 @@ Options:
 <h2 id='create'><code>network create</code></h2>
 <div class='help'><pre><code>Cria uma rede
 
-Usage: delonix-x86_64-v3-linux network create [OPTIONS] &lt;NAME&gt;
+Usage: delonix-x86_64-linux network create [OPTIONS] &lt;NAME&gt;
 
 Arguments:
   &lt;NAME&gt;  
@@ -114,7 +114,7 @@ Options:
 <h2 id='ls'><code>network ls</code></h2>
 <div class='help'><pre><code>Lista as redes
 
-Usage: delonix-x86_64-v3-linux network ls [OPTIONS]
+Usage: delonix-x86_64-linux network ls [OPTIONS]
 
 Options:
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
@@ -123,7 +123,7 @@ Options:
 <h2 id='inspect'><code>network inspect</code></h2>
 <div class='help'><pre><code>Detalhe de uma rede
 
-Usage: delonix-x86_64-v3-linux network inspect [OPTIONS] &lt;NAME&gt;
+Usage: delonix-x86_64-linux network inspect [OPTIONS] &lt;NAME&gt;
 
 Arguments:
   &lt;NAME&gt;  
@@ -135,7 +135,7 @@ Options:
 <h2 id='rm'><code>network rm</code></h2>
 <div class='help'><pre><code>Remove uma rede
 
-Usage: delonix-x86_64-v3-linux network rm [OPTIONS] &lt;NAME&gt;
+Usage: delonix-x86_64-linux network rm [OPTIONS] &lt;NAME&gt;
 
 Arguments:
   &lt;NAME&gt;  
@@ -147,7 +147,7 @@ Options:
 <h2 id='apply'><code>network apply</code></h2>
 <div class='help'><pre><code>Aplica os documentos `kind: Network` de um manifesto (idempotente por nome)
 
-Usage: delonix-x86_64-v3-linux network apply [OPTIONS]
+Usage: delonix-x86_64-linux network apply [OPTIONS]
 
 Options:
   -f, --file &lt;FILE&gt;   

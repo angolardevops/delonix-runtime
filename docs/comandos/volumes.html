@@ -74,7 +74,7 @@ main{padding:1.4rem 1.2rem 4rem}}
 <code>-v /host:/destino[:ro]</code> para um bind mount — a distinção é automática.</p>
 <div class='help'><pre><code>Named volumes and bind mounts: create/ls/rm/inspect
 
-Usage: delonix-x86_64-v3-linux volumes [OPTIONS] &lt;COMMAND&gt;
+Usage: delonix-x86_64-linux volumes [OPTIONS] &lt;COMMAND&gt;
 
 Commands:
   create    Cria um volume nomeado
@@ -92,7 +92,7 @@ Options:
 <h2 id='create'><code>volumes create</code></h2>
 <div class='help'><pre><code>Cria um volume nomeado
 
-Usage: delonix-x86_64-v3-linux volumes create [OPTIONS] &lt;NAME&gt;
+Usage: delonix-x86_64-linux volumes create [OPTIONS] &lt;NAME&gt;
 
 Arguments:
   &lt;NAME&gt;  
@@ -108,7 +108,7 @@ Options:
 <h2 id='ls'><code>volumes ls</code></h2>
 <div class='help'><pre><code>Lista os volumes
 
-Usage: delonix-x86_64-v3-linux volumes ls [OPTIONS]
+Usage: delonix-x86_64-linux volumes ls [OPTIONS]
 
 Options:
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
@@ -117,7 +117,7 @@ Options:
 <h2 id='inspect'><code>volumes inspect</code></h2>
 <div class='help'><pre><code>Detalhe de um volume (inclui uso real em disco)
 
-Usage: delonix-x86_64-v3-linux volumes inspect [OPTIONS] &lt;NAME&gt;
+Usage: delonix-x86_64-linux volumes inspect [OPTIONS] &lt;NAME&gt;
 
 Arguments:
   &lt;NAME&gt;  
@@ -129,7 +129,7 @@ Options:
 <h2 id='rm'><code>volumes rm</code></h2>
 <div class='help'><pre><code>Remove um volume
 
-Usage: delonix-x86_64-v3-linux volumes rm [OPTIONS] &lt;NAME&gt;
+Usage: delonix-x86_64-linux volumes rm [OPTIONS] &lt;NAME&gt;
 
 Arguments:
   &lt;NAME&gt;  
@@ -141,7 +141,7 @@ Options:
 <h2 id='apply'><code>volumes apply</code></h2>
 <div class='help'><pre><code>Aplica os documentos `kind: Volume` de um manifesto (idempotente por nome)
 
-Usage: delonix-x86_64-v3-linux volumes apply [OPTIONS]
+Usage: delonix-x86_64-linux volumes apply [OPTIONS]
 
 Options:
   -f, --file &lt;FILE&gt;   

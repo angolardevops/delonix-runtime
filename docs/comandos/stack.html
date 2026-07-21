@@ -76,7 +76,7 @@ Semântica <em>garante-presente</em> (idempotente por nome), não um reconciliad
 rollout nem rollback — fail-fast, o que já foi aplicado fica.</p>
 <div class='help'><pre><code>Apply a whole manifest (`delonix-manifest.yaml`) — every Kind, in dependency order
 
-Usage: delonix-x86_64-v3-linux stack [OPTIONS] &lt;COMMAND&gt;
+Usage: delonix-x86_64-linux stack [OPTIONS] &lt;COMMAND&gt;
 
 Commands:
   init      Inicializa um projecto COMPLETO: Delonixfile + manifesto + cluster + README — ficheiros JÁ PREENCHIDOS (imagens incluídas), prontos a usar sem editar nada
@@ -111,7 +111,7 @@ spec:
 <h2 id='init'><code>stack init</code></h2>
 <div class='help'><pre><code>Inicializa um projecto COMPLETO: Delonixfile + manifesto + cluster + README — ficheiros JÁ PREENCHIDOS (imagens incluídas), prontos a usar sem editar nada
 
-Usage: delonix-x86_64-v3-linux stack init [OPTIONS] [DIR]
+Usage: delonix-x86_64-linux stack init [OPTIONS] [DIR]
 
 Arguments:
   [DIR]  Directório do projecto (default: o actual) [default: .]
@@ -133,7 +133,7 @@ do projecto.</p>
 <h2 id='apply'><code>stack apply</code></h2>
 <div class='help'><pre><code>Aplica todos os Kinds do manifesto (Network → Volume → Image → Vm → Container)
 
-Usage: delonix-x86_64-v3-linux stack apply [OPTIONS]
+Usage: delonix-x86_64-linux stack apply [OPTIONS]
 
 Options:
   -f, --file &lt;FILE&gt;   

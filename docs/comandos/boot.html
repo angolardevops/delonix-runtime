@@ -74,7 +74,7 @@ user units + <code>loginctl enable-linger</code>; root → system units), com <c
 =<code>container start</code>. Assim os containers voltam a subir quando o host arranca, sem daemon.</p>
 <div class='help'><pre><code>Boot persistence: systemd units so containers come back up after a reboot
 
-Usage: delonix-x86_64-v3-linux boot [OPTIONS] &lt;COMMAND&gt;
+Usage: delonix-x86_64-linux boot [OPTIONS] &lt;COMMAND&gt;
 
 Commands:
   enable   Install + enable systemd units for the RUNNING containers, so they come back up when the host boots. Rootless uses user units + linger
@@ -88,7 +88,7 @@ Options:
 <h2 id='enable'><code>boot enable</code></h2>
 <div class='help'><pre><code>Install + enable systemd units for the RUNNING containers, so they come back up when the host boots. Rootless uses user units + linger
 
-Usage: delonix-x86_64-v3-linux boot enable [OPTIONS]
+Usage: delonix-x86_64-linux boot enable [OPTIONS]
 
 Options:
       --l18n &lt;en|pt&gt;       Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
@@ -98,7 +98,7 @@ Options:
 <h2 id='status'><code>boot status</code></h2>
 <div class='help'><pre><code>Show boot-persistence status (installed units + mode)
 
-Usage: delonix-x86_64-v3-linux boot status [OPTIONS]
+Usage: delonix-x86_64-linux boot status [OPTIONS]
 
 Options:
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
@@ -107,7 +107,7 @@ Options:
 <h2 id='disable'><code>boot disable</code></h2>
 <div class='help'><pre><code>Disable + remove the generated boot units
 
-Usage: delonix-x86_64-v3-linux boot disable [OPTIONS]
+Usage: delonix-x86_64-linux boot disable [OPTIONS]
 
 Options:
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand

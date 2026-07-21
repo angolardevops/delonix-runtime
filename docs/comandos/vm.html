@@ -75,7 +75,7 @@ O <code>create</code> é idempotente (cria ou auto-recupera) e suporta cloud-ini
 automaticamente. É a camada que o <code>delonix cluster kubeadm</code> usa para provisionar nós.</p>
 <div class='help'><pre><code>Declarative microVMs: create/ls/stop/rm/status
 
-Usage: delonix-x86_64-v3-linux vm [OPTIONS] &lt;COMMAND&gt;
+Usage: delonix-x86_64-linux vm [OPTIONS] &lt;COMMAND&gt;
 
 Commands:
   dash      Dashboard (KPIs + tabela) das VMs — TUI interactivo, ou `--once` snapshot
@@ -99,7 +99,7 @@ Options:
 <h2 id='create'><code>vm create</code></h2>
 <div class='help'><pre><code>Cria (ou auto-recupera) uma VM
 
-Usage: delonix-x86_64-v3-linux vm create [OPTIONS] &lt;NAME&gt;
+Usage: delonix-x86_64-linux vm create [OPTIONS] &lt;NAME&gt;
 
 Arguments:
   &lt;NAME&gt;  
@@ -159,7 +159,7 @@ Options:
 <h2 id='ls'><code>vm ls</code></h2>
 <div class='help'><pre><code>Lista as VMs
 
-Usage: delonix-x86_64-v3-linux vm ls [OPTIONS]
+Usage: delonix-x86_64-linux vm ls [OPTIONS]
 
 Options:
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
@@ -168,7 +168,7 @@ Options:
 <h2 id='status'><code>vm status</code></h2>
 <div class='help'><pre><code>Estado actual (reconcilia liveness/IP com o backend)
 
-Usage: delonix-x86_64-v3-linux vm status [OPTIONS] [NAME]
+Usage: delonix-x86_64-linux vm status [OPTIONS] [NAME]
 
 Arguments:
   [NAME]  VM a consultar (omite para o estado de TODAS)
@@ -180,7 +180,7 @@ Options:
 <h2 id='stop'><code>vm stop</code></h2>
 <div class='help'><pre><code>Pára a VM (preserva disco/registo)
 
-Usage: delonix-x86_64-v3-linux vm stop [OPTIONS] &lt;NAME&gt;
+Usage: delonix-x86_64-linux vm stop [OPTIONS] &lt;NAME&gt;
 
 Arguments:
   &lt;NAME&gt;  
@@ -192,7 +192,7 @@ Options:
 <h2 id='rm'><code>vm rm</code></h2>
 <div class='help'><pre><code>Remove a VM (pára + apaga overlay/estado)
 
-Usage: delonix-x86_64-v3-linux vm rm [OPTIONS] &lt;NAME&gt;
+Usage: delonix-x86_64-linux vm rm [OPTIONS] &lt;NAME&gt;
 
 Arguments:
   &lt;NAME&gt;  
@@ -205,7 +205,7 @@ Options:
 <h2 id='apply'><code>vm apply</code></h2>
 <div class='help'><pre><code>Aplica os documentos `kind: Vm` de um manifesto (`delonix_vm::create` já é idempotente por nome — cria ou auto-recupera)
 
-Usage: delonix-x86_64-v3-linux vm apply [OPTIONS]
+Usage: delonix-x86_64-linux vm apply [OPTIONS]
 
 Options:
   -f, --file &lt;FILE&gt;   
