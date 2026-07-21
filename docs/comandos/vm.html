@@ -87,6 +87,7 @@ Commands:
   console   Attach to the VM&#x27;s serial console (interactive terminal) — works with no IP (boot logs, login). Escape: Ctrl-] 
   vnc       Print the VNC address of a graphical VM (created with `--vnc`, libvirt)
   status    Current state (reconciles liveness/IP with the backend)
+  reach     How VMs reach containers: for each libvirt VM network, the container services published on its gateway (reachable), and the ones bound to loopback only (host-only) with the exact command to expose them
   describe  Human-readable detail of one or more VMs, `kubectl describe` style (for humans; use `status` for the usual compact view). Includes the LIVE state — `delonix_vm::status` reconciles liveness/IP with the backend
   stop      Stop the VM (preserves disk/record)
   rm        Remove the VM (stops + deletes overlay/state)
