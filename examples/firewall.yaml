@@ -1,14 +1,20 @@
-# kind: Ingress / kind: Egress — firewall L4 declarativo por container (estilo
-# k8s NetworkPolicy, dividido por direcção). Cada documento é o ESTADO DESEJADO
-# de uma direcção do container-alvo: aplicar substitui as regras dessa direcção
-# (allowlist + default-deny), deixando a outra intacta. Aplicado por `stack apply`
-# DEPOIS dos containers existirem. Só actua em containers na SDN (têm IP na delonix0).
+# kind: FirewallPolicy — firewall L4 declarativo por container (estilo k8s
+# NetworkPolicy), com a direcção em `spec.direction`. Cada documento é o ESTADO
+# DESEJADO de uma direcção do container-alvo: aplicar substitui as regras dessa
+# direcção (allowlist + default-deny), deixando a outra intacta. Aplicado por
+# `stack apply` DEPOIS dos containers existirem. Só actua em containers na SDN.
+#
+# NOTA: `kind: Ingress` já NÃO é firewall — passou a ser o Ingress L7/HTTP estilo
+# k8s (host/path→backend, ver examples/ingress.yaml). Para o firewall inbound usa
+# `kind: FirewallPolicy` com `direction: ingress` (como abaixo). `kind: Egress`
+# (firewall outbound) continua a funcionar.
 ---
 apiVersion: delonix.io/v1
-kind: Ingress
+kind: FirewallPolicy
 metadata:
   name: db-inbound
 spec:
+  direction: ingress       # ingress (inbound) | egress (outbound)
   target: dbapp            # nome do container-alvo (deve existir, em rede custom)
   defaultPolicy: deny      # allow | deny (default: deny — só passa o que estiver listado)
   rules:

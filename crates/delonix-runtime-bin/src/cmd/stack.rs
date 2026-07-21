@@ -557,7 +557,7 @@ fn validate_graph_with(
                     }
                 }
             }
-            "Ingress" | "Egress" | "FirewallPolicy" => {
+            "Egress" | "FirewallPolicy" => {
                 let scope = doc
                     .spec
                     .get("scope")
@@ -591,11 +591,17 @@ fn validate_graph_with(
                     }
                 }
             }
-            "HTTPRoute" => {
+            "HTTPRoute" | "Ingress" => {
                 // Each backend.service must be a declared/existing Container;
                 // the tls.secretRef (if used) a Secret. Reuses the typed parser to
                 // avoid duplicating the schema (and catches an invalid spec right away).
-                match manifest::spec_of::<super::httproute::HttpRouteSpec>(doc) {
+                // `kind: Ingress` (k8s-shaped) is converted to the same HttpRouteSpec.
+                let parsed = if doc.kind == "Ingress" {
+                    super::httproute::ingress_spec_of(doc)
+                } else {
+                    manifest::spec_of::<super::httproute::HttpRouteSpec>(doc)
+                };
+                match parsed {
                     Ok(spec) => {
                         if let Err(e) = super::httproute::validate_spec(name, &spec) {
                             issues.push(e.to_string());

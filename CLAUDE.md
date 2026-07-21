@@ -168,11 +168,23 @@ container}.rs`) tem um `spec` tipado próprio (`NetworkSpec`, `VolumeSpec`, ...)
 
 ## Reverse-proxy L7 (`kind: HTTPRoute`)
 
-Reverse-proxy HTTP/HTTPS declarativo **embutido** (nome alinhado ao Gateway API do k8s: `HTTPRoute`
-= L7; `Ingress`/`FirewallPolicy` = firewall L4). Roteia por `Host` + prefixo de path para
+Reverse-proxy HTTP/HTTPS declarativo **embutido**. Roteia por `Host` + prefixo de path para
 containers backend. Módulos: `cmd/httproute.rs` (schema `HttpRouteSpec` + resolução + `apply`) e
 `cmd/ingress_proxy.rs` (o proxy `hyper` + o ciclo de vida). Superfície: `delonix httproute
 ls/apply/rm` + `kind: HTTPRoute` no `stack apply`.
+
+**`kind: Ingress` = Ingress L7 estilo k8s (BREAKING v0.7.x).** Desde esta série, `kind: Ingress`
+é a forma **networking.k8s.io/v1** (`spec.rules[].host` + `http.paths[].backend.service.{name,port.
+number}`, `spec.tls[]`, `defaultBackend`, `ingressClassName`) e **compila para o mesmo proxy L7**
+(`httproute::ingress_to_httproute`/`ingress_spec_of` → `HttpRouteSpec`; recolhido em
+`parse_and_validate` a par do `HTTPRoute`). Limitações herdadas do HTTPRoute: **um só cert (sem
+SNI)** — o 1.º `tls[]` decide selfSigned/secretRef; `pathType: Exact` é aceite mas tratado como
+prefixo; portas nomeadas dão erro (usa `port.number`). **Migração**: o firewall L4 que ANTES vivia
+em `kind: Ingress` passou para **`kind: FirewallPolicy` com `direction: ingress`** (já era alias);
+`firewall::apply` deixou de tratar `Ingress` (só `Egress`/`FirewallPolicy`); `validate_graph` e o
+drift-guard movidos em conformidade; `examples/firewall.yaml` migrado, `examples/ingress.yaml` é a
+nova forma L7. A CLI `delonix ingress` (publish/allow/deny) **continua L4** — só o *Kind* do
+manifesto mudou de significado.
 
 - **O proxy é `hyper` puro** (server http1 + cliente `hyper-util` legacy), **confinado ao bin** —
   `hyper`/`hyper-util`/`tokio`/`tokio-rustls`/`rustls-pemfile`/`rcgen`/`bytes`/`http-body-util` são
