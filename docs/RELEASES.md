@@ -4,6 +4,56 @@
 > (regenerado automaticamente pelo pipeline de release a cada tag publicada).
 > Não editar à mão — edita a nota da release respectiva.
 
+## v0.7.15 — `vm reach` (descoberta VM→container) + `kind: Container` forma de Pod k8s
+
+### VM — `delonix vm reach`
+
+Descoberta de como as VMs alcançam os serviços de container, sem dataplane novo
+nem privilégio. Uma porta publicada só é alcançável de dentro de uma VM libvirt
+se estiver ligada a um endereço que a VM roteia — o **gateway da rede da VM**
+(ex.: `192.168.122.1`), não o loopback (o default SEGURO, que faz o VM→container
+falhar em silêncio com "connection refused").
+
+- `delonix vm reach` lista os gateways das redes de VM (`virbr*`), lê o bind
+  VIVO de cada porta publicada (via `ss`) e separa **"alcançáveis a partir de
+  VMs"** (endereço:porta a usar) dos **"loopback-only"**, com o comando exacto
+  para os expor (`unpublish` + republish com `DELONIX_PUBLISH_ADDR=<gateway>` —
+  alcançável pelas VMs dessa rede, **não** pela LAN externa, que é NAT).
+- Read-only, zero privilégio, zero mudança ao default seguro.
+
+**Provado E2E ao vivo**: de dentro de uma VM, `curl <gateway>:<porta>` → HTTP 200
+para um container na SDN; o loopback-bound recusa, como esperado. `container→VM`
+já funcionava nativamente (o egress por-container governa-o). O IP 10.x **directo**
+VM→container (bridge virbr0↔SDN) continua a exigir um dataplane privilegiado
+(veth+rotas, `CAP_NET_ADMIN` no init-netns) — trabalho opt-in, fora deste release.
+
+### Container — `kind: Container` com a forma de um Pod k8s
+
+O `kind: Container` passa a aceitar a FORMA de um Pod do Kubernetes quando
+`spec.containers` está presente (a alternativa "flat" continua totalmente
+suportada; as duas formas nunca se misturam):
+
+```yaml
+spec:
+  containers:
+    - image, command (ENTRYPOINT), args (CMD),
+      ports: [{ containerPort, hostPort, protocol, hostIP }],
+      env: [{ name, value }],
+      volumeMounts: [{ name, mountPath, readOnly }],
+      resources: { limits: { cpu, memory } },
+      securityContext: { privileged, runAsUser, readOnlyRootFilesystem,
+                         capabilities: { add, drop } },
+      workingDir
+  volumes: [{ name, hostPath | emptyDir | persistentVolumeClaim | source }]
+  network / restartPolicy / hostname / expose   # extensões delonix
+```
+
+**v1**: exactamente UM container por Pod (erro claro se >1). Normaliza para o
+MESMO `RunOpts` interno da forma flat — o motor fica intocado. 1.ª fatia do
+pedido "manifestos mais parecidos ao k8s".
+
+---
+
 ## v0.7.12 — VM com IP alcançável por omissão (`nat` inteligente + `--ip` estático)
 
 ### VM — rede
