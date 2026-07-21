@@ -1273,6 +1273,11 @@ pub fn remove_force(base: &Path, name: &str) -> Result<()> {
 }
 
 fn remove_inner(base: &Path, name: &str, force: bool) -> Result<()> {
+    // Um nome que `create` recusaria não pode existir — e não pode, sobretudo,
+    // fluir para os caminhos apagados abaixo (o `remove_dir_all` do seed dir).
+    if !valid_vm_name(name) {
+        return Err(Error::VmNotFound(name.to_string()));
+    }
     let vmdir = vms_dir(base);
     let st = store(base)?;
     let existed = match st.load(name) {
@@ -1297,15 +1302,19 @@ fn remove_inner(base: &Path, name: &str, force: bool) -> Result<()> {
             orphan
         }
     };
-    for ext in ["qcow2", "sock", "serial", "log", "pid", "xml"] {
+    for ext in ["qcow2", "sock", "sock.lock", "serial", "log", "pid", "xml"] {
         let _ = std::fs::remove_file(vmdir.join(format!("{name}.{ext}")));
     }
-    match st.remove(name) {
-        // órfão limpo: não havia registo para remover, mas a VM existia.
-        Err(Error::NotFound(_)) if existed => Ok(()),
-        Err(Error::NotFound(n)) => Err(Error::VmNotFound(n)),
-        other => other,
+    // O directório seed do cloud-init (`vms/<name>/`, de `generate_seed_iso`)
+    // também é da VM — ficava para trás e acumulava lixo por nome.
+    let _ = std::fs::remove_dir_all(vmdir.join(name));
+    if !existed {
+        // Nem registo local nem domínio no libvirt — o `st.remove` abaixo é
+        // idempotente (ausência não é erro) e diria Ok; um `rm` de algo que
+        // não existe deve dizê-lo, como o docker.
+        return Err(Error::VmNotFound(name.to_string()));
     }
+    st.remove(name)
 }
 
 /// Pára a VM via o SEU backend (CH/libvirt) mas **preserva** registo e disco
@@ -1394,6 +1403,32 @@ mod tests {
         assert!(super::valid_vm_name("dev"));
         assert!(super::valid_vm_name("kadm-cp1"));
         assert!(super::valid_vm_name("my.vm_02"));
+    }
+
+    #[test]
+    fn quiet_captura_o_stderr_sem_o_prefixo_error() {
+        // O `virsh` prefixa cada linha com `error: ` — a mensagem composta não
+        // deve repetir isso, nem vazar o stderr cru para o terminal.
+        let err = super::quiet("sh", &["-c", "echo 'error: boom' >&2; exit 1"]).unwrap_err();
+        assert_eq!(err, "boom");
+        let ok = super::quiet("sh", &["-c", "echo out"]).unwrap();
+        assert_eq!(ok, "out");
+    }
+
+    #[test]
+    fn stop_e_remove_de_vm_inexistente_dizem_no_such_vm() {
+        // Regressão do bug report: `vm stop dev` sem registo respondia
+        // "no such container: dev" — substantivo errado para uma VM — e o
+        // `vm rm` de um nome inexistente devolvia sucesso silencioso.
+        let base = std::env::temp_dir().join(format!("delonix-vm-test-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&base);
+        for res in [super::stop(&base, "nope"), super::remove(&base, "nope")] {
+            match res {
+                Err(Error::VmNotFound(n)) => assert_eq!(n, "nope"),
+                other => panic!("esperava VmNotFound, veio {other:?}"),
+            }
+        }
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     fn test_vm_cfg(mem: &str) -> VmConfig {
