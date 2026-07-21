@@ -1958,3 +1958,9 @@ msgstr "Detalhe do stack ao estilo `kubectl describe`: cada recurso DECLARADO no
 
 msgid "Validates the manifest WITHOUT touching anything (dry-run): resolves the cross-references (`Container.network`/`.volumes`, `Vm.network`, `Ingress/Egress.target`) against what the manifest declares PLUS what already exists in the stores. Exits with an error if any reference is left unresolved — it is the safety net against an `apply` that would only fail halfway through (fail-fast, no rollback)."
 msgstr "Valida o manifesto SEM tocar em nada (dry-run): resolve as referências cruzadas (`Container.network`/`.volumes`, `Vm.network`, `Ingress/Egress.target`) contra o que o manifesto declara MAIS o que já existe nos stores. Sai com erro se alguma referência ficar por resolver — é a rede de segurança contra um `apply` que só falharia a meio (fail-fast, sem rollback)."
+
+msgid "Static IP (libvirt nat mode): DHCP reservation on the libvirt network."
+msgstr "IP estático (modo nat do libvirt): reserva DHCP na rede libvirt."
+
+msgid "user-mode network: this VM will have no reachable IP — join the `libvirt` group (nat mode then becomes the default), or pass `--net-mode nat|bridge`"
+msgstr "rede user-mode: esta VM não terá IP alcançável — entra no grupo `libvirt` (o modo nat passa a ser o default), ou usa `--net-mode nat|bridge`"
