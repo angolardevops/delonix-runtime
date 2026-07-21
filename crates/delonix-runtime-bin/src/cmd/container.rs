@@ -3128,9 +3128,16 @@ pub(crate) fn unpublish_live(store: &Store, c: &mut Container, host_port: &str) 
     match c.network.as_deref() {
         Some(_) => infra::unpublish_port(host_port),
         None => {
-            let pid = c.pid.ok_or_else(|| Error::NotRunning(c.name.clone()))?;
-            let sock = delonix_net::slirp_container_sock(pid);
-            infra::slirp_remove_hostfwd(&sock, host_port)?;
+            // Sem rede custom, o hostfwd vive no slirp POR-container — que morre
+            // com ele. Num container parado não há dataplane para limpar, só o
+            // registo (antes: erro "container is not running" e o publish ficava
+            // preso no registo para sempre — bug report real).
+            if let Some(pid) = c.pid.filter(|&p| runtime::is_alive(p)) {
+                let sock = delonix_net::slirp_container_sock(pid);
+                if sock.exists() {
+                    infra::slirp_remove_hostfwd(&sock, host_port)?;
+                }
+            }
         }
     }
     *c = store.update(&c.id, |cur| {

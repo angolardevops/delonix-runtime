@@ -1383,3 +1383,27 @@ msgstr "Remove o estado local mesmo que a limpeza no libvirt falhe."
 
 msgid "the VM record was kept; `delonix vm rm --force {name}` discards it anyway"
 msgstr "o registo da VM foi preservado; `delonix vm rm --force {name}` descarta-o na mesma"
+
+msgid "Remove inbound rule(s) matching `[proto/]port` (all protos if none given)."
+msgstr "Remove regra(s) de entrada que casem `[proto/]porta` (todos os protos se omitido)."
+
+msgid "Remove outbound rule(s) matching `[proto/]port` (all protos if none given)."
+msgstr "Remove regra(s) de saída que casem `[proto/]porta` (todos os protos se omitido)."
+
+msgid "`tcp/5432`, `5432` (any proto), or `*` (all ports)."
+msgstr "`tcp/5432`, `5432` (qualquer proto), ou `*` (todas as portas)."
+
+msgid "Only rules from this source CIDR (default: any recorded source)."
+msgstr "Só regras com esta origem CIDR (default: qualquer origem registada)."
+
+msgid "Only rules to this destination CIDR (default: any recorded destination)."
+msgstr "Só regras com este destino CIDR (default: qualquer destino registado)."
+
+msgid "  (replaces the previous {old} rule for this match — the last command wins)"
+msgstr "  (substitui a regra {old} anterior deste match — o último comando ganha)"
+
+msgid "an earlier overlapping rule ({action} {spec}) still matches first and can override this one — remove it with `delonix {group} rm {name} {spec}`"
+msgstr "uma regra anterior sobreposta ({action} {spec}) continua a casar primeiro e pode anular esta — remove-a com `delonix {group} rm {name} {spec}`"
+
+msgid "{name}: {n} {arrow} rule(s) removed ({spec})"
+msgstr "{name}: {n} regra(s) {arrow} removida(s) ({spec})"
