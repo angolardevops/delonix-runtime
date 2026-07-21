@@ -44,11 +44,13 @@ uma lista plana, um módulo por grupo em `crates/delonix-runtime-bin/src/cmd/`:
   `kind: Container` (`container::container_to_run_opts`/`pod_member_run_opts`); o `kind: Container`
   continua a aceitar SÓ 1 container (>1 → usa `kind: Pod`). **`kind: Pod`** no manifesto (mesmo
   schema `PodSpec`, N containers) + grupo `pods:` no `kind: Stack` + `--dry-run`. **Também tapa o
-  gap do CRI root-mode** (`delonix-cri` chamava `delonix pod create/rm` que não existia). Partilha
-  de **netns feita (Fase 1)**; **IPC/UTS/PID** (`shareProcessNamespace`, campo já no schema) vêm em
-  fatias seguintes — o pause container que segura essas namespaces + os peers a juntá-las por
-  `setns` (agora possível porque o re-exec já os põe no userns do holder, onde o `setns` tem
-  privilégio — a razão pela qual o `setns` antigo falhava deixou de valer).
+  gap do CRI root-mode** (`delonix-cri` chamava `delonix pod create/rm` que não existia).
+  **Partilha de namespaces**: **netns** (Fase 1) + **IPC + UTS** (Fase 2) — o 1.º container segura
+  o ipc/uts e os restantes juntam-se via `RunSpec.pod_infra_pid` (o `spawn` suprime
+  `CLONE_NEWIPC/NEWUTS`, o `container_init` faz `setns` de `/proc/<pid>/ns/{ipc,uts}`); possível em
+  rootless porque o re-exec `--pod` já os põe no userns do holder, onde o `setns` tem privilégio (a
+  razão pela qual o `setns` antigo — `join_netns`, agora removido — falhava deixou de valer).
+  **PID** (`shareProcessNamespace`, campo já no schema) é a Fase 3.
 - `delonix image` — pull/ls/rm/export (bundle OCI para `runc`/`crun`).
 - `delonix build -t <tag> [-f Dockerfile|Delonixfile] [contexto]` — único grupo com orquestração
   nova (as outras têm API pronta nas crates, isto é "ligar os fios"): sobe um container de
