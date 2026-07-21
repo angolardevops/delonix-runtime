@@ -530,7 +530,29 @@ pub fn run(action: VmCmd) -> Result<()> {
                 vnc,
                 static_ip: ip,
             };
-            let vm = delonix_vm::create(&base, &cfg)?;
+            // Staged progress on STDERR (human), while STDOUT stays the bare VM
+            // name (scriptable — unchanged contract). Replaces the raw
+            // `qemu-img`/`virsh` chatter that leaked before (now captured in the
+            // engine). Each `CreateStage` renders one step as it starts.
+            eprintln!(
+                "{}",
+                super::po::tf("Creating VM '{name}'…", &[("name", &cfg.name)])
+            );
+            let render = |s: delonix_vm::CreateStage| {
+                use delonix_vm::CreateStage::*;
+                let step = match s {
+                    Disk => super::po::t("preparing the overlay disk"),
+                    Network => super::po::t("configuring the network"),
+                    Define => super::po::t("defining the domain"),
+                    Start => super::po::t("starting the VM"),
+                };
+                eprintln!("  → {step}");
+            };
+            let vm = delonix_vm::create_with(&base, &cfg, &render)?;
+            eprintln!(
+                "{}",
+                super::po::tf("✓ VM '{name}' is up.", &[("name", &vm.name)])
+            );
             println!("{}", vm.name);
             // Honest signal instead of a silent `IP <none>`: a libvirt VM that
             // fell back to user-mode (session SLIRP) never gets a reachable IP.
@@ -551,6 +573,7 @@ pub fn run(action: VmCmd) -> Result<()> {
                     std::time::Duration::from_secs(boot_timeout),
                 );
             }
+            print_vm_next_steps(&vm.name);
             Ok(())
         }
         VmCmd::Pull { source, name } => {
@@ -773,6 +796,34 @@ fn cmd_vnc(base: &std::path::Path, name: &str) -> Result<()> {
 /// `delonix vm console <name>` — the VM's interactive serial terminal. Needs no
 /// IP (like a serial cable): to watch the boot and log in even without network.
 /// Cloud Hypervisor: connects to the serial UNIX socket and bridges it with the
+/// Prints the "what now?" block after a successful `vm create` — on STDERR so
+/// STDOUT stays the bare VM name for scripts. The console hint spells out the
+/// escape key because with serial autologin `exit`/`logout` just loop.
+fn print_vm_next_steps(name: &str) {
+    let rows = [
+        (
+            format!("delonix vm console {name}"),
+            super::po::t("open the serial console (back to host: Ctrl+])"),
+        ),
+        (
+            format!("delonix vm status {name}"),
+            super::po::t("state, backend and IP"),
+        ),
+        (
+            format!("delonix vm describe {name}"),
+            super::po::t("full details"),
+        ),
+        (
+            format!("delonix vm stop {name}"),
+            super::po::t("stop it (keeps the disk)"),
+        ),
+    ];
+    eprintln!("\n{}", super::po::t("Next steps:"));
+    for (cmd, desc) in rows {
+        eprintln!("  {cmd:<30} # {desc}");
+    }
+}
+
 /// local tty (raw mode); libvirt: delegates to `virsh console` (which does it).
 fn cmd_console(base: &std::path::Path, name: &str) -> Result<()> {
     let vm = delonix_vm::status(base, name)?;
@@ -782,18 +833,35 @@ fn cmd_console(base: &std::path::Path, name: &str) -> Result<()> {
             &[("name", name)],
         )));
     }
+    // The golden image auto-logs-in on ttyS0, so inside the console `exit`/`logout`
+    // just re-trigger the getty and loop forever — the ONLY way back to the host
+    // is the escape key. Spelling it out (in the user's language) fixes the
+    // recurring "I can't get out of the VM console" report.
+    eprintln!(
+        "{}",
+        super::po::tf(
+            "Console of '{name}'. To return to the host: press Ctrl+]  (exit/logout only restarts the session — autologin re-enters).",
+            &[("name", name)],
+        )
+    );
     let backend = vm.backend.as_str();
     if backend.contains("libvirt") || backend.contains("qemu") || backend.contains("kvm") {
-        // virsh already gives a raw interactive console; we replace the process.
-        use std::os::unix::process::CommandExt;
+        // Spawn `virsh console` as a CHILD (not exec/replace) so that when the
+        // user presses Ctrl+] we regain control and can confirm the return —
+        // virsh handles the raw tty and the escape key itself.
         let uri = delonix_vm::libvirt_uri(name);
-        let err = std::process::Command::new("virsh")
+        let status = std::process::Command::new("virsh")
             .args(["-c", &uri, "console", "--", name])
-            .exec();
-        return Err(Error::Runtime {
-            context: "virsh console",
-            message: err.to_string(),
-        });
+            .status()
+            .map_err(|e| Error::Runtime {
+                context: "virsh console",
+                message: e.to_string(),
+            })?;
+        // virsh returns non-zero on some disconnects; that is not an error to
+        // surface — the user asked to leave.
+        let _ = status;
+        eprintln!("{}", super::po::t("Back to the host shell."));
+        return Ok(());
     }
     // Cloud Hypervisor: ponte tty<->socket.
     let sock = delonix_vm::console_socket(base, name);
@@ -806,7 +874,9 @@ fn cmd_console(base: &std::path::Path, name: &str) -> Result<()> {
             &[("name", name)],
         )));
     }
-    console_bridge(&sock)
+    let r = console_bridge(&sock);
+    eprintln!("{}", super::po::t("Back to the host shell."));
+    r
 }
 
 /// Saves stdin's tty mode and restores it on `Drop` (even on Ctrl-C, panic,
