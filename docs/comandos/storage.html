@@ -75,7 +75,7 @@ A password vem do cofre (<code>--password-secret</code>), nunca do argv. Ligado 
 (ordem Network→Volume→<strong>Storage</strong>→Image→Vm→Container). Montar precisa de CAP_SYS_ADMIN.</p>
 <div class='help'><pre><code>NETWORK storage (NFS/CIFS/WebDAV) mountable as a volume — k8s PersistentVolume style
 
-Usage: delonix-x86_64-v3-linux storage [OPTIONS] &lt;COMMAND&gt;
+Usage: delonix-x86_64-linux storage [OPTIONS] &lt;COMMAND&gt;
 
 Commands:
   dash     Dashboard (KPIs + tabela) do storage/volumes — TUI, ou `--once` snapshot
@@ -92,7 +92,7 @@ Options:
 <h2 id='create'><code>storage create</code></h2>
 <div class='help'><pre><code>Cria (e monta) um armazenamento de rede
 
-Usage: delonix-x86_64-v3-linux storage create [OPTIONS] --type &lt;TYPE&gt; --server &lt;SERVER&gt; --share &lt;SHARE&gt; &lt;NAME&gt;
+Usage: delonix-x86_64-linux storage create [OPTIONS] --type &lt;TYPE&gt; --server &lt;SERVER&gt; --share &lt;SHARE&gt; &lt;NAME&gt;
 
 Arguments:
   &lt;NAME&gt;  
@@ -122,7 +122,7 @@ Options:
 <h2 id='ls'><code>storage ls</code></h2>
 <div class='help'><pre><code>Lista os armazenamentos de rede (volumes com driver de rede)
 
-Usage: delonix-x86_64-v3-linux storage ls [OPTIONS]
+Usage: delonix-x86_64-linux storage ls [OPTIONS]
 
 Options:
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
@@ -131,7 +131,7 @@ Options:
 <h2 id='rm'><code>storage rm</code></h2>
 <div class='help'><pre><code>Remove (e desmonta) um armazenamento. Os DADOS ficam no NAS — só se desliga a montagem local, como o docker
 
-Usage: delonix-x86_64-v3-linux storage rm [OPTIONS] &lt;NAME&gt;
+Usage: delonix-x86_64-linux storage rm [OPTIONS] &lt;NAME&gt;
 
 Arguments:
   &lt;NAME&gt;  

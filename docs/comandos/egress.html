@@ -75,7 +75,7 @@ ou <code>allowlist</code> (nega tudo excepto DNS e os CIDRs dados). Tudo sobre o
 /nft do <code>ingress</code>.</p>
 <div class='help'><pre><code>OUTBOUND firewall (L4 rules + per-network egress policy) for a container
 
-Usage: delonix-x86_64-v3-linux egress [OPTIONS] &lt;COMMAND&gt;
+Usage: delonix-x86_64-linux egress [OPTIONS] &lt;COMMAND&gt;
 
 Commands:
   allow   Allow outbound traffic from a container: `[proto/]port` to an optional CIDR
@@ -94,7 +94,7 @@ Options:
 <h2 id='allow'><code>egress allow</code></h2>
 <div class='help'><pre><code>Allow outbound traffic from a container: `[proto/]port` to an optional CIDR
 
-Usage: delonix-x86_64-v3-linux egress allow [OPTIONS] &lt;CONTAINER&gt; &lt;PORT&gt;
+Usage: delonix-x86_64-linux egress allow [OPTIONS] &lt;CONTAINER&gt; &lt;PORT&gt;
 
 Arguments:
   &lt;CONTAINER&gt;  
@@ -109,7 +109,7 @@ Options:
 <h2 id='policy'><code>egress policy</code></h2>
 <div class='help'><pre><code>Set the default outbound policy when no rule matches
 
-Usage: delonix-x86_64-v3-linux egress policy [OPTIONS] &lt;CONTAINER&gt; &lt;POLICY&gt;
+Usage: delonix-x86_64-linux egress policy [OPTIONS] &lt;CONTAINER&gt; &lt;POLICY&gt;
 
 Arguments:
   &lt;CONTAINER&gt;  
@@ -122,7 +122,7 @@ Options:
 <h2 id='net'><code>egress net</code></h2>
 <div class='help'><pre><code>Govern a whole network&#x27;s egress to the Internet
 
-Usage: delonix-x86_64-v3-linux egress net [OPTIONS] &lt;NETWORK&gt; &lt;MODE&gt;
+Usage: delonix-x86_64-linux egress net [OPTIONS] &lt;NETWORK&gt; &lt;MODE&gt;
 
 Arguments:
   &lt;NETWORK&gt;
@@ -147,7 +147,7 @@ Options:
 <h2 id='host'><code>egress host</code></h2>
 <div class='help'><pre><code>Allow a network&#x27;s egress to a HOSTNAME (and `*.hostname`), learnt live from DNS answers — the FQDN allowlist nft/CIDR can&#x27;t express. Repeatable
 
-Usage: delonix-x86_64-v3-linux egress host [OPTIONS] &lt;NETWORK&gt; &lt;HOSTNAME&gt;
+Usage: delonix-x86_64-linux egress host [OPTIONS] &lt;NETWORK&gt; &lt;HOSTNAME&gt;
 
 Arguments:
   &lt;NETWORK&gt;   
@@ -164,7 +164,7 @@ rootless (sem eBPF) — a FQDN-policy do Cilium, via nftables. Repetível para v
 <h2 id='show'><code>egress show</code></h2>
 <div class='help'><pre><code>Show a NETWORK&#x27;s egress policy: CIDR allowlist, FQDN hosts, and the IPs currently learnt from DNS for those hosts
 
-Usage: delonix-x86_64-v3-linux egress show [OPTIONS] &lt;NETWORK&gt;
+Usage: delonix-x86_64-linux egress show [OPTIONS] &lt;NETWORK&gt;
 
 Arguments:
   &lt;NETWORK&gt;  
@@ -176,7 +176,7 @@ Options:
 <h2 id='ls'><code>egress ls</code></h2>
 <div class='help'><pre><code>Show the outbound firewall (policy + rules)
 
-Usage: delonix-x86_64-v3-linux egress ls [OPTIONS] [CONTAINER]
+Usage: delonix-x86_64-linux egress ls [OPTIONS] [CONTAINER]
 
 Arguments:
   [CONTAINER]  Container to inspect (omit to list every container&#x27;s outbound state)
