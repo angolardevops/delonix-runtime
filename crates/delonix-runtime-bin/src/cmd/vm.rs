@@ -363,6 +363,10 @@ pub enum VmCmd {
         #[arg(add = ArgValueCandidates::new(super::complete::vms))]
         name: Option<String>,
     },
+    /// How VMs reach containers: for each libvirt VM network, the container
+    /// services published on its gateway (reachable), and the ones bound to
+    /// loopback only (host-only) with the exact command to expose them.
+    Reach,
     /// Human-readable detail of one or more VMs, `kubectl describe` style (for
     /// humans; use `status` for the usual compact view). Includes the LIVE
     /// state — `delonix_vm::status` reconciles liveness/IP with the backend.
@@ -779,6 +783,7 @@ pub fn run(action: VmCmd) -> Result<()> {
             t.print();
             Ok(())
         }
+        VmCmd::Reach => cmd_reach(&base),
         VmCmd::Stop { name } => {
             delonix_vm::stop(&base, &name)?;
             println!("{name}");
@@ -811,6 +816,147 @@ pub fn run(action: VmCmd) -> Result<()> {
             apply(&docs)
         }
     }
+}
+
+/// IPv4 gateways of the host's libvirt VM networks (the `virbr*` bridge
+/// addresses) — what a `nat` VM uses to reach a host-published service.
+/// Best-effort: no `ip` tool → empty, and `vm reach` still shows the port binds.
+fn libvirt_gateways() -> Vec<String> {
+    match Command::new("ip").args(["-br", "-4", "addr", "show"]).output() {
+        Ok(o) if o.status.success() => parse_ip_gateways(&String::from_utf8_lossy(&o.stdout)),
+        _ => Vec::new(),
+    }
+}
+
+/// Parses `ip -br -4 addr show` output → the IPv4 addresses of `virbr*`
+/// bridges. Pure — tested without the `ip` tool.
+fn parse_ip_gateways(out: &str) -> Vec<String> {
+    let mut gws = Vec::new();
+    for line in out.lines() {
+        let mut it = line.split_whitespace();
+        let iface = it.next().unwrap_or("");
+        if !iface.starts_with("virbr") {
+            continue;
+        }
+        if let Some(cidr) = it.find(|s| s.contains('.')) {
+            if let Some((ip, _)) = cidr.split_once('/') {
+                gws.push(ip.to_string());
+            }
+        }
+    }
+    gws
+}
+
+/// Map `host_port -> bind address` for every listening TCP socket (via `ss`).
+/// The LIVE truth of where a published port is bound — the bind address is not
+/// kept in the container record (it came from `DELONIX_PUBLISH_ADDR` at publish
+/// time), so `vm reach` reads it from the actual listeners. Prefers a
+/// non-loopback bind when a port has more than one.
+fn listening_binds() -> std::collections::HashMap<String, String> {
+    match Command::new("ss").args(["-tlnH"]).output() {
+        Ok(o) if o.status.success() => parse_ss_binds(&String::from_utf8_lossy(&o.stdout)),
+        _ => std::collections::HashMap::new(),
+    }
+}
+
+/// Parses `ss -tlnH` output → `host_port -> bind address`. Prefers a
+/// non-loopback bind when a port has more than one listener. Pure — tested
+/// without `ss`.
+fn parse_ss_binds(out: &str) -> std::collections::HashMap<String, String> {
+    let mut m = std::collections::HashMap::new();
+    for line in out.lines() {
+        // columns: State Recv-Q Send-Q Local-Address:Port Peer ...
+        let cols: Vec<&str> = line.split_whitespace().collect();
+        let Some(local) = cols.get(3) else { continue };
+        let Some(idx) = local.rfind(':') else { continue };
+        let (addr, port) = (local[..idx].to_string(), local[idx + 1..].to_string());
+        m.entry(port)
+            .and_modify(|cur: &mut String| {
+                if cur == "127.0.0.1" && addr != "127.0.0.1" {
+                    *cur = addr.clone();
+                }
+            })
+            .or_insert(addr);
+    }
+    m
+}
+
+/// `delonix vm reach` — how VMs reach container services. A published port is
+/// reachable from a libvirt VM only if bound to an address the VM routes to
+/// (the VM network gateway, e.g. `192.168.122.1`), not the safe-by-default
+/// loopback. Surfaces the gap AND the exact fix, instead of leaving the user
+/// with a silent "connection refused" from inside the VM.
+fn cmd_reach(_base: &std::path::Path) -> Result<()> {
+    let gateways = libvirt_gateways();
+    let binds = listening_binds();
+    let gw = gateways
+        .first()
+        .cloned()
+        .unwrap_or_else(|| "<vm-gateway>".into());
+
+    let (_images, store) = super::util::open_stores()?;
+    let mut reachable = output::Table::new(&["CONTAINER", "SERVICE", "ADDRESS (from a VM)"]);
+    let mut hostonly = output::Table::new(&["CONTAINER", "HOST PORT", "BOUND TO"]);
+    let (mut n_reach, mut n_host) = (0usize, 0usize);
+    for c in store.list()? {
+        for p in &c.ports {
+            let hp = p.split(':').next().unwrap_or(p).to_string();
+            match binds.get(&hp).map(String::as_str) {
+                // loopback only → not reachable from VMs
+                Some("127.0.0.1") | Some("127.0.0.0") => {
+                    n_host += 1;
+                    hostonly.row(vec![c.name.clone(), hp, "127.0.0.1 (host only)".into()]);
+                }
+                // bound to a routable address (gateway or 0.0.0.0) → reachable
+                Some(addr) => {
+                    n_reach += 1;
+                    let shown = if addr == "0.0.0.0" || addr == "*" {
+                        gateways.first().cloned().unwrap_or_else(|| addr.to_string())
+                    } else {
+                        addr.to_string()
+                    };
+                    reachable.row(vec![c.name.clone(), p.clone(), format!("{shown}:{hp}")]);
+                }
+                // in the record but no live listener (container stopped) → skip
+                None => {}
+            }
+        }
+    }
+    if !gateways.is_empty() {
+        println!(
+            "{}",
+            super::po::tf(
+                "VM network gateway(s): {gws}",
+                &[("gws", &gateways.join(", "))]
+            )
+        );
+    }
+    if n_reach > 0 {
+        println!();
+        println!("{}", super::po::t("Reachable from VMs:"));
+        reachable.print();
+    }
+    if n_host > 0 {
+        println!();
+        output::warn(&super::po::t(
+            "Published on loopback only — NOT reachable from VMs:",
+        ));
+        hostonly.print();
+        println!(
+            "{}",
+            super::po::tf(
+                "  fix: re-publish bound to the VM gateway — `delonix ingress unpublish <c> <port>`, then `DELONIX_PUBLISH_ADDR={gw} delonix ingress publish <c> <port>` (reachable from VMs on that network, not the external LAN)",
+                &[("gw", &gw)],
+            )
+        );
+    }
+    if n_reach == 0 && n_host == 0 {
+        println!(
+            "{}",
+            super::po::t("no running container publishes a port — nothing for a VM to reach yet")
+        );
+    }
+    Ok(())
 }
 
 /// A VM's state as text, without the raw enum `{:?}`: `Failed(137)` from
@@ -1382,8 +1528,49 @@ fn cmd_init(
 
 #[cfg(test)]
 mod tests {
-    use super::{build_meta_data, build_user_data, fmt_vm_status, VmSpec};
+    use super::{
+        build_meta_data, build_user_data, fmt_vm_status, parse_ip_gateways, parse_ss_binds, VmSpec,
+    };
     use delonix_runtime_core::Status;
+
+    #[test]
+    fn parse_ip_gateways_pega_so_as_virbr() {
+        let out = "\
+lo               UNKNOWN        127.0.0.1/8
+virbr0           UP             192.168.122.1/24
+br0              DOWN           10.0.0.1/24
+virbr1           UP             10.10.100.1/24
+delonix0         UNKNOWN        10.200.0.1/16";
+        // Só as bridges libvirt (virbr*) são gateways de VM — nem o delonix0
+        // (SDN, no netns do holder) nem br0 (bridge de host qualquer) entram.
+        assert_eq!(parse_ip_gateways(out), vec!["192.168.122.1", "10.10.100.1"]);
+    }
+
+    #[test]
+    fn parse_ss_binds_classifica_loopback_vs_gateway() {
+        let out = "\
+LISTEN 0      1          127.0.0.1:8069  0.0.0.0:*
+LISTEN 0      1      192.168.122.1:18077 0.0.0.0:*
+LISTEN 0      128          0.0.0.0:22    0.0.0.0:*
+LISTEN 0      128             [::]:443   [::]:*";
+        let m = parse_ss_binds(out);
+        assert_eq!(m.get("8069").map(String::as_str), Some("127.0.0.1")); // loopback → host-only
+        assert_eq!(m.get("18077").map(String::as_str), Some("192.168.122.1")); // gateway → VM-reachable
+        assert_eq!(m.get("22").map(String::as_str), Some("0.0.0.0")); // all ifaces
+        assert_eq!(m.get("443").map(String::as_str), Some("[::]")); // IPv6, parse não estoura
+    }
+
+    #[test]
+    fn parse_ss_binds_prefere_nao_loopback_quando_a_porta_tem_dois() {
+        // Uma porta com listener em loopback E no gateway conta como alcançável.
+        let out = "\
+LISTEN 0 1 127.0.0.1:9000 0.0.0.0:*
+LISTEN 0 1 192.168.122.1:9000 0.0.0.0:*";
+        assert_eq!(
+            parse_ss_binds(out).get("9000").map(String::as_str),
+            Some("192.168.122.1")
+        );
+    }
 
     #[test]
     fn vmspec_aceita_snake_case_legado_e_camel_case_canonico() {

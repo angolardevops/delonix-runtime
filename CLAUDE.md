@@ -706,12 +706,36 @@ Bug report real: `vm create dev` mostrava `IP <none>` para sempre — sem
   192.168.122.x + containers SDN 10.210.x): **container→VM funciona
   nativamente** (container → holder → slirp → stack do host → virbr0; provado
   com banner SSH recebido de dentro do kaeso-odoo) e as regras de EGRESS
-  por-container governam-no (daddr CIDR). **VM→container**: via portas
-  publicadas no host (o hostfwd do slirp escuta 0.0.0.0 — da VM, o gateway
-  192.168.122.1) ou pelo proxy L7; IPs de container DIRECTOS são inalcançáveis
-  de fora (NAT do slirp) — dataplane próprio é trabalho futuro (`delonixd`).
-  VM↔VM na mesma rede nat: directo pela virbr0. IP do ingress (SDN) para VM =
-  backend Cloud Hypervisor (tap no holder), como sempre.
+  por-container governam-no (daddr CIDR). **VM→container**: por porta publicada
+  ligada ao gateway da rede da VM, ou pelo proxy L7. IPs de container DIRECTOS
+  são inalcançáveis de fora do netns do holder (NAT do slirp) — juntar as duas
+  casas (virbr0 do host ↔ SDN no netns do holder) exige `CAP_NET_ADMIN` no
+  init-netns do host (um veth+rotas privilegiado), fora do modelo rootless;
+  trabalho futuro opt-in (`delonixd`), NÃO um toggle (o `delonix0` não é bridge
+  de host — confirmado). VM↔VM na mesma rede nat: directo pela virbr0. IP do
+  ingress (SDN) para VM = backend Cloud Hypervisor (tap no holder, MESMA SDN dos
+  containers → alcança-os por IP directo; provado por construção, mas a golden
+  image k8s só arranca em libvirt, não em CH).
+
+### `delonix vm reach` — descoberta VM→container (sem dataplane novo)
+
+O caminho VM→container por **porta publicada** só funciona se o bind for um
+endereço que a VM roteia — o **gateway da rede libvirt** (ex.: `192.168.122.1`),
+não o loopback (o default SEGURO, que faz o VM→container falhar em silêncio com
+"connection refused"). O mecanismo já existia (`DELONIX_PUBLISH_ADDR=<gw>` no
+`slirp_add_hostfwd`, IPv4 validado); ligar ao gateway do libvirt expõe às VMs
+dessa rede **mas não à LAN externa** (192.168.122/24 é NAT). **Provado E2E**: de
+dentro de uma VM (`ubuntu@192.168.122.50`), `curl 192.168.122.1:<porta>` →
+HTTP 200 para um container na SDN; o loopback-bound recusa, como esperado.
+
+`delonix vm reach` (`cmd/vm.rs`, `cmd_reach`) torna isto descobrível: lista os
+gateways `virbr*` (`parse_ip_gateways`), lê o bind VIVO de cada porta publicada
+via `ss -tlnH` (`parse_ss_binds` — o bind NÃO está no registo, veio do env var
+no publish), e separa "alcançáveis a partir de VMs" (endereço:porta) dos
+"loopback-only" (com o comando exacto de correção: `unpublish` + republish com
+`DELONIX_PUBLISH_ADDR=<gw>`). Read-only, zero privilégio, zero mudança ao default
+seguro. Parsers puros e testados (`parse_ip_gateways_pega_so_as_virbr`,
+`parse_ss_binds_classifica_loopback_vs_gateway`).
 
 ## Firewall `ingress`/`egress` — o último comando ganha (+ `rm` cirúrgico)
 

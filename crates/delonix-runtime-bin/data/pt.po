@@ -2005,3 +2005,21 @@ msgstr "Consola de '{name}'. Para voltar ao host: prima Ctrl+]  (exit/logout ape
 
 msgid "Back to the host shell."
 msgstr "De volta ao shell do host."
+
+msgid "How VMs reach containers: for each libvirt VM network, the container services published on its gateway (reachable), and the ones bound to loopback only (host-only) with the exact command to expose them."
+msgstr "Como as VMs alcançam containers: por cada rede de VMs libvirt, os serviços de container publicados no seu gateway (alcançáveis) e os que estão só em loopback (host-only), com o comando exacto para os expor."
+
+msgid "VM network gateway(s): {gws}"
+msgstr "Gateway(s) das redes de VM: {gws}"
+
+msgid "Reachable from VMs:"
+msgstr "Alcançáveis a partir de VMs:"
+
+msgid "Published on loopback only — NOT reachable from VMs:"
+msgstr "Publicados só em loopback — NÃO alcançáveis a partir de VMs:"
+
+msgid "  fix: re-publish bound to the VM gateway — `delonix ingress unpublish <c> <port>`, then `DELONIX_PUBLISH_ADDR={gw} delonix ingress publish <c> <port>` (reachable from VMs on that network, not the external LAN)"
+msgstr "  correção: re-publica ligado ao gateway da VM — `delonix ingress unpublish <c> <porta>`, depois `DELONIX_PUBLISH_ADDR={gw} delonix ingress publish <c> <porta>` (alcançável pelas VMs dessa rede, não pela LAN externa)"
+
+msgid "no running container publishes a port — nothing for a VM to reach yet"
+msgstr "nenhum container em execução publica uma porta — nada para uma VM alcançar ainda"
