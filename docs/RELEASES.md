@@ -4,6 +4,52 @@
 > (regenerado automaticamente pelo pipeline de release a cada tag publicada).
 > Não editar à mão — edita a nota da release respectiva.
 
+## v0.7.12 — VM com IP alcançável por omissão (`nat` inteligente + `--ip` estático)
+
+### VM — rede
+
+Do bug report real: `vm create dev` mostrava `IP <none>` para sempre. Sem
+`--net-mode` e em rootless, o backend libvirt caía em `qemu:///session`
+user-mode (SLIRP), cujo IP é invisível ao `domifaddr` e inalcançável do host.
+
+- **Default inteligente `nat`**: sem `--net-mode`, se a conexão de SISTEMA do
+  libvirt é utilizável (utilizador no grupo `libvirt`), a VM passa a receber
+  **IP por DHCP da rede libvirt** — visível no `vm ls` e alcançável. Só quando
+  o system libvirt não está disponível fica user-mode, e aí o `create` **avisa
+  alto** ("no reachable IP — join the `libvirt` group, or pass `--net-mode`")
+  em vez de um `<none>` silencioso.
+- **`--ip <estático>`** (e `spec.ip` no manifesto) — reserva DHCP MAC→IP na
+  rede libvirt (modo `nat`). O guest não precisa de config de rede no
+  cloud-init; noutros modos, erro claro.
+- **`vm ls`/`--wait` corrigidos**: `Vm.tap` regista o modo EFECTIVO
+  (`nat`/`bridge`/`user`), por isso o `--wait` espera o lease DHCP de uma VM
+  `nat` em vez de desistir aos 3s (antes desistia para qualquer VM libvirt sem
+  IP imediato).
+
+### VM — dois bloqueios corrigidos pelo caminho
+
+- **AppArmor + golden image**: o QEMU abria o overlay mas levava `Permission
+  denied` no qcow2 base (`vm-images/…`). O perfil AppArmor por-domínio
+  (virt-aa-helper, Ubuntu) só autoriza caminhos presentes no XML — o domínio
+  passa a declarar `<backingStore>` explícito (formato via `qemu-img info`,
+  nunca pela extensão).
+- **DNS interno resolve VMs `nat`**: uma VM `nat` vive na `virbr0` do HOST e o
+  seu MAC nunca aparece na tabela `neigh` do holder (o único mecanismo
+  anterior). O `dns_resolve` passa a usar o **IP do registo** primeiro (neigh
+  como fallback para VMs Cloud Hypervisor), e o `vm status` **persiste** o IP
+  aprendido por DHCP após o arranque.
+
+### Alcançabilidade VM↔container (validado ao vivo)
+
+Container → VM funciona nativamente (container na SDN → holder → slirp → stack
+do host → `virbr0`; provado com banner SSH recebido de dentro de um container),
+e o egress por-container governa-o. VM → container por IP directo continua a
+passar por portas publicadas no host ou pelo proxy L7 (o NAT do slirp esconde
+os IPs de container) — um dataplane que exponha IPs de container a VMs é
+trabalho futuro (`delonixd`), fora do âmbito deste fix.
+
+---
+
 ## v0.7.11 — firewall: o último comando ganha (`allow` depois de `deny` volta a abrir)
 
 ### Firewall `ingress`/`egress`
