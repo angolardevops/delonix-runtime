@@ -30,6 +30,18 @@ struct VmSpec {
     firmware: Option<String>,
     cmdline: Option<String>,
     seed: Option<String>,
+    /// cloud-init: hostname applied on first boot (CLI `--hostname`). Without an
+    /// explicit `seed`, a NoCloud ISO is generated from these fields — full
+    /// parity with `vm create` in the declarative path.
+    hostname: Option<String>,
+    /// cloud-init: authorized public SSH keys (CLI `--ssh-key`, repeatable).
+    /// Each is `ssh-ed25519 AAAA…` or `@/path` to read from a file.
+    #[serde(default, rename = "sshKeys", alias = "ssh_keys")]
+    ssh_keys: Vec<String>,
+    /// cloud-init: your own `user-data` (replaces the generated one) — a path or
+    /// `@/path` (CLI `--user-data`). Full control for whoever needs it.
+    #[serde(default, rename = "userData", alias = "user_data")]
+    user_data: Option<String>,
     /// Canonical `restartPolicy` (uniform with `Container`); `restart_policy`
     /// stays accepted so earlier manifests don't break.
     #[serde(rename = "restartPolicy", alias = "restart_policy")]
@@ -84,6 +96,11 @@ pub(crate) const VM_SPEC_FIELDS: &[&str] = &[
     "firmware",
     "cmdline",
     "seed",
+    "hostname",
+    "sshKeys",
+    "ssh_keys",
+    "userData",
+    "user_data",
     "restartPolicy",
     "restart_policy",
     "hugepages",
@@ -383,16 +400,25 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
         // so any API consumer inherits it — here the backend is passed as
         // declared (with explicit CH + volumes, the engine refuses with a clear error).
 
-        // If there are volumes and no own seed was given, generate a seed with the
-        // 9p mounts (else the `<filesystem>` exists but the guest won't mount it).
+        // Same rule as the CLI `vm create`: unless an explicit `seed` is given,
+        // ALWAYS generate a NoCloud seed. Without a datasource the cloud image's
+        // cloud-init skips the network phase and the VM boots with no IP/route —
+        // so the declarative path used to leave a volume-less `kind: Vm` offline.
+        // The seed also carries hostname/sshKeys/userData (CLI parity) and the
+        // 9p volume mounts.
         let seed = match spec.seed {
             Some(s) => Some(s),
-            None if !vm_volumes.is_empty() => Some(
-                generate_seed_iso(name, None, &[], None, &vm_volumes)?
-                    .to_string_lossy()
-                    .into_owned(),
+            None => Some(
+                generate_seed_iso(
+                    name,
+                    spec.hostname.as_deref(),
+                    &spec.ssh_keys,
+                    spec.user_data.as_deref(),
+                    &vm_volumes,
+                )?
+                .to_string_lossy()
+                .into_owned(),
             ),
-            None => None,
         };
 
         let cfg = VmConfig {
