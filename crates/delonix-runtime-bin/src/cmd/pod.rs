@@ -182,20 +182,33 @@ fn members_of(store: &delonix_runtime_core::Store, pod: &str) -> Result<Vec<Cont
 fn remove_pod(name: &str, force: bool) -> Result<()> {
     let (images, store) = open_stores()?;
     let members = members_of(&store, name)?;
-    // Remove each member (best-effort). A member's `rm` does NOT tear down the
-    // shared netns (it is `--net host` in its own record) — same contract the CRI
-    // relies on; the netns is detached ONCE, below.
-    for c in &members {
-        let _ = container::cmd_rm(&images, &store, &c.name, force);
-    }
-    // Detach the pod's shared netns (idempotent-ish; harmless if already gone).
-    let netns = pod_netns_name(name);
-    infra::detach_container(&netns, &infra::container_ip(&netns));
     if members.is_empty() {
         return Err(Error::Invalid(format!(
             "no such pod: {name} (see `delonix pod ls`)"
         )));
     }
+    // Remove each member, PROPAGATING failures (no silent success — the invariant).
+    // Without `--force`, `cmd_rm` refuses a RUNNING container (docker semantics), so
+    // a running pod needs `-f`. A member's `rm` does NOT tear down the shared netns
+    // (it is `--net host` in its own record) — same contract the CRI relies on; the
+    // netns is detached ONCE, below, and ONLY after every member is gone.
+    let mut failed = Vec::new();
+    for c in &members {
+        if let Err(e) = container::cmd_rm(&images, &store, &c.name, force) {
+            failed.push(format!("{}: {e}", c.name));
+        }
+    }
+    if !failed.is_empty() {
+        return Err(Error::Invalid(format!(
+            "pod '{name}': {}/{} container(s) NOT removed ({}). Retry with `delonix pod rm -f {name}`.",
+            failed.len(),
+            members.len(),
+            failed.join("; ")
+        )));
+    }
+    // Now safe to tear down the shared netns (all members gone).
+    let netns = pod_netns_name(name);
+    infra::detach_container(&netns, &infra::container_ip(&netns));
     println!(
         "pod/{name}: removed ({} container(s) + shared netns)",
         members.len()
