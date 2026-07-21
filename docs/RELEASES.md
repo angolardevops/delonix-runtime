@@ -4,6 +4,42 @@
 > (regenerado automaticamente pelo pipeline de release a cada tag publicada).
 > Não editar à mão — edita a nota da release respectiva.
 
+## v0.7.18 — `vm bridge`: VM↔container por IP directo (EXPERIMENTAL, root, opt-in)
+
+### VM — `delonix vm bridge`/`unbridge`
+
+A última fronteira que o modelo rootless não fecha sozinho: dar a uma VM libvirt
+alcançabilidade **DIRECTA por IP** aos containers da SDN (e vice-versa). A bridge
+da SDN (`delonix0`/`dlxn…`) vive dentro do netns do holder (`unshare --user
+--net`), inalcançável do host sem `CAP_NET_ADMIN` no init-netns — por isso `vm
+bridge` **exige root**, é a excepção deliberada ao daemonless-rootless, e usa
+**dry-run por omissão** (só imprime o plano; `--apply` executa).
+
+- **Mecanismo**: `veth` do host para dentro do netns do holder (ponta SDN
+  enslaved à bridge da rede) + endereço/rota no host + `ip_forward` + rota de
+  retorno das subnets das VMs dentro do holder. **Sem SNAT**: o container vê o
+  IP real da VM, e o firewall `ingress`/`egress` por-container continua a
+  governar o tráfego.
+- **Robustez**: regras `iptables -I FORWARD` ACCEPT nos dois sentidos (contra o
+  REJECT default do libvirt), e establish **idempotente** (limpa um veth órfão
+  antes de criar). `vm unbridge <rede>` desfaz tudo.
+- **Segurança**: abre VM↔container **só na rede indicada**; a subnet da VM é a
+  NAT do libvirt (ex.: `192.168.122.0/24`), **não** a LAN externa.
+- **Sob sudo** resolve o state do utilizador invocador (`$SUDO_USER`), não do
+  root — encontra as tuas redes/holder na mesma.
+
+**Validado end-to-end** num host real: de dentro de uma VM libvirt,
+`ping`/`curl` a um container por IP directo → **HTTP 200** (`ttl=63`, uma hop
+pelo forward do host); `unbridge` limpa. Complementa o `vm reach` (VM→container
+por porta publicada, **sem** privilégio) da v0.7.15.
+
+**Follow-ups conhecidos**: persistência (re-aplicar num respawn do holder) e
+**descoberta por NOME** (a VM resolver `<container>.<ns>.delonix.internal` via o
+DNS do holder — os IPs de container são dinâmicos por DHCP). As mensagens do
+comando estão em EN (i18n do `pt.po` pendente para este comando experimental).
+
+---
+
 ## v0.7.15 — `vm reach` (descoberta VM→container) + `kind: Container` forma de Pod k8s
 
 ### VM — `delonix vm reach`
