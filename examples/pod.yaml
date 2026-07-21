@@ -1,0 +1,48 @@
+# kind: Container — Pod-shaped (k8s-like). Apply with:
+#   delonix container apply -f examples/pod.yaml
+# The familiar Pod schema: spec.containers[] with structured ports/env/resources/
+# securityContext + pod-level volumes. v1 accepts ONE container (>1 is an error).
+# The flat single-container spec (see examples/*, `image:` at the top) still works.
+apiVersion: delonix.io/v1
+kind: Container
+metadata:
+  name: web
+  namespace: default
+spec:
+  # delonix extensions (pod-level):
+  network: web-net            # host | none | <custom network>
+  restartPolicy: Always       # Always | OnFailure | Never  (delonix values also OK)
+  expose: 80                  # auto-register this HTTP port in the L7 proxy (optional)
+  containers:
+    - name: web
+      image: nginx:latest
+      command: ["/bin/sh", "-c"]         # overrides ENTRYPOINT (k8s semantics)
+      args: ["nginx -g 'daemon off;'"]   # overrides CMD
+      ports:
+        - containerPort: 80
+          hostPort: 8080                 # published only when hostPort is set
+          protocol: TCP
+      env:
+        - name: TZ
+          value: UTC
+      volumeMounts:
+        - name: site
+          mountPath: /usr/share/nginx/html
+          readOnly: true
+        - name: scratch
+          mountPath: /tmp/cache
+      resources:
+        limits:
+          cpu: "500m"                     # 500m → 0.5 cores
+          memory: 256Mi
+      securityContext:
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop: ["ALL"]
+          add: ["NET_BIND_SERVICE"]
+  volumes:
+    - name: site
+      hostPath:
+        path: /srv/www                    # bind mount
+    - name: scratch
+      emptyDir: {}                        # ephemeral → tmpfs

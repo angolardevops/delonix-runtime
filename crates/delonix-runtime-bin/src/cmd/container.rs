@@ -184,6 +184,317 @@ fn custom_net_name(net: &str) -> Option<String> {
     (net != "host" && net != "none").then(|| net.to_string())
 }
 
+// ===========================================================================
+// Pod-shaped `kind: Container` (k8s-like) — opt-in when `spec.containers` is
+// present. Normalizes to the SAME internal `RunOpts` as the flat spec, so the
+// engine is untouched. v1: EXACTLY ONE container (a clear error on >1). The flat
+// spec stays fully supported (back-compat); the two shapes never mix.
+// ===========================================================================
+
+/// k8s-like Pod spec, parsed when `spec.containers` is present.
+#[derive(Debug, Deserialize)]
+struct PodSpec {
+    containers: Vec<PodContainer>,
+    #[serde(default)]
+    volumes: Vec<PodVolume>,
+    /// delonix extension: network to attach (`host`|`none`|`<custom>`). Default `host`.
+    #[serde(default = "default_net")]
+    network: String,
+    /// k8s `restartPolicy`: `Always`|`OnFailure`|`Never` (delonix values also accepted).
+    #[serde(default = "default_restart", rename = "restartPolicy")]
+    restart_policy: String,
+    #[serde(default)]
+    hostname: Option<String>,
+    /// delonix extension: auto-register an HTTP port in the L7 proxy.
+    #[serde(default)]
+    expose: Option<u16>,
+    #[serde(default = "default_true")]
+    detach: bool,
+}
+
+/// One entry of `spec.containers[]`.
+#[derive(Debug, Deserialize)]
+struct PodContainer {
+    #[serde(default)]
+    #[allow(dead_code)] // accepted for k8s fidelity; delonix names the whole pod
+    name: Option<String>,
+    image: String,
+    /// k8s `command` — overrides the image ENTRYPOINT.
+    #[serde(default)]
+    command: Vec<String>,
+    /// k8s `args` — overrides the image CMD.
+    #[serde(default)]
+    args: Vec<String>,
+    #[serde(default, rename = "workingDir")]
+    working_dir: Option<String>,
+    #[serde(default)]
+    ports: Vec<PodPort>,
+    #[serde(default)]
+    env: Vec<PodEnvVar>,
+    #[serde(default, rename = "volumeMounts")]
+    volume_mounts: Vec<PodVolumeMount>,
+    #[serde(default)]
+    resources: Option<PodResources>,
+    #[serde(default, rename = "securityContext")]
+    security_context: Option<PodSecurityContext>,
+    #[serde(default)]
+    #[allow(dead_code)] // accepted; delonix decides tty by attach/detach
+    tty: bool,
+}
+
+#[derive(Debug, Deserialize)]
+struct PodPort {
+    #[serde(rename = "containerPort")]
+    container_port: u16,
+    #[serde(default, rename = "hostPort")]
+    host_port: Option<u16>,
+    #[serde(default)]
+    protocol: Option<String>,
+    #[serde(default, rename = "hostIP")]
+    host_ip: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct PodEnvVar {
+    name: String,
+    #[serde(default)]
+    value: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct PodVolumeMount {
+    name: String,
+    #[serde(rename = "mountPath")]
+    mount_path: String,
+    #[serde(default, rename = "readOnly")]
+    read_only: bool,
+}
+
+#[derive(Debug, Deserialize)]
+struct PodResources {
+    #[serde(default)]
+    limits: Option<PodResourceList>,
+    #[serde(default)]
+    #[allow(dead_code)] // requests are advisory; delonix enforces limits
+    requests: Option<PodResourceList>,
+}
+
+#[derive(Debug, Deserialize)]
+struct PodResourceList {
+    #[serde(default)]
+    cpu: Option<String>,
+    #[serde(default)]
+    memory: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct PodSecurityContext {
+    #[serde(default)]
+    privileged: bool,
+    #[serde(default, rename = "runAsUser")]
+    run_as_user: Option<i64>,
+    #[serde(default, rename = "readOnlyRootFilesystem")]
+    read_only_root_filesystem: bool,
+    #[serde(default)]
+    capabilities: Option<PodCapabilities>,
+}
+
+#[derive(Debug, Deserialize)]
+struct PodCapabilities {
+    #[serde(default)]
+    add: Vec<String>,
+    #[serde(default)]
+    drop: Vec<String>,
+}
+
+/// One entry of the Pod-level `spec.volumes[]` (referenced by `volumeMounts`).
+#[derive(Debug, Deserialize)]
+struct PodVolume {
+    name: String,
+    #[serde(default, rename = "hostPath")]
+    host_path: Option<PodHostPath>,
+    #[serde(default, rename = "emptyDir")]
+    empty_dir: Option<PodEmptyDir>,
+    #[serde(default, rename = "persistentVolumeClaim")]
+    pvc: Option<PodPvc>,
+    /// delonix extension: a named `Volume`/`Storage` directly by source string.
+    #[serde(default)]
+    source: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct PodHostPath {
+    path: String,
+}
+#[derive(Debug, Deserialize)]
+struct PodEmptyDir {
+    #[serde(default)]
+    #[allow(dead_code)] // "" | "Memory" — delonix maps emptyDir to tmpfs either way
+    medium: Option<String>,
+}
+#[derive(Debug, Deserialize)]
+struct PodPvc {
+    #[serde(rename = "claimName")]
+    claim_name: String,
+}
+
+/// Top-level field names accepted in a Pod-shaped `spec` (for the unknown-field warning).
+pub(crate) const POD_SPEC_FIELDS: &[&str] = &[
+    "containers",
+    "volumes",
+    "network",
+    "restartPolicy",
+    "hostname",
+    "expose",
+    "detach",
+];
+
+/// k8s CPU quantity → docker-style core count: `"500m"` → `"0.5"`, `"2"` → `"2"`.
+fn cpu_quantity_to_cores(q: &str) -> String {
+    if let Some(m) = q.strip_suffix('m') {
+        if let Ok(milli) = m.trim().parse::<f64>() {
+            return format!("{}", milli / 1000.0);
+        }
+    }
+    q.trim().to_string()
+}
+
+/// Normalizes a Pod-shaped spec (k8s-like) into the flat [`RunOpts`]. v1 accepts
+/// exactly one container. Maps command/args, structured ports/env,
+/// volumeMounts+volumes, resources and securityContext to the docker-style fields.
+fn pod_to_run_opts(name: &str, namespace: Option<String>, pod: PodSpec) -> Result<RunOpts> {
+    if pod.containers.is_empty() {
+        return Err(Error::Invalid(format!(
+            "Container '{name}': spec.containers is empty"
+        )));
+    }
+    if pod.containers.len() > 1 {
+        return Err(Error::Invalid(format!(
+            "Container '{name}': multi-container pods are not supported yet — declare a single container (found {})",
+            pod.containers.len()
+        )));
+    }
+    let c = pod.containers.into_iter().next().unwrap();
+    if c.working_dir.is_some() {
+        output::warn(super::po::t(
+            "kind: Container: `workingDir` is not applied yet (ignored)",
+        ));
+    }
+
+    // command (k8s) → entrypoint + leading args; args (k8s) → trailing args.
+    let (entrypoint, command) = if c.command.is_empty() {
+        (None, c.args)
+    } else {
+        let mut it = c.command.into_iter();
+        let ep = it.next();
+        let mut cmd: Vec<String> = it.collect();
+        cmd.extend(c.args);
+        (ep, cmd)
+    };
+
+    // ports: publish only those declaring a hostPort (a bare containerPort is
+    // informational in k8s and does not publish).
+    let mut ports = Vec::new();
+    for p in &c.ports {
+        if let Some(hp) = p.host_port {
+            let proto = p.protocol.as_deref().unwrap_or("tcp").to_lowercase();
+            let base = format!("{hp}:{}/{}", p.container_port, proto);
+            ports.push(match &p.host_ip {
+                Some(ip) => format!("{ip}:{base}"),
+                None => base,
+            });
+        }
+    }
+
+    let env = c
+        .env
+        .iter()
+        .map(|e| format!("{}={}", e.name, e.value))
+        .collect();
+
+    // volumeMounts resolved against the pod volumes; emptyDir → tmpfs (ephemeral).
+    let vmap: std::collections::HashMap<&str, &PodVolume> =
+        pod.volumes.iter().map(|v| (v.name.as_str(), v)).collect();
+    let mut volumes = Vec::new();
+    let mut tmpfs = Vec::new();
+    for m in &c.volume_mounts {
+        let ro = if m.read_only { ":ro" } else { "" };
+        let vol = vmap.get(m.name.as_str()).ok_or_else(|| {
+            Error::Invalid(format!(
+                "Container '{name}': volumeMount '{}' has no matching entry in spec.volumes",
+                m.name
+            ))
+        })?;
+        if let Some(hp) = &vol.host_path {
+            volumes.push(format!("{}:{}{ro}", hp.path, m.mount_path));
+        } else if let Some(pvc) = &vol.pvc {
+            volumes.push(format!("{}:{}{ro}", pvc.claim_name, m.mount_path));
+        } else if let Some(src) = &vol.source {
+            volumes.push(format!("{}:{}{ro}", src, m.mount_path));
+        } else if vol.empty_dir.is_some() {
+            tmpfs.push(m.mount_path.clone());
+        } else {
+            volumes.push(format!("{}:{}{ro}", vol.name, m.mount_path));
+        }
+    }
+
+    // resources.limits → memory/cpus (requests are advisory, ignored).
+    let (mut memory, mut cpus) = (None, None);
+    if let Some(res) = &c.resources {
+        if let Some(lim) = &res.limits {
+            memory = lim.memory.clone();
+            cpus = lim.cpu.as_deref().map(cpu_quantity_to_cores);
+        }
+    }
+
+    // securityContext → privileged/user/read_only/cap_add/cap_drop.
+    let (mut privileged, mut user, mut read_only, mut cap_add, mut cap_drop) =
+        (false, None, false, Vec::new(), Vec::new());
+    if let Some(sc) = &c.security_context {
+        privileged = sc.privileged;
+        read_only = sc.read_only_root_filesystem;
+        user = sc.run_as_user.map(|u| u.to_string());
+        if let Some(caps) = &sc.capabilities {
+            cap_add = caps.add.clone();
+            cap_drop = caps.drop.clone();
+        }
+    }
+
+    // restartPolicy: k8s → delonix (delonix values pass through).
+    let restart = match pod.restart_policy.as_str() {
+        "Always" => "always",
+        "OnFailure" => "on-failure",
+        "Never" => "no",
+        other => other,
+    }
+    .to_string();
+
+    Ok(RunOpts {
+        detach: pod.detach,
+        name: Some(name.to_string()),
+        hostname: pod.hostname,
+        user,
+        net: pod.network,
+        namespace,
+        expose: pod.expose,
+        volumes,
+        ports,
+        privileged,
+        entrypoint,
+        restart,
+        env,
+        image: c.image,
+        command,
+        memory,
+        cpus,
+        read_only,
+        cap_add,
+        cap_drop,
+        tmpfs,
+        ..Default::default()
+    })
+}
+
 // FIXME(follow-up): variants with a large size disparity (≥880 B). Boxing the
 // fat variants is a real optimization but awkward with clap's `#[derive(Subcommand)]`
 // — left for a dedicated change; the cost here is a short-lived CLI.
@@ -770,12 +1081,29 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
     let (images, store) = open_stores()?;
     for doc in manifest::of_kind(docs, "Container") {
         let name = &doc.metadata.name;
+        // Pod-shaped (k8s-like) when `spec.containers` is present; otherwise the
+        // flat spec. The two shapes never mix.
+        let pod_shaped = doc.spec.get("containers").is_some();
         // Warn about typos BEFORE the early-continue: a manifest re-applied
         // against an already-existing resource should also see the warning (otherwise
         // the typo never shows up after the first creation).
-        manifest::warn_unknown_fields(doc, CONTAINER_SPEC_FIELDS);
+        manifest::warn_unknown_fields(
+            doc,
+            if pod_shaped {
+                POD_SPEC_FIELDS
+            } else {
+                CONTAINER_SPEC_FIELDS
+            },
+        );
         if store.list()?.iter().any(|c| &c.name == name) {
             println!("container/{name}: already exists, nothing to do");
+            continue;
+        }
+        if pod_shaped {
+            let pod: PodSpec = manifest::spec_of(doc)?;
+            let opts = pod_to_run_opts(name, doc.metadata.namespace.clone(), pod)?;
+            cmd_run(&images, &store, opts)?;
+            println!("container/{name}: created");
             continue;
         }
         let spec: ContainerSpec = manifest::spec_of(doc)?;
@@ -3536,5 +3864,73 @@ mod tests {
         assert!(policy_supervised("unless-stopped"));
         assert!(policy_supervised("on-failure"));
         assert!(policy_supervised("on-failure:5"));
+    }
+
+    #[test]
+    fn pod_shape_normalizes_to_run_opts() {
+        let yaml = r#"
+containers:
+  - name: web
+    image: nginx:latest
+    command: ["/bin/sh", "-c"]
+    args: ["nginx -g 'daemon off;'"]
+    ports:
+      - containerPort: 80
+        hostPort: 8080
+        protocol: TCP
+    env:
+      - name: FOO
+        value: bar
+    volumeMounts:
+      - name: data
+        mountPath: /data
+        readOnly: true
+      - name: cache
+        mountPath: /cache
+    resources:
+      limits:
+        cpu: "500m"
+        memory: "256Mi"
+    securityContext:
+      privileged: true
+      runAsUser: 1000
+      readOnlyRootFilesystem: true
+      capabilities:
+        add: ["NET_ADMIN"]
+        drop: ["ALL"]
+volumes:
+  - name: data
+    hostPath:
+      path: /srv/data
+  - name: cache
+    emptyDir: {}
+network: mynet
+restartPolicy: OnFailure
+"#;
+        let pod: super::PodSpec = serde_yaml::from_str(yaml).unwrap();
+        let opts = super::pod_to_run_opts("web", None, pod).unwrap();
+        assert_eq!(opts.image, "nginx:latest");
+        assert_eq!(opts.entrypoint.as_deref(), Some("/bin/sh"));
+        assert_eq!(opts.command, vec!["-c", "nginx -g 'daemon off;'"]);
+        assert_eq!(opts.ports, vec!["8080:80/tcp"]);
+        assert_eq!(opts.env, vec!["FOO=bar"]);
+        assert!(opts.volumes.contains(&"/srv/data:/data:ro".to_string()));
+        assert_eq!(opts.tmpfs, vec!["/cache"]);
+        assert_eq!(opts.cpus.as_deref(), Some("0.5"));
+        assert_eq!(opts.memory.as_deref(), Some("256Mi"));
+        assert!(opts.privileged);
+        assert_eq!(opts.user.as_deref(), Some("1000"));
+        assert!(opts.read_only);
+        assert_eq!(opts.cap_add, vec!["NET_ADMIN"]);
+        assert_eq!(opts.cap_drop, vec!["ALL"]);
+        assert_eq!(opts.net, "mynet");
+        assert_eq!(opts.restart, "on-failure");
+    }
+
+    #[test]
+    fn pod_shape_rejects_multi_container() {
+        let yaml = "containers:\n  - image: a\n  - image: b\n";
+        let pod: super::PodSpec = serde_yaml::from_str(yaml).unwrap();
+        assert!(super::pod_to_run_opts("x", None, pod).is_err());
     }
 }
