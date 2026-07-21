@@ -1,69 +1,69 @@
-//! Fundação de observabilidade do Delonix Runtime (C1): logging ESTRUTURADO via
-//! `tracing` (fatia 1) + **spans distribuídos via OpenTelemetry/OTLP** (fatia 3,
-//! esta), para substituir os `eprintln!`/`println!` ad-hoc espalhados pelo motor
-//! e dar a um SRE traces correlacionáveis a milhares de nós.
+//! Observability foundation of the Delonix Runtime (C1): STRUCTURED logging via
+//! `tracing` (slice 1) + **distributed spans via OpenTelemetry/OTLP** (slice 3,
+//! this one), to replace the ad-hoc `eprintln!`/`println!` scattered across the engine
+//! and give an SRE traces correlatable across thousands of nodes.
 //!
-//! Um runtime de containers a competir com containerd/CRI-O tem de emitir logs e
-//! traces que um SRE consiga filtrar e correlacionar; `println` num terminal não
-//! chega. Esta camada liga o subscriber `fmt` (sempre) e, quando pedido, uma
-//! layer OTLP que exporta os spans do `tracing` para um collector OpenTelemetry.
+//! A container runtime competing with containerd/CRI-O must emit logs and
+//! traces that an SRE can filter and correlate; `println` in a terminal is not
+//! enough. This layer connects the `fmt` subscriber (always) and, when requested, an
+//! OTLP layer that exports the `tracing` spans to an OpenTelemetry collector.
 //!
-//! ## Nuance honesta: exportador em batch vs. CLI síncrona
+//! ## Honest nuance: batch exporter vs. synchronous CLI
 //!
-//! O exportador OTLP corre num **modelo de batch**: as spans são bufferizadas e
-//! despachadas periodicamente. Escolhemos deliberadamente o `BatchSpanProcessor`
-//! do `opentelemetry_sdk`, que corre numa **thread dedicada** (`futures_executor::
-//! block_on`) e um cliente HTTP **bloqueante** (`reqwest/blocking`) — logo **não
-//! precisa de um runtime tokio ambiente** no momento da instalação. Isto é o que
-//! permite ligar OTLP tanto no servidor `delonix-cri` (que tem tokio) como na CLI
-//! `delonix` (síncrona, sem tokio) sem fingir nada.
+//! The OTLP exporter runs on a **batch model**: spans are buffered and
+//! dispatched periodically. We deliberately chose the `BatchSpanProcessor`
+//! of `opentelemetry_sdk`, which runs on a **dedicated thread** (`futures_executor::
+//! block_on`) and a **blocking** HTTP client (`reqwest/blocking`) — so it **does not
+//! need an ambient tokio runtime** at the moment of installation. This is what
+//! allows connecting OTLP both in the `delonix-cri` server (which has tokio) and in the CLI
+//! `delonix` (synchronous, without tokio) without faking anything.
 //!
-//! **A limitação real fica na CLI síncrona**: o batch só despacha ao fim de
-//! `scheduled_delay` (~5s) ou num `force_flush`/`shutdown` explícito. A CLI
-//! `delonix` é de vida curta e os seus `main`/entry-points **não** chamam
-//! `shutdown()` (ficam fora do território desta camada), por isso uma invocação
-//! rápida pode terminar ANTES do primeiro flush e perder as spans. O caminho onde
-//! OTLP entrega de forma fiável é o **servidor `delonix-cri`** (processo de longa
-//! duração — o timer do batch flusha em ciclo enquanto o processo vive). Não se
-//! promete o contrário para a CLI síncrona.
+//! **The real limitation is in the synchronous CLI**: the batch only dispatches after
+//! `scheduled_delay` (~5s) or on an explicit `force_flush`/`shutdown`. The CLI
+//! `delonix` is short-lived and its `main`/entry-points do **not** call
+//! `shutdown()` (they stay outside the territory of this layer), so a fast
+//! invocation may terminate BEFORE the first flush and lose the spans. The path where
+//! OTLP delivers reliably is the **`delonix-cri` server** (long-running
+//! process — the batch timer flushes in a cycle while the process lives). The
+//! opposite is not promised for the synchronous CLI.
 //!
-//! ## Transporte
+//! ## Transport
 //!
-//! OTLP/HTTP protobuf, cliente `reqwest` **sem backend de TLS** (endpoint em texto
-//! simples, típico de um collector local). É uma decisão de supply-chain: evita
-//! arrastar `aws-lc-sys`/`openssl`/`native-tls` (C + licença OpenSSL) para um
-//! runtime público mínimo. Um endpoint `https://` não é suportado por desenho.
+//! OTLP/HTTP protobuf, `reqwest` client **without a TLS backend** (plain-text
+//! endpoint, typical of a local collector). It is a supply-chain decision: it avoids
+//! dragging `aws-lc-sys`/`openssl`/`native-tls` (C + OpenSSL license) into a
+//! minimal public runtime. An `https://` endpoint is not supported by design.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
 static INITIALISED: AtomicBool = AtomicBool::new(false);
 
-/// Mantém o `TracerProvider` vivo durante todo o processo. Se fosse largado, o
-/// `BatchSpanProcessor` desligava a thread de exportação e as spans deixavam de
-/// sair. Guardado aqui (além do provider global) para o tempo de vida ser
-/// explícito e independente do estado global do `opentelemetry`.
+/// Keeps the `TracerProvider` alive for the whole process. If it were dropped, the
+/// `BatchSpanProcessor` would shut down the export thread and the spans would stop
+/// going out. Stored here (besides the global provider) so the lifetime is
+/// explicit and independent of the global `opentelemetry` state.
 static OTLP_PROVIDER: std::sync::OnceLock<opentelemetry_sdk::trace::SdkTracerProvider> =
     std::sync::OnceLock::new();
 
-/// Instala o subscriber global de `tracing` a partir do ambiente. **Idempotente**
-/// e à prova de concorrência: chamar duas vezes (ou de dois binários no mesmo
-/// processo de teste) não entra em pânico — a segunda chamada é um no-op.
+/// Installs the global `tracing` subscriber from the environment. **Idempotent**
+/// and concurrency-proof: calling it twice (or from two binaries in the same
+/// test process) does not panic — the second call is a no-op.
 ///
-/// Controlo por ambiente (nada de flags novas na CLI):
-/// - **`DELONIX_LOG`** (ou `RUST_LOG` como alternativa) — filtro por nível/alvo,
-///   sintaxe `env_filter` (ex.: `info`, `delonix_net=debug,warn`). Default `info`.
-/// - **`DELONIX_LOG_FORMAT=json`** — emite JSON estruturado (uma linha por evento,
-///   para ingestão por Loki/ELK); qualquer outro valor (ou ausente) → texto legível.
-/// - **`DELONIX_OTLP_ENDPOINT`** — quando definido (e não vazio), adiciona uma layer
-///   OTLP que exporta as spans para esse collector (ex.: `http://localhost:4318`).
-///   O caminho `/v1/traces` é acrescentado se faltar. Ausente → só `fmt` (sem OTLP,
-///   sem custo). Ver a nuance CLI-sync no topo do módulo.
+/// Control via environment (no new flags on the CLI):
+/// - **`DELONIX_LOG`** (or `RUST_LOG` as an alternative) — filter by level/target,
+///   `env_filter` syntax (e.g.: `info`, `delonix_net=debug,warn`). Default `info`.
+/// - **`DELONIX_LOG_FORMAT=json`** — emits structured JSON (one line per event,
+///   for ingestion by Loki/ELK); any other value (or absent) → readable text.
+/// - **`DELONIX_OTLP_ENDPOINT`** — when set (and non-empty), adds an OTLP
+///   layer that exports the spans to that collector (e.g.: `http://localhost:4318`).
+///   The `/v1/traces` path is appended if missing. Absent → only `fmt` (no OTLP,
+///   no cost). See the CLI-sync nuance at the top of the module.
 ///
-/// Deve ser chamada UMA vez, no arranque de cada binário (`delonix`, `delonix-cri`).
+/// Must be called ONCE, at the startup of each binary (`delonix`, `delonix-cri`).
 pub fn init() {
-    // Evita reinstalar (e o pânico do `set_global_default` já-definido) quando dois
-    // caminhos chamam `init` — o `try_init` já falha em silêncio, mas o guard torna
-    // a intenção explícita e evita o custo de reconstruir o filtro.
+    // Avoids reinstalling (and the panic of an already-set `set_global_default`) when two
+    // paths call `init` — `try_init` already fails silently, but the guard makes
+    // the intent explicit and avoids the cost of rebuilding the filter.
     if INITIALISED.swap(true, Ordering::SeqCst) {
         return;
     }
@@ -71,26 +71,26 @@ pub fn init() {
     use tracing_subscriber::prelude::*;
     use tracing_subscriber::{fmt, EnvFilter, Layer};
 
-    // Prioridade: DELONIX_LOG > RUST_LOG > "info". `env` (não `env_or`) para poder
-    // cair no RUST_LOG quando DELONIX_LOG não está definido.
+    // Priority: DELONIX_LOG > RUST_LOG > "info". `env` (not `env_or`) so it can
+    // fall back to RUST_LOG when DELONIX_LOG is not set.
     let filter = EnvFilter::try_from_env("DELONIX_LOG")
         .or_else(|_| EnvFilter::try_from_default_env()) // RUST_LOG
         .unwrap_or_else(|_| EnvFilter::new("info"));
 
     let json = std::env::var("DELONIX_LOG_FORMAT").ok().as_deref() == Some("json");
 
-    // Logs vão para stderr (stdout é reservado ao OUTPUT do utilizador — tabelas
-    // `ls`, `describe` — que NÃO deve ser poluído por linhas de log). Boxed para
-    // unificar os dois tipos (json vs texto) num só `dyn Layer`.
+    // Logs go to stderr (stdout is reserved for the user's OUTPUT — `ls`,
+    // `describe` tables — which must NOT be polluted by log lines). Boxed to
+    // unify the two types (json vs text) into a single `dyn Layer`.
     let fmt_layer = if json {
         fmt::layer().with_writer(std::io::stderr).json().boxed()
     } else {
         fmt::layer().with_writer(std::io::stderr).boxed()
     };
 
-    // Layer OTLP OPCIONAL: `None` (sem `DELONIX_OTLP_ENDPOINT`) é um no-op — a
-    // `Option<Layer>` implementa `Layer`. O `EnvFilter` aplica-se ao registry
-    // inteiro, logo governa tanto o `fmt` como o OTLP.
+    // OPTIONAL OTLP layer: `None` (without `DELONIX_OTLP_ENDPOINT`) is a no-op — the
+    // `Option<Layer>` implements `Layer`. The `EnvFilter` applies to the whole
+    // registry, so it governs both the `fmt` and the OTLP.
     let otlp_layer = build_otlp_layer();
 
     let _ = tracing_subscriber::registry()
@@ -100,11 +100,11 @@ pub fn init() {
         .try_init();
 }
 
-/// Constrói a layer OTLP se `DELONIX_OTLP_ENDPOINT` estiver definido; senão `None`.
+/// Builds the OTLP layer if `DELONIX_OTLP_ENDPOINT` is set; otherwise `None`.
 ///
-/// Falha **suave**: se o endpoint for inválido ou o exportador não construir,
-/// avisa via `tracing` (que já está a caminho de ser instalado — o aviso sai pelo
-/// `fmt`) e devolve `None`. Nunca faz `panic` no arranque por causa de telemetria.
+/// **Soft** failure: if the endpoint is invalid or the exporter fails to build,
+/// it warns via `tracing` (which is already on its way to being installed — the warning goes out via
+/// `fmt`) and returns `None`. It never `panic`s at startup because of telemetry.
 fn build_otlp_layer<S>() -> Option<Box<dyn tracing_subscriber::Layer<S> + Send + Sync>>
 where
     S: tracing::Subscriber + for<'a> tracing_subscriber::registry::LookupSpan<'a> + Send + Sync,
@@ -140,8 +140,8 @@ where
         .with_service_name(service_name())
         .build();
 
-    // `with_batch_exporter` usa o BatchSpanProcessor default: thread dedicada +
-    // `block_on` (sem runtime tokio ambiente). Ver a nuance no topo do módulo.
+    // `with_batch_exporter` uses the default BatchSpanProcessor: dedicated thread +
+    // `block_on` (without an ambient tokio runtime). See the nuance at the top of the module.
     let provider = opentelemetry_sdk::trace::SdkTracerProvider::builder()
         .with_batch_exporter(exporter)
         .with_resource(resource)
@@ -149,17 +149,17 @@ where
 
     let tracer = provider.tracer("delonix-runtime");
 
-    // Mantém o provider vivo: no global do `opentelemetry` (macros) e no nosso
-    // `OnceLock`. Como o `init()` inteiro é idempotente, não há corrida real aqui.
+    // Keeps the provider alive: in the `opentelemetry` global (macros) and in our
+    // `OnceLock`. Since the whole `init()` is idempotent, there is no real race here.
     opentelemetry::global::set_tracer_provider(provider.clone());
     let _ = OTLP_PROVIDER.set(provider);
 
     Some(tracing_opentelemetry::layer().with_tracer(tracer).boxed())
 }
 
-/// Nome do serviço para os `Resource` attributes das spans — distingue a CLI do
-/// servidor CRI no collector. Deriva do nome do executável (`delonix` /
-/// `delonix-cri`); `OTEL_SERVICE_NAME` tem prioridade (convenção OpenTelemetry).
+/// Service name for the spans' `Resource` attributes — distinguishes the CLI from
+/// the CRI server in the collector. Derived from the executable name (`delonix` /
+/// `delonix-cri`); `OTEL_SERVICE_NAME` takes priority (OpenTelemetry convention).
 fn service_name() -> String {
     if let Ok(name) = std::env::var("OTEL_SERVICE_NAME") {
         if !name.trim().is_empty() {
@@ -174,10 +174,10 @@ fn service_name() -> String {
         .unwrap_or_else(|| "delonix-runtime".to_string())
 }
 
-/// Normaliza o endpoint para o caminho de spans OTLP/HTTP. Como passamos o valor
-/// programaticamente (`with_endpoint`), o SDK usa-o VERBATIM (não acrescenta
-/// `/v1/traces`); por isso acrescentamo-lo nós se faltar, para o utilizador poder
-/// dar só a base do collector (`http://host:4318`). Função pura → testável.
+/// Normalizes the endpoint to the OTLP/HTTP spans path. Since we pass the value
+/// programmatically (`with_endpoint`), the SDK uses it VERBATIM (does not append
+/// `/v1/traces`); so we append it ourselves if missing, so the user can
+/// give just the collector base (`http://host:4318`). Pure function → testable.
 fn normalise_traces_endpoint(endpoint: &str) -> String {
     const SIGNAL_PATH: &str = "/v1/traces";
     if endpoint.contains(SIGNAL_PATH) {

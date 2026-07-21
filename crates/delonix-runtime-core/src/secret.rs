@@ -1,9 +1,9 @@
-//! Secret Manager: segredos nomeados (pares chave→valor) injetados como variáveis
-//! de ambiente nos containers. Persistidos um ficheiro por segredo sob
-//! `<root>/secrets/<nome>.json` com permissões **0600** e **cifrados at-rest**
-//! (XChaCha20-Poly1305, via [`crate::cred_vault::CredVault`], chave-mestra do host).
-//! Ficheiros plaintext de versões anteriores continuam legíveis (retrocompatível);
-//! ao re-gravar passam a cifrados. Os valores nunca devem ir para logs/inspect em claro.
+//! Secret Manager: named secrets (key→value pairs) injected as environment
+//! variables into containers. Persisted one file per secret under
+//! `<root>/secrets/<name>.json` with **0600** permissions and **encrypted at-rest**
+//! (XChaCha20-Poly1305, via [`crate::cred_vault::CredVault`], host master key).
+//! Plaintext files from previous versions remain readable (backward-compatible);
+//! on re-write they become encrypted. Values must never go to logs/inspect in cleartext.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -15,34 +15,34 @@ use serde::{Deserialize, Serialize};
 use crate::cred_vault::CredVault;
 use crate::{Error, Result};
 
-/// Um segredo nomeado: um conjunto de pares `CHAVE=valor` (env).
+/// A named secret: a set of `KEY=value` pairs (env).
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct Secret {
-    /// Nome do segredo (referência usada por `run --secret <nome>`).
+    /// Secret name (reference used by `run --secret <name>`).
     pub name: String,
-    /// Pares chave→valor. As chaves são nomes de variáveis de ambiente.
+    /// key→value pairs. The keys are environment variable names.
     #[serde(default)]
     pub data: BTreeMap<String, String>,
-    /// Instante de criação/atualização (segundos Unix).
+    /// Creation/update instant (Unix seconds).
     #[serde(default)]
     pub updated_unix: u64,
 }
 
 impl Secret {
-    /// Os pares no formato `CHAVE=valor` para injeção como env.
+    /// The pairs in `KEY=value` format for injection as env.
     pub fn env_pairs(&self) -> Vec<String> {
         self.data.iter().map(|(k, v)| format!("{k}={v}")).collect()
     }
 }
 
-/// Um nome de variável de ambiente é válido? (`[A-Za-z_][A-Za-z0-9_]*`).
+/// Is an environment variable name valid? (`[A-Za-z_][A-Za-z0-9_]*`).
 pub fn valid_env_key(k: &str) -> bool {
     let mut it = k.chars();
     matches!(it.next(), Some(c) if c.is_ascii_alphabetic() || c == '_')
         && it.all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
-/// Nome de segredo válido? (`[a-z0-9._-]`, não vazio, ≤ 64).
+/// Valid secret name? (`[a-z0-9._-]`, non-empty, ≤ 64).
 pub fn valid_name(n: &str) -> bool {
     !n.is_empty()
         && n.len() <= 64
@@ -50,25 +50,25 @@ pub fn valid_name(n: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
 }
 
-/// Cabeçalho dos ficheiros cifrados (distingue do formato legado plaintext JSON).
+/// Header of the encrypted files (distinguishes from the legacy plaintext JSON format).
 const SEALED_MAGIC: &[u8] = b"DLXSEC1\n";
 
-/// Armazém de segredos sob `<root>/secrets`, com ficheiros 0600 **cifrados at-rest**
-/// (XChaCha20-Poly1305 via [`CredVault`], chave-mestra do host). Ficheiros plaintext
-/// antigos continuam legíveis (retrocompatível).
+/// Secret store under `<root>/secrets`, with 0600 files **encrypted at-rest**
+/// (XChaCha20-Poly1305 via [`CredVault`], host master key). Old plaintext
+/// files remain readable (backward-compatible).
 pub struct SecretStore {
     root: PathBuf,
     vault: CredVault,
 }
 
 impl SecretStore {
-    /// Abre (criando) o armazém. `base` = `$DELONIX_ROOT` (o dir `secrets` é criado lá).
-    /// Reutiliza a chave-mestra do host (a mesma do [`CredVault`]) para cifrar os valores.
+    /// Opens (creating) the store. `base` = `$DELONIX_ROOT` (the `secrets` dir is created there).
+    /// Reuses the host master key (the same as [`CredVault`]) to encrypt the values.
     pub fn open(base: impl Into<PathBuf>) -> Result<Self> {
         let base = base.into();
         let root = base.join("secrets");
         fs::create_dir_all(&root)?;
-        // o próprio diretório é 0700 (não listável por outros).
+        // the directory itself is 0700 (not listable by others).
         let _ = fs::set_permissions(&root, fs::Permissions::from_mode(0o700));
         let vault = CredVault::open(&base)?;
         Ok(Self { root, vault })
@@ -78,7 +78,7 @@ impl SecretStore {
         self.root.join(format!("{name}.json"))
     }
 
-    /// Descodifica os bytes de um ficheiro: cifrado (com cabeçalho) ou legado (plaintext JSON).
+    /// Decodes the bytes of a file: encrypted (with header) or legacy (plaintext JSON).
     fn decode(&self, bytes: &[u8]) -> Result<Secret> {
         if let Some(sealed) = bytes.strip_prefix(SEALED_MAGIC) {
             Ok(serde_json::from_slice(&self.vault.unseal(sealed)?)?)
@@ -87,7 +87,7 @@ impl SecretStore {
         }
     }
 
-    /// Persiste um segredo (escrita atómica + chmod 0600).
+    /// Persists a secret (atomic write + chmod 0600).
     pub fn save(&self, s: &Secret) -> Result<()> {
         if !valid_name(&s.name) {
             return Err(Error::Invalid(format!("invalid secret name: {:?}", s.name)));
@@ -97,7 +97,7 @@ impl SecretStore {
                 return Err(Error::Invalid(format!("invalid env key: {k:?}")));
             }
         }
-        // valor cifrado at-rest: cabeçalho || nonce || ciphertext.
+        // value encrypted at-rest: header || nonce || ciphertext.
         let mut blob = Vec::from(SEALED_MAGIC);
         blob.extend_from_slice(&self.vault.seal(&serde_json::to_vec(s)?)?);
         let tmp = self.root.join(format!(".{}.tmp", s.name));
@@ -107,7 +107,7 @@ impl SecretStore {
         Ok(())
     }
 
-    /// Carrega um segredo por nome.
+    /// Loads a secret by name.
     pub fn load(&self, name: &str) -> Result<Secret> {
         let p = self.path(name);
         if !p.exists() {
@@ -116,7 +116,7 @@ impl SecretStore {
         self.decode(&fs::read(p)?)
     }
 
-    /// Lista os nomes dos segredos existentes.
+    /// Lists the names of the existing secrets.
     pub fn list(&self) -> Vec<Secret> {
         let mut out = Vec::new();
         if let Ok(rd) = fs::read_dir(&self.root) {
@@ -133,7 +133,7 @@ impl SecretStore {
         out
     }
 
-    /// Remove um segredo.
+    /// Removes a secret.
     pub fn remove(&self, name: &str) -> Result<()> {
         let p = self.path(name);
         if !p.exists() {
@@ -143,9 +143,9 @@ impl SecretStore {
         Ok(())
     }
 
-    /// Resolve uma lista de nomes de segredos nos seus pares `CHAVE=valor` (env),
-    /// pela ordem dada (os últimos sobrepõem-se aos primeiros na mesma chave).
-    /// Nomes inexistentes são ignorados (best-effort no arranque).
+    /// Resolves a list of secret names into their `KEY=value` pairs (env),
+    /// in the given order (later ones override earlier ones on the same key).
+    /// Nonexistent names are ignored (best-effort at startup).
     pub fn resolve_env(&self, names: &[String]) -> Vec<String> {
         let mut env: BTreeMap<String, String> = BTreeMap::new();
         for n in names {
@@ -158,10 +158,10 @@ impl SecretStore {
         env.into_iter().map(|(k, v)| format!("{k}={v}")).collect()
     }
 
-    /// Materializa os segredos como **ficheiros** em `dir` (um por chave, 0600;
-    /// `dir` 0700) — para injeção via bind-mount em `/run/secrets` (Pilar 5 Bloco B),
-    /// em vez de variáveis de ambiente (que vazam em `environ`/`inspect`). Idempotente.
-    /// Nomes inexistentes → erro (o chamador validou antes).
+    /// Materializes the secrets as **files** in `dir` (one per key, 0600;
+    /// `dir` 0700) — for injection via bind-mount into `/run/secrets` (Pillar 5 Block B),
+    /// instead of environment variables (which leak in `environ`/`inspect`). Idempotent.
+    /// Nonexistent names → error (the caller validated beforehand).
     pub fn materialize(&self, names: &[String], dir: &Path) -> Result<()> {
         fs::create_dir_all(dir)?;
         let _ = fs::set_permissions(dir, fs::Permissions::from_mode(0o700));
@@ -179,13 +179,13 @@ impl SecretStore {
         Ok(())
     }
 
-    /// Roda a chave-mestra do host: decifra todos os segredos com a chave atual,
-    /// roda a chave do [`CredVault`] (que re-cifra também as creds de túnel) e
-    /// re-sela todos os segredos com a nova chave. Valores preservados; ficheiros
-    /// plaintext legados passam a cifrados. Aborta ANTES de rodar se algum segredo
-    /// não decifrar (não fica a meio).
+    /// Rotates the host master key: decrypts all secrets with the current key,
+    /// rotates the [`CredVault`] key (which also re-encrypts the tunnel creds) and
+    /// re-seals all secrets with the new key. Values preserved; legacy plaintext
+    /// files become encrypted. Aborts BEFORE rotating if any secret
+    /// fails to decrypt (does not end up half-done).
     pub fn rotate_key(&mut self) -> Result<()> {
-        // nomes a partir do disco (`<root>/<nome>.json`).
+        // names from disk (`<root>/<name>.json`).
         let mut names = Vec::new();
         if let Ok(rd) = fs::read_dir(&self.root) {
             for e in rd.flatten() {
@@ -197,14 +197,14 @@ impl SecretStore {
                 }
             }
         }
-        // 1) decifra TODOS com a chave atual (aborta se algum falhar → não rodar a meio).
+        // 1) decrypt ALL with the current key (abort if any fails → do not rotate half-way).
         let mut loaded = Vec::with_capacity(names.len());
         for n in &names {
             loaded.push(self.load(n)?);
         }
-        // 2) roda a chave-mestra partilhada (recifra também as creds de túnel).
+        // 2) rotate the shared master key (also re-encrypts the tunnel creds).
         self.vault.rotate_key()?;
-        // 3) re-sela todos os segredos com a nova chave.
+        // 3) re-seal all secrets with the new key.
         for s in &loaded {
             self.save(s)?;
         }
@@ -212,8 +212,8 @@ impl SecretStore {
     }
 }
 
-/// Faz o parse de um ficheiro `.env` (linhas `CHAVE=valor`; ignora vazias e `#`).
-/// Aceita aspas simples/duplas à volta do valor. Devolve os pares válidos.
+/// Parses a `.env` file (`KEY=value` lines; ignores empty ones and `#`).
+/// Accepts single/double quotes around the value. Returns the valid pairs.
 pub fn parse_env_file(content: &str) -> BTreeMap<String, String> {
     let mut out = BTreeMap::new();
     for line in content.lines() {
@@ -274,7 +274,7 @@ mod tests {
             updated_unix: 1,
         })
         .unwrap();
-        // ficheiro 0600
+        // 0600 file
         let mode = std::fs::metadata(dir.join("secrets/db.json"))
             .unwrap()
             .permissions()
@@ -300,7 +300,7 @@ mod tests {
             })
             .unwrap();
 
-        // o valor NÃO aparece em claro no disco (cifrado at-rest).
+        // the value does NOT appear in cleartext on disk (encrypted at-rest).
         let raw = std::fs::read(dir.join("secrets/app.json")).unwrap();
         assert!(
             !String::from_utf8_lossy(&raw).contains("PLAINTEXT-MARKER-XYZ"),
@@ -310,13 +310,13 @@ mod tests {
             raw.starts_with(SEALED_MAGIC),
             "ficheiro devia ter o cabeçalho cifrado"
         );
-        // round-trip decifra corretamente.
+        // round-trip decrypts correctly.
         assert_eq!(
             store.load("app").unwrap().data.get("TOKEN").unwrap(),
             "PLAINTEXT-MARKER-XYZ"
         );
 
-        // retrocompatibilidade: um ficheiro plaintext JSON antigo continua legível.
+        // backward-compatibility: an old plaintext JSON file remains readable.
         let mut old = BTreeMap::new();
         old.insert("K".to_string(), "v".to_string());
         let legacy = serde_json::to_vec(&Secret {
@@ -392,7 +392,7 @@ mod tests {
         let key_after = std::fs::read(dir.join("tunnels/keyring.key")).unwrap();
         assert_ne!(key_before, key_after, "a chave-mestra não rodou");
 
-        // valores preservados, legíveis com a nova chave (em memória e reabrindo do disco).
+        // values preserved, readable with the new key (in memory and reopening from disk).
         assert_eq!(store.load("s1").unwrap().data.get("A").unwrap(), "1");
         assert_eq!(store.load("s2").unwrap().data.get("B").unwrap(), "2");
         let store2 = SecretStore::open(&dir).unwrap();

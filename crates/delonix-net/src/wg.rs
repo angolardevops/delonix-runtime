@@ -1,14 +1,14 @@
-//! WireGuard sobre o overlay (req #6) — confidencialidade + integridade +
-//! autenticação de ORIGEM entre nós Delonix (Curve25519 + ChaCha20-Poly1305).
+//! WireGuard over the overlay (req #6) — confidentiality + integrity +
+//! ORIGIN authentication between Delonix nodes (Curve25519 + ChaCha20-Poly1305).
 //!
-//! A "assinatura de pacotes" do requisito só é coerente entre PEERS (túnel), não
-//! para egress arbitrário; a resposta certa é cifrar o overlay inter-node. Usa o
-//! módulo de kernel via `ip link`/`wg` — o holder cria a interface no netns de
-//! infra como já cria bridge/veth, logo NÃO é preciso boringtun/dependência nova.
-//! O intra-host fica coberto pelo anti-spoofing (do_attach).
+//! The requirement's "packet signing" only makes sense between PEERS (tunnel), not
+//! for arbitrary egress; the right answer is to encrypt the inter-node overlay. Uses the
+//! kernel module via `ip link`/`wg` — the holder creates the interface in the infra
+//! netns just as it already creates bridge/veth, so NO boringtun/new dependency is needed.
+//! Intra-host is covered by the anti-spoofing (do_attach).
 //!
-//! Validado end-to-end (dois netns rootless): ping pelo túnel + `tcpdump` no
-//! underlay = só UDP WireGuard cifrado, sem ICMP em claro; handshake completo.
+//! Validated end-to-end (two rootless netns): ping through the tunnel + `tcpdump` on the
+//! underlay = only encrypted WireGuard UDP, no ICMP in the clear; full handshake.
 
 use delonix_runtime_core::{Error, Result};
 use std::io::Write;
@@ -23,7 +23,7 @@ fn rt(ctx: &'static str, e: impl std::fmt::Display) -> Error {
     }
 }
 
-/// Corre `prog args`; devolve stdout (trim) ou erro com o stderr.
+/// Runs `prog args`; returns stdout (trimmed) or an error with the stderr.
 fn out(prog: &str, args: &[&str]) -> Result<String> {
     let o = Command::new(prog)
         .args(args)
@@ -42,14 +42,14 @@ fn run(prog: &str, args: &[&str]) -> Result<()> {
     out(prog, args).map(|_| ())
 }
 
-/// Par de chaves WireGuard (base64, como o `wg` as emite).
+/// WireGuard key pair (base64, as `wg` emits them).
 #[derive(Clone, Debug)]
 pub struct WgKey {
     pub private: String,
     pub public: String,
 }
 
-/// Deriva a chave pública de uma privada (`<priv> | wg pubkey`).
+/// Derives the public key from a private one (`<priv> | wg pubkey`).
 pub fn pubkey(private: &str) -> Result<String> {
     let mut child = Command::new("wg")
         .arg("pubkey")
@@ -68,7 +68,7 @@ pub fn pubkey(private: &str) -> Result<String> {
     Ok(String::from_utf8_lossy(&o.stdout).trim().to_string())
 }
 
-/// Gera um par de chaves novo (`wg genkey` + `wg pubkey`).
+/// Generates a new key pair (`wg genkey` + `wg pubkey`).
 pub fn keygen() -> Result<WgKey> {
     let private = out("wg", &["genkey"])?;
     let public = pubkey(&private)?;
@@ -89,8 +89,8 @@ fn write_0600(p: &Path, data: &str) -> Result<()> {
     Ok(())
 }
 
-/// Chave do nó, persistida 0600 em `$DELONIX_ROOT/wg/node.key` (gera na 1ª vez).
-/// A pública vai para `node.pub` (legível) para publicação no control-plane.
+/// Node key, persisted 0600 at `$DELONIX_ROOT/wg/node.key` (generated on first use).
+/// The public one goes to `node.pub` (readable) for publishing to the control-plane.
 pub fn ensure_node_key() -> Result<WgKey> {
     let dir = wg_dir();
     std::fs::create_dir_all(&dir).map_err(|e| rt("wg dir", e))?;
@@ -109,9 +109,9 @@ pub fn ensure_node_key() -> Result<WgKey> {
     Ok(WgKey { private, public })
 }
 
-/// Cria/configura a interface WireGuard `<name>` no netns ATUAL (chamado no holder,
-/// que tem CAP_NET_ADMIN no netns de infra). Idempotente. A privada vai por
-/// ficheiro temporário 0600 (não na linha de comando / `ps`). `addr_cidr` ex.:
+/// Creates/configures the WireGuard interface `<name>` in the CURRENT netns (called in the
+/// holder, which has CAP_NET_ADMIN in the infra netns). Idempotent. The private key goes via
+/// a 0600 temporary file (not on the command line / `ps`). `addr_cidr` e.g.:
 /// `"10.99.0.1/24"`.
 pub fn ensure_iface(
     name: &str,
@@ -119,7 +119,7 @@ pub fn ensure_iface(
     listen_port: u16,
     addr_cidr: &str,
 ) -> Result<()> {
-    let _ = run("ip", &["link", "del", name]); // limpa restos (best-effort)
+    let _ = run("ip", &["link", "del", name]); // clears leftovers (best-effort)
     run("ip", &["link", "add", name, "type", "wireguard"])?;
     let dir = wg_dir();
     let _ = std::fs::create_dir_all(&dir);
@@ -143,14 +143,14 @@ pub fn ensure_iface(
     Ok(())
 }
 
-/// Um peer WireGuard (outro nó Delonix).
+/// A WireGuard peer (another Delonix node).
 pub struct Peer {
     pub public: String,
     pub endpoint: String,
     pub allowed_ips: Vec<String>,
 }
 
-/// Configura um peer numa interface (`wg set <if> peer <pub> allowed-ips … endpoint …`).
+/// Configures a peer on an interface (`wg set <if> peer <pub> allowed-ips … endpoint …`).
 pub fn set_peer(name: &str, p: &Peer) -> Result<()> {
     let allowed = p.allowed_ips.join(",");
     run(
@@ -170,7 +170,7 @@ pub fn set_peer(name: &str, p: &Peer) -> Result<()> {
     )
 }
 
-/// Está o WireGuard disponível neste host? (`wg`/`ip` + módulo de kernel).
+/// Is WireGuard available on this host? (`wg`/`ip` + kernel module).
 pub fn available() -> bool {
     Command::new("wg")
         .arg("--version")
@@ -186,14 +186,14 @@ mod tests {
     #[test]
     fn keygen_roundtrip() {
         if !available() {
-            return; // salta em hosts sem `wg`
+            return; // skips on hosts without `wg`
         }
         let k = keygen().expect("keygen");
-        // chaves WireGuard = base64 de 32 bytes = 44 chars (termina em '=').
+        // WireGuard keys = base64 of 32 bytes = 44 chars (ends in '=').
         assert_eq!(k.private.len(), 44);
         assert_eq!(k.public.len(), 44);
         assert!(k.public.ends_with('='));
-        // a pública deriva DETERMINISTICAMENTE da privada (Curve25519).
+        // the public key derives DETERMINISTICALLY from the private one (Curve25519).
         assert_eq!(pubkey(&k.private).unwrap(), k.public);
         assert_ne!(k.private, k.public);
     }

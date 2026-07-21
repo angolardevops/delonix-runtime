@@ -1,6 +1,6 @@
-//! Credenciais de registos (`delonix login`/`logout`), formato compatível com
-//! o `~/.docker/config.json` / `auth.json` do Podman: `{ "auths": { "<host>":
-//! { "auth": "base64(user:password)" } } }`. Guardado em `<root>/auth.json`.
+//! Registry credentials (`delonix login`/`logout`), format compatible with
+//! Podman's `~/.docker/config.json` / `auth.json`: `{ "auths": { "<host>":
+//! { "auth": "base64(user:password)" } } }`. Stored in `<root>/auth.json`.
 
 use base64::engine::general_purpose::STANDARD as B64;
 use base64::Engine;
@@ -25,8 +25,8 @@ fn auth_path(root: &Path) -> PathBuf {
     root.join("auth.json")
 }
 
-/// Normaliza o nome do registo para a chave canónica (host da API V2). `docker.io`,
-/// `index.docker.io` e vazio → `registry-1.docker.io`.
+/// Normalises the registry name to the canonical key (V2 API host). `docker.io`,
+/// `index.docker.io` and empty → `registry-1.docker.io`.
 pub fn canonical_host(registry: &str) -> String {
     match registry {
         "" | "docker.io" | "index.docker.io" | "registry-1.docker.io" => {
@@ -43,7 +43,7 @@ fn read(root: &Path) -> AuthFile {
         .unwrap_or_default()
 }
 
-/// Guarda as credenciais de `registry` (codificadas em base64). 0600.
+/// Stores the credentials for `registry` (base64-encoded). 0600.
 pub fn login(root: &Path, registry: &str, user: &str, password: &str) -> Result<()> {
     let host = canonical_host(registry);
     let mut file = read(root);
@@ -53,7 +53,7 @@ pub fn login(root: &Path, registry: &str, user: &str, password: &str) -> Result<
     Ok(())
 }
 
-/// Remove as credenciais de `registry`. Devolve `true` se existiam.
+/// Removes the credentials for `registry`. Returns `true` if they existed.
 pub fn logout(root: &Path, registry: &str) -> Result<bool> {
     let host = canonical_host(registry);
     let mut file = read(root);
@@ -68,7 +68,7 @@ fn write(root: &Path, file: &AuthFile) -> Result<()> {
     let bytes = serde_json::to_vec_pretty(file)?;
     let path = auth_path(root);
     std::fs::write(&path, bytes)?;
-    // permissões 0600 — credenciais não devem ser legíveis por outros.
+    // 0600 permissions — credentials must not be readable by others.
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -77,7 +77,7 @@ fn write(root: &Path, file: &AuthFile) -> Result<()> {
     Ok(())
 }
 
-/// Devolve `(user, password)` guardados para `host`, se existirem.
+/// Returns the `(user, password)` stored for `host`, if present.
 pub fn lookup(root: &Path, host: &str) -> Option<(String, String)> {
     let file = read(root);
     let entry = file.auths.get(&canonical_host(host))?;

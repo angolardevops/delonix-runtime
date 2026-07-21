@@ -1,10 +1,10 @@
-//! Ciclo de vida CRI (pods + containers) sobre o engine Delonix.
+//! CRI lifecycle (pods + containers) over the Delonix engine.
 //!
-//! Estratégia: o estado CRI (sandboxes/containers) vive em ficheiros JSON sob
-//! `<base>/cri/`; as operações que usam `clone` (run/stop/rm) **delegam no
-//! binário `delonix`** (single-threaded, lógica já verificada), porque o servidor
-//! CRI é multi-thread (Tokio) e `clone` não é seguro fora de single-thread. O
-//! ESTADO de execução lê-se directamente do `Store` do Delonix.
+//! Strategy: the CRI state (sandboxes/containers) lives in JSON files under
+//! `<base>/cri/`; the operations that use `clone` (run/stop/rm) **delegate to
+//! the `delonix` binary** (single-threaded, already-verified logic), because the
+//! CRI server is multi-threaded (Tokio) and `clone` is not safe outside a single
+//! thread. The runtime STATE is read directly from Delonix's `Store`.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -22,8 +22,9 @@ struct SandboxRec {
     uid: String,
     attempt: u32,
     created_at: i64,
-    /// Hostname do pod (`PodSandboxConfig.hostname`) — aplicado a cada container do
-    /// sandbox via `delonix run --hostname`. Vazio só quando a rede é do NÓ.
+    /// Pod hostname (`PodSandboxConfig.hostname`) — applied to each container of
+    /// the sandbox via `delonix run --hostname`. Empty only when the network is
+    /// the NODE's.
     #[serde(default)]
     hostname: String,
     log_directory: String,
@@ -31,20 +32,20 @@ struct SandboxRec {
     stopped: bool,
     labels: HashMap<String, String>,
     annotations: HashMap<String, String>,
-    /// `true` se o pod usa a rede do NÓ (host network); então NÃO há infra/netns
-    /// próprio e os containers correm na rede do host.
+    /// `true` if the pod uses the NODE's network (host network); then there is NO
+    /// own infra/netns and the containers run on the host's network.
     #[serde(default)]
     host_network: bool,
-    /// Partilha o PID/IPC namespace do host (`namespace_options.{pid,ipc} = NODE`).
+    /// Shares the host's PID/IPC namespace (`namespace_options.{pid,ipc} = NODE`).
     #[serde(default)]
     host_pid: bool,
     #[serde(default)]
     host_ipc: bool,
-    /// `sysctl`s do pod (`chave=valor`), aplicados aos containers do sandbox.
+    /// Pod `sysctl`s (`key=value`), applied to the sandbox's containers.
     #[serde(default)]
     sysctls: Vec<String>,
-    /// IP (endereço, sem CIDR) atribuído pelo IPAM do CNI quando o sandbox foi
-    /// configurado por plugins CNI (rootless, via holder). Vazio = SDN nativo.
+    /// IP (address, without CIDR) assigned by the CNI IPAM when the sandbox was
+    /// configured by CNI plugins (rootless, via holder). Empty = native SDN.
     #[serde(default)]
     cni_ip: String,
 }
@@ -68,13 +69,13 @@ struct ContainerRec {
     args: Vec<String>,
     created_at: i64,
     started: bool,
-    /// Caminho COMPLETO do ficheiro de log (log_directory do sandbox + log_path do
-    /// container) — onde o kubelet/crictl esperam ler stdout/stderr (formato CRI).
+    /// FULL path of the log file (the sandbox's log_directory + the container's
+    /// log_path) — where the kubelet/crictl expect to read stdout/stderr (CRI format).
     #[serde(default)]
     log_path: String,
     labels: HashMap<String, String>,
     annotations: HashMap<String, String>,
-    // --- security context (CRI) traduzido para flags do `delonix run` ---
+    // --- security context (CRI) translated to `delonix run` flags ---
     #[serde(default)]
     readonly_rootfs: bool,
     #[serde(default)]
@@ -87,19 +88,19 @@ struct ContainerRec {
     cap_drop: Vec<String>,
     #[serde(default)]
     apparmor: Option<String>,
-    /// `RunAsUser` (uid numérico) do security context. `None` = root (histórico).
+    /// `RunAsUser` (numeric uid) from the security context. `None` = root (historical).
     #[serde(default)]
     run_as_user: Option<i64>,
-    /// `RunAsGroup` (gid numérico). Só válido com `run_as_user`/`run_as_username`.
+    /// `RunAsGroup` (numeric gid). Only valid with `run_as_user`/`run_as_username`.
     #[serde(default)]
     run_as_group: Option<i64>,
-    /// `RunAsUserName`: o utilizador resolve-se no `/etc/passwd` da imagem (o
-    /// `delonix run --user <nome>` fá-lo). Vazio = não usado.
+    /// `RunAsUserName`: the user is resolved in the image's `/etc/passwd` (the
+    /// `delonix run --user <name>` does it). Empty = not used.
     #[serde(default)]
     run_as_username: String,
 }
 
-/// `true` se o perfil AppArmor está carregado no host (em
+/// `true` if the AppArmor profile is loaded on the host (in
 /// `/sys/kernel/security/apparmor/profiles`).
 fn apparmor_loaded(profile: &str) -> bool {
     std::fs::read_to_string("/sys/kernel/security/apparmor/profiles")
@@ -127,11 +128,11 @@ fn st<E: std::fmt::Display>(e: E) -> Status {
     Status::internal(e.to_string())
 }
 
-/// `true` se o stderr de um `delonix container rm/stop` indica que o alvo **não
-/// existe** — o contrato CRI exige que `RemoveContainer`/`StopContainer` sejam
-/// IDEMPOTENTES (um container ausente conta como já removido/parado). A mensagem
-/// canónica do `delonix` é "container não encontrado"; cobrimos também as
-/// variantes docker/inglês para robustez.
+/// `true` if the stderr of a `delonix container rm/stop` indicates the target
+/// **does not exist** — the CRI contract requires `RemoveContainer`/`StopContainer`
+/// to be IDEMPOTENT (a missing container counts as already removed/stopped). The
+/// canonical `delonix` message is "container não encontrado"; we also cover the
+/// docker/english variants for robustness.
 fn stderr_not_found(stderr: &[u8]) -> bool {
     let e = String::from_utf8_lossy(stderr).to_lowercase();
     e.contains("não encontrado")
@@ -144,9 +145,9 @@ fn stderr_not_found(stderr: &[u8]) -> bool {
 fn write_rec<T: Serialize>(dir: &Path, id: &str, rec: &T) -> Result<(), Status> {
     std::fs::create_dir_all(dir).map_err(st)?;
     let bytes = serde_json::to_vec_pretty(rec).map_err(st)?;
-    // Escrita ATÓMICA (temp + rename): o servidor CRI é multi-thread, e um
-    // `container_status`/`list_containers` concorrente nunca deve ler um ficheiro
-    // truncado a meio de uma escrita.
+    // ATOMIC write (temp + rename): the CRI server is multi-threaded, and a
+    // concurrent `container_status`/`list_containers` must never read a file
+    // truncated mid-write.
     let final_path = dir.join(format!("{id}.json"));
     let tmp = dir.join(format!(".{id}.{}.tmp", std::process::id()));
     std::fs::write(&tmp, bytes).map_err(st)?;
@@ -175,9 +176,9 @@ fn delonix_bin() -> PathBuf {
     crate::cli_bin()
 }
 
-/// Corre o binário `delonix` (single-threaded) com o `DELONIX_ROOT` da CRI.
-/// `DELONIX_INTERNAL=1` ignora a barreira dos comandos agrupados (delegação
-/// máquina-a-máquina): o CRI usa as formas de topo `run`/`stop`/`rm`.
+/// Runs the `delonix` binary (single-threaded) with the CRI's `DELONIX_ROOT`.
+/// `DELONIX_INTERNAL=1` bypasses the grouped-commands barrier (machine-to-machine
+/// delegation): the CRI uses the top-level `run`/`stop`/`rm` forms.
 fn delonix(base: &Path, args: &[&str]) -> Result<std::process::Output, Status> {
     Command::new(delonix_bin())
         .env("DELONIX_ROOT", base)
@@ -187,9 +188,10 @@ fn delonix(base: &Path, args: &[&str]) -> Result<std::process::Output, Status> {
         .map_err(st)
 }
 
-/// Como [`delonix`], mas com stdio em `/dev/null` — OBRIGATÓRIO para `run -d`: o
-/// container daemonizado herda e SEGURA os *pipes* de stdout/stderr; com `.output()`
-/// o `wait` ficaria preso até o container terminar (bug "run -d | tail pendura").
+/// Like [`delonix`], but with stdio to `/dev/null` — MANDATORY for `run -d`: the
+/// daemonized container inherits and HOLDS the stdout/stderr *pipes*; with
+/// `.output()` the `wait` would block until the container exits (the "run -d |
+/// tail hangs" bug).
 fn delonix_detached(base: &Path, args: &[&str]) -> Result<bool, Status> {
     use std::process::Stdio;
     let status = Command::new(delonix_bin())
@@ -204,19 +206,20 @@ fn delonix_detached(base: &Path, args: &[&str]) -> Result<bool, Status> {
     Ok(status.success())
 }
 
-/// Carrega um container CRI e **reconcilia** o seu status contra o kernel
-/// (`Running`+pid morto → `Crashed`/`Failed`) antes de o devolver, persistindo a
-/// mudança (best-effort). É o cerne da correção de exit-codes: sem reconciliar,
-/// um container que crashou mas cujo store ainda diz `Running` reportava estado
-/// `Exited` com exit-code 0 → o kubelet (restartPolicy `OnFailure`) NÃO o
-/// reiniciava. Após reconciliar, o crash vira `Crashed` (137) e o kubelet reage.
+/// Loads a CRI container and **reconciles** its status against the kernel
+/// (`Running`+dead pid → `Crashed`/`Failed`) before returning it, persisting the
+/// change (best-effort). This is the heart of the exit-code fix: without
+/// reconciling, a container that crashed but whose store still says `Running`
+/// reported state `Exited` with exit-code 0 → the kubelet (restartPolicy
+/// `OnFailure`) did NOT restart it. After reconciling, the crash becomes
+/// `Crashed` (137) and the kubelet reacts.
 fn load_reconciled(base: &Path, cri_id: &str) -> Option<delonix_runtime_core::Container> {
     let store = delonix_runtime_core::Store::open(base.join("containers")).ok()?;
-    // `update` (flock + relê sob o trinco), NÃO `load`+`save`: este servidor é
-    // CONCORRENTE (o kubelet emite pedidos em paralelo, cada um numa
-    // `spawn_blocking`) e a CLI mexe no mesmo estado. Com o padrão ingénuo, dois
-    // reconciles simultâneos perdiam escritas — medido: 24 updates concorrentes
-    // → 1 sobrevivente (ver `store::tests::update_concorrente_nao_perde_escritas`).
+    // `update` (flock + re-reads under the lock), NOT `load`+`save`: this server
+    // is CONCURRENT (the kubelet issues requests in parallel, each in a
+    // `spawn_blocking`) and the CLI touches the same state. With the naive
+    // pattern, two simultaneous reconciles lost writes — measured: 24 concurrent
+    // updates → 1 survivor (see `store::tests::update_concorrente_nao_perde_escritas`).
     store
         .update(&format!("cri-{cri_id}"), |c| {
             delonix_runtime::reconcile_status(c)
@@ -224,7 +227,7 @@ fn load_reconciled(base: &Path, cri_id: &str) -> Option<delonix_runtime_core::Co
         .ok()
 }
 
-/// O estado de execução de um container CRI, lido (e reconciliado) do `Store`.
+/// The runtime state of a CRI container, read (and reconciled) from the `Store`.
 fn delonix_state(base: &Path, cri_id: &str) -> i32 {
     use delonix_runtime_core::Status as S;
     match load_reconciled(base, cri_id) {
@@ -232,8 +235,8 @@ fn delonix_state(base: &Path, cri_id: &str) -> i32 {
             S::Running if c.pid.map(delonix_runtime::is_alive).unwrap_or(false) => {
                 ContainerState::ContainerRunning as i32
             }
-            S::Running => ContainerState::ContainerExited as i32, // defensivo (pós-reconcile)
-            S::Paused => ContainerState::ContainerRunning as i32, // congelado, mas existe
+            S::Running => ContainerState::ContainerExited as i32, // defensive (post-reconcile)
+            S::Paused => ContainerState::ContainerRunning as i32, // frozen, but exists
             S::Stopped | S::Failed(_) | S::Crashed => ContainerState::ContainerExited as i32,
             S::Created => ContainerState::ContainerCreated as i32,
         },
@@ -241,9 +244,9 @@ fn delonix_state(base: &Path, cri_id: &str) -> i32 {
     }
 }
 
-/// O código de saída de um container CRI (reconciliado), ou `None` se ainda está
-/// a correr/criado. Permite ao kubelet ver a verdadeira causa de saída (137/143/n)
-/// e aplicar a `restartPolicy` — em vez de assumir 0 (`Completed`) para tudo.
+/// The exit code of a CRI container (reconciled), or `None` if it is still
+/// running/created. Lets the kubelet see the true exit cause (137/143/n) and
+/// apply the `restartPolicy` — instead of assuming 0 (`Completed`) for everything.
 fn delonix_exit(base: &Path, cri_id: &str) -> Option<i32> {
     use delonix_runtime_core::Status as S;
     match load_reconciled(base, cri_id)?.status {
@@ -265,7 +268,7 @@ pub fn run_pod_sandbox(
         .ok_or_else(|| Status::invalid_argument("missing config"))?;
     let md = cfg.metadata.clone().unwrap_or_default();
     let id = delonix_runtime_core::generate_id();
-    // Rede do host? (namespace_options.network == NODE) → sem infra/netns próprio.
+    // Host network? (namespace_options.network == NODE) → no own infra/netns.
     let ns = cfg
         .linux
         .as_ref()
@@ -275,20 +278,21 @@ pub fn run_pod_sandbox(
     let host_network = ns.map(|n| is_node(n.network)).unwrap_or(false);
     let host_pid = ns.map(|n| is_node(n.pid)).unwrap_or(false);
     let host_ipc = ns.map(|n| is_node(n.ipc)).unwrap_or(false);
-    // sysctls do pod (`net.*`, `kernel.shm*`, …) → `chave=valor`.
+    // pod sysctls (`net.*`, `kernel.shm*`, …) → `key=value`.
     let sysctls: Vec<String> = cfg
         .linux
         .as_ref()
         .map(|l| l.sysctls.iter().map(|(k, v)| format!("{k}={v}")).collect())
         .unwrap_or_default();
-    // Pod REAL do Delonix: um infra container (`pod-cri-<id>`) detém o netns
-    // partilhado (estilo "pause"), que os containers do sandbox passam a juntar
-    // via `--pod`. É o que dá networking de pod e partilha de namespaces.
-    // CNI (opt-in `DELONIX_CNI=1` + conflist): o sandbox obtém a rede de plugins CNI
-    // reais (a cadeia do cluster, ex. Calico), como no containerd/CRI-O. Rootless →
-    // os plugins correm no holder (dono da netns); a netns chama-se `cri-<id>` para
-    // os containers do sandbox se juntarem via `--pod cri-<id>` (join_argv). Sem a
-    // flag, `enabled_conf()` é None e segue o caminho nativo (SDN) inalterado.
+    // REAL Delonix pod: an infra container (`pod-cri-<id>`) holds the shared
+    // netns ("pause"-style), which the sandbox's containers then join via
+    // `--pod`. That is what gives pod networking and namespace sharing.
+    // CNI (opt-in `DELONIX_CNI=1` + conflist): the sandbox gets its network from
+    // real CNI plugins (the cluster chain, e.g. Calico), as in containerd/CRI-O.
+    // Rootless → the plugins run in the holder (owner of the netns); the netns is
+    // named `cri-<id>` so the sandbox's containers join via `--pod cri-<id>`
+    // (join_argv). Without the flag, `enabled_conf()` is None and it follows the
+    // native (SDN) path unchanged.
     let mut cni_ip = String::new();
     if !host_network {
         let pod = format!("cri-{id}");
@@ -303,15 +307,15 @@ pub fn run_pod_sandbox(
                 Err(e) => return Err(Status::internal(format!("CNI ADD of sandbox {pod}: {e}"))),
             }
         } else if delonix_runtime::is_rootless() {
-            // ROOTLESS: o pod é um netns PARTILHADO do ingress (delonix0 + DHCP +
-            // DNS + firewall); os containers do sandbox juntam-se via `--pod`.
+            // ROOTLESS: the pod is a SHARED ingress netns (delonix0 + DHCP +
+            // DNS + firewall); the sandbox's containers join via `--pod`.
             if !delonix_detached(base, &["netns", "attach", &pod])? {
                 return Err(Status::internal(format!(
                     "failed to create the ingress sandbox {pod}"
                 )));
             }
         } else if !delonix_detached(base, &["pod", "create", &pod, "--network"])? {
-            // ROOT: infra container (`pod-cri-<id>`) detém o netns (estilo "pause").
+            // ROOT: infra container (`pod-cri-<id>`) holds the netns ("pause"-style).
             return Err(Status::internal(format!(
                 "failed to create the pod sandbox {pod}"
             )));
@@ -344,7 +348,7 @@ pub fn stop_pod_sandbox(
     base: &Path,
     id: String,
 ) -> Result<Response<StopPodSandboxResponse>, Status> {
-    // pára os containers do sandbox e marca-o NotReady.
+    // stop the sandbox's containers and mark it NotReady.
     for c in list_recs::<ContainerRec>(&ct_dir(base)) {
         if c.sandbox_id == id {
             let _ = delonix(base, &["container", "stop", &format!("cri-{}", c.id)]);
@@ -367,11 +371,11 @@ pub fn remove_pod_sandbox(
             let _ = std::fs::remove_file(ct_dir(base).join(format!("{}.json", c.id)));
         }
     }
-    // Remove o pod real do Delonix (infra container + netns), se existia.
+    // Remove the real Delonix pod (infra container + netns), if it existed.
     if let Ok(sb) = read_rec::<SandboxRec>(&sb_dir(base), &id) {
         if !sb.host_network {
             if !sb.cni_ip.is_empty() {
-                // sandbox configurado por CNI (rootless): DEL dos plugins no holder.
+                // CNI-configured sandbox (rootless): plugin DEL in the holder.
                 if let Some(conf) = delonix_net::cni::enabled_conf() {
                     let cj = serde_json::to_string(&conf).unwrap_or_default();
                     let _ = delonix_net::infra::cni_detach_container(&format!("cri-{id}"), &cj);
@@ -417,14 +421,14 @@ pub fn pod_sandbox_status(
     id: String,
 ) -> Result<Response<PodSandboxStatusResponse>, Status> {
     let r: SandboxRec = read_rec(&sb_dir(base), &id)?;
-    // IP do pod: o do infra container (`pod-cri-<id>`), que detém o netns.
+    // Pod IP: that of the infra container (`pod-cri-<id>`), which holds the netns.
     let ip = if r.host_network {
         String::new()
     } else if !r.cni_ip.is_empty() {
-        // sandbox configurado por CNI: o IP veio do IPAM do plugin.
+        // CNI-configured sandbox: the IP came from the plugin's IPAM.
         r.cni_ip.clone()
     } else if delonix_runtime::is_rootless() {
-        // ROOTLESS: IP do netns partilhado do pod no ingress (determinístico).
+        // ROOTLESS: IP of the pod's shared netns in the ingress (deterministic).
         delonix_net::infra::container_ip(&format!("cri-{}", r.id))
     } else {
         delonix_runtime_core::Store::open(base.join("containers"))
@@ -475,7 +479,7 @@ pub fn create_container(
         return Err(Status::invalid_argument("imagem em falta"));
     }
     let id = delonix_runtime_core::generate_id();
-    // Security context (CRI) → flags do `delonix run` (aplicadas no start).
+    // Security context (CRI) → `delonix run` flags (applied at start).
     let sc = cfg.linux.as_ref().and_then(|l| l.security_context.as_ref());
     let readonly_rootfs = sc.map(|s| s.readonly_rootfs).unwrap_or(false);
     let privileged = sc.map(|s| s.privileged).unwrap_or(false);
@@ -487,9 +491,9 @@ pub fn create_container(
         .and_then(|s| s.seccomp.as_ref())
         .map(|p| p.profile_type == security_profile::ProfileType::Unconfined as i32)
         .unwrap_or(false);
-    // AppArmor: o campo NOVO (`apparmor`, SecurityProfile) tem precedência; se não
-    // estiver definido, cai para o campo DEPRECIADO `apparmor_profile` (string,
-    // formato `unconfined` | `localhost/<perfil>` | `runtime/default` | `<perfil>`).
+    // AppArmor: the NEW field (`apparmor`, SecurityProfile) takes precedence; if it
+    // is not set, it falls back to the DEPRECATED field `apparmor_profile` (string,
+    // format `unconfined` | `localhost/<profile>` | `runtime/default` | `<profile>`).
     let apparmor = sc
         .and_then(|s| s.apparmor.as_ref())
         .and_then(
@@ -502,7 +506,7 @@ pub fn create_container(
             },
         )
         .or_else(|| {
-            #[allow(deprecated)] // suporte intencional ao campo CRI depreciado
+            #[allow(deprecated)] // intentional support for the deprecated CRI field
             let s = sc.map(|s| s.apparmor_profile.as_str()).unwrap_or("");
             match s {
                 "" | "runtime/default" => None,
@@ -510,21 +514,21 @@ pub fn create_container(
                 _ => Some(s.strip_prefix("localhost/").unwrap_or(s).to_string()),
             }
         });
-    // RunAsUser/RunAsGroup/RunAsUserName (→ `delonix run --user`, aplicado no start).
-    // `Int64Value` é opcional (a AUSÊNCIA da mensagem = não especificado).
+    // RunAsUser/RunAsGroup/RunAsUserName (→ `delonix run --user`, applied at start).
+    // `Int64Value` is optional (the ABSENCE of the message = not specified).
     let run_as_user = sc.and_then(|s| s.run_as_user.as_ref()).map(|v| v.value);
     let run_as_group = sc.and_then(|s| s.run_as_group.as_ref()).map(|v| v.value);
     let run_as_username = sc.map(|s| s.run_as_username.clone()).unwrap_or_default();
-    // Contrato CRI: `run_as_group` só pode existir com `run_as_user` OU
-    // `run_as_username`; senão o runtime DEVE falhar (spec do proto). Valida-se no
-    // CreateContainer, como o restante security context.
+    // CRI contract: `run_as_group` can only exist with `run_as_user` OR
+    // `run_as_username`; otherwise the runtime MUST fail (proto spec). Validated in
+    // CreateContainer, like the rest of the security context.
     if run_as_group.is_some() && run_as_user.is_none() && run_as_username.is_empty() {
         return Err(Status::invalid_argument(
             "run_as_group specified without run_as_user or run_as_username",
         ));
     }
-    // Valida JÁ no CreateContainer (como o runc): um perfil AppArmor que não esteja
-    // carregado no host faz a criação falhar (o cri-tools verifica-o aqui).
+    // Validate ALREADY in CreateContainer (like runc): an AppArmor profile not
+    // loaded on the host makes creation fail (cri-tools checks it here).
     if let Some(p) = &apparmor {
         if p != "unconfined" && p != "delonix-default" && !apparmor_loaded(p) {
             return Err(Status::invalid_argument(format!(
@@ -532,9 +536,9 @@ pub fn create_container(
             )));
         }
     }
-    // Caminho de log completo: o `log_path` é relativo ao `log_directory` do
-    // sandbox (o kubelet sempre o dá assim). REJEITA `..` e caminhos absolutos —
-    // senão um pedido malicioso escreveria ficheiros fora do diretório de logs.
+    // Full log path: `log_path` is relative to the sandbox's `log_directory`
+    // (the kubelet always provides it that way). REJECTS `..` and absolute paths —
+    // otherwise a malicious request would write files outside the log directory.
     let full_log_path = {
         let lp = cfg.log_path.clone();
         if lp.is_empty() {
@@ -595,7 +599,7 @@ pub fn start_container(
         "--name".into(),
         name,
     ];
-    // Logs no caminho/formato que o kubelet/crictl esperam (CRI), se houver.
+    // Logs in the path/format the kubelet/crictl expect (CRI), if any.
     if !rec.log_path.is_empty() {
         if let Some(dir) = std::path::Path::new(&rec.log_path).parent() {
             let _ = std::fs::create_dir_all(dir);
@@ -604,27 +608,27 @@ pub fn start_container(
         args.push(rec.log_path.clone());
         args.push("--log-cri".into());
     }
-    // Junta-se ao netns do pod sandbox (partilha de rede/namespaces), salvo se o
-    // pod usa a rede do host.
+    // Joins the pod sandbox's netns (network/namespace sharing), unless the pod
+    // uses the host's network.
     if let Ok(sb) = read_rec::<SandboxRec>(&sb_dir(base), &rec.sandbox_id) {
         if !sb.host_network {
             args.push("--pod".into());
             args.push(format!("cri-{}", rec.sandbox_id));
         }
-        // Hostname do pod (`PodSandboxConfig.hostname`) — o CRI conformance verifica
-        // que `hostname`/`/etc/hostname` dentro do container batem com o do sandbox.
+        // Pod hostname (`PodSandboxConfig.hostname`) — CRI conformance checks that
+        // `hostname`/`/etc/hostname` inside the container match the sandbox's.
         if !sb.hostname.is_empty() {
             args.push("--hostname".into());
             args.push(sb.hostname.clone());
         }
-        // Namespaces de host herdados do pod sandbox.
+        // Host namespaces inherited from the pod sandbox.
         if sb.host_pid {
             args.push("--host-pid".into());
         }
         if sb.host_ipc {
             args.push("--host-ipc".into());
         }
-        // sysctls do pod, aplicados no container (partilha os namespaces do pod).
+        // pod sysctls, applied to the container (shares the pod's namespaces).
         for s in &sb.sysctls {
             args.push("--sysctl".into());
             args.push(s.clone());
@@ -655,11 +659,11 @@ pub fn start_container(
         args.push("--apparmor".into());
         args.push(prof.clone());
     }
-    // RunAsUser/RunAsGroup/RunAsUserName → `--user <user[:group]>`. O `--user` do
-    // `delonix run` resolve um NOME contra o `/etc/passwd` da imagem (contrato
-    // `RunAsUserName`) e aceita um uid numérico (`RunAsUser`); o grupo é o
-    // `RunAsGroup` numérico. `RunAsUserName` tem precedência sobre `RunAsUser`
-    // (o proto proíbe os dois ao mesmo tempo).
+    // RunAsUser/RunAsGroup/RunAsUserName → `--user <user[:group]>`. The `--user` of
+    // `delonix run` resolves a NAME against the image's `/etc/passwd` (the
+    // `RunAsUserName` contract) and accepts a numeric uid (`RunAsUser`); the group
+    // is the numeric `RunAsGroup`. `RunAsUserName` takes precedence over `RunAsUser`
+    // (the proto forbids both at the same time).
     let user_part = if !rec.run_as_username.is_empty() {
         Some(rec.run_as_username.clone())
     } else {
@@ -673,8 +677,9 @@ pub fn start_container(
         args.push("--user".into());
         args.push(spec);
     }
-    // `--` separa as flags dos posicionais: impede que um `image`/`command` vindo
-    // do pedido CRI e começado por `-` seja interpretado como flag (injecção).
+    // `--` separates the flags from the positionals: prevents an `image`/`command`
+    // coming from the CRI request and starting with `-` from being interpreted as
+    // a flag (injection).
     args.push("--".into());
     args.push(rec.image.clone());
     args.extend(rec.command.iter().cloned());
@@ -693,21 +698,22 @@ pub fn stop_container(
     id: String,
     timeout: i64,
 ) -> Result<Response<StopContainerResponse>, Status> {
-    // Honra o período de graça do pedido CRI (segundos): o kubelet/crictl impõem
-    // a sua própria deadline, por isso NÃO podemos usar o default longo do
-    // `delonix stop`. `timeout=0` → paragem imediata (SIGKILL).
+    // Honor the CRI request's grace period (seconds): the kubelet/crictl impose
+    // their own deadline, so we CANNOT use `delonix stop`'s long default.
+    // `timeout=0` → immediate stop (SIGKILL).
     let secs = timeout.max(0).to_string();
     let out = delonix(
         base,
         &["container", "stop", "-t", &secs, &format!("cri-{id}")],
     )?;
-    // Contrato CRI: parar um container que já não existe é sucesso (idempotente).
+    // CRI contract: stopping a container that no longer exists is success (idempotent).
     if !out.status.success() && stderr_not_found(&out.stderr) {
         return Ok(Response::new(StopContainerResponse {}));
     }
-    // Verifica que PAROU de facto (reconciliado). Idempotente: já parado/inexistente
-    // = OK. Se continua vivo, propaga erro → o kubelet repete (em vez de assumir
-    // que parou e seguir para o RemoveContainer sobre um processo ainda a correr).
+    // Verify it actually STOPPED (reconciled). Idempotent: already stopped/absent
+    // = OK. If it is still alive, propagate an error → the kubelet retries (instead
+    // of assuming it stopped and moving on to RemoveContainer on a still-running
+    // process).
     if let Some(c) = load_reconciled(base, &id) {
         let alive = matches!(c.status, delonix_runtime_core::Status::Running)
             && c.pid.map(delonix_runtime::is_alive).unwrap_or(false);
@@ -724,10 +730,10 @@ pub fn remove_container(
     base: &Path,
     id: String,
 ) -> Result<Response<RemoveContainerResponse>, Status> {
-    // SÓ apagar o registo CRI DEPOIS de o runtime remover o container. Antes,
-    // apagava-se o JSON mesmo com o `rm -f` falhado → fuga de rootfs/subuid/netns
-    // sem rasto para o kubelet reptir. Idempotente (contrato CRI): um container
-    // que já não existe conta como removido.
+    // ONLY delete the CRI record AFTER the runtime removes the container. Before,
+    // the JSON was deleted even with a failed `rm -f` → leak of rootfs/subuid/netns
+    // with no trace for the kubelet to retry. Idempotent (CRI contract): a container
+    // that no longer exists counts as removed.
     let out = delonix(base, &["container", "rm", "-f", &format!("cri-{id}")])?;
     let gone = out.status.success() || stderr_not_found(&out.stderr);
     if !gone {
@@ -774,8 +780,8 @@ pub fn container_status(
     id: String,
 ) -> Result<Response<ContainerStatusResponse>, Status> {
     let r: ContainerRec = read_rec(&ct_dir(base), &id)?;
-    // Código de saída real (do Store), para o kubelet ver a causa de saída em vez
-    // de um `0` fixo. `finished_at`/`reason` acompanham.
+    // Real exit code (from the Store), so the kubelet sees the exit cause instead
+    // of a fixed `0`. `finished_at`/`reason` follow along.
     let exit = delonix_exit(base, &r.id);
     let status = ContainerStatus {
         id: r.id.clone(),
@@ -799,9 +805,9 @@ pub fn container_status(
             Some(_) => "Error".into(),
             None => String::new(),
         },
-        // Preserva os atributos do CreateContainer — o spec de conformância
-        // `preserving container attributes` exige que labels/annotations voltem
-        // tal como foram definidos; com `..Default::default()` vinham vazios.
+        // Preserve the CreateContainer attributes — the conformance spec
+        // `preserving container attributes` requires labels/annotations to come
+        // back exactly as they were set; with `..Default::default()` they came empty.
         labels: r.labels.clone(),
         annotations: r.annotations.clone(),
         ..Default::default()
@@ -813,8 +819,8 @@ pub fn container_status(
 }
 
 // ---------------------------------------------------------------------------
-// ExecSync: corre um comando no container e devolve stdout/stderr/exit. É o que
-// o kubelet usa para sondas `exec` (liveness/readiness) e o `crictl exec -s`.
+// ExecSync: runs a command in the container and returns stdout/stderr/exit. It's
+// what the kubelet uses for `exec` probes (liveness/readiness) and `crictl exec -s`.
 // ---------------------------------------------------------------------------
 
 pub fn exec_sync(
@@ -827,8 +833,9 @@ pub fn exec_sync(
         return Err(Status::invalid_argument("exec_sync without a command"));
     }
     let name = format!("cri-{id}");
-    // Delega no binário `delonix exec` (single-threaded; faz setns ao container).
-    // O timeout (segundos, >0) é imposto pelo coreutil `timeout` por robustez.
+    // Delegates to the `delonix exec` binary (single-threaded; does setns into the
+    // container). The timeout (seconds, >0) is enforced by the `timeout` coreutil
+    // for robustness.
     let mut command = Command::new(delonix_bin());
     command
         .env("DELONIX_ROOT", base)
@@ -848,7 +855,7 @@ pub fn exec_sync(
         .args(&cmd)
         .output()
         .map_err(st)?;
-    // `timeout` devolve 124 quando expira → mapeia para um exit code distinto.
+    // `timeout` returns 124 when it expires → maps to a distinct exit code.
     let exit_code = out.status.code().unwrap_or(-1);
     Ok(Response::new(ExecSyncResponse {
         stdout: out.stdout,
@@ -858,11 +865,11 @@ pub fn exec_sync(
 }
 
 // ---------------------------------------------------------------------------
-// Métricas (CRI stats) — reais, lidas do cgroup v2 do container. É o que o
-// kubelet usa para Summary API / HPA. C2.
+// Metrics (CRI stats) — real, read from the container's cgroup v2. It's what the
+// kubelet uses for the Summary API / HPA. C2.
 // ---------------------------------------------------------------------------
 
-/// Lê um inteiro de um ficheiro do cgroup (`memory.current`, `pids.current`, …).
+/// Reads an integer from a cgroup file (`memory.current`, `pids.current`, …).
 fn cg_u64(cgroup: &str, file: &str) -> u64 {
     std::fs::read_to_string(format!("{cgroup}/{file}"))
         .ok()
@@ -870,7 +877,7 @@ fn cg_u64(cgroup: &str, file: &str) -> u64 {
         .unwrap_or(0)
 }
 
-/// Lê um campo `chave valor` de um ficheiro estilo `cpu.stat`/`memory.stat`.
+/// Reads a `key value` field from a `cpu.stat`/`memory.stat`-style file.
 fn cg_field(cgroup: &str, file: &str, key: &str) -> u64 {
     std::fs::read_to_string(format!("{cgroup}/{file}"))
         .ok()
@@ -883,7 +890,7 @@ fn cg_field(cgroup: &str, file: &str, key: &str) -> u64 {
         .unwrap_or(0)
 }
 
-/// O cgroup de um container CRI (`cri-<id>`), via o `Store` do Delonix.
+/// The cgroup of a CRI container (`cri-<id>`), via Delonix's `Store`.
 fn container_cgroup(base: &Path, cri_id: &str) -> Option<String> {
     let store = delonix_runtime_core::Store::open(base.join("containers")).ok()?;
     store
@@ -892,10 +899,10 @@ fn container_cgroup(base: &Path, cri_id: &str) -> Option<String> {
         .map(|c| c.cgroup())
 }
 
-/// Soma o `VmRSS` (bytes) de todos os processos do cgroup, lendo `/proc`. É a
-/// fonte de memória quando o `memory.current` do cgroup sub-reporta (o init é
-/// colocado no cgroup após o *exec*, logo as páginas faltadas antes não são
-/// cobradas a este cgroup — mas os PIDs ESTÃO cá, e o `/proc` diz a verdade).
+/// Sums the `VmRSS` (bytes) of all the cgroup's processes, reading `/proc`. It's
+/// the memory source when the cgroup's `memory.current` under-reports (the init is
+/// placed into the cgroup after the *exec*, so pages faulted before are not
+/// charged to this cgroup — but the PIDs ARE here, and `/proc` tells the truth).
 fn cgroup_rss_bytes(cgroup: &str) -> u64 {
     let procs = match std::fs::read_to_string(format!("{cgroup}/cgroup.procs")) {
         Ok(p) => p,
@@ -924,7 +931,7 @@ fn u64v(value: u64) -> Option<UInt64Value> {
     Some(UInt64Value { value })
 }
 
-/// Constrói as métricas reais de um container a partir do seu cgroup v2.
+/// Builds a container's real metrics from its cgroup v2.
 fn container_stats_for(base: &Path, r: &ContainerRec) -> ContainerStats {
     let ts = now_ns();
     let cg = container_cgroup(base, &r.id);
@@ -934,8 +941,8 @@ fn container_stats_for(base: &Path, r: &ContainerRec) -> ContainerStats {
             let cur = cg_u64(cg, "memory.current");
             let inactive = cg_field(cg, "memory.stat", "inactive_file");
             let anon = cg_field(cg, "memory.stat", "anon");
-            // O cgroup sub-reporta a memória (cobrança tardia); cai para o RSS
-            // real dos processos do cgroup, que é a verdade observável.
+            // The cgroup under-reports memory (late charging); falls back to the
+            // real RSS of the cgroup's processes, which is the observable truth.
             let (usage, working, rss) = if cur > 0 {
                 (cur, cur.saturating_sub(inactive), anon)
             } else {
@@ -1024,7 +1031,7 @@ pub fn list_container_stats(
     Ok(Response::new(ListContainerStatsResponse { stats }))
 }
 
-/// Métricas de um pod sandbox: agrega os containers do sandbox (cpu/memória).
+/// Metrics of a pod sandbox: aggregates the sandbox's containers (cpu/memory).
 fn pod_sandbox_stats_for(base: &Path, sb: &SandboxRec) -> PodSandboxStats {
     let ts = now_ns();
     let conts: Vec<ContainerStats> = list_recs::<ContainerRec>(&ct_dir(base))
@@ -1121,9 +1128,9 @@ mod tests {
 
     #[test]
     fn crashed_container_reporta_137_nao_0() {
-        // Container marcado `Running` no store mas com pid MORTO — simula um crash
-        // ainda não reconciliado. Sem o fix, delonix_exit devolvia None → o kubelet
-        // via exit 0 (Completed) e o restartPolicy OnFailure NÃO reiniciava.
+        // Container marked `Running` in the store but with a DEAD pid — simulates a
+        // not-yet-reconciled crash. Without the fix, delonix_exit returned None → the
+        // kubelet saw exit 0 (Completed) and restartPolicy OnFailure did NOT restart.
         let tmp = std::env::temp_dir().join(format!("dlx-cri-exit-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&tmp);
         let store = delonix_runtime_core::Store::open(tmp.join("containers")).unwrap();
@@ -1135,10 +1142,10 @@ mod tests {
             String::new(),
         );
         c.status = delonix_runtime_core::Status::Running;
-        c.pid = Some(2_000_000); // pid inexistente → morto
+        c.pid = Some(2_000_000); // nonexistent pid → dead
         store.save(&c).unwrap();
 
-        // reconcilia (Running+morto → Crashed) → exit 137 + estado Exited.
+        // reconciles (Running+dead → Crashed) → exit 137 + state Exited.
         assert_eq!(
             delonix_exit(&tmp, "abc"),
             Some(137),
@@ -1149,7 +1156,7 @@ mod tests {
             ContainerState::ContainerExited as i32
         );
 
-        // Um container parado limpo → 0 (Completed). Um Failed(n) → n.
+        // A cleanly stopped container → 0 (Completed). A Failed(n) → n.
         let mut ok = c.clone();
         ok.status = delonix_runtime_core::Status::Stopped;
         store.save(&ok).unwrap();

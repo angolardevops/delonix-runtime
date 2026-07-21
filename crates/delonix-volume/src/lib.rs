@@ -1,13 +1,13 @@
-//! `delonix-volume` — volumes nomeados e *bind mounts* do Delonix Engine.
+//! `delonix-volume` — named volumes and *bind mounts* for the Delonix Engine.
 //!
-//! Dois tipos de montagem, ambos **zero-copy** (o kernel partilha os blocos via
-//! `MS_BIND`, não há cópia de dados):
-//! - **volume nomeado**: um directório gerido pelo Delonix em
-//!   `<root>/volumes/<nome>/_data`, que **sobrevive** ao container;
-//! - **bind mount**: um caminho arbitrário do host, montado no container.
+//! Two kinds of mount, both **zero-copy** (the kernel shares the blocks via
+//! `MS_BIND`, there is no data copy):
+//! - **named volume**: a directory managed by Delonix at
+//!   `<root>/volumes/<name>/_data`, which **survives** the container;
+//! - **bind mount**: an arbitrary host path, mounted into the container.
 //!
-//! A sintaxe `-v` segue o Docker: `nome:/destino` (volume) ou
-//! `/caminho/host:/destino` (bind), com `:ro` opcional para só-leitura.
+//! The `-v` syntax follows Docker: `name:/target` (volume) or
+//! `/host/path:/target` (bind), with an optional `:ro` for read-only.
 
 use delonix_runtime_core::{Error, Mount, Result};
 use serde::{Deserialize, Serialize};
@@ -15,41 +15,41 @@ use std::fs;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-/// Metadados de um volume nomeado.
+/// Metadata of a named volume.
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Volume {
-    /// O nome do volume.
+    /// The volume name.
     pub name: String,
-    /// O directório de dados no host (`.../_data`).
+    /// The data directory on the host (`.../_data`).
     pub mountpoint: String,
-    /// Instante de criação (segundos Unix).
+    /// Creation instant (Unix seconds).
     pub created_unix: u64,
-    /// Driver: `local` (omissão) ou `nfs` (TrueNAS/NFS externo).
+    /// Driver: `local` (default) or `nfs` (external TrueNAS/NFS).
     #[serde(default = "default_driver")]
     pub driver: String,
-    /// Para `nfs`: o *export* (`servidor:/caminho`).
+    /// For `nfs`: the *export* (`server:/path`).
     #[serde(default)]
     pub device: Option<String>,
-    /// Opções de montagem (`mount -o ...`), ex.: `vers=4,ro`.
+    /// Mount options (`mount -o ...`), e.g.: `vers=4,ro`.
     #[serde(default)]
     pub options: Option<String>,
-    /// Quota de tamanho em bytes (`--quota`). `None` = sem limite. Com privilégio
-    /// (modelo root) é um cap DURO via imagem ext4 montada por loop; em rootless é
-    /// um limite MONITORIZADO (uso medido, alerta perto do limite). [[híbrido #7]]
+    /// Size quota in bytes (`--quota`). `None` = no limit. With privilege
+    /// (root model) it is a HARD cap via a loop-mounted ext4 image; in rootless it is
+    /// a MONITORED limit (measured usage, alert near the limit). [[hybrid #7]]
     #[serde(default)]
     pub quota_bytes: Option<u64>,
-    /// Percentagem de uso a partir da qual se gera alerta (omissão 90).
+    /// Usage percentage above which an alert is raised (default 90).
     #[serde(default)]
     pub alert_pct: Option<u8>,
 }
 
-/// Os drivers que montam uma partilha de rede (por oposição a `local`/loopback).
+/// The drivers that mount a network share (as opposed to `local`/loopback).
 pub fn is_network_driver(driver: &str) -> bool {
     matches!(driver, "nfs" | "cifs" | "smb" | "webdav" | "dav")
 }
 
-/// O `-t <fstype>` do `mount` para cada driver de rede. `smb` é um alias de
-/// `cifs` (o kernel só conhece `cifs`); `dav` de `webdav` (`davfs`).
+/// The `mount` `-t <fstype>` for each network driver. `smb` is an alias of
+/// `cifs` (the kernel only knows `cifs`); `dav` of `webdav` (`davfs`).
 fn mount_fstype(driver: &str) -> &'static str {
     match driver {
         "cifs" | "smb" => "cifs",
@@ -62,8 +62,8 @@ fn default_driver() -> String {
     "local".to_string()
 }
 
-/// Tamanho humano (`512m`, `2g`, `10G`, `1048576`) → bytes. Sufixos binários
-/// (k=1024, m=1024², g=1024³, t=1024⁴); um `b`/`B` final é aceite. `None` se inválido.
+/// Human size (`512m`, `2g`, `10G`, `1048576`) → bytes. Binary suffixes
+/// (k=1024, m=1024², g=1024³, t=1024⁴); a trailing `b`/`B` is accepted. `None` if invalid.
 pub fn parse_size_bytes(s: &str) -> Option<u64> {
     let lower = s.trim().to_lowercase();
     let body = lower.strip_suffix('b').unwrap_or(lower.as_str());
@@ -81,13 +81,13 @@ pub fn parse_size_bytes(s: &str) -> Option<u64> {
     Some((n * mult as f64) as u64)
 }
 
-/// O armazém de volumes, sob `<root>/volumes`.
+/// The volume store, under `<root>/volumes`.
 pub struct VolumeStore {
     root: PathBuf,
 }
 
 impl VolumeStore {
-    /// Abre (criando) o armazém de volumes.
+    /// Opens (creating) the volume store.
     pub fn open(base: impl Into<PathBuf>) -> Result<Self> {
         let root = base.into().join("volumes");
         fs::create_dir_all(&root)?;
@@ -98,8 +98,8 @@ impl VolumeStore {
         self.root.join(name)
     }
 
-    /// O diretório raiz de um volume (`<root>/volumes/<nome>`) — para operações
-    /// de recuperação na CLI (ex.: rm de órfãos/subuids num userns mapeado).
+    /// The root directory of a volume (`<root>/volumes/<name>`) — for recovery
+    /// operations in the CLI (e.g.: rm of orphans/subuids in a mapped userns).
     pub fn volume_dir(&self, name: &str) -> PathBuf {
         self.dir(name)
     }
@@ -117,17 +117,17 @@ impl VolumeStore {
                 .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.')
     }
 
-    /// Cria um volume `local` (idempotente: devolve o existente se já existir).
+    /// Creates a `local` volume (idempotent: returns the existing one if it already exists).
     pub fn create(&self, name: &str) -> Result<Volume> {
         if self.meta_path(name).exists() {
-            return self.inspect(name); // preserva o driver/device de um volume já criado
+            return self.inspect(name); // preserves the driver/device of an already-created volume
         }
         self.create_with(name, "local", None, None)
     }
 
-    /// Cria um volume com um driver (`local`/`nfs`). Para `nfs`, monta já o
-    /// *export* (`servidor:/caminho`) no directório de dados — útil para ligar a
-    /// um TrueNAS ou outro servidor NFS. Idempotente.
+    /// Creates a volume with a driver (`local`/`nfs`). For `nfs`, it immediately
+    /// mounts the *export* (`server:/path`) into the data directory — useful to
+    /// connect to a TrueNAS or another NFS server. Idempotent.
     pub fn create_with(
         &self,
         name: &str,
@@ -143,8 +143,8 @@ impl VolumeStore {
             self.ensure_mounted(&v)?;
             return Ok(v);
         }
-        // Os drivers de rede exigem um `device` (o alvo da montagem): nfs
-        // `servidor:/export`, cifs `//servidor/share`, webdav `https://…`.
+        // Network drivers require a `device` (the mount target): nfs
+        // `server:/export`, cifs `//server/share`, webdav `https://…`.
         if is_network_driver(driver) && device.as_deref().unwrap_or("").is_empty() {
             return Err(Error::Invalid(format!(
                 "{driver} volume requires a device (the mount target)"
@@ -162,7 +162,7 @@ impl VolumeStore {
             quota_bytes: None,
             alert_pct: None,
         };
-        // Monta ANTES de persistir: se o NFS falhar, não deixamos um volume órfão.
+        // Mount BEFORE persisting: if NFS fails, we don't leave an orphan volume.
         if let Err(e) = self.ensure_mounted(&vol) {
             let _ = fs::remove_dir_all(self.dir(name));
             return Err(e);
@@ -171,17 +171,17 @@ impl VolumeStore {
         Ok(vol)
     }
 
-    /// Garante que um volume de REDE está montado. No-op para volumes locais ou
-    /// se já estiver montado. Best-effort: requer o helper de mount do tipo
-    /// (`mount.nfs`, `mount.cifs`, `mount.davfs`) e, tipicamente, privilégio.
+    /// Ensures a NETWORK volume is mounted. No-op for local volumes or
+    /// if it is already mounted. Best-effort: requires the type's mount helper
+    /// (`mount.nfs`, `mount.cifs`, `mount.davfs`) and, typically, privilege.
     ///
-    /// Tipos suportados e o `mount -t` respectivo:
-    /// - `nfs`   → `mount -t nfs   servidor:/export`  (TrueNAS/NFS externo)
-    /// - `cifs`/`smb` → `mount -t cifs //servidor/share` (Samba/Windows/TrueNAS SMB)
+    /// Supported types and their respective `mount -t`:
+    /// - `nfs`   → `mount -t nfs   server:/export`  (external TrueNAS/NFS)
+    /// - `cifs`/`smb` → `mount -t cifs //server/share` (Samba/Windows/TrueNAS SMB)
     /// - `webdav`/`dav` → `mount -t davfs https://…`  (Nextcloud/ownCloud WebDAV)
     pub fn ensure_mounted(&self, vol: &Volume) -> Result<()> {
-        // Volume com quota DURA (loopback ext4): remonta a imagem se desmontada
-        // (ex.: após reinício do host). Best-effort — sem privilégio, no-op.
+        // Volume with a HARD quota (ext4 loopback): remounts the image if unmounted
+        // (e.g.: after a host reboot). Best-effort — without privilege, no-op.
         let img = self.loop_img(&vol.name);
         if vol.quota_bytes.is_some() && img.exists() && !is_mounted(&vol.mountpoint) {
             let _ = Self::run(
@@ -225,7 +225,7 @@ impl VolumeStore {
         Ok(())
     }
 
-    /// Lista os volumes existentes.
+    /// Lists the existing volumes.
     pub fn list(&self) -> Result<Vec<Volume>> {
         let mut out = Vec::new();
         for entry in fs::read_dir(&self.root)? {
@@ -243,7 +243,7 @@ impl VolumeStore {
         Ok(out)
     }
 
-    /// Inspecciona um volume pelo nome.
+    /// Inspects a volume by name.
     pub fn inspect(&self, name: &str) -> Result<Volume> {
         let meta = self.meta_path(name);
         if !meta.exists() {
@@ -252,20 +252,20 @@ impl VolumeStore {
         Ok(serde_json::from_slice(&fs::read(meta)?)?)
     }
 
-    // ---- Snapshots (Bloco B do plano Odoo) ------------------------------------
-    // Um snapshot é um tar.gz do `_data`, guardado em `<vol>/_snapshots/<snap>.tar.gz`
-    // (sobrevive ao container; NÃO sobrevive ao `volume rm` — é um snapshot, não um
-    // backup externo). Crash-consistente: tira-se com a carga a correr; para
-    // consistência aplicacional (ex.: BD), o backup orquestrado (Bloco C) pára/dump.
-    // Em rootless o tar corre num userns mapeado (dono efetivo dos subuids) — ver a
-    // CLI (`__volsnap`); esta camada só conhece caminhos e listagem.
+    // ---- Snapshots (Block B of the Odoo plan) ---------------------------------
+    // A snapshot is a tar.gz of `_data`, stored in `<vol>/_snapshots/<snap>.tar.gz`
+    // (survives the container; does NOT survive `volume rm` — it is a snapshot, not an
+    // external backup). Crash-consistent: taken with the workload running; for
+    // application consistency (e.g.: DB), the orchestrated backup (Block C) stops/dumps.
+    // In rootless the tar runs in a mapped userns (effective owner of the subuids) — see the
+    // CLI (`__volsnap`); this layer only knows about paths and listing.
 
-    /// O diretório de snapshots de um volume.
+    /// The snapshots directory of a volume.
     pub fn snapshots_dir(&self, name: &str) -> PathBuf {
         self.dir(name).join("_snapshots")
     }
 
-    /// O caminho do ficheiro de um snapshot (valida o nome primeiro).
+    /// The file path of a snapshot (validates the name first).
     pub fn snapshot_path(&self, volume: &str, snap: &str) -> Result<PathBuf> {
         if !safe_snapshot_name(snap) {
             return Err(Error::Invalid(format!(
@@ -275,7 +275,7 @@ impl VolumeStore {
         Ok(self.snapshots_dir(volume).join(format!("{snap}.tar.gz")))
     }
 
-    /// Lista os snapshots de um volume: `(nome, bytes, mtime-unix)`.
+    /// Lists the snapshots of a volume: `(name, bytes, mtime-unix)`.
     pub fn list_snapshots(&self, name: &str) -> Result<Vec<(String, u64, i64)>> {
         let dir = self.snapshots_dir(name);
         let mut out = Vec::new();
@@ -299,11 +299,11 @@ impl VolumeStore {
                 .unwrap_or(0);
             out.push((snap.to_string(), size, mtime));
         }
-        out.sort_by_key(|s| s.2); // mais antigo primeiro
+        out.sort_by_key(|s| s.2); // oldest first
         Ok(out)
     }
 
-    /// Apaga um snapshot.
+    /// Deletes a snapshot.
     pub fn remove_snapshot(&self, volume: &str, snap: &str) -> Result<()> {
         let p = self.snapshot_path(volume, snap)?;
         if !p.exists() {
@@ -315,14 +315,14 @@ impl VolumeStore {
         Ok(())
     }
 
-    /// Remove um volume (e os seus dados). Desmonta primeiro se for `nfs`.
+    /// Removes a volume (and its data). Unmounts first if it is `nfs`.
     pub fn remove(&self, name: &str) -> Result<()> {
         let dir = self.dir(name);
         if !dir.exists() {
             return Err(Error::NotFound(format!("volume {name}")));
         }
         if let Ok(v) = self.inspect(name) {
-            // desmonta nfs OU o loopback de quota dura antes de apagar os dados.
+            // unmount nfs OR the hard-quota loopback before deleting the data.
             if (is_network_driver(&v.driver) || v.quota_bytes.is_some())
                 && is_mounted(&v.mountpoint)
             {
@@ -335,18 +335,18 @@ impl VolumeStore {
         Ok(())
     }
 
-    // ---- Quota (#7, híbrida) -------------------------------------------------
-    // Modelo ROOT (privileged): cap DURO via imagem ext4 montada por loop em `_data`
-    // (a escrita falha com ENOSPC ao encher; resize2fs cresce a quente). Modelo
-    // ROOTLESS (monitor): a quota é um limite medido — `usage()`+`over_quota()`
-    // expõem o estado e o alerta; não há cap duro (losetup precisa de CAP_SYS_ADMIN).
+    // ---- Quota (#7, hybrid) --------------------------------------------------
+    // ROOT model (privileged): HARD cap via a loop-mounted ext4 image on `_data`
+    // (writes fail with ENOSPC when full; resize2fs grows it hot). ROOTLESS model
+    // (monitor): the quota is a measured limit — `usage()`+`over_quota()`
+    // expose the state and the alert; there is no hard cap (losetup needs CAP_SYS_ADMIN).
 
     fn loop_img(&self, name: &str) -> PathBuf {
         self.dir(name).join("data.img")
     }
 
-    /// Uso REAL em bytes do volume (`du` do `_data`, recursivo). Para volumes com
-    /// loopback, reflete o ocupado dentro do ext4; para locais, o tamanho dos dados.
+    /// REAL usage in bytes of the volume (`du` of `_data`, recursive). For volumes with
+    /// loopback, reflects what is used inside the ext4; for local ones, the data size.
     pub fn usage(&self, name: &str) -> u64 {
         fn walk(p: &std::path::Path) -> u64 {
             let mut total = 0u64;
@@ -365,7 +365,7 @@ impl VolumeStore {
         walk(&self.data_dir(name))
     }
 
-    /// O volume está em (ou acima) do limiar de alerta? `(em_alerta, acima_da_quota)`.
+    /// Is the volume at (or above) the alert threshold? `(in_alert, above_quota)`.
     pub fn quota_state(&self, vol: &Volume) -> (bool, bool) {
         match vol.quota_bytes {
             Some(q) if q > 0 => {
@@ -398,7 +398,7 @@ impl VolumeStore {
         Ok(())
     }
 
-    /// Encontra o dispositivo de loop que serve a imagem (`losetup -j`), se houver.
+    /// Finds the loop device serving the image (`losetup -j`), if any.
     fn loop_dev(img: &std::path::Path) -> Option<String> {
         let out = std::process::Command::new("losetup")
             .args(["-j", &img.to_string_lossy(), "-O", "NAME", "--noheadings"])
@@ -411,21 +411,21 @@ impl VolumeStore {
             .filter(|l| !l.is_empty())
     }
 
-    /// Garante a imagem ext4 (privileged) com `quota` bytes montada em `_data`.
-    /// Cria na 1.ª vez (volume vazio) ou redimensiona a quente (cresce: truncate +
-    /// resize2fs online). Devolve `Err` se faltar privilégio/ferramentas.
+    /// Ensures the ext4 image (privileged) with `quota` bytes is mounted on `_data`.
+    /// Creates it the 1st time (empty volume) or resizes it hot (grows: truncate +
+    /// online resize2fs). Returns `Err` if privilege/tools are missing.
     fn apply_loopback(&self, name: &str, quota: u64) -> Result<()> {
         let img = self.loop_img(name);
         let data = self.data_dir(name);
         let data_s = data.to_string_lossy().into_owned();
         if !img.exists() {
-            // só criamos loopback sobre um `_data` VAZIO (senão esconderíamos dados).
+            // we only create a loopback over an EMPTY `_data` (otherwise we'd hide data).
             if self.usage(name) > 0 {
                 return Err(Error::Invalid(
                     "hard quota (loopback) only on an empty volume; create with --quota or empty it first".into(),
                 ));
             }
-            // imagem esparsa do tamanho da quota → ext4 → mount por loop.
+            // sparse image the size of the quota → ext4 → loop mount.
             Self::run(
                 "truncate",
                 &["-s", &quota.to_string(), &img.to_string_lossy()],
@@ -438,13 +438,13 @@ impl VolumeStore {
             Self::run("mount", &["-o", "loop", &img.to_string_lossy(), &data_s])?;
             return Ok(());
         }
-        // imagem já existe → garante montada e redimensiona para a nova quota.
+        // image already exists → ensure mounted and resize to the new quota.
         if !is_mounted(&data_s) {
             Self::run("mount", &["-o", "loop", &img.to_string_lossy(), &data_s])?;
         }
         let cur = fs::metadata(&img).map(|m| m.len()).unwrap_or(0);
         if quota > cur {
-            // CRESCER a quente: aumenta a imagem e o fs (online).
+            // GROW hot: increase the image and the fs (online).
             Self::run(
                 "truncate",
                 &["-s", &quota.to_string(), &img.to_string_lossy()],
@@ -453,11 +453,11 @@ impl VolumeStore {
                 context: "quota",
                 message: "loop device not found".into(),
             })?;
-            Self::run("losetup", &["-c", &dev])?; // reconhece o novo tamanho do backing
+            Self::run("losetup", &["-c", &dev])?; // recognizes the backing's new size
             Self::run("resize2fs", &[&dev])?; // online grow
         } else if quota < cur {
-            // ENCOLHER: ext4 não encolhe online — faz offline (desmonta/resize/monta).
-            // Recusa se ocupado (container a usar) ou se a quota < uso atual.
+            // SHRINK: ext4 does not shrink online — do it offline (unmount/resize/mount).
+            // Refuses if busy (container in use) or if the quota < current usage.
             if self.usage(name) > quota {
                 return Err(Error::Invalid(
                     "the new quota is smaller than the current usage — free up space first".into(),
@@ -473,8 +473,8 @@ impl VolumeStore {
                     "volume in use — stop the containers to shrink the quota".into(),
                 ));
             }
-            let blocks = format!("{}s", quota / 512); // resize2fs aceita tamanho em sectores
-                                                      // resize2fs precisa de e2fsck antes de encolher; loop temporário.
+            let blocks = format!("{}s", quota / 512); // resize2fs accepts size in sectors
+                                                      // resize2fs needs e2fsck before shrinking; temporary loop.
             Self::run("e2fsck", &["-f", "-y", &img.to_string_lossy()]).ok();
             Self::run("resize2fs", &[&img.to_string_lossy(), &blocks])?;
             Self::run(
@@ -486,9 +486,9 @@ impl VolumeStore {
         Ok(())
     }
 
-    /// Define (ou remove) a quota de um volume. `privileged` (modelo root) ativa o
-    /// cap DURO por loopback ext4; senão fica em modo MONITOR (só persiste o limite).
-    /// `quota=None` remove o limite (não desfaz um loopback já criado).
+    /// Sets (or removes) a volume's quota. `privileged` (root model) enables the
+    /// HARD cap via ext4 loopback; otherwise it stays in MONITOR mode (only persists the limit).
+    /// `quota=None` removes the limit (does not undo an already-created loopback).
     pub fn set_quota(
         &self,
         name: &str,
@@ -508,10 +508,10 @@ impl VolumeStore {
         Ok(vol)
     }
 
-    /// Traduz uma especificação `-v` num [`Mount`].
+    /// Translates a `-v` specification into a [`Mount`].
     ///
-    /// - `nome:/destino[:ro]` → volume nomeado (criado se não existir);
-    /// - `/host:/destino[:ro]` (ou `./rel`) → *bind mount* de um caminho do host.
+    /// - `name:/target[:ro]` → named volume (created if it does not exist);
+    /// - `/host:/target[:ro]` (or `./rel`) → *bind mount* of a host path.
     pub fn resolve_spec(&self, spec: &str) -> Result<Mount> {
         let parts: Vec<&str> = spec.split(':').collect();
         if parts.len() < 2 || parts.len() > 3 {
@@ -521,11 +521,11 @@ impl VolumeStore {
         }
         let src = parts[0];
         let target = parts[1];
-        // 3.º campo: só `ro`/`rw` reconhecidos. Antes, QUALQUER outra opção
-        // (`z`/`Z` SELinux, `U`, propagação) era SILENCIOSAMENTE ignorada — o
-        // bind montava sem o rótulo SELinux e falhava em RHEL/Fedora enforcing
-        // com o utilizador a julgar que `:z` foi tratado. Fail-closed: erro
-        // explícito (achado da análise Docker/Podman; "sem falha silenciosa").
+        // 3rd field: only `ro`/`rw` recognized. Before, ANY other option
+        // (`z`/`Z` SELinux, `U`, propagation) was SILENTLY ignored — the
+        // bind mounted without the SELinux label and failed on RHEL/Fedora enforcing
+        // with the user believing `:z` was handled. Fail-closed: explicit
+        // error (finding from the Docker/Podman analysis; "no silent failure").
         let readonly = match parts.get(2) {
             None | Some(&"rw") => false,
             Some(&"ro") => true,
@@ -542,12 +542,12 @@ impl VolumeStore {
         }
 
         let source = if src.starts_with('/') || src.starts_with('.') {
-            // bind mount de um caminho do host
+            // bind mount of a host path
             let p = fs::canonicalize(src)
                 .map_err(|_| Error::Invalid(format!("bind path does not exist: {src}")))?;
             p.to_string_lossy().into_owned()
         } else {
-            // volume nomeado (cria a pedido, como o Docker; monta o NFS se for o caso)
+            // named volume (creates on demand, like Docker; mounts the NFS if applicable)
             let vol = self.create(src)?;
             self.ensure_mounted(&vol)?;
             vol.mountpoint
@@ -568,7 +568,7 @@ fn now_unix() -> u64 {
         .unwrap_or(0)
 }
 
-/// Nome de snapshot seguro: `[A-Za-z0-9._-]+`, sem path traversal.
+/// Safe snapshot name: `[A-Za-z0-9._-]+`, no path traversal.
 pub fn safe_snapshot_name(s: &str) -> bool {
     !s.is_empty()
         && s.len() <= 128
@@ -577,7 +577,7 @@ pub fn safe_snapshot_name(s: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
 }
 
-/// `true` se `path` é um ponto de montagem activo (consulta `/proc/mounts`).
+/// `true` if `path` is an active mount point (queries `/proc/mounts`).
 fn is_mounted(path: &str) -> bool {
     fs::read_to_string("/proc/mounts")
         .map(|s| s.lines().any(|l| l.split_whitespace().nth(1) == Some(path)))
@@ -590,8 +590,8 @@ mod tests {
 
     #[test]
     fn bind_option_rejeita_selinux_e_desconhecidas() {
-        // Fail-closed: uma opção de bind não-suportada (`:z`/`:Z` SELinux, `:U`,
-        // propagação) dá ERRO em vez de ser ignorada em silêncio.
+        // Fail-closed: an unsupported bind option (`:z`/`:Z` SELinux, `:U`,
+        // propagation) gives an ERROR instead of being silently ignored.
         let tmp = std::env::temp_dir().join(format!("dlx-vol-bindopt-{}", std::process::id()));
         std::fs::create_dir_all(&tmp).unwrap();
         let store = VolumeStore::open(&tmp).unwrap();
@@ -599,7 +599,7 @@ mod tests {
         assert!(store.resolve_spec(&format!("{src}:/dst:z")).is_err());
         assert!(store.resolve_spec(&format!("{src}:/dst:Z")).is_err());
         assert!(store.resolve_spec(&format!("{src}:/dst:U")).is_err());
-        // `ro`/`rw` continuam a funcionar (sem regressão).
+        // `ro`/`rw` still work (no regression).
         assert!(store.resolve_spec(&format!("{src}:/dst:ro")).is_ok());
         assert!(store.resolve_spec(&format!("{src}:/dst:rw")).is_ok());
         assert!(store.resolve_spec(&format!("{src}:/dst")).is_ok());
@@ -624,11 +624,11 @@ mod tests {
         let (s, dir) = store();
         s.create("qv").unwrap();
         std::fs::write(s.data_dir("qv").join("f"), vec![0u8; 950]).unwrap();
-        // quota 1000, alerta a 90% → 950/1000 = 95% ⇒ em alerta, não acima.
+        // quota 1000, alert at 90% → 950/1000 = 95% ⇒ in alert, not above.
         let v = s.set_quota("qv", Some(1000), Some(90), false).unwrap();
         let (warn, over) = s.quota_state(&v);
         assert!(warn && !over, "950/1000 deve estar em alerta mas não acima");
-        // acima da quota
+        // above the quota
         std::fs::write(s.data_dir("qv").join("g"), vec![0u8; 200]).unwrap();
         let (_, over2) = s.quota_state(&v);
         assert!(over2, "1150/1000 deve estar acima da quota");
@@ -661,21 +661,21 @@ mod tests {
     #[test]
     fn create_with_driver_idempotent_and_meta_on_disk() {
         let (vs, base) = store();
-        // cria com driver explícito `local`
+        // create with explicit `local` driver
         let v = vs.create_with("app_data", "local", None, None).unwrap();
         assert_eq!(v.driver, "local");
-        // meta.json deve existir no disco
+        // meta.json must exist on disk
         assert!(base.join("volumes/app_data/meta.json").exists());
-        // idempotente: re-criar devolve o existente sem erro
+        // idempotent: re-creating returns the existing one without error
         let v2 = vs.create_with("app_data", "local", None, None).unwrap();
         assert_eq!(v2.name, "app_data");
         assert_eq!(vs.list().unwrap().len(), 1);
-        // nome inválido → Error::Invalid
+        // invalid name → Error::Invalid
         assert!(matches!(
             vs.create_with("bad name!", "local", None, None),
             Err(Error::Invalid(_))
         ));
-        // nfs sem device → Error::Invalid
+        // nfs without device → Error::Invalid
         assert!(matches!(
             vs.create_with("nas", "nfs", None, None),
             Err(Error::Invalid(_))
@@ -727,10 +727,10 @@ mod tests {
     fn snapshot_paths_and_listing() {
         let (vs, base) = store();
         vs.create("v1").unwrap();
-        // caminho validado + inexistentes listam vazio
+        // validated path + non-existent ones list empty
         assert!(vs.snapshot_path("v1", "../evil").is_err());
         assert_eq!(vs.list_snapshots("v1").unwrap().len(), 0);
-        // um snapshot "feito" (ficheiro no sítio) aparece na listagem
+        // a "made" snapshot (file in place) appears in the listing
         let p = vs.snapshot_path("v1", "s1").unwrap();
         fs::create_dir_all(p.parent().unwrap()).unwrap();
         fs::write(&p, b"tar").unwrap();

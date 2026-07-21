@@ -1,10 +1,10 @@
-//! Typestate do ciclo de vida de um container (Sprint 5 — Damas: *correção por
-//! construção*). Os estados são **tipos**, e as transições ilegais **não
-//! compilam** — em vez de serem apanhadas (ou não) em runtime por um `match` sobre
-//! um [`Status`](crate::Status).
+//! Typestate of a container's lifecycle (Sprint 5 — Damas: *correctness by
+//! construction*). The states are **types**, and the illegal transitions **do not
+//! compile** — instead of being caught (or not) at runtime by a `match` over
+//! a [`Status`](crate::Status).
 //!
-//! O modelo: `Created → Running → Stopped → (restart) Created`. Cada transição
-//! **consome** a fase anterior, por isso uma fase obsoleta não pode ser reutilizada.
+//! The model: `Created → Running → Stopped → (restart) Created`. Each transition
+//! **consumes** the previous phase, so an obsolete phase cannot be reused.
 //!
 //! ```
 //! use delonix_runtime_core::typestate::Phase;
@@ -16,42 +16,42 @@
 //! assert_eq!(running.pid(), 4242);
 //! let stopped = running.stop(0);                 // Running → Stopped
 //! assert_eq!(stopped.status(), Status::Stopped);
-//! let _again = stopped.restart();                // Stopped → Created (reusa o id)
+//! let _again = stopped.restart();                // Stopped → Created (reuses the id)
 //! ```
 //!
-//! As transições inválidas são **erros de compilação**, não bugs em runtime:
+//! The invalid transitions are **compilation errors**, not runtime bugs:
 //!
 //! ```compile_fail
 //! use delonix_runtime_core::typestate::Phase;
 //! let created = Phase::new("abc123"); // Phase<Created>
-//! created.stop(0);                    // ERRO: `stop` só existe em Phase<Running>
+//! created.stop(0);                    // ERROR: `stop` only exists on Phase<Running>
 //! ```
 //!
 //! ```compile_fail
 //! use delonix_runtime_core::typestate::Phase;
 //! let running = Phase::new("abc123").start(1); // Phase<Running>
-//! running.start(2);                            // ERRO: `start` só existe em Phase<Created>
+//! running.start(2);                            // ERROR: `start` only exists on Phase<Created>
 //! ```
 //!
 //! ```compile_fail
 //! use delonix_runtime_core::typestate::Phase;
 //! let created = Phase::new("abc123");
 //! let _running = created.start(1);
-//! created.start(2);                  // ERRO: `created` foi consumido pela 1.ª transição
+//! created.start(2);                  // ERROR: `created` was consumed by the 1st transition
 //! ```
 
 use crate::Status;
 use std::marker::PhantomData;
 
-/// Estado: criado, ainda sem `pid`.
+/// State: created, still without a `pid`.
 pub struct Created;
-/// Estado: em execução, com um `pid` de init vivo.
+/// State: running, with a live init `pid`.
 pub struct Running;
-/// Estado: terminado, com um código de saída.
+/// State: terminated, with an exit code.
 pub struct Stopped;
 
-/// Uma fase **tipada** do ciclo de vida. O parâmetro `S` é o estado atual; os
-/// métodos de transição só existem nas fases onde são válidos.
+/// A **typed** phase of the lifecycle. The `S` parameter is the current state; the
+/// transition methods only exist in the phases where they are valid.
 pub struct Phase<S> {
     id: String,
     pid: Option<i32>,
@@ -60,14 +60,14 @@ pub struct Phase<S> {
 }
 
 impl<S> Phase<S> {
-    /// O identificador do container (estável ao longo das transições).
+    /// The container's identifier (stable across transitions).
     pub fn id(&self) -> &str {
         &self.id
     }
 }
 
 impl Phase<Created> {
-    /// Cria uma fase nova no estado `Created`.
+    /// Creates a new phase in the `Created` state.
     pub fn new(id: impl Into<String>) -> Self {
         Phase {
             id: id.into(),
@@ -76,7 +76,7 @@ impl Phase<Created> {
             _state: PhantomData,
         }
     }
-    /// `Created → Running`. Consome a fase (a anterior deixa de ser utilizável).
+    /// `Created → Running`. Consumes the phase (the previous one becomes unusable).
     pub fn start(self, pid: i32) -> Phase<Running> {
         Phase {
             id: self.id,
@@ -85,18 +85,18 @@ impl Phase<Created> {
             _state: PhantomData,
         }
     }
-    /// O [`Status`](crate::Status) correspondente.
+    /// The corresponding [`Status`](crate::Status).
     pub fn status(&self) -> Status {
         Status::Created
     }
 }
 
 impl Phase<Running> {
-    /// O `pid` do init (existe só no estado `Running`).
+    /// The init's `pid` (exists only in the `Running` state).
     pub fn pid(&self) -> i32 {
         self.pid.expect("Phase<Running> always has a pid")
     }
-    /// `Running → Stopped`, guardando o código de saída.
+    /// `Running → Stopped`, storing the exit code.
     pub fn stop(self, code: i32) -> Phase<Stopped> {
         Phase {
             id: self.id,
@@ -105,18 +105,18 @@ impl Phase<Running> {
             _state: PhantomData,
         }
     }
-    /// O [`Status`](crate::Status) correspondente.
+    /// The corresponding [`Status`](crate::Status).
     pub fn status(&self) -> Status {
         Status::Running
     }
 }
 
 impl Phase<Stopped> {
-    /// O código de saída (existe só no estado `Stopped`).
+    /// The exit code (exists only in the `Stopped` state).
     pub fn exit_code(&self) -> i32 {
         self.code.expect("Phase<Stopped> always has an exit code")
     }
-    /// `Stopped → Created` (restart): reutiliza o id, limpa pid/código.
+    /// `Stopped → Created` (restart): reuses the id, clears pid/code.
     pub fn restart(self) -> Phase<Created> {
         Phase {
             id: self.id,
@@ -125,7 +125,7 @@ impl Phase<Stopped> {
             _state: PhantomData,
         }
     }
-    /// O [`Status`](crate::Status) correspondente: código 0 → Stopped, ≠0 → Failed.
+    /// The corresponding [`Status`](crate::Status): code 0 → Stopped, ≠0 → Failed.
     pub fn status(&self) -> Status {
         match self.code.unwrap_or(0) {
             0 => Status::Stopped,

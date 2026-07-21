@@ -1,5 +1,5 @@
-//! Montagem do rootfs com **overlay2**: empilha os *layers* (read-only) e
-//! acrescenta uma camada de escrita por container.
+//! Mounting the rootfs with **overlay2**: stacks the *layers* (read-only) and
+//! adds a write layer per container.
 
 use crate::cas::strip;
 use crate::image::{Image, ImageStore};
@@ -7,7 +7,7 @@ use delonix_runtime_core::{Error, Result};
 use nix::mount::{mount, umount2, MntFlags, MsFlags};
 use std::path::{Path, PathBuf};
 
-/// `chown` recursivo de um directório (para suporte a user namespace).
+/// Recursive `chown` of a directory (for user namespace support).
 fn chown_recursive(path: &Path, uid: u32, gid: u32) -> Result<()> {
     use std::os::unix::fs::chown;
     let _ = chown(path, Some(uid), Some(gid));
@@ -19,8 +19,8 @@ fn chown_recursive(path: &Path, uid: u32, gid: u32) -> Result<()> {
     Ok(())
 }
 
-/// Extrai um *layer* (tar, opcionalmente gzip ou zstd) para um directório.
-/// Detecta a compressão pelos *magic bytes* (gzip `1f 8b`, zstd `28 b5 2f fd`).
+/// Extracts a *layer* (tar, optionally gzip or zstd) into a directory.
+/// Detects the compression by *magic bytes* (gzip `1f 8b`, zstd `28 b5 2f fd`).
 fn extract_layer(data: &[u8], dest: &Path) -> Result<()> {
     let is_gzip = data.len() >= 2 && data[0] == 0x1f && data[1] == 0x8b;
     let is_zstd =
@@ -38,9 +38,9 @@ fn extract_layer(data: &[u8], dest: &Path) -> Result<()> {
     result.map_err(|e| Error::Invalid(format!("failed to extract layer: {e}")))
 }
 
-/// Aplica um *layer* a um destino FLAT (não overlay), tratando os *whiteouts*
-/// do OCI: `.wh.<nome>` apaga o alvo; `.wh..wh..opq` esvazia o directório. É o
-/// que torna o resultado num rootfs portável (ex.: um *bundle* OCI p/ o `runc`).
+/// Applies a *layer* to a FLAT destination (not overlay), handling the OCI
+/// *whiteouts*: `.wh.<name>` deletes the target; `.wh..wh..opq` empties the directory. This is
+/// what makes the result a portable rootfs (e.g. an OCI *bundle* for `runc`).
 fn apply_layer_flat(data: &[u8], dest: &Path) -> Result<()> {
     let reader: Box<dyn std::io::Read> = if data.starts_with(&[0x1f, 0x8b]) {
         Box::new(flate2::read::GzDecoder::new(data))
@@ -83,12 +83,12 @@ fn apply_layer_flat(data: &[u8], dest: &Path) -> Result<()> {
             }
             continue;
         }
-        // ROOTLESS: muitas imagens têm directórios read-only (ex. `/usr/lib64` 0555).
-        // O `unpack_in` cria o dir com esse modo e, sem CAP_DAC_OVERRIDE (não-root),
-        // não consegue escrever os ficheiros lá dentro → PermissionDenied silencioso
-        // → bash/glibc/coreutils desaparecem do rootfs. Garantimos que o dir-pai está
-        // gravável ANTES de extrair, e que cada dir criado fica gravável p/ o dono
-        // (como o `Archive::unpack` em bloco faz, deferindo as permissões dos dirs).
+        // ROOTLESS: many images have read-only directories (e.g. `/usr/lib64` 0555).
+        // `unpack_in` creates the dir with that mode and, without CAP_DAC_OVERRIDE (non-root),
+        // cannot write the files inside it → silent PermissionDenied
+        // → bash/glibc/coreutils disappear from the rootfs. We ensure the parent dir is
+        // writable BEFORE extracting, and that each created dir is writable for the owner
+        // (as `Archive::unpack` in bulk does, deferring the dirs' permissions).
         let safe = safe_rel(&path);
         if let Some(rel) = &safe {
             if let Some(parent) = rel.parent() {
@@ -101,7 +101,7 @@ fn apply_layer_flat(data: &[u8], dest: &Path) -> Result<()> {
             }
         }
         let is_dir = entry.header().entry_type().is_dir();
-        let _ = entry.unpack_in(dest); // ignora nós que precisam de privilégio
+        let _ = entry.unpack_in(dest); // ignore nodes that require privilege
         if is_dir {
             if let Some(rel) = &safe {
                 ensure_owner_writable(&dest.join(rel));
@@ -111,9 +111,9 @@ fn apply_layer_flat(data: &[u8], dest: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Caminho relativo "seguro" (sem componentes absolutos nem `..`), para podermos
-/// pré-criar o dir-pai sem risco de escapar do `dest`. `None` se for inseguro
-/// (deixamos o `unpack_in` rejeitar/tratar).
+/// "Safe" relative path (no absolute components nor `..`), so we can
+/// pre-create the parent dir without risk of escaping `dest`. `None` if unsafe
+/// (we let `unpack_in` reject/handle it).
 fn safe_rel(path: &Path) -> Option<PathBuf> {
     use std::path::Component;
     let mut out = PathBuf::new();
@@ -121,7 +121,7 @@ fn safe_rel(path: &Path) -> Option<PathBuf> {
         match c {
             Component::Normal(s) => out.push(s),
             Component::CurDir => {}
-            _ => return None, // RootDir, ParentDir, Prefix → inseguro
+            _ => return None, // RootDir, ParentDir, Prefix → unsafe
         }
     }
     if out.as_os_str().is_empty() {
@@ -131,18 +131,18 @@ fn safe_rel(path: &Path) -> Option<PathBuf> {
     }
 }
 
-/// Garante o bit de escrita do DONO num directório (best-effort), para que os
-/// ficheiros/subdirs seguintes possam ser lá escritos em modo rootless. Mantém
-/// os bits de leitura/execução e de grupo/outros.
+/// Ensures the OWNER write bit on a directory (best-effort), so that the
+/// following files/subdirs can be written there in rootless mode. Keeps
+/// the read/execute and group/other bits.
 fn ensure_owner_writable(p: &Path) {
     use std::os::unix::fs::PermissionsExt;
     if let Ok(md) = std::fs::metadata(p) {
         if md.is_dir() {
             let mode = md.permissions().mode();
-            // Um directório precisa de ESCRITA **e** EXECUÇÃO do dono para se
-            // criarem/acederem entradas. `0o555` (r-x, sem w) E `0o644` (rw, sem x —
-            // ex.: `/etc/containerd` em algumas imagens) bloqueiam a escrita dos
-            // filhos em rootless → ficheiros desaparecem. Exigimos os dois (`0o300`).
+            // A directory needs owner WRITE **and** EXECUTE to
+            // create/access entries. `0o555` (r-x, without w) AND `0o644` (rw, without x —
+            // e.g. `/etc/containerd` in some images) block the writing of
+            // children in rootless → files disappear. We require both (`0o300`).
             if mode & 0o300 != 0o300 {
                 let mut perm = md.permissions();
                 perm.set_mode(mode | 0o700);
@@ -153,8 +153,8 @@ fn ensure_owner_writable(p: &Path) {
 }
 
 impl ImageStore {
-    /// Extrai uma imagem para um rootfs FLAT em `dest` (aplica todos os layers por
-    /// ordem, com *whiteouts*) — base de um *bundle* OCI runtime (C1).
+    /// Extracts an image into a FLAT rootfs at `dest` (applies all layers in
+    /// order, with *whiteouts*) — the basis of an OCI runtime *bundle* (C1).
     pub fn export_rootfs(&self, image: &Image, dest: &Path) -> Result<()> {
         std::fs::create_dir_all(dest)?;
         for digest in &image.layers {
@@ -164,11 +164,11 @@ impl ImageStore {
         Ok(())
     }
 
-    /// Garante que cada *layer* está extraído em `layers/<hex>/` (cacheado). A
-    /// extracção é **atómica**: vai para um directório temporário próprio e só
-    /// depois é renomeada para o destino final. Assim, vários `run` da MESMA
-    /// imagem em paralelo não se atropelam a escrever os mesmos ficheiros
-    /// (robustez sob concorrência — ver `tools/stress.sh`).
+    /// Ensures each *layer* is extracted into `layers/<hex>/` (cached). The
+    /// extraction is **atomic**: it goes to its own temporary directory and only
+    /// then is renamed to the final destination. This way, several `run`s of the SAME
+    /// image in parallel do not trample each other writing the same files
+    /// (robustness under concurrency — see `tools/stress.sh`).
     fn ensure_layers(&self, image: &Image) -> Result<Vec<PathBuf>> {
         let mut dirs = Vec::new();
         for digest in &image.layers {
@@ -178,15 +178,15 @@ impl ImageStore {
             if !marker.exists() {
                 let layers_dir = self.root().join("layers");
                 std::fs::create_dir_all(&layers_dir)?;
-                // temp exclusivo deste processo (pid + digest).
+                // temp exclusive to this process (pid + digest).
                 let tmp = layers_dir.join(format!(".{hex}.{}.tmp", std::process::id()));
                 let _ = std::fs::remove_dir_all(&tmp);
                 std::fs::create_dir_all(&tmp)?;
                 let data = self.cas().read(digest)?;
                 extract_layer(&data, &tmp)?;
                 std::fs::write(tmp.join(".extracted"), b"ok")?;
-                // publica atomicamente. Se outro processo já publicou (o rename
-                // falha porque o destino existe), descartamos o nosso temp.
+                // publish atomically. If another process already published (the rename
+                // fails because the destination exists), we discard our temp.
                 if marker.exists() || std::fs::rename(&tmp, &dir).is_err() {
                     let _ = std::fs::remove_dir_all(&tmp);
                 }
@@ -196,12 +196,12 @@ impl ImageStore {
         Ok(dirs)
     }
 
-    /// O directório base de um container no armazém de imagens.
+    /// The base directory of a container in the image store.
     fn container_dir(&self, container_id: &str) -> PathBuf {
         self.root().join("containers").join(container_id)
     }
 
-    /// Monta o rootfs overlay de um container e devolve o caminho `merged`.
+    /// Mounts the overlay rootfs of a container and returns the `merged` path.
     pub fn mount_rootfs(&self, image: &Image, container_id: &str) -> Result<PathBuf> {
         let lowers = self.ensure_layers(image)?;
         if lowers.is_empty() {
@@ -242,9 +242,9 @@ impl ImageStore {
         Ok(merged)
     }
 
-    /// Faz `chown` (recursivo) da camada de escrita do container (upper+work)
-    /// para `uid:gid`. Necessário com user namespace: o root do container
-    /// (mapeado para `uid` no host) precisa de ser dono da sua camada de escrita.
+    /// Does a (recursive) `chown` of the container's write layer (upper+work)
+    /// to `uid:gid`. Needed with a user namespace: the container's root
+    /// (mapped to `uid` on the host) needs to own its write layer.
     pub fn chown_writable(&self, container_id: &str, uid: u32, gid: u32) -> Result<()> {
         let base = self.container_dir(container_id);
         for sub in ["upper", "work"] {
@@ -253,17 +253,17 @@ impl ImageStore {
         Ok(())
     }
 
-    /// Desmonta o overlay de um container e remove a sua camada de escrita.
+    /// Unmounts a container's overlay and removes its write layer.
     pub fn unmount_rootfs(&self, container_id: &str) -> Result<()> {
         let base = self.container_dir(container_id);
         let merged = base.join("merged");
         if merged.exists() {
             let _ = umount2(&merged, MntFlags::MNT_DETACH);
         }
-        // ROOTLESS FLAT: `rootfs/` é o estado PERSISTENTE do container (reusado no
-        // restart, preserva as escritas — como o Docker). Em `stop`/cleanup NÃO o
-        // apagar; limpa só os directórios scratch do overlay (modelo root). O destroy
-        // definitivo é o `remove_container_dir` (chamado pelo `rm`).
+        // ROOTLESS FLAT: `rootfs/` is the container's PERSISTENT state (reused on
+        // restart, preserves the writes — like Docker). On `stop`/cleanup do NOT
+        // delete it; clean only the overlay's scratch directories (root model). The
+        // definitive destroy is `remove_container_dir` (called by `rm`).
         if base.join("rootfs").exists() {
             for d in ["merged", "upper", "work"] {
                 let _ = std::fs::remove_dir_all(base.join(d));
@@ -274,14 +274,14 @@ impl ImageStore {
         Ok(())
     }
 
-    /// Remove TODO o directório do container (incl. o `rootfs/` flat). Usar no `rm`
-    /// (destroy definitivo), ao contrário do `unmount_rootfs` (stop, que preserva).
+    /// Removes the ENTIRE container directory (incl. the flat `rootfs/`). Use in `rm`
+    /// (definitive destroy), unlike `unmount_rootfs` (stop, which preserves).
     pub fn remove_container_dir(&self, container_id: &str) {
         let _ = std::fs::remove_dir_all(self.container_dir(container_id));
     }
 
-    /// Caminho do directório de um container (`<root>/containers/<id>`). Para o `rm`
-    /// poder removê-lo num userns mapeado (ficheiros de subuid) via runtime.
+    /// Path of a container's directory (`<root>/containers/<id>`). So `rm`
+    /// can remove it in a mapped userns (subuid files) via the runtime.
     pub fn container_path(&self, container_id: &str) -> PathBuf {
         self.container_dir(container_id)
     }
@@ -291,26 +291,26 @@ impl ImageStore {
 mod tests {
     use super::{apply_layer_flat, extract_layer};
 
-    /// Regressão: uma camada com um directório READ-ONLY (modo 0555, p.ex.
-    /// `/usr/lib64`) e ficheiros lá dentro. Em ROOTLESS, o `unpack_in` criava o
-    /// dir 0555 e depois NÃO conseguia escrever os filhos (PermissionDenied
-    /// silencioso) → bash/glibc desapareciam. O fix garante o dir gravável pelo
-    /// dono. Asserção independente do uid: o dir tem de ficar com o bit de escrita
-    /// E o ficheiro lá dentro tem de existir.
+    /// Regression: a layer with a READ-ONLY directory (mode 0555, e.g.
+    /// `/usr/lib64`) and files inside it. In ROOTLESS, `unpack_in` created the
+    /// dir 0555 and then could NOT write the children (silent
+    /// PermissionDenied) → bash/glibc disappeared. The fix ensures the dir is writable by the
+    /// owner. Assertion independent of the uid: the dir must end up with the write bit
+    /// AND the file inside it must exist.
     #[test]
     fn flat_extract_writes_into_readonly_dirs() {
         use std::os::unix::fs::PermissionsExt;
         let mut buf = Vec::new();
         {
             let mut b = tar::Builder::new(&mut buf);
-            // dir "ro/" com modo 0555 (read+execute, sem escrita)
+            // dir "ro/" with mode 0555 (read+execute, no write)
             let mut dh = tar::Header::new_gnu();
             dh.set_entry_type(tar::EntryType::Directory);
             dh.set_size(0);
             dh.set_mode(0o555);
             dh.set_cksum();
             b.append_data(&mut dh, "ro/", std::io::empty()).unwrap();
-            // ficheiro DENTRO do dir read-only (como glibc em /usr/lib64)
+            // file INSIDE the read-only dir (like glibc in /usr/lib64)
             let content = b"glibc";
             let mut fh = tar::Header::new_gnu();
             fh.set_size(content.len() as u64);
@@ -339,9 +339,9 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
     }
 
-    /// Regressão B.3 (Kind): um directório `0o644` (escrita SEM execução — ex.:
-    /// `/etc/containerd` no kindest/node) bloqueia a criação de ficheiros lá dentro
-    /// em rootless. O fix tem de garantir também o bit de EXECUÇÃO.
+    /// Regression B.3 (Kind): a `0o644` directory (write WITHOUT execute — e.g.
+    /// `/etc/containerd` in kindest/node) blocks the creation of files inside it
+    /// in rootless. The fix must also ensure the EXECUTE bit.
     #[test]
     fn flat_extract_writes_into_writable_but_nonexec_dir() {
         use std::os::unix::fs::PermissionsExt;
@@ -351,7 +351,7 @@ mod tests {
             let mut dh = tar::Header::new_gnu();
             dh.set_entry_type(tar::EntryType::Directory);
             dh.set_size(0);
-            dh.set_mode(0o644); // rw-r--r-- (sem x) — o caso do /etc/containerd
+            dh.set_mode(0o644); // rw-r--r-- (without x) — the /etc/containerd case
             dh.set_cksum();
             b.append_data(&mut dh, "cfgdir/", std::io::empty()).unwrap();
             let content = b"version = 2\n";
@@ -379,7 +379,7 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
     }
 
-    /// Constrói um tar com um ficheiro e devolve os bytes.
+    /// Builds a tar with one file and returns the bytes.
     fn tar_with_file(name: &str, content: &[u8]) -> Vec<u8> {
         let mut buf = Vec::new();
         {
@@ -398,7 +398,7 @@ mod tests {
     fn extracts_zstd_and_gzip_layers() {
         let tar = tar_with_file("hello.txt", b"camada");
         let zstd_bytes = zstd::encode_all(&tar[..], 0).unwrap();
-        assert_eq!(&zstd_bytes[..4], &[0x28, 0xb5, 0x2f, 0xfd]); // magic zstd
+        assert_eq!(&zstd_bytes[..4], &[0x28, 0xb5, 0x2f, 0xfd]); // zstd magic
 
         let dir = std::env::temp_dir().join(format!("delonix-zstd-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
@@ -409,7 +409,7 @@ mod tests {
             "camada"
         );
 
-        // o caminho gzip continua a funcionar
+        // the gzip path still works
         let mut gz = Vec::new();
         {
             use std::io::Write;

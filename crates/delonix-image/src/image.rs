@@ -1,4 +1,4 @@
-//! O modelo de uma imagem e o seu armazém local.
+//! The model of an image and its local store.
 
 use crate::cas::{strip, Cas};
 use delonix_runtime_core::{Error, Result};
@@ -7,74 +7,74 @@ use std::fs;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-/// O subconjunto do config OCI que o Delonix usa (Cmd/Env) + extensões Delonix
-/// (limites de recursos embebidos na imagem — algo que o Docker não tem).
+/// The subset of the OCI config that Delonix uses (Cmd/Env) + Delonix extensions
+/// (resource limits embedded in the image — something Docker does not have).
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct ImageConfig {
-    /// O comando por omissão (Docker: `Cmd`).
+    /// The default command (Docker: `Cmd`).
     #[serde(default)]
     pub cmd: Vec<String>,
-    /// O executável de entrada (Docker: `Entrypoint`). Muitas imagens definem só
-    /// isto (sem `Cmd`); o comando final é `entrypoint + cmd` (ou `entrypoint +
-    /// args do utilizador`).
+    /// The entry executable (Docker: `Entrypoint`). Many images set only
+    /// this (without `Cmd`); the final command is `entrypoint + cmd` (or `entrypoint +
+    /// user args`).
     #[serde(default)]
     pub entrypoint: Vec<String>,
-    /// As variáveis de ambiente por omissão (Docker: `Env`).
+    /// The default environment variables (Docker: `Env`).
     #[serde(default)]
     pub env: Vec<String>,
-    /// Limite de CPU embebido (`CPUS` no Dockerfile Delonix), ex.: "0.5".
+    /// Embedded CPU limit (`CPUS` in the Delonix Dockerfile), e.g. "0.5".
     #[serde(default)]
     pub cpus: Option<String>,
-    /// Limite de memória embebido (`MEMORY`), ex.: "96M".
+    /// Embedded memory limit (`MEMORY`), e.g. "96M".
     #[serde(default)]
     pub memory: Option<String>,
-    /// Postura de segurança embebida (`SECURITY`): ex. `["userns","apparmor"]`.
+    /// Embedded security posture (`SECURITY`): e.g. `["userns","apparmor"]`.
     #[serde(default)]
     pub security: Vec<String>,
-    /// Comando de `HEALTHCHECK` do Dockerfile (a parte após `CMD`), se houver.
+    /// Dockerfile `HEALTHCHECK` command (the part after `CMD`), if any.
     #[serde(default)]
     pub healthcheck: Option<String>,
-    /// O utilizador por omissão (Docker/OCI: `User`), ex.: `"elasticsearch"`,
-    /// `"1000"` ou `"1000:1000"`. Vazio = root (uid 0). Imagens como o
-    /// Elasticsearch recusam correr como root, por isso o runtime troca para este
-    /// uid/gid antes do `exec` (em rootless, via mapa de subuid `newuidmap`).
+    /// The default user (Docker/OCI: `User`), e.g. `"elasticsearch"`,
+    /// `"1000"` or `"1000:1000"`. Empty = root (uid 0). Images such as
+    /// Elasticsearch refuse to run as root, so the runtime switches to this
+    /// uid/gid before the `exec` (in rootless, via the `newuidmap` subuid map).
     #[serde(default)]
     pub user: String,
-    /// Diretório de trabalho por omissão (Docker/OCI: `WorkingDir`), ex.: `"/data"`,
-    /// `"/app"`. Vazio = `/`. O runtime faz `chdir` para aqui antes do `exec` — sem
-    /// isto, entrypoints que operam no CWD (ex.: o `chown -R` do redis/postgres) correm
-    /// a partir de `/` e tocam `/sys` (RO). [[delonix-rootless-user]]
+    /// Default working directory (Docker/OCI: `WorkingDir`), e.g. `"/data"`,
+    /// `"/app"`. Empty = `/`. The runtime `chdir`s here before the `exec` — without
+    /// this, entrypoints that operate on the CWD (e.g. redis/postgres's `chown -R`) run
+    /// from `/` and touch `/sys` (RO). [[delonix-rootless-user]]
     #[serde(default)]
     pub working_dir: String,
 }
 
-/// Uma imagem registada localmente.
+/// A locally registered image.
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Image {
-    /// Id da imagem = digest do blob de config (`sha256:...`).
+    /// Image id = digest of the config blob (`sha256:...`).
     pub id: String,
-    /// As etiquetas (`name:tag`) que apontam para esta imagem.
+    /// The tags (`name:tag`) that point to this image.
     pub repo_tags: Vec<String>,
-    /// Digests dos *layers*, da base para o topo.
+    /// Digests of the *layers*, from base to top.
     pub layers: Vec<String>,
-    /// O config resolvido (Cmd/Env).
+    /// The resolved config (Cmd/Env).
     pub config: ImageConfig,
-    /// Instante de importação/construção (segundos Unix).
+    /// Import/build instant (Unix seconds).
     pub created_unix: u64,
 }
 
 impl Image {
-    /// Os primeiros 12 caracteres do id (hex).
+    /// The first 12 characters of the id (hex).
     pub fn short_id(&self) -> String {
         strip(&self.id).chars().take(12).collect()
     }
 
-    /// A pseudo-imagem `scratch` (Docker): uma base VAZIA, sem layers nem config.
-    /// NÃO se resolve no store nem se puxa de um registry — é o ponto de partida
-    /// vazio para `FROM scratch`. `export_rootfs` sobre ela produz um rootfs vazio.
+    /// The `scratch` pseudo-image (Docker): an EMPTY base, with no layers or config.
+    /// It does NOT resolve in the store nor pull from a registry — it is the empty
+    /// starting point for `FROM scratch`. `export_rootfs` over it produces an empty rootfs.
     pub fn scratch() -> Self {
         Image {
-            id: "sha256:scratch".into(), // sentinela; não há blob de config real
+            id: "sha256:scratch".into(), // sentinel; there is no real config blob
             repo_tags: vec!["scratch:latest".into()],
             layers: Vec::new(),
             config: ImageConfig::default(),
@@ -83,14 +83,14 @@ impl Image {
     }
 }
 
-/// O armazém de imagens: registos JSON + blobs no CAS.
+/// The image store: JSON records + blobs in the CAS.
 pub struct ImageStore {
     root: PathBuf,
     cas: Cas,
 }
 
 impl ImageStore {
-    /// Abre (criando) o armazém. `$DELONIX_ROOT` ou `/var/lib/delonix`.
+    /// Opens (creating) the store. `$DELONIX_ROOT` or `/var/lib/delonix`.
     pub fn open(root: impl Into<PathBuf>) -> Result<Self> {
         let root = root.into();
         fs::create_dir_all(root.join("images"))?;
@@ -100,13 +100,13 @@ impl ImageStore {
         Ok(Self { root, cas })
     }
 
-    /// O directório por omissão do armazém de imagens.
+    /// The default directory of the image store.
     pub fn default_root() -> PathBuf {
         if let Some(root) = std::env::var_os("DELONIX_ROOT") {
             return PathBuf::from(root);
         }
-        // Rootless (A13): sem privilégios, o armazém de root (`/var/lib/delonix`)
-        // não é escrevível → usa o do utilizador (`$XDG_DATA_HOME/delonix`).
+        // Rootless (A13): without privileges, root's store (`/var/lib/delonix`)
+        // is not writable → use the user's one (`$XDG_DATA_HOME/delonix`).
         if !nix::unistd::geteuid().is_root() {
             let base = std::env::var_os("XDG_DATA_HOME")
                 .map(PathBuf::from)
@@ -117,12 +117,12 @@ impl ImageStore {
         PathBuf::from("/var/lib/delonix")
     }
 
-    /// Acesso ao CAS subjacente.
+    /// Access to the underlying CAS.
     pub fn cas(&self) -> &Cas {
         &self.cas
     }
 
-    /// A raiz do armazém.
+    /// The root of the store.
     pub fn root(&self) -> &PathBuf {
         &self.root
     }
@@ -131,10 +131,10 @@ impl ImageStore {
         self.root.join("images").join(format!("{}.json", strip(id)))
     }
 
-    /// Etiquetas a guardar para uma imagem com este `id`: a nova primeiro, e
-    /// depois as que JÁ existam para o mesmo `id` (conteúdo idêntico ⇒ mesmo id,
-    /// pode ter várias tags — como o Docker). Evita perder a tag anterior quando
-    /// dois builds produzem o mesmo config (ex.: cache hit no mesmo segundo).
+    /// Tags to store for an image with this `id`: the new one first, and
+    /// then those that ALREADY exist for the same `id` (identical content ⇒ same id,
+    /// can have several tags — like Docker). Avoids losing the previous tag when
+    /// two builds produce the same config (e.g. a cache hit in the same second).
     pub(crate) fn merged_tags(&self, id: &str, new_tag: &str) -> Vec<String> {
         let mut tags = vec![normalise_tag(new_tag)];
         if let Ok(data) = fs::read(self.record_path(id)) {
@@ -149,7 +149,7 @@ impl ImageStore {
         tags
     }
 
-    /// Persiste uma imagem (escrita atómica).
+    /// Persists an image (atomic write).
     pub fn save(&self, img: &Image) -> Result<()> {
         let p = self.record_path(&img.id);
         let tmp = p.with_extension("tmp");
@@ -158,7 +158,7 @@ impl ImageStore {
         Ok(())
     }
 
-    /// Lista todas as imagens, da mais recente para a mais antiga.
+    /// Lists all images, from newest to oldest.
     pub fn list(&self) -> Result<Vec<Image>> {
         let mut out = Vec::new();
         for entry in fs::read_dir(self.root.join("images"))? {
@@ -175,7 +175,7 @@ impl ImageStore {
         Ok(out)
     }
 
-    /// Resolve `name:tag`, `name` (→`:latest`) ou prefixo de id.
+    /// Resolves `name:tag`, `name` (→`:latest`) or an id prefix.
     pub fn resolve(&self, name: &str) -> Result<Image> {
         let want = normalise_tag(name);
         for img in self.list()? {
@@ -186,10 +186,10 @@ impl ImageStore {
         Err(Error::NotFound(format!("image {name}")))
     }
 
-    /// Garante que cada etiqueta de `img` aponta SÓ para `img`: retira-a de
-    /// qualquer OUTRO registo que ainda a tenha (e apaga o registo se ficar sem
-    /// etiquetas). É o que faz uma re-etiquetagem MOVER a tag (como o Docker), em
-    /// vez de a deixar a apontar para duas imagens.
+    /// Ensures each tag of `img` points ONLY to `img`: removes it from
+    /// any OTHER record that still has it (and deletes the record if it is left with no
+    /// tags). This is what makes a re-tag MOVE the tag (like Docker), instead
+    /// of leaving it pointing to two images.
     pub(crate) fn enforce_tag_uniqueness(&self, img: &Image) -> Result<()> {
         let tags: std::collections::HashSet<&String> = img.repo_tags.iter().collect();
         for other in self.list()? {
@@ -203,7 +203,7 @@ impl ImageStore {
                 .cloned()
                 .collect();
             if kept.len() == other.repo_tags.len() {
-                continue; // nada para remover
+                continue; // nothing to remove
             }
             if kept.is_empty() {
                 let _ = fs::remove_file(self.record_path(&other.id));
@@ -216,8 +216,8 @@ impl ImageStore {
         Ok(())
     }
 
-    /// Acrescenta uma nova etiqueta a uma imagem existente (movendo-a de outra
-    /// imagem se já lá estiver — a tag fica única).
+    /// Adds a new tag to an existing image (moving it from another
+    /// image if it is already there — the tag stays unique).
     pub fn tag(&self, source: &str, new_tag: &str) -> Result<()> {
         let mut img = self.resolve(source)?;
         let tag = normalise_tag(new_tag);
@@ -229,7 +229,7 @@ impl ImageStore {
         Ok(())
     }
 
-    /// Remove uma etiqueta; se for a última, apaga o registo da imagem.
+    /// Removes a tag; if it is the last one, deletes the image record.
     pub fn remove(&self, name: &str) -> Result<String> {
         let mut img = self.resolve(name)?;
         let want = normalise_tag(name);
@@ -245,7 +245,7 @@ impl ImageStore {
     }
 }
 
-/// Normaliza um nome de imagem: `alpine` → `alpine:latest`.
+/// Normalises an image name: `alpine` → `alpine:latest`.
 pub fn normalise_tag(name: &str) -> String {
     if name.contains(':') || name.contains('@') {
         name.to_string()
@@ -254,7 +254,7 @@ pub fn normalise_tag(name: &str) -> String {
     }
 }
 
-/// O instante actual em segundos Unix.
+/// The current instant in Unix seconds.
 pub fn now_unix() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)

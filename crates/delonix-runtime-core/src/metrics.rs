@@ -1,11 +1,11 @@
-//! Métricas Prometheus PARTILHADAS do runtime (C1, fatia 2). Uma única definição
-//! por métrica vive aqui; os servidores expõem-nas onde fazem falta — o
-//! `delonix-cri` num `/metrics` HTTP dedicado (scrape do runtime no nó k8s, como
-//! containerd/CRI-O), e opcionalmente o `delonix-mgmt` (control-plane). Evita
-//! duplicar definições de métrica entre superfícies.
+//! SHARED Prometheus metrics of the runtime (C1, slice 2). A single definition
+//! per metric lives here; the servers expose them where they are needed — the
+//! `delonix-cri` on a dedicated HTTP `/metrics` (runtime scrape on the k8s node, like
+//! containerd/CRI-O), and optionally the `delonix-mgmt` (control-plane). Avoids
+//! duplicating metric definitions across surfaces.
 //!
-//! Os consumidores NÃO tocam no `prometheus-client`: incrementam via as funções
-//! `inc_*` e renderizam via [`encode`]. Assim a dependência fica contida neste crate.
+//! Consumers do NOT touch `prometheus-client`: they increment via the
+//! `inc_*` functions and render via [`encode`]. This keeps the dependency contained in this crate.
 
 use std::sync::LazyLock;
 
@@ -24,8 +24,8 @@ struct Metrics {
 static METRICS: LazyLock<Metrics> = LazyLock::new(|| {
     let mut registry = Registry::with_prefix("delonix");
 
-    // `delonix_build_info{version="…"} 1` — sempre presente, dá ao scrape uma série
-    // estável para correlacionar versão do runtime (padrão `*_build_info`).
+    // `delonix_build_info{version="…"} 1` — always present, gives the scrape a stable
+    // series to correlate the runtime version (`*_build_info` pattern).
     let build = Info::new(vec![("version", env!("CARGO_PKG_VERSION"))]);
     registry.register("build", "Runtime build information", build);
 
@@ -56,23 +56,23 @@ static METRICS: LazyLock<Metrics> = LazyLock::new(|| {
     }
 });
 
-/// Renderiza todas as métricas no formato-texto do Prometheus (o corpo de um
-/// `GET /metrics`). Nunca falha na prática — o `encode` só erra em `fmt::Error`.
+/// Renders all metrics in Prometheus text format (the body of a
+/// `GET /metrics`). Never fails in practice — `encode` only errors on `fmt::Error`.
 pub fn encode() -> String {
     let mut buf = String::new();
     let _ = encode_registry(&mut buf, &METRICS.registry);
     buf
 }
 
-/// +1 pod sandbox CRI criado.
+/// +1 CRI pod sandbox created.
 pub fn inc_pod_sandbox_created() {
     METRICS.pod_sandboxes_created.inc();
 }
-/// +1 container CRI criado.
+/// +1 CRI container created.
 pub fn inc_container_created() {
     METRICS.containers_created.inc();
 }
-/// +1 imagem puxada via CRI.
+/// +1 image pulled via CRI.
 pub fn inc_image_pulled() {
     METRICS.images_pulled.inc();
 }
@@ -85,8 +85,8 @@ mod tests {
     fn encode_rende_formato_prometheus_e_conta() {
         inc_container_created();
         let out = encode();
-        // build_info sempre presente + a métrica de container (TYPE sem `_total`, a
-        // amostra COM `_total`, como o OpenMetrics manda).
+        // build_info always present + the container metric (TYPE without `_total`, the
+        // sample WITH `_total`, as OpenMetrics requires).
         assert!(
             out.contains("delonix_build_info{version="),
             "build_info em falta:\n{out}"
@@ -96,7 +96,7 @@ mod tests {
             out.contains("delonix_cri_containers_created_total"),
             "contador em falta:\n{out}"
         );
-        // Formato Prometheus termina com `# EOF`.
+        // Prometheus format ends with `# EOF`.
         assert!(out.trim_end().ends_with("# EOF"));
     }
 }

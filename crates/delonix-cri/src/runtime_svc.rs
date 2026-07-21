@@ -1,5 +1,5 @@
-//! RuntimeService do CRI sobre o engine Delonix. `version`/`status` são reais;
-//! o ciclo de vida de pods/containers é preenchido a seguir.
+//! CRI RuntimeService over the Delonix engine. `version`/`status` are real;
+//! the pod/container lifecycle is filled in below.
 
 use std::path::PathBuf;
 use tonic::{Request, Response, Status};
@@ -19,14 +19,14 @@ impl DelonixRuntime {
     }
 }
 
-/// Atalho para "ainda não implementado" (o `kubelet`/`crictl` só chamam o que
-/// precisam; o resto devolve `UNIMPLEMENTED`).
+/// Shortcut for "not yet implemented" (the `kubelet`/`crictl` only call what
+/// they need; the rest returns `UNIMPLEMENTED`).
 fn todo<T>(what: &str) -> Result<Response<T>, Status> {
     Err(Status::unimplemented(format!("delonix-cri: {what}")))
 }
 
-/// Corre uma operação BLOQUEANTE (fs + shell-out ao `delonix`) fora do runtime
-/// async — senão o `clone`/`run` paralisava os workers do Tokio.
+/// Runs a BLOCKING operation (fs + shell-out to `delonix`) outside the async
+/// runtime — otherwise `clone`/`run` would stall the Tokio workers.
 async fn blocking<T, F>(f: F) -> Result<Response<T>, Status>
 where
     T: Send + 'static,
@@ -37,14 +37,14 @@ where
         .map_err(|e| Status::internal(e.to_string()))?
 }
 
-/// Nome do pod a partir dos metadados do sandbox, para os campos das spans.
-/// `""` quando ausente (o `crictl`/`kubelet` nem sempre preenchem tudo) — melhor
-/// uma span sem nome do que instrumentação a entrar em pânico num `unwrap`.
+/// Pod name from the sandbox metadata, for the span fields. `""` when absent
+/// (the `crictl`/`kubelet` don't always fill everything in) — better a span
+/// without a name than instrumentation panicking on an `unwrap`.
 fn pod_meta_name(m: Option<&PodSandboxMetadata>) -> &str {
     m.map(|m| m.name.as_str()).unwrap_or("")
 }
 
-/// Idem para o nome do container a partir dos metadados do `ContainerConfig`.
+/// Likewise for the container name from the `ContainerConfig` metadata.
 fn ctr_meta_name(m: Option<&ContainerMetadata>) -> &str {
     m.map(|m| m.name.as_str()).unwrap_or("")
 }
@@ -77,16 +77,16 @@ impl RuntimeService for DelonixRuntime {
             reason: reason.into(),
             message: message.into(),
         };
-        // `RuntimeReady`: chegar até aqui já prova que o servidor CRI está vivo
-        // e a responder — não há mais nada a verificar sem inventar um estado
-        // que não temos.
+        // `RuntimeReady`: getting this far already proves the CRI server is alive
+        // and responding — there is nothing more to check without inventing a
+        // state we don't have.
         let runtime_ready = cond("RuntimeReady", true, "", "");
-        // `NetworkReady`: ANTES disto era sempre `true` fixo — mascarava
-        // avarias reais da SDN (bridge/slirp/holder em baixo), fazendo o node
-        // ficar `Ready` no K8s mesmo sem rede a funcionar. Agora verifica de
-        // facto, nos DOIS modos (rootless: holder+slirp vivos via pidfiles;
-        // root: existência do bridge `delonix0` via sysfs — leitura, sem
-        // privilégio nenhum).
+        // `NetworkReady`: BEFORE this it was always a fixed `true` — it masked
+        // real SDN failures (bridge/slirp/holder down), making the node go
+        // `Ready` in K8s even without working networking. Now it actually checks,
+        // in BOTH modes (rootless: holder+slirp alive via pidfiles; root:
+        // existence of the `delonix0` bridge via sysfs — a read, with no
+        // privilege at all).
         let network_ready = if delonix_runtime::is_rootless() {
             let st = delonix_net::infra::status();
             if st.up {
@@ -130,12 +130,12 @@ impl RuntimeService for DelonixRuntime {
         }))
     }
 
-    // --- ciclo de vida de pods/containers: instrumentado com spans `tracing`.
-    // Cada handler abre uma span (exportada por OTLP quando `DELONIX_OTLP_ENDPOINT`
-    // está definido — ver `delonix_runtime_core::telemetry`) com o id do recurso.
-    // Os campos leem-se de `r.get_ref()` (avaliado na ENTRADA da span, antes de
-    // `into_inner()` consumir o pedido); `skip_all` evita despejar o `Request`
-    // inteiro (não-`Debug`/verboso) e o `self`.
+    // --- pod/container lifecycle: instrumented with `tracing` spans.
+    // Each handler opens a span (exported over OTLP when `DELONIX_OTLP_ENDPOINT`
+    // is set — see `delonix_runtime_core::telemetry`) with the resource id.
+    // The fields are read from `r.get_ref()` (evaluated on span ENTRY, before
+    // `into_inner()` consumes the request); `skip_all` avoids dumping the whole
+    // `Request` (non-`Debug`/verbose) and `self`.
     #[tracing::instrument(name = "cri.run_pod_sandbox", skip_all, fields(
         pod = pod_meta_name(r.get_ref().config.as_ref().and_then(|c| c.metadata.as_ref())),
         runtime_handler = %r.get_ref().runtime_handler,
@@ -247,7 +247,7 @@ impl RuntimeService for DelonixRuntime {
         blocking(move || lifecycle::container_status(&base, id)).await
     }
 
-    // --- não exercitadas pelo fluxo base do crictl/kubelet → UNIMPLEMENTED ---
+    // --- not exercised by the base crictl/kubelet flow → UNIMPLEMENTED ---
     async fn update_container_resources(
         &self,
         _r: Request<UpdateContainerResourcesRequest>,
@@ -273,9 +273,9 @@ impl RuntimeService for DelonixRuntime {
         if req.cmd.is_empty() {
             return Err(Status::invalid_argument("exec without a command"));
         }
-        // Regista o pedido e devolve a URL do servidor de streaming. O cliente
-        // (kubelet/crictl) faz upgrade (SPDY ou WebSocket) lá e nós corremos
-        // `delonix exec`, ligando stdin/stdout/stderr às streams.
+        // Register the request and return the streaming server URL. The client
+        // (kubelet/crictl) upgrades (SPDY or WebSocket) there and we run
+        // `delonix exec`, wiring stdin/stdout/stderr to the streams.
         let url = self.streamer.prepare_exec(
             req.container_id,
             req.cmd,
@@ -288,10 +288,10 @@ impl RuntimeService for DelonixRuntime {
     }
     async fn attach(&self, r: Request<AttachRequest>) -> Result<Response<AttachResponse>, Status> {
         let req = r.into_inner();
-        // Attach = transmite o output (stdout/stderr) do container ao vivo. O
-        // stdio do processo principal de um container detached vai para o log,
-        // logo o servidor de streaming corre `delonix logs -f`. (Enviar stdin ao
-        // PID 1 de um container detached não é suportado — usa `exec`.)
+        // Attach = streams the container's output (stdout/stderr) live. The
+        // stdio of a detached container's main process goes to the log, so the
+        // streaming server runs `delonix logs -f`. (Sending stdin to PID 1 of a
+        // detached container is not supported — use `exec`.)
         let url = self.streamer.prepare_attach(
             req.container_id,
             req.tty,
@@ -306,8 +306,8 @@ impl RuntimeService for DelonixRuntime {
         r: Request<PortForwardRequest>,
     ) -> Result<Response<PortForwardResponse>, Status> {
         let req = r.into_inner();
-        // Encaminha portas do host para dentro do netns do pod (proxy TCP via
-        // setns). Devolve a URL de streaming; o cliente abre uma stream por porta.
+        // Forwards host ports into the pod's netns (TCP proxy via setns).
+        // Returns the streaming URL; the client opens one stream per port.
         let url = self
             .streamer
             .prepare_port_forward(req.pod_sandbox_id, req.port);
@@ -389,25 +389,26 @@ pub mod lifecycle;
 mod tests {
     use super::*;
 
-    /// O achado corrigido: `NetworkReady` deixou de ser `true` fixo. Neste
-    /// ambiente de teste não há nenhuma infra rootless (`holder`/`slirp`) a
-    /// correr — por isso `NetworkReady` TEM de vir `false` (com razão
-    /// "InfraDown"), nunca `true`. Antes da correção, este teste falharia
-    /// (a condição vinha sempre `true`, mascarando exactamente este cenário).
+    /// The fixed finding: `NetworkReady` is no longer a fixed `true`. In this
+    /// test environment there is no rootless infra (`holder`/`slirp`) running —
+    /// so `NetworkReady` MUST come back `false` (with reason "InfraDown"), never
+    /// `true`. Before the fix, this test would fail (the condition always came
+    /// back `true`, masking exactly this scenario).
     #[tokio::test]
     async fn network_ready_reflecte_infra_rootless_real_nao_fabricada() {
         if !delonix_runtime::is_rootless() {
             eprintln!("SKIP: teste assume ambiente rootless (uid != 0)");
             return;
         }
-        // `status()` sonda a infra rootless GLOBAL (`delonix_net::infra::status()`
-        // lê `<base_root>/ingress/holder.pid`, resolvido por `DELONIX_ROOT`/
-        // `XDG_DATA_HOME`, NÃO pelo `base` temporário deste teste). Se o operador
-        // tiver infra REAL a correr (ex.: um holder de sessões anteriores neste
-        // dev box), `NetworkReady` vem `true` com razão — e não há como forçar
-        // "InfraDown" sem DERRUBAR essa infra viva, o que um teste unitário nunca
-        // pode fazer. Neste caso salta-se; num runner limpo (infra em baixo, o caso
-        // que importa para a regressão) o teste corre e valida o caminho `false`.
+        // `status()` probes the GLOBAL rootless infra (`delonix_net::infra::status()`
+        // reads `<base_root>/ingress/holder.pid`, resolved by `DELONIX_ROOT`/
+        // `XDG_DATA_HOME`, NOT by this test's temporary `base`). If the operator
+        // has REAL infra running (e.g. a holder from earlier sessions on this
+        // dev box), `NetworkReady` comes back `true` rightly — and there is no way
+        // to force "InfraDown" without TEARING DOWN that live infra, which a unit
+        // test can never do. In that case we skip; on a clean runner (infra down,
+        // the case that matters for the regression) the test runs and validates
+        // the `false` path.
         if delonix_net::infra::status().up {
             eprintln!("SKIP: infra rootless ambiente a correr — não se pode provar InfraDown sem a derrubar");
             return;

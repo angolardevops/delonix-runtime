@@ -1,17 +1,17 @@
-//! CredVault — cofre de credenciais **cifrado at-rest** (Bloco B do Public Tunnel).
+//! CredVault — credential vault **encrypted at-rest** (Block B of Public Tunnel).
 //!
-//! Guarda segredos sensíveis (ex.: authtokens do Ngrok/Pinggy) cifrados com
-//! **XChaCha20-Poly1305** (AEAD), sob uma chave-mestra local em
-//! `<root>/tunnels/keyring.key` (32 bytes, **0600**, fora de backups/exports).
-//! Cada credencial é `nonce(24) || ciphertext` em `<root>/tunnels/cred/<nome>.bin`
-//! (0600). Suporta **rotação** da chave-mestra (recifra tudo).
+//! Stores sensitive secrets (e.g.: Ngrok/Pinggy authtokens) encrypted with
+//! **XChaCha20-Poly1305** (AEAD), under a local master key in
+//! `<root>/tunnels/keyring.key` (32 bytes, **0600**, outside backups/exports).
+//! Each credential is `nonce(24) || ciphertext` in `<root>/tunnels/cred/<name>.bin`
+//! (0600). Supports **rotation** of the master key (re-encrypts everything).
 //!
-//! ⚠️ Nota honesta de segurança: sem TPM/HSM, a cifra local protege contra
-//! **leitura casual do disco, backups, exports e leaks acidentais** (logs, dumps),
-//! **não** contra um atacante já com os privilégios do utilizador que corre o
-//! engine (esse lê a chave-mestra). É o nível realista para rootless single-host;
-//! um KMS externo seria uma interface opcional futura. Distinto do `SecretStore`
-//! (que persiste valores em **plaintext** 0600 para injeção de env).
+//! ⚠️ Honest security note: without TPM/HSM, local encryption protects against
+//! **casual disk reads, backups, exports and accidental leaks** (logs, dumps),
+//! **not** against an attacker already holding the privileges of the user running the
+//! engine (that one reads the master key). It is the realistic level for rootless single-host;
+//! an external KMS would be a future optional interface. Distinct from `SecretStore`
+//! (which persists values in **plaintext** 0600 for env injection).
 
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
@@ -25,7 +25,7 @@ use crate::{Error, Result};
 const KEY_LEN: usize = 32;
 const NONCE_LEN: usize = 24;
 
-/// Cofre cifrado. `key` é a chave-mestra carregada em memória.
+/// Encrypted vault. `key` is the master key loaded in memory.
 pub struct CredVault {
     /// `<root>/tunnels/cred`
     dir: PathBuf,
@@ -34,7 +34,7 @@ pub struct CredVault {
     key: [u8; KEY_LEN],
 }
 
-/// Bytes aleatórios criptográficos (getrandom → /dev/urandom no Linux).
+/// Cryptographic random bytes (getrandom → /dev/urandom on Linux).
 fn random_bytes(buf: &mut [u8]) -> Result<()> {
     getrandom::getrandom(buf).map_err(|e| Error::Runtime {
         context: "getrandom",
@@ -42,8 +42,8 @@ fn random_bytes(buf: &mut [u8]) -> Result<()> {
     })
 }
 
-/// Nome de credencial válido: `[a-z0-9._:-]`, 1–96 chars (permite `ngrok`,
-/// `pinggy`, ou escopos como `ngrok:equipa-a`).
+/// Valid credential name: `[a-z0-9._:-]`, 1–96 chars (allows `ngrok`,
+/// `pinggy`, or scopes like `ngrok:team-a`).
 pub fn valid_cred_name(name: &str) -> bool {
     !name.is_empty()
         && name.len() <= 96
@@ -61,8 +61,8 @@ fn write_0600(path: &Path, bytes: &[u8]) -> Result<()> {
 }
 
 impl CredVault {
-    /// Abre (ou inicializa) o cofre em `<base>/tunnels`. Cria a chave-mestra na
-    /// primeira utilização.
+    /// Opens (or initializes) the vault in `<base>/tunnels`. Creates the master key on
+    /// first use.
     pub fn open(base: &Path) -> Result<CredVault> {
         let root = base.join("tunnels");
         let dir = root.join("cred");
@@ -103,9 +103,9 @@ impl CredVault {
         self.dir.join(format!("{name}.bin"))
     }
 
-    /// Cifra bytes arbitrários com a chave-mestra → `nonce(24) || ciphertext`.
-    /// Primitiva partilhada: o `SecretStore` cifra o seu JSON com isto, para os
-    /// secrets de aplicação ficarem cifrados at-rest com a **mesma** chave do host.
+    /// Encrypts arbitrary bytes with the master key → `nonce(24) || ciphertext`.
+    /// Shared primitive: `SecretStore` encrypts its JSON with this, so the
+    /// application secrets are encrypted at-rest with the **same** host key.
     pub fn seal(&self, plaintext: &[u8]) -> Result<Vec<u8>> {
         let mut nonce = [0u8; NONCE_LEN];
         random_bytes(&mut nonce)?;
@@ -118,7 +118,7 @@ impl CredVault {
         Ok(blob)
     }
 
-    /// Decifra um blob `nonce(24) || ciphertext` produzido por [`CredVault::seal`].
+    /// Decrypts a `nonce(24) || ciphertext` blob produced by [`CredVault::seal`].
     pub fn unseal(&self, blob: &[u8]) -> Result<Vec<u8>> {
         if blob.len() < NONCE_LEN + 16 {
             return Err(Error::Invalid("corrupted encrypted blob".into()));
@@ -129,7 +129,7 @@ impl CredVault {
             .map_err(|_| Error::Invalid("failed to decrypt (wrong key?)".into()))
     }
 
-    /// Cifra e persiste uma credencial (sobrescreve se existir).
+    /// Encrypts and persists a credential (overwrites if it exists).
     pub fn put(&self, name: &str, value: &str) -> Result<()> {
         if !valid_cred_name(name) {
             return Err(Error::Invalid(format!("invalid credential name: {name}")));
@@ -138,7 +138,7 @@ impl CredVault {
         Ok(())
     }
 
-    /// Lê e decifra uma credencial. `Ok(None)` se não existe.
+    /// Reads and decrypts a credential. `Ok(None)` if it does not exist.
     pub fn get(&self, name: &str) -> Result<Option<String>> {
         let blob = match fs::read(self.cred_path(name)) {
             Ok(b) => b,
@@ -153,12 +153,12 @@ impl CredVault {
         Ok(Some(s))
     }
 
-    /// Existe a credencial?
+    /// Does the credential exist?
     pub fn exists(&self, name: &str) -> bool {
         self.cred_path(name).exists()
     }
 
-    /// Lista os **nomes** das credenciais (NUNCA os valores).
+    /// Lists the credential **names** (NEVER the values).
     pub fn list(&self) -> Result<Vec<String>> {
         let mut out = Vec::new();
         for entry in fs::read_dir(&self.dir)? {
@@ -173,7 +173,7 @@ impl CredVault {
         Ok(out)
     }
 
-    /// Remove uma credencial (idempotente).
+    /// Removes a credential (idempotent).
     pub fn remove(&self, name: &str) -> Result<()> {
         match fs::remove_file(self.cred_path(name)) {
             Ok(()) => Ok(()),
@@ -182,22 +182,22 @@ impl CredVault {
         }
     }
 
-    /// **Rotação da chave-mestra**: gera uma chave nova, recifra todas as
-    /// credenciais com ela e substitui a chave em disco. Atómico por-credencial;
-    /// se algo falhar a meio, as já-recifradas ficam com a nova chave — por isso
-    /// a chave nova é escrita SÓ no fim, e em caso de falha a chave antiga
-    /// permanece e as recifradas tornam-se ilegíveis (recuperáveis por re-`put`).
-    /// Para minimizar a janela, decifra-tudo primeiro, depois recifra.
+    /// **Master key rotation**: generates a new key, re-encrypts all
+    /// credentials with it and replaces the key on disk. Atomic per-credential;
+    /// if something fails half-way, the already-re-encrypted ones get the new key — that is why
+    /// the new key is written ONLY at the end, and in case of failure the old key
+    /// remains and the re-encrypted ones become unreadable (recoverable via re-`put`).
+    /// To minimize the window, decrypt-everything first, then re-encrypt.
     pub fn rotate_key(&mut self) -> Result<()> {
         let names = self.list()?;
-        // 1) decifra tudo com a chave atual.
+        // 1) decrypt everything with the current key.
         let mut plain: Vec<(String, String)> = Vec::with_capacity(names.len());
         for n in &names {
             if let Some(v) = self.get(n)? {
                 plain.push((n.clone(), v));
             }
         }
-        // 2) gera a nova chave e recifra tudo com ela.
+        // 2) generate the new key and re-encrypt everything with it.
         let mut new_key = [0u8; KEY_LEN];
         random_bytes(&mut new_key)?;
         let cipher = Self::cipher(&new_key);
@@ -212,7 +212,7 @@ impl CredVault {
             blob.extend_from_slice(&ct);
             write_0600(&self.cred_path(n), &blob)?;
         }
-        // 3) persiste a nova chave-mestra e adota-a em memória.
+        // 3) persist the new master key and adopt it in memory.
         write_0600(&self.key_path, &new_key)?;
         self.key = new_key;
         Ok(())
@@ -256,7 +256,7 @@ mod tests {
             !as_str.contains("PLAINTEXT-MARKER-123"),
             "token vazou em claro no disco!"
         );
-        // permissões 0600
+        // 0600 permissions
         let mode = fs::metadata(base.join("tunnels/cred/pinggy.bin"))
             .unwrap()
             .permissions()
@@ -281,7 +281,7 @@ mod tests {
         assert_eq!(names, vec!["ngrok".to_string(), "pinggy".to_string()]);
         v.remove("ngrok").unwrap();
         assert_eq!(v.list().unwrap(), vec!["pinggy".to_string()]);
-        v.remove("ngrok").unwrap(); // idempotente
+        v.remove("ngrok").unwrap(); // idempotent
         let _ = fs::remove_dir_all(&base);
     }
 
@@ -295,10 +295,10 @@ mod tests {
         v.rotate_key().unwrap();
         let key_after = fs::read(base.join("tunnels/keyring.key")).unwrap();
         assert_ne!(key_before, key_after, "a chave-mestra não rodou");
-        // valores continuam legíveis com a nova chave
+        // values remain readable with the new key
         assert_eq!(v.get("ngrok").unwrap().as_deref(), Some("tok-1"));
         assert_eq!(v.get("pinggy").unwrap().as_deref(), Some("tok-2"));
-        // um cofre reaberto (lê a nova chave do disco) também decifra
+        // a reopened vault (reads the new key from disk) also decrypts
         let v2 = CredVault::open(&base).unwrap();
         assert_eq!(v2.get("ngrok").unwrap().as_deref(), Some("tok-1"));
         let _ = fs::remove_dir_all(&base);
@@ -308,8 +308,8 @@ mod tests {
     fn invalid_names_rejected() {
         assert!(valid_cred_name("ngrok"));
         assert!(valid_cred_name("ngrok:equipa-a"));
-        assert!(!valid_cred_name("Ngrok")); // maiúscula
-        assert!(!valid_cred_name("")); // vazio
-        assert!(!valid_cred_name("tok en")); // espaço
+        assert!(!valid_cred_name("Ngrok")); // uppercase
+        assert!(!valid_cred_name("")); // empty
+        assert!(!valid_cred_name("tok en")); // space
     }
 }

@@ -1,19 +1,19 @@
-//! Cloud Native Buildpacks / Paketo — Pilar 1, **Bloco B** (lógica pura + scaffolding).
+//! Cloud Native Buildpacks / Paketo — Pillar 1, **Block B** (pure logic + scaffolding).
 //!
-//! Constrói o **plano** de um build CNB: que imagem-*builder* correr, que *run-image*,
-//! que argumentos do `lifecycle/creator` (CNB *platform spec*, fase única detect+build+
-//! export) e que *mounts*. Tudo isto é **lógica pura, unit-testada**.
+//! Builds the **plan** of a CNB build: which *builder* image to run, which *run-image*,
+//! which `lifecycle/creator` arguments (CNB *platform spec*, single detect+build+
+//! export phase) and which *mounts*. All of this is **pure, unit-tested logic**.
 //!
-//! A **execução** (correr o builder como container Delonix rootless e exportar a imagem)
-//! é conduzida pela CLI e exige **ambiente real** (builder Paketo presente + o registo
-//! interno do Bloco E para o *exporter*) — está em scaffolding, **E2E por validar**.
+//! The **execution** (running the builder as a rootless Delonix container and exporting the image)
+//! is driven by the CLI and requires a **real environment** (Paketo builder present + the
+//! internal registry from Block E for the *exporter*) — it is in scaffolding, **E2E yet to be validated**.
 
 use std::path::{Path, PathBuf};
 
-/// As imagens (builder, run) de uma família de buildpacks.
+/// The (builder, run) images of a buildpack family.
 ///
-/// `auto`/`paketo` (omissão) → `builder-jammy-base`, que cobre Node/Python/Go/Java/Ruby/
-/// .NET/PHP/web num só builder. `heroku` → a família Heroku.
+/// `auto`/`paketo` (default) → `builder-jammy-base`, which covers Node/Python/Go/Java/Ruby/
+/// .NET/PHP/web in a single builder. `heroku` → the Heroku family.
 pub fn builder_images(family: &str) -> (&'static str, &'static str) {
     match family {
         "heroku" => ("heroku/builder:24", "heroku/heroku:24"),
@@ -24,23 +24,23 @@ pub fn builder_images(family: &str) -> (&'static str, &'static str) {
     }
 }
 
-/// O plano de um build CNB — tudo o que é preciso para correr o lifecycle.
+/// The plan of a CNB build — everything needed to run the lifecycle.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CnbPlan {
-    /// Imagem que se corre (contém o lifecycle + os buildpacks).
+    /// Image that is run (contains the lifecycle + the buildpacks).
     pub builder_image: String,
-    /// Imagem-base do runtime, passada ao `creator`.
+    /// Runtime base image, passed to the `creator`.
     pub run_image: String,
-    /// Referência OCI de saída (ex.: `<name>:latest` ou `<registo>/<name>:latest`).
+    /// Output OCI reference (e.g. `<name>:latest` or `<registry>/<name>:latest`).
     pub output_ref: String,
-    /// Pasta do código-fonte (montada em `/workspace`).
+    /// Source code folder (mounted at `/workspace`).
     pub source: PathBuf,
-    /// Volume nomeado para o cache de layers entre builds (montado em `/cache`).
+    /// Named volume for the layer cache across builds (mounted at `/cache`).
     pub cache_volume: String,
 }
 
 impl CnbPlan {
-    /// Constrói o plano para uma app a partir da família de builder e da ref de saída.
+    /// Builds the plan for an app from the builder family and the output ref.
     pub fn new(name: &str, source: &Path, family: &str, output_ref: &str) -> CnbPlan {
         let (builder, run) = builder_images(family);
         CnbPlan {
@@ -52,8 +52,8 @@ impl CnbPlan {
         }
     }
 
-    /// Argumentos do `lifecycle/creator` (fase única: detect → build → export) conforme a
-    /// *CNB platform spec*. O `creator` é o entrypoint do container builder.
+    /// `lifecycle/creator` arguments (single phase: detect → build → export) per the
+    /// *CNB platform spec*. The `creator` is the entrypoint of the builder container.
     pub fn creator_args(&self) -> Vec<String> {
         vec![
             "/cnb/lifecycle/creator".into(),
@@ -65,8 +65,8 @@ impl CnbPlan {
         ]
     }
 
-    /// Mounts do container builder: fonte→`/workspace`, volume de cache→`/cache`.
-    /// (O cache reusa a CAS/overlay do engine via um volume nomeado — Bloco F.)
+    /// Mounts of the builder container: source→`/workspace`, cache volume→`/cache`.
+    /// (The cache reuses the engine's CAS/overlay via a named volume — Block F.)
     pub fn mounts(&self) -> Vec<(String, String)> {
         vec![
             (self.source.display().to_string(), "/workspace".to_string()),
@@ -110,7 +110,7 @@ mod tests {
         assert_eq!(args[0], "/cnb/lifecycle/creator");
         assert!(args.contains(&"-app=/workspace".to_string()));
         assert!(args.contains(&"-run-image=paketobuildpacks/run-jammy-base".to_string()));
-        assert_eq!(args.last().unwrap(), "shop:latest"); // output ref é o posicional final
+        assert_eq!(args.last().unwrap(), "shop:latest"); // output ref is the final positional
 
         let mounts = plan.mounts();
         assert_eq!(

@@ -1,30 +1,30 @@
-//! Deteção de **virtualização** (KVM/QEMU/Xen/VMware/…) e de dispositivos
-//! **virtio**, para o Delonix tirar o máximo desempenho quando corre dentro de
-//! uma VM Linux (#1 — "integração nativa com KVM").
+//! Detection of **virtualization** (KVM/QEMU/Xen/VMware/…) and of **virtio**
+//! devices, so Delonix can extract maximum performance when it runs inside
+//! a Linux VM (#1 — "native KVM integration").
 //!
-//! Tudo é lido de `/sys` e `/proc` (sem dependências externas → funciona no
-//! binário musl estático). A deteção nunca altera nada; as afinações de
-//! desempenho são explícitas (ver [`set_blk_scheduler_none`]).
+//! Everything is read from `/sys` and `/proc` (no external dependencies → works in
+//! the static musl binary). Detection never changes anything; the performance
+//! tunings are explicit (see [`set_blk_scheduler_none`]).
 
 use std::path::Path;
 
-/// Resumo do ambiente de virtualização do host onde o Delonix corre.
+/// Summary of the virtualization environment of the host where Delonix runs.
 #[derive(Debug, Clone, Default)]
 pub struct VirtInfo {
-    /// `true` se estamos dentro de uma VM (qualquer hipervisor).
+    /// `true` if we are inside a VM (any hypervisor).
     pub virtualized: bool,
-    /// Nome do hipervisor: `kvm`, `qemu`, `xen`, `vmware`, `virtualbox`,
-    /// `hyper-v`, `unknown` ou `none` (bare-metal).
+    /// Hypervisor name: `kvm`, `qemu`, `xen`, `vmware`, `virtualbox`,
+    /// `hyper-v`, `unknown` or `none` (bare-metal).
     pub hypervisor: String,
-    /// `true` quando o guest é acelerado por KVM (caminho de máximo desempenho).
+    /// `true` when the guest is KVM-accelerated (maximum performance path).
     pub is_kvm: bool,
-    /// `/dev/kvm` presente (aceleração KVM disponível — p.ex. virtualização aninhada).
+    /// `/dev/kvm` present (KVM acceleration available — e.g. nested virtualization).
     pub kvm_accel: bool,
-    /// Interfaces de rede servidas por `virtio_net` (p.ex. `enp1s0`).
+    /// Network interfaces served by `virtio_net` (e.g. `enp1s0`).
     pub virtio_net: Vec<String>,
-    /// Discos servidos por `virtio_blk` (p.ex. `vda`).
+    /// Disks served by `virtio_blk` (e.g. `vda`).
     pub virtio_blk: Vec<String>,
-    /// Nº total de dispositivos no bus virtio (`/sys/bus/virtio/devices`).
+    /// Total number of devices on the virtio bus (`/sys/bus/virtio/devices`).
     pub virtio_count: usize,
 }
 
@@ -35,8 +35,8 @@ fn read_trim(p: &str) -> String {
         .to_string()
 }
 
-/// Decide o nome do hipervisor a partir dos sinais do DMI/CPU. Função pura
-/// (separada de [`detect`]) para ser testável sem uma VM real.
+/// Decides the hypervisor name from the DMI/CPU signals. Pure function
+/// (separated from [`detect`]) so it is testable without a real VM.
 fn classify(
     product: &str,
     sys_vendor: &str,
@@ -51,7 +51,7 @@ fn classify(
     } else if pl.contains("kvm") {
         "kvm".into()
     } else if vl.contains("qemu") || vl.contains("red hat") {
-        // Vendor QEMU/Red Hat com virtio é, na prática, sempre acelerado por KVM.
+        // A QEMU/Red Hat vendor with virtio is, in practice, always KVM-accelerated.
         if has_virtio {
             "kvm".into()
         } else {
@@ -70,7 +70,7 @@ fn classify(
     }
 }
 
-/// Lê o `device/driver` de uma entrada de `/sys` e devolve o basename do driver.
+/// Reads the `device/driver` of a `/sys` entry and returns the driver's basename.
 fn driver_of(dir: &Path) -> String {
     std::fs::read_link(dir.join("device/driver"))
         .ok()
@@ -78,7 +78,7 @@ fn driver_of(dir: &Path) -> String {
         .unwrap_or_default()
 }
 
-/// Deteta o ambiente de virtualização atual (barato; pode ser chamado à vontade).
+/// Detects the current virtualization environment (cheap; may be called freely).
 pub fn detect() -> VirtInfo {
     let cpuinfo = std::fs::read_to_string("/proc/cpuinfo").unwrap_or_default();
     let hv_flag = cpuinfo
@@ -132,17 +132,17 @@ pub fn detect() -> VirtInfo {
     }
 }
 
-/// Lê o escalonador de I/O atual de um disco e diz se convém pôr `none`.
+/// Reads the current I/O scheduler of a disk and says whether it is worth setting `none`.
 ///
-/// Devolve `(atual, deve_pôr_none)`. Num guest KVM o host já escalona o I/O do
-/// disco físico — manter um escalonador no guest só duplica trabalho e latência,
-/// por isso `none` é o recomendado para `virtio-blk`.
+/// Returns `(current, should_set_none)`. On a KVM guest the host already schedules the I/O of the
+/// physical disk — keeping a scheduler in the guest only duplicates work and latency,
+/// so `none` is the recommended one for `virtio-blk`.
 pub fn blk_scheduler(dev: &str) -> Option<(String, bool)> {
     let raw = read_trim(&format!("/sys/block/{dev}/queue/scheduler"));
     if raw.is_empty() {
         return None;
     }
-    // Formato do kernel: "[none] mq-deadline" — o ativo está entre [].
+    // Kernel format: "[none] mq-deadline" — the active one is between [].
     let current = raw
         .split_whitespace()
         .find(|t| t.starts_with('['))
@@ -152,7 +152,7 @@ pub fn blk_scheduler(dev: &str) -> Option<(String, bool)> {
     Some((current, wants_none))
 }
 
-/// Aplica `none` ao escalonador de I/O de um disco virtio-blk (precisa de root).
+/// Applies `none` to the I/O scheduler of a virtio-blk disk (needs root).
 pub fn set_blk_scheduler_none(dev: &str) -> std::io::Result<()> {
     std::fs::write(format!("/sys/block/{dev}/queue/scheduler"), "none")
 }
@@ -163,19 +163,19 @@ mod tests {
 
     #[test]
     fn driver_of_resolves_symlink() {
-        // Monta `<tmp>/eth0/device -> ../drivers/virtio_net` como o sysfs real
-        // (`/sys/class/net/eth0/device/driver` aponta para o driver virtio).
+        // Sets up `<tmp>/eth0/device -> ../drivers/virtio_net` like the real sysfs
+        // (`/sys/class/net/eth0/device/driver` points to the virtio driver).
         let root = std::env::temp_dir().join(format!("delonix-virt-{}", std::process::id()));
         let dev = root.join("eth0");
         let drvdir = root.join("drivers/virtio_net");
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&dev).unwrap();
         std::fs::create_dir_all(&drvdir).unwrap();
-        // device/ é um dir; device/driver é o symlink para o driver.
+        // device/ is a dir; device/driver is the symlink to the driver.
         std::fs::create_dir_all(dev.join("device")).unwrap();
         std::os::unix::fs::symlink(&drvdir, dev.join("device/driver")).unwrap();
         assert_eq!(driver_of(&dev), "virtio_net");
-        // sem symlink → string vazia (não-virtio).
+        // no symlink → empty string (non-virtio).
         assert_eq!(driver_of(&root.join("nope")), "");
         let _ = std::fs::remove_dir_all(&root);
     }

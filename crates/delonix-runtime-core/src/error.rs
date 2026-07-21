@@ -1,54 +1,54 @@
-//! O tipo de erro partilhado por todo o Delonix Engine.
+//! The error type shared by the whole Delonix Engine.
 
 use thiserror::Error;
 
-/// Erros do Delonix Engine.
+/// Delonix Engine errors.
 #[derive(Debug, Error)]
 pub enum Error {
-    /// Falha de I/O (ler/escrever estado, cgroups, `/proc`).
+    /// I/O failure (read/write state, cgroups, `/proc`).
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
 
-    /// Falha a serialisar/desserialisar estado (JSON).
+    /// Failure to serialise/deserialise state (JSON).
     #[error("state serialisation error: {0}")]
     Json(#[from] serde_json::Error),
 
-    /// Uma chamada ao sistema (`clone`, `mount`, `setns`, ...) falhou.
+    /// A system call (`clone`, `mount`, `setns`, ...) failed.
     #[error("system call `{context}` failed: {message}")]
     Runtime {
-        /// O nome da operação que falhou.
+        /// The name of the operation that failed.
         context: &'static str,
-        /// A mensagem do `errno` subjacente.
+        /// The message of the underlying `errno`.
         message: String,
     },
 
-    /// Não existe nenhum container com o id/nome dado.
+    /// There is no container with the given id/name.
     #[error("no such container: {0}")]
     NotFound(String),
 
-    /// Não existe nenhuma VM com o nome dado. Variante própria porque o
-    /// [`Error::NotFound`] partilhado diz "no such container" — num
-    /// `vm stop`/`vm rm` isso confundia (o utilizador nem mexeu em containers).
+    /// There is no VM with the given name. Its own variant because the
+    /// shared [`Error::NotFound`] says "no such container" — in a
+    /// `vm stop`/`vm rm` that was confusing (the user didn't even touch containers).
     #[error("no such VM: {0} (see `delonix vm ls`)")]
     VmNotFound(String),
 
-    /// O container existe mas não está em execução.
+    /// The container exists but is not running.
     #[error("container is not running: {0}")]
     NotRunning(String),
 
-    /// Argumento inválido.
+    /// Invalid argument.
     #[error("invalid argument: {0}")]
     Invalid(String),
 
-    /// Falha ao falar com um registo de imagens OCI (Docker Hub, ghcr.io, ...).
+    /// Failure to talk to an OCI image registry (Docker Hub, ghcr.io, ...).
     #[error("registry error: {0}")]
     Registry(String),
 
-    /// O estado desejado entra em conflito com o estado actual (ex.: já existe um
-    /// recurso com o mesmo nome mas de outro `kind`).
+    /// The desired state conflicts with the current state (e.g.: a resource with
+    /// the same name but of a different `kind` already exists).
     #[error("conflict: {0}")]
     Conflict(String),
 }
 
-/// Alias de conveniência.
+/// Convenience alias.
 pub type Result<T> = std::result::Result<T, Error>;

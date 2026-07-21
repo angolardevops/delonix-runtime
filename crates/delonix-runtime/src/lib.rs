@@ -1,11 +1,11 @@
-//! `delonix-runtime` — o runtime OCI de baixo nível do Delonix Engine.
+//! `delonix-runtime` — the Delonix Engine's low-level OCI runtime.
 //!
-//! É o `mini-runc` do Mês 5, promovido a biblioteca: cria containers com
-//! `clone` (namespaces) + `pivot_root` (rootfs) + cgroup (memória) + seccomp
-//! (confinamento), corre comandos dentro de um container existente com `setns`
-//! (`exec`), e gere o seu ciclo de vida (`stop`/`remove`).
+//! It is Month 5's `mini-runc`, promoted to a library: it creates containers with
+//! `clone` (namespaces) + `pivot_root` (rootfs) + cgroup (memory) + seccomp
+//! (confinement), runs commands inside an existing container with `setns`
+//! (`exec`), and manages their lifecycle (`stop`/`remove`).
 //!
-//! Toda a fronteira de `syscalls` vive aqui; o resto do Delonix nunca lhe toca.
+//! The entire `syscall` boundary lives here; the rest of Delonix never touches it.
 
 use std::collections::BTreeMap;
 use std::ffi::CString;
@@ -14,10 +14,10 @@ use std::time::Duration;
 
 use delonix_runtime_core::{Container, Error, Mount, Result, Status, Store};
 
-/// RFC3339 com precisão de nanossegundos, p/ o *logging shim* (stdout do
-/// container timestampado). Cópia local deliberada: `delonix-runtime` não
-/// depende de `delonix-core` (PaaS) — este helper é puramente formatação de
-/// tempo, sem nenhuma semântica de auditoria/tenant.
+/// RFC3339 with nanosecond precision, for the *logging shim* (timestamped
+/// container stdout). Deliberate local copy: `delonix-runtime` does not
+/// depend on `delonix-core` (PaaS) — this helper is purely time formatting,
+/// with no audit/tenant semantics.
 fn now_rfc3339_nano() -> String {
     fn rfc3339(secs: u64) -> String {
         let days = (secs / 86_400) as i64;
@@ -55,8 +55,8 @@ use seccompiler::{
     SeccompRule,
 };
 
-/// Um *hook* invocado com o PID do init, logo após o container arrancar e antes
-/// de qualquer `waitpid`. A Fase 3 usa-o para configurar a rede (estilo CNI).
+/// A *hook* invoked with the init PID, right after the container starts and before
+/// any `waitpid`. Phase 3 uses it to configure the network (CNI-style).
 pub type StartedHook<'a> = dyn Fn(i32) -> Result<()> + 'a;
 
 fn syserr(context: &'static str) -> impl Fn(nix::Error) -> Error {
@@ -66,31 +66,31 @@ fn syserr(context: &'static str) -> impl Fn(nix::Error) -> Error {
     }
 }
 
-/// `true` se o processo `pid` ainda existe (sinal 0 = só testa vida).
+/// `true` if process `pid` still exists (signal 0 = only tests liveness).
 pub fn is_alive(pid: i32) -> bool {
     kill(Pid::from_raw(pid), None).is_ok()
 }
 
-/// `starttime` do processo (campo 22 de `/proc/<pid>/stat`, jiffies desde o
-/// boot). Único e estável durante a vida do processo — usamo-lo para detectar
-/// reutilização de PID.
+/// The process `starttime` (field 22 of `/proc/<pid>/stat`, jiffies since
+/// boot). Unique and stable for the process's lifetime — we use it to detect
+/// PID reuse.
 pub fn proc_starttime(pid: i32) -> Option<u64> {
     let s = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
-    // O comm (campo 2) pode conter espaços/parênteses — corta até ao último ')'.
+    // The comm (field 2) may contain spaces/parentheses — cut up to the last ')'.
     let rest = &s[s.rfind(')')? + 1..];
-    rest.split_whitespace().nth(19).and_then(|f| f.parse().ok()) // campo 22 = 20.º após o comm
+    rest.split_whitespace().nth(19).and_then(|f| f.parse().ok()) // field 22 = the 20th after the comm
 }
 
-/// `true` se é seguro enviar um sinal a `pid` em nome deste container: o PID
-/// está vivo E (se conhecemos o `starttime` registado) ainda é o MESMO processo.
-/// Protege contra reutilização de PID — nunca matamos um processo alheio do host.
+/// `true` if it is safe to send a signal to `pid` on behalf of this container: the PID
+/// is alive AND (if we know the recorded `starttime`) is still the SAME process.
+/// Guards against PID reuse — we never kill a process belonging to the host.
 pub fn safe_to_signal(pid: i32, starttime: Option<u64>) -> bool {
     if !is_alive(pid) {
         return false;
     }
     match starttime {
         Some(want) => proc_starttime(pid) == Some(want),
-        None => true, // registo antigo sem starttime: comportamento legado
+        None => true, // old record without starttime: legacy behavior
     }
 }
 
@@ -102,8 +102,8 @@ fn wait_to_code(status: WaitStatus) -> i32 {
     }
 }
 
-/// Converte o `WaitStatus` no [`Status`] terminal correto: saída 0 → Stopped,
-/// saída ≠ 0 → Failed, morto por sinal → Crashed.
+/// Converts the `WaitStatus` into the correct terminal [`Status`]: exit 0 → Stopped,
+/// exit ≠ 0 → Failed, killed by signal → Crashed.
 fn wait_to_status(status: WaitStatus) -> Status {
     match status {
         WaitStatus::Exited(_, 0) => Status::Stopped,
@@ -114,10 +114,10 @@ fn wait_to_status(status: WaitStatus) -> Status {
 }
 
 // ----------------------------------------------------------------------------
-// Criar e correr um container
+// Create and run a container
 // ----------------------------------------------------------------------------
 
-/// Uma regra seccomp por-argumento: o syscall casa (e é bloqueado) quando
+/// A per-argument seccomp rule: the syscall matches (and is blocked) when
 /// `(arg[index] & mask) == (value & mask)`.
 fn rule_arg_masked(index: u8, mask: u64, value: u64) -> SeccompRule {
     SeccompRule::new(vec![SeccompCondition::new(
@@ -130,11 +130,11 @@ fn rule_arg_masked(index: u8, mask: u64, value: u64) -> SeccompRule {
     .expect("seccomp rule")
 }
 
-/// Instala um filtro seccomp: bloqueia (com `EPERM`) a lista negra incondicional
-/// MAIS regras por-argumento que afinam casos legítimos. Activa `no_new_privs`.
-/// Carrega o filtro seccomp com `SECCOMP_FILTER_FLAG_LOG`: cada syscall NEGADO
-/// (fora da allowlist) é **registado** no audit/dmesg do kernel — detecção em
-/// runtime tipo Falco (B12) — sem deixar de o bloquear (continua `EPERM`).
+/// Installs a seccomp filter: blocks (with `EPERM`) the unconditional blacklist
+/// PLUS per-argument rules that refine legitimate cases. Enables `no_new_privs`.
+/// Loads the seccomp filter with `SECCOMP_FILTER_FLAG_LOG`: every DENIED syscall
+/// (outside the allowlist) is **logged** to the kernel audit/dmesg — Falco-style
+/// runtime detection (B12) — while still blocking it (still `EPERM`).
 fn apply_filter_logged(prog: &seccompiler::BpfProgram) {
     const SET_MODE_FILTER: libc::c_ulong = 1;
     const FLAG_LOG: libc::c_ulong = 2;
@@ -142,7 +142,7 @@ fn apply_filter_logged(prog: &seccompiler::BpfProgram) {
         len: prog.len() as u16,
         filter: prog.as_ptr() as *mut libc::sock_filter,
     };
-    // SAFETY: `fprog` aponta para um programa BPF válido; NO_NEW_PRIVS já está set.
+    // SAFETY: `fprog` points to a valid BPF program; NO_NEW_PRIVS is already set.
     let rc = unsafe {
         libc::syscall(
             libc::SYS_seccomp,
@@ -152,26 +152,26 @@ fn apply_filter_logged(prog: &seccompiler::BpfProgram) {
         )
     };
     if rc != 0 {
-        // recurso: aplica sem o flag de log (segurança mantém-se).
+        // last resort: apply without the log flag (security is preserved).
         let _ = apply_filter(prog);
     }
 }
 
 fn apply_seccomp(unconfined: bool, detect: bool) {
     if unconfined {
-        return; // `--security-opt seccomp=unconfined`: sem filtro (uso confiável)
+        return; // `--security-opt seccomp=unconfined`: no filter (trusted use)
     }
-    // ALLOWLIST (default-deny): só os syscalls seguros são permitidos; tudo o
-    // resto — incl. syscalls FUTUROS/desconhecidos — devolve EPERM. Modelo Docker.
+    // ALLOWLIST (default-deny): only safe syscalls are permitted; everything
+    // else — incl. FUTURE/unknown syscalls — returns EPERM. Docker model.
     let mut rules: BTreeMap<i64, Vec<SeccompRule>> = BTreeMap::new();
     for nr in allowed_syscalls() {
-        rules.insert(nr, vec![]); // match incondicional -> on_match (Allow)
+        rules.insert(nr, vec![]); // unconditional match -> on_match (Allow)
     }
-    // `clone`: permitir SÓ quando NÃO cria um novo USER namespace (impede escape
-    // por userns aninhado).
+    // `clone`: permit ONLY when it does NOT create a new USER namespace (prevents
+    // escape via nested userns).
     rules.insert(
         libc::SYS_clone,
-        vec![rule_arg_masked(0, libc::CLONE_NEWUSER as u64, 0)], // NEWUSER não setado
+        vec![rule_arg_masked(0, libc::CLONE_NEWUSER as u64, 0)], // NEWUSER not set
     );
 
     let arch = match std::env::consts::ARCH.try_into() {
@@ -182,25 +182,25 @@ fn apply_seccomp(unconfined: bool, detect: bool) {
         }
     };
 
-    // Pré-filtro CRÍTICO: `clone3` → ENOSYS. Os flags do clone3 vão num ponteiro
-    // (`struct clone_args`) e NÃO podem ser inspeccionados pelo seccomp clássico,
-    // por isso um clone3(CLONE_NEWUSER) contornaria o bloqueio do userns acima.
-    // Devolvendo ENOSYS forçamos o glibc a cair no `clone` (que É filtrado).
-    // ENOSYS (ERRNO) tem precedência sobre o Allow do filtro principal, por isso
-    // ganha mesmo com clone3 ainda na allowlist (necessário p/ threads via clone).
+    // CRITICAL pre-filter: `clone3` → ENOSYS. The clone3 flags go in a pointer
+    // (`struct clone_args`) and can NOT be inspected by classic seccomp,
+    // so a clone3(CLONE_NEWUSER) would bypass the userns block above.
+    // By returning ENOSYS we force glibc to fall back to `clone` (which IS filtered).
+    // ENOSYS (ERRNO) takes precedence over the main filter's Allow, so it
+    // wins even with clone3 still on the allowlist (needed for threads via clone).
     //
-    // Instala-se SEMPRE, **inclusive em `detect`**: o modo `detect` afina o *log*
-    // dos syscalls negados (FLAG_LOG no filtro principal), NÃO afrouxa o
-    // confinamento. Se este pré-filtro só corresse com `!detect`, um container com
-    // `--security-opt seccomp=detect` poderia `clone3(CLONE_NEWUSER)` e escapar
-    // por userns aninhado — exactamente o buraco que o resto do filtro fecha. A
-    // tentativa de userns que daí resulta cai no `clone` filtrado (logado no
-    // filtro principal), por isso não se perde detecção.
+    // It is ALWAYS installed, **including in `detect`**: the `detect` mode tunes the *log*
+    // of denied syscalls (FLAG_LOG on the main filter), it does NOT loosen the
+    // confinement. If this pre-filter only ran with `!detect`, a container with
+    // `--security-opt seccomp=detect` could `clone3(CLONE_NEWUSER)` and escape
+    // via nested userns — exactly the hole the rest of the filter closes. The
+    // userns attempt that results falls into the filtered `clone` (logged in the
+    // main filter), so no detection is lost.
     let mut pre: BTreeMap<i64, Vec<SeccompRule>> = BTreeMap::new();
     pre.insert(libc::SYS_clone3, vec![]);
     if let Ok(pf) = SeccompFilter::new(
         pre,
-        SeccompAction::Allow,                      // não-casado: deixa passar
+        SeccompAction::Allow,                      // not matched: let it through
         SeccompAction::Errno(libc::ENOSYS as u32), // clone3 → ENOSYS
         arch,
     ) {
@@ -211,8 +211,8 @@ fn apply_seccomp(unconfined: bool, detect: bool) {
 
     let prog: seccompiler::BpfProgram = match SeccompFilter::new(
         rules,
-        SeccompAction::Errno(libc::EPERM as u32), // por omissão (não-casado): EPERM
-        SeccompAction::Allow,                     // casado (na allowlist): permitir
+        SeccompAction::Errno(libc::EPERM as u32), // by default (not matched): EPERM
+        SeccompAction::Allow,                     // matched (on the allowlist): permit
         arch,
     )
     .and_then(|f| f.try_into())
@@ -224,23 +224,23 @@ fn apply_seccomp(unconfined: bool, detect: bool) {
         }
     };
     if detect {
-        apply_filter_logged(&prog); // B12: regista os syscalls negados
+        apply_filter_logged(&prog); // B12: logs denied syscalls
     } else if let Err(e) = apply_filter(&prog) {
         eprintln!("delonix: failed to apply seccomp: {e}; aborting the container");
         unsafe { libc::_exit(126) };
     }
 }
 
-/// Allowlist de syscalls seguros (baseada no perfil por omissão do Docker, para
-/// x86_64). `clone` é tratado à parte (condicional). Os perigosos (mount, ptrace,
-/// bpf, kexec, init_module, setns, unshare, …) ficam DE FORA = negados.
+/// Allowlist of safe syscalls (based on Docker's default profile, for
+/// x86_64). `clone` is handled separately (conditional). The dangerous ones (mount, ptrace,
+/// bpf, kexec, init_module, setns, unshare, …) are LEFT OUT = denied.
 fn allowed_syscalls() -> Vec<i64> {
     use libc::*;
-    // Allowlist PORTÁVEL (existe em x86_64 e aarch64). Os syscalls legados
-    // que só existem em x86_64 (open/stat/fork/*at antigos…) são adicionados
-    // condicionalmente — em aarch64 usam-se as variantes `*at`/`clone`.
+    // PORTABLE allowlist (exists on x86_64 and aarch64). The legacy syscalls
+    // that only exist on x86_64 (old open/stat/fork/*at…) are added
+    // conditionally — on aarch64 the `*at`/`clone` variants are used.
     let mut v: Vec<i64> = vec![
-        // ficheiros / FS
+        // files / FS
         SYS_read,
         SYS_write,
         SYS_openat,
@@ -313,7 +313,7 @@ fn allowed_syscalls() -> Vec<i64> {
         SYS_removexattr,
         SYS_lremovexattr,
         SYS_fremovexattr,
-        // memória
+        // memory
         SYS_mmap,
         SYS_munmap,
         SYS_mprotect,
@@ -329,7 +329,7 @@ fn allowed_syscalls() -> Vec<i64> {
         SYS_mlock2,
         SYS_memfd_create,
         SYS_membarrier,
-        // processos / threads
+        // processes / threads
         SYS_clone3,
         SYS_execve,
         SYS_execveat,
@@ -356,7 +356,7 @@ fn allowed_syscalls() -> Vec<i64> {
         SYS_getcpu,
         SYS_capget,
         SYS_capset,
-        // ids / credenciais (sem privilégio extra — NO_NEW_PRIVS+caps já limitam)
+        // ids / credentials (no extra privilege — NO_NEW_PRIVS+caps already limit)
         SYS_getuid,
         SYS_geteuid,
         SYS_getgid,
@@ -379,7 +379,7 @@ fn allowed_syscalls() -> Vec<i64> {
         SYS_setsid,
         SYS_getpriority,
         SYS_setpriority,
-        // limites / scheduling
+        // limits / scheduling
         SYS_getrlimit,
         SYS_setrlimit,
         SYS_prlimit64,
@@ -394,7 +394,7 @@ fn allowed_syscalls() -> Vec<i64> {
         SYS_sched_get_priority_max,
         SYS_sched_get_priority_min,
         SYS_sched_rr_get_interval,
-        // sinais
+        // signals
         SYS_rt_sigaction,
         SYS_rt_sigprocmask,
         SYS_rt_sigpending,
@@ -405,7 +405,7 @@ fn allowed_syscalls() -> Vec<i64> {
         SYS_sigaltstack,
         SYS_signalfd4,
         SYS_restart_syscall,
-        // tempo / timers
+        // time / timers
         SYS_nanosleep,
         SYS_clock_nanosleep,
         SYS_clock_gettime,
@@ -431,14 +431,14 @@ fn allowed_syscalls() -> Vec<i64> {
         SYS_inotify_init1,
         SYS_inotify_add_watch,
         SYS_inotify_rm_watch,
-        // AIO clássico (libaio) — o nginx & cia usam-no; o Docker permite-o por
-        // omissão. (io_uring fica DE FORA, como no Docker, por ser mais sensível.)
+        // classic AIO (libaio) — nginx & co use it; Docker permits it by
+        // default. (io_uring is LEFT OUT, as in Docker, being more sensitive.)
         SYS_io_setup,
         SYS_io_destroy,
         SYS_io_getevents,
         SYS_io_submit,
         SYS_io_cancel,
-        // rede
+        // network
         SYS_socket,
         SYS_socketpair,
         SYS_bind,
@@ -522,9 +522,9 @@ fn allowed_syscalls() -> Vec<i64> {
     v
 }
 
-/// As capabilities que o container PODE manter (modelo do Docker, menos
-/// `CAP_MKNOD` — sem device cgroup, é a forma de impedir o acesso a discos do
-/// host). Tudo o resto é removido.
+/// The capabilities the container MAY keep (Docker's model, minus
+/// `CAP_MKNOD` — without a device cgroup, this is how we prevent access to host
+/// disks). Everything else is dropped.
 const KEPT_CAPS: &[u8] = &[
     0,  // CHOWN
     1,  // DAC_OVERRIDE
@@ -542,7 +542,7 @@ const KEPT_CAPS: &[u8] = &[
     31, // SETFCAP
 ];
 
-/// Número da capability a partir do nome (`CAP_NET_ADMIN` ou `NET_ADMIN`).
+/// Capability number from the name (`CAP_NET_ADMIN` or `NET_ADMIN`).
 fn cap_num(name: &str) -> Option<u8> {
     let n = name.trim().to_ascii_uppercase();
     let n = n.strip_prefix("CAP_").unwrap_or(&n);
@@ -592,9 +592,9 @@ fn cap_num(name: &str) -> Option<u8> {
     })
 }
 
-/// Máscara com TODAS as capabilities suportadas pelo kernel (`--privileged`).
-/// Lê `/proc/sys/kernel/cap_last_cap` para não passar bits inválidos ao `capset`
-/// (que daria EINVAL). Fallback conservador: CAP_CHECKPOINT_RESTORE (40).
+/// Mask with ALL capabilities supported by the kernel (`--privileged`).
+/// Reads `/proc/sys/kernel/cap_last_cap` so as not to pass invalid bits to `capset`
+/// (which would give EINVAL). Conservative fallback: CAP_CHECKPOINT_RESTORE (40).
 fn all_caps_mask() -> u64 {
     let last: u32 = std::fs::read_to_string("/proc/sys/kernel/cap_last_cap")
         .ok()
@@ -608,8 +608,8 @@ fn all_caps_mask() -> u64 {
     }
 }
 
-/// Calcula a máscara de capabilities a manter: começa em [`KEPT_CAPS`], aplica
-/// `--cap-drop` (`ALL` → nenhuma) e depois `--cap-add`.
+/// Computes the mask of capabilities to keep: starts at [`KEPT_CAPS`], applies
+/// `--cap-drop` (`ALL` → none) and then `--cap-add`.
 fn resolve_cap_keep(cap_drop: &[String], cap_add: &[String]) -> u64 {
     let mut keep: u64 = if cap_drop.iter().any(|c| c.eq_ignore_ascii_case("all")) {
         0
@@ -625,10 +625,10 @@ fn resolve_cap_keep(cap_drop: &[String], cap_add: &[String]) -> u64 {
         }
         m
     };
-    // `--cap-add ALL` (docker) / a tradução CRI de `privileged` → mantém TODAS as
-    // capabilities. Sem este ramo, `cap_num("ALL")` devolvia `None` e o `ALL` era
-    // silenciosamente ignorado — um container "privilegiado" via CRI ficava sem
-    // CAP_SYS_ADMIN (ex.: `sethostname` dava EPERM apesar de o CRI o pedir).
+    // `--cap-add ALL` (docker) / the CRI translation of `privileged` → keeps ALL
+    // capabilities. Without this branch, `cap_num("ALL")` returned `None` and `ALL` was
+    // silently ignored — a "privileged" container via CRI ended up without
+    // CAP_SYS_ADMIN (e.g. `sethostname` gave EPERM even though CRI requested it).
     if cap_add.iter().any(|c| c.eq_ignore_ascii_case("all")) {
         return all_caps_mask();
     }
@@ -640,29 +640,29 @@ fn resolve_cap_keep(cap_drop: &[String], cap_add: &[String]) -> u64 {
     keep
 }
 
-/// Activa `NO_NEW_PRIVS`: um `execve` nunca ganha privilégios (anula setuid/
-/// setgid/capabilities de ficheiro). Defesa-chave contra escalada — sempre activo.
+/// Enables `NO_NEW_PRIVS`: an `execve` never gains privileges (nullifies setuid/
+/// setgid/file capabilities). Key defense against escalation — always active.
 fn set_no_new_privs() {
-    // SAFETY: prctl simples; idempotente; não falha em kernels suportados.
+    // SAFETY: simple prctl; idempotent; does not fail on supported kernels.
     unsafe {
         libc::prctl(libc::PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0);
     }
 }
 
-/// Remove todas as capabilities excepto `keep` (máscara). Sem isto, o root do
-/// container é o root REAL do host (pode carregar módulos, reiniciar a máquina,
-/// criar device nodes para o disco do host, etc.).
+/// Drops all capabilities except `keep` (mask). Without this, the container's
+/// root is the REAL host root (can load modules, reboot the machine,
+/// create device nodes for the host disk, etc.).
 fn drop_capabilities(keep: u64) {
-    // 1) bounding set: impede readquirir caps via setuid/exec.
+    // 1) bounding set: prevents reacquiring caps via setuid/exec.
     for cap in 0..64i64 {
         if (keep >> cap) & 1 == 0 {
-            // SAFETY: prctl é seguro; caps inexistentes devolvem EINVAL (ignorado).
+            // SAFETY: prctl is safe; nonexistent caps return EINVAL (ignored).
             unsafe {
                 libc::prctl(libc::PR_CAPBSET_DROP, cap as libc::c_ulong, 0, 0, 0);
             }
         }
     }
-    // 2) effective/permitted/inheritable: ficam só os da allowlist.
+    // 2) effective/permitted/inheritable: only the allowlist ones remain.
     #[repr(C)]
     struct CapHeader {
         version: u32,
@@ -676,7 +676,7 @@ fn drop_capabilities(keep: u64) {
     }
     let hdr = CapHeader {
         version: 0x2008_0522, // _LINUX_CAPABILITY_VERSION_3
-        pid: 0,               // o próprio thread
+        pid: 0,               // the thread itself
     };
     let (lo, hi) = ((keep & 0xffff_ffff) as u32, (keep >> 32) as u32);
     let data = [
@@ -691,18 +691,18 @@ fn drop_capabilities(keep: u64) {
             inheritable: 0,
         },
     ];
-    // SAFETY: capset com cabeçalho v3 válido e 2 estruturas de dados; reduzir as
-    // próprias caps a um subconjunto é sempre permitido.
+    // SAFETY: capset with a valid v3 header and 2 data structs; reducing one's
+    // own caps to a subset is always permitted.
     unsafe {
         libc::syscall(libc::SYS_capset, &hdr as *const _, data.as_ptr());
     }
 }
 
-/// Decide se o confinamento ficou MESMO em vigor, a partir dos campos lidos de
-/// `/proc/self/status`. Lógica pura (testável): exige `NO_NEW_PRIVS`, seccomp em
-/// modo filtro (2) quando esperado, e NENHUMA capability fora de `cap_keep` no
-/// bounding set nem no effective. `CapBnd`/`CapEff` ausentes = não-verificável =
-/// erro (fail-closed).
+/// Decides whether the confinement REALLY took effect, from the fields read from
+/// `/proc/self/status`. Pure logic (testable): requires `NO_NEW_PRIVS`, seccomp in
+/// filter mode (2) when expected, and NO capability outside `cap_keep` in the
+/// bounding set nor in the effective set. `CapBnd`/`CapEff` absent = unverifiable =
+/// error (fail-closed).
 fn confinement_ok(
     no_new_privs: Option<u32>,
     seccomp_mode: Option<u32>,
@@ -714,7 +714,7 @@ fn confinement_ok(
     if no_new_privs != Some(1) {
         return Err(format!("NO_NEW_PRIVS inactive ({no_new_privs:?})"));
     }
-    // 2 = SECCOMP_MODE_FILTER. (`detect` também aplica um filtro → modo 2.)
+    // 2 = SECCOMP_MODE_FILTER. (`detect` also applies a filter → mode 2.)
     if seccomp_expected && seccomp_mode != Some(2) {
         return Err(format!(
             "seccomp is not in filter mode (Seccomp={seccomp_mode:?})"
@@ -732,12 +732,12 @@ fn confinement_ok(
     Ok(())
 }
 
-/// FAIL-CLOSED: lê `/proc/self/status` e confirma que `no_new_privs`, o seccomp e o
-/// drop de caps ficaram MESMO em vigor antes do `execve`. Cada um destes controlos
-/// pode falhar em silêncio (capset/prctl/seccomp são, em parte, best-effort); um
-/// controlo de segurança que falha ABERTO é pior que nenhum, porque dá falsa
-/// confiança. Se a verificação falhar, o `container_init`/`exec` aborta. Opt-out
-/// explícito do OPERADOR (não do container, cujo env ainda não foi aplicado):
+/// FAIL-CLOSED: reads `/proc/self/status` and confirms that `no_new_privs`, seccomp and the
+/// cap drop REALLY took effect before the `execve`. Each of these controls
+/// can fail silently (capset/prctl/seccomp are, in part, best-effort); a
+/// security control that fails OPEN is worse than none, because it gives false
+/// confidence. If the check fails, `container_init`/`exec` aborts. Explicit opt-out
+/// by the OPERATOR (not the container, whose env has not yet been applied):
 /// `DELONIX_INSECURE_BESTEFFORT=1`.
 fn verify_confinement(seccomp_expected: bool, cap_keep: u64) -> std::result::Result<(), String> {
     let status = std::fs::read_to_string("/proc/self/status")
@@ -757,20 +757,20 @@ fn verify_confinement(seccomp_expected: bool, cap_keep: u64) -> std::result::Res
     confinement_ok(nnp, sec, bnd, eff, seccomp_expected, cap_keep)
 }
 
-/// O operador desligou as verificações fail-closed? (variável do ENGINE, lida antes
-/// de `apply_env` limpar o ambiente — um container não a pode forjar.)
+/// Did the operator turn off the fail-closed checks? (ENGINE variable, read before
+/// `apply_env` clears the environment — a container cannot forge it.)
 fn insecure_besteffort() -> bool {
     std::env::var_os("DELONIX_INSECURE_BESTEFFORT").is_some()
 }
 
-/// Desliga o stdio do terminal em modo detached. `stdin` vai sempre para
-/// `/dev/null`; `stdout`/`stderr` vão para `out_fd` (a ponta de escrita do pipe
-/// do *logging shim*) se dado, senão para `/dev/null`.
+/// Detaches the terminal stdio in detached mode. `stdin` always goes to
+/// `/dev/null`; `stdout`/`stderr` go to `out_fd` (the write end of the *logging
+/// shim* pipe) if given, otherwise to `/dev/null`.
 ///
-/// Sem isto, quem invocou `$(delonix run -d ...)` ficaria bloqueado até o
-/// container fechar o stdout — ou seja, até terminar.
+/// Without this, whoever invoked `$(delonix run -d ...)` would block until the
+/// container closed its stdout — that is, until it terminated.
 fn detach_stdio(out_fd: Option<i32>) {
-    // SAFETY: FFI directa; duplica os descritores-padrão. Best-effort.
+    // SAFETY: direct FFI; duplicates the standard descriptors. Best-effort.
     unsafe {
         let null = libc::open(c"/dev/null".as_ptr(), libc::O_RDWR);
         if null >= 0 {
@@ -784,7 +784,7 @@ fn detach_stdio(out_fd: Option<i32>) {
         if null > 2 {
             libc::close(null);
         }
-        // a ponta original do pipe já não é precisa (ficou dupada em 1/2).
+        // the original pipe end is no longer needed (it was dup'd into 1/2).
         if let Some(fd) = out_fd {
             if fd > 2 {
                 libc::close(fd);
@@ -793,16 +793,16 @@ fn detach_stdio(out_fd: Option<i32>) {
     }
 }
 
-/// Tamanho máximo do ficheiro de log antes de rodar (1 MiB).
+/// Maximum log file size before rotating (1 MiB).
 const MAX_LOG_BYTES: u64 = 1024 * 1024;
 
-/// O *logging shim*: lê o stdout/stderr do container (pela ponta de leitura do
-/// pipe) e escreve-o em `log_path`, **rodando** quando passa [`MAX_LOG_BYTES`]
-/// (renomeia para `.1` e recomeça). Corre num processo próprio que sobrevive ao
-/// `delonix run` (reparentado ao init) e termina quando o container fecha o pipe.
-// `written` é escrito no fim do macro `write_block!` e lido no INÍCIO da iteração
-// SEGUINTE (contabilidade de rotação entre chamadas); a análise de fluxo do rustc
-// não vê essa leitura cross-iteração e marca a última escrita como "unused".
+/// The *logging shim*: reads the container's stdout/stderr (via the pipe's read
+/// end) and writes it to `log_path`, **rotating** when it exceeds [`MAX_LOG_BYTES`]
+/// (renames to `.1` and starts over). Runs in its own process that outlives
+/// `delonix run` (reparented to init) and terminates when the container closes the pipe.
+// `written` is written at the end of the `write_block!` macro and read at the START of the
+// NEXT iteration (rotation accounting across calls); rustc's flow analysis
+// does not see that cross-iteration read and marks the last write as "unused".
 #[allow(unused_assignments)]
 fn log_shim(
     read_fd: i32,
@@ -812,14 +812,14 @@ fn log_shim(
     tag: String,
     cri: bool,
 ) -> ! {
-    // Driver journald/syslog: encaminha cada linha para o syslog (que o journald
-    // capta), em vez do ficheiro. `--log-driver journald|syslog`.
+    // journald/syslog driver: forwards each line to syslog (which journald
+    // captures), instead of the file. `--log-driver journald|syslog`.
     if driver == "journald" || driver == "syslog" {
         log_shim_syslog(read_fd, tag);
     }
     use std::io::{Read, Write};
     use std::os::fd::FromRawFd;
-    // SAFETY: `read_fd` é a ponta de leitura do pipe, herdada e válida.
+    // SAFETY: `read_fd` is the pipe's read end, inherited and valid.
     let mut reader = unsafe { std::fs::File::from_raw_fd(read_fd) };
     let open_log = |append: bool| {
         std::fs::OpenOptions::new()
@@ -832,14 +832,14 @@ fn log_shim(
     let mut out = open_log(true);
     let mut written: u64 = std::fs::metadata(&log_path).map(|m| m.len()).unwrap_or(0);
     let mut buf = [0u8; 8192];
-    // No modo CRI cada linha sai como `<rfc3339nano> stdout F <linha>\n` — o que o
-    // kubelet/crictl sabem parsear. Acumula até ao `\n` (linhas podem vir partidas
-    // entre `read`s). Teto p/ uma linha sem `\n` não crescer a RAM sem limite.
+    // In CRI mode each line comes out as `<rfc3339nano> stdout F <line>\n` — which the
+    // kubelet/crictl know how to parse. Accumulates up to `\n` (lines may arrive split
+    // across `read`s). Cap so a line without `\n` does not grow RAM without bound.
     let mut line = Vec::<u8>::new();
     const MAX_LINE: usize = 256 * 1024;
-    // Escreve um bloco, rodando ANTES se ultrapassasse `max_bytes` — no modo CRI
-    // isto é chamado só com registos COMPLETOS, logo a rotação nunca parte um
-    // registo a meio (e a contagem inclui o prefixo, ao contrário de antes).
+    // Writes a block, rotating BEFORE if it would exceed `max_bytes` — in CRI mode
+    // this is called only with COMPLETE records, so rotation never splits a
+    // record in the middle (and the count includes the prefix, unlike before).
     macro_rules! write_block {
         ($bytes:expr) => {{
             let b: &[u8] = $bytes;
@@ -857,7 +857,7 @@ fn log_shim(
     }
     loop {
         let n = match reader.read(&mut buf) {
-            Ok(0) | Err(_) => break, // EOF: o container fechou o pipe (terminou)
+            Ok(0) | Err(_) => break, // EOF: the container closed the pipe (terminated)
             Ok(n) => n,
         };
         if !cri {
@@ -877,24 +877,24 @@ fn log_shim(
             }
         }
     }
-    // linha final sem `\n` (modo CRI) — emite na mesma como partial.
+    // final line without `\n` (CRI mode) — emit it anyway as partial.
     if cri && !line.is_empty() {
         let ts = now_rfc3339_nano();
         let rec = format!("{ts} stdout P {}\n", String::from_utf8_lossy(&line));
         write_block!(rec.as_bytes());
     }
-    // SAFETY: sai sem correr destrutores herdados do processo-pai.
+    // SAFETY: exits without running destructors inherited from the parent process.
     unsafe { libc::_exit(0) }
 }
 
-/// Variante do *logging shim* que escreve cada linha no **syslog** (capturado
-/// pelo journald em sistemas systemd). `tag` = `delonix/<nome>`.
+/// Variant of the *logging shim* that writes each line to **syslog** (captured
+/// by journald on systemd systems). `tag` = `delonix/<name>`.
 fn log_shim_syslog(read_fd: i32, tag: String) -> ! {
     use std::io::Read;
     use std::os::fd::FromRawFd;
-    // o tag tem de viver enquanto o syslog estiver aberto -> fuga deliberada.
+    // the tag must live as long as syslog is open -> deliberate leak.
     let ctag = std::ffi::CString::new(tag).unwrap_or_default();
-    // SAFETY: openlog com um ponteiro válido que sobrevive ao processo (leaked).
+    // SAFETY: openlog with a valid pointer that outlives the process (leaked).
     unsafe {
         libc::openlog(
             Box::leak(ctag.into_boxed_c_str()).as_ptr(),
@@ -902,7 +902,7 @@ fn log_shim_syslog(read_fd: i32, tag: String) -> ! {
             libc::LOG_USER,
         )
     };
-    // SAFETY: `read_fd` é a ponta de leitura do pipe.
+    // SAFETY: `read_fd` is the pipe's read end.
     let mut reader = unsafe { std::fs::File::from_raw_fd(read_fd) };
     let mut buf = [0u8; 8192];
     let mut line = Vec::new();
@@ -914,7 +914,7 @@ fn log_shim_syslog(read_fd: i32, tag: String) -> ! {
                 for &b in &buf[..n] {
                     if b == b'\n' {
                         if let Ok(c) = std::ffi::CString::new(line.clone()) {
-                            // SAFETY: formato e argumento são ponteiros C válidos.
+                            // SAFETY: format and argument are valid C pointers.
                             unsafe { libc::syslog(libc::LOG_INFO, fmt.as_ptr(), c.as_ptr()) };
                         }
                         line.clear();
@@ -930,15 +930,15 @@ fn log_shim_syslog(read_fd: i32, tag: String) -> ! {
             unsafe { libc::syslog(libc::LOG_INFO, fmt.as_ptr(), c.as_ptr()) };
         }
     }
-    // SAFETY: termina sem correr destrutores herdados.
+    // SAFETY: exits without running inherited destructors.
     unsafe { libc::_exit(0) }
 }
 
-/// Monta um volume/bind no rootfs (antes do `pivot_root`). Zero-copy: o
-/// `MS_BIND` partilha os blocos do `source`, não copia dados.
-/// Um `target` de bind-mount é seguro? (absoluto e SEM componentes `..`). Defesa
-/// contra escape: `bind_volume` corre antes do `pivot_root`, logo um target
-/// relativo/`..` montaria sobre o filesystem do HOST.
+/// Mounts a volume/bind into the rootfs (before `pivot_root`). Zero-copy: the
+/// `MS_BIND` shares `source`'s blocks, it does not copy data.
+/// Is a bind-mount `target` safe? (absolute and WITHOUT `..` components). Defense
+/// against escape: `bind_volume` runs before `pivot_root`, so a relative/`..`
+/// target would mount over the HOST filesystem.
 fn mount_target_safe(target: &str) -> bool {
     let p = std::path::Path::new(target);
     p.is_absolute()
@@ -952,8 +952,8 @@ fn bind_volume(rootfs: &str, m: &Mount) -> nix::Result<()> {
         return Err(nix::errno::Errno::EINVAL);
     }
     let dst = format!("{rootfs}{}", m.target);
-    // Origem ficheiro (ex.: segredo) → o alvo tem de ser um FICHEIRO; origem
-    // directório → um directório.
+    // File source (e.g. secret) → the target must be a FILE; directory source
+    // → a directory.
     if std::path::Path::new(&m.source).is_file() {
         if let Some(parent) = std::path::Path::new(&dst).parent() {
             let _ = std::fs::create_dir_all(parent);
@@ -973,10 +973,10 @@ fn bind_volume(rootfs: &str, m: &Mount) -> nix::Result<()> {
         MsFlags::MS_BIND | MsFlags::MS_REC,
         None::<&str>,
     )?;
-    // Remount para aplicar `nosuid`+`nodev` — um bind ignora estas flags no 1.º
-    // `mount`, logo sem isto um volume podia trazer binários setuid ou device
-    // nodes para dentro do container. `rdonly` adicional se pedido. (`noexec` NÃO,
-    // para não partir volumes com executáveis legítimos, ex.: código.)
+    // Remount to apply `nosuid`+`nodev` — a bind ignores these flags on the first
+    // `mount`, so without this a volume could bring setuid binaries or device
+    // nodes into the container. Additional `rdonly` if requested. (`noexec` NOT,
+    // so as not to break volumes with legitimate executables, e.g. code.)
     let mut rflags =
         MsFlags::MS_BIND | MsFlags::MS_REMOUNT | MsFlags::MS_NOSUID | MsFlags::MS_NODEV;
     if m.readonly {
@@ -992,16 +992,16 @@ fn bind_volume(rootfs: &str, m: &Mount) -> nix::Result<()> {
     Ok(())
 }
 
-/// Os device nodes essenciais que todo o container deve ter em `/dev`.
+/// The essential device nodes every container should have in `/dev`.
 const ESSENTIAL_DEVS: &[&str] = &["null", "zero", "full", "random", "urandom", "tty"];
 
-/// Monta um `/dev` limpo (tmpfs) e liga os device nodes essenciais do host.
+/// Mounts a clean `/dev` (tmpfs) and wires up the host's essential device nodes.
 ///
-/// Sem isto, a imagem traz um `/dev` vazio e, com user namespace, o container
-/// nem consegue criar lá ficheiros (o `/dev` é de um uid não-mapeado). Corre
-/// ANTES do `pivot_root` (os nós do host ainda são acessíveis) e enquanto temos
-/// `CAP_DAC_OVERRIDE` (criador do user ns). Os nós são de caracteres → o device
-/// cgroup eBPF permite-os.
+/// Without this, the image brings an empty `/dev` and, with a user namespace, the container
+/// cannot even create files there (the `/dev` belongs to an unmapped uid). Runs
+/// BEFORE `pivot_root` (the host nodes are still accessible) and while we have
+/// `CAP_DAC_OVERRIDE` (creator of the user ns). The nodes are character devices → the device
+/// cgroup eBPF permits them.
 fn setup_dev(rootfs: &str) -> nix::Result<()> {
     let dev = format!("{rootfs}/dev");
     let _ = std::fs::create_dir_all(&dev);
@@ -1014,8 +1014,8 @@ fn setup_dev(rootfs: &str) -> nix::Result<()> {
     )?;
     for name in ESSENTIAL_DEVS {
         let target = format!("{dev}/{name}");
-        let _ = std::fs::File::create(&target); // ponto de montagem (temos CAP_DAC_OVERRIDE)
-                                                // bind do nó real do host (sobrevive ao pivot_root).
+        let _ = std::fs::File::create(&target); // mount point (we have CAP_DAC_OVERRIDE)
+                                                // bind of the host's real node (survives pivot_root).
         let _ = mount(
             Some(format!("/dev/{name}").as_str()),
             target.as_str(),
@@ -1024,16 +1024,16 @@ fn setup_dev(rootfs: &str) -> nix::Result<()> {
             None::<&str>,
         );
     }
-    dev_std_symlinks(&dev); // /dev/stdout→/proc/self/fd/1 etc. (logs do nginx/etc.)
-    mount_devpts(&dev, true); // pseudo-terminais próprios (gid=5 = grupo tty do host)
+    dev_std_symlinks(&dev); // /dev/stdout→/proc/self/fd/1 etc. (nginx/etc. logs)
+    mount_devpts(&dev, true); // own pseudo-terminals (gid=5 = host's tty group)
     Ok(())
 }
 
-/// Cria os symlinks padrão dos *streams* em `<dev>`: `/dev/stdout`, `/dev/stderr`,
-/// `/dev/stdin` e `/dev/fd` → `/proc/self/fd/...`. É o que o runc/Docker fazem —
-/// e o que faz programas como o nginx (que ligam `access.log` → `/dev/stdout`)
-/// escreverem para o stdout CAPTURADO, em vez de para um ficheiro perdido. Os
-/// alvos resolvem-se em tempo de execução com o `/proc` do container.
+/// Creates the standard *stream* symlinks in `<dev>`: `/dev/stdout`, `/dev/stderr`,
+/// `/dev/stdin` and `/dev/fd` → `/proc/self/fd/...`. It is what runc/Docker do —
+/// and what makes programs like nginx (which link `access.log` → `/dev/stdout`)
+/// write to the CAPTURED stdout, instead of to a lost file. The
+/// targets resolve at runtime using the container's `/proc`.
 fn dev_std_symlinks(dev: &str) {
     use std::os::unix::fs::symlink;
     let _ = symlink("/proc/self/fd", format!("{dev}/fd"));
@@ -1042,15 +1042,15 @@ fn dev_std_symlinks(dev: &str) {
     let _ = symlink("/proc/self/fd/2", format!("{dev}/stderr"));
 }
 
-/// Monta um `devpts` próprio (`newinstance`) em `<dev>/pts` e cria `<dev>/ptmx`
-/// → `pts/ptmx`. Dá ao container os seus **próprios** pseudo-terminais — é o que
-/// torna o `exec -it` numa shell interactiva real e faz o nome do terminal
-/// (`/dev/pts/N`) resolver lá dentro (como o Docker). Best-effort.
+/// Mounts its own `devpts` (`newinstance`) at `<dev>/pts` and creates `<dev>/ptmx`
+/// → `pts/ptmx`. Gives the container its **own** pseudo-terminals — this is what
+/// makes `exec -it` a real interactive shell and makes the terminal name
+/// (`/dev/pts/N`) resolve inside it (like Docker). Best-effort.
 fn mount_devpts(dev: &str, with_gid: bool) {
     let pts = format!("{dev}/pts");
     let _ = std::fs::create_dir_all(&pts);
-    // `newinstance` isola estes ptys dos do host; `ptmxmode=0666` deixa o
-    // multiplexador abrível sem CAP. Sem `gid=5` num user ns (gid não mapeável).
+    // `newinstance` isolates these ptys from the host's; `ptmxmode=0666` lets the
+    // multiplexer be opened without a CAP. No `gid=5` in a user ns (gid not mappable).
     let opts = if with_gid {
         "newinstance,ptmxmode=0666,mode=0620,gid=5"
     } else {
@@ -1068,14 +1068,14 @@ fn mount_devpts(dev: &str, with_gid: bool) {
     let _ = std::os::unix::fs::symlink("pts/ptmx", &ptmx);
 }
 
-/// `/dev` para um container com user namespace. Corre DEPOIS do `setuid(0)` — só
-/// então o uid 0 do container é mapeável, e o tmpfs `/dev` fica com dono uid 0 (se
-/// fosse montado antes, ficaria com dono `overflow` e o root do container não lá
-/// conseguiria escrever). Em user ns não há CAP_MKNOD, por isso ligamos (`bind`) os
-/// device nodes REAIS do host por cima dos pontos de montagem — única forma de ter
-/// `crw-rw-rw-` reais lá dentro, como o runc/Docker. Os nós do host continuam
-/// acessíveis em `old_root` (a raiz antiga preservada pelo `pivot_root`, ainda por
-/// desmontar). O caller desmonta `old_root` logo a seguir.
+/// `/dev` for a container with a user namespace. Runs AFTER `setuid(0)` — only
+/// then is the container's uid 0 mappable, and the `/dev` tmpfs ends up owned by uid 0 (if
+/// mounted before, it would be owned by `overflow` and the container's root could not
+/// write there). In a user ns there is no CAP_MKNOD, so we bind the
+/// REAL host device nodes over the mount points — the only way to have real
+/// `crw-rw-rw-` inside, like runc/Docker. The host nodes remain
+/// accessible under `old_root` (the old root preserved by `pivot_root`, still to
+/// be unmounted). The caller unmounts `old_root` right after.
 fn setup_dev_userns(old_root: &str, devices: &[String]) {
     let _ = mount(
         Some("tmpfs"),
@@ -1086,7 +1086,7 @@ fn setup_dev_userns(old_root: &str, devices: &[String]) {
     );
     for name in ESSENTIAL_DEVS {
         let target = format!("/dev/{name}");
-        let _ = std::fs::File::create(&target); // ponto de montagem
+        let _ = std::fs::File::create(&target); // mount point
         let _ = mount(
             Some(format!("{old_root}/dev/{name}").as_str()),
             target.as_str(),
@@ -1095,19 +1095,19 @@ fn setup_dev_userns(old_root: &str, devices: &[String]) {
             None::<&str>,
         );
     }
-    bind_devices(old_root, "", devices); // --device (nós reais do host, via raiz antiga)
+    bind_devices(old_root, "", devices); // --device (host's real nodes, via the old root)
     dev_std_symlinks("/dev"); // /dev/stdout→/proc/self/fd/1 etc.
-    mount_devpts("/dev", false); // sem gid=5 (não mapeável no user ns)
+    mount_devpts("/dev", false); // no gid=5 (not mappable in the user ns)
 }
 
-/// Liga os dispositivos pedidos (`--device /dev/host[:/dev/cont]`) ao `/dev` do
-/// container (bind do nó real do host). Char devices são permitidos pelo device
-/// cgroup eBPF; os de bloco continuam negados.
+/// Wires the requested devices (`--device /dev/host[:/dev/cont]`) into the container's
+/// `/dev` (bind of the host's real node). Char devices are permitted by the device
+/// cgroup eBPF; block ones remain denied.
 ///
-/// `src_prefix` prefixa o caminho do nó do host (vazio sem user ns — o host ainda
-/// é a raiz, antes do `pivot_root`; `/.delonix_old` com user ns — a raiz antiga
-/// preservada pelo `pivot_root`, onde o `/dev` do host continua acessível depois
-/// do `setuid`). `rootfs` prefixa o ponto de montagem dentro do container.
+/// `src_prefix` prefixes the host node's path (empty without a user ns — the host is still
+/// the root, before `pivot_root`; `/.delonix_old` with a user ns — the old root
+/// preserved by `pivot_root`, where the host's `/dev` remains accessible after
+/// the `setuid`). `rootfs` prefixes the mount point inside the container.
 fn bind_devices(src_prefix: &str, rootfs: &str, devices: &[String]) {
     for spec in devices {
         let mut it = spec.split(':');
@@ -1116,9 +1116,9 @@ fn bind_devices(src_prefix: &str, rootfs: &str, devices: &[String]) {
             continue;
         }
         let src = format!("{src_prefix}{host}");
-        // Recusa dispositivos de BLOCO em código (não confia só no eBPF, que é
-        // best-effort e pode falhar a carregar): dar `/dev/sda` a um container =
-        // acesso bruto ao disco do host. Só char devices são permitidos.
+        // Refuses BLOCK devices in code (does not rely solely on eBPF, which is
+        // best-effort and may fail to load): giving `/dev/sda` to a container =
+        // raw access to the host disk. Only char devices are permitted.
         match nix::sys::stat::stat(src.as_str()) {
             Ok(st) => {
                 let mode = st.st_mode & libc::S_IFMT;
@@ -1132,7 +1132,7 @@ fn bind_devices(src_prefix: &str, rootfs: &str, devices: &[String]) {
                 continue;
             }
         }
-        // destino: 2.º campo se começar por '/', senão = caminho do host.
+        // destination: 2nd field if it starts with '/', otherwise = host path.
         let cont = match it.next() {
             Some(c) if c.starts_with('/') => c,
             _ => host,
@@ -1141,7 +1141,7 @@ fn bind_devices(src_prefix: &str, rootfs: &str, devices: &[String]) {
         if let Some(parent) = std::path::Path::new(&target).parent() {
             let _ = std::fs::create_dir_all(parent);
         }
-        let _ = std::fs::File::create(&target); // ponto de montagem
+        let _ = std::fs::File::create(&target); // mount point
         let _ = mount(
             Some(src.as_str()),
             target.as_str(),
@@ -1152,7 +1152,7 @@ fn bind_devices(src_prefix: &str, rootfs: &str, devices: &[String]) {
     }
 }
 
-/// Monta o rootfs do container e faz `pivot_root` (corre DENTRO da `clone`).
+/// Mounts the container rootfs and does `pivot_root` (runs INSIDE the `clone`).
 #[allow(clippy::too_many_arguments)]
 fn setup_rootfs(
     rootfs: &str,
@@ -1179,35 +1179,35 @@ fn setup_rootfs(
         MsFlags::MS_BIND | MsFlags::MS_REC,
         None::<&str>,
     )?;
-    // /dev limpo com os nós essenciais (tmpfs + bind dos device nodes reais do host:
-    // única forma de ter `crw-rw-rw-` reais sem CAP_MKNOD). Sem user ns corre AQUI,
-    // antes do pivot_root, como root real e enquanto o `/dev` do host é a raiz. Com
-    // user ns é feito DEPOIS do setuid (senão o tmpfs ficava com dono `overflow`); os
-    // nós do host continuam acessíveis na raiz antiga do pivot_root — ver o caller de
-    // setup_rootfs e setup_dev_userns.
+    // clean /dev with the essential nodes (tmpfs + bind of the host's real device nodes:
+    // the only way to have real `crw-rw-rw-` without CAP_MKNOD). Without a user ns it runs HERE,
+    // before pivot_root, as real root and while the host's `/dev` is the root. With
+    // a user ns it is done AFTER setuid (otherwise the tmpfs would be owned by `overflow`); the
+    // host nodes remain accessible in pivot_root's old root — see the caller of
+    // setup_rootfs and setup_dev_userns.
     if !userns {
         setup_dev(rootfs)?;
-        bind_devices("", rootfs, devices); // --device (nós reais do host)
+        bind_devices("", rootfs, devices); // --device (host's real nodes)
     }
-    // Volumes e bind mounts: injectados ANTES do pivot_root, sobre o rootfs.
+    // Volumes and bind mounts: injected BEFORE pivot_root, over the rootfs.
     for m in mounts {
         bind_volume(rootfs, m)?;
     }
     let put_old = format!("{rootfs}/.delonix_old");
     let _ = std::fs::create_dir_all(&put_old);
-    // Pontos de montagem essenciais: imagens MÍNIMAS (ex.: as `e2e-test-images`
-    // do Kubernetes) podem não trazer `/proc` e `/sys`; cria-os no overlay
-    // (escrita) ANTES do pivot_root, senão o `mount` de /proc falha com ENOENT e
-    // o container não arranca. É o que o runc/Docker fazem (criam os mountpoints).
+    // Essential mount points: MINIMAL images (e.g. the Kubernetes `e2e-test-images`)
+    // may not bring `/proc` and `/sys`; create them on the overlay
+    // (writable) BEFORE pivot_root, otherwise the `mount` of /proc fails with ENOENT and
+    // the container does not start. It is what runc/Docker do (they create the mountpoints).
     let _ = std::fs::create_dir_all(format!("{rootfs}/proc"));
     let _ = std::fs::create_dir_all(format!("{rootfs}/sys"));
     chdir(rootfs)?;
     pivot_root(".", ".delonix_old")?;
     chdir("/")?;
     if host_pid {
-        // A partilhar o pidns do host, o kernel recusa montar um procfs NOVO (regra
-        // "fully visible" → EPERM); faz-se bind do /proc do host (preservado na raiz
-        // antiga pelo pivot_root), que já tem a vista correcta dos processos.
+        // Sharing the host's pidns, the kernel refuses to mount a NEW procfs (the
+        // "fully visible" rule → EPERM); we bind the host's /proc (preserved in the old
+        // root by pivot_root), which already has the correct view of the processes.
         mount(
             Some("/.delonix_old/proc"),
             "/proc",
@@ -1224,12 +1224,12 @@ fn setup_rootfs(
             None::<&str>,
         )?;
     }
-    apply_sysctls(sysctls); // --sysctl: ANTES de /proc/sys ficar só-leitura (B13)
+    apply_sysctls(sysctls); // --sysctl: BEFORE /proc/sys becomes read-only (B13)
     mask_proc_paths();
-    // `/sys` SÓ-LEITURA (B13): impede escrita em controlos do kernel/dispositivos
-    // a partir do container. nosuid/nodev/noexec por defesa. (Ignora se não há /sys.)
-    // EXCEÇÃO --privileged: `/sys` RW + `cgroup2` RW delegado, para o systemd dentro
-    // do container (nodes Kind) criar e gerir sub-cgroups. Só com `--privileged`.
+    // `/sys` READ-ONLY (B13): prevents writing to kernel/device controls
+    // from the container. nosuid/nodev/noexec for defense. (Skips if there is no /sys.)
+    // --privileged EXCEPTION: `/sys` RW + `cgroup2` RW delegated, so the systemd inside
+    // the container (Kind nodes) can create and manage sub-cgroups. Only with `--privileged`.
     let sys_base = MsFlags::MS_NOSUID | MsFlags::MS_NODEV | MsFlags::MS_NOEXEC;
     let fresh_sysfs = mount(
         Some("sysfs"),
@@ -1243,14 +1243,14 @@ fn setup_rootfs(
         None::<&str>,
     );
     if fresh_sysfs.is_err() && privileged {
-        // Montar um sysfs NOVO num user ns só é permitido se o userns for DONO do
-        // netns — com `--net host` (o default) não é, e o kernel devolve EPERM,
-        // deixando o /sys VAZIO (foi isto que impedia o kindest/node de arrancar:
-        // sem /sys/fs/cgroup, o entrypoint do kind "deteta cgroup v1" e morre).
-        // Fallback = o que o runc rootless faz: bind recursivo do /sys do host,
-        // preservado na raiz antiga pelo pivot_root. Só em --privileged (semântica
-        // Docker: --privileged expõe o /sys do host RW); não-privileged mantém o
-        // comportamento de sempre (sem /sys — nunca expor o do host sem pedir).
+        // Mounting a NEW sysfs in a user ns is only permitted if the userns OWNS the
+        // netns — with `--net host` (the default) it does not, and the kernel returns EPERM,
+        // leaving /sys EMPTY (this is what prevented kindest/node from starting:
+        // without /sys/fs/cgroup, the kind entrypoint "detects cgroup v1" and dies).
+        // Fallback = what rootless runc does: recursive bind of the host's /sys,
+        // preserved in the old root by pivot_root. Only in --privileged (Docker
+        // semantics: --privileged exposes the host's /sys RW); non-privileged keeps the
+        // usual behavior (no /sys — never expose the host's without asking).
         let _ = mount(
             Some("/.delonix_old/sys"),
             "/sys",
@@ -1260,12 +1260,12 @@ fn setup_rootfs(
         );
     }
     if privileged {
-        // cgroup2 RW por cima de /sys/fs/cgroup. Com CLONE_NEWCGROUP, a vista fica
-        // enraizada no cgroup do container (delegado pelo host — pré-requisito
-        // cgroup v2 Delegate=yes). nsdelegate deixa o systemd gerir o seu subtree.
-        // NOTA: já estamos DEPOIS do pivot_root — o mountpoint cria-se em
-        // `/sys/fs/cgroup` (o `{rootfs}/...` de antes já não resolvia aqui, e o
-        // create_dir_all falhava em silêncio).
+        // cgroup2 RW over /sys/fs/cgroup. With CLONE_NEWCGROUP, the view is
+        // rooted at the container's cgroup (delegated by the host — cgroup v2
+        // Delegate=yes prerequisite). nsdelegate lets systemd manage its subtree.
+        // NOTE: we are already AFTER pivot_root — the mountpoint is created at
+        // `/sys/fs/cgroup` (the earlier `{rootfs}/...` no longer resolved here, and the
+        // create_dir_all failed silently).
         let _ = std::fs::create_dir_all("/sys/fs/cgroup");
         let _ = mount(
             Some("cgroup2"),
@@ -1275,8 +1275,8 @@ fn setup_rootfs(
             Some("nsdelegate"),
         );
     }
-    // Com user ns a raiz antiga é desmontada só DEPOIS do setuid + setup_dev_userns
-    // (que precisa dela para ligar os nós reais do host ao /dev) — feito no caller.
+    // With a user ns the old root is unmounted only AFTER setuid + setup_dev_userns
+    // (which needs it to wire the host's real nodes into /dev) — done in the caller.
     if !userns {
         umount2("/.delonix_old", MntFlags::MNT_DETACH)?;
         let _ = std::fs::remove_dir("/.delonix_old");
@@ -1284,12 +1284,12 @@ fn setup_rootfs(
     Ok(())
 }
 
-/// Mascara as entradas de `/proc` que dão controlo do host: `sysrq-trigger`
-/// (pode causar panic/reboot do host) e `kcore` (memória do kernel). Liga-as a
-/// `/dev/null`/read-only. Best-effort: corre antes do seccomp, com caps ainda
-/// presentes. (Replica as *masked paths* do Docker.)
+/// Masks the `/proc` entries that give host control: `sysrq-trigger`
+/// (can cause host panic/reboot) and `kcore` (kernel memory). Wires them to
+/// `/dev/null`/read-only. Best-effort: runs before seccomp, with caps still
+/// present. (Replicates Docker's *masked paths*.)
 fn mask_proc_paths() {
-    // bind /dev/null por cima de sysrq-trigger -> escritas vão para o vazio.
+    // bind /dev/null over sysrq-trigger -> writes go to the void.
     let _ = mount(
         Some("/dev/null"),
         "/proc/sysrq-trigger",
@@ -1297,7 +1297,7 @@ fn mask_proc_paths() {
         MsFlags::MS_BIND,
         None::<&str>,
     );
-    // /proc/kcore (imagem da RAM do kernel): tornar inacessível.
+    // /proc/kcore (image of the kernel RAM): make it inaccessible.
     let _ = mount(
         Some("/dev/null"),
         "/proc/kcore",
@@ -1305,7 +1305,7 @@ fn mask_proc_paths() {
         MsFlags::MS_BIND,
         None::<&str>,
     );
-    // /proc/sys read-only (impede alterar sysctls do host).
+    // /proc/sys read-only (prevents changing host sysctls).
     let _ = mount(
         Some("/proc/sys"),
         "/proc/sys",
@@ -1322,47 +1322,47 @@ fn mask_proc_paths() {
     );
 }
 
-/// Base e tamanho do mapeamento de UIDs para o user namespace: o root do
-/// container (uid 0) passa a ser o uid `USERNS_UID_BASE` (não privilegiado) no
-/// host. Sem isto, o root do container é o root REAL do host.
+/// Base and size of the UID mapping for the user namespace: the container's
+/// root (uid 0) becomes the uid `USERNS_UID_BASE` (unprivileged) on the
+/// host. Without this, the container's root is the REAL host root.
 pub const USERNS_UID_BASE: u32 = 100_000;
 pub const USERNS_RANGE: u32 = 65_536;
 
-/// Escreve os mapas de uid/gid de um container com user namespace (corre no PAI).
-/// - **Como root** (engine com `sudo`): mapeia o intervalo `100000+65536` (root do
-///   container = uid não privilegiado no host).
-/// - **Rootless** (engine sem `sudo`): mapeia UM só uid — `0 <euid> 1` — porque
-///   sem `newuidmap` (helper setuid) um não-root só pode mapear o seu próprio uid.
+/// Writes the uid/gid maps of a container with a user namespace (runs in the PARENT).
+/// - **As root** (engine with `sudo`): maps the range `100000+65536` (container's
+///   root = unprivileged uid on the host).
+/// - **Rootless** (engine without `sudo`): maps a SINGLE uid — `0 <euid> 1` — because
+///   without `newuidmap` (setuid helper) a non-root can only map its own uid.
 fn write_userns_maps(pid: i32, want_range: bool) -> Result<()> {
-    // SAFETY: geteuid/getegid não têm pré-condições.
+    // SAFETY: geteuid/getegid have no preconditions.
     let (euid, egid) = unsafe { (libc::geteuid(), libc::getegid()) };
-    // ROOTLESS + imagem com USER≠0: o uid alvo (ex.: 1000) NÃO existe num mapa de
-    // um só uid. Mapeia um INTERVALO via `newuidmap`/`newgidmap` (helpers setuid que
-    // consultam /etc/subuid|subgid): container uid 0 → o nosso euid, e 1..N → os
-    // subuids delegados. Assim o `setuid(1000)` dentro do container passa a ser
-    // válido. Se os helpers/subuid não existirem, cai no mapa de um só uid (e o
-    // chamador degrada para correr como root, com aviso).
+    // ROOTLESS + image with USER≠0: the target uid (e.g. 1000) does NOT exist in a map of
+    // a single uid. Maps a RANGE via `newuidmap`/`newgidmap` (setuid helpers that
+    // consult /etc/subuid|subgid): container uid 0 → our euid, and 1..N → the
+    // delegated subuids. This way the `setuid(1000)` inside the container becomes
+    // valid. If the helpers/subuid do not exist, it falls back to the single-uid map (and the
+    // caller degrades to running as root, with a warning).
     if want_range && euid != 0 && have_subid_helpers() {
-        // NÃO escrever `setgroups=deny` aqui. Só é OBRIGATÓRIO quando um não-root
-        // escreve o `gid_map` À MÃO (ver o ramo abaixo) — o kernel exige-o para
-        // impedir que se largue um grupo restritivo. Com `newgidmap` (helper
-        // setuid, valida contra /etc/subgid) o mapeamento é privilegiado e o
-        // kernel deixa `setgroups` ficar em `allow`.
+        // Do NOT write `setgroups=deny` here. It is only MANDATORY when a non-root
+        // writes the `gid_map` BY HAND (see the branch below) — the kernel requires it to
+        // prevent a restrictive group from being dropped. With `newgidmap` (setuid
+        // helper, validates against /etc/subgid) the mapping is privileged and the
+        // kernel lets `setgroups` stay at `allow`.
         //
-        // Pô-lo em `deny` aqui quebrava metade das imagens oficiais: os
-        // entrypoints que largam privilégio (`su-exec`/`gosu`/`setpriv`) chamam
-        // `setgroups()` ANTES do `setuid()` e levavam EPERM. O `postgres` morria
-        // logo com `failed switching to 'postgres': operation not permitted`,
-        // apesar de o uid alvo estar bem mapeado e de termos CAP_SETUID/SETGID.
-        // O docker/podman rootless também deixam `allow` neste caminho.
-        let range = USERNS_RANGE - 1; // 1..USERNS_RANGE delegados aos subuids
+        // Setting it to `deny` here broke half the official images: the
+        // entrypoints that drop privilege (`su-exec`/`gosu`/`setpriv`) call
+        // `setgroups()` BEFORE `setuid()` and got EPERM. `postgres` died
+        // right away with `failed switching to 'postgres': operation not permitted`,
+        // even though the target uid was well mapped and we had CAP_SETUID/SETGID.
+        // docker/podman rootless also leave `allow` on this path.
+        let range = USERNS_RANGE - 1; // 1..USERNS_RANGE delegated to the subuids
         let map_uid = format!("0 {euid} 1 1 {USERNS_UID_BASE} {range}");
         let map_gid = format!("0 {egid} 1 1 {USERNS_UID_BASE} {range}");
         run_idmap("newuidmap", pid, &map_uid)?;
         run_idmap("newgidmap", pid, &map_gid)?;
         return Ok(());
     }
-    // `setgroups=deny` antes do gid_map (boa prática; obrigatório p/ não-root).
+    // `setgroups=deny` before the gid_map (good practice; mandatory for non-root).
     let _ = std::fs::write(format!("/proc/{pid}/setgroups"), "deny");
     let (uid_map, gid_map) = if euid == 0 {
         let m = format!("0 {USERNS_UID_BASE} {USERNS_RANGE}\n");
@@ -1381,8 +1381,8 @@ fn write_userns_maps(pid: i32, want_range: bool) -> Result<()> {
     Ok(())
 }
 
-/// `true` se os helpers `newuidmap`/`newgidmap` existem (necessários p/ mapear um
-/// intervalo de subuids em rootless — o caminho do `USER` da imagem ≠ root).
+/// `true` if the `newuidmap`/`newgidmap` helpers exist (needed to map a
+/// range of subuids in rootless — the image's `USER` ≠ root path).
 fn have_subid_helpers() -> bool {
     ["/usr/bin/newuidmap", "/bin/newuidmap"]
         .iter()
@@ -1392,8 +1392,8 @@ fn have_subid_helpers() -> bool {
             .any(|p| std::path::Path::new(p).exists())
 }
 
-/// Corre `newuidmap`/`newgidmap <pid> <map...>` (os args do mapa são tripletos
-/// `<id_no_ns> <id_no_host> <count>`).
+/// Runs `newuidmap`/`newgidmap <pid> <map...>` (the map args are triplets
+/// `<id_in_ns> <id_on_host> <count>`).
 fn run_idmap(tool: &str, pid: i32, map: &str) -> Result<()> {
     let mut cmd = std::process::Command::new(tool);
     cmd.arg(pid.to_string());
@@ -1416,32 +1416,32 @@ fn run_idmap(tool: &str, pid: i32, map: &str) -> Result<()> {
     Ok(())
 }
 
-/// `true` se o engine corre sem privilégios de root (modo *rootless*, A13).
+/// `true` if the engine runs without root privileges (*rootless* mode, A13).
 pub fn is_rootless() -> bool {
-    // SAFETY: geteuid não tem pré-condições.
+    // SAFETY: geteuid has no preconditions.
     unsafe { libc::geteuid() != 0 }
 }
 
-/// Remove uma árvore de ficheiros que pode conter ficheiros de **subuid** (chowned
-/// para o uid de serviço de um container rootless — ex.: o nginx faz chown das
-/// caches para 101 → host 100100). O utilizador (uid real) NÃO os consegue apagar.
-/// Solução (estilo `podman unshare rm`): fork dum filho num user namespace; o pai
-/// mapeia o intervalo de subuid (`newuidmap`); o filho torna-se root NESSE userns
-/// (logo dono efectivo dos subuids) e re-exec `delonix __rmtree <path>` que os apaga.
-/// Re-executa `delonix <args…>` como **root num user namespace mapeado** (o pai
-/// escreve o mapa de subuids via `newuidmap` — mesmo mecanismo do
-/// [`remove_tree_mapped`], generalizado). É a forma de fazer operações de
-/// ficheiros sobre árvores com donos de **subuid** (volumes escritos por
-/// containers rootless): dentro do userns o filho é dono efectivo deles.
+/// Removes a file tree that may contain **subuid** files (chowned
+/// to a rootless container's service uid — e.g. nginx chowns the
+/// caches to 101 → host 100100). The user (real uid) can NOT delete them.
+/// Solution (`podman unshare rm`-style): fork a child in a user namespace; the parent
+/// maps the subuid range (`newuidmap`); the child becomes root IN THAT userns
+/// (hence effective owner of the subuids) and re-execs `delonix __rmtree <path>` which deletes them.
+/// Re-executes `delonix <args…>` as **root in a mapped user namespace** (the parent
+/// writes the subuid map via `newuidmap` — the same mechanism as
+/// [`remove_tree_mapped`], generalized). It is the way to do file
+/// operations over trees with **subuid** owners (volumes written by
+/// rootless containers): inside the userns the child is their effective owner.
 ///
-/// Devolve `None` se o mecanismo não se aplica (não-rootless, ou sem os helpers
-/// `newuidmap`/`newgidmap`) — o chamador deve então fazer a operação diretamente.
-/// `Some(true)` = o filho terminou com sucesso; `Some(false)` = falhou.
+/// Returns `None` if the mechanism does not apply (non-rootless, or without the
+/// `newuidmap`/`newgidmap` helpers) — the caller should then do the operation directly.
+/// `Some(true)` = the child finished successfully; `Some(false)` = it failed.
 pub fn reexec_mapped(args: &[&str]) -> Option<bool> {
     if !is_rootless() || !have_subid_helpers() {
         return None;
     }
-    // Pré-computa TUDO o que aloca ANTES do fork (pós-fork só ops async-signal-safe).
+    // Pre-computes EVERYTHING that allocates BEFORE the fork (post-fork only async-signal-safe ops).
     let exe = std::env::current_exe().ok()?;
     let prog = std::ffi::CString::new(exe.as_os_str().as_encoded_bytes()).ok()?;
     let cargs: Vec<std::ffi::CString> = args
@@ -1458,8 +1458,8 @@ pub fn reexec_mapped(args: &[&str]) -> Option<bool> {
         return Some(false);
     }
     let (r, w) = (fds[0], fds[1]);
-    // SAFETY: fork; o filho só faz close/unshare/read/setuid/execv (async-signal-safe;
-    // os CStrings/argv foram construídos acima, antes do fork).
+    // SAFETY: fork; the child only does close/unshare/read/setuid/execv (async-signal-safe;
+    // the CStrings/argv were built above, before the fork).
     match unsafe { libc::fork() } {
         0 => unsafe {
             libc::close(w);
@@ -1476,7 +1476,7 @@ pub fn reexec_mapped(args: &[&str]) -> Option<bool> {
         },
         pid if pid > 0 => {
             unsafe { libc::close(r) };
-            // pequena espera para o filho fazer unshare antes de mapearmos.
+            // small wait for the child to unshare before we map.
             std::thread::sleep(std::time::Duration::from_millis(20));
             let _ = write_userns_maps(pid, true);
             let ok = unsafe {
@@ -1499,14 +1499,14 @@ pub fn reexec_mapped(args: &[&str]) -> Option<bool> {
     }
 }
 
-/// Sem rootless/helpers → remoção directa.
+/// Without rootless/helpers → direct removal.
 pub fn remove_tree_mapped(path: &std::path::Path) {
     if !is_rootless() || !have_subid_helpers() {
         let _ = std::fs::remove_dir_all(path);
         return;
     }
-    // Pré-computa TUDO o que aloca ANTES do fork (no filho pós-fork, num processo que
-    // possa ter threads, alocar pode deadlockar — só ops async-signal-safe lá).
+    // Pre-computes EVERYTHING that allocates BEFORE the fork (in the post-fork child, in a process that
+    // may have threads, allocating can deadlock — only async-signal-safe ops there).
     let exe = std::env::current_exe()
         .unwrap_or_else(|_| std::path::PathBuf::from("/usr/local/bin/delonix"));
     let prog = match std::ffi::CString::new(exe.as_os_str().as_encoded_bytes()) {
@@ -1531,8 +1531,8 @@ pub fn remove_tree_mapped(path: &std::path::Path) {
         return;
     }
     let (r, w) = (fds[0], fds[1]);
-    // SAFETY: fork; o filho só faz close/unshare/read/setuid/execv (async-signal-safe,
-    // sem alocação — os CStrings/argv foram criados acima, antes do fork).
+    // SAFETY: fork; the child only does close/unshare/read/setuid/execv (async-signal-safe,
+    // without allocation — the CStrings/argv were created above, before the fork).
     match unsafe { libc::fork() } {
         0 => unsafe {
             libc::close(w);
@@ -1549,7 +1549,7 @@ pub fn remove_tree_mapped(path: &std::path::Path) {
         },
         pid if pid > 0 => {
             unsafe { libc::close(r) };
-            // pequena espera para o filho fazer unshare antes de mapearmos.
+            // small wait for the child to unshare before we map.
             std::thread::sleep(std::time::Duration::from_millis(20));
             let _ = write_userns_maps(pid, true);
             let ok = unsafe {
@@ -1560,13 +1560,13 @@ pub fn remove_tree_mapped(path: &std::path::Path) {
                 libc::waitpid(pid, &mut st, 0);
                 libc::WIFEXITED(st) && libc::WEXITSTATUS(st) == 0
             };
-            // O exit status era LIDO E IGNORADO, sem fallback: se o filho falhava
-            // (era o caso — re-executava `delonix __rmtree`, um subcomando que o
-            // binário público não tinha, e o clap devolvia rc=2), a árvore ficava
-            // por apagar em SILÊNCIO e ninguém sabia. O irmão `reexec_mapped` já
-            // verificava; este não. Agora verifica, e ainda tenta o caminho
-            // directo — que resolve o caso comum (ficheiros do nosso próprio uid,
-            // sem subuid pelo meio) mesmo que o re-exec se estrague outra vez.
+            // The exit status was READ AND IGNORED, without fallback: if the child failed
+            // (it was the case — it re-executed `delonix __rmtree`, a subcommand the
+            // public binary did not have, and clap returned rc=2), the tree stayed
+            // undeleted SILENTLY and no one knew. The sibling `reexec_mapped` already
+            // verified; this one did not. Now it verifies, and still tries the direct
+            // path — which resolves the common case (files of our own uid,
+            // no subuid in the mix) even if the re-exec breaks again.
             if !ok {
                 let _ = std::fs::remove_dir_all(path);
             }
@@ -1581,48 +1581,48 @@ pub fn remove_tree_mapped(path: &std::path::Path) {
     }
 }
 
-/// `true` se corremos DENTRO de um user namespace não-inicial (uid 0 mapeado, não
-/// o root real do host) — ex.: o spawn do ingress rootless, que corre no userns do
-/// holder. O userns inicial tem o mapa identidade `0 0 4294967295`; qualquer outro
-/// indica um userns-filho. Sem delegação de cgroup também aqui → limites best-effort.
+/// `true` if we run INSIDE a non-initial user namespace (mapped uid 0, not
+/// the real host root) — e.g. the rootless ingress spawn, which runs in the holder's
+/// userns. The initial userns has the identity map `0 0 4294967295`; any other
+/// indicates a child-userns. Without cgroup delegation here too → best-effort limits.
 pub fn in_userns() -> bool {
     std::fs::read_to_string("/proc/self/uid_map")
         .map(|s| s.split_whitespace().collect::<Vec<_>>() != ["0", "0", "4294967295"])
         .unwrap_or(false)
 }
 
-/// Pede a transição para um perfil AppArmor no próximo `execve`
-/// (`aa_change_onexec`). Best-effort: se o AppArmor não estiver disponível,
-/// segue sem confinamento MAC.
+/// Requests the transition to an AppArmor profile on the next `execve`
+/// (`aa_change_onexec`). Best-effort: if AppArmor is not available,
+/// it proceeds without MAC confinement.
 fn apply_apparmor(profile: &str) {
     let cmd = format!("exec {profile}");
-    // Kernels recentes: /proc/self/attr/apparmor/exec; antigos: /proc/self/attr/exec.
+    // Recent kernels: /proc/self/attr/apparmor/exec; old ones: /proc/self/attr/exec.
     if std::fs::write("/proc/self/attr/apparmor/exec", &cmd).is_err() {
         let _ = std::fs::write("/proc/self/attr/exec", &cmd);
     }
 }
 
-/// `true` se o SELinux é o LSM activo (montado em `/sys/fs/selinux`). Em hosts
-/// com AppArmor (Debian/Ubuntu) é `false`; em RHEL/Fedora é `true`.
+/// `true` if SELinux is the active LSM (mounted at `/sys/fs/selinux`). On hosts
+/// with AppArmor (Debian/Ubuntu) it is `false`; on RHEL/Fedora it is `true`.
 fn selinux_active() -> bool {
     std::path::Path::new("/sys/fs/selinux/enforce").exists()
 }
 
-/// Pede a transição para um contexto SELinux no próximo `execve` (`setexeccon`),
-/// escrevendo em `/proc/.../attr/exec`. Só actua se o SELinux for o LSM activo —
-/// em hosts AppArmor aquele caminho pertence ao AppArmor, daí o *gate*.
-/// (Os LSMs major são exclusivos: ou AppArmor ou SELinux.)
+/// Requests the transition to a SELinux context on the next `execve` (`setexeccon`),
+/// writing to `/proc/.../attr/exec`. Only acts if SELinux is the active LSM —
+/// on AppArmor hosts that path belongs to AppArmor, hence the *gate*.
+/// (The major LSMs are exclusive: either AppArmor or SELinux.)
 fn apply_selinux(context: &str) {
     if selinux_active() && std::fs::write("/proc/thread-self/attr/exec", context).is_err() {
         let _ = std::fs::write("/proc/self/attr/exec", context);
     }
 }
 
-/// O corpo que corre dentro dos novos namespaces (o PID 1 do container).
+/// The body that runs inside the new namespaces (the container's PID 1).
 #[allow(clippy::too_many_arguments)]
-/// Substitui o ambiente herdado por um limpo e previsível (como o Docker):
-/// `PATH`/`HOME`/`HOSTNAME`/`TERM` por omissão + as `KEY=value` da imagem/stack/CLI
-/// (estas sobrepõem-se). Corre no filho single-threaded, antes do `execvp`.
+/// Replaces the inherited environment with a clean, predictable one (like Docker):
+/// default `PATH`/`HOME`/`HOSTNAME`/`TERM` + the `KEY=value` from the image/stack/CLI
+/// (these override). Runs in the single-threaded child, before the `execvp`.
 fn apply_env(hostname: &str, env: &[String]) {
     let keys: Vec<String> = std::env::vars().map(|(k, _)| k).collect();
     for k in keys {
@@ -1645,9 +1645,9 @@ fn apply_env(hostname: &str, env: &[String]) {
     }
 }
 
-#[allow(clippy::too_many_arguments)] // init do container: muitos parâmetros do namespace/segurança
-/// Monta os tmpfs pedidos (`--tmpfs /path[:opts]`). Corre depois do `pivot_root`
-/// e antes de largar caps; `nosuid,nodev` por omissão (endurecimento).
+#[allow(clippy::too_many_arguments)] // container init: many namespace/security parameters
+/// Mounts the requested tmpfs (`--tmpfs /path[:opts]`). Runs after `pivot_root`
+/// and before dropping caps; `nosuid,nodev` by default (hardening).
 fn apply_tmpfs(specs: &[String]) {
     for spec in specs {
         let (target, opts) = match spec.split_once(':') {
@@ -1665,10 +1665,10 @@ fn apply_tmpfs(specs: &[String]) {
     }
 }
 
-/// Monta um **tmpfs** em `/run/secrets` e escreve lá os pares chave→valor (0600),
-/// para `--secret-files`. Corre DENTRO do namespace do container (pós-`pivot_root`,
-/// ainda com caps): os valores ficam só em RAM (tmpfs) — nunca tocam o fs do host
-/// nem o do container, nem o ambiente. O mount fica read-only para o container.
+/// Mounts a **tmpfs** at `/run/secrets` and writes the key→value pairs (0600) there,
+/// for `--secret-files`. Runs INSIDE the container's namespace (post-`pivot_root`,
+/// still with caps): the values stay only in RAM (tmpfs) — they never touch the host fs
+/// nor the container's, nor the environment. The mount is left read-only for the container.
 fn write_secret_files(pairs: &[(String, String)]) {
     use std::os::unix::fs::PermissionsExt;
     let dir = "/run/secrets";
@@ -1683,7 +1683,7 @@ fn write_secret_files(pairs: &[(String, String)]) {
         Some("mode=0700"),
     );
     for (k, v) in pairs {
-        // só nomes de ficheiro seguros (são chaves de env válidas, mas defensivo).
+        // only safe file names (they are valid env keys, but defensive).
         if k.is_empty() || k.contains('/') {
             continue;
         }
@@ -1692,7 +1692,7 @@ fn write_secret_files(pairs: &[(String, String)]) {
             let _ = std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o600));
         }
     }
-    // torna o tmpfs só-leitura para o container (os valores já lá estão).
+    // makes the tmpfs read-only for the container (the values are already there).
     let _ = mount(
         None::<&str>,
         dir,
@@ -1702,17 +1702,17 @@ fn write_secret_files(pairs: &[(String, String)]) {
     );
 }
 
-/// Escreve os `sysctl`s namespaced (`--sysctl net.x=y`) em `/proc/sys/...` do
-/// container (depois de `/proc` estar montado). Só os que o namespace permite.
+/// Writes the namespaced `sysctl`s (`--sysctl net.x=y`) into the container's
+/// `/proc/sys/...` (after `/proc` is mounted). Only those the namespace permits.
 fn apply_sysctls(specs: &[String]) {
     for kv in specs {
         if let Some((k, v)) = kv.split_once('=') {
             let k = k.trim();
-            // Allowlist de sysctls NAMESPACED (modelo Docker): só estes são
-            // seguros num container — os restantes (`kernel.*`, `vm.*`, …) são
-            // GLOBAIS ao host e um container não os pode tocar. Sem isto, e como
-            // isto corre antes de `/proc/sys` ficar RO e antes de largar caps,
-            // um container poderia escrever knobs do kernel do HOST.
+            // Allowlist of NAMESPACED sysctls (Docker model): only these are
+            // safe in a container — the rest (`kernel.*`, `vm.*`, …) are
+            // GLOBAL to the host and a container cannot touch them. Without this, and since
+            // this runs before `/proc/sys` becomes RO and before dropping caps,
+            // a container could write HOST kernel knobs.
             if !sysctl_namespaced(k) {
                 eprintln!("delonix: --sysctl {k}: not namespaced; refused (affects the host)");
                 continue;
@@ -1723,8 +1723,8 @@ fn apply_sysctls(specs: &[String]) {
     }
 }
 
-/// `true` se o sysctl é namespaced (seguro para um container alterar). Mesmo
-/// conjunto que o Docker permite por omissão.
+/// `true` if the sysctl is namespaced (safe for a container to change). Same
+/// set that Docker permits by default.
 fn sysctl_namespaced(k: &str) -> bool {
     if k.contains("..") || k.starts_with('/') {
         return false;
@@ -1736,14 +1736,14 @@ fn sysctl_namespaced(k: &str) -> bool {
         || k.starts_with("net.")
 }
 
-/// O tipo do 1.º argumento de `setrlimit`: enum (`__rlimit_resource_t`) no glibc,
-/// `c_int` no musl. Alias condicional para a build estática musl compilar.
+/// The type of the 1st argument of `setrlimit`: enum (`__rlimit_resource_t`) in glibc,
+/// `c_int` in musl. Conditional alias so the static musl build compiles.
 #[cfg(target_env = "musl")]
 type RlimitResource = libc::c_int;
 #[cfg(not(target_env = "musl"))]
 type RlimitResource = libc::__rlimit_resource_t;
 
-/// Mapeia o nome de um `--ulimit` ao recurso `RLIMIT_*`.
+/// Maps a `--ulimit` name to the `RLIMIT_*` resource.
 fn rlimit_resource(name: &str) -> Option<RlimitResource> {
     Some(match name {
         "nofile" => libc::RLIMIT_NOFILE,
@@ -1759,8 +1759,8 @@ fn rlimit_resource(name: &str) -> Option<RlimitResource> {
     })
 }
 
-/// Aplica `--ulimit nome=soft[:hard]` via `setrlimit` (antes de largar caps, para
-/// poder subir limites rígidos com `CAP_SYS_RESOURCE`).
+/// Applies `--ulimit name=soft[:hard]` via `setrlimit` (before dropping caps, so it can
+/// raise hard limits with `CAP_SYS_RESOURCE`).
 fn apply_ulimits(specs: &[String]) {
     let parse = |s: &str| -> Option<u64> {
         if s == "unlimited" || s == "-1" {
@@ -1785,31 +1785,31 @@ fn apply_ulimits(specs: &[String]) {
                 rlim_cur: rc,
                 rlim_max: rm,
             };
-            // SAFETY: `res` é um RLIMIT_* válido e `rl` está inicializado.
+            // SAFETY: `res` is a valid RLIMIT_* and `rl` is initialized.
             unsafe { libc::setrlimit(res, &rl) };
         }
     }
 }
 
 #[allow(clippy::too_many_arguments)]
-/// (privileged / node Kind) Dá ao container uma RAIZ DE CGROUP DEDICADA e VAZIA.
+/// (privileged / Kind node) Gives the container a DEDICATED, EMPTY CGROUP ROOT.
 ///
-/// No caminho rootless-com-rede o `ip netns exec` monta um sysfs FRESCO sobre
-/// `/sys`, TAPANDO o cgroup2 delegado; e o node herdaria como raiz do seu cgroup-ns
-/// o próprio cgroup-scope onde o `kind` (e helpers do delonix) correm — mas o
-/// kubelet do node aborta se essa raiz tiver processos DIRETOS
-/// (`create-kubelet-cgroup-v2.sh` precisa de escrever o `cgroup.subtree_control`
-/// de topo). Solução: (1) destapar o cgroup2 real (umount do sysfs), (2) mover-nos
-/// para um leaf `<base>/dlx-<id>` VAZIO, (3) `unshare(CLONE_NEWCGROUP)` — a raiz do
-/// cgroup-ns passa a ser o leaf (só o nosso init) e `kind`/`delonix`/helpers ficam
-/// ACIMA dela. Best-effort: o `unshare` final corre SEMPRE (mesmo sem o leaf dá o
-/// cgroup-ns como antes — sem regressão para privileged não-node).
-/// Unidades systemd que num nó Kind rootless **falham e esgotam o timeout** (não têm
-/// acesso a kernel-fs/módulos/udev), atrasando o boot ~2min e fazendo o Kind desistir
-/// na deteção de readiness. Mascaramo-las (symlink → `/dev/null`, o mecanismo de
-/// `systemctl mask`) na `/etc/systemd/system/` do rootfs, ANTES de o systemd arrancar.
-/// Nenhuma é necessária ao `containerd`/`kubelet` (os módulos do host já estão
-/// carregados e visíveis). Corre pós-pivot, uid 0 no userns. Best-effort.
+/// On the rootless-with-network path the `ip netns exec` mounts a FRESH sysfs over
+/// `/sys`, COVERING the delegated cgroup2; and the node would inherit as its cgroup-ns root
+/// the very cgroup-scope where `kind` (and the delonix helpers) run — but the
+/// node's kubelet aborts if that root has DIRECT processes
+/// (`create-kubelet-cgroup-v2.sh` needs to write the top-level `cgroup.subtree_control`).
+/// Solution: (1) uncover the real cgroup2 (umount the sysfs), (2) move us
+/// to an EMPTY leaf `<base>/dlx-<id>`, (3) `unshare(CLONE_NEWCGROUP)` — the cgroup-ns
+/// root becomes the leaf (only our init) and `kind`/`delonix`/helpers stay
+/// ABOVE it. Best-effort: the final `unshare` ALWAYS runs (even without the leaf it gives the
+/// cgroup-ns as before — no regression for non-node privileged).
+/// systemd units that on a rootless Kind node **fail and exhaust the timeout** (they have no
+/// access to kernel-fs/modules/udev), delaying boot ~2min and making Kind give up
+/// on readiness detection. We mask them (symlink → `/dev/null`, the mechanism of
+/// `systemctl mask`) in the rootfs's `/etc/systemd/system/`, BEFORE systemd starts.
+/// None is needed by `containerd`/`kubelet` (the host modules are already
+/// loaded and visible). Runs post-pivot, uid 0 in the userns. Best-effort.
 fn mask_slow_node_units() {
     const UNITS: &[&str] = &[
         "dev-mqueue.mount",
@@ -1828,24 +1828,24 @@ fn mask_slow_node_units() {
     let _ = std::fs::create_dir_all(dir);
     for u in UNITS {
         let link = format!("{dir}/{u}");
-        let _ = std::fs::remove_file(&link); // idempotente (restart do nó)
+        let _ = std::fs::remove_file(&link); // idempotent (node restart)
         let _ = std::os::unix::fs::symlink("/dev/null", &link);
     }
 }
 
-/// Nó Kind: semeia UMA regra `iptables-nft` para o `select_iptables` do
-/// entrypoint do Kind escolher o backend **nft**. Sem isto, num netns fresco
-/// tanto `iptables-legacy-save` como `iptables-nft-save` devolvem 0 linhas e o
-/// script do Kind, no empate (`num_legacy >= num_nft`), escolhe `legacy` — que
-/// é INUTILIZÁVEL aqui: o backend legacy lê `/proc/net/ip_tables_names`, um
-/// ficheiro `0440` do root do HOST que, no nosso user namespace, aparece com
-/// dono não-mapeado (nobody) e portanto ilegível → EPERM, e o boot do nó aborta
-/// logo a seguir a "setting iptables to detected mode: legacy". O backend nft
-/// não toca nesse ficheiro e funciona (o netns é NOSSO, temos CAP_NET_ADMIN
-/// efectivo nele). A regra é inócua (a policy de INPUT já é ACCEPT); só serve
-/// para `iptables-nft-save` reportar ≥1 linha e o empate do Kind cair para nft.
-/// Best-effort, ANTES do `execve` do entrypoint (o `select_iptables` corre no
-/// arranque do entrypoint, antes do systemd) e ainda com CAP_NET_ADMIN.
+/// Kind node: seeds ONE `iptables-nft` rule so the Kind entrypoint's `select_iptables`
+/// chooses the **nft** backend. Without this, in a fresh netns
+/// both `iptables-legacy-save` and `iptables-nft-save` return 0 lines and the
+/// Kind script, on the tie (`num_legacy >= num_nft`), chooses `legacy` — which
+/// is UNUSABLE here: the legacy backend reads `/proc/net/ip_tables_names`, a
+/// `0440` file owned by the HOST root that, in our user namespace, appears with
+/// an unmapped owner (nobody) and hence unreadable → EPERM, and the node boot aborts
+/// right after "setting iptables to detected mode: legacy". The nft backend
+/// does not touch that file and works (the netns is OURS, we have effective CAP_NET_ADMIN
+/// in it). The rule is harmless (the INPUT policy is already ACCEPT); it only serves
+/// to make `iptables-nft-save` report ≥1 line and the Kind tie fall to nft.
+/// Best-effort, BEFORE the entrypoint's `execve` (the `select_iptables` runs at
+/// entrypoint startup, before systemd) and still with CAP_NET_ADMIN.
 fn seed_kind_nft() {
     for bin in ["/usr/sbin/iptables-nft", "/sbin/iptables-nft"] {
         if std::path::Path::new(bin).exists() {
@@ -1860,18 +1860,18 @@ fn seed_kind_nft() {
 }
 
 fn setup_node_cgroup_ns(cid: &str) {
-    // 1) Destapa o cgroup2 real. No caminho rootless-com-rede o `ip netns exec` monta
-    //    um sysfs FRESCO sobre `/sys` (SEM cgroup2 → SEM o ficheiro
-    //    `cgroup.controllers`), tapando o cgroup2 delegado. Deteta-se pela AUSÊNCIA
-    //    desse ficheiro — um cgroup2 real tem-no SEMPRE, mesmo sem controladores
-    //    delegados (ler "não-vazio" dava falso-negativo nesse caso).
+    // 1) Uncover the real cgroup2. On the rootless-with-network path the `ip netns exec` mounts
+    //    a FRESH sysfs over `/sys` (WITHOUT cgroup2 → WITHOUT the
+    //    `cgroup.controllers` file), covering the delegated cgroup2. It is detected by the ABSENCE
+    //    of that file — a real cgroup2 ALWAYS has it, even without delegated
+    //    controllers (reading "non-empty" gave a false-negative in that case).
     let real_cg2 = std::path::Path::new("/sys/fs/cgroup/cgroup.controllers").exists();
     if !real_cg2 {
-        // Higiene: torna `/` (recursivamente) PRIVADO antes do umount para o umount
-        // não escapar deste mount-ns. (O `ip netns exec` já pôs `/` em rslave, logo o
-        // umount NÃO propaga ao mount-ns do holder de qualquer modo — isto é defesa
-        // em profundidade, não a causa da flakiness de readiness.) SAFETY: root no
-        // userns (caps completas), só neste mount-ns.
+        // Hygiene: makes `/` (recursively) PRIVATE before the umount so the umount
+        // does not escape this mount-ns. (The `ip netns exec` already set `/` to rslave, so the
+        // umount does NOT propagate to the holder's mount-ns anyway — this is defense
+        // in depth, not the cause of the readiness flakiness.) SAFETY: root in the
+        // userns (full caps), only in this mount-ns.
         let _ = mount(
             None::<&str>,
             "/",
@@ -1881,11 +1881,11 @@ fn setup_node_cgroup_ns(cid: &str) {
         );
         let _ = umount2("/sys", MntFlags::empty());
     }
-    // 2) Move-nos para um leaf IRMÃO do cgroup do `kind`, sob o SCOPE-pai, e delega
-    //    os controladores do scope ao leaf. O `kind` (e os helpers) correm em
-    //    `<scope>/kind` (ver `paas.rs`), libertando a raiz do `<scope>`; assim o
-    //    leaf `<scope>/dlx-<id>` fica com cpu delegado (o entrypoint do node exige)
-    //    E como raiz do cgroup-ns fica com 0 processos diretos (o kubelet exige).
+    // 2) Move us to a SIBLING leaf of the `kind` cgroup, under the parent SCOPE, and delegate
+    //    the scope's controllers to the leaf. `kind` (and the helpers) run in
+    //    `<scope>/kind` (see `paas.rs`), freeing the `<scope>` root; this way the
+    //    leaf `<scope>/dlx-<id>` gets cpu delegated (the node entrypoint requires it)
+    //    AND as the cgroup-ns root it has 0 direct processes (the kubelet requires it).
     if let Some(base) = std::fs::read_to_string("/proc/self/cgroup")
         .ok()
         .and_then(|s| {
@@ -1895,31 +1895,31 @@ fn setup_node_cgroup_ns(cid: &str) {
             })
         })
     {
-        // scope = pai do cgroup atual (o node herda `<scope>/kind` do `kind`).
+        // scope = parent of the current cgroup (the node inherits `<scope>/kind` from `kind`).
         if let Some(scope) = std::path::Path::new(&base)
             .parent()
             .map(|p| p.to_path_buf())
         {
             let scope = scope.to_string_lossy().to_string();
-            // RACE-CLOSE (determinístico): delegar `subtree_control` com processos
-            // DIRETOS no scope é rejeitado (no-internal-processes) → o `+cpu` não
-            // engatava e o node não ficava Ready (parte da flakiness ~50%, mascarada
-            // pelo retry). Espera (curto) que a raiz do scope fique VAZIA — o `paas.rs`
-            // move o `kind` para `<scope>/kind`, mas fecha-se aqui qualquer janela.
+            // RACE-CLOSE (deterministic): delegating `subtree_control` with DIRECT
+            // processes in the scope is rejected (no-internal-processes) → the `+cpu` did not
+            // engage and the node did not become Ready (part of the ~50% flakiness, masked
+            // by the retry). Wait (briefly) for the scope root to become EMPTY — `paas.rs`
+            // moves `kind` to `<scope>/kind`, but we close any window here.
             for _ in 0..30 {
                 let empty = std::fs::read_to_string(format!("{scope}/cgroup.procs"))
                     .map(|s| s.trim().is_empty())
-                    .unwrap_or(true); // ilegível → não esperar (best-effort)
+                    .unwrap_or(true); // unreadable → do not wait (best-effort)
                 if empty {
                     break;
                 }
                 std::thread::sleep(std::time::Duration::from_millis(100));
             }
-            // Delega os controladores do scope aos filhos. Best-effort: falha silenciosa
-            // em hosts sem esta estrutura de cgroup delegado. `cpuset`/`io` só passam
-            // se o host os delegar à sessão user (drop-in `Delegate=cpu cpuset io
-            // memory pids` no `user@.service` — ver AGENTS.md); sem isso, o kubelet
-            // marca "missing required cgroups: cpuset" mas o resto funciona.
+            // Delegate the scope's controllers to the children. Best-effort: silent failure
+            // on hosts without this delegated cgroup structure. `cpuset`/`io` only pass
+            // if the host delegates them to the user session (drop-in `Delegate=cpu cpuset io
+            // memory pids` in the `user@.service` — see AGENTS.md); without that, the kubelet
+            // marks "missing required cgroups: cpuset" but the rest works.
             for ctrl in ["+cpuset", "+cpu", "+io", "+memory", "+pids"] {
                 let _ = std::fs::write(format!("{scope}/cgroup.subtree_control"), ctrl);
             }
@@ -1932,13 +1932,13 @@ fn setup_node_cgroup_ns(cid: &str) {
             }
         }
     }
-    // 3) Ancora a raiz do cgroup-ns no cgroup ATUAL (o leaf, se o move funcionou).
+    // 3) Anchor the cgroup-ns root at the CURRENT cgroup (the leaf, if the move worked).
     let _ = unshare(CloneFlags::CLONE_NEWCGROUP);
 }
 
-// FIXME(follow-up): 29 argumentos posicionais — smell real. Refatorar para um
-// `ContainerInitSpec` tipado (agrupa rootfs/hostname/argv/limites/flags) numa
-// mudança dedicada e revista; não misturar com o gate de lint.
+// FIXME(follow-up): 29 positional arguments — a real smell. Refactor to a typed
+// `ContainerInitSpec` (groups rootfs/hostname/argv/limits/flags) in a
+// dedicated, reviewed change; do not mix with the lint gate.
 #[allow(clippy::too_many_arguments)]
 fn container_init(
     rootfs: &str,
@@ -1971,13 +1971,13 @@ fn container_init(
     cid: &str,
     node_cgroup: bool,
 ) -> isize {
-    // User namespace: espera que o PAI escreva uid_map/gid_map antes de continuar
-    // (até lá, somos `nobody` sem caps). O byte recebido é o "podes avançar".
-    // No ingress rootless herdamos o userns do holder (já como uid 0) — sem clone
-    // nem sync, mas o rootfs trata-se como `userns` (somos root no userns herdado).
+    // User namespace: wait for the PARENT to write uid_map/gid_map before continuing
+    // (until then, we are `nobody` without caps). The received byte is the "you may proceed".
+    // In the rootless ingress we inherit the holder's userns (already as uid 0) — no clone
+    // nor sync, but the rootfs is treated as `userns` (we are root in the inherited userns).
     let userns = sync.is_some() || inherit_userns;
     if let Some((r, w)) = sync {
-        // SAFETY: fds do pipe herdados da clone; fecha o write, lê 1 byte do read.
+        // SAFETY: pipe fds inherited from the clone; close the write, read 1 byte from the read.
         unsafe {
             libc::close(w);
             let mut b = [0u8; 1];
@@ -1985,11 +1985,11 @@ fn container_init(
             libc::close(r);
         }
     }
-    // Pod: junta-se ao network namespace do infra container (partilha IP/localhost).
+    // Pod: joins the infra container's network namespace (shares IP/localhost).
     if let Some(path) = join_netns {
         match open(path, OFlag::O_RDONLY | OFlag::O_CLOEXEC, Mode::empty()) {
             Ok(fd) => {
-                // SAFETY: fd válido; setns(NEWNET) junta o netns do pod.
+                // SAFETY: valid fd; setns(NEWNET) joins the pod's netns.
                 let owned = unsafe { OwnedFd::from_raw_fd(fd) };
                 if setns(owned, CloneFlags::CLONE_NEWNET).is_err() {
                     eprintln!("delonix: failed to join the pod netns");
@@ -2005,19 +2005,19 @@ fn container_init(
     if detach {
         detach_stdio(log_fd);
     }
-    // Node KIND: ANTES de montar o rootfs (que remonta `/sys`), dá ao node uma raiz
-    // de cgroup-ns dedicada e vazia (destapa o cgroup2 real, move-nos p/ um leaf,
-    // `unshare(NEWCGROUP)`). Assim o cgroup2 que o rootfs vai montar reflete o leaf
-    // como raiz. Gated ao node Kind (label `io.x-k8s.kind.*`), NÃO a todo o
-    // `--privileged` — um container privilegiado normal não deve ter a hierarquia de
-    // cgroup mexida. Best-effort.
+    // KIND node: BEFORE mounting the rootfs (which remounts `/sys`), gives the node a dedicated,
+    // empty cgroup-ns root (uncovers the real cgroup2, moves us to a leaf,
+    // `unshare(NEWCGROUP)`). This way the cgroup2 the rootfs will mount reflects the leaf
+    // as root. Gated to the Kind node (label `io.x-k8s.kind.*`), NOT to every
+    // `--privileged` — a normal privileged container should not have its cgroup
+    // hierarchy meddled with. Best-effort.
     if node_cgroup {
         setup_node_cgroup_ns(cid);
     }
-    // `setup_rootfs` corre como o criador do user ns (caps completas, mesmo sendo
-    // `nobody`): o pivot_root e os ficheiros vão para o overlay do host (que aceita
-    // o uid do host). Sem user ns, monta logo o `/dev` (bind dos nós reais do host).
-    // Com user ns, o `/dev` é montado a seguir, já depois do setuid — ver abaixo.
+    // `setup_rootfs` runs as the user ns creator (full caps, even being
+    // `nobody`): the pivot_root and the files go to the host overlay (which accepts
+    // the host uid). Without a user ns, it mounts `/dev` right away (bind of the host's real nodes).
+    // With a user ns, `/dev` is mounted next, after the setuid — see below.
     if let Err(e) = setup_rootfs(
         rootfs, hostname, mounts, userns, devices, sysctls, host_pid, privileged,
     ) {
@@ -2025,45 +2025,45 @@ fn container_init(
         return 126;
     }
     if userns {
-        // uid 0 DENTRO do user ns (= USERNS_UID_BASE no host, mapeável).
-        // nonzero->0 copia permitted->effective (mantém caps).
-        // SAFETY: somos o criador do user ns -> temos CAP_SETUID/SETGID.
+        // uid 0 INSIDE the user ns (= USERNS_UID_BASE on the host, mappable).
+        // nonzero->0 copies permitted->effective (keeps caps).
+        // SAFETY: we are the user ns creator -> we have CAP_SETUID/SETGID.
         unsafe {
             libc::setgid(0);
             libc::setuid(0);
         }
-        // /dev: tmpfs (agora com dono uid 0) + bind dos nós reais do host a partir da
-        // raiz antiga preservada pelo pivot_root. Depois desmonta-a (já não é precisa).
+        // /dev: tmpfs (now owned by uid 0) + bind of the host's real nodes from the
+        // old root preserved by pivot_root. Then unmount it (no longer needed).
         setup_dev_userns("/.delonix_old", devices);
         let _ = umount2("/.delonix_old", MntFlags::MNT_DETACH);
         let _ = std::fs::remove_dir("/.delonix_old");
     }
-    // Nó Kind: mascara as unidades systemd que FALHAM e atrasam o boot num container
-    // rootless (mounts de kernel-fs, modprobe de módulos, udev/modules-load). Sem
-    // isto o boot leva ~2min (cada uma esgota o timeout) e o Kind desiste na deteção
-    // de readiness ("Preparing nodes"). Aqui já estamos pós-pivot (o `/` é o rootfs do
-    // nó), uid 0 no userns e com escrita. Best-effort.
+    // Kind node: masks the systemd units that FAIL and delay boot in a rootless
+    // container (kernel-fs mounts, module modprobe, udev/modules-load). Without
+    // this, boot takes ~2min (each exhausts the timeout) and Kind gives up on readiness
+    // detection ("Preparing nodes"). Here we are already post-pivot (`/` is the node's
+    // rootfs), uid 0 in the userns and writable. Best-effort.
     if node_cgroup {
         mask_slow_node_units();
-        // Enviesa o `select_iptables` do Kind para nft (o backend legacy é
-        // ilegível em rootless — ver `seed_kind_nft`). Ainda com CAP_NET_ADMIN,
-        // no netns do nó, antes do `execve` do entrypoint.
+        // Bias the Kind `select_iptables` toward nft (the legacy backend is
+        // unreadable in rootless — see `seed_kind_nft`). Still with CAP_NET_ADMIN,
+        // in the node's netns, before the entrypoint's `execve`.
         seed_kind_nft();
     }
-    // --privileged detached (nodes Kind): aloca um `/dev/console` (pty) para o
-    // PID 1 e captura-o no log. Tem de ser DEPOIS do `/dev`/devpts montado (acima)
-    // e ANTES de largar caps (o bind de `/dev/console` precisa de CAP_SYS_ADMIN).
-    // O `detach_stdio` acima já apontou o stdio herdado para /dev/null; isto
-    // reaponta-o para o pty. Ver `setup_console`.
+    // --privileged detached (Kind nodes): allocates a `/dev/console` (pty) for
+    // PID 1 and captures it in the log. Must be AFTER the `/dev`/devpts is mounted (above)
+    // and BEFORE dropping caps (the bind of `/dev/console` needs CAP_SYS_ADMIN).
+    // The `detach_stdio` above already pointed the inherited stdio to /dev/null; this
+    // re-points it to the pty. See `setup_console`.
     if let Some(cs) = console_sock {
         setup_console(cs);
     }
-    apply_tmpfs(tmpfs); // --tmpfs (depois do pivot, ainda com caps)
+    apply_tmpfs(tmpfs); // --tmpfs (after the pivot, still with caps)
     if !secret_files.is_empty() {
-        write_secret_files(secret_files); // --secret-files: tmpfs in-namespace (ainda com caps)
+        write_secret_files(secret_files); // --secret-files: in-namespace tmpfs (still with caps)
     }
-    // `--read-only`: remonta o rootfs (`/`) só-leitura. Volumes/dev/proc são
-    // mounts separados e mantêm-se escrevíveis; o resto fica imutável.
+    // `--read-only`: remounts the rootfs (`/`) read-only. Volumes/dev/proc are
+    // separate mounts and stay writable; the rest becomes immutable.
     if read_only {
         let _ = mount(
             None::<&str>,
@@ -2073,13 +2073,13 @@ fn container_init(
             None::<&str>,
         );
     }
-    apply_ulimits(ulimits); // --ulimit (antes de largar CAP_SYS_RESOURCE)
-    set_no_new_privs(); // nenhum execve ganha privilégios (anti-escalada) — sempre
-    drop_capabilities(cap_keep); // largar caps (depois das montagens, antes do exec)
+    apply_ulimits(ulimits); // --ulimit (before dropping CAP_SYS_RESOURCE)
+    set_no_new_privs(); // no execve gains privileges (anti-escalation) — always
+    drop_capabilities(cap_keep); // drop caps (after the mounts, before the exec)
     apply_seccomp(seccomp_unconfined, seccomp_detect); // allowlist (default-deny)
-                                                       // FAIL-CLOSED: confirma que o confinamento ficou MESMO em vigor antes do execve.
-                                                       // Corre ANTES do `setuid` do USER (mais abaixo) e ANTES do `apply_env` (logo lê o
-                                                       // opt-out do ENGINE, não do container). Ver `verify_confinement`.
+                                                       // FAIL-CLOSED: confirms the confinement REALLY took effect before the execve.
+                                                       // Runs BEFORE the USER's `setuid` (further below) and BEFORE `apply_env` (so it reads the
+                                                       // ENGINE's opt-out, not the container's). See `verify_confinement`.
     if !insecure_besteffort() {
         if let Err(e) = verify_confinement(!seccomp_unconfined, cap_keep) {
             eprintln!("delonix: confinement NOT verified ({e}); aborting the container");
@@ -2087,42 +2087,42 @@ fn container_init(
         }
     }
     if let Some(p) = apparmor {
-        apply_apparmor(p); // confinamento MAC (AppArmor) — transita no execve
+        apply_apparmor(p); // MAC confinement (AppArmor) — transitions on the execve
     }
     if let Some(c) = selinux {
-        apply_selinux(c); // confinamento MAC (SELinux) — só em hosts SELinux
+        apply_selinux(c); // MAC confinement (SELinux) — only on SELinux hosts
     }
-    // CWD da imagem (OCI `WorkingDir`) — DEPOIS do pivot, ANTES do exec. Sem isto,
-    // entrypoints que operam no CWD (redis/postgres `chown -R .`) correm a partir de `/`
-    // e tocam `/sys` (RO). Se o dir não existir, cria-o (semântica Docker do WORKDIR).
+    // image CWD (OCI `WorkingDir`) — AFTER the pivot, BEFORE the exec. Without this,
+    // entrypoints that operate on the CWD (redis/postgres `chown -R .`) run from `/`
+    // and touch `/sys` (RO). If the dir does not exist, create it (Docker WORKDIR semantics).
     if let Some(w) = workdir.filter(|w| !w.is_empty() && *w != "/") {
         let _ = std::fs::create_dir_all(w);
         if chdir(w).is_err() {
             eprintln!("delonix: warning — failed to enter WORKDIR {w}");
         }
     }
-    apply_env(hostname, env); // ambiente limpo + ENV da imagem/stack/CLI
-                              // `USER` da imagem (≠ root): troca para o uid/gid pedido ANTES do `execve`. Faz-se
-                              // por último — depois das montagens/caps/seccomp, que precisaram de uid 0. Estamos
-                              // dentro do user namespace (root do ns), logo temos CAP_CHOWN/SETUID sobre o
-                              // intervalo mapeado: damos a posse do rootfs ao uid (uma vez; marcador para não
-                              // repetir) e largamos privilégios. setgid ANTES de setuid (depois de setuid já não
-                              // se pode mudar de grupo). Ex.: o Elasticsearch recusa correr como root.
+    apply_env(hostname, env); // clean environment + image/stack/CLI ENV
+                              // image `USER` (≠ root): switch to the requested uid/gid BEFORE the `execve`. Done
+                              // last — after the mounts/caps/seccomp, which needed uid 0. We are
+                              // inside the user namespace (root of the ns), so we have CAP_CHOWN/SETUID over the
+                              // mapped range: we hand ownership of the rootfs to the uid (once; marker so as not to
+                              // repeat) and drop privileges. setgid BEFORE setuid (after setuid one can no longer
+                              // change group). E.g.: Elasticsearch refuses to run as root.
     if let Some(uid) = run_uid {
         if uid != 0 {
             let gid = run_gid.unwrap_or(uid);
             chown_tree_once("/", uid, gid);
-            // O stdout/stderr são o pipe do log_shim, criado como uid 0. Imagens
-            // "unprivileged" (nginx, etc.) ligam /var/log/.../*.log → /dev/stdout
-            // (= /proc/self/fd/1) e REABREM-no já como o USER — o que falharia sem
-            // o pipe lhes pertencer. fchown dos 3 fds dá-lhes esse acesso.
-            // SAFETY: fchown sobre fds abertos válidos (0/1/2); erros ignorados.
+            // The stdout/stderr are the log_shim's pipe, created as uid 0. "unprivileged"
+            // images (nginx, etc.) link /var/log/.../*.log → /dev/stdout
+            // (= /proc/self/fd/1) and REOPEN it already as the USER — which would fail without
+            // the pipe belonging to it. fchown of the 3 fds gives them that access.
+            // SAFETY: fchown over valid open fds (0/1/2); errors ignored.
             unsafe {
                 libc::fchown(0, uid, gid);
                 libc::fchown(1, uid, gid);
                 libc::fchown(2, uid, gid);
             }
-            // SAFETY: somos root no user ns → setgid/setgroups/setuid sucedem.
+            // SAFETY: we are root in the user ns → setgid/setgroups/setuid succeed.
             unsafe {
                 libc::setgroups(1, [gid].as_ptr());
                 if libc::setgid(gid) != 0 {
@@ -2142,19 +2142,19 @@ fn container_init(
     127
 }
 
-/// `chown -R <uid>:<gid>` de `root` usando **`lchown`** (nunca segue symlinks — um
-/// symlink malicioso dentro da árvore, ex. `usr/x -> /etc/shadow`, não pode fazer-nos
-/// mudar a posse de um ficheiro fora da árvore). Salta `proc`/`sys`/`dev` no
-/// topo (são mounts, não fazem parte do rootfs exportado). Best-effort: erros
-/// individuais são ignorados (ficheiros especiais), o que conta é a árvore da app.
+/// `chown -R <uid>:<gid>` of `root` using **`lchown`** (never follows symlinks — a
+/// malicious symlink inside the tree, e.g. `usr/x -> /etc/shadow`, cannot make us
+/// change the ownership of a file outside the tree). Skips `proc`/`sys`/`dev` at the
+/// top (they are mounts, not part of the exported rootfs). Best-effort: individual
+/// errors are ignored (special files), what matters is the app's tree.
 ///
-/// Público porque é partilhado com `delonix-runtime-bin` (rootfs FLAT rootless) —
-/// **nunca reimplementar isto com `std::fs::chown`/`std::os::unix::fs::chown`**, que
-/// segue symlinks.
+/// Public because it is shared with `delonix-runtime-bin` (rootless FLAT rootfs) —
+/// **never reimplement this with `std::fs::chown`/`std::os::unix::fs::chown`**, which
+/// follows symlinks.
 pub fn lchown_tree(root: &std::path::Path, uid: u32, gid: u32) {
     fn lchown_path(p: &std::path::Path, uid: u32, gid: u32) {
         if let Ok(c) = std::ffi::CString::new(p.as_os_str().as_encoded_bytes()) {
-            // SAFETY: lchown sobre um caminho válido; não segue symlink.
+            // SAFETY: lchown over a valid path; does not follow the symlink.
             unsafe {
                 libc::lchown(c.as_ptr(), uid, gid);
             }
@@ -2190,8 +2190,8 @@ pub fn lchown_tree(root: &std::path::Path, uid: u32, gid: u32) {
     }
 }
 
-/// Como [`lchown_tree`], mas idempotente via um marcador `/.delonix_user_<uid>` —
-/// só corre na 1.ª vez para um dado uid, evitando o custo a cada arranque.
+/// Like [`lchown_tree`], but idempotent via a `/.delonix_user_<uid>` marker —
+/// only runs the 1st time for a given uid, avoiding the cost on every startup.
 fn chown_tree_once(root: &str, uid: u32, gid: u32) {
     let marker = format!("{}/.delonix_user_{uid}", root.trim_end_matches('/'));
     if std::path::Path::new(&marker).exists() {
@@ -2201,10 +2201,10 @@ fn chown_tree_once(root: &str, uid: u32, gid: u32) {
     let _ = std::fs::File::create(&marker);
 }
 
-/// Limite de PIDs por container (anti fork-bomb).
+/// PID limit per container (anti fork-bomb).
 const DEFAULT_PIDS_MAX: &str = "512";
 
-/// Codifica uma instrução eBPF (8 bytes) num `u64` (little-endian).
+/// Encodes an eBPF instruction (8 bytes) into a `u64` (little-endian).
 fn bpf_insn(code: u8, dst: u8, src: u8, off: i16, imm: i32) -> u64 {
     (code as u64)
         | (((dst & 0xf) as u64) << 8)
@@ -2213,19 +2213,19 @@ fn bpf_insn(code: u8, dst: u8, src: u8, off: i16, imm: i32) -> u64 {
         | ((imm as u32 as u64) << 32)
 }
 
-/// Carrega um programa eBPF `CGROUP_DEVICE` que **nega dispositivos de bloco**
-/// (discos) e permite os de caracteres, e anexa-o ao cgroup do container. É o
-/// *device cgroup* do cgroup v2 (controlo de dispositivos por eBPF, como o runc).
-/// Best-effort: se o kernel não suportar, as outras camadas (caps/seccomp/userns/
-/// AppArmor) já negam o acesso a dispositivos.
+/// Loads a `CGROUP_DEVICE` eBPF program that **denies block devices**
+/// (disks) and permits char ones, and attaches it to the container's cgroup. It is the
+/// cgroup v2 *device cgroup* (device control via eBPF, like runc).
+/// Best-effort: if the kernel does not support it, the other layers (caps/seccomp/userns/
+/// AppArmor) already deny device access.
 fn attach_device_filter(cgroup: &str) -> bool {
     const BPF_PROG_LOAD: i64 = 5;
     const BPF_PROG_ATTACH: i64 = 8;
     const BPF_PROG_TYPE_CGROUP_DEVICE: u32 = 15;
     const BPF_CGROUP_DEVICE: u32 = 6;
 
-    // Programa: r2 = ctx->access_type; tipo = r2 & 0xffff;
-    //           se tipo == 1 (BLK) -> r0=0 (negar); senão r0=1 (permitir).
+    // Program: r2 = ctx->access_type; type = r2 & 0xffff;
+    //           if type == 1 (BLK) -> r0=0 (deny); otherwise r0=1 (allow).
     let insns: [u64; 7] = [
         bpf_insn(0x61, 2, 1, 0, 0),      // LDX_W r2 = *(u32*)(r1+0)
         bpf_insn(0x54, 2, 0, 0, 0xffff), // AND32 r2 &= 0xffff
@@ -2238,7 +2238,7 @@ fn attach_device_filter(cgroup: &str) -> bool {
     let license = b"GPL\0";
     let mut log = [0u8; 4096];
 
-    // bpf_attr para PROG_LOAD (buffer zerado; campos nos offsets do kernel).
+    // bpf_attr for PROG_LOAD (zeroed buffer; fields at the kernel offsets).
     let mut attr = [0u8; 128];
     attr[0..4].copy_from_slice(&BPF_PROG_TYPE_CGROUP_DEVICE.to_ne_bytes());
     attr[4..8].copy_from_slice(&(insns.len() as u32).to_ne_bytes());
@@ -2248,7 +2248,7 @@ fn attach_device_filter(cgroup: &str) -> bool {
     attr[28..32].copy_from_slice(&(log.len() as u32).to_ne_bytes());
     attr[32..40].copy_from_slice(&(log.as_mut_ptr() as u64).to_ne_bytes());
 
-    // SAFETY: chamada bpf(PROG_LOAD) com um bpf_attr válido e zerado.
+    // SAFETY: bpf(PROG_LOAD) call with a valid, zeroed bpf_attr.
     let prog_fd = unsafe { libc::syscall(libc::SYS_bpf, BPF_PROG_LOAD, attr.as_ptr(), attr.len()) };
     if prog_fd < 0 {
         return false;
@@ -2258,7 +2258,7 @@ fn attach_device_filter(cgroup: &str) -> bool {
         Ok(c) => c,
         Err(_) => return false,
     };
-    // SAFETY: abre o directório do cgroup como fd para o attach.
+    // SAFETY: opens the cgroup directory as an fd for the attach.
     let cg_fd = unsafe { libc::open(cg.as_ptr(), libc::O_RDONLY | libc::O_DIRECTORY) };
     if cg_fd < 0 {
         unsafe { libc::close(prog_fd as i32) };
@@ -2269,7 +2269,7 @@ fn attach_device_filter(cgroup: &str) -> bool {
     at[0..4].copy_from_slice(&(cg_fd as u32).to_ne_bytes()); // target_fd (cgroup)
     at[4..8].copy_from_slice(&(prog_fd as u32).to_ne_bytes()); // attach_bpf_fd
     at[8..12].copy_from_slice(&BPF_CGROUP_DEVICE.to_ne_bytes()); // attach_type
-                                                                 // SAFETY: bpf(PROG_ATTACH) liga o programa ao cgroup.
+                                                                 // SAFETY: bpf(PROG_ATTACH) attaches the program to the cgroup.
     let r = unsafe { libc::syscall(libc::SYS_bpf, BPF_PROG_ATTACH, at.as_ptr(), at.len()) };
     unsafe {
         libc::close(prog_fd as i32);
@@ -2278,16 +2278,16 @@ fn attach_device_filter(cgroup: &str) -> bool {
     r == 0
 }
 
-/// Converte `cpus` (ex.: "0.5", "2") na sintaxe `cpu.max` do cgroup v2
-/// (`<quota> <period>`); `period` = 100000 µs. Mínimo 0.01 de um core.
+/// Converts `cpus` (e.g. "0.5", "2") into the cgroup v2 `cpu.max` syntax
+/// (`<quota> <period>`); `period` = 100000 µs. Minimum 0.01 of a core.
 fn cpu_max_value(cpus: &str) -> String {
     let c: f64 = cpus.parse().unwrap_or(1.0);
     let quota = ((c * 100_000.0).round() as i64).max(1000);
     format!("{quota} 100000")
 }
 
-/// Escreve um limite no cgroup; falhar é ERRO (os limites são OBRIGATÓRIOS — um
-/// container nunca deve correr sem teto de recursos).
+/// Writes a limit into the cgroup; failing is an ERROR (limits are MANDATORY — a
+/// container should never run without a resource ceiling).
 fn write_limit(cgroup: &str, file: &str, value: &str) -> Result<()> {
     std::fs::write(format!("{cgroup}/{file}"), value).map_err(|e| Error::Runtime {
         context: "cgroup limit",
@@ -2295,10 +2295,10 @@ fn write_limit(cgroup: &str, file: &str, value: &str) -> Result<()> {
     })
 }
 
-/// Cria um cgroup dedicado e aplica limites OBRIGATÓRIOS de memória, CPU e PIDs,
-/// depois move `pid` para lá. Ao contrário do Docker (que por omissão não limita
-/// nada), o Delonix recusa-se a correr um container sem tetos de recursos.
-/// Percentagem do host reservada ao Delonix no total (o resto é folga do host).
+/// Creates a dedicated cgroup and applies MANDATORY memory, CPU and PID limits,
+/// then moves `pid` there. Unlike Docker (which by default limits
+/// nothing), Delonix refuses to run a container without resource ceilings.
+/// Percentage of the host reserved for Delonix in total (the rest is host headroom).
 fn host_reserve_pct() -> u64 {
     std::env::var("DELONIX_RESERVE_PCT")
         .ok()
@@ -2307,7 +2307,7 @@ fn host_reserve_pct() -> u64 {
         .unwrap_or(85)
 }
 
-/// Memória total do host (bytes), de `/proc/meminfo`.
+/// Total host memory (bytes), from `/proc/meminfo`.
 fn host_mem_bytes() -> u64 {
     std::fs::read_to_string("/proc/meminfo")
         .ok()
@@ -2327,9 +2327,9 @@ fn host_ncpu() -> u64 {
         .unwrap_or(1)
 }
 
-/// Tecto agregado de I/O de disco da slice em bytes/s (`DELONIX_IO_MAX_BPS`,
-/// def. **500 MB/s**). 0 desactiva o limite. Serve de tecto de segurança contra
-/// um container saturar o disco e matar o host, não de QoS fino.
+/// Aggregate disk I/O ceiling of the slice in bytes/s (`DELONIX_IO_MAX_BPS`,
+/// def. **500 MB/s**). 0 disables the limit. Serves as a safety ceiling against
+/// a container saturating the disk and killing the host, not as fine QoS.
 fn host_io_max_bps() -> u64 {
     std::env::var("DELONIX_IO_MAX_BPS")
         .ok()
@@ -2337,21 +2337,21 @@ fn host_io_max_bps() -> u64 {
         .unwrap_or(500_000_000)
 }
 
-/// `MAJ:MIN` do dispositivo de bloco que suporta o store do Delonix (onde os
-/// overlays/imagens vivem). Necessário para o `io.max` da slice. O `io.max` do
-/// cgroup-v2 exige o disco INTEIRO (não uma partição: uma partição dá ENODEV),
-/// por isso resolvemos o device-pai quando o que contém o store é uma partição.
+/// `MAJ:MIN` of the block device backing the Delonix store (where the
+/// overlays/images live). Needed for the slice's `io.max`. The cgroup-v2
+/// `io.max` requires the WHOLE disk (not a partition: a partition gives ENODEV),
+/// so we resolve the parent device when what contains the store is a partition.
 fn slice_io_device() -> Option<String> {
-    // O store fica sob /var/lib/delonix (root) — usa o device que o contém.
+    // The store lives under /var/lib/delonix (root) — use the device that contains it.
     let probe = ["/var/lib/delonix", "/var/lib", "/"];
     for p in probe {
         if let Ok(st) = nix::sys::stat::stat(p) {
             let dev = st.st_dev;
             let (maj, min) = (libc::major(dev), libc::minor(dev));
             if maj == 0 {
-                continue; // device virtual (overlay/tmpfs) — sem io.max útil
+                continue; // virtual device (overlay/tmpfs) — no useful io.max
             }
-            // Se for uma partição, sobe ao disco-pai (`/sys/dev/block/M:m/../dev`).
+            // If it is a partition, go up to the parent disk (`/sys/dev/block/M:m/../dev`).
             let sysfs = format!("/sys/dev/block/{maj}:{min}");
             if std::path::Path::new(&format!("{sysfs}/partition")).exists() {
                 if let Ok(parent) = std::fs::read_to_string(format!("{sysfs}/../dev")) {
@@ -2364,14 +2364,14 @@ fn slice_io_device() -> Option<String> {
     None
 }
 
-/// Carga média a 1 minuto do host (`/proc/loadavg`).
+/// Host 1-minute load average (`/proc/loadavg`).
 fn host_load1() -> Option<f64> {
     std::fs::read_to_string("/proc/loadavg")
         .ok()
         .and_then(|s| s.split_whitespace().next().and_then(|f| f.parse().ok()))
 }
 
-/// Converte `64M`/`1G`/`512K`/bytes em bytes.
+/// Converts `64M`/`1G`/`512K`/bytes into bytes.
 fn parse_mem_bytes(s: &str) -> u64 {
     let s = s.trim();
     let (num, mult) = match s.chars().last() {
@@ -2380,25 +2380,25 @@ fn parse_mem_bytes(s: &str) -> u64 {
         Some('G') | Some('g') => (&s[..s.len() - 1], 1024 * 1024 * 1024),
         _ => (s, 1),
     };
-    // `saturating_mul` evita overflow (ex.: "99999999999G"); um valor não-parseável
-    // satura para u64::MAX (e não 0), para o controlo de admissão recusar — nunca
-    // tratar lixo como "0 bytes" e deixar passar.
+    // `saturating_mul` avoids overflow (e.g. "99999999999G"); an unparseable value
+    // saturates to u64::MAX (and not 0), so admission control refuses it — never
+    // treat garbage as "0 bytes" and let it through.
     match num.trim().parse::<u64>() {
         Ok(n) => n.saturating_mul(mult),
         Err(_) => u64::MAX,
     }
 }
 
-/// Os limites de cgroup (cpu/memória/pids) vão de facto aplicar-se a um
-/// container novo neste host/sessão?
+/// Will the cgroup limits (cpu/memory/pids) actually apply to a
+/// new container on this host/session?
 ///
-/// Espelha EXACTAMENTE a condição que o `spawn` testa — `mkdir` sob a
-/// `delonix.slice` — sem arrancar container nenhum: se conseguirmos criar um
-/// cgroup lá (e limpá-lo já), há delegação; se não, é rootless-sem-delegação e
-/// os limites serão best-effort.
+/// Mirrors EXACTLY the condition `spawn` tests — `mkdir` under the
+/// `delonix.slice` — without starting any container: if we can create a
+/// cgroup there (and clean it up right away), there is delegation; if not, it is
+/// rootless-without-delegation and the limits will be best-effort.
 ///
-/// Existe para o chamador poder avisar UMA vez ANTES de arrancar N nós (ex.:
-/// `cluster create`), em vez de deixar cada nó re-exec repetir o mesmo aviso.
+/// Exists so the caller can warn ONCE BEFORE starting N nodes (e.g.
+/// `cluster create`), instead of letting each node re-exec repeat the same warning.
 pub fn cgroup_limits_apply() -> bool {
     let probe = format!(
         "{}/.delonix-probe-{}",
@@ -2410,7 +2410,7 @@ pub fn cgroup_limits_apply() -> bool {
             let _ = std::fs::remove_dir(&probe);
             true
         }
-        // Já existir (corrida) conta como "consigo lá escrever".
+        // Already existing (race) counts as "I can write there".
         Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
             let _ = std::fs::remove_dir(&probe);
             true
@@ -2419,14 +2419,14 @@ pub fn cgroup_limits_apply() -> bool {
     }
 }
 
-/// Garante a `delonix.slice` com limites AGREGADOS (uma fracção do host) e os
-/// controladores activos para os filhos. É o que impede que a SOMA de todos os
-/// containers mate o host: a slice tem `memory.max`/`cpu.max`/`pids.max` totais,
-/// e o kernel OOM-mata DENTRO da slice (um container), nunca o host. Idempotente.
+/// Ensures the `delonix.slice` with AGGREGATE limits (a fraction of the host) and the
+/// controllers active for children. It is what prevents the SUM of all
+/// containers from killing the host: the slice has total `memory.max`/`cpu.max`/`pids.max`,
+/// and the kernel OOM-kills INSIDE the slice (a container), never the host. Idempotent.
 pub fn ensure_delonix_slice() {
     let slice = delonix_runtime_core::DELONIX_SLICE;
     if std::fs::create_dir_all(slice).is_err() {
-        return; // sem permissão (rootless) → best-effort
+        return; // no permission (rootless) → best-effort
     }
     let pct = host_reserve_pct();
     let mem = host_mem_bytes();
@@ -2435,14 +2435,14 @@ pub fn ensure_delonix_slice() {
         let _ = std::fs::write(format!("{slice}/memory.swap.max"), "0");
     }
     let ncpu = host_ncpu();
-    let quota = ncpu * 100_000 / 100 * pct; // pct% de `ncpu` cores
+    let quota = ncpu * 100_000 / 100 * pct; // pct% of `ncpu` cores
     let _ = std::fs::write(format!("{slice}/cpu.max"), format!("{quota} 100000"));
     let _ = std::fs::write(format!("{slice}/pids.max"), (ncpu * 4096).to_string());
-    // Tecto de I/O de DISCO agregado: sem isto, um único container a escrever a
-    // fundo satura o disco e mata o host (journald/store/swap) mesmo com CPU e
-    // memória limitadas. `io.max` (cgroup-v2) limita rbps/wbps no dispositivo que
-    // suporta o store. Best-effort: pode estar acima do limite real do device —
-    // serve de tecto de segurança, não de QoS fino. Ajustável por env.
+    // Aggregate DISK I/O ceiling: without this, a single container writing at
+    // full tilt saturates the disk and kills the host (journald/store/swap) even with CPU and
+    // memory limited. `io.max` (cgroup-v2) limits rbps/wbps on the device that
+    // backs the store. Best-effort: may be above the device's real limit —
+    // serves as a safety ceiling, not fine QoS. Tunable via env.
     if let Some(dev) = slice_io_device() {
         let cap_bps = host_io_max_bps();
         if cap_bps > 0 {
@@ -2452,20 +2452,20 @@ pub fn ensure_delonix_slice() {
             );
         }
     }
-    // activa os controladores para os filhos (UM a um — se algum não existir no
-    // host, os outros ficam à mesma activos).
+    // enable the controllers for the children (ONE by one — if some do not exist on the
+    // host, the others stay active anyway).
     for ctrl in ["+memory", "+cpu", "+pids", "+io"] {
         let _ = std::fs::write(format!("{slice}/cgroup.subtree_control"), ctrl);
     }
 }
 
-/// Controlo de ADMISSÃO (robustez, #1/#4): recusa graciosamente um novo
-/// container quando o orçamento agregado do Delonix está esgotado ou o host está
-/// sob carga excessiva — em vez de deixar o host afogar-se. (A slice já é o
-/// tecto rígido; isto é a recusa suave e informativa.)
+/// ADMISSION control (robustness, #1/#4): gracefully refuses a new
+/// container when Delonix's aggregate budget is exhausted or the host is
+/// under excessive load — instead of letting the host drown. (The slice is already the
+/// hard ceiling; this is the soft, informative refusal.)
 pub fn admission_check(memory_max: &str) -> Result<()> {
     if is_rootless() {
-        return Ok(()); // sem cgroup delegado → sem orçamento a verificar
+        return Ok(()); // no delegated cgroup → no budget to check
     }
     ensure_delonix_slice();
     let slice = delonix_runtime_core::DELONIX_SLICE;
@@ -2504,9 +2504,9 @@ pub fn admission_check(memory_max: &str) -> Result<()> {
     Ok(())
 }
 
-/// Temperatura máxima (°C) entre os sensores térmicos do host (CPU e afins).
-/// Base do governador térmico (#2): quando o Delonix aquece a máquina, baixamos
-/// o tecto de CPU da slice para reduzir a fonte de calor.
+/// Maximum temperature (°C) among the host's thermal sensors (CPU and the like).
+/// Basis of the thermal governor (#2): when Delonix heats up the machine, we lower
+/// the slice's CPU ceiling to reduce the heat source.
 pub fn max_cpu_temp_c() -> Option<u64> {
     let mut max: Option<u64> = None;
     if let Ok(rd) = std::fs::read_dir("/sys/class/thermal") {
@@ -2524,17 +2524,17 @@ pub fn max_cpu_temp_c() -> Option<u64> {
     max
 }
 
-/// O quota TOTAL de CPU da delonix.slice (100% do orçamento), em µs/período.
+/// The TOTAL CPU quota of delonix.slice (100% of the budget), in µs/period.
 pub fn slice_full_cpu_quota() -> u64 {
     host_ncpu() * 100_000 / 100 * host_reserve_pct()
 }
 
-/// Define o `cpu.max` da slice como `pct`% do orçamento total — o governador
-/// térmico baixa-o para arrefecer e repõe-no quando a temperatura desce.
+/// Sets the slice's `cpu.max` to `pct`% of the total budget — the thermal
+/// governor lowers it to cool down and restores it when the temperature drops.
 pub fn set_slice_cpu_pct(pct: u64) {
     ensure_delonix_slice();
-    // Piso de segurança: nunca escrever quota 0 (`cpu.max "0 100000"` congelaria
-    // TODOS os containers da slice). Garante pelo menos ~1% de um core.
+    // Safety floor: never write quota 0 (`cpu.max "0 100000"` would freeze
+    // ALL of the slice's containers). Guarantees at least ~1% of a core.
     let quota = (slice_full_cpu_quota() * pct.min(100) / 100).max(1_000);
     let _ = std::fs::write(
         format!("{}/cpu.max", delonix_runtime_core::DELONIX_SLICE),
@@ -2542,9 +2542,9 @@ pub fn set_slice_cpu_pct(pct: u64) {
     );
 }
 
-/// Best-effort: tenta pôr os ventiladores controláveis no máximo (se existirem
-/// `pwmN` escrevíveis). Em muitos portáteis o PWM é gerido pelo firmware e não é
-/// escrevível — por isso o arrefecimento real é o *throttle* da slice.
+/// Best-effort: tries to set the controllable fans to max (if writable
+/// `pwmN` exist). On many laptops the PWM is managed by firmware and is not
+/// writable — so the real cooling is the slice *throttle*.
 pub fn boost_fans() -> bool {
     let mut bumped = false;
     if let Ok(rd) = std::fs::read_dir("/sys/class/hwmon") {
@@ -2563,7 +2563,7 @@ pub fn boost_fans() -> bool {
     bumped
 }
 
-/// Estado do orçamento agregado do Delonix (para `system info`).
+/// State of Delonix's aggregate budget (for `system info`).
 pub fn slice_budget() -> (u64, u64, u64, f64, u64) {
     ensure_delonix_slice();
     let slice = delonix_runtime_core::DELONIX_SLICE;
@@ -2582,26 +2582,26 @@ pub fn slice_budget() -> (u64, u64, u64, f64, u64) {
     )
 }
 
-/// Cgroup v2 atual do processo (de `/proc/self/cgroup`, linha `0::`).
+/// Current cgroup v2 of the process (from `/proc/self/cgroup`, the `0::` line).
 fn current_cgroup_v2() -> Option<String> {
     let s = std::fs::read_to_string("/proc/self/cgroup").ok()?;
     let rel = s.lines().find_map(|l| l.strip_prefix("0::"))?.trim();
     Some(format!("/sys/fs/cgroup{rel}"))
 }
 
-/// Destapa o cgroup2 real quando o `/sys` foi TAPADO por um sysfs fresco (o
-/// `ip netns exec` do caminho rootless-com-rede faz isso) — sem o
-/// `cgroup.controllers` visível NENHUMA operação de cgroup funciona e o
-/// container ficava no cgroup HERDADO da sessão (métricas 0 na Console,
-/// limites não aplicados). Mesma técnica do `setup_node_cgroup_ns` (nodes
-/// Kind), agora disponível ao caminho GERAL: torna `/` privado (o umount não
-/// propaga; o `ip netns exec` já pôs `/` em rslave — defesa em profundidade) e
-/// desmonta o `/sys` do netns, revelando o cgroup2 por baixo. Só atua no
-/// mount-ns do CHAMADOR; leitores de `/sys/class/net` (métricas de rede) criam
-/// sempre um mount-ns fresco próprio, pelo que não são afetados. Best-effort.
+/// Uncovers the real cgroup2 when `/sys` has been COVERED by a fresh sysfs (the
+/// `ip netns exec` of the rootless-with-network path does that) — without the
+/// `cgroup.controllers` visible NO cgroup operation works and the
+/// container stayed in the session's INHERITED cgroup (0 metrics in the Console,
+/// limits not applied). Same technique as `setup_node_cgroup_ns` (Kind
+/// nodes), now available to the GENERAL path: makes `/` private (the umount does not
+/// propagate; the `ip netns exec` already set `/` to rslave — defense in depth) and
+/// unmounts the netns's `/sys`, revealing the cgroup2 underneath. It only acts on the
+/// CALLER's mount-ns; readers of `/sys/class/net` (network metrics) always create
+/// their own fresh mount-ns, so they are not affected. Best-effort.
 pub fn reveal_cgroup2_if_masked() {
     if std::path::Path::new("/sys/fs/cgroup/cgroup.controllers").exists() {
-        return; // cgroup2 real já visível
+        return; // real cgroup2 already visible
     }
     let _ = mount(
         None::<&str>,
@@ -2613,50 +2613,50 @@ pub fn reveal_cgroup2_if_masked() {
     let _ = umount2("/sys", MntFlags::empty());
 }
 
-/// Base de cgroup PRÓPRIA do Delonix sob a árvore delegada do systemd --user:
-/// dado o cgroup atual (absoluto, `/sys/fs/cgroup/...`), encontra o ancestral
-/// `user@<uid>.service` (a fronteira de delegação — os ficheiros são do
-/// utilizador e o systemd já ativa `cpu memory pids` no `subtree_control`
-/// dele) e devolve `<ancestral>/dlx-containers`. O cgroup ATUAL da sessão
-/// (ex.: `app-*.scope`) está POVOADO — a regra no-internal-processes recusa
-/// `subtree_control` lá; esta fuga dá-nos uma base VAZIA e delegável.
+/// Delonix's OWN cgroup base under the systemd --user delegated tree:
+/// given the current cgroup (absolute, `/sys/fs/cgroup/...`), find the ancestor
+/// `user@<uid>.service` (the delegation boundary — the files belong to the
+/// user and systemd already activates `cpu memory pids` in its `subtree_control`)
+/// and return `<ancestor>/dlx-containers`. The session's CURRENT cgroup
+/// (e.g. `app-*.scope`) is POPULATED — the no-internal-processes rule refuses
+/// `subtree_control` there; this escape gives us an EMPTY, delegable base.
 fn user_service_base(cur_abs: &str) -> Option<String> {
     let mut end = 0usize;
     for seg in cur_abs.split('/') {
-        end += seg.len() + 1; // +1 pelo '/'
+        end += seg.len() + 1; // +1 for the '/'
         if seg.starts_with("user@") && seg.ends_with(".service") {
-            // `end-1` = fim do segmento (sem contar o '/' seguinte).
+            // `end-1` = end of the segment (not counting the following '/').
             return Some(format!("{}/dlx-containers", &cur_abs[..end - 1]));
         }
     }
     None
 }
 
-/// Delegação cgroup ROOTLESS para um container **privileged** (nodes Kind, que
-/// verificam que o controlador `cpu` está delegado). Usa o cgroup DELEGADO do
-/// próprio processo (sob `user@<uid>.service`, escrevível) como base, move o
-/// delonix e o container para leaves (regra no-internal-processes do cgroup v2) e
-/// ativa `+cpu +memory +pids` no `subtree_control` da base — passando os
-/// controladores ao cgroup do container. Best-effort: devolve `false` se a base
-/// não for delegada/limpa (ex.: scope partilhado sem `cpu`), caindo o caller no
-/// comportamento atual (sem regressão). Requer o engine num cgroup delegado
-/// (`systemd-run --user --scope -p Delegate=yes` ou serviço de utilizador).
+/// ROOTLESS cgroup delegation for a **privileged** container (Kind nodes, which
+/// verify that the `cpu` controller is delegated). Uses the process's own DELEGATED
+/// cgroup (under `user@<uid>.service`, writable) as the base, moves the
+/// delonix and the container to leaves (cgroup v2 no-internal-processes rule) and
+/// enables `+cpu +memory +pids` in the base's `subtree_control` — passing the
+/// controllers to the container's cgroup. Best-effort: returns `false` if the base
+/// is not delegated/clean (e.g. shared scope without `cpu`), the caller falling back to
+/// current behavior (no regression). Requires the engine in a delegated cgroup
+/// (`systemd-run --user --scope -p Delegate=yes` or a user service).
 fn setup_cgroup_delegated(c: &Container, pid: i32) -> bool {
     let cur = match current_cgroup_v2() {
         Some(b) => b,
         None => return false,
     };
-    // Candidato 1: o cgroup ATUAL como base (funciona quando o delonix corre num
-    // scope `Delegate=yes` DEDICADO, ex.: `systemd-run --user --scope`). Move o
-    // nosso processo para um `dlx-mgr` para libertar a base.
+    // Candidate 1: the CURRENT cgroup as base (works when delonix runs in a
+    // `Delegate=yes` DEDICATED scope, e.g. `systemd-run --user --scope`). Moves
+    // our process to a `dlx-mgr` to free the base.
     if try_delegated_base(&cur, c, pid, true) {
         return true;
     }
-    // Candidato 2 (fuga): o cgroup da sessão está POVOADO (a regra
-    // no-internal-processes recusa o `subtree_control`) — usa uma base PRÓPRIA
-    // `<user@uid.service>/dlx-containers` (vazia, delegável; o systemd já ativa
-    // `cpu memory pids` no subtree do `user@`). A regra do ancestral comum
-    // permite mover o pid do scope da sessão para lá (ficheiros do utilizador).
+    // Candidate 2 (escape): the session's cgroup is POPULATED (the
+    // no-internal-processes rule refuses `subtree_control`) — use an OWN base
+    // `<user@uid.service>/dlx-containers` (empty, delegable; systemd already activates
+    // `cpu memory pids` in the `user@` subtree). The common-ancestor rule
+    // allows moving the pid from the session scope there (user's files).
     if let Some(base) = user_service_base(&cur) {
         if std::fs::create_dir_all(&base).is_ok() && try_delegated_base(&base, c, pid, false) {
             return true;
@@ -2665,22 +2665,22 @@ fn setup_cgroup_delegated(c: &Container, pid: i32) -> bool {
     false
 }
 
-/// Tenta usar `base` como base delegada: move o container para `<base>/dlx-<id>`,
-/// ativa os controladores no `subtree_control` da base e aplica os limites no
-/// leaf. `move_self`: mover o próprio processo p/ `<base>/dlx-mgr` (necessário
-/// quando a base é o cgroup ATUAL — senão os nossos processos bloqueiam o
-/// subtree_control; desnecessário na base-fuga, que começa vazia).
+/// Tries to use `base` as a delegated base: moves the container to `<base>/dlx-<id>`,
+/// activates the controllers in the base's `subtree_control` and applies the limits on the
+/// leaf. `move_self`: move our own process to `<base>/dlx-mgr` (needed
+/// when the base is the CURRENT cgroup — otherwise our processes block the
+/// subtree_control; unnecessary on the escape-base, which starts empty).
 fn try_delegated_base(base: &str, c: &Container, pid: i32, move_self: bool) -> bool {
     if std::fs::metadata(format!("{base}/cgroup.subtree_control")).is_err() {
-        return false; // base não escrevível/delegada
+        return false; // base not writable/delegated
     }
     let leaf = format!("{base}/dlx-{}", c.id);
     if std::fs::create_dir_all(&leaf).is_err() {
         return false;
     }
     if move_self {
-        // liberta a base de processos DIRETOS (no-internal-processes) antes de
-        // tentar o subtree_control.
+        // free the base of DIRECT processes (no-internal-processes) before
+        // trying the subtree_control.
         let mgr = format!("{base}/dlx-mgr");
         if std::fs::create_dir_all(&mgr).is_ok() {
             let _ = std::fs::write(
@@ -2689,11 +2689,11 @@ fn try_delegated_base(base: &str, c: &Container, pid: i32, move_self: bool) -> b
             );
         }
     }
-    // 1) Delega os controladores aos filhos da base ANTES de mover o container
-    //    para o leaf: o accounting (memory.current/cpu.stat) só apanha alocações
-    //    feitas COM o controlador ativo — mover primeiro deixava as páginas do
-    //    init por contar (métricas a 0 apesar do leaf certo). Um a um; falha se
-    //    a base tiver processos diretos (scope partilhado) → fallback.
+    // 1) Delegate the base's controllers to the children BEFORE moving the container
+    //    to the leaf: the accounting (memory.current/cpu.stat) only catches allocations
+    //    made WITH the controller active — moving first left the init's pages
+    //    uncounted (metrics at 0 despite the right leaf). One by one; fails if
+    //    the base has direct processes (shared scope) → fallback.
     let mut any = false;
     for ctrl in ["+cpuset", "+cpu", "+io", "+memory", "+pids"] {
         if std::fs::write(format!("{base}/cgroup.subtree_control"), ctrl).is_ok() {
@@ -2701,14 +2701,14 @@ fn try_delegated_base(base: &str, c: &Container, pid: i32, move_self: bool) -> b
         }
     }
     if !any {
-        return false; // sem delegação (no-internal-processes ou sem permissão)
+        return false; // no delegation (no-internal-processes or no permission)
     }
-    // 2) Limites no leaf (controladores já ativos) — ANTES do processo entrar,
-    //    para o teto valer desde a primeira alocação.
+    // 2) Limits on the leaf (controllers already active) — BEFORE the process enters,
+    //    so the ceiling holds from the first allocation.
     let _ = std::fs::write(format!("{leaf}/memory.max"), &c.memory_max);
     let _ = std::fs::write(format!("{leaf}/pids.max"), DEFAULT_PIDS_MAX);
     let _ = std::fs::write(format!("{leaf}/cpu.max"), cpu_max_value(&c.cpus));
-    // 3) Só agora o container entra no leaf.
+    // 3) Only now does the container enter the leaf.
     if std::fs::write(format!("{leaf}/cgroup.procs"), pid.to_string()).is_err() {
         return false;
     }
@@ -2716,40 +2716,40 @@ fn try_delegated_base(base: &str, c: &Container, pid: i32, move_self: bool) -> b
 }
 
 fn setup_cgroup(c: &Container, pid: i32) -> Result<()> {
-    // Rootless: tenta SEMPRE a delegação cgroup (cpu/memory/pids) no cgroup
-    // delegado do utilizador (systemd --user com `Delegate=yes`) — é o modelo do
-    // Podman e a forma de ter limites REAIS sem root. Antes só se tentava com
-    // `--privileged` (nodes Kind), deixando TODO container rootless-com-rede sem
-    // memory.max/pids.max/cpu.max — um fork-bomb/leak matava o host. Se a
-    // delegação não existir, devolve false e cai no caminho best-effort abaixo.
-    // EXCETO nodes Kind (privileged + labels io.x-k8s.kind*): esses gerem o
-    // próprio cgroup no FILHO (`setup_node_cgroup_ns` — leaf-irmão com cpu
-    // delegado + raiz de cgroup-ns vazia, invariantes do kubelet). Colocá-los
-    // aqui no pai mudava a base que o filho usa e quebrava essa dança validada.
+    // Rootless: ALWAYS tries cgroup delegation (cpu/memory/pids) in the user's
+    // delegated cgroup (systemd --user with `Delegate=yes`) — it is Podman's model
+    // and the way to get REAL limits without root. Before, it was only tried with
+    // `--privileged` (Kind nodes), leaving EVERY rootless-with-network container without
+    // memory.max/pids.max/cpu.max — a fork-bomb/leak killed the host. If
+    // delegation does not exist, it returns false and falls to the best-effort path below.
+    // EXCEPT Kind nodes (privileged + io.x-k8s.kind* labels): those manage
+    // their own cgroup in the CHILD (`setup_node_cgroup_ns` — sibling leaf with cpu
+    // delegated + empty cgroup-ns root, kubelet invariants). Placing them
+    // here in the parent changed the base the child uses and broke that validated dance.
     let kind_node = c.labels.keys().any(|k| k.starts_with("io.x-k8s.kind"));
     if !kind_node && (is_rootless() || in_userns()) && setup_cgroup_delegated(c, pid) {
         return Ok(());
     }
-    ensure_delonix_slice(); // a slice-pai com os limites agregados (robustez)
+    ensure_delonix_slice(); // the parent-slice with the aggregate limits (robustness)
     let cgroup = c.cgroup();
     let cg = cgroup.as_str();
-    // Rootless (A13): sem delegação de cgroup (systemd), um não-root não pode
-    // escrever em `/sys/fs/cgroup`. Os limites tornam-se best-effort — o
-    // isolamento de namespaces/seccomp mantém-se. (Como o Podman rootless.)
-    // Também `in_userns()`: o ingress rootless corre o spawn DENTRO do userns do
-    // holder (uid 0 MAPEADO) — `is_rootless()` (geteuid) seria falso, mas não há
-    // delegação de cgroup na mesma; tratamos como rootless.
+    // Rootless (A13): without cgroup delegation (systemd), a non-root cannot
+    // write to `/sys/fs/cgroup`. The limits become best-effort — the
+    // namespace/seccomp isolation remains. (Like rootless Podman.)
+    // Also `in_userns()`: the rootless ingress runs the spawn INSIDE the holder's userns
+    // (MAPPED uid 0) — `is_rootless()` (geteuid) would be false, but there is no
+    // cgroup delegation all the same; we treat it as rootless.
     if std::fs::create_dir_all(cg).is_err() {
-        // `DELONIX_NO_CGROUP_WARN`: o chamador já avisou e não quer o bloco
-        // repetido. É assim que o `cluster create` o cala: cada nó arranca por
-        // um RE-EXEC (processo novo), logo o `Once` abaixo — que só dedup dentro
-        // de UM processo — não chegava; um `--workers 3` mostrava o aviso 4×.
-        // A env var propaga-se pela cadeia de re-exec (os filhos herdam-na), o
-        // `Once` trata do resto (um único processo a arrancar N containers).
+        // `DELONIX_NO_CGROUP_WARN`: the caller already warned and does not want the
+        // block repeated. This is how `cluster create` silences it: each node starts by
+        // a RE-EXEC (new process), so the `Once` below — which only dedups within
+        // ONE process — was not enough; a `--workers 3` showed the warning 4×.
+        // The env var propagates through the re-exec chain (the children inherit it), the
+        // `Once` handles the rest (a single process starting N containers).
         if is_rootless() || in_userns() {
-            // O aviso é sobre o AMBIENTE (não há delegação de cgroup nesta
-            // sessão), não sobre este container — logo UMA vez por processo, e
-            // calável via env quando o chamador já avisou (ver acima).
+            // The warning is about the ENVIRONMENT (there is no cgroup delegation in this
+            // session), not about this container — hence ONCE per process, and
+            // silenceable via env when the caller already warned (see above).
             let calado = std::env::var_os("DELONIX_NO_CGROUP_WARN").is_some();
             if !calado {
                 static AVISO: std::sync::Once = std::sync::Once::new();
@@ -2772,99 +2772,99 @@ fn setup_cgroup(c: &Container, pid: i32) -> Result<()> {
             message: format!("could not create {cg}"),
         });
     }
-    // device cgroup (eBPF): nega dispositivos de bloco (discos do host). Best-effort
-    // (kernels sem BPF_CGROUP_DEVICE). Se falhar, avisa em vez de ignorar em silêncio:
-    // a proteção primária mantém-se (sem CAP_MKNOD não se criam device nodes, e o
-    // `bind_devices` recusa block devices), mas o operador deve saber que esta camada
-    // não está activa.
+    // device cgroup (eBPF): denies block devices (host disks). Best-effort
+    // (kernels without BPF_CGROUP_DEVICE). If it fails, warn instead of ignoring silently:
+    // the primary protection remains (without CAP_MKNOD device nodes cannot be created, and
+    // `bind_devices` refuses block devices), but the operator should know that this layer
+    // is not active.
     if !attach_device_filter(cg) {
         eprintln!(
             "delonix: warning — device cgroup (eBPF) not applied on {}; block devices rely on caps/seccomp only",
             c.name
         );
     }
-    write_limit(cg, "memory.max", &c.memory_max)?; // teto de memória (kernel OOM-kill)
-                                                   // sem swap além da memória, senão o limite de memória seria contornável;
-                                                   // best-effort: o controlador de swap pode estar desligado no sistema.
+    write_limit(cg, "memory.max", &c.memory_max)?; // memory ceiling (kernel OOM-kill)
+                                                   // no swap beyond memory, otherwise the memory limit would be bypassable;
+                                                   // best-effort: the swap controller may be disabled on the system.
     let _ = std::fs::write(format!("{cg}/memory.swap.max"), "0");
-    write_limit(cg, "cpu.max", &cpu_max_value(&c.cpus))?; // teto de CPU
+    write_limit(cg, "cpu.max", &cpu_max_value(&c.cpus))?; // CPU ceiling
     write_limit(cg, "pids.max", DEFAULT_PIDS_MAX)?; // anti fork-bomb
-                                                    // --- escalonamento / QoS (cgroup v2, best-effort) ---
+                                                    // --- scheduling / QoS (cgroup v2, best-effort) ---
     if let Some(w) = &c.cpu_weight {
-        let _ = std::fs::write(format!("{cg}/cpu.weight"), w); // prioridade de CPU
+        let _ = std::fs::write(format!("{cg}/cpu.weight"), w); // CPU priority
     }
     if let Some(set) = &c.cpuset {
-        let _ = std::fs::write(format!("{cg}/cpuset.cpus"), set); // pinning de cores
+        let _ = std::fs::write(format!("{cg}/cpuset.cpus"), set); // core pinning
     }
     if let Some(w) = &c.io_weight {
-        let _ = std::fs::write(format!("{cg}/io.weight"), w); // prioridade de I/O
+        let _ = std::fs::write(format!("{cg}/io.weight"), w); // I/O priority
     }
     std::fs::write(format!("{cg}/cgroup.procs"), pid.to_string())?;
     Ok(())
 }
 
-/// A especificação de arranque de um container. Concentra as opções que
-/// cresceram ao longo das fases: `detach` (1), `mounts`/volumes (4),
+/// The startup specification of a container. Gathers the options that
+/// grew over the phases: `detach` (1), `mounts`/volumes (4),
 /// `new_netns`+`on_started` (3).
 #[derive(Default)]
 pub struct RunSpec<'a> {
-    /// Corre em segundo plano (não espera o `waitpid`).
+    /// Runs in the background (does not wait for the `waitpid`).
     pub detach: bool,
-    /// Cria um *network namespace* próprio (`CLONE_NEWNET`).
+    /// Creates its own *network namespace* (`CLONE_NEWNET`).
     pub new_netns: bool,
-    /// Em vez de criar um netns, junta-se a este (caminho p/ `/proc/<pid>/ns/net`)
-    /// — usado pelos membros de um **pod** (partilham a rede do infra container).
+    /// Instead of creating a netns, joins this one (path to `/proc/<pid>/ns/net`)
+    /// — used by the members of a **pod** (they share the infra container's network).
     pub join_netns: Option<String>,
-    /// Volumes/bind mounts a injectar no rootfs.
+    /// Volumes/bind mounts to inject into the rootfs.
     pub mounts: Vec<Mount>,
-    /// Ficheiro de log para o stdout/stderr (detached) — o *log driver* "file".
+    /// Log file for the stdout/stderr (detached) — the "file" *log driver*.
     pub log_path: Option<String>,
-    /// Escreve cada linha no formato de log do CRI (`<rfc3339nano> stdout F <linha>`),
-    /// para o `crictl`/kubelet conseguirem ler os logs. Default: formato cru.
+    /// Writes each line in the CRI log format (`<rfc3339nano> stdout F <line>`),
+    /// so `crictl`/kubelet can read the logs. Default: raw format.
     pub log_cri: bool,
-    /// Cria um *user namespace* (`CLONE_NEWUSER`): o root do container deixa de
-    /// ser o root do host. Requer que a camada de escrita esteja `chown`-ada
-    /// para [`USERNS_UID_BASE`] (o `delonix-cli` trata disso).
+    /// Creates a *user namespace* (`CLONE_NEWUSER`): the container's root stops
+    /// being the host's root. Requires the write layer to be `chown`ed
+    /// to [`USERNS_UID_BASE`] (the `delonix-cli` handles that).
     pub userns: bool,
-    /// Perfil AppArmor a aplicar no `execve` (tem de estar carregado no host).
+    /// AppArmor profile to apply on the `execve` (must be loaded on the host).
     pub apparmor: Option<String>,
-    /// Contexto SELinux a aplicar no `execve` (só em hosts onde o SELinux é o LSM).
+    /// SELinux context to apply on the `execve` (only on hosts where SELinux is the LSM).
     pub selinux: Option<String>,
-    /// *Hook* chamado com o PID após o arranque (a Fase 3 configura aí a rede).
-    /// **Com userns corre ANTES de libertar o filho** — ver `spawn`: a rede tem de
-    /// estar pronta antes de o entrypoint arrancar.
+    /// *Hook* called with the PID after startup (Phase 3 configures the network there).
+    /// **With userns it runs BEFORE releasing the child** — see `spawn`: the network must
+    /// be ready before the entrypoint starts.
     pub on_started: Option<&'a StartedHook<'a>>,
-    /// IP do container a escrever em `/etc/hosts` (mapeado ao hostname), como
-    /// fazem o Docker/Podman. `None` = só as entradas de loopback.
+    /// Container IP to write into `/etc/hosts` (mapped to the hostname), as
+    /// Docker/Podman do. `None` = only the loopback entries.
     pub hosts_ip: Option<String>,
-    /// Servidor DNS a escrever em `/etc/resolv.conf` do container (Docker/Podman
-    /// geram sempre este ficheiro). Numa rede custom é o *gateway* — o resolver
-    /// interno do ingress, que resolve nomes de containers/VMs e reencaminha o
-    /// resto; com `-p` (slirp) é o DNS do slirp. `None` → copia-se o do host
-    /// (containers `--net host` herdam o DNS da máquina).
+    /// DNS server to write into the container's `/etc/resolv.conf` (Docker/Podman
+    /// always generate this file). On a custom network it is the *gateway* — the
+    /// ingress internal resolver, which resolves container/VM names and forwards the
+    /// rest; with `-p` (slirp) it is the slirp DNS. `None` → the host's is copied
+    /// (`--net host` containers inherit the machine's DNS).
     pub dns: Option<String>,
-    /// Partilha o *PID namespace* do host (`--host-pid`; CRI `namespace_options.pid
-    /// = NODE`): o container vê os processos do host. Por omissão, isolado.
+    /// Shares the host's *PID namespace* (`--host-pid`; CRI `namespace_options.pid
+    /// = NODE`): the container sees the host's processes. By default, isolated.
     pub host_pid: bool,
-    /// Partilha o *IPC namespace* do host (`--host-ipc`; CRI `namespace_options.ipc
-    /// = NODE`): memória partilhada/filas do host. Por omissão, isolado.
+    /// Shares the host's *IPC namespace* (`--host-ipc`; CRI `namespace_options.ipc
+    /// = NODE`): the host's shared memory/queues. By default, isolated.
     pub host_ipc: bool,
-    /// **Ingress rootless:** o processo já corre DENTRO do user+network namespace
-    /// do holder do ingress (re-exec via `nsenter … ip netns exec`). Não cria
-    /// `CLONE_NEWUSER` nem `CLONE_NEWNET` (herda os do holder, já como uid 0), mas
-    /// trata o rootfs como `userns` (é root no userns herdado). Ver `delonix-net::infra`.
+    /// **Rootless ingress:** the process already runs INSIDE the ingress holder's
+    /// user+network namespace (re-exec via `nsenter … ip netns exec`). It does not create
+    /// `CLONE_NEWUSER` nor `CLONE_NEWNET` (inherits the holder's, already as uid 0), but
+    /// treats the rootfs as `userns` (it is root in the inherited userns). See `delonix-net::infra`.
     pub inherit_userns: bool,
-    /// `USER` da imagem: uid/gid para os quais trocar ANTES do `exec` (Docker `User`).
-    /// `None` ou `Some(0)` = corre como root (uid 0) — o comportamento histórico.
-    /// `Some(uid != 0)` faz o runtime (a) mapear um intervalo de subuid via
-    /// `newuidmap` em rootless (senão o uid não-zero não existe no userns), (b)
-    /// `chown` o rootfs para esse uid/gid e (c) `setgid`/`setuid` antes do `execve`.
-    /// Necessário para imagens que recusam root (ex.: Elasticsearch).
+    /// image `USER`: uid/gid to switch to BEFORE the `exec` (Docker `User`).
+    /// `None` or `Some(0)` = runs as root (uid 0) — the historical behavior.
+    /// `Some(uid != 0)` makes the runtime (a) map a subuid range via
+    /// `newuidmap` in rootless (otherwise the non-zero uid does not exist in the userns), (b)
+    /// `chown` the rootfs to that uid/gid and (c) `setgid`/`setuid` before the `execve`.
+    /// Needed for images that refuse root (e.g. Elasticsearch).
     pub run_uid: Option<u32>,
     pub run_gid: Option<u32>,
 }
 
-/// Cria e arranca um container (sem rede própria) — a assinatura da Fase 1.
+/// Creates and starts a container (without its own network) — the Phase 1 signature.
 pub fn create(store: &Store, container: &mut Container, rootfs: &str, detach: bool) -> Result<()> {
     spawn(
         store,
@@ -2872,13 +2872,13 @@ pub fn create(store: &Store, container: &mut Container, rootfs: &str, detach: bo
         rootfs,
         &RunSpec {
             detach,
-            userns: container.userns, // honra o userns (necessário em rootless)
+            userns: container.userns, // honors the userns (needed in rootless)
             ..Default::default()
         },
     )
 }
 
-/// Como [`create`], mas com *network namespace* próprio e um *hook* CNI.
+/// Like [`create`], but with its own *network namespace* and a CNI *hook*.
 pub fn create_networked(
     store: &Store,
     container: &mut Container,
@@ -2899,8 +2899,8 @@ pub fn create_networked(
     )
 }
 
-/// O ponto de entrada geral (Fase 4): arranca um container segundo uma
-/// [`RunSpec`] — combina volumes, rede e modo detached.
+/// The general entry point (Phase 4): starts a container per a
+/// [`RunSpec`] — combines volumes, network and detached mode.
 pub fn create_with(
     store: &Store,
     container: &mut Container,
@@ -2910,27 +2910,27 @@ pub fn create_with(
     spawn(store, container, rootfs, spec)
 }
 
-/// Escreve `/etc/hostname` e `/etc/hosts` no rootfs, como o Docker/Podman (que
-/// gerem sempre estes ficheiros). Faz-se no PAI, antes do clone, porque é aqui
-/// que se sabem o nome e o IP; o rootfs é um caminho do host (cópia flat em
-/// rootless, overlay montado em root).
+/// Writes `/etc/hostname` and `/etc/hosts` into the rootfs, as Docker/Podman (which
+/// always manage these files). Done in the PARENT, before the clone, because it is here
+/// that the name and IP are known; the rootfs is a host path (flat copy in
+/// rootless, mounted overlay in root).
 ///
-/// Porquê os dois:
-/// - **`/etc/hostname`**: o `sethostname` do `container_init` não chega num
-///   container com systemd — o systemd RELÊ `/etc/hostname` no arranque e
-///   sobrepõe-no (um nó Kind ficava com o `debuerreotype` da imagem).
-/// - **`/etc/hosts`**: sem ele, `getent ahostsv4 $(hostname)` não resolve — e é
-///   EXACTAMENTE assim que o entrypoint do `kindest/node` descobre o IP do nó
-///   ("detected IPv4 address:"); vinha vazio e o nó não arrancava como control-plane.
+/// Why both:
+/// - **`/etc/hostname`**: the `sethostname` of `container_init` is not enough in a
+///   container with systemd — systemd RE-READS `/etc/hostname` at startup and
+///   overrides it (a Kind node ended up with the image's `debuerreotype`).
+/// - **`/etc/hosts`**: without it, `getent ahostsv4 $(hostname)` does not resolve — and it is
+///   EXACTLY how the `kindest/node` entrypoint discovers the node's IP
+///   ("detected IPv4 address:"); it came empty and the node did not start as control-plane.
 fn write_etc_files(rootfs: &str, hostname: &str, ip: Option<&str>, dns: Option<&str>) {
     let etc = format!("{rootfs}/etc");
     if std::fs::metadata(&etc).is_err() {
-        return; // imagem sem /etc (ex.: scratch) — nada a fazer
+        return; // image without /etc (e.g. scratch) — nothing to do
     }
     let _ = std::fs::write(format!("{etc}/hostname"), format!("{hostname}\n"));
-    // `/etc/resolv.conf`: sem ele o resolver da libc cai em 127.0.0.1 e NADA
-    // resolve por nome (só por IP). Numa rede custom aponta-se para o gateway (o
-    // resolver do ingress); em `--net host` copia-se o do host. Como o Docker.
+    // `/etc/resolv.conf`: without it the libc resolver falls back to 127.0.0.1 and NOTHING
+    // resolves by name (only by IP). On a custom network it points to the gateway (the
+    // ingress resolver); on `--net host` the host's is copied. Like Docker.
     match dns {
         Some(server) => {
             let _ = std::fs::write(
@@ -2959,9 +2959,9 @@ fn write_etc_files(rootfs: &str, hostname: &str, ip: Option<&str>, dns: Option<&
 }
 
 fn spawn(store: &Store, container: &mut Container, rootfs: &str, spec: &RunSpec<'_>) -> Result<()> {
-    // `--hostname` (CRI `PodSandboxConfig.hostname`) sobrepõe-se ao nome do
-    // container na UTS namespace e nos `/etc/hostname`+`/etc/hosts`; sem ele,
-    // usa-se o nome (comportamento histórico).
+    // `--hostname` (CRI `PodSandboxConfig.hostname`) overrides the container's
+    // name in the UTS namespace and in `/etc/hostname`+`/etc/hosts`; without it,
+    // the name is used (historical behavior).
     let hostname = container
         .hostname
         .clone()
@@ -2991,8 +2991,8 @@ fn spawn(store: &Store, container: &mut Container, rootfs: &str, spec: &RunSpec<
     let join_netns = spec.join_netns.clone();
     let env = container.env.clone();
     let read_only = container.read_only;
-    // --privileged: mantém TODAS as caps + seccomp unconfined + cgroupns + /sys RW
-    // (ver setup_rootfs). Estritamente gated — o caminho não-privileged é idêntico.
+    // --privileged: keeps ALL caps + seccomp unconfined + cgroupns + /sys RW
+    // (see setup_rootfs). Strictly gated — the non-privileged path is identical.
     let privileged = container.privileged;
     let cap_keep = if privileged {
         all_caps_mask()
@@ -3006,21 +3006,21 @@ fn spawn(store: &Store, container: &mut Container, rootfs: &str, spec: &RunSpec<
     let ulimits = container.ulimits.clone();
     let sysctls = container.sysctls.clone();
 
-    // Console (pty) para o PID 1: SÓ em `--privileged` detached com log (nodes
-    // Kind, que correm systemd como PID 1). Dá um `/dev/console` real cujo output
-    // — incluindo o estado do boot do systemd — é capturado no ficheiro de log, de
-    // modo que `docker logs -f` (= o que o Kind usa para detetar readiness) o veja.
-    // O caminho NÃO-privileged fica byte-a-byte idêntico (sem pty, pipe normal).
+    // Console (pty) for PID 1: ONLY in `--privileged` detached with log (Kind
+    // nodes, which run systemd as PID 1). Gives a real `/dev/console` whose output
+    // — including the systemd boot state — is captured in the log file, so
+    // that `docker logs -f` (= what Kind uses to detect readiness) sees it.
+    // The NON-privileged path stays byte-for-byte identical (no pty, normal pipe).
     let console = privileged && detach && spec.log_path.is_some();
 
-    // Logging shim: em detached, o stdout/stderr do container vão por um pipe para
-    // um processo `log_shim` que escreve em `log_path` COM rotação por tamanho. Em
-    // modo console o "pipe" é antes o MASTER do pty (recebido do container), por
-    // isso aqui não se cria pipe.
+    // Logging shim: in detached, the container's stdout/stderr go through a pipe to
+    // a `log_shim` process that writes to `log_path` WITH size-based rotation. In
+    // console mode the "pipe" is instead the MASTER of the pty (received from the container), so
+    // no pipe is created here.
     let log_pipe: Option<(i32, i32)> = match (detach && !console, &spec.log_path) {
         (true, Some(_)) => {
             let mut fds = [0i32; 2];
-            // SAFETY: pipe() preenche 2 fds.
+            // SAFETY: pipe() fills 2 fds.
             if unsafe { libc::pipe(fds.as_mut_ptr()) } == 0 {
                 Some((fds[0], fds[1]))
             } else {
@@ -3029,14 +3029,14 @@ fn spawn(store: &Store, container: &mut Container, rootfs: &str, spec: &RunSpec<
         }
         _ => None,
     };
-    let log_fd = log_pipe.map(|(_, w)| w); // o container escreve na ponta de escrita
+    let log_fd = log_pipe.map(|(_, w)| w); // the container writes to the write end
 
-    // Socketpair do *console socket* (runc): o init aloca o pty no devpts do
-    // container e devolve o master por aqui. `(pai, filho)`; o filho herda ambos na
-    // clone e fecha o do pai (ver `setup_console`).
+    // Socketpair of the *console socket* (runc): the init allocates the pty in the container's
+    // devpts and returns the master through here. `(parent, child)`; the child inherits both in the
+    // clone and closes the parent's (see `setup_console`).
     let console_sock: Option<(i32, i32)> = if console {
         let mut sv = [0i32; 2];
-        // SAFETY: socketpair() preenche 2 fds (AF_UNIX/SOCK_DGRAM, como no `exec`).
+        // SAFETY: socketpair() fills 2 fds (AF_UNIX/SOCK_DGRAM, as in `exec`).
         if unsafe { libc::socketpair(libc::AF_UNIX, libc::SOCK_DGRAM, 0, sv.as_mut_ptr()) } == 0 {
             Some((sv[0], sv[1]))
         } else {
@@ -3046,10 +3046,10 @@ fn spawn(store: &Store, container: &mut Container, rootfs: &str, spec: &RunSpec<
         None
     };
 
-    // Isolamento por omissão: mount, PID, UTS e **IPC** (System V/POSIX). O IPC
-    // isolado impede um container de ver/alterar a memória partilhada e as filas
-    // de mensagens do host (como o Docker). `--host-pid`/`--host-ipc` (e o
-    // `namespace_options: NODE` do CRI) abdicam desse isolamento.
+    // Isolation by default: mount, PID, UTS and **IPC** (System V/POSIX). The isolated
+    // IPC prevents a container from seeing/altering the host's shared memory and message
+    // queues (like Docker). `--host-pid`/`--host-ipc` (and the CRI
+    // `namespace_options: NODE`) waive that isolation.
     let mut flags = CloneFlags::CLONE_NEWNS | CloneFlags::CLONE_NEWUTS;
     if !spec.host_pid {
         flags |= CloneFlags::CLONE_NEWPID;
@@ -3057,8 +3057,8 @@ fn spawn(store: &Store, container: &mut Container, rootfs: &str, spec: &RunSpec<
     if !spec.host_ipc {
         flags |= CloneFlags::CLONE_NEWIPC;
     }
-    // Ingress rootless: herdamos o netns + userns do holder (já lá estamos via
-    // nsenter), por isso NÃO criamos os nossos. Só os de mount/pid/ipc/uts.
+    // Rootless ingress: we inherit the holder's netns + userns (we are already there via
+    // nsenter), so we do NOT create our own. Only the mount/pid/ipc/uts ones.
     if spec.new_netns && !spec.inherit_userns {
         flags |= CloneFlags::CLONE_NEWNET;
     }
@@ -3066,16 +3066,16 @@ fn spawn(store: &Store, container: &mut Container, rootfs: &str, spec: &RunSpec<
     if userns {
         flags |= CloneFlags::CLONE_NEWUSER;
     }
-    // --privileged: cgroup namespace próprio (o systemd dentro do container vê o
-    // seu cgroup como raiz e pode delegar sub-cgroups). NÃO o criamos aqui: o
-    // `container_init` faz `unshare(CLONE_NEWCGROUP)` DEPOIS de se mover para um
-    // leaf dedicado `dlx-<id>` (ver `setup_node_cgroup_ns`), para que a raiz do
-    // cgroup-ns do node fique VAZIA (regra no-internal-processes que o kubelet
-    // exige) — em vez de ancorar no cgroup-scope partilhado com o `kind`.
-    // Pipe de sincronização: o filho espera o pai mapear os uid/gid (user ns).
+    // --privileged: its own cgroup namespace (the systemd inside the container sees
+    // its cgroup as root and can delegate sub-cgroups). We do NOT create it here: the
+    // `container_init` does `unshare(CLONE_NEWCGROUP)` AFTER moving to a
+    // dedicated leaf `dlx-<id>` (see `setup_node_cgroup_ns`), so that the node's
+    // cgroup-ns root is EMPTY (the no-internal-processes rule the kubelet
+    // requires) — instead of anchoring in the cgroup-scope shared with `kind`.
+    // Sync pipe: the child waits for the parent to map the uid/gid (user ns).
     let sync = if userns {
         let mut fds = [0i32; 2];
-        // SAFETY: pipe() preenche o array de 2 fds.
+        // SAFETY: pipe() fills the 2-fd array.
         if unsafe { libc::pipe(fds.as_mut_ptr()) } != 0 {
             return Err(Error::Runtime {
                 context: "pipe",
@@ -3091,9 +3091,9 @@ fn spawn(store: &Store, container: &mut Container, rootfs: &str, spec: &RunSpec<
     let inherit_userns = spec.inherit_userns;
     let run_uid = spec.run_uid;
     let run_gid = spec.run_gid;
-    // --secret-files: lê+decifra os valores AGORA (no host, antes do pivot do filho)
-    // para os escrever num tmpfs in-namespace. Só nomes/raiz tocam fora da memória;
-    // os valores são capturados (move) no closure do clone = memória do filho.
+    // --secret-files: reads+decrypts the values NOW (on the host, before the child's pivot)
+    // to write them into an in-namespace tmpfs. Only names/root touch outside memory;
+    // the values are captured (moved) into the clone's closure = the child's memory.
     let secret_files: Vec<(String, String)> =
         if container.secret_files && !container.secrets.is_empty() {
             match delonix_runtime_core::SecretStore::open(store.base()) {
@@ -3113,12 +3113,12 @@ fn spawn(store: &Store, container: &mut Container, rootfs: &str, spec: &RunSpec<
         } else {
             Vec::new()
         };
-    // CWD da imagem (OCI WorkingDir) — capturado p/ o filho fazer `chdir` antes do exec.
+    // image CWD (OCI WorkingDir) — captured for the child to `chdir` before the exec.
     let workdir = container.workdir.clone();
-    // Id do container: usado p/ o leaf de cgroup dedicado do node Kind.
+    // Container id: used for the Kind node's dedicated cgroup leaf.
     let cid = container.id.clone();
-    // Node KIND (label `io.x-k8s.kind.*`): só estes recebem o cgroup-ns dedicado —
-    // um container `--privileged` normal fica com a hierarquia de cgroup intacta.
+    // KIND node (label `io.x-k8s.kind.*`): only these get the dedicated cgroup-ns —
+    // a normal `--privileged` container keeps its cgroup hierarchy intact.
     let node_cgroup = privileged
         && container
             .labels
@@ -3159,31 +3159,31 @@ fn spawn(store: &Store, container: &mut Container, rootfs: &str, spec: &RunSpec<
         )
     });
 
-    // SAFETY: single-threaded; o filho monta o container e faz `exec`.
+    // SAFETY: single-threaded; the child mounts the container and does `exec`.
     let pid = unsafe { clone(cb, &mut stack, flags, Some(Signal::SIGCHLD as i32)) }
         .map_err(syserr("clone"))?;
 
-    // ORDEM CRÍTICA: o handshake do user namespace (libertar o filho com o byte
-    // "GO") TEM de vir ANTES do recv do console. Em modo console o init só aloca o
-    // pty e envia o master DEPOIS de receber o GO; se o pai bloqueasse no recv_fd
-    // antes de escrever o GO, dava deadlock (pai espera o master, filho espera o
-    // GO). Por isso: 1.º userns, 2.º console+log_shim.
+    // CRITICAL ORDER: the user namespace handshake (releasing the child with the byte
+    // "GO") MUST come BEFORE the console recv. In console mode the init only allocates the
+    // pty and sends the master AFTER receiving the GO; if the parent blocked on recv_fd
+    // before writing the GO, it would deadlock (parent waits for the master, child waits for the
+    // GO). Hence: 1st userns, 2nd console+log_shim.
 
-    // User namespace: o pai mapeia os uid/gid e liberta o filho pelo pipe.
-    // Rede já configurada pelo hook antes do GO? (só no caminho com userns/sync)
+    // User namespace: the parent maps the uid/gid and releases the child via the pipe.
+    // Network already configured by the hook before the GO? (only on the userns/sync path)
     let mut net_done = false;
     if let Some((r, w)) = sync {
-        // SAFETY: o pai fecha o read e usa o write para libertar o filho.
+        // SAFETY: the parent closes the read and uses the write to release the child.
         unsafe {
             libc::close(r);
         }
-        // Mapa de subuid (intervalo) por omissão em rootless quando há helpers
-        // `newuidmap`/`newgidmap` + /etc/subuid: além de permitir o USER≠0 da imagem,
-        // deixa os entrypoints que fazem `chown` para uids de serviço funcionarem —
-        // ex.: o nginx faz chown das caches para o uid 101; com mapa de um só uid isso
-        // dava `chown(...) failed (22: Invalid argument)` e o container saía. Sem os
-        // helpers, mantém o mapa de um só uid (comportamento histórico). Não afecta
-        // containers de ingress (herdam o userns do holder).
+        // Subuid map (range) by default in rootless when there are helpers
+        // `newuidmap`/`newgidmap` + /etc/subuid: besides allowing the image's USER≠0,
+        // it lets the entrypoints that `chown` to service uids work —
+        // e.g.: nginx chowns the caches to uid 101; with a single-uid map that
+        // gave `chown(...) failed (22: Invalid argument)` and the container exited. Without the
+        // helpers, it keeps the single-uid map (historical behavior). Does not affect
+        // ingress containers (they inherit the holder's userns).
         let want_range = run_uid.map(|u| u != 0).unwrap_or(false) || have_subid_helpers();
         if let Err(e) = write_userns_maps(pid.as_raw(), want_range) {
             unsafe {
@@ -3192,18 +3192,18 @@ fn spawn(store: &Store, container: &mut Container, rootfs: &str, spec: &RunSpec<
             let _ = kill(pid, Signal::SIGKILL);
             return Err(e);
         }
-        // REDE ANTES DO GO (ordem crítica): o filho ainda está BLOQUEADO à espera
-        // deste byte, por isso é aqui — e só aqui — que se pode garantir que a
-        // rede está pronta ANTES de o entrypoint correr. Com o hook depois do GO
-        // havia uma race real: o `slirp4netns` configura o `tap0` a partir do PAI
-        // enquanto o filho já corre, e um entrypoint que leia o IP UMA vez no
-        // arranque (ex.: o do `kindest/node`: "detected IPv4 address:") via-o
-        // VAZIO e o nó morria. Docker/podman também só arrancam o processo com a
-        // rede já montada. Sem userns (sync=None) não há ponto de bloqueio: o
-        // hook corre mais abaixo, como antes (a race mantém-se, mas esse caminho
-        // não é o rootless/Kind).
+        // NETWORK BEFORE THE GO (critical order): the child is still BLOCKED waiting
+        // for this byte, so it is here — and only here — that we can guarantee the
+        // network is ready BEFORE the entrypoint runs. With the hook after the GO
+        // there was a real race: `slirp4netns` configures `tap0` from the PARENT
+        // while the child is already running, and an entrypoint that reads the IP ONCE at
+        // startup (e.g. that of `kindest/node`: "detected IPv4 address:") saw it
+        // EMPTY and the node died. Docker/podman also only start the process with the
+        // network already up. Without userns (sync=None) there is no blocking point: the
+        // hook runs further below, as before (the race remains, but that path
+        // is not the rootless/Kind one).
         let net_err = spec.on_started.and_then(|hook| hook(pid.as_raw()).err());
-        // SAFETY: escreve 1 byte (o "podes avançar") e fecha o write.
+        // SAFETY: writes 1 byte (the "you may proceed") and closes the write.
         unsafe {
             let go = [1u8; 1];
             let _ = libc::write(w, go.as_ptr() as *const libc::c_void, 1);
@@ -3216,17 +3216,17 @@ fn spawn(store: &Store, container: &mut Container, rootfs: &str, spec: &RunSpec<
         net_done = true;
     }
 
-    // Origem do log: em modo console é o MASTER do pty (recebido do init por
-    // SCM_RIGHTS, JÁ depois do GO do userns acima); caso contrário a ponta de
-    // LEITURA do pipe de stdout/stderr.
+    // Log source: in console mode it is the pty MASTER (received from the init by
+    // SCM_RIGHTS, ALREADY after the userns GO above); otherwise the READ end
+    // of the stdout/stderr pipe.
     let log_src: Option<i32> = if let Some((csp, csc)) = console_sock {
-        // SAFETY: o pai larga a ponta do filho e recebe o master do init.
+        // SAFETY: the parent drops the child's end and receives the master from the init.
         unsafe { libc::close(csc) };
-        // Timeout de recepção: se o init MORRER antes de enviar o master do pty
-        // (ex.: o entrypoint do kindest/node aborta cedo) e um neto reparentado
-        // segurar a ponta do socketpair, o `recvmsg` bloquearia PARA SEMPRE — o
-        // `run` ficava pendurado sem log nem exit. Com SO_RCVTIMEO, ao fim de 10s
-        // desiste (None → sem log, mas o container segue e o status reconcilia).
+        // Receive timeout: if the init DIES before sending the pty master
+        // (e.g. the kindest/node entrypoint aborts early) and a reparented grandchild
+        // holds the socketpair end, the `recvmsg` would block FOREVER — the
+        // `run` would hang without log nor exit. With SO_RCVTIMEO, after 10s
+        // it gives up (None → no log, but the container proceeds and the status reconciles).
         unsafe {
             let tv = libc::timeval {
                 tv_sec: 10,
@@ -3242,28 +3242,28 @@ fn spawn(store: &Store, container: &mut Container, rootfs: &str, spec: &RunSpec<
         }
         let m = recv_fd(csp);
         unsafe { libc::close(csp) };
-        m // None se o init não conseguiu alocar o pty (cai sem log, sem bloquear)
+        m // None if the init could not allocate the pty (falls through without log, without blocking)
     } else {
         log_pipe.map(|(r, _)| r)
     };
 
-    // Arranca o logging shim (lê o pipe/master, escreve o log com rotação). Reparentado
-    // ao init quando o `delonix run` termina; morre quando o container fecha a fonte.
+    // Starts the logging shim (reads the pipe/master, writes the log with rotation). Reparented
+    // to the init when `delonix run` finishes; dies when the container closes the source.
     if let Some(src) = log_src {
         let lp = spec.log_path.clone().unwrap_or_default();
         let driver = container.log_driver.clone().unwrap_or_default();
         let tag = format!("delonix/{}", container.name);
-        // SAFETY: fork de um processo single-threaded; o filho-shim só faz I/O e _exit.
+        // SAFETY: fork of a single-threaded process; the child-shim only does I/O and _exit.
         if let Ok(ForkResult::Child) = unsafe { fork() } {
-            // Larga a ponta de ESCRITA do pipe (se existir) — só o container a mantém.
+            // Drops the WRITE end of the pipe (if it exists) — only the container keeps it.
             if let Some((_, logw)) = log_pipe {
                 unsafe { libc::close(logw) };
             }
-            // O shim sobrevive ao `delonix run` (vive enquanto o container viver).
-            // Tem de LARGAR o stdio herdado do pai — senão um chamador que capture
-            // o stdout do `run -d` (o shim Docker, `$(...)`, CI/scripts) fica
-            // bloqueado à espera de EOF até o container morrer. setsid + /dev/null
-            // destacam-no por completo; o shim escreve no ficheiro de log próprio.
+            // The shim outlives `delonix run` (it lives as long as the container lives).
+            // It must DROP the stdio inherited from the parent — otherwise a caller that captures
+            // the stdout of `run -d` (the Docker shim, `$(...)`, CI/scripts) stays
+            // blocked waiting for EOF until the container dies. setsid + /dev/null
+            // detach it completely; the shim writes to its own log file.
             unsafe {
                 libc::setsid();
                 let null = libc::open(c"/dev/null".as_ptr(), libc::O_RDWR);
@@ -3276,10 +3276,10 @@ fn spawn(store: &Store, container: &mut Container, rootfs: &str, spec: &RunSpec<
                     }
                 }
             }
-            log_shim(src, lp, MAX_LOG_BYTES, driver, tag, spec.log_cri); // não regressa (o pai não espera)
+            log_shim(src, lp, MAX_LOG_BYTES, driver, tag, spec.log_cri); // does not return (the parent does not wait)
         }
-        // O pai larga as pontas: só o container (a fonte, via fd 1/2 ou o slave do
-        // pty) e o shim (src) as mantêm. Quando o container morre, o shim vê EOF/EIO.
+        // The parent drops the ends: only the container (the source, via fd 1/2 or the pty
+        // slave) and the shim (src) keep them. When the container dies, the shim sees EOF/EIO.
         unsafe { libc::close(src) };
         if let Some((_, logw)) = log_pipe {
             unsafe { libc::close(logw) };
@@ -3292,9 +3292,9 @@ fn spawn(store: &Store, container: &mut Container, rootfs: &str, spec: &RunSpec<
     setup_cgroup(container, pid.as_raw())?;
     store.save(container)?;
 
-    // Configura a rede (ou outro arranque) ANTES de esperar/devolver. Só chega
-    // aqui o caminho SEM userns (sem ponto de sync onde bloquear o filho) — com
-    // userns o hook já correu antes do GO, com o filho parado (ver acima).
+    // Configures the network (or other startup) BEFORE waiting/returning. Only the
+    // path WITHOUT userns reaches here (no sync point to block the child on) — with
+    // userns the hook already ran before the GO, with the child stopped (see above).
     if !net_done {
         if let Some(hook) = spec.on_started {
             if let Err(e) = hook(pid.as_raw()) {
@@ -3317,25 +3317,25 @@ fn spawn(store: &Store, container: &mut Container, rootfs: &str, spec: &RunSpec<
     Ok(())
 }
 
-/// Espera o container terminar e **regista o estado REAL** (com o exit code) no
-/// `Store`. Devolve o estado final.
+/// Waits for the container to terminate and **records the REAL state** (with the exit code) in
+/// the `Store`. Returns the final state.
 ///
-/// Só funciona para quem chamou [`create_with`] — porque `waitpid` só é
-/// permitido ao **pai** do processo. É essa a razão de existir: num `run -d`
-/// normal a CLI sai logo, o container é reparentado ao `init` do host e o
-/// código de saída morre com ele — o `reconcile_status` só consegue depois
-/// dizer "morreu" (`Crashed`/137), nunca *porquê*. Um supervisor que chame
-/// `create_with` e depois isto fica pai do container e captura o código
-/// verdadeiro (`Failed(n)`), que é o que uma política de restart
-/// `on-failure` precisa de saber para decidir.
+/// Only works for whoever called [`create_with`] — because `waitpid` is only
+/// permitted to the **parent** of the process. That is its reason to exist: in a normal `run -d`
+/// the CLI exits right away, the container is reparented to the host `init` and the
+/// exit code dies with it — `reconcile_status` can then only
+/// say "it died" (`Crashed`/137), never *why*. A supervisor that calls
+/// `create_with` and then this becomes the container's parent and captures the
+/// true code (`Failed(n)`), which is what an `on-failure` restart policy
+/// needs to know to decide.
 pub fn wait_and_record(store: &Store, container: &mut Container) -> Result<Status> {
     let pid = container
         .pid
         .ok_or_else(|| Error::NotRunning(container.short_id().to_string()))?;
     let st = waitpid(Pid::from_raw(pid), None).map_err(syserr("waitpid"))?;
     let status = wait_to_status(st);
-    // `update` (flock) e não `save`: o CRI/CLI podem estar a reconciliar o
-    // mesmo container agora — ver `Store::update`.
+    // `update` (flock) and not `save`: the CRI/CLI may be reconciling the
+    // same container right now — see `Store::update`.
     let final_status = status.clone();
     let _ = store.update(&container.id, |c| {
         c.status = final_status.clone();
@@ -3349,22 +3349,22 @@ pub fn wait_and_record(store: &Store, container: &mut Container) -> Result<Statu
 }
 
 // ----------------------------------------------------------------------------
-// Exec: correr um comando dentro de um container existente
+// Exec: run a command inside an existing container
 // ----------------------------------------------------------------------------
 
-/// Corre `argv` dentro dos namespaces do container, via `setns`.
+/// Runs `argv` inside the container's namespaces, via `setns`.
 ///
-/// Usa um **duplo fork**: o 1.º filho fica single-threaded (requisito do kernel
-/// para `setns` ao *user namespace*); faz `setns` a todos os namespaces; e o
-/// 2.º filho — criado depois de juntar o *pid namespace* — é quem realmente
-/// entra nesse namespace (o `setns(PID)` só afecta filhos futuros).
-/// Aloca um pseudo-terminal (master, slave) com o tamanho do terminal actual.
-/// Usa `posix_openpt` (sem libutil). `None` se não for possível.
-/// Aloca um pty a partir do devpts **do container** (`/dev/ptmx` → `pts/ptmx`).
-/// Corre no neto (já dentro do mnt ns do container), por isso o `/dev/pts/N`
-/// resultante resolve lá dentro — o `tty` imprime o nome certo, tal como o
-/// Docker. Devolve `(master, slave, path_do_slave)`; o master é enviado ao pai
-/// por SCM_RIGHTS e o `path` (`/dev/pts/N`) serve para o bind de `/dev/console`.
+/// Uses a **double fork**: the 1st child stays single-threaded (kernel requirement
+/// for `setns` to the *user namespace*); does `setns` to all namespaces; and the
+/// 2nd child — created after joining the *pid namespace* — is the one that actually
+/// enters that namespace (`setns(PID)` only affects future children).
+/// Allocates a pseudo-terminal (master, slave) with the current terminal's size.
+/// Uses `posix_openpt` (without libutil). `None` if not possible.
+/// Allocates a pty from the **container's** devpts (`/dev/ptmx` → `pts/ptmx`).
+/// Runs in the grandchild (already inside the container's mnt ns), so the resulting `/dev/pts/N`
+/// resolves inside it — `tty` prints the right name, just like
+/// Docker. Returns `(master, slave, slave_path)`; the master is sent to the parent
+/// by SCM_RIGHTS and the `path` (`/dev/pts/N`) serves for the `/dev/console` bind.
 fn open_pty_in_container() -> Option<(i32, i32, String)> {
     unsafe {
         let m = libc::open(c"/dev/ptmx".as_ptr(), libc::O_RDWR | libc::O_NOCTTY);
@@ -3392,32 +3392,32 @@ fn open_pty_in_container() -> Option<(i32, i32, String)> {
     }
 }
 
-/// Dá um `/dev/console` (pty) ao PID 1 de um container `--privileged` detached e
-/// captura-o para o ficheiro de log. O `master` vai para o pai (que o liga ao
-/// `log_shim`), o `slave` vira `/dev/console` + stdio — é onde o **systemd**,
-/// como PID 1, escreve o estado do boot (ex.: "Reached target Multi-User
-/// System"). Sem isto esse estado ia só para o *journal*, invisível ao
-/// `docker logs -f` que o Kind usa para detetar o node pronto. Modelo *console
-/// socket* do runc. Corre no init do container (já com o `/dev`/devpts montado e
-/// ainda com caps), antes de largar privilégios e do `execve`.
+/// Gives a `/dev/console` (pty) to PID 1 of a `--privileged` detached container and
+/// captures it into the log file. The `master` goes to the parent (which wires it to the
+/// `log_shim`), the `slave` becomes `/dev/console` + stdio — it is where **systemd**,
+/// as PID 1, writes the boot state (e.g. "Reached target Multi-User
+/// System"). Without this that state went only to the *journal*, invisible to the
+/// `docker logs -f` that Kind uses to detect the node ready. runc *console
+/// socket* model. Runs in the container's init (already with the `/dev`/devpts mounted and
+/// still with caps), before dropping privileges and the `execve`.
 fn setup_console(console_sock: (i32, i32)) {
     let (sp, sc) = console_sock;
-    // SAFETY: o init não usa a ponta do pai do socketpair.
+    // SAFETY: the init does not use the parent's end of the socketpair.
     unsafe { libc::close(sp) };
     let Some((m, s, path)) = open_pty_in_container() else {
         unsafe { libc::close(sc) };
         return;
     };
-    // Entrega o master ao pai (que o pumpa para o log) e larga-o aqui.
+    // Delivers the master to the parent (which pumps it to the log) and drops it here.
     send_fd(sc, m);
-    // SAFETY: master e socket já não são precisos dentro do container.
+    // SAFETY: master and socket are no longer needed inside the container.
     unsafe {
         libc::close(m);
         libc::close(sc);
     }
-    // `/dev/console` = bind do nó do slave (char device do pty). É o que o systemd
-    // abre por nome para imprimir o estado do boot. Best-effort.
-    let _ = std::fs::File::create("/dev/console"); // ponto de montagem
+    // `/dev/console` = bind of the slave's node (char device of the pty). It is what systemd
+    // opens by name to print the boot state. Best-effort.
+    let _ = std::fs::File::create("/dev/console"); // mount point
     let _ = mount(
         Some(path.as_str()),
         "/dev/console",
@@ -3425,10 +3425,10 @@ fn setup_console(console_sock: (i32, i32)) {
         MsFlags::MS_BIND,
         None::<&str>,
     );
-    // Sessão nova + controlling tty no slave + stdio = slave (modelo runc
-    // `terminal:true`). O PID 1 (filho da clone) não é líder de grupo → o setsid
-    // sucede; o systemd herda isto e escreve para o pty capturado.
-    // SAFETY: FFI directa sobre o slave válido; best-effort.
+    // New session + controlling tty on the slave + stdio = slave (runc
+    // `terminal:true` model). PID 1 (child of the clone) is not a group leader → the setsid
+    // succeeds; systemd inherits this and writes to the captured pty.
+    // SAFETY: direct FFI over the valid slave; best-effort.
     unsafe {
         libc::setsid();
         libc::ioctl(s, libc::TIOCSCTTY as _, 0);
@@ -3441,8 +3441,8 @@ fn setup_console(console_sock: (i32, i32)) {
     }
 }
 
-/// Envia um fd por um socket Unix (SCM_RIGHTS). O neto aloca o pty no devpts do
-/// container e passa o `master` ao pai por aqui (modelo *console socket* do runc).
+/// Sends an fd over a Unix socket (SCM_RIGHTS). The grandchild allocates the pty in the container's
+/// devpts and passes the `master` to the parent through here (runc *console socket* model).
 fn send_fd(sock: i32, fd: i32) -> bool {
     unsafe {
         let mut dummy: u8 = 0;
@@ -3455,7 +3455,7 @@ fn send_fd(sock: i32, fd: i32) -> bool {
         msg.msg_iov = &mut iov;
         msg.msg_iovlen = 1;
         msg.msg_control = cmsgbuf.as_mut_ptr().cast::<libc::c_void>();
-        // `as _`: o tipo dos campos cmsg difere entre glibc (size_t) e musl (socklen_t).
+        // `as _`: the type of the cmsg fields differs between glibc (size_t) and musl (socklen_t).
         msg.msg_controllen = libc::CMSG_SPACE(std::mem::size_of::<libc::c_int>() as u32) as _;
         let cmsg = libc::CMSG_FIRSTHDR(&msg);
         (*cmsg).cmsg_level = libc::SOL_SOCKET;
@@ -3466,7 +3466,7 @@ fn send_fd(sock: i32, fd: i32) -> bool {
     }
 }
 
-/// Recebe um fd enviado por SCM_RIGHTS (o pai recebe o master do pty do neto).
+/// Receives an fd sent by SCM_RIGHTS (the parent receives the grandchild's pty master).
 fn recv_fd(sock: i32) -> Option<i32> {
     unsafe {
         let mut dummy: u8 = 0;
@@ -3500,7 +3500,7 @@ fn recv_fd(sock: i32) -> Option<i32> {
     }
 }
 
-/// Copia bytes de um fd para outro até EOF (uma direcção do proxy do pty).
+/// Copies bytes from one fd to another until EOF (one direction of the pty proxy).
 fn pump_fd(from: i32, to: i32) {
     let mut buf = [0u8; 4096];
     loop {
@@ -3525,8 +3525,8 @@ fn pump_fd(from: i32, to: i32) {
     }
 }
 
-/// Põe o terminal do utilizador em modo raw (para a shell interactiva). Devolve
-/// o estado anterior para restaurar. `None` se o stdin não for um terminal.
+/// Puts the user's terminal in raw mode (for the interactive shell). Returns
+/// the previous state to restore. `None` if the stdin is not a terminal.
 fn set_raw_mode() -> Option<libc::termios> {
     unsafe {
         if libc::isatty(0) == 0 {
@@ -3552,25 +3552,25 @@ fn restore_mode(saved: Option<libc::termios>) {
 }
 
 pub fn exec(container: &Container, argv: &[String], tty: bool) -> Result<i32> {
-    // Guarda contra reutilização de PID: o `exec` entra nos namespaces via
-    // setns(pid) — se o PID foi reciclado, entraríamos nos namespaces de um
-    // processo alheio do host. Exigimos o mesmo `starttime`.
+    // Guard against PID reuse: the `exec` enters the namespaces via
+    // setns(pid) — if the PID was recycled, we would enter the namespaces of a
+    // process belonging to the host. We require the same `starttime`.
     let pid = container
         .pid
         .filter(|p| safe_to_signal(*p, container.pid_starttime))
         .ok_or_else(|| Error::NotRunning(container.short_id().to_string()))?;
 
-    // Junta o user namespace PRIMEIRO (para ganhar caps nesse ns e poder juntar os
-    // restantes); depois UTS, NET, PID e MNT (mnt por último). Inclui-se SEMPRE o
-    // `user`: a lógica de skip-por-inode abaixo remove-o se já o partilhamos (container
-    // host). Crucial para os containers do INGRESS rootless, que **herdam** o user ns
-    // do holder (não criam o seu) e por isso tinham `container.userns=false` — sem o
-    // setns(user) o setns(uts) dava EPERM (o UTS pertence a esse user ns).
+    // Joins the user namespace FIRST (to gain caps in that ns and be able to join the
+    // rest); then UTS, NET, PID and MNT (mnt last). The `user` is ALWAYS included:
+    // the skip-by-inode logic below removes it if we already share it (host
+    // container). Crucial for the rootless INGRESS containers, which **inherit** the holder's user ns
+    // (they do not create their own) and therefore had `container.userns=false` — without the
+    // setns(user) the setns(uts) gave EPERM (the UTS belongs to that user ns).
     let ns_list: &[&str] = &["user", "uts", "net", "pid", "mnt"];
-    // Abre os fds no PAI (resolvem-se no contexto do host); herdam-se pela fork.
-    // Salta os namespaces que JÁ partilhamos (mesmo inode) — ex.: um container
-    // com user ns mas sem rede partilha o `net` do host, e juntá-lo depois de
-    // entrar no user ns daria EPERM (perdemos privilégio sobre o ns do host).
+    // Open the fds in the PARENT (they resolve in the host context); they are inherited by the fork.
+    // Skip the namespaces we ALREADY share (same inode) — e.g. a container
+    // with a user ns but no network shares the host's `net`, and joining it after
+    // entering the user ns would give EPERM (we lose privilege over the host's ns).
     use std::os::unix::fs::MetadataExt;
     let self_pid = std::process::id();
     let mut fds: Vec<(&str, i32)> = Vec::new();
@@ -3579,7 +3579,7 @@ pub fn exec(container: &Container, argv: &[String], tty: bool) -> Result<i32> {
         let mine = format!("/proc/{self_pid}/ns/{ns}");
         if let (Ok(a), Ok(b)) = (std::fs::metadata(&target), std::fs::metadata(&mine)) {
             if a.ino() == b.ino() {
-                continue; // já estamos neste namespace
+                continue; // we are already in this namespace
             }
         }
         let fd = open(
@@ -3590,9 +3590,9 @@ pub fn exec(container: &Container, argv: &[String], tty: bool) -> Result<i32> {
         .map_err(syserr("open ns"))?;
         fds.push((ns, fd));
     }
-    // Entrámos mesmo num user ns? (i.e., não o partilhávamos já). Se sim, tornamo-nos
-    // uid 0 dentro dele depois dos setns — quer o container o tenha CRIADO (`userns`)
-    // quer o tenha HERDADO do holder do ingress.
+    // Did we actually enter a user ns? (i.e., we did not already share it). If so, we become
+    // uid 0 inside it after the setns — whether the container CREATED it (`userns`)
+    // or INHERITED it from the ingress holder.
     let joined_userns = fds.iter().any(|(n, _)| *n == "user");
 
     let cargv: Vec<CString> = argv
@@ -3602,12 +3602,12 @@ pub fn exec(container: &Container, argv: &[String], tty: bool) -> Result<i32> {
         })
         .collect::<Result<_>>()?;
 
-    // `exec -t`: o neto aloca um pty no devpts DO container e passa o master ao
-    // PAI por um socketpair (SCM_RIGHTS). Assim o `/dev/pts/N` resolve dentro do
-    // container (o `tty` imprime o nome) — modelo *console socket* do runc.
+    // `exec -t`: the grandchild allocates a pty in the container's devpts and passes the master to the
+    // PARENT over a socketpair (SCM_RIGHTS). This way the `/dev/pts/N` resolves inside the
+    // container (`tty` prints the name) — runc *console socket* model.
     let pty_sock: Option<(i32, i32)> = if tty {
         let mut sv = [0i32; 2];
-        // SAFETY: socketpair com argumentos válidos; sv preenchido em sucesso.
+        // SAFETY: socketpair with valid arguments; sv filled on success.
         if unsafe { libc::socketpair(libc::AF_UNIX, libc::SOCK_DGRAM, 0, sv.as_mut_ptr()) } == 0 {
             Some((sv[0], sv[1]))
         } else {
@@ -3617,36 +3617,36 @@ pub fn exec(container: &Container, argv: &[String], tty: bool) -> Result<i32> {
         None
     };
 
-    // 1.º fork: o filho fica single-threaded.
-    // SAFETY: o filho só faz syscalls simples e `_exit`.
+    // 1st fork: the child stays single-threaded.
+    // SAFETY: the child only does simple syscalls and `_exit`.
     match unsafe { fork() }.map_err(syserr("fork"))? {
         ForkResult::Child => {
             for (ns, fd) in &fds {
-                // SAFETY: fd válido herdado; `OwnedFd` fecha-o após o `setns`.
+                // SAFETY: valid inherited fd; `OwnedFd` closes it after the `setns`.
                 let owned = unsafe { OwnedFd::from_raw_fd(*fd) };
                 if let Err(e) = setns(owned, CloneFlags::empty()) {
                     eprintln!("delonix: setns({ns}) failed: {e}");
                     unsafe { libc::_exit(125) };
                 }
             }
-            // Se juntámos um user ns (criado OU herdado), tornamo-nos uid 0 DENTRO
-            // (igual ao init do container).
-            // SAFETY: após setns(user) temos CAP_SETUID no user ns do container.
+            // If we joined a user ns (created OR inherited), we become uid 0 INSIDE
+            // (same as the container's init).
+            // SAFETY: after setns(user) we have CAP_SETUID in the container's user ns.
             if joined_userns {
                 unsafe {
                     libc::setgid(0);
                     libc::setuid(0);
                 }
             }
-            // 2.º fork: entra no pid namespace já juntado.
-            // SAFETY: o neto faz `exec` ou `_exit`.
+            // 2nd fork: enters the already-joined pid namespace.
+            // SAFETY: the grandchild does `exec` or `_exit`.
             match unsafe { fork() } {
                 Ok(ForkResult::Child) => {
                     let _ = chdir("/");
-                    // pty: aloca no devpts do container, envia o master ao pai, e
-                    // usa o slave como stdio (nova sessão + controlling terminal).
+                    // pty: allocates in the container's devpts, sends the master to the parent, and
+                    // uses the slave as stdio (new session + controlling terminal).
                     if let Some((sp, sc)) = pty_sock {
-                        unsafe { libc::close(sp) }; // o neto só usa o seu lado
+                        unsafe { libc::close(sp) }; // the grandchild only uses its own side
                         if let Some((m, s, _path)) = open_pty_in_container() {
                             send_fd(sc, m);
                             unsafe {
@@ -3666,43 +3666,43 @@ pub fn exec(container: &Container, argv: &[String], tty: bool) -> Result<i32> {
                         }
                     }
                     set_no_new_privs();
-                    // Espelha o confinamento do INIT (ver `spawn`): um container
-                    // `--privileged` mantém TODAS as caps também no `exec` — sem
-                    // isto, `exec` caía sempre no conjunto default (KEPT_CAPS, sem
-                    // CAP_NET_ADMIN), e depurar um nó Kind por dentro (`nft`,
-                    // `iptables`) dava "Operation not permitted" apesar de o init
-                    // ter as caps. Docker/podman: `exec` herda o perfil do container.
+                    // Mirrors the INIT's confinement (see `spawn`): a `--privileged`
+                    // container keeps ALL caps also in `exec` — without
+                    // this, `exec` always fell back to the default set (KEPT_CAPS, without
+                    // CAP_NET_ADMIN), and debugging a Kind node from inside (`nft`,
+                    // `iptables`) gave "Operation not permitted" even though the init
+                    // had the caps. Docker/podman: `exec` inherits the container's profile.
                     let exec_keep = if container.privileged {
                         all_caps_mask()
                     } else {
                         resolve_cap_keep(&container.cap_drop, &container.cap_add)
                     };
-                    drop_capabilities(exec_keep); // mesmo confinamento
+                    drop_capabilities(exec_keep); // same confinement
                     let exec_unconf =
                         container.privileged || container.seccomp.as_deref() == Some("unconfined");
                     apply_seccomp(exec_unconf, container.seccomp.as_deref() == Some("detect"));
-                    // FAIL-CLOSED: o processo do `exec` tem de ficar tão confinado como
-                    // o init do container; aborta se algum controlo falhou em silêncio.
+                    // FAIL-CLOSED: the `exec` process must stay as confined as
+                    // the container's init; aborts if some control failed silently.
                     if !insecure_besteffort() {
                         if let Err(e) = verify_confinement(!exec_unconf, exec_keep) {
                             eprintln!("delonix: exec confinement NOT verified ({e}); aborting");
                             unsafe { libc::_exit(126) };
                         }
                     }
-                    apply_env(&container.name, &container.env); // mesmo ambiente do container
+                    apply_env(&container.name, &container.env); // same environment as the container
                     if let Some(p) = &container.apparmor {
-                        apply_apparmor(p); // mesmo confinamento MAC que o processo de init
+                        apply_apparmor(p); // same MAC confinement as the init process
                     }
-                    // `--user` (CRI `RunAsUser`/`RunAsUserName`): o `exec` corre como o
-                    // MESMO utilizador do processo de init — é o que o CRI conformance
-                    // verifica (`execSync id -u` == RunAsUser). Sem isto, o `exec`
-                    // ficava sempre uid 0 do userns e o `id -u` reportava 0. setgid
-                    // ANTES de setuid (depois de largar o uid já não se muda de grupo).
+                    // `--user` (CRI `RunAsUser`/`RunAsUserName`): the `exec` runs as the
+                    // SAME user as the init process — it is what the CRI conformance
+                    // checks (`execSync id -u` == RunAsUser). Without this, the `exec`
+                    // always stayed uid 0 of the userns and `id -u` reported 0. setgid
+                    // BEFORE setuid (after dropping the uid one can no longer change group).
                     if let Some(uid) = container.run_uid.filter(|u| *u != 0) {
                         let gid = container.run_gid.unwrap_or(uid);
-                        // SAFETY: uid/gid mapeados no userns do container (o init já
-                        // mapeou o intervalo no arranque); setgroups/setgid/setuid
-                        // sucedem enquanto somos root no userns.
+                        // SAFETY: uid/gid mapped in the container's userns (the init already
+                        // mapped the range at startup); setgroups/setgid/setuid
+                        // succeed while we are root in the userns.
                         unsafe {
                             libc::setgroups(1, [gid].as_ptr());
                             if libc::setgid(gid) != 0 {
@@ -3718,7 +3718,7 @@ pub fn exec(container: &Container, argv: &[String], tty: bool) -> Result<i32> {
                     unsafe { libc::_exit(127) };
                 }
                 Ok(ForkResult::Parent { child }) => {
-                    // o meio não segura o pty/socket (senão o master nunca dá EOF).
+                    // the middle does not hold the pty/socket (otherwise the master never gives EOF).
                     if let Some((sp, sc)) = pty_sock {
                         unsafe {
                             libc::close(sp);
@@ -3733,18 +3733,18 @@ pub fn exec(container: &Container, argv: &[String], tty: bool) -> Result<i32> {
         }
         ForkResult::Parent { child } => {
             if let Some((sp, sc)) = pty_sock {
-                unsafe { libc::close(sc) }; // o pai recebe pelo seu lado
+                unsafe { libc::close(sc) }; // the parent receives on its side
                 let master = recv_fd(sp);
                 unsafe { libc::close(sp) };
                 if let Some(m) = master {
-                    // ajusta o pty ao tamanho do terminal do cliente.
+                    // adjusts the pty to the client terminal's size.
                     unsafe {
                         let mut ws: libc::winsize = std::mem::zeroed();
                         if libc::ioctl(0, libc::TIOCGWINSZ, &mut ws) == 0 {
                             libc::ioctl(m, libc::TIOCSWINSZ, &ws);
                         }
                     }
-                    // o pai fala com o master: stdin→master e master→stdout, em modo raw.
+                    // the parent talks to the master: stdin→master and master→stdout, in raw mode.
                     let saved = set_raw_mode();
                     std::thread::spawn(move || pump_fd(m, 1)); // master -> stdout
                     std::thread::spawn(move || pump_fd(0, m)); // stdin -> master
@@ -3753,7 +3753,7 @@ pub fn exec(container: &Container, argv: &[String], tty: bool) -> Result<i32> {
                     unsafe { libc::close(m) };
                     return Ok(wait_to_code(status?));
                 }
-                // o neto não conseguiu alocar o pty: comporta-se como não-tty.
+                // the grandchild could not allocate the pty: behaves as non-tty.
                 let status = waitpid(child, None).map_err(syserr("waitpid"))?;
                 Ok(wait_to_code(status))
             } else {
@@ -3765,22 +3765,22 @@ pub fn exec(container: &Container, argv: &[String], tty: bool) -> Result<i32> {
 }
 
 // ----------------------------------------------------------------------------
-// Hot-plug de volumes (zero-downtime): montar/desmontar num container A CORRER
+// Volume hot-plug (zero-downtime): mount/unmount in a RUNNING container
 // ----------------------------------------------------------------------------
 //
-// A nova mount API do kernel (open_tree/move_mount, Linux 5.2+; mount_setattr
-// 5.12+) permite montar num container vivo sem o parar. O problema-chave é o
-// modelo ROOTLESS: depois do `pivot_root` a fonte (caminho do host) já NÃO é
-// visível dentro do mnt ns do container, e o userns do container não manda no
-// mnt ns do host. Solução (funciona em rootless E root):
-//   1. setns(user) → entra no userns do container (ganha CAP_SYS_ADMIN lá)
-//   2. unshare(CLONE_NEWNS) → mnt ns novo, CÓPIA do do host (fonte visível),
-//      mas POSSUÍDO pelo userns do container
-//   3. open_tree(CLONE) → clona a subárvore-fonte num mount DESTACADO (fd)
-//   4. setns(mnt) → entra no mnt ns REAL do container (raiz = raiz do container)
-//   5. move_mount(fd, alvo) → anexa o mount; o mesmo userns possui origem e
-//      destino, por isso o kernel autoriza
-// Tudo no filho de uma fork (single-threaded, requisito do setns(user)).
+// The kernel's new mount API (open_tree/move_mount, Linux 5.2+; mount_setattr
+// 5.12+) allows mounting in a live container without stopping it. The key problem is the
+// ROOTLESS model: after the `pivot_root` the source (host path) is NO longer
+// visible inside the container's mnt ns, and the container's userns does not command the
+// host's mnt ns. Solution (works in rootless AND root):
+//   1. setns(user) → enter the container's userns (gain CAP_SYS_ADMIN there)
+//   2. unshare(CLONE_NEWNS) → new mnt ns, a COPY of the host's (source visible),
+//      but OWNED by the container's userns
+//   3. open_tree(CLONE) → clone the source subtree into a DETACHED mount (fd)
+//   4. setns(mnt) → enter the container's REAL mnt ns (root = container root)
+//   5. move_mount(fd, target) → attach the mount; the same userns owns source and
+//      destination, so the kernel authorizes it
+// All in the child of a fork (single-threaded, requirement of setns(user)).
 
 const OPEN_TREE_CLONE: libc::c_uint = 1;
 const MOVE_MOUNT_F_EMPTY_PATH: libc::c_uint = 0x0000_0004;
@@ -3796,29 +3796,29 @@ struct MountAttr {
     userns_fd: u64,
 }
 
-/// `open_tree(AT_FDCWD, src, OPEN_TREE_CLONE [|AT_RECURSIVE])` → fd dum mount
-/// destacado (cópia da subárvore que cobre `src`). Erro se o kernel não suportar.
+/// `open_tree(AT_FDCWD, src, OPEN_TREE_CLONE [|AT_RECURSIVE])` → fd of a detached mount
+/// (copy of the subtree covering `src`). Error if the kernel does not support it.
 fn open_tree_clone(src: &str, recursive: bool) -> nix::Result<OwnedFd> {
     let c = CString::new(src).map_err(|_| nix::errno::Errno::EINVAL)?;
     let mut flags = OPEN_TREE_CLONE | (OFlag::O_CLOEXEC.bits() as libc::c_uint);
     if recursive {
         flags |= libc::AT_RECURSIVE as libc::c_uint;
     }
-    // SAFETY: syscall com caminho válido (CString terminado em NUL) e flags válidas.
+    // SAFETY: syscall with a valid path (NUL-terminated CString) and valid flags.
     let fd = unsafe { libc::syscall(libc::SYS_open_tree, libc::AT_FDCWD, c.as_ptr(), flags) };
     if fd < 0 {
         return Err(nix::errno::Errno::last());
     }
-    // SAFETY: fd >= 0 devolvido pelo kernel, com posse transferida ao OwnedFd.
+    // SAFETY: fd >= 0 returned by the kernel, with ownership transferred to the OwnedFd.
     Ok(unsafe { OwnedFd::from_raw_fd(fd as RawFd) })
 }
 
-/// `move_mount(dfd, "", AT_FDCWD, target, MOVE_MOUNT_F_EMPTY_PATH)` → anexa o
-/// mount destacado `dfd` em `target` (resolvido contra a raiz actual).
+/// `move_mount(dfd, "", AT_FDCWD, target, MOVE_MOUNT_F_EMPTY_PATH)` → attaches the
+/// detached mount `dfd` at `target` (resolved against the current root).
 fn move_mount_to(dfd: RawFd, target: &str) -> nix::Result<()> {
     let empty = CString::new("").unwrap();
     let c = CString::new(target).map_err(|_| nix::errno::Errno::EINVAL)?;
-    // SAFETY: dfd válido, caminhos NUL-terminados, flag válida.
+    // SAFETY: valid dfd, NUL-terminated paths, valid flag.
     let r = unsafe {
         libc::syscall(
             libc::SYS_move_mount,
@@ -3835,8 +3835,8 @@ fn move_mount_to(dfd: RawFd, target: &str) -> nix::Result<()> {
     Ok(())
 }
 
-/// `mount_setattr(dfd, "", AT_EMPTY_PATH|AT_RECURSIVE, &attr)` — fixa atributos
-/// (nosuid/nodev sempre, rdonly opcional) no mount destacado antes de o anexar.
+/// `mount_setattr(dfd, "", AT_EMPTY_PATH|AT_RECURSIVE, &attr)` — fixes attributes
+/// (nosuid/nodev always, rdonly optional) on the detached mount before attaching it.
 fn mount_setattr_fd(dfd: RawFd, attr_set: u64) -> nix::Result<()> {
     let empty = CString::new("").unwrap();
     let attr = MountAttr {
@@ -3845,7 +3845,7 @@ fn mount_setattr_fd(dfd: RawFd, attr_set: u64) -> nix::Result<()> {
         propagation: 0,
         userns_fd: 0,
     };
-    // SAFETY: dfd válido, struct do tamanho declarado, flags válidas.
+    // SAFETY: valid dfd, struct of the declared size, valid flags.
     let r = unsafe {
         libc::syscall(
             libc::SYS_mount_setattr,
@@ -3862,8 +3862,8 @@ fn mount_setattr_fd(dfd: RawFd, attr_set: u64) -> nix::Result<()> {
     Ok(())
 }
 
-/// Abre o fd dum namespace do container, saltando-o se JÁ o partilhamos (mesmo
-/// inode) — juntá-lo depois daria EPERM. Devolve `Ok(None)` se já partilhado.
+/// Opens the fd of a container namespace, skipping it if we ALREADY share it (same
+/// inode) — joining it afterward would give EPERM. Returns `Ok(None)` if already shared.
 fn open_container_ns(pid: i32, ns: &str) -> Result<Option<OwnedFd>> {
     use std::os::unix::fs::MetadataExt;
     let target = format!("/proc/{pid}/ns/{ns}");
@@ -3879,12 +3879,12 @@ fn open_container_ns(pid: i32, ns: &str) -> Result<Option<OwnedFd>> {
         Mode::empty(),
     )
     .map_err(syserr("open ns"))?;
-    // SAFETY: fd >= 0 do kernel; posse transferida ao OwnedFd.
+    // SAFETY: fd >= 0 from the kernel; ownership transferred to the OwnedFd.
     Ok(Some(unsafe { OwnedFd::from_raw_fd(fd) }))
 }
 
-/// Monta um bind-volume num container A CORRER, sem o parar (hot-plug). Ver o
-/// comentário do módulo para a sequência setns/unshare/open_tree/move_mount.
+/// Mounts a bind-volume in a RUNNING container, without stopping it (hot-plug). See the
+/// module comment for the setns/unshare/open_tree/move_mount sequence.
 pub fn mount_live(container: &Container, m: &Mount) -> Result<()> {
     if !mount_target_safe(&m.target) {
         return Err(Error::Invalid(format!("unsafe mount target: {}", m.target)));
@@ -3897,16 +3897,16 @@ pub fn mount_live(container: &Container, m: &Mount) -> Result<()> {
         .map_err(|_| Error::Invalid(format!("mount source does not exist: {}", m.source)))?
         .is_dir();
 
-    // fds dos namespaces (abertos no PAI, no contexto do host; herdados pela fork).
+    // namespace fds (opened in the PARENT, in the host context; inherited by the fork).
     //
-    // Abre-se SEMPRE o `user`, sem olhar a `container.userns` — `open_container_ns`
-    // já devolve `None` por comparação de inode quando o ns é o mesmo que o nosso.
-    // O campo `userns` só diz se o container CRIOU o seu; os do ingress rootless
-    // HERDAM o do holder e ficam com `userns=false` apesar de estarem num userns
-    // diferente do nosso. A confiar no campo, saltava-se o `setns(user)` e o
-    // `unshare(NEWNS)` seguinte dava EPERM (sem CAP_SYS_ADMIN no nosso userns) —
-    // exactamente o mesmo bug que o `exec` já teve e corrigiu da mesma maneira
-    // (ver o comentário do `ns_list` em `exec`).
+    // The `user` is ALWAYS opened, regardless of `container.userns` — `open_container_ns`
+    // already returns `None` by inode comparison when the ns is the same as ours.
+    // The `userns` field only says whether the container CREATED its own; the rootless ingress ones
+    // INHERIT the holder's and end up with `userns=false` despite being in a userns
+    // different from ours. Trusting the field, the `setns(user)` was skipped and the
+    // following `unshare(NEWNS)` gave EPERM (without CAP_SYS_ADMIN in our userns) —
+    // exactly the same bug that `exec` already had and fixed the same way
+    // (see the `ns_list` comment in `exec`).
     let user_fd = open_container_ns(pid, "user")?;
     let mnt_fd = open_container_ns(pid, "mnt")?.ok_or_else(|| {
         Error::Invalid("container shares the host mnt ns — nothing to mount".into())
@@ -3919,30 +3919,30 @@ pub fn mount_live(container: &Container, m: &Mount) -> Result<()> {
     let source = m.source.clone();
     let target = m.target.clone();
 
-    // fork: o filho fica single-threaded (requisito do setns(user)).
-    // SAFETY: o filho só faz syscalls simples e `_exit`, sem correr destrutores.
+    // fork: the child stays single-threaded (requirement of setns(user)).
+    // SAFETY: the child only does simple syscalls and `_exit`, without running destructors.
     match unsafe { fork() }.map_err(syserr("fork"))? {
         ForkResult::Child => {
             let fail = |code: i32, msg: &str| -> ! {
                 eprintln!("delonix: mount_live: {msg}");
                 unsafe { libc::_exit(code) }
             };
-            // 1) entra no userns do container (ganha CAP_SYS_ADMIN lá).
+            // 1) enter the container's userns (gain CAP_SYS_ADMIN there).
             if let Some(u) = user_fd {
                 if setns(u, CloneFlags::empty()).is_err() {
                     fail(125, "setns(user)");
                 }
-                // SAFETY: temos CAP_SETUID no userns do container.
+                // SAFETY: we have CAP_SETUID in the container's userns.
                 unsafe {
                     libc::setgid(0);
                     libc::setuid(0);
                 }
             }
-            // 2) mnt ns novo (cópia do do host) possuído pelo userns do container.
+            // 2) new mnt ns (copy of the host's) owned by the container's userns.
             if unshare(CloneFlags::CLONE_NEWNS).is_err() {
                 fail(124, "unshare(NEWNS)");
             }
-            // 3) clona a subárvore-fonte (visível: ainda vemos a árvore do host).
+            // 3) clone the source subtree (visible: we still see the host's tree).
             let dfd = match open_tree_clone(&source, true) {
                 Ok(f) => f,
                 Err(e) => fail(
@@ -3953,11 +3953,11 @@ pub fn mount_live(container: &Container, m: &Mount) -> Result<()> {
             if mount_setattr_fd(dfd.as_raw_fd(), attr).is_err() {
                 fail(122, "mount_setattr");
             }
-            // 4) entra no mnt ns REAL do container (a raiz passa a ser a do container).
+            // 4) enter the container's REAL mnt ns (the root becomes the container's).
             if setns(mnt_fd, CloneFlags::CLONE_NEWNS).is_err() {
                 fail(121, "setns(mnt)");
             }
-            // 5) cria o ponto de montagem (resolve contra a raiz = raiz do container).
+            // 5) create the mount point (resolves against the root = container root).
             if src_is_dir {
                 let _ = std::fs::create_dir_all(&target);
             } else {
@@ -3966,7 +3966,7 @@ pub fn mount_live(container: &Container, m: &Mount) -> Result<()> {
                 }
                 let _ = std::fs::File::create(&target);
             }
-            // 6) anexa o mount destacado no alvo.
+            // 6) attach the detached mount at the target.
             if move_mount_to(dfd.as_raw_fd(), &target).is_err() {
                 fail(120, "move_mount");
             }
@@ -3986,8 +3986,8 @@ pub fn mount_live(container: &Container, m: &Mount) -> Result<()> {
     }
 }
 
-/// Desmonta um bind-volume dum container A CORRER (hot-unplug). Entra no mnt ns
-/// do container e faz `umount2(target, MNT_DETACH)` (lazy: não falha se ocupado).
+/// Unmounts a bind-volume from a RUNNING container (hot-unplug). Enters the container's
+/// mnt ns and does `umount2(target, MNT_DETACH)` (lazy: does not fail if busy).
 pub fn unmount_live(container: &Container, target: &str) -> Result<()> {
     if !mount_target_safe(target) {
         return Err(Error::Invalid(format!("unsafe unmount target: {target}")));
@@ -3996,15 +3996,15 @@ pub fn unmount_live(container: &Container, target: &str) -> Result<()> {
         .pid
         .filter(|p| safe_to_signal(*p, container.pid_starttime))
         .ok_or_else(|| Error::NotRunning(container.short_id().to_string()))?;
-    // Sempre o `user` (skip-por-inode em `open_container_ns`) — ver a nota
-    // extensa em `mount_live`: `container.userns` não é o mesmo que "está num
-    // userns diferente do meu".
+    // Always the `user` (skip-by-inode in `open_container_ns`) — see the extensive
+    // note in `mount_live`: `container.userns` is not the same as "is in a
+    // userns different from mine".
     let user_fd = open_container_ns(pid, "user")?;
     let mnt_fd = open_container_ns(pid, "mnt")?
         .ok_or_else(|| Error::Invalid("container shares the host mnt ns".into()))?;
     let target = target.to_string();
 
-    // SAFETY: o filho só faz syscalls simples e `_exit`.
+    // SAFETY: the child only does simple syscalls and `_exit`.
     match unsafe { fork() }.map_err(syserr("fork"))? {
         ForkResult::Child => {
             if let Some(u) = user_fd {
@@ -4037,12 +4037,12 @@ pub fn unmount_live(container: &Container, target: &str) -> Result<()> {
 }
 
 // ----------------------------------------------------------------------------
-// Prioridade de CPU (nice/renice) — QoS #6
+// CPU priority (nice/renice) — QoS #6
 // ----------------------------------------------------------------------------
 
-/// Reúne os PIDs (host) de um container: primeiro via `cgroup.procs` (preciso);
-/// se faltar (rootless sem delegação de cgroup), faz BFS pela árvore de processos
-/// a partir do `pid` do init, lendo o `ppid` (campo 4 de `/proc/<pid>/stat`).
+/// Gathers a container's (host) PIDs: first via `cgroup.procs` (precise);
+/// if missing (rootless without cgroup delegation), does a BFS over the process tree
+/// from the init's `pid`, reading the `ppid` (field 4 of `/proc/<pid>/stat`).
 fn container_pids(container: &Container) -> Vec<i32> {
     if let Ok(procs) = std::fs::read_to_string(format!("{}/cgroup.procs", container.cgroup())) {
         let v: Vec<i32> = procs
@@ -4056,7 +4056,7 @@ fn container_pids(container: &Container) -> Vec<i32> {
     let Some(root) = container.pid else {
         return Vec::new();
     };
-    // mapa ppid→[filhos] a partir de /proc, depois BFS desde o init.
+    // ppid→[children] map from /proc, then BFS from the init.
     let mut children: std::collections::HashMap<i32, Vec<i32>> = std::collections::HashMap::new();
     if let Ok(rd) = std::fs::read_dir("/proc") {
         for e in rd.flatten() {
@@ -4064,7 +4064,7 @@ fn container_pids(container: &Container) -> Vec<i32> {
                 continue;
             };
             if let Ok(stat) = std::fs::read_to_string(format!("/proc/{pid}/stat")) {
-                // campo 4 (ppid) vem DEPOIS do `comm` entre parênteses — fatia após ')'.
+                // field 4 (ppid) comes AFTER the `comm` in parentheses — slice after ')'.
                 if let Some(rest) = stat.rsplit(')').next() {
                     let f: Vec<&str> = rest.split_whitespace().collect();
                     if let Some(ppid) = f.get(1).and_then(|s| s.parse::<i32>().ok()) {
@@ -4087,10 +4087,10 @@ fn container_pids(container: &Container) -> Vec<i32> {
     out
 }
 
-/// Aplica uma prioridade de CPU (`nice`) a TODA a árvore de processos de um
-/// container A CORRER (renice ao vivo). Best-effort: baixar prioridade (nice
-/// positivo) funciona sem privilégio; subir (negativo) exige `CAP_SYS_NICE`/root,
-/// por isso falhas individuais não abortam. Devolve `(aplicados, total)`.
+/// Applies a CPU priority (`nice`) to the WHOLE process tree of a
+/// RUNNING container (live renice). Best-effort: lowering priority (positive nice)
+/// works without privilege; raising (negative) requires `CAP_SYS_NICE`/root,
+/// so individual failures do not abort. Returns `(applied, total)`.
 pub fn set_priority(container: &Container, nice: i32) -> Result<(usize, usize)> {
     let nice = nice.clamp(-20, 19);
     let pid = container
@@ -4104,7 +4104,7 @@ pub fn set_priority(container: &Container, nice: i32) -> Result<(usize, usize)> 
     }
     let mut applied = 0usize;
     for p in &pids {
-        // SAFETY: setpriority com PRIO_PROCESS e um pid válido; sem efeitos de memória.
+        // SAFETY: setpriority with PRIO_PROCESS and a valid pid; no memory effects.
         let r = unsafe { libc::setpriority(libc::PRIO_PROCESS, *p as libc::id_t, nice) };
         if r == 0 {
             applied += 1;
@@ -4114,17 +4114,17 @@ pub fn set_priority(container: &Container, nice: i32) -> Result<(usize, usize)> 
 }
 
 // ----------------------------------------------------------------------------
-// Ciclo de vida: stop / remove
+// Lifecycle: stop / remove
 // ----------------------------------------------------------------------------
 
-/// Pára um container: `SIGTERM`, espera até `timeout_secs`, depois `SIGKILL`.
+/// Stops a container: `SIGTERM`, waits up to `timeout_secs`, then `SIGKILL`.
 pub fn stop(store: &Store, container: &mut Container, timeout_secs: u64) -> Result<()> {
     let pid = container
         .pid
         .ok_or_else(|| Error::NotRunning(container.short_id().to_string()))?;
     let st = container.pid_starttime;
-    // Protecção contra reutilização de PID: se o PID já não é o nosso processo
-    // (kernel reciclou-o), NÃO enviamos sinais — só limpamos o estado.
+    // PID reuse protection: if the PID is no longer our process
+    // (the kernel recycled it), we do NOT send signals — we only clean up the state.
     if !safe_to_signal(pid, st) {
         container.status = Status::Stopped;
         container.pid = None;
@@ -4143,8 +4143,8 @@ pub fn stop(store: &Store, container: &mut Container, timeout_secs: u64) -> Resu
     if safe_to_signal(pid, st) {
         let _ = kill(target, Signal::SIGKILL);
     }
-    // Paragem INTENCIONAL (pelo utilizador) → sempre Stopped, mesmo que tenha sido
-    // preciso SIGKILL (não é um crash: foi um stop pedido).
+    // INTENTIONAL stop (by the user) → always Stopped, even if SIGKILL was
+    // needed (it is not a crash: it was a requested stop).
     container.status = Status::Stopped;
     container.pid = None;
     store.save(container)?;
@@ -4152,9 +4152,9 @@ pub fn stop(store: &Store, container: &mut Container, timeout_secs: u64) -> Resu
     Ok(())
 }
 
-/// Remove o cgroup de um container, esperando que esvazie. Após `SIGKILL` o
-/// processo pode levar uns ms a ser ceifado pelo init → `rmdir` daria `EBUSY`;
-/// por isso reentamos brevemente (evita fuga de cgroups vazios — robustez).
+/// Removes a container's cgroup, waiting for it to empty. After `SIGKILL` the
+/// process may take a few ms to be reaped by the init → `rmdir` would give `EBUSY`;
+/// so we retry briefly (avoids leaking empty cgroups — robustness).
 fn remove_cgroup(cgroup: &str) {
     for _ in 0..100 {
         if !std::path::Path::new(cgroup).exists() || std::fs::remove_dir(cgroup).is_ok() {
@@ -4164,10 +4164,10 @@ fn remove_cgroup(cgroup: &str) {
     }
 }
 
-/// Remove o cgroup do container em TODAS as localizações possíveis: o caminho
-/// root-mode (`Container::cgroup()`) e os leaves delegados rootless — a base
-/// atual (scope dedicado) e a base-fuga `dlx-containers` sob o `user@`.
-/// Best-effort; só remove dirs vazios (o `remove_cgroup` reenta).
+/// Removes the container's cgroup in ALL possible locations: the
+/// root-mode path (`Container::cgroup()`) and the rootless delegated leaves — the
+/// current base (dedicated scope) and the escape-base `dlx-containers` under the `user@`.
+/// Best-effort; only removes empty dirs (the `remove_cgroup` retries).
 fn remove_container_cgroup(container: &Container) {
     remove_cgroup(&container.cgroup());
     if let Some(cur) = current_cgroup_v2() {
@@ -4178,9 +4178,9 @@ fn remove_container_cgroup(container: &Container) {
     }
 }
 
-/// Cgroup v2 REAL do container (lido de `/proc/<pid>/cgroup` do init) — cobre
-/// o leaf delegado rootless (`.../dlx-<id>`), onde `Container::cgroup()` (o
-/// caminho root-mode estático) não aponta. Fallback: `cgroup()`.
+/// The container's REAL cgroup v2 (read from the init's `/proc/<pid>/cgroup`) — covers
+/// the rootless delegated leaf (`.../dlx-<id>`), where `Container::cgroup()` (the
+/// static root-mode path) does not point. Fallback: `cgroup()`.
 pub fn live_cgroup(container: &Container) -> String {
     if let Some(pid) = container.pid {
         if let Ok(s) = std::fs::read_to_string(format!("/proc/{pid}/cgroup")) {
@@ -4192,10 +4192,10 @@ pub fn live_cgroup(container: &Container) -> String {
     container.cgroup()
 }
 
-/// Suspende (`pause`) ou retoma (`unpause`) um container usando o *freezer* do
-/// cgroup v2 (`cgroup.freeze`): `1` congela todos os processos, `0` retoma. Ao
-/// contrário do `SIGSTOP`, é atómico para a árvore inteira e invisível ao
-/// processo (não pode ser apanhado/ignorado).
+/// Suspends (`pause`) or resumes (`unpause`) a container using the cgroup v2
+/// *freezer* (`cgroup.freeze`): `1` freezes all processes, `0` resumes. Unlike
+/// `SIGSTOP`, it is atomic for the whole tree and invisible to the
+/// process (cannot be caught/ignored).
 pub fn set_frozen(container: &Container, frozen: bool) -> Result<()> {
     if !container
         .pid
@@ -4212,28 +4212,28 @@ pub fn set_frozen(container: &Container, frozen: bool) -> Result<()> {
     Ok(())
 }
 
-/// `true` se o container está congelado (`cgroup.freeze` == 1).
+/// `true` if the container is frozen (`cgroup.freeze` == 1).
 pub fn is_frozen(container: &Container) -> bool {
     std::fs::read_to_string(format!("{}/cgroup.freeze", live_cgroup(container)))
         .map(|s| s.trim() == "1")
         .unwrap_or(false)
 }
 
-/// Reconcilia o `status` de um container contra a realidade do kernel (sem o
-/// gravar — o chamador grava se devolver `true`). Centraliza a lógica dos 6
-/// estados nas listagens (`ps`, API, Console):
-///   * Running + pid morto  → **Crashed** (morte inesperada; um stop limpo já teria
-///     posto Stopped). pid = None.
-///   * Running + congelado   → **Paused** (freezer do cgroup ativo).
-///   * Paused + descongelado → **Running** (retomado externamente).
-///   * Paused + pid morto    → **Crashed**.
+/// Reconciles a container's `status` against the kernel reality (without
+/// saving it — the caller saves if it returns `true`). Centralizes the 6-state
+/// logic in the listings (`ps`, API, Console):
+///   * Running + dead pid  → **Crashed** (unexpected death; a clean stop would already have
+///     set Stopped). pid = None.
+///   * Running + frozen     → **Paused** (cgroup freezer active).
+///   * Paused + thawed      → **Running** (resumed externally).
+///   * Paused + dead pid    → **Crashed**.
 ///
-/// Estados terminais (Stopped/Failed/Crashed) e Created não são tocados.
+/// Terminal states (Stopped/Failed/Crashed) and Created are not touched.
 pub fn reconcile_status(c: &mut Container) -> bool {
-    // `safe_to_signal` (não `is_alive` cru) para fechar a janela de reutilização
-    // de PID: se o init morreu e o kernel reciclou o PID para um processo alheio
-    // do host, `is_alive` daria `true` e o container ficaria preso em Running a
-    // apontar para um PID que não é o seu. O `starttime` registado desempata.
+    // `safe_to_signal` (not raw `is_alive`) to close the PID-reuse window:
+    // if the init died and the kernel recycled the PID for a process belonging to the
+    // host, `is_alive` would give `true` and the container would be stuck in Running
+    // pointing to a PID that is not its own. The recorded `starttime` breaks the tie.
     match c.status {
         Status::Running => match c.pid {
             Some(pid) if !safe_to_signal(pid, c.pid_starttime) => {
@@ -4263,9 +4263,9 @@ pub fn reconcile_status(c: &mut Container) -> bool {
     }
 }
 
-/// Reescreve, AO VIVO, os limites de cgroup de um container (`docker update`).
-/// Se o container estiver parado, não há cgroup — só o registo muda (na CLI), e
-/// os novos limites aplicam-se no próximo `start`.
+/// Rewrites, LIVE, a container's cgroup limits (`docker update`).
+/// If the container is stopped, there is no cgroup — only the record changes (in the CLI), and
+/// the new limits apply on the next `start`.
 pub fn update_limits(
     container: &Container,
     memory: Option<&str>,
@@ -4284,7 +4284,7 @@ pub fn update_limits(
     Ok(())
 }
 
-/// Remove um container. Se estiver a correr, exige `force` (e mata-o).
+/// Removes a container. If it is running, requires `force` (and kills it).
 pub fn remove(store: &Store, container: &Container, force: bool) -> Result<()> {
     if let Some(pid) = container.pid {
         if safe_to_signal(pid, container.pid_starttime) {
@@ -4306,13 +4306,13 @@ pub fn remove(store: &Store, container: &Container, force: bool) -> Result<()> {
 mod tests {
     use super::*;
 
-    /// `lchown_tree` NUNCA pode seguir symlinks: um symlink dentro da árvore para
-    /// um ficheiro FORA da árvore (ex. imagem OCI maliciosa `usr/x -> /etc/shadow`)
-    /// não pode fazer-nos tocar na posse desse ficheiro externo. Prova-se sem
-    /// privilégios de root: qualquer chamada real a chown(2)/lchown(2) actualiza o
-    /// ctime do inode visado, mesmo passando o uid/gid já actuais — se o ctime do
-    /// alvo do symlink mudar, a função seguiu o link (bug); se só o ctime do
-    /// PRÓPRIO link mudar, `lchown` foi usado correctamente.
+    /// `lchown_tree` can NEVER follow symlinks: a symlink inside the tree to
+    /// a file OUTSIDE the tree (e.g. malicious OCI image `usr/x -> /etc/shadow`)
+    /// cannot make us touch that external file's ownership. It is proven without
+    /// root privileges: any real call to chown(2)/lchown(2) updates the
+    /// ctime of the targeted inode, even passing the already-current uid/gid — if the ctime of the
+    /// symlink target changes, the function followed the link (bug); if only the ctime of the
+    /// link ITSELF changes, `lchown` was used correctly.
     #[test]
     fn lchown_tree_nao_segue_symlinks() {
         use std::os::unix::fs::MetadataExt;
@@ -4337,7 +4337,7 @@ mod tests {
         let link = tree.join("link_to_victim");
         std::os::unix::fs::symlink(&victim, &link).unwrap();
 
-        // ctime "antes" — dorme 1s porque a resolução de ctime em alguns FS é de 1s.
+        // ctime "before" — sleeps 1s because the ctime resolution on some FS is 1s.
         std::thread::sleep(std::time::Duration::from_millis(1100));
         let victim_ctime_before = std::fs::metadata(&victim).unwrap().ctime();
         let link_ctime_before = std::fs::symlink_metadata(&link).unwrap().ctime();
@@ -4369,7 +4369,7 @@ mod tests {
 
     #[test]
     fn user_service_base_encontra_a_fronteira_de_delegacao() {
-        // caso normal: sessão de utilizador → base sob o user@<uid>.service.
+        // normal case: user session → base under the user@<uid>.service.
         assert_eq!(
             user_service_base(
                 "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice/app-x.scope"
@@ -4377,18 +4377,18 @@ mod tests {
             .as_deref(),
             Some("/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/dlx-containers")
         );
-        // o próprio user@ (fim do caminho) também serve de âncora.
+        // the user@ itself (end of the path) also serves as an anchor.
         assert_eq!(
             user_service_base("/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service")
                 .as_deref(),
             Some("/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/dlx-containers")
         );
-        // fora da árvore de sessão (serviço de sistema) → sem fuga.
+        // outside the session tree (system service) → no escape.
         assert_eq!(
             user_service_base("/sys/fs/cgroup/system.slice/foo.service"),
             None
         );
-        // um segmento com "user@" sem o sufixo ".service" não engana o parser.
+        // a segment with "user@" without the ".service" suffix does not fool the parser.
         assert_eq!(
             user_service_base("/sys/fs/cgroup/system.slice/user@fake"),
             None
@@ -4397,38 +4397,38 @@ mod tests {
 
     #[test]
     fn mount_target_rejects_traversal() {
-        // seguros
+        // safe
         assert!(mount_target_safe("/data"));
         assert!(mount_target_safe("/var/lib/app/config"));
-        // escape via `..` (montaria sobre o host antes do pivot_root)
+        // escape via `..` (would mount over the host before the pivot_root)
         assert!(!mount_target_safe("/../../etc"));
         assert!(!mount_target_safe("/data/../../etc/shadow"));
         assert!(!mount_target_safe("/a/../b"));
-        // relativo (resolve a partir do cwd do holder, não do rootfs)
+        // relative (resolves from the holder's cwd, not the rootfs)
         assert!(!mount_target_safe("etc/passwd"));
         assert!(!mount_target_safe(""));
     }
 
     #[test]
     fn confinement_ok_is_fail_closed() {
-        let keep = (1u64 << 1) | (1u64 << 3); // só caps 1 e 3 na allowlist
-                                              // estado bom: no_new_privs, seccomp modo filtro, caps ⊆ keep
+        let keep = (1u64 << 1) | (1u64 << 3); // only caps 1 and 3 on the allowlist
+                                              // good state: no_new_privs, seccomp filter mode, caps ⊆ keep
         assert!(confinement_ok(Some(1), Some(2), Some(keep), Some(keep), true, keep).is_ok());
-        // NO_NEW_PRIVS inativo → aborta
+        // NO_NEW_PRIVS inactive → aborts
         assert!(confinement_ok(Some(0), Some(2), Some(keep), Some(keep), true, keep).is_err());
-        // seccomp esperado mas não em modo filtro (falhou a aplicar) → aborta
+        // seccomp expected but not in filter mode (failed to apply) → aborts
         assert!(confinement_ok(Some(1), Some(0), Some(keep), Some(keep), true, keep).is_err());
-        // cap fora da allowlist persiste no bounding set (capset/capbset falhou) → aborta
+        // cap outside the allowlist persists in the bounding set (capset/capbset failed) → aborts
         let leaked = keep | (1u64 << 21); // + CAP_SYS_ADMIN
         assert!(confinement_ok(Some(1), Some(2), Some(leaked), Some(keep), true, keep).is_err());
-        // …ou no effective
+        // …or in the effective
         assert!(confinement_ok(Some(1), Some(2), Some(keep), Some(leaked), true, keep).is_err());
-        // unconfined (--security-opt seccomp=unconfined): modo 0 é aceite
+        // unconfined (--security-opt seccomp=unconfined): mode 0 is accepted
         assert!(confinement_ok(Some(1), Some(0), Some(keep), Some(keep), false, keep).is_ok());
-        // campos de caps ausentes = não-verificável = aborta (fail-closed)
+        // cap fields absent = unverifiable = aborts (fail-closed)
         assert!(confinement_ok(Some(1), Some(2), None, Some(keep), true, keep).is_err());
         assert!(confinement_ok(Some(1), Some(2), Some(keep), None, true, keep).is_err());
-        // privileged (keep = todas as caps): nada fica "fora" → ok
+        // privileged (keep = all caps): nothing ends up "outside" → ok
         let allcaps = u64::MAX;
         assert!(confinement_ok(
             Some(1),
@@ -4446,14 +4446,14 @@ mod tests {
         assert_eq!(cpu_max_value("0.5"), "50000 100000");
         assert_eq!(cpu_max_value("1.0"), "100000 100000");
         assert_eq!(cpu_max_value("2"), "200000 100000");
-        // valores absurdos têm um piso (0.01 de um core)
+        // absurd values have a floor (0.01 of a core)
         assert_eq!(cpu_max_value("0"), "1000 100000");
     }
 
     #[test]
     fn dangerous_caps_are_not_kept() {
         // SYS_ADMIN(21), SYS_MODULE(16), SYS_BOOT(22), MKNOD(27), SYS_RAWIO(17),
-        // SYS_PTRACE(19), BPF(39) NÃO podem estar na allowlist.
+        // SYS_PTRACE(19), BPF(39) can NOT be on the allowlist.
         for dangerous in [21u8, 16, 22, 27, 17, 19, 39] {
             assert!(
                 !KEPT_CAPS.contains(&dangerous),
@@ -4464,9 +4464,9 @@ mod tests {
 
     #[test]
     fn bpf_insn_encoding() {
-        // EXIT (code 0x95, sem regs/off/imm).
+        // EXIT (code 0x95, without regs/off/imm).
         assert_eq!(bpf_insn(0x95, 0, 0, 0, 0), 0x95);
-        // MOV r0 = 1 (imm nos 32 bits altos).
+        // MOV r0 = 1 (imm in the high 32 bits).
         assert_eq!(bpf_insn(0xb7, 0, 0, 0, 1), 0xb7 | (1u64 << 32));
         // LDX r2 = *(u32*)(r1+0): dst=2 (bits 8-11), src=1 (bits 12-15).
         assert_eq!(bpf_insn(0x61, 2, 1, 0, 0), 0x61 | (2 << 8) | (1 << 12));
@@ -4475,7 +4475,7 @@ mod tests {
     #[test]
     fn seccomp_allowlist_excludes_dangerous_and_includes_common() {
         let allowed = allowed_syscalls();
-        // perigosos: FORA da allowlist (= negados por omissão).
+        // dangerous: OUTSIDE the allowlist (= denied by default).
         for nr in [
             libc::SYS_mount,
             libc::SYS_reboot,
@@ -4492,7 +4492,7 @@ mod tests {
                 "syscall {nr} perigoso NÃO devia estar na allowlist"
             );
         }
-        // comuns/essenciais: DENTRO da allowlist.
+        // common/essential: INSIDE the allowlist.
         for nr in [
             libc::SYS_read,
             libc::SYS_write,
@@ -4514,16 +4514,16 @@ mod tests {
         assert_eq!(parse_mem_bytes("64M"), 64 * 1024 * 1024);
         assert_eq!(parse_mem_bytes("1G"), 1024 * 1024 * 1024);
         assert_eq!(parse_mem_bytes("512"), 512);
-        // overflow → satura (não faz panic/wrap).
+        // overflow → saturates (does not panic/wrap).
         assert_eq!(parse_mem_bytes("99999999999G"), u64::MAX);
-        // lixo → u64::MAX (recusa na admissão), NUNCA 0 (que deixaria passar tudo).
+        // garbage → u64::MAX (refused at admission), NEVER 0 (which would let everything through).
         assert_eq!(parse_mem_bytes("64MB"), u64::MAX);
         assert_eq!(parse_mem_bytes("abc"), u64::MAX);
     }
 
     #[test]
     fn sysctl_allowlist_so_aceita_namespaced() {
-        // namespaced (seguros) → permitidos.
+        // namespaced (safe) → permitted.
         for k in [
             "net.ipv4.ip_forward",
             "kernel.shmmax",
@@ -4532,7 +4532,7 @@ mod tests {
         ] {
             assert!(sysctl_namespaced(k), "{k} devia ser permitido");
         }
-        // globais ao host / travessia → recusados.
+        // global to the host / traversal → refused.
         for k in [
             "kernel.hostname",
             "vm.swappiness",

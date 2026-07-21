@@ -1,7 +1,7 @@
-//! `delonix-image` — imagens OCI do Delonix Engine.
+//! `delonix-image` — Delonix Engine OCI images.
 //!
-//! Junta as quatro peças do Mês 5 (Parte B): **CAS** ([`cas`]), **modelo +
-//! armazém** ([`image`]), **load** ([`load`]), **overlay2** ([`overlay`]) e
+//! Ties together the four pieces of Month 5 (Part B): **CAS** ([`cas`]), **model +
+//! store** ([`image`]), **load** ([`load`]), **overlay2** ([`overlay`]) and
 //! **build** ([`build`]).
 
 pub mod auth;
@@ -97,11 +97,11 @@ mod tests {
         let b = mk(&"b".repeat(64), "other:latest");
         store.save(&a).unwrap();
         store.save(&b).unwrap();
-        // re-etiquetar B com a tag de A: deve MOVER (A fica sem ela; B passa a tê-la).
+        // re-tag B with A's tag: it must MOVE (A loses it; B gains it).
         store.tag("other:latest", "app:latest").unwrap();
         let resolved = store.resolve("app:latest").unwrap();
         assert_eq!(resolved.id, b.id, "app:latest devia agora apontar para B");
-        // só UMA imagem tem app:latest.
+        // only ONE image has app:latest.
         let holders = store
             .list()
             .unwrap()

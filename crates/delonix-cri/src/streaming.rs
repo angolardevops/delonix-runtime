@@ -1,22 +1,22 @@
-//! Servidor de **streaming** do CRI — o que dá vida ao `kubectl exec -it` e ao
-//! `crictl exec -it`.
+//! CRI **streaming** server — the one that brings `kubectl exec -it` and
+//! `crictl exec -it` to life.
 //!
-//! Modelo do CRI: as RPCs `Exec`/`Attach`/`PortForward` **não** transportam os
-//! dados; devolvem uma **URL** para um servidor HTTP que o cliente (kubelet/
-//! `crictl`) contacta e onde faz *upgrade* para o protocolo *remotecommand* do
-//! Kubernetes. Implementamos esse servidor aqui, sobre **WebSocket**
-//! (`v5.channel.k8s.io`) — o `crictl`/client-go modernos tentam WebSocket
-//! primeiro e só caem para SPDY se o servidor não o anunciar.
+//! CRI model: the `Exec`/`Attach`/`PortForward` RPCs do **not** carry the
+//! data; they return a **URL** to an HTTP server that the client (kubelet/
+//! `crictl`) contacts and where it *upgrades* to the Kubernetes *remotecommand*
+//! protocol. We implement that server here, over **WebSocket**
+//! (`v5.channel.k8s.io`) — modern `crictl`/client-go try WebSocket first and
+//! only fall back to SPDY if the server does not advertise it.
 //!
-//! Protocolo WebSocket (cada *frame* binário começa por um byte de canal):
-//!   0 = stdin (cliente→nós)   1 = stdout   2 = stderr   3 = erro/estado
-//!   4 = resize (JSON `{"Width":w,"Height":h}`)   255 = fechar stream (v5)
+//! WebSocket protocol (each binary *frame* starts with a channel byte):
+//!   0 = stdin (client→us)   1 = stdout   2 = stderr   3 = error/state
+//!   4 = resize (JSON `{"Width":w,"Height":h}`)   255 = close stream (v5)
 //!
-//! O `exec` é executado pelo binário `delonix exec` (que faz `setns` ao
-//! container). Em modo TTY alocamos um **pty** externo e passamos o *slave* como
-//! stdio do `delonix exec -t` — que por sua vez aloca o pty interno no devpts do
-//! container (modelo *console socket* do runc). A ponte master↔WebSocket move os
-//! bytes em bruto. C2.
+//! `exec` is run by the `delonix exec` binary (which does `setns` into the
+//! container). In TTY mode we allocate an external **pty** and pass the *slave*
+//! as the stdio of `delonix exec -t` — which in turn allocates the inner pty in
+//! the container's devpts (runc's *console socket* model). The master↔WebSocket
+//! bridge moves the raw bytes. C2.
 #![allow(clippy::result_large_err)]
 
 use std::collections::HashMap;
@@ -34,7 +34,7 @@ use axum::routing::any;
 use axum::Router;
 use futures_util::{SinkExt, StreamExt};
 
-/// Pedido de streaming guardado entre a RPC e a ligação subsequente.
+/// Streaming request kept between the RPC and the subsequent connection.
 #[derive(Clone)]
 pub struct Pending {
     pub container_id: String,
@@ -43,23 +43,23 @@ pub struct Pending {
     pub stdin: bool,
     pub stdout: bool,
     pub stderr: bool,
-    /// `true` = ATTACH (transmite o output do container via `delonix logs -f`),
-    /// `false` = EXEC (corre `cmd` no container). Reutiliza toda a máquina de
-    /// streaming SPDY/WebSocket — só o comando lançado difere.
+    /// `true` = ATTACH (streams the container's output via `delonix logs -f`),
+    /// `false` = EXEC (runs `cmd` in the container). Reuses the whole
+    /// SPDY/WebSocket streaming machinery — only the launched command differs.
     pub attach: bool,
     created: Instant,
 }
 
-/// Servidor de streaming partilhado (token-cache + base do engine).
+/// Shared streaming server (token-cache + engine base).
 #[derive(Clone)]
 pub struct Streamer {
     base: PathBuf,
-    advertised: String, // ex.: "http://127.0.0.1:34567"
+    advertised: String, // e.g. "http://127.0.0.1:34567"
     execs: Arc<Mutex<HashMap<String, Pending>>>,
     pforwards: Arc<Mutex<HashMap<String, PfPending>>>,
 }
 
-/// Pedido de `PortForward` guardado entre a RPC e a ligação subsequente.
+/// `PortForward` request kept between the RPC and the subsequent connection.
 #[derive(Clone)]
 pub struct PfPending {
     pub pod_sandbox_id: String,
@@ -77,9 +77,9 @@ impl Streamer {
         }
     }
 
-    /// Regista um `port_forward` e devolve a URL de streaming. O `pod_sandbox_id`
-    /// resolve-se em tempo de ligação para o `pid` do infra container do pod
-    /// (`pod-cri-<id>`), cujo netns é onde se faz o proxy TCP.
+    /// Registers a `port_forward` and returns the streaming URL. The
+    /// `pod_sandbox_id` is resolved at connection time to the `pid` of the pod's
+    /// infra container (`pod-cri-<id>`), whose netns is where the TCP proxy runs.
     pub fn prepare_port_forward(&self, pod_sandbox_id: String, ports: Vec<i32>) -> String {
         let token = random_token();
         let mut m = self.pforwards.lock().unwrap();
@@ -95,7 +95,7 @@ impl Streamer {
         format!("{}/portforward/{}", self.advertised, token)
     }
 
-    /// Regista um `exec` e devolve a URL que o cliente vai contactar.
+    /// Registers an `exec` and returns the URL the client will contact.
     #[allow(clippy::too_many_arguments)]
     pub fn prepare_exec(
         &self,
@@ -125,9 +125,9 @@ impl Streamer {
         format!("{}/exec/{}", self.advertised, token)
     }
 
-    /// Regista um `attach` (output do container) e devolve a URL de streaming.
-    /// Reutiliza a mesma rota/handler do exec; o flag `attach` no `Pending` faz o
-    /// handler correr `delonix logs -f` em vez de `delonix exec`.
+    /// Registers an `attach` (container output) and returns the streaming URL.
+    /// Reuses the same route/handler as exec; the `attach` flag in `Pending` makes
+    /// the handler run `delonix logs -f` instead of `delonix exec`.
     pub fn prepare_attach(
         &self,
         container_id: String,
@@ -155,8 +155,8 @@ impl Streamer {
         format!("{}/exec/{}", self.advertised, token)
     }
 
-    /// Constrói o `Router` axum com as rotas de streaming. Aceita `GET`
-    /// (WebSocket) e `POST` (SPDY) — o `crictl`/`kubelet` usam `POST` para SPDY.
+    /// Builds the axum `Router` with the streaming routes. Accepts `GET`
+    /// (WebSocket) and `POST` (SPDY) — `crictl`/`kubelet` use `POST` for SPDY.
     pub fn router(self) -> Router {
         Router::new()
             .route("/exec/:token", any(exec_upgrade))
@@ -165,15 +165,15 @@ impl Streamer {
     }
 }
 
-/// Resolve o `pid` do infra container de um pod sandbox (`pod-cri-<id>`), cujo
-/// netns é onde se faz o proxy TCP do port-forward. `None` se não existir/parado.
+/// Resolves the `pid` of a pod sandbox's infra container (`pod-cri-<id>`), whose
+/// netns is where the port-forward TCP proxy runs. `None` if absent/stopped.
 fn pod_sandbox_pid(base: &std::path::Path, sandbox_id: &str) -> Option<i32> {
     let store = delonix_runtime_core::Store::open(base.join("containers")).ok()?;
     let c = store.load(&format!("pod-cri-{sandbox_id}")).ok()?;
     c.pid.filter(|p| delonix_runtime::is_alive(*p))
 }
 
-/// Handler HTTP → upgrade SPDY para `PortForward`.
+/// HTTP handler → SPDY upgrade for `PortForward`.
 async fn portforward_upgrade(
     State(st): State<Streamer>,
     AxPath(token): AxPath<String>,
@@ -193,9 +193,9 @@ async fn portforward_upgrade(
     crate::spdy::handle_port_forward(req, pid)
 }
 
-/// Constrói o argv do `delonix` a lançar para servir este stream: `logs -f`
-/// (attach — output do container) ou `exec [-t] <cmd>` (exec). Centraliza a
-/// diferença exec/attach que de outra forma estaria espalhada pelos handlers.
+/// Builds the `delonix` argv to launch to serve this stream: `logs -f`
+/// (attach — container output) or `exec [-t] <cmd>` (exec). Centralizes the
+/// exec/attach difference that would otherwise be scattered across the handlers.
 pub fn subprocess_args(attach: bool, cmd: &[String], name: &str, tty: bool) -> Vec<String> {
     if attach {
         vec![
@@ -220,13 +220,13 @@ pub fn subprocess_args(attach: bool, cmd: &[String], name: &str, tty: bool) -> V
     }
 }
 
-/// Remove tokens com mais de 5 minutos (o cliente liga-se em segundos).
+/// Removes tokens older than 5 minutes (the client connects within seconds).
 fn purge_expired(m: &mut HashMap<String, Pending>) {
     let now = Instant::now();
     m.retain(|_, p| now.duration_since(p.created) < Duration::from_secs(300));
 }
 
-/// Token aleatório (16 bytes de `/dev/urandom`, hex) — não adivinhável em loopback.
+/// Random token (16 bytes from `/dev/urandom`, hex) — unguessable on loopback.
 fn random_token() -> String {
     let mut buf = [0u8; 16];
     if let Ok(mut f) = std::fs::File::open("/dev/urandom") {
@@ -240,7 +240,7 @@ fn delonix_bin() -> PathBuf {
 }
 
 // ---------------------------------------------------------------------------
-// Handler HTTP → upgrade WebSocket.
+// HTTP handler → WebSocket upgrade.
 // ---------------------------------------------------------------------------
 
 async fn exec_upgrade(
@@ -261,7 +261,7 @@ async fn exec_upgrade(
         .unwrap_or("")
         .to_ascii_lowercase();
 
-    // O `crictl`/`kubelet` de hoje usam SPDY/3.1; o WebSocket (v5) é o futuro.
+    // Today's `crictl`/`kubelet` use SPDY/3.1; WebSocket (v5) is the future.
     if upgrade.contains("spdy") {
         return crate::spdy::handle_exec(req, base, name, p);
     }
@@ -286,11 +286,11 @@ async fn exec_upgrade(
 }
 
 // ---------------------------------------------------------------------------
-// Codificação do estado final (canal 3) — protocolo metav1.Status.
+// Final state encoding (channel 3) — metav1.Status protocol.
 // ---------------------------------------------------------------------------
 
-/// Mensagem de estado para o canal 3. Em sucesso `Success`; em código != 0 o
-/// client-go lê `details.causes[ExitCode]` para reportar o exit code real.
+/// State message for channel 3. On success `Success`; on code != 0 client-go
+/// reads `details.causes[ExitCode]` to report the real exit code.
 fn status_frame(exit_code: i32) -> Message {
     let body = if exit_code == 0 {
         serde_json::json!({"metadata":{},"status":"Success"})
@@ -316,7 +316,7 @@ fn err_frame(msg: &str) -> Message {
 }
 
 // ---------------------------------------------------------------------------
-// Exec com TTY: pty externo ↔ WebSocket (tudo no canal 1/stdout).
+// Exec with TTY: external pty ↔ WebSocket (all on channel 1/stdout).
 // ---------------------------------------------------------------------------
 
 async fn exec_tty(
@@ -336,8 +336,8 @@ async fn exec_tty(
         }
     };
 
-    // Captura o tamanho inicial: espera por um `resize` até 250 ms (o crictl
-    // envia-o de imediato), guardando o stdin que chegar entretanto para reenviar.
+    // Capture the initial size: wait for a `resize` up to 250 ms (crictl sends
+    // it right away), stashing any stdin that arrives meanwhile to resend.
     let mut pending_stdin: Vec<Vec<u8>> = Vec::new();
     loop {
         match tokio::time::timeout(Duration::from_millis(250), socket.recv()).await {
@@ -350,17 +350,17 @@ async fn exec_tty(
                 _ => {}
             },
             Ok(Some(Ok(_))) => {}
-            _ => break, // timeout ou ligação fechada
+            _ => break, // timeout or connection closed
         }
     }
 
-    // Lança `delonix exec -t <name> <cmd>` com o slave como stdio.
+    // Launch `delonix exec -t <name> <cmd>` with the slave as stdio.
     let mut command = std::process::Command::new(delonix_bin());
     command
         .env("DELONIX_ROOT", &base)
         .env("DELONIX_INTERNAL", "1")
         .args(subprocess_args(attach, &cmd, &name, true));
-    // SAFETY: dup do slave; cada Stdio fica dono do fd e fecha-o.
+    // SAFETY: dup of the slave; each Stdio owns its fd and closes it.
     unsafe {
         command
             .stdin(Stdio::from_raw_fd(libc::dup(slave)))
@@ -380,14 +380,14 @@ async fn exec_tty(
         }
     };
 
-    // Reenvia o stdin que chegou antes do spawn.
+    // Resend the stdin that arrived before the spawn.
     for chunk in &pending_stdin {
         write_all(master, chunk);
     }
 
     let (mut ws_tx, mut ws_rx) = socket.split();
 
-    // Thread: master → canal mpsc (stdout). EOF quando o filho fecha o pty.
+    // Thread: master → mpsc channel (stdout). EOF when the child closes the pty.
     let (out_tx, mut out_rx) = tokio::sync::mpsc::unbounded_channel::<Vec<u8>>();
     let m_read = master;
     let reader = std::thread::spawn(move || {
@@ -419,7 +419,7 @@ async fn exec_tty(
                 Some(Ok(Message::Binary(b))) if !b.is_empty() => match b[0] {
                     0 => write_all(master, &b[1..]),
                     4 => apply_resize(master, &b[1..]),
-                    255 => { /* fechar stdin: o pty não meia-fecha; ignora */ }
+                    255 => { /* close stdin: the pty doesn't half-close; ignore */ }
                     _ => {}
                 },
                 Some(Ok(Message::Close(_))) | None => break,
@@ -438,7 +438,7 @@ async fn exec_tty(
                 exit_code = Some(code.unwrap_or(-1));
             }
         }
-        // Termina quando o filho saiu E o stdout drenou.
+        // Ends when the child has exited AND stdout has drained.
         if exit_code.is_some() && !out_open {
             break;
         }
@@ -455,7 +455,7 @@ async fn exec_tty(
 }
 
 // ---------------------------------------------------------------------------
-// Exec sem TTY: stdin/stdout/stderr separados (canais 0/1/2).
+// Exec without TTY: separate stdin/stdout/stderr (channels 0/1/2).
 // ---------------------------------------------------------------------------
 
 async fn exec_pipes(
@@ -529,7 +529,7 @@ async fn exec_pipes(
                             let _ = si.flush();
                         }
                     }
-                    255 => { stdin = None; } // fecha stdin (EOF para o processo)
+                    255 => { stdin = None; } // close stdin (EOF for the process)
                     _ => {}
                 },
                 Some(Ok(Message::Close(_))) | None => break,
@@ -565,17 +565,17 @@ async fn exec_pipes(
 }
 
 // ---------------------------------------------------------------------------
-// Auxiliares de baixo nível (pty, resize, escrita).
+// Low-level helpers (pty, resize, write).
 // ---------------------------------------------------------------------------
 
-/// Aloca um pty externo (80x24 por omissão). Devolve `(master, slave)` em bruto.
+/// Allocates an external pty (80x24 by default). Returns raw `(master, slave)`.
 pub(crate) fn open_pty() -> Option<(i32, i32)> {
     let mut master: i32 = -1;
     let mut slave: i32 = -1;
     let mut ws: libc::winsize = unsafe { std::mem::zeroed() };
     ws.ws_row = 24;
     ws.ws_col = 80;
-    // SAFETY: openpty preenche master/slave; restantes ponteiros nulos = defaults.
+    // SAFETY: openpty fills master/slave; the remaining null pointers = defaults.
     let r = unsafe {
         libc::openpty(
             &mut master,
@@ -592,7 +592,7 @@ pub(crate) fn open_pty() -> Option<(i32, i32)> {
     }
 }
 
-/// Aplica um `resize` (JSON `{"Width":w,"Height":h}`) ao master via TIOCSWINSZ.
+/// Applies a `resize` (JSON `{"Width":w,"Height":h}`) to the master via TIOCSWINSZ.
 pub(crate) fn apply_resize(master: i32, payload: &[u8]) {
     let Ok(v) = serde_json::from_slice::<serde_json::Value>(payload) else {
         return;
@@ -602,13 +602,13 @@ pub(crate) fn apply_resize(master: i32, payload: &[u8]) {
     let mut ws: libc::winsize = unsafe { std::mem::zeroed() };
     ws.ws_row = rows;
     ws.ws_col = cols;
-    // SAFETY: master é um fd de pty válido; TIOCSWINSZ aceita uma winsize.
+    // SAFETY: master is a valid pty fd; TIOCSWINSZ accepts a winsize.
     unsafe {
         libc::ioctl(master, libc::TIOCSWINSZ, &ws);
     }
 }
 
-/// Escreve tudo num fd em bruto (master do pty), tolerando escritas parciais.
+/// Writes everything to a raw fd (the pty master), tolerating partial writes.
 pub(crate) fn write_all(fd: i32, mut data: &[u8]) {
     while !data.is_empty() {
         let n = unsafe { libc::write(fd, data.as_ptr() as *const _, data.len()) };

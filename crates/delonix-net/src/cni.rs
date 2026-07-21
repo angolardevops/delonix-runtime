@@ -1,15 +1,15 @@
-//! Camada de conformidade **CNI** (Container Network Interface, spec 0.4.0/1.0.0).
+//! **CNI** conformance layer (Container Network Interface, spec 0.4.0/1.0.0).
 //!
-//! Permite ao Delonix delegar a configuração de rede de uma netns a **plugins CNI
-//! reais** (`/etc/cni/net.d/*.conflist` + binários em `/opt/cni/bin`), de modo a
-//! correr Calico/Flannel/Cilium tal como o containerd/CRI-O — mantendo o SDN nativo
-//! (bridge `delonix0`) como *provider* interno alternativo.
+//! Lets Delonix delegate a netns's network configuration to **real CNI
+//! plugins** (`/etc/cni/net.d/*.conflist` + binaries in `/opt/cni/bin`), so as to
+//! run Calico/Flannel/Cilium just like containerd/CRI-O — keeping the native SDN
+//! (`delonix0` bridge) as an alternative internal *provider*.
 //!
-//! Este módulo é a **camada de protocolo**, pura e testável: descobre/parseia a
-//! config, resolve o binário do plugin no `CNI_PATH`, constrói o ambiente e o stdin
-//! JSON, invoca `ADD`/`DEL` encadeando o `prevResult`, e parseia o resultado/erro.
-//! O *wiring* aos caminhos de attach (root via `Net`, rootless via holder) é feito
-//! por quem chama `add`/`del`.
+//! This module is the **protocol layer**, pure and testable: it discovers/parses the
+//! config, resolves the plugin binary in `CNI_PATH`, builds the environment and the JSON
+//! stdin, invokes `ADD`/`DEL` chaining the `prevResult`, and parses the result/error.
+//! The *wiring* to the attach paths (root via `Net`, rootless via the holder) is done
+//! by whoever calls `add`/`del`.
 
 use delonix_runtime_core::{Error, Result};
 use serde::{Deserialize, Serialize};
@@ -17,14 +17,14 @@ use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-/// Diretório padrão dos plugins CNI (o mesmo do containerd/CRI-O).
+/// Default directory of CNI plugins (the same as containerd/CRI-O).
 pub const DEFAULT_PLUGIN_DIR: &str = "/opt/cni/bin";
-/// Diretório padrão das configs de rede CNI.
+/// Default directory of CNI network configs.
 pub const DEFAULT_CONF_DIR: &str = "/etc/cni/net.d";
-/// Interface por omissão dentro do container (paridade com o resto do Delonix).
+/// Default interface inside the container (parity with the rest of Delonix).
 pub const DEFAULT_IFNAME: &str = "eth0";
 
-/// O comando CNI (vai para a env var `CNI_COMMAND`).
+/// The CNI command (goes to the `CNI_COMMAND` env var).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Command_ {
     Add,
@@ -42,30 +42,30 @@ impl Command_ {
     }
 }
 
-/// Identidade do container/interface para uma invocação CNI.
+/// Container/interface identity for a CNI invocation.
 #[derive(Clone, Copy)]
 pub struct Target<'a> {
-    /// Id do container (`CNI_CONTAINERID`).
+    /// Container id (`CNI_CONTAINERID`).
     pub container_id: &'a str,
-    /// Caminho da netns (`CNI_NETNS`), ex. `/proc/<pid>/ns/net` ou `/run/netns/<n>`.
+    /// Netns path (`CNI_NETNS`), e.g. `/proc/<pid>/ns/net` or `/run/netns/<n>`.
     pub netns: &'a str,
-    /// Nome da interface dentro do container (`CNI_IFNAME`).
+    /// Interface name inside the container (`CNI_IFNAME`).
     pub ifname: &'a str,
 }
 
-/// Uma lista de configuração de rede CNI (`*.conflist`): uma cadeia de plugins que
-/// partilham `cniVersion`/`name`. Um `*.conf` de plugin único é normalizado nisto.
+/// A CNI network configuration list (`*.conflist`): a chain of plugins that
+/// share `cniVersion`/`name`. A single-plugin `*.conf` is normalized into this.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct NetConfList {
     #[serde(rename = "cniVersion")]
     pub cni_version: String,
     pub name: String,
-    /// Cada plugin é um objeto arbitrário; só o campo `type` é obrigatório. Guardamos
-    /// como `Value` para preservar campos específicos de cada plugin no round-trip.
+    /// Each plugin is an arbitrary object; only the `type` field is required. We keep it
+    /// as `Value` to preserve each plugin's specific fields across the round-trip.
     pub plugins: Vec<Value>,
 }
 
-/// Resultado de um plugin CNI (spec 1.0.0 — campos irrelevantes ignorados).
+/// Result of a CNI plugin (spec 1.0.0 — irrelevant fields ignored).
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct CniResult {
     #[serde(rename = "cniVersion", default)]
@@ -80,7 +80,7 @@ pub struct CniResult {
     pub dns: Value,
 }
 
-/// Uma interface no resultado CNI.
+/// An interface in the CNI result.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct Interface {
     pub name: String,
@@ -90,19 +90,19 @@ pub struct Interface {
     pub sandbox: String,
 }
 
-/// Um IP atribuído no resultado CNI (o IPAM do plugin substitui o `alloc_ip` nativo).
+/// An IP assigned in the CNI result (the plugin's IPAM replaces the native `alloc_ip`).
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct IpConf {
-    /// CIDR, ex. `10.244.1.7/24`.
+    /// CIDR, e.g. `10.244.1.7/24`.
     pub address: String,
     #[serde(default)]
     pub gateway: String,
-    /// Índice em `interfaces[]` a que este IP pertence.
+    /// Index in `interfaces[]` this IP belongs to.
     #[serde(default)]
     pub interface: Option<i64>,
 }
 
-/// Erro estruturado devolvido por um plugin (JSON no stdout com saída ≠ 0).
+/// Structured error returned by a plugin (JSON on stdout with a non-zero exit).
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CniError {
     pub code: i32,
@@ -112,11 +112,11 @@ pub struct CniError {
 }
 
 // ---------------------------------------------------------------------------
-//  Descoberta e parsing de config (puro)
+//  Config discovery and parsing (pure)
 // ---------------------------------------------------------------------------
 
-/// Lista os ficheiros de config CNI num diretório, por ordem alfabética (o CNI
-/// escolhe o primeiro). Aceita `*.conflist` e `*.conf`. Diretório ausente → vazio.
+/// Lists the CNI config files in a directory, in alphabetical order (CNI
+/// picks the first). Accepts `*.conflist` and `*.conf`. Missing directory → empty.
 pub fn list_conf_files(dir: &Path) -> Vec<PathBuf> {
     let Ok(rd) = std::fs::read_dir(dir) else {
         return Vec::new();
@@ -135,8 +135,8 @@ pub fn list_conf_files(dir: &Path) -> Vec<PathBuf> {
     out
 }
 
-/// Parseia uma config CNI, aceitando tanto `*.conflist` (com `plugins[]`) como um
-/// `*.conf` de plugin único (normalizado para uma lista de um só plugin).
+/// Parses a CNI config, accepting both `*.conflist` (with `plugins[]`) and a
+/// single-plugin `*.conf` (normalized to a list of a single plugin).
 pub fn parse_config(text: &str) -> Result<NetConfList> {
     let v: Value = serde_json::from_str(text)
         .map_err(|e| Error::Invalid(format!("invalid CNI config: {e}")))?;
@@ -144,7 +144,7 @@ pub fn parse_config(text: &str) -> Result<NetConfList> {
         return serde_json::from_value(v)
             .map_err(|e| Error::Invalid(format!("invalid CNI conflist: {e}")));
     }
-    // `*.conf` de plugin único: o próprio objeto é o plugin.
+    // single-plugin `*.conf`: the object itself is the plugin.
     let cni_version = v
         .get("cniVersion")
         .and_then(|s| s.as_str())
@@ -162,7 +162,7 @@ pub fn parse_config(text: &str) -> Result<NetConfList> {
     })
 }
 
-/// Descobre e carrega a primeira config CNI do diretório dado. `None` se não houver.
+/// Discovers and loads the first CNI config from the given directory. `None` if none.
 pub fn load_default(conf_dir: &Path) -> Result<Option<NetConfList>> {
     let Some(first) = list_conf_files(conf_dir).into_iter().next() else {
         return Ok(None);
@@ -172,16 +172,16 @@ pub fn load_default(conf_dir: &Path) -> Result<Option<NetConfList>> {
     Ok(Some(parse_config(&text)?))
 }
 
-/// Resolve o binário de um plugin (`type`) no `CNI_PATH` (primeiro que exista).
+/// Resolves a plugin's binary (`type`) in `CNI_PATH` (first one that exists).
 pub fn resolve_plugin(cni_path: &[PathBuf], typ: &str) -> Option<PathBuf> {
     cni_path.iter().map(|d| d.join(typ)).find(|p| p.is_file())
 }
 
 // ---------------------------------------------------------------------------
-//  Construção de ambiente e stdin (puro)
+//  Environment and stdin construction (pure)
 // ---------------------------------------------------------------------------
 
-/// Constrói as variáveis de ambiente do protocolo CNI para uma invocação.
+/// Builds the CNI protocol environment variables for an invocation.
 fn build_env(cmd: Command_, t: Target, cni_path: &[PathBuf]) -> Vec<(String, String)> {
     let path = cni_path
         .iter()
@@ -197,8 +197,8 @@ fn build_env(cmd: Command_, t: Target, cni_path: &[PathBuf]) -> Vec<(String, Str
     ]
 }
 
-/// Constrói o JSON de stdin para um plugin: a sua config, com `cniVersion`/`name`
-/// da lista injetados e o `prevResult` do plugin anterior (encadeamento CNI).
+/// Builds the stdin JSON for a plugin: its config, with the list's `cniVersion`/`name`
+/// injected and the previous plugin's `prevResult` (CNI chaining).
 fn plugin_input(
     plugin: &Value,
     name: &str,
@@ -220,7 +220,7 @@ fn plugin_input(
     serde_json::to_string(&obj).map_err(|e| Error::Invalid(format!("serialize CNI config: {e}")))
 }
 
-/// Parseia o resultado (stdout) de um plugin bem-sucedido.
+/// Parses the result (stdout) of a successful plugin.
 fn parse_result(stdout: &str) -> Result<CniResult> {
     if stdout.trim().is_empty() {
         return Ok(CniResult::default());
@@ -228,17 +228,17 @@ fn parse_result(stdout: &str) -> Result<CniResult> {
     serde_json::from_str(stdout).map_err(|e| Error::Invalid(format!("invalid CNI result: {e}")))
 }
 
-/// Tenta extrair o erro estruturado que um plugin escreve no stdout ao falhar.
+/// Tries to extract the structured error a plugin writes to stdout on failure.
 fn parse_error(stdout: &str) -> Option<CniError> {
     serde_json::from_str(stdout).ok()
 }
 
 // ---------------------------------------------------------------------------
-//  Execução (impuro) + orquestração da cadeia
+//  Execution (impure) + chain orchestration
 // ---------------------------------------------------------------------------
 
-/// Invoca um binário de plugin com a config por stdin e o ambiente CNI. Devolve
-/// `(sucesso, stdout, stderr)`.
+/// Invokes a plugin binary with the config on stdin and the CNI environment. Returns
+/// `(success, stdout, stderr)`.
 fn invoke(
     plugin: &Path,
     envs: &[(String, String)],
@@ -278,7 +278,7 @@ fn invoke(
     ))
 }
 
-/// Executa um plugin da cadeia com um dado comando, devolvendo o resultado parseado.
+/// Runs a chain plugin with a given command, returning the parsed result.
 fn run_one(
     cmd: Command_,
     plugin: &Value,
@@ -308,8 +308,8 @@ fn run_one(
     parse_result(&stdout)
 }
 
-/// `ADD`: corre a cadeia de plugins por ordem, encadeando o `prevResult`, e devolve
-/// o resultado do último plugin (que contém as interfaces/IPs finais).
+/// `ADD`: runs the plugin chain in order, chaining the `prevResult`, and returns
+/// the last plugin's result (which contains the final interfaces/IPs).
 pub fn add(
     net: &NetConfList,
     cni_path: &[PathBuf],
@@ -330,8 +330,8 @@ pub fn add(
     prev.ok_or_else(|| Error::Invalid("CNI conflist has no plugins".into()))
 }
 
-/// `DEL`: corre a cadeia por **ordem inversa** (spec CNI). Best-effort: continua
-/// mesmo que um plugin falhe, devolvendo o primeiro erro no fim.
+/// `DEL`: runs the chain in **reverse order** (CNI spec). Best-effort: continues
+/// even if a plugin fails, returning the first error at the end.
 pub fn del(
     net: &NetConfList,
     cni_path: &[PathBuf],
@@ -358,9 +358,9 @@ pub fn del(
     }
 }
 
-/// A camada CNI está ativa? Opt-in por `DELONIX_CNI=1`. Devolve a conflist default
-/// (`/etc/cni/net.d`) se ativa **e** existir uma config; senão `None` — nesse caso
-/// o chamador usa o SDN nativo, sem qualquer mudança de comportamento.
+/// Is the CNI layer active? Opt-in via `DELONIX_CNI=1`. Returns the default conflist
+/// (`/etc/cni/net.d`) if active **and** a config exists; otherwise `None` — in which case
+/// the caller uses the native SDN, with no behavior change.
 pub fn enabled_conf() -> Option<NetConfList> {
     if std::env::var("DELONIX_CNI").ok().as_deref() != Some("1") {
         return None;
@@ -368,7 +368,7 @@ pub fn enabled_conf() -> Option<NetConfList> {
     load_default(Path::new(DEFAULT_CONF_DIR)).ok().flatten()
 }
 
-/// Diretórios de plugins a partir da env `CNI_PATH` (`:`-separada) ou o default.
+/// Plugin directories from the `CNI_PATH` env (`:`-separated) or the default.
 pub fn plugin_dirs() -> Vec<PathBuf> {
     match std::env::var("CNI_PATH") {
         Ok(v) if !v.is_empty() => std::env::split_paths(&v).collect(),
@@ -433,14 +433,14 @@ mod tests {
     #[test]
     fn plugin_input_injeta_nome_versao_e_prevresult() {
         let net = parse_config(CONFLIST).unwrap();
-        // 1.º plugin: sem prevResult.
+        // 1st plugin: no prevResult.
         let s1 = plugin_input(&net.plugins[0], &net.name, &net.cni_version, None).unwrap();
         let v1: Value = serde_json::from_str(&s1).unwrap();
         assert_eq!(v1["name"], "delonix");
         assert_eq!(v1["cniVersion"], "1.0.0");
         assert_eq!(v1["bridge"], "cni0");
         assert!(v1.get("prevResult").is_none());
-        // 2.º plugin: com prevResult do 1.º.
+        // 2nd plugin: with the 1st's prevResult.
         let prev = CniResult {
             ips: vec![IpConf {
                 address: "10.0.0.5/24".into(),
@@ -514,15 +514,15 @@ mod tests {
         assert!(list_conf_files(Path::new("/nao/existe/de/todo")).is_empty());
     }
 
-    /// E2E do executor: um plugin falso (shell) valida a env `CNI_COMMAND`, lê a
-    /// config do stdin e devolve um resultado CNI — exercita invoke/run_one/add/del.
+    /// Executor E2E: a fake plugin (shell) validates the `CNI_COMMAND` env, reads the
+    /// config from stdin and returns a CNI result — exercises invoke/run_one/add/del.
     #[test]
     fn add_e_del_com_plugin_falso() {
         use std::os::unix::fs::PermissionsExt;
         let tmp = std::env::temp_dir().join(format!("dlx-cni-e2e-{}", std::process::id()));
         let bindir = tmp.join("bin");
         std::fs::create_dir_all(&bindir).unwrap();
-        // ADD → imprime resultado; DEL → nada; comando desconhecido → erro estruturado.
+        // ADD → prints result; DEL → nothing; unknown command → structured error.
         let script = r#"#!/bin/sh
 cat > /dev/null
 case "$CNI_COMMAND" in
@@ -541,7 +541,7 @@ esac
         let r = add(&net, &dirs, "cid", "/proc/1/ns/net", "eth0").unwrap();
         assert_eq!(r.ips[0].address, "10.9.9.9/24");
         assert_eq!(r.ips[0].gateway, "10.9.9.1");
-        // DEL é best-effort e devolve Ok.
+        // DEL is best-effort and returns Ok.
         del(&net, &dirs, "cid", "/proc/1/ns/net", "eth0").unwrap();
         let _ = std::fs::remove_dir_all(&tmp);
     }
