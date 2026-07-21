@@ -52,6 +52,9 @@ struct VmSpec {
     volumes: Vec<VmVolumeSpec>,
     #[serde(default)]
     vnc: bool,
+    /// Static IP (libvirt `nat` mode): DHCP reservation on the libvirt network.
+    #[serde(default)]
+    ip: Option<String>,
 }
 
 /// One entry of a VM's `spec.volumes`: refers to a `Volume`/`Storage` by
@@ -93,6 +96,7 @@ pub(crate) const VM_SPEC_FIELDS: &[&str] = &[
     "bridge",
     "volumes",
     "vnc",
+    "ip",
 ];
 
 fn default_vcpus() -> u32 {
@@ -206,6 +210,9 @@ pub enum VmCmd {
         /// Bridge name (net-mode=bridge) or libvirt network (nat).
         #[arg(long)]
         bridge: Option<String>,
+        /// Static IP (libvirt nat mode): DHCP reservation on the libvirt network.
+        #[arg(long)]
+        ip: Option<String>,
         /// VNC graphical console (libvirt backend only — Cloud Hypervisor has no display).
         #[arg(long)]
         vnc: bool,
@@ -408,6 +415,7 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
             bridge: spec.bridge,
             volumes: vm_volumes,
             vnc: spec.vnc,
+            static_ip: spec.ip,
         };
         delonix_vm::create(&base, &cfg)?;
         println!("vm/{name}: garantida");
@@ -464,6 +472,7 @@ pub fn run(action: VmCmd) -> Result<()> {
             backend,
             net_mode,
             bridge,
+            ip,
             vnc,
             console,
             wait,
@@ -519,9 +528,17 @@ pub fn run(action: VmCmd) -> Result<()> {
                 bridge,
                 volumes: vec![],
                 vnc,
+                static_ip: ip,
             };
             let vm = delonix_vm::create(&base, &cfg)?;
             println!("{}", vm.name);
+            // Honest signal instead of a silent `IP <none>`: a libvirt VM that
+            // fell back to user-mode (session SLIRP) never gets a reachable IP.
+            if vm.backend.contains("libvirt") && vm.tap == "user" {
+                output::warn(super::po::t(
+                    "user-mode network: this VM will have no reachable IP — join the `libvirt` group (nat mode then becomes the default), or pass `--net-mode nat|bridge`",
+                ));
+            }
             // Dynamic boot: --console attaches to the serial console (watch the
             // boot live); --wait shows a spinner until the VM gets an IP.
             if console {
@@ -665,7 +682,11 @@ fn wait_for_boot(base: &std::path::Path, name: &str, timeout: std::time::Duratio
             }
             // libvirt user-mode never gives an IP: after a short start, steer
             // toward the console instead of waiting the whole timeout in vain.
+            // `vm.tap` records the EFFECTIVE mode (the engine may default to
+            // nat) — a nat/bridge VM legitimately takes tens of seconds to get
+            // its DHCP lease, so only user-mode short-circuits here.
             if vm.backend.contains("libvirt")
+                && vm.tap == "user"
                 && vm.ip.is_none()
                 && start.elapsed() >= std::time::Duration::from_secs(3)
             {

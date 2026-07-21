@@ -642,6 +642,48 @@ substantivo errado). Corrigido em `delonix-vm` (`libvirt_cleanup`/`quiet`/
   `stop_e_remove_de_vm_inexistente_dizem_no_such_vm`. Validado ao vivo: o
   órfão `dev` real (shut off + managed save) foi removido em silêncio.
 
+## Rede das VMs libvirt — default `nat` com IP, `--ip` estático, rotas VM↔container
+
+Bug report real: `vm create dev` mostrava `IP <none>` para sempre — sem
+`--net-mode` e rootless, o backend libvirt caía em `qemu:///session` user-mode
+(SLIRP), cujo IP é invisível ao `domifaddr` e inalcançável. Corrigido:
+
+- **Default inteligente** (`LibvirtBackend::boot`): sem `--net-mode`, se a
+  conexão de SISTEMA é utilizável (`system_libvirt_usable`, grupo `libvirt`),
+  o modo efectivo passa a **`nat`** → IP por DHCP da rede libvirt, visível e
+  alcançável. Só sem acesso ao system fica user-mode, e o `create` AVISA alto
+  ("no reachable IP — join the `libvirt` group…"). `Vm.tap` passou a registar o
+  **modo efectivo** (`nat`/`bridge`/`user`) — é o que o `wait_for_boot` usa
+  para distinguir "esperar o lease DHCP" de "nunca vai ter IP" (antes desistia
+  aos 3s para QUALQUER VM libvirt, mesmo nat a meio do boot).
+- **`--ip <estático>`** (`vm create` + `spec.ip` no manifesto): reserva DHCP
+  MAC→IP na rede libvirt (`virsh net-update … ip-dhcp-host`, `libvirt_reserve_ip`,
+  idempotente add-last→modify). Só modo nat; noutros modos erro claro. Armadilha
+  de argv: os flags `--live --config` têm de vir ANTES do `--` (depois viram
+  dados posicionais). **Limitação**: `vm rm` ainda não remove a reserva.
+- **`<backingStore>` explícito no XML do domínio**: o perfil AppArmor
+  por-domínio (virt-aa-helper, Ubuntu) só whitelista caminhos presentes no XML
+  — sem ele o QEMU abria o overlay mas levava EPERM no qcow2 base
+  ("Could not open …vm-images/…: Permission denied"). Formato via
+  `disk_backing_format` (nunca pela extensão).
+- **DNS interno**: `dns_resolve` agora resolve VMs pelo **IP do registo**
+  primeiro (uma VM nat/bridge vive na virbr0 do HOST — o MAC nunca aparece na
+  neigh do holder, único mecanismo anterior), com neigh como fallback (CH).
+  `delonix_vm::status` **persiste** o IP recém-aprendido (o lease DHCP chega
+  muito depois do create). NOTA: o DNS corre no processo do holder — binário
+  antigo só apanha isto num respawn do holder (não forçar num host com
+  containers vivos).
+- **Matriz de alcançabilidade validada ao vivo** (kaeso-sys-01, VM nat
+  192.168.122.x + containers SDN 10.210.x): **container→VM funciona
+  nativamente** (container → holder → slirp → stack do host → virbr0; provado
+  com banner SSH recebido de dentro do kaeso-odoo) e as regras de EGRESS
+  por-container governam-no (daddr CIDR). **VM→container**: via portas
+  publicadas no host (o hostfwd do slirp escuta 0.0.0.0 — da VM, o gateway
+  192.168.122.1) ou pelo proxy L7; IPs de container DIRECTOS são inalcançáveis
+  de fora (NAT do slirp) — dataplane próprio é trabalho futuro (`delonixd`).
+  VM↔VM na mesma rede nat: directo pela virbr0. IP do ingress (SDN) para VM =
+  backend Cloud Hypervisor (tap no holder), como sempre.
+
 ## Firewall `ingress`/`egress` — o último comando ganha (+ `rm` cirúrgico)
 
 Bug report real: `ingress deny <c> 8069` seguido de `ingress allow <c> 8069`

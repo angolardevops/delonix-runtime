@@ -81,6 +81,10 @@ pub struct VmConfig {
     /// VNC graphical console (`--vnc`) — **libvirt backend only** (Cloud Hypervisor
     /// has no display). Binds to `127.0.0.1` on an auto port; see `vm vnc`.
     pub vnc: bool,
+    /// Static IP (`--ip`) — libvirt `nat` mode only: materialized as a DHCP
+    /// reservation (`<host mac=… ip=…/>`) on the libvirt network, so the guest
+    /// needs NO cloud-init network config. Must belong to the network's subnet.
+    pub static_ip: Option<String>,
 }
 
 /// A host directory shared into the VM via virtio-9p. This is what
@@ -659,6 +663,47 @@ fn libvirt_uri_of(name: &str) -> &'static str {
     }
 }
 
+/// `true` if this user can use the libvirt SYSTEM connection (the `libvirt`
+/// group, or root). This is what decides the default network mode: `nat`
+/// (reachable DHCP IP) instead of user-mode (no visible IP at all).
+fn system_libvirt_usable() -> bool {
+    capture("virsh", &["-c", "qemu:///system", "uri"]).is_some()
+}
+
+/// DHCP reservation MAC→IP on the libvirt network `net` (nat mode) — the
+/// static `--ip` path with NO cloud-init network config. Idempotent: if an
+/// entry for this MAC exists, modify it; clear error when the IP does not
+/// belong to the network's subnet (virsh itself validates that).
+fn libvirt_reserve_ip(uri: &str, net: &str, mac: &str, ip: &str) -> Result<()> {
+    let entry = format!("<host mac='{mac}' ip='{ip}'/>");
+    let args = |verb: &'static str| {
+        // Flags BEFORE `--`: after the terminator virsh reads everything as
+        // positional data ("unexpected data '--config'", real error).
+        vec![
+            "-c",
+            uri,
+            "net-update",
+            "--live",
+            "--config",
+            "--",
+            net,
+            verb,
+            "ip-dhcp-host",
+            &entry,
+        ]
+    };
+    if quiet("virsh", &args("add-last")).is_ok() || quiet("virsh", &args("modify")).is_ok() {
+        return Ok(());
+    }
+    // Report with virsh's reason (retrying add-last), never raw stderr.
+    let msg = quiet("virsh", &args("add-last"))
+        .err()
+        .unwrap_or_else(|| "unknown error".into());
+    Err(Error::Invalid(format!(
+        "could not reserve static IP {ip} on libvirt network '{net}': {msg}"
+    )))
+}
+
 /// The connection where the domain `name` is DEFINED, if any — unlike
 /// [`libvirt_uri_of`], **without** a fallback. `None` = libvirt does not know the VM.
 fn libvirt_domain_uri(name: &str) -> Option<&'static str> {
@@ -816,10 +861,24 @@ pub fn libvirt_domain_xml(cfg: &VmConfig, overlay: &str, mac: &str) -> String {
     ));
     s.push_str("  <devices>\n");
     s.push_str("    <emulator>/usr/bin/qemu-system-x86_64</emulator>\n");
-    // main disk: qcow2 overlay via virtio (vda).
+    // main disk: qcow2 overlay via virtio (vda). The backing file (the base
+    // image) is declared EXPLICITLY: on Ubuntu the per-domain AppArmor profile
+    // (virt-aa-helper) only whitelists paths present in the XML — without
+    // <backingStore>, QEMU opened the overlay but got EPERM on the backing
+    // qcow2 ("Could not open …vm-images/…: Permission denied", real report).
     s.push_str("    <disk type='file' device='disk'>\n");
     s.push_str("      <driver name='qemu' type='qcow2'/>\n");
     s.push_str(&format!("      <source file='{}'/>\n", xml_escape(overlay)));
+    if !cfg.disk.is_empty() {
+        let base = std::fs::canonicalize(&cfg.disk)
+            .map(|p| p.to_string_lossy().into_owned())
+            .unwrap_or_else(|_| cfg.disk.clone());
+        let fmt = disk_backing_format(Path::new(&base));
+        s.push_str("      <backingStore type='file'>\n");
+        s.push_str(&format!("        <format type='{}'/>\n", xml_escape(&fmt)));
+        s.push_str(&format!("        <source file='{}'/>\n", xml_escape(&base)));
+        s.push_str("      </backingStore>\n");
+    }
     s.push_str("      <target dev='vda' bus='virtio'/>\n");
     s.push_str("    </disk>\n");
     // cloud-init seed (NoCloud) as cdrom.
@@ -988,6 +1047,31 @@ impl VmBackend for LibvirtBackend {
     }
 
     fn boot(&self, vmdir: &Path, cfg: &VmConfig, overlay: &str) -> Result<Boot> {
+        // Effective net mode: with no explicit `--net-mode`, prefer `nat`
+        // whenever the SYSTEM connection is usable (libvirt group) — user-mode
+        // (session) NEVER yields a reachable/visible IP, and silently landing
+        // there was the real-world "vm ls shows IP <none>" report. Only when
+        // the system connection is unusable do we keep user-mode (egress-only).
+        let mut cfg = cfg.clone();
+        if cfg.net_mode.is_none() && system_libvirt_usable() {
+            cfg.net_mode = Some("nat".into());
+        }
+        let cfg = &cfg;
+        if let Some(ip) = cfg.static_ip.as_deref() {
+            if !matches!(cfg.net_mode.as_deref(), Some("nat") | Some("network")) {
+                return Err(Error::Invalid(format!(
+                    "VM '{}': --ip (static IP) requires the libvirt `nat` mode — this VM resolved to '{}' (on a host bridge, reserve the IP on your LAN's DHCP instead)",
+                    cfg.name,
+                    cfg.net_mode.as_deref().unwrap_or("user")
+                )));
+            }
+            if ip.parse::<std::net::Ipv4Addr>().is_err() {
+                return Err(Error::Invalid(format!(
+                    "VM '{}': invalid static IP '{ip}'",
+                    cfg.name
+                )));
+            }
+        }
         let mac = mac_for(&cfg.name);
         let uri = libvirt_uri_for(cfg.net_mode.as_deref());
         // overlay as an absolute path (libvirtd may run in another cwd).
@@ -1001,6 +1085,11 @@ impl VmBackend for LibvirtBackend {
         if matches!(cfg.net_mode.as_deref(), Some("nat") | Some("network")) {
             let net = cfg.bridge.as_deref().unwrap_or("default");
             ensure_libvirt_network(uri, net);
+            // Static IP: DHCP reservation MAC→IP on the libvirt network, BEFORE
+            // the domain boots (the guest's DHCP request must already find it).
+            if let Some(ip) = cfg.static_ip.as_deref() {
+                libvirt_reserve_ip(uri, net, &mac, ip)?;
+            }
         }
         let mut xml = libvirt_domain_xml(cfg, &overlay_abs, &mac);
         // On `qemu:///system` the QEMU process runs as the `libvirt-qemu` user,
@@ -1041,8 +1130,11 @@ impl VmBackend for LibvirtBackend {
         }
         Ok(Boot {
             pid: None, // managed by libvirtd — liveness via virsh domstate
-            ip: self.ip_uri(uri, &cfg.name),
-            tap: "user".into(),
+            ip: self.ip_uri(uri, &cfg.name).or_else(|| cfg.static_ip.clone()),
+            // The EFFECTIVE mode (not the requested one): lets `vm describe`
+            // and the bin tell a reachable VM (nat/bridge) from an egress-only
+            // one (user) — the basis of the "no reachable IP" warning.
+            tap: cfg.net_mode.clone().unwrap_or_else(|| "user".into()),
             mac,
             api_socket: String::new(),
         })
@@ -1351,6 +1443,7 @@ pub fn status(base: &Path, name: &str) -> Result<Vm> {
         e => e,
     })?;
     let backend = backend_for(&vm);
+    let old_ip = vm.ip.clone();
     if backend.is_running(&vm) {
         vm.status = Status::Running;
         vm.ip = backend.ip(&vm).or(vm.ip);
@@ -1359,6 +1452,13 @@ pub fn status(base: &Path, name: &str) -> Result<Vm> {
         // unlike containers, the VM is autonomous — a crash is not assumed).
         vm.status = Status::Stopped;
         vm.pid = None;
+    }
+    // Persist a freshly-learnt IP (a nat VM only gets its DHCP lease well after
+    // `create` saved the record): the record is what the holder's internal DNS
+    // reads to resolve `<vm-name>` for containers — a stale null IP there means
+    // the name never resolves. Best-effort: status() stays read-mostly.
+    if vm.ip != old_ip {
+        let _ = st.save(name, &vm);
     }
     Ok(vm)
 }
@@ -1452,6 +1552,7 @@ mod tests {
             bridge: None,
             volumes: vec![],
             vnc: false,
+            static_ip: None,
         }
     }
 
@@ -1582,6 +1683,7 @@ mod tests {
             bridge: None,
             volumes: vec![],
             vnc: false,
+            static_ip: None,
         }
     }
 
