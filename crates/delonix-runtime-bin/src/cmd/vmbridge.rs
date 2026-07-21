@@ -141,6 +141,35 @@ fn unbridge_plan(
     plan
 }
 
+/// Extracts the home directory (field 6) from a `getent passwd` line. Pure.
+fn home_from_passwd_line(line: &str) -> Option<String> {
+    let home = line.trim().split(':').nth(5)?.trim();
+    (!home.is_empty()).then(|| home.to_string())
+}
+
+/// Under `sudo`, point Delonix state resolution at the INVOKING user's data dir,
+/// not root's. The network defs (`resolve_net`) and the holder PID live in
+/// `~<user>/.local/share/delonix`; run as root, `state_root()`/`base_root()`
+/// would resolve to `/var/lib/delonix` and NOT find `kaeso-net` (real bug:
+/// `sudo delonix vm bridge` → "network does not exist"). Honors an explicit
+/// `DELONIX_ROOT` if already set (power users / custom `XDG_DATA_HOME`).
+fn adopt_invoking_user_root() {
+    if std::env::var_os("DELONIX_ROOT").is_some() {
+        return;
+    }
+    let Some(user) = std::env::var_os("SUDO_USER") else {
+        return; // not under sudo — state_root() is already the user's
+    };
+    if let Ok(out) = Command::new("getent").arg("passwd").arg(&user).output() {
+        if out.status.success() {
+            if let Some(home) = home_from_passwd_line(&String::from_utf8_lossy(&out.stdout)) {
+                let root = Path::new(&home).join(".local/share/delonix");
+                std::env::set_var("DELONIX_ROOT", root);
+            }
+        }
+    }
+}
+
 /// Reads the holder PID (the netns target) — the infra must be UP.
 fn holder_pid() -> Result<String> {
     let p = state_root().join("ingress").join("holder.pid");
@@ -231,6 +260,7 @@ fn run_plan(plan: &[Vec<String>], apply: bool, tolerate: bool) -> Result<()> {
 
 /// `delonix vm bridge <network>` — establish (or dry-run) the host↔SDN bridge.
 pub fn bridge(network: &str, vm_subnets: Vec<String>, apply: bool) -> Result<()> {
+    adopt_invoking_user_root();
     let (bridge, prefix, _gw) = infra::resolve_net(network)?;
     let holder = holder_pid()?;
     let subs = if vm_subnets.is_empty() {
@@ -267,6 +297,7 @@ pub fn bridge(network: &str, vm_subnets: Vec<String>, apply: bool) -> Result<()>
 
 /// `delonix vm unbridge <network>` — tear the bridge down.
 pub fn unbridge(network: &str, apply: bool) -> Result<()> {
+    adopt_invoking_user_root();
     let (bridge, prefix, _gw) = infra::resolve_net(network)?;
     let holder = holder_pid()?;
     let subs = detect_vm_subnets();
@@ -284,6 +315,17 @@ pub fn unbridge(network: &str, apply: bool) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn home_from_passwd_line_pega_o_campo_6() {
+        assert_eq!(
+            home_from_passwd_line("walter:x:1000:1000:Walter:/home/walter:/bin/bash").as_deref(),
+            Some("/home/walter")
+        );
+        // Sem home (campo vazio) → None; linha malformada → None.
+        assert_eq!(home_from_passwd_line("x:x:0:0::::").as_deref(), None);
+        assert_eq!(home_from_passwd_line("lixo").as_deref(), None);
+    }
 
     #[test]
     fn veth_names_estaveis_e_curtos() {
