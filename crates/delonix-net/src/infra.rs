@@ -3244,7 +3244,11 @@ fn dns_resolve(name: &str) -> Option<[u8; 4]> {
                 // Recorded IP first: a libvirt nat/bridge VM lives on the HOST's
                 // virbr0 — its MAC never shows up in the holder's neigh table,
                 // so without this branch those VMs simply didn't resolve.
-                if let Some(ip) = v["ip"].as_str().filter(|s| !s.is_empty()).and_then(parse_v4) {
+                if let Some(ip) = v["ip"]
+                    .as_str()
+                    .filter(|s| !s.is_empty())
+                    .and_then(parse_v4)
+                {
                     return Some(ip);
                 }
                 // CH VMs (tap in the holder netns): IP via the neigh table.

@@ -1130,7 +1130,9 @@ impl VmBackend for LibvirtBackend {
         }
         Ok(Boot {
             pid: None, // managed by libvirtd — liveness via virsh domstate
-            ip: self.ip_uri(uri, &cfg.name).or_else(|| cfg.static_ip.clone()),
+            ip: self
+                .ip_uri(uri, &cfg.name)
+                .or_else(|| cfg.static_ip.clone()),
             // The EFFECTIVE mode (not the requested one): lets `vm describe`
             // and the bin tell a reachable VM (nat/bridge) from an egress-only
             // one (user) — the basis of the "no reachable IP" warning.
