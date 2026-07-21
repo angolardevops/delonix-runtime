@@ -11,8 +11,11 @@
 //! carries the label `delonix.io/pod=<name>`; the pod state is derived from
 //! `Store::list`. Zero new store.
 //!
-//! Shared **IPC/UTS/PID** (`shareProcessNamespace`) land in later slices — this
-//! one delivers the shared netns/sandbox + a unified lifecycle.
+//! **Shared IPC + UTS**: the FIRST container holds those namespaces; the peers
+//! `setns` into them (`RunOpts.pod_infra_pid` → `RunSpec.pod_infra_pid`), so the
+//! pod shares System V/POSIX IPC and the hostname — safe rootless because the
+//! `--pod` re-exec already put us in the holder's userns (which owns them).
+//! Shared **PID** (`shareProcessNamespace`) lands next.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -144,16 +147,26 @@ fn create_pod(name: &str, namespace: Option<String>, spec: PodSpec) -> Result<()
     })?;
 
     // 2. Each container joins THAT netns (via `--pod`) — same IP, localhost peers.
-    let members = container::pod_member_run_opts(name, namespace, spec, &netns)?;
+    // The FIRST container holds the pod's IPC/UTS namespaces; the rest join them
+    // (via `pod_infra_pid`), so the pod shares System V/POSIX IPC + the hostname.
+    let mut members = container::pod_member_run_opts(name, namespace, spec, &netns)?;
     let count = members.len();
-    for opts in members {
+    let first = members.remove(0);
+    let first_name = first.name.clone().unwrap_or_else(|| format!("{name}-c0"));
+    if let Err(e) = container::cmd_run(&images, &store, first) {
+        let _ = remove_pod(name, true);
+        return Err(e);
+    }
+    // The holder's init PID (host pid) — the peers `setns` its /proc/<pid>/ns/{ipc,uts}.
+    let infra_pid = store.load(&first_name).ok().and_then(|c| c.pid);
+    for mut opts in members {
+        opts.pod_infra_pid = infra_pid;
         if let Err(e) = container::cmd_run(&images, &store, opts) {
-            // Roll back what we started + the shared netns, then propagate.
             let _ = remove_pod(name, true);
             return Err(e);
         }
     }
-    println!("pod/{name}: {count} container(s) on shared netns (ip {ip})");
+    println!("pod/{name}: {count} container(s) sharing netns + IPC/UTS (ip {ip})");
     Ok(())
 }
 
