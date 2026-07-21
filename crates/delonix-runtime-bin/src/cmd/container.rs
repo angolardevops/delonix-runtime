@@ -1304,7 +1304,17 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
     let mut apparmor_profile = apparmor;
     for opt in &security_opt {
         match opt.split_once('=') {
-            Some(("seccomp", v)) => c.seccomp = Some(v.to_string()),
+            // Só `unconfined` (desliga) e `detect` (modo log) são suportados; um
+            // PERFIL custom (`seccomp=/x.json`) era ACEITE e depois IGNORADO — o
+            // container corria com o perfil embutido enquanto o utilizador
+            // julgava o seu activo. Fail-closed: erro explícito (achado da
+            // análise Docker/Podman; invariante "sem falha silenciosa").
+            Some(("seccomp", "unconfined")) => c.seccomp = Some("unconfined".into()),
+            Some(("seccomp", v)) => {
+                return Err(Error::Invalid(format!(
+                    "unsupported seccomp profile '{v}' — only `seccomp=unconfined` is supported (the built-in profile applies otherwise); custom profiles are not implemented yet"
+                )))
+            }
             Some(("apparmor", v)) => apparmor_profile = Some(v.to_string()),
             _ => {
                 return Err(Error::Invalid(format!(
@@ -1343,6 +1353,14 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
     c.sysctls = sysctl;
 
     // ---- network ----
+    // `--network-alias` é gravado mas o DNS interno (dns_resolve) ainda NÃO o
+    // consulta — resolve só pelo nome. Avisa em vez de fingir (achado da
+    // análise Docker/Podman; invariante "sem falha silenciosa").
+    if !network_alias.is_empty() {
+        super::output::warn(super::po::t(
+            "--network-alias is recorded but the internal DNS does not resolve aliases yet — only the container name resolves",
+        ));
+    }
     c.net_aliases = network_alias;
     if knows_none {
         c.dns_knows = Some(Vec::new());
