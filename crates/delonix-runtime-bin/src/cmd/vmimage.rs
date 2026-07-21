@@ -1001,6 +1001,33 @@ fn common_customization_steps(
             "echo 'delonix ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/90-delonix && chmod 440 /etc/sudoers.d/90-delonix"
                 .into(),
         ),
+        // Shell UX the Kubernetes docs recommend: kubectl/kubeadm bash completion
+        // + the `k` alias (with completion wired to it). Written to
+        // `/etc/bash.bashrc` (Ubuntu sources it for every interactive bash — login
+        // AND non-login — so both the serial console and SSH get it), NOT to
+        // `/etc/profile.d` (those are sourced by `sh` too, which chokes on the
+        // `<(...)` process substitution). Each block is guarded by `command -v`
+        // so it is inert if a tool is missing, and evaluated at shell-start (not
+        // build time) — order relative to the package install does not matter.
+        CustomizeOp::RunCommand(
+            "cat >> /etc/bash.bashrc <<'DELONIX_KUBECTL_EOF'\n\
+             \n\
+             # --- Delonix golden image: kubectl/kubeadm completion + `k` alias (k8s docs) ---\n\
+             if command -v kubectl >/dev/null 2>&1; then\n\
+             \x20 source <(kubectl completion bash)\n\
+             \x20 alias k=kubectl\n\
+             \x20 complete -o default -F __start_kubectl k\n\
+             fi\n\
+             if command -v kubeadm >/dev/null 2>&1; then\n\
+             \x20 source <(kubeadm completion bash)\n\
+             fi\n\
+             if command -v crictl >/dev/null 2>&1; then\n\
+             \x20 source <(crictl completion bash) 2>/dev/null || true\n\
+             fi\n\
+             # --- end Delonix ---\n\
+             DELONIX_KUBECTL_EOF"
+                .into(),
+        ),
     ]);
     ops.extend(extra_run.iter().cloned().map(CustomizeOp::RunCommand));
     // apt cleanup — ALWAYS at the end (after the user's `--extra-run`, which
@@ -1119,6 +1146,37 @@ mod tests {
         assert!(
             matches!(ops.last(), Some(CustomizeOp::RunCommand(c)) if c.contains("apt-get clean"))
         );
+    }
+
+    #[test]
+    fn customization_steps_configuram_completion_e_alias_k() {
+        let cri = PathBuf::from("/tmp/delonix-cri");
+        let svc = PathBuf::from("/tmp/delonix-cri.service");
+        // Both build paths (online + offline) share `common_customization_steps`,
+        // so the kubectl UX must be present in both.
+        for ops in [
+            k8s_customization_steps(None, &[], &[], &cri, &svc),
+            k8s_customization_steps_offline(
+                &[PathBuf::from("/tmp/x/kubeadm_1.34.9-1.1_amd64.deb")],
+                &[],
+                &cri,
+                &svc,
+            ),
+        ] {
+            let bashrc = ops
+                .iter()
+                .find_map(|op| match op {
+                    CustomizeOp::RunCommand(c) if c.contains("/etc/bash.bashrc") => Some(c),
+                    _ => None,
+                })
+                .expect("devia haver um passo a escrever no /etc/bash.bashrc");
+            assert!(bashrc.contains("kubectl completion bash"));
+            assert!(bashrc.contains("alias k=kubectl"));
+            assert!(bashrc.contains("complete -o default -F __start_kubectl k"));
+            assert!(bashrc.contains("kubeadm completion bash"));
+            // Guarded so it is inert when a tool is absent.
+            assert!(bashrc.contains("command -v kubectl"));
+        }
     }
 
     /// A reduced `Packages`, with the same shape as the real one (several architectures and

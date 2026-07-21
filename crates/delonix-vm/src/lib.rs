@@ -22,9 +22,47 @@ use std::process::Command;
 use delonix_net::infra;
 use delonix_runtime_core::{Error, JsonStore, Result, Status, Vm};
 
+/// CPU topology (`<cpu><topology sockets cores threads/></cpu>`).
+#[derive(Debug, Clone, Default)]
+pub struct CpuTopology {
+    pub sockets: u32,
+    pub cores: u32,
+    pub threads: u32,
+}
+
+/// An extra disk attached to the VM (beyond the main overlay + cloud-init seed).
+#[derive(Debug, Clone)]
+pub struct ExtraDisk {
+    /// Host path of the disk image.
+    pub source: String,
+    /// `"disk"` (default) or `"cdrom"`.
+    pub device: String,
+    /// Bus: `"virtio"` (default), `"sata"`, `"scsi"`, `"ide"`.
+    pub bus: String,
+    /// Image format: `"qcow2"` (default) or `"raw"`.
+    pub format: String,
+    /// Mount read-only.
+    pub read_only: bool,
+    /// Explicit target dev (e.g. `"vdb"`); auto-assigned when `None`.
+    pub target: Option<String>,
+}
+
+/// An extra network interface (beyond the primary one derived from `net_mode`).
+#[derive(Debug, Clone)]
+pub struct ExtraNic {
+    /// `"network"` (libvirt network), `"bridge"` (host bridge) or `"user"`.
+    pub kind: String,
+    /// Network/bridge name (for `network`/`bridge`).
+    pub source: Option<String>,
+    /// NIC model: `"virtio"` (default), `"e1000"`, `"rtl8139"`, …
+    pub model: String,
+    /// Fixed MAC (auto/random when `None`).
+    pub mac: Option<String>,
+}
+
 /// Configuration to boot a microVM (flat fields, independent of the
 /// `orchestrator` — the CLI translates the `VmSpec` into this).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct VmConfig {
     /// Name (persistence key and of the deterministic `tap`/MAC).
     pub name: String,
@@ -85,6 +123,38 @@ pub struct VmConfig {
     /// reservation (`<host mac=… ip=…/>`) on the libvirt network, so the guest
     /// needs NO cloud-init network config. Must belong to the network's subnet.
     pub static_ip: Option<String>,
+
+    // --- Advanced libvirt knobs (libvirt backend only) ------------------------
+    // Declarative `kind: Vm` parity with hand-written libvirt XML: typed fields
+    // for the common cases + two raw-XML escape hatches for the long tail.
+    /// Machine type (`<os><type machine=…>`), default `q35`.
+    pub machine: Option<String>,
+    /// CPU mode/model: `"host-passthrough"` (default), `"host-model"`, or a named
+    /// model (e.g. `"Skylake-Server"`) → `<cpu mode='custom'>`.
+    pub cpu_model: Option<String>,
+    /// CPU topology (`<topology sockets cores threads/>`).
+    pub cpu_topology: Option<CpuTopology>,
+    /// Emulated TPM 2.0 (`<tpm>`) — needed by some guests (Windows/Secure Boot).
+    pub tpm: bool,
+    /// Video model (`<video><model type=…>`): `"virtio"`, `"qxl"`, `"vga"`,
+    /// `"none"`. Overrides the default (virtio when `vnc`).
+    pub video: Option<String>,
+    /// OS boot device order (`<os><boot dev=…/>`): e.g. `["hd","cdrom","network"]`
+    /// (ignored on direct-kernel boot).
+    pub boot_order: Vec<String>,
+    /// Extra disks beyond the main overlay + cloud-init seed.
+    pub extra_disks: Vec<ExtraDisk>,
+    /// Extra network interfaces beyond the primary one.
+    pub extra_nics: Vec<ExtraNic>,
+    /// Raw libvirt XML FRAGMENTS injected verbatim just before `</devices>` — the
+    /// escape hatch for device knobs with no typed field. **UNVALIDATED**: a
+    /// fragment can reference arbitrary host paths/devices, so only for TRUSTED
+    /// manifests (same trust model as running an arbitrary disk image).
+    pub libvirt_xml_overlay: Vec<String>,
+    /// FULL `<domain>` override used VERBATIM (ignores everything generated from
+    /// the fields above except the rootless seclabel injected at boot). The
+    /// ultimate escape hatch — the author owns the entire XML. **UNVALIDATED**.
+    pub libvirt_xml: Option<String>,
 }
 
 /// A host directory shared into the VM via virtio-9p. This is what
@@ -837,6 +907,12 @@ fn libvirt_cleanup(name: &str) -> Result<()> {
 /// virtio user-mode network (rootless egress), serial console, and VFIO passthrough of
 /// PCI devices (`<hostdev>`).
 pub fn libvirt_domain_xml(cfg: &VmConfig, overlay: &str, mac: &str) -> String {
+    // Full-domain escape hatch: the manifest author owns the entire XML. The
+    // rootless seclabel is still injected at boot (`create`, via the </domain>
+    // replace), so a full override keeps working under system libvirt.
+    if let Some(raw) = &cfg.libvirt_xml {
+        return raw.clone();
+    }
     let mib = mem_mib(&cfg.memory);
     let kib = mib * 1024;
     let vcpus = cfg.vcpus.max(1);
@@ -864,7 +940,11 @@ pub fn libvirt_domain_xml(cfg: &VmConfig, overlay: &str, mac: &str) -> String {
         s.push_str("  </cputune>\n");
     }
     // Boot: firmware (cloud images) or direct kernel.
-    s.push_str("  <os>\n    <type arch='x86_64' machine='q35'>hvm</type>\n");
+    let machine = cfg.machine.as_deref().unwrap_or("q35");
+    s.push_str(&format!(
+        "  <os>\n    <type arch='x86_64' machine='{}'>hvm</type>\n",
+        xml_escape(machine)
+    ));
     if let Some(k) = &cfg.kernel {
         s.push_str(&format!("    <kernel>{}</kernel>\n", xml_escape(k)));
         if let Some(i) = &cfg.initrd {
@@ -883,12 +963,21 @@ pub fn libvirt_domain_xml(cfg: &VmConfig, overlay: &str, mac: &str) -> String {
             "    <loader readonly='yes' type='pflash'>{}</loader>\n",
             xml_escape(fw)
         ));
-    } else {
-        s.push_str("    <boot dev='hd'/>\n");
+    }
+    // Boot device order (firmware/disk boot only — irrelevant with a direct
+    // kernel). Explicit `boot_order` wins; otherwise the default is `hd`.
+    if cfg.kernel.is_none() {
+        if cfg.boot_order.is_empty() {
+            s.push_str("    <boot dev='hd'/>\n");
+        } else {
+            for d in &cfg.boot_order {
+                s.push_str(&format!("    <boot dev='{}'/>\n", xml_escape(d)));
+            }
+        }
     }
     s.push_str("  </os>\n");
     s.push_str("  <features>\n    <acpi/>\n    <apic/>\n  </features>\n");
-    s.push_str("  <cpu mode='host-passthrough' check='none'/>\n");
+    s.push_str(&libvirt_cpu_xml(cfg));
     s.push_str("  <clock offset='utc'/>\n");
     s.push_str("  <on_poweroff>destroy</on_poweroff>\n");
     // restart policy: 'always'/'on-failure' → restart on crash.
@@ -929,6 +1018,58 @@ pub fn libvirt_domain_xml(cfg: &VmConfig, overlay: &str, mac: &str) -> String {
         s.push_str("      <target dev='sda' bus='sata'/>\n");
         s.push_str("      <readonly/>\n    </disk>\n");
     }
+    // Extra disks (typed): additional images beyond the main overlay + seed.
+    // Target devs are auto-assigned per bus (vdb, vdc… for virtio; sdb… for
+    // sata/scsi) unless the user pinned one — `vda`/`sda` stay reserved above.
+    let mut vd = b'b'; // next virtio letter (vda taken by the main disk)
+    let mut sd = b'b'; // next sata/scsi letter (sda taken by the seed cdrom)
+    for d in &cfg.extra_disks {
+        let bus = if d.bus.is_empty() { "virtio" } else { &d.bus };
+        let device = if d.device.is_empty() {
+            "disk"
+        } else {
+            &d.device
+        };
+        let fmt = if d.format.is_empty() {
+            "qcow2"
+        } else {
+            &d.format
+        };
+        let target = match &d.target {
+            Some(t) => t.clone(),
+            None if bus == "virtio" => {
+                let t = format!("vd{}", vd as char);
+                vd += 1;
+                t
+            }
+            None => {
+                let t = format!("sd{}", sd as char);
+                sd += 1;
+                t
+            }
+        };
+        s.push_str(&format!(
+            "    <disk type='file' device='{}'>\n",
+            xml_escape(device)
+        ));
+        s.push_str(&format!(
+            "      <driver name='qemu' type='{}'/>\n",
+            xml_escape(fmt)
+        ));
+        s.push_str(&format!(
+            "      <source file='{}'/>\n",
+            xml_escape(&d.source)
+        ));
+        s.push_str(&format!(
+            "      <target dev='{}' bus='{}'/>\n",
+            xml_escape(&target),
+            xml_escape(bus)
+        ));
+        if d.read_only {
+            s.push_str("      <readonly/>\n");
+        }
+        s.push_str("    </disk>\n");
+    }
     // volumes/Storage shared via virtio-9p — the user does NOT write this
     // XML: it comes from `spec.volumes` already resolved. The guest mounts by `<target dir=tag>`
     // (the mount is injected into cloud-init, see `cmd::vm::build_user_data`).
@@ -946,13 +1087,62 @@ pub fn libvirt_domain_xml(cfg: &VmConfig, overlay: &str, mac: &str) -> String {
     }
     // network: abstracted by the YAML (net_mode) → virtio `<interface>`. No hand-written XML.
     s.push_str(&libvirt_interface_xml(cfg, mac));
+    // Extra NICs (typed): additional interfaces beyond the primary one.
+    for n in &cfg.extra_nics {
+        let model = if n.model.is_empty() {
+            "virtio"
+        } else {
+            &n.model
+        };
+        let (itype, src) = match n.kind.as_str() {
+            "bridge" => (
+                "bridge",
+                n.source
+                    .as_deref()
+                    .map(|b| format!("      <source bridge='{}'/>\n", xml_escape(b))),
+            ),
+            "user" => ("user", None),
+            _ => (
+                "network",
+                Some(format!(
+                    "      <source network='{}'/>\n",
+                    xml_escape(n.source.as_deref().unwrap_or("default"))
+                )),
+            ),
+        };
+        s.push_str(&format!("    <interface type='{itype}'>\n"));
+        if let Some(src) = src {
+            s.push_str(&src);
+        }
+        if let Some(m) = &n.mac {
+            s.push_str(&format!("      <mac address='{}'/>\n", xml_escape(m)));
+        }
+        s.push_str(&format!(
+            "      <model type='{}'/>\n    </interface>\n",
+            xml_escape(model)
+        ));
+    }
     // serial console (boot logs).
     s.push_str("    <serial type='pty'><target type='isa-serial' port='0'/></serial>\n");
     s.push_str("    <console type='pty'><target type='serial' port='0'/></console>\n");
+    // Emulated TPM 2.0 (opt-in) — some guests (Windows, Secure Boot) require it.
+    if cfg.tpm {
+        s.push_str("    <tpm model='tpm-crb'>\n      <backend type='emulator' version='2.0'/>\n    </tpm>\n");
+    }
     // VNC (opt-in): auto port, loopback only (`vm vnc` reports host:port).
     if cfg.vnc {
         s.push_str("    <graphics type='vnc' port='-1' autoport='yes' listen='127.0.0.1'/>\n");
-        s.push_str("    <video><model type='virtio' heads='1'/></video>\n");
+    }
+    // Video: explicit model overrides; else the default virtio head when VNC is
+    // on. `"none"` suppresses the device entirely.
+    match cfg.video.as_deref() {
+        Some("none") => {}
+        Some(m) => s.push_str(&format!(
+            "    <video><model type='{}' heads='1'/></video>\n",
+            xml_escape(m)
+        )),
+        None if cfg.vnc => s.push_str("    <video><model type='virtio' heads='1'/></video>\n"),
+        None => {}
     }
     // VFIO: PCI device passthrough (SR-IOV VF, GPU).
     for dev in &cfg.devices {
@@ -964,9 +1154,47 @@ pub fn libvirt_domain_xml(cfg: &VmConfig, overlay: &str, mac: &str) -> String {
             s.push_str("      </source>\n    </hostdev>\n");
         }
     }
+    // Raw XML fragments (escape hatch) injected verbatim before </devices> — the
+    // long tail of libvirt device knobs with no typed field. UNVALIDATED: trusted
+    // manifests only (a fragment can name arbitrary host paths/devices).
+    for frag in &cfg.libvirt_xml_overlay {
+        s.push_str(frag);
+        if !frag.ends_with('\n') {
+            s.push('\n');
+        }
+    }
     s.push_str("  </devices>\n");
     s.push_str("</domain>\n");
     s
+}
+
+/// The domain's `<cpu>` element from `cpu_model` + `cpu_topology`. **Pure**.
+/// `host-passthrough` (default) exposes the host CPU exactly; `host-model`
+/// asks libvirt for the closest named model; anything else is a custom model.
+fn libvirt_cpu_xml(cfg: &VmConfig) -> String {
+    let topo = cfg.cpu_topology.as_ref().map(|t| {
+        format!(
+            "    <topology sockets='{}' cores='{}' threads='{}'/>\n",
+            t.sockets.max(1),
+            t.cores.max(1),
+            t.threads.max(1)
+        )
+    });
+    match cfg.cpu_model.as_deref().unwrap_or("host-passthrough") {
+        "host-passthrough" => match topo {
+            Some(t) => format!("  <cpu mode='host-passthrough' check='none'>\n{t}  </cpu>\n"),
+            None => "  <cpu mode='host-passthrough' check='none'/>\n".into(),
+        },
+        "host-model" => match topo {
+            Some(t) => format!("  <cpu mode='host-model' check='partial'>\n{t}  </cpu>\n"),
+            None => "  <cpu mode='host-model' check='partial'/>\n".into(),
+        },
+        named => format!(
+            "  <cpu mode='custom' match='exact' check='partial'>\n    <model fallback='allow'>{}</model>\n{}  </cpu>\n",
+            xml_escape(named),
+            topo.unwrap_or_default()
+        ),
+    }
 }
 
 /// Generates the libvirt domain's `<interface>` from the YAML `net_mode` — so the
@@ -1614,6 +1842,7 @@ mod tests {
             volumes: vec![],
             vnc: false,
             static_ip: None,
+            ..Default::default()
         }
     }
 
@@ -1745,6 +1974,7 @@ mod tests {
             volumes: vec![],
             vnc: false,
             static_ip: None,
+            ..Default::default()
         }
     }
 
@@ -1847,5 +2077,59 @@ mod tests {
         assert!(xml.contains("<vcpupin vcpu='3' cpuset='8-15'/>"));
         assert!(xml.contains("<hostdev mode='subsystem' type='pci'"));
         assert!(xml.contains("bus='0x65' slot='0x00' function='0x1'"));
+    }
+
+    #[test]
+    fn libvirt_xml_advanced_knobs() {
+        let mut c = hpc_cfg();
+        c.machine = Some("pc-q35-6.2".into());
+        c.cpu_model = Some("Skylake-Server".into());
+        c.cpu_topology = Some(CpuTopology {
+            sockets: 2,
+            cores: 4,
+            threads: 2,
+        });
+        c.tpm = true;
+        c.video = Some("qxl".into());
+        c.boot_order = vec!["cdrom".into(), "hd".into()];
+        c.extra_disks = vec![ExtraDisk {
+            source: "/data/extra.qcow2".into(),
+            device: "disk".into(),
+            bus: "virtio".into(),
+            format: "qcow2".into(),
+            read_only: true,
+            target: None,
+        }];
+        c.extra_nics = vec![ExtraNic {
+            kind: "bridge".into(),
+            source: Some("br0".into()),
+            model: "e1000".into(),
+            mac: None,
+        }];
+        c.libvirt_xml_overlay = vec!["    <watchdog model='i6300esb' action='reset'/>".into()];
+        let xml = libvirt_domain_xml(&c, "/o.qcow2", "52:54:00:aa:bb:cc");
+        assert!(xml.contains("machine='pc-q35-6.2'"));
+        assert!(xml.contains("<cpu mode='custom'"));
+        assert!(xml.contains("<model fallback='allow'>Skylake-Server</model>"));
+        assert!(xml.contains("sockets='2' cores='4' threads='2'"));
+        assert!(xml.contains("<boot dev='cdrom'/>"));
+        assert!(xml.contains("<boot dev='hd'/>"));
+        assert!(xml.contains("<source file='/data/extra.qcow2'/>"));
+        // main disk keeps vda; the extra virtio disk auto-assigns vdb.
+        assert!(xml.contains("<target dev='vdb' bus='virtio'/>"));
+        assert!(xml.contains("<interface type='bridge'>"));
+        assert!(xml.contains("<source bridge='br0'/>"));
+        assert!(xml.contains("<model type='e1000'/>"));
+        assert!(xml.contains("<tpm model='tpm-crb'>"));
+        assert!(xml.contains("<video><model type='qxl' heads='1'/></video>"));
+        assert!(xml.contains("<watchdog model='i6300esb' action='reset'/>"));
+    }
+
+    #[test]
+    fn libvirt_xml_full_override_is_verbatim() {
+        let mut c = hpc_cfg();
+        c.libvirt_xml = Some("<domain type='kvm'><name>custom</name></domain>\n".into());
+        let xml = libvirt_domain_xml(&c, "/o.qcow2", "52:54:00:aa:bb:cc");
+        assert_eq!(xml, "<domain type='kvm'><name>custom</name></domain>\n");
     }
 }

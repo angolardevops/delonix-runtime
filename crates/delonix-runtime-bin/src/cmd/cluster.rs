@@ -928,6 +928,7 @@ fn create_and_wait(
         volumes: vec![],
         vnc: false,
         static_ip: None,
+        ..Default::default()
     };
     delonix_vm::create(&state_root(), &cfg)?;
     println!(
