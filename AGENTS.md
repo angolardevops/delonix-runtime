@@ -737,6 +737,28 @@ no publish), e separa "alcançáveis a partir de VMs" (endereço:porta) dos
 seguro. Parsers puros e testados (`parse_ip_gateways_pega_so_as_virbr`,
 `parse_ss_binds_classifica_loopback_vs_gateway`).
 
+## VM↔container por IP directo (`vm bridge`) — EXPERIMENTAL, privilegiado, opt-in
+
+A ÚNICA coisa que o modelo rootless não faz sozinho: dar a uma VM libvirt (em
+`virbr0`, netns do host) alcançabilidade DIRECTA aos IPs de container da SDN
+(`delonix0`/`dlxn…`, dentro do netns do holder `unshare --user --net`). Fechar a
+fronteira exige `CAP_NET_ADMIN` no init-netns do host, logo `vm bridge` **precisa
+de root** — é a excepção deliberada ao daemonless-rootless, atrás de `--apply`
+(default = DRY-RUN que só imprime o plano). Módulo `cmd/vmbridge.rs`.
+
+- **Mecanismo** (`bridge_plan`, puro/testado): veth par no host → move a ponta SDN
+  para o netns do holder + enslave à bridge da rede → ponta host ganha
+  `<prefix>.255.254/16` → `ip_forward=1` → rota de retorno `<vm-subnet> via
+  <host-ip>` DENTRO do holder. Sem SNAT: o container vê o IP real da VM, e o
+  firewall por-container continua a governar (um IP de VM não está em `@dlxall`,
+  passa como gateway; regras `ingress` explícitas aplicam-se na mesma).
+- **Segurança**: abre VM↔container só na rede indicada; a subnet da VM é a NAT do
+  libvirt (`192.168.122.0/24`), NÃO a LAN externa. `vm unbridge <rede>` desfaz.
+- **Estado**: no branch `feat/vm-bridge`, NÃO fundido/lançado — não foi corrido
+  E2E no sandbox (sem root). A GERAÇÃO dos comandos é pura e testada; a execução
+  privilegiada valida-se no host real (dry-run primeiro). Complementa o
+  `vm reach` (via porta publicada, sem privilégio) para quem precisa do IP 10.x cru.
+
 ## Firewall `ingress`/`egress` — o último comando ganha (+ `rm` cirúrgico)
 
 Bug report real: `ingress deny <c> 8069` seguido de `ingress allow <c> 8069`

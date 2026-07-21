@@ -30,5 +30,6 @@ pub mod storage;
 pub mod system;
 pub mod util;
 pub mod vm;
+pub mod vmbridge;
 pub mod vmimage;
 pub mod volume;
