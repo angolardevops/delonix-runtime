@@ -1,14 +1,14 @@
-//! `delonix cluster apply -f cloud.yaml` — bootstrap `kubeadm` idempotente
-//! sobre SSH, em hosts já vivos (`kind: Cluster`). Não cria VMs — isso é
-//! `delonix vm create` (opcionalmente com a imagem dourada de `delonix image
-//! --vm build`). Idempotência SEM ficheiro de estado: cada passo verifica a
-//! condição real no host (`remote::ssh_check`) antes de agir.
+//! `delonix cluster apply -f cloud.yaml` — idempotent `kubeadm` bootstrap
+//! over SSH, on already-live hosts (`kind: Cluster`). Does not create VMs — that is
+//! `delonix vm create` (optionally with the golden image from `delonix image
+//! --vm build`). Idempotency WITHOUT a state file: each step checks the
+//! real condition on the host (`remote::ssh_check`) before acting.
 //!
-//! **Simplificações desta v1** (ver `CLAUDE.md`): só etcd `stacked`
-//! (co-localizado nos control-planes — o default do kubeadm); execução
-//! sequencial (não paralela) entre hosts; HA multi-control-plane exige
-//! `spec.controlPlaneEndpoint` explícito (kubeadm precisa de um endpoint
-//! estável — LB/VIP — à frente de vários control-planes).
+//! **Simplifications of this v1** (see `CLAUDE.md`): only `stacked` etcd
+//! (co-located on the control-planes — the kubeadm default); sequential
+//! (not parallel) execution across hosts; multi-control-plane HA requires
+//! an explicit `spec.controlPlaneEndpoint` (kubeadm needs a stable endpoint
+//! — LB/VIP — in front of several control-planes).
 
 use std::path::PathBuf;
 use std::process::Command;
@@ -29,22 +29,22 @@ use super::{k8s_recipes, vm as vm_cmd, vmimage};
 struct SshSpec {
     #[serde(default = "default_ssh_user")]
     user: String,
-    /// `keyPath` é o nome canónico (o dos templates); `key` mantém-se aceite
-    /// para não partir manifestos escritos antes desta reestruturação.
+    /// `keyPath` is the canonical name (the one in the templates); `key` stays accepted
+    /// so as not to break manifests written before this restructuring.
     #[serde(alias = "keyPath")]
     key: Option<PathBuf>,
-    // FIXME(RELATORIO FAIL#1): parseado mas AINDA não ligado ao `conn_args()` — o
-    // SSH vai sempre à 22. Aceite e ignorado de propósito (não partir manifestos que
-    // o definam); ligar ou remover do schema é decisão pendente, em commit dedicado.
+    // FIXME(RELATORIO FAIL#1): parsed but NOT YET wired to `conn_args()` — SSH
+    // always goes to port 22. Accepted and ignored on purpose (to not break manifests that
+    // set it); wiring it up or removing it from the schema is a pending decision, in a dedicated commit.
     #[serde(default)]
     #[allow(dead_code)]
     port: Option<u16>,
 }
 
-/// `Default` MANUAL (não derivado) de propósito: o derive daria `user: ""`, e
-/// como `ClusterSpec.ssh` é `#[serde(default)]`, um manifesto SEM bloco `ssh:`
-/// ficaria com utilizador VAZIO em vez de `delonix` — o `default_ssh_user` só
-/// se aplica quando o bloco existe mas lhe falta o campo. Mesmo padrão de
+/// MANUAL `Default` (not derived) on purpose: the derive would give `user: ""`, and
+/// since `ClusterSpec.ssh` is `#[serde(default)]`, a manifest WITHOUT an `ssh:` block
+/// would end up with an EMPTY user instead of `delonix` — `default_ssh_user` only
+/// applies when the block exists but is missing the field. Same pattern as
 /// `EtcdSpec`/`KindModeSpec`.
 impl Default for SshSpec {
     fn default() -> Self {
@@ -80,8 +80,8 @@ fn default_etcd_mode() -> String {
 
 #[derive(Debug, Clone, Deserialize)]
 struct HostSpec {
-    /// `address` é o nome canónico nos templates; `ip` mantém-se por
-    /// compatibilidade com os manifestos anteriores.
+    /// `address` is the canonical name in the templates; `ip` stays for
+    /// compatibility with earlier manifests.
     #[serde(alias = "address")]
     ip: String,
     hostname: Option<String>,
@@ -95,10 +95,10 @@ impl HostSpec {
 
 #[derive(Debug, Deserialize)]
 struct ClusterSpec {
-    /// **O discriminador**: `kind` (containers aqui), `vm` (VMs douradas) ou
-    /// `ssh` (hosts remotos já vivos). Um só Kind, três caminhos — os campos
-    /// comuns (k8sVersion/podSubnet/cni) partilham-se, os específicos vivem no
-    /// bloco do modo.
+    /// **The discriminator**: `kind` (containers here), `vm` (golden VMs) or
+    /// `ssh` (remote hosts already live). One Kind, three paths — the common
+    /// fields (k8sVersion/podSubnet/cni) are shared, the specific ones live in
+    /// the mode's block.
     #[serde(default = "default_mode")]
     mode: String,
     #[serde(default)]
@@ -117,7 +117,7 @@ struct ClusterSpec {
     pod_subnet: String,
     #[serde(rename = "serviceSubnet", default = "default_service_subnet")]
     service_subnet: String,
-    /// `default` = a CNI da imagem (kindnet); `none` = não instalar nenhuma.
+    /// `default` = the image's CNI (kindnet); `none` = install none.
     #[serde(default = "default_cni")]
     cni: String,
     #[serde(default)]
@@ -126,11 +126,11 @@ struct ClusterSpec {
     vm: VmModeSpec,
 }
 
-/// `Default` MANUAL, espelhando EXACTAMENTE os `#[serde(default = ...)]` de
-/// cima — um `ClusterSpec::default()` tem de ser indistinguível de um manifesto
-/// vazio desserializado. Existe sobretudo para os testes poderem usar
-/// `ClusterSpec { campo: x, ..Default::default() }` e não voltarem a partir de
-/// cada vez que o schema ganha um campo novo.
+/// MANUAL `Default`, mirroring EXACTLY the `#[serde(default = ...)]` above
+/// — a `ClusterSpec::default()` has to be indistinguishable from a deserialized
+/// empty manifest. It exists mostly so the tests can use
+/// `ClusterSpec { field: x, ..Default::default() }` and not break again
+/// every time the schema gains a new field.
 impl Default for ClusterSpec {
     fn default() -> Self {
         ClusterSpec {
@@ -157,9 +157,9 @@ fn default_cni() -> String {
     "default".to_string()
 }
 
-/// Os nós de um papel. **Unifica os três modos**: `kind`/`vm` dizem quantos
-/// (`replicas`), `ssh` diz quais (`hosts`) — porque lá as máquinas já existem e
-/// nós não as criamos.
+/// The nodes of a role. **Unifies the three modes**: `kind`/`vm` say how many
+/// (`replicas`), `ssh` says which ones (`hosts`) — because there the machines already exist
+/// and we do not create them.
 #[derive(Debug, Default, Deserialize)]
 struct NodesSpec {
     #[serde(default)]
@@ -169,7 +169,7 @@ struct NodesSpec {
 }
 
 impl NodesSpec {
-    /// Quantos nós este papel pede, seja como for que foram declarados.
+    /// How many nodes this role asks for, however they were declared.
     fn count(&self) -> u32 {
         if !self.hosts.is_empty() {
             self.hosts.len() as u32
@@ -179,7 +179,7 @@ impl NodesSpec {
     }
 }
 
-/// Bloco `spec.kind` — só lido no `mode: kind`.
+/// `spec.kind` block — only read in `mode: kind`.
 #[derive(Debug, Deserialize)]
 struct KindModeSpec {
     #[serde(default = "default_node_image")]
@@ -201,7 +201,7 @@ fn default_node_image() -> String {
     super::kindmode::DEFAULT_NODE_IMAGE.to_string()
 }
 
-/// Bloco `spec.vm` — só lido no `mode: vm`.
+/// `spec.vm` block — only read in `mode: vm`.
 #[derive(Debug, Default, Deserialize)]
 struct VmModeSpec {
     image: Option<String>,
@@ -223,15 +223,15 @@ fn default_service_subnet() -> String {
     "10.96.0.0/12".to_string()
 }
 
-/// `host[:porta]` — só o alfabeto de um hostname/IPv4/IPv6 + porta. Recusa
-/// vazio e qualquer coisa que comece por `-`/`:` (evita ambiguidade com
-/// flags). **Crítico para segurança**: este valor entra directamente num
-/// `format!` que vira o CORPO de um comando `bash -c` remoto (`kubeadm
-/// init --control-plane-endpoint=...`, ver `kubeadm_init`/`kubeadm_join`) —
-/// sem esta validação, um manifesto malicioso injecta comandos arbitrários
-/// como root no host remoto (`;`/`` ` ``/`$()`/`|` não são bloqueados por
-/// `remote::shell_quote`, que só protege a fronteira ssh→bash-c local, não o
-/// CONTEÚDO do script). Achado de auditoria de segurança, ver CLAUDE.md.
+/// `host[:port]` — only the alphabet of a hostname/IPv4/IPv6 + port. Rejects
+/// empty and anything starting with `-`/`:` (avoids ambiguity with
+/// flags). **Security-critical**: this value goes directly into a
+/// `format!` that becomes the BODY of a remote `bash -c` command (`kubeadm
+/// init --control-plane-endpoint=...`, see `kubeadm_init`/`kubeadm_join`) —
+/// without this validation, a malicious manifest injects arbitrary commands
+/// as root on the remote host (`;`/`` ` ``/`$()`/`|` are not blocked by
+/// `remote::shell_quote`, which only protects the local ssh→bash-c boundary, not the
+/// CONTENT of the script). Security-audit finding, see CLAUDE.md.
 fn valid_endpoint(s: &str) -> bool {
     !s.is_empty()
         && !matches!(s.chars().next(), Some('-') | Some(':'))
@@ -239,19 +239,19 @@ fn valid_endpoint(s: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | ':'))
 }
 
-/// CIDR simples (`10.244.0.0/16`) — só dígitos/`.`/`/`. Mesma justificação
-/// de segurança de [`valid_endpoint`] (usado em `--pod-network-cidr`/
-/// `--service-cidr` do `kubeadm init`).
+/// Simple CIDR (`10.244.0.0/16`) — only digits/`.`/`/`. Same security
+/// rationale as [`valid_endpoint`] (used in `kubeadm init`'s `--pod-network-cidr`/
+/// `--service-cidr`).
 fn valid_cidr(s: &str) -> bool {
     !s.is_empty()
         && s.chars()
             .all(|c| c.is_ascii_digit() || matches!(c, '.' | '/'))
 }
 
-/// Versão do Kubernetes (`1.31` ou `1.31.2`) — só dígitos/`.`. Mesma
-/// justificação de segurança de [`valid_endpoint`] (usado em
-/// `--kubernetes-version` do `kubeadm init` E no repositório apt de
-/// `k8s_recipes::k8s_host_recipes`, corrido em TODOS os hosts).
+/// Kubernetes version (`1.31` or `1.31.2`) — only digits/`.`. Same
+/// security rationale as [`valid_endpoint`] (used in
+/// `kubeadm init`'s `--kubernetes-version` AND in the apt repository of
+/// `k8s_recipes::k8s_host_recipes`, run on ALL hosts).
 pub(crate) fn valid_version(s: &str) -> bool {
     !s.is_empty() && s.chars().all(|c| c.is_ascii_digit() || c == '.')
 }
@@ -349,74 +349,74 @@ fn target_for(host: &HostSpec, ssh: &SshSpec) -> SshTarget {
     }
 }
 
-// `Kubeadm` é maior que `Apply` (muitos flags opcionais de provisionamento) —
-// mesma justificação do `#[allow]` já usado em `VmCmd`/`Cmd` (enum de CLI
-// parseado uma vez por invocação, não um hot-path).
+// `Kubeadm` is larger than `Apply` (many optional provisioning flags) —
+// same rationale as the `#[allow]` already used in `VmCmd`/`Cmd` (a CLI enum
+// parsed once per invocation, not a hot path).
 #[allow(clippy::large_enum_variant)]
 #[derive(Subcommand)]
 pub enum ClusterCmd {
-    /// Inicializa um projecto com os manifestos de cluster (kind/vm/ssh) — ficheiros JÁ PREENCHIDOS (imagens
-    /// incluídas), prontos a usar sem editar nada.
+    /// Initialize a project with the cluster manifests (kind/vm/ssh) — files ALREADY FILLED IN (images
+    /// included), ready to use without editing anything.
     Init {
-        /// Directório do projecto (default: o actual).
+        /// Project directory (default: the current one).
         #[arg(default_value = ".")]
         dir: PathBuf,
-        /// Nome do projecto (default: o nome do directório).
+        /// Project name (default: the directory name).
         #[arg(long)]
         name: Option<String>,
-        /// Imagem a usar. Omitir = preenche com a imagem por omissão.
+        /// Image to use. Omit = fills in with the default image.
         #[arg(long)]
         image: Option<String>,
-        /// Substitui ficheiros já existentes.
+        /// Overwrite existing files.
         #[arg(long)]
         force: bool,
     },
-    /// Cria um cluster Kubernetes local **sem manifesto e sem Docker** (modo
-    /// kind nativo): arranca os nós `kindest/node` no próprio motor Delonix e
-    /// faz o bootstrap com `kubeadm`. Sem flags = 1 control-plane pronto a usar.
+    /// Create a local Kubernetes cluster **without a manifest and without Docker** (native
+    /// kind mode): starts the `kindest/node` nodes in the Delonix engine itself and
+    /// bootstraps them with `kubeadm`. No flags = 1 control-plane ready to use.
     Create {
-        /// Nome do cluster (prefixo dos nós e do kubeconfig). Omitir = inventa
-        /// um (rei + lugar de Angola), para dois `create` seguidos não colidirem.
+        /// Cluster name (prefix of the nodes and the kubeconfig). Omit = invents
+        /// one (Angolan king + place), so two `create`s in a row do not collide.
         #[arg(long)]
         name: Option<String>,
-        /// Porta do host para o apiserver. Omitir = o delonix escolhe uma livre
-        /// (tenta a 6443; se estiver tomada por outro cluster, usa uma alta).
+        /// Host port for the apiserver. Omit = delonix picks a free one
+        /// (tries 6443; if taken by another cluster, uses a high one).
         #[arg(long)]
         api_port: Option<u16>,
-        /// Nós worker a juntar (0 = só control-plane, sem taint — agenda tudo).
+        /// Worker nodes to join (0 = control-plane only, untainted — schedules everything).
         #[arg(long, default_value_t = 0)]
         workers: u32,
-        /// Control-planes do cluster (default 1). Mais que 1 exige um endpoint
-        /// estável à frente deles (LB) — ver o erro se pedires >1.
+        /// Cluster control-planes (default 1). More than 1 requires a stable
+        /// endpoint in front of them (LB) — see the error if you ask for >1.
         #[arg(long, default_value_t = 1)]
         control_planes: u32,
-        /// Imagem do nó (default: `kindest/node` fixada por digest).
+        /// Node image (default: `kindest/node` pinned by digest).
         #[arg(long)]
         image: Option<String>,
         #[arg(long, default_value = "10.244.0.0/16")]
         pod_subnet: String,
         #[arg(long, default_value = "10.96.0.0/12")]
         service_subnet: String,
-        /// `default` (kindnet, da própria imagem) ou `none` (nó fica NotReady
-        /// até aplicares a tua — comportamento do kubeadm puro).
+        /// `default` (kindnet, from the image itself) or `none` (node stays NotReady
+        /// until you apply yours — plain kubeadm behavior).
         #[arg(long, default_value = "default")]
         cni: String,
     },
-    /// Lista os clusters e o estado dos seus nós.
+    /// List the clusters and the state of their nodes.
     #[command(visible_alias = "list")]
     Ls,
-    /// Remove um cluster do modo kind (pára e apaga os nós + kubeconfig).
+    /// Remove a kind-mode cluster (stops and deletes the nodes + kubeconfig).
     Delete {
         #[arg(long, default_value = "delonix", add = ArgValueCandidates::new(super::complete::clusters))]
         name: String,
     },
-    /// Aplica o(s) documento(s) `kind: Cluster` de um manifesto.
+    /// Apply the `kind: Cluster` document(s) of a manifest.
     Apply {
         #[arg(short = 'f', long = "file")]
         file: Option<PathBuf>,
     },
-    /// Provisiona VMs (imagem VM dourada) + bootstrap `kubeadm` — do zero a
-    /// um cluster a funcionar, sem escrever um manifesto à mão.
+    /// Provision VMs (golden VM image) + `kubeadm` bootstrap — from zero to
+    /// a working cluster, without writing a manifest by hand.
     Kubeadm {
         #[arg(long)]
         name: String,
@@ -424,14 +424,14 @@ pub enum ClusterCmd {
         control_plane: u32,
         #[arg(long, default_value_t = 2)]
         workers: u32,
-        /// Tag da imagem VM dourada (`delonix image --vm ls`). Omitir = usa a
-        /// única imagem local existente.
+        /// Tag of the golden VM image (`delonix image --vm ls`). Omit = uses the
+        /// only local image that exists.
         #[arg(long = "vm-image")]
         vm_image: Option<String>,
-        /// Rede já criada (`delonix network create`) — sem default mágico.
+        /// Already-created network (`delonix network create`) — no magic default.
         #[arg(long)]
         network: String,
-        /// Chave SSH privada a usar. Omitir = gera um par ed25519 novo em
+        /// Private SSH key to use. Omit = generates a new ed25519 pair in
         /// `<root>/clusters/<name>/id_ed25519`.
         #[arg(long = "ssh-key")]
         ssh_key: Option<PathBuf>,
@@ -445,7 +445,7 @@ pub enum ClusterCmd {
         pod_subnet: String,
         #[arg(long, default_value = "10.96.0.0/12")]
         service_subnet: String,
-        /// Segundos a esperar por cada VM ficar alcançável por SSH.
+        /// Seconds to wait for each VM to become reachable over SSH.
         #[arg(long, default_value_t = 300)]
         boot_timeout: u64,
     },
@@ -461,9 +461,9 @@ pub fn run(action: ClusterCmd) -> Result<()> {
     {
         return cmd_init(super::scaffold::Target::Cluster, dir, name, image, force);
     }
-    // Modo kind nativo — não toca em SSH/VMs nem precisa de manifesto.
+    // Native kind mode — does not touch SSH/VMs nor need a manifest.
     match action {
-        // Tratado no topo de `run` (faz `return`).
+        // Handled at the top of `run` (does a `return`).
         ClusterCmd::Init { .. } => unreachable!("tratado acima"),
         ClusterCmd::Create {
             ref name,
@@ -509,7 +509,7 @@ pub fn run(action: ClusterCmd) -> Result<()> {
         _ => {}
     }
     match action {
-        // Já tratados acima (modo kind nativo / init) — o topo de `run` faz `return`.
+        // Already handled above (native kind mode / init) — the top of `run` does a `return`.
         ClusterCmd::Create { .. }
         | ClusterCmd::Delete { .. }
         | ClusterCmd::Init { .. }
@@ -563,17 +563,17 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
 
 fn apply_one(name: &str, spec: &ClusterSpec) -> Result<()> {
     validate(spec)?;
-    // O `spec.mode` escolhe o caminho — os campos comuns (k8sVersion/podSubnet/
-    // cni) valem nos três; só o bloco específico do modo muda.
+    // `spec.mode` chooses the path — the common fields (k8sVersion/podSubnet/
+    // cni) hold in all three; only the mode-specific block changes.
     match spec.mode.as_str() {
         "kind" => return apply_kind(name, spec),
         "vm" => return apply_vm(name, spec),
-        _ => {} // `ssh` segue abaixo (o caminho original)
+        _ => {} // `ssh` follows below (the original path)
     }
     apply_ssh(name, spec)
 }
 
-/// `mode: kind` — nós em containers nesta máquina (ver `cmd::kindmode`).
+/// `mode: kind` — nodes in containers on this machine (see `cmd::kindmode`).
 fn apply_kind(name: &str, spec: &ClusterSpec) -> Result<()> {
     if spec.control_plane.count() > 1 {
         return Err(Error::Invalid(
@@ -595,14 +595,14 @@ fn apply_kind(name: &str, spec: &ClusterSpec) -> Result<()> {
             cni: spec.cni.clone(),
             k8s_version: spec.k8s_version.clone(),
             workers: spec.workers.count(),
-            // O `> 1` já foi recusado acima, com a mesma razão.
+            // The `> 1` case was already rejected above, for the same reason.
             control_planes: 1,
         },
     )
 }
 
-/// `mode: vm` — provisiona VMs da imagem dourada e faz o bootstrap por SSH.
-/// Reaproveita o `provision_and_apply` do `cluster kubeadm` (zero duplicação).
+/// `mode: vm` — provisions VMs from the golden image and bootstraps them over SSH.
+/// Reuses `cluster kubeadm`'s `provision_and_apply` (zero duplication).
 fn apply_vm(name: &str, spec: &ClusterSpec) -> Result<()> {
     let network = spec.vm.network.clone().ok_or_else(|| {
         Error::Invalid(
@@ -631,7 +631,7 @@ fn apply_vm(name: &str, spec: &ClusterSpec) -> Result<()> {
     })
 }
 
-/// `mode: ssh` — hosts remotos JÁ vivos (o caminho original, inalterado).
+/// `mode: ssh` — remote hosts ALREADY live (the original path, unchanged).
 fn apply_ssh(name: &str, spec: &ClusterSpec) -> Result<()> {
     let cri_bin = vmimage::resolve_cri_bin(None)?;
     let cri_service = vmimage::workspace_dist_file("delonix-cri.service")?;
@@ -683,7 +683,7 @@ fn apply_ssh(name: &str, spec: &ClusterSpec) -> Result<()> {
 }
 
 // ---------------------------------------------------------------------------
-// `delonix cluster kubeadm` — provisiona VMs + chama `apply_one`
+// `delonix cluster kubeadm` — provisions VMs + calls `apply_one`
 // ---------------------------------------------------------------------------
 
 struct ProvisionArgs {
@@ -701,16 +701,16 @@ struct ProvisionArgs {
     boot_timeout: u64,
 }
 
-/// Nomes determinísticos das VMs de um papel (`<cluster>-cp1`, `<cluster>-w1`, ...).
+/// Deterministic VM names of a role (`<cluster>-cp1`, `<cluster>-w1`, ...).
 fn vm_names(cluster_name: &str, role: &str, count: u32) -> Vec<String> {
     (1..=count)
         .map(|i| format!("{cluster_name}-{role}{i}"))
         .collect()
 }
 
-/// Resolve a tag da imagem VM dourada a usar: explícita, ou a única existente
-/// localmente (erro claro se houver 0 ou mais de 1 — nunca escolhe às cegas
-/// entre várias).
+/// Resolves the tag of the golden VM image to use: explicit, or the only one that
+/// exists locally (clear error if there are 0 or more than 1 — never picks blindly
+/// among several).
 pub(crate) fn resolve_vm_image(store: &VmImageStore, explicit: Option<String>) -> Result<String> {
     if let Some(tag) = explicit {
         return Ok(tag);
@@ -729,10 +729,10 @@ pub(crate) fn resolve_vm_image(store: &VmImageStore, explicit: Option<String>) -
     }
 }
 
-/// Chave SSH privada a usar: a explícita, ou gera um par ed25519 novo em
-/// `<root>/clusters/<name>/id_ed25519` (`ssh-keygen` não-interactivo, sem
-/// passphrase — automação, mesmo espírito do `BatchMode=yes` já usado em
-/// `remote.rs`). Devolve `(caminho_privada, texto_publica)`.
+/// Private SSH key to use: the explicit one, or generates a new ed25519 pair in
+/// `<root>/clusters/<name>/id_ed25519` (non-interactive `ssh-keygen`, no
+/// passphrase — automation, same spirit as the `BatchMode=yes` already used in
+/// `remote.rs`). Returns `(private_path, public_text)`.
 fn generate_or_load_ssh_key(name: &str, explicit: Option<PathBuf>) -> Result<(PathBuf, String)> {
     if let Some(key) = explicit {
         let pub_path = key.with_extension("pub");
@@ -762,9 +762,9 @@ fn generate_or_load_ssh_key(name: &str, explicit: Option<PathBuf>) -> Result<(Pa
     Ok((key_path, public.trim().to_string()))
 }
 
-/// Espera uma VM ficar alcançável por SSH: primeiro o IP (reconciliado pelo
-/// backend — DHCP/`domifaddr`, tipicamente rápido), depois um `ssh_check`
-/// real (o boot do SO/arranque do sshd demora mais). Devolve o IP.
+/// Waits for a VM to become reachable over SSH: first the IP (reconciled by the
+/// backend — DHCP/`domifaddr`, typically fast), then a real `ssh_check`
+/// (the OS boot / sshd startup takes longer). Returns the IP.
 fn wait_for_vm_ssh_ready(vm_name: &str, ssh: &SshSpec, timeout: Duration) -> Result<String> {
     let base = state_root();
     let deadline = Instant::now() + timeout;
@@ -861,10 +861,10 @@ fn provision_and_apply(args: ProvisionArgs) -> Result<()> {
         ));
     };
 
-    // O `cluster kubeadm` (flags, sem manifesto) constrói o MESMO ClusterSpec que
-    // um `apply -f` construiria — daí passar pelo `validate`/`apply_one` iguais.
+    // `cluster kubeadm` (flags, no manifest) builds the SAME ClusterSpec that
+    // an `apply -f` would build — hence it goes through the same `validate`/`apply_one`.
     let spec = ClusterSpec {
-        mode: "ssh".to_string(), // as VMs já foram criadas acima; daqui p/ a frente é SSH
+        mode: "ssh".to_string(), // the VMs were already created above; from here on it is SSH
         ssh,
         etcd: EtcdSpec::default(),
         control_plane_endpoint,
@@ -1031,7 +1031,7 @@ fn recover_join_info(cp1: &SshTarget) -> Result<JoinInfo> {
         })?;
     let cert_key_out = remote::ssh_run(cp1, "kubeadm init phase upload-certs --upload-certs")?;
     let certificate_key = extract_after(&cert_key_out, "Using certificate key:\n").or_else(|| {
-        // formato alternativo (linha única "certificate key: <hex>") consoante a versão.
+        // alternative format (single line "certificate key: <hex>") depending on the version.
         extract_after(&cert_key_out, "certificate key:")
     });
     Ok(JoinInfo {
@@ -1041,9 +1041,9 @@ fn recover_join_info(cp1: &SshTarget) -> Result<JoinInfo> {
     })
 }
 
-/// Extrai o kubeadm init/join output: `token`/`discovery-token-ca-cert-hash`
-/// vêm de `--flag valor`; `certificate-key` idem. Função pura, testada com
-/// uma amostra real de output.
+/// Extracts from the kubeadm init/join output: `token`/`discovery-token-ca-cert-hash`
+/// come from `--flag value`; `certificate-key` likewise. Pure function, tested with
+/// a real output sample.
 fn parse_join_info(output: &str) -> Result<JoinInfo> {
     let token = extract_after(output, "--token ").ok_or_else(|| {
         Error::Invalid(
@@ -1110,8 +1110,8 @@ fn fetch_kubeconfig(cp1: &SshTarget, cluster_name: &str) -> Result<()> {
     std::fs::create_dir_all(&dir)?;
     let dest = dir.join(format!("{cluster_name}-kubeconfig.yaml"));
 
-    // `/etc/kubernetes/admin.conf` é 0600 root:root — copia para /tmp com
-    // permissão legível pelo utilizador SSH antes do scp, depois limpa.
+    // `/etc/kubernetes/admin.conf` is 0600 root:root — copy it to /tmp with
+    // permission readable by the SSH user before the scp, then clean up.
     remote::ssh_run(cp1, "cp /etc/kubernetes/admin.conf /tmp/delonix-admin.conf && chmod 644 /tmp/delonix-admin.conf")?;
     remote::scp_from(cp1, "/tmp/delonix-admin.conf", &dest)?;
     let _ = remote::ssh_run(cp1, "rm -f /tmp/delonix-admin.conf");
@@ -1137,7 +1137,7 @@ fn fetch_kubeconfig(cp1: &SshTarget, cluster_name: &str) -> Result<()> {
     Ok(())
 }
 
-/// Trata o `init` deste grupo (ver `cmd::scaffold`).
+/// Handles this group's `init` (see `cmd::scaffold`).
 fn cmd_init(
     target: super::scaffold::Target,
     dir: PathBuf,
@@ -1146,10 +1146,10 @@ fn cmd_init(
     force: bool,
 ) -> Result<()> {
     let name = name.unwrap_or_else(|| {
-        // Sem `--name`, usa o nome do DIRECTÓRIO. Não se pode usar `canonicalize`:
-        // o directório ainda não existe (é o `init` que o cria) e falharia sempre,
-        // caindo no fallback — todos os projectos ficavam chamados "app".
-        // `.`/vazio resolvem para o cwd; um caminho novo usa o seu basename.
+        // Without `--name`, uses the DIRECTORY name. Cannot use `canonicalize`:
+        // the directory does not exist yet (it is `init` that creates it) and it would always fail,
+        // falling into the fallback — every project would be named "app".
+        // `.`/empty resolve to the cwd; a new path uses its basename.
         let p = if dir.as_os_str().is_empty() || dir == std::path::Path::new(".") {
             std::env::current_dir().ok()
         } else {
@@ -1321,8 +1321,8 @@ kubeadm join 10.0.0.10:6443 --token abcdef.0123456789abcdef \\
         assert!(!valid_version(""));
     }
 
-    /// Um `ClusterSpec` mínimo e VÁLIDO no `mode: ssh` (1 control-plane), para
-    /// cada teste de `validate` só ter de sobrepor o campo que está a exercitar.
+    /// A minimal and VALID `ClusterSpec` in `mode: ssh` (1 control-plane), so
+    /// each `validate` test only has to override the field it is exercising.
     fn spec_ssh_1cp() -> ClusterSpec {
         ClusterSpec {
             mode: "ssh".into(),
@@ -1445,9 +1445,9 @@ k8sVersion: \"1.31\"
         assert_eq!(spec.pod_subnet, default_pod_subnet());
     }
 
-    /// O `Default` manual de `ClusterSpec` tem de ser indistinguível de um
-    /// manifesto vazio — se divergir, os testes acima passam a exercitar um
-    /// spec que o parser nunca produziria.
+    /// The manual `Default` of `ClusterSpec` has to be indistinguishable from an
+    /// empty manifest — if it diverges, the tests above start exercising a
+    /// spec the parser would never produce.
     #[test]
     fn cluster_spec_default_igual_ao_yaml_vazio() {
         let spec: ClusterSpec = serde_yaml::from_str("{}").unwrap();
@@ -1461,8 +1461,8 @@ k8sVersion: \"1.31\"
         assert_eq!(spec.kind.image, def.kind.image);
     }
 
-    /// Um manifesto SEM bloco `ssh:` tem de ficar com o utilizador canónico
-    /// (`delonix`), não com a string vazia — regressão do `Default` derivado.
+    /// A manifest WITHOUT an `ssh:` block has to end up with the canonical user
+    /// (`delonix`), not the empty string — regression of the derived `Default`.
     #[test]
     fn ssh_user_cai_no_default_quando_o_bloco_ssh_e_omitido() {
         let spec: ClusterSpec = serde_yaml::from_str("mode: ssh").unwrap();

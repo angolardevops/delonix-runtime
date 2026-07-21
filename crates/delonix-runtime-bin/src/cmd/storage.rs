@@ -1,11 +1,11 @@
-//! `delonix storage` — armazenamento de REDE montável como volume, inspirado nos
-//! PersistentVolumes do Kubernetes. Uma pasta partilhada (NFS, SMB/CIFS, WebDAV)
-//! de um NAS (TrueNAS, Synology, Nextcloud, …) fica disponível como um volume
-//! nomeado que qualquer container monta com `-v <nome>:/caminho`.
+//! `delonix storage` — NETWORK storage mountable as a volume, inspired by
+//! Kubernetes PersistentVolumes. A shared folder (NFS, SMB/CIFS, WebDAV)
+//! from a NAS (TrueNAS, Synology, Nextcloud, …) becomes available as a named
+//! volume that any container mounts with `-v <name>:/path`.
 //!
-//! Por baixo é um volume do `delonix-volume` com um driver de rede — o `Storage`
-//! é a declaração AMIGÁVEL (server/share/credenciais) que se traduz no
-//! `device`/`options` de mount; o `volumes ls` mostra-o com o seu driver.
+//! Under the hood it is a `delonix-volume` volume with a network driver — the
+//! `Storage` is the FRIENDLY declaration (server/share/credentials) that
+//! translates into the mount `device`/`options`; `volumes ls` shows it with its driver.
 
 use std::path::PathBuf;
 
@@ -20,61 +20,61 @@ use super::util::state_root;
 
 #[derive(Subcommand)]
 pub enum StorageCmd {
-    /// Dashboard (KPIs + tabela) do storage/volumes — TUI, ou `--once` snapshot.
+    /// Storage/volumes dashboard (KPIs + table) — TUI, or `--once` snapshot.
     Dash {
         #[arg(long)]
         once: bool,
     },
-    /// Cria (e monta) um armazenamento de rede.
+    /// Create (and mount) a network storage.
     Create {
         name: String,
-        /// Tipo: `nfs` | `cifs`/`smb` (Samba/Windows) | `webdav` (Nextcloud/ownCloud).
+        /// Type: `nfs` | `cifs`/`smb` (Samba/Windows) | `webdav` (Nextcloud/ownCloud).
         #[arg(long, value_parser = ["nfs", "cifs", "smb", "webdav"])]
         r#type: String,
-        /// Servidor (host/IP), ou o URL base no caso do `webdav`.
+        /// Server (host/IP), or the base URL in the `webdav` case.
         #[arg(long)]
         server: String,
-        /// Export/partilha: caminho NFS (`/mnt/pool/media`), nome da share CIFS
-        /// (`media`), ou o caminho no URL WebDAV (`/remote.php/dav/...`).
+        /// Export/share: NFS path (`/mnt/pool/media`), CIFS share name
+        /// (`media`), or the path in the WebDAV URL (`/remote.php/dav/...`).
         #[arg(long)]
         share: String,
-        /// Utilizador (cifs/webdav).
+        /// User (cifs/webdav).
         #[arg(long)]
         username: Option<String>,
-        /// Password (cifs/webdav) — preferir `--password-secret` para não a expor.
+        /// Password (cifs/webdav) — prefer `--password-secret` to avoid exposing it.
         #[arg(long)]
         password: Option<String>,
-        /// Segredo do cofre com a chave `password` (cifs/webdav) — não vaza no histórico.
+        /// Vault secret with the `password` key (cifs/webdav) — does not leak in shell history.
         #[arg(long = "password-secret")]
         password_secret: Option<String>,
-        /// Monta só-de-leitura.
+        /// Mount read-only.
         #[arg(long = "read-only")]
         read_only: bool,
-        /// Opções de mount extra (`vers=4.1,soft`), acrescentadas às derivadas.
+        /// Extra mount options (`vers=4.1,soft`), appended to the derived ones.
         #[arg(long)]
         options: Option<String>,
     },
-    /// Lista os armazenamentos de rede (volumes com driver de rede).
+    /// List the network storages (volumes with a network driver).
     Ls,
-    /// Detalhe de um armazenamento.
+    /// Details of a storage.
     Inspect {
         #[arg(add = clap_complete::engine::ArgValueCandidates::new(super::complete::volumes))]
         name: String,
     },
-    /// Remove (e desmonta) um armazenamento. Os DADOS ficam no NAS — só se
-    /// desliga a montagem local, como o docker.
+    /// Remove (and unmount) a storage. The DATA stays on the NAS — only the
+    /// local mount is torn down, like docker.
     Rm {
         #[arg(add = clap_complete::engine::ArgValueCandidates::new(super::complete::volumes))]
         name: String,
     },
-    /// Aplica os documentos `kind: Storage` de um manifesto.
+    /// Apply the `kind: Storage` documents from a manifest.
     Apply {
         #[arg(short = 'f', long = "file")]
         file: Option<PathBuf>,
     },
 }
 
-/// `spec` de `kind: Storage`.
+/// `spec` of `kind: Storage`.
 #[derive(Debug, Deserialize)]
 struct StorageSpec {
     /// `nfs` | `cifs`/`smb` | `webdav`.
@@ -85,7 +85,7 @@ struct StorageSpec {
     username: Option<String>,
     #[serde(default)]
     password: Option<String>,
-    /// Segredo do cofre (chave `password`).
+    /// Vault secret (`password` key).
     #[serde(default, rename = "passwordSecret")]
     password_secret: Option<String>,
     #[serde(default, rename = "readOnly")]
@@ -94,7 +94,7 @@ struct StorageSpec {
     mount_options: Option<String>,
 }
 
-/// Nomes aceites no `spec` de `kind: Storage`, para o aviso de campos desconhecidos.
+/// Names accepted in the `kind: Storage` `spec`, for the unknown-field warning.
 pub(crate) const STORAGE_SPEC_FIELDS: &[&str] = &[
     "type",
     "server",
@@ -106,16 +106,16 @@ pub(crate) const STORAGE_SPEC_FIELDS: &[&str] = &[
     "mountOptions",
 ];
 
-/// Os parâmetros de mount derivados de uma declaração de storage.
+/// The mount parameters derived from a storage declaration.
 struct MountSpec {
     driver: String,
     device: String,
     options: Option<String>,
 }
 
-/// Constrói `(driver, device, options)` a partir da declaração amigável.
-/// **Função pura** (a resolução de secret é feita antes, por quem chama) para o
-/// mapeamento tipo→device/options ser testável sem tocar no cofre nem montar.
+/// Builds `(driver, device, options)` from the friendly declaration.
+/// **Pure function** (secret resolution is done beforehand, by the caller) so the
+/// type→device/options mapping is testable without touching the vault or mounting.
 fn build_mount(
     r#type: &str,
     server: &str,
@@ -132,7 +132,7 @@ fn build_mount(
             format!("//{server}/{}", share.trim_start_matches('/')),
         ),
         "webdav" => {
-            // server pode já vir com esquema; senão assume https.
+            // server may already come with a scheme; otherwise assume https.
             let base = if server.contains("://") {
                 server.to_string()
             } else {
@@ -153,7 +153,7 @@ fn build_mount(
             )))
         }
     };
-    // Opções: credenciais (cifs), ro, e as extra do utilizador — por esta ordem.
+    // Options: credentials (cifs), ro, and the user's extras — in this order.
     let mut opts: Vec<String> = Vec::new();
     if driver == "cifs" {
         if let Some(u) = username {
@@ -183,7 +183,7 @@ fn build_mount(
     })
 }
 
-/// Resolve a password: inline `--password`, ou a chave `password` de um segredo.
+/// Resolves the password: inline `--password`, or the `password` key of a secret.
 fn resolve_password(password: Option<String>, secret: Option<String>) -> Result<Option<String>> {
     if let Some(p) = password {
         return Ok(Some(p));
@@ -270,8 +270,8 @@ pub fn run(action: StorageCmd) -> Result<()> {
     Ok(())
 }
 
-/// Aplica os `kind: Storage` de um manifesto (idempotente por nome — o
-/// `create_with` do store não recria um que já exista).
+/// Applies the `kind: Storage` from a manifest (idempotent by name — the
+/// store's `create_with` does not recreate one that already exists).
 pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
     let store = VolumeStore::open(state_root())?;
     for doc in manifest::of_kind(docs, "Storage") {
@@ -327,7 +327,7 @@ mod tests {
             Some("vers=3.0"),
         )
         .unwrap();
-        assert_eq!(m.driver, "cifs"); // smb é alias de cifs
+        assert_eq!(m.driver, "cifs"); // smb is an alias of cifs
         assert_eq!(m.device, "//nas.local/media");
         let o = m.options.unwrap();
         assert!(o.contains("username=alice"));

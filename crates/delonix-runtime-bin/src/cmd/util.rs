@@ -1,6 +1,6 @@
-//! Helpers partilhados por vários grupos de comandos (`container`, `image`,
-//! `build`) — raiz de estado, abertura de armazéns, resolução de imagens e a
-//! lógica rootless-flat vs root-overlay de preparação de rootfs.
+//! Helpers shared by several command groups (`container`, `image`,
+//! `build`) — state root, opening the stores, image resolution, and the
+//! rootless-flat vs root-overlay logic for preparing the rootfs.
 
 use std::path::{Path, PathBuf};
 
@@ -8,7 +8,7 @@ use delonix_image::{Image, ImageStore};
 use delonix_runtime::{self as runtime};
 use delonix_runtime_core::{Container, Error, Result, Store};
 
-/// Raiz de estado do runtime: `$DELONIX_ROOT` ou o default do `ImageStore`.
+/// The runtime's state root: `$DELONIX_ROOT` or the `ImageStore` default.
 pub(crate) fn state_root() -> PathBuf {
     std::env::var_os("DELONIX_ROOT")
         .map(PathBuf::from)
@@ -22,7 +22,7 @@ pub(crate) fn open_stores() -> Result<(ImageStore, Store)> {
     Ok((images, store))
 }
 
-/// Resolve uma imagem local; se faltar, puxa-a do registo.
+/// Resolve a local image; if missing, pull it from the registry.
 pub(crate) fn resolve_or_pull(images: &ImageStore, reference: &str) -> Result<Image> {
     match images.resolve(reference) {
         Ok(img) => Ok(img),
@@ -33,9 +33,9 @@ pub(crate) fn resolve_or_pull(images: &ImageStore, reference: &str) -> Result<Im
     }
 }
 
-/// Comando efetivo (função pura): ENTRYPOINT + (args do utilizador, senão CMD da
-/// imagem) — a mesma semântica do Docker/OCI (o `run <cmd>` substitui o CMD, não o
-/// ENTRYPOINT).
+/// Effective command (pure function): ENTRYPOINT + (the user's args, otherwise the
+/// image's CMD) — the same semantics as Docker/OCI (`run <cmd>` replaces the CMD, not
+/// the ENTRYPOINT).
 pub(crate) fn compose_command(
     entrypoint: &[String],
     cmd: &[String],
@@ -50,22 +50,22 @@ pub(crate) fn compose_command(
     v
 }
 
-/// Como [`compose_command`], mas a partir da config da imagem.
+/// Like [`compose_command`], but from the image's config.
 pub(crate) fn effective_command(img: &Image, user: &[String]) -> Vec<String> {
     compose_command(&img.config.entrypoint, &img.config.cmd, user)
 }
 
-/// `chown -R <uid>:<uid>` de um rootfs FLAT (rootless): sem isto, os ficheiros
-/// pertencem ao uid 0 do host, que fica não-mapeado dentro do user namespace.
-/// Delega em `delonix_runtime::lchown_tree` (usa `lchown`, nunca segue symlinks —
-/// ver nota de segurança lá; não reimplementar isto localmente com
-/// `std::os::unix::fs::chown`, que segue symlinks).
+/// `chown -R <uid>:<uid>` of a FLAT rootfs (rootless): without this, the files
+/// belong to the host's uid 0, which ends up unmapped inside the user namespace.
+/// Delegates to `delonix_runtime::lchown_tree` (uses `lchown`, never follows symlinks —
+/// see the security note there; don't reimplement this locally with
+/// `std::os::unix::fs::chown`, which follows symlinks).
 pub(crate) fn chown_tree(path: &Path, uid: u32) -> Result<()> {
     delonix_runtime::lchown_tree(path, uid, uid);
     Ok(())
 }
 
-/// Localiza um container pelo prefixo do ID ou pelo nome exato.
+/// Locates a container by ID prefix or by exact name.
 pub(crate) fn find(store: &Store, q: &str) -> Result<Container> {
     let all = store.list()?;
     all.into_iter()
@@ -73,9 +73,9 @@ pub(crate) fn find(store: &Store, q: &str) -> Result<Container> {
         .ok_or_else(|| Error::Invalid(format!("{}: {q}", super::po::t("container not found"))))
 }
 
-/// Prepara o rootfs de um novo container a partir de uma imagem: FLAT (export +
-/// chown ao uid do userns) em rootless, ou overlay montado em modo root. Mesma
-/// regra usada por `container run` e por `build` (o container "de trabalho").
+/// Prepares a new container's rootfs from an image: FLAT (export +
+/// chown to the userns uid) in rootless, or a mounted overlay in root mode. Same
+/// rule used by `container run` and by `build` (the "work" container).
 pub(crate) fn prepare_rootfs(images: &ImageStore, img: &Image, id: &str) -> Result<String> {
     let rootless = runtime::is_rootless();
     if rootless {

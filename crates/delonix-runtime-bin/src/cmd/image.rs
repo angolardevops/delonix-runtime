@@ -16,15 +16,15 @@ use serde::Deserialize;
 use super::manifest::{self, ManifestDoc};
 use super::util::{effective_command, open_stores, resolve_or_pull};
 
-/// `spec` de `kind: Image` — ou `pull: <ref>`, ou `build: {...}` (mutuamente
-/// exclusivos; erro claro se faltarem os dois).
+/// `spec` of `kind: Image` — either `pull: <ref>` or `build: {...}` (mutually
+/// exclusive; clear error if both are missing).
 #[derive(Debug, Deserialize)]
 struct ImageSpec {
     pull: Option<String>,
     build: Option<BuildSpec>,
 }
 
-/// Nomes aceites no `spec` de `kind: Image`, para o aviso de campos desconhecidos.
+/// Field names accepted in the `spec` of `kind: Image`, for the unknown-field warning.
 pub(crate) const IMAGE_SPEC_FIELDS: &[&str] = &["pull", "build"];
 
 #[derive(Debug, Deserialize)]
@@ -41,113 +41,113 @@ fn default_context() -> PathBuf {
 
 #[derive(Subcommand)]
 pub enum ImageCmd {
-    /// Dashboard (KPIs + tabela) das imagens — TUI interactivo, ou `--once` snapshot.
+    /// Dashboard (KPIs + table) of images — interactive TUI, or `--once` snapshot.
     Dash {
         #[arg(long)]
         once: bool,
     },
-    /// Puxa uma imagem de um registo.
+    /// Pull an image from a registry.
     Pull {
         image: String,
-        /// Verifica a assinatura cosign com esta chave pública (PEM) DEPOIS do
-        /// pull, e falha se não bater. Sem isto, um pull não é autenticado além
-        /// do digest do próprio registo.
+        /// Verify the cosign signature with this public key (PEM) AFTER the
+        /// pull, and fail if it does not match. Without this, a pull is not
+        /// authenticated beyond the registry's own digest.
         #[arg(long, value_name = "PEM")]
         verify: Option<PathBuf>,
     },
-    /// Lista imagens locais.
+    /// List local images.
     Ls,
-    /// Detalhe legível de uma ou mais imagens, ao estilo `kubectl describe`
-    /// (tags/digest/tamanho/layers + o config OCI: entrypoint/cmd/env/workdir).
-    /// Com `--vm`, descreve imagens VM douradas.
+    /// Human-readable detail of one or more images, `kubectl describe`-style
+    /// (tags/digest/size/layers + the OCI config: entrypoint/cmd/env/workdir).
+    /// With `--vm`, describes golden VM images.
     Describe {
         #[arg(required = true, add = ArgValueCandidates::new(super::complete::images))]
         names: Vec<String>,
     },
-    /// Dá outro nome/tag a uma imagem local (não copia nada — é só um nome novo
-    /// para o mesmo conteúdo).
+    /// Give another name/tag to a local image (copies nothing — it's just a new
+    /// name for the same content).
     Tag {
         #[arg(add = ArgValueCandidates::new(super::complete::images))]
         source: String,
         target: String,
     },
-    /// Layers de uma imagem (digest + tamanho), da base para o topo.
+    /// Layers of an image (digest + size), from base to top.
     History {
         #[arg(add = ArgValueCandidates::new(super::complete::images))]
         image: String,
     },
-    /// Verifica a assinatura cosign de uma imagem local contra uma chave pública.
+    /// Verify the cosign signature of a local image against a public key.
     Verify {
         #[arg(add = ArgValueCandidates::new(super::complete::images))]
         image: String,
-        /// Chave pública em PEM.
+        /// Public key in PEM.
         #[arg(value_name = "PEM")]
         key: PathBuf,
     },
-    /// SBOM + scan de CVE de uma imagem (lê os layers do CAS, sem correr nada).
-    /// Puxa a imagem se faltar. Ver `--sbom`, `--fail-on`, `--update`.
+    /// SBOM + CVE scan of an image (reads the layers from the CAS, without running anything).
+    /// Pulls the image if missing. See `--sbom`, `--fail-on`, `--update`.
     Scan {
-        /// Imagem a analisar (dispensável com `--update`).
+        /// Image to scan (optional with `--update`).
         image: Option<String>,
-        /// Lista o SBOM (pacotes instalados) em vez de analisar.
+        /// List the SBOM (installed packages) instead of scanning.
         #[arg(long)]
         sbom: bool,
-        /// Falha (exit 1) se houver vulnerabilidades >= esta severidade
-        /// (low|medium|high|critical) — gate para CI.
+        /// Fail (exit 1) if there are vulnerabilities >= this severity
+        /// (low|medium|high|critical) — gate for CI.
         #[arg(long = "fail-on", value_name = "SEV")]
         fail_on: Option<String>,
-        /// Sincroniza o feed de CVE para a base local (usada depois por cada scan).
+        /// Sync the CVE feed to the local database (used afterwards by each scan).
         #[arg(long)]
         update: bool,
-        /// Fonte do feed para `--update`: URL ou ficheiro (ou $DELONIX_ADVISORY_FEED).
+        /// Feed source for `--update`: URL or file (or $DELONIX_ADVISORY_FEED).
         #[arg(long = "feed", value_name = "URL|FICHEIRO")]
         feed: Option<String>,
     },
-    /// Remove uma imagem local.
+    /// Remove a local image.
     Rm {
         #[arg(add = ArgValueCandidates::new(super::complete::images))]
         image: String,
     },
-    /// Exporta um bundle OCI runtime (rootfs + config.json) para `runc`/`crun`.
+    /// Export an OCI runtime bundle (rootfs + config.json) for `runc`/`crun`.
     Export {
         #[arg(add = ArgValueCandidates::new(super::complete::images))]
         image: String,
         dir: PathBuf,
     },
-    /// Aplica os documentos `kind: Image` de um manifesto (`pull` idempotente
-    /// por referência; `build` reconstrói e substitui a tag a cada apply).
+    /// Apply the `kind: Image` documents of a manifest (`pull` idempotent
+    /// by reference; `build` rebuilds and replaces the tag on each apply).
     Apply {
         #[arg(short = 'f', long = "file")]
         file: Option<PathBuf>,
     },
-    /// Autentica num registo OCI (guarda as credenciais em `<root>/auth.json`,
-    /// formato docker/podman). A password vem SEMPRE do stdin — nunca de um
-    /// argumento (ficaria no histórico da shell e no /proc).
+    /// Authenticate to an OCI registry (stores the credentials in `<root>/auth.json`,
+    /// docker/podman format). The password ALWAYS comes from stdin — never from an
+    /// argument (it would end up in the shell history and in /proc).
     Login {
-        /// Registo (ex.: `ghcr.io`, `docker.io`).
+        /// Registry (e.g. `ghcr.io`, `docker.io`).
         registry: String,
         #[arg(short = 'u', long = "username")]
         username: String,
-        /// Lê a password/token do stdin (única forma suportada).
+        /// Read the password/token from stdin (the only supported way).
         #[arg(long = "password-stdin")]
         password_stdin: bool,
     },
-    /// Remove as credenciais guardadas de um registo.
+    /// Remove the stored credentials of a registry.
     Logout { registry: String },
-    /// Imagens VM douradas (`<root>/vm-images/`): ls/pull/push/build.
-    /// Equivalente a `image --vm <cmd>` (forma antiga, mantida).
+    /// Golden VM images (`<root>/vm-images/`): ls/pull/push/build.
+    /// Equivalent to `image --vm <cmd>` (old form, kept).
     Vm {
         #[command(subcommand)]
         action: VmSub,
     },
-    /// Publica uma imagem local num registo OCI. Sem `target`, publica sob a
-    /// própria referência da imagem. Com `--vm`, o `target` é obrigatório.
+    /// Publish a local image to an OCI registry. Without `target`, publishes under
+    /// the image's own reference. With `--vm`, `target` is required.
     Push {
         #[arg(add = ArgValueCandidates::new(super::complete::images))]
         name: String,
         target: Option<String>,
     },
-    /// (só com `--vm`) Constrói a imagem VM dourada (Ubuntu + kubeadm/kubelet/
+    /// (only with `--vm`) Build the golden VM image (Ubuntu + kubeadm/kubelet/
     /// kubectl + `delonix-cri`).
     Build {
         #[arg(short = 't', long = "tag")]
@@ -162,37 +162,37 @@ pub enum ImageCmd {
         extra_run: Vec<String>,
         #[arg(long)]
         cri_bin: Option<PathBuf>,
-        /// Não comprimir o qcow2 final (maior, mas sem custo de descompressão
-        /// nas leituras do backing file em runtime).
+        /// Do not compress the final qcow2 (larger, but with no decompression
+        /// cost on backing-file reads at runtime).
         #[arg(long)]
         no_compress: bool,
-        /// Obter os .deb do k8s no HOST (verificados) e instalá-los com `dpkg` —
-        /// o appliance corre sem rede. Dispensa DHCP/DNS no guest.
+        /// Fetch the k8s .deb packages on the HOST (verified) and install them with `dpkg` —
+        /// the appliance runs without network. No DHCP/DNS needed in the guest.
         #[arg(long)]
         offline: bool,
     },
 }
 
-/// Subcomandos de `image vm` — espelham 1:1 o `cmd::vmimage::VmImageCmd`.
+/// Subcommands of `image vm` — mirror `cmd::vmimage::VmImageCmd` 1:1.
 #[derive(Subcommand)]
 pub enum VmSub {
-    /// Lista as imagens VM locais.
+    /// List the local VM images.
     Ls,
-    /// Detalhe legível de uma ou mais imagens VM, ao estilo `kubectl describe`.
+    /// Human-readable detail of one or more VM images, `kubectl describe`-style.
     Describe {
         #[arg(required = true)]
         names: Vec<String>,
     },
-    /// Obtém uma imagem VM de um registo OCI (artefacto de blob único).
+    /// Fetch a VM image from an OCI registry (single-blob artifact).
     Pull {
         source: String,
-        /// Nome local (default: derivado da referência).
+        /// Local name (default: derived from the reference).
         #[arg(long)]
         name: Option<String>,
     },
-    /// Publica uma imagem VM local num registo OCI.
+    /// Publish a local VM image to an OCI registry.
     Push { name: String, target: String },
-    /// Constrói a imagem VM dourada (Ubuntu + kubeadm/kubelet/kubectl + `delonix-cri`).
+    /// Build the golden VM image (Ubuntu + kubeadm/kubelet/kubectl + `delonix-cri`).
     Build {
         #[arg(short = 't', long = "tag")]
         tag: String,
@@ -206,23 +206,23 @@ pub enum VmSub {
         extra_run: Vec<String>,
         #[arg(long)]
         cri_bin: Option<PathBuf>,
-        /// Não comprimir o qcow2 final (maior, mas sem custo de descompressão
-        /// nas leituras do backing file em runtime).
+        /// Do not compress the final qcow2 (larger, but with no decompression
+        /// cost on backing-file reads at runtime).
         #[arg(long)]
         no_compress: bool,
-        /// Obter os .deb do k8s no HOST (verificados) e instalá-los com `dpkg` —
-        /// o appliance corre sem rede. Dispensa DHCP/DNS no guest.
+        /// Fetch the k8s .deb packages on the HOST (verified) and install them with `dpkg` —
+        /// the appliance runs without network. No DHCP/DNS needed in the guest.
         #[arg(long)]
         offline: bool,
     },
 }
 
-/// `vm`: activa `--vm` no grupo `image` — despacha `ls`/`pull`/`push`/`build`
-/// para `cmd::vmimage` (imagens VM douradas) em vez de `ImageStore` (imagens
-/// de container). `rm`/`export`/`apply` não fazem sentido para imagens VM
-/// nesta fase — erro claro em vez de um comportamento silenciosamente errado.
+/// `vm`: enables `--vm` in the `image` group — dispatches `ls`/`pull`/`push`/`build`
+/// to `cmd::vmimage` (golden VM images) instead of `ImageStore` (container
+/// images). `rm`/`export`/`apply` make no sense for VM images at this
+/// stage — clear error instead of silently wrong behavior.
 pub fn run(vm: bool, action: ImageCmd) -> Result<()> {
-    // login/logout são agnósticos a container-vs-VM (mesmo auth.json).
+    // login/logout are agnostic to container-vs-VM (same auth.json).
     match &action {
         ImageCmd::Dash { once } => {
             return super::dash::run(super::dash::DashScope::Images, *once);
@@ -304,8 +304,8 @@ pub fn run(vm: bool, action: ImageCmd) -> Result<()> {
     }
 }
 
-/// `image login` — lê a password do stdin (obrigatório: um argumento ficaria no
-/// histórico da shell e visível em /proc) e delega no `delonix_image::auth`.
+/// `image login` — reads the password from stdin (mandatory: an argument would end up
+/// in the shell history and be visible in /proc) and delegates to `delonix_image::auth`.
 fn cmd_login(registry: &str, username: &str, password_stdin: bool) -> Result<()> {
     if !password_stdin {
         return Err(Error::Invalid(
@@ -336,7 +336,7 @@ fn run_vm(action: ImageCmd) -> Result<()> {
         },
         ImageCmd::Push { name, target } => VmImageCmd::Push {
             name,
-            // Uma imagem VM não tem repo_tags de onde inferir o destino.
+            // A VM image has no repo_tags from which to infer the destination.
             target: target.ok_or_else(|| {
                 Error::Invalid(
                     super::po::t("`image --vm push <name> <dest>`: the destination is required")
@@ -421,34 +421,34 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
 
 fn cmd_pull(images: &ImageStore, reference: &str, verify: Option<&std::path::Path>) -> Result<()> {
     let img = delonix_image::pull_from_registry(images, reference)?;
-    // Verifica DEPOIS do pull (a assinatura cosign vive num tag ao lado da
-    // imagem no registo, logo é preciso tê-la cá). Se falhar, o comando falha —
-    // a imagem fica local, mas quem pediu `--verify` sabe que não é de confiança.
+    // Verify AFTER the pull (the cosign signature lives in a tag alongside the
+    // image in the registry, so we need it here). If it fails, the command fails —
+    // the image stays local, but whoever asked for `--verify` knows it is untrusted.
     if let Some(key) = verify {
         let pem = std::fs::read_to_string(key)?;
         let digest = delonix_image::verify_signature(images, reference, &pem)?;
         println!("assinatura válida para {reference} ({digest})");
     }
-    // Política de admissão de CVE (scan-on-pull): off por omissão (sem latência),
-    // opt-in via `DELONIX_SCAN_ON_PULL`. Fecha o "puxa sem olhar para dentro" —
-    // ver `scan::admission_scan_on_pull`. Corre DEPOIS da verificação de
-    // assinatura: primeiro "é quem diz ser", depois "traz coisa perigosa?".
+    // CVE admission policy (scan-on-pull): off by default (no latency),
+    // opt-in via `DELONIX_SCAN_ON_PULL`. Closes the "pull without looking inside" —
+    // see `scan::admission_scan_on_pull`. Runs AFTER the signature
+    // verification: first "is it who it says it is", then "does it bring dangerous stuff?".
     super::scan::admission_scan_on_pull(images, reference, &img)?;
     println!("{}", img.short_id());
     Ok(())
 }
 
-/// `image tag` — outro nome para o mesmo conteúdo (não copia layers).
+/// `image tag` — another name for the same content (does not copy layers).
 fn cmd_tag(images: &ImageStore, source: &str, target: &str) -> Result<()> {
     images.tag(source, target)?;
     println!("{source} -> {target}");
     Ok(())
 }
 
-/// `image history` — os layers da imagem, da base para o topo.
+/// `image history` — the image's layers, from base to top.
 ///
-/// O `#` é a posição no stack (0 = base), como no `docker history`. O tamanho é
-/// o do blob COMPRIMIDO no CAS — ver a nota em `image_size`.
+/// The `#` is the position in the stack (0 = base), as in `docker history`. The size is
+/// that of the COMPRESSED blob in the CAS — see the note in `image_size`.
 fn cmd_history(images: &ImageStore, image: &str) -> Result<()> {
     let img = images.resolve(image)?;
     let mut t = super::output::Table::new(&["#", "LAYER", "SIZE"]).right_align(2);
@@ -466,7 +466,7 @@ fn cmd_history(images: &ImageStore, image: &str) -> Result<()> {
     Ok(())
 }
 
-/// `image verify` — assinatura cosign contra uma chave pública.
+/// `image verify` — cosign signature against a public key.
 fn cmd_verify(images: &ImageStore, image: &str, key: &std::path::Path) -> Result<()> {
     let pem = std::fs::read_to_string(key)?;
     let digest = delonix_image::verify_signature(images, image, &pem)?;
@@ -474,24 +474,25 @@ fn cmd_verify(images: &ImageStore, image: &str, key: &std::path::Path) -> Result
     Ok(())
 }
 
-/// `image push` — publica uma imagem de container num registo OCI.
+/// `image push` — publishes a container image to an OCI registry.
 fn cmd_push(images: &ImageStore, image: &str, destination: Option<&str>) -> Result<()> {
-    // Sem destino, publica sob a própria referência (o caso comum: a imagem já
-    // foi construída com a tag do registo de destino).
+    // Without a destination, publishes under its own reference (the common case: the image
+    // was already built with the destination registry's tag).
     let dest = destination.unwrap_or(image);
     let digest = delonix_image::push_to_registry(images, image, dest)?;
     println!("{dest}  {digest}");
     Ok(())
 }
 
-/// Tamanho de uma imagem = soma dos blobs dos seus layers no CAS.
+/// Size of an image = sum of its layers' blobs in the CAS.
 ///
-/// **Não é o "SIZE" do `docker images`**, que é o rootfs DESCOMPACTADO; aqui é
-/// o que a imagem ocupa mesmo no disco (layers comprimidos, partilhados entre
-/// imagens que os reusem). É a única medida que se obtém sem descompactar tudo,
-/// e é a que responde à pergunta que se faz a um `ls` ("quanto espaço isto
-/// gasta?"). Um layer que falte no CAS não conta — daí `Option` só quando NADA
-/// é legível, para não passar por "0 B" uma imagem cujos blobs desapareceram.
+/// **Not the "SIZE" from `docker images`**, which is the UNCOMPRESSED rootfs; here it is
+/// what the image actually occupies on disk (compressed layers, shared among
+/// images that reuse them). It is the only measure obtainable without decompressing
+/// everything, and it is the one that answers the question asked of an `ls` ("how much
+/// space does this use?"). A layer missing from the CAS does not count — hence `Option`
+/// only when NOTHING is readable, so as not to report "0 B" for an image whose blobs
+/// have disappeared.
 fn image_size(images: &ImageStore, img: &delonix_image::Image) -> Option<u64> {
     if img.layers.is_empty() {
         return None;
@@ -509,7 +510,7 @@ fn image_size(images: &ImageStore, img: &delonix_image::Image) -> Option<u64> {
 
 fn cmd_ls(images: &ImageStore) -> Result<()> {
     let mut imgs = images.list()?;
-    // O mais recente primeiro, como no `docker images`.
+    // Newest first, as in `docker images`.
     imgs.sort_by_key(|i| std::cmp::Reverse(i.created_unix));
     let mut t = super::output::Table::new(&["REPOSITORY:TAG", "IMAGE ID", "CREATED", "SIZE"])
         .right_align(3);
@@ -520,11 +521,11 @@ fn cmd_ls(images: &ImageStore) -> Result<()> {
             .cloned()
             .unwrap_or_else(|| "<none>".into());
         t.row(vec![
-            // `display_ref` tira o `@sha256:…` redundante (a tag ja identifica);
-            // o `truncate` e' a rede de seguranca para nomes de repo enormes.
+            // `display_ref` strips the redundant `@sha256:…` (the tag already identifies it);
+            // `truncate` is the safety net for huge repo names.
             super::output::truncate(&super::output::display_ref(&tag), 44),
             img.short_id(),
-            // Era o epoch cru (`CRIADA(unix)`) — ilegível numa tabela.
+            // It used to be the raw epoch (`CRIADA(unix)`) — unreadable in a table.
             super::output::fmt_age(img.created_unix),
             image_size(images, &img)
                 .map(super::output::fmt_size)
@@ -535,12 +536,12 @@ fn cmd_ls(images: &ImageStore) -> Result<()> {
     Ok(())
 }
 
-/// `image describe` — detalhe legível ao estilo `kubectl describe`.
+/// `image describe` — human-readable detail, `kubectl describe`-style.
 fn cmd_describe(images: &ImageStore, names: &[String]) -> Result<()> {
     for (i, name) in names.iter().enumerate() {
-        // `resolve` (não `resolve_or_pull`): descrever não é obter — um
-        // `describe` de uma imagem que não existe deve dizer isso, não passar
-        // minutos a puxar do registo por engano.
+        // `resolve` (not `resolve_or_pull`): describing is not fetching — a
+        // `describe` of a nonexistent image should say so, not spend
+        // minutes pulling from the registry by mistake.
         let img = images.resolve(name)?;
         if i > 0 {
             println!();
@@ -564,7 +565,7 @@ fn describe_one(images: &ImageStore, img: &delonix_image::Image) {
             .unwrap_or_else(|| "<unknown>".into()),
     );
 
-    // Layers com o tamanho de cada blob — é o que mostra ONDE está o peso.
+    // Layers with each blob's size — it's what shows WHERE the weight is.
     if img.layers.is_empty() {
         d.field("Layers", "<none>");
     } else {
@@ -604,8 +605,8 @@ fn describe_one(images: &ImageStore, img: &delonix_image::Image) {
         },
     );
     d.sub("User", if c.user.is_empty() { "root" } else { &c.user });
-    // Extensões Delonix do Dockerfile/Delonixfile (`CPUS`/`MEMORY`/`SECURITY`/
-    // `HEALTHCHECK`) — omitidas por inteiro nas imagens que não as tenham.
+    // Delonix extensions of the Dockerfile/Delonixfile (`CPUS`/`MEMORY`/`SECURITY`/
+    // `HEALTHCHECK`) — omitted entirely on images that do not have them.
     d.sub_opt("CPUs", c.cpus.as_deref());
     d.sub_opt("Memory", c.memory.as_deref());
     d.sub_opt("Healthcheck", c.healthcheck.as_deref());
@@ -622,7 +623,7 @@ fn cmd_rm(images: &ImageStore, reference: &str) -> Result<()> {
     Ok(())
 }
 
-/// Escreve um bundle OCI runtime mínimo (rootfs + config.json) para `runc`/`crun`.
+/// Writes a minimal OCI runtime bundle (rootfs + config.json) for `runc`/`crun`.
 fn cmd_export(images: &ImageStore, reference: &str, dir: &std::path::Path) -> Result<()> {
     let img = resolve_or_pull(images, reference)?;
     std::fs::create_dir_all(dir)
@@ -651,29 +652,29 @@ fn cmd_export(images: &ImageStore, reference: &str, dir: &std::path::Path) -> Re
     Ok(())
 }
 
-/// Constrói um `config.json` de **runtime OCI conformante** a partir dos tipos
-/// canónicos do `oci-spec` (em vez do JSON à mão de antes, que estava incompleto).
-/// PURA — sem IO — para ser validada por teste de round-trip contra o próprio
-/// `oci_spec::runtime::Spec`.
+/// Builds a **conformant OCI-runtime** `config.json` from the `oci-spec`
+/// canonical types (instead of the previous hand-written JSON, which was incomplete).
+/// PURE — no IO — so it can be validated by a round-trip test against
+/// `oci_spec::runtime::Spec` itself.
 ///
-/// Difere do bundle mínimo anterior em três pontos que o tornavam **não-funcional**
-/// com `runc`/`crun` (não só não-conformante):
-/// 1. **`mounts`** — antes não existia NENHUM. Sem `/proc`, `/sys`, `/dev/pts`,
-///    `/dev/shm`, `/dev/mqueue` o container arrancava sem `/proc` e a maioria das
-///    cargas partia. Passa a usar o conjunto-padrão do `runc spec`.
-/// 2. **Capabilities** — antes só `bounding` estava definido, logo o processo (uid 0)
-///    ficava com o conjunto EFETIVO vazio (nem `chown` nem bind <1024). Agora o
-///    mesmo conjunto vai a bounding+effective+permitted; inheritable/ambient vazios
-///    (mínimo privilégio, coerente com `noNewPrivileges`).
-/// 3. **`maskedPaths`/`readonlyPaths`** — endurecimento-padrão (`/proc/kcore`, …)
-///    que o bundle anterior omitia por completo.
+/// It differs from the previous minimal bundle in three points that made it **non-functional**
+/// with `runc`/`crun` (not just non-conformant):
+/// 1. **`mounts`** — before there were NONE. Without `/proc`, `/sys`, `/dev/pts`,
+///    `/dev/shm`, `/dev/mqueue` the container started without `/proc` and most
+///    workloads broke. Now uses the `runc spec` standard set.
+/// 2. **Capabilities** — before only `bounding` was defined, so the process (uid 0)
+///    ended up with an empty EFFECTIVE set (neither `chown` nor bind <1024). Now the
+///    same set goes to bounding+effective+permitted; inheritable/ambient empty
+///    (least privilege, consistent with `noNewPrivileges`).
+/// 3. **`maskedPaths`/`readonlyPaths`** — standard hardening (`/proc/kcore`, …)
+///    that the previous bundle omitted entirely.
 fn build_runtime_spec(args: Vec<String>, env: Vec<String>, cwd: String) -> Result<Spec> {
     let mkerr = |what: &'static str| {
         move |e: oci_spec::OciSpecError| Error::Invalid(format!("{what}: {e}"))
     };
 
-    // A mesma postura de capacidades do bundle anterior, mas aplicada aos três
-    // conjuntos que a tornam EFETIVA (não só ao teto `bounding`).
+    // The same capability posture as the previous bundle, but applied to the three
+    // sets that make it EFFECTIVE (not just the `bounding` ceiling).
     let caps: std::collections::HashSet<Capability> = [
         Capability::Chown,
         Capability::DacOverride,
@@ -695,7 +696,7 @@ fn build_runtime_spec(args: Vec<String>, env: Vec<String>, cwd: String) -> Resul
 
     let process = ProcessBuilder::default()
         .terminal(false)
-        .user(User::default()) // uid 0 / gid 0 — como antes
+        .user(User::default()) // uid 0 / gid 0 — as before
         .args(args)
         .env(env)
         .cwd(cwd)
@@ -710,9 +711,9 @@ fn build_runtime_spec(args: Vec<String>, env: Vec<String>, cwd: String) -> Resul
         .build()
         .map_err(mkerr("root"))?;
 
-    // Namespaces/masked/readonly-paths padrão do `runc spec` — o alvo de
-    // conformidade. (Inclui um network namespace isolado, como o `runc spec`; quem
-    // quiser rede-do-host edita o `config.json`.)
+    // Standard namespaces/masked/readonly-paths of the `runc spec` — the
+    // conformance target. (Includes an isolated network namespace, like the `runc spec`;
+    // whoever wants host networking edits the `config.json`.)
     let linux = LinuxBuilder::default()
         .namespaces(get_default_namespaces())
         .masked_paths(get_default_maskedpaths())
@@ -735,9 +736,9 @@ fn build_runtime_spec(args: Vec<String>, env: Vec<String>, cwd: String) -> Resul
 mod tests {
     use super::*;
 
-    /// Conformidade OCI-runtime do bundle exportado: serializa e **volta a
-    /// desserializar** pelo `oci_spec::runtime::Spec` canónico — se o nosso JSON
-    /// divergisse do schema, o round-trip falhava aqui.
+    /// OCI-runtime conformance of the exported bundle: serializes and **deserializes
+    /// again** through the canonical `oci_spec::runtime::Spec` — if our JSON
+    /// diverged from the schema, the round-trip would fail here.
     #[test]
     fn bundle_exportado_e_conformante_oci_runtime() {
         let spec = build_runtime_spec(
@@ -754,11 +755,11 @@ mod tests {
         let json = serde_json::to_vec(&spec).expect("serializar");
         let parsed: Spec = serde_json::from_slice(&json).expect("round-trip pelo tipo canónico");
 
-        // ociVersion presente e semânticamente válido.
+        // ociVersion present and semantically valid.
         assert_eq!(parsed.version(), "1.0.2");
 
-        // O FIX central: mounts padrão presentes — em particular `/proc`, sem o qual
-        // o container arrancava partido. Antes deste commit não havia mounts nenhuns.
+        // The central FIX: standard mounts present — in particular `/proc`, without which
+        // the container started broken. Before this commit there were no mounts at all.
         let mounts = parsed.mounts().as_ref().expect("mounts");
         assert!(
             mounts
@@ -771,7 +772,7 @@ mod tests {
             "conjunto de mounts padrão do runc (proc/sys/dev/pts/shm/…)"
         );
 
-        // Processo: args/env/cwd propagados e capacidades EFETIVAS (não só bounding).
+        // Process: args/env/cwd propagated and EFFECTIVE capabilities (not just bounding).
         let proc = parsed.process().as_ref().expect("process");
         assert_eq!(proc.args().as_ref().unwrap()[0], "/bin/sh");
         assert_eq!(proc.cwd(), std::path::Path::new("/work"));
@@ -783,7 +784,7 @@ mod tests {
             "as capacidades têm de ir ao conjunto EFETIVO, não só ao bounding"
         );
 
-        // Endurecimento padrão que o bundle anterior omitia.
+        // Standard hardening that the previous bundle omitted.
         let linux = parsed.linux().as_ref().expect("linux");
         assert!(!linux.masked_paths().as_ref().expect("masked").is_empty());
         assert!(!linux.namespaces().as_ref().expect("namespaces").is_empty());

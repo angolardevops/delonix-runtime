@@ -1,69 +1,71 @@
-//! `delonix <grupo> init` — arranca um projecto completo e funcional com **um
-//! comando**: os ficheiros já vêm preenchidos (imagens incluídas), prontos a
-//! `build`/`apply`/`create` sem editar nada.
+//! `delonix <group> init` — bootstraps a complete, working project with **one
+//! command**: the files come already filled in (images included), ready to
+//! `build`/`apply`/`create` without editing anything.
 //!
-//! # Regra que estes templates seguem
+//! # Rule these templates follow
 //!
-//! **Só usam campos que o parser LÊ mesmo.** Um scaffold que gera YAML com
-//! campos ignorados em silêncio é pior que nenhum: dá a ilusão de configuração.
-//! Cada campo aqui está ligado a código (`ContainerSpec`, `VmSpec`, `KindCluster`…);
-//! o que ainda não existe aparece como comentário, nunca como chave activa.
+//! **They only use fields the parser ACTUALLY reads.** A scaffold that emits
+//! YAML with silently-ignored fields is worse than none: it gives the illusion
+//! of configuration. Every field here is wired to code (`ContainerSpec`,
+//! `VmSpec`, `KindCluster`…); what does not exist yet appears as a comment,
+//! never as an active key.
 //!
-//! # Resiliência por omissão
+//! # Resilience by default
 //!
-//! O que é gerado usa `restart: always` (supervisor destacado que captura o
-//! exit code real e reinicia — ver `container::run_supervised`), volumes
-//! nomeados para o estado (sobrevivem ao `rm` do container) e portas
-//! publicadas pelo ingress. É o "resiliente e funcional" pedido — não um
-//! esqueleto que é preciso completar.
+//! What is generated uses `restart: always` (a detached supervisor that
+//! captures the real exit code and restarts — see `container::run_supervised`),
+//! named volumes for state (they survive the container's `rm`) and ports
+//! published by the ingress. It is the requested "resilient and working" — not
+//! a skeleton that has to be completed.
 
 use std::path::{Path, PathBuf};
 
 use delonix_runtime_core::{Error, Result};
 
-// Templates embebidos pelo `build.rs`: `TEMPLATES: &[(&str, &[(&str, &str)])]`
-// = [(nome, [(caminho-relativo, conteúdo)])].
+// Templates embedded by `build.rs`: `TEMPLATES: &[(&str, &[(&str, &str)])]`
+// = [(name, [(relative-path, content)])].
 include!(concat!(env!("OUT_DIR"), "/templates.rs"));
 
-/// Imagens por omissão — é isto que preenche o projecto quando NÃO se passa
-/// `--image`. Fixadas por digest onde a reprodutibilidade importa.
+/// Default images — this is what fills the project when `--image` is NOT
+/// passed. Pinned by digest where reproducibility matters.
 const DEFAULT_APP_BASE: &str = "alpine:3.20";
 const DEFAULT_DB_IMAGE: &str = "postgres:16-alpine";
 const DEFAULT_VM_IMAGE: &str = "k8s-golden";
 
-/// O que gerar.
+/// What to generate.
 #[derive(Clone, Copy, PartialEq)]
 pub(crate) enum Target {
     Container,
     Vm,
     Cluster,
-    /// Projecto completo: Delonixfile + manifesto (todos os Kinds) + cluster.
+    /// Complete project: Delonixfile + manifest (all Kinds) + cluster.
     Stack,
 }
 
 pub(crate) struct InitOpts {
     pub dir: PathBuf,
     pub name: String,
-    /// `None` = preenche com a imagem por omissão do alvo (o pedido explícito:
-    /// "sem passarmos o --image já preenche as imagens").
+    /// `None` = fill with the target's default image (the explicit request:
+    /// "without passing --image it already fills in the images").
     pub image: Option<String>,
     pub force: bool,
-    /// `--template <nome>`: em vez do scaffold genérico, gera um PROJECTO COMPLETO
-    /// de uma linguagem/framework (ex.: `python`) com boas práticas — código,
-    /// Delonixfile, manifesto, testes e dotfiles. `list` mostra os disponíveis.
+    /// `--template <name>`: instead of the generic scaffold, generates a
+    /// COMPLETE PROJECT for a language/framework (e.g. `python`) with best
+    /// practices — code, Delonixfile, manifest, tests and dotfiles. `list`
+    /// shows the available ones.
     pub template: Option<String>,
-    /// `--up`: depois de gerar, constrói a imagem, arranca o container e espera
-    /// que fique saudável — tudo com progresso animado, num só comando.
+    /// `--up`: after generating, builds the image, starts the container and
+    /// waits until it is healthy — all with animated progress, in a single command.
     pub up: bool,
 }
 
-/// Nomes dos templates disponíveis, para o `--help`/erros.
+/// Names of the available templates, for `--help`/errors.
 pub(crate) fn template_names() -> Vec<&'static str> {
     TEMPLATES.iter().map(|(n, _)| *n).collect()
 }
 
-/// `(porta, health-path)` de um template (do `template.meta` embebido pelo
-/// build.rs). Default `8000` + o health das apps se o template não o declarar.
+/// `(port, health-path)` of a template (from the `template.meta` embedded by
+/// build.rs). Default `8000` + the apps' health if the template does not declare it.
 fn template_meta(name: &str) -> (&'static str, &'static str) {
     TEMPLATE_META
         .iter()
@@ -72,8 +74,8 @@ fn template_meta(name: &str) -> (&'static str, &'static str) {
         .unwrap_or(("8000", "/api/v1/health/live"))
 }
 
-/// Deriva um módulo Python válido a partir do nome do projecto: minúsculas,
-/// `[a-z0-9_]`, e nunca a começar por dígito (senão não é um identificador).
+/// Derives a valid Python module from the project name: lowercase,
+/// `[a-z0-9_]`, and never starting with a digit (otherwise it is not an identifier).
 fn python_module(name: &str) -> String {
     let mut m: String = name
         .chars()
@@ -91,15 +93,15 @@ fn python_module(name: &str) -> String {
     m
 }
 
-/// Substitui os tokens `__NAME__`/`__MODULE__`/`__PORT__` (em conteúdos E caminhos).
+/// Substitutes the `__NAME__`/`__MODULE__`/`__PORT__` tokens (in contents AND paths).
 fn subst(s: &str, o: &InitOpts, module: &str, port: &str) -> String {
     s.replace("__NAME__", &o.name)
         .replace("__MODULE__", module)
         .replace("__PORT__", port)
 }
 
-/// Gera um projecto a partir de um template embebido. `show_next` imprime os
-/// passos seguintes (build/apply/curl) — suprime-se quando o `--up` os vai fazer.
+/// Generates a project from an embedded template. `show_next` prints the next
+/// steps (build/apply/curl) — suppressed when `--up` will do them.
 fn render_template(tname: &str, o: &InitOpts, show_next: bool) -> Result<()> {
     if tname == "list" {
         println!(
@@ -159,7 +161,7 @@ fn render_template(tname: &str, o: &InitOpts, show_next: bool) -> Result<()> {
     Ok(())
 }
 
-/// Escreve um ficheiro, recusando-se a destruir trabalho sem `--force`.
+/// Writes a file, refusing to destroy work without `--force`.
 fn write_file(path: &Path, content: &str, force: bool) -> Result<bool> {
     if path.exists() && !force {
         eprintln!(
@@ -177,13 +179,14 @@ fn write_file(path: &Path, content: &str, force: bool) -> Result<bool> {
     Ok(true)
 }
 
-/// stdin é um terminal interactivo? (menu/perguntas só fazem sentido num TTY).
+/// Is stdin an interactive terminal? (menu/questions only make sense on a TTY).
 fn stdin_is_tty() -> bool {
     unsafe { libc::isatty(0) == 1 }
 }
 
-/// Menu numerado dos templates + a opção "genérico". `Some(nome)` = template;
-/// `None` = scaffold genérico. Reprompt em input inválido; aceita número ou nome.
+/// Numbered menu of the templates + the "generic" option. `Some(name)` =
+/// template; `None` = generic scaffold. Reprompts on invalid input; accepts a
+/// number or a name.
 fn choose_template_interactive() -> Result<Option<String>> {
     use std::io::Write;
     let names = template_names();
@@ -220,7 +223,7 @@ fn choose_template_interactive() -> Result<Option<String>> {
     }
 }
 
-/// Pergunta sim/não. Em não-TTY devolve o default (sem bloquear scripts).
+/// Yes/no question. On non-TTY it returns the default (without blocking scripts).
 fn prompt_yes(question: &str, default_yes: bool) -> bool {
     use std::io::Write;
     if !stdin_is_tty() {
@@ -242,8 +245,8 @@ fn prompt_yes(question: &str, default_yes: bool) -> bool {
     }
 }
 
-/// Constrói a imagem, arranca o container e espera ficar saudável — cada etapa
-/// com progresso animado (estilo `cluster create`). Um só comando até estar UP.
+/// Builds the image, starts the container and waits until healthy — each step
+/// with animated progress (like `cluster create`). A single command until it is UP.
 fn build_and_up(name: &str, dir: &Path, port: &str, health: &str) -> Result<()> {
     let exe = std::env::current_exe().map_err(|e| Error::Invalid(e.to_string()))?;
     let tag = format!("{name}:dev");
@@ -281,8 +284,8 @@ fn build_and_up(name: &str, dir: &Path, port: &str, health: &str) -> Result<()> 
     Ok(())
 }
 
-/// Corre `delonix <args>` em `dir`, capturando a saída (o spinner é que fala).
-/// O erro traz a saída capturada para o diagnóstico.
+/// Runs `delonix <args>` in `dir`, capturing the output (the spinner does the
+/// talking). The error carries the captured output for diagnostics.
 fn run_quiet(exe: &Path, dir: &Path, args: &[&str]) -> Result<()> {
     let out = std::process::Command::new(exe)
         .args(args)
@@ -300,7 +303,7 @@ fn run_quiet(exe: &Path, dir: &Path, args: &[&str]) -> Result<()> {
     }
 }
 
-/// Espera que `health` responda 200 (até ~40s).
+/// Waits for `health` to answer 200 (up to ~40s).
 fn wait_health(port: &str, health: &str) -> Result<()> {
     for _ in 0..80 {
         if http_ok(port, health) {
@@ -313,7 +316,7 @@ fn wait_health(port: &str, health: &str) -> Result<()> {
     ))
 }
 
-/// GET mínimo a `127.0.0.1:port` (HTTP/1.0); `true` se a resposta é `200`.
+/// Minimal GET to `127.0.0.1:port` (HTTP/1.0); `true` if the response is `200`.
 fn http_ok(port: &str, path: &str) -> bool {
     use std::io::{Read, Write};
     let Ok(mut s) = std::net::TcpStream::connect(format!("127.0.0.1:{port}")) else {
@@ -329,17 +332,17 @@ fn http_ok(port: &str, path: &str) -> bool {
 }
 
 pub(crate) fn init(target: Target, o: &InitOpts) -> Result<()> {
-    // `--template list` só lista.
+    // `--template list` only lists.
     if o.template.as_deref() == Some("list") {
         return render_template("list", o, false);
     }
-    // Sem `--template` num TTY interactivo: abre o menu. Em não-TTY (scripts/CI)
-    // cai no scaffold genérico, como sempre.
-    // O menu/flag de templates é de APPS EM CONTAINERS (django/nginx/...): só
-    // faz sentido em `container init`/`stack init`. Em `vm init`/`cluster init`
-    // o utilizador quer o scaffold do ALVO — antes disto, escolher um template
-    // em `vm init` construía e arrancava um CONTAINER (visto ao vivo: gunicorn
-    // a correr onde se esperava uma VM).
+    // No `--template` on an interactive TTY: open the menu. On non-TTY
+    // (scripts/CI) it falls back to the generic scaffold, as always.
+    // The template menu/flag is for CONTAINERIZED APPS (django/nginx/...): it
+    // only makes sense in `container init`/`stack init`. In `vm init`/`cluster
+    // init` the user wants the TARGET's scaffold — before this, picking a
+    // template in `vm init` built and started a CONTAINER (seen live: gunicorn
+    // running where a VM was expected).
     let templates_apply = matches!(target, Target::Container | Target::Stack);
     if !templates_apply && o.template.is_some() && o.template.as_deref() != Some("list") {
         return Err(delonix_runtime_core::Error::Invalid(
@@ -354,8 +357,8 @@ pub(crate) fn init(target: Target, o: &InitOpts) -> Result<()> {
         None if templates_apply && stdin_is_tty() => choose_template_interactive()?,
         None => None,
     };
-    // Um template (via flag ou menu) → projecto completo; opcionalmente
-    // build+run animado (`--up`, ou a pergunta interactiva).
+    // A template (via flag or menu) → complete project; optionally an animated
+    // build+run (`--up`, or the interactive question).
     if let Some(t) = &chosen {
         let do_up = o.up || (stdin_is_tty() && prompt_yes("Build and start it now?", true));
         render_template(t, o, !do_up)?;
@@ -496,15 +499,15 @@ fn delonixfile(o: &InitOpts) -> String {
 
 fn manifest_container(o: &InitOpts) -> String {
     let img = o.image.clone().unwrap_or_else(|| format!("{}:dev", o.name));
-    // Template COMPLETO: toda a spec de `kind: Container`, com defaults e um
-    // comentário por campo. Apaga o que não precisares — o parser aceita
-    // qualquer subconjunto (só `image` é obrigatório).
+    // COMPLETE template: the full `kind: Container` spec, with defaults and one
+    // comment per field. Delete what you do not need — the parser accepts any
+    // subset (only `image` is mandatory).
     CONTAINER_REFERENCE
         .replace("{name}", &o.name)
         .replace("{image}", &img)
 }
 
-/// Referência completa de `kind: Container` (todos os campos que o `apply` lê).
+/// Complete reference for `kind: Container` (all the fields that `apply` reads).
 const CONTAINER_REFERENCE: &str = r#"# Apply with:  delonix container apply
 apiVersion: delonix.io/v1
 kind: Container
@@ -570,7 +573,7 @@ fn manifest_vm(o: &InitOpts) -> String {
         .replace("{image}", &img)
 }
 
-/// Referência completa de `kind: Vm` (espelha `delonix_vm::VmConfig`).
+/// Complete reference for `kind: Vm` (mirrors `delonix_vm::VmConfig`).
 const VM_REFERENCE: &str = r#"# Apply with:  delonix vm apply
 # The golden VM image is built once with:
 #   delonix image vm build -t {image} --k8s-version 1.34

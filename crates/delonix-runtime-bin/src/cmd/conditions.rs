@@ -1,22 +1,23 @@
-//! Conditions de honestidade — a peça que impede um recurso de MENTIR por
-//! omissão. Vários Kinds aplicam best-effort e, quando um pré-requisito de
-//! privilégio/host falta, o recurso é criado mas não faz o que aparenta (um
-//! `Storage` NFS em rootless não monta; uma quota dura em rootless só é
-//! monitorizada; um `Network` macvlan fica em registo sem plano físico; um
-//! `restartPolicy` numa VM Cloud Hypervisor não é supervisionado). Em vez de
-//! deixar isto em silêncio, cada Kind pode declarar `conditions` (estilo
-//! kubectl: um estado booleano + `reason` accionável) que o `stack describe`
-//! mostra ao utilizador.
+//! Honesty conditions — the piece that stops a resource from LYING by
+//! omission. Several Kinds apply best-effort and, when a privilege/host
+//! prerequisite is missing, the resource is created but does not do what it
+//! appears to (an NFS `Storage` in rootless does not mount; a hard quota in
+//! rootless is only monitored; a macvlan `Network` stays in the registry with
+//! no physical plane; a `restartPolicy` on a Cloud Hypervisor VM is not
+//! supervised). Instead of leaving this silent, each Kind can declare
+//! `conditions` (kubectl-style: a boolean state + actionable `reason`) that
+//! `stack describe` shows to the user.
 //!
-//! **Sem estado persistido**: as conditions são CALCULADAS a partir do spec + um
-//! probe do ambiente, na hora — a mesma filosofia "o stack não tem registo
-//! próprio" do `describe`. `conditions_for` é puro (recebe o `Env` já probado),
-//! para ser testável sem depender do estado real da máquina.
+//! **No persisted state**: conditions are COMPUTED from the spec + an
+//! environment probe, on the fly — the same "the stack has no registry of its
+//! own" philosophy as `describe`. `conditions_for` is pure (it receives the
+//! already-probed `Env`), so it is testable without depending on the machine's
+//! real state.
 
 use super::manifest::ManifestDoc;
 
-/// Uma condition de um recurso — `ok=false` é o que interessa (o pré-requisito
-/// em falta). `reason` é um código curto estável; `message` é accionável.
+/// A condition of a resource — `ok=false` is what matters (the missing
+/// prerequisite). `reason` is a short stable code; `message` is actionable.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Condition {
     pub kind: &'static str,
@@ -44,27 +45,27 @@ impl Condition {
     }
 }
 
-/// Ambiente probado do host (best-effort). Campos explícitos = `conditions_for`
-/// puro e testável sem tocar no host real.
+/// Probed host environment (best-effort). Explicit fields = `conditions_for`
+/// pure and testable without touching the real host.
 #[derive(Debug, Clone)]
 pub struct Env {
-    /// Sem privilégio de root (o `mount -t` de rede e a quota dura precisam de
-    /// CAP_SYS_ADMIN, que uma sessão rootless não tem no namespace de init).
+    /// No root privilege (network `mount -t` and the hard quota need
+    /// CAP_SYS_ADMIN, which a rootless session does not have in the init namespace).
     pub rootless: bool,
-    /// Helper `mount.nfs` presente no PATH.
+    /// Helper `mount.nfs` present on the PATH.
     pub mount_nfs: bool,
-    /// Helper `mount.cifs` presente no PATH.
+    /// Helper `mount.cifs` present on the PATH.
     pub mount_cifs: bool,
-    /// Helper `mount.davfs` presente no PATH.
+    /// Helper `mount.davfs` present on the PATH.
     pub mount_davfs: bool,
-    /// Binário `cloud-hypervisor` disponível — decide o backend AUTO da VM
-    /// (presente → CH; ausente → cai para libvirt). Espelha `select_backend`.
+    /// `cloud-hypervisor` binary available — decides the VM's AUTO backend
+    /// (present → CH; absent → falls back to libvirt). Mirrors `select_backend`.
     pub cloud_hypervisor: bool,
 }
 
 impl Env {
-    /// Proba o host de verdade. Reutiliza `delonix_runtime::is_rootless` (o
-    /// helper canónico de privilégio, o mesmo que o resto do runtime usa).
+    /// Probes the host for real. Reuses `delonix_runtime::is_rootless` (the
+    /// canonical privilege helper, the same one the rest of the runtime uses).
     pub fn probe() -> Env {
         Env {
             rootless: delonix_runtime::is_rootless(),
@@ -76,11 +77,11 @@ impl Env {
     }
 }
 
-/// `binário está no PATH?` — varre `$PATH` MAIS os directórios sbin canónicos.
-/// Os helpers de mount (`mount.nfs`/`mount.cifs`/`mount.davfs`) vivem em
-/// `/sbin`/`/usr/sbin`, que muitas vezes NÃO estão no `$PATH` de uma sessão de
-/// utilizador — sem os incluir, a condition reportaria `MountHelperMissing`
-/// quando o helper existe (honestidade a virar desinformação).
+/// `is the binary on the PATH?` — scans `$PATH` PLUS the canonical sbin
+/// directories. The mount helpers (`mount.nfs`/`mount.cifs`/`mount.davfs`) live
+/// in `/sbin`/`/usr/sbin`, which often are NOT on a user session's `$PATH` —
+/// without including them, the condition would report `MountHelperMissing`
+/// when the helper exists (honesty turning into misinformation).
 fn which(bin: &str) -> bool {
     let path = std::env::var_os("PATH").unwrap_or_default();
     let sbins = ["/sbin", "/usr/sbin", "/usr/local/sbin"].map(std::path::PathBuf::from);
@@ -89,14 +90,14 @@ fn which(bin: &str) -> bool {
         .any(|dir| dir.join(bin).is_file())
 }
 
-/// Lê um campo string de topo do `spec` cru, aceitando qualquer um de `keys`
-/// (para cobrir o canónico E o alias legado — ex.: `restartPolicy`/`restart_policy`).
+/// Reads a top-level string field from the raw `spec`, accepting any of `keys`
+/// (to cover the canonical AND the legacy alias — e.g. `restartPolicy`/`restart_policy`).
 fn spec_str<'a>(doc: &'a ManifestDoc, keys: &[&str]) -> Option<&'a str> {
     keys.iter()
         .find_map(|k| doc.spec.get(k).and_then(|v| v.as_str()))
 }
 
-/// As conditions de um documento. Vazio = nada a assinalar (o caso comum).
+/// The conditions of a document. Empty = nothing to flag (the common case).
 pub fn conditions_for(doc: &ManifestDoc, env: &Env) -> Vec<Condition> {
     match doc.kind.as_str() {
         "Storage" => storage(doc, env),
@@ -111,9 +112,9 @@ pub fn conditions_for(doc: &ManifestDoc, env: &Env) -> Vec<Condition> {
     }
 }
 
-/// `Storage.Mounted` — montar NFS/CIFS/WebDAV precisa de CAP_SYS_ADMIN e do
-/// helper de mount certo no host; sem qualquer um, o volume é criado mas o mount
-/// falha em silêncio (best-effort). Ver `delonix-volume::ensure_mounted`.
+/// `Storage.Mounted` — mounting NFS/CIFS/WebDAV needs CAP_SYS_ADMIN and the
+/// right mount helper on the host; without either, the volume is created but the
+/// mount fails silently (best-effort). See `delonix-volume::ensure_mounted`.
 fn storage(doc: &ManifestDoc, env: &Env) -> Vec<Condition> {
     let ty = spec_str(doc, &["type"]).unwrap_or("nfs");
     if env.rootless {
@@ -138,9 +139,9 @@ fn storage(doc: &ManifestDoc, env: &Env) -> Vec<Condition> {
     vec![Condition::ok("Mounted")]
 }
 
-/// `Volume.QuotaEnforced` — a quota dura usa um loopback ext4 (`losetup`), que
-/// exige root; em rootless só há alerta monitorizado, sem cap real. Sem quota
-/// declarada, não há nada a assinalar.
+/// `Volume.QuotaEnforced` — the hard quota uses an ext4 loopback (`losetup`),
+/// which requires root; in rootless there is only a monitored alert, no real
+/// cap. With no quota declared, there is nothing to flag.
 fn volume(doc: &ManifestDoc, env: &Env) -> Vec<Condition> {
     let has_quota = doc.spec.get("quota").is_some_and(|v| !v.is_null());
     if !has_quota {
@@ -157,9 +158,10 @@ fn volume(doc: &ManifestDoc, env: &Env) -> Vec<Condition> {
     }
 }
 
-/// `Network.Realized` — só o driver `bridge` tem plano físico (bridge do holder
-/// rootless); `macvlan`/`ipvlan`/`overlay` ficam no `NetworkStore` sem nada que
-/// um container consiga atachar. Ver a nota em `cmd::network`.
+/// `Network.Realized` — only the `bridge` driver has a physical plane (the
+/// rootless holder's bridge); `macvlan`/`ipvlan`/`overlay` stay in the
+/// `NetworkStore` with nothing a container can attach to. See the note in
+/// `cmd::network`.
 fn network(doc: &ManifestDoc) -> Vec<Condition> {
     let driver = spec_str(doc, &["driver"]).unwrap_or("bridge");
     match driver {
@@ -172,17 +174,18 @@ fn network(doc: &ManifestDoc) -> Vec<Condition> {
     }
 }
 
-/// `Vm.RestartSupervised` — só o backend libvirt materializa a política de
-/// restart (via `<on_crash>` no XML); o Cloud Hypervisor (default do auto) não a
-/// supervisiona. Sem `restartPolicy` (ou `no`), não há nada a assinalar.
+/// `Vm.RestartSupervised` — only the libvirt backend materializes the restart
+/// policy (via `<on_crash>` in the XML); Cloud Hypervisor (the auto default)
+/// does not supervise it. With no `restartPolicy` (or `no`), there is nothing
+/// to flag.
 fn vm(doc: &ManifestDoc, env: &Env) -> Vec<Condition> {
     let policy = spec_str(doc, &["restartPolicy", "restart_policy"]).unwrap_or("no");
     if policy.is_empty() || policy == "no" {
         return Vec::new();
     }
-    // Que backend ARRANCA de facto — espelha `select_backend`: explícito manda;
-    // no auto (backend ausente) prefere-se Cloud Hypervisor SE o binário existir,
-    // senão cai para libvirt. Só o libvirt supervisiona o restart.
+    // Which backend actually BOOTS — mirrors `select_backend`: explicit wins;
+    // in auto (backend absent) Cloud Hypervisor is preferred IF the binary
+    // exists, otherwise it falls back to libvirt. Only libvirt supervises the restart.
     let backend = match spec_str(doc, &["backend"]) {
         Some(b) => b.to_string(),
         None if env.cloud_hypervisor => "cloud-hypervisor".to_string(),
@@ -199,10 +202,11 @@ fn vm(doc: &ManifestDoc, env: &Env) -> Vec<Condition> {
     }
 }
 
-/// `Vm.VolumesRequireLibvirt` — `spec.volumes` só é materializável pelo backend
-/// libvirt (virtio-9p; o Cloud Hypervisor não o suporta). O apply auto-selecciona
-/// libvirt quando não há backend explícito; isto assinala o caso em que o
-/// utilizador FORÇA `backend: cloud-hypervisor` com volumes (o boot recusaria).
+/// `Vm.VolumesRequireLibvirt` — `spec.volumes` is only materializable by the
+/// libvirt backend (virtio-9p; Cloud Hypervisor does not support it). The apply
+/// auto-selects libvirt when there is no explicit backend; this flags the case
+/// where the user FORCES `backend: cloud-hypervisor` with volumes (the boot
+/// would refuse).
 fn vm_volumes(doc: &ManifestDoc) -> Vec<Condition> {
     let has_volumes = doc
         .spec
@@ -240,7 +244,7 @@ mod tests {
     }
 
     fn env(rootless: bool, nfs: bool, cifs: bool, davfs: bool) -> Env {
-        // cloud_hypervisor: true por defeito nos testes que não o exercitam.
+        // cloud_hypervisor: true by default in tests that do not exercise it.
         Env {
             rootless,
             mount_nfs: nfs,
@@ -260,13 +264,13 @@ mod tests {
 
     #[test]
     fn storage_root_sem_helper_assinala_helper_em_falta() {
-        // cifs precisa de mount.cifs; ausente → MountHelperMissing.
+        // cifs needs mount.cifs; absent → MountHelperMissing.
         let c = conditions_for(
             &doc("Storage", "type: cifs"),
             &env(false, true, false, true),
         );
         assert_eq!(c[0].reason, "MountHelperMissing");
-        // com o helper presente → OK.
+        // with the helper present → OK.
         let c = conditions_for(&doc("Storage", "type: cifs"), &env(false, true, true, true));
         assert!(c[0].ok);
     }
@@ -275,10 +279,10 @@ mod tests {
     fn volume_quota_rootless_e_so_monitorizada() {
         let c = conditions_for(&doc("Volume", "quota: 2g"), &env(true, true, true, true));
         assert_eq!(c[0].reason, "RequiresRoot");
-        // root com quota → OK.
+        // root with quota → OK.
         let c = conditions_for(&doc("Volume", "quota: 2g"), &env(false, true, true, true));
         assert!(c[0].ok);
-        // sem quota → nenhuma condition.
+        // no quota → no condition.
         assert!(conditions_for(
             &doc("Volume", "driver: local"),
             &env(true, true, true, true)
@@ -304,7 +308,7 @@ mod tests {
 
     #[test]
     fn vm_volumes_com_ch_explicito_exige_libvirt() {
-        // volumes + backend cloud-hypervisor explícito → condition.
+        // volumes + explicit cloud-hypervisor backend → condition.
         let c = conditions_for(
             &doc(
                 "Vm",
@@ -317,7 +321,7 @@ mod tests {
                 .any(|x| x.reason == "BackendCloudHypervisor" && x.kind == "VolumesRequireLibvirt"),
             "{c:?}"
         );
-        // volumes sem backend explícito (auto → libvirt) → sem esta condition.
+        // volumes with no explicit backend (auto → libvirt) → without this condition.
         let c = conditions_for(
             &doc("Vm", "disk: d\nvolumes: [ { name: x, mountPath: /x } ]"),
             &env(false, true, true, true),
@@ -330,20 +334,20 @@ mod tests {
 
     #[test]
     fn vm_restart_no_cloud_hypervisor_nao_e_supervisionado() {
-        // backend ausente (auto → CH) + restartPolicy canónico → não supervisionado.
+        // backend absent (auto → CH) + canonical restartPolicy → not supervised.
         let c = conditions_for(
             &doc("Vm", "disk: d\nrestartPolicy: always"),
             &env(false, true, true, true),
         );
         assert_eq!(c[0].reason, "BackendCloudHypervisor");
-        // alias legado restart_policy + backend libvirt → supervisionado.
+        // legacy alias restart_policy + libvirt backend → supervised.
         let c = conditions_for(
             &doc("Vm", "disk: d\nrestart_policy: always\nbackend: libvirt"),
             &env(false, true, true, true),
         );
         assert!(c[0].ok);
-        // Fix #3: backend AUSENTE (auto) num host SEM cloud-hypervisor → cai para
-        // libvirt → supervisionado (não avisa BackendCloudHypervisor à toa).
+        // Fix #3: backend ABSENT (auto) on a host WITHOUT cloud-hypervisor → falls
+        // back to libvirt → supervised (does not warn BackendCloudHypervisor needlessly).
         let sem_ch = Env {
             rootless: false,
             mount_nfs: true,
@@ -356,7 +360,7 @@ mod tests {
             c[0].ok,
             "sem cloud-hypervisor o auto cai para libvirt, que supervisiona"
         );
-        // sem restartPolicy (ou `no`) → nenhuma condition.
+        // no restartPolicy (or `no`) → no condition.
         assert!(conditions_for(&doc("Vm", "disk: d"), &env(false, true, true, true)).is_empty());
         assert!(conditions_for(
             &doc("Vm", "disk: d\nrestartPolicy: no"),
