@@ -312,7 +312,13 @@ nó não faz nenhuma instalação**, só `kubeadm init`/`kubeadm join`.
   (`dist/delonix-cri.service`, `systemctl enable`), e cria a conta padrão pedida: `root`/senha
   `delonix`, utilizador `delonix:delonix` em `sudo` com `NOPASSWD`. cloud-init fica ACTIVO na
   imagem (o build só corre uma vez; o cloud-init do primeiro-boot de CADA VM continua a aplicar
-  hostname/SSH-keys — ver `delonix vm create` abaixo).
+  hostname/SSH-keys — ver `delonix vm create` abaixo). Configura também, em `/etc/bash.bashrc`
+  (bash interactivo login E não-login — consola série e SSH), o **autocomplete + alias `k`**
+  recomendado pela doc do Kubernetes: `source <(kubectl completion bash)` / `alias k=kubectl` /
+  `complete -o default -F __start_kubectl k` / `source <(kubeadm completion bash)` (+ `crictl`),
+  cada bloco guardado por `command -v` (inerte se faltar a ferramenta). Fica em
+  `common_customization_steps` (partilhado pelos builds online E offline); só toma efeito na
+  próxima build/publicação da golden (`vm-image.yml`).
 - **Tamanho do artefacto (medido, golden 24.04: 2.38 GiB → 677 MiB, −72%)** — três passos, todos
   no fim do `build`, cada um com uma razão concreta:
   1. **`apt-get clean` + `rm -rf /var/lib/apt/lists/*`** (último `CustomizeOp`, DEPOIS do
@@ -395,6 +401,29 @@ nó não faz nenhuma instalação**, só `kubeadm init`/`kubeadm join`.
 — sem `--seed` explícito, gera um ISO NoCloud (`cloud-localds`) por-instância se qualquer um
 destes for dado (função pura `build_user_data`, testável sem `cloud-localds` real). Não confundir
 com o `build` acima: aquele corre uma vez por IMAGEM (golden), isto corre uma vez por VM.
+
+**`kind: Vm` — paridade total com o CLI + réplica completa do XML libvirt.** A `VmSpec`
+(`cmd/vm.rs`) ganhou (1) o **cloud-init declarativo** `hostname`/`sshKeys`/`userData` que só o
+CLI tinha; e (2) — CORRIGINDO um bug latente — o `apply` do manifesto passou a gerar **sempre** o
+seed (como o CLI), não só quando há volumes: um `kind: Vm` sem volumes ficava sem datasource →
+cloud-init saltava a fase de rede → VM sem IP. Além disso, para expressar no manifesto tudo o que
+se faz à mão no XML do libvirt, abordagem **"ambos"**: campos **tipados** (`machine`, `cpuModel`
++ `cpuTopology`, `bootOrder`, `tpm`, `video`, `extraDisks` com target dev auto, `extraNics`
+network/bridge/user) renderizados no `delonix_vm::libvirt_domain_xml` (função pura, testada), +
+dois **escape-hatches de XML cru**: `libvirtXmlOverlay` (fragmentos `<device>` antes de
+`</devices>`) e `libvirtXml` (override TOTAL do `<domain>`, verbatim — o seclabel rootless
+continua injetado no boot). Os dois hatches são **UNVALIDATED** — só para manifestos confiáveis
+(um fragmento pode nomear caminhos/dispositivos arbitrários do host; alinhado com o risco
+"manifesto não-confiável" da auditoria E2E). `VmConfig` deriva `Default` (os literais usam
+`..Default::default()`); exemplo completo em `examples/vm.yaml`.
+
+**Consola (`vm console`) volta ao shell do host.** A golden faz autologin no ttyS0 → dentro da
+consola `exit`/`logout` só re-disparam o getty (loop). O `cmd_console` imprime agora um aviso
+claro (i18n) — *voltar ao host: Ctrl+]* — e corre `virsh console` como FILHO (spawn+wait, não
+`exec`) para confirmar "De volta ao host" à saída, nos dois backends. E `vm create` mostra
+**progresso por etapa** (`CreateStage` emitido pelo motor via `create_with`; texto/i18n no bin) em
+stderr + bloco "Próximos passos", com o output cru de `qemu-img`/`virsh` capturado (`run_quiet`);
+stdout continua a ser só o nome da VM (scriptável).
 
 `delonix-cri` (`crates/delonix-cri`) ganhou o seu primeiro `[[bin]]` (`src/bin/delonix-cri.rs`)
 — antes só existia como library, chamado por ninguém no workspace. Corre `serve_blocking` num
