@@ -876,9 +876,17 @@ activado por `--l18n=pt`/`DELONIX_L18N=pt`. Regras para não regredir:
   final do help curto — `t_help` compensa (lookup com e sem `.`).
 - Parser `.po` próprio (~50 linhas, testado) — sem crate `gettext` (regra de
   supply-chain). `parse_po` cobre msgid/msgstr multi-linha + escapes.
+- **Comentários do código: 100% EN (FEITO).** Todos os comentários (`//`, `///`,
+  `//!`) dos 9 crates de motor (PR #26) e do `delonix-runtime-bin` (PR #27) foram
+  traduzidos PT→EN; o help de CLI que ainda vivia em PT no código (doc-comments
+  `///` dos enums clap + campos `#[arg]`) passou a EN na fonte, com o PT no
+  `pt.po` (+183 entradas na fase 2). Regra a manter: comentário/help novo = EN no
+  código; a tradução vai para o `pt.po` (o `t()`/`translate_help` degradam para EN
+  se faltar a entrada, nunca deixam a UI muda). Só identificadores/nomes de teste
+  em PT sobrevivem (não são texto de utilizador).
 - **Pendente**: mensagens de erro dos crates de MOTOR (não podem depender do bin;
   a via desenhada é traduzir no printer de erros do `main.rs` por lookup do texto
-  EN) e os comentários dos 8 crates PT→EN (tarefa própria).
+  EN) — os textos EN dessas mensagens ainda não estão semeados no `pt.po`.
 
 ## Regra de ouro: fronteira com o PaaS
 
