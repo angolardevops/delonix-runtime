@@ -754,9 +754,20 @@ de root** — é a excepção deliberada ao daemonless-rootless, atrás de `--ap
   passa como gateway; regras `ingress` explícitas aplicam-se na mesma).
 - **Segurança**: abre VM↔container só na rede indicada; a subnet da VM é a NAT do
   libvirt (`192.168.122.0/24`), NÃO a LAN externa. `vm unbridge <rede>` desfaz.
-- **Estado**: no branch `feat/vm-bridge`, NÃO fundido/lançado — não foi corrido
-  E2E no sandbox (sem root). A GERAÇÃO dos comandos é pura e testada; a execução
-  privilegiada valida-se no host real (dry-run primeiro). Complementa o
+- **Robustez**: regras `iptables -I FORWARD` ACCEPT nos dois sentidos
+  (`<vm-subnet>↔<sdn>/16`) contra o REJECT default do libvirt; establish
+  IDEMPOTENTE (limpa um veth órfão antes de criar, p.ex. após respawn do holder).
+- **VALIDADO E2E ao vivo** (kaeso-sys-01, 2026-07-21): de DENTRO de uma VM libvirt
+  (`ubuntu@192.168.122.50`) → `ping`/`curl` a um container da `kaeso-net` por IP
+  DIRECTO (`10.210.37.150:8069` → HTTP 200, ttl=63 = uma hop pelo forward do
+  host). O `unbridge` limpa tudo. Três bugs reais apanhados no host e corrigidos:
+  (1) sob sudo resolvia o state do root, não do utilizador (`adopt_invoking_user_root`
+  via `$SUDO_USER`); (2) `nsenter -U -n` largava as caps → EPERM no enslave, tem
+  de ser `-n` só (root mantém o CAP_NET_ADMIN do init-userns sobre o netns do
+  userns descendente); (3) IPs de container são dinâmicos (DHCP, mudam no restart).
+- **Follow-ups**: persistência (re-aplicar num respawn do holder) e **descoberta
+  por NOME** (a VM resolver `<c>.<ns>.delonix.internal` via o DNS do holder, para
+  não depender de IPs dinâmicos) — a fatia que dá o valor real. Complementa o
   `vm reach` (via porta publicada, sem privilégio) para quem precisa do IP 10.x cru.
 
 ## Firewall `ingress`/`egress` — o último comando ganha (+ `rm` cirúrgico)

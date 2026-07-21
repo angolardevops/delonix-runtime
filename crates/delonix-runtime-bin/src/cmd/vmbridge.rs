@@ -56,6 +56,11 @@ fn host_sdn_ip(prefix: &str) -> String {
     format!("{prefix}.255.254")
 }
 
+/// The SDN network CIDR of a `/16` prefix (`10.210` → `10.210.0.0/16`). Pure.
+fn sdn_subnet(prefix: &str) -> String {
+    format!("{prefix}.0.0/16")
+}
+
 /// Builds the ordered list of privileged commands (argv each) that establish
 /// the bridge. PURE — unit-tested without touching the network. `vm_subnets`
 /// are the libvirt VM subnets that must route back through the holder.
@@ -85,6 +90,7 @@ fn bridge_plan(
         v
     };
     let s = |a: &[&str]| a.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+    let sdn = sdn_subnet(prefix);
     let mut plan = vec![
         // 1. veth pair in the host netns.
         s(&[
@@ -100,7 +106,20 @@ fn bridge_plan(
         // 6. host forwards between virbr0 and the SDN link.
         s(&["sysctl", "-w", "net.ipv4.ip_forward=1"]),
     ];
-    // 7. return route inside the holder: VM subnets via the host end.
+    // 7. FORWARD ACCEPT both ways (defense in depth): libvirt's default network
+    // ends its FORWARD chain with a REJECT for traffic that doesn't match its
+    // own subnet, which would drop a VM→SDN forwarded packet. Insert at the TOP
+    // so it wins. (On the validated host libvirt let it through already; this
+    // makes it work where the default policy is stricter.)
+    for sub in vm_subnets {
+        plan.push(s(&[
+            "iptables", "-I", "FORWARD", "-s", sub, "-d", &sdn, "-j", "ACCEPT",
+        ]));
+        plan.push(s(&[
+            "iptables", "-I", "FORWARD", "-s", &sdn, "-d", sub, "-j", "ACCEPT",
+        ]));
+    }
+    // 8. return route inside the holder: VM subnets via the host end.
     for sub in vm_subnets {
         plan.push(nsenter(&["ip", "route", "add", sub, "via", &host_ip]));
     }
@@ -132,7 +151,19 @@ fn unbridge_plan(
         v.extend(args.iter().map(|s| s.to_string()));
         v
     };
+    let s = |a: &[&str]| a.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+    let sdn = sdn_subnet(prefix);
     let mut plan = Vec::new();
+    // Remove the FORWARD ACCEPT rules (mirror of the bridge plan; tolerated —
+    // may already be gone).
+    for sub in vm_subnets {
+        plan.push(s(&[
+            "iptables", "-D", "FORWARD", "-s", sub, "-d", &sdn, "-j", "ACCEPT",
+        ]));
+        plan.push(s(&[
+            "iptables", "-D", "FORWARD", "-s", &sdn, "-d", sub, "-j", "ACCEPT",
+        ]));
+    }
     for sub in vm_subnets {
         plan.push(nsenter(&["ip", "route", "del", sub, "via", &host_ip]));
     }
@@ -293,6 +324,12 @@ pub fn bridge(network: &str, vm_subnets: Vec<String>, apply: bool) -> Result<()>
         );
         return Ok(());
     }
+    // Idempotent establish: clear any leftover from a previous run or a holder
+    // respawn (a dangling host-side veth) FIRST, tolerated, so `bridge` doesn't
+    // fail on "RTNETLINK: File exists". This is the auto-cleanup of orphans —
+    // full lifecycle teardown (on holder death) is the persistence follow-up.
+    let cleanup = unbridge_plan(&holder, &bridge, &prefix, &subs);
+    run_plan(&cleanup, true, true)?;
     run_plan(&plan, true, false)?;
     output::info(&format!(
         "bridged '{network}' ({prefix}.0.0/16) to the VM network(s) {} — VMs now reach its containers by IP",
@@ -382,7 +419,12 @@ mod tests {
         assert!(plan
             .iter()
             .any(|c| c.contains(&"net.ipv4.ip_forward=1".to_string())));
-        // rota de retorno da subnet da VM, via o host end, DENTRO do holder.
+        // FORWARD ACCEPT nos dois sentidos, contra o REJECT default do libvirt.
+        assert!(plan.iter().any(|c| c[..2] == ["iptables", "-I"]
+            && c.contains(&"192.168.122.0/24".to_string())
+            && c.contains(&"10.200.0.0/16".to_string())));
+        // rota de retorno da subnet da VM, via o host end, DENTRO do holder — e
+        // fica em ÚLTIMO (depois do enslave e das regras FORWARD).
         let ret = plan.last().unwrap();
         assert_eq!(ret[0], "nsenter");
         assert!(
@@ -392,9 +434,21 @@ mod tests {
     }
 
     #[test]
-    fn unbridge_plan_apaga_rota_e_veth() {
+    fn sdn_subnet_deriva_o_16() {
+        assert_eq!(sdn_subnet("10.210"), "10.210.0.0/16");
+        assert_eq!(sdn_subnet("10.200"), "10.200.0.0/16");
+    }
+
+    #[test]
+    fn unbridge_plan_apaga_forward_rota_e_veth() {
         let plan = unbridge_plan("4242", "delonix0", "10.200", &["192.168.122.0/24".into()]);
-        assert!(plan[0].contains(&"route".to_string()) && plan[0].contains(&"del".to_string()));
+        // Remove as regras FORWARD (espelho do bridge)…
+        assert!(plan.iter().any(|c| c[..2] == ["iptables", "-D"]));
+        // …a rota de retorno…
+        assert!(plan
+            .iter()
+            .any(|c| c.contains(&"route".to_string()) && c.contains(&"del".to_string())));
+        // …e por fim o veth (que arrasta o par inteiro).
         let last = plan.last().unwrap();
         assert_eq!(last[..3], ["ip", "link", "del"]);
         assert!(last[3].starts_with("vbh"));
