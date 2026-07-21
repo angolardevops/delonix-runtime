@@ -343,7 +343,10 @@ pub enum VmCmd {
         name: Option<String>,
     },
     /// Push a local golden VM image to an OCI registry (`vm push <name> <target>`).
-    Push { name: String, target: String },
+    Push {
+        name: String,
+        target: String,
+    },
     /// List the VMs.
     Ls,
     /// Attach to the VM's serial console (interactive terminal) — works with no
@@ -363,10 +366,27 @@ pub enum VmCmd {
         #[arg(add = ArgValueCandidates::new(super::complete::vms))]
         name: Option<String>,
     },
-    /// How VMs reach containers: for each libvirt VM network, the container
-    /// services published on its gateway (reachable), and the ones bound to
-    /// loopback only (host-only) with the exact command to expose them.
     Reach,
+    /// EXPERIMENTAL (root): give a libvirt VM DIRECT IP reachability to a
+    /// container SDN network (veth from the host into the holder netns + routes).
+    /// Defaults to a DRY-RUN; add `--apply` (as root) to establish it.
+    Bridge {
+        #[arg(add = ArgValueCandidates::new(super::complete::networks))]
+        network: String,
+        /// VM subnet(s) to route back (default: auto-detected `virbr*`). Repeatable.
+        #[arg(long = "vm-subnet")]
+        vm_subnet: Vec<String>,
+        /// Actually run the privileged plan (requires root). Without it: dry-run.
+        #[arg(long)]
+        apply: bool,
+    },
+    /// Tear down a `vm bridge` (dry-run without `--apply`).
+    Unbridge {
+        #[arg(add = ArgValueCandidates::new(super::complete::networks))]
+        network: String,
+        #[arg(long)]
+        apply: bool,
+    },
     /// Human-readable detail of one or more VMs, `kubectl describe` style (for
     /// humans; use `status` for the usual compact view). Includes the LIVE
     /// state — `delonix_vm::status` reconciles liveness/IP with the backend.
@@ -790,6 +810,12 @@ pub fn run(action: VmCmd) -> Result<()> {
             Ok(())
         }
         VmCmd::Reach => cmd_reach(&base),
+        VmCmd::Bridge {
+            network,
+            vm_subnet,
+            apply,
+        } => super::vmbridge::bridge(&network, vm_subnet, apply),
+        VmCmd::Unbridge { network, apply } => super::vmbridge::unbridge(&network, apply),
         VmCmd::Stop { name } => {
             delonix_vm::stop(&base, &name)?;
             println!("{name}");
