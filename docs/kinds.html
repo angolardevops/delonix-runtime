@@ -62,13 +62,13 @@ main{padding:1.4rem 1.2rem 4rem}}
 <h5>Documentação</h5>
 <a href="index.html">Início</a><a href="cheatsheet.html">Cheatsheet</a><a href="kinds.html" class="on">Kinds e templates</a><a href="arquitectura.html">Arquitectura</a><a href="c4.html">Modelo C4 e system design</a><a href="cri.html">CRI — kubelet sem containerd</a>
 <h5>Referência CLI</h5>
-<a href="comandos/container.html">delonix container</a><a href="comandos/image.html">delonix image</a><a href="comandos/build.html">delonix build</a><a href="comandos/vm.html">delonix vm</a><a href="comandos/volumes.html">delonix volumes</a><a href="comandos/network.html">delonix network</a><a href="comandos/stack.html">delonix stack</a><a href="comandos/cluster.html">delonix cluster</a><a href="comandos/secret.html">delonix secret</a><a href="comandos/storage.html">delonix storage</a><a href="comandos/ingress.html">delonix ingress</a><a href="comandos/egress.html">delonix egress</a><a href="comandos/flow.html">delonix flow</a><a href="comandos/boot.html">delonix boot</a><a href="comandos/system.html">delonix system</a><a href="comandos/kube.html">delonix kube</a><a href="comandos/netns.html">delonix netns</a><a href="comandos/completion.html">delonix completion</a>
+<a href="comandos/container.html">delonix container</a><a href="comandos/pod.html">delonix pod</a><a href="comandos/image.html">delonix image</a><a href="comandos/build.html">delonix build</a><a href="comandos/vm.html">delonix vm</a><a href="comandos/volumes.html">delonix volumes</a><a href="comandos/network.html">delonix network</a><a href="comandos/stack.html">delonix stack</a><a href="comandos/cluster.html">delonix cluster</a><a href="comandos/secret.html">delonix secret</a><a href="comandos/storage.html">delonix storage</a><a href="comandos/ingress.html">delonix ingress</a><a href="comandos/egress.html">delonix egress</a><a href="comandos/flow.html">delonix flow</a><a href="comandos/boot.html">delonix boot</a><a href="comandos/system.html">delonix system</a><a href="comandos/kube.html">delonix kube</a><a href="comandos/netns.html">delonix netns</a><a href="comandos/completion.html">delonix completion</a>
 <h5>Projecto</h5>
 <a href="https://github.com/angolardevops/delonix-runtime">GitHub</a>
 <a href="https://github.com/angolardevops/delonix-runtime/releases">Releases</a>
 </nav>
 <main>
-<h1>Kinds do manifesto</h1><p class='tagline'>Cada Kind com um template COMPLETO e funcional — todos os campos, com os defaults e um comentário. Aplica um só com <code>delonix &lt;grupo&gt; apply -f</code>, ou todos de uma vez com <code>delonix stack apply</code> (ordem por dependência: Network → Volume → Storage → Image → Vm → Container → Ingress → Egress).</p>
+<h1>Kinds do manifesto</h1><p class='tagline'>Cada Kind com um template COMPLETO e funcional — todos os campos, com os defaults e um comentário. Aplica um só com <code>delonix &lt;grupo&gt; apply -f</code>, ou todos de uma vez com <code>delonix stack apply</code> (ordem por dependência: Network → Volume → Storage → Image → Vm → Container → Pod → Ingress → Egress).</p>
 <p>Semântica <em>garante-presente</em> (idempotente por nome), não um reconciliador: sem diffing, rollout nem rollback — fail-fast, o que já foi aplicado fica. Os templates abaixo são os ficheiros reais em <a href='https://github.com/angolardevops/delonix-runtime/tree/main/examples'><code>examples/</code></a>.</p>
 <h2 id='network'>Network</h2>
 <p>Uma rede de utilizador. Os containers juntam-se com <code>--net &lt;nome&gt;</code>; as VMs com <code>network:</code>. Driver <code>bridge</code> é o único a que containers se atacham hoje.</p>
@@ -273,6 +273,34 @@ spec:
   # --- misc ---
   labels: []                  # [&quot;tier=frontend&quot;]
   logDriver: null             # json | cri</code></pre>
+<h2 id='pod'>Pod</h2>
+<p>Um pod REAL multi-container: N containers a partilhar as namespaces do pod (mesmo schema <code>spec.containers[]</code> do <code>kind: Container</code>, mas com N containers). Partilham <strong>netns</strong> (mesmo IP, <code>localhost</code> entre si), <strong>IPC</strong> e <strong>UTS</strong> (hostname). A namespace de PID (<code>shareProcessNamespace</code>) é follow-up. Gere-se com <code>delonix pod create/ls/describe/rm/logs</code>.</p>
+<pre><code># kind: Pod — a REAL multi-container pod: N containers sharing the pod&#x27;s network
+# namespace (same IP, localhost between them), like a Kubernetes Pod. Apply with:
+#   delonix pod create -f examples/pod-multi.yaml      (or `stack apply`)
+# Manage as a unit:  delonix pod ls | describe web-app | logs web-app | rm web-app
+#
+# Same k8s-shaped schema as `kind: Container` (spec.containers[]), but here N
+# containers are allowed and they share the pod sandbox. The web + sidecar reach
+# each other on `localhost` (shared netns). IPC/UTS/PID sharing
+# (shareProcessNamespace) are honored by later runtime slices.
+apiVersion: delonix.io/v1
+kind: Pod
+metadata:
+  name: web-app
+  namespace: default
+spec:
+  shareProcessNamespace: false     # true → containers see each other&#x27;s processes
+  containers:
+    - name: web
+      image: nginx:latest
+      ports:
+        - containerPort: 80
+          hostPort: 8080           # published on the pod&#x27;s shared IP
+    - name: sidecar
+      image: busybox:latest
+      # Reaches the web container on localhost — they share the pod&#x27;s netns.
+      command: [&quot;sh&quot;, &quot;-c&quot;, &quot;while true; do wget -qO- http://localhost:80/ &gt;/dev/null 2&gt;&amp;1; sleep 10; done&quot;]</code></pre>
 <h2 id='ingress'>Ingress / Egress</h2>
 <p>Firewall L4 declarativo por direcção (estilo k8s NetworkPolicy). Cada documento é o estado desejado de uma direcção de um container-alvo — allowlist + default-deny, idempotente.</p>
 <pre><code># kind: FirewallPolicy — firewall L4 declarativo por container (estilo k8s

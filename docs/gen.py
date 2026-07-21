@@ -73,6 +73,43 @@ marcada com <code>~</code>.</p>"""},
             "apply": {"examples": [("Aplicar só os `kind: Container` de um manifesto", "delonix container apply -f delonix-manifest.yaml")]},
         },
     },
+    "pod": {
+        "title": "delonix pod",
+        "tagline": "Pods reais multi-container (create, ls, describe, rm, logs) — N containers como uma unidade.",
+        "intro": """Pods de verdade, ao estilo Kubernetes: N containers que <strong>partilham as
+namespaces do pod</strong> e se gerem como uma só unidade. Hoje partilham <strong>netns</strong>
+(o mesmo IP, alcançam-se por <code>localhost</code>), <strong>IPC</strong> (System V/POSIX) e
+<strong>UTS</strong> (o hostname). Tudo <em>rootless e daemonless</em>: o pod é uma netns SDN
+nomeada no holder (<code>pod-&lt;nome&gt;</code>, com IP na <code>delonix0</code>), e cada container
+junta-se a ela pelo re-exec <code>nsenter … ip netns exec</code> (a flag interna <code>--pod</code>);
+o 1.º container segura o IPC/UTS e os restantes fazem <code>setns</code> de
+<code>/proc/&lt;pid&gt;/ns/{ipc,uts}</code> — possível sem privilégio porque o re-exec já os põe no
+userns do holder. A <em>membership</em> não tem store novo: deriva do label
+<code>delonix.io/pod=&lt;nome&gt;</code> (como <code>cluster</code>/<code>stack</code>). Cria-se de um
+manifesto <code>kind: Pod</code> (o mesmo schema <code>spec.containers[]</code> do
+<code>kind: Container</code>, mas com N containers permitidos). <strong>Limitação conhecida:</strong>
+a namespace de <strong>PID</strong> (<code>shareProcessNamespace</code>, já no schema) ainda NÃO é
+partilhada — cada container mantém a sua própria árvore de processos; é a fatia seguinte.""",
+        "subs": {
+            "create": {"examples": [
+                ("Criar um pod (web + sidecar que fala por localhost) de um manifesto",
+                 "delonix pod create -f examples/pod-multi.yaml"),
+            ], "notes": """<p>Idempotente (<em>garante-presente</em>): se o pod já tem containers, não
+faz nada. Também se pode aplicar pelo <code>delonix stack apply</code> (grupo <code>pods:</code> no
+<code>kind: Stack</code>) e pré-visualizar com <code>--dry-run</code>. Se a criação de um membro
+falha, o pod é desfeito por inteiro (sem meio-pod).</p>"""},
+            "ls": {"examples": [("Listar os pods (POD, CONTAINERS n/N, IP, STATUS)", "delonix pod ls")]},
+            "describe": {"examples": [("Detalhe estilo kubectl: containers + IP e netns partilhados", "delonix pod describe web-app")]},
+            "rm": {"examples": [
+                ("Remover o pod: pára/remove TODOS os containers + a netns partilhada", "delonix pod rm web-app"),
+                ("Forçar (mata os que estão a correr)", "delonix pod rm -f web-app"),
+            ]},
+            "logs": {"examples": [
+                ("Logs do 1.º container do pod", "delonix pod logs web-app"),
+                ("Logs de um container específico (nome curto dentro do pod)", "delonix pod logs web-app --container sidecar -f"),
+            ]},
+        },
+    },
     "image": {
         "title": "delonix image",
         "tagline": "Imagens OCI: pull, ls, rm, export — e, com --vm, as imagens VM douradas (build/push).",
@@ -750,6 +787,11 @@ KINDS_DOC = [
      "camada que o <code>delonix cluster kubeadm</code> usa para provisionar nós."),
     ("Container", "container.yaml", "A carga do dia a dia. Só <code>image</code> é obrigatório; todos os outros campos "
      "têm default. Cobre rede, storage, recursos (cgroup v2), segredos, segurança, devices e limites."),
+    ("Pod", "pod-multi.yaml", "Um pod REAL multi-container: N containers a partilhar as namespaces do pod (mesmo "
+     "schema <code>spec.containers[]</code> do <code>kind: Container</code>, mas com N containers). Partilham "
+     "<strong>netns</strong> (mesmo IP, <code>localhost</code> entre si), <strong>IPC</strong> e <strong>UTS</strong> "
+     "(hostname). A namespace de PID (<code>shareProcessNamespace</code>) é follow-up. Gere-se com "
+     "<code>delonix pod create/ls/describe/rm/logs</code>."),
     ("Ingress / Egress", "firewall.yaml", "Firewall L4 declarativo por direcção (estilo k8s NetworkPolicy). Cada "
      "documento é o estado desejado de uma direcção de um container-alvo — allowlist + default-deny, idempotente."),
 ]
@@ -759,7 +801,7 @@ def kinds_page():
     body = ["<h1>Kinds do manifesto</h1><p class='tagline'>Cada Kind com um template COMPLETO e funcional — "
             "todos os campos, com os defaults e um comentário. Aplica um só com "
             "<code>delonix &lt;grupo&gt; apply -f</code>, ou todos de uma vez com <code>delonix stack apply</code> "
-            "(ordem por dependência: Network → Volume → Storage → Image → Vm → Container → Ingress → Egress).</p>"]
+            "(ordem por dependência: Network → Volume → Storage → Image → Vm → Container → Pod → Ingress → Egress).</p>"]
     body.append("<p>Semântica <em>garante-presente</em> (idempotente por nome), não um reconciliador: sem diffing, "
                 "rollout nem rollback — fail-fast, o que já foi aplicado fica. Os templates abaixo são os ficheiros "
                 "reais em <a href='https://github.com/angolardevops/delonix-runtime/tree/main/examples'><code>examples/</code></a>.</p>")
