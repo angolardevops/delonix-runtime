@@ -67,6 +67,9 @@ Highlights
   one shared ``slirp4netns``, with nftables DNAT for port publishing. Because a
   published port is *dataplane state, not container state*, ports and volumes can
   be swapped **hot**, without restarting the container.
+- **Real pods.** ``kind: Pod`` and ``delonix pod`` run N containers as one unit,
+  sharing the pod's network namespace (same IP, ``localhost`` between them), IPC
+  and UTS — a Kubernetes-style pod, rootless (PID sharing is a follow-up).
 - **Declarative microVMs.** ``kind: Vm`` on a pluggable ``VmBackend`` (Cloud
   Hypervisor or libvirt), with per-instance cloud-init.
 - **Network storage.** ``kind: Storage`` mounts NFS/CIFS/WebDAV shares from a NAS
@@ -143,6 +146,8 @@ real ``--help``) at https://angolardevops.github.io/delonix-runtime/cheatsheet.h
      - What it does
    * - ``container``
      - Lifecycle: run, ps, start, stop, rm, exec, logs, inspect, stats, update, apply.
+   * - ``pod``
+     - Real multi-container pods (``kind: Pod``): create, ls, describe, rm, logs — N containers sharing netns/IPC/UTS as one unit.
    * - ``image``
      - OCI images: pull, ls, rm, export, scan; with ``--vm``, golden VM images (build/push).
    * - ``build``
@@ -202,9 +207,11 @@ Manifests
 
 The declarative face, Kubernetes-style: a multi-document YAML
 (``apiVersion: delonix.io/v1``) with Kinds — ``Network``, ``Volume``,
-``Storage``, ``Image``, ``Vm``, ``Container``, ``Ingress``, ``Egress`` — applied
-in dependency order by ``delonix stack apply``. Ensure-present semantics
-(idempotent by name), not a reconciler.
+``Storage``, ``Image``, ``Vm``, ``Container``, ``Pod``, ``Ingress``, ``Egress`` —
+applied in dependency order by ``delonix stack apply``. Ensure-present semantics
+(idempotent by name), not a reconciler. ``kind: Pod`` is a real multi-container
+pod: N containers sharing the pod's netns (same IP, ``localhost`` between them),
+IPC and UTS — managed as a unit with ``delonix pod``.
 
 .. code-block:: yaml
 
