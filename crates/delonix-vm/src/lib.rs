@@ -322,8 +322,11 @@ pub trait VmBackend {
     fn is_running(&self, vm: &Vm) -> bool;
     /// IP atual da VM (pode mudar/resolver-se mais tarde por DHCP).
     fn ip(&self, vm: &Vm) -> Option<String>;
-    /// Pára a VM e liberta os recursos de rede.
-    fn stop(&self, vmdir: &Path, vm: &Vm);
+    /// Pára a VM e liberta os recursos de rede. Devolve `Err` quando o backend
+    /// RECUSOU a limpeza (ex.: libvirt) — o chamador decide se aborta (para não
+    /// apagar registo local de uma VM que continua definida no hipervisor) ou
+    /// se ignora (`vm rm --force`).
+    fn stop(&self, vmdir: &Path, vm: &Vm) -> Result<()>;
 }
 
 /// Seleciona um backend a partir de um pedido explícito ou por auto-deteção
@@ -444,7 +447,7 @@ impl VmBackend for CloudHypervisorBackend {
         infra::dhcp_ip_for_mac(&vm.network, &vm.mac)
     }
 
-    fn stop(&self, _vmdir: &Path, vm: &Vm) {
+    fn stop(&self, _vmdir: &Path, vm: &Vm) -> Result<()> {
         if let Some(pid) = vm.pid {
             if pid > 0 {
                 // SAFETY: enviar SIGTERM a um PID é seguro; ignora-se o erro.
@@ -454,6 +457,7 @@ impl VmBackend for CloudHypervisorBackend {
             }
         }
         infra::vm_detach(&vm.name);
+        Ok(())
     }
 }
 
@@ -645,16 +649,100 @@ pub fn libvirt_uri(name: &str) -> String {
 }
 
 fn libvirt_uri_of(name: &str) -> &'static str {
-    for uri in ["qemu:///system", "qemu:///session"] {
-        if capture("virsh", &["-c", uri, "domstate", "--", name]).is_some() {
-            return uri;
-        }
+    if let Some(uri) = libvirt_domain_uri(name) {
+        return uri;
     }
     if is_rootless() {
         "qemu:///session"
     } else {
         "qemu:///system"
     }
+}
+
+/// A conexão onde o domínio `name` está DEFINIDO, se em alguma — ao contrário
+/// de [`libvirt_uri_of`], **sem** fallback. `None` = o libvirt não conhece a VM.
+fn libvirt_domain_uri(name: &str) -> Option<&'static str> {
+    ["qemu:///system", "qemu:///session"]
+        .into_iter()
+        .find(|uri| capture("virsh", &["-c", uri, "domstate", "--", name]).is_some())
+}
+
+/// Corre um comando capturando stdout E stderr — nada do `virsh` vaza cru para
+/// o terminal (era o `error: Failed to destroy domain …` que aparecia no meio
+/// do output do `vm rm`). Em falha devolve a 1.ª linha útil do stderr, sem o
+/// prefixo `error: ` do virsh, para compor mensagens claras.
+fn quiet(prog: &str, args: &[&str]) -> std::result::Result<String, String> {
+    match Command::new(prog).args(args).output() {
+        Ok(out) if out.status.success() => {
+            Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+        }
+        Ok(out) => {
+            let err = String::from_utf8_lossy(&out.stderr);
+            let line = err
+                .lines()
+                .map(|l| l.trim())
+                .map(|l| l.strip_prefix("error: ").unwrap_or(l))
+                .find(|l| !l.is_empty())
+                .unwrap_or("unknown error");
+            Err(line.to_string())
+        }
+        Err(e) => Err(format!("{prog}: {e}")),
+    }
+}
+
+/// Desliga o domínio (`virsh destroy`) apenas se NÃO estiver já "shut off" —
+/// idempotente e silencioso (destroy num domínio parado é erro no virsh, e era
+/// uma das mensagens cruas que o `vm rm` deixava escapar).
+fn libvirt_poweroff(uri: &str, name: &str) -> Result<()> {
+    let state = capture("virsh", &["-c", uri, "domstate", "--", name]).unwrap_or_default();
+    if state.is_empty() || state == "shut off" {
+        return Ok(());
+    }
+    quiet("virsh", &["-c", uri, "destroy", "--", name])
+        .map(|_| ())
+        .map_err(|msg| Error::Runtime {
+            context: "vm",
+            message: format!("could not power off VM '{name}': {msg}"),
+        })
+}
+
+/// Remove por completo o domínio libvirt `name`, se existir: desliga-o e faz
+/// `undefine` com os flags que limpam estado agarrado ao domínio (managed
+/// save, metadados de snapshots, NVRAM). Sem `--managed-save`, um domínio
+/// suspenso pelo host (`virsh managedsave`/libvirt-guests no shutdown) faz o
+/// virsh RECUSAR o undefine — e a versão antiga ignorava essa recusa, apagava
+/// o registo local na mesma e deixava a VM órfã no libvirt. Idempotente:
+/// domínio inexistente → `Ok`.
+fn libvirt_cleanup(name: &str) -> Result<()> {
+    let Some(uri) = libvirt_domain_uri(name) else {
+        return Ok(());
+    };
+    libvirt_poweroff(uri, name)?;
+    if quiet(
+        "virsh",
+        &[
+            "-c",
+            uri,
+            "undefine",
+            "--managed-save",
+            "--snapshots-metadata",
+            "--nvram",
+            "--",
+            name,
+        ],
+    )
+    .is_ok()
+    {
+        return Ok(());
+    }
+    // virsh antigo sem algum dos flags acima: o undefine simples ainda cobre o
+    // caso comum (sem managed save).
+    quiet("virsh", &["-c", uri, "undefine", "--", name])
+        .map(|_| ())
+        .map_err(|msg| Error::Runtime {
+            context: "vm",
+            message: format!("could not remove VM '{name}' from libvirt ({uri}): {msg}"),
+        })
 }
 
 /// Gera o XML do domínio libvirt (KVM). **Função pura** — testada sem daemon.
@@ -968,15 +1056,10 @@ impl VmBackend for LibvirtBackend {
         self.ip_uri(libvirt_uri_of(&vm.name), &vm.name)
     }
 
-    fn stop(&self, vmdir: &Path, vm: &Vm) {
-        let uri = libvirt_uri_of(&vm.name);
-        let _ = Command::new("virsh")
-            .args(["-c", uri, "destroy", "--", &vm.name])
-            .status();
-        let _ = Command::new("virsh")
-            .args(["-c", uri, "undefine", "--", &vm.name])
-            .status();
+    fn stop(&self, vmdir: &Path, vm: &Vm) -> Result<()> {
+        libvirt_cleanup(&vm.name)?;
         let _ = std::fs::remove_file(vmdir.join(format!("{}.xml", vm.name)));
+        Ok(())
     }
 }
 
@@ -1173,22 +1256,56 @@ pub fn restart_policy_unsupervised(backend_id: &str, policy: Option<&str>) -> bo
 }
 
 /// Remove uma VM: pára o VMM (via o seu backend), e apaga overlay/estado.
+///
+/// Se a limpeza no backend falhar (ex.: o libvirt recusa o undefine), o registo
+/// local fica **INTACTO** e o erro sobe — a versão antiga apagava o registo na
+/// mesma e a VM ficava órfã no libvirt, invisível a `vm ls`/`vm stop`. Cobre
+/// também o inverso: sem registo local mas com domínio órfão no libvirt (um
+/// `rm` antigo interrompido), o `remove` limpa o domínio na mesma.
 pub fn remove(base: &Path, name: &str) -> Result<()> {
+    remove_inner(base, name, false)
+}
+
+/// Como [`remove`], mas apaga o estado local MESMO que a limpeza no backend
+/// falhe (o `vm rm --force`) — o utilizador assume resolver o resto no libvirt.
+pub fn remove_force(base: &Path, name: &str) -> Result<()> {
+    remove_inner(base, name, true)
+}
+
+fn remove_inner(base: &Path, name: &str, force: bool) -> Result<()> {
     let vmdir = vms_dir(base);
     let st = store(base)?;
-    if let Ok(vm) = st.load(name) {
-        backend_for(&vm).stop(&vmdir, &vm);
-    } else {
-        // sem registo: tenta limpar o tap do ingress, por segurança.
-        infra::vm_detach(name);
+    let existed = match st.load(name) {
+        Ok(vm) => {
+            if let Err(e) = backend_for(&vm).stop(&vmdir, &vm) {
+                if !force {
+                    return Err(e); // registo intacto — o rm pode repetir-se
+                }
+            }
+            true
+        }
+        Err(_) => {
+            // Sem registo: pode haver um domínio libvirt órfão com este nome —
+            // limpa-o, e o tap do ingress por segurança.
+            let orphan = libvirt_domain_uri(name).is_some();
+            if let Err(e) = libvirt_cleanup(name) {
+                if !force {
+                    return Err(e);
+                }
+            }
+            infra::vm_detach(name);
+            orphan
+        }
+    };
+    for ext in ["qcow2", "sock", "serial", "log", "pid", "xml"] {
+        let _ = std::fs::remove_file(vmdir.join(format!("{name}.{ext}")));
     }
-    let _ = std::fs::remove_file(vmdir.join(format!("{name}.qcow2")));
-    let _ = std::fs::remove_file(vmdir.join(format!("{name}.sock")));
-    let _ = std::fs::remove_file(vmdir.join(format!("{name}.serial")));
-    let _ = std::fs::remove_file(vmdir.join(format!("{name}.log")));
-    let _ = std::fs::remove_file(vmdir.join(format!("{name}.pid")));
-    let _ = std::fs::remove_file(vmdir.join(format!("{name}.xml")));
-    st.remove(name)
+    match st.remove(name) {
+        // órfão limpo: não havia registo para remover, mas a VM existia.
+        Err(Error::NotFound(_)) if existed => Ok(()),
+        Err(Error::NotFound(n)) => Err(Error::VmNotFound(n)),
+        other => other,
+    }
 }
 
 /// Pára a VM via o SEU backend (CH/libvirt) mas **preserva** registo e disco
@@ -1198,8 +1315,20 @@ pub fn remove(base: &Path, name: &str) -> Result<()> {
 pub fn stop(base: &Path, name: &str) -> Result<()> {
     let vmdir = vms_dir(base);
     let st = store(base)?;
-    let mut vm = st.load(name)?;
-    backend_for(&vm).stop(&vmdir, &vm);
+    let mut vm = match st.load(name) {
+        Ok(vm) => vm,
+        // Sem registo local, mas com domínio no libvirt (órfão de um `rm`
+        // antigo): desliga-o na mesma — a intenção é inequívoca e responder
+        // "no such VM" a uma VM que o libvirt lista seria mentira.
+        Err(Error::NotFound(_)) => {
+            return match libvirt_domain_uri(name) {
+                Some(uri) => libvirt_poweroff(uri, name),
+                None => Err(Error::VmNotFound(name.to_string())),
+            };
+        }
+        Err(e) => return Err(e),
+    };
+    backend_for(&vm).stop(&vmdir, &vm)?;
     vm.status = Status::Stopped;
     vm.pid = None;
     st.save(name, &vm)
@@ -1208,7 +1337,10 @@ pub fn stop(base: &Path, name: &str) -> Result<()> {
 /// Estado actual de uma VM, com `status`/`ip` reconciliados pelo seu backend.
 pub fn status(base: &Path, name: &str) -> Result<Vm> {
     let st = store(base)?;
-    let mut vm = st.load(name)?;
+    let mut vm = st.load(name).map_err(|e| match e {
+        Error::NotFound(n) => Error::VmNotFound(n),
+        e => e,
+    })?;
     let backend = backend_for(&vm);
     if backend.is_running(&vm) {
         vm.status = Status::Running;

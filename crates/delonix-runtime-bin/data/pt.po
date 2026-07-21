@@ -1374,3 +1374,6 @@ msgstr "a vm '{name}' ainda a arrancar após o timeout — `delonix vm console {
 
 msgid "booting '{name}'..."
 msgstr "a arrancar '{name}'..."
+
+msgid "--network-alias is recorded but the internal DNS does not resolve aliases yet — only the container name resolves"
+msgstr "--network-alias é gravado mas o DNS interno ainda não resolve aliases — só o nome do container resolve"

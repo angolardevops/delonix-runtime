@@ -257,14 +257,19 @@ pub enum VmCmd {
         names: Vec<String>,
     },
     /// Pára a VM (preserva disco/registo).
+    #[command(alias = "down")]
     Stop {
         #[arg(add = ArgValueCandidates::new(super::complete::vms))]
         name: String,
     },
     /// Remove a VM (pára + apaga overlay/estado).
+    #[command(alias = "delete")]
     Rm {
         #[arg(add = ArgValueCandidates::new(super::complete::vms))]
         name: String,
+        /// Remove the local state even if the libvirt cleanup fails.
+        #[arg(long, short = 'f')]
+        force: bool,
     },
     /// Aplica os documentos `kind: Vm` de um manifesto (`delonix_vm::create` já
     /// é idempotente por nome — cria ou auto-recupera).
@@ -587,8 +592,24 @@ pub fn run(action: VmCmd) -> Result<()> {
             println!("{name}");
             Ok(())
         }
-        VmCmd::Rm { name } => {
-            delonix_vm::remove(&base, &name)?;
+        VmCmd::Rm { name, force } => {
+            let res = if force {
+                delonix_vm::remove_force(&base, &name)
+            } else {
+                delonix_vm::remove(&base, &name)
+            };
+            if let Err(e) = res {
+                // Limpeza no backend recusada: o registo local ficou intacto de
+                // propósito (nada de VMs órfãs no libvirt) — diz ao utilizador
+                // como forçar, em vez de o deixar num beco.
+                if !force && !matches!(e, Error::VmNotFound(_)) {
+                    output::warn(&super::po::tf(
+                        "the VM record was kept; `delonix vm rm --force {name}` discards it anyway",
+                        &[("name", &name)],
+                    ));
+                }
+                return Err(e);
+            }
             println!("{name}");
             Ok(())
         }
