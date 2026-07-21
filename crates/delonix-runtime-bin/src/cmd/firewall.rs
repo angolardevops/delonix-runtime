@@ -251,7 +251,11 @@ pub fn run_egress(cmd: EgressCmd) -> Result<()> {
             Some(c) => list_rules(&store, &c, "out"),
             None => list_all(&store, "out"),
         },
-        EgressCmd::Rm { container, port, to } => remove_rule(&store, &container, "out", &port, to),
+        EgressCmd::Rm {
+            container,
+            port,
+            to,
+        } => remove_rule(&store, &container, "out", &port, to),
         EgressCmd::Clear { container } => clear_dir(&store, &container, "out"),
     }
 }
