@@ -507,6 +507,30 @@ validate_recusa_endpoint_malicioso_no_manifesto_completo`,
 `registry::tests::pull_oci_artifact_recusa_blob_adulterado`,
 `cmd::build::tests::safe_join_recusa_dot_dot`.
 
+## Falhas silenciosas corrigidas (fail-closed) + 1 documentada
+
+Da análise Docker/Podman (`docs/COMPARACAO-DOCKER-PODMAN.md`), quatro casos em
+que uma opção era ACEITE e depois IGNORADA — pior que uma feature em falta,
+porque o utilizador julga estar protegido. Três corrigidos para fail-closed
+(erro/aviso explícito, alinhado ao invariante "sem falha silenciosa"):
+
+1. **`--security-opt seccomp=<perfil.json>`** — perfil custom era ignorado (o
+   container corria com o allowlist embutido). Passa a ERRO explícito: só
+   `seccomp=unconfined` é suportado; perfis custom não estão implementados.
+2. **`-v host:/dst:z|:Z|:U|<propagação>`** — o 3.º campo só reconhecia `ro`; as
+   opções SELinux eram ignoradas e o bind falhava em RHEL/Fedora enforcing.
+   Passa a ERRO: só `:ro`/`:rw` suportados (`resolve_spec`).
+3. **`--network-alias`** — gravado mas o `dns_resolve` nunca o consultava.
+   Passa a AVISO no `run` (implementar a resolução por alias é follow-up).
+
+**Ainda por corrigir (documentado, precisa de teste em cgroup delegado real):**
+4. **`container update --memory/--cpus` em rootless-delegado é no-op silencioso**
+   — escreve num leaf que não existe no modo delegado (systemd `Delegate=yes`),
+   enquanto o limite real vive noutro leaf. Também `cpuset`/`cpu.weight`/
+   `io.weight` só se aplicam no caminho não-delegado (root). Fechar exige apontar
+   para o leaf correcto do subtree delegado — trabalho de cgroup a validar num
+   host com delegação, não neste sandbox.
+
 ## Auditoria de segurança #2 (código VM desta série: console/rede/cloud-init)
 
 Skill `delonix-runtime-sec` corrida sobre a superfície NOVA das v0.7.x (VM

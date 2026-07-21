@@ -521,7 +521,20 @@ impl VolumeStore {
         }
         let src = parts[0];
         let target = parts[1];
-        let readonly = parts.get(2).map(|o| *o == "ro").unwrap_or(false);
+        // 3.º campo: só `ro`/`rw` reconhecidos. Antes, QUALQUER outra opção
+        // (`z`/`Z` SELinux, `U`, propagação) era SILENCIOSAMENTE ignorada — o
+        // bind montava sem o rótulo SELinux e falhava em RHEL/Fedora enforcing
+        // com o utilizador a julgar que `:z` foi tratado. Fail-closed: erro
+        // explícito (achado da análise Docker/Podman; "sem falha silenciosa").
+        let readonly = match parts.get(2) {
+            None | Some(&"rw") => false,
+            Some(&"ro") => true,
+            Some(other) => {
+                return Err(Error::Invalid(format!(
+                    "unsupported bind option ':{other}' — only ':ro'/':rw' are supported (SELinux ':z'/':Z', ':U' and propagation are not implemented)"
+                )))
+            }
+        };
         if !target.starts_with('/') {
             return Err(Error::Invalid(format!(
                 "target must be absolute: {target:?}"
@@ -574,6 +587,24 @@ fn is_mounted(path: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bind_option_rejeita_selinux_e_desconhecidas() {
+        // Fail-closed: uma opção de bind não-suportada (`:z`/`:Z` SELinux, `:U`,
+        // propagação) dá ERRO em vez de ser ignorada em silêncio.
+        let tmp = std::env::temp_dir().join(format!("dlx-vol-bindopt-{}", std::process::id()));
+        std::fs::create_dir_all(&tmp).unwrap();
+        let store = VolumeStore::open(&tmp).unwrap();
+        let src = tmp.to_string_lossy();
+        assert!(store.resolve_spec(&format!("{src}:/dst:z")).is_err());
+        assert!(store.resolve_spec(&format!("{src}:/dst:Z")).is_err());
+        assert!(store.resolve_spec(&format!("{src}:/dst:U")).is_err());
+        // `ro`/`rw` continuam a funcionar (sem regressão).
+        assert!(store.resolve_spec(&format!("{src}:/dst:ro")).is_ok());
+        assert!(store.resolve_spec(&format!("{src}:/dst:rw")).is_ok());
+        assert!(store.resolve_spec(&format!("{src}:/dst")).is_ok());
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
 
     #[test]
     fn parse_size_units() {
