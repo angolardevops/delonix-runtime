@@ -1,52 +1,52 @@
-//! `infra` — gestor do **netns de infra-estrutura** do ingress rootless (Fase 1).
+//! `infra` — manager of the rootless ingress's **infrastructure netns** (Phase 1).
 //!
-//! Substitui (a prazo) o modelo `1 slirp4netns por container` por um **ingress
-//! único**: um netns de infra partilhado, com a bridge `delonix0` lá dentro, UM
-//! só `slirp4netns` como ponte host↔infra, e o NAT/DNAT em `nft` DENTRO do netns.
-//! Os containers ligam-se por `veth` à `delonix0` (Fase 3) e as portas publicam-se
-//! via `add_hostfwd` + DNAT (Fase 4). Esta fase entrega só o **gestor**: arrancar,
-//! observar e derrubar a infra, com *ref-count* de ciclo de vida.
+//! Eventually replaces the `1 slirp4netns per container` model with a **single
+//! ingress**: a shared infra netns, with the `delonix0` bridge inside it, ONE
+//! `slirp4netns` as a host↔infra bridge, and the NAT/DNAT in `nft` INSIDE the netns.
+//! Containers attach by `veth` to `delonix0` (Phase 3) and ports are published
+//! via `add_hostfwd` + DNAT (Phase 4). This phase delivers only the **manager**: bring up,
+//! observe and tear down the infra, with a lifecycle *ref-count*.
 //!
-//! **Porque é rootless:** um não-root é root DENTRO do seu próprio user+network
-//! namespace → tem `CAP_NET_ADMIN` lá e pode criar bridge e regras `nft`. O netns
-//! vive enquanto o processo *holder* viver; descobre-se pelo PID (host-visível).
+//! **Why it's rootless:** a non-root is root INSIDE its own user+network
+//! namespace → it has `CAP_NET_ADMIN` there and can create a bridge and `nft` rules. The netns
+//! lives as long as the *holder* process lives; it's discovered by PID (host-visible).
 //!
-//! **Gotcha conhecido:** NÃO se consegue `nsenter --user --net` a partir do host
-//! (dá `setgroups: Operation not permitted`). Logo toda a configuração DENTRO do
-//! netns é feita pelo próprio holder (já é root no userns) — daí o re-exec do
-//! binário para [`holder_main`].
+//! **Known gotcha:** you CANNOT `nsenter --user --net` from the host
+//! (it gives `setgroups: Operation not permitted`). So all the configuration INSIDE the
+//! netns is done by the holder itself (already root in the userns) — hence the re-exec of the
+//! binary to [`holder_main`].
 
 use crate::{run, run_ok, SLIRP_IP};
 use delonix_runtime_core::{Error, Result};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-/// Bridge dentro do netns de infra (mesmo nome do modelo root; não colide por
-/// estar noutro netns).
+/// Bridge inside the infra netns (same name as the root model; doesn't collide
+/// because it's in another netns).
 pub const INFRA_BRIDGE: &str = "delonix0";
-/// Gateway/IP da bridge no netns de infra.
+/// Gateway/IP of the bridge in the infra netns.
 pub const INFRA_GATEWAY: &str = "10.200.0.1";
-/// CIDR da bridge no netns de infra (os containers ficam em `10.200.x/16`).
+/// CIDR of the bridge in the infra netns (containers land in `10.200.x/16`).
 pub const INFRA_CIDR: &str = "10.200.0.1/16";
-/// Prefixo `/16` da subnet de infra (para validar IPs de container).
+/// `/16` prefix of the infra subnet (to validate container IPs).
 pub const INFRA_PREFIX: &str = "10.200";
-/// Subnet do `tap0` do slirp único (o seu lado host↔infra), alvo do masquerade.
+/// Subnet of the single slirp's `tap0` (its host↔infra side), target of the masquerade.
 pub const INFRA_TAP_SUBNET: &str = "10.0.2.0/24";
-/// Tabela `nft` do ingress, VIVE DENTRO do netns de infra (distinta da `delonix`
-/// do modo root, que vive no netns do host).
+/// The ingress's `nft` table, LIVES INSIDE the infra netns (distinct from the root
+/// mode's `delonix`, which lives in the host's netns).
 pub const INGRESS_TABLE: &str = "dlxing";
 
-// ---- localização dos artefactos (pidfiles, socket, status, refcount) --------
+// ---- artifact locations (pidfiles, socket, status, refcount) ----------------
 
-/// Raiz de dados do Delonix, SEM depender de `geteuid()` quando `DELONIX_ROOT`
-/// está definido — crucial porque o holder corre com uid mapeado a 0 no userns
-/// (senão resolveria para `/var/lib/delonix` em vez do armazém do utilizador). O
-/// pai passa sempre `DELONIX_ROOT` ao holder para os caminhos baterem certo.
+/// Delonix data root, WITHOUT depending on `geteuid()` when `DELONIX_ROOT`
+/// is defined — crucial because the holder runs with uid mapped to 0 in the userns
+/// (otherwise it would resolve to `/var/lib/delonix` instead of the user's store). The
+/// parent always passes `DELONIX_ROOT` to the holder so the paths line up.
 pub(crate) fn base_root() -> PathBuf {
     if let Some(root) = std::env::var_os("DELONIX_ROOT") {
         return PathBuf::from(root);
     }
-    // SAFETY: geteuid() não tem pré-condições.
+    // SAFETY: geteuid() has no preconditions.
     if unsafe { libc::geteuid() } != 0 {
         let base = std::env::var_os("XDG_DATA_HOME")
             .map(PathBuf::from)
@@ -57,7 +57,7 @@ pub(crate) fn base_root() -> PathBuf {
     PathBuf::from("/var/lib/delonix")
 }
 
-/// Diretório `<base>/ingress/` com o estado da infra.
+/// Directory `<base>/ingress/` with the infra's state.
 fn ingress_dir() -> PathBuf {
     base_root().join("ingress")
 }
@@ -67,11 +67,11 @@ fn holder_pid_path() -> PathBuf {
 fn slirp_pid_path() -> PathBuf {
     ingress_dir().join("slirp.pid")
 }
-/// O api-socket do slirp único (onde se pedem os `add_hostfwd` na Fase 4).
+/// The single slirp's api-socket (where the `add_hostfwd`s are requested in Phase 4).
 pub fn slirp_sock_path() -> PathBuf {
     ingress_dir().join("slirp.sock")
 }
-/// Socket de controlo do holder (fábrica de netns/veth): o host pede attach/detach.
+/// The holder's control socket (netns/veth factory): the host requests attach/detach.
 fn control_sock_path() -> PathBuf {
     ingress_dir().join("control.sock")
 }
@@ -85,9 +85,9 @@ fn lock_path() -> PathBuf {
     ingress_dir().join("lock")
 }
 
-// ---- helpers de processo/pid -------------------------------------------------
+// ---- process/pid helpers -----------------------------------------------------
 
-/// `true` se o processo `pid` ainda existe (via `/proc/<pid>`).
+/// `true` if the process `pid` still exists (via `/proc/<pid>`).
 fn pid_alive(pid: i32) -> bool {
     pid > 0 && Path::new(&format!("/proc/{pid}")).exists()
 }
@@ -100,38 +100,38 @@ fn read_pid(path: &Path) -> Option<i32> {
         .ok()
 }
 
-/// Envia `SIGTERM` a um pid e remove o seu pidfile.
+/// Sends `SIGTERM` to a pid and removes its pidfile.
 fn kill_pidfile(path: &Path) {
     if let Some(pid) = read_pid(path) {
         if pid_alive(pid) {
-            // SAFETY: kill() com um pid válido; ignoramos o resultado (best-effort).
+            // SAFETY: kill() with a valid pid; we ignore the result (best-effort).
             unsafe { libc::kill(pid, libc::SIGTERM) };
         }
     }
     let _ = std::fs::remove_file(path);
 }
 
-// ---- nft do ingress (dentro do netns de infra) ------------------------------
+// ---- ingress nft (inside the infra netns) -----------------------------------
 
-/// O *ruleset* `nft` BASE do ingress: cadeia `pre` (DNAT das portas publicadas),
-/// `post` (masquerade do tap0) e `fwd` (FILTRO de forward — o ÚNICO sítio do
-/// firewall parametrizável, com chains por-container chamadas por jump). PURA.
+/// The ingress's BASE `nft` *ruleset*: `pre` chain (DNAT of published ports),
+/// `post` (tap0 masquerade) and `fwd` (forward FILTER — the ONLY place of the
+/// parameterizable firewall, with per-container chains called by jump). PURE.
 pub fn ingress_table_ruleset() -> String {
-    // DEFAULT-DENY no forward (Grupo B). Os DROPS dinâmicos (anti-spoof, isolamento,
-    // egress, egress-net, l4guard, fw por-container) vivem na chain `fwdeny`
-    // (prioridade -10, corre ANTES) — assim um `drop`/`accept` específico ganha
-    // sempre ao default. O `forward` (prioridade 0) permite returns + egress +
-    // inbound + **mesma rede** (intra-bridge `delonix0`); o resto cai no `policy drop`.
+    // DEFAULT-DENY on the forward (Group B). The dynamic DROPS (anti-spoof, isolation,
+    // egress, egress-net, l4guard, per-container fw) live in the `fwdeny` chain
+    // (priority -10, runs BEFORE) — so a specific `drop`/`accept` always wins
+    // over the default. The `forward` (priority 0) allows returns + egress +
+    // inbound + **same network** (intra-bridge `delonix0`); the rest falls into the `policy drop`.
     //
-    // INTRA-REDE: com `br_netfilter` (bridge-nf-call-iptables=1) o tráfego entre
-    // containers da MESMA bridge atravessa o forward e cairia no drop → apps não
-    // alcançariam os seus serviços/addons na mesma rede. Aceitamos `delonix0↔delonix0`
-    // (modelo Docker user-network/k8s: mesma rede comunica; cruzar redes é dropado pelo
-    // `fwdeny` inter-bridge). A micro-segmentação intra-rede faz-se com `kind:NetworkPolicy`
-    // (P12), cujas regras entram no `fwdeny` (correm antes, pré-emptem este accept).
-    // Rollback instantâneo: DELONIX_FORWARD_POLICY=accept → volta ao default-allow.
+    // INTRA-NETWORK: with `br_netfilter` (bridge-nf-call-iptables=1) the traffic between
+    // containers on the SAME bridge traverses the forward and would fall into the drop → apps
+    // wouldn't reach their services/addons on the same network. We accept `delonix0↔delonix0`
+    // (Docker user-network/k8s model: same network communicates; crossing networks is dropped by
+    // the inter-bridge `fwdeny`). Intra-network micro-segmentation is done with `kind:NetworkPolicy`
+    // (P12), whose rules go into the `fwdeny` (run first, pre-empt this accept).
+    // Instant rollback: DELONIX_FORWARD_POLICY=accept → back to default-allow.
     let policy = if std::env::var("DELONIX_FORWARD_POLICY").ok().as_deref() == Some("accept") {
-        // NET-03: o opt-out reverte o default-deny — não deixar isto silencioso.
+        // NET-03: the opt-out reverts the default-deny — don't leave this silent.
         tracing::warn!(
             "SECURITY WARNING — DELONIX_FORWARD_POLICY=accept: the ingress netns forward \
              reverts to default-ALLOW (no `policy drop`). For debugging only — do NOT use in production."
@@ -157,49 +157,49 @@ pub fn ingress_table_ruleset() -> String {
     )
 }
 
-// ---- ref-count (ciclo de vida partilhado pelos containers, Fase 3) ----------
+// ---- ref-count (lifecycle shared by the containers, Phase 3) ----------------
 //
-// Modelo de CONJUNTO (não um contador inteiro). Cada container/pod que entra na
-// infra de ingress deixa um MARCADOR (um ficheiro em `<ingress>/refs/`, cujo
-// nome é o hex do id); o "ref-count" é a CARDINALIDADE do conjunto. Porquê um
-// conjunto e não um `i64`:
-//   - `release` fica IDEMPOTENTE por-id — remover um marcador que já não existe
-//     é um no-op, logo um `stop` seguido de um `rm` (dois detaches para o mesmo
-//     id) NÃO derruba a infra cedo demais, e um container morto abruptamente que
-//     só é reapado mais tarde não conta a dobrar.
-//   - permite um REAPER DETERMINÍSTICO: cruzar os marcadores com os ids VIVOS
-//     (Store + pods CRI) e libertar só os órfãos (marcador sem dono vivo). Um
-//     contador cego nunca saberia QUAIS libertar.
-// Fecha o leak "16 refs com 3 containers vivos": cada caminho de saída (rm
-// normal, container morto, erro a meio) remove o marcador do SEU id, e o que
-// escapar (morte abrupta sem `rm`) é apanhado pelo reaper.
+// SET model (not an integer counter). Each container/pod that enters the
+// ingress infra leaves a MARKER (a file in `<ingress>/refs/`, whose
+// name is the hex of the id); the "ref-count" is the CARDINALITY of the set. Why a
+// set and not an `i64`:
+//   - `release` becomes IDEMPOTENT per-id — removing a marker that no longer exists
+//     is a no-op, so a `stop` followed by a `rm` (two detaches for the same
+//     id) does NOT tear down the infra too early, and a container killed abruptly that
+//     is only reaped later doesn't count double.
+//   - it enables a DETERMINISTIC REAPER: cross the markers with the LIVE ids
+//     (Store + CRI pods) and free only the orphans (marker with no live owner). A
+//     blind counter would never know WHICH ones to free.
+// Closes the "16 refs with 3 live containers" leak: each exit path (normal
+// rm, dead container, error midway) removes ITS id's marker, and whatever
+// escapes (abrupt death without `rm`) is caught by the reaper.
 
-/// Diretório com um marcador por container/pod atachado à infra de ingress.
+/// Directory with one marker per container/pod attached to the ingress infra.
 fn refs_dir() -> PathBuf {
     ingress_dir().join("refs")
 }
 
-/// Nome de ficheiro do marcador de um id — hex do id, reversível e sempre seguro
-/// em disco. Ao contrário de [`sanitize`] NÃO trunca: o id tem de sobreviver ao
-/// round-trip para o reaper o cruzar com o Store sem colisões.
+/// Marker filename for an id — hex of the id, reversible and always safe
+/// on disk. Unlike [`sanitize`] it does NOT truncate: the id has to survive the
+/// round-trip so the reaper can cross it with the Store without collisions.
 fn ref_marker_name(id: &str) -> String {
     hex_encode(id.as_bytes())
 }
 
-/// Regista o marcador de `id` em `dir` (idempotente). Núcleo testável: recebe o
-/// dir explícito, não toca no caminho global nem no kernel.
+/// Registers `id`'s marker in `dir` (idempotent). Testable core: takes the
+/// dir explicitly, touches neither the global path nor the kernel.
 fn ref_add_in(dir: &Path, id: &str) {
     let _ = std::fs::create_dir_all(dir);
     let _ = std::fs::write(dir.join(ref_marker_name(id)), id.as_bytes());
 }
 
-/// Remove o marcador de `id` em `dir` (idempotente). Núcleo testável.
+/// Removes `id`'s marker in `dir` (idempotent). Testable core.
 fn ref_remove_in(dir: &Path, id: &str) {
     let _ = std::fs::remove_file(dir.join(ref_marker_name(id)));
 }
 
-/// Lê os ids ATACHADOS a partir dos marcadores em `dir` (decodifica o hex do
-/// nome). Núcleo testável.
+/// Reads the ATTACHED ids from the markers in `dir` (decodes the hex of the
+/// name). Testable core.
 fn refs_in(dir: &Path) -> Vec<String> {
     let Ok(rd) = std::fs::read_dir(dir) else {
         return Vec::new();
@@ -212,10 +212,10 @@ fn refs_in(dir: &Path) -> Vec<String> {
         .collect()
 }
 
-/// **PURA** — quais dos ids ATACHADOS já não têm dono vivo (candidatos a reap).
-/// É o coração do reaper determinístico do ref-count: um marcador cujo id não
-/// está em `live` (containers a correr + pods CRI, montado pelo chamador) perdeu
-/// o dono e deve ser liberto. Não toca em disco nem no kernel — testável a seco.
+/// **PURE** — which of the ATTACHED ids no longer have a live owner (reap candidates).
+/// It's the heart of the ref-count's deterministic reaper: a marker whose id is not
+/// in `live` (running containers + CRI pods, assembled by the caller) has lost
+/// its owner and should be freed. Touches neither disk nor kernel — dry-testable.
 pub fn orphan_refs(attached: &[String], live: &std::collections::HashSet<String>) -> Vec<String> {
     attached
         .iter()
@@ -224,20 +224,20 @@ pub fn orphan_refs(attached: &[String], live: &std::collections::HashSet<String>
         .collect()
 }
 
-/// Ids atualmente atachados à infra de ingress (para o chamador — ex.: `system
-/// prune` — preservar os que sabe estarem vivos ao montar o `live` do reaper).
+/// Ids currently attached to the ingress infra (for the caller — e.g.: `system
+/// prune` — to preserve the ones it knows are alive when assembling the reaper's `live`).
 pub fn attached_refs() -> Vec<String> {
     refs_in(&refs_dir())
 }
 
-/// Nº de containers a usar a infra (cardinalidade do conjunto de marcadores).
+/// Number of containers using the infra (cardinality of the marker set).
 fn read_refcount() -> i64 {
     refs_in(&refs_dir()).len() as i64
 }
 
-/// Trinco exclusivo de ficheiro (`flock`) à volta das operações de ref-count, para
-/// `acquire`/`release` concorrentes (vários `run` em paralelo) não correrem em
-/// cima um do outro. Devolve o fd; o `Drop` liberta-o.
+/// Exclusive file lock (`flock`) around the ref-count operations, so that
+/// concurrent `acquire`/`release` (several `run` in parallel) don't run on
+/// top of each other. Returns the fd; `Drop` releases it.
 struct FileLock(i32);
 impl FileLock {
     fn acquire() -> FileLock {
@@ -245,7 +245,7 @@ impl FileLock {
         let path = lock_path();
         let c = std::ffi::CString::new(path.as_os_str().to_string_lossy().as_bytes().to_vec())
             .unwrap_or_else(|_| std::ffi::CString::new("/tmp/dlxlock").unwrap());
-        // SAFETY: open/flock com caminho válido; -1 em falha trata-se a seguir.
+        // SAFETY: open/flock with a valid path; -1 on failure is handled next.
         let fd = unsafe { libc::open(c.as_ptr(), libc::O_CREAT | libc::O_RDWR, 0o600) };
         if fd >= 0 {
             unsafe { libc::flock(fd, libc::LOCK_EX) };
@@ -256,7 +256,7 @@ impl FileLock {
 impl Drop for FileLock {
     fn drop(&mut self) {
         if self.0 >= 0 {
-            // SAFETY: fd próprio, aberto em acquire().
+            // SAFETY: own fd, opened in acquire().
             unsafe {
                 libc::flock(self.0, libc::LOCK_UN);
                 libc::close(self.0);
@@ -265,20 +265,20 @@ impl Drop for FileLock {
     }
 }
 
-/// Incrementa o ref-count e garante a infra de pé no 1.º utilizador. Chamar uma
-/// vez por container/pod que entra na rede de ingress (Fase 3). `id` = id do
-/// container/pod — a MESMA chave que `release`/o reaper usam para o cruzar com o
-/// Store; idempotente (atachar duas vezes o mesmo id não conta a dobrar).
+/// Increments the ref-count and ensures the infra is up on the 1st user. Call once
+/// per container/pod that enters the ingress network (Phase 3). `id` = the
+/// container/pod's id — the SAME key that `release`/the reaper use to cross it with the
+/// Store; idempotent (attaching the same id twice doesn't count double).
 pub fn acquire(id: &str) -> Result<()> {
     let _lock = FileLock::acquire();
-    ensure_up()?; // idempotente — robusto mesmo com marcadores stale
+    ensure_up()?; // idempotent — robust even with stale markers
     ref_add_in(&refs_dir(), id);
     Ok(())
 }
 
-/// Decrementa o ref-count (remove o marcador de `id`, **idempotente**) e derruba
-/// a infra quando sai o ÚLTIMO utilizador. Seguro em qualquer caminho de saída:
-/// `stop` e depois `rm` do mesmo container não derrubam a infra a dobrar.
+/// Decrements the ref-count (removes `id`'s marker, **idempotent**) and tears down
+/// the infra when the LAST user leaves. Safe on any exit path:
+/// `stop` and then `rm` of the same container don't tear down the infra twice.
 pub fn release(id: &str) {
     let _lock = FileLock::acquire();
     ref_remove_in(&refs_dir(), id);
@@ -287,12 +287,12 @@ pub fn release(id: &str) {
     }
 }
 
-/// **Reaper determinístico do ref-count**: liberta os marcadores cujo id NÃO
-/// está entre os vivos (`live` = ids de containers a correr + pods CRI, montado
-/// pelo chamador — como `reap_orphan_hostfwds` recebe as `live_ports`). Devolve
-/// quantos libertou; derruba a infra se ficar sem marcadores. **Nunca toca num
-/// id vivo.** Fecha o leak dos marcadores deixados por mortes abruptas que nunca
-/// chegaram a passar por `detach_container`.
+/// **Deterministic ref-count reaper**: frees the markers whose id is NOT
+/// among the live ones (`live` = ids of running containers + CRI pods, assembled
+/// by the caller — like `reap_orphan_hostfwds` receives the `live_ports`). Returns
+/// how many it freed; tears down the infra if it runs out of markers. **Never touches a
+/// live id.** Closes the leak of markers left by abrupt deaths that never
+/// went through `detach_container`.
 pub fn reap_orphan_refs(live: &std::collections::HashSet<String>) -> usize {
     let _lock = FileLock::acquire();
     let dir = refs_dir();
@@ -306,24 +306,24 @@ pub fn reap_orphan_refs(live: &std::collections::HashSet<String>) -> usize {
     orphans.len()
 }
 
-// ---- estado / observação ----------------------------------------------------
+// ---- state / observation ----------------------------------------------------
 
-/// Estado observável da infra de ingress (para `ingress status` e a Console).
+/// Observable state of the ingress infra (for `ingress status` and the Console).
 #[derive(Clone, Debug, Default, serde::Serialize)]
 pub struct InfraStatus {
-    /// PID host-visível do holder do netns (vivo enquanto a infra existe).
+    /// Host-visible PID of the netns holder (alive as long as the infra exists).
     pub holder_pid: Option<i32>,
-    /// PID do `slirp4netns` único (a ponte host↔infra).
+    /// PID of the single `slirp4netns` (the host↔infra bridge).
     pub slirp_pid: Option<i32>,
-    /// `true` se holder E slirp estão vivos.
+    /// `true` if holder AND slirp are alive.
     pub up: bool,
     pub bridge: String,
     pub gateway: String,
-    /// Contador de containers a usar a infra (ref-count).
+    /// Counter of containers using the infra (ref-count).
     pub refcount: i64,
 }
 
-/// Lê o estado atual a partir dos pidfiles (sem tocar no kernel).
+/// Reads the current state from the pidfiles (without touching the kernel).
 pub fn status() -> InfraStatus {
     let holder = read_pid(&holder_pid_path()).filter(|&p| pid_alive(p));
     let slirp = read_pid(&slirp_pid_path()).filter(|&p| pid_alive(p));
@@ -337,16 +337,16 @@ pub fn status() -> InfraStatus {
     }
 }
 
-// ---- arranque / derrube -----------------------------------------------------
+// ---- bring up / tear down ---------------------------------------------------
 
-/// Garante a infra de pé (holder + bridge + slirp único). **Idempotente**: se já
-/// estiver tudo vivo, não faz nada. É o ponto de entrada do gestor.
+/// Ensures the infra is up (holder + bridge + single slirp). **Idempotent**: if
+/// everything is already alive, does nothing. It's the manager's entry point.
 pub fn ensure_up() -> Result<()> {
     let st = status();
     if st.up {
         return Ok(());
     }
-    // estado parcial (ex.: holder morto) → limpa antes de recriar.
+    // partial state (e.g.: dead holder) → clean up before recreating.
     teardown();
     std::fs::create_dir_all(ingress_dir()).map_err(|e| Error::Runtime {
         context: "ingress dir",
@@ -354,48 +354,48 @@ pub fn ensure_up() -> Result<()> {
     })?;
     let holder_pid = start_holder()?;
     if let Err(e) = start_slirp(holder_pid) {
-        // se o slirp falha, não deixamos um holder órfão.
+        // if the slirp fails, we don't leave an orphan holder.
         teardown();
         return Err(e);
     }
     Ok(())
 }
 
-/// Derruba a infra: mata o slirp e o holder (o que liberta o netns) e limpa os
-/// artefactos. Best-effort e idempotente.
+/// Tears down the infra: kills the slirp and the holder (which frees the netns) and cleans up the
+/// artifacts. Best-effort and idempotent.
 pub fn teardown() {
-    // os servidores DHCP/DNS/RA são threads do holder — morrem ao matá-lo.
+    // the DHCP/DNS/RA servers are threads of the holder — they die when it's killed.
     kill_pidfile(&slirp_pid_path());
     kill_pidfile(&holder_pid_path());
     let _ = std::fs::remove_file(slirp_sock_path());
     let _ = std::fs::remove_file(control_sock_path());
     let _ = std::fs::remove_file(status_path());
-    // Estado limpo — sem marcadores stale a segurar a infra no próximo ciclo.
+    // Clean state — no stale markers holding the infra up in the next cycle.
     let _ = std::fs::remove_dir_all(refs_dir());
-    let _ = std::fs::remove_file(refcount_path()); // legado (contador inteiro antigo)
+    let _ = std::fs::remove_file(refcount_path()); // legacy (old integer counter)
 }
 
-/// Arranca o **holder**: re-exec do próprio binário dentro de `unshare
-/// --user --map-root-user --net --mount`, que corre [`holder_main`] (root no
-/// userns) para montar a `delonix0` + `nft` e depois bloquear. Espera o ficheiro
-/// de estado "ready" antes de devolver o PID host-visível.
-/// Espera que `fd` fique legível, com teto de `timeout_ms`. `true` = legível (ou
-/// EOF, que também é um evento e desbloqueia o `read`); `false` = esgotou o tempo.
+/// Starts the **holder**: re-exec of the binary itself inside `unshare
+/// --user --map-root-user --net --mount`, which runs [`holder_main`] (root in the
+/// userns) to set up `delonix0` + `nft` and then block. Waits for the
+/// "ready" state file before returning the host-visible PID.
+/// Waits for `fd` to become readable, capped at `timeout_ms`. `true` = readable (or
+/// EOF, which is also an event and unblocks the `read`); `false` = timed out.
 ///
-/// Existe para não haver mais `read` nus em fds que dependem de um processo
-/// externo sinalizar: se esse processo nunca sinalizar E nunca fechar o fd (basta
-/// um neto herdá-lo), o `read` fica pendurado para sempre — foi assim que um
-/// `run` ficou preso 1h em `skb_wait_for_more_packets` sem log nem exit.
-/// `poll` não precisa de mexer nas flags do fd (nada de `O_NONBLOCK` a vazar
-/// para quem o herdar).
+/// It exists so there are no more bare `read`s on fds that depend on an external
+/// process signaling: if that process never signals AND never closes the fd (a
+/// grandchild inheriting it is enough), the `read` hangs forever — that's how a
+/// `run` got stuck 1h in `skb_wait_for_more_packets` with no log or exit.
+/// `poll` doesn't need to touch the fd's flags (no `O_NONBLOCK` leaking
+/// to whoever inherits it).
 fn wait_readable(fd: i32, timeout_ms: i32) -> bool {
     let mut pfd = libc::pollfd {
         fd,
         events: libc::POLLIN,
         revents: 0,
     };
-    // SAFETY: `pfd` é válido e vive durante a chamada; poll não retém o ponteiro.
-    // EINTR (sinal) devolve -1 → tratamos como "não ficou pronto", o chamador avisa.
+    // SAFETY: `pfd` is valid and lives for the duration of the call; poll doesn't retain the pointer.
+    // EINTR (signal) returns -1 → we treat it as "not ready", the caller warns.
     unsafe { libc::poll(&mut pfd, 1, timeout_ms) > 0 }
 }
 
@@ -405,10 +405,10 @@ fn start_holder() -> Result<i32> {
         message: e.to_string(),
     })?;
     let _ = std::fs::remove_file(status_path());
-    // `--map-auto` mapeia TODA a gama subuid/subgid do utilizador (/etc/subuid),
-    // não só o root: imagens reais (nginx uid 101, postgres, …) precisam de chown
-    // para uids != 0 DENTRO do container, que assim ficam mapeáveis. `--map-root-user`
-    // mapeia o uid 0 do userns → o uid do utilizador no host.
+    // `--map-auto` maps the user's ENTIRE subuid/subgid range (/etc/subuid),
+    // not just root: real images (nginx uid 101, postgres, …) need chown
+    // to uids != 0 INSIDE the container, which thus become mappable. `--map-root-user`
+    // maps the userns's uid 0 → the user's uid on the host.
     let child = Command::new("unshare")
         .args([
             "--user",
@@ -420,7 +420,7 @@ fn start_holder() -> Result<i32> {
         ])
         .arg(&exe)
         .args(["netns", "holder"])
-        // o holder corre com uid->0 no userns; força os caminhos para a base real.
+        // the holder runs with uid->0 in the userns; forces the paths to the real base.
         .env("DELONIX_ROOT", base_root())
         .env("DELONIX_INTERNAL", "1")
         .stdin(Stdio::null())
@@ -433,10 +433,10 @@ fn start_holder() -> Result<i32> {
         })?;
     let pid = child.id() as i32;
     let _ = std::fs::write(holder_pid_path(), pid.to_string());
-    // o holder segue vivo durante toda a vida da infra — não lhe fazemos wait.
+    // the holder stays alive for the entire life of the infra — we don't wait on it.
     std::mem::forget(child);
 
-    // espera o holder sinalizar "ready" (ou erro) no ficheiro de estado (~5s).
+    // waits for the holder to signal "ready" (or error) in the state file (~5s).
     for _ in 0..100 {
         if !pid_alive(pid) {
             teardown();
@@ -464,13 +464,13 @@ fn start_holder() -> Result<i32> {
     })
 }
 
-/// Arranca o **slirp único** ligado ao netns do holder (`tap0`), com api-socket
-/// para os `add_hostfwd` da Fase 4. Espera o `--ready-fd` antes de devolver.
+/// Starts the **single slirp** attached to the holder's netns (`tap0`), with an api-socket
+/// for the Phase 4 `add_hostfwd`s. Waits for the `--ready-fd` before returning.
 fn start_slirp(holder_pid: i32) -> Result<()> {
     let sock = slirp_sock_path();
     let _ = std::fs::remove_file(&sock);
     let mut fds = [0i32; 2];
-    // SAFETY: pipe() preenche 2 fds; -1 em falha trata-se a seguir.
+    // SAFETY: pipe() fills 2 fds; -1 on failure is handled next.
     if unsafe { libc::pipe(fds.as_mut_ptr()) } != 0 {
         return Err(Error::Runtime {
             context: "pipe",
@@ -492,35 +492,35 @@ fn start_slirp(holder_pid: i32) -> Result<()> {
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn();
-    // SAFETY: o pai fecha a sua cópia de escrita; só o slirp a mantém aberta.
+    // SAFETY: the parent closes its write copy; only the slirp keeps it open.
     unsafe { libc::close(wr) };
     match spawned {
         Ok(child) => {
-            // ESPERA COM TETO. Um `read` nu aqui podia pendurar PARA SEMPRE: o EOF
-            // só chega se TODAS as cópias do write-end fecharem, e basta um neto do
-            // slirp herdar o fd para isso nunca acontecer. E o preço subiu: o
-            // `slirp_attach` passou a correr ANTES de libertar o container (a rede
-            // tem de estar pronta antes do entrypoint), por isso um slirp que não
-            // sinalize pendura o `run` inteiro, sem log e sem exit — a mesma classe
-            // do deadlock do `recv_fd` do console. 10s chegam de sobra (o slirp
-            // sinaliza em ms); ao fim disso seguimos e o erro aparece a jusante,
-            // com mensagem, em vez de um processo pendurado para sempre.
+            // CAPPED WAIT. A bare `read` here could hang FOREVER: the EOF
+            // only arrives if ALL copies of the write-end close, and a single grandchild of the
+            // slirp inheriting the fd is enough for that to never happen. And the stakes rose: the
+            // `slirp_attach` now runs BEFORE releasing the container (the network
+            // has to be ready before the entrypoint), so a slirp that doesn't
+            // signal hangs the entire `run`, with no log and no exit — the same class
+            // as the console's `recv_fd` deadlock. 10s is more than enough (the slirp
+            // signals in ms); after that we move on and the error surfaces downstream,
+            // with a message, instead of a process hung forever.
             if !wait_readable(rd, 10_000) {
                 tracing::warn!("slirp4netns did not signal ready within 10s; the container network may not be operational");
             }
             let mut b = [0u8; 1];
-            // SAFETY: lê 1 byte do read-end (já legível, ou desistimos acima).
+            // SAFETY: reads 1 byte from the read-end (already readable, or we gave up above).
             unsafe {
                 libc::read(rd, b.as_mut_ptr() as *mut libc::c_void, 1);
                 libc::close(rd);
             }
             let _ = std::fs::write(slirp_pid_path(), (child.id() as i32).to_string());
-            // o slirp vive durante toda a vida da infra — não lhe fazemos wait.
+            // the slirp lives for the entire life of the infra — we don't wait on it.
             std::mem::forget(child);
             Ok(())
         }
         Err(e) => {
-            // SAFETY: fecha o read-end no erro.
+            // SAFETY: closes the read-end on error.
             unsafe { libc::close(rd) };
             Err(Error::Runtime {
                 context: "slirp4netns",
@@ -530,14 +530,14 @@ fn start_slirp(holder_pid: i32) -> Result<()> {
     }
 }
 
-// ---- corpo do holder (corre DENTRO do user+net+mount namespace) -------------
+// ---- holder body (runs INSIDE the user+net+mount namespace) -----------------
 
-/// Ponto de entrada do **holder** (invocado por `delonix netns holder`, oculto).
-/// Corre como root no userns/netns recém-criados: monta a `delonix0`, liga o
-/// `ip_forward`, instala a tabela `nft` de ingress, ABRE o socket de controlo,
-/// escreve "ready" e **serve** pedidos de attach/detach de containers (a fábrica
-/// de netns/veth). O netns vive enquanto este processo viver; SIGTERM (teardown)
-/// mata-o → o kernel liberta o netns. Em falha de arranque escreve `err:<msg>`.
+/// Entry point of the **holder** (invoked by `delonix netns holder`, hidden).
+/// Runs as root in the freshly-created userns/netns: sets up `delonix0`, enables
+/// `ip_forward`, installs the ingress `nft` table, OPENS the control socket,
+/// writes "ready" and **serves** container attach/detach requests (the netns/veth
+/// factory). The netns lives as long as this process lives; SIGTERM (teardown)
+/// kills it → the kernel frees the netns. On startup failure it writes `err:<msg>`.
 pub fn holder_main() -> ! {
     let started = setup_infra_netns().and_then(|_| {
         let _ = std::fs::remove_file(control_sock_path());
@@ -548,7 +548,7 @@ pub fn holder_main() -> ! {
                     message: e.to_string(),
                 }
             })?;
-        // só o uid do engine pode falar com o holder: 0600 + SO_PEERCRED (control_loop).
+        // only the engine's uid can talk to the holder: 0600 + SO_PEERCRED (control_loop).
         use std::os::unix::fs::PermissionsExt;
         let _ =
             std::fs::set_permissions(control_sock_path(), std::fs::Permissions::from_mode(0o600));
@@ -556,13 +556,13 @@ pub fn holder_main() -> ! {
     });
     match started {
         Ok(listener) => {
-            // servidor DNS do ingress numa thread (resolve nomes de containers/VMs).
+            // ingress DNS server on a thread (resolves container/VM names).
             std::thread::spawn(dns_server_main);
-            // emissor de Router Advertisements (SLAAC IPv6 para VMs/containers).
+            // Router Advertisements emitter (SLAAC IPv6 for VMs/containers).
             std::thread::spawn(ra_sender_main);
-            // só agora sinalizamos pronto — o socket de controlo já aceita ligações.
+            // only now do we signal ready — the control socket already accepts connections.
             write_status("ready");
-            control_loop(listener); // nunca retorna (até SIGTERM)
+            control_loop(listener); // never returns (until SIGTERM)
         }
         Err(e) => {
             write_status(&format!("err: {e}"));
@@ -571,10 +571,10 @@ pub fn holder_main() -> ! {
     }
 }
 
-/// Aceita ligações no socket de controlo e serve um comando por ligação (a fábrica
-/// de netns/veth). Corre DENTRO do holder, logo as operações `ip`/`ip netns` ficam
-/// no netns de infra sem `nsenter`. Síncrono (um attach de cada vez — suficiente).
-/// uid do peer de uma ligação Unix (via SO_PEERCRED). `None` em falha.
+/// Accepts connections on the control socket and serves one command per connection (the netns/veth
+/// factory). Runs INSIDE the holder, so the `ip`/`ip netns` operations stay
+/// in the infra netns without `nsenter`. Synchronous (one attach at a time — sufficient).
+/// uid of the peer of a Unix connection (via SO_PEERCRED). `None` on failure.
 fn peer_uid(stream: &std::os::unix::net::UnixStream) -> Option<u32> {
     use std::os::unix::io::AsRawFd;
     let mut cred = libc::ucred {
@@ -583,7 +583,7 @@ fn peer_uid(stream: &std::os::unix::net::UnixStream) -> Option<u32> {
         gid: 0,
     };
     let mut len = std::mem::size_of::<libc::ucred>() as libc::socklen_t;
-    // SAFETY: getsockopt em SO_PEERCRED com um buffer ucred do tamanho correto.
+    // SAFETY: getsockopt on SO_PEERCRED with a correctly-sized ucred buffer.
     let r = unsafe {
         libc::getsockopt(
             stream.as_raw_fd(),
@@ -602,12 +602,12 @@ fn peer_uid(stream: &std::os::unix::net::UnixStream) -> Option<u32> {
 
 fn control_loop(listener: std::os::unix::net::UnixListener) -> ! {
     use std::io::{BufRead, BufReader, Write};
-    // SAFETY: geteuid() não tem pré-condições.
+    // SAFETY: geteuid() has no preconditions.
     let own_uid = unsafe { libc::geteuid() };
     for conn in listener.incoming() {
         let Ok(mut stream) = conn else { continue };
-        // SO_PEERCRED: só aceita comandos do próprio uid do engine — impede que um
-        // utilizador local não-privilegiado conduza o holder / injete nft (CAP_NET_ADMIN).
+        // SO_PEERCRED: only accepts commands from the engine's own uid — prevents a
+        // non-privileged local user from driving the holder / injecting nft (CAP_NET_ADMIN).
         if peer_uid(&stream) != Some(own_uid) {
             continue;
         }
@@ -621,39 +621,39 @@ fn control_loop(listener: std::os::unix::net::UnixListener) -> ! {
     std::process::exit(0);
 }
 
-/// Despacha um comando de controlo (`attach <netns> <ip>`, `detach <netns>`,
-/// `ping`) e devolve a resposta (`ok\n` ou `err: <msg>\n`).
+/// Dispatches a control command (`attach <netns> <ip>`, `detach <netns>`,
+/// `ping`) and returns the reply (`ok\n` or `err: <msg>\n`).
 fn handle_control(line: &str) -> String {
     let parts: Vec<&str> = line.split_whitespace().collect();
-    // CNI (rootless): o plugin corre AQUI, no holder — mapped-root e dono da netns
-    // (o host, uid do utilizador, não teria CAP_NET_ADMIN nela). `cni-add` devolve
-    // o IP atribuído no corpo da resposta (`ok <cidr>`), para o host o registar.
+    // CNI (rootless): the plugin runs HERE, in the holder — mapped-root and owner of the netns
+    // (the host, the user's uid, wouldn't have CAP_NET_ADMIN in it). `cni-add` returns
+    // the assigned IP in the reply body (`ok <cidr>`), for the host to register.
     if let ["cni-add", netns, id, ifname, hex] = parts.as_slice() {
         return match do_cni_add(netns, id, ifname, hex) {
             Ok(ip) => format!("ok {ip}\n"),
             Err(e) => format!("err: {e}\n"),
         };
     }
-    // Query: IPs FQDN actualmente aprendidos (no set nft) da bridge — para o
-    // `egress show`. Corre no holder (dono do netns onde o set vive).
+    // Query: FQDN IPs currently learned (in the nft set) for the bridge — for
+    // `egress show`. Runs in the holder (owner of the netns where the set lives).
     if let ["egress-show", bridge] = parts.as_slice() {
         return format!("ok {}\n", egress_set_members(bridge).join(","));
     }
     let res = match parts.as_slice() {
         ["ping"] => Ok(()),
-        // 5 tokens = namespace `default` (compat com o cliente antigo); 6 = namespaced.
+        // 5 tokens = `default` namespace (compat with the old client); 6 = namespaced.
         ["attach", netns, ip, bridge, gateway] => do_attach(netns, ip, bridge, gateway, "default"),
         ["attach", netns, ip, bridge, gateway, ns] => do_attach(netns, ip, bridge, gateway, ns),
         ["detach", netns] => do_detach(netns),
         ["cni-del", netns, id, ifname, hex] => do_cni_del(netns, id, ifname, hex),
-        // multi-homing ao vivo (rootless): liga/desliga uma rede ADICIONAL a um
-        // container já a correr (veth extra para a bridge da rede privada).
+        // live multi-homing (rootless): connects/disconnects an ADDITIONAL network to a
+        // container already running (extra veth to the private network's bridge).
         ["attach-extra", netns, ifname, ip, bridge, gateway] => {
             do_attach_extra(netns, ifname, ip, bridge, gateway)
         }
         ["detach-extra", netns, ifname] => do_detach_extra(netns, ifname),
-        // limite de largura de banda ao vivo (rootless): shaping no veth do lado
-        // do infra (download via tbf na raiz, upload via ingress police).
+        // live bandwidth limit (rootless): shaping on the infra-side veth
+        // (download via tbf at the root, upload via ingress police).
         ["netrate", vh, rate, burst] => do_netrate(vh, rate, burst),
         ["netrate-clear", vh] => {
             do_netrate_clear(vh);
@@ -679,7 +679,7 @@ fn handle_control(line: &str) -> String {
             clear_l4guard();
             Ok(())
         }
-        // WireGuard sobre o overlay (req #6): a interface vive no netns de infra.
+        // WireGuard over the overlay (req #6): the interface lives in the infra netns.
         ["wg-up", iface, port, priv_key, addr] => {
             crate::wg::ensure_iface(iface, priv_key, port.parse().unwrap_or(51820), addr)
         }
@@ -691,8 +691,8 @@ fn handle_control(line: &str) -> String {
                 allowed_ips: allowed.split(',').map(str::to_string).collect(),
             },
         ),
-        // Uplink VXLAN de uma rede overlay (o L2 partilhado entre nós). `dsts` = os
-        // destinos do FDB (`wg_ip` se cifrado, senão `node_ip`; `-` = sem pares).
+        // VXLAN uplink of an overlay network (the L2 shared between nodes). `dsts` = the
+        // FDB destinations (`wg_ip` if encrypted, otherwise `node_ip`; `-` = no peers).
         ["vxlan", dev, vni, bridge, gateway, dsts] => do_vxlan(dev, vni, bridge, gateway, dsts),
         _ => Err(Error::Invalid(format!("invalid control command: {line:?}"))),
     };
@@ -702,10 +702,10 @@ fn handle_control(line: &str) -> String {
     }
 }
 
-/// Garante a BRIDGE de uma rede no netns de infra (o gateway é SEMPRE o ingress):
-/// cria `<bridge>` com `<gateway>/16` se faltar, e ISOLA-a das outras bridges
-/// delonix (forward drop entre redes, como o docker) — mas o egress (oifname tap0)
-/// e a comunicação intra-rede mantêm-se. Idempotente.
+/// Ensures a network's BRIDGE in the infra netns (the gateway is ALWAYS the ingress):
+/// creates `<bridge>` with `<gateway>/16` if missing, and ISOLATES it from the other
+/// delonix bridges (forward drop between networks, like docker) — but egress (oifname tap0)
+/// and intra-network communication remain. Idempotent.
 fn ensure_net_bridge(bridge: &str, gateway: &str) -> Result<()> {
     let exists = crate::capture("ip", &["link", "show", bridge])
         .map(|o| o.contains(bridge))
@@ -717,7 +717,7 @@ fn ensure_net_bridge(bridge: &str, gateway: &str) -> Result<()> {
             &["addr", "add", &format!("{gateway}/16"), "dev", bridge],
         )?;
         run("ip", &["link", "set", bridge, "up"])?;
-        // IPv6 (ULA): gateway na bridge + forwarding v6 (best-effort).
+        // IPv6 (ULA): gateway on the bridge + v6 forwarding (best-effort).
         let p = prefix_of(gateway);
         run_ok(
             "ip",
@@ -732,11 +732,11 @@ fn ensure_net_bridge(bridge: &str, gateway: &str) -> Result<()> {
         );
         let _ = std::fs::write("/proc/sys/net/ipv6/conf/all/forwarding", "1");
     }
-    // Conectividade INTRA-rede: os containers da MESMA bridge falam-se (modelo
-    // Docker/user-network, como o `delonix0`). Sem esta regra, o `policy drop` do
-    // `forward` cortava TODO o tráfego intra-bridge das redes criadas (`dlxn*`) —
-    // serviços na mesma rede (incl. dentro de um tenant) não se alcançavam. A
-    // micro-segmentação fina faz-se depois com `kind:NetworkPolicy`. Idempotente.
+    // INTRA-network connectivity: containers on the SAME bridge talk to each other (Docker/
+    // user-network model, like `delonix0`). Without this rule, the `forward`'s `policy drop`
+    // cut ALL intra-bridge traffic of the created networks (`dlxn*`) —
+    // services on the same network (incl. within a tenant) couldn't reach each other. The
+    // fine micro-segmentation is done later with `kind:NetworkPolicy`. Idempotent.
     let fchain = crate::capture("nft", &["list", "chain", "ip", INGRESS_TABLE, "forward"])
         .unwrap_or_default();
     let self_accept = format!("iifname \"{bridge}\" oifname \"{bridge}\" accept");
@@ -757,7 +757,7 @@ fn ensure_net_bridge(bridge: &str, gateway: &str) -> Result<()> {
             ],
         );
     }
-    // isolamento entre redes: drop forward entre esta bridge e as outras delonix.
+    // inter-network isolation: forward drop between this bridge and the other delonix ones.
     let listed =
         crate::capture("ip", &["-o", "link", "show", "type", "bridge"]).unwrap_or_default();
     let fwd = crate::capture("nft", &["list", "chain", "ip", INGRESS_TABLE, "fwdeny"])
@@ -772,7 +772,7 @@ fn ensure_net_bridge(bridge: &str, gateway: &str) -> Result<()> {
             || other == bridge
             || (other != INFRA_BRIDGE && !other.starts_with("dlxn"))
         {
-            continue; // só isolar contra delonix0 e outras redes dlxn*
+            continue; // only isolate against delonix0 and other dlxn* networks
         }
         for (a, b) in [(bridge, other), (other, bridge)] {
             let needle = format!("iifname \"{a}\" oifname \"{b}\" drop");
@@ -795,11 +795,11 @@ fn ensure_net_bridge(bridge: &str, gateway: &str) -> Result<()> {
             }
         }
     }
-    // servidor DHCP da rede (para VMs/clientes que peçam IP).
+    // the network's DHCP server (for VMs/clients that request an IP).
     start_dhcp(bridge, &prefix_of(gateway));
-    // Re-aplica a intenção de egress PERSISTIDA quando a bridge é (re)criada — é o
-    // que a faz sobreviver ao respawn do holder (o nft e o registry FQDN vivem no
-    // netns efémero). Só no `!exists` (bridge nova): idempotente e barato.
+    // Re-applies the PERSISTED egress intent when the bridge is (re)created — it's what
+    // makes it survive the holder's respawn (the nft and the FQDN registry live in the
+    // ephemeral netns). Only on `!exists` (new bridge): idempotent and cheap.
     if !exists {
         if let Some(def) = network_list().into_iter().find(|d| d.bridge == bridge) {
             if def.egress.policy.is_some() || !def.egress.hosts.is_empty() {
@@ -810,27 +810,27 @@ fn ensure_net_bridge(bridge: &str, gateway: &str) -> Result<()> {
     Ok(())
 }
 
-/// Bridges que já têm o servidor DHCP nativo a correr (uma thread por bridge).
+/// Bridges that already have the native DHCP server running (one thread per bridge).
 static DHCP_STARTED: std::sync::Mutex<std::collections::BTreeSet<String>> =
     std::sync::Mutex::new(std::collections::BTreeSet::new());
 
-/// Arranca o servidor DHCP **NATIVO** (Rust) da bridge de uma rede, se ainda não
-/// estiver a correr. Substitui o `busybox udhcpd` — o holder fica self-contained
-/// (sem dependência de binários do host). Uma thread por bridge.
+/// Starts a network bridge's **NATIVE** (Rust) DHCP server, if it isn't already
+/// running. Replaces `busybox udhcpd` — the holder becomes self-contained
+/// (no dependency on host binaries). One thread per bridge.
 fn start_dhcp(bridge: &str, prefix: &str) {
     {
         let mut s = DHCP_STARTED.lock().unwrap();
         if !s.insert(bridge.to_string()) {
-            return; // já tem servidor DHCP
+            return; // already has a DHCP server
         }
     }
     let (b, p) = (bridge.to_string(), prefix.to_string());
     std::thread::spawn(move || dhcp_serve(b, p));
 }
 
-/// Servidor DHCPv4 nativo de uma bridge: escuta UDP `:67` (só nessa bridge, via
-/// `SO_BINDTODEVICE`) e responde a DISCOVER/REQUEST com um IP do pool
-/// `<prefix>.254.10–.254.250` (determinístico do MAC), **gateway/DNS = ingress**.
+/// Native DHCPv4 server of a bridge: listens on UDP `:67` (only on that bridge, via
+/// `SO_BINDTODEVICE`) and responds to DISCOVER/REQUEST with an IP from the pool
+/// `<prefix>.254.10–.254.250` (deterministic from the MAC), **gateway/DNS = ingress**.
 fn dhcp_serve(bridge: String, prefix: String) {
     use std::os::unix::io::FromRawFd;
     let oct: Vec<u8> = prefix.split('.').filter_map(|x| x.parse().ok()).collect();
@@ -838,8 +838,8 @@ fn dhcp_serve(bridge: String, prefix: String) {
         return;
     }
     let (o0, o1) = (oct[0], oct[1]);
-    let gw = [o0, o1, 0, 1]; // gateway/server/DNS = <prefix>.0.1 (o ingress)
-                             // SAFETY: socket UDP; setsockopt REUSEADDR/PORT/BROADCAST/BINDTODEVICE; bind :67.
+    let gw = [o0, o1, 0, 1]; // gateway/server/DNS = <prefix>.0.1 (the ingress)
+                             // SAFETY: UDP socket; setsockopt REUSEADDR/PORT/BROADCAST/BINDTODEVICE; bind :67.
     let sock = unsafe {
         let fd = libc::socket(libc::AF_INET, libc::SOCK_DGRAM, 0);
         if fd < 0 {
@@ -922,13 +922,13 @@ fn dhcp_serve(bridge: String, prefix: String) {
         r.extend_from_slice(&[3, 4]);
         r.extend_from_slice(&gw); // router
         r.extend_from_slice(&[6, 4]);
-        r.extend_from_slice(&gw); // DNS (o nosso servidor)
+        r.extend_from_slice(&gw); // DNS (our server)
         r.push(255); // end
         let _ = sock.send_to(&r, "255.255.255.255:68");
     }
 }
 
-/// Extrai o valor de uma opção DHCP (TLV) do bloco de opções.
+/// Extracts the value of a DHCP option (TLV) from the options block.
 fn dhcp_opt(opts: &[u8], want: u8) -> Option<Vec<u8>> {
     let mut i = 0;
     while i < opts.len() {
@@ -955,17 +955,17 @@ fn dhcp_opt(opts: &[u8], want: u8) -> Option<Vec<u8>> {
     None
 }
 
-// ---- IPv6 (ULA) do ingress: fd00:<2.º octeto>::/64 por rede ----------------
+// ---- ingress IPv6 (ULA): fd00:<2nd octet>::/64 per network -----------------
 
-/// Grupo IPv6 de uma rede a partir do prefixo `/16` (`10.201` → `201`).
+/// A network's IPv6 group from the `/16` prefix (`10.201` → `201`).
 fn v6_group(v4prefix: &str) -> String {
     v4prefix.rsplit('.').next().unwrap_or("200").to_string()
 }
-/// Gateway IPv6 (= ingress) de uma rede: `fd00:<grupo>::1`.
+/// A network's IPv6 gateway (= ingress): `fd00:<group>::1`.
 fn v6_gw(v4prefix: &str) -> String {
     format!("fd00:{}::1", v6_group(v4prefix))
 }
-/// IPv6 ULA determinístico de um IP v4 do ingress: `fd00:<o2>::<o3>:<o4>`.
+/// Deterministic IPv6 ULA of an ingress v4 IP: `fd00:<o2>::<o3>:<o4>`.
 fn v6_of(ip4: &str) -> Option<String> {
     let o: Vec<&str> = ip4.split('.').collect();
     if o.len() != 4 {
@@ -974,7 +974,7 @@ fn v6_of(ip4: &str) -> Option<String> {
     Some(format!("fd00:{}::{}:{}", o[1], o[2], o[3]))
 }
 
-/// Prefixo `/16` (`10.x`) a partir de um IP/gateway (`10.x.y.z`).
+/// `/16` prefix (`10.x`) from an IP/gateway (`10.x.y.z`).
 fn prefix_of(ip: &str) -> String {
     let o: Vec<&str> = ip.split('.').collect();
     if o.len() >= 2 {
@@ -984,29 +984,29 @@ fn prefix_of(ip: &str) -> String {
     }
 }
 
-/// CNI rootless (holder): cria uma netns VAZIA e delega a sua configuração aos
-/// plugins CNI (`crate::cni::add`) — a bridge/veth/IPAM são do plugin, não do SDN
-/// nativo. Corre no holder (mapped-root, dono da netns → CAP_NET_ADMIN). Devolve o
-/// IP (CIDR) atribuído pelo IPAM do CNI. `hex` = a conflist JSON em hex.
+/// Rootless CNI (holder): creates an EMPTY netns and delegates its configuration to the
+/// CNI plugins (`crate::cni::add`) — the bridge/veth/IPAM are the plugin's, not the native
+/// SDN's. Runs in the holder (mapped-root, owner of the netns → CAP_NET_ADMIN). Returns the
+/// IP (CIDR) assigned by the CNI's IPAM. `hex` = the conflist JSON in hex.
 fn do_cni_add(netns: &str, id: &str, ifname: &str, hex: &str) -> Result<String> {
     let netns = sanitize(netns);
     let bytes = hex_decode(hex).ok_or_else(|| Error::Invalid("invalid conflist hex".into()))?;
     let conf = crate::cni::parse_config(&String::from_utf8_lossy(&bytes))?;
-    // netns vazia (o plugin move o veth para lá); limpa restos de tentativas.
+    // empty netns (the plugin moves the veth there); clears leftovers of attempts.
     run_ok("ip", &["netns", "del", &netns]);
     run("ip", &["netns", "add", &netns])?;
     let path = format!("/run/netns/{netns}");
     match crate::cni::add(&conf, &crate::cni::plugin_dirs(), id, &path, ifname) {
         Ok(r) => Ok(r.ips.first().map(|i| i.address.clone()).unwrap_or_default()),
         Err(e) => {
-            // rollback: não deixa a netns órfã se o plugin falhou.
+            // rollback: doesn't leave the netns orphan if the plugin failed.
             run_ok("ip", &["netns", "del", &netns]);
             Err(e)
         }
     }
 }
 
-/// CNI rootless (holder): corre `DEL` dos plugins e remove a netns. Best-effort.
+/// Rootless CNI (holder): runs the plugins' `DEL` and removes the netns. Best-effort.
 fn do_cni_del(netns: &str, id: &str, ifname: &str, hex: &str) -> Result<()> {
     let netns = sanitize(netns);
     if let Some(bytes) = hex_decode(hex) {
@@ -1019,23 +1019,23 @@ fn do_cni_del(netns: &str, id: &str, ifname: &str, hex: &str) -> Result<()> {
     Ok(())
 }
 
-/// Cria o netns de um container e liga-o à BRIDGE da sua rede por `veth`: par
-/// `<vh>`↔`eth0`, `vh` na bridge, `eth0` no netns com `<ip>/16` e rota default
-/// pelo `<gateway>` (= o ingress). Cria a bridge da rede se faltar. Corre no holder.
-/// Regista o IP de um container nos sets de namespace: `@dlxall` (todos os IPs de
-/// container) + `@dlxns_<ns>` (a namespace do container). Antes, **remove-o de
-/// qualquer `@dlxns_*` anterior** — assim uma re-attach (ou mudança de namespace)
-/// fica correcta sem precisar de cleanup no detach. Best-effort/idempotente.
+/// Creates a container's netns and attaches it to its network's BRIDGE via `veth`: pair
+/// `<vh>`↔`eth0`, `vh` on the bridge, `eth0` in the netns with `<ip>/16` and default route
+/// through `<gateway>` (= the ingress). Creates the network's bridge if missing. Runs in the holder.
+/// Registers a container's IP in the namespace sets: `@dlxall` (all container
+/// IPs) + `@dlxns_<ns>` (the container's namespace). Beforehand, **removes it from
+/// any previous `@dlxns_*`** — so a re-attach (or namespace change)
+/// stays correct without needing cleanup on detach. Best-effort/idempotent.
 fn ns_set_join(ip: &str, ns: &str) {
     if !is_ingress_ip(ip) {
-        return; // só IPs da SDN
+        return; // only SDN IPs
     }
     let elem = format!("{{ {ip} }}");
     run_ok(
         "nft",
         &["add", "element", "ip", INGRESS_TABLE, DLXALL_SET, &elem],
     );
-    // tira o IP de qualquer namespace anterior (nome do set = 2.º token de "set X {").
+    // takes the IP out of any previous namespace (set name = 2nd token of "set X {").
     let sets = crate::capture("nft", &["list", "sets", "ip", INGRESS_TABLE]).unwrap_or_default();
     for line in sets.lines() {
         if let Some(name) = line.split_whitespace().nth(1) {
@@ -1070,7 +1070,7 @@ fn do_attach(netns: &str, ip: &str, bridge: &str, gateway: &str, namespace: &str
     let bridge = sanitize(bridge);
     ensure_net_bridge(&bridge, gateway)?;
     let vh = vh_name(&netns);
-    // limpa restos de uma tentativa anterior (best-effort).
+    // clears leftovers of a previous attempt (best-effort).
     run_ok("ip", &["netns", "del", &netns]);
     run_ok("ip", &["link", "del", &vh]);
     run("ip", &["netns", "add", &netns])?;
@@ -1094,7 +1094,7 @@ fn do_attach(netns: &str, ip: &str, bridge: &str, gateway: &str, namespace: &str
     ] {
         run("ip", &argv)?;
     }
-    // IPv6 (ULA) no eth0 + rota default v6 (best-effort; o host pode ter v6 off).
+    // IPv6 (ULA) on eth0 + v6 default route (best-effort; the host may have v6 off).
     let p = prefix_of(gateway);
     let gw6 = v6_gw(&p);
     if let Some(v6) = v6_of(ip) {
@@ -1112,18 +1112,18 @@ fn do_attach(netns: &str, ip: &str, bridge: &str, gateway: &str, namespace: &str
             ],
         );
     }
-    // ANTI-SPOOFING: o tráfego que entra deste veth TEM de ter o IP atribuído como
-    // origem — senão um container podia falsificar o source-IP e furar a firewall
-    // por-IP / o isolamento / a atribuição de fluxos. `insert` põe a regra no topo
-    // do `forward`, antes dos jumps por-container. Idempotente (limpa antes).
+    // ANTI-SPOOFING: traffic entering from this veth MUST have the assigned IP as
+    // source — otherwise a container could forge the source-IP and bypass the per-IP
+    // firewall / the isolation / the flow assignment. `insert` puts the rule at the top
+    // of the `forward`, before the per-container jumps. Idempotent (clears first).
     //
-    // NET-06 (limitação conhecida): para um nó Kind PRIVILEGIADO, o tráfego pod→pod
-    // fica dentro do netns do nó (nunca cruza este veth) e o pod→exterior sai com
-    // `saddr`=IP-do-nó (kindnet faz masquerade), por isso nó-único funciona. Um
-    // cenário MULTI-NÓ com routing de pod-CIDR (10.244/16) ENTRE nós seria DROPado
-    // aqui (saddr do pod ≠ IP-do-nó). Enquanto o multi-nó não for suportado, isto é
-    // latente; a correcção será uma excepção de anti-spoof para o pod-CIDR quando o
-    // container é um nó de cluster (a par do trabalho de routing inter-nó).
+    // NET-06 (known limitation): for a PRIVILEGED Kind node, pod→pod traffic
+    // stays inside the node's netns (never crosses this veth) and pod→outside leaves with
+    // `saddr`=node-IP (kindnet masquerades), so single-node works. A
+    // MULTI-NODE scenario with pod-CIDR routing (10.244/16) BETWEEN nodes would be DROPped
+    // here (pod's saddr ≠ node-IP). While multi-node isn't supported, this is
+    // latent; the fix will be an anti-spoof exception for the pod-CIDR when the
+    // container is a cluster node (alongside the inter-node routing work).
     clear_antispoof(&vh);
     run_ok(
         "nft",
@@ -1142,15 +1142,15 @@ fn do_attach(netns: &str, ip: &str, bridge: &str, gateway: &str, namespace: &str
             "drop",
         ],
     );
-    // Isolamento de namespace: regista o IP em @dlxall + @dlxns_<ns> (o
-    // fw_chain_body do container referencia estes sets). Comportamento inalterado
-    // para tudo em `default` (a mesma namespace contém todos = SDN aberta).
+    // Namespace isolation: registers the IP in @dlxall + @dlxns_<ns> (the
+    // container's fw_chain_body references these sets). Behavior unchanged
+    // for everything in `default` (the same namespace contains all = open SDN).
     ns_set_join(ip, namespace);
     Ok(())
 }
 
-/// Remove o netns de um container (e, com ele, o `eth0`; o `vh` órfão é limpo a
-/// seguir). Best-effort.
+/// Removes a container's netns (and, with it, the `eth0`; the orphan `vh` is cleaned up
+/// next). Best-effort.
 fn do_detach(netns: &str) -> Result<()> {
     let netns = sanitize(netns);
     let vh = vh_name(&netns);
@@ -1160,16 +1160,16 @@ fn do_detach(netns: &str) -> Result<()> {
     Ok(())
 }
 
-/// Liga uma rede ADICIONAL a um container JÁ A CORRER (multi-homing ao vivo): um
-/// segundo `veth` do netns existente para a bridge da rede privada. Não cria o
-/// netns (já existe) e NÃO mexe na rota default (a rede primária mantém-na).
+/// Attaches an ADDITIONAL network to an ALREADY-RUNNING container (live multi-homing): a
+/// second `veth` from the existing netns to the private network's bridge. Does not create the
+/// netns (it already exists) and does NOT touch the default route (the primary network keeps it).
 fn do_attach_extra(netns: &str, ifname: &str, ip: &str, bridge: &str, gateway: &str) -> Result<()> {
     let netns = sanitize(netns);
     let ifname = sanitize(ifname);
     let bridge = sanitize(bridge);
     ensure_net_bridge(&bridge, gateway)?;
     let vh = vh_name_extra(&netns, &ifname);
-    run_ok("ip", &["link", "del", &vh]); // limpa restos
+    run_ok("ip", &["link", "del", &vh]); // clears leftovers
     run(
         "ip",
         &["link", "add", &vh, "type", "veth", "peer", "name", &ifname],
@@ -1186,7 +1186,7 @@ fn do_attach_extra(netns: &str, ifname: &str, ip: &str, bridge: &str, gateway: &
     ] {
         run("ip", &argv)?;
     }
-    // IPv6 (ULA) na nova interface (best-effort; sem rota default v6 — primária mantém).
+    // IPv6 (ULA) on the new interface (best-effort; no v6 default route — the primary keeps it).
     if let Some(v6) = v6_of(ip) {
         let cidr6 = format!("{v6}/64");
         run_ok(
@@ -1196,7 +1196,7 @@ fn do_attach_extra(netns: &str, ifname: &str, ip: &str, bridge: &str, gateway: &
             ],
         );
     }
-    // ANTI-SPOOFING também na interface adicional (mesma garantia por-IP do eth0).
+    // ANTI-SPOOFING also on the additional interface (same per-IP guarantee as eth0).
     clear_antispoof(&vh);
     run_ok(
         "nft",
@@ -1218,8 +1218,8 @@ fn do_attach_extra(netns: &str, ifname: &str, ip: &str, bridge: &str, gateway: &
     Ok(())
 }
 
-/// Desliga uma rede adicional: remove o `veth` extra (leva o `<ifname>` do netns
-/// do container atrás). Best-effort.
+/// Detaches an additional network: removes the extra `veth` (takes the container's netns
+/// `<ifname>` with it). Best-effort.
 fn do_detach_extra(netns: &str, ifname: &str) -> Result<()> {
     let netns = sanitize(netns);
     let ifname = sanitize(ifname);
@@ -1229,15 +1229,15 @@ fn do_detach_extra(netns: &str, ifname: &str) -> Result<()> {
     Ok(())
 }
 
-/// Aplica shaping de largura de banda no veth `vh` (lado do infra), DENTRO do
-/// netns de infra (corre no holder). Mesmo caudal nos dois sentidos:
-/// DOWNLOAD (host→container) = tbf na raiz; UPLOAD (container→host) = ingress
-/// `police`+`drop`. `rate`/`burst` já vêm em bit/s e bytes. Idempotente.
+/// Applies bandwidth shaping on the veth `vh` (infra side), INSIDE the
+/// infra netns (runs in the holder). Same rate in both directions:
+/// DOWNLOAD (host→container) = tbf at the root; UPLOAD (container→host) = ingress
+/// `police`+`drop`. `rate`/`burst` already come in bit/s and bytes. Idempotent.
 fn do_netrate(vh: &str, rate: &str, burst: &str) -> Result<()> {
     let vh = sanitize(vh);
     let r = format!("{}bit", rate.parse::<u64>().unwrap_or(0).max(8000));
     let b = burst.to_string();
-    do_netrate_clear(&vh); // reaplicação limpa
+    do_netrate_clear(&vh); // clean reapplication
     run(
         "tc",
         &[
@@ -1258,8 +1258,8 @@ fn do_netrate(vh: &str, rate: &str, burst: &str) -> Result<()> {
     Ok(())
 }
 
-/// Remove o shaping do veth `vh` (best-effort). Apagar o veth já leva os qdiscs;
-/// limpa-se à mão para reaplicação e órfãos.
+/// Removes the shaping from the veth `vh` (best-effort). Deleting the veth already takes the qdiscs;
+/// we clear by hand for reapplication and orphans.
 fn do_netrate_clear(vh: &str) {
     let vh = sanitize(vh);
     run_ok("tc", &["qdisc", "del", "dev", &vh, "root"]);
@@ -1269,7 +1269,7 @@ fn do_netrate_clear(vh: &str) {
     );
 }
 
-/// Remove as regras anti-spoofing de um veth no `forward` (idempotência).
+/// Removes a veth's anti-spoofing rules from the `forward` (idempotency).
 fn clear_antispoof(vh: &str) {
     let listed = crate::capture(
         "nft",
@@ -1301,50 +1301,50 @@ fn clear_antispoof(vh: &str) {
     }
 }
 
-/// Cria um `tap` para uma VM, ligado à BRIDGE da sua rede (cria a bridge + DHCP se
-/// faltar). O QEMU (a correr no netns de infra) usa este tap; o guest obtém IP do
-/// udhcpd da rede (gateway = ingress). Corre no holder.
+/// Creates a `tap` for a VM, attached to its network's BRIDGE (creates the bridge + DHCP if
+/// missing). QEMU (running in the infra netns) uses this tap; the guest gets an IP from the
+/// network's udhcpd (gateway = ingress). Runs in the holder.
 fn do_vmtap(tap: &str, bridge: &str, gateway: &str) -> Result<()> {
     let tap = sanitize(tap);
     let bridge = sanitize(bridge);
     ensure_net_bridge(&bridge, gateway)?;
-    run_ok("ip", &["link", "del", &tap]); // limpa restos
+    run_ok("ip", &["link", "del", &tap]); // clears leftovers
     run("ip", &["tuntap", "add", "dev", &tap, "mode", "tap"])?;
     run("ip", &["link", "set", &tap, "master", &bridge])?;
     run("ip", &["link", "set", &tap, "up"])?;
     Ok(())
 }
 
-/// Remove o `tap` de uma VM (no `vm rm`/stop). Best-effort.
+/// Removes a VM's `tap` (on `vm rm`/stop). Best-effort.
 fn do_vmtapdel(tap: &str) -> Result<()> {
     run_ok("ip", &["link", "del", &sanitize(tap)]);
     Ok(())
 }
 
-/// Um destino de FDB só pode ser um IP (v4/v6): dígitos hex, `.`, `:`. Rejeita
-/// tudo o resto ANTES de o passar ao `bridge`/`ip`. Vai por argv (não shell), mas
-/// mantemos a disciplina `valid_*` da auditoria — um destino com espaço/`;`/`|`
-/// nunca chega a um comando. (Um valor vazio já foi filtrado pelo chamador.)
+/// An FDB destination can only be an IP (v4/v6): hex digits, `.`, `:`. Rejects
+/// everything else BEFORE passing it to `bridge`/`ip`. It goes via argv (not shell), but
+/// we keep the audit's `valid_*` discipline — a destination with a space/`;`/`|`
+/// never reaches a command. (An empty value was already filtered by the caller.)
 fn valid_fdb_dst(dst: &str) -> bool {
     !dst.is_empty()
-        && dst.len() <= 45 // teto de um IPv6 textual
+        && dst.len() <= 45 // cap of a textual IPv6
         && dst.chars().all(|c| c.is_ascii_hexdigit() || c == '.' || c == ':')
 }
 
-/// **Sobe o uplink VXLAN de uma rede overlay** no netns de infra (porta de
-/// `crate::Net::ensure_vxlan` para o modelo holder rootless): garante a `<bridge>`
-/// da rede, cria o device `<dev>` (id `<vni>`, porta 4789, `nolearning`) a
-/// masterizá-la, e semeia o FDB com uma entrada "broadcast" (`00:…:00`) por cada
-/// destino dos pares (`dsts_csv` = `wg_ip` se o overlay é cifrado, senão `node_ip`;
-/// `-` = ainda sem pares). Idempotente: só cria o que falta, só semeia FDB novo.
+/// **Brings up an overlay network's VXLAN uplink** in the infra netns (port of
+/// `crate::Net::ensure_vxlan` to the rootless holder model): ensures the network's
+/// `<bridge>`, creates the device `<dev>` (id `<vni>`, port 4789, `nolearning`)
+/// mastering it, and seeds the FDB with a "broadcast" entry (`00:…:00`) for each
+/// peer destination (`dsts_csv` = `wg_ip` if the overlay is encrypted, otherwise `node_ip`;
+/// `-` = still no peers). Idempotent: only creates what's missing, only seeds new FDB.
 fn do_vxlan(dev: &str, vni: &str, bridge: &str, gateway: &str, dsts_csv: &str) -> Result<()> {
     let dev = sanitize(dev);
     let bridge = sanitize(bridge);
     let vni: u32 = vni
         .parse()
         .map_err(|_| Error::Invalid(format!("invalid vni: {vni}")))?;
-    // A bridge da overlay é uma bridge de rede normal do holder — mesma função que
-    // o `attach`/`vmtap` usam, para containers e VXLAN partilharem o mesmo L2.
+    // The overlay's bridge is a normal holder network bridge — the same function that
+    // `attach`/`vmtap` use, so containers and VXLAN share the same L2.
     ensure_net_bridge(&bridge, gateway)?;
     let exists = crate::capture("ip", &["link", "show", &dev])
         .map(|o| o.contains(dev.as_str()))
@@ -1375,8 +1375,8 @@ fn do_vxlan(dev: &str, vni: &str, bridge: &str, gateway: &str, dsts_csv: &str) -
             .map(str::trim)
             .filter(|d| valid_fdb_dst(d))
         {
-            // Match EXACTO por token (não `contains`): senão 10.0.0.5 seria "já
-            // presente" por ser substring de um 10.0.0.50 no FDB → nunca semeado.
+            // EXACT match by token (not `contains`): otherwise 10.0.0.5 would be "already
+            // present" for being a substring of a 10.0.0.50 in the FDB → never seeded.
             let present = have.lines().any(|l| l.split_whitespace().any(|t| t == dst));
             if !present {
                 run_ok(
@@ -1397,7 +1397,7 @@ fn do_vxlan(dev: &str, vni: &str, bridge: &str, gateway: &str, dsts_csv: &str) -
     Ok(())
 }
 
-/// Remove a bridge de uma rede privada do netns de infra (no `network rm`).
+/// Removes a private network's bridge from the infra netns (on `network rm`).
 fn do_netdel(bridge: &str) -> Result<()> {
     let bridge = sanitize(bridge);
     if bridge == INFRA_BRIDGE {
@@ -1409,9 +1409,9 @@ fn do_netdel(bridge: &str) -> Result<()> {
     Ok(())
 }
 
-/// Instala o DNAT de uma porta publicada na chain `pre` do `dlxing` (corre no
-/// holder): tráfego que chegou pelo slirp (`daddr` do tap) na `host_port` é
-/// reescrito para `<cip>:<cport>`. Validações defensivas contra injeção no `nft`.
+/// Installs the DNAT of a published port in the `dlxing`'s `pre` chain (runs in the
+/// holder): traffic that arrived via the slirp (the tap's `daddr`) on `host_port` is
+/// rewritten to `<cip>:<cport>`. Defensive validations against injection in `nft`.
 fn do_publish(proto: &str, host_port: &str, cip: &str, cport: &str) -> Result<()> {
     validate_publish(proto, host_port, cip, cport)?;
     run(
@@ -1435,10 +1435,10 @@ fn do_publish(proto: &str, host_port: &str, cip: &str, cport: &str) -> Result<()
     )
 }
 
-/// Como [`do_publish`], mas com uma **allowlist de origem**: só os CIDRs dados
-/// alcançam a `host_port`; o resto é dropado ANTES do DNAT (`insert` no topo da
-/// chain `pre`). Os CIDRs são validados (`fw_src_ok`) — anti-injeção nft. Usado
-/// para expor a DB de uma app só a IPs autorizados (firewall).
+/// Like [`do_publish`], but with a **source allowlist**: only the given CIDRs
+/// reach the `host_port`; the rest is dropped BEFORE the DNAT (`insert` at the top of the
+/// `pre` chain). The CIDRs are validated (`fw_src_ok`) — nft anti-injection. Used
+/// to expose an app's DB only to authorized IPs (firewall).
 fn do_publish_allow(
     proto: &str,
     host_port: &str,
@@ -1455,8 +1455,8 @@ fn do_publish_allow(
     if cidrs.is_empty() {
         return Err(Error::Invalid("empty allowlist or no valid CIDRs".into()));
     }
-    // drop no topo da `pre`: tráfego para esta host_port cujo saddr NÃO está na
-    // allowlist é descartado antes de chegar à regra de DNAT (que vem depois).
+    // drop at the top of `pre`: traffic to this host_port whose saddr is NOT in the
+    // allowlist is discarded before reaching the DNAT rule (which comes after).
     let set = format!("{{ {} }}", cidrs.join(", "));
     run(
         "nft",
@@ -1482,12 +1482,12 @@ fn do_publish_allow(
     do_publish(proto, host_port, cip, cport)
 }
 
-/// Remove o DNAT de uma `host_port` (por handle) da chain `pre`. Best-effort.
+/// Removes a `host_port`'s DNAT (by handle) from the `pre` chain. Best-effort.
 fn do_unpublish(host_port: &str) -> Result<()> {
     if !is_port(host_port) {
         return Err(Error::Invalid(format!("invalid port: {host_port}")));
     }
-    // lista a chain com handles e apaga a(s) regra(s) que casam a dport.
+    // lists the chain with handles and deletes the rule(s) matching the dport.
     let listed = crate::capture("nft", &["-a", "list", "chain", "ip", INGRESS_TABLE, "pre"])
         .unwrap_or_default();
     let needle = format!("dport {host_port} ");
@@ -1516,11 +1516,11 @@ fn do_unpublish(host_port: &str) -> Result<()> {
     Ok(())
 }
 
-/// Política GLOBAL de egress do ingress único (corre DENTRO do netns de infra,
-/// onde o holder tem CAP_NET_ADMIN). `deny` adiciona `forward oifname tap0 drop`
-/// (bloqueia toda a saída para a Internet); `allow` remove-o. As regras de
-/// firewall por-carga (accept) que apareçam ANTES na chain `forward` continuam a
-/// abrir excepções pontuais — portanto isto é a política de BASE do egress.
+/// GLOBAL egress policy of the single ingress (runs INSIDE the infra netns,
+/// where the holder has CAP_NET_ADMIN). `deny` adds `forward oifname tap0 drop`
+/// (blocks all egress to the Internet); `allow` removes it. The per-workload
+/// firewall rules (accept) that appear BEFORE in the `forward` chain still
+/// open specific exceptions — so this is the BASE egress policy.
 fn do_egress(policy: &str) -> Result<()> {
     let listed = crate::capture(
         "nft",
@@ -1568,17 +1568,17 @@ fn do_egress(policy: &str) -> Result<()> {
     }
 }
 
-/// Egress POR-REDE (workspace): controla a saída→Internet de UMA bridge, sem
-/// afetar as outras. Idempotente (remove as regras antigas dessa bridge antes).
-/// Suporta `deny`/`allow`/`allowlist:<cidrs>` (NET-A).
+/// PER-NETWORK egress (workspace): controls the egress→Internet of ONE bridge, without
+/// affecting the others. Idempotent (removes that bridge's old rules first).
+/// Supports `deny`/`allow`/`allowlist:<cidrs>` (NET-A).
 fn do_egress_net(bridge: &str, policy: &str) -> Result<()> {
     if !(policy == "allow" || policy == "deny" || policy.starts_with("allowlist:")) {
         return Err(Error::Invalid(format!("invalid egress policy: {policy}")));
     }
     let norm = (policy != "allow").then(|| policy.to_string());
     let bridge = sanitize(bridge);
-    // Persiste a nova política e re-aplica a chain COMPLETA (política + hosts
-    // FQDN existentes) — para `egress net` e `egress host` comporem.
+    // Persists the new policy and re-applies the COMPLETE chain (policy + existing
+    // FQDN hosts) — so `egress net` and `egress host` compose.
     let state = update_netdef_egress(&bridge, |e| e.policy = norm.clone()).unwrap_or(EgressState {
         policy: norm,
         hosts: Vec::new(),
@@ -1586,27 +1586,27 @@ fn do_egress_net(bridge: &str, policy: &str) -> Result<()> {
     apply_egress_from_state(&bridge, &state)
 }
 
-// ---- egress por HOSTNAME (FQDN allowlist via DNS-snooping) -------------------
+// ---- egress by HOSTNAME (FQDN allowlist via DNS-snooping) -------------------
 //
-// nft só sabe de IPs; para permitir "sai só para *.github.com" o holder vê as
-// respostas DNS que já reencaminha (o resolver do ingress) e injecta os A-records
-// dos hostnames permitidos num `set` nft por-bridge que o egress aceita. É a
-// FQDN-policy do Cilium, mas 100% rootless (nft + DNS no holder, sem eBPF).
+// nft only knows about IPs; to allow "egress only to *.github.com" the holder sees the
+// DNS responses it already forwards (the ingress's resolver) and injects the A-records
+// of the allowed hostnames into a per-bridge nft `set` that the egress accepts. It's the
+// Cilium FQDN-policy, but 100% rootless (nft + DNS in the holder, no eBPF).
 
-/// Allowlist FQDN partilhada entre a thread de controlo (regista em `egress-host`)
-/// e a thread de DNS (popula o set com os A-records). Tuplos `(bridge, set, sufixo)`.
-/// O sufixo `github.com` casa `github.com` E `*.github.com`.
+/// FQDN allowlist shared between the control thread (registers in `egress-host`)
+/// and the DNS thread (populates the set with the A-records). Tuples `(bridge, set, suffix)`.
+/// The suffix `github.com` matches `github.com` AND `*.github.com`.
 static FQDN_ALLOW: std::sync::Mutex<Vec<(String, String, String)>> =
     std::sync::Mutex::new(Vec::new());
 
-/// Nome (curto, <= limite do nft) do set FQDN de uma bridge.
+/// Name (short, <= nft's limit) of a bridge's FQDN set.
 fn fqdn_set(bridge: &str) -> String {
     format!("dlxfq{:08x}", crate::fnv32(bridge))
 }
 
-/// Regista um hostname permitido para a saída de uma bridge: cria o set nft (com
-/// `flags timeout` para as entradas expirarem com o TTL), reprograma o egress da
-/// bridge para `DNS + @set + drop`, e memoriza o sufixo para o DNS o popular.
+/// Registers an allowed hostname for a bridge's egress: creates the nft set (with
+/// `flags timeout` so entries expire with the TTL), reprograms the bridge's egress
+/// to `DNS + @set + drop`, and memorizes the suffix for the DNS to populate.
 fn do_egress_host(bridge: &str, suffix: &str) -> Result<()> {
     let bridge = sanitize(bridge);
     let suffix = suffix
@@ -1614,7 +1614,7 @@ fn do_egress_host(bridge: &str, suffix: &str) -> Result<()> {
         .trim_start_matches("*.")
         .trim_matches('.')
         .to_lowercase();
-    // Anti-injeção: um hostname é [a-z0-9.-], com pelo menos um ponto, <= 253.
+    // Anti-injection: a hostname is [a-z0-9.-], with at least one dot, <= 253.
     if suffix.is_empty()
         || suffix.len() > 253
         || !suffix.contains('.')
@@ -1624,8 +1624,8 @@ fn do_egress_host(bridge: &str, suffix: &str) -> Result<()> {
     {
         return Err(Error::Invalid(format!("invalid hostname: {suffix:?}")));
     }
-    // Persiste o hostname e re-aplica a chain COMPLETA (compõe com a política CIDR
-    // se houver). `apply_egress_from_state` cria o set e regista no FQDN_ALLOW.
+    // Persists the hostname and re-applies the COMPLETE chain (composes with the CIDR
+    // policy if any). `apply_egress_from_state` creates the set and registers in FQDN_ALLOW.
     let state = update_netdef_egress(&bridge, |e| {
         if !e.hosts.contains(&suffix) {
             e.hosts.push(suffix.clone());
@@ -1638,8 +1638,8 @@ fn do_egress_host(bridge: &str, suffix: &str) -> Result<()> {
     apply_egress_from_state(&bridge, &state)
 }
 
-/// Extrai os IPv4 dos A-records de uma resposta DNS (bounds-checked; tolera
-/// compressão de nomes por saltar via RDLENGTH). PURA — testável sem rede.
+/// Extracts the IPv4s from the A-records of a DNS response (bounds-checked; tolerates
+/// name compression by skipping via RDLENGTH). PURE — testable without a network.
 fn parse_a_records(resp: &[u8]) -> Vec<[u8; 4]> {
     let mut out = Vec::new();
     if resp.len() < 12 {
@@ -1648,7 +1648,7 @@ fn parse_a_records(resp: &[u8]) -> Vec<[u8; 4]> {
     let qd = u16::from_be_bytes([resp[4], resp[5]]) as usize;
     let an = u16::from_be_bytes([resp[6], resp[7]]) as usize;
     let mut i = 12usize;
-    // saltar as QDCOUNT questões (nome + QTYPE + QCLASS)
+    // skip the QDCOUNT questions (name + QTYPE + QCLASS)
     for _ in 0..qd {
         i = skip_name(resp, i);
         i += 4;
@@ -1656,7 +1656,7 @@ fn parse_a_records(resp: &[u8]) -> Vec<[u8; 4]> {
             return out;
         }
     }
-    // ler ANCOUNT respostas
+    // read ANCOUNT answers
     for _ in 0..an {
         i = skip_name(resp, i);
         if i + 10 > resp.len() {
@@ -1676,7 +1676,7 @@ fn parse_a_records(resp: &[u8]) -> Vec<[u8; 4]> {
     out
 }
 
-/// Avança o offset para lá de um nome DNS (labels ou ponteiro de compressão 0xC0).
+/// Advances the offset past a DNS name (labels or 0xC0 compression pointer).
 fn skip_name(b: &[u8], mut i: usize) -> usize {
     while i < b.len() {
         let len = b[i] as usize;
@@ -1684,15 +1684,15 @@ fn skip_name(b: &[u8], mut i: usize) -> usize {
             return i + 1;
         }
         if len & 0xc0 == 0xc0 {
-            return i + 2; // ponteiro de compressão: 2 bytes, fim do nome
+            return i + 2; // compression pointer: 2 bytes, end of the name
         }
         i += 1 + len;
     }
     i
 }
 
-/// Se `name` casa um sufixo permitido, injecta os A-records de `resp` no(s) set(s)
-/// nft correspondente(s), com timeout (renova a cada resolução). Best-effort.
+/// If `name` matches an allowed suffix, injects `resp`'s A-records into the corresponding
+/// nft set(s), with timeout (renews on each resolution). Best-effort.
 fn snoop_fqdn(name: &str, resp: &[u8]) {
     let n = name.trim_end_matches('.').to_lowercase();
     let sets: Vec<String> = match FQDN_ALLOW.lock() {
@@ -1724,9 +1724,9 @@ fn snoop_fqdn(name: &str, resp: &[u8]) {
     }
 }
 
-/// Pré-flight de um ruleset `nft` (`nft -c -f -`): devolve `true` se for ACEITE,
-/// SEM o aplicar. É a "regra de ouro" da proteção L4 — só aplicamos depois de o
-/// kernel confirmar que suporta a sintaxe (ex.: `meter`/`ct count`).
+/// Pre-flight of an `nft` ruleset (`nft -c -f -`): returns `true` if it's ACCEPTED,
+/// WITHOUT applying it. It's the "golden rule" of the L4 protection — we only apply after the
+/// kernel confirms it supports the syntax (e.g.: `meter`/`ct count`).
 fn nft_check(script: &str) -> bool {
     use std::io::Write;
     let mut child = match Command::new("nft")
@@ -1745,11 +1745,11 @@ fn nft_check(script: &str) -> bool {
     child.wait().map(|s| s.success()).unwrap_or(false)
 }
 
-/// Proteção DDoS L4 (req #5): rate-limit + ct-count POR-ORIGEM das NOVAS ligações
-/// de entrada (via tap0), no `forward` do dlxing. Não é global (cada origem tem o
-/// seu balde → não é self-DoS). `counter drop` torna os excessos OBSERVÁVEIS
-/// (deteção). best-effort + pré-flight `nft -c`: se o kernel não suportar `meter`,
-/// DEGRADA (não aplica, não parte o ruleset). Idempotente (limpa antes).
+/// L4 DDoS protection (req #5): PER-SOURCE rate-limit + ct-count of NEW inbound
+/// connections (via tap0), in the dlxing's `forward`. Not global (each source has
+/// its own bucket → it's not self-DoS). `counter drop` makes the excesses OBSERVABLE
+/// (detection). best-effort + `nft -c` pre-flight: if the kernel doesn't support `meter`,
+/// it DEGRADES (doesn't apply, doesn't break the ruleset). Idempotent (clears first).
 fn do_l4guard(conn_rate: u32, conn_max: u32) -> Result<()> {
     clear_l4guard();
     let rate = conn_rate.clamp(1, 100_000);
@@ -1762,7 +1762,7 @@ fn do_l4guard(conn_rate: u32, conn_max: u32) -> Result<()> {
             {{ ip saddr ct count over {max} }} counter drop\n",
         t = INGRESS_TABLE,
     );
-    // REGRA DE OURO: só aplica se o kernel aceitar a sintaxe (senão degrada).
+    // GOLDEN RULE: only applies if the kernel accepts the syntax (otherwise degrades).
     if !nft_check(&script) {
         return Ok(());
     }
@@ -1770,8 +1770,8 @@ fn do_l4guard(conn_rate: u32, conn_max: u32) -> Result<()> {
     Ok(())
 }
 
-/// Remove as regras de L4 guard do `forward` (e, com elas, os meters dinâmicos —
-/// um meter sem regras que o referenciem é libertado). Idempotente.
+/// Removes the L4 guard rules from the `forward` (and, with them, the dynamic meters —
+/// a meter with no rules referencing it is freed). Idempotent.
 fn clear_l4guard() {
     let listed = crate::capture(
         "nft",
@@ -1802,8 +1802,8 @@ fn clear_l4guard() {
     }
 }
 
-/// Valida os campos de um publish antes de os meter num comando `nft` (defesa
-/// contra injeção): protocolo `tcp`/`udp`, portas numéricas, IP na subnet de infra.
+/// Validates a publish's fields before putting them into an `nft` command (defense
+/// against injection): `tcp`/`udp` protocol, numeric ports, IP in the infra subnet.
 fn validate_publish(proto: &str, host_port: &str, cip: &str, cport: &str) -> Result<()> {
     if proto != "tcp" && proto != "udp" {
         return Err(Error::Invalid(format!("invalid protocol: {proto}")));
@@ -1823,14 +1823,14 @@ fn is_port(p: &str) -> bool {
     p.parse::<u16>().map(|n| n >= 1).unwrap_or(false)
 }
 
-/// `true` se `ip` é um endereço válido do ESPAÇO de ingress (`10.{200..=254}.x.x`,
-/// unicast): a rede default (10.200) ou uma rede privada (10.201+). Defesa
-/// anti-injeção sem fixar um único `/16`.
-/// Espaço de workloads (`10.200.0.0`–`10.254.255.255`, ver
-/// `delonix_runtime_core::workload_net` — partilhado com `delonix-tunnel`, que usa o
-/// MESMO range para o guard "no-bypass" do túnel), excepto os endereços de
-/// rede/broadcast de cada /16 (`.0.0` e `.255.255`), que aqui não são IPs de
-/// workload utilizáveis.
+/// `true` if `ip` is a valid address of the ingress SPACE (`10.{200..=254}.x.x`,
+/// unicast): the default network (10.200) or a private network (10.201+). Anti-injection
+/// defense without fixing a single `/16`.
+/// Workload space (`10.200.0.0`–`10.254.255.255`, see
+/// `delonix_runtime_core::workload_net` — shared with `delonix-tunnel`, which uses the
+/// SAME range for the tunnel's "no-bypass" guard), except each /16's
+/// network/broadcast addresses (`.0.0` and `.255.255`), which here are not usable
+/// workload IPs.
 fn is_ingress_ip(ip: &str) -> bool {
     let o: Vec<&str> = ip.split('.').collect();
     if o.len() != 4 {
@@ -1850,36 +1850,36 @@ fn is_ingress_ip(ip: &str) -> bool {
         && (n[2], n[3]) != (255, 255)
 }
 
-/// Nome do `veth` do lado da bridge para um netns (determinístico, <= 15 chars).
+/// Name of the bridge-side `veth` for a netns (deterministic, <= 15 chars).
 fn vh_name(netns: &str) -> String {
     format!("vh{:08x}", crate::fnv32(netns))
 }
 
-/// Nome do `veth` host-side de uma rede ADICIONAL (multi-homing): distinto por
-/// (netns, interface) para não colidir com o primário nem entre redes extra.
+/// Name of the host-side `veth` of an ADDITIONAL network (multi-homing): distinct per
+/// (netns, interface) so as not to collide with the primary nor between extra networks.
 fn vh_name_extra(netns: &str, ifname: &str) -> String {
     format!("vx{:08x}", crate::fnv32(&format!("{netns}/{ifname}")))
 }
 
-// ---- firewall PARAMETRIZÁVEL do ingress (o ÚNICO sítio — princípio do utilizador) ----
+// ---- PARAMETERIZABLE ingress firewall (the ONLY place — user's principle) ----
 
-/// Nome da chain de firewall por-container no `dlxing` (derivado do IP).
+/// Name of the per-container firewall chain in `dlxing` (derived from the IP).
 fn fw_chain_name(ip: &str) -> String {
     format!("fw{:08x}", crate::fnv32(ip))
 }
 
-/// Gera o CORPO da chain de firewall de um container (regras L4 + política default),
-/// no netns de infra. PURA — mesma semântica do modelo root (`apply_container_firewall`),
-/// mas aplicada no ingress. `in` = tráfego PARA o container (daddr==ip); `out` = DELE
-/// (saddr==ip); `src` casa o outro extremo (peer). Testável sem kernel.
+/// Generates the BODY of a container's firewall chain (L4 rules + default policy),
+/// in the infra netns. PURE — same semantics as the root model (`apply_container_firewall`),
+/// but applied at the ingress. `in` = traffic TO the container (daddr==ip); `out` = FROM it
+/// (saddr==ip); `src` matches the other end (peer). Testable without a kernel.
 pub fn fw_chain_body(ip: &str, fw: &delonix_runtime_core::ContainerFw) -> String {
     let mut body = String::new();
     if !fw.enabled {
-        return body; // chain vazia = aberto (comportamento anterior a fw/namespace)
+        return body; // empty chain = open (behavior prior to fw/namespace)
     }
     for r in &fw.rules {
-        // Defesa contra injeção nft: salta regras com campos inseguros
-        // (src/proto/port são interpolados na ruleset alimentada a `nft -f`).
+        // Defense against nft injection: skips rules with unsafe fields
+        // (src/proto/port are interpolated into the ruleset fed to `nft -f`).
         if !r.nft_safe() {
             continue;
         }
@@ -1905,12 +1905,12 @@ pub fn fw_chain_body(ip: &str, fw: &delonix_runtime_core::ContainerFw) -> String
         });
         body.push_str(&format!("\t\t{line}\n"));
     }
-    // Isolamento de NAMESPACE na ENTRADA — só quando NÃO há política de entrada
-    // explícita (uma Dependency/Ingress é autoritativa e substitui isto): aceita a
-    // mesma namespace e dropa NOVAS ligações de containers de OUTRA namespace. O
-    // `ct state new` isenta o retorno (established/related), e o `@dlxall` limita o
-    // drop a fontes que SÃO containers da SDN (deixa passar gateway/DNS/internet).
-    // As regras EXPLÍCITAS acima têm precedência (first-match terminal na chain).
+    // NAMESPACE isolation on INGRESS — only when there is NO explicit inbound
+    // policy (a Dependency/Ingress is authoritative and replaces this): accepts the
+    // same namespace and drops NEW connections from containers of ANOTHER namespace. The
+    // `ct state new` exempts the return (established/related), and the `@dlxall` limits the
+    // drop to sources that ARE SDN containers (lets gateway/DNS/internet through).
+    // The EXPLICIT rules above take precedence (first-match terminal in the chain).
     let has_explicit_in = fw.policy_in == "deny" || fw.rules.iter().any(|r| r.dir == "in");
     if !has_explicit_in {
         let nsset = dlxns_set(&fw.namespace);
@@ -1928,18 +1928,18 @@ pub fn fw_chain_body(ip: &str, fw: &delonix_runtime_core::ContainerFw) -> String
     body
 }
 
-/// Set nft com TODOS os IPs de containers da SDN (para o isolamento de namespace
-/// só afetar tráfego container↔container, não gateway/DNS/internet).
+/// nft set with ALL the SDN container IPs (so namespace isolation
+/// only affects container↔container traffic, not gateway/DNS/internet).
 pub const DLXALL_SET: &str = "dlxall";
 
-/// Nome (curto, ≤ limite do nft) do set de IPs de uma namespace lógica.
+/// Name (short, ≤ nft's limit) of the IP set of a logical namespace.
 pub fn dlxns_set(ns: &str) -> String {
     format!("dlxns{:08x}", crate::fnv32(ns))
 }
 
-/// Aplica a firewall de um container no `dlxing` (corre no holder): garante a chain
-/// `fw<hash>` + jumps no `fwd` (daddr/saddr==ip), e reconstrói o corpo. `hex` é o
-/// JSON da `ContainerFw` em hexadecimal (o canal de controlo é por linhas).
+/// Applies a container's firewall in `dlxing` (runs in the holder): ensures the chain
+/// `fw<hash>` + jumps in the `fwd` (daddr/saddr==ip), and rebuilds the body. `hex` is the
+/// `ContainerFw` JSON in hexadecimal (the control channel is line-based).
 fn do_firewall(ip: &str, hex: &str) -> Result<()> {
     if !is_ingress_ip(ip) {
         return Err(Error::Invalid(format!(
@@ -1950,14 +1950,14 @@ fn do_firewall(ip: &str, hex: &str) -> Result<()> {
     let fw: delonix_runtime_core::ContainerFw = serde_json::from_slice(&bytes)
         .map_err(|e| Error::Invalid(format!("firewall JSON: {e}")))?;
     let chain = fw_chain_name(ip);
-    // garante a chain (regular, só alvo de jump).
+    // ensures the chain (regular, only a jump target).
     let exists = crate::capture("nft", &["list", "chain", "ip", INGRESS_TABLE, &chain])
         .map(|o| o.contains(&chain))
         .unwrap_or(false);
     if !exists {
         run_ok("nft", &["add", "chain", "ip", INGRESS_TABLE, &chain]);
     }
-    // jumps idempotentes no fwd: tráfego PARA (daddr) e DE (saddr) o IP.
+    // idempotent jumps in the fwd: traffic TO (daddr) and FROM (saddr) the IP.
     let fwd_chain = crate::capture("nft", &["list", "chain", "ip", INGRESS_TABLE, "fwdeny"])
         .unwrap_or_default();
     for dir in ["daddr", "saddr"] {
@@ -1979,7 +1979,7 @@ fn do_firewall(ip: &str, hex: &str) -> Result<()> {
             );
         }
     }
-    // flush + reconstrução do corpo num único script (mantém a chain e os jumps).
+    // flush + body rebuild in a single script (keeps the chain and the jumps).
     let body = fw_chain_body(ip, &fw);
     let script = format!(
         "flush chain ip {INGRESS_TABLE} {chain}\ntable ip {INGRESS_TABLE} {{\n\tchain {chain} {{\n{body}\t}}\n}}\n"
@@ -1987,8 +1987,8 @@ fn do_firewall(ip: &str, hex: &str) -> Result<()> {
     apply_nft_stdin(&script)
 }
 
-/// Remove a firewall de um container do `dlxing`: tira os jumps do `fwd` (por
-/// handle) e apaga a chain. Best-effort.
+/// Removes a container's firewall from `dlxing`: takes the jumps out of the `fwd` (by
+/// handle) and deletes the chain. Best-effort.
 fn do_unfirewall(ip: &str) -> Result<()> {
     let chain = fw_chain_name(ip);
     if let Ok(out) = crate::capture(
@@ -2010,7 +2010,7 @@ fn do_unfirewall(ip: &str) -> Result<()> {
     Ok(())
 }
 
-/// Hex-encode (minúsculas) — para passar o JSON da firewall pelo canal de linhas.
+/// Hex-encode (lowercase) — to pass the firewall JSON through the line channel.
 fn hex_encode(bytes: &[u8]) -> String {
     let mut s = String::with_capacity(bytes.len() * 2);
     for b in bytes {
@@ -2019,7 +2019,7 @@ fn hex_encode(bytes: &[u8]) -> String {
     s
 }
 
-/// Hex-decode; `None` se o comprimento for ímpar ou houver dígitos inválidos.
+/// Hex-decode; `None` if the length is odd or there are invalid digits.
 fn hex_decode(s: &str) -> Option<Vec<u8>> {
     if !s.len().is_multiple_of(2) {
         return None;
@@ -2030,8 +2030,8 @@ fn hex_decode(s: &str) -> Option<Vec<u8>> {
         .collect()
 }
 
-/// Sanitiza um nome de netns/interface (só `[a-z0-9_-]`, <= 12 chars) — defesa
-/// contra injeção no `ip netns` e no IFNAMSIZ.
+/// Sanitizes a netns/interface name (only `[a-z0-9_-]`, <= 12 chars) — defense
+/// against injection in `ip netns` and the IFNAMSIZ.
 fn sanitize(s: &str) -> String {
     let cleaned: String = s
         .chars()
@@ -2040,37 +2040,37 @@ fn sanitize(s: &str) -> String {
     cleaned.chars().take(12).collect()
 }
 
-// ---- redes privadas do ingress (F6): bridge por rede, gateway = ingress -------
+// ---- ingress private networks (F6): bridge per network, gateway = ingress ----
 
-/// Definição de uma rede privada do ingress: nome, bridge (no netns de infra) e
-/// prefixo `/16`. O **gateway é SEMPRE o ingress** (`<prefix>.0.1` na bridge), por
-/// onde a rede sai/recebe (egress via o slirp único) e onde vive o firewall.
+/// Definition of an ingress private network: name, bridge (in the infra netns) and
+/// `/16` prefix. The **gateway is ALWAYS the ingress** (`<prefix>.0.1` on the bridge), through
+/// which the network egresses/receives (egress via the single slirp) and where the firewall lives.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct NetDef {
     pub name: String,
     pub bridge: String,
-    pub prefix: String, // ex.: "10.201"
-    /// Intenção de egress da rede, PERSISTIDA para sobreviver ao respawn do
-    /// holder (o nft e o registry FQDN vivem num netns efémero). Re-aplicada em
-    /// [`ensure_net_bridge`] quando a bridge é recriada.
+    pub prefix: String, // e.g.: "10.201"
+    /// The network's egress intent, PERSISTED to survive the holder's
+    /// respawn (the nft and the FQDN registry live in an ephemeral netns). Re-applied in
+    /// [`ensure_net_bridge`] when the bridge is recreated.
     #[serde(default)]
     pub egress: EgressState,
 }
 
-/// Política de egress de uma rede, guardada na [`NetDef`].
+/// A network's egress policy, stored in the [`NetDef`].
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct EgressState {
     /// `deny` | `allow` | `allowlist:<cidrs>`. `None` = default (allow).
     #[serde(default)]
     pub policy: Option<String>,
-    /// Sufixos FQDN permitidos (`egress host`).
+    /// Allowed FQDN suffixes (`egress host`).
     #[serde(default)]
     pub hosts: Vec<String>,
 }
 
-/// Actualiza (e persiste) a intenção de egress da rede cuja bridge é `bridge`,
-/// devolvendo o estado resultante. `None` se nenhuma `NetDef` corresponder (ex.:
-/// a bridge default `delonix0`, que não é persistida).
+/// Updates (and persists) the egress intent of the network whose bridge is `bridge`,
+/// returning the resulting state. `None` if no `NetDef` matches (e.g.:
+/// the default bridge `delonix0`, which is not persisted).
 fn update_netdef_egress(
     bridge: &str,
     mutate: impl FnOnce(&mut EgressState),
@@ -2087,15 +2087,15 @@ fn update_netdef_egress(
     None
 }
 
-/// Constrói a chain de egress COMPLETA de uma bridge a partir do estado combinado
-/// (política CIDR + hosts FQDN), para que `egress net allowlist` e `egress host`
-/// COMPONHAM em vez de um reprogramar por cima do outro. Remove as regras antigas
-/// da bridge e reinsere na ordem certa: DNS → CIDRs → @set FQDN → drop. `allow`
-/// sem hosts = default-allow (nada). `deny` sem hosts = drop total. Qualquer host
-/// força modo allowlist (os hosts são allows explícitos).
+/// Builds a bridge's COMPLETE egress chain from the combined state
+/// (CIDR policy + FQDN hosts), so that `egress net allowlist` and `egress host`
+/// COMPOSE instead of one reprogramming over the other. Removes the bridge's old
+/// rules and reinserts in the right order: DNS → CIDRs → @set FQDN → drop. `allow`
+/// with no hosts = default-allow (nothing). `deny` with no hosts = total drop. Any host
+/// forces allowlist mode (the hosts are explicit allows).
 fn apply_egress_from_state(bridge: &str, state: &EgressState) -> Result<()> {
     let bridge = sanitize(bridge);
-    // Remove todas as regras de egress antigas desta bridge (drop + accepts).
+    // Removes all this bridge's old egress rules (drop + accepts).
     let needle_if = format!("iifname \"{bridge}\"");
     let listed = crate::capture(
         "nft",
@@ -2127,7 +2127,7 @@ fn apply_egress_from_state(bridge: &str, state: &EgressState) -> Result<()> {
             }
         }
     }
-    // Cria o set FQDN + regista os sufixos ANTES de inserir a regra `@set`.
+    // Creates the FQDN set + registers the suffixes BEFORE inserting the `@set` rule.
     if !state.hosts.is_empty() {
         let set = fqdn_set(&bridge);
         run_ok(
@@ -2143,18 +2143,18 @@ fn apply_egress_from_state(bridge: &str, state: &EgressState) -> Result<()> {
         );
         fqdn_register(&bridge, &set, &state.hosts);
     }
-    // `insert` prepende → inserir em ordem INVERSA para o topo→fundo ficar certo.
+    // `insert` prepends → insert in REVERSE order so the top→bottom comes out right.
     for spec in egress_specs(&bridge, state).iter().rev() {
         run("nft", &spec.iter().map(|s| s.as_str()).collect::<Vec<_>>())?;
     }
     Ok(())
 }
 
-/// Constrói os arg-vectors `nft insert rule …` do egress de uma bridge a partir do
-/// estado combinado (política CIDR + hosts FQDN), na ordem topo→fundo. **PURA**
-/// (sem I/O — testável): DNS → CIDRs da allowlist → `@set` FQDN → drop. `allow`
-/// sem hosts → vazio (default-allow); `deny` sem hosts → só drop. `bridge` já vem
-/// sanitizado.
+/// Builds the `nft insert rule …` arg-vectors for a bridge's egress from the
+/// combined state (CIDR policy + FQDN hosts), in top→bottom order. **PURE**
+/// (no I/O — testable): DNS → allowlist CIDRs → `@set` FQDN → drop. `allow`
+/// with no hosts → empty (default-allow); `deny` with no hosts → only drop. `bridge` comes
+/// already sanitized.
 fn egress_specs(bridge: &str, state: &EgressState) -> Vec<Vec<String>> {
     let policy = state.policy.as_deref().unwrap_or("allow");
     let has_hosts = !state.hosts.is_empty();
@@ -2200,12 +2200,12 @@ fn egress_specs(bridge: &str, state: &EgressState) -> Vec<Vec<String>> {
             "accept",
         ]));
     }
-    specs.push(base(&["drop"])); // default-deny do resto (fica em ÚLTIMO)
+    specs.push(base(&["drop"])); // default-deny of the rest (stays LAST)
     specs
 }
 
-/// IPs actualmente no set FQDN de uma bridge (aprendidos das respostas DNS).
-/// Corre DENTRO do holder (o set vive no netns de infra). Extrai os IPv4 do dump.
+/// IPs currently in a bridge's FQDN set (learned from the DNS responses).
+/// Runs INSIDE the holder (the set lives in the infra netns). Extracts the IPv4s from the dump.
 fn egress_set_members(bridge: &str) -> Vec<String> {
     let set = fqdn_set(&sanitize(bridge));
     let dump =
@@ -2223,10 +2223,10 @@ fn egress_set_members(bridge: &str) -> Vec<String> {
     ips
 }
 
-/// IPs FQDN aprendidos ao vivo para uma bridge — pergunta ao holder (`egress show`
-/// do lado do CLI). Vazio se o holder estiver em baixo.
+/// FQDN IPs learned live for a bridge — asks the holder (`egress show`
+/// on the CLI side). Empty if the holder is down.
 pub fn egress_members(bridge: &str) -> Vec<String> {
-    // `control_query` já devolve o corpo (sem o prefixo `ok `).
+    // `control_query` already returns the body (without the `ok ` prefix).
     match control_query(&format!("egress-show {bridge}")) {
         Ok(body) => body
             .split(',')
@@ -2238,8 +2238,8 @@ pub fn egress_members(bridge: &str) -> Vec<String> {
     }
 }
 
-/// Regista (sem duplicar) os sufixos FQDN de uma bridge no [`FQDN_ALLOW`] para a
-/// thread de DNS os snoopar. Chamado no apply e na re-aplicação pós-respawn.
+/// Registers (without duplicating) a bridge's FQDN suffixes in [`FQDN_ALLOW`] for the
+/// DNS thread to snoop them. Called on apply and on the post-respawn re-application.
 fn fqdn_register(bridge: &str, set: &str, hosts: &[String]) {
     if let Ok(mut g) = FQDN_ALLOW.lock() {
         for h in hosts {
@@ -2257,13 +2257,13 @@ fn netdef_path(name: &str) -> PathBuf {
     networks_dir().join(format!("{}.json", sanitize(name)))
 }
 
-/// Gateway (= ingress) de um prefixo `/16`.
+/// Gateway (= ingress) of a `/16` prefix.
 fn gateway_of(prefix: &str) -> String {
     format!("{prefix}.0.1")
 }
 
-/// Resolve uma rede para `(bridge, prefix, gateway)`. `ingress`/vazio = a rede
-/// default (delonix0/10.200); senão carrega a `NetDef` da rede privada.
+/// Resolves a network to `(bridge, prefix, gateway)`. `ingress`/empty = the
+/// default network (delonix0/10.200); otherwise loads the private network's `NetDef`.
 pub fn resolve_net(name: &str) -> Result<(String, String, String)> {
     if name.is_empty() || name == "ingress" {
         return Ok((
@@ -2281,12 +2281,12 @@ pub fn resolve_net(name: &str) -> Result<(String, String, String)> {
     Ok((def.bridge, def.prefix, gw))
 }
 
-/// Lê a `NetDef` de uma rede privada (se existir).
+/// Reads a private network's `NetDef` (if it exists).
 pub fn network_get(name: &str) -> Option<NetDef> {
     serde_json::from_slice(&std::fs::read(netdef_path(name)).ok()?).ok()
 }
 
-/// Lista as redes privadas do ingress definidas.
+/// Lists the defined ingress private networks.
 pub fn network_list() -> Vec<NetDef> {
     let mut v = Vec::new();
     if let Ok(rd) = std::fs::read_dir(networks_dir()) {
@@ -2301,9 +2301,9 @@ pub fn network_list() -> Vec<NetDef> {
     v
 }
 
-/// **Cria uma rede privada do ingress**: aloca um prefixo `/16` livre (10.201+,
-/// evitando 10.200 e os já usados) e uma bridge, e persiste a `NetDef`. A bridge é
-/// criada (lazy) no netns de infra no 1.º `attach`. Idempotente por nome.
+/// **Creates an ingress private network**: allocates a free `/16` prefix (10.201+,
+/// avoiding 10.200 and the ones already used) and a bridge, and persists the `NetDef`. The bridge is
+/// created (lazily) in the infra netns on the 1st `attach`. Idempotent by name.
 pub fn network_create(name: &str) -> Result<NetDef> {
     if let Some(def) = network_get(name) {
         return Ok(def);
@@ -2331,10 +2331,10 @@ pub fn network_create(name: &str) -> Result<NetDef> {
     Ok(def)
 }
 
-/// Como [`network_create`], mas com um **prefixo `/16` explícito** (ex.: `"10.50"`).
-/// Usado para ALINHAR o plano de rede das VMs ao prefixo decidido pelo
-/// `NetworkStore` (a fonte da verdade), para que a mesma rede tenha a MESMA subnet
-/// em containers e VMs. Idempotente por nome.
+/// Like [`network_create`], but with an **explicit `/16` prefix** (e.g.: `"10.50"`).
+/// Used to ALIGN the VMs' network plan to the prefix decided by the
+/// `NetworkStore` (the source of truth), so the same network has the SAME subnet
+/// in containers and VMs. Idempotent by name.
 pub fn network_create_with(name: &str, prefix: &str) -> Result<NetDef> {
     if let Some(def) = network_get(name) {
         return Ok(def);
@@ -2356,37 +2356,37 @@ pub fn network_create_with(name: &str, prefix: &str) -> Result<NetDef> {
     Ok(def)
 }
 
-/// **Remove uma rede privada do ingress**: apaga a bridge (se a infra estiver de
-/// pé) e a `NetDef`. Best-effort.
+/// **Removes an ingress private network**: deletes the bridge (if the infra is
+/// up) and the `NetDef`. Best-effort.
 pub fn network_remove(name: &str) {
     if let Some(def) = network_get(name) {
-        // `control_send` falha já se o holder estiver em baixo (rede sem cargas) —
-        // a bridge nunca viveu num netns, nada a apagar. Best-effort.
+        // `control_send` fails right away if the holder is down (network with no workloads) —
+        // the bridge never lived in a netns, nothing to delete. Best-effort.
         let _ = control_send(&format!("netdel {}", def.bridge));
     }
     let _ = std::fs::remove_file(netdef_path(name));
 }
 
-// ---- API host-side: fábrica de containers + ciclo de vida (ref-count) -------
+// ---- host-side API: container factory + lifecycle (ref-count) ---------------
 
-/// IP determinístico de um container numa rede do ingress (`<prefix>.A.B`),
-/// derivado do id — estável entre invocações.
+/// Deterministic IP of a container on an ingress network (`<prefix>.A.B`),
+/// derived from the id — stable across invocations.
 pub fn container_ip_on(prefix: &str, id: &str) -> String {
     crate::alloc_ip_in(prefix, id)
 }
 
-/// IP do container na rede default do ingress (`10.200.A.B`).
+/// The container's IP on the default ingress network (`10.200.A.B`).
 pub fn container_ip(id: &str) -> String {
     container_ip_on(INFRA_PREFIX, id)
 }
 
-/// **Liga um container via CNI (rootless)**: garante a infra de pé (ref-count++) e
-/// pede ao holder para correr os plugins CNI (`conf_json` = conflist) na netns do
-/// container. Devolve `(netns, ip_cidr)`. O IP vem do IPAM do plugin. Em falha
-/// desfaz o ref-count. Preserva o rootless-first: o plugin corre no holder (dono
-/// da netns), não no host sem privilégio.
+/// **Attaches a container via CNI (rootless)**: ensures the infra is up (ref-count++) and
+/// asks the holder to run the CNI plugins (`conf_json` = conflist) in the container's
+/// netns. Returns `(netns, ip_cidr)`. The IP comes from the plugin's IPAM. On failure
+/// it undoes the ref-count. Preserves rootless-first: the plugin runs in the holder (owner
+/// of the netns), not on the host without privilege.
 pub fn cni_attach_container(id: &str, conf_json: &str) -> Result<(String, String)> {
-    acquire(id)?; // ensure_up + marcador de ref para `id`
+    acquire(id)?; // ensure_up + ref marker for `id`
     let netns = sanitize(id);
     let hex = hex_encode(conf_json.as_bytes());
     let cmd = format!(
@@ -2402,8 +2402,8 @@ pub fn cni_attach_container(id: &str, conf_json: &str) -> Result<(String, String
     }
 }
 
-/// **Desliga um container CNI (rootless)**: pede ao holder o `DEL` dos plugins +
-/// remoção da netns, e liberta o ref-count. Best-effort.
+/// **Detaches a CNI container (rootless)**: asks the holder for the plugins' `DEL` +
+/// netns removal, and frees the ref-count. Best-effort.
 pub fn cni_detach_container(id: &str, conf_json: &str) -> Result<()> {
     let netns = sanitize(id);
     let hex = hex_encode(conf_json.as_bytes());
@@ -2415,23 +2415,23 @@ pub fn cni_detach_container(id: &str, conf_json: &str) -> Result<()> {
     Ok(())
 }
 
-/// **Liga um container a uma rede do ingress** (`net`=`ingress` ou nome de rede
-/// privada): garante a infra de pé (ref-count++), resolve a bridge/gateway e pede
-/// ao holder o netns + `veth` + IP. Devolve `(netns, ip)`. Em falha desfaz o ref-count.
+/// **Attaches a container to an ingress network** (`net`=`ingress` or a private
+/// network name): ensures the infra is up (ref-count++), resolves the bridge/gateway and asks
+/// the holder for the netns + `veth` + IP. Returns `(netns, ip)`. On failure it undoes the ref-count.
 pub fn attach_container(id: &str, net: &str, namespace: &str) -> Result<(String, String)> {
     let (bridge, prefix, gateway) = resolve_net(net)?;
-    let ip = crate::ipam::allocate(&prefix, id)?; // lease único (anti-colisão), estável por id
-    acquire(id)?; // ensure_up + marcador de ref para `id`
+    let ip = crate::ipam::allocate(&prefix, id)?; // unique lease (anti-collision), stable per id
+    acquire(id)?; // ensure_up + ref marker for `id`
     let netns = sanitize(id);
-    // `namespace` sanitizado (vai a um token do control-line): sem espaços/lixo.
+    // `namespace` sanitized (goes to a control-line token): no spaces/garbage.
     let ns = sanitize(if namespace.is_empty() {
         "default"
     } else {
         namespace
     });
-    // Compat de upgrade: `default` mantém a forma de 5 tokens (um holder ANTIGO,
-    // pré-namespaces, ainda a aceita); só attaches namespaced levam o 6.º token e
-    // exigem o holder novo. Minimiza a quebra num upgrade in-place do binário.
+    // Upgrade compat: `default` keeps the 5-token form (an OLD holder,
+    // pre-namespaces, still accepts it); only namespaced attaches carry the 6th token and
+    // require the new holder. Minimizes breakage on an in-place binary upgrade.
     let cmd = if ns == "default" {
         format!("attach {netns} {ip} {bridge} {gateway}")
     } else {
@@ -2440,19 +2440,19 @@ pub fn attach_container(id: &str, net: &str, namespace: &str) -> Result<(String,
     match control_send(&cmd) {
         Ok(()) => Ok((netns, ip)),
         Err(e) => {
-            release(id); // desfaz o marcador de ref se o attach falhou
+            release(id); // undoes the ref marker if the attach failed
             Err(e)
         }
     }
 }
 
-/// **Liga um container A CORRER a uma rede ADICIONAL** (multi-homing ao vivo,
-/// rootless): resolve a bridge/gateway/IP da rede e pede ao holder o `veth` extra
-/// na interface `eth<idx>`. Sem ref-count novo (o attach primário já segura a infra).
-/// Devolve `(ifname, ip)`.
+/// **Attaches a RUNNING container to an ADDITIONAL network** (live multi-homing,
+/// rootless): resolves the network's bridge/gateway/IP and asks the holder for the extra `veth`
+/// on the interface `eth<idx>`. No new ref-count (the primary attach already holds the infra).
+/// Returns `(ifname, ip)`.
 pub fn attach_extra_container(id: &str, idx: u32, net: &str) -> Result<(String, String)> {
     let (bridge, prefix, gateway) = resolve_net(net)?;
-    let ip = crate::ipam::allocate(&prefix, id)?; // lease único na rede adicional
+    let ip = crate::ipam::allocate(&prefix, id)?; // unique lease on the additional network
     let ifname = format!("eth{idx}");
     let netns = sanitize(id);
     control_send(&format!(
@@ -2461,43 +2461,43 @@ pub fn attach_extra_container(id: &str, idx: u32, net: &str) -> Result<(String, 
     Ok((ifname, ip))
 }
 
-/// **Limita a largura de banda de um container A CORRER** (rootless, ao vivo):
-/// pede ao holder o shaping no veth do lado do infra (`vh<fnv>`). `rate_bit` em
-/// bit/s, `burst_bytes` em bytes. Idempotente.
+/// **Limits the bandwidth of a RUNNING container** (rootless, live):
+/// asks the holder for the shaping on the infra-side veth (`vh<fnv>`). `rate_bit` in
+/// bit/s, `burst_bytes` in bytes. Idempotent.
 pub fn set_net_rate(id: &str, rate_bit: u64, burst_bytes: u64) -> Result<()> {
     let vh = vh_name(&sanitize(id));
     control_send(&format!("netrate {vh} {rate_bit} {burst_bytes}"))
 }
 
-/// **Remove o limite de largura de banda** de um container (rootless). Best-effort.
+/// **Removes the bandwidth limit** of a container (rootless). Best-effort.
 pub fn clear_net_rate(id: &str) {
     let vh = vh_name(&sanitize(id));
     let _ = control_send(&format!("netrate-clear {vh}"));
 }
 
-/// **Desliga um container de uma rede adicional** (multi-homing ao vivo): pede ao
-/// holder a remoção do `veth` extra e liberta o lease de IP nessa rede. `ip` é o
-/// IP do container na rede adicional (do record `ExtraNet`). Best-effort.
+/// **Detaches a container from an additional network** (live multi-homing): asks the
+/// holder to remove the extra `veth` and frees the IP lease on that network. `ip` is the
+/// container's IP on the additional network (from the `ExtraNet` record). Best-effort.
 pub fn detach_extra_container(id: &str, idx: u32, ip: &str) {
     let netns = sanitize(id);
     let ifname = format!("eth{idx}");
     let _ = control_send(&format!("detach-extra {netns} {ifname}"));
-    crate::ipam::release(&crate::ipam::prefix_of(ip), id); // liberta o lease da rede extra
+    crate::ipam::release(&crate::ipam::prefix_of(ip), id); // frees the extra network's lease
 }
 
-/// **Desliga um container do ingress**: limpa a firewall (no seu `ip`), pede o
-/// `detach` ao holder e baixa o ref-count (derruba a infra no último). Best-effort.
+/// **Detaches a container from the ingress**: clears the firewall (on its `ip`), asks the
+/// holder for the `detach` and lowers the ref-count (tears down the infra on the last). Best-effort.
 pub fn detach_container(id: &str, ip: &str) {
     let netns = sanitize(id);
     let _ = control_send(&format!("unfirewall {ip}"));
     let _ = control_send(&format!("detach {netns}"));
-    crate::ipam::release(&crate::ipam::prefix_of(ip), id); // liberta o lease de IP
-    release(id); // remove o marcador de ref (teardown quando fica vazio)
+    crate::ipam::release(&crate::ipam::prefix_of(ip), id); // frees the IP lease
+    release(id); // removes the ref marker (teardown when it becomes empty)
 }
 
-/// **Aplica a firewall parametrizável de um container NO INGRESS** (o único sítio,
-/// via o bind): traduz a `ContainerFw` (a mesma persistida no record, v0.1.93) para
-/// a chain `fw<hash>` do `dlxing`, chaveada pelo `ip` do container na sua rede.
+/// **Applies a container's parameterizable firewall AT THE INGRESS** (the only place,
+/// via the bind): translates the `ContainerFw` (the same one persisted in the record, v0.1.93) to
+/// the `dlxing`'s `fw<hash>` chain, keyed by the container's `ip` on its network.
 pub fn apply_firewall(id: &str, ip: &str, fw: &delonix_runtime_core::ContainerFw) -> Result<()> {
     let json = serde_json::to_vec(fw).map_err(|e| Error::Invalid(e.to_string()))?;
     control_send(&format!(
@@ -2508,15 +2508,15 @@ pub fn apply_firewall(id: &str, ip: &str, fw: &delonix_runtime_core::ContainerFw
     ))
 }
 
-/// Define a política GLOBAL de egress do ingress único (via holder, no netns de
-/// infra). `deny` bloqueia toda a saída para a Internet; `allow` repõe o default
-/// (egress permitido). Idempotente.
+/// Sets the GLOBAL egress policy of the single ingress (via the holder, in the infra
+/// netns). `deny` blocks all egress to the Internet; `allow` restores the default
+/// (egress allowed). Idempotent.
 pub fn set_egress_policy(deny: bool) -> Result<()> {
     control_send(&format!("egress {}", if deny { "deny" } else { "allow" }))
 }
 
-/// Como [`set_egress_policy`], mas SÓ para a bridge `<bridge>` (egress por-rede /
-/// por-workspace). Não afeta as outras redes.
+/// Like [`set_egress_policy`], but ONLY for the bridge `<bridge>` (per-network /
+/// per-workspace egress). Doesn't affect the other networks.
 pub fn set_egress_policy_net(bridge: &str, deny: bool) -> Result<()> {
     control_send(&format!(
         "egress-net {} {}",
@@ -2525,10 +2525,10 @@ pub fn set_egress_policy_net(bridge: &str, deny: bool) -> Result<()> {
     ))
 }
 
-/// NET-A — egress em modo ALLOWLIST para a bridge `<bridge>`: nega toda a saída→
-/// Internet EXCEPTO DNS (53) e os `cidrs` indicados (lista separada por vírgulas,
-/// sem espaços). É o "nega tudo excepto X" que faltava (o `set_egress_policy_net`
-/// é só denylist). Os CIDRs são validados (`fw_src_ok`) no holder — anti-injeção.
+/// NET-A — ALLOWLIST-mode egress for the bridge `<bridge>`: denies all egress→
+/// Internet EXCEPT DNS (53) and the given `cidrs` (comma-separated list,
+/// no spaces). It's the "deny everything except X" that was missing (`set_egress_policy_net`
+/// is only a denylist). The CIDRs are validated (`fw_src_ok`) in the holder — anti-injection.
 pub fn set_egress_policy_net_allowlist(bridge: &str, cidrs: &[&str]) -> Result<()> {
     control_send(&format!(
         "egress-net {} allowlist:{}",
@@ -2537,28 +2537,28 @@ pub fn set_egress_policy_net_allowlist(bridge: &str, cidrs: &[&str]) -> Result<(
     ))
 }
 
-/// Egress por HOSTNAME: só deixa a bridge sair para os IPs que resolverem para
-/// `<suffix>` (ou `*.<suffix>`), aprendidos ao vivo das respostas DNS. Nega o
-/// resto (excepto DNS). Chamar mais que uma vez acrescenta hostnames à allowlist.
+/// Egress by HOSTNAME: only lets the bridge egress to the IPs that resolve to
+/// `<suffix>` (or `*.<suffix>`), learned live from the DNS responses. Denies the
+/// rest (except DNS). Calling more than once adds hostnames to the allowlist.
 pub fn set_egress_host(bridge: &str, suffix: &str) -> Result<()> {
     control_send(&format!("egress-host {bridge} {suffix}"))
 }
 
-/// Ativa/atualiza a proteção DDoS L4 (rate-limit + ct-count por-origem). `conn_rate`
-/// = novas ligações/segundo por IP; `conn_max` = ligações concorrentes por IP.
-/// best-effort no holder (degrada se o kernel não suportar). Ver [`do_l4guard`].
+/// Enables/updates the L4 DDoS protection (per-source rate-limit + ct-count). `conn_rate`
+/// = new connections/second per IP; `conn_max` = concurrent connections per IP.
+/// best-effort in the holder (degrades if the kernel doesn't support it). See [`do_l4guard`].
 pub fn set_l4_guard(conn_rate: u32, conn_max: u32) -> Result<()> {
     control_send(&format!("l4guard {conn_rate} {conn_max}"))
 }
 
-/// Remove a proteção DDoS L4 (idempotente).
+/// Removes the L4 DDoS protection (idempotent).
 pub fn clear_l4_guard() -> Result<()> {
     control_send("l4guard-clear")
 }
 
-/// Sobe a interface WireGuard `<iface>` no netns de infra (req #6) com a privada
-/// do nó e a porta de escuta. A privada vai pelo control socket (0600 + SO_PEERCRED
-/// = só o uid do engine). Ver [`crate::wg`].
+/// Brings up the WireGuard interface `<iface>` in the infra netns (req #6) with the node's
+/// private key and the listen port. The private key goes via the control socket (0600 + SO_PEERCRED
+/// = only the engine's uid). See [`crate::wg`].
 pub fn set_wg_iface(
     iface: &str,
     private_key: &str,
@@ -2570,7 +2570,7 @@ pub fn set_wg_iface(
     ))
 }
 
-/// Adiciona um peer WireGuard (outro nó) à interface do overlay.
+/// Adds a WireGuard peer (another node) to the overlay interface.
 pub fn set_wg_peer(
     iface: &str,
     public_key: &str,
@@ -2583,21 +2583,21 @@ pub fn set_wg_peer(
     ))
 }
 
-/// **Realiza o uplink VXLAN de uma rede overlay** no netns de infra: bridge +
-/// device VXLAN (`<dev>`/`<vni>`) + FDB dos pares (`dsts` = `wg_ip` se cifrado,
-/// senão `node_ip`). O gateway alinha a subnet à decidida pelo `NetworkStore`.
-/// Requer o holder de pé (`ensure_up` antes). Idempotente. Ver [`do_vxlan`].
+/// **Realizes an overlay network's VXLAN uplink** in the infra netns: bridge +
+/// VXLAN device (`<dev>`/`<vni>`) + peers' FDB (`dsts` = `wg_ip` if encrypted,
+/// otherwise `node_ip`). The gateway aligns the subnet to the one decided by the `NetworkStore`.
+/// Requires the holder up (`ensure_up` first). Idempotent. See [`do_vxlan`].
 pub fn set_vxlan(dev: &str, vni: u32, bridge: &str, gateway: &str, dsts: &[String]) -> Result<()> {
-    // Valida os destinos AQUI, ANTES de os interpolar na linha do control-socket
-    // (disciplina valid_* da auditoria — validar antes do `format!`/socket, não só
-    // holder-side): um dst com espaço/newline malformaria a linha ou tentaria
-    // smuggling de um 2.º comando. `do_vxlan` revalida, mas a fronteira é esta.
+    // Validates the destinations HERE, BEFORE interpolating them into the control-socket line
+    // (the audit's valid_* discipline — validate before the `format!`/socket, not only
+    // holder-side): a dst with a space/newline would malform the line or attempt
+    // smuggling a 2nd command. `do_vxlan` re-validates, but this is the boundary.
     if let Some(bad) = dsts.iter().find(|d| !valid_fdb_dst(d)) {
         return Err(Error::Invalid(format!(
             "invalid overlay peer destination: {bad:?} (IPs only)"
         )));
     }
-    // CSV num único token (o control-loop faz `split_whitespace`); `-` = sem pares.
+    // CSV in a single token (the control-loop does `split_whitespace`); `-` = no peers.
     let csv = if dsts.is_empty() {
         "-".to_string()
     } else {
@@ -2606,31 +2606,31 @@ pub fn set_vxlan(dev: &str, vni: u32, bridge: &str, gateway: &str, dsts: &[Strin
     control_send(&format!("vxlan {dev} {vni} {bridge} {gateway} {csv}"))
 }
 
-/// Remove a firewall de um container do ingress (best-effort).
+/// Removes a container's firewall from the ingress (best-effort).
 pub fn clear_firewall(ip: &str) {
     let _ = control_send(&format!("unfirewall {ip}"));
 }
 
-// ---- VMs no ingress (QEMU/KVM) ----------------------------------------------
+// ---- VMs on the ingress (QEMU/KVM) ------------------------------------------
 
-/// Nome do `tap` de uma VM (determinístico, <= 15 chars).
+/// Name of a VM's `tap` (deterministic, <= 15 chars).
 pub fn vm_tap_name(vm: &str) -> String {
     format!("vt{:08x}", crate::fnv32(vm))
 }
 
-/// Hash FNV-1a de um nome (para derivar MAC determinístico, etc.).
+/// FNV-1a hash of a name (to derive a deterministic MAC, etc.).
 pub fn name_hash(s: &str) -> u32 {
     crate::fnv32(s)
 }
 
-/// **Liga uma VM ao ingress**: garante a infra de pé (ref-count++), resolve a rede
-/// e pede ao holder um `tap` na bridge dessa rede (com DHCP). Devolve o nome do tap
-/// (que o QEMU usa). O guest obtém IP por DHCP (pool da rede; gateway = ingress).
+/// **Attaches a VM to the ingress**: ensures the infra is up (ref-count++), resolves the network
+/// and asks the holder for a `tap` on that network's bridge (with DHCP). Returns the tap name
+/// (which QEMU uses). The guest gets an IP via DHCP (the network's pool; gateway = ingress).
 pub fn vm_attach(vm: &str, net: &str) -> Result<String> {
     let (bridge, _prefix, gateway) = resolve_net(net)?;
-    // Chave de ref `vm-<nome>` — namespace próprio, distinto dos ids de container
-    // e dos pods `cri-*`; o reaper do `prune` preserva os `vm-*` (geridos por
-    // outro store) tal como os `cri-*`.
+    // Ref key `vm-<name>` — its own namespace, distinct from the container ids
+    // and the `cri-*` pods; the `prune` reaper preserves the `vm-*` (managed by
+    // another store) just like the `cri-*`.
     acquire(&format!("vm-{vm}"))?;
     let tap = vm_tap_name(vm);
     match control_send(&format!("vmtap {tap} {bridge} {gateway}")) {
@@ -2642,14 +2642,14 @@ pub fn vm_attach(vm: &str, net: &str) -> Result<String> {
     }
 }
 
-/// **Desliga uma VM do ingress**: remove o `tap` e baixa o ref-count. Best-effort.
+/// **Detaches a VM from the ingress**: removes the `tap` and lowers the ref-count. Best-effort.
 pub fn vm_detach(vm: &str) {
     let _ = control_send(&format!("vmtapdel {}", vm_tap_name(vm)));
     release(&format!("vm-{vm}"));
 }
 
-/// `argv` para correr um processo (o QEMU) DENTRO do netns de infra do holder
-/// (onde vivem as bridges e os taps). `None` se a infra não estiver de pé.
+/// `argv` to run a process (QEMU) INSIDE the holder's infra netns
+/// (where the bridges and taps live). `None` if the infra isn't up.
 pub fn infra_join_argv() -> Option<Vec<String>> {
     let holder = read_pid(&holder_pid_path()).filter(|&p| pid_alive(p))?;
     Some(vec![
@@ -2680,47 +2680,47 @@ pub fn infra_netns_argv() -> Option<Vec<String>> {
     ])
 }
 
-/// Descobre o IP de um MAC na rede de infra — pela tabela `neigh` (ARP) DENTRO do
-/// netns do holder (imediata, ao contrário da leasefile do udhcpd que só é escrita
-/// periodicamente). Usado para reportar o IP que o DHCP atribuiu a uma VM/cliente.
-/// `_net` mantido por compatibilidade da assinatura. `None` se o MAC ainda não
-/// apareceu na tabela (guest a arrancar).
+/// Discovers the IP of a MAC on the infra network — via the `neigh` (ARP) table INSIDE the
+/// holder's netns (immediate, unlike the udhcpd's leasefile that is only written
+/// periodically). Used to report the IP that DHCP assigned to a VM/client.
+/// `_net` kept for signature compatibility. `None` if the MAC hasn't yet
+/// appeared in the table (guest booting).
 pub fn dhcp_ip_for_mac(net: &str, mac: &str) -> Option<String> {
-    // O IP de uma VM é DETERMINÍSTICO do MAC: o servidor DHCP nativo
-    // (`dhcp_serve`) atribui `<prefix>.254.<10 + fnv32(mac)%240>`. Calcula-se
-    // directamente com a MESMA fórmula, em vez de ler `ip neigh` — que só mostra
-    // o IP depois de ARP recente e dava `<none>` a uma VM viva mas silenciosa
-    // (o caso real reportado). Este é o IP que a VM obtém do DHCP, disponível
-    // mal ela exista, e o certo para SSH.
+    // A VM's IP is DETERMINISTIC from the MAC: the native DHCP server
+    // (`dhcp_serve`) assigns `<prefix>.254.<10 + fnv32(mac)%240>`. It's computed
+    // directly with the SAME formula, instead of reading `ip neigh` — which only shows
+    // the IP after recent ARP and gave `<none>` for a live but silent VM
+    // (the real reported case). This is the IP the VM gets from DHCP, available
+    // as soon as it exists, and the right one for SSH.
     let (_bridge, prefix, _gw) = resolve_net(net).ok()?;
     let oct: Vec<u8> = prefix.split('.').filter_map(|x| x.parse().ok()).collect();
     if oct.len() != 2 {
         return None;
     }
-    // Mesmo formato de string que o `dhcp_serve` mete no `fnv32` (lowercase,
-    // separado por `:`) — senão o hash diverge e o IP não bate com o atribuído.
+    // Same string format that `dhcp_serve` puts into the `fnv32` (lowercase,
+    // `:`-separated) — otherwise the hash diverges and the IP doesn't match the assigned one.
     let macs = mac.to_lowercase();
     let host = 10 + (crate::fnv32(&macs) % 240) as u8;
     Some(format!("{}.{}.254.{host}", oct[0], oct[1]))
 }
 
-/// **Publica uma porta pelo ingress** (o bind do container): `add_hostfwd` no
-/// slirp único (host → tap0) + DNAT na chain `pre` (tap0 → container). `spec` é
-/// `hostPort:contPort[/tcp|udp]`. É AQUI que vivem as regras parametrizáveis do
-/// firewall do ingress (próximo incremento: allow/deny por porta/CIDR na mesma
-/// superfície).
+/// **Publishes a port through the ingress** (the container's bind): `add_hostfwd` on the
+/// single slirp (host → tap0) + DNAT on the `pre` chain (tap0 → container). `spec` is
+/// `hostPort:contPort[/tcp|udp]`. This is WHERE the ingress firewall's parameterizable
+/// rules live (next increment: allow/deny per port/CIDR on the same
+/// surface).
 pub fn publish_port(cip: &str, spec: &str) -> Result<()> {
     let (host_port, cont_port, proto) = crate::parse_publish(spec)?;
-    // host → tap0:host_port (o slirp único; guest_port == host_port).
+    // host → tap0:host_port (the single slirp; guest_port == host_port).
     crate::slirp_add_hostfwd(&slirp_sock_path(), &host_port, &host_port, &proto)?;
-    // tap0:host_port → container:cont_port (DNAT no netns de infra, via holder).
+    // tap0:host_port → container:cont_port (DNAT in the infra netns, via the holder).
     control_send(&format!("publish {proto} {host_port} {cip} {cont_port}"))
 }
 
-/// Como [`publish_port`], mas restringe o acesso à `host_port` a uma **allowlist**
-/// de CIDRs (firewall inbound): o resto é dropado antes do DNAT. `spec` é
-/// `hostPort:contPort[/proto]`; `cidrs` são validados no holder (`fw_src_ok`).
-/// Usado para expor a DB de uma app só a IPs autorizados.
+/// Like [`publish_port`], but restricts access to the `host_port` to an **allowlist**
+/// of CIDRs (inbound firewall): the rest is dropped before the DNAT. `spec` is
+/// `hostPort:contPort[/proto]`; `cidrs` are validated in the holder (`fw_src_ok`).
+/// Used to expose an app's DB only to authorized IPs.
 pub fn publish_port_allow(cip: &str, spec: &str, cidrs: &[&str]) -> Result<()> {
     let (host_port, cont_port, proto) = crate::parse_publish(spec)?;
     crate::slirp_add_hostfwd(&slirp_sock_path(), &host_port, &host_port, &proto)?;
@@ -2730,23 +2730,23 @@ pub fn publish_port_allow(cip: &str, spec: &str, cidrs: &[&str]) -> Result<()> {
     ))
 }
 
-/// Remove a publicação de uma `host_port`: tira o `add_hostfwd` do slirp e o DNAT
-/// da chain `pre`. Best-effort.
+/// Removes a `host_port`'s publication: takes the `add_hostfwd` out of the slirp and the DNAT
+/// out of the `pre` chain. Best-effort.
 pub fn unpublish_port(host_port: &str) {
     trace_unpublish("unpublish_port", host_port);
     let _ = slirp_remove_hostfwd(&slirp_sock_path(), host_port);
     let _ = control_send(&format!("unpublish {host_port}"));
 }
 
-/// Regista quem despublicou uma porta, quando `DELONIX_TRACE_UNPUBLISH` está
-/// definido (aponta para um ficheiro; senão vai para o stderr).
+/// Records who unpublished a port, when `DELONIX_TRACE_UNPUBLISH` is
+/// set (points to a file; otherwise goes to stderr).
 ///
-/// Não é debug esquecido no código: há um bug em aberto em que hostfwds de
-/// containers VIVOS desaparecem sem `stop`/`rm`, e a pergunta que o fecha é
-/// "quem os removeu?". Um binário de longa duração (holder, supervisor de
-/// `--restart`, log shim) continua a correr o código de quando NASCEU, por isso
-/// a resposta não se obtém a ler o repo — só instrumentando e reproduzindo.
-/// Custo zero quando a env var não está definida.
+/// It's not debug left in the code by accident: there's an open bug where hostfwds of
+/// LIVE containers disappear without `stop`/`rm`, and the question that closes it is
+/// "who removed them?". A long-running binary (holder, `--restart` supervisor,
+/// log shim) keeps running the code from when it was BORN, so
+/// the answer isn't obtained by reading the repo — only by instrumenting and reproducing.
+/// Zero cost when the env var isn't set.
 pub fn trace_unpublish(func: &str, host_port: &str) {
     let Ok(dest) = std::env::var("DELONIX_TRACE_UNPUBLISH") else {
         return;
@@ -2779,11 +2779,11 @@ pub fn trace_unpublish(func: &str, host_port: &str) {
     }
 }
 
-/// Reconcilia os `hostfwd` do slirp ÚNICO do ingress contra os ports REALMENTE em
-/// uso por containers vivos: remove as entradas órfãs (de containers já removidos,
-/// ou que morreram sem limpar) que de outro modo bloqueavam o re-uso da porta de
-/// host. `live_ports` = host_ports publicados por containers vivos. Parte do reaper
-/// #1 (port-leak). Devolve quantas removeu. Barato (1 query ao api-socket).
+/// Reconciles the SINGLE ingress slirp's `hostfwd`s against the ports ACTUALLY in
+/// use by live containers: removes the orphan entries (from containers already removed,
+/// or that died without cleaning up) that would otherwise block the reuse of the host
+/// port. `live_ports` = host_ports published by live containers. Part of reaper
+/// #1 (port-leak). Returns how many it removed. Cheap (1 query to the api-socket).
 pub fn reap_orphan_hostfwds(live_ports: &std::collections::HashSet<u32>) -> usize {
     let sock = slirp_sock_path();
     if !sock.exists() {
@@ -2794,7 +2794,7 @@ pub fn reap_orphan_hostfwds(live_ports: &std::collections::HashSet<u32>) -> usiz
         Err(_) => return 0,
     };
     let v: serde_json::Value = serde_json::from_str(&listed).unwrap_or(serde_json::Value::Null);
-    // A resposta vem como {"entries":[…]} ou {"return":{"entries":[…]}} conforme a versão.
+    // The response comes as {"entries":[…]} or {"return":{"entries":[…]}} depending on the version.
     let entries = v
         .get("return")
         .and_then(|r| r.get("entries"))
@@ -2817,14 +2817,14 @@ pub fn reap_orphan_hostfwds(live_ports: &std::collections::HashSet<u32>) -> usiz
     removed
 }
 
-/// Envia um comando JSON ao api-socket do slirp único e devolve a resposta.
+/// Sends a JSON command to the single slirp's api-socket and returns the response.
 fn slirp_api(sock: &Path, json: &str) -> Result<String> {
     use std::io::{Read, Write};
     use std::os::unix::net::UnixStream;
-    // Ponto de estrangulamento de TODOS os comandos ao slirp — inclusive os
-    // `remove_hostfwd` que o `reap_orphan_hostfwds` envia directamente, sem
-    // passar por `slirp_remove_hostfwd`. Instrumentar só as funções nomeadas
-    // deixava esse caminho invisível.
+    // Chokepoint for ALL commands to the slirp — including the
+    // `remove_hostfwd`s that `reap_orphan_hostfwds` sends directly, without
+    // going through `slirp_remove_hostfwd`. Instrumenting only the named functions
+    // left that path invisible.
     if !json.contains("list_hostfwd") {
         trace_unpublish("slirp_api", json);
     }
@@ -2833,14 +2833,14 @@ fn slirp_api(sock: &Path, json: &str) -> Result<String> {
         message: e.to_string(),
     })?;
     let _ = s.set_read_timeout(Some(std::time::Duration::from_secs(3)));
-    // O `\n` é OBRIGATÓRIO: o slirp4netns só PARSEIA o comando (e responde) ao ver
-    // uma newline OU o EOF do cliente. Como aqui o cliente fica a LER a resposta
-    // (`read_to_string`) sem fechar a escrita, sem o `\n` o slirp nunca parseava
-    // e o `list_hostfwd` voltava VAZIO ao fim do timeout — pelo que o
-    // `slirp_remove_hostfwd` não achava o `id` e NÃO removia nada. Efeito: a porta
-    // de um cluster/container apagado ficava presa no ingress (visto na 6443 de um
-    // `cluster delete`). O `add_hostfwd` safava-se por parsear no EOF (fire-and-
-    // forget), o que escondia o bug.
+    // The `\n` is MANDATORY: slirp4netns only PARSES the command (and responds) upon seeing
+    // a newline OR the client's EOF. Since here the client stays READING the response
+    // (`read_to_string`) without closing the write side, without the `\n` the slirp never parsed
+    // and `list_hostfwd` came back EMPTY at the end of the timeout — so
+    // `slirp_remove_hostfwd` didn't find the `id` and removed NOTHING. Effect: the port
+    // of a deleted cluster/container stayed stuck in the ingress (seen on the 6443 of a
+    // `cluster delete`). `add_hostfwd` got away with it by parsing on EOF (fire-and-
+    // forget), which hid the bug.
     let line = if json.ends_with('\n') {
         json.to_string()
     } else {
@@ -2855,20 +2855,20 @@ fn slirp_api(sock: &Path, json: &str) -> Result<String> {
     Ok(resp)
 }
 
-/// Remove um `hostfwd` de UM slirp (o único do ingress, ou o de um container no
-/// caminho slirp-por-container): descobre o `id` da entrada com aquela
-/// `host_port` (via `list_hostfwd`) e remove-o.
+/// Removes a `hostfwd` from ONE slirp (the single ingress one, or a container's on the
+/// slirp-per-container path): finds the `id` of the entry with that
+/// `host_port` (via `list_hostfwd`) and removes it.
 ///
-/// `pub` porque o `container update` precisa de despublicar a quente uma porta
-/// do slirp PRÓPRIO de um container (socket `delonix-slirp-<pid>.sock`), e não
-/// só do slirp único do ingress — que é o que [`unpublish_port`] assume.
-/// As entradas de um `list_hostfwd`, tolerante à FORMA da resposta.
+/// `pub` because `container update` needs to hot-unpublish a port
+/// of a container's OWN slirp (socket `delonix-slirp-<pid>.sock`), and not
+/// just the single ingress slirp — which is what [`unpublish_port`] assumes.
+/// The entries of a `list_hostfwd`, tolerant of the response's SHAPE.
 ///
-/// O slirp4netns 1.2.1 responde `{"entries":[…]}` — sem o wrapper `return` que
-/// envolve outras respostas (`remove_hostfwd` dá `{"return":{}}`). O parser
-/// antigo procurava SÓ `return.entries` e por isso não achava nada e nunca
-/// removia — a outra metade do bug do port-leak (a 1.ª era o `\n` em falta no
-/// `slirp_api`). Aceita as duas formas para não voltar a partir entre versões.
+/// slirp4netns 1.2.1 responds `{"entries":[…]}` — without the `return` wrapper that
+/// envelops other responses (`remove_hostfwd` gives `{"return":{}}`). The old
+/// parser looked ONLY at `return.entries` and so found nothing and never
+/// removed — the other half of the port-leak bug (the 1st was the missing `\n` in
+/// `slirp_api`). Accepts both shapes so as not to break again across versions.
 fn hostfwd_entries(v: &serde_json::Value) -> Option<&Vec<serde_json::Value>> {
     v.get("entries")
         .or_else(|| v.get("return").and_then(|r| r.get("entries")))
@@ -2896,10 +2896,10 @@ pub fn slirp_remove_hostfwd(sock: &Path, host_port: &str) -> Result<()> {
     Ok(())
 }
 
-/// O prefixo `argv` para CORRER um processo dentro do netns de um container gerido
-/// pelo holder: entra no userns+mountns do holder (`--preserve-credentials` evita
-/// o `setgroups` error) e faz `ip netns exec <netns>`. O runtime prefixa isto ao
-/// comando do container. `None` se a infra não estiver de pé.
+/// The `argv` prefix to RUN a process inside the netns of a container managed
+/// by the holder: enters the holder's userns+mountns (`--preserve-credentials` avoids
+/// the `setgroups` error) and does `ip netns exec <netns>`. The runtime prefixes this to the
+/// container's command. `None` if the infra isn't up.
 pub fn join_argv(id: &str) -> Option<Vec<String>> {
     let holder = read_pid(&holder_pid_path()).filter(|&p| pid_alive(p))?;
     let netns = sanitize(id);
@@ -2919,10 +2919,10 @@ pub fn join_argv(id: &str) -> Option<Vec<String>> {
     ])
 }
 
-/// Bytes rx/tx do `eth0` de um container rootless, lidos DE DENTRO do seu netns
-/// (via `join_argv`). Do ponto de vista do container, `rx`=download e `tx`=upload
-/// (sem a troca do modelo root, onde se lê o veth do lado do host). Devolve
-/// `(download, upload)` ou `None` se a infra/container não estiver de pé.
+/// The `eth0` rx/tx bytes of a rootless container, read FROM INSIDE its netns
+/// (via `join_argv`). From the container's point of view, `rx`=download and `tx`=upload
+/// (without the swap of the root model, where the host-side veth is read). Returns
+/// `(download, upload)` or `None` if the infra/container isn't up.
 pub fn container_net_bytes(id: &str) -> Option<(u64, u64)> {
     let prefix = join_argv(id)?;
     let read = |stat: &str| -> Option<u64> {
@@ -2938,27 +2938,27 @@ pub fn container_net_bytes(id: &str) -> Option<(u64, u64)> {
     Some((read("rx_bytes")?, read("tx_bytes")?))
 }
 
-/// Envia um comando ao socket de controlo do holder e espera `ok`. Tenta
-/// brevemente até o socket existir (o holder cria-o ao arrancar).
+/// Sends a command to the holder's control socket and waits for `ok`. Retries
+/// briefly until the socket exists (the holder creates it on startup).
 fn control_send(cmd: &str) -> Result<()> {
-    // Só os comandos que DESFAZEM estado — o trace serve para responder a "quem
-    // desligou isto?", e um log de todos os attach/publish afogaria a resposta.
+    // Only the commands that UNDO state — the trace serves to answer "who
+    // turned this off?", and a log of every attach/publish would drown out the answer.
     if cmd.starts_with("unpublish") || cmd.starts_with("detach") || cmd.starts_with("unfirewall") {
         trace_unpublish("control_send", cmd);
     }
     control_query(cmd).map(|_| ())
 }
 
-/// Como `control_send`, mas devolve o CORPO da resposta após `ok ` (vazio se só
-/// `ok`). Usado pelo `cni-add`, cuja resposta carrega o IP atribuído pelo IPAM.
+/// Like `control_send`, but returns the BODY of the response after `ok ` (empty if just
+/// `ok`). Used by `cni-add`, whose response carries the IP assigned by the IPAM.
 fn control_query(cmd: &str) -> Result<String> {
     use std::io::{Read, Write};
     use std::os::unix::net::UnixStream;
-    // Fast-fail se o holder NÃO estiver vivo: sem ele não há ninguém a responder, e
-    // girar 50×40ms (~2s) à espera de um socket que não vem é puro desperdício. Os
-    // caminhos de SETUP chamam `ensure_up()` antes (holder vivo → passa); os de
-    // TEARDOWN com o holder em baixo saem aqui. O retry abaixo continua a cobrir a
-    // corrida de arranque legítima (holder JÁ vivo, socket ainda a ligar).
+    // Fast-fail if the holder is NOT alive: without it there's no one to respond, and
+    // spinning 50×40ms (~2s) waiting for a socket that won't come is pure waste. The
+    // SETUP paths call `ensure_up()` first (holder alive → passes); the
+    // TEARDOWN ones with the holder down exit here. The retry below still covers the
+    // legitimate startup race (holder ALREADY alive, socket still coming up).
     if status().holder_pid.is_none() {
         return Err(Error::Runtime {
             context: "control socket",
@@ -3002,8 +3002,8 @@ fn control_query(cmd: &str) -> Result<String> {
     })
 }
 
-/// Escrita atómica do ficheiro de estado (tmp + rename) para o pai nunca ler um
-/// valor parcial.
+/// Atomic write of the state file (tmp + rename) so the parent never reads a
+/// partial value.
 fn write_status(s: &str) {
     let _ = std::fs::create_dir_all(ingress_dir());
     let tmp = ingress_dir().join(".status.tmp");
@@ -3012,11 +3012,11 @@ fn write_status(s: &str) {
     }
 }
 
-/// Configura o netns de infra (corre dentro do holder). A receita provada: lo up
-/// → bridge `delonix0` 10.200.0.1/16 up → `ip_forward=1` → tmpfs em `/run/netns`
-/// (para a Fase 3 criar netns de container) → tabela `nft` de ingress.
+/// Configures the infra netns (runs inside the holder). The proven recipe: lo up
+/// → bridge `delonix0` 10.200.0.1/16 up → `ip_forward=1` → tmpfs at `/run/netns`
+/// (for Phase 3 to create container netns) → ingress `nft` table.
 fn setup_infra_netns() -> Result<()> {
-    // mounts do holder ficam privados (não vazam para o host).
+    // the holder's mounts become private (don't leak to the host).
     run_ok("mount", &["--make-rprivate", "/"]);
     run("ip", &["link", "set", "lo", "up"])?;
     run("ip", &["link", "add", INFRA_BRIDGE, "type", "bridge"])?;
@@ -3026,21 +3026,21 @@ fn setup_infra_netns() -> Result<()> {
         context: "ip_forward",
         message: e.to_string(),
     })?;
-    // /run/netns para `ip netns` dos containers (Fase 3); best-effort.
+    // /run/netns for the containers' `ip netns` (Phase 3); best-effort.
     run_ok("mount", &["-t", "tmpfs", "none", "/run"]);
     let _ = std::fs::create_dir_all("/run/netns");
     apply_nft_stdin(&ingress_table_ruleset())?;
-    // Proteção DDoS L4 por omissão (req #5): rate-limit + ct-count POR-ORIGEM.
-    // Limites conservadores (tráfego legítimo não é afetado), best-effort e com
-    // pré-flight `nft -c` (degrada em kernels sem `meter`). Configurável via API.
+    // L4 DDoS protection by default (req #5): PER-SOURCE rate-limit + ct-count.
+    // Conservative limits (legitimate traffic is not affected), best-effort and with
+    // `nft -c` pre-flight (degrades on kernels without `meter`). Configurable via API.
     let _ = do_l4guard(50, 200);
-    // DHCP da rede default do ingress (delonix0).
+    // DHCP for the default ingress network (delonix0).
     start_dhcp(INFRA_BRIDGE, INFRA_PREFIX);
     Ok(())
 }
 
-/// Aplica um *ruleset* `nft` por stdin (`nft -f -`) — variante local ao holder
-/// (a do `lib.rs` é privada ao módulo).
+/// Applies an `nft` *ruleset* via stdin (`nft -f -`) — variant local to the holder
+/// (the one in `lib.rs` is private to that module).
 fn apply_nft_stdin(ruleset: &str) -> Result<()> {
     use std::io::Write;
     let mut child = Command::new("nft")
@@ -3074,16 +3074,16 @@ fn apply_nft_stdin(ruleset: &str) -> Result<()> {
     Ok(())
 }
 
-/// Re-exporta o IP do tap0 do slirp (lado infra) — o destino dos `add_hostfwd`.
+/// Re-exports the slirp's tap0 IP (infra side) — the destination of the `add_hostfwd`s.
 pub const INFRA_SLIRP_IP: &str = SLIRP_IP;
 
-// ---- DNS interno do ingress (responder próprio; o dnsmasq não corre rootless) ----
+// ---- ingress internal DNS (own responder; dnsmasq doesn't run rootless) ----
 
-/// **Servidor DNS do ingress** — corre numa thread do holder, escuta UDP `:53` em
-/// TODAS as bridges (`0.0.0.0` no netns de infra → responde em cada gateway).
-/// Resolve nomes de **containers e VMs** do ingress (→ IPv4); reencaminha o resto
-/// para o upstream (DNS do slirp). É o equivalente funcional do dnsmasq (que não
-/// funciona rootless).
+/// **Ingress DNS server** — runs in a holder thread, listens on UDP `:53` on
+/// ALL bridges (`0.0.0.0` in the infra netns → responds on each gateway).
+/// Resolves names of ingress **containers and VMs** (→ IPv4); forwards the rest
+/// to the upstream (the slirp's DNS). It's the functional equivalent of dnsmasq (which doesn't
+/// work rootless).
 fn dns_server_main() {
     let sock = match std::net::UdpSocket::bind("0.0.0.0:53") {
         Ok(s) => s,
@@ -3103,10 +3103,10 @@ fn dns_server_main() {
     }
 }
 
-/// Resposta a uma query DNS: se for `A` e o nome for de um container/VM do ingress,
-/// responde com o IP; senão reencaminha para o upstream.
+/// Response to a DNS query: if it's `A` and the name is of an ingress container/VM,
+/// responds with the IP; otherwise forwards to the upstream.
 fn handle_dns(q: &[u8]) -> Option<Vec<u8>> {
-    // parse da 1ª questão (offset 12): labels até 0x00, depois QTYPE+QCLASS.
+    // parse the 1st question (offset 12): labels until 0x00, then QTYPE+QCLASS.
     let mut i = 12usize;
     let mut name = String::new();
     while i < q.len() {
@@ -3128,17 +3128,17 @@ fn handle_dns(q: &[u8]) -> Option<Vec<u8>> {
         return forward_dns(q);
     }
     let qtype = u16::from_be_bytes([q[i], q[i + 1]]);
-    let qend = i + 4; // fim da questão (QTYPE+QCLASS)
+    let qend = i + 4; // end of the question (QTYPE+QCLASS)
     if qtype == 1 {
         if let Some(ip) = dns_resolve(&name) {
             let mut r = Vec::with_capacity(qend + 16);
-            r.extend_from_slice(&q[0..2]); // ID original
-            r.extend_from_slice(&[0x81, 0x80]); // flags: resposta + RA
+            r.extend_from_slice(&q[0..2]); // original ID
+            r.extend_from_slice(&[0x81, 0x80]); // flags: response + RA
             r.extend_from_slice(&[0x00, 0x01]); // QDCOUNT=1
             r.extend_from_slice(&[0x00, 0x01]); // ANCOUNT=1
             r.extend_from_slice(&[0x00, 0x00, 0x00, 0x00]); // NSCOUNT=0, ARCOUNT=0
-            r.extend_from_slice(&q[12..qend]); // questão original
-            r.extend_from_slice(&[0xc0, 0x0c]); // ponteiro para o nome (offset 12)
+            r.extend_from_slice(&q[12..qend]); // original question
+            r.extend_from_slice(&[0xc0, 0x0c]); // pointer to the name (offset 12)
             r.extend_from_slice(&[0x00, 0x01, 0x00, 0x01]); // TYPE A, CLASS IN
             r.extend_from_slice(&[0x00, 0x00, 0x00, 0x1e]); // TTL 30s
             r.extend_from_slice(&[0x00, 0x04]); // RDLENGTH 4
@@ -3146,15 +3146,15 @@ fn handle_dns(q: &[u8]) -> Option<Vec<u8>> {
             return Some(r);
         }
     }
-    // Nome externo: reencaminha e, se estiver numa allowlist FQDN, aprende os
-    // A-records da resposta para o set nft do egress (antes de a devolver).
+    // External name: forwards and, if it's on an FQDN allowlist, learns the
+    // response's A-records into the egress nft set (before returning it).
     let resp = forward_dns(q)?;
     snoop_fqdn(&name, &resp);
     Some(resp)
 }
 
-/// Reencaminha a query crua para o upstream (DNS do slirp; fallback 1.1.1.1) e
-/// devolve a resposta.
+/// Forwards the raw query to the upstream (the slirp's DNS; fallback 1.1.1.1) and
+/// returns the response.
 fn forward_dns(q: &[u8]) -> Option<Vec<u8>> {
     let sock = std::net::UdpSocket::bind("0.0.0.0:0").ok()?;
     sock.set_read_timeout(Some(std::time::Duration::from_secs(3)))
@@ -3170,17 +3170,17 @@ fn forward_dns(q: &[u8]) -> Option<Vec<u8>> {
     None
 }
 
-/// Resolve um nome do ingress (container OU VM) → IPv4. Aceita `nome` e
-/// `nome.delonix.io`. Lê os records dos containers e as metas das VMs.
-/// Separa um nome DNS interno em `(container, namespace_opcional)`. Aceita os
-/// esquemas: `<nome>`, `<nome>.delonix.io` (legado, qualquer namespace) e
-/// `<nome>.<namespace>.delonix.internal` (com verificação de namespace). PURA
-/// (testável). Devolve `None` se ficar vazio.
+/// Resolves an ingress name (container OR VM) → IPv4. Accepts `name` and
+/// `name.delonix.io`. Reads the containers' records and the VMs' metas.
+/// Splits an internal DNS name into `(container, optional_namespace)`. Accepts the
+/// schemes: `<name>`, `<name>.delonix.io` (legacy, any namespace) and
+/// `<name>.<namespace>.delonix.internal` (with namespace verification). PURE
+/// (testable). Returns `None` if it ends up empty.
 pub fn parse_internal_name(name: &str) -> Option<(String, Option<String>)> {
     let n = name.trim_end_matches('.').to_lowercase();
-    // SÓ `.delonix.internal` faz matching por namespace (`<nome>.<namespace>`) — um
-    // domínio EXTERNO `foo.com` NÃO pode ser sequestrado por um container 'foo' na
-    // namespace 'com'. Os nomes de container não têm `.`, logo o último segmento é a
+    // ONLY `.delonix.internal` does namespace matching (`<name>.<namespace>`) — an
+    // EXTERNAL domain `foo.com` CANNOT be hijacked by a container 'foo' in the
+    // 'com' namespace. Container names have no `.`, so the last segment is the
     // namespace.
     if let Some(core) = n.strip_suffix(".delonix.internal") {
         if core.is_empty() {
@@ -3193,9 +3193,9 @@ pub fn parse_internal_name(name: &str) -> Option<(String, Option<String>)> {
             _ => Some((core.to_string(), None)),
         };
     }
-    // `.delonix.io` (legado) e nomes SIMPLES: casam o nome INTEIRO, sem dividir em
-    // namespace (preserva o comportamento antigo — um `foo.com` sem container 'foo.com'
-    // não casa e reencaminha).
+    // `.delonix.io` (legacy) and SIMPLE names: match the WHOLE name, without splitting into
+    // namespace (preserves the old behavior — a `foo.com` with no container 'foo.com'
+    // doesn't match and forwards).
     let core = n.strip_suffix(".delonix.io").unwrap_or(&n);
     if core.is_empty() {
         return None;
@@ -3205,7 +3205,7 @@ pub fn parse_internal_name(name: &str) -> Option<(String, Option<String>)> {
 
 fn dns_resolve(name: &str) -> Option<[u8; 4]> {
     let (cname, want_ns) = parse_internal_name(name)?;
-    let n = cname; // nome do container a casar
+    let n = cname; // container name to match
                    // containers: <base>/containers/*.json (name + ip [+ namespace])
     if let Ok(rd) = std::fs::read_dir(base_root().join("containers")) {
         for e in rd.flatten() {
@@ -3215,8 +3215,8 @@ fn dns_resolve(name: &str) -> Option<[u8; 4]> {
                 continue;
             };
             if v["name"].as_str().map(|s| s.to_lowercase()).as_deref() == Some(n.as_str()) {
-                // Esquema com namespace (`.delonix.internal`): só resolve se a
-                // namespace do container coincidir (isolamento também no DNS).
+                // Scheme with namespace (`.delonix.internal`): only resolves if the
+                // container's namespace matches (isolation also in DNS).
                 if let Some(want) = &want_ns {
                     let cns = v["namespace"].as_str().unwrap_or("default");
                     if cns != want {
@@ -3261,20 +3261,20 @@ fn parse_v4(s: &str) -> Option<[u8; 4]> {
     }
 }
 
-// ---- IPv6 SLAAC: emissor de Router Advertisements (sem radvd, que não há) ----
+// ---- IPv6 SLAAC: Router Advertisements emitter (no radvd, which isn't there) ----
 
-/// **Emissor de Router Advertisements** — corre numa thread do holder; a cada ~8s
-/// envia um RA (ICMPv6 tipo 134) para `ff02::1` em CADA bridge do ingress, com o
-/// prefixo ULA `/64` da rede (flags A+L → SLAAC). VMs e containers auto-configuram
-/// um IPv6 a partir do prefixo. Substitui o radvd (inexistente/rootless-hostil).
+/// **Router Advertisements emitter** — runs in a holder thread; every ~8s
+/// sends an RA (ICMPv6 type 134) to `ff02::1` on EACH ingress bridge, with the
+/// network's ULA `/64` prefix (flags A+L → SLAAC). VMs and containers auto-configure
+/// an IPv6 from the prefix. Replaces radvd (nonexistent/rootless-hostile).
 fn ra_sender_main() {
-    // SAFETY: cria um socket raw ICMPv6 (CAP_NET_RAW no netns de infra).
+    // SAFETY: creates a raw ICMPv6 socket (CAP_NET_RAW in the infra netns).
     let fd = unsafe { libc::socket(libc::AF_INET6, libc::SOCK_RAW, libc::IPPROTO_ICMPV6) };
     if fd < 0 {
         return;
     }
-    let hops: libc::c_int = 255; // RA exige hop limit 255
-                                 // SAFETY: setsockopt num fd válido com um inteiro.
+    let hops: libc::c_int = 255; // RA requires hop limit 255
+                                 // SAFETY: setsockopt on a valid fd with an integer.
     unsafe {
         libc::setsockopt(
             fd,
@@ -3290,12 +3290,12 @@ fn ra_sender_main() {
                 Ok(c) => c,
                 Err(_) => continue,
             };
-            // SAFETY: if_nametoindex com um nome C válido.
+            // SAFETY: if_nametoindex with a valid C name.
             let idx = unsafe { libc::if_nametoindex(cname.as_ptr()) };
             if idx == 0 {
                 continue;
             }
-            // SAFETY: define a interface de saída do multicast.
+            // SAFETY: sets the multicast output interface.
             unsafe {
                 libc::setsockopt(
                     fd,
@@ -3306,8 +3306,8 @@ fn ra_sender_main() {
                 );
             }
             let pkt = build_ra(&prefix);
-            // sockaddr_in6 para ff02::1 (all-nodes).
-            // SAFETY: zera e preenche um sockaddr_in6 válido; sendto com tamanhos certos.
+            // sockaddr_in6 for ff02::1 (all-nodes).
+            // SAFETY: zeroes and fills a valid sockaddr_in6; sendto with correct sizes.
             unsafe {
                 let mut dst: libc::sockaddr_in6 = std::mem::zeroed();
                 dst.sin6_family = libc::AF_INET6 as u16;
@@ -3327,8 +3327,8 @@ fn ra_sender_main() {
     }
 }
 
-/// Bridges do ingress + o seu prefixo `/64` ULA (16 bytes, host a zero), lidas da
-/// tabela de endereços do netns de infra.
+/// Ingress bridges + their ULA `/64` prefix (16 bytes, host zeroed), read from the
+/// infra netns's address table.
 fn ra_bridges() -> Vec<(String, [u8; 16])> {
     let mut out = Vec::new();
     let links = crate::capture("ip", &["-o", "link", "show", "type", "bridge"]).unwrap_or_default();
@@ -3349,7 +3349,7 @@ fn ra_bridges() -> Vec<(String, [u8; 16])> {
                 if let Ok(v6) = ipstr.parse::<std::net::Ipv6Addr>() {
                     let mut b = v6.octets();
                     for x in b.iter_mut().skip(8) {
-                        *x = 0; // só o /64
+                        *x = 0; // only the /64
                     }
                     out.push((name.to_string(), b));
                     break;
@@ -3360,16 +3360,16 @@ fn ra_bridges() -> Vec<(String, [u8; 16])> {
     out
 }
 
-/// Constrói um Router Advertisement (ICMPv6 134) com uma opção Prefix Information
-/// (A+L → SLAAC on-link). O checksum ICMPv6 é preenchido pelo kernel (socket raw).
+/// Builds a Router Advertisement (ICMPv6 134) with a Prefix Information option
+/// (A+L → SLAAC on-link). The ICMPv6 checksum is filled in by the kernel (raw socket).
 fn build_ra(prefix: &[u8; 16]) -> Vec<u8> {
     let mut p = vec![134u8, 0, 0, 0]; // type=RA, code=0, checksum=0 (kernel)
     p.push(64); // cur hop limit
-    p.push(0); // flags M/O = 0 (SLAAC, sem DHCPv6)
+    p.push(0); // flags M/O = 0 (SLAAC, no DHCPv6)
     p.extend_from_slice(&1800u16.to_be_bytes()); // router lifetime (default router)
     p.extend_from_slice(&0u32.to_be_bytes()); // reachable time
     p.extend_from_slice(&0u32.to_be_bytes()); // retrans timer
-                                              // opção Prefix Information (type 3, len 4×8=32 bytes)
+                                              // Prefix Information option (type 3, len 4×8=32 bytes)
     p.push(3);
     p.push(4);
     p.push(64); // prefix length
@@ -3377,18 +3377,18 @@ fn build_ra(prefix: &[u8; 16]) -> Vec<u8> {
     p.extend_from_slice(&86400u32.to_be_bytes()); // valid lifetime
     p.extend_from_slice(&14400u32.to_be_bytes()); // preferred lifetime
     p.extend_from_slice(&0u32.to_be_bytes()); // reserved
-    p.extend_from_slice(prefix); // 16 bytes do prefixo
+    p.extend_from_slice(prefix); // 16 bytes of the prefix
     p
 }
 
-/// IPv6 ULA determinístico (estático) de um container a partir do seu IPv4. Para
-/// mostrar na UI/CLI.
+/// Deterministic (static) IPv6 ULA of a container from its IPv4. For
+/// display in the UI/CLI.
 pub fn container_ip6(ip4: &str) -> Option<String> {
     v6_of(ip4)
 }
 
-/// IPv6 de um MAC pela tabela `neigh` v6 do netns de infra (via nsenter, do host).
-/// Para mostrar o IPv6 (SLAAC) de uma VM. `None` se ainda não apareceu.
+/// IPv6 of a MAC via the infra netns's v6 `neigh` table (via nsenter, from the host).
+/// To display a VM's (SLAAC) IPv6. `None` if it hasn't appeared yet.
 pub fn dhcp_ip6_for_mac(_net: &str, mac: &str) -> Option<String> {
     let holder = read_pid(&holder_pid_path()).filter(|&p| pid_alive(p))?;
     let mac = mac.to_lowercase();
@@ -3419,7 +3419,7 @@ pub fn dhcp_ip6_for_mac(_net: &str, mac: &str) -> Option<String> {
     None
 }
 
-/// IP de um MAC pela tabela `neigh` — corre DENTRO do holder (já no netns), sem nsenter.
+/// IP of a MAC via the `neigh` table — runs INSIDE the holder (already in the netns), no nsenter.
 fn neigh_ip_local(mac: &str) -> Option<String> {
     let mac = mac.to_lowercase();
     let out = crate::capture("ip", &["-o", "neigh", "show"]).ok()?;
@@ -3437,17 +3437,17 @@ fn neigh_ip_local(mac: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    /// O IP calculado por `dhcp_ip_for_mac` TEM de bater com o que o
-    /// `dhcp_serve` atribui — mesma fórmula. Se um dos dois mudar sem o outro,
-    /// as VMs mostram um IP a que não respondem. Trava a fórmula partilhada.
+    /// The IP computed by `dhcp_ip_for_mac` MUST match what
+    /// `dhcp_serve` assigns — same formula. If one of the two changes without the other,
+    /// VMs show an IP they don't respond to. Locks the shared formula.
     #[test]
     fn dhcp_ip_matches_server_formula() {
         let mac = "52:54:00:ab:cd:ef";
-        // A fórmula do servidor (dhcp_serve): host = 10 + fnv32(mac)%240.
+        // The server's formula (dhcp_serve): host = 10 + fnv32(mac)%240.
         let host = 10 + (crate::fnv32(mac) % 240) as u8;
         let expected = format!("10.200.254.{host}");
-        // A default (delonix0/10.200) resolve sem holder — usa o prefixo fixo.
-        // (resolve_net("ingress") devolve INFRA_PREFIX sem tocar em disco.)
+        // The default (delonix0/10.200) resolves without a holder — uses the fixed prefix.
+        // (resolve_net("ingress") returns INFRA_PREFIX without touching disk.)
         let (_b, prefix, _g) = super::resolve_net("ingress").unwrap();
         let oct: Vec<u8> = prefix.split('.').filter_map(|x| x.parse().ok()).collect();
         let got = format!("{}.{}.254.{host}", oct[0], oct[1]);
@@ -3457,8 +3457,8 @@ mod tests {
 
     #[test]
     fn parse_a_records_extracts_ipv4_answers() {
-        // Resposta DNS para `example.com` com dois A-records (name compression no
-        // answer via ponteiro 0xc00c), mais um AAAA que deve ser ignorado.
+        // DNS response for `example.com` with two A-records (name compression in the
+        // answer via 0xc00c pointer), plus an AAAA that should be ignored.
         let resp: Vec<u8> = vec![
             0x12, 0x34, 0x81, 0x80, 0x00, 0x01, 0x00, 0x03, 0x00, 0x00, 0x00,
             0x00, // header: QD=1 AN=3
@@ -3478,9 +3478,9 @@ mod tests {
 
     #[test]
     fn hostfwd_entries_aceita_as_duas_formas() {
-        // slirp4netns 1.2.1: {"entries":[…]} (sem wrapper). Outras versões podem
-        // envolver em {"return":{"entries":[…]}}. Ambas têm de funcionar, senão o
-        // remove nunca acha o id → porta presa.
+        // slirp4netns 1.2.1: {"entries":[…]} (no wrapper). Other versions may
+        // wrap it in {"return":{"entries":[…]}}. Both have to work, otherwise the
+        // remove never finds the id → stuck port.
         let a: serde_json::Value =
             serde_json::from_str(r#"{"entries":[{"id":1,"host_port":6443}]}"#).unwrap();
         let b: serde_json::Value =
@@ -3493,10 +3493,10 @@ mod tests {
 
     use super::*;
 
-    /// Dir temporário único (sem depender do crate `tempfile`) — o teste corre
-    /// SEM privilégio: só mexe em ficheiros-marcador, nunca em namespaces.
+    /// Unique temporary dir (without depending on the `tempfile` crate) — the test runs
+    /// WITHOUT privilege: it only touches marker files, never namespaces.
     fn tmp_refs_dir(tag: &str) -> PathBuf {
-        // SAFETY: getpid()/gettid() não têm pré-condições.
+        // SAFETY: getpid()/gettid() have no preconditions.
         let uniq = format!(
             "delonix-refs-{tag}-{}-{}",
             unsafe { libc::getpid() },
@@ -3510,17 +3510,17 @@ mod tests {
         dir
     }
 
-    /// STRESS do ref-count (modelo de conjunto): create→destroy de N recursos ao
-    /// nível dos marcadores da infra, sem privilégio. Assevera que o "refcount"
-    /// (cardinalidade do conjunto) volta SEMPRE a 0 e que o reaper determinístico
-    /// apanha os órfãos deixados por mortes abruptas, preservando os vivos.
+    /// STRESS test of the ref-count (set model): create→destroy of N resources at
+    /// the level of the infra markers, without privilege. Asserts that the "refcount"
+    /// (set cardinality) ALWAYS returns to 0 and that the deterministic reaper
+    /// catches the orphans left by abrupt deaths, preserving the live ones.
     #[test]
     fn stress_refcount_volta_a_zero_e_reaper_apanha_orfaos() {
         use std::collections::HashSet;
         const N: usize = 500;
         let dir = tmp_refs_dir("stress");
 
-        // 1) Ciclo balanceado: cada id atacha e destaca — refcount volta a 0.
+        // 1) Balanced cycle: each id attaches and detaches — refcount returns to 0.
         for i in 0..N {
             ref_add_in(&dir, &format!("c{i}"));
         }
@@ -3530,18 +3530,18 @@ mod tests {
         }
         assert_eq!(refs_in(&dir).len(), 0, "N detaches balanceados → 0");
 
-        // 2) Idempotência: atachar/destacar a dobrar (stop+rm do mesmo id) não
-        //    desalinha o contador nem derruba a infra cedo demais.
+        // 2) Idempotency: attaching/detaching double (stop+rm of the same id) doesn't
+        //    misalign the counter nor tear down the infra too early.
         ref_add_in(&dir, "x");
         ref_add_in(&dir, "x");
         assert_eq!(refs_in(&dir).len(), 1, "atachar 2x o mesmo id conta 1");
         ref_remove_in(&dir, "x");
-        ref_remove_in(&dir, "x"); // 2.º detach é no-op
+        ref_remove_in(&dir, "x"); // 2nd detach is a no-op
         assert_eq!(refs_in(&dir).len(), 0, "detach idempotente");
 
-        // 3) Mortes abruptas: N atacham e NENHUM destaca (o `pid` foi a None sem
-        //    passar por `stop`/`rm`). O reaper cruza com os vivos e liberta só os
-        //    órfãos. `alive` e o pod CRI `cri-pod1` têm de sobreviver.
+        // 3) Abrupt deaths: N attach and NONE detaches (the `pid` went to None without
+        //    going through `stop`/`rm`). The reaper crosses with the live ones and frees only the
+        //    orphans. `alive` and the CRI pod `cri-pod1` have to survive.
         for i in 0..N {
             ref_add_in(&dir, &format!("dead{i}"));
         }
@@ -3560,8 +3560,8 @@ mod tests {
         assert!(remaining.contains("alive"), "container vivo preservado");
         assert!(remaining.contains("cri-pod1"), "pod CRI vivo preservado");
 
-        // 4) Round-trip do id via hex do marcador (ids longos/com `-` não colidem
-        //    nem se truncam — o reaper precisa do id EXACTO para cruzar).
+        // 4) Round-trip of the id via the marker's hex (long ids/with `-` don't collide
+        //    nor get truncated — the reaper needs the EXACT id to cross).
         let long = "cri-9f8e7d6c5b4a39281706abcdef0123456789";
         ref_add_in(&dir, long);
         assert!(
@@ -3585,10 +3585,10 @@ mod tests {
     #[test]
     fn vh_name_is_short_and_deterministic() {
         let a = vh_name("0123456789ab");
-        assert_eq!(a, vh_name("0123456789ab")); // determinístico
+        assert_eq!(a, vh_name("0123456789ab")); // deterministic
         assert!(a.starts_with("vh"));
         assert!(a.len() <= 15, "IFNAMSIZ: {a}"); // 'vh' + 8 hex = 10
-        assert_ne!(a, vh_name("ffffffffffff")); // ids diferentes → nomes diferentes
+        assert_ne!(a, vh_name("ffffffffffff")); // different ids → different names
     }
 
     #[test]
@@ -3598,13 +3598,13 @@ mod tests {
             policy: policy.map(String::from),
             hosts: hosts.iter().map(|s| s.to_string()).collect(),
         };
-        // allow, sem hosts → nenhuma regra (default-allow).
+        // allow, no hosts → no rules (default-allow).
         assert!(super::egress_specs("dlx1", &st(None, &[])).is_empty());
-        // deny, sem hosts → um só drop.
+        // deny, no hosts → a single drop.
         let d = super::egress_specs("dlx1", &st(Some("deny"), &[]));
         assert_eq!(d.len(), 1);
         assert_eq!(d[0].last().unwrap(), "drop");
-        // allowlist + host COMPÕEM: 2xDNS + 1 CIDR válido + @set + drop (CIDR mau saltado).
+        // allowlist + host COMPOSE: 2xDNS + 1 valid CIDR + @set + drop (bad CIDR skipped).
         let a = super::egress_specs(
             "dlx1",
             &st(Some("allowlist:1.1.1.0/24,lixo;rm"), &["github.com"]),
@@ -3616,7 +3616,7 @@ mod tests {
             "a regra @set do FQDN está presente"
         );
         assert_eq!(a[4].last().unwrap(), "drop");
-        // só host (sem política CIDR) → 2xDNS + @set + drop.
+        // host only (no CIDR policy) → 2xDNS + @set + drop.
         let h = super::egress_specs("dlx1", &st(None, &["example.com"]));
         assert_eq!(h.len(), 4);
         assert!(h[2].iter().any(|x| x.starts_with("@dlxfq")));
@@ -3624,17 +3624,17 @@ mod tests {
 
     #[test]
     fn sanitize_strips_unsafe_and_caps_length() {
-        assert_eq!(sanitize("abc; rm -rf /"), "abcrm-rf"); // sem espaços/`;`/`/`
+        assert_eq!(sanitize("abc; rm -rf /"), "abcrm-rf"); // no spaces/`;`/`/`
         assert_eq!(sanitize("0123456789abcdef").len(), 12); // <= 12
-        assert_eq!(sanitize("web_1-x"), "web_1-x"); // alnum/_/- preservados
+        assert_eq!(sanitize("web_1-x"), "web_1-x"); // alnum/_/- preserved
     }
 
     #[test]
     fn hex_roundtrip() {
         let data = br#"{"enabled":true}"#;
         assert_eq!(hex_decode(&hex_encode(data)).unwrap(), data);
-        assert!(hex_decode("abc").is_none()); // ímpar
-        assert!(hex_decode("zz").is_none()); // não-hex
+        assert!(hex_decode("abc").is_none()); // odd
+        assert!(hex_decode("zz").is_none()); // non-hex
     }
 
     #[test]
@@ -3664,18 +3664,18 @@ mod tests {
             namespace: "default".into(),
         };
         let body = fw_chain_body("10.200.0.5", &fw);
-        // regra in: daddr==ip, peer saddr==src, tcp dport 8080 accept
+        // in rule: daddr==ip, peer saddr==src, tcp dport 8080 accept
         assert!(
             body.contains("ip daddr 10.200.0.5 ip saddr 10.200.0.0/16 tcp dport 8080 accept"),
             "{body}"
         );
-        // regra out: saddr==ip, drop (proto any → sem proto/dport)
+        // out rule: saddr==ip, drop (proto any → no proto/dport)
         assert!(body.contains("ip saddr 10.200.0.5 drop"), "{body}");
-        // política in=deny → drop final no daddr
+        // policy in=deny → final drop on the daddr
         assert!(body.contains("ip daddr 10.200.0.5 drop"), "{body}");
-        // política de entrada EXPLÍCITA (deny) → NÃO emite regras de namespace.
+        // EXPLICIT inbound policy (deny) → does NOT emit namespace rules.
         assert!(!body.contains("@dlxall"), "{body}");
-        // disabled → corpo vazio
+        // disabled → empty body
         let off = delonix_runtime_core::ContainerFw {
             enabled: false,
             ..fw
@@ -3685,7 +3685,7 @@ mod tests {
 
     #[test]
     fn fw_body_emits_namespace_isolation_when_no_explicit_ingress() {
-        // enabled, sem regras de entrada e policy_in != deny → isolamento de namespace.
+        // enabled, no inbound rules and policy_in != deny → namespace isolation.
         let fw = delonix_runtime_core::ContainerFw {
             enabled: true,
             namespace: "web".into(),
@@ -3722,8 +3722,8 @@ mod tests {
         assert!(validate_publish("tcp", "8080", "10.200.0.5", "80").is_ok());
         assert!(validate_publish("udp", "53", "10.200.1.9", "53").is_ok());
         assert!(validate_publish("sctp", "80", "10.200.0.5", "80").is_err()); // proto
-        assert!(validate_publish("tcp", "0", "10.200.0.5", "80").is_err()); // porta 0
-        assert!(validate_publish("tcp", "8080", "10.99.0.5", "80").is_err()); // IP fora da subnet
+        assert!(validate_publish("tcp", "0", "10.200.0.5", "80").is_err()); // port 0
+        assert!(validate_publish("tcp", "8080", "10.99.0.5", "80").is_err()); // IP outside the subnet
         assert!(!is_port("70000") && !is_port("abc") && is_port("443"));
     }
 
@@ -3732,46 +3732,46 @@ mod tests {
         let ip = container_ip("0a0b0c0d1122");
         assert!(ip.starts_with(&format!("{INFRA_PREFIX}.")), "{ip}");
         assert!(crate::valid_ip_in_subnet(INFRA_PREFIX, &ip), "{ip}");
-        assert_eq!(ip, container_ip("0a0b0c0d1122")); // determinístico
+        assert_eq!(ip, container_ip("0a0b0c0d1122")); // deterministic
     }
 
     #[test]
     fn valid_fdb_dst_accepts_only_ips() {
-        // IPv4/IPv6 textuais — aceites.
+        // textual IPv4/IPv6 — accepted.
         assert!(valid_fdb_dst("10.0.0.1"));
         assert!(valid_fdb_dst("192.168.1.254"));
         assert!(valid_fdb_dst("fd00::1"));
         assert!(valid_fdb_dst("2001:db8::a2f"));
-        // Injeção / lixo — recusado (o dst vai a argv do `bridge fdb`, mas mantemos
-        // a disciplina valid_* da auditoria: nada com espaço/`;`/`|`/`$` passa).
+        // Injection / garbage — refused (the dst goes to argv of `bridge fdb`, but we keep
+        // the audit's valid_* discipline: nothing with a space/`;`/`|`/`$` passes).
         assert!(!valid_fdb_dst(""));
         assert!(!valid_fdb_dst("10.0.0.1; rm -rf /"));
         assert!(!valid_fdb_dst("$(curl evil)"));
         assert!(!valid_fdb_dst("10.0.0.1 dev eth0"));
-        assert!(!valid_fdb_dst(&"a".repeat(46))); // acima do teto IPv6 textual
+        assert!(!valid_fdb_dst(&"a".repeat(46))); // above the textual IPv6 cap
     }
 
     #[test]
     fn parse_internal_name_handles_all_schemes() {
-        // <nome> simples → sem namespace (qualquer)
+        // simple <name> → no namespace (any)
         assert_eq!(parse_internal_name("web"), Some(("web".into(), None)));
-        // legado .delonix.io → nome INTEIRO, sem namespace
+        // legacy .delonix.io → WHOLE name, no namespace
         assert_eq!(
             parse_internal_name("web.delonix.io"),
             Some(("web".into(), None))
         );
-        // FQDN interno com namespace → verifica
+        // internal FQDN with namespace → verifies
         assert_eq!(
             parse_internal_name("web.data.delonix.internal"),
             Some(("web".into(), Some("data".into())))
         );
-        // trailing dot + maiúsculas normalizadas
+        // trailing dot + uppercase normalized
         assert_eq!(
             parse_internal_name("API.PROD.delonix.internal."),
             Some(("api".into(), Some("prod".into())))
         );
-        // ANTI-SEQUESTRO: um domínio externo com ponto NÃO é dividido em namespace
-        // (fica como nome inteiro; não casa nenhum container 'foo.com' → reencaminha).
+        // ANTI-HIJACK: an external domain with a dot is NOT split into namespace
+        // (stays as a whole name; matches no container 'foo.com' → forwards).
         assert_eq!(
             parse_internal_name("foo.com"),
             Some(("foo.com".into(), None))
@@ -3780,26 +3780,26 @@ mod tests {
             parse_internal_name("api.github.com"),
             Some(("api.github.com".into(), None))
         );
-        // só o sufixo → None
+        // only the suffix → None
         assert_eq!(parse_internal_name(".delonix.internal"), None);
         assert_eq!(parse_internal_name(""), None);
     }
 
     #[test]
     fn fdb_presence_is_exact_token_not_substring() {
-        // A saída real do `bridge fdb show`: cada destino é um token isolado.
+        // The real output of `bridge fdb show`: each destination is an isolated token.
         let have = "00:00:00:00:00:00 dst 10.0.0.50 self permanent\n\
                     1a:2b:3c:4d:5e:6f master br0 permanent";
         let present = |dst: &str| have.lines().any(|l| l.split_whitespace().any(|t| t == dst));
-        assert!(present("10.0.0.50")); // presente de facto
-        assert!(!present("10.0.0.5")); // NÃO presente — apesar de ser substring de 10.0.0.50
+        assert!(present("10.0.0.50")); // actually present
+        assert!(!present("10.0.0.5")); // NOT present — even though it's a substring of 10.0.0.50
     }
 
     #[test]
     fn set_vxlan_empty_peers_uses_sentinel_token() {
-        // Sem pares, o CSV colapsaria a nada e o control-loop (split_whitespace)
-        // veria 5 tokens em vez de 6 — o sentinela `-` mantém a aridade. (Não toca
-        // no holder: só validamos a forma do comando, montando-o à mão como o wrapper.)
+        // With no peers, the CSV would collapse to nothing and the control-loop (split_whitespace)
+        // would see 5 tokens instead of 6 — the `-` sentinel keeps the arity. (Doesn't touch
+        // the holder: we only validate the command's shape, building it by hand like the wrapper.)
         let dsts: Vec<String> = Vec::new();
         let csv = if dsts.is_empty() {
             "-".to_string()
@@ -3809,7 +3809,7 @@ mod tests {
         assert_eq!(csv, "-");
         let cmd = format!("vxlan dlxvx0042 66 dlxn0000002a 10.201.0.1 {csv}");
         assert_eq!(cmd.split_whitespace().count(), 6);
-        // Com pares, um único token CSV (sem espaços) preserva a aridade.
+        // With peers, a single CSV token (no spaces) preserves the arity.
         let csv2 = ["10.0.0.2".to_string(), "10.0.0.3".to_string()].join(",");
         let cmd2 = format!("vxlan dlxvx0042 66 dlxn0000002a 10.201.0.1 {csv2}");
         assert_eq!(cmd2.split_whitespace().count(), 6);
@@ -3817,8 +3817,8 @@ mod tests {
 
     #[test]
     fn base_root_honours_explicit_root() {
-        // com DELONIX_ROOT definido, ingress_dir é determinístico e NÃO depende
-        // do uid (essencial para o holder com uid mapeado a 0).
+        // with DELONIX_ROOT set, ingress_dir is deterministic and does NOT depend
+        // on the uid (essential for the holder with uid mapped to 0).
         std::env::set_var("DELONIX_ROOT", "/tmp/dlx-test-root");
         assert_eq!(ingress_dir(), PathBuf::from("/tmp/dlx-test-root/ingress"));
         std::env::remove_var("DELONIX_ROOT");

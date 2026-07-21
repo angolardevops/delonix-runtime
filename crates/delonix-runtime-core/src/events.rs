@@ -1,56 +1,56 @@
-//! Registo de eventos do motor — o `docker events` de um runtime **sem daemon**.
+//! Engine event log — the `docker events` of a runtime **without a daemon**.
 //!
-//! # Porquê um ficheiro e não um daemon
+//! # Why a file and not a daemon
 //!
-//! O `docker events` funciona porque há um `dockerd` sempre vivo a multiplexar um
-//! stream para os clientes. Aqui não há daemon nenhum: cada comando é um processo
-//! efémero que nasce, faz o seu trabalho e morre. A resposta daemonless é o
-//! inverso — um **log append-only** partilhado (`<root>/events.jsonl`): quem
-//! produz acrescenta uma linha e sai; quem lê faz `tail`. O ficheiro É o bus.
+//! `docker events` works because there is a `dockerd` always alive multiplexing a
+//! stream to the clients. Here there is no daemon at all: each command is an
+//! ephemeral process that is born, does its work and dies. The daemonless answer is the
+//! opposite — a shared **append-only log** (`<root>/events.jsonl`): the
+//! producer appends a line and exits; the reader does a `tail`. The file IS the bus.
 //!
-//! # Porque não precisa de trinco
+//! # Why it needs no lock
 //!
-//! Um `write` em `O_APPEND` de menos de `PIPE_BUF` (4 KiB) é **atómico** em
-//! filesystems locais: o kernel serializa o posicionamento e a escrita. Cada
-//! evento é uma linha curta, muito abaixo desse limite — logo N processos
-//! concorrentes acrescentam sem se entrelaçarem e sem `flock`. (Um evento que
-//! passasse os 4 KiB perderia a garantia; por isso os campos são fixos e curtos,
-//! nunca conteúdo arbitrário como logs ou env.)
+//! A `write` in `O_APPEND` of less than `PIPE_BUF` (4 KiB) is **atomic** on
+//! local filesystems: the kernel serializes the positioning and the write. Each
+//! event is a short line, well below that limit — so N concurrent
+//! processes append without interleaving and without `flock`. (An event that
+//! exceeded 4 KiB would lose the guarantee; that is why the fields are fixed and short,
+//! never arbitrary content like logs or env.)
 //!
-//! # Rotação
+//! # Rotation
 //!
-//! Sem daemon não há quem limpe em background. A rotação é oportunista: quem
-//! escreve verifica o tamanho e, se passou o tecto, roda para `.1` (uma geração
-//! só — histórico não é a função disto; para auditoria de longo prazo, exporta).
+//! Without a daemon there is no one to clean up in the background. Rotation is opportunistic: the
+//! writer checks the size and, if it exceeded the ceiling, rotates to `.1` (a single
+//! generation — history is not the point of this; for long-term auditing, export).
 
 use serde::{Deserialize, Serialize};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-/// Tecto do ficheiro antes de rodar (~4 MiB ≈ dezenas de milhar de eventos).
+/// File ceiling before rotating (~4 MiB ≈ tens of thousands of events).
 const MAX_BYTES: u64 = 4 * 1024 * 1024;
 
-/// Um evento do ciclo de vida. Campos deliberadamente poucos e curtos — ver a
-/// nota sobre `PIPE_BUF` no topo.
+/// A lifecycle event. Deliberately few and short fields — see the
+/// note about `PIPE_BUF` at the top.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Event {
-    /// Instante unix (segundos).
+    /// Unix instant (seconds).
     pub ts: u64,
     /// `container` | `image` | `network` | `volume` | `vm`.
     pub kind: String,
     /// `create`|`start`|`stop`|`die`|`remove`|`pull`|…
     pub action: String,
-    /// Id do objecto (curto).
+    /// Object id (short).
     pub id: String,
-    /// Nome legível.
+    /// Human-readable name.
     pub name: String,
-    /// Detalhe opcional (ex.: exit code no `die`).
+    /// Optional detail (e.g.: exit code in `die`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub detail: Option<String>,
 }
 
 impl Event {
-    /// Linha para consumo humano (`system events`).
+    /// Line for human consumption (`system events`).
     pub fn to_line(&self) -> String {
         let when = crate::fmt_local_ts(self.ts);
         let detail = self
@@ -77,9 +77,9 @@ fn path(root: &Path) -> PathBuf {
     root.join("events.jsonl")
 }
 
-/// Acrescenta um evento. **Best-effort e infalível por desenho**: um erro a
-/// registar um evento nunca pode fazer falhar a operação que o gerou (não se
-/// recusa um `container stop` porque o log de eventos está cheio).
+/// Appends an event. **Best-effort and infallible by design**: an error while
+/// recording an event can never make the operation that generated it fail (a
+/// `container stop` is not refused because the event log is full).
 pub fn emit(root: &Path, kind: &str, action: &str, id: &str, name: &str, detail: Option<&str>) {
     let ev = Event {
         ts: std::time::SystemTime::now()
@@ -99,7 +99,7 @@ pub fn emit(root: &Path, kind: &str, action: &str, id: &str, name: &str, detail:
     let p = path(root);
     rotate_if_needed(&p);
     let _ = std::fs::create_dir_all(root);
-    // `O_APPEND`: a atomicidade vem do kernel, não de um trinco nosso.
+    // `O_APPEND`: the atomicity comes from the kernel, not from a lock of ours.
     if let Ok(mut f) = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
@@ -109,8 +109,8 @@ pub fn emit(root: &Path, kind: &str, action: &str, id: &str, name: &str, detail:
     }
 }
 
-/// Roda quando passa o tecto. Oportunista (quem escreve limpa) — sem daemon não
-/// há outra altura em que isto possa acontecer.
+/// Rotates when it exceeds the ceiling. Opportunistic (the writer cleans up) — without a daemon
+/// there is no other moment at which this could happen.
 fn rotate_if_needed(p: &Path) {
     if std::fs::metadata(p).map(|m| m.len()).unwrap_or(0) <= MAX_BYTES {
         return;
@@ -118,9 +118,9 @@ fn rotate_if_needed(p: &Path) {
     let _ = std::fs::rename(p, p.with_extension("jsonl.1"));
 }
 
-/// Lê os eventos registados (do mais antigo para o mais recente). Linhas
-/// corrompidas são saltadas em silêncio: um evento ilegível não pode esconder
-/// os outros.
+/// Reads the recorded events (from oldest to most recent). Corrupted
+/// lines are silently skipped: an unreadable event cannot hide
+/// the others.
 pub fn read(root: &Path) -> Vec<Event> {
     let Ok(data) = std::fs::read_to_string(path(root)) else {
         return Vec::new();
@@ -130,12 +130,12 @@ pub fn read(root: &Path) -> Vec<Event> {
         .collect()
 }
 
-/// O tamanho actual do log (para o `-f` saber onde continuar).
+/// The current log size (so `-f` knows where to continue).
 pub fn size(root: &Path) -> u64 {
     std::fs::metadata(path(root)).map(|m| m.len()).unwrap_or(0)
 }
 
-/// Lê a partir de um offset (para o `follow`). Devolve os eventos e o offset novo.
+/// Reads from an offset (for the `follow`). Returns the events and the new offset.
 pub fn read_from(root: &Path, offset: u64) -> (Vec<Event>, u64) {
     use std::io::{Read, Seek, SeekFrom};
     let p = path(root);
@@ -143,7 +143,7 @@ pub fn read_from(root: &Path, offset: u64) -> (Vec<Event>, u64) {
         return (Vec::new(), offset);
     };
     let len = f.metadata().map(|m| m.len()).unwrap_or(0);
-    // Encolheu = rodou; recomeça do princípio para não perder o ficheiro novo.
+    // Shrank = rotated; restart from the beginning so as not to miss the new file.
     let start = if len < offset { 0 } else { offset };
     if f.seek(SeekFrom::Start(start)).is_err() {
         return (Vec::new(), offset);
@@ -189,9 +189,9 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// A garantia que sustenta o desenho sem trincos: N processos (aqui threads,
-    /// cada uma com o seu `OpenOptions`) acrescentam SEM se entrelaçarem — cada
-    /// linha continua a ser um JSON válido e nenhuma se perde.
+    /// The guarantee that underpins the lock-free design: N processes (here threads,
+    /// each with its own `OpenOptions`) append WITHOUT interleaving — each
+    /// line remains valid JSON and none is lost.
     #[test]
     fn emits_concorrentes_nao_se_entrelacam() {
         let root = tmp("race");
@@ -227,7 +227,7 @@ mod tests {
         emit(&root, "container", "create", "a1", "um", None);
         let (first, off) = read_from(&root, 0);
         assert_eq!(first.len(), 1);
-        // Sem eventos novos, não devolve nada (é isto que o `-f` precisa).
+        // With no new events, returns nothing (this is what `-f` needs).
         let (none, off2) = read_from(&root, off);
         assert!(none.is_empty());
         emit(&root, "container", "die", "a1", "um", None);

@@ -1,15 +1,16 @@
-//! **API de gestão local do Delonix Runtime** (HTTP+JSON sobre um unix socket).
+//! **Local management API of the Delonix Runtime** (HTTP+JSON over a unix socket).
 //!
-//! É a superfície que um control-plane externo (o `delonix-paas`, via o seu
-//! `RemoteRuntime`) consome para operar o motor **sem link directo aos crates** —
-//! fala só HTTP com este socket no mesmo host. Complementa o CRI (`delonix-cri`,
-//! que serve o kubelet): este serve a *gestão* do produto (volumes/containers/…).
+//! This is the surface that an external control-plane (the `delonix-paas`, via its
+//! `RemoteRuntime`) consumes to operate the engine **without a direct link to the
+//! crates** — it speaks only HTTP with this socket on the same host. It complements
+//! the CRI (`delonix-cri`, which serves the kubelet): this serves the product's
+//! *management* (volumes/containers/…).
 //!
-//! Superfícies expostas: **volumes** (CRUD), **containers** (list/get + run/rm/
-//! action/logs/exec + reconfig parcial), **imagens** (list/rmi/pull/build/scan/
-//! sbom), **redes** (create/rm) e **VMs** (só stop/rm — subsistema divergente). O
-//! contrato de LEITURA é o próprio tipo serde de cada recurso (`Volume`,
-//! `Container`, `Image`, `Package`); as MUTAÇÕES devolvem `{ok, output}`.
+//! Exposed surfaces: **volumes** (CRUD), **containers** (list/get + run/rm/
+//! action/logs/exec + partial reconfig), **images** (list/rmi/pull/build/scan/
+//! sbom), **networks** (create/rm) and **VMs** (only stop/rm — divergent subsystem).
+//! The READ contract is each resource's own serde type (`Volume`,
+//! `Container`, `Image`, `Package`); the MUTATIONS return `{ok, output}`.
 
 use std::path::PathBuf;
 
@@ -22,31 +23,32 @@ use delonix_image::ImageStore;
 use delonix_runtime_core::{Error, Store};
 use delonix_volume::VolumeStore;
 
-/// Estado partilhado dos handlers.
+/// Shared state of the handlers.
 #[derive(Clone)]
 struct AppState {
-    /// A raiz do estado do runtime (`$DELONIX_ROOT`).
+    /// The root of the runtime state (`$DELONIX_ROOT`).
     base: PathBuf,
-    /// O binário da CLI do runtime (`delonix`) para as MUTAÇÕES. Ao contrário das
-    /// leituras (chamadas de biblioteca ao Store), uma mutação de container
-    /// (rm/stop/start/…) tem de reusar o caminho REAL do motor — matar o processo,
-    /// limpar cgroups/namespaces, despublicar portas, desligar redes — que vive na
-    /// CLI. Chamar a própria CLI garante paridade total, em vez de reimplementar
-    /// essa limpeza aqui. É a mesma decisão que o `InProcessRuntime` do PaaS já
-    /// tomava; a arquitectura Runtime-como-serviço só MOVE esse shell-out para aqui.
+    /// The runtime CLI binary (`delonix`) for the MUTATIONS. Unlike the
+    /// reads (library calls to the Store), a container mutation
+    /// (rm/stop/start/…) must reuse the engine's REAL path — kill the process,
+    /// clean up cgroups/namespaces, unpublish ports, disconnect networks — which
+    /// lives in the CLI. Calling the CLI itself guarantees full parity, rather than
+    /// reimplementing that cleanup here. It is the same decision the PaaS's
+    /// `InProcessRuntime` already took; the Runtime-as-a-service architecture only
+    /// MOVES that shell-out here.
     bin: PathBuf,
 }
 
-/// Arranca a API de gestão a escutar num unix socket (bloqueante). `addr` aceita
-/// um caminho ou `unix:///caminho`. Mesmo padrão do `delonix-cri::serve_blocking`.
+/// Starts the management API listening on a unix socket (blocking). `addr` accepts
+/// a path or `unix:///path`. Same pattern as `delonix-cri::serve_blocking`.
 pub fn serve_blocking(base: PathBuf, addr: &str) -> Result<(), Error> {
-    // O binário para as mutações é o PRÓPRIO executável (este processo É o
-    // `delonix api`); fallback para "delonix" no PATH se `current_exe` falhar.
+    // The binary for the mutations is the executable ITSELF (this process IS the
+    // `delonix api`); fall back to "delonix" in PATH if `current_exe` fails.
     let bin = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("delonix"));
     serve_blocking_with(base, bin, addr)
 }
 
-/// Como [`serve_blocking`], mas com o binário da CLI explícito (para testes).
+/// Like [`serve_blocking`], but with the CLI binary explicit (for tests).
 pub fn serve_blocking_with(base: PathBuf, bin: PathBuf, addr: &str) -> Result<(), Error> {
     let path = addr.strip_prefix("unix://").unwrap_or(addr).to_string();
     let rt = tokio::runtime::Builder::new_multi_thread()
@@ -57,7 +59,7 @@ pub fn serve_blocking_with(base: PathBuf, bin: PathBuf, addr: &str) -> Result<()
             message: e.to_string(),
         })?;
     rt.block_on(async move {
-        let _ = std::fs::remove_file(&path); // limpa um socket antigo
+        let _ = std::fs::remove_file(&path); // clean up an old socket
         let uds = tokio::net::UnixListener::bind(&path).map_err(|e| Error::Runtime {
             context: "bind",
             message: e.to_string(),
@@ -67,8 +69,8 @@ pub fn serve_blocking_with(base: PathBuf, bin: PathBuf, addr: &str) -> Result<()
     })
 }
 
-/// Serve um `Router` axum sobre um `UnixListener` (o `axum::serve` só aceita TCP;
-/// aqui usa-se o loop de accept + hyper-util, o padrão do exemplo unix do axum).
+/// Serves an axum `Router` over a `UnixListener` (`axum::serve` only accepts TCP;
+/// here we use the accept loop + hyper-util, the pattern from axum's unix example).
 async fn serve_over_uds(uds: tokio::net::UnixListener, app: Router) -> Result<(), Error> {
     use hyper::body::Incoming;
     use hyper_util::rt::{TokioExecutor, TokioIo};
@@ -79,7 +81,7 @@ async fn serve_over_uds(uds: tokio::net::UnixListener, app: Router) -> Result<()
             context: "accept",
             message: e.to_string(),
         })?;
-        // `into_make_service` é infalível → o service da ligação nunca falha aqui.
+        // `into_make_service` is infallible → the connection service never fails here.
         let tower_service = match make.call(&socket).await {
             Ok(svc) => svc,
             Err(never) => match never {},
@@ -96,53 +98,53 @@ async fn serve_over_uds(uds: tokio::net::UnixListener, app: Router) -> Result<()
     }
 }
 
-/// As rotas da API. Exposta para testes (sem socket, via `oneshot`).
+/// The API routes. Exposed for tests (no socket, via `oneshot`).
 fn router(state: AppState) -> Router {
     Router::new()
         .route("/_ping", get(ping))
-        // `GET /metrics` — o MESMO registo Prometheus partilhado que o `delonix-cri`
-        // expõe (definido em `delonix-runtime-core::metrics`). Só render, zero métricas
-        // novas: o control-plane pode fazer scrape do motor por este socket de gestão.
+        // `GET /metrics` — the SAME shared Prometheus registry that `delonix-cri`
+        // exposes (defined in `delonix-runtime-core::metrics`). Only render, zero new
+        // metrics: the control-plane can scrape the engine through this management socket.
         .route("/metrics", get(metrics))
         .route("/v1/volumes", get(list_volumes).post(create_volume))
         .route("/v1/volumes/:name", get(get_volume).delete(delete_volume))
-        // Containers: leitura (list/get) por biblioteca; mutação (abaixo) por CLI.
-        // `POST` = `run` (recebe o spec em JSON e reconstrói os args da CLI).
+        // Containers: read (list/get) via library; mutation (below) via CLI.
+        // `POST` = `run` (receives the spec in JSON and rebuilds the CLI args).
         .route("/v1/containers", get(list_containers).post(run_container))
         .route(
             "/v1/containers/:id",
             get(get_container).delete(delete_container),
         )
-        // Mutação de container: rm/start/stop/restart/pause/unpause — shell-out à
-        // CLI do runtime (paridade total de limpeza), não uma chamada ao Store.
+        // Container mutation: rm/start/stop/restart/pause/unpause — shell-out to the
+        // runtime CLI (full cleanup parity), not a call to the Store.
         .route("/v1/containers/:id/action", post(container_action_ep))
-        // Logs (request/response, não streaming) + exec não-interactivo.
+        // Logs (request/response, not streaming) + non-interactive exec.
         .route("/v1/containers/:id/logs", get(container_logs_ep))
         .route("/v1/containers/:id/exec", post(container_exec_ep))
-        // Imagens: list + rmi. A referência (`nginx:latest`, `library/nginx`,
-        // `sha256:…`) NÃO cabe num segmento de path (tem `/` e `:`) → vai por
-        // query (`?ref=…`). Não há risco de traversal: `ImageStore::remove`
-        // resolve por varrimento linear (compara tags/prefixo de id) e o ficheiro
-        // que apaga usa o `id` sanitizado, nunca o `ref` cru.
+        // Images: list + rmi. The reference (`nginx:latest`, `library/nginx`,
+        // `sha256:…`) does NOT fit in a path segment (it has `/` and `:`) → it goes
+        // by query (`?ref=…`). No traversal risk: `ImageStore::remove`
+        // resolves by linear scan (compares tags/id prefix) and the file
+        // it deletes uses the sanitized `id`, never the raw `ref`.
         .route("/v1/images", get(list_images).delete(delete_image))
-        // Pull (opcionalmente com scan de CVE a seguir) — shell-out à CLI.
+        // Pull (optionally with a CVE scan afterwards) — shell-out to the CLI.
         .route("/v1/images/pull", post(pull_image))
-        // Build a partir de um Delonixfile colado (materializa + `delonix build`).
+        // Build from a pasted Delonixfile (materializes + `delonix build`).
         .route("/v1/images/build", post(build_image))
-        // Scan de CVE (texto, via CLI) + SBOM (estruturado, via biblioteca).
+        // CVE scan (text, via CLI) + SBOM (structured, via library).
         .route("/v1/images/scan", get(scan_image))
         .route("/v1/images/sbom", get(sbom_image))
-        // Redes: create/rm (ciclo de vida da rede) — shell-out à CLI. publish/
-        // unpublish (DNAT) NÃO entram aqui — dívida `Net::`/`infra::` no PaaS.
+        // Networks: create/rm (network lifecycle) — shell-out to the CLI. publish/
+        // unpublish (DNAT) do NOT go here — `Net::`/`infra::` debt in the PaaS.
         .route("/v1/networks", post(create_network))
         .route("/v1/networks/:name", axum::routing::delete(delete_network))
-        // Reconfig a quente de container: SÓ o subconjunto que o `container update`
-        // do runtime suporta (publish-add/publish-rm). Os campos que o
-        // `ContainerUpdateSpec` do PaaS tem mas o runtime NÃO (memory/cpus/restart/
-        // dns/hosts) são recusados do lado do PaaS, não chegam aqui.
+        // Hot reconfig of a container: ONLY the subset that the runtime's `container
+        // update` supports (publish-add/publish-rm). The fields the PaaS's
+        // `ContainerUpdateSpec` has but the runtime does NOT (memory/cpus/restart/
+        // dns/hosts) are rejected on the PaaS side and never reach here.
         .route("/v1/containers/:id/reconfig", post(reconfig_container))
-        // VMs (subsistema delonix-vm): SÓ stop/rm (o runtime não tem `vm run`/
-        // `vm start`; `vm create` é outro modelo). Ver a nota no PaaS.
+        // VMs (delonix-vm subsystem): ONLY stop/rm (the runtime has no `vm run`/
+        // `vm start`; `vm create` is another model). See the note in the PaaS.
         .route("/v1/vms/:name/action", post(vm_action_ep))
         .with_state(state)
 }
@@ -151,9 +153,9 @@ async fn ping() -> &'static str {
     "delonix-mgmt ok"
 }
 
-/// `GET /metrics` — corpo OpenMetrics do registo Prometheus PARTILHADO em
-/// `delonix-runtime-core` (o mesmo que o `delonix-cri` serve). Sem métricas
-/// próprias: só render, para o control-plane fazer scrape via o socket de gestão.
+/// `GET /metrics` — OpenMetrics body of the SHARED Prometheus registry in
+/// `delonix-runtime-core` (the same one `delonix-cri` serves). No metrics of
+/// its own: only render, so the control-plane can scrape via the management socket.
 async fn metrics() -> impl IntoResponse {
     (
         [(
@@ -164,10 +166,11 @@ async fn metrics() -> impl IntoResponse {
     )
 }
 
-/// Nome de volume seguro no LIMITE da API (defesa contra path traversal). É
-/// deliberadamente MAIS estrito que o `VolumeStore`: este aceita `..` (só carateres
-/// `.`) e o `inspect`/`remove` nem validam o nome — um `remove("..")` vindo do path
-/// da URL apagaria o diretório-pai. Aqui rejeita-se qualquer `..`/`/`/`.` sozinho.
+/// Safe volume name at the API BOUNDARY (defense against path traversal). It is
+/// deliberately STRICTER than the `VolumeStore`: that one accepts `..` (only `.`
+/// characters) and `inspect`/`remove` don't even validate the name — a `remove("..")`
+/// coming from the URL path would delete the parent directory. Here any lone
+/// `..`/`/`/`.` is rejected.
 fn valid_name(name: &str) -> bool {
     !name.is_empty()
         && name != "."
@@ -179,13 +182,13 @@ fn valid_name(name: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
 }
 
-/// Erro 400 padrão para um nome de volume inválido.
+/// Standard 400 error for an invalid volume name.
 fn invalid_name() -> Response {
     err_response(Error::Invalid("invalid volume name".to_string()))
 }
 
-/// Mapeia um `Error` do motor para (código HTTP, corpo JSON) — o cliente
-/// reconstrói o seu próprio `RuntimeError` a partir do código + mensagem.
+/// Maps an engine `Error` to (HTTP code, JSON body) — the client
+/// reconstructs its own `RuntimeError` from the code + message.
 fn err_response(e: Error) -> Response {
     let (code, msg) = match e {
         Error::NotFound(m) => (StatusCode::NOT_FOUND, m),
@@ -196,8 +199,8 @@ fn err_response(e: Error) -> Response {
     (code, Json(serde_json::json!({ "error": msg }))).into_response()
 }
 
-/// Corre uma operação síncrona do `VolumeStore` numa thread de bloqueio (o store
-/// é síncrono; não deve bloquear o executor async).
+/// Runs a synchronous `VolumeStore` operation on a blocking thread (the store
+/// is synchronous; it must not block the async executor).
 async fn with_store<T, F>(base: PathBuf, f: F) -> Result<T, Error>
 where
     T: Send + 'static,
@@ -231,7 +234,7 @@ async fn get_volume(State(s): State<AppState>, Path(name): Path<String>) -> Resp
     }
 }
 
-/// Corpo de `POST /v1/volumes`.
+/// Body of `POST /v1/volumes`.
 #[derive(serde::Deserialize)]
 struct CreateVolumeBody {
     name: String,
@@ -268,10 +271,10 @@ async fn delete_volume(State(s): State<AppState>, Path(name): Path<String>) -> R
     }
 }
 
-// ---- Containers (leitura) --------------------------------------------------
+// ---- Containers (read) -----------------------------------------------------
 
-/// Corre uma operação síncrona do `Store` de containers numa thread de bloqueio.
-/// O store vive em `<base>/containers` (mesma resolução que a CLI usa em
+/// Runs a synchronous container `Store` operation on a blocking thread.
+/// The store lives at `<base>/containers` (same resolution the CLI uses in
 /// `util::open_stores`).
 async fn with_container_store<T, F>(base: PathBuf, f: F) -> Result<T, Error>
 where
@@ -297,8 +300,8 @@ async fn list_containers(State(s): State<AppState>) -> Response {
 }
 
 async fn get_container(State(s): State<AppState>, Path(id): Path<String>) -> Response {
-    // Mesma defesa de fronteira dos volumes: o `Store::load` faz `root.join(id)`
-    // antes de cair no varrimento por nome/prefixo — um `..` no path escaparia.
+    // Same boundary defense as volumes: `Store::load` does `root.join(id)`
+    // before falling into the scan by name/prefix — a `..` in the path would escape.
     if !valid_name(&id) {
         return err_response(Error::Invalid("invalid container id".to_string()));
     }
@@ -308,16 +311,16 @@ async fn get_container(State(s): State<AppState>, Path(id): Path<String>) -> Res
     }
 }
 
-/// Argumento seguro para passar à CLI: além do `valid_name` (sem `..`/`/`), recusa
-/// um `-` inicial — senão o `clap` da CLI interpretaria o id como uma flag (ex.: um
-/// id `--rm`). Os args da CLI não sofrem injecção de shell (`Command::args`, não uma
-/// string), mas podem ser lidos como opções — daí a barreira contra `-`.
+/// Safe argument to pass to the CLI: besides `valid_name` (no `..`/`/`), it refuses
+/// a leading `-` — otherwise the CLI's `clap` would interpret the id as a flag (e.g. an
+/// id `--rm`). The CLI args do not suffer shell injection (`Command::args`, not a
+/// string), but they can be read as options — hence the barrier against `-`.
 fn valid_arg(s: &str) -> bool {
     valid_name(s) && !s.starts_with('-')
 }
 
-/// Corre a CLI do runtime (`delonix …`) com `DELONIX_ROOT` na base, e devolve
-/// `(sucesso, saída combinada)`. Bloqueante → corre em `spawn_blocking`.
+/// Runs the runtime CLI (`delonix …`) with `DELONIX_ROOT` at the base, and returns
+/// `(success, combined output)`. Blocking → runs in `spawn_blocking`.
 async fn run_cli(bin: PathBuf, base: PathBuf, args: Vec<String>) -> Result<(bool, String), Error> {
     tokio::task::spawn_blocking(move || {
         let out = std::process::Command::new(&bin)
@@ -339,7 +342,7 @@ async fn run_cli(bin: PathBuf, base: PathBuf, args: Vec<String>) -> Result<(bool
     })?
 }
 
-/// Query de `DELETE /v1/containers/:id?force=<bool>`.
+/// Query of `DELETE /v1/containers/:id?force=<bool>`.
 #[derive(serde::Deserialize)]
 struct ForceQuery {
     #[serde(default)]
@@ -365,7 +368,7 @@ async fn delete_container(
     }
 }
 
-/// Corpo de `POST /v1/containers/:id/action`.
+/// Body of `POST /v1/containers/:id/action`.
 #[derive(serde::Deserialize)]
 struct ActionBody {
     action: String,
@@ -379,7 +382,7 @@ async fn container_action_ep(
     if !valid_arg(&id) {
         return err_response(Error::Invalid("invalid container id".to_string()));
     }
-    // Só acções conhecidas (allowlist) chegam à CLI. `remove` = `rm -f`.
+    // Only known actions (allowlist) reach the CLI. `remove` = `rm -f`.
     let sub = match b.action.as_str() {
         "start" | "stop" | "restart" | "pause" | "unpause" => b.action.clone(),
         "remove" | "rm" => {
@@ -413,8 +416,8 @@ async fn container_logs_ep(State(s): State<AppState>, Path(id): Path<String>) ->
     if !valid_arg(&id) {
         return err_response(Error::Invalid("invalid container id".to_string()));
     }
-    // `logs` request/response (não streaming); a saída vem tal e qual, mesmo se o
-    // container não existir (o cliente ignora o `ok`, como o InProcessRuntime).
+    // `logs` request/response (not streaming); the output comes as-is, even if the
+    // container does not exist (the client ignores the `ok`, like the InProcessRuntime).
     match run_cli(
         s.bin,
         s.base,
@@ -427,7 +430,7 @@ async fn container_logs_ep(State(s): State<AppState>, Path(id): Path<String>) ->
     }
 }
 
-/// Corpo de `POST /v1/containers/:id/exec`.
+/// Body of `POST /v1/containers/:id/exec`.
 #[derive(serde::Deserialize)]
 struct ExecBody {
     cmd: String,
@@ -441,9 +444,9 @@ async fn container_exec_ep(
     if !valid_arg(&id) {
         return err_response(Error::Invalid("invalid container id".to_string()));
     }
-    // `exec <id> sh -c <cmd>`: o `cmd` é passado como UM argumento a `sh -c` DENTRO
-    // do container — corre no container, nunca no shell do host (é `Command::args`,
-    // sem shell nossa). Exec é, por natureza, execução arbitrária no container.
+    // `exec <id> sh -c <cmd>`: the `cmd` is passed as ONE argument to `sh -c` INSIDE
+    // the container — runs in the container, never in the host's shell (it is
+    // `Command::args`, no shell of ours). Exec is, by nature, arbitrary exec in the container.
     let args = vec![
         "container".to_string(),
         "exec".to_string(),
@@ -458,8 +461,8 @@ async fn container_exec_ep(
     }
 }
 
-/// Corpo de `POST /v1/containers` (run). Espelha o `ContainerRunSpec` do PaaS — o
-/// contrato são os nomes dos campos (o PaaS serializa o seu spec, este desserializa).
+/// Body of `POST /v1/containers` (run). Mirrors the PaaS's `ContainerRunSpec` — the
+/// contract is the field names (the PaaS serializes its spec, this deserializes it).
 #[derive(serde::Deserialize)]
 struct RunSpecBody {
     image: String,
@@ -485,10 +488,10 @@ struct RunSpecBody {
     knows_none: bool,
 }
 
-/// Reconstrói os args `delonix container run -d …` a partir do spec — função PURA
-/// (testável sem kernel). Os filtros são os MESMOS que o `InProcessRuntime` do PaaS
-/// já usava; a única diferença de nome de flag é deliberada: o binário do runtime
-/// usa `--net` (o do PaaS, com shim docker, usava `--network`).
+/// Rebuilds the `delonix container run -d …` args from the spec — a PURE function
+/// (testable without a kernel). The filters are the SAME the PaaS's `InProcessRuntime`
+/// already used; the only flag-name difference is deliberate: the runtime binary
+/// uses `--net` (the PaaS one, with the docker shim, used `--network`).
 fn build_run_args(spec: RunSpecBody) -> Vec<String> {
     let mut args: Vec<String> = vec!["container".into(), "run".into(), "-d".into()];
     if !spec.name.is_empty() {
@@ -496,8 +499,8 @@ fn build_run_args(spec: RunSpecBody) -> Vec<String> {
         args.push(spec.name);
     }
     if !spec.network.is_empty() && spec.network != "none" {
-        // O CLI do runtime usa `--net` (não `--network`). Forma `--net=<v>` para o
-        // valor nunca escapar para um token novo.
+        // The runtime CLI uses `--net` (not `--network`). Form `--net=<v>` so the
+        // value never escapes into a new token.
         args.push(format!("--net={}", spec.network));
     }
     for p in &spec.ports {
@@ -542,10 +545,10 @@ fn build_run_args(spec: RunSpecBody) -> Vec<String> {
 }
 
 async fn run_container(State(s): State<AppState>, Json(spec): Json<RunSpecBody>) -> Response {
-    // `image` é obrigatória e um valor começado por `-` seria lido pelo clap como
-    // uma flag (é o argumento POSICIONAL final) — recusa no limite. O mesmo para
-    // `name` (valor de `--name`). Os restantes campos ou têm charset próprio
-    // (ports) ou são valores de opção sem ambiguidade posicional.
+    // `image` is required and a value starting with `-` would be read by clap as
+    // a flag (it is the final POSITIONAL argument) — refuse at the boundary. Same for
+    // `name` (value of `--name`). The remaining fields either have their own charset
+    // (ports) or are option values with no positional ambiguity.
     if spec.image.is_empty() || spec.image.starts_with('-') {
         return err_response(Error::Invalid("invalid image".to_string()));
     }
@@ -558,10 +561,10 @@ async fn run_container(State(s): State<AppState>, Json(spec): Json<RunSpecBody>)
     }
 }
 
-// ---- Imagens (list + rmi) --------------------------------------------------
+// ---- Images (list + rmi) ---------------------------------------------------
 
-/// Corre uma operação síncrona do `ImageStore` numa thread de bloqueio. O store
-/// resolve `<base>/images` internamente (recebe a base, como o `VolumeStore`).
+/// Runs a synchronous `ImageStore` operation on a blocking thread. The store
+/// resolves `<base>/images` internally (it receives the base, like the `VolumeStore`).
 async fn with_image_store<T, F>(base: PathBuf, f: F) -> Result<T, Error>
 where
     T: Send + 'static,
@@ -585,7 +588,7 @@ async fn list_images(State(s): State<AppState>) -> Response {
     }
 }
 
-/// Query de `DELETE /v1/images?ref=…`. `ref` é palavra-reservada em Rust.
+/// Query of `DELETE /v1/images?ref=…`. `ref` is a reserved word in Rust.
 #[derive(serde::Deserialize)]
 struct RefQuery {
     #[serde(rename = "ref")]
@@ -597,26 +600,26 @@ async fn delete_image(State(s): State<AppState>, Query(q): Query<RefQuery>) -> R
         return err_response(Error::Invalid("empty image reference".to_string()));
     }
     match with_image_store(s.base, move |store| store.remove(&q.reference)).await {
-        // `remove` devolve "untagged: …" ou "deleted: …" — devolve-o tal e qual.
+        // `remove` returns "untagged: …" or "deleted: …" — return it as-is.
         Ok(result) => Json(serde_json::json!({ "result": result })).into_response(),
         Err(e) => err_response(e),
     }
 }
 
-/// Corpo de `POST /v1/images/pull`.
+/// Body of `POST /v1/images/pull`.
 #[derive(serde::Deserialize)]
 struct PullBody {
     #[serde(rename = "ref")]
     reference: String,
-    /// Corre também um scan de CVE depois do pull (e anexa a saída).
+    /// Also runs a CVE scan after the pull (and appends the output).
     #[serde(default)]
     scan_after: bool,
 }
 
 async fn pull_image(State(s): State<AppState>, Json(b): Json<PullBody>) -> Response {
-    // A referência é o argumento POSICIONAL de `image pull` — um `-` inicial seria
-    // lido como flag. Recusa no limite. (Refs válidas têm `/`/`:`, nunca `-` no
-    // início.)
+    // The reference is the POSITIONAL argument of `image pull` — a leading `-` would
+    // be read as a flag. Refuse at the boundary. (Valid refs have `/`/`:`, never `-`
+    // at the start.)
     if b.reference.is_empty() || b.reference.starts_with('-') {
         return err_response(Error::Invalid("invalid image reference".to_string()));
     }
@@ -630,7 +633,7 @@ async fn pull_image(State(s): State<AppState>, Json(b): Json<PullBody>) -> Respo
         Ok(r) => r,
         Err(e) => return err_response(e),
     };
-    // Auto-scan opcional a seguir ao pull (só se o pull correu bem).
+    // Optional auto-scan after the pull (only if the pull succeeded).
     if ok && b.scan_after {
         if let Ok((_so, sout)) = run_cli(
             s.bin,
@@ -646,30 +649,30 @@ async fn pull_image(State(s): State<AppState>, Json(b): Json<PullBody>) -> Respo
     Json(serde_json::json!({ "ok": ok, "output": out })).into_response()
 }
 
-/// Corpo de `POST /v1/images/build`.
+/// Body of `POST /v1/images/build`.
 #[derive(serde::Deserialize)]
 struct BuildBody {
-    /// Conteúdo do Delonixfile (colado; os `RUN` correm durante o build).
+    /// Content of the Delonixfile (pasted; the `RUN`s run during the build).
     delonixfile: String,
-    /// Tag da imagem resultante (`repo:tag`).
+    /// Tag of the resulting image (`repo:tag`).
     tag: String,
 }
 
-/// Contador monótono por-processo para nomear work dirs de build únicos.
+/// Per-process monotonic counter to name unique build work dirs.
 static BUILD_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 async fn build_image(State(s): State<AppState>, Json(b): Json<BuildBody>) -> Response {
-    // `-t <tag>`: um valor começado por `-` seria lido como flag. Recusa no limite.
+    // `-t <tag>`: a value starting with `-` would be read as a flag. Refuse at the boundary.
     if b.tag.is_empty() || b.tag.starts_with('-') {
         return err_response(Error::Invalid("invalid tag".to_string()));
     }
     if b.delonixfile.trim().is_empty() {
         return err_response(Error::Invalid("empty Delonixfile".to_string()));
     }
-    // Work dir ÚNICO por-build (contexto onde o `COPY` resolve): `pid-seq` isola
-    // builds concorrentes — sem isto, dois builds em paralelo partilhariam o
-    // `Delonixfile`/contexto (TOCTOU: um constrói o Delonixfile do outro). Limpo no
-    // fim. O nome deriva só de `s.base`+pid+contador — nunca de input do utilizador.
+    // UNIQUE work dir per-build (the context where `COPY` resolves): `pid-seq` isolates
+    // concurrent builds — without it, two parallel builds would share the
+    // `Delonixfile`/context (TOCTOU: one builds the other's Delonixfile). Cleaned up at
+    // the end. The name derives only from `s.base`+pid+counter — never from user input.
     let seq = BUILD_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let dir = s
         .base
@@ -706,7 +709,7 @@ async fn build_image(State(s): State<AppState>, Json(b): Json<BuildBody>) -> Res
         dir.to_string_lossy().into_owned(),
     ];
     let result = run_cli(s.bin, s.base, args).await;
-    // Limpa o work dir (best-effort) — não deixa Delonixfiles/contextos a acumular.
+    // Clean up the work dir (best-effort) — don't leave Delonixfiles/contexts piling up.
     let dir_c = dir.clone();
     let _ = tokio::task::spawn_blocking(move || std::fs::remove_dir_all(&dir_c)).await;
     match result {
@@ -716,7 +719,7 @@ async fn build_image(State(s): State<AppState>, Json(b): Json<BuildBody>) -> Res
 }
 
 async fn scan_image(State(s): State<AppState>, Query(q): Query<RefQuery>) -> Response {
-    // `image scan <ref>` (texto). A ref é posicional — `-` inicial viraria flag.
+    // `image scan <ref>` (text). The ref is positional — a leading `-` would become a flag.
     if q.reference.is_empty() || q.reference.starts_with('-') {
         return err_response(Error::Invalid("invalid image reference".to_string()));
     }
@@ -736,12 +739,12 @@ async fn sbom_image(State(s): State<AppState>, Query(q): Query<RefQuery>) -> Res
     if q.reference.is_empty() {
         return err_response(Error::Invalid("empty image reference".to_string()));
     }
-    // SBOM é uma chamada de BIBLIOTECA (lê os layers do CAS, não corre nada) — como
-    // as leituras de volume/container. 404 se a imagem não existir localmente.
+    // SBOM is a LIBRARY call (it reads the layers from the CAS, runs nothing) — like
+    // the volume/container reads. 404 if the image doesn't exist locally.
     let out = with_image_store(s.base, move |store| {
         let img = store.resolve(&q.reference)?;
-        // `extract` falha → imagem existe mas sem gestor de pacotes legível (lista
-        // vazia), tal como o handler antigo distinguia de "não encontrada".
+        // `extract` fails → the image exists but has no readable package manager (empty
+        // list), just as the old handler distinguished it from "not found".
         Ok(delonix_scan::extract_sbom(store, &img).unwrap_or_default())
     })
     .await;
@@ -751,7 +754,7 @@ async fn sbom_image(State(s): State<AppState>, Query(q): Query<RefQuery>) -> Res
     }
 }
 
-/// Corpo de `POST /v1/networks`.
+/// Body of `POST /v1/networks`.
 #[derive(serde::Deserialize)]
 struct NetworkBody {
     name: String,
@@ -783,8 +786,8 @@ async fn delete_network(State(s): State<AppState>, Path(name): Path<String>) -> 
     }
 }
 
-/// Corpo de `POST /v1/containers/:id/reconfig`. Só o subconjunto que o `container
-/// update` do runtime suporta — o PaaS recusa os restantes campos antes de chamar.
+/// Body of `POST /v1/containers/:id/reconfig`. Only the subset that the runtime's
+/// `container update` supports — the PaaS refuses the remaining fields before calling.
 #[derive(serde::Deserialize)]
 struct ReconfigBody {
     #[serde(default)]
@@ -802,7 +805,7 @@ async fn reconfig_container(
         return err_response(Error::Invalid("invalid container id".to_string()));
     }
     let mut args = vec!["container".to_string(), "update".to_string(), id];
-    // As portas têm charset próprio (dígitos/`:`/`/`) — não podem virar flag.
+    // The ports have their own charset (digits/`:`/`/`) — they can't become a flag.
     for p in &b.publish_add {
         if p.chars()
             .all(|c| c.is_ascii_digit() || matches!(c, ':' | '/'))
@@ -825,8 +828,8 @@ async fn reconfig_container(
     }
 }
 
-/// Corpo de `POST /v1/vms/:name/action`. Só `stop`/`rm` (o runtime não tem
-/// `vm start`; `vm run`/`vm create` são outro subsistema — recusados no PaaS).
+/// Body of `POST /v1/vms/:name/action`. Only `stop`/`rm` (the runtime has no
+/// `vm start`; `vm run`/`vm create` are another subsystem — refused in the PaaS).
 #[derive(serde::Deserialize)]
 struct VmActionBody {
     action: String,
@@ -864,8 +867,8 @@ mod tests {
         (
             AppState {
                 base: dir.path().to_path_buf(),
-                // `/bin/false`: as mutações reais provam-se no e2e cross-processo;
-                // os testes de unidade cobrem só a validação (recusa ANTES do exec).
+                // `/bin/false`: the real mutations are proven in the cross-process e2e;
+                // the unit tests cover only the validation (refusal BEFORE the exec).
                 bin: PathBuf::from("/bin/false"),
             },
             dir,
@@ -913,7 +916,7 @@ mod tests {
         );
         let bytes = resp.into_body().collect().await.unwrap().to_bytes();
         let body = String::from_utf8_lossy(&bytes);
-        // O `delonix_build_info` do registo partilhado tem de estar sempre presente.
+        // The shared registry's `delonix_build_info` must always be present.
         assert!(body.contains("delonix_build_info"), "corpo: {body}");
     }
 
@@ -922,7 +925,7 @@ mod tests {
         let (st, _d) = test_state();
         let app = router(st);
 
-        // Lista vazia inicialmente.
+        // Empty list initially.
         let resp = app
             .clone()
             .oneshot(
@@ -936,7 +939,7 @@ mod tests {
         assert_eq!(resp.status(), StatusCode::OK);
         assert_eq!(body_json(resp).await.as_array().unwrap().len(), 0);
 
-        // Cria um volume.
+        // Create a volume.
         let create = Request::builder()
             .method("POST")
             .uri("/v1/volumes")
@@ -949,7 +952,7 @@ mod tests {
         assert_eq!(v["name"], "dados");
         assert_eq!(v["driver"], "local");
 
-        // Aparece na listagem e no GET individual.
+        // Shows up in the listing and in the individual GET.
         let resp = app
             .clone()
             .oneshot(
@@ -963,7 +966,7 @@ mod tests {
         assert_eq!(resp.status(), StatusCode::OK);
         assert_eq!(body_json(resp).await["name"], "dados");
 
-        // Apaga.
+        // Delete.
         let del = Request::builder()
             .method("DELETE")
             .uri("/v1/volumes/dados")
@@ -972,7 +975,7 @@ mod tests {
         let resp = app.clone().oneshot(del).await.unwrap();
         assert_eq!(resp.status(), StatusCode::NO_CONTENT);
 
-        // GET de um volume inexistente → 404.
+        // GET of a nonexistent volume → 404.
         let resp = app
             .oneshot(
                 Request::builder()
@@ -989,7 +992,7 @@ mod tests {
     fn valid_name_rejeita_traversal() {
         assert!(valid_name("dados"));
         assert!(valid_name("bd-1.snap_2"));
-        // Traversal / separadores / dot-segments → rejeitados.
+        // Traversal / separators / dot-segments → rejected.
         for bad in ["", ".", "..", "../x", "a/b", "a..b", "..\u{0000}", "/etc"] {
             assert!(!valid_name(bad), "devia rejeitar {bad:?}");
         }
@@ -998,8 +1001,8 @@ mod tests {
     #[tokio::test]
     async fn delete_com_dot_dot_da_400_e_nao_apaga_nada() {
         let (st, _d) = test_state();
-        // Um DELETE com `..` no path tem de ser recusado no limite (não chega ao
-        // remove_dir_all do store — senão apagava o diretório-pai).
+        // A DELETE with `..` in the path must be refused at the boundary (it doesn't
+        // reach the store's remove_dir_all — otherwise it would delete the parent dir).
         let del = Request::builder()
             .method("DELETE")
             .uri("/v1/volumes/..")
@@ -1014,7 +1017,7 @@ mod tests {
         let (st, _d) = test_state();
         let app = router(st);
 
-        // Sem containers criados → lista vazia.
+        // No containers created → empty list.
         let resp = app
             .clone()
             .oneshot(
@@ -1028,7 +1031,7 @@ mod tests {
         assert_eq!(resp.status(), StatusCode::OK);
         assert_eq!(body_json(resp).await.as_array().unwrap().len(), 0);
 
-        // GET de um container inexistente → 404.
+        // GET of a nonexistent container → 404.
         let resp = app
             .oneshot(
                 Request::builder()
@@ -1045,7 +1048,7 @@ mod tests {
     async fn containers_devolve_container_populado() {
         use delonix_runtime_core::Container;
         let (st, dir) = test_state();
-        // Persiste um container real no store (`<base>/containers`), como a CLI faz.
+        // Persist a real container in the store (`<base>/containers`), as the CLI does.
         let store = Store::open(dir.path().join("containers")).unwrap();
         let c = Container::new(
             "abc123def456".to_string(),
@@ -1061,7 +1064,7 @@ mod tests {
         store.save(&c).unwrap();
 
         let app = router(st);
-        // Aparece na listagem, com os campos intactos.
+        // Shows up in the listing, with the fields intact.
         let resp = app
             .clone()
             .oneshot(
@@ -1079,7 +1082,7 @@ mod tests {
         assert_eq!(arr[0]["name"], "web");
         assert_eq!(arr[0]["image"], "nginx:latest");
 
-        // GET por id exacto → o mesmo container.
+        // GET by exact id → the same container.
         let resp = app
             .oneshot(
                 Request::builder()
@@ -1112,7 +1115,7 @@ mod tests {
             .unwrap();
 
         let app = router(st);
-        // Lista mostra a imagem.
+        // The list shows the image.
         let resp = app
             .clone()
             .oneshot(
@@ -1128,7 +1131,7 @@ mod tests {
         assert_eq!(arr.as_array().unwrap().len(), 1);
         assert_eq!(arr[0]["repo_tags"][0], "nginx:latest");
 
-        // rmi por tag (ref vai por query, com `:` e potencialmente `/`).
+        // rmi by tag (ref goes by query, with `:` and potentially `/`).
         let resp = app
             .clone()
             .oneshot(
@@ -1146,7 +1149,7 @@ mod tests {
             .unwrap()
             .contains("deleted"));
 
-        // Já não existe → rmi de novo dá 404.
+        // No longer exists → rmi again gives 404.
         let resp = app
             .oneshot(
                 Request::builder()
@@ -1164,8 +1167,8 @@ mod tests {
     async fn mutacao_de_container_valida_o_id_antes_do_exec() {
         let (st, _d) = test_state();
         let app = router(st);
-        // `..` e um `-` inicial (que a CLI leria como flag) → 400, sem exec. (Um
-        // `a/b` nem chega ao handler — vira 2 segmentos e o router dá 404.)
+        // `..` and a leading `-` (which the CLI would read as a flag) → 400, no exec. (An
+        // `a/b` doesn't even reach the handler — it becomes 2 segments and the router gives 404.)
         for bad in ["..", "-rf"] {
             let resp = app
                 .clone()
@@ -1184,7 +1187,7 @@ mod tests {
                 "delete devia recusar {bad:?}"
             );
         }
-        // Acção desconhecida → 400 (allowlist).
+        // Unknown action → 400 (allowlist).
         let resp = app
             .clone()
             .oneshot(
@@ -1199,7 +1202,7 @@ mod tests {
             .unwrap();
         assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
 
-        // run: imagem vazia ou começada por `-` (viraria flag posicional) → 400.
+        // run: empty image or one starting with `-` (would become a positional flag) → 400.
         for bad in [
             r#"{"image":""}"#,
             r#"{"image":"-rm"}"#,
@@ -1223,7 +1226,7 @@ mod tests {
                 "run devia recusar {bad}"
             );
         }
-        // pull: ref vazia ou começada por `-` → 400 (antes de qualquer exec).
+        // pull: empty ref or one starting with `-` → 400 (before any exec).
         for bad in [r#"{"ref":""}"#, r#"{"ref":"-x"}"#] {
             let resp = app
                 .clone()
@@ -1243,7 +1246,7 @@ mod tests {
                 "pull devia recusar {bad}"
             );
         }
-        // build: tag inválida ou Delonixfile vazio → 400 (antes de escrever/exec).
+        // build: invalid tag or empty Delonixfile → 400 (before writing/exec).
         for bad in [
             r#"{"delonixfile":"FROM x","tag":""}"#,
             r#"{"delonixfile":"FROM x","tag":"-t"}"#,
@@ -1267,7 +1270,7 @@ mod tests {
                 "build devia recusar {bad}"
             );
         }
-        // network create: nome inválido (`-`/vazio) → 400.
+        // network create: invalid name (`-`/empty) → 400.
         for bad in [r#"{"name":""}"#, r#"{"name":"-net"}"#] {
             let resp = app
                 .clone()
@@ -1294,18 +1297,18 @@ mod tests {
         let spec = RunSpecBody {
             image: "nginx:latest".into(),
             name: "web".into(),
-            ports: vec!["8080:80".into(), "mau;porta".into()], // 2.ª é filtrada
+            ports: vec!["8080:80".into(), "mau;porta".into()], // 2nd is filtered out
             env: vec!["K=v".into()],
             network: "minha-rede".into(),
             memory: "256m".into(),
             restart: "always".into(),
             command: vec!["nginx".into(), "-g".into(), "daemon off;".into()],
-            volumes: vec!["dados:/var".into(), "mau/../x:/y".into()], // 2.ª filtrada
+            volumes: vec!["dados:/var".into(), "mau/../x:/y".into()], // 2nd filtered out
             knows: vec!["db".into()],
             knows_none: false,
         };
         let args = build_run_args(spec);
-        // Flag de rede é `--net=…` (do runtime), NUNCA `--network`.
+        // Network flag is `--net=…` (the runtime's), NEVER `--network`.
         assert!(
             args.contains(&"--net=minha-rede".to_string()),
             "args: {args:?}"
@@ -1314,12 +1317,12 @@ mod tests {
             !args.iter().any(|a| a.starts_with("--network")),
             "não pode usar --network"
         );
-        // Filtros preservados: porta inválida e volume com `..` caem fora.
+        // Filters preserved: invalid port and volume with `..` fall out.
         assert!(args.contains(&"8080:80".to_string()));
         assert!(!args.iter().any(|a| a.contains("mau;porta")));
         assert!(args.contains(&"dados:/var".to_string()));
         assert!(!args.iter().any(|a| a.contains("..")));
-        // A imagem vem antes do command (posicional final), e o command a seguir.
+        // The image comes before the command (final positional), and the command after.
         let img = args.iter().position(|a| a == "nginx:latest").unwrap();
         let cmd = args.iter().position(|a| a == "daemon off;").unwrap();
         assert!(img < cmd, "imagem antes do command");
@@ -1352,8 +1355,8 @@ mod tests {
     #[tokio::test]
     async fn container_get_com_dot_dot_da_400() {
         let (st, _d) = test_state();
-        // `..` no path do id tem de ser recusado no limite (o `Store::load` faz
-        // `root.join(id)` antes do varrimento — um `..` escaparia da raiz).
+        // `..` in the id path must be refused at the boundary (`Store::load` does
+        // `root.join(id)` before the scan — a `..` would escape the root).
         let resp = router(st)
             .oneshot(
                 Request::builder()

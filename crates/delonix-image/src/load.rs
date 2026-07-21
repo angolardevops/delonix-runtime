@@ -1,4 +1,4 @@
-//! Carregar imagens a partir de um arquivo `docker save` (formato OCI/legacy).
+//! Loading images from a `docker save` archive (OCI/legacy format).
 
 use crate::cas::sha256_hex;
 use crate::image::{now_unix, Image, ImageConfig, ImageStore};
@@ -8,11 +8,11 @@ use serde::Deserialize;
 use std::io::Read;
 use std::path::Path;
 
-/// Uma entrada do `manifest.json` legacy do `docker save`. NÃO é um tipo OCI —
-/// o `manifest.json` do `docker save` é um formato Docker legacy (array de
-/// `{Config, RepoTags, Layers}` com caminhos `blobs/sha256/...`), que o
-/// `oci-spec` não modela; por isso fica hand-rolled de propósito. O blob de
-/// config apontado por ele já é um `ImageConfiguration` OCI (ver abaixo).
+/// An entry of the legacy `manifest.json` from `docker save`. It is NOT an OCI type —
+/// the `manifest.json` of `docker save` is a legacy Docker format (array of
+/// `{Config, RepoTags, Layers}` with `blobs/sha256/...` paths), which
+/// `oci-spec` does not model; hence it is hand-rolled on purpose. The config
+/// blob it points to is already an OCI `ImageConfiguration` (see below).
 #[derive(Deserialize)]
 struct DockerManifest {
     #[serde(rename = "Config")]
@@ -23,13 +23,13 @@ struct DockerManifest {
     layers: Vec<String>,
 }
 
-/// Converte um caminho `blobs/sha256/<hex>` no digest `sha256:<hex>`.
+/// Converts a `blobs/sha256/<hex>` path into the `sha256:<hex>` digest.
 fn path_to_digest(blob_path: &str) -> String {
     let hex = blob_path.rsplit('/').next().unwrap_or(blob_path);
     format!("sha256:{hex}")
 }
 
-/// Importa um arquivo `docker save` para o armazém, devolvendo a imagem.
+/// Imports a `docker save` archive into the store, returning the image.
 pub fn load_docker_archive(store: &ImageStore, tar_path: &Path) -> Result<Image> {
     let file = std::fs::File::open(tar_path)?;
     let mut archive = tar::Archive::new(file);
@@ -70,7 +70,7 @@ pub fn load_docker_archive(store: &ImageStore, tar_path: &Path) -> Result<Image>
     if sha256_hex(&config_bytes) != crate::cas::strip(&config_digest) {
         return Err(Error::Invalid("config digest mismatch".into()));
     }
-    // Lê a config de execução do blob de config OCI (`ImageConfiguration`).
+    // Read the runtime config from the OCI config blob (`ImageConfiguration`).
     let oci_config: ImageConfiguration = serde_json::from_slice(&config_bytes)?;
     let inner = oci_config.config().clone().unwrap_or_default();
 
