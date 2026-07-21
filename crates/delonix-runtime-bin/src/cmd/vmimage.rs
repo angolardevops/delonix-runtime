@@ -4,11 +4,12 @@
 //! CAS/layers — there is only one blob per image, nothing to deduplicate) + a
 //! `.json` of metadata, both under `<root>/vm-images/`.
 //!
-//! `build` produces the image from scratch (download of the Ubuntu cloud image
-//! + `virt-customize`); `push`/`pull` publish/fetch it from an OCI registry (a
-//! single-blob artifact, see `delonix_image::registry::{push_oci_artifact,
-//! pull_oci_artifact}`) — the same protocol as container images, only without
-//! the Docker layers/config model.
+//! `build` produces the image from scratch (download of the Ubuntu cloud
+//! image plus `virt-customize`); `push`/`pull` publish/fetch it from an OCI
+//! registry (a single-blob artifact, see
+//! `delonix_image::registry::{push_oci_artifact, pull_oci_artifact}`) — the
+//! same protocol as container images, only without the Docker layers/config
+//! model.
 
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
