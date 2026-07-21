@@ -806,42 +806,69 @@ fn console_bridge(sock: &std::path::Path) -> Result<()> {
         context: "vm console",
         message: e.to_string(),
     })?;
+    use std::os::unix::io::AsRawFd;
     let _raw = RawTty::enable();
-    eprintln!("[connected to '{}' — escape: Ctrl-]]\r", sock.display());
+    eprintln!(
+        "[connected — detach with Ctrl-]; the console returns here when the VM powers off]\r"
+    );
 
-    // socket -> stdout, numa thread.
-    let mut rd = stream.try_clone().map_err(|e| Error::Runtime {
+    // Ponte bidireccional com `poll()` num só fio: reage a stdin E ao socket,
+    // e — o ponto do fix — REGRESSA ao host quando o socket fecha (a VM fez
+    // poweroff/desligou), sem ficar preso num `read` de stdin. Ctrl-] (0x1d)
+    // destaca; `exit`/Ctrl-D dentro da VM vão para o getty (autologin), não
+    // para aqui — a única saída manual é o Ctrl-], por isso é anunciado.
+    let mut wr = stream.try_clone().map_err(|e| Error::Runtime {
         context: "vm console",
         message: e.to_string(),
     })?;
-    let reader = std::thread::spawn(move || {
-        let mut buf = [0u8; 4096];
-        let mut out = std::io::stdout();
-        while let Ok(n) = rd.read(&mut buf) {
-            if n == 0 || out.write_all(&buf[..n]).is_err() || out.flush().is_err() {
-                break;
+    let mut rd = stream;
+    let (in_fd, sock_fd) = (std::io::stdin().as_raw_fd(), rd.as_raw_fd());
+    let mut buf = [0u8; 4096];
+    'bridge: loop {
+        let mut fds = [
+            libc::pollfd {
+                fd: in_fd,
+                events: libc::POLLIN,
+                revents: 0,
+            },
+            libc::pollfd {
+                fd: sock_fd,
+                events: libc::POLLIN,
+                revents: 0,
+            },
+        ];
+        // SAFETY: poll sobre 2 pollfd válidos; -1 = bloqueia até um evento.
+        if unsafe { libc::poll(fds.as_mut_ptr(), 2, -1) } < 0 {
+            break;
+        }
+        // stdin -> socket (Ctrl-] destaca; EOF do host sai).
+        if fds[0].revents & (libc::POLLIN | libc::POLLHUP) != 0 {
+            match std::io::stdin().read(&mut buf) {
+                Ok(0) | Err(_) => break,
+                Ok(n) => {
+                    if buf[..n].contains(&0x1d) {
+                        break;
+                    }
+                    if wr.write_all(&buf[..n]).is_err() {
+                        break;
+                    }
+                }
             }
         }
-    });
-
-    // stdin -> socket, no fio principal; Ctrl-] (0x1d) sai.
-    let mut wr = stream;
-    let mut stdin = std::io::stdin();
-    let mut buf = [0u8; 4096];
-    loop {
-        let n = match stdin.read(&mut buf) {
-            Ok(0) | Err(_) => break,
-            Ok(n) => n,
-        };
-        if buf[..n].contains(&0x1d) {
-            break;
-        }
-        if wr.write_all(&buf[..n]).is_err() {
-            break;
+        // socket -> stdout; EOF = a VM fechou → regressa ao host.
+        if fds[1].revents & (libc::POLLIN | libc::POLLHUP) != 0 {
+            match rd.read(&mut buf) {
+                Ok(0) | Err(_) => break 'bridge,
+                Ok(n) => {
+                    let mut out = std::io::stdout();
+                    if out.write_all(&buf[..n]).is_err() || out.flush().is_err() {
+                        break;
+                    }
+                }
+            }
         }
     }
     let _ = wr.shutdown(std::net::Shutdown::Both);
-    let _ = reader.join();
     eprintln!("\r\n[console closed]\r");
     Ok(())
 }
