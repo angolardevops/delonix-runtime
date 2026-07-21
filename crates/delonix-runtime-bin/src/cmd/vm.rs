@@ -67,6 +67,79 @@ struct VmSpec {
     /// Static IP (libvirt `nat` mode): DHCP reservation on the libvirt network.
     #[serde(default)]
     ip: Option<String>,
+
+    // --- Advanced libvirt knobs (libvirt backend) — full XML parity ---------
+    /// Machine type (default `q35`).
+    machine: Option<String>,
+    /// CPU mode/model: `host-passthrough` (default), `host-model`, or a named model.
+    #[serde(rename = "cpuModel", alias = "cpu_model")]
+    cpu_model: Option<String>,
+    /// CPU topology (sockets/cores/threads).
+    #[serde(rename = "cpuTopology", alias = "cpu_topology")]
+    cpu_topology: Option<CpuTopologySpec>,
+    /// Emulated TPM 2.0.
+    #[serde(default)]
+    tpm: bool,
+    /// Video model (`virtio`|`qxl`|`vga`|`none`).
+    video: Option<String>,
+    /// OS boot device order, e.g. `[cdrom, hd]`.
+    #[serde(default, rename = "bootOrder", alias = "boot_order")]
+    boot_order: Vec<String>,
+    /// Extra disks beyond the main overlay + seed.
+    #[serde(default, rename = "extraDisks", alias = "extra_disks")]
+    extra_disks: Vec<ExtraDiskSpec>,
+    /// Extra network interfaces beyond the primary one.
+    #[serde(default, rename = "extraNics", alias = "extra_nics")]
+    extra_nics: Vec<ExtraNicSpec>,
+    /// Raw libvirt XML fragments injected before `</devices>` (trusted manifests).
+    #[serde(default, rename = "libvirtXmlOverlay", alias = "libvirt_xml_overlay")]
+    libvirt_xml_overlay: Vec<String>,
+    /// Full `<domain>` XML used verbatim (ultimate escape hatch; trusted only).
+    #[serde(rename = "libvirtXml", alias = "libvirt_xml")]
+    libvirt_xml: Option<String>,
+}
+
+/// `spec.cpuTopology` of a `kind: Vm`.
+#[derive(Debug, Deserialize)]
+struct CpuTopologySpec {
+    #[serde(default)]
+    sockets: u32,
+    #[serde(default)]
+    cores: u32,
+    #[serde(default)]
+    threads: u32,
+}
+
+/// One entry of `spec.extraDisks`.
+#[derive(Debug, Deserialize)]
+struct ExtraDiskSpec {
+    /// Host path of the disk image.
+    source: String,
+    /// `disk` (default) or `cdrom`.
+    device: Option<String>,
+    /// Bus: `virtio` (default), `sata`, `scsi`, `ide`.
+    bus: Option<String>,
+    /// Format: `qcow2` (default) or `raw`.
+    format: Option<String>,
+    /// Mount read-only.
+    #[serde(default, rename = "readOnly", alias = "read_only")]
+    read_only: bool,
+    /// Explicit target dev (auto-assigned when omitted).
+    target: Option<String>,
+}
+
+/// One entry of `spec.extraNics`.
+#[derive(Debug, Deserialize)]
+struct ExtraNicSpec {
+    /// `network` (libvirt network), `bridge` (host bridge) or `user`.
+    #[serde(rename = "type", alias = "kind")]
+    kind: String,
+    /// Network/bridge name.
+    source: Option<String>,
+    /// Model: `virtio` (default), `e1000`, …
+    model: Option<String>,
+    /// Fixed MAC (random when omitted).
+    mac: Option<String>,
 }
 
 /// One entry of a VM's `spec.volumes`: refers to a `Volume`/`Storage` by
@@ -114,6 +187,23 @@ pub(crate) const VM_SPEC_FIELDS: &[&str] = &[
     "volumes",
     "vnc",
     "ip",
+    "machine",
+    "cpuModel",
+    "cpu_model",
+    "cpuTopology",
+    "cpu_topology",
+    "tpm",
+    "video",
+    "bootOrder",
+    "boot_order",
+    "extraDisks",
+    "extra_disks",
+    "extraNics",
+    "extra_nics",
+    "libvirtXmlOverlay",
+    "libvirt_xml_overlay",
+    "libvirtXml",
+    "libvirt_xml",
 ];
 
 fn default_vcpus() -> u32 {
@@ -442,6 +532,40 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
             volumes: vm_volumes,
             vnc: spec.vnc,
             static_ip: spec.ip,
+            machine: spec.machine,
+            cpu_model: spec.cpu_model,
+            cpu_topology: spec.cpu_topology.map(|t| delonix_vm::CpuTopology {
+                sockets: t.sockets,
+                cores: t.cores,
+                threads: t.threads,
+            }),
+            tpm: spec.tpm,
+            video: spec.video,
+            boot_order: spec.boot_order,
+            extra_disks: spec
+                .extra_disks
+                .into_iter()
+                .map(|d| delonix_vm::ExtraDisk {
+                    source: d.source,
+                    device: d.device.unwrap_or_default(),
+                    bus: d.bus.unwrap_or_default(),
+                    format: d.format.unwrap_or_default(),
+                    read_only: d.read_only,
+                    target: d.target,
+                })
+                .collect(),
+            extra_nics: spec
+                .extra_nics
+                .into_iter()
+                .map(|n| delonix_vm::ExtraNic {
+                    kind: n.kind,
+                    source: n.source,
+                    model: n.model.unwrap_or_default(),
+                    mac: n.mac,
+                })
+                .collect(),
+            libvirt_xml_overlay: spec.libvirt_xml_overlay,
+            libvirt_xml: spec.libvirt_xml,
         };
         delonix_vm::create(&base, &cfg)?;
         println!("vm/{name}: garantida");
@@ -555,6 +679,8 @@ pub fn run(action: VmCmd) -> Result<()> {
                 volumes: vec![],
                 vnc,
                 static_ip: ip,
+                // Advanced libvirt knobs are declarative-only (`kind: Vm`), not CLI flags.
+                ..Default::default()
             };
             // Staged progress on STDERR (human), while STDOUT stays the bare VM
             // name (scriptable — unchanged contract). Replaces the raw
