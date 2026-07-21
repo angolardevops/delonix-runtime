@@ -78,22 +78,22 @@ image + kubeadm/kubelet/kubectl + <code>delonix-cri</code> — a base do <code>d
 Usage: delonix-x86_64-linux image [OPTIONS] &lt;COMMAND&gt;
 
 Commands:
-  dash      Dashboard (KPIs + tabela) das imagens — TUI interactivo, ou `--once` snapshot
-  pull      Puxa uma imagem de um registo
-  ls        Lista imagens locais
-  describe  Detalhe legível de uma ou mais imagens, ao estilo `kubectl describe` (tags/digest/tamanho/layers + o config OCI: entrypoint/cmd/env/workdir). Com `--vm`, descreve imagens VM douradas
-  tag       Dá outro nome/tag a uma imagem local (não copia nada — é só um nome novo para o mesmo conteúdo)
-  history   Layers de uma imagem (digest + tamanho), da base para o topo
-  verify    Verifica a assinatura cosign de uma imagem local contra uma chave pública
-  scan      SBOM + scan de CVE de uma imagem (lê os layers do CAS, sem correr nada). Puxa a imagem se faltar. Ver `--sbom`, `--fail-on`, `--update`
-  rm        Remove uma imagem local
-  export    Exporta um bundle OCI runtime (rootfs + config.json) para `runc`/`crun`
-  apply     Aplica os documentos `kind: Image` de um manifesto (`pull` idempotente por referência; `build` reconstrói e substitui a tag a cada apply)
-  login     Autentica num registo OCI (guarda as credenciais em `&lt;root&gt;/auth.json`, formato docker/podman). A password vem SEMPRE do stdin — nunca de um argumento (ficaria no histórico da shell e no /proc)
-  logout    Remove as credenciais guardadas de um registo
-  vm        Imagens VM douradas (`&lt;root&gt;/vm-images/`): ls/pull/push/build. Equivalente a `image --vm &lt;cmd&gt;` (forma antiga, mantida)
-  push      Publica uma imagem local num registo OCI. Sem `target`, publica sob a própria referência da imagem. Com `--vm`, o `target` é obrigatório
-  build     (só com `--vm`) Constrói a imagem VM dourada (Ubuntu + kubeadm/kubelet/ kubectl + `delonix-cri`)
+  dash      Dashboard (KPIs + table) of images — interactive TUI, or `--once` snapshot
+  pull      Pull an image from a registry
+  ls        List local images
+  describe  Human-readable detail of one or more images, `kubectl describe`-style (tags/digest/size/layers + the OCI config: entrypoint/cmd/env/workdir). With `--vm`, describes golden VM images
+  tag       Give another name/tag to a local image (copies nothing — it&#x27;s just a new name for the same content)
+  history   Layers of an image (digest + size), from base to top
+  verify    Verify the cosign signature of a local image against a public key
+  scan      SBOM + CVE scan of an image (reads the layers from the CAS, without running anything). Pulls the image if missing. See `--sbom`, `--fail-on`, `--update`
+  rm        Remove a local image
+  export    Export an OCI runtime bundle (rootfs + config.json) for `runc`/`crun`
+  apply     Apply the `kind: Image` documents of a manifest (`pull` idempotent by reference; `build` rebuilds and replaces the tag on each apply)
+  login     Authenticate to an OCI registry (stores the credentials in `&lt;root&gt;/auth.json`, docker/podman format). The password ALWAYS comes from stdin — never from an argument (it would end up in the shell history and in /proc)
+  logout    Remove the stored credentials of a registry
+  vm        Golden VM images (`&lt;root&gt;/vm-images/`): ls/pull/push/build. Equivalent to `image --vm &lt;cmd&gt;` (old form, kept)
+  push      Publish a local image to an OCI registry. Without `target`, publishes under the image&#x27;s own reference. With `--vm`, `target` is required
+  build     (only with `--vm`) Build the golden VM image (Ubuntu + kubeadm/kubelet/ kubectl + `delonix-cri`)
   help      Print this message or the help of the given subcommand(s)
 
 Options:
@@ -101,7 +101,7 @@ Options:
       --vm            Operate on VM images (`&lt;root&gt;/vm-images/`) instead of container images — enables the `push`/`build` subcommands
   -h, --help          Print help</code></pre></div>
 <h2 id='pull'><code>image pull</code></h2>
-<div class='help'><pre><code>Puxa uma imagem de um registo
+<div class='help'><pre><code>Pull an image from a registry
 
 Usage: delonix-x86_64-linux image pull [OPTIONS] &lt;IMAGE&gt;
 
@@ -110,11 +110,11 @@ Arguments:
 
 Options:
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-      --verify &lt;PEM&gt;  Verifica a assinatura cosign com esta chave pública (PEM) DEPOIS do pull, e falha se não bater. Sem isto, um pull não é autenticado além do digest do próprio registo
+      --verify &lt;PEM&gt;  Verify the cosign signature with this public key (PEM) AFTER the pull, and fail if it does not match. Without this, a pull is not authenticated beyond the registry&#x27;s own digest
   -h, --help          Print help</code></pre></div>
 <h3>Exemplos</h3><div class="ex"><div class="cap">Referência com tag e digest (formato combinado suportado)</div><pre><code>delonix image pull kindest/node:v1.34.0@sha256:7416a6…</code></pre></div>
 <h2 id='ls'><code>image ls</code></h2>
-<div class='help'><pre><code>Lista imagens locais
+<div class='help'><pre><code>List local images
 
 Usage: delonix-x86_64-linux image ls [OPTIONS]
 
@@ -123,7 +123,7 @@ Options:
   -h, --help          Print help</code></pre></div>
 <h3>Exemplos</h3><div class="ex"><pre><code>delonix image ls</code></pre></div>
 <h2 id='rm'><code>image rm</code></h2>
-<div class='help'><pre><code>Remove uma imagem local
+<div class='help'><pre><code>Remove a local image
 
 Usage: delonix-x86_64-linux image rm [OPTIONS] &lt;IMAGE&gt;
 
@@ -135,7 +135,7 @@ Options:
   -h, --help          Print help</code></pre></div>
 <h3>Exemplos</h3><div class="ex"><pre><code>delonix image rm alpine:3.19</code></pre></div>
 <h2 id='export'><code>image export</code></h2>
-<div class='help'><pre><code>Exporta um bundle OCI runtime (rootfs + config.json) para `runc`/`crun`
+<div class='help'><pre><code>Export an OCI runtime bundle (rootfs + config.json) for `runc`/`crun`
 
 Usage: delonix-x86_64-linux image export [OPTIONS] &lt;IMAGE&gt; &lt;DIR&gt;
 
@@ -148,7 +148,7 @@ Options:
   -h, --help          Print help</code></pre></div>
 <h3>Exemplos</h3><div class="ex"><div class="cap">Bundle OCI runtime para correr com runc/crun</div><pre><code>delonix image export alpine:3.19 /tmp/bundle &amp;&amp; sudo runc run -b /tmp/bundle teste</code></pre></div>
 <h2 id='push'><code>image push</code></h2>
-<div class='help'><pre><code>Publica uma imagem local num registo OCI. Sem `target`, publica sob a própria referência da imagem. Com `--vm`, o `target` é obrigatório
+<div class='help'><pre><code>Publish a local image to an OCI registry. Without `target`, publishes under the image&#x27;s own reference. With `--vm`, `target` is required
 
 Usage: delonix-x86_64-linux image push [OPTIONS] &lt;NAME&gt; [TARGET]
 
@@ -161,7 +161,7 @@ Options:
   -h, --help          Print help</code></pre></div>
 <h3>Exemplos</h3><div class="ex"><div class="cap">Publicar a imagem VM dourada como artefacto OCI (padrão ORAS)</div><pre><code>delonix image --vm push k8s-golden ghcr.io/angolardevops/delonix-vm-k8s:1.34</code></pre></div>
 <h2 id='build'><code>image build</code></h2>
-<div class='help'><pre><code>(só com `--vm`) Constrói a imagem VM dourada (Ubuntu + kubeadm/kubelet/ kubectl + `delonix-cri`)
+<div class='help'><pre><code>(only with `--vm`) Build the golden VM image (Ubuntu + kubeadm/kubelet/ kubectl + `delonix-cri`)
 
 Usage: delonix-x86_64-linux image build [OPTIONS] --tag &lt;TAG&gt;
 
@@ -181,14 +181,14 @@ Options:
       --cri-bin &lt;CRI_BIN&gt;
           
       --no-compress
-          Não comprimir o qcow2 final (maior, mas sem custo de descompressão nas leituras do backing file em runtime)
+          Do not compress the final qcow2 (larger, but with no decompression cost on backing-file reads at runtime)
       --offline
-          Obter os .deb do k8s no HOST (verificados) e instalá-los com `dpkg` — o appliance corre sem rede. Dispensa DHCP/DNS no guest
+          Fetch the k8s .deb packages on the HOST (verified) and install them with `dpkg` — the appliance runs without network. No DHCP/DNS needed in the guest
   -h, --help
           Print help</code></pre></div>
 <h3>Exemplos</h3><div class="ex"><div class="cap">Construir a imagem VM dourada (descarrega Ubuntu, valida SHA256SUMS, virt-customize)</div><pre><code>delonix image --vm build --name k8s-golden --k8s-version 1.34</code></pre></div>
 <h2 id='apply'><code>image apply</code></h2>
-<div class='help'><pre><code>Aplica os documentos `kind: Image` de um manifesto (`pull` idempotente por referência; `build` reconstrói e substitui a tag a cada apply)
+<div class='help'><pre><code>Apply the `kind: Image` documents of a manifest (`pull` idempotent by reference; `build` rebuilds and replaces the tag on each apply)
 
 Usage: delonix-x86_64-linux image apply [OPTIONS]
 

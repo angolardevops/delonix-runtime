@@ -79,11 +79,11 @@ rollout nem rollback — fail-fast, o que já foi aplicado fica.</p>
 Usage: delonix-x86_64-linux stack [OPTIONS] &lt;COMMAND&gt;
 
 Commands:
-  init      Inicializa um projecto COMPLETO: Delonixfile + manifesto + cluster + README — ficheiros JÁ PREENCHIDOS (imagens incluídas), prontos a usar sem editar nada
-  apply     Aplica todos os Kinds do manifesto (Network → Volume → Image → Vm → Container)
-  ls        Detalhe do stack ao estilo `kubectl describe`: cada recurso DECLARADO no manifesto e se está, ou não, presente na máquina
+  init      Initializes a COMPLETE project: Delonixfile + manifest + cluster + README — files ALREADY FILLED IN (images included), ready to use without editing anything
+  apply     Applies all the manifest Kinds (Network → Volume → Image → Vm → Container)
+  ls        Stack detail in `kubectl describe` style: each resource DECLARED in the manifest and whether or not it is present on the machine
   describe  
-  validate  Valida o manifesto SEM tocar em nada (dry-run): resolve as referências cruzadas (`Container.network`/`.volumes`, `Vm.network`, `Ingress/Egress. target`) contra o que o manifesto declara MAIS o que já existe nos stores. Sai com erro se alguma referência ficar por resolver — é a rede de segurança contra um `apply` que só falharia a meio (fail-fast, sem rollback)
+  validate  Validates the manifest WITHOUT touching anything (dry-run): resolves the cross-references (`Container.network`/`.volumes`, `Vm.network`, `Ingress/Egress. target`) against what the manifest declares PLUS what already exists in the stores. Exits with an error if any reference is left unresolved — it is the safety net against an `apply` that would only fail halfway through (fail-fast, no rollback)
   help      Print this message or the help of the given subcommand(s)
 
 Options:
@@ -109,20 +109,20 @@ spec:
   env: [ "POSTGRES_PASSWORD=segredo" ]
 </code></pre>
 <h2 id='init'><code>stack init</code></h2>
-<div class='help'><pre><code>Inicializa um projecto COMPLETO: Delonixfile + manifesto + cluster + README — ficheiros JÁ PREENCHIDOS (imagens incluídas), prontos a usar sem editar nada
+<div class='help'><pre><code>Initializes a COMPLETE project: Delonixfile + manifest + cluster + README — files ALREADY FILLED IN (images included), ready to use without editing anything
 
 Usage: delonix-x86_64-linux stack init [OPTIONS] [DIR]
 
 Arguments:
-  [DIR]  Directório do projecto (default: o actual) [default: .]
+  [DIR]  Project directory (default: the current one) [default: .]
 
 Options:
       --l18n &lt;en|pt&gt;         Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-      --name &lt;NAME&gt;          Nome do projecto (default: o nome do directório)
-      --image &lt;IMAGE&gt;        Imagem a usar. Omitir = preenche com a imagem por omissão
-      --force                Substitui ficheiros já existentes
-  -t, --template &lt;TEMPLATE&gt;  Gera um PROJECTO completo de uma stack (ex.: `python`) com boas práticas, em vez do scaffold genérico. `--template list` mostra os disponíveis
-      --up                   Depois de gerar, constrói a imagem, arranca e espera ficar saudável
+      --name &lt;NAME&gt;          Project name (default: the directory name)
+      --image &lt;IMAGE&gt;        Image to use. Omit = fills in with the default image
+      --force                Overwrites already existing files
+  -t, --template &lt;TEMPLATE&gt;  Generates a complete PROJECT for a stack (e.g. `python`) with best practices, instead of the generic scaffold. `--template list` shows the available ones
+      --up                   After generating, builds the image, starts it and waits for it to become healthy
   -h, --help                 Print help</code></pre></div>
 <p><code>--template &lt;nome&gt;</code> gera um projecto real e funcional de uma
 linguagem/framework, com boas práticas (multi-stage não-root, healthcheck, testes, dotfiles) e já
@@ -131,7 +131,7 @@ scaffold genérico. Os tokens <code>__NAME__</code>/<code>__MODULE__</code> são
 do projecto.</p>
 <h3>Exemplos</h3><div class="ex"><div class="cap">Projecto COMPLETO de uma stack (FastAPI): código + Delonixfile + manifesto + testes</div><pre><code>delonix stack init myapi --template python</code></pre></div><div class="ex"><div class="cap">Ver os templates disponíveis</div><pre><code>delonix stack init --template list</code></pre></div>
 <h2 id='apply'><code>stack apply</code></h2>
-<div class='help'><pre><code>Aplica todos os Kinds do manifesto (Network → Volume → Image → Vm → Container)
+<div class='help'><pre><code>Applies all the manifest Kinds (Network → Volume → Image → Vm → Container)
 
 Usage: delonix-x86_64-linux stack apply [OPTIONS]
 

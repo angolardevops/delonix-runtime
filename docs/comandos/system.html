@@ -78,30 +78,30 @@ fluxo de eventos.</p>
 Usage: delonix-x86_64-linux system [OPTIONS] &lt;COMMAND&gt;
 
 Commands:
-  events   Eventos do motor (create/start/die/remove/…), do mais antigo ao mais recente. Sem daemon, o registo é um log append-only partilhado — cada comando acrescenta a sua linha (ver `delonix_runtime_core::events`)
-  info     Estado do motor: rootless?, delegação de cgroup, infra de rede, contagens
-  df       Uso de disco por área (imagens, containers, volumes, imagens VM)
-  virt     Virtualização do host: hipervisor, KVM, virtio — e o que há a afinar
-  prune    Recupera espaço: remove containers parados, imagens sem uso, blobs do CAS que ninguém referencia, cgroups vazios e — o que mais espaço liberta — **directórios de containers órfãos** (de nós/containers que morreram abruptamente sem `rm`, sem entrada no registo)
-  monitor  Ligações de rede activas por container (via conntrack): quem entra, quem sai, e entre containers. Actualiza em contínuo (ver `--no-stream`)
-  thermal  Governador térmico: baixa o orçamento de CPU do Delonix quando o CPU aquece e repõe-no quando arrefece. Corre em contínuo (ver `--once`)
+  events   Engine events (create/start/die/remove/…), from oldest to most recent. With no daemon, the log is a shared append-only file — each command appends its own line (see `delonix_runtime_core::events`)
+  info     Engine state: rootless?, cgroup delegation, network infra, counts
+  df       Disk usage by area (images, containers, volumes, VM images)
+  virt     Host virtualization: hypervisor, KVM, virtio — and what there is to tune
+  prune    Reclaim space: remove stopped containers, unused images, CAS blobs nobody references, empty cgroups and — the biggest space saver — **orphan container directories** (from nodes/containers that died abruptly without `rm`, with no registry entry)
+  monitor  Active network connections per container (via conntrack): who comes in, who goes out, and between containers. Refreshes continuously (see `--no-stream`)
+  thermal  Thermal governor: lowers Delonix&#x27;s CPU budget when the CPU heats up and restores it when it cools down. Runs continuously (see `--once`)
   help     Print this message or the help of the given subcommand(s)
 
 Options:
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
   -h, --help          Print help</code></pre></div>
 <h2 id='prune'><code>system prune</code></h2>
-<div class='help'><pre><code>Recupera espaço: remove containers parados, imagens sem uso, blobs do CAS que ninguém referencia, cgroups vazios e — o que mais espaço liberta — **directórios de containers órfãos** (de nós/containers que morreram abruptamente sem `rm`, sem entrada no registo)
+<div class='help'><pre><code>Reclaim space: remove stopped containers, unused images, CAS blobs nobody references, empty cgroups and — the biggest space saver — **orphan container directories** (from nodes/containers that died abruptly without `rm`, with no registry entry)
 
 Usage: delonix-x86_64-linux system prune [OPTIONS]
 
 Options:
-  -a, --all           Também remove imagens sem uso que TÊM tag (não só as dangling)
+  -a, --all           Also remove unused images that DO have a tag (not just the dangling ones)
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
   -h, --help          Print help</code></pre></div>
 <h3>Exemplos</h3><div class="ex"><div class="cap">Recuperar espaço (GC)</div><pre><code>delonix system prune</code></pre></div>
 <h2 id='df'><code>system df</code></h2>
-<div class='help'><pre><code>Uso de disco por área (imagens, containers, volumes, imagens VM)
+<div class='help'><pre><code>Disk usage by area (images, containers, volumes, VM images)
 
 Usage: delonix-x86_64-linux system df [OPTIONS]
 
@@ -110,7 +110,7 @@ Options:
   -h, --help          Print help</code></pre></div>
 <h3>Exemplos</h3><div class="ex"><div class="cap">Uso de disco</div><pre><code>delonix system df</code></pre></div>
 <h2 id='info'><code>system info</code></h2>
-<div class='help'><pre><code>Estado do motor: rootless?, delegação de cgroup, infra de rede, contagens
+<div class='help'><pre><code>Engine state: rootless?, cgroup delegation, network infra, counts
 
 Usage: delonix-x86_64-linux system info [OPTIONS]
 

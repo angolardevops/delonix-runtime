@@ -78,19 +78,19 @@ A password vem do cofre (<code>--password-secret</code>), nunca do argv. Ligado 
 Usage: delonix-x86_64-linux storage [OPTIONS] &lt;COMMAND&gt;
 
 Commands:
-  dash     Dashboard (KPIs + tabela) do storage/volumes — TUI, ou `--once` snapshot
-  create   Cria (e monta) um armazenamento de rede
-  ls       Lista os armazenamentos de rede (volumes com driver de rede)
-  inspect  Detalhe de um armazenamento
-  rm       Remove (e desmonta) um armazenamento. Os DADOS ficam no NAS — só se desliga a montagem local, como o docker
-  apply    Aplica os documentos `kind: Storage` de um manifesto
+  dash     Storage/volumes dashboard (KPIs + table) — TUI, or `--once` snapshot
+  create   Create (and mount) a network storage
+  ls       List the network storages (volumes with a network driver)
+  inspect  Details of a storage
+  rm       Remove (and unmount) a storage. The DATA stays on the NAS — only the local mount is torn down, like docker
+  apply    Apply the `kind: Storage` documents from a manifest
   help     Print this message or the help of the given subcommand(s)
 
 Options:
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
   -h, --help          Print help</code></pre></div>
 <h2 id='create'><code>storage create</code></h2>
-<div class='help'><pre><code>Cria (e monta) um armazenamento de rede
+<div class='help'><pre><code>Create (and mount) a network storage
 
 Usage: delonix-x86_64-linux storage create [OPTIONS] --type &lt;TYPE&gt; --server &lt;SERVER&gt; --share &lt;SHARE&gt; &lt;NAME&gt;
 
@@ -101,26 +101,26 @@ Options:
       --l18n &lt;en|pt&gt;
           Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
       --type &lt;TYPE&gt;
-          Tipo: `nfs` | `cifs`/`smb` (Samba/Windows) | `webdav` (Nextcloud/ownCloud) [possible values: nfs, cifs, smb, webdav]
+          Type: `nfs` | `cifs`/`smb` (Samba/Windows) | `webdav` (Nextcloud/ownCloud) [possible values: nfs, cifs, smb, webdav]
       --server &lt;SERVER&gt;
-          Servidor (host/IP), ou o URL base no caso do `webdav`
+          Server (host/IP), or the base URL in the `webdav` case
       --share &lt;SHARE&gt;
-          Export/partilha: caminho NFS (`/mnt/pool/media`), nome da share CIFS (`media`), ou o caminho no URL WebDAV (`/remote.php/dav/...`)
+          Export/share: NFS path (`/mnt/pool/media`), CIFS share name (`media`), or the path in the WebDAV URL (`/remote.php/dav/...`)
       --username &lt;USERNAME&gt;
-          Utilizador (cifs/webdav)
+          User (cifs/webdav)
       --password &lt;PASSWORD&gt;
-          Password (cifs/webdav) — preferir `--password-secret` para não a expor
+          Password (cifs/webdav) — prefer `--password-secret` to avoid exposing it
       --password-secret &lt;PASSWORD_SECRET&gt;
-          Segredo do cofre com a chave `password` (cifs/webdav) — não vaza no histórico
+          Vault secret with the `password` key (cifs/webdav) — does not leak in shell history
       --read-only
-          Monta só-de-leitura
+          Mount read-only
       --options &lt;OPTIONS&gt;
-          Opções de mount extra (`vers=4.1,soft`), acrescentadas às derivadas
+          Extra mount options (`vers=4.1,soft`), appended to the derived ones
   -h, --help
           Print help</code></pre></div>
 <h3>Exemplos</h3><div class="ex"><div class="cap">NFS de um TrueNAS</div><pre><code>delonix storage create media --type nfs --server 10.0.0.5 --share /mnt/pool/media</code></pre></div><div class="ex"><div class="cap">SMB/CIFS com password do cofre</div><pre><code>delonix storage create docs --type cifs --server nas --share docs --username user --password-secret nas-pass</code></pre></div>
 <h2 id='ls'><code>storage ls</code></h2>
-<div class='help'><pre><code>Lista os armazenamentos de rede (volumes com driver de rede)
+<div class='help'><pre><code>List the network storages (volumes with a network driver)
 
 Usage: delonix-x86_64-linux storage ls [OPTIONS]
 
@@ -129,7 +129,7 @@ Options:
   -h, --help          Print help</code></pre></div>
 <h3>Exemplos</h3><div class="ex"><pre><code>delonix storage ls</code></pre></div>
 <h2 id='rm'><code>storage rm</code></h2>
-<div class='help'><pre><code>Remove (e desmonta) um armazenamento. Os DADOS ficam no NAS — só se desliga a montagem local, como o docker
+<div class='help'><pre><code>Remove (and unmount) a storage. The DATA stays on the NAS — only the local mount is torn down, like docker
 
 Usage: delonix-x86_64-linux storage rm [OPTIONS] &lt;NAME&gt;
 

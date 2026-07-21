@@ -78,26 +78,26 @@ automaticamente. É a camada que o <code>delonix cluster kubeadm</code> usa para
 Usage: delonix-x86_64-linux vm [OPTIONS] &lt;COMMAND&gt;
 
 Commands:
-  dash      Dashboard (KPIs + tabela) das VMs — TUI interactivo, ou `--once` snapshot
-  init      Inicializa um projecto com manifesto de VM — ficheiros JÁ PREENCHIDOS (imagens incluídas), prontos a usar sem editar nada
-  create    Cria (ou auto-recupera) uma VM
+  dash      Dashboard (KPIs + table) of the VMs — interactive TUI, or `--once` snapshot
+  init      Bootstrap a project with a VM manifest — files ALREADY FILLED IN (images included), ready to use without editing anything
+  create    Create (or auto-recover) a VM
   pull      Pull a golden VM image from an OCI registry — with no argument, the OFFICIAL Delonix image (ready for `vm create`/`cluster kubeadm`)
   push      Push a local golden VM image to an OCI registry (`vm push &lt;name&gt; &lt;target&gt;`)
-  ls        Lista as VMs
+  ls        List the VMs
   console   Attach to the VM&#x27;s serial console (interactive terminal) — works with no IP (boot logs, login). Escape: Ctrl-] 
   vnc       Print the VNC address of a graphical VM (created with `--vnc`, libvirt)
-  status    Estado actual (reconcilia liveness/IP com o backend)
-  describe  Detalhe legível de uma ou mais VMs, ao estilo `kubectl describe` (para humanos; use `status` para a vista compacta de sempre). Inclui o estado AO VIVO — `delonix_vm::status` reconcilia liveness/IP com o backend
-  stop      Pára a VM (preserva disco/registo)
-  rm        Remove a VM (pára + apaga overlay/estado)
-  apply     Aplica os documentos `kind: Vm` de um manifesto (`delonix_vm::create` já é idempotente por nome — cria ou auto-recupera)
+  status    Current state (reconciles liveness/IP with the backend)
+  describe  Human-readable detail of one or more VMs, `kubectl describe` style (for humans; use `status` for the usual compact view). Includes the LIVE state — `delonix_vm::status` reconciles liveness/IP with the backend
+  stop      Stop the VM (preserves disk/record)
+  rm        Remove the VM (stops + deletes overlay/state)
+  apply     Apply the `kind: Vm` documents of a manifest (`delonix_vm::create` is already idempotent by name — creates or auto-recovers)
   help      Print this message or the help of the given subcommand(s)
 
 Options:
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
   -h, --help          Print help</code></pre></div>
 <h2 id='create'><code>vm create</code></h2>
-<div class='help'><pre><code>Cria (ou auto-recupera) uma VM
+<div class='help'><pre><code>Create (or auto-recover) a VM
 
 Usage: delonix-x86_64-linux vm create [OPTIONS] &lt;NAME&gt;
 
@@ -106,45 +106,47 @@ Arguments:
 
 Options:
       --disk &lt;DISK&gt;
-          Disco base (qcow2/raw) — vira overlay por-VM. Omite para usar a imagem VM dourada local (se houver exactamente uma; `image --vm ls`)
+          Base disk (qcow2/raw) — becomes a per-VM overlay. Omit to use the local golden VM image (if there is exactly one; `image --vm ls`)
       --l18n &lt;en|pt&gt;
           Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
       --vcpus &lt;VCPUS&gt;
           [default: 1]
       --memory &lt;MEMORY&gt;
-          Memória (`&quot;2G&quot;`/`&quot;1024M&quot;`) [default: 1G]
+          Memory (`&quot;2G&quot;`/`&quot;1024M&quot;`) [default: 1G]
       --network &lt;NETWORK&gt;
           Ingress network for the tap (default: the system ingress network; a custom network must be created first with `delonix network create`) [default: ingress]
       --kernel &lt;KERNEL&gt;
-          Kernel para direct boot
+          Kernel for direct boot
       --initrd &lt;INITRD&gt;
           
       --firmware &lt;FIRMWARE&gt;
-          Firmware, alternativa ao kernel (cloud images)
+          Firmware, alternative to the kernel (cloud images)
       --cmdline &lt;CMDLINE&gt;
           
       --seed &lt;SEED&gt;
-          ISO cloud-init (NoCloud) já pronta — se dado, tem prioridade sobre `--hostname`/`--ssh-key`/`--user-data` (esses geram a ISO; este usa-a directamente)
+          Ready-made cloud-init (NoCloud) ISO — if given, takes priority over `--hostname`/`--ssh-key`/`--user-data` (those generate the ISO; this uses it directly)
       --hostname &lt;HOSTNAME&gt;
-          Hostname a aplicar no primeiro boot (gera a ISO NoCloud se nenhum `--seed` explícito for dado)
+          Hostname to apply on first boot (generates the NoCloud ISO if no explicit `--seed` is given)
       --ssh-key &lt;SSH_KEYS&gt;
-          Chave SSH pública autorizada, `ssh-ed25519 AAAA...` ou `@caminho` para ler de um ficheiro. Repetível
+          Authorized public SSH key, `ssh-ed25519 AAAA...` or `@path` to read from a file. Repeatable
       --user-data &lt;USER_DATA&gt;
-          `user-data` cloud-init próprio (substitui totalmente o gerado por omissão) — controlo completo para quem precisar
+          Your own cloud-init `user-data` (fully replaces the default-generated one) — full control for whoever needs it
       --restart-policy &lt;RESTART_POLICY&gt;
           `no`|`on-failure`|`always`
       --hugepages
           
       --cpu-affinity &lt;CPU_AFFINITY&gt;
-          Afinidade de cores, ex.: `8-15`
+          Core affinity, e.g. `8-15`
       --device &lt;DEVICES&gt;
-          VFIO PCI passthrough, repetível
+          VFIO PCI passthrough, repeatable
       --backend &lt;BACKEND&gt;
-          `cloud-hypervisor`|`libvirt` (omitir = auto-deteção)
+          `cloud-hypervisor`|`libvirt` (omit = auto-detection)
       --net-mode &lt;NET_MODE&gt;
-          Só libvirt: `user`|`nat`|`bridge`
+          libvirt only: `user`|`nat`|`bridge`
       --bridge &lt;BRIDGE&gt;
-          Nome da bridge (net-mode=bridge) ou rede libvirt (nat)
+          Bridge name (net-mode=bridge) or libvirt network (nat)
+      --ip &lt;IP&gt;
+          Static IP (libvirt nat mode): DHCP reservation on the libvirt network
       --vnc
           VNC graphical console (libvirt backend only — Cloud Hypervisor has no display)
       --console
@@ -157,7 +159,7 @@ Options:
           Print help</code></pre></div>
 <h3>Exemplos</h3><div class="ex"><div class="cap">VM a partir da imagem dourada, com chave SSH</div><pre><code>delonix vm create --name node1 --image k8s-golden --cpus 2 --memory 4096 --ssh-key @~/.ssh/id_ed25519.pub</code></pre></div>
 <h2 id='ls'><code>vm ls</code></h2>
-<div class='help'><pre><code>Lista as VMs
+<div class='help'><pre><code>List the VMs
 
 Usage: delonix-x86_64-linux vm ls [OPTIONS]
 
@@ -166,19 +168,19 @@ Options:
   -h, --help          Print help</code></pre></div>
 <h3>Exemplos</h3><div class="ex"><pre><code>delonix vm ls</code></pre></div>
 <h2 id='status'><code>vm status</code></h2>
-<div class='help'><pre><code>Estado actual (reconcilia liveness/IP com o backend)
+<div class='help'><pre><code>Current state (reconciles liveness/IP with the backend)
 
 Usage: delonix-x86_64-linux vm status [OPTIONS] [NAME]
 
 Arguments:
-  [NAME]  VM a consultar (omite para o estado de TODAS)
+  [NAME]  VM to query (omit for the state of ALL)
 
 Options:
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
   -h, --help          Print help</code></pre></div>
 <h3>Exemplos</h3><div class="ex"><div class="cap">Reconcilia liveness/IP com o backend</div><pre><code>delonix vm status node1</code></pre></div>
 <h2 id='stop'><code>vm stop</code></h2>
-<div class='help'><pre><code>Pára a VM (preserva disco/registo)
+<div class='help'><pre><code>Stop the VM (preserves disk/record)
 
 Usage: delonix-x86_64-linux vm stop [OPTIONS] &lt;NAME&gt;
 
@@ -190,7 +192,7 @@ Options:
   -h, --help          Print help</code></pre></div>
 <h3>Exemplos</h3><div class="ex"><pre><code>delonix vm stop node1</code></pre></div>
 <h2 id='rm'><code>vm rm</code></h2>
-<div class='help'><pre><code>Remove a VM (pára + apaga overlay/estado)
+<div class='help'><pre><code>Remove the VM (stops + deletes overlay/state)
 
 Usage: delonix-x86_64-linux vm rm [OPTIONS] &lt;NAME&gt;
 
@@ -203,7 +205,7 @@ Options:
   -h, --help          Print help</code></pre></div>
 <h3>Exemplos</h3><div class="ex"><pre><code>delonix vm rm node1</code></pre></div>
 <h2 id='apply'><code>vm apply</code></h2>
-<div class='help'><pre><code>Aplica os documentos `kind: Vm` de um manifesto (`delonix_vm::create` já é idempotente por nome — cria ou auto-recupera)
+<div class='help'><pre><code>Apply the `kind: Vm` documents of a manifest (`delonix_vm::create` is already idempotent by name — creates or auto-recovers)
 
 Usage: delonix-x86_64-linux vm apply [OPTIONS]
 

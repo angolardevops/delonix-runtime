@@ -79,21 +79,21 @@ de containers a esses drivers é trabalho futuro.</p>
 Usage: delonix-x86_64-linux network [OPTIONS] &lt;COMMAND&gt;
 
 Commands:
-  dash      Dashboard (KPIs + tabela) das redes — TUI interactivo, ou `--once` snapshot
-  ls        Lista as redes
-  node      Identidade WireGuard DESTE nó, para o overlay VXLAN cifrado entre nós (`network create --driver overlay`). A chave privada fica 0600 em `&lt;root&gt;/wg/node.key`; a pública é o que se distribui aos peers
-  create    Cria uma rede
-  inspect   Detalhe de uma rede
-  describe  Detalhe legível de uma ou mais redes, ao estilo `kubectl describe` (para humanos; use `inspect` para a vista compacta de sempre)
-  rm        Remove uma rede
-  apply     Aplica os documentos `kind: Network` de um manifesto (idempotente por nome)
+  dash      Dashboard (KPIs + table) of the networks — interactive TUI, or `--once` snapshot
+  ls        List the networks
+  node      WireGuard identity of THIS node, for the encrypted VXLAN overlay between nodes (`network create --driver overlay`). The private key stays 0600 in `&lt;root&gt;/wg/node.key`; the public one is what you hand out to the peers
+  create    Create a network
+  inspect   Detail of a network
+  describe  Readable detail of one or more networks, `kubectl describe` style (for humans; use `inspect` for the usual compact view)
+  rm        Remove a network
+  apply     Apply the `kind: Network` documents of a manifest (idempotent by name)
   help      Print this message or the help of the given subcommand(s)
 
 Options:
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
   -h, --help          Print help</code></pre></div>
 <h2 id='create'><code>network create</code></h2>
-<div class='help'><pre><code>Cria uma rede
+<div class='help'><pre><code>Create a network
 
 Usage: delonix-x86_64-linux network create [OPTIONS] &lt;NAME&gt;
 
@@ -101,18 +101,18 @@ Arguments:
   &lt;NAME&gt;  
 
 Options:
-      --driver &lt;DRIVER&gt;    `bridge` (default, filtrada pelo firewall) | `macvlan` | `ipvlan` (NÃO filtrados, ver aviso) | `overlay` (VXLAN inter-nó) [default: bridge]
+      --driver &lt;DRIVER&gt;    `bridge` (default, filtered by the firewall) | `macvlan` | `ipvlan` (NOT filtered, see warning) | `overlay` (inter-node VXLAN) [default: bridge]
       --l18n &lt;en|pt&gt;       Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-      --parent &lt;PARENT&gt;    NIC-pai do host (obrigatório p/ macvlan/ipvlan)
-      --subnet &lt;SUBNET&gt;    Subnet (obrigatório p/ macvlan/ipvlan, ex.: `192.168.1.0/24`)
+      --parent &lt;PARENT&gt;    Host parent NIC (required for macvlan/ipvlan)
+      --subnet &lt;SUBNET&gt;    Subnet (required for macvlan/ipvlan, e.g.: `192.168.1.0/24`)
       --gateway &lt;GATEWAY&gt;  Gateway (macvlan/ipvlan) [default: &quot;&quot;]
-      --vni &lt;VNI&gt;          VXLAN Network Identifier (obrigatório p/ overlay)
-      --peer &lt;PEERS&gt;       Nó-par (`&lt;ip&gt;` ou `&lt;ip&gt;=&lt;wg_pubkey&gt;=&lt;wg_ip&gt;`), repetível (overlay)
-      --wg-ip &lt;WG_IP&gt;      IP de túnel WireGuard deste nó (overlay cifrado)
+      --vni &lt;VNI&gt;          VXLAN Network Identifier (required for overlay)
+      --peer &lt;PEERS&gt;       Peer node (`&lt;ip&gt;` or `&lt;ip&gt;=&lt;wg_pubkey&gt;=&lt;wg_ip&gt;`), repeatable (overlay)
+      --wg-ip &lt;WG_IP&gt;      WireGuard tunnel IP of this node (encrypted overlay)
   -h, --help               Print help</code></pre></div>
 <h3>Exemplos</h3><div class="ex"><div class="cap">Rede bridge para um grupo de serviços</div><pre><code>delonix network create backend</code></pre></div>
 <h2 id='ls'><code>network ls</code></h2>
-<div class='help'><pre><code>Lista as redes
+<div class='help'><pre><code>List the networks
 
 Usage: delonix-x86_64-linux network ls [OPTIONS]
 
@@ -121,7 +121,7 @@ Options:
   -h, --help          Print help</code></pre></div>
 <h3>Exemplos</h3><div class="ex"><pre><code>delonix network ls</code></pre></div>
 <h2 id='inspect'><code>network inspect</code></h2>
-<div class='help'><pre><code>Detalhe de uma rede
+<div class='help'><pre><code>Detail of a network
 
 Usage: delonix-x86_64-linux network inspect [OPTIONS] &lt;NAME&gt;
 
@@ -133,7 +133,7 @@ Options:
   -h, --help          Print help</code></pre></div>
 <h3>Exemplos</h3><div class="ex"><pre><code>delonix network inspect backend</code></pre></div>
 <h2 id='rm'><code>network rm</code></h2>
-<div class='help'><pre><code>Remove uma rede
+<div class='help'><pre><code>Remove a network
 
 Usage: delonix-x86_64-linux network rm [OPTIONS] &lt;NAME&gt;
 
@@ -145,7 +145,7 @@ Options:
   -h, --help          Print help</code></pre></div>
 <h3>Exemplos</h3><div class="ex"><pre><code>delonix network rm backend</code></pre></div>
 <h2 id='apply'><code>network apply</code></h2>
-<div class='help'><pre><code>Aplica os documentos `kind: Network` de um manifesto (idempotente por nome)
+<div class='help'><pre><code>Apply the `kind: Network` documents of a manifest (idempotent by name)
 
 Usage: delonix-x86_64-linux network apply [OPTIONS]
 

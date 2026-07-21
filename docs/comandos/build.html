@@ -80,12 +80,12 @@ com extensões (<code>SCAN</code>, <code>CPUS</code>, <code>MEMORY</code>, <code
 Usage: delonix-x86_64-linux build [OPTIONS] --tag &lt;TAG&gt; [CONTEXT]
 
 Arguments:
-  [CONTEXT]  Contexto de build (default: `.`) — raiz para `COPY` [default: .]
+  [CONTEXT]  Build context (default: `.`) — root for `COPY` [default: .]
 
 Options:
-  -f, --file &lt;FILE&gt;   Caminho do Dockerfile (default: `&lt;contexto&gt;/Dockerfile`)
+  -f, --file &lt;FILE&gt;   Path of the Dockerfile (default: `&lt;context&gt;/Dockerfile`)
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-  -t, --tag &lt;TAG&gt;     Tag da imagem resultante (`repo:tag`)
+  -t, --tag &lt;TAG&gt;     Tag of the resulting image (`repo:tag`)
   -h, --help          Print help</code></pre></div>
 <h2>Exemplos</h2><div class="ex"><div class="cap">Build com tag</div><pre><code>delonix build -t minha-app:1.0 .</code></pre></div><div class="ex"><div class="cap">Delonixfile explícito</div><pre><code>delonix build -t api:dev -f Delonixfile ./servico</code></pre></div>
 <footer>Delonix Runtime · Apache-2.0 · <a href="https://github.com/angolardevops/delonix-runtime">angolardevops/delonix-runtime</a>
