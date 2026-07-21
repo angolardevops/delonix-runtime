@@ -8,7 +8,7 @@ use clap_complete::engine::ArgValueCandidates;
 use delonix_runtime_core::{Error, Result};
 use delonix_vm::VmConfig;
 use delonix_volume::VolumeStore;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use super::manifest::{self, ManifestDoc};
 use super::output;
@@ -16,7 +16,7 @@ use super::util::state_root;
 
 /// `spec` for `kind: Vm` — mirrors `delonix_vm::VmConfig` (minus `name`, which
 /// comes from `metadata.name`).
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 struct VmSpec {
     disk: String,
     #[serde(default = "default_vcpus")]
@@ -100,7 +100,7 @@ struct VmSpec {
 }
 
 /// `spec.cpuTopology` of a `kind: Vm`.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 struct CpuTopologySpec {
     #[serde(default)]
     sockets: u32,
@@ -111,7 +111,7 @@ struct CpuTopologySpec {
 }
 
 /// One entry of `spec.extraDisks`.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 struct ExtraDiskSpec {
     /// Host path of the disk image.
     source: String,
@@ -129,7 +129,7 @@ struct ExtraDiskSpec {
 }
 
 /// One entry of `spec.extraNics`.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 struct ExtraNicSpec {
     /// `network` (libvirt network), `bridge` (host bridge) or `user`.
     #[serde(rename = "type", alias = "kind")]
@@ -144,7 +144,7 @@ struct ExtraNicSpec {
 
 /// One entry of a VM's `spec.volumes`: refers to a `Volume`/`Storage` by
 /// name and says where to mount it in the guest.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 struct VmVolumeSpec {
     /// Name of a `kind: Volume` or `kind: Storage` (resolved at apply time).
     name: String,
@@ -477,6 +477,12 @@ fn resolve_vm_volumes(
         });
     }
     Ok(out)
+}
+
+/// Dry-run: the spec with every `#[serde(default)]` materialized.
+pub fn spec_with_defaults(doc: &ManifestDoc) -> Result<serde_yaml::Value> {
+    let spec: VmSpec = manifest::spec_of(doc)?;
+    serde_yaml::to_value(spec).map_err(|e| Error::Invalid(format!("dry-run: {e}")))
 }
 
 pub fn apply(docs: &[ManifestDoc]) -> Result<()> {

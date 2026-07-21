@@ -14,7 +14,7 @@ use delonix_net::infra;
 use delonix_runtime_core::{
     fw_port_ok, fw_proto_ok, fw_src_ok, Container, Error, FwRule, Result, Store,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use super::manifest::{self, ManifestDoc};
 use super::output;
@@ -652,8 +652,13 @@ fn egress_net(network: &str, mode: EgressMode, to: Option<String>) -> Result<()>
 /// the other direction untouched, so an `Ingress` and an `Egress` doc compose
 /// on the same container. Allowlist by default (`defaultPolicy: deny`), like a
 /// k8s NetworkPolicy.
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 struct FwDocSpec {
+    /// `ingress`|`egress` — only for `kind: FirewallPolicy` (the direction comes
+    /// from the Kind for the legacy `Egress`). Captured so the dry-run round-trip
+    /// preserves it; `apply` reads it directly from `doc.spec`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    direction: Option<String>,
     /// `container` (default) or `network`. In `network` (only `Egress`), the `target`
     /// is a NETWORK NAME and the per-network egress policy + CIDR/FQDN allowlist +
     /// L4 rate-limit apply — not per-container L4 rules.
@@ -683,7 +688,7 @@ struct FwDocSpec {
 
 /// `spec.rateLimit` — the ingress L4 DDoS protection (global). `{connRate: 0,
 /// connMax: 0}` explicitly TURNS OFF the guard (clear_l4_guard).
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 struct RateLimitSpec {
     /// New connections per second allowed.
     #[serde(default, rename = "connRate")]
@@ -706,7 +711,7 @@ pub(crate) const FW_SPEC_FIELDS: &[&str] = &[
     "rateLimit",
 ];
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 struct FwDocRule {
     /// `tcp`/`udp`/`any` (default `any`).
     #[serde(default)]
@@ -728,6 +733,12 @@ struct FwDocRule {
 
 /// Applies every `Ingress` and `Egress` document in the manifest. Called last in
 /// `stack apply` (the target containers must already exist).
+/// Dry-run: the firewall spec (`Egress`/`FirewallPolicy`) with defaults materialized.
+pub fn spec_with_defaults(doc: &ManifestDoc) -> Result<serde_yaml::Value> {
+    let spec: FwDocSpec = manifest::spec_of(doc)?;
+    serde_yaml::to_value(spec).map_err(|e| Error::Invalid(format!("dry-run: {e}")))
+}
+
 pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
     let (_images, store) = open_stores()?;
     // NB: `kind: Ingress` is NO LONGER firewall — it is now the k8s-shaped L7/HTTP

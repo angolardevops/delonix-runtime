@@ -158,9 +158,13 @@ dependência (herda a namespace) — o Stack não sobrevive ao load, tudo o rest
 apply por-Kind) vê os filhos. (3) **`kind: Ingress` = Ingress L7 k8s** (ver secção do reverse-proxy;
 firewall foi para `FirewallPolicy`). (4) **`stack apply --dry-run`** — `manifest::render_with_
 defaults` faz round-trip do spec pelo struct tipado (materializa os `#[serde(default)]`) e imprime
-o YAML completo sem aplicar (estilo `kubectl --dry-run=client -o yaml`); precisou de `Serialize` nos
-specs simples (Network/Volume/Storage/Image/Dependency/Container-flat + Metadata/ManifestDoc), os
-Kinds com nested (Vm/HTTPRoute/Ingress/Firewall/Container-pod/Secret) caem no spec cru — extensível.
+o YAML completo sem aplicar (estilo `kubectl --dry-run=client -o yaml`). Cada grupo expõe um
+`pub fn spec_with_defaults(doc) -> serde_yaml::Value` (round-trip pelo seu spec tipado, que tem
+`Serialize`); cobre **todos os Kinds** — Network/Volume/Storage/Image/Dependency/Vm/HTTPRoute/
+Ingress(k8s)/Egress/FirewallPolicy/Container (flat E Pod-shape, via `pod_spec_with_defaults`). Só
+**`Secret`** fica no spec cru de propósito (não reformatar `stringData`). `FwDocSpec` ganhou o campo
+`direction` (Option, `skip_serializing_if`) para o round-trip o preservar (o `apply` lê-o do
+`doc.spec`). `Metadata`/`ManifestDoc` têm `Serialize` (+ `skip_serializing_if` nos campos vazios).
 
 - **`delonix <container|image|vm|volumes|network> apply [-f ficheiro]`** — aplica só os
   documentos do Kind desse grupo (ignora os outros). Sem `-f`, usa `./delonix-manifest.yaml`

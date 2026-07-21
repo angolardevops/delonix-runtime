@@ -82,10 +82,14 @@ fn filled_spec(doc: &ManifestDoc) -> Result<serde_yaml::Value> {
         // reformat its `stringData` through the renderer.
         "Image" => cmd::image::spec_with_defaults(doc),
         "Dependency" => cmd::dependency::spec_with_defaults(doc),
-        // Flat `kind: Container` only (the Pod shape has nested structs — raw for now).
-        "Container" if doc.spec.get("containers").is_none() => {
-            cmd::container::spec_with_defaults(doc)
+        "Vm" => cmd::vm::spec_with_defaults(doc),
+        "HTTPRoute" => cmd::httproute::spec_with_defaults(doc),
+        "Ingress" => cmd::httproute::ingress_spec_with_defaults(doc),
+        "Egress" | "FirewallPolicy" => cmd::firewall::spec_with_defaults(doc),
+        "Container" if doc.spec.get("containers").is_some() => {
+            cmd::container::pod_spec_with_defaults(doc)
         }
+        "Container" => cmd::container::spec_with_defaults(doc),
         _ => Ok(doc.spec.clone()),
     }
 }
