@@ -768,6 +768,10 @@ pub enum ContainerCmd {
         /// Join a pod's netns (`--net <network>`), sharing IP/ports.
         #[arg(long)]
         pod: Option<String>,
+        /// (internal) init PID of the pod's infra container — join its IPC/UTS
+        /// namespaces (shared pod IPC + hostname). Set by `delonix pod`.
+        #[arg(long = "pod-infra-pid", hide = true)]
+        pod_infra_pid: Option<i32>,
         /// Egress bandwidth cap (`10mbit`, `512kbit`). Only with `--net <network>`.
         #[arg(long = "net-bps")]
         net_bps: Option<String>,
@@ -1031,6 +1035,7 @@ pub fn run(action: ContainerCmd) -> Result<()> {
             knows,
             knows_none,
             pod,
+            pod_infra_pid,
             net_bps,
             net_burst,
             log_driver,
@@ -1091,6 +1096,7 @@ pub fn run(action: ContainerCmd) -> Result<()> {
                 knows,
                 knows_none,
                 pod,
+                pod_infra_pid,
                 net_bps,
                 net_burst,
                 log_driver,
@@ -1494,6 +1500,11 @@ pub(crate) struct RunOpts {
     pub(crate) knows_none: bool,
     #[serde(default)]
     pub(crate) pod: Option<String>,
+    /// (internal) init PID of the pod's infra container. When set, this container
+    /// joins the infra's IPC/UTS namespaces (shared pod IPC + hostname). Set by
+    /// `cmd::pod` for the pod's app containers; flows through the `--pod` re-exec.
+    #[serde(default)]
+    pub(crate) pod_infra_pid: Option<i32>,
     #[serde(default)]
     pub(crate) net_bps: Option<String>,
     #[serde(default)]
@@ -1557,6 +1568,7 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
         knows,
         knows_none,
         pod,
+        pod_infra_pid,
         net_bps,
         net_burst,
         log_driver,
@@ -1923,7 +1935,10 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
         // On re-exec we're already in the right netns: DON'T create another (nor join
         // anything — the `ip netns exec` handled that).
         new_netns: !reexec && (net == "none" || !slirp_ports.is_empty()),
-        join_netns: None,
+        // Pod IPC/UTS sharing: a pod app container (`--pod-infra-pid`) joins the
+        // infra's IPC + UTS in `spawn`/`container_init`. Only meaningful in the
+        // re-exec pass (already in the holder's userns, where `setns` has privilege).
+        pod_infra_pid: if reexec { pod_infra_pid } else { None },
         userns: c.userns && !reexec,
         // Inherits the holder's user+network namespace instead of creating its own.
         inherit_userns: reexec,
@@ -2658,7 +2673,7 @@ fn cmd_start(images: &ImageStore, store: &Store, id: &str) -> Result<()> {
     let spec = RunSpec {
         detach: true,
         new_netns: !reexec && !slirp_ports.is_empty(),
-        join_netns: None,
+        pod_infra_pid: None,
         userns: c.userns && !reexec,
         inherit_userns: reexec,
         log_path: Some(log_path),

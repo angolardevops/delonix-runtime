@@ -1950,7 +1950,7 @@ fn container_init(
     sync: Option<(i32, i32)>,
     apparmor: Option<&str>,
     selinux: Option<&str>,
-    join_netns: Option<&str>,
+    pod_infra_pid: Option<i32>,
     env: &[String],
     read_only: bool,
     cap_keep: u64,
@@ -1985,20 +1985,36 @@ fn container_init(
             libc::close(r);
         }
     }
-    // Pod: joins the infra container's network namespace (shares IP/localhost).
-    if let Some(path) = join_netns {
-        match open(path, OFlag::O_RDONLY | OFlag::O_CLOEXEC, Mode::empty()) {
-            Ok(fd) => {
-                // SAFETY: valid fd; setns(NEWNET) joins the pod's netns.
-                let owned = unsafe { OwnedFd::from_raw_fd(fd) };
-                if setns(owned, CloneFlags::CLONE_NEWNET).is_err() {
-                    eprintln!("delonix: failed to join the pod netns");
+    // Pod IPC/UTS sharing: join the infra container's IPC + UTS namespaces so the
+    // pod's containers share System V/POSIX IPC and the UTS/hostname. The netns is
+    // already joined (the `--pod` re-exec's `ip netns exec`). We run in the
+    // holder's userns (via that re-exec), which OWNS these namespaces, so `setns`
+    // has privilege — the reason the old `join_netns` setns failed rootless no
+    // longer applies. IPC/UTS are "immediate" namespaces (setns moves us directly);
+    // we suppressed CLONE_NEWIPC/NEWUTS in `spawn` so there is one to join into.
+    if let Some(pid) = pod_infra_pid {
+        for (sub, flag) in [
+            ("ipc", CloneFlags::CLONE_NEWIPC),
+            ("uts", CloneFlags::CLONE_NEWUTS),
+        ] {
+            let path = format!("/proc/{pid}/ns/{sub}");
+            match open(
+                path.as_str(),
+                OFlag::O_RDONLY | OFlag::O_CLOEXEC,
+                Mode::empty(),
+            ) {
+                Ok(fd) => {
+                    // SAFETY: valid fd; setns joins the pod infra's ipc/uts ns.
+                    let owned = unsafe { OwnedFd::from_raw_fd(fd) };
+                    if setns(owned, flag).is_err() {
+                        eprintln!("delonix: failed to join the pod {sub} namespace");
+                        return 125;
+                    }
+                }
+                Err(_) => {
+                    eprintln!("delonix: pod {sub} namespace unavailable (infra pid {pid})");
                     return 125;
                 }
-            }
-            Err(_) => {
-                eprintln!("delonix: pod netns unavailable");
-                return 125;
             }
         }
     }
@@ -2812,9 +2828,15 @@ pub struct RunSpec<'a> {
     pub detach: bool,
     /// Creates its own *network namespace* (`CLONE_NEWNET`).
     pub new_netns: bool,
-    /// Instead of creating a netns, joins this one (path to `/proc/<pid>/ns/net`)
-    /// — used by the members of a **pod** (they share the infra container's network).
-    pub join_netns: Option<String>,
+    /// **Pod IPC/UTS sharing**: the init PID of the pod's infra container. When
+    /// set, this container does NOT create its own IPC/UTS namespaces — it
+    /// `setns` into the infra's (`/proc/<pid>/ns/{ipc,uts}`), so the pod's
+    /// containers share System V/POSIX IPC and the UTS/hostname. Safe in rootless
+    /// because the `--pod` re-exec already put us in the holder's userns (which
+    /// owns those namespaces), where `setns` has privilege — the reason the old
+    /// `join_netns` setns failed no longer applies. The netns is joined earlier by
+    /// the re-exec's `ip netns exec`. (PID sharing lands with `shareProcessNamespace`.)
+    pub pod_infra_pid: Option<i32>,
     /// Volumes/bind mounts to inject into the rootfs.
     pub mounts: Vec<Mount>,
     /// Log file for the stdout/stderr (detached) — the "file" *log driver*.
@@ -2988,7 +3010,7 @@ fn spawn(store: &Store, container: &mut Container, rootfs: &str, spec: &RunSpec<
     let mounts = spec.mounts.clone();
     let apparmor = spec.apparmor.clone();
     let selinux = spec.selinux.clone();
-    let join_netns = spec.join_netns.clone();
+    let pod_infra_pid = spec.pod_infra_pid;
     let env = container.env.clone();
     let read_only = container.read_only;
     // --privileged: keeps ALL caps + seccomp unconfined + cgroupns + /sys RW
@@ -3050,11 +3072,19 @@ fn spawn(store: &Store, container: &mut Container, rootfs: &str, spec: &RunSpec<
     // IPC prevents a container from seeing/altering the host's shared memory and message
     // queues (like Docker). `--host-pid`/`--host-ipc` (and the CRI
     // `namespace_options: NODE`) waive that isolation.
-    let mut flags = CloneFlags::CLONE_NEWNS | CloneFlags::CLONE_NEWUTS;
+    // Pod IPC/UTS sharing: a pod member does NOT create its own IPC/UTS — it will
+    // `setns` into the infra container's (in `container_init`), so the pod shares
+    // System V/POSIX IPC and the UTS/hostname. (PID stays isolated here; sharing
+    // it is `shareProcessNamespace`, handled separately.)
+    let join_pod = spec.pod_infra_pid.is_some();
+    let mut flags = CloneFlags::CLONE_NEWNS;
+    if !join_pod {
+        flags |= CloneFlags::CLONE_NEWUTS;
+    }
     if !spec.host_pid {
         flags |= CloneFlags::CLONE_NEWPID;
     }
-    if !spec.host_ipc {
+    if !spec.host_ipc && !join_pod {
         flags |= CloneFlags::CLONE_NEWIPC;
     }
     // Rootless ingress: we inherit the holder's netns + userns (we are already there via
@@ -3136,7 +3166,7 @@ fn spawn(store: &Store, container: &mut Container, rootfs: &str, spec: &RunSpec<
             sync,
             apparmor.as_deref(),
             selinux.as_deref(),
-            join_netns.as_deref(),
+            pod_infra_pid,
             &env,
             read_only,
             cap_keep,
