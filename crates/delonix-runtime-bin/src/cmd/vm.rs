@@ -822,7 +822,10 @@ pub fn run(action: VmCmd) -> Result<()> {
 /// addresses) — what a `nat` VM uses to reach a host-published service.
 /// Best-effort: no `ip` tool → empty, and `vm reach` still shows the port binds.
 fn libvirt_gateways() -> Vec<String> {
-    match Command::new("ip").args(["-br", "-4", "addr", "show"]).output() {
+    match Command::new("ip")
+        .args(["-br", "-4", "addr", "show"])
+        .output()
+    {
         Ok(o) if o.status.success() => parse_ip_gateways(&String::from_utf8_lossy(&o.stdout)),
         _ => Vec::new(),
     }
@@ -868,7 +871,9 @@ fn parse_ss_binds(out: &str) -> std::collections::HashMap<String, String> {
         // columns: State Recv-Q Send-Q Local-Address:Port Peer ...
         let cols: Vec<&str> = line.split_whitespace().collect();
         let Some(local) = cols.get(3) else { continue };
-        let Some(idx) = local.rfind(':') else { continue };
+        let Some(idx) = local.rfind(':') else {
+            continue;
+        };
         let (addr, port) = (local[..idx].to_string(), local[idx + 1..].to_string());
         m.entry(port)
             .and_modify(|cur: &mut String| {
@@ -911,7 +916,10 @@ fn cmd_reach(_base: &std::path::Path) -> Result<()> {
                 Some(addr) => {
                     n_reach += 1;
                     let shown = if addr == "0.0.0.0" || addr == "*" {
-                        gateways.first().cloned().unwrap_or_else(|| addr.to_string())
+                        gateways
+                            .first()
+                            .cloned()
+                            .unwrap_or_else(|| addr.to_string())
                     } else {
                         addr.to_string()
                     };
@@ -938,7 +946,7 @@ fn cmd_reach(_base: &std::path::Path) -> Result<()> {
     }
     if n_host > 0 {
         println!();
-        output::warn(&super::po::t(
+        output::warn(super::po::t(
             "Published on loopback only — NOT reachable from VMs:",
         ));
         hostonly.print();
