@@ -238,8 +238,8 @@ fn describe(names: &[String]) -> Result<()> {
         let mut d = output::Describe::new();
         d.field("Pod", name);
         d.field("Namespace", &members[0].namespace);
-        d.field("IP", &infra::container_ip(&pod_netns_name(name)));
-        d.field("Netns", &pod_netns_name(name));
+        d.field("IP", infra::container_ip(&pod_netns_name(name)));
+        d.field("Netns", pod_netns_name(name));
         d.print();
         let mut t = output::Table::new(&["CONTAINER", "IMAGE", "STATUS"]);
         let prefix = format!("{name}-");
