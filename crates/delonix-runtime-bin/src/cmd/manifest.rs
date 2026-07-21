@@ -80,8 +80,108 @@ pub fn canonical_kind(kind: &str) -> &str {
         "vm" | "virtualmachine" => "Vm",
         // `KnowDepends` is the name the user asked for; `Dependency` is the canonical one.
         "knowdepends" | "dependency" => "Dependency",
+        "stack" => "Stack",
         _ => kind,
     }
+}
+
+/// A grouped `kind: Stack` — bundles resources of several Kinds in ONE document
+/// (k8s-Service-like: everything for an app in one place). Expanded at load time
+/// into the individual docs, which then flow through the normal per-Kind apply,
+/// in dependency order. Each child inherits the Stack's namespace unless it sets
+/// its own. The Stack doc itself does not survive the load (it becomes its parts).
+#[derive(Debug, Deserialize)]
+struct StackSpec {
+    #[serde(default)]
+    secrets: Vec<StackItem>,
+    #[serde(default)]
+    networks: Vec<StackItem>,
+    #[serde(default)]
+    volumes: Vec<StackItem>,
+    #[serde(default)]
+    storage: Vec<StackItem>,
+    #[serde(default)]
+    images: Vec<StackItem>,
+    #[serde(default)]
+    vms: Vec<StackItem>,
+    #[serde(default)]
+    containers: Vec<StackItem>,
+    #[serde(default)]
+    ingress: Vec<StackItem>,
+    #[serde(default)]
+    egress: Vec<StackItem>,
+    #[serde(default, rename = "firewallPolicies")]
+    firewall_policies: Vec<StackItem>,
+    #[serde(default, rename = "httpRoutes")]
+    http_routes: Vec<StackItem>,
+    #[serde(default)]
+    dependencies: Vec<StackItem>,
+}
+
+/// One entry inside a `kind: Stack` group: a name + the resource's own `spec`.
+#[derive(Debug, Deserialize)]
+struct StackItem {
+    name: String,
+    #[serde(default)]
+    namespace: Option<String>,
+    #[serde(default)]
+    spec: serde_yaml::Value,
+}
+
+/// Top-level field names accepted in a `kind: Stack` `spec` (unknown-field warning).
+pub const STACK_SPEC_FIELDS: &[&str] = &[
+    "secrets",
+    "networks",
+    "volumes",
+    "storage",
+    "images",
+    "vms",
+    "containers",
+    "ingress",
+    "egress",
+    "firewallPolicies",
+    "httpRoutes",
+    "dependencies",
+];
+
+/// Expands a `kind: Stack` doc into its constituent resource docs, in dependency
+/// order (Secret → Network → Volume → Storage → Image → Vm → Container → firewall
+/// → route → Dependency). Each child inherits the Stack's namespace by default.
+fn expand_stack(doc: &ManifestDoc) -> Result<Vec<ManifestDoc>> {
+    warn_unknown_fields(doc, STACK_SPEC_FIELDS);
+    let spec: StackSpec = spec_of(doc)?;
+    let ns = &doc.metadata.namespace;
+    let groups: Vec<(&str, Vec<StackItem>)> = vec![
+        ("Secret", spec.secrets),
+        ("Network", spec.networks),
+        ("Volume", spec.volumes),
+        ("Storage", spec.storage),
+        ("Image", spec.images),
+        ("Vm", spec.vms),
+        ("Container", spec.containers),
+        ("Ingress", spec.ingress),
+        ("Egress", spec.egress),
+        ("FirewallPolicy", spec.firewall_policies),
+        ("HTTPRoute", spec.http_routes),
+        ("Dependency", spec.dependencies),
+    ];
+    let mut out = Vec::new();
+    for (kind, items) in groups {
+        for it in items {
+            out.push(ManifestDoc {
+                api_version: SUPPORTED_API_VERSION.to_string(),
+                kind: kind.to_string(),
+                metadata: Metadata {
+                    name: it.name,
+                    namespace: it.namespace.or_else(|| ns.clone()),
+                    labels: Default::default(),
+                    annotations: Default::default(),
+                },
+                spec: it.spec,
+            });
+        }
+    }
+    Ok(out)
 }
 
 /// Loads ALL the documents (`---`-separated) of a manifest.
@@ -116,7 +216,14 @@ pub fn load(path: &Path) -> Result<Vec<ManifestDoc>> {
                 doc.kind, doc.metadata.name, doc.api_version
             )));
         }
-        docs.push(doc);
+        // A grouped `kind: Stack` expands into its constituent resource docs
+        // (which then flow through the normal per-Kind apply). The Stack doc
+        // itself does not survive — it becomes its parts.
+        if doc.kind == "Stack" {
+            docs.extend(expand_stack(&doc)?);
+        } else {
+            docs.push(doc);
+        }
     }
     if docs.is_empty() {
         return Err(Error::Invalid(format!(
@@ -452,5 +559,42 @@ spec: { image: alpine }
         assert!(format!("{err}").contains("sem manifesto"));
         std::env::set_current_dir(orig).unwrap();
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn stack_expands_into_child_docs_in_order() {
+        let yaml = "\
+apiVersion: delonix.io/v1
+kind: Stack
+metadata:
+  name: myapp
+  namespace: prod
+spec:
+  networks:
+    - name: web-net
+      spec: { driver: bridge }
+  containers:
+    - name: web
+      spec: { image: nginx }
+    - name: db
+      namespace: data
+      spec: { image: postgres }
+";
+        let dir = std::env::temp_dir();
+        let p = dir.join(format!("delonix-stack-{}.yaml", std::process::id()));
+        std::fs::write(&p, yaml).unwrap();
+        let docs = load(&p).unwrap();
+        let _ = std::fs::remove_file(&p);
+        // The Stack itself is gone; children present, in dependency order.
+        assert!(!docs.iter().any(|d| d.kind == "Stack"));
+        assert_eq!(docs.len(), 3);
+        assert_eq!(docs[0].kind, "Network");
+        assert_eq!(docs[0].metadata.name, "web-net");
+        assert_eq!(docs[0].metadata.namespace.as_deref(), Some("prod")); // inherited
+        assert_eq!(docs[1].kind, "Container");
+        assert_eq!(docs[1].metadata.name, "web");
+        assert_eq!(docs[2].kind, "Container");
+        assert_eq!(docs[2].metadata.name, "db");
+        assert_eq!(docs[2].metadata.namespace.as_deref(), Some("data")); // per-item override
     }
 }

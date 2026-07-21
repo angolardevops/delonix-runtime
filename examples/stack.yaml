@@ -1,0 +1,37 @@
+# kind: Stack — groups a whole app (networks, containers, storage, …) in ONE
+# document (k8s-Service-like). Apply with:
+#   delonix stack apply -f examples/stack.yaml
+# At load time the Stack expands into its constituent resources, which then flow
+# through the normal per-Kind apply IN DEPENDENCY ORDER (Network → … → Container
+# → firewall → route → Dependency). Each child inherits the Stack's namespace
+# unless it sets its own. You can still write the resources as separate documents
+# — the Stack is just a convenient single place to bundle them.
+apiVersion: delonix.io/v1
+kind: Stack
+metadata:
+  name: blog
+  namespace: default
+spec:
+  networks:
+    - name: blog-net
+      spec:
+        driver: bridge
+  containers:
+    - name: web
+      spec:
+        image: nginx:latest
+        network: blog-net
+        ports: ["8080:80"]
+        expose: 80
+    - name: db
+      spec:
+        image: postgres:16
+        network: blog-net
+        env: ["POSTGRES_PASSWORD=change-me"]
+  # Every groupable Kind is available: secrets, volumes, storage, images, vms,
+  # containers, ingress, egress, firewallPolicies, httpRoutes, dependencies.
+  dependencies:
+    - name: web-knows-db
+      spec:
+        from: web
+        to: db
