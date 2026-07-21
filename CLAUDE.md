@@ -601,6 +601,26 @@ substantivo errado). Corrigido em `delonix-vm` (`libvirt_cleanup`/`quiet`/
   `stop_e_remove_de_vm_inexistente_dizem_no_such_vm`. Validado ao vivo: o
   órfão `dev` real (shut off + managed save) foi removido em silêncio.
 
+## Firewall `ingress`/`egress` — o último comando ganha (+ `rm` cirúrgico)
+
+Bug report real: `ingress deny <c> 8069` seguido de `ingress allow <c> 8069`
+deixava o serviço bloqueado PARA SEMPRE — as regras acumulavam no `ContainerFw`
+e a chain nft é first-match terminal, logo o deny antigo (acima) ganhava. Fixado
+em `cmd/firewall.rs::add_rule` (semântica ufw): uma regra nova para o MESMO
+match (dir/proto/porta/origem, com `""`≡`0.0.0.0/0`≡`*` via `norm_any`)
+**substitui** a existente, com nota no output. Para sobreposições parciais (ex.:
+`deny any/8069` vs `allow tcp/8069`, matches distintos) um **aviso de sombra**
+(`field_overlaps`) explica que a regra anterior continua a casar primeiro e diz
+o comando para a tirar. Novo **`ingress|egress rm <c> <[proto/]porta> [--from/
+--to]`** — remoção cirúrgica em que os coringas do spec são FILTRO (`rm c 8069`
+tira tcp/udp/any dessa porta); complementa o `clear` (tudo-ou-nada) e segue a
+sua regra de "firewall vazia desaparece por inteiro". Também corrigido:
+`ingress unpublish` num container PARADO sem rede custom — o hostfwd vive no
+slirp por-container, que morreu com ele; limpa-se só o registo (antes: erro
+"container is not running" e o publish ficava preso). Validado E2E ao vivo
+(deny→000, allow→200 com substituição, rm→limpo). Nota: um `ingress -h` vazio
+reportado uma vez NÃO reproduziu (3× OK) — glitch de terminal, sem causa no CLI.
+
 ## Cluster modo Kind sem Docker — investigação (GO/NO-GO)
 
 Pedido: `delonix cluster` em modo `kind` (sem `kubeadm`) a funcionar **sem Docker instalado** —

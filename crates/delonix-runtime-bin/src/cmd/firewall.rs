@@ -96,6 +96,16 @@ pub enum IngressCmd {
         #[arg(add = ArgValueCandidates::new(super::complete::containers))]
         container: Option<String>,
     },
+    /// Remove inbound rule(s) matching `[proto/]port` (all protos if none given).
+    Rm {
+        #[arg(add = ArgValueCandidates::new(super::complete::containers))]
+        container: String,
+        /// `tcp/5432`, `5432` (any proto), or `*` (all ports).
+        port: String,
+        /// Only rules from this source CIDR (default: any recorded source).
+        #[arg(long)]
+        from: Option<String>,
+    },
     /// Remove all inbound rules (keeps published ports).
     Clear {
         #[arg(add = ArgValueCandidates::new(super::complete::containers))]
@@ -155,6 +165,16 @@ pub enum EgressCmd {
         #[arg(add = ArgValueCandidates::new(super::complete::containers))]
         container: Option<String>,
     },
+    /// Remove outbound rule(s) matching `[proto/]port` (all protos if none given).
+    Rm {
+        #[arg(add = ArgValueCandidates::new(super::complete::containers))]
+        container: String,
+        /// `tcp/5432`, `5432` (any proto), or `*` (all ports).
+        port: String,
+        /// Only rules to this destination CIDR (default: any recorded destination).
+        #[arg(long)]
+        to: Option<String>,
+    },
     /// Show a NETWORK's egress policy: CIDR allowlist, FQDN hosts, and the IPs
     /// currently learnt from DNS for those hosts.
     Show {
@@ -199,6 +219,11 @@ pub fn run_ingress(cmd: IngressCmd) -> Result<()> {
             Some(c) => list_rules(&store, &c, "in"),
             None => list_all(&store, "in"),
         },
+        IngressCmd::Rm {
+            container,
+            port,
+            from,
+        } => remove_rule(&store, &container, "in", &port, from),
         IngressCmd::Clear { container } => clear_dir(&store, &container, "in"),
     }
 }
@@ -226,6 +251,7 @@ pub fn run_egress(cmd: EgressCmd) -> Result<()> {
             Some(c) => list_rules(&store, &c, "out"),
             None => list_all(&store, "out"),
         },
+        EgressCmd::Rm { container, port, to } => remove_rule(&store, &container, "out", &port, to),
         EgressCmd::Clear { container } => clear_dir(&store, &container, "out"),
     }
 }
@@ -260,6 +286,32 @@ fn require_sdn_ip(c: &Container) -> Result<String> {
     })
 }
 
+/// `""`, `0.0.0.0/0` e `*` significam todos "de/para qualquer lado" — a
+/// dataplane trata-os igual (ver `fw_chain_body`); normaliza para comparar.
+fn norm_any(s: &str) -> &str {
+    if s == "0.0.0.0/0" || s == "*" {
+        ""
+    } else {
+        s
+    }
+}
+
+/// `true` se dois valores de um campo se sobrepõem no sentido first-match:
+/// iguais, ou um deles é um dos coringas dados. (Aproximação conservadora — não
+/// parseia ranges `n-m`; serve o AVISO de sombra, não a substituição exacta.)
+fn field_overlaps(a: &str, b: &str, wilds: &[&str]) -> bool {
+    a == b || wilds.contains(&a) || wilds.contains(&b)
+}
+
+/// O spec `[proto/]porta` de uma regra, para reproduzir no `ingress rm`.
+fn rule_spec(r: &FwRule) -> String {
+    if r.proto.is_empty() || r.proto == "any" {
+        r.port.clone()
+    } else {
+        format!("{}/{}", r.proto, r.port)
+    }
+}
+
 fn add_rule(
     store: &Store,
     name: &str,
@@ -278,14 +330,45 @@ fn add_rule(
     let ip = require_sdn_ip(&c)?;
     let mut fw = c.firewall.clone().unwrap_or_default();
     fw.enabled = true;
+    // O ÚLTIMO comando ganha (semântica ufw): uma regra nova para o MESMO match
+    // (dir/proto/porta/origem) SUBSTITUI a existente. Sem isto, `deny 8069`
+    // seguido de `allow 8069` deixava o serviço bloqueado para sempre — as
+    // regras acumulavam e a chain nft é first-match terminal: o deny antigo,
+    // acima, ganhava sempre (bug report real).
+    let same_match = |r: &FwRule| {
+        r.dir == dir && r.proto == proto && r.port == port && norm_any(&r.src) == norm_any(&src)
+    };
+    let replaced: Vec<String> = fw
+        .rules
+        .iter()
+        .filter(|r| same_match(r))
+        .map(|r| r.action.clone())
+        .collect();
+    fw.rules.retain(|r| !same_match(r));
     fw.rules.push(FwRule {
         dir: dir.to_string(),
-        proto,
-        port,
-        src,
+        proto: proto.clone(),
+        port: port.clone(),
+        src: src.clone(),
         action: action.as_str().to_string(),
         note: note.unwrap_or_default(),
     });
+    // Sombra: uma regra ANTERIOR sobreposta (ex.: `deny any/8069` vs
+    // `allow tcp/8069`) com acção contrária continua a casar primeiro — a regra
+    // nova nunca chega a ser avaliada. Avisar aqui evita o "apliquei o allow e
+    // continua bloqueado" sem explicação.
+    let shadow = fw
+        .rules
+        .iter()
+        .take(fw.rules.len() - 1)
+        .find(|r| {
+            r.dir == dir
+                && r.action != action.as_str()
+                && field_overlaps(&r.proto, &proto, &["any", ""])
+                && field_overlaps(&r.port, &port, &["*", ""])
+                && field_overlaps(norm_any(&r.src), norm_any(&src), &[""])
+        })
+        .map(|r| (r.action.clone(), rule_spec(r)));
     infra::apply_firewall(&c.id, &ip, &fw)?;
     c.firewall = Some(fw);
     store.save(&c)?;
@@ -294,6 +377,88 @@ fn add_rule(
         "{}: {arrow} rule added ({})",
         c.name,
         output::bold(&format!("{} {port_spec}", action.as_str()))
+    );
+    if let Some(old) = replaced.iter().find(|a| *a != action.as_str()) {
+        println!(
+            "{}",
+            super::po::tf(
+                "  (replaces the previous {old} rule for this match — the last command wins)",
+                &[("old", old)],
+            )
+        );
+    }
+    if let Some((sh_action, sh_spec)) = shadow {
+        let group = if dir == "in" { "ingress" } else { "egress" };
+        output::warn(&super::po::tf(
+            "an earlier overlapping rule ({action} {spec}) still matches first and can override this one — remove it with `delonix {group} rm {name} {spec}`",
+            &[
+                ("action", &sh_action),
+                ("spec", &sh_spec),
+                ("group", group),
+                ("name", &c.name),
+            ],
+        ));
+    }
+    Ok(())
+}
+
+/// Remove regra(s) que casem com `[proto/]porta` (+ CIDR, se dado). Os coringas
+/// do SPEC funcionam como filtro: `rm c 8069` (proto `any`) remove as regras
+/// tcp/udp/any dessa porta; `rm c '*'` remove todas; sem `--from`, qualquer
+/// origem. Complementa o `clear` (tudo-ou-nada) com remoção cirúrgica.
+fn remove_rule(
+    store: &Store,
+    name: &str,
+    dir: &str,
+    port_spec: &str,
+    cidr: Option<String>,
+) -> Result<()> {
+    let (proto, port) = parse_port_spec(port_spec)?;
+    let src = cidr.unwrap_or_default();
+    if !src.is_empty() && !fw_src_ok(&src) {
+        return Err(Error::Invalid(format!("invalid CIDR '{src}'")));
+    }
+    let mut c = store.load(name)?;
+    let ip = require_sdn_ip(&c)?;
+    let mut fw = c.firewall.clone().unwrap_or_default();
+    let rm_match = |r: &FwRule| {
+        r.dir == dir
+            && (proto == "any" || r.proto == proto)
+            && (port == "*" || r.port == port)
+            && (norm_any(&src).is_empty() || norm_any(&r.src) == norm_any(&src))
+    };
+    let before = fw.rules.len();
+    fw.rules.retain(|r| !rm_match(r));
+    let n = before - fw.rules.len();
+    if n == 0 {
+        let arrow = if dir == "in" { "inbound" } else { "outbound" };
+        return Err(Error::Invalid(format!(
+            "'{}' has no {arrow} rule matching {port_spec}",
+            c.name
+        )));
+    }
+    // Mesma regra do `clear`: sem regras e sem políticas explícitas, a firewall
+    // desaparece por inteiro (chain limpa) em vez de ficar um registo vazio.
+    let empty = fw.rules.is_empty() && fw.policy_in.is_empty() && fw.policy_out.is_empty();
+    if empty {
+        infra::clear_firewall(&ip);
+    } else {
+        infra::apply_firewall(&c.id, &ip, &fw)?;
+    }
+    c.firewall = if empty { None } else { Some(fw) };
+    store.save(&c)?;
+    let arrow = if dir == "in" { "inbound" } else { "outbound" };
+    println!(
+        "{}",
+        super::po::tf(
+            "{name}: {n} {arrow} rule(s) removed ({spec})",
+            &[
+                ("name", &c.name),
+                ("n", &n.to_string()),
+                ("arrow", arrow),
+                ("spec", port_spec),
+            ],
+        )
     );
     Ok(())
 }
@@ -859,6 +1024,46 @@ fn egress_host(network: &str, hostname: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn rule(dir: &str, proto: &str, port: &str, src: &str, action: &str) -> FwRule {
+        FwRule {
+            dir: dir.into(),
+            proto: proto.into(),
+            port: port.into(),
+            src: src.into(),
+            action: action.into(),
+            note: String::new(),
+        }
+    }
+
+    // Regressão do bug report: `deny 8069` seguido de `allow 8069` acumulava e
+    // o deny (acima, first-match) ganhava para sempre. A substituição compara
+    // com norm_any: origem ""/"0.0.0.0/0"/"*" são o mesmo match.
+    #[test]
+    fn norm_any_iguala_as_tres_formas_de_qualquer_origem() {
+        assert_eq!(norm_any(""), norm_any("0.0.0.0/0"));
+        assert_eq!(norm_any(""), norm_any("*"));
+        assert_eq!(norm_any("10.0.0.0/8"), "10.0.0.0/8");
+    }
+
+    #[test]
+    fn field_overlaps_apanha_coringas_e_iguais() {
+        // `deny any/8069` sombreia `allow tcp/8069` — o aviso tem de disparar.
+        assert!(field_overlaps("any", "tcp", &["any", ""]));
+        assert!(field_overlaps("8069", "8069", &["*", ""]));
+        assert!(field_overlaps("*", "8069", &["*", ""]));
+        assert!(!field_overlaps("tcp", "udp", &["any", ""]));
+        assert!(!field_overlaps("8069", "5432", &["*", ""]));
+    }
+
+    #[test]
+    fn rule_spec_reproduz_o_formato_do_cli() {
+        assert_eq!(rule_spec(&rule("in", "any", "8069", "", "deny")), "8069");
+        assert_eq!(
+            rule_spec(&rule("in", "tcp", "5432", "", "allow")),
+            "tcp/5432"
+        );
+    }
 
     fn net_spec(policy: &str, cidrs: &[&str], fqdns: &[&str], rules: Vec<FwDocRule>) -> FwDocSpec {
         FwDocSpec {
