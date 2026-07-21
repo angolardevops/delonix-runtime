@@ -1,15 +1,15 @@
-//! `delonix ingress-proxy` — o reverse-proxy L7/HTTP embutido que serve os
-//! `kind: HTTPRoute` (ver `cmd/httproute.rs`). Subcomando OCULTO: não é para o
-//! utilizador o correr à mão — a Fase 4 lança-o DENTRO do netns do holder (onde
-//! alcança os backends por IP) e publica as portas de entrada no host.
+//! `delonix ingress-proxy` — the embedded L7/HTTP reverse-proxy that serves the
+//! `kind: HTTPRoute` (see `cmd/httproute.rs`). HIDDEN subcommand: it is not for the
+//! user to run by hand — Phase 4 launches it INSIDE the holder's netns (where it
+//! reaches the backends by IP) and publishes the inbound ports on the host.
 //!
-//! **Fase 2 (este ficheiro):** o núcleo do proxy — servidor `hyper` (http1),
-//! roteamento por `Host` + prefixo de path para `backend.ip:porta`, encaminhamento
-//! com streaming de corpo (sem bufferizar). TLS (Fase 3) e o ciclo de vida/spawn
-//! (Fase 4) vêm a seguir; um `listener` com `tls: true` é saltado com aviso aqui.
+//! **Phase 2 (this file):** the proxy core — `hyper` server (http1),
+//! routing by `Host` + path prefix to `backend.ip:port`, forwarding with
+//! body streaming (no buffering). TLS (Phase 3) and the lifecycle/spawn
+//! (Phase 4) come next; a `listener` with `tls: true` is skipped with a warning here.
 //!
-//! A config é um JSON simples escrito pela Fase 4 (`ProxyConfig`) — rotas já
-//! resolvidas para `ip:porta` (o proxy não fala com nenhum store).
+//! The config is a plain JSON written by Phase 4 (`ProxyConfig`) — routes already
+//! resolved to `ip:port` (the proxy talks to no store).
 
 use std::convert::Infallible;
 use std::net::SocketAddr;
@@ -28,19 +28,19 @@ use tokio::net::TcpListener;
 
 use delonix_runtime_core::{Error, Result};
 
-/// A config de runtime do proxy (escrita pela Fase 4, lida por `run`). Rotas já
-/// resolvidas — o proxy não conhece containers nem stores.
+/// The proxy's runtime config (written by Phase 4, read by `run`). Routes already
+/// resolved — the proxy knows no containers or stores.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProxyConfig {
     pub listeners: Vec<Listener>,
     pub routes: Vec<Route>,
-    /// Material TLS já resolvido pela Fase 4 (self-signed gerado OU cert/chave do
-    /// `kind: Secret`). Presente ⇒ os listeners `tls: true` terminam TLS com ele.
+    /// TLS material already resolved by Phase 4 (generated self-signed OR cert/key
+    /// from a `kind: Secret`). Present ⇒ the `tls: true` listeners terminate TLS with it.
     #[serde(default)]
     pub tls: Option<TlsMaterial>,
 }
 
-/// Cert + chave em PEM, prontos a carregar no rustls (a Fase 4 resolve-os).
+/// Cert + key in PEM, ready to load into rustls (Phase 4 resolves them).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TlsMaterial {
     #[serde(rename = "certPem")]
@@ -49,8 +49,8 @@ pub struct TlsMaterial {
     pub key_pem: String,
 }
 
-/// Gera um par cert+chave **self-signed** (PEM) para os `hosts` dados (SANs).
-/// Usado pela Fase 4 quando `tls.mode: selfSigned`. Sem hosts → `localhost`.
+/// Generates a **self-signed** cert+key pair (PEM) for the given `hosts` (SANs).
+/// Used by Phase 4 when `tls.mode: selfSigned`. No hosts → `localhost`.
 pub fn self_signed_pem(hosts: &[String]) -> Result<TlsMaterial> {
     let sans: Vec<String> = if hosts.is_empty() {
         vec!["localhost".into()]
@@ -67,7 +67,7 @@ pub fn self_signed_pem(hosts: &[String]) -> Result<TlsMaterial> {
     })
 }
 
-/// Uma porta de escuta do proxy.
+/// A listening port of the proxy.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Listener {
     pub port: u16,
@@ -75,8 +75,8 @@ pub struct Listener {
     pub tls: bool,
 }
 
-/// Uma rota resolvida: casa por `host` (vazio = qualquer) + prefixo `path`, e
-/// encaminha para `backend` (`ip:porta`, já resolvido do record do container).
+/// A resolved route: matches by `host` (empty = any) + `path` prefix, and
+/// forwards to `backend` (`ip:port`, already resolved from the container record).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Route {
     #[serde(default)]
@@ -85,32 +85,32 @@ pub struct Route {
     pub backend: String,
 }
 
-/// O corpo de resposta unificado (proxiado OU gerado localmente p/ 404/502).
+/// The unified response body (proxied OR generated locally for 404/502).
 type RespBody = BoxBody<Bytes, Box<dyn std::error::Error + Send + Sync>>;
 
-/// Tabela de rotas partilhada e **trocável a quente**: o `SIGHUP` relê a config e
-/// substitui o `Arc` interno (os listeners continuam de pé). Cada pedido lê um
-/// snapshot (`clone` do Arc) sob um read-lock curtíssimo — o auto-registo de
-/// containers (rota nova sem reiniciar o proxy) assenta nisto.
+/// Shared and **hot-swappable** route table: `SIGHUP` re-reads the config and
+/// replaces the inner `Arc` (the listeners stay up). Each request reads a
+/// snapshot (`clone` of the Arc) under a very short read-lock — container
+/// auto-registration (a new route without restarting the proxy) rests on this.
 type SharedRoutes = Arc<std::sync::RwLock<Arc<Vec<Route>>>>;
 
-/// Teto de tempo para o backend responder (senão 504) — evita que um backend
-/// pendurado prenda a ligação/task para sempre (slowloris do lado do backend).
+/// Time ceiling for the backend to respond (else 504) — keeps a hung backend
+/// from holding the connection/task forever (backend-side slowloris).
 const BACKEND_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
-/// Teto para o cliente enviar os headers completos — corta o slowloris clássico.
+/// Ceiling for the client to send the full headers — cuts the classic slowloris.
 const HEADER_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
-/// Teto para o handshake TLS completar — corta o slowloris de handshake.
+/// Ceiling for the TLS handshake to complete — cuts the handshake slowloris.
 const TLS_HANDSHAKE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
 
-/// Remove os headers **hop-by-hop** (RFC 7230 §6.1) de um `HeaderMap`, incluindo
-/// os tokens listados no próprio `Connection:`. Um proxy NÃO os pode reencaminhar:
-/// pertencem a UMA ligação (a nossa com o cliente / a nossa com o backend), não à
-/// mensagem — deixá-los passar corrompe o enquadramento (o hyper reenquadra o
-/// corpo por cima de um `Transfer-Encoding` do cliente → risco de smuggling) e
-/// vaza `Connection: close`/`Keep-Alive` para o outro lado.
+/// Removes the **hop-by-hop** headers (RFC 7230 §6.1) from a `HeaderMap`, including
+/// the tokens listed in the `Connection:` header itself. A proxy MUST NOT forward
+/// them: they belong to ONE connection (ours with the client / ours with the
+/// backend), not to the message — letting them through corrupts framing (hyper
+/// reframes the body over a client `Transfer-Encoding` → smuggling risk) and
+/// leaks `Connection: close`/`Keep-Alive` to the other side.
 fn strip_hop_by_hop(headers: &mut hyper::HeaderMap) {
     use hyper::header::{HeaderName, CONNECTION};
-    // Os nomes listados no(s) header(s) `Connection` são eles próprios hop-by-hop.
+    // The names listed in the `Connection` header(s) are themselves hop-by-hop.
     let mut listed: Vec<HeaderName> = Vec::new();
     for v in headers.get_all(CONNECTION) {
         if let Ok(s) = v.to_str() {
@@ -134,15 +134,15 @@ fn strip_hop_by_hop(headers: &mut hyper::HeaderMap) {
     for h in HOP {
         headers.remove(h);
     }
-    headers.remove("proxy-connection"); // não-standard mas comum
+    headers.remove("proxy-connection"); // non-standard but common
     for h in listed {
         headers.remove(&h);
     }
 }
 
-/// Escolhe a melhor rota para um `(host, path)`: primeiro as rotas com `host`
-/// específico (sobre as de qualquer-host), depois o prefixo de path mais LONGO
-/// (o mais específico ganha). `None` = nenhuma casa.
+/// Picks the best route for a `(host, path)`: first the routes with a specific
+/// `host` (over the any-host ones), then the LONGEST path prefix (the most
+/// specific wins). `None` = none matches.
 fn pick_route<'a>(routes: &'a [Route], host: &str, path: &str) -> Option<&'a Route> {
     routes
         .iter()
@@ -150,7 +150,7 @@ fn pick_route<'a>(routes: &'a [Route], host: &str, path: &str) -> Option<&'a Rou
         .max_by_key(|r| (usize::from(!r.host.is_empty()), r.path.len()))
 }
 
-/// O `Host` do pedido, sem a porta (`loja.exemplo.ao:80` → `loja.exemplo.ao`).
+/// The request's `Host`, without the port (`loja.exemplo.ao:80` → `loja.exemplo.ao`).
 fn req_host(req: &Request<Incoming>) -> String {
     req.headers()
         .get(hyper::header::HOST)
@@ -163,7 +163,7 @@ fn req_host(req: &Request<Incoming>) -> String {
         .to_string()
 }
 
-/// Uma resposta de erro simples (404/502) com corpo de texto.
+/// A simple error response (404/502) with a text body.
 fn text_response(code: StatusCode, msg: &str) -> Response<RespBody> {
     let body = Full::new(Bytes::from(msg.to_string()))
         .map_err(|e: Infallible| match e {})
@@ -174,8 +174,8 @@ fn text_response(code: StatusCode, msg: &str) -> Response<RespBody> {
         .expect("resposta estática válida")
 }
 
-/// Trata um pedido: casa a rota e encaminha (streaming) para o backend, ou
-/// devolve 404 (sem rota) / 502 (backend inacessível).
+/// Handles a request: matches the route and forwards (streaming) to the backend, or
+/// returns 404 (no route) / 502 (backend unreachable).
 async fn handle(
     req: Request<Incoming>,
     routes: SharedRoutes,
@@ -183,7 +183,7 @@ async fn handle(
 ) -> std::result::Result<Response<RespBody>, Infallible> {
     let host = req_host(&req);
     let path = req.uri().path().to_string();
-    // Snapshot das rotas (o SIGHUP pode trocá-las a qualquer momento).
+    // Snapshot of the routes (SIGHUP may swap them at any moment).
     let snapshot = routes
         .read()
         .map(|g| g.clone())
@@ -196,9 +196,9 @@ async fn handle(
     };
     let backend = route.backend.clone();
 
-    // Reconstrói o pedido para o backend: mesma method/headers/corpo, URI absoluta
-    // `http://<backend><path?query>`. O corpo (`Incoming`) é reencaminhado sem
-    // bufferizar (streaming) — hyper transfere-o à medida que chega.
+    // Rebuilds the request to the backend: same method/headers/body, absolute URI
+    // `http://<backend><path?query>`. The body (`Incoming`) is forwarded without
+    // buffering (streaming) — hyper transfers it as it arrives.
     let pq = req
         .uri()
         .path_and_query()
@@ -209,8 +209,8 @@ async fn handle(
         let (p, b) = req.into_parts();
         (p.method, p.headers, b)
     };
-    // Remove os hop-by-hop ANTES de encaminhar (o Host end-to-end mantém-se — o
-    // backend pode precisar dele para virtual-hosting).
+    // Removes the hop-by-hop headers BEFORE forwarding (the Host stays end-to-end —
+    // the backend may need it for virtual-hosting).
     strip_hop_by_hop(&mut headers);
     let mut out = Request::builder().method(parts).uri(&uri);
     if let Some(h) = out.headers_mut() {
@@ -226,11 +226,11 @@ async fn handle(
         }
     };
 
-    // Teto de tempo: um backend pendurado não pode prender a ligação para sempre.
+    // Time ceiling: a hung backend must not hold the connection forever.
     match tokio::time::timeout(BACKEND_TIMEOUT, client.request(out_req)).await {
         Ok(Ok(resp)) => {
-            // A resposta do backend flui de volta em streaming; também lhe tiramos
-            // os hop-by-hop antes de a devolver ao cliente.
+            // The backend's response flows back streaming; we also strip its
+            // hop-by-hop headers before returning it to the client.
             let (mut rparts, body) = resp.into_parts();
             strip_hop_by_hop(&mut rparts.headers);
             let body = body
@@ -252,8 +252,8 @@ async fn handle(
     }
 }
 
-/// Serve UMA ligação já estabelecida (TCP ou TLS): `io` é qualquer IO que o hyper
-/// saiba ler/escrever. Genérico para não duplicar o caminho TLS e o plano.
+/// Serves ONE already-established connection (TCP or TLS): `io` is any IO that hyper
+/// can read/write. Generic so as not to duplicate the TLS and plain paths.
 async fn serve_io<I>(
     io: I,
     routes: SharedRoutes,
@@ -262,14 +262,14 @@ async fn serve_io<I>(
     I: hyper::rt::Read + hyper::rt::Write + Unpin + 'static,
 {
     let svc = service_fn(move |req| handle(req, routes.clone(), client.clone()));
-    // NOTA: WebSocket/`Connection: Upgrade` ainda NÃO é tunelado — o cliente
-    // hyper-util legacy não estabelece a ligação trocada, e nós removemos o header
-    // `Upgrade` (hop-by-hop) no encaminhamento. Tunelar upgrades (hyper::upgrade::on
-    // nos dois lados + cópia bidireccional) é um follow-up; hoje só HTTP
-    // request/response é proxiado.
+    // NOTE: WebSocket/`Connection: Upgrade` is NOT tunneled yet — the legacy
+    // hyper-util client does not establish the switched connection, and we remove the
+    // `Upgrade` header (hop-by-hop) in forwarding. Tunneling upgrades (hyper::upgrade::on
+    // on both sides + bidirectional copy) is a follow-up; today only HTTP
+    // request/response is proxied.
     //
-    // `header_read_timeout` corta o slowloris clássico (headers a conta-gotas) — o
-    // `timer` é obrigatório para o hyper o poder aplicar.
+    // `header_read_timeout` cuts the classic slowloris (headers dripped out) — the
+    // `timer` is mandatory for hyper to be able to apply it.
     let _ = hyper::server::conn::http1::Builder::new()
         .timer(hyper_util::rt::TokioTimer::new())
         .header_read_timeout(HEADER_READ_TIMEOUT)
@@ -277,8 +277,8 @@ async fn serve_io<I>(
         .await;
 }
 
-/// Aceita ligações numa porta e serve cada uma. Com `tls` presente, faz o
-/// handshake TLS antes de servir (termina TLS no proxy); senão, HTTP simples.
+/// Accepts connections on a port and serves each one. With `tls` present, does the
+/// TLS handshake before serving (terminates TLS at the proxy); otherwise, plain HTTP.
 async fn accept_loop(
     listener: TcpListener,
     routes: SharedRoutes,
@@ -289,8 +289,8 @@ async fn accept_loop(
         let (stream, _peer) = match listener.accept().await {
             Ok(s) => s,
             Err(_) => {
-                // Um erro persistente (EMFILE/ENFILE sob esgotamento de fds) num
-                // `continue` nu gira um busy-loop a queimar CPU — pausa curta.
+                // A persistent error (EMFILE/ENFILE under fd exhaustion) on a
+                // bare `continue` spins a busy-loop burning CPU — short pause.
                 tokio::time::sleep(std::time::Duration::from_millis(10)).await;
                 continue;
             }
@@ -300,8 +300,8 @@ async fn accept_loop(
         let tls = tls.clone();
         tokio::task::spawn(async move {
             match tls {
-                // Timeout no handshake: um cliente que abre TCP e nunca completa o
-                // ClientHello não pode segurar a task para sempre (slowloris TLS).
+                // Handshake timeout: a client that opens TCP and never completes the
+                // ClientHello must not hold the task forever (TLS slowloris).
                 Some(acceptor) => {
                     match tokio::time::timeout(TLS_HANDSHAKE_TIMEOUT, acceptor.accept(stream)).await
                     {
@@ -309,7 +309,7 @@ async fn accept_loop(
                             serve_io(TokioIo::new(tls_stream), routes, client).await
                         }
                         Ok(Err(e)) => eprintln!("ingress-proxy: handshake TLS falhou: {e}"),
-                        Err(_) => { /* handshake não completou a tempo — descarta */ }
+                        Err(_) => { /* handshake did not complete in time — discard */ }
                     }
                 }
                 None => serve_io(TokioIo::new(stream), routes, client).await,
@@ -318,13 +318,13 @@ async fn accept_loop(
     }
 }
 
-/// Constrói o `ServerConfig` do rustls a partir do PEM (cert-chain + chave). O
-/// provider criptográfico (`ring`) tem de estar instalado (ver `run`).
+/// Builds rustls's `ServerConfig` from the PEM (cert-chain + key). The
+/// cryptographic provider (`ring`) must be installed (see `run`).
 ///
-/// **Limitação v1 (SNI):** um ÚNICO cert serve todos os hosts (`with_single_cert`).
-/// Para vários hosts com certs distintos era preciso um `ResolvesServerCert` por
-/// SNI — follow-up. Hoje o self-signed cobre todos os hosts do HTTPRoute num só
-/// cert (multi-SAN), e o modo BYO assume um cert que sirva todos os hosts.
+/// **v1 limitation (SNI):** a SINGLE cert serves all hosts (`with_single_cert`).
+/// For several hosts with distinct certs a `ResolvesServerCert` per SNI would be
+/// needed — follow-up. Today the self-signed covers all the HTTPRoute's hosts in one
+/// cert (multi-SAN), and the BYO mode assumes a cert that serves all the hosts.
 fn build_server_config(tls: &TlsMaterial) -> Result<Arc<tokio_rustls::rustls::ServerConfig>> {
     use tokio_rustls::rustls::ServerConfig;
     let certs: Vec<_> = rustls_pemfile::certs(&mut tls.cert_pem.as_bytes())
@@ -345,25 +345,25 @@ fn build_server_config(tls: &TlsMaterial) -> Result<Arc<tokio_rustls::rustls::Se
     Ok(Arc::new(cfg))
 }
 
-/// Núcleo assíncrono: bind de cada listener + servir, com a tabela de rotas
-/// trocável a quente por `SIGHUP` (relê `config_path`). Os listeners e o material
-/// TLS ficam FIXOS no arranque (mudá-los exige reiniciar); só as ROTAS recarregam
-/// — é o que o auto-registo de containers precisa.
+/// Async core: bind each listener + serve, with the route table hot-swappable via
+/// `SIGHUP` (re-reads `config_path`). The listeners and TLS material stay FIXED at
+/// startup (changing them requires a restart); only the ROUTES reload — which is
+/// what container auto-registration needs.
 async fn serve(cfg: ProxyConfig, config_path: std::path::PathBuf) -> Result<()> {
     let client: Client<_, Incoming> = Client::builder(TokioExecutor::new())
         .build(hyper_util::client::legacy::connect::HttpConnector::new());
 
-    // Um só ServerConfig TLS partilhado por todos os listeners TLS (se houver
-    // material). Construído UMA vez — o rustls guarda-o num Arc.
+    // A single TLS ServerConfig shared by all TLS listeners (if there is
+    // material). Built ONCE — rustls keeps it in an Arc.
     let tls_acceptor: Option<tokio_rustls::TlsAcceptor> = match &cfg.tls {
         Some(mat) => Some(tokio_rustls::TlsAcceptor::from(build_server_config(mat)?)),
         None => None,
     };
 
-    // Tabela de rotas partilhada e trocável a quente.
+    // Shared and hot-swappable route table.
     let routes: SharedRoutes = Arc::new(std::sync::RwLock::new(Arc::new(cfg.routes.clone())));
 
-    // SIGHUP → relê a config e substitui SÓ as rotas (listeners/TLS ficam).
+    // SIGHUP → re-reads the config and replaces ONLY the routes (listeners/TLS stay).
     {
         let routes = routes.clone();
         let path = config_path.clone();
@@ -381,8 +381,8 @@ async fn serve(cfg: ProxyConfig, config_path: std::path::PathBuf) -> Result<()> 
                     Some(newcfg) => {
                         let n = newcfg.routes.len();
                         match routes.write() {
-                            // Larga o write-lock ANTES do eprintln (o I/O de stderr
-                            // não pode bloquear os handlers que fazem `read()`).
+                            // Drop the write-lock BEFORE the eprintln (stderr I/O
+                            // must not block the handlers that do `read()`).
                             Ok(mut g) => *g = Arc::new(newcfg.routes),
                             Err(_) => {
                                 eprintln!(
@@ -447,8 +447,8 @@ async fn serve(cfg: ProxyConfig, config_path: std::path::PathBuf) -> Result<()> 
     Ok(())
 }
 
-/// Ponto de entrada do subcomando `delonix ingress-proxy --config <ficheiro>`.
-/// Lê a `ProxyConfig` (JSON) e corre o servidor até morrer (bloqueia).
+/// Entry point of the `delonix ingress-proxy --config <file>` subcommand.
+/// Reads the `ProxyConfig` (JSON) and runs the server until it dies (blocks).
 pub fn run(config_path: &Path) -> Result<()> {
     let bytes = std::fs::read(config_path).map_err(|e| {
         Error::Invalid(format!(
@@ -458,9 +458,9 @@ pub fn run(config_path: &Path) -> Result<()> {
     })?;
     let cfg: ProxyConfig = serde_json::from_slice(&bytes)
         .map_err(|e| Error::Invalid(format!("ingress-proxy: config inválida: {e}")))?;
-    // Instala o provider criptográfico do rustls (ring) — o `ServerConfig::builder`
-    // usa o default do processo; sem isto, entra em pânico. Idempotente (ignora se
-    // já instalado por outra parte do processo).
+    // Installs rustls's cryptographic provider (ring) — the `ServerConfig::builder`
+    // uses the process default; without this, it panics. Idempotent (ignores if
+    // already installed by another part of the process).
     let _ = tokio_rustls::rustls::crypto::ring::default_provider().install_default();
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -473,18 +473,18 @@ pub fn run(config_path: &Path) -> Result<()> {
 }
 
 // ============================================================================
-// Ciclo de vida (host-side): arrancar/recarregar/parar o proxy no netns do holder.
-// O proxy é infra persistente (como o slirp/holder), lançado só quando há um
-// HTTPRoute — respeita o 'daemonless' (não corre sem carga declarada).
+// Lifecycle (host-side): start/reload/stop the proxy in the holder's netns.
+// The proxy is persistent infra (like the slirp/holder), launched only when there
+// is an HTTPRoute — it respects 'daemonless' (does not run without declared load).
 // ============================================================================
 
-/// Pasta de estado do proxy (`<root>/httproute/`). No mesmo sistema de ficheiros
-/// que o holder vê (a mount-ns do holder é cópia da do host) — o proxy lá dentro
-/// lê a MESMA config que aqui escrevemos.
+/// The proxy's state folder (`<root>/httproute/`). On the same filesystem the
+/// holder sees (the holder's mount-ns is a copy of the host's) — the proxy in
+/// there reads the SAME config we write out here.
 fn proxy_dir() -> std::path::PathBuf {
     crate::cmd::util::state_root().join("httproute")
 }
-/// Caminho canónico da `ProxyConfig` (o proxy relê-o no SIGHUP).
+/// Canonical path of the `ProxyConfig` (the proxy re-reads it on SIGHUP).
 pub fn config_path() -> std::path::PathBuf {
     proxy_dir().join("config.json")
 }
@@ -494,21 +494,21 @@ fn pid_path() -> std::path::PathBuf {
 fn log_path() -> std::path::PathBuf {
     proxy_dir().join("proxy.log")
 }
-/// Porta HTTP das auto-rotas (`--expose`). **Não-privilegiada** — em rootless o
-/// slirp recusa publicar portas <1024. Alcança-se com `Host: <fqdn>` em `:8080`.
+/// HTTP port of the auto-routes (`--expose`). **Non-privileged** — in rootless the
+/// slirp refuses to publish ports <1024. Reached with `Host: <fqdn>` on `:8080`.
 const AUTO_HTTP_PORT: u16 = 8080;
 
-/// A parte MANUAL da config (rotas/listeners/TLS dos `kind: HTTPRoute`).
+/// The MANUAL part of the config (routes/listeners/TLS from `kind: HTTPRoute`).
 fn manual_path() -> std::path::PathBuf {
     proxy_dir().join("manual.json")
 }
-/// As rotas AUTO-REGISTADAS de containers (`container run --expose`).
+/// The AUTO-REGISTERED routes of containers (`container run --expose`).
 fn auto_path() -> std::path::PathBuf {
     proxy_dir().join("auto.json")
 }
 
-/// Uma rota auto-registada de um container HTTP: o FQDN interno
-/// `<nome>.<namespace>.delonix.internal` → `<ip>:<porta>`.
+/// An auto-registered route of an HTTP container: the internal FQDN
+/// `<name>.<namespace>.delonix.internal` → `<ip>:<port>`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AutoRoute {
     pub name: String,
@@ -518,7 +518,7 @@ pub struct AutoRoute {
 }
 
 impl AutoRoute {
-    /// O FQDN interno deste container (o `Host` que o casa no proxy + o nome DNS).
+    /// This container's internal FQDN (the `Host` that matches it in the proxy + the DNS name).
     pub fn fqdn(&self) -> String {
         format!("{}.{}.delonix.internal", self.name, self.namespace)
     }
@@ -534,16 +534,16 @@ fn read_auto() -> Vec<AutoRoute> {
         .unwrap_or_default()
 }
 
-/// Read-modify-write da `auto.json` sob **flock exclusivo** — dois
-/// `container run --expose` em paralelo não podem perder uma rota (lost update).
-/// `f` recebe a lista actual e devolve a nova. Devolve `true` se mudou.
+/// Read-modify-write of `auto.json` under an **exclusive flock** — two
+/// `container run --expose` in parallel must not lose a route (lost update).
+/// `f` receives the current list and returns the new one. Returns `true` if it changed.
 fn with_auto_locked(f: impl FnOnce(&mut Vec<AutoRoute>)) -> Result<bool> {
     use std::os::unix::io::AsRawFd;
     std::fs::create_dir_all(proxy_dir()).map_err(|e| Error::Runtime {
         context: "httproute dir",
         message: e.to_string(),
     })?;
-    // Um ficheiro de lock dedicado (o flock é no fd; o conteúdo fica na auto.json).
+    // A dedicated lock file (the flock is on the fd; the content stays in auto.json).
     let lock = std::fs::OpenOptions::new()
         .create(true)
         .write(true)
@@ -553,7 +553,7 @@ fn with_auto_locked(f: impl FnOnce(&mut Vec<AutoRoute>)) -> Result<bool> {
             context: "auto.lock",
             message: e.to_string(),
         })?;
-    // SAFETY: flock(LOCK_EX) no fd do lock; libertado ao fechar (fim do escopo).
+    // SAFETY: flock(LOCK_EX) on the lock's fd; released on close (end of scope).
     if unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX) } != 0 {
         return Err(Error::Runtime {
             context: "flock auto",
@@ -577,10 +577,10 @@ fn with_auto_locked(f: impl FnOnce(&mut Vec<AutoRoute>)) -> Result<bool> {
     Ok(true)
 }
 
-/// **Compõe a config final** a partir da parte MANUAL (HTTPRoute) + as rotas
-/// AUTO-REGISTADAS, e garante o proxy a servir (ou pára-o se ficou tudo vazio).
-/// É o ponto único que o `httproute apply` e o auto-registo chamam — nenhuma
-/// fonte apaga a outra.
+/// **Composes the final config** from the MANUAL part (HTTPRoute) + the
+/// AUTO-REGISTERED routes, and ensures the proxy is serving (or stops it if it all
+/// went empty). It is the single point that `httproute apply` and auto-registration
+/// call — neither source erases the other.
 fn rebuild() -> Result<()> {
     let manual = read_manual();
     let auto = read_auto();
@@ -595,9 +595,9 @@ fn rebuild() -> Result<()> {
         .unwrap_or_default();
     let tls = manual.as_ref().and_then(|m| m.tls.clone());
 
-    // As auto-rotas servem-se em HTTP na porta AUTO_HTTP_PORT (FQDN interno). NÃO
-    // :80 — em rootless o slirp não publica portas privilegiadas (add_hostfwd
-    // recusa <1024). Garante o listener se houver alguma auto-rota.
+    // The auto-routes are served over HTTP on the AUTO_HTTP_PORT port (internal
+    // FQDN). NOT :80 — in rootless the slirp does not publish privileged ports
+    // (add_hostfwd refuses <1024). Ensures the listener if there is any auto-route.
     if !auto.is_empty() && !listeners.iter().any(|l| l.port == AUTO_HTTP_PORT) {
         listeners.push(Listener {
             port: AUTO_HTTP_PORT,
@@ -613,7 +613,7 @@ fn rebuild() -> Result<()> {
     }
 
     if listeners.is_empty() || routes.is_empty() {
-        // Nada declarado (nem manual nem auto) → o proxy não tem razão de existir.
+        // Nothing declared (neither manual nor auto) → the proxy has no reason to exist.
         return stop();
     }
     ensure_running(&ProxyConfig {
@@ -623,7 +623,7 @@ fn rebuild() -> Result<()> {
     })
 }
 
-/// Escreve a parte MANUAL (do `httproute apply`) e recompõe a config final.
+/// Writes the MANUAL part (from `httproute apply`) and recomposes the final config.
 pub fn set_manual(cfg: &ProxyConfig) -> Result<()> {
     std::fs::create_dir_all(proxy_dir()).map_err(|e| Error::Runtime {
         context: "httproute dir",
@@ -640,9 +640,9 @@ pub fn set_manual(cfg: &ProxyConfig) -> Result<()> {
     rebuild()
 }
 
-/// Remove a parte MANUAL (no `httproute rm`) e recompõe — as rotas
-/// auto-registadas de containers `--expose` SOBREVIVEM (o proxy só pára se nada
-/// mais restar). Devolve `true` se havia rotas manuais.
+/// Removes the MANUAL part (on `httproute rm`) and recomposes — the
+/// auto-registered routes of `--expose` containers SURVIVE (the proxy only stops if
+/// nothing else remains). Returns `true` if there were manual routes.
 pub fn clear_manual() -> Result<bool> {
     let had = manual_path().exists();
     let _ = std::fs::remove_file(manual_path());
@@ -650,8 +650,8 @@ pub fn clear_manual() -> Result<bool> {
     Ok(had)
 }
 
-/// **Auto-regista** um container HTTP no proxy (`container run --expose`): junta/
-/// actualiza a sua `AutoRoute` e recompõe a config (SIGHUP a quente). Idempotente.
+/// **Auto-registers** an HTTP container in the proxy (`container run --expose`):
+/// adds/updates its `AutoRoute` and recomposes the config (hot SIGHUP). Idempotent.
 pub fn auto_register(name: &str, namespace: &str, ip: &str, port: u16) -> Result<()> {
     let entry = AutoRoute {
         name: name.to_string(),
@@ -660,26 +660,26 @@ pub fn auto_register(name: &str, namespace: &str, ip: &str, port: u16) -> Result
         port,
     };
     with_auto_locked(|auto| {
-        auto.retain(|a| a.name != name); // substitui uma entrada anterior do mesmo nome
+        auto.retain(|a| a.name != name); // replaces a previous entry of the same name
         auto.push(entry.clone());
     })?;
     rebuild()
 }
 
-/// **Remove** o auto-registo de um container (no `container rm`/stop) e recompõe.
-/// Best-effort — se o container não estava registado, não faz nada.
+/// **Removes** a container's auto-registration (on `container rm`/stop) and recomposes.
+/// Best-effort — if the container was not registered, does nothing.
 pub fn auto_deregister(name: &str) {
-    // `Ok(true)` = removeu algo → recompõe; `Ok(false)`/`Err` = não estava
-    // registado (ou o lock falhou) — nada a recompor.
+    // `Ok(true)` = removed something → recompose; `Ok(false)`/`Err` = was not
+    // registered (or the lock failed) — nothing to recompose.
     if let Ok(true) = with_auto_locked(|auto| auto.retain(|a| a.name != name)) {
         let _ = rebuild();
     }
 }
 
-/// PID do proxy se estiver VIVO **e for mesmo o nosso** (o `/proc/<pid>/cmdline`
-/// contém `ingress-proxy`), senão `None` (e limpa um pidfile órfão). A guarda de
-/// identidade é essencial: sem ela, um PID reciclado pelo kernel faria o
-/// `SIGHUP`/`SIGTERM` atingir um processo alheio (SIGHUP default = terminar).
+/// The proxy's PID if it is ALIVE **and really ours** (the `/proc/<pid>/cmdline`
+/// contains `ingress-proxy`), else `None` (and cleans up an orphan pidfile). The
+/// identity guard is essential: without it, a PID recycled by the kernel would make
+/// `SIGHUP`/`SIGTERM` hit an unrelated process (SIGHUP default = terminate).
 fn running_pid() -> Option<i32> {
     let pid: i32 = std::fs::read_to_string(pid_path())
         .ok()?
@@ -692,21 +692,21 @@ fn running_pid() -> Option<i32> {
     if is_ours {
         Some(pid)
     } else {
-        let _ = std::fs::remove_file(pid_path()); // morto OU PID reciclado — órfão
+        let _ = std::fs::remove_file(pid_path()); // dead OR recycled PID — orphan
         None
     }
 }
 
-/// Escreve a config e **garante o proxy a servir**: se já está vivo, recarrega a
-/// quente (SIGHUP); senão, arranca-o no netns do holder e publica as portas.
-/// Idempotente — é o que o `stack apply`/auto-registo chamam sempre.
+/// Writes the config and **ensures the proxy is serving**: if already alive, reloads
+/// hot (SIGHUP); otherwise, starts it in the holder's netns and publishes the ports.
+/// Idempotent — it is what `stack apply`/auto-registration always call.
 pub fn ensure_running(cfg: &ProxyConfig) -> Result<()> {
     std::fs::create_dir_all(proxy_dir()).map_err(|e| Error::Runtime {
         context: "httproute dir",
         message: e.to_string(),
     })?;
-    // Captura os listeners ACTUAIS ANTES de sobrescrever a config (senão o prev
-    // seria já o novo).
+    // Captures the CURRENT listeners BEFORE overwriting the config (else `prev`
+    // would already be the new one).
     let prev_ports = prev_listener_ports();
     let json = serde_json::to_vec_pretty(cfg).map_err(|e| Error::Runtime {
         context: "serialize config",
@@ -718,10 +718,10 @@ pub fn ensure_running(cfg: &ProxyConfig) -> Result<()> {
     })?;
 
     if let Some(pid) = running_pid() {
-        // Vivo → recarrega as rotas a quente (SIGHUP). As portas já estão publicadas.
-        // AVISO: o SIGHUP só recarrega ROTAS; mudar entrypoints/TLS exige reiniciar
-        // (`httproute rm` + apply). Detetamos a mudança do conjunto de portas para
-        // não mentir que o novo listener está a servir.
+        // Alive → reload the routes hot (SIGHUP). The ports are already published.
+        // WARNING: SIGHUP only reloads ROUTES; changing entrypoints/TLS requires a
+        // restart (`httproute rm` + apply). We detect the change of the port set so
+        // as not to lie that the new listener is serving.
         if let Some(prev) = prev_ports {
             let now: std::collections::BTreeSet<u16> =
                 cfg.listeners.iter().map(|l| l.port).collect();
@@ -732,7 +732,7 @@ pub fn ensure_running(cfg: &ProxyConfig) -> Result<()> {
                 );
             }
         }
-        // SAFETY: SIGHUP a um pid que confirmámos vivo E nosso (guarda de cmdline).
+        // SAFETY: SIGHUP to a pid we confirmed alive AND ours (cmdline guard).
         unsafe { libc::kill(pid, libc::SIGHUP) };
         eprintln!("httproute: proxy #{pid} recarregado (SIGHUP)");
         return Ok(());
@@ -742,19 +742,19 @@ pub fn ensure_running(cfg: &ProxyConfig) -> Result<()> {
     Ok(())
 }
 
-/// As portas dos listeners da config ACTUALMENTE em vigor (antes de a
-/// sobrescrevermos) — para detetar uma mudança de listeners no re-apply.
+/// The listener ports of the config CURRENTLY in effect (before we overwrite it) —
+/// to detect a change of listeners on re-apply.
 fn prev_listener_ports() -> Option<std::collections::BTreeSet<u16>> {
     let bytes = std::fs::read(config_path()).ok()?;
     let cfg: ProxyConfig = serde_json::from_slice(&bytes).ok()?;
     Some(cfg.listeners.iter().map(|l| l.port).collect())
 }
 
-/// Arranca o proxy DENTRO do netns do holder (via `infra_join_argv`), detached
-/// (setsid, stdio para um log), e grava o pidfile.
+/// Starts the proxy INSIDE the holder's netns (via `infra_join_argv`), detached
+/// (setsid, stdio to a log), and writes the pidfile.
 fn spawn_proxy() -> Result<()> {
     use std::os::unix::process::CommandExt;
-    // Garante o holder de pé (o proxy vive no netns dele).
+    // Ensures the holder is up (the proxy lives in its netns).
     delonix_net::infra::ensure_up()?;
     let join = delonix_net::infra::infra_join_argv().ok_or_else(|| Error::Runtime {
         context: "holder",
@@ -791,9 +791,9 @@ fn spawn_proxy() -> Result<()> {
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::from(log))
         .stderr(std::process::Stdio::from(log2));
-    // SAFETY: setsid no filho (pós-fork, pré-exec) destaca-o da sessão/terminal
-    // do CLI para sobreviver à saída deste. O nsenter faz EXEC (não fork) do
-    // proxy, por isso este PID torna-se o do proxy — signalável do host.
+    // SAFETY: setsid in the child (post-fork, pre-exec) detaches it from the CLI's
+    // session/terminal so it survives this process's exit. nsenter does EXEC (not
+    // fork) of the proxy, so this PID becomes the proxy's — signalable from the host.
     unsafe {
         cmd.pre_exec(|| {
             libc::setsid();
@@ -808,8 +808,8 @@ fn spawn_proxy() -> Result<()> {
         context: "escrever pidfile",
         message: e.to_string(),
     })?;
-    // Confirma que arrancou de facto (não morreu logo no bind): dá-lhe um instante
-    // e verifica o /proc. Se caiu, aponta o log — não declarar 'a servir' a mentir.
+    // Confirm it really started (did not die right at bind): give it a moment and
+    // check /proc. If it fell, point to the log — do not declare 'serving' and lie.
     std::thread::sleep(std::time::Duration::from_millis(300));
     if !std::path::Path::new(&format!("/proc/{}", child.id())).exists() {
         return Err(Error::Runtime {
@@ -827,16 +827,16 @@ fn spawn_proxy() -> Result<()> {
     Ok(())
 }
 
-/// Publica as portas de entrada no host (slirp `add_hostfwd`): o proxy escuta em
-/// `0.0.0.0:<porta>` no netns do holder e apanha o tráfego entregue em `SLIRP_IP`.
-/// (Sem DNAT — o holder não tem `input` chain a filtrar entregas locais.)
+/// Publishes the inbound ports on the host (slirp `add_hostfwd`): the proxy listens
+/// on `0.0.0.0:<port>` in the holder's netns and catches the traffic delivered to
+/// `SLIRP_IP`. (No DNAT — the holder has no `input` chain filtering local deliveries.)
 fn publish_listeners(cfg: &ProxyConfig) -> Result<()> {
     let sock = delonix_net::infra::slirp_sock_path();
     for l in &cfg.listeners {
         let p = l.port.to_string();
-        // Best-effort/idempotente: se a porta JÁ tem hostfwd (proxy anterior que
-        // crashou sem teardown), o slirp recusa 'already exists' — não é fatal, o
-        // estado desejado (porta publicada) já está. Só avisa noutros erros.
+        // Best-effort/idempotent: if the port ALREADY has a hostfwd (a previous proxy
+        // that crashed without teardown), the slirp refuses with 'already exists' — not
+        // fatal, the desired state (port published) is already there. Only warns on other errors.
         if let Err(e) = delonix_net::slirp_add_hostfwd(&sock, &p, &p, "tcp") {
             let msg = e.to_string();
             if msg.contains("already") || msg.to_lowercase().contains("exist") {
@@ -861,10 +861,10 @@ fn publish_listeners(cfg: &ProxyConfig) -> Result<()> {
     Ok(())
 }
 
-/// **Pára o proxy e despublica as portas** (teardown do `httproute rm`). Lê os
-/// portos da config antes de a apagar. Best-effort/idempotente.
+/// **Stops the proxy and unpublishes the ports** (teardown of `httproute rm`). Reads
+/// the ports from the config before deleting it. Best-effort/idempotent.
 pub fn stop() -> Result<()> {
-    // Despublica as portas conhecidas (da config, se ainda existir).
+    // Unpublishes the known ports (from the config, if it still exists).
     if let Ok(bytes) = std::fs::read(config_path()) {
         if let Ok(cfg) = serde_json::from_slice::<ProxyConfig>(&bytes) {
             let sock = delonix_net::infra::slirp_sock_path();
@@ -874,19 +874,19 @@ pub fn stop() -> Result<()> {
         }
     }
     if let Some(pid) = running_pid() {
-        // SAFETY: SIGTERM a um pid confirmado vivo e nosso.
+        // SAFETY: SIGTERM to a pid confirmed alive and ours.
         unsafe { libc::kill(pid, libc::SIGTERM) };
     }
     let _ = std::fs::remove_file(pid_path());
     let _ = std::fs::remove_file(config_path());
-    // Teardown total: também as fontes (manual + auto), senão um arranque seguinte
-    // reergueria rotas fantasma.
+    // Full teardown: also the sources (manual + auto), else a subsequent start would
+    // raise phantom routes again.
     let _ = std::fs::remove_file(manual_path());
     let _ = std::fs::remove_file(auto_path());
     Ok(())
 }
 
-/// Está o proxy a correr? (para o `httproute ls`/describe).
+/// Is the proxy running? (for `httproute ls`/describe).
 pub fn is_running() -> bool {
     running_pid().is_some()
 }
@@ -906,21 +906,21 @@ mod tests {
     #[test]
     fn pick_route_prefere_host_especifico_e_prefixo_mais_longo() {
         let routes = vec![
-            r("", "/", "10.0.0.1:80"),           // qualquer host, raiz
-            r("loja.ex", "/", "10.0.0.2:80"),    // host específico, raiz
-            r("loja.ex", "/api", "10.0.0.3:80"), // host específico, /api (mais longo)
+            r("", "/", "10.0.0.1:80"),           // any host, root
+            r("loja.ex", "/", "10.0.0.2:80"),    // specific host, root
+            r("loja.ex", "/api", "10.0.0.3:80"), // specific host, /api (longer)
         ];
-        // /api na loja → a rota /api (prefixo mais longo)
+        // /api on loja → the /api route (longest prefix)
         assert_eq!(
             pick_route(&routes, "loja.ex", "/api/x").unwrap().backend,
             "10.0.0.3:80"
         );
-        // / na loja → a rota host-específica, não a de qualquer-host
+        // / on loja → the host-specific route, not the any-host one
         assert_eq!(
             pick_route(&routes, "loja.ex", "/home").unwrap().backend,
             "10.0.0.2:80"
         );
-        // outro host → só casa a de qualquer-host
+        // another host → only the any-host one matches
         assert_eq!(
             pick_route(&routes, "outro.ex", "/api").unwrap().backend,
             "10.0.0.1:80"
@@ -938,7 +938,7 @@ mod tests {
         let mat = self_signed_pem(&["loja.exemplo.ao".into()]).unwrap();
         assert!(mat.cert_pem.contains("BEGIN CERTIFICATE"));
         assert!(mat.key_pem.contains("PRIVATE KEY"));
-        // E o rustls consegue construir um ServerConfig com ele.
+        // And rustls can build a ServerConfig from it.
         let _ = tokio_rustls::rustls::crypto::ring::default_provider().install_default();
         assert!(build_server_config(&mat).is_ok());
     }

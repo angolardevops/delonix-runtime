@@ -1,14 +1,14 @@
-//! `delonix dash` — dashboard de resumo/KPIs do runtime. Global (`delonix dash`)
-//! ou contextual por grupo (`delonix container dash`, `vm dash`, ...).
+//! `delonix dash` — runtime summary/KPI dashboard. Global (`delonix dash`)
+//! or contextual per group (`delonix container dash`, `vm dash`, ...).
 //!
-//! Duas saídas a partir da MESMA `DashData` (snapshot puro dos stores):
-//!  * **TUI interactivo** (default, num terminal): tiles + tabela + painel de
-//!    problemas + sparkline de actividade, refrescado a cada ~1s até `q`.
-//!  * **`--once`** (ou sem tty): imprime UM snapshot de texto (ANSI) — para
-//!    scripts/CI e para o smoke test (não precisa de terminal).
+//! Two outputs from the SAME `DashData` (pure snapshot of the stores):
+//!  * **interactive TUI** (default, in a terminal): tiles + table + problems
+//!    panel + activity sparkline, refreshed every ~1s until `q`.
+//!  * **`--once`** (or no tty): prints ONE text snapshot (ANSI) — for
+//!    scripts/CI and for the smoke test (no terminal needed).
 //!
-//! A recolha de dados (`DashData::collect`) e a formatação do snapshot são puras
-//! sobre os stores — testáveis sem terminal. O TUI é uma casca fina por cima.
+//! Data collection (`DashData::collect`) and snapshot formatting are pure
+//! over the stores — testable without a terminal. The TUI is a thin shell on top.
 
 use std::collections::VecDeque;
 use std::io::IsTerminal;
@@ -18,7 +18,7 @@ use delonix_runtime_core::{Result, Status};
 
 use super::util::state_root;
 
-/// Âmbito do dashboard: global ou focado num grupo de recursos.
+/// Dashboard scope: global or focused on a group of resources.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DashScope {
     Global,
@@ -42,7 +42,7 @@ impl DashScope {
     }
 }
 
-/// Um KPI (tile) — rótulo + valor grande + subtítulo.
+/// A KPI (tile) — label + big value + subtitle.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Tile {
     pub label: String,
@@ -50,32 +50,32 @@ pub struct Tile {
     pub sub: String,
 }
 
-/// Uma linha da tabela de recursos.
+/// A row of the resource table.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Row {
     pub kind: String,
     pub name: String,
     pub status: String,
     pub extra: String,
-    /// `true` = estado saudável (Running/present); pinta a verde vs vermelho.
+    /// `true` = healthy state (Running/present); painted green vs red.
     pub ok: bool,
 }
 
-/// Um problema identificado (o painel vermelho da direita).
+/// An identified problem (the red panel on the right).
 #[derive(Debug, Clone, PartialEq)]
 pub struct Problem {
     pub resource: String,
     pub message: String,
 }
 
-/// Snapshot completo do dashboard num instante — puro (só lê stores).
+/// Complete dashboard snapshot at an instant — pure (only reads stores).
 #[derive(Debug, Clone, PartialEq)]
 pub struct DashData {
     pub scope: DashScope,
     pub tiles: Vec<Tile>,
     pub rows: Vec<Row>,
     pub problems: Vec<Problem>,
-    /// Métrica única para o sparkline de actividade (containers a correr).
+    /// Single metric for the activity sparkline (running containers).
     pub activity: u64,
 }
 
@@ -88,8 +88,8 @@ fn tile(label: &str, value: impl ToString, sub: &str) -> Tile {
 }
 
 impl DashData {
-    /// Recolhe o snapshot dos stores para o `scope` dado. Best-effort: um store
-    /// que não abra conta como 0 (o dashboard nunca deve rebentar por um store).
+    /// Collects the store snapshot for the given `scope`. Best-effort: a store
+    /// that doesn't open counts as 0 (the dashboard should never blow up over a store).
     pub fn collect(scope: DashScope) -> Result<DashData> {
         let root = state_root();
 
@@ -107,8 +107,8 @@ impl DashData {
             .filter(|(_, s, _)| *s == Status::Running)
             .count();
 
-        // --- vms (estado RECONCILIADO com o backend, como os containers) — uma
-        //     VM morta por fora aparece Stopped, não o Running persistido ---
+        // --- vms (state RECONCILED with the backend, like containers) — a
+        //     VM killed externally shows Stopped, not the persisted Running ---
         let vms: Vec<delonix_runtime_core::Vm> = delonix_vm::list(&root)
             .unwrap_or_default()
             .into_iter()
@@ -116,7 +116,7 @@ impl DashData {
             .collect();
         let vm_running = vms.iter().filter(|v| v.status == Status::Running).count();
 
-        // --- redes / volumes / imagens / segredos ---
+        // --- networks / volumes / images / secrets ---
         let networks = delonix_net::NetworkStore::open(&root)
             .and_then(|s| s.list())
             .unwrap_or_default();
@@ -130,7 +130,7 @@ impl DashData {
             .map(|s| s.list().len())
             .unwrap_or(0);
 
-        // --- tiles (por scope) ---
+        // --- tiles (per scope) ---
         let tiles = match scope {
             DashScope::Global => vec![
                 tile(
@@ -166,7 +166,7 @@ impl DashData {
             DashScope::Images => vec![tile("IMAGENS", images.len(), "em cache")],
         };
 
-        // --- linhas da tabela (por scope) ---
+        // --- table rows (per scope) ---
         let mut rows = Vec::new();
         let want_c = matches!(scope, DashScope::Global | DashScope::Containers);
         let want_v = matches!(scope, DashScope::Global | DashScope::Vms);
@@ -233,7 +233,7 @@ impl DashData {
             }
         }
 
-        // --- problemas: derivados do estado VIVO (não de um manifesto) ---
+        // --- problems: derived from LIVE state (not from a manifest) ---
         let problems = derive_problems(&containers, &vms);
 
         Ok(DashData {
@@ -246,8 +246,8 @@ impl DashData {
     }
 }
 
-/// Problemas = recursos em estado não-saudável (o painel vermelho). Puro sobre os
-/// estados já reconciliados — separado para ser testável sem stores.
+/// Problems = resources in an unhealthy state (the red panel). Pure over the
+/// already-reconciled states — split out to be testable without stores.
 fn derive_problems(
     containers: &[(String, Status, String)],
     vms: &[delonix_runtime_core::Vm],
@@ -278,7 +278,7 @@ fn derive_problems(
 }
 
 // ===========================================================================
-// Snapshot de texto (ANSI) — `--once` / sem tty
+// Text snapshot (ANSI) — `--once` / no tty
 // ===========================================================================
 
 const RESET: &str = "\x1b[0m";
@@ -288,8 +288,8 @@ const GREEN: &str = "\x1b[38;5;114m";
 const DIM: &str = "\x1b[2m";
 const BOLD: &str = "\x1b[1m";
 
-/// Formata o snapshot como texto colorido (ANSI). Puro sobre `DashData` — o teste
-/// exercita-o com dados fabricados, sem stores nem terminal.
+/// Formats the snapshot as colored text (ANSI). Pure over `DashData` — the test
+/// exercises it with fabricated data, without stores or terminal.
 pub fn render_snapshot(d: &DashData, color: bool) -> String {
     let c = |code: &'static str| if color { code } else { "" };
     let mut out = String::new();
@@ -301,7 +301,7 @@ pub fn render_snapshot(d: &DashData, color: bool) -> String {
         c(RESET)
     ));
 
-    // Tiles — uma linha "LABEL  valor (sub)".
+    // Tiles — one line "LABEL  value (sub)".
     for t in &d.tiles {
         out.push_str(&format!(
             "  {}{:<12}{} {}{}{:>8}{} {}{}{}\n",
@@ -319,7 +319,7 @@ pub fn render_snapshot(d: &DashData, color: bool) -> String {
     }
     out.push('\n');
 
-    // Tabela de recursos.
+    // Resource table.
     if !d.rows.is_empty() {
         let mut t = super::output::Table::new(&["KIND", "NAME", "STATUS", "INFO"]);
         for r in &d.rows {
@@ -334,7 +334,7 @@ pub fn render_snapshot(d: &DashData, color: bool) -> String {
         out.push('\n');
     }
 
-    // Painel de problemas.
+    // Problems panel.
     if d.problems.is_empty() {
         out.push_str(&format!(
             "{}{}✓ sem problemas identificados{}\n",
@@ -367,8 +367,8 @@ pub fn render_snapshot(d: &DashData, color: bool) -> String {
 // Entrypoint
 // ===========================================================================
 
-/// Corre o dashboard. `once` (ou stdout não-tty) → um snapshot de texto; senão,
-/// o TUI interactivo.
+/// Runs the dashboard. `once` (or non-tty stdout) → a text snapshot; otherwise,
+/// the interactive TUI.
 pub fn run(scope: DashScope, once: bool) -> Result<()> {
     let is_tty = std::io::stdout().is_terminal();
     if once || !is_tty {
@@ -380,7 +380,7 @@ pub fn run(scope: DashScope, once: bool) -> Result<()> {
 }
 
 // ===========================================================================
-// TUI interactivo (ratatui) — casca fina; a lógica está em DashData/render
+// interactive TUI (ratatui) — thin shell; the logic lives in DashData/render
 // ===========================================================================
 
 mod tui {
@@ -395,17 +395,17 @@ mod tui {
     use std::io::stdout;
 
     pub fn run_interactive(scope: DashScope) -> Result<()> {
-        // Recolhe o PRIMEIRO snapshot ANTES de mexer no terminal: se falhar,
-        // devolve o erro com o terminal ainda intacto (nada de raw mode / alt
-        // screen por limpar). A partir daqui, TODOS os caminhos de saída restauram
-        // o terminal (a função `render` central faz a limpeza uma só vez no fim).
+        // Collect the FIRST snapshot BEFORE touching the terminal: if it fails,
+        // return the error with the terminal still intact (no raw mode / alt
+        // screen left to clean up). From here on, ALL exit paths restore
+        // the terminal (the central `render` function does the cleanup once at the end).
         let data = DashData::collect(scope)?;
 
         terminal::enable_raw_mode().ok();
         execute!(stdout(), terminal::EnterAlternateScreen).ok();
         let res = render(scope, data);
-        // Restaura SEMPRE (mesmo que `render` tenha devolvido Err) — senão o shell
-        // fica sem echo e no ecrã alternativo.
+        // ALWAYS restore (even if `render` returned Err) — otherwise the shell
+        // is left with no echo and on the alternate screen.
         terminal::disable_raw_mode().ok();
         execute!(
             stdout(),
@@ -416,8 +416,8 @@ mod tui {
         res
     }
 
-    /// O loop de desenho propriamente dito. Separado para que `run_interactive`
-    /// possa restaurar o terminal DEPOIS, aconteça o que acontecer aqui dentro.
+    /// The drawing loop proper. Split out so that `run_interactive`
+    /// can restore the terminal AFTERWARDS, whatever happens in here.
     fn render(scope: DashScope, mut data: DashData) -> Result<()> {
         let backend = ratatui::backend::CrosstermBackend::new(stdout());
         let mut term = Terminal::new(backend).map_err(io_err)?;
@@ -425,7 +425,7 @@ mod tui {
         let mut last = Instant::now() - Duration::from_secs(2);
 
         loop {
-            // Recolhe a cada ~1s (não a cada frame).
+            // Collect every ~1s (not every frame).
             if last.elapsed() >= Duration::from_secs(1) {
                 data = DashData::collect(scope).unwrap_or(data);
                 history.push_back(data.activity);
@@ -437,7 +437,7 @@ mod tui {
             if let Err(e) = term.draw(|f| draw(f, &data, history.make_contiguous())) {
                 break Err(io_err(e));
             }
-            // Poll de teclado com timeout curto (mantém o refresh fluido).
+            // Keyboard poll with a short timeout (keeps the refresh smooth).
             match event::poll(Duration::from_millis(200)) {
                 Ok(true) => {
                     if let Ok(Event::Key(k)) = event::read() {
@@ -470,11 +470,11 @@ mod tui {
         let root = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Length(1), // título
+                Constraint::Length(1), // title
                 Constraint::Length(4), // tiles
-                Constraint::Min(6),    // tabela + problemas
+                Constraint::Min(6),    // table + problems
                 Constraint::Length(7), // sparkline
-                Constraint::Length(1), // rodapé
+                Constraint::Length(1), // footer
             ])
             .split(area);
 
@@ -659,7 +659,7 @@ mod tests {
         assert!(s.contains("web"));
         assert!(s.contains("PROBLEMAS IDENTIFICADOS (1)"));
         assert!(s.contains("container/db"));
-        // sem cor → sem sequências ANSI.
+        // no color → no ANSI sequences.
         assert!(!s.contains("\x1b["));
     }
 

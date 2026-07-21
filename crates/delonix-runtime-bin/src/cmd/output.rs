@@ -1,21 +1,21 @@
-//! Camada de output partilhada da CLI — tabelas (`ls`, estilo `docker ps`) e
-//! blocos de detalhe (`describe`, estilo `kubectl describe`).
+//! Shared CLI output layer — tables (`ls`, `docker ps` style) and detail
+//! blocks (`describe`, `kubectl describe` style).
 //!
-//! Antes disto cada grupo de comandos imprimia com `println!` e larguras
-//! hardcoded (`{:<20}`), o que desalinhava a tabela toda assim que um nome ou
-//! uma imagem passava a largura adivinhada. [`Table`] mede as colunas pelo
-//! conteúdo real antes de imprimir.
+//! Before this, each command group printed with `println!` and hardcoded
+//! widths (`{:<20}`), which misaligned the whole table as soon as a name or an
+//! image exceeded the guessed width. [`Table`] measures the columns by the
+//! real content before printing.
 //!
-//! **Sem dependências novas**: este repo é público e não tem hoje nenhuma crate
-//! de tabelas/cor/datas na árvore (`comfy-table`, `tabled`, `chrono`, …). Um
-//! alinhador de colunas e um `localtime_r` são pequenos demais para justificar
-//! aumentar a superfície de supply-chain de um runtime de containers.
+//! **No new dependencies**: this repo is public and today has no table/color/
+//! date crate in the tree (`comfy-table`, `tabled`, `chrono`, …). A column
+//! aligner and a `localtime_r` are too small to justify growing the
+//! supply-chain surface of a container runtime.
 
-/// Espaço entre colunas, como no `docker ps`.
+/// Gap between columns, like in `docker ps`.
 const GAP: usize = 3;
 
 // ---------------------------------------------------------------------------
-// Cor
+// Color
 // ---------------------------------------------------------------------------
 
 /// ANSI codes. Just these: a CLI that uses half a palette ends up with each
@@ -77,9 +77,9 @@ pub fn is_pt() -> bool {
     LANG.load(std::sync::atomic::Ordering::Relaxed) == 1
 }
 
-// (o antigo `tr(en, pt)` inline morreu a favor do catálogo `data/pt.po` —
-// ver `cmd::po::t`; os pares espalhados pelo código eram intraduzíveis por
-// ferramentas e impossíveis de rever num sítio só.)
+// (the old inline `tr(en, pt)` died in favor of the `data/pt.po` catalog —
+// see `cmd::po::t`; the pairs scattered across the code were untranslatable by
+// tooling and impossible to review in a single place.)
 
 fn label_warn() -> &'static str {
     super::po::t("warning")
@@ -112,13 +112,13 @@ pub fn bold(s: &str) -> String {
     paint(color::BOLD, s)
 }
 
-/// Tabela alinhada pelo conteúdo: as colunas ficam com a largura da célula mais
-/// larga (incluindo o cabeçalho). A última coluna nunca leva padding à direita,
-/// para não deixar espaços em fim de linha.
+/// Table aligned by content: columns take the width of the widest cell
+/// (including the header). The last column never gets right padding, so it
+/// doesn't leave trailing spaces at the end of a line.
 pub struct Table {
     headers: Vec<String>,
     rows: Vec<Vec<String>>,
-    /// Índices das colunas alinhadas à direita (números).
+    /// Indices of the right-aligned columns (numbers).
     right: Vec<usize>,
 }
 
@@ -131,7 +131,7 @@ impl Table {
         }
     }
 
-    /// Alinha à direita a coluna `idx` (para tamanhos/contagens).
+    /// Right-aligns column `idx` (for sizes/counts).
     pub fn right_align(mut self, idx: usize) -> Self {
         self.right.push(idx);
         self
@@ -146,9 +146,9 @@ impl Table {
         self.rows.push(cells);
     }
 
-    /// Imprime o cabeçalho e as linhas. Um `ls` sem resultados imprime só o
-    /// cabeçalho — é o que o `docker ps` faz, e diz ao utilizador que o comando
-    /// correu e não encontrou nada (em vez de silêncio ambíguo).
+    /// Prints the header and the rows. An `ls` with no results prints only the
+    /// header — which is what `docker ps` does, telling the user the command
+    /// ran and found nothing (instead of ambiguous silence).
     pub fn print(&self) {
         let widths = self.widths();
         println!("{}", self.render(&self.headers, &widths));
@@ -157,8 +157,8 @@ impl Table {
         }
     }
 
-    /// Como `print`, mas devolve a tabela inteira (cabeçalho + linhas) como String
-    /// — para compor dentro doutra saída (ex.: o `dash` mete a tabela num painel).
+    /// Like `print`, but returns the whole table (header + rows) as a String —
+    /// to compose inside another output (e.g. `dash` puts the table in a panel).
     pub fn render_all(&self) -> String {
         let widths = self.widths();
         let mut out = String::new();
@@ -191,7 +191,7 @@ impl Table {
                 out.push_str(c);
             } else {
                 out.push_str(c);
-                // A última coluna não leva padding à direita.
+                // The last column gets no right padding.
                 if i != last {
                     out.push_str(&" ".repeat(pad));
                 }
@@ -204,31 +204,31 @@ impl Table {
     }
 }
 
-/// Largura em colunas de terminal, aproximada por número de `char`s (não de
-/// bytes — um nome com acentos contaria a dobrar em `len()`). Não trata CJK
-/// nem emoji com largura dupla; nomes de containers/imagens são ASCII na
-/// prática e não vale a pena uma dependência `unicode-width` por isso.
+/// Width in terminal columns, approximated by the number of `char`s (not
+/// bytes — a name with accents would count double in `len()`). Does not handle
+/// double-width CJK or emoji; container/image names are ASCII in practice and
+/// it's not worth a `unicode-width` dependency for it.
 fn display_width(s: &str) -> usize {
     s.chars().count()
 }
 
-/// Referência de imagem para MOSTRAR a um humano.
+/// Image reference to SHOW to a human.
 ///
-/// Uma referência fixada por digest (`kindest/node:v1.34.0@sha256:7416a61b…`,
-/// 84 chars) é o que o motor precisa — reprodutibilidade — mas numa tabela só
-/// empurra as colunas todas para fora do ecrã e o digest não diz nada a quem
-/// lê. Com tag presente, o `@sha256:…` é redundante para efeitos de leitura:
-/// mostra-se `kindest/node:v1.34.0`.
+/// A digest-pinned reference (`kindest/node:v1.34.0@sha256:7416a61b…`, 84
+/// chars) is what the engine needs — reproducibility — but in a table it just
+/// pushes all the columns off the screen and the digest says nothing to the
+/// reader. With a tag present, the `@sha256:…` is redundant for reading
+/// purposes: `kindest/node:v1.34.0` is shown.
 ///
-/// **Sem tag** (`repo@sha256:…`) o digest é a ÚNICA identificação que resta —
-/// aí encurta-se, mas nunca se deita fora: `repo@sha256:7416a61b`.
+/// **Without a tag** (`repo@sha256:…`) the digest is the ONLY identification
+/// left — there it's shortened, but never thrown away: `repo@sha256:7416a61b`.
 pub fn display_ref(reference: &str) -> String {
     let Some((antes, digest)) = reference.split_once("@sha256:") else {
         return reference.to_string();
     };
-    // `repo:tag@sha256:…` → a tag identifica; o digest é ruído na tabela.
-    // Cuidado: um `:` no host com porta (`reg:5000/img`) não é uma tag — a tag
-    // vem depois do ÚLTIMO '/'.
+    // `repo:tag@sha256:…` → the tag identifies; the digest is noise in the table.
+    // Careful: a `:` in the host with a port (`reg:5000/img`) is not a tag — the
+    // tag comes after the LAST '/'.
     let tem_tag = antes
         .rsplit('/')
         .next()
@@ -241,8 +241,8 @@ pub fn display_ref(reference: &str) -> String {
     format!("{antes}@sha256:{curto}")
 }
 
-/// Trunca com reticências (`…`) se passar de `max` — para COMMAND/PORTS, que
-/// podem ser arbitrariamente longos e rebentavam a tabela.
+/// Truncates with an ellipsis (`…`) if it exceeds `max` — for COMMAND/PORTS,
+/// which can be arbitrarily long and used to blow up the table.
 pub fn truncate(s: &str, max: usize) -> String {
     if display_width(s) <= max {
         return s.to_string();
@@ -253,13 +253,13 @@ pub fn truncate(s: &str, max: usize) -> String {
     out
 }
 
-/// Bloco de detalhe ao estilo `kubectl describe`: coluna de chaves com largura
-/// fixa, secções indentadas, listas com marcador.
+/// Detail block in `kubectl describe` style: a fixed-width key column,
+/// indented sections, bulleted lists.
 pub struct Describe {
     lines: Vec<String>,
 }
 
-/// Largura da coluna de chaves — a mesma do `kubectl describe`.
+/// Width of the key column — the same as `kubectl describe`.
 const KEY_W: usize = 16;
 
 impl Describe {
@@ -267,15 +267,16 @@ impl Describe {
         Self { lines: Vec::new() }
     }
 
-    /// `Chave:        valor`
+    /// `Key:          value`
     pub fn field(&mut self, key: &str, val: impl AsRef<str>) -> &mut Self {
         let k = format!("{key}:");
         self.lines.push(format!("{k:<KEY_W$}{}", val.as_ref()));
         self
     }
 
-    /// Campo opcional: omitido por inteiro quando é `None` (o `kubectl` faz o
-    /// mesmo — não polui o detalhe com `<none>` para tudo o que não se aplica).
+    /// Optional field: omitted entirely when it's `None` (`kubectl` does the
+    /// same — it doesn't pollute the detail with `<none>` for everything that
+    /// doesn't apply).
     pub fn field_opt(&mut self, key: &str, val: Option<impl AsRef<str>>) -> &mut Self {
         if let Some(v) = val {
             self.field(key, v.as_ref());
@@ -283,15 +284,15 @@ impl Describe {
         self
     }
 
-    /// Cabeçalho de secção (`Mounts:`), cujo conteúdo vem indentado por
+    /// Section header (`Mounts:`), whose content comes indented by
     /// [`Describe::item`].
     pub fn section(&mut self, key: &str) -> &mut Self {
         self.lines.push(format!("{key}:"));
         self
     }
 
-    /// Secção com uma lista; vazia imprime `<none>` na mesma linha, para o
-    /// leitor distinguir "não tem" de "esqueci-me de mostrar".
+    /// Section with a list; when empty it prints `<none>` on the same line, so
+    /// the reader can tell "has none" apart from "I forgot to show it".
     pub fn list(&mut self, key: &str, items: &[String]) -> &mut Self {
         if items.is_empty() {
             return self.field(key, "<none>");
@@ -303,13 +304,13 @@ impl Describe {
         self
     }
 
-    /// Linha indentada dentro de uma secção.
+    /// Indented line within a section.
     pub fn item(&mut self, val: impl AsRef<str>) -> &mut Self {
         self.lines.push(format!("  {}", val.as_ref()));
         self
     }
 
-    /// Par chave/valor indentado dentro de uma secção.
+    /// Indented key/value pair within a section.
     pub fn sub(&mut self, key: &str, val: impl AsRef<str>) -> &mut Self {
         let k = format!("{key}:");
         self.lines.push(format!(
@@ -321,7 +322,7 @@ impl Describe {
         self
     }
 
-    /// Como [`Describe::sub`], mas omitido por inteiro quando é `None`.
+    /// Like [`Describe::sub`], but omitted entirely when it's `None`.
     pub fn sub_opt(&mut self, key: &str, val: Option<impl AsRef<str>>) -> &mut Self {
         if let Some(v) = val {
             self.sub(key, v.as_ref());
@@ -336,14 +337,14 @@ impl Describe {
     }
 }
 
-/// Formata um tamanho em bytes de forma legível (base 1024: B/KiB/MiB/GiB/TiB).
-/// Uma barra de progresso de download numa linha, reescrita com `\r` (só em
-/// tty; fora de um terminal — pipes/CI — não imprime nada, para não encher os
-/// logs de linhas de progresso). `done`/`total` em bytes; `total` ausente
-/// (resposta sem Content-Length) mostra só os bytes já lidos.
+/// A single-line download progress bar, rewritten with `\r` (only on a tty;
+/// outside a terminal — pipes/CI — it prints nothing, so as not to flood the
+/// logs with progress lines). `done`/`total` in bytes; an absent `total`
+/// (response without Content-Length) shows only the bytes already read.
 ///
-/// Barato de chamar a cada pedaço: o desenho real é feito pelo chamador, que
-/// deve estrangular a frequência (ver `cmd::vmimage`); aqui só formatamos.
+/// Cheap to call for each chunk: the actual drawing is done by the caller,
+/// which should throttle the frequency (see `cmd::vmimage`); here we only
+/// format.
 pub fn progress_bar(label: &str, done: u64, total: Option<u64>) {
     if !color_enabled() {
         return;
@@ -369,7 +370,7 @@ pub fn progress_bar(label: &str, done: u64, total: Option<u64>) {
     let _ = std::io::stderr().flush();
 }
 
-/// Fecha a linha da [`progress_bar`] (limpa-a e emite o `\n`), em tty.
+/// Closes the [`progress_bar`] line (clears it and emits the `\n`), on a tty.
 pub fn progress_done() {
     if color_enabled() {
         eprintln!("\r\x1b[K");
@@ -387,18 +388,19 @@ pub fn fmt_size(bytes: u64) -> String {
         val /= 1024.0;
         unit += 1;
     }
-    // 2 casas para GiB+, 1 casa para KiB/MiB — legível sem ruído.
+    // 2 decimals for GiB+, 1 for KiB/MiB — readable without noise.
     let prec = if unit >= 3 { 2 } else { 1 };
     format!("{val:.prec$} {}", UNITS[unit])
 }
 
-/// Formata um instante unix (segundos) como data/hora LOCAL "AAAA-MM-DD HH:MM".
-/// Usa `localtime_r` (honra `/etc/localtime`/`TZ`); em falha, cai no valor cru.
+/// Formats a unix instant (seconds) as LOCAL date/time "YYYY-MM-DD HH:MM".
+/// Uses `localtime_r` (honors `/etc/localtime`/`TZ`); on failure, falls back to
+/// the raw value.
 pub fn fmt_local(unix: u64) -> String {
     let t = unix as libc::time_t;
     let mut tm: libc::tm = unsafe { std::mem::zeroed() };
-    // SAFETY: `t` é válido; `localtime_r` escreve em `tm` (buffer nosso, do
-    // tamanho certo) e devolve NULL só em erro — que tratamos abaixo.
+    // SAFETY: `t` is valid; `localtime_r` writes into `tm` (our buffer, of the
+    // right size) and returns NULL only on error — which we handle below.
     let ok = unsafe { !libc::localtime_r(&t, &mut tm).is_null() };
     if !ok {
         return unix.to_string();
@@ -420,23 +422,24 @@ pub fn now_unix() -> u64 {
         .unwrap_or(0)
 }
 
-/// Idade relativa ao estilo do `docker ps` — "About a minute ago", "3 hours
-/// ago". Função pura em `secs` para ser testável sem relógio.
+/// Relative age in `docker ps` style — "About a minute ago", "3 hours ago".
+/// Pure function on `secs` so it's testable without a clock.
 pub fn fmt_age_secs(secs: u64) -> String {
     let d = fmt_duration_secs(secs);
     format!("{d} ago")
 }
 
-/// Duração legível, estilo docker: "5 seconds", "About a minute", "2 hours".
-/// Deliberadamente grosseira — numa tabela, "3 days" é mais útil que "3d 4h 12m".
+/// Human-readable duration, docker style: "5 seconds", "About a minute",
+/// "2 hours". Deliberately coarse — in a table, "3 days" is more useful than
+/// "3d 4h 12m".
 ///
-/// Porta o `units.HumanDuration` do docker à letra, incluindo a escolha de
-/// baldes que à primeira vista parece arbitrária: os dias vão até às **2
-/// semanas** (não 1), as semanas até aos **2 meses**, os meses até aos **2
-/// anos**. É isso que evita o plural em falso — nenhum balde pode dar "1
-/// weeks"/"1 months", porque cada um começa no 2. A primeira tentativa aqui
-/// usou os limites "óbvios" (1 semana, 1 mês) mais "About a month/year" a
-/// tapar o singular, e imprimia mesmo "1 weeks" para tudo entre 7 e 13 dias.
+/// Ports docker's `units.HumanDuration` to the letter, including the bucket
+/// choice that at first glance looks arbitrary: days go up to **2 weeks**
+/// (not 1), weeks up to **2 months**, months up to **2 years**. That is what
+/// avoids the false plural — no bucket can yield "1 weeks"/"1 months", because
+/// each one starts at 2. The first attempt here used the "obvious" limits
+/// (1 week, 1 month) plus "About a month/year" to cover the singular, and it
+/// actually printed "1 weeks" for everything between 7 and 13 days.
 pub fn fmt_duration_secs(secs: u64) -> String {
     const MIN: u64 = 60;
     const HOUR: u64 = 60 * MIN;
@@ -456,29 +459,29 @@ pub fn fmt_duration_secs(secs: u64) -> String {
     }
 }
 
-/// Idade a partir de um instante unix, tolerante a relógios que andaram para
-/// trás (um `created_unix` no futuro dá 0, não um underflow gigante).
+/// Age from a unix instant, tolerant of clocks that moved backwards (a
+/// `created_unix` in the future yields 0, not a giant underflow).
 pub fn fmt_age(created_unix: u64) -> String {
     fmt_age_secs(now_unix().saturating_sub(created_unix))
 }
 
-/// Instante do boot (unix, segundos), do campo `btime` de `/proc/stat`.
+/// Boot instant (unix, seconds), from the `btime` field of `/proc/stat`.
 fn boot_unix() -> Option<u64> {
     let s = std::fs::read_to_string("/proc/stat").ok()?;
     s.lines()
         .find_map(|l| l.strip_prefix("btime ")?.trim().parse().ok())
 }
 
-/// Há quantos segundos o processo de init do container arrancou, a partir do
-/// `pid_starttime` (jiffies desde o boot, campo 22 de `/proc/<pid>/stat`).
+/// How many seconds ago the container's init process started, from
+/// `pid_starttime` (jiffies since boot, field 22 of `/proc/<pid>/stat`).
 ///
-/// **Porque não usar `created_unix`**: o `Up …` do `docker ps` é o tempo desde
-/// o ARRANQUE, não desde a criação. Um container criado ontem e reiniciado há
-/// 5 minutos (`container start`, política `--restart`) mostraria "Up 1 day" —
-/// falso, e falso precisamente quando interessa (a depurar um crash-loop). O
-/// `starttime` do processo é a única fonte que não mente.
+/// **Why not use `created_unix`**: the `Up …` of `docker ps` is the time since
+/// STARTUP, not since creation. A container created yesterday and restarted 5
+/// minutes ago (`container start`, `--restart` policy) would show "Up 1 day" —
+/// false, and false precisely when it matters (debugging a crash-loop). The
+/// process `starttime` is the only source that doesn't lie.
 pub fn uptime_from_starttime(starttime_jiffies: u64) -> Option<u64> {
-    // SAFETY: `sysconf` é thread-safe e sem efeitos; devolve -1 em erro.
+    // SAFETY: `sysconf` is thread-safe and has no effects; returns -1 on error.
     let hz = unsafe { libc::sysconf(libc::_SC_CLK_TCK) };
     if hz <= 0 {
         return None;
@@ -487,20 +490,20 @@ pub fn uptime_from_starttime(starttime_jiffies: u64) -> Option<u64> {
     Some(now_unix().saturating_sub(started_unix))
 }
 
-/// Progresso ao estilo do `kind`, com **spinner animado**: cada passo mostra um
-/// braille a girar (` ⠋ A arrancar o control-plane 🕹️ `) numa thread de fundo, e
-/// a linha é reescrita com ` ✓ …` (ou ` ✗ …`) quando fecha.
+/// `kind`-style progress, with an **animated spinner**: each step shows a
+/// spinning braille (` ⠋ Starting the control-plane 🕹️ `) on a background
+/// thread, and the line is rewritten with ` ✓ …` (or ` ✗ …`) when it closes.
 ///
-/// # Porquê uma thread
+/// # Why a thread
 ///
-/// O trabalho do passo (`node_exec_capture`) bloqueia o thread principal, às
-/// vezes por minutos (`kubeadm init` puxa imagens). Sem uma thread a animar, a
-/// linha ficava congelada e parecia pendurada. A thread só toca no stderr (o
-/// output do passo vai para um ficheiro capturado, ver `node_exec_capture`), por
-/// isso não há duas escritas a competir pela mesma linha.
+/// The step's work (`node_exec_capture`) blocks the main thread, sometimes for
+/// minutes (`kubeadm init` pulls images). Without a thread animating, the line
+/// stayed frozen and looked hung. The thread only touches stderr (the step's
+/// output goes to a captured file, see `node_exec_capture`), so there are never
+/// two writes competing for the same line.
 ///
-/// **Sem TTY (pipe, CI, `2>&1 | tee`)** não há spinner nem `\r`: imprime-se só a
-/// linha final, uma por passo — o que um log de CI quer.
+/// **Without a TTY (pipe, CI, `2>&1 | tee`)** there is no spinner and no `\r`:
+/// only the final line is printed, one per step — which is what a CI log wants.
 pub struct Progress {
     tty: bool,
     msg: String,
@@ -513,12 +516,12 @@ struct SpinnerHandle {
     handle: Option<std::thread::JoinHandle<()>>,
 }
 
-/// Frames do spinner (braille, como o `kind`/`spinnies`).
+/// Spinner frames (braille, like `kind`/`spinnies`).
 const SPIN_FRAMES: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
 impl Progress {
     pub fn new() -> Self {
-        // SAFETY: isatty não tem pré-condições; 2 = stderr.
+        // SAFETY: isatty has no preconditions; 2 = stderr.
         let tty = unsafe { libc::isatty(2) } == 1;
         Self {
             tty,
@@ -528,9 +531,9 @@ impl Progress {
         }
     }
 
-    /// Abre um passo e arranca o spinner (em TTY). `icon` é o emoji do fim.
+    /// Opens a step and starts the spinner (on a TTY). `icon` is the ending emoji.
     pub fn step(&mut self, msg: &str, icon: &str) {
-        self.close_line('✗'); // fecha um passo anterior deixado em aberto
+        self.close_line('✗'); // closes a previous step left open
         self.msg = msg.to_string();
         self.icon = icon.to_string();
         if !self.tty {
@@ -542,8 +545,8 @@ impl Progress {
             use std::io::Write;
             let mut i = 0usize;
             while !s2.load(std::sync::atomic::Ordering::Relaxed) {
-                // `\x1b[K` limpa até ao fim da linha (evita restos de um frame
-                // mais longo). Sem `\n` — a linha é reescrita in-place.
+                // `\x1b[K` clears to the end of the line (avoids leftovers from
+                // a longer frame). No `\n` — the line is rewritten in-place.
                 eprint!(
                     "\r {} {msg} {icon}\x1b[K",
                     SPIN_FRAMES[i % SPIN_FRAMES.len()]
@@ -559,13 +562,13 @@ impl Progress {
         });
     }
 
-    /// Fecha o passo actual com `✓`.
+    /// Closes the current step with `✓`.
     pub fn ok(&mut self) {
         self.close_line('✓');
     }
 
-    /// Pára o spinner (se houver) e escreve a linha final com `mark`. Idempotente
-    /// — chamado pelo `ok`, pelo próximo `step` e pelo `Drop`.
+    /// Stops the spinner (if any) and writes the final line with `mark`.
+    /// Idempotent — called by `ok`, by the next `step` and by `Drop`.
     fn close_line(&mut self, mark: char) {
         let had_spinner = self.spin.is_some();
         if let Some(mut s) = self.spin.take() {
@@ -574,10 +577,10 @@ impl Progress {
                 let _ = h.join();
             }
         } else if self.msg.is_empty() {
-            return; // nada aberto
+            return; // nothing open
         }
         if self.tty {
-            // `\r` + limpar a linha do spinner, depois a linha final.
+            // `\r` + clear the spinner line, then the final line.
             eprintln!("\r {mark} {} {}\x1b[K", self.msg, self.icon);
         } else if !self.msg.is_empty() {
             eprintln!(" {mark} {} {}", self.msg, self.icon);
@@ -589,8 +592,8 @@ impl Progress {
 
 impl Drop for Progress {
     fn drop(&mut self) {
-        // Um passo deixado em aberto (erro a meio) fecha com ✗ em vez de ficar
-        // com o spinner pendurado.
+        // A step left open (error midway) closes with ✗ instead of leaving the
+        // spinner hanging.
         self.close_line('✗');
     }
 }
@@ -606,7 +609,7 @@ mod tests {
         t.row(vec!["curto".into(), "y".into()]);
         let w = t.widths();
         assert_eq!(w[0], "um-nome-bem-comprido".len());
-        // Cabeçalho mais largo que o conteúdo ganha.
+        // A header wider than the content wins.
         assert_eq!(w[1], 1);
     }
 
@@ -622,7 +625,7 @@ mod tests {
     fn truncate_respeita_o_maximo() {
         assert_eq!(truncate("abcdef", 4), "abc…");
         assert_eq!(truncate("abc", 4), "abc");
-        // Conta chars, não bytes — senão um acento truncava cedo demais.
+        // Counts chars, not bytes — otherwise an accent would truncate too early.
         assert_eq!(truncate("ãããã", 4), "ãããã");
     }
 
@@ -637,9 +640,9 @@ mod tests {
 
     #[test]
     fn nenhum_balde_imprime_um_plural_em_falso() {
-        // Regressão: um `image ls` real mostrou "1 weeks ago" para uma imagem de
-        // 7 dias. Nenhuma duração pode produzir "1 <plural>" — no docker os
-        // baldes de weeks/months/years começam todos no 2, por construção.
+        // Regression: a real `image ls` showed "1 weeks ago" for a 7-day image.
+        // No duration can produce "1 <plural>" — in docker the weeks/months/
+        // years buckets all start at 2, by construction.
         const DAY: u64 = 86400;
         for s in [
             0u64,
@@ -664,7 +667,7 @@ mod tests {
                 "plural em falso para {s}s: {d:?}"
             );
         }
-        // E os limites de balde, à letra do docker.
+        // And the bucket limits, to the letter of docker.
         assert_eq!(fmt_duration_secs(7 * DAY), "7 days");
         assert_eq!(fmt_duration_secs(13 * DAY), "13 days");
         assert_eq!(fmt_duration_secs(14 * DAY), "2 weeks");
@@ -674,25 +677,26 @@ mod tests {
 
     #[test]
     fn idade_com_relogio_no_futuro_nao_faz_underflow() {
-        // `created_unix` no futuro (relógio corrigido para trás) dava um
-        // underflow de u64 → "584 milhões de anos ago".
+        // `created_unix` in the future (clock corrected backwards) used to give
+        // a u64 underflow → "584 million years ago".
         let futuro = now_unix() + 3600;
         assert_eq!(fmt_age(futuro), "Less than a second ago");
     }
 
     #[test]
     fn locale_reconhece_variantes_pt() {
-        // A tradução em si vive no catálogo (`cmd::po`); aqui só o locale.
+        // The translation itself lives in the catalog (`cmd::po`); here it's
+        // only the locale.
         set_lang("en");
         assert!(!is_pt());
         set_lang("pt");
         assert!(is_pt());
-        // pt_AO e variantes contam como pt; qualquer outra coisa = en (default seguro).
+        // pt_AO and variants count as pt; anything else = en (safe default).
         set_lang("pt_AO");
         assert!(is_pt());
         set_lang("fr");
         assert!(!is_pt());
-        set_lang("en"); // repõe para não afectar outros testes
+        set_lang("en"); // reset so it doesn't affect other tests
     }
 
     #[test]
@@ -704,7 +708,7 @@ mod tests {
 
     #[test]
     fn display_ref_corta_o_digest_quando_ha_tag() {
-        // O caso que motivou isto: um kindest/node fixado por digest.
+        // The case that motivated this: a kindest/node pinned by digest.
         assert_eq!(
             display_ref("kindest/node:v1.34.0@sha256:7416a61b42b1662ca6ca89f02028ac133a309a2a30ba309614e8ec94d976dc5a"),
             "kindest/node:v1.34.0"
@@ -713,15 +717,16 @@ mod tests {
             display_ref("nginx:latest@sha256:abcdef0123"),
             "nginx:latest"
         );
-        // Sem digest, intacto.
+        // Without a digest, untouched.
         assert_eq!(display_ref("alpine:3.19"), "alpine:3.19");
         assert_eq!(display_ref("nginx"), "nginx");
     }
 
     #[test]
     fn display_ref_sem_tag_encurta_o_digest_mas_nao_o_deita_fora() {
-        // `repo@sha256:…` — o digest é a ÚNICA identificação; encurta-se, não se
-        // remove (senão ficavam duas imagens diferentes com o mesmo nome).
+        // `repo@sha256:…` — the digest is the ONLY identification; it's
+        // shortened, not removed (otherwise two different images would end up
+        // with the same name).
         assert_eq!(
             display_ref("myrepo@sha256:7416a61b42b1662ca6ca89f0"),
             "myrepo@sha256:7416a61b"
@@ -730,13 +735,14 @@ mod tests {
 
     #[test]
     fn display_ref_nao_confunde_porta_do_registo_com_tag() {
-        // `reg:5000/img@sha256:…` — o `:5000` é a porta do host, NÃO uma tag.
-        // A tag, se houver, vem depois do último '/'. Aqui não há → encurta o digest.
+        // `reg:5000/img@sha256:…` — the `:5000` is the host port, NOT a tag.
+        // The tag, if any, comes after the last '/'. Here there is none →
+        // shorten the digest.
         assert_eq!(
             display_ref("reg:5000/img@sha256:7416a61b42b1662c"),
             "reg:5000/img@sha256:7416a61b"
         );
-        // Com porta E tag, a tag identifica → corta o digest.
+        // With a port AND a tag, the tag identifies → cut the digest.
         assert_eq!(
             display_ref("reg:5000/img:v2@sha256:7416a61b"),
             "reg:5000/img:v2"

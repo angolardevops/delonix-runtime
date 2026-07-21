@@ -1,23 +1,23 @@
-//! i18n por catálogo gettext (`.po`) EMBUTIDO — a fonte do código é 100%
-//! inglês (o padrão de mercado num repo público) e as traduções vivem num
-//! ficheiro `.po` standard, compilado para dentro do binário.
+//! i18n via an EMBEDDED gettext (`.po`) catalog — the code source is 100%
+//! English (the market standard in a public repo) and the translations live in
+//! a standard `.po` file, compiled into the binary.
 //!
-//! Porquê `.po` e não pares inline `tr(en, pt)`: o par inline espalha a
-//! tradução por 30 ficheiros de código (impossível de rever ou entregar a um
-//! tradutor), enquanto um catálogo é UM ficheiro com o formato que as
-//! ferramentas de tradução (Poedit, Weblate, Crowdin) falam nativamente.
-//! Adicionar uma língua nova = adicionar um `.po`, zero mudanças de código.
+//! Why `.po` and not inline `tr(en, pt)` pairs: the inline pair scatters the
+//! translation across 30 code files (impossible to review or hand to a
+//! translator), whereas a catalog is ONE file in the format that translation
+//! tools (Poedit, Weblate, Crowdin) speak natively. Adding a new language =
+//! adding a `.po`, zero code changes.
 //!
-//! Parser próprio mínimo (~50 linhas) em vez do crate `gettext`: a regra do
-//! projecto é não aumentar a superfície de supply-chain por conveniência
-//! (ver CLAUDE.md, secção Output) — o subconjunto que precisamos (msgid/
-//! msgstr com continuações e escapes) cabe aqui e tem testes.
+//! A minimal in-house parser (~50 lines) instead of the `gettext` crate: the
+//! project rule is not to grow the supply-chain surface for convenience (see
+//! CLAUDE.md, Output section) — the subset we need (msgid/msgstr with
+//! continuations and escapes) fits here and has tests.
 
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
-/// O catálogo pt_AO, embutido no binário. Regenerar entradas: cada string
-/// nova de UI entra aqui com o EN como `msgid` — nunca no código.
+/// The pt_AO catalog, embedded in the binary. Regenerating entries: each new
+/// UI string enters here with the EN as `msgid` — never in the code.
 const PT_PO: &str = include_str!("../../data/pt.po");
 
 fn catalog() -> &'static HashMap<String, String> {
@@ -25,11 +25,11 @@ fn catalog() -> &'static HashMap<String, String> {
     CAT.get_or_init(|| parse_po(PT_PO))
 }
 
-/// Traduz `en` para a língua activa — o substituto directo do antigo
-/// `tr(en, pt)`: mesma assinatura de retorno (`&'static str`, possível porque
-/// o catálogo vive num `OnceLock` estático), mas com o PT no `data/pt.po` em
-/// vez de espalhado pelo código. Sem tradução (ou em inglês), devolve o
-/// próprio `en` — a UI nunca fica muda por um msgid em falta.
+/// Translates `en` to the active language — the direct replacement for the old
+/// `tr(en, pt)`: same return signature (`&'static str`, possible because the
+/// catalog lives in a static `OnceLock`), but with the PT in `data/pt.po`
+/// instead of scattered across the code. Without a translation (or in English),
+/// it returns `en` itself — the UI never goes mute over a missing msgid.
 pub fn t(en: &'static str) -> &'static str {
     if !super::output::is_pt() {
         return en;
@@ -40,10 +40,10 @@ pub fn t(en: &'static str) -> &'static str {
     }
 }
 
-/// `t()` para TEMPLATES com valores: o `format!` exige literais em
-/// compile-time, logo mensagens interpoladas traduzem o template e substituem
-/// os placeholders NOMEADOS depois (`{name}` — nomeados de propósito: uma
-/// tradução pode reordená-los, coisa que `{}` posicionais não permitem).
+/// `t()` for TEMPLATES with values: `format!` requires compile-time literals,
+/// so interpolated messages translate the template and substitute the NAMED
+/// placeholders afterwards (`{name}` — named on purpose: a translation may
+/// reorder them, which positional `{}` don't allow).
 ///
 ///   tf("port {port} is taken by '{owner}'", &[("port", &hp), ("owner", &ow)])
 pub fn tf(en: &'static str, subs: &[(&str, &str)]) -> String {
@@ -54,11 +54,11 @@ pub fn tf(en: &'static str, subs: &[(&str, &str)]) -> String {
     out
 }
 
-/// Variante para strings DINÂMICAS — o help do clap e o PRINTER DE ERROS do
-/// main.rs (mensagens dos crates de MOTOR chegam como texto já formatado; os
-/// crates não podem depender deste catálogo, por isso a tradução acontece à
-/// saída, por lookup do texto EN completo — mensagens com valores interpolados
-/// não casam e saem em EN, limitação conhecida e documentada).
+/// Variant for DYNAMIC strings — the clap help and the ERROR PRINTER of
+/// main.rs (messages from the ENGINE crates arrive as already-formatted text;
+/// those crates can't depend on this catalog, so translation happens at
+/// output, by looking up the full EN text — messages with interpolated values
+/// don't match and come out in EN, a known and documented limitation).
 pub fn t_dyn(s: &str) -> String {
     t_owned(s)
 }
@@ -73,13 +73,13 @@ fn t_owned(s: &str) -> String {
     }
 }
 
-/// Parser do subconjunto de `.po` que usamos: entradas `msgid`/`msgstr`, com
-/// linhas de continuação (`"..."`) e escapes `\n`/`\"`/`\\`. Comentários (`#`)
-/// e metadados (o msgid vazio do cabeçalho) são ignorados.
+/// Parser for the subset of `.po` we use: `msgid`/`msgstr` entries, with
+/// continuation lines (`"..."`) and `\n`/`\"`/`\\` escapes. Comments (`#`) and
+/// metadata (the header's empty msgid) are ignored.
 fn parse_po(src: &str) -> HashMap<String, String> {
     let mut map = HashMap::new();
     let (mut id, mut val) = (String::new(), String::new());
-    // 0 = fora, 1 = a acumular msgid, 2 = a acumular msgstr
+    // 0 = outside, 1 = accumulating msgid, 2 = accumulating msgstr
     let mut state = 0u8;
     let mut flush = |id: &mut String, val: &mut String| {
         if !id.is_empty() {
@@ -117,7 +117,7 @@ fn parse_po(src: &str) -> HashMap<String, String> {
     map
 }
 
-/// Desfaz as aspas e escapes de uma string `.po` (`"a \"b\"\n"` → `a "b"<nl>`).
+/// Undoes the quotes and escapes of a `.po` string (`"a \"b\"\n"` → `a "b"<nl>`).
 fn unquote(s: &str) -> String {
     let inner = s.trim().trim_start_matches('"').trim_end_matches('"');
     let mut out = String::with_capacity(inner.len());
@@ -142,9 +142,10 @@ fn unquote(s: &str) -> String {
     out
 }
 
-/// `t()` para strings de HELP: o clap derive REMOVE o ponto final do
-/// doc-comment na ajuda curta, mas no catálogo os msgids ficam com pontuação
-/// natural — se o lookup exacto falhar, tenta com `.` e volta a tirá-lo.
+/// `t()` for HELP strings: the clap derive REMOVES the trailing period of the
+/// doc-comment in the short help, but in the catalog the msgids keep natural
+/// punctuation — if the exact lookup fails, it tries with `.` and strips it
+/// again.
 fn t_help(s: &str) -> String {
     let direct = t_owned(s);
     if direct != s {
@@ -159,12 +160,13 @@ fn t_help(s: &str) -> String {
     }
 }
 
-/// Traduz o texto de ajuda de um `clap::Command` inteiro (about/long_about de
-/// cada subcomando + help de cada argumento), recursivamente, via catálogo.
+/// Translates the help text of an entire `clap::Command` (about/long_about of
+/// each subcommand + help of each argument), recursively, via the catalog.
 ///
-/// O clap derive congela as strings de help em compile-time; isto reescreve-as
-/// DEPOIS de construir o `Command` e ANTES do parse — é o que permite ter a
-/// fonte em EN e `--l18n=pt` a servir o help em português do MESMO binário.
+/// The clap derive freezes the help strings at compile-time; this rewrites them
+/// AFTER building the `Command` and BEFORE the parse — which is what lets us
+/// have the source in EN and `--l18n=pt` serving the help in Portuguese from
+/// the SAME binary.
 pub fn translate_help(mut cmd: clap::Command) -> clap::Command {
     if let Some(about) = cmd.get_about().map(|s| s.to_string()) {
         cmd = cmd.about(t_help(&about));
@@ -198,9 +200,9 @@ pub fn translate_help(mut cmd: clap::Command) -> clap::Command {
     cmd
 }
 
-/// Espreita a língua no argv/ambiente ANTES do parse do clap — o help é
-/// gerado DURANTE o parse, logo a língua tem de estar decidida primeiro
-/// (`--l18n pt`, `--l18n=pt` ou `$DELONIX_L18N`).
+/// Peeks the language in the argv/environment BEFORE the clap parse — the help
+/// is generated DURING the parse, so the language has to be decided first
+/// (`--l18n pt`, `--l18n=pt` or `$DELONIX_L18N`).
 pub fn peek_lang() -> Option<String> {
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
@@ -245,7 +247,7 @@ mod tests {
 
     #[test]
     fn catalogo_embutido_parseia_e_tem_entradas() {
-        // Se alguém partir o data/pt.po, este teste rebenta ANTES da release.
+        // If someone breaks the data/pt.po, this test blows up BEFORE the release.
         assert!(!catalog().is_empty(), "data/pt.po vazio ou malformado");
     }
 }

@@ -1,14 +1,14 @@
-//! `delonix image --vm` — imagens VM douradas (Ubuntu + kubeadm/kubelet/
-//! kubectl + `delonix-cri`), geridas à parte das imagens de container (essas
-//! ficam em `cmd::image`/`ImageStore`). Um `.qcow2` solto por imagem (sem
-//! CAS/layers — só há um blob por imagem, nada a deduplicar) + um `.json` de
-//! metadados, ambos em `<root>/vm-images/`.
+//! `delonix image --vm` — golden VM images (Ubuntu + kubeadm/kubelet/
+//! kubectl + `delonix-cri`), managed separately from container images (those
+//! live in `cmd::image`/`ImageStore`). One standalone `.qcow2` per image (no
+//! CAS/layers — there is only one blob per image, nothing to deduplicate) + a
+//! `.json` of metadata, both under `<root>/vm-images/`.
 //!
-//! `build` produz a imagem de raiz (download da cloud image Ubuntu + `virt-
-//! customize`); `push`/`pull` publicam/obtêm-na de um registo OCI (artefacto
-//! de blob único, ver `delonix_image::registry::{push_oci_artifact,
-//! pull_oci_artifact}`) — o mesmo protocolo das imagens de container, só sem
-//! o modelo de layers/config Docker.
+//! `build` produces the image from scratch (download of the Ubuntu cloud image
+//! + `virt-customize`); `push`/`pull` publish/fetch it from an OCI registry (a
+//! single-blob artifact, see `delonix_image::registry::{push_oci_artifact,
+//! pull_oci_artifact}`) — the same protocol as container images, only without
+//! the Docker layers/config model.
 
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -68,9 +68,9 @@ impl VmImageStore {
     }
 
     pub fn base_cache_path(&self, ubuntu_release: &str) -> PathBuf {
-        // `sanitize` (não aplicado aqui antes — achado de auditoria de segurança,
-        // ver CLAUDE.md) elimina `/` de `ubuntu_release`, impedindo que
-        // `--ubuntu-release '../../../etc/cron.d/x'` escreva fora de `_base/`.
+        // `sanitize` (not applied here before — security-audit finding, see
+        // CLAUDE.md) strips `/` from `ubuntu_release`, preventing
+        // `--ubuntu-release '../../../etc/cron.d/x'` from writing outside `_base/`.
         self.root.join("_base").join(format!(
             "ubuntu-{}-server-cloudimg-amd64.img",
             Self::sanitize(ubuntu_release)
@@ -108,47 +108,47 @@ impl VmImageStore {
 
 #[derive(Subcommand)]
 pub enum VmImageCmd {
-    /// Lista as imagens VM locais.
+    /// List the local VM images.
     Ls,
-    /// Detalhe legível de uma ou mais imagens VM, ao estilo `kubectl describe`.
+    /// Human-readable detail of one or more VM images, `kubectl describe` style.
     Describe { names: Vec<String> },
-    /// Publica uma imagem VM local num registo OCI (artefacto de blob único).
+    /// Publish a local VM image to an OCI registry (single-blob artifact).
     Push { name: String, target: String },
-    /// Puxa uma imagem VM de um registo OCI.
+    /// Pull a VM image from an OCI registry.
     Pull {
         source: String,
         #[arg(long)]
         name: Option<String>,
     },
-    /// Constrói a imagem dourada: Ubuntu cloud image + kubeadm/kubelet/kubectl
-    /// + `delonix-cri` (endpoint CRI para o kubelet), via `virt-customize`.
+    /// Build the golden image: Ubuntu cloud image + kubeadm/kubelet/kubectl
+    /// + `delonix-cri` (CRI endpoint for the kubelet), via `virt-customize`.
     Build {
         #[arg(short = 't', long = "tag")]
         tag: String,
         #[arg(long, default_value = "26.04")]
         ubuntu_release: String,
-        /// Versão do Kubernetes (ex.: `1.31`) — omitir usa a última estável.
+        /// Kubernetes version (e.g. `1.31`) — omit to use the latest stable.
         #[arg(long)]
         k8s_version: Option<String>,
-        /// Pacote apt adicional, repetível — extensibilidade sem tocar no código.
+        /// Extra apt package, repeatable — extensibility without touching the code.
         #[arg(long = "extra-package")]
         extra_packages: Vec<String>,
-        /// Comando adicional a correr dentro do guest durante o build, repetível.
+        /// Extra command to run inside the guest during the build, repeatable.
         #[arg(long = "extra-run")]
         extra_run: Vec<String>,
-        /// Caminho explícito do binário `delonix-cri` a instalar (senão:
-        /// procura ao lado do `delonix` actual, depois tenta compilar do
-        /// workspace se um `Cargo.toml` for detectado a partir do cwd).
+        /// Explicit path of the `delonix-cri` binary to install (otherwise:
+        /// looks next to the current `delonix`, then tries to build from the
+        /// workspace if a `Cargo.toml` is detected from the cwd).
         #[arg(long)]
         cri_bin: Option<PathBuf>,
-        /// Não comprimir o qcow2 final (fica maior, mas sem custo de
-        /// descompressão nas leituras do backing file em runtime).
+        /// Do not compress the final qcow2 (larger, but no decompression cost
+        /// on backing-file reads at runtime).
         #[arg(long)]
         no_compress: bool,
-        /// Obter os .deb do k8s no HOST (verificados: assinatura do InRelease +
-        /// SHA256) e instalá-los com `dpkg` — o appliance corre sem rede
-        /// (`--no-network`). Dispensa DHCP/DNS no guest, logo dispensa os
-        /// workarounds de host (passt/dhclient) que o modo online exige.
+        /// Fetch the k8s .deb files on the HOST (verified: InRelease signature +
+        /// SHA256) and install them with `dpkg` — the appliance runs without
+        /// network (`--no-network`). Dispenses with DHCP/DNS in the guest, so it
+        /// dispenses with the host workarounds (passt/dhclient) the online mode requires.
         #[arg(long)]
         offline: bool,
     },
@@ -199,7 +199,7 @@ fn cmd_ls(store: &VmImageStore) -> Result<()> {
     Ok(())
 }
 
-/// `image --vm describe` — detalhe legível ao estilo `kubectl describe`.
+/// `image --vm describe` — human-readable detail, `kubectl describe` style.
 fn cmd_describe(store: &VmImageStore, names: &[String]) -> Result<()> {
     for (i, name) in names.iter().enumerate() {
         let img = store.get(name)?;
@@ -219,8 +219,8 @@ fn describe_one(store: &VmImageStore, img: &VmImage) {
     d.field("Size", fmt_size(img.size));
     d.field("Created", fmt_local(img.created_unix));
     d.field("Age", output::fmt_age(img.created_unix));
-    // `pull` NÃO recupera estes metadados (o artefacto OCI só carrega o blob
-    // qcow2) — numa imagem puxada ficam `None`. Ver o gap conhecido no CLAUDE.md.
+    // `pull` does NOT recover this metadata (the OCI artifact only carries the
+    // qcow2 blob) — on a pulled image they stay `None`. See the known gap in CLAUDE.md.
     d.field(
         "Ubuntu",
         img.ubuntu_release.as_deref().unwrap_or("<unknown>"),
@@ -228,8 +228,8 @@ fn describe_one(store: &VmImageStore, img: &VmImage) {
     d.field("K8s", img.k8s_version.as_deref().unwrap_or("<unknown>"));
     let qcow2 = store.qcow2_path(&img.name);
     d.field("Path", qcow2.to_string_lossy());
-    // O `size` acima é o do build/pull; este é o que ESTÁ em disco agora. Se
-    // divergirem, o artefacto foi mexido por fora — vale a pena poder ver.
+    // The `size` above is the build/pull one; this is what IS on disk now. If
+    // they diverge, the artifact was tampered with out-of-band — worth being able to see.
     d.field_opt(
         "On disk",
         std::fs::metadata(&qcow2).ok().map(|m| fmt_size(m.len())),
@@ -237,9 +237,9 @@ fn describe_one(store: &VmImageStore, img: &VmImage) {
     d.print();
 }
 
-/// A imagem VM dourada OFICIAL do Delonix (Ubuntu 24.04 + kubeadm/kubelet/
-/// kubectl + delonix-cri como serviço systemd) — publicada e validada com
-/// round-trip byte-idêntico; ver CLAUDE.md, secção "Imagem VM dourada".
+/// Delonix's OFFICIAL golden VM image (Ubuntu 24.04 + kubeadm/kubelet/
+/// kubectl + delonix-cri as a systemd service) — published and validated with
+/// a byte-identical round-trip; see CLAUDE.md, section "Golden VM image".
 pub(crate) const OFFICIAL_VM_IMAGE: &str = "ghcr.io/angolardevops/delonix-vm-k8s:1.34";
 
 pub(crate) fn cmd_push(store: &VmImageStore, name: &str, target: &str) -> Result<()> {
@@ -262,9 +262,9 @@ pub(crate) fn cmd_push(store: &VmImageStore, name: &str, target: &str) -> Result
 }
 
 pub(crate) fn cmd_pull(store: &VmImageStore, source: &str, name: Option<String>) -> Result<()> {
-    // Barra de progresso do download (a golden tem centenas de MB): o motor
-    // reporta (bytes, total) a cada 64KB; redesenhamos no máximo a cada ~2MB
-    // para não martelar o terminal. Só desenha em tty (ver `output`).
+    // Download progress bar (the golden is hundreds of MB): the engine
+    // reports (bytes, total) every 64KB; we redraw at most every ~2MB
+    // so as not to hammer the terminal. Only draws on a tty (see `output`).
     let label = format!("[vm pull] {source}");
     let last = std::cell::Cell::new(0u64);
     let on_progress = move |done: u64, total: Option<u64>| {
@@ -309,10 +309,10 @@ fn cmd_build(
     compress: bool,
     offline: bool,
 ) -> Result<()> {
-    // `k8s_version` entra num `format!` que vira comando `virt-customize --run-command`
-    // (via `k8s_recipes::k8s_host_recipes`) — validar aqui fecha o mesmo achado de
-    // segurança de `cmd::cluster::valid_version` (o repositório apt embutido não pode
-    // conter metacaracteres de shell). Achado de auditoria, ver CLAUDE.md.
+    // `k8s_version` goes into a `format!` that becomes a `virt-customize --run-command`
+    // (via `k8s_recipes::k8s_host_recipes`) — validating here closes the same security
+    // finding as `cmd::cluster::valid_version` (the embedded apt repository must not
+    // contain shell metacharacters). Audit finding, see CLAUDE.md.
     if let Some(v) = &k8s_version {
         if !super::cluster::valid_version(v) {
             return Err(Error::Invalid(format!(
@@ -345,8 +345,8 @@ fn cmd_build(
 
     let service_unit = workspace_dist_file("delonix-cri.service")?;
     let ops = if offline {
-        // Tudo o que precisa de rede acontece AQUI, no host (verificado), para o
-        // appliance poder correr com `--no-network`.
+        // Everything that needs network happens HERE, on the host (verified), so the
+        // appliance can run with `--no-network`.
         eprintln!("modo offline: a obter os .deb do k8s no host...");
         let debs = download_k8s_debs(
             &work_dir,
@@ -367,8 +367,8 @@ fn cmd_build(
     };
     let mut args = customize_args(&work_qcow2, &ops);
     if offline {
-        // Sem isto o libguestfs arranca o passt e o appliance espera por um lease
-        // DHCP que nunca chega em hosts onde o passt está partido (ver CLAUDE.md).
+        // Without this, libguestfs starts passt and the appliance waits for a DHCP
+        // lease that never arrives on hosts where passt is broken (see CLAUDE.md).
         args.insert(0, "--no-network".to_string());
     }
 
@@ -382,17 +382,17 @@ fn cmd_build(
         &args.iter().map(String::as_str).collect::<Vec<_>>(),
     )?;
 
-    // Encolher o artefacto. Medido numa golden 24.04 (2.38 GiB → 677 MiB, −72%):
-    //  1) `virt-sparsify --in-place` — zera os blocos já libertados (a limpeza do
-    //     apt acima liberta ~367 MiB que, sem isto, continuam a ocupar no qcow2).
-    //  2) `qemu-img convert -c` — a cloud image da Ubuntu VEM comprimida e o
-    //     `convert` inicial (acima, sem `-c`) descomprime-a; sem este passo o
-    //     artefacto final fica ~4x maior que a base. `zstd` em vez do zlib por
-    //     omissão: comprime 5x mais rápido (10s vs 53s), fica menor, e sobretudo
-    //     DESCOMPRIME muito mais rápido — importa porque esta imagem é usada como
-    //     backing file read-only das VMs (`delonix_vm::create` faz um overlay por
-    //     VM), logo cada leitura do SO base passa pelo descompressor.
-    // Sparsify é best-effort: se falhar, seguimos (só perde-se algum tamanho).
+    // Shrink the artifact. Measured on a 24.04 golden (2.38 GiB → 677 MiB, −72%):
+    //  1) `virt-sparsify --in-place` — zeroes the blocks already freed (the apt
+    //     cleanup above frees ~367 MiB that, without this, still occupy the qcow2).
+    //  2) `qemu-img convert -c` — the Ubuntu cloud image COMES compressed and the
+    //     initial `convert` (above, without `-c`) decompresses it; without this step
+    //     the final artifact is ~4x larger than the base. `zstd` instead of the
+    //     default zlib: compresses 5x faster (10s vs 53s), ends up smaller, and above
+    //     all DECOMPRESSES much faster — it matters because this image is used as the
+    //     read-only backing file of the VMs (`delonix_vm::create` makes an overlay per
+    //     VM), so every read of the base OS goes through the decompressor.
+    // Sparsify is best-effort: if it fails, we carry on (only some size is lost).
     let final_qcow2 = if compress {
         eprintln!(
             "{}",
@@ -452,7 +452,7 @@ fn cmd_build(
 }
 
 // ---------------------------------------------------------------------------
-// Download + verificação da cloud image Ubuntu
+// Download + verification of the Ubuntu cloud image
 // ---------------------------------------------------------------------------
 
 fn download_ubuntu_base(store: &VmImageStore, release: &str) -> Result<PathBuf> {
@@ -538,36 +538,36 @@ fn http_get_text(url: &str) -> Result<String> {
 }
 
 // ---------------------------------------------------------------------------
-// Build OFFLINE: descarrega+verifica os .deb do k8s NO HOST
+// OFFLINE build: download+verify the k8s .deb files ON THE HOST
 // ---------------------------------------------------------------------------
-// Assim o `virt-customize` corre com `--no-network` e o appliance nunca precisa
-// de DHCP/DNS — o que remove os workarounds de host (passt/dhclient) que o
-// caminho online exige. A cadeia de confiança é a MESMA do apt, só que feita
-// aqui em vez de dentro do guest:
-//   InRelease (clearsigned, verificado com a Release.key do repo)
-//     → SHA256 do `Packages`  → SHA256 de cada `.deb`
-// Nunca se aceita um ficheiro sem o passo anterior o ter autenticado — o mesmo
-// princípio do achado CRÍTICO nº3 da auditoria (`pull_oci_artifact` sem digest).
+// This way `virt-customize` runs with `--no-network` and the appliance never
+// needs DHCP/DNS — which removes the host workarounds (passt/dhclient) that the
+// online path requires. The chain of trust is the SAME as apt's, only done
+// here instead of inside the guest:
+//   InRelease (clearsigned, verified with the repo's Release.key)
+//     → SHA256 of `Packages`  → SHA256 of each `.deb`
+// A file is never accepted without the previous step having authenticated it — the
+// same principle as CRITICAL finding nº3 of the audit (`pull_oci_artifact` without digest).
 
-/// Um `.deb` do repo `pkgs.k8s.io`, já resolvido a partir de um `Packages` autenticado.
+/// A `.deb` from the `pkgs.k8s.io` repo, already resolved from an authenticated `Packages`.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct K8sDeb {
     pub name: String,
     pub version: String,
-    /// Caminho relativo à raiz do repo (campo `Filename`).
+    /// Path relative to the repo root (the `Filename` field).
     pub filename: String,
     pub sha256: String,
 }
 
-/// Parseia um índice `Packages` (Debian control, blocos separados por linha
-/// vazia) e devolve, por pacote de `wanted`, a MAIOR versão disponível para
-/// `arch`. Função PURA (testável sem rede).
+/// Parses a `Packages` index (Debian control, blocks separated by a blank
+/// line) and returns, per package in `wanted`, the HIGHEST version available for
+/// `arch`. PURE function (testable without network).
 ///
-/// `version_prefix` (ex.: "1.34.") só se aplica aos pacotes de `versioned` — os
-/// componentes que seguem a versão do Kubernetes (kubeadm/kubelet/kubectl). Os
-/// restantes do repo têm versionamento PRÓPRIO (`kubernetes-cni` é 1.7.x,
-/// `cri-tools` é 1.34.x mas independente) e levam só "a mais recente": filtrá-los
-/// pelo prefixo do k8s não devolvia nada.
+/// `version_prefix` (e.g. "1.34.") only applies to the `versioned` packages — the
+/// components that follow the Kubernetes version (kubeadm/kubelet/kubectl). The
+/// rest of the repo has its OWN versioning (`kubernetes-cni` is 1.7.x,
+/// `cri-tools` is 1.34.x but independent) and take only "the most recent": filtering
+/// them by the k8s prefix returned nothing.
 pub(crate) fn parse_packages_index(
     index: &str,
     arch: &str,
@@ -598,7 +598,7 @@ pub(crate) fn parse_packages_index(
         if !wanted.is_empty() && !wanted.contains(name) {
             continue;
         }
-        // O prefixo do k8s só vale para quem segue a versão do k8s.
+        // The k8s prefix only applies to those that follow the k8s version.
         if versioned.contains(name) && !version.starts_with(version_prefix) {
             continue;
         }
@@ -619,10 +619,10 @@ pub(crate) fn parse_packages_index(
     best.into_values().collect()
 }
 
-/// Compara duas versões Debian de forma suficiente para o repo k8s
-/// (`1.34.9-1.1`): compara numericamente os campos separados por `.`/`-`.
-/// Não é o algoritmo completo do dpkg — o repo só usa versões desta forma, e um
-/// empate/formato inesperado degrada para comparação lexicográfica.
+/// Compares two Debian versions well enough for the k8s repo
+/// (`1.34.9-1.1`): compares numerically the fields separated by `.`/`-`.
+/// It is not dpkg's full algorithm — the repo only uses versions of this form, and a
+/// tie/unexpected format degrades to lexicographic comparison.
 pub(crate) fn deb_version_lt(a: &str, b: &str) -> bool {
     let parts = |s: &str| -> Vec<u64> {
         s.split(['.', '-'])
@@ -641,9 +641,9 @@ pub(crate) fn deb_version_lt(a: &str, b: &str) -> bool {
     }
 }
 
-/// Extrai de um `Release` autenticado o SHA256 esperado de um ficheiro
-/// (ex.: "Packages"). Os índices vêm na secção `SHA256:` como
-/// `<sha>  <tamanho>  <caminho>`. Função PURA.
+/// Extracts from an authenticated `Release` the expected SHA256 of a file
+/// (e.g. "Packages"). The indexes come in the `SHA256:` section as
+/// `<sha>  <size>  <path>`. PURE function.
 pub(crate) fn release_sha256_of(release: &str, want_path: &str) -> Option<String> {
     let mut in_sha = false;
     for line in release.lines() {
@@ -651,7 +651,7 @@ pub(crate) fn release_sha256_of(release: &str, want_path: &str) -> Option<String
             in_sha = true;
             continue;
         }
-        // outra secção de topo (não indentada) termina o bloco SHA256.
+        // another top-level (non-indented) section ends the SHA256 block.
         if in_sha && !line.starts_with(' ') {
             in_sha = false;
         }
@@ -668,15 +668,15 @@ pub(crate) fn release_sha256_of(release: &str, want_path: &str) -> Option<String
     None
 }
 
-/// Verifica o `InRelease` (clearsigned) com a `Release.key` do repo e devolve o
-/// corpo JÁ AUTENTICADO. Usa `gpgv` com um keyring temporário — nunca toca no
-/// keyring do utilizador. Falha fechado: sem assinatura válida, não há build.
+/// Verifies the `InRelease` (clearsigned) with the repo's `Release.key` and returns
+/// the ALREADY AUTHENTICATED body. Uses `gpgv` with a temporary keyring — never touches
+/// the user's keyring. Fails closed: without a valid signature, there is no build.
 fn verify_inrelease(work: &Path, repo_base: &str) -> Result<String> {
     let key_armored = http_get_text(&format!("{repo_base}/Release.key"))?;
     let key_asc = work.join("k8s-release.asc");
     let keyring = work.join("k8s-release.gpg");
     std::fs::write(&key_asc, &key_armored)?;
-    // ASCII-armored → keyring binário que o gpgv entende.
+    // ASCII-armored → binary keyring that gpgv understands.
     run_tool(
         "gpg",
         &[
@@ -716,9 +716,9 @@ fn verify_inrelease(work: &Path, repo_base: &str) -> Result<String> {
     Ok(std::fs::read_to_string(&inrelease)?)
 }
 
-/// Descarrega para `dest_dir` os `.deb` do k8s (fecho do repo: kubeadm/kubelet/
-/// kubectl + `kubernetes-cni`), com a cadeia apt completa verificada no host.
-/// Devolve os caminhos locais. `arch` é a arquitectura Debian (ex.: "amd64").
+/// Downloads to `dest_dir` the k8s `.deb` files (repo closure: kubeadm/kubelet/
+/// kubectl + `kubernetes-cni`), with the full apt chain verified on the host.
+/// Returns the local paths. `arch` is the Debian architecture (e.g. "amd64").
 fn download_k8s_debs(
     work: &Path,
     dest_dir: &Path,
@@ -733,7 +733,7 @@ fn download_k8s_debs(
     eprintln!("a verificar a assinatura do repo k8s ({repo})...");
     let release = verify_inrelease(work, &repo_base)?;
 
-    // `Packages` autenticado pelo SHA256 que consta do InRelease assinado.
+    // `Packages` authenticated by the SHA256 listed in the signed InRelease.
     let want_sha = release_sha256_of(&release, "Packages").ok_or_else(|| {
         Error::Invalid(
             super::po::t("the k8s repo InRelease does not declare the SHA256 of 'Packages'")
@@ -752,12 +752,12 @@ fn download_k8s_debs(
     }
     let index = std::fs::read_to_string(&packages_path)?;
 
-    // Fecho: os 3 pedidos + `kubernetes-cni` (dep do kubelet dentro do repo).
-    // As restantes deps do kubelet (iptables/mount/util-linux/libc6) já vêm na
-    // cloud image da Ubuntu — se alguma faltar, o `dpkg -i` falha ALTO no guest,
-    // que é o que queremos (nunca instalar meio-instalado em silêncio).
-    // `versioned` seguem a versão do k8s (`--k8s-version 1.34` → `1.34.*`);
-    // `kubernetes-cni` tem versionamento próprio → só "a mais recente".
+    // Closure: the 3 requested + `kubernetes-cni` (kubelet dep inside the repo).
+    // The remaining kubelet deps (iptables/mount/util-linux/libc6) already come in
+    // the Ubuntu cloud image — if any is missing, `dpkg -i` fails LOUDLY in the guest,
+    // which is what we want (never install half-installed silently).
+    // `versioned` follow the k8s version (`--k8s-version 1.34` → `1.34.*`);
+    // `kubernetes-cni` has its own versioning → only "the most recent".
     const VERSIONED: [&str; 3] = ["kubeadm", "kubelet", "kubectl"];
     let mut wanted: Vec<&str> = vec!["kubeadm", "kubelet", "kubectl", "kubernetes-cni"];
     for p in extra_packages {
@@ -828,7 +828,7 @@ fn now_unix() -> u64 {
 }
 
 // ---------------------------------------------------------------------------
-// Resolução do binário `delonix-cri` a instalar no guest
+// Resolution of the `delonix-cri` binary to install in the guest
 // ---------------------------------------------------------------------------
 
 pub(crate) fn resolve_cri_bin(explicit: Option<PathBuf>) -> Result<PathBuf> {
@@ -841,7 +841,7 @@ pub(crate) fn resolve_cri_bin(explicit: Option<PathBuf>) -> Result<PathBuf> {
         }
         return Ok(p);
     }
-    // Ao lado do `delonix` actual (instalação normal, release).
+    // Next to the current `delonix` (normal install, release).
     if let Ok(exe) = std::env::current_exe() {
         if let Some(dir) = exe.parent() {
             let candidate = dir.join("delonix-cri");
@@ -850,7 +850,7 @@ pub(crate) fn resolve_cri_bin(explicit: Option<PathBuf>) -> Result<PathBuf> {
             }
         }
     }
-    // Conveniência de dev: workspace do código-fonte a partir do cwd.
+    // Dev convenience: source-code workspace from the cwd.
     if let Some(workspace_root) = find_workspace_root() {
         eprintln!(
             "a compilar delonix-cri (release) a partir de {}...",
@@ -908,7 +908,7 @@ pub(crate) fn workspace_dist_file(name: &str) -> Result<PathBuf> {
 }
 
 // ---------------------------------------------------------------------------
-// Passos de customização (função pura — testável sem VM/virt-customize real)
+// Customization steps (pure function — testable without a real VM/virt-customize)
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, PartialEq)]
@@ -919,23 +919,23 @@ pub(crate) enum CustomizeOp {
     RootPassword(String),
 }
 
-/// Constrói a lista de passos de customização a aplicar à imagem base — a
-/// parte "100% parametrizada": `extra_packages`/`extra_run` estendem sem
-/// tocar nesta função. Pura (sem I/O), testável isoladamente. As receitas
-/// tecnicamente sensíveis (repo/pacotes/swap/módulos/sysctls) vêm de
-/// `k8s_recipes::k8s_host_recipes` — o MESMO catálogo que `cmd::cluster`
-/// usa via SSH, para a imagem dourada e um host preparado por `cluster
-/// apply` ficarem exactamente iguais.
-/// Como [`k8s_customization_steps`], mas SEM rede no guest: em vez do
-/// repositório apt + `apt-get install`, injecta os `.deb` já descarregados e
-/// verificados no HOST (`download_k8s_debs`) e instala-os com `dpkg -i`. As
-/// restantes receitas (swap/módulos/sysctls) são as MESMAS do caminho online
-/// (`k8s_recipes::k8s_config_recipes`) — não divergem.
+/// Builds the list of customization steps to apply to the base image — the
+/// "100% parameterized" part: `extra_packages`/`extra_run` extend without
+/// touching this function. Pure (no I/O), testable in isolation. The
+/// technically sensitive recipes (repo/packages/swap/modules/sysctls) come from
+/// `k8s_recipes::k8s_host_recipes` — the SAME catalog that `cmd::cluster`
+/// uses via SSH, so the golden image and a host prepared by `cluster
+/// apply` end up exactly alike.
+/// Like [`k8s_customization_steps`], but WITHOUT network in the guest: instead of
+/// the apt repository + `apt-get install`, it injects the `.deb` files already
+/// downloaded and verified on the HOST (`download_k8s_debs`) and installs them with
+/// `dpkg -i`. The remaining recipes (swap/modules/sysctls) are the SAME as the online
+/// path (`k8s_recipes::k8s_config_recipes`) — they do not diverge.
 ///
-/// `dpkg -i` em vez de `apt-get install ./*.deb`: o apt precisaria de contactar
-/// as listas para resolver deps; as deps do kubelet fora do repo k8s
-/// (iptables/mount/util-linux/libc6) já vêm na cloud image. Se alguma faltar, o
-/// `dpkg` falha ALTO e o build pára — nunca deixa um guest meio-instalado.
+/// `dpkg -i` instead of `apt-get install ./*.deb`: apt would need to contact
+/// the lists to resolve deps; the kubelet deps outside the k8s repo
+/// (iptables/mount/util-linux/libc6) already come in the cloud image. If any is
+/// missing, `dpkg` fails LOUDLY and the build stops — it never leaves a half-installed guest.
 pub(crate) fn k8s_customization_steps_offline(
     debs: &[PathBuf],
     extra_run: &[String],
@@ -943,7 +943,7 @@ pub(crate) fn k8s_customization_steps_offline(
     cri_service: &Path,
 ) -> Vec<CustomizeOp> {
     let mut ops: Vec<CustomizeOp> = Vec::new();
-    // `--copy-in` exige que o directório-alvo JÁ exista no guest.
+    // `--copy-in` requires the target directory to ALREADY exist in the guest.
     ops.push(CustomizeOp::RunCommand("mkdir -p /tmp/k8s-debs".into()));
     for d in debs {
         ops.push(CustomizeOp::CopyIn(d.clone(), "/tmp/k8s-debs".to_string()));
@@ -977,9 +977,9 @@ pub(crate) fn k8s_customization_steps(
     ops
 }
 
-/// A cauda comum aos dois modos (online/offline): `delonix-cri` + contas +
-/// `--extra-run` do utilizador + limpeza do apt. Partilhada para os dois
-/// caminhos nunca divergirem no que produzem.
+/// The tail common to both modes (online/offline): `delonix-cri` + accounts +
+/// the user's `--extra-run` + apt cleanup. Shared so the two paths
+/// never diverge in what they produce.
 fn common_customization_steps(
     extra_run: &[String],
     cri_bin: &Path,
@@ -987,12 +987,12 @@ fn common_customization_steps(
 ) -> Vec<CustomizeOp> {
     let mut ops: Vec<CustomizeOp> = Vec::new();
     ops.extend([
-        // `delonix-cri` — endpoint CRI para o kubelet (substitui containerd).
+        // `delonix-cri` — CRI endpoint for the kubelet (replaces containerd).
         CustomizeOp::CopyIn(cri_bin.to_path_buf(), "/usr/local/bin".to_string()),
         CustomizeOp::RunCommand("chmod +x /usr/local/bin/delonix-cri".into()),
         CustomizeOp::CopyIn(cri_service.to_path_buf(), "/etc/systemd/system".to_string()),
         CustomizeOp::RunCommand("systemctl enable delonix-cri.service".into()),
-        // Conta padrão: root/delonix e delonix:delonix em sudoers (pedido explícito).
+        // Default account: root/delonix and delonix:delonix in sudoers (explicit request).
         CustomizeOp::RootPassword("delonix".to_string()),
         CustomizeOp::RunCommand("useradd -m -s /bin/bash -G sudo delonix || true".into()),
         CustomizeOp::Password { user: "delonix".to_string(), password: "delonix".to_string() },
@@ -1002,23 +1002,23 @@ fn common_customization_steps(
         ),
     ]);
     ops.extend(extra_run.iter().cloned().map(CustomizeOp::RunCommand));
-    // Limpeza do apt — SEMPRE no fim (depois do `--extra-run` do utilizador, que
-    // pode instalar mais pacotes). Medido numa golden 24.04: `/var/cache/apt`
-    // (~181 MiB de .deb já instalados) + `/var/lib/apt/lists` (~186 MiB de
-    // índices) = ~367 MiB de puro lixo, que enchiam a raiz a 92%. Um `apt-get
-    // update` regenera os índices se o nó precisar.
+    // apt cleanup — ALWAYS at the end (after the user's `--extra-run`, which
+    // may install more packages). Measured on a 24.04 golden: `/var/cache/apt`
+    // (~181 MiB of already-installed .deb) + `/var/lib/apt/lists` (~186 MiB of
+    // indexes) = ~367 MiB of pure garbage, which filled the root to 92%. An `apt-get
+    // update` regenerates the indexes if the node needs them.
     //
-    // DELIBERADAMENTE aqui e não em `k8s_recipes`: aquele catálogo é PARTILHADO
-    // com `cluster apply`, que prepara hosts VIVOS — limpar a cache apt é uma
-    // preocupação do ARTEFACTO (encolher uma imagem distribuível), não da
-    // preparação de um host.
+    // DELIBERATELY here and not in `k8s_recipes`: that catalog is SHARED
+    // with `cluster apply`, which prepares LIVE hosts — cleaning the apt cache is a
+    // concern of the ARTIFACT (shrinking a distributable image), not of
+    // host preparation.
     ops.push(CustomizeOp::RunCommand(
         "apt-get clean && rm -rf /var/lib/apt/lists/*".into(),
     ));
     ops
 }
 
-/// Traduz os `CustomizeOp` para os argumentos reais do `virt-customize`.
+/// Translates the `CustomizeOp`s into the actual `virt-customize` arguments.
 pub(crate) fn customize_args(disk: &Path, ops: &[CustomizeOp]) -> Vec<String> {
     let mut args = vec!["-a".to_string(), disk.to_string_lossy().into_owned()];
     for op in ops {
@@ -1091,7 +1091,7 @@ mod tests {
 
     #[test]
     fn fmt_local_tem_a_forma_data_hora() {
-        // 1784216635 → uma data/hora local; validamos a FORMA (o fuso é do host).
+        // 1784216635 → a local date/time; we validate the SHAPE (the timezone is the host's).
         let s = fmt_local(1_784_216_635);
         let b = s.as_bytes();
         assert_eq!(s.len(), 16, "esperado 'AAAA-MM-DD HH:MM', obtido {s:?}");
@@ -1104,8 +1104,8 @@ mod tests {
         let cri = PathBuf::from("/tmp/delonix-cri");
         let svc = PathBuf::from("/tmp/delonix-cri.service");
         let ops = k8s_customization_steps(None, &[], &["echo oi".to_string()], &cri, &svc);
-        // `--extra-run` corre depois de todos os passos base; só a limpeza do apt
-        // vem a seguir (tem de ser a última — o extra-run pode instalar pacotes).
+        // `--extra-run` runs after all base steps; only the apt cleanup
+        // comes after it (it must be last — the extra-run may install packages).
         let idx_extra = ops
             .iter()
             .position(|op| matches!(op, CustomizeOp::RunCommand(c) if c == "echo oi"))
@@ -1120,8 +1120,8 @@ mod tests {
         );
     }
 
-    /// Um `Packages` reduzido, com a mesma forma do real (várias arquitecturas e
-    /// versões por pacote) — inclui o caso que partiu o 1.º build offline.
+    /// A reduced `Packages`, with the same shape as the real one (several architectures and
+    /// versions per package) — includes the case that broke the 1st offline build.
     const PACKAGES_FIXTURE: &str = "\
 Package: cri-tools
 Version: 1.34.0-1.1
@@ -1180,14 +1180,14 @@ SHA256: ccc1
 
     #[test]
     fn parse_packages_ignora_versionamento_proprio_no_filtro_de_versao() {
-        // REGRESSÃO: o `kubernetes-cni` é 1.7.x — filtrá-lo por "1.34." não
-        // devolvia nada e o build offline abortava com "não tem kubernetes-cni".
+        // REGRESSION: `kubernetes-cni` is 1.7.x — filtering it by "1.34." returned
+        // nothing and the offline build aborted with "does not have kubernetes-cni".
         let got = parse_packages_index(
             PACKAGES_FIXTURE,
             "amd64",
             "1.34.",
             &["kubeadm", "kubernetes-cni"],
-            &["kubeadm"], // só o kubeadm segue a versão do k8s
+            &["kubeadm"], // only kubeadm follows the k8s version
         );
         let cni = got
             .iter()
@@ -1256,14 +1256,14 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
             cmds.iter().any(|c| c.contains("mkdir -p /tmp/k8s-debs")),
             "o --copy-in exige o dir criado"
         );
-        // A garantia central do modo offline: nada contacta a rede no guest.
+        // The central guarantee of offline mode: nothing contacts the network in the guest.
         for c in &cmds {
             assert!(
                 !c.contains("curl") && !c.contains("apt-get update") && !c.contains("https://"),
                 "passo offline com rede: {c}"
             );
         }
-        // E o .deb é injectado.
+        // And the .deb is injected.
         assert!(ops
             .iter()
             .any(|o| matches!(o, CustomizeOp::CopyIn(_, d) if d == "/tmp/k8s-debs")));
@@ -1274,7 +1274,7 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
         let cri = PathBuf::from("/tmp/delonix-cri");
         let svc = PathBuf::from("/tmp/delonix-cri.service");
         let ops = k8s_customization_steps(None, &[], &[], &cri, &svc);
-        // ~367 MiB de .deb + índices que, sem isto, enchiam a raiz da golden a 92%.
+        // ~367 MiB of .deb + indexes that, without this, filled the golden's root to 92%.
         let last = ops.last().expect("devia haver passos");
         assert!(
             matches!(last, CustomizeOp::RunCommand(c) if c.contains("apt-get clean") && c.contains("/var/lib/apt/lists")),

@@ -28,7 +28,7 @@ struct ContainerSpec {
     pub(crate) detach: bool,
     #[serde(default = "default_net")]
     network: String,
-    /// Porta HTTP a auto-registar no proxy L7 (FQDN interno). Ver `--expose`.
+    /// HTTP port to auto-register in the L7 proxy (internal FQDN). See `--expose`.
     #[serde(default)]
     expose: Option<u16>,
     #[serde(default)]
@@ -119,8 +119,8 @@ struct ContainerSpec {
     log_driver: Option<String>,
 }
 
-/// Nomes aceites no `spec` de `kind: Container` (canónicos + aliases), para o
-/// aviso de campos desconhecidos. Alinhado com `ContainerSpec` pelo teste
+/// Names accepted in the `spec` of `kind: Container` (canonical + aliases), for the
+/// unknown-fields warning. Kept aligned with `ContainerSpec` by the test
 /// `manifest::tests::examples_nao_tem_campos_desconhecidos`.
 pub(crate) const CONTAINER_SPEC_FIELDS: &[&str] = &[
     "image",
@@ -184,14 +184,14 @@ fn custom_net_name(net: &str) -> Option<String> {
     (net != "host" && net != "none").then(|| net.to_string())
 }
 
-// FIXME(follow-up): variantes com grande disparidade de tamanho (≥880 B). Boxar as
-// variantes gordas é uma optimização real mas desajeitada com `#[derive(Subcommand)]`
-// do clap — fica para mudança dedicada; o custo aqui é uma CLI de vida curta.
+// FIXME(follow-up): variants with a large size disparity (≥880 B). Boxing the
+// fat variants is a real optimization but awkward with clap's `#[derive(Subcommand)]`
+// — left for a dedicated change; the cost here is a short-lived CLI.
 #[allow(clippy::large_enum_variant)]
 #[derive(Subcommand)]
 pub enum ContainerCmd {
-    /// Dashboard (KPIs + tabela + problemas) dos containers — TUI interactivo, ou
-    /// `--once` para um snapshot de texto.
+    /// Dashboard (KPIs + table + problems) of the containers — interactive TUI, or
+    /// `--once` for a text snapshot.
     Dash {
         #[arg(long)]
         once: bool,
@@ -211,11 +211,11 @@ pub enum ContainerCmd {
         /// Overwrite existing files.
         #[arg(long)]
         force: bool,
-        /// Gera um PROJECTO completo de uma stack (ex.: `python`) com boas práticas,
-        /// em vez do scaffold genérico. `--template list` mostra os disponíveis.
+        /// Generate a complete PROJECT for a stack (e.g. `python`) with best
+        /// practices, instead of the generic scaffold. `--template list` shows the available ones.
         #[arg(long, short = 't')]
         template: Option<String>,
-        /// Depois de gerar, constrói a imagem, arranca e espera ficar saudável.
+        /// After generating, build the image, start it, and wait until it's healthy.
         #[arg(long)]
         up: bool,
     },
@@ -770,9 +770,9 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
     let (images, store) = open_stores()?;
     for doc in manifest::of_kind(docs, "Container") {
         let name = &doc.metadata.name;
-        // Avisa de gralhas ANTES do early-continue: um manifesto re-aplicado
-        // contra um recurso já existente também deve ver o aviso (senão a
-        // gralha nunca aparece depois da primeira criação).
+        // Warn about typos BEFORE the early-continue: a manifest re-applied
+        // against an already-existing resource should also see the warning (otherwise
+        // the typo never shows up after the first creation).
         manifest::warn_unknown_fields(doc, CONTAINER_SPEC_FIELDS);
         if store.list()?.iter().any(|c| &c.name == name) {
             println!("container/{name}: already exists, nothing to do");
@@ -989,17 +989,17 @@ fn group_lookup(rootfs: &str, name: &str) -> Option<u32> {
 pub(crate) struct RunOpts {
     pub(crate) detach: bool,
     pub(crate) name: Option<String>,
-    /// Hostname interno (`--hostname`). `None` = usa o nome do container.
+    /// Internal hostname (`--hostname`). `None` = use the container name.
     #[serde(default)]
     pub(crate) hostname: Option<String>,
-    /// Utilizador do processo (`--user`, `uid[:gid]`|`nome[:grupo]`). `None` = root.
+    /// The process user (`--user`, `uid[:gid]`|`name[:group]`). `None` = root.
     #[serde(default)]
     pub(crate) user: Option<String>,
     pub(crate) net: String,
-    /// Namespace lógico de ISOLAMENTO (default `default`). Ver [[isolamento de namespace]].
+    /// Logical ISOLATION namespace (default `default`). See [[namespace isolation]].
     #[serde(default)]
     pub(crate) namespace: Option<String>,
-    /// Porta HTTP a auto-registar no proxy L7 sob o FQDN interno (`--expose`).
+    /// HTTP port to auto-register in the L7 proxy under the internal FQDN (`--expose`).
     #[serde(default)]
     pub(crate) expose: Option<u16>,
     pub(crate) volumes: Vec<String>,
@@ -1144,9 +1144,9 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
         log_file,
         log_cri,
     } = opts;
-    // Namespace de isolamento (default `default`). Vai a um nome de set nft (via
-    // `dlxns_set`, que o HASHEIA → seguro) e a um token do control-line (que o
-    // `attach_container` sanitiza). Aqui só garantimos não-vazio.
+    // Isolation namespace (default `default`). It goes into an nft set name (via
+    // `dlxns_set`, which HASHES it → safe) and into a control-line token (which
+    // `attach_container` sanitizes). Here we only ensure it's non-empty.
     let namespace = namespace
         .filter(|s| !s.trim().is_empty())
         .unwrap_or_else(|| "default".into());
@@ -1174,9 +1174,9 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
         for spec in &ports {
             let (hp, cp, _) = delonix_net::parse_publish(spec)?;
             if let Some(owner) = port_owner(store, &hp)? {
-                // Estruturada como as receitas do `cluster apply`: primeiro o
-                // facto, depois as saídas possíveis como comandos prontos a
-                // copiar — quem bate neste erro resolve-o sem ir ao --help.
+                // Structured like the `cluster apply` recipes: the fact first,
+                // then the possible ways out as ready-to-copy commands — whoever
+                // hits this error resolves it without going to --help.
                 let alt = hp.parse::<u32>().map(|n| n + 10000).unwrap_or(18080);
                 return Err(Error::Invalid(super::po::tf(
                     "port {hp} is already published by container '{owner}'\n\
@@ -1221,10 +1221,10 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
             "no command (the image defines no ENTRYPOINT/CMD)".into(),
         ));
     }
-    // Nome default no padrão angolano (rei + lugar, como os clusters kind-mode
-    // e as VMs) — derivado do `id` para as DUAS passagens do re-exec chegarem
-    // ao mesmo nome (o id viaja no DELONIX_REEXEC_ID; ver `names::derived_name`).
-    // `dlx-<id>` fica só como último recurso se as 50 tentativas colidirem.
+    // Default name in the Angolan pattern (king + place, like the kind-mode
+    // clusters and the VMs) — derived from the `id` so the TWO re-exec passes arrive
+    // at the same name (the id travels in DELONIX_REEXEC_ID; see `names::derived_name`).
+    // `dlx-<id>` is only a last resort if the 50 attempts all collide.
     let cname = match name {
         Some(n) => n,
         None => {
@@ -1272,13 +1272,13 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
             c.labels.insert(k.to_string(), v.to_string());
         }
     }
-    // `--hostname`: sobrepõe o nome do container na UTS namespace (o motor lê
-    // `c.hostname`). Vazio = usa o nome (histórico).
+    // `--hostname`: overrides the container name in the UTS namespace (the engine reads
+    // `c.hostname`). Empty = use the name (historical).
     c.hostname = hostname.filter(|h| !h.trim().is_empty());
-    // `--user <uid[:gid]|nome[:grupo]>`: resolve contra o `/etc/passwd`/`/etc/group`
-    // da imagem (nomes) ou usa os números; o motor troca para o uid/gid antes do
-    // `execve` (`RunSpec.run_uid`/`run_gid`). É o fio do CRI `RunAsUser`/`RunAsGroup`/
-    // `RunAsUserName`.
+    // `--user <uid[:gid]|name[:group]>`: resolves against the image's
+    // `/etc/passwd`/`/etc/group` (names) or uses the numbers; the engine switches to
+    // the uid/gid before `execve` (`RunSpec.run_uid`/`run_gid`). It's the thread of the
+    // CRI `RunAsUser`/`RunAsGroup`/`RunAsUserName`.
     if let Some(u) = &user {
         let (uid, gid) = resolve_run_user(&rootfs, u)?;
         c.run_uid = Some(uid);
@@ -1304,11 +1304,11 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
     let mut apparmor_profile = apparmor;
     for opt in &security_opt {
         match opt.split_once('=') {
-            // Só `unconfined` (desliga) e `detect` (modo log) são suportados; um
-            // PERFIL custom (`seccomp=/x.json`) era ACEITE e depois IGNORADO — o
-            // container corria com o perfil embutido enquanto o utilizador
-            // julgava o seu activo. Fail-closed: erro explícito (achado da
-            // análise Docker/Podman; invariante "sem falha silenciosa").
+            // Only `unconfined` (off) and `detect` (log mode) are supported; a
+            // custom PROFILE (`seccomp=/x.json`) used to be ACCEPTED and then IGNORED —
+            // the container ran with the built-in profile while the user
+            // thought theirs was active. Fail-closed: explicit error (a finding from
+            // the Docker/Podman analysis; invariant "no silent failure").
             Some(("seccomp", "unconfined")) => c.seccomp = Some("unconfined".into()),
             Some(("seccomp", v)) => {
                 return Err(Error::Invalid(format!(
@@ -1353,9 +1353,9 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
     c.sysctls = sysctl;
 
     // ---- network ----
-    // `--network-alias` é gravado mas o DNS interno (dns_resolve) ainda NÃO o
-    // consulta — resolve só pelo nome. Avisa em vez de fingir (achado da
-    // análise Docker/Podman; invariante "sem falha silenciosa").
+    // `--network-alias` is recorded but the internal DNS (dns_resolve) does NOT yet
+    // consult it — it resolves by name only. Warn instead of pretending (a finding from
+    // the Docker/Podman analysis; invariant "no silent failure").
     if !network_alias.is_empty() {
         super::output::warn(super::po::t(
             "--network-alias is recorded but the internal DNS does not resolve aliases yet — only the container name resolves",
@@ -1408,8 +1408,8 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
     // to JOIN it via `RunSpec.join_netns`, not create its own with `new_netns` —
     // that was the wrong approach, tried and corrected here).
     let custom_net = custom_net_name(&net);
-    // `--expose` precisa de um IP na SDN (rede custom) — o proxy alcança o backend
-    // por esse IP. Com `--net host/none` não há IP → avisa em vez de ignorar mudo.
+    // `--expose` needs an IP on the SDN (custom network) — the proxy reaches the backend
+    // via that IP. With `--net host/none` there's no IP → warn instead of silently ignoring.
     if expose.is_some() && custom_net.is_none() {
         eprintln!(
             "{} {}",
@@ -1427,10 +1427,10 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
             // 1st pass: creates the netns on the holder's side and RE-EXECUTES itself inside it.
             delonix_net::NetworkStore::open(super::util::state_root())?.get(n)?;
             let (netns, ip) = infra::attach_container(&id, n, &namespace)?;
-            // `--expose`: auto-registo no proxy L7 AQUI, no lado do HOST — o spawn do
-            // proxy é por `nsenter` para o holder, que falha do processo já
-            // reexec'd (dentro do netns do container). O `c.expose` persiste-se
-            // depois, no bloco custom_net da passagem reexec.
+            // `--expose`: auto-register in the L7 proxy HERE, on the HOST side — the
+            // proxy spawn is via `nsenter` into the holder, which fails from the
+            // already-reexec'd process (inside the container's netns). `c.expose` is
+            // persisted later, in the custom_net block of the reexec pass.
             if let Some(port) = expose {
                 if let Err(e) = super::ingress_proxy::auto_register(&c.name, &namespace, &ip, port)
                 {
@@ -1443,13 +1443,13 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
             return reexec_into_netns(&id, &netns, &ip, &opts_copy, true);
         }
     }
-    // `--pod <name>`: junta-se ao netns PARTILHADO do pod sandbox (modelo "pause"),
-    // usado pelo servidor CRI (`delonix-cri`). O netns do pod já existe (o CRI fê-lo
-    // com `netns attach cri-<pod>`); cada container do pod junta-se a ESSE netns
-    // (IP/portas partilhados) em vez de criar o seu. Mesmo mecanismo de re-exec do
-    // `--net <custom>`, mas a ENTRAR no netns do POD (não num com o nome deste
-    // container). NÃO destaca o netns em caso de falha — pertence ao pod, não a este
-    // container (outros containers do pod partilham-no).
+    // `--pod <name>`: joins the pod sandbox's SHARED netns ("pause" model),
+    // used by the CRI server (`delonix-cri`). The pod's netns already exists (the CRI
+    // created it with `netns attach cri-<pod>`); each container of the pod joins THAT
+    // netns (shared IP/ports) instead of creating its own. Same re-exec mechanism as
+    // `--net <custom>`, but ENTERING the POD's netns (not one named after this
+    // container). It does NOT detach the netns on failure — it belongs to the pod, not to
+    // this container (the pod's other containers share it).
     if let Some(pn) = &pod {
         if reexec {
             attached_ip = std::env::var("DELONIX_REEXEC_IP").ok();
@@ -1486,15 +1486,15 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
         Vec::new()
     };
     let slirp_hook = |pid: i32| -> Result<()> { delonix_net::slirp_attach(pid, &slirp_ports) };
-    // DNS para o /etc/resolv.conf: numa rede custom é o gateway (o resolver do
-    // ingress); com `-p` (slirp) é o DNS do slirp; em `--net host` fica `None`
-    // (o runtime copia o resolv.conf do host).
+    // DNS for /etc/resolv.conf: on a custom network it's the gateway (the ingress's
+    // resolver); with `-p` (slirp) it's the slirp's DNS; on `--net host` it's `None`
+    // (the runtime copies the host's resolv.conf).
     let dns = match &custom_net {
         Some(n) => infra::resolve_net(n).ok().map(|(_, _, gw)| gw),
-        // Container de POD (`--pod`): está em delonix0 como qualquer container de rede
-        // custom → o resolver é o DNS do holder no gateway da infra. Sem isto o
-        // `/etc/resolv.conf` ficava por escrever (o re-exec corre no mount-ns do holder,
-        // onde o `/etc/resolv.conf` do host não existe) e NADA resolvia por nome no pod.
+        // POD container (`--pod`): it's on delonix0 like any custom-network container
+        // → the resolver is the holder's DNS on the infra gateway. Without this the
+        // `/etc/resolv.conf` was left unwritten (the re-exec runs in the holder's mount-ns,
+        // where the host's `/etc/resolv.conf` doesn't exist) and NOTHING resolved by name in the pod.
         None if pod.is_some() => Some(infra::INFRA_GATEWAY.to_string()),
         None if !slirp_ports.is_empty() => Some(delonix_net::SLIRP_DNS.to_string()),
         None => None,
@@ -1549,9 +1549,9 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
     if let Some(n) = &custom_net {
         c.network = Some(n.clone());
         c.ip = attached_ip;
-        // Isolamento de namespace: um container fora do `default` ganha o fw de
-        // namespace (o fw_chain_body emite same-ns accept + cross-ns `ct new` drop).
-        // Em `default` não se aplica nada — SDN aberta, comportamento inalterado.
+        // Namespace isolation: a container outside `default` gets the namespace
+        // firewall (fw_chain_body emits same-ns accept + cross-ns `ct new` drop).
+        // In `default` nothing applies — open SDN, unchanged behavior.
         if c.namespace != "default" {
             if let Some(ip) = c.ip.clone() {
                 let mut fw = c.firewall.clone().unwrap_or_default();
@@ -1566,9 +1566,9 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
                 }
             }
         }
-        // `--expose <porta>`: persiste no record (para re-registar no `start` e
-        // des-registar no `rm`). O auto-registo no proxy JÁ foi feito na 1.ª
-        // passagem (host), porque o spawn por nsenter não corre do reexec.
+        // `--expose <port>`: persists in the record (to re-register on `start` and
+        // de-register on `rm`). The proxy auto-register was ALREADY done in the 1st
+        // pass (host), because the nsenter spawn doesn't run from the reexec.
         if let Some(port) = expose {
             c.expose = Some(port);
         }
@@ -1600,16 +1600,16 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
     }
     if detach && !quiet {
         println!("{id}");
-        // Morte à nascença: um `-d` bem sucedido com o init já morto engana —
-        // o utilizador só descobria ao fazer `curl`/`ps` mais tarde. 400ms
-        // chegam para apanhar os crashes imediatos (bind <1024 em `--net host`
-        // rootless, entrypoint partido) sem atrasar o caminho feliz de forma
-        // perceptível. Aviso com a causa mais provável, não erro: o container
-        // ficou registado e os logs têm a história completa.
+        // Death at birth: a successful `-d` with an already-dead init misleads —
+        // the user would only find out when running `curl`/`ps` later. 400ms
+        // are enough to catch the immediate crashes (bind <1024 on rootless
+        // `--net host`, a broken entrypoint) without perceptibly delaying the
+        // happy path. A warning with the most likely cause, not an error: the
+        // container is registered and the logs have the full story.
         std::thread::sleep(std::time::Duration::from_millis(400));
         if let Ok(cur) = find(store, &id) {
             let dead = match cur.pid {
-                // SAFETY: kill(pid, 0) não envia sinal — só testa a existência.
+                // SAFETY: kill(pid, 0) sends no signal — it only tests existence.
                 Some(p) => (unsafe { libc::kill(p, 0) } != 0),
                 None => true,
             };
@@ -1779,8 +1779,8 @@ fn for_each_id(ids: &[String], mut f: impl FnMut(&str) -> Result<()>) -> Result<
     let mut failed = false;
     for id in ids {
         if let Err(e) = f(id) {
-            // Cada falha sai AQUI com o contexto do id; devolver o erro fazia o
-            // main imprimi-lo segunda vez, sem contexto (mensagem duplicada).
+            // Each failure exits HERE with the id's context; returning the error made
+            // main print it a second time, without context (duplicated message).
             eprintln!("{id}: {e}");
             failed = true;
         }
@@ -1972,8 +1972,8 @@ fn reexec_into_netns(
     opts: &RunOpts,
     detach_on_fail: bool,
 ) -> Result<()> {
-    // Entra no netns `netns` (o do container em `--net <custom>`, onde
-    // `netns == sanitize(id)`; o do POD partilhado em `--pod`, onde difere do `id`).
+    // Enters the netns `netns` (the container's in `--net <custom>`, where
+    // `netns == sanitize(id)`; the shared POD's in `--pod`, where it differs from `id`).
     let prefix = infra::join_argv(netns).ok_or_else(|| Error::Runtime {
         context: "join_argv",
         message: "infra de ingress em baixo — não há holder onde entrar".into(),
@@ -2006,8 +2006,8 @@ fn reexec_into_netns(
         message: e.to_string(),
     })?;
     if !status.success() {
-        // Só destaca se ESTE container é dono do netns (`--net <custom>`); num pod o
-        // netns pertence ao sandbox e é partilhado — destacá-lo derrubaria os pares.
+        // Only detach if THIS container owns the netns (`--net <custom>`); in a pod the
+        // netns belongs to the sandbox and is shared — detaching it would take down the peers.
         if detach_on_fail {
             infra::detach_container(id, ip);
         }
@@ -2165,8 +2165,8 @@ fn cmd_start(images: &ImageStore, store: &Store, id: &str) -> Result<()> {
     if let Some(n) = c.network.clone() {
         if !reexec {
             let (netns, ip) = infra::attach_container(&c.id, &n, &c.namespace)?;
-            // Re-registo no proxy L7 (`--expose`) AQUI, no host — o spawn por
-            // nsenter não corre do processo reexec'd.
+            // Re-register in the L7 proxy (`--expose`) HERE, on the host — the spawn via
+            // nsenter doesn't run from the reexec'd process.
             if let Some(port) = c.expose {
                 let _ = super::ingress_proxy::auto_register(&c.name, &c.namespace, &ip, port);
             }
@@ -2182,9 +2182,9 @@ fn cmd_start(images: &ImageStore, store: &Store, id: &str) -> Result<()> {
                     return Err(e);
                 }
             }
-            // Re-aplica a firewall persistida (isolamento de namespace, Dependency,
-            // Ingress) — a chain nft vive no netns EFÉMERO do holder, por isso um
-            // container reiniciado perderia o isolamento sem isto. Best-effort.
+            // Re-applies the persisted firewall (namespace isolation, Dependency,
+            // Ingress) — the nft chain lives in the holder's EPHEMERAL netns, so a
+            // restarted container would lose the isolation without this. Best-effort.
             if let Some(fw) = &c.firewall {
                 if fw.enabled {
                     if let Err(e) = infra::apply_firewall(&c.id, &ip, fw) {
@@ -2221,8 +2221,8 @@ fn cmd_start(images: &ImageStore, store: &Store, id: &str) -> Result<()> {
         Vec::new()
     };
     let slirp_hook = |pid: i32| -> Result<()> { delonix_net::slirp_attach(pid, &slirp_ports) };
-    // resolv.conf: gateway da rede custom (resolver do ingress), DNS do slirp com
-    // `-p`, ou o do host (`--net host`) — ver o `run`.
+    // resolv.conf: the custom network's gateway (the ingress resolver), the slirp's DNS
+    // with `-p`, or the host's (`--net host`) — see `run`.
     let dns = match &c.network {
         Some(n) => infra::resolve_net(n).ok().map(|(_, _, gw)| gw),
         None if !slirp_ports.is_empty() => Some(delonix_net::SLIRP_DNS.to_string()),
@@ -2254,8 +2254,8 @@ fn cmd_start(images: &ImageStore, store: &Store, id: &str) -> Result<()> {
             .clone()
             .or_else(|| (!slirp_ports.is_empty()).then(|| delonix_net::SLIRP_IP.to_string())),
         dns,
-        // Reproduz o `--user` do `run` original (o `--hostname` vem de `c.hostname`,
-        // lido pelo motor). Sem isto, um `start` corria como root.
+        // Reproduces the original `run`'s `--user` (the `--hostname` comes from
+        // `c.hostname`, read by the engine). Without this, a `start` ran as root.
         run_uid: c.run_uid,
         run_gid: c.run_gid,
         ..Default::default()
@@ -2361,7 +2361,7 @@ fn cmd_rm(images: &ImageStore, store: &Store, id: &str, force: bool) -> Result<(
     let pid = c.pid;
     runtime::remove(store, &c, force)?;
     unpublish_ports(&c, pid);
-    // Des-registo do proxy L7 se estava exposto (`--expose`) — remove a rota + SIGHUP.
+    // De-register from the L7 proxy if it was exposed (`--expose`) — removes the route + SIGHUP.
     if c.expose.is_some() {
         super::ingress_proxy::auto_deregister(&c.name);
     }
@@ -2462,7 +2462,7 @@ fn cmd_commit(images: &ImageStore, store: &Store, id: &str, tag: &str) -> Result
             tag,
         )?
     } else {
-        let layer = images.commit_upper(&c.id)?; // tar do upperdir → CAS
+        let layer = images.commit_upper(&c.id)?; // tar of the upperdir → CAS
         images.commit_container(&base, layer, c.command.clone(), c.env.clone(), tag)?
     };
     println!("{}  {}", img.short_id(), img.repo_tags.join(", "));
@@ -3128,10 +3128,10 @@ pub(crate) fn unpublish_live(store: &Store, c: &mut Container, host_port: &str) 
     match c.network.as_deref() {
         Some(_) => infra::unpublish_port(host_port),
         None => {
-            // Sem rede custom, o hostfwd vive no slirp POR-container — que morre
-            // com ele. Num container parado não há dataplane para limpar, só o
-            // registo (antes: erro "container is not running" e o publish ficava
-            // preso no registo para sempre — bug report real).
+            // Without a custom network, the hostfwd lives in the PER-container slirp —
+            // which dies with it. On a stopped container there's no dataplane to clean up,
+            // only the record (before: an error "container is not running" and the publish
+            // stayed stuck in the record forever — a real bug report).
             if let Some(pid) = c.pid.filter(|&p| runtime::is_alive(p)) {
                 let sock = delonix_net::slirp_container_sock(pid);
                 if sock.exists() {
@@ -3346,7 +3346,7 @@ mod tests {
         let canon: ContainerSpec =
             serde_yaml::from_str("image: alpine\nrestartPolicy: always\n").unwrap();
         assert_eq!(canon.restart, "always");
-        // Sem o campo → o default `no`.
+        // Without the field → the default `no`.
         let vazio: ContainerSpec = serde_yaml::from_str("image: alpine\n").unwrap();
         assert_eq!(vazio.restart, "no");
     }

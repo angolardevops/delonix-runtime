@@ -1,37 +1,40 @@
-//! `kind: Dependency` (alias `KnowDepends`) — alcançabilidade **DIRIGIDA** entre
-//! containers/VMs. Ao contrário de uma `Network` (comunicação bidirecional), uma
-//! dependência abre UM sentido: `from` alcança `to`, mas `to` **não** inicia para
-//! `from`. É o caso "a app conhece a DB, a DB não conhece a app" — a DB deixa de
-//! ficar exposta a todos os containers de uma rede partilhada.
+//! `kind: Dependency` (alias `KnowDepends`) — **DIRECTED** reachability between
+//! containers/VMs. Unlike a `Network` (bidirectional communication), a
+//! dependency opens ONE direction: `from` reaches `to`, but `to` does **not**
+//! initiate towards `from`. It is the "the app knows the DB, the DB does not
+//! know the app" case — the DB stops being exposed to every container of a
+//! shared network.
 //!
-//! **Como funciona (açúcar sobre o firewall L4 por-container):** declarar
-//! `Dependency { from: app, to: [db] }` compila para, no `db`: ingress
-//! **default-deny** (protege a DB de TODA a SDN) + um `allow` do IP do `app`. O
-//! sentido inverso (db→app) nunca é aberto, e o retorno da conversa app↔db flui
-//! porque a SDN é stateful (`ct state established,related accept`). Reutiliza o
-//! mesmo `ContainerFw`/`infra::apply_firewall` do `kind: Ingress` — zero dataplane
-//! novo. Várias `Dependency` para o mesmo `to` ACUMULAM os `allow`.
+//! **How it works (sugar over the per-container L4 firewall):** declaring
+//! `Dependency { from: app, to: [db] }` compiles to, on `db`: ingress
+//! **default-deny** (protects the DB from the WHOLE SDN) + an `allow` for
+//! `app`'s IP. The reverse direction (db→app) is never opened, and the return
+//! of the app↔db conversation flows because the SDN is stateful (`ct state
+//! established,related accept`). Reuses the same `ContainerFw`/`infra::apply_firewall`
+//! as `kind: Ingress` — zero new dataplane. Multiple `Dependency` for the same
+//! `to` ACCUMULATE the `allow`s.
 //!
-//! **Teardown ("garante presente", não reconciliador):** remover a `Dependency`
-//! de um manifesto e reaplicar NÃO desprotege o `to` — o ingress default-deny
-//! fica (mesma semântica do `kind: Ingress`). Para reabrir, aplica um `Ingress`
-//! com `defaultPolicy: allow` ao container, ou limpa a firewall dele à mão.
+//! **Teardown ("ensure present", not a reconciler):** removing the `Dependency`
+//! from a manifest and reapplying does NOT unprotect the `to` — the default-deny
+//! ingress stays (same semantics as `kind: Ingress`). To reopen, apply an
+//! `Ingress` with `defaultPolicy: allow` to the container, or clear its firewall
+//! by hand.
 
 use serde::{Deserialize, Deserializer};
 
 use super::manifest::{self, ManifestDoc};
 use delonix_runtime_core::{Error, FwRule, Result};
 
-/// `spec` de `kind: Dependency`.
+/// `spec` of `kind: Dependency`.
 #[derive(Debug, Clone, Deserialize)]
 pub struct DependencySpec {
-    /// Container/VM que INICIA a ligação (o que "conhece"). Ganha acesso a `to`.
+    /// Container/VM that INITIATES the connection (the one that "knows"). Gains access to `to`.
     pub from: String,
-    /// Alvo(s) que `from` passa a alcançar (e que ficam protegidos: só os `from`
-    /// declarados os alcançam). Aceita um nome só (`to: db`) ou uma lista.
+    /// Target(s) that `from` gets to reach (and which become protected: only the
+    /// declared `from`s reach them). Accepts a single name (`to: db`) or a list.
     #[serde(default, deserialize_with = "string_or_vec")]
     pub to: Vec<String>,
-    /// Portas de `to` abertas ao `from` (ex.: `["5432"]`). Vazio = qualquer porta.
+    /// Ports of `to` opened to `from` (e.g. `["5432"]`). Empty = any port.
     #[serde(default)]
     pub ports: Vec<String>,
     /// `tcp`/`udp`/`any` (default `any`).
@@ -39,10 +42,10 @@ pub struct DependencySpec {
     pub proto: Option<String>,
 }
 
-/// Campos conhecidos do `spec` (drift-guard).
+/// Known fields of the `spec` (drift-guard).
 pub const DEPENDENCY_SPEC_FIELDS: &[&str] = &["from", "to", "ports", "proto"];
 
-/// Desserializa `to` como um nome único OU uma lista de nomes (ergonomia).
+/// Deserializes `to` as a single name OR a list of names (ergonomics).
 fn string_or_vec<'de, D: Deserializer<'de>>(d: D) -> std::result::Result<Vec<String>, D::Error> {
     #[derive(Deserialize)]
     #[serde(untagged)]
@@ -56,23 +59,23 @@ fn string_or_vec<'de, D: Deserializer<'de>>(d: D) -> std::result::Result<Vec<Str
     })
 }
 
-/// Resolve os `kind: Dependency` do manifesto e aplica-os. Corre no `stack apply`
-/// DEPOIS dos containers existirem (precisa dos IPs). Idempotente ("garante
-/// presente" — reaplica o estado desejado do ingress de cada `to`).
+/// Resolves the manifest's `kind: Dependency` and applies them. Runs in
+/// `stack apply` AFTER the containers exist (it needs the IPs). Idempotent
+/// ("ensure present" — reapplies the desired ingress state of each `to`).
 pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
     let deps = manifest::of_kind(docs, "Dependency");
     if deps.is_empty() {
         return Ok(());
     }
     let (_, store) = super::util::open_stores()?;
-    // nome → IP na SDN (do record); só containers com IP servem de from/to.
+    // name → IP on the SDN (from the record); only containers with an IP serve as from/to.
     let ips: std::collections::HashMap<String, String> = store
         .list()?
         .into_iter()
         .filter_map(|c| c.ip.map(|ip| (c.name, ip)))
         .collect();
 
-    // Agrupa por ALVO: cada `to` junta os `allow` de todos os `from` que o conhecem.
+    // Group by TARGET: each `to` gathers the `allow`s of every `from` that knows it.
     let mut by_target: std::collections::BTreeMap<String, Vec<FwRule>> =
         std::collections::BTreeMap::new();
     for doc in &deps {
@@ -96,7 +99,7 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
                 spec.from
             ))
         })?;
-        // Portas: vazio = qualquer; senão uma regra por porta.
+        // Ports: empty = any; otherwise one rule per port.
         let ports: Vec<String> = if spec.ports.is_empty() {
             vec![String::new()]
         } else {
@@ -133,10 +136,10 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
         }
     }
 
-    // Alvos que TAMBÉM têm um Ingress/FirewallPolicy(ingress) explícito: o
-    // Dependency corre depois e substitui a direção `in`, logo apaga essas regras.
-    // Avisar em vez de as perder em silêncio (a composição das duas fontes é um
-    // follow-up — ver revisão).
+    // Targets that ALSO have an explicit Ingress/FirewallPolicy(ingress): the
+    // Dependency runs afterwards and replaces the `in` direction, so it deletes
+    // those rules. Warn instead of losing them silently (composing the two
+    // sources is a follow-up — see review).
     let explicit_ingress: std::collections::HashSet<&str> = docs
         .iter()
         .filter(|d| {
@@ -147,7 +150,7 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
         .filter_map(|d| d.spec.get("target").and_then(|v| v.as_str()))
         .collect();
 
-    // Aplica: cada alvo fica default-deny + os allow acumulados.
+    // Apply: each target becomes default-deny + the accumulated allows.
     for (target, allows) in &by_target {
         if explicit_ingress.contains(target.as_str()) {
             eprintln!(

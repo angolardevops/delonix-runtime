@@ -1,17 +1,18 @@
-//! `kind: HTTPRoute` — reverse-proxy L7/HTTP declarativo (roteamento por Host/path
-//! para containers backend), distinto do `kind: Ingress` (que é firewall L4
-//! *inbound* por-container — ver `cmd/firewall.rs`). O nome segue o Gateway API do
-//! Kubernetes: `HTTPRoute` = L7, `Ingress`/`FirewallPolicy` = L4.
+//! `kind: HTTPRoute` — declarative L7/HTTP reverse-proxy (routing by Host/path to
+//! backend containers), distinct from `kind: Ingress` (which is an *inbound*
+//! per-container L4 firewall — see `cmd/firewall.rs`). The name follows the
+//! Kubernetes Gateway API: `HTTPRoute` = L7, `Ingress`/`FirewallPolicy` = L4.
 //!
-//! **Arquitetura** (ver `cmd/ingress_proxy.rs` / `realize` na Fase 4): o schema
-//! aqui é a superfície declarativa; o plano físico é um reverse-proxy `hyper`
-//! embutido, lançado DENTRO do netns do holder (onde alcança os backends por IP),
-//! com as portas de entrada publicadas no host via o mecanismo de `publish` já
-//! existente. TLS termina no proxy (BYO via `kind: Secret` ou self-signed).
+//! **Architecture** (see `cmd/ingress_proxy.rs` / `realize` in Phase 4): the schema
+//! here is the declarative surface; the physical plane is an embedded `hyper`
+//! reverse-proxy, launched INSIDE the holder netns (where it reaches the backends by
+//! IP), with the entry ports published on the host via the already existing
+//! `publish` mechanism. TLS terminates at the proxy (BYO via `kind: Secret` or
+//! self-signed).
 //!
-//! **Semântica "garante presente"** como todos os Kinds: sem reconciler. Esta Fase
-//! (F1) entrega só o **parsing + validação** (schema, `valid_*`, grafo de
-//! referências); o proxy e o ciclo de vida vêm nas fases seguintes.
+//! **"Ensure present" semantics** like all Kinds: no reconciler. This Phase (F1)
+//! delivers only the **parsing + validation** (schema, `valid_*`, reference graph);
+//! the proxy and the lifecycle come in the following phases.
 
 use clap::Subcommand;
 use serde::Deserialize;
@@ -19,19 +20,19 @@ use serde::Deserialize;
 use super::manifest::{self, ManifestDoc};
 use delonix_runtime_core::{Error, Result};
 
-/// `delonix httproute` — inspeccionar/derrubar o reverse-proxy L7 dos HTTPRoute.
-/// (O `apply` faz-se por `stack apply`/`<kind> apply` — este grupo é operação.)
+/// `delonix httproute` — inspect/tear down the L7 reverse-proxy of the HTTPRoutes.
+/// (`apply` is done via `stack apply`/`<kind> apply` — this group is operational.)
 #[derive(Subcommand)]
 pub enum HttpRouteCmd {
-    /// Estado do proxy + rotas activas (da config em vigor).
+    /// State of the proxy + active routes (from the config in effect).
     Ls,
-    /// Aplica os HTTPRoute de um manifesto (sobe/recarrega o proxy).
+    /// Apply the HTTPRoutes of a manifest (brings up/reloads the proxy).
     Apply {
-        /// Ficheiro do manifesto (default `./delonix-manifest.yaml`).
+        /// Manifest file (default `./delonix-manifest.yaml`).
         #[arg(short, long)]
         file: Option<std::path::PathBuf>,
     },
-    /// Pára o proxy e despublica as portas (teardown).
+    /// Stop the proxy and unpublish the ports (teardown).
     Rm,
 }
 
@@ -81,8 +82,8 @@ pub fn run(action: HttpRouteCmd) -> Result<()> {
             apply(&docs)
         }
         HttpRouteCmd::Rm => {
-            // Remove só as rotas MANUAIS; as auto-registadas (`--expose`) sobrevivem
-            // e o proxy só pára se nada mais restar.
+            // Remove only the MANUAL routes; the auto-registered ones (`--expose`)
+            // survive and the proxy only stops if nothing else remains.
             ingress_proxy::clear_manual()?;
             if ingress_proxy::is_running() {
                 println!("httproute: rotas manuais removidas — proxy mantém-se (há rotas auto-registadas)");
@@ -94,58 +95,58 @@ pub fn run(action: HttpRouteCmd) -> Result<()> {
     }
 }
 
-/// `spec` de `kind: HTTPRoute`.
+/// `spec` for `kind: HTTPRoute`.
 #[derive(Debug, Clone, Deserialize)]
 pub struct HttpRouteSpec {
-    /// Pontos de entrada (portas onde o proxy escuta). Default: `[{port: 80}]`,
-    /// mais `{port: 443, tls: true}` implícito se `spec.tls` estiver definido.
+    /// Entry points (ports where the proxy listens). Default: `[{port: 80}]`,
+    /// plus an implicit `{port: 443, tls: true}` if `spec.tls` is defined.
     #[serde(default)]
     pub entrypoints: Vec<Entrypoint>,
-    /// Configuração de TLS (opcional). Sem isto, o proxy só serve HTTP.
+    /// TLS configuration (optional). Without it, the proxy only serves HTTP.
     #[serde(default)]
     pub tls: Option<TlsSpec>,
-    /// Regras de roteamento (por Host e/ou prefixo de path). Obrigatório e não-vazio.
+    /// Routing rules (by Host and/or path prefix). Required and non-empty.
     #[serde(default)]
     pub rules: Vec<RouteRule>,
 }
 
-/// Um ponto de entrada (porta de escuta do proxy).
+/// An entry point (proxy listen port).
 #[derive(Debug, Clone, Deserialize)]
 pub struct Entrypoint {
     pub port: u16,
-    /// `true` = termina TLS nesta porta (exige `spec.tls`). Default `false`.
+    /// `true` = terminate TLS on this port (requires `spec.tls`). Default `false`.
     #[serde(default)]
     pub tls: bool,
 }
 
-/// Configuração de TLS do proxy.
+/// Proxy TLS configuration.
 #[derive(Debug, Clone, Deserialize)]
 pub struct TlsSpec {
-    /// `selfSigned` (default) ou `secretRef`.
+    /// `selfSigned` (default) or `secretRef`.
     #[serde(default)]
     pub mode: Option<String>,
-    /// Nome de um `kind: Secret` com as chaves `tls.crt`/`tls.key` (PEM). Usado
-    /// quando `mode: secretRef`.
+    /// Name of a `kind: Secret` with the `tls.crt`/`tls.key` keys (PEM). Used
+    /// when `mode: secretRef`.
     #[serde(default, rename = "secretRef")]
     pub secret_ref: Option<String>,
 }
 
-/// Uma regra de roteamento: casa por `host` (opcional — vazio = qualquer Host) e
-/// despacha por prefixo de path para um backend.
+/// A routing rule: matches by `host` (optional — empty = any Host) and
+/// dispatches by path prefix to a backend.
 #[derive(Debug, Clone, Deserialize)]
 pub struct RouteRule {
-    /// Nome de host a casar (ex.: `loja.exemplo.ao`). Vazio/omisso = qualquer Host.
+    /// Host name to match (e.g.: `loja.exemplo.ao`). Empty/omitted = any Host.
     #[serde(default)]
     pub host: Option<String>,
-    /// Sub-regras por prefixo de path. Obrigatório e não-vazio.
+    /// Sub-rules by path prefix. Required and non-empty.
     #[serde(default)]
     pub paths: Vec<PathRule>,
 }
 
-/// Um prefixo de path e o backend para onde encaminha.
+/// A path prefix and the backend it forwards to.
 #[derive(Debug, Clone, Deserialize)]
 pub struct PathRule {
-    /// Prefixo de path (ex.: `/`, `/api`). Default `/`.
+    /// Path prefix (e.g.: `/`, `/api`). Default `/`.
     #[serde(default = "default_path")]
     pub path: String,
     pub backend: Backend,
@@ -155,28 +156,28 @@ fn default_path() -> String {
     "/".to_string()
 }
 
-/// O destino de um path: um container (por nome) e a porta onde ele escuta.
+/// The destination of a path: a container (by name) and the port it listens on.
 #[derive(Debug, Clone, Deserialize)]
 pub struct Backend {
-    /// Nome do container backend (resolvido para o IP do record no apply).
+    /// Name of the backend container (resolved to the record's IP at apply time).
     pub service: String,
-    /// Porta do container onde o serviço escuta.
+    /// Container port where the service listens.
     pub port: u16,
 }
 
-/// Campos conhecidos do `spec` (drift-guard — ver `manifest::warn_unknown_fields`).
+/// Known fields of the `spec` (drift-guard — see `manifest::warn_unknown_fields`).
 pub const HTTP_ROUTE_SPEC_FIELDS: &[&str] = &["entrypoints", "tls", "rules"];
 
-/// Um nome de host DNS válido para casar no `Host:` header. Estrito de propósito
-/// (disciplina `valid_*` da auditoria): letras/dígitos/`.`/`-`, sem esquema, sem
-/// `/`, sem porta, sem espaços — nunca chega a um `format!`/comando com lixo.
+/// A valid DNS host name to match against the `Host:` header. Strict on purpose
+/// (the audit's `valid_*` discipline): letters/digits/`.`/`-`, no scheme, no
+/// `/`, no port, no spaces — never reaches a `format!`/command with garbage.
 pub fn valid_host(h: &str) -> bool {
     if h.is_empty() || h.len() > 253 {
         return false;
     }
-    // Cada label (separada por `.`) tem de ser não-vazia e não começar/acabar em
-    // `-` — senão `loja..exemplo`/`loja.`/`-loja` passariam e a regra ficaria
-    // morta (o `Host:` real nunca tem essa forma). Alfabeto: alnum + `-`.
+    // Each label (separated by `.`) must be non-empty and not start/end with
+    // `-` — otherwise `loja..exemplo`/`loja.`/`-loja` would pass and the rule
+    // would be dead (a real `Host:` never has that form). Alphabet: alnum + `-`.
     h.split('.').all(|label| {
         !label.is_empty()
             && !label.starts_with('-')
@@ -185,8 +186,8 @@ pub fn valid_host(h: &str) -> bool {
     })
 }
 
-/// Um prefixo de path válido: começa em `/`, sem espaços, sem `..`, ASCII
-/// imprimível. Match por prefixo (não regex) — não precisa de metacaracteres.
+/// A valid path prefix: starts with `/`, no spaces, no `..`, printable ASCII.
+/// Prefix match (not regex) — it needs no metacharacters.
 pub fn valid_path_prefix(p: &str) -> bool {
     p.starts_with('/')
         && p.len() <= 2048
@@ -195,9 +196,9 @@ pub fn valid_path_prefix(p: &str) -> bool {
         && p.chars().all(|c| c.is_ascii_graphic())
 }
 
-/// Um nome de serviço/container backend válido — o mesmo alfabeto que o resto do
-/// runtime usa para nomes de recurso (o container tem de existir; resolvido no
-/// apply). Sem `/`/espaços/`:` para nunca poluir uma linha de controlo.
+/// A valid backend service/container name — the same alphabet the rest of the
+/// runtime uses for resource names (the container must exist; resolved at apply
+/// time). No `/`/spaces/`:` so it never pollutes a control line.
 pub fn valid_service(s: &str) -> bool {
     !s.is_empty()
         && s.len() <= 128
@@ -205,8 +206,8 @@ pub fn valid_service(s: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.')
 }
 
-/// Valida um `HttpRouteSpec` já desserializado (chamado no apply e reutilizável no
-/// `stack validate`). Não toca em nada — só schema/`valid_*`.
+/// Validates an already deserialized `HttpRouteSpec` (called at apply time and
+/// reusable in `stack validate`). Touches nothing — only schema/`valid_*`.
 pub fn validate_spec(name: &str, spec: &HttpRouteSpec) -> Result<()> {
     let err = |m: String| Error::Invalid(format!("HTTPRoute '{name}': {m}"));
 
@@ -215,8 +216,8 @@ pub fn validate_spec(name: &str, spec: &HttpRouteSpec) -> Result<()> {
             "spec.rules não pode ser vazio (nada para rotear)".into()
         ));
     }
-    // TLS: se algum entrypoint pede tls, ou mode: secretRef, o spec.tls tem de
-    // fazer sentido.
+    // TLS: if any entrypoint asks for tls, or mode: secretRef, spec.tls has to
+    // make sense.
     if let Some(tls) = &spec.tls {
         let mode = tls.mode.as_deref().unwrap_or("selfSigned");
         if !matches!(mode, "selfSigned" | "secretRef") {
@@ -231,7 +232,7 @@ pub fn validate_spec(name: &str, spec: &HttpRouteSpec) -> Result<()> {
             ));
         }
     }
-    // Um entrypoint com tls: true exige spec.tls definido (senão não há cert).
+    // An entrypoint with tls: true requires spec.tls defined (otherwise no cert).
     for ep in &spec.entrypoints {
         if ep.port == 0 {
             return Err(err("entrypoint com port: 0 inválido".into()));
@@ -243,11 +244,11 @@ pub fn validate_spec(name: &str, spec: &HttpRouteSpec) -> Result<()> {
             )));
         }
     }
-    // Pares (host, path) exactamente iguais tornam uma das rotas morta em silêncio
-    // (o matcher da F2 escolhe uma) — apanha o conflito já na validação.
+    // Exactly equal (host, path) pairs make one of the routes silently dead
+    // (the F2 matcher picks one) — catch the conflict already at validation.
     let mut seen_routes: std::collections::HashSet<(String, String)> =
         std::collections::HashSet::new();
-    // Regras: cada host (se presente) e cada path/backend válidos.
+    // Rules: each host (if present) and each path/backend valid.
     for (i, rule) in spec.rules.iter().enumerate() {
         if let Some(host) = &rule.host {
             if !valid_host(host) {
@@ -290,8 +291,9 @@ pub fn validate_spec(name: &str, spec: &HttpRouteSpec) -> Result<()> {
     Ok(())
 }
 
-/// Desserializa + valida cada `kind: HTTPRoute` do manifesto (sem aplicar nada
-/// ainda — o proxy e o ciclo de vida vêm na Fase 4). Avisa por campo desconhecido.
+/// Deserializes + validates each `kind: HTTPRoute` of the manifest (without
+/// applying anything yet — the proxy and the lifecycle come in Phase 4). Warns per
+/// unknown field.
 pub fn parse_and_validate(docs: &[ManifestDoc]) -> Result<Vec<(String, HttpRouteSpec)>> {
     let mut out = Vec::new();
     for doc in manifest::of_kind(docs, "HTTPRoute") {
@@ -304,15 +306,16 @@ pub fn parse_and_validate(docs: &[ManifestDoc]) -> Result<Vec<(String, HttpRoute
 }
 
 // ============================================================================
-// Aplicação (Fase 4b): resolve os HTTPRoute numa ProxyConfig (backends→ip:porta,
-// TLS) e garante o reverse-proxy a servir (ver `cmd::ingress_proxy`).
+// Application (Phase 4b): resolves the HTTPRoutes into a ProxyConfig
+// (backends→ip:port, TLS) and ensures the reverse-proxy is serving (see
+// `cmd::ingress_proxy`).
 // ============================================================================
 
 use super::ingress_proxy::{self, Listener, ProxyConfig, Route, TlsMaterial};
 
-/// Mapa nome-de-container → IP na SDN (do record). Só containers com IP (numa
-/// rede custom) servem de backend — os de `--net host/none` não têm IP alcançável
-/// pelo proxy no netns do holder.
+/// Map container-name → IP on the SDN (from the record). Only containers with an IP
+/// (on a custom network) can serve as a backend — those of `--net host/none` have no
+/// IP reachable by the proxy in the holder netns.
 fn container_ips() -> std::collections::HashMap<String, String> {
     let mut m = std::collections::HashMap::new();
     if let Ok((_, cstore)) = super::util::open_stores() {
@@ -327,9 +330,9 @@ fn container_ips() -> std::collections::HashMap<String, String> {
     m
 }
 
-/// Lê o par cert/chave (PEM) de um `kind: Secret`. Aceita as chaves estilo k8s
-/// (`tls.crt`/`tls.key`) OU a variante com `_` (o cofre não permite `.` nas
-/// chaves de env — ver `valid_env_key`), o que for encontrado.
+/// Reads the cert/key pair (PEM) from a `kind: Secret`. Accepts the k8s-style keys
+/// (`tls.crt`/`tls.key`) OR the variant with `_` (the vault does not allow `.` in
+/// env keys — see `valid_env_key`), whichever is found.
 fn tls_from_secret(name: &str) -> Result<TlsMaterial> {
     let store = delonix_runtime_core::SecretStore::open(super::util::state_root())?;
     let s = store.load(name)?;
@@ -350,8 +353,8 @@ fn tls_from_secret(name: &str) -> Result<TlsMaterial> {
     })
 }
 
-/// Resolve TODOS os HTTPRoute do manifesto numa única `ProxyConfig` (um proxy
-/// serve todas as rotas). `None` = não há HTTPRoute (nada a fazer).
+/// Resolves ALL the manifest's HTTPRoutes into a single `ProxyConfig` (one proxy
+/// serves all the routes). `None` = there are no HTTPRoutes (nothing to do).
 fn resolve_config(specs: &[(String, HttpRouteSpec)]) -> Result<Option<ProxyConfig>> {
     if specs.is_empty() {
         return Ok(None);
@@ -364,7 +367,8 @@ fn resolve_config(specs: &[(String, HttpRouteSpec)]) -> Result<Option<ProxyConfi
     let mut secret_ref: Option<String> = None;
 
     for (name, spec) in specs {
-        // Listeners: os declarados, ou o default (:80, e :443 tls se houver spec.tls).
+        // Listeners: the declared ones, or the default (:80, and :443 tls if there
+        // is spec.tls).
         let eps = if spec.entrypoints.is_empty() {
             let mut d = vec![Entrypoint {
                 port: 80,
@@ -381,7 +385,7 @@ fn resolve_config(specs: &[(String, HttpRouteSpec)]) -> Result<Option<ProxyConfi
             spec.entrypoints.clone()
         };
         for ep in eps {
-            // Dedup por porta; se colidir, TLS ganha (mais restritivo/seguro).
+            // Dedup by port; on collision, TLS wins (more restrictive/secure).
             match listeners.iter_mut().find(|l| l.port == ep.port) {
                 Some(l) => l.tls = l.tls || ep.tls,
                 None => listeners.push(Listener {
@@ -390,13 +394,13 @@ fn resolve_config(specs: &[(String, HttpRouteSpec)]) -> Result<Option<ProxyConfi
                 }),
             }
         }
-        // TLS: memoriza o secretRef (resolve-se no fim) ou marca self-signed.
+        // TLS: memoize the secretRef (resolved at the end) or mark self-signed.
         if let Some(tls) = &spec.tls {
             if tls.mode.as_deref() == Some("secretRef") {
                 secret_ref = tls.secret_ref.clone();
             }
         }
-        // Rotas: resolve cada backend para ip:porta do record.
+        // Routes: resolve each backend to the record's ip:port.
         for rule in &spec.rules {
             if let Some(h) = &rule.host {
                 all_hosts.push(h.clone());
@@ -417,7 +421,7 @@ fn resolve_config(specs: &[(String, HttpRouteSpec)]) -> Result<Option<ProxyConfi
         }
     }
 
-    // Material TLS, se algum listener termina TLS.
+    // TLS material, if any listener terminates TLS.
     if listeners.iter().any(|l| l.tls) {
         tls_material = Some(match secret_ref {
             Some(sref) => tls_from_secret(&sref)?,
@@ -432,15 +436,15 @@ fn resolve_config(specs: &[(String, HttpRouteSpec)]) -> Result<Option<ProxyConfi
     }))
 }
 
-/// `stack apply` (e o auto-registo, mais tarde): resolve os HTTPRoute e garante o
-/// proxy a servir. Chamado DEPOIS dos containers existirem (precisa dos IPs).
+/// `stack apply` (and auto-registration, later): resolves the HTTPRoutes and
+/// ensures the proxy is serving. Called AFTER the containers exist (needs the IPs).
 pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
     let specs = parse_and_validate(docs)?;
     let Some(cfg) = resolve_config(&specs)? else {
-        return Ok(()); // sem HTTPRoute — nada a fazer
+        return Ok(()); // no HTTPRoute — nothing to do
     };
-    // Escreve a parte MANUAL e recompõe (compõe com as rotas auto-registadas de
-    // containers `--expose`, sem que uma apague a outra).
+    // Write the MANUAL part and recompose (composes with the auto-registered routes
+    // of `--expose` containers, without one erasing the other).
     ingress_proxy::set_manual(&cfg)?;
     println!(
         "httproute: {} rota(s) em {} listener(s){} — proxy {}",
@@ -465,20 +469,20 @@ mod tests {
         assert!(valid_host("loja.exemplo.ao"));
         assert!(valid_host("api-v2.example.com"));
         assert!(!valid_host(""));
-        assert!(!valid_host("loja.exemplo.ao/path")); // com path
-        assert!(!valid_host("loja:8080")); // com porta
-        assert!(!valid_host("a b")); // espaço
+        assert!(!valid_host("loja.exemplo.ao/path")); // with path
+        assert!(!valid_host("loja:8080")); // with port
+        assert!(!valid_host("a b")); // space
         assert!(!valid_host(".leading.dot"));
         assert!(!valid_host("host;rm -rf"));
     }
 
     #[test]
     fn valid_host_rejeita_labels_vazias_e_hifens_de_bordo() {
-        assert!(!valid_host("loja..exemplo")); // label vazia
-        assert!(!valid_host("loja.")); // ponto final
-        assert!(!valid_host("-loja.com")); // hífen à cabeça da label
-        assert!(!valid_host("loja-.com")); // hífen no fim da label
-        assert!(valid_host("a.b.c")); // labels de 1 char, ok
+        assert!(!valid_host("loja..exemplo")); // empty label
+        assert!(!valid_host("loja.")); // trailing dot
+        assert!(!valid_host("-loja.com")); // hyphen at the head of the label
+        assert!(!valid_host("loja-.com")); // hyphen at the end of the label
+        assert!(valid_host("a.b.c")); // 1-char labels, ok
     }
 
     #[test]
@@ -493,9 +497,9 @@ mod tests {
     fn valid_path_prefix_exige_barra_e_rejeita_traversal() {
         assert!(valid_path_prefix("/"));
         assert!(valid_path_prefix("/api/v2"));
-        assert!(!valid_path_prefix("api")); // sem barra inicial
+        assert!(!valid_path_prefix("api")); // no leading slash
         assert!(!valid_path_prefix("/a/../b")); // traversal
-        assert!(!valid_path_prefix("/a b")); // espaço
+        assert!(!valid_path_prefix("/a b")); // space
     }
 
     #[test]

@@ -1,17 +1,18 @@
-//! `delonix build` — constrói uma imagem a partir de um Dockerfile.
+//! `delonix build` — builds an image from a Dockerfile.
 //!
-//! Único grupo com orquestração nova (as outras 5 são "ligar os fios" a APIs já
-//! prontas nas crates do workspace): sobe um container "de trabalho" (placeholder
-//! `sleep infinity`, mantém as namespaces vivas), corre cada `RUN` nele via
-//! `runtime::exec`, aplica cada `COPY` escrevendo directamente no rootfs em
-//! disco, e no fim empacota o resultado com `ImageStore::commit_flat_rootfs`
-//! (rootless) ou `commit_upper`+`build_image` (root/overlay) — as mesmas duas
-//! funções de "docker commit" que já existem em `delonix-image::build`.
+//! The only group with new orchestration (the other 5 are "wiring up" APIs
+//! already ready in the workspace crates): brings up a "working" container
+//! (placeholder `sleep infinity`, keeps the namespaces alive), runs each `RUN`
+//! in it via `runtime::exec`, applies each `COPY` by writing directly to the
+//! rootfs on disk, and at the end packages the result with
+//! `ImageStore::commit_flat_rootfs` (rootless) or `commit_upper`+`build_image`
+//! (root/overlay) — the same two "docker commit" functions that already exist
+//! in `delonix-image::build`.
 //!
-//! **Só single-stage nesta versão**: um Dockerfile com `FROM ... AS <nome>`
-//! seguido doutro `FROM` (multi-stage) é recusado com um erro claro — falta
-//! desenhar com cuidado a passagem de rootfs entre estágios (`COPY --from`);
-//! fica para uma iteração seguinte.
+//! **Single-stage only in this version**: a Dockerfile with `FROM ... AS <name>`
+//! followed by another `FROM` (multi-stage) is rejected with a clear error — the
+//! rootfs handoff between stages (`COPY --from`) still needs careful design;
+//! it is left for a future iteration.
 
 use std::path::{Path, PathBuf};
 
@@ -25,23 +26,23 @@ use super::util::{open_stores, prepare_rootfs, resolve_or_pull};
 
 #[derive(Args)]
 pub struct BuildArgs {
-    /// Contexto de build (default: `.`) — raiz para `COPY`.
+    /// Build context (default: `.`) — root for `COPY`.
     #[arg(default_value = ".")]
     context: PathBuf,
-    /// Caminho do Dockerfile (default: `<contexto>/Dockerfile`).
+    /// Path of the Dockerfile (default: `<context>/Dockerfile`).
     #[arg(short = 'f', long = "file")]
     file: Option<PathBuf>,
-    /// Tag da imagem resultante (`repo:tag`).
+    /// Tag of the resulting image (`repo:tag`).
     #[arg(short = 't', long = "tag")]
     tag: String,
 }
 
-/// Resolve o ficheiro de build por omissão: `Delonixfile` se existir no
-/// contexto, senão `Dockerfile` (mesma gramática — `parse_dockerfile` já
-/// suporta as extensões Delonix `SCAN`/`CPUS`/`MEMORY`/`SECURITY`/
-/// `HEALTHCHECK` independentemente do nome do ficheiro; `Delonixfile` é só o
-/// nome canónico, descoberto por omissão, para quem não quer reaproveitar o
-/// nome `Dockerfile`).
+/// Resolves the default build file: `Delonixfile` if it exists in the
+/// context, otherwise `Dockerfile` (same grammar — `parse_dockerfile` already
+/// supports the Delonix extensions `SCAN`/`CPUS`/`MEMORY`/`SECURITY`/
+/// `HEALTHCHECK` regardless of the file name; `Delonixfile` is just the
+/// canonical name, discovered by default, for those who do not want to reuse
+/// the `Dockerfile` name).
 pub(crate) fn default_build_file(context: &Path) -> PathBuf {
     let delonixfile = context.join("Delonixfile");
     if delonixfile.exists() {
@@ -61,9 +62,9 @@ pub fn run(args: BuildArgs) -> Result<()> {
     Ok(())
 }
 
-/// A orquestração completa de um build (parse → container de trabalho → RUN/
-/// COPY → commit). Extraída de `run()` para ser reutilizada por `delonix
-/// image apply` (`kind: Image`, `spec.build`) sem duplicar lógica.
+/// The full orchestration of a build (parse → working container → RUN/
+/// COPY → commit). Extracted from `run()` to be reused by `delonix
+/// image apply` (`kind: Image`, `spec.build`) without duplicating logic.
 pub fn build_from_spec(context: &Path, dockerfile_path: &Path, tag: &str) -> Result<Image> {
     let (images, store) = open_stores()?;
     let text = std::fs::read_to_string(dockerfile_path).map_err(|e| {
@@ -86,8 +87,8 @@ pub fn build_from_spec(context: &Path, dockerfile_path: &Path, tag: &str) -> Res
     let rootless = runtime::is_rootless();
     let rootfs = prepare_rootfs(&images, &base, &id)?;
 
-    // Container "de trabalho": `sleep infinity` mantém as namespaces vivas para
-    // podermos `exec` cada RUN; COPY escreve diretamente no rootfs em disco.
+    // "Working" container: `sleep infinity` keeps the namespaces alive so we
+    // can `exec` each RUN; COPY writes directly to the rootfs on disk.
     let mut c = Container::new(
         id.clone(),
         format!("dlx-build-{}", &id[..8.min(id.len())]),
@@ -126,28 +127,28 @@ pub fn build_from_spec(context: &Path, dockerfile_path: &Path, tag: &str) -> Res
         }
     });
 
-    // Limpeza best-effort do container de trabalho — nunca esconde o erro do
-    // build/commit (o `?` abaixo, sobre `commit_result`, é o que decide o exit code).
+    // Best-effort cleanup of the working container — never hides the build/commit
+    // error (the `?` below, over `commit_result`, is what decides the exit code).
     let _ = runtime::remove(&store, &c, true);
     let _ = images.unmount_rootfs(&c.id);
 
     commit_result
 }
 
-/// Empacota e faz commit do rootfs FLAT de um build **rootless**, empacotando
-/// DENTRO do userns mapeado quando há subuid.
+/// Packages and commits the FLAT rootfs of a **rootless** build, packaging it
+/// INSIDE the mapped userns when there is subuid.
 ///
-/// Motivo: um `RUN` com `apt`/`dpkg` deixa ficheiros de subuid de modo restrito
-/// (`aux-cache` 0600, dirs `partial` 0700) que o utilizador REAL não lê — o tar
-/// in-process de `commit_flat_rootfs` dava `Permission denied` no fim de um build
-/// que já tinha passado todos os RUN. Aqui re-executamos `delonix __buildtar`
-/// como root num userns com os subuids mapeados (`reexec_mapped`, o mesmo
-/// mecanismo dos snapshots de volume): lá dentro somos donos de tudo, o tar sai
-/// completo e legível, e o pai lê-o de volta (fica 0644) para o gravar no CAS.
+/// Reason: a `RUN` with `apt`/`dpkg` leaves subuid files with restricted modes
+/// (`aux-cache` 0600, `partial` dirs 0700) that the REAL user cannot read — the
+/// in-process tar of `commit_flat_rootfs` gave `Permission denied` at the end of a
+/// build that had already passed all the RUNs. Here we re-exec `delonix __buildtar`
+/// as root in a userns with the subuids mapped (`reexec_mapped`, the same
+/// mechanism as volume snapshots): inside it we own everything, the tar comes out
+/// complete and readable, and the parent reads it back (it becomes 0644) to store it in the CAS.
 ///
-/// `reexec_mapped` devolve `None` quando não se aplica — rootless **single-uid**
-/// (sem `newuidmap`): aí os ficheiros do RUN pertencem ao NOSSO uid e o caminho
-/// in-process lê-os na mesma, por isso caímos para `commit_flat_rootfs`.
+/// `reexec_mapped` returns `None` when it does not apply — rootless **single-uid**
+/// (without `newuidmap`): there the RUN files belong to OUR uid and the
+/// in-process path reads them just the same, so we fall back to `commit_flat_rootfs`.
 fn commit_flat_rootless(
     images: &delonix_image::ImageStore,
     rootfs: &str,
@@ -168,32 +169,32 @@ fn commit_flat_rootless(
         Some(false) => Err(Error::Invalid(
             "empacotar rootfs dentro do userns mapeado falhou (delonix __buildtar)".into(),
         )),
-        // Sem subuid (rootless single-uid): os ficheiros do RUN são do nosso uid.
+        // Without subuid (rootless single-uid): the RUN files are our uid's.
         None => images.commit_flat_rootfs(Path::new(rootfs), cmd, env, workdir, tag),
     };
-    let _ = std::fs::remove_file(&tar_path); // best-effort, nunca esconde o result
+    let _ = std::fs::remove_file(&tar_path); // best-effort, never hides the result
     result
 }
 
-/// Sintetiza um `export KEY='VALUE'; ` seguro para o `/bin/sh -c` de cada `RUN`.
-/// O **valor** vai entre plicas (single-quotes) porque as imagens base trazem
-/// ENV com espaços — o clássico é `PHPIZE_DEPS="autoconf dpkg-dev file g++ …"`
-/// de toda a imagem `php`/`frankenphp`. Sem as plicas, `export PHPIZE_DEPS=autoconf
-/// dpkg-dev …` faz o shell tratar `dpkg-dev` como um segundo nome a exportar →
-/// `export: dpkg-dev: bad variable name`, e **todo** o `RUN` dessa imagem falha.
-/// Plicas dentro do valor viram `'\''` (fecha, escapa uma plica literal, reabre).
+/// Synthesizes a safe `export KEY='VALUE'; ` for the `/bin/sh -c` of each `RUN`.
+/// The **value** goes in single-quotes because base images ship
+/// ENV with spaces — the classic is `PHPIZE_DEPS="autoconf dpkg-dev file g++ …"`
+/// from the whole `php`/`frankenphp` image. Without the quotes, `export PHPIZE_DEPS=autoconf
+/// dpkg-dev …` makes the shell treat `dpkg-dev` as a second name to export →
+/// `export: dpkg-dev: bad variable name`, and the **entire** `RUN` of that image fails.
+/// Single-quotes inside the value become `'\''` (close, escape a literal quote, reopen).
 fn sh_export(kv: &str) -> String {
     match kv.split_once('=') {
         Some((key, val)) => format!("export {key}='{}'; ", val.replace('\'', "'\\''")),
-        // Sem `=` não é uma atribuição — deixa como está (caso degenerado).
+        // Without `=` it is not an assignment — leave it as is (degenerate case).
         None => format!("export {kv}; "),
     }
 }
 
-/// Corre os passos do Dockerfile por ordem, mantendo um acumulador local de
-/// ENV/WORKDIR (o `runtime::exec` não tem noção de ambiente por-chamada — cada
-/// `RUN` sintetiza `cd <workdir> && export ... ; <cmd>` num `/bin/sh -c`, tal
-/// como o shell-form do Docker já implica).
+/// Runs the Dockerfile steps in order, keeping a local accumulator of
+/// ENV/WORKDIR (`runtime::exec` has no notion of per-call environment — each
+/// `RUN` synthesizes `cd <workdir> && export ... ; <cmd>` in a `/bin/sh -c`, just
+/// as Docker's shell-form already implies).
 fn run_steps(
     steps: &[Step],
     rootfs: &str,
@@ -246,14 +247,14 @@ fn run_steps(
     Ok(())
 }
 
-/// Resolve um componente `../`/absoluto de forma segura: junta `base` só com
-/// os componentes "normais" de `rel` (rejeita `..`/raiz/prefixo — nunca deixa
-/// escapar de `base`). Mesmo padrão de `safe_rel` em
-/// `delonix-image/src/overlay.rs` (extracção de layers de imagem), aplicado
-/// aqui ao `COPY` do Dockerfile/Delonixfile. **Achado de auditoria de
-/// segurança**: sem isto, `COPY ../../../etc/passwd x` lia ficheiros
-/// arbitrários do host para dentro da imagem, e um `dst` com `..` escrevia
-/// fora do rootfs — ver CLAUDE.md.
+/// Resolves a `../`/absolute component safely: joins `base` only with
+/// the "normal" components of `rel` (rejects `..`/root/prefix — never lets it
+/// escape from `base`). Same pattern as `safe_rel` in
+/// `delonix-image/src/overlay.rs` (image-layer extraction), applied
+/// here to the `COPY` of the Dockerfile/Delonixfile. **Security-audit
+/// finding**: without this, `COPY ../../../etc/passwd x` read
+/// arbitrary host files into the image, and a `dst` with `..` wrote
+/// outside the rootfs — see CLAUDE.md.
 fn safe_join(base: &Path, rel: &str) -> Result<PathBuf> {
     use std::path::Component;
     let mut out = base.to_path_buf();
@@ -279,9 +280,9 @@ fn copy_into_rootfs(
     workdir: &str,
 ) -> Result<()> {
     let src_path = safe_join(context, src)?;
-    // Semântica Docker do destino: um `dst` relativo resolve-se contra o WORKDIR
-    // (`COPY x ./` → WORKDIR/x, não a raiz do rootfs); um `dst` que termina em `/`
-    // (ou é um directório) mantém o basename do `src` lá dentro.
+    // Docker semantics of the destination: a relative `dst` resolves against the WORKDIR
+    // (`COPY x ./` → WORKDIR/x, not the rootfs root); a `dst` ending in `/`
+    // (or being a directory) keeps the basename of `src` inside it.
     let dir_dest = dst.ends_with('/') || dst == "." || dst == "./";
     let abs_dst = if dst.starts_with('/') {
         dst.to_string()
@@ -339,18 +340,18 @@ mod tests {
 
     #[test]
     fn sh_export_cita_valor_com_espacos() {
-        // Regressão: `PHPIZE_DEPS` (imagem php/frankenphp) tem espaços — sem plicas
-        // o shell tratava `dpkg-dev` como nome a exportar e TODO o RUN falhava
+        // Regression: `PHPIZE_DEPS` (php/frankenphp image) has spaces — without quotes
+        // the shell treated `dpkg-dev` as a name to export and the WHOLE RUN failed
         // ("export: dpkg-dev: bad variable name").
         assert_eq!(
             sh_export("PHPIZE_DEPS=autoconf dpkg-dev file g++"),
             "export PHPIZE_DEPS='autoconf dpkg-dev file g++'; "
         );
-        // Sem espaços continua correcto.
+        // Without spaces it stays correct.
         assert_eq!(sh_export("PATH=/usr/bin"), "export PATH='/usr/bin'; ");
-        // Uma plica literal no valor é escapada (fecha/escapa/reabre).
+        // A literal single-quote in the value is escaped (close/escape/reopen).
         assert_eq!(sh_export("MSG=it's ok"), "export MSG='it'\\''s ok'; ");
-        // `=` no valor (ex.: base64) só parte no primeiro.
+        // `=` in the value (e.g. base64) only splits on the first one.
         assert_eq!(sh_export("K=a=b=c"), "export K='a=b=c'; ");
     }
 
@@ -372,8 +373,8 @@ mod tests {
 
     #[test]
     fn safe_join_recusa_absoluto() {
-        // um `dst` absoluto NÃO pode substituir `base` (era o risco antes do fix:
-        // `Path::join` com um componente absoluto ignora `base` por completo).
+        // an absolute `dst` must NOT replace `base` (that was the risk before the fix:
+        // `Path::join` with an absolute component ignores `base` entirely).
         let base = Path::new("/tmp/rootfs");
         assert!(safe_join(base, "/etc/passwd").is_err());
     }

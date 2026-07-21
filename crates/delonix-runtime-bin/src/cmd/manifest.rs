@@ -1,13 +1,13 @@
-//! `delonix-manifest.yaml` — manifesto declarativo multi-documento, ao estilo
-//! Kubernetes (`apiVersion`/`kind`/`metadata`/`spec`), para os 5 Kinds já
-//! cobertos por grupo de CLI: `Container`/`Image`/`Vm`/`Volume`/`Network`.
+//! `delonix-manifest.yaml` — declarative multi-document manifest, in the
+//! Kubernetes style (`apiVersion`/`kind`/`metadata`/`spec`), for the 5 Kinds
+//! already covered by a CLI group: `Container`/`Image`/`Vm`/`Volume`/`Network`.
 //!
-//! **Semântica de `apply`: "garante presente", não um reconciliador.** Sem
-//! diffing/rollout/drift-detection contínua — isso é trabalho de um
-//! orchestrator com controllers (fora de escopo aqui, deliberadamente). Cada
-//! `apply` de um recurso verifica se já existe por nome; se sim, salta; se
-//! não, cria com a mesma lógica do comando `create`/`run`/`pull` equivalente.
-//! Ver `cmd::stack` para a composição de todos os Kinds (`stack apply`).
+//! **`apply` semantics: "ensure present", not a reconciler.** No
+//! continuous diffing/rollout/drift-detection — that is the job of an
+//! orchestrator with controllers (out of scope here, deliberately). Each
+//! `apply` of a resource checks whether it already exists by name; if so, it skips; if
+//! not, it creates it with the same logic as the equivalent `create`/`run`/`pull` command.
+//! See `cmd::stack` for the composition of all the Kinds (`stack apply`).
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -18,24 +18,24 @@ use serde::Deserialize;
 #[derive(Debug, Clone, Deserialize)]
 pub struct Metadata {
     pub name: String,
-    /// Namespace lógico de ISOLAMENTO (default `default`). Recursos de namespaces
-    /// diferentes não se alcançam (só um `kind: Dependency` fura). Ver a secção
-    /// "isolamento de namespace" no CLAUDE.md.
+    /// Logical ISOLATION namespace (default `default`). Resources of different
+    /// namespaces do not reach each other (only a `kind: Dependency` breaks through). See the
+    /// "namespace isolation" section in CLAUDE.md.
     #[serde(default)]
     pub namespace: Option<String>,
-    /// Rótulos livres para agrupar/seleccionar recursos (estilo k8s). Opcional —
-    /// o runtime é single-tenant, não há namespaces; isto é só organização.
+    /// Free labels to group/select resources (k8s style). Optional —
+    /// the runtime is single-tenant, there are no namespaces; this is just organization.
     #[serde(default)]
     pub labels: BTreeMap<String, String>,
-    /// Anotações livres (notas, prereqs, referências) — nunca interpretadas pelo
-    /// runtime, só transportadas para o `describe`.
+    /// Free annotations (notes, prereqs, references) — never interpreted by the
+    /// runtime, only carried through to the `describe`.
     #[serde(default)]
     pub annotations: BTreeMap<String, String>,
 }
 
-/// Um documento do manifesto — `spec` fica cru (`serde_yaml::Value`) até o
-/// grupo do Kind certo o re-desserializar para o seu tipo tipado (`ContainerSpec`,
-/// `VmSpec`, ...). Evita este módulo ter de conhecer os 5 tipos de spec.
+/// A manifest document — `spec` stays raw (`serde_yaml::Value`) until the
+/// right Kind's group re-deserializes it into its typed type (`ContainerSpec`,
+/// `VmSpec`, ...). Avoids this module having to know the 5 spec types.
 #[derive(Debug, Clone, Deserialize)]
 pub struct ManifestDoc {
     #[serde(rename = "apiVersion")]
@@ -46,7 +46,7 @@ pub struct ManifestDoc {
     pub spec: serde_yaml::Value,
 }
 
-/// `-f <ficheiro>` explícito, ou `./delonix-manifest.yaml` por omissão.
+/// explicit `-f <file>`, or `./delonix-manifest.yaml` by default.
 pub fn resolve_path(explicit: Option<PathBuf>) -> Result<PathBuf> {
     if let Some(p) = explicit {
         return Ok(p);
@@ -61,30 +61,30 @@ pub fn resolve_path(explicit: Option<PathBuf>) -> Result<PathBuf> {
     }
 }
 
-/// A única `apiVersion` reconhecida hoje — recusa cedo (em vez de avançar
-/// silenciosamente) se o manifesto vier de uma versão futura/incompatível.
+/// The only `apiVersion` recognized today — refuses early (instead of advancing
+/// silently) if the manifest comes from a future/incompatible version.
 const SUPPORTED_API_VERSION: &str = "delonix.io/v1";
 
-/// Normaliza o `kind` para a sua forma canónica, aceitando sinónimos comuns —
-/// o match de Kind é por string exacta (`of_kind`), por isso um `VirtualMachine`
-/// ou `VM` num manifesto tem de resolver para o mesmo `Vm` que o resto do código
-/// usa. Devolve a forma canónica se conhecida, senão o `kind` tal e qual (Kinds
-/// desconhecidos são tratados a jusante, ver `cmd::stack::describe`).
+/// Normalizes the `kind` to its canonical form, accepting common synonyms —
+/// the Kind match is by exact string (`of_kind`), so a `VirtualMachine`
+/// or `VM` in a manifest has to resolve to the same `Vm` that the rest of the code
+/// uses. Returns the canonical form if known, otherwise the `kind` as-is (unknown
+/// Kinds are handled downstream, see `cmd::stack::describe`).
 pub fn canonical_kind(kind: &str) -> &str {
-    // Case-insensitive de propósito: `Vm`/`VM`/`vm`/`VirtualMachine`/`virtualMachine`
-    // (qualquer casing) resolvem todos para o `Vm` canónico — meia-medida
-    // (só alguns casings) seria pior do que nada, deixando um `kind: vm` a ser
-    // ignorado em silêncio pelo `stack apply`.
+    // Case-insensitive on purpose: `Vm`/`VM`/`vm`/`VirtualMachine`/`virtualMachine`
+    // (any casing) all resolve to the canonical `Vm` — a half-measure
+    // (only some casings) would be worse than nothing, leaving a `kind: vm` to be
+    // ignored silently by the `stack apply`.
     let lower = kind.to_ascii_lowercase();
     match lower.as_str() {
         "vm" | "virtualmachine" => "Vm",
-        // `KnowDepends` é o nome que o utilizador pediu; `Dependency` é o canónico.
+        // `KnowDepends` is the name the user asked for; `Dependency` is the canonical one.
         "knowdepends" | "dependency" => "Dependency",
         _ => kind,
     }
 }
 
-/// Carrega TODOS os documentos (`---`-separados) de um manifesto.
+/// Loads ALL the documents (`---`-separated) of a manifest.
 pub fn load(path: &Path) -> Result<Vec<ManifestDoc>> {
     let text = std::fs::read_to_string(path).map_err(|e| {
         Error::Invalid(format!(
@@ -104,8 +104,8 @@ pub fn load(path: &Path) -> Result<Vec<ManifestDoc>> {
         let mut doc = ManifestDoc::deserialize(de).map_err(|e| {
             Error::Invalid(format!("manifesto inválido em {}: {e}", path.display()))
         })?;
-        // Canonicaliza cedo: todo o resto (of_kind, stack::KINDS, describe) fala
-        // só a forma canónica, e um `kind: VirtualMachine` passa a ser um `Vm`.
+        // Canonicalize early: everything else (of_kind, stack::KINDS, describe) speaks
+        // only the canonical form, and a `kind: VirtualMachine` becomes a `Vm`.
         let canon = canonical_kind(&doc.kind);
         if canon != doc.kind {
             doc.kind = canon.to_string();
@@ -127,12 +127,12 @@ pub fn load(path: &Path) -> Result<Vec<ManifestDoc>> {
     Ok(docs)
 }
 
-/// Filtra os documentos de um `kind` específico (comparação exacta, ex. `"Container"`).
+/// Filters the documents of a specific `kind` (exact comparison, e.g. `"Container"`).
 pub fn of_kind<'a>(docs: &'a [ManifestDoc], kind: &str) -> Vec<&'a ManifestDoc> {
     docs.iter().filter(|d| d.kind == kind).collect()
 }
 
-/// Re-desserializa o `spec` cru de um documento para o tipo tipado do seu Kind.
+/// Re-deserializes the raw `spec` of a document into its Kind's typed type.
 pub fn spec_of<T: for<'de> Deserialize<'de>>(doc: &ManifestDoc) -> Result<T> {
     serde_yaml::from_value(doc.spec.clone()).map_err(|e| {
         Error::Invalid(format!(
@@ -142,17 +142,17 @@ pub fn spec_of<T: for<'de> Deserialize<'de>>(doc: &ManifestDoc) -> Result<T> {
     })
 }
 
-/// Avisa (stderr, NÃO erro) por cada chave de topo do `spec` que não conste em
-/// `known`. Os specs não têm `deny_unknown_fields` de propósito — um manifesto
-/// `delonix.io/v1` escrito para um binário mais recente pode trazer campos que
-/// este ainda não conhece, e nesse caso queremos ignorá-los e seguir, não
-/// abortar. Mas o caso comum de um campo desconhecido é uma GRALHA (`memroy:`),
-/// e um IaaS nunca deve aplicar um default em silêncio quando o utilizador
-/// claramente quis outra coisa. Daí o aviso claro e accionável.
+/// Warns (stderr, NOT an error) for each top-level key of the `spec` that is not in
+/// `known`. The specs deliberately do not have `deny_unknown_fields` — a
+/// `delonix.io/v1` manifest written for a more recent binary may bring fields that
+/// this one does not know yet, and in that case we want to ignore them and proceed, not
+/// abort. But the common case of an unknown field is a TYPO (`memroy:`),
+/// and an IaaS should never apply a default silently when the user
+/// clearly meant something else. Hence the clear and actionable warning.
 ///
-/// `known` deve conter TODOS os nomes aceites (o canónico e cada `alias`) — há
-/// um teste por Kind que garante que os `examples/` não disparam nenhum aviso,
-/// travando o drift entre esta lista e o struct.
+/// `known` must contain ALL the accepted names (the canonical one and each `alias`) — there is
+/// a test per Kind that ensures the `examples/` do not trigger any warning,
+/// stopping the drift between this list and the struct.
 pub fn warn_unknown_fields(doc: &ManifestDoc, known: &[&str]) {
     for key in unknown_fields(doc, known) {
         eprintln!(
@@ -162,9 +162,9 @@ pub fn warn_unknown_fields(doc: &ManifestDoc, known: &[&str]) {
     }
 }
 
-/// Núcleo puro de `warn_unknown_fields`: devolve as chaves de topo do `spec` que
-/// não constam em `known`. Separado para os testes de drift (`examples/` nunca
-/// deve produzir chaves desconhecidas) poderem afirmar sobre o resultado.
+/// Pure core of `warn_unknown_fields`: returns the top-level keys of the `spec` that
+/// are not in `known`. Separated so the drift tests (`examples/` should never
+/// produce unknown keys) can assert on the result.
 pub fn unknown_fields(doc: &ManifestDoc, known: &[&str]) -> Vec<String> {
     let serde_yaml::Value::Mapping(map) = &doc.spec else {
         return Vec::new();
@@ -253,7 +253,7 @@ spec: { disk: k8s-golden }
         ));
         std::fs::write(&p, text).unwrap();
         let docs = load(&p).unwrap();
-        // Ambos os sinónimos passam a ser o `Vm` canónico, apanhados por `of_kind`.
+        // Both synonyms become the canonical `Vm`, caught by `of_kind`.
         assert_eq!(of_kind(&docs, "Vm").len(), 2);
         assert_eq!(docs[0].kind, "Vm");
         assert_eq!(docs[1].kind, "Vm");
@@ -262,7 +262,7 @@ spec: { disk: k8s-golden }
 
     #[test]
     fn canonical_kind_e_case_insensitive_para_vm() {
-        // Qualquer casing plausível de outra ferramenta resolve para `Vm`.
+        // Any plausible casing from another tool resolves to `Vm`.
         for k in [
             "Vm",
             "VM",
@@ -277,7 +277,7 @@ spec: { disk: k8s-golden }
                 "kind {k:?} devia canonicalizar para Vm"
             );
         }
-        // Kinds não-Vm passam intactos (não inventamos sinónimos).
+        // Non-Vm Kinds pass through intact (we don't invent synonyms).
         assert_eq!(canonical_kind("Container"), "Container");
         assert_eq!(canonical_kind("Storage"), "Storage");
     }
@@ -310,7 +310,7 @@ spec: {}
             docs[0].metadata.annotations.get("note").map(String::as_str),
             Some("exemplo")
         );
-        // Sem bloco labels/annotations → mapas vazios, nunca erro.
+        // Without a labels/annotations block → empty maps, never an error.
         assert!(docs[1].metadata.labels.is_empty());
         assert!(docs[1].metadata.annotations.is_empty());
         let _ = std::fs::remove_file(&p);
@@ -331,15 +331,15 @@ spec: { image: alpine, memroy: 2G, restartPolicy: always }
         std::fs::write(&p, text).unwrap();
         let docs = load(&p).unwrap();
         let unknown = unknown_fields(&docs[0], crate::cmd::container::CONTAINER_SPEC_FIELDS);
-        // `memroy` (gralha) é sinalizado; `image`/`restartPolicy` (canónico) não.
+        // `memroy` (typo) is flagged; `image`/`restartPolicy` (canonical) are not.
         assert_eq!(unknown, vec!["memroy".to_string()]);
         let _ = std::fs::remove_file(&p);
     }
 
-    /// Drift-guard: cada ficheiro em `examples/` tem de parsear sem UM campo
-    /// desconhecido. Se alguém acrescenta um campo ao exemplo mas esquece a
-    /// const `*_SPEC_FIELDS` (ou vice-versa), este teste parte — é o que mantém
-    /// as listas de campos conhecidos alinhadas com o schema real e com a doc.
+    /// Drift-guard: each file in `examples/` must parse without A single
+    /// unknown field. If someone adds a field to the example but forgets the
+    /// `*_SPEC_FIELDS` const (or vice versa), this test breaks — it is what keeps
+    /// the lists of known fields aligned with the real schema and with the doc.
     #[test]
     fn examples_nao_tem_campos_desconhecidos() {
         let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
@@ -357,7 +357,7 @@ spec: { image: alpine, memroy: 2G, restartPolicy: always }
                 }
                 "HTTPRoute" => Some(crate::cmd::httproute::HTTP_ROUTE_SPEC_FIELDS),
                 "Dependency" => Some(crate::cmd::dependency::DEPENDENCY_SPEC_FIELDS),
-                _ => None, // Cluster tem specs aninhados próprios; fora deste guard.
+                _ => None, // Cluster has its own nested specs; outside this guard.
             }
         };
         for entry in std::fs::read_dir(&dir).expect("examples/ existe") {
@@ -366,11 +366,11 @@ spec: { image: alpine, memroy: 2G, restartPolicy: always }
                 continue;
             }
             let text = std::fs::read_to_string(&path).unwrap();
-            // Distinguir "não é um manifesto delonix" (cloud-config, sem
-            // apiVersion — saltar) de "é um manifesto e está PARTIDO" (tem o
-            // marcador mas o load falha — o teste TEM de falhar, senão um
-            // example malformado passa despercebido). Sem esta distinção, o
-            // guard ficava vacuamente verde para um example partido.
+            // Distinguish "not a delonix manifest" (cloud-config, without
+            // apiVersion — skip) from "it is a manifest and it is BROKEN" (has the
+            // marker but the load fails — the test MUST fail, otherwise a
+            // malformed example passes unnoticed). Without this distinction, the
+            // guard would stay vacuously green for a broken example.
             if !text.contains(SUPPORTED_API_VERSION) {
                 continue;
             }
@@ -399,10 +399,10 @@ spec: { image: alpine, memroy: 2G, restartPolicy: always }
 
     #[test]
     fn manifesto_marcado_mas_partido_falha_load_nao_e_saltado() {
-        // Contrato do drift-guard (Fix #1): um ficheiro que TEM o marcador
-        // `delonix.io/v1` mas está partido (aqui, falta `metadata.name`) tem de
-        // dar Err no load — é isso que distingue um example malformado (o guard
-        // FALHA) de um cloud-config sem marcador (o guard salta).
+        // Drift-guard contract (Fix #1): a file that HAS the `delonix.io/v1`
+        // marker but is broken (here, `metadata.name` is missing) must
+        // give Err on load — that is what distinguishes a malformed example (the guard
+        // FAILS) from a cloud-config without a marker (the guard skips).
         let text = "\
 apiVersion: delonix.io/v1
 kind: Container

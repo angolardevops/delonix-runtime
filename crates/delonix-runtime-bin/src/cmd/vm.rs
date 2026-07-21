@@ -1,4 +1,4 @@
-//! `delonix vm` — microVMs declarativas (create/ls/stop/rm/status).
+//! `delonix vm` — declarative microVMs (create/ls/stop/rm/status).
 
 use std::path::PathBuf;
 use std::process::Command;
@@ -14,8 +14,8 @@ use super::manifest::{self, ManifestDoc};
 use super::output;
 use super::util::state_root;
 
-/// `spec` de `kind: Vm` — espelha `delonix_vm::VmConfig` (menos `name`, que
-/// vem de `metadata.name`).
+/// `spec` for `kind: Vm` — mirrors `delonix_vm::VmConfig` (minus `name`, which
+/// comes from `metadata.name`).
 #[derive(Debug, Deserialize)]
 struct VmSpec {
     disk: String,
@@ -30,47 +30,47 @@ struct VmSpec {
     firmware: Option<String>,
     cmdline: Option<String>,
     seed: Option<String>,
-    /// Canónico `restartPolicy` (uniforme com `Container`); `restart_policy`
-    /// mantém-se aceite para não partir manifestos anteriores.
+    /// Canonical `restartPolicy` (uniform with `Container`); `restart_policy`
+    /// stays accepted so earlier manifests don't break.
     #[serde(rename = "restartPolicy", alias = "restart_policy")]
     restart_policy: Option<String>,
     #[serde(default)]
     hugepages: bool,
-    /// Canónico `cpuAffinity`; `cpu_affinity` continua aceite (retrocompat).
+    /// Canonical `cpuAffinity`; `cpu_affinity` stays accepted (back-compat).
     #[serde(rename = "cpuAffinity", alias = "cpu_affinity")]
     cpu_affinity: Option<String>,
     #[serde(default)]
     devices: Vec<String>,
     backend: Option<String>,
-    /// Canónico `netMode`; `net_mode` continua aceite (retrocompat).
+    /// Canonical `netMode`; `net_mode` stays accepted (back-compat).
     #[serde(rename = "netMode", alias = "net_mode")]
     net_mode: Option<String>,
     bridge: Option<String>,
-    /// Volumes/Storage a montar dentro da VM (virtio-9p) — fecha o gap de dar
-    /// storage a uma VM sem escrever cloud-init/XML. Ver `VmVolumeSpec`.
+    /// Volumes/Storage to mount inside the VM (virtio-9p) — closes the gap of
+    /// giving storage to a VM without writing cloud-init/XML. See `VmVolumeSpec`.
     #[serde(default)]
     volumes: Vec<VmVolumeSpec>,
     #[serde(default)]
     vnc: bool,
 }
 
-/// Uma entrada de `spec.volumes` de uma VM: refere um `Volume`/`Storage` por
-/// nome e diz onde montá-lo no guest.
+/// One entry of a VM's `spec.volumes`: refers to a `Volume`/`Storage` by
+/// name and says where to mount it in the guest.
 #[derive(Debug, Deserialize)]
 struct VmVolumeSpec {
-    /// Nome de um `kind: Volume` ou `kind: Storage` (resolvido no apply).
+    /// Name of a `kind: Volume` or `kind: Storage` (resolved at apply time).
     name: String,
-    /// Ponto de montagem no guest (ex.: `/mnt/dados`).
+    /// Mount point in the guest (e.g. `/mnt/dados`).
     #[serde(rename = "mountPath")]
     mount_path: String,
-    /// Montar só-de-leitura.
+    /// Mount read-only.
     #[serde(default, rename = "readOnly")]
     read_only: bool,
 }
 
-/// Nomes de campo aceites no `spec` de `kind: Vm` (canónicos + aliases legados),
-/// para o aviso de campos desconhecidos. Mantém-se alinhado com `VmSpec` pelo
-/// teste `manifest::tests::examples_nao_tem_campos_desconhecidos`.
+/// Field names accepted in the `spec` of `kind: Vm` (canonical + legacy aliases),
+/// for the unknown-field warning. Kept aligned with `VmSpec` by the
+/// test `manifest::tests::examples_nao_tem_campos_desconhecidos`.
 pub(crate) const VM_SPEC_FIELDS: &[&str] = &[
     "disk",
     "vcpus",
@@ -102,88 +102,88 @@ fn default_memory() -> String {
     "1G".to_string()
 }
 fn default_network() -> String {
-    // A rede default do ingress (bridge delonix0/10.200, sempre presente) — NÃO
-    // "bridge", que `resolve_net` trataria como uma rede PRIVADA a criar antes
-    // (o `vm create dev` falhava com "ingress network 'bridge'" — o default
-    // apontava para uma rede que ninguém tinha criado).
+    // The default ingress network (bridge delonix0/10.200, always present) — NOT
+    // "bridge", which `resolve_net` would treat as a PRIVATE network to create
+    // first (`vm create dev` failed with "ingress network 'bridge'" — the default
+    // pointed at a network no one had created).
     "ingress".to_string()
 }
 
-// `Create` é maior que as outras variantes (muitos flags opcionais de VM) — é um
-// enum de CLI parseado UMA vez por invocação, não um hot-path; boxar cada campo
-// só para agradar ao lint complicaria a derive do `clap` sem benefício real.
+// `Create` is bigger than the other variants (many optional VM flags) — it's a
+// CLI enum parsed ONCE per invocation, not a hot-path; boxing each field just to
+// please the lint would complicate the `clap` derive with no real benefit.
 #[allow(clippy::large_enum_variant)]
 #[derive(Subcommand)]
 pub enum VmCmd {
-    /// Dashboard (KPIs + tabela) das VMs — TUI interactivo, ou `--once` snapshot.
+    /// Dashboard (KPIs + table) of the VMs — interactive TUI, or `--once` snapshot.
     Dash {
         #[arg(long)]
         once: bool,
     },
-    /// Inicializa um projecto com manifesto de VM — ficheiros JÁ PREENCHIDOS (imagens
-    /// incluídas), prontos a usar sem editar nada.
+    /// Bootstrap a project with a VM manifest — files ALREADY FILLED IN (images
+    /// included), ready to use without editing anything.
     Init {
-        /// Directório do projecto (default: o actual).
+        /// Project directory (default: the current one).
         #[arg(default_value = ".")]
         dir: PathBuf,
-        /// Nome do projecto (default: o nome do directório).
+        /// Project name (default: the directory name).
         #[arg(long)]
         name: Option<String>,
-        /// Imagem a usar. Omitir = preenche com a imagem por omissão.
+        /// Image to use. Omit = fills in with the default image.
         #[arg(long)]
         image: Option<String>,
-        /// Substitui ficheiros já existentes.
+        /// Overwrite existing files.
         #[arg(long)]
         force: bool,
-        /// Gera um PROJECTO completo de uma stack (ex.: `python`) com boas práticas,
-        /// em vez do scaffold genérico. `--template list` mostra os disponíveis.
+        /// Generate a complete PROJECT for a stack (e.g. `python`) with best
+        /// practices, instead of the generic scaffold. `--template list` shows the available ones.
         #[arg(long, short = 't')]
         template: Option<String>,
-        /// Depois de gerar, constrói a imagem, arranca e espera ficar saudável.
+        /// After generating, build the image, start it, and wait until healthy.
         #[arg(long)]
         up: bool,
     },
-    /// Cria (ou auto-recupera) uma VM.
+    /// Create (or auto-recover) a VM.
     Create {
         name: String,
-        /// Disco base (qcow2/raw) — vira overlay por-VM. Omite para usar a
-        /// imagem VM dourada local (se houver exactamente uma; `image --vm ls`).
+        /// Base disk (qcow2/raw) — becomes a per-VM overlay. Omit to use the
+        /// local golden VM image (if there is exactly one; `image --vm ls`).
         #[arg(long)]
         disk: Option<String>,
         #[arg(long, default_value_t = 1)]
         vcpus: u32,
-        /// Memória (`"2G"`/`"1024M"`).
+        /// Memory (`"2G"`/`"1024M"`).
         #[arg(long, default_value = "1G")]
         memory: String,
         /// Ingress network for the tap (default: the system ingress network; a
         /// custom network must be created first with `delonix network create`).
         #[arg(long, default_value = "ingress")]
         network: String,
-        /// Kernel para direct boot.
+        /// Kernel for direct boot.
         #[arg(long)]
         kernel: Option<String>,
         #[arg(long)]
         initrd: Option<String>,
-        /// Firmware, alternativa ao kernel (cloud images).
+        /// Firmware, alternative to the kernel (cloud images).
         #[arg(long)]
         firmware: Option<String>,
         #[arg(long)]
         cmdline: Option<String>,
-        /// ISO cloud-init (NoCloud) já pronta — se dado, tem prioridade sobre
-        /// `--hostname`/`--ssh-key`/`--user-data` (esses geram a ISO; este usa-a
-        /// directamente).
+        /// Ready-made cloud-init (NoCloud) ISO — if given, takes priority over
+        /// `--hostname`/`--ssh-key`/`--user-data` (those generate the ISO; this
+        /// uses it directly).
         #[arg(long)]
         seed: Option<String>,
-        /// Hostname a aplicar no primeiro boot (gera a ISO NoCloud se nenhum
-        /// `--seed` explícito for dado).
+        /// Hostname to apply on first boot (generates the NoCloud ISO if no
+        /// explicit `--seed` is given).
         #[arg(long)]
         hostname: Option<String>,
-        /// Chave SSH pública autorizada, `ssh-ed25519 AAAA...` ou `@caminho`
-        /// para ler de um ficheiro. Repetível.
+        /// Authorized public SSH key, `ssh-ed25519 AAAA...` or `@path`
+        /// to read from a file. Repeatable.
         #[arg(long = "ssh-key")]
         ssh_keys: Vec<String>,
-        /// `user-data` cloud-init próprio (substitui totalmente o gerado por
-        /// omissão) — controlo completo para quem precisar.
+        /// Your own cloud-init `user-data` (fully replaces the default-generated
+        /// one) — full control for whoever needs it.
         #[arg(long)]
         user_data: Option<PathBuf>,
         /// `no`|`on-failure`|`always`.
@@ -191,19 +191,19 @@ pub enum VmCmd {
         restart_policy: Option<String>,
         #[arg(long)]
         hugepages: bool,
-        /// Afinidade de cores, ex.: `8-15`.
+        /// Core affinity, e.g. `8-15`.
         #[arg(long)]
         cpu_affinity: Option<String>,
-        /// VFIO PCI passthrough, repetível.
+        /// VFIO PCI passthrough, repeatable.
         #[arg(long = "device")]
         devices: Vec<String>,
-        /// `cloud-hypervisor`|`libvirt` (omitir = auto-deteção).
+        /// `cloud-hypervisor`|`libvirt` (omit = auto-detection).
         #[arg(long)]
         backend: Option<String>,
-        /// Só libvirt: `user`|`nat`|`bridge`.
+        /// libvirt only: `user`|`nat`|`bridge`.
         #[arg(long)]
         net_mode: Option<String>,
-        /// Nome da bridge (net-mode=bridge) ou rede libvirt (nat).
+        /// Bridge name (net-mode=bridge) or libvirt network (nat).
         #[arg(long)]
         bridge: Option<String>,
         /// VNC graphical console (libvirt backend only — Cloud Hypervisor has no display).
@@ -230,7 +230,7 @@ pub enum VmCmd {
     },
     /// Push a local golden VM image to an OCI registry (`vm push <name> <target>`).
     Push { name: String, target: String },
-    /// Lista as VMs.
+    /// List the VMs.
     Ls,
     /// Attach to the VM's serial console (interactive terminal) — works with no
     /// IP (boot logs, login). Escape: Ctrl-] .
@@ -243,26 +243,26 @@ pub enum VmCmd {
         #[arg(add = ArgValueCandidates::new(super::complete::vms))]
         name: String,
     },
-    /// Estado actual (reconcilia liveness/IP com o backend).
+    /// Current state (reconciles liveness/IP with the backend).
     Status {
-        /// VM a consultar (omite para o estado de TODAS).
+        /// VM to query (omit for the state of ALL).
         #[arg(add = ArgValueCandidates::new(super::complete::vms))]
         name: Option<String>,
     },
-    /// Detalhe legível de uma ou mais VMs, ao estilo `kubectl describe` (para
-    /// humanos; use `status` para a vista compacta de sempre). Inclui o estado
-    /// AO VIVO — `delonix_vm::status` reconcilia liveness/IP com o backend.
+    /// Human-readable detail of one or more VMs, `kubectl describe` style (for
+    /// humans; use `status` for the usual compact view). Includes the LIVE
+    /// state — `delonix_vm::status` reconciles liveness/IP with the backend.
     Describe {
         #[arg(required = true, add = ArgValueCandidates::new(super::complete::vms))]
         names: Vec<String>,
     },
-    /// Pára a VM (preserva disco/registo).
+    /// Stop the VM (preserves disk/record).
     #[command(alias = "down")]
     Stop {
         #[arg(add = ArgValueCandidates::new(super::complete::vms))]
         name: String,
     },
-    /// Remove a VM (pára + apaga overlay/estado).
+    /// Remove the VM (stops + deletes overlay/state).
     #[command(alias = "delete")]
     Rm {
         #[arg(add = ArgValueCandidates::new(super::complete::vms))]
@@ -271,18 +271,18 @@ pub enum VmCmd {
         #[arg(long, short = 'f')]
         force: bool,
     },
-    /// Aplica os documentos `kind: Vm` de um manifesto (`delonix_vm::create` já
-    /// é idempotente por nome — cria ou auto-recupera).
+    /// Apply the `kind: Vm` documents of a manifest (`delonix_vm::create` is
+    /// already idempotent by name — creates or auto-recovers).
     Apply {
         #[arg(short = 'f', long = "file")]
         file: Option<PathBuf>,
     },
 }
 
-/// Tag 9p base a partir do nome do volume: `[a-zA-Z0-9_]`, ≤31 chars (limite do
-/// 9p). Como `.` e `-` colapsam ambos em `_`, dois nomes distintos podem gerar a
-/// mesma base — a unicidade é garantida por `resolve_vm_volumes` (sufixo por
-/// índice), não aqui.
+/// Base 9p tag from the volume name: `[a-zA-Z0-9_]`, ≤31 chars (9p limit).
+/// Since `.` and `-` both collapse to `_`, two distinct names can generate the
+/// same base — uniqueness is guaranteed by `resolve_vm_volumes` (per-index
+/// suffix), not here.
 fn vol_tag(name: &str) -> String {
     let mut t: String = name
         .chars()
@@ -298,10 +298,10 @@ fn vol_tag(name: &str) -> String {
     t
 }
 
-/// Um `mountPath` de volume tem de ser um caminho absoluto SEM caracteres que
-/// partam a sequência de fluxo YAML do cloud-init (`,`/`]`/`#`/`"`) nem control
-/// chars — senão a entrada `mounts` fica malformada e o volume não monta em
-/// silêncio depois do boot.
+/// A volume `mountPath` must be an absolute path WITHOUT characters that break
+/// the cloud-init YAML flow sequence (`,`/`]`/`#`/`"`) nor control chars —
+/// otherwise the `mounts` entry is malformed and the volume silently fails to
+/// mount after boot.
 fn valid_mount_path(p: &str) -> bool {
     p.starts_with('/')
         && !p
@@ -309,11 +309,11 @@ fn valid_mount_path(p: &str) -> bool {
             .any(|c| c.is_control() || matches!(c, ',' | ']' | '[' | '#' | '"'))
 }
 
-/// Resolve `spec.volumes` (nomes de Volume/Storage) para `VmVolume` com o
-/// directório no host, garantindo que um Storage de rede está montado antes de o
-/// partilhar por 9p. Tags únicas (sufixo `_N` em colisão). O `Volume`/`Storage`
-/// tem de já existir (o `stack apply` aplica-os antes da VM; o `validate_graph`
-/// já confirma a referência).
+/// Resolve `spec.volumes` (Volume/Storage names) into `VmVolume` with the host
+/// directory, ensuring a network Storage is mounted before sharing it over 9p.
+/// Unique tags (`_N` suffix on collision). The `Volume`/`Storage` must already
+/// exist (`stack apply` applies them before the VM; `validate_graph` already
+/// confirms the reference).
 fn resolve_vm_volumes(
     base: &std::path::Path,
     specs: &[VmVolumeSpec],
@@ -337,10 +337,10 @@ fn resolve_vm_volumes(
                 v.name
             ))
         })?;
-        // Se for um Storage de rede, garante a montagem no host antes de partilhar.
+        // If it's a network Storage, ensure it's mounted on the host before sharing.
         store.ensure_mounted(&vol)?;
-        // Unicidade da tag: `.` e `-` colapsam em `_`, por isso nomes distintos
-        // podem colidir — desambigua com um sufixo `_N` estável por ordem.
+        // Tag uniqueness: `.` and `-` collapse to `_`, so distinct names can
+        // collide — disambiguate with a `_N` suffix stable by order.
         let base_tag = vol_tag(&v.name);
         let mut tag = base_tag.clone();
         let mut n = 1;
@@ -368,16 +368,16 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
         manifest::warn_unknown_fields(doc, VM_SPEC_FIELDS);
         let spec: VmSpec = manifest::spec_of(doc)?;
 
-        // Resolve cada volume (nome de Volume/Storage → directório no host) e
-        // garante que um Storage de rede está montado antes de o partilhar.
+        // Resolve each volume (Volume/Storage name → host directory) and
+        // ensure a network Storage is mounted before sharing it.
         let vm_volumes = resolve_vm_volumes(&base, &spec.volumes)?;
 
-        // NB: a regra "volumes ⇒ libvirt" vive no motor (`delonix_vm::create`),
-        // para qualquer consumidor da API a herdar — aqui passa-se o backend tal
-        // como declarado (com CH explícito + volumes, o motor recusa com erro claro).
+        // NB: the "volumes ⇒ libvirt" rule lives in the engine (`delonix_vm::create`),
+        // so any API consumer inherits it — here the backend is passed as
+        // declared (with explicit CH + volumes, the engine refuses with a clear error).
 
-        // Se há volumes e não foi dado um seed próprio, gera um seed com os mounts
-        // 9p (senão o `<filesystem>` existe mas o guest não o monta sozinho).
+        // If there are volumes and no own seed was given, generate a seed with the
+        // 9p mounts (else the `<filesystem>` exists but the guest won't mount it).
         let seed = match spec.seed {
             Some(s) => Some(s),
             None if !vm_volumes.is_empty() => Some(
@@ -440,7 +440,7 @@ pub fn run(action: VmCmd) -> Result<()> {
     }
     let base = state_root();
     match action {
-        // Tratado no topo de `run` (faz `return`).
+        // Handled at the top of `run` (does `return`).
         VmCmd::Init { .. } => unreachable!("tratado acima"),
         VmCmd::Dash { .. } => unreachable!("tratado acima"),
         VmCmd::Create {
@@ -469,9 +469,9 @@ pub fn run(action: VmCmd) -> Result<()> {
             wait,
             boot_timeout,
         } => {
-            // Sem --disk: a imagem VM dourada única (mesma resolução do
-            // `cluster kubeadm` — 0 ou várias imagens dão erro claro, nunca
-            // uma escolha às cegas).
+            // No --disk: the single golden VM image (same resolution as
+            // `cluster kubeadm` — 0 or several images give a clear error, never
+            // a blind choice).
             let disk = match disk {
                 Some(d) => d,
                 None => {
@@ -480,12 +480,12 @@ pub fn run(action: VmCmd) -> Result<()> {
                     store.qcow2_path(&tag).to_string_lossy().into_owned()
                 }
             };
-            // SEMPRE um seed cloud-init (a menos de `--seed` explícito). Sem
-            // datasource, o cloud-init da cloud image não corre a fase de rede
-            // e a VM fica sem IP nem rota ("Network is unreachable" no guest,
-            // caso real). O seed mínimo (network-config DHCP + hostname = nome
-            // da VM) faz o cloud-init subir a rede e aplicar as ssh-keys/hostname
-            // quando dados.
+            // ALWAYS a cloud-init seed (unless an explicit `--seed`). Without a
+            // datasource, the cloud image's cloud-init doesn't run the network
+            // phase and the VM ends up with no IP nor route ("Network is
+            // unreachable" in the guest, a real case). The minimal seed
+            // (network-config DHCP + hostname = VM name) makes cloud-init bring
+            // up the network and apply the ssh-keys/hostname when given.
             let seed = match seed {
                 Some(s) => Some(s),
                 None => {
@@ -522,8 +522,8 @@ pub fn run(action: VmCmd) -> Result<()> {
             };
             let vm = delonix_vm::create(&base, &cfg)?;
             println!("{}", vm.name);
-            // Boot dinâmico: --console anexa à consola serial (vê o boot ao
-            // vivo); --wait mostra um spinner até a VM ganhar IP.
+            // Dynamic boot: --console attaches to the serial console (watch the
+            // boot live); --wait shows a spinner until the VM gets an IP.
             if console {
                 return cmd_console(&base, &vm.name);
             }
@@ -547,7 +547,7 @@ pub fn run(action: VmCmd) -> Result<()> {
         }
         VmCmd::Ls => {
             let mut t = output::Table::new(&["NAME", "VCPUS", "MEMORY", "STATUS", "IP"])
-                // VCPUS é uma contagem — alinhada à direita como os tamanhos.
+                // VCPUS is a count — right-aligned like the sizes.
                 .right_align(1);
             for vm in delonix_vm::list(&base)? {
                 t.row(vec![
@@ -565,8 +565,8 @@ pub fn run(action: VmCmd) -> Result<()> {
         VmCmd::Console { name } => cmd_console(&base, &name),
         VmCmd::Vnc { name } => cmd_vnc(&base, &name),
         VmCmd::Status { name } => {
-            // Sem argumento: o estado reconciliado de TODAS (consistente com
-            // `ingress ls`/`egress ls` sem argumento).
+            // No argument: the reconciled state of ALL (consistent with
+            // `ingress ls`/`egress ls` with no argument).
             let names: Vec<String> = match name {
                 Some(n) => vec![n],
                 None => delonix_vm::list(&base)?
@@ -599,9 +599,9 @@ pub fn run(action: VmCmd) -> Result<()> {
                 delonix_vm::remove(&base, &name)
             };
             if let Err(e) = res {
-                // Limpeza no backend recusada: o registo local ficou intacto de
-                // propósito (nada de VMs órfãs no libvirt) — diz ao utilizador
-                // como forçar, em vez de o deixar num beco.
+                // Backend cleanup refused: the local record was kept intact on
+                // purpose (no orphan VMs in libvirt) — tell the user how to
+                // force it, instead of leaving them in a dead end.
                 if !force && !matches!(e, Error::VmNotFound(_)) {
                     output::warn(&super::po::tf(
                         "the VM record was kept; `delonix vm rm --force {name}` discards it anyway",
@@ -621,9 +621,9 @@ pub fn run(action: VmCmd) -> Result<()> {
     }
 }
 
-/// Estado de uma VM em texto, sem o `{:?}` cru do enum: `Failed(137)` do
-/// `Debug` viraria "Failed(137)" — legível, mas o `Exited (137)` é o
-/// vocabulário que o resto da CLI já usa (`container ps`). Pura.
+/// A VM's state as text, without the raw enum `{:?}`: `Failed(137)` from
+/// `Debug` would become "Failed(137)" — readable, but `Exited (137)` is the
+/// vocabulary the rest of the CLI already uses (`container ps`). Pure.
 fn fmt_vm_status(status: &delonix_runtime_core::Status) -> String {
     use delonix_runtime_core::Status as S;
     match status {
@@ -636,15 +636,15 @@ fn fmt_vm_status(status: &delonix_runtime_core::Status) -> String {
     }
 }
 
-/// `vm describe` — detalhe legível ao estilo `kubectl describe`.
+/// `vm describe` — human-readable detail, `kubectl describe` style.
 ///
-/// Usa `delonix_vm::status` (não o registo cru): reconcilia liveness/IP com o
-/// backend, portanto o que se lê é o estado AO VIVO e não o último que ficou
-/// gravado. É a diferença entre "diz que está Running" e "está Running".
-/// Espera (com spinner) a VM ganhar IP — o sinal de que a rede subiu e o boot
-/// avançou. Só faz sentido em modos com IP visível (CH, ou libvirt nat/bridge);
-/// em user-mode (libvirt session, SLIRP) nunca há IP, por isso avisa e aponta
-/// para a consola em vez de esperar em vão o timeout inteiro.
+/// Uses `delonix_vm::status` (not the raw record): reconciles liveness/IP with
+/// the backend, so what you read is the LIVE state and not the last one that
+/// got saved. It's the difference between "says it's Running" and "is Running".
+/// Waits (with a spinner) for the VM to get an IP — the sign the network came
+/// up and the boot advanced. Only makes sense in modes with a visible IP (CH,
+/// or libvirt nat/bridge); in user-mode (libvirt session, SLIRP) there's never
+/// an IP, so it warns and points to the console instead of waiting in vain.
 fn wait_for_boot(base: &std::path::Path, name: &str, timeout: std::time::Duration) {
     let start = std::time::Instant::now();
     let deadline = start + timeout;
@@ -663,8 +663,8 @@ fn wait_for_boot(base: &std::path::Path, name: &str, timeout: std::time::Duratio
                 ));
                 return;
             }
-            // libvirt user-mode nunca dá IP: após um curto arranque, orienta
-            // para a consola em vez de esperar o timeout inteiro em vão.
+            // libvirt user-mode never gives an IP: after a short start, steer
+            // toward the console instead of waiting the whole timeout in vain.
             if vm.backend.contains("libvirt")
                 && vm.ip.is_none()
                 && start.elapsed() >= std::time::Duration::from_secs(3)
@@ -703,10 +703,10 @@ fn wait_for_boot(base: &std::path::Path, name: &str, timeout: std::time::Duratio
     }
 }
 
-/// `delonix vm vnc <name>` — o endereço VNC de uma VM gráfica (criada com
-/// `--vnc`, backend libvirt). O Cloud Hypervisor não tem display — nesse caso
-/// aponta para `vm console` (serial). Não abre cliente nenhum; imprime o
-/// endereço para o utilizador ligar com o seu (`vncviewer`, Remmina, ...).
+/// `delonix vm vnc <name>` — the VNC address of a graphical VM (created with
+/// `--vnc`, libvirt backend). Cloud Hypervisor has no display — in that case
+/// it points to `vm console` (serial). Opens no client; prints the address
+/// for the user to connect with their own (`vncviewer`, Remmina, ...).
 fn cmd_vnc(base: &std::path::Path, name: &str) -> Result<()> {
     let vm = delonix_vm::status(base, name)?;
     let backend = vm.backend.as_str();
@@ -716,7 +716,7 @@ fn cmd_vnc(base: &std::path::Path, name: &str) -> Result<()> {
             &[("name", name)],
         )));
     }
-    // `virsh vncdisplay` devolve `:N` (porta = 5900 + N) ou `127.0.0.1:N`.
+    // `virsh vncdisplay` returns `:N` (port = 5900 + N) or `127.0.0.1:N`.
     let uri = delonix_vm::libvirt_uri(name);
     let out = std::process::Command::new("virsh")
         .args(["-c", &uri, "vncdisplay", "--", name])
@@ -732,7 +732,7 @@ fn cmd_vnc(base: &std::path::Path, name: &str) -> Result<()> {
             &[("name", name)],
         )));
     }
-    // Normaliza ":N" -> "127.0.0.1:590N" (o N é o índice do display).
+    // Normalize ":N" -> "127.0.0.1:590N" (N is the display index).
     let addr = if let Some(rest) = disp.strip_prefix(':') {
         match rest.parse::<u32>() {
             Ok(n) => format!("127.0.0.1:{}", 5900 + n),
@@ -749,10 +749,10 @@ fn cmd_vnc(base: &std::path::Path, name: &str) -> Result<()> {
     Ok(())
 }
 
-/// `delonix vm console <name>` — terminal serial interactivo da VM. Não precisa
-/// de IP (é como um cabo série): serve para ver o boot e fazer login mesmo sem
-/// rede. Cloud Hypervisor: liga ao socket UNIX do serial e faz de ponte com o
-/// tty local (raw mode); libvirt: delega no `virsh console` (que já o faz).
+/// `delonix vm console <name>` — the VM's interactive serial terminal. Needs no
+/// IP (like a serial cable): to watch the boot and log in even without network.
+/// Cloud Hypervisor: connects to the serial UNIX socket and bridges it with the
+/// local tty (raw mode); libvirt: delegates to `virsh console` (which does it).
 fn cmd_console(base: &std::path::Path, name: &str) -> Result<()> {
     let vm = delonix_vm::status(base, name)?;
     if !matches!(vm.status, delonix_runtime_core::Status::Running) {
@@ -763,7 +763,7 @@ fn cmd_console(base: &std::path::Path, name: &str) -> Result<()> {
     }
     let backend = vm.backend.as_str();
     if backend.contains("libvirt") || backend.contains("qemu") || backend.contains("kvm") {
-        // O virsh já dá uma consola raw interactiva; substituímos o processo.
+        // virsh already gives a raw interactive console; we replace the process.
         use std::os::unix::process::CommandExt;
         let uri = delonix_vm::libvirt_uri(name);
         let err = std::process::Command::new("virsh")
@@ -777,9 +777,9 @@ fn cmd_console(base: &std::path::Path, name: &str) -> Result<()> {
     // Cloud Hypervisor: ponte tty<->socket.
     let sock = delonix_vm::console_socket(base, name);
     if !sock.exists() {
-        // A VM está viva mas foi arrancada por um binário antigo (serial em
-        // ficheiro, não socket). Um `create` idempotente não a re-arranca; é
-        // preciso parar e deixar o `create` re-arrancar com o socket.
+        // The VM is alive but was started by an old binary (serial to a file,
+        // not a socket). An idempotent `create` won't restart it; you have to
+        // stop it and let `create` restart it with the socket.
         return Err(Error::Invalid(super::po::tf(
             "no console socket for VM '{name}' — it was started by an older delonix; run `delonix vm stop {name} && delonix vm create {name}` to restart it with a console",
             &[("name", name)],
@@ -788,12 +788,12 @@ fn cmd_console(base: &std::path::Path, name: &str) -> Result<()> {
     console_bridge(&sock)
 }
 
-/// Guarda o modo do tty de stdin e repõe-no no `Drop` (mesmo com Ctrl-C, panic
-/// ou saída da VM) — sem isto o terminal ficaria em raw depois de sair.
+/// Saves stdin's tty mode and restores it on `Drop` (even on Ctrl-C, panic,
+/// or VM exit) — without this the terminal would stay in raw after exiting.
 struct RawTty(libc::termios);
 impl RawTty {
     fn enable() -> Option<Self> {
-        // SAFETY: tcgetattr/tcsetattr sobre o fd 0 (stdin); sem pré-condições.
+        // SAFETY: tcgetattr/tcsetattr on fd 0 (stdin); no preconditions.
         unsafe {
             if libc::isatty(0) != 1 {
                 return None;
@@ -811,15 +811,15 @@ impl RawTty {
 }
 impl Drop for RawTty {
     fn drop(&mut self) {
-        // SAFETY: repõe o termios original guardado.
+        // SAFETY: restores the saved original termios.
         unsafe {
             libc::tcsetattr(0, libc::TCSANOW, &self.0);
         }
     }
 }
 
-/// Liga stdin/stdout ao socket da consola, byte a byte, até `Ctrl-]` (0x1d) no
-/// stdin — a mesma tecla de escape do `telnet`.
+/// Connects stdin/stdout to the console socket, byte by byte, until `Ctrl-]`
+/// (0x1d) on stdin — the same escape key as `telnet`.
 fn console_bridge(sock: &std::path::Path) -> Result<()> {
     use std::io::{Read, Write};
     use std::os::unix::net::UnixStream;
@@ -833,11 +833,11 @@ fn console_bridge(sock: &std::path::Path) -> Result<()> {
         "[connected — detach with Ctrl-]; the console returns here when the VM powers off]\r"
     );
 
-    // Ponte bidireccional com `poll()` num só fio: reage a stdin E ao socket,
-    // e — o ponto do fix — REGRESSA ao host quando o socket fecha (a VM fez
-    // poweroff/desligou), sem ficar preso num `read` de stdin. Ctrl-] (0x1d)
-    // destaca; `exit`/Ctrl-D dentro da VM vão para o getty (autologin), não
-    // para aqui — a única saída manual é o Ctrl-], por isso é anunciado.
+    // Bidirectional bridge with `poll()` on a single thread: reacts to stdin AND
+    // to the socket, and — the point of the fix — RETURNS to the host when the
+    // socket closes (the VM powered off/shut down), without getting stuck in a
+    // stdin `read`. Ctrl-] (0x1d) detaches; `exit`/Ctrl-D inside the VM go to the
+    // getty (autologin), not here — the only manual exit is Ctrl-], so it's announced.
     let mut wr = stream.try_clone().map_err(|e| Error::Runtime {
         context: "vm console",
         message: e.to_string(),
@@ -858,11 +858,11 @@ fn console_bridge(sock: &std::path::Path) -> Result<()> {
                 revents: 0,
             },
         ];
-        // SAFETY: poll sobre 2 pollfd válidos; -1 = bloqueia até um evento.
+        // SAFETY: poll over 2 valid pollfds; -1 = blocks until an event.
         if unsafe { libc::poll(fds.as_mut_ptr(), 2, -1) } < 0 {
             break;
         }
-        // stdin -> socket (Ctrl-] destaca; EOF do host sai).
+        // stdin -> socket (Ctrl-] detaches; host EOF exits).
         if fds[0].revents & (libc::POLLIN | libc::POLLHUP) != 0 {
             match std::io::stdin().read(&mut buf) {
                 Ok(0) | Err(_) => break,
@@ -876,7 +876,7 @@ fn console_bridge(sock: &std::path::Path) -> Result<()> {
                 }
             }
         }
-        // socket -> stdout; EOF = a VM fechou → regressa ao host.
+        // socket -> stdout; EOF = the VM closed → returns to the host.
         if fds[1].revents & (libc::POLLIN | libc::POLLHUP) != 0 {
             match rd.read(&mut buf) {
                 Ok(0) | Err(_) => break 'bridge,
@@ -905,9 +905,9 @@ fn cmd_describe(base: &std::path::Path, names: &[String]) -> Result<()> {
     Ok(())
 }
 
-/// Tamanho de um ficheiro em disco, se legível. Um overlay/disco que
-/// desapareceu (apagado à mão) dá `None` e o campo omite o tamanho — melhor
-/// que imprimir `0 B`, que se leria como "vazio" em vez de "não existe".
+/// Size of a file on disk, if readable. An overlay/disk that disappeared
+/// (deleted by hand) gives `None` and the field omits the size — better than
+/// printing `0 B`, which would read as "empty" instead of "doesn't exist".
 fn file_size(path: &str) -> Option<u64> {
     std::fs::metadata(path).ok().map(|m| m.len())
 }
@@ -937,7 +937,7 @@ fn describe_one(vm: &delonix_runtime_core::Vm) {
     d.section("Disk");
     d.sub("Base", &vm.disk);
     d.sub("Overlay", &vm.overlay);
-    // Tamanho REAL do overlay em disco (o que a VM escreveu por cima da base).
+    // REAL on-disk size of the overlay (what the VM wrote on top of the base).
     d.sub_opt("Overlay size", file_size(&vm.overlay).map(output::fmt_size));
 
     d.section("Network");
@@ -951,12 +951,12 @@ fn describe_one(vm: &delonix_runtime_core::Vm) {
 }
 
 // ---------------------------------------------------------------------------
-// Geração da ISO cloud-init NoCloud por-instância (não confundir com o build
-// da imagem dourada, em `cmd::vmimage` — isto corre uma vez por VM, no
-// arranque; aquele corre uma vez por imagem, no build).
+// Per-instance NoCloud cloud-init ISO generation (not to be confused with the
+// golden image build, in `cmd::vmimage` — this runs once per VM, at startup;
+// that one runs once per image, at build time).
 // ---------------------------------------------------------------------------
 
-/// Resolve uma entrada de `--ssh-key`: literal, ou `@caminho` para ler de um ficheiro.
+/// Resolve a `--ssh-key` entry: literal, or `@path` to read from a file.
 fn resolve_ssh_key(spec: &str) -> Result<String> {
     match spec.strip_prefix('@') {
         Some(path) => std::fs::read_to_string(path)
@@ -971,10 +971,10 @@ fn resolve_ssh_key(spec: &str) -> Result<String> {
     }
 }
 
-/// `user-data` NoCloud mínimo — pura, testável sem `cloud-localds` real.
-/// `package_update: false`/`package_upgrade: false` porque a imagem dourada
-/// já vem pronta (ver `cmd::vmimage`); não faz sentido gastar o primeiro boot
-/// a `apt update`.
+/// Minimal NoCloud `user-data` — pure, testable without a real `cloud-localds`.
+/// `package_update: false`/`package_upgrade: false` because the golden image
+/// already comes ready (see `cmd::vmimage`); no point spending the first boot
+/// on `apt update`.
 fn build_user_data(
     hostname: &str,
     ssh_keys: &[String],
@@ -990,10 +990,10 @@ fn build_user_data(
             out.push_str(&format!("  - {k}\n"));
         }
     }
-    // Auto-login na consola serial (ttyS0) como o utilizador `delonix` da golden:
-    // o `vm console` entra directo, sem pedir password (escolha do utilizador —
-    // a consola serial de uma VM de dev é acesso local, como no multipass/kind).
-    // Sem isto, o cloud-init reconfigura o getty e a consola passa a pedir login.
+    // Auto-login on the serial console (ttyS0) as the golden's `delonix` user:
+    // `vm console` enters directly, without asking for a password (user's choice
+    // — a dev VM's serial console is local access, like in multipass/kind).
+    // Without this, cloud-init reconfigures the getty and the console asks for login.
     out.push_str("write_files:\n");
     out.push_str("  - path: /etc/systemd/system/serial-getty@ttyS0.service.d/autologin.conf\n");
     out.push_str("    content: |\n");
@@ -1005,16 +1005,16 @@ fn build_user_data(
     out.push_str("runcmd:\n");
     out.push_str("  - [ systemctl, daemon-reload ]\n");
     out.push_str("  - [ systemctl, restart, serial-getty@ttyS0 ]\n");
-    // Monta cada volume 9p partilhado pelo `<filesystem>` do domínio. O
-    // `_netdev` evita bloquear o boot se o share não estiver pronto; `trans=virtio`
-    // + `9p2000.L` é o dialecto que o libvirt/QEMU expõem. Assim o guest monta o
-    // NAS/volume SEM o utilizador escrever fstab nem cloud-init à mão.
+    // Mount each 9p volume shared by the domain's `<filesystem>`. The `_netdev`
+    // avoids blocking the boot if the share isn't ready; `trans=virtio`
+    // + `9p2000.L` is the dialect that libvirt/QEMU expose. This way the guest
+    // mounts the NAS/volume WITHOUT the user writing fstab or cloud-init by hand.
     if !volumes.is_empty() {
         out.push_str("mounts:\n");
         for v in volumes {
             let mode = if v.read_only { "ro" } else { "rw" };
-            // `mount_path` entre aspas (validado sem `"` em `valid_mount_path`) e
-            // `tag` saneada (`vol_tag`) — a sequência de fluxo YAML não parte.
+            // `mount_path` quoted (validated without `"` in `valid_mount_path`) and
+            // `tag` sanitized (`vol_tag`) — the YAML flow sequence doesn't break.
             out.push_str(&format!(
                 "  - [ \"{}\", \"{}\", 9p, \"trans=virtio,version=9p2000.L,{mode},_netdev\", \"0\", \"0\" ]\n",
                 v.tag, v.mount_path
@@ -1028,10 +1028,10 @@ fn build_meta_data(instance_id: &str, hostname: &str) -> String {
     format!("instance-id: {instance_id}\nlocal-hostname: {hostname}\n")
 }
 
-/// Gera (ou reaproveita, via `user_data_override`) o `user-data`/`meta-data` e
-/// empacota-os num ISO NoCloud com `cloud-localds`. Devolve o caminho da ISO.
-/// `pub(crate)`: reaproveitada por `cmd::cluster::provision_and_apply` (cada
-/// VM provisionada por `delonix cluster kubeadm` precisa do mesmo seed).
+/// Generates (or reuses, via `user_data_override`) the `user-data`/`meta-data`
+/// and packages them into a NoCloud ISO with `cloud-localds`. Returns the ISO
+/// path. `pub(crate)`: reused by `cmd::cluster::provision_and_apply` (each VM
+/// provisioned by `delonix cluster kubeadm` needs the same seed).
 pub(crate) fn generate_seed_iso(
     vm_name: &str,
     hostname: Option<&str>,
@@ -1052,10 +1052,10 @@ pub(crate) fn generate_seed_iso(
                     p.display()
                 ))
             })?;
-            // O user-data próprio do utilizador substitui TUDO — não há onde
-            // injectar os mounts dos volumes sem os fundir. Avisa em vez de os
-            // perder em silêncio (o `<filesystem>` fica no XML, mas o guest não
-            // os monta sozinho sem uma entrada `mounts:`).
+            // The user's own user-data replaces EVERYTHING — there's nowhere to
+            // inject the volume mounts without merging them. Warn instead of
+            // losing them silently (the `<filesystem>` stays in the XML, but the
+            // guest won't mount them by itself without a `mounts:` entry).
             if !volumes.is_empty() {
                 eprintln!(
                     "AVISO: VM '{vm_name}': --user-data/seed próprio não inclui os mounts dos volumes 9p — acrescenta-os manualmente (tags: {})",
@@ -1073,9 +1073,9 @@ pub(crate) fn generate_seed_iso(
     let meta_data_path = work_dir.join("meta-data");
     std::fs::write(&meta_data_path, build_meta_data(vm_name, &hostname))?;
 
-    // network-config (NoCloud v2): DHCP em qualquer interface ethernet — sem
-    // isto a cloud image pode não configurar a rede e a VM fica sem IP.
-    // `match name: "e*"` cobre eth0/ens2/enp0s2/... (nomes previsíveis ou não).
+    // network-config (NoCloud v2): DHCP on any ethernet interface — without this
+    // the cloud image may not configure the network and the VM ends up with no
+    // IP. `match name: "e*"` covers eth0/ens2/enp0s2/... (predictable or not).
     let net_cfg_path = work_dir.join("network-config");
     std::fs::write(
         &net_cfg_path,
@@ -1099,7 +1099,7 @@ pub(crate) fn generate_seed_iso(
     Ok(iso_path)
 }
 
-/// Trata o `init` deste grupo (ver `cmd::scaffold`).
+/// Handles the `init` of this group (see `cmd::scaffold`).
 fn cmd_init(
     target: super::scaffold::Target,
     dir: PathBuf,
@@ -1110,10 +1110,10 @@ fn cmd_init(
     up: bool,
 ) -> Result<()> {
     let name = name.unwrap_or_else(|| {
-        // Sem `--name`, usa o nome do DIRECTÓRIO. Não se pode usar `canonicalize`:
-        // o directório ainda não existe (é o `init` que o cria) e falharia sempre,
-        // caindo no fallback — todos os projectos ficavam chamados "app".
-        // `.`/vazio resolvem para o cwd; um caminho novo usa o seu basename.
+        // Without `--name`, use the DIRECTORY name. Can't use `canonicalize`: the
+        // directory doesn't exist yet (it's `init` that creates it) and would
+        // always fail, falling into the fallback — every project got named "app".
+        // `.`/empty resolve to the cwd; a new path uses its basename.
         let p = if dir.as_os_str().is_empty() || dir == std::path::Path::new(".") {
             std::env::current_dir().ok()
         } else {
@@ -1144,7 +1144,7 @@ mod tests {
 
     #[test]
     fn vmspec_aceita_snake_case_legado_e_camel_case_canonico() {
-        // Legado (snake_case) — não pode partir.
+        // Legacy (snake_case) — must not break.
         let legado: VmSpec = serde_yaml::from_str(
             "disk: d\nrestart_policy: always\ncpu_affinity: 0-3\nnet_mode: nat\n",
         )
@@ -1152,7 +1152,7 @@ mod tests {
         assert_eq!(legado.restart_policy.as_deref(), Some("always"));
         assert_eq!(legado.cpu_affinity.as_deref(), Some("0-3"));
         assert_eq!(legado.net_mode.as_deref(), Some("nat"));
-        // Canónico (camelCase) — a forma nova dos exemplos.
+        // Canonical (camelCase) — the new form in the examples.
         let canon: VmSpec = serde_yaml::from_str(
             "disk: d\nrestartPolicy: always\ncpuAffinity: 0-3\nnetMode: nat\n",
         )
@@ -1166,7 +1166,7 @@ mod tests {
     fn status_de_vm_usa_o_vocabulario_da_cli() {
         assert_eq!(fmt_vm_status(&Status::Running), "Running");
         assert_eq!(fmt_vm_status(&Status::Stopped), "Stopped");
-        // `{:?}` daria "Failed(137)"; o resto da CLI diz "Exited (137)".
+        // `{:?}` would give "Failed(137)"; the rest of the CLI says "Exited (137)".
         assert_eq!(fmt_vm_status(&Status::Failed(137)), "Exited (137)");
         assert_eq!(fmt_vm_status(&Status::Crashed), "Dead");
     }
@@ -1188,8 +1188,8 @@ mod tests {
 
     #[test]
     fn user_data_configura_autologin_serial() {
-        // A consola serial entra directo como `delonix` (o `vm console` sem
-        // pedir password) — o cloud-init reconfiguraria o getty senão.
+        // The serial console enters directly as `delonix` (`vm console` without
+        // asking for a password) — cloud-init would reconfigure the getty otherwise.
         let ud = build_user_data("myvm", &[], &[]);
         assert!(ud.contains("serial-getty@ttyS0.service.d/autologin.conf"));
         assert!(ud.contains("--autologin delonix"));
@@ -1216,7 +1216,7 @@ mod tests {
         assert!(ud.contains("mounts:\n"));
         assert!(ud.contains("[ \"dados\", \"/mnt/dados\", 9p, \"trans=virtio,version=9p2000.L,rw,_netdev\", \"0\", \"0\" ]"), "{ud}");
         assert!(ud.contains("[ \"ro\", \"/mnt/ro\", 9p, \"trans=virtio,version=9p2000.L,ro,_netdev\", \"0\", \"0\" ]"), "{ud}");
-        // Sem volumes → sem secção mounts.
+        // No volumes → no mounts section.
         assert!(!build_user_data("myvm", &[], &[]).contains("mounts:"));
     }
 
@@ -1224,15 +1224,15 @@ mod tests {
     fn vol_tag_saneia_e_trunca() {
         assert_eq!(super::vol_tag("nas-creds.db"), "nas_creds_db");
         assert_eq!(super::vol_tag(&"x".repeat(40)).len(), 31);
-        // `.` e `-` colapsam ambos em `_` → base igual (a unicidade é no resolve).
+        // `.` and `-` both collapse to `_` → same base (uniqueness is in resolve).
         assert_eq!(super::vol_tag("nas.creds"), super::vol_tag("nas-creds"));
     }
 
     #[test]
     fn valid_mount_path_rejeita_relativos_e_chars_que_partem_o_yaml() {
         assert!(super::valid_mount_path("/mnt/dados"));
-        assert!(super::valid_mount_path("/mnt/com espaco")); // espaço é ok (vai entre aspas)
-        assert!(!super::valid_mount_path("relativo/x")); // não absoluto
+        assert!(super::valid_mount_path("/mnt/com espaco")); // space is ok (goes between quotes)
+        assert!(!super::valid_mount_path("relativo/x")); // not absolute
         for bad in ["/mnt/a,b", "/mnt/a]b", "/mnt/a\"b", "/mnt/a#b", "/mnt/a\nb"] {
             assert!(!super::valid_mount_path(bad), "{bad:?} devia ser rejeitado");
         }

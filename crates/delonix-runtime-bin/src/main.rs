@@ -1,22 +1,22 @@
-//! `delonix` — a CLI opensource do Delonix Runtime: motor de containers e
-//! microVMs daemonless, rootless-first, kernel-native. Homólogo ao Docker;
-//! distinto do `delonix`/`delonixctl` privados do `delonix-paas` (outro repo,
-//! outra árvore de dependências — ver `CLAUDE.md`).
+//! `delonix` — the open-source CLI of the Delonix Runtime: a daemonless,
+//! rootless-first, kernel-native container and microVM engine. Homologous to
+//! Docker; distinct from the private `delonix`/`delonixctl` of `delonix-paas`
+//! (another repo, another dependency tree — see `CLAUDE.md`).
 //!
-//! Comandos agrupados semanticamente (em vez de uma lista plana): `container`
+//! Commands grouped semantically (instead of a flat list): `container`
 //! (run/ps/stop/rm/exec/logs), `image` (pull/ls/rm/export), `build`
-//! (Dockerfile/Delonixfile → imagem), `vm` (microVMs declarativas), `volumes`
-//! (volumes nomeados), `network` (redes de utilizador) e `stack` (aplica um
-//! `delonix-manifest.yaml` inteiro). Cada grupo com `apply` também aceita um
-//! manifesto por-Kind (`delonix <grupo> apply [-f ficheiro]`) — ver
-//! `cmd::manifest`. Cada grupo vive em `src/cmd/<nome>.rs`.
+//! (Dockerfile/Delonixfile → image), `vm` (declarative microVMs), `volumes`
+//! (named volumes), `network` (user networks) and `stack` (applies a whole
+//! `delonix-manifest.yaml`). Each group with `apply` also accepts a per-Kind
+//! manifest (`delonix <group> apply [-f file]`) — see `cmd::manifest`. Each
+//! group lives in `src/cmd/<name>.rs`.
 
 mod cmd;
 
 use clap::{Parser, Subcommand, ValueEnum};
 use delonix_runtime_core::Result;
 
-/// Shells suportados por `delonix completion`.
+/// Shells supported by `delonix completion`.
 #[derive(Clone, Copy, ValueEnum)]
 enum CompShell {
     Bash,
@@ -42,9 +42,9 @@ struct Cli {
     cmd: Cmd,
 }
 
-// `Vm` carrega `VmCmd`, que tem uma variante `Create` grande (muitos flags
-// opcionais) — mesma justificação do `#[allow]` em `cmd::vm::VmCmd`: enum de
-// CLI parseado uma vez por invocação, não um hot-path.
+// `Vm` carries `VmCmd`, which has a large `Create` variant (many optional
+// flags) — same justification as the `#[allow]` in `cmd::vm::VmCmd`: a CLI enum
+// parsed once per invocation, not a hot path.
 #[allow(clippy::large_enum_variant)]
 #[derive(Subcommand)]
 enum Cmd {
@@ -165,25 +165,26 @@ enum Cmd {
         /// Target shell.
         shell: CompShell,
     },
-    /// (interno) O reverse-proxy L7 embutido que serve os `kind: HTTPRoute`. NÃO é
-    /// para uso manual — o `stack apply` lança-o dentro do netns do holder (ver
-    /// `cmd::httproute`/`cmd::ingress_proxy`).
+    /// (internal) The embedded L7 reverse-proxy that serves the `kind: HTTPRoute`.
+    /// NOT for manual use — `stack apply` launches it inside the holder's netns
+    /// (see `cmd::httproute`/`cmd::ingress_proxy`).
     #[command(hide = true)]
     IngressProxy {
-        /// Ficheiro JSON com a `ProxyConfig` (listeners + rotas já resolvidas).
+        /// JSON file with the `ProxyConfig` (listeners + already-resolved routes).
         #[arg(long)]
         config: std::path::PathBuf,
     },
 }
 
-/// O cartão de visita do `--version` (o `-V` mantém a linha curta e estável
-/// para scripts): identidade do build + o que fazer a seguir. É a primeira
-/// coisa que um utilizador novo corre — merece apontar o caminho.
+/// The `--version` business card (the `-V` keeps the short, stable line for
+/// scripts): build identity + what to do next. It's the first thing a new user
+/// runs — it deserves to point the way.
 fn long_version_text() -> &'static str {
     use cmd::po::t;
-    // Leak deliberado e único: o clap builder exige &'static str (sem a feature
-    // "string"), e isto corre uma vez por processo — não é fuga acumulável.
-    // O clap imprime "<nome> <long_version>" — o texto NÃO repete o nome.
+    // Deliberate, one-off leak: the clap builder requires &'static str (without
+    // the "string" feature), and this runs once per process — not an
+    // accumulating leak. clap prints "<name> <long_version>" — the text does
+    // NOT repeat the name.
     Box::leak(
         format!(
             "{v}\n\
@@ -216,22 +217,23 @@ fn long_version_text() -> &'static str {
 }
 
 fn run() -> Result<()> {
-    // Língua ANTES do parse do clap: o help é gerado DURANTE o parse, logo a
-    // decisão tem de vir de um peek ao argv/ambiente (`--l18n` tem precedência
-    // sobre `$DELONIX_L18N`; sem nenhum, inglês — o default do repo público).
+    // Language BEFORE the clap parse: the help is generated DURING the parse,
+    // so the decision has to come from a peek at the argv/environment (`--l18n`
+    // takes precedence over `$DELONIX_L18N`; with neither, English — the public
+    // repo's default).
     if let Some(l) = cmd::po::peek_lang() {
         cmd::output::set_lang(&l);
     }
     let mut command = <Cli as clap::CommandFactory>::command();
     if cmd::output::is_pt() {
-        // Fonte do help em EN; em pt, reescreve about/help via o catálogo pt.po.
+        // Help source in EN; in pt, rewrite about/help via the pt.po catalog.
         command = cmd::po::translate_help(command);
     }
     let cli = match <Cli as clap::FromArgMatches>::from_arg_matches(&command.get_matches()) {
         Ok(v) => v,
         Err(e) => e.exit(),
     };
-    let _ = cli.l18n; // já consumida pelo peek (fica no schema p/ o help)
+    let _ = cli.l18n; // already consumed by the peek (kept in the schema for the help)
     match cli.cmd {
         Cmd::Container { action } => cmd::container::run(action),
         Cmd::Image { vm, action } => cmd::image::run(vm, action),
@@ -269,11 +271,11 @@ fn run() -> Result<()> {
     }
 }
 
-/// `delonix completion <shell>` — imprime o **script de registo** do
-/// autocompletion. Usa a engine dinâmica do clap: o script chama
-/// `COMPLETE=<shell> delonix -- …` para obter as sugestões de comandos/
-/// subcomandos/flags em tempo real, a partir da MESMA definição de `Cli`
-/// usada para o parsing — nunca fica desactualizado à mão.
+/// `delonix completion <shell>` — prints the autocompletion **registration
+/// script**. Uses clap's dynamic engine: the script calls
+/// `COMPLETE=<shell> delonix -- …` to get command/subcommand/flag suggestions
+/// in real time, from the SAME `Cli` definition used for parsing — it never
+/// goes out of date by hand.
 fn cmd_completion(shell: CompShell) -> Result<()> {
     use clap_complete::env::{Bash, Elvish, EnvCompleter, Fish, Powershell, Zsh};
     use std::io::Write;
@@ -292,19 +294,20 @@ fn cmd_completion(shell: CompShell) -> Result<()> {
 
 fn main() {
     delonix_runtime_core::telemetry::init();
-    // Re-exec oculto do holder de netns (`delonix netns holder`, invocado pelo
-    // próprio `delonix-net::infra::start_holder` via `unshare` — nunca pelo
-    // utilizador). Tem de ser interceptado ANTES do clap parsear (não é um
-    // subcomando público) — sem isto, `--net <rede-custom>` falha sempre com
-    // "timeout à espera do holder do netns" (o re-exec cai no parser normal e
-    // é recusado como subcomando desconhecido).
+    // Hidden re-exec of the netns holder (`delonix netns holder`, invoked by
+    // `delonix-net::infra::start_holder` itself via `unshare` — never by the
+    // user). It has to be intercepted BEFORE clap parses (it's not a public
+    // subcommand) — without this, `--net <custom-network>` always fails with
+    // "timeout waiting for the netns holder" (the re-exec falls into the normal
+    // parser and is rejected as an unknown subcommand).
     let raw: Vec<String> = std::env::args().collect();
     if raw.len() == 3 && raw[1] == "netns" && raw[2] == "holder" {
-        delonix_net::infra::holder_main(); // nunca retorna
+        delonix_net::infra::holder_main(); // never returns
     }
-    // Re-exec oculto do 2.º passo do `--net <rede>` (ver `container::reexec_into_netns`):
-    // já corremos DENTRO do userns+netns do holder; a spec do container vem num
-    // ficheiro. Interceptado ANTES do clap — não é um subcomando público.
+    // Hidden re-exec of the 2nd step of `--net <network>` (see
+    // `container::reexec_into_netns`): we already run INSIDE the holder's
+    // userns+netns; the container spec comes in a file. Intercepted BEFORE clap
+    // — it's not a public subcommand.
     if raw.len() == 4 && raw[1] == "netns" && raw[2] == "run" {
         if let Err(e) = cmd::container::run_from_spec(std::path::Path::new(&raw[3])) {
             eprintln!("delonix: {}", cmd::po::t_dyn(&e.to_string()));
@@ -312,17 +315,17 @@ fn main() {
         }
         std::process::exit(0);
     }
-    // Re-exec ocultos MAPEADOS (`__rmtree`, `__volsnap`): já corremos como root
-    // num user namespace com os subuids mapeados (o pai usou `newuidmap` — ver
-    // `delonix_runtime::{remove_tree_mapped, reexec_mapped}`), logo somos donos
-    // efectivos dos ficheiros que o container escreveu.
+    // Hidden MAPPED re-execs (`__rmtree`, `__volsnap`): we already run as root
+    // in a user namespace with the subuids mapped (the parent used `newuidmap` —
+    // see `delonix_runtime::{remove_tree_mapped, reexec_mapped}`), so we are the
+    // effective owners of the files the container wrote.
     //
-    // **Estas metades faltavam neste binário** e só existiam na CLI privada do
-    // `delonix-paas`: a biblioteca PÚBLICA re-executava `delonix __rmtree` e o
-    // `delonix` público respondia "unrecognized subcommand" (rc=2) — com o
-    // `remove_tree_mapped` a nem olhar para o exit status, a árvore ficava por
-    // apagar em SILÊNCIO. O motor público tem de bastar-se a si próprio.
-    // Interceptados antes do clap, como os `netns` acima.
+    // **These halves were missing in this binary** and only existed in the
+    // private CLI of `delonix-paas`: the PUBLIC library re-executed
+    // `delonix __rmtree` and the public `delonix` replied "unrecognized
+    // subcommand" (rc=2) — with `remove_tree_mapped` not even looking at the
+    // exit status, the tree stayed undeleted in SILENCE. The public engine has
+    // to stand on its own. Intercepted before clap, like the `netns` above.
     if raw.len() == 3 && raw[1] == "__rmtree" {
         if let Err(e) = cmd::mapped::rmtree(std::path::Path::new(&raw[2])) {
             eprintln!("delonix: {}", cmd::po::t_dyn(&e.to_string()));
@@ -351,12 +354,12 @@ fn main() {
         std::process::exit(0);
     }
 
-    // Autocompletion dinâmico: se o shell pediu sugestões (env COMPLETE), trata
-    // disso e termina; caso contrário, segue o fluxo normal.
+    // Dynamic autocompletion: if the shell asked for suggestions (env
+    // COMPLETE), handle that and exit; otherwise, follow the normal flow.
     clap_complete::CompleteEnv::with_factory(<Cli as clap::CommandFactory>::command).complete();
 
     if let Err(e) = run() {
-        // O erro de topo a vermelho (honra NO_COLOR/pipes — ver `output::cor`).
+        // The top-level error in red (honors NO_COLOR/pipes — see `output::cor`).
         cmd::output::error(&e.to_string());
         std::process::exit(1);
     }
