@@ -4,6 +4,42 @@
 > (regenerado automaticamente pelo pipeline de release a cada tag publicada).
 > Não editar à mão — edita a nota da release respectiva.
 
+## v0.7.10 — gestão de VM 100% nativa no libvirt: managed save, órfãos, `--force`
+
+### VM — `vm stop`/`vm rm` à prova de managed save e de órfãos
+
+Do bug report real: `vm rm` de uma VM com *managed save image* vazava o stderr
+cru do `virsh` ("Refusing to undefine while domain managed save image exists"),
+apagava o registo local NA MESMA e deixava o domínio órfão no libvirt — e o
+`vm stop` seguinte respondia "no such container" (substantivo errado). Agora:
+
+- **`undefine` leva sempre `--managed-save --snapshots-metadata --nvram`**
+  (fallback para o simples em virsh antigo) — a causa-raiz da recusa; o
+  `destroy` só corre se o domínio não estiver "shut off".
+- **Nada do `virsh` vaza cru**: stdout/stderr capturados e transformados em
+  mensagens claras (ex.: `vm: could not remove VM 'dev' from libvirt
+  (qemu:///session): …`).
+- **Sem órfãos em nenhum sentido**: se a limpeza no libvirt falhar, o `rm`
+  **preserva o registo local** e diz como forçar; `vm rm -f/--force` descarta o
+  estado local na mesma. Um domínio órfão de ANTES do fix (sem registo local) é
+  reconhecido e limpo/desligado por `rm`/`stop`.
+- **`no such VM: <nome> (see `delonix vm ls`)`** em `stop`/`rm`/`status` —
+  e `vm rm` de um nome inexistente passa a ser **erro** (devolvia sucesso
+  silencioso), como no docker.
+- **Aliases**: `vm down` = `stop`, `vm delete` = `rm`.
+- O `rm` também limpa o directório seed do cloud-init (`vms/<nome>/`) e o
+  `.sock.lock`, que ficavam para trás.
+
+Validado ao vivo no cenário exacto do report: um domínio "shut off" com managed
+save foi removido em silêncio, e o `rm` repetido respondeu `no such VM`.
+
+**Nota de transparência**: parte deste trabalho entrou já no v0.7.9 (dentro do
+commit dos fail-closed, sem constar das notas); o v0.7.10 completa-o (rm de
+inexistente é erro, limpeza do seed dir, testes de regressão) e documenta o
+conjunto.
+
+---
+
 ## v0.7.9 — consola recupera o shell + chega de falhas silenciosas
 
 ### VM
