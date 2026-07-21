@@ -507,6 +507,47 @@ validate_recusa_endpoint_malicioso_no_manifesto_completo`,
 `registry::tests::pull_oci_artifact_recusa_blob_adulterado`,
 `cmd::build::tests::safe_join_recusa_dot_dot`.
 
+## Auditoria de segurança #2 (código VM desta série: console/rede/cloud-init)
+
+Skill `delonix-runtime-sec` corrida sobre a superfície NOVA das v0.7.x (VM
+console/vnc, firmware/backend automáticos, rede libvirt, cloud-init user-data,
+instalador). O container `run` está limpo (id gerado + `safe_key`); a VM era a
+excepção porque os caminhos auxiliares usavam o nome CRU.
+
+**Achado ALTO — CORRIGIDO — path traversal via nome da VM.** O nome (do CLI OU
+de `metadata.name` de um manifesto NÃO-confiado via `stack apply -f`) fluía cru
+para `state_root/vms/<name>` (`generate_seed_iso`) e para o overlay
+`<name>.qcow2` — um `metadata.name: "../../.ssh/authorized_keys"` escrevia/
+sobrescrevia ficheiros FORA do directório de estado, como o utilizador
+(arbitrary file write conduzido por manifesto). O `JsonStore` já sanitizava o
+`.json` (`safe_key`), mas os caminhos de seed/overlay/sock não. **Fix**:
+`delonix_vm::valid_vm_name` (whitelist `[A-Za-z0-9._-]`, sem `..`/`/`/`-`
+inicial/controlo) chamada no topo de `delonix_vm::create` — o boundary do
+motor, por isso qualquer consumidor da API herda. Fecha de uma vez os 3
+vectores do nome: traversal, argv do `virsh`, e injecção no YAML do cloud-init
+(o nome vira `hostname`). Teste `valid_vm_name_recusa_exploits`.
+
+**Achado BAIXO — CORRIGIDO — argv do `virsh` sem `--`.** `virsh -c uri console/
+start/destroy/domstate/... <name>` sem `--`: um nome começado por `-` seria lido
+como opção. Coberto já pela `valid_vm_name`, mas acrescentou-se `--` antes do
+nome/rede em todos os argv `virsh` (defesa em profundidade, mesmo padrão do
+`ssh`/`scp` da auditoria #1).
+
+**Achado MÉDIO — CORRIGIDO — ficheiro temp previsível (rede libvirt).**
+`ensure_libvirt_network` escrevia o XML da rede em `/tmp/delonix-libvirt-
+default-<pid>.xml` (nome previsível, world-writable) com `fs::write` — outro
+utilizador local podia pré-criar um symlink e desviar a escrita. **Fix**:
+`OpenOptions::create_new` (O_EXCL, não segue symlinks) + `mode(0o600)`.
+
+**Achado MÉDIO — DOCUMENTADO — downloads do instalador sem checksum.** O
+`install.sh` verifica o binário `delonix` contra o `SHA256SUMS`, mas o
+`cloud-hypervisor-static` e o `hypervisor-fw` (upstreams oficiais) são
+instalados só com HTTPS, sem verificação de hash — o upstream não publica
+checksums num formato conveniente. MITM mitigado por TLS; um upstream
+comprometido ou TLS-stripping passaria. Aceite como risco documentado (mesma
+natureza do cloud-hypervisor que já se instalava assim); fechar exigiria os
+upstreams publicarem/pinar-se um digest.
+
 ## Cluster modo Kind sem Docker — investigação (GO/NO-GO)
 
 Pedido: `delonix cluster` em modo `kind` (sem `kubeadm`) a funcionar **sem Docker instalado** —
