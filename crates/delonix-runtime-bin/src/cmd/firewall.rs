@@ -1083,6 +1083,7 @@ mod tests {
 
     fn net_spec(policy: &str, cidrs: &[&str], fqdns: &[&str], rules: Vec<FwDocRule>) -> FwDocSpec {
         FwDocSpec {
+            direction: None,
             scope: Some("network".into()),
             target: "n".into(),
             default_policy: Some(policy.into()),
