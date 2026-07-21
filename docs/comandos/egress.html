@@ -84,6 +84,7 @@ Commands:
   net     Govern a whole network&#x27;s egress to the Internet
   host    Allow a network&#x27;s egress to a HOSTNAME (and `*.hostname`), learnt live from DNS answers — the FQDN allowlist nft/CIDR can&#x27;t express. Repeatable
   ls      Show the outbound firewall (policy + rules)
+  rm      Remove outbound rule(s) matching `[proto/]port` (all protos if none given)
   show    Show a NETWORK&#x27;s egress policy: CIDR allowlist, FQDN hosts, and the IPs currently learnt from DNS for those hosts
   clear   Remove all outbound rules
   help    Print this message or the help of the given subcommand(s)
