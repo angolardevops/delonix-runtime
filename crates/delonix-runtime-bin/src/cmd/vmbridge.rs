@@ -70,12 +70,15 @@ fn bridge_plan(
     let host_cidr = format!("{host_ip}/16");
     let nsenter = |args: &[&str]| -> Vec<String> {
         let mut v = vec![
+            // ROOT enters ONLY the net namespace (-n), NOT the userns (-U):
+            // as root in the init userns it keeps CAP_NET_ADMIN, which IS valid
+            // over a netns owned by a descendant userns (the holder's). With -U
+            // it entered the holder userns as an UNMAPPED uid → no caps → the
+            // `ip link set … master` got EPERM ("Operation not permitted").
             "nsenter".into(),
             "-t".into(),
             holder_pid.into(),
-            "-U".into(),
             "-n".into(),
-            "--preserve-credentials".into(),
             "--".into(),
         ];
         v.extend(args.iter().map(|s| s.to_string()));
@@ -115,12 +118,15 @@ fn unbridge_plan(
     let host_ip = host_sdn_ip(prefix);
     let nsenter = |args: &[&str]| -> Vec<String> {
         let mut v = vec![
+            // ROOT enters ONLY the net namespace (-n), NOT the userns (-U):
+            // as root in the init userns it keeps CAP_NET_ADMIN, which IS valid
+            // over a netns owned by a descendant userns (the holder's). With -U
+            // it entered the holder userns as an UNMAPPED uid → no caps → the
+            // `ip link set … master` got EPERM ("Operation not permitted").
             "nsenter".into(),
             "-t".into(),
             holder_pid.into(),
-            "-U".into(),
             "-n".into(),
-            "--preserve-credentials".into(),
             "--".into(),
         ];
         v.extend(args.iter().map(|s| s.to_string()));
