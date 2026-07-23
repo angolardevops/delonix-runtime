@@ -480,6 +480,17 @@ pub struct Container {
     /// `run_as_group`). `None` = uses the UID's primary group. Persisted.
     #[serde(default)]
     pub run_gid: Option<u32>,
+    /// Short, stable reason code set by `reconcile_status` when `status` flips to
+    /// `Crashed`: `"process_gone"` (the init pid no longer exists) or `"pid_reused"`
+    /// (the kernel recycled the pid for an unrelated process before we noticed).
+    /// The engine is never this process's real parent (it's reparented away at
+    /// creation — see ARCHITECTURE), so this is best-effort diagnosis from polling
+    /// `/proc`, not a captured exit code/signal. Cleared on the next successful start.
+    #[serde(default)]
+    pub crash_reason: Option<String>,
+    /// When `crash_reason` was set (Unix seconds). `None` iff `crash_reason` is `None`.
+    #[serde(default)]
+    pub crashed_at: Option<u64>,
 }
 
 fn default_cpus() -> String {
@@ -549,6 +560,8 @@ impl Container {
             hostname: None,
             run_uid: None,
             run_gid: None,
+            crash_reason: None,
+            crashed_at: None,
         }
     }
 
