@@ -1423,9 +1423,20 @@ fn cmd_console(base: &std::path::Path, name: &str) -> Result<()> {
         // Spawn `virsh console` as a CHILD (not exec/replace) so that when the
         // user presses Ctrl+] we regain control and can confirm the return —
         // virsh handles the raw tty and the escape key itself.
+        //
+        // BUG FIXED HERE, found live on a real host: without `--force`, a console
+        // left behind by a crashed/killed `delonix vm console` (SSH drop, Ctrl-C
+        // hitting virsh's foreground process, terminal closed) makes libvirt
+        // believe a session is still attached, and every subsequent `vm console`
+        // fails with "Active console session exists for this domain" — no way
+        // out short of a host-level libvirtd restart. `delonix vm console <name>`
+        // is a single-operator "get me back into this VM" command, so a stale
+        // lock on your own VM is the overwhelmingly common case, not a real
+        // concurrent viewer to protect; `--force` (built for exactly this) takes
+        // over the stale session instead of refusing forever.
         let uri = delonix_vm::libvirt_uri(name);
         let status = std::process::Command::new("virsh")
-            .args(["-c", &uri, "console", "--", name])
+            .args(["-c", &uri, "console", "--force", "--", name])
             .status()
             .map_err(|e| Error::Runtime {
                 context: "virsh console",
