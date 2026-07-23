@@ -564,7 +564,7 @@ checksum = "a4ae5f15dda3c708c0ade84bfee31ccab44a3da4f88015ed22f63732abe300c8"
 
 [[package]]
 name = "delonix-cri"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "axum",
  "delonix-image",
@@ -588,7 +588,7 @@ dependencies = [
 
 [[package]]
 name = "delonix-image"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "base64",
  "delonix-runtime-core",
@@ -627,7 +627,7 @@ dependencies = [
 
 [[package]]
 name = "delonix-net"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "delonix-runtime-core",
  "libc",
@@ -639,7 +639,7 @@ dependencies = [
 
 [[package]]
 name = "delonix-runtime"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "delonix-runtime-core",
  "libc",
@@ -649,7 +649,7 @@ dependencies = [
 
 [[package]]
 name = "delonix-runtime-bin"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "bytes",
  "clap",
@@ -684,7 +684,7 @@ dependencies = [
 
 [[package]]
 name = "delonix-runtime-core"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "chacha20poly1305",
  "getrandom 0.2.17",
@@ -703,7 +703,7 @@ dependencies = [
 
 [[package]]
 name = "delonix-scan"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "delonix-image",
  "delonix-runtime-core",
@@ -715,7 +715,7 @@ dependencies = [
 
 [[package]]
 name = "delonix-vm"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "delonix-net",
  "delonix-runtime-core",
@@ -725,7 +725,7 @@ dependencies = [
 
 [[package]]
 name = "delonix-volume"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "delonix-runtime-core",
  "serde",
