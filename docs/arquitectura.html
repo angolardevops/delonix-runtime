@@ -142,10 +142,12 @@ arranque a FALHAR se não ficarem mesmo activos; pull com verificação de diges
 artefactos VM OCI); inputs de manifesto de recursos como <code>Cluster</code>/<code>Vm</code>
 validados por whitelist antes de chegarem a qualquer shell remoto.</p>
 <div class="callout warn">
-<p><b>Auditoria de 2026-07-21 — 6 achados de severidade alta ainda por corrigir</b> (o <code>COPY</code>
-do build, por exemplo, ainda é contornável por symlink, apesar de uma correcção anterior ter tentado
-fechá-lo). Não há indícios de RCE pela rede, mas não corras ainda imagens/manifestos não confiáveis
-nem exponhas o motor num host partilhado. Detalhe completo em
+<p><b>Auditoria de 2026-07-21 — 6 achados de severidade alta, CORRIGIDOS em 2026-07-23</b> (o
+<code>COPY</code> do build, por exemplo, era contornável por symlink apesar de uma correcção
+anterior ter tentado fechá-lo — agora canonicaliza e confirma o confinamento). Não há indícios de
+RCE pela rede, mas os fixes ainda não foram confirmados por uma 2.ª auditoria independente e o
+núcleo de syscalls nunca teve revisão de segurança — por prudência, evita ainda imagens/manifestos
+não confiáveis ou expor o motor num host partilhado até à confirmação. Detalhe completo em
 <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/AUDITORIA-E2E.md">AUDITORIA-E2E.md</a>
 — ver também a <a href="comparacao.html">comparação com Docker/Podman</a> para o estado geral do
 projecto.</p>

@@ -3,15 +3,15 @@
 > Actualizado 2026-07-23. Revisão desde a versão anterior: pods reais multi-container
 > (netns+IPC+UTS), `delonix cluster kubeadm` validado ponta-a-ponta com um control-plane
 > k8s v1.34 `Ready` real, `vm bridge` (VM↔container por IP directo), diagnóstico de crash
-> + re-supervisão de `--restart`, e **a auditoria de segurança adversarial de 2026-07-21**
-> (`docs/AUDITORIA-E2E.md`) — que muda o veredicto: a maior barreira a um lançamento público
-> deixou de ser só "compatibilidade de superfície" e passou a incluir **segurança não fechada**.
+> + re-supervisão de `--restart`, **a auditoria de segurança adversarial de 2026-07-21**
+> (`docs/AUDITORIA-E2E.md`) e, no mesmo dia, **a correcção dos 6 HIGH que ela confirmou**
+> (ver secção 1a — corrigidos, mas ainda por CONFIRMAR por uma 2.ª auditoria independente).
 
 ## 1. Veredicto executivo
 
-O **delonix-runtime não é hoje um substituto drop-in do Docker/Podman rootless**, mas está muito mais perto do que o CLAUDE.md sugere — e em várias dimensões ultrapassa ambos. A distância não é uniforme: é moderada em ciclo de vida de containers, rede e volumes, e grande em build de imagens, compatibilidade de ecossistema (API/compose/tooling) e GPU. **Em segurança, o desenho é sólido (userns/seccomp/caps/fail-closed por omissão) mas a EXECUÇÃO tem 6 bugs HIGH confirmados e por corrigir** (ver secção 1a) — isto, e não a falta de features, é o que bloqueia hoje um lançamento público sem reservas.
+O **delonix-runtime não é hoje um substituto drop-in do Docker/Podman rootless**, mas está muito mais perto do que o CLAUDE.md sugere — e em várias dimensões ultrapassa ambos. A distância não é uniforme: é moderada em ciclo de vida de containers, rede e volumes, e grande em build de imagens, compatibilidade de ecossistema (API/compose/tooling) e GPU. **Em segurança, o desenho é sólido (userns/seccomp/caps/fail-closed por omissão) e os 6 bugs HIGH que a execução tinha foram corrigidos em 2026-07-23** (ver secção 1a) — mas o núcleo de syscalls nunca teve revisão adversarial e os fixes ainda não foram confirmados por um 2.º par de olhos independente, por isso o cuidado antes de expor a estranhos mantém-se.
 
-**Para que casos JÁ serve (com confiança), assumindo os HIGH da secção 1a corrigidos:**
+**Para que casos JÁ serve (com confiança):**
 - **Execução e operação interactiva de containers** — run/ps/stop/exec/logs/inspect + extras que o Docker não tem (reconfiguração a quente, pause via freezer, describe estilo kubectl, diagnóstico automático de crash com razão+forense).
 - **Distribuição de imagens OCI** — pull/push/tag/history/login interoperáveis com registos, com assinatura cosign e scan de CVE embutidos (diferenciais).
 - **Rede de container single-node** — `--net host/none/bridge-custom`, publish rootless via slirp4netns, DNS de descoberta com isolamento por namespace, overlay VXLAN+WireGuard, firewall L4/egress e shaping — supera o podman rootless em várias frentes.
@@ -19,29 +19,31 @@ O **delonix-runtime não é hoje um substituto drop-in do Docker/Podman rootless
 - **Bootstrap de Kubernetes SEM Docker** — servidor CRI real para kubelet, imagem VM dourada, `cluster kubeadm`, e **modo Kind (`kindest/node`) já ARRANCA e um control-plane v1.34 fica `Ready`** (netfilter/cgroup2/containerd todos resolvidos). Terreno onde é motor único (container + VM + k8s), ninguém no espaço Docker/Podman cobre este arco.
 
 **Para que NÃO serve (ainda), por duas razões distintas:**
-- **Segurança não fechada (bloqueia QUALQUER host multi-utilizador ou que corra imagens/manifestos não-confiáveis)** — path traversal explorável por uma imagem maliciosa (apaga a home do utilizador), socket de gestão sem autenticação (RCE-equivalente em condições comuns), kubeconfig cluster-admin exposto. Ver secção 1a — isto é o bloqueio real para "produção".
+- **Segurança ainda não confirmada de forma independente** — os 6 HIGH conhecidos estão corrigidos (secção 1a), mas o núcleo de syscalls (104 `unsafe`) nunca foi auditado e ninguém verificou os fixes de fora para dentro. Para um host multi-utilizador ou que corra imagens/manifestos de terceiros não confiáveis, prudência até uma 2.ª auditoria confirmar.
 - **Compatibilidade de ecossistema (limita o âmbito, não a segurança)** — só single-stage build, sem BuildKit/buildx, sem API Docker-compatível (logo sem `docker compose`/testcontainers/CI via `DOCKER_HOST`), sem GPU/CDI real. Não impede um beta honesto sobre o que cobre.
 
-**Posição global:** um runtime rootless-first **sólido em desenho e em pontos superior** para operação directa e para o caminho Kubernetes, mas com **execução de segurança por fechar** e **não interoperável com o ecossistema Docker**. Não é ainda "drop-in" — mas ao contrário de uma leitura anterior deste documento, a barreira nº1 hoje não é falta de capacidade de kernel nem só compatibilidade de superfície: é fechar os 6 HIGH da auditoria antes de qualquer exposição a input não-confiável.
+**Posição global:** um runtime rootless-first **sólido em desenho e em pontos superior** para operação directa e para o caminho Kubernetes, com os bugs de segurança conhecidos já corrigidos, mas **ainda sem confirmação adversarial independente** e **não interoperável com o ecossistema Docker**. Não é ainda "drop-in" — a barreira nº1 deixou de ser os 6 HIGH (fechados) e passa a ser: confirmar essa correcção de fora para dentro, cobrir o núcleo de syscalls que nunca foi revisto, e só depois falar de compatibilidade de superfície.
 
 ---
 
-## 1a. BLOQUEANTE DE SEGURANÇA — 6 HIGH confirmados, por corrigir (auditoria 2026-07-21)
+## 1a. Segurança — 6 HIGH da auditoria de 2026-07-21, CORRIGIDOS em 2026-07-23
 
-Fonte completa: [`docs/AUDITORIA-E2E.md`](AUDITORIA-E2E.md) (24 achados confirmados por 2 céticos adversariais + 11 candidatos ainda por verificar). Confirmado por `git log` em 2026-07-23: **nenhum dos 6 HIGH foi corrigido desde a auditoria.**
+Fonte completa: [`docs/AUDITORIA-E2E.md`](AUDITORIA-E2E.md) (24 achados confirmados por 2 céticos adversariais + 11 candidatos ainda por verificar).
 
-| # | Achado | Impacto | Local |
-|---|---|---|---|
-| 1 | Path traversal em whiteouts OCI | Imagem maliciosa apaga ficheiros/directórios arbitrários do utilizador (ex.: a home inteira) — reachable no `container run` rootless DEFAULT | `delonix-image/src/overlay.rs:81` |
-| 2 | IDs do CRI sem validação | Kubelet comprometido apaga/lê `*.json` arbitrário via `../` | `delonix-cri/src/runtime_svc/lifecycle.rs:745` |
-| 3 | Nome de VM ainda escapa o fix anterior | `generate_seed_iso` escreve ficheiros fora do state-dir ANTES de `create()` validar o nome | `cmd/vm.rs:1043` |
-| 4 | kubeconfig cluster-admin em `/tmp` modo 0644 | Qualquer utilizador local no host do control-plane lê credenciais cluster-admin | `cmd/cluster.rs:1115` |
-| 5 | `safe_join` do build é só léxico | Symlink na imagem/contexto reabre leitura/escrita arbitrária de ficheiros do host — o MESMO bug que uma correcção anterior já tinha tentado fechar | `cmd/build.rs:282` |
-| 6 | Socket de gestão sem autenticação de peer | Sem `SO_PEERCRED`/chmod — em condições comuns (umask permissivo) qualquer processo local ganha `container exec` = execução arbitrária dentro de QUALQUER container | `delonix-mgmt/src/lib.rs:63` |
+| # | Achado | Impacto | Local | Estado |
+|---|---|---|---|---|
+| 1 | Path traversal em whiteouts OCI | Imagem maliciosa apaga ficheiros/directórios arbitrários do utilizador (ex.: a home inteira) — reachable no `container run` rootless DEFAULT | `delonix-image/src/overlay.rs` | ✅ Corrigido — `safe_rel` no ramo de whiteout + confinamento contra symlink plantado |
+| 2 | IDs do CRI sem validação | Kubelet comprometido apaga/lê `*.json` arbitrário via `../` | `delonix-cri/src/runtime_svc/lifecycle.rs` | ✅ Corrigido — whitelist centralizada em `write_rec`/`read_rec`/`remove_rec` |
+| 3 | Nome de VM ainda escapa o fix anterior | `generate_seed_iso` escrevia ficheiros fora do state-dir ANTES de `create()` validar o nome | `cmd/vm.rs` | ✅ Corrigido — `valid_vm_name` também no topo de `generate_seed_iso` |
+| 4 | kubeconfig cluster-admin em `/tmp` modo 0644 | Qualquer utilizador local no host do control-plane lia credenciais cluster-admin | `cmd/cluster.rs` | ✅ Corrigido — `sudo cat` para stdout do SSH, nunca toca em disco remoto; cópia local a 0600 |
+| 5 | `safe_join` do build é só léxico | Symlink na imagem/contexto reabria leitura/escrita arbitrária de ficheiros do host | `cmd/build.rs` | ✅ Corrigido — `confine_to` canonicaliza e confirma confinamento, com teste de regressão |
+| 6 | Socket de gestão sem autenticação de peer | Sem `SO_PEERCRED`/chmod — condições comuns davam `container exec` = execução arbitrária em qualquer container a qualquer processo local | `delonix-mgmt/src/lib.rs` | ✅ Corrigido — 0600 + `SO_PEERCRED`, e o mesmo fix aplicado ao socket do `delonix-cri` |
 
-**Mais grave a médio prazo**: o núcleo de syscalls (`clone`/`mount`/`setns`/seccomp em `delonix-runtime/src/lib.rs`, **104 blocos `unsafe`**) **nunca teve revisão adversarial** — a auditoria bateu no limite de sessão antes de o cobrir. Há ainda **11 achados candidatos por verificar**, incluindo mais um HIGH (`container run --rm` deixa o rootfs inteiro no disco em rootless, mesmo padrão do incidente de disk-pressure já documentado) e um "egress global apaga silenciosamente as políticas por-rede".
+Validado com `cargo build`/`test`/`clippy --workspace` limpos e um teste de fumo ao vivo do socket de gestão (modo 0600, cliente do mesmo utilizador continua a funcionar). **Isto NÃO substitui uma 2.ª auditoria adversarial independente** — os fixes foram escritos e testados por quem os corrigiu, não confirmados por um céptico de fora, ao contrário do processo com que a auditoria original tratou os 24 achados.
 
-**Todos os 6 HIGH têm correcção sugerida já escrita no relatório — são mecânicos** (validar um nome/id antes de tocar em caminhos, `set_permissions`+`SO_PEERCRED`, mktemp+0600). Fechar isto é trabalho de dias, não de semanas — mas é o que separa "beta público" de "não expor a estranhos".
+**Ainda em aberto (não são HIGH confirmados, mas por resolver antes de confiança total):**
+- O núcleo de syscalls (`delonix-runtime/src/lib.rs`, **104 blocos `unsafe`**: `clone`/`mount`/`setns`/seccomp) **nunca teve revisão adversarial** — a auditoria bateu no limite de sessão antes de o cobrir. É o ponto de maior risco por cobrir do repositório.
+- **11 achados candidatos por verificar**, incluindo mais um HIGH (`container run --rm` deixa o rootfs inteiro no disco em rootless, mesmo padrão do incidente de disk-pressure já documentado) e um "egress global apaga silenciosamente as políticas por-rede".
 
 ---
 
@@ -149,8 +151,9 @@ Honestamente, não é só "Docker com menos features" — há genuíno valor nov
 ## 4. Roadmap priorizado para paridade de produção
 
 **Fase 0 — SEGURANÇA, antes de qualquer exposição pública (bloqueia tudo o resto):**
-- **Fechar os 6 HIGH da auditoria** (secção 1a) — todos mecânicos, correcção já esboçada no relatório: `safe_rel` no ramo de whiteout OCI, whitelist nos IDs do CRI, `valid_vm_name` também em `generate_seed_iso`, mktemp+0600 no kubeconfig, resolver symlinks no `COPY` do build, `SO_PEERCRED`+chmod no socket de gestão. **Sem isto, não expor o motor a imagens/manifestos não-confiáveis nem a um host multi-utilizador.**
-- **2.ª corrida da auditoria** sobre o núcleo de syscalls (`delonix-runtime/lib.rs`, 104 `unsafe`) e `delonix-net/infra.rs` — ficaram sem revisão adversarial na primeira corrida; e triar os 11 achados candidatos (inclui mais um HIGH: fuga de rootfs no `--rm` rootless).
+- ✅ **FEITO (2026-07-23)**: os 6 HIGH da auditoria (secção 1a) — path traversal no whiteout OCI, IDs do CRI, nome de VM em `generate_seed_iso`, kubeconfig em `/tmp`, symlink no `COPY` do build, socket de gestão sem `SO_PEERCRED`.
+- **2.ª auditoria adversarial independente** para confirmar os 6 fixes de fora para dentro (não foram revistos por um céptico, ao contrário do processo que os encontrou).
+- **1.ª auditoria do núcleo de syscalls** (`delonix-runtime/lib.rs`, 104 `unsafe`) e `delonix-net/infra.rs` — nunca tiveram revisão adversarial nenhuma. E triar os 11 achados candidatos (inclui mais um HIGH: fuga de rootfs no `--rm` rootless).
 
 **Fase 1 — destrava o ecossistema (maior alavanca, um investimento resolve três bloqueantes):**
 1. **Shim da Docker Engine API** sobre unix socket (`/containers/json`, `/create`, `/images/json`, `/version`, `/info`, `/events`) — destrava docker CLI, `docker compose`, testcontainers e CI via `DOCKER_HOST` de uma vez. Combina com o `--format` abaixo, já que a API precisa da mesma serialização.
