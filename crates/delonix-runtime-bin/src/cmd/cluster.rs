@@ -1112,11 +1112,22 @@ fn fetch_kubeconfig(cp1: &SshTarget, cluster_name: &str) -> Result<()> {
     std::fs::create_dir_all(&dir)?;
     let dest = dir.join(format!("{cluster_name}-kubeconfig.yaml"));
 
-    // `/etc/kubernetes/admin.conf` is 0600 root:root — copy it to /tmp with
-    // permission readable by the SSH user before the scp, then clean up.
-    remote::ssh_run(cp1, "cp /etc/kubernetes/admin.conf /tmp/delonix-admin.conf && chmod 644 /tmp/delonix-admin.conf")?;
-    remote::scp_from(cp1, "/tmp/delonix-admin.conf", &dest)?;
-    let _ = remote::ssh_run(cp1, "rm -f /tmp/delonix-admin.conf");
+    // SECURITY: `/etc/kubernetes/admin.conf` holds cluster-admin credentials
+    // (client-certificate-data + client-key-data). The old approach copied it to a
+    // FIXED, PREDICTABLE path (`/tmp/delonix-admin.conf`) and made it world-readable
+    // (chmod 644) for the window between the sudo `cp` and the unprivileged `scp` —
+    // any local user on the control-plane host could read it, or pre-plant the file
+    // so the `cp` (non-interactive, no `-i`) wrote into a file THEY already owned.
+    // Reading it via `sudo cat` straight into the SSH session's stdout never touches
+    // disk on the remote host at all — no temp file, no window, nothing to clean up.
+    let kubeconfig = remote::ssh_run(cp1, "cat /etc/kubernetes/admin.conf")?;
+    std::fs::write(&dest, kubeconfig)?;
+    // Defense in depth locally too: cluster-admin credentials shouldn't be readable
+    // by other local users just because of the ambient umask.
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&dest, std::fs::Permissions::from_mode(0o600));
+    }
 
     println!("kubeconfig: {}", dest.display());
     println!("export KUBECONFIG={}", dest.display());

@@ -1468,6 +1468,15 @@ pub(crate) fn generate_seed_iso(
     user_data_override: Option<&std::path::Path>,
     volumes: &[delonix_vm::VmVolume],
 ) -> Result<PathBuf> {
+    // SECURITY: this runs BEFORE `delonix_vm::create()` — which is where
+    // `valid_vm_name` is enforced — so a `../../../home/<u>/.ssh` name reached
+    // `create_dir_all`/`fs::write` here (seed.iso with fully attacker-controlled
+    // content via `--user-data`) before ever hitting that check. Enforce it here
+    // too: this function is a path-writing boundary of its own, not just an API
+    // consumer of `create()`.
+    if !delonix_vm::valid_vm_name(vm_name) {
+        return Err(Error::Invalid(format!("invalid VM name: {vm_name:?}")));
+    }
     let hostname = hostname.unwrap_or(vm_name).to_string();
     let work_dir = state_root().join("vms").join(vm_name);
     std::fs::create_dir_all(&work_dir)?;

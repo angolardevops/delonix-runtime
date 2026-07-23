@@ -66,10 +66,29 @@ fn apply_layer_flat(data: &[u8], dest: &Path) -> Result<()> {
             .into_owned();
         let name = path.file_name().and_then(|s| s.to_str()).unwrap_or("");
         if let Some(target) = name.strip_prefix(".wh.") {
-            let parent = path
+            // SECURITY: unlike the extraction branch below, this used to join the RAW
+            // tar path (never run through `safe_rel`) straight into `remove_dir_all`/
+            // `remove_file` — a `..`-laden whiteout entry (e.g.
+            // `../../../../home/<u>/.wh..wh..opq`) deleted files outside `dest`. Reject
+            // any whiteout whose path isn't confined (mirrors the extraction branch).
+            let Some(safe) = safe_rel(&path) else {
+                continue;
+            };
+            let parent = safe
                 .parent()
                 .map(|p| dest.join(p))
                 .unwrap_or_else(|| dest.to_path_buf());
+            // Defense in depth: an EARLIER layer may have planted a symlink at `parent`
+            // pointing outside `dest` (the lexical check above only rejects `..` in the
+            // whiteout's OWN path, not a symlink an unrelated prior entry created) —
+            // canonicalize and confirm we're still inside `dest` before deleting through it.
+            let (Ok(canon_parent), Ok(canon_dest)) = (parent.canonicalize(), dest.canonicalize())
+            else {
+                continue;
+            };
+            if !canon_parent.starts_with(&canon_dest) {
+                continue;
+            }
             if target == ".wh..opq" {
                 if let Ok(rd) = std::fs::read_dir(&parent) {
                     for e in rd.flatten() {

@@ -103,26 +103,6 @@ pub fn scp_to(t: &SshTarget, local: &Path, remote_path: &str) -> Result<()> {
     Ok(())
 }
 
-/// Copia um ficheiro do host para o local — o `remote_path` tem de ser
-/// legível pelo utilizador SSH (ex.: via `sudo chmod`/`cat` antes, se for
-/// root-only; `cmd::cluster::fetch_kubeconfig` trata disso).
-pub fn scp_from(t: &SshTarget, remote_path: &str, local: &Path) -> Result<()> {
-    let mut args = t.conn_args();
-    args.push("--".to_string());
-    args.push(format!("{}:{}", t.user_host(), remote_path));
-    args.push(local.to_string_lossy().into_owned());
-    let status = Command::new("scp")
-        .args(&args)
-        .status()
-        .map_err(|e| Error::Invalid(format!("a correr scp de {}: {e}", t.host)))?;
-    if !status.success() {
-        return Err(Error::Invalid(format!(
-            "scp de {}:{remote_path} falhou",
-            t.host
-        )));
-    }
-    Ok(())
-}
 
 #[cfg(test)]
 mod tests {

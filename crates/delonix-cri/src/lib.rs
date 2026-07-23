@@ -10,6 +10,7 @@
 #![allow(clippy::result_large_err)]
 
 use std::path::PathBuf;
+use tokio_stream::StreamExt as _;
 use tonic::{Request, Response, Status};
 
 pub mod cri {
@@ -269,6 +270,33 @@ async fn metrics_handler() -> impl axum::response::IntoResponse {
     )
 }
 
+/// uid of the peer of a unix connection (via `SO_PEERCRED`). `None` on failure.
+/// Same mechanism as `delonix-net::infra::peer_uid`/`delonix-mgmt::peer_uid`.
+fn peer_uid(stream: &tokio::net::UnixStream) -> Option<u32> {
+    use std::os::unix::io::AsRawFd;
+    let mut cred = libc::ucred {
+        pid: 0,
+        uid: 0,
+        gid: 0,
+    };
+    let mut len = std::mem::size_of::<libc::ucred>() as libc::socklen_t;
+    // SAFETY: getsockopt on SO_PEERCRED with a correctly-sized ucred buffer.
+    let r = unsafe {
+        libc::getsockopt(
+            stream.as_raw_fd(),
+            libc::SOL_SOCKET,
+            libc::SO_PEERCRED,
+            &mut cred as *mut libc::ucred as *mut libc::c_void,
+            &mut len,
+        )
+    };
+    if r == 0 {
+        Some(cred.uid)
+    } else {
+        None
+    }
+}
+
 pub fn serve_blocking(base: PathBuf, addr: &str) -> Result<(), delonix_runtime_core::Error> {
     let path = addr.strip_prefix("unix://").unwrap_or(addr).to_string();
     let rt = tokio::runtime::Builder::new_multi_thread()
@@ -286,7 +314,21 @@ pub fn serve_blocking(base: PathBuf, addr: &str) -> Result<(), delonix_runtime_c
                 message: e.to_string(),
             }
         })?;
-        let incoming = tokio_stream::wrappers::UnixListenerStream::new(uds);
+        // SECURITY: same gap as `delonix-mgmt` (audit finding, 2026-07-21) — no
+        // `SO_PEERCRED` check and no restrictive socket mode, so under a permissive
+        // umask ANY local process could reach the kubelet-facing RuntimeService
+        // (create/exec/rm containers). Mirror the holder's control socket: 0600 +
+        // reject any peer that isn't this process's own euid, before it reaches a
+        // single gRPC handler.
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+        // SAFETY: geteuid() has no preconditions.
+        let own_uid = unsafe { libc::geteuid() };
+        let incoming = tokio_stream::wrappers::UnixListenerStream::new(uds)
+            .filter(move |conn| match conn {
+                Ok(stream) => peer_uid(stream) == Some(own_uid),
+                Err(_) => true,
+            });
         eprintln!("delonix-cri (CRI v1) listening on unix://{path}");
 
         // Streaming server (exec/attach/port-forward): HTTP/WebSocket on a
