@@ -4,6 +4,89 @@
 > (regenerado automaticamente pelo pipeline de release a cada tag publicada).
 > Não editar à mão — edita a nota da release respectiva.
 
+## v0.9.0 — segurança fechada, build de produção (multi-stage/ARG/cache) e API Docker (leitura)
+
+A maior release em superfície desde o extraction do monorepo: fecha os 6 achados de
+segurança HIGH da auditoria adversarial, e resolve a maior parte da "Fase 2" do plano de
+paridade com Docker/Podman (`docs/COMPARACAO-DOCKER-PODMAN.md`) — build multi-stage,
+`ARG`, cache de camadas — mais uma primeira fatia (leitura) da API Docker Engine.
+
+### Segurança — 6 HIGH corrigidos (auditoria de 2026-07-21)
+
+Todos confirmados por 2 céticos adversariais independentes, nenhum corrigido antes desta
+release (`docs/AUDITORIA-E2E.md`):
+
+- **Path traversal em whiteouts OCI** — uma imagem maliciosa apagava ficheiros fora do
+  rootfs no `container run` rootless por omissão. Corrigido: `safe_rel` no ramo de
+  whiteout + confinamento contra symlink plantado por uma layer anterior.
+- **IDs do CRI sem validação** — um kubelet comprometido apagava/lia `*.json`
+  arbitrário via `../`. Corrigido: whitelist centralizada em `write_rec`/`read_rec`.
+- **Nome de VM ainda escapava o fix anterior** — `generate_seed_iso` escrevia antes de
+  `create()` validar o nome. Corrigido na origem.
+- **kubeconfig cluster-admin exposto** em `/tmp` a modo 0644. Corrigido: `sudo cat` para
+  stdout do SSH, nunca toca em disco remoto.
+- **`COPY` do build contornável por symlink** — reabria leitura/escrita arbitrária de
+  ficheiros do host. Corrigido com confinamento canonicalizado + teste de regressão.
+- **Socket de gestão sem autenticação de peer** — condições comuns davam `container
+  exec` (execução arbitrária em qualquer container) a qualquer processo local. Corrigido
+  com `SO_PEERCRED` + modo 0600, também aplicado ao socket do `delonix-cri`.
+
+**Nota de honestidade**: os fixes foram testados por quem os fez, não confirmados por
+uma 2.ª auditoria independente; o núcleo de syscalls (104 blocos `unsafe`) continua sem
+revisão adversarial nenhuma. Ver a comparação pública para o estado de segurança
+actualizado: [delonix vs Docker/Podman](https://angolardevops.github.io/delonix-runtime/comparacao.html).
+
+### Build multi-stage (`FROM ... AS` + `COPY --from`)
+
+Cada estágio ganha o seu próprio container/rootfs; um estágio pode construir sobre outro
+(`FROM <estágio-anterior>`, clonado via `cp -a --reflink=auto` — preserva symlinks/
+permissões, ao contrário de uma cópia recursiva ingénua). Único limite conhecido: em modo
+root (overlay), o estágio final ainda tem de ser uma imagem real (sem lineage OCI para um
+estágio clonado) — erro claro, não silencioso; sem essa restrição em rootless.
+
+### `ARG`/`--build-arg`, e `USER`/`ENTRYPOINT` já sobrevivem ao build
+
+`ARG NAME[=default]` com substituição `${NAME}`/`$NAME` (incluindo antes do 1.º `FROM`,
+para `FROM alpine:${VERSION}`); `--build-arg`/manifesto `buildArgs` só têm efeito num
+nome que o Dockerfile declare, como no Docker. `USER`/`ENTRYPOINT` deixam de se perder no
+commit rootless (antes só o `ENTRYPOINT` do modo root sobrevivia; `USER` perdia-se
+sempre, nos dois modos, e nem chegava ao JSON de config OCI).
+
+### Cache de camadas por instrução (rootless)
+
+Um `RUN`/`COPY` repetido não volta a executar — cadeia de hash por instrução,
+`--no-cache`/manifesto `noCache` para saltar. **Dois bugs reais apanhados a testar, não a
+rever código**: sincronizar um cache-hit no rootfs de um container já activo corrompia os
+mounts de `/proc`/`/sys`/`/dev` (corrigido: um cache-hit clona sempre para um container
+novo, nunca escreve por cima de um já vivo); e uma fuga de rootfs **pré-existente em
+todos os builds rootless desde sempre** (o `unmount_rootfs` preserva deliberadamente o
+rootfs — certo para um container real, errado para o container de trabalho efémero de um
+build — `remove_container_dir` agora corre também). Modo root continua sem cache
+(`commit_upper` precisa de um `upper/` real que um clone plano não tem).
+
+### API Docker Engine — fatia de leitura
+
+`delonix docker-api` (socket próprio, `/run/delonix-docker.sock` por omissão):
+`/_ping`, `/version`, `/info`, `/containers/json`, `/images/json` — o suficiente para
+`docker version`/`ps`/`images`/`info` apontados via `DOCKER_HOST=unix://<socket>`
+funcionarem contra o estado real do delonix. **Validado contra um `docker` CLI real**
+(27.3.1) — o protocolo (negociação de versão via o header `Api-Version` da resposta ao
+`/_ping`) foi capturado ao vivo antes de escrever código, não adivinhado da
+especificação. Mesma postura de segurança do socket de gestão: 0600 + `SO_PEERCRED`
+(só o próprio utilizador). **Por fazer**: as mutações (`create`/`start`/`exec`) — o que
+falta para `docker run`/`docker compose up`; qualquer rota ainda não implementada dá 404
+claro em vez de um erro confuso do lado do cliente.
+
+### Limitações conhecidas
+
+- Núcleo de syscalls do motor sem auditoria de segurança adversarial (ver acima).
+- API Docker Engine só de leitura — sem `docker compose`/testcontainers ainda.
+- Sem BuildKit real (`RUN --mount=secret`, `--platform`).
+- `container run` não aplica automaticamente o `USER` guardado numa imagem — só um
+  `--user` explícito o faz (gap separado, encontrado ao validar esta release).
+
+---
+
 ## v0.8.0 — diagnóstico de crash (razão + forense) e re-supervisão de `--restart` no `start`
 
 Motivado por uma investigação real a containers a aparecerem como **"Dead"** sem
