@@ -1,23 +1,47 @@
 # Análise de Gaps — delonix-runtime vs Docker/Podman rootless em produção
 
+> Actualizado 2026-07-23. Revisão desde a versão anterior: pods reais multi-container
+> (netns+IPC+UTS), `delonix cluster kubeadm` validado ponta-a-ponta com um control-plane
+> k8s v1.34 `Ready` real, `vm bridge` (VM↔container por IP directo), diagnóstico de crash
+> + re-supervisão de `--restart`, e **a auditoria de segurança adversarial de 2026-07-21**
+> (`docs/AUDITORIA-E2E.md`) — que muda o veredicto: a maior barreira a um lançamento público
+> deixou de ser só "compatibilidade de superfície" e passou a incluir **segurança não fechada**.
+
 ## 1. Veredicto executivo
 
-O **delonix-runtime não é hoje um substituto drop-in do Docker/Podman rootless**, mas está muito mais perto do que o CLAUDE.md sugere — e em várias dimensões ultrapassa ambos. A distância não é uniforme: é quase nula em segurança/isolamento e limites de cgroup, moderada em ciclo de vida de containers, rede e volumes, e grande em build de imagens, compatibilidade de ecossistema (API/compose/tooling) e GPU.
+O **delonix-runtime não é hoje um substituto drop-in do Docker/Podman rootless**, mas está muito mais perto do que o CLAUDE.md sugere — e em várias dimensões ultrapassa ambos. A distância não é uniforme: é moderada em ciclo de vida de containers, rede e volumes, e grande em build de imagens, compatibilidade de ecossistema (API/compose/tooling) e GPU. **Em segurança, o desenho é sólido (userns/seccomp/caps/fail-closed por omissão) mas a EXECUÇÃO tem 6 bugs HIGH confirmados e por corrigir** (ver secção 1a) — isto, e não a falta de features, é o que bloqueia hoje um lançamento público sem reservas.
 
-**Para que casos JÁ serve (com confiança):**
-- **Execução e operação interactiva de containers** — run/ps/stop/exec/logs/inspect + extras que o Docker não tem (reconfiguração a quente, pause via freezer, describe estilo kubectl).
+**Para que casos JÁ serve (com confiança), assumindo os HIGH da secção 1a corrigidos:**
+- **Execução e operação interactiva de containers** — run/ps/stop/exec/logs/inspect + extras que o Docker não tem (reconfiguração a quente, pause via freezer, describe estilo kubectl, diagnóstico automático de crash com razão+forense).
 - **Distribuição de imagens OCI** — pull/push/tag/history/login interoperáveis com registos, com assinatura cosign e scan de CVE embutidos (diferenciais).
 - **Rede de container single-node** — `--net host/none/bridge-custom`, publish rootless via slirp4netns, DNS de descoberta com isolamento por namespace, overlay VXLAN+WireGuard, firewall L4/egress e shaping — supera o podman rootless em várias frentes.
-- **Segurança rootless por omissão** — userns/seccomp/caps/no-new-privs ligados por defeito, com verificação fail-closed que nem o Docker/Podman dão.
-- **Bootstrap de Kubernetes** — servidor CRI real para kubelet, imagem VM dourada, `cluster kubeadm`. Terreno onde é motor único (container + VM + k8s).
+- **Pods reais multi-container** (`kind: Pod`) — netns + IPC + UTS partilhados, validado E2E.
+- **Bootstrap de Kubernetes SEM Docker** — servidor CRI real para kubelet, imagem VM dourada, `cluster kubeadm`, e **modo Kind (`kindest/node`) já ARRANCA e um control-plane v1.34 fica `Ready`** (netfilter/cgroup2/containerd todos resolvidos). Terreno onde é motor único (container + VM + k8s), ninguém no espaço Docker/Podman cobre este arco.
 
-**Para que NÃO serve (ainda):**
-- **Qualquer pipeline que dependa de `docker build` moderno** — só single-stage, sem BuildKit/buildx, sem cache de layers, sem `--build-arg`; o caminho rootless (o default) achata tudo num layer e perde ENTRYPOINT/USER.
-- **Qualquer tooling que fale a Docker Engine API** — docker CLI, `docker compose`, testcontainers, integrações CI via `DOCKER_HOST` não se ligam (a API HTTP é schema próprio para o control-plane privado).
-- **Correr projectos `docker-compose.yml` existentes** — não há parser de compose nem `depends_on`/health-gating nem `down`.
-- **Cargas GPU/CUDA** — `--gpus` só faz bind dos nós `/dev/nvidia*`, sem injecção de driver/CDI; imagens CUDA não correm.
+**Para que NÃO serve (ainda), por duas razões distintas:**
+- **Segurança não fechada (bloqueia QUALQUER host multi-utilizador ou que corra imagens/manifestos não-confiáveis)** — path traversal explorável por uma imagem maliciosa (apaga a home do utilizador), socket de gestão sem autenticação (RCE-equivalente em condições comuns), kubeconfig cluster-admin exposto. Ver secção 1a — isto é o bloqueio real para "produção".
+- **Compatibilidade de ecossistema (limita o âmbito, não a segurança)** — só single-stage build, sem BuildKit/buildx, sem API Docker-compatível (logo sem `docker compose`/testcontainers/CI via `DOCKER_HOST`), sem GPU/CDI real. Não impede um beta honesto sobre o que cobre.
 
-**Posição global:** um runtime rootless-first **sólido e em pontos superior** para operação directa e para o caminho Kubernetes, mas **não interoperável com o ecossistema Docker** (API/compose/testcontainers/buildkit). É um "substituto parcial e com fricção", não drop-in — a barreira principal não é capacidade de kernel, é **compatibilidade de superfície** (formatos e APIs que o ecossistema assume).
+**Posição global:** um runtime rootless-first **sólido em desenho e em pontos superior** para operação directa e para o caminho Kubernetes, mas com **execução de segurança por fechar** e **não interoperável com o ecossistema Docker**. Não é ainda "drop-in" — mas ao contrário de uma leitura anterior deste documento, a barreira nº1 hoje não é falta de capacidade de kernel nem só compatibilidade de superfície: é fechar os 6 HIGH da auditoria antes de qualquer exposição a input não-confiável.
+
+---
+
+## 1a. BLOQUEANTE DE SEGURANÇA — 6 HIGH confirmados, por corrigir (auditoria 2026-07-21)
+
+Fonte completa: [`docs/AUDITORIA-E2E.md`](AUDITORIA-E2E.md) (24 achados confirmados por 2 céticos adversariais + 11 candidatos ainda por verificar). Confirmado por `git log` em 2026-07-23: **nenhum dos 6 HIGH foi corrigido desde a auditoria.**
+
+| # | Achado | Impacto | Local |
+|---|---|---|---|
+| 1 | Path traversal em whiteouts OCI | Imagem maliciosa apaga ficheiros/directórios arbitrários do utilizador (ex.: a home inteira) — reachable no `container run` rootless DEFAULT | `delonix-image/src/overlay.rs:81` |
+| 2 | IDs do CRI sem validação | Kubelet comprometido apaga/lê `*.json` arbitrário via `../` | `delonix-cri/src/runtime_svc/lifecycle.rs:745` |
+| 3 | Nome de VM ainda escapa o fix anterior | `generate_seed_iso` escreve ficheiros fora do state-dir ANTES de `create()` validar o nome | `cmd/vm.rs:1043` |
+| 4 | kubeconfig cluster-admin em `/tmp` modo 0644 | Qualquer utilizador local no host do control-plane lê credenciais cluster-admin | `cmd/cluster.rs:1115` |
+| 5 | `safe_join` do build é só léxico | Symlink na imagem/contexto reabre leitura/escrita arbitrária de ficheiros do host — o MESMO bug que uma correcção anterior já tinha tentado fechar | `cmd/build.rs:282` |
+| 6 | Socket de gestão sem autenticação de peer | Sem `SO_PEERCRED`/chmod — em condições comuns (umask permissivo) qualquer processo local ganha `container exec` = execução arbitrária dentro de QUALQUER container | `delonix-mgmt/src/lib.rs:63` |
+
+**Mais grave a médio prazo**: o núcleo de syscalls (`clone`/`mount`/`setns`/seccomp em `delonix-runtime/src/lib.rs`, **104 blocos `unsafe`**) **nunca teve revisão adversarial** — a auditoria bateu no limite de sessão antes de o cobrir. Há ainda **11 achados candidatos por verificar**, incluindo mais um HIGH (`container run --rm` deixa o rootfs inteiro no disco em rootless, mesmo padrão do incidente de disk-pressure já documentado) e um "egress global apaga silenciosamente as políticas por-rede".
+
+**Todos os 6 HIGH têm correcção sugerida já escrita no relatório — são mecânicos** (validar um nome/id antes de tocar em caminhos, `set_permissions`+`SO_PEERCRED`, mktemp+0600). Fechar isto é trabalho de dias, não de semanas — mas é o que separa "beta público" de "não expor a estranhos".
 
 ---
 
@@ -115,35 +139,41 @@ Honestamente, não é só "Docker com menos features" — há genuíno valor nov
 - **describe estilo kubectl** (aditivo ao inspect), **healthcheck/ssh/dash TUI** como extras de operação.
 - **Limites obrigatórios** — o arranque falha se o cgroup não aplicar o limite (Docker por omissão não limita nada).
 - **i18n** — fonte EN + catálogo gettext pt.po embutido, help do clap traduzido em runtime.
+- **Pods reais multi-container** (`kind: Pod` / `delonix pod`) — N containers a partilhar netns+IPC+UTS como um Pod do k8s, validado E2E (2026-07). Nenhum destes dois concorrentes tem isto fora do próprio k8s.
+- **`kindest/node` (Kind) a arrancar sem Docker** — cgroup2, netfilter (nft) e containerd resolvidos em rootless; um control-plane Kubernetes v1.34 completo ficou `Ready` a correr sobre o Delonix, com o kube-proxy a programar netfilter no nosso netns. Prova viva do "container+VM+k8s num só motor".
+- **`vm bridge`** (experimental, opt-in, privilegiado) — VM libvirt e container comunicam por IP directo, sem SNAT, com firewall por-container a continuar a valer. Fecha a única lacuna que o modelo rootless não fazia sozinho.
+- **Diagnóstico automático de crash** — `container describe`/`ls` mostram a RAZÃO (`process_gone`/`pid_reused`) e a hora de um `Crashed`, com um snapshot forense (tail do log) gravado automaticamente; `container start` volta a supervisionar `--restart` mesmo que o supervisor anterior tenha morrido com o host. Nem docker nem podman expõem esta razão — só "Exited"/"Dead".
 
 ---
 
 ## 4. Roadmap priorizado para paridade de produção
 
-**Fase 0 — destrava o ecossistema (maior alavanca, um investimento resolve três bloqueantes):**
-1. **Shim da Docker Engine API** sobre unix socket (`/containers/json`, `/create`, `/images/json`, `/version`, `/info`, `/events`) — destrava docker CLI, `docker compose`, testcontainers e CI via `DOCKER_HOST` de uma vez. Combina com o `--format` abaixo, já que a API precisa da mesma serialização.
-2. **`--format` / Go-template** em ps/inspect/info — bloqueante isolado para scripting e para um eventual backend `kind`. Emular por correspondência de strings do conjunto finito de templates (o CLAUDE.md já capturou os 52 usos do `kind`).
+**Fase 0 — SEGURANÇA, antes de qualquer exposição pública (bloqueia tudo o resto):**
+- **Fechar os 6 HIGH da auditoria** (secção 1a) — todos mecânicos, correcção já esboçada no relatório: `safe_rel` no ramo de whiteout OCI, whitelist nos IDs do CRI, `valid_vm_name` também em `generate_seed_iso`, mktemp+0600 no kubeconfig, resolver symlinks no `COPY` do build, `SO_PEERCRED`+chmod no socket de gestão. **Sem isto, não expor o motor a imagens/manifestos não-confiáveis nem a um host multi-utilizador.**
+- **2.ª corrida da auditoria** sobre o núcleo de syscalls (`delonix-runtime/lib.rs`, 104 `unsafe`) e `delonix-net/infra.rs` — ficaram sem revisão adversarial na primeira corrida; e triar os 11 achados candidatos (inclui mais um HIGH: fuga de rootfs no `--rm` rootless).
 
-**Fase 1 — build de produção:**
+**Fase 1 — destrava o ecossistema (maior alavanca, um investimento resolve três bloqueantes):**
+1. **Shim da Docker Engine API** sobre unix socket (`/containers/json`, `/create`, `/images/json`, `/version`, `/info`, `/events`) — destrava docker CLI, `docker compose`, testcontainers e CI via `DOCKER_HOST` de uma vez. Combina com o `--format` abaixo, já que a API precisa da mesma serialização.
+2. **`--format` / Go-template** em ps/inspect/info — bloqueante isolado para scripting. O modo Kind já não precisa disto para arrancar (resolvido — ver Diferenciais), mas continua útil para scripting/CI em geral.
+
+**Fase 2 — build de produção:**
 3. **Multi-stage build** (`FROM…AS` + `COPY --from`) — sem isto quase nenhum Dockerfile moderno passa.
 4. **`--build-arg`/`ARG`** + **preservar ENTRYPOINT/USER no build rootless** (o default hoje perde-os) — correcções de correctude, não só de conforto.
 5. **Cache de layers** no caminho rootless (hoje 1 squash, cada RUN re-executa).
 6. **BuildKit-lite** — pelo menos `RUN --mount=type=secret` e `--platform` (segredos de build e cross-compile são o mínimo de CI serio).
 
-**Fase 2 — compose e orquestração local (se o alvo for substituir compose):**
-7. **Parser de `docker-compose.yml`** + **`depends_on` com `condition: service_healthy`** + **healthcheck declarativo a gatear arranque** + **`stack down`/`logs`/`ps` scoped a projecto**. (Alternativamente, o shim da Fase 0 já deixa o `docker compose` real falar com o motor — pode tornar 7 desnecessário.)
+**Fase 3 — compose e orquestração local (se o alvo for substituir compose):**
+7. **Parser de `docker-compose.yml`** + **`depends_on` com `condition: service_healthy`** + **healthcheck declarativo a gatear arranque** + **`stack down`/`logs`/`ps` scoped a projecto**. (Alternativamente, o shim da Fase 1 já deixa o `docker compose` real falar com o motor — pode tornar 7 desnecessário.)
 
-**Fase 3 — correcções de correctude silenciosas (fazer ANTES de produção, independentemente do resto):**
-8. **Perfil seccomp custom silenciosamente ignorado** — footgun de segurança: ou implementar o carregamento do JSON, ou **erro explícito**. (lib.rs:3002)
-9. **Opções de bind `:z/:Z` SELinux silenciosamente ignoradas** — quebram bind mounts em RHEL/Fedora enforcing; erro explícito no mínimo. (delonix-volume/lib.rs:516)
-10. **`--network-alias` no-op** — resolver de facto no DNS, ou avisar. (infra.rs:3217)
-11. **`container update --memory/--cpus` no-op silencioso em rootless-delegado** + **cpuset/weights ignorados no delegado** — apontar para o leaf correcto. (lib.rs:4274)
+**Fase 4 — correcções de correctude silenciosas restantes:**
+- ✅ **FEITO**: perfil seccomp custom (erro explícito), opções de bind `:z/:Z` SELinux (erro explícito), `--network-alias` no-op (agora avisa).
+8. **`container update --memory/--cpus` no-op silencioso em rootless-delegado** + **cpuset/weights ignorados no delegado** — ainda por corrigir; precisa de teste num host com delegação systemd real. (lib.rs:4274)
 
-**Fase 4 — paridade de CLI de operação:**
-12. `wait` (+ guardar exit code), `kill -s`, `attach`, `restart`, `logs --tail/--since`, `exec -e/-w/-u`, `rename`, `port`.
+**Fase 5 — paridade de CLI de operação:**
+9. `wait` (+ guardar exit code real — hoje só há `crash_reason` best-effort, nunca um exit code capturado, porque o motor não é o pai real do processo), `kill -s`, `attach`, `restart` (subcomando dedicado), `logs --tail/--since`, `exec -e/-w/-u`, `rename`, `port`.
 
-**Fase 5 — rede/GPU/recursos avançados:**
-13. **GPU real via CDI/nvidia-container-toolkit** — bloqueante só para o segmento GPU, mas total nesse segmento; grande esforço (injecção de libs de driver).
-14. Publish com host-IP, backend pasta/passt (perf), `--ip` fixo, macvlan/ipvlan rootless (limitado por CAP_NET_ADMIN), `--pids-limit`, tuning de memória/swap.
+**Fase 6 — rede/GPU/recursos avançados:**
+10. **GPU real via CDI/nvidia-container-toolkit** — bloqueante só para o segmento GPU, mas total nesse segmento; grande esforço (injecção de libs de driver).
+11. Publish com host-IP, backend pasta/passt (perf), `--ip` fixo, macvlan/ipvlan rootless (limitado por CAP_NET_ADMIN), `--pids-limit`, tuning de memória/swap.
 
 **Racional da ordem:** a Fase 0 tem a maior razão valor/esforço — a maioria do "não serve em produção" vem de **incompatibilidade de superfície**, não de falta de capacidade de kernel (onde o motor já está a par ou à frente). A Fase 3 é barata e deve entrar cedo porque são **falhas silenciosas de segurança/correctude** — piores que uma feature em falta, porque o utilizador julga que está protegido.
