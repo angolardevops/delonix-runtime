@@ -110,8 +110,22 @@ impl VolumeStore {
         self.dir(name).join("meta.json")
     }
 
+    // BUG FIXED HERE (CRITICAL, found live by adversarial review): this charset
+    // check alone accepts "." and ".." — a name made ENTIRELY of dots is still
+    // "every char is alnum/-/_/.". `register_external`'s caller (`kind:
+    // ShareVolume`) joins this name onto a parent path
+    // (`<storage>/_data/shares/<name>`) WITHOUT normalizing — a name of ".."
+    // resolves, at the OS level, to the PARENT's own `_data` directory itself:
+    // total isolation bypass, and `sharevolume rm --purge-data` on it recursively
+    // deletes the parent Storage's entire data. Same whitelist shape as
+    // `delonix_vm::valid_vm_name` (doesn't start with `-`/`.`, never `..`) closes
+    // this for every caller of this store, not just ShareVolume.
     fn valid_name(name: &str) -> bool {
         !name.is_empty()
+            && name.len() <= 64
+            && !name.starts_with('-')
+            && !name.starts_with('.')
+            && !name.contains("..")
             && name
                 .chars()
                 .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.')
@@ -707,6 +721,34 @@ mod tests {
         std::fs::write(s.data_dir("qv").join("g"), vec![0u8; 200]).unwrap();
         let (_, over2) = s.quota_state(&v);
         assert!(over2, "1150/1000 deve estar acima da quota");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn valid_name_recusa_dot_dot_e_dot() {
+        // CRITICAL fixed here: a name made ENTIRELY of the allowed char '.'
+        // passed the old charset-only check. `register_external`'s caller
+        // (kind: ShareVolume) joins the name onto `<parent>/shares/<name>` —
+        // ".." resolves to the PARENT's own data dir, ".": to the "shares"
+        // dir containing every sibling tenant. Both must be rejected.
+        assert!(!VolumeStore::valid_name(".."));
+        assert!(!VolumeStore::valid_name("."));
+        assert!(!VolumeStore::valid_name("-x"));
+        assert!(!VolumeStore::valid_name("a..b"));
+        assert!(!VolumeStore::valid_name(""));
+        // legitimate names with an internal dot still work.
+        assert!(VolumeStore::valid_name("my.vol_02"));
+        assert!(VolumeStore::valid_name("tenant-a"));
+    }
+
+    #[test]
+    fn register_external_recusa_nome_dot_dot() {
+        let (s, dir) = store();
+        let external = dir.join("shares").join("..");
+        let err = s
+            .register_external("..", &external, None, None)
+            .unwrap_err();
+        assert!(format!("{err}").contains("invalid volume name"));
         let _ = std::fs::remove_dir_all(dir);
     }
 

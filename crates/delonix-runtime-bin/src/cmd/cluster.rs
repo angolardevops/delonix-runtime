@@ -1314,6 +1314,48 @@ fn fetch_kubeconfig(cp1: &SshTarget, cluster_name: &str) -> Result<()> {
 /// (a fresh `~/.kube/config`) — an existing file's active context is left
 /// alone, since silently redirecting `kubectl` for someone with other
 /// clusters already configured would be surprising.
+/// Builds a MINIMAL `clusters[]` entry, copying only the two fields kubeadm's
+/// generated `admin.conf` is known to populate (the API server URL and the
+/// inline CA cert) — never the raw fetched block. See the caller for why:
+/// this is what stops a compromised control-plane host's admin.conf from
+/// smuggling e.g. `insecure-skip-tls-verify: true` into the operator's
+/// kubeconfig.
+fn safe_cluster_entry(name: &str, raw: &serde_yaml::Value) -> serde_yaml::Value {
+    use serde_yaml::Value;
+    let mut cluster = serde_yaml::Mapping::new();
+    if let Some(v) = raw.get("cluster").and_then(|c| c.get("server")) {
+        cluster.insert(Value::from("server"), v.clone());
+    }
+    if let Some(v) = raw
+        .get("cluster")
+        .and_then(|c| c.get("certificate-authority-data"))
+    {
+        cluster.insert(Value::from("certificate-authority-data"), v.clone());
+    }
+    let mut m = serde_yaml::Mapping::new();
+    m.insert(Value::from("name"), Value::from(name));
+    m.insert(Value::from("cluster"), Value::Mapping(cluster));
+    Value::Mapping(m)
+}
+
+/// Builds a MINIMAL `users[]` entry, copying only the inline client
+/// certificate/key kubeadm's `admin.conf` is known to carry — never an
+/// `exec:` auth-provider or any other field the raw fetched block might
+/// contain. See `safe_cluster_entry`'s doc for the threat this closes.
+fn safe_user_entry(name: &str, raw: &serde_yaml::Value) -> serde_yaml::Value {
+    use serde_yaml::Value;
+    let mut user = serde_yaml::Mapping::new();
+    for key in ["client-certificate-data", "client-key-data"] {
+        if let Some(v) = raw.get("user").and_then(|u| u.get(key)) {
+            user.insert(Value::from(key), v.clone());
+        }
+    }
+    let mut m = serde_yaml::Mapping::new();
+    m.insert(Value::from("name"), Value::from(name));
+    m.insert(Value::from("user"), Value::Mapping(user));
+    Value::Mapping(m)
+}
+
 fn merge_into_local_kubeconfig(source: &Path, cluster_name: &str, dest: &Path) -> Result<()> {
     use serde_yaml::Value;
 
@@ -1335,15 +1377,30 @@ fn merge_into_local_kubeconfig(source: &Path, cluster_name: &str, dest: &Path) -
     let src = read_yaml(source)?;
     let user_name = format!("{cluster_name}-admin");
 
-    let mut clusters = as_seq(&src, "clusters");
+    // BUG FIXED HERE (HIGH, found live by adversarial review): this used to
+    // clone the fetched `clusters[0]`/`users[0]` entries VERBATIM (only their
+    // `name` field got rewritten) into the operator's real ~/.kube/config.
+    // `source` is `/etc/kubernetes/admin.conf` read straight off the remote
+    // control-plane host over SSH — a kubeconfig `users[].user` block can
+    // legally carry an `exec:` auth-provider (arbitrary LOCAL command
+    // execution the next time `kubectl` uses this context) or a
+    // `clusters[].cluster.insecure-skip-tls-verify: true`. If that host is
+    // ever compromised post-provisioning, a planted admin.conf turns into
+    // code execution on the OPERATOR's own machine the moment they next use
+    // the merged context. Build fresh entries containing ONLY the fields
+    // kubeadm's own generated admin.conf is known to carry — never clone the
+    // raw fetched cluster/user blocks.
+    let raw_clusters = as_seq(&src, "clusters");
+    let raw_users = as_seq(&src, "users");
+    let clusters = vec![safe_cluster_entry(
+        cluster_name,
+        raw_clusters.first().unwrap_or(&Value::Null),
+    )];
+    let users = vec![safe_user_entry(
+        &user_name,
+        raw_users.first().unwrap_or(&Value::Null),
+    )];
     let mut contexts = as_seq(&src, "contexts");
-    let mut users = as_seq(&src, "users");
-    if let Some(c) = clusters.first_mut() {
-        c["name"] = Value::String(cluster_name.to_string());
-    }
-    if let Some(u) = users.first_mut() {
-        u["name"] = Value::String(user_name.clone());
-    }
     if let Some(ctx) = contexts.first_mut() {
         ctx["name"] = Value::String(cluster_name.to_string());
         ctx["context"]["cluster"] = Value::String(cluster_name.to_string());
@@ -1466,6 +1523,74 @@ users:
     client-certificate-data: AAAA
 "#
         .to_string()
+    }
+
+    #[test]
+    fn merge_kubeconfig_recusa_exec_e_insecure_skip_de_um_admin_conf_malicioso() {
+        // HIGH fixed here: a compromised control-plane host's admin.conf can
+        // legally carry an `exec:` auth-provider (arbitrary LOCAL command
+        // execution the next time `kubectl` uses this context) or
+        // `insecure-skip-tls-verify: true`. Neither may survive the merge.
+        let tmp = std::env::temp_dir().join(format!(
+            "delonix-cluster-merge-kubeconfig-malicious-test-{}-{}",
+            std::process::id(),
+            line!()
+        ));
+        std::fs::create_dir_all(&tmp).unwrap();
+        let source = tmp.join("admin.conf");
+        std::fs::write(
+            &source,
+            r#"apiVersion: v1
+kind: Config
+clusters:
+- name: kubernetes
+  cluster:
+    server: https://1.2.3.4:6443
+    certificate-authority-data: AAAA
+    insecure-skip-tls-verify: true
+contexts:
+- name: kubernetes-admin@kubernetes
+  context:
+    cluster: kubernetes
+    user: kubernetes-admin
+current-context: kubernetes-admin@kubernetes
+users:
+- name: kubernetes-admin
+  user:
+    client-certificate-data: BBBB
+    client-key-data: CCCC
+    exec:
+      command: touch
+      args: ["/tmp/pwned-via-kubeconfig"]
+"#,
+        )
+        .unwrap();
+        let dest = tmp.join("config");
+
+        merge_into_local_kubeconfig(&source, "lab", &dest).unwrap();
+
+        let merged: serde_yaml::Value =
+            serde_yaml::from_str(&std::fs::read_to_string(&dest).unwrap()).unwrap();
+        // The legitimate fields survive...
+        assert_eq!(
+            merged["clusters"][0]["cluster"]["server"],
+            "https://1.2.3.4:6443"
+        );
+        assert_eq!(
+            merged["clusters"][0]["cluster"]["certificate-authority-data"],
+            "AAAA"
+        );
+        assert_eq!(
+            merged["users"][0]["user"]["client-certificate-data"],
+            "BBBB"
+        );
+        // ...but the dangerous ones never made it into the operator's real config.
+        assert!(merged["clusters"][0]["cluster"]
+            .get("insecure-skip-tls-verify")
+            .is_none());
+        assert!(merged["users"][0]["user"].get("exec").is_none());
+
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     #[test]
