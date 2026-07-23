@@ -59,9 +59,10 @@ pub enum ImageCmd {
         #[arg(long)]
         once: bool,
     },
-    /// Pull an image from a registry.
+    /// Pull an image from a registry. With `--vm`, no argument = the
+    /// OFFICIAL Delonix golden VM image.
     Pull {
-        image: String,
+        image: Option<String>,
         /// Verify the cosign signature with this public key (PEM) AFTER the
         /// pull, and fail if it does not match. Without this, a pull is not
         /// authenticated beyond the registry's own digest.
@@ -196,9 +197,10 @@ pub enum VmSub {
         #[arg(required = true)]
         names: Vec<String>,
     },
-    /// Fetch a VM image from an OCI registry (single-blob artifact).
+    /// Fetch a VM image from an OCI registry (single-blob artifact) — with
+    /// no argument, the OFFICIAL Delonix image.
     Pull {
-        source: String,
+        source: Option<String>,
         /// Local name (default: derived from the reference).
         #[arg(long)]
         name: Option<String>,
@@ -288,7 +290,16 @@ pub fn run(vm: bool, action: ImageCmd) -> Result<()> {
     let (images, _store) = open_stores()?;
     match action {
         ImageCmd::Dash { .. } => unreachable!("tratado no topo de run"),
-        ImageCmd::Pull { image, verify } => cmd_pull(&images, &image, verify.as_deref()),
+        ImageCmd::Pull { image, verify } => {
+            // Unlike `--vm pull` (defaults to the official golden image), a
+            // plain container-image pull has no sensible default — `image`
+            // only became `Option<String>` so the SAME struct could serve
+            // both paths at the clap level (see `run_vm`'s mapping).
+            let image = image.ok_or_else(|| {
+                Error::Invalid(super::po::t("`image pull <reference>`: the reference is required").into())
+            })?;
+            cmd_pull(&images, &image, verify.as_deref())
+        }
         ImageCmd::Ls => cmd_ls(&images),
         ImageCmd::Describe { names } => cmd_describe(&images, &names),
         ImageCmd::Tag { source, target } => cmd_tag(&images, &source, &target),
@@ -343,6 +354,13 @@ fn run_vm(action: ImageCmd) -> Result<()> {
         ImageCmd::Dash { .. } => unreachable!("tratado no topo de run"),
         ImageCmd::Ls => VmImageCmd::Ls,
         ImageCmd::Describe { names } => VmImageCmd::Describe { names },
+        // BUG FIXED HERE, found live on a real host: `delonix image --vm
+        // pull` (no argument) should default to the official golden image,
+        // same as `delonix vm pull` — this mapping used to pass `image`
+        // through even when `None`, and `VmImageCmd::Pull` used to require a
+        // `source`, so clap itself rejected the no-arg invocation before this
+        // code ever ran. Both are now `Option<String>`; `vmimage::run`
+        // applies the actual default.
         ImageCmd::Pull { image, verify: _ } => VmImageCmd::Pull {
             source: image,
             name: None,
