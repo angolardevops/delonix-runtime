@@ -55,6 +55,9 @@ pub struct Dockerfile {
     pub env: Vec<String>,
     /// The final `WORKDIR` (for the image config).
     pub workdir: Option<String>,
+    /// The final `USER` (name or uid[:gid]), empty if never set — inherits the
+    /// base's if so, same rule as `cmd`/`entrypoint`/`workdir`.
+    pub user: String,
     // --- Delonix extensions (which the Dockerfile does NOT have) ---
     /// `SCAN fail-on=<sev>` — vulnerability gate before the build.
     pub scan_fail_on: Option<String>,
@@ -224,6 +227,7 @@ pub fn parse_dockerfile_with_args(text: &str, cli_args: &[(String, String)]) -> 
                 .push(Step::Run(rest.to_string())),
             "CMD" => df.cmd = parse_cmd(rest),
             "ENTRYPOINT" => df.entrypoint = parse_cmd(rest),
+            "USER" => df.user = rest.trim().to_string(),
             "ENV" => {
                 // `ENV k1=v1 k2="v 2" …` (multiple vars) OR the legacy `ENV k v`.
                 for (key, val) in parse_env_pairs(rest) {
@@ -287,7 +291,7 @@ pub fn parse_dockerfile_with_args(text: &str, cli_args: &[(String, String)]) -> 
                 }
             }
             // compatibility: accepted but with no build effect (metadata)
-            "LABEL" | "EXPOSE" | "USER" | "MAINTAINER" | "VOLUME" | "STOPSIGNAL"
+            "LABEL" | "EXPOSE" | "MAINTAINER" | "VOLUME" | "STOPSIGNAL"
             | "SHELL" | "ONBUILD" => {}
             other => {
                 return Err(Error::Invalid(format!(
@@ -467,11 +471,16 @@ impl ImageStore {
             .clone()
             .or_else(|| base.config.healthcheck.clone());
         let workdir = df.workdir.clone().unwrap_or_default();
+        let user = if df.user.is_empty() {
+            base.config.user.clone()
+        } else {
+            df.user.clone()
+        };
         let config_json = serde_json::json!({
             // Standard OCI/Docker image config fields (interop).
             "architecture": oci_arch(),
             "os": "linux",
-            "config": { "Cmd": cmd, "Entrypoint": entrypoint, "Env": env, "Cpus": cpus, "Memory": memory, "Security": security },
+            "config": { "Cmd": cmd, "Entrypoint": entrypoint, "Env": env, "User": user, "Cpus": cpus, "Memory": memory, "Security": security },
             "rootfs": { "type": "layers", "diff_ids": diff_ids },
             // Delonix extension (ignored by Docker):
             "created_unix": created,
@@ -491,7 +500,7 @@ impl ImageStore {
                 memory,
                 security,
                 healthcheck,
-                user: String::new(),
+                user,
                 working_dir: workdir.clone(),
             },
             created_unix: created,
@@ -504,12 +513,15 @@ impl ImageStore {
     /// Creates an image from a FLAT rootfs (*rootless*/vfs mode): packs
     /// the ENTIRE directory as **a single layer** (squash) — there is no overlay, hence
     /// no diff. Valid OCI config (1 diff_id). Used by the rootless `build`.
+    #[allow(clippy::too_many_arguments)]
     pub fn commit_flat_rootfs(
         &self,
         rootfs: &std::path::Path,
         cmd: Vec<String>,
+        entrypoint: Vec<String>,
         env: Vec<String>,
         workdir: String,
+        user: String,
         tag: &str,
     ) -> Result<Image> {
         let mut buf = Vec::new();
@@ -521,7 +533,7 @@ impl ImageStore {
             b.finish()
                 .map_err(|e| Error::Invalid(format!("fechar tar: {e}")))?;
         }
-        self.commit_flat_rootfs_from_tar(buf, cmd, env, workdir, tag)
+        self.commit_flat_rootfs_from_tar(buf, cmd, entrypoint, env, workdir, user, tag)
     }
 
     /// Like [`commit_flat_rootfs`], but receives the rootfs tar **already built**
@@ -531,12 +543,15 @@ impl ImageStore {
     /// (`delonix __buildtar`, see `cmd::mapped::buildtar`) and the result delivered
     /// here. The in-process path of [`commit_flat_rootfs`] is for when there is
     /// no subuid (rootless single-uid) or for root.
+    #[allow(clippy::too_many_arguments)]
     pub fn commit_flat_rootfs_from_tar(
         &self,
         tar_bytes: Vec<u8>,
         cmd: Vec<String>,
+        entrypoint: Vec<String>,
         env: Vec<String>,
         workdir: String,
+        user: String,
         tag: &str,
     ) -> Result<Image> {
         let layer = self.cas().write(&tar_bytes)?; // uncompressed tar → diff_id = digest
@@ -545,7 +560,7 @@ impl ImageStore {
         let config_json = serde_json::json!({
             "architecture": oci_arch(),
             "os": "linux",
-            "config": { "Cmd": cmd, "Env": env, "WorkingDir": workdir },
+            "config": { "Cmd": cmd, "Entrypoint": entrypoint, "Env": env, "User": user, "WorkingDir": workdir },
             "rootfs": { "type": "layers", "diff_ids": diff_ids },
             "created_unix": created,
         });
@@ -557,13 +572,13 @@ impl ImageStore {
             layers: vec![layer],
             config: ImageConfig {
                 cmd,
-                entrypoint: Vec::new(),
+                entrypoint,
                 env,
                 cpus: None,
                 memory: None,
                 security: Vec::new(),
                 healthcheck: None,
-                user: String::new(),
+                user,
                 working_dir: workdir,
             },
             created_unix: created,

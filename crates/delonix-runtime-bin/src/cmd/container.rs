@@ -2965,8 +2965,10 @@ fn cmd_commit(images: &ImageStore, store: &Store, id: &str, tag: &str) -> Result
         images.commit_flat_rootfs(
             &rootfs,
             c.command.clone(),
+            Vec::new(),
             c.env.clone(),
             c.workdir.clone().unwrap_or_default(),
+            String::new(),
             tag,
         )?
     } else {
