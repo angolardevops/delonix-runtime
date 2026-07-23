@@ -1414,9 +1414,26 @@ fn build_user_data(
     out.push_str("package_update: false\n");
     out.push_str("package_upgrade: false\n");
     if !ssh_keys.is_empty() {
-        out.push_str("ssh_authorized_keys:\n");
+        // BUG FIXED HERE: a bare top-level `ssh_authorized_keys:` only reaches
+        // cloud-init's DEFAULT distro user (`ubuntu` on this Ubuntu-based golden
+        // image) — NOT the `delonix` user the golden image itself creates at
+        // build time (`vmimage.rs`, `sudo` NOPASSWD) and that everything else
+        // here assumes is the login target: the autologin config right below
+        // (`agetty --autologin delonix`), and `cluster kubeadm`'s SSH user,
+        // hardcoded to `delonix` (the account "the golden image already
+        // creates"). Found live: `delonix cluster kubeadm` consistently failed
+        // "SSH did not respond within --boot-timeout" — the VM WAS reachable
+        // and the key WAS installed, just onto `ubuntu`, not `delonix`.
+        // Scoping the key under `users:` (keeping `- default` so the `ubuntu`
+        // account nothing else here relies on still gets created too) targets
+        // the EXISTING `delonix` account directly — cloud-init adds keys to an
+        // already-existing user without trying to recreate it.
+        out.push_str("users:\n");
+        out.push_str("  - default\n");
+        out.push_str("  - name: delonix\n");
+        out.push_str("    ssh_authorized_keys:\n");
         for k in ssh_keys {
-            out.push_str(&format!("  - {k}\n"));
+            out.push_str(&format!("      - {k}\n"));
         }
     }
     // Auto-login on the serial console (ttyS0) as the golden's `delonix` user:
@@ -1655,8 +1672,18 @@ LISTEN 0 1 192.168.122.1:9000 0.0.0.0:*";
         let ud = build_user_data("myvm", &["ssh-ed25519 AAAA foo".to_string()], &[]);
         assert!(ud.starts_with("#cloud-config\n"));
         assert!(ud.contains("hostname: myvm\n"));
-        assert!(ud.contains("ssh_authorized_keys:\n  - ssh-ed25519 AAAA foo\n"));
         assert!(ud.contains("package_update: false\n"));
+        // Regression: a bare top-level `ssh_authorized_keys:` only reaches
+        // cloud-init's DEFAULT user (`ubuntu`), never the `delonix` account the
+        // golden image actually creates and that `cluster kubeadm`'s SSH login
+        // (and the autologin config below) hardcode. Found live: `delonix
+        // cluster kubeadm` consistently failed "SSH did not respond" against a
+        // fully-booted, reachable VM, because the key landed on the wrong user.
+        // Must be scoped under `users: - name: delonix`, alongside `- default`
+        // so the `ubuntu` account still gets created too (unrelated code paths
+        // may depend on it existing).
+        assert!(ud.contains("users:\n  - default\n  - name: delonix\n"));
+        assert!(ud.contains("ssh_authorized_keys:\n      - ssh-ed25519 AAAA foo\n"));
     }
 
     #[test]
