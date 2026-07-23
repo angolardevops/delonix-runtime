@@ -672,10 +672,12 @@ arranque a FALHAR se não ficarem mesmo activos; pull com verificação de diges
 artefactos VM OCI); inputs de manifesto de recursos como <code>Cluster</code>/<code>Vm</code>
 validados por whitelist antes de chegarem a qualquer shell remoto.</p>
 <div class="callout warn">
-<p><b>Auditoria de 2026-07-21 — 6 achados de severidade alta ainda por corrigir</b> (o <code>COPY</code>
-do build, por exemplo, ainda é contornável por symlink, apesar de uma correcção anterior ter tentado
-fechá-lo). Não há indícios de RCE pela rede, mas não corras ainda imagens/manifestos não confiáveis
-nem exponhas o motor num host partilhado. Detalhe completo em
+<p><b>Auditoria de 2026-07-21 — 6 achados de severidade alta, CORRIGIDOS em 2026-07-23</b> (o
+<code>COPY</code> do build, por exemplo, era contornável por symlink apesar de uma correcção
+anterior ter tentado fechá-lo — agora canonicaliza e confirma o confinamento). Não há indícios de
+RCE pela rede, mas os fixes ainda não foram confirmados por uma 2.ª auditoria independente e o
+núcleo de syscalls nunca teve revisão de segurança — por prudência, evita ainda imagens/manifestos
+não confiáveis ou expor o motor num host partilhado até à confirmação. Detalhe completo em
 <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/AUDITORIA-E2E.md">AUDITORIA-E2E.md</a>
 — ver também a <a href="comparacao.html">comparação com Docker/Podman</a> para o estado geral do
 projecto.</p>
@@ -732,12 +734,15 @@ para uma pessoa a decidir o que instalar hoje, ou uma empresa a avaliar para pro
 
 <div class="callout warn">
 <p><b>Estado actual (2026-07): beta público, em hardening activo.</b> Uma auditoria de segurança
-independente encontrou 6 falhas de severidade alta ainda por corrigir (essencialmente:
-escrita/eliminação de ficheiros fora do esperado a partir de uma imagem ou manifesto não confiável,
-e um socket de gestão sem autenticação). Não há indícios de execução remota de código a partir da
-rede — a fronteira rootless→root está sólida — mas <strong>não corras ainda imagens não confiáveis
-nem exponhas o motor num host partilhado por várias pessoas</strong> até isto fechar. Detalhe
-completo, com ficheiro e linha de cada achado:
+independente encontrou 6 falhas de severidade alta (essencialmente: escrita/eliminação de
+ficheiros fora do esperado a partir de uma imagem ou manifesto não confiável, e um socket de
+gestão sem autenticação) — <strong>as 6 já estão corrigidas</strong>, mas ainda NÃO foram
+confirmadas por uma 2.ª auditoria adversarial independente, e o núcleo de syscalls do motor
+(clone/mount/namespaces) nunca teve revisão de segurança nenhuma. Não há indícios de execução
+remota de código a partir da rede — a fronteira rootless→root está sólida — mas
+<strong>por prudência, evita ainda imagens não confiáveis ou expor o motor num host partilhado por
+várias pessoas</strong> até à confirmação. Detalhe completo, com ficheiro e linha de cada achado e
+o estado da correcção:
 <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/AUDITORIA-E2E.md">relatório
 da auditoria</a>.</p>
 </div>
@@ -805,8 +810,8 @@ crash (razão + snapshot do log, não só "Exited")</td></tr>
 <td><span class="tag ok">cosign/sigstore + scan de CVE no próprio motor</span></td></tr>
 <tr><td>Maturidade de segurança EM PRODUÇÃO (anos de uso adversarial real)</td>
 <td><span class="tag ok">muito madura</span></td><td><span class="tag ok">muito madura</span></td>
-<td><span class="tag no">projecto novo — auditoria própria já encontrou e está a corrigir falhas
-altas, ver aviso acima</span></td></tr>
+<td><span class="tag mid">projecto novo — auditoria própria já encontrou e corrigiu falhas altas,
+ainda sem confirmação independente, ver aviso acima</span></td></tr>
 <tr><td>Ecossistema (docs, fóruns, integrações de terceiros)</td>
 <td><span class="tag ok">enorme</span></td><td><span class="tag ok">grande</span></td>
 <td><span class="tag no">início — este site + o repositório é tudo o que há por agora</span></td></tr>
@@ -853,8 +858,9 @@ Kubernetes pequeno sem instalar Docker</td>
 <td>Fica no Docker/Podman para o build; podes correr as imagens resultantes no Delonix se quiseres
 testar a operação.</td></tr>
 <tr><td>Empresa a avaliar para produção multi-tenant ou com dados sensíveis</td>
-<td>Aguarda o fecho dos 6 achados de segurança altos (aviso acima) antes de expor o motor a imagens
-ou utilizadores não confiáveis — acompanha o
+<td>Os 6 achados de segurança altos já estão corrigidos, mas aguarda a confirmação por uma 2.ª
+auditoria independente (aviso acima) antes de expor o motor a imagens ou utilizadores não
+confiáveis — acompanha o
 <a href="https://github.com/angolardevops/delonix-runtime/releases">changelog</a>.</td></tr>
 <tr><td>Quer avaliar tecnicamente ao detalhe (gap-a-gap, com ficheiro e linha)</td>
 <td>Lê a <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/COMPARACAO-DOCKER-PODMAN.md">análise de gaps completa</a> no repositório.</td></tr>
