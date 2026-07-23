@@ -74,9 +74,7 @@ pub fn run(addr: Option<String>) -> Result<()> {
         })?;
         use std::os::unix::fs::PermissionsExt;
         let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
-        eprintln!(
-            "delonix-docker-api (Docker Engine API, read-only) listening on unix://{path}"
-        );
+        eprintln!("delonix-docker-api (Docker Engine API, read-only) listening on unix://{path}");
         serve(uds, state).await
     })
 }

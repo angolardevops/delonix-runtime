@@ -760,7 +760,10 @@ mod tests {
             .register_external("share-a", &external, Some(1000), Some(80))
             .unwrap();
         assert_eq!(v.mountpoint, external.to_string_lossy());
-        assert!(external.exists(), "o mountpoint externo devia ter sido criado");
+        assert!(
+            external.exists(),
+            "o mountpoint externo devia ter sido criado"
+        );
         // Re-registering (a `ShareVolume` re-`apply`) updates quota in place,
         // does not error, and keeps pointing at the SAME external path.
         let v2 = s
@@ -773,7 +776,10 @@ mod tests {
         std::fs::write(external.join("f"), vec![0u8; 1900]).unwrap();
         assert_eq!(s.usage_at(&external), 1900);
         let (warn, over) = s.quota_state_at(&external, Some(2000), Some(90));
-        assert!(warn && !over, "1900/2000 devia estar em alerta mas não acima");
+        assert!(
+            warn && !over,
+            "1900/2000 devia estar em alerta mas não acima"
+        );
 
         // `remove` deletes ONLY this store's own bookkeeping dir — the
         // external data (the shared Storage's real subdirectory) survives.

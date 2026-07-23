@@ -1988,13 +1988,18 @@ LISTEN 0 1 192.168.122.1:9000 0.0.0.0:*";
         // A field set BOTH at the flat top level and inside a group — the
         // explicit flat value wins (unambiguous precedence, not "whichever
         // the map happens to iterate last").
-        let mixed: serde_yaml::Value = serde_yaml::from_str(
-            "disk: d\nvcpus: 8\nresources:\n  vcpus: 2\n  memory: 1G\n",
-        )
-        .unwrap();
+        let mixed: serde_yaml::Value =
+            serde_yaml::from_str("disk: d\nvcpus: 8\nresources:\n  vcpus: 2\n  memory: 1G\n")
+                .unwrap();
         let spec: VmSpec = serde_yaml::from_value(normalize_vm_spec(mixed)).unwrap();
-        assert_eq!(spec.vcpus, 8, "o vcpus plano explícito devia ganhar ao do grupo");
-        assert_eq!(spec.memory, "1G", "sem colisão, o do grupo aplica-se na mesma");
+        assert_eq!(
+            spec.vcpus, 8,
+            "o vcpus plano explícito devia ganhar ao do grupo"
+        );
+        assert_eq!(
+            spec.memory, "1G",
+            "sem colisão, o do grupo aplica-se na mesma"
+        );
     }
 
     #[test]

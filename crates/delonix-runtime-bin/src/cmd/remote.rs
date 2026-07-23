@@ -103,7 +103,6 @@ pub fn scp_to(t: &SshTarget, local: &Path, remote_path: &str) -> Result<()> {
     Ok(())
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::shell_quote;

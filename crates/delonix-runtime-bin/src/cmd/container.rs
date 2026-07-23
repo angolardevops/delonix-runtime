@@ -259,10 +259,7 @@ fn normalize_container_spec(mut v: serde_yaml::Value) -> serde_yaml::Value {
                 ("detect", "detect"),
             ][..],
         ),
-        (
-            "storage",
-            &[("volumes", "volumes"), ("tmpfs", "tmpfs")][..],
-        ),
+        ("storage", &[("volumes", "volumes"), ("tmpfs", "tmpfs")][..]),
         (
             "limits",
             &[
@@ -2269,14 +2266,7 @@ fn record_crash_forensics(c: &Container) {
         tail.as_deref().unwrap_or("<no log>")
     );
     let _ = std::fs::write(dir.join(format!("crash-{ts}.log")), snapshot);
-    delonix_runtime_core::events::emit(
-        &root,
-        "container",
-        "crashed",
-        &c.id,
-        &c.name,
-        Some(reason),
-    );
+    delonix_runtime_core::events::emit(&root, "container", "crashed", &c.id, &c.name, Some(reason));
 }
 
 /// `--rm` in detached mode: with no daemon, removal is done by a dedicated
@@ -4053,7 +4043,8 @@ mod tests {
              \x20 gpus: all\n",
         )
         .unwrap();
-        let spec: ContainerSpec = serde_yaml::from_value(normalize_container_spec(grouped)).unwrap();
+        let spec: ContainerSpec =
+            serde_yaml::from_value(normalize_container_spec(grouped)).unwrap();
         assert_eq!(spec.image, "nginx");
         assert_eq!(spec.memory.as_deref(), Some("512M"));
         assert_eq!(spec.cpus.as_deref(), Some("2.0"));
@@ -4078,8 +4069,16 @@ mod tests {
         )
         .unwrap();
         let spec: ContainerSpec = serde_yaml::from_value(normalize_container_spec(mixed)).unwrap();
-        assert_eq!(spec.memory.as_deref(), Some("2G"), "o memory plano explícito devia ganhar");
-        assert_eq!(spec.cpus.as_deref(), Some("4.0"), "sem colisão, o do grupo aplica-se");
+        assert_eq!(
+            spec.memory.as_deref(),
+            Some("2G"),
+            "o memory plano explícito devia ganhar"
+        );
+        assert_eq!(
+            spec.cpus.as_deref(),
+            Some("4.0"),
+            "sem colisão, o do grupo aplica-se"
+        );
     }
 
     fn v(xs: &[&str]) -> Vec<String> {

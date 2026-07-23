@@ -699,8 +699,8 @@ mod tests {
         // `<token>@free.pinggy.io`, the last positional ssh argv element, was
         // parsed by ssh as an OPTION instead of part of the destination —
         // local RCE via ProxyCommand. Reject before it ever reaches argv.
-        let err = resolve_token(Some("-oProxyCommand=touch /tmp/pwned".to_string()), None)
-            .unwrap_err();
+        let err =
+            resolve_token(Some("-oProxyCommand=touch /tmp/pwned".to_string()), None).unwrap_err();
         assert!(format!("{err}").contains("não pode começar por"));
         // A normal token is untouched.
         assert_eq!(
