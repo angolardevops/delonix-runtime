@@ -389,6 +389,31 @@ fn capture(prog: &str, args: &[&str]) -> Option<String> {
     Some(String::from_utf8_lossy(&out.stdout).trim().to_string())
 }
 
+/// Pure parser for `virsh net-dhcp-leases` output: among the entries matching
+/// `mac` (case-insensitive), returns the address of the one with the LATEST
+/// `Expiry Time`. See [`LibvirtBackend::ip_from_leases`] for why this is the
+/// only reliable signal (`domifaddr` can list several stale entries for the
+/// same MAC in no useful order). The expiry format (`YYYY-MM-DD HH:MM:SS`) is
+/// zero-padded and lexicographically sortable — plain string `max` is exact,
+/// no date parsing needed.
+fn parse_leases_latest_ip(out: &str, mac: &str) -> Option<String> {
+    let mac_lower = mac.to_ascii_lowercase();
+    out.lines()
+        .filter_map(|l| {
+            let cols: Vec<&str> = l.split_whitespace().collect();
+            // "<date> <time> <mac> ipv4 <addr>/<prefix> ..." — at least 5 cols.
+            if cols.len() < 5 || cols[2].to_ascii_lowercase() != mac_lower {
+                return None;
+            }
+            let expiry = format!("{} {}", cols[0], cols[1]);
+            let ip = cols[4].split_once('/').map(|(ip, _)| ip)?;
+            ip.parse::<std::net::Ipv4Addr>().ok()?;
+            Some((expiry, ip.to_string()))
+        })
+        .max_by(|a, b| a.0.cmp(&b.0))
+        .map(|(_, ip)| ip)
+}
+
 // ===========================================================================
 // Backend trait
 // ===========================================================================
@@ -1410,8 +1435,8 @@ impl VmBackend for LibvirtBackend {
         }
         Ok(Boot {
             pid: None, // managed by libvirtd — liveness via virsh domstate
-            ip: self
-                .ip_uri(uri, &cfg.name)
+            ip: Self::ip_from_leases(uri, &cfg.name, &mac)
+                .or_else(|| self.ip_uri(uri, &cfg.name))
                 .or_else(|| cfg.static_ip.clone()),
             // The EFFECTIVE mode (not the requested one): lets `vm describe`
             // and the bin tell a reachable VM (nat/bridge) from an egress-only
@@ -1427,7 +1452,8 @@ impl VmBackend for LibvirtBackend {
     }
 
     fn ip(&self, vm: &Vm) -> Option<String> {
-        self.ip_uri(libvirt_uri_of(&vm.name), &vm.name)
+        let uri = libvirt_uri_of(&vm.name);
+        Self::ip_from_leases(uri, &vm.name, &vm.mac).or_else(|| self.ip_uri(uri, &vm.name))
     }
 
     fn stop(&self, vmdir: &Path, vm: &Vm) -> Result<()> {
@@ -1444,7 +1470,49 @@ impl LibvirtBackend {
             .unwrap_or(false)
     }
 
+    /// The libvirt network a domain's interface actually sources from (the
+    /// `Source` column of `domiflist`) — NOT necessarily the delonix
+    /// `--network` name given at `vm create`/`cluster kubeadm` time. Found
+    /// live: a VM created with `--network lab-net` still lands on libvirt's
+    /// own `default` NAT network; `lab-net` never becomes a real libvirt
+    /// network object for the VM backend. `net-dhcp-leases` needs the REAL
+    /// one, so this is queried rather than assumed.
+    fn network_of(uri: &str, name: &str) -> Option<String> {
+        let out = capture("virsh", &["-c", uri, "domiflist", "--", name])?;
+        out.lines().find_map(|l| {
+            let cols: Vec<&str> = l.split_whitespace().collect();
+            (cols.len() >= 3 && cols[1] == "network").then(|| cols[2].to_string())
+        })
+    }
+
+    /// IP via `virsh net-dhcp-leases`, scoped to this VM's OWN mac and
+    /// resolved to the MOST RECENT lease.
+    ///
+    /// BUG FIXED HERE, found live (`cluster kubeadm`, repeatedly): a VM's
+    /// guest can renegotiate DHCP several times during a single boot (each
+    /// getting a DIFFERENT IP — observed live, e.g. one VM cycling through 3
+    /// distinct addresses in under 20 minutes with a STABLE machine-id/DUID,
+    /// so this isn't the machine-id-collision bug already fixed elsewhere —
+    /// dnsmasq's lease list simply accumulates every past negotiation for
+    /// that MAC instead of the guest releasing the old ones). `domifaddr`'s
+    /// "lease" source dumps ALL of them, in neither chronological nor any
+    /// other USEFUL order — taking its first (or last) line is a coin flip;
+    /// confirmed live picking the WRONG, no-longer-valid entry from BOTH
+    /// ends while the true current IP sat in the middle. `net-dhcp-leases`
+    /// carries a real `Expiry Time` per entry (`YYYY-MM-DD HH:MM:SS`, so
+    /// plain string comparison sorts it correctly) — filtering by MAC and
+    /// taking the MAX expiry is the only actually-correct signal available,
+    /// not a heuristic. Falls back to [`Self::ip_uri`] (`domifaddr`) when
+    /// this doesn't resolve (non-libvirt-managed network, no lease yet, ...).
+    fn ip_from_leases(uri: &str, name: &str, mac: &str) -> Option<String> {
+        let network = Self::network_of(uri, name)?;
+        let out = capture("virsh", &["-c", uri, "net-dhcp-leases", "--", &network])?;
+        parse_leases_latest_ip(&out, mac)
+    }
+
     /// IP via `virsh domifaddr` (may be empty in user-mode networking without an agent).
+    /// Fallback of [`Self::ip_from_leases`] — see its doc for why that one is
+    /// preferred whenever it resolves.
     fn ip_uri(&self, uri: &str, name: &str) -> Option<String> {
         let out = capture("virsh", &["-c", uri, "domifaddr", "--", name])?;
         // format: "Name  MAC  Protocol  Address"; take the 1st IPv4 (a.b.c.d/p).
@@ -1779,6 +1847,50 @@ pub fn list(base: &Path) -> Result<Vec<Vm>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parse_leases_latest_ip_escolhe_o_expiry_mais_recente() {
+        // Real `virsh net-dhcp-leases default` output captured live while
+        // diagnosing this exact bug — 3 leases for the SAME MAC (a VM whose
+        // guest renegotiated DHCP repeatedly during one boot), not in
+        // chronological order in the listing. Only .179 (the last NEGOTIATED,
+        // NOT the last LISTED) was actually reachable at the time.
+        let out = "\
+ Expiry Time           MAC address         Protocol   IP address           Hostname   Client ID or DUID
+------------------------------------------------------------------------------------------------------------------------------------------------
+ 2026-07-23 19:45:54   52:54:00:e2:55:fb   ipv4       192.168.122.177/24   -          ff:56:50:4d:98:00:02:00:00:ab:11:f8:13:8b:f9:b6:a0:58:03
+ 2026-07-23 20:04:08   52:54:00:e2:55:fb   ipv4       192.168.122.179/24   lab-cp1    ff:56:50:4d:98:00:02:00:00:ab:11:1a:71:81:66:74:ab:24:eb
+ 2026-07-23 19:55:23   52:54:00:e2:55:fb   ipv4       192.168.122.178/24   -          ff:56:50:4d:98:00:02:00:00:ab:11:7c:bb:67:24:f1:93:4b:b8
+ 2026-07-23 19:46:10   52:54:00:b7:c8:ef   ipv4       192.168.122.17/24    -          ff:56:50:4d:98:00:02:00:00:ab:11:a1:60:5a:13:80:91:cf:b8";
+        assert_eq!(
+            parse_leases_latest_ip(out, "52:54:00:e2:55:fb"),
+            Some("192.168.122.179".to_string())
+        );
+        // Case-insensitive MAC match (virsh output is lowercase, callers may not be).
+        assert_eq!(
+            parse_leases_latest_ip(out, "52:54:00:E2:55:FB"),
+            Some("192.168.122.179".to_string())
+        );
+        // A different MAC only ever had one lease.
+        assert_eq!(
+            parse_leases_latest_ip(out, "52:54:00:b7:c8:ef"),
+            Some("192.168.122.17".to_string())
+        );
+        // No lease at all for this MAC.
+        assert_eq!(parse_leases_latest_ip(out, "aa:bb:cc:dd:ee:ff"), None);
+    }
+
+    #[test]
+    fn parse_leases_latest_ip_tolera_saida_vazia_ou_so_cabecalho() {
+        assert_eq!(parse_leases_latest_ip("", "52:54:00:e2:55:fb"), None);
+        assert_eq!(
+            parse_leases_latest_ip(
+                " Expiry Time  MAC address  Protocol  IP address  Hostname  Client ID or DUID\n---",
+                "52:54:00:e2:55:fb"
+            ),
+            None
+        );
+    }
 
     #[test]
     fn mem_mib_parses_units() {

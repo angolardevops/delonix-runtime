@@ -142,6 +142,13 @@ enum Cmd {
         #[command(subcommand)]
         action: cmd::httproute::HttpRouteCmd,
     },
+    /// Expose a local port to the public internet via pinggy/ngrok/cloudflare
+    /// (`kind: Tunnel`) — pair with `httproute`'s listening port to route by
+    /// Host header behind ONE public URL.
+    Tunnel {
+        #[command(subcommand)]
+        action: cmd::tunnel::TunnelCmd,
+    },
     /// Boot persistence: systemd units so containers come back up after a reboot.
     Boot {
         #[command(subcommand)]
@@ -266,6 +273,7 @@ fn run() -> Result<()> {
         Cmd::Egress { action } => cmd::firewall::run_egress(action),
         Cmd::IngressProxy { config } => cmd::ingress_proxy::run(&config),
         Cmd::Httproute { action } => cmd::httproute::run(action),
+        Cmd::Tunnel { action } => cmd::tunnel::run(action),
         Cmd::Cri { addr } => {
             let addr = addr
                 .or_else(|| std::env::var("DELONIX_CRI_ADDR").ok())

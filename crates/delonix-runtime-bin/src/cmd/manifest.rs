@@ -168,6 +168,8 @@ struct StackSpec {
     http_routes: Vec<StackItem>,
     #[serde(default)]
     dependencies: Vec<StackItem>,
+    #[serde(default)]
+    tunnels: Vec<StackItem>,
 }
 
 /// One entry inside a `kind: Stack` group: a name + the resource's own `spec`.
@@ -195,6 +197,7 @@ pub const STACK_SPEC_FIELDS: &[&str] = &[
     "firewallPolicies",
     "httpRoutes",
     "dependencies",
+    "tunnels",
 ];
 
 /// Expands a `kind: Stack` doc into its constituent resource docs, in dependency
@@ -218,6 +221,7 @@ fn expand_stack(doc: &ManifestDoc) -> Result<Vec<ManifestDoc>> {
         ("FirewallPolicy", spec.firewall_policies),
         ("HTTPRoute", spec.http_routes),
         ("Dependency", spec.dependencies),
+        ("Tunnel", spec.tunnels),
     ];
     let mut out = Vec::new();
     for (kind, items) in groups {
