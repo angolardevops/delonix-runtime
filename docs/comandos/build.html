@@ -90,8 +90,10 @@ gramática é a mesma, com extensões (<code>SCAN</code>, <code>CPUS</code>, <co
 conhecida: em modo root (overlay), o estágio final ainda tem de ser uma imagem real, não outro
 estágio (sem lineage OCI para um estágio clonado) — sem restrição em rootless.
 <code>ARG</code>/<code>--build-arg</code> e <code>USER</code>/<code>ENTRYPOINT</code> já
-sobrevivem ao build (incluindo em rootless). Sem BuildKit (sem cache de camadas entre builds,
-sem <code>RUN --mount=secret</code>).</p>
+sobrevivem ao build (incluindo em rootless). <strong>Cache de camadas por instrução</strong>
+(rootless — um <code>RUN</code>/<code>COPY</code> repetido não re-executa; <code>--no-cache</code>
+para saltar; modo root continua sem cache). Sem BuildKit real (sem
+<code>RUN --mount=secret</code>, sem <code>--platform</code>).</p>
 <div class='help'><pre><code>Build an image from a Dockerfile or Delonixfile
 
 Usage: delonix build [OPTIONS] --tag &lt;TAG&gt; [CONTEXT]
@@ -104,6 +106,7 @@ Options:
       --l18n &lt;en|pt&gt;           Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
   -t, --tag &lt;TAG&gt;              Tag of the resulting image (`repo:tag`)
       --build-arg &lt;BUILD_ARG&gt;  Build-time variable (`KEY=VALUE`), repeatable — only takes effect for a name the Dockerfile actually declares with `ARG KEY[=default]` (an override with no matching `ARG` is silently ignored, same as Docker)
+      --no-cache               Bypasses the layer cache entirely (neither reads nor writes it) — same as Docker&#x27;s `--no-cache`
   -h, --help                   Print help</code></pre></div>
 <h2>Exemplos</h2><div class="ex"><div class="cap">Build com tag</div><pre><code>delonix build -t minha-app:1.0 .</code></pre></div><div class="ex"><div class="cap">Delonixfile explícito</div><pre><code>delonix build -t api:dev -f Delonixfile ./servico</code></pre></div>
 <footer>Delonix Runtime · Apache-2.0 · <a href="https://github.com/angolardevops/delonix-runtime">angolardevops/delonix-runtime</a>
