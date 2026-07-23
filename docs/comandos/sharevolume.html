@@ -95,7 +95,7 @@ quota é SOFT (uso medido + alerta) — o caminho HARD (imagem ext4 loopback) pr
 bloco local e não compõe com um subdirectório de um mount de rede.</p>
 <div class='help'><pre><code>An isolated, individually-quota&#x27;d slice of a `Storage` — multiple container/vm/pod share ONE NAS export without seeing each other&#x27;s data
 
-Usage: delonix sharevolume [OPTIONS] &lt;COMMAND&gt;
+Usage: delonix-x86_64-linux sharevolume [OPTIONS] &lt;COMMAND&gt;
 
 Commands:
   apply     Apply the `kind: ShareVolume` documents of a manifest (idempotent)
@@ -110,7 +110,7 @@ Options:
 <h2 id='apply'><code>sharevolume apply</code></h2>
 <div class='help'><pre><code>Apply the `kind: ShareVolume` documents of a manifest (idempotent)
 
-Usage: delonix sharevolume apply [OPTIONS]
+Usage: delonix-x86_64-linux sharevolume apply [OPTIONS]
 
 Options:
   -f, --file &lt;FILE&gt;   
@@ -121,7 +121,7 @@ sharevolume/tenant-b: ready (nas-shared -&gt; /var/lib/delonix/volumes/nas-share
 <h2 id='ls'><code>sharevolume ls</code></h2>
 <div class='help'><pre><code>List share volumes (parent storage, quota, live usage)
 
-Usage: delonix sharevolume ls [OPTIONS]
+Usage: delonix-x86_64-linux sharevolume ls [OPTIONS]
 
 Options:
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
@@ -132,7 +132,7 @@ tenant-a   nas-shared   1.0 MiB   1.0 MiB   OVER    .../shares/tenant-a</code></
 <h2 id='describe'><code>sharevolume describe</code></h2>
 <div class='help'><pre><code>Human-readable detail of one share volume
 
-Usage: delonix sharevolume describe [OPTIONS] &lt;NAME&gt;
+Usage: delonix-x86_64-linux sharevolume describe [OPTIONS] &lt;NAME&gt;
 
 Arguments:
   &lt;NAME&gt;  
@@ -150,7 +150,7 @@ Consume with:   -v tenant-a:/path/in/container</code></pre></div></div>
 <h2 id='rm'><code>sharevolume rm</code></h2>
 <div class='help'><pre><code>Un-register a share volume. The underlying data (a subdirectory of the parent Storage) is PRESERVED unless `--purge-data` is passed
 
-Usage: delonix sharevolume rm [OPTIONS] &lt;NAME&gt;
+Usage: delonix-x86_64-linux sharevolume rm [OPTIONS] &lt;NAME&gt;
 
 Arguments:
   &lt;NAME&gt;  

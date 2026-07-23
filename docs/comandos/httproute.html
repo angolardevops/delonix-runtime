@@ -95,7 +95,7 @@ com <code>--expose &lt;porta&gt;</code> auto-regista-se sob
 para dar uma única URL pública a vários backends.</p>
 <div class='help'><pre><code>Embedded L7/HTTP reverse-proxy (`kind: HTTPRoute`): ls/apply/rm
 
-Usage: delonix httproute [OPTIONS] &lt;COMMAND&gt;
+Usage: delonix-x86_64-linux httproute [OPTIONS] &lt;COMMAND&gt;
 
 Commands:
   ls     State of the proxy + active routes (from the config in effect)
@@ -109,7 +109,7 @@ Options:
 <h2 id='apply'><code>httproute apply</code></h2>
 <div class='help'><pre><code>Apply the HTTPRoutes of a manifest (brings up/reloads the proxy)
 
-Usage: delonix httproute apply [OPTIONS]
+Usage: delonix-x86_64-linux httproute apply [OPTIONS]
 
 Options:
   -f, --file &lt;FILE&gt;   Manifest file (default `./delonix-manifest.yaml`)
@@ -119,7 +119,7 @@ Options:
 <h2 id='ls'><code>httproute ls</code></h2>
 <div class='help'><pre><code>State of the proxy + active routes (from the config in effect)
 
-Usage: delonix httproute ls [OPTIONS]
+Usage: delonix-x86_64-linux httproute ls [OPTIONS]
 
 Options:
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
@@ -128,7 +128,7 @@ Options:
 <h2 id='rm'><code>httproute rm</code></h2>
 <div class='help'><pre><code>Stop the proxy and unpublish the ports (teardown)
 
-Usage: delonix httproute rm [OPTIONS]
+Usage: delonix-x86_64-linux httproute rm [OPTIONS]
 
 Options:
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
