@@ -291,8 +291,7 @@ pub fn parse_dockerfile_with_args(text: &str, cli_args: &[(String, String)]) -> 
                 }
             }
             // compatibility: accepted but with no build effect (metadata)
-            "LABEL" | "EXPOSE" | "MAINTAINER" | "VOLUME" | "STOPSIGNAL"
-            | "SHELL" | "ONBUILD" => {}
+            "LABEL" | "EXPOSE" | "MAINTAINER" | "VOLUME" | "STOPSIGNAL" | "SHELL" | "ONBUILD" => {}
             other => {
                 return Err(Error::Invalid(format!(
                     "Dockerfile line {}: unknown instruction `{other}`",
@@ -653,10 +652,7 @@ mod tests {
         let mut known = HashMap::new();
         known.insert("V".to_string(), "3.19".to_string());
         known.insert("PKG".to_string(), "curl".to_string());
-        assert_eq!(
-            substitute_args("alpine:${V}", &known),
-            "alpine:3.19"
-        );
+        assert_eq!(substitute_args("alpine:${V}", &known), "alpine:3.19");
         assert_eq!(
             substitute_args("apt install $PKG now", &known),
             "apt install curl now"
@@ -687,11 +683,8 @@ mod tests {
         // Docker semantics: a --build-arg with no matching ARG in the file is a
         // no-op (not an error, not a phantom substitution).
         let df = "FROM alpine:3.19\nRUN echo $GHOST";
-        let parsed = parse_dockerfile_with_args(
-            df,
-            &[("GHOST".to_string(), "boo".to_string())],
-        )
-        .unwrap();
+        let parsed =
+            parse_dockerfile_with_args(df, &[("GHOST".to_string(), "boo".to_string())]).unwrap();
         assert!(matches!(&parsed.steps[0], super::Step::Run(s) if s == "echo $GHOST"));
     }
 

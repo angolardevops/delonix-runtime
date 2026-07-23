@@ -315,8 +315,8 @@ fn build_one_stage(
                     // Cache key includes the ACTUAL bytes being copied, not just
                     // the src/dst strings — a file whose content changed must
                     // invalidate the cache from here on, same as Docker.
-                    let content_hash = hash_path_content(&hash_src_path)
-                        .unwrap_or_else(|_| "unreadable".into());
+                    let content_hash =
+                        hash_path_content(&hash_src_path).unwrap_or_else(|_| "unreadable".into());
                     let new_hash = hash_link(
                         &chain_hash,
                         &format!("COPY:{stage_rel}:{dst}:{content_hash}"),
@@ -331,14 +331,7 @@ fn build_one_stage(
                             continue;
                         }
                     }
-                    ensure_container(
-                        store,
-                        &mut container,
-                        &cur_id,
-                        &cur_rootfs,
-                        from,
-                        rootless,
-                    )?;
+                    ensure_container(store, &mut container, &cur_id, &cur_rootfs, from, rootless)?;
                     copy_into_rootfs(src_root, &cur_rootfs, &stage_rel, dst, &cur_workdir)?;
                     if use_cache {
                         save_to_cache(&new_hash, &cur_rootfs);
@@ -357,14 +350,7 @@ fn build_one_stage(
                             continue;
                         }
                     }
-                    ensure_container(
-                        store,
-                        &mut container,
-                        &cur_id,
-                        &cur_rootfs,
-                        from,
-                        rootless,
-                    )?;
+                    ensure_container(store, &mut container, &cur_id, &cur_rootfs, from, rootless)?;
                     let exports: String = cur_env.iter().map(|kv| sh_export(kv)).collect();
                     let shell =
                         format!("mkdir -p {cur_workdir} && cd {cur_workdir}; {exports}{cmdline}");
@@ -505,10 +491,7 @@ pub fn build_from_spec(
             .stages
             .iter()
             .any(|s| s.name.as_deref() == Some(df.from.as_str()))
-            || df
-                .from
-                .parse::<usize>()
-                .is_ok_and(|i| i < df.stages.len());
+            || df.from.parse::<usize>().is_ok_and(|i| i < df.stages.len());
         if final_from_is_stage {
             return Err(Error::Invalid(format!(
                 "build multi-stage em modo root (overlay): o estágio final (`FROM {}`) tem de ser \
@@ -546,13 +529,7 @@ pub fn build_from_spec(
         }
 
         let (ids, final_state) = build_one_stage(
-            &store,
-            &images,
-            context,
-            &df.from,
-            &df.steps,
-            &stages,
-            use_cache,
+            &store, &images, context, &df.from, &df.steps, &stages, use_cache,
         );
         all_ids.extend(ids);
         let final_state = final_state?;
@@ -667,7 +644,9 @@ fn commit_flat_rootless(
             "empacotar rootfs dentro do userns mapeado falhou (delonix __buildtar)".into(),
         )),
         // Without subuid (rootless single-uid): the RUN files are our uid's.
-        None => images.commit_flat_rootfs(Path::new(rootfs), cmd, entrypoint, env, workdir, user, tag),
+        None => {
+            images.commit_flat_rootfs(Path::new(rootfs), cmd, entrypoint, env, workdir, user, tag)
+        }
     };
     let _ = std::fs::remove_file(&tar_path); // best-effort, never hides the result
     result
