@@ -180,20 +180,40 @@ fn log_path(name: &str) -> PathBuf {
 /// `kind: Secret`'s named key, else `None` (the free/ephemeral path of every
 /// provider here works with no token at all).
 fn resolve_token(literal: Option<String>, secret_ref: Option<String>) -> Result<Option<String>> {
-    if literal.is_some() {
-        return Ok(literal);
-    }
-    let Some(name) = secret_ref else {
-        return Ok(None);
+    let token = if let Some(t) = literal {
+        Some(t)
+    } else if let Some(name) = secret_ref {
+        let store = delonix_runtime_core::SecretStore::open(state_root())?;
+        let s = store.load(&name)?;
+        Some(s.data.get("token").cloned().ok_or_else(|| {
+            Error::Invalid(super::po::tf(
+                "secret '{name}' has no 'token' key",
+                &[("name", &name)],
+            ))
+        })?)
+    } else {
+        None
     };
-    let store = delonix_runtime_core::SecretStore::open(state_root())?;
-    let s = store.load(&name)?;
-    s.data.get("token").cloned().map(Some).ok_or_else(|| {
-        Error::Invalid(super::po::tf(
-            "secret '{name}' has no 'token' key",
-            &[("name", &name)],
-        ))
-    })
+    // BUG FIXED HERE (CRITICAL, found live by adversarial review): pinggy's
+    // token is embedded as `<token>@free.pinggy.io`, the LAST positional argv
+    // element handed to `ssh` — no other validation stood between a token and
+    // that argv slot. `ssh`'s argument parser is hand-rolled (not glibc
+    // getopt) but still permutes: a token of `-oProxyCommand=<cmd>` is parsed
+    // as an ssh OPTION regardless of position, executing an attacker's shell
+    // command via `/bin/sh -c` before any network connection is even made —
+    // local RCE as whoever runs `delonix tunnel apply/expose`. Rejecting a
+    // leading `-` here protects every provider's use of the token (pinggy's
+    // ssh argv AND ngrok's `--authtoken <value>`), not just the one call site
+    // that happened to be exploitable today.
+    if let Some(t) = &token {
+        if t.starts_with('-') {
+            return Err(Error::Invalid(
+                "token não pode começar por '-' (seria interpretado como uma opção do binário do provider)"
+                    .into(),
+            ));
+        }
+    }
+    Ok(token)
 }
 
 fn config_hash(spec: &TunnelSpec, token: &Option<String>) -> String {
@@ -404,6 +424,13 @@ fn spawn_pinggy(rec: &mut TunnelRecord, token: Option<&str>) -> Result<()> {
         "ExitOnForwardFailure=yes".to_string(),
         "-R".to_string(),
         format!("0:localhost:{}", rec.local_port),
+        // `--` before the positional destination: `resolve_token` already
+        // rejects a leading `-`, but this is the same defense-in-depth
+        // convention the codebase already applies to `virsh`/`ssh` argv
+        // elsewhere (see cluster.rs) — belt and suspenders, verified live
+        // that OpenSSH honors it (a `--`-prefixed destination is treated
+        // literally, never as an option, regardless of its content).
+        "--".to_string(),
         user_host,
     ];
     if rec.hostname.is_some() {
@@ -664,6 +691,23 @@ mod tests {
             found,
             Some("https://ccjjc-197-148-40-67.run.pinggy-free.link".to_string())
         );
+    }
+
+    #[test]
+    fn resolve_token_recusa_token_a_comecar_por_traco() {
+        // CRITICAL fixed here: a token like "-oProxyCommand=..." embedded as
+        // `<token>@free.pinggy.io`, the last positional ssh argv element, was
+        // parsed by ssh as an OPTION instead of part of the destination —
+        // local RCE via ProxyCommand. Reject before it ever reaches argv.
+        let err = resolve_token(Some("-oProxyCommand=touch /tmp/pwned".to_string()), None)
+            .unwrap_err();
+        assert!(format!("{err}").contains("não pode começar por"));
+        // A normal token is untouched.
+        assert_eq!(
+            resolve_token(Some("mytoken".to_string()), None).unwrap(),
+            Some("mytoken".to_string())
+        );
+        assert_eq!(resolve_token(None, None).unwrap(), None);
     }
 
     #[test]

@@ -967,11 +967,44 @@ fn mount_target_safe(target: &str) -> bool {
             .any(|c| matches!(c, std::path::Component::ParentDir))
 }
 
+/// Resolves `target` (an in-container path, already lexically validated by
+/// `mount_target_safe`) against `rootfs`, component-by-component, refusing to
+/// descend through any symlink an image layer may have planted along the
+/// way. `mount_target_safe`'s lexical `..` check is not enough on its own:
+/// `create_dir_all`/`OpenOptions::open` (called on the joined path right
+/// after this) FOLLOW symlinks, and `bind_volume` runs BEFORE `pivot_root`
+/// while `/` is still the real host filesystem — an absolute symlink at ANY
+/// path component (a malicious image shipping e.g. `/etc -> /root`, or the
+/// final mount-target component itself already existing as one) redirects
+/// the destination to an arbitrary real host path, and the subsequent
+/// create/open then create real directories/files on the host, as the
+/// engine's own uid. Mirrors the confinement technique `cmd::build::
+/// confine_to` already uses for the build's COPY (a sibling of this exact
+/// bug class, fixed there first) — this is the engine-side equivalent.
+fn safe_bind_target(rootfs: &str, target: &str) -> Option<std::path::PathBuf> {
+    let mut current = std::path::PathBuf::from(rootfs);
+    for comp in std::path::Path::new(target).components() {
+        let std::path::Component::Normal(c) = comp else {
+            continue;
+        };
+        current.push(c);
+        if let Ok(meta) = std::fs::symlink_metadata(&current) {
+            if meta.file_type().is_symlink() {
+                return None;
+            }
+        }
+    }
+    Some(current)
+}
+
 fn bind_volume(rootfs: &str, m: &Mount) -> nix::Result<()> {
     if !mount_target_safe(&m.target) {
         return Err(nix::errno::Errno::EINVAL);
     }
-    let dst = format!("{rootfs}{}", m.target);
+    let Some(dst_path) = safe_bind_target(rootfs, &m.target) else {
+        return Err(nix::errno::Errno::EINVAL);
+    };
+    let dst = dst_path.to_string_lossy().into_owned();
     // File source (e.g. secret) → the target must be a FILE; directory source
     // → a directory.
     if std::path::Path::new(&m.source).is_file() {
@@ -4423,6 +4456,55 @@ mod tests {
         );
 
         std::fs::remove_dir_all(&base).ok();
+    }
+
+    #[test]
+    fn safe_bind_target_recusa_symlink_plantado_pela_imagem() {
+        // HIGH fixed here: `mount_target_safe` only rejects lexical `..` —
+        // it never resolves symlinks, and `create_dir_all`/`OpenOptions::open`
+        // (called on the joined path right after, before `pivot_root`) FOLLOW
+        // them. A malicious image shipping e.g. `/etc -> /root` inside its
+        // rootfs redirects a `-v vol:/etc/pwned` mount target to a real host
+        // path. `safe_bind_target` must refuse to descend through ANY
+        // symlink component, whether in the middle of the path or as the
+        // final target itself.
+        let base = std::env::temp_dir().join(format!(
+            "delonix-safe-bind-target-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let rootfs = base.join("rootfs");
+        std::fs::create_dir_all(&rootfs).unwrap();
+
+        // Case 1: an intermediate path component is a symlink escaping rootfs.
+        let outside = base.join("outside-victim");
+        std::fs::create_dir_all(&outside).unwrap();
+        std::os::unix::fs::symlink(&outside, rootfs.join("etc")).unwrap();
+        assert!(
+            safe_bind_target(&rootfs.to_string_lossy(), "/etc/pwned").is_none(),
+            "um symlink a meio do caminho deve ser recusado"
+        );
+
+        // Case 2: the FINAL target component itself is already a symlink.
+        let victim_file = base.join("victim-file");
+        std::fs::write(&victim_file, b"secret").unwrap();
+        std::fs::create_dir_all(rootfs.join("app")).unwrap();
+        std::os::unix::fs::symlink(&victim_file, rootfs.join("app").join("data")).unwrap();
+        assert!(
+            safe_bind_target(&rootfs.to_string_lossy(), "/app/data").is_none(),
+            "um symlink no próprio componente final deve ser recusado"
+        );
+
+        // Legitimate case: no symlinks anywhere, real target resolves normally.
+        assert_eq!(
+            safe_bind_target(&rootfs.to_string_lossy(), "/data/inside"),
+            Some(rootfs.join("data").join("inside"))
+        );
+
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     #[test]

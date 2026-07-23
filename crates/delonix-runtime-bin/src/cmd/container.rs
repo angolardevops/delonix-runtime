@@ -308,6 +308,20 @@ fn custom_net_name(net: &str) -> Option<String> {
     (net != "host" && net != "none").then(|| net.to_string())
 }
 
+/// Whitelist for a container's name: alnum + `-`/`_`, non-empty, doesn't
+/// start with `-`. Deliberately excludes `.` (unlike `delonix_vm::
+/// valid_vm_name`, which allows it) — see the call site for why: a dotted
+/// container name is indistinguishable from an external FQDN to the DNS
+/// resolver's whole-name match, letting it hijack that domain node-wide.
+fn valid_container_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 253
+        && !name.starts_with('-')
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+}
+
 // ===========================================================================
 // Pod-shaped `kind: Container` (k8s-like) — opt-in when `spec.containers` is
 // present. Normalizes to the SAME internal `RunOpts` as the flat spec, so the
@@ -1788,6 +1802,23 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
                 .unwrap_or_else(|| format!("dlx-{}", &id[..8.min(id.len())]))
         }
     };
+    // BUG FIXED HERE (HIGH, found live by adversarial review): no code path
+    // anywhere ever validated a container's name — unlike VM/Secret/Volume,
+    // which all got a `valid_*_name` boundary check in earlier audits. The
+    // internal DNS resolver (`delonix-net::infra::parse_internal_name`)
+    // treats any name WITHOUT a `.delonix.internal`/`.delonix.io` suffix as a
+    // whole-name match resolvable from ANY namespace — an ordinary
+    // `container run --name registry.npmjs.org` (no manifest, no privilege)
+    // makes the holder's node-wide DNS server answer every OTHER container's
+    // lookup of that hostname with the attacker's own IP, hijacking it across
+    // every namespace, silently, ahead of the real upstream forward.
+    if !valid_container_name(&cname) {
+        return Err(Error::Invalid(format!(
+            "invalid container name '{cname}' — only letters, digits, '-', '_' allowed (no '.': \
+             a dotted name would be indistinguishable from an external domain to internal DNS \
+             resolution, letting a container hijack that domain node-wide)"
+        )));
+    }
     // UNIQUE name, like docker ("name is already in use"). Without this, several
     // containers with the same name got created: `find` resolves to the first, and
     // an `rm <name>` only caught that one — the rest were left orphaned and invisible
@@ -3972,7 +4003,7 @@ mod tests {
     use super::super::util::compose_command;
     use super::{
         fmt_ports, fmt_status, next_extra_idx, normalize_container_spec, parse_burst_bytes,
-        parse_rate_bits, policy_supervised, should_restart, ContainerSpec,
+        parse_rate_bits, policy_supervised, should_restart, valid_container_name, ContainerSpec,
     };
     use delonix_runtime_core::{Container, ExtraNet, Status};
 
@@ -4131,6 +4162,20 @@ mod tests {
         assert_eq!(split_cp_arg("/mnt/disco:1/f"), None);
         // An empty name is not a container.
         assert_eq!(split_cp_arg(":/etc"), None);
+    }
+
+    #[test]
+    fn valid_container_name_recusa_pontos_e_outros_exploits() {
+        // HIGH fixed here: a dotted name is indistinguishable from an
+        // external FQDN to the DNS resolver's whole-name match — reject it.
+        assert!(!valid_container_name("registry.npmjs.org"));
+        assert!(!valid_container_name("api.github.com"));
+        assert!(!valid_container_name(""));
+        assert!(!valid_container_name("-x"));
+        // legitimate names (incl. the auto-derived "king-place-NN" pattern).
+        assert!(valid_container_name("njinga-benguela-07"));
+        assert!(valid_container_name("web"));
+        assert!(valid_container_name("my_app-2"));
     }
 
     #[test]
