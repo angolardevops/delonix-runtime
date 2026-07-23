@@ -458,6 +458,12 @@ pub enum VmCmd {
         #[arg(long)]
         name: Option<String>,
     },
+    /// List the tags available in a remote OCI repository — with no
+    /// argument, the OFFICIAL Delonix golden image repo (discover which
+    /// k8s versions are published before `pull`).
+    LsRemote {
+        source: Option<String>,
+    },
     /// Push a local golden VM image to an OCI registry (`vm push <name> <target>`).
     Push {
         name: String,
@@ -886,6 +892,10 @@ pub fn run(action: VmCmd) -> Result<()> {
             let store = super::vmimage::VmImageStore::open(super::util::state_root())?;
             let src = source.unwrap_or_else(|| super::vmimage::OFFICIAL_VM_IMAGE.to_string());
             super::vmimage::cmd_pull(&store, &src, name)
+        }
+        VmCmd::LsRemote { source } => {
+            let src = source.unwrap_or_else(|| super::vmimage::OFFICIAL_VM_IMAGE.to_string());
+            super::vmimage::cmd_ls_remote(&src)
         }
         VmCmd::Push { name, target } => {
             let store = super::vmimage::VmImageStore::open(super::util::state_root())?;

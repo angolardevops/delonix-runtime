@@ -69,6 +69,9 @@ pub enum ImageCmd {
         #[arg(long, value_name = "PEM")]
         verify: Option<PathBuf>,
     },
+    /// (only with `--vm`) List the tags available in a remote OCI repository
+    /// — with no argument, the OFFICIAL Delonix golden image repo.
+    LsRemote { source: Option<String> },
     /// List local images.
     Ls,
     /// Human-readable detail of one or more images, `kubectl describe`-style
@@ -205,6 +208,10 @@ pub enum VmSub {
         #[arg(long)]
         name: Option<String>,
     },
+    /// List the tags available in a remote OCI repository — with no
+    /// argument, the OFFICIAL Delonix golden image repo (discover which
+    /// k8s versions are published before `pull`/`--k8s-version`).
+    LsRemote { source: Option<String> },
     /// Publish a local VM image to an OCI registry.
     Push { name: String, target: String },
     /// Build the golden VM image (Ubuntu + kubeadm/kubelet/kubectl + `delonix-cri`).
@@ -262,6 +269,7 @@ pub fn run(vm: bool, action: ImageCmd) -> Result<()> {
             VmSub::Ls => VmImageCmd::Ls,
             VmSub::Describe { names } => VmImageCmd::Describe { names },
             VmSub::Pull { source, name } => VmImageCmd::Pull { source, name },
+            VmSub::LsRemote { source } => VmImageCmd::LsRemote { source },
             VmSub::Push { name, target } => VmImageCmd::Push { name, target },
             VmSub::Build {
                 tag,
@@ -300,6 +308,12 @@ pub fn run(vm: bool, action: ImageCmd) -> Result<()> {
             })?;
             cmd_pull(&images, &image, verify.as_deref())
         }
+        ImageCmd::LsRemote { .. } => Err(Error::Invalid(
+            super::po::t(
+                "`ls-remote` of container images is not supported yet — use `delonix image --vm ls-remote` for VM images",
+            )
+            .into(),
+        )),
         ImageCmd::Ls => cmd_ls(&images),
         ImageCmd::Describe { names } => cmd_describe(&images, &names),
         ImageCmd::Tag { source, target } => cmd_tag(&images, &source, &target),
@@ -365,6 +379,7 @@ fn run_vm(action: ImageCmd) -> Result<()> {
             source: image,
             name: None,
         },
+        ImageCmd::LsRemote { source } => VmImageCmd::LsRemote { source },
         ImageCmd::Push { name, target } => VmImageCmd::Push {
             name,
             // A VM image has no repo_tags from which to infer the destination.
