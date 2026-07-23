@@ -88,7 +88,7 @@ provisiona as VMs a partir da imagem VM dourada, espera pelo SSH e corre o MESMO
 comando, do zero a um cluster com o <code>delonix-cri</code> como runtime (sem containerd).</p>
 <div class='help'><pre><code>Idempotent `kubeadm` bootstrap over SSH (`kind: Cluster`), or full VM provisioning
 
-Usage: delonix cluster [OPTIONS] &lt;COMMAND&gt;
+Usage: delonix-x86_64-linux cluster [OPTIONS] &lt;COMMAND&gt;
 
 Commands:
   init     Initialize a project with the cluster manifests (kind/vm/ssh) — files ALREADY FILLED IN (images included), ready to use without editing anything
@@ -105,7 +105,7 @@ Options:
 <h2 id='apply'><code>cluster apply</code></h2>
 <div class='help'><pre><code>Apply the `kind: Cluster` document(s) of a manifest
 
-Usage: delonix cluster apply [OPTIONS]
+Usage: delonix-x86_64-linux cluster apply [OPTIONS]
 
 Options:
   -f, --file &lt;FILE&gt;   
@@ -119,7 +119,7 @@ auditoria ofensiva do projecto, com testes a replicar o exploit.</p>
 <h2 id='kubeadm'><code>cluster kubeadm</code></h2>
 <div class='help'><pre><code>Provision VMs (golden VM image) + `kubeadm` bootstrap — from zero to a working cluster, without writing a manifest by hand
 
-Usage: delonix cluster kubeadm [OPTIONS] --name &lt;NAME&gt; --network &lt;NETWORK&gt;
+Usage: delonix-x86_64-linux cluster kubeadm [OPTIONS] --name &lt;NAME&gt; --network &lt;NETWORK&gt;
 
 Options:
       --l18n &lt;en|pt&gt;
