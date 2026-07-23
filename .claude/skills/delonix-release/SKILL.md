@@ -22,6 +22,11 @@ glibc 2.35). O trabalho local é: notas → bump → tag → monitorizar → val
 3. **Bump** — `version = "X.Y.Z"` no `[workspace.package]` do `Cargo.toml` raiz
    + `cargo update --workspace` (actualiza o lock; o CI compila `--locked`).
    O workflow ABORTA se `--version` do binário ≠ tag — o bump não é opcional.
+   Armadilha do `Edit`: a linha 34 do `Cargo.toml` tem `oci-spec = { version =
+   "0.10.0", ... }` — uma dependência SEM RELAÇÃO com a versão do workspace que
+   por vezes coincide em string com ela, causando "2 matches" no `old_string`.
+   Inclui sempre `[workspace.package]\nversion = "X.Y.Z"` como contexto do
+   `old_string` para apontar só à linha 17.
 4. **Documentação da CLI** (só se a superfície de comandos mudou): o site de
    docs embebe o `--help` real — depois de a release publicar, descarregar o
    binário publicado e regenerar:
