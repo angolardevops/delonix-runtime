@@ -86,7 +86,7 @@ maioria dos utilizadores nunca precisa disto — usa os grupos de alto nível �
 depuração e integração.</p>
 <div class='help'><pre><code>Low-level management of the rootless ingress infra (up/status/attach/publish/firewall)
 
-Usage: delonix netns [OPTIONS] &lt;COMMAND&gt;
+Usage: delonix-x86_64-linux netns [OPTIONS] &lt;COMMAND&gt;
 
 Commands:
   up         Bring the ingress infra up (idempotent): holder netns + delonix0 + single slirp
@@ -106,7 +106,7 @@ Options:
 <h2 id='status'><code>netns status</code></h2>
 <div class='help'><pre><code>Show the ingress infra status (holder/slirp pids, bridge, refcount)
 
-Usage: delonix netns status [OPTIONS]
+Usage: delonix-x86_64-linux netns status [OPTIONS]
 
 Options:
       --json          Emit JSON instead of a human summary
@@ -116,7 +116,7 @@ Options:
 <h2 id='up'><code>netns up</code></h2>
 <div class='help'><pre><code>Bring the ingress infra up (idempotent): holder netns + delonix0 + single slirp
 
-Usage: delonix netns up [OPTIONS]
+Usage: delonix-x86_64-linux netns up [OPTIONS]
 
 Options:
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
