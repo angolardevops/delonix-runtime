@@ -647,46 +647,71 @@ comprometido ou TLS-stripping passaria. Aceite como risco documentado (mesma
 natureza do cloud-hypervisor que já se instalava assim); fechar exigiria os
 upstreams publicarem/pinar-se um digest.
 
-## Auditoria E2E ampla (14 finders × verificação adversarial) — achados ABERTOS
+## Auditoria E2E ampla (14 finders × verificação adversarial) — estado
 
 Auditoria ofensiva de todo o ecossistema (~50k LOC, 9 crates: bugs/gaps/design/
 performance/concorrência/memória/recursos), 14 finders por subsistema, cada
 achado passado por 2 céticos adversariais. **Relatório completo em
 [docs/AUDITORIA-E2E.md](docs/AUDITORIA-E2E.md)** — 24 achados confirmados (6 HIGH,
-12 MEDIUM, 6 LOW) + 11 por-verificar (a corrida bateu no limite de sessão a meio
-da verificação; os subsistemas de maior risco — `runtime/lib.rs` 104 unsafe,
-`net/infra.rs` — ficaram sem 2.º par de olhos adversarial, precisam de 2.ª corrida).
+12 MEDIUM, 6 LOW) + 11 por-verificar nessa corrida original.
 
-**Padrão dominante dos HIGH — escrita/eliminação de ficheiros fora do sandbox por
-input não-confiável** (nenhum RCE novo; a fronteira rootless→root e a validação de
-CLI/manifesto das auditorias anteriores mantêm-se sólidas). Ainda **por corrigir**:
+**Os 6 HIGH foram CORRIGIDOS no v0.9.0** (path traversal em whiteouts OCI via
+`safe_rel`+confinamento canonicalizado; IDs de CRI via `valid_cri_id`+`remove_rec`;
+nome de VM em `generate_seed_iso` via `valid_vm_name` na origem; kubeconfig via
+`sudo cat` para stdout do SSH, nunca toca em disco remoto; `COPY` do build via
+`confine_to` (canonicaliza + confere `starts_with`); socket de gestão via
+`SO_PEERCRED`+modo 0600, espelhado no `delonix-cri`) — **re-verificados ao vivo
+numa 2.ª sessão (2026-07-23), código actual lido linha a linha, os 6 continuam
+corrigidos**, sem regressão.
 
-1. **Path traversal em whiteouts OCI** (`delonix-image/overlay.rs:81`) — o ramo de
-   whiteout de `apply_layer_flat` usa o `entry.path()` CRU do tar (nunca passa por
-   `safe_rel`, ao contrário do ramo de extracção) em `remove_dir_all`/`remove_file`.
-   Uma imagem com `../../../home/<u>/.wh..wh..opq` apaga o home do utilizador num
-   `container run` rootless normal. Ambos os céticos confirmaram.
-2. **IDs de CRI sem validação** (`delonix-cri/lifecycle.rs:745`) — `container_id`/
-   `pod_sandbox_id` viram path (`{id}.json`) sem whitelist; um `../` num pedido do
-   kubelet apaga/lê ficheiros arbitrários (root nos nós k8s). O `log_path` ali ao
-   lado JÁ é validado — o id não.
-3. **O fix da auditoria #2 (`valid_vm_name`) está INCOMPLETO** — está na fronteira
-   do motor (`delonix_vm::create`), mas `generate_seed_iso` (bin, `cmd/vm.rs:1043`)
-   corre ANTES com o nome cru: `create_dir_all`+escrita da seed.iso (conteúdo
-   controlado via `--user-data`) fora do state-dir, depois `create()` rejeita —
-   tarde demais. Falta validar em `generate_seed_iso`/nos call-sites e no
-   `metadata.name` do manifesto.
-4. **API de gestão sem autenticação de peer** (`delonix-mgmt/lib.rs:63`) — o socket
-   unix não valida `SO_PEERCRED` (ao contrário do control socket do holder).
-5. **COPY do build é lexical** (`cmd/build.rs:282`) — `safe_join` não resolve
-   symlinks; um symlink plantado num `RUN` anterior desvia a escrita para fora.
-6. **kubeconfig cluster-admin em `/tmp` 0644** (`cmd/cluster.rs:1115`).
+**Os outros 29 (12 MEDIUM + 6 LOW confirmados + 11 por-verificar) continuam TODOS
+em aberto** — re-confirmados na mesma sessão (nenhum foi refutado, nenhum
+parcialmente corrigido); ver o relatório completo para detalhe/correcção de cada
+um. Entre os "por-verificar" da corrida original, dois destacam-se por severidade
+alta e vale re-ler antes de mexer nesse código: fuga de rootfs no `--rm`
+(`container.rs`, ambos os ramos foreground/watcher nunca chamam
+`remove_container_dir`) e o `egress` global que apaga regras per-network por
+correspondência de substring demasiado ampla (`infra.rs:1531`, ver abaixo).
 
-MEDIUM/LOW (password CIFS em argv world-readable, prune que derruba o ingress a
-meio de um `run`, match de path-prefix do proxy sem fronteira de segmento, admission
-gate `DELONIX_SCAN_ON_PULL` fail-OPEN, buffering de blob sem limite → OOM, etc.) e
-os detalhes/correcções de cada um: ver o relatório. **Nada disto foi corrigido
-ainda** — é a lista de trabalho de segurança a seguir.
+### 2.ª ronda (2026-07-23) — 4 auditorias em paralelo, 2 CRITICAL + 3 HIGH novos, CORRIGIDOS no v0.10.1
+
+Pedida uma revisão completa (bugs/gaps/design/arquitectura, não só segurança).
+Além de re-verificar os 35 achados acima, 3 auditorias frescas: `delonix-runtime/
+lib.rs` (104 `unsafe`, NUNCA antes auditado), `delonix-net/infra.rs` (holder/
+control-socket), e todo o código desta MESMA sessão anterior (Tunnel, ShareVolume,
+`cluster.rs`, specs agrupados) — código com zero revisão prévia. 2 CRITICAL + 3
+HIGH, **todos já em produção no v0.10.0**, corrigidos de imediato (ver
+[docs/releases/v0.10.1.md](docs/releases/v0.10.1.md) para o detalhe completo):
+
+1. **`kind: ShareVolume` com `name: ".."` escapava para o Storage pai inteiro** —
+   `VolumeStore::valid_name` aceitava um nome só de `.` (`".."` passava no
+   charset); `sharevolume rm --purge-data` nesse nome apagava o NAS partilhado
+   inteiro. Corrigido no `valid_name` (recusa `.`-prefixo/`..`), protege todos os
+   consumidores do store.
+2. **Injecção de argv SSH via token do `kind: Tunnel`** — o token do pinggy ia
+   sem `--` como último argumento posicional do `ssh`; um token
+   `-oProxyCommand=<cmd>` era lido como opção → RCE local. Corrigido em
+   `resolve_token` (recusa `-` inicial) + `--` no argv.
+3. **Nomes de container nunca validados** — `container run --name
+   registry.npmjs.org` (sem privilégio) sequestrava a resolução DNS desse
+   hostname para TODO o nó, em qualquer namespace. Corrigido com
+   `valid_container_name` (exclui `.` deliberadamente, ao contrário do
+   `valid_vm_name`).
+4. **`cluster kubeadm --copy-kubeconfig` confiava no `admin.conf` remoto por
+   inteiro** — um `users[].user.exec` legal vira RCE local no operador se o
+   control-plane for comprometido depois do provisionamento. Corrigido:
+   `safe_cluster_entry`/`safe_user_entry` constroem entradas novas só com os
+   campos que o `admin.conf` real do kubeadm tem.
+5. **Bind-mounts seguiam symlinks plantados pela imagem, antes do `pivot_root`**
+   — `mount_target_safe` só lexical; a imagem podia redireccionar
+   `create_dir_all`/`open` para qualquer caminho real do host. Corrigido com
+   `safe_bind_target` (resolve componente a componente, recusa symlinks) — o
+   equivalente, do lado do motor, ao `confine_to` do build.
+
+Todos validados ao vivo contra o exploit real, não só testes unitários (ver o
+histórico de commits `4c3e223`/`456925f`). Achado #3 acima é uma escalada do
+achado "por-verificar" MEDIUM de DNS hijack da corrida original (o CLI directo,
+sem manifesto nenhum, já bastava).
 
 ## Ciclo de vida VM no libvirt (`vm stop/rm`) — managed save, órfãos, `--force`
 
