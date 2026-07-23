@@ -54,7 +54,7 @@ Validado com `cargo build`/`test`/`clippy --workspace` limpos e um teste de fumo
 | Feature | Docker/Podman tem | delonix | Evidência |
 |---|---|---|---|
 | **`--format` (Go template)** | ps/inspect/info com `--format '{{json .}}'`/`{{.Names}}` — scripts e o próprio `kind` dependem disto | **Ausente** — nenhuma flag de formato; inspect emite JSON fixo | `grep long="format"` em `crates/delonix-runtime-bin/src/` = 0; `cmd_inspect` container.rs:2394 |
-| **Multi-stage build** (`FROM…AS x` + `COPY --from`) | Total; é a norma de quase todo o Dockerfile de produção | **Ausente** — recusa com erro se houver >1 stage | cmd/build.rs:76-82; `COPY --from` erra em build.rs:224-228 |
+| ~~**Multi-stage build** (`FROM…AS x` + `COPY --from`)~~ | Total; é a norma de quase todo o Dockerfile de produção | ✅ **FEITO (2026-07-23)** — cada estágio ganha o seu próprio container/rootfs; `COPY --from=<nome-ou-índice>` lê do estágio já construído; `FROM <estágio-anterior>` clona via `cp -a --reflink=auto`. Gap conhecido: no modo root (overlay), o estágio FINAL ainda tem de ser uma imagem real (sem lineage OCI para um estágio clonado) — erro claro, não falha silenciosa | cmd/build.rs (`build_one_stage`/`resolve_stage_base`/`clone_rootfs`) |
 | **BuildKit/buildx** (`RUN --mount=secret/ssh/cache`, heredocs, `--platform`, `--cache-from/to`) | docker buildx / buildah | **Ausente** — sem qualquer flag de segredo/cache/plataforma | `BuildArgs` só context/file/tag, cmd/build.rs:26-37 |
 | **Docker Engine API (`/v1.4x` docker-compatível)** | docker.sock e `podman system service` expõem a MESMA API — é o que faz docker CLI/compose/testcontainers falarem via `DOCKER_HOST` | **Ausente** — API é schema próprio `/v1/...` para o control-plane privado | delonix-mgmt/src/lib.rs:100-148; grep `docker.sock`/`containers/json` = 0 |
 | **Ler `docker-compose.yml`** | docker compose / podman-compose nativos | **Ausente** — só manifesto próprio `delonix.io/v1` | main.rs sem subcomando Compose; grep 'compose' só apanha `compose_command` |
@@ -160,7 +160,7 @@ Honestamente, não é só "Docker com menos features" — há genuíno valor nov
 2. **`--format` / Go-template** em ps/inspect/info — bloqueante isolado para scripting. O modo Kind já não precisa disto para arrancar (resolvido — ver Diferenciais), mas continua útil para scripting/CI em geral.
 
 **Fase 2 — build de produção:**
-3. **Multi-stage build** (`FROM…AS` + `COPY --from`) — sem isto quase nenhum Dockerfile moderno passa.
+3. ✅ **FEITO (2026-07-23)**: multi-stage build (`FROM…AS` + `COPY --from`) — ver secção 2a.
 4. **`--build-arg`/`ARG`** + **preservar ENTRYPOINT/USER no build rootless** (o default hoje perde-os) — correcções de correctude, não só de conforto.
 5. **Cache de layers** no caminho rootless (hoje 1 squash, cada RUN re-executa).
 6. **BuildKit-lite** — pelo menos `RUN --mount=type=secret` e `--platform` (segredos de build e cross-compile são o mínimo de CI serio).

@@ -142,12 +142,16 @@ image + kubeadm/kubelet/kubectl + <code>delonix-cri</code> — a base do <code>d
     "build": {
         "title": "delonix build",
         "tagline": "Constrói uma imagem a partir de um Dockerfile ou Delonixfile.",
-        "intro": """Build sem daemon nem BuildKit: sobe um container de trabalho, corre cada
-<code>RUN</code> por <code>exec</code>, aplica <code>COPY</code> no rootfs (confinado ao contexto —
-path traversal é rejeitado) e empacota o resultado. Sem <code>-f</code>, procura primeiro um
-<code>Delonixfile</code> no contexto e só depois um <code>Dockerfile</code> — a gramática é a mesma,
-com extensões (<code>SCAN</code>, <code>CPUS</code>, <code>MEMORY</code>, <code>SECURITY</code>,
-<code>HEALTHCHECK</code>). Limitação conhecida: só single-stage (multi-stage é recusado com erro claro).""",
+        "intro": """Build sem daemon nem BuildKit: sobe um container de trabalho por estágio, corre
+cada <code>RUN</code> por <code>exec</code>, aplica <code>COPY</code> no rootfs (confinado ao
+contexto — path traversal é rejeitado) e empacota o resultado. Sem <code>-f</code>, procura
+primeiro um <code>Delonixfile</code> no contexto e só depois um <code>Dockerfile</code> — a
+gramática é a mesma, com extensões (<code>SCAN</code>, <code>CPUS</code>, <code>MEMORY</code>,
+<code>SECURITY</code>, <code>HEALTHCHECK</code>). <strong>Multi-stage suportado</strong>
+(<code>FROM ... AS &lt;nome&gt;</code> + <code>COPY --from=&lt;estágio&gt;</code>); limitação
+conhecida: em modo root (overlay), o estágio final ainda tem de ser uma imagem real, não outro
+estágio (sem lineage OCI para um estágio clonado) — sem restrição em rootless. Sem BuildKit
+(sem <code>--build-arg</code> funcional, sem cache de camadas entre builds).""",
         "subs": {},
         "examples": [
             ("Build com tag", "delonix build -t minha-app:1.0 ."),
@@ -751,8 +755,8 @@ da auditoria</a>.</p>
 <table>
 <tr><th>Se precisas de…</th><th>Usa</th></tr>
 <tr><td>Correr um <code>docker-compose.yml</code> já existente</td><td>Docker ou Podman</td></tr>
-<tr><td>Um <code>Dockerfile</code> multi-stage moderno (<code>FROM … AS build</code>)</td>
-<td>Docker ou Podman — o Delonix só faz single-stage por agora</td></tr>
+<tr><td>Um pipeline de build com BuildKit (segredos de build, cache de camadas, cross-compile)</td>
+<td>Docker ou Podman — o Delonix faz multi-stage mas não tem BuildKit</td></tr>
 <tr><td>Cargas GPU/CUDA</td><td>Docker ou Podman (com nvidia-container-toolkit)</td></tr>
 <tr><td>Ferramentas que falam directamente com o Docker Engine (testcontainers, CI via
 <code>DOCKER_HOST</code>)</td><td>Docker ou Podman</td></tr>
@@ -785,7 +789,8 @@ crash (razão + snapshot do log, não só "Exited")</td></tr>
 <tr><td>Build de imagens (<code>Dockerfile</code>)</td>
 <td><span class="tag ok">forte — multi-stage, BuildKit, cache</span></td>
 <td><span class="tag ok">forte — via buildah</span></td>
-<td><span class="tag no">só single-stage, sem cache de camadas</span></td></tr>
+<td><span class="tag mid">multi-stage suportado; sem BuildKit (sem cache de camadas, sem
+<code>--build-arg</code> funcional)</span></td></tr>
 <tr><td><code>docker compose</code> / orquestração local</td>
 <td><span class="tag ok">nativo</span></td><td><span class="tag mid">podman-compose</span></td>
 <td><span class="tag no">manifesto próprio, sem parser de compose</span></td></tr>
@@ -840,9 +845,9 @@ nomeado montável por qualquer container, como um <code>PersistentVolume</code>.
 <ul>
 <li><strong>Não corre um <code>docker-compose.yml</code> existente</strong> nem fala a API do Docker
 — ferramentas que dependem disso (testcontainers, CI via <code>DOCKER_HOST</code>) não se ligam.</li>
-<li><strong>Build de imagens é básico</strong> — só single-stage, sem <code>--build-arg</code>
-funcional, sem cache de camadas; um <code>Dockerfile</code> de produção típico com multi-stage não
-passa.</li>
+<li><strong>Build de imagens ainda não tem BuildKit</strong> — multi-stage já funciona, mas sem
+<code>--build-arg</code> funcional, sem cache de camadas entre builds, sem
+<code>RUN --mount=secret</code>.</li>
 <li><strong>Sem GPU real</strong> — nenhuma carga CUDA corre hoje.</li>
 <li><strong>Projecto novo</strong> — sem o histórico de produção que o Docker e o Podman têm; ver o
 aviso de segurança no topo desta página antes de decidir.</li>
@@ -854,9 +859,9 @@ aviso de segurança no topo desta página antes de decidir.</li>
 <tr><td>Programador(a) a experimentar em local/homelab, ou a fazer bootstrap de um cluster
 Kubernetes pequeno sem instalar Docker</td>
 <td>Experimenta o Delonix hoje — é exactamente o caso em que já está forte.</td></tr>
-<tr><td>Equipa com um pipeline de build maduro (multi-stage, BuildKit, compose)</td>
+<tr><td>Equipa com um pipeline de build maduro (BuildKit, cache de camadas, compose)</td>
 <td>Fica no Docker/Podman para o build; podes correr as imagens resultantes no Delonix se quiseres
-testar a operação.</td></tr>
+testar a operação — multi-stage já funciona, mas sem BuildKit.</td></tr>
 <tr><td>Empresa a avaliar para produção multi-tenant ou com dados sensíveis</td>
 <td>Os 6 achados de segurança altos já estão corrigidos, mas aguarda a confirmação por uma 2.ª
 auditoria independente (aviso acima) antes de expor o motor a imagens ou utilizadores não
