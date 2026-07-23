@@ -4,6 +4,30 @@
 > (regenerado automaticamente pelo pipeline de release a cada tag publicada).
 > Não editar à mão — edita a nota da release respectiva.
 
+## v0.10.2 — `image --vm pull`/`image vm pull` sem argumento voltam a funcionar
+
+Fix pontual, encontrado ao vivo por um utilizador num host real: `delonix image vm
+pull --name delonix-vm-k8s:1.34` (sem `source`) dava `error: the following required
+arguments were not provided: <SOURCE>` — ao contrário do que a própria ajuda do
+comando promete ("com nenhum argumento, a imagem OFICIAL da Delonix"), comportamento
+que só `delonix vm pull` (uma definição de CLI irmã, separada) tinha mesmo.
+
+Três pontos de entrada partilham o mesmo `VmImageCmd::Pull` por baixo, e os TRÊS
+precisavam do fix (cada um alcançável independentemente e independentemente
+partido): `delonix vm pull` já funcionava; `delonix image vm pull` e `delonix image
+--vm pull` tinham `source`/`image` tipados como `String` obrigatória ao nível do
+clap, recusando a invocação sem argumento antes de qualquer código correr. Os três
+passam agora pelo mesmo `source.unwrap_or_else(|| OFFICIAL_VM_IMAGE.to_string())`
+dentro de `vmimage::run`. `ImageCmd::Pull.image` também serve o caminho (não
+relacionado) de pull de imagens de container, que não tem default sensato — esse
+handler passa a exigi-lo explicitamente com um erro claro em vez de depender do clap.
+
+Validado ao vivo: os 3 caminhos tentam agora o pull real em vez de errar de
+imediato; um `image pull` simples (sem `--vm`, sem referência) continua,
+correctamente, a exigi-la.
+
+---
+
 ## v0.10.1 — 2 CRITICAL + 3 HIGH corrigidos (revisão adversarial completa)
 
 Patch de segurança urgente. Pedida uma revisão de código completa ao runtime — bugs,
