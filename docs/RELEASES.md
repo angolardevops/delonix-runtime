@@ -4,6 +4,124 @@
 > (regenerado automaticamente pelo pipeline de release a cada tag publicada).
 > Não editar à mão — edita a nota da release respectiva.
 
+## v0.10.0 — kind: Tunnel, kind: ShareVolume, e um `cluster kubeadm` finalmente real
+
+O caminho `delonix cluster kubeadm`/`cluster apply` (modo `vm`) nunca tinha corrido de
+ponta a ponta antes desta release — cada tentativa real de o levar até um cluster
+Kubernetes a funcionar encontrou um bug novo, corrigido no acto. Também dois Kinds novos
+(`Tunnel`, `ShareVolume`), ambos validados ao vivo com tráfego/isolamento reais, não
+simulados.
+
+### `kind: Tunnel` — expor um serviço à internet pública
+
+`delonix tunnel apply|expose|ls|describe|rm`: leva tráfego da internet pública até UMA
+porta local, sem conta, sem IP público, sem tocar no router. Três providers, cada um o
+mecanismo REAL desse serviço:
+
+- **pinggy** — zero binário extra (`ssh` puro, já uma dependência do projecto). Grátis,
+  efémero.
+- **ngrok** — precisa do agente `ngrok` no PATH; a URL pública sai da API local do
+  próprio agente (não de scraping de logs).
+- **cloudflare** — precisa de `cloudflared`; por agora só o quick-tunnel efémero
+  (`*.trycloudflare.com`, sem conta). Um tunnel NOMEADO com domínio próprio precisa da
+  API do Cloudflare (accountId/zoneId/token) — desenhado mas não implementado, ver
+  limitações abaixo.
+
+Junta-se ao `kind: HTTPRoute` (já existente) apontando `localPort` para onde o proxy L7
+escuta — uma só URL pública, routing por Host para tantos backends quantos precisares.
+**Validado ao vivo**: tráfego HTTPS real da internet chegou a um servidor local através
+de um tunnel pinggy (HTTP 200); `rm` confirmado a matar o processo agente a sério.
+
+### `kind: ShareVolume` — multi-tenant num só NAS
+
+`delonix sharevolume apply|ls|describe|rm`: várias cargas a partilhar UM export
+NFS/CIFS/WebDAV (`kind: Storage`), cada uma com o seu ponto de montagem ISOLADO e a sua
+QUOTA. Sem mecanismo de montagem novo: cada `ShareVolume` é um subdirectório real da
+árvore já montada, registado como o seu próprio volume — a isolação é confinamento de
+caminho puro e o consumo usa `-v <nome>:/destino` de sempre, zero código novo do lado do
+container/vm/pod. Quota SOFT (uso medido + alerta) — o caminho HARD (loopback ext4) não
+compõe com um subdirectório de um mount de rede. **Validado ao vivo**: dois tenants no
+mesmo NAS, escrita num nunca visível no outro, alerta a mudar para OVER ao passar a
+quota, um container real a ler/escrever por `-v` normal.
+
+### `delonix cluster kubeadm` — 6 bugs reais, cada um encontrado a correr o comando a sério
+
+Este caminho (provisiona VMs + faz o bootstrap kubeadm) nunca tinha sido validado de
+ponta a ponta. Persistir até um cluster real a funcionar encontrou, um a um:
+
+1. **cloud-init só chegava ao utilizador `ubuntu`**, nunca ao `delonix` que a imagem
+   dourada cria e que o comando usa como login SSH — corrigido (`users:` scoped no
+   `user-data`).
+2. **`known_hosts` obsoleto** bloqueava a recriação de uma VM no mesmo IP (o
+   `StrictHostKeyChecking=accept-new` recusava, correctamente, uma chave de host
+   diferente) — purga automática antes da 1.ª tentativa.
+3. **`/etc/machine-id` partilhado entre VMs clonadas** — o `virt-customize` deixava um id
+   real gravado (uma imagem cloud normal vem vazia de propósito); o DUID do DHCP deriva
+   dele, e o dnsmasq via 3 VMs como o MESMO cliente, movendo o lease de uma para a
+   outra. Corrigido: `truncate -s 0 /etc/machine-id` como o último passo do build.
+4. **O loop de espera de SSH fixava-se no 1.º IP visto** e nunca voltava a verificar —
+   se o DHCP da VM mudasse a meio do boot (observado ao vivo), o loop martelava um
+   endereço morto até ao `--boot-timeout`.
+5. **`virsh domifaddr` lista leases obsoletas em ordem nenhuma** — apanhado a escolher o
+   IP errado tanto pela primeira como pela última linha. Corrigido: `virsh
+   net-dhcp-leases` tem um `Expiry Time` real e ordenável; a resolução de IP passa a
+   filtrar pelo MAC da própria VM e escolher o mais recente.
+6. **`kubeadm init`/`join` nunca passavam `--cri-socket`** — o kubeadm só auto-detecta
+   entre um punhado de caminhos conhecidos (containerd/CRI-O), tentava o socket do
+   containerd (que não existe nesta imagem) e falhava logo no preflight, antes de tocar
+   no `delonix-cri` de todo.
+
+Com os 6 corrigidos, o cluster passou a chegar consistentemente a `kubeadm init` a
+gerar certificados, kubeconfig e a arrancar o kubelet — o preflight do CRI, que falhava
+sempre antes do fix #6, passa a verde. (A validação completa até um nó `Ready` ficou
+limitada por pressão de memória do sandbox onde isto foi corrido, não por nenhum destes
+bugs — cada um tem prova ao vivo independente do resultado final.)
+
+Também novo: **`cluster kubeadm --copy-kubeconfig`** espera por todos os nós `Ready`
+antes de tocar em `~/.kube/config`, e passa a MERGE o cluster novo como o seu próprio
+contexto em vez do comportamento antigo (`fs::copy` simples, que só copiava na
+primeira vez — o 2.º cluster nunca aparecia). E **`--k8s-version 1.35`** passa a
+seleccionar automaticamente `delonix-vm-k8s:1.35` quando `--vm-image` é omitido.
+
+### `delonix vm ls` — mais colunas, `image --vm ls` mais claro
+
+`vm ls` ganha **UPTIME** (desde o boot actual, não desde a criação — distinto para uma
+VM reiniciada), **ROLE** (control-plane/worker, lido da convenção de nomes do `cluster
+kubeadm`), **GPU** (dispositivos PCI passthrough, agora persistidos no registo da VM) e
+um `--ports` opt-in (sonda TCP a um punhado de portas conhecidas). `image --vm ls`:
+coluna `UBUNTU` renomeada para `DISTRO`, mais uma coluna `KERNEL` nova (a versão do
+kernel instalado, lida via `virt-cat` sem nunca arrancar a imagem).
+
+### Layout YAML agrupado para `kind: Vm`/`kind: Container`
+
+Os specs destes dois Kinds tinham crescido para 30-40 campos sem estrutura nenhuma além
+de comentários. Passam a aceitar uma forma AGRUPADA (`resources:`/`network:`/`boot:`/
+`cloudInit:`/`libvirt:` na Vm; `resources:`/`network:`/`security:`/`storage:`/`env:`/
+`limits:` no Container) — a forma plana antiga continua 100% suportada, sem quebrar
+nenhum manifesto existente; os `examples/` passam a mostrar a forma nova.
+
+### Documentação
+
+Site regenerado: `httproute`/`tunnel`/`sharevolume`/`dash`/`docker-api` estavam
+completamente ausentes da referência (sem página, sem entrada na navegação). Exemplos
+passam a poder mostrar o RESULTADO real de um comando, não só o comando. Novo projecto
+completo (`examples/delonix-temp/` + tutorial): uma API FastAPI de tempo real, corrida a
+sério — build multi-stage → `container run` → `tunnel expose` até uma URL pública real,
+confirmada com `curl` de fora da máquina.
+
+### Limitações conhecidas
+
+- `Tunnel` com provider `cloudflare`: só o quick-tunnel efémero — um tunnel nomeado com
+  domínio próprio precisa da API do Cloudflare (accountId/zoneId/token), ainda por
+  implementar.
+- `cluster kubeadm`: validação completa até um nó `Ready` não foi possível fechar nesta
+  sessão por pressão de recursos do ambiente de desenvolvimento (não um bug do código —
+  cada um dos 6 fixes tem prova ao vivo independente).
+- Núcleo de syscalls do motor continua sem auditoria de segurança adversarial (ver
+  release anterior).
+
+---
+
 ## v0.9.0 — segurança fechada, build de produção (multi-stage/ARG/cache) e API Docker (leitura)
 
 A maior release em superfície desde o extraction do monorepo: fecha os 6 achados de
