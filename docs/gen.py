@@ -150,8 +150,10 @@ gramática é a mesma, com extensões (<code>SCAN</code>, <code>CPUS</code>, <co
 <code>SECURITY</code>, <code>HEALTHCHECK</code>). <strong>Multi-stage suportado</strong>
 (<code>FROM ... AS &lt;nome&gt;</code> + <code>COPY --from=&lt;estágio&gt;</code>); limitação
 conhecida: em modo root (overlay), o estágio final ainda tem de ser uma imagem real, não outro
-estágio (sem lineage OCI para um estágio clonado) — sem restrição em rootless. Sem BuildKit
-(sem <code>--build-arg</code> funcional, sem cache de camadas entre builds).""",
+estágio (sem lineage OCI para um estágio clonado) — sem restrição em rootless.
+<code>ARG</code>/<code>--build-arg</code> e <code>USER</code>/<code>ENTRYPOINT</code> já
+sobrevivem ao build (incluindo em rootless). Sem BuildKit (sem cache de camadas entre builds,
+sem <code>RUN --mount=secret</code>).""",
         "subs": {},
         "examples": [
             ("Build com tag", "delonix build -t minha-app:1.0 ."),
@@ -789,8 +791,8 @@ crash (razão + snapshot do log, não só "Exited")</td></tr>
 <tr><td>Build de imagens (<code>Dockerfile</code>)</td>
 <td><span class="tag ok">forte — multi-stage, BuildKit, cache</span></td>
 <td><span class="tag ok">forte — via buildah</span></td>
-<td><span class="tag mid">multi-stage suportado; sem BuildKit (sem cache de camadas, sem
-<code>--build-arg</code> funcional)</span></td></tr>
+<td><span class="tag mid">multi-stage + ARG/USER/ENTRYPOINT já funcionam; sem BuildKit (sem
+cache de camadas, sem <code>RUN --mount=secret</code>)</span></td></tr>
 <tr><td><code>docker compose</code> / orquestração local</td>
 <td><span class="tag ok">nativo</span></td><td><span class="tag mid">podman-compose</span></td>
 <td><span class="tag no">manifesto próprio, sem parser de compose</span></td></tr>
@@ -845,9 +847,9 @@ nomeado montável por qualquer container, como um <code>PersistentVolume</code>.
 <ul>
 <li><strong>Não corre um <code>docker-compose.yml</code> existente</strong> nem fala a API do Docker
 — ferramentas que dependem disso (testcontainers, CI via <code>DOCKER_HOST</code>) não se ligam.</li>
-<li><strong>Build de imagens ainda não tem BuildKit</strong> — multi-stage já funciona, mas sem
-<code>--build-arg</code> funcional, sem cache de camadas entre builds, sem
-<code>RUN --mount=secret</code>.</li>
+<li><strong>Build de imagens ainda não tem BuildKit</strong> — multi-stage, <code>ARG</code>/
+<code>--build-arg</code> e <code>USER</code>/<code>ENTRYPOINT</code> já funcionam, mas sem
+cache de camadas entre builds nem <code>RUN --mount=secret</code>.</li>
 <li><strong>Sem GPU real</strong> — nenhuma carga CUDA corre hoje.</li>
 <li><strong>Projecto novo</strong> — sem o histórico de produção que o Docker e o Podman têm; ver o
 aviso de segurança no topo desta página antes de decidir.</li>
