@@ -161,7 +161,7 @@ Honestamente, não é só "Docker com menos features" — há genuíno valor nov
 
 **Fase 2 — build de produção:**
 3. ✅ **FEITO (2026-07-23)**: multi-stage build (`FROM…AS` + `COPY --from`) — ver secção 2a.
-4. **`--build-arg`/`ARG`** + **preservar ENTRYPOINT/USER no build rootless** (o default hoje perde-os) — correcções de correctude, não só de conforto.
+4. ✅ **FEITO (2026-07-23)**: `--build-arg`/`ARG` (com `${NAME}`/`$NAME`, incluindo antes do 1º `FROM`) + `USER`/`ENTRYPOINT` já sobrevivem ao commit rootless (antes só o `ENTRYPOINT` do modo root sobrevivia; `USER` perdia-se sempre, em ambos os modos, e nem chegava ao JSON de config OCI). **Gap novo, separado, encontrado ao validar**: `container run` nunca lê o `User` guardado na imagem para definir o uid em runtime — só um `--user` explícito o faz. Guardar o `USER` (feito) e aplicá-lo automaticamente no `run` são features distintas; a resolução de nome→uid (`resolve_run_user`) já existe, falta só o default.
 5. **Cache de layers** no caminho rootless (hoje 1 squash, cada RUN re-executa).
 6. **BuildKit-lite** — pelo menos `RUN --mount=type=secret` e `--platform` (segredos de build e cross-compile são o mínimo de CI serio).
 
