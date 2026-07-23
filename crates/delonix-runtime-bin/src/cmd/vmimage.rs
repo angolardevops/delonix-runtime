@@ -123,9 +123,10 @@ pub enum VmImageCmd {
     Describe { names: Vec<String> },
     /// Publish a local VM image to an OCI registry (single-blob artifact).
     Push { name: String, target: String },
-    /// Pull a VM image from an OCI registry.
+    /// Pull a VM image from an OCI registry — with no argument, the OFFICIAL
+    /// Delonix image (ready for `vm create`/`cluster kubeadm`).
     Pull {
-        source: String,
+        source: Option<String>,
         #[arg(long)]
         name: Option<String>,
     },
@@ -169,7 +170,18 @@ pub fn run(action: VmImageCmd) -> Result<()> {
         VmImageCmd::Ls => cmd_ls(&store),
         VmImageCmd::Describe { names } => cmd_describe(&store, &names),
         VmImageCmd::Push { name, target } => cmd_push(&store, &name, &target),
-        VmImageCmd::Pull { source, name } => cmd_pull(&store, &source, name),
+        VmImageCmd::Pull { source, name } => {
+            // BUG FIXED HERE, found live: this is the shared engine command
+            // behind BOTH `image --vm pull` AND `image vm pull` — it never
+            // got the "no argument = official image" default that `delonix
+            // vm pull` (a separate, sibling CLI definition in `cmd/vm.rs`)
+            // already has, despite this exact struct's own doc comment
+            // claiming it. A user on a real host hit this: `delonix image vm
+            // pull --name delonix-vm-k8s:1.34` (no source) errored "required
+            // arguments were not provided: <SOURCE>".
+            let src = source.unwrap_or_else(|| OFFICIAL_VM_IMAGE.to_string());
+            cmd_pull(&store, &src, name)
+        }
         VmImageCmd::Build {
             tag,
             ubuntu_release,
