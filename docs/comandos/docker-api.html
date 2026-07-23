@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>delonix storage · Delonix Runtime</title>
+<title>delonix docker-api · Delonix Runtime</title>
 <style>
 :root{--accent:#e8590c;--accent-soft:#fff0e6;--ink:#1a1a2e;--muted:#5a6472;--line:#e6e8ec;
 --bg:#ffffff;--side:#f7f8fa;--code-bg:#0f172a;--code-ink:#e2e8f0;--radius:10px}
@@ -78,84 +78,30 @@ main{padding:1.4rem 1.2rem 4rem}}
 <h5>Documentação</h5>
 <a href="../index.html">Início</a><a href="../cheatsheet.html">Cheatsheet</a><a href="../kinds.html">Kinds e templates</a><a href="../arquitectura.html">Arquitectura</a><a href="../c4.html">Modelo C4 e system design</a><a href="../cri.html">CRI — kubelet sem containerd</a><a href="../comparacao.html">Delonix vs Docker vs Podman</a>
 <h5>Referência CLI</h5>
-<a href="../comandos/container.html">delonix container</a><a href="../comandos/pod.html">delonix pod</a><a href="../comandos/image.html">delonix image</a><a href="../comandos/build.html">delonix build</a><a href="../comandos/vm.html">delonix vm</a><a href="../comandos/volumes.html">delonix volumes</a><a href="../comandos/network.html">delonix network</a><a href="../comandos/stack.html">delonix stack</a><a href="../comandos/cluster.html">delonix cluster</a><a href="../comandos/secret.html">delonix secret</a><a href="../comandos/storage.html" class="on">delonix storage</a><a href="../comandos/sharevolume.html">delonix sharevolume</a><a href="../comandos/ingress.html">delonix ingress</a><a href="../comandos/egress.html">delonix egress</a><a href="../comandos/httproute.html">delonix httproute</a><a href="../comandos/tunnel.html">delonix tunnel</a><a href="../comandos/flow.html">delonix flow</a><a href="../comandos/boot.html">delonix boot</a><a href="../comandos/system.html">delonix system</a><a href="../comandos/dash.html">delonix dash</a><a href="../comandos/docker-api.html">delonix docker-api</a><a href="../comandos/kube.html">delonix kube</a><a href="../comandos/netns.html">delonix netns</a><a href="../comandos/completion.html">delonix completion</a>
+<a href="../comandos/container.html">delonix container</a><a href="../comandos/pod.html">delonix pod</a><a href="../comandos/image.html">delonix image</a><a href="../comandos/build.html">delonix build</a><a href="../comandos/vm.html">delonix vm</a><a href="../comandos/volumes.html">delonix volumes</a><a href="../comandos/network.html">delonix network</a><a href="../comandos/stack.html">delonix stack</a><a href="../comandos/cluster.html">delonix cluster</a><a href="../comandos/secret.html">delonix secret</a><a href="../comandos/storage.html">delonix storage</a><a href="../comandos/sharevolume.html">delonix sharevolume</a><a href="../comandos/ingress.html">delonix ingress</a><a href="../comandos/egress.html">delonix egress</a><a href="../comandos/httproute.html">delonix httproute</a><a href="../comandos/tunnel.html">delonix tunnel</a><a href="../comandos/flow.html">delonix flow</a><a href="../comandos/boot.html">delonix boot</a><a href="../comandos/system.html">delonix system</a><a href="../comandos/dash.html">delonix dash</a><a href="../comandos/docker-api.html" class="on">delonix docker-api</a><a href="../comandos/kube.html">delonix kube</a><a href="../comandos/netns.html">delonix netns</a><a href="../comandos/completion.html">delonix completion</a>
 <h5>Projecto</h5>
 <a href="https://github.com/angolardevops/delonix-runtime">GitHub</a>
 <a href="https://github.com/angolardevops/delonix-runtime/releases">Releases</a>
 </nav>
 <main>
-<h1>delonix storage</h1><p class='tagline'>Volumes de REDE (NFS/CIFS/WebDAV) montáveis, estilo PersistentVolume do k8s.</p>
-<p>Monta pastas de um NAS (TrueNAS/Synology/Samba/Nextcloud) como volumes nomeados.
-Por baixo é um volume do <code>delonix-volume</code> com driver de rede — <code>mount -t nfs|cifs|davfs</code>.
-A password vem do cofre (<code>--password-secret</code>), nunca do argv. Ligado ao <code>stack apply</code>
-(ordem Network→Volume→<strong>Storage</strong>→Image→Vm→Container). Montar precisa de CAP_SYS_ADMIN.</p>
-<div class='help'><pre><code>NETWORK storage (NFS/CIFS/WebDAV) mountable as a volume — k8s PersistentVolume style
+<h1>delonix docker-api</h1><p class='tagline'>Fatia SÓ-LEITURA da API Docker Engine, num socket unix — `docker version/ps/images/info`.</p>
+<p>Serve o suficiente da API real do Docker Engine (protocolo capturado ao vivo
+contra um <code>docker</code> CLI real, versão negociada via o header <code>Api-Version</code> da
+resposta ao <code>/_ping</code>) para <code>docker version</code>/<code>ps</code>/<code>images</code>/
+<code>info</code> apontados via <code>DOCKER_HOST=unix://&lt;socket&gt;</code> funcionarem contra o
+estado REAL do delonix — útil para ferramentas que só sabem falar com a API do Docker. Mesma postura
+de segurança do socket de gestão: 0600 + <code>SO_PEERCRED</code> (só o próprio utilizador). Por
+fazer: mutações (<code>create</code>/<code>start</code>/<code>exec</code>) — o que falta para
+<code>docker run</code>/<code>docker compose up</code>; qualquer rota não implementada dá 404 claro.</p>
+<div class='help'><pre><code>Serve a READ-ONLY slice of the Docker Engine API on a unix socket — `docker version`/`ps`/`images`/`info` via `DOCKER_HOST=unix://&lt;path&gt;`
 
-Usage: delonix storage [OPTIONS] &lt;COMMAND&gt;
-
-Commands:
-  dash     Storage/volumes dashboard (KPIs + table) — TUI, or `--once` snapshot
-  create   Create (and mount) a network storage
-  ls       List the network storages (volumes with a network driver)
-  inspect  Details of a storage
-  rm       Remove (and unmount) a storage. The DATA stays on the NAS — only the local mount is torn down, like docker
-  apply    Apply the `kind: Storage` documents from a manifest
-  help     Print this message or the help of the given subcommand(s)
+Usage: delonix docker-api [OPTIONS]
 
 Options:
+      --addr &lt;ADDR&gt;   Socket address (default: `$DELONIX_DOCKER_ADDR` or `unix:///run/delonix-docker.sock`)
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
   -h, --help          Print help</code></pre></div>
-<h2 id='create'><code>storage create</code></h2>
-<div class='help'><pre><code>Create (and mount) a network storage
-
-Usage: delonix storage create [OPTIONS] --type &lt;TYPE&gt; --server &lt;SERVER&gt; --share &lt;SHARE&gt; &lt;NAME&gt;
-
-Arguments:
-  &lt;NAME&gt;  
-
-Options:
-      --l18n &lt;en|pt&gt;
-          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-      --type &lt;TYPE&gt;
-          Type: `nfs` | `cifs`/`smb` (Samba/Windows) | `webdav` (Nextcloud/ownCloud) [possible values: nfs, cifs, smb, webdav]
-      --server &lt;SERVER&gt;
-          Server (host/IP), or the base URL in the `webdav` case
-      --share &lt;SHARE&gt;
-          Export/share: NFS path (`/mnt/pool/media`), CIFS share name (`media`), or the path in the WebDAV URL (`/remote.php/dav/...`)
-      --username &lt;USERNAME&gt;
-          User (cifs/webdav)
-      --password &lt;PASSWORD&gt;
-          Password (cifs/webdav) — prefer `--password-secret` to avoid exposing it
-      --password-secret &lt;PASSWORD_SECRET&gt;
-          Vault secret with the `password` key (cifs/webdav) — does not leak in shell history
-      --read-only
-          Mount read-only
-      --options &lt;OPTIONS&gt;
-          Extra mount options (`vers=4.1,soft`), appended to the derived ones
-  -h, --help
-          Print help</code></pre></div>
-<h3>Exemplos</h3><div class="ex"><div class="cap">NFS de um TrueNAS</div><pre><code>delonix storage create media --type nfs --server 10.0.0.5 --share /mnt/pool/media</code></pre></div><div class="ex"><div class="cap">SMB/CIFS com password do cofre</div><pre><code>delonix storage create docs --type cifs --server nas --share docs --username user --password-secret nas-pass</code></pre></div>
-<h2 id='ls'><code>storage ls</code></h2>
-<div class='help'><pre><code>List the network storages (volumes with a network driver)
-
-Usage: delonix storage ls [OPTIONS]
-
-Options:
-      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-  -h, --help          Print help</code></pre></div>
-<h3>Exemplos</h3><div class="ex"><pre><code>delonix storage ls</code></pre></div>
-<h2 id='rm'><code>storage rm</code></h2>
-<div class='help'><pre><code>Remove (and unmount) a storage. The DATA stays on the NAS — only the local mount is torn down, like docker
-
-Usage: delonix storage rm [OPTIONS] &lt;NAME&gt;
-
-Arguments:
-  &lt;NAME&gt;  
-
-Options:
-      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-  -h, --help          Print help</code></pre></div>
-<h3>Exemplos</h3><div class="ex"><div class="cap">Desmonta; os dados ficam no NAS</div><pre><code>delonix storage rm media</code></pre></div>
+<h2>Exemplos</h2><div class="ex"><div class="cap">Servir no socket por omissão</div><pre><code>delonix docker-api &amp;</code></pre></div><div class="ex"><div class="cap">Um `docker` real a falar com o delonix</div><pre><code>DOCKER_HOST=unix:///run/delonix-docker.sock docker ps</code></pre></div>
 <footer>Delonix Runtime · Apache-2.0 · <a href="https://github.com/angolardevops/delonix-runtime">angolardevops/delonix-runtime</a>
 · Referência gerada do <code>--help</code> real do binário por <code>docs/gen.py</code>.</footer>
 </main>

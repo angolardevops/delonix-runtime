@@ -35,6 +35,11 @@ overflow-x:auto;font-size:.86rem;line-height:1.55}
 pre code{background:none;padding:0;color:inherit;font-size:inherit}
 .help pre{border-left:4px solid var(--accent)}
 .ex{margin:.9rem 0}.ex .cap{font-size:.88rem;color:var(--muted);margin-bottom:.25rem}
+.ex .out{margin-top:.4rem}
+.ex .out pre{background:transparent;border:1px dashed var(--line);color:var(--muted);
+padding:.7rem 1rem;font-size:.82rem}
+.ex .out::before{content:"→ resultado";display:block;font-size:.75rem;color:var(--muted);
+margin-bottom:.15rem;letter-spacing:.03em;text-transform:uppercase}
 table{border-collapse:collapse;width:100%;font-size:.92rem}
 td,th{border:1px solid var(--line);padding:.5rem .7rem;text-align:left;vertical-align:top}
 th{background:var(--side)}
@@ -73,7 +78,7 @@ main{padding:1.4rem 1.2rem 4rem}}
 <h5>Documentação</h5>
 <a href="../index.html">Início</a><a href="../cheatsheet.html">Cheatsheet</a><a href="../kinds.html">Kinds e templates</a><a href="../arquitectura.html">Arquitectura</a><a href="../c4.html">Modelo C4 e system design</a><a href="../cri.html">CRI — kubelet sem containerd</a><a href="../comparacao.html">Delonix vs Docker vs Podman</a>
 <h5>Referência CLI</h5>
-<a href="../comandos/container.html">delonix container</a><a href="../comandos/pod.html">delonix pod</a><a href="../comandos/image.html" class="on">delonix image</a><a href="../comandos/build.html">delonix build</a><a href="../comandos/vm.html">delonix vm</a><a href="../comandos/volumes.html">delonix volumes</a><a href="../comandos/network.html">delonix network</a><a href="../comandos/stack.html">delonix stack</a><a href="../comandos/cluster.html">delonix cluster</a><a href="../comandos/secret.html">delonix secret</a><a href="../comandos/storage.html">delonix storage</a><a href="../comandos/ingress.html">delonix ingress</a><a href="../comandos/egress.html">delonix egress</a><a href="../comandos/flow.html">delonix flow</a><a href="../comandos/boot.html">delonix boot</a><a href="../comandos/system.html">delonix system</a><a href="../comandos/kube.html">delonix kube</a><a href="../comandos/netns.html">delonix netns</a><a href="../comandos/completion.html">delonix completion</a>
+<a href="../comandos/container.html">delonix container</a><a href="../comandos/pod.html">delonix pod</a><a href="../comandos/image.html" class="on">delonix image</a><a href="../comandos/build.html">delonix build</a><a href="../comandos/vm.html">delonix vm</a><a href="../comandos/volumes.html">delonix volumes</a><a href="../comandos/network.html">delonix network</a><a href="../comandos/stack.html">delonix stack</a><a href="../comandos/cluster.html">delonix cluster</a><a href="../comandos/secret.html">delonix secret</a><a href="../comandos/storage.html">delonix storage</a><a href="../comandos/sharevolume.html">delonix sharevolume</a><a href="../comandos/ingress.html">delonix ingress</a><a href="../comandos/egress.html">delonix egress</a><a href="../comandos/httproute.html">delonix httproute</a><a href="../comandos/tunnel.html">delonix tunnel</a><a href="../comandos/flow.html">delonix flow</a><a href="../comandos/boot.html">delonix boot</a><a href="../comandos/system.html">delonix system</a><a href="../comandos/dash.html">delonix dash</a><a href="../comandos/docker-api.html">delonix docker-api</a><a href="../comandos/kube.html">delonix kube</a><a href="../comandos/netns.html">delonix netns</a><a href="../comandos/completion.html">delonix completion</a>
 <h5>Projecto</h5>
 <a href="https://github.com/angolardevops/delonix-runtime">GitHub</a>
 <a href="https://github.com/angolardevops/delonix-runtime/releases">Releases</a>
@@ -86,7 +91,7 @@ verificação de digest no pull. Com <code>--vm</code>, o MESMO grupo opera sobr
 image + kubeadm/kubelet/kubectl + <code>delonix-cri</code> — a base do <code>delonix cluster</code>.</p>
 <div class='help'><pre><code>OCI images: pull/ls/rm/export (with `--vm`: golden VM images — ls/pull/push/build)
 
-Usage: delonix-x86_64-linux image [OPTIONS] &lt;COMMAND&gt;
+Usage: delonix image [OPTIONS] &lt;COMMAND&gt;
 
 Commands:
   dash      Dashboard (KPIs + table) of images — interactive TUI, or `--once` snapshot
@@ -114,7 +119,7 @@ Options:
 <h2 id='pull'><code>image pull</code></h2>
 <div class='help'><pre><code>Pull an image from a registry
 
-Usage: delonix-x86_64-linux image pull [OPTIONS] &lt;IMAGE&gt;
+Usage: delonix image pull [OPTIONS] &lt;IMAGE&gt;
 
 Arguments:
   &lt;IMAGE&gt;  
@@ -127,7 +132,7 @@ Options:
 <h2 id='ls'><code>image ls</code></h2>
 <div class='help'><pre><code>List local images
 
-Usage: delonix-x86_64-linux image ls [OPTIONS]
+Usage: delonix image ls [OPTIONS]
 
 Options:
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
@@ -136,7 +141,7 @@ Options:
 <h2 id='rm'><code>image rm</code></h2>
 <div class='help'><pre><code>Remove a local image
 
-Usage: delonix-x86_64-linux image rm [OPTIONS] &lt;IMAGE&gt;
+Usage: delonix image rm [OPTIONS] &lt;IMAGE&gt;
 
 Arguments:
   &lt;IMAGE&gt;  
@@ -148,7 +153,7 @@ Options:
 <h2 id='export'><code>image export</code></h2>
 <div class='help'><pre><code>Export an OCI runtime bundle (rootfs + config.json) for `runc`/`crun`
 
-Usage: delonix-x86_64-linux image export [OPTIONS] &lt;IMAGE&gt; &lt;DIR&gt;
+Usage: delonix image export [OPTIONS] &lt;IMAGE&gt; &lt;DIR&gt;
 
 Arguments:
   &lt;IMAGE&gt;  
@@ -161,7 +166,7 @@ Options:
 <h2 id='push'><code>image push</code></h2>
 <div class='help'><pre><code>Publish a local image to an OCI registry. Without `target`, publishes under the image&#x27;s own reference. With `--vm`, `target` is required
 
-Usage: delonix-x86_64-linux image push [OPTIONS] &lt;NAME&gt; [TARGET]
+Usage: delonix image push [OPTIONS] &lt;NAME&gt; [TARGET]
 
 Arguments:
   &lt;NAME&gt;    
@@ -174,7 +179,7 @@ Options:
 <h2 id='build'><code>image build</code></h2>
 <div class='help'><pre><code>(only with `--vm`) Build the golden VM image (Ubuntu + kubeadm/kubelet/ kubectl + `delonix-cri`)
 
-Usage: delonix-x86_64-linux image build [OPTIONS] --tag &lt;TAG&gt;
+Usage: delonix image build [OPTIONS] --tag &lt;TAG&gt;
 
 Options:
       --l18n &lt;en|pt&gt;
@@ -201,7 +206,7 @@ Options:
 <h2 id='apply'><code>image apply</code></h2>
 <div class='help'><pre><code>Apply the `kind: Image` documents of a manifest (`pull` idempotent by reference; `build` rebuilds and replaces the tag on each apply)
 
-Usage: delonix-x86_64-linux image apply [OPTIONS]
+Usage: delonix image apply [OPTIONS]
 
 Options:
   -f, --file &lt;FILE&gt;   

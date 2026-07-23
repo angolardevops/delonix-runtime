@@ -1,0 +1,35 @@
+# kind: ShareVolume — an isolated, individually-quota'd slice of an existing
+# kind: Storage (NFS/CIFS/WebDAV), so multiple container/vm/pod can share ONE
+# NAS export without seeing each other's data or exhausting each other's
+# quota. Each ShareVolume is a real subdirectory of the Storage's own mount,
+# registered as its own named volume — consume it exactly like any other
+# volume: `-v <name>:/path`.
+#
+# Apply with:  delonix sharevolume apply -f sharevolume.yaml
+# (the storageRef below must already exist — create it first, e.g.
+#  `delonix storage create nas --type nfs --server 10.0.0.5 --share /pool/data`)
+apiVersion: delonix.io/v1
+kind: Storage
+metadata:
+  name: nas
+spec:
+  type: nfs
+  server: 10.0.0.5
+  share: /pool/data
+---
+apiVersion: delonix.io/v1
+kind: ShareVolume
+metadata:
+  name: app-a
+spec:
+  storageRef: nas             # required — an existing kind: Storage
+  quota: 5G                   # optional; SOFT quota (measured usage + alert), omit = unlimited
+  alertPct: 90                 # optional; usage % above which ls/describe flag a WARN (default 90)
+---
+apiVersion: delonix.io/v1
+kind: ShareVolume
+metadata:
+  name: app-b
+spec:
+  storageRef: nas              # the SAME parent Storage — app-a and app-b never see each other's files
+  quota: 2G

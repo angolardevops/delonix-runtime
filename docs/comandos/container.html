@@ -35,6 +35,11 @@ overflow-x:auto;font-size:.86rem;line-height:1.55}
 pre code{background:none;padding:0;color:inherit;font-size:inherit}
 .help pre{border-left:4px solid var(--accent)}
 .ex{margin:.9rem 0}.ex .cap{font-size:.88rem;color:var(--muted);margin-bottom:.25rem}
+.ex .out{margin-top:.4rem}
+.ex .out pre{background:transparent;border:1px dashed var(--line);color:var(--muted);
+padding:.7rem 1rem;font-size:.82rem}
+.ex .out::before{content:"→ resultado";display:block;font-size:.75rem;color:var(--muted);
+margin-bottom:.15rem;letter-spacing:.03em;text-transform:uppercase}
 table{border-collapse:collapse;width:100%;font-size:.92rem}
 td,th{border:1px solid var(--line);padding:.5rem .7rem;text-align:left;vertical-align:top}
 th{background:var(--side)}
@@ -73,7 +78,7 @@ main{padding:1.4rem 1.2rem 4rem}}
 <h5>Documentação</h5>
 <a href="../index.html">Início</a><a href="../cheatsheet.html">Cheatsheet</a><a href="../kinds.html">Kinds e templates</a><a href="../arquitectura.html">Arquitectura</a><a href="../c4.html">Modelo C4 e system design</a><a href="../cri.html">CRI — kubelet sem containerd</a><a href="../comparacao.html">Delonix vs Docker vs Podman</a>
 <h5>Referência CLI</h5>
-<a href="../comandos/container.html" class="on">delonix container</a><a href="../comandos/pod.html">delonix pod</a><a href="../comandos/image.html">delonix image</a><a href="../comandos/build.html">delonix build</a><a href="../comandos/vm.html">delonix vm</a><a href="../comandos/volumes.html">delonix volumes</a><a href="../comandos/network.html">delonix network</a><a href="../comandos/stack.html">delonix stack</a><a href="../comandos/cluster.html">delonix cluster</a><a href="../comandos/secret.html">delonix secret</a><a href="../comandos/storage.html">delonix storage</a><a href="../comandos/ingress.html">delonix ingress</a><a href="../comandos/egress.html">delonix egress</a><a href="../comandos/flow.html">delonix flow</a><a href="../comandos/boot.html">delonix boot</a><a href="../comandos/system.html">delonix system</a><a href="../comandos/kube.html">delonix kube</a><a href="../comandos/netns.html">delonix netns</a><a href="../comandos/completion.html">delonix completion</a>
+<a href="../comandos/container.html" class="on">delonix container</a><a href="../comandos/pod.html">delonix pod</a><a href="../comandos/image.html">delonix image</a><a href="../comandos/build.html">delonix build</a><a href="../comandos/vm.html">delonix vm</a><a href="../comandos/volumes.html">delonix volumes</a><a href="../comandos/network.html">delonix network</a><a href="../comandos/stack.html">delonix stack</a><a href="../comandos/cluster.html">delonix cluster</a><a href="../comandos/secret.html">delonix secret</a><a href="../comandos/storage.html">delonix storage</a><a href="../comandos/sharevolume.html">delonix sharevolume</a><a href="../comandos/ingress.html">delonix ingress</a><a href="../comandos/egress.html">delonix egress</a><a href="../comandos/httproute.html">delonix httproute</a><a href="../comandos/tunnel.html">delonix tunnel</a><a href="../comandos/flow.html">delonix flow</a><a href="../comandos/boot.html">delonix boot</a><a href="../comandos/system.html">delonix system</a><a href="../comandos/dash.html">delonix dash</a><a href="../comandos/docker-api.html">delonix docker-api</a><a href="../comandos/kube.html">delonix kube</a><a href="../comandos/netns.html">delonix netns</a><a href="../comandos/completion.html">delonix completion</a>
 <h5>Projecto</h5>
 <a href="https://github.com/angolardevops/delonix-runtime">GitHub</a>
 <a href="https://github.com/angolardevops/delonix-runtime/releases">Releases</a>
@@ -87,7 +92,7 @@ JSON no <code>$DELONIX_ROOT</code>. Em rootless, o rootfs do container é uma c�
 <em>persistente</em> — as escritas sobrevivem a <code>stop</code>/<code>start</code>, como no Docker.</p>
 <div class='help'><pre><code>Containers: run/ps/stop/rm/exec/logs/update/describe
 
-Usage: delonix-x86_64-linux container [OPTIONS] &lt;COMMAND&gt;
+Usage: delonix container [OPTIONS] &lt;COMMAND&gt;
 
 Commands:
   dash         Dashboard (KPIs + table + problems) of the containers — interactive TUI, or `--once` for a text snapshot
@@ -120,7 +125,7 @@ Options:
 <h2 id='run'><code>container run</code></h2>
 <div class='help'><pre><code>Run a container from an image (pulls it if missing)
 
-Usage: delonix-x86_64-linux container run [OPTIONS] &lt;IMAGE&gt; [COMMAND]...
+Usage: delonix container run [OPTIONS] &lt;IMAGE&gt; [COMMAND]...
 
 Arguments:
   &lt;IMAGE&gt;       Image (e.g. `alpine:3.19`)
@@ -188,7 +193,7 @@ delonix container run -d --net minha-rede -p 8443:443 caddy</code></pre></div><d
 <h2 id='ps'><code>container ps</code></h2>
 <div class='help'><pre><code>List containers
 
-Usage: delonix-x86_64-linux container ps [OPTIONS]
+Usage: delonix container ps [OPTIONS]
 
 Options:
   -a, --all           Include stopped/failed ones
@@ -199,7 +204,7 @@ Options:
 <h2 id='start'><code>container start</code></h2>
 <div class='help'><pre><code>(Re)start stopped/crashed containers, reusing the persistent rootfs (writes made inside the container survive, like in docker) and the same network/ports/volumes as the original `run`. Always detached
 
-Usage: delonix-x86_64-linux container start [OPTIONS] &lt;IDS&gt;...
+Usage: delonix container start [OPTIONS] &lt;IDS&gt;...
 
 Arguments:
   &lt;IDS&gt;...  
@@ -213,7 +218,7 @@ persistente — ao contrário de <code>rm</code>+<code>run</code>, nada do que o
 <h2 id='stop'><code>container stop</code></h2>
 <div class='help'><pre><code>Stop one or more containers (SIGTERM, then SIGKILL)
 
-Usage: delonix-x86_64-linux container stop [OPTIONS] &lt;IDS&gt;...
+Usage: delonix container stop [OPTIONS] &lt;IDS&gt;...
 
 Arguments:
   &lt;IDS&gt;...  
@@ -226,7 +231,7 @@ Options:
 <h2 id='rm'><code>container rm</code></h2>
 <div class='help'><pre><code>Remove one or more containers
 
-Usage: delonix-x86_64-linux container rm [OPTIONS] &lt;IDS&gt;...
+Usage: delonix container rm [OPTIONS] &lt;IDS&gt;...
 
 Arguments:
   &lt;IDS&gt;...  
@@ -239,7 +244,7 @@ Options:
 <h2 id='exec'><code>container exec</code></h2>
 <div class='help'><pre><code>Execute a command inside a running container
 
-Usage: delonix-x86_64-linux container exec [OPTIONS] &lt;ID&gt; &lt;COMMAND&gt;...
+Usage: delonix container exec [OPTIONS] &lt;ID&gt; &lt;COMMAND&gt;...
 
 Arguments:
   &lt;ID&gt;          
@@ -254,7 +259,7 @@ Options:
 <h2 id='logs'><code>container logs</code></h2>
 <div class='help'><pre><code>Show the logs (detached containers)
 
-Usage: delonix-x86_64-linux container logs [OPTIONS] &lt;ID&gt;
+Usage: delonix container logs [OPTIONS] &lt;ID&gt;
 
 Arguments:
   &lt;ID&gt;  
@@ -267,7 +272,7 @@ Options:
 <h2 id='inspect'><code>container inspect</code></h2>
 <div class='help'><pre><code>Show the full spec of one or more containers (Store JSON)
 
-Usage: delonix-x86_64-linux container inspect [OPTIONS] &lt;IDS&gt;...
+Usage: delonix container inspect [OPTIONS] &lt;IDS&gt;...
 
 Arguments:
   &lt;IDS&gt;...  
@@ -279,7 +284,7 @@ Options:
 <h2 id='stats'><code>container stats</code></h2>
 <div class='help'><pre><code>Resource usage (CPU/memory/PIDs) of the running containers — one sample and exits (no stream). With no IDs, shows all running ones
 
-Usage: delonix-x86_64-linux container stats [OPTIONS] [IDS]...
+Usage: delonix container stats [OPTIONS] [IDS]...
 
 Arguments:
   [IDS]...  
@@ -295,7 +300,7 @@ marcada com <code>~</code>.</p>
 <h2 id='apply'><code>container apply</code></h2>
 <div class='help'><pre><code>Apply the `kind: Container` documents of a manifest (idempotent by name — an existing container with that name is neither recreated nor checked for spec drift, see `cmd::manifest`)
 
-Usage: delonix-x86_64-linux container apply [OPTIONS]
+Usage: delonix container apply [OPTIONS]
 
 Options:
   -f, --file &lt;FILE&gt;   
