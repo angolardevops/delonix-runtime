@@ -130,6 +130,10 @@ pub enum VmImageCmd {
         #[arg(long)]
         name: Option<String>,
     },
+    /// List the tags available in a remote OCI repository — with no
+    /// argument, the OFFICIAL Delonix golden image repo (discover which
+    /// k8s versions are published before `pull`/`--k8s-version`).
+    LsRemote { source: Option<String> },
     /// Build the golden image: Ubuntu cloud image + kubeadm/kubelet/kubectl
     /// + `delonix-cri` (CRI endpoint for the kubelet), via `virt-customize`.
     Build {
@@ -181,6 +185,10 @@ pub fn run(action: VmImageCmd) -> Result<()> {
             // arguments were not provided: <SOURCE>".
             let src = source.unwrap_or_else(|| OFFICIAL_VM_IMAGE.to_string());
             cmd_pull(&store, &src, name)
+        }
+        VmImageCmd::LsRemote { source } => {
+            let src = source.unwrap_or_else(|| OFFICIAL_VM_IMAGE.to_string());
+            cmd_ls_remote(&src)
         }
         VmImageCmd::Build {
             tag,
@@ -322,6 +330,15 @@ pub(crate) fn cmd_pull(store: &VmImageStore, source: &str, name: Option<String>)
     };
     store.save(&img)?;
     println!("{name}");
+    Ok(())
+}
+
+pub(crate) fn cmd_ls_remote(source: &str) -> Result<()> {
+    let mut tags = delonix_image::registry::list_remote_tags(&state_root(), source)?;
+    tags.sort();
+    for tag in tags {
+        println!("{tag}");
+    }
     Ok(())
 }
 

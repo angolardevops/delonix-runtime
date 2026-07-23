@@ -214,6 +214,36 @@ impl Client {
         )
     }
 
+    fn tags_url(&self) -> String {
+        format!(
+            "{}://{}/v2/{}/tags/list",
+            scheme_for(&self.host),
+            self.host,
+            self.repo
+        )
+    }
+
+    /// The repo's tags, per the Registry v2 `GET /v2/<name>/tags/list`
+    /// endpoint (`{"name": ..., "tags": [...]}`). Reuses `fetch`'s normal
+    /// 401→token→retry flow, so this works against ghcr.io/Docker Hub/any
+    /// other v2 registry the same way pull/push already do. Single request,
+    /// no `Link`-header pagination — fine for the handful of tags a golden
+    /// VM image repo realistically has; a repo with hundreds of tags would
+    /// only see the registry's first page.
+    fn list_tags(&mut self) -> Result<Vec<String>> {
+        let url = self.tags_url();
+        let resp = self.fetch(&url, "application/json")?;
+        let v: serde_json::Value = resp.json().map_err(reg_err)?;
+        Ok(v.get("tags")
+            .and_then(|t| t.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|t| t.as_str().map(str::to_string))
+                    .collect()
+            })
+            .unwrap_or_default())
+    }
+
     fn blob(&mut self, digest: &str) -> Result<Vec<u8>> {
         self.blob_with_progress(digest, None)
     }
@@ -445,6 +475,11 @@ impl RegistryClient {
     /// The tag/digest with which the client was created.
     pub fn reference(&self) -> String {
         self.reference.clone()
+    }
+    /// All tags of this client's repository (ignores the tag/digest it was
+    /// built with — only `host`/`repo` matter here). See `Client::list_tags`.
+    pub fn list_tags(&mut self) -> Result<Vec<String>> {
+        self.inner.list_tags()
     }
     /// Raw bytes of a manifest (by tag or digest).
     pub fn get_manifest(&mut self, refr: &str) -> Result<Vec<u8>> {
@@ -851,6 +886,28 @@ pub fn push_oci_artifact(
     Ok(digest)
 }
 
+/// Tags of `source`'s repository (host/repo part; any tag on `source` itself
+/// is ignored). Same lightweight shape as [`push_oci_artifact`]/
+/// [`pull_oci_artifact`] — no [`crate::image::ImageStore`] needed, `root` is
+/// only used for `crate::auth::lookup`.
+pub fn list_remote_tags(root: &std::path::Path, source: &str) -> Result<Vec<String>> {
+    let (host, repo, _refr) = parse_reference(source);
+    let http = reqwest::blocking::Client::builder()
+        .user_agent("delonix/0.1")
+        .timeout(Duration::from_secs(600))
+        .build()
+        .map_err(reg_err)?;
+    let creds = crate::auth::lookup(root, &host);
+    let mut c = Client {
+        http,
+        host,
+        repo,
+        token: None,
+        creds,
+    };
+    c.list_tags()
+}
+
 /// Pull of an artifact published by [`push_oci_artifact`] — resolves the
 /// manifest and returns the bytes of the (single) layer.
 pub fn pull_oci_artifact(root: &std::path::Path, source: &str) -> Result<Vec<u8>> {
@@ -909,8 +966,27 @@ pub fn pull_oci_artifact_with_progress(
 mod tests {
     use super::{
         layer_media_type, parse_reference, pull_from_registry_with_creds, pull_oci_artifact,
-        push_oci_artifact, sha256_hex, with_prefix,
+        push_oci_artifact, sha256_hex, with_prefix, Client,
     };
+
+    fn test_client(host: &str, repo: &str) -> Client {
+        Client {
+            http: reqwest::blocking::Client::new(),
+            host: host.to_string(),
+            repo: repo.to_string(),
+            token: None,
+            creds: None,
+        }
+    }
+
+    #[test]
+    fn tags_url_is_the_v2_tags_list_endpoint() {
+        let c = test_client("ghcr.io", "angolardevops/delonix-vm-k8s");
+        assert_eq!(
+            c.tags_url(),
+            "https://ghcr.io/v2/angolardevops/delonix-vm-k8s/tags/list"
+        );
+    }
 
     #[test]
     fn with_prefix_is_idempotent() {

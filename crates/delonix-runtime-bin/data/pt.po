@@ -277,6 +277,9 @@ msgstr "--expose exige `--net <rede>` (o proxy alcança o container pelo IP da S
 msgid "`image --vm push <name> <dest>`: the destination is required"
 msgstr "`image --vm push <nome> <destino>`: o destino é obrigatório"
 
+msgid "`ls-remote` of container images is not supported yet — use `delonix image --vm ls-remote` for VM images"
+msgstr "`ls-remote` de imagens de container ainda não é suportado — usa `delonix image --vm ls-remote` para imagens VM"
+
 msgid "built"
 msgstr "construída"
 

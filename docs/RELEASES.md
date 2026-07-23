@@ -4,6 +4,33 @@
 > (regenerado automaticamente pelo pipeline de release a cada tag publicada).
 > Não editar à mão — edita a nota da release respectiva.
 
+## v0.11.0 — `ls-remote` para imagens VM douradas
+
+Feature pontual: descobrir que versões da imagem VM dourada estão publicadas num registo
+remoto, ANTES de fazer `pull`. Faltava — `image vm ls` só mostra o que já está local.
+
+### `delonix vm ls-remote` / `delonix image vm ls-remote` / `delonix image --vm ls-remote`
+
+Lista as tags do repositório OCI (`GET /v2/<repo>/tags/list`) — sem argumento, o repositório
+OFICIAL da Delonix (`ghcr.io/angolardevops/delonix-vm-k8s`). Reutiliza inteiramente o `Client`
+já usado por `pull`/`push` (`crates/delonix-image/src/registry.rs`) — o mesmo fluxo de
+autenticação 401→`WWW-Authenticate`→token→retry, por isso funciona contra ghcr.io/Docker Hub/
+qualquer registo v2 tal como o `pull` já funciona, sem código novo de auth.
+
+Como o `pull`, os TRÊS pontos de entrada (CLI dedicada `vm`, `image vm`, `image --vm`) convergem
+no mesmo `VmImageCmd::LsRemote` — o mesmo padrão triplo que o `pull` já seguia, para os três
+caminhos ficarem consistentes desde o início (ao contrário do `pull`, que só ganhou essa
+convergência num fix posterior).
+
+**Limitação conhecida**: uma só página (sem paginação por `Link` header) — adequado para o
+punhado de tags que um repositório de imagem dourada realisticamente tem; um repositório com
+centenas de tags só veria a 1.ª página do registo.
+
+Validado ao vivo contra o ghcr.io real: `delonix vm ls-remote` (sem argumento) devolve a tag
+`1.34`, hoje a única publicada.
+
+---
+
 ## v0.10.2 — `image --vm pull`/`image vm pull` sem argumento voltam a funcionar
 
 Fix pontual, encontrado ao vivo por um utilizador num host real: `delonix image vm
