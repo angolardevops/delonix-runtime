@@ -89,9 +89,9 @@ Validado com `cargo build`/`test`/`clippy --workspace` limpos e um teste de fumo
 | `volume inspect` / `network inspect` em JSON | sim | **Parcial** — só texto PT; migrar seria breaking change | cmd/volume.rs:253-265 |
 | AppArmor por omissão | docker-default automático | **Ausente** — só com `--apparmor` explícito | container.rs:1304 |
 | userns `keep-id/auto/nomap` | Essencial p/ posse em bind mounts rootless | **Ausente** — só booleano; ficheiros aparecem com subuids altos | container.rs:327-331; lib.rs:1336-1382 |
-| `--build-arg` / `ARG` | Quase todo o CI | **Ignorado** — ARG parseado mas descartado | build.rs:204; BuildArgs sem flag |
-| Cache de layers / rebuild incremental | Por instrução | **Ausente** — rootless empacota rootfs inteiro como 1 layer squash; cada RUN re-executa | cmd/build.rs:110-122 |
-| ENTRYPOINT/USER preservados no build rootless | Sempre gravados | **Perdidos** no caminho rootless (o default) | build.rs:448-471 (entrypoint vazio, user vazio) |
+| ~~`--build-arg` / `ARG`~~ | Quase todo o CI | ✅ **FEITO (2026-07-23)** — substituição `${NAME}`/`$NAME`, incluindo antes do 1º `FROM` | delonix-image/build.rs (`parse_dockerfile_with_args`) |
+| ~~Cache de layers / rebuild incremental~~ | Por instrução | ✅ **FEITO (2026-07-23), rootless** — cadeia de hash por instrução, clonagem via `cp -a --reflink=auto`; modo root nunca usa cache (ver nota na secção 2a) | cmd/build.rs (`build_one_stage`, `try_clone_cached`) |
+| ~~ENTRYPOINT/USER preservados no build rootless~~ | Sempre gravados | ✅ **FEITO (2026-07-23)** — ambos sobrevivem ao commit rootless agora | delonix-image/build.rs (`commit_flat_rootfs*`) |
 | save/load/import de imagem (air-gap) | sim | **Parcial** — `load_docker_archive` existe mas não ligado à CLI; `export` produz bundle runc, não tar portátil | delonix-image/src/load.rs; cmd/image.rs:626-652 |
 | Recriar serviço em drift de config | `compose up` compara e substitui | **Parcial** — idempotência só por nome; mudar imagem/porta e re-aplicar é no-op | cmd/manifest.rs:8 |
 | Healthcheck declarativo a gatear arranque/restart | `healthcheck:` no compose | **Parcial** — só da imagem, corre sob pedido; restart por exit code, nunca por saúde | container.rs:2470-2489, 1794-1890 |
@@ -162,8 +162,8 @@ Honestamente, não é só "Docker com menos features" — há genuíno valor nov
 **Fase 2 — build de produção:**
 3. ✅ **FEITO (2026-07-23)**: multi-stage build (`FROM…AS` + `COPY --from`) — ver secção 2a.
 4. ✅ **FEITO (2026-07-23)**: `--build-arg`/`ARG` (com `${NAME}`/`$NAME`, incluindo antes do 1º `FROM`) + `USER`/`ENTRYPOINT` já sobrevivem ao commit rootless (antes só o `ENTRYPOINT` do modo root sobrevivia; `USER` perdia-se sempre, em ambos os modos, e nem chegava ao JSON de config OCI). **Gap novo, separado, encontrado ao validar**: `container run` nunca lê o `User` guardado na imagem para definir o uid em runtime — só um `--user` explícito o faz. Guardar o `USER` (feito) e aplicá-lo automaticamente no `run` são features distintas; a resolução de nome→uid (`resolve_run_user`) já existe, falta só o default.
-5. **Cache de layers** no caminho rootless (hoje 1 squash, cada RUN re-executa).
-6. **BuildKit-lite** — pelo menos `RUN --mount=type=secret` e `--platform` (segredos de build e cross-compile são o mínimo de CI serio).
+5. ✅ **FEITO (2026-07-23), rootless**: cache de layers por instrução (`--no-cache` para saltar) — ver secção 2a/2b. Modo root continua sem cache (executa sempre a sério — ver a nota na secção 2a sobre `commit_upper` precisar de um `upper/` real).
+6. **BuildKit-lite** — pelo menos `RUN --mount=type=secret` e `--platform` (segredos de build e cross-compile são o mínimo de CI serio). Único item por fazer nesta fase.
 
 **Fase 3 — compose e orquestração local (se o alvo for substituir compose):**
 7. **Parser de `docker-compose.yml`** + **`depends_on` com `condition: service_healthy`** + **healthcheck declarativo a gatear arranque** + **`stack down`/`logs`/`ps` scoped a projecto**. (Alternativamente, o shim da Fase 1 já deixa o `docker compose` real falar com o motor — pode tornar 7 desnecessário.)

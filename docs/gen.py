@@ -152,8 +152,10 @@ gramática é a mesma, com extensões (<code>SCAN</code>, <code>CPUS</code>, <co
 conhecida: em modo root (overlay), o estágio final ainda tem de ser uma imagem real, não outro
 estágio (sem lineage OCI para um estágio clonado) — sem restrição em rootless.
 <code>ARG</code>/<code>--build-arg</code> e <code>USER</code>/<code>ENTRYPOINT</code> já
-sobrevivem ao build (incluindo em rootless). Sem BuildKit (sem cache de camadas entre builds,
-sem <code>RUN --mount=secret</code>).""",
+sobrevivem ao build (incluindo em rootless). <strong>Cache de camadas por instrução</strong>
+(rootless — um <code>RUN</code>/<code>COPY</code> repetido não re-executa; <code>--no-cache</code>
+para saltar; modo root continua sem cache). Sem BuildKit real (sem
+<code>RUN --mount=secret</code>, sem <code>--platform</code>).""",
         "subs": {},
         "examples": [
             ("Build com tag", "delonix build -t minha-app:1.0 ."),
@@ -757,8 +759,9 @@ da auditoria</a>.</p>
 <table>
 <tr><th>Se precisas de…</th><th>Usa</th></tr>
 <tr><td>Correr um <code>docker-compose.yml</code> já existente</td><td>Docker ou Podman</td></tr>
-<tr><td>Um pipeline de build com BuildKit (segredos de build, cache de camadas, cross-compile)</td>
-<td>Docker ou Podman — o Delonix faz multi-stage mas não tem BuildKit</td></tr>
+<tr><td>Um pipeline de build com BuildKit (segredos de build, cross-compile)</td>
+<td>Docker ou Podman — o Delonix faz multi-stage e cache de camadas (rootless), mas não tem
+BuildKit</td></tr>
 <tr><td>Cargas GPU/CUDA</td><td>Docker ou Podman (com nvidia-container-toolkit)</td></tr>
 <tr><td>Ferramentas que falam directamente com o Docker Engine (testcontainers, CI via
 <code>DOCKER_HOST</code>)</td><td>Docker ou Podman</td></tr>
@@ -791,8 +794,8 @@ crash (razão + snapshot do log, não só "Exited")</td></tr>
 <tr><td>Build de imagens (<code>Dockerfile</code>)</td>
 <td><span class="tag ok">forte — multi-stage, BuildKit, cache</span></td>
 <td><span class="tag ok">forte — via buildah</span></td>
-<td><span class="tag mid">multi-stage + ARG/USER/ENTRYPOINT já funcionam; sem BuildKit (sem
-cache de camadas, sem <code>RUN --mount=secret</code>)</span></td></tr>
+<td><span class="tag mid">multi-stage + ARG/USER/ENTRYPOINT + cache de camadas (rootless) já
+funcionam; sem BuildKit real (sem <code>RUN --mount=secret</code>)</span></td></tr>
 <tr><td><code>docker compose</code> / orquestração local</td>
 <td><span class="tag ok">nativo</span></td><td><span class="tag mid">podman-compose</span></td>
 <td><span class="tag no">manifesto próprio, sem parser de compose</span></td></tr>
@@ -847,9 +850,10 @@ nomeado montável por qualquer container, como um <code>PersistentVolume</code>.
 <ul>
 <li><strong>Não corre um <code>docker-compose.yml</code> existente</strong> nem fala a API do Docker
 — ferramentas que dependem disso (testcontainers, CI via <code>DOCKER_HOST</code>) não se ligam.</li>
-<li><strong>Build de imagens ainda não tem BuildKit</strong> — multi-stage, <code>ARG</code>/
-<code>--build-arg</code> e <code>USER</code>/<code>ENTRYPOINT</code> já funcionam, mas sem
-cache de camadas entre builds nem <code>RUN --mount=secret</code>.</li>
+<li><strong>Build de imagens ainda não tem BuildKit real</strong> — multi-stage,
+<code>ARG</code>/<code>--build-arg</code>, <code>USER</code>/<code>ENTRYPOINT</code> e cache de
+camadas (rootless) já funcionam, mas sem <code>RUN --mount=secret</code> nem
+<code>--platform</code>.</li>
 <li><strong>Sem GPU real</strong> — nenhuma carga CUDA corre hoje.</li>
 <li><strong>Projecto novo</strong> — sem o histórico de produção que o Docker e o Podman têm; ver o
 aviso de segurança no topo desta página antes de decidir.</li>
@@ -861,9 +865,10 @@ aviso de segurança no topo desta página antes de decidir.</li>
 <tr><td>Programador(a) a experimentar em local/homelab, ou a fazer bootstrap de um cluster
 Kubernetes pequeno sem instalar Docker</td>
 <td>Experimenta o Delonix hoje — é exactamente o caso em que já está forte.</td></tr>
-<tr><td>Equipa com um pipeline de build maduro (BuildKit, cache de camadas, compose)</td>
+<tr><td>Equipa com um pipeline de build maduro (BuildKit, compose)</td>
 <td>Fica no Docker/Podman para o build; podes correr as imagens resultantes no Delonix se quiseres
-testar a operação — multi-stage já funciona, mas sem BuildKit.</td></tr>
+testar a operação — multi-stage e cache de camadas já funcionam (rootless), mas sem BuildKit
+real.</td></tr>
 <tr><td>Empresa a avaliar para produção multi-tenant ou com dados sensíveis</td>
 <td>Os 6 achados de segurança altos já estão corrigidos, mas aguarda a confirmação por uma 2.ª
 auditoria independente (aviso acima) antes de expor o motor a imagens ou utilizadores não
