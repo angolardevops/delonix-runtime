@@ -348,7 +348,15 @@ pub enum VmCmd {
         target: String,
     },
     /// List the VMs.
-    Ls,
+    Ls {
+        /// Also probe a short list of well-known ports (22, 6443, 10250, 80,
+        /// 443) on each VM's IP and show which respond — a real TCP connect
+        /// per port, short timeout, run concurrently. Off by default: unlike
+        /// the rest of `ls` (local state only), this does live network I/O
+        /// and can add latency, especially for an unreachable/booting VM.
+        #[arg(long)]
+        ports: bool,
+    },
     /// Attach to the VM's serial console (interactive terminal) — works with no
     /// IP (boot logs, login). Escape: Ctrl-] .
     Console {
@@ -767,18 +775,29 @@ pub fn run(action: VmCmd) -> Result<()> {
             let store = super::vmimage::VmImageStore::open(super::util::state_root())?;
             super::vmimage::cmd_push(&store, &name, &target)
         }
-        VmCmd::Ls => {
-            let mut t = output::Table::new(&["NAME", "VCPUS", "MEMORY", "STATUS", "IP"])
+        VmCmd::Ls { ports } => {
+            let mut cols = vec!["NAME", "VCPUS", "MEMORY", "STATUS", "IP", "UPTIME", "ROLE", "GPU"];
+            if ports {
+                cols.push("PORTS OPEN");
+            }
+            let mut t = output::Table::new(&cols)
                 // VCPUS is a count — right-aligned like the sizes.
                 .right_align(1);
             for vm in delonix_vm::list(&base)? {
-                t.row(vec![
-                    vm.name,
+                let mut row = vec![
+                    vm.name.clone(),
                     vm.vcpus.to_string(),
                     vm.memory,
                     fmt_vm_status(&vm.status),
-                    vm.ip.unwrap_or_else(|| "<none>".into()),
-                ]);
+                    vm.ip.clone().unwrap_or_else(|| "<none>".into()),
+                    fmt_vm_uptime(vm.started_unix),
+                    vm_role(&vm.name).to_string(),
+                    fmt_vm_gpu(&vm.devices),
+                ];
+                if ports {
+                    row.push(fmt_open_ports(vm.ip.as_deref()));
+                }
+                t.row(row);
             }
             t.print();
             Ok(())
@@ -1011,6 +1030,86 @@ fn fmt_vm_status(status: &delonix_runtime_core::Status) -> String {
         S::Stopped => "Stopped".to_string(),
         S::Failed(code) => format!("Exited ({code})"),
         S::Crashed => "Dead".to_string(),
+    }
+}
+
+/// UPTIME column: "Up X" since the CURRENT boot (`started_unix`, distinct
+/// from `created_unix` — see the field doc in `delonix-runtime-core`), or
+/// "-" for a stopped VM / an old record predating this field.
+fn fmt_vm_uptime(started_unix: Option<u64>) -> String {
+    match started_unix {
+        Some(t) => format!("Up {}", output::fmt_duration_secs(output::now_unix().saturating_sub(t))),
+        None => "-".to_string(),
+    }
+}
+
+/// ROLE column: derived from the deterministic naming `cluster kubeadm` gives
+/// its nodes (`vm_names` in `cmd/cluster.rs`: `<cluster>-cp<N>`/`<cluster>-w<N>`)
+/// — no new state to keep in sync, just reading a convention the codebase
+/// already committed to everywhere else (`cluster ls` derives similarly from
+/// labels rather than its own store). A VM outside that convention (manifest/
+/// `vm create` standalone) has no role to report — "-", not a guess.
+fn vm_role(vm_name: &str) -> &'static str {
+    let suffix = vm_name.rsplit('-').next().unwrap_or("");
+    if let Some(n) = suffix.strip_prefix("cp") {
+        if !n.is_empty() && n.chars().all(|c| c.is_ascii_digit()) {
+            return "control-plane";
+        }
+    }
+    if let Some(n) = suffix.strip_prefix('w') {
+        if !n.is_empty() && n.chars().all(|c| c.is_ascii_digit()) {
+            return "worker";
+        }
+    }
+    "-"
+}
+
+/// GPU column: count of PCI passthrough devices attached at boot (SR-IOV VFs
+/// — see `VmConfig.devices`, overwhelmingly used for GPU passthrough in
+/// practice; we don't claim to identify the device CLASS, just that
+/// passthrough hardware is attached). "-" when none, so an all-dash column
+/// (the common case, no GPU VMs) reads as "nothing to see" at a glance.
+fn fmt_vm_gpu(devices: &[String]) -> String {
+    match devices.len() {
+        0 => "-".to_string(),
+        n => format!("{n} dev"),
+    }
+}
+
+/// Well-known ports worth a quick reachability check from `vm ls --ports`:
+/// SSH (every VM), and the Kubernetes control-plane/kubelet/HTTP(S) ports a
+/// cluster node commonly exposes. Deliberately small — this is a glance, not
+/// a port scanner.
+const PROBE_PORTS: &[u16] = &[22, 6443, 10250, 80, 443];
+
+/// Probes [`PROBE_PORTS`] on `ip` concurrently (one thread per port, short
+/// connect timeout) and returns the ones that accepted a TCP connection.
+/// Zero new dependencies: `TcpStream::connect_timeout` is std. A VM with no
+/// IP yet (still booting) skips the network I/O entirely.
+fn fmt_open_ports(ip: Option<&str>) -> String {
+    let Some(ip) = ip else {
+        return "-".to_string();
+    };
+    use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
+    use std::time::Duration;
+    let handles: Vec<_> = PROBE_PORTS
+        .iter()
+        .filter_map(|&port| {
+            let addr: SocketAddr = (ip, port).to_socket_addrs().ok()?.next()?;
+            Some((port, std::thread::spawn(move || {
+                TcpStream::connect_timeout(&addr, Duration::from_millis(300)).is_ok()
+            })))
+        })
+        .collect();
+    let mut open: Vec<u16> = handles
+        .into_iter()
+        .filter_map(|(port, h)| h.join().ok().filter(|&ok| ok).map(|_| port))
+        .collect();
+    open.sort_unstable();
+    if open.is_empty() {
+        "-".to_string()
+    } else {
+        open.iter().map(u16::to_string).collect::<Vec<_>>().join(",")
     }
 }
 
@@ -1595,9 +1694,40 @@ fn cmd_init(
 #[cfg(test)]
 mod tests {
     use super::{
-        build_meta_data, build_user_data, fmt_vm_status, parse_ip_gateways, parse_ss_binds, VmSpec,
+        build_meta_data, build_user_data, fmt_vm_gpu, fmt_vm_status, fmt_vm_uptime,
+        parse_ip_gateways, parse_ss_binds, vm_role, VmSpec,
     };
     use delonix_runtime_core::Status;
+
+    #[test]
+    fn vm_role_le_o_sufixo_determinístico_do_cluster_kubeadm() {
+        assert_eq!(vm_role("lab-cp1"), "control-plane");
+        assert_eq!(vm_role("lab-cp12"), "control-plane");
+        assert_eq!(vm_role("lab-w1"), "worker");
+        assert_eq!(vm_role("prod-w3"), "worker");
+        // Nada disto é um nó de cluster kubeadm — sem papel a reportar.
+        assert_eq!(vm_role("dev"), "-");
+        assert_eq!(vm_role("my-custom-vm"), "-");
+        assert_eq!(vm_role("lab-cp"), "-"); // sem número, não bate no padrão
+        assert_eq!(vm_role("lab-cpx"), "-"); // sufixo não-numérico
+    }
+
+    #[test]
+    fn fmt_vm_gpu_conta_dispositivos_passthrough() {
+        assert_eq!(fmt_vm_gpu(&[]), "-");
+        assert_eq!(fmt_vm_gpu(&["0000:65:00.1".to_string()]), "1 dev");
+        assert_eq!(
+            fmt_vm_gpu(&["0000:65:00.1".to_string(), "0000:65:00.2".to_string()]),
+            "2 dev"
+        );
+    }
+
+    #[test]
+    fn fmt_vm_uptime_distingue_parado_de_a_correr() {
+        assert_eq!(fmt_vm_uptime(None), "-");
+        let five_min_ago = super::output::now_unix().saturating_sub(300);
+        assert_eq!(fmt_vm_uptime(Some(five_min_ago)), "Up 5 minutes");
+    }
 
     #[test]
     fn parse_ip_gateways_pega_so_as_virbr() {
