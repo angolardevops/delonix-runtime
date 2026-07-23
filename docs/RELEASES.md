@@ -4,6 +4,74 @@
 > (regenerado automaticamente pelo pipeline de release a cada tag publicada).
 > Não editar à mão — edita a nota da release respectiva.
 
+## v0.10.1 — 2 CRITICAL + 3 HIGH corrigidos (revisão adversarial completa)
+
+Patch de segurança urgente. Pedida uma revisão de código completa ao runtime — bugs,
+gaps, erros de design/arquitectura que pudessem comprometer o sistema em ambientes
+críticos. Correram 4 auditorias adversariais em paralelo: (1) re-verificação dos 35
+achados da auditoria anterior (`docs/AUDITORIA-E2E.md`) contra o código actual, (2)
+primeira auditoria de sempre aos 104 blocos `unsafe` de `delonix-runtime/lib.rs`, (3)
+auditoria fresca ao holder/control-socket de `delonix-net/infra.rs`, (4) auditoria de
+todo o código novo da sessão anterior (Tunnel, ShareVolume, `cluster.rs`, specs
+agrupados). Dois achados CRITICAL e três HIGH — todos já em produção no v0.10.0 — foram
+corrigidos de imediato em vez de só reportados.
+
+### 2 CRITICAL
+
+- **`kind: ShareVolume` com `name: ".."` escapava para o Storage pai inteiro.** O
+  charset do `VolumeStore::valid_name` aceitava um nome composto SÓ pelo carácter `.`
+  (`".."` passava). Juntar esse nome ao caminho do Storage pai resolve, sem normalizar,
+  para o próprio directório de dados do pai — bypass total do isolamento, e
+  `sharevolume rm --purge-data` nessa fatia apaga o NAS partilhado inteiro. Corrigido na
+  raiz: `valid_name` passa a recusar qualquer nome a começar por `.` ou a conter `..`,
+  protegendo todos os consumidores do store, não só o ShareVolume.
+- **Injecção de argv SSH via token do `kind: Tunnel`.** O token do provider `pinggy`
+  era embutido como o ÚLTIMO argumento posicional do `ssh`, sem `--` a separar. Um
+  token a começar por `-` (ex.: `-oProxyCommand=<comando>`) é interpretado pelo `ssh`
+  como uma OPÇÃO, executando o comando do atacante via `/bin/sh -c` antes de qualquer
+  ligação de rede — RCE local como quem corre `tunnel apply/expose`. Corrigido no único
+  ponto de resolução do token (protege pinggy E ngrok) mais um `--` no argv como defesa
+  em profundidade.
+
+### 3 HIGH
+
+- **Nomes de container nunca validados** — um `container run --name registry.npmjs.org`
+  vulgar (sem manifesto, sem privilégio) sequestra a resolução DNS desse hostname para
+  TODOS os outros containers/VMs do nó, em qualquer namespace. Corrigido com
+  `valid_container_name` (exclui `.` deliberadamente).
+- **`cluster kubeadm --copy-kubeconfig` confiava no `admin.conf` remoto por inteiro** —
+  um `users[].user` pode legalmente ter um `exec:` (execução de comando arbitrário LOCAL
+  da próxima vez que o `kubectl` usar o contexto). Um control-plane comprometido depois
+  do provisionamento vira execução de código na máquina do operador. Corrigido:
+  constrói-se um `cluster`/`user` NOVO só com os campos que o `admin.conf` real do
+  kubeadm tem, nunca clonando o bloco bruto.
+- **Bind-mounts seguiam symlinks plantados pela imagem, antes do `pivot_root`** — um
+  `mount_target_safe` só lexical (rejeita `..`) não chega: a criação do destino
+  (`create_dir_all`/`open`, ambos seguem symlinks) corre com `/` ainda a ser o
+  filesystem real do host. Uma imagem com `/etc -> /root` redirecciona a criação de
+  ficheiros/directórios reais para o host, como o uid do motor. Corrigido com
+  `safe_bind_target`: resolve o caminho componente a componente, recusando qualquer
+  symlink — o equivalente, do lado do motor, ao `confine_to` já usado no `COPY` do build.
+
+### Estado da auditoria anterior
+
+Reverificados os 6 HIGH da auditoria de segurança do v0.9.0: continuam corrigidos. Os
+outros 29 achados MEDIUM/LOW/por-verificar de `docs/AUDITORIA-E2E.md` continuam em
+aberto — não tocados nesta release, ficam como lista de trabalho priorizada para uma
+próxima sessão dedicada.
+
+### Nota de honestidade
+
+Todas as correcções foram validadas ao vivo contra o exploit real (não só testes
+unitários): o `..` do ShareVolume recusado antes de tocar em disco, um token malicioso
+bloqueado via `tunnel apply -f` real sem efeito lateral, um nome de container com ponto
+recusado via `container run --name` real, um `admin.conf` malicioso com `exec:`/
+`insecure-skip-tls-verify` removido enquanto os campos legítimos sobrevivem, e a recusa
+de symlink do `safe_bind_target` cobre tanto uma componente intermédia do caminho como o
+próprio alvo final.
+
+---
+
 ## v0.10.0 — kind: Tunnel, kind: ShareVolume, e um `cluster kubeadm` finalmente real
 
 O caminho `delonix cluster kubeadm`/`cluster apply` (modo `vm`) nunca tinha corrido de
