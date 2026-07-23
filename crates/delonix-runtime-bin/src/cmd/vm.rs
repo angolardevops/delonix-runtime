@@ -673,7 +673,7 @@ pub fn run(action: VmCmd) -> Result<()> {
                 Some(d) => d,
                 None => {
                     let store = super::vmimage::VmImageStore::open(super::util::state_root())?;
-                    let tag = super::cluster::resolve_vm_image(&store, None)?;
+                    let tag = super::cluster::resolve_vm_image(&store, None, None)?;
                     store.qcow2_path(&tag).to_string_lossy().into_owned()
                 }
             };
@@ -776,7 +776,9 @@ pub fn run(action: VmCmd) -> Result<()> {
             super::vmimage::cmd_push(&store, &name, &target)
         }
         VmCmd::Ls { ports } => {
-            let mut cols = vec!["NAME", "VCPUS", "MEMORY", "STATUS", "IP", "UPTIME", "ROLE", "GPU"];
+            let mut cols = vec![
+                "NAME", "VCPUS", "MEMORY", "STATUS", "IP", "UPTIME", "ROLE", "GPU",
+            ];
             if ports {
                 cols.push("PORTS OPEN");
             }
@@ -1038,7 +1040,10 @@ fn fmt_vm_status(status: &delonix_runtime_core::Status) -> String {
 /// "-" for a stopped VM / an old record predating this field.
 fn fmt_vm_uptime(started_unix: Option<u64>) -> String {
     match started_unix {
-        Some(t) => format!("Up {}", output::fmt_duration_secs(output::now_unix().saturating_sub(t))),
+        Some(t) => format!(
+            "Up {}",
+            output::fmt_duration_secs(output::now_unix().saturating_sub(t))
+        ),
         None => "-".to_string(),
     }
 }
@@ -1096,9 +1101,12 @@ fn fmt_open_ports(ip: Option<&str>) -> String {
         .iter()
         .filter_map(|&port| {
             let addr: SocketAddr = (ip, port).to_socket_addrs().ok()?.next()?;
-            Some((port, std::thread::spawn(move || {
-                TcpStream::connect_timeout(&addr, Duration::from_millis(300)).is_ok()
-            })))
+            Some((
+                port,
+                std::thread::spawn(move || {
+                    TcpStream::connect_timeout(&addr, Duration::from_millis(300)).is_ok()
+                }),
+            ))
         })
         .collect();
     let mut open: Vec<u16> = handles
@@ -1109,7 +1117,10 @@ fn fmt_open_ports(ip: Option<&str>) -> String {
     if open.is_empty() {
         "-".to_string()
     } else {
-        open.iter().map(u16::to_string).collect::<Vec<_>>().join(",")
+        open.iter()
+            .map(u16::to_string)
+            .collect::<Vec<_>>()
+            .join(",")
     }
 }
 
