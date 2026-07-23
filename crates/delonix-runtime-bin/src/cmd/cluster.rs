@@ -782,6 +782,25 @@ fn wait_for_vm_ssh_ready(vm_name: &str, ssh: &SshSpec, timeout: Duration) -> Res
         std::thread::sleep(Duration::from_secs(3));
     };
 
+    // BUG FIXED HERE, found live: a VM we just created can land on an IP a
+    // PREVIOUS VM (recreated after a failed/removed attempt at the same name —
+    // exactly what troubleshooting a stuck boot leads to) already used. libvirt's
+    // NAT DHCP reservation is by MAC, so the IP is deterministic per VM name —
+    // a stale entry in the invoking user's REAL `~/.ssh/known_hosts`, left over
+    // from that earlier incarnation's DIFFERENT host key, then makes `ssh`
+    // (`StrictHostKeyChecking=accept-new`, correctly refusing a CHANGED key —
+    // this is not a bug in that check) fail every single attempt until the
+    // `--boot-timeout` deadline, surfacing as a confusing "SSH did not
+    // respond" that looks exactly like a slow boot but never was one. Since we
+    // created this VM ourselves moments ago, any existing record for its IP is
+    // known-stale garbage — safe to discard before the very first attempt
+    // rather than let the user hit this blind.
+    let _ = std::process::Command::new("ssh-keygen")
+        .args(["-R", &ip])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status();
+
     let target = SshTarget {
         host: ip.clone(),
         user: ssh.user.clone(),

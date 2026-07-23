@@ -1043,6 +1043,23 @@ fn common_customization_steps(
     ops.push(CustomizeOp::RunCommand(
         "apt-get clean && rm -rf /var/lib/apt/lists/*".into(),
     ));
+    // BUG FOUND LIVE (delonix cluster kubeadm, multi-VM libvirt NAT): every VM
+    // cloned from this golden qcow2 shares ONE `/etc/machine-id` — installing
+    // kubeadm's dependencies during `virt-customize` pulls in a package whose
+    // postinst calls `systemd-machine-id-setup`/`dbus-uuidgen`, baking a REAL id
+    // into the image (a fresh Ubuntu cloud image ships this file EMPTY on
+    // purpose, so systemd generates a fresh one on each VM's actual first boot —
+    // `virt-customize` doesn't do that virt-sysprep-style cleanup by itself).
+    // systemd-networkd derives its DHCP client-id (DUID) from machine-id, so
+    // dnsmasq saw 3 cluster VMs as the SAME client and kept moving the one lease
+    // to whichever VM last renewed — evicting the other two, breaking
+    // connectivity mid-`kubeadm init`. Confirmed live: `lab-cp1` and `lab-w1`
+    // reported the byte-for-byte identical machine-id. MUST be the very last
+    // step (after `--extra-run`/apt cleanup) so nothing after it regenerates one.
+    ops.push(CustomizeOp::RunCommand(
+        "truncate -s 0 /etc/machine-id && rm -f /var/lib/dbus/machine-id && ln -sf /etc/machine-id /var/lib/dbus/machine-id"
+            .into(),
+    ));
     ops
 }
 
@@ -1140,11 +1157,18 @@ mod tests {
             .expect("o --extra-run devia estar na lista");
         assert_eq!(
             idx_extra,
-            ops.len() - 2,
+            ops.len() - 3,
             "o --extra-run devia vir logo antes da limpeza"
         );
         assert!(
-            matches!(ops.last(), Some(CustomizeOp::RunCommand(c)) if c.contains("apt-get clean"))
+            matches!(&ops[ops.len() - 2], CustomizeOp::RunCommand(c) if c.contains("apt-get clean"))
+        );
+        // machine-id reset must be the ABSOLUTE last step (regression: shared
+        // machine-id across cloned VMs breaks DHCP client-id, see comment at
+        // the push site in `common_customization_steps`).
+        assert!(
+            matches!(ops.last(), Some(CustomizeOp::RunCommand(c)) if c.contains("truncate -s 0 /etc/machine-id")),
+            "o reset do machine-id devia ser o ÚLTIMO passo"
         );
     }
 
@@ -1334,10 +1358,11 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
         let svc = PathBuf::from("/tmp/delonix-cri.service");
         let ops = k8s_customization_steps(None, &[], &[], &cri, &svc);
         // ~367 MiB of .deb + indexes that, without this, filled the golden's root to 92%.
-        let last = ops.last().expect("devia haver passos");
+        // Second-to-last: the machine-id reset (below) must run AFTER it.
+        let clean = &ops[ops.len() - 2];
         assert!(
-            matches!(last, CustomizeOp::RunCommand(c) if c.contains("apt-get clean") && c.contains("/var/lib/apt/lists")),
-            "o último passo devia limpar a cache apt, obtido: {last:?}"
+            matches!(clean, CustomizeOp::RunCommand(c) if c.contains("apt-get clean") && c.contains("/var/lib/apt/lists")),
+            "o penúltimo passo devia limpar a cache apt, obtido: {clean:?}"
         );
     }
 
