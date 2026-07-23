@@ -104,6 +104,7 @@ struct StageResult {
     entrypoint: Vec<String>,
     env: Vec<String>,
     workdir: String,
+    user: String,
     /// `Some` only when this stage's `FROM` resolved to a real pulled image —
     /// needed for the root-mode OCI commit if this ends up being the FINAL
     /// stage's base (lineage/diff_ids come from a real `Image`, not a clone).
@@ -127,6 +128,7 @@ fn resolve_stage_base(
             entrypoint: prior.entrypoint.clone(),
             env: prior.env.clone(),
             workdir: prior.workdir.clone(),
+            user: prior.user.clone(),
             image: None,
         })
     } else {
@@ -143,6 +145,7 @@ fn resolve_stage_base(
             entrypoint: img.config.entrypoint.clone(),
             env: img.config.env.clone(),
             workdir,
+            user: img.config.user.clone(),
             image: Some(img),
         })
     }
@@ -317,13 +320,33 @@ pub fn build_from_spec(
             } else {
                 df.cmd.clone()
             };
+            let entrypoint = if df.entrypoint.is_empty() {
+                final_state.entrypoint.clone()
+            } else {
+                df.entrypoint.clone()
+            };
             let mut env = final_state.env.clone();
             env.extend(df.env.iter().cloned());
             let workdir = df
                 .workdir
                 .clone()
                 .unwrap_or_else(|| final_state.workdir.clone());
-            commit_flat_rootless(&images, &final_state.rootfs, &id, cmd, env, workdir, tag)
+            let user = if df.user.is_empty() {
+                final_state.user.clone()
+            } else {
+                df.user.clone()
+            };
+            commit_flat_rootless(
+                &images,
+                &final_state.rootfs,
+                &id,
+                cmd,
+                entrypoint,
+                env,
+                workdir,
+                user,
+                tag,
+            )
         } else {
             let Some(base_image) = &final_state.image else {
                 return Err(Error::Invalid(format!(
@@ -362,13 +385,16 @@ pub fn build_from_spec(
 /// `reexec_mapped` returns `None` when it does not apply — rootless **single-uid**
 /// (without `newuidmap`): there the RUN files belong to OUR uid and the
 /// in-process path reads them just the same, so we fall back to `commit_flat_rootfs`.
+#[allow(clippy::too_many_arguments)]
 fn commit_flat_rootless(
     images: &delonix_image::ImageStore,
     rootfs: &str,
     id: &str,
     cmd: Vec<String>,
+    entrypoint: Vec<String>,
     env: Vec<String>,
     workdir: String,
+    user: String,
     tag: &str,
 ) -> Result<Image> {
     let tar_path = std::env::temp_dir().join(format!("delonix-build-{id}.tar"));
@@ -377,13 +403,13 @@ fn commit_flat_rootless(
         Some(true) => {
             let bytes = std::fs::read(&tar_path)
                 .map_err(|e| Error::Invalid(format!("ler tar do build (userns mapeado): {e}")))?;
-            images.commit_flat_rootfs_from_tar(bytes, cmd, env, workdir, tag)
+            images.commit_flat_rootfs_from_tar(bytes, cmd, entrypoint, env, workdir, user, tag)
         }
         Some(false) => Err(Error::Invalid(
             "empacotar rootfs dentro do userns mapeado falhou (delonix __buildtar)".into(),
         )),
         // Without subuid (rootless single-uid): the RUN files are our uid's.
-        None => images.commit_flat_rootfs(Path::new(rootfs), cmd, env, workdir, tag),
+        None => images.commit_flat_rootfs(Path::new(rootfs), cmd, entrypoint, env, workdir, user, tag),
     };
     let _ = std::fs::remove_file(&tar_path); // best-effort, never hides the result
     result
