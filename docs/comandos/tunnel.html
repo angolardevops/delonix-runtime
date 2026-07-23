@@ -97,7 +97,7 @@ por agora só o quick-tunnel efémero <code>*.trycloudflare.com</code>, sem cont
 NOMEADO com domínio próprio precisa da API do Cloudflare, ainda por implementar).</p>
 <div class='help'><pre><code>Expose a local port to the public internet via pinggy/ngrok/cloudflare (`kind: Tunnel`) — pair with `httproute`&#x27;s listening port to route by Host header behind ONE public URL
 
-Usage: delonix tunnel [OPTIONS] &lt;COMMAND&gt;
+Usage: delonix-x86_64-linux tunnel [OPTIONS] &lt;COMMAND&gt;
 
 Commands:
   apply     Apply the `kind: Tunnel` documents of a manifest (idempotent)
@@ -113,7 +113,7 @@ Options:
 <h2 id='expose'><code>tunnel expose</code></h2>
 <div class='help'><pre><code>One-shot expose of a local port, no manifest needed
 
-Usage: delonix tunnel expose [OPTIONS] --provider &lt;PROVIDER&gt; --local-port &lt;LOCAL_PORT&gt;
+Usage: delonix-x86_64-linux tunnel expose [OPTIONS] --provider &lt;PROVIDER&gt; --local-port &lt;LOCAL_PORT&gt;
 
 Options:
       --l18n &lt;en|pt&gt;                 Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
@@ -130,7 +130,7 @@ chegou a um servidor local através do tunnel (HTTP 200) usando exactamente este
 <h2 id='ls'><code>tunnel ls</code></h2>
 <div class='help'><pre><code>List tunnels (state + public URL)
 
-Usage: delonix tunnel ls [OPTIONS]
+Usage: delonix-x86_64-linux tunnel ls [OPTIONS]
 
 Options:
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
@@ -140,7 +140,7 @@ test1   pinggy          18234   https://oxipg-197-148-40-67.free.pinggy.net   Ru
 <h2 id='describe'><code>tunnel describe</code></h2>
 <div class='help'><pre><code>Human-readable detail of one tunnel
 
-Usage: delonix tunnel describe [OPTIONS] &lt;NAME&gt;
+Usage: delonix-x86_64-linux tunnel describe [OPTIONS] &lt;NAME&gt;
 
 Arguments:
   &lt;NAME&gt;  
@@ -152,7 +152,7 @@ Options:
 <h2 id='rm'><code>tunnel rm</code></h2>
 <div class='help'><pre><code>Stop and remove a tunnel
 
-Usage: delonix tunnel rm [OPTIONS] &lt;NAME&gt;
+Usage: delonix-x86_64-linux tunnel rm [OPTIONS] &lt;NAME&gt;
 
 Arguments:
   &lt;NAME&gt;  

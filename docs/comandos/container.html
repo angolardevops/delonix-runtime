@@ -92,7 +92,7 @@ JSON no <code>$DELONIX_ROOT</code>. Em rootless, o rootfs do container é uma c�
 <em>persistente</em> — as escritas sobrevivem a <code>stop</code>/<code>start</code>, como no Docker.</p>
 <div class='help'><pre><code>Containers: run/ps/stop/rm/exec/logs/update/describe
 
-Usage: delonix container [OPTIONS] &lt;COMMAND&gt;
+Usage: delonix-x86_64-linux container [OPTIONS] &lt;COMMAND&gt;
 
 Commands:
   dash         Dashboard (KPIs + table + problems) of the containers — interactive TUI, or `--once` for a text snapshot
@@ -125,7 +125,7 @@ Options:
 <h2 id='run'><code>container run</code></h2>
 <div class='help'><pre><code>Run a container from an image (pulls it if missing)
 
-Usage: delonix container run [OPTIONS] &lt;IMAGE&gt; [COMMAND]...
+Usage: delonix-x86_64-linux container run [OPTIONS] &lt;IMAGE&gt; [COMMAND]...
 
 Arguments:
   &lt;IMAGE&gt;       Image (e.g. `alpine:3.19`)
@@ -193,7 +193,7 @@ delonix container run -d --net minha-rede -p 8443:443 caddy</code></pre></div><d
 <h2 id='ps'><code>container ps</code></h2>
 <div class='help'><pre><code>List containers
 
-Usage: delonix container ps [OPTIONS]
+Usage: delonix-x86_64-linux container ps [OPTIONS]
 
 Options:
   -a, --all           Include stopped/failed ones
@@ -204,7 +204,7 @@ Options:
 <h2 id='start'><code>container start</code></h2>
 <div class='help'><pre><code>(Re)start stopped/crashed containers, reusing the persistent rootfs (writes made inside the container survive, like in docker) and the same network/ports/volumes as the original `run`. Always detached
 
-Usage: delonix container start [OPTIONS] &lt;IDS&gt;...
+Usage: delonix-x86_64-linux container start [OPTIONS] &lt;IDS&gt;...
 
 Arguments:
   &lt;IDS&gt;...  
@@ -218,7 +218,7 @@ persistente — ao contrário de <code>rm</code>+<code>run</code>, nada do que o
 <h2 id='stop'><code>container stop</code></h2>
 <div class='help'><pre><code>Stop one or more containers (SIGTERM, then SIGKILL)
 
-Usage: delonix container stop [OPTIONS] &lt;IDS&gt;...
+Usage: delonix-x86_64-linux container stop [OPTIONS] &lt;IDS&gt;...
 
 Arguments:
   &lt;IDS&gt;...  
@@ -231,7 +231,7 @@ Options:
 <h2 id='rm'><code>container rm</code></h2>
 <div class='help'><pre><code>Remove one or more containers
 
-Usage: delonix container rm [OPTIONS] &lt;IDS&gt;...
+Usage: delonix-x86_64-linux container rm [OPTIONS] &lt;IDS&gt;...
 
 Arguments:
   &lt;IDS&gt;...  
@@ -244,7 +244,7 @@ Options:
 <h2 id='exec'><code>container exec</code></h2>
 <div class='help'><pre><code>Execute a command inside a running container
 
-Usage: delonix container exec [OPTIONS] &lt;ID&gt; &lt;COMMAND&gt;...
+Usage: delonix-x86_64-linux container exec [OPTIONS] &lt;ID&gt; &lt;COMMAND&gt;...
 
 Arguments:
   &lt;ID&gt;          
@@ -259,7 +259,7 @@ Options:
 <h2 id='logs'><code>container logs</code></h2>
 <div class='help'><pre><code>Show the logs (detached containers)
 
-Usage: delonix container logs [OPTIONS] &lt;ID&gt;
+Usage: delonix-x86_64-linux container logs [OPTIONS] &lt;ID&gt;
 
 Arguments:
   &lt;ID&gt;  
@@ -272,7 +272,7 @@ Options:
 <h2 id='inspect'><code>container inspect</code></h2>
 <div class='help'><pre><code>Show the full spec of one or more containers (Store JSON)
 
-Usage: delonix container inspect [OPTIONS] &lt;IDS&gt;...
+Usage: delonix-x86_64-linux container inspect [OPTIONS] &lt;IDS&gt;...
 
 Arguments:
   &lt;IDS&gt;...  
@@ -284,7 +284,7 @@ Options:
 <h2 id='stats'><code>container stats</code></h2>
 <div class='help'><pre><code>Resource usage (CPU/memory/PIDs) of the running containers — one sample and exits (no stream). With no IDs, shows all running ones
 
-Usage: delonix container stats [OPTIONS] [IDS]...
+Usage: delonix-x86_64-linux container stats [OPTIONS] [IDS]...
 
 Arguments:
   [IDS]...  
@@ -300,7 +300,7 @@ marcada com <code>~</code>.</p>
 <h2 id='apply'><code>container apply</code></h2>
 <div class='help'><pre><code>Apply the `kind: Container` documents of a manifest (idempotent by name — an existing container with that name is neither recreated nor checked for spec drift, see `cmd::manifest`)
 
-Usage: delonix container apply [OPTIONS]
+Usage: delonix-x86_64-linux container apply [OPTIONS]
 
 Options:
   -f, --file &lt;FILE&gt;   

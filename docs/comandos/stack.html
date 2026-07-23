@@ -92,7 +92,7 @@ Semântica <em>garante-presente</em> (idempotente por nome), não um reconciliad
 rollout nem rollback — fail-fast, o que já foi aplicado fica.</p>
 <div class='help'><pre><code>Apply a whole manifest (`delonix-manifest.yaml`) — every Kind, in dependency order
 
-Usage: delonix stack [OPTIONS] &lt;COMMAND&gt;
+Usage: delonix-x86_64-linux stack [OPTIONS] &lt;COMMAND&gt;
 
 Commands:
   init      Initializes a COMPLETE project: Delonixfile + manifest + cluster + README — files ALREADY FILLED IN (images included), ready to use without editing anything
@@ -127,7 +127,7 @@ spec:
 <h2 id='init'><code>stack init</code></h2>
 <div class='help'><pre><code>Initializes a COMPLETE project: Delonixfile + manifest + cluster + README — files ALREADY FILLED IN (images included), ready to use without editing anything
 
-Usage: delonix stack init [OPTIONS] [DIR]
+Usage: delonix-x86_64-linux stack init [OPTIONS] [DIR]
 
 Arguments:
   [DIR]  Project directory (default: the current one) [default: .]
@@ -149,7 +149,7 @@ do projecto.</p>
 <h2 id='apply'><code>stack apply</code></h2>
 <div class='help'><pre><code>Applies all the manifest Kinds (Network → Volume → Image → Vm → Container)
 
-Usage: delonix stack apply [OPTIONS]
+Usage: delonix-x86_64-linux stack apply [OPTIONS]
 
 Options:
   -f, --file &lt;FILE&gt;   

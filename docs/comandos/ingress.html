@@ -92,7 +92,7 @@ a política por omissão, e os <em>publishes</em> DNAT. Só actua em containers 
 <code>delonix0</code>); <code>--net host</code> é recusado.</p>
 <div class='help'><pre><code>INBOUND firewall (L4 rules + DNAT publishes) for a container on the SDN
 
-Usage: delonix ingress [OPTIONS] &lt;COMMAND&gt;
+Usage: delonix-x86_64-linux ingress [OPTIONS] &lt;COMMAND&gt;
 
 Commands:
   allow      Allow inbound traffic to a container: `[proto/]port` from an optional CIDR
@@ -111,7 +111,7 @@ Options:
 <h2 id='allow'><code>ingress allow</code></h2>
 <div class='help'><pre><code>Allow inbound traffic to a container: `[proto/]port` from an optional CIDR
 
-Usage: delonix ingress allow [OPTIONS] &lt;CONTAINER&gt; &lt;PORT&gt;
+Usage: delonix-x86_64-linux ingress allow [OPTIONS] &lt;CONTAINER&gt; &lt;PORT&gt;
 
 Arguments:
   &lt;CONTAINER&gt;  
@@ -126,7 +126,7 @@ Options:
 <h2 id='deny'><code>ingress deny</code></h2>
 <div class='help'><pre><code>Deny inbound traffic to a container (same shape as `allow`)
 
-Usage: delonix ingress deny [OPTIONS] &lt;CONTAINER&gt; &lt;PORT&gt;
+Usage: delonix-x86_64-linux ingress deny [OPTIONS] &lt;CONTAINER&gt; &lt;PORT&gt;
 
 Arguments:
   &lt;CONTAINER&gt;  
@@ -141,7 +141,7 @@ Options:
 <h2 id='policy'><code>ingress policy</code></h2>
 <div class='help'><pre><code>Set the default inbound policy when no rule matches
 
-Usage: delonix ingress policy [OPTIONS] &lt;CONTAINER&gt; &lt;POLICY&gt;
+Usage: delonix-x86_64-linux ingress policy [OPTIONS] &lt;CONTAINER&gt; &lt;POLICY&gt;
 
 Arguments:
   &lt;CONTAINER&gt;  
@@ -154,7 +154,7 @@ Options:
 <h2 id='publish'><code>ingress publish</code></h2>
 <div class='help'><pre><code>Publish a host port to the container (DNAT through the ingress)
 
-Usage: delonix ingress publish [OPTIONS] &lt;CONTAINER&gt; &lt;SPEC&gt;
+Usage: delonix-x86_64-linux ingress publish [OPTIONS] &lt;CONTAINER&gt; &lt;SPEC&gt;
 
 Arguments:
   &lt;CONTAINER&gt;  
@@ -167,7 +167,7 @@ Options:
 <h2 id='ls'><code>ingress ls</code></h2>
 <div class='help'><pre><code>Show the inbound firewall (policy + rules) and published ports
 
-Usage: delonix ingress ls [OPTIONS] [CONTAINER]
+Usage: delonix-x86_64-linux ingress ls [OPTIONS] [CONTAINER]
 
 Arguments:
   [CONTAINER]  Container to inspect (omit to list every container&#x27;s inbound state)

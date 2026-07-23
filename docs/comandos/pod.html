@@ -101,7 +101,7 @@ a namespace de <strong>PID</strong> (<code>shareProcessNamespace</code>, já no 
 partilhada — cada container mantém a sua própria árvore de processos; é a fatia seguinte.</p>
 <div class='help'><pre><code>Real multi-container pods (N containers sharing a netns): create/ls/describe/rm/logs
 
-Usage: delonix pod [OPTIONS] &lt;COMMAND&gt;
+Usage: delonix-x86_64-linux pod [OPTIONS] &lt;COMMAND&gt;
 
 Commands:
   create    Create a pod (N containers sharing a netns) from a manifest (`kind: Pod`)
@@ -117,7 +117,7 @@ Options:
 <h2 id='create'><code>pod create</code></h2>
 <div class='help'><pre><code>Create a pod (N containers sharing a netns) from a manifest (`kind: Pod`)
 
-Usage: delonix pod create [OPTIONS]
+Usage: delonix-x86_64-linux pod create [OPTIONS]
 
 Options:
   -f, --file &lt;FILE&gt;   
@@ -131,7 +131,7 @@ falha, o pod é desfeito por inteiro (sem meio-pod).</p>
 <h2 id='ls'><code>pod ls</code></h2>
 <div class='help'><pre><code>List the pods (derived from container labels)
 
-Usage: delonix pod ls [OPTIONS]
+Usage: delonix-x86_64-linux pod ls [OPTIONS]
 
 Options:
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
@@ -140,7 +140,7 @@ Options:
 <h2 id='describe'><code>pod describe</code></h2>
 <div class='help'><pre><code>Details of one or more pods (containers + the shared IP), `kubectl` style
 
-Usage: delonix pod describe [OPTIONS] [NAMES]...
+Usage: delonix-x86_64-linux pod describe [OPTIONS] [NAMES]...
 
 Arguments:
   [NAMES]...  
@@ -152,7 +152,7 @@ Options:
 <h2 id='rm'><code>pod rm</code></h2>
 <div class='help'><pre><code>Remove a pod: stop/remove ALL its containers + the shared netns
 
-Usage: delonix pod rm [OPTIONS] [NAMES]...
+Usage: delonix-x86_64-linux pod rm [OPTIONS] [NAMES]...
 
 Arguments:
   [NAMES]...  
@@ -165,7 +165,7 @@ Options:
 <h2 id='logs'><code>pod logs</code></h2>
 <div class='help'><pre><code>Logs of a pod&#x27;s container (defaults to the first member)
 
-Usage: delonix pod logs [OPTIONS] &lt;POD&gt;
+Usage: delonix-x86_64-linux pod logs [OPTIONS] &lt;POD&gt;
 
 Arguments:
   &lt;POD&gt;  
