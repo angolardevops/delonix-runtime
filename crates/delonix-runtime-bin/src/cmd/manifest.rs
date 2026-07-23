@@ -528,6 +528,8 @@ spec: { image: alpine, memroy: 2G, restartPolicy: always }
                 "Egress" | "FirewallPolicy" => Some(crate::cmd::firewall::FW_SPEC_FIELDS),
                 "HTTPRoute" => Some(crate::cmd::httproute::HTTP_ROUTE_SPEC_FIELDS),
                 "Dependency" => Some(crate::cmd::dependency::DEPENDENCY_SPEC_FIELDS),
+                "Tunnel" => Some(crate::cmd::tunnel::TUNNEL_SPEC_FIELDS),
+                "ShareVolume" => Some(crate::cmd::sharevolume::SHAREVOLUME_SPEC_FIELDS),
                 _ => None, // Cluster has its own nested specs; outside this guard.
             }
         };

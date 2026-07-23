@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>delonix egress · Delonix Runtime</title>
+<title>delonix sharevolume · Delonix Runtime</title>
 <style>
 :root{--accent:#e8590c;--accent-soft:#fff0e6;--ink:#1a1a2e;--muted:#5a6472;--line:#e6e8ec;
 --bg:#ffffff;--side:#f7f8fa;--code-bg:#0f172a;--code-ink:#e2e8f0;--radius:10px}
@@ -78,130 +78,88 @@ main{padding:1.4rem 1.2rem 4rem}}
 <h5>Documentação</h5>
 <a href="../index.html">Início</a><a href="../cheatsheet.html">Cheatsheet</a><a href="../kinds.html">Kinds e templates</a><a href="../arquitectura.html">Arquitectura</a><a href="../c4.html">Modelo C4 e system design</a><a href="../cri.html">CRI — kubelet sem containerd</a><a href="../comparacao.html">Delonix vs Docker vs Podman</a>
 <h5>Referência CLI</h5>
-<a href="../comandos/container.html">delonix container</a><a href="../comandos/pod.html">delonix pod</a><a href="../comandos/image.html">delonix image</a><a href="../comandos/build.html">delonix build</a><a href="../comandos/vm.html">delonix vm</a><a href="../comandos/volumes.html">delonix volumes</a><a href="../comandos/network.html">delonix network</a><a href="../comandos/stack.html">delonix stack</a><a href="../comandos/cluster.html">delonix cluster</a><a href="../comandos/secret.html">delonix secret</a><a href="../comandos/storage.html">delonix storage</a><a href="../comandos/sharevolume.html">delonix sharevolume</a><a href="../comandos/ingress.html">delonix ingress</a><a href="../comandos/egress.html" class="on">delonix egress</a><a href="../comandos/httproute.html">delonix httproute</a><a href="../comandos/tunnel.html">delonix tunnel</a><a href="../comandos/flow.html">delonix flow</a><a href="../comandos/boot.html">delonix boot</a><a href="../comandos/system.html">delonix system</a><a href="../comandos/dash.html">delonix dash</a><a href="../comandos/docker-api.html">delonix docker-api</a><a href="../comandos/kube.html">delonix kube</a><a href="../comandos/netns.html">delonix netns</a><a href="../comandos/completion.html">delonix completion</a>
+<a href="../comandos/container.html">delonix container</a><a href="../comandos/pod.html">delonix pod</a><a href="../comandos/image.html">delonix image</a><a href="../comandos/build.html">delonix build</a><a href="../comandos/vm.html">delonix vm</a><a href="../comandos/volumes.html">delonix volumes</a><a href="../comandos/network.html">delonix network</a><a href="../comandos/stack.html">delonix stack</a><a href="../comandos/cluster.html">delonix cluster</a><a href="../comandos/secret.html">delonix secret</a><a href="../comandos/storage.html">delonix storage</a><a href="../comandos/sharevolume.html" class="on">delonix sharevolume</a><a href="../comandos/ingress.html">delonix ingress</a><a href="../comandos/egress.html">delonix egress</a><a href="../comandos/httproute.html">delonix httproute</a><a href="../comandos/tunnel.html">delonix tunnel</a><a href="../comandos/flow.html">delonix flow</a><a href="../comandos/boot.html">delonix boot</a><a href="../comandos/system.html">delonix system</a><a href="../comandos/dash.html">delonix dash</a><a href="../comandos/docker-api.html">delonix docker-api</a><a href="../comandos/kube.html">delonix kube</a><a href="../comandos/netns.html">delonix netns</a><a href="../comandos/completion.html">delonix completion</a>
 <h5>Projecto</h5>
 <a href="https://github.com/angolardevops/delonix-runtime">GitHub</a>
 <a href="https://github.com/angolardevops/delonix-runtime/releases">Releases</a>
 </nav>
 <main>
-<h1>delonix egress</h1><p class='tagline'>Firewall de SAÍDA (regras L4 + política de egress→Internet por-rede).</p>
-<p>A outra metade do firewall. Governa a SAÍDA de um container (regras allow/deny + política
-por omissão) e, ao nível da REDE, a política de egress para a Internet: <code>allow</code>/<code>deny</code>,
-ou <code>allowlist</code> (nega tudo excepto DNS e os CIDRs dados). Tudo sobre o mesmo <code>ContainerFw</code>
-/nft do <code>ingress</code>.</p>
-<div class='help'><pre><code>OUTBOUND firewall (L4 rules + per-network egress policy) for a container
+<h1>delonix sharevolume</h1><p class='tagline'>Uma fatia ISOLADA e com QUOTA própria de um `Storage` — vários container/vm/pod partilham um NAS.</p>
+<p>Resolve um problema concreto de multi-tenant: várias cargas a partilhar UM export
+NFS/CIFS/WebDAV, cada uma com o SEU ponto de montagem isolado e a SUA quota, sem se verem. Por baixo
+não há mecanismo de montagem novo nenhum: cada <code>ShareVolume</code> é um SUBDIRECTÓRIO real da
+árvore já montada pelo <code>kind: Storage</code> pai (<code>&lt;storage&gt;/_data/shares/&lt;nome&gt;</code>),
+registado como o seu próprio volume — a isolação é confinamento de caminho puro e o consumo usa o
+<code>-v &lt;nome&gt;:/destino</code> de sempre, sem código novo nenhum do lado do container/vm/pod. A
+quota é SOFT (uso medido + alerta) — o caminho HARD (imagem ext4 loopback) precisa de armazenamento de
+bloco local e não compõe com um subdirectório de um mount de rede.</p>
+<div class='help'><pre><code>An isolated, individually-quota&#x27;d slice of a `Storage` — multiple container/vm/pod share ONE NAS export without seeing each other&#x27;s data
 
-Usage: delonix egress [OPTIONS] &lt;COMMAND&gt;
+Usage: delonix sharevolume [OPTIONS] &lt;COMMAND&gt;
 
 Commands:
-  allow   Allow outbound traffic from a container: `[proto/]port` to an optional CIDR
-  deny    Deny outbound traffic from a container (same shape as `allow`)
-  policy  Set the default outbound policy when no rule matches
-  net     Govern a whole network&#x27;s egress to the Internet
-  host    Allow a network&#x27;s egress to a HOSTNAME (and `*.hostname`), learnt live from DNS answers — the FQDN allowlist nft/CIDR can&#x27;t express. Repeatable
-  ls      Show the outbound firewall (policy + rules)
-  rm      Remove outbound rule(s) matching `[proto/]port` (all protos if none given)
-  show    Show a NETWORK&#x27;s egress policy: CIDR allowlist, FQDN hosts, and the IPs currently learnt from DNS for those hosts
-  clear   Remove all outbound rules
-  help    Print this message or the help of the given subcommand(s)
+  apply     Apply the `kind: ShareVolume` documents of a manifest (idempotent)
+  ls        List share volumes (parent storage, quota, live usage)
+  describe  Human-readable detail of one share volume
+  rm        Un-register a share volume. The underlying data (a subdirectory of the parent Storage) is PRESERVED unless `--purge-data` is passed
+  help      Print this message or the help of the given subcommand(s)
 
 Options:
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
   -h, --help          Print help</code></pre></div>
-<h2 id='allow'><code>egress allow</code></h2>
-<div class='help'><pre><code>Allow outbound traffic from a container: `[proto/]port` to an optional CIDR
+<h2 id='apply'><code>sharevolume apply</code></h2>
+<div class='help'><pre><code>Apply the `kind: ShareVolume` documents of a manifest (idempotent)
 
-Usage: delonix egress allow [OPTIONS] &lt;CONTAINER&gt; &lt;PORT&gt;
-
-Arguments:
-  &lt;CONTAINER&gt;  
-  &lt;PORT&gt;       
+Usage: delonix sharevolume apply [OPTIONS]
 
 Options:
+  -f, --file &lt;FILE&gt;   
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-      --to &lt;TO&gt;       Only to this destination CIDR (default: anywhere)
-      --note &lt;NOTE&gt;   
   -h, --help          Print help</code></pre></div>
-<h3>Exemplos</h3><div class="ex"><div class="cap">Só deixar sair HTTPS</div><pre><code>delonix egress allow app tcp/443 --to 0.0.0.0/0</code></pre></div>
-<h2 id='policy'><code>egress policy</code></h2>
-<div class='help'><pre><code>Set the default outbound policy when no rule matches
+<h3>Exemplos</h3><div class="ex"><div class="cap">Duas fatias isoladas do mesmo NAS, cada uma com a sua quota</div><pre><code>delonix sharevolume apply -f sharevolume.yaml</code></pre><div class="out"><pre><code>sharevolume/tenant-a: ready (nas-shared -&gt; /var/lib/delonix/volumes/nas-shared/_data/shares/tenant-a)
+sharevolume/tenant-b: ready (nas-shared -&gt; /var/lib/delonix/volumes/nas-shared/_data/shares/tenant-b)</code></pre></div></div>
+<h2 id='ls'><code>sharevolume ls</code></h2>
+<div class='help'><pre><code>List share volumes (parent storage, quota, live usage)
 
-Usage: delonix egress policy [OPTIONS] &lt;CONTAINER&gt; &lt;POLICY&gt;
-
-Arguments:
-  &lt;CONTAINER&gt;  
-  &lt;POLICY&gt;     [possible values: allow, deny]
+Usage: delonix sharevolume ls [OPTIONS]
 
 Options:
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
   -h, --help          Print help</code></pre></div>
-<h3>Exemplos</h3><div class="ex"><div class="cap">Default-deny de saída</div><pre><code>delonix egress policy app deny</code></pre></div>
-<h2 id='net'><code>egress net</code></h2>
-<div class='help'><pre><code>Govern a whole network&#x27;s egress to the Internet
+<h3>Exemplos</h3><div class="ex"><div class="cap">Listar (quota + uso real medido)</div><pre><code>delonix sharevolume ls</code></pre><div class="out"><pre><code>NAME       STORAGE      QUOTA     USED   ALERT   MOUNTPOINT
+tenant-b   nas-shared   2.0 MiB   0 B    -       .../shares/tenant-b
+tenant-a   nas-shared   1.0 MiB   1.0 MiB   OVER    .../shares/tenant-a</code></pre></div></div>
+<h2 id='describe'><code>sharevolume describe</code></h2>
+<div class='help'><pre><code>Human-readable detail of one share volume
 
-Usage: delonix egress net [OPTIONS] &lt;NETWORK&gt; &lt;MODE&gt;
-
-Arguments:
-  &lt;NETWORK&gt;
-          
-
-  &lt;MODE&gt;
-          Possible values:
-          - allow:     Allow all egress (the default)
-          - deny:      Block all egress to the Internet
-          - allowlist: Deny all egress EXCEPT DNS and the CIDRs given in `--to` (allowlist)
-
-Options:
-      --l18n &lt;en|pt&gt;
-          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-
-      --to &lt;TO&gt;
-          CIDRs for `allowlist` mode (comma-separated), e.g. `10.0.0.0/8,1.1.1.1/32`
-
-  -h, --help
-          Print help (see a summary with &#x27;-h&#x27;)</code></pre></div>
-<h3>Exemplos</h3><div class="ex"><div class="cap">Egress de uma rede em allowlist (só DNS + estes CIDRs)</div><pre><code>delonix egress net backend allowlist --to 10.0.0.0/8,1.1.1.1/32</code></pre></div>
-<h2 id='host'><code>egress host</code></h2>
-<div class='help'><pre><code>Allow a network&#x27;s egress to a HOSTNAME (and `*.hostname`), learnt live from DNS answers — the FQDN allowlist nft/CIDR can&#x27;t express. Repeatable
-
-Usage: delonix egress host [OPTIONS] &lt;NETWORK&gt; &lt;HOSTNAME&gt;
+Usage: delonix sharevolume describe [OPTIONS] &lt;NAME&gt;
 
 Arguments:
-  &lt;NETWORK&gt;   
-  &lt;HOSTNAME&gt;  e.g. `github.com` (matches `github.com` and `*.github.com`)
+  &lt;NAME&gt;  
 
 Options:
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
   -h, --help          Print help</code></pre></div>
-<p>O que o nft/CIDR não faz: allowlist por <strong>hostname</strong>. O resolver DNS
-interno do ingress passa a snoopar os A-records das respostas e injecta-os num <code>set</code> nft
-por-rede (com timeout = expira com o TTL); o egress aceita esse set + DNS e dropa o resto. 100%
-rootless (sem eBPF) — a FQDN-policy do Cilium, via nftables. Repetível para vários hostnames.</p>
-<h3>Exemplos</h3><div class="ex"><div class="cap">Só deixar sair para o GitHub (e *.github.com), aprendido do DNS</div><pre><code>delonix egress host backend github.com</code></pre></div>
-<h2 id='show'><code>egress show</code></h2>
-<div class='help'><pre><code>Show a NETWORK&#x27;s egress policy: CIDR allowlist, FQDN hosts, and the IPs currently learnt from DNS for those hosts
+<h3>Exemplos</h3><div class="ex"><div class="cap">Detalhe de uma fatia (aponta o comando -v para a consumir)</div><pre><code>delonix sharevolume describe tenant-a</code></pre><div class="out"><pre><code>Name:           tenant-a
+Storage:        nas-shared
+Mountpoint:     .../shares/tenant-a
+Used:           1.0 MiB
+Quota:          1.0 MiB
+Alert:          OVER QUOTA
+Consume with:   -v tenant-a:/path/in/container</code></pre></div></div>
+<h2 id='rm'><code>sharevolume rm</code></h2>
+<div class='help'><pre><code>Un-register a share volume. The underlying data (a subdirectory of the parent Storage) is PRESERVED unless `--purge-data` is passed
 
-Usage: delonix egress show [OPTIONS] &lt;NETWORK&gt;
+Usage: delonix sharevolume rm [OPTIONS] &lt;NAME&gt;
 
 Arguments:
-  &lt;NETWORK&gt;  
+  &lt;NAME&gt;  
 
 Options:
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+      --purge-data    
   -h, --help          Print help</code></pre></div>
-<h3>Exemplos</h3><div class="ex"><div class="cap">Ver a política de egress de uma rede + os IPs FQDN aprendidos ao vivo</div><pre><code>delonix egress show backend</code></pre></div>
-<h2 id='ls'><code>egress ls</code></h2>
-<div class='help'><pre><code>Show the outbound firewall (policy + rules)
-
-Usage: delonix egress ls [OPTIONS] [CONTAINER]
-
-Arguments:
-  [CONTAINER]  Container to inspect (omit to list every container&#x27;s outbound state)
-
-Options:
-      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-  -h, --help          Print help</code></pre></div>
-<h3>Exemplos</h3><div class="ex"><pre><code>delonix egress ls app</code></pre></div>
+<h3>Exemplos</h3><div class="ex"><div class="cap">Remove o registo; os DADOS ficam (a não ser que peças --purge-data)</div><pre><code>delonix sharevolume rm tenant-a</code></pre></div>
 <footer>Delonix Runtime · Apache-2.0 · <a href="https://github.com/angolardevops/delonix-runtime">angolardevops/delonix-runtime</a>
 · Referência gerada do <code>--help</code> real do binário por <code>docs/gen.py</code>.</footer>
 </main>

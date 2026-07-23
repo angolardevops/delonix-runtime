@@ -1,0 +1,19 @@
+# kind: Tunnel — exposes ONE local TCP port to the public internet via a
+# 3rd-party provider (pinggy/ngrok/cloudflare). Deliberately single-purpose:
+# it does the outbound transport only. Point `localPort` at the HTTPRoute
+# proxy's own listening port (see httproute.yaml) to combine the two — one
+# public URL, routed by Host/path to as many backend containers as you want.
+#
+# Apply with:  delonix tunnel apply -f tunnel.yaml
+# One-shot equivalent, no manifest:
+#   delonix tunnel expose --provider pinggy --local-port 80
+apiVersion: delonix.io/v1
+kind: Tunnel
+metadata:
+  name: public
+spec:
+  provider: pinggy           # pinggy (zero extra binary) | ngrok | cloudflare
+  localPort: 80               # the HTTPRoute proxy's port, or any container's published port
+  hostname: null               # custom/reserved hostname — provider-dependent, omit for an ephemeral URL
+  token: null                  # pinggy pro token / ngrok authtoken (literal — prefer tokenSecretRef)
+  tokenSecretRef: null         # pull the token from a `kind: Secret`'s `token` key instead

@@ -307,6 +307,43 @@ A password vem do cofre (<code>--password-secret</code>), nunca do argv. Ligado 
             "rm": {"examples": [("Desmonta; os dados ficam no NAS", "delonix storage rm media")]},
         },
     },
+    "sharevolume": {
+        "title": "delonix sharevolume",
+        "tagline": "Uma fatia ISOLADA e com QUOTA própria de um `Storage` — vários container/vm/pod partilham um NAS.",
+        "intro": """Resolve um problema concreto de multi-tenant: várias cargas a partilhar UM export
+NFS/CIFS/WebDAV, cada uma com o SEU ponto de montagem isolado e a SUA quota, sem se verem. Por baixo
+não há mecanismo de montagem novo nenhum: cada <code>ShareVolume</code> é um SUBDIRECTÓRIO real da
+árvore já montada pelo <code>kind: Storage</code> pai (<code>&lt;storage&gt;/_data/shares/&lt;nome&gt;</code>),
+registado como o seu próprio volume — a isolação é confinamento de caminho puro e o consumo usa o
+<code>-v &lt;nome&gt;:/destino</code> de sempre, sem código novo nenhum do lado do container/vm/pod. A
+quota é SOFT (uso medido + alerta) — o caminho HARD (imagem ext4 loopback) precisa de armazenamento de
+bloco local e não compõe com um subdirectório de um mount de rede.""",
+        "subs": {
+            "apply": {"examples": [
+                ("Duas fatias isoladas do mesmo NAS, cada uma com a sua quota",
+                 "delonix sharevolume apply -f sharevolume.yaml",
+                 "sharevolume/tenant-a: ready (nas-shared -> /var/lib/delonix/volumes/nas-shared/_data/shares/tenant-a)\n"
+                 "sharevolume/tenant-b: ready (nas-shared -> /var/lib/delonix/volumes/nas-shared/_data/shares/tenant-b)"),
+            ]},
+            "ls": {"examples": [
+                ("Listar (quota + uso real medido)", "delonix sharevolume ls",
+                 "NAME       STORAGE      QUOTA     USED   ALERT   MOUNTPOINT\n"
+                 "tenant-b   nas-shared   2.0 MiB   0 B    -       .../shares/tenant-b\n"
+                 "tenant-a   nas-shared   1.0 MiB   1.0 MiB   OVER    .../shares/tenant-a"),
+            ]},
+            "describe": {"examples": [
+                ("Detalhe de uma fatia (aponta o comando -v para a consumir)",
+                 "delonix sharevolume describe tenant-a",
+                 "Name:           tenant-a\nStorage:        nas-shared\nMountpoint:     .../shares/tenant-a\n"
+                 "Used:           1.0 MiB\nQuota:          1.0 MiB\nAlert:          OVER QUOTA\n"
+                 "Consume with:   -v tenant-a:/path/in/container"),
+            ]},
+            "rm": {"examples": [
+                ("Remove o registo; os DADOS ficam (a não ser que peças --purge-data)",
+                 "delonix sharevolume rm tenant-a"),
+            ]},
+        },
+    },
     "ingress": {
         "title": "delonix ingress",
         "tagline": "Firewall de ENTRADA (regras L4 + publishes DNAT) de um container na SDN.",
@@ -343,6 +380,64 @@ por-rede (com timeout = expira com o TTL); o egress aceita esse set + DNS e drop
 rootless (sem eBPF) — a FQDN-policy do Cilium, via nftables. Repetível para vários hostnames.</p>"""},
             "show": {"examples": [("Ver a política de egress de uma rede + os IPs FQDN aprendidos ao vivo", "delonix egress show backend")]},
             "ls": {"examples": [("", "delonix egress ls app")]},
+        },
+    },
+    "httproute": {
+        "title": "delonix httproute",
+        "tagline": "Reverse-proxy L7/HTTP embutido (`kind: HTTPRoute`) — routing por Host + prefixo de path.",
+        "intro": """Um reverse-proxy HTTP/HTTPS <strong>embutido</strong> (hyper puro, sem Nginx/Envoy),
+que corre dentro do netns do holder e roteia por <code>Host</code> + prefixo de <code>path</code> para
+containers backend na SDN. TLS termina no proxy (self-signed ou <code>secretRef</code>); reload a
+quente por SIGHUP (as rotas trocam sem downtime, os listeners ficam fixos no arranque). Um container
+com <code>--expose &lt;porta&gt;</code> auto-regista-se sob
+<code>&lt;nome&gt;.&lt;namespace&gt;.delonix.internal</code>, sem precisar de nenhum
+<code>kind: HTTPRoute</code> manual. É o que o <code>kind: Tunnel</code> normalmente põe à frente
+para dar uma única URL pública a vários backends.""",
+        "subs": {
+            "apply": {"examples": [
+                ("Aplicar as HTTPRoutes de um manifesto (sobe/recarrega o proxy)",
+                 "delonix httproute apply -f delonix-manifest.yaml"),
+            ]},
+            "ls": {"examples": [
+                ("Estado do proxy + rotas activas", "delonix httproute ls"),
+            ]},
+            "rm": {"examples": [
+                ("Parar o proxy e despublicar as portas", "delonix httproute rm"),
+            ]},
+        },
+    },
+    "tunnel": {
+        "title": "delonix tunnel",
+        "tagline": "Expõe uma porta local à internet pública via pinggy/ngrok/cloudflare (`kind: Tunnel`).",
+        "intro": """Faz UMA coisa: leva tráfego da internet pública até UMA porta local — sem conta,
+sem IP público, sem configurar o router. Junta-se ao <code>httproute</code> apontando
+<code>--local-port</code> para a porta onde o proxy L7 escuta, e o routing por <code>Host</code>
+do lado de lá continua a decidir para que container vai cada pedido — uma só URL pública, vários
+backends. Três providers, cada um o binário/mecanismo REAL desse serviço (nunca simulado):
+<strong>pinggy</strong> (zero binário extra — <code>ssh</code> puro, já uma dependência do
+projecto), <strong>ngrok</strong> (precisa do agente <code>ngrok</code> no PATH; a URL pública sai
+da API local do próprio agente) e <strong>cloudflare</strong> (precisa de <code>cloudflared</code>;
+por agora só o quick-tunnel efémero <code>*.trycloudflare.com</code>, sem conta — um tunnel
+NOMEADO com domínio próprio precisa da API do Cloudflare, ainda por implementar).""",
+        "subs": {
+            "expose": {"examples": [
+                ("Expor uma porta local sem escrever manifesto (pinggy, grátis, efémero)",
+                 "delonix tunnel expose --name demo --provider pinggy --local-port 8080",
+                 "tunnel/demo: running — https://oxipg-197-148-40-67.free.pinggy.net"),
+            ], "notes": """<p>Validado ao vivo nesta mesma sessão: tráfego HTTPS real da internet
+chegou a um servidor local através do tunnel (HTTP 200) usando exactamente este comando.</p>"""},
+            "ls": {"examples": [
+                ("Listar túneis (estado + URL pública)", "delonix tunnel ls",
+                 "NAME    PROVIDER   LOCAL PORT   PUBLIC URL                                    STATUS    UPTIME\n"
+                 "test1   pinggy          18234   https://oxipg-197-148-40-67.free.pinggy.net   Running   Up 34 seconds"),
+            ]},
+            "describe": {"examples": [
+                ("Detalhe de um túnel", "delonix tunnel describe demo"),
+            ]},
+            "rm": {"examples": [
+                ("Parar e remover (mata o processo agente a sério)", "delonix tunnel rm demo",
+                 "tunnel/demo: removed"),
+            ]},
         },
     },
     "flow": {
@@ -383,6 +478,38 @@ fluxo de eventos.""",
             "df": {"examples": [("Uso de disco", "delonix system df")]},
             "info": {"examples": [("", "delonix system info")]},
         },
+    },
+    "dash": {
+        "title": "delonix dash",
+        "tagline": "Dashboard de resumo/KPIs (TUI estilo htop), global ou por grupo.",
+        "intro": """Vista viva do estado do runtime — containers, VMs, imagens, redes, storage — num
+só ecrã, sem precisar de correr <code>ls</code> em 5 grupos diferentes. Cada grupo também tem o
+seu próprio (<code>container dash</code>, <code>vm dash</code>, ...); este é o agregado global.
+<code>--once</code> imprime um snapshot de texto e sai (scripts/CI) — é também o que acontece
+automaticamente quando o stdout não é um terminal.""",
+        "subs": {},
+        "examples": [
+            ("TUI interactiva", "delonix dash"),
+            ("Snapshot único, para um script", "delonix dash --once"),
+        ],
+    },
+    "docker-api": {
+        "title": "delonix docker-api",
+        "tagline": "Fatia SÓ-LEITURA da API Docker Engine, num socket unix — `docker version/ps/images/info`.",
+        "intro": """Serve o suficiente da API real do Docker Engine (protocolo capturado ao vivo
+contra um <code>docker</code> CLI real, versão negociada via o header <code>Api-Version</code> da
+resposta ao <code>/_ping</code>) para <code>docker version</code>/<code>ps</code>/<code>images</code>/
+<code>info</code> apontados via <code>DOCKER_HOST=unix://&lt;socket&gt;</code> funcionarem contra o
+estado REAL do delonix — útil para ferramentas que só sabem falar com a API do Docker. Mesma postura
+de segurança do socket de gestão: 0600 + <code>SO_PEERCRED</code> (só o próprio utilizador). Por
+fazer: mutações (<code>create</code>/<code>start</code>/<code>exec</code>) — o que falta para
+<code>docker run</code>/<code>docker compose up</code>; qualquer rota não implementada dá 404 claro.""",
+        "subs": {},
+        "examples": [
+            ("Servir no socket por omissão", "delonix docker-api &"),
+            ("Um `docker` real a falar com o delonix",
+             "DOCKER_HOST=unix:///run/delonix-docker.sock docker ps"),
+        ],
     },
     "kube": {
         "title": "delonix kube",
@@ -452,6 +579,11 @@ overflow-x:auto;font-size:.86rem;line-height:1.55}
 pre code{background:none;padding:0;color:inherit;font-size:inherit}
 .help pre{border-left:4px solid var(--accent)}
 .ex{margin:.9rem 0}.ex .cap{font-size:.88rem;color:var(--muted);margin-bottom:.25rem}
+.ex .out{margin-top:.4rem}
+.ex .out pre{background:transparent;border:1px dashed var(--line);color:var(--muted);
+padding:.7rem 1rem;font-size:.82rem}
+.ex .out::before{content:"→ resultado";display:block;font-size:.75rem;color:var(--muted);
+margin-bottom:.15rem;letter-spacing:.03em;text-transform:uppercase}
 table{border-collapse:collapse;width:100%;font-size:.92rem}
 td,th{border:1px solid var(--line);padding:.5rem .7rem;text-align:left;vertical-align:top}
 th{background:var(--side)}
@@ -538,10 +670,19 @@ def page(path, title, body, depth=0):
 
 
 def examples_html(exs):
+    """Each example is (caption, command) or (caption, command, output) — the
+    3rd, optional element is REAL output captured from an actual run (never
+    invented), rendered in a dimmer block right under the command so a reader
+    sees not just how to invoke something but what it actually returns."""
     parts = []
-    for cap, cmd in exs:
+    for ex in exs:
+        cap, cmd = ex[0], ex[1]
+        out = ex[2] if len(ex) > 2 else None
         cap_html = f'<div class="cap">{html.escape(cap)}</div>' if cap else ""
-        parts.append(f'<div class="ex">{cap_html}<pre><code>{html.escape(cmd)}</code></pre></div>')
+        out_html = f'<div class="out"><pre><code>{html.escape(out)}</code></pre></div>' if out else ""
+        parts.append(
+            f'<div class="ex">{cap_html}<pre><code>{html.escape(cmd)}</code></pre>{out_html}</div>'
+        )
     return "".join(parts)
 
 
@@ -950,6 +1091,12 @@ CHEAT_TASKS = [
     ("Tráfego por container ao vivo (eBPF)", "sudo delonix flow --watch"),
     ("Volume de rede de um NAS (NFS)", "delonix storage create media --type nfs --server 10.0.0.5 --share /mnt/pool/media"),
     ("Segredo no cofre (não no argv)", "printf 's3nha' | delonix secret create db-pass"),
+    ("Expor um container à internet pública (sem conta, sem router)",
+     "delonix container run -d --name web --expose 80 nginx\ndelonix tunnel expose --provider pinggy --local-port 8080",
+     "tunnel/tunnel-8080: running — https://oxipg-197-148-40-67.free.pinggy.net"),
+    ("NAS partilhado por vários tenants, cada um com a sua quota",
+     "delonix storage create nas --type nfs --server 10.0.0.5 --share /pool/data\n"
+     "delonix sharevolume apply -f sharevolume.yaml"),
     ("microVM com cloud-init", "delonix vm create node1 --disk base.qcow2 --ssh-key @~/.ssh/id_ed25519.pub"),
     ("Cluster Kubernetes do zero", "delonix cluster kubeadm --name lab --control-plane 1 --workers 2"),
     ("Aplicar um manifesto inteiro", "delonix stack apply -f delonix-manifest.yaml"),
@@ -980,6 +1127,16 @@ KINDS_DOC = [
      "<code>delonix pod create/ls/describe/rm/logs</code>."),
     ("Ingress / Egress", "firewall.yaml", "Firewall L4 declarativo por direcção (estilo k8s NetworkPolicy). Cada "
      "documento é o estado desejado de uma direcção de um container-alvo — allowlist + default-deny, idempotente."),
+    ("HTTPRoute", "httproute.yaml", "Reverse-proxy L7/HTTP embutido — routing por <code>Host</code> + prefixo de "
+     "<code>path</code> para containers backend. TLS termina no proxy (self-signed ou <code>secretRef</code>); "
+     "reload a quente por SIGHUP."),
+    ("Tunnel", "tunnel.yaml", "Expõe UMA porta local à internet pública via pinggy/ngrok/cloudflare — sem conta, "
+     "sem IP público. Junta-se ao <code>HTTPRoute</code> apontando <code>localPort</code> para onde o proxy L7 "
+     "escuta: uma URL pública, routing por Host do lado de lá para vários backends."),
+    ("ShareVolume", "sharevolume.yaml", "Uma fatia ISOLADA e com quota própria de um <code>Storage</code> — vários "
+     "container/vm/pod partilham UM export NFS/CIFS/WebDAV sem se verem. Cada fatia é um subdirectório real do "
+     "mount pai, registado como o seu próprio volume; consome-se com <code>-v &lt;nome&gt;:/destino</code>, sem "
+     "nada de novo do lado do consumidor."),
 ]
 
 
@@ -987,7 +1144,8 @@ def kinds_page():
     body = ["<h1>Kinds do manifesto</h1><p class='tagline'>Cada Kind com um template COMPLETO e funcional — "
             "todos os campos, com os defaults e um comentário. Aplica um só com "
             "<code>delonix &lt;grupo&gt; apply -f</code>, ou todos de uma vez com <code>delonix stack apply</code> "
-            "(ordem por dependência: Network → Volume → Storage → Image → Vm → Container → Pod → Ingress → Egress).</p>"]
+            "(ordem por dependência: Secret → Network → Volume → Storage → ShareVolume → Image → Vm → Container → "
+            "Pod → Ingress/Egress → Dependency → HTTPRoute → Tunnel).</p>"]
     body.append("<p>Semântica <em>garante-presente</em> (idempotente por nome), não um reconciliador: sem diffing, "
                 "rollout nem rollback — fail-fast, o que já foi aplicado fica. Os templates abaixo são os ficheiros "
                 "reais em <a href='https://github.com/angolardevops/delonix-runtime/tree/main/examples'><code>examples/</code></a>.</p>")
