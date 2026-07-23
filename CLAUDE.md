@@ -753,6 +753,20 @@ substantivo errado). Corrigido em `delonix-vm` (`libvirt_cleanup`/`quiet`/
   `stop_e_remove_de_vm_inexistente_dizem_no_such_vm`. Validado ao vivo: o
   órfão `dev` real (shut off + managed save) foi removido em silêncio.
 
+### `vm console` preso em "Active console session exists" (v0.11.1)
+
+Bug report real (host kaeso-sys-01): depois de um `vm console` terminar de
+forma não limpa (SSH caída, Ctrl-C a atingir o `virsh` em primeiro plano,
+terminal fechado), o libvirt continua a achar que há uma sessão de consola
+ligada a esse domínio — toda a tentativa seguinte de `vm console` na MESMA VM
+falha para sempre com `error: operation failed: Active console session exists
+for this domain`, sem saída a não ser reiniciar o `libvirtd` do host.
+**Corrigido**: `--force` no `virsh console` (`cmd_console`, `cmd/vm.rs`) — a
+flag existe exactamente para isto ("disconnect already connected sessions").
+Como `vm console <nome>` é um comando de um único operador, uma sessão presa
+da tua PRÓPRIA ligação anterior é o caso esmagadoramente comum, não um
+segundo espectador real a proteger.
+
 ## Rede das VMs libvirt — default `nat` com IP, `--ip` estático, rotas VM↔container
 
 Bug report real: `vm create dev` mostrava `IP <none>` para sempre — sem

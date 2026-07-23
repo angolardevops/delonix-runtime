@@ -4,6 +4,20 @@
 > (regenerado automaticamente pelo pipeline de release a cada tag publicada).
 > Não editar à mão — edita a nota da release respectiva.
 
+## v0.11.1 — `vm console` já não fica preso num "Active console session exists"
+
+Bug report real (host kaeso-sys-01): depois de um `delonix vm console dev` terminar de forma não
+limpa (ligação SSH caída, Ctrl-C a atingir o `virsh` em primeiro plano, terminal fechado), toda
+tentativa seguinte de `delonix vm console dev` falhava com `error: operation failed: Active
+console session exists for this domain` — sem saída a não ser reiniciar o `libvirtd` do host.
+
+`delonix vm console` é um comando de um único operador ("volta a ligar-me a esta VM"); uma sessão
+presa da tua PRÓPRIA ligação anterior é o caso esmagadoramente comum, não um segundo espectador
+real a proteger. Corrigido com a flag `--force` do `virsh console` (feita exactamente para isto —
+"disconnect already connected sessions"), em vez de recusar para sempre.
+
+---
+
 ## v0.11.0 — `ls-remote` para imagens VM douradas
 
 Feature pontual: descobrir que versões da imagem VM dourada estão publicadas num registo
