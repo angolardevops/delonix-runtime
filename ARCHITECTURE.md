@@ -1,7 +1,7 @@
-# Arquitectura — Delonix Runtime
+# Arquitectura — Delonix Engine
 
 Modelo C4 (Contexto → Contentores → Componentes) e system design funcional do
-**Delonix Runtime**: motor de containers e microVMs **daemonless, rootless-first,
+**Delonix Engine**: motor de containers e microVMs **daemonless, rootless-first,
 kernel-native**, em Rust (8 crates, workspace `crates/`). Este documento é canónico
 e mantido contra o código — cada afirmação estrutural tem a referência do
 crate/ficheiro onde foi confirmada. Onde há limites, eles aparecem nos diagramas,
@@ -16,7 +16,7 @@ que detém o network namespace de infra-estrutura do ingress rootless
 
 ## C4 — Nível 1: Contexto
 
-O Delonix Runtime é usado por um **operador humano** (via CLI), por um **kubelet**
+O Delonix Engine é usado por um **operador humano** (via CLI), por um **kubelet**
 (via CRI), e fala com sistemas externos: registos OCI, hosts SSH remotos e os
 hipervisores locais.
 
@@ -29,7 +29,7 @@ graph TB
     HV["Hipervisores locais<br>Cloud Hypervisor sobre KVM ou libvirt"]
     UBU["cloud-images.ubuntu.com<br>imagens base p/ imagem VM dourada"]
 
-    DLX["Delonix Runtime<br>motor de containers e microVMs<br>daemonless, rootless-first"]
+    DLX["Delonix Engine<br>motor de containers e microVMs<br>daemonless, rootless-first"]
 
     OP -- "delonix container / image / build / vm / volumes / network / stack / cluster" --> DLX
     KUBELET -- "CRI runtime.v1 gRPC<br>socket unix" --> DLX

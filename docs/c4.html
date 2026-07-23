@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Modelo C4 e system design · Delonix Runtime</title>
+<title>Modelo C4 e system design · Delonix Engine</title>
 <style>
 :root{--accent:#e8590c;--accent-soft:#fff0e6;--ink:#1a1a2e;--muted:#5a6472;--line:#e6e8ec;
 --bg:#ffffff;--side:#f7f8fa;--code-bg:#0f172a;--code-ink:#e2e8f0;--radius:10px}
@@ -74,7 +74,7 @@ main{padding:1.4rem 1.2rem 4rem}}
 <body>
 <div class="layout">
 <nav class="side">
-<div class="brand"><span class="dot">▲</span> Delonix Runtime</div>
+<div class="brand"><span class="dot">▲</span> Delonix Engine</div>
 <h5>Documentação</h5>
 <a href="index.html">Início</a><a href="cheatsheet.html">Cheatsheet</a><a href="kinds.html">Kinds e templates</a><a href="arquitectura.html">Arquitectura</a><a href="c4.html" class="on">Modelo C4 e system design</a><a href="cri.html">CRI — kubelet sem containerd</a><a href="comparacao.html">Delonix vs Docker vs Podman</a><a href="tutorial-delonix-temp.html">Projecto completo: Delonix Temp</a>
 <h5>Referência CLI</h5>
@@ -84,9 +84,9 @@ main{padding:1.4rem 1.2rem 4rem}}
 <a href="https://github.com/angolardevops/delonix-runtime/releases">Releases</a>
 </nav>
 <main>
-<h1>Arquitectura — Delonix Runtime</h1>
+<h1>Arquitectura — Delonix Engine</h1>
 <p>Modelo C4 (Contexto → Contentores → Componentes) e system design funcional do
-<strong>Delonix Runtime</strong>: motor de containers e microVMs <strong>daemonless, rootless-first,
+<strong>Delonix Engine</strong>: motor de containers e microVMs <strong>daemonless, rootless-first,
 kernel-native</strong>, em Rust (8 crates, workspace <code>crates/</code>). Este documento é canónico
 e mantido contra o código — cada afirmação estrutural tem a referência do
 crate/ficheiro onde foi confirmada. Onde há limites, eles aparecem nos diagramas,
@@ -97,7 +97,7 @@ que detém o network namespace de infra-estrutura do ingress rootless
 (<code>crates/delonix-net/src/infra.rs</code>).</p>
 <hr />
 <h2>C4 — Nível 1: Contexto</h2>
-<p>O Delonix Runtime é usado por um <strong>operador humano</strong> (via CLI), por um <strong>kubelet</strong>
+<p>O Delonix Engine é usado por um <strong>operador humano</strong> (via CLI), por um <strong>kubelet</strong>
 (via CRI), e fala com sistemas externos: registos OCI, hosts SSH remotos e os
 hipervisores locais.</p>
 <pre class="mermaid">graph TB
@@ -108,7 +108,7 @@ hipervisores locais.</p>
     HV[&quot;Hipervisores locais&lt;br&gt;Cloud Hypervisor sobre KVM ou libvirt&quot;]
     UBU[&quot;cloud-images.ubuntu.com&lt;br&gt;imagens base p/ imagem VM dourada&quot;]
 
-    DLX[&quot;Delonix Runtime&lt;br&gt;motor de containers e microVMs&lt;br&gt;daemonless, rootless-first&quot;]
+    DLX[&quot;Delonix Engine&lt;br&gt;motor de containers e microVMs&lt;br&gt;daemonless, rootless-first&quot;]
 
     OP -- &quot;delonix container / image / build / vm / volumes / network / stack / cluster&quot; --&gt; DLX
     KUBELET -- &quot;CRI runtime.v1 gRPC&lt;br&gt;socket unix&quot; --&gt; DLX
@@ -598,7 +598,7 @@ main{max-width:1280px}
   padding:1.2rem;margin:1.4rem 0;overflow-x:auto;text-align:center}
 .mermaid svg{width:100%!important;max-width:1180px!important;height:auto!important;min-height:340px}
 </style>
-<footer>Delonix Runtime · Apache-2.0 · <a href="https://github.com/angolardevops/delonix-runtime">angolardevops/delonix-runtime</a>
+<footer>Delonix Engine · Apache-2.0 · <a href="https://github.com/angolardevops/delonix-runtime">angolardevops/delonix-runtime</a>
 · Referência gerada do <code>--help</code> real do binário por <code>docs/gen.py</code>.</footer>
 </main>
 </div>

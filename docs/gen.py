@@ -633,7 +633,7 @@ def sidebar(active, depth=0):
         cls = ' class="on"' if href == active else ""
         return f'<a href="{p}{href}"{cls}>{html.escape(label)}</a>'
     return f"""<nav class="side">
-<div class="brand"><span class="dot">▲</span> Delonix Runtime</div>
+<div class="brand"><span class="dot">▲</span> Delonix Engine</div>
 <h5>Documentação</h5>
 {''.join(link(h, l) for h, l in items_docs)}
 <h5>Referência CLI</h5>
@@ -650,7 +650,7 @@ def page(path, title, body, depth=0):
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>{html.escape(title)} · Delonix Runtime</title>
+<title>{html.escape(title)} · Delonix Engine</title>
 <style>{CSS}</style>
 </head>
 <body>
@@ -658,7 +658,7 @@ def page(path, title, body, depth=0):
 {sidebar(path, depth)}
 <main>
 {body}
-<footer>Delonix Runtime · Apache-2.0 · <a href="https://github.com/angolardevops/delonix-runtime">angolardevops/delonix-runtime</a>
+<footer>Delonix Engine · Apache-2.0 · <a href="https://github.com/angolardevops/delonix-runtime">angolardevops/delonix-runtime</a>
 · Referência gerada do <code>--help</code> real do binário por <code>docs/gen.py</code>.</footer>
 </main>
 </div>
@@ -708,7 +708,7 @@ def group_page(name, g):
 
 
 INDEX = """
-<h1>Delonix Runtime <span class="pill">v{ver}</span></h1>
+<h1>Delonix Engine <span class="pill">v{ver}</span></h1>
 <p class="tagline"><strong>Engine</strong> de containers e microVMs <strong>daemonless</strong>,
 <strong>rootless-first</strong>, kernel-native, em Rust — com CRI próprio para Kubernetes.
 <em>O engine open-source que alimenta o Delonix.</em></p>
@@ -718,7 +718,7 @@ engine COMPLETO de containers <strong>e</strong> VMs — build, run, rede, firew
 bootstrap de clusters Kubernetes, tudo num só binário. É a camada aberta (Apache-2.0) sobre a qual
 assenta a plataforma <strong>Delonix</strong>.</p>
 
-<p>O Delonix Runtime faz o trabalho do Docker/Podman sem daemon residente: cada comando é um
+<p>O Delonix Engine faz o trabalho do Docker/Podman sem daemon residente: cada comando é um
 processo efémero que fala directamente com o kernel (namespaces, cgroups v2, pivot_root),
 guarda estado em ficheiros e desaparece. Em rootless, a rede é servida por um único par
 holder-netns + slirp4netns partilhado — não um slirp por container — com DNAT nft para o
@@ -877,7 +877,7 @@ COMPARE = """
 <p class="tagline">Comparação honesta, para decidir com que motor construir — não um argumento de
 venda.</p>
 
-<p>O Delonix Runtime é um motor de containers e microVMs <strong>daemonless, rootless-first</strong>,
+<p>O Delonix Engine é um motor de containers e microVMs <strong>daemonless, rootless-first</strong>,
 em Rust, com Kubernetes de raiz (CRI próprio). Em vários pontos concretos já vai mais longe que o
 Docker e o Podman rootless. Noutros, fica muito atrás. Esta página diz exactamente onde é onde —
 para uma pessoa a decidir o que instalar hoje, ou uma empresa a avaliar para produção.</p>
@@ -1328,7 +1328,7 @@ def main():
         f'<p>{html.escape(g["tagline"])}</p></div>'
         for n, g in GROUPS.items()
     )
-    page("index.html", "Delonix Runtime", INDEX.replace("{ver}", ver).replace("{cards}", cards))
+    page("index.html", "Delonix Engine", INDEX.replace("{ver}", ver).replace("{cards}", cards))
     cheatsheet_page()
     kinds_page()
     page("arquitectura.html", "Arquitectura", ARCH)
