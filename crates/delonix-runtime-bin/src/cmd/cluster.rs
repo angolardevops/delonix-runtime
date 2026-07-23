@@ -741,7 +741,10 @@ fn wait_for_cluster_ready(
             .filter(|l| l.split_whitespace().nth(1) == Some("Ready"))
             .count();
         if ready >= expected && expected > 0 {
-            println!("cluster/{cluster_name}: {}", super::po::t("all nodes Ready"));
+            println!(
+                "cluster/{cluster_name}: {}",
+                super::po::t("all nodes Ready")
+            );
             return Ok(());
         }
         if std::time::Instant::now() >= deadline {
@@ -786,14 +789,34 @@ fn vm_names(cluster_name: &str, role: &str, count: u32) -> Vec<String> {
         .collect()
 }
 
-/// Resolves the tag of the golden VM image to use: explicit, or the only one that
-/// exists locally (clear error if there are 0 or more than 1 — never picks blindly
-/// among several).
-pub(crate) fn resolve_vm_image(store: &VmImageStore, explicit: Option<String>) -> Result<String> {
+/// Resolves the tag of the golden VM image to use, in order: the explicit
+/// `--vm-image`; else, if `--k8s-version <v>` was given, the image named
+/// after the official convention (`delonix-vm-k8s:<v>` — what both `vm pull`
+/// and the `vm-image.yml` publish workflow produce), if present locally;
+/// else the only local image that exists (clear error if there are 0 or
+/// more than 1 — never picks blindly among several).
+///
+/// The `--k8s-version` path is name-based, not a metadata scan: a `vm pull`ed
+/// image has `k8s_version: null` in its own record (the OCI artifact only
+/// carries the qcow2 blob, not the build metadata — a known gap, see
+/// CLAUDE.md), so matching by the image's OWN naming convention is the one
+/// reliable signal for the common case of several k8s versions pulled
+/// side by side.
+pub(crate) fn resolve_vm_image(
+    store: &VmImageStore,
+    explicit: Option<String>,
+    k8s_version: Option<&str>,
+) -> Result<String> {
     if let Some(tag) = explicit {
         return Ok(tag);
     }
     let mut images = store.list()?;
+    if let Some(v) = k8s_version {
+        let wanted = format!("delonix-vm-k8s:{v}");
+        if images.iter().any(|img| img.name == wanted) {
+            return Ok(wanted);
+        }
+    }
     match images.len() {
         0 => Err(Error::Invalid(
             super::po::t("no local VM images — run `delonix image --vm build` (or `pull`) first, or pass the image/disk explicitly")
@@ -801,7 +824,7 @@ pub(crate) fn resolve_vm_image(store: &VmImageStore, explicit: Option<String>) -
         )),
         1 => Ok(images.remove(0).name),
         n => Err(Error::Invalid(super::po::tf(
-            "{n} local VM images — say which one: `--vm-image <tag>` (cluster) or `--disk <path>` (vm create); see `delonix image --vm ls`",
+            "{n} local VM images — say which one: `--vm-image <tag>` (cluster) or `--disk <path>` (vm create), or `--k8s-version <v>` if `delonix-vm-k8s:<v>` is one of them; see `delonix image --vm ls`",
             &[("n", &n.to_string())],
         ))),
     }
@@ -932,7 +955,11 @@ fn provision_and_apply(args: ProvisionArgs) -> Result<()> {
     }
     let base = state_root();
     let vm_store = VmImageStore::open(&base)?;
-    let image_tag = resolve_vm_image(&vm_store, args.vm_image.clone())?;
+    let image_tag = resolve_vm_image(
+        &vm_store,
+        args.vm_image.clone(),
+        args.k8s_version.as_deref(),
+    )?;
     let disk = vm_store.qcow2_path(&image_tag);
     if !disk.exists() {
         return Err(Error::Invalid(format!(
@@ -1296,7 +1323,10 @@ fn merge_into_local_kubeconfig(source: &Path, cluster_name: &str, dest: &Path) -
             .map_err(|e| Error::Invalid(format!("kubeconfig malformado ({}): {e}", p.display())))
     };
     let as_seq = |v: &Value, key: &str| -> Vec<Value> {
-        v.get(key).and_then(|x| x.as_sequence()).cloned().unwrap_or_default()
+        v.get(key)
+            .and_then(|x| x.as_sequence())
+            .cloned()
+            .unwrap_or_default()
     };
     let entry_name = |v: &Value| -> Option<String> {
         v.get("name").and_then(|n| n.as_str()).map(str::to_string)
@@ -1519,7 +1549,7 @@ users:
         ));
         let store = VmImageStore::open(&tmp).unwrap();
         assert_eq!(
-            resolve_vm_image(&store, Some("minha-tag".to_string())).unwrap(),
+            resolve_vm_image(&store, Some("minha-tag".to_string()), None).unwrap(),
             "minha-tag"
         );
         let _ = std::fs::remove_dir_all(&tmp);
@@ -1532,7 +1562,7 @@ users:
             std::process::id()
         ));
         let store = VmImageStore::open(&tmp).unwrap();
-        let err = resolve_vm_image(&store, None).unwrap_err();
+        let err = resolve_vm_image(&store, None, None).unwrap_err();
         assert!(format!("{err}").contains("build"));
         let _ = std::fs::remove_dir_all(&tmp);
     }
@@ -1553,9 +1583,13 @@ users:
                 ubuntu_release: Some("26.04".to_string()),
                 k8s_version: Some("1.31".to_string()),
                 created_unix: 0,
+                kernel_version: None,
             })
             .unwrap();
-        assert_eq!(resolve_vm_image(&store, None).unwrap(), "ubuntu-26.04-k8s");
+        assert_eq!(
+            resolve_vm_image(&store, None, None).unwrap(),
+            "ubuntu-26.04-k8s"
+        );
         let _ = std::fs::remove_dir_all(&tmp);
     }
 
@@ -1576,11 +1610,63 @@ users:
                     ubuntu_release: None,
                     k8s_version: None,
                     created_unix: 0,
+                    kernel_version: None,
                 })
                 .unwrap();
         }
-        let err = resolve_vm_image(&store, None).unwrap_err();
+        let err = resolve_vm_image(&store, None, None).unwrap_err();
         assert!(format!("{err}").contains("--vm-image"));
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn resolve_vm_image_k8s_version_escolhe_a_convencao_de_nome() {
+        let tmp = std::env::temp_dir().join(format!(
+            "delonix-cluster-resolve-image-k8sver-{}",
+            std::process::id()
+        ));
+        let store = VmImageStore::open(&tmp).unwrap();
+        for tag in ["delonix-vm-k8s:1.34", "delonix-vm-k8s:1.35"] {
+            store
+                .save(&vmimage::VmImage {
+                    name: tag.to_string(),
+                    tag: tag.to_string(),
+                    digest: "sha256:abc".to_string(),
+                    size: 1,
+                    // A `vm pull`ed image has null metadata (known gap) — the
+                    // resolution has to work from the NAME, not this field.
+                    ubuntu_release: None,
+                    k8s_version: None,
+                    created_unix: 0,
+                    kernel_version: None,
+                })
+                .unwrap();
+        }
+        // 2 local images would normally be an error ("say which one") —
+        // `--k8s-version` disambiguates via the naming convention.
+        assert_eq!(
+            resolve_vm_image(&store, None, Some("1.35")).unwrap(),
+            "delonix-vm-k8s:1.35"
+        );
+        assert_eq!(
+            resolve_vm_image(&store, None, Some("1.34")).unwrap(),
+            "delonix-vm-k8s:1.34"
+        );
+        // A version with no matching image falls through to the normal
+        // 0/1/N logic (here: still ambiguous, N=2 — an honest error, not a
+        // silent wrong pick).
+        let err = resolve_vm_image(&store, None, Some("1.99")).unwrap_err();
+        assert!(format!("{err}").contains("--vm-image"));
+        // Explicit `--vm-image` always wins over `--k8s-version`.
+        assert_eq!(
+            resolve_vm_image(
+                &store,
+                Some("delonix-vm-k8s:1.34".to_string()),
+                Some("1.35")
+            )
+            .unwrap(),
+            "delonix-vm-k8s:1.34"
+        );
         let _ = std::fs::remove_dir_all(&tmp);
     }
 

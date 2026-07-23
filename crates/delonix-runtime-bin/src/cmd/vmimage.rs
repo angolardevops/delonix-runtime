@@ -35,6 +35,14 @@ pub struct VmImage {
     pub ubuntu_release: Option<String>,
     pub k8s_version: Option<String>,
     pub created_unix: u64,
+    /// The Linux kernel release string (`uname -r` shape, e.g.
+    /// `6.8.0-31-generic`) baked into the image — read back via `virt-cat`
+    /// right after `virt-customize` (see `cmd_build`), never booted to find
+    /// out. `None` for images built before this field existed, or `vm pull`ed
+    /// (same known gap as `ubuntu_release`/`k8s_version` — the OCI artifact
+    /// only carries the qcow2 blob, not build metadata).
+    #[serde(default)]
+    pub kernel_version: Option<String>,
 }
 
 pub struct VmImageStore {
@@ -186,11 +194,13 @@ pub fn run(action: VmImageCmd) -> Result<()> {
 }
 
 fn cmd_ls(store: &VmImageStore) -> Result<()> {
-    let mut t = output::Table::new(&["NAME", "UBUNTU", "K8S", "CREATED", "SIZE"]).right_align(4);
+    let mut t =
+        output::Table::new(&["NAME", "DISTRO", "KERNEL", "K8S", "CREATED", "SIZE"]).right_align(5);
     for img in store.list()? {
         t.row(vec![
             img.name,
             img.ubuntu_release.as_deref().unwrap_or("-").to_string(),
+            img.kernel_version.as_deref().unwrap_or("-").to_string(),
             img.k8s_version.as_deref().unwrap_or("-").to_string(),
             fmt_local(img.created_unix),
             fmt_size(img.size),
@@ -223,8 +233,12 @@ fn describe_one(store: &VmImageStore, img: &VmImage) {
     // `pull` does NOT recover this metadata (the OCI artifact only carries the
     // qcow2 blob) — on a pulled image they stay `None`. See the known gap in CLAUDE.md.
     d.field(
-        "Ubuntu",
+        "Distro",
         img.ubuntu_release.as_deref().unwrap_or("<unknown>"),
+    );
+    d.field(
+        "Kernel",
+        img.kernel_version.as_deref().unwrap_or("<unknown>"),
     );
     d.field("K8s", img.k8s_version.as_deref().unwrap_or("<unknown>"));
     let qcow2 = store.qcow2_path(&img.name);
@@ -292,6 +306,7 @@ pub(crate) fn cmd_pull(store: &VmImageStore, source: &str, name: Option<String>)
         ubuntu_release: None,
         k8s_version: None,
         created_unix: now_unix(),
+        kernel_version: None,
     };
     store.save(&img)?;
     println!("{name}");
@@ -383,6 +398,23 @@ fn cmd_build(
         &args.iter().map(String::as_str).collect::<Vec<_>>(),
     )?;
 
+    // Read back the kernel version the customize steps recorded (see the
+    // `/etc/delonix-kernel-version` step in `common_customization_steps`) —
+    // `virt-cat` pulls a single file out of a disk image without booting it.
+    // Best-effort: a missing/unreadable file just leaves the column blank,
+    // never fails the build over a "nice to have" metadata field.
+    let kernel_version = std::process::Command::new("virt-cat")
+        .args([
+            "-a",
+            &work_qcow2.to_string_lossy(),
+            "/etc/delonix-kernel-version",
+        ])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .filter(|s| !s.is_empty() && s != "unknown");
+
     // Shrink the artifact. Measured on a 24.04 golden (2.38 GiB → 677 MiB, −72%):
     //  1) `virt-sparsify --in-place` — zeroes the blocks already freed (the apt
     //     cleanup above frees ~367 MiB that, without this, still occupy the qcow2).
@@ -446,6 +478,7 @@ fn cmd_build(
         ubuntu_release: Some(ubuntu_release.to_string()),
         k8s_version,
         created_unix: now_unix(),
+        kernel_version,
     };
     store.save(&img)?;
     println!("{tag}");
@@ -1030,6 +1063,19 @@ fn common_customization_steps(
         ),
     ]);
     ops.extend(extra_run.iter().cloned().map(CustomizeOp::RunCommand));
+    // Records the installed kernel's `uname -r` string for `image --vm ls`'s
+    // KERNEL column — `virt-customize` never boots the image's own kernel (it
+    // chroots via its OWN appliance kernel), so there is no `uname -r` to run
+    // here; `/boot/vmlinuz-<release>` is named by the exact release string
+    // once booted, so listing it is the reliable proxy. Written to a file
+    // (not returned — `virt-customize` has no channel back to the host
+    // process) that `cmd_build` reads out with `virt-cat` right after this
+    // runs, once for the whole build, not per VM.
+    ops.push(CustomizeOp::RunCommand(
+        "ls /boot/vmlinuz-* 2>/dev/null | sed 's#.*/vmlinuz-##' | sort -V | tail -1 \
+         > /etc/delonix-kernel-version || echo unknown > /etc/delonix-kernel-version"
+            .into(),
+    ));
     // apt cleanup — ALWAYS at the end (after the user's `--extra-run`, which
     // may install more packages). Measured on a 24.04 golden: `/var/cache/apt`
     // (~181 MiB of already-installed .deb) + `/var/lib/apt/lists` (~186 MiB of
@@ -1157,8 +1203,11 @@ mod tests {
             .expect("o --extra-run devia estar na lista");
         assert_eq!(
             idx_extra,
-            ops.len() - 3,
-            "o --extra-run devia vir logo antes da limpeza"
+            ops.len() - 4,
+            "o --extra-run devia vir logo antes da leitura do kernel + limpeza"
+        );
+        assert!(
+            matches!(&ops[ops.len() - 3], CustomizeOp::RunCommand(c) if c.contains("/etc/delonix-kernel-version"))
         );
         assert!(
             matches!(&ops[ops.len() - 2], CustomizeOp::RunCommand(c) if c.contains("apt-get clean"))
