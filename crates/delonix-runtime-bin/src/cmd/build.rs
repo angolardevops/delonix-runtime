@@ -29,7 +29,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use clap::Args;
-use delonix_image::build::{parse_dockerfile, Step};
+use delonix_image::build::{parse_dockerfile_with_args, Step};
 use delonix_image::{Image, ImageStore};
 use delonix_runtime::{self as runtime, RunSpec};
 use delonix_runtime_core::{generate_id, Container, Error, Result, Store};
@@ -47,6 +47,25 @@ pub struct BuildArgs {
     /// Tag of the resulting image (`repo:tag`).
     #[arg(short = 't', long = "tag")]
     tag: String,
+    /// Build-time variable (`KEY=VALUE`), repeatable — only takes effect for a
+    /// name the Dockerfile actually declares with `ARG KEY[=default]` (an
+    /// override with no matching `ARG` is silently ignored, same as Docker).
+    #[arg(long = "build-arg")]
+    build_arg: Vec<String>,
+}
+
+/// Parses `KEY=VALUE` build-arg flags into pairs, dropping anything malformed
+/// (missing `=`) with a warning rather than failing the whole build over a typo.
+pub(crate) fn parse_build_args(raw: &[String]) -> Vec<(String, String)> {
+    raw.iter()
+        .filter_map(|kv| match kv.split_once('=') {
+            Some((k, v)) => Some((k.to_string(), v.to_string())),
+            None => {
+                eprintln!("aviso: --build-arg '{kv}' ignorado — esperava KEY=VALUE");
+                None
+            }
+        })
+        .collect()
 }
 
 /// Resolves the default build file: `Delonixfile` if it exists in the
@@ -69,7 +88,8 @@ pub fn run(args: BuildArgs) -> Result<()> {
         .file
         .clone()
         .unwrap_or_else(|| default_build_file(&args.context));
-    let img = build_from_spec(&args.context, &file, &args.tag)?;
+    let build_args = parse_build_args(&args.build_arg);
+    let img = build_from_spec(&args.context, &file, &args.tag, &build_args)?;
     println!("{}", img.short_id());
     Ok(())
 }
@@ -224,7 +244,12 @@ fn build_one_stage(
 /// The full orchestration of a build (parse → one working container per stage
 /// → RUN/COPY → commit). Extracted from `run()` to be reused by `delonix
 /// image apply` (`kind: Image`, `spec.build`) without duplicating logic.
-pub fn build_from_spec(context: &Path, dockerfile_path: &Path, tag: &str) -> Result<Image> {
+pub fn build_from_spec(
+    context: &Path,
+    dockerfile_path: &Path,
+    tag: &str,
+    build_args: &[(String, String)],
+) -> Result<Image> {
     let (images, store) = open_stores()?;
     let text = std::fs::read_to_string(dockerfile_path).map_err(|e| {
         Error::Invalid(format!(
@@ -232,7 +257,7 @@ pub fn build_from_spec(context: &Path, dockerfile_path: &Path, tag: &str) -> Res
             dockerfile_path.display()
         ))
     })?;
-    let df = parse_dockerfile(&text)?;
+    let df = parse_dockerfile_with_args(&text, build_args)?;
     let rootless = runtime::is_rootless();
 
     // Fail fast (before building anything) in the one root-mode gap: the FINAL
