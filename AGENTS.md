@@ -411,18 +411,29 @@ nó não faz nenhuma instalação**, só `kubeadm init`/`kubeadm join`.
   `push_to_registry` (imagens de container), sem duplicar a lógica. **PUBLICADA E VALIDADA
   (2026-07-20) via CI** — `ghcr.io/angolardevops/delonix-vm-k8s:1.34` (678.8 MiB, golden
   optimizada), PÚBLICA, com `delonix vm pull` (sem argumento) a descarregá-la de ponta a ponta.
+  **`:1.35` publicada a par (2026-07-23)**, mesmo workflow/repositório — as duas tags coexistem
+  (`ghcr.io/angolardevops/delonix-vm-k8s:1.34` e `:1.35`).
   O caminho oficial de publicação é o workflow `.github/workflows/vm-image.yml` (disparo manual,
-  `workflow_dispatch`): constrói a golden com o binário do próprio commit (`image --vm build
-  --offline`) e publica no ghcr. **Lições da publicação real** (a nota anterior dizia "publicada
-  em 2026-07-17" mas o package NÃO existia — nunca chegou ao ghcr): (1) o **`virt-customize`
-  FUNCIONA em CI** — o bloqueio de `libguestfs` era só do sandbox local, um runner `ubuntu-24.04`
-  limpo constrói a golden sem os workarounds; (2) o push do PRIMEIRO package de um nome novo no
-  namespace de um **user** (não org) EXIGE um **PAT classic com `write:packages`** (secret
-  `GHCR_TOKEN`) — o `GITHUB_TOKEN` do workflow dá **403 Forbidden** mesmo com "Workflow
-  permissions: Read and write", porque não pode CRIAR packages novos de user; (3) o primeiro push
-  cria o package **privado** — tornar público é um passo manual na UI depois. **Gap conhecido**:
-  o `pull` NÃO recupera os metadados (`ubuntu_release`/`k8s_version` ficam `null` — o artefacto OCI
-  só carrega o blob qcow2), por isso um `image vm ls` de uma imagem puxada mostra `-` nessas colunas.
+  `workflow_dispatch`, input `k8s_version`): constrói a golden com o binário do próprio commit
+  (`image --vm build --offline`) e publica no ghcr. **Lições da publicação real** (a nota anterior
+  dizia "publicada em 2026-07-17" mas o package NÃO existia — nunca chegou ao ghcr): (1) o
+  **`virt-customize` FUNCIONA em CI** — o bloqueio de `libguestfs` era só do sandbox local, um
+  runner `ubuntu-24.04` limpo constrói a golden sem os workarounds; (2) o push do PRIMEIRO package
+  de um nome novo no namespace de um **user** (não org) EXIGE um **PAT classic com
+  `write:packages`** (secret `GHCR_TOKEN`) — o `GITHUB_TOKEN` do workflow dá **403 Forbidden** mesmo
+  com "Workflow permissions: Read and write", porque não pode CRIAR packages novos de user; (3) o
+  primeiro push cria o package **privado** — tornar público é um passo manual na UI depois (tags
+  seguintes do mesmo package herdam a visibilidade). **Gap conhecido**: o `pull` NÃO recupera os
+  metadados (`ubuntu_release`/`k8s_version` ficam `null` — o artefacto OCI só carrega o blob
+  qcow2), por isso um `image vm ls` de uma imagem puxada mostra `-` nessas colunas.
+- **`ls-remote`** (v0.11.0) — `delonix vm ls-remote` / `image vm ls-remote` / `image --vm
+  ls-remote`, sem argumento lista as tags do repositório OCI oficial (`GET
+  /v2/<repo>/tags/list`), com argumento qualquer outro repositório — descobre que versões (k8s)
+  estão publicadas ANTES de um `pull`, sem tocar em nada local. Reutiliza inteiramente o `Client`/
+  auth de `pull`/`push` (`delonix_image::registry::list_remote_tags`, mesmo fluxo 401→token→retry).
+  Os três pontos de entrada convergem em `VmImageCmd::LsRemote`, o mesmo padrão triplo que o
+  `pull` já seguia. Só a 1.ª página do registo (sem paginação por `Link`) — irrelevante para o
+  punhado de tags de uma golden. Validado ao vivo: mostra `1.34` e `1.35` reais no ghcr.io.
 - **Bloqueios de host do `virt-customize` — DESAPARECEM com `--offline`** (diagnosticados a
   fundo em 2026-07-17; só afectam o caminho ONLINE, que precisa de DHCP/DNS no appliance):
   1. **Appliance sem cliente DHCP** → `apt-get install` falha com "Could not resolve host".
