@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Projecto completo: Delonix Temp · Delonix Runtime</title>
+<style>
+:root{--accent:#e8590c;--accent-soft:#fff0e6;--ink:#1a1a2e;--muted:#5a6472;--line:#e6e8ec;
+--bg:#ffffff;--side:#f7f8fa;--code-bg:#0f172a;--code-ink:#e2e8f0;--radius:10px}
+@media (prefers-color-scheme: dark){:root{--ink:#e6e8ee;--muted:#9aa4b2;--line:#252a33;
+--bg:#0d1117;--side:#10151c;--accent-soft:#2a1810;--code-bg:#161b22;--code-ink:#dbe2ea}}
+*{box-sizing:border-box}body{margin:0;font:16px/1.65 -apple-system,'Segoe UI',Roboto,Ubuntu,
+sans-serif;color:var(--ink);background:var(--bg)}
+a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
+.layout{display:flex;min-height:100vh}
+nav.side{width:270px;flex-shrink:0;background:var(--side);border-right:1px solid var(--line);
+padding:1.2rem 1rem 3rem;position:sticky;top:0;height:100vh;overflow-y:auto}
+nav.side .brand{display:flex;align-items:center;gap:.55rem;font-weight:700;font-size:1.12rem;
+margin-bottom:1.1rem;color:var(--ink)}
+nav.side .brand .dot{width:26px;height:26px;border-radius:7px;background:var(--accent);
+display:inline-flex;align-items:center;justify-content:center;color:#fff;font-size:.85rem}
+nav.side h5{margin:1.3rem 0 .3rem;font-size:.72rem;letter-spacing:.09em;text-transform:uppercase;
+color:var(--muted)}
+nav.side a{display:block;padding:.28rem .55rem;border-radius:6px;color:var(--ink);font-size:.93rem}
+nav.side a:hover{background:var(--accent-soft);text-decoration:none}
+nav.side a.on{background:var(--accent-soft);color:var(--accent);font-weight:600}
+main{flex:1;min-width:0;padding:2.2rem 3rem 5rem;max-width:940px}
+main h1{font-size:1.9rem;margin:.2rem 0 .4rem}
+main h2{font-size:1.35rem;margin-top:2.4rem;padding-bottom:.35rem;border-bottom:1px solid var(--line)}
+main h3{font-size:1.05rem;margin-top:1.6rem}
+.tagline{color:var(--muted);font-size:1.05rem;margin-top:0}
+code{background:var(--accent-soft);padding:.1em .35em;border-radius:5px;font-size:.9em}
+pre{background:var(--code-bg);color:var(--code-ink);padding:1rem 1.2rem;border-radius:var(--radius);
+overflow-x:auto;font-size:.86rem;line-height:1.55}
+pre code{background:none;padding:0;color:inherit;font-size:inherit}
+.help pre{border-left:4px solid var(--accent)}
+.ex{margin:.9rem 0}.ex .cap{font-size:.88rem;color:var(--muted);margin-bottom:.25rem}
+.ex .out,div.out{margin-top:.4rem}
+.ex .out pre,div.out pre{background:transparent;border:1px dashed var(--line);color:var(--muted);
+padding:.7rem 1rem;font-size:.82rem}
+.ex .out::before,div.out::before{content:"→ resultado";display:block;font-size:.75rem;color:var(--muted);
+margin-bottom:.15rem;letter-spacing:.03em;text-transform:uppercase}
+table{border-collapse:collapse;width:100%;font-size:.92rem}
+td,th{border:1px solid var(--line);padding:.5rem .7rem;text-align:left;vertical-align:top}
+th{background:var(--side)}
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:1rem;margin:1.4rem 0}
+.card{border:1px solid var(--line);border-radius:var(--radius);padding:1rem 1.1rem}
+.card b{display:block;margin-bottom:.25rem}.card a{font-weight:600}
+.card p{margin:.2rem 0 0;font-size:.88rem;color:var(--muted)}
+.arch{display:flex;flex-direction:column;gap:.6rem;margin:1.4rem 0}
+.arch .row{display:flex;gap:.6rem;flex-wrap:wrap}
+.arch .box{flex:1;min-width:150px;border:1.5px solid var(--accent);border-radius:8px;
+padding:.55rem .8rem;font-size:.85rem;background:var(--accent-soft)}
+.arch .box.mut{border-color:var(--line);background:var(--side)}
+.arch .box b{display:block;font-size:.9rem}
+.pill{display:inline-block;background:var(--accent);color:#fff;border-radius:99px;
+padding:.05rem .6rem;font-size:.75rem;font-weight:600;vertical-align:middle}
+.tag{display:inline-block;border-radius:6px;padding:.1rem .5rem;font-size:.82rem;font-weight:600}
+.tag.ok{background:#d8f3dc;color:#1b4332}.tag.mid{background:#fff3bf;color:#5c4a00}
+.tag.no{background:#ffe3e3;color:#7a1420}
+@media (prefers-color-scheme: dark){.tag.ok{background:#0f3d24;color:#8fe3ac}
+.tag.mid{background:#453800;color:#ffe066}.tag.no{background:#4a1015;color:#ffa8a8}}
+.callout{border:1.5px solid var(--accent);border-radius:var(--radius);padding:1rem 1.2rem;margin:1.4rem 0;
+background:var(--accent-soft)}
+.callout.warn{border-color:#e03131;background:#fff0f0}
+.callout.warn b{color:#c92a2a}
+@media (prefers-color-scheme: dark){.callout.warn{background:#3a1414}.callout.warn b{color:#ff8787}}
+.callout p:first-child{margin-top:0}.callout p:last-child{margin-bottom:0}
+footer{margin-top:4rem;color:var(--muted);font-size:.85rem;border-top:1px solid var(--line);padding-top:1rem}
+@media (max-width:840px){.layout{flex-direction:column}nav.side{width:100%;height:auto;position:static}
+main{padding:1.4rem 1.2rem 4rem}}
+</style>
+</head>
+<body>
+<div class="layout">
+<nav class="side">
+<div class="brand"><span class="dot">▲</span> Delonix Runtime</div>
+<h5>Documentação</h5>
+<a href="index.html">Início</a><a href="cheatsheet.html">Cheatsheet</a><a href="kinds.html">Kinds e templates</a><a href="arquitectura.html">Arquitectura</a><a href="c4.html">Modelo C4 e system design</a><a href="cri.html">CRI — kubelet sem containerd</a><a href="comparacao.html">Delonix vs Docker vs Podman</a><a href="tutorial-delonix-temp.html" class="on">Projecto completo: Delonix Temp</a>
+<h5>Referência CLI</h5>
+<a href="comandos/container.html">delonix container</a><a href="comandos/pod.html">delonix pod</a><a href="comandos/image.html">delonix image</a><a href="comandos/build.html">delonix build</a><a href="comandos/vm.html">delonix vm</a><a href="comandos/volumes.html">delonix volumes</a><a href="comandos/network.html">delonix network</a><a href="comandos/stack.html">delonix stack</a><a href="comandos/cluster.html">delonix cluster</a><a href="comandos/secret.html">delonix secret</a><a href="comandos/storage.html">delonix storage</a><a href="comandos/sharevolume.html">delonix sharevolume</a><a href="comandos/ingress.html">delonix ingress</a><a href="comandos/egress.html">delonix egress</a><a href="comandos/httproute.html">delonix httproute</a><a href="comandos/tunnel.html">delonix tunnel</a><a href="comandos/flow.html">delonix flow</a><a href="comandos/boot.html">delonix boot</a><a href="comandos/system.html">delonix system</a><a href="comandos/dash.html">delonix dash</a><a href="comandos/docker-api.html">delonix docker-api</a><a href="comandos/kube.html">delonix kube</a><a href="comandos/netns.html">delonix netns</a><a href="comandos/completion.html">delonix completion</a>
+<h5>Projecto</h5>
+<a href="https://github.com/angolardevops/delonix-runtime">GitHub</a>
+<a href="https://github.com/angolardevops/delonix-runtime/releases">Releases</a>
+</nav>
+<main>
+
+<h1>Projecto completo: Delonix Temp</h1>
+<p class="tagline">Do zero a um serviço na internet pública — build, run, e uma URL real, em 4
+comandos. Tudo neste guia foi corrido a sério; o output é real, copiado da execução.</p>
+
+<p>Uma API de tempo real em <a href="https://fastapi.tiangolo.com/">FastAPI</a> — consulta a
+temperatura ACTUAL de qualquer cidade (via <a href="https://open-meteo.com/">Open-Meteo</a>, sem
+API key) e serve uma página que actualiza sozinha a cada 30s. O objectivo é percorrer o ciclo
+completo do Delonix num só projecto pequeno: <code>build</code> multi-stage → <code>container
+run</code> → expor à internet com <code>tunnel</code>. Os ficheiros completos estão em
+<a href="https://github.com/angolardevops/delonix-runtime/tree/main/examples/delonix-temp"><code>examples/delonix-temp/</code></a>
+— <code>git clone</code> e segue os passos abaixo tal como estão.</p>
+
+<h2>1. A app</h2>
+<p>Três ficheiros. <code>main.py</code> — duas rotas: <code>/api/weather/{city}</code> (geocodifica
+a cidade, pede a temperatura actual, devolve JSON) e <code>/</code> (uma página HTML que chama a
+API própria via <code>fetch</code> e refaz a cada 30s):</p>
+<pre><code>from fastapi import FastAPI, HTTPException
+from fastapi.responses import HTMLResponse
+import httpx
+
+app = FastAPI(title="Delonix Temp")
+
+@app.get("/api/weather/{city}")
+async def weather(city: str):
+    async with httpx.AsyncClient(timeout=8.0) as client:
+        geo = await client.get("https://geocoding-api.open-meteo.com/v1/search",
+                                params={"name": city, "count": 1})
+        place = geo.json()["results"][0]
+        fc = await client.get("https://api.open-meteo.com/v1/forecast", params={
+            "latitude": place["latitude"], "longitude": place["longitude"],
+            "current": "temperature_2m,weather_code",
+        })
+    current = fc.json()["current"]
+    return {"city": place["name"], "country": place.get("country"),
+            "temperature_c": current["temperature_2m"], "observed_at": current["time"]}
+
+@app.get("/", response_class=HTMLResponse)
+async def index():
+    return PAGE  # HTML com um &lt;script&gt; que faz fetch("/api/weather/"+city) a cada 30s
+</code></pre>
+<p>(versão completa, com a página HTML e <code>/health</code>, no ficheiro real do repo.)</p>
+
+<p><code>requirements.txt</code> — <code>fastapi</code>, <code>uvicorn[standard]</code>,
+<code>httpx</code>, com versões fixas.</p>
+
+<p><code>Delonixfile</code> — build <strong>multi-stage</strong>: um estágio instala as
+dependências Python, o outro só copia o resultado + o código — a imagem final não carrega o
+cache do pip nem ferramentas de build:</p>
+<pre><code>FROM python:3.12-slim AS builder
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
+
+FROM python:3.12-slim
+WORKDIR /app
+COPY --from=builder /install /usr/local
+COPY main.py .
+ENV PYTHONUNBUFFERED=1
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "80"]</code></pre>
+
+<h2>2. Build</h2>
+<pre><code>cd examples/delonix-temp
+delonix build -t delonix-temp:1 .</code></pre>
+<div class="out"><pre><code>Collecting fastapi==0.115.0 (from -r requirements.txt (line 1))
+...
+Successfully installed annotated-types-0.7.0 anyio-4.14.2 ... fastapi-0.115.0 ...
+ef708d73f029</code></pre></div>
+<p>O ID no fim (<code>ef708d73f029</code>) é a imagem. <code>delonix image ls</code> confirma o
+tamanho — o estágio final, sem as ferramentas de build, fica bem mais pequeno que se fosse tudo
+num único <code>FROM</code>:</p>
+<pre><code>delonix image ls</code></pre>
+<div class="out"><pre><code>REPOSITORY:TAG     IMAGE ID       CREATED          SIZE
+delonix-temp:1     ef708d73f029   agora mesmo      157.2 MiB
+python:3.12-slim   25c5b8011a34   agora mesmo       41.2 MiB</code></pre></div>
+
+<h2>3. Correr</h2>
+<pre><code>delonix container run -d --name delonix-temp -p 8080:80 delonix-temp:1
+curl -s http://localhost:8080/api/weather/Luanda</code></pre>
+<div class="out"><pre><code>{"city":"Luanda","country":"Angola","temperature_c":20.2,"observed_at":"2026-07-23T19:00"}</code></pre></div>
+<p>Temperatura REAL, consultada ao vivo — não é um valor fixo. Os logs do container confirmam
+os pedidos:</p>
+<pre><code>delonix container logs delonix-temp</code></pre>
+<div class="out"><pre><code>INFO:     Uvicorn running on http://0.0.0.0:80 (Press CTRL+C to quit)
+INFO:     10.0.2.2:57786 - "GET /health HTTP/1.1" 200 OK
+INFO:     10.0.2.2:57802 - "GET /api/weather/Luanda HTTP/1.1" 200 OK</code></pre></div>
+
+<h2>4. Expor à internet</h2>
+<p>Uma porta local não chega — o objectivo é uma URL que qualquer pessoa, em qualquer rede,
+consiga abrir. É aqui que entra o <a href="comandos/tunnel.html"><code>kind: Tunnel</code></a>:</p>
+<pre><code>delonix tunnel expose --name delonix-temp --provider pinggy --local-port 8080</code></pre>
+<div class="out"><pre><code>tunnel/delonix-temp: running — https://lfdhz-197-148-40-67.free.pinggy.net</code></pre></div>
+<p>Essa URL é REAL — foi a que este guião recebeu ao correr o comando. (A tua vai ser diferente
+de cada vez: o provider grátis atribui uma nova de cada sessão.) Confirmação, de fora, sem
+tocar em nada local:</p>
+<pre><code>curl https://lfdhz-197-148-40-67.free.pinggy.net/api/weather/Luanda</code></pre>
+<div class="out"><pre><code>{"city":"Luanda","country":"Angola","temperature_c":20.2,"observed_at":"2026-07-23T19:00"}</code></pre></div>
+<p>O mesmo JSON, desta vez a chegar de fora da máquina, por um tunnel SSH até um servidor
+público (pinggy) e de volta — zero configuração de router, zero IP público próprio, zero conta.
+Abrir a URL num browser mostra a página <em>Delonix Temp</em> a actualizar-se sozinha.</p>
+
+<div class="callout">
+<p><b>Ir mais longe:</b> com mais de um serviço, mete o <a href="comandos/httproute.html"><code>kind:
+HTTPRoute</code></a> à frente (routing por <code>Host</code>/path para vários containers) e aponta
+o <code>tunnel</code> para a PORTA DO PROXY em vez de directamente ao container — uma só URL
+pública, tantos backends quantos precisares. Ver <code>examples/httproute.yaml</code> +
+<code>examples/tunnel.yaml</code>.</p>
+</div>
+
+<h2>Arrumar</h2>
+<pre><code>delonix tunnel rm delonix-temp
+delonix container rm -f delonix-temp</code></pre>
+
+<h2>O que isto provou</h2>
+<table>
+<tr><th>Comando</th><th>O que validou</th></tr>
+<tr><td><code>delonix build</code></td><td>build multi-stage real (2 estágios, <code>COPY --from</code>), com rede no build</td></tr>
+<tr><td><code>delonix container run -p</code></td><td>NAT userspace sem root, porta publicada no host</td></tr>
+<tr><td><code>delonix container logs</code></td><td>observabilidade de um serviço real a correr</td></tr>
+<tr><td><code>delonix tunnel expose</code></td><td>tráfego REAL da internet pública a chegar a um container local, sem conta nem IP público</td></tr>
+</table>
+
+<footer>Delonix Runtime · Apache-2.0 · <a href="https://github.com/angolardevops/delonix-runtime">angolardevops/delonix-runtime</a>
+· Referência gerada do <code>--help</code> real do binário por <code>docs/gen.py</code>.</footer>
+</main>
+</div>
+</body>
+</html>

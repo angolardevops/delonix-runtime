@@ -579,10 +579,10 @@ overflow-x:auto;font-size:.86rem;line-height:1.55}
 pre code{background:none;padding:0;color:inherit;font-size:inherit}
 .help pre{border-left:4px solid var(--accent)}
 .ex{margin:.9rem 0}.ex .cap{font-size:.88rem;color:var(--muted);margin-bottom:.25rem}
-.ex .out{margin-top:.4rem}
-.ex .out pre{background:transparent;border:1px dashed var(--line);color:var(--muted);
+.ex .out,div.out{margin-top:.4rem}
+.ex .out pre,div.out pre{background:transparent;border:1px dashed var(--line);color:var(--muted);
 padding:.7rem 1rem;font-size:.82rem}
-.ex .out::before{content:"→ resultado";display:block;font-size:.75rem;color:var(--muted);
+.ex .out::before,div.out::before{content:"→ resultado";display:block;font-size:.75rem;color:var(--muted);
 margin-bottom:.15rem;letter-spacing:.03em;text-transform:uppercase}
 table{border-collapse:collapse;width:100%;font-size:.92rem}
 td,th{border:1px solid var(--line);padding:.5rem .7rem;text-align:left;vertical-align:top}
@@ -626,6 +626,7 @@ def sidebar(active, depth=0):
         ("c4.html", "Modelo C4 e system design"),
         ("cri.html", "CRI — kubelet sem containerd"),
         ("comparacao.html", "Delonix vs Docker vs Podman"),
+        ("tutorial-delonix-temp.html", "Projecto completo: Delonix Temp"),
     ]
     items_cmd = [(f"comandos/{g}.html", GROUPS[g]["title"]) for g in GROUPS]
     def link(href, label):
@@ -1189,6 +1190,130 @@ def cheatsheet_page():
     page("cheatsheet.html", "Cheatsheet", "\n".join(body))
 
 
+TUTORIAL = """
+<h1>Projecto completo: Delonix Temp</h1>
+<p class="tagline">Do zero a um serviço na internet pública — build, run, e uma URL real, em 4
+comandos. Tudo neste guia foi corrido a sério; o output é real, copiado da execução.</p>
+
+<p>Uma API de tempo real em <a href="https://fastapi.tiangolo.com/">FastAPI</a> — consulta a
+temperatura ACTUAL de qualquer cidade (via <a href="https://open-meteo.com/">Open-Meteo</a>, sem
+API key) e serve uma página que actualiza sozinha a cada 30s. O objectivo é percorrer o ciclo
+completo do Delonix num só projecto pequeno: <code>build</code> multi-stage → <code>container
+run</code> → expor à internet com <code>tunnel</code>. Os ficheiros completos estão em
+<a href="https://github.com/angolardevops/delonix-runtime/tree/main/examples/delonix-temp"><code>examples/delonix-temp/</code></a>
+— <code>git clone</code> e segue os passos abaixo tal como estão.</p>
+
+<h2>1. A app</h2>
+<p>Três ficheiros. <code>main.py</code> — duas rotas: <code>/api/weather/{city}</code> (geocodifica
+a cidade, pede a temperatura actual, devolve JSON) e <code>/</code> (uma página HTML que chama a
+API própria via <code>fetch</code> e refaz a cada 30s):</p>
+<pre><code>from fastapi import FastAPI, HTTPException
+from fastapi.responses import HTMLResponse
+import httpx
+
+app = FastAPI(title="Delonix Temp")
+
+@app.get("/api/weather/{city}")
+async def weather(city: str):
+    async with httpx.AsyncClient(timeout=8.0) as client:
+        geo = await client.get("https://geocoding-api.open-meteo.com/v1/search",
+                                params={"name": city, "count": 1})
+        place = geo.json()["results"][0]
+        fc = await client.get("https://api.open-meteo.com/v1/forecast", params={
+            "latitude": place["latitude"], "longitude": place["longitude"],
+            "current": "temperature_2m,weather_code",
+        })
+    current = fc.json()["current"]
+    return {"city": place["name"], "country": place.get("country"),
+            "temperature_c": current["temperature_2m"], "observed_at": current["time"]}
+
+@app.get("/", response_class=HTMLResponse)
+async def index():
+    return PAGE  # HTML com um &lt;script&gt; que faz fetch("/api/weather/"+city) a cada 30s
+</code></pre>
+<p>(versão completa, com a página HTML e <code>/health</code>, no ficheiro real do repo.)</p>
+
+<p><code>requirements.txt</code> — <code>fastapi</code>, <code>uvicorn[standard]</code>,
+<code>httpx</code>, com versões fixas.</p>
+
+<p><code>Delonixfile</code> — build <strong>multi-stage</strong>: um estágio instala as
+dependências Python, o outro só copia o resultado + o código — a imagem final não carrega o
+cache do pip nem ferramentas de build:</p>
+<pre><code>FROM python:3.12-slim AS builder
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
+
+FROM python:3.12-slim
+WORKDIR /app
+COPY --from=builder /install /usr/local
+COPY main.py .
+ENV PYTHONUNBUFFERED=1
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "80"]</code></pre>
+
+<h2>2. Build</h2>
+<pre><code>cd examples/delonix-temp
+delonix build -t delonix-temp:1 .</code></pre>
+<div class="out"><pre><code>Collecting fastapi==0.115.0 (from -r requirements.txt (line 1))
+...
+Successfully installed annotated-types-0.7.0 anyio-4.14.2 ... fastapi-0.115.0 ...
+ef708d73f029</code></pre></div>
+<p>O ID no fim (<code>ef708d73f029</code>) é a imagem. <code>delonix image ls</code> confirma o
+tamanho — o estágio final, sem as ferramentas de build, fica bem mais pequeno que se fosse tudo
+num único <code>FROM</code>:</p>
+<pre><code>delonix image ls</code></pre>
+<div class="out"><pre><code>REPOSITORY:TAG     IMAGE ID       CREATED          SIZE
+delonix-temp:1     ef708d73f029   agora mesmo      157.2 MiB
+python:3.12-slim   25c5b8011a34   agora mesmo       41.2 MiB</code></pre></div>
+
+<h2>3. Correr</h2>
+<pre><code>delonix container run -d --name delonix-temp -p 8080:80 delonix-temp:1
+curl -s http://localhost:8080/api/weather/Luanda</code></pre>
+<div class="out"><pre><code>{"city":"Luanda","country":"Angola","temperature_c":20.2,"observed_at":"2026-07-23T19:00"}</code></pre></div>
+<p>Temperatura REAL, consultada ao vivo — não é um valor fixo. Os logs do container confirmam
+os pedidos:</p>
+<pre><code>delonix container logs delonix-temp</code></pre>
+<div class="out"><pre><code>INFO:     Uvicorn running on http://0.0.0.0:80 (Press CTRL+C to quit)
+INFO:     10.0.2.2:57786 - "GET /health HTTP/1.1" 200 OK
+INFO:     10.0.2.2:57802 - "GET /api/weather/Luanda HTTP/1.1" 200 OK</code></pre></div>
+
+<h2>4. Expor à internet</h2>
+<p>Uma porta local não chega — o objectivo é uma URL que qualquer pessoa, em qualquer rede,
+consiga abrir. É aqui que entra o <a href="comandos/tunnel.html"><code>kind: Tunnel</code></a>:</p>
+<pre><code>delonix tunnel expose --name delonix-temp --provider pinggy --local-port 8080</code></pre>
+<div class="out"><pre><code>tunnel/delonix-temp: running — https://lfdhz-197-148-40-67.free.pinggy.net</code></pre></div>
+<p>Essa URL é REAL — foi a que este guião recebeu ao correr o comando. (A tua vai ser diferente
+de cada vez: o provider grátis atribui uma nova de cada sessão.) Confirmação, de fora, sem
+tocar em nada local:</p>
+<pre><code>curl https://lfdhz-197-148-40-67.free.pinggy.net/api/weather/Luanda</code></pre>
+<div class="out"><pre><code>{"city":"Luanda","country":"Angola","temperature_c":20.2,"observed_at":"2026-07-23T19:00"}</code></pre></div>
+<p>O mesmo JSON, desta vez a chegar de fora da máquina, por um tunnel SSH até um servidor
+público (pinggy) e de volta — zero configuração de router, zero IP público próprio, zero conta.
+Abrir a URL num browser mostra a página <em>Delonix Temp</em> a actualizar-se sozinha.</p>
+
+<div class="callout">
+<p><b>Ir mais longe:</b> com mais de um serviço, mete o <a href="comandos/httproute.html"><code>kind:
+HTTPRoute</code></a> à frente (routing por <code>Host</code>/path para vários containers) e aponta
+o <code>tunnel</code> para a PORTA DO PROXY em vez de directamente ao container — uma só URL
+pública, tantos backends quantos precisares. Ver <code>examples/httproute.yaml</code> +
+<code>examples/tunnel.yaml</code>.</p>
+</div>
+
+<h2>Arrumar</h2>
+<pre><code>delonix tunnel rm delonix-temp
+delonix container rm -f delonix-temp</code></pre>
+
+<h2>O que isto provou</h2>
+<table>
+<tr><th>Comando</th><th>O que validou</th></tr>
+<tr><td><code>delonix build</code></td><td>build multi-stage real (2 estágios, <code>COPY --from</code>), com rede no build</td></tr>
+<tr><td><code>delonix container run -p</code></td><td>NAT userspace sem root, porta publicada no host</td></tr>
+<tr><td><code>delonix container logs</code></td><td>observabilidade de um serviço real a correr</td></tr>
+<tr><td><code>delonix tunnel expose</code></td><td>tráfego REAL da internet pública a chegar a um container local, sem conta nem IP público</td></tr>
+</table>
+"""
+
+
 def main():
     # Só a 1.ª linha: desde a v0.6.1 o --version é um cartão multi-linha e o
     # último token do output inteiro deixou de ser a versão.
@@ -1210,6 +1335,7 @@ def main():
     c4_page()
     page("cri.html", "CRI", CRI)
     page("comparacao.html", "Delonix vs Docker vs Podman", COMPARE)
+    page("tutorial-delonix-temp.html", "Projecto completo: Delonix Temp", TUTORIAL)
     for n, g in GROUPS.items():
         group_page(n, g)
     open(os.path.join(ROOT, ".nojekyll"), "w").close()
