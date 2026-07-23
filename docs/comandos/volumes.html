@@ -50,6 +50,17 @@ padding:.55rem .8rem;font-size:.85rem;background:var(--accent-soft)}
 .arch .box b{display:block;font-size:.9rem}
 .pill{display:inline-block;background:var(--accent);color:#fff;border-radius:99px;
 padding:.05rem .6rem;font-size:.75rem;font-weight:600;vertical-align:middle}
+.tag{display:inline-block;border-radius:6px;padding:.1rem .5rem;font-size:.82rem;font-weight:600}
+.tag.ok{background:#d8f3dc;color:#1b4332}.tag.mid{background:#fff3bf;color:#5c4a00}
+.tag.no{background:#ffe3e3;color:#7a1420}
+@media (prefers-color-scheme: dark){.tag.ok{background:#0f3d24;color:#8fe3ac}
+.tag.mid{background:#453800;color:#ffe066}.tag.no{background:#4a1015;color:#ffa8a8}}
+.callout{border:1.5px solid var(--accent);border-radius:var(--radius);padding:1rem 1.2rem;margin:1.4rem 0;
+background:var(--accent-soft)}
+.callout.warn{border-color:#e03131;background:#fff0f0}
+.callout.warn b{color:#c92a2a}
+@media (prefers-color-scheme: dark){.callout.warn{background:#3a1414}.callout.warn b{color:#ff8787}}
+.callout p:first-child{margin-top:0}.callout p:last-child{margin-bottom:0}
 footer{margin-top:4rem;color:var(--muted);font-size:.85rem;border-top:1px solid var(--line);padding-top:1rem}
 @media (max-width:840px){.layout{flex-direction:column}nav.side{width:100%;height:auto;position:static}
 main{padding:1.4rem 1.2rem 4rem}}
@@ -60,7 +71,7 @@ main{padding:1.4rem 1.2rem 4rem}}
 <nav class="side">
 <div class="brand"><span class="dot">▲</span> Delonix Runtime</div>
 <h5>Documentação</h5>
-<a href="../index.html">Início</a><a href="../cheatsheet.html">Cheatsheet</a><a href="../kinds.html">Kinds e templates</a><a href="../arquitectura.html">Arquitectura</a><a href="../c4.html">Modelo C4 e system design</a><a href="../cri.html">CRI — kubelet sem containerd</a>
+<a href="../index.html">Início</a><a href="../cheatsheet.html">Cheatsheet</a><a href="../kinds.html">Kinds e templates</a><a href="../arquitectura.html">Arquitectura</a><a href="../c4.html">Modelo C4 e system design</a><a href="../cri.html">CRI — kubelet sem containerd</a><a href="../comparacao.html">Delonix vs Docker vs Podman</a>
 <h5>Referência CLI</h5>
 <a href="../comandos/container.html">delonix container</a><a href="../comandos/pod.html">delonix pod</a><a href="../comandos/image.html">delonix image</a><a href="../comandos/build.html">delonix build</a><a href="../comandos/vm.html">delonix vm</a><a href="../comandos/volumes.html" class="on">delonix volumes</a><a href="../comandos/network.html">delonix network</a><a href="../comandos/stack.html">delonix stack</a><a href="../comandos/cluster.html">delonix cluster</a><a href="../comandos/secret.html">delonix secret</a><a href="../comandos/storage.html">delonix storage</a><a href="../comandos/ingress.html">delonix ingress</a><a href="../comandos/egress.html">delonix egress</a><a href="../comandos/flow.html">delonix flow</a><a href="../comandos/boot.html">delonix boot</a><a href="../comandos/system.html">delonix system</a><a href="../comandos/kube.html">delonix kube</a><a href="../comandos/netns.html">delonix netns</a><a href="../comandos/completion.html">delonix completion</a>
 <h5>Projecto</h5>
@@ -74,7 +85,7 @@ main{padding:1.4rem 1.2rem 4rem}}
 <code>-v /host:/destino[:ro]</code> para um bind mount — a distinção é automática.</p>
 <div class='help'><pre><code>Named volumes and bind mounts: create/ls/rm/inspect
 
-Usage: delonix-x86_64-linux volumes [OPTIONS] &lt;COMMAND&gt;
+Usage: delonix volumes [OPTIONS] &lt;COMMAND&gt;
 
 Commands:
   create    Create a named volume
@@ -92,7 +103,7 @@ Options:
 <h2 id='create'><code>volumes create</code></h2>
 <div class='help'><pre><code>Create a named volume
 
-Usage: delonix-x86_64-linux volumes create [OPTIONS] &lt;NAME&gt;
+Usage: delonix volumes create [OPTIONS] &lt;NAME&gt;
 
 Arguments:
   &lt;NAME&gt;  
@@ -108,7 +119,7 @@ Options:
 <h2 id='ls'><code>volumes ls</code></h2>
 <div class='help'><pre><code>List the volumes
 
-Usage: delonix-x86_64-linux volumes ls [OPTIONS]
+Usage: delonix volumes ls [OPTIONS]
 
 Options:
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
@@ -117,7 +128,7 @@ Options:
 <h2 id='inspect'><code>volumes inspect</code></h2>
 <div class='help'><pre><code>Details of a volume (includes real on-disk usage)
 
-Usage: delonix-x86_64-linux volumes inspect [OPTIONS] &lt;NAME&gt;
+Usage: delonix volumes inspect [OPTIONS] &lt;NAME&gt;
 
 Arguments:
   &lt;NAME&gt;  
@@ -129,7 +140,7 @@ Options:
 <h2 id='rm'><code>volumes rm</code></h2>
 <div class='help'><pre><code>Remove a volume
 
-Usage: delonix-x86_64-linux volumes rm [OPTIONS] &lt;NAME&gt;
+Usage: delonix volumes rm [OPTIONS] &lt;NAME&gt;
 
 Arguments:
   &lt;NAME&gt;  
@@ -141,7 +152,7 @@ Options:
 <h2 id='apply'><code>volumes apply</code></h2>
 <div class='help'><pre><code>Apply the `kind: Volume` documents from a manifest (idempotent by name)
 
-Usage: delonix-x86_64-linux volumes apply [OPTIONS]
+Usage: delonix volumes apply [OPTIONS]
 
 Options:
   -f, --file &lt;FILE&gt;   

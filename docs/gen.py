@@ -459,6 +459,17 @@ padding:.55rem .8rem;font-size:.85rem;background:var(--accent-soft)}
 .arch .box b{display:block;font-size:.9rem}
 .pill{display:inline-block;background:var(--accent);color:#fff;border-radius:99px;
 padding:.05rem .6rem;font-size:.75rem;font-weight:600;vertical-align:middle}
+.tag{display:inline-block;border-radius:6px;padding:.1rem .5rem;font-size:.82rem;font-weight:600}
+.tag.ok{background:#d8f3dc;color:#1b4332}.tag.mid{background:#fff3bf;color:#5c4a00}
+.tag.no{background:#ffe3e3;color:#7a1420}
+@media (prefers-color-scheme: dark){.tag.ok{background:#0f3d24;color:#8fe3ac}
+.tag.mid{background:#453800;color:#ffe066}.tag.no{background:#4a1015;color:#ffa8a8}}
+.callout{border:1.5px solid var(--accent);border-radius:var(--radius);padding:1rem 1.2rem;margin:1.4rem 0;
+background:var(--accent-soft)}
+.callout.warn{border-color:#e03131;background:#fff0f0}
+.callout.warn b{color:#c92a2a}
+@media (prefers-color-scheme: dark){.callout.warn{background:#3a1414}.callout.warn b{color:#ff8787}}
+.callout p:first-child{margin-top:0}.callout p:last-child{margin-bottom:0}
 footer{margin-top:4rem;color:var(--muted);font-size:.85rem;border-top:1px solid var(--line);padding-top:1rem}
 @media (max-width:840px){.layout{flex-direction:column}nav.side{width:100%;height:auto;position:static}
 main{padding:1.4rem 1.2rem 4rem}}
@@ -474,6 +485,7 @@ def sidebar(active, depth=0):
         ("arquitectura.html", "Arquitectura"),
         ("c4.html", "Modelo C4 e system design"),
         ("cri.html", "CRI — kubelet sem containerd"),
+        ("comparacao.html", "Delonix vs Docker vs Podman"),
     ]
     items_cmd = [(f"comandos/{g}.html", GROUPS[g]["title"]) for g in GROUPS]
     def link(href, label):
@@ -655,11 +667,19 @@ volumes, via mounts live) se trocam a quente: o processo do container nunca é t
 dedicado (modelo podman), que morre com ele.</p>
 
 <h2>Segurança</h2>
-<p>Rootless por omissão; seccomp e drop de capabilities fora de <code>--privileged</code>; pull com
-verificação de digest (incluindo artefactos VM OCI); COPY do build confinado ao contexto; inputs de
-manifesto validados por whitelist antes de chegarem a qualquer shell remoto. O projecto passou uma
-auditoria ofensiva dedicada (3 revisões adversariais em paralelo) — os 4 achados críticos foram
-corrigidos com testes que replicam cada exploit.</p>
+<p>Rootless por omissão; seccomp e drop de capabilities fora de <code>--privileged</code>, com
+arranque a FALHAR se não ficarem mesmo activos; pull com verificação de digest (incluindo
+artefactos VM OCI); inputs de manifesto de recursos como <code>Cluster</code>/<code>Vm</code>
+validados por whitelist antes de chegarem a qualquer shell remoto.</p>
+<div class="callout warn">
+<p><b>Auditoria de 2026-07-21 — 6 achados de severidade alta ainda por corrigir</b> (o <code>COPY</code>
+do build, por exemplo, ainda é contornável por symlink, apesar de uma correcção anterior ter tentado
+fechá-lo). Não há indícios de RCE pela rede, mas não corras ainda imagens/manifestos não confiáveis
+nem exponhas o motor num host partilhado. Detalhe completo em
+<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/AUDITORIA-E2E.md">AUDITORIA-E2E.md</a>
+— ver também a <a href="comparacao.html">comparação com Docker/Podman</a> para o estado geral do
+projecto.</p>
+</div>
 """
 
 CRI = """
@@ -697,6 +717,148 @@ estado e remoção</td></tr>
 (<code>delonix image --vm build</code>) já traz kubeadm/kubelet/kubectl e o
 <code>delonix-cri</code> activo; <code>delonix cluster kubeadm</code> provisiona as VMs e faz o
 bootstrap — o cluster resultante corre Kubernetes com o Delonix como runtime de ponta a ponta.</p>
+"""
+
+
+COMPARE = """
+<h1>Delonix vs Docker vs Podman</h1>
+<p class="tagline">Comparação honesta, para decidir com que motor construir — não um argumento de
+venda.</p>
+
+<p>O Delonix Runtime é um motor de containers e microVMs <strong>daemonless, rootless-first</strong>,
+em Rust, com Kubernetes de raiz (CRI próprio). Em vários pontos concretos já vai mais longe que o
+Docker e o Podman rootless. Noutros, fica muito atrás. Esta página diz exactamente onde é onde —
+para uma pessoa a decidir o que instalar hoje, ou uma empresa a avaliar para produção.</p>
+
+<div class="callout warn">
+<p><b>Estado actual (2026-07): beta público, em hardening activo.</b> Uma auditoria de segurança
+independente encontrou 6 falhas de severidade alta ainda por corrigir (essencialmente:
+escrita/eliminação de ficheiros fora do esperado a partir de uma imagem ou manifesto não confiável,
+e um socket de gestão sem autenticação). Não há indícios de execução remota de código a partir da
+rede — a fronteira rootless→root está sólida — mas <strong>não corras ainda imagens não confiáveis
+nem exponhas o motor num host partilhado por várias pessoas</strong> até isto fechar. Detalhe
+completo, com ficheiro e linha de cada achado:
+<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/AUDITORIA-E2E.md">relatório
+da auditoria</a>.</p>
+</div>
+
+<h2>Decisão rápida</h2>
+<table>
+<tr><th>Se precisas de…</th><th>Usa</th></tr>
+<tr><td>Correr um <code>docker-compose.yml</code> já existente</td><td>Docker ou Podman</td></tr>
+<tr><td>Um <code>Dockerfile</code> multi-stage moderno (<code>FROM … AS build</code>)</td>
+<td>Docker ou Podman — o Delonix só faz single-stage por agora</td></tr>
+<tr><td>Cargas GPU/CUDA</td><td>Docker ou Podman (com nvidia-container-toolkit)</td></tr>
+<tr><td>Ferramentas que falam directamente com o Docker Engine (testcontainers, CI via
+<code>DOCKER_HOST</code>)</td><td>Docker ou Podman</td></tr>
+<tr><td>Bootstrap de um cluster Kubernetes real sem instalar Docker/containerd</td>
+<td><strong>Delonix</strong> — CRI próprio, já validado com um control-plane v1.34 <code>Ready</code></td></tr>
+<tr><td>Um só motor para containers <strong>e</strong> microVMs <strong>e</strong> Kubernetes</td>
+<td><strong>Delonix</strong> — ninguém no espaço Docker/Podman cobre isto junto</td></tr>
+<tr><td>Trocar portas/volumes/redes de um container a quente, sem o recriar</td>
+<td><strong>Delonix</strong> — o Docker obriga a recriar</td></tr>
+<tr><td>Rede rootless avançada (overlay cifrado entre nós, firewall dirigido por container)</td>
+<td><strong>Delonix</strong> — acima do Podman rootless nestes pontos</td></tr>
+<tr><td>Um motor com anos de produção, comunidade enorme, máxima compatibilidade de ferramentas</td>
+<td>Docker ou Podman — ainda sem substituto à vista</td></tr>
+</table>
+
+<h2>Comparação por área</h2>
+<p><span class="tag ok">forte</span> · <span class="tag mid">parcial ou com limitações</span> ·
+<span class="tag no">ausente</span></p>
+
+<table>
+<tr><th>Área</th><th>Docker</th><th>Podman</th><th>Delonix</th></tr>
+<tr><td>Correr/parar/inspeccionar containers</td>
+<td><span class="tag ok">forte</span></td><td><span class="tag ok">forte</span></td>
+<td><span class="tag ok">forte</span> — mais reconfiguração a quente e diagnóstico automático de
+crash (razão + snapshot do log, não só "Exited")</td></tr>
+<tr><td>Rootless por omissão</td>
+<td><span class="tag no">não é o modo por omissão</span></td>
+<td><span class="tag ok">forte, é a proposta do Podman</span></td>
+<td><span class="tag ok">forte — e falha de propósito se o isolamento não ficar activo</span></td></tr>
+<tr><td>Build de imagens (<code>Dockerfile</code>)</td>
+<td><span class="tag ok">forte — multi-stage, BuildKit, cache</span></td>
+<td><span class="tag ok">forte — via buildah</span></td>
+<td><span class="tag no">só single-stage, sem cache de camadas</span></td></tr>
+<tr><td><code>docker compose</code> / orquestração local</td>
+<td><span class="tag ok">nativo</span></td><td><span class="tag mid">podman-compose</span></td>
+<td><span class="tag no">manifesto próprio, sem parser de compose</span></td></tr>
+<tr><td>Rede rootless avançada (overlay inter-nó, firewall por-container)</td>
+<td><span class="tag no">overlay exige swarm</span></td>
+<td><span class="tag mid">sem overlay rootless nativo</span></td>
+<td><span class="tag ok">VXLAN+WireGuard rootless, firewall dirigido por container</span></td></tr>
+<tr><td>Bootstrap de Kubernetes sem Docker/containerd</td>
+<td><span class="tag no">não é o papel do Docker</span></td>
+<td><span class="tag no">não tem CRI próprio</span></td>
+<td><span class="tag ok">CRI próprio + <code>cluster kubeadm</code>, validado com cluster real</span></td></tr>
+<tr><td>MicroVMs no mesmo motor</td>
+<td><span class="tag no">ausente</span></td><td><span class="tag no">ausente</span></td>
+<td><span class="tag ok">Cloud Hypervisor / libvirt, declarativo</span></td></tr>
+<tr><td>GPU/CUDA</td>
+<td><span class="tag ok">nvidia-container-toolkit maduro</span></td>
+<td><span class="tag ok">idem</span></td>
+<td><span class="tag no">só bind dos nós de dispositivo, sem injecção de driver</span></td></tr>
+<tr><td>Assinatura de imagens + scan de CVE embutidos</td>
+<td><span class="tag no">precisa de cosign/trivy à parte</span></td>
+<td><span class="tag no">idem</span></td>
+<td><span class="tag ok">cosign/sigstore + scan de CVE no próprio motor</span></td></tr>
+<tr><td>Maturidade de segurança EM PRODUÇÃO (anos de uso adversarial real)</td>
+<td><span class="tag ok">muito madura</span></td><td><span class="tag ok">muito madura</span></td>
+<td><span class="tag no">projecto novo — auditoria própria já encontrou e está a corrigir falhas
+altas, ver aviso acima</span></td></tr>
+<tr><td>Ecossistema (docs, fóruns, integrações de terceiros)</td>
+<td><span class="tag ok">enorme</span></td><td><span class="tag ok">grande</span></td>
+<td><span class="tag no">início — este site + o repositório é tudo o que há por agora</span></td></tr>
+</table>
+
+<h2>Onde o Delonix já vai mais longe</h2>
+<ul>
+<li><strong>Um motor só, três problemas</strong> — containers, microVMs e Kubernetes (via CRI
+próprio) na mesma ferramenta. Já correu um control-plane Kubernetes v1.34 completo
+<code>Ready</code>, com o próprio <code>kube-proxy</code> a programar netfilter dentro do modelo
+rootless.</li>
+<li><strong>Reconfiguração a quente</strong> — mudar portas, volumes, redes ou limite de banda de um
+container <em>sem o recriar</em> e com o mesmo PID. No Docker, mudar uma porta obriga a apagar e
+recriar o container.</li>
+<li><strong>Diagnóstico automático de crash</strong> — quando um container morre inesperadamente, o
+Delonix regista a razão (processo desapareceu vs PID reciclado) e guarda um excerto do log
+automaticamente. Docker e Podman só dizem "Exited"/"Dead".</li>
+<li><strong>Segurança rootless mais rígida por desenho</strong> — no-new-privs sempre activo, e o
+arranque de um container <em>falha</em> se seccomp/capabilities não ficarem mesmo a valer, em vez
+de seguir em frente a fingir que está protegido.</li>
+<li><strong>Storage de rede estilo Kubernetes</strong> — uma pasta NFS/CIFS/WebDAV vira um volume
+nomeado montável por qualquer container, como um <code>PersistentVolume</code>.</li>
+</ul>
+
+<h2>Onde ainda não chega</h2>
+<ul>
+<li><strong>Não corre um <code>docker-compose.yml</code> existente</strong> nem fala a API do Docker
+— ferramentas que dependem disso (testcontainers, CI via <code>DOCKER_HOST</code>) não se ligam.</li>
+<li><strong>Build de imagens é básico</strong> — só single-stage, sem <code>--build-arg</code>
+funcional, sem cache de camadas; um <code>Dockerfile</code> de produção típico com multi-stage não
+passa.</li>
+<li><strong>Sem GPU real</strong> — nenhuma carga CUDA corre hoje.</li>
+<li><strong>Projecto novo</strong> — sem o histórico de produção que o Docker e o Podman têm; ver o
+aviso de segurança no topo desta página antes de decidir.</li>
+</ul>
+
+<h2>Recomendação por perfil</h2>
+<table>
+<tr><th>Quem és</th><th>Sugestão</th></tr>
+<tr><td>Programador(a) a experimentar em local/homelab, ou a fazer bootstrap de um cluster
+Kubernetes pequeno sem instalar Docker</td>
+<td>Experimenta o Delonix hoje — é exactamente o caso em que já está forte.</td></tr>
+<tr><td>Equipa com um pipeline de build maduro (multi-stage, BuildKit, compose)</td>
+<td>Fica no Docker/Podman para o build; podes correr as imagens resultantes no Delonix se quiseres
+testar a operação.</td></tr>
+<tr><td>Empresa a avaliar para produção multi-tenant ou com dados sensíveis</td>
+<td>Aguarda o fecho dos 6 achados de segurança altos (aviso acima) antes de expor o motor a imagens
+ou utilizadores não confiáveis — acompanha o
+<a href="https://github.com/angolardevops/delonix-runtime/releases">changelog</a>.</td></tr>
+<tr><td>Quer avaliar tecnicamente ao detalhe (gap-a-gap, com ficheiro e linha)</td>
+<td>Lê a <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/COMPARACAO-DOCKER-PODMAN.md">análise de gaps completa</a> no repositório.</td></tr>
+</table>
 """
 
 
@@ -865,6 +1027,7 @@ def main():
     page("arquitectura.html", "Arquitectura", ARCH)
     c4_page()
     page("cri.html", "CRI", CRI)
+    page("comparacao.html", "Delonix vs Docker vs Podman", COMPARE)
     for n, g in GROUPS.items():
         group_page(n, g)
     open(os.path.join(ROOT, ".nojekyll"), "w").close()
