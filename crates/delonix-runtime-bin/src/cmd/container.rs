@@ -166,7 +166,131 @@ pub(crate) const CONTAINER_SPEC_FIELDS: &[&str] = &[
     "netBurst",
     "logDriver",
     "expose",
+    // Grouped-form-only keys (see `normalize_container_spec`) — `network`
+    // and `env` need no entry of their own: they're ALREADY above, reused
+    // for both shapes (a scalar/array in the old flat form, a mapping in
+    // the new grouped one).
+    "resources",
+    "security",
+    "storage",
+    "limits",
 ];
+
+/// Re-deserializes a FLAT `kind: Container` document's spec, accepting BOTH
+/// the historic flat shape (every field at the top level — still fully
+/// supported) and a newer GROUPED one (`resources:`/`network:`/`security:`/
+/// `storage:`/`env:`/`limits:`), by hoisting each group's sub-fields to
+/// their flat top-level name on the raw YAML `Value` BEFORE the
+/// strongly-typed `ContainerSpec` (unchanged) ever sees it — same pattern as
+/// `cmd::vm::vm_spec_of`/`normalize_vm_spec`, see its doc for the reasoning.
+/// Only the FLAT spec gets this treatment — the Pod-shaped form
+/// (`spec.containers[]`) already mirrors k8s's own grouping
+/// (`resources.limits`/`securityContext`/...), nothing to improve there.
+fn container_spec_of(doc: &ManifestDoc) -> Result<ContainerSpec> {
+    let normalized = normalize_container_spec(doc.spec.clone());
+    serde_yaml::from_value(normalized).map_err(|e| {
+        Error::Invalid(format!(
+            "{} '{}': spec inválido: {e}",
+            doc.kind, doc.metadata.name
+        ))
+    })
+}
+
+/// Hoists each recognized group's sub-fields to their flat top-level name.
+/// Pure, testable independently of serde — see `cmd::vm::normalize_vm_spec`
+/// for the general pattern this mirrors, including the precedence rule (an
+/// explicit flat key always wins over a grouped one of the same target).
+///
+/// `network` and `env` are the two special cases: their OLD flat forms are a
+/// SCALAR (`network: host`) and a SEQUENCE (`env: ["K=v"]`) respectively —
+/// the NEW grouped forms are MAPPINGS, so the two are told apart by the YAML
+/// node's own type, same trick as `network` in `normalize_vm_spec`.
+fn normalize_container_spec(mut v: serde_yaml::Value) -> serde_yaml::Value {
+    use serde_yaml::Value;
+    let Value::Mapping(m) = &mut v else {
+        return v;
+    };
+
+    if let Some(Value::Mapping(net)) = m.get("network").cloned() {
+        m.remove("network");
+        if let Some(name) = net.get("name") {
+            m.insert(Value::from("network"), name.clone());
+        }
+        hoist(m, &net, "ports", "ports");
+        hoist(m, &net, "expose", "expose");
+        hoist(m, &net, "alias", "networkAlias");
+        hoist(m, &net, "knows", "knows");
+        hoist(m, &net, "rateBps", "netBps");
+        hoist(m, &net, "rateBurst", "netBurst");
+    }
+    if let Some(Value::Mapping(env)) = m.get("env").cloned() {
+        m.remove("env");
+        if let Some(vars) = env.get("vars") {
+            m.insert(Value::from("env"), vars.clone());
+        }
+        hoist(m, &env, "files", "envFile");
+        hoist(m, &env, "secrets", "secret");
+        hoist(m, &env, "secretFiles", "secretFiles");
+    }
+    for (group, pairs) in [
+        (
+            "resources",
+            &[
+                ("memory", "memory"),
+                ("cpus", "cpus"),
+                ("cpuWeight", "cpuWeight"),
+                ("cpuset", "cpuset"),
+                ("ioWeight", "ioWeight"),
+            ][..],
+        ),
+        (
+            "security",
+            &[
+                ("privileged", "privileged"),
+                ("readOnly", "readOnly"),
+                ("capAdd", "capAdd"),
+                ("capDrop", "capDrop"),
+                ("securityOpt", "securityOpt"),
+                ("apparmor", "apparmor"),
+                ("selinux", "selinux"),
+                ("userns", "userns"),
+                ("hostPid", "hostPid"),
+                ("hostIpc", "hostIpc"),
+                ("detect", "detect"),
+            ][..],
+        ),
+        (
+            "storage",
+            &[("volumes", "volumes"), ("tmpfs", "tmpfs")][..],
+        ),
+        (
+            "limits",
+            &[
+                ("ulimit", "ulimit"),
+                ("sysctl", "sysctl"),
+                ("gpus", "gpus"),
+                ("devices", "devices"),
+            ][..],
+        ),
+    ] {
+        if let Some(Value::Mapping(g)) = m.get(group).cloned() {
+            for (from, to) in pairs {
+                hoist(m, &g, from, to);
+            }
+            m.remove(group);
+        }
+    }
+    v
+}
+
+fn hoist(m: &mut serde_yaml::Mapping, group: &serde_yaml::Mapping, from: &str, to: &str) {
+    if m.contains_key(to) {
+        return;
+    }
+    if let Some(val) = group.get(from) {
+        m.insert(serde_yaml::Value::from(to), val.clone());
+    }
+}
 
 fn default_restart() -> String {
     "no".to_string()
@@ -1164,7 +1288,7 @@ pub fn run(action: ContainerCmd) -> Result<()> {
 
 /// Dry-run: the FLAT spec with every `#[serde(default)]` materialized.
 pub fn spec_with_defaults(doc: &ManifestDoc) -> Result<serde_yaml::Value> {
-    let spec: ContainerSpec = manifest::spec_of(doc)?;
+    let spec: ContainerSpec = container_spec_of(doc)?;
     serde_yaml::to_value(spec).map_err(|e| Error::Invalid(format!("dry-run: {e}")))
 }
 
@@ -1203,7 +1327,7 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
             println!("container/{name}: created");
             continue;
         }
-        let spec: ContainerSpec = manifest::spec_of(doc)?;
+        let spec: ContainerSpec = container_spec_of(doc)?;
         cmd_run(
             &images,
             &store,
@@ -3847,8 +3971,8 @@ fn cmd_init(
 mod tests {
     use super::super::util::compose_command;
     use super::{
-        fmt_ports, fmt_status, next_extra_idx, parse_burst_bytes, parse_rate_bits,
-        policy_supervised, should_restart, ContainerSpec,
+        fmt_ports, fmt_status, next_extra_idx, normalize_container_spec, parse_burst_bytes,
+        parse_rate_bits, policy_supervised, should_restart, ContainerSpec,
     };
     use delonix_runtime_core::{Container, ExtraNet, Status};
 
@@ -3863,6 +3987,68 @@ mod tests {
         // Without the field → the default `no`.
         let vazio: ContainerSpec = serde_yaml::from_str("image: alpine\n").unwrap();
         assert_eq!(vazio.restart, "no");
+    }
+
+    #[test]
+    fn normalize_container_spec_deixa_a_forma_plana_intacta() {
+        let flat: serde_yaml::Value =
+            serde_yaml::from_str("image: nginx\nnetwork: host\nenv: [K=v]\nmemory: 1G\n").unwrap();
+        assert_eq!(flat.clone(), normalize_container_spec(flat));
+    }
+
+    #[test]
+    fn normalize_container_spec_hoisteia_todos_os_grupos() {
+        let grouped: serde_yaml::Value = serde_yaml::from_str(
+            "image: nginx\n\
+             resources:\n\
+             \x20 memory: 512M\n\
+             \x20 cpus: \"2.0\"\n\
+             network:\n\
+             \x20 name: my-net\n\
+             \x20 ports: [\"8080:80\"]\n\
+             \x20 expose: 80\n\
+             \x20 alias: [web]\n\
+             security:\n\
+             \x20 privileged: true\n\
+             \x20 capAdd: [NET_ADMIN]\n\
+             storage:\n\
+             \x20 volumes: [\"data:/var/lib\"]\n\
+             \x20 tmpfs: [\"/scratch\"]\n\
+             env:\n\
+             \x20 vars: [\"KEY=value\"]\n\
+             \x20 secrets: [db-pass]\n\
+             limits:\n\
+             \x20 ulimit: [\"nofile=1024\"]\n\
+             \x20 gpus: all\n",
+        )
+        .unwrap();
+        let spec: ContainerSpec = serde_yaml::from_value(normalize_container_spec(grouped)).unwrap();
+        assert_eq!(spec.image, "nginx");
+        assert_eq!(spec.memory.as_deref(), Some("512M"));
+        assert_eq!(spec.cpus.as_deref(), Some("2.0"));
+        assert_eq!(spec.network, "my-net");
+        assert_eq!(spec.ports, vec!["8080:80".to_string()]);
+        assert_eq!(spec.expose, Some(80));
+        assert_eq!(spec.network_alias, vec!["web".to_string()]);
+        assert!(spec.privileged);
+        assert_eq!(spec.cap_add, vec!["NET_ADMIN".to_string()]);
+        assert_eq!(spec.volumes, vec!["data:/var/lib".to_string()]);
+        assert_eq!(spec.tmpfs, vec!["/scratch".to_string()]);
+        assert_eq!(spec.env, vec!["KEY=value".to_string()]);
+        assert_eq!(spec.secret, vec!["db-pass".to_string()]);
+        assert_eq!(spec.ulimit, vec!["nofile=1024".to_string()]);
+        assert_eq!(spec.gpus.as_deref(), Some("all"));
+    }
+
+    #[test]
+    fn normalize_container_spec_forma_plana_explicita_ganha_ao_grupo() {
+        let mixed: serde_yaml::Value = serde_yaml::from_str(
+            "image: nginx\nmemory: 2G\nresources:\n  memory: 512M\n  cpus: \"4.0\"\n",
+        )
+        .unwrap();
+        let spec: ContainerSpec = serde_yaml::from_value(normalize_container_spec(mixed)).unwrap();
+        assert_eq!(spec.memory.as_deref(), Some("2G"), "o memory plano explícito devia ganhar");
+        assert_eq!(spec.cpus.as_deref(), Some("4.0"), "sem colisão, o do grupo aplica-se");
     }
 
     fn v(xs: &[&str]) -> Vec<String> {

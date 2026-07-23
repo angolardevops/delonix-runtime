@@ -204,7 +204,123 @@ pub(crate) const VM_SPEC_FIELDS: &[&str] = &[
     "libvirt_xml_overlay",
     "libvirtXml",
     "libvirt_xml",
+    // Grouped-form-only keys (see `normalize_vm_spec`) — `network` needs no
+    // entry of its own: it's ALREADY above, reused for both shapes (a plain
+    // string in the old flat form, a mapping in the new grouped one).
+    "resources",
+    "boot",
+    "cloudInit",
+    "libvirt",
 ];
+
+/// Re-deserializes a `kind: Vm` document's spec, accepting BOTH the historic
+/// flat shape (every field at the top level — still fully supported, never
+/// breaks an existing manifest) and a newer GROUPED one (`resources:`/
+/// `network:`/`boot:`/`cloudInit:`/`libvirt:`) that reads better for a spec
+/// this size. The grouped form is hoisted to the flat shape on the raw YAML
+/// `Value` — see `normalize_vm_spec` — BEFORE the strongly-typed `VmSpec`
+/// (unchanged) ever sees it, so every existing field/alias/default keeps
+/// working exactly as before for both shapes.
+fn vm_spec_of(doc: &ManifestDoc) -> Result<VmSpec> {
+    let normalized = normalize_vm_spec(doc.spec.clone());
+    serde_yaml::from_value(normalized).map_err(|e| {
+        Error::Invalid(format!(
+            "{} '{}': spec inválido: {e}",
+            doc.kind, doc.metadata.name
+        ))
+    })
+}
+
+/// Hoists each recognized group's sub-fields to their flat top-level name.
+/// Pure (no I/O) and independent of serde/`VmSpec` — testable against raw
+/// YAML shapes directly. An explicit flat key always wins over a grouped one
+/// of the same target name (defensive; the two shapes are not meant to be
+/// mixed for the same field, but this makes the precedence unambiguous
+/// rather than "whichever the map iterates last").
+///
+/// `network` is the one special case: the OLD flat form is a plain SCALAR
+/// (`network: node1-net`), the NEW grouped form is a MAPPING (`network:
+/// {name: ..., mode: ...}`) — same key, disambiguated by the YAML node's own
+/// type, because `network` already existed as a flat field and reusing the
+/// name (rather than inventing e.g. `net:`) is what reads naturally.
+fn normalize_vm_spec(mut v: serde_yaml::Value) -> serde_yaml::Value {
+    use serde_yaml::Value;
+    let Value::Mapping(m) = &mut v else {
+        return v;
+    };
+
+    if let Some(Value::Mapping(net)) = m.get("network").cloned() {
+        m.remove("network");
+        if let Some(name) = net.get("name") {
+            m.insert(Value::from("network"), name.clone());
+        }
+        hoist(m, &net, "mode", "netMode");
+        hoist(m, &net, "bridge", "bridge");
+        hoist(m, &net, "staticIp", "ip");
+    }
+    for (group, pairs) in [
+        (
+            "resources",
+            &[
+                ("vcpus", "vcpus"),
+                ("memory", "memory"),
+                ("hugepages", "hugepages"),
+                ("cpuAffinity", "cpuAffinity"),
+            ][..],
+        ),
+        (
+            "boot",
+            &[
+                ("kernel", "kernel"),
+                ("initrd", "initrd"),
+                ("firmware", "firmware"),
+                ("cmdline", "cmdline"),
+            ][..],
+        ),
+        (
+            "cloudInit",
+            &[
+                ("seed", "seed"),
+                ("hostname", "hostname"),
+                ("sshKeys", "sshKeys"),
+                ("userData", "userData"),
+            ][..],
+        ),
+        (
+            "libvirt",
+            &[
+                ("backend", "backend"),
+                ("machine", "machine"),
+                ("cpuModel", "cpuModel"),
+                ("cpuTopology", "cpuTopology"),
+                ("tpm", "tpm"),
+                ("video", "video"),
+                ("bootOrder", "bootOrder"),
+                ("extraDisks", "extraDisks"),
+                ("extraNics", "extraNics"),
+                ("xmlOverlay", "libvirtXmlOverlay"),
+                ("xml", "libvirtXml"),
+            ][..],
+        ),
+    ] {
+        if let Some(Value::Mapping(g)) = m.get(group).cloned() {
+            for (from, to) in pairs {
+                hoist(m, &g, from, to);
+            }
+            m.remove(group);
+        }
+    }
+    v
+}
+
+fn hoist(m: &mut serde_yaml::Mapping, group: &serde_yaml::Mapping, from: &str, to: &str) {
+    if m.contains_key(to) {
+        return;
+    }
+    if let Some(val) = group.get(from) {
+        m.insert(serde_yaml::Value::from(to), val.clone());
+    }
+}
 
 fn default_vcpus() -> u32 {
     1
@@ -509,7 +625,7 @@ fn resolve_vm_volumes(
 
 /// Dry-run: the spec with every `#[serde(default)]` materialized.
 pub fn spec_with_defaults(doc: &ManifestDoc) -> Result<serde_yaml::Value> {
-    let spec: VmSpec = manifest::spec_of(doc)?;
+    let spec: VmSpec = vm_spec_of(doc)?;
     serde_yaml::to_value(spec).map_err(|e| Error::Invalid(format!("dry-run: {e}")))
 }
 
@@ -518,7 +634,7 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
     for doc in manifest::of_kind(docs, "Vm") {
         let name = &doc.metadata.name;
         manifest::warn_unknown_fields(doc, VM_SPEC_FIELDS);
-        let spec: VmSpec = manifest::spec_of(doc)?;
+        let spec: VmSpec = vm_spec_of(doc)?;
 
         // Resolve each volume (Volume/Storage name → host directory) and
         // ensure a network Storage is mounted before sharing it.
@@ -1706,7 +1822,7 @@ fn cmd_init(
 mod tests {
     use super::{
         build_meta_data, build_user_data, fmt_vm_gpu, fmt_vm_status, fmt_vm_uptime,
-        parse_ip_gateways, parse_ss_binds, vm_role, VmSpec,
+        normalize_vm_spec, parse_ip_gateways, parse_ss_binds, vm_role, VmSpec,
     };
     use delonix_runtime_core::Status;
 
@@ -1797,6 +1913,78 @@ LISTEN 0 1 192.168.122.1:9000 0.0.0.0:*";
         assert_eq!(canon.restart_policy.as_deref(), Some("always"));
         assert_eq!(canon.cpu_affinity.as_deref(), Some("0-3"));
         assert_eq!(canon.net_mode.as_deref(), Some("nat"));
+    }
+
+    #[test]
+    fn normalize_vm_spec_deixa_a_forma_plana_intacta() {
+        // The historic flat shape must pass through byte-for-byte-equivalent
+        // (no group keys present — the whole function is a no-op on it).
+        let flat: serde_yaml::Value = serde_yaml::from_str(
+            "disk: d\nvcpus: 4\nmemory: 4G\nnetwork: node1-net\nhostname: h\n",
+        )
+        .unwrap();
+        let normalized = normalize_vm_spec(flat.clone());
+        assert_eq!(flat, normalized);
+    }
+
+    #[test]
+    fn normalize_vm_spec_hoisteia_todos_os_grupos_para_a_forma_plana() {
+        let grouped: serde_yaml::Value = serde_yaml::from_str(
+            "disk: k8s-golden\n\
+             resources:\n\
+             \x20 vcpus: 4\n\
+             \x20 memory: 4G\n\
+             \x20 hugepages: true\n\
+             \x20 cpuAffinity: 8-15\n\
+             network:\n\
+             \x20 name: node1-net\n\
+             \x20 mode: nat\n\
+             \x20 bridge: br0\n\
+             \x20 staticIp: 192.168.122.50\n\
+             boot:\n\
+             \x20 kernel: /boot/vmlinuz\n\
+             \x20 cmdline: console=ttyS0\n\
+             cloudInit:\n\
+             \x20 hostname: node1\n\
+             \x20 sshKeys: [ssh-ed25519 AAAA foo]\n\
+             libvirt:\n\
+             \x20 backend: libvirt\n\
+             \x20 tpm: true\n\
+             \x20 xmlOverlay: [\"<serial/>\"]\n\
+             \x20 xml: null\n",
+        )
+        .unwrap();
+        let spec: VmSpec = serde_yaml::from_value(normalize_vm_spec(grouped)).unwrap();
+        assert_eq!(spec.disk, "k8s-golden");
+        assert_eq!(spec.vcpus, 4);
+        assert_eq!(spec.memory, "4G");
+        assert!(spec.hugepages);
+        assert_eq!(spec.cpu_affinity.as_deref(), Some("8-15"));
+        assert_eq!(spec.network, "node1-net");
+        assert_eq!(spec.net_mode.as_deref(), Some("nat"));
+        assert_eq!(spec.bridge.as_deref(), Some("br0"));
+        assert_eq!(spec.ip.as_deref(), Some("192.168.122.50"));
+        assert_eq!(spec.kernel.as_deref(), Some("/boot/vmlinuz"));
+        assert_eq!(spec.cmdline.as_deref(), Some("console=ttyS0"));
+        assert_eq!(spec.hostname.as_deref(), Some("node1"));
+        assert_eq!(spec.ssh_keys, vec!["ssh-ed25519 AAAA foo".to_string()]);
+        assert_eq!(spec.backend.as_deref(), Some("libvirt"));
+        assert!(spec.tpm);
+        assert_eq!(spec.libvirt_xml_overlay, vec!["<serial/>".to_string()]);
+    }
+
+    #[test]
+    fn normalize_vm_spec_forma_plana_explicita_ganha_ao_grupo() {
+        // A field set BOTH at the flat top level and inside a group — the
+        // explicit flat value wins (unambiguous precedence, not "whichever
+        // the map happens to iterate last").
+        let mixed: serde_yaml::Value = serde_yaml::from_str(
+            "disk: d\nvcpus: 8\nresources:\n  vcpus: 2\n  memory: 1G\n",
+        )
+        .unwrap();
+        let spec: VmSpec = serde_yaml::from_value(normalize_vm_spec(mixed)).unwrap();
+        assert_eq!(spec.vcpus, 8, "o vcpus plano explícito devia ganhar ao do grupo");
+        assert_eq!(spec.memory, "1G", "sem colisão, o do grupo aplica-se na mesma");
     }
 
     #[test]
