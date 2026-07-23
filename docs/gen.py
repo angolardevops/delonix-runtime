@@ -763,8 +763,12 @@ da auditoria</a>.</p>
 <td>Docker ou Podman — o Delonix faz multi-stage e cache de camadas (rootless), mas não tem
 BuildKit</td></tr>
 <tr><td>Cargas GPU/CUDA</td><td>Docker ou Podman (com nvidia-container-toolkit)</td></tr>
-<tr><td>Ferramentas que falam directamente com o Docker Engine (testcontainers, CI via
-<code>DOCKER_HOST</code>)</td><td>Docker ou Podman</td></tr>
+<tr><td><code>docker version</code>/<code>ps</code>/<code>images</code>/<code>info</code> via
+<code>DOCKER_HOST</code> (scripts/CI de leitura)</td>
+<td><strong>Delonix</strong> — <code>delonix docker-api</code>, validado contra um
+<code>docker</code> CLI real</td></tr>
+<tr><td><code>docker run</code>/<code>docker compose up</code>/testcontainers (precisam de
+criar containers via a API)</td><td>Docker ou Podman — só a parte de leitura da API está feita</td></tr>
 <tr><td>Bootstrap de um cluster Kubernetes real sem instalar Docker/containerd</td>
 <td><strong>Delonix</strong> — CRI próprio, já validado com um control-plane v1.34 <code>Ready</code></td></tr>
 <tr><td>Um só motor para containers <strong>e</strong> microVMs <strong>e</strong> Kubernetes</td>
@@ -848,8 +852,10 @@ nomeado montável por qualquer container, como um <code>PersistentVolume</code>.
 
 <h2>Onde ainda não chega</h2>
 <ul>
-<li><strong>Não corre um <code>docker-compose.yml</code> existente</strong> nem fala a API do Docker
-— ferramentas que dependem disso (testcontainers, CI via <code>DOCKER_HOST</code>) não se ligam.</li>
+<li><strong>Não corre um <code>docker-compose.yml</code> existente</strong> — sem parser de compose.
+A API do Docker (<code>DOCKER_HOST</code>) já responde a leituras (<code>version</code>/<code>ps</code>/
+<code>images</code>/<code>info</code>), mas ainda não cria containers — testcontainers e
+<code>docker compose up</code> continuam sem se ligar.</li>
 <li><strong>Build de imagens ainda não tem BuildKit real</strong> — multi-stage,
 <code>ARG</code>/<code>--build-arg</code>, <code>USER</code>/<code>ENTRYPOINT</code> e cache de
 camadas (rootless) já funcionam, mas sem <code>RUN --mount=secret</code> nem
