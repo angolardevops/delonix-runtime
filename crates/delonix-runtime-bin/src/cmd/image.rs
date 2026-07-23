@@ -43,6 +43,9 @@ struct BuildSpec {
     /// only takes effect for a name the Dockerfile actually declares.
     #[serde(default, rename = "buildArgs")]
     build_args: Vec<String>,
+    /// Bypasses the layer cache — same as the CLI's `--no-cache`.
+    #[serde(default, rename = "noCache")]
+    no_cache: bool,
 }
 
 fn default_context() -> PathBuf {
@@ -408,7 +411,13 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
                     .file
                     .unwrap_or_else(|| super::build::default_build_file(&b.context));
                 let build_args = super::build::parse_build_args(&b.build_args);
-                let img = super::build::build_from_spec(&b.context, &file, &b.tag, &build_args)?;
+                let img = super::build::build_from_spec(
+                    &b.context,
+                    &file,
+                    &b.tag,
+                    &build_args,
+                    !b.no_cache,
+                )?;
                 println!(
                     "image/{name}: {} ({})",
                     super::po::t("built"),
