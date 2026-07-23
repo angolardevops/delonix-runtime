@@ -2063,6 +2063,67 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
     Ok(())
 }
 
+/// Reconciles `c`'s status and, if it just flipped to `Crashed` in THIS call, records a
+/// best-effort forensic snapshot (see [`record_crash_forensics`]). Same idiom as the
+/// repeated `if reconcile_status(c) { store.update(...) }` seen throughout this file —
+/// used at the handful of call sites (`ls`, `describe`, `start`) a human/kubelet is
+/// actually likely to observe a fresh crash from first; other sites (`dash`, the `--rm`
+/// watcher) keep the plain call, since `crash_reason`/`crashed_at` are set either way
+/// (they live on `reconcile_status` itself) and duplicate forensics/events would be
+/// wasted work, not wrong — the guard below only fires once per crash regardless of
+/// which caller happens to be first.
+fn reconcile_with_diagnostics(store: &Store, c: &mut Container) -> bool {
+    if !runtime::reconcile_status(c) {
+        return false;
+    }
+    *c = store
+        .update(&c.id, runtime::reconcile_status)
+        .unwrap_or_else(|_| c.clone());
+    if matches!(c.status, Status::Crashed) {
+        record_crash_forensics(c);
+    }
+    true
+}
+
+/// Best-effort forensics for a container that just flipped to `Crashed`: a short
+/// `container crashed` line in `system events` (see `events.rs` on why it stays short)
+/// plus the tail of the container's log saved alongside it
+/// (`<root>/containers/<id>/crash-<ts>.log`) — since the engine is never this
+/// process's real parent (see ARCHITECTURE), this is the only forensic trail available;
+/// there is no captured exit code/signal to fall back on. Never fails the caller.
+fn record_crash_forensics(c: &Container) {
+    let (Some(reason), Some(ts)) = (c.crash_reason.as_deref(), c.crashed_at) else {
+        return;
+    };
+    let root = super::util::state_root();
+    let dir = root.join("containers").join(&c.id);
+    const TAIL_BYTES: u64 = 8 * 1024;
+    let log_path = dir.join("log");
+    let tail = std::fs::metadata(&log_path).ok().and_then(|meta| {
+        use std::io::{Read, Seek, SeekFrom};
+        let mut f = std::fs::File::open(&log_path).ok()?;
+        f.seek(SeekFrom::Start(meta.len().saturating_sub(TAIL_BYTES)))
+            .ok()?;
+        let mut buf = String::new();
+        f.read_to_string(&mut buf).ok()?;
+        Some(buf)
+    });
+    let snapshot = format!(
+        "reason={reason}\ncrashed_at={}\n\n--- tail of the container log ---\n{}\n",
+        output::fmt_local(ts),
+        tail.as_deref().unwrap_or("<no log>")
+    );
+    let _ = std::fs::write(dir.join(format!("crash-{ts}.log")), snapshot);
+    delonix_runtime_core::events::emit(
+        &root,
+        "container",
+        "crashed",
+        &c.id,
+        &c.name,
+        Some(reason),
+    );
+}
+
 /// `--rm` in detached mode: with no daemon, removal is done by a dedicated
 /// **watcher** — a detached process (setsid, stdio to /dev/null) that polls the
 /// container's state ~1x/s via `reconcile_status` and, once it stops running, does
@@ -2171,9 +2232,7 @@ fn cmd_ps(store: &Store, all: bool, quiet: bool) -> Result<()> {
     for c in cs.iter_mut() {
         // `update` (flock) and not `save`: the CRI is concurrent and may be
         // reconciling the same container right now — see `Store::update`.
-        if runtime::reconcile_status(c) {
-            let _ = store.update(&c.id, runtime::reconcile_status);
-        }
+        reconcile_with_diagnostics(store, c);
         let hidden = matches!(c.status, Status::Failed(_) | Status::Crashed);
         if !all && hidden {
             continue;
@@ -2573,9 +2632,7 @@ fn unpublish_ports(c: &Container, slirp_pid: Option<i32>) {
 /// doesn't lose the state written inside the container.
 fn cmd_start(images: &ImageStore, store: &Store, id: &str) -> Result<()> {
     let mut c = find(store, id)?;
-    if runtime::reconcile_status(&mut c) {
-        c = store.update(&c.id, runtime::reconcile_status).unwrap_or(c);
-    }
+    reconcile_with_diagnostics(store, &mut c);
     // `start` reasserts the desired state = running (clears the user's `stop`).
     let _ = store.update(&c.id, |cur| {
         cur.stopped_by_user = false;
@@ -2694,6 +2751,25 @@ fn cmd_start(images: &ImageStore, store: &Store, id: &str) -> Result<()> {
         run_gid: c.run_gid,
         ..Default::default()
     };
+    // Re-enter supervision on `start`, same as `run -d --restart`: a container with a
+    // supervised policy that crashed (or whose earlier supervisor died with it — host
+    // reboot, `kill -9` on the supervisor) came back here with NO ONE watching it —
+    // `create_with` alone would restore it Running but as an unsupervised orphan again,
+    // silently dropping the policy the user asked for. See `run_supervised`'s doc comment
+    // for why only the container's real parent can enforce it.
+    let policy = c.restart_policy.clone().unwrap_or_default();
+    if policy_supervised(&policy) {
+        let start_id = c.id.clone();
+        delonix_runtime_core::events::emit(
+            &super::util::state_root(),
+            "container",
+            "start",
+            &c.id,
+            &c.name,
+            None,
+        );
+        return run_supervised(store, &mut c, &rootfs, &spec, &policy, &start_id);
+    }
     runtime::create_with(store, &mut c, &rootfs, &spec)?;
     delonix_runtime_core::events::emit(
         &super::util::state_root(),
@@ -2838,9 +2914,7 @@ fn cmd_inspect(store: &Store, ids: &[String]) -> Result<()> {
     let mut cs = Vec::new();
     for id in ids {
         let mut c = find(store, id)?;
-        if runtime::reconcile_status(&mut c) {
-            c = store.update(&c.id, runtime::reconcile_status).unwrap_or(c);
-        }
+        reconcile_with_diagnostics(store, &mut c);
         cs.push(c);
     }
     println!(
@@ -3130,9 +3204,7 @@ fn cmd_cp(images: &ImageStore, store: &Store, src: &str, dst: &str) -> Result<()
 fn cmd_describe(store: &Store, ids: &[String]) -> Result<()> {
     for (i, id) in ids.iter().enumerate() {
         let mut c = find(store, id)?;
-        if runtime::reconcile_status(&mut c) {
-            c = store.update(&c.id, runtime::reconcile_status).unwrap_or(c);
-        }
+        reconcile_with_diagnostics(store, &mut c);
         if i > 0 {
             println!();
         }
@@ -3159,6 +3231,12 @@ fn describe_one(c: &Container) {
         Some(p) => d.field("PID", p.to_string()),
         None => d.field("PID", "<none>"),
     };
+    if let Some(reason) = &c.crash_reason {
+        d.field("Crash reason", reason);
+        if let Some(ts) = c.crashed_at {
+            d.field("Crashed at", output::fmt_local(ts));
+        }
+    }
     d.field_opt("Pod", c.pod.as_deref());
 
     d.section("Resources");

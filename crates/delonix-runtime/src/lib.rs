@@ -94,6 +94,26 @@ pub fn safe_to_signal(pid: i32, starttime: Option<u64>) -> bool {
     }
 }
 
+/// Short, stable reason code for WHY `safe_to_signal` failed — the two cases it
+/// collapses into one bool. Precondition: only meaningful when `safe_to_signal(pid,
+/// starttime)` is `false`; called right after that check fails, in `reconcile_status`.
+pub fn crash_reason_of(pid: i32, _starttime: Option<u64>) -> &'static str {
+    if !is_alive(pid) {
+        "process_gone"
+    } else {
+        // is_alive was true, so safe_to_signal only failed because the starttime
+        // didn't match: the kernel recycled the pid for an unrelated process.
+        "pid_reused"
+    }
+}
+
+fn now_unix() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
 fn wait_to_code(status: WaitStatus) -> i32 {
     match status {
         WaitStatus::Exited(_, code) => code,
@@ -3319,6 +3339,10 @@ fn spawn(store: &Store, container: &mut Container, rootfs: &str, spec: &RunSpec<
     container.pid = Some(pid.as_raw());
     container.pid_starttime = proc_starttime(pid.as_raw());
     container.status = Status::Running;
+    // A fresh, successful start makes any earlier crash diagnosis stale — clear it so
+    // `describe`/`ls` don't keep pointing at a cause that no longer applies.
+    container.crash_reason = None;
+    container.crashed_at = None;
     setup_cgroup(container, pid.as_raw())?;
     store.save(container)?;
 
@@ -4268,6 +4292,8 @@ pub fn reconcile_status(c: &mut Container) -> bool {
         Status::Running => match c.pid {
             Some(pid) if !safe_to_signal(pid, c.pid_starttime) => {
                 c.status = Status::Crashed;
+                c.crash_reason = Some(crash_reason_of(pid, c.pid_starttime).to_string());
+                c.crashed_at = Some(now_unix());
                 c.pid = None;
                 true
             }
@@ -4280,6 +4306,8 @@ pub fn reconcile_status(c: &mut Container) -> bool {
         Status::Paused => match c.pid {
             Some(pid) if !safe_to_signal(pid, c.pid_starttime) => {
                 c.status = Status::Crashed;
+                c.crash_reason = Some(crash_reason_of(pid, c.pid_starttime).to_string());
+                c.crashed_at = Some(now_unix());
                 c.pid = None;
                 true
             }
