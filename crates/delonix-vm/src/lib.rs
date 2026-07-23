@@ -18,6 +18,7 @@
 
 use std::path::Path;
 use std::process::Command;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use delonix_net::infra;
 use delonix_runtime_core::{Error, JsonStore, Result, Status, Vm};
@@ -1608,6 +1609,13 @@ pub fn create_with(base: &Path, cfg: &VmConfig, on: &dyn Fn(CreateStage)) -> Res
     vm.restart_policy = cfg.restart_policy.clone();
     vm.ip = boot.ip;
     vm.backend = backend.id().to_string();
+    vm.devices = cfg.devices.clone();
+    vm.started_unix = Some(
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0),
+    );
     // restart_policy HONESTY: only libvirt materializes it (`<on_crash>restart`
     // in the XML). On Cloud Hypervisor there is no supervisor on the host — warn instead of
     // silently accepting a policy that is not enforced instantly.
@@ -1721,6 +1729,7 @@ pub fn stop(base: &Path, name: &str) -> Result<()> {
     backend_for(&vm).stop(&vmdir, &vm)?;
     vm.status = Status::Stopped;
     vm.pid = None;
+    vm.started_unix = None;
     st.save(name, &vm)
 }
 
@@ -1733,6 +1742,7 @@ pub fn status(base: &Path, name: &str) -> Result<Vm> {
     })?;
     let backend = backend_for(&vm);
     let old_ip = vm.ip.clone();
+    let was_running = vm.status == Status::Running;
     if backend.is_running(&vm) {
         vm.status = Status::Running;
         vm.ip = backend.ip(&vm).or(vm.ip);
@@ -1741,12 +1751,16 @@ pub fn status(base: &Path, name: &str) -> Result<Vm> {
         // unlike containers, the VM is autonomous — a crash is not assumed).
         vm.status = Status::Stopped;
         vm.pid = None;
+        // The guest powered itself off outside our own `stop()` (e.g. `shutdown
+        // now` from inside) — reconcile `started_unix` the same way `stop()`
+        // does, so UPTIME doesn't keep counting a boot that already ended.
+        vm.started_unix = None;
     }
     // Persist a freshly-learnt IP (a nat VM only gets its DHCP lease well after
     // `create` saved the record): the record is what the holder's internal DNS
     // reads to resolve `<vm-name>` for containers — a stale null IP there means
     // the name never resolves. Best-effort: status() stays read-mostly.
-    if vm.ip != old_ip {
+    if vm.ip != old_ip || was_running != (vm.status == Status::Running) {
         let _ = st.save(name, &vm);
     }
     Ok(vm)

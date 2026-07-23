@@ -10,7 +10,7 @@
 //! an explicit `spec.controlPlaneEndpoint` (kubeadm needs a stable endpoint
 //! — LB/VIP — in front of several control-planes).
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, Instant};
 
@@ -448,6 +448,14 @@ pub enum ClusterCmd {
         /// Seconds to wait for each VM to become reachable over SSH.
         #[arg(long, default_value_t = 300)]
         boot_timeout: u64,
+        /// Wait for every node to report `Ready` (CNI up) before fetching the
+        /// kubeconfig, then MERGE it into `~/.kube/config` as its own
+        /// cluster/user/context (named after `--name`) instead of leaving
+        /// other clusters' contexts untouched only by accident. Without this,
+        /// the kubeconfig is still written to `<root>/clusters/<name>-kubeconfig.yaml`
+        /// right after `kubeadm join`, before the CNI has necessarily finished.
+        #[arg(long)]
+        copy_kubeconfig: bool,
     },
 }
 
@@ -534,6 +542,7 @@ pub fn run(action: ClusterCmd) -> Result<()> {
             pod_subnet,
             service_subnet,
             boot_timeout,
+            copy_kubeconfig,
         } => provision_and_apply(ProvisionArgs {
             name,
             control_plane,
@@ -547,6 +556,7 @@ pub fn run(action: ClusterCmd) -> Result<()> {
             pod_subnet,
             service_subnet,
             boot_timeout,
+            copy_kubeconfig,
         }),
     }
 }
@@ -556,21 +566,24 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
         let name = &doc.metadata.name;
         let spec: ClusterSpec = manifest::spec_of(doc)?;
         validate(&spec)?;
-        apply_one(name, &spec)?;
+        // `cluster apply` (manifest-driven) keeps the historical timing: no
+        // wait for node Ready. `cluster kubeadm --copy-kubeconfig` is the
+        // opt-in path for that (see `provision_and_apply`).
+        apply_one(name, &spec, false)?;
     }
     Ok(())
 }
 
-fn apply_one(name: &str, spec: &ClusterSpec) -> Result<()> {
+fn apply_one(name: &str, spec: &ClusterSpec, wait_ready: bool) -> Result<()> {
     validate(spec)?;
     // `spec.mode` chooses the path — the common fields (k8sVersion/podSubnet/
     // cni) hold in all three; only the mode-specific block changes.
     match spec.mode.as_str() {
         "kind" => return apply_kind(name, spec),
-        "vm" => return apply_vm(name, spec),
+        "vm" => return apply_vm(name, spec, wait_ready),
         _ => {} // `ssh` follows below (the original path)
     }
-    apply_ssh(name, spec)
+    apply_ssh(name, spec, wait_ready)
 }
 
 /// `mode: kind` — nodes in containers on this machine (see `cmd::kindmode`).
@@ -603,7 +616,7 @@ fn apply_kind(name: &str, spec: &ClusterSpec) -> Result<()> {
 
 /// `mode: vm` — provisions VMs from the golden image and bootstraps them over SSH.
 /// Reuses `cluster kubeadm`'s `provision_and_apply` (zero duplication).
-fn apply_vm(name: &str, spec: &ClusterSpec) -> Result<()> {
+fn apply_vm(name: &str, spec: &ClusterSpec, wait_ready: bool) -> Result<()> {
     let network = spec.vm.network.clone().ok_or_else(|| {
         Error::Invalid(
             "`mode: vm` exige `spec.vm.network` (cria-a antes com `delonix network create`)".into(),
@@ -628,11 +641,12 @@ fn apply_vm(name: &str, spec: &ClusterSpec) -> Result<()> {
         pod_subnet: spec.pod_subnet.clone(),
         service_subnet: spec.service_subnet.clone(),
         boot_timeout,
+        copy_kubeconfig: wait_ready,
     })
 }
 
 /// `mode: ssh` — remote hosts ALREADY live (the original path, unchanged).
-fn apply_ssh(name: &str, spec: &ClusterSpec) -> Result<()> {
+fn apply_ssh(name: &str, spec: &ClusterSpec, wait_ready: bool) -> Result<()> {
     let cri_bin = vmimage::resolve_cri_bin(None)?;
     let cri_service = vmimage::workspace_dist_file("delonix-cri.service")?;
 
@@ -677,9 +691,62 @@ fn apply_ssh(name: &str, spec: &ClusterSpec) -> Result<()> {
         kubeadm_join(&target, &h.label(), &endpoint, &info, false)?;
     }
 
+    if wait_ready {
+        let expected = spec.control_plane.hosts.len() + spec.workers.hosts.len();
+        wait_for_cluster_ready(&cp1_target, name, expected, Duration::from_secs(180))?;
+    }
     fetch_kubeconfig(&cp1_target, name)?;
     println!("cluster/{name}: {}", super::po::t("ready"));
     Ok(())
+}
+
+/// Polls `kubectl get nodes` on the control-plane until all `expected` nodes
+/// report `Ready` (CNI installed and functional) or `timeout` elapses.
+/// Best-effort: a timeout is a WARNING, not a hard failure — the cluster is
+/// already bootstrapped (`kubeadm join` succeeded on every node); the CNI
+/// may just be slow to converge (image pulls, etc.), and the kubeconfig this
+/// gates is still valid either way, just possibly ahead of full readiness.
+fn wait_for_cluster_ready(
+    cp1: &SshTarget,
+    cluster_name: &str,
+    expected: usize,
+    timeout: Duration,
+) -> Result<()> {
+    println!(
+        "cluster/{cluster_name}: {}",
+        super::po::tf(
+            "waiting for {n} node(s) to become Ready...",
+            &[("n", &expected.to_string())]
+        )
+    );
+    let deadline = std::time::Instant::now() + timeout;
+    loop {
+        let out = remote::ssh_run(
+            cp1,
+            "kubectl --kubeconfig=/etc/kubernetes/admin.conf get nodes --no-headers 2>/dev/null",
+        )
+        .unwrap_or_default();
+        let ready = out
+            .lines()
+            .filter(|l| l.split_whitespace().nth(1) == Some("Ready"))
+            .count();
+        if ready >= expected && expected > 0 {
+            println!("cluster/{cluster_name}: {}", super::po::t("all nodes Ready"));
+            return Ok(());
+        }
+        if std::time::Instant::now() >= deadline {
+            eprintln!(
+                "cluster/{cluster_name}: {}",
+                super::po::tf(
+                    "WARNING: only {ready}/{n} node(s) Ready after the wait — the cluster is \
+                     bootstrapped, the CNI may still be converging",
+                    &[("ready", &ready.to_string()), ("n", &expected.to_string())]
+                )
+            );
+            return Ok(());
+        }
+        std::thread::sleep(Duration::from_secs(5));
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -699,6 +766,7 @@ struct ProvisionArgs {
     pod_subnet: String,
     service_subnet: String,
     boot_timeout: u64,
+    copy_kubeconfig: bool,
 }
 
 /// Deterministic VM names of a role (`<cluster>-cp1`, `<cluster>-w1`, ...).
@@ -795,18 +863,15 @@ fn wait_for_vm_ssh_ready(vm_name: &str, ssh: &SshSpec, timeout: Duration) -> Res
     // created this VM ourselves moments ago, any existing record for its IP is
     // known-stale garbage — safe to discard before the very first attempt
     // rather than let the user hit this blind.
-    let _ = std::process::Command::new("ssh-keygen")
-        .args(["-R", &ip])
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status();
+    purge_known_host(&ip);
 
-    let target = SshTarget {
-        host: ip.clone(),
-        user: ssh.user.clone(),
-        key: ssh.key.clone(),
-    };
+    let mut ip = ip;
     loop {
+        let target = SshTarget {
+            host: ip.clone(),
+            user: ssh.user.clone(),
+            key: ssh.key.clone(),
+        };
         if remote::ssh_check(&target, "true") {
             return Ok(ip);
         }
@@ -816,7 +881,39 @@ fn wait_for_vm_ssh_ready(vm_name: &str, ssh: &SshSpec, timeout: Duration) -> Res
             )));
         }
         std::thread::sleep(Duration::from_secs(5));
+        // BUG FIXED HERE, found live: a VM's FIRST DHCP lease can be replaced by a
+        // DIFFERENT one moments later (the client's initial request times out/gets
+        // NAK'd and it retries — observed live: `lab-w2` was first seen at .176,
+        // then silently moved to .52 mid-boot). Locking onto the first-seen IP for
+        // the rest of the wait made this loop hammer a now-dead address for the
+        // full `--boot-timeout` while the VM was already answering SSH elsewhere.
+        // Re-poll `status()` each tick and follow the IP if it changed.
+        if let Ok(vm) = delonix_vm::status(&base, vm_name) {
+            if let Some(new_ip) = vm.ip {
+                if new_ip != ip {
+                    println!(
+                        "cluster: {}",
+                        super::po::tf(
+                            "VM '{vm}' IP changed {old} -> {new}, retrying there",
+                            &[("vm", vm_name), ("old", &ip), ("new", &new_ip)]
+                        )
+                    );
+                    purge_known_host(&new_ip);
+                    ip = new_ip;
+                }
+            }
+        }
     }
+}
+
+/// Discards any existing `known_hosts` entry for `ip` — best-effort, see the
+/// callers for why a stale entry there is expected and safe to drop.
+fn purge_known_host(ip: &str) {
+    let _ = std::process::Command::new("ssh-keygen")
+        .args(["-R", ip])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status();
 }
 
 fn provision_and_apply(args: ProvisionArgs) -> Result<()> {
@@ -903,7 +1000,7 @@ fn provision_and_apply(args: ProvisionArgs) -> Result<()> {
         vm: VmModeSpec::default(),
     };
     validate(&spec)?;
-    apply_one(&args.name, &spec)
+    apply_one(&args.name, &spec, args.copy_kubeconfig)
 }
 
 fn create_and_wait(
@@ -1154,18 +1251,102 @@ fn fetch_kubeconfig(cp1: &SshTarget, cluster_name: &str) -> Result<()> {
     if let Some(home) = std::env::var_os("HOME") {
         let kube_dir = PathBuf::from(home).join(".kube");
         let kube_config = kube_dir.join("config");
-        if !kube_config.exists() {
-            std::fs::create_dir_all(&kube_dir)?;
-            std::fs::copy(&dest, &kube_config)?;
-            println!(
-                "{}",
-                super::po::tf(
-                    "also copied to {path} (it did not exist yet)",
-                    &[("path", &kube_config.display().to_string())]
-                )
-            );
-        }
+        std::fs::create_dir_all(&kube_dir)?;
+        merge_into_local_kubeconfig(&dest, cluster_name, &kube_config)?;
     }
+    Ok(())
+}
+
+/// Merges a single-cluster `admin.conf` (from kubeadm — always names its
+/// cluster/user/context `kubernetes`/`kubernetes-admin`/`kubernetes-admin@kubernetes`)
+/// into `~/.kube/config`, so `kubectl` ends up with a context PER delonix
+/// cluster instead of colliding on those fixed names.
+///
+/// BUG FIXED HERE: the old code only ever did a flat `fs::copy` the FIRST
+/// time `~/.kube/config` didn't exist — a 2nd cluster silently got no entry
+/// at all (the file already existed), and `kubectl` never had "all the
+/// contexts of the created clusters", only ever the very first one.
+///
+/// Renames the 3 entries to `<cluster_name>` (cluster+context) /
+/// `<cluster_name>-admin` (user) before merging, so distinct delonix
+/// clusters never collide on kubeadm's fixed names. Re-running for the SAME
+/// cluster name replaces its own 3 entries (idempotent), never duplicates.
+/// `current-context` is only set to the new cluster on the FIRST ever write
+/// (a fresh `~/.kube/config`) — an existing file's active context is left
+/// alone, since silently redirecting `kubectl` for someone with other
+/// clusters already configured would be surprising.
+fn merge_into_local_kubeconfig(source: &Path, cluster_name: &str, dest: &Path) -> Result<()> {
+    use serde_yaml::Value;
+
+    let read_yaml = |p: &Path| -> Result<Value> {
+        let s = std::fs::read_to_string(p)?;
+        serde_yaml::from_str(&s)
+            .map_err(|e| Error::Invalid(format!("kubeconfig malformado ({}): {e}", p.display())))
+    };
+    let as_seq = |v: &Value, key: &str| -> Vec<Value> {
+        v.get(key).and_then(|x| x.as_sequence()).cloned().unwrap_or_default()
+    };
+    let entry_name = |v: &Value| -> Option<String> {
+        v.get("name").and_then(|n| n.as_str()).map(str::to_string)
+    };
+
+    let src = read_yaml(source)?;
+    let user_name = format!("{cluster_name}-admin");
+
+    let mut clusters = as_seq(&src, "clusters");
+    let mut contexts = as_seq(&src, "contexts");
+    let mut users = as_seq(&src, "users");
+    if let Some(c) = clusters.first_mut() {
+        c["name"] = Value::String(cluster_name.to_string());
+    }
+    if let Some(u) = users.first_mut() {
+        u["name"] = Value::String(user_name.clone());
+    }
+    if let Some(ctx) = contexts.first_mut() {
+        ctx["name"] = Value::String(cluster_name.to_string());
+        ctx["context"]["cluster"] = Value::String(cluster_name.to_string());
+        ctx["context"]["user"] = Value::String(user_name.clone());
+    }
+
+    let first_write = !dest.exists();
+    let mut merged = if first_write {
+        serde_yaml::from_str::<Value>(
+            "apiVersion: v1\nkind: Config\npreferences: {}\nclusters: []\ncontexts: []\nusers: []\n",
+        )
+        .expect("skeleton estático válido")
+    } else {
+        read_yaml(dest)?
+    };
+
+    for (key, fresh) in [
+        ("clusters", &clusters),
+        ("contexts", &contexts),
+        ("users", &users),
+    ] {
+        let mut existing = as_seq(&merged, key);
+        let fresh_names: Vec<Option<String>> = fresh.iter().map(entry_name).collect();
+        existing.retain(|e| !fresh_names.contains(&entry_name(e)));
+        existing.extend(fresh.iter().cloned());
+        merged[key] = Value::Sequence(existing);
+    }
+    if first_write {
+        merged["current-context"] = Value::String(cluster_name.to_string());
+    }
+
+    let out = serde_yaml::to_string(&merged)
+        .map_err(|e| Error::Invalid(format!("falha a serializar o kubeconfig: {e}")))?;
+    std::fs::write(dest, out)?;
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(dest, std::fs::Permissions::from_mode(0o600));
+    }
+    println!(
+        "{}",
+        super::po::tf(
+            "merged into {path} as context '{ctx}' (kubectl config use-context {ctx})",
+            &[("path", &dest.display().to_string()), ("ctx", cluster_name)]
+        )
+    );
     Ok(())
 }
 
@@ -1217,6 +1398,105 @@ mod tests {
             vec!["prod-w1", "prod-w2", "prod-w3"]
         );
         assert_eq!(vm_names("prod", "cp", 0), Vec::<String>::new());
+    }
+
+    fn fake_admin_conf() -> String {
+        // Shape of a real kubeadm admin.conf: always the SAME fixed names
+        // (`kubernetes`/`kubernetes-admin`/`kubernetes-admin@kubernetes`),
+        // which is exactly why a naive merge would collide across clusters.
+        // Raw string, flush left: a `\`-continued literal would strip the
+        // leading whitespace of each line, flattening this YAML's nesting.
+        r#"apiVersion: v1
+kind: Config
+clusters:
+- name: kubernetes
+  cluster:
+    server: https://1.2.3.4:6443
+contexts:
+- name: kubernetes-admin@kubernetes
+  context:
+    cluster: kubernetes
+    user: kubernetes-admin
+current-context: kubernetes-admin@kubernetes
+users:
+- name: kubernetes-admin
+  user:
+    client-certificate-data: AAAA
+"#
+        .to_string()
+    }
+
+    #[test]
+    fn merge_kubeconfig_renomeia_e_cria_de_novo() {
+        let tmp = std::env::temp_dir().join(format!(
+            "delonix-cluster-merge-kubeconfig-test-{}-{}",
+            std::process::id(),
+            line!()
+        ));
+        std::fs::create_dir_all(&tmp).unwrap();
+        let source = tmp.join("admin.conf");
+        std::fs::write(&source, fake_admin_conf()).unwrap();
+        let dest = tmp.join("config");
+
+        merge_into_local_kubeconfig(&source, "lab", &dest).unwrap();
+
+        let merged: serde_yaml::Value =
+            serde_yaml::from_str(&std::fs::read_to_string(&dest).unwrap()).unwrap();
+        assert_eq!(merged["clusters"][0]["name"], "lab");
+        assert_eq!(merged["contexts"][0]["name"], "lab");
+        assert_eq!(merged["contexts"][0]["context"]["cluster"], "lab");
+        assert_eq!(merged["contexts"][0]["context"]["user"], "lab-admin");
+        assert_eq!(merged["users"][0]["name"], "lab-admin");
+        // Fresh file: current-context follows the new (only) cluster.
+        assert_eq!(merged["current-context"], "lab");
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn merge_kubeconfig_acumula_varios_clusters_sem_colidir() {
+        let tmp = std::env::temp_dir().join(format!(
+            "delonix-cluster-merge-kubeconfig-multi-test-{}-{}",
+            std::process::id(),
+            line!()
+        ));
+        std::fs::create_dir_all(&tmp).unwrap();
+        let source = tmp.join("admin.conf");
+        let dest = tmp.join("config");
+
+        // 1st cluster: creates the file, becomes current-context.
+        std::fs::write(&source, fake_admin_conf()).unwrap();
+        merge_into_local_kubeconfig(&source, "lab", &dest).unwrap();
+        // 2nd, DIFFERENT cluster, same kubeadm fixed names in its own admin.conf —
+        // the historical bug: this used to be a no-op because ~/.kube/config
+        // already existed, so `prod`'s context never made it in at all.
+        std::fs::write(&source, fake_admin_conf()).unwrap();
+        merge_into_local_kubeconfig(&source, "prod", &dest).unwrap();
+
+        let merged: serde_yaml::Value =
+            serde_yaml::from_str(&std::fs::read_to_string(&dest).unwrap()).unwrap();
+        let names = |key: &str| -> Vec<String> {
+            merged[key]
+                .as_sequence()
+                .unwrap()
+                .iter()
+                .map(|e| e["name"].as_str().unwrap().to_string())
+                .collect()
+        };
+        assert_eq!(names("clusters"), vec!["lab", "prod"]);
+        assert_eq!(names("contexts"), vec!["lab", "prod"]);
+        assert_eq!(names("users"), vec!["lab-admin", "prod-admin"]);
+        // The 2nd write must NOT silently switch what `kubectl` already points to.
+        assert_eq!(merged["current-context"], "lab");
+
+        // Re-running for `lab` REPLACES its 3 entries, never duplicates them.
+        std::fs::write(&source, fake_admin_conf()).unwrap();
+        merge_into_local_kubeconfig(&source, "lab", &dest).unwrap();
+        let merged: serde_yaml::Value =
+            serde_yaml::from_str(&std::fs::read_to_string(&dest).unwrap()).unwrap();
+        assert_eq!(merged["clusters"].as_sequence().unwrap().len(), 2);
+
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     #[test]

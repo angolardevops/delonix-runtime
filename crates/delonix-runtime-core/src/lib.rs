@@ -620,6 +620,20 @@ pub struct Vm {
     /// records = `cloud-hypervisor` (the only backend before the VmBackend trait).
     #[serde(default = "default_vm_backend")]
     pub backend: String,
+    /// PCI passthrough device addresses (SR-IOV VFs, typically GPUs) attached
+    /// at boot — copied from `VmConfig.devices`. Empty = none. Old records
+    /// (pre this field) default to empty, same honesty as `backend` above:
+    /// we genuinely don't know, and "none" is the safe reading for a VM that
+    /// predates device tracking.
+    #[serde(default)]
+    pub devices: Vec<String>,
+    /// Unix instant of the CURRENT boot (not `created_unix`, which is set once
+    /// and never moves) — set on every real boot (`create`/auto-heal), cleared
+    /// on `stop`. Distinguishing them matters for the same reason it does for
+    /// `Container` (see `pid_starttime` there): a VM created yesterday but
+    /// restarted 5 minutes ago should show an uptime of 5 minutes, not 1 day.
+    #[serde(default)]
+    pub started_unix: Option<u64>,
 }
 
 /// Default backend for VMs persisted before multi-backend support.
@@ -661,6 +675,8 @@ impl Vm {
             restart_policy: None,
             ip: None,
             backend: default_vm_backend(),
+            devices: Vec::new(),
+            started_unix: None,
         }
     }
 }
