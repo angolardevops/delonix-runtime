@@ -4,6 +4,7 @@
 use crate::cas::strip;
 use crate::image::{now_unix, Image, ImageConfig, ImageStore};
 use delonix_runtime_core::{Error, Result};
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 /// A build step, in order (order matters: `COPY` before the `RUN` that uses it).
@@ -96,19 +97,91 @@ fn join_continuations(text: &str) -> Vec<(usize, String)> {
     out
 }
 
+/// Convenience wrapper for callers with no `--build-arg` overrides (most
+/// existing callers/tests) — same as `parse_dockerfile_with_args(text, &[])`.
 pub fn parse_dockerfile(text: &str) -> Result<Dockerfile> {
+    parse_dockerfile_with_args(text, &[])
+}
+
+/// Substitutes `${NAME}`/`$NAME` occurrences of an already-declared `ARG` in
+/// `line`. Deliberately simple — no `${NAME:-default}`/`${NAME:+alt}` shell
+/// parameter-expansion forms, just plain substitution — covers the common
+/// Dockerfile ARG-interpolation case (`FROM alpine:${VERSION}`,
+/// `RUN pip install pkg==${PKG_VERSION}`) without pulling in a shell parser.
+fn substitute_args(line: &str, known: &HashMap<String, String>) -> String {
+    let mut out = String::with_capacity(line.len());
+    let mut chars = line.char_indices().peekable();
+    while let Some((i, ch)) = chars.next() {
+        if ch != '$' {
+            out.push(ch);
+            continue;
+        }
+        if line[i + 1..].starts_with('{') {
+            if let Some(end) = line[i + 2..].find('}') {
+                let name = &line[i + 2..i + 2 + end];
+                if let Some(val) = known.get(name) {
+                    out.push_str(val);
+                    // Skip past the consumed `{name}` (already advanced 1 char for `$`).
+                    for _ in 0..(1 + name.len() + 1) {
+                        chars.next();
+                    }
+                    continue;
+                }
+            }
+            out.push(ch);
+            continue;
+        }
+        let rest = &line[i + 1..];
+        let name_len = rest
+            .char_indices()
+            .take_while(|(idx, c)| {
+                if *idx == 0 {
+                    c.is_ascii_alphabetic() || *c == '_'
+                } else {
+                    c.is_ascii_alphanumeric() || *c == '_'
+                }
+            })
+            .count();
+        if name_len > 0 {
+            let name = &rest[..name_len];
+            if let Some(val) = known.get(name) {
+                out.push_str(val);
+                for _ in 0..name_len {
+                    chars.next();
+                }
+                continue;
+            }
+        }
+        out.push(ch);
+    }
+    out
+}
+
+/// Parses a Dockerfile, substituting `ARG`-declared variables as it goes
+/// (`cli_args` = `--build-arg NAME=VALUE` overrides, applied when the matching
+/// `ARG NAME[=default]` is declared — an override with no matching `ARG` has no
+/// effect, same as Docker). **Simplification**: args live in ONE flow-scoped
+/// map for the whole file rather than being reset per stage — an `ARG`
+/// declared in an earlier stage stays visible in a later one, which is more
+/// permissive than Docker's per-stage scoping but never less correct (nothing
+/// that would fail to substitute in real Docker fails to substitute here).
+pub fn parse_dockerfile_with_args(text: &str, cli_args: &[(String, String)]) -> Result<Dockerfile> {
     let mut df = Dockerfile::default();
     let mut stages: Vec<Stage> = Vec::new(); // all stages, in order
+    let mut known_args: HashMap<String, String> = HashMap::new();
     for (n, line) in join_continuations(text) {
         let line = line.trim();
         if line.is_empty() || line.starts_with('#') {
             continue;
         }
         let (instr, rest) = line.split_once(char::is_whitespace).unwrap_or((line, ""));
-        let rest = rest.trim();
+        let rest = substitute_args(rest.trim(), &known_args);
+        let rest = rest.as_str();
         let instr_up = instr.to_ascii_uppercase();
         // The steps go to the current STAGE (the last of `stages`); FROM opens a new one.
-        if instr_up != "FROM" && stages.is_empty() {
+        // `ARG` is allowed before the 1st FROM too (Docker's "global-scope" ARG, the only
+        // way to parameterize the FROM line itself, e.g. `FROM alpine:${VERSION}`).
+        if instr_up != "FROM" && instr_up != "ARG" && stages.is_empty() {
             // allow extensions/metadata before the 1st FROM to be ignored? No:
             // any step before FROM is an error (like in Docker).
             return Err(Error::Invalid(format!(
@@ -117,6 +190,19 @@ pub fn parse_dockerfile(text: &str) -> Result<Dockerfile> {
             )));
         }
         match instr_up.as_str() {
+            "ARG" => {
+                let (name, default) = match rest.split_once('=') {
+                    Some((k, v)) => (k.trim().to_string(), Some(v.trim().to_string())),
+                    None => (rest.trim().to_string(), None),
+                };
+                let value = cli_args
+                    .iter()
+                    .find(|(k, _)| *k == name)
+                    .map(|(_, v)| v.clone())
+                    .or(default)
+                    .unwrap_or_default();
+                known_args.insert(name, value);
+            }
             "FROM" => {
                 // `FROM <img> [AS <name>]`
                 let mut it = rest.split_whitespace();
@@ -201,7 +287,7 @@ pub fn parse_dockerfile(text: &str) -> Result<Dockerfile> {
                 }
             }
             // compatibility: accepted but with no build effect (metadata)
-            "LABEL" | "EXPOSE" | "USER" | "ARG" | "MAINTAINER" | "VOLUME" | "STOPSIGNAL"
+            "LABEL" | "EXPOSE" | "USER" | "MAINTAINER" | "VOLUME" | "STOPSIGNAL"
             | "SHELL" | "ONBUILD" => {}
             other => {
                 return Err(Error::Invalid(format!(
@@ -544,7 +630,55 @@ impl ImageStore {
 
 #[cfg(test)]
 mod tests {
-    use super::{join_continuations, parse_env_pairs};
+    use super::{join_continuations, parse_dockerfile_with_args, parse_env_pairs, substitute_args};
+    use std::collections::HashMap;
+
+    #[test]
+    fn substitute_args_replaces_braced_and_bare_names() {
+        let mut known = HashMap::new();
+        known.insert("V".to_string(), "3.19".to_string());
+        known.insert("PKG".to_string(), "curl".to_string());
+        assert_eq!(
+            substitute_args("alpine:${V}", &known),
+            "alpine:3.19"
+        );
+        assert_eq!(
+            substitute_args("apt install $PKG now", &known),
+            "apt install curl now"
+        );
+        // Unknown name: left untouched, not replaced with empty.
+        assert_eq!(substitute_args("echo $UNKNOWN", &known), "echo $UNKNOWN");
+        // `$` not followed by a valid name start: untouched.
+        assert_eq!(substitute_args("price: $5", &known), "price: $5");
+    }
+
+    #[test]
+    fn arg_default_used_without_override() {
+        let df = "ARG TAG=3.19\nFROM alpine:${TAG}\nRUN echo hi";
+        let parsed = parse_dockerfile_with_args(df, &[]).unwrap();
+        assert_eq!(parsed.from, "alpine:3.19");
+    }
+
+    #[test]
+    fn build_arg_override_wins_over_default() {
+        let df = "ARG TAG=3.19\nFROM alpine:${TAG}\nRUN echo hi";
+        let parsed =
+            parse_dockerfile_with_args(df, &[("TAG".to_string(), "3.20".to_string())]).unwrap();
+        assert_eq!(parsed.from, "alpine:3.20");
+    }
+
+    #[test]
+    fn build_arg_for_undeclared_name_has_no_effect() {
+        // Docker semantics: a --build-arg with no matching ARG in the file is a
+        // no-op (not an error, not a phantom substitution).
+        let df = "FROM alpine:3.19\nRUN echo $GHOST";
+        let parsed = parse_dockerfile_with_args(
+            df,
+            &[("GHOST".to_string(), "boo".to_string())],
+        )
+        .unwrap();
+        assert!(matches!(&parsed.steps[0], super::Step::Run(s) if s == "echo $GHOST"));
+    }
 
     #[test]
     fn join_continuations_coalesces_backslash_lines() {

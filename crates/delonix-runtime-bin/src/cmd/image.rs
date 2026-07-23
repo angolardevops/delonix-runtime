@@ -39,6 +39,10 @@ struct BuildSpec {
     context: PathBuf,
     file: Option<PathBuf>,
     tag: String,
+    /// `ARG` overrides (`KEY=VALUE`) — same semantics as the CLI's `--build-arg`:
+    /// only takes effect for a name the Dockerfile actually declares.
+    #[serde(default, rename = "buildArgs")]
+    build_args: Vec<String>,
 }
 
 fn default_context() -> PathBuf {
@@ -403,7 +407,8 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
                 let file = b
                     .file
                     .unwrap_or_else(|| super::build::default_build_file(&b.context));
-                let img = super::build::build_from_spec(&b.context, &file, &b.tag)?;
+                let build_args = super::build::parse_build_args(&b.build_args);
+                let img = super::build::build_from_spec(&b.context, &file, &b.tag, &build_args)?;
                 println!(
                     "image/{name}: {} ({})",
                     super::po::t("built"),
