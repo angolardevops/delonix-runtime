@@ -24,6 +24,32 @@
 //! stage's `FROM` names an earlier stage rather than a real image, that path
 //! errors out early with a clear message; rootless has no such restriction
 //! (it packs a flat squash layer, no lineage to carry).
+//!
+//! **Layer cache** (`<root>/build-cache/<hash>/rootfs`, `--no-cache` to bypass,
+//! **rootless only** — see below): a rolling hash chain, one link per
+//! instruction (`RUN`/`COPY` snapshot the rootfs after running; `ENV`/
+//! `WORKDIR` fold into the chain without a filesystem snapshot, since they
+//! don't touch the rootfs but DO affect later `RUN`s). Before a `RUN`/`COPY`
+//! executes, its link's hash is checked against the cache; on a hit, the
+//! step is skipped and the cached snapshot is CLONED into a fresh,
+//! not-yet-created container's rootfs directory (`cp -a --reflink=auto`,
+//! same mechanism as `FROM <earlier-stage>` above) — never synced in place
+//! onto an already-live container's rootfs. That in-place approach was tried
+//! first and is unsafe: it corrupts the `/proc`/`/sys`/`/dev` mounts already
+//! established inside the live container, so the next REAL exec fails
+//! confinement verification. `COPY`'s link hashes the actual bytes being
+//! copied, not just the src/dst strings, so a changed file correctly
+//! invalidates the cache from that point on — same "everything after the
+//! first change re-runs" semantics as classic (non-BuildKit) Docker caching.
+//! **Root (overlay) mode never caches** (always executes for real, exactly as
+//! before caching existed) — a cache hit's flat-cloned rootfs has no `upper/`
+//! overlay diff for `commit_upper` to read, and building a second,
+//! overlay-aware snapshot format wasn't worth it for a mode this sandbox
+//! can't even exercise live. Trade-offs, stated plainly: snapshots the FULL
+//! rootfs per cached step rather than storing per-layer diffs, so it's less
+//! space-efficient than Docker's real layers (mitigated by `--reflink=auto`
+//! copy-on-write where the filesystem supports it); no cache GC/TTL yet —
+//! `<root>/build-cache` only grows.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -33,6 +59,7 @@ use delonix_image::build::{parse_dockerfile_with_args, Step};
 use delonix_image::{Image, ImageStore};
 use delonix_runtime::{self as runtime, RunSpec};
 use delonix_runtime_core::{generate_id, Container, Error, Result, Store};
+use sha2::{Digest, Sha256};
 
 use super::util::{open_stores, prepare_rootfs, resolve_or_pull};
 
@@ -52,6 +79,10 @@ pub struct BuildArgs {
     /// override with no matching `ARG` is silently ignored, same as Docker).
     #[arg(long = "build-arg")]
     build_arg: Vec<String>,
+    /// Bypasses the layer cache entirely (neither reads nor writes it) — same
+    /// as Docker's `--no-cache`.
+    #[arg(long = "no-cache")]
+    no_cache: bool,
 }
 
 /// Parses `KEY=VALUE` build-arg flags into pairs, dropping anything malformed
@@ -89,7 +120,7 @@ pub fn run(args: BuildArgs) -> Result<()> {
         .clone()
         .unwrap_or_else(|| default_build_file(&args.context));
     let build_args = parse_build_args(&args.build_arg);
-    let img = build_from_spec(&args.context, &file, &args.tag, &build_args)?;
+    let img = build_from_spec(&args.context, &file, &args.tag, &build_args, !args.no_cache)?;
     println!("{}", img.short_id());
     Ok(())
 }
@@ -99,12 +130,25 @@ pub fn run(args: BuildArgs) -> Result<()> {
 /// its rootfs) or `COPY --from=<stage>` (a read of its rootfs, untouched).
 #[derive(Clone)]
 struct StageResult {
+    /// The container id that OWNS `rootfs` right now — may have changed
+    /// several times over the stage's steps (each cache-hit clone gets a
+    /// fresh id; see `build_one_stage`). Needed by the caller to know which
+    /// id to pass to `commit_upper`/`reexec_mapped` for the FINAL stage,
+    /// since it can no longer just assume "the last container ever created".
+    id: String,
     rootfs: String,
     cmd: Vec<String>,
     entrypoint: Vec<String>,
     env: Vec<String>,
     workdir: String,
     user: String,
+    /// The layer-cache hash chain's current link — the "base identity" a
+    /// LATER stage's own chain builds on, whether via `COPY --from` (doesn't
+    /// change the chain) or `FROM <this-stage>` (starts the new stage's chain
+    /// here). A real image's chain starts at its content-addressed `id`
+    /// (stable across builds); a cloned stage's chain starts at whatever the
+    /// source stage's chain had ended at.
+    chain_hash: String,
     /// `Some` only when this stage's `FROM` resolved to a real pulled image —
     /// needed for the root-mode OCI commit if this ends up being the FINAL
     /// stage's base (lineage/diff_ids come from a real `Image`, not a clone).
@@ -123,12 +167,14 @@ fn resolve_stage_base(
     if let Some(prior) = stages.get(from) {
         let rootfs = clone_rootfs(images, &prior.rootfs, new_id)?;
         Ok(StageResult {
+            id: new_id.to_string(),
             rootfs,
             cmd: prior.cmd.clone(),
             entrypoint: prior.entrypoint.clone(),
             env: prior.env.clone(),
             workdir: prior.workdir.clone(),
             user: prior.user.clone(),
+            chain_hash: prior.chain_hash.clone(),
             image: None,
         })
     } else {
@@ -140,12 +186,14 @@ fn resolve_stage_base(
             img.config.working_dir.clone()
         };
         Ok(StageResult {
+            id: new_id.to_string(),
             rootfs,
             cmd: img.config.cmd.clone(),
             entrypoint: img.config.entrypoint.clone(),
             env: img.config.env.clone(),
             workdir,
             user: img.config.user.clone(),
+            chain_hash: img.id.clone(),
             image: Some(img),
         })
     }
@@ -179,15 +227,30 @@ fn clone_rootfs(images: &ImageStore, src_rootfs: &str, id: &str) -> Result<Strin
 }
 
 /// Builds ONE stage end to end: resolves its base (image or earlier stage),
-/// brings up a working container over its rootfs, runs its steps. Returns the
-/// container (for the caller to stop/clean up) and the resulting state. Does
-/// NOT unmount/remove anything — an intermediate stage's rootfs must survive
-/// until every later stage that might `COPY --from`/`FROM` it has run.
-/// Returns the working container WHENEVER one was actually created — regardless
-/// of whether the stage's steps then succeeded — so the caller can always clean
-/// it up. A `RUN`/`COPY` failing partway through must not leak the container: it
-/// was already `create_with`'d and possibly `exec`'d into before the failing
-/// step, so there's real state (cgroup, namespaces, rootfs) to tear down.
+/// brings up working containers over its rootfs as needed, runs its steps.
+/// Returns EVERY id (rootfs directory) allocated along the way — for the
+/// caller to clean up, see below — and the resulting state. Does NOT
+/// unmount/remove anything itself — an intermediate stage's rootfs must
+/// survive until every later stage that might `COPY --from`/`FROM` it has run.
+///
+/// **Why "ids", plural, and not just "containers"**: a cache hit restores a
+/// step's rootfs by CLONING the cached snapshot into a fresh, not-yet-created
+/// container directory — never by rewriting files under an ALREADY-LIVE
+/// container's rootfs. That in-place approach was tried first and is unsafe:
+/// `setup_rootfs` bind-mounts the rootfs onto itself and then mounts
+/// `/proc`/`/sys`/`/dev` inside it before `pivot_root`; deleting and
+/// repopulating those directories from the host side (to sync in cached
+/// content) orphans those live mounts, and the NEXT real `exec` fails
+/// confinement verification because `/proc/self/status` no longer resolves to
+/// a real procfs. Cloning into a fresh directory and only ever
+/// `create_with`-ing a BRAND NEW container over it sidesteps the whole class
+/// of bug — exactly how `FROM <earlier-stage>` already worked before caching
+/// existed. The cost: some of those cloned ids may end their life WITHOUT ever
+/// having a container created over them (e.g. two cache hits in a row, or the
+/// stage's last step being a hit) — such an id has no `Store` record at all,
+/// so it can't be cleaned up via `runtime::remove`/a container list, only by
+/// its id. Every id — container-backed or not — is tracked here for exactly
+/// that reason.
 fn build_one_stage(
     store: &Store,
     images: &ImageStore,
@@ -195,20 +258,168 @@ fn build_one_stage(
     from: &str,
     steps: &[Step],
     stages: &HashMap<String, StageResult>,
-) -> (Option<Container>, Result<StageResult>) {
+    use_cache: bool,
+) -> (Vec<String>, Result<StageResult>) {
+    let mut all_ids: Vec<String> = Vec::new();
+    let rootless = runtime::is_rootless();
+    // Cache is ROOTLESS-ONLY: a cache hit clones a plain FLAT rootfs directory
+    // (`try_clone_cached`, mirroring the multi-stage `FROM <stage>` clone). In
+    // root mode the final commit needs `commit_upper` to find a real overlay
+    // `upper/` diff for the id it's given — a flat clone never has one. Rather
+    // than build a second, overlay-aware snapshot format for a mode this
+    // sandbox can't even exercise live, root mode simply never caches (always
+    // executes for real, exactly as before caching existed).
+    let use_cache = use_cache && rootless;
     let id = generate_id();
+    all_ids.push(id.clone());
     let mut base = match resolve_stage_base(images, from, stages, &id) {
         Ok(b) => b,
-        Err(e) => return (None, Err(e)),
+        Err(e) => return (all_ids, Err(e)),
     };
-    let rootless = runtime::is_rootless();
 
-    // "Working" container: `sleep infinity` keeps the namespaces alive so we
-    // can `exec` each RUN; COPY writes directly to the rootfs on disk.
+    let mut cur_id = id;
+    let mut cur_rootfs = base.rootfs.clone();
+    let mut container: Option<Container> = None;
+    let mut cur_env = base.env.clone();
+    let mut cur_workdir = base.workdir.clone();
+    let mut chain_hash = base.chain_hash.clone();
+
+    let result = (|| -> Result<()> {
+        for step in steps {
+            match step {
+                Step::Env { key, val } => {
+                    let prefix = format!("{key}=");
+                    cur_env.retain(|kv| !kv.starts_with(&prefix));
+                    cur_env.push(format!("{key}={val}"));
+                    // Doesn't touch the rootfs, but DOES affect every RUN from
+                    // here on — must still shift the chain, or two Dockerfiles
+                    // differing only in an ENV value would collide on the same
+                    // cache key for their next RUN.
+                    chain_hash = hash_link(&chain_hash, &format!("ENV:{key}={val}"));
+                }
+                Step::Workdir(dir) => {
+                    cur_workdir = if dir.starts_with('/') {
+                        dir.clone()
+                    } else {
+                        format!("{cur_workdir}/{dir}")
+                    };
+                    chain_hash = hash_link(&chain_hash, &format!("WORKDIR:{cur_workdir}"));
+                }
+                Step::Copy {
+                    src,
+                    dst,
+                    from: copy_from,
+                } => {
+                    let (hash_src_path, src_root, stage_rel) =
+                        resolve_copy_source(context, stages, src, copy_from)?;
+                    // Cache key includes the ACTUAL bytes being copied, not just
+                    // the src/dst strings — a file whose content changed must
+                    // invalidate the cache from here on, same as Docker.
+                    let content_hash = hash_path_content(&hash_src_path)
+                        .unwrap_or_else(|_| "unreadable".into());
+                    let new_hash = hash_link(
+                        &chain_hash,
+                        &format!("COPY:{stage_rel}:{dst}:{content_hash}"),
+                    );
+                    if use_cache {
+                        if let Some((cid, crootfs)) = try_clone_cached(images, &new_hash)? {
+                            retire_container(store, &mut container);
+                            all_ids.push(cid.clone());
+                            cur_id = cid;
+                            cur_rootfs = crootfs;
+                            chain_hash = new_hash;
+                            continue;
+                        }
+                    }
+                    ensure_container(
+                        store,
+                        &mut container,
+                        &cur_id,
+                        &cur_rootfs,
+                        from,
+                        rootless,
+                    )?;
+                    copy_into_rootfs(src_root, &cur_rootfs, &stage_rel, dst, &cur_workdir)?;
+                    if use_cache {
+                        save_to_cache(&new_hash, &cur_rootfs);
+                    }
+                    chain_hash = new_hash;
+                }
+                Step::Run(cmdline) => {
+                    let new_hash = hash_link(&chain_hash, &format!("RUN:{cmdline}"));
+                    if use_cache {
+                        if let Some((cid, crootfs)) = try_clone_cached(images, &new_hash)? {
+                            retire_container(store, &mut container);
+                            all_ids.push(cid.clone());
+                            cur_id = cid;
+                            cur_rootfs = crootfs;
+                            chain_hash = new_hash;
+                            continue;
+                        }
+                    }
+                    ensure_container(
+                        store,
+                        &mut container,
+                        &cur_id,
+                        &cur_rootfs,
+                        from,
+                        rootless,
+                    )?;
+                    let exports: String = cur_env.iter().map(|kv| sh_export(kv)).collect();
+                    let shell =
+                        format!("mkdir -p {cur_workdir} && cd {cur_workdir}; {exports}{cmdline}");
+                    let argv = vec!["/bin/sh".to_string(), "-c".to_string(), shell];
+                    let code = runtime::exec(container.as_ref().unwrap(), &argv, false)?;
+                    if code != 0 {
+                        return Err(Error::Invalid(format!(
+                            "RUN falhou (exit {code}): {cmdline}"
+                        )));
+                    }
+                    if use_cache {
+                        save_to_cache(&new_hash, &cur_rootfs);
+                    }
+                    chain_hash = new_hash;
+                }
+            }
+        }
+        Ok(())
+    })();
+    retire_container(store, &mut container);
+
+    match result {
+        Ok(()) => {
+            base.id = cur_id;
+            base.rootfs = cur_rootfs;
+            base.env = cur_env;
+            base.workdir = cur_workdir;
+            base.chain_hash = chain_hash;
+            (all_ids, Ok(base))
+        }
+        Err(e) => (all_ids, Err(e)),
+    }
+}
+
+/// Creates a working container over `(id, rootfs)` if one doesn't already
+/// exist (a no-op right after a cache hit already positioned `container` at
+/// `None`, meaning the current state has no live process yet). Left in
+/// `*container` for the caller to move into `created` via `retire_container` —
+/// see `build_one_stage`'s doc comment for why a `RUN`/`COPY` failing partway
+/// through must not leak it.
+fn ensure_container(
+    store: &Store,
+    container: &mut Option<Container>,
+    id: &str,
+    rootfs: &str,
+    from_label: &str,
+    rootless: bool,
+) -> Result<()> {
+    if container.is_some() {
+        return Ok(());
+    }
     let mut c = Container::new(
-        id.clone(),
+        id.to_string(),
         format!("dlx-build-{}", &id[..8.min(id.len())]),
-        from.to_string(),
+        from_label.to_string(),
         vec!["/bin/sh".into(), "-c".into(), "sleep infinity".into()],
         "max".into(),
     );
@@ -218,29 +429,51 @@ fn build_one_stage(
         userns: rootless,
         ..Default::default()
     };
-    if let Err(e) = runtime::create_with(store, &mut c, &base.rootfs, &spec) {
-        return (None, Err(e));
-    }
+    runtime::create_with(store, &mut c, rootfs, &spec)?;
+    *container = Some(c);
+    Ok(())
+}
 
-    let mut cur_env = base.env.clone();
-    let mut cur_workdir = base.workdir.clone();
-    let steps_result = run_steps(
-        steps,
-        &base.rootfs,
-        context,
-        &c,
-        &mut cur_env,
-        &mut cur_workdir,
-        stages,
-    );
-    let _ = runtime::stop(store, &mut c, 5);
-    match steps_result {
-        Ok(()) => {
-            base.env = cur_env;
-            base.workdir = cur_workdir;
-            (Some(c), Ok(base))
+/// Stops the live container (if any) — its id was already recorded in
+/// `all_ids` when it was created, so stopping here is all that's left to do;
+/// the caller's final cleanup pass removes it by id regardless. Called both
+/// mid-loop — right before a cache hit replaces the "current state" with a
+/// cloned snapshot, so the container that was tracking the OLD state gets
+/// torn down instead of silently abandoned mid-build — and once,
+/// unconditionally, after the step loop ends (success OR failure: a
+/// `RUN`/`COPY` failing partway through must not leak a still-running
+/// container).
+fn retire_container(store: &Store, container: &mut Option<Container>) {
+    if let Some(mut c) = container.take() {
+        let _ = runtime::stop(store, &mut c, 5);
+    }
+}
+
+/// Resolves a `COPY [--from=<stage>] <src> <dst>`'s SOURCE side: the path to
+/// hash (for the cache key) and to actually read from, and the root it's
+/// relative to (build context, or an earlier stage's rootfs).
+fn resolve_copy_source<'a>(
+    context: &'a Path,
+    stages: &'a HashMap<String, StageResult>,
+    src: &str,
+    from: &Option<String>,
+) -> Result<(PathBuf, &'a Path, String)> {
+    match from {
+        Some(stage_ref) => {
+            let src_stage = stages.get(stage_ref).ok_or_else(|| {
+                Error::Invalid(format!(
+                    "COPY --from={stage_ref}: estágio desconhecido (só estágios JÁ definidos \
+                     antes deste ponto do Dockerfile são visíveis)"
+                ))
+            })?;
+            let rel = src.trim_start_matches('/').to_string();
+            let root = Path::new(src_stage.rootfs.as_str());
+            Ok((root.join(&rel), root, rel))
         }
-        Err(e) => (Some(c), Err(e)),
+        None => {
+            let resolved = safe_join(context, src)?;
+            Ok((resolved, context, src.to_string()))
+        }
     }
 }
 
@@ -252,6 +485,7 @@ pub fn build_from_spec(
     dockerfile_path: &Path,
     tag: &str,
     build_args: &[(String, String)],
+    use_cache: bool,
 ) -> Result<Image> {
     let (images, store) = open_stores()?;
     let text = std::fs::read_to_string(dockerfile_path).map_err(|e| {
@@ -286,19 +520,24 @@ pub fn build_from_spec(
     }
 
     let mut stages: HashMap<String, StageResult> = HashMap::new();
-    let mut work_containers: Vec<Container> = Vec::new();
+    let mut all_ids: Vec<String> = Vec::new();
 
     let build_result: Result<Image> = (|| {
         for (idx, stage) in df.stages.iter().enumerate() {
-            let (c, result) =
-                build_one_stage(&store, &images, context, &stage.from, &stage.steps, &stages);
-            // Track the container for cleanup BEFORE propagating a step failure —
-            // otherwise a `RUN`/`COPY` that fails partway through leaks it (it was
-            // already created; only the caller's error handling would know to
-            // tear it down).
-            if let Some(c) = c {
-                work_containers.push(c);
-            }
+            let (ids, result) = build_one_stage(
+                &store,
+                &images,
+                context,
+                &stage.from,
+                &stage.steps,
+                &stages,
+                use_cache,
+            );
+            // Track EVERY id this stage allocated for cleanup BEFORE
+            // propagating a step failure — otherwise a `RUN`/`COPY` that fails
+            // partway through leaks it (it was already created; only the
+            // caller's error handling would know to tear it down).
+            all_ids.extend(ids);
             let result = result?;
             if let Some(name) = &stage.name {
                 stages.insert(name.clone(), result.clone());
@@ -306,13 +545,18 @@ pub fn build_from_spec(
             stages.insert(idx.to_string(), result);
         }
 
-        let (c, final_state) =
-            build_one_stage(&store, &images, context, &df.from, &df.steps, &stages);
-        if let Some(c) = c {
-            work_containers.push(c);
-        }
+        let (ids, final_state) = build_one_stage(
+            &store,
+            &images,
+            context,
+            &df.from,
+            &df.steps,
+            &stages,
+            use_cache,
+        );
+        all_ids.extend(ids);
         let final_state = final_state?;
-        let id = work_containers.last().unwrap().id.clone();
+        let id = final_state.id.clone();
 
         if rootless {
             let cmd = if df.cmd.is_empty() {
@@ -361,11 +605,25 @@ pub fn build_from_spec(
         }
     })();
 
-    // Best-effort cleanup of EVERY stage's working container/rootfs — never
+    // Best-effort cleanup of EVERY id allocated during the build (whether or
+    // not it ever got a live container/Store record — see `build_one_stage`'s
+    // doc comment on why a cache-hit-cloned id can have neither) — never
     // hides the build/commit error (`build_result` alone decides the outcome).
-    for c in &work_containers {
-        let _ = runtime::remove(&store, c, true);
-        let _ = images.unmount_rootfs(&c.id);
+    // BUG FIXED HERE (pre-existing, predates multi-stage AND caching):
+    // `unmount_rootfs` alone does NOT delete a rootless FLAT rootfs — it
+    // deliberately preserves `rootfs/` for a REAL container that might
+    // restart (see its doc comment). A build's work container is never
+    // restarted, so every rootless build — single-stage included — leaked its
+    // `<root>/containers/<id>/rootfs` forever. `remove_container_dir` (the
+    // real destroy, normally reached via `container rm`) closes it; unmount
+    // first so it can also clean an overlay's `merged` mountpoint in root
+    // mode before deleting the tree.
+    for id in &all_ids {
+        if let Ok(c) = store.load(id) {
+            let _ = runtime::remove(&store, &c, true);
+        }
+        let _ = images.unmount_rootfs(id);
+        images.remove_container_dir(id);
     }
 
     build_result
@@ -430,78 +688,122 @@ fn sh_export(kv: &str) -> String {
     }
 }
 
-/// Runs the Dockerfile steps in order, keeping a local accumulator of
-/// ENV/WORKDIR (`runtime::exec` has no notion of per-call environment — each
-/// `RUN` synthesizes `cd <workdir> && export ... ; <cmd>` in a `/bin/sh -c`, just
-/// as Docker's shell-form already implies).
-fn run_steps(
-    steps: &[Step],
-    rootfs: &str,
-    context: &Path,
-    c: &Container,
-    cur_env: &mut Vec<String>,
-    cur_workdir: &mut String,
-    stages: &HashMap<String, StageResult>,
-) -> Result<()> {
-    for step in steps {
-        match step {
-            Step::Env { key, val } => {
-                let prefix = format!("{key}=");
-                cur_env.retain(|kv| !kv.starts_with(&prefix));
-                cur_env.push(format!("{key}={val}"));
+/// `<root>/build-cache/<hash>/rootfs` — the layer cache root.
+fn build_cache_dir() -> PathBuf {
+    super::util::state_root().join("build-cache")
+}
+
+/// One rolling-hash link: `chain` (the state so far) + `repr` (this
+/// instruction, in a stable textual form) → the new chain value.
+fn hash_link(chain: &str, repr: &str) -> String {
+    let mut h = Sha256::new();
+    h.update(chain.as_bytes());
+    h.update(b"\n");
+    h.update(repr.as_bytes());
+    format!("{:x}", h.finalize())
+}
+
+/// Content hash of a file/symlink/directory (recursive, sorted, includes
+/// filenames) — deliberately hashes BYTES rather than mtime/size, so
+/// rewriting a file with identical content is still a cache hit, and any real
+/// content change always invalidates, regardless of timestamps.
+fn hash_path_content(path: &Path) -> Result<String> {
+    let mut h = Sha256::new();
+    hash_path_into(path, &mut h)?;
+    Ok(format!("{:x}", h.finalize()))
+}
+
+fn hash_path_into(path: &Path, h: &mut Sha256) -> Result<()> {
+    let meta = std::fs::symlink_metadata(path)
+        .map_err(|e| Error::Invalid(format!("ler {}: {e}", path.display())))?;
+    if meta.file_type().is_symlink() {
+        let target = std::fs::read_link(path)
+            .map_err(|e| Error::Invalid(format!("ler symlink {}: {e}", path.display())))?;
+        h.update(b"symlink:");
+        h.update(target.to_string_lossy().as_bytes());
+    } else if meta.is_dir() {
+        let mut entries: Vec<_> = std::fs::read_dir(path)
+            .map_err(|e| Error::Invalid(format!("ler {}: {e}", path.display())))?
+            .filter_map(|e| e.ok())
+            .collect();
+        entries.sort_by_key(|e| e.file_name());
+        for e in entries {
+            h.update(e.file_name().to_string_lossy().as_bytes());
+            h.update(b"\0");
+            hash_path_into(&e.path(), h)?;
+        }
+    } else {
+        let mut f = std::fs::File::open(path)
+            .map_err(|e| Error::Invalid(format!("ler {}: {e}", path.display())))?;
+        let mut buf = [0u8; 1 << 16];
+        loop {
+            use std::io::Read;
+            let n = f
+                .read(&mut buf)
+                .map_err(|e| Error::Invalid(format!("ler {}: {e}", path.display())))?;
+            if n == 0 {
+                break;
             }
-            Step::Workdir(dir) => {
-                *cur_workdir = if dir.starts_with('/') {
-                    dir.clone()
-                } else {
-                    format!("{cur_workdir}/{dir}")
-                };
-            }
-            Step::Copy { src, dst, from } => {
-                match from {
-                    // `COPY --from=<name-or-index>`: read from an EARLIER stage's
-                    // rootfs (kept alive on disk for exactly this) instead of the
-                    // build context. `copy_into_rootfs` already takes an
-                    // arbitrary "source root" — no change needed there.
-                    Some(stage_ref) => {
-                        let src_stage = stages.get(stage_ref).ok_or_else(|| {
-                            Error::Invalid(format!(
-                                "COPY --from={stage_ref}: estágio desconhecido (só estágios \
-                                 JÁ definidos antes deste ponto do Dockerfile são visíveis)"
-                            ))
-                        })?;
-                        // Unlike a plain `COPY` (src relative to the build context), Docker's
-                        // `--from=<stage>` takes `src` rooted at that STAGE's `/` — the leading
-                        // `/` here means "the stage's filesystem root", not "reject as
-                        // absolute" (which is what `safe_join`/`copy_into_rootfs` do for a
-                        // plain COPY's context-relative src).
-                        let stage_rel = src.trim_start_matches('/');
-                        copy_into_rootfs(
-                            Path::new(&src_stage.rootfs),
-                            rootfs,
-                            stage_rel,
-                            dst,
-                            cur_workdir,
-                        )?;
-                    }
-                    None => copy_into_rootfs(context, rootfs, src, dst, cur_workdir)?,
-                }
-            }
-            Step::Run(cmdline) => {
-                let exports: String = cur_env.iter().map(|kv| sh_export(kv)).collect();
-                let shell =
-                    format!("mkdir -p {cur_workdir} && cd {cur_workdir}; {exports}{cmdline}");
-                let argv = vec!["/bin/sh".to_string(), "-c".to_string(), shell];
-                let code = runtime::exec(c, &argv, false)?;
-                if code != 0 {
-                    return Err(Error::Invalid(format!(
-                        "RUN falhou (exit {code}): {cmdline}"
-                    )));
-                }
-            }
+            h.update(&buf[..n]);
         }
     }
     Ok(())
+}
+
+/// If a cached snapshot exists for `hash`, syncs `rootfs`'s CONTENT to match
+/// it in place — deletes the current entries and `cp -a --reflink=auto`s the
+/// cached ones over — and returns `true`. No container recreation needed: the
+/// working container's mount just keeps pointing at the same host directory,
+/// whose content we swap from outside (the same trick `COPY` already relies
+/// on — the container sees host-side writes to its rootfs immediately).
+/// `false` on a cache miss (nothing touched).
+/// If a cached snapshot exists for `hash`, clones it into a FRESH,
+/// not-yet-created container id's rootfs directory (via the same `cp -a
+/// --reflink=auto` machinery `FROM <earlier-stage>` already uses) and returns
+/// `(new_id, new_rootfs)`. SECURITY/CORRECTNESS: never syncs onto an
+/// ALREADY-LIVE container's rootfs — see `build_one_stage`'s doc comment for
+/// why that corrupts its `/proc`/`/sys`/`/dev` mounts. `Ok(None)` on a miss.
+fn try_clone_cached(images: &ImageStore, hash: &str) -> Result<Option<(String, String)>> {
+    let cached = build_cache_dir().join(hash).join("rootfs");
+    if !cached.exists() {
+        return Ok(None);
+    }
+    let new_id = generate_id();
+    let rootfs = clone_rootfs(images, &cached.to_string_lossy(), &new_id)?;
+    Ok(Some((new_id, rootfs)))
+}
+
+/// Snapshots `rootfs`'s current content into the cache under `hash`, for a
+/// FUTURE build to reuse. Best-effort BY DESIGN (silently gives up on any
+/// error) — a caching problem must never fail an otherwise-successful build,
+/// only make the NEXT one slower. Written atomically (temp dir + rename) so a
+/// build killed mid-snapshot can never leave a corrupt entry a later build
+/// would wrongly trust.
+fn save_to_cache(hash: &str, rootfs: &str) {
+    let dir = build_cache_dir();
+    let final_dir = dir.join(hash);
+    if final_dir.exists() {
+        return; // already cached (e.g. two stages converged to the same state)
+    }
+    let tmp_dir = dir.join(format!(".{hash}.{}.tmp", std::process::id()));
+    let tmp_rootfs = tmp_dir.join("rootfs");
+    if std::fs::create_dir_all(&tmp_rootfs).is_err() {
+        return;
+    }
+    let status = std::process::Command::new("cp")
+        .arg("-a")
+        .arg("--reflink=auto")
+        .arg(format!("{}/.", rootfs.trim_end_matches('/')))
+        .arg(&tmp_rootfs)
+        .status();
+    match status {
+        Ok(s) if s.success() => {
+            let _ = std::fs::rename(&tmp_dir, &final_dir);
+        }
+        _ => {
+            let _ = std::fs::remove_dir_all(&tmp_dir);
+        }
+    }
 }
 
 /// Resolves a `../`/absolute component safely: joins `base` only with
