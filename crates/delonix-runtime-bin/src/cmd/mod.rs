@@ -6,6 +6,7 @@ pub mod conditions;
 pub mod container;
 pub mod dash;
 pub mod dependency;
+pub mod dockerapi;
 pub mod firewall;
 pub mod flow;
 pub mod httproute;

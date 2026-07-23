@@ -159,6 +159,12 @@ enum Cmd {
         #[arg(long)]
         addr: Option<String>,
     },
+    /// Serve a READ-ONLY slice of the Docker Engine API on a unix socket — `docker version`/`ps`/`images`/`info` via `DOCKER_HOST=unix://<path>`.
+    DockerApi {
+        /// Socket address (default: `$DELONIX_DOCKER_ADDR` or `unix:///run/delonix-docker.sock`).
+        #[arg(long)]
+        addr: Option<String>,
+    },
     /// Runtime summary/KPI dashboard (interactive htop-style TUI) — global, or per group (`container dash`, `vm dash`, ...).
     Dash {
         /// Print ONE text snapshot and exit (no TUI) — for scripts/CI; the default when stdout is not a terminal.
@@ -272,6 +278,7 @@ fn run() -> Result<()> {
                 .unwrap_or_else(|| "unix:///run/delonix-mgmt.sock".to_string());
             delonix_mgmt::serve_blocking(cmd::util::state_root(), &addr)
         }
+        Cmd::DockerApi { addr } => cmd::dockerapi::run(addr),
         Cmd::Dash { once } => cmd::dash::run(cmd::dash::DashScope::Global, once),
         Cmd::Completion { shell } => cmd_completion(shell),
     }

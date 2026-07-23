@@ -513,7 +513,7 @@ fn cmd_push(images: &ImageStore, image: &str, destination: Option<&str>) -> Resu
 /// space does this use?"). A layer missing from the CAS does not count — hence `Option`
 /// only when NOTHING is readable, so as not to report "0 B" for an image whose blobs
 /// have disappeared.
-fn image_size(images: &ImageStore, img: &delonix_image::Image) -> Option<u64> {
+pub(crate) fn image_size(images: &ImageStore, img: &delonix_image::Image) -> Option<u64> {
     if img.layers.is_empty() {
         return None;
     }
