@@ -9,18 +9,30 @@
 //! (root/overlay) — the same two "docker commit" functions that already exist
 //! in `delonix-image::build`.
 //!
-//! **Single-stage only in this version**: a Dockerfile with `FROM ... AS <name>`
-//! followed by another `FROM` (multi-stage) is rejected with a clear error — the
-//! rootfs handoff between stages (`COPY --from`) still needs careful design;
-//! it is left for a future iteration.
+//! **Multi-stage** (`FROM ... AS <name>` + `COPY --from=<stage>`): each stage
+//! (including the final one) is built the same way — a working container, its
+//! own rootfs, its own `RUN`/`COPY` steps — but an intermediate stage's rootfs
+//! is kept on disk (not unmounted/removed) until the WHOLE build finishes, so a
+//! later stage's `COPY --from=<name-or-index>` can read straight out of it via
+//! [`copy_into_rootfs`] (which already takes an arbitrary "source root", not
+//! just the build context). `FROM <earlier-stage>` (a stage built FROM another
+//! stage, not an image) is supported by cloning that stage's rootfs with
+//! `cp -a --reflink=auto` (preserves symlinks/perms exactly — a naive
+//! walk-and-copy would dereference `/bin -> usr/bin`-style symlinks, which is
+//! wrong for a rootfs). The one gap: committing the FINAL image in **root**
+//! (overlay) mode needs a real OCI base `Image` for lineage — if the final
+//! stage's `FROM` names an earlier stage rather than a real image, that path
+//! errors out early with a clear message; rootless has no such restriction
+//! (it packs a flat squash layer, no lineage to carry).
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use clap::Args;
 use delonix_image::build::{parse_dockerfile, Step};
-use delonix_image::Image;
+use delonix_image::{Image, ImageStore};
 use delonix_runtime::{self as runtime, RunSpec};
-use delonix_runtime_core::{generate_id, Container, Error, Result};
+use delonix_runtime_core::{generate_id, Container, Error, Result, Store};
 
 use super::util::{open_stores, prepare_rootfs, resolve_or_pull};
 
@@ -62,8 +74,155 @@ pub fn run(args: BuildArgs) -> Result<()> {
     Ok(())
 }
 
-/// The full orchestration of a build (parse → working container → RUN/
-/// COPY → commit). Extracted from `run()` to be reused by `delonix
+/// The accumulated state of one finished stage — what a LATER stage needs from
+/// an EARLIER one, whether referencing it via `FROM <stage>` (a fresh clone of
+/// its rootfs) or `COPY --from=<stage>` (a read of its rootfs, untouched).
+#[derive(Clone)]
+struct StageResult {
+    rootfs: String,
+    cmd: Vec<String>,
+    entrypoint: Vec<String>,
+    env: Vec<String>,
+    workdir: String,
+    /// `Some` only when this stage's `FROM` resolved to a real pulled image —
+    /// needed for the root-mode OCI commit if this ends up being the FINAL
+    /// stage's base (lineage/diff_ids come from a real `Image`, not a clone).
+    image: Option<Image>,
+}
+
+/// Resolves a stage's `FROM <token>`: either an EARLIER stage's name/index
+/// (clones its rootfs — Docker's "build on top of another stage" form) or a
+/// real image reference (pull/resolve as usual).
+fn resolve_stage_base(
+    images: &ImageStore,
+    from: &str,
+    stages: &HashMap<String, StageResult>,
+    new_id: &str,
+) -> Result<StageResult> {
+    if let Some(prior) = stages.get(from) {
+        let rootfs = clone_rootfs(images, &prior.rootfs, new_id)?;
+        Ok(StageResult {
+            rootfs,
+            cmd: prior.cmd.clone(),
+            entrypoint: prior.entrypoint.clone(),
+            env: prior.env.clone(),
+            workdir: prior.workdir.clone(),
+            image: None,
+        })
+    } else {
+        let img = resolve_or_pull(images, from)?;
+        let rootfs = prepare_rootfs(images, &img, new_id)?;
+        let workdir = if img.config.working_dir.is_empty() {
+            "/".to_string()
+        } else {
+            img.config.working_dir.clone()
+        };
+        Ok(StageResult {
+            rootfs,
+            cmd: img.config.cmd.clone(),
+            entrypoint: img.config.entrypoint.clone(),
+            env: img.config.env.clone(),
+            workdir,
+            image: Some(img),
+        })
+    }
+}
+
+/// Clones an EARLIER stage's rootfs into a NEW stage's rootfs directory —
+/// `FROM <stage>`, not `FROM <image>`. `cp -a --reflink=auto` (copy-on-write
+/// where the filesystem supports it, e.g. btrfs/xfs) preserves symlinks,
+/// permissions and xattrs verbatim; a rootfs is full of symlinks
+/// (`/bin -> usr/bin`, …) that a naive recursive copy would wrongly dereference.
+fn clone_rootfs(images: &ImageStore, src_rootfs: &str, id: &str) -> Result<String> {
+    let dst = images.root().join("containers").join(id).join("rootfs");
+    std::fs::create_dir_all(&dst)
+        .map_err(|e| Error::Invalid(format!("mkdir {}: {e}", dst.display())))?;
+    let status = std::process::Command::new("cp")
+        .arg("-a")
+        .arg("--reflink=auto")
+        .arg(format!("{}/.", src_rootfs.trim_end_matches('/')))
+        .arg(&dst)
+        .status()
+        .map_err(|e| Error::Invalid(format!("cp do estágio '{src_rootfs}': {e}")))?;
+    if !status.success() {
+        return Err(Error::Invalid(format!(
+            "cp do estágio '{src_rootfs}' falhou"
+        )));
+    }
+    if runtime::is_rootless() {
+        super::util::chown_tree(&dst, runtime::USERNS_UID_BASE)?;
+    }
+    Ok(dst.to_string_lossy().into_owned())
+}
+
+/// Builds ONE stage end to end: resolves its base (image or earlier stage),
+/// brings up a working container over its rootfs, runs its steps. Returns the
+/// container (for the caller to stop/clean up) and the resulting state. Does
+/// NOT unmount/remove anything — an intermediate stage's rootfs must survive
+/// until every later stage that might `COPY --from`/`FROM` it has run.
+/// Returns the working container WHENEVER one was actually created — regardless
+/// of whether the stage's steps then succeeded — so the caller can always clean
+/// it up. A `RUN`/`COPY` failing partway through must not leak the container: it
+/// was already `create_with`'d and possibly `exec`'d into before the failing
+/// step, so there's real state (cgroup, namespaces, rootfs) to tear down.
+fn build_one_stage(
+    store: &Store,
+    images: &ImageStore,
+    context: &Path,
+    from: &str,
+    steps: &[Step],
+    stages: &HashMap<String, StageResult>,
+) -> (Option<Container>, Result<StageResult>) {
+    let id = generate_id();
+    let mut base = match resolve_stage_base(images, from, stages, &id) {
+        Ok(b) => b,
+        Err(e) => return (None, Err(e)),
+    };
+    let rootless = runtime::is_rootless();
+
+    // "Working" container: `sleep infinity` keeps the namespaces alive so we
+    // can `exec` each RUN; COPY writes directly to the rootfs on disk.
+    let mut c = Container::new(
+        id.clone(),
+        format!("dlx-build-{}", &id[..8.min(id.len())]),
+        from.to_string(),
+        vec!["/bin/sh".into(), "-c".into(), "sleep infinity".into()],
+        "max".into(),
+    );
+    c.userns = rootless;
+    let spec = RunSpec {
+        detach: true,
+        userns: rootless,
+        ..Default::default()
+    };
+    if let Err(e) = runtime::create_with(store, &mut c, &base.rootfs, &spec) {
+        return (None, Err(e));
+    }
+
+    let mut cur_env = base.env.clone();
+    let mut cur_workdir = base.workdir.clone();
+    let steps_result = run_steps(
+        steps,
+        &base.rootfs,
+        context,
+        &c,
+        &mut cur_env,
+        &mut cur_workdir,
+        stages,
+    );
+    let _ = runtime::stop(store, &mut c, 5);
+    match steps_result {
+        Ok(()) => {
+            base.env = cur_env;
+            base.workdir = cur_workdir;
+            (Some(c), Ok(base))
+        }
+        Err(e) => (Some(c), Err(e)),
+    }
+}
+
+/// The full orchestration of a build (parse → one working container per stage
+/// → RUN/COPY → commit). Extracted from `run()` to be reused by `delonix
 /// image apply` (`kind: Image`, `spec.build`) without duplicating logic.
 pub fn build_from_spec(context: &Path, dockerfile_path: &Path, tag: &str) -> Result<Image> {
     let (images, store) = open_stores()?;
@@ -74,65 +233,94 @@ pub fn build_from_spec(context: &Path, dockerfile_path: &Path, tag: &str) -> Res
         ))
     })?;
     let df = parse_dockerfile(&text)?;
-    if !df.stages.is_empty() {
-        return Err(Error::Invalid(
-            "build multi-stage (FROM ... AS <nome> seguido doutro FROM) ainda não é suportado \
-             por `delonix build` — só single-stage nesta versão"
-                .into(),
-        ));
+    let rootless = runtime::is_rootless();
+
+    // Fail fast (before building anything) in the one root-mode gap: the FINAL
+    // stage's `FROM` naming an earlier stage rather than a real image — see the
+    // module doc comment for why. Determined purely from `df`, no I/O needed.
+    if !rootless {
+        let final_from_is_stage = df
+            .stages
+            .iter()
+            .any(|s| s.name.as_deref() == Some(df.from.as_str()))
+            || df
+                .from
+                .parse::<usize>()
+                .is_ok_and(|i| i < df.stages.len());
+        if final_from_is_stage {
+            return Err(Error::Invalid(format!(
+                "build multi-stage em modo root (overlay): o estágio final (`FROM {}`) tem de ser \
+                 uma imagem real — `FROM <estágio-anterior>` no estágio final só é suportado em \
+                 rootless (sem lineage OCI a preservar)",
+                df.from
+            )));
+        }
     }
 
-    let base = resolve_or_pull(&images, &df.from)?;
-    let id = generate_id();
-    let rootless = runtime::is_rootless();
-    let rootfs = prepare_rootfs(&images, &base, &id)?;
+    let mut stages: HashMap<String, StageResult> = HashMap::new();
+    let mut work_containers: Vec<Container> = Vec::new();
 
-    // "Working" container: `sleep infinity` keeps the namespaces alive so we
-    // can `exec` each RUN; COPY writes directly to the rootfs on disk.
-    let mut c = Container::new(
-        id.clone(),
-        format!("dlx-build-{}", &id[..8.min(id.len())]),
-        df.from.clone(),
-        vec!["/bin/sh".into(), "-c".into(), "sleep infinity".into()],
-        "max".into(),
-    );
-    c.userns = rootless;
-    let spec = RunSpec {
-        detach: true,
-        userns: rootless,
-        ..Default::default()
-    };
-    runtime::create_with(&store, &mut c, &rootfs, &spec)?;
+    let build_result: Result<Image> = (|| {
+        for (idx, stage) in df.stages.iter().enumerate() {
+            let (c, result) =
+                build_one_stage(&store, &images, context, &stage.from, &stage.steps, &stages);
+            // Track the container for cleanup BEFORE propagating a step failure —
+            // otherwise a `RUN`/`COPY` that fails partway through leaks it (it was
+            // already created; only the caller's error handling would know to
+            // tear it down).
+            if let Some(c) = c {
+                work_containers.push(c);
+            }
+            let result = result?;
+            if let Some(name) = &stage.name {
+                stages.insert(name.clone(), result.clone());
+            }
+            stages.insert(idx.to_string(), result);
+        }
 
-    let steps_result = run_steps(&df.steps, &rootfs, context, &c, &base);
+        let (c, final_state) =
+            build_one_stage(&store, &images, context, &df.from, &df.steps, &stages);
+        if let Some(c) = c {
+            work_containers.push(c);
+        }
+        let final_state = final_state?;
+        let id = work_containers.last().unwrap().id.clone();
 
-    let commit_result = steps_result.and_then(|()| {
-        let _ = runtime::stop(&store, &mut c, 5);
         if rootless {
             let cmd = if df.cmd.is_empty() {
-                base.config.cmd.clone()
+                final_state.cmd.clone()
             } else {
                 df.cmd.clone()
             };
-            let mut env = base.config.env.clone();
+            let mut env = final_state.env.clone();
             env.extend(df.env.iter().cloned());
             let workdir = df
                 .workdir
                 .clone()
-                .unwrap_or_else(|| base.config.working_dir.clone());
-            commit_flat_rootless(&images, &rootfs, &id, cmd, env, workdir, tag)
+                .unwrap_or_else(|| final_state.workdir.clone());
+            commit_flat_rootless(&images, &final_state.rootfs, &id, cmd, env, workdir, tag)
         } else {
-            let layer = images.commit_upper(&c.id)?;
-            images.build_image(&base, layer, &df, tag)
+            let Some(base_image) = &final_state.image else {
+                return Err(Error::Invalid(format!(
+                    "build multi-stage em modo root (overlay): o estágio final (`FROM {}`) tem de \
+                     ser uma imagem real — `FROM <estágio-anterior>` no estágio final só é \
+                     suportado em rootless (sem lineage OCI a preservar)",
+                    df.from
+                )));
+            };
+            let layer = images.commit_upper(&id)?;
+            images.build_image(base_image, layer, &df, tag)
         }
-    });
+    })();
 
-    // Best-effort cleanup of the working container — never hides the build/commit
-    // error (the `?` below, over `commit_result`, is what decides the exit code).
-    let _ = runtime::remove(&store, &c, true);
-    let _ = images.unmount_rootfs(&c.id);
+    // Best-effort cleanup of EVERY stage's working container/rootfs — never
+    // hides the build/commit error (`build_result` alone decides the outcome).
+    for c in &work_containers {
+        let _ = runtime::remove(&store, c, true);
+        let _ = images.unmount_rootfs(&c.id);
+    }
 
-    commit_result
+    build_result
 }
 
 /// Packages and commits the FLAT rootfs of a **rootless** build, packaging it
@@ -200,14 +388,10 @@ fn run_steps(
     rootfs: &str,
     context: &Path,
     c: &Container,
-    base: &Image,
+    cur_env: &mut Vec<String>,
+    cur_workdir: &mut String,
+    stages: &HashMap<String, StageResult>,
 ) -> Result<()> {
-    let mut cur_env: Vec<String> = base.config.env.clone();
-    let mut cur_workdir = if base.config.working_dir.is_empty() {
-        "/".to_string()
-    } else {
-        base.config.working_dir.clone()
-    };
     for step in steps {
         match step {
             Step::Env { key, val } => {
@@ -216,19 +400,41 @@ fn run_steps(
                 cur_env.push(format!("{key}={val}"));
             }
             Step::Workdir(dir) => {
-                cur_workdir = if dir.starts_with('/') {
+                *cur_workdir = if dir.starts_with('/') {
                     dir.clone()
                 } else {
                     format!("{cur_workdir}/{dir}")
                 };
             }
             Step::Copy { src, dst, from } => {
-                if from.is_some() {
-                    return Err(Error::Invalid(
-                        "COPY --from=<estágio> requer build multi-stage, não suportado nesta versão".into(),
-                    ));
+                match from {
+                    // `COPY --from=<name-or-index>`: read from an EARLIER stage's
+                    // rootfs (kept alive on disk for exactly this) instead of the
+                    // build context. `copy_into_rootfs` already takes an
+                    // arbitrary "source root" — no change needed there.
+                    Some(stage_ref) => {
+                        let src_stage = stages.get(stage_ref).ok_or_else(|| {
+                            Error::Invalid(format!(
+                                "COPY --from={stage_ref}: estágio desconhecido (só estágios \
+                                 JÁ definidos antes deste ponto do Dockerfile são visíveis)"
+                            ))
+                        })?;
+                        // Unlike a plain `COPY` (src relative to the build context), Docker's
+                        // `--from=<stage>` takes `src` rooted at that STAGE's `/` — the leading
+                        // `/` here means "the stage's filesystem root", not "reject as
+                        // absolute" (which is what `safe_join`/`copy_into_rootfs` do for a
+                        // plain COPY's context-relative src).
+                        let stage_rel = src.trim_start_matches('/');
+                        copy_into_rootfs(
+                            Path::new(&src_stage.rootfs),
+                            rootfs,
+                            stage_rel,
+                            dst,
+                            cur_workdir,
+                        )?;
+                    }
+                    None => copy_into_rootfs(context, rootfs, src, dst, cur_workdir)?,
                 }
-                copy_into_rootfs(context, rootfs, src, dst, &cur_workdir)?;
             }
             Step::Run(cmdline) => {
                 let exports: String = cur_env.iter().map(|kv| sh_export(kv)).collect();
