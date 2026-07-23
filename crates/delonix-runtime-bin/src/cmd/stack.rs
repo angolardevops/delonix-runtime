@@ -364,6 +364,9 @@ fn apply(file: Option<PathBuf>) -> Result<()> {
     super::network::apply(&docs)?;
     super::volume::apply(&docs)?;
     super::storage::apply(&docs)?;
+    // ShareVolume right after Storage: it carves subdirectories out of an
+    // already-mounted Storage, so the parent must exist first.
+    super::sharevolume::apply(&docs)?;
     super::image::apply(&docs)?;
     super::vm::apply(&docs)?;
     super::container::apply(&docs)?;

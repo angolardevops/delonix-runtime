@@ -93,6 +93,12 @@ enum Cmd {
         #[command(subcommand)]
         action: cmd::storage::StorageCmd,
     },
+    /// An isolated, individually-quota'd slice of a `Storage` — multiple
+    /// container/vm/pod share ONE NAS export without seeing each other's data.
+    Sharevolume {
+        #[command(subcommand)]
+        action: cmd::sharevolume::ShareVolumeCmd,
+    },
     /// Apply a whole manifest (`delonix-manifest.yaml`) — every Kind, in dependency order.
     Stack {
         #[command(subcommand)]
@@ -262,6 +268,7 @@ fn run() -> Result<()> {
         Cmd::Network { action } => cmd::network::run(action),
         Cmd::Secret { action } => cmd::secret::run(action),
         Cmd::Storage { action } => cmd::storage::run(action),
+        Cmd::Sharevolume { action } => cmd::sharevolume::run(action),
         Cmd::Stack { action } => cmd::stack::run(action),
         Cmd::System { action } => cmd::system::run(action),
         Cmd::Cluster { action } => cmd::cluster::run(action),

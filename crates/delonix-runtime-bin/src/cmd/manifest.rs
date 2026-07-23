@@ -150,6 +150,8 @@ struct StackSpec {
     volumes: Vec<StackItem>,
     #[serde(default)]
     storage: Vec<StackItem>,
+    #[serde(default, rename = "shareVolumes")]
+    share_volumes: Vec<StackItem>,
     #[serde(default)]
     images: Vec<StackItem>,
     #[serde(default)]
@@ -188,6 +190,7 @@ pub const STACK_SPEC_FIELDS: &[&str] = &[
     "networks",
     "volumes",
     "storage",
+    "shareVolumes",
     "images",
     "vms",
     "containers",
@@ -212,6 +215,7 @@ fn expand_stack(doc: &ManifestDoc) -> Result<Vec<ManifestDoc>> {
         ("Network", spec.networks),
         ("Volume", spec.volumes),
         ("Storage", spec.storage),
+        ("ShareVolume", spec.share_volumes),
         ("Image", spec.images),
         ("Vm", spec.vms),
         ("Container", spec.containers),

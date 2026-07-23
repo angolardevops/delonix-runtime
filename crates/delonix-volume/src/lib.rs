@@ -125,6 +125,52 @@ impl VolumeStore {
         self.create_with(name, "local", None, None)
     }
 
+    /// Registers a volume whose data lives at an EXTERNAL `mountpoint` (not
+    /// this store's own `<name>/_data` convention) — the base for
+    /// `kind: ShareVolume` (`cmd::sharevolume` in the bin crate): a dedicated,
+    /// ISOLATED subdirectory of an already-mounted `kind: Storage`, so N
+    /// tenants can share one NFS/CIFS/WebDAV export without seeing each
+    /// other's data (plain path confinement — a container that only ever
+    /// bind-mounts ITS subdirectory cannot reach a sibling's). Idempotent:
+    /// re-registering the same name updates `quota_bytes`/`alert_pct`
+    /// in place rather than erroring, so a `ShareVolume` manifest's re-`apply`
+    /// with a bumped quota just works. `mountpoint` is created if missing;
+    /// this store never manages ITS lifecycle beyond that — `remove()` only
+    /// ever deletes this record's OWN bookkeeping dir (`<root>/<name>/`), not
+    /// `mountpoint`, so removing a share never touches the shared data.
+    pub fn register_external(
+        &self,
+        name: &str,
+        mountpoint: &std::path::Path,
+        quota_bytes: Option<u64>,
+        alert_pct: Option<u8>,
+    ) -> Result<Volume> {
+        if !Self::valid_name(name) {
+            return Err(Error::Invalid(format!("invalid volume name: {name:?}")));
+        }
+        fs::create_dir_all(mountpoint)?;
+        fs::create_dir_all(self.dir(name))?; // this store's own per-name bookkeeping dir
+        let vol = if let Ok(mut existing) = self.inspect(name) {
+            existing.mountpoint = mountpoint.to_string_lossy().into_owned();
+            existing.quota_bytes = quota_bytes;
+            existing.alert_pct = alert_pct;
+            existing
+        } else {
+            Volume {
+                name: name.to_string(),
+                mountpoint: mountpoint.to_string_lossy().into_owned(),
+                created_unix: now_unix(),
+                driver: "local".to_string(),
+                device: None,
+                options: None,
+                quota_bytes,
+                alert_pct,
+            }
+        };
+        fs::write(self.meta_path(name), serde_json::to_vec_pretty(&vol)?)?;
+        Ok(vol)
+    }
+
     /// Creates a volume with a driver (`local`/`nfs`). For `nfs`, it immediately
     /// mounts the *export* (`server:/path`) into the data directory — useful to
     /// connect to a TrueNAS or another NFS server. Idempotent.
@@ -348,33 +394,33 @@ impl VolumeStore {
     /// REAL usage in bytes of the volume (`du` of `_data`, recursive). For volumes with
     /// loopback, reflects what is used inside the ext4; for local ones, the data size.
     pub fn usage(&self, name: &str) -> u64 {
-        fn walk(p: &std::path::Path) -> u64 {
-            let mut total = 0u64;
-            if let Ok(rd) = fs::read_dir(p) {
-                for e in rd.flatten() {
-                    let Ok(ft) = e.file_type() else { continue };
-                    if ft.is_dir() {
-                        total += walk(&e.path());
-                    } else if let Ok(m) = e.metadata() {
-                        total += m.len();
-                    }
-                }
-            }
-            total
-        }
-        walk(&self.data_dir(name))
+        dir_usage(&self.data_dir(name))
+    }
+
+    /// Like [`Self::usage`], but for ANY path — not just this store's own
+    /// `<name>/_data` convention. Lets a caller (e.g. `kind: ShareVolume`,
+    /// which registers volumes via [`Self::register_external`] with a
+    /// `mountpoint` OUTSIDE this store) measure the SAME way without
+    /// duplicating the walk.
+    pub fn usage_at(&self, path: &std::path::Path) -> u64 {
+        dir_usage(path)
     }
 
     /// Is the volume at (or above) the alert threshold? `(in_alert, above_quota)`.
     pub fn quota_state(&self, vol: &Volume) -> (bool, bool) {
-        match vol.quota_bytes {
-            Some(q) if q > 0 => {
-                let used = self.usage(&vol.name);
-                let pct = vol.alert_pct.unwrap_or(90) as u64;
-                (used * 100 >= q * pct, used >= q)
-            }
-            _ => (false, false),
-        }
+        quota_state_of(self.usage(&vol.name), vol.quota_bytes, vol.alert_pct)
+    }
+
+    /// Like [`Self::quota_state`], parameterized directly instead of reading
+    /// a stored [`Volume`] — for a caller tracking quota against an external
+    /// path/limit of its own (see [`Self::usage_at`]).
+    pub fn quota_state_at(
+        &self,
+        path: &std::path::Path,
+        quota_bytes: Option<u64>,
+        alert_pct: Option<u8>,
+    ) -> (bool, bool) {
+        quota_state_of(self.usage_at(path), quota_bytes, alert_pct)
     }
 
     fn run(cmd: &str, args: &[&str]) -> Result<()> {
@@ -561,6 +607,35 @@ impl VolumeStore {
     }
 }
 
+/// Recursive directory size in bytes — the shared implementation behind
+/// [`VolumeStore::usage`]/[`VolumeStore::usage_at`].
+fn dir_usage(p: &std::path::Path) -> u64 {
+    let mut total = 0u64;
+    if let Ok(rd) = fs::read_dir(p) {
+        for e in rd.flatten() {
+            let Ok(ft) = e.file_type() else { continue };
+            if ft.is_dir() {
+                total += dir_usage(&e.path());
+            } else if let Ok(m) = e.metadata() {
+                total += m.len();
+            }
+        }
+    }
+    total
+}
+
+/// `(in_alert, above_quota)` from a measured `used` against `quota_bytes`/`alert_pct`
+/// — the shared implementation behind [`VolumeStore::quota_state`]/[`VolumeStore::quota_state_at`].
+fn quota_state_of(used: u64, quota_bytes: Option<u64>, alert_pct: Option<u8>) -> (bool, bool) {
+    match quota_bytes {
+        Some(q) if q > 0 => {
+            let pct = alert_pct.unwrap_or(90) as u64;
+            (used * 100 >= q * pct, used >= q)
+        }
+        _ => (false, false),
+    }
+}
+
 fn now_unix() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -632,6 +707,39 @@ mod tests {
         std::fs::write(s.data_dir("qv").join("g"), vec![0u8; 200]).unwrap();
         let (_, over2) = s.quota_state(&v);
         assert!(over2, "1150/1000 deve estar acima da quota");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn register_external_aponta_para_fora_e_e_idempotente() {
+        let (s, dir) = store();
+        let external = dir.join("shares").join("tenant-a");
+        let v = s
+            .register_external("share-a", &external, Some(1000), Some(80))
+            .unwrap();
+        assert_eq!(v.mountpoint, external.to_string_lossy());
+        assert!(external.exists(), "o mountpoint externo devia ter sido criado");
+        // Re-registering (a `ShareVolume` re-`apply`) updates quota in place,
+        // does not error, and keeps pointing at the SAME external path.
+        let v2 = s
+            .register_external("share-a", &external, Some(2000), Some(90))
+            .unwrap();
+        assert_eq!(v2.quota_bytes, Some(2000));
+        assert_eq!(v2.mountpoint, external.to_string_lossy());
+
+        // usage_at/quota_state_at measure the EXTERNAL path directly.
+        std::fs::write(external.join("f"), vec![0u8; 1900]).unwrap();
+        assert_eq!(s.usage_at(&external), 1900);
+        let (warn, over) = s.quota_state_at(&external, Some(2000), Some(90));
+        assert!(warn && !over, "1900/2000 devia estar em alerta mas não acima");
+
+        // `remove` deletes ONLY this store's own bookkeeping dir — the
+        // external data (the shared Storage's real subdirectory) survives.
+        s.remove("share-a").unwrap();
+        assert!(
+            external.exists(),
+            "remove() nunca deve tocar num mountpoint externo"
+        );
         let _ = std::fs::remove_dir_all(dir);
     }
 
