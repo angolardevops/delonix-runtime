@@ -64,9 +64,45 @@ pub fn serve_blocking_with(base: PathBuf, bin: PathBuf, addr: &str) -> Result<()
             context: "bind",
             message: e.to_string(),
         })?;
+        // SECURITY: this is the highest-privilege surface in the runtime — every
+        // route (including `/v1/containers/:id/exec`, arbitrary code execution
+        // inside any container) was reachable by ANY local process, gated only by
+        // the ambient umask at bind time. Mirror the holder's control socket
+        // (`delonix-net::infra::holder_main`): 0600 file mode + `SO_PEERCRED` on
+        // every accepted connection, checked in `serve_over_uds` below.
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
         eprintln!("delonix-mgmt (management API) listening on unix://{path}");
         serve_over_uds(uds, router(AppState { base, bin })).await
     })
+}
+
+/// uid of the peer of a unix connection (via `SO_PEERCRED`). `None` on failure.
+/// Same mechanism as `delonix-net::infra::peer_uid`, adapted to `tokio::net::UnixStream`
+/// (the raw fd check is identical regardless of sync/async).
+fn peer_uid(stream: &tokio::net::UnixStream) -> Option<u32> {
+    use std::os::unix::io::AsRawFd;
+    let mut cred = libc::ucred {
+        pid: 0,
+        uid: 0,
+        gid: 0,
+    };
+    let mut len = std::mem::size_of::<libc::ucred>() as libc::socklen_t;
+    // SAFETY: getsockopt on SO_PEERCRED with a correctly-sized ucred buffer.
+    let r = unsafe {
+        libc::getsockopt(
+            stream.as_raw_fd(),
+            libc::SOL_SOCKET,
+            libc::SO_PEERCRED,
+            &mut cred as *mut libc::ucred as *mut libc::c_void,
+            &mut len,
+        )
+    };
+    if r == 0 {
+        Some(cred.uid)
+    } else {
+        None
+    }
 }
 
 /// Serves an axum `Router` over a `UnixListener` (`axum::serve` only accepts TCP;
@@ -75,12 +111,20 @@ async fn serve_over_uds(uds: tokio::net::UnixListener, app: Router) -> Result<()
     use hyper::body::Incoming;
     use hyper_util::rt::{TokioExecutor, TokioIo};
     use tower::Service;
+    // SAFETY: geteuid() has no preconditions.
+    let own_uid = unsafe { libc::geteuid() };
     let mut make = app.into_make_service();
     loop {
         let (socket, _) = uds.accept().await.map_err(|e| Error::Runtime {
             context: "accept",
             message: e.to_string(),
         })?;
+        // Reject any peer that isn't this process's own euid BEFORE it ever reaches
+        // the router — a mismatched umask/`/run` placement must not turn into a
+        // full control-plane RCE for any local user.
+        if peer_uid(&socket) != Some(own_uid) {
+            continue;
+        }
         // `into_make_service` is infallible → the connection service never fails here.
         let tower_service = match make.call(&socket).await {
             Ok(svc) => svc,

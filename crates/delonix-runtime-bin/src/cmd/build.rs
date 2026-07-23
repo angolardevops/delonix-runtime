@@ -272,6 +272,57 @@ fn safe_join(base: &Path, rel: &str) -> Result<PathBuf> {
     Ok(out)
 }
 
+/// Resolves `path` to its real, symlink-free location and refuses if that would
+/// land outside `canon_base` (already canonicalized). SECURITY: `safe_join` only
+/// rejects LEXICAL `..`/absolute components in the REQUESTED path — it says
+/// nothing about a symlink already sitting on disk that the lexical path walks
+/// through (build context or rootfs from an earlier layer). Two concrete escapes
+/// this closes: a build-context entry `creds -> /home/u/.ssh/id_rsa` baking the
+/// host's private key into an image via `COPY creds /app/creds`; and a rootfs
+/// symlink `/opt/hook -> ../../../../home/u/.bashrc` shipped by a malicious `FROM`
+/// image, overwritten by a later `COPY payload /opt/hook`. `path` need not exist
+/// yet (the destination side of a COPY usually doesn't) — walks up to the nearest
+/// EXISTING ancestor, canonicalizes THAT, and re-appends the non-existent tail
+/// (which by definition can't itself be a symlink).
+fn confine_to(canon_base: &Path, path: &Path) -> Result<PathBuf> {
+    let mut existing: &Path = path;
+    let mut tail: Vec<std::ffi::OsString> = Vec::new();
+    loop {
+        match existing.canonicalize() {
+            Ok(canon) => {
+                let mut real = canon;
+                for t in tail.into_iter().rev() {
+                    real.push(t);
+                }
+                if !real.starts_with(canon_base) {
+                    return Err(Error::Invalid(format!(
+                        "'{}' sai do directório permitido através de um symlink",
+                        path.display()
+                    )));
+                }
+                return Ok(real);
+            }
+            Err(_) => {
+                let Some(name) = existing.file_name() else {
+                    return Err(Error::Invalid(format!(
+                        "caminho inválido em COPY: '{}'",
+                        path.display()
+                    )));
+                };
+                tail.push(name.to_os_string());
+                existing = existing.parent().ok_or_else(|| {
+                    Error::Invalid(format!("caminho inválido em COPY: '{}'", path.display()))
+                })?;
+            }
+        }
+    }
+}
+
+fn canonical_base(p: &Path) -> Result<PathBuf> {
+    p.canonicalize()
+        .map_err(|e| Error::Invalid(format!("resolver {}: {e}", p.display())))
+}
+
 fn copy_into_rootfs(
     context: &Path,
     rootfs: &str,
@@ -279,7 +330,11 @@ fn copy_into_rootfs(
     dst: &str,
     workdir: &str,
 ) -> Result<()> {
+    let canon_context = canonical_base(context)?;
+    let canon_rootfs = canonical_base(Path::new(rootfs))?;
+
     let src_path = safe_join(context, src)?;
+    let src_path = confine_to(&canon_context, &src_path)?;
     // Docker semantics of the destination: a relative `dst` resolves against the WORKDIR
     // (`COPY x ./` → WORKDIR/x, not the rootfs root); a `dst` ending in `/`
     // (or being a directory) keeps the basename of `src` inside it.
@@ -291,13 +346,15 @@ fn copy_into_rootfs(
     };
     let mut dst_path = safe_join(Path::new(rootfs), abs_dst.trim_start_matches('/'))?;
     if src_path.is_dir() {
-        copy_dir_all(&src_path, &dst_path)
+        let dst_path = confine_to(&canon_rootfs, &dst_path)?;
+        copy_dir_all(&src_path, &dst_path, &canon_context, &canon_rootfs)
     } else {
         if dir_dest || dst_path.is_dir() {
             if let Some(name) = src_path.file_name() {
                 dst_path.push(name);
             }
         }
+        let dst_path = confine_to(&canon_rootfs, &dst_path)?;
         if let Some(parent) = dst_path.parent() {
             std::fs::create_dir_all(parent)
                 .map_err(|e| Error::Invalid(format!("mkdir {}: {e}", parent.display())))?;
@@ -313,7 +370,7 @@ fn copy_into_rootfs(
     }
 }
 
-fn copy_dir_all(src: &Path, dst: &Path) -> Result<()> {
+fn copy_dir_all(src: &Path, dst: &Path, canon_context: &Path, canon_rootfs: &Path) -> Result<()> {
     std::fs::create_dir_all(dst)
         .map_err(|e| Error::Invalid(format!("mkdir {}: {e}", dst.display())))?;
     for entry in
@@ -323,11 +380,15 @@ fn copy_dir_all(src: &Path, dst: &Path) -> Result<()> {
         let ty = entry
             .file_type()
             .map_err(|e| Error::Invalid(e.to_string()))?;
-        let target = dst.join(entry.file_name());
+        // A NESTED entry can itself be a symlink escaping the tree, even though the
+        // top-level src/dst of this COPY already passed `confine_to` — validate every
+        // entry, not just the root.
+        let entry_path = confine_to(canon_context, &entry.path())?;
+        let target = confine_to(canon_rootfs, &dst.join(entry.file_name()))?;
         if ty.is_dir() {
-            copy_dir_all(&entry.path(), &target)?;
+            copy_dir_all(&entry_path, &target, canon_context, canon_rootfs)?;
         } else {
-            std::fs::copy(entry.path(), &target).map_err(|e| Error::Invalid(e.to_string()))?;
+            std::fs::copy(&entry_path, &target).map_err(|e| Error::Invalid(e.to_string()))?;
         }
     }
     Ok(())
@@ -335,7 +396,7 @@ fn copy_dir_all(src: &Path, dst: &Path) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{default_build_file, safe_join, sh_export};
+    use super::{confine_to, default_build_file, safe_join, sh_export};
     use std::path::Path;
 
     #[test]
@@ -377,6 +438,36 @@ mod tests {
         // `Path::join` with an absolute component ignores `base` entirely).
         let base = Path::new("/tmp/rootfs");
         assert!(safe_join(base, "/etc/passwd").is_err());
+    }
+
+    #[test]
+    fn confine_to_recusa_symlink_que_escapa_da_base() {
+        // Regression for the audit finding: `safe_join` only rejects lexical `..` in
+        // the REQUESTED path — a symlink already on disk (planted by an earlier
+        // build-context entry or a malicious `FROM` image layer) could still walk
+        // out. `confine_to` must catch it even though the requested relative path
+        // itself never contained `..`.
+        let dir = std::env::temp_dir().join(format!("delonix-confine-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let base = dir.join("base");
+        let outside = dir.join("outside");
+        std::fs::create_dir_all(&base).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(outside.join("secret"), b"top secret").unwrap();
+        std::os::unix::fs::symlink(&outside, base.join("escape")).unwrap();
+
+        let canon_base = base.canonicalize().unwrap();
+        // Existing target reached via the symlink: rejected.
+        assert!(confine_to(&canon_base, &base.join("escape/secret")).is_err());
+        // Non-existent target reached via the symlink (the COPY destination case,
+        // where the final component doesn't exist yet): still rejected — the walk
+        // up the ancestor chain hits `escape` (which DOES exist and resolves
+        // outside `base`) before it ever reaches a real filesystem boundary.
+        assert!(confine_to(&canon_base, &base.join("escape/not-yet-created")).is_err());
+        // A normal, non-symlinked path stays accepted.
+        assert!(confine_to(&canon_base, &base.join("plain/not-yet-created")).is_ok());
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

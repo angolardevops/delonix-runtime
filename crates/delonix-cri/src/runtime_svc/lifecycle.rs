@@ -142,7 +142,24 @@ fn stderr_not_found(stderr: &[u8]) -> bool {
         || e.contains("não existe")
 }
 
+/// Whitelist for CRI ids (`container_id`/`pod_sandbox_id`) used to build filesystem
+/// paths (`<dir>/<id>.json`). SECURITY: these ids come straight from CRI requests —
+/// a compromised/malicious kubelet (or anyone with access to the CRI socket) could
+/// send `container_id: "../../../../home/<u>/somefile"` and reach paths outside
+/// `ct_dir`/`sb_dir`. Mirrors `delonix_vm::valid_vm_name` and `Store::safe_key`.
+fn valid_cri_id(id: &str) -> bool {
+    !id.is_empty()
+        && id != "."
+        && id != ".."
+        && id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+}
+
 fn write_rec<T: Serialize>(dir: &Path, id: &str, rec: &T) -> Result<(), Status> {
+    if !valid_cri_id(id) {
+        return Err(Status::invalid_argument(format!("invalid id: {id:?}")));
+    }
     std::fs::create_dir_all(dir).map_err(st)?;
     let bytes = serde_json::to_vec_pretty(rec).map_err(st)?;
     // ATOMIC write (temp + rename): the CRI server is multi-threaded, and a
@@ -154,9 +171,20 @@ fn write_rec<T: Serialize>(dir: &Path, id: &str, rec: &T) -> Result<(), Status> 
     std::fs::rename(&tmp, &final_path).map_err(st)
 }
 fn read_rec<T: for<'de> Deserialize<'de>>(dir: &Path, id: &str) -> Result<T, Status> {
+    if !valid_cri_id(id) {
+        return Err(Status::invalid_argument(format!("invalid id: {id:?}")));
+    }
     let data = std::fs::read(dir.join(format!("{id}.json")))
         .map_err(|_| Status::not_found(format!("{id} not found")))?;
     serde_json::from_slice(&data).map_err(st)
+}
+/// Guarded `remove_file` for the raw (non-`write_rec`) deletion call sites — same
+/// whitelist, silently skipped (best-effort, matching the existing `let _ =` style)
+/// rather than erroring, since these run during cleanup paths that must not abort.
+fn remove_rec(dir: &Path, id: &str) {
+    if valid_cri_id(id) {
+        let _ = std::fs::remove_file(dir.join(format!("{id}.json")));
+    }
 }
 fn list_recs<T: for<'de> Deserialize<'de>>(dir: &Path) -> Vec<T> {
     let mut out = Vec::new();
@@ -368,7 +396,7 @@ pub fn remove_pod_sandbox(
     for c in list_recs::<ContainerRec>(&ct_dir(base)) {
         if c.sandbox_id == id {
             let _ = delonix(base, &["container", "rm", "-f", &format!("cri-{}", c.id)]);
-            let _ = std::fs::remove_file(ct_dir(base).join(format!("{}.json", c.id)));
+            remove_rec(&ct_dir(base), &c.id);
         }
     }
     // Remove the real Delonix pod (infra container + netns), if it existed.
@@ -387,7 +415,7 @@ pub fn remove_pod_sandbox(
             }
         }
     }
-    let _ = std::fs::remove_file(sb_dir(base).join(format!("{id}.json")));
+    remove_rec(&sb_dir(base), &id);
     Ok(Response::new(RemovePodSandboxResponse {}))
 }
 
@@ -742,7 +770,7 @@ pub fn remove_container(
             String::from_utf8_lossy(&out.stderr).trim()
         )));
     }
-    let _ = std::fs::remove_file(ct_dir(base).join(format!("{id}.json")));
+    remove_rec(&ct_dir(base), &id);
     Ok(Response::new(RemoveContainerResponse {}))
 }
 
