@@ -30,6 +30,7 @@ pub mod secret;
 pub mod stack;
 pub mod storage;
 pub mod system;
+pub mod tunnel;
 pub mod util;
 pub mod vm;
 pub mod vmbridge;

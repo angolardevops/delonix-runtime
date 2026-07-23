@@ -375,6 +375,9 @@ fn apply(file: Option<PathBuf>) -> Result<()> {
     // HTTPRoute LAST: it needs the backend containers already created (with IP) to
     // resolve the routes; brings up/reloads the L7 reverse-proxy.
     super::httproute::apply(&docs)?;
+    // Tunnel LAST of all: its `localPort` is typically the HTTPRoute proxy's own
+    // listening port (see `cmd::tunnel`'s module doc) — must already be up.
+    super::tunnel::apply(&docs)?;
     // After creating everything, say what was created but will NOT work as it
     // appears without a host prerequisite (network mount in rootless, etc.) —
     // it is here, in the real creation flow, that the user needs to know it.

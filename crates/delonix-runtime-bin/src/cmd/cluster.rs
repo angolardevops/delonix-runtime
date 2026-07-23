@@ -25,6 +25,16 @@ use super::util::state_root;
 use super::vmimage::VmImageStore;
 use super::{k8s_recipes, vm as vm_cmd, vmimage};
 
+/// `kubeadm` only auto-detects a CRI socket among a hardcoded list of
+/// well-known paths (containerd/CRI-O/dockershim) — `delonix-cri`'s socket
+/// (`dist/delonix-cri.service`'s `DELONIX_CRI_ADDR`) isn't one of them, so
+/// without `--cri-socket` explicitly on BOTH `kubeadm init` and `kubeadm
+/// join`, preflight fails trying to dial containerd's socket, which doesn't
+/// exist on this image. Found live, first real end-to-end run of `cluster
+/// kubeadm`/`cluster apply` (mode: vm) — this path had never gotten past VM
+/// provisioning before (see CLAUDE.md's "sem teste end-to-end real" note).
+const DELONIX_CRI_SOCKET: &str = "unix:///run/delonix-cri.sock";
+
 #[derive(Debug, Deserialize)]
 struct SshSpec {
     #[serde(default = "default_ssh_user")]
@@ -1127,6 +1137,7 @@ fn kubeadm_init(
         .unwrap_or_default();
     let cmd = format!(
         "kubeadm init --control-plane-endpoint={endpoint} --upload-certs \
+         --cri-socket={DELONIX_CRI_SOCKET} \
          --pod-network-cidr={} --service-cidr={}{k8s_ver_flag}",
         spec.pod_subnet, spec.service_subnet
     );
@@ -1205,7 +1216,8 @@ fn kubeadm_join(
         return Ok(());
     }
     let mut cmd = format!(
-        "kubeadm join {endpoint}:6443 --token {} --discovery-token-ca-cert-hash {}",
+        "kubeadm join {endpoint}:6443 --token {} --discovery-token-ca-cert-hash {} \
+         --cri-socket={DELONIX_CRI_SOCKET}",
         info.token, info.ca_cert_hash
     );
     if as_control_plane {
