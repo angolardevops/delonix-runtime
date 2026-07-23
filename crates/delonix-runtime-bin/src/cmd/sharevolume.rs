@@ -195,7 +195,9 @@ fn cmd_ls(vstore: &VolumeStore, sstore: &JsonStore<ShareRecord>) -> Result<()> {
         t.row(vec![
             rec.name,
             rec.storage_ref,
-            rec.quota_bytes.map(output::fmt_size).unwrap_or_else(|| "-".to_string()),
+            rec.quota_bytes
+                .map(output::fmt_size)
+                .unwrap_or_else(|| "-".to_string()),
             output::fmt_size(used),
             alert_label(warn, over).to_string(),
             rec.mountpoint,
@@ -207,9 +209,9 @@ fn cmd_ls(vstore: &VolumeStore, sstore: &JsonStore<ShareRecord>) -> Result<()> {
 
 fn cmd_describe(vstore: &VolumeStore, sstore: &JsonStore<ShareRecord>, name: &str) -> Result<()> {
     let rec = sstore.load(name).map_err(|e| match e {
-        Error::NotFound(n) => {
-            Error::Invalid(format!("no such sharevolume: {n} (see `delonix sharevolume ls`)"))
-        }
+        Error::NotFound(n) => Error::Invalid(format!(
+            "no such sharevolume: {n} (see `delonix sharevolume ls`)"
+        )),
         e => e,
     })?;
     let path = Path::new(&rec.mountpoint);
@@ -232,7 +234,10 @@ fn cmd_describe(vstore: &VolumeStore, sstore: &JsonStore<ShareRecord>, name: &st
         },
     );
     d.field("Created", output::fmt_local(rec.created_unix));
-    d.field("Consume with", format!("-v {}:/path/in/container", rec.name));
+    d.field(
+        "Consume with",
+        format!("-v {}:/path/in/container", rec.name),
+    );
     d.print();
     Ok(())
 }
@@ -244,9 +249,9 @@ fn cmd_rm(
     purge_data: bool,
 ) -> Result<()> {
     let rec = sstore.load(name).map_err(|e| match e {
-        Error::NotFound(n) => {
-            Error::Invalid(format!("no such sharevolume: {n} (see `delonix sharevolume ls`)"))
-        }
+        Error::NotFound(n) => Error::Invalid(format!(
+            "no such sharevolume: {n} (see `delonix sharevolume ls`)"
+        )),
         e => e,
     })?;
     // Best-effort: `remove` only ever deletes THIS store's own bookkeeping
@@ -330,7 +335,10 @@ mod tests {
 
         let a = sstore.load("tenant-a").unwrap();
         let b = sstore.load("tenant-b").unwrap();
-        assert_ne!(a.mountpoint, b.mountpoint, "cada tenant tem o SEU subdirectório");
+        assert_ne!(
+            a.mountpoint, b.mountpoint,
+            "cada tenant tem o SEU subdirectório"
+        );
         assert!(a.mountpoint.contains("nas-shared"));
         assert!(a.mountpoint.ends_with("tenant-a"));
         assert_eq!(a.quota_bytes, Some(1024 * 1024));
@@ -358,7 +366,10 @@ mod tests {
         std::fs::write(Path::new(&mountpoint).join("f"), b"data").unwrap();
 
         cmd_rm(&vstore, &sstore, "tenant-a", false).unwrap();
-        assert!(sstore.load("tenant-a").is_err(), "o registo devia ter desaparecido");
+        assert!(
+            sstore.load("tenant-a").is_err(),
+            "o registo devia ter desaparecido"
+        );
         assert!(
             Path::new(&mountpoint).join("f").exists(),
             "sem --purge-data os dados devem sobreviver"

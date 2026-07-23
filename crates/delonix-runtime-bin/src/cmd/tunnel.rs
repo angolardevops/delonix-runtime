@@ -64,8 +64,13 @@ struct TunnelSpec {
     token_secret_ref: Option<String>,
 }
 
-pub const TUNNEL_SPEC_FIELDS: &[&str] =
-    &["provider", "localPort", "hostname", "token", "tokenSecretRef"];
+pub const TUNNEL_SPEC_FIELDS: &[&str] = &[
+    "provider",
+    "localPort",
+    "hostname",
+    "token",
+    "tokenSecretRef",
+];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct TunnelRecord {
@@ -255,7 +260,10 @@ fn apply_one(name: &str, spec: &TunnelSpec) -> Result<()> {
             println!(
                 "tunnel/{name}: {} — {}",
                 super::po::t("already running"),
-                existing.public_url.as_deref().unwrap_or("(a determinar URL...)")
+                existing
+                    .public_url
+                    .as_deref()
+                    .unwrap_or("(a determinar URL...)")
             );
             return Ok(());
         }
@@ -287,9 +295,9 @@ fn apply_one(name: &str, spec: &TunnelSpec) -> Result<()> {
     println!(
         "tunnel/{name}: {} — {}",
         super::po::t("running"),
-        rec.public_url.as_deref().unwrap_or(
-            "(URL ainda não confirmada — ver `delonix tunnel describe` / o log)"
-        )
+        rec.public_url
+            .as_deref()
+            .unwrap_or("(URL ainda não confirmada — ver `delonix tunnel describe` / o log)")
     );
     Ok(())
 }
@@ -316,10 +324,7 @@ fn spawn_and_capture(
         message: e.to_string(),
     })?;
     let mut cmd = Command::new(bin);
-    cmd.args(args)
-        .stdin(Stdio::null())
-        .stdout(log)
-        .stderr(log2);
+    cmd.args(args).stdin(Stdio::null()).stdout(log).stderr(log2);
     // SAFETY: setsid in the child (post-fork, pre-exec) detaches it from this
     // process so it survives the CLI exiting — same pattern as `ingress_proxy`.
     unsafe {
@@ -366,7 +371,11 @@ fn spawn_and_capture(
 fn find_url_where(text: &str, keep: impl Fn(&str) -> bool) -> Option<String> {
     text.split(|c: char| c.is_whitespace() || matches!(c, '"' | '\'' | '(' | ')' | '<' | '>'))
         .filter(|w| w.starts_with("https://"))
-        .map(|w| w.trim_end_matches(|c: char| !(c.is_ascii_alphanumeric() || matches!(c, '/' | '.' | '-' | ':'))))
+        .map(|w| {
+            w.trim_end_matches(|c: char| {
+                !(c.is_ascii_alphanumeric() || matches!(c, '/' | '.' | '-' | ':'))
+            })
+        })
         .find(|w| keep(w))
         .map(str::to_string)
 }
@@ -415,7 +424,9 @@ fn spawn_pinggy(rec: &mut TunnelRecord, token: Option<&str>) -> Result<()> {
     // robust signal: whatever the assigned domain looks like this time, it
     // is not that one fixed host.
     spawn_and_capture(rec, "ssh", &args, |t| {
-        find_url_where(t, |u| u.contains("pinggy") && !u.contains("dashboard.pinggy.io"))
+        find_url_where(t, |u| {
+            u.contains("pinggy") && !u.contains("dashboard.pinggy.io")
+        })
     })
 }
 
@@ -488,9 +499,9 @@ fn pick_free_ngrok_web_port(store: &JsonStore<TunnelRecord>) -> Result<u16> {
         .filter(|r| r.provider == "ngrok" && is_alive(r))
         .filter_map(|r| r.agent_web_port)
         .collect();
-    (4040..4140)
-        .find(|p| !used.contains(p))
-        .ok_or_else(|| Error::Invalid("sem porta livre para o agente ngrok (4040-4139 todas em uso)".into()))
+    (4040..4140).find(|p| !used.contains(p)).ok_or_else(|| {
+        Error::Invalid("sem porta livre para o agente ngrok (4040-4139 todas em uso)".into())
+    })
 }
 
 fn spawn_cloudflare_quick(rec: &mut TunnelRecord) -> Result<()> {
@@ -523,8 +534,15 @@ fn spawn_cloudflare_quick(rec: &mut TunnelRecord) -> Result<()> {
 
 fn cmd_ls() -> Result<()> {
     let store = record_store()?;
-    let mut t = output::Table::new(&["NAME", "PROVIDER", "LOCAL PORT", "PUBLIC URL", "STATUS", "UPTIME"])
-        .right_align(2);
+    let mut t = output::Table::new(&[
+        "NAME",
+        "PROVIDER",
+        "LOCAL PORT",
+        "PUBLIC URL",
+        "STATUS",
+        "UPTIME",
+    ])
+    .right_align(2);
     for rec in store.list()? {
         let alive = is_alive(&rec);
         t.row(vec![
@@ -532,7 +550,11 @@ fn cmd_ls() -> Result<()> {
             rec.provider,
             rec.local_port.to_string(),
             rec.public_url.unwrap_or_else(|| "-".to_string()),
-            if alive { "Running".to_string() } else { "Stopped".to_string() },
+            if alive {
+                "Running".to_string()
+            } else {
+                "Stopped".to_string()
+            },
             match (alive, rec.started_unix) {
                 (true, Some(s)) => format!(
                     "Up {}",
@@ -549,7 +571,9 @@ fn cmd_ls() -> Result<()> {
 fn cmd_describe(name: &str) -> Result<()> {
     let store = record_store()?;
     let rec = store.load(name).map_err(|e| match e {
-        Error::NotFound(n) => Error::Invalid(format!("no such tunnel: {n} (see `delonix tunnel ls`)")),
+        Error::NotFound(n) => {
+            Error::Invalid(format!("no such tunnel: {n} (see `delonix tunnel ls`)"))
+        }
         e => e,
     })?;
     let alive = is_alive(&rec);
@@ -558,7 +582,10 @@ fn cmd_describe(name: &str) -> Result<()> {
     d.field("Provider", &rec.provider);
     d.field("Local Port", rec.local_port.to_string());
     d.field_opt("Hostname", rec.hostname.as_deref());
-    d.field("Public URL", rec.public_url.as_deref().unwrap_or("(not yet known)"));
+    d.field(
+        "Public URL",
+        rec.public_url.as_deref().unwrap_or("(not yet known)"),
+    );
     d.field("Status", if alive { "Running" } else { "Stopped" });
     d.field_opt("PID", rec.pid.map(|p| p.to_string()).as_deref());
     d.field_opt(
@@ -574,7 +601,9 @@ fn cmd_describe(name: &str) -> Result<()> {
 fn cmd_rm(name: &str) -> Result<()> {
     let store = record_store()?;
     let rec = store.load(name).map_err(|e| match e {
-        Error::NotFound(n) => Error::Invalid(format!("no such tunnel: {n} (see `delonix tunnel ls`)")),
+        Error::NotFound(n) => {
+            Error::Invalid(format!("no such tunnel: {n} (see `delonix tunnel ls`)"))
+        }
         e => e,
     })?;
     stop_process(&rec);
@@ -600,7 +629,8 @@ mod tests {
 
     #[test]
     fn find_url_containing_apara_pontuacao_em_volta() {
-        let text = "Your quick Tunnel has been created! Visit it at (https://foo-bar.trycloudflare.com).";
+        let text =
+            "Your quick Tunnel has been created! Visit it at (https://foo-bar.trycloudflare.com).";
         assert_eq!(
             find_url_containing(text, ".trycloudflare.com"),
             Some("https://foo-bar.trycloudflare.com".to_string())
@@ -627,7 +657,9 @@ mod tests {
                    http://gzohk-197-148-40-67.free.pinggy.net\n\
                    https://ccjjc-197-148-40-67.run.pinggy-free.link\n\
                    https://gzohk-197-148-40-67.free.pinggy.net\n";
-        let found = find_url_where(log, |u| u.contains("pinggy") && !u.contains("dashboard.pinggy.io"));
+        let found = find_url_where(log, |u| {
+            u.contains("pinggy") && !u.contains("dashboard.pinggy.io")
+        });
         assert_eq!(
             found,
             Some("https://ccjjc-197-148-40-67.run.pinggy-free.link".to_string())
@@ -716,7 +748,10 @@ mod tests {
         };
         store.save("other", &fake).unwrap();
         let port = pick_free_ngrok_web_port(&store).unwrap();
-        assert_eq!(port, 4040, "o registo não está genuinamente vivo (cmdline não é ngrok)");
+        assert_eq!(
+            port, 4040,
+            "o registo não está genuinamente vivo (cmdline não é ngrok)"
+        );
         let _ = std::fs::remove_dir_all(&tmp);
     }
 }

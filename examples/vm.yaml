@@ -1,42 +1,60 @@
 # Vm — a declarative microVM (Cloud Hypervisor or libvirt). Apply with:
 #   delonix vm apply -f examples/vm.yaml
 # The golden VM image is built once with:  delonix image --vm build --name k8s-golden --k8s-version 1.34
+#
+# Fields are grouped by concern (resources/network/boot/cloudInit/libvirt) so
+# a spec this size stays readable. The OLD flat form (every field at the top
+# level, no groups) still works exactly as before on any existing manifest —
+# both shapes are accepted, this is just the one the docs/examples show.
 apiVersion: delonix.io/v1
 kind: Vm
 metadata:
   name: node1
 spec:
-  disk: k8s-golden            # required — base qcow2/raw (an overlay is made per VM)
-  vcpus: 2
-  memory: 2G                  # "2G" | "1024M" (a "…i" suffix is accepted, k8s-style)
-  network: node1-net          # ingress network for the VM's tap
-  restartPolicy: null         # no | on-failure | always  (alias: restart_policy)
-  # --- boot: firmware (cloud images) OR direct kernel ---
-  firmware: null              # UEFI firmware path (typical for cloud images)
-  kernel: null                # direct kernel boot (alternative to firmware)
-  initrd: null                # initramfs for direct kernel boot
-  cmdline: null               # kernel cmdline for direct boot
-  # --- cloud-init (full parity with `vm create`; a seed is auto-generated) ---
-  seed: null                  # path to a prebuilt NoCloud ISO (overrides the fields below)
-  hostname: null              # hostname applied on first boot
-  sshKeys: []                 # authorized public keys: "ssh-ed25519 AAAA…" or "@/path"
-  userData: null              # your own cloud-init user-data (path/@path) — replaces the generated one
-  # --- performance / passthrough ---
-  hugepages: false
-  cpuAffinity: null           # pin vCPUs, e.g. "8-15"  (alias: cpu_affinity)
-  devices: []                 # VFIO PCI passthrough (sysfs paths)
-  # --- backend selection ---
-  backend: null               # cloud-hypervisor | libvirt | null (auto)
-  netMode: null               # libvirt only: user | nat | bridge  (alias: net_mode)
-  bridge: null                # host bridge / libvirt network
-  # --- advanced libvirt knobs (libvirt backend): full XML parity, all optional ---
-  machine: null               # machine type (default q35)
-  cpuModel: null              # host-passthrough (default) | host-model | a named model
-  cpuTopology: null           # { sockets: 1, cores: 4, threads: 2 }
-  tpm: false                  # add an emulated TPM 2.0
-  video: null                 # virtio | qxl | vga | none
-  bootOrder: []               # e.g. [cdrom, hd]
-  extraDisks: []              # [{ source: /data/d.qcow2, bus: virtio, format: qcow2, readOnly: false }]
-  extraNics: []               # [{ type: bridge, source: br0, model: virtio }]
-  libvirtXmlOverlay: []       # raw <device> XML fragments (trusted manifests only)
-  libvirtXml: null            # full <domain> XML, used verbatim (ultimate escape hatch)
+  disk: k8s-golden              # required — base qcow2/raw (an overlay is made per VM)
+  restartPolicy: null           # no | on-failure | always
+
+  resources:
+    vcpus: 2
+    memory: 2G                  # "2G" | "1024M" (a "…i" suffix is accepted, k8s-style)
+    hugepages: false
+    cpuAffinity: null           # pin vCPUs, e.g. "8-15"
+
+  network:
+    name: node1-net             # ingress network for the VM's tap
+    mode: null                  # libvirt only: user | nat | bridge
+    bridge: null                # host bridge / libvirt network
+    staticIp: null              # libvirt nat mode: DHCP reservation on the libvirt network
+
+  # Boot mechanism: firmware (cloud images, the default) OR a direct kernel — pick one.
+  boot:
+    firmware: null              # UEFI firmware path (typical for cloud images)
+    kernel: null                # direct kernel boot (alternative to firmware)
+    initrd: null                # initramfs for direct kernel boot
+    cmdline: null                # kernel cmdline for direct boot
+
+  # cloud-init — full parity with `vm create`; a NoCloud seed ISO is auto-generated
+  # from hostname/sshKeys/userData unless you hand it a prebuilt one via `seed`.
+  cloudInit:
+    seed: null                  # path to a prebuilt NoCloud ISO (overrides the fields below)
+    hostname: null              # hostname applied on first boot
+    sshKeys: []                 # authorized public keys: "ssh-ed25519 AAAA…" or "@/path"
+    userData: null              # your own cloud-init user-data (path/@path) — replaces the generated one
+
+  # Advanced libvirt knobs (libvirt backend only): full XML parity, all optional.
+  libvirt:
+    backend: null                # cloud-hypervisor | libvirt | null (auto)
+    machine: null                 # machine type (default q35)
+    cpuModel: null                # host-passthrough (default) | host-model | a named model
+    cpuTopology: null             # { sockets: 1, cores: 4, threads: 2 }
+    tpm: false                    # add an emulated TPM 2.0
+    video: null                   # virtio | qxl | vga | none
+    bootOrder: []                 # e.g. [cdrom, hd]
+    extraDisks: []                # [{ source: /data/d.qcow2, bus: virtio, format: qcow2, readOnly: false }]
+    extraNics: []                 # [{ type: bridge, source: br0, model: virtio }]
+    xmlOverlay: []                # raw <device> XML fragments (trusted manifests only)
+    xml: null                     # full <domain> XML, used verbatim (ultimate escape hatch)
+
+  devices: []                   # VFIO PCI passthrough (sysfs paths) — backend-agnostic (CH + libvirt)
+  volumes: []                   # 9p mounts from a Volume/Storage: [{ name: data, target: /data, readOnly: false }]
+  vnc: false                    # graphical console (libvirt backend only)

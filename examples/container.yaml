@@ -1,54 +1,69 @@
 # Container — the everyday workload. Apply with:  delonix container apply -f examples/container.yaml
 # Every field below is optional except `image`; the values shown are the defaults.
+#
+# Fields are grouped by concern (resources/network/security/storage/env/limits)
+# so a spec this size stays readable. The OLD flat form (every field at the
+# top level, no groups) still works exactly as before on any existing
+# manifest — both shapes are accepted, this is just the one the docs/examples
+# show. (The k8s-style Pod shape — `spec.containers[]` — is unaffected: it
+# already mirrors k8s's own grouping, see examples/pod.yaml.)
 apiVersion: delonix.io/v1
 kind: Container
 metadata:
   name: web
 spec:
-  image: nginx:alpine         # required — the only mandatory field
-  # command + args override the image ENTRYPOINT/CMD (docker semantics):
-  command: []                 # e.g. ["nginx", "-g", "daemon off;"]
-  entrypoint: null            # override the image ENTRYPOINT ("" clears it)
-  detach: true                # run in the background (a manifest is declarative)
-  restartPolicy: always       # no | on-failure[:max] | always | unless-stopped  (alias: restart)
-  # --- network ---
-  network: host               # host | none | <a network created by `network create`>
-  ports: []                   # ["8080:80"] — gives the container its own netns + slirp NAT
-  networkAlias: []            # DNS aliases on the network
-  knows: []                   # restrict name resolution to these containers (isolation)
-  netBps: null                # egress rate limit (e.g. "10mbit"), only with a custom network
-  netBurst: null              # burst for netBps
-  # --- storage ---
-  volumes: []                 # ["data:/var/lib", "/host/path:/inside:ro"]
-  tmpfs: []                   # ["/scratch"]
-  # --- resources (cgroup v2) ---
-  memory: max                 # 64M | 2G | max (no cap)
-  cpus: "1.0"                 # CPU cores
-  cpuWeight: null             # relative CPU weight under contention (1-10000)
-  cpuset: null                # pin to CPUs, e.g. "0-3"
-  ioWeight: null              # relative I/O weight
-  # --- env & secrets ---
-  env: []                     # ["KEY=value"]
-  envFile: []                 # ["./.env"]
-  secret: []                  # vault secret names (see `delonix secret`); injected as env
-  secretFiles: false          # true → secrets go to /run/secrets/<name> instead of env
-  # --- security ---
-  privileged: false           # all caps, seccomp off — trusted workloads only
-  readOnly: false             # read-only rootfs (writes go to tmpfs/volumes)
-  capAdd: []                  # ["NET_ADMIN"]
-  capDrop: []                 # ["MKNOD"]
-  securityOpt: []             # ["seccomp=unconfined", "apparmor=<profile>"]
-  apparmor: null              # AppArmor profile
-  selinux: null               # SELinux context
-  userns: false               # force the subuid user namespace (default-on in rootless)
-  hostPid: false              # share the host PID namespace
-  hostIpc: false              # share the host IPC namespace
-  detect: false               # seccomp in log mode — discover the syscalls a workload uses
-  # --- devices & limits ---
-  devices: []                 # ["/dev/fuse"]
-  gpus: null                  # all | nvidia | dri
-  ulimit: []                  # ["nofile=1024:2048"]
-  sysctl: []                  # ["net.core.somaxconn=1024"]
-  # --- misc ---
-  labels: []                  # ["tier=frontend"]
-  logDriver: null             # json | cri
+  image: nginx:alpine           # required — the only mandatory field
+  command: []                   # overrides the image CMD, e.g. ["nginx", "-g", "daemon off;"]
+  entrypoint: null              # override the image ENTRYPOINT ("" clears it)
+  user: null                    # UID/GID or name to run as, e.g. "1000:1000"
+  hostname: null                # container hostname (default: the container name)
+  detach: true                  # run in the background (a manifest is declarative)
+  restartPolicy: always         # no | on-failure[:max] | always | unless-stopped
+
+  resources:                    # cgroup v2 limits
+    memory: max                 # 64M | 2G | max (no cap)
+    cpus: "1.0"                 # CPU cores
+    cpuWeight: null             # relative CPU weight under contention (1-10000)
+    cpuset: null                # pin to CPUs, e.g. "0-3"
+    ioWeight: null              # relative I/O weight
+
+  network:
+    name: host                  # host | none | <a network created by `network create`>
+    ports: []                   # ["8080:80"] — gives the container its own netns + slirp NAT
+    expose: null                # HTTP port to auto-register in the embedded L7 proxy (see kind: Tunnel)
+    alias: []                   # DNS aliases on the network
+    knows: []                   # restrict name resolution to these containers (isolation)
+    rateBps: null                # egress rate limit (e.g. "10mbit"), only with a custom network
+    rateBurst: null              # burst for rateBps
+
+  security:
+    privileged: false           # all caps, seccomp off — trusted workloads only
+    readOnly: false              # read-only rootfs (writes go to tmpfs/volumes)
+    capAdd: []                   # ["NET_ADMIN"]
+    capDrop: []                  # ["MKNOD"]
+    securityOpt: []              # ["seccomp=unconfined", "apparmor=<profile>"]
+    apparmor: null               # AppArmor profile
+    selinux: null                # SELinux context
+    userns: false                # force the subuid user namespace (default-on in rootless)
+    hostPid: false                # share the host PID namespace
+    hostIpc: false                # share the host IPC namespace
+    detect: false                  # seccomp in log mode — discover the syscalls a workload uses
+
+  storage:
+    volumes: []                  # ["data:/var/lib", "/host/path:/inside:ro"]
+    tmpfs: []                    # ["/scratch"]
+
+  env:
+    vars: []                     # ["KEY=value"]
+    files: []                    # ["./.env"]
+    secrets: []                  # vault secret names (see `delonix secret`); injected as env
+    secretFiles: false           # true → secrets go to /run/secrets/<name> instead of env
+
+  limits:
+    devices: []                  # ["/dev/fuse"]
+    gpus: null                   # all | nvidia | dri
+    ulimit: []                   # ["nofile=1024:2048"]
+    sysctl: []                   # ["net.core.somaxconn=1024"]
+
+  labels: []                     # ["tier=frontend"]
+  logDriver: null                # json | cri
