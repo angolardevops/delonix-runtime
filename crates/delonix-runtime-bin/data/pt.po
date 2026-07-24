@@ -357,6 +357,9 @@ msgstr "virt-sparsify falhou ({err}); a comprimir na mesma"
 msgid "SHA256SUMS has no entry for"
 msgstr "SHA256SUMS não tem entrada para"
 
+msgid "SHA512SUMS has no entry for"
+msgstr "SHA512SUMS não tem entrada para"
+
 msgid "preparing the k8s repo keyring"
 msgstr "a preparar o keyring do repo k8s"
 

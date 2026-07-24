@@ -448,9 +448,38 @@ nó não faz nenhuma instalação**, só `kubeadm init`/`kubeadm join`.
   tags `ubuntu-24.04`/futuramente `debian-12`/`rocky-9` — sem wiring de omissão em `Pull`/
   `LsRemote` nesta fase, o chamador passa sempre a fonte explícita). `vm-image.yml` ganhou o input
   `no_k8s` (boolean) que troca o passo de build/tag/repositório de destino. **Por fazer
-  (deliberadamente fora desta fase)**: Debian, Rocky (dnf — família de gestor de pacotes
-  diferente, o maior salto), `--offline` para `--no-k8s` (a verificação de `.deb` no host é
-  específica do `pkgs.k8s.io`), selecção por omissão em `Pull`/`LsRemote`.
+  (deliberadamente fora desta fase)**: Rocky (dnf — família de gestor de pacotes diferente, o
+  maior salto), `--offline` para `--no-k8s` (a verificação de `.deb` no host é específica do
+  `pkgs.k8s.io`), selecção por omissão em `Pull`/`LsRemote`.
+- **`--distro debian` (v0.17.0) — Fase 2 de 3.** `download_ubuntu_base` generalizou-se em
+  `download_ubuntu_base`/`download_debian_base` por trás de um novo enum `Distro { Ubuntu,
+  Debian }` (`--distro`, `clap::ValueEnum`, omissão `ubuntu` — zero mudança de comportamento para
+  quem não usa a flag nova). Confirmado ao vivo (não suposto) antes de escrever código: o cloud
+  image Debian vive em `cloud.debian.org/images/cloud/<codinome>/latest/debian-<major>-
+  genericcloud-amd64.qcow2` (`genericcloud`, não `generic` — kernel só-virtio, cloud-init
+  mantido, mais pequeno; o nome do ficheiro usa o NÚMERO MAJOR, o directório usa o CODINOME, sem
+  alias numérico — daí `debian_major_version` com uma whitelist explícita
+  bullseye/bookworm/trixie, erro claro para o resto) e **publica só `SHA512SUMS` — não
+  `SHA256SUMS` de todo** (confirmado com `curl -I`; mesmo formato `<hash>  <ficheiro>`, algoritmo
+  diferente) — `hex_sha512_file` novo (mesmo `sha2` já na árvore, zero dependência nova), testado
+  contra o vector oficial NIST de `SHA-512("abc")`. O resto do pipeline (`rootless_customization_
+  steps`/`shared_account_steps`/`k8s_host_recipes`) já era 100% distro-agnóstico — confirmado
+  antes de escrever código: o repositório `pkgs.k8s.io` usa formato de repo "flat" (sem
+  codinome/suite no URL), a conta `sudo`/`/etc/bash.bashrc` são convenções idênticas em
+  Debian/Ubuntu (mesma linhagem de empacotamento) — por isso o `--distro debian` já funciona com
+  E sem `--no-k8s`, sem código extra nenhum para o k8s em si. `VmImage` ganhou `distro:
+  Option<String>` (`#[serde(default)]`, metadados antigos continuam válidos); `ubuntu_release`
+  manteve o NOME do campo (romper renomeá-lo quebraria `.json` já em disco, que não tem
+  `#[serde(default)]` nesse campo) mas agora guarda o identificador de release de QUALQUER distro.
+  `vm-image.yml` ganhou `distro`/`debian_release` (só para builds `--no-k8s`, mesmo escopo do
+  `no_k8s` da fase anterior). **Limitação conhecida**: o download real do qcow2 Debian (~300-600
+  MiB) não foi validado de ponta a ponta neste sandbox — a ligação de saída daqui até
+  `cloud.debian.org` mostrou-se muito lenta (confirmado independentemente com `curl` simples, não
+  é bug do código); a verificação SHA512 em si está coberta por teste unitário com vector
+  conhecido, e o URL/formato do `SHA512SUMS` foi confirmado ao vivo com `curl -I`/`curl` de texto
+  (ficheiros pequenos). Uma build `--offline` para Debian não está implementada (mesma razão do
+  `--no-k8s`: `download_k8s_debs` já é distro-agnóstico do lado do host, mas não foi testada nesta
+  combinação) — só o caminho online e `--no-k8s` foram cobertos nesta fase.
 - **`push`/`pull`**: publicam/obtêm a imagem como artefacto OCI de blob único (config vazio + 1
   layer, padrão ORAS/Helm) via `delonix_image::registry::{push_oci_artifact,pull_oci_artifact}`
   (`crates/delonix-image/src/registry.rs`) — generaliza o `Client`/auth/upload já usado por

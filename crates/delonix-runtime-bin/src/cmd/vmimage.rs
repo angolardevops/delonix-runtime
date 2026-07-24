@@ -43,6 +43,47 @@ pub struct VmImage {
     /// only carries the qcow2 blob, not build metadata).
     #[serde(default)]
     pub kernel_version: Option<String>,
+    /// `"ubuntu"` | `"debian"` — added in v0.17.0 alongside multi-distro
+    /// support. `#[serde(default)]` so pre-existing on-disk metadata (all
+    /// Ubuntu, built before this field existed) still loads; `None` there is
+    /// treated as `"ubuntu"` for display purposes (`distro_label`), never
+    /// re-written on disk. `ubuntu_release` keeps its field NAME for
+    /// backward-compat with existing `.json` files (no `#[serde(default)]`
+    /// on it — a rename would break loading them) but now holds the release
+    /// identifier for WHATEVER distro this is (a Debian codename like
+    /// `bookworm`, not just an Ubuntu release number).
+    #[serde(default)]
+    pub distro: Option<String>,
+}
+
+/// Base distro for a golden image build. `Ubuntu` stays the default (no
+/// behavior change for existing callers); `Debian` is additive.
+#[derive(clap::ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Distro {
+    Ubuntu,
+    Debian,
+}
+
+impl Distro {
+    fn as_str(self) -> &'static str {
+        match self {
+            Distro::Ubuntu => "ubuntu",
+            Distro::Debian => "debian",
+        }
+    }
+}
+
+/// `"ubuntu/24.04"`-style label for `ls`/`describe`. Pre-v0.17.0 metadata has
+/// no `distro` field — displayed as just the release, matching what those
+/// images actually showed before this column existed (never silently
+/// mislabeled as Debian, which `None` would otherwise risk).
+fn distro_label(img: &VmImage) -> String {
+    match (img.distro.as_deref(), img.ubuntu_release.as_deref()) {
+        (Some(d), Some(r)) => format!("{d}/{r}"),
+        (Some(d), None) => d.to_string(),
+        (None, Some(r)) => r.to_string(),
+        (None, None) => "-".to_string(),
+    }
 }
 
 pub struct VmImageStore {
@@ -76,14 +117,21 @@ impl VmImageStore {
         self.root.join(format!("{}.qcow2", Self::sanitize(name)))
     }
 
-    pub fn base_cache_path(&self, ubuntu_release: &str) -> PathBuf {
+    pub fn base_cache_path(&self, distro: Distro, release: &str) -> PathBuf {
         // `sanitize` (not applied here before — security-audit finding, see
-        // CLAUDE.md) strips `/` from `ubuntu_release`, preventing
+        // CLAUDE.md) strips `/` from `release`, preventing
         // `--ubuntu-release '../../../etc/cron.d/x'` from writing outside `_base/`.
-        self.root.join("_base").join(format!(
-            "ubuntu-{}-server-cloudimg-amd64.img",
-            Self::sanitize(ubuntu_release)
-        ))
+        let filename = match distro {
+            Distro::Ubuntu => format!(
+                "ubuntu-{}-server-cloudimg-amd64.img",
+                Self::sanitize(release)
+            ),
+            Distro::Debian => format!(
+                "debian-{}-genericcloud-amd64.qcow2",
+                Self::sanitize(release)
+            ),
+        };
+        self.root.join("_base").join(filename)
     }
 
     pub fn save(&self, img: &VmImage) -> Result<()> {
@@ -139,8 +187,14 @@ pub enum VmImageCmd {
     Build {
         #[arg(short = 't', long = "tag")]
         tag: String,
+        /// Base distro for the cloud image.
+        #[arg(long, value_enum, default_value = "ubuntu")]
+        distro: Distro,
         #[arg(long, default_value = "26.04")]
         ubuntu_release: String,
+        /// Debian codename (`bookworm`, `trixie`, ...) — only used with `--distro debian`.
+        #[arg(long, default_value = "bookworm")]
+        debian_release: String,
         /// Kubernetes version (e.g. `1.31`) — omit to use the latest stable.
         #[arg(long)]
         k8s_version: Option<String>,
@@ -202,7 +256,9 @@ pub fn run(action: VmImageCmd) -> Result<()> {
         }
         VmImageCmd::Build {
             tag,
+            distro,
             ubuntu_release,
+            debian_release,
             k8s_version,
             extra_packages,
             extra_run,
@@ -214,7 +270,9 @@ pub fn run(action: VmImageCmd) -> Result<()> {
         } => cmd_build(
             &store,
             &tag,
+            distro,
             &ubuntu_release,
+            &debian_release,
             k8s_version,
             extra_packages,
             extra_run,
@@ -231,9 +289,10 @@ fn cmd_ls(store: &VmImageStore) -> Result<()> {
     let mut t =
         output::Table::new(&["NAME", "DISTRO", "KERNEL", "K8S", "CREATED", "SIZE"]).right_align(5);
     for img in store.list()? {
+        let distro = distro_label(&img);
         t.row(vec![
             img.name,
-            img.ubuntu_release.as_deref().unwrap_or("-").to_string(),
+            distro,
             img.kernel_version.as_deref().unwrap_or("-").to_string(),
             img.k8s_version.as_deref().unwrap_or("-").to_string(),
             fmt_local(img.created_unix),
@@ -266,10 +325,8 @@ fn describe_one(store: &VmImageStore, img: &VmImage) {
     d.field("Age", output::fmt_age(img.created_unix));
     // `pull` does NOT recover this metadata (the OCI artifact only carries the
     // qcow2 blob) — on a pulled image they stay `None`. See the known gap in CLAUDE.md.
-    d.field(
-        "Distro",
-        img.ubuntu_release.as_deref().unwrap_or("<unknown>"),
-    );
+    let distro = distro_label(img);
+    d.field("Distro", if distro == "-" { "<unknown>" } else { &distro });
     d.field(
         "Kernel",
         img.kernel_version.as_deref().unwrap_or("<unknown>"),
@@ -349,6 +406,7 @@ pub(crate) fn cmd_pull(store: &VmImageStore, source: &str, name: Option<String>)
         k8s_version: None,
         created_unix: now_unix(),
         kernel_version: None,
+        distro: None,
     };
     store.save(&img)?;
     println!("{name}");
@@ -368,7 +426,9 @@ pub(crate) fn cmd_ls_remote(source: &str) -> Result<()> {
 fn cmd_build(
     store: &VmImageStore,
     tag: &str,
+    distro: Distro,
     ubuntu_release: &str,
+    debian_release: &str,
     k8s_version: Option<String>,
     extra_packages: Vec<String>,
     extra_run: Vec<String>,
@@ -415,7 +475,14 @@ fn cmd_build(
             )));
         }
     }
-    let base = download_ubuntu_base(store, ubuntu_release)?;
+    let release = match distro {
+        Distro::Ubuntu => ubuntu_release,
+        Distro::Debian => debian_release,
+    };
+    let base = match distro {
+        Distro::Ubuntu => download_ubuntu_base(store, ubuntu_release)?,
+        Distro::Debian => download_debian_base(store, debian_release)?,
+    };
 
     let work_dir =
         std::env::temp_dir().join(format!("delonix-vmimage-build-{}", std::process::id()));
@@ -582,10 +649,11 @@ fn cmd_build(
         tag: tag.to_string(),
         digest,
         size,
-        ubuntu_release: Some(ubuntu_release.to_string()),
+        ubuntu_release: Some(release.to_string()),
         k8s_version,
         created_unix: now_unix(),
         kernel_version,
+        distro: Some(distro.as_str().to_string()),
     };
     store.save(&img)?;
     println!("{tag}");
@@ -597,7 +665,7 @@ fn cmd_build(
 // ---------------------------------------------------------------------------
 
 fn download_ubuntu_base(store: &VmImageStore, release: &str) -> Result<PathBuf> {
-    let cached = store.base_cache_path(release);
+    let cached = store.base_cache_path(Distro::Ubuntu, release);
     if cached.exists() {
         return Ok(cached);
     }
@@ -624,6 +692,74 @@ fn download_ubuntu_base(store: &VmImageStore, release: &str) -> Result<PathBuf> 
         })?
         .to_string();
     let got = hex_sha256_file(&tmp)?;
+    if got != expected {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(Error::Invalid(format!(
+            "checksum inválido para {img_name}: esperado {expected}, obtido {got} — download descartado"
+        )));
+    }
+    std::fs::rename(&tmp, &cached)?;
+    Ok(cached)
+}
+
+// ---------------------------------------------------------------------------
+// Download + verification of the Debian cloud image
+// ---------------------------------------------------------------------------
+
+/// Debian's cloud image directory is keyed by CODENAME (`bookworm`), but the
+/// filename embeds the MAJOR VERSION NUMBER (`debian-12-...`) — confirmed
+/// live against `cloud.debian.org` (no numeric-only directory alias exists,
+/// so this mapping can't be derived from the codename string alone). Fails
+/// closed on an unknown codename rather than guessing a number.
+fn debian_major_version(codename: &str) -> Result<&'static str> {
+    match codename {
+        "bullseye" => Ok("11"),
+        "bookworm" => Ok("12"),
+        "trixie" => Ok("13"),
+        _ => Err(Error::Invalid(format!(
+            "--debian-release '{codename}' desconhecido (bullseye|bookworm|trixie)"
+        ))),
+    }
+}
+
+/// Same shape as `download_ubuntu_base`, two confirmed differences (checked
+/// live against `cloud.debian.org` before writing this, not assumed): (1) the
+/// path is `images/cloud/<codename>/latest/`, filename
+/// `debian-<major>-genericcloud-amd64.qcow2` (the `genericcloud` variant —
+/// virtio-only kernel, smaller, still has cloud-init — not the `generic`
+/// variant, which also ships legacy drivers this project never needs); (2)
+/// Debian publishes `SHA512SUMS`, NOT `SHA256SUMS` (no SHA256 checksums file
+/// exists at all) — same `<hash>  <filename>` line format, different hash
+/// algorithm, hence `hex_sha512_file` below.
+fn download_debian_base(store: &VmImageStore, release: &str) -> Result<PathBuf> {
+    let cached = store.base_cache_path(Distro::Debian, release);
+    if cached.exists() {
+        return Ok(cached);
+    }
+    let major = debian_major_version(release)?;
+    let base_url = format!("https://cloud.debian.org/images/cloud/{release}/latest");
+    let img_name = format!("debian-{major}-genericcloud-amd64.qcow2");
+    let img_url = format!("{base_url}/{img_name}");
+    let sums_url = format!("{base_url}/SHA512SUMS");
+
+    eprintln!("a descarregar {img_url}...");
+    let tmp = cached.with_extension("download");
+    stream_download(&img_url, &tmp)?;
+
+    eprintln!("a verificar SHA512SUMS...");
+    let sums = http_get_text(&sums_url)?;
+    let expected = sums
+        .lines()
+        .find(|l| l.trim_end().ends_with(&img_name))
+        .and_then(|l| l.split_whitespace().next())
+        .ok_or_else(|| {
+            Error::Invalid(format!(
+                "{} {img_name}",
+                super::po::t("SHA512SUMS has no entry for")
+            ))
+        })?
+        .to_string();
+    let got = hex_sha512_file(&tmp)?;
     if got != expected {
         let _ = std::fs::remove_file(&tmp);
         return Err(Error::Invalid(format!(
@@ -1026,6 +1162,23 @@ fn hex_sha256(data: &[u8]) -> String {
 fn hex_sha256_file(path: &Path) -> Result<String> {
     let mut f = std::fs::File::open(path)?;
     let mut h = Sha256::new();
+    let mut buf = [0u8; 1 << 20];
+    loop {
+        let n = f.read(&mut buf)?;
+        if n == 0 {
+            break;
+        }
+        h.update(&buf[..n]);
+    }
+    Ok(hex(&h.finalize()))
+}
+
+/// Debian's cloud images only publish `SHA512SUMS` (no `SHA256SUMS` at all —
+/// confirmed live) — same streaming-hash shape as `hex_sha256_file`, `Sha512`
+/// instead of `Sha256` (already in the `sha2` crate, no new dependency).
+fn hex_sha512_file(path: &Path) -> Result<String> {
+    let mut f = std::fs::File::open(path)?;
+    let mut h = sha2::Sha512::new();
     let mut buf = [0u8; 1 << 20];
     loop {
         let n = f.read(&mut buf)?;
@@ -1994,13 +2147,90 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
     }
 
     #[test]
+    fn hex_sha512_file_bate_com_vector_conhecido() {
+        // NIST test vector: SHA-512("abc").
+        let dir = std::env::temp_dir().join(format!(
+            "delonix-vmimage-sha512-test-{}-{}",
+            std::process::id(),
+            line!()
+        ));
+        std::fs::write(&dir, b"abc").unwrap();
+        let got = hex_sha512_file(&dir).unwrap();
+        assert_eq!(got, "ddaf35a193617abacc417349ae20413112e6fa4e89a97ea20a9eeee64b55d39a2192992a274fc1a836ba3c23a3feebbd454d4423643ce80e2a9ac94fa54ca49f");
+        let _ = std::fs::remove_file(&dir);
+    }
+
+    #[test]
+    fn debian_major_version_conhece_os_codinomes_suportados() {
+        assert_eq!(debian_major_version("bullseye").unwrap(), "11");
+        assert_eq!(debian_major_version("bookworm").unwrap(), "12");
+        assert_eq!(debian_major_version("trixie").unwrap(), "13");
+        assert!(debian_major_version("sid").is_err());
+        assert!(debian_major_version("").is_err());
+    }
+
+    #[test]
+    fn distro_label_combina_distro_e_release_ou_degrada_com_gracia() {
+        let mut img = VmImage {
+            name: "x".to_string(),
+            tag: "x".to_string(),
+            digest: "sha256:x".to_string(),
+            size: 0,
+            ubuntu_release: None,
+            k8s_version: None,
+            created_unix: 0,
+            kernel_version: None,
+            distro: None,
+        };
+        // Pulled image, no build metadata at all — pre-existing gap, not new.
+        assert_eq!(distro_label(&img), "-");
+        // Pre-v0.17.0 on-disk metadata: `distro` missing, `ubuntu_release` set.
+        img.ubuntu_release = Some("24.04".to_string());
+        assert_eq!(distro_label(&img), "24.04");
+        // A build from this version on: both set.
+        img.distro = Some("debian".to_string());
+        img.ubuntu_release = Some("bookworm".to_string());
+        assert_eq!(distro_label(&img), "debian/bookworm");
+    }
+
+    #[test]
+    fn base_cache_path_distingue_distro_e_continua_a_sanitizar() {
+        let (store, dir) = tmp_store();
+        let ubuntu = store.base_cache_path(Distro::Ubuntu, "24.04");
+        let debian = store.base_cache_path(Distro::Debian, "bookworm");
+        assert_ne!(ubuntu, debian);
+        assert!(ubuntu
+            .file_name()
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .starts_with("ubuntu-24.04-"));
+        assert!(debian
+            .file_name()
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .starts_with("debian-bookworm-"));
+        // Same path-traversal defense as the Ubuntu side, for the new Debian arm:
+        // `sanitize` strips `/` (dots survive — harmless without a separator,
+        // `Path::join` can't treat them as multiple segments), so the result
+        // stays confined to a single filename inside `_base/`.
+        let evil = store.base_cache_path(Distro::Debian, "../../../etc/cron.d/x");
+        assert_eq!(evil.parent().unwrap(), dir.join("vm-images").join("_base"));
+        assert!(!evil.file_name().unwrap().to_str().unwrap().contains('/'));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn no_k8s_rejeita_k8s_version_offline_e_cri_bin() {
         let (store, dir) = tmp_store();
         let base = |k8s_version: Option<String>, offline: bool, cri_bin: Option<PathBuf>| {
             cmd_build(
                 &store,
                 "t",
+                Distro::Ubuntu,
                 "24.04",
+                "bookworm",
                 k8s_version,
                 vec![],
                 vec![],
@@ -2023,7 +2253,9 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
         let err = cmd_build(
             &store,
             "t",
+            Distro::Ubuntu,
             "24.04",
+            "bookworm",
             None,
             vec![],
             vec![],

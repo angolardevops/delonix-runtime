@@ -15,6 +15,7 @@ use serde::{Deserialize, Serialize};
 
 use super::manifest::{self, ManifestDoc};
 use super::util::{effective_command, open_stores, resolve_or_pull};
+use super::vmimage::Distro;
 
 /// `spec` of `kind: Image` — either `pull: <ref>` or `build: {...}` (mutually
 /// exclusive; clear error if both are missing).
@@ -169,8 +170,12 @@ pub enum ImageCmd {
     Build {
         #[arg(short = 't', long = "tag")]
         tag: String,
+        #[arg(long, value_enum, default_value = "ubuntu")]
+        distro: Distro,
         #[arg(long, default_value = "26.04")]
         ubuntu_release: String,
+        #[arg(long, default_value = "bookworm")]
+        debian_release: String,
         #[arg(long)]
         k8s_version: Option<String>,
         #[arg(long = "extra-package")]
@@ -223,8 +228,12 @@ pub enum VmSub {
     Build {
         #[arg(short = 't', long = "tag")]
         tag: String,
+        #[arg(long, value_enum, default_value = "ubuntu")]
+        distro: Distro,
         #[arg(long, default_value = "26.04")]
         ubuntu_release: String,
+        #[arg(long, default_value = "bookworm")]
+        debian_release: String,
         #[arg(long)]
         k8s_version: Option<String>,
         #[arg(long = "extra-package")]
@@ -283,7 +292,9 @@ pub fn run(vm: bool, action: ImageCmd) -> Result<()> {
             VmSub::Push { name, target } => VmImageCmd::Push { name, target },
             VmSub::Build {
                 tag,
+                distro,
                 ubuntu_release,
+                debian_release,
                 k8s_version,
                 extra_packages,
                 extra_run,
@@ -294,7 +305,9 @@ pub fn run(vm: bool, action: ImageCmd) -> Result<()> {
                 delonix_bin,
             } => VmImageCmd::Build {
                 tag,
+                distro,
                 ubuntu_release,
+                debian_release,
                 k8s_version,
                 extra_packages,
                 extra_run,
@@ -406,7 +419,9 @@ fn run_vm(action: ImageCmd) -> Result<()> {
         },
         ImageCmd::Build {
             tag,
+            distro,
             ubuntu_release,
+            debian_release,
             k8s_version,
             extra_packages,
             extra_run,
@@ -417,7 +432,9 @@ fn run_vm(action: ImageCmd) -> Result<()> {
             delonix_bin,
         } => VmImageCmd::Build {
             tag,
+            distro,
             ubuntu_release,
+            debian_release,
             k8s_version,
             extra_packages,
             extra_run,
