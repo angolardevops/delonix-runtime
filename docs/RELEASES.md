@@ -4,6 +4,40 @@
 > (regenerado automaticamente pelo pipeline de release a cada tag publicada).
 > Não editar à mão — edita a nota da release respectiva.
 
+## v0.13.0 — `cluster kubeadm` provisiona HAProxy automaticamente para HA multi-control-plane
+
+Até aqui, `delonix cluster kubeadm --control-plane <N>` com `N > 1` recusava sempre com erro
+claro: kubeadm HA exige um endpoint estável (LB/VIP) à frente dos control-planes, e o comando não
+provisionava um — o utilizador tinha de preparar um LB externo à mão e usar `delonix cluster
+apply` com `controlPlaneEndpoint` já definido.
+
+**Corrigido**: com `--control-plane > 1`, o comando provisiona automaticamente uma VM extra
+(`<nome>-lb`) a correr HAProxy como balanceador TCP (L4 — a TLS do apiserver termina sempre no
+control-plane real, nunca no LB), aponta o `balance roundrobin`/`option tcp-check` para a porta
+6443 de cada control-plane, e usa o IP dessa VM como `controlPlaneEndpoint`. Um único comando
+produz agora um cluster HA a funcionar — sem flag nova, dispara sozinho a partir de `N > 1`.
+
+Nada mudou a jusante: `kubeadm_init`/`kubeadm_join` já suportavam multi-control-plane
+(`--control-plane-endpoint`/`--upload-certs`/`--certificate-key`) desde a v1 original; a única
+lacuna era não termos NENHUM endpoint a apontar-lhes. `delonix cluster apply` continua a aceitar
+um `controlPlaneEndpoint` externo/manual, para quem já tem o seu próprio LB.
+
+Novo módulo `cmd/lb.rs`: `build_haproxy_cfg` (função pura, testada) gera o `haproxy.cfg`;
+`ensure_haproxy` instala o haproxy via apt se preciso, escreve a config (mesmo idioma de
+`prepare_host` para o `delonix-cri`: tmpfile local → scp → `mv` privilegiado) e reinicia o
+serviço — sempre reescreve + reinicia, idempotente-simples (o mesmo compromisso já aceite no
+resto de `cluster apply`), seguro em qualquer re-execução porque o HAProxy é um proxy L4 sem
+estado.
+
+### Limitação conhecida
+
+A VM do LB reaproveita o mesmo perfil (`--vcpus`/`--memory`) e a mesma imagem dourada das
+restantes VMs do cluster — sem flags próprias de dimensionamento nesta versão. `--etcd-cluster
+<N>` (etcd externo dedicado, isolado dos control-planes) fica para uma sessão de planeamento à
+parte — ver `CLAUDE.md`, secção "Próximas fases".
+
+---
+
 ## v0.12.0 — `vm start`/`vm restart`, `cluster kubeadm` sem `--name` e com auto-pull
 
 Pedido directo de um utilizador real, no seguimento do fix do `vm console` em v0.11.1: depois de

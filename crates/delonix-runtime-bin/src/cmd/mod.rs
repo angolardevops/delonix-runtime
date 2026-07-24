@@ -15,6 +15,7 @@ pub mod ingress_proxy;
 pub mod k8s_recipes;
 pub mod kindmode;
 pub mod kube;
+pub mod lb;
 pub mod manifest;
 pub mod mapped;
 pub mod names;

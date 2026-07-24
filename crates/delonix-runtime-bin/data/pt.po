@@ -241,6 +241,12 @@ msgstr "a criar VM {vm}..."
 msgid "waiting for SSH on {vm}..."
 msgstr "a aguardar SSH em {vm}..."
 
+msgid "provisioning the HAProxy load balancer..."
+msgstr "a provisionar o load balancer HAProxy..."
+
+msgid "configuring HAProxy ({ip})..."
+msgstr "a configurar o HAProxy ({ip})..."
+
 msgid "already satisfied (SKIP)"
 msgstr "já satisfeito (SKIP)"
 

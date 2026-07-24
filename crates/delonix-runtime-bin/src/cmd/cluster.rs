@@ -23,7 +23,7 @@ use super::manifest::{self, ManifestDoc};
 use super::remote::{self, SshTarget};
 use super::util::state_root;
 use super::vmimage::VmImageStore;
-use super::{k8s_recipes, vm as vm_cmd, vmimage};
+use super::{k8s_recipes, lb, vm as vm_cmd, vmimage};
 
 /// `kubeadm` only auto-detects a CRI socket among a hardcoded list of
 /// well-known paths (containerd/CRI-O/dockershim) — `delonix-cri`'s socket
@@ -242,7 +242,7 @@ fn default_service_subnet() -> String {
 /// as root on the remote host (`;`/`` ` ``/`$()`/`|` are not blocked by
 /// `remote::shell_quote`, which only protects the local ssh→bash-c boundary, not the
 /// CONTENT of the script). Security-audit finding, see CLAUDE.md.
-fn valid_endpoint(s: &str) -> bool {
+pub(crate) fn valid_endpoint(s: &str) -> bool {
     !s.is_empty()
         && !matches!(s.chars().next(), Some('-') | Some(':'))
         && s.chars()
@@ -1072,12 +1072,30 @@ fn provision_and_apply(args: ProvisionArgs) -> Result<()> {
     let control_plane_endpoint = if control_plane.len() == 1 {
         None
     } else {
-        return Err(Error::Invalid(
-            "mais de 1 control-plane pedido, mas `delonix cluster kubeadm` ainda não provisiona \
-             um endpoint estável (LB/VIP) automaticamente — usa `delonix cluster apply` com um \
-             `controlPlaneEndpoint` externo já preparado, ou pede só 1 control-plane"
-                .into(),
-        ));
+        // kubeadm HA needs a stable endpoint in front of >1 control-plane —
+        // provision one extra VM (`<name>-lb`) running HAProxy as a TCP
+        // passthrough LB on 6443, reusing the exact same provisioning helper
+        // as every other VM in this cluster (same golden image/cloud-init).
+        let lb_name = format!("{}-lb", args.name);
+        println!(
+            "cluster/{}: {}",
+            args.name,
+            super::po::t("provisioning the HAProxy load balancer...")
+        );
+        let lb_ip = create_and_wait(&lb_name, &disk, &args, &ssh_public, &ssh, timeout)?;
+        let lb_target = SshTarget {
+            host: lb_ip.clone(),
+            user: ssh.user.clone(),
+            key: ssh.key.clone(),
+        };
+        let backend_ips: Vec<String> = control_plane.iter().map(|h| h.ip.clone()).collect();
+        println!(
+            "cluster/{}: {}",
+            args.name,
+            super::po::tf("configuring HAProxy ({ip})...", &[("ip", &lb_ip)])
+        );
+        lb::ensure_haproxy(&lb_target, &backend_ips)?;
+        Some(lb_ip)
     };
 
     // `cluster kubeadm` (flags, no manifest) builds the SAME ClusterSpec that
