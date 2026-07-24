@@ -187,6 +187,11 @@ pub enum ImageCmd {
         /// the appliance runs without network. No DHCP/DNS needed in the guest.
         #[arg(long)]
         offline: bool,
+        /// Build a golden image with NO Kubernetes — just `delonix` itself.
+        #[arg(long)]
+        no_k8s: bool,
+        #[arg(long)]
+        delonix_bin: Option<PathBuf>,
     },
 }
 
@@ -236,6 +241,11 @@ pub enum VmSub {
         /// the appliance runs without network. No DHCP/DNS needed in the guest.
         #[arg(long)]
         offline: bool,
+        /// Build a golden image with NO Kubernetes — just `delonix` itself.
+        #[arg(long)]
+        no_k8s: bool,
+        #[arg(long)]
+        delonix_bin: Option<PathBuf>,
     },
 }
 
@@ -280,6 +290,8 @@ pub fn run(vm: bool, action: ImageCmd) -> Result<()> {
                 cri_bin,
                 no_compress,
                 offline,
+                no_k8s,
+                delonix_bin,
             } => VmImageCmd::Build {
                 tag,
                 ubuntu_release,
@@ -289,6 +301,8 @@ pub fn run(vm: bool, action: ImageCmd) -> Result<()> {
                 cri_bin,
                 no_compress,
                 offline,
+                no_k8s,
+                delonix_bin,
             },
         });
     }
@@ -399,6 +413,8 @@ fn run_vm(action: ImageCmd) -> Result<()> {
             cri_bin,
             no_compress,
             offline,
+            no_k8s,
+            delonix_bin,
         } => VmImageCmd::Build {
             tag,
             ubuntu_release,
@@ -408,6 +424,8 @@ fn run_vm(action: ImageCmd) -> Result<()> {
             cri_bin,
             no_compress,
             offline,
+            no_k8s,
+            delonix_bin,
         },
         ImageCmd::Tag { .. }
         | ImageCmd::History { .. }

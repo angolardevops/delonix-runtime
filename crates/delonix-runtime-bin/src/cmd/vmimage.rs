@@ -165,6 +165,16 @@ pub enum VmImageCmd {
         /// dispenses with the host workarounds (passt/dhclient) the online mode requires.
         #[arg(long)]
         offline: bool,
+        /// Build a golden image with NO Kubernetes at all — just the
+        /// `delonix` engine binary, ready for rootless containers (mutually
+        /// exclusive with `--k8s-version`/`--offline`, which don't apply).
+        #[arg(long)]
+        no_k8s: bool,
+        /// Explicit path of the `delonix` binary to install when `--no-k8s`
+        /// (otherwise: the currently running `delonix`, then a workspace
+        /// build, then a verified download from the matching release).
+        #[arg(long)]
+        delonix_bin: Option<PathBuf>,
     },
 }
 
@@ -199,6 +209,8 @@ pub fn run(action: VmImageCmd) -> Result<()> {
             cri_bin,
             no_compress,
             offline,
+            no_k8s,
+            delonix_bin,
         } => cmd_build(
             &store,
             &tag,
@@ -209,6 +221,8 @@ pub fn run(action: VmImageCmd) -> Result<()> {
             cri_bin,
             !no_compress,
             offline,
+            no_k8s,
+            delonix_bin,
         ),
     }
 }
@@ -276,6 +290,14 @@ fn describe_one(store: &VmImageStore, img: &VmImage) {
 /// kubectl + delonix-cri as a systemd service) — published and validated with
 /// a byte-identical round-trip; see CLAUDE.md, section "Golden VM image".
 pub(crate) const OFFICIAL_VM_IMAGE: &str = "ghcr.io/angolardevops/delonix-vm-k8s:1.34";
+
+/// Golden VM image with NO Kubernetes — just the `delonix` engine binary and
+/// rootless prerequisites (see `rootless_customization_steps`). No default
+/// selection wired into `Pull`/`LsRemote`: callers pass this explicitly, same
+/// as pulling any non-default k8s image today.
+#[allow(dead_code)]
+pub(crate) const OFFICIAL_VM_BASE_IMAGE: &str =
+    "ghcr.io/angolardevops/delonix-vm-base:ubuntu-24.04";
 
 pub(crate) fn cmd_push(store: &VmImageStore, name: &str, target: &str) -> Result<()> {
     let img = store.get(name)?;
@@ -353,7 +375,35 @@ fn cmd_build(
     cri_bin: Option<PathBuf>,
     compress: bool,
     offline: bool,
+    no_k8s: bool,
+    delonix_bin: Option<PathBuf>,
 ) -> Result<()> {
+    // `--no-k8s` builds a completely different image (no kubeadm/kubelet/
+    // kubectl/delonix-cri at all — see `rootless_customization_steps`); the
+    // k8s-only flags don't apply and silently ignoring them would be
+    // confusing, so reject the combination up front.
+    if no_k8s {
+        if k8s_version.is_some() {
+            return Err(Error::Invalid(
+                "--no-k8s e --k8s-version são mutuamente exclusivos".into(),
+            ));
+        }
+        if offline {
+            return Err(Error::Invalid(
+                "--no-k8s não suporta --offline (o modo offline só sabe verificar .deb do k8s)"
+                    .into(),
+            ));
+        }
+        if cri_bin.is_some() {
+            return Err(Error::Invalid(
+                "--no-k8s e --cri-bin são mutuamente exclusivos (usa --delonix-bin)".into(),
+            ));
+        }
+    } else if delonix_bin.is_some() {
+        return Err(Error::Invalid(
+            "--delonix-bin só se aplica com --no-k8s".into(),
+        ));
+    }
     // `k8s_version` goes into a `format!` that becomes a `virt-customize --run-command`
     // (via `k8s_recipes::k8s_host_recipes`) — validating here closes the same security
     // finding as `cmd::cluster::valid_version` (the embedded apt repository must not
@@ -366,7 +416,6 @@ fn cmd_build(
         }
     }
     let base = download_ubuntu_base(store, ubuntu_release)?;
-    let cri = resolve_cri_bin(cri_bin)?;
 
     let work_dir =
         std::env::temp_dir().join(format!("delonix-vmimage-build-{}", std::process::id()));
@@ -388,49 +437,56 @@ fn cmd_build(
         ],
     )?;
 
-    let service_unit = workspace_dist_file("delonix-cri.service")?;
-    let ops = if offline {
-        // Everything that needs network happens HERE, on the host (verified), so the
-        // appliance can run with `--no-network`.
-        eprintln!("modo offline: a obter os .deb do k8s no host...");
-        let debs = download_k8s_debs(
-            &work_dir,
-            &work_dir.join("debs"),
-            k8s_version.as_deref(),
-            "amd64",
-            &extra_packages,
-        )?;
-        // Best-effort: the golden image ships with kubeadm's own core images
-        // already local, so a real `kubeadm init` on a booted VM does not
-        // redownload apiserver/etcd/coredns/... from scratch (see
-        // `preseed_k8s_images` for the real crash this fixes). Needs the
-        // kubeadm `.deb` we just downloaded/verified on the host.
-        let preseed_root = debs
-            .iter()
-            .find(|d| {
-                d.file_name()
-                    .and_then(|n| n.to_str())
-                    .is_some_and(|n| n.starts_with("kubeadm_"))
-            })
-            .and_then(|kubeadm_deb| {
-                eprintln!("a pré-semear as imagens do kubeadm no host...");
-                preseed_k8s_images(&work_dir, kubeadm_deb, k8s_version.as_deref())
-            });
-        k8s_customization_steps_offline(
-            &debs,
-            &extra_run,
-            &cri,
-            &service_unit,
-            preseed_root.as_deref(),
-        )
+    let ops = if no_k8s {
+        eprintln!("modo --no-k8s: a preparar imagem sem Kubernetes (delonix + rootless)...");
+        let delonix = resolve_delonix_bin(delonix_bin)?;
+        rootless_customization_steps(&extra_run, &delonix)
     } else {
-        k8s_customization_steps(
-            k8s_version.as_deref(),
-            &extra_packages,
-            &extra_run,
-            &cri,
-            &service_unit,
-        )
+        let cri = resolve_cri_bin(cri_bin)?;
+        let service_unit = workspace_dist_file("delonix-cri.service")?;
+        if offline {
+            // Everything that needs network happens HERE, on the host (verified), so the
+            // appliance can run with `--no-network`.
+            eprintln!("modo offline: a obter os .deb do k8s no host...");
+            let debs = download_k8s_debs(
+                &work_dir,
+                &work_dir.join("debs"),
+                k8s_version.as_deref(),
+                "amd64",
+                &extra_packages,
+            )?;
+            // Best-effort: the golden image ships with kubeadm's own core images
+            // already local, so a real `kubeadm init` on a booted VM does not
+            // redownload apiserver/etcd/coredns/... from scratch (see
+            // `preseed_k8s_images` for the real crash this fixes). Needs the
+            // kubeadm `.deb` we just downloaded/verified on the host.
+            let preseed_root = debs
+                .iter()
+                .find(|d| {
+                    d.file_name()
+                        .and_then(|n| n.to_str())
+                        .is_some_and(|n| n.starts_with("kubeadm_"))
+                })
+                .and_then(|kubeadm_deb| {
+                    eprintln!("a pré-semear as imagens do kubeadm no host...");
+                    preseed_k8s_images(&work_dir, kubeadm_deb, k8s_version.as_deref())
+                });
+            k8s_customization_steps_offline(
+                &debs,
+                &extra_run,
+                &cri,
+                &service_unit,
+                preseed_root.as_deref(),
+            )
+        } else {
+            k8s_customization_steps(
+                k8s_version.as_deref(),
+                &extra_packages,
+                &extra_run,
+                &cri,
+                &service_unit,
+            )
+        }
     };
     let mut args = customize_args(&work_qcow2, &ops);
     if offline {
@@ -1129,6 +1185,105 @@ fn download_cri_bin() -> Result<PathBuf> {
     Ok(cached)
 }
 
+/// Mirrors `resolve_cri_bin` for the `delonix` engine binary itself (used by
+/// `--no-k8s` golden images). Simpler than the CRI case for tier 2: this
+/// command is already running AS `delonix`, so `current_exe()` IS a valid
+/// `delonix` binary — no "next to the exe" lookup needed.
+pub(crate) fn resolve_delonix_bin(explicit: Option<PathBuf>) -> Result<PathBuf> {
+    if let Some(p) = explicit {
+        if !p.exists() {
+            return Err(Error::Invalid(format!(
+                "--delonix-bin '{}' não existe",
+                p.display()
+            )));
+        }
+        return Ok(p);
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        if exe.exists() {
+            return Ok(exe);
+        }
+    }
+    // Dev convenience: source-code workspace from the cwd.
+    if let Some(workspace_root) = find_workspace_root() {
+        eprintln!(
+            "a compilar delonix (release) a partir de {}...",
+            workspace_root.display()
+        );
+        let status = Command::new("cargo")
+            .args([
+                "build",
+                "--release",
+                "-p",
+                "delonix-runtime-bin",
+                "--bin",
+                "delonix",
+            ])
+            .current_dir(&workspace_root)
+            .status()
+            .map_err(|e| Error::Invalid(format!("a correr cargo build: {e}")))?;
+        if !status.success() {
+            return Err(Error::Invalid("cargo build do delonix falhou".into()));
+        }
+        let built = workspace_root.join("target/release/delonix");
+        if built.exists() {
+            return Ok(built);
+        }
+    }
+    download_delonix_bin().map_err(|e| {
+        Error::Invalid(format!(
+            "{e} — or use --delonix-bin <path> / run from a source checkout"
+        ))
+    })
+}
+
+/// Downloads (and caches) `delonix` itself from the GitHub release matching
+/// the RUNNING binary's own version. Same verified-download machinery as
+/// `download_cri_bin`, just a different release asset name.
+fn download_delonix_bin() -> Result<PathBuf> {
+    let version = env!("CARGO_PKG_VERSION");
+    let cache_dir = cri_cache_dir();
+    let cached = cache_dir.join("delonix");
+    if cached.exists() {
+        return Ok(cached);
+    }
+    std::fs::create_dir_all(&cache_dir)?;
+    let base_url =
+        format!("https://github.com/angolardevops/delonix-runtime/releases/download/v{version}");
+    let tmp = cache_dir.join("delonix.download");
+    let variant = if cpu_has_x86_64_v3() { "-v3" } else { "" };
+    let mut asset = format!("delonix-x86_64{variant}-linux");
+    eprintln!("a descarregar {asset} (v{version})...");
+    if !variant.is_empty() && stream_download(&format!("{base_url}/{asset}"), &tmp).is_err() {
+        asset = "delonix-x86_64-linux".to_string();
+        eprintln!("{asset} em falta nesta release — a tentar o binário genérico...");
+        stream_download(&format!("{base_url}/{asset}"), &tmp)?;
+    } else if variant.is_empty() {
+        stream_download(&format!("{base_url}/{asset}"), &tmp)?;
+    }
+    let sums = http_get_text(&format!("{base_url}/SHA256SUMS"))?;
+    let expected = sums
+        .lines()
+        .find(|l| l.trim_end().ends_with(&asset))
+        .and_then(|l| l.split_whitespace().next())
+        .ok_or_else(|| Error::Invalid(format!("SHA256SUMS has no entry for {asset}")))?
+        .to_string();
+    let got = hex_sha256_file(&tmp)?;
+    if got != expected {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(Error::Invalid(format!(
+            "checksum inválido para {asset}: esperado {expected}, obtido {got} — download descartado"
+        )));
+    }
+    std::fs::rename(&tmp, &cached)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&cached, std::fs::Permissions::from_mode(0o755))?;
+    }
+    Ok(cached)
+}
+
 fn find_workspace_root() -> Option<PathBuf> {
     let mut dir = std::env::current_dir().ok()?;
     loop {
@@ -1228,7 +1383,8 @@ pub(crate) fn k8s_customization_steps_offline(
             .into_iter()
             .map(|r| CustomizeOp::RunCommand(r.apply_offline().to_string())),
     );
-    ops.extend(common_customization_steps(extra_run, cri_bin, cri_service));
+    ops.extend(install_cri_steps(cri_bin, cri_service));
+    ops.extend(shared_account_steps(extra_run));
     if let Some(root) = preseed_images_root {
         ops.push(CustomizeOp::RunCommand("mkdir -p /var/lib/delonix".into()));
         for sub in ["images", "layers", "containers", "blobs"] {
@@ -1253,25 +1409,31 @@ pub(crate) fn k8s_customization_steps(
             .into_iter()
             .map(|r| CustomizeOp::RunCommand(r.apply_offline().to_string()))
             .collect();
-    ops.extend(common_customization_steps(extra_run, cri_bin, cri_service));
+    ops.extend(install_cri_steps(cri_bin, cri_service));
+    ops.extend(shared_account_steps(extra_run));
     ops
 }
 
-/// The tail common to both modes (online/offline): `delonix-cri` + accounts +
-/// the user's `--extra-run` + apt cleanup. Shared so the two paths
-/// never diverge in what they produce.
-fn common_customization_steps(
-    extra_run: &[String],
-    cri_bin: &Path,
-    cri_service: &Path,
-) -> Vec<CustomizeOp> {
-    let mut ops: Vec<CustomizeOp> = Vec::new();
-    ops.extend([
-        // `delonix-cri` — CRI endpoint for the kubelet (replaces containerd).
+/// `delonix-cri` install — CRI endpoint for the kubelet (replaces containerd).
+/// Split out of the old `common_customization_steps` so the no-k8s golden
+/// image path (`rootless_customization_steps`) can skip it entirely: a
+/// CRI-to-kubelet shim is meaningless on a VM with no kubelet.
+fn install_cri_steps(cri_bin: &Path, cri_service: &Path) -> Vec<CustomizeOp> {
+    vec![
         CustomizeOp::CopyIn(cri_bin.to_path_buf(), "/usr/local/bin".to_string()),
         CustomizeOp::RunCommand("chmod +x /usr/local/bin/delonix-cri".into()),
         CustomizeOp::CopyIn(cri_service.to_path_buf(), "/etc/systemd/system".to_string()),
         CustomizeOp::RunCommand("systemctl enable delonix-cri.service".into()),
+    ]
+}
+
+/// The tail shared by every golden image variant regardless of k8s/no-k8s:
+/// accounts + the user's `--extra-run` + apt cleanup + machine-id reset.
+/// Kept separate from `install_cri_steps` so a non-Kubernetes image gets the
+/// same account/UX/cleanup guarantees without carrying the CRI shim.
+fn shared_account_steps(extra_run: &[String]) -> Vec<CustomizeOp> {
+    let mut ops: Vec<CustomizeOp> = Vec::new();
+    ops.extend([
         // Default account: root/delonix and delonix:delonix in sudoers (explicit request).
         CustomizeOp::RootPassword("delonix".to_string()),
         CustomizeOp::RunCommand("useradd -m -s /bin/bash -G sudo delonix || true".into()),
@@ -1350,6 +1512,54 @@ fn common_customization_steps(
     // step (after `--extra-run`/apt cleanup) so nothing after it regenerates one.
     ops.push(CustomizeOp::RunCommand(
         "truncate -s 0 /etc/machine-id && rm -f /var/lib/dbus/machine-id && ln -sf /etc/machine-id /var/lib/dbus/machine-id"
+            .into(),
+    ));
+    ops
+}
+
+/// Non-Kubernetes golden image: no kubeadm/kubelet/kubectl, no `delonix-cri`
+/// (a CRI shim is meaningless without a kubelet to call it) — instead, the
+/// `delonix` engine binary itself plus everything `scripts/install.sh`
+/// normally configures on a fresh host for rootless containers to work
+/// out of the box (rootless deps, subuid/subgid range, AppArmor profile on
+/// 23.10+-family hosts). Without this, the appliance boots but `delonix run`
+/// fails immediately on a userns error — defeating the point of a golden image.
+pub(crate) fn rootless_customization_steps(
+    extra_run: &[String],
+    delonix_bin: &Path,
+) -> Vec<CustomizeOp> {
+    let mut ops: Vec<CustomizeOp> = vec![
+        // Same package list `install.sh` requires (`require_dep`/`optional_dep`),
+        // just apt-installed in the guest instead of host-detected.
+        CustomizeOp::RunCommand(
+            "apt-get update && apt-get install -y slirp4netns uidmap nftables iproute2 conntrack"
+                .into(),
+        ),
+        // `delonix` — the daemonless engine binary itself. No systemd unit: it
+        // is CLI-invoked, not a long-running service (unlike `delonix-cri`).
+        CustomizeOp::CopyIn(delonix_bin.to_path_buf(), "/usr/local/bin".to_string()),
+        CustomizeOp::RunCommand("chmod +x /usr/local/bin/delonix".into()),
+    ];
+    ops.extend(shared_account_steps(extra_run));
+    // Subuid/subgid range for the `delonix` account — mirrors `install.sh`'s
+    // `ensure_subid`: without a range, the rootless userns only maps 1 uid and
+    // any image with a non-root USER fails. Idempotent (`grep -q` guard).
+    ops.push(CustomizeOp::RunCommand(
+        "grep -q '^delonix:' /etc/subuid || echo 'delonix:100000:65536' >> /etc/subuid".into(),
+    ));
+    ops.push(CustomizeOp::RunCommand(
+        "grep -q '^delonix:' /etc/subgid || echo 'delonix:100000:65536' >> /etc/subgid".into(),
+    ));
+    // AppArmor `unconfined+userns` profile — on Ubuntu 23.10+-family hosts,
+    // `kernel.apparmor_restrict_unprivileged_userns=1` blocks an unprivileged
+    // `unshare(CLONE_NEWUSER)` from an unprofiled binary (`install.sh`'s exact
+    // mechanism/content). Written unconditionally: harmless where the
+    // restriction is off, load-bearing where it's on. Best-effort — a guest
+    // build environment may not be able to load it the same way a live boot
+    // can (matches `preseed_k8s_images`'s "never fail the whole build" norm).
+    ops.push(CustomizeOp::RunCommand(
+        "printf 'abi <abi/4.0>,\\ninclude <tunables/global>\\nprofile delonix /usr/local/bin/delonix flags=(unconfined) {\\n  userns,\\n}\\n' > /etc/apparmor.d/delonix && \
+         (apparmor_parser -r /etc/apparmor.d/delonix || true)"
             .into(),
     ));
     ops
@@ -1701,6 +1911,130 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
             .iter()
             .any(|op| matches!(op, CustomizeOp::RootPassword(p) if p == "delonix")));
         assert!(ops.iter().any(|op| matches!(op, CustomizeOp::Password{user,password} if user=="delonix" && password=="delonix")));
+    }
+
+    #[test]
+    fn rootless_steps_instalam_dependencias_e_o_binario_delonix_sem_cri() {
+        let delonix = PathBuf::from("/tmp/delonix");
+        let ops = rootless_customization_steps(&[], &delonix);
+        let cmds: Vec<&str> = ops
+            .iter()
+            .filter_map(|o| match o {
+                CustomizeOp::RunCommand(c) => Some(c.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert!(cmds.iter().any(|c| c.contains("slirp4netns")
+            && c.contains("uidmap")
+            && c.contains("nftables")
+            && c.contains("iproute2")
+            && c.contains("conntrack")));
+        assert!(ops
+            .iter()
+            .any(|o| matches!(o, CustomizeOp::CopyIn(src, dst) if src == &delonix && dst == "/usr/local/bin")));
+        // No CRI shim on a no-k8s image — there is no kubelet to serve.
+        assert!(!cmds.iter().any(|c| c.contains("delonix-cri")));
+        assert!(!ops
+            .iter()
+            .any(|o| matches!(o, CustomizeOp::CopyIn(_, dst) if dst == "/etc/systemd/system")));
+    }
+
+    #[test]
+    fn rootless_steps_configuram_subuid_e_subgid_para_delonix() {
+        let ops = rootless_customization_steps(&[], &PathBuf::from("/tmp/delonix"));
+        let cmds: Vec<&str> = ops
+            .iter()
+            .filter_map(|o| match o {
+                CustomizeOp::RunCommand(c) => Some(c.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert!(cmds
+            .iter()
+            .any(|c| c.contains("/etc/subuid") && c.contains("delonix:100000:65536")));
+        assert!(cmds
+            .iter()
+            .any(|c| c.contains("/etc/subgid") && c.contains("delonix:100000:65536")));
+    }
+
+    #[test]
+    fn rootless_steps_escrevem_o_perfil_apparmor_unconfined_userns() {
+        let ops = rootless_customization_steps(&[], &PathBuf::from("/tmp/delonix"));
+        let cmds: Vec<&str> = ops
+            .iter()
+            .filter_map(|o| match o {
+                CustomizeOp::RunCommand(c) => Some(c.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert!(cmds.iter().any(|c| c.contains("/etc/apparmor.d/delonix")
+            && c.contains("flags=(unconfined)")
+            && c.contains("userns")));
+    }
+
+    #[test]
+    fn rootless_steps_partilham_a_criacao_de_conta_delonix() {
+        let ops = rootless_customization_steps(&[], &PathBuf::from("/tmp/delonix"));
+        assert!(ops
+            .iter()
+            .any(|op| matches!(op, CustomizeOp::RootPassword(p) if p == "delonix")));
+        assert!(ops.iter().any(|op| matches!(op, CustomizeOp::Password{user,password} if user=="delonix" && password=="delonix")));
+    }
+
+    fn tmp_store() -> (VmImageStore, PathBuf) {
+        let dir = std::env::temp_dir().join(format!(
+            "delonix-vmimage-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        (VmImageStore::open(&dir).unwrap(), dir)
+    }
+
+    #[test]
+    fn no_k8s_rejeita_k8s_version_offline_e_cri_bin() {
+        let (store, dir) = tmp_store();
+        let base = |k8s_version: Option<String>, offline: bool, cri_bin: Option<PathBuf>| {
+            cmd_build(
+                &store,
+                "t",
+                "24.04",
+                k8s_version,
+                vec![],
+                vec![],
+                cri_bin,
+                true,
+                offline,
+                true, // no_k8s
+                None,
+            )
+        };
+        assert!(base(Some("1.34".into()), false, None).is_err());
+        assert!(base(None, true, None).is_err());
+        assert!(base(None, false, Some(PathBuf::from("/tmp/x"))).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn delonix_bin_sem_no_k8s_e_rejeitado() {
+        let (store, dir) = tmp_store();
+        let err = cmd_build(
+            &store,
+            "t",
+            "24.04",
+            None,
+            vec![],
+            vec![],
+            None,
+            true,
+            false,
+            false, // no_k8s = false
+            Some(PathBuf::from("/tmp/delonix")),
+        );
+        assert!(err.is_err());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
