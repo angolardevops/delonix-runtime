@@ -96,6 +96,37 @@ pub(crate) fn derived_name<F: Fn(&str) -> bool>(seed: &str, taken: F) -> Option<
     None
 }
 
+/// Same `<king>-<place>-<NN>` pattern as [`derived_name`], but randomly
+/// seeded (time + pid) instead of derived from an existing id — for callers
+/// with no natural seed to derive from (a brand-new cluster has no id yet,
+/// unlike a container). Used by kind-mode `cluster create` and by `cluster
+/// kubeadm` (see `cmd::kindmode::random_cluster_name`/
+/// `cmd::cluster::random_kubeadm_cluster_name`) so every kind of
+/// auto-generated cluster name reads the same way as an auto-named container.
+pub(crate) fn random_name<F: Fn(&str) -> bool>(taken: F) -> Option<String> {
+    let mut seed = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.subsec_nanos() as u64)
+        .unwrap_or(0)
+        ^ (std::process::id() as u64) << 20;
+    for _ in 0..50 {
+        seed = seed
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
+        let r = (seed >> 33) as usize;
+        let name = format!(
+            "{}-{}-{:02}",
+            REIS[r % REIS.len()],
+            LUGARES[(r / REIS.len()) % LUGARES.len()],
+            (r / (REIS.len() * LUGARES.len())) % 100
+        );
+        if !taken(&name) {
+            return Some(name);
+        }
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

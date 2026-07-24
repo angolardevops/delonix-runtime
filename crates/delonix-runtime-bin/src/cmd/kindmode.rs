@@ -318,10 +318,6 @@ fn join_config_yaml(j: &JoinInfo) -> String {
     )
 }
 
-// Kings/queens + places of Angola: lists SHARED with the auto-generated
-// container names — see `cmd/names.rs` (a single source of truth).
-use super::names::{LUGARES, REIS};
-
 /// Invents a cluster name (king + place + suffix), avoiding the ones already used.
 ///
 /// Without this, `create` without `--name` always used "delonix" and collided on the second
@@ -339,29 +335,9 @@ pub(crate) fn random_cluster_name(store: &Store) -> Result<String> {
         .iter()
         .filter_map(|c| c.labels.get("io.x-k8s.kind.cluster").cloned())
         .collect();
-    let mut seed = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.subsec_nanos() as u64)
-        .unwrap_or(0)
-        ^ (std::process::id() as u64) << 20;
-    for _ in 0..50 {
-        seed = seed
-            .wrapping_mul(6364136223846793005)
-            .wrapping_add(1442695040888963407); // LCG
-        let r = (seed >> 33) as usize;
-        let name = format!(
-            "{}-{}-{:02}",
-            REIS[r % REIS.len()],
-            LUGARES[(r / REIS.len()) % LUGARES.len()],
-            (r / (REIS.len() * LUGARES.len())) % 100
-        );
-        if !existing.contains(&name) {
-            return Ok(name);
-        }
-    }
-    Err(Error::Invalid(
-        "não consegui inventar um nome livre — passa `--name`".into(),
-    ))
+    super::names::random_name(|n| existing.iter().any(|e| e == n)).ok_or_else(|| {
+        Error::Invalid("não consegui inventar um nome livre — passa `--name`".into())
+    })
 }
 
 /// Name of worker `i` (1-based), in the `kind` convention: the first is

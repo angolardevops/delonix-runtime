@@ -530,6 +530,23 @@ pub enum VmCmd {
         #[arg(add = ArgValueCandidates::new(super::complete::vms))]
         name: String,
     },
+    /// Start an existing, stopped VM — idempotent (already running = no-op).
+    /// Reboots with the base disk/vcpus/memory/network/backend recorded at
+    /// its last `create`/`start`, reusing the same overlay (disk state
+    /// preserved). Does NOT restore anything that only ever existed as a
+    /// `vm create` flag (custom kernel/seed/volumes/static IP/VNC/advanced
+    /// libvirt knobs) — a VM using those needs the original `vm create`
+    /// invocation instead (also idempotent/auto-heal).
+    Start {
+        #[arg(add = ArgValueCandidates::new(super::complete::vms))]
+        name: String,
+    },
+    /// Stop (if running) then start — always a real reboot, unlike `start`.
+    /// Same recovered-fields limits as `start`.
+    Restart {
+        #[arg(add = ArgValueCandidates::new(super::complete::vms))]
+        name: String,
+    },
     /// Remove the VM (stops + deletes overlay/state).
     #[command(alias = "delete")]
     Rm {
@@ -965,6 +982,16 @@ pub fn run(action: VmCmd) -> Result<()> {
         VmCmd::Unbridge { network, apply } => super::vmbridge::unbridge(&network, apply),
         VmCmd::Stop { name } => {
             delonix_vm::stop(&base, &name)?;
+            println!("{name}");
+            Ok(())
+        }
+        VmCmd::Start { name } => {
+            delonix_vm::start(&base, &name)?;
+            println!("{name}");
+            Ok(())
+        }
+        VmCmd::Restart { name } => {
+            delonix_vm::restart(&base, &name)?;
             println!("{name}");
             Ok(())
         }

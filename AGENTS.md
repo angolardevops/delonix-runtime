@@ -517,7 +517,7 @@ de agir. Nunca dessincroniza de um `.tfstate` porque não há nenhum.
   comandos `kubeadm init`/`join`, e a tentativa real de SSH falha correctamente e com clareza
   (`No route to host` num IP de teste) — não há mais nada para simular sem máquinas verdadeiras.
 
-### `delonix cluster kubeadm --name <n> --control-plane <n> --workers <n>`
+### `delonix cluster kubeadm [--name <n>] --control-plane <n> --workers <n>`
 
 Camada por cima de `cluster apply` (pedido original, primeira sessão desta série: "um comando,
 do zero a um cluster a funcionar"). Não escreve nem exige um `cloud.yaml` — provisiona as VMs e
@@ -547,6 +547,37 @@ bloqueado neste sandbox (pacote `libguestfs-common` em falta, já documentado ac
 imagem local, `delonix cluster kubeadm` não tem o que provisionar. Validado até essa fronteira
 real: parsing de flags, `resolve_vm_image` (0/1/N imagens, com testes automatizados), geração de
 nomes determinísticos (`vm_names`), e o erro claro e correcto quando não há imagem nenhuma.
+
+#### `--name` opcional + auto-pull de `--vm-image` em falta (v0.12.0)
+
+Dois bugs reais (host kaeso-sys-01): (1) `--name` era obrigatório — sem a mesma analogia do nome
+automático angolano (`<rei>-<lugar>-NN`) que containers e `cluster create` (modo kind) já têm;
+(2) `--vm-image <v>`/`--k8s-version <v>` sem a imagem local dava sempre erro ("não tem qcow2 em
+disco"), mesmo a golden sendo um artefacto OCI publicado precisamente para não precisar de
+pull manual — e mesmo quando a imagem ESTAVA local mas só sob o nome de convenção completo
+(`delonix-vm-k8s:1.34`), porque `resolve_vm_image` devolvia o valor explícito verbatim sem
+verificar essa convenção primeiro.
+
+**Corrigido**:
+
+- `--name` passou a `Option<String>`; sem ele, `random_kubeadm_cluster_name` gera um nome livre
+  no mesmo padrão (`super::names::random_name`, extraído do `kindmode::random_cluster_name` para
+  ser partilhado pelos dois) — colisão verificada contra os nomes de VM existentes (um cluster
+  kubeadm não tem registo próprio, É as suas VMs `<nome>-cp1`/`<nome>-w1`).
+- `resolve_vm_image` agora prefere o nome de convenção local (`delonix-vm-k8s:<v>`) quando o
+  valor explícito não bate certo com nenhuma imagem local por si só — fecha o caso de uma imagem
+  já puxada por `vm pull` (que a guarda sob o nome completo) nunca ser encontrada por um
+  `--vm-image` abreviado.
+- Quando, mesmo assim, não há imagem local nenhuma, `provision_and_apply` já não desiste — chama
+  `vmimage::cmd_pull` contra o repositório oficial (`official_pull_source`, mesma normalização:
+  um valor com `/` usa-se tal-e-qual, um valor nu ou `delonix-vm-k8s:<v>` resolve contra
+  `ghcr.io/angolardevops/delonix-vm-k8s:<v>`), sob o MESMO nome local que `resolve_vm_image` já
+  tinha decidido — a chamada seguinte a `qcow2_path` encontra-a.
+
+Validado ao vivo: `--vm-image 1.34` (já local, sob `delonix-vm-k8s:1.34`) resolve sem tentar
+nenhum download; `--vm-image 1.35` (ausente) imprime "a descarregar de
+'ghcr.io/angolardevops/delonix-vm-k8s:1.35'..." e inicia o pull real; sem `--name`, gera
+`nzinga-cacuaco-19` e prossegue para a geração da chave SSH.
 
 ## Auditoria de segurança (skill `delonix-runtime-sec`)
 
@@ -766,6 +797,34 @@ flag existe exactamente para isto ("disconnect already connected sessions").
 Como `vm console <nome>` é um comando de um único operador, uma sessão presa
 da tua PRÓPRIA ligação anterior é o caso esmagadoramente comum, não um
 segundo espectador real a proteger.
+
+### `vm start`/`vm restart` (v0.12.0) — trazer de volta uma VM parada, sem redigitar as flags
+
+Bug report real (o mesmo `dev` do achado acima): depois de o `vm console`
+finalmente destrancar, o domínio afinal já estava mesmo `Stopped` (motivo fora
+do alcance do delonix — ver secção anterior). A única forma de voltar a
+arrancá-la era `delonix vm create dev` de novo, que É idempotente/auto-heal
+(reaproveita o overlay), mas **exige as MESMAS flags** (`--vcpus`/`--memory`/
+`--disk`/etc.) — sem elas, o "auto-heal" arrancaria com os defaults do clap
+(1 vCPU, 1G), silenciosamente diferente da VM original. `vm start`/`vm
+restart` (`delonix_vm::{start,restart}`, `crates/delonix-vm/src/lib.rs`)
+resolvem isto: reconstroem a `VmConfig` a partir do PRÓPRIO registo persistido
+(`config_from`) — disco base, vcpus, memória, rede, backend, `restart_policy`,
+`devices`, e (só libvirt) o net mode, que `LibvirtBackend::boot` já guardava
+disfarçado no campo `Vm.tap` (`cfg.net_mode.unwrap_or("user")`) — e delegam no
+mesmo `create`/auto-heal de sempre.
+
+**Limitação honesta, documentada no próprio `--help`**: o registo `Vm` nunca
+persistiu tudo o que a `VmConfig` completa tem — kernel/initrd/firmware/
+cmdline de boot directo, seed de cloud-init próprio, volumes 9p, IP estático,
+VNC, e os campos avançados de libvirt (machine/cpu model/topology/TPM/video/
+boot order/discos ou NICs extra/XML cru) só existiram como flags do `vm
+create` e morrem depois de ele terminar. Uma VM que precise de algum destes
+tem de voltar pelo `vm create` original (também idempotente) — `start`/
+`restart` cobrem o caso comum (imagem dourada, sem flags avançadas), não
+substituem `create` para o resto. `vm start` é idempotente (já a correr = sem
+efeito, delega no `create`); `vm restart` força sempre um reboot real (pára
+primeiro se estiver a correr).
 
 ## Rede das VMs libvirt — default `nat` com IP, `--ip` estático, rotas VM↔container
 
