@@ -109,6 +109,8 @@ Commands:
   unbridge   Tear down a `vm bridge` (dry-run without `--apply`)
   describe   Human-readable detail of one or more VMs, `kubectl describe` style (for humans; use `status` for the usual compact view). Includes the LIVE state — `delonix_vm::status` reconciles liveness/IP with the backend
   stop       Stop the VM (preserves disk/record)
+  start      Start an existing, stopped VM — idempotent (already running = no-op). Reboots with the base disk/vcpus/memory/network/backend recorded at its last `create`/`start`, reusing the same overlay (disk state preserved). Does NOT restore anything that only ever existed as a `vm create` flag (custom kernel/seed/volumes/static IP/VNC/advanced libvirt knobs) — a VM using those needs the original `vm create` invocation instead (also idempotent/auto-heal)
+  restart    Stop (if running) then start — always a real reboot, unlike `start`. Same recovered-fields limits as `start`
   rm         Remove the VM (stops + deletes overlay/state)
   apply      Apply the `kind: Vm` documents of a manifest (`delonix_vm::create` is already idempotent by name — creates or auto-recovers)
   help       Print this message or the help of the given subcommand(s)
