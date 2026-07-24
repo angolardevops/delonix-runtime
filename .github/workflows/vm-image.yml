@@ -21,7 +21,7 @@ on:
         description: "Versão do Kubernetes (tag da imagem) — ignorado se no_k8s=true"
         default: "1.34"
       ubuntu_release:
-        description: "Cloud image Ubuntu base"
+        description: "Cloud image Ubuntu base (usado quando distro=ubuntu)"
         default: "24.04"
       image:
         description: "Repositório OCI de destino"
@@ -30,6 +30,16 @@ on:
         description: "Construir a variante SEM Kubernetes (só delonix + rootless)"
         type: boolean
         default: false
+      distro:
+        description: "Distro base para builds --no-k8s"
+        type: choice
+        options:
+          - ubuntu
+          - debian
+        default: ubuntu
+      debian_release:
+        description: "Codinome Debian (usado quando distro=debian, builds --no-k8s)"
+        default: "bookworm"
 
 permissions:
   contents: read
@@ -55,8 +65,13 @@ jobs:
         id: vars
         run: |
           if [ "${{ inputs.no_k8s }}" = "true" ]; then
-            echo "tag=delonix-vm-base:ubuntu-${{ inputs.ubuntu_release }}" >> "$GITHUB_OUTPUT"
-            echo "dest_tag=ubuntu-${{ inputs.ubuntu_release }}" >> "$GITHUB_OUTPUT"
+            if [ "${{ inputs.distro }}" = "debian" ]; then
+              echo "tag=delonix-vm-base:debian-${{ inputs.debian_release }}" >> "$GITHUB_OUTPUT"
+              echo "dest_tag=debian-${{ inputs.debian_release }}" >> "$GITHUB_OUTPUT"
+            else
+              echo "tag=delonix-vm-base:ubuntu-${{ inputs.ubuntu_release }}" >> "$GITHUB_OUTPUT"
+              echo "dest_tag=ubuntu-${{ inputs.ubuntu_release }}" >> "$GITHUB_OUTPUT"
+            fi
             echo "dest_repo=ghcr.io/angolardevops/delonix-vm-base" >> "$GITHUB_OUTPUT"
           else
             echo "tag=delonix-vm-k8s:${{ inputs.k8s_version }}" >> "$GITHUB_OUTPUT"
@@ -80,11 +95,20 @@ jobs:
         env:
           LIBGUESTFS_BACKEND: direct
         run: |
-          ./target/release/delonix image --vm build \
-            --tag "${{ steps.vars.outputs.tag }}" \
-            --ubuntu-release "${{ inputs.ubuntu_release }}" \
-            --delonix-bin ./target/release/delonix \
-            --no-k8s
+          if [ "${{ inputs.distro }}" = "debian" ]; then
+            ./target/release/delonix image --vm build \
+              --tag "${{ steps.vars.outputs.tag }}" \
+              --distro debian \
+              --debian-release "${{ inputs.debian_release }}" \
+              --delonix-bin ./target/release/delonix \
+              --no-k8s
+          else
+            ./target/release/delonix image --vm build \
+              --tag "${{ steps.vars.outputs.tag }}" \
+              --ubuntu-release "${{ inputs.ubuntu_release }}" \
+              --delonix-bin ./target/release/delonix \
+              --no-k8s
+          fi
           ./target/release/delonix image --vm ls
       - name: Login no ghcr e push
         env:

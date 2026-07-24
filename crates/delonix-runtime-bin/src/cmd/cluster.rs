@@ -1830,6 +1830,7 @@ users:
                 k8s_version: None,
                 created_unix: 0,
                 kernel_version: None,
+                distro: None,
             })
             .unwrap();
         assert_eq!(
@@ -1852,6 +1853,7 @@ users:
                 k8s_version: None,
                 created_unix: 0,
                 kernel_version: None,
+                distro: None,
             })
             .unwrap();
         assert_eq!(
@@ -1890,6 +1892,7 @@ users:
                 k8s_version: Some("1.31".to_string()),
                 created_unix: 0,
                 kernel_version: None,
+                distro: None,
             })
             .unwrap();
         assert_eq!(
@@ -1917,6 +1920,7 @@ users:
                     k8s_version: None,
                     created_unix: 0,
                     kernel_version: None,
+                    distro: None,
                 })
                 .unwrap();
         }
@@ -1945,6 +1949,7 @@ users:
                     k8s_version: None,
                     created_unix: 0,
                     kernel_version: None,
+                    distro: None,
                 })
                 .unwrap();
         }
