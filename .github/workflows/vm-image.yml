@@ -18,7 +18,7 @@ on:
   workflow_dispatch:
     inputs:
       k8s_version:
-        description: "Versão do Kubernetes (tag da imagem)"
+        description: "Versão do Kubernetes (tag da imagem) — ignorado se no_k8s=true"
         default: "1.34"
       ubuntu_release:
         description: "Cloud image Ubuntu base"
@@ -26,6 +26,10 @@ on:
       image:
         description: "Repositório OCI de destino"
         default: "ghcr.io/angolardevops/delonix-vm-k8s"
+      no_k8s:
+        description: "Construir a variante SEM Kubernetes (só delonix + rootless)"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -47,16 +51,40 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Compila delonix + delonix-cri
         run: cargo build --release --locked -p delonix-runtime-bin -p delonix-cri
+      - name: Calcula tag/repositório de destino
+        id: vars
+        run: |
+          if [ "${{ inputs.no_k8s }}" = "true" ]; then
+            echo "tag=delonix-vm-base:ubuntu-${{ inputs.ubuntu_release }}" >> "$GITHUB_OUTPUT"
+            echo "dest_tag=ubuntu-${{ inputs.ubuntu_release }}" >> "$GITHUB_OUTPUT"
+            echo "dest_repo=ghcr.io/angolardevops/delonix-vm-base" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=delonix-vm-k8s:${{ inputs.k8s_version }}" >> "$GITHUB_OUTPUT"
+            echo "dest_tag=${{ inputs.k8s_version }}" >> "$GITHUB_OUTPUT"
+            echo "dest_repo=${{ inputs.image }}" >> "$GITHUB_OUTPUT"
+          fi
       - name: Constrói a imagem VM dourada (offline)
+        if: ${{ inputs.no_k8s != 'true' }}
         env:
           LIBGUESTFS_BACKEND: direct
         run: |
           ./target/release/delonix image --vm build \
-            --tag "delonix-vm-k8s:${{ inputs.k8s_version }}" \
+            --tag "${{ steps.vars.outputs.tag }}" \
             --ubuntu-release "${{ inputs.ubuntu_release }}" \
             --k8s-version "${{ inputs.k8s_version }}" \
             --cri-bin ./target/release/delonix-cri \
             --offline
+          ./target/release/delonix image --vm ls
+      - name: Constrói a imagem VM dourada (sem Kubernetes)
+        if: ${{ inputs.no_k8s == 'true' }}
+        env:
+          LIBGUESTFS_BACKEND: direct
+        run: |
+          ./target/release/delonix image --vm build \
+            --tag "${{ steps.vars.outputs.tag }}" \
+            --ubuntu-release "${{ inputs.ubuntu_release }}" \
+            --delonix-bin ./target/release/delonix \
+            --no-k8s
           ./target/release/delonix image --vm ls
       - name: Login no ghcr e push
         env:
@@ -69,9 +97,9 @@ jobs:
           echo "${GHCR_TOKEN:-$GITHUB_TOKEN}" | ./target/release/delonix image login ghcr.io \
             -u "${{ github.actor }}" --password-stdin
           ./target/release/delonix image --vm push \
-            "delonix-vm-k8s:${{ inputs.k8s_version }}" \
-            "${{ inputs.image }}:${{ inputs.k8s_version }}"
+            "${{ steps.vars.outputs.tag }}" \
+            "${{ steps.vars.outputs.dest_repo }}:${{ steps.vars.outputs.dest_tag }}"
       - name: Sumário
         run: |
           echo "### Imagem VM dourada publicada" >> "$GITHUB_STEP_SUMMARY"
-          echo "\`${{ inputs.image }}:${{ inputs.k8s_version }}\` — testa com \`delonix vm pull\`." >> "$GITHUB_STEP_SUMMARY"
+          echo "\`${{ steps.vars.outputs.dest_repo }}:${{ steps.vars.outputs.dest_tag }}\` — testa com \`delonix vm pull\`." >> "$GITHUB_STEP_SUMMARY"

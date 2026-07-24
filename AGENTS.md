@@ -427,6 +427,30 @@ nó não faz nenhuma instalação**, só `kubeadm init`/`kubeadm join`.
   extraído (sem instalar) devolveu as 7 imagens reais da v1.34; um `pull_from_registry_with_creds`
   real contra `registry.k8s.io/pause:3.10.1` confirmou o layout do `ImageStore` resultante
   (`images/layers/containers/blobs`) bate exactamente com o que o `--copy-in` espera.
+- **`--no-k8s` (v0.16.0) — golden SEM Kubernetes, só `delonix` + rootless pronto a usar.** Fase 1
+  de 3 (pedido: Ubuntu 26.04 [já funciona hoje, zero código — `--ubuntu-release 26.04`], Ubuntu
+  24.04 sem k8s [este], Debian, Rocky — sequenciamento incremental escolhido explicitamente pelo
+  utilizador). `k8s_version: None` **não** era "sem k8s": `k8s_repo_version` cai sempre em
+  `stable:/v1.31` e instalava kubeadm/kubelet/kubectl na mesma — não havia forma de desligar.
+  `--no-k8s` é um caminho novo (`rootless_customization_steps`), mutuamente exclusivo com
+  `--k8s-version`/`--offline`/`--cri-bin` (rejeitado com erro claro, nunca ignorado em silêncio):
+  instala os mesmos pacotes rootless que o `install.sh` exige (`slirp4netns`/`uidmap`/`nftables`/
+  `iproute2`/`conntrack`), injecta o binário `delonix` (não `delonix-cri` — um shim de CRI para o
+  kubelet não serve para nada sem kubelet; sem unidade systemd, o motor é invocado por CLI, não é
+  um serviço), configura o intervalo subuid/subgid da conta `delonix` (mesma lógica do
+  `ensure_subid` do `install.sh` — sem isto o userns rootless só mapeia 1 uid) e escreve o perfil
+  AppArmor `unconfined+userns` (`install.sh:370-381`, necessário em hosts Ubuntu 23.10+ com
+  `kernel.apparmor_restrict_unprivileged_userns=1` — sem ele o `unshare(CLONE_NEWUSER)` falha logo
+  no arranque). A criação de conta/sudoers/bash-completion/limpeza de apt/reset de machine-id
+  continua **partilhada** com o caminho k8s (`shared_account_steps`, extraído de
+  `common_customization_steps` sem alterar o output do caminho k8s — só o CRI ficou à parte em
+  `install_cri_steps`). Publica em `ghcr.io/angolardevops/delonix-vm-base` (repositório novo,
+  tags `ubuntu-24.04`/futuramente `debian-12`/`rocky-9` — sem wiring de omissão em `Pull`/
+  `LsRemote` nesta fase, o chamador passa sempre a fonte explícita). `vm-image.yml` ganhou o input
+  `no_k8s` (boolean) que troca o passo de build/tag/repositório de destino. **Por fazer
+  (deliberadamente fora desta fase)**: Debian, Rocky (dnf — família de gestor de pacotes
+  diferente, o maior salto), `--offline` para `--no-k8s` (a verificação de `.deb` no host é
+  específica do `pkgs.k8s.io`), selecção por omissão em `Pull`/`LsRemote`.
 - **`push`/`pull`**: publicam/obtêm a imagem como artefacto OCI de blob único (config vazio + 1
   layer, padrão ORAS/Helm) via `delonix_image::registry::{push_oci_artifact,pull_oci_artifact}`
   (`crates/delonix-image/src/registry.rs`) — generaliza o `Client`/auth/upload já usado por
