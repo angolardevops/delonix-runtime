@@ -20,6 +20,7 @@ use delonix_runtime_core::{Error, Result};
 use serde::Deserialize;
 
 use super::manifest::{self, ManifestDoc};
+use super::output;
 use super::remote::{self, SshTarget};
 use super::util::state_root;
 use super::vmimage::VmImageStore;
@@ -676,12 +677,20 @@ fn apply_ssh(name: &str, spec: &ClusterSpec, wait_ready: bool) -> Result<()> {
         .iter()
         .chain(spec.workers.hosts.iter())
         .collect();
-    println!(
-        "cluster/{name}: {}",
-        super::po::tf(
-            "preparing {n} host(s)...",
-            &[("n", &all_hosts.len().to_string())]
-        )
+
+    // Same `Progress` convention as `provision_and_apply` above (and
+    // `kindmode`'s own `create`) — one spinner per logical stage, not per
+    // host/command. This is a SEPARATE `Progress` instance: `cluster apply
+    // -f` reaches this function directly, without ever going through
+    // `provision_and_apply`'s own progress block.
+    let mut p = output::Progress::new();
+
+    p.step(
+        &super::po::tf(
+            "Preparing {n} host(s)",
+            &[("n", &all_hosts.len().to_string())],
+        ),
+        "🔧",
     );
     for h in &all_hosts {
         let target = target_for(h, &spec.ssh);
@@ -693,6 +702,7 @@ fn apply_ssh(name: &str, spec: &ClusterSpec, wait_ready: bool) -> Result<()> {
             &cri_service,
         )?;
     }
+    p.ok();
 
     let cp1 = &spec.control_plane.hosts[0];
     let cp1_target = target_for(cp1, &spec.ssh);
@@ -700,23 +710,60 @@ fn apply_ssh(name: &str, spec: &ClusterSpec, wait_ready: bool) -> Result<()> {
         .control_plane_endpoint
         .clone()
         .unwrap_or_else(|| cp1.ip.clone());
-    let info = kubeadm_init(&cp1_target, &cp1.label(), &endpoint, spec)?;
 
-    for h in &spec.control_plane.hosts[1..] {
-        let target = target_for(h, &spec.ssh);
-        kubeadm_join(&target, &h.label(), &endpoint, &info, true)?;
+    p.step(
+        super::po::t("Bootstrapping control-plane (kubeadm init)"),
+        "🕹️",
+    );
+    let info = kubeadm_init(&cp1_target, &cp1.label(), &endpoint, spec)?;
+    p.ok();
+
+    if spec.control_plane.hosts.len() > 1 {
+        p.step(
+            &super::po::tf(
+                "Joining {n} more control-plane(s)",
+                &[("n", &(spec.control_plane.hosts.len() - 1).to_string())],
+            ),
+            "🎮",
+        );
+        for h in &spec.control_plane.hosts[1..] {
+            let target = target_for(h, &spec.ssh);
+            kubeadm_join(&target, &h.label(), &endpoint, &info, true)?;
+        }
+        p.ok();
     }
-    for h in &spec.workers.hosts {
-        let target = target_for(h, &spec.ssh);
-        kubeadm_join(&target, &h.label(), &endpoint, &info, false)?;
+    if !spec.workers.hosts.is_empty() {
+        p.step(
+            &super::po::tf(
+                "Joining {n} worker(s)",
+                &[("n", &spec.workers.hosts.len().to_string())],
+            ),
+            "🚜",
+        );
+        for h in &spec.workers.hosts {
+            let target = target_for(h, &spec.ssh);
+            kubeadm_join(&target, &h.label(), &endpoint, &info, false)?;
+        }
+        p.ok();
     }
 
     if wait_ready {
         let expected = spec.control_plane.hosts.len() + spec.workers.hosts.len();
+        p.step(super::po::t("Waiting for all nodes to be Ready"), "⏳");
         wait_for_cluster_ready(&cp1_target, name, expected, Duration::from_secs(180))?;
+        p.ok();
     }
-    fetch_kubeconfig(&cp1_target, name)?;
-    println!("cluster/{name}: {}", super::po::t("ready"));
+
+    p.step(super::po::t("Fetching kubeconfig"), "📇");
+    let kubeconfig_path = fetch_kubeconfig(&cp1_target, name)?;
+    p.ok();
+
+    output::info(&super::po::tf(
+        "cluster \"{name}\" ready",
+        &[("name", name)],
+    ));
+    println!("kubeconfig: {}", kubeconfig_path.display());
+    println!("export KUBECONFIG={}", kubeconfig_path.display());
     Ok(())
 }
 
@@ -732,13 +779,6 @@ fn wait_for_cluster_ready(
     expected: usize,
     timeout: Duration,
 ) -> Result<()> {
-    println!(
-        "cluster/{cluster_name}: {}",
-        super::po::tf(
-            "waiting for {n} node(s) to become Ready...",
-            &[("n", &expected.to_string())]
-        )
-    );
     let deadline = std::time::Instant::now() + timeout;
     loop {
         let out = remote::ssh_run(
@@ -751,21 +791,18 @@ fn wait_for_cluster_ready(
             .filter(|l| l.split_whitespace().nth(1) == Some("Ready"))
             .count();
         if ready >= expected && expected > 0 {
-            println!(
-                "cluster/{cluster_name}: {}",
-                super::po::t("all nodes Ready")
-            );
             return Ok(());
         }
         if std::time::Instant::now() >= deadline {
-            eprintln!(
-                "cluster/{cluster_name}: {}",
-                super::po::tf(
-                    "WARNING: only {ready}/{n} node(s) Ready after the wait — the cluster is \
-                     bootstrapped, the CNI may still be converging",
-                    &[("ready", &ready.to_string()), ("n", &expected.to_string())]
-                )
-            );
+            output::warn(&super::po::tf(
+                "cluster \"{name}\": only {ready}/{n} node(s) Ready after the wait — the cluster \
+                 is bootstrapped, the CNI may still be converging",
+                &[
+                    ("name", cluster_name),
+                    ("ready", &ready.to_string()),
+                    ("n", &expected.to_string()),
+                ],
+            ));
             return Ok(());
         }
         std::thread::sleep(Duration::from_secs(5));
@@ -908,7 +945,7 @@ fn generate_or_load_ssh_key(name: &str, explicit: Option<PathBuf>) -> Result<(Pa
     let key_path = dir.join("id_ed25519");
     if !key_path.exists() {
         let status = Command::new("ssh-keygen")
-            .args(["-t", "ed25519", "-N", "", "-f"])
+            .args(["-q", "-t", "ed25519", "-N", "", "-f"])
             .arg(&key_path)
             .args(["-C", &format!("delonix-cluster-{name}")])
             .status()
@@ -1034,6 +1071,12 @@ fn provision_and_apply(args: ProvisionArgs) -> Result<()> {
         vmimage::cmd_pull(&vm_store, &source, Some(image_tag.clone()))?;
     }
 
+    output::info(&super::po::tf(
+        "Creating cluster \"{name}\" (kubeadm, {image})...",
+        &[("name", &args.name), ("image", &image_tag)],
+    ));
+    let mut p = output::Progress::new();
+
     let (ssh_key_path, ssh_public) = generate_or_load_ssh_key(&args.name, args.ssh_key.clone())?;
     let ssh = SshSpec {
         user: "delonix".to_string(),
@@ -1045,13 +1088,18 @@ fn provision_and_apply(args: ProvisionArgs) -> Result<()> {
     let cp_names = vm_names(&args.name, "cp", args.control_plane);
     let worker_names = vm_names(&args.name, "w", args.workers);
 
-    println!(
-        "cluster/{}: a provisionar {} control-plane(s) + {} worker(s) a partir de '{image_tag}'...",
-        args.name,
-        cp_names.len(),
-        worker_names.len()
+    // One step per BATCH (not per VM) — same convention as `kindmode`'s own
+    // `Progress` usage ("like kind/spinnies"): the spinner communicates
+    // "working", the per-VM detail that used to scroll by is gone on
+    // purpose. On failure, `Progress::drop` auto-closes the open step with
+    // `✗` before the error propagates via `?`.
+    p.step(
+        &super::po::tf(
+            "Provisioning {n} control-plane(s)",
+            &[("n", &cp_names.len().to_string())],
+        ),
+        "📦",
     );
-
     let mut control_plane = Vec::with_capacity(cp_names.len());
     for vm_name in &cp_names {
         let ip = create_and_wait(vm_name, &disk, &args, &ssh_public, &ssh, timeout)?;
@@ -1060,13 +1108,25 @@ fn provision_and_apply(args: ProvisionArgs) -> Result<()> {
             hostname: Some(vm_name.clone()),
         });
     }
+    p.ok();
+
     let mut worker_hosts = Vec::with_capacity(worker_names.len());
-    for vm_name in &worker_names {
-        let ip = create_and_wait(vm_name, &disk, &args, &ssh_public, &ssh, timeout)?;
-        worker_hosts.push(HostSpec {
-            ip,
-            hostname: Some(vm_name.clone()),
-        });
+    if !worker_names.is_empty() {
+        p.step(
+            &super::po::tf(
+                "Provisioning {n} worker(s)",
+                &[("n", &worker_names.len().to_string())],
+            ),
+            "📦",
+        );
+        for vm_name in &worker_names {
+            let ip = create_and_wait(vm_name, &disk, &args, &ssh_public, &ssh, timeout)?;
+            worker_hosts.push(HostSpec {
+                ip,
+                hostname: Some(vm_name.clone()),
+            });
+        }
+        p.ok();
     }
 
     let control_plane_endpoint = if control_plane.len() == 1 {
@@ -1076,12 +1136,8 @@ fn provision_and_apply(args: ProvisionArgs) -> Result<()> {
         // provision one extra VM (`<name>-lb`) running HAProxy as a TCP
         // passthrough LB on 6443, reusing the exact same provisioning helper
         // as every other VM in this cluster (same golden image/cloud-init).
+        p.step(super::po::t("Provisioning the HAProxy load balancer"), "⚖️");
         let lb_name = format!("{}-lb", args.name);
-        println!(
-            "cluster/{}: {}",
-            args.name,
-            super::po::t("provisioning the HAProxy load balancer...")
-        );
         let lb_ip = create_and_wait(&lb_name, &disk, &args, &ssh_public, &ssh, timeout)?;
         let lb_target = SshTarget {
             host: lb_ip.clone(),
@@ -1089,12 +1145,8 @@ fn provision_and_apply(args: ProvisionArgs) -> Result<()> {
             key: ssh.key.clone(),
         };
         let backend_ips: Vec<String> = control_plane.iter().map(|h| h.ip.clone()).collect();
-        println!(
-            "cluster/{}: {}",
-            args.name,
-            super::po::tf("configuring HAProxy ({ip})...", &[("ip", &lb_ip)])
-        );
         lb::ensure_haproxy(&lb_target, &backend_ips)?;
+        p.ok();
         Some(lb_ip)
     };
 
@@ -1132,11 +1184,6 @@ fn create_and_wait(
     ssh: &SshSpec,
     timeout: Duration,
 ) -> Result<String> {
-    println!(
-        "cluster/{}: {}",
-        args.name,
-        super::po::tf("creating VM {vm}...", &[("vm", vm_name)])
-    );
     let seed = vm_cmd::generate_seed_iso(
         vm_name,
         Some(vm_name),
@@ -1168,16 +1215,13 @@ fn create_and_wait(
         ..Default::default()
     };
     delonix_vm::create(&state_root(), &cfg)?;
-    println!(
-        "cluster/{}: {}",
-        args.name,
-        super::po::tf("waiting for SSH on {vm}...", &[("vm", vm_name)])
-    );
-    let ip = wait_for_vm_ssh_ready(vm_name, ssh, timeout)?;
-    println!("cluster/{}: {vm_name} pronta (ip={ip})", args.name);
-    Ok(ip)
+    wait_for_vm_ssh_ready(vm_name, ssh, timeout)
 }
 
+/// `label` no longer prints on the happy path — the calling `Progress` step
+/// owns the visible line now (`apply_ssh`'s "Preparing N host(s) 🔧") — but
+/// it still tags every error, so a failure is self-contained (which host,
+/// which recipe) instead of relying on a scrolled-away "applying..." line.
 fn prepare_host(
     target: &SshTarget,
     label: &str,
@@ -1187,37 +1231,28 @@ fn prepare_host(
 ) -> Result<()> {
     for r in k8s_recipes::k8s_host_recipes(k8s_version, &[]) {
         if remote::ssh_check(target, &r.check) {
-            println!(
-                "[{label}] {}: {}",
-                r.name,
-                super::po::t("already satisfied (SKIP)")
-            );
             continue;
         }
-        println!("[{label}] {}: {}", r.name, super::po::t("applying..."));
-        remote::ssh_run(target, &r.apply)?;
-        println!("[{label}] {}: OK", r.name);
+        remote::ssh_run(target, &r.apply)
+            .map_err(|e| Error::Invalid(format!("[{label}] {}: {e}", r.name)))?;
     }
 
-    if remote::ssh_check(target, "systemctl is-active --quiet delonix-cri") {
-        println!(
-            "[{label}] delonix-cri: {}",
-            super::po::t("already satisfied (SKIP)")
-        );
-    } else {
-        println!("[{label}] delonix-cri: {}", super::po::t("installing..."));
-        remote::scp_to(target, cri_bin, "/tmp/delonix-cri")?;
+    if !remote::ssh_check(target, "systemctl is-active --quiet delonix-cri") {
+        remote::scp_to(target, cri_bin, "/tmp/delonix-cri")
+            .map_err(|e| Error::Invalid(format!("[{label}] delonix-cri: {e}")))?;
         remote::ssh_run(
             target,
             "mv /tmp/delonix-cri /usr/local/bin/delonix-cri && chmod +x /usr/local/bin/delonix-cri",
-        )?;
-        remote::scp_to(target, cri_service, "/tmp/delonix-cri.service")?;
+        )
+        .map_err(|e| Error::Invalid(format!("[{label}] delonix-cri: {e}")))?;
+        remote::scp_to(target, cri_service, "/tmp/delonix-cri.service")
+            .map_err(|e| Error::Invalid(format!("[{label}] delonix-cri: {e}")))?;
         remote::ssh_run(
             target,
             "mv /tmp/delonix-cri.service /etc/systemd/system/delonix-cri.service && \
              systemctl daemon-reload && systemctl enable --now delonix-cri",
-        )?;
-        println!("[{label}] delonix-cri: OK");
+        )
+        .map_err(|e| Error::Invalid(format!("[{label}] delonix-cri: {e}")))?;
     }
     Ok(())
 }
@@ -1235,10 +1270,6 @@ fn kubeadm_init(
     spec: &ClusterSpec,
 ) -> Result<JoinInfo> {
     if remote::ssh_check(cp1, "test -f /etc/kubernetes/admin.conf") {
-        println!(
-            "[{label}] kubeadm init: {}",
-            super::po::t("already satisfied (SKIP) — recovering join credentials...")
-        );
         return recover_join_info(cp1);
     }
     let k8s_ver_flag = spec
@@ -1252,12 +1283,8 @@ fn kubeadm_init(
          --pod-network-cidr={} --service-cidr={}{k8s_ver_flag}",
         spec.pod_subnet, spec.service_subnet
     );
-    println!(
-        "[{label}] kubeadm init: {}",
-        super::po::t("running (this can take a few minutes)...")
-    );
-    let out = remote::ssh_run(cp1, &cmd)?;
-    println!("[{label}] kubeadm init: OK");
+    let out = remote::ssh_run(cp1, &cmd)
+        .map_err(|e| Error::Invalid(format!("[{label}] kubeadm init: {e}")))?;
     parse_join_info(&out)
 }
 
@@ -1320,10 +1347,6 @@ fn kubeadm_join(
     as_control_plane: bool,
 ) -> Result<()> {
     if remote::ssh_check(target, "test -f /etc/kubernetes/kubelet.conf") {
-        println!(
-            "[{label}] kubeadm join: {}",
-            super::po::t("already satisfied (SKIP)")
-        );
         return Ok(());
     }
     let mut cmd = format!(
@@ -1340,13 +1363,12 @@ fn kubeadm_join(
         })?;
         cmd.push_str(&format!(" --control-plane --certificate-key {key}"));
     }
-    println!("[{label}] kubeadm join: {}", super::po::t("running..."));
-    remote::ssh_run(target, &cmd)?;
-    println!("[{label}] kubeadm join: OK");
+    remote::ssh_run(target, &cmd)
+        .map_err(|e| Error::Invalid(format!("[{label}] kubeadm join: {e}")))?;
     Ok(())
 }
 
-fn fetch_kubeconfig(cp1: &SshTarget, cluster_name: &str) -> Result<()> {
+fn fetch_kubeconfig(cp1: &SshTarget, cluster_name: &str) -> Result<PathBuf> {
     let dir = state_root().join("clusters");
     std::fs::create_dir_all(&dir)?;
     let dest = dir.join(format!("{cluster_name}-kubeconfig.yaml"));
@@ -1368,16 +1390,13 @@ fn fetch_kubeconfig(cp1: &SshTarget, cluster_name: &str) -> Result<()> {
         let _ = std::fs::set_permissions(&dest, std::fs::Permissions::from_mode(0o600));
     }
 
-    println!("kubeconfig: {}", dest.display());
-    println!("export KUBECONFIG={}", dest.display());
-
     if let Some(home) = std::env::var_os("HOME") {
         let kube_dir = PathBuf::from(home).join(".kube");
         let kube_config = kube_dir.join("config");
         std::fs::create_dir_all(&kube_dir)?;
         merge_into_local_kubeconfig(&dest, cluster_name, &kube_config)?;
     }
-    Ok(())
+    Ok(dest)
 }
 
 /// Merges a single-cluster `admin.conf` (from kubeadm — always names its
