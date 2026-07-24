@@ -4,6 +4,45 @@
 > (regenerado automaticamente pelo pipeline de release a cada tag publicada).
 > Não editar à mão — edita a nota da release respectiva.
 
+## v0.16.1 — `tunnel expose --provider pinggy` já não fica sem URL
+
+Bug report real (host kaeso-sys-01): `delonix tunnel expose --provider pinggy --local-port 8181`
+respondia sempre `running — (URL ainda não confirmada — ver \`delonix tunnel describe\` / o log)`,
+nunca uma URL real, mesmo esperando os 15s do poll.
+
+**Causa-raiz, confirmada independentemente do delonix** (correndo o `ssh` real à mão, fora do
+binário): `free.pinggy.io`'s geo-DNS, a partir deste host, resolvia sempre para um PoP regional
+partido (`br.free.pinggy.io` → `lin.br.1.a.pinggy.click`) — a ligação SSH era aceite, o
+`-R0:localhost:<porta>` era alocado, e o servidor fechava a ligação segundos depois, sem imprimir
+nenhuma URL. Um 2.º comportamento, também reproduzido: sob `setsid`/detached (exactamente como o
+`spawn_and_capture` do tunnel lança o processo), o cliente `ssh` às vezes **nem sequer sai** depois
+do servidor fechar a ligação — fica pendurado indefinidamente sem progredir. Nenhum dos dois é
+detectável de forma fiável só por "o processo morreu" — o processo pode ter morrido cedo, OU pode
+ter ficado vivo mas parado.
+
+### Corrigido
+
+`spawn_pinggy` tenta primeiro `free.pinggy.io` (o endpoint DOCUMENTADO pela pinggy, mantido como
+omissão), e se não sair nenhuma URL do poll — morto ou pendurado, não importa qual — mata o
+processo se ainda estiver vivo (nunca deixa 2 túneis vivos para o mesmo `TunnelRecord`) e tenta
+UMA vez `a.pinggy.io` (endpoint próprio da pinggy, não documentado à parte, mas que ligou com
+sucesso nas mesmas condições). `spawn_and_capture` também passou a sair do poll assim que o
+processo morre, em vez de esperar sempre os 15s completos — falha mais rápido quando há mesmo uma
+falha a detectar.
+
+### Validado ao vivo
+
+- Reproduzido o bug de forma isolada (3× consecutivas, `ssh` a correr à mão, fora do delonix) contra
+  `free.pinggy.io` — confirma que não é um bug de scraping de log, é uma falha real da ligação.
+- Com o fix: `delonix tunnel expose --provider pinggy --local-port 8181` imprime o aviso do
+  fallback e devolve uma URL pública real (`https://dlbll-105-174-64-18.free.pinggy.net`).
+- `curl` ao endpoint local (`127.0.0.1:8181`, `200`) e à URL pública devolvida (`200`) — o túnel
+  encaminha tráfego real de ponta a ponta, não é só uma URL capturada do log.
+- `cargo test --workspace` (todos os crates, 238 testes só em `delonix-runtime-bin`), `clippy -D
+  warnings` e `fmt --check` limpos.
+
+---
+
 ## v0.16.0 — golden image sem Kubernetes: `delonix image --vm build --no-k8s`
 
 Pedido real (host kaeso-sys-01): golden VM images para tenants que não precisam de Kubernetes —

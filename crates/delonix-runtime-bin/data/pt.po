@@ -2043,3 +2043,8 @@ msgstr "  correção: re-publica ligado ao gateway da VM — `delonix ingress un
 
 msgid "no running container publishes a port — nothing for a VM to reach yet"
 msgstr "nenhum container em execução publica uma porta — nada para uma VM alcançar ainda"
+
+# ---- tunnel (cmd/tunnel.rs) -------------------------------------------------
+
+msgid "free.pinggy.io did not return a URL (geo-routed node may be down, or the connection hung) — trying a.pinggy.io..."
+msgstr "free.pinggy.io não devolveu URL (o nó geo-encaminhado pode estar em baixo, ou a ligação ficou pendurada) — a tentar a.pinggy.io..."

@@ -1059,6 +1059,24 @@ slirp por-container, que morreu com ele; limpa-se só o registo (antes: erro
 (deny→000, allow→200 com substituição, rm→limpo). Nota: um `ingress -h` vazio
 reportado uma vez NÃO reproduziu (3× OK) — glitch de terminal, sem causa no CLI.
 
+### `tunnel expose --provider pinggy` sem URL (v0.16.1)
+
+Bug report real (host kaeso-sys-01): `delonix tunnel expose --provider pinggy --local-port 8181`
+respondia sempre "URL ainda não confirmada", nunca uma URL real. **Causa-raiz, confirmada
+correndo o `ssh` real à mão, fora do binário**: `free.pinggy.io` (o endpoint DOCUMENTADO pela
+pinggy) tem geo-DNS — a partir deste host resolvia sempre para um PoP regional partido
+(`br.free.pinggy.io` → `lin.br.1.a.pinggy.click`) que aceita a ligação, aloca o `-R0`, e fecha
+segundos depois sem imprimir nada. Um 2.º comportamento também reproduzido: sob `setsid`/detached
+(exactamente como `spawn_and_capture` lança o processo), o `ssh` às vezes nem sai depois do
+servidor fechar — fica pendurado. Nem "processo morreu" nem "processo vivo" isolam sozinhos qual
+das duas falhas aconteceu. **Corrigido**: `spawn_pinggy` tenta `free.pinggy.io` primeiro (mantido
+como omissão — é o documentado); se o poll não produzir URL nenhuma, mata o processo se ainda
+estiver vivo (nunca deixa 2 túneis por `TunnelRecord`) e tenta uma vez `a.pinggy.io` (endpoint
+próprio da pinggy, não documentado à parte, mas que ligou com sucesso nas mesmas condições).
+`spawn_and_capture` também sai do poll assim que o processo morre, em vez de esperar sempre os
+15s. Validado ao vivo: URL pública real devolvida (`https://….free.pinggy.net`), `curl` local E
+à URL pública deram 200 — o túnel encaminha tráfego de verdade, não é só log-scraping.
+
 ## Cluster modo Kind sem Docker — investigação (GO/NO-GO)
 
 Pedido: `delonix cluster` em modo `kind` (sem `kubeadm`) a funcionar **sem Docker instalado** —

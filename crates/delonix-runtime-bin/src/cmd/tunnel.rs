@@ -359,7 +359,7 @@ fn spawn_and_capture(
     })?;
     rec.pid = Some(child.id() as i32);
     std::thread::sleep(Duration::from_millis(400));
-    if !std::path::Path::new(&format!("/proc/{}", child.id())).exists() {
+    if !pid_alive(child.id() as i32) {
         let tail = std::fs::read_to_string(&path).unwrap_or_default();
         return Err(Error::Runtime {
             context: "tunnel",
@@ -377,9 +377,25 @@ fn spawn_and_capture(
                 break;
             }
         }
+        // BUG FOUND LIVE: `free.pinggy.io`'s own geo-DNS can route to a broken
+        // regional PoP that accepts the SSH connection, allocates the remote
+        // forward, then closes it a moment later — no URL is EVER going to
+        // appear in the log. Without this check, `apply_one` always waited
+        // the full 15s before reporting "URL ainda não confirmada", even
+        // though the process had already died after ~1-2s — and (see
+        // `spawn_pinggy`) there was no way to distinguish "still connecting,
+        // just slow" from "already dead" to decide whether a retry makes
+        // sense. Exiting the instant the process is gone fixes both.
+        if !pid_alive(child.id() as i32) {
+            break;
+        }
         std::thread::sleep(Duration::from_millis(500));
     }
     Ok(())
+}
+
+fn pid_alive(pid: i32) -> bool {
+    std::path::Path::new(&format!("/proc/{pid}")).exists()
 }
 
 /// First `https://` token in `text` matching `keep` — pure, tolerant of
@@ -405,13 +421,53 @@ fn find_url_containing(text: &str, needle: &str) -> Option<String> {
     find_url_where(text, |w| w.contains(needle))
 }
 
+/// `free.pinggy.io` is pinggy's own DOCUMENTED endpoint (`ssh -p443
+/// -R0:<localhost>:<localport> [<token>@]free.pinggy.io`) — kept as the
+/// primary target. BUG FOUND LIVE, two distinct failure shapes, both
+/// reproduced independently of delonix by hand-running the identical `ssh`
+/// invocation: (1) its geo-DNS can route to a broken regional PoP (host
+/// resolved to `br.free.pinggy.io` → `lin.br.1.a.pinggy.click`) that accepts
+/// the connection, allocates the remote forward, then closes it a moment
+/// later — the `ssh` client DOES exit, just with no URL ever printed; (2)
+/// under some conditions the `ssh` client does NOT exit even after the
+/// server closes the connection (no pty, backgrounded — confirmed this
+/// keeps `ssh` alive indefinitely, unlike the exact same command run
+/// interactively) — so "did the process die" is NOT a reliable signal that
+/// the attempt failed. Either way the observable fact after the poll window
+/// is the same: no URL. So retry unconditionally on that, killing the
+/// primary attempt first if it's still lingering (never leave 2 live tunnels
+/// for one `TunnelRecord`). `a.pinggy.io` (pinggy's own literal, non-geo-
+/// routed host — not separately documented, but a real pinggy-owned
+/// endpoint that connected successfully under the exact same conditions) is
+/// a one-shot fallback for exactly this, not a replacement default.
 fn spawn_pinggy(rec: &mut TunnelRecord, token: Option<&str>) -> Result<()> {
-    // Documented general form: `ssh -p443 -R0:<localhost>:<localport>
-    // [<token/keyword/tunneltype>@]free.pinggy.io` — the `-R0` port (dynamic,
-    // server-assigned) is what makes this work with zero prior setup.
+    spawn_pinggy_at(rec, token, "free.pinggy.io")?;
+    if rec.public_url.is_none() {
+        if let Some(pid) = rec.pid {
+            if pid_alive(pid) {
+                // SAFETY: signalling the PID this exact function just spawned
+                // and confirmed alive moments ago.
+                unsafe { libc::kill(pid, libc::SIGTERM) };
+            }
+        }
+        eprintln!(
+            "tunnel: {}",
+            super::po::t(
+                "free.pinggy.io did not return a URL (geo-routed node may be down, or the \
+                 connection hung) — trying a.pinggy.io..."
+            )
+        );
+        spawn_pinggy_at(rec, token, "a.pinggy.io")?;
+    }
+    Ok(())
+}
+
+fn spawn_pinggy_at(rec: &mut TunnelRecord, token: Option<&str>, host: &str) -> Result<()> {
+    // The `-R0` port (dynamic, server-assigned) is what makes this work with
+    // zero prior setup.
     let user_host = match token {
-        Some(t) => format!("{t}@free.pinggy.io"),
-        None => "free.pinggy.io".to_string(),
+        Some(t) => format!("{t}@{host}"),
+        None => host.to_string(),
     };
     let args = vec![
         "-p".to_string(),
@@ -691,6 +747,15 @@ mod tests {
             found,
             Some("https://ccjjc-197-148-40-67.run.pinggy-free.link".to_string())
         );
+    }
+
+    #[test]
+    fn pid_alive_distingue_processo_vivo_de_pid_inexistente() {
+        assert!(pid_alive(std::process::id() as i32));
+        // A high PID astronomically unlikely to be in use on any real host —
+        // same class of assumption `spawn_and_capture`'s own early-death
+        // check already relies on.
+        assert!(!pid_alive(i32::MAX - 1));
     }
 
     #[test]
