@@ -201,6 +201,10 @@ Options:
           Do not compress the final qcow2 (larger, but with no decompression cost on backing-file reads at runtime)
       --offline
           Fetch the k8s .deb packages on the HOST (verified) and install them with `dpkg` — the appliance runs without network. No DHCP/DNS needed in the guest
+      --no-k8s
+          Build a golden image with NO Kubernetes — just `delonix` itself
+      --delonix-bin &lt;DELONIX_BIN&gt;
+          
   -h, --help
           Print help</code></pre></div>
 <h3>Exemplos</h3><div class="ex"><div class="cap">Construir a imagem VM dourada (descarrega Ubuntu, valida SHA256SUMS, virt-customize)</div><pre><code>delonix image --vm build --name k8s-golden --k8s-version 1.34</code></pre></div>
