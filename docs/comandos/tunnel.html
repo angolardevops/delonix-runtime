@@ -76,7 +76,7 @@ main{padding:1.4rem 1.2rem 4rem}}
 <nav class="side">
 <div class="brand"><span class="dot">▲</span> Delonix Engine</div>
 <h5>Documentação</h5>
-<a href="../index.html">Início</a><a href="../cheatsheet.html">Cheatsheet</a><a href="../kinds.html">Kinds e templates</a><a href="../arquitectura.html">Arquitectura</a><a href="../c4.html">Modelo C4 e system design</a><a href="../cri.html">CRI — kubelet sem containerd</a><a href="../comparacao.html">Delonix vs Docker vs Podman</a><a href="../tutorial-delonix-temp.html">Projecto completo: Delonix Temp</a>
+<a href="../index.html">Início</a><a href="../cheatsheet.html">Cheatsheet</a><a href="../kinds.html">Kinds e templates</a><a href="../arquitectura.html">Arquitectura</a><a href="../c4.html">Modelo C4 e system design</a><a href="../cri.html">CRI — kubelet sem containerd</a><a href="../comparacao.html">Delonix vs Docker vs Podman</a><a href="../tutorial-delonix-temp.html">Projecto completo: Delonix Temp</a><a href="../delonixctl.html">delonixctl — cliente PaaS</a>
 <h5>Referência CLI</h5>
 <a href="../comandos/container.html">delonix container</a><a href="../comandos/pod.html">delonix pod</a><a href="../comandos/image.html">delonix image</a><a href="../comandos/build.html">delonix build</a><a href="../comandos/vm.html">delonix vm</a><a href="../comandos/volumes.html">delonix volumes</a><a href="../comandos/network.html">delonix network</a><a href="../comandos/stack.html">delonix stack</a><a href="../comandos/cluster.html">delonix cluster</a><a href="../comandos/secret.html">delonix secret</a><a href="../comandos/storage.html">delonix storage</a><a href="../comandos/sharevolume.html">delonix sharevolume</a><a href="../comandos/ingress.html">delonix ingress</a><a href="../comandos/egress.html">delonix egress</a><a href="../comandos/httproute.html">delonix httproute</a><a href="../comandos/tunnel.html" class="on">delonix tunnel</a><a href="../comandos/flow.html">delonix flow</a><a href="../comandos/boot.html">delonix boot</a><a href="../comandos/system.html">delonix system</a><a href="../comandos/dash.html">delonix dash</a><a href="../comandos/docker-api.html">delonix docker-api</a><a href="../comandos/kube.html">delonix kube</a><a href="../comandos/netns.html">delonix netns</a><a href="../comandos/completion.html">delonix completion</a>
 <h5>Projecto</h5>
@@ -97,7 +97,7 @@ por agora só o quick-tunnel efémero <code>*.trycloudflare.com</code>, sem cont
 NOMEADO com domínio próprio precisa da API do Cloudflare, ainda por implementar).</p>
 <div class='help'><pre><code>Expose a local port to the public internet via pinggy/ngrok/cloudflare (`kind: Tunnel`) — pair with `httproute`&#x27;s listening port to route by Host header behind ONE public URL
 
-Usage: delonix-x86_64-linux tunnel [OPTIONS] &lt;COMMAND&gt;
+Usage: delonix tunnel [OPTIONS] &lt;COMMAND&gt;
 
 Commands:
   apply     Apply the `kind: Tunnel` documents of a manifest (idempotent)
@@ -113,7 +113,7 @@ Options:
 <h2 id='expose'><code>tunnel expose</code></h2>
 <div class='help'><pre><code>One-shot expose of a local port, no manifest needed
 
-Usage: delonix-x86_64-linux tunnel expose [OPTIONS] --provider &lt;PROVIDER&gt; --local-port &lt;LOCAL_PORT&gt;
+Usage: delonix tunnel expose [OPTIONS] --provider &lt;PROVIDER&gt; --local-port &lt;LOCAL_PORT&gt;
 
 Options:
       --l18n &lt;en|pt&gt;                 Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
@@ -130,7 +130,7 @@ chegou a um servidor local através do tunnel (HTTP 200) usando exactamente este
 <h2 id='ls'><code>tunnel ls</code></h2>
 <div class='help'><pre><code>List tunnels (state + public URL)
 
-Usage: delonix-x86_64-linux tunnel ls [OPTIONS]
+Usage: delonix tunnel ls [OPTIONS]
 
 Options:
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
@@ -140,7 +140,7 @@ test1   pinggy          18234   https://oxipg-197-148-40-67.free.pinggy.net   Ru
 <h2 id='describe'><code>tunnel describe</code></h2>
 <div class='help'><pre><code>Human-readable detail of one tunnel
 
-Usage: delonix-x86_64-linux tunnel describe [OPTIONS] &lt;NAME&gt;
+Usage: delonix tunnel describe [OPTIONS] &lt;NAME&gt;
 
 Arguments:
   &lt;NAME&gt;  
@@ -152,7 +152,7 @@ Options:
 <h2 id='rm'><code>tunnel rm</code></h2>
 <div class='help'><pre><code>Stop and remove a tunnel
 
-Usage: delonix-x86_64-linux tunnel rm [OPTIONS] &lt;NAME&gt;
+Usage: delonix tunnel rm [OPTIONS] &lt;NAME&gt;
 
 Arguments:
   &lt;NAME&gt;  
