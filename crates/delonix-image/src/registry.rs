@@ -668,15 +668,28 @@ pub fn pull_from_registry_with_creds(
     // Image manifest (`oci_spec::image::ImageManifest`) — OCI/Docker v2 schema.
     let manifest: ImageManifest = serde_json::from_slice(&manifest_bytes)?;
 
-    // 2) config blob (= image id)
+    // 2) config blob (= image id). CAS-first: content-addressed means "already
+    // have this exact digest" IS the proof of correctness (the path itself is
+    // the hash) — a re-pull of an already-fully-local image (or one that
+    // shares a base layer with something already pulled) used to hit the
+    // network for every single blob regardless, which is why pre-baking
+    // images into the golden VM never actually saved a `kubeadm init` a
+    // single byte of download: nothing ever checked `Cas::has` first. See
+    // CLAUDE.md ("cluster kubeadm" section) for the real-world symptom this
+    // fixes (a kubeadm rate-limiter timeout while every core image
+    // re-downloaded on every VM boot).
     let config_digest_str = manifest.config().digest().to_string();
-    let config_bytes = c.blob(&config_digest_str)?;
-    if sha256_hex(&config_bytes) != manifest.config().digest().digest() {
-        return Err(Error::Registry("config digest mismatch".into()));
+    if !store.cas().has(&config_digest_str) {
+        let config_bytes = c.blob(&config_digest_str)?;
+        if sha256_hex(&config_bytes) != manifest.config().digest().digest() {
+            return Err(Error::Registry("config digest mismatch".into()));
+        }
+        store.cas().write(&config_bytes)?;
     }
-    let config_digest = store.cas().write(&config_bytes)?;
+    let config_digest = config_digest_str;
+    let config_bytes = store.cas().read(&config_digest)?;
 
-    // 3) layers (ignores "foreign"/Windows layers)
+    // 3) layers (ignores "foreign"/Windows layers) — same CAS-first check.
     let real_layers: Vec<&Descriptor> = manifest
         .layers()
         .iter()
@@ -686,6 +699,10 @@ pub fn pull_from_registry_with_creds(
     let mut layers = Vec::with_capacity(total);
     for (i, l) in real_layers.iter().enumerate() {
         let ldigest = l.digest().to_string();
+        if store.cas().has(&ldigest) {
+            layers.push(ldigest);
+            continue;
+        }
         tracing::debug!(
             index = i + 1,
             total,
@@ -1149,9 +1166,18 @@ mod tests {
     /// public `ghcr.io` or a local registry without auth): stores blobs/manifests
     /// in memory and serves them back. Enough for a real round-trip of
     /// `push_oci_artifact`→`pull_oci_artifact` without depending on the network.
-    fn serve_anon_registry() -> (u16, std::thread::JoinHandle<()>) {
+    /// Also returns a counter of `GET .../blobs/...` requests served — used by
+    /// `pull_from_registry_with_creds_salta_blobs_ja_no_cas` to prove a 2nd
+    /// pull of the same reference does not touch the network for content
+    /// already in the local CAS.
+    fn serve_anon_registry() -> (
+        u16,
+        std::sync::Arc<std::sync::atomic::AtomicUsize>,
+        std::thread::JoinHandle<()>,
+    ) {
         use std::io::{Read, Write};
         use std::net::TcpListener;
+        use std::sync::atomic::{AtomicUsize, Ordering};
         use std::sync::{Arc, Mutex};
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
@@ -1159,6 +1185,8 @@ mod tests {
             Arc::new(Mutex::new(Default::default()));
         let manifests: Arc<Mutex<std::collections::HashMap<String, Vec<u8>>>> =
             Arc::new(Mutex::new(Default::default()));
+        let blob_gets = Arc::new(AtomicUsize::new(0));
+        let blob_gets_thread = blob_gets.clone();
         let handle = std::thread::spawn(move || {
             listener.set_nonblocking(false).unwrap();
             loop {
@@ -1235,6 +1263,7 @@ mod tests {
                         write_resp(&mut s, "404 Not Found", "", b"");
                     }
                 } else if method == "GET" && path.contains("/blobs/") {
+                    blob_gets_thread.fetch_add(1, Ordering::SeqCst);
                     let digest = path.rsplit('/').next().unwrap_or("").to_string();
                     match blobs.lock().unwrap().get(&digest) {
                         Some(data) => write_resp(&mut s, "200 OK", "", data),
@@ -1260,7 +1289,7 @@ mod tests {
                 }
             }
         });
-        (port, handle)
+        (port, blob_gets, handle)
     }
 
     fn find_subslice(haystack: &[u8], needle: &[u8]) -> Option<usize> {
@@ -1269,7 +1298,7 @@ mod tests {
 
     #[test]
     fn push_e_pull_oci_artifact_round_trip() {
-        let (port, _handle) = serve_anon_registry();
+        let (port, _blob_gets, _handle) = serve_anon_registry();
         let tmp = std::env::temp_dir().join(format!(
             "delonix-image-artifact-test-{}-{}",
             std::process::id(),
@@ -1298,12 +1327,93 @@ mod tests {
         let _ = std::fs::remove_dir_all(&tmp);
     }
 
+    /// BUG FIXED, found live (host kaeso-sys-01): `pull_from_registry_with_creds`
+    /// used to fetch every blob from the network unconditionally, even when
+    /// the exact content was already in the local CAS — a golden VM
+    /// pre-seeded with kubeadm's images would still redownload everything on
+    /// every real `kubeadm init` (the actual cause of a real rate-limiter
+    /// timeout crash). Now it checks `Cas::has` before each blob GET.
+    #[test]
+    fn pull_from_registry_with_creds_salta_blobs_ja_no_cas() {
+        let (port, blob_gets, _handle) = serve_anon_registry();
+        let tmp = std::env::temp_dir().join(format!(
+            "delonix-image-cas-skip-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&tmp).unwrap();
+
+        // `pull_from_registry_with_creds` parses the config blob as a REAL
+        // `oci_spec::image::ImageConfiguration` (requires `architecture`/`os`)
+        // — unlike `push_oci_artifact`'s single-blob artifacts (empty `{}`
+        // config), so the manifest is built by hand here via the crate's own
+        // `Client::push_blob`/`push_manifest` (same ones `push_oci_artifact`
+        // uses internally) instead of reusing that higher-level function.
+        let mut c = test_client(&format!("127.0.0.1:{port}"), "cas-skip");
+        let config_bytes =
+            br#"{"architecture":"amd64","os":"linux","rootfs":{"type":"layers","diff_ids":[]}}"#
+                .to_vec();
+        let config_digest = format!("sha256:{}", sha256_hex(&config_bytes));
+        c.push_blob(&config_digest, &config_bytes).unwrap();
+
+        let layer_bytes = b"conteudo-de-layer-fingido-para-o-teste".to_vec();
+        let layer_digest = format!("sha256:{}", sha256_hex(&layer_bytes));
+        c.push_blob(&layer_digest, &layer_bytes).unwrap();
+
+        let manifest = serde_json::json!({
+            "schemaVersion": 2,
+            "mediaType": "application/vnd.oci.image.manifest.v1+json",
+            "config": {
+                "mediaType": "application/vnd.oci.image.config.v1+json",
+                "size": config_bytes.len(),
+                "digest": config_digest,
+            },
+            "layers": [{
+                "mediaType": "application/vnd.oci.image.layer.v1.tar",
+                "size": layer_bytes.len(),
+                "digest": layer_digest,
+            }],
+        });
+        let manifest_bytes = serde_json::to_vec(&manifest).unwrap();
+        c.push_manifest(
+            "tag",
+            &manifest_bytes,
+            "application/vnd.oci.image.manifest.v1+json",
+        )
+        .unwrap();
+
+        let target = format!("127.0.0.1:{port}/cas-skip:tag");
+        let store = crate::ImageStore::open(&tmp).unwrap();
+        let img1 = pull_from_registry_with_creds(&store, &target, None)
+            .expect("1º pull devia ter sucesso");
+        let gets_after_first = blob_gets.load(std::sync::atomic::Ordering::SeqCst);
+        assert!(
+            gets_after_first > 0,
+            "o 1º pull tinha de ter pedido pelo menos 1 blob (config + layer)"
+        );
+
+        let img2 = pull_from_registry_with_creds(&store, &target, None).expect(
+            "2º pull (MESMO store) devia ter sucesso mesmo sem tocar na rede para os blobs",
+        );
+        let gets_after_second = blob_gets.load(std::sync::atomic::Ordering::SeqCst);
+        assert_eq!(
+            gets_after_first, gets_after_second,
+            "o 2º pull não devia ter pedido NENHUM blob novo — já estavam no CAS local"
+        );
+        assert_eq!(img1.id, img2.id);
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
     /// Security-audit finding: `pull_oci_artifact` must reject a blob whose
     /// real content does not match the digest declared in the manifest — simulates a
     /// compromised/tampered registry that serves different bytes under the same digest.
     #[test]
     fn pull_oci_artifact_recusa_blob_adulterado() {
-        let (port, _handle) = serve_anon_registry();
+        let (port, _blob_gets, _handle) = serve_anon_registry();
         let tmp = std::env::temp_dir().join(format!(
             "delonix-image-artifact-tamper-test-{}-{}",
             std::process::id(),

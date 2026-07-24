@@ -4,6 +4,62 @@
 > (regenerado automaticamente pelo pipeline de release a cada tag publicada).
 > Não editar à mão — edita a nota da release respectiva.
 
+## v0.15.0 — a golden image k8s já não redescarrega tudo em cada `kubeadm init`
+
+Bug report real (host kaeso-sys-01, na mesma corrida que validou o HAProxy automático da
+v0.13.0): um `kubeadm init` REAL redescarregava sempre TODAS as imagens core
+(apiserver/controller-manager/scheduler/etcd/coredns/pause) do zero, em CADA VM criada — lento o
+suficiente para estourar o próprio deadline interno do rate-limiter do kubeadm e fazer o
+`wait-control-plane` falhar a meio (`client rate limiter Wait returned an error: rate: Wait(n=1)
+would exceed context deadline`).
+
+### Causa-raiz: o CAS nunca era consultado antes de descarregar um blob
+
+`delonix_image::registry::pull_from_registry_with_creds` (usado pelo `delonix image pull` E pelo
+`delonix-cri` a cada `PullImage` do kubelet) descarregava sempre cada blob da rede, mesmo quando o
+conteúdo exacto já estava no `Cas` local — o método `Cas::has` já existia, simplesmente nunca era
+chamado. **Corrigido**: verifica-se `has` antes de cada `GET` de blob (config + cada layer); só
+descarrega o que ainda não tem. Isto sozinho já ajuda qualquer reexecução de um pull parcial ou
+qualquer imagem partilhada entre pulls — mas é também o pré-requisito sem o qual pré-semear a
+imagem dourada não adiantaria nada (o `delonix-cri` continuaria a redescarregar tudo na mesma).
+
+### `image --vm build --offline` pré-semeia as imagens do `kubeadm`
+
+Com o CAS corrigido, o modo `--offline` passa a:
+
+1. Extrair o binário `kubeadm` do `.deb` já descarregado/verificado no HOST (`dpkg-deb -x`, sem
+   instalar nada);
+2. Correr `kubeadm config images list --kubernetes-version=vX.Y.Z` localmente (sem rede — é uma
+   tabela interna estática do próprio binário);
+3. Descarregar cada imagem no HOST através do mesmo `pull_from_registry_with_creds`, para um
+   `ImageStore` de trabalho;
+4. Injectar as suas 4 subpastas (`images`/`layers`/`containers`/`blobs`) em `/var/lib/delonix` do
+   convidado via `virt-customize --copy-in` — o mesmo caminho que `delonix-cri` já lê em runtime.
+
+Melhor esforço em toda a cadeia: qualquer falha (imagem em falta, `dpkg-deb` ausente, etc.) só
+avisa e o build segue sem pré-semear — nunca chumba o build inteiro por isto. Só disponível no
+modo `--offline` (o caminho online já resolve pacotes/imagens dentro do próprio convidado, sem o
+mesmo encaixe host-primeiro que o `--offline` já usa para os `.deb`).
+
+### Validado ao vivo
+
+- `kubeadm config images list` a partir de um `kubeadm` extraído (sem instalar) devolveu as 7
+  imagens reais da v1.34.
+- Um `pull_from_registry_with_creds` real contra `registry.k8s.io/pause:3.10.1` confirmou que o
+  layout do `ImageStore` resultante bate exactamente com o que o `--copy-in` espera.
+- Um novo teste com um mock de registo local (contador de `GET` de blobs) confirma que um 2.º
+  pull da mesma referência não toca a rede para nenhum blob já presente.
+
+### Limitação conhecida
+
+Não valida o build `virt-customize` completo de ponta a ponta nesta sessão (bloqueado neste
+sandbox de desenvolvimento, `libguestfs-common` em falta — o mesmo bloqueio já documentado para
+outras sessões; o CI real, que já publicou a `delonix-vm-k8s:1.34`/`1.35`, é onde isto corre de
+verdade). Uma reconstrução real da golden image (`vm-image.yml`) é o próximo passo para confirmar
+o ganho de tempo ao vivo num `kubeadm init` real.
+
+---
+
 ## v0.14.0 — `cluster kubeadm` ganha progresso ao estilo `kind`
 
 Pedido directo do utilizador: o log de `cluster kubeadm` (uma `println!` por VM criada, por

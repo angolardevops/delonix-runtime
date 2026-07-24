@@ -400,7 +400,29 @@ fn cmd_build(
             "amd64",
             &extra_packages,
         )?;
-        k8s_customization_steps_offline(&debs, &extra_run, &cri, &service_unit)
+        // Best-effort: the golden image ships with kubeadm's own core images
+        // already local, so a real `kubeadm init` on a booted VM does not
+        // redownload apiserver/etcd/coredns/... from scratch (see
+        // `preseed_k8s_images` for the real crash this fixes). Needs the
+        // kubeadm `.deb` we just downloaded/verified on the host.
+        let preseed_root = debs
+            .iter()
+            .find(|d| {
+                d.file_name()
+                    .and_then(|n| n.to_str())
+                    .is_some_and(|n| n.starts_with("kubeadm_"))
+            })
+            .and_then(|kubeadm_deb| {
+                eprintln!("a pré-semear as imagens do kubeadm no host...");
+                preseed_k8s_images(&work_dir, kubeadm_deb, k8s_version.as_deref())
+            });
+        k8s_customization_steps_offline(
+            &debs,
+            &extra_run,
+            &cri,
+            &service_unit,
+            preseed_root.as_deref(),
+        )
     } else {
         k8s_customization_steps(
             k8s_version.as_deref(),
@@ -859,6 +881,86 @@ fn download_k8s_debs(
     Ok(out)
 }
 
+/// Pre-seeds the golden image's own `ImageStore` (`/var/lib/delonix`, what
+/// `delonix-cri` reads at runtime) with the exact container images
+/// `kubeadm init`/`join` need for this k8s version — fetched+verified on the
+/// HOST (same offline philosophy as the `.deb` packages: the appliance
+/// itself never needs network for this), injected via
+/// `virt-customize --copy-in`.
+///
+/// Real bug this closes (host kaeso-sys-01): `kubeadm init` redownloaded
+/// every core image (apiserver/controller-manager/scheduler/etcd/coredns/
+/// pause) fresh on EVERY VM boot, slow enough to blow past kubeadm's own
+/// internal rate-limiter deadline and crash the bootstrap. This alone is not
+/// sufficient — it depends on the CAS-first fix in
+/// `delonix_image::registry::pull_from_registry_with_creds` (skip a blob
+/// already on disk) to actually pay off at runtime; without that fix,
+/// `delonix-cri` would still re-download every blob regardless of what is
+/// pre-seeded here.
+///
+/// Best-effort end to end: returns `None` (never fails the whole build) if
+/// `kubeadm config images list` or the pre-seed step does not succeed, and
+/// logs (does not fail) a per-image pull error — a slower first boot beats a
+/// broken one.
+fn preseed_k8s_images(
+    work: &Path,
+    kubeadm_deb: &Path,
+    k8s_version: Option<&str>,
+) -> Option<PathBuf> {
+    let extract_dir = work.join("kubeadm-host");
+    let status = Command::new("dpkg-deb")
+        .args([
+            "-x",
+            &kubeadm_deb.to_string_lossy(),
+            &extract_dir.to_string_lossy(),
+        ])
+        .status()
+        .ok()?;
+    if !status.success() {
+        eprintln!("warning: dpkg-deb -x kubeadm.deb failed — skipping image pre-seed");
+        return None;
+    }
+    let kubeadm_bin = extract_dir.join("usr/bin/kubeadm");
+    if !kubeadm_bin.exists() {
+        eprintln!("warning: kubeadm binary not found after extraction — skipping image pre-seed");
+        return None;
+    }
+
+    let mut cmd = Command::new(&kubeadm_bin);
+    cmd.arg("config").arg("images").arg("list");
+    if let Some(v) = k8s_version {
+        cmd.arg(format!("--kubernetes-version=v{v}"));
+    }
+    let out = match cmd.output() {
+        Ok(o) if o.status.success() => o,
+        _ => {
+            eprintln!("warning: `kubeadm config images list` failed — skipping image pre-seed");
+            return None;
+        }
+    };
+    let images: Vec<String> = String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .map(str::to_string)
+        .collect();
+    if images.is_empty() {
+        return None;
+    }
+
+    let preseed_root = work.join("preseed-images");
+    let store = delonix_image::ImageStore::open(&preseed_root).ok()?;
+    for img in &images {
+        eprintln!("  pre-seeding {img}...");
+        if let Err(e) = delonix_image::registry::pull_from_registry_with_creds(&store, img, None) {
+            eprintln!(
+                "warning: could not pre-seed {img}: {e} (kubeadm will fetch it at runtime instead)"
+            );
+        }
+    }
+    Some(preseed_root)
+}
+
 fn hex_sha256(data: &[u8]) -> String {
     let mut h = Sha256::new();
     h.update(data);
@@ -1097,11 +1199,19 @@ pub(crate) enum CustomizeOp {
 /// the lists to resolve deps; the kubelet deps outside the k8s repo
 /// (iptables/mount/util-linux/libc6) already come in the cloud image. If any is
 /// missing, `dpkg` fails LOUDLY and the build stops — it never leaves a half-installed guest.
+///
+/// `preseed_images_root`, when given (see `preseed_k8s_images`), points at a
+/// HOST-side `delonix_image::ImageStore` root already populated with
+/// kubeadm's core images — copied verbatim into the guest's own
+/// `/var/lib/delonix` (what `delonix-cri` reads at runtime) via 4
+/// `--copy-in` calls, one per `ImageStore` subdirectory
+/// (`images`/`layers`/`containers`/`blobs`).
 pub(crate) fn k8s_customization_steps_offline(
     debs: &[PathBuf],
     extra_run: &[String],
     cri_bin: &Path,
     cri_service: &Path,
+    preseed_images_root: Option<&Path>,
 ) -> Vec<CustomizeOp> {
     let mut ops: Vec<CustomizeOp> = Vec::new();
     // `--copy-in` requires the target directory to ALREADY exist in the guest.
@@ -1119,6 +1229,15 @@ pub(crate) fn k8s_customization_steps_offline(
             .map(|r| CustomizeOp::RunCommand(r.apply_offline().to_string())),
     );
     ops.extend(common_customization_steps(extra_run, cri_bin, cri_service));
+    if let Some(root) = preseed_images_root {
+        ops.push(CustomizeOp::RunCommand("mkdir -p /var/lib/delonix".into()));
+        for sub in ["images", "layers", "containers", "blobs"] {
+            ops.push(CustomizeOp::CopyIn(
+                root.join(sub),
+                "/var/lib/delonix".to_string(),
+            ));
+        }
+    }
     ops
 }
 
@@ -1361,6 +1480,7 @@ mod tests {
                 &[],
                 &cri,
                 &svc,
+                None,
             ),
         ] {
             let bashrc = ops
@@ -1500,6 +1620,7 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
             &[],
             &PathBuf::from("/tmp/delonix-cri"),
             &PathBuf::from("/tmp/delonix-cri.service"),
+            None,
         );
         let cmds: Vec<&str> = ops
             .iter()
@@ -1526,6 +1647,35 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
         assert!(ops
             .iter()
             .any(|o| matches!(o, CustomizeOp::CopyIn(_, d) if d == "/tmp/k8s-debs")));
+    }
+
+    #[test]
+    fn steps_offline_com_preseed_injecta_as_4_subpastas_do_image_store() {
+        let debs = vec![PathBuf::from("/tmp/x/kubeadm_1.34.9-1.1_amd64.deb")];
+        let preseed_root = PathBuf::from("/tmp/preseed-images");
+        let ops = k8s_customization_steps_offline(
+            &debs,
+            &[],
+            &PathBuf::from("/tmp/delonix-cri"),
+            &PathBuf::from("/tmp/delonix-cri.service"),
+            Some(&preseed_root),
+        );
+        for sub in ["images", "layers", "containers", "blobs"] {
+            assert!(
+                ops.iter().any(|o| matches!(
+                    o,
+                    CustomizeOp::CopyIn(src, dst)
+                        if src == &preseed_root.join(sub) && dst == "/var/lib/delonix"
+                )),
+                "faltou o --copy-in de {sub}"
+            );
+        }
+        assert!(
+            ops.iter().any(
+                |o| matches!(o, CustomizeOp::RunCommand(c) if c == "mkdir -p /var/lib/delonix")
+            ),
+            "/var/lib/delonix tem de existir antes do --copy-in"
+        );
     }
 
     #[test]
