@@ -585,6 +585,37 @@ Validado ao vivo com um binário isolado (sem `delonix-cri` ao lado, fora de qua
 `DELONIX_ROOT` limpo) contra a v0.13.1 real publicada: descarrega, verifica, cacheia, e o
 `cluster apply`/`cluster kubeadm` avançam até à fase real de preparação SSH dos hosts.
 
+#### Progresso ao estilo `kind` (v0.14.0)
+
+Pedido directo do utilizador: o log linha-a-linha (uma `println!` por VM criada, por recipe
+aplicada, por host preparado) ficava verboso e pouco elegante num cluster de várias VMs — queria
+o mesmo formato do `kind create cluster`. `cmd::kindmode.rs` já tinha exactamente esse mecanismo
+(`output::Progress`, o próprio comentário do código já dizia "like kind/spinnies") — um spinner
+braille por ETAPA lógica (não por VM/comando), que fecha com `✓`/`✗`. `provision_and_apply` e
+`apply_ssh` passaram a usá-lo, cada um com a sua própria instância `Progress` (`apply_ssh` também
+é chamado por `cluster apply -f`, que nunca passa por `provision_and_apply`):
+
+```
+info Creating cluster "ngolacloudlab" (kubeadm, 1.34)...
+ ✓ Provisioning 2 control-plane(s) 📦
+ ✓ Provisioning 3 worker(s) 📦
+ ✓ Provisioning the HAProxy load balancer ⚖️
+ ✓ Preparing 6 host(s) 🔧
+ ✓ Bootstrapping control-plane (kubeadm init) 🕹️
+ ✓ Joining 1 more control-plane(s) 🎮
+ ✓ Joining 3 worker(s) 🚜
+ ✓ Fetching kubeconfig 📇
+```
+
+Sem TTY (pipe/CI/`2>&1 | tee`), o `Progress` já degradava sozinho para uma linha por etapa SÓ
+quando ela fecha (nada durante — é o que um log de CI quer) — validado ao vivo exactamente assim.
+`create_and_wait`/`prepare_host`/`kubeadm_init`/`kubeadm_join` perderam os `println!` internos
+(o passo exterior é que fala agora); os erros ganharam contexto explícito (`[{label}] {}: {e}`)
+para não perder diagnóstico com o log granular removido. `ssh-keygen -q` tira o banner ruidoso da
+geração da chave. `fetch_kubeconfig` passou a devolver o `PathBuf` em vez de imprimir por dentro —
+as duas linhas finais úteis (`kubeconfig: ...`/`export KUBECONFIG=...`) imprimem-se depois do
+último `✓`, fora do bloco de progresso, tal como o `kind` real também deixa um resumo no fim.
+
 #### `--name` opcional + auto-pull de `--vm-image` em falta (v0.12.0)
 
 Dois bugs reais (host kaeso-sys-01): (1) `--name` era obrigatório — sem a mesma analogia do nome

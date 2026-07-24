@@ -229,44 +229,49 @@ msgstr "(nenhum cluster — cria um com `delonix cluster create`)"
 
 # ---- mensagens de runtime dos comandos (fase 3b) ---------------------------
 
-msgid "preparing {n} host(s)..."
-msgstr "a preparar {n} host(s)..."
-
 msgid "ready"
 msgstr "pronto"
-
-msgid "creating VM {vm}..."
-msgstr "a criar VM {vm}..."
-
-msgid "waiting for SSH on {vm}..."
-msgstr "a aguardar SSH em {vm}..."
-
-msgid "provisioning the HAProxy load balancer..."
-msgstr "a provisionar o load balancer HAProxy..."
-
-msgid "configuring HAProxy ({ip})..."
-msgstr "a configurar o HAProxy ({ip})..."
-
-msgid "already satisfied (SKIP)"
-msgstr "já satisfeito (SKIP)"
-
-msgid "applying..."
-msgstr "a aplicar..."
-
-msgid "installing..."
-msgstr "a instalar..."
-
-msgid "already satisfied (SKIP) — recovering join credentials..."
-msgstr "já satisfeito (SKIP) — a recuperar credenciais de join..."
-
-msgid "running (this can take a few minutes)..."
-msgstr "a correr (pode demorar alguns minutos)..."
 
 msgid "no certificate-key available for a control-plane join"
 msgstr "sem certificate-key disponível para join de control-plane"
 
-msgid "running..."
-msgstr "a correr..."
+# ---- cluster kubeadm: progresso ao estilo `kind` (v0.14.0) -----------------
+
+msgid "Creating cluster \"{name}\" (kubeadm, {image})..."
+msgstr "A criar o cluster \"{name}\" (kubeadm, {image})..."
+
+msgid "Provisioning {n} control-plane(s)"
+msgstr "A provisionar {n} control-plane(s)"
+
+msgid "Provisioning {n} worker(s)"
+msgstr "A provisionar {n} worker(s)"
+
+msgid "Provisioning the HAProxy load balancer"
+msgstr "A provisionar o load balancer HAProxy"
+
+msgid "Preparing {n} host(s)"
+msgstr "A preparar {n} host(s)"
+
+msgid "Bootstrapping control-plane (kubeadm init)"
+msgstr "A arrancar o control-plane (kubeadm init)"
+
+msgid "Joining {n} more control-plane(s)"
+msgstr "A juntar mais {n} control-plane(s)"
+
+msgid "Joining {n} worker(s)"
+msgstr "A juntar {n} worker(s)"
+
+msgid "Waiting for all nodes to be Ready"
+msgstr "A aguardar que todos os nós fiquem Ready"
+
+msgid "Fetching kubeconfig"
+msgstr "A obter o kubeconfig"
+
+msgid "cluster \"{name}\" ready"
+msgstr "cluster \"{name}\" pronto"
+
+msgid "cluster \"{name}\": only {ready}/{n} node(s) Ready after the wait — the cluster is bootstrapped, the CNI may still be converging"
+msgstr "cluster \"{name}\": só {ready}/{n} nó(s) Ready depois da espera — o cluster está inicializado, o CNI pode ainda estar a convergir"
 
 msgid "also copied to {path} (it did not exist yet)"
 msgstr "também copiado para {path} (não existia ainda)"
