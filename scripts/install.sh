@@ -268,23 +268,43 @@ if [ "$WITH_BINARY" = 1 ]; then
   CLEANUP_TMP="$TMP"
   # Variante optimizada para o CPU (x86-64-v3: AVX2/BMI2/FMA) quando ele a
   # suporta; releases antigas podem não a ter — fallback para o genérico.
-  fetch_asset() { # $1 nome-base (delonix|delonix-cri) → devolve o nome descarregado
+  #
+  # BUG CORRIGIDO AQUI (achado ao vivo, num host real): esta função e
+  # `dl_main` abaixo corriam sob `set -e`, mas terminavam SEMPRE com `echo`
+  # (aqui) ou com o `curl` da SHA256SUMS a não ser verificado explicitamente
+  # (lá) — e como as duas correm dentro de `spin ... || die`, o `errexit`
+  # fica SUSPENSO para toda a árvore de chamadas aninhada sob esse `||`
+  # (comportamento documentado do bash: uma falha só dispara o `set -e` se
+  # NÃO estiver a ser testada por `&&`/`||`/`if` — e essa suspensão propaga-se
+  # para dentro de funções chamadas nesse contexto). Resultado real, visto num
+  # host: o `curl` da SHA256SUMS falhava com "Failure when receiving data
+  # from the peer" (erro de rede transitório), a falha era engolida em
+  # silêncio, e só aparecia depois como "SHA256 verification FAILED —
+  # corrupted or tampered download" — mensagem enganosa (implica adulteração/
+  # MITM) para o que era só uma transferência que falhou. Corrigido com
+  # `|| return 1` explícito em cada `curl` que tem de ser fatal — controlo de
+  # fluxo explícito não depende do estado (in)consistente do `errexit`.
+  fetch_asset() { # $1 nome-base (delonix|delonix-cri) → devolve o nome descarregado, ou falha
     local base="$1" asset="$1-x86_64${CPU_VARIANT}-linux"
-    if [ -n "$CPU_VARIANT" ] && ! curl -fsSL -o "$TMP/$asset" "$BASE_URL/$asset" 2>/dev/null; then
+    if [ -n "$CPU_VARIANT" ]; then
+      if curl -fsSL -o "$TMP/$asset" "$BASE_URL/$asset" 2>/dev/null; then
+        echo "$asset"
+        return 0
+      fi
       warn "$asset is not in this release — falling back to the generic binary"
       asset="$base-x86_64-linux"
-      curl -fsSL -o "$TMP/$asset" "$BASE_URL/$asset"
-    elif [ -z "$CPU_VARIANT" ]; then
-      curl -fsSL -o "$TMP/$asset" "$BASE_URL/$asset"
     fi
+    curl -fsSL -o "$TMP/$asset" "$BASE_URL/$asset" || return 1
     echo "$asset"
   }
   verify_asset() { # nunca instalar um download sem conferir contra o SHA256SUMS
+    [ -s "$TMP/SHA256SUMS" ] \
+      || die "could not download SHA256SUMS — check your network and re-run (this is a download failure, not a corrupted/tampered file)"
     ( cd "$TMP" && grep -E " $1\$" SHA256SUMS | sha256sum -c - >/dev/null 2>&1 ) \
       || die "SHA256 verification FAILED for $1 — corrupted or tampered download, aborting"
   }
   dl_main() {
-    curl -fsSL -o "$TMP/SHA256SUMS" "$BASE_URL/SHA256SUMS"
+    curl -fsSL -o "$TMP/SHA256SUMS" "$BASE_URL/SHA256SUMS" || return 1
     fetch_asset delonix > "$TMP/.asset-delonix"
   }
   spin binary delonix "downloading ($VERSION, $VARIANT_LABEL)..." dl_main \
