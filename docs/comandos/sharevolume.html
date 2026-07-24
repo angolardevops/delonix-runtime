@@ -76,7 +76,7 @@ main{padding:1.4rem 1.2rem 4rem}}
 <nav class="side">
 <div class="brand"><span class="dot">▲</span> Delonix Engine</div>
 <h5>Documentação</h5>
-<a href="../index.html">Início</a><a href="../cheatsheet.html">Cheatsheet</a><a href="../kinds.html">Kinds e templates</a><a href="../arquitectura.html">Arquitectura</a><a href="../c4.html">Modelo C4 e system design</a><a href="../cri.html">CRI — kubelet sem containerd</a><a href="../comparacao.html">Delonix vs Docker vs Podman</a><a href="../tutorial-delonix-temp.html">Projecto completo: Delonix Temp</a>
+<a href="../index.html">Início</a><a href="../cheatsheet.html">Cheatsheet</a><a href="../kinds.html">Kinds e templates</a><a href="../arquitectura.html">Arquitectura</a><a href="../c4.html">Modelo C4 e system design</a><a href="../cri.html">CRI — kubelet sem containerd</a><a href="../comparacao.html">Delonix vs Docker vs Podman</a><a href="../tutorial-delonix-temp.html">Projecto completo: Delonix Temp</a><a href="../delonixctl.html">delonixctl — cliente PaaS</a>
 <h5>Referência CLI</h5>
 <a href="../comandos/container.html">delonix container</a><a href="../comandos/pod.html">delonix pod</a><a href="../comandos/image.html">delonix image</a><a href="../comandos/build.html">delonix build</a><a href="../comandos/vm.html">delonix vm</a><a href="../comandos/volumes.html">delonix volumes</a><a href="../comandos/network.html">delonix network</a><a href="../comandos/stack.html">delonix stack</a><a href="../comandos/cluster.html">delonix cluster</a><a href="../comandos/secret.html">delonix secret</a><a href="../comandos/storage.html">delonix storage</a><a href="../comandos/sharevolume.html" class="on">delonix sharevolume</a><a href="../comandos/ingress.html">delonix ingress</a><a href="../comandos/egress.html">delonix egress</a><a href="../comandos/httproute.html">delonix httproute</a><a href="../comandos/tunnel.html">delonix tunnel</a><a href="../comandos/flow.html">delonix flow</a><a href="../comandos/boot.html">delonix boot</a><a href="../comandos/system.html">delonix system</a><a href="../comandos/dash.html">delonix dash</a><a href="../comandos/docker-api.html">delonix docker-api</a><a href="../comandos/kube.html">delonix kube</a><a href="../comandos/netns.html">delonix netns</a><a href="../comandos/completion.html">delonix completion</a>
 <h5>Projecto</h5>
@@ -95,7 +95,7 @@ quota é SOFT (uso medido + alerta) — o caminho HARD (imagem ext4 loopback) pr
 bloco local e não compõe com um subdirectório de um mount de rede.</p>
 <div class='help'><pre><code>An isolated, individually-quota&#x27;d slice of a `Storage` — multiple container/vm/pod share ONE NAS export without seeing each other&#x27;s data
 
-Usage: delonix-x86_64-linux sharevolume [OPTIONS] &lt;COMMAND&gt;
+Usage: delonix sharevolume [OPTIONS] &lt;COMMAND&gt;
 
 Commands:
   apply     Apply the `kind: ShareVolume` documents of a manifest (idempotent)
@@ -110,7 +110,7 @@ Options:
 <h2 id='apply'><code>sharevolume apply</code></h2>
 <div class='help'><pre><code>Apply the `kind: ShareVolume` documents of a manifest (idempotent)
 
-Usage: delonix-x86_64-linux sharevolume apply [OPTIONS]
+Usage: delonix sharevolume apply [OPTIONS]
 
 Options:
   -f, --file &lt;FILE&gt;   
@@ -121,7 +121,7 @@ sharevolume/tenant-b: ready (nas-shared -&gt; /var/lib/delonix/volumes/nas-share
 <h2 id='ls'><code>sharevolume ls</code></h2>
 <div class='help'><pre><code>List share volumes (parent storage, quota, live usage)
 
-Usage: delonix-x86_64-linux sharevolume ls [OPTIONS]
+Usage: delonix sharevolume ls [OPTIONS]
 
 Options:
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
@@ -132,7 +132,7 @@ tenant-a   nas-shared   1.0 MiB   1.0 MiB   OVER    .../shares/tenant-a</code></
 <h2 id='describe'><code>sharevolume describe</code></h2>
 <div class='help'><pre><code>Human-readable detail of one share volume
 
-Usage: delonix-x86_64-linux sharevolume describe [OPTIONS] &lt;NAME&gt;
+Usage: delonix sharevolume describe [OPTIONS] &lt;NAME&gt;
 
 Arguments:
   &lt;NAME&gt;  
@@ -150,7 +150,7 @@ Consume with:   -v tenant-a:/path/in/container</code></pre></div></div>
 <h2 id='rm'><code>sharevolume rm</code></h2>
 <div class='help'><pre><code>Un-register a share volume. The underlying data (a subdirectory of the parent Storage) is PRESERVED unless `--purge-data` is passed
 
-Usage: delonix-x86_64-linux sharevolume rm [OPTIONS] &lt;NAME&gt;
+Usage: delonix sharevolume rm [OPTIONS] &lt;NAME&gt;
 
 Arguments:
   &lt;NAME&gt;  

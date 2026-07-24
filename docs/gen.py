@@ -18,10 +18,20 @@ import sys
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 BIN = sys.argv[1] if len(sys.argv) > 1 else os.path.join(ROOT, "..", "target", "release", "delonix")
+# `delonixctl` — cliente remoto do Delonix PaaS, produto IRMÃO deste engine mas de um repo
+# PRIVADO diferente (angolardevops/delonix-paas). Não introspectamos o repo (não temos acesso
+# aqui) — só o binário JÁ COMPILADO, passado como 2.º argumento, para manter a mesma promessa
+# do resto deste gerador: o `--help` embebido é sempre o REAL, nunca inventado.
+BIN_CTL = sys.argv[2] if len(sys.argv) > 2 else os.path.join(ROOT, "..", "target", "release", "delonixctl")
 
 
 def help_of(*args):
     out = subprocess.run([BIN, *args, "--help"], capture_output=True, text=True)
+    return (out.stdout or out.stderr).strip()
+
+
+def help_of_ctl(*args):
+    out = subprocess.run([BIN_CTL, *args, "--help"], capture_output=True, text=True)
     return (out.stdout or out.stderr).strip()
 
 
@@ -627,6 +637,7 @@ def sidebar(active, depth=0):
         ("cri.html", "CRI — kubelet sem containerd"),
         ("comparacao.html", "Delonix vs Docker vs Podman"),
         ("tutorial-delonix-temp.html", "Projecto completo: Delonix Temp"),
+        ("delonixctl.html", "delonixctl — cliente PaaS"),
     ]
     items_cmd = [(f"comandos/{g}.html", GROUPS[g]["title"]) for g in GROUPS]
     def link(href, label):
@@ -707,6 +718,99 @@ def group_page(name, g):
     page(f"comandos/{name}.html", g["title"], "\n".join(body), depth=1)
 
 
+CTL_GROUPS = {
+    "auth": {
+        "title": "delonixctl auth",
+        "tagline": "Device-flow (RFC 8628) contra o portal do teu operador — nunca pede password directamente.",
+        "examples": [
+            ("Autenticar (abre um código no browser)", "delonixctl auth login --portal https://portal.o-teu-operador.example"),
+            ("Confirmar credenciais guardadas", "delonixctl auth status"),
+            ("Sem device-flow, token já em mão (CI/automação)", "delonixctl auth login --token \"o-teu-token\""),
+        ],
+    },
+    "team": {
+        "title": "delonixctl team",
+        "tagline": "Teams (`/v2/teams`) — `set` substitui a lista de membros inteira (sem add/remove incremental hoje).",
+        "examples": [
+            ("Listar", "delonixctl team ls", "(sem teams)"),
+            ("Criar/substituir membros", "delonixctl team set backend --org acme --member ana:admin --member joao"),
+        ],
+    },
+    "addons": {
+        "title": "delonixctl addons",
+        "tagline": "Addons geridos — postgres/pgvector/redis/kafka/minio/mongodb/qdrant.",
+        "examples": [
+            ("Provisionar", "delonixctl addons create cache --type redis --ha --metrics"),
+            ("Backup on-demand", "delonixctl addons backup cache"),
+        ],
+    },
+    "app": {
+        "title": "delonixctl app",
+        "tagline": "Apps por preset — nextcloud/onlyoffice/mattermost/odoo/collab/coturn.",
+        "examples": [
+            ("Catálogo", "delonixctl app presets",
+             "ID           NOME           DESCRIÇÃO\nnextcloud    Nextcloud      Ficheiros + colaboração; Postgres gerido, HTTPS.\nonlyoffice   OnlyOffice     Document Server; edição de documentos (JWT).\nmattermost   Mattermost     Chat de equipa + Calls (vídeo/voz); Postgres gerido.\nodoo         Odoo           ERP/CRM; Postgres gerido, filestore, ingress.\ncollab       Suite colab    Nextcloud + OnlyOffice + Mattermost integrados.\ncoturn       coturn (TURN)  Relay TURN/STUN para media WebRTC (RTC)."),
+            ("Criar (assíncrono — devolve um job)", "delonixctl app create a-minha-app --preset nextcloud --domain files.example.com"),
+            ("Bloquear até terminar", "delonixctl app create outra --preset odoo --wait"),
+        ],
+    },
+    "org": {
+        "title": "delonixctl org",
+        "tagline": "Organizações (`/v2/orgs`).",
+        "examples": [("Criar/actualizar", "delonixctl org set acme --owner eu@example.com --sso-domain example.com")],
+    },
+    "odoo": {
+        "title": "delonixctl odoo",
+        "tagline": "Único preset com grupo próprio (módulos, operações, ficheiros) — os outros usam só `app create --preset`.",
+        "examples": [
+            ("Criar", "delonixctl odoo create a-minha-erp --version 17 --domain erp.example.com"),
+            ("Instalar um módulo", "delonixctl odoo module install a-minha-erp o_modulo --upgrade"),
+        ],
+    },
+    "apply": {
+        "title": "delonixctl apply / delete",
+        "tagline": "Manifesto genérico (`/v2/apply`, `/v2/delete`, admin) — QUALQUER Kind, não só os com grupo dedicado.",
+        "examples": [
+            ("Aplicar", "delonixctl apply -f app.yaml"),
+            ("De stdin", "delonixctl apply -f - < app.yaml"),
+        ],
+    },
+    "version": {
+        "title": "delonixctl version",
+        "tagline": "Client + Server version lado a lado (estilo `kubectl version`) — substitui o `--version`/`-V` do clap.",
+        "examples": [
+            ("Contra uma plataforma viva", "delonixctl version",
+             "Cliente: delonixctl v0.9.74  (commit c8cd0e46c, compilado 2026-07-24)\nServidor: delonix-engine v0.9.74  (API v2) — https://127.0.0.1:9443"),
+        ],
+    },
+}
+
+
+def delonixctl_page():
+    body = [
+        "<h1>delonixctl <span class='pill'>cliente PaaS</span></h1>",
+        "<p class='tagline'>O cliente REMOTO do Delonix PaaS — homólogo ao <code>kubectl</code>. "
+        "Produto irmão deste engine, dum repositório diferente (privado): fala só HTTP com a API "
+        "<code>/v2/*</code> de uma plataforma Delonix PaaS já a correr — nunca toca em containers/VMs "
+        "directamente (isso é o <code>delonix</code> documentado no resto deste site).</p>",
+        "<table><tr><th></th><th><code>delonix</code></th><th><code>delonixctl</code></th></tr>"
+        "<tr><td>Papel</td><td>Motor local de containers/VMs/rede</td><td>Cliente remoto do PaaS</td></tr>"
+        "<tr><td>Onde corre</td><td>Na máquina do Delonix Engine</td><td>De qualquer máquina</td></tr>"
+        "<tr><td>Fala com</td><td>O kernel directamente</td><td>Só HTTP com <code>/v2/*</code></td></tr>"
+        "</table>",
+        "<div class='help'><pre><code>" + html.escape(help_of_ctl()) + "</code></pre></div>",
+        "<p>Guia completo (auth, todos os grupos, troubleshooting) no repo do PaaS: "
+        "<code>docs/user/DELONIXCTL.md</code>.</p>",
+    ]
+    for name, g in CTL_GROUPS.items():
+        body.append(f"<h2 id='{name}'><code>{html.escape(g['title'])}</code></h2>")
+        body.append(f"<p>{html.escape(g['tagline'])}</p>")
+        body.append(f"<div class='help'><pre><code>{html.escape(help_of_ctl(name))}</code></pre></div>")
+        if g.get("examples"):
+            body.append("<h3>Exemplos</h3>" + examples_html(g["examples"]))
+    page("delonixctl.html", "delonixctl", "\n".join(body))
+
+
 INDEX = """
 <h1>Delonix Engine <span class="pill">v{ver}</span></h1>
 <p class="tagline"><strong>Engine</strong> de containers e microVMs <strong>daemonless</strong>,
@@ -757,6 +861,12 @@ delonix container start web      # rearranca com o mesmo estado</code></pre>
 <tr><td>VMs</td><td>—</td><td>machine (para si próprio)</td><td>microVMs declarativas de 1.ª classe (Cloud Hypervisor/libvirt)</td></tr>
 <tr><td>Kubernetes</td><td>—</td><td>—</td><td>CRI próprio + bootstrap kubeadm do zero (<code>delonix cluster</code>)</td></tr>
 </table>
+
+<h2>Já usas uma plataforma Delonix PaaS?</h2>
+<p>Este site documenta o <strong>engine</strong> (<code>delonix</code>, o que corre na máquina).
+Para operar uma plataforma <strong>Delonix PaaS</strong> já a correr de qualquer máquina — apps,
+addons geridos, organizações, teams — o cliente é o <a href="delonixctl.html"><code>delonixctl</code></a>
+(homólogo ao <code>kubectl</code>, produto irmão, repo diferente).</p>
 """
 
 ARCH = """
@@ -1081,6 +1191,24 @@ def subcommands_of(group):
     return rows
 
 
+def subcommands_of_ctl(group):
+    """Mesmo que `subcommands_of`, mas lendo o `--help` do `delonixctl` (BIN_CTL)."""
+    out, seen, rows = help_of_ctl(group), False, []
+    for line in out.splitlines():
+        if line.strip().startswith("Commands:"):
+            seen = True
+            continue
+        if seen:
+            if line.strip().startswith("Options:") or not line.strip():
+                if rows:
+                    break
+                continue
+            m = line.strip().split(None, 1)
+            if m and m[0] not in ("help",) and m[0][0].isalpha():
+                rows.append((m[0], m[1] if len(m) > 1 else ""))
+    return rows
+
+
 # Tarefas comuns — o "cola e corre" no topo do cheatsheet.
 CHEAT_TASKS = [
     ("Serviço web, sem root, sem daemon", "delonix container run -d --name web -p 8080:80 nginx"),
@@ -1187,6 +1315,21 @@ def cheatsheet_page():
     body.append("<h2>Global</h2><p><code>--l18n en|pt</code> — idioma da saída (EN por omissão; "
                 "<code>pt</code> para pt_AO). <code>$DELONIX_ROOT</code> — raiz do estado. "
                 "<code>delonix completion &lt;shell&gt;</code> — autocompletion.</p>")
+    body.append("<h2>delonixctl (cliente remoto do PaaS) <a href='delonixctl.html'>→</a></h2>")
+    body.append("<p>Produto irmão (repo diferente, privado) — ver <a href='delonixctl.html'>a página "
+                 "dedicada</a> para exemplos e o guia completo. Grupos:</p>")
+    for g in CTL_GROUPS:
+        title = CTL_GROUPS[g]["title"]
+        subs = subcommands_of_ctl(g)
+        head = f"<h3 id='ctl-{g}'><a href='delonixctl.html#{g}'><code>{html.escape(title)}</code></a></h3>"
+        if not subs:
+            body.append(head + f"<p>{html.escape(CTL_GROUPS[g]['tagline'])}</p>")
+            continue
+        rows = "".join(
+            f"<tr><td><code>{html.escape(g)} {html.escape(s)}</code></td><td>{html.escape(d)}</td></tr>"
+            for s, d in subs
+        )
+        body.append(head + f"<table><tr><th>Comando</th><th>O que faz</th></tr>{rows}</table>")
     page("cheatsheet.html", "Cheatsheet", "\n".join(body))
 
 
@@ -1338,6 +1481,10 @@ def main():
     page("tutorial-delonix-temp.html", "Projecto completo: Delonix Temp", TUTORIAL)
     for n, g in GROUPS.items():
         group_page(n, g)
+    if os.path.isfile(BIN_CTL) and os.access(BIN_CTL, os.X_OK):
+        delonixctl_page()
+    else:
+        print(f"aviso: delonixctl não encontrado em {BIN_CTL} — delonixctl.html NÃO regenerado")
     open(os.path.join(ROOT, ".nojekyll"), "w").close()
     print(f"docs geradas (delonix {ver}) em {ROOT}")
 

@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>delonixctl · Delonix Engine</title>
+<style>
+:root{--accent:#e8590c;--accent-soft:#fff0e6;--ink:#1a1a2e;--muted:#5a6472;--line:#e6e8ec;
+--bg:#ffffff;--side:#f7f8fa;--code-bg:#0f172a;--code-ink:#e2e8f0;--radius:10px}
+@media (prefers-color-scheme: dark){:root{--ink:#e6e8ee;--muted:#9aa4b2;--line:#252a33;
+--bg:#0d1117;--side:#10151c;--accent-soft:#2a1810;--code-bg:#161b22;--code-ink:#dbe2ea}}
+*{box-sizing:border-box}body{margin:0;font:16px/1.65 -apple-system,'Segoe UI',Roboto,Ubuntu,
+sans-serif;color:var(--ink);background:var(--bg)}
+a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
+.layout{display:flex;min-height:100vh}
+nav.side{width:270px;flex-shrink:0;background:var(--side);border-right:1px solid var(--line);
+padding:1.2rem 1rem 3rem;position:sticky;top:0;height:100vh;overflow-y:auto}
+nav.side .brand{display:flex;align-items:center;gap:.55rem;font-weight:700;font-size:1.12rem;
+margin-bottom:1.1rem;color:var(--ink)}
+nav.side .brand .dot{width:26px;height:26px;border-radius:7px;background:var(--accent);
+display:inline-flex;align-items:center;justify-content:center;color:#fff;font-size:.85rem}
+nav.side h5{margin:1.3rem 0 .3rem;font-size:.72rem;letter-spacing:.09em;text-transform:uppercase;
+color:var(--muted)}
+nav.side a{display:block;padding:.28rem .55rem;border-radius:6px;color:var(--ink);font-size:.93rem}
+nav.side a:hover{background:var(--accent-soft);text-decoration:none}
+nav.side a.on{background:var(--accent-soft);color:var(--accent);font-weight:600}
+main{flex:1;min-width:0;padding:2.2rem 3rem 5rem;max-width:940px}
+main h1{font-size:1.9rem;margin:.2rem 0 .4rem}
+main h2{font-size:1.35rem;margin-top:2.4rem;padding-bottom:.35rem;border-bottom:1px solid var(--line)}
+main h3{font-size:1.05rem;margin-top:1.6rem}
+.tagline{color:var(--muted);font-size:1.05rem;margin-top:0}
+code{background:var(--accent-soft);padding:.1em .35em;border-radius:5px;font-size:.9em}
+pre{background:var(--code-bg);color:var(--code-ink);padding:1rem 1.2rem;border-radius:var(--radius);
+overflow-x:auto;font-size:.86rem;line-height:1.55}
+pre code{background:none;padding:0;color:inherit;font-size:inherit}
+.help pre{border-left:4px solid var(--accent)}
+.ex{margin:.9rem 0}.ex .cap{font-size:.88rem;color:var(--muted);margin-bottom:.25rem}
+.ex .out,div.out{margin-top:.4rem}
+.ex .out pre,div.out pre{background:transparent;border:1px dashed var(--line);color:var(--muted);
+padding:.7rem 1rem;font-size:.82rem}
+.ex .out::before,div.out::before{content:"→ resultado";display:block;font-size:.75rem;color:var(--muted);
+margin-bottom:.15rem;letter-spacing:.03em;text-transform:uppercase}
+table{border-collapse:collapse;width:100%;font-size:.92rem}
+td,th{border:1px solid var(--line);padding:.5rem .7rem;text-align:left;vertical-align:top}
+th{background:var(--side)}
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:1rem;margin:1.4rem 0}
+.card{border:1px solid var(--line);border-radius:var(--radius);padding:1rem 1.1rem}
+.card b{display:block;margin-bottom:.25rem}.card a{font-weight:600}
+.card p{margin:.2rem 0 0;font-size:.88rem;color:var(--muted)}
+.arch{display:flex;flex-direction:column;gap:.6rem;margin:1.4rem 0}
+.arch .row{display:flex;gap:.6rem;flex-wrap:wrap}
+.arch .box{flex:1;min-width:150px;border:1.5px solid var(--accent);border-radius:8px;
+padding:.55rem .8rem;font-size:.85rem;background:var(--accent-soft)}
+.arch .box.mut{border-color:var(--line);background:var(--side)}
+.arch .box b{display:block;font-size:.9rem}
+.pill{display:inline-block;background:var(--accent);color:#fff;border-radius:99px;
+padding:.05rem .6rem;font-size:.75rem;font-weight:600;vertical-align:middle}
+.tag{display:inline-block;border-radius:6px;padding:.1rem .5rem;font-size:.82rem;font-weight:600}
+.tag.ok{background:#d8f3dc;color:#1b4332}.tag.mid{background:#fff3bf;color:#5c4a00}
+.tag.no{background:#ffe3e3;color:#7a1420}
+@media (prefers-color-scheme: dark){.tag.ok{background:#0f3d24;color:#8fe3ac}
+.tag.mid{background:#453800;color:#ffe066}.tag.no{background:#4a1015;color:#ffa8a8}}
+.callout{border:1.5px solid var(--accent);border-radius:var(--radius);padding:1rem 1.2rem;margin:1.4rem 0;
+background:var(--accent-soft)}
+.callout.warn{border-color:#e03131;background:#fff0f0}
+.callout.warn b{color:#c92a2a}
+@media (prefers-color-scheme: dark){.callout.warn{background:#3a1414}.callout.warn b{color:#ff8787}}
+.callout p:first-child{margin-top:0}.callout p:last-child{margin-bottom:0}
+footer{margin-top:4rem;color:var(--muted);font-size:.85rem;border-top:1px solid var(--line);padding-top:1rem}
+@media (max-width:840px){.layout{flex-direction:column}nav.side{width:100%;height:auto;position:static}
+main{padding:1.4rem 1.2rem 4rem}}
+</style>
+</head>
+<body>
+<div class="layout">
+<nav class="side">
+<div class="brand"><span class="dot">▲</span> Delonix Engine</div>
+<h5>Documentação</h5>
+<a href="index.html">Início</a><a href="cheatsheet.html">Cheatsheet</a><a href="kinds.html">Kinds e templates</a><a href="arquitectura.html">Arquitectura</a><a href="c4.html">Modelo C4 e system design</a><a href="cri.html">CRI — kubelet sem containerd</a><a href="comparacao.html">Delonix vs Docker vs Podman</a><a href="tutorial-delonix-temp.html">Projecto completo: Delonix Temp</a><a href="delonixctl.html" class="on">delonixctl — cliente PaaS</a>
+<h5>Referência CLI</h5>
+<a href="comandos/container.html">delonix container</a><a href="comandos/pod.html">delonix pod</a><a href="comandos/image.html">delonix image</a><a href="comandos/build.html">delonix build</a><a href="comandos/vm.html">delonix vm</a><a href="comandos/volumes.html">delonix volumes</a><a href="comandos/network.html">delonix network</a><a href="comandos/stack.html">delonix stack</a><a href="comandos/cluster.html">delonix cluster</a><a href="comandos/secret.html">delonix secret</a><a href="comandos/storage.html">delonix storage</a><a href="comandos/sharevolume.html">delonix sharevolume</a><a href="comandos/ingress.html">delonix ingress</a><a href="comandos/egress.html">delonix egress</a><a href="comandos/httproute.html">delonix httproute</a><a href="comandos/tunnel.html">delonix tunnel</a><a href="comandos/flow.html">delonix flow</a><a href="comandos/boot.html">delonix boot</a><a href="comandos/system.html">delonix system</a><a href="comandos/dash.html">delonix dash</a><a href="comandos/docker-api.html">delonix docker-api</a><a href="comandos/kube.html">delonix kube</a><a href="comandos/netns.html">delonix netns</a><a href="comandos/completion.html">delonix completion</a>
+<h5>Projecto</h5>
+<a href="https://github.com/angolardevops/delonix-runtime">GitHub</a>
+<a href="https://github.com/angolardevops/delonix-runtime/releases">Releases</a>
+</nav>
+<main>
+<h1>delonixctl <span class='pill'>cliente PaaS</span></h1>
+<p class='tagline'>O cliente REMOTO do Delonix PaaS — homólogo ao <code>kubectl</code>. Produto irmão deste engine, dum repositório diferente (privado): fala só HTTP com a API <code>/v2/*</code> de uma plataforma Delonix PaaS já a correr — nunca toca em containers/VMs directamente (isso é o <code>delonix</code> documentado no resto deste site).</p>
+<table><tr><th></th><th><code>delonix</code></th><th><code>delonixctl</code></th></tr><tr><td>Papel</td><td>Motor local de containers/VMs/rede</td><td>Cliente remoto do PaaS</td></tr><tr><td>Onde corre</td><td>Na máquina do Delonix Engine</td><td>De qualquer máquina</td></tr><tr><td>Fala com</td><td>O kernel directamente</td><td>Só HTTP com <code>/v2/*</code></td></tr></table>
+<div class='help'><pre><code>Cliente remoto do Delonix PaaS (fala só com a API /v2)
+
+Usage: delonixctl [OPTIONS] &lt;COMMAND&gt;
+
+Commands:
+  auth        Autenticação de tenant (device-flow) — partilha `~/.delonix/auth.json` com o `delonix auth login` do runtime local
+  team        Teams (`/v2/teams`)
+  addons      Addons geridos (`/v2/addons`) — postgres/pgvector/redis/kafka/minio/mongodb/qdrant
+  app         Apps por preset (`/v2/apps`) — nextcloud/onlyoffice/mattermost/odoo/collab/coturn
+  org         Organizações (`/v2/orgs`)
+  odoo        Apps Odoo (`/v2/odoo*`) — superfície própria (módulos, ops, ficheiros). Os outros presets (nextcloud/onlyoffice/mattermost) usam `delonixctl app create --preset &lt;nome&gt;`, não têm grupo próprio
+  apply       Aplica um manifesto (`/v2/apply`, admin — pode criar/atualizar QUALQUER Kind)
+  delete      Remove o(s) recurso(s) do manifesto (`/v2/delete`, admin)
+  completion  Imprime o script de autocompletion do shell (bash/zsh/fish/...)
+  version     Versão do cliente E do servidor ligado (padrão `kubectl version`) — substitui o `--version`/`-V` gerado pelo clap
+  help        Print this message or the help of the given subcommand(s)
+
+Options:
+      --api &lt;API&gt;      URL da API (ex.: https://host:9443). Também `DELONIX_API`
+      --insecure       Aceita certificados TLS self-signed (a API vem assim por omissão). Também `DELONIX_API_INSECURE=1`
+      --token &lt;TOKEN&gt;  Token Bearer explícito (sobrepõe `DELONIX_TOKEN`/ficheiro de login)
+      --json           Imprime a resposta em JSON em vez de tabela legível, onde aplicável
+  -h, --help           Print help</code></pre></div>
+<p>Guia completo (auth, todos os grupos, troubleshooting) no repo do PaaS: <code>docs/user/DELONIXCTL.md</code>.</p>
+<h2 id='auth'><code>delonixctl auth</code></h2>
+<p>Device-flow (RFC 8628) contra o portal do teu operador — nunca pede password directamente.</p>
+<div class='help'><pre><code>Autenticação de tenant (device-flow) — partilha `~/.delonix/auth.json` com o `delonix auth login` do runtime local
+
+Usage: delonixctl auth [OPTIONS] &lt;COMMAND&gt;
+
+Commands:
+  login   Autentica-se no portal (device-flow) ou aceita `--token` directo
+  status  Mostra se há credenciais guardadas (sem revelar o token)
+  logout  Remove as credenciais guardadas
+  help    Print this message or the help of the given subcommand(s)
+
+Options:
+      --api &lt;API&gt;      URL da API (ex.: https://host:9443). Também `DELONIX_API`
+      --insecure       Aceita certificados TLS self-signed (a API vem assim por omissão). Também `DELONIX_API_INSECURE=1`
+      --token &lt;TOKEN&gt;  Token Bearer explícito (sobrepõe `DELONIX_TOKEN`/ficheiro de login)
+      --json           Imprime a resposta em JSON em vez de tabela legível, onde aplicável
+  -h, --help           Print help</code></pre></div>
+<h3>Exemplos</h3><div class="ex"><div class="cap">Autenticar (abre um código no browser)</div><pre><code>delonixctl auth login --portal https://portal.o-teu-operador.example</code></pre></div><div class="ex"><div class="cap">Confirmar credenciais guardadas</div><pre><code>delonixctl auth status</code></pre></div><div class="ex"><div class="cap">Sem device-flow, token já em mão (CI/automação)</div><pre><code>delonixctl auth login --token &quot;o-teu-token&quot;</code></pre></div>
+<h2 id='team'><code>delonixctl team</code></h2>
+<p>Teams (`/v2/teams`) — `set` substitui a lista de membros inteira (sem add/remove incremental hoje).</p>
+<div class='help'><pre><code>Teams (`/v2/teams`)
+
+Usage: delonixctl team [OPTIONS] &lt;COMMAND&gt;
+
+Commands:
+  ls    Lista os teams
+  set   Cria/substitui um team (organização + lista COMPLETA de membros — `PUT /v2/teams/:name`, a API não suporta add/remove incremental hoje)
+  rm    Remove um team
+  help  Print this message or the help of the given subcommand(s)
+
+Options:
+      --api &lt;API&gt;      URL da API (ex.: https://host:9443). Também `DELONIX_API`
+      --insecure       Aceita certificados TLS self-signed (a API vem assim por omissão). Também `DELONIX_API_INSECURE=1`
+      --token &lt;TOKEN&gt;  Token Bearer explícito (sobrepõe `DELONIX_TOKEN`/ficheiro de login)
+      --json           Imprime a resposta em JSON em vez de tabela legível, onde aplicável
+  -h, --help           Print help</code></pre></div>
+<h3>Exemplos</h3><div class="ex"><div class="cap">Listar</div><pre><code>delonixctl team ls</code></pre><div class="out"><pre><code>(sem teams)</code></pre></div></div><div class="ex"><div class="cap">Criar/substituir membros</div><pre><code>delonixctl team set backend --org acme --member ana:admin --member joao</code></pre></div>
+<h2 id='addons'><code>delonixctl addons</code></h2>
+<p>Addons geridos — postgres/pgvector/redis/kafka/minio/mongodb/qdrant.</p>
+<div class='help'><pre><code>Addons geridos (`/v2/addons`) — postgres/pgvector/redis/kafka/minio/mongodb/qdrant
+
+Usage: delonixctl addons [OPTIONS] &lt;COMMAND&gt;
+
+Commands:
+  ls      Lista os addons
+  create  Cria um addon
+  rm      Remove um addon
+  backup  Dispara um backup on-demand
+  help    Print this message or the help of the given subcommand(s)
+
+Options:
+      --api &lt;API&gt;      URL da API (ex.: https://host:9443). Também `DELONIX_API`
+      --insecure       Aceita certificados TLS self-signed (a API vem assim por omissão). Também `DELONIX_API_INSECURE=1`
+      --token &lt;TOKEN&gt;  Token Bearer explícito (sobrepõe `DELONIX_TOKEN`/ficheiro de login)
+      --json           Imprime a resposta em JSON em vez de tabela legível, onde aplicável
+  -h, --help           Print help</code></pre></div>
+<h3>Exemplos</h3><div class="ex"><div class="cap">Provisionar</div><pre><code>delonixctl addons create cache --type redis --ha --metrics</code></pre></div><div class="ex"><div class="cap">Backup on-demand</div><pre><code>delonixctl addons backup cache</code></pre></div>
+<h2 id='app'><code>delonixctl app</code></h2>
+<p>Apps por preset — nextcloud/onlyoffice/mattermost/odoo/collab/coturn.</p>
+<div class='help'><pre><code>Apps por preset (`/v2/apps`) — nextcloud/onlyoffice/mattermost/odoo/collab/coturn
+
+Usage: delonixctl app [OPTIONS] &lt;COMMAND&gt;
+
+Commands:
+  ls       Lista as apps (visíveis ao token actual)
+  presets  Catálogo de presets disponíveis
+  create   Cria uma app por preset (assíncrono — devolve um job)
+  job      Estado/log de um job de provisionamento
+  help     Print this message or the help of the given subcommand(s)
+
+Options:
+      --api &lt;API&gt;      URL da API (ex.: https://host:9443). Também `DELONIX_API`
+      --insecure       Aceita certificados TLS self-signed (a API vem assim por omissão). Também `DELONIX_API_INSECURE=1`
+      --token &lt;TOKEN&gt;  Token Bearer explícito (sobrepõe `DELONIX_TOKEN`/ficheiro de login)
+      --json           Imprime a resposta em JSON em vez de tabela legível, onde aplicável
+  -h, --help           Print help</code></pre></div>
+<h3>Exemplos</h3><div class="ex"><div class="cap">Catálogo</div><pre><code>delonixctl app presets</code></pre><div class="out"><pre><code>ID           NOME           DESCRIÇÃO
+nextcloud    Nextcloud      Ficheiros + colaboração; Postgres gerido, HTTPS.
+onlyoffice   OnlyOffice     Document Server; edição de documentos (JWT).
+mattermost   Mattermost     Chat de equipa + Calls (vídeo/voz); Postgres gerido.
+odoo         Odoo           ERP/CRM; Postgres gerido, filestore, ingress.
+collab       Suite colab    Nextcloud + OnlyOffice + Mattermost integrados.
+coturn       coturn (TURN)  Relay TURN/STUN para media WebRTC (RTC).</code></pre></div></div><div class="ex"><div class="cap">Criar (assíncrono — devolve um job)</div><pre><code>delonixctl app create a-minha-app --preset nextcloud --domain files.example.com</code></pre></div><div class="ex"><div class="cap">Bloquear até terminar</div><pre><code>delonixctl app create outra --preset odoo --wait</code></pre></div>
+<h2 id='org'><code>delonixctl org</code></h2>
+<p>Organizações (`/v2/orgs`).</p>
+<div class='help'><pre><code>Organizações (`/v2/orgs`)
+
+Usage: delonixctl org [OPTIONS] &lt;COMMAND&gt;
+
+Commands:
+  ls    Lista as organizações
+  get   Uma organização individual
+  set   Cria/atualiza uma organização
+  rm    Remove uma organização
+  help  Print this message or the help of the given subcommand(s)
+
+Options:
+      --api &lt;API&gt;      URL da API (ex.: https://host:9443). Também `DELONIX_API`
+      --insecure       Aceita certificados TLS self-signed (a API vem assim por omissão). Também `DELONIX_API_INSECURE=1`
+      --token &lt;TOKEN&gt;  Token Bearer explícito (sobrepõe `DELONIX_TOKEN`/ficheiro de login)
+      --json           Imprime a resposta em JSON em vez de tabela legível, onde aplicável
+  -h, --help           Print help</code></pre></div>
+<h3>Exemplos</h3><div class="ex"><div class="cap">Criar/actualizar</div><pre><code>delonixctl org set acme --owner eu@example.com --sso-domain example.com</code></pre></div>
+<h2 id='odoo'><code>delonixctl odoo</code></h2>
+<p>Único preset com grupo próprio (módulos, operações, ficheiros) — os outros usam só `app create --preset`.</p>
+<div class='help'><pre><code>Apps Odoo (`/v2/odoo*`) — superfície própria (módulos, ops, ficheiros). Os outros presets (nextcloud/onlyoffice/mattermost) usam `delonixctl app create --preset &lt;nome&gt;`, não têm grupo próprio
+
+Usage: delonixctl odoo [OPTIONS] &lt;COMMAND&gt;
+
+Commands:
+  images  Tags de imagem disponíveis (sugeridas + descobertas no Docker Hub)
+  ls      Lista as apps Odoo
+  create  Cria uma app Odoo
+  get     Detalhe de uma app (overview, módulos, backups)
+  ops     Operações odoo-bin: restart|upgrade-all|update-list
+  module  Módulos
+  backup  Dispara um backup (.dlxb)
+  files   Lista os ficheiros editáveis dos módulos
+  file    Ficheiros de módulos
+  help    Print this message or the help of the given subcommand(s)
+
+Options:
+      --api &lt;API&gt;      URL da API (ex.: https://host:9443). Também `DELONIX_API`
+      --insecure       Aceita certificados TLS self-signed (a API vem assim por omissão). Também `DELONIX_API_INSECURE=1`
+      --token &lt;TOKEN&gt;  Token Bearer explícito (sobrepõe `DELONIX_TOKEN`/ficheiro de login)
+      --json           Imprime a resposta em JSON em vez de tabela legível, onde aplicável
+  -h, --help           Print help</code></pre></div>
+<h3>Exemplos</h3><div class="ex"><div class="cap">Criar</div><pre><code>delonixctl odoo create a-minha-erp --version 17 --domain erp.example.com</code></pre></div><div class="ex"><div class="cap">Instalar um módulo</div><pre><code>delonixctl odoo module install a-minha-erp o_modulo --upgrade</code></pre></div>
+<h2 id='apply'><code>delonixctl apply / delete</code></h2>
+<p>Manifesto genérico (`/v2/apply`, `/v2/delete`, admin) — QUALQUER Kind, não só os com grupo dedicado.</p>
+<div class='help'><pre><code>Aplica um manifesto (`/v2/apply`, admin — pode criar/atualizar QUALQUER Kind)
+
+Usage: delonixctl apply [OPTIONS] --file &lt;FILE&gt;
+
+Options:
+      --api &lt;API&gt;      URL da API (ex.: https://host:9443). Também `DELONIX_API`
+  -f, --file &lt;FILE&gt;    Ficheiro YAML (`-` para stdin)
+      --insecure       Aceita certificados TLS self-signed (a API vem assim por omissão). Também `DELONIX_API_INSECURE=1`
+      --token &lt;TOKEN&gt;  Token Bearer explícito (sobrepõe `DELONIX_TOKEN`/ficheiro de login)
+      --json           Imprime a resposta em JSON em vez de tabela legível, onde aplicável
+  -h, --help           Print help</code></pre></div>
+<h3>Exemplos</h3><div class="ex"><div class="cap">Aplicar</div><pre><code>delonixctl apply -f app.yaml</code></pre></div><div class="ex"><div class="cap">De stdin</div><pre><code>delonixctl apply -f - &lt; app.yaml</code></pre></div>
+<h2 id='version'><code>delonixctl version</code></h2>
+<p>Client + Server version lado a lado (estilo `kubectl version`) — substitui o `--version`/`-V` do clap.</p>
+<div class='help'><pre><code>Versão do cliente E do servidor ligado (padrão `kubectl version`) — substitui o `--version`/`-V` gerado pelo clap
+
+Usage: delonixctl version [OPTIONS]
+
+Options:
+      --api &lt;API&gt;      URL da API (ex.: https://host:9443). Também `DELONIX_API`
+      --insecure       Aceita certificados TLS self-signed (a API vem assim por omissão). Também `DELONIX_API_INSECURE=1`
+      --token &lt;TOKEN&gt;  Token Bearer explícito (sobrepõe `DELONIX_TOKEN`/ficheiro de login)
+      --json           Imprime a resposta em JSON em vez de tabela legível, onde aplicável
+  -h, --help           Print help</code></pre></div>
+<h3>Exemplos</h3><div class="ex"><div class="cap">Contra uma plataforma viva</div><pre><code>delonixctl version</code></pre><div class="out"><pre><code>Cliente: delonixctl v0.9.74  (commit c8cd0e46c, compilado 2026-07-24)
+Servidor: delonix-engine v0.9.74  (API v2) — https://127.0.0.1:9443</code></pre></div></div>
+<footer>Delonix Engine · Apache-2.0 · <a href="https://github.com/angolardevops/delonix-runtime">angolardevops/delonix-runtime</a>
+· Referência gerada do <code>--help</code> real do binário por <code>docs/gen.py</code>.</footer>
+</main>
+</div>
+</body>
+</html>
