@@ -556,11 +556,34 @@ reinicia, idempotente-simples (mesmo compromisso já aceite no resto do `cluster
 em qualquer re-execução porque o HAProxy é um proxy L4 sem estado e a VM do LB já é idempotente
 por nome (auto-heal, como qualquer outra VM deste cluster).
 
-**Sem teste end-to-end real nesta sessão**: o `virt-customize` do build da imagem dourada está
-bloqueado neste sandbox (pacote `libguestfs-common` em falta, já documentado acima) — sem uma
-imagem local, `delonix cluster kubeadm` não tem o que provisionar. Validado até essa fronteira
-real: parsing de flags, `resolve_vm_image` (0/1/N imagens, com testes automatizados), geração de
-nomes determinísticos (`vm_names`), e o erro claro e correcto quando não há imagem nenhuma.
+**Validado ao vivo (host kaeso-sys-01, 2026-07-24)**: `cluster kubeadm --control-plane 2 --workers
+3` provisionou as 5 VMs + a `<nome>-lb` a correr HAProxy de ponta a ponta (`creating VM
+ngolacloudlab-lb...` → `configuring HAProxy (192.168.122.26)...` → scp da config OK) — confirma o
+caminho todo até ao ponto em que `apply_ssh` começa a preparar os hosts reais. Foi essa mesma
+corrida que revelou o gap do `delonix-cri` corrigido a seguir.
+
+#### `delonix-cri`/`delonix-cri.service` em falta fora de um checkout (v0.13.2)
+
+Bug report real (mesma corrida acima): depois do LB configurado, `apply_ssh` falhava logo a
+seguir com `não encontrei o binário delonix-cri: usa --cri-bin <caminho>, instala-o ao lado do
+delonix, ou corre a partir do checkout do código-fonte` — o utilizador tinha instalado via
+`install.sh` **sem** `--with-cri` (o default) e corria `cluster kubeadm` de fora de um checkout do
+código-fonte, os dois únicos casos que `resolve_cri_bin` sabia resolver antes desta versão.
+
+**Corrigido**, dois gaps da mesma família:
+
+- `resolve_cri_bin`: quando não encontra o binário localmente, descarrega-o (verificado contra o
+  `SHA256SUMS` da própria release, o mesmo não-negociável de qualquer download deste código) do
+  release do GitHub que bate com a versão do PRÓPRIO `delonix` a correr — os dois publicam-se
+  sempre juntos, na mesma tag. Cache em `<root>/bin/<versão>/delonix-cri`, um download por versão
+  instalada. Detecta a variante `-v3` (AVX2/BMI2/FMA) com o mesmo critério do `install.sh`.
+- `workspace_dist_file("delonix-cri.service")`: o unit systemd é estático e não depende de
+  versão — passou a vir embutido no binário (`include_str!`) e é escrito para a mesma pasta de
+  cache na primeira vez que falta, sem precisar de rede nenhuma.
+
+Validado ao vivo com um binário isolado (sem `delonix-cri` ao lado, fora de qualquer checkout,
+`DELONIX_ROOT` limpo) contra a v0.13.1 real publicada: descarrega, verifica, cacheia, e o
+`cluster apply`/`cluster kubeadm` avançam até à fase real de preparação SSH dos hosts.
 
 #### `--name` opcional + auto-pull de `--vm-image` em falta (v0.12.0)
 
