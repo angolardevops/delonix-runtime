@@ -939,11 +939,92 @@ pub(crate) fn resolve_cri_bin(explicit: Option<PathBuf>) -> Result<PathBuf> {
             return Ok(built);
         }
     }
-    Err(Error::Invalid(
-        "não encontrei o binário delonix-cri: usa --cri-bin <caminho>, instala-o ao lado do \
-         delonix, ou corre a partir do checkout do código-fonte"
-            .into(),
-    ))
+    // BUG FIXED HERE, found live: a user who installed via `install.sh`
+    // WITHOUT `--with-cri` (the default) and isn't running from a source
+    // checkout had no way forward — `cluster kubeadm` needs `delonix-cri` to
+    // install on every provisioned host, and none of the checks above ever
+    // find one. `delonix-cri` is published as its own release asset
+    // alongside `delonix` (same tag, always released together) — download it
+    // (verified against the release's own SHA256SUMS, same as `install.sh`
+    // would with `--with-cri`) instead of giving up.
+    download_cri_bin().map_err(|e| {
+        Error::Invalid(format!(
+            "{e} — or use --cri-bin <path> / run from a source checkout"
+        ))
+    })
+}
+
+/// `true` when the CPU has AVX2+BMI2+FMA — the same 3-feature check
+/// `install.sh` uses to pick the `-v3` release asset (Zen 2+/Haswell+).
+fn cpu_has_x86_64_v3() -> bool {
+    #[cfg(target_arch = "x86_64")]
+    {
+        is_x86_feature_detected!("avx2")
+            && is_x86_feature_detected!("bmi2")
+            && is_x86_feature_detected!("fma")
+    }
+    #[cfg(not(target_arch = "x86_64"))]
+    {
+        false
+    }
+}
+
+/// `<root>/bin/<running-version>/` — where a resolved-without-a-checkout
+/// `delonix-cri` (binary and/or service unit) is cached, namespaced by the
+/// RUNNING `delonix` binary's own version so an upgrade never serves a
+/// stale copy from a previous install.
+fn cri_cache_dir() -> PathBuf {
+    state_root().join("bin").join(env!("CARGO_PKG_VERSION"))
+}
+
+/// Downloads (and caches) `delonix-cri` from the GitHub release matching the
+/// RUNNING `delonix` binary's own version — the two are always released
+/// together, same tag. Verified against the release's own SHA256SUMS, same
+/// non-negotiable as every other download in this codebase (never installs
+/// an unverified binary). Cached under `<root>/bin/<version>/delonix-cri`,
+/// so this only ever downloads once per installed version.
+fn download_cri_bin() -> Result<PathBuf> {
+    let version = env!("CARGO_PKG_VERSION");
+    let cache_dir = cri_cache_dir();
+    let cached = cache_dir.join("delonix-cri");
+    if cached.exists() {
+        return Ok(cached);
+    }
+    std::fs::create_dir_all(&cache_dir)?;
+    let base_url =
+        format!("https://github.com/angolardevops/delonix-runtime/releases/download/v{version}");
+    let tmp = cache_dir.join("delonix-cri.download");
+    let variant = if cpu_has_x86_64_v3() { "-v3" } else { "" };
+    let mut asset = format!("delonix-cri-x86_64{variant}-linux");
+    eprintln!("a descarregar {asset} (v{version})...");
+    if !variant.is_empty() && stream_download(&format!("{base_url}/{asset}"), &tmp).is_err() {
+        asset = "delonix-cri-x86_64-linux".to_string();
+        eprintln!("{asset} em falta nesta release — a tentar o binário genérico...");
+        stream_download(&format!("{base_url}/{asset}"), &tmp)?;
+    } else if variant.is_empty() {
+        stream_download(&format!("{base_url}/{asset}"), &tmp)?;
+    }
+    let sums = http_get_text(&format!("{base_url}/SHA256SUMS"))?;
+    let expected = sums
+        .lines()
+        .find(|l| l.trim_end().ends_with(&asset))
+        .and_then(|l| l.split_whitespace().next())
+        .ok_or_else(|| Error::Invalid(format!("SHA256SUMS has no entry for {asset}")))?
+        .to_string();
+    let got = hex_sha256_file(&tmp)?;
+    if got != expected {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(Error::Invalid(format!(
+            "checksum inválido para {asset}: esperado {expected}, obtido {got} — download descartado"
+        )));
+    }
+    std::fs::rename(&tmp, &cached)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&cached, std::fs::Permissions::from_mode(0o755))?;
+    }
+    Ok(cached)
 }
 
 fn find_workspace_root() -> Option<PathBuf> {
@@ -958,12 +1039,29 @@ fn find_workspace_root() -> Option<PathBuf> {
     }
 }
 
+/// Embedded fallback for `dist/delonix-cri.service` — the ONLY file
+/// `workspace_dist_file` is ever asked for. It is small, static, and
+/// version-independent (no templating), so there is no staleness risk in
+/// baking it into the binary at compile time — same fix class as
+/// `download_cri_bin` above (a user outside a source checkout had no way
+/// forward for this file either), just without needing a network round-trip
+/// since the content already ships inside us.
+const DELONIX_CRI_SERVICE_UNIT: &str = include_str!("../../../../dist/delonix-cri.service");
+
 pub(crate) fn workspace_dist_file(name: &str) -> Result<PathBuf> {
     if let Some(root) = find_workspace_root() {
         let p = root.join("dist").join(name);
         if p.exists() {
             return Ok(p);
         }
+    }
+    if name == "delonix-cri.service" {
+        let cached = cri_cache_dir().join(name);
+        if !cached.exists() {
+            std::fs::create_dir_all(cri_cache_dir())?;
+            std::fs::write(&cached, DELONIX_CRI_SERVICE_UNIT)?;
+        }
+        return Ok(cached);
     }
     Err(Error::Invalid(format!(
         "não encontrei dist/{name} — corre a partir do checkout do código-fonte ou fornece via --extra-run"
