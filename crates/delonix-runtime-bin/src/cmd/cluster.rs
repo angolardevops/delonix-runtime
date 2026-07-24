@@ -428,8 +428,12 @@ pub enum ClusterCmd {
     /// Provision VMs (golden VM image) + `kubeadm` bootstrap — from zero to
     /// a working cluster, without writing a manifest by hand.
     Kubeadm {
+        /// Cluster name (used for `<name>-cp1`/`<name>-w1` VM names and the
+        /// kubeconfig context). Omit for an auto-generated Angolan name
+        /// (`<king>-<place>-NN`) — same pattern as auto-named containers and
+        /// `cluster create` (kind mode).
         #[arg(long)]
-        name: String,
+        name: Option<String>,
         #[arg(long, default_value_t = 1)]
         control_plane: u32,
         #[arg(long, default_value_t = 2)]
@@ -553,21 +557,27 @@ pub fn run(action: ClusterCmd) -> Result<()> {
             service_subnet,
             boot_timeout,
             copy_kubeconfig,
-        } => provision_and_apply(ProvisionArgs {
-            name,
-            control_plane,
-            workers,
-            vm_image,
-            network,
-            ssh_key,
-            vcpus,
-            memory,
-            k8s_version,
-            pod_subnet,
-            service_subnet,
-            boot_timeout,
-            copy_kubeconfig,
-        }),
+        } => {
+            let name = match name {
+                Some(n) => n,
+                None => random_kubeadm_cluster_name(&state_root())?,
+            };
+            provision_and_apply(ProvisionArgs {
+                name,
+                control_plane,
+                workers,
+                vm_image,
+                network,
+                ssh_key,
+                vcpus,
+                memory,
+                k8s_version,
+                pod_subnet,
+                service_subnet,
+                boot_timeout,
+                copy_kubeconfig,
+            })
+        }
     }
 }
 
@@ -789,25 +799,73 @@ fn vm_names(cluster_name: &str, role: &str, count: u32) -> Vec<String> {
         .collect()
 }
 
+/// The OCI reference to `vm pull` for a resolved `image_tag` that has no
+/// local qcow2: if `image_tag` already looks like a full reference (has a
+/// `/`, e.g. a non-official registry/repo), used as-is; otherwise it is a
+/// bare tag or the `delonix-vm-k8s:<v>` local-name convention (from
+/// `--k8s-version`) — either way, resolved against the OFFICIAL golden image
+/// repo (`vmimage::OFFICIAL_VM_IMAGE`'s repo, same default `vm pull` uses),
+/// taking only the tag portion so we never double up a `repo:` prefix.
+fn official_pull_source(image_tag: &str) -> String {
+    if image_tag.contains('/') {
+        return image_tag.to_string();
+    }
+    let official_repo = vmimage::OFFICIAL_VM_IMAGE
+        .rsplit_once(':')
+        .map(|(repo, _tag)| repo)
+        .unwrap_or(vmimage::OFFICIAL_VM_IMAGE);
+    let tag = image_tag.rsplit(':').next().unwrap_or(image_tag);
+    format!("{official_repo}:{tag}")
+}
+
+/// Random Angolan-style name for a NEW kubeadm cluster with no `--name` —
+/// same pattern as auto-named containers and `cluster create` (kind mode,
+/// `kindmode::random_cluster_name`). A kubeadm cluster has no registry entry
+/// of its own — it IS its VMs (`<name>-cp1`/`<name>-w1`, see `vm_names`) — so
+/// a candidate collides if any EXISTING VM name already starts with
+/// `<candidate>-`.
+fn random_kubeadm_cluster_name(base: &std::path::Path) -> Result<String> {
+    let existing = delonix_vm::list(base)?;
+    super::names::random_name(|n| {
+        let prefix = format!("{n}-");
+        existing.iter().any(|vm| vm.name.starts_with(&prefix))
+    })
+    .ok_or_else(|| Error::Invalid("não consegui inventar um nome livre — passa `--name`".into()))
+}
+
 /// Resolves the tag of the golden VM image to use, in order: the explicit
-/// `--vm-image`; else, if `--k8s-version <v>` was given, the image named
-/// after the official convention (`delonix-vm-k8s:<v>` — what both `vm pull`
-/// and the `vm-image.yml` publish workflow produce), if present locally;
-/// else the only local image that exists (clear error if there are 0 or
-/// more than 1 — never picks blindly among several).
+/// `--vm-image` (if it isn't a local image's exact name, but the
+/// `delonix-vm-k8s:<v>` convention IS — e.g. `--vm-image 1.34` where `vm
+/// pull` actually saved it as `delonix-vm-k8s:1.34` — the convention wins,
+/// so an already-pulled image is never treated as missing over a naming
+/// mismatch); else, if `--k8s-version <v>` was given, the same convention
+/// name if present locally; else the only local image that exists (clear
+/// error if there are 0 or more than 1 — never picks blindly among
+/// several). A name (explicit or `--k8s-version`) that matches NEITHER form
+/// locally is still returned as given — `provision_and_apply` pulls it from
+/// the official registry (see `official_pull_source`) rather than failing
+/// outright, since the golden image is a published OCI artifact precisely
+/// so it does not need to be pre-pulled by hand.
 ///
-/// The `--k8s-version` path is name-based, not a metadata scan: a `vm pull`ed
-/// image has `k8s_version: null` in its own record (the OCI artifact only
-/// carries the qcow2 blob, not the build metadata — a known gap, see
-/// CLAUDE.md), so matching by the image's OWN naming convention is the one
-/// reliable signal for the common case of several k8s versions pulled
-/// side by side.
+/// The `--k8s-version`/convention matching is name-based, not a metadata
+/// scan: a `vm pull`ed image has `k8s_version: null` in its own record (the
+/// OCI artifact only carries the qcow2 blob, not the build metadata — a
+/// known gap, see CLAUDE.md), so matching by the image's OWN naming
+/// convention is the one reliable signal for the common case of several k8s
+/// versions pulled side by side.
 pub(crate) fn resolve_vm_image(
     store: &VmImageStore,
     explicit: Option<String>,
     k8s_version: Option<&str>,
 ) -> Result<String> {
     if let Some(tag) = explicit {
+        let images = store.list()?;
+        if !images.iter().any(|img| img.name == tag) {
+            let wanted = format!("delonix-vm-k8s:{tag}");
+            if images.iter().any(|img| img.name == wanted) {
+                return Ok(wanted);
+            }
+        }
         return Ok(tag);
     }
     let mut images = store.list()?;
@@ -962,10 +1020,18 @@ fn provision_and_apply(args: ProvisionArgs) -> Result<()> {
     )?;
     let disk = vm_store.qcow2_path(&image_tag);
     if !disk.exists() {
-        return Err(Error::Invalid(format!(
-            "imagem VM '{image_tag}' não tem qcow2 em disco ({})",
-            disk.display()
-        )));
+        // BUG FIXED HERE, found live: `resolve_vm_image` happily returns an
+        // explicit `--vm-image`/`--k8s-version`-derived tag that has no local
+        // qcow2 — this used to be a dead end ("não tem qcow2 em disco"), even
+        // though the whole point of the golden image being a published OCI
+        // artifact (`ghcr.io/angolardevops/delonix-vm-k8s`, see `vmimage.rs`)
+        // is that it does not need to be pre-pulled by hand. Download it now,
+        // same as `vm pull`/`image vm pull` would, under the SAME local name
+        // `resolve_vm_image` already decided on (so this exact lookup succeeds
+        // right after).
+        let source = official_pull_source(&image_tag);
+        println!("imagem VM '{image_tag}' não está local — a descarregar de '{source}'...");
+        vmimage::cmd_pull(&vm_store, &source, Some(image_tag.clone()))?;
     }
 
     let (ssh_key_path, ssh_public) = generate_or_load_ssh_key(&args.name, args.ssh_key.clone())?;
@@ -1499,6 +1565,31 @@ mod tests {
         assert_eq!(vm_names("prod", "cp", 0), Vec::<String>::new());
     }
 
+    #[test]
+    fn official_pull_source_resolve_bare_versions_against_the_official_repo() {
+        // The bug this fixes: `--vm-image 1.35`/`--k8s-version 1.35` (no
+        // local qcow2) used to be a dead end — never attempted a pull.
+        assert_eq!(
+            official_pull_source("1.35"),
+            "ghcr.io/angolardevops/delonix-vm-k8s:1.35"
+        );
+        // `resolve_vm_image`'s own `--k8s-version` convention
+        // (`delonix-vm-k8s:<v>`) must resolve to the SAME source, not double
+        // up the repo prefix.
+        assert_eq!(
+            official_pull_source("delonix-vm-k8s:1.35"),
+            "ghcr.io/angolardevops/delonix-vm-k8s:1.35"
+        );
+    }
+
+    #[test]
+    fn official_pull_source_leaves_full_references_untouched() {
+        assert_eq!(
+            official_pull_source("ghcr.io/someoneelse/other-image:2.0"),
+            "ghcr.io/someoneelse/other-image:2.0"
+        );
+    }
+
     fn fake_admin_conf() -> String {
         // Shape of a real kubeadm admin.conf: always the SAME fixed names
         // (`kubernetes`/`kubernetes-admin`/`kubernetes-admin@kubernetes`),
@@ -1676,6 +1767,59 @@ users:
         assert_eq!(
             resolve_vm_image(&store, Some("minha-tag".to_string()), None).unwrap(),
             "minha-tag"
+        );
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn resolve_vm_image_explicita_prefere_a_convencao_local_ja_puxada() {
+        // Bug found live: `delonix vm pull` (no --name) saves under the
+        // convention name `delonix-vm-k8s:1.34`, but a user naturally types
+        // `--vm-image 1.34` — the short form. Before this fix that returned
+        // "1.34" verbatim, `qcow2_path("1.34")` never matched the real file,
+        // and the CLI reported the already-pulled image as missing.
+        let tmp = std::env::temp_dir().join(format!(
+            "delonix-cluster-resolve-image-explicit-convention-{}",
+            std::process::id()
+        ));
+        let store = VmImageStore::open(&tmp).unwrap();
+        store
+            .save(&vmimage::VmImage {
+                name: "delonix-vm-k8s:1.34".to_string(),
+                tag: "delonix-vm-k8s:1.34".to_string(),
+                digest: "sha256:abc".to_string(),
+                size: 1,
+                ubuntu_release: None,
+                k8s_version: None,
+                created_unix: 0,
+                kernel_version: None,
+            })
+            .unwrap();
+        assert_eq!(
+            resolve_vm_image(&store, Some("1.34".to_string()), None).unwrap(),
+            "delonix-vm-k8s:1.34"
+        );
+        // No local match under either form: returned as-is (the caller pulls it).
+        assert_eq!(
+            resolve_vm_image(&store, Some("1.99".to_string()), None).unwrap(),
+            "1.99"
+        );
+        // An EXACT local match wins over the convention-name guess.
+        store
+            .save(&vmimage::VmImage {
+                name: "custom-name".to_string(),
+                tag: "custom-name".to_string(),
+                digest: "sha256:def".to_string(),
+                size: 1,
+                ubuntu_release: None,
+                k8s_version: None,
+                created_unix: 0,
+                kernel_version: None,
+            })
+            .unwrap();
+        assert_eq!(
+            resolve_vm_image(&store, Some("custom-name".to_string()), None).unwrap(),
+            "custom-name"
         );
         let _ = std::fs::remove_dir_all(&tmp);
     }

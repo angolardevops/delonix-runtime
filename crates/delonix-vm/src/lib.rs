@@ -1801,6 +1801,62 @@ pub fn stop(base: &Path, name: &str) -> Result<()> {
     st.save(name, &vm)
 }
 
+/// Reconstructs the subset of [`VmConfig`] reliably recoverable from a
+/// persisted [`Vm`] record, for [`start`]/[`restart`]. `Vm` does NOT persist
+/// everything `VmConfig` needs to boot — only what survives past the initial
+/// `create`: base disk, vcpus, memory, network, restart policy, passthrough
+/// devices, and (libvirt only) the net mode, smuggled into `Vm.tap` at boot
+/// (see the `LibvirtBackend::boot` `tap: cfg.net_mode…` assignment). Fields
+/// that only ever existed as `vm create` flags — custom kernel/initrd,
+/// cloud-init seed, 9p volumes, static IP, VNC, and the advanced libvirt
+/// knobs (machine/CPU model/topology/TPM/video/boot order/extra disks or
+/// NICs/raw XML) — are lost once `create` returns, so they are NOT restored.
+fn config_from(vm: &Vm) -> VmConfig {
+    VmConfig {
+        name: vm.name.clone(),
+        disk: vm.disk.clone(),
+        vcpus: vm.vcpus,
+        memory: vm.memory.clone(),
+        network: vm.network.clone(),
+        restart_policy: vm.restart_policy.clone(),
+        devices: vm.devices.clone(),
+        backend: Some(vm.backend.clone()),
+        net_mode: (vm.backend == "libvirt").then(|| vm.tap.clone()),
+        ..Default::default()
+    }
+}
+
+/// Starts an existing, stopped VM — idempotent (already running = no-op,
+/// same as `create`'s auto-heal, which this delegates to). Reboots reusing
+/// the SAME per-VM overlay (disk state preserved) with the base
+/// disk/vcpus/memory/network/backend recorded at its last `create`/`start`.
+/// See [`config_from`] for what is NOT restored (anything only ever passed
+/// as a `vm create` flag) — a VM using those needs the original `vm create`
+/// invocation (itself idempotent), not `start`.
+pub fn start(base: &Path, name: &str) -> Result<Vm> {
+    let st = store(base)?;
+    let vm = st.load(name).map_err(|e| match e {
+        Error::NotFound(n) => Error::VmNotFound(n),
+        e => e,
+    })?;
+    create(base, &config_from(&vm))
+}
+
+/// Stops (if running) then starts — always a real reboot, unlike `start`
+/// (which no-ops when already running). Same recovered-fields caveat as
+/// `start`/[`config_from`].
+pub fn restart(base: &Path, name: &str) -> Result<Vm> {
+    let st = store(base)?;
+    let vm = st.load(name).map_err(|e| match e {
+        Error::NotFound(n) => Error::VmNotFound(n),
+        e => e,
+    })?;
+    if backend_for(&vm).is_running(&vm) {
+        stop(base, name)?;
+    }
+    create(base, &config_from(&vm))
+}
+
 /// Current state of a VM, with `status`/`ip` reconciled by its backend.
 pub fn status(base: &Path, name: &str) -> Result<Vm> {
     let st = store(base)?;
@@ -2257,5 +2313,64 @@ mod tests {
         c.libvirt_xml = Some("<domain type='kvm'><name>custom</name></domain>\n".into());
         let xml = libvirt_domain_xml(&c, "/o.qcow2", "52:54:00:aa:bb:cc");
         assert_eq!(xml, "<domain type='kvm'><name>custom</name></domain>\n");
+    }
+
+    #[test]
+    fn config_from_recovers_libvirt_net_mode_from_the_tap_field() {
+        // For libvirt, `Vm.tap` is not a real host tap — `LibvirtBackend::boot`
+        // stores the net mode string there (`cfg.net_mode.unwrap_or("user")`,
+        // see the assignment above). `config_from`/`start`/`restart` depend on
+        // being able to read it back out the same way.
+        let mut vm = Vm::new(
+            "dev".into(),
+            "/base.qcow2".into(),
+            "/overlay.qcow2".into(),
+            2,
+            "2G".into(),
+            "ingress".into(),
+            "nat".into(),
+            "52:54:00:aa:bb:cc".into(),
+            String::new(),
+        );
+        vm.backend = "libvirt".into();
+        vm.restart_policy = Some("on-failure".into());
+        vm.devices = vec!["/sys/bus/pci/devices/0000:65:00.1".into()];
+
+        let cfg = config_from(&vm);
+        assert_eq!(cfg.name, "dev");
+        assert_eq!(cfg.disk, "/base.qcow2");
+        assert_eq!(cfg.vcpus, 2);
+        assert_eq!(cfg.memory, "2G");
+        assert_eq!(cfg.network, "ingress");
+        assert_eq!(cfg.backend.as_deref(), Some("libvirt"));
+        assert_eq!(cfg.net_mode.as_deref(), Some("nat"));
+        assert_eq!(cfg.restart_policy.as_deref(), Some("on-failure"));
+        assert_eq!(cfg.devices, vec!["/sys/bus/pci/devices/0000:65:00.1"]);
+        // Never recovered — only ever existed as `vm create` flags.
+        assert!(cfg.kernel.is_none());
+        assert!(cfg.seed.is_none());
+        assert!(cfg.static_ip.is_none());
+    }
+
+    #[test]
+    fn config_from_leaves_net_mode_none_for_cloud_hypervisor() {
+        // Cloud Hypervisor's `Vm.tap` IS a real host tap device name — must
+        // NOT be misread as a libvirt net mode.
+        let mut vm = Vm::new(
+            "ch1".into(),
+            "/base.qcow2".into(),
+            "/overlay.qcow2".into(),
+            1,
+            "1G".into(),
+            "ingress".into(),
+            "tap-ch1".into(),
+            "52:54:00:11:22:33".into(),
+            "/run/ch1.sock".into(),
+        );
+        vm.backend = "cloud-hypervisor".into();
+
+        let cfg = config_from(&vm);
+        assert_eq!(cfg.backend.as_deref(), Some("cloud-hypervisor"));
+        assert!(cfg.net_mode.is_none());
     }
 }

@@ -1935,6 +1935,12 @@ msgstr "Detalhe legível de uma ou mais VMs, ao estilo `kubectl describe` (para 
 msgid "Stop the VM (preserves disk/record)."
 msgstr "Pára a VM (preserva disco/registo)."
 
+msgid "Start an existing, stopped VM — idempotent (already running = no-op). Reboots with the base disk/vcpus/memory/network/backend recorded at its last `create`/`start`, reusing the same overlay (disk state preserved). Does NOT restore anything that only ever existed as a `vm create` flag (custom kernel/seed/volumes/static IP/VNC/advanced libvirt knobs) — a VM using those needs the original `vm create` invocation instead (also idempotent/auto-heal)"
+msgstr "Arranca uma VM existente e parada — idempotente (já a correr = sem efeito). Reinicia com o disco base/vcpus/memória/rede/backend gravados no último `create`/`start`, reaproveitando o mesmo overlay (o estado do disco preserva-se). NÃO restaura o que só alguma vez existiu como flag do `vm create` (kernel/seed/volumes/IP estático/VNC/opções avançadas do libvirt) — uma VM que precise disso precisa do `vm create` original (também idempotente/auto-recuperação)"
+
+msgid "Stop (if running) then start — always a real reboot, unlike `start`. Same recovered-fields limits as `start`"
+msgstr "Pára (se a correr) e depois arranca — reinício real sempre, ao contrário do `start`. Mesmos limites de campos recuperados que o `start`"
+
 msgid "Remove the VM (stops + deletes overlay/state)."
 msgstr "Remove a VM (pára + apaga overlay/estado)."
 
