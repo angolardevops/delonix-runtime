@@ -405,6 +405,28 @@ nó não faz nenhuma instalação**, só `kubeadm init`/`kubeadm join`.
     as 2 de rede + estas, para o `cluster apply` (hosts vivos) continuar a ver o catálogo todo.
   - Equivalência com o online **provada**: mesmos pacotes e mesmo estado de hold —
     `kubeadm`/`kubectl`/`kubelet` `hi` 1.34.9-1.1, `kubernetes-cni` `ii` 1.7.1-1.1.
+- **Pré-semear as imagens do `kubeadm` (v0.15.0)** — bug report real (host kaeso-sys-01): um
+  `kubeadm init` REAL redescarregava sempre TODAS as imagens core (apiserver/controller-manager/
+  scheduler/etcd/coredns/pause) do zero, em CADA VM criada — lento o suficiente para estourar o
+  próprio deadline interno do rate-limiter do kubeadm e fazer o `wait-control-plane` falhar a
+  meio. **Causa-raiz de fundo**: `delonix_image::registry::pull_from_registry_with_creds`
+  descarregava sempre cada blob da rede, mesmo quando o conteúdo exacto já estava no CAS local —
+  **corrigido** com um `Cas::has` (já existia, nunca era chamado) antes de cada `GET` de blob;
+  sem isto, pré-semear a imagem dourada não adiantava nada (o `delonix-cri` ia redescarregar tudo
+  na mesma). Com o fix, `--offline build` passou a: extrair o `kubeadm` do `.deb` já
+  descarregado/verificado no HOST (`dpkg-deb -x`, sem instalar), correr `kubeadm config images
+  list --kubernetes-version=vX.Y.Z` (sem rede — é uma tabela interna estática do binário; provado
+  ao vivo), descarregar cada imagem no HOST através do MESMO `pull_from_registry_with_creds` para
+  um `ImageStore` de trabalho, e injectar as suas 4 subpastas (`images`/`layers`/`containers`/
+  `blobs`) em `/var/lib/delonix` do convidado via `virt-customize --copy-in` — o mesmo caminho que
+  `delonix-cri` já lê em runtime. Melhor esforço em toda a cadeia: uma falha (imagem em falta,
+  `dpkg-deb` ausente, etc.) só avisa e segue sem imagens pré-semeadas, nunca chumba o build
+  inteiro — um arranque mais lento é sempre melhor que um build partido. **Só no modo
+  `--offline`** (o caminho online já corre `apt-get`/pull dentro do convidado, sem o mesmo
+  encaixe host-primeiro). Validado ao vivo: `kubeadm config images list` a partir de um `kubeadm`
+  extraído (sem instalar) devolveu as 7 imagens reais da v1.34; um `pull_from_registry_with_creds`
+  real contra `registry.k8s.io/pause:3.10.1` confirmou o layout do `ImageStore` resultante
+  (`images/layers/containers/blobs`) bate exactamente com o que o `--copy-in` espera.
 - **`push`/`pull`**: publicam/obtêm a imagem como artefacto OCI de blob único (config vazio + 1
   layer, padrão ORAS/Helm) via `delonix_image::registry::{push_oci_artifact,pull_oci_artifact}`
   (`crates/delonix-image/src/registry.rs`) — generaliza o `Client`/auth/upload já usado por
@@ -1230,6 +1252,64 @@ errado.
 
 Ver [docs/RELATORIO-PRE-PRODUCAO.md](docs/RELATORIO-PRE-PRODUCAO.md) para a bateria E2E completa
 (139 PASS / 1 FAIL) e a lista de gaps.
+
+## Visão de produto: Universal Runtime (Workload Abstraction Layer)
+
+**Norte do projeto**: o Delonix Runtime não deve evoluir como "mais um motor de VMs" nem como
+três CLIs desligadas (`container`/`vm`/`image`). O objectivo é um **Runtime Abstraction Layer**:
+uma única API declarativa (`kind: Workload`, `spec.type: container|vm|microvm`) que despacha para
+o motor certo, com os backends de computação plugáveis — não hardcoded. Isto é uma direcção, não
+uma reescrita: implementa-se por cima do que já existe, não a substituir.
+
+### O que já existe e serve de base (não inventar do zero)
+
+- **`VmBackend`** (`crates/delonix-vm/src/lib.rs:438`) já É o padrão `ComputeDriver` pedido —
+  `id()`/`available()`/`boot()` por trás de `CloudHypervisorBackend`/`LibvirtBackend`. Adicionar um
+  backend novo (Firecracker, KVM nativo mais fino) é implementar este trait, não desenhar um novo.
+- **`delonix-cri`** já dá a perna de "Container Runtime" da unificação (serve `kubelet` via
+  `runtime.v1`) — não precisa de um `ContainerController` novo, só de ligação ao mesmo `Workload`.
+- **`delonix-net`** (SDN rootless + overlay WireGuard entre nós) já cobre boa parte do "Network
+  Engine" do pedido original — falta é NAT/floating-IP/ACL por *tenant*, que é uma noção proibida
+  aqui (ver "Regra de ouro" abaixo).
+- **`delonix-image`** (pull/registry/CNB/verificação de assinatura) já é o Image Service.
+- Cloud-init já existe para VM dourada (secção "Imagem VM dourada" acima) — não é greenfield.
+- **Não existe hoje**: modelo `Workload` unificado, plugin system formal para drivers, scheduler
+  multi-nó, event bus, `delonixd`. Destes, só os dois primeiros pertencem a este repo — ver abaixo.
+
+### Fronteira com o Portal/Control Plane (aplica a "Regra de ouro" a este pedido)
+
+O texto original desenha Portal, IAM, billing, quotas, inventário multi-cluster Proxmox e
+scheduler multi-tenant por cima do runtime. **Nada disso pertence a este repo** — é
+`delonix-paas`/Control Plane, pela mesma regra que já proíbe noção de tenant/billing aqui. Um
+driver Proxmox *multi-cluster* (inventário, mapeamento tenant↔recursos, scheduler entre clusters)
+é trabalho do `delonix-paas`, do mesmo modo que o CRI serve o `kubelet` sem saber quem é o kubelet.
+O que pode fazer sentido *aqui* é, no máximo, um `ProxmoxBackend: VmBackend` de baixo nível (um nó,
+sem noção de tenant) — não o "Proxmox Driver" com inventário/scheduler do texto original.
+
+### Roadmap faseado
+
+1. **Fase 1 — Unificar o modelo** (curto prazo, aditivo): introduzir `kind: Workload` como camada
+   fina sobre os caminhos `container`/`vm` já existentes (`spec.type` decide para onde despacha).
+   Zero backend novo nesta fase — só o objecto declarativo e o dispatcher.
+2. **Fase 2 — Formalizar o plugin system**: extrair de `VmBackend` um trait geral reutilizável
+   por `delonix-runtime-core`, de forma a que o motor de containers também o possa implementar no
+   futuro. Backends novos (Firecracker, `ProxmoxBackend` de nó único) entram aqui, um de cada vez,
+   cada um com o seu spike GO/NO-GO (mesmo padrão já usado nesta doc para `--privileged`/kind).
+3. **Fase 3 — Decisão de filosofia sobre daemon**: `delonixd` só entra em cima da mesa se um event
+   bus/observabilidade contínua provar necessidade real — **não é um default**, é uma mudança de
+   filosofia (o produto é daemonless por desenho) que precisa da sua própria sessão de planeamento,
+   tal como já está registado em "Próximas fases" abaixo.
+
+### Decisões arquitecturais a fechar antes de código
+
+- Shape exacto do YAML `kind: Workload`/`apiVersion: runtime.delonix.io/v1` — precisa de um design
+  doc próprio (nomes de campos, versionamento) antes de tocar em `cmd/`.
+- Onde vive o trait geral extraído do `VmBackend`: `delonix-runtime-core` (partilhado por
+  containers e VMs) é o candidato óbvio — confirmar que não cria dependência circular.
+- Scheduler multi-nó fica **fora** deste repo por desenho (é um runtime de nó, não um orquestrador
+  de frota) — não abrir issue aqui para isso; é `delonix-paas`/orchestrator.
+- Event bus: só decidir o transporte (in-process callback vs. daemon) depois da Fase 3 acima, não
+  antes — evita desenhar para um daemon que pode nunca ser aprovado.
 
 ## Próximas fases (pedidas, não implementadas — cada uma precisa da sua própria sessão de planeamento)
 
