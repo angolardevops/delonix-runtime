@@ -537,10 +537,24 @@ carrega uma chave SSH** (`--ssh-key`, ou `ssh-keygen -t ed25519` não-interactiv
 conta que a imagem dourada já cria) → `validate()` + `apply_one()` (mesmas defesas da auditoria
 de segurança, herdadas automaticamente).
 
-**Limitação conhecida**: só suporta **1 control-plane** por agora — com `--control-plane > 1`
-recusa com erro claro, porque kubeadm HA exige um endpoint estável (LB/VIP) à frente dos
-control-planes, e este comando ainda não provisiona um automaticamente. Para HA hoje, usa
-`delonix cluster apply` com um `controlPlaneEndpoint` externo já preparado.
+#### HA multi-control-plane: HAProxy automático (v0.13.0)
+
+Com `--control-plane > 1`, provisiona automaticamente uma VM extra (`<nome>-lb`) a correr
+**HAProxy** como load balancer TCP (L4, passthrough — a TLS do apiserver termina sempre no
+control-plane real, nunca no LB) à frente da porta 6443 de cada control-plane, e usa o IP dessa
+VM como `controlPlaneEndpoint` do `kubeadm init`/`join` — um único comando produz um cluster HA a
+funcionar, sem flag nova (dispara sozinho a partir de `--control-plane > 1`). `delonix cluster
+apply` continua a aceitar um `controlPlaneEndpoint` externo/manual para quem já tem o seu próprio LB.
+
+Nada mudou a jusante: `kubeadm_init`/`kubeadm_join` já suportavam multi-control-plane
+(`--control-plane-endpoint`/`--upload-certs`/`--certificate-key`) desde a v1 original — a única
+lacuna era nunca termos nenhum endpoint real a apontar-lhes. Novo módulo `cmd/lb.rs`:
+`build_haproxy_cfg` (função pura, testada) gera o `haproxy.cfg`; `ensure_haproxy` instala o
+haproxy via apt se preciso, escreve a config (mesmo idioma de `prepare_host` para o
+`delonix-cri`: tmpfile local → scp → `mv` privilegiado) e reinicia o serviço — sempre reescreve +
+reinicia, idempotente-simples (mesmo compromisso já aceite no resto do `cluster apply`), seguro
+em qualquer re-execução porque o HAProxy é um proxy L4 sem estado e a VM do LB já é idempotente
+por nome (auto-heal, como qualquer outra VM deste cluster).
 
 **Sem teste end-to-end real nesta sessão**: o `virt-customize` do build da imagem dourada está
 bloqueado neste sandbox (pacote `libguestfs-common` em falta, já documentado acima) — sem uma
@@ -1169,12 +1183,13 @@ Ver [docs/RELATORIO-PRE-PRODUCAO.md](docs/RELATORIO-PRE-PRODUCAO.md) para a bate
   local via `kind` (shell-out à ferramenta já instalada no host). **Bloqueado** pelo NO-GO do
   spike acima — o `kindest/node` não arranca sob o nosso `--privileged` hoje; ver secção "Cluster
   modo Kind sem Docker — investigação". Precisa de instrumentação de arranque antes de continuar.
-- **`etcd: external`** em `delonix cluster apply` — cluster etcd dedicado (TLS entre membros,
-  discovery) em vez do `stacked` já suportado.
+- **`etcd: external`** em `delonix cluster apply` + `--etcd-cluster <N>` em `delonix cluster
+  kubeadm` — cluster etcd dedicado (TLS entre membros, discovery) isolado dos control-planes, em
+  vez do `stacked` já suportado. Desenho já esboçado (PKI própria via `rcgen` — CA+certos, sem
+  precedente no código, que hoje só gera um leaf self-signed para o `httproute`; `kubeadm init`
+  muda de flags simples para `--config` YAML, obrigatório para etcd externo) — maior risco que o
+  LB automático acima, fica para uma sessão de planeamento própria.
 - **Paralelizar a preparação de host** em `cluster apply` (hoje sequencial, deliberado nesta v1).
-- **HA multi-control-plane em `delonix cluster kubeadm`** — hoje só provisiona 1 control-plane;
-  para vários precisa de provisionar/gerir um endpoint estável (LB/VIP) automaticamente, o que
-  ainda não existe. `delonix cluster apply` já suporta HA se o endpoint for externo/manual.
 - **`delonixd`** (daemon opcional em userspace) + **dataplane de ingress/egress próprio** (evitar
   um veth por container — hoje `infra::do_attach` cria sempre 1 veth-par por container,
   confirmado) + **firewall dinâmico** para publish de portas + **eBPF** para observabilidade +
