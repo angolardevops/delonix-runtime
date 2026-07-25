@@ -36,10 +36,14 @@ on:
         options:
           - ubuntu
           - debian
+          - rocky
         default: ubuntu
       debian_release:
         description: "Codinome Debian (usado quando distro=debian, builds --no-k8s)"
         default: "bookworm"
+      rocky_release:
+        description: "Versão major do Rocky (usado quando distro=rocky, builds --no-k8s)"
+        default: "9"
 
 permissions:
   contents: read
@@ -68,6 +72,9 @@ jobs:
             if [ "${{ inputs.distro }}" = "debian" ]; then
               echo "tag=delonix-vm-base:debian-${{ inputs.debian_release }}" >> "$GITHUB_OUTPUT"
               echo "dest_tag=debian-${{ inputs.debian_release }}" >> "$GITHUB_OUTPUT"
+            elif [ "${{ inputs.distro }}" = "rocky" ]; then
+              echo "tag=delonix-vm-base:rocky-${{ inputs.rocky_release }}" >> "$GITHUB_OUTPUT"
+              echo "dest_tag=rocky-${{ inputs.rocky_release }}" >> "$GITHUB_OUTPUT"
             else
               echo "tag=delonix-vm-base:ubuntu-${{ inputs.ubuntu_release }}" >> "$GITHUB_OUTPUT"
               echo "dest_tag=ubuntu-${{ inputs.ubuntu_release }}" >> "$GITHUB_OUTPUT"
@@ -100,6 +107,13 @@ jobs:
               --tag "${{ steps.vars.outputs.tag }}" \
               --distro debian \
               --debian-release "${{ inputs.debian_release }}" \
+              --delonix-bin ./target/release/delonix \
+              --no-k8s
+          elif [ "${{ inputs.distro }}" = "rocky" ]; then
+            ./target/release/delonix image --vm build \
+              --tag "${{ steps.vars.outputs.tag }}" \
+              --distro rocky \
+              --rocky-release "${{ inputs.rocky_release }}" \
               --delonix-bin ./target/release/delonix \
               --no-k8s
           else

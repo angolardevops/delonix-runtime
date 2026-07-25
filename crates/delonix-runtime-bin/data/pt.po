@@ -360,6 +360,9 @@ msgstr "SHA256SUMS não tem entrada para"
 msgid "SHA512SUMS has no entry for"
 msgstr "SHA512SUMS não tem entrada para"
 
+msgid "CHECKSUM has no entry for"
+msgstr "CHECKSUM não tem entrada para"
+
 msgid "preparing the k8s repo keyring"
 msgstr "a preparar o keyring do repo k8s"
 

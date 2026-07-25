@@ -176,6 +176,8 @@ pub enum ImageCmd {
         ubuntu_release: String,
         #[arg(long, default_value = "bookworm")]
         debian_release: String,
+        #[arg(long, default_value = "9")]
+        rocky_release: String,
         #[arg(long)]
         k8s_version: Option<String>,
         #[arg(long = "extra-package")]
@@ -234,6 +236,8 @@ pub enum VmSub {
         ubuntu_release: String,
         #[arg(long, default_value = "bookworm")]
         debian_release: String,
+        #[arg(long, default_value = "9")]
+        rocky_release: String,
         #[arg(long)]
         k8s_version: Option<String>,
         #[arg(long = "extra-package")]
@@ -295,6 +299,7 @@ pub fn run(vm: bool, action: ImageCmd) -> Result<()> {
                 distro,
                 ubuntu_release,
                 debian_release,
+                rocky_release,
                 k8s_version,
                 extra_packages,
                 extra_run,
@@ -308,6 +313,7 @@ pub fn run(vm: bool, action: ImageCmd) -> Result<()> {
                 distro,
                 ubuntu_release,
                 debian_release,
+                rocky_release,
                 k8s_version,
                 extra_packages,
                 extra_run,
@@ -422,6 +428,7 @@ fn run_vm(action: ImageCmd) -> Result<()> {
             distro,
             ubuntu_release,
             debian_release,
+            rocky_release,
             k8s_version,
             extra_packages,
             extra_run,
@@ -435,6 +442,7 @@ fn run_vm(action: ImageCmd) -> Result<()> {
             distro,
             ubuntu_release,
             debian_release,
+            rocky_release,
             k8s_version,
             extra_packages,
             extra_run,

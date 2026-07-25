@@ -62,6 +62,7 @@ pub struct VmImage {
 pub enum Distro {
     Ubuntu,
     Debian,
+    Rocky,
 }
 
 impl Distro {
@@ -69,6 +70,7 @@ impl Distro {
         match self {
             Distro::Ubuntu => "ubuntu",
             Distro::Debian => "debian",
+            Distro::Rocky => "rocky",
         }
     }
 }
@@ -130,6 +132,7 @@ impl VmImageStore {
                 "debian-{}-genericcloud-amd64.qcow2",
                 Self::sanitize(release)
             ),
+            Distro::Rocky => format!("rocky-{}-genericcloud-amd64.qcow2", Self::sanitize(release)),
         };
         self.root.join("_base").join(filename)
     }
@@ -195,6 +198,10 @@ pub enum VmImageCmd {
         /// Debian codename (`bookworm`, `trixie`, ...) — only used with `--distro debian`.
         #[arg(long, default_value = "bookworm")]
         debian_release: String,
+        /// Rocky Linux major version (`8`, `9`, `10`) — only used with `--distro
+        /// rocky`. Rocky currently only supports `--no-k8s` builds.
+        #[arg(long, default_value = "9")]
+        rocky_release: String,
         /// Kubernetes version (e.g. `1.31`) — omit to use the latest stable.
         #[arg(long)]
         k8s_version: Option<String>,
@@ -259,6 +266,7 @@ pub fn run(action: VmImageCmd) -> Result<()> {
             distro,
             ubuntu_release,
             debian_release,
+            rocky_release,
             k8s_version,
             extra_packages,
             extra_run,
@@ -273,6 +281,7 @@ pub fn run(action: VmImageCmd) -> Result<()> {
             distro,
             &ubuntu_release,
             &debian_release,
+            &rocky_release,
             k8s_version,
             extra_packages,
             extra_run,
@@ -429,6 +438,7 @@ fn cmd_build(
     distro: Distro,
     ubuntu_release: &str,
     debian_release: &str,
+    rocky_release: &str,
     k8s_version: Option<String>,
     extra_packages: Vec<String>,
     extra_run: Vec<String>,
@@ -464,6 +474,18 @@ fn cmd_build(
             "--delonix-bin só se aplica com --no-k8s".into(),
         ));
     }
+    // Rocky's dnf-family customization steps only exist for the `--no-k8s`
+    // path (`rootless_customization_steps`) — `k8s_recipes` is apt-only
+    // (pkgs.k8s.io's RPM repo has a different URL/GPG scheme, not
+    // implemented). Fail closed rather than silently running apt commands
+    // against a dnf guest.
+    if distro == Distro::Rocky && !no_k8s {
+        return Err(Error::Invalid(
+            "--distro rocky só suporta --no-k8s por agora (o caminho k8s precisa do \
+             repositório RPM do pkgs.k8s.io, ainda não implementado)"
+                .into(),
+        ));
+    }
     // `k8s_version` goes into a `format!` that becomes a `virt-customize --run-command`
     // (via `k8s_recipes::k8s_host_recipes`) — validating here closes the same security
     // finding as `cmd::cluster::valid_version` (the embedded apt repository must not
@@ -478,10 +500,12 @@ fn cmd_build(
     let release = match distro {
         Distro::Ubuntu => ubuntu_release,
         Distro::Debian => debian_release,
+        Distro::Rocky => rocky_release,
     };
     let base = match distro {
         Distro::Ubuntu => download_ubuntu_base(store, ubuntu_release)?,
         Distro::Debian => download_debian_base(store, debian_release)?,
+        Distro::Rocky => download_rocky_base(store, rocky_release)?,
     };
 
     let work_dir =
@@ -507,7 +531,7 @@ fn cmd_build(
     let ops = if no_k8s {
         eprintln!("modo --no-k8s: a preparar imagem sem Kubernetes (delonix + rootless)...");
         let delonix = resolve_delonix_bin(delonix_bin)?;
-        rootless_customization_steps(&extra_run, &delonix)
+        rootless_customization_steps(&extra_run, &delonix, distro)
     } else {
         let cri = resolve_cri_bin(cri_bin)?;
         let service_unit = workspace_dist_file("delonix-cri.service")?;
@@ -544,6 +568,7 @@ fn cmd_build(
                 &cri,
                 &service_unit,
                 preseed_root.as_deref(),
+                distro,
             )
         } else {
             k8s_customization_steps(
@@ -552,6 +577,7 @@ fn cmd_build(
                 &extra_run,
                 &cri,
                 &service_unit,
+                distro,
             )
         }
     };
@@ -768,6 +794,83 @@ fn download_debian_base(store: &VmImageStore, release: &str) -> Result<PathBuf> 
     }
     std::fs::rename(&tmp, &cached)?;
     Ok(cached)
+}
+
+// ---------------------------------------------------------------------------
+// Download + verification of the Rocky Linux cloud image
+// ---------------------------------------------------------------------------
+
+/// Rocky's release directory AND filename both use the plain major version
+/// number (`9`, not a codename) — simpler than Debian, confirmed live
+/// against `dl.rockylinux.org` (8/9/10 all exist today). Whitelisted rather
+/// than accepted verbatim purely for a fast, clear error before any network
+/// call — an unknown value would otherwise still fail safely (a 404 from
+/// `stream_download`), this is just better UX, not a security boundary
+/// (unlike Debian's codename→number mapping, which IS load-bearing: there is
+/// no way to derive the filename's number from an arbitrary codename).
+fn valid_rocky_release(release: &str) -> Result<()> {
+    if matches!(release, "8" | "9" | "10") {
+        Ok(())
+    } else {
+        Err(Error::Invalid(format!(
+            "--rocky-release '{release}' desconhecido (8|9|10)"
+        )))
+    }
+}
+
+/// Same shape as `download_ubuntu_base`/`download_debian_base`, confirmed
+/// live before writing code: the image is `Rocky-<release>-GenericCloud.
+/// latest.x86_64.qcow2` under `pub/rocky/<release>/images/x86_64/` (no
+/// `images/cloud/` segment — a different tree shape than Debian's). The
+/// checksum sidecar is PER-FILE (`<img>.CHECKSUM`, not a directory-wide
+/// `SUMS` file) and uses the BSD `SHA256 (<filename>) = <hash>` shape — a
+/// THIRD checksum format in this module, after Ubuntu/Debian's GNU
+/// `<hash>  <filename>` — hence `parse_bsd_checksum` below. SHA256 (not
+/// SHA512 like Debian), so
+/// `hex_sha256_file` is reused as-is.
+fn download_rocky_base(store: &VmImageStore, release: &str) -> Result<PathBuf> {
+    valid_rocky_release(release)?;
+    let cached = store.base_cache_path(Distro::Rocky, release);
+    if cached.exists() {
+        return Ok(cached);
+    }
+    let img_name = format!("Rocky-{release}-GenericCloud.latest.x86_64.qcow2");
+    let img_url = format!("https://dl.rockylinux.org/pub/rocky/{release}/images/x86_64/{img_name}");
+    let sums_url = format!("{img_url}.CHECKSUM");
+
+    eprintln!("a descarregar {img_url}...");
+    let tmp = cached.with_extension("download");
+    stream_download(&img_url, &tmp)?;
+
+    eprintln!("a verificar CHECKSUM...");
+    let sums = http_get_text(&sums_url)?;
+    let expected = parse_bsd_checksum(&sums, &img_name).ok_or_else(|| {
+        Error::Invalid(format!(
+            "{} {img_name}",
+            super::po::t("CHECKSUM has no entry for")
+        ))
+    })?;
+    let got = hex_sha256_file(&tmp)?;
+    if got != expected {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(Error::Invalid(format!(
+            "checksum inválido para {img_name}: esperado {expected}, obtido {got} — download descartado"
+        )));
+    }
+    std::fs::rename(&tmp, &cached)?;
+    Ok(cached)
+}
+
+/// Rocky's `.CHECKSUM` uses the BSD `SHA256 (<filename>) = <hash>` line
+/// shape — confirmed live, different from both `<hash>  <filename>` forms
+/// used elsewhere in this module. Pure/tested. Matches the exact filename
+/// (not just any `SHA256 (...)` line) as defense-in-depth against a sidecar
+/// that happens to list more than one file.
+fn parse_bsd_checksum(text: &str, filename: &str) -> Option<String> {
+    let prefix = format!("SHA256 ({filename}) = ");
+    text.lines()
+        .find_map(|l| l.strip_prefix(prefix.as_str()))
+        .map(|s| s.trim().to_string())
 }
 
 fn stream_download(url: &str, dest: &Path) -> Result<()> {
@@ -1520,6 +1623,7 @@ pub(crate) fn k8s_customization_steps_offline(
     cri_bin: &Path,
     cri_service: &Path,
     preseed_images_root: Option<&Path>,
+    distro: Distro,
 ) -> Vec<CustomizeOp> {
     let mut ops: Vec<CustomizeOp> = Vec::new();
     // `--copy-in` requires the target directory to ALREADY exist in the guest.
@@ -1537,7 +1641,7 @@ pub(crate) fn k8s_customization_steps_offline(
             .map(|r| CustomizeOp::RunCommand(r.apply_offline().to_string())),
     );
     ops.extend(install_cri_steps(cri_bin, cri_service));
-    ops.extend(shared_account_steps(extra_run));
+    ops.extend(shared_account_steps(extra_run, distro));
     if let Some(root) = preseed_images_root {
         ops.push(CustomizeOp::RunCommand("mkdir -p /var/lib/delonix".into()));
         for sub in ["images", "layers", "containers", "blobs"] {
@@ -1556,6 +1660,7 @@ pub(crate) fn k8s_customization_steps(
     extra_run: &[String],
     cri_bin: &Path,
     cri_service: &Path,
+    distro: Distro,
 ) -> Vec<CustomizeOp> {
     let mut ops: Vec<CustomizeOp> =
         super::k8s_recipes::k8s_host_recipes(k8s_version, extra_packages)
@@ -1563,7 +1668,7 @@ pub(crate) fn k8s_customization_steps(
             .map(|r| CustomizeOp::RunCommand(r.apply_offline().to_string()))
             .collect();
     ops.extend(install_cri_steps(cri_bin, cri_service));
-    ops.extend(shared_account_steps(extra_run));
+    ops.extend(shared_account_steps(extra_run, distro));
     ops
 }
 
@@ -1581,30 +1686,48 @@ fn install_cri_steps(cri_bin: &Path, cri_service: &Path) -> Vec<CustomizeOp> {
 }
 
 /// The tail shared by every golden image variant regardless of k8s/no-k8s:
-/// accounts + the user's `--extra-run` + apt cleanup + machine-id reset.
-/// Kept separate from `install_cri_steps` so a non-Kubernetes image gets the
-/// same account/UX/cleanup guarantees without carrying the CRI shim.
-fn shared_account_steps(extra_run: &[String]) -> Vec<CustomizeOp> {
+/// accounts + the user's `--extra-run` + package-cache cleanup + machine-id
+/// reset. Kept separate from `install_cri_steps` so a non-Kubernetes image
+/// gets the same account/UX/cleanup guarantees without carrying the CRI shim.
+///
+/// The three lines below actually differ by distro FAMILY, all confirmed
+/// live (not assumed) before writing this: the sudo-equivalent group is
+/// `wheel` on Rocky/RHEL, not `sudo` (which doesn't exist there at all);
+/// the system-wide interactive-bash file is `/etc/bashrc` on Rocky, not
+/// `/etc/bash.bashrc` (a Debian/Ubuntu-family convention); and the package
+/// cache cleanup command is obviously package-manager-specific.
+fn shared_account_steps(extra_run: &[String], distro: Distro) -> Vec<CustomizeOp> {
+    let sudo_group = match distro {
+        Distro::Ubuntu | Distro::Debian => "sudo",
+        Distro::Rocky => "wheel",
+    };
+    let bashrc_path = match distro {
+        Distro::Ubuntu | Distro::Debian => "/etc/bash.bashrc",
+        Distro::Rocky => "/etc/bashrc",
+    };
     let mut ops: Vec<CustomizeOp> = Vec::new();
     ops.extend([
         // Default account: root/delonix and delonix:delonix in sudoers (explicit request).
         CustomizeOp::RootPassword("delonix".to_string()),
-        CustomizeOp::RunCommand("useradd -m -s /bin/bash -G sudo delonix || true".into()),
+        CustomizeOp::RunCommand(format!(
+            "useradd -m -s /bin/bash -G {sudo_group} delonix || true"
+        )),
         CustomizeOp::Password { user: "delonix".to_string(), password: "delonix".to_string() },
         CustomizeOp::RunCommand(
             "echo 'delonix ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/90-delonix && chmod 440 /etc/sudoers.d/90-delonix"
                 .into(),
         ),
         // Shell UX the Kubernetes docs recommend: kubectl/kubeadm bash completion
-        // + the `k` alias (with completion wired to it). Written to
-        // `/etc/bash.bashrc` (Ubuntu sources it for every interactive bash — login
-        // AND non-login — so both the serial console and SSH get it), NOT to
-        // `/etc/profile.d` (those are sourced by `sh` too, which chokes on the
-        // `<(...)` process substitution). Each block is guarded by `command -v`
-        // so it is inert if a tool is missing, and evaluated at shell-start (not
-        // build time) — order relative to the package install does not matter.
-        CustomizeOp::RunCommand(
-            "cat >> /etc/bash.bashrc <<'DELONIX_KUBECTL_EOF'\n\
+        // + the `k` alias (with completion wired to it). Written to the
+        // system-wide interactive-bash file (sourced for every interactive
+        // bash — login AND non-login — so both the serial console and SSH
+        // get it), NOT to `/etc/profile.d` (those are sourced by `sh` too,
+        // which chokes on the `<(...)` process substitution). Each block is
+        // guarded by `command -v` so it is inert if a tool is missing (e.g.
+        // every non-k8s image), and evaluated at shell-start (not build
+        // time) — order relative to the package install does not matter.
+        CustomizeOp::RunCommand(format!(
+            "cat >> {bashrc_path} <<'DELONIX_KUBECTL_EOF'\n\
              \n\
              # --- Delonix golden image: kubectl/kubeadm completion + `k` alias (k8s docs) ---\n\
              if command -v kubectl >/dev/null 2>&1; then\n\
@@ -1620,8 +1743,7 @@ fn shared_account_steps(extra_run: &[String]) -> Vec<CustomizeOp> {
              fi\n\
              # --- end Delonix ---\n\
              DELONIX_KUBECTL_EOF"
-                .into(),
-        ),
+        )),
     ]);
     ops.extend(extra_run.iter().cloned().map(CustomizeOp::RunCommand));
     // Records the installed kernel's `uname -r` string for `image --vm ls`'s
@@ -1637,19 +1759,22 @@ fn shared_account_steps(extra_run: &[String]) -> Vec<CustomizeOp> {
          > /etc/delonix-kernel-version || echo unknown > /etc/delonix-kernel-version"
             .into(),
     ));
-    // apt cleanup — ALWAYS at the end (after the user's `--extra-run`, which
-    // may install more packages). Measured on a 24.04 golden: `/var/cache/apt`
-    // (~181 MiB of already-installed .deb) + `/var/lib/apt/lists` (~186 MiB of
-    // indexes) = ~367 MiB of pure garbage, which filled the root to 92%. An `apt-get
-    // update` regenerates the indexes if the node needs them.
+    // Package cache cleanup — ALWAYS at the end (after the user's
+    // `--extra-run`, which may install more packages). Measured on a 24.04
+    // apt golden: `/var/cache/apt` (~181 MiB of already-installed .deb) +
+    // `/var/lib/apt/lists` (~186 MiB of indexes) = ~367 MiB of pure garbage,
+    // which filled the root to 92%. An `apt-get update`/`dnf makecache`
+    // regenerates the indexes if the node needs them.
     //
     // DELIBERATELY here and not in `k8s_recipes`: that catalog is SHARED
-    // with `cluster apply`, which prepares LIVE hosts — cleaning the apt cache is a
-    // concern of the ARTIFACT (shrinking a distributable image), not of
-    // host preparation.
-    ops.push(CustomizeOp::RunCommand(
-        "apt-get clean && rm -rf /var/lib/apt/lists/*".into(),
-    ));
+    // with `cluster apply`, which prepares LIVE hosts — cleaning the package
+    // cache is a concern of the ARTIFACT (shrinking a distributable image),
+    // not of host preparation.
+    let cleanup_cmd = match distro {
+        Distro::Ubuntu | Distro::Debian => "apt-get clean && rm -rf /var/lib/apt/lists/*",
+        Distro::Rocky => "dnf clean all",
+    };
+    ops.push(CustomizeOp::RunCommand(cleanup_cmd.into()));
     // BUG FOUND LIVE (delonix cluster kubeadm, multi-VM libvirt NAT): every VM
     // cloned from this golden qcow2 shares ONE `/etc/machine-id` — installing
     // kubeadm's dependencies during `virt-customize` pulls in a package whose
@@ -1680,41 +1805,65 @@ fn shared_account_steps(extra_run: &[String]) -> Vec<CustomizeOp> {
 pub(crate) fn rootless_customization_steps(
     extra_run: &[String],
     delonix_bin: &Path,
+    distro: Distro,
 ) -> Vec<CustomizeOp> {
-    let mut ops: Vec<CustomizeOp> = vec![
-        // Same package list `install.sh` requires (`require_dep`/`optional_dep`),
-        // just apt-installed in the guest instead of host-detected.
-        CustomizeOp::RunCommand(
+    // Same package LIST `install.sh` requires (`require_dep`/`optional_dep`),
+    // just guest-installed instead of host-detected. Package NAMES confirmed
+    // live against Rocky 9's own repo listings before writing this (not
+    // assumed): `shadow-utils` (not `uidmap`), `iproute` (not `iproute2`),
+    // `conntrack-tools` (not `conntrack`) — all present in Rocky's base
+    // BaseOS/AppStream, no EPEL needed. `nftables`/`slirp4netns` share the
+    // same package name across both families.
+    let pkg_install_cmd = match distro {
+        Distro::Ubuntu | Distro::Debian => {
             "apt-get update && apt-get install -y slirp4netns uidmap nftables iproute2 conntrack"
-                .into(),
-        ),
+                .to_string()
+        }
+        Distro::Rocky => {
+            "dnf install -y slirp4netns shadow-utils nftables iproute conntrack-tools".to_string()
+        }
+    };
+    let mut ops: Vec<CustomizeOp> = vec![
+        CustomizeOp::RunCommand(pkg_install_cmd),
         // `delonix` — the daemonless engine binary itself. No systemd unit: it
         // is CLI-invoked, not a long-running service (unlike `delonix-cri`).
         CustomizeOp::CopyIn(delonix_bin.to_path_buf(), "/usr/local/bin".to_string()),
         CustomizeOp::RunCommand("chmod +x /usr/local/bin/delonix".into()),
     ];
-    ops.extend(shared_account_steps(extra_run));
+    ops.extend(shared_account_steps(extra_run, distro));
     // Subuid/subgid range for the `delonix` account — mirrors `install.sh`'s
     // `ensure_subid`: without a range, the rootless userns only maps 1 uid and
     // any image with a non-root USER fails. Idempotent (`grep -q` guard).
+    // `/etc/subuid`/`/etc/subgid` are `shadow-utils` files, present and in the
+    // same location on every distro family here.
     ops.push(CustomizeOp::RunCommand(
         "grep -q '^delonix:' /etc/subuid || echo 'delonix:100000:65536' >> /etc/subuid".into(),
     ));
     ops.push(CustomizeOp::RunCommand(
         "grep -q '^delonix:' /etc/subgid || echo 'delonix:100000:65536' >> /etc/subgid".into(),
     ));
-    // AppArmor `unconfined+userns` profile — on Ubuntu 23.10+-family hosts,
-    // `kernel.apparmor_restrict_unprivileged_userns=1` blocks an unprivileged
-    // `unshare(CLONE_NEWUSER)` from an unprofiled binary (`install.sh`'s exact
-    // mechanism/content). Written unconditionally: harmless where the
-    // restriction is off, load-bearing where it's on. Best-effort — a guest
-    // build environment may not be able to load it the same way a live boot
-    // can (matches `preseed_k8s_images`'s "never fail the whole build" norm).
-    ops.push(CustomizeOp::RunCommand(
-        "printf 'abi <abi/4.0>,\\ninclude <tunables/global>\\nprofile delonix /usr/local/bin/delonix flags=(unconfined) {\\n  userns,\\n}\\n' > /etc/apparmor.d/delonix && \
-         (apparmor_parser -r /etc/apparmor.d/delonix || true)"
-            .into(),
-    ));
+    // AppArmor `unconfined+userns` profile — Ubuntu-ONLY. The kernel sysctl
+    // this defends against (`kernel.apparmor_restrict_unprivileged_userns=1`,
+    // 23.10+-family hosts) is an Ubuntu-specific LSM hardening patch, not
+    // present upstream/Debian and meaningless on Rocky (SELinux, no AppArmor
+    // LSM at all). BUG CAUGHT HERE, before it shipped: the write is
+    // `printf ... > /etc/apparmor.d/delonix && (apparmor_parser ... || true)`
+    // — the `|| true` only guards the parser call, NOT the file write. Rocky
+    // cloud images have no `/etc/apparmor.d/` directory at all, so the
+    // redirect itself would fail, the `&&` would short-circuit, and the
+    // WHOLE `virt-customize` step (hence the whole build) would fail — not a
+    // harmless no-op like on a distro that happens to lack AppArmor tooling
+    // but still has the directory. Gating to `Ubuntu` is the correct fix, not
+    // just a Rocky workaround (also correct for Debian, which never actually
+    // needed this step either — kept unconditional there since it degrades
+    // harmlessly, but Rocky specifically cannot risk it).
+    if distro == Distro::Ubuntu {
+        ops.push(CustomizeOp::RunCommand(
+            "printf 'abi <abi/4.0>,\\ninclude <tunables/global>\\nprofile delonix /usr/local/bin/delonix flags=(unconfined) {\\n  userns,\\n}\\n' > /etc/apparmor.d/delonix && \
+             (apparmor_parser -r /etc/apparmor.d/delonix || true)"
+                .into(),
+        ));
+    }
     ops
 }
 
@@ -1766,7 +1915,8 @@ mod tests {
     fn customization_steps_incluem_pacotes_extra() {
         let cri = PathBuf::from("/tmp/delonix-cri");
         let svc = PathBuf::from("/tmp/delonix-cri.service");
-        let ops = k8s_customization_steps(None, &["htop".to_string()], &[], &cri, &svc);
+        let ops =
+            k8s_customization_steps(None, &["htop".to_string()], &[], &cri, &svc, Distro::Ubuntu);
         let install_step = ops
             .iter()
             .find_map(|op| match op {
@@ -1803,7 +1953,14 @@ mod tests {
     fn customization_steps_incluem_extra_run_no_fim() {
         let cri = PathBuf::from("/tmp/delonix-cri");
         let svc = PathBuf::from("/tmp/delonix-cri.service");
-        let ops = k8s_customization_steps(None, &[], &["echo oi".to_string()], &cri, &svc);
+        let ops = k8s_customization_steps(
+            None,
+            &[],
+            &["echo oi".to_string()],
+            &cri,
+            &svc,
+            Distro::Ubuntu,
+        );
         // `--extra-run` runs after all base steps; only the apt cleanup
         // comes after it (it must be last — the extra-run may install packages).
         let idx_extra = ops
@@ -1837,13 +1994,14 @@ mod tests {
         // Both build paths (online + offline) share `common_customization_steps`,
         // so the kubectl UX must be present in both.
         for ops in [
-            k8s_customization_steps(None, &[], &[], &cri, &svc),
+            k8s_customization_steps(None, &[], &[], &cri, &svc, Distro::Ubuntu),
             k8s_customization_steps_offline(
                 &[PathBuf::from("/tmp/x/kubeadm_1.34.9-1.1_amd64.deb")],
                 &[],
                 &cri,
                 &svc,
                 None,
+                Distro::Ubuntu,
             ),
         ] {
             let bashrc = ops
@@ -1984,6 +2142,7 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
             &PathBuf::from("/tmp/delonix-cri"),
             &PathBuf::from("/tmp/delonix-cri.service"),
             None,
+            Distro::Ubuntu,
         );
         let cmds: Vec<&str> = ops
             .iter()
@@ -2022,6 +2181,7 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
             &PathBuf::from("/tmp/delonix-cri"),
             &PathBuf::from("/tmp/delonix-cri.service"),
             Some(&preseed_root),
+            Distro::Ubuntu,
         );
         for sub in ["images", "layers", "containers", "blobs"] {
             assert!(
@@ -2045,7 +2205,7 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
     fn customization_steps_limpam_a_cache_apt_no_fim() {
         let cri = PathBuf::from("/tmp/delonix-cri");
         let svc = PathBuf::from("/tmp/delonix-cri.service");
-        let ops = k8s_customization_steps(None, &[], &[], &cri, &svc);
+        let ops = k8s_customization_steps(None, &[], &[], &cri, &svc, Distro::Ubuntu);
         // ~367 MiB of .deb + indexes that, without this, filled the golden's root to 92%.
         // Second-to-last: the machine-id reset (below) must run AFTER it.
         let clean = &ops[ops.len() - 2];
@@ -2059,7 +2219,7 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
     fn customization_steps_configuram_delonix_user_e_root_password() {
         let cri = PathBuf::from("/tmp/delonix-cri");
         let svc = PathBuf::from("/tmp/delonix-cri.service");
-        let ops = k8s_customization_steps(None, &[], &[], &cri, &svc);
+        let ops = k8s_customization_steps(None, &[], &[], &cri, &svc, Distro::Ubuntu);
         assert!(ops
             .iter()
             .any(|op| matches!(op, CustomizeOp::RootPassword(p) if p == "delonix")));
@@ -2069,7 +2229,7 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
     #[test]
     fn rootless_steps_instalam_dependencias_e_o_binario_delonix_sem_cri() {
         let delonix = PathBuf::from("/tmp/delonix");
-        let ops = rootless_customization_steps(&[], &delonix);
+        let ops = rootless_customization_steps(&[], &delonix, Distro::Ubuntu);
         let cmds: Vec<&str> = ops
             .iter()
             .filter_map(|o| match o {
@@ -2094,7 +2254,7 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
 
     #[test]
     fn rootless_steps_configuram_subuid_e_subgid_para_delonix() {
-        let ops = rootless_customization_steps(&[], &PathBuf::from("/tmp/delonix"));
+        let ops = rootless_customization_steps(&[], &PathBuf::from("/tmp/delonix"), Distro::Ubuntu);
         let cmds: Vec<&str> = ops
             .iter()
             .filter_map(|o| match o {
@@ -2112,7 +2272,7 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
 
     #[test]
     fn rootless_steps_escrevem_o_perfil_apparmor_unconfined_userns() {
-        let ops = rootless_customization_steps(&[], &PathBuf::from("/tmp/delonix"));
+        let ops = rootless_customization_steps(&[], &PathBuf::from("/tmp/delonix"), Distro::Ubuntu);
         let cmds: Vec<&str> = ops
             .iter()
             .filter_map(|o| match o {
@@ -2127,11 +2287,132 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
 
     #[test]
     fn rootless_steps_partilham_a_criacao_de_conta_delonix() {
-        let ops = rootless_customization_steps(&[], &PathBuf::from("/tmp/delonix"));
+        let ops = rootless_customization_steps(&[], &PathBuf::from("/tmp/delonix"), Distro::Ubuntu);
         assert!(ops
             .iter()
             .any(|op| matches!(op, CustomizeOp::RootPassword(p) if p == "delonix")));
         assert!(ops.iter().any(|op| matches!(op, CustomizeOp::Password{user,password} if user=="delonix" && password=="delonix")));
+    }
+
+    #[test]
+    fn rootless_steps_rocky_usa_dnf_e_pacotes_rpm() {
+        let ops = rootless_customization_steps(&[], &PathBuf::from("/tmp/delonix"), Distro::Rocky);
+        let cmds: Vec<&str> = ops
+            .iter()
+            .filter_map(|o| match o {
+                CustomizeOp::RunCommand(c) => Some(c.as_str()),
+                _ => None,
+            })
+            .collect();
+        // Package NAMES confirmed live against Rocky 9's own repo listings —
+        // `shadow-utils`/`iproute`/`conntrack-tools`, not the apt names.
+        assert!(cmds.iter().any(|c| c.starts_with("dnf install")
+            && c.contains("slirp4netns")
+            && c.contains("shadow-utils")
+            && c.contains("nftables")
+            && c.contains("iproute")
+            && c.contains("conntrack-tools")));
+        assert!(!cmds.iter().any(|c| c.contains("apt-get")));
+    }
+
+    #[test]
+    fn rootless_steps_rocky_usa_wheel_bashrc_e_dnf_clean() {
+        let ops = rootless_customization_steps(&[], &PathBuf::from("/tmp/delonix"), Distro::Rocky);
+        let cmds: Vec<&str> = ops
+            .iter()
+            .filter_map(|o| match o {
+                CustomizeOp::RunCommand(c) => Some(c.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert!(cmds
+            .iter()
+            .any(|c| c.contains("useradd") && c.contains("-G wheel")));
+        assert!(!cmds.iter().any(|c| c.contains("-G sudo")));
+        assert!(cmds.iter().any(|c| c.contains(">> /etc/bashrc")));
+        assert!(!cmds.iter().any(|c| c.contains("/etc/bash.bashrc")));
+        assert!(cmds.iter().any(|c| c == &"dnf clean all"));
+        assert!(!cmds.iter().any(|c| c.contains("apt-get clean")));
+    }
+
+    #[test]
+    fn rootless_steps_rocky_nunca_escreve_perfil_apparmor() {
+        // BUG CAUGHT DURING IMPLEMENTATION: the AppArmor write is
+        // `printf ... > /etc/apparmor.d/delonix && (apparmor_parser ... || true)`
+        // — only the parser call is guarded. Rocky has no `/etc/apparmor.d/`
+        // directory at all, so if this step ran there the redirect itself
+        // would fail and take down the whole `virt-customize` build (the
+        // `&&` isn't guarded). Ubuntu-only gating is the fix; this test
+        // proves Rocky never even sees the command.
+        let ops = rootless_customization_steps(&[], &PathBuf::from("/tmp/delonix"), Distro::Rocky);
+        assert!(!ops
+            .iter()
+            .any(|o| matches!(o, CustomizeOp::RunCommand(c) if c.contains("apparmor"))));
+    }
+
+    #[test]
+    fn rootless_steps_debian_nao_muda_de_comportamento() {
+        // v0.17.0 regression guard: Debian's sudo/bashrc/apt-clean output must
+        // stay byte-identical to before this Rocky-driven refactor.
+        let ops = rootless_customization_steps(&[], &PathBuf::from("/tmp/delonix"), Distro::Debian);
+        let cmds: Vec<&str> = ops
+            .iter()
+            .filter_map(|o| match o {
+                CustomizeOp::RunCommand(c) => Some(c.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert!(cmds
+            .iter()
+            .any(|c| c.contains("useradd") && c.contains("-G sudo")));
+        assert!(cmds.iter().any(|c| c.contains(">> /etc/bash.bashrc")));
+        assert!(cmds.iter().any(|c| c.contains("apt-get clean")));
+    }
+
+    #[test]
+    fn parse_bsd_checksum_extrai_o_hash_do_ficheiro_pedido() {
+        // Real line captured live from `dl.rockylinux.org`.
+        let text = "# Rocky-9-GenericCloud.latest.x86_64.qcow2: 645988352 bytes\n\
+                     SHA256 (Rocky-9-GenericCloud.latest.x86_64.qcow2) = 92c206cc6f790c61583247eefe87890f8828420662c17cacf247cec78ab4eec8\n";
+        assert_eq!(
+            parse_bsd_checksum(text, "Rocky-9-GenericCloud.latest.x86_64.qcow2"),
+            Some("92c206cc6f790c61583247eefe87890f8828420662c17cacf247cec78ab4eec8".to_string())
+        );
+        assert_eq!(parse_bsd_checksum(text, "other-file.qcow2"), None);
+        assert_eq!(parse_bsd_checksum("", "x"), None);
+    }
+
+    #[test]
+    fn valid_rocky_release_aceita_so_as_versoes_conhecidas() {
+        assert!(valid_rocky_release("8").is_ok());
+        assert!(valid_rocky_release("9").is_ok());
+        assert!(valid_rocky_release("10").is_ok());
+        assert!(valid_rocky_release("7").is_err());
+        assert!(valid_rocky_release("latest").is_err());
+    }
+
+    #[test]
+    fn no_k8s_false_com_distro_rocky_e_rejeitado() {
+        let (store, dir) = tmp_store();
+        let err = cmd_build(
+            &store,
+            "t",
+            Distro::Rocky,
+            "24.04",
+            "bookworm",
+            "9",
+            None,
+            vec![],
+            vec![],
+            None,
+            true,
+            false,
+            false, // no_k8s = false — Rocky doesn't support the k8s path yet
+            None,
+        );
+        assert!(err.is_err());
+        assert!(format!("{}", err.unwrap_err()).contains("--no-k8s"));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     fn tmp_store() -> (VmImageStore, PathBuf) {
@@ -2198,7 +2479,10 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
         let (store, dir) = tmp_store();
         let ubuntu = store.base_cache_path(Distro::Ubuntu, "24.04");
         let debian = store.base_cache_path(Distro::Debian, "bookworm");
+        let rocky = store.base_cache_path(Distro::Rocky, "9");
         assert_ne!(ubuntu, debian);
+        assert_ne!(debian, rocky);
+        assert_ne!(ubuntu, rocky);
         assert!(ubuntu
             .file_name()
             .unwrap()
@@ -2211,6 +2495,12 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
             .to_str()
             .unwrap()
             .starts_with("debian-bookworm-"));
+        assert!(rocky
+            .file_name()
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .starts_with("rocky-9-"));
         // Same path-traversal defense as the Ubuntu side, for the new Debian arm:
         // `sanitize` strips `/` (dots survive — harmless without a separator,
         // `Path::join` can't treat them as multiple segments), so the result
@@ -2231,6 +2521,7 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
                 Distro::Ubuntu,
                 "24.04",
                 "bookworm",
+                "9",
                 k8s_version,
                 vec![],
                 vec![],
@@ -2256,6 +2547,7 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
             Distro::Ubuntu,
             "24.04",
             "bookworm",
+            "9",
             None,
             vec![],
             vec![],
