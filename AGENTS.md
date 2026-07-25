@@ -480,6 +480,52 @@ nó não faz nenhuma instalação**, só `kubeadm init`/`kubeadm join`.
   (ficheiros pequenos). Uma build `--offline` para Debian não está implementada (mesma razão do
   `--no-k8s`: `download_k8s_debs` já é distro-agnóstico do lado do host, mas não foi testada nesta
   combinação) — só o caminho online e `--no-k8s` foram cobertos nesta fase.
+- **`--distro rocky` (v0.18.0) — Fase 3 de 3, a última (dnf/RPM, a família de gestor de pacotes
+  mais distante de tudo o resto do código).** Escopo **deliberadamente só `--no-k8s`** — o pedido
+  original já enquadrava o Rocky como variante para tenants sem Kubernetes, e `k8s_recipes`
+  (repositório `pkgs.k8s.io`, `dpkg -i`/`apt-mark hold`) é apt-only; o RPM equivalente do
+  `pkgs.k8s.io` tem URL/GPG diferentes e fica fora desta fase. `cmd_build` rejeita
+  `--distro rocky` sem `--no-k8s` com erro claro, em vez de tentar correr `apt-get`/`dpkg` num
+  guest dnf.
+  - **Cloud image**: confirmado ao vivo (não suposto) contra `dl.rockylinux.org` antes de
+    escrever código — `pub/rocky/<major>/images/x86_64/Rocky-<major>-GenericCloud.latest.
+    x86_64.qcow2` (árvore diferente da do Debian — sem segmento `images/cloud/`). O `<major>` é
+    literal (`8`/`9`/`10`, sem tradução de codinome como o Debian) — `valid_rocky_release`
+    valida contra essa whitelist só por UX (erro rápido, claro, antes de qualquer rede); ao
+    contrário do `debian_major_version`, não é uma fronteira de segurança (um valor desconhecido
+    já falhava em segurança com um 404 do `stream_download`).
+  - **Checksum: uma TERCEIRA forma, diferente das outras duas.** Rocky publica um `.CHECKSUM`
+    PER-FILE (não uma `SUMS` por directório) no formato BSD `SHA256 (<ficheiro>) = <hash>` —
+    confirmado ao vivo, diferente do `<hash>  <ficheiro>` GNU que Ubuntu/Debian usam.
+    `parse_bsd_checksum` novo (testado com a linha real capturada ao vivo); SHA256 (não SHA512
+    como o Debian), por isso reutiliza `hex_sha256_file` sem alterações.
+  - **Nomes de pacote RPM confirmados ao vivo** (não assumidos) contra os próprios listagens do
+    repositório Rocky 9 antes de escrever código: `shadow-utils` (não `uidmap`), `iproute` (não
+    `iproute2`), `conntrack-tools` (não `conntrack`) — todos em BaseOS/AppStream, **sem EPEL**.
+    `nftables`/`slirp4netns` partilham o nome entre as duas famílias.
+  - **`shared_account_steps` ganhou um parâmetro `distro`** (branch em 3 pontos, todos
+    confirmados ao vivo): o grupo sudo-equivalente é `wheel` no Rocky (não `sudo`, que nem
+    existe lá); o ficheiro bash interactivo do sistema é `/etc/bashrc` (não `/etc/bash.bashrc`,
+    convenção Debian/Ubuntu); a limpeza de cache de pacotes é `dnf clean all` em vez de
+    `apt-get clean && rm -rf /var/lib/apt/lists/*`. Debian/Ubuntu mantêm exactamente o output de
+    antes (teste de regressão dedicado).
+  - **BUG apanhado ANTES de publicar, não em produção**: o passo do perfil AppArmor
+    (`printf ... > /etc/apparmor.d/delonix && (apparmor_parser ... || true)`) só guarda a
+    chamada ao `apparmor_parser` com `|| true` — a ESCRITA do ficheiro não tem guarda nenhuma.
+    O Rocky/RHEL não tem `/etc/apparmor.d/` (usa SELinux, não AppArmor) — correr este passo lá
+    faria o redirect falhar, o `&&` curto-circuitar, e o `RunCommand` inteiro (logo o
+    `virt-customize`, logo o build inteiro) falhar. **Corrigido pela raiz**: o passo passou a só
+    correr quando `distro == Distro::Ubuntu` — não é só um workaround para o Rocky, é também mais
+    correcto para o Debian (o sysctl `kernel.apparmor_restrict_unprivileged_userns` que este
+    perfil existe para contornar é uma patch de kernel exclusiva do Ubuntu 23.10+, nunca existiu
+    no Debian; ficava lá antes só por não ter sido revisto, inofensivo porque o Debian tem
+    `/etc/apparmor.d/`, mas incorrecto na mesma). Teste de regressão dedicado
+    (`rootless_steps_rocky_nunca_escreve_perfil_apparmor`) prova que o Rocky nunca vê o comando.
+  - `vm-image.yml` ganhou `rocky_release`, mesmo escopo dos inputs de distro anteriores.
+    **Limitação conhecida**: tal como o Debian, o download real do `.qcow2` Rocky não foi
+    validado de ponta a ponta neste sandbox (mesma ligação de saída lenta) — verificação SHA256
+    coberta por teste unitário com a linha real capturada ao vivo, URL/redirect confirmados com
+    `curl -I` contra as 3 versões major.
 - **`push`/`pull`**: publicam/obtêm a imagem como artefacto OCI de blob único (config vazio + 1
   layer, padrão ORAS/Helm) via `delonix_image::registry::{push_oci_artifact,pull_oci_artifact}`
   (`crates/delonix-image/src/registry.rs`) — generaliza o `Client`/auth/upload já usado por
