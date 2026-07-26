@@ -48,7 +48,7 @@ VM provisionada com samba por cloud-init (`--user-data <ficheiro>`, egress da SD
 Como o `mount -t cifs` corre no netns do HOST, publica-se a porta SMB da VM para o host pelo
 ingress e monta-se por `127.0.0.1`:
 
-    delonix netns publish nasvm 4445:445 --ip <ip-da-vm>        # DNAT host:4445 → VM:445
+    delonix net netns publish nasvm 4445:445 --ip <ip-da-vm>    # DNAT host:4445 → VM:445
     sudo -E delonix storage create nastest \                    # mount precisa de CAP_SYS_ADMIN
       --type cifs --server 127.0.0.1 --share delonixnas \
       --options "port=4445,guest,vers=3.0"

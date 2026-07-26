@@ -114,74 +114,21 @@ enum Cmd {
         #[command(subcommand)]
         action: cmd::system::SystemCmd,
     },
-    /// Idempotent `kubeadm` bootstrap over SSH (`kind: Cluster`), or full VM provisioning.
+    /// Idempotent `kubeadm` bootstrap over SSH (`kind: Cluster`), full VM provisioning, or
+    /// generating a k8s manifest from a running container/pod (`cluster kube generate`).
     Cluster {
         #[command(subcommand)]
         action: cmd::cluster::ClusterCmd,
     },
-    /// Generate Kubernetes manifests from containers/pods (`generate`).
-    Kube {
+    /// Low-level network/infra plumbing, grouped: netns/flow/ingress/egress/httproute/tunnel/boot.
+    Net {
         #[command(subcommand)]
-        action: cmd::kube::KubeCmd,
+        action: cmd::net::NetCmd,
     },
-    /// Low-level management of the rootless ingress infra (up/status/attach/publish/firewall).
-    Netns {
+    /// Serve a protocol endpoint on a unix socket, grouped: cri/api/docker-api.
+    Serve {
         #[command(subcommand)]
-        action: cmd::netns::NetnsCmd,
-    },
-    /// Live per-container traffic (eBPF datapath; degrades to veth counters).
-    Flow {
-        /// Watch only this interface (default: auto — every SDN veth).
-        #[arg(long)]
-        iface: Option<String>,
-        /// Refresh continuously (every 2s) instead of printing once.
-        #[arg(long, short)]
-        watch: bool,
-    },
-    /// INBOUND firewall (L4 rules + DNAT publishes) for a container on the SDN.
-    Ingress {
-        #[command(subcommand)]
-        action: cmd::firewall::IngressCmd,
-    },
-    /// OUTBOUND firewall (L4 rules + per-network egress policy) for a container.
-    Egress {
-        #[command(subcommand)]
-        action: cmd::firewall::EgressCmd,
-    },
-    /// Embedded L7/HTTP reverse-proxy (`kind: HTTPRoute`): ls/apply/rm.
-    Httproute {
-        #[command(subcommand)]
-        action: cmd::httproute::HttpRouteCmd,
-    },
-    /// Expose a local port to the public internet via pinggy/ngrok/cloudflare
-    /// (`kind: Tunnel`) — pair with `httproute`'s listening port to route by
-    /// Host header behind ONE public URL.
-    Tunnel {
-        #[command(subcommand)]
-        action: cmd::tunnel::TunnelCmd,
-    },
-    /// Boot persistence: systemd units so containers come back up after a reboot.
-    Boot {
-        #[command(subcommand)]
-        action: cmd::boot::BootCmd,
-    },
-    /// Serve the CRI endpoint (`runtime.v1`) on a unix socket — replaces containerd/CRI-O for a kubelet.
-    Cri {
-        /// Socket address (default: `$DELONIX_CRI_ADDR` or `unix:///run/delonix-cri.sock`).
-        #[arg(long)]
-        addr: Option<String>,
-    },
-    /// Serve the MANAGEMENT API (HTTP+JSON) on a unix socket — the surface an external control-plane consumes to operate the engine.
-    Api {
-        /// Socket address (default: `$DELONIX_API_ADDR` or `unix:///run/delonix-mgmt.sock`).
-        #[arg(long)]
-        addr: Option<String>,
-    },
-    /// Serve a READ-ONLY slice of the Docker Engine API on a unix socket — `docker version`/`ps`/`images`/`info` via `DOCKER_HOST=unix://<path>`.
-    DockerApi {
-        /// Socket address (default: `$DELONIX_DOCKER_ADDR` or `unix:///run/delonix-docker.sock`).
-        #[arg(long)]
-        addr: Option<String>,
+        action: cmd::serve::ServeCmd,
     },
     /// Runtime summary/KPI dashboard (interactive htop-style TUI) — global, or per group (`container dash`, `vm dash`, ...).
     Dash {
@@ -278,28 +225,9 @@ fn run() -> Result<()> {
         Cmd::Compose { action } => cmd::compose::run(action),
         Cmd::System { action } => cmd::system::run(action),
         Cmd::Cluster { action } => cmd::cluster::run(action),
-        Cmd::Kube { action } => cmd::kube::run(action),
-        Cmd::Netns { action } => cmd::netns::run(action),
-        Cmd::Boot { action } => cmd::boot::run(action),
-        Cmd::Flow { iface, watch } => cmd::flow::run(iface, watch),
-        Cmd::Ingress { action } => cmd::firewall::run_ingress(action),
-        Cmd::Egress { action } => cmd::firewall::run_egress(action),
+        Cmd::Net { action } => cmd::net::run(action),
+        Cmd::Serve { action } => cmd::serve::run(action),
         Cmd::IngressProxy { config } => cmd::ingress_proxy::run(&config),
-        Cmd::Httproute { action } => cmd::httproute::run(action),
-        Cmd::Tunnel { action } => cmd::tunnel::run(action),
-        Cmd::Cri { addr } => {
-            let addr = addr
-                .or_else(|| std::env::var("DELONIX_CRI_ADDR").ok())
-                .unwrap_or_else(|| "unix:///run/delonix-cri.sock".to_string());
-            delonix_cri::serve_blocking(cmd::util::state_root(), &addr)
-        }
-        Cmd::Api { addr } => {
-            let addr = addr
-                .or_else(|| std::env::var("DELONIX_API_ADDR").ok())
-                .unwrap_or_else(|| "unix:///run/delonix-mgmt.sock".to_string());
-            delonix_mgmt::serve_blocking(cmd::util::state_root(), &addr)
-        }
-        Cmd::DockerApi { addr } => cmd::dockerapi::run(addr),
         Cmd::Dash { once } => cmd::dash::run(cmd::dash::DashScope::Global, once),
         Cmd::Completion { shell } => cmd_completion(shell),
     }

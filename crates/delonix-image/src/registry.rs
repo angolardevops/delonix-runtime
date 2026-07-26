@@ -663,6 +663,27 @@ pub fn pull_from_registry_with_creds_platform(
     creds_override: Option<(String, String)>,
     requested_arch: Option<&str>,
 ) -> Result<Image> {
+    pull_from_registry_with_creds_full(store, reference, creds_override, requested_arch, None)
+}
+
+/// `(layer_index_1_based, layer_total, bytes_done, bytes_total)`.
+pub type PullProgressCb<'a> = &'a dyn Fn(usize, usize, u64, Option<u64>);
+
+/// Like [`pull_from_registry_with_creds_platform`], with an optional per-layer
+/// download progress callback — the multi-layer sibling of
+/// `pull_oci_artifact_with_progress` (single-blob VM artifacts). BUG FOUND
+/// live: `delonix image pull <ref>` gave no feedback at all for a large image
+/// (multiple, sometimes hundreds-of-MB, layers) beyond one log line at the
+/// very start — looked hung, unlike `docker pull`'s familiar per-layer bars.
+/// The engine crate only REPORTS bytes; the bin draws (same split
+/// `blob_with_progress`'s own doc comment establishes).
+pub fn pull_from_registry_with_creds_full(
+    store: &ImageStore,
+    reference: &str,
+    creds_override: Option<(String, String)>,
+    requested_arch: Option<&str>,
+    progress: Option<PullProgressCb>,
+) -> Result<Image> {
     let (host, repo, refr) = parse_reference(reference);
     let http = reqwest::blocking::Client::builder()
         .user_agent("delonix/0.1")
@@ -763,7 +784,14 @@ pub fn pull_from_registry_with_creds_platform(
             i + 1,
             total
         );
-        let data = c.blob(&ldigest)?;
+        let data = if let Some(cb) = progress {
+            let layer_index = i + 1;
+            let adapter =
+                |done: u64, blob_total: Option<u64>| cb(layer_index, total, done, blob_total);
+            c.blob_with_progress(&ldigest, Some(&adapter))?
+        } else {
+            c.blob(&ldigest)?
+        };
         let dg = store.cas().write(&data)?;
         if dg != ldigest {
             return Err(Error::Registry(format!("corrupted layer: {ldigest}")));

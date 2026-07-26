@@ -1,7 +1,7 @@
 # kind: Ingress — Kubernetes-shaped L7/HTTP Ingress (host/path → backend service).
 # This is the networking.k8s.io/v1 Ingress schema; it compiles to the embedded L7
 # reverse-proxy (same engine as kind: HTTPRoute). Apply with:
-#   delonix httproute apply -f examples/ingress.yaml   (or `stack apply`)
+#   delonix net httproute apply -f examples/ingress.yaml   (or `stack apply`)
 #
 # NOTE: `kind: Ingress` used to be the L4 firewall — that moved to
 # `kind: FirewallPolicy` (direction: ingress); see examples/firewall.yaml.

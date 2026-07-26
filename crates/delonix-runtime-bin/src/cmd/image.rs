@@ -568,7 +568,37 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
 }
 
 fn cmd_pull(images: &ImageStore, reference: &str, verify: Option<&std::path::Path>) -> Result<()> {
-    let img = delonix_image::pull_from_registry(images, reference)?;
+    // Per-layer progress bar (`docker pull`-style) — BUG FOUND live: a
+    // multi-hundred-MB image gave no feedback at all beyond one log line at
+    // the very start, looked hung. `last` tracks (layer, bytes) so a
+    // transition to a NEW layer closes the previous bar's line, without
+    // depending on the registry sending a Content-Length (chunked transfers
+    // may not) to know when one layer ends and the next begins.
+    let last = std::cell::Cell::new((0usize, 0u64));
+    let on_progress = move |layer: usize, layer_total: usize, done: u64, total: Option<u64>| {
+        let (last_layer, last_done) = last.get();
+        if last_layer != 0 && last_layer != layer {
+            super::output::progress_done();
+        }
+        let advanced = last_layer != layer || done.saturating_sub(last_done) >= 2 * 1024 * 1024;
+        let finished = total.map(|t| done >= t).unwrap_or(false);
+        if advanced || finished {
+            last.set((layer, done));
+            super::output::progress_bar(
+                &format!("[pull] layer {layer}/{layer_total}"),
+                done,
+                total,
+            );
+        }
+    };
+    let img = delonix_image::registry::pull_from_registry_with_creds_full(
+        images,
+        reference,
+        None,
+        None,
+        Some(&on_progress),
+    )?;
+    super::output::progress_done();
     // Verify AFTER the pull (the cosign signature lives in a tag alongside the
     // image in the registry, so we need it here). If it fails, the command fails —
     // the image stays local, but whoever asked for `--verify` knows it is untrusted.
