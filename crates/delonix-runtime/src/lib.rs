@@ -3370,6 +3370,22 @@ fn spawn(store: &Store, container: &mut Container, rootfs: &str, spec: &RunSpec<
             if let Some((_, logw)) = log_pipe {
                 unsafe { libc::close(logw) };
             }
+            // This shim never execs — it just loops copying `src` to the log file for as
+            // long as the container lives — so CLOEXEC never takes effect for it: every
+            // OTHER fd the caller had open at fork time (e.g. a long-lived server's OTHER
+            // live connections, its listening socket, epoll/eventfd) would otherwise stay
+            // open here for the container's whole life, keeping those connections from
+            // ever reaching EOF on the peer's side even after the caller itself is done
+            // with them. Close everything except `src` before doing anything else —
+            // `close_range` is a raw syscall (no allocation), the safe choice this soon
+            // after forking a process that may have other threads.
+            let srcu = src as u32;
+            unsafe {
+                if srcu > 3 {
+                    libc::close_range(3, srcu - 1, 0);
+                }
+                libc::close_range(srcu + 1, u32::MAX, 0);
+            }
             // The shim outlives `delonix run` (it lives as long as the container lives).
             // It must DROP the stdio inherited from the parent — otherwise a caller that captures
             // the stdout of `run -d` (the Docker shim, `$(...)`, CI/scripts) stays

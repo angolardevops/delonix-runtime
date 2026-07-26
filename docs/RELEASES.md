@@ -4,6 +4,81 @@
 > (regenerado automaticamente pelo pipeline de release a cada tag publicada).
 > Não editar à mão — edita a nota da release respectiva.
 
+## v0.26.0 — mutações na Docker Engine API (`delonix docker-api`)
+
+Fecha mais um dos 4 gaps "bloqueantes" identificados na análise Docker/Podman
+([docs/COMPARACAO-DOCKER-PODMAN.md](../COMPARACAO-DOCKER-PODMAN.md)): a API
+docker-compatível (`delonix docker-api`) tinha só leitura (`/_ping`/`/version`/`/info`/
+`/containers/json`/`/images/json`, v.2026-07-23) — sem `docker run`/`docker compose up`
+funcionarem, o `DOCKER_HOST=unix://...` de um `docker` CLI real não servia de nada além de `ps`.
+
+### Novo
+
+- **Mutações de ciclo de vida** — `POST /containers/create|start|stop|kill|wait|restart|rename`,
+  `DELETE /containers/{id}`, `GET /containers/{id}/json`. Cada rota delega na MESMA
+  `cmd_run`/`cmd_stop`/`cmd_kill`/`cmd_wait`/`cmd_restart`/`cmd_rename`/`cmd_rm` que o CLI já usa —
+  zero lógica de motor duplicada. `docker_config_to_run_opts` traduz o `ContainerConfig` JSON do
+  Docker (`Image`/`Cmd`/`Entrypoint`/`Env`/`Labels`/`HostConfig.{Binds,PortBindings,RestartPolicy,
+  Memory,NanoCpus,Privileged,CapAdd,CapDrop}`) para o `RunOpts` interno.
+- **Simplificação deliberada, documentada**: `create` já arranca de imediato (o motor não tem um
+  estado "created" dormente à parte) — `start` numa já-a-correr devolve o **304** idempotente que o
+  docker real também devolve nesse caso, o que mantém o par `create`→`start` (o que `docker compose
+  up` de facto usa) a funcionar sem precisar de um estado dormente novo.
+- **`exec`/attach interactivo (HTTP hijacking) continua fora de escopo** desta fatia (não muda o
+  scope já documentado na v anterior). **`--restart` é recusado com um erro claro**: a política
+  precisa do supervisor `run_supervised`, que faz um `fork()` cru assumindo um chamador
+  single-threaded — verdade só para o CLI, não para este servidor `tokio` multi-thread; arriscar
+  esse fork podia deadlockar silenciosamente (um lock de outra thread, ex. do alocador, ficaria
+  preso para sempre no filho). Usa `delonix container run --restart ...` do CLI para isso.
+
+### 2 bugs reais corrigidos, encontrados a validar ao vivo contra um `docker` CLI real
+
+1. **Zombie permanente** — um container desanexado morto (`docker kill`) ficava `<defunct>` para
+   sempre (`ps`), e `docker inspect` continuava a dizer `Running` indefinidamente. Causa-raiz:
+   `spawn()` só devolve sem `waitpid` quando `detach: true` — inofensivo no CLI normal (o processo
+   sai a seguir, o órfão é reparentado ao `init` real do host, que o reapa sozinho), mas este
+   servidor NUNCA sai — é o pai real do container para sempre e nunca chamava `waitpid`, e uma
+   zombie ainda ocupa a entrada na tabela de processos (`kill(pid, 0)` continua a suceder).
+   **Corrigido**: thread dedicada (`spawn_zombie_reaper`) que faz `waitpid(-1, ...)` em loop —
+   confirmado seguro contra o resto do motor (as únicas chamadas `waitpid` directas num pid
+   específico, em `reexec_mapped`/`remove_tree_mapped`, servem `build`/`volsnap`/`prune`, nenhuma
+   das quais esta API expõe hoje).
+2. **Fuga de file descriptors no shim de logs** — `log_shim` (um `fork()` que nunca faz `execve`,
+   corre para sempre a copiar o pipe do container para o ficheiro de log) só fechava o stdio
+   herdado (fds 0/1/2). Num servidor long-lived, herdava TAMBÉM os sockets de outras ligações HTTP
+   vivas nesse instante e ficava a segurá-los abertos por toda a vida do container. **Corrigido**:
+   fecha tudo excepto o fd de origem logo a seguir ao fork (`libc::close_range`, sem alocação —
+   seguro tão cedo depois de um fork de processo multi-thread).
+
+### Validado ao vivo contra um `docker` CLI real (27.3.1)
+
+`docker create`+`start`+`inspect`+`kill`+`wait`+`restart`+`rename`+`stop`+`rm` — todos correctos e
+instantâneos (é exactamente o caminho que `docker compose up/down` usa, sem passar pelo `run`).
+`wait` bloqueia e devolve o exit code real só com supervisor `--restart` (limitação arquitectural
+pré-existente, não desta fatia — sem supervisor mostra `137`, documentado desde a v0.25.0).
+
+**Limitação encontrada, documentada, não bloqueante**: o subcomando de conveniência `docker run`
+(create+start num só comando) não devolve o controlo ao terminal de forma fiável contra este
+servidor — o container fica correcto e a funcionar (confirmado via `inspect`/`describe` nativo),
+mas o processo `docker` cliente não termina. A causa aparenta ser um comportamento interno do
+próprio CLI Go (sinalização/cleanup), não reproduzido com `create`+`start` em separado. Recomendação:
+usar `docker create`+`docker start` (ou `docker compose`, que já usa esse caminho) em vez de
+`docker run` directamente contra este servidor.
+
+### Validação
+
+`cargo build`/`clippy --all-targets -D warnings`/`fmt --check` limpos nos 4 crates tocados
+(`delonix-runtime`, `delonix-runtime-bin`). Testes existentes continuam verdes (285 em
+`delonix-runtime-bin` + suite de `delonix-runtime`).
+
+### Por fazer
+
+BuildKit-lite (`RUN --mount=secret`, `--platform`) e GPU real via CDI/nvidia-container-toolkit —
+os 2 gaps "bloqueantes"/maiores restantes do roadmap, já com plano desenhado, próximas fatias desta
+mesma série.
+
+---
+
 ## v0.25.0 — paridade de CLI de operação com Docker/Podman
 
 Fecha a Fase 5 do roadmap de paridade Docker/Podman

@@ -2695,7 +2695,7 @@ fn should_restart(policy: &str, status: &delonix_runtime_core::Status, restarts:
 }
 
 /// Does the policy require supervision? (`no` needs no supervisor at all.)
-fn policy_supervised(policy: &str) -> bool {
+pub(crate) fn policy_supervised(policy: &str) -> bool {
     matches!(
         policy.split(':').next().unwrap_or(""),
         "always" | "unless-stopped" | "on-failure"
@@ -2914,7 +2914,7 @@ fn unpublish_ports(c: &Container, slirp_pid: Option<i32>) {
 /// (rootless: the flat copy in `containers/<id>/rootfs`; root: remounts the
 /// overlay, whose `upper` preserves the writes). It's what `rm`+`run` lacks: it
 /// doesn't lose the state written inside the container.
-fn cmd_start(images: &ImageStore, store: &Store, id: &str) -> Result<()> {
+pub(crate) fn cmd_start(images: &ImageStore, store: &Store, id: &str) -> Result<()> {
     let mut c = find(store, id)?;
     reconcile_with_diagnostics(store, &mut c);
     // `start` reasserts the desired state = running (clears the user's `stop`).
@@ -3200,17 +3200,24 @@ pub(crate) fn cmd_kill(store: &Store, id: &str, signal: &str) -> Result<()> {
 /// N = `Failed(N)`, 137 = `Crashed`, which covers both OOM and a violent signal
 /// death; this engine has no captured-real-signal path, same documented
 /// limitation as everywhere else `crash_reason` is used instead of a real
-/// waitpid status).
-pub(crate) fn cmd_wait(store: &Store, id: &str) -> Result<()> {
+/// waitpid status). Extracted from `cmd_wait` so `cmd::dockerapi`'s `POST
+/// /containers/{id}/wait` can reuse the exact same polling logic and get the
+/// code back as a value instead of parsing it off stdout.
+pub(crate) fn wait_for_exit(store: &Store, id: &str) -> Result<i32> {
     loop {
         let mut c = find(store, id)?;
         reconcile_with_diagnostics(store, &mut c);
         if c.status.is_terminal() {
-            println!("{}", c.status.exit_code());
-            return Ok(());
+            return Ok(c.status.exit_code());
         }
         std::thread::sleep(std::time::Duration::from_millis(500));
     }
+}
+
+pub(crate) fn cmd_wait(store: &Store, id: &str) -> Result<()> {
+    let code = wait_for_exit(store, id)?;
+    println!("{code}");
+    Ok(())
 }
 
 /// `stop` then `start` — reuses both wholesale rather than duplicating their
