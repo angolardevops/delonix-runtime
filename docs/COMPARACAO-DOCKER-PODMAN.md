@@ -21,6 +21,16 @@
 > o histórico do repo) — corrigido para "não implementado", que é a caracterização honesta. Os
 > outros 5 itens verificados (`--format`, cpuset/weights delegados, seccomp custom, bind `:z/:Z`,
 > `--network-alias`, compose `profiles`/`extends`) continuam exactamente como descrito.
+>
+> **Correcção real (2026-07-26, mesmo dia, terceira revisão)**: o único gap "importante"
+> genuinamente aberto identificado na re-comparação anterior — `cpuset`/`cpu.weight`/`io.weight`
+> ignorados no cgroup rootless-delegado — **está FEITO**. `try_delegated_base` já delegava os
+> controladores certos mas nunca escrevia os ficheiros na leaf; corrigido e **validado ao vivo**
+> neste host real (`--cpu-weight 500` confirmado na leaf de um container real). `cpuset`/`io`
+> continuam sem confirmação ao vivo por este host específico não os delegar ao `user@.service`
+> (limite de systemd/distro, não do código — confirmado tentando forçar com `systemd-run --scope
+> -p Delegate=cpuset`), mas o código agora escreve-os sempre que o kernel permitir, best-effort,
+> exactamente como o caminho root já fazia. Ver secção 2b.
 
 ## 1. Veredicto executivo
 
@@ -32,8 +42,8 @@ independentes que faltavam foram concluídas nesta revisão**: o núcleo de sysc
 rede (secção 1b, zero achados novos) e os 6 HIGH da auditoria original (secção 1a — 5
 confirmados, 1 corrigido de novo). Não há mais nenhuma peça de segurança "por confirmar" em
 aberto — o que resta é a triagem dos 10 achados candidatos menores (nunca confirmados nem
-refutados) e gaps de correctude "importantes" mas não-bloqueantes (cgroups rootless-delegados,
-`--format` Go-template).
+refutados) e o `--format` Go-template (scripting/CI). O único gap "importante" genuinamente
+aberto — cpuset/weights no cgroup rootless-delegado — foi FECHADO nesta mesma revisão.
 
 **Para que casos JÁ serve (com confiança):**
 - **Execução e operação interactiva de containers** — run/ps/stop/exec/logs/inspect + extras que o Docker não tem (reconfiguração a quente, pause via freezer, describe estilo kubectl, diagnóstico automático de crash com razão+forense).
@@ -44,9 +54,9 @@ refutados) e gaps de correctude "importantes" mas não-bloqueantes (cgroups root
 - **API Docker-compatível, BuildKit-lite, GPU/CDI e `docker-compose.yml` nativo** — mutações de ciclo de vida, `--mount=secret`/`--platform`, `--gpus`/CDI, `compose up/down/ps/logs` com `depends_on` real, todos v1 validados ao vivo (ver secções 2a/2b).
 
 **Para que NÃO serve (ainda):**
-- **Compatibilidade de ecossistema residual (limita o âmbito, não a segurança nem a confiança)** — sem `--format` Go-template (scripting/CI), gaps de correctude silenciosa em cgroups rootless-delegados (`container update --memory/--cpus` no-op nesse modo, secção 2b), `profiles`/`extends`/multi-ficheiro do compose ainda por fazer (erro claro, não silencioso).
+- **Compatibilidade de ecossistema residual (limita o âmbito, não a segurança nem a confiança)** — sem `--format` Go-template (scripting/CI), `container update --memory/--cpus` não implementado (secção 2b), `profiles`/`extends`/multi-ficheiro do compose ainda por fazer (erro claro, não silencioso).
 
-**Posição global:** um runtime rootless-first **sólido em desenho, confirmado por duas rondas de auditoria adversarial independente, e já à par ou à frente do Docker/Podman em ciclo de vida, rede, build e compatibilidade de API**. A barreira que existia — "segurança não confirmada de fora para dentro" — está fechada. O que resta é compatibilidade de superfície residual (scripting `--format`, correctude fina em cgroups delegados), não mais uma questão de confiança.
+**Posição global:** um runtime rootless-first **sólido em desenho, confirmado por duas rondas de auditoria adversarial independente, e já à par ou à frente do Docker/Podman em ciclo de vida, rede, build e compatibilidade de API**. A barreira que existia — "segurança não confirmada de fora para dentro" — está fechada. O único gap "importante" genuinamente aberto (cgroups rootless-delegados) foi fechado nesta revisão. O que resta é compatibilidade de superfície residual (scripting `--format`), não mais uma questão de confiança nem de correctude silenciosa.
 
 ---
 
@@ -157,7 +167,7 @@ esta auditoria de 2026-07-26 não os re-confirma. Continuam a precisar do seu pr
 | Quadlet / units declaráveis versionáveis | podman generate systemd / Quadlet | **Parcial** — `boot enable` fotografa containers vivos, não é ficheiro declarativo | boot.rs:131-135 |
 | Auto-update de imagens | podman auto-update + timer | **Ausente** | grep autoupdate = 0 |
 | `--pids-limit` configurável | por container | **Ausente** — fixo em 512 | lib.rs:2205 |
-| cpuset/cpu.weight/io.weight no rootless-delegado (o normal) | podman aplica no cgroup delegado | **Ignorados** — só escritos no caminho não-delegado (root); delegado só faz memory/pids/cpu.max | lib.rs:2708-2710, 2796 |
+| ~~cpuset/cpu.weight/io.weight no rootless-delegado (o normal)~~ | podman aplica no cgroup delegado | ✅ **FEITO (2026-07-26)** — `try_delegated_base` já activava `+cpuset`/`+io` no `subtree_control` mas nunca escrevia os ficheiros na leaf; corrigido para escrever os três, tal como o caminho root já fazia. Validado ao vivo (kaeso-sys-01): `--cpu-weight 500` confirmado na leaf real (`cpu` está delegado neste host). `cpuset`/`io` continuam sem confirmação ao vivo — este host não os delega ao `user@.service` (confirmado com `systemd-run --scope -p Delegate=cpuset`), limite da distro/systemd, não do código; o `fs::write` fica best-effort aí, mesmo comportamento já aceite no caminho root | `try_delegated_base` em `crates/delonix-runtime/src/lib.rs` |
 | `container update --memory/--cpus` | Reescreve o cgroup real, a quente | **Não implementado** — `UpdateOpts`/`cmd_update` não têm `--memory`/`--cpus` nenhum (só publish/volume/net-connect/net-rate); `runtime::update_limits` existe no motor mas não tem NENHUM chamador em todo o histórico do repo. Correcção de registo (2026-07-26): uma versão anterior deste doc descrevia isto como "no-op silencioso" — errado, não há flag nenhuma para invocar em primeiro lugar, o `clap` recusaria a invocação antes de qualquer código correr | `cmd/container.rs` (`UpdateOpts`), `delonix-runtime/src/lib.rs::update_limits` (código morto) |
 | Limites garantidos em rootless SEM delegação systemd | podman assume Delegate=yes por omissão | **Best-effort** — memory/cpu/pids não aplicados; fork-bomb pode matar o host | lib.rs:2736-2768 |
 
@@ -229,7 +239,7 @@ Honestamente, não é só "Docker com menos features" — há genuíno valor nov
 
 **Fase 4 — correcções de correctude silenciosas restantes:**
 - ✅ **FEITO**: perfil seccomp custom (erro explícito), opções de bind `:z/:Z` SELinux (erro explícito), `--network-alias` no-op (agora avisa), fuga de rootfs no `--rm` rootless (confirmado fixo 2026-07-26 — ver secção 2a/o achado da auditoria original).
-8. **`cpuset`/`cpu.weight`/`io.weight` ignorados no cgroup rootless-delegado** (o modo normal) — ainda por corrigir; precisa de teste num host com delegação systemd real. `container update --memory/--cpus` continua **não implementado** de todo (não é um bug de no-op, é uma feature em falta — ver secção 2b). (lib.rs:2899-2906)
+8. ✅ **FEITO (2026-07-26)**: `cpuset`/`cpu.weight`/`io.weight` no cgroup rootless-delegado (o modo normal) — `try_delegated_base` corrigido para escrever os três na leaf, validado ao vivo neste host (`--cpu-weight`). `container update --memory/--cpus` continua **não implementado** de todo — não é um bug de no-op, é uma feature em falta (ver secção 2b).
 
 **Fase 5 — paridade de CLI de operação:**
 - ✅ **FEITO (v0.25.0)**: `wait`, `kill -s`, `attach` (só saída), `restart` (subcomando), `logs --tail/--since/--timestamps`, `exec -e/-w/-u`, `rename`, `port` — ver secção 2b para o detalhe e as limitações honestas de cada um.
