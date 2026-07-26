@@ -4,6 +4,81 @@
 > (regenerado automaticamente pelo pipeline de release a cada tag publicada).
 > Não editar à mão — edita a nota da release respectiva.
 
+## v0.29.0 — `docker-compose.yml` nativo + fecho da Fase 0 de segurança
+
+Fecha o último gap "importante" (não bloqueante, mas de alto valor) da análise Docker/Podman
+([docs/COMPARACAO-DOCKER-PODMAN.md](../COMPARACAO-DOCKER-PODMAN.md)) — suporte nativo a
+`docker-compose.yml` — e conclui as DUAS auditorias de segurança adversariais independentes que
+faltavam desde 2026-07-23, fechando por completo a "Fase 0" do roadmap de produção.
+
+### Novo — `delonix compose up|down|ps|logs|config`
+
+Suporte nativo ao Compose Spec v2.x (`cmd/compose.rs`), um tradutor de esquema estrangeiro da
+mesma família de `container::pod_to_run_opts` (Pod k8s) e `dockerapi::docker_config_to_run_opts`
+(API Docker) — parser tipado à mão (zero dependência nova), traduzido directamente para `RunOpts`
+(containers, via o mesmo `cmd_run` do CLI) ou para `ManifestDoc`s que reaproveitam
+`image`/`network`/`volume::apply` tal-e-qual (mesma idempotência, mesmo hardening de input, zero
+lógica de criação duplicada).
+
+- **`depends_on`** com as 3 condições reais (`service_started`/`service_healthy`/
+  `service_completed_successfully`) — ordenação topológica do grafo de serviços (ciclo → erro
+  claro nomeando os serviços envolvidos, nunca uma ordem arbitrária) + espera pelo healthcheck
+  real (inline do serviço, ou o da própria imagem se o serviço não declarar um). Zero mudança ao
+  schema do motor/store.
+- **Projecto** (`compose down`/`ps`/`logs`, escopados) — cada container ganha a label
+  `delonix.io/compose-project=<nome>` (mesma ideia de `pod.rs`); redes/volumes (sem campo de
+  labels) usam nomeação determinística `<projecto>_<nome>`, a mesma convenção do `docker compose`
+  real. `down` reconstrói os mesmos nomes a partir do ficheiro compose reanalisado — sem registo
+  próprio, mesma filosofia do `stack describe`/`cluster ls`.
+- Cobre `image`/`build`/`environment`/`env_file`/`ports`/`volumes`/`command`/`entrypoint`/
+  `healthcheck`/`restart`/`networks`/`labels`/`user`/`cap_add`/`cap_drop`/`privileged`/`tmpfs`/
+  `deploy.resources.limits`/`container_name`/`hostname`/`read_only`, top-level `networks:`/
+  `volumes:` (incl. `external: true`).
+- **Por fazer, sempre com erro claro (nunca silencioso)**: `profiles`/`extends`/`configs`/
+  `secrets` top-level (usa `kind: Secret` em vez disso)/multi-ficheiro (`-f a -f b`/`include:`),
+  `build.target`, `deploy.replicas≠1`, `networks.*.ipv4_address` fixo, volumes anónimos, porta
+  sem host explícito. `working_dir:` é aceite mas AVISA e é ignorado — gap pré-existente do motor
+  inteiro, não introduzido por este módulo.
+
+### Validado ao vivo, de ponta-a-ponta (host real, Postgres + app)
+
+`compose up` com um `web` a depender de `db` via `condition: service_healthy`: `web` só arrancou
+depois do `pg_isready` do `db` ter sucesso REAL (visível no output do próprio healthcheck); `ps`
+mostrou os 2 containers correctos; re-`up` foi idempotente ("already exists, nothing to do");
+`logs`/`logs <serviço>` funcionaram (incluindo o log completo de arranque do Postgres); `down -v`
+removeu os 2 containers + a rede + o volume sem deixar nada para trás. Um bug real de CLI foi
+encontrado e corrigido durante esta validação: `compose logs` tinha um `-f` a colidir entre
+`--file` e `--follow` (um `panic` do `clap` só disparado em runtime, nunca detectado por
+build/clippy/test — só a validação ao vivo o apanhou).
+
+### Segurança — as duas auditorias independentes que faltavam, ambas feitas nesta janela
+
+1. **Núcleo de syscalls (`delonix-runtime/lib.rs`, 104 `unsafe`) + `delonix-net/infra.rs`** — uma
+   correcção de registo importante: uma versão anterior deste doc afirmava estes ficheiros
+   "nunca terem tido revisão adversarial", o que estava desactualizado (o AGENTS.md já
+   documentava uma auditoria de 2026-07-23 que os cobriu, com 2 CRITICAL + 3 HIGH corrigidos
+   nesse dia). A auditoria FRESCA desta janela é a confirmação independente de fora para dentro
+   que faltava para essa ronda — **zero achados novos CRITICAL/HIGH**.
+2. **Os 6 HIGH da auditoria original de 2026-07-21** — nunca tinham tido um 2º par de olhos
+   genuinamente externo. 5/6 confirmados sólidos ao tentar reconstruir activamente cada exploit
+   original. O 6º (kubeconfig cluster-admin) tinha um **TOCTOU residual real**: `fs::write`
+   cria o ficheiro local no modo do umask (664, medido ao vivo neste host) e só DEPOIS aplica
+   `chmod 600` — uma janela real em que outro utilizador local podia ler as credenciais
+   cluster-admin. **Corrigido**: `OpenOptions::mode(0o600)` define o modo atomicamente na
+   criação (`cmd/cluster.rs::fetch_kubeconfig`), o mesmo padrão que `ensure_libvirt_network` já
+   usa noutro ponto do código.
+
+Com isto, a Fase 0 do roadmap de segurança (docs/COMPARACAO-DOCKER-PODMAN.md) está fechada por
+completo — não há mais nenhuma peça "por confirmar de fora para dentro" em aberto.
+
+### Validação
+
+Build/clippy/fmt/test limpos no workspace inteiro. 299 testes em `delonix-runtime-bin` (+9
+novos: parsing/tradução do compose, ordenação topológica, tokenizador `shlex_split`, parsing de
+duração Go, nomes de projecto).
+
+---
+
 ## v0.28.0 — GPU real via CDI (`--gpus`/`--device nvidia.com/gpu=...`)
 
 Fecha o último dos 4 gaps "bloqueantes" da análise Docker/Podman

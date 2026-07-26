@@ -472,7 +472,7 @@ fn describe_one(n: &Network) {
     d.print();
 }
 
-fn cmd_rm(store: &NetworkStore, name: &str) -> Result<()> {
+pub(crate) fn cmd_rm(store: &NetworkStore, name: &str) -> Result<()> {
     store.remove(name)?;
     infra::network_remove(name);
     println!("{name}");

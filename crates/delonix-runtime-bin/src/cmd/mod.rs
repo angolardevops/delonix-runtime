@@ -3,6 +3,7 @@ pub mod build;
 pub mod cdi;
 pub mod cluster;
 pub mod complete;
+pub mod compose;
 pub mod conditions;
 pub mod container;
 pub mod dash;

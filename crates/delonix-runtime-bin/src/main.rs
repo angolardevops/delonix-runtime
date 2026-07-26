@@ -104,6 +104,11 @@ enum Cmd {
         #[command(subcommand)]
         action: cmd::stack::StackCmd,
     },
+    /// Native `docker-compose.yml` support (up/down/ps/logs/config).
+    Compose {
+        #[command(subcommand)]
+        action: cmd::compose::ComposeCmd,
+    },
     /// The engine itself: events, state and disk usage.
     System {
         #[command(subcommand)]
@@ -270,6 +275,7 @@ fn run() -> Result<()> {
         Cmd::Storage { action } => cmd::storage::run(action),
         Cmd::Sharevolume { action } => cmd::sharevolume::run(action),
         Cmd::Stack { action } => cmd::stack::run(action),
+        Cmd::Compose { action } => cmd::compose::run(action),
         Cmd::System { action } => cmd::system::run(action),
         Cmd::Cluster { action } => cmd::cluster::run(action),
         Cmd::Kube { action } => cmd::kube::run(action),
