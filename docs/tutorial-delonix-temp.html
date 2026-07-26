@@ -78,7 +78,7 @@ main{padding:1.4rem 1.2rem 4rem}}
 <h5>Documentação</h5>
 <a href="index.html">Início</a><a href="cheatsheet.html">Cheatsheet</a><a href="kinds.html">Kinds e templates</a><a href="arquitectura.html">Arquitectura</a><a href="c4.html">Modelo C4 e system design</a><a href="cri.html">CRI — kubelet sem containerd</a><a href="comparacao.html">Delonix vs Docker vs Podman</a><a href="tutorial-delonix-temp.html" class="on">Projecto completo: Delonix Temp</a><a href="delonixctl.html">delonixctl — cliente PaaS</a>
 <h5>Referência CLI</h5>
-<a href="comandos/container.html">delonix container</a><a href="comandos/pod.html">delonix pod</a><a href="comandos/image.html">delonix image</a><a href="comandos/build.html">delonix build</a><a href="comandos/vm.html">delonix vm</a><a href="comandos/volumes.html">delonix volumes</a><a href="comandos/network.html">delonix network</a><a href="comandos/stack.html">delonix stack</a><a href="comandos/cluster.html">delonix cluster</a><a href="comandos/secret.html">delonix secret</a><a href="comandos/storage.html">delonix storage</a><a href="comandos/sharevolume.html">delonix sharevolume</a><a href="comandos/ingress.html">delonix ingress</a><a href="comandos/egress.html">delonix egress</a><a href="comandos/httproute.html">delonix httproute</a><a href="comandos/tunnel.html">delonix tunnel</a><a href="comandos/flow.html">delonix flow</a><a href="comandos/boot.html">delonix boot</a><a href="comandos/system.html">delonix system</a><a href="comandos/dash.html">delonix dash</a><a href="comandos/docker-api.html">delonix docker-api</a><a href="comandos/kube.html">delonix kube</a><a href="comandos/netns.html">delonix netns</a><a href="comandos/completion.html">delonix completion</a>
+<a href="comandos/container.html">delonix container</a><a href="comandos/pod.html">delonix pod</a><a href="comandos/image.html">delonix image</a><a href="comandos/build.html">delonix build</a><a href="comandos/vm.html">delonix vm</a><a href="comandos/volumes.html">delonix volumes</a><a href="comandos/network.html">delonix network</a><a href="comandos/stack.html">delonix stack</a><a href="comandos/cluster.html">delonix cluster</a><a href="comandos/secret.html">delonix secret</a><a href="comandos/storage.html">delonix storage</a><a href="comandos/sharevolume.html">delonix sharevolume</a><a href="comandos/ingress.html">delonix net ingress</a><a href="comandos/egress.html">delonix net egress</a><a href="comandos/httproute.html">delonix net httproute</a><a href="comandos/tunnel.html">delonix net tunnel</a><a href="comandos/flow.html">delonix net flow</a><a href="comandos/boot.html">delonix net boot</a><a href="comandos/system.html">delonix system</a><a href="comandos/dash.html">delonix dash</a><a href="comandos/docker-api.html">delonix serve docker-api</a><a href="comandos/kube.html">delonix cluster kube</a><a href="comandos/netns.html">delonix net netns</a><a href="comandos/completion.html">delonix completion</a>
 <h5>Projecto</h5>
 <a href="https://github.com/angolardevops/delonix-runtime">GitHub</a>
 <a href="https://github.com/angolardevops/delonix-runtime/releases">Releases</a>
@@ -174,7 +174,7 @@ INFO:     10.0.2.2:57802 - "GET /api/weather/Luanda HTTP/1.1" 200 OK</code></pre
 <h2>4. Expor à internet</h2>
 <p>Uma porta local não chega — o objectivo é uma URL que qualquer pessoa, em qualquer rede,
 consiga abrir. É aqui que entra o <a href="comandos/tunnel.html"><code>kind: Tunnel</code></a>:</p>
-<pre><code>delonix tunnel expose --name delonix-temp --provider pinggy --local-port 8080</code></pre>
+<pre><code>delonix net tunnel expose --name delonix-temp --provider pinggy --local-port 8080</code></pre>
 <div class="out"><pre><code>tunnel/delonix-temp: running — https://lfdhz-197-148-40-67.free.pinggy.net</code></pre></div>
 <p>Essa URL é REAL — foi a que este guião recebeu ao correr o comando. (A tua vai ser diferente
 de cada vez: o provider grátis atribui uma nova de cada sessão.) Confirmação, de fora, sem
@@ -194,7 +194,7 @@ pública, tantos backends quantos precisares. Ver <code>examples/httproute.yaml<
 </div>
 
 <h2>Arrumar</h2>
-<pre><code>delonix tunnel rm delonix-temp
+<pre><code>delonix net tunnel rm delonix-temp
 delonix container rm -f delonix-temp</code></pre>
 
 <h2>O que isto provou</h2>
@@ -203,7 +203,7 @@ delonix container rm -f delonix-temp</code></pre>
 <tr><td><code>delonix build</code></td><td>build multi-stage real (2 estágios, <code>COPY --from</code>), com rede no build</td></tr>
 <tr><td><code>delonix container run -p</code></td><td>NAT userspace sem root, porta publicada no host</td></tr>
 <tr><td><code>delonix container logs</code></td><td>observabilidade de um serviço real a correr</td></tr>
-<tr><td><code>delonix tunnel expose</code></td><td>tráfego REAL da internet pública a chegar a um container local, sem conta nem IP público</td></tr>
+<tr><td><code>delonix net tunnel expose</code></td><td>tráfego REAL da internet pública a chegar a um container local, sem conta nem IP público</td></tr>
 </table>
 
 <footer>Delonix Engine · Apache-2.0 · <a href="https://github.com/angolardevops/delonix-runtime">angolardevops/delonix-runtime</a>

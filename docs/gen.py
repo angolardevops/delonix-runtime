@@ -25,6 +25,29 @@ BIN = sys.argv[1] if len(sys.argv) > 1 else os.path.join(ROOT, "..", "target", "
 BIN_CTL = sys.argv[2] if len(sys.argv) > 2 else os.path.join(ROOT, "..", "target", "release", "delonixctl")
 
 
+# v0.30.0 nested some former top-level groups under `net`/`serve`/`cluster`
+# (deep grouping, no aliases kept) — this maps a GROUPS dict key (the stable
+# doc page name, unchanged) to the real argv prefix needed to reach its
+# `--help` today. Anything absent here is still a real top-level command.
+GROUP_PATH = {
+    "netns": ("net", "netns"),
+    "flow": ("net", "flow"),
+    "ingress": ("net", "ingress"),
+    "egress": ("net", "egress"),
+    "httproute": ("net", "httproute"),
+    "tunnel": ("net", "tunnel"),
+    "boot": ("net", "boot"),
+    "cri": ("serve", "cri"),
+    "api": ("serve", "api"),
+    "docker-api": ("serve", "docker-api"),
+    "kube": ("cluster", "kube"),
+}
+
+
+def group_argv(name):
+    return GROUP_PATH.get(name, (name,))
+
+
 def help_of(*args):
     out = subprocess.run([BIN, *args, "--help"], capture_output=True, text=True)
     return (out.stdout or out.stderr).strip()
@@ -355,7 +378,7 @@ bloco local e não compõe com um subdirectório de um mount de rede.""",
         },
     },
     "ingress": {
-        "title": "delonix ingress",
+        "title": "delonix net ingress",
         "tagline": "Firewall de ENTRADA (regras L4 + publishes DNAT) de um container na SDN.",
         "intro": """Metade da superfície unificada de firewall (a outra é <code>egress</code>). Edita a
 única fonte de verdade — o <code>ContainerFw</code> por container, aplicado como regras nft na chain de
@@ -363,37 +386,37 @@ ingress. <code>ingress</code> governa a ENTRADA: regras allow/deny por <code>[pr
 a política por omissão, e os <em>publishes</em> DNAT. Só actua em containers numa rede custom (têm IP na
 <code>delonix0</code>); <code>--net host</code> é recusado.""",
         "subs": {
-            "allow": {"examples": [("Deixar entrar Postgres só da própria SDN", "delonix ingress allow db tcp/5432 --from 10.219.0.0/16")]},
-            "deny": {"examples": [("Bloquear uma porta específica", "delonix ingress deny web tcp/22")]},
-            "policy": {"examples": [("Default-deny (allowlist)", "delonix ingress policy db deny")]},
-            "publish": {"examples": [("Publicar uma porta pelo ingress (DNAT)", "delonix ingress publish web 8080:80")]},
-            "ls": {"examples": [("Ver regras + publishes", "delonix ingress ls db")]},
+            "allow": {"examples": [("Deixar entrar Postgres só da própria SDN", "delonix net ingress allow db tcp/5432 --from 10.219.0.0/16")]},
+            "deny": {"examples": [("Bloquear uma porta específica", "delonix net ingress deny web tcp/22")]},
+            "policy": {"examples": [("Default-deny (allowlist)", "delonix net ingress policy db deny")]},
+            "publish": {"examples": [("Publicar uma porta pelo ingress (DNAT)", "delonix net ingress publish web 8080:80")]},
+            "ls": {"examples": [("Ver regras + publishes", "delonix net ingress ls db")]},
         },
     },
     "egress": {
-        "title": "delonix egress",
+        "title": "delonix net egress",
         "tagline": "Firewall de SAÍDA (regras L4 + política de egress→Internet por-rede).",
         "intro": """A outra metade do firewall. Governa a SAÍDA de um container (regras allow/deny + política
 por omissão) e, ao nível da REDE, a política de egress para a Internet: <code>allow</code>/<code>deny</code>,
 ou <code>allowlist</code> (nega tudo excepto DNS e os CIDRs dados). Tudo sobre o mesmo <code>ContainerFw</code>
 /nft do <code>ingress</code>.""",
         "subs": {
-            "allow": {"examples": [("Só deixar sair HTTPS", "delonix egress allow app tcp/443 --to 0.0.0.0/0")]},
-            "policy": {"examples": [("Default-deny de saída", "delonix egress policy app deny")]},
-            "net": {"examples": [("Egress de uma rede em allowlist (só DNS + estes CIDRs)", "delonix egress net backend allowlist --to 10.0.0.0/8,1.1.1.1/32")]},
+            "allow": {"examples": [("Só deixar sair HTTPS", "delonix net egress allow app tcp/443 --to 0.0.0.0/0")]},
+            "policy": {"examples": [("Default-deny de saída", "delonix net egress policy app deny")]},
+            "net": {"examples": [("Egress de uma rede em allowlist (só DNS + estes CIDRs)", "delonix net egress net backend allowlist --to 10.0.0.0/8,1.1.1.1/32")]},
             "host": {"examples": [
                 ("Só deixar sair para o GitHub (e *.github.com), aprendido do DNS",
-                 "delonix egress host backend github.com"),
+                 "delonix net egress host backend github.com"),
             ], "notes": """<p>O que o nft/CIDR não faz: allowlist por <strong>hostname</strong>. O resolver DNS
 interno do ingress passa a snoopar os A-records das respostas e injecta-os num <code>set</code> nft
 por-rede (com timeout = expira com o TTL); o egress aceita esse set + DNS e dropa o resto. 100%
 rootless (sem eBPF) — a FQDN-policy do Cilium, via nftables. Repetível para vários hostnames.</p>"""},
-            "show": {"examples": [("Ver a política de egress de uma rede + os IPs FQDN aprendidos ao vivo", "delonix egress show backend")]},
-            "ls": {"examples": [("", "delonix egress ls app")]},
+            "show": {"examples": [("Ver a política de egress de uma rede + os IPs FQDN aprendidos ao vivo", "delonix net egress show backend")]},
+            "ls": {"examples": [("", "delonix net egress ls app")]},
         },
     },
     "httproute": {
-        "title": "delonix httproute",
+        "title": "delonix net httproute",
         "tagline": "Reverse-proxy L7/HTTP embutido (`kind: HTTPRoute`) — routing por Host + prefixo de path.",
         "intro": """Um reverse-proxy HTTP/HTTPS <strong>embutido</strong> (hyper puro, sem Nginx/Envoy),
 que corre dentro do netns do holder e roteia por <code>Host</code> + prefixo de <code>path</code> para
@@ -406,18 +429,18 @@ para dar uma única URL pública a vários backends.""",
         "subs": {
             "apply": {"examples": [
                 ("Aplicar as HTTPRoutes de um manifesto (sobe/recarrega o proxy)",
-                 "delonix httproute apply -f delonix-manifest.yaml"),
+                 "delonix net httproute apply -f delonix-manifest.yaml"),
             ]},
             "ls": {"examples": [
-                ("Estado do proxy + rotas activas", "delonix httproute ls"),
+                ("Estado do proxy + rotas activas", "delonix net httproute ls"),
             ]},
             "rm": {"examples": [
-                ("Parar o proxy e despublicar as portas", "delonix httproute rm"),
+                ("Parar o proxy e despublicar as portas", "delonix net httproute rm"),
             ]},
         },
     },
     "tunnel": {
-        "title": "delonix tunnel",
+        "title": "delonix net tunnel",
         "tagline": "Expõe uma porta local à internet pública via pinggy/ngrok/cloudflare (`kind: Tunnel`).",
         "intro": """Faz UMA coisa: leva tráfego da internet pública até UMA porta local — sem conta,
 sem IP público, sem configurar o router. Junta-se ao <code>httproute</code> apontando
@@ -432,26 +455,26 @@ NOMEADO com domínio próprio precisa da API do Cloudflare, ainda por implementa
         "subs": {
             "expose": {"examples": [
                 ("Expor uma porta local sem escrever manifesto (pinggy, grátis, efémero)",
-                 "delonix tunnel expose --name demo --provider pinggy --local-port 8080",
+                 "delonix net tunnel expose --name demo --provider pinggy --local-port 8080",
                  "tunnel/demo: running — https://oxipg-197-148-40-67.free.pinggy.net"),
             ], "notes": """<p>Validado ao vivo nesta mesma sessão: tráfego HTTPS real da internet
 chegou a um servidor local através do tunnel (HTTP 200) usando exactamente este comando.</p>"""},
             "ls": {"examples": [
-                ("Listar túneis (estado + URL pública)", "delonix tunnel ls",
+                ("Listar túneis (estado + URL pública)", "delonix net tunnel ls",
                  "NAME    PROVIDER   LOCAL PORT   PUBLIC URL                                    STATUS    UPTIME\n"
                  "test1   pinggy          18234   https://oxipg-197-148-40-67.free.pinggy.net   Running   Up 34 seconds"),
             ]},
             "describe": {"examples": [
-                ("Detalhe de um túnel", "delonix tunnel describe demo"),
+                ("Detalhe de um túnel", "delonix net tunnel describe demo"),
             ]},
             "rm": {"examples": [
-                ("Parar e remover (mata o processo agente a sério)", "delonix tunnel rm demo",
+                ("Parar e remover (mata o processo agente a sério)", "delonix net tunnel rm demo",
                  "tunnel/demo: removed"),
             ]},
         },
     },
     "flow": {
-        "title": "delonix flow",
+        "title": "delonix net flow",
         "tagline": "Tráfego por-container ao vivo — datapath eBPF (degrada para contadores veth).",
         "intro": """Telemetria de rede por container. Quando corre com privilégio (CAP_BPF/root), attacha
 dois classificadores tc/clsact em eBPF às veths da SDN, que contam bytes/pacotes por IP num BPF map
@@ -460,20 +483,20 @@ partilhado — <strong>sem nunca fazer drop</strong> (o nft continua o único en
 redesenha a cada 2s.""",
         "subs": {},
         "examples": [
-            ("Uma amostra", "sudo delonix flow"),
-            ("Monitorização contínua", "sudo delonix flow --watch"),
+            ("Uma amostra", "sudo delonix net flow"),
+            ("Monitorização contínua", "sudo delonix net flow --watch"),
         ],
     },
     "boot": {
-        "title": "delonix boot",
+        "title": "delonix net boot",
         "tagline": "Persistência no arranque: units systemd para os containers voltarem a subir no boot.",
         "intro": """<code>boot enable</code> gera uma unit systemd por container em execução (rootless →
 user units + <code>loginctl enable-linger</code>; root → system units), com <code>ExecStart</code>
 =<code>container start</code>. Assim os containers voltam a subir quando o host arranca, sem daemon.""",
         "subs": {
-            "enable": {"examples": [("Persistir os que correm agora", "delonix boot enable")]},
-            "status": {"examples": [("Ver o que está instalado", "delonix boot status")]},
-            "disable": {"examples": [("Remover as units de boot", "delonix boot disable")]},
+            "enable": {"examples": [("Persistir os que correm agora", "delonix net boot enable")]},
+            "status": {"examples": [("Ver o que está instalado", "delonix net boot status")]},
+            "disable": {"examples": [("Remover as units de boot", "delonix net boot disable")]},
         },
     },
     "system": {
@@ -504,7 +527,7 @@ automaticamente quando o stdout não é um terminal.""",
         ],
     },
     "docker-api": {
-        "title": "delonix docker-api",
+        "title": "delonix serve docker-api",
         "tagline": "Fatia SÓ-LEITURA da API Docker Engine, num socket unix — `docker version/ps/images/info`.",
         "intro": """Serve o suficiente da API real do Docker Engine (protocolo capturado ao vivo
 contra um <code>docker</code> CLI real, versão negociada via o header <code>Api-Version</code> da
@@ -516,30 +539,30 @@ fazer: mutações (<code>create</code>/<code>start</code>/<code>exec</code>) —
 <code>docker run</code>/<code>docker compose up</code>; qualquer rota não implementada dá 404 claro.""",
         "subs": {},
         "examples": [
-            ("Servir no socket por omissão", "delonix docker-api &"),
+            ("Servir no socket por omissão", "delonix serve docker-api &"),
             ("Um `docker` real a falar com o delonix",
              "DOCKER_HOST=unix:///run/delonix-docker.sock docker ps"),
         ],
     },
     "kube": {
-        "title": "delonix kube",
+        "title": "delonix cluster kube",
         "tagline": "Gera manifestos Kubernetes a partir de containers.",
         "intro": """<code>kube generate</code> produz um manifesto <code>kind: Pod</code> a partir de um
 container existente — a ponte para exportar uma carga do runtime local para um cluster.""",
         "subs": {
-            "generate": {"examples": [("Pod a partir de um container", "delonix kube generate web > web-pod.yaml")]},
+            "generate": {"examples": [("Pod a partir de um container", "delonix cluster kube generate web > web-pod.yaml")]},
         },
     },
     "netns": {
-        "title": "delonix netns",
+        "title": "delonix net netns",
         "tagline": "Gestão de baixo nível da infra de ingress rootless.",
         "intro": """A camada crua por baixo do <code>ingress</code>/<code>egress</code>: subir/descer o
 holder do ingress, attach/detach de netns, publish/unpublish de portas e firewall por container. A
 maioria dos utilizadores nunca precisa disto — usa os grupos de alto nível — mas está exposto para
 depuração e integração.""",
         "subs": {
-            "status": {"examples": [("Estado da infra de ingress", "delonix netns status")]},
-            "up": {"examples": [("Subir o holder do ingress", "delonix netns up")]},
+            "status": {"examples": [("Estado da infra de ingress", "delonix net netns status")]},
+            "up": {"examples": [("Subir o holder do ingress", "delonix net netns up")]},
         },
     },
     "completion": {
@@ -701,14 +724,14 @@ def examples_html(exs):
 def group_page(name, g):
     body = [f"<h1>{html.escape(g['title'])}</h1><p class='tagline'>{html.escape(g['tagline'])}</p>"]
     body.append(f"<p>{g['intro']}</p>")
-    top_help = help_of(name) if name != "completion" else help_of("completion")
+    top_help = help_of(*group_argv(name))
     body.append(f"<div class='help'><pre><code>{html.escape(top_help)}</code></pre></div>")
     if g.get("examples"):
         body.append("<h2>Exemplos</h2>" + examples_html(g["examples"]))
     if g.get("extra"):
         body.append(g["extra"])
     for sub, meta in g["subs"].items():
-        args = ["image", "--vm", sub] if name == "image" and sub in ("push", "build") else [name, sub]
+        args = ["image", "--vm", sub] if name == "image" and sub in ("push", "build") else list(group_argv(name)) + [sub]
         body.append(f"<h2 id='{sub}'><code>{html.escape(name)} {html.escape(sub)}</code></h2>")
         body.append(f"<div class='help'><pre><code>{html.escape(help_of(*args))}</code></pre></div>")
         if meta.get("notes"):
@@ -1017,7 +1040,7 @@ BuildKit</td></tr>
 <tr><td>Cargas GPU/CUDA</td><td>Docker ou Podman (com nvidia-container-toolkit)</td></tr>
 <tr><td><code>docker version</code>/<code>ps</code>/<code>images</code>/<code>info</code> via
 <code>DOCKER_HOST</code> (scripts/CI de leitura)</td>
-<td><strong>Delonix</strong> — <code>delonix docker-api</code>, validado contra um
+<td><strong>Delonix</strong> — <code>delonix serve docker-api</code>, validado contra um
 <code>docker</code> CLI real</td></tr>
 <tr><td><code>docker run</code>/<code>docker compose up</code>/testcontainers (precisam de
 criar containers via a API)</td><td>Docker ou Podman — só a parte de leitura da API está feita</td></tr>
@@ -1175,7 +1198,7 @@ main{max-width:1280px}
 
 def subcommands_of(group):
     """(sub, short-help) de cada subcomando de um grupo, lido do `--help` real."""
-    out, seen, rows = help_of(group), False, []
+    out, seen, rows = help_of(*group_argv(group)), False, []
     for line in out.splitlines():
         if line.strip().startswith("Commands:"):
             seen = True
@@ -1215,13 +1238,13 @@ CHEAT_TASKS = [
     ("Shell descartável", "delonix container run --rm -it alpine sh"),
     ("Rede própria + publicar pelo ingress", "delonix network create backend\ndelonix container run -d --net backend -p 8443:443 caddy"),
     ("Trocar uma porta a QUENTE (sem reiniciar)", "delonix container update web --publish-add 9090:80"),
-    ("Firewall: só deixar entrar Postgres da SDN", "delonix ingress allow db tcp/5432 --from 10.219.0.0/16\ndelonix ingress policy db deny"),
-    ("Firewall: egress da rede só p/ DNS + CIDRs", "delonix egress net backend allowlist --to 10.0.0.0/8"),
-    ("Tráfego por container ao vivo (eBPF)", "sudo delonix flow --watch"),
+    ("Firewall: só deixar entrar Postgres da SDN", "delonix net ingress allow db tcp/5432 --from 10.219.0.0/16\ndelonix net ingress policy db deny"),
+    ("Firewall: egress da rede só p/ DNS + CIDRs", "delonix net egress net backend allowlist --to 10.0.0.0/8"),
+    ("Tráfego por container ao vivo (eBPF)", "sudo delonix net flow --watch"),
     ("Volume de rede de um NAS (NFS)", "delonix storage create media --type nfs --server 10.0.0.5 --share /mnt/pool/media"),
     ("Segredo no cofre (não no argv)", "printf 's3nha' | delonix secret create db-pass"),
     ("Expor um container à internet pública (sem conta, sem router)",
-     "delonix container run -d --name web --expose 80 nginx\ndelonix tunnel expose --provider pinggy --local-port 8080",
+     "delonix container run -d --name web --expose 80 nginx\ndelonix net tunnel expose --provider pinggy --local-port 8080",
      "tunnel/tunnel-8080: running — https://oxipg-197-148-40-67.free.pinggy.net"),
     ("NAS partilhado por vários tenants, cada um com a sua quota",
      "delonix storage create nas --type nfs --server 10.0.0.5 --share /pool/data\n"
@@ -1229,7 +1252,7 @@ CHEAT_TASKS = [
     ("microVM com cloud-init", "delonix vm create node1 --disk base.qcow2 --ssh-key @~/.ssh/id_ed25519.pub"),
     ("Cluster Kubernetes do zero", "delonix cluster kubeadm --name lab --control-plane 1 --workers 2"),
     ("Aplicar um manifesto inteiro", "delonix stack apply -f delonix-manifest.yaml"),
-    ("Persistir os containers no arranque", "delonix boot enable"),
+    ("Persistir os containers no arranque", "delonix net boot enable"),
     ("Recuperar espaço (GC)", "delonix system prune"),
 ]
 
@@ -1299,7 +1322,7 @@ def cheatsheet_page():
     body.append("<h2>Todos os grupos</h2>")
     order = list(GROUPS.keys()) + ["cri"]
     for g in order:
-        title = GROUPS[g]["title"] if g in GROUPS else "delonix cri"
+        title = GROUPS[g]["title"] if g in GROUPS else "delonix serve cri"
         href = f"comandos/{g}.html" if g in GROUPS else "cri.html"
         subs = subcommands_of(g)
         head = f"<h3 id='{g}'><a href='{href}'><code>{html.escape(title)}</code></a></h3>"
@@ -1307,8 +1330,9 @@ def cheatsheet_page():
             tl = GROUPS[g]["tagline"] if g in GROUPS else "Serve o endpoint CRI (runtime.v1) num socket unix."
             body.append(head + f"<p>{html.escape(tl)}</p>")
             continue
+        prefix = " ".join(group_argv(g)) if g in GROUPS else "serve cri"
         rows = "".join(
-            f"<tr><td><code>{html.escape(g)} {html.escape(s)}</code></td><td>{html.escape(d)}</td></tr>"
+            f"<tr><td><code>{html.escape(prefix)} {html.escape(s)}</code></td><td>{html.escape(d)}</td></tr>"
             for s, d in subs
         )
         body.append(head + f"<table><tr><th>Comando</th><th>O que faz</th></tr>{rows}</table>")
@@ -1423,7 +1447,7 @@ INFO:     10.0.2.2:57802 - "GET /api/weather/Luanda HTTP/1.1" 200 OK</code></pre
 <h2>4. Expor à internet</h2>
 <p>Uma porta local não chega — o objectivo é uma URL que qualquer pessoa, em qualquer rede,
 consiga abrir. É aqui que entra o <a href="comandos/tunnel.html"><code>kind: Tunnel</code></a>:</p>
-<pre><code>delonix tunnel expose --name delonix-temp --provider pinggy --local-port 8080</code></pre>
+<pre><code>delonix net tunnel expose --name delonix-temp --provider pinggy --local-port 8080</code></pre>
 <div class="out"><pre><code>tunnel/delonix-temp: running — https://lfdhz-197-148-40-67.free.pinggy.net</code></pre></div>
 <p>Essa URL é REAL — foi a que este guião recebeu ao correr o comando. (A tua vai ser diferente
 de cada vez: o provider grátis atribui uma nova de cada sessão.) Confirmação, de fora, sem
@@ -1443,7 +1467,7 @@ pública, tantos backends quantos precisares. Ver <code>examples/httproute.yaml<
 </div>
 
 <h2>Arrumar</h2>
-<pre><code>delonix tunnel rm delonix-temp
+<pre><code>delonix net tunnel rm delonix-temp
 delonix container rm -f delonix-temp</code></pre>
 
 <h2>O que isto provou</h2>
@@ -1452,7 +1476,7 @@ delonix container rm -f delonix-temp</code></pre>
 <tr><td><code>delonix build</code></td><td>build multi-stage real (2 estágios, <code>COPY --from</code>), com rede no build</td></tr>
 <tr><td><code>delonix container run -p</code></td><td>NAT userspace sem root, porta publicada no host</td></tr>
 <tr><td><code>delonix container logs</code></td><td>observabilidade de um serviço real a correr</td></tr>
-<tr><td><code>delonix tunnel expose</code></td><td>tráfego REAL da internet pública a chegar a um container local, sem conta nem IP público</td></tr>
+<tr><td><code>delonix net tunnel expose</code></td><td>tráfego REAL da internet pública a chegar a um container local, sem conta nem IP público</td></tr>
 </table>
 """
 
