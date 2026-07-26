@@ -49,11 +49,17 @@ msgstr "Aplica um manifesto (`delonix-manifest.yaml`) inteiro — todos os Kinds
 msgid "The engine itself: events, state and disk usage."
 msgstr "O motor em si: eventos, estado e uso de disco."
 
-msgid "Idempotent `kubeadm` bootstrap over SSH (`kind: Cluster`), or full VM provisioning."
-msgstr "Bootstrap `kubeadm` idempotente sobre SSH (`kind: Cluster`), ou provisionamento completo de VMs."
+msgid "Idempotent `kubeadm` bootstrap over SSH (`kind: Cluster`), full VM provisioning, or generating a k8s manifest from a running container/pod (`cluster kube generate`)."
+msgstr "Bootstrap `kubeadm` idempotente sobre SSH (`kind: Cluster`), provisionamento completo de VMs, ou geração de um manifesto k8s a partir de um container/pod já a correr (`cluster kube generate`)."
 
-msgid "Generate Kubernetes manifests from containers/pods (`generate`)."
-msgstr "Gera manifestos Kubernetes a partir de containers/pods (`generate`)."
+msgid "Generate a Kubernetes manifest from a container/pod already running locally (`kube generate`) — the \"ran it locally, now give me the YAML for k8s\" path (equivalent to `podman generate kube`)."
+msgstr "Gera um manifesto Kubernetes a partir de um container/pod já a correr localmente (`kube generate`) — o caminho \"correu localmente, agora dá-me o YAML para k8s\" (equivalente ao `podman generate kube`)."
+
+msgid "Low-level network/infra plumbing, grouped: netns/flow/ingress/egress/httproute/tunnel/boot."
+msgstr "Plumbing de rede/infra de baixo nível, agrupada: netns/flow/ingress/egress/httproute/tunnel/boot."
+
+msgid "Serve a protocol endpoint on a unix socket, grouped: cri/api/docker-api."
+msgstr "Serve um endpoint de protocolo num socket unix, agrupado: cri/api/docker-api."
 
 msgid "Low-level management of the rootless ingress infra (up/status/attach/publish/firewall)."
 msgstr "Gestão de baixo nível da infra de ingress rootless (up/status/attach/publish/firewall)."
@@ -90,6 +96,9 @@ msgstr "Serve a API de GESTÃO (HTTP+JSON) num socket unix — a superfície que
 
 msgid "Socket address (default: `$DELONIX_API_ADDR` or `unix:///run/delonix-mgmt.sock`)."
 msgstr "Endereço do socket (default: `$DELONIX_API_ADDR` ou `unix:///run/delonix-mgmt.sock`)."
+
+msgid "Serve a slice of the Docker Engine API on a unix socket — `docker version`/`ps`/`images`/`info`/lifecycle mutations via `DOCKER_HOST=unix://<path>`."
+msgstr "Serve uma fatia da Docker Engine API num socket unix — `docker version`/`ps`/`images`/`info`/mutações de ciclo de vida via `DOCKER_HOST=unix://<caminho>`."
 
 msgid "Runtime summary/KPI dashboard (interactive htop-style TUI) — global, or per group (`container dash`, `vm dash`, ...)."
 msgstr "Dashboard de resumo/KPIs do runtime (TUI interactivo estilo htop) — global, ou por grupo (`container dash`, `vm dash`, ...)."
