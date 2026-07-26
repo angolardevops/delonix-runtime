@@ -446,11 +446,11 @@ nó não faz nenhuma instalação**, só `kubeadm init`/`kubeadm join`.
   `common_customization_steps` sem alterar o output do caminho k8s — só o CRI ficou à parte em
   `install_cri_steps`). Publica em `ghcr.io/angolardevops/delonix-vm-base` (repositório novo,
   tags `ubuntu-24.04`/futuramente `debian-12`/`rocky-9` — sem wiring de omissão em `Pull`/
-  `LsRemote` nesta fase, o chamador passa sempre a fonte explícita). `vm-image.yml` ganhou o input
-  `no_k8s` (boolean) que troca o passo de build/tag/repositório de destino. **Por fazer
-  (deliberadamente fora desta fase)**: Rocky (dnf — família de gestor de pacotes diferente, o
-  maior salto), `--offline` para `--no-k8s` (a verificação de `.deb` no host é específica do
-  `pkgs.k8s.io`), selecção por omissão em `Pull`/`LsRemote`.
+  `LsRemote` nesta fase, o chamador passa sempre a fonte explícita — **fechado no v0.23.0**, ver
+  abaixo). `vm-image.yml` ganhou o input `no_k8s` (boolean) que troca o passo de build/tag/
+  repositório de destino. **Por fazer (deliberadamente fora desta fase)**: Rocky (dnf — família de
+  gestor de pacotes diferente, o maior salto; feito no v0.18.0), `--offline` para `--no-k8s` (a
+  verificação de `.deb` no host é específica do `pkgs.k8s.io`).
 - **`--distro debian` (v0.17.0) — Fase 2 de 3.** `download_ubuntu_base` generalizou-se em
   `download_ubuntu_base`/`download_debian_base` por trás de um novo enum `Distro { Ubuntu,
   Debian }` (`--distro`, `clap::ValueEnum`, omissão `ubuntu` — zero mudança de comportamento para
@@ -629,8 +629,11 @@ de agir. Nunca dessincroniza de um `.tfstate` porque não há nenhum.
 - **Só etcd `stacked`** (default do kubeadm, co-localizado nos control-planes) — `etcd: external`
   é reconhecido no schema mas recusado com erro claro. Etcd externo (TLS entre membros,
   discovery) é um subprojecto à parte.
-- **Execução sequencial**, não paralela, entre hosts — paralelizar a preparação (independente por
-  host) é um follow-up de performance, não de correcção.
+- **Preparação de host paralela entre hosts (v0.23.0)** — cada host é independente (sessão SSH
+  própria, sem estado partilhado), corre agora em `std::thread::scope`. `kubeadm init`/`join`
+  continuam sequenciais (dependem uns dos outros por desenho — o join precisa do token do init).
+  Mudança de comportamento: ao contrário do loop antigo (parava no 1º host mau), agora TODOS os
+  hosts são preparados e TODAS as falhas reportadas juntas.
 - **HA multi-control-plane exige `spec.controlPlaneEndpoint` explícito** — kubeadm precisa de um
   endpoint estável (LB/VIP) à frente de vários control-planes; com 1 só, usa o IP dele.
 - Sem teste end-to-end real nesta sessão — este sandbox não tem hosts SSH remotos. Validado até à
@@ -1474,9 +1477,19 @@ activado por `--l18n=pt`/`DELONIX_L18N=pt`. Regras para não regredir:
   código; a tradução vai para o `pt.po` (o `t()`/`translate_help` degradam para EN
   se faltar a entrada, nunca deixam a UI muda). Só identificadores/nomes de teste
   em PT sobrevivem (não são texto de utilizador).
-- **Pendente**: mensagens de erro dos crates de MOTOR (não podem depender do bin;
-  a via desenhada é traduzir no printer de erros do `main.rs` por lookup do texto
-  EN) — os textos EN dessas mensagens ainda não estão semeados no `pt.po`.
+- **FEITO (v0.23.0)**: mensagens de erro dos crates de MOTOR (não podem depender do
+  bin) traduzem-se no printer de erros do `main.rs`, por lookup do texto EN —
+  `po::t_dyn`. Dois bugs fechados: (1) `t_dyn` fazia lookup EXACTO contra o texto
+  TOTALMENTE renderizado do erro, mas esse texto é sempre um prefixo EN fixo
+  (`"invalid argument: "`, `"no such container: "`, ...) colado à mensagem real —
+  nunca batia com nada, mesmo havendo entrada `pt.po` para a mensagem interna;
+  corrigido reconhecendo os 6 moldes `#[error(...)]` traduzíveis de
+  `delonix_runtime_core::Error` (`Io`/`Json`/`Runtime` ficam de fora — o texto vem
+  de um errno/serde do SO, não é nosso para traduzir) e traduzindo prefixo/
+  interior/sufixo separadamente. (2) o caminho de erro PRINCIPAL do `main.rs`
+  (`run()` → `cmd::output::error`) nunca sequer chamava `t_dyn` — só os 4
+  re-execs escondidos o faziam; e `for_each_id` (`stop`/`rm`/... com vários ids)
+  tinha o seu próprio `eprintln!` que também nunca passava por ele.
 
 ## Regra de ouro: fronteira com o PaaS
 

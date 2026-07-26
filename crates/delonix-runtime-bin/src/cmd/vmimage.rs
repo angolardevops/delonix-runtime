@@ -180,11 +180,21 @@ pub enum VmImageCmd {
         source: Option<String>,
         #[arg(long)]
         name: Option<String>,
+        /// With no `source`, pull the official NO-Kubernetes golden (just the
+        /// `delonix` engine, rootless-ready) instead of the Kubernetes one.
+        #[arg(long)]
+        no_k8s: bool,
     },
     /// List the tags available in a remote OCI repository — with no
     /// argument, the OFFICIAL Delonix golden image repo (discover which
     /// k8s versions are published before `pull`/`--k8s-version`).
-    LsRemote { source: Option<String> },
+    LsRemote {
+        source: Option<String>,
+        /// With no `source`, list the official NO-Kubernetes golden's repo
+        /// instead of the Kubernetes one.
+        #[arg(long)]
+        no_k8s: bool,
+    },
     /// Build the golden image: Ubuntu cloud image + kubeadm/kubelet/kubectl
     /// + `delonix-cri` (CRI endpoint for the kubelet), via `virt-customize`.
     Build {
@@ -245,7 +255,11 @@ pub fn run(action: VmImageCmd) -> Result<()> {
         VmImageCmd::Ls => cmd_ls(&store),
         VmImageCmd::Describe { names } => cmd_describe(&store, &names),
         VmImageCmd::Push { name, target } => cmd_push(&store, &name, &target),
-        VmImageCmd::Pull { source, name } => {
+        VmImageCmd::Pull {
+            source,
+            name,
+            no_k8s,
+        } => {
             // BUG FIXED HERE, found live: this is the shared engine command
             // behind BOTH `image --vm pull` AND `image vm pull` — it never
             // got the "no argument = official image" default that `delonix
@@ -254,11 +268,11 @@ pub fn run(action: VmImageCmd) -> Result<()> {
             // claiming it. A user on a real host hit this: `delonix image vm
             // pull --name delonix-vm-k8s:1.34` (no source) errored "required
             // arguments were not provided: <SOURCE>".
-            let src = source.unwrap_or_else(|| OFFICIAL_VM_IMAGE.to_string());
+            let src = source.unwrap_or_else(|| default_pull_source(no_k8s).to_string());
             cmd_pull(&store, &src, name)
         }
-        VmImageCmd::LsRemote { source } => {
-            let src = source.unwrap_or_else(|| OFFICIAL_VM_IMAGE.to_string());
+        VmImageCmd::LsRemote { source, no_k8s } => {
+            let src = source.unwrap_or_else(|| default_pull_source(no_k8s).to_string());
             cmd_ls_remote(&src)
         }
         VmImageCmd::Build {
@@ -358,12 +372,24 @@ fn describe_one(store: &VmImageStore, img: &VmImage) {
 pub(crate) const OFFICIAL_VM_IMAGE: &str = "ghcr.io/angolardevops/delonix-vm-k8s:1.34";
 
 /// Golden VM image with NO Kubernetes — just the `delonix` engine binary and
-/// rootless prerequisites (see `rootless_customization_steps`). No default
-/// selection wired into `Pull`/`LsRemote`: callers pass this explicitly, same
-/// as pulling any non-default k8s image today.
-#[allow(dead_code)]
+/// rootless prerequisites (see `rootless_customization_steps`). Selected by
+/// `Pull`/`LsRemote --no-k8s` when no explicit `source` is given.
 pub(crate) const OFFICIAL_VM_BASE_IMAGE: &str =
     "ghcr.io/angolardevops/delonix-vm-base:ubuntu-24.04";
+
+/// Picks the default source for `Pull`/`LsRemote` when no explicit `source`
+/// is given. BUG FIXED (gap): `OFFICIAL_VM_BASE_IMAGE` existed but had no way
+/// to be selected without typing out the full `ghcr.io/...:ubuntu-24.04`
+/// reference by hand — a tenant who only wants the no-Kubernetes golden had
+/// no discoverable "just give me the official one" path, unlike the
+/// Kubernetes golden (bare `pull`/`ls-remote`).
+pub(crate) fn default_pull_source(no_k8s: bool) -> &'static str {
+    if no_k8s {
+        OFFICIAL_VM_BASE_IMAGE
+    } else {
+        OFFICIAL_VM_IMAGE
+    }
+}
 
 pub(crate) fn cmd_push(store: &VmImageStore, name: &str, target: &str) -> Result<()> {
     let img = store.get(name)?;
@@ -1910,6 +1936,16 @@ fn run_tool(bin: &str, args: &[&str]) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Gap closed: `OFFICIAL_VM_BASE_IMAGE` existed but had no default-selection
+    /// wiring — a bare `pull`/`ls-remote --no-k8s` now resolves to it, same as a
+    /// bare `pull`/`ls-remote` already resolved to the Kubernetes golden.
+    #[test]
+    fn default_pull_source_escolhe_k8s_ou_base_consoante_a_flag() {
+        assert_eq!(default_pull_source(false), OFFICIAL_VM_IMAGE);
+        assert_eq!(default_pull_source(true), OFFICIAL_VM_BASE_IMAGE);
+        assert_ne!(default_pull_source(false), default_pull_source(true));
+    }
 
     #[test]
     fn customization_steps_incluem_pacotes_extra() {
