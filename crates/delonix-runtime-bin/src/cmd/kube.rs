@@ -75,8 +75,34 @@ fn pod_manifest(name: &str, members: &[Container]) -> String {
     y
 }
 
+/// YAML double-quoted-scalar escaping.
+///
+/// BUG FOUND: this used to be a bare `format!("\"{s}\"")` with no escaping
+/// at all. `command`/`args` come from the container's own record (whatever
+/// the user or an image entrypoint originally set), and this manifest's
+/// whole point is to be piped into `kubectl apply -f -`. A command
+/// containing an embedded `"` (`sh -c 'echo "hi"'`) produced `["echo
+/// "hi""]` — invalid YAML, `kubectl` rejects it outright. A command
+/// containing a raw newline would be worse: it injects a literal line
+/// break into the document, potentially adding sibling keys the emitter
+/// never intended. Proper YAML double-quoted scalars escape `\`/`"` and
+/// control characters — this covers the realistic ones without pulling in
+/// a full YAML emitter for one call site.
 fn quote(s: &str) -> String {
-    format!("\"{s}\"")
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push('"');
+    for c in s.chars() {
+        match c {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '\n' => out.push_str("\\n"),
+            '\t' => out.push_str("\\t"),
+            '\r' => out.push_str("\\r"),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
 }
 
 #[cfg(test)]
@@ -123,5 +149,38 @@ mod tests {
             !y.contains("memory:"),
             "não devia haver limite de memória: {y}"
         );
+    }
+
+    #[test]
+    fn quote_escapa_aspas_e_barra_invertida() {
+        // BUG regression guard: `quote` used to be a bare `"{s}"` with no
+        // escaping — `sh -c 'echo "hi"'` produced `["echo "hi""]`, invalid
+        // YAML that `kubectl apply -f -` rejects outright.
+        assert_eq!(quote(r#"echo "hi""#), r#""echo \"hi\"""#);
+        assert_eq!(quote(r"C:\path"), r#""C:\\path""#);
+    }
+
+    #[test]
+    fn quote_escapa_quebras_de_linha_em_vez_de_as_injectar() {
+        // A raw embedded newline would inject a literal line break into the
+        // emitted document — potentially adding sibling keys the emitter
+        // never intended. Must come out as the two-character escape `\n`,
+        // not an actual newline byte.
+        let q = quote("line1\nline2");
+        assert_eq!(q, r#""line1\nline2""#);
+        assert!(
+            !q.contains('\n'),
+            "não pode conter uma quebra de linha real"
+        );
+    }
+
+    #[test]
+    fn gera_pod_com_comando_contendo_aspas_produz_yaml_valido() {
+        let c = ctr("web", "alpine", &["sh", "-c", r#"echo "hi""#], "0.1", "64M");
+        let y = pod_manifest("web", &[c]);
+        assert!(y.contains(r#""echo \"hi\"""#), "{y}");
+        // A quick sanity check that the offending pattern from the bug
+        // report (unescaped adjacent quotes) is gone.
+        assert!(!y.contains(r#""echo "hi"""#));
     }
 }

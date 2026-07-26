@@ -751,6 +751,20 @@ pub fn ensure_running(cfg: &ProxyConfig) -> Result<()> {
         message: e.to_string(),
     })?;
 
+    // BUG FOUND: the running_pid()-check → spawn_proxy() decision used to
+    // have NO lock at all. When no proxy exists yet, two concurrent callers
+    // (e.g. an `httproute apply` racing a `container run --expose`) both
+    // observe `running_pid() == None` and both spawn a proxy; both try to
+    // bind the same listener port(s) in the holder netns — one wins, the
+    // other crashes at bind, and whichever spawn writes the pidfile LAST
+    // wins that race independently of which process actually stayed alive.
+    // If the crashed one wrote last, `running_pid()` later finds it dead
+    // and cleans the pidfile while the SURVIVING proxy is left with no
+    // pidfile recorded — an orphan that SIGHUP/SIGTERM can no longer reach.
+    // Serializing the whole check-then-spawn decision under a dedicated
+    // lock (separate from `auto.lock`, which only guards `auto.json`)
+    // closes the race: only one caller ever gets to spawn.
+    let _spawn_lock = FileLock::acquire(&proxy_dir().join("spawn.lock"));
     if let Some(pid) = running_pid() {
         // Alive → reload the routes hot (SIGHUP). The ports are already published.
         // WARNING: SIGHUP only reloads ROUTES; changing entrypoints/TLS requires a
@@ -774,6 +788,36 @@ pub fn ensure_running(cfg: &ProxyConfig) -> Result<()> {
     spawn_proxy()?;
     publish_listeners(cfg)?;
     Ok(())
+}
+
+/// Exclusive file lock (`flock`) — same minimal idiom `with_auto_locked`
+/// already uses inline, factored out here so `ensure_running` can guard a
+/// DIFFERENT critical section (the spawn decision) under its own lock file.
+struct FileLock(std::fs::File);
+
+impl FileLock {
+    fn acquire(path: &std::path::Path) -> Option<FileLock> {
+        use std::os::unix::io::AsRawFd;
+        let f = std::fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(false)
+            .open(path)
+            .ok()?;
+        // SAFETY: valid, open fd; LOCK_EX blocks until the lock is ours.
+        if unsafe { libc::flock(f.as_raw_fd(), libc::LOCK_EX) } != 0 {
+            return None;
+        }
+        Some(FileLock(f))
+    }
+}
+
+impl Drop for FileLock {
+    fn drop(&mut self) {
+        use std::os::unix::io::AsRawFd;
+        // SAFETY: fd still open (we own the File until here).
+        unsafe { libc::flock(self.0.as_raw_fd(), libc::LOCK_UN) };
+    }
 }
 
 /// The listener ports of the config CURRENTLY in effect (before we overwrite it) —

@@ -109,11 +109,13 @@ impl DashData {
 
         // --- vms (state RECONCILED with the backend, like containers) — a
         //     VM killed externally shows Stopped, not the persisted Running ---
-        let vms: Vec<delonix_runtime_core::Vm> = delonix_vm::list(&root)
-            .unwrap_or_default()
-            .into_iter()
-            .map(|v| delonix_vm::status(&root, &v.name).unwrap_or(v))
-            .collect();
+        // BUG FOUND: `delonix_vm::list` ALREADY calls `status(base, &vm.name)`
+        // per VM internally (see its own body) — the `.map(status)` below
+        // used to reconcile every VM a SECOND time, doubling the `virsh`
+        // subprocess spawns this dashboard forks every second (libvirt
+        // backend: several `virsh` calls per VM per `status`). Redundant
+        // work only, `list`'s result is already fully reconciled.
+        let vms: Vec<delonix_runtime_core::Vm> = delonix_vm::list(&root).unwrap_or_default();
         let vm_running = vms.iter().filter(|v| v.status == Status::Running).count();
 
         // --- networks / volumes / images / secrets ---
