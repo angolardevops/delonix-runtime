@@ -1,5 +1,6 @@
 pub mod boot;
 pub mod build;
+pub mod cdi;
 pub mod cluster;
 pub mod complete;
 pub mod conditions;

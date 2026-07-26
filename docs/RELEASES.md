@@ -4,6 +4,65 @@
 > (regenerado automaticamente pelo pipeline de release a cada tag publicada).
 > Não editar à mão — edita a nota da release respectiva.
 
+## v0.28.0 — GPU real via CDI (`--gpus`/`--device nvidia.com/gpu=...`)
+
+Fecha o último dos 4 gaps "bloqueantes" da análise Docker/Podman
+([docs/COMPARACAO-DOCKER-PODMAN.md](../COMPARACAO-DOCKER-PODMAN.md)): passagem de GPU real
+(injecção das libs de driver NVIDIA, não só os nós `/dev`), via **CDI (Container Device
+Interface, `cdi.k8s.io`/CNCF)** — o mesmo mecanismo que Docker/Podman/containerd/CRI-O reais usam.
+
+### Novo
+
+- **`cmd/cdi.rs`** — um CONSUMIDOR de CDI: parseia specs JSON/YAML já gerados por `nvidia-ctk cdi
+  generate` (`/etc/cdi/*.json|yaml`, `/var/run/cdi/*.json|yaml`) e traduz o `containerEdits` de
+  cada dispositivo (`deviceNodes`/`mounts`/`env`) para o MESMO `Vec<Mount>`/`Vec<String>` que
+  `-v`/`--device` já alimentam — aplicados pelo motor via `bind_volume`/`bind_devices` tal-e-qual.
+  Deliberadamente **não** o modelo legacy do hook `nvidia-container-cli configure --pid=<pid>`
+  (um 2.º processo a `setns` para o userns/mntns de OUTRO por PID — precisaria de CAP_SYS_ADMIN
+  nesse userns alheio, o mesmo problema de privilégio cross-namespace que o `--net <rede-custom>`
+  já resolve por re-exec, não por attach externo): aqui os mounts são feitos pelo PRÓPRIO init do
+  container, antes do `pivot_root`, **zero modelo de privilégio novo** — o mesmo mecanismo
+  rootless que `-v`/`--device` já usam. A descoberta/versão do driver fica 100% dentro do
+  `nvidia-ctk`, tal como em qualquer runtime real — este motor nunca reimplementa isso.
+- **`--gpus nvidia|all`** (upgrade do flag existente) e **`--device nvidia.com/gpu=<nome|all>`**
+  (extensão do `--device` para o formato `vendor.com/class=name` do Docker/CDI real, ao lado do
+  formato `/dev/...` já existente). `--gpus dri` fica **inalterado** (bind cru de `/dev/dri/*` —
+  Mesa/VAAPI é open-source e já vem no pacote da própria imagem, não é o gap que isto fecha).
+- **Erro claro e accionável, nunca silencioso**: sem spec CDI nem `nvidia-ctk` no `PATH`, um
+  `--gpus nvidia`/`--device nvidia.com/gpu=...` recusa ANTES de criar seja o que for, com o
+  comando exacto para corrigir (`nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml`) — nunca
+  cai em silêncio para o bind cru de `/dev/nvidia*` antigo, que falharia a meio com um erro
+  confuso do próprio CUDA.
+- **`ldconfig -r <rootfs>`** best-effort logo após os mounts em `setup_rootfs` (engine,
+  `crates/delonix-runtime`), ainda antes do `pivot_root` — substituto deliberadamente mais simples
+  do hook `createContainer` real de um spec CDI (que precisaria do protocolo OCI-hook-stdin-state,
+  não implementado); um spec que declare `hooks` avisa (não silencioso) que não foram executados.
+
+### Validado ao vivo (host real, sem GPU)
+
+`--gpus nvidia`/`--device nvidia.com/gpu=all` sem CDI disponível recusam correctamente ANTES de
+criar o container (confirmado: nenhum leftover no `container ls -a`); `--gpus dri` continua a
+funcionar sem alterações (0 dispositivos encontrados, comportamento normal sem GPU). O parsing e
+tradução `containerEdits → Mount/devices/env` está coberto por teste unitário com um spec JSON
+real (formato `cdi.k8s.io`).
+
+### Por confirmar num host GPU real (impossível neste sandbox)
+
+A precedência exacta `/etc/cdi` vs `/var/run/cdi`; se `ldconfig -r` chega como substituto
+suficiente dos hooks `createContainer` reais de um spec `nvidia-ctk`-gerado.
+
+### Validação
+
+Build/clippy/fmt/test limpos. 290 testes em `delonix-runtime-bin` (+2 novos em `cmd::cdi`).
+
+### Fecha o roadmap dos 4 gaps "bloqueantes"
+
+Com este, os 4 gaps identificados na análise Docker/Podman original (mutações da Docker Engine
+API, BuildKit-lite, GPU/CDI, e paridade de verbos CLI) estão todos FEITOS — cada um como uma
+fatia v1, com limitações documentadas honestamente em vez de escondidas.
+
+---
+
 ## v0.27.0 — BuildKit-lite: `RUN --mount=secret` e `--platform`
 
 Fecha mais um dos gaps "bloqueantes" da análise Docker/Podman
