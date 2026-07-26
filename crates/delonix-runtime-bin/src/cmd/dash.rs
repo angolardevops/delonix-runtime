@@ -187,6 +187,19 @@ impl DashData {
             super::output::fmt_size(summary.network_rx_bytes.unwrap_or(0)),
             super::output::fmt_size(summary.network_tx_bytes.unwrap_or(0))
         );
+        // BUG FOUND (code review): a `--net host`/`--net none` container has
+        // no netns to inspect, so it never contributed to the sum above —
+        // silently indistinguishable from "measured, zero traffic" unless
+        // called out here. `network_unmeasured_containers` is always 0 when
+        // network collection was skipped entirely (see the field doc).
+        let net_sub = if summary.network_unmeasured_containers > 0 {
+            po::tf(
+                "rx / tx (cumulative) — {n} container(s) not measured (host/none network)",
+                &[("n", &summary.network_unmeasured_containers.to_string())],
+            )
+        } else {
+            po::t("rx / tx (cumulative)").to_string()
+        };
         // `None` until the first background pass of the (expensive) disk-usage
         // walk completes — see `collect`/`collect_with`'s doc comments. Shown
         // as a translated placeholder, never a misleading "0 B".
@@ -224,7 +237,7 @@ impl DashData {
                     super::output::fmt_size(summary.memory_bytes_used),
                     &mem_sub,
                 ),
-                tile(po::t("TRAFFIC"), net_value, po::t("rx / tx (cumulative)")),
+                tile(po::t("TRAFFIC"), net_value.clone(), &net_sub),
                 tile(
                     po::t("STORAGE"),
                     fmt_storage(storage_total),
@@ -244,7 +257,7 @@ impl DashData {
                     super::output::fmt_size(summary.memory_bytes_used),
                     &mem_sub,
                 ),
-                tile(po::t("TRAFFIC"), net_value, po::t("rx / tx (cumulative)")),
+                tile(po::t("TRAFFIC"), net_value.clone(), &net_sub),
             ],
             DashScope::Vms => vec![
                 tile(po::t("RUNNING"), vm_running, "Running"),
@@ -252,7 +265,7 @@ impl DashData {
             ],
             DashScope::Networks => vec![
                 tile(po::t("NETWORKS"), networks.len(), po::t("defined")),
-                tile(po::t("TRAFFIC"), net_value, po::t("rx / tx (cumulative)")),
+                tile(po::t("TRAFFIC"), net_value.clone(), &net_sub),
             ],
             DashScope::Storage => vec![
                 tile("VOLUMES", volumes.len(), po::t("local + network")),
@@ -530,10 +543,17 @@ mod tui {
     use std::sync::{Arc, Mutex};
     use std::thread;
 
-    /// How often the background thread re-runs the EXPENSIVE half of
-    /// `dashstats::collect` (per-container netns reads + the disk-usage
-    /// walk). Independent of the 1s tile/table refresh — see `render`.
+    /// How long to WAIT, at minimum, after a completed (or timed-out)
+    /// expensive collect before starting the next one. Independent of the 1s
+    /// tile/table refresh — see `render`. NOT a periodic guarantee: a slow
+    /// but legitimate collect (measured live at ~1 minute on a host with
+    /// heavy containers) already pushes the real cadence well past this.
     const SLOW_REFRESH: Duration = Duration::from_secs(15);
+    /// Ceiling on a single expensive collect — independent of `SLOW_REFRESH`
+    /// (a real collect can legitimately take longer than the retry cadence;
+    /// conflating the two would make a normal slow host look "timed out"
+    /// forever). Matches `delonix-mgmt`'s equivalent background refresh.
+    const COLLECT_TIMEOUT: Duration = Duration::from_secs(120);
 
     pub fn run_interactive(scope: DashScope) -> Result<()> {
         let root = state_root();
@@ -557,9 +577,22 @@ mod tui {
             let shared = shared.clone();
             let root = root.clone();
             thread::spawn(move || loop {
-                let full = delonix_mgmt::dashstats::collect(&root, true, true);
-                if let Ok(mut slot) = shared.lock() {
-                    *slot = full;
+                // BUG FOUND (code review): this used to call `collect` (no
+                // ceiling) directly — a genuinely stuck disk/netns operation
+                // would freeze this background thread forever, silently
+                // leaving the MEMORY/TRAFFIC/STORAGE tiles stuck at whatever
+                // they last showed for the rest of the TUI session (with no
+                // indication anything was wrong). Bounded the same way the
+                // mgmt server's equivalent refresh loop is.
+                if let Some(full) = delonix_mgmt::dashstats::collect_with_timeout(
+                    &root,
+                    true,
+                    true,
+                    COLLECT_TIMEOUT,
+                ) {
+                    if let Ok(mut slot) = shared.lock() {
+                        *slot = full;
+                    }
                 }
                 thread::sleep(SLOW_REFRESH);
             });

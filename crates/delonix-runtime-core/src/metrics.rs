@@ -38,6 +38,11 @@ struct Metrics {
     memory_bytes_limit: Gauge,
     network_rx_bytes: Gauge,
     network_tx_bytes: Gauge,
+    /// How many running containers did NOT contribute to the two gauges
+    /// above (`--net host`/`--net none` have no netns to read) — makes the
+    /// traffic total's incompleteness visible to a scrape instead of it
+    /// silently looking like an exhaustive, authoritative sum.
+    network_unmeasured_containers: Gauge,
     storage_bytes_images: Gauge,
     storage_bytes_volumes: Gauge,
     storage_bytes_vm_images: Gauge,
@@ -115,6 +120,12 @@ static METRICS: LazyLock<Metrics> = LazyLock::new(|| {
         "Sum of transmitted bytes across every running container's primary interface",
         network_tx_bytes.clone(),
     );
+    let network_unmeasured_containers = Gauge::default();
+    registry.register(
+        "network_unmeasured_containers",
+        "Running containers NOT included in network_rx_bytes/network_tx_bytes (--net host/none have no netns to read)",
+        network_unmeasured_containers.clone(),
+    );
     let storage_bytes_images = Gauge::default();
     registry.register(
         "storage_bytes_images",
@@ -153,6 +164,7 @@ static METRICS: LazyLock<Metrics> = LazyLock::new(|| {
         memory_bytes_limit,
         network_rx_bytes,
         network_tx_bytes,
+        network_unmeasured_containers,
         storage_bytes_images,
         storage_bytes_volumes,
         storage_bytes_vm_images,
@@ -198,9 +210,12 @@ pub fn set_memory(used: u64, limit: u64) {
 }
 /// Overwrites the aggregate network byte-counter gauges (see the `Metrics`
 /// struct doc comment for why these are gauges, not counters).
-pub fn set_network(rx_bytes: u64, tx_bytes: u64) {
+pub fn set_network(rx_bytes: u64, tx_bytes: u64, unmeasured_containers: u64) {
     METRICS.network_rx_bytes.set(rx_bytes as i64);
     METRICS.network_tx_bytes.set(tx_bytes as i64);
+    METRICS
+        .network_unmeasured_containers
+        .set(unmeasured_containers as i64);
 }
 /// Overwrites the disk-usage gauges (bytes) with a freshly-collected snapshot.
 pub fn set_storage(images: u64, volumes: u64, vm_images: u64, containers: u64) {

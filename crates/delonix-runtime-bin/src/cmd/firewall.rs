@@ -316,6 +316,41 @@ fn rule_spec(r: &FwRule) -> String {
     }
 }
 
+/// Like `Store::update`, but for a closure that can itself fail — every
+/// firewall mutation needs to call `infra::apply_firewall` (a kernel
+/// syscall) partway through, and `Store::update`'s own closure only returns
+/// a commit/abort `bool`, with no room to propagate an error from inside it.
+///
+/// BUG FOUND (code review): every firewall mutation in this file used to do
+/// a bare `store.load` -> mutate in memory -> `infra::apply_firewall` ->
+/// `store.save`, with NO lock held between the read and the write.
+/// `Store::update` exists *precisely* to sequence this kind of
+/// read-modify-write across processes (`flock`, see its own doc comment) —
+/// it just was never used here. Concrete race: two firewall commands against
+/// the same container (or a firewall command racing a concurrent reconcile
+/// save) both read the same starting state, both apply their own change to
+/// the kernel successfully, but only the LAST `save` wins on disk — the
+/// other's rule is live in `nft` right now but silently missing from the
+/// persisted record, so it vanishes on the next `container start` (which
+/// only re-applies what's persisted).
+fn update_locked<F>(store: &Store, id_or_name: &str, f: F) -> Result<Container>
+where
+    F: FnOnce(&mut Container) -> Result<bool>,
+{
+    let mut err = None;
+    let c = store.update(id_or_name, |c| match f(c) {
+        Ok(commit) => commit,
+        Err(e) => {
+            err = Some(e);
+            false
+        }
+    })?;
+    match err {
+        Some(e) => Err(e),
+        None => Ok(c),
+    }
+}
+
 fn add_rule(
     store: &Store,
     name: &str,
@@ -330,52 +365,55 @@ fn add_rule(
     if !src.is_empty() && !fw_src_ok(&src) {
         return Err(Error::Invalid(format!("invalid CIDR '{src}'")));
     }
-    let mut c = store.load(name)?;
-    let ip = require_sdn_ip(&c)?;
-    let mut fw = c.firewall.clone().unwrap_or_default();
-    fw.enabled = true;
-    // The LAST command wins (ufw semantics): a new rule for the SAME match
-    // (dir/proto/port/source) REPLACES the existing one. Without this, `deny 8069`
-    // followed by `allow 8069` left the service blocked forever — the rules
-    // accumulated and the nft chain is first-match terminal: the old deny,
-    // above, always won (real bug report).
-    let same_match = |r: &FwRule| {
-        r.dir == dir && r.proto == proto && r.port == port && norm_any(&r.src) == norm_any(&src)
-    };
-    let replaced: Vec<String> = fw
-        .rules
-        .iter()
-        .filter(|r| same_match(r))
-        .map(|r| r.action.clone())
-        .collect();
-    fw.rules.retain(|r| !same_match(r));
-    fw.rules.push(FwRule {
-        dir: dir.to_string(),
-        proto: proto.clone(),
-        port: port.clone(),
-        src: src.clone(),
-        action: action.as_str().to_string(),
-        note: note.unwrap_or_default(),
-    });
-    // Shadow: an EARLIER overlapping rule (e.g. `deny any/8069` vs
-    // `allow tcp/8069`) with the opposite action still matches first — the new
-    // rule never gets evaluated. Warning here avoids the "I applied the allow and
-    // it stays blocked" without explanation.
-    let shadow = fw
-        .rules
-        .iter()
-        .take(fw.rules.len() - 1)
-        .find(|r| {
-            r.dir == dir
-                && r.action != action.as_str()
-                && field_overlaps(&r.proto, &proto, &["any", ""])
-                && field_overlaps(&r.port, &port, &["*", ""])
-                && field_overlaps(norm_any(&r.src), norm_any(&src), &[""])
-        })
-        .map(|r| (r.action.clone(), rule_spec(r)));
-    infra::apply_firewall(&c.id, &ip, &fw)?;
-    c.firewall = Some(fw);
-    store.save(&c)?;
+    let mut replaced: Vec<String> = Vec::new();
+    let mut shadow: Option<(String, String)> = None;
+    let c = update_locked(store, name, |c| {
+        let ip = require_sdn_ip(c)?;
+        let mut fw = c.firewall.clone().unwrap_or_default();
+        fw.enabled = true;
+        // The LAST command wins (ufw semantics): a new rule for the SAME match
+        // (dir/proto/port/source) REPLACES the existing one. Without this, `deny 8069`
+        // followed by `allow 8069` left the service blocked forever — the rules
+        // accumulated and the nft chain is first-match terminal: the old deny,
+        // above, always won (real bug report).
+        let same_match = |r: &FwRule| {
+            r.dir == dir && r.proto == proto && r.port == port && norm_any(&r.src) == norm_any(&src)
+        };
+        replaced = fw
+            .rules
+            .iter()
+            .filter(|r| same_match(r))
+            .map(|r| r.action.clone())
+            .collect();
+        fw.rules.retain(|r| !same_match(r));
+        fw.rules.push(FwRule {
+            dir: dir.to_string(),
+            proto: proto.clone(),
+            port: port.clone(),
+            src: src.clone(),
+            action: action.as_str().to_string(),
+            note: note.clone().unwrap_or_default(),
+        });
+        // Shadow: an EARLIER overlapping rule (e.g. `deny any/8069` vs
+        // `allow tcp/8069`) with the opposite action still matches first — the new
+        // rule never gets evaluated. Warning here avoids the "I applied the allow and
+        // it stays blocked" without explanation.
+        shadow = fw
+            .rules
+            .iter()
+            .take(fw.rules.len() - 1)
+            .find(|r| {
+                r.dir == dir
+                    && r.action != action.as_str()
+                    && field_overlaps(&r.proto, &proto, &["any", ""])
+                    && field_overlaps(&r.port, &port, &["*", ""])
+                    && field_overlaps(norm_any(&r.src), norm_any(&src), &[""])
+            })
+            .map(|r| (r.action.clone(), rule_spec(r)));
+        infra::apply_firewall(&c.id, &ip, &fw)?;
+        c.firewall = Some(fw);
+        Ok(true)
+    })?;
     let arrow = if dir == "in" { "inbound" } else { "outbound" };
     println!(
         "{}: {arrow} rule added ({})",
@@ -422,35 +460,37 @@ fn remove_rule(
     if !src.is_empty() && !fw_src_ok(&src) {
         return Err(Error::Invalid(format!("invalid CIDR '{src}'")));
     }
-    let mut c = store.load(name)?;
-    let ip = require_sdn_ip(&c)?;
-    let mut fw = c.firewall.clone().unwrap_or_default();
-    let rm_match = |r: &FwRule| {
-        r.dir == dir
-            && (proto == "any" || r.proto == proto)
-            && (port == "*" || r.port == port)
-            && (norm_any(&src).is_empty() || norm_any(&r.src) == norm_any(&src))
-    };
-    let before = fw.rules.len();
-    fw.rules.retain(|r| !rm_match(r));
-    let n = before - fw.rules.len();
-    if n == 0 {
-        let arrow = if dir == "in" { "inbound" } else { "outbound" };
-        return Err(Error::Invalid(format!(
-            "'{}' has no {arrow} rule matching {port_spec}",
-            c.name
-        )));
-    }
-    // Same rule as `clear`: with no rules and no explicit policies, the firewall
-    // disappears entirely (clean chain) instead of leaving an empty record.
-    let empty = fw.rules.is_empty() && fw.policy_in.is_empty() && fw.policy_out.is_empty();
-    if empty {
-        infra::clear_firewall(&ip);
-    } else {
-        infra::apply_firewall(&c.id, &ip, &fw)?;
-    }
-    c.firewall = if empty { None } else { Some(fw) };
-    store.save(&c)?;
+    let mut n = 0usize;
+    let c = update_locked(store, name, |c| {
+        let ip = require_sdn_ip(c)?;
+        let mut fw = c.firewall.clone().unwrap_or_default();
+        let rm_match = |r: &FwRule| {
+            r.dir == dir
+                && (proto == "any" || r.proto == proto)
+                && (port == "*" || r.port == port)
+                && (norm_any(&src).is_empty() || norm_any(&r.src) == norm_any(&src))
+        };
+        let before = fw.rules.len();
+        fw.rules.retain(|r| !rm_match(r));
+        n = before - fw.rules.len();
+        if n == 0 {
+            let arrow = if dir == "in" { "inbound" } else { "outbound" };
+            return Err(Error::Invalid(format!(
+                "'{}' has no {arrow} rule matching {port_spec}",
+                c.name
+            )));
+        }
+        // Same rule as `clear`: with no rules and no explicit policies, the firewall
+        // disappears entirely (clean chain) instead of leaving an empty record.
+        let empty = fw.rules.is_empty() && fw.policy_in.is_empty() && fw.policy_out.is_empty();
+        if empty {
+            infra::clear_firewall(&ip);
+        } else {
+            infra::apply_firewall(&c.id, &ip, &fw)?;
+        }
+        c.firewall = if empty { None } else { Some(fw) };
+        Ok(true)
+    })?;
     let arrow = if dir == "in" { "inbound" } else { "outbound" };
     println!(
         "{}",
@@ -468,18 +508,19 @@ fn remove_rule(
 }
 
 fn set_policy(store: &Store, name: &str, dir: &str, policy: Action) -> Result<()> {
-    let mut c = store.load(name)?;
-    let ip = require_sdn_ip(&c)?;
-    let mut fw = c.firewall.clone().unwrap_or_default();
-    fw.enabled = true;
-    if dir == "in" {
-        fw.policy_in = policy.as_str().to_string();
-    } else {
-        fw.policy_out = policy.as_str().to_string();
-    }
-    infra::apply_firewall(&c.id, &ip, &fw)?;
-    c.firewall = Some(fw);
-    store.save(&c)?;
+    let c = update_locked(store, name, |c| {
+        let ip = require_sdn_ip(c)?;
+        let mut fw = c.firewall.clone().unwrap_or_default();
+        fw.enabled = true;
+        if dir == "in" {
+            fw.policy_in = policy.as_str().to_string();
+        } else {
+            fw.policy_out = policy.as_str().to_string();
+        }
+        infra::apply_firewall(&c.id, &ip, &fw)?;
+        c.firewall = Some(fw);
+        Ok(true)
+    })?;
     let arrow = if dir == "in" { "inbound" } else { "outbound" };
     println!("{}: default {arrow} policy = {}", c.name, policy.as_str());
     Ok(())
@@ -579,29 +620,36 @@ fn or_any(s: &str) -> String {
 }
 
 fn clear_dir(store: &Store, name: &str, dir: &str) -> Result<()> {
-    let mut c = store.load(name)?;
-    let mut fw = match c.firewall.clone() {
-        Some(f) => f,
-        None => {
-            println!("{}: no firewall to clear", c.name);
-            return Ok(());
+    let mut removed = 0usize;
+    let mut nothing_to_clear = false;
+    let c = update_locked(store, name, |c| {
+        let mut fw = match c.firewall.clone() {
+            Some(f) => f,
+            None => {
+                nothing_to_clear = true;
+                return Ok(false);
+            }
+        };
+        let before = fw.rules.len();
+        fw.rules.retain(|r| r.dir != dir);
+        removed = before - fw.rules.len();
+        // If nothing is left (no rules, both policies default), drop the firewall
+        // entirely and detach it from the ingress; otherwise re-apply what remains.
+        let empty = fw.rules.is_empty() && fw.policy_in.is_empty() && fw.policy_out.is_empty();
+        if let Some(ip) = c.ip.clone().filter(|s| !s.is_empty()) {
+            if empty {
+                infra::clear_firewall(&ip);
+            } else {
+                infra::apply_firewall(&c.id, &ip, &fw)?;
+            }
         }
-    };
-    let before = fw.rules.len();
-    fw.rules.retain(|r| r.dir != dir);
-    let removed = before - fw.rules.len();
-    // If nothing is left (no rules, both policies default), drop the firewall
-    // entirely and detach it from the ingress; otherwise re-apply what remains.
-    let empty = fw.rules.is_empty() && fw.policy_in.is_empty() && fw.policy_out.is_empty();
-    if let Some(ip) = c.ip.clone().filter(|s| !s.is_empty()) {
-        if empty {
-            infra::clear_firewall(&ip);
-        } else {
-            infra::apply_firewall(&c.id, &ip, &fw)?;
-        }
+        c.firewall = if empty { None } else { Some(fw) };
+        Ok(true)
+    })?;
+    if nothing_to_clear {
+        println!("{}: no firewall to clear", c.name);
+        return Ok(());
     }
-    c.firewall = if empty { None } else { Some(fw) };
-    store.save(&c)?;
     let arrow = if dir == "in" { "inbound" } else { "outbound" };
     println!("{}: removed {removed} {arrow} rule(s)", c.name);
     Ok(())
@@ -801,12 +849,8 @@ fn apply_fw_doc(store: &Store, doc: &ManifestDoc, dir: &str) -> Result<()> {
         return apply_network_egress(kind, &doc.metadata.name, &spec);
     }
 
-    let mut c = store.load(&spec.target)?;
-    let ip = require_sdn_ip(&c)?;
-    let mut fw = c.firewall.clone().unwrap_or_default();
-    fw.enabled = true;
-    // Declarative: this direction is fully replaced by the document.
-    fw.rules.retain(|r| r.dir != dir);
+    // Pure spec validation first (no container/lock involved) — fail fast on
+    // a bad manifest before ever touching the store.
     let policy = spec.default_policy.as_deref().unwrap_or("deny");
     if !matches!(policy, "allow" | "deny") {
         return Err(Error::Invalid(format!(
@@ -814,11 +858,7 @@ fn apply_fw_doc(store: &Store, doc: &ManifestDoc, dir: &str) -> Result<()> {
             doc.metadata.name
         )));
     }
-    if dir == "in" {
-        fw.policy_in = policy.to_string();
-    } else {
-        fw.policy_out = policy.to_string();
-    }
+    let mut new_rules = Vec::new();
     for r in &spec.rules {
         let proto = r.proto.clone().unwrap_or_else(|| "any".into());
         if !fw_proto_ok(&proto) {
@@ -847,7 +887,7 @@ fn apply_fw_doc(store: &Store, doc: &ManifestDoc, dir: &str) -> Result<()> {
                 doc.metadata.name
             )));
         }
-        fw.rules.push(FwRule {
+        new_rules.push(FwRule {
             dir: dir.to_string(),
             proto,
             port: r.port.clone(),
@@ -856,10 +896,24 @@ fn apply_fw_doc(store: &Store, doc: &ManifestDoc, dir: &str) -> Result<()> {
             note: r.note.clone().unwrap_or_default(),
         });
     }
-    infra::apply_firewall(&c.id, &ip, &fw)?;
-    let n = fw.rules.iter().filter(|r| r.dir == dir).count();
-    c.firewall = Some(fw);
-    store.save(&c)?;
+    let mut n = 0usize;
+    update_locked(store, &spec.target, |c| {
+        let ip = require_sdn_ip(c)?;
+        let mut fw = c.firewall.clone().unwrap_or_default();
+        fw.enabled = true;
+        // Declarative: this direction is fully replaced by the document.
+        fw.rules.retain(|r| r.dir != dir);
+        if dir == "in" {
+            fw.policy_in = policy.to_string();
+        } else {
+            fw.policy_out = policy.to_string();
+        }
+        fw.rules.extend(new_rules.iter().cloned());
+        infra::apply_firewall(&c.id, &ip, &fw)?;
+        n = fw.rules.iter().filter(|r| r.dir == dir).count();
+        c.firewall = Some(fw);
+        Ok(true)
+    })?;
     println!(
         "{kind}/{}: applied to {} ({n} rule(s), default {policy})",
         doc.metadata.name, spec.target
@@ -883,16 +937,17 @@ pub(crate) fn apply_container_ingress(
             "ingress de '{target}': policy tem de ser allow|deny"
         )));
     }
-    let mut c = store.load(target)?;
-    let ip = require_sdn_ip(&c)?;
-    let mut fw = c.firewall.clone().unwrap_or_default();
-    fw.enabled = true;
-    fw.rules.retain(|r| r.dir != "in"); // declarative: the `in` direction is replaced
-    fw.policy_in = policy.to_string();
-    fw.rules.extend(allows.iter().cloned());
-    infra::apply_firewall(&c.id, &ip, &fw)?;
-    c.firewall = Some(fw);
-    store.save(&c)?;
+    update_locked(store, target, |c| {
+        let ip = require_sdn_ip(c)?;
+        let mut fw = c.firewall.clone().unwrap_or_default();
+        fw.enabled = true;
+        fw.rules.retain(|r| r.dir != "in"); // declarative: the `in` direction is replaced
+        fw.policy_in = policy.to_string();
+        fw.rules.extend(allows.iter().cloned());
+        infra::apply_firewall(&c.id, &ip, &fw)?;
+        c.firewall = Some(fw);
+        Ok(true)
+    })?;
     Ok(())
 }
 

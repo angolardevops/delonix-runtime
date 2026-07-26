@@ -15,6 +15,7 @@
 //! crate none of the higher-level crates depend on for this.
 
 use std::path::Path;
+use std::time::Duration;
 
 use delonix_runtime_core::Status;
 
@@ -37,6 +38,16 @@ pub struct DashSummary {
     /// Sum of received bytes across every running container's primary interface, cumulative since each interface's creation. `None` when the caller opted out of the netns reads (see [`collect`]'s `include_network`) — a real "0 bytes" is `Some(0)`, not `None`.
     pub network_rx_bytes: Option<u64>,
     pub network_tx_bytes: Option<u64>,
+    /// How many of `containers_running` did NOT contribute to the sum above
+    /// (always `0` when `network_rx_bytes`/`tx_bytes` are `None`, since then
+    /// nothing was attempted at all). BUG FOUND (code review): a container
+    /// on `--net host`/`--net none` has no netns for `container_net_bytes`
+    /// to inspect, so it returns `None` there — this used to be folded into
+    /// the sum as a silent "+0", making the total look complete and
+    /// authoritative when it was actually a partial measurement on any host
+    /// mixing network modes. Surfaced explicitly instead so a caller can
+    /// show "N containers not measured" rather than a falsely-precise number.
+    pub network_unmeasured_containers: u64,
     /// `None` when the caller opted out of the directory walk (see
     /// [`collect`]'s `include_storage`) — MEASURED on a real host with 49
     /// containers (several full `kindest/node` rootfs copies): 68 GiB,
@@ -129,18 +140,25 @@ pub fn collect(root: &Path, include_network: bool, include_storage: bool) -> Das
 
     let (memory_bytes_limit, memory_bytes_used, ..) = delonix_runtime::slice_budget();
 
-    let (network_rx_bytes, network_tx_bytes) = if include_network {
+    let (network_rx_bytes, network_tx_bytes, network_unmeasured_containers) = if include_network {
         let mut rx = 0u64;
         let mut tx = 0u64;
+        let mut unmeasured = 0u64;
         for id in &running_ids {
-            if let Some((r, t)) = delonix_net::infra::container_net_bytes(id) {
-                rx += r;
-                tx += t;
+            match delonix_net::infra::container_net_bytes(id) {
+                Some((r, t)) => {
+                    rx += r;
+                    tx += t;
+                }
+                // `--net host`/`--net none` containers have no netns to
+                // inspect (see the field doc on `network_unmeasured_containers`)
+                // — count them, don't silently treat as zero traffic.
+                None => unmeasured += 1,
             }
         }
-        (Some(rx), Some(tx))
+        (Some(rx), Some(tx), unmeasured)
     } else {
-        (None, None)
+        (None, None, 0)
     };
 
     let (
@@ -172,11 +190,45 @@ pub fn collect(root: &Path, include_network: bool, include_storage: bool) -> Das
         memory_bytes_limit,
         network_rx_bytes,
         network_tx_bytes,
+        network_unmeasured_containers,
         storage_bytes_images,
         storage_bytes_volumes,
         storage_bytes_vm_images,
         storage_bytes_containers,
     }
+}
+
+/// Like [`collect`], but with a hard wall-clock ceiling — `None` on timeout
+/// instead of blocking the caller forever.
+///
+/// BUG FOUND (code review): neither `collect` itself nor anything calling it
+/// (the mgmt background metrics-refresh loop, the TUI's background thread)
+/// had ANY timeout — a genuinely stuck I/O path underneath (a hung/
+/// unresponsive NFS-backed volume or `vm-images` dir under the recursive
+/// `dir_size` walk, or a wedged `nsenter`/`ip netns exec` inside
+/// `container_net_bytes`, both real uninterruptible-I/O failure modes, not
+/// hypothetical) would permanently freeze that background loop — contrary
+/// to its own doc comment's claim that "a collection panic/slow disk on one
+/// tick never stops the next one" (true for panics and BOUNDED slowness,
+/// not an actual hang).
+///
+/// The worker thread is intentionally leaked on timeout: Rust cannot
+/// forcibly cancel a thread stuck in blocking syscalls. This only recurs if
+/// the SAME underlying operation keeps hanging on every subsequent
+/// periodic attempt (in which case leaking one more thread per attempt is
+/// the lesser problem — see the caller's own log line when this fires).
+pub fn collect_with_timeout(
+    root: &Path,
+    include_network: bool,
+    include_storage: bool,
+    timeout: Duration,
+) -> Option<DashSummary> {
+    let root = root.to_path_buf();
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(collect(&root, include_network, include_storage));
+    });
+    rx.recv_timeout(timeout).ok()
 }
 
 /// Pushes a [`DashSummary`] into the shared Prometheus registry
@@ -190,7 +242,7 @@ pub fn publish_to_metrics(s: &DashSummary) {
     delonix_runtime_core::metrics::set_vms(s.vms_running, s.vms_total);
     delonix_runtime_core::metrics::set_memory(s.memory_bytes_used, s.memory_bytes_limit);
     if let (Some(rx), Some(tx)) = (s.network_rx_bytes, s.network_tx_bytes) {
-        delonix_runtime_core::metrics::set_network(rx, tx);
+        delonix_runtime_core::metrics::set_network(rx, tx, s.network_unmeasured_containers);
     }
     if let (Some(images), Some(volumes), Some(vm_images), Some(containers)) = (
         s.storage_bytes_images,
@@ -225,6 +277,25 @@ mod tests {
         assert_eq!(s.network_tx_bytes, None);
         assert_eq!(s.storage_bytes_images, None);
         assert_eq!(s.storage_bytes_containers, None);
+    }
+
+    #[test]
+    fn collect_with_timeout_devolve_some_dentro_do_prazo() {
+        let dir = tempfile::tempdir().unwrap();
+        let s = collect_with_timeout(dir.path(), true, true, Duration::from_secs(10));
+        assert!(s.is_some());
+    }
+
+    /// Doesn't (and can't, without a way to inject an artificially hung
+    /// `collect`) exercise the ACTUAL timeout firing — it proves the ceiling
+    /// itself is real: `collect` on an empty tempdir is fast, so a timeout far
+    /// shorter than that must still return in time and `None` must be a
+    /// real, reachable outcome of the function's own logic, not dead code.
+    #[test]
+    fn collect_with_timeout_devolve_none_se_o_prazo_e_zero() {
+        let dir = tempfile::tempdir().unwrap();
+        let s = collect_with_timeout(dir.path(), true, true, Duration::from_nanos(1));
+        assert!(s.is_none());
     }
 
     #[test]

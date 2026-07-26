@@ -44,7 +44,7 @@
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use clap::Subcommand;
 use delonix_image::ImageStore;
@@ -565,6 +565,26 @@ fn shlex_split(s: &str) -> Result<Vec<String>> {
                 in_double = !in_double;
                 has_token = true;
             }
+            // BUG FOUND (code review): POSIX only gives backslash special meaning
+            // inside double quotes before `$ \` " <newline>` — any OTHER character
+            // keeps its backslash literally (e.g. `"grep \d+ file"` must keep the
+            // `\d`, not silently drop the backslash and change the pattern). This
+            // used to treat every backslash the same regardless of `in_double`,
+            // dropping it unconditionally — a real "wrong argv" correctness bug
+            // for compose commands with backslash-escaped literals inside quotes.
+            // Outside quotes (the common case, and unquoted shell-style escaping),
+            // a backslash still escapes whatever follows, unconditionally.
+            '\\' if !in_single && in_double => match chars.peek() {
+                Some(&next) if matches!(next, '$' | '`' | '"' | '\\' | '\n') => {
+                    chars.next();
+                    cur.push(next);
+                    has_token = true;
+                }
+                _ => {
+                    cur.push('\\');
+                    has_token = true;
+                }
+            },
             '\\' if !in_single => {
                 if let Some(next) = chars.next() {
                     cur.push(next);
@@ -695,6 +715,27 @@ fn topo_sort(services: &BTreeMap<String, ComposeService>) -> Result<Vec<String>>
     Ok(order)
 }
 
+/// Deterministic `<project>_<key>` name for a network/volume that has no
+/// `name:` override — networks/volumes have no label field to scope them by
+/// (unlike containers, which carry `delonix.io/compose-project`), so `down`
+/// re-derives this SAME name from the re-parsed compose file instead of
+/// looking anything up. BUG FOUND (code review): a plain `format!("{project}_{key}")`
+/// is not collision-free — project `"a_b"` key `"c"` and project `"a"` key
+/// `"b_c"` both produced `"a_b_c"`, so a `compose down` for one project could
+/// remove a network/volume that was actually a DIFFERENT project's resource.
+/// Fixed with a prefix-free encoding: every literal `_` inside `project`/`key`
+/// is doubled before joining on a single `_`, so the join point is always the
+/// first LONE underscore — unambiguous to reverse, which is exactly the
+/// property `down` needs. Deliberately breaking pre-existing name generation
+/// (not additive/back-compat): this ships before the public launch, the
+/// safest point to fix a naming scheme.
+fn compose_scoped_name(project: &str, key: &str) -> String {
+    fn escape(s: &str) -> String {
+        s.replace('_', "__")
+    }
+    format!("{}_{}", escape(project), escape(key))
+}
+
 fn resolve_network_names(project: &str, compose: &ComposeFile) -> BTreeMap<String, String> {
     let mut map: BTreeMap<String, String> = compose
         .networks
@@ -705,13 +746,13 @@ fn resolve_network_names(project: &str, compose: &ComposeFile) -> BTreeMap<Strin
             } else {
                 net.name
                     .clone()
-                    .unwrap_or_else(|| format!("{project}_{key}"))
+                    .unwrap_or_else(|| compose_scoped_name(project, key))
             };
             (key.clone(), real)
         })
         .collect();
     map.entry("default".to_string())
-        .or_insert_with(|| format!("{project}_default"));
+        .or_insert_with(|| compose_scoped_name(project, "default"));
     map
 }
 
@@ -725,7 +766,7 @@ fn resolve_volume_names(project: &str, compose: &ComposeFile) -> BTreeMap<String
             } else {
                 vol.name
                     .clone()
-                    .unwrap_or_else(|| format!("{project}_{key}"))
+                    .unwrap_or_else(|| compose_scoped_name(project, key))
             };
             (key.clone(), real)
         })
@@ -854,7 +895,7 @@ fn translate(compose: &ComposeFile, project: &str, base_dir: &Path) -> Result<Tr
             let tag = svc
                 .image
                 .clone()
-                .unwrap_or_else(|| format!("{project}_{name}"));
+                .unwrap_or_else(|| compose_scoped_name(project, name));
             image_docs.push(service_build_to_image_doc(name, build, base_dir, &tag)?);
             tag
         } else {
@@ -973,6 +1014,24 @@ fn resolve_ports(ports: &[ComposePort], service: &str) -> Result<Vec<String>> {
                 if parts.len() < 2 {
                     return Err(Error::Invalid(format!(
                         "compose: service '{service}': malformed port '{s}'"
+                    )));
+                }
+                // BUG FOUND (code review): a 3-part `host_ip:host_port:container_port`
+                // form (e.g. `127.0.0.1:9000:80`, a deliberate loopback-only bind)
+                // used to silently drop `parts[2]` (the IP) and fall through to the
+                // 2-part case — the engine's own `-p` flag already rejects a host-IP
+                // bind explicitly (`parse_publish` requires the host port to be
+                // digits-only, see docs/COMPARACAO-DOCKER-PODMAN.md 2b), so doing it
+                // silently here instead was a real gap: a compose file that restricts
+                // a port to loopback got translated into one with NO restriction at
+                // all. Reject explicitly instead, consistent with the CLI and with
+                // this module's own "never a silent no-op" rule.
+                if parts.len() == 3 {
+                    return Err(Error::Invalid(format!(
+                        "compose: service '{service}' port '{s}': binding to a specific host IP is not supported in v1 \
+                         (would silently drop the IP restriction) — use '{}:{}' to bind all interfaces, \
+                         or drop the port publish and reach the service by its internal DNS name instead",
+                        parts[1], parts[0]
                     )));
                 }
                 out.push(format!("{}:{}", parts[1], parts[0]));
@@ -1263,22 +1322,54 @@ fn wait_for_condition(
 ) -> Result<()> {
     match wait.condition {
         DependsCondition::Started => Ok(()),
-        DependsCondition::CompletedSuccessfully => loop {
-            let mut c = find(store, dep_container_name)?;
-            let changed = runtime::reconcile_status(&mut c);
-            let _ = changed;
-            if !matches!(c.status, Status::Running | Status::Created) {
-                return match c.status {
-                    Status::Stopped => Ok(()),
-                    other => Err(Error::Invalid(format!(
-                        "compose: '{dep_container_name}' was expected to complete successfully (service_completed_successfully) \
-                         but ended in state {other:?} (exit code {})",
-                        other.exit_code()
-                    ))),
-                };
+        DependsCondition::CompletedSuccessfully => {
+            // BUG FOUND (code review): this used to be a bare `loop {}` with no
+            // way out short of Ctrl-C — a service accidentally declared with
+            // this condition on something long-running (or restart:always,
+            // which keeps cycling back into Running) hung `compose up`
+            // forever with zero feedback, unlike the `Healthy` branch below
+            // (already bounded by `retries`). Real `docker compose` has the
+            // same unbounded wait for this specific condition, so a hard
+            // failure here isn't full parity — instead: a generous default
+            // ceiling (never silently forever) plus periodic progress output
+            // (so a legitimately slow one-shot job, e.g. a DB migration,
+            // doesn't look indistinguishable from a hang while it's still
+            // within budget).
+            const MAX_WAIT: Duration = Duration::from_secs(30 * 60);
+            const HEARTBEAT: Duration = Duration::from_secs(30);
+            let deadline = Instant::now() + MAX_WAIT;
+            let mut last_heartbeat = Instant::now();
+            loop {
+                let mut c = find(store, dep_container_name)?;
+                let changed = runtime::reconcile_status(&mut c);
+                let _ = changed;
+                if !matches!(c.status, Status::Running | Status::Created) {
+                    return match c.status {
+                        Status::Stopped => Ok(()),
+                        other => Err(Error::Invalid(format!(
+                            "compose: '{dep_container_name}' was expected to complete successfully (service_completed_successfully) \
+                             but ended in state {other:?} (exit code {})",
+                            other.exit_code()
+                        ))),
+                    };
+                }
+                if Instant::now() >= deadline {
+                    return Err(Error::Invalid(format!(
+                        "compose: '{dep_container_name}' did not finish within {}s (service_completed_successfully) — \
+                         aborting `compose up` (already-started services are left running; `compose down` to clean up). \
+                         If it legitimately needs longer, this condition may be the wrong one for a long-running service.",
+                        MAX_WAIT.as_secs()
+                    )));
+                }
+                if last_heartbeat.elapsed() >= HEARTBEAT {
+                    eprintln!(
+                        "compose: still waiting for '{dep_container_name}' to complete (service_completed_successfully)..."
+                    );
+                    last_heartbeat = Instant::now();
+                }
+                std::thread::sleep(Duration::from_secs(1));
             }
-            std::thread::sleep(Duration::from_secs(1));
-        },
+        }
         DependsCondition::Healthy => {
             let c = find(store, dep_container_name)?;
             let Some(argv) = resolve_test_argv(&wait.healthcheck, images, &c.image) else {
@@ -1564,6 +1655,27 @@ mod tests {
         assert!(shlex_split("echo 'unterminated").is_err());
     }
 
+    /// BUG FOUND (code review): inside double quotes, POSIX only special-cases
+    /// backslash before `$ \` " <newline>` — any other character keeps its
+    /// backslash. This used to drop the backslash unconditionally, silently
+    /// mangling e.g. a regex pattern passed as a command argument.
+    #[test]
+    fn shlex_split_dentro_de_aspas_duplas_so_escapa_o_conjunto_posix() {
+        // `\d` is not one of `$ \` " <newline>` -> the backslash survives.
+        assert_eq!(
+            shlex_split(r#"grep "\d+" file"#).unwrap(),
+            vec!["grep", r"\d+", "file"]
+        );
+        // `\"` and `\\` ARE in the POSIX set -> backslash is consumed.
+        assert_eq!(
+            shlex_split(r#"echo "a\"b\\c""#).unwrap(),
+            vec!["echo", "a\"b\\c"]
+        );
+        // Outside quotes, backslash still escapes whatever follows unconditionally
+        // (unchanged behavior).
+        assert_eq!(shlex_split(r"echo \d+").unwrap(), vec!["echo", "d+"]);
+    }
+
     #[test]
     fn parse_go_duration_reconhece_as_unidades() {
         assert_eq!(parse_go_duration("30s").unwrap(), Duration::from_secs(30));
@@ -1670,5 +1782,30 @@ services:
 
         let bare = vec![ComposePort::Short("80".to_string())];
         assert!(resolve_ports(&bare, "svc").is_err());
+    }
+
+    /// BUG FOUND (code review): `127.0.0.1:9000:80` used to silently drop the
+    /// IP and behave exactly like `9000:80` (bound on every interface) — the
+    /// opposite of what the compose file asked for. Must reject explicitly.
+    #[test]
+    fn resolve_ports_recusa_bind_a_ip_especifico_em_vez_de_o_descartar_em_silencio() {
+        let ports = vec![ComposePort::Short("127.0.0.1:9000:80".to_string())];
+        let err = resolve_ports(&ports, "svc").unwrap_err().to_string();
+        assert!(err.contains("host IP"), "erro inesperado: {err}");
+    }
+
+    /// BUG FOUND (code review): a plain `<project>_<key>` join let two
+    /// DIFFERENT projects/keys collapse onto the same generated network/
+    /// volume name (`project="a_b", key="c"` vs `project="a", key="b_c"`,
+    /// both used to yield `"a_b_c"`), which meant `compose down` for one
+    /// project could remove a resource belonging to the other.
+    #[test]
+    fn compose_scoped_name_nao_colide_entre_projectos_com_undercores() {
+        let a = compose_scoped_name("a_b", "c");
+        let b = compose_scoped_name("a", "b_c");
+        assert_ne!(
+            a, b,
+            "colisão real entre dois pares projecto/chave distintos"
+        );
     }
 }

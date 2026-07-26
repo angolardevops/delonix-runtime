@@ -12,6 +12,7 @@ pub mod cred_vault;
 mod error;
 pub mod events;
 pub mod metrics;
+pub mod peer_cred;
 pub mod secret;
 mod store;
 pub mod telemetry;

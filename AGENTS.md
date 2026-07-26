@@ -1067,6 +1067,86 @@ validate_recusa_endpoint_malicioso_no_manifesto_completo`,
 `registry::tests::pull_oci_artifact_recusa_blob_adulterado`,
 `cmd::build::tests::safe_join_recusa_dot_dot`.
 
+## Revisão ampla de código/arquitectura (2026-07-27) — bugs reais corrigidos + dívida documentada
+
+Pedido explícito do utilizador antes da publicação pública: revisão de código E arquitectura
+(não só segurança) sobre TODO o repositório, com foco redobrado no código mais recente (dash/
+métricas, `compose.rs`, a reorganização da CLI). 4 auditorias em paralelo — resumo em
+`docs/COMPARACAO-DOCKER-PODMAN.md` não se aplica aqui (é específico do gap Docker/Podman); os
+achados de arquitectura ficam registados nesta secção.
+
+**7 bugs reais confirmados e CORRIGIDOS**:
+
+1. **`compose.rs`: `depends_on: condition: service_completed_successfully` sem timeout** —
+   `wait_for_condition` era um `loop {}` sem saída a não ser Ctrl-C se a dependência nunca saísse
+   do estado Running (ex.: condição errada num serviço de longa duração, ou `restart:always` a
+   reciclar de volta para Running). Corrigido com um tecto generoso (30 min) + heartbeat de
+   progresso a cada 30s — nunca mais silenciosamente indistinguível de um hang.
+2. **`compose.rs`: porta `host_ip:host:container` (ex.: `127.0.0.1:9000:80`) descartava o IP em
+   silêncio** — caía no caminho de 2 partes (`hostPort:containerPort`), publicando em TODAS as
+   interfaces exactamente o oposto do que o ficheiro compose pedia (bind só a loopback). Corrigido
+   para recusar explicitamente (o motor em si já recusa `-p 127.0.0.1:...` — `parse_publish` exige
+   host_port só dígitos), consistente com a regra do próprio módulo de nunca degradar em silêncio.
+3. **`compose.rs`: nomes `<projecto>_<chave>` de rede/volume podiam colidir entre projectos
+   diferentes** — `format!("{project}_{key}")` não é livre de colisão (`project="a_b" key="c"` e
+   `project="a" key="b_c"` davam ambos `"a_b_c"`); redes/volumes não têm campo de labels, por isso
+   `compose down` recomputa o nome do zero — uma colisão fazia `down` de um projecto apagar o
+   recurso de OUTRO. Corrigido com uma codificação livre de prefixo (`compose_scoped_name`: cada
+   `_` literal em projecto/chave duplica-se antes da junção).
+4. **`compose.rs`: `shlex_split` escapava backslash a mais dentro de aspas duplas** — POSIX só dá
+   significado especial a backslash antes de cifrão, crase, aspas duplas, o próprio backslash, ou
+   newline, dentro de `"…"`; qualquer outro carácter mantém o backslash. O parser tratava todos os
+   backslashes da mesma forma, mudando em silêncio o argv de um comando com um padrão tipo
+   `"grep \d+ ficheiro"`. Corrigido para seguir a regra POSIX exacta dentro de aspas duplas (fora
+   delas, o comportamento — escapar o que vier a seguir, incondicionalmente — mantém-se).
+5. **`firewall.rs`: TODOS os caminhos de mutação contornavam o `flock` do `Store`** — `ingress
+   allow/deny/rm/clear`, `egress` equivalentes, `apply_container_ingress`, e o apply de manifesto
+   faziam `store.load` → mutar em memória → `infra::apply_firewall` (kernel) → `store.save`, SEM
+   nunca passar por `Store::update` (cujo próprio doc-comment diz que existe precisamente para
+   sequenciar este read-modify-write entre processos). Corrida real: dois comandos de firewall
+   contra o mesmo container (ou um comando de firewall a competir com uma reconciliação
+   concorrente) aplicavam ambos no kernel com sucesso, mas só o último `save` sobrevivia no disco
+   — a regra "perdedora" ficava viva no `nft` mas ausente do registo persistido, e desaparecia
+   silenciosamente no próximo `container start` (que só reaplica o que está persistido). Corrigido
+   com um novo `update_locked` (helper local que envolve `Store::update` para um closure que pode
+   ele próprio falhar) — todos os 6 pontos de mutação agora passam pelo `flock`. Validado ao vivo
+   (allow→deny→rm→policy→clear, ponta-a-ponta, estado persistido confere com o `nft` real).
+6. **`peer_uid()` (extracção `SO_PEERCRED`) duplicado verbatim em 4 sítios** — `delonix-cri`,
+   `delonix-mgmt`, `delonix-net::infra`, `cmd/dockerapi.rs`, os quatro já dependem de
+   `delonix-runtime-core`, sem razão de fronteira de crate para a duplicação (ao contrário do
+   `dir_size`, que genuinamente não pode ser partilhado sem dependência circular). Consolidado em
+   `delonix_runtime_core::peer_cred::peer_uid` — um só sítio a partir de agora.
+7. **Dashboard/métricas: nenhum timeout na colheita cara (rede+disco), e o total de tráfego
+   contava silenciosamente um container `--net host/none` como "0 bytes"** — ver a secção "KPIs de
+   recursos" acima para o detalhe completo dos dois achados e das correcções (`collect_with_timeout`
+   com tecto de 120s + leak deliberado da thread presa em vez de um hang permanente; novo campo
+   `network_unmeasured_containers` exposto no tile/JSON/gauge Prometheus em vez de somado como zero).
+
+**3 achados de arquitectura DOCUMENTADOS como dívida conhecida (não corrigidos nesta sessão —
+âmbito/risco vs. o prazo de publicação; nenhum é um bug ao vivo reproduzido, ao contrário dos 7
+acima)**:
+
+- **Criação de rede não tem rollback em falha parcial** — `create_network` (bridge) faz
+  `store.create(name)?` (declarativo) e só DEPOIS `infra::network_create_with(...)?` (físico); se o
+  segundo falhar, o registo do primeiro fica órfão — `network ls` mostra a rede, nada consegue
+  anexar-se (`NotFound`), e um retry de `create` falha com "already exists" até um `network rm`
+  manual. Para `overlay` é pior: a mensagem de erro promete "reconcilia no próximo `network
+  create`", mas `NetworkStore::create_overlay` não é idempotente (ao contrário de
+  `create_with_base`) — a reconciliação prometida nunca pode acontecer tal como está escrita hoje.
+- **`delonix-vm`'s `JsonStore<Vm>` não tem primitivo de lock/update** — ao contrário de
+  `Store<Container>::update`, `delonix_vm::status()` faz load→mutar(IP)→save sem `flock`, e é
+  chamado concorrentemente pelo refresh de métricas em background (dash/`delonix-mgmt`) a par de
+  `vm start/stop/create` da CLI — uma janela real, embora estreita, de escrita perdida no estado/IP
+  de uma VM.
+- **`spawn()` (`crates/delonix-runtime/src/lib.rs`) é uma função de ~405 linhas** cobrindo
+  preparação de hostname/argv, setup de pty/socketpair, cálculo de flags de clone, o próprio
+  `clone()`, um handshake de userns cuja correcção depende de uma ordem só documentada em
+  comentários ("CRITICAL ORDER"), fork+detach do log shim, o hook de rede, setup de cgroup e
+  `Store::save` — tudo numa função só. O tratamento de erros interno é cuidadoso, mas o tamanho é
+  um risco real de manutenção (uma futura edição que reordene dois blocos pode reintroduzir um
+  deadlock/corrida que os próprios comentários já documentam ter existido). Não é um bug ao vivo —
+  é uma nota para quem for mexer ali a seguir.
+
 ## Falhas silenciosas corrigidas (fail-closed) + 1 documentada
 
 Da análise Docker/Podman (`docs/COMPARACAO-DOCKER-PODMAN.md`), quatro casos em
