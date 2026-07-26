@@ -1247,6 +1247,22 @@ fn setup_rootfs(
     for m in mounts {
         bind_volume(rootfs, m)?;
     }
+    // Best-effort ld cache refresh for any driver libraries a CDI-derived
+    // mount just injected (e.g. `libcuda.so.*` from `--gpus nvidia`/`--device
+    // nvidia.com/gpu=...`) — a deliberately simpler substitute for executing
+    // a real CDI spec's own `createContainer` hook (`nvidia-ctk hook
+    // update-ldcache`, which needs the OCI-hook-stdin-state protocol this
+    // engine doesn't implement). `rootfs` is still a normal host path here
+    // (pre-`pivot_root`), so `ldconfig -r <rootfs>` scopes the cache rebuild
+    // to the container's own view without needing to be inside it. Skipped
+    // silently if `ldconfig` isn't on the host — never blocks a container
+    // with no injected libraries over this.
+    let _ = std::process::Command::new("ldconfig")
+        .arg("-r")
+        .arg(rootfs)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status();
     let put_old = format!("{rootfs}/.delonix_old");
     let _ = std::fs::create_dir_all(&put_old);
     // Essential mount points: MINIMAL images (e.g. the Kubernetes `e2e-test-images`)

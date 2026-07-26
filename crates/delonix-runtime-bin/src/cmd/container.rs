@@ -11,6 +11,7 @@ use delonix_runtime_core::{generate_id, Container, Error, Result, Status, Store}
 use delonix_volume::VolumeStore;
 use serde::{Deserialize, Serialize};
 
+use super::cdi;
 use super::manifest::{self, ManifestDoc};
 use super::output;
 use super::util::{effective_command, find, open_stores, prepare_rootfs, resolve_or_pull};
@@ -1503,10 +1504,13 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
     Ok(())
 }
 
-/// Expand `--gpus <spec>` into the list of device nodes to expose. `all` = NVIDIA +
-/// DRI; `nvidia` = only `/dev/nvidia*`; `dri` = only `/dev/dri/*`. Includes only
-/// the nodes that EXIST on the host (a `--gpus all` on a GPU-less machine invents
-/// no devices).
+/// Expand `--gpus <spec>` into the list of raw device nodes to bind. Still
+/// takes a `nvidia`/`dri`/`all` spec string for generality, but `cmd_run`
+/// only ever calls it with `"dri"` now — the `nvidia`/`all` portion is
+/// resolved via CDI instead (`cdi::resolve_cdi_device`), which injects the
+/// real userspace driver libraries too, not just the raw `/dev/nvidia*`
+/// nodes (CUDA/cuDNN need both). Includes only the nodes that EXIST on the
+/// host (asking for a GPU on a GPU-less machine invents no devices).
 fn expand_gpu_devices(spec: &str) -> Vec<String> {
     let want_nvidia = spec == "all" || spec.contains("nvidia");
     let want_dri = spec == "all" || spec.contains("dri");
@@ -1775,7 +1779,7 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
         entrypoint,
         rm,
         restart,
-        devices,
+        mut devices,
         env,
         labels,
         image,
@@ -1867,7 +1871,35 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
             }
         }
     }
-    let mounts = resolve_mounts(&volumes)?;
+    let mut mounts = resolve_mounts(&volumes)?;
+    // `--gpus nvidia|all` (upgraded) and `--device vendor.com/class=name`:
+    // resolve via CDI BEFORE creating anything — same "fail fast, no
+    // leftovers" pattern as the port checks above. `--gpus dri` stays the
+    // raw `/dev/dri/*` glob (Mesa/VAAPI is open-source and normally already
+    // ships inside the image — not the gap this closes).
+    let mut cdi_edits = cdi::CdiEdits::default();
+    if let Some(g) = &gpus {
+        if g == "all" || g.contains("nvidia") {
+            cdi::ensure_cdi_available()?;
+            cdi::resolve_cdi_device("nvidia.com/gpu=all", &mut cdi_edits)?;
+        }
+        if g == "all" || g.contains("dri") {
+            devices.extend(expand_gpu_devices("dri"));
+        }
+    }
+    for d in devices.iter().filter(|d| cdi::is_cdi_qualified(d)) {
+        cdi::ensure_cdi_available()?;
+        cdi::resolve_cdi_device(d, &mut cdi_edits)?;
+    }
+    devices.retain(|d| !cdi::is_cdi_qualified(d));
+    devices.extend(cdi_edits.devices);
+    mounts.extend(cdi_edits.mounts);
+    if cdi_edits.had_unexecuted_hooks {
+        eprintln!(
+            "aviso: o spec CDI declara hooks que este motor não executa (usa `ldconfig -r` no \
+             lugar) — se algo não carregar em runtime, confirma manualmente os passos do hook"
+        );
+    }
     let img = resolve_or_pull(images, &image)?;
     // On the 2nd re-exec pass (see `reexec_into_netns`) the id MUST be the same:
     // the named netns was already created with it on the holder's side.
@@ -1947,14 +1979,14 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
         }
     }
     c.env.extend(env);
+    c.env.extend(cdi_edits.env);
     if !img.config.working_dir.is_empty() {
         c.workdir = Some(img.config.working_dir.clone());
     }
+    // `--gpus`/CDI-qualified `--device`s were already resolved (CDI devices/
+    // mounts merged in) and `--gpus dri`'s raw glob already appended, above —
+    // `devices` here is the final list.
     c.devices = devices;
-    // `--gpus`: expands `all`/`nvidia`/`dri` into the `/dev` nodes present on the host.
-    if let Some(g) = &gpus {
-        c.devices.extend(expand_gpu_devices(g));
-    }
     c.privileged = privileged;
     for l in &labels {
         if let Some((k, v)) = l.split_once('=') {

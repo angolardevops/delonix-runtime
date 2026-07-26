@@ -49,7 +49,27 @@ uma lista plana, um módulo por grupo em `crates/delonix-runtime-bin/src/cmd/`:
   o processo passa a ter privilégio no userns do holder). O `RunSpec.join_netns` por `setns`
   (que falhava com "netns do pod indisponível") é **código morto** — abandonado a favor do
   re-exec. **`--pod <netns>`** usa o MESMO mecanismo para juntar N containers à netns partilhada
-  de um pod (ver `delonix pod` / `kind: Pod` abaixo).
+  de um pod (ver `delonix pod` / `kind: Pod` abaixo). **GPU real via CDI (v0.28.0)**: `--gpus
+  nvidia|all` e `--device nvidia.com/gpu=<nome|all>` (`cmd/cdi.rs`) — CONSOME specs CDI já gerados
+  por `nvidia-ctk cdi generate` (`/etc/cdi`/`/var/run/cdi`), nunca faz a descoberta do driver
+  sozinho (isso fica 100% dentro do `nvidia-ctk`, tal como no Docker/Podman/containerd reais).
+  Deliberadamente NÃO é o modelo do hook legacy `nvidia-container-cli configure --pid=<pid>`
+  (um 2º processo a `setns` para dentro do userns/mntns de OUTRO por PID — precisaria de
+  `CAP_SYS_ADMIN` nesse userns alheio, o mesmo problema de privilégio cross-namespace que o
+  `--net <rede-custom>` já resolve por re-exec, não por attach externo): os `deviceNodes`/
+  `mounts`/`env` do spec traduzem-se para o MESMO `Vec<Mount>`/`Vec<String>` que `-v`/`--device`
+  já alimentam, aplicados pelo PRÓPRIO init do container antes do `pivot_root` — zero modelo de
+  privilégio novo, o mesmo mecanismo já rootless de sempre. Sem spec CDI nem `nvidia-ctk` no
+  PATH, `--gpus nvidia`/um `--device nvidia.com/gpu=...` **recusa com erro claro e accionável**
+  ANTES de criar nada (nunca cai em silêncio para o bind cru de `/dev/nvidia*`, que falharia a
+  meio com um erro confuso do CUDA). `ldconfig -r <rootfs>` best-effort logo após os mounts em
+  `setup_rootfs` (ainda antes do `pivot_root`) — substituto deliberadamente mais simples do hook
+  `createContainer` real de um spec CDI (que precisa do protocolo OCI-hook-stdin-state, não
+  implementado); um spec que declare hooks avisa (não silencioso) que não foram executados.
+  `--gpus dri` continua inalterado (bind cru de `/dev/dri/*` — Mesa/VAAPI é open-source, já vem
+  no pacote da própria imagem). **Por confirmar num host GPU real** (impossível neste sandbox):
+  a precedência exacta `/etc/cdi` vs `/var/run/cdi`, e se o `ldconfig -r` chega como substituto
+  dos hooks reais.
 - `delonix pod` — **pods reais multi-container** (create/ls/describe/rm/logs). N containers
   partilham a **netns do pod** (mesmo IP, `localhost` entre si), como um Pod do k8s. `cmd/pod.rs`:
   cria uma netns SDN NOMEADA no holder (`pod-<nome>`, via `infra::attach_container`) e corre cada
