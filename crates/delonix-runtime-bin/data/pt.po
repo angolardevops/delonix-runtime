@@ -272,11 +272,20 @@ msgstr "A provisionar {n} worker(s)"
 msgid "Provisioning the HAProxy load balancer"
 msgstr "A provisionar o load balancer HAProxy"
 
+msgid "Provisioning {n} etcd node(s)"
+msgstr "A provisionar {n} nó(s) etcd"
+
 msgid "Preparing {n} host(s)"
 msgstr "A preparar {n} host(s)"
 
 msgid "host prep thread panicked"
 msgstr "a thread de preparação do host rebentou (panic)"
+
+msgid "Bootstrapping the etcd cluster"
+msgstr "A arrancar o cluster etcd"
+
+msgid "etcd.hosts has only 1 member — no HA (a single etcd node is a single point of failure)"
+msgstr "etcd.hosts só tem 1 membro — sem HA (um único nó etcd é um ponto único de falha)"
 
 msgid "Bootstrapping control-plane (kubeadm init)"
 msgstr "A arrancar o control-plane (kubeadm init)"
