@@ -2431,7 +2431,11 @@ fn for_each_id(ids: &[String], mut f: impl FnMut(&str) -> Result<()>) -> Result<
         if let Err(e) = f(id) {
             // Each failure exits HERE with the id's context; returning the error made
             // main print it a second time, without context (duplicated message).
-            eprintln!("{id}: {e}");
+            // BUG FIXED (i18n gap): this bypassed `main.rs`'s error printer entirely
+            // (exits before `run()` ever returns), so it never went through
+            // `po::t_dyn` — every batched `stop`/`rm`/... failure stayed in EN
+            // even under `--l18n=pt`, unlike a single-id failure of the same command.
+            eprintln!("{id}: {}", super::po::t_dyn(&e.to_string()));
             failed = true;
         }
     }

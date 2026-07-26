@@ -69,10 +69,20 @@ pub enum ImageCmd {
         /// authenticated beyond the registry's own digest.
         #[arg(long, value_name = "PEM")]
         verify: Option<PathBuf>,
+        /// (only with `--vm`) With no argument, pull the official
+        /// NO-Kubernetes golden instead of the Kubernetes one.
+        #[arg(long)]
+        no_k8s: bool,
     },
     /// (only with `--vm`) List the tags available in a remote OCI repository
     /// — with no argument, the OFFICIAL Delonix golden image repo.
-    LsRemote { source: Option<String> },
+    LsRemote {
+        source: Option<String>,
+        /// With no argument, list the official NO-Kubernetes golden's repo
+        /// instead of the Kubernetes one.
+        #[arg(long)]
+        no_k8s: bool,
+    },
     /// List local images.
     Ls,
     /// Human-readable detail of one or more images, `kubectl describe`-style
@@ -219,11 +229,21 @@ pub enum VmSub {
         /// Local name (default: derived from the reference).
         #[arg(long)]
         name: Option<String>,
+        /// With no `source`, pull the official NO-Kubernetes golden instead
+        /// of the Kubernetes one.
+        #[arg(long)]
+        no_k8s: bool,
     },
     /// List the tags available in a remote OCI repository — with no
     /// argument, the OFFICIAL Delonix golden image repo (discover which
     /// k8s versions are published before `pull`/`--k8s-version`).
-    LsRemote { source: Option<String> },
+    LsRemote {
+        source: Option<String>,
+        /// With no `source`, list the official NO-Kubernetes golden's repo
+        /// instead of the Kubernetes one.
+        #[arg(long)]
+        no_k8s: bool,
+    },
     /// Publish a local VM image to an OCI registry.
     Push { name: String, target: String },
     /// Build the golden VM image (Ubuntu + kubeadm/kubelet/kubectl + `delonix-cri`).
@@ -291,8 +311,16 @@ pub fn run(vm: bool, action: ImageCmd) -> Result<()> {
         return vmimage::run(match action {
             VmSub::Ls => VmImageCmd::Ls,
             VmSub::Describe { names } => VmImageCmd::Describe { names },
-            VmSub::Pull { source, name } => VmImageCmd::Pull { source, name },
-            VmSub::LsRemote { source } => VmImageCmd::LsRemote { source },
+            VmSub::Pull {
+                source,
+                name,
+                no_k8s,
+            } => VmImageCmd::Pull {
+                source,
+                name,
+                no_k8s,
+            },
+            VmSub::LsRemote { source, no_k8s } => VmImageCmd::LsRemote { source, no_k8s },
             VmSub::Push { name, target } => VmImageCmd::Push { name, target },
             VmSub::Build {
                 tag,
@@ -331,11 +359,16 @@ pub fn run(vm: bool, action: ImageCmd) -> Result<()> {
     let (images, _store) = open_stores()?;
     match action {
         ImageCmd::Dash { .. } => unreachable!("tratado no topo de run"),
-        ImageCmd::Pull { image, verify } => {
+        ImageCmd::Pull {
+            image,
+            verify,
+            no_k8s: _,
+        } => {
             // Unlike `--vm pull` (defaults to the official golden image), a
             // plain container-image pull has no sensible default — `image`
             // only became `Option<String>` so the SAME struct could serve
-            // both paths at the clap level (see `run_vm`'s mapping).
+            // both paths at the clap level (see `run_vm`'s mapping). `no_k8s`
+            // only matters in `--vm` mode too — ignored here.
             let image = image.ok_or_else(|| {
                 Error::Invalid(super::po::t("`image pull <reference>`: the reference is required").into())
             })?;
@@ -408,11 +441,16 @@ fn run_vm(action: ImageCmd) -> Result<()> {
         // `source`, so clap itself rejected the no-arg invocation before this
         // code ever ran. Both are now `Option<String>`; `vmimage::run`
         // applies the actual default.
-        ImageCmd::Pull { image, verify: _ } => VmImageCmd::Pull {
+        ImageCmd::Pull {
+            image,
+            verify: _,
+            no_k8s,
+        } => VmImageCmd::Pull {
             source: image,
             name: None,
+            no_k8s,
         },
-        ImageCmd::LsRemote { source } => VmImageCmd::LsRemote { source },
+        ImageCmd::LsRemote { source, no_k8s } => VmImageCmd::LsRemote { source, no_k8s },
         ImageCmd::Push { name, target } => VmImageCmd::Push {
             name,
             // A VM image has no repo_tags from which to infer the destination.

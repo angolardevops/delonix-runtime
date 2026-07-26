@@ -54,13 +54,56 @@ pub fn tf(en: &'static str, subs: &[(&str, &str)]) -> String {
     out
 }
 
+/// Known `#[error("...")]` wrapper templates from `delonix_runtime_core::Error`
+/// (`(prefix, suffix)`) — the SAME shared `Error` type used by every engine
+/// crate. BUG FIXED (gap): `t_dyn` did a single exact-string lookup against
+/// the FULLY rendered `e.to_string()` — but that string is always the fixed EN
+/// prefix (`"invalid argument: "`, `"no such container: "`, ...) glued to the
+/// actual message. Since the catalog was seeded with just the inner message
+/// (e.g. `"invalid VNI (1..16777215)"`), the wrapped text never matched
+/// ANYTHING, even with a perfectly good `pt.po` entry sitting right there —
+/// every engine-crate error came out in English regardless of `--l18n=pt`.
+/// `Io`/`Json`/`Runtime` are deliberately excluded: their variable part is an
+/// OS errno/serde message, not ours to translate.
+const ERROR_WRAPPERS: &[(&str, &str)] = &[
+    ("no such VM: ", " (see `delonix vm ls`)"),
+    ("no such container: ", ""),
+    ("container is not running: ", ""),
+    ("invalid argument: ", ""),
+    ("registry error: ", ""),
+    ("conflict: ", ""),
+];
+
 /// Variant for DYNAMIC strings — the clap help and the ERROR PRINTER of
 /// main.rs (messages from the ENGINE crates arrive as already-formatted text;
 /// those crates can't depend on this catalog, so translation happens at
-/// output, by looking up the full EN text — messages with interpolated values
-/// don't match and come out in EN, a known and documented limitation).
+/// output). Strips a known `ERROR_WRAPPERS` prefix/suffix before the lookup
+/// (translating both the wrapper and the inner message independently) so a
+/// static engine message wrapped in a fixed EN template still matches its
+/// `pt.po` entry; falls back to a whole-string lookup otherwise. Messages
+/// with INTERPOLATED values (a container id, an errno) still don't match —
+/// a known and documented limitation, since the catalog only has whole texts.
 pub fn t_dyn(s: &str) -> String {
+    if !super::output::is_pt() {
+        return s.to_string();
+    }
+    if let Some((prefix, inner, suffix)) = split_error_wrapper(s) {
+        return format!("{}{}{}", t_owned(prefix), t_owned(inner), t_owned(suffix));
+    }
     t_owned(s)
+}
+
+/// Splits a rendered engine error into `(prefix, inner, suffix)` if it matches
+/// a known [`ERROR_WRAPPERS`] template — pure (no locale/catalog involved),
+/// split out of `t_dyn` so the matching logic itself is testable without
+/// touching the global `output::is_pt()` state.
+fn split_error_wrapper(s: &str) -> Option<(&'static str, &str, &'static str)> {
+    for &(prefix, suffix) in ERROR_WRAPPERS {
+        if let Some(inner) = s.strip_prefix(prefix).and_then(|r| r.strip_suffix(suffix)) {
+            return Some((prefix, inner, suffix));
+        }
+    }
+    None
 }
 
 fn t_owned(s: &str) -> String {
@@ -249,5 +292,45 @@ mod tests {
     fn catalogo_embutido_parseia_e_tem_entradas() {
         // If someone breaks the data/pt.po, this test blows up BEFORE the release.
         assert!(!catalog().is_empty(), "data/pt.po vazio ou malformado");
+    }
+
+    /// BUG FIXED (i18n gap): `t_dyn` used to do a single exact-string lookup
+    /// against the FULLY rendered engine error — but that's always a fixed EN
+    /// prefix (sometimes + suffix) glued to the actual message, so it NEVER
+    /// matched a `pt.po` entry seeded with just the inner text. Locks in that
+    /// the wrapper-splitting recognizes every `delonix_runtime_core::Error`
+    /// template it claims to, and rejects the ones deliberately excluded
+    /// (`Io`/`Json`/`Runtime` — OS errno/serde text, not ours to translate).
+    #[test]
+    fn split_error_wrapper_reconhece_prefixo_e_sufixo() {
+        assert_eq!(
+            split_error_wrapper("no such VM: dev (see `delonix vm ls`)"),
+            Some(("no such VM: ", "dev", " (see `delonix vm ls`)"))
+        );
+        assert_eq!(
+            split_error_wrapper("no such container: web-01"),
+            Some(("no such container: ", "web-01", ""))
+        );
+        assert_eq!(
+            split_error_wrapper("invalid argument: invalid VNI (1..16777215)"),
+            Some(("invalid argument: ", "invalid VNI (1..16777215)", ""))
+        );
+        assert_eq!(
+            split_error_wrapper("registry error: HTTP 403 Forbidden"),
+            Some(("registry error: ", "HTTP 403 Forbidden", ""))
+        );
+        assert_eq!(
+            split_error_wrapper("conflict: 'web' already exists"),
+            Some(("conflict: ", "'web' already exists", ""))
+        );
+        // Deliberately excluded: OS errno/serde text is not ours to translate.
+        assert_eq!(split_error_wrapper("I/O error: disk full"), None);
+        assert_eq!(split_error_wrapper("state serialisation error: EOF"), None);
+        assert_eq!(
+            split_error_wrapper("system call `clone` failed: EPERM"),
+            None
+        );
+        // No known wrapper at all — falls through untouched.
+        assert_eq!(split_error_wrapper("some unrelated text"), None);
     }
 }

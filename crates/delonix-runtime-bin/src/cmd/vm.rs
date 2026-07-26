@@ -457,12 +457,21 @@ pub enum VmCmd {
         /// Local name (default: derived from the reference).
         #[arg(long)]
         name: Option<String>,
+        /// With no `source`, pull the official NO-Kubernetes golden (just
+        /// the `delonix` engine, rootless-ready) instead of the Kubernetes
+        /// one.
+        #[arg(long)]
+        no_k8s: bool,
     },
     /// List the tags available in a remote OCI repository — with no
     /// argument, the OFFICIAL Delonix golden image repo (discover which
     /// k8s versions are published before `pull`).
     LsRemote {
         source: Option<String>,
+        /// With no `source`, list the official NO-Kubernetes golden's repo
+        /// instead of the Kubernetes one.
+        #[arg(long)]
+        no_k8s: bool,
     },
     /// Push a local golden VM image to an OCI registry (`vm push <name> <target>`).
     Push {
@@ -905,13 +914,19 @@ pub fn run(action: VmCmd) -> Result<()> {
             print_vm_next_steps(&vm.name);
             Ok(())
         }
-        VmCmd::Pull { source, name } => {
+        VmCmd::Pull {
+            source,
+            name,
+            no_k8s,
+        } => {
             let store = super::vmimage::VmImageStore::open(super::util::state_root())?;
-            let src = source.unwrap_or_else(|| super::vmimage::OFFICIAL_VM_IMAGE.to_string());
+            let src =
+                source.unwrap_or_else(|| super::vmimage::default_pull_source(no_k8s).to_string());
             super::vmimage::cmd_pull(&store, &src, name)
         }
-        VmCmd::LsRemote { source } => {
-            let src = source.unwrap_or_else(|| super::vmimage::OFFICIAL_VM_IMAGE.to_string());
+        VmCmd::LsRemote { source, no_k8s } => {
+            let src =
+                source.unwrap_or_else(|| super::vmimage::default_pull_source(no_k8s).to_string());
             super::vmimage::cmd_ls_remote(&src)
         }
         VmCmd::Push { name, target } => {

@@ -387,8 +387,16 @@ fn main() {
     clap_complete::CompleteEnv::with_factory(<Cli as clap::CommandFactory>::command).complete();
 
     if let Err(e) = run() {
-        // The top-level error in red (honors NO_COLOR/pipes — see `output::cor`).
-        cmd::output::error(&e.to_string());
+        // Gap closed: the 4 hidden re-exec paths above already ran their errors
+        // through `po::t_dyn` (exact-text lookup against `pt.po` — see its doc
+        // comment: engine crates can't depend on this catalog, so translation
+        // happens here, at output), but THIS is the error path virtually every
+        // normal user-facing command failure actually takes — it was printing
+        // the raw (often untranslated, sometimes PT/EN-mixed historically)
+        // engine-crate message verbatim even under `--l18n=pt`. A message
+        // without a matching `pt.po` entry still degrades to the original text
+        // (same graceful fallback `t_dyn` already guarantees everywhere else).
+        cmd::output::error(&cmd::po::t_dyn(&e.to_string()));
         std::process::exit(1);
     }
 }

@@ -155,6 +155,29 @@ msgstr "aviso"
 msgid "error"
 msgstr "erro"
 
+# ---- wrappers `#[error(...)]` de delonix-runtime-core::Error (ver po::t_dyn) -
+
+msgid "no such VM: "
+msgstr "sem essa VM: "
+
+msgid " (see `delonix vm ls`)"
+msgstr " (ver `delonix vm ls`)"
+
+msgid "no such container: "
+msgstr "sem esse container: "
+
+msgid "container is not running: "
+msgstr "o container não está em execução: "
+
+msgid "invalid argument: "
+msgstr "argumento inválido: "
+
+msgid "registry error: "
+msgstr "erro de registo: "
+
+msgid "conflict: "
+msgstr "conflito: "
+
 # ---- mensagens migradas do tr() inline -------------------------------------
 
 msgid "active connections (conntrack)"
@@ -251,6 +274,9 @@ msgstr "A provisionar o load balancer HAProxy"
 
 msgid "Preparing {n} host(s)"
 msgstr "A preparar {n} host(s)"
+
+msgid "host prep thread panicked"
+msgstr "a thread de preparação do host rebentou (panic)"
 
 msgid "Bootstrapping control-plane (kubeadm init)"
 msgstr "A arrancar o control-plane (kubeadm init)"

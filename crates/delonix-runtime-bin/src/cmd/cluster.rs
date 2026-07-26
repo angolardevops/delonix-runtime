@@ -666,6 +666,17 @@ fn apply_vm(name: &str, spec: &ClusterSpec, wait_ready: bool) -> Result<()> {
     })
 }
 
+/// Combines the per-host `prepare_host` outcomes collected across the
+/// parallel `std::thread::scope` in `apply_ssh` into a single `Result` — pure
+/// (testable without any real SSH). Empty = every host prepared cleanly.
+fn combine_host_prep_errors(errors: Vec<String>) -> Result<()> {
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(Error::Invalid(errors.join("; ")))
+    }
+}
+
 /// `mode: ssh` — remote hosts ALREADY live (the original path, unchanged).
 fn apply_ssh(name: &str, spec: &ClusterSpec, wait_ready: bool) -> Result<()> {
     let cri_bin = vmimage::resolve_cri_bin(None)?;
@@ -692,16 +703,46 @@ fn apply_ssh(name: &str, spec: &ClusterSpec, wait_ready: bool) -> Result<()> {
         ),
         "🔧",
     );
-    for h in &all_hosts {
-        let target = target_for(h, &spec.ssh);
-        prepare_host(
-            &target,
-            &h.label(),
-            spec.k8s_version.as_deref(),
-            &cri_bin,
-            &cri_service,
-        )?;
-    }
+    // Gap closed: host prep used to run sequentially, one SSH round-trip at a
+    // time, even though each host is entirely independent (separate SSH
+    // session, separate `apt`/`dpkg` state, no shared mutable data) — an
+    // N-host cluster paid N × (apt update + package install + delonix-cri
+    // deploy) back to back instead of in parallel. `std::thread::scope` lets
+    // the closures borrow `spec`/`cri_bin`/`cri_service` directly (no `Clone`
+    // needed beyond the already-owned `SshTarget`/label per host). Unlike the
+    // old fail-fast loop (stop at the first bad host, others never attempted),
+    // every host is now prepared regardless of the others' outcome and ALL
+    // failures are reported together — strictly more useful for an operator
+    // fixing a multi-host manifest than discovering one broken host per run.
+    let errors: Vec<String> = std::thread::scope(|scope| {
+        let handles: Vec<_> = all_hosts
+            .iter()
+            .map(|h| {
+                let target = target_for(h, &spec.ssh);
+                let label = h.label();
+                let cri_bin = &cri_bin;
+                let cri_service = &cri_service;
+                scope.spawn(move || {
+                    prepare_host(
+                        &target,
+                        &label,
+                        spec.k8s_version.as_deref(),
+                        cri_bin,
+                        cri_service,
+                    )
+                })
+            })
+            .collect();
+        handles
+            .into_iter()
+            .filter_map(|h| match h.join() {
+                Ok(Ok(())) => None,
+                Ok(Err(e)) => Some(e.to_string()),
+                Err(_) => Some(super::po::t("host prep thread panicked").to_string()),
+            })
+            .collect()
+    });
+    combine_host_prep_errors(errors)?;
     p.ok();
 
     let cp1 = &spec.control_plane.hosts[0];
@@ -1610,6 +1651,19 @@ fn cmd_init(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Gap closed: host prep now runs in parallel (`std::thread::scope`) instead of
+    /// one SSH round-trip at a time. Unlike the old fail-fast loop, ALL hosts are
+    /// attempted and ALL failures are reported together — locks in that aggregation.
+    #[test]
+    fn combine_host_prep_errors_agrega_todas_as_falhas() {
+        assert!(combine_host_prep_errors(vec![]).is_ok());
+        let err = combine_host_prep_errors(vec!["[cp1] falhou".into(), "[w1] falhou".into()])
+            .unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("[cp1] falhou"), "{msg}");
+        assert!(msg.contains("[w1] falhou"), "{msg}");
+    }
 
     #[test]
     fn vm_names_gera_nomes_deterministicos() {
