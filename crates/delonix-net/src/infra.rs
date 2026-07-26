@@ -293,10 +293,47 @@ pub fn release(id: &str) {
 /// how many it freed; tears down the infra if it runs out of markers. **Never touches a
 /// live id.** Closes the leak of markers left by abrupt deaths that never
 /// went through `detach_container`.
+/// A freshly-`acquire`d marker is spared from reaping for this long, no
+/// matter what `live` says. Closes a real TOCTOU: `attach_container` writes
+/// the ref-marker BEFORE the container's Store record is saved (the network
+/// has to exist before the container does), so a `system prune` racing that
+/// exact window sees an id with a marker but no Store entry, calls it an
+/// orphan, and — if it's the last marker — tears down the ENTIRE holder/
+/// slirp/nft state out from under the in-flight `run`, and drops every
+/// other container's veths/nft rules too (the holder netns is shared).
+/// Container creation is not expected to take anywhere near this long
+/// between `acquire` and `store.save`; generous on purpose since the cost
+/// of skipping a genuinely-orphaned marker for a few extra seconds is
+/// nothing, while the cost of the race is total ingress teardown.
+const REF_MARKER_GRACE: std::time::Duration = std::time::Duration::from_secs(15);
+
+/// Marker `mtime`-based grace check, factored out for testing without
+/// needing a real clock race: `now` and `grace` are parameters, not
+/// `SystemTime::now()`/the constant above, baked in.
+fn marker_within_grace(
+    mtime: std::time::SystemTime,
+    now: std::time::SystemTime,
+    grace: std::time::Duration,
+) -> bool {
+    now.duration_since(mtime)
+        .map(|age| age < grace)
+        .unwrap_or(true) // clock went backwards → don't reap
+}
+
 pub fn reap_orphan_refs(live: &std::collections::HashSet<String>) -> usize {
     let _lock = FileLock::acquire();
     let dir = refs_dir();
-    let orphans = orphan_refs(&refs_in(&dir), live);
+    let now = std::time::SystemTime::now();
+    let candidates = orphan_refs(&refs_in(&dir), live);
+    let orphans: Vec<String> = candidates
+        .into_iter()
+        .filter(|id| {
+            std::fs::metadata(dir.join(ref_marker_name(id)))
+                .and_then(|m| m.modified())
+                .map(|mtime| !marker_within_grace(mtime, now, REF_MARKER_GRACE))
+                .unwrap_or(true) // marker vanished/unreadable — nothing to spare
+        })
+        .collect();
     for id in &orphans {
         ref_remove_in(&dir, id);
     }
@@ -388,7 +425,7 @@ pub fn teardown() {
 /// `run` got stuck 1h in `skb_wait_for_more_packets` with no log or exit.
 /// `poll` doesn't need to touch the fd's flags (no `O_NONBLOCK` leaking
 /// to whoever inherits it).
-fn wait_readable(fd: i32, timeout_ms: i32) -> bool {
+pub(crate) fn wait_readable(fd: i32, timeout_ms: i32) -> bool {
     let mut pfd = libc::pollfd {
         fd,
         events: libc::POLLIN,
@@ -505,13 +542,23 @@ fn start_slirp(holder_pid: i32) -> Result<()> {
             // as the console's `recv_fd` deadlock. 10s is more than enough (the slirp
             // signals in ms); after that we move on and the error surfaces downstream,
             // with a message, instead of a process hung forever.
-            if !wait_readable(rd, 10_000) {
+            // BUG FOUND: this used to `read` unconditionally after the poll,
+            // even on timeout — defeating the whole point of `wait_readable`.
+            // With no data and no EOF (the exact condition the poll timed
+            // out on), that bare `read` blocks INDEFINITELY, reintroducing
+            // the deadlock this capped wait exists to prevent. Only read
+            // when the fd is actually known-readable; always close it either way.
+            if wait_readable(rd, 10_000) {
+                let mut b = [0u8; 1];
+                // SAFETY: reads 1 byte from a read-end already confirmed readable.
+                unsafe {
+                    libc::read(rd, b.as_mut_ptr() as *mut libc::c_void, 1);
+                }
+            } else {
                 tracing::warn!("slirp4netns did not signal ready within 10s; the container network may not be operational");
             }
-            let mut b = [0u8; 1];
-            // SAFETY: reads 1 byte from the read-end (already readable, or we gave up above).
+            // SAFETY: rd is a valid fd owned by this function either way.
             unsafe {
-                libc::read(rd, b.as_mut_ptr() as *mut libc::c_void, 1);
                 libc::close(rd);
             }
             let _ = std::fs::write(slirp_pid_path(), (child.id() as i32).to_string());
@@ -1521,6 +1568,26 @@ fn do_unpublish(host_port: &str) -> Result<()> {
 /// (blocks all egress to the Internet); `allow` removes it. The per-workload
 /// firewall rules (accept) that appear BEFORE in the `forward` chain still
 /// open specific exceptions — so this is the BASE egress policy.
+/// Whether an `nft -a list chain` line is the ONE global blanket egress rule
+/// (`oifname "tap0" drop`, no `iifname`) that `do_egress` is allowed to
+/// delete before (re)applying its new policy.
+///
+/// BUG FOUND, fixed here: the original check was just `contains("oifname
+/// \"tap0\"") && contains("drop")`, with no `iifname` exclusion. Every
+/// PER-NETWORK egress rule installed by `apply_egress_from_state`/
+/// `egress_specs` has the shape `iifname "<bridge>" oifname "tap0" ...
+/// drop` — it ALSO contains both substrings. A later, unrelated global
+/// `egress allow`/`deny` silently deleted a network's own `deny`/
+/// `allowlist` terminal drop rule, reopening full Internet egress for that
+/// network with no error and no indication the per-network policy was
+/// wiped — a data-exfiltration path reopened by an unrelated command.
+/// Excluding any line that also contains `iifname` is exactly "the global
+/// rule has no iifname" — every `apply_egress_from_state` rule always
+/// starts with one (see `egress_specs`'s `base()` helper).
+fn is_global_egress_drop_line(line: &str) -> bool {
+    line.contains("oifname \"tap0\"") && line.contains("drop") && !line.contains("iifname")
+}
+
 fn do_egress(policy: &str) -> Result<()> {
     let listed = crate::capture(
         "nft",
@@ -1528,7 +1595,7 @@ fn do_egress(policy: &str) -> Result<()> {
     )
     .unwrap_or_default();
     for line in listed.lines() {
-        if line.contains("oifname \"tap0\"") && line.contains("drop") {
+        if is_global_egress_drop_line(line) {
             if let Some(handle) = line
                 .rsplit("# handle ")
                 .next()
@@ -3584,6 +3651,37 @@ mod tests {
     }
 
     #[test]
+    fn marker_within_grace_poupa_marcadores_recentes() {
+        // BUG regression guard: `system prune` racing `attach_container`'s
+        // acquire-before-store-save window used to reap (and, if it was the
+        // last marker, TEAR DOWN THE WHOLE HOLDER) a container that was
+        // still mid-creation. A grace period on the marker's own mtime
+        // closes it without needing to reorder container creation.
+        let now = std::time::SystemTime::now();
+        let grace = std::time::Duration::from_secs(15);
+        // Just written (in-flight creation) → spared regardless of `live`.
+        assert!(super::marker_within_grace(now, now, grace));
+        assert!(super::marker_within_grace(
+            now - std::time::Duration::from_secs(5),
+            now,
+            grace
+        ));
+        // Old enough → no longer spared, a genuine orphan gets reaped.
+        assert!(!super::marker_within_grace(
+            now - std::time::Duration::from_secs(30),
+            now,
+            grace
+        ));
+        // Clock skew (mtime "in the future" relative to `now`) fails closed —
+        // never reap on an unreliable duration_since.
+        assert!(super::marker_within_grace(
+            now + std::time::Duration::from_secs(5),
+            now,
+            grace
+        ));
+    }
+
+    #[test]
     fn ruleset_has_pre_and_post_chains() {
         let rs = ingress_table_ruleset();
         assert!(rs.contains(&format!("table ip {INGRESS_TABLE}")));
@@ -3631,6 +3729,30 @@ mod tests {
         let h = super::egress_specs("dlx1", &st(None, &["example.com"]));
         assert_eq!(h.len(), 4);
         assert!(h[2].iter().any(|x| x.starts_with("@dlxfq")));
+    }
+
+    #[test]
+    fn is_global_egress_drop_line_nao_apanha_regras_por_rede() {
+        // BUG regression guard: a global `egress deny`/`allow` used to also
+        // match and delete PER-NETWORK egress rules (real `nft -a list
+        // chain` line shapes below), silently reopening a network's egress
+        // that had been explicitly denied/allowlisted.
+        assert!(super::is_global_egress_drop_line(
+            "\t\toifname \"tap0\" drop # handle 12"
+        ));
+        assert!(!super::is_global_egress_drop_line(
+            "\t\tiifname \"dlxn1a2b\" oifname \"tap0\" drop # handle 7"
+        ));
+        assert!(!super::is_global_egress_drop_line(
+            "\t\tiifname \"dlxn1a2b\" oifname \"tap0\" ip daddr @dlxfq1a2b accept # handle 5"
+        ));
+        // A line with neither substring, or only one, is never a match either way.
+        assert!(!super::is_global_egress_drop_line(
+            "\t\tiifname \"dlxn1a2b\" oifname \"tap0\" udp dport 53 accept # handle 3"
+        ));
+        assert!(!super::is_global_egress_drop_line(
+            "\t\tcounter packets 0 bytes 0"
+        ));
     }
 
     #[test]

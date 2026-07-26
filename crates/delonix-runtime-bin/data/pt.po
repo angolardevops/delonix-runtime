@@ -303,6 +303,9 @@ msgstr "proxy a correr mas a config não leu"
 msgid "container not found"
 msgstr "container não encontrado"
 
+msgid "multiple containers match this prefix"
+msgstr "vários containers correspondem a este prefixo"
+
 msgid "could not read"
 msgstr "não consegui ler"
 

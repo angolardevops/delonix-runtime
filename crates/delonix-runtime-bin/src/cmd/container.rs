@@ -2181,6 +2181,14 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
             runtime::remove(store, &c, true)?;
             unpublish_ports(&c, pid);
             let _ = images.unmount_rootfs(&c.id);
+            // BUG FOUND: `--rm` (foreground) stopped at `unmount_rootfs`, which
+            // deliberately PRESERVES the flat rootless rootfs (it's meant for
+            // `start` to reuse) — only `remove_container_dir` actually deletes
+            // it. `--rm`'s whole contract is full auto-cleanup, same as `rm -f`
+            // (see `cmd_rm`, which already does this); without it every
+            // foreground `--rm` run left its full rootfs behind forever, the
+            // exact same disk-pressure leak `cmd_rm` was already fixed for.
+            images.remove_container_dir(&c.id);
             return Ok(());
         }
     }
@@ -2302,6 +2310,10 @@ fn spawn_rm_watcher(images: &ImageStore, store: &Store, id: &str) {
                 let _ = runtime::remove(store, &c, true);
                 unpublish_ports(&c, pid);
                 let _ = images.unmount_rootfs(&c.id);
+                // Same fix as the foreground `--rm` branch above: `unmount_rootfs`
+                // preserves the flat rootless rootfs on purpose, only this
+                // actually deletes it.
+                images.remove_container_dir(&c.id);
                 std::process::exit(0);
             }
         }
@@ -2628,7 +2640,24 @@ fn reexec_into_netns(
     // who called it.
     let spec_path = super::util::state_root().join(format!(".reexec-{id}.json"));
     let json = serde_json::to_string(opts).map_err(|e| Error::Invalid(e.to_string()))?;
-    std::fs::write(&spec_path, json)?;
+    // BUG FOUND: `std::fs::write` creates the file at the ambient umask
+    // (typically 0644, world-readable). `opts.env` carries the raw `-e
+    // KEY=VALUE` pairs the user passed — commonly credentials — and for a
+    // FOREGROUND container this file sits on disk for the container's whole
+    // lifetime (the spawned child blocks until the container exits). Fixed
+    // with the same `create_new` (O_EXCL, no symlink-follow) + 0600 pattern
+    // already used for the libvirt network XML temp file.
+    {
+        use std::io::Write as _;
+        use std::os::unix::fs::OpenOptionsExt as _;
+        let _ = std::fs::remove_file(&spec_path); // leftover OF OURS from a crashed previous run
+        let mut f = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&spec_path)?;
+        f.write_all(json.as_bytes())?;
+    }
     let status = std::process::Command::new(&prefix[0])
         .args(&prefix[1..])
         .arg(&exe)
