@@ -1064,14 +1064,17 @@ modo ATOMICAMENTE na criação (`cmd/cluster.rs::fetch_kubeconfig`), o mesmo
 padrão que `ensure_libvirt_network` já usa — ver
 `docs/COMPARACAO-DOCKER-PODMAN.md` secção 1a/1b para o relatório completo.
 
-**Os outros 29 (12 MEDIUM + 6 LOW confirmados + 11 por-verificar) continuam TODOS
+**Dos outros 29 (12 MEDIUM + 6 LOW confirmados + 11 por-verificar), 27 continuam
 em aberto** — re-confirmados na mesma sessão (nenhum foi refutado, nenhum
 parcialmente corrigido); ver o relatório completo para detalhe/correcção de cada
-um. Entre os "por-verificar" da corrida original, dois destacam-se por severidade
-alta e vale re-ler antes de mexer nesse código: fuga de rootfs no `--rm`
-(`container.rs`, ambos os ramos foreground/watcher nunca chamam
-`remove_container_dir`) e o `egress` global que apaga regras per-network por
-correspondência de substring demasiado ampla (`infra.rs:1531`, ver abaixo).
+um. Os 2 "por-verificar" de maior severidade da corrida original **já estão
+CONFIRMADOS CORRIGIDOS** (o `AUDITORIA-E2E.md` ainda os lista como abertos por
+lapso — `docs/COMPARACAO-DOCKER-PODMAN.md` tem o detalhe de cada um): fuga de
+rootfs no `--rm` rootless (`container.rs`, ambos os ramos foreground/watcher já
+chamam `remove_container_dir`, desde o commit `7bde467`/v0.19.0) e o `egress`
+global que apagava regras per-network por correspondência de substring demasiado
+ampla (`infra.rs:1531`, `is_global_egress_drop_line` já exclui linhas com
+`iifname`, confirmado na 2ª ronda — ver secção 1b do `COMPARACAO-DOCKER-PODMAN.md`).
 
 ### 2.ª ronda (2026-07-23) — 4 auditorias em paralelo, 2 CRITICAL + 3 HIGH novos, CORRIGIDOS no v0.10.1
 
