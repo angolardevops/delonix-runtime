@@ -1339,6 +1339,24 @@ fn extract_after(text: &str, marker: &str) -> Option<String> {
     Some(value.trim_end_matches('\\').to_string())
 }
 
+/// `endpoint` as `kubeadm join` expects it: `host:port`. `valid_endpoint`
+/// explicitly accepts `host[:port]` (and `kubeadm_init` interpolates it
+/// as-is into `--control-plane-endpoint=`, which takes host or host:port),
+/// but this used to unconditionally append `:6443` — a `controlPlaneEndpoint`
+/// WITH an explicit non-default port (a real HA setup: an LB/VIP not on
+/// 6443) produced `kubeadm join host:8443:6443`, a malformed address, and
+/// every control-plane/worker join failed. Only append the default port
+/// when the endpoint doesn't already carry one — `valid_endpoint`'s
+/// charset has no `[`/`]`, so IPv6 literals can't appear here and a bare
+/// `:` unambiguously means "port already present".
+fn endpoint_with_default_port(endpoint: &str, default_port: u16) -> String {
+    if endpoint.contains(':') {
+        endpoint.to_string()
+    } else {
+        format!("{endpoint}:{default_port}")
+    }
+}
+
 fn kubeadm_join(
     target: &SshTarget,
     label: &str,
@@ -1349,8 +1367,9 @@ fn kubeadm_join(
     if remote::ssh_check(target, "test -f /etc/kubernetes/kubelet.conf") {
         return Ok(());
     }
+    let endpoint = endpoint_with_default_port(endpoint, 6443);
     let mut cmd = format!(
-        "kubeadm join {endpoint}:6443 --token {} --discovery-token-ca-cert-hash {} \
+        "kubeadm join {endpoint} --token {} --discovery-token-ca-cert-hash {} \
          --cri-socket={DELONIX_CRI_SOCKET}",
         info.token, info.ca_cert_hash
     );
@@ -2012,6 +2031,31 @@ kubeadm join 10.0.0.10:6443 --token abcdef.0123456789abcdef \\
         assert!(valid_endpoint("10.0.0.10:6443"));
         assert!(valid_endpoint("lb.exemplo.com"));
         assert!(valid_endpoint("cp1"));
+    }
+
+    #[test]
+    fn endpoint_with_default_port_nao_duplica_porta_explicita() {
+        // BUG regression guard: an HA `controlPlaneEndpoint` with an explicit
+        // non-default port (a real setup: an LB/VIP not on 6443) used to
+        // become `kubeadm join host:8443:6443` — malformed, breaking every
+        // control-plane/worker join on that cluster.
+        assert_eq!(
+            endpoint_with_default_port("lb.exemplo.com:8443", 6443),
+            "lb.exemplo.com:8443"
+        );
+        assert_eq!(
+            endpoint_with_default_port("10.0.0.10:6443", 6443),
+            "10.0.0.10:6443"
+        );
+        // No port given → the default is appended, same as before.
+        assert_eq!(
+            endpoint_with_default_port("10.0.0.10", 6443),
+            "10.0.0.10:6443"
+        );
+        assert_eq!(
+            endpoint_with_default_port("lb.exemplo.com", 6443),
+            "lb.exemplo.com:6443"
+        );
     }
 
     #[test]

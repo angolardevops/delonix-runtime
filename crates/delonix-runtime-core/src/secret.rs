@@ -8,12 +8,53 @@
 use std::collections::BTreeMap;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
+use std::os::unix::io::AsRawFd;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde::{Deserialize, Serialize};
 
 use crate::cred_vault::CredVault;
 use crate::{Error, Result};
+
+/// Sequence to make the temporary file of [`SecretStore::save`] unique PER
+/// WRITER — same reasoning as `Store::save`'s own `TMP_SEQ`: the pid alone
+/// is not enough (a multi-threaded process could collide on the same temp).
+static TMP_SEQ: AtomicU64 = AtomicU64::new(0);
+
+/// Exclusive file lock (`flock`) sequencing [`SecretStore::update`]'s
+/// read-modify-write BETWEEN PROCESSES. Same pattern as `Store`'s own
+/// (module-private there, so duplicated here rather than shared — matches
+/// `delonix-net::infra` also keeping its own copy of the same idiom).
+struct FileLock(fs::File);
+
+impl FileLock {
+    /// Acquires the lock (blocks until it gets it). `None` if the lock file
+    /// cannot even be opened — in that case the caller proceeds without a
+    /// lock (graceful degradation: better than refusing the operation).
+    fn acquire(path: &Path) -> Option<FileLock> {
+        let f = fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(false)
+            .open(path)
+            .ok()?;
+        // SAFETY: valid, open fd; LOCK_EX blocks until the lock is ours.
+        if unsafe { libc::flock(f.as_raw_fd(), libc::LOCK_EX) } != 0 {
+            return None;
+        }
+        Some(FileLock(f))
+    }
+}
+
+impl Drop for FileLock {
+    fn drop(&mut self) {
+        // SAFETY: fd still open (we own the File until here). The File's
+        // `close` would also release the flock; explicit so as not to
+        // depend on that.
+        unsafe { libc::flock(self.0.as_raw_fd(), libc::LOCK_UN) };
+    }
+}
 
 /// A named secret: a set of `KEY=value` pairs (env).
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
@@ -88,6 +129,17 @@ impl SecretStore {
     }
 
     /// Persists a secret (atomic write + chmod 0600).
+    ///
+    /// BUG FOUND: the temp file used to be FIXED per name (`.{name}.tmp`) —
+    /// exactly the failure mode `Store::save` (container state) was
+    /// deliberately engineered against: two concurrent writers of the SAME
+    /// secret name (two `delonix secret set` invocations, or a `stack
+    /// apply` re-run racing automation) both `fs::write` (truncating) the
+    /// same temp path; their writes can interleave, and the `rename` then
+    /// publishes a TORN blob. Because the value is AEAD-sealed, any
+    /// corruption makes `decode()` fail PERMANENTLY (the secret becomes
+    /// undecryptable — data loss, not just staleness). Fixed with the same
+    /// per-writer-unique temp name (pid + atomic seq) `Store::save` uses.
     pub fn save(&self, s: &Secret) -> Result<()> {
         if !valid_name(&s.name) {
             return Err(Error::Invalid(format!("invalid secret name: {:?}", s.name)));
@@ -100,15 +152,67 @@ impl SecretStore {
         // value encrypted at-rest: header || nonce || ciphertext.
         let mut blob = Vec::from(SEALED_MAGIC);
         blob.extend_from_slice(&self.vault.seal(&serde_json::to_vec(s)?)?);
-        let tmp = self.root.join(format!(".{}.tmp", s.name));
-        fs::write(&tmp, &blob)?;
-        fs::set_permissions(&tmp, fs::Permissions::from_mode(0o600))?;
-        fs::rename(&tmp, self.path(&s.name))?;
-        Ok(())
+        let seq = TMP_SEQ.fetch_add(1, Ordering::Relaxed);
+        let tmp = self
+            .root
+            .join(format!(".{}.{}.{seq}.tmp", s.name, std::process::id()));
+        let write = || -> Result<()> {
+            fs::write(&tmp, &blob)?;
+            fs::set_permissions(&tmp, fs::Permissions::from_mode(0o600))?;
+            fs::rename(&tmp, self.path(&s.name))?;
+            Ok(())
+        };
+        let r = write();
+        if r.is_err() {
+            let _ = fs::remove_file(&tmp); // do not leave junk if it failed half-way
+        }
+        r
+    }
+
+    /// **Safe read-modify-write** of a secret, under an exclusive flock —
+    /// mirrors `Store::update` (container state). `f` receives the CURRENT
+    /// secret (a fresh, empty one if it doesn't exist yet — matching how
+    /// `secret set`/`unset` already treat a missing name) and returns
+    /// `false` to abort without writing. Closes the lost-update window the
+    /// CLI's naive load+mutate+save had: two concurrent `secret set db
+    /// A=1` / `secret set db B=2` used to silently drop one of the keys.
+    pub fn update<F>(&self, name: &str, f: F) -> Result<Secret>
+    where
+        F: FnOnce(&mut Secret) -> bool,
+    {
+        if !valid_name(name) {
+            return Err(Error::Invalid(format!("invalid secret name: {name:?}")));
+        }
+        let _lock = FileLock::acquire(&self.lock_path(name));
+        let mut s = self.load(name).unwrap_or_else(|_| Secret {
+            name: name.to_string(),
+            data: BTreeMap::new(),
+            updated_unix: 0,
+        });
+        if !f(&mut s) {
+            return Ok(s);
+        }
+        self.save(&s)?;
+        Ok(s)
+    }
+
+    fn lock_path(&self, name: &str) -> PathBuf {
+        self.root.join(format!(".{name}.lock"))
     }
 
     /// Loads a secret by name.
+    ///
+    /// BUG FOUND: only `save()` validated the name — `load`/`remove` (and
+    /// everything that funnels through them: `resolve_env`, `materialize`)
+    /// built `<root>/<name>.json` from the RAW name. `container run
+    /// --secret <name>` and an untrusted manifest's `spec.secrets` both
+    /// reach here with an unvalidated name; `../../../home/x` in either
+    /// reads a file outside `<root>/secrets` and, if it happens to parse as
+    /// Secret JSON, injects its contents as container env.
     pub fn load(&self, name: &str) -> Result<Secret> {
+        if !valid_name(name) {
+            return Err(Error::Invalid(format!("invalid secret name: {name:?}")));
+        }
         let p = self.path(name);
         if !p.exists() {
             return Err(Error::NotFound(format!("secret {name}")));
@@ -134,7 +238,15 @@ impl SecretStore {
     }
 
     /// Removes a secret.
+    ///
+    /// Same fix as `load`: `delonix secret rm ../../../home/x` (or any path
+    /// resolving to an existing `.json` file) used to `remove_file` outside
+    /// `<root>/secrets` entirely — an arbitrary-file-delete primitive
+    /// bounded only by the invoking user's own permissions.
     pub fn remove(&self, name: &str) -> Result<()> {
+        if !valid_name(name) {
+            return Err(Error::Invalid(format!("invalid secret name: {name:?}")));
+        }
         let p = self.path(name);
         if !p.exists() {
             return Err(Error::NotFound(format!("secret {name}")));
@@ -282,6 +394,69 @@ mod tests {
         assert_eq!(mode & 0o777, 0o600);
         let env = s.resolve_env(&["db".to_string(), "missing".to_string()]);
         assert_eq!(env, vec!["DB_PASS=xyz".to_string()]);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn load_e_remove_recusam_nomes_com_traversal() {
+        // BUG regression guard: only `save` validated the name — `load`/
+        // `remove` built `<root>/<name>.json` from the raw name, so
+        // `../../../home/x` (or any path resolving to an existing .json)
+        // reached FILES OUTSIDE `<root>/secrets` entirely: an
+        // arbitrary-file-read (via `load`/`resolve_env`) and
+        // arbitrary-file-delete (via `remove`) primitive.
+        let dir = std::env::temp_dir().join(format!("dlx-sec-traversal-{}", std::process::id()));
+        let s = SecretStore::open(&dir).unwrap();
+        let evil = "../../../etc/passwd";
+        assert!(matches!(s.load(evil), Err(Error::Invalid(_))));
+        assert!(matches!(s.remove(evil), Err(Error::Invalid(_))));
+        // resolve_env funnels through load() and is best-effort (ignores
+        // failures) — must NOT silently include a file read from outside root.
+        assert!(s.resolve_env(&[evil.to_string()]).is_empty());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn update_faz_read_modify_write_sem_perder_chaves() {
+        // Sequential stand-in for the concurrent-writer race `update` fixes
+        // (two `secret set db A=1` / `secret set db B=2` racing a naive
+        // load+mutate+save used to silently drop one key) — `update`'s own
+        // flock makes each call a self-contained read-modify-write, so
+        // calling it twice in a row must accumulate both keys rather than
+        // the second overwriting the first's in-memory read.
+        let dir = std::env::temp_dir().join(format!("dlx-sec-update-{}", std::process::id()));
+        let s = SecretStore::open(&dir).unwrap();
+        s.update("db", |sec| {
+            sec.data.insert("A".to_string(), "1".to_string());
+            true
+        })
+        .unwrap();
+        s.update("db", |sec| {
+            sec.data.insert("B".to_string(), "2".to_string());
+            true
+        })
+        .unwrap();
+        let loaded = s.load("db").unwrap();
+        assert_eq!(loaded.data.get("A").map(String::as_str), Some("1"));
+        assert_eq!(loaded.data.get("B").map(String::as_str), Some("2"));
+        // `f` returning `false` aborts without writing.
+        let before = s.load("db").unwrap().updated_unix;
+        let aborted = s
+            .update("db", |sec| {
+                sec.data.insert("C".to_string(), "3".to_string());
+                false
+            })
+            .unwrap();
+        assert!(
+            aborted.data.contains_key("C"),
+            "o valor devolvido reflecte a mutação tentada"
+        );
+        assert_eq!(
+            s.load("db").unwrap().updated_unix,
+            before,
+            "mas nada foi persistido — f devolveu false"
+        );
+        assert!(!s.load("db").unwrap().data.contains_key("C"));
         let _ = std::fs::remove_dir_all(dir);
     }
 

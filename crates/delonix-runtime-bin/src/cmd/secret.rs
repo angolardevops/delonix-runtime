@@ -244,19 +244,30 @@ pub fn run(action: SecretCmd) -> Result<()> {
             if pairs.is_empty() {
                 return Err(Error::Invalid("indica pelo menos um KEY=value".into()));
             }
-            let mut s = store.load(&name).unwrap_or_else(|_| Secret {
-                name: name.clone(),
-                ..Default::default()
-            });
-            s.name = name.clone();
+            // Parse ALL pairs before touching the store — a bad pair must
+            // fail before we ever take the lock, not half-way through.
+            let mut kvs = Vec::with_capacity(pairs.len());
             for p in &pairs {
                 let (k, v) = parse_kv(p).ok_or_else(|| {
                     Error::Invalid(format!("par inválido: {p:?} (usa KEY=value)"))
                 })?;
-                s.data.insert(k, v);
+                kvs.push((k, v));
             }
-            s.updated_unix = now_unix();
-            store.save(&s)?;
+            // BUG FOUND: this used to be a naive load+mutate+save with no
+            // lock — two concurrent `secret set db A=1` / `secret set db
+            // B=2` (or a `stack apply` re-run racing automation) could both
+            // read the same starting state and each save its own version,
+            // silently dropping the other's key. `SecretStore::update` is
+            // the same flock-guarded read-modify-write `Store::update`
+            // already uses for container state.
+            let s = store.update(&name, |s| {
+                s.name = name.clone();
+                for (k, v) in &kvs {
+                    s.data.insert(k.clone(), v.clone());
+                }
+                s.updated_unix = now_unix();
+                true
+            })?;
             println!("segredo '{name}' actualizado ({} chave(s))", s.data.len());
         }
         SecretCmd::Unset { name, key, all } => {
@@ -268,14 +279,20 @@ pub fn run(action: SecretCmd) -> Result<()> {
             let k = key.ok_or_else(|| {
                 Error::Invalid(super::po::t("say which key to remove (or --all)").into())
             })?;
-            let mut s = store.load(&name)?;
-            if s.data.remove(&k).is_none() {
+            store.load(&name)?; // distinct "secret not found" vs. "key not found" below
+            let mut removed = false;
+            store.update(&name, |s| {
+                removed = s.data.remove(&k).is_some();
+                if removed {
+                    s.updated_unix = now_unix();
+                }
+                removed
+            })?;
+            if !removed {
                 return Err(Error::Invalid(format!(
                     "chave '{k}' não existe em '{name}'"
                 )));
             }
-            s.updated_unix = now_unix();
-            store.save(&s)?;
             println!("chave '{k}' removida de '{name}'");
         }
         SecretCmd::Rm { name } => {

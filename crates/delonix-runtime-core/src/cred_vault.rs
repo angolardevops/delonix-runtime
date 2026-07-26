@@ -139,7 +139,15 @@ impl CredVault {
     }
 
     /// Reads and decrypts a credential. `Ok(None)` if it does not exist.
+    ///
+    /// BUG FOUND: only `put` validated the name — `get`/`exists`/`remove`
+    /// built `<dir>/<name>.bin` from the RAW name, unvalidated. Same class
+    /// as the sibling fix in `SecretStore` (`load`/`remove`): an
+    /// unvalidated name here is an arbitrary-file-read/delete primitive.
     pub fn get(&self, name: &str) -> Result<Option<String>> {
+        if !valid_cred_name(name) {
+            return Err(Error::Invalid(format!("invalid credential name: {name}")));
+        }
         let blob = match fs::read(self.cred_path(name)) {
             Ok(b) => b,
             Err(ref e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
@@ -153,9 +161,11 @@ impl CredVault {
         Ok(Some(s))
     }
 
-    /// Does the credential exist?
+    /// Does the credential exist? `false` (not an error) for an invalid
+    /// name — "doesn't exist" is the safe, fail-closed answer here, same
+    /// spirit as `get`/`remove` refusing to touch the path at all.
     pub fn exists(&self, name: &str) -> bool {
-        self.cred_path(name).exists()
+        valid_cred_name(name) && self.cred_path(name).exists()
     }
 
     /// Lists the credential **names** (NEVER the values).
@@ -175,6 +185,9 @@ impl CredVault {
 
     /// Removes a credential (idempotent).
     pub fn remove(&self, name: &str) -> Result<()> {
+        if !valid_cred_name(name) {
+            return Err(Error::Invalid(format!("invalid credential name: {name}")));
+        }
         match fs::remove_file(self.cred_path(name)) {
             Ok(()) => Ok(()),
             Err(ref e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
@@ -242,6 +255,27 @@ mod tests {
         );
         assert!(v.exists("ngrok"));
         assert_eq!(v.get("inexistente").unwrap(), None);
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn get_exists_remove_recusam_nomes_com_traversal() {
+        // BUG regression guard: only `put` validated the name — `get`/
+        // `exists`/`remove` built `<dir>/<name>.bin` from the raw name, an
+        // arbitrary-file-read/delete primitive via `../../../etc/passwd`-style
+        // names. A valid-but-missing name must still behave as documented
+        // (`get` → `Ok(None)`, `exists` → `false`) — only invalid CHARSET
+        // names are refused.
+        let base = tmp_base();
+        let v = CredVault::open(&base).unwrap();
+        let evil = "../../../etc/passwd";
+        assert!(matches!(v.get(evil), Err(Error::Invalid(_))));
+        assert!(!v.exists(evil));
+        assert!(matches!(v.remove(evil), Err(Error::Invalid(_))));
+        // Valid charset, simply missing — unchanged, documented behavior.
+        assert_eq!(v.get("inexistente").unwrap(), None);
+        assert!(!v.exists("inexistente"));
+        assert!(v.remove("inexistente").is_ok()); // idempotent remove of a missing-but-valid name
         let _ = fs::remove_dir_all(&base);
     }
 
