@@ -34,10 +34,29 @@ impl HostRecipe {
 }
 
 /// The version of the `pkgs.k8s.io` repository (`stable:/v1.31` by default).
+///
+/// BUG FOUND: `cluster.rs::valid_version` explicitly accepts (and its own
+/// doc-comment/tests assert) a PATCH version like `1.31.2` — but
+/// `pkgs.k8s.io` only ever publishes MINOR-level repo directories
+/// (`stable:/v1.31/deb/`, never `.../v1.31.2/deb/`). A `spec.k8sVersion:
+/// "1.31.2"` passed `valid_version` and produced a 404 repo URL, failing
+/// `apt-get update` on every host of the cluster during `prepare_host` —
+/// well after the manifest was accepted as valid. Truncate to major.minor
+/// for the REPO path only; `--kubernetes-version` (kubeadm's own flag,
+/// built elsewhere) still gets the full version, which is correct there.
 pub(crate) fn k8s_repo_version(k8s_version: Option<&str>) -> String {
     match k8s_version {
-        Some(v) if v != "stable" => format!("stable:/v{v}"),
+        Some(v) if v != "stable" => format!("stable:/v{}", major_minor(v)),
         _ => "stable:/v1.31".to_string(),
+    }
+}
+
+/// `"1.31.2"` → `"1.31"`; `"1.31"` → `"1.31"` unchanged (no third
+/// component to drop). Pure, tested against the exact repo-404 scenario.
+fn major_minor(v: &str) -> &str {
+    match v.match_indices('.').nth(1) {
+        Some((idx, _)) => &v[..idx],
+        None => v,
     }
 }
 
@@ -146,6 +165,34 @@ mod tests {
             .find(|r| r.name.contains("repositório"))
             .unwrap();
         assert!(repo_step.apply.contains("stable:/v1.30"));
+    }
+
+    #[test]
+    fn k8s_version_patch_e_truncada_para_major_minor_no_repo() {
+        // BUG regression guard: `valid_version` (cluster.rs) explicitly
+        // accepts a patch version like "1.31.2" (its own doc-comment says
+        // so) but pkgs.k8s.io only ever publishes MINOR-level repo
+        // directories — the untruncated version produced a 404 repo URL,
+        // failing `apt-get update` on every host, well past manifest
+        // validation.
+        let recipes = k8s_host_recipes(Some("1.31.2"), &[]);
+        let repo_step = recipes
+            .iter()
+            .find(|r| r.name.contains("repositório"))
+            .unwrap();
+        assert!(
+            repo_step.apply.contains("stable:/v1.31/"),
+            "{}",
+            repo_step.apply
+        );
+        assert!(!repo_step.apply.contains("v1.31.2"));
+    }
+
+    #[test]
+    fn major_minor_trunca_so_quando_ha_terceira_componente() {
+        assert_eq!(super::major_minor("1.31.2"), "1.31");
+        assert_eq!(super::major_minor("1.31"), "1.31");
+        assert_eq!(super::major_minor("1"), "1");
     }
 
     #[test]
