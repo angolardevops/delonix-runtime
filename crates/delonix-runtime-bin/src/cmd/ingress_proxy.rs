@@ -146,8 +146,26 @@ fn strip_hop_by_hop(headers: &mut hyper::HeaderMap) {
 fn pick_route<'a>(routes: &'a [Route], host: &str, path: &str) -> Option<&'a Route> {
     routes
         .iter()
-        .filter(|r| (r.host.is_empty() || r.host == host) && path.starts_with(&r.path))
+        .filter(|r| (r.host.is_empty() || r.host == host) && path_prefix_matches(path, &r.path))
         .max_by_key(|r| (usize::from(!r.host.is_empty()), r.path.len()))
+}
+
+/// Kubernetes Gateway API `PathPrefix` semantics: `/foo` matches `/foo` and
+/// `/foo/bar`, but NOT `/foobar`.
+///
+/// BUG FOUND: this used to be a raw `path.starts_with(prefix)` with no
+/// segment-boundary check — `valid_path_prefix`/AGENTS.md explicitly align
+/// `kind: HTTPRoute` to the k8s Gateway API's PathPrefix match, but the
+/// runtime matcher didn't actually enforce it. Two routes `/api` (internal
+/// backend) and `/` (public backend) on the same host: a request for
+/// `/api-docs` (meant for the public backend) matched `/api` too, and — via
+/// the longest-prefix tie-break — got silently routed to the more specific,
+/// wrong (potentially internal) backend.
+fn path_prefix_matches(path: &str, prefix: &str) -> bool {
+    if !path.starts_with(prefix) {
+        return false;
+    }
+    prefix.ends_with('/') || path.len() == prefix.len() || path.as_bytes()[prefix.len()] == b'/'
 }
 
 /// The request's `Host`, without the port (`loja.exemplo.ao:80` → `loja.exemplo.ao`).
@@ -534,9 +552,23 @@ fn read_auto() -> Vec<AutoRoute> {
         .unwrap_or_default()
 }
 
-/// Read-modify-write of `auto.json` under an **exclusive flock** — two
-/// `container run --expose` in parallel must not lose a route (lost update).
-/// `f` receives the current list and returns the new one. Returns `true` if it changed.
+/// Read-modify-write of `auto.json` under an **exclusive flock**, followed
+/// by `rebuild()` (compose + write `config.json` + SIGHUP) STILL under that
+/// SAME lock — two `container run --expose` in parallel must not lose a
+/// route (lost update), NOR must the live proxy config end up reflecting a
+/// stale snapshot. `f` receives the current list and returns the new one.
+/// Returns `true` if it changed.
+///
+/// BUG FOUND: `rebuild()` used to be called by the CALLER, AFTER this
+/// function had already released the lock. Two concurrent `--expose`
+/// registrations could interleave so the LAST writer of `config.json` (the
+/// file the proxy actually serves, reloaded via SIGHUP) reflected an
+/// EARLIER, incomplete snapshot of `auto.json` — a route that was
+/// genuinely added successfully to `auto.json` silently never made it into
+/// the live proxy, with no error and no further trigger to recompose.
+/// Folding the whole compose+write+reload into this same critical section
+/// makes the last writer to finish always see (and publish) the final
+/// `auto.json`.
 fn with_auto_locked(f: impl FnOnce(&mut Vec<AutoRoute>)) -> Result<bool> {
     use std::os::unix::io::AsRawFd;
     std::fs::create_dir_all(proxy_dir()).map_err(|e| Error::Runtime {
@@ -574,6 +606,9 @@ fn with_auto_locked(f: impl FnOnce(&mut Vec<AutoRoute>)) -> Result<bool> {
         context: "escrever auto",
         message: e.to_string(),
     })?;
+    // Still holding `lock` here — the recompose+publish happens before it's
+    // dropped at the end of this scope.
+    rebuild()?;
     Ok(true)
 }
 
@@ -659,21 +694,20 @@ pub fn auto_register(name: &str, namespace: &str, ip: &str, port: u16) -> Result
         ip: ip.to_string(),
         port,
     };
+    // `with_auto_locked` already recomposes+publishes the config itself,
+    // still under the same flock as the `auto.json` write — see its doc
+    // comment for the race this closes.
     with_auto_locked(|auto| {
         auto.retain(|a| a.name != name); // replaces a previous entry of the same name
         auto.push(entry.clone());
     })?;
-    rebuild()
+    Ok(())
 }
 
 /// **Removes** a container's auto-registration (on `container rm`/stop) and recomposes.
 /// Best-effort — if the container was not registered, does nothing.
 pub fn auto_deregister(name: &str) {
-    // `Ok(true)` = removed something → recompose; `Ok(false)`/`Err` = was not
-    // registered (or the lock failed) — nothing to recompose.
-    if let Ok(true) = with_auto_locked(|auto| auto.retain(|a| a.name != name)) {
-        let _ = rebuild();
-    }
+    let _ = with_auto_locked(|auto| auto.retain(|a| a.name != name));
 }
 
 /// The proxy's PID if it is ALIVE **and really ours** (the `/proc/<pid>/cmdline`
@@ -931,6 +965,44 @@ mod tests {
     fn pick_route_sem_correspondencia() {
         let routes = vec![r("loja.ex", "/", "10.0.0.2:80")];
         assert!(pick_route(&routes, "outro.ex", "/").is_none());
+    }
+
+    #[test]
+    fn pick_route_respeita_fronteira_de_segmento() {
+        // BUG regression guard: `/api-docs` used to match the `/api` route
+        // (raw string-prefix match, no segment boundary) instead of falling
+        // through to `/` — exactly the k8s Gateway API PathPrefix semantics
+        // AGENTS.md/`valid_path_prefix` claim but the runtime matcher didn't
+        // enforce.
+        let routes = vec![
+            r("loja.ex", "/", "public:80"),
+            r("loja.ex", "/api", "internal:80"),
+        ];
+        assert_eq!(
+            pick_route(&routes, "loja.ex", "/api-docs").unwrap().backend,
+            "public:80",
+            "/api-docs não é um sub-caminho de /api"
+        );
+        assert_eq!(
+            pick_route(&routes, "loja.ex", "/api").unwrap().backend,
+            "internal:80",
+            "/api exacto continua a casar"
+        );
+        assert_eq!(
+            pick_route(&routes, "loja.ex", "/api/v1").unwrap().backend,
+            "internal:80",
+            "/api/v1 é um sub-caminho real de /api"
+        );
+    }
+
+    #[test]
+    fn path_prefix_matches_casos_directos() {
+        assert!(super::path_prefix_matches("/api", "/api"));
+        assert!(super::path_prefix_matches("/api/v1", "/api"));
+        assert!(!super::path_prefix_matches("/api-docs", "/api"));
+        assert!(super::path_prefix_matches("/anything", "/")); // root matches all
+        assert!(super::path_prefix_matches("/api/v1", "/api/"));
+        assert!(!super::path_prefix_matches("/apiX", "/api/"));
     }
 
     #[test]

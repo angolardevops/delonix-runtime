@@ -307,6 +307,13 @@ pub fn admission_rejects(worst: Option<Severity>, policy: &str) -> bool {
     }
 }
 
+/// `true` for the only two shapes `DELONIX_SCAN_ON_PULL` accepts: `warn`, or
+/// a real severity threshold. Factored out so the fail-closed validation in
+/// `admission_scan_on_pull` is unit-testable without an `ImageStore`.
+fn valid_admission_policy(policy: &str) -> bool {
+    policy == "warn" || Severity::parse(policy).is_some()
+}
+
 /// **CVE admission policy on pull** (supply-chain). Controlled by
 /// `DELONIX_SCAN_ON_PULL`: unset/empty = off (no latency); `warn` = scan +
 /// report; `low|medium|high|critical` = fail-closed GATE — removes the image and
@@ -321,6 +328,20 @@ pub fn admission_scan_on_pull(images: &ImageStore, reference: &str, img: &Image)
     };
     if policy.is_empty() {
         return Ok(());
+    }
+    // BUG FOUND: an unrecognized policy value (a typo — "criticl" for
+    // "critical") used to fall through `admission_rejects` (Severity::parse
+    // fails → `false`, meaning "does not reject") and only get flagged with
+    // a stderr warning AFTER the pull had already succeeded — a
+    // misconfigured GATE silently downgraded to advisory-only. This is
+    // documented as a "fail-closed GATE"; validate the policy string BEFORE
+    // scanning anything, so a bad value refuses instead of admitting.
+    if !valid_admission_policy(&policy) {
+        return Err(Error::Invalid(format!(
+            "DELONIX_SCAN_ON_PULL='{policy}' inválido (warn|low|medium|high|critical) — \
+             recusado (a política é um gate fail-closed; um valor desconhecido não é tratado \
+             como 'sem política')"
+        )));
     }
     eprintln!(
         "→ política de admissão: scan de CVE de '{reference}' (DELONIX_SCAN_ON_PULL={policy})…"
@@ -342,9 +363,6 @@ pub fn admission_scan_on_pull(images: &ImageStore, reference: &str, img: &Image)
              (DELONIX_SCAN_ON_PULL). Imagem removida. Corrige a imagem ou ajusta a política."
         )));
     }
-    if policy != "warn" && Severity::parse(&policy).is_none() {
-        output::warn(&format!("DELONIX_SCAN_ON_PULL='{policy}' inválido (warn|low|medium|high|critical); só reportado."));
-    }
     Ok(())
 }
 
@@ -362,6 +380,22 @@ mod tests {
         assert!(!admission_rejects(None, "high"));
         // `warn` is not a severity → never rejects (only reports).
         assert!(!admission_rejects(Some(Severity::Critical), "warn"));
+    }
+
+    #[test]
+    fn valid_admission_policy_recusa_valores_desconhecidos() {
+        // BUG regression guard: a typo like "criticl" (for "critical") used
+        // to fall through Severity::parse → admission_rejects returns
+        // false → the pull was silently ADMITTED, only warned about after
+        // the fact — a misconfigured fail-closed gate degrading to
+        // advisory-only. Validating up front turns that into a hard error.
+        assert!(valid_admission_policy("warn"));
+        assert!(valid_admission_policy("low"));
+        assert!(valid_admission_policy("critical"));
+        assert!(valid_admission_policy("crit")); // Severity::parse's own alias
+        assert!(!valid_admission_policy("criticl")); // the actual typo this bug was found from
+        assert!(!valid_admission_policy(""));
+        assert!(valid_admission_policy("Critical")); // Severity::parse lowercases internally
     }
 
     #[test]

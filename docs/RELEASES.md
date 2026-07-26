@@ -4,6 +4,74 @@
 > (regenerado automaticamente pelo pipeline de release a cada tag publicada).
 > Não editar à mão — edita a nota da release respectiva.
 
+## v0.20.0 — 7 mais bugs da auditoria E2E (Fase 2 do backlog)
+
+Continuação directa da v0.19.0 — mesma auditoria ([docs/AUDITORIA-E2E.md](../AUDITORIA-E2E.md)),
+próximos 7 achados confirmados directamente no código actual.
+
+### Correcções
+
+11. **`kubeadm join` duplicava a porta num `controlPlaneEndpoint` com porta explícita** —
+    `kubeadm_init` interpola o endpoint tal-e-qual em `--control-plane-endpoint=` (aceita
+    `host[:porta]`), mas `kubeadm_join` anexava `:6443` incondicionalmente. Um LB/VIP HA numa
+    porta não-6443 (cenário real, `valid_endpoint` sempre aceitou porta) gerava `kubeadm join
+    host:8443:6443` — endereço malformado, todos os joins de control-plane/workers falhavam.
+    Corrigido: só anexa a porta por omissão quando o endpoint ainda não tem uma.
+12. **`pick_route` (HTTPRoute) ignorava a fronteira de segmento no path prefix** — AGENTS.md
+    alinha explicitamente a semântica ao Kubernetes Gateway API (`PathPrefix` de `/foo` casa
+    `/foo` e `/foo/bar`, NUNCA `/foobar`), mas o matcher usava `starts_with` cru. Duas rotas
+    `/api` (backend interno) e `/` (público) no mesmo host: um pedido a `/api-docs` (destinado
+    ao público) era silenciosamente encaminhado para o backend interno.
+13. **Config composta do proxy L7 escrita fora do flock** — `auto_register`/`auto_deregister`
+    faziam o read-modify-write de `auto.json` sob flock, mas chamavam `rebuild()` (compõe +
+    escreve `config.json` + SIGHUP) DEPOIS de largar o lock. Duas registações `--expose`
+    concorrentes podiam interleaving de forma a que o `config.json` final (o que o proxy
+    realmente serve) reflectisse um snapshot desactualizado — uma rota adicionada com sucesso a
+    `auto.json` nunca chegava ao proxy vivo, sem erro nem novo trigger para recompor.
+14. **Gate de admissão de CVE falhava aberto com um valor de política desconhecido** —
+    `DELONIX_SCAN_ON_PULL=criticl` (erro de escrita de "critical") caía em
+    `Severity::parse` → `None` → `admission_rejects` devolve `false` → a imagem era ADMITIDA,
+    só avisada DEPOIS do facto. Um gate documentado como "fail-closed" degradava-se
+    silenciosamente para consultivo. Corrigido: a política é validada ANTES de scanear.
+15. **Password CIFS exposta em argv world-readable + injecção por vírgula** — `mount.cifs`
+    corre como root com a password como argumento LITERAL do processo
+    (`/proc/<pid>/cmdline` legível por qualquer utilizador local durante o mount), derrotando o
+    propósito do `--password-secret`/`kind: Secret`. Além disso as opções CIFS são delimitadas
+    por vírgula sem escape — uma password com vírgula truncava a credencial ou, vinda de um
+    Secret não-confiável, injectava opções de mount arbitrárias. Corrigido com
+    `credentials=<ficheiro 0600>` em vez de `username=`/`password=` inline.
+16. **`SecretStore`/`CredVault` sem validação de nome em `load`/`remove`/`get`/`exists`** — só
+    `save`/`put` validavam; os outros construíam o caminho a partir do nome cru. Um nome como
+    `../../../etc/passwd` em `container run --secret <nome>` ou num manifesto não-confiável era
+    uma primitiva de leitura/eliminação arbitrária de ficheiros.
+17. **`SecretStore::save` com ficheiro temporário fixo e sem lock** — exactamente o padrão que
+    `Store::save` (estado de containers) já tinha sido desenhado para evitar: dois
+    `secret set` concorrentes do MESMO nome escreviam no mesmo temp, produzindo um blob
+    encriptado corrompido (permanentemente ilegível, já que o valor é AEAD-selado) — perda de
+    dados, não só desactualização. Corrigido com o mesmo padrão de temp único por-escritor
+    (pid+sequência) do `Store::save`, mais um novo `SecretStore::update` (read-modify-write sob
+    flock) que `secret set`/`unset` agora usam em vez de load+mutate+save sem protecção.
+
+### Validação
+
+Cada achado tem teste de regressão dedicado (excepto o #13, uma correcção de concorrência sem
+infra de proxy real disponível neste sandbox — validado por leitura cuidadosa + o padrão já
+provado noutros locais deste código). `cargo test --workspace` (258 testes só em
+`delonix-runtime-bin`, mais os das crates de motor), `clippy -D warnings` e `fmt --check`
+limpos.
+
+### Por fazer (próximas fatias do mesmo backlog)
+
+7 achados restantes: buffering ilimitado no pull de imagens (OOM), fuga de processos
+exec/attach do CRI em disconnect, timestamps fabricados no `ContainerStatus`, performance do
+resolvedor DNS (scan O(n) + forward bloqueante), double-spawn do proxy em primeiro arranque
+concorrente, YAML sem escape do `kube generate`, dashboard a reconciliar VMs 2x por tick, e
+resiliência do accept loop de gestão/CRI a erros transitórios (EMFILE). Mais os gaps menores já
+documentados (selecção por omissão em `Pull`/`LsRemote`, paralelizar `cluster apply`, i18n dos
+crates de motor) e o etcd externo (subprojecto maior, deixado para o fim).
+
+---
+
 ## v0.19.0 — 10 bugs fechados da auditoria E2E (Fase 1 do backlog completo)
 
 Início de uma passagem sistemática pelo backlog inteiro da auditoria E2E ampla
