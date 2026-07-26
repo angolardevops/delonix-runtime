@@ -4,6 +4,87 @@
 > (regenerado automaticamente pelo pipeline de release a cada tag publicada).
 > Não editar à mão — edita a nota da release respectiva.
 
+## v0.19.0 — 10 bugs fechados da auditoria E2E (Fase 1 do backlog completo)
+
+Início de uma passagem sistemática pelo backlog inteiro da auditoria E2E ampla
+([docs/AUDITORIA-E2E.md](../AUDITORIA-E2E.md)) — 24 achados confirmados + 11 por-verificar,
+registados numa sessão anterior e nunca fechados. Esta primeira fatia cobre 10 achados reais,
+confirmados directamente no código actual (não só na descrição do relatório) antes de qualquer
+correcção.
+
+### Segurança / correcção real
+
+1. **`container run --rm` fugia o rootfs inteiro em rootless** (ambos os caminhos: foreground e o
+   watcher detached) — `unmount_rootfs` preserva deliberadamente o rootfs FLAT (para o `start`
+   reaproveitar); só `remove_container_dir` o apaga de facto, e `--rm` nunca a chamava. É o MESMO
+   leak de disco já corrigido para `rm`/`rm -f` (49 directórios, 45 GiB, `disk-pressure` no
+   kubelet) — só nunca tinha sido aplicado ao `--rm`. Validado ao vivo: `container run --rm
+   alpine echo ...` já não deixa nenhum directório órfão.
+2. **`egress` global apagava as regras de egress POR REDE (fail-open)** — o loop de limpeza do
+   `do_egress` global casava com `oifname "tap0"` + `drop`, mas as regras por-rede
+   (`apply_egress_from_state`) também têm essa forma (`iifname "<bridge>" oifname "tap0" ...
+   drop`). Um `egress allow`/`deny` global não relacionado apagava silenciosamente o `deny`/
+   `allowlist` de uma rede já restringida, reabrindo egress total para a Internet sem erro nem
+   aviso — um caminho de exfiltração de dados reaberto por um comando não relacionado. Corrigido
+   excluindo linhas com `iifname` do loop de limpeza global.
+3. **Endereço PCI (VFIO) interpolado no XML do libvirt sem validação hex nem escape** —
+   `parse_pci_addr` devolvia os 4 componentes crus, sem confirmar que eram hex; um
+   `spec.devices` malicioso injectava atributos XML. Corrigido: cada componente tem de ser hex da
+   largura certa (domain 4, bus 2, slot 2, func 1), e `xml_escape` aplicado no ponto de
+   interpolação como defesa em profundidade.
+4. **Ficheiro de spec do re-exec ficava world-readable com segredos em claro** — `reexec_into_netns`
+   (usado por TODO `--net <custom>`/`--pod`) escrevia `-e KEY=VALUE` num JSON com o umask
+   ambiente (tipicamente 0644); num container em foreground, ficava assim durante TODA a vida do
+   container. Corrigido com o mesmo padrão `create_new`+0600 já usado para o XML da rede libvirt.
+5. **Escape por symlink no alvo de bind-mount** — confirmado JÁ CORRIGIDO (achado desactualizado):
+   `safe_bind_target` já resolve o alvo componente-a-componente, sem seguir symlinks.
+6. **`read` bloqueante depois de um `poll` falhado podia pendurar `run` para sempre** — em DOIS
+   pontos (`start_slirp` e `slirp_attach`), se o `slirp4netns` nunca sinalizasse pronto E nunca
+   fechasse o write-end (um neto a herdá-lo chega), o `read` seguinte bloqueava
+   indefinidamente — reintroduzindo exactamente o deadlock que o `poll` existia para evitar.
+   Corrigido: só lê quando o `poll` confirma que há dados; fecha o fd sempre.
+7. **`system prune` podia derrubar TODA a infra de ingress a meio de um `run`** — `attach_container`
+   escreve o marcador de referência ANTES do registo do container ser guardado na Store; um
+   `system prune` a correr exactamente nessa janela via o marcador como órfão e, se fosse o
+   último, desligava o holder+slirp+nft inteiros — afectando também todos os OUTROS containers
+   (o netns do holder é partilhado). Corrigido com um período de graça de 15s no `mtime` do
+   marcador, sem precisar de reordenar a criação do container.
+8. **Prefixo de id ambíguo resolvia silenciosamente para o container mais recente** — `find`
+   (usado por `stop`/`rm`/etc.) devolvia o PRIMEIRO match (ordem created-desc) em vez de recusar,
+   ao contrário do Docker/Podman ("multiple IDs found"). Um comando destrutivo com um prefixo
+   ambíguo podia acertar no container errado sem aviso. Corrigido: match exacto de id/nome ganha
+   sempre; múltiplos matches por prefixo são erro explícito, listando os candidatos.
+9. **`exec` fugia os fds das namespaces no processo-pai** — só o filho fechava os seus fds (via
+   `OwnedFd`); o pai nunca fechava os seus, mantendo vivas as namespaces (mnt/net/pid/user) mesmo
+   depois do container morrer, além do esgotamento de fds em chamadores de longa duração.
+   Corrigido: fecha explicitamente no ramo `ForkResult::Parent`, simétrico com `mount_live`/
+   `unmount_live`.
+10. **`--sysctl net.*` escrevia no netns do HOST quando o container o partilha** — `--net host` (ou
+    rede custom em rootless, que partilha o netns do holder) não tem `CLONE_NEWNET`; `/proc/sys/
+    net/*` reflecte então a namespace PARTILHADA, não uma isolada do container. O Docker recusa
+    exactamente esta combinação. Corrigido: `net.*` só é permitido quando o container tem mesmo a
+    sua própria netns.
+
+### Validação
+
+Cada achado teve um teste de regressão novo (excepto os dois de baixo nível de syscall — fd
+leak no `exec` e a permissão do ficheiro de spec — que replicam exactamente o padrão já
+estabelecido no código sem teste dedicado, mesma classe do fix já existente para o XML da rede
+libvirt). `cargo test --workspace` (252 testes só em `delonix-runtime-bin`, mais os das crates de
+motor), `clippy -D warnings` e `fmt --check` limpos. `--rm` validado ao vivo neste host real
+(nenhum directório órfão após `container run --rm`).
+
+### Por fazer (próximas fatias do mesmo backlog)
+
+14 achados restantes da lista confirmada/por-verificar — HTTPRoute path-prefix, proxy config fora
+do flock, admission gate fail-open, credenciais CIFS, `SecretStore`/`CredVault` traversal +
+concorrência, buffering ilimitado no pull de imagens, fuga de processos exec/attach do CRI,
+timestamps fabricados no `ContainerStatus`, performance do resolvedor DNS, `kubeadm join` com
+porta duplicada, double-spawn do proxy, YAML sem escape do `kube generate`, dashboard a
+reconciliar VMs 2x, e resiliência do accept loop de gestão/CRI — seguem em fatias posteriores.
+
+---
+
 ## v0.18.0 — golden VM images: `--distro rocky` (Fase 3 de 3, a última)
 
 Terceira e última fatia da sequência de variantes de golden image (Ubuntu 26.04 já funcionava de

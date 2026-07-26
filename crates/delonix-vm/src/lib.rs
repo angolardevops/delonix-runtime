@@ -1173,6 +1173,15 @@ pub fn libvirt_domain_xml(cfg: &VmConfig, overlay: &str, mac: &str) -> String {
     // VFIO: PCI device passthrough (SR-IOV VF, GPU).
     for dev in &cfg.devices {
         if let Some((dom, bus, slot, func)) = parse_pci_addr(dev) {
+            // `parse_pci_addr` already restricts these to fixed-width hex, so
+            // `xml_escape` here is defense-in-depth, not the primary guard —
+            // matches the discipline every other field in this function follows.
+            let (dom, bus, slot, func) = (
+                xml_escape(&dom),
+                xml_escape(&bus),
+                xml_escape(&slot),
+                xml_escape(&func),
+            );
             s.push_str("    <hostdev mode='subsystem' type='pci' managed='yes'>\n      <source>\n");
             s.push_str(&format!(
                 "        <address domain='0x{dom}' bus='0x{bus}' slot='0x{slot}' function='0x{func}'/>\n"
@@ -1264,7 +1273,21 @@ fn xml_escape(s: &str) -> String {
 
 /// Extracts `(domain, bus, slot, func)` from a PCI path/address
 /// (`/sys/bus/pci/devices/0000:65:00.1` or `0000:65:00.1`). Pure function.
+///
+/// BUG FOUND: this used to return the four raw split substrings with no
+/// validation that they're actually hex — every OTHER user-influenced value
+/// in `libvirt_domain_xml` goes through `xml_escape` except these four,
+/// which get interpolated straight into `<address domain='0x{dom}' .../>`.
+/// `cfg.devices` is manifest-reachable (`spec.devices`), so a value like
+/// `0' foo='bar:00:00.0` split fine (no `:`/`.`/`/` in `dom`) and produced
+/// injected-attribute XML. Fixed at the source: each component must be
+/// valid hex of the expected width (domain 4, bus 2, slot 2, func 1) or the
+/// whole address is rejected — `xml_escape` is also applied at the call
+/// site as defense-in-depth, matching every other field in this function.
 fn parse_pci_addr(dev: &str) -> Option<(String, String, String, String)> {
+    fn is_hex_of_len(s: &str, len: usize) -> bool {
+        s.len() == len && s.chars().all(|c| c.is_ascii_hexdigit())
+    }
     let bdf = dev.rsplit('/').next().unwrap_or(dev); // 0000:65:00.1
     let (rest, func) = bdf.rsplit_once('.')?;
     let mut it = rest.split(':');
@@ -1272,6 +1295,13 @@ fn parse_pci_addr(dev: &str) -> Option<(String, String, String, String)> {
     let bus = it.next()?;
     let slot = it.next()?;
     if it.next().is_some() {
+        return None;
+    }
+    if !(is_hex_of_len(dom, 4)
+        && is_hex_of_len(bus, 2)
+        && is_hex_of_len(slot, 2)
+        && is_hex_of_len(func, 1))
+    {
         return None;
     }
     Some((
@@ -2208,6 +2238,22 @@ mod tests {
             Some(("0000".into(), "03".into(), "00".into(), "0".into()))
         );
         assert_eq!(parse_pci_addr("lixo"), None);
+    }
+
+    #[test]
+    fn pci_addr_recusa_injeccao_de_atributos_xml() {
+        // BUG regression guard: the parser used to accept ANY non-`:`/`.`/`/`
+        // characters for each component, with no hex check — a manifest
+        // `spec.devices` entry like `0' foo='bar:00:00.0` produced an
+        // injected XML attribute in `libvirt_domain_xml`'s `<address>` tag.
+        assert_eq!(parse_pci_addr("0' foo='bar:00:00.0"), None);
+        assert_eq!(parse_pci_addr("a':00:00.0"), None);
+        // Wrong width per component is also rejected (not just non-hex chars).
+        assert_eq!(parse_pci_addr("00000:65:00.1"), None); // domain too long
+        assert_eq!(parse_pci_addr("0000:6:00.1"), None); // bus too short
+        assert_eq!(parse_pci_addr("0000:65:0.1"), None); // slot too short
+        assert_eq!(parse_pci_addr("0000:65:00.12"), None); // func too long
+        assert_eq!(parse_pci_addr("000g:65:00.1"), None); // non-hex digit
     }
 
     #[test]

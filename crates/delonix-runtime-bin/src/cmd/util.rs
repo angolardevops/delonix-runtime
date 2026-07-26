@@ -66,11 +66,40 @@ pub(crate) fn chown_tree(path: &Path, uid: u32) -> Result<()> {
 }
 
 /// Locates a container by ID prefix or by exact name.
+///
+/// BUG FOUND: this used to be `.find(...)` on the id-prefix/exact-name
+/// predicate, returning the FIRST match from `store.list()` (created-desc
+/// order) — an ambiguous short prefix silently resolved to the newest
+/// matching container instead of erroring, unlike Docker/Podman ("multiple
+/// IDs found"). Destructive verbs (`stop`/`rm`) all resolve through this, so
+/// an ambiguous prefix could silently act on the wrong container. Fixed:
+/// an exact id or exact name match wins outright (unambiguous by
+/// definition); otherwise every prefix match is collected, and more than
+/// one is a hard error listing the candidates.
 pub(crate) fn find(store: &Store, q: &str) -> Result<Container> {
     let all = store.list()?;
-    all.into_iter()
-        .find(|c| c.id == q || c.id.starts_with(q) || c.name == q)
-        .ok_or_else(|| Error::Invalid(format!("{}: {q}", super::po::t("container not found"))))
+    if let Some(c) = all.iter().find(|c| c.id == q || c.name == q) {
+        return Ok(c.clone());
+    }
+    let mut matches: Vec<Container> = all.into_iter().filter(|c| c.id.starts_with(q)).collect();
+    match matches.len() {
+        0 => Err(Error::Invalid(format!(
+            "{}: {q}",
+            super::po::t("container not found")
+        ))),
+        1 => Ok(matches.remove(0)),
+        _ => {
+            let ids: Vec<&str> = matches
+                .iter()
+                .map(|c| super::container::short_id(&c.id))
+                .collect();
+            Err(Error::Invalid(format!(
+                "{}: {q} ({})",
+                super::po::t("multiple containers match this prefix"),
+                ids.join(", ")
+            )))
+        }
+    }
 }
 
 /// Prepares a new container's rootfs from an image: FLAT (export +
@@ -85,5 +114,72 @@ pub(crate) fn prepare_rootfs(images: &ImageStore, img: &Image, id: &str) -> Resu
         Ok(rfs.to_string_lossy().into_owned())
     } else {
         Ok(images.mount_rootfs(img, id)?.to_string_lossy().into_owned())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tmp_store() -> (Store, PathBuf) {
+        let dir = std::env::temp_dir().join(format!(
+            "delonix-util-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        (Store::open(&dir).unwrap(), dir)
+    }
+
+    fn mk(id: &str, name: &str) -> Container {
+        Container::new(
+            id.to_string(),
+            name.to_string(),
+            "alpine".to_string(),
+            vec!["sh".to_string()],
+            "0".to_string(),
+        )
+    }
+
+    #[test]
+    fn find_prefixo_ambiguo_e_erro_nao_o_mais_recente() {
+        // BUG regression guard: `find` used to silently return the FIRST
+        // (newest-created) match on an ambiguous id prefix instead of
+        // erroring — the exact opposite of Docker/Podman semantics.
+        let (store, dir) = tmp_store();
+        store.save(&mk("a1f3000000000000", "old")).unwrap();
+        store.save(&mk("a1f9000000000000", "new")).unwrap();
+        let err = find(&store, "a1").unwrap_err();
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("a1f300000000") || msg.contains("a1f900000000"),
+            "{msg}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn find_prefixo_unico_resolve_normalmente() {
+        let (store, dir) = tmp_store();
+        store.save(&mk("a1f3000000000000", "old")).unwrap();
+        store.save(&mk("b2000000000000000", "other")).unwrap();
+        let c = find(&store, "a1f3").unwrap();
+        assert_eq!(c.name, "old");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn find_nome_exacto_ganha_mesmo_com_prefixo_de_id_ambiguo() {
+        // An exact id/name match is unambiguous by definition and must win
+        // outright, even if OTHER containers' ids happen to share a prefix
+        // with the query string.
+        let (store, dir) = tmp_store();
+        store.save(&mk("a1f3000000000000", "web")).unwrap();
+        store.save(&mk("a1f9000000000000", "other")).unwrap();
+        let c = find(&store, "web").unwrap();
+        assert_eq!(c.id, "a1f3000000000000");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -2226,11 +2226,27 @@ pub fn slirp_attach(pid: i32, publish: &[String]) -> Result<()> {
     unsafe { libc::close(wr) };
     match spawned {
         Ok(child) => {
-            // Waits for the "ready" byte (network configured) before continuing.
-            let mut b = [0u8; 1];
-            // SAFETY: reads 1 byte from the read-end; blocks until the slirp signals.
+            // BUG FOUND: this used to be a BARE blocking `read` with no poll
+            // guard at all — if slirp4netns never signals AND never closes
+            // the write end (a grandchild inheriting it, created WITHOUT
+            // O_CLOEXEC, is enough), the read hangs the calling `run`
+            // forever with no log and no exit. Same class of deadlock the
+            // sibling `start_slirp` (infra.rs) already guards against with
+            // `wait_readable` — applying the identical capped-wait pattern
+            // here closes the gap in the per-container attach path too.
+            if crate::infra::wait_readable(rd, 10_000) {
+                let mut b = [0u8; 1];
+                // SAFETY: reads 1 byte from a read-end already confirmed readable.
+                unsafe {
+                    libc::read(rd, b.as_mut_ptr() as *mut libc::c_void, 1);
+                }
+            } else {
+                tracing::warn!(
+                    "slirp4netns did not signal ready within 10s; the container network may not be operational"
+                );
+            }
+            // SAFETY: rd is a valid fd owned by this function either way.
             unsafe {
-                libc::read(rd, b.as_mut_ptr() as *mut libc::c_void, 1);
                 libc::close(rd);
             }
             // Publishes the ports via the api-socket (host → container, in userspace).

@@ -1216,6 +1216,7 @@ fn setup_rootfs(
     sysctls: &[String],
     host_pid: bool,
     privileged: bool,
+    has_own_netns: bool,
 ) -> nix::Result<()> {
     sethostname(hostname)?;
     mount(
@@ -1277,7 +1278,7 @@ fn setup_rootfs(
             None::<&str>,
         )?;
     }
-    apply_sysctls(sysctls); // --sysctl: BEFORE /proc/sys becomes read-only (B13)
+    apply_sysctls(sysctls, has_own_netns); // --sysctl: BEFORE /proc/sys becomes read-only (B13)
     mask_proc_paths();
     // `/sys` READ-ONLY (B13): prevents writing to kernel/device controls
     // from the container. nosuid/nodev/noexec for defense. (Skips if there is no /sys.)
@@ -1757,7 +1758,17 @@ fn write_secret_files(pairs: &[(String, String)]) {
 
 /// Writes the namespaced `sysctl`s (`--sysctl net.x=y`) into the container's
 /// `/proc/sys/...` (after `/proc` is mounted). Only those the namespace permits.
-fn apply_sysctls(specs: &[String]) {
+///
+/// BUG FOUND: `net.*` was always treated as safe, on the assumption that
+/// network sysctls are always namespaced — true ONLY if this container has
+/// its OWN network namespace (`CLONE_NEWNET`). A container sharing a netns
+/// (`--net host`: the real host's; or rootless custom-network: the ingress
+/// holder's, shared with every other container on that network) has
+/// `/proc/sys/net/*` pointing at that SHARED namespace — Docker itself
+/// refuses `--sysctl net.*` combined with host networking for exactly this
+/// reason. `has_own_netns` is the same condition `spawn` uses to decide
+/// whether to add `CLONE_NEWNET` in the first place.
+fn apply_sysctls(specs: &[String], has_own_netns: bool) {
     for kv in specs {
         if let Some((k, v)) = kv.split_once('=') {
             let k = k.trim();
@@ -1766,7 +1777,7 @@ fn apply_sysctls(specs: &[String]) {
             // GLOBAL to the host and a container cannot touch them. Without this, and since
             // this runs before `/proc/sys` becomes RO and before dropping caps,
             // a container could write HOST kernel knobs.
-            if !sysctl_namespaced(k) {
+            if !sysctl_namespaced(k, has_own_netns) {
                 eprintln!("delonix: --sysctl {k}: not namespaced; refused (affects the host)");
                 continue;
             }
@@ -1777,8 +1788,9 @@ fn apply_sysctls(specs: &[String]) {
 }
 
 /// `true` if the sysctl is namespaced (safe for a container to change). Same
-/// set that Docker permits by default.
-fn sysctl_namespaced(k: &str) -> bool {
+/// set that Docker permits by default — `net.*` additionally requires the
+/// container to actually own its network namespace (see `apply_sysctls`).
+fn sysctl_namespaced(k: &str, has_own_netns: bool) -> bool {
     if k.contains("..") || k.starts_with('/') {
         return false;
     }
@@ -1786,7 +1798,7 @@ fn sysctl_namespaced(k: &str) -> bool {
         || k.starts_with("kernel.shm")
         || k.starts_with("kernel.msg")
         || k.starts_with("fs.mqueue.")
-        || k.starts_with("net.")
+        || (k.starts_with("net.") && has_own_netns)
 }
 
 /// The type of the 1st argument of `setrlimit`: enum (`__rlimit_resource_t`) in glibc,
@@ -2013,6 +2025,7 @@ fn container_init(
     tmpfs: &[String],
     ulimits: &[String],
     sysctls: &[String],
+    has_own_netns: bool,
     host_pid: bool,
     inherit_userns: bool,
     run_uid: Option<u32>,
@@ -2088,7 +2101,15 @@ fn container_init(
     // the host uid). Without a user ns, it mounts `/dev` right away (bind of the host's real nodes).
     // With a user ns, `/dev` is mounted next, after the setuid — see below.
     if let Err(e) = setup_rootfs(
-        rootfs, hostname, mounts, userns, devices, sysctls, host_pid, privileged,
+        rootfs,
+        hostname,
+        mounts,
+        userns,
+        devices,
+        sysctls,
+        host_pid,
+        privileged,
+        has_own_netns,
     ) {
         eprintln!("delonix: failed to prepare the rootfs: {e}");
         return 126;
@@ -3172,6 +3193,12 @@ fn spawn(store: &Store, container: &mut Container, rootfs: &str, spec: &RunSpec<
 
     let host_pid = spec.host_pid;
     let inherit_userns = spec.inherit_userns;
+    // Same condition that decides whether `CLONE_NEWNET` is actually added
+    // above — the one place that knows whether this container ends up with
+    // an EXCLUSIVE network namespace of its own, vs sharing one (the real
+    // host's, under `--net host`, or the holder's under rootless ingress).
+    // `apply_sysctls` needs this to know whether `net.*` sysctls are safe.
+    let has_own_netns = spec.new_netns && !spec.inherit_userns;
     let run_uid = spec.run_uid;
     let run_gid = spec.run_gid;
     // --secret-files: reads+decrypts the values NOW (on the host, before the child's pivot)
@@ -3229,6 +3256,7 @@ fn spawn(store: &Store, container: &mut Container, rootfs: &str, spec: &RunSpec<
             &tmpfs,
             &ulimits,
             &sysctls,
+            has_own_netns,
             host_pid,
             inherit_userns,
             run_uid,
@@ -3819,6 +3847,20 @@ pub fn exec(container: &Container, argv: &[String], tty: bool) -> Result<i32> {
             }
         }
         ForkResult::Parent { child } => {
+            // BUG FOUND: `fds` (the ns fds opened above, in the PARENT) were
+            // never closed on this branch. Only the CHILD closes its copies
+            // (via `OwnedFd::from_raw_fd` before `setns`) — the PARENT's
+            // copies leaked for the rest of this (typically long-running:
+            // CLI process, or the CRI server) process's life. `O_CLOEXEC`
+            // only helps across an `execve` of THIS process, which a
+            // persistent caller may never do. Worse than an fd leak: each
+            // leaked fd PINS the referenced namespace alive (mnt/net/pid/
+            // user) even after the container dies, blocking its teardown.
+            // Symmetric with `mount_live`/`unmount_live`, which already get
+            // this right via `OwnedFd` (through `open_container_ns`).
+            for (_, fd) in &fds {
+                unsafe { libc::close(*fd) };
+            }
             if let Some((sp, sc)) = pty_sock {
                 unsafe { libc::close(sc) }; // the parent receives on its side
                 let master = recv_fd(sp);
@@ -4663,23 +4705,37 @@ mod tests {
 
     #[test]
     fn sysctl_allowlist_so_aceita_namespaced() {
-        // namespaced (safe) → permitted.
+        // namespaced (safe) → permitted, WITH an own netns.
         for k in [
             "net.ipv4.ip_forward",
             "kernel.shmmax",
             "kernel.sem",
             "fs.mqueue.msg_max",
         ] {
-            assert!(sysctl_namespaced(k), "{k} devia ser permitido");
+            assert!(sysctl_namespaced(k, true), "{k} devia ser permitido");
         }
-        // global to the host / traversal → refused.
+        // global to the host / traversal → refused, regardless of netns.
         for k in [
             "kernel.hostname",
             "vm.swappiness",
             "kernel.core_pattern",
             "net/../kernel.x",
         ] {
-            assert!(!sysctl_namespaced(k), "{k} NÃO devia ser permitido");
+            assert!(!sysctl_namespaced(k, true), "{k} NÃO devia ser permitido");
         }
+    }
+
+    #[test]
+    fn sysctl_net_star_recusado_sem_netns_propria() {
+        // BUG regression guard: `--net host` (or rootless custom-network,
+        // which shares the ingress holder's netns) used to let `net.*`
+        // sysctls through unconditionally — writing a GLOBAL knob of
+        // whatever netns is actually shared, not a per-container one.
+        // `kernel.sem`/`fs.mqueue.*` stay allowed either way (never network).
+        assert!(!sysctl_namespaced("net.ipv4.ip_forward", false));
+        assert!(!sysctl_namespaced("net.ipv6.conf.all.forwarding", false));
+        assert!(sysctl_namespaced("net.ipv4.ip_forward", true));
+        assert!(sysctl_namespaced("kernel.sem", false));
+        assert!(sysctl_namespaced("fs.mqueue.msg_max", false));
     }
 }
