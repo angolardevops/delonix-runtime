@@ -4,6 +4,67 @@
 > (regenerado automaticamente pelo pipeline de release a cada tag publicada).
 > Não editar à mão — edita a nota da release respectiva.
 
+## v0.25.0 — paridade de CLI de operação com Docker/Podman
+
+Fecha a Fase 5 do roadmap de paridade Docker/Podman
+([docs/COMPARACAO-DOCKER-PODMAN.md](../COMPARACAO-DOCKER-PODMAN.md)): os verbos de operação que
+faltavam no `delonix container`. Nenhum destes precisou de tocar no princípio daemonless/
+rootless — são extensões da superfície de CLI/motor já existente, não um subsistema novo.
+
+### Novo
+
+- **`container kill [-s <signal>]`** — envia um sinal arbitrário (nome ou número, ex.: `KILL`,
+  `SIGKILL`, `9`, `TERM`) ao processo init do container. Ao contrário de `stop`, NÃO espera nem
+  força o estado a `Stopped` — o resultado real (`Crashed` se o sinal matar mesmo o processo) só
+  se reflecte na próxima observação, o que é honesto: um `kill -s TERM` num PID 1 sem handler
+  próprio (comportamento normal do Linux em namespaces de PID) pode não ter efeito nenhum, tal
+  como aconteceria num Docker real com o mesmo entrypoint.
+- **`container wait`** — bloqueia até o container sair, depois imprime o exit code real. Só é
+  REAL quando o container tem um supervisor `--restart` (o único caso em que o motor é o pai
+  verdadeiro do processo e por isso tem um `waitpid` genuíno); sem supervisor, a morte continua a
+  aparecer como `Crashed`/137, uma limitação arquitectural pré-existente (documentada, não nova).
+- **`container restart`** — `stop` seguido de `start`, reaproveitando os dois tal-e-qual (imprime
+  2 linhas em vez de 1 — trade-off aceite para não duplicar a lógica de rede/namespace de
+  nenhum dos dois).
+- **`container rename <id> <novo-nome>`** e **`container port <id>`**.
+- **`container exec -e/-w/-u`** — overrides por-chamada (nunca persistidos no registo do
+  container). **Bug real corrigido pelo caminho**: `exec` fazia `chdir("/")` incondicionalmente,
+  ignorando o `workdir` próprio do container mesmo sem `-w` nenhum — agora usa o workdir
+  configurado por omissão, só `-w` o substitui.
+- **`container logs --tail/--since/--timestamps`** — só funcionam em containers corridos com
+  `--log-cri` (o único formato de log com timestamps reais por linha, `<rfc3339nano> stdout F
+  <linha>`); sem isso, erro claro em vez de uma coluna de timestamp em branco. `--since` aceita
+  um timestamp Unix (segundos); comparação lexicográfica de strings RFC3339 (sem `chrono`,
+  mesma disciplina de supply-chain do resto do projecto).
+- **`container attach`** — reaproveita o mecanismo de `logs -f`. Deliberadamente **só saída**:
+  este motor não guarda nenhum conduíte de stdin vivo para um container já arrancado em
+  detached (ao contrário de um shim persistente por-container, como o `containerd-shim`);
+  `-i`/`--interactive` é recusado com um erro claro, apontando para `exec -it` em vez disso.
+
+### Validado ao vivo (host real)
+
+Todos os verbos acima testados contra containers reais: `wait` mostrou o exit code real (7) com
+supervisor e `137` sem ele (comportamento esperado, não um bug); `kill` (SIGKILL) matou o
+processo, `kill -s TERM` corretamente NÃO matou um `sleep` sem handler (mesmo comportamento que
+um Docker real teria); `exec -e/-w/-u` mostrou o workdir/env/user aplicados corretamente;
+`logs --timestamps`/`--tail` formataram as linhas certas; `attach -i` recusou com o erro
+esperado; `rename`/`restart`/`port` funcionaram de ponta a ponta.
+
+### Validação
+
+21 testes novos/actualizados (parsing de sinal, parsing de linhas de log CRI, conversão
+Unix→RFC3339 cross-validada contra `date -u` real). `cargo test --workspace`, `clippy
+--all-targets -D warnings` e `fmt --check` limpos.
+
+### Por fazer
+
+Mutações da API Docker-compatível (`/containers/create|start|stop|exec`), BuildKit-lite (`RUN
+--mount=secret`, `--platform`) e GPU real via CDI/nvidia-container-toolkit — os 3 gaps
+"bloqueantes"/maiores restantes do roadmap, cada um já com plano desenhado, próximas fatias
+desta mesma série.
+
+---
+
 ## v0.24.0 — etcd externo dedicado (`cluster apply`/`cluster kubeadm`)
 
 Fecha o último item do backlog da auditoria E2E ([docs/AUDITORIA-E2E.md](../AUDITORIA-E2E.md)):

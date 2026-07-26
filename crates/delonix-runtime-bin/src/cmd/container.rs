@@ -955,6 +955,43 @@ pub enum ContainerCmd {
         #[arg(short, long, default_value_t = 10)]
         time: u64,
     },
+    /// Send a signal to one or more containers (default SIGKILL) — unlike
+    /// `stop`, does not wait or force a `Stopped` status: the real outcome
+    /// (e.g. `Crashed` for a `KILL`) is picked up on the next observation.
+    Kill {
+        #[arg(required = true, add = ArgValueCandidates::new(super::complete::containers))]
+        ids: Vec<String>,
+        /// Signal name (`KILL`, `SIGKILL`, case-insensitive, `SIG` prefix
+        /// optional) or number (`9`).
+        #[arg(short = 's', long, default_value = "KILL")]
+        signal: String,
+    },
+    /// Block until one or more containers exit, then print their exit code
+    /// (one per line, in the order given).
+    Wait {
+        #[arg(required = true, add = ArgValueCandidates::new(super::complete::containers))]
+        ids: Vec<String>,
+    },
+    /// Stop then start one or more containers (reuses the persistent rootfs
+    /// and the original run configuration, like `start`).
+    Restart {
+        #[arg(required = true, add = ArgValueCandidates::new(super::complete::containers))]
+        ids: Vec<String>,
+        /// Seconds until SIGKILL, for the `stop` half.
+        #[arg(short, long, default_value_t = 10)]
+        time: u64,
+    },
+    /// Give a container a new name.
+    Rename {
+        #[arg(add = ArgValueCandidates::new(super::complete::containers))]
+        id: String,
+        new_name: String,
+    },
+    /// Published ports of a container (`hostPort/proto -> containerPort`).
+    Port {
+        #[arg(add = ArgValueCandidates::new(super::complete::containers))]
+        id: String,
+    },
     /// Remove one or more containers.
     Rm {
         #[arg(required = true, add = ArgValueCandidates::new(super::complete::containers))]
@@ -1017,6 +1054,19 @@ pub enum ContainerCmd {
         /// Allocate a pseudo-terminal.
         #[arg(short = 't', long)]
         tty: bool,
+        /// Extra environment variable (`KEY=VAL`) for this call only, on top of
+        /// the container's own env. Repeatable.
+        #[arg(short = 'e', long = "env")]
+        env: Vec<String>,
+        /// Working directory for this call only (default: the container's own
+        /// configured `workdir`, or `/`).
+        #[arg(short = 'w', long = "workdir")]
+        workdir: Option<String>,
+        /// Run as this user for this call only: `uid[:gid]` or `name[:group]`
+        /// (resolved against the container's own `/etc/passwd`/`/etc/group`).
+        /// Default: the container's own configured user.
+        #[arg(short = 'u', long = "user")]
+        user: Option<String>,
         #[arg(add = ArgValueCandidates::new(super::complete::containers))]
         id: String,
         #[arg(trailing_var_arg = true, allow_hyphen_values = true, required = true)]
@@ -1089,6 +1139,35 @@ pub enum ContainerCmd {
         /// Follow the log continuously (exits when the container stops).
         #[arg(short, long)]
         follow: bool,
+        /// Show only the last N lines. Requires the container to have been run
+        /// with `--log-cri` (per-line timestamps needed to find "the last N" —
+        /// see `--timestamps`'s doc for why).
+        #[arg(long)]
+        tail: Option<usize>,
+        /// Show only lines at or after this Unix timestamp (seconds). Same
+        /// `--log-cri` requirement as `--tail`.
+        #[arg(long)]
+        since: Option<u64>,
+        /// Prefix each line with its RFC3339 timestamp. Only available for
+        /// containers run with `--log-cri` (`container run --log-cri`) — the
+        /// plain log format is raw bytes with no per-line timestamp to show;
+        /// a container without it gets a clear error naming the flag, not a
+        /// silently-blank column.
+        #[arg(long)]
+        timestamps: bool,
+    },
+    /// Re-attach to a running container's output stream (same log file
+    /// `logs -f` reads). Unlike `docker attach`, this is OUTPUT-ONLY: a
+    /// detached container's stdin has nowhere to go (this engine keeps no
+    /// live conduit to it once started, unlike a persistent per-container
+    /// shim) — `-i`/`--stdin` is refused with a clear error instead of
+    /// silently doing nothing.
+    Attach {
+        #[arg(add = ArgValueCandidates::new(super::complete::containers))]
+        id: String,
+        /// Refused: stdin forwarding isn't supported (see the command's own doc above).
+        #[arg(short, long)]
+        interactive: bool,
     },
     /// Apply the `kind: Container` documents of a manifest (idempotent by
     /// name — an existing container with that name is neither recreated nor
@@ -1242,15 +1321,35 @@ pub fn run(action: ContainerCmd) -> Result<()> {
         ContainerCmd::Ps { all, quiet } => cmd_ps(&store, all, quiet),
         ContainerCmd::Start { ids } => for_each_id(&ids, |id| cmd_start(&images, &store, id)),
         ContainerCmd::Stop { ids, time } => for_each_id(&ids, |id| cmd_stop(&store, id, time)),
+        ContainerCmd::Kill { ids, signal } => for_each_id(&ids, |id| cmd_kill(&store, id, &signal)),
+        ContainerCmd::Wait { ids } => for_each_id(&ids, |id| cmd_wait(&store, id)),
+        ContainerCmd::Restart { ids, time } => {
+            for_each_id(&ids, |id| cmd_restart(&images, &store, id, time))
+        }
+        ContainerCmd::Rename { id, new_name } => cmd_rename(&store, &id, &new_name),
+        ContainerCmd::Port { id } => cmd_port(&store, &id),
         ContainerCmd::Rm { ids, force } => {
             for_each_id(&ids, |id| cmd_rm(&images, &store, id, force))
         }
         ContainerCmd::Exec {
             interactive,
             tty,
+            env,
+            workdir,
+            user,
             id,
             command,
-        } => cmd_exec(&store, &id, interactive, tty, &command),
+        } => cmd_exec(
+            &images,
+            &store,
+            &id,
+            interactive,
+            tty,
+            &env,
+            workdir.as_deref(),
+            user.as_deref(),
+            &command,
+        ),
         ContainerCmd::Pause { ids } => for_each_id(&ids, |id| cmd_freeze(&store, id, true)),
         ContainerCmd::Unpause { ids } => for_each_id(&ids, |id| cmd_freeze(&store, id, false)),
         ContainerCmd::Commit { id, tag } => cmd_commit(&images, &store, &id, &tag),
@@ -1288,7 +1387,14 @@ pub fn run(action: ContainerCmd) -> Result<()> {
             },
         ),
         ContainerCmd::Stats { ids } => cmd_stats(&store, &ids),
-        ContainerCmd::Logs { id, follow } => cmd_logs(&images, &store, &id, follow),
+        ContainerCmd::Logs {
+            id,
+            follow,
+            tail,
+            since,
+            timestamps,
+        } => cmd_logs(&images, &store, &id, follow, tail, since, timestamps),
+        ContainerCmd::Attach { id, interactive } => cmd_attach(&images, &store, &id, interactive),
         ContainerCmd::Apply { file } => {
             let path = manifest::resolve_path(file)?;
             let docs = manifest::load(&path)?;
@@ -3028,6 +3134,149 @@ pub(crate) fn cmd_stop(store: &Store, id: &str, time: u64) -> Result<()> {
     Ok(())
 }
 
+/// Parses a `docker kill -s` style signal spec into a raw signal number: a
+/// bare number (`9`) or a name, case-insensitive, with or without the `SIG`
+/// prefix (`kill`, `KILL`, `SIGKILL` all mean the same thing). Covers the
+/// standard POSIX signals a container is realistically sent — an unknown name
+/// is a clear error, never a silent no-op.
+fn parse_signal(spec: &str) -> Result<i32> {
+    if let Ok(n) = spec.parse::<i32>() {
+        return Ok(n);
+    }
+    let upper = spec.to_ascii_uppercase();
+    let name = upper.strip_prefix("SIG").unwrap_or(&upper);
+    Ok(match name {
+        "HUP" => libc::SIGHUP,
+        "INT" => libc::SIGINT,
+        "QUIT" => libc::SIGQUIT,
+        "ILL" => libc::SIGILL,
+        "TRAP" => libc::SIGTRAP,
+        "ABRT" => libc::SIGABRT,
+        "BUS" => libc::SIGBUS,
+        "FPE" => libc::SIGFPE,
+        "KILL" => libc::SIGKILL,
+        "USR1" => libc::SIGUSR1,
+        "SEGV" => libc::SIGSEGV,
+        "USR2" => libc::SIGUSR2,
+        "PIPE" => libc::SIGPIPE,
+        "ALRM" => libc::SIGALRM,
+        "TERM" => libc::SIGTERM,
+        "CHLD" => libc::SIGCHLD,
+        "CONT" => libc::SIGCONT,
+        "STOP" => libc::SIGSTOP,
+        "TSTP" => libc::SIGTSTP,
+        "TTIN" => libc::SIGTTIN,
+        "TTOU" => libc::SIGTTOU,
+        "URG" => libc::SIGURG,
+        "XCPU" => libc::SIGXCPU,
+        "XFSZ" => libc::SIGXFSZ,
+        "VTALRM" => libc::SIGVTALRM,
+        "PROF" => libc::SIGPROF,
+        "WINCH" => libc::SIGWINCH,
+        "IO" => libc::SIGIO,
+        "SYS" => libc::SIGSYS,
+        _ => return Err(Error::Invalid(format!("unknown signal: '{spec}'"))),
+    })
+}
+
+pub(crate) fn cmd_kill(store: &Store, id: &str, signal: &str) -> Result<()> {
+    let sig = parse_signal(signal)?;
+    let c = find(store, id)?;
+    runtime::send_signal(&c, sig)?;
+    delonix_runtime_core::events::emit(
+        &super::util::state_root(),
+        "container",
+        "kill",
+        &c.id,
+        &c.name,
+        Some(signal),
+    );
+    println!("{}", c.id);
+    Ok(())
+}
+
+/// Blocks until the container is no longer `Running`/`Paused`, then returns its
+/// exit code — same 3 values `Status::exit_code()` already models (0 = clean,
+/// N = `Failed(N)`, 137 = `Crashed`, which covers both OOM and a violent signal
+/// death; this engine has no captured-real-signal path, same documented
+/// limitation as everywhere else `crash_reason` is used instead of a real
+/// waitpid status).
+pub(crate) fn cmd_wait(store: &Store, id: &str) -> Result<()> {
+    loop {
+        let mut c = find(store, id)?;
+        reconcile_with_diagnostics(store, &mut c);
+        if c.status.is_terminal() {
+            println!("{}", c.status.exit_code());
+            return Ok(());
+        }
+        std::thread::sleep(std::time::Duration::from_millis(500));
+    }
+}
+
+/// `stop` then `start` — reuses both wholesale rather than duplicating their
+/// (fairly involved) network/namespace re-attach logic. Accepted trade-off:
+/// prints 2 lines (one from each half) instead of docker's 1, since neither
+/// helper is silence-able without touching either's own callers.
+pub(crate) fn cmd_restart(images: &ImageStore, store: &Store, id: &str, time: u64) -> Result<()> {
+    let c = find(store, id)?;
+    if matches!(
+        c.status,
+        delonix_runtime_core::Status::Running | delonix_runtime_core::Status::Paused
+    ) {
+        cmd_stop(store, id, time)?;
+    }
+    cmd_start(images, store, id)
+}
+
+pub(crate) fn cmd_rename(store: &Store, id: &str, new_name: &str) -> Result<()> {
+    if new_name.trim().is_empty() {
+        return Err(Error::Invalid("new name cannot be empty".into()));
+    }
+    if !valid_container_name(new_name) {
+        return Err(Error::Invalid(format!(
+            "invalid name: '{new_name}' (see the name restrictions on `container run --name`)"
+        )));
+    }
+    let c = find(store, id)?;
+    if store.load(new_name).is_ok() {
+        return Err(Error::Invalid(format!(
+            "a container named '{new_name}' already exists"
+        )));
+    }
+    let old_name = c.name.clone();
+    store.update(&c.id, |cur| {
+        cur.name = new_name.to_string();
+        true
+    })?;
+    delonix_runtime_core::events::emit(
+        &super::util::state_root(),
+        "container",
+        "rename",
+        &c.id,
+        new_name,
+        Some(&old_name),
+    );
+    println!("{new_name}");
+    Ok(())
+}
+
+/// `docker port <container>` — published ports, `hostPort/proto -> containerPort`.
+pub(crate) fn cmd_port(store: &Store, id: &str) -> Result<()> {
+    let c = find(store, id)?;
+    if c.ports.is_empty() {
+        return Ok(()); // docker prints nothing for a container with no published ports
+    }
+    for spec in &c.ports {
+        if let Some((host_part, cont_part)) = spec.split_once(':') {
+            let (cont_port, proto) = cont_part.split_once('/').unwrap_or((cont_part, "tcp"));
+            println!("{cont_port}/{proto} -> 0.0.0.0:{host_part}");
+        } else {
+            println!("{spec}");
+        }
+    }
+    Ok(())
+}
+
 /// Remove an ALREADY resolved container (`cmd_rm` resolves the id first). Extracted
 /// so kind mode's `cluster delete` can remove nodes without going through strings.
 pub(crate) fn remove_container(
@@ -3073,16 +3322,42 @@ pub(crate) fn cmd_rm(images: &ImageStore, store: &Store, id: &str, force: bool) 
     Ok(())
 }
 
+/// Rootfs path of an ALREADY-RUNNING container — same convention `cmd_commit`/
+/// `cmd_start` already use per mode: a flat directory in rootless (no overlay
+/// to look through), the overlay's `merged` mountpoint in root mode. Only
+/// needed to resolve `exec -u <name>` against `/etc/passwd` — a numeric `-u`
+/// never touches this path at all.
+fn live_rootfs_path(images: &ImageStore, id: &str) -> PathBuf {
+    if runtime::is_rootless() {
+        images.root().join("containers").join(id).join("rootfs")
+    } else {
+        images.root().join("containers").join(id).join("merged")
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
 fn cmd_exec(
+    images: &ImageStore,
     store: &Store,
     id: &str,
     interactive: bool,
     tty: bool,
+    env: &[String],
+    workdir: Option<&str>,
+    user: Option<&str>,
     command: &[String],
 ) -> Result<()> {
     let c = find(store, id)?;
     let _ = interactive; // stdin is inherited; the flag keeps CLI parity
-    let code = runtime::exec(&c, command, tty)?;
+    let user_override = user
+        .map(|u| resolve_run_user(&live_rootfs_path(images, &c.id).to_string_lossy(), u))
+        .transpose()?;
+    let overrides = runtime::ExecOverrides {
+        extra_env: env,
+        workdir,
+        user: user_override,
+    };
+    let code = runtime::exec_with(&c, command, tty, &overrides)?;
     std::process::exit(code);
 }
 
@@ -3936,7 +4211,62 @@ fn cmd_stats(store: &Store, ids: &[String]) -> Result<()> {
     Ok(())
 }
 
-pub(crate) fn cmd_logs(images: &ImageStore, store: &Store, id: &str, follow: bool) -> Result<()> {
+/// Splits one CRI-format log line (`<rfc3339nano> stdout F <line>` — the
+/// format `--log-cri` writes, see `delonix_runtime::log_shim`) into
+/// `(timestamp, body)`. `None` for anything that doesn't match — a raw
+/// (non-CRI) log, or an odd malformed record.
+fn parse_cri_log_line(line: &str) -> Option<(&str, &str)> {
+    let mut parts = line.splitn(4, ' ');
+    let ts = parts.next()?;
+    let _stream = parts.next()?;
+    let _tag = parts.next()?;
+    let body = parts.next().unwrap_or("");
+    if ts.len() < 20 || !ts.ends_with('Z') || ts.as_bytes().get(4) != Some(&b'-') {
+        return None;
+    }
+    Some((ts, body))
+}
+
+/// Unix seconds -> the same `YYYY-MM-DDTHH:MM:SS` prefix a CRI log line's own
+/// timestamp starts with — RFC3339 UTC timestamps compare lexicographically in
+/// the same order as chronologically, so `--since` just needs this string
+/// prefix, not a full parse back into a comparable integer. Small hand-written
+/// civil-calendar conversion (mirrors `delonix_runtime`'s own private
+/// `rfc3339` helper) rather than a `chrono` dependency, matching this
+/// project's supply-chain-minimalism rule (see AGENTS.md's "Output" section).
+fn unix_secs_to_rfc3339_prefix(secs: u64) -> String {
+    let days = (secs / 86_400) as i64;
+    let rem = secs % 86_400;
+    let (hh, mm, ss) = (rem / 3600, (rem % 3600) / 60, rem % 60);
+    let z = days + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = if m <= 2 { y + 1 } else { y };
+    format!("{year:04}-{m:02}-{d:02}T{hh:02}:{mm:02}:{ss:02}")
+}
+
+fn cri_format_error(name: &str) -> Error {
+    Error::Invalid(format!(
+        "--tail/--since/--timestamps require the container to have been run with --log-cri \
+         (per-line timestamps) — '{name}' logs aren't in that format"
+    ))
+}
+
+pub(crate) fn cmd_logs(
+    images: &ImageStore,
+    store: &Store,
+    id: &str,
+    follow: bool,
+    tail: Option<usize>,
+    since: Option<u64>,
+    timestamps: bool,
+) -> Result<()> {
     use std::io::{Read, Seek, Write};
     let c = find(store, id)?;
     let p = images.root().join("containers").join(&c.id).join("log");
@@ -3947,15 +4277,49 @@ pub(crate) fn cmd_logs(images: &ImageStore, store: &Store, id: &str, follow: boo
         ))
     })?;
     let mut out = std::io::stdout();
+    let needs_cri = tail.is_some() || since.is_some() || timestamps;
+
     let mut buf = Vec::new();
     f.read_to_end(&mut buf)?;
-    out.write_all(&buf)?;
+    if needs_cri {
+        let text = String::from_utf8_lossy(&buf).into_owned();
+        let since_prefix = since.map(unix_secs_to_rfc3339_prefix);
+        let mut lines: Vec<(&str, &str)> = Vec::new();
+        for line in text.lines() {
+            if line.is_empty() {
+                continue;
+            }
+            let (ts, body) = parse_cri_log_line(line).ok_or_else(|| cri_format_error(&c.name))?;
+            lines.push((ts, body));
+        }
+        if let Some(threshold) = &since_prefix {
+            lines.retain(|(ts, _)| *ts >= threshold.as_str());
+        }
+        if let Some(n) = tail {
+            let start = lines.len().saturating_sub(n);
+            lines = lines[start..].to_vec();
+        }
+        for (ts, body) in &lines {
+            if timestamps {
+                println!("{ts} {body}");
+            } else {
+                println!("{body}");
+            }
+        }
+    } else {
+        out.write_all(&buf)?;
+    }
     if !follow {
         return Ok(());
     }
     // `-f`: follows the appends (reopens if the file shrinks — shim rotation);
     // ends when the container stops running and there's nothing left to read.
+    // `--tail`/`--since` only filter the BACKLOG above — once live, every new
+    // line is shown (same as docker). `--timestamps` keeps applying, buffering
+    // a trailing incomplete line across reads (a line can arrive split across
+    // two appends) since it needs a full line to parse the CRI record.
     let mut pos = f.stream_position()?;
+    let mut pending_line = String::new();
     loop {
         out.flush().ok();
         std::thread::sleep(std::time::Duration::from_millis(300));
@@ -3969,7 +4333,24 @@ pub(crate) fn cmd_logs(images: &ImageStore, store: &Store, id: &str, follow: boo
             buf.clear();
             f.read_to_end(&mut buf)?;
             pos += buf.len() as u64;
-            out.write_all(&buf)?;
+            if !needs_cri {
+                out.write_all(&buf)?;
+                continue;
+            }
+            pending_line.push_str(&String::from_utf8_lossy(&buf));
+            while let Some(nl) = pending_line.find('\n') {
+                let line: String = pending_line.drain(..=nl).collect();
+                let line = line.trim_end_matches('\n');
+                if let Some((ts, body)) = parse_cri_log_line(line) {
+                    if timestamps {
+                        println!("{ts} {body}");
+                    } else {
+                        println!("{body}");
+                    }
+                } else if !line.is_empty() {
+                    println!("{line}");
+                }
+            }
             continue;
         }
         let mut c = find(store, id)?;
@@ -3981,6 +4362,29 @@ pub(crate) fn cmd_logs(images: &ImageStore, store: &Store, id: &str, follow: boo
             return Ok(());
         }
     }
+}
+
+/// `docker attach` — OUTPUT-ONLY re-attach to a running container's log
+/// stream (this engine keeps no live stdin conduit to an already-started
+/// detached container, unlike a persistent per-container shim; see the
+/// command's own `--help`). Reuses `cmd_logs`'s exact follow mechanism.
+fn cmd_attach(images: &ImageStore, store: &Store, id: &str, interactive: bool) -> Result<()> {
+    if interactive {
+        return Err(Error::Invalid(
+            "attach -i/--interactive: stdin forwarding isn't supported — this engine keeps no \
+             live conduit to an already-started detached container's stdin (no persistent shim). \
+             Use `container exec -it <id> <cmd>` for an interactive session instead."
+                .into(),
+        ));
+    }
+    let c = find(store, id)?;
+    if !matches!(
+        c.status,
+        delonix_runtime_core::Status::Running | delonix_runtime_core::Status::Paused
+    ) {
+        return Err(Error::NotRunning(short_id(&c.id).to_string()));
+    }
+    cmd_logs(images, store, id, true, None, None, false)
 }
 
 /// Handles this group's `init` (see `cmd::scaffold`).
@@ -4026,9 +4430,61 @@ mod tests {
     use super::super::util::compose_command;
     use super::{
         fmt_ports, fmt_status, next_extra_idx, normalize_container_spec, parse_burst_bytes,
-        parse_rate_bits, policy_supervised, should_restart, valid_container_name, ContainerSpec,
+        parse_cri_log_line, parse_rate_bits, parse_signal, policy_supervised, should_restart,
+        unix_secs_to_rfc3339_prefix, valid_container_name, ContainerSpec,
     };
     use delonix_runtime_core::{Container, ExtraNet, Status};
+
+    #[test]
+    fn parse_signal_aceita_nome_numero_e_variantes_de_maiusculas() {
+        assert_eq!(parse_signal("9").unwrap(), libc::SIGKILL);
+        assert_eq!(parse_signal("KILL").unwrap(), libc::SIGKILL);
+        assert_eq!(parse_signal("kill").unwrap(), libc::SIGKILL);
+        assert_eq!(parse_signal("SIGKILL").unwrap(), libc::SIGKILL);
+        assert_eq!(parse_signal("term").unwrap(), libc::SIGTERM);
+        assert_eq!(parse_signal("HUP").unwrap(), libc::SIGHUP);
+        assert!(parse_signal("NOTASIGNAL").is_err());
+    }
+
+    #[test]
+    fn parse_cri_log_line_reconhece_o_formato_e_rejeita_texto_cru() {
+        let (ts, body) =
+            parse_cri_log_line("2026-07-26T15:30:00.123456789Z stdout F hello world").unwrap();
+        assert_eq!(ts, "2026-07-26T15:30:00.123456789Z");
+        assert_eq!(body, "hello world");
+        // Partial-record marker ("P") also parses — only the timestamp shape gates it.
+        assert!(parse_cri_log_line("2026-07-26T15:30:00.123456789Z stdout P partial").is_some());
+        assert!(parse_cri_log_line("plain raw log line, no timestamp").is_none());
+        assert!(parse_cri_log_line("").is_none());
+    }
+
+    /// Cross-checked against real `date -u -d @<secs>` output — the whole point
+    /// of this function is that its output has to be lexicographically
+    /// comparable against a REAL CRI log line's own timestamp text.
+    #[test]
+    fn unix_secs_to_rfc3339_prefix_bate_com_date_u() {
+        assert_eq!(unix_secs_to_rfc3339_prefix(0), "1970-01-01T00:00:00");
+        assert_eq!(
+            unix_secs_to_rfc3339_prefix(1_700_000_000),
+            "2023-11-14T22:13:20"
+        );
+        assert_eq!(
+            unix_secs_to_rfc3339_prefix(1_753_547_686),
+            "2025-07-26T16:34:46"
+        );
+    }
+
+    #[test]
+    fn since_prefix_e_menor_ou_igual_a_um_timestamp_real_do_mesmo_segundo() {
+        // The actual property `--since` relies on: a bare-seconds prefix must
+        // compare <= any real (fractional-nanosecond) CRI timestamp for that
+        // same second, so `ts >= threshold` includes the whole second.
+        let threshold = unix_secs_to_rfc3339_prefix(1_753_547_686);
+        let real_line_ts = "2025-07-26T16:34:46.999999999Z";
+        assert!(real_line_ts >= threshold.as_str());
+        let earlier = "2025-07-26T16:34:45.999999999Z";
+        assert!(earlier < threshold.as_str());
+    }
 
     #[test]
     fn containerspec_aceita_restart_legado_e_restartpolicy_canonico() {
