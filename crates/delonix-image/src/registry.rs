@@ -248,16 +248,46 @@ impl Client {
         self.blob_with_progress(digest, None)
     }
 
+    /// Hard ceiling on a single blob (container layer or VM artifact). Golden
+    /// VM images run to the low single-digit GiB (CLAUDE.md: "layers de
+    /// várias centenas de MB a multiple GB" for `kindest/node`); this is
+    /// generous headroom above that, not a tight budget.
+    const MAX_BLOB_BYTES: u64 = 8 * 1024 * 1024 * 1024;
+
+    fn blob_with_progress(
+        &mut self,
+        digest: &str,
+        progress: Option<&dyn Fn(u64, Option<u64>)>,
+    ) -> Result<Vec<u8>> {
+        self.blob_with_progress_capped(digest, progress, Self::MAX_BLOB_BYTES)
+    }
+
     /// Downloads a blob in STREAMING, calling `progress(bytes_read, total)` as
     /// it advances — the total comes from `Content-Length` (may be missing in
     /// chunked responses, hence the `Option`). Reading in chunks instead of `.bytes()`
     /// (which loads everything before returning) is what enables a progress
     /// bar: a VM artifact is hundreds of MB and without this the `pull` looks
     /// hung. The engine crate only REPORTS the bytes; the drawing is the bin's job.
-    fn blob_with_progress(
+    ///
+    /// `max_bytes` is a parameter (not always [`Self::MAX_BLOB_BYTES`]) so
+    /// tests can exercise the over-limit abort path with a tiny fake cap
+    /// instead of actually streaming gigabytes of data.
+    ///
+    /// BUG FOUND: `Vec::with_capacity(total.unwrap_or(0))` used to trust the
+    /// registry's raw, UNTRUSTED `Content-Length` outright — a hostile or
+    /// MITM'd registry returning a huge value (e.g. near u64::MAX) makes the
+    /// allocator attempt a giant reservation, which ABORTS the whole process
+    /// (not a recoverable error). Independently, nothing capped the actual
+    /// read loop either, so a server that just kept streaming (with or
+    /// without a lying Content-Length — a chunked response may not even
+    /// send one) grew `buf` until the machine OOMed. Both are fixed here:
+    /// the up-front reservation is capped regardless of the claimed total,
+    /// and the loop aborts once the ACTUAL bytes read exceed the limit.
+    fn blob_with_progress_capped(
         &mut self,
         digest: &str,
         progress: Option<&dyn Fn(u64, Option<u64>)>,
+        max_bytes: u64,
     ) -> Result<Vec<u8>> {
         use std::io::Read;
         let url = format!(
@@ -269,7 +299,8 @@ impl Client {
         );
         let mut resp = self.fetch(&url, "*/*")?;
         let total = resp.content_length();
-        let mut buf: Vec<u8> = Vec::with_capacity(total.unwrap_or(0) as usize);
+        let reserve = total.unwrap_or(0).min(max_bytes) as usize;
+        let mut buf: Vec<u8> = Vec::with_capacity(reserve);
         let mut chunk = [0u8; 65536];
         let mut done: u64 = 0;
         loop {
@@ -279,8 +310,13 @@ impl Client {
             if n == 0 {
                 break;
             }
-            buf.extend_from_slice(&chunk[..n]);
             done += n as u64;
+            if done > max_bytes {
+                return Err(Error::Registry(format!(
+                    "blob {digest} exceeds the {max_bytes}-byte limit — aborted"
+                )));
+            }
+            buf.extend_from_slice(&chunk[..n]);
             if let Some(p) = progress {
                 p(done, total);
             }
@@ -1406,6 +1442,46 @@ mod tests {
         assert_eq!(img1.id, img2.id);
 
         let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    /// Security-audit finding: `blob_with_progress` used to trust the registry's raw
+    /// `Content-Length` header for `Vec::with_capacity` (a huge/lying value could abort the
+    /// process via allocator failure) AND had no independent cap on the actual bytes read (a
+    /// server that just keeps streaming, regardless of what it claimed, could OOM the host).
+    /// `blob_with_progress_capped` closes both: the reservation is capped by `max_bytes`, and
+    /// the read loop aborts as soon as ACTUAL bytes read exceed it — proven here with a tiny
+    /// fake `max_bytes` instead of streaming gigabytes of real data.
+    #[test]
+    fn blob_with_progress_capped_aborta_acima_do_limite() {
+        let (port, _blob_gets, _handle) = serve_anon_registry();
+        let mut c = test_client(&format!("127.0.0.1:{port}"), "blob-cap");
+
+        let big_blob = vec![b'x'; 1024];
+        let digest = format!("sha256:{}", sha256_hex(&big_blob));
+        c.push_blob(&digest, &big_blob).unwrap();
+
+        let err = c
+            .blob_with_progress_capped(&digest, None, 100)
+            .expect_err("devia recusar um blob maior do que o limite");
+        let msg = err.to_string();
+        assert!(msg.contains(&digest), "{msg}");
+        assert!(msg.contains("100"), "{msg}");
+    }
+
+    /// Sanity check: a blob within the limit still round-trips normally.
+    #[test]
+    fn blob_with_progress_capped_aceita_dentro_do_limite() {
+        let (port, _blob_gets, _handle) = serve_anon_registry();
+        let mut c = test_client(&format!("127.0.0.1:{port}"), "blob-cap-ok");
+
+        let small_blob = b"conteudo-pequeno".to_vec();
+        let digest = format!("sha256:{}", sha256_hex(&small_blob));
+        c.push_blob(&digest, &small_blob).unwrap();
+
+        let got = c
+            .blob_with_progress_capped(&digest, None, small_blob.len() as u64)
+            .expect("devia aceitar um blob exactamente no limite");
+        assert_eq!(got, small_blob);
     }
 
     /// Security-audit finding: `pull_oci_artifact` must reject a blob whose

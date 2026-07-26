@@ -115,10 +115,19 @@ async fn serve_over_uds(uds: tokio::net::UnixListener, app: Router) -> Result<()
     let own_uid = unsafe { libc::geteuid() };
     let mut make = app.into_make_service();
     loop {
-        let (socket, _) = uds.accept().await.map_err(|e| Error::Runtime {
-            context: "accept",
-            message: e.to_string(),
-        })?;
+        // BUG FIXED: `?` used to propagate ANY accept() error out of this loop,
+        // tearing down the whole management API process — including on
+        // EMFILE/ENFILE/ECONNABORTED, all transient and self-clearing conditions
+        // `accept(2)` explicitly documents as "retry", not "give up". A brief fd
+        // exhaustion elsewhere on the host used to kill every in-flight request
+        // this server was handling. Now it's logged and the loop keeps accepting.
+        let (socket, _) = match uds.accept().await {
+            Ok(x) => x,
+            Err(e) => {
+                eprintln!("delonix-mgmt: accept() error (transient, retrying): {e}");
+                continue;
+            }
+        };
         // Reject any peer that isn't this process's own euid BEFORE it ever reaches
         // the router — a mismatched umask/`/run` placement must not turn into a
         // full control-plane RCE for any local user.

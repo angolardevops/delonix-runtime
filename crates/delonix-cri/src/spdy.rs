@@ -470,15 +470,15 @@ async fn writer_task<W: AsyncWrite + Unpin>(mut wr: W, mut rx: UnboundedReceiver
 
 enum Input {
     None,
-    Tty(i32),
-    Pipe(Option<std::process::ChildStdin>),
+    Tty(i32, u32),
+    Pipe(Option<std::process::ChildStdin>, u32),
 }
 
 impl Input {
     fn write_stdin(&mut self, data: &[u8]) {
         match self {
-            Input::Tty(m) => write_fd(*m, data),
-            Input::Pipe(Some(si)) => {
+            Input::Tty(m, _) => write_fd(*m, data),
+            Input::Pipe(Some(si), _) => {
                 use std::io::Write;
                 let _ = si.write_all(data);
                 let _ = si.flush();
@@ -487,18 +487,34 @@ impl Input {
         }
     }
     fn close_stdin(&mut self) {
-        if let Input::Pipe(si) = self {
+        if let Input::Pipe(si, _) = self {
             *si = None;
         }
     }
     fn resize(&mut self, data: &[u8]) {
-        if let Input::Tty(m) = self {
+        if let Input::Tty(m, _) = self {
             apply_resize(*m, data);
         }
     }
+    /// Called when the client goes away (SPDY connection closed/GOAWAY). Bug
+    /// found: this used to only close the pty fd (or do nothing, for the
+    /// pipe case) — the spawned `delonix exec`/`delonix logs -f` child was
+    /// never killed, so an interactive shell with no client attached ran
+    /// forever, leaking a process (and everything it holds: pty, netns fds,
+    /// container namespace refs) per abandoned exec session. Best-effort:
+    /// the wait-thread in `spawn_and_pump` already reaps whichever process
+    /// currently has this pid, so a SIGKILL here after it already exited is
+    /// a harmless ESRCH, not a misdirected signal to a reused pid.
     fn close(self) {
-        if let Input::Tty(m) = self {
-            unsafe { libc::close(m) };
+        match self {
+            Input::Tty(m, pid) => unsafe {
+                libc::kill(pid as i32, libc::SIGKILL);
+                libc::close(m);
+            },
+            Input::Pipe(_, pid) => {
+                unsafe { libc::kill(pid as i32, libc::SIGKILL) };
+            }
+            Input::None => {}
         }
     }
 }
@@ -540,6 +556,7 @@ fn spawn_and_pump(
                 return Input::None;
             }
         };
+        let pid = child.id();
         let tx = out_tx.clone();
         let reader = std::thread::spawn(move || {
             let mut buf = [0u8; 8192];
@@ -566,7 +583,7 @@ fn spawn_and_pump(
             let _ = reader.join();
             finish(&tx2, error_sid, code);
         });
-        Input::Tty(master)
+        Input::Tty(master, pid)
     } else {
         let mut cmd = Command::new(delonix_bin());
         cmd.env("DELONIX_ROOT", base)
@@ -584,6 +601,7 @@ fn spawn_and_pump(
                 return Input::None;
             }
         };
+        let pid = child.id();
         let stdin = child.stdin.take();
         let mut handles = Vec::new();
         for (sid, src) in [
@@ -630,7 +648,7 @@ fn spawn_and_pump(
             }
             finish(&tx2, error_sid, code);
         });
-        Input::Pipe(stdin)
+        Input::Pipe(stdin, pid)
     }
 }
 

@@ -69,6 +69,20 @@ struct ContainerRec {
     args: Vec<String>,
     created_at: i64,
     started: bool,
+    /// Real wall-clock time `StartContainer` succeeded (CRI `ContainerStatus.started_at`).
+    /// BUG FIXED: this used to be fabricated as `created_at` on every read instead of the
+    /// real start time — anything computing container age/uptime from it (kubectl describe,
+    /// probes) was wrong from the moment the container actually started.
+    #[serde(default)]
+    started_at: i64,
+    /// Real wall-clock time the container was first observed exited (CRI
+    /// `ContainerStatus.finished_at`). BUG FIXED: this used to be `now_ns()` recomputed on
+    /// EVERY `ContainerStatus` poll — the kubelet polls this repeatedly, so the reported
+    /// finish time kept moving forward long after the container actually died, breaking
+    /// anything keyed on "how long has this been dead" (crash-loop backoff timing, log
+    /// rotation heuristics). Persisted once, the first time an exit is observed.
+    #[serde(default)]
+    finished_at: i64,
     /// FULL path of the log file (the sandbox's log_directory + the container's
     /// log_path) — where the kubelet/crictl expect to read stdout/stderr (CRI format).
     #[serde(default)]
@@ -596,6 +610,8 @@ pub fn create_container(
         args: cfg.args,
         created_at: now_ns(),
         started: false,
+        started_at: 0,
+        finished_at: 0,
         log_path: full_log_path,
         labels: cfg.labels,
         annotations: cfg.annotations,
@@ -717,6 +733,7 @@ pub fn start_container(
         return Err(Status::internal(format!("failed to start container {id}")));
     }
     rec.started = true;
+    rec.started_at = now_ns();
     write_rec(&ct_dir(base), &id, &rec)?;
     Ok(Response::new(StartContainerResponse {}))
 }
@@ -807,10 +824,26 @@ pub fn container_status(
     base: &Path,
     id: String,
 ) -> Result<Response<ContainerStatusResponse>, Status> {
-    let r: ContainerRec = read_rec(&ct_dir(base), &id)?;
+    let mut r: ContainerRec = read_rec(&ct_dir(base), &id)?;
     // Real exit code (from the Store), so the kubelet sees the exit cause instead
     // of a fixed `0`. `finished_at`/`reason` follow along.
     let exit = delonix_exit(base, &r.id);
+    // Persist the finish time only the FIRST time an exit is observed — see the
+    // BUG FIXED note on `ContainerRec::finished_at`. Best-effort: a failed write
+    // here still reports a correct (just not yet durable) timestamp this call.
+    if exit.is_some() && r.finished_at == 0 {
+        r.finished_at = now_ns();
+        let _ = write_rec(&ct_dir(base), &id, &r);
+    }
+    // `started_at` falls back to `created_at` only for records written before this
+    // fix (upgrade path) — old JSON on disk never persisted a real start time.
+    let started_at = if !r.started {
+        0
+    } else if r.started_at != 0 {
+        r.started_at
+    } else {
+        r.created_at
+    };
     let status = ContainerStatus {
         id: r.id.clone(),
         metadata: Some(ContainerMetadata {
@@ -819,8 +852,8 @@ pub fn container_status(
         }),
         state: delonix_state(base, &r.id),
         created_at: r.created_at,
-        started_at: if r.started { r.created_at } else { 0 },
-        finished_at: if exit.is_some() { now_ns() } else { 0 },
+        started_at,
+        finished_at: r.finished_at,
         exit_code: exit.unwrap_or(0),
         image: Some(ImageSpec {
             image: r.image.clone(),
@@ -1193,6 +1226,73 @@ mod tests {
         failed.status = delonix_runtime_core::Status::Failed(2);
         store.save(&failed).unwrap();
         assert_eq!(delonix_exit(&tmp, "abc"), Some(2));
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    /// BUG FIXED: `ContainerStatus.finished_at` used to be `now_ns()` recomputed on
+    /// EVERY poll (never stable), and `started_at` was fabricated as `created_at`
+    /// instead of the real start time. Both are now persisted once and stay stable
+    /// across repeated polls.
+    #[test]
+    fn container_status_finished_at_e_started_at_sao_estaveis_entre_polls() {
+        let tmp = std::env::temp_dir().join(format!(
+            "dlx-cri-status-stable-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = std::fs::remove_dir_all(&tmp);
+
+        let store = delonix_runtime_core::Store::open(tmp.join("containers")).unwrap();
+        let mut c = delonix_runtime_core::Container::new(
+            "cri-abc".into(),
+            "cri-abc".into(),
+            "img:1".into(),
+            vec![],
+            String::new(),
+        );
+        c.status = delonix_runtime_core::Status::Stopped;
+        store.save(&c).unwrap();
+
+        let real_started_at = 111_222_333;
+        let rec = ContainerRec {
+            id: "abc".into(),
+            created_at: 1,
+            started: true,
+            started_at: real_started_at,
+            finished_at: 0,
+            ..Default::default()
+        };
+        write_rec(&ct_dir(&tmp), "abc", &rec).unwrap();
+
+        let s1 = container_status(&tmp, "abc".into())
+            .unwrap()
+            .into_inner()
+            .status
+            .unwrap();
+        assert_eq!(
+            s1.started_at, real_started_at,
+            "started_at deve ser o valor persistido, não created_at"
+        );
+        assert_ne!(
+            s1.finished_at, 0,
+            "um container Stopped tem de ter finished_at"
+        );
+
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        let s2 = container_status(&tmp, "abc".into())
+            .unwrap()
+            .into_inner()
+            .status
+            .unwrap();
+        assert_eq!(
+            s1.finished_at, s2.finished_at,
+            "finished_at não pode mudar entre polls sucessivos"
+        );
+        assert_eq!(s1.started_at, s2.started_at);
 
         let _ = std::fs::remove_dir_all(&tmp);
     }

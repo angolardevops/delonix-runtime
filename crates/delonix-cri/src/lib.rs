@@ -324,10 +324,26 @@ pub fn serve_blocking(base: PathBuf, addr: &str) -> Result<(), delonix_runtime_c
         let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
         // SAFETY: geteuid() has no preconditions.
         let own_uid = unsafe { libc::geteuid() };
-        let incoming = tokio_stream::wrappers::UnixListenerStream::new(uds)
-            .filter(move |conn| match conn {
-                Ok(stream) => peer_uid(stream) == Some(own_uid),
-                Err(_) => true,
+        // BUG FIXED: a transient `accept()` error (EMFILE/ENFILE/ECONNABORTED —
+        // all self-clearing, `accept(2)`'s own man page says to just retry) used
+        // to be KEPT in the stream (`Err(_) => true`) and handed straight to
+        // tonic as an item; tonic treats an `Err` from its incoming stream as
+        // FATAL and tears down the whole gRPC server — every in-flight kubelet
+        // request killed by a hiccup unrelated to any of them. Now the error is
+        // logged and the item is dropped (`filter_map` → `None`), so the accept
+        // loop keeps serving instead of the process dying.
+        let incoming =
+            tokio_stream::wrappers::UnixListenerStream::new(uds).filter_map(move |conn| {
+                match conn {
+                    Ok(stream) if peer_uid(&stream) == Some(own_uid) => {
+                        Some(Ok::<_, std::io::Error>(stream))
+                    }
+                    Ok(_) => None, // wrong-uid peer: silently dropped, as before
+                    Err(e) => {
+                        tracing::warn!(error = %e, "delonix-cri: accept() error (transient, retrying)");
+                        None
+                    }
+                }
             });
         eprintln!("delonix-cri (CRI v1) listening on unix://{path}");
 

@@ -3151,22 +3151,47 @@ pub const INFRA_SLIRP_IP: &str = SLIRP_IP;
 /// Resolves names of ingress **containers and VMs** (→ IPv4); forwards the rest
 /// to the upstream (the slirp's DNS). It's the functional equivalent of dnsmasq (which doesn't
 /// work rootless).
+/// Upper bound on DNS queries handled concurrently. UDP `:53` accepts
+/// unauthenticated traffic from anyone on the ingress bridges — without a cap, a
+/// flood of garbage queries would spawn one thread per packet, unbounded.
+const DNS_MAX_INFLIGHT: usize = 64;
+static DNS_INFLIGHT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
 fn dns_server_main() {
     let sock = match std::net::UdpSocket::bind("0.0.0.0:53") {
         Ok(s) => s,
         Err(_) => return,
     };
+    let sock = std::sync::Arc::new(sock);
     let mut buf = [0u8; 1500];
     loop {
         let (n, peer) = match sock.recv_from(&mut buf) {
             Ok(x) => x,
             Err(_) => continue,
         };
-        if n >= 12 {
-            if let Some(r) = handle_dns(&buf[..n]) {
-                let _ = sock.send_to(&r, peer);
-            }
+        if n < 12 {
+            continue;
         }
+        // BUG FIXED: `handle_dns` used to run INLINE here, in the single accept
+        // loop. `forward_dns` can block up to ~6s (2 upstreams × 3s timeout) on a
+        // slow/dead external resolver — one query for an unreachable domain
+        // stalled DNS for the WHOLE node (including lookups of live
+        // containers/VMs, which don't touch the network at all) for the duration
+        // of that timeout. Each query now gets its own short-lived thread; a slow
+        // forward blocks only its own client, not the node.
+        use std::sync::atomic::Ordering;
+        if DNS_INFLIGHT.load(Ordering::Relaxed) >= DNS_MAX_INFLIGHT {
+            continue; // drop: the resolver on the other end retries/times out, same as an overloaded server would
+        }
+        DNS_INFLIGHT.fetch_add(1, Ordering::Relaxed);
+        let q = buf[..n].to_vec();
+        let sock2 = sock.clone();
+        std::thread::spawn(move || {
+            if let Some(r) = handle_dns(&q) {
+                let _ = sock2.send_to(&r, peer);
+            }
+            DNS_INFLIGHT.fetch_sub(1, Ordering::Relaxed);
+        });
     }
 }
 
@@ -3270,10 +3295,63 @@ pub fn parse_internal_name(name: &str) -> Option<(String, Option<String>)> {
     Some((core.to_string(), None))
 }
 
-fn dns_resolve(name: &str) -> Option<[u8; 4]> {
-    let (cname, want_ns) = parse_internal_name(name)?;
-    let n = cname; // container name to match
-                   // containers: <base>/containers/*.json (name + ip [+ namespace])
+/// How long a built ingress-DNS index is trusted before a query pays for a
+/// rebuild. BUG FIXED: `dns_resolve` used to do a full directory scan + JSON
+/// parse of EVERY container/VM record (plus, per VM lacking a static IP, its own
+/// `ip neigh show` subprocess exec) on EVERY single query — including queries
+/// for entirely external domains, since `parse_internal_name` never returns
+/// `None` for a bare hostname. On a node running many containers this made
+/// every DNS lookup (even a miss forwarded upstream) pay for an O(n) scan
+/// first. The index is now rebuilt at most once per `DNS_INDEX_TTL`; each query
+/// does an O(1) `HashMap` lookup instead. 2s keeps a newly-created/renamed
+/// container resolvable promptly — well under the 30s TTL already stamped on
+/// the generated `A` responses, so the staleness window is not user-visible in
+/// practice.
+const DNS_INDEX_TTL: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// Namespaced key: only a query that explicitly asks for `<name>.<namespace>.
+/// delonix.internal` matches this — mirrors the `continue`-past-mismatched-
+/// namespace behavior the original per-query scan had (no silent fallback to a
+/// same-named container in a DIFFERENT namespace).
+fn dns_index_ns_key(name: &str, ns: &str) -> String {
+    format!("{name}@{}", ns.to_lowercase())
+}
+
+/// VM key, distinct namespace from container keys: VMs have no namespace
+/// concept (matches the original code, whose VM branch never checked
+/// `want_ns`), and containers are always tried first — same priority the
+/// original two-section scan had.
+fn dns_index_vm_key(name: &str) -> String {
+    format!("vm:{name}")
+}
+
+/// Parses `ip -o neigh show` output into `(lowercased line, ip)` pairs — same
+/// substring-match semantics `neigh_ip_local` always used, just decomposed so
+/// the table is fetched ONCE per index build instead of once per VM per query.
+fn parse_neigh_table(raw: &str) -> Vec<(String, String)> {
+    raw.lines()
+        .filter_map(|line| {
+            let ip = line.split_whitespace().next()?;
+            ip.contains('.')
+                .then(|| (line.to_lowercase(), ip.to_string()))
+        })
+        .collect()
+}
+
+fn neigh_table_lookup(table: &[(String, String)], mac: &str) -> Option<String> {
+    let mac = mac.to_lowercase();
+    table
+        .iter()
+        .find(|(line, _)| line.contains(&mac))
+        .map(|(_, ip)| ip.clone())
+}
+
+/// Builds the full ingress-DNS index from disk (containers + VMs). Real
+/// filesystem/subprocess I/O — called at most once per `DNS_INDEX_TTL` by
+/// [`dns_index`], never directly from a query.
+fn build_dns_index() -> std::collections::HashMap<String, [u8; 4]> {
+    let mut idx = std::collections::HashMap::new();
+    // containers: <base>/containers/*.json (name + ip [+ namespace])
     if let Ok(rd) = std::fs::read_dir(base_root().join("containers")) {
         for e in rd.flatten() {
             let Ok(v) = serde_json::from_slice::<serde_json::Value>(
@@ -3281,23 +3359,23 @@ fn dns_resolve(name: &str) -> Option<[u8; 4]> {
             ) else {
                 continue;
             };
-            if v["name"].as_str().map(|s| s.to_lowercase()).as_deref() == Some(n.as_str()) {
-                // Scheme with namespace (`.delonix.internal`): only resolves if the
-                // container's namespace matches (isolation also in DNS).
-                if let Some(want) = &want_ns {
-                    let cns = v["namespace"].as_str().unwrap_or("default");
-                    if cns != want {
-                        continue;
-                    }
-                }
-                if let Some(ip) = v["ip"].as_str().and_then(parse_v4) {
-                    return Some(ip);
-                }
-            }
+            let Some(name) = v["name"].as_str().map(|s| s.to_lowercase()) else {
+                continue;
+            };
+            let Some(ip) = v["ip"].as_str().and_then(parse_v4) else {
+                continue;
+            };
+            let ns = v["namespace"].as_str().unwrap_or("default");
+            // Bare key: first container written for a given name wins (same
+            // arbitrary-but-deterministic-per-build tie-break the old
+            // directory-order scan had when names collide across namespaces).
+            idx.entry(name.clone()).or_insert(ip);
+            idx.entry(dns_index_ns_key(&name, ns)).or_insert(ip);
         }
     }
-    // VMs: <base>/vms/*.json (name + mac) → IP pela tabela neigh
+    // VMs: <base>/vms/*.json (name + mac) → IP via the neigh table (fetched once).
     if let Ok(rd) = std::fs::read_dir(base_root().join("vms")) {
+        let neigh_table: std::sync::OnceLock<Vec<(String, String)>> = std::sync::OnceLock::new();
         for e in rd.flatten() {
             if e.path().extension().and_then(|x| x.to_str()) != Some("json") {
                 continue;
@@ -3307,27 +3385,67 @@ fn dns_resolve(name: &str) -> Option<[u8; 4]> {
             ) else {
                 continue;
             };
-            if v["name"].as_str().map(|s| s.to_lowercase()).as_deref() == Some(n.as_str()) {
-                // Recorded IP first: a libvirt nat/bridge VM lives on the HOST's
-                // virbr0 — its MAC never shows up in the holder's neigh table,
-                // so without this branch those VMs simply didn't resolve.
-                if let Some(ip) = v["ip"]
-                    .as_str()
-                    .filter(|s| !s.is_empty())
-                    .and_then(parse_v4)
-                {
-                    return Some(ip);
-                }
-                // CH VMs (tap in the holder netns): IP via the neigh table.
-                if let Some(mac) = v["mac"].as_str() {
-                    if let Some(ip) = neigh_ip_local(mac).as_deref().and_then(parse_v4) {
-                        return Some(ip);
-                    }
-                }
+            let Some(name) = v["name"].as_str().map(|s| s.to_lowercase()) else {
+                continue;
+            };
+            // Recorded IP first: a libvirt nat/bridge VM lives on the HOST's
+            // virbr0 — its MAC never shows up in the holder's neigh table, so
+            // without this branch those VMs simply didn't resolve.
+            let ip = v["ip"]
+                .as_str()
+                .filter(|s| !s.is_empty())
+                .and_then(parse_v4)
+                .or_else(|| {
+                    let mac = v["mac"].as_str()?;
+                    let table = neigh_table.get_or_init(|| {
+                        let raw =
+                            crate::capture("ip", &["-o", "neigh", "show"]).unwrap_or_default();
+                        parse_neigh_table(&raw)
+                    });
+                    neigh_table_lookup(table, mac).as_deref().and_then(parse_v4)
+                });
+            if let Some(ip) = ip {
+                idx.entry(dns_index_vm_key(&name)).or_insert(ip);
             }
         }
     }
-    None
+    idx
+}
+
+fn dns_index() -> std::sync::Arc<std::collections::HashMap<String, [u8; 4]>> {
+    type Cache = std::sync::Mutex<
+        Option<(
+            std::time::Instant,
+            std::sync::Arc<std::collections::HashMap<String, [u8; 4]>>,
+        )>,
+    >;
+    static CACHE: std::sync::OnceLock<Cache> = std::sync::OnceLock::new();
+    let cell = CACHE.get_or_init(|| std::sync::Mutex::new(None));
+    let mut guard = cell.lock().unwrap();
+    let fresh = guard
+        .as_ref()
+        .map(|(built_at, _)| built_at.elapsed() < DNS_INDEX_TTL)
+        .unwrap_or(false);
+    if !fresh {
+        *guard = Some((
+            std::time::Instant::now(),
+            std::sync::Arc::new(build_dns_index()),
+        ));
+    }
+    guard.as_ref().unwrap().1.clone()
+}
+
+fn dns_resolve(name: &str) -> Option<[u8; 4]> {
+    let (cname, want_ns) = parse_internal_name(name)?;
+    let idx = dns_index();
+    if let Some(ns) = &want_ns {
+        if let Some(ip) = idx.get(&dns_index_ns_key(&cname, ns)) {
+            return Some(*ip);
+        }
+    } else if let Some(ip) = idx.get(&cname) {
+        return Some(*ip);
+    }
+    idx.get(&dns_index_vm_key(&cname)).copied()
 }
 
 fn parse_v4(s: &str) -> Option<[u8; 4]> {
@@ -3489,22 +3607,6 @@ pub fn dhcp_ip6_for_mac(_net: &str, mac: &str) -> Option<String> {
         if line.to_lowercase().contains(&mac) {
             if let Some(ip) = line.split_whitespace().next() {
                 if ip.starts_with("fd00") {
-                    return Some(ip.to_string());
-                }
-            }
-        }
-    }
-    None
-}
-
-/// IP of a MAC via the `neigh` table — runs INSIDE the holder (already in the netns), no nsenter.
-fn neigh_ip_local(mac: &str) -> Option<String> {
-    let mac = mac.to_lowercase();
-    let out = crate::capture("ip", &["-o", "neigh", "show"]).ok()?;
-    for line in out.lines() {
-        if line.to_lowercase().contains(&mac) {
-            if let Some(ip) = line.split_whitespace().next() {
-                if ip.contains('.') {
                     return Some(ip.to_string());
                 }
             }
@@ -3955,5 +4057,41 @@ mod tests {
         std::env::set_var("DELONIX_ROOT", "/tmp/dlx-test-root");
         assert_eq!(ingress_dir(), PathBuf::from("/tmp/dlx-test-root/ingress"));
         std::env::remove_var("DELONIX_ROOT");
+    }
+
+    /// BUG FIXED: DNS resolution used to do a full directory scan + JSON parse
+    /// PER QUERY. These lock in the pieces extracted so that scan can be done
+    /// once per refresh interval (`build_dns_index`) instead of once per query
+    /// (`dns_resolve`/`dns_index`) — see the `DNS_INDEX_TTL` doc comment.
+    #[test]
+    fn dns_index_keys_separam_namespace_e_vms_de_containers() {
+        // Bare vs namespaced keys never collide with each other or with the VM
+        // namespace — a container and a VM sharing a name must not cross-resolve.
+        assert_eq!(dns_index_ns_key("db", "prod"), "db@prod");
+        // Case-insensitive on the namespace, matching the original `cns != want`
+        // comparison being done on values already read verbatim from JSON.
+        assert_eq!(dns_index_ns_key("db", "PROD"), "db@prod");
+        assert_eq!(dns_index_vm_key("db"), "vm:db");
+        // A VM key can never collide with a bare container key (distinct prefix).
+        assert_ne!(dns_index_vm_key("db"), "db");
+    }
+
+    #[test]
+    fn parse_neigh_table_extrai_so_linhas_com_ipv4() {
+        let raw = "10.200.254.11 dev delonix0 lladdr 52:54:00:aa:bb:cc REACHABLE\n\
+                    fe80::1 dev delonix0 lladdr 52:54:00:aa:bb:cc STALE\n\
+                    10.200.254.12 dev delonix0 lladdr 52:54:00:dd:ee:ff STALE\n";
+        let table = parse_neigh_table(raw);
+        // The IPv6 line is dropped (its 1st whitespace token has no '.').
+        assert_eq!(table.len(), 2);
+        assert_eq!(
+            neigh_table_lookup(&table, "52:54:00:AA:BB:CC").as_deref(),
+            Some("10.200.254.11")
+        );
+        assert_eq!(
+            neigh_table_lookup(&table, "52:54:00:dd:ee:ff").as_deref(),
+            Some("10.200.254.12")
+        );
+        assert_eq!(neigh_table_lookup(&table, "52:54:00:00:00:00"), None);
     }
 }
