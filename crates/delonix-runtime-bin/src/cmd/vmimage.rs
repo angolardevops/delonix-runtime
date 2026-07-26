@@ -899,7 +899,7 @@ fn parse_bsd_checksum(text: &str, filename: &str) -> Option<String> {
         .map(|s| s.trim().to_string())
 }
 
-fn stream_download(url: &str, dest: &Path) -> Result<()> {
+pub(crate) fn stream_download(url: &str, dest: &Path) -> Result<()> {
     let client = reqwest::blocking::Client::builder()
         .user_agent("delonix/0.1")
         .timeout(std::time::Duration::from_secs(3600))
@@ -926,7 +926,7 @@ fn stream_download(url: &str, dest: &Path) -> Result<()> {
     Ok(())
 }
 
-fn http_get_text(url: &str) -> Result<String> {
+pub(crate) fn http_get_text(url: &str) -> Result<String> {
     let client = reqwest::blocking::Client::builder()
         .user_agent("delonix/0.1")
         .timeout(std::time::Duration::from_secs(60))
@@ -1288,7 +1288,7 @@ fn hex_sha256(data: &[u8]) -> String {
     hex(&h.finalize())
 }
 
-fn hex_sha256_file(path: &Path) -> Result<String> {
+pub(crate) fn hex_sha256_file(path: &Path) -> Result<String> {
     let mut f = std::fs::File::open(path)?;
     let mut h = Sha256::new();
     let mut buf = [0u8; 1 << 20];
@@ -1396,7 +1396,7 @@ pub(crate) fn resolve_cri_bin(explicit: Option<PathBuf>) -> Result<PathBuf> {
 
 /// `true` when the CPU has AVX2+BMI2+FMA — the same 3-feature check
 /// `install.sh` uses to pick the `-v3` release asset (Zen 2+/Haswell+).
-fn cpu_has_x86_64_v3() -> bool {
+pub(crate) fn cpu_has_x86_64_v3() -> bool {
     #[cfg(target_arch = "x86_64")]
     {
         is_x86_feature_detected!("avx2")

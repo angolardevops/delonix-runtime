@@ -4,6 +4,69 @@
 > (regenerado automaticamente pelo pipeline de release a cada tag publicada).
 > Não editar à mão — edita a nota da release respectiva.
 
+## v0.24.0 — etcd externo dedicado (`cluster apply`/`cluster kubeadm`)
+
+Fecha o último item do backlog da auditoria E2E ([docs/AUDITORIA-E2E.md](../AUDITORIA-E2E.md)):
+`etcd.mode: "external"` — delonix passa a provisionar e gerir o seu PRÓPRIO cluster etcd
+dedicado, em vez de apenas o `stacked` (co-localizado nos control-planes, default do kubeadm).
+Era o item explicitamente deixado para o fim, por precisar de uma sessão de planeamento própria
+(subsistema de PKI novo, `kubeadm init` a mudar de flags simples para `--config` YAML).
+
+### Novo
+
+- **`etcd.hosts` no manifesto (`mode: ssh`) ou `cluster kubeadm --etcd-cluster <N>`** (auto-provisiona
+  N VMs extra, mesmo `create_and_wait` das outras roles). Delonix gera a sua própria CA (`rcgen`,
+  API de baixo nível — `self_signed`/`signed_by`, primeira vez que este código assina uma CADEIA
+  em vez de um único leaf self-signed) + um leaf por membro etcd (reutilizado para TLS de peer E
+  client/server, reduzindo a superfície de PKI de um subsistema novo) + um leaf
+  `apiserver-etcd-client` para o kube-apiserver.
+- **Bootstrap paralelo**: instala+arranca o `etcd` real (binário oficial `etcd-io/etcd`,
+  descarregado e verificado por `SHA256SUMS` — nunca por `apt`, a versão fica sob o nosso
+  controlo, mesmo padrão de `vmimage::download_cri_bin`) em TODOS os membros ao mesmo tempo
+  (`std::thread::scope`) — o bootstrap estático do etcd precisa de todos os membros iniciais
+  alcançáveis em conjunto, não é só uma questão de velocidade. Espera o quórum ficar saudável
+  (`etcdctl endpoint health --cluster`) antes de avançar para o `kubeadm init`.
+- **`kubeadm init --config=...`**: como o caminho de flags simples não consegue exprimir
+  `ClusterConfiguration.etcd.external`, o caminho externo passa a gerar um YAML de 2 documentos
+  (`cmd/kubeadm_config.rs`, `serde_yaml`) e corre `kubeadm init --config=...` em vez de
+  `--pod-network-cidr=...` etc. **O caminho `stacked` (default) fica byte-a-byte inalterado** —
+  zero risco de regressão para quem não usa etcd externo.
+- **Quórum**: `validate()` exige `etcd.hosts` não vazio e um número ÍMPAR de membros (excepto
+  exactamente 1, aceite para dev/teste com um aviso alto de "sem HA" — um só nó etcd é um ponto
+  único de falha).
+- **Achado não validado, contornado em vez de assumido**: não se confirmou se o
+  `--upload-certs`/`--certificate-key` do kubeadm já redistribui o cert `apiserver-etcd-client`
+  para CADA control-plane no caso externo, da mesma forma que faz para o `stacked`. Em vez de
+  depender disso, `etcd::push_etcd_client_pki` reenvia `ca.crt` + `apiserver-etcd-client.{crt,key}`
+  a cada control-plane (o do `kubeadm init` e cada `kubeadm join --control-plane`) antes do
+  respectivo comando — a correcção fica independente do comportamento nativo do kubeadm.
+  Confirmar isso ao vivo (e possivelmente simplificar) fica como follow-up, não bloqueia esta
+  versão.
+- **Armazenamento**: CA + certos ficam em `<root>/clusters/<nome>/etcd/` (directório `0700`,
+  ficheiros `0600`) — estende a convenção de subdirectório por-cluster que `id_ed25519` já usa,
+  em vez de reaproveitar o `SecretStore`/`CredVault` (esses são o gestor de segredos
+  *user-facing*; um segredo gerado internamente pelo sistema não pertence lá).
+
+### Deliberadamente fora desta versão
+
+Adicionar/remover membros etcd depois do bootstrap inicial, rotação de certificados, migrar um
+cluster `stacked` já vivo para `external`, e `mode: vm` (manifesto) auto-provisionar etcd — só o
+`cluster kubeadm --etcd-cluster` o faz por agora (`validate()` recusa `etcd.mode: external` fora
+de `mode: ssh` de propósito, para não descartar `etcd.hosts` em silêncio nesse modo).
+
+### Validação
+
+`pki::generate_ca`/`issue_leaf`, `etcd::build_etcd_unit`/`etcd_release_asset_url`,
+`kubeadm_config::render_init_config` e as 6 novas ramificações de `validate()` têm teste de
+regressão dedicado — 21 testes novos/actualizados. O URL/formato do `SHA256SUMS` do
+`etcd-io/etcd` foi confirmado AO VIVO (não suposto) antes de escrever código, e o YAML real
+gerado por `render_init_config` foi inspeccionado visualmente. Este sandbox não tem hosts SSH
+reais — o bootstrap etcd real (formação de quórum, `kubeadm init --config=...` até um
+control-plane `Ready` contra um cluster etcd dedicado) precisa de validação no host do
+utilizador. `cargo test --workspace`, `clippy --all-targets -D warnings` e `fmt --check` limpos.
+
+---
+
 ## v0.23.0 — os 3 gaps menores por fechar (Fase 5, fecha o backlog restante)
 
 Fecha os 3 gaps menores documentados no `CLAUDE.md` que ficaram deliberadamente de fora das

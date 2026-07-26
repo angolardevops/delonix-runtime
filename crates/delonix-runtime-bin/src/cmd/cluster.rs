@@ -24,7 +24,7 @@ use super::output;
 use super::remote::{self, SshTarget};
 use super::util::state_root;
 use super::vmimage::VmImageStore;
-use super::{k8s_recipes, lb, vm as vm_cmd, vmimage};
+use super::{etcd, k8s_recipes, kubeadm_config, lb, vm as vm_cmd, vmimage};
 
 /// `kubeadm` only auto-detects a CRI socket among a hardcoded list of
 /// well-known paths (containerd/CRI-O/dockershim) — `delonix-cri`'s socket
@@ -34,7 +34,7 @@ use super::{k8s_recipes, lb, vm as vm_cmd, vmimage};
 /// exist on this image. Found live, first real end-to-end run of `cluster
 /// kubeadm`/`cluster apply` (mode: vm) — this path had never gotten past VM
 /// provisioning before (see CLAUDE.md's "sem teste end-to-end real" note).
-const DELONIX_CRI_SOCKET: &str = "unix:///run/delonix-cri.sock";
+pub(crate) const DELONIX_CRI_SOCKET: &str = "unix:///run/delonix-cri.sock";
 
 #[derive(Debug, Deserialize)]
 struct SshSpec {
@@ -75,12 +75,18 @@ fn default_ssh_user() -> String {
 struct EtcdSpec {
     #[serde(default = "default_etcd_mode")]
     mode: String,
+    /// Only meaningful with `mode: "external"` — the dedicated etcd hosts
+    /// delonix bootstraps its own CA + cluster on. Reuses `HostSpec` verbatim
+    /// (same shape `controlPlane.hosts`/`workers.hosts` already use).
+    #[serde(default)]
+    hosts: Vec<HostSpec>,
 }
 
 impl Default for EtcdSpec {
     fn default() -> Self {
         EtcdSpec {
             mode: default_etcd_mode(),
+            hosts: Vec::new(),
         }
     }
 }
@@ -289,12 +295,55 @@ fn validate(spec: &ClusterSpec) -> Result<()> {
             spec.mode
         )));
     }
-    if spec.etcd.mode != "stacked" {
-        return Err(Error::Invalid(format!(
-            "etcd.mode '{}' não suportado nesta versão — só 'stacked' (etcd externo fica para \
-             uma iteração seguinte, ver CLAUDE.md)",
-            spec.etcd.mode
-        )));
+    match spec.etcd.mode.as_str() {
+        "stacked" => {}
+        "external" => {
+            // v1 scope: only `mode: ssh` supports external etcd — `kind`/`vm`
+            // never forward `spec.etcd` into the hosts they provision (kind-mode
+            // nodes are containers with no separate etcd-host concept; `mode:
+            // vm`'s `provision_and_apply` only wires etcd through the
+            // `--etcd-cluster` CLI flag, which always ends up as `mode: ssh`
+            // internally). Rejecting here instead of silently dropping
+            // `spec.etcd.hosts` avoids a silent-failure gap.
+            if spec.mode != "ssh" {
+                return Err(Error::Invalid(format!(
+                    "etcd.mode 'external' só é suportado com spec.mode 'ssh' nesta versão (aqui é \
+                     '{}') — usa `mode: ssh` com `etcd.hosts` explícito, ou `cluster kubeadm \
+                     --etcd-cluster <N>`",
+                    spec.mode
+                )));
+            }
+            if spec.etcd.hosts.is_empty() {
+                return Err(Error::Invalid(
+                    "etcd.mode 'external' exige etcd.hosts (pelo menos 1) — delonix cria e gere \
+                     o cluster etcd nesses hosts, eles têm de existir e estar alcançáveis"
+                        .into(),
+                ));
+            }
+            if spec.etcd.hosts.len() > 1 && spec.etcd.hosts.len().is_multiple_of(2) {
+                return Err(Error::Invalid(format!(
+                    "etcd.hosts tem {} entradas — um cluster etcd precisa de um número ÍMPAR de \
+                     membros para ter quórum bem definido (1 para dev/teste, sem HA; 3, 5, ... \
+                     para produção)",
+                    spec.etcd.hosts.len()
+                )));
+            }
+            for h in &spec.etcd.hosts {
+                if !valid_endpoint(&h.ip) {
+                    return Err(Error::Invalid(format!(
+                        "etcd host '{}' tem ip inválido: '{}'",
+                        h.label(),
+                        h.ip
+                    )));
+                }
+            }
+        }
+        other => {
+            return Err(Error::Invalid(format!(
+                "etcd.mode '{other}' inválido — usa 'stacked' (default, co-localizado nos \
+                 control-planes) ou 'external' (cluster etcd dedicado, gerido por delonix)"
+            )));
+        }
     }
     if spec.control_plane.count() == 0 {
         return Err(Error::Invalid(
@@ -471,6 +520,14 @@ pub enum ClusterCmd {
         /// right after `kubeadm join`, before the CNI has necessarily finished.
         #[arg(long)]
         copy_kubeconfig: bool,
+        /// Auto-provision N more VMs as a DEDICATED etcd cluster (delonix
+        /// generates its own CA + certs and bootstraps it) instead of the
+        /// default `stacked` etcd (co-located with the control-planes). Use
+        /// an ODD number for a well-defined quorum (3, 5, ...) — 1 is allowed
+        /// for dev/test but has no HA (a single point of failure). Omit for
+        /// today's default behavior.
+        #[arg(long = "etcd-cluster")]
+        etcd_cluster: Option<u32>,
     },
 }
 
@@ -558,6 +615,7 @@ pub fn run(action: ClusterCmd) -> Result<()> {
             service_subnet,
             boot_timeout,
             copy_kubeconfig,
+            etcd_cluster,
         } => {
             let name = match name {
                 Some(n) => n,
@@ -577,6 +635,7 @@ pub fn run(action: ClusterCmd) -> Result<()> {
                 service_subnet,
                 boot_timeout,
                 copy_kubeconfig,
+                etcd_cluster,
             })
         }
     }
@@ -663,6 +722,11 @@ fn apply_vm(name: &str, spec: &ClusterSpec, wait_ready: bool) -> Result<()> {
         service_subnet: spec.service_subnet.clone(),
         boot_timeout,
         copy_kubeconfig: wait_ready,
+        // `mode: vm` (manifest-driven) doesn't auto-provision a dedicated etcd
+        // cluster this round — only the `cluster kubeadm` CLI's `--etcd-cluster`
+        // does (see CLAUDE.md). `validate()` rejects `spec.etcd.mode: external`
+        // combined with `mode: vm` outright, so this is never silently dropped.
+        etcd_cluster: None,
     })
 }
 
@@ -745,6 +809,32 @@ fn apply_ssh(name: &str, spec: &ClusterSpec, wait_ready: bool) -> Result<()> {
     combine_host_prep_errors(errors)?;
     p.ok();
 
+    // Dedicated etcd cluster (`etcd.mode: external`) — bootstrapped BEFORE
+    // `kubeadm init` needs its endpoints/PKI. `validate()` already guarantees
+    // `spec.etcd.hosts` is non-empty and odd-sized here (or exactly 1, for
+    // dev/test, which gets a loud non-HA warning).
+    let (etcd_endpoints, etcd_pki_dir): (Vec<String>, Option<PathBuf>) = if spec.etcd.mode
+        == "external"
+    {
+        if spec.etcd.hosts.len() == 1 {
+            output::warn(super::po::t(
+                    "etcd.hosts has only 1 member — no HA (a single etcd node is a single point of failure)",
+                ));
+        }
+        p.step(super::po::t("Bootstrapping the etcd cluster"), "🗄️");
+        let members: Vec<(String, SshTarget)> = spec
+            .etcd
+            .hosts
+            .iter()
+            .map(|h| (h.label(), target_for(h, &spec.ssh)))
+            .collect();
+        let result = etcd::bootstrap_etcd_cluster(name, &members, spec.k8s_version.as_deref())?;
+        p.ok();
+        (result.endpoints, Some(result.pki_dir))
+    } else {
+        (Vec::new(), None)
+    };
+
     let cp1 = &spec.control_plane.hosts[0];
     let cp1_target = target_for(cp1, &spec.ssh);
     let endpoint = spec
@@ -756,7 +846,10 @@ fn apply_ssh(name: &str, spec: &ClusterSpec, wait_ready: bool) -> Result<()> {
         super::po::t("Bootstrapping control-plane (kubeadm init)"),
         "🕹️",
     );
-    let info = kubeadm_init(&cp1_target, &cp1.label(), &endpoint, spec)?;
+    if let Some(dir) = &etcd_pki_dir {
+        etcd::push_etcd_client_pki(&cp1_target, dir)?;
+    }
+    let info = kubeadm_init(&cp1_target, &cp1.label(), &endpoint, spec, &etcd_endpoints)?;
     p.ok();
 
     if spec.control_plane.hosts.len() > 1 {
@@ -769,6 +862,9 @@ fn apply_ssh(name: &str, spec: &ClusterSpec, wait_ready: bool) -> Result<()> {
         );
         for h in &spec.control_plane.hosts[1..] {
             let target = target_for(h, &spec.ssh);
+            if let Some(dir) = &etcd_pki_dir {
+                etcd::push_etcd_client_pki(&target, dir)?;
+            }
             kubeadm_join(&target, &h.label(), &endpoint, &info, true)?;
         }
         p.ok();
@@ -868,6 +964,10 @@ struct ProvisionArgs {
     service_subnet: String,
     boot_timeout: u64,
     copy_kubeconfig: bool,
+    /// `None`/`Some(0)` = stacked etcd (default, unchanged). `Some(n >= 1)` =
+    /// auto-provision `n` more VMs as a dedicated etcd cluster (odd `n` for a
+    /// well-defined quorum, or exactly 1 for dev/test — see `validate()`).
+    etcd_cluster: Option<u32>,
 }
 
 /// Deterministic VM names of a role (`<cluster>-cp1`, `<cluster>-w1`, ...).
@@ -1191,12 +1291,43 @@ fn provision_and_apply(args: ProvisionArgs) -> Result<()> {
         Some(lb_ip)
     };
 
+    // `--etcd-cluster <N>` — auto-provision N more VMs as a dedicated etcd
+    // cluster, mirroring the conditional-LB-VM block above shape-for-shape
+    // (same `create_and_wait` helper, already role-agnostic).
+    let etcd_names = vm_names(&args.name, "etcd", args.etcd_cluster.unwrap_or(0));
+    let mut etcd_hosts = Vec::with_capacity(etcd_names.len());
+    if !etcd_names.is_empty() {
+        p.step(
+            &super::po::tf(
+                "Provisioning {n} etcd node(s)",
+                &[("n", &etcd_names.len().to_string())],
+            ),
+            "🗄️",
+        );
+        for vm_name in &etcd_names {
+            let ip = create_and_wait(vm_name, &disk, &args, &ssh_public, &ssh, timeout)?;
+            etcd_hosts.push(HostSpec {
+                ip,
+                hostname: Some(vm_name.clone()),
+            });
+        }
+        p.ok();
+    }
+    let etcd_spec = if etcd_hosts.is_empty() {
+        EtcdSpec::default()
+    } else {
+        EtcdSpec {
+            mode: "external".to_string(),
+            hosts: etcd_hosts,
+        }
+    };
+
     // `cluster kubeadm` (flags, no manifest) builds the SAME ClusterSpec that
     // an `apply -f` would build — hence it goes through the same `validate`/`apply_one`.
     let spec = ClusterSpec {
         mode: "ssh".to_string(), // the VMs were already created above; from here on it is SSH
         ssh,
-        etcd: EtcdSpec::default(),
+        etcd: etcd_spec,
         control_plane_endpoint,
         control_plane: NodesSpec {
             replicas: None,
@@ -1309,9 +1440,40 @@ fn kubeadm_init(
     label: &str,
     endpoint: &str,
     spec: &ClusterSpec,
+    etcd_endpoints: &[String],
 ) -> Result<JoinInfo> {
     if remote::ssh_check(cp1, "test -f /etc/kubernetes/admin.conf") {
         return recover_join_info(cp1);
+    }
+    // External etcd needs `ClusterConfiguration.etcd.external`, which only
+    // exists in kubeadm's `--config` YAML — flat flags can't express it. The
+    // `stacked` (default) path below is byte-for-byte unchanged.
+    if !etcd_endpoints.is_empty() {
+        let yaml = kubeadm_config::render_init_config(
+            spec.k8s_version.as_deref(),
+            endpoint,
+            &spec.pod_subnet,
+            &spec.service_subnet,
+            DELONIX_CRI_SOCKET,
+            etcd_endpoints,
+        )?;
+        let tmp = std::env::temp_dir().join(format!(
+            "delonix-kubeadm-config-{}.yaml",
+            std::process::id()
+        ));
+        std::fs::write(&tmp, &yaml)
+            .map_err(|e| Error::Invalid(format!("a escrever kubeadm-config.yaml local: {e}")))?;
+        let scp_result = remote::scp_to(cp1, &tmp, "/tmp/delonix-kubeadm-config.yaml");
+        let _ = std::fs::remove_file(&tmp);
+        scp_result.map_err(|e| Error::Invalid(format!("[{label}] kubeadm config: {e}")))?;
+        let out = remote::ssh_run(
+            cp1,
+            "mkdir -p /etc/kubernetes && \
+             mv /tmp/delonix-kubeadm-config.yaml /etc/kubernetes/kubeadm-config.yaml && \
+             kubeadm init --config=/etc/kubernetes/kubeadm-config.yaml --upload-certs",
+        )
+        .map_err(|e| Error::Invalid(format!("[{label}] kubeadm init: {e}")))?;
+        return parse_join_info(&out);
     }
     let k8s_ver_flag = spec
         .k8s_version
@@ -2190,16 +2352,97 @@ kubeadm join 10.0.0.10:6443 --token abcdef.0123456789abcdef \\
         );
     }
 
+    fn etcd_host(ip: &str) -> HostSpec {
+        HostSpec {
+            ip: ip.into(),
+            hostname: None,
+        }
+    }
+
     #[test]
-    fn validate_recusa_etcd_external() {
+    fn validate_recusa_etcd_external_sem_hosts() {
         let spec = ClusterSpec {
             etcd: EtcdSpec {
                 mode: "external".into(),
+                hosts: vec![],
             },
             ..spec_ssh_1cp()
         };
         let err = validate(&spec).unwrap_err();
-        assert!(format!("{err}").contains("etcd"));
+        assert!(format!("{err}").contains("etcd.hosts"));
+    }
+
+    #[test]
+    fn validate_recusa_etcd_external_numero_par_de_hosts() {
+        let spec = ClusterSpec {
+            etcd: EtcdSpec {
+                mode: "external".into(),
+                hosts: vec![etcd_host("10.0.1.1"), etcd_host("10.0.1.2")],
+            },
+            ..spec_ssh_1cp()
+        };
+        let err = validate(&spec).unwrap_err();
+        assert!(format!("{err}").contains("ÍMPAR"));
+    }
+
+    #[test]
+    fn validate_aceita_etcd_external_1_host() {
+        let spec = ClusterSpec {
+            etcd: EtcdSpec {
+                mode: "external".into(),
+                hosts: vec![etcd_host("10.0.1.1")],
+            },
+            ..spec_ssh_1cp()
+        };
+        assert!(validate(&spec).is_ok());
+    }
+
+    #[test]
+    fn validate_aceita_etcd_external_3_hosts() {
+        let spec = ClusterSpec {
+            etcd: EtcdSpec {
+                mode: "external".into(),
+                hosts: vec![
+                    etcd_host("10.0.1.1"),
+                    etcd_host("10.0.1.2"),
+                    etcd_host("10.0.1.3"),
+                ],
+            },
+            ..spec_ssh_1cp()
+        };
+        assert!(validate(&spec).is_ok());
+    }
+
+    #[test]
+    fn validate_recusa_etcd_mode_desconhecido() {
+        let spec = ClusterSpec {
+            etcd: EtcdSpec {
+                mode: "esquisito".into(),
+                hosts: vec![],
+            },
+            ..spec_ssh_1cp()
+        };
+        let err = validate(&spec).unwrap_err();
+        assert!(format!("{err}").contains("stacked"));
+        assert!(format!("{err}").contains("external"));
+    }
+
+    #[test]
+    fn validate_recusa_etcd_external_fora_de_mode_ssh() {
+        let spec = ClusterSpec {
+            mode: "vm".into(),
+            control_plane: NodesSpec {
+                replicas: Some(1),
+                hosts: vec![],
+            },
+            etcd: EtcdSpec {
+                mode: "external".into(),
+                hosts: vec![etcd_host("10.0.1.1")],
+            },
+            ..Default::default()
+        };
+        let err = validate(&spec).unwrap_err();
+        assert!(format!("{err}").contains("mode 'ssh'") || format!("{err}").contains("mode: ssh"));
     }
 
     #[test]
@@ -2274,6 +2517,7 @@ k8sVersion: \"1.31\"
         assert_eq!(spec.mode, def.mode);
         assert_eq!(spec.ssh.user, def.ssh.user);
         assert_eq!(spec.etcd.mode, def.etcd.mode);
+        assert_eq!(spec.etcd.hosts.len(), def.etcd.hosts.len());
         assert_eq!(spec.pod_subnet, def.pod_subnet);
         assert_eq!(spec.service_subnet, def.service_subnet);
         assert_eq!(spec.cni, def.cni);

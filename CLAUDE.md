@@ -626,9 +626,32 @@ estado"): cada passo de `k8s_recipes` tem um `check` (comando shell, êxito = j�
 de agir. Nunca dessincroniza de um `.tfstate` porque não há nenhum.
 
 **Simplificações da v1** (pedido era "hosts arbitrários", escopo já grande sem estas):
-- **Só etcd `stacked`** (default do kubeadm, co-localizado nos control-planes) — `etcd: external`
-  é reconhecido no schema mas recusado com erro claro. Etcd externo (TLS entre membros,
-  discovery) é um subprojecto à parte.
+- **Etcd externo dedicado (v0.24.0)** — `etcd.mode: "external"` + `etcd.hosts` (manifesto) ou
+  `cluster kubeadm --etcd-cluster <N>` (auto-provisiona N VMs extra, mesmo `create_and_wait` das
+  outras roles). Delonix gera a sua PRÓPRIA CA + um leaf por membro (reutilizado para TLS de peer
+  E client/server — reduz a superfície de PKI de um subsistema novo) + um leaf
+  `apiserver-etcd-client`, instala+arranca o `etcd` real (binário oficial `etcd-io/etcd`,
+  descarregado e verificado por `SHA256SUMS`, nunca por apt — a versão não é da nossa
+  responsabilidade) em TODOS os membros em paralelo (`std::thread::scope` — o bootstrap estático
+  precisa de todos os membros iniciais alcançáveis em conjunto, não só mais rápido), espera o
+  quórum ficar saudável, e só depois corre `kubeadm init`. Como o `kubeadm init` de flags simples
+  não consegue exprimir `ClusterConfiguration.etcd.external`, o caminho externo passa a gerar um
+  `--config` YAML (`cmd/kubeadm_config.rs`, `serde_yaml`) — o caminho `stacked` (default) fica
+  byte-a-byte inalterado. Quórum: `validate()` exige `etcd.hosts` não vazio e um número ÍMPAR
+  (excepto exactamente 1, aceite para dev/teste com aviso alto de "sem HA"). **Achado não
+  validado, contornado em vez de assumido**: não se confirmou se o `--upload-certs`/
+  `--certificate-key` do kubeadm já redistribui o `apiserver-etcd-client` cert para CADA
+  control-plane no caso externo (faz-o para o `stacked`); em vez de depender disso,
+  `etcd::push_etcd_client_pki` reenvia `ca.crt`+`apiserver-etcd-client.{crt,key}` a CADA
+  control-plane (o do `init` e cada `join --control-plane`) antes do respectivo comando kubeadm —
+  a correcção fica independente do comportamento nativo do kubeadm; confirmar isso ao vivo é um
+  follow-up, não bloqueia esta versão. CA+certos ficam em `<root>/clusters/<nome>/etcd/` (`0700`
+  dir, `0600` ficheiros), a mesma convenção de subdirectório por-cluster que `id_ed25519` já usa.
+  **Por fazer (deliberadamente fora desta versão)**: adicionar/remover membros depois do bootstrap,
+  rotação de certificados, migrar um cluster `stacked` já vivo para `external`, e `mode: vm`
+  (manifesto) auto-provisionar etcd — só o `cluster kubeadm --etcd-cluster` o faz por agora
+  (`validate()` recusa `etcd.mode: external` fora de `mode: ssh` de propósito, para não descartar
+  `etcd.hosts` em silêncio).
 - **Preparação de host paralela entre hosts (v0.23.0)** — cada host é independente (sessão SSH
   própria, sem estado partilhado), corre agora em `std::thread::scope`. `kubeadm init`/`join`
   continuam sequenciais (dependem uns dos outros por desenho — o join precisa do token do init).
@@ -1437,13 +1460,11 @@ sem noção de tenant) — não o "Proxmox Driver" com inventário/scheduler do 
   local via `kind` (shell-out à ferramenta já instalada no host). **Bloqueado** pelo NO-GO do
   spike acima — o `kindest/node` não arranca sob o nosso `--privileged` hoje; ver secção "Cluster
   modo Kind sem Docker — investigação". Precisa de instrumentação de arranque antes de continuar.
-- **`etcd: external`** em `delonix cluster apply` + `--etcd-cluster <N>` em `delonix cluster
-  kubeadm` — cluster etcd dedicado (TLS entre membros, discovery) isolado dos control-planes, em
-  vez do `stacked` já suportado. Desenho já esboçado (PKI própria via `rcgen` — CA+certos, sem
-  precedente no código, que hoje só gera um leaf self-signed para o `httproute`; `kubeadm init`
-  muda de flags simples para `--config` YAML, obrigatório para etcd externo) — maior risco que o
-  LB automático acima, fica para uma sessão de planeamento própria.
-- **Paralelizar a preparação de host** em `cluster apply` (hoje sequencial, deliberado nesta v1).
+- **FEITO (v0.24.0)**: `etcd: external` em `delonix cluster apply` + `--etcd-cluster <N>` em
+  `delonix cluster kubeadm` — ver a secção "Cluster kubeadm" acima para o detalhe completo
+  (PKI própria via `rcgen`, bootstrap paralelo, `--config` YAML do kubeadm).
+- **FEITO (v0.23.0)**: paralelizar a preparação de host em `cluster apply` (era sequencial nesta
+  v1) — ver a secção "Cluster kubeadm" acima.
 - **`delonixd`** (daemon opcional em userspace) + **dataplane de ingress/egress próprio** (evitar
   um veth por container — hoje `infra::do_attach` cria sempre 1 veth-par por container,
   confirmado) + **firewall dinâmico** para publish de portas + **eBPF** para observabilidade +
