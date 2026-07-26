@@ -11,6 +11,7 @@ use std::sync::LazyLock;
 
 use prometheus_client::encoding::text::encode as encode_registry;
 use prometheus_client::metrics::counter::Counter;
+use prometheus_client::metrics::gauge::Gauge;
 use prometheus_client::metrics::info::Info;
 use prometheus_client::registry::Registry;
 
@@ -19,6 +20,28 @@ struct Metrics {
     pod_sandboxes_created: Counter,
     containers_created: Counter,
     images_pulled: Counter,
+    // Resource-summary GAUGES (C1, slice 3) — unlike the counters above (app
+    // events, incremented as they happen), these are a snapshot RE-COMPUTED by
+    // the caller right before a scrape (see `dash`/`dashstats` in the
+    // higher-level crates that have store/cgroup/netns access this crate
+    // deliberately does not). `Gauge`, not `Counter`, even for the
+    // cumulative-looking byte counters: the value read from the kernel is
+    // already a running total, but it is SUMMED across a dynamic set of
+    // containers that can disappear between scrapes (shrinking the sum) —
+    // `Counter`'s API only allows monotonic `inc`/`inc_by`, which doesn't fit
+    // a value that can legitimately go down when a container exits.
+    containers_running: Gauge,
+    containers_total: Gauge,
+    vms_running: Gauge,
+    vms_total: Gauge,
+    memory_bytes_used: Gauge,
+    memory_bytes_limit: Gauge,
+    network_rx_bytes: Gauge,
+    network_tx_bytes: Gauge,
+    storage_bytes_images: Gauge,
+    storage_bytes_volumes: Gauge,
+    storage_bytes_vm_images: Gauge,
+    storage_bytes_containers: Gauge,
 }
 
 static METRICS: LazyLock<Metrics> = LazyLock::new(|| {
@@ -48,11 +71,92 @@ static METRICS: LazyLock<Metrics> = LazyLock::new(|| {
         images_pulled.clone(),
     );
 
+    let containers_running = Gauge::default();
+    registry.register(
+        "containers_running",
+        "Containers currently in the Running state",
+        containers_running.clone(),
+    );
+    let containers_total = Gauge::default();
+    registry.register(
+        "containers_total",
+        "Containers in any state (the whole store)",
+        containers_total.clone(),
+    );
+    let vms_running = Gauge::default();
+    registry.register(
+        "vms_running",
+        "VMs currently in the Running state",
+        vms_running.clone(),
+    );
+    let vms_total = Gauge::default();
+    registry.register("vms_total", "VMs in any state", vms_total.clone());
+    let memory_bytes_used = Gauge::default();
+    registry.register(
+        "memory_bytes_used",
+        "Current memory.current of the whole Delonix cgroup slice, in bytes",
+        memory_bytes_used.clone(),
+    );
+    let memory_bytes_limit = Gauge::default();
+    registry.register(
+        "memory_bytes_limit",
+        "Configured memory.max of the whole Delonix cgroup slice, in bytes (0 = unlimited/unknown)",
+        memory_bytes_limit.clone(),
+    );
+    let network_rx_bytes = Gauge::default();
+    registry.register(
+        "network_rx_bytes",
+        "Sum of received bytes across every running container's primary interface",
+        network_rx_bytes.clone(),
+    );
+    let network_tx_bytes = Gauge::default();
+    registry.register(
+        "network_tx_bytes",
+        "Sum of transmitted bytes across every running container's primary interface",
+        network_tx_bytes.clone(),
+    );
+    let storage_bytes_images = Gauge::default();
+    registry.register(
+        "storage_bytes_images",
+        "Disk space used by the image store (blobs + layers), in bytes",
+        storage_bytes_images.clone(),
+    );
+    let storage_bytes_volumes = Gauge::default();
+    registry.register(
+        "storage_bytes_volumes",
+        "Disk space used by named volumes, in bytes",
+        storage_bytes_volumes.clone(),
+    );
+    let storage_bytes_vm_images = Gauge::default();
+    registry.register(
+        "storage_bytes_vm_images",
+        "Disk space used by golden/VM images (qcow2 bases), in bytes",
+        storage_bytes_vm_images.clone(),
+    );
+    let storage_bytes_containers = Gauge::default();
+    registry.register(
+        "storage_bytes_containers",
+        "Disk space used by container rootfs directories, in bytes",
+        storage_bytes_containers.clone(),
+    );
+
     Metrics {
         registry,
         pod_sandboxes_created,
         containers_created,
         images_pulled,
+        containers_running,
+        containers_total,
+        vms_running,
+        vms_total,
+        memory_bytes_used,
+        memory_bytes_limit,
+        network_rx_bytes,
+        network_tx_bytes,
+        storage_bytes_images,
+        storage_bytes_volumes,
+        storage_bytes_vm_images,
+        storage_bytes_containers,
     }
 });
 
@@ -75,6 +179,35 @@ pub fn inc_container_created() {
 /// +1 image pulled via CRI.
 pub fn inc_image_pulled() {
     METRICS.images_pulled.inc();
+}
+
+/// Overwrites the container-count gauges with a freshly-collected snapshot.
+pub fn set_containers(running: u64, total: u64) {
+    METRICS.containers_running.set(running as i64);
+    METRICS.containers_total.set(total as i64);
+}
+/// Overwrites the VM-count gauges with a freshly-collected snapshot.
+pub fn set_vms(running: u64, total: u64) {
+    METRICS.vms_running.set(running as i64);
+    METRICS.vms_total.set(total as i64);
+}
+/// Overwrites the cgroup-slice memory gauges (bytes) with a freshly-collected snapshot.
+pub fn set_memory(used: u64, limit: u64) {
+    METRICS.memory_bytes_used.set(used as i64);
+    METRICS.memory_bytes_limit.set(limit as i64);
+}
+/// Overwrites the aggregate network byte-counter gauges (see the `Metrics`
+/// struct doc comment for why these are gauges, not counters).
+pub fn set_network(rx_bytes: u64, tx_bytes: u64) {
+    METRICS.network_rx_bytes.set(rx_bytes as i64);
+    METRICS.network_tx_bytes.set(tx_bytes as i64);
+}
+/// Overwrites the disk-usage gauges (bytes) with a freshly-collected snapshot.
+pub fn set_storage(images: u64, volumes: u64, vm_images: u64, containers: u64) {
+    METRICS.storage_bytes_images.set(images as i64);
+    METRICS.storage_bytes_volumes.set(volumes as i64);
+    METRICS.storage_bytes_vm_images.set(vm_images as i64);
+    METRICS.storage_bytes_containers.set(containers as i64);
 }
 
 #[cfg(test)]

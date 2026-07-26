@@ -721,6 +721,8 @@ pub enum ContainerCmd {
     Dash {
         #[arg(long)]
         once: bool,
+        #[arg(long)]
+        json: bool,
     },
     /// Initialize a project with a Delonixfile + manifest — files ALREADY FILLED IN (images
     /// included), ready to use without editing anything.
@@ -1199,8 +1201,8 @@ pub fn run(action: ContainerCmd) -> Result<()> {
             up,
         );
     }
-    if let ContainerCmd::Dash { once } = action {
-        return super::dash::run(super::dash::DashScope::Containers, once);
+    if let ContainerCmd::Dash { once, json } = action {
+        return super::dash::run(super::dash::DashScope::Containers, once, json);
     }
     let (images, store) = open_stores()?;
     match action {

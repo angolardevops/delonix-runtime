@@ -24,6 +24,8 @@ pub enum StorageCmd {
     Dash {
         #[arg(long)]
         once: bool,
+        #[arg(long)]
+        json: bool,
     },
     /// Create (and mount) a network storage.
     Create {
@@ -286,8 +288,8 @@ fn resolve_password(password: Option<String>, secret: Option<String>) -> Result<
 pub fn run(action: StorageCmd) -> Result<()> {
     let store = VolumeStore::open(state_root())?;
     match action {
-        StorageCmd::Dash { once } => {
-            return super::dash::run(super::dash::DashScope::Storage, once)
+        StorageCmd::Dash { once, json } => {
+            return super::dash::run(super::dash::DashScope::Storage, once, json)
         }
         StorageCmd::Create {
             name,

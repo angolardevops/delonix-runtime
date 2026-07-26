@@ -241,6 +241,101 @@ aumentar a superfície de supply-chain de um runtime de containers por um alinha
 > `delonix dash --once` (snapshot de texto ANSI) não a usa em runtime. Registado
 > aqui para a auditoria futura não a tratar como acidental — ver `cmd/dash.rs`.
 
+### KPIs de recursos (RAM/rede/storage) + Prometheus + `dash --json`
+
+Pedido directo do utilizador ao ver o `delonix dash`: faltavam KPIs dinâmicos
+(RAM/rede/storage consumidos), a barra de actividade "não dizia muito" (só
+contagem de containers, sem uptime por-recurso), o dashboard vinha em PT por
+omissão (bug de i18n — nunca detectado antes), e faltava uma forma de
+alimentar Grafana/outras ferramentas SRE. Tudo isto partilha UM único
+colector (`delonix-mgmt::dashstats::collect`), para o TUI, o `--json`, e o
+scrape Prometheus nunca divergirem na aritmética.
+
+- **Novo módulo `delonix-mgmt::dashstats`** (`crates/delonix-mgmt/src/
+  dashstats.rs`): `pub fn collect(root, include_network, include_storage) ->
+  DashSummary` — contagens de containers/VMs/redes/volumes/imagens/segredos,
+  `memory.current`/`memory.max` do slice cgroup inteiro (`delonix_runtime::
+  slice_budget`), soma de bytes rx/tx por-container
+  (`delonix_net::infra::container_net_bytes`, um `nsenter`+`cat` por
+  container a correr) e uso de disco por área (`blobs+layers`/`volumes`/
+  `vm-images`/`containers`, `dir_size` recursivo estilo `du`, o mesmo padrão
+  de `cmd/system.rs::dir_size`/`cmd_df` — duplicado ali de propósito: um
+  helper de ~10 linhas, e `delonix-mgmt` não pode depender do crate `-bin`).
+  `delonix-runtime-bin` depende de `delonix-mgmt` (nunca o inverso), por isso
+  `cmd/dash.rs` chama directamente para este colector em vez de reimplementar
+  a agregação — single source of truth entre TUI/JSON/Prometheus.
+- **BUG DE CUSTO encontrado a validar ao vivo, corrigido antes de publicar**:
+  a soma de disco (`storage_bytes_*`) percorre `containers/` — em rootless
+  cada container tem uma cópia FLAT completa do rootfs (ver secção "Imagem VM
+  dourada"/histórico do incidente de disk-pressure) — medido neste host (49
+  containers, vários nós `kindest/node` completos): **68 GiB, mais de um
+  minuto** de I/O de disco. Calcular isto em linha bloquearia o TUI a cada
+  tick E estouraria o timeout de scrape do Prometheus (10s por omissão).
+  Corrigido com dois mecanismos de desacoplamento:
+  1. `dashstats::collect` ganhou `include_network`/`include_storage`
+     (`bool`), devolvendo `Option<u64>` nos campos caros quando `false` — nunca
+     um "0 bytes" enganoso, sempre `None` explícito até haver uma medição real.
+  2. **TUI** (`cmd/dash.rs::tui::run_interactive`): a 1ª snapshot (antes do
+     terminal) só pede os campos baratos (contagens + memória — instantâneo);
+     uma `std::thread` própria corre o `collect(true, true)` completo em loop
+     (`SLOW_REFRESH = 15s` entre passagens) e publica num `Arc<Mutex<
+     DashSummary>>` partilhado; o tick de 1s do render (sempre barato) funde
+     os campos caros mais recentes desse mutex antes de construir os tiles —
+     a UI nunca bloqueia, mesmo que a passagem de disco demore mais de um minuto.
+  3. **`delonix-mgmt` `/metrics`**: o handler só recalcula os campos baratos a
+     cada pedido; uma tarefa `tokio::spawn`ada uma vez no arranque do servidor
+     (`spawn_expensive_metrics_refresh`) recalcula os campos caros a cada 30s
+     em background e publica-os no registo partilhado — o scrape fica sempre
+     rápido (confirmado ao vivo: ~0.15s), as gauges caras ficam "stale" por até
+     30s, nunca ausentes. `GET /v1/dash` (JSON, pedido pontual dum humano/
+     ferramenta) continua a fazer a colheita COMPLETA em linha — documentado
+     como potencialmente lento (dezenas de segundos), não é um scrape periódico.
+- **Prometheus, não gRPC, para o Grafana**: o motor já tinha um registo
+  Prometheus partilhado (`delonix-runtime-core::metrics`, `prometheus-client`
+  já na árvore, usado só por contadores do CRI) exposto em `/metrics` do
+  `delonix-cri` (scrape do kubelet) e do `delonix-mgmt` (scrape do
+  control-plane) — Grafana fala nativamente Prometheus/REST, não gRPC. Ganhou
+  gauges novas: `delonix_containers_running/total`, `delonix_vms_running/
+  total`, `delonix_memory_bytes_used/limit`, `delonix_network_rx/tx_bytes`,
+  `delonix_storage_bytes_{images,volumes,vm_images,containers}`. `Gauge` e não
+  `Counter` mesmo para os bytes "cumulativos": o valor lido do kernel É
+  monótono, mas é somado por um conjunto DINÂMICO de containers que podem
+  desaparecer entre scrapes (encolhendo a soma) — a API de `Counter` só
+  permite `inc`/`inc_by`, que não serve para isso.
+- **`delonix-mgmt` ganhou `GET /v1/dash`** (JSON do mesmo `DashSummary`) e
+  passou a depender de `delonix-runtime`/`delonix-vm`/`delonix-net` (antes só
+  `delonix-volume`/`delonix-image`/`delonix-scan`) — mesma expansão que o
+  `delonix-cri` já tinha feito por uma razão análoga (visibilidade completa
+  do motor), sem dependência circular nenhuma.
+- **`delonix dash --json`** (novo, ao lado do `--once` ANSI já existente):
+  `DashData`/`Tile`/`Row`/`Problem`/`DashScope` ganharam `Serialize` — um
+  snapshot só, sem TUI nem ANSI, para scripts/CI ou um datasource JSON do
+  Grafana. Reaproveita o `DashData::collect` de sempre (colheita completa,
+  incluindo os campos caros) — o mesmo trade-off de custo do `--once`.
+- **Coluna `UP` na tabela de recursos** — uptime real por-container
+  (`pid_starttime` → `output::uptime_from_starttime`/`fmt_duration_secs`, o
+  MESMO mecanismo do `container ls`), `-` para VM/rede/volume/imagem (nenhum
+  destes guarda um starttime hoje — não fingido). Responde directamente ao
+  pedido do utilizador ("a barra não diz há quanto tempo o container está a
+  correr").
+- **Sparkline com alternância (tecla `m`)** — em vez de só a contagem de
+  containers a correr, o TUI agora rastreia DUAS séries em paralelo (ambas
+  baratas, já fazem parte de cada snapshot) e a tecla `m` alterna qual delas o
+  gráfico de 2 minutos mostra: containers a correr, ou memória usada (MiB).
+- **BUG DE I18N encontrado e corrigido**: `cmd/dash.rs` tinha 100% do texto
+  de utilizador hardcoded em PT directamente no código-fonte — zero chamadas
+  a `po::t`/`po::tf`, violando a regra deste repo (fonte 100% EN, tradução via
+  `pt.po`) desde que o dashboard foi escrito. Corrigido: toda a UI do dash
+  (tiles, tabela, painel de problemas, rodapé do TUI) passou a EN na fonte +
+  entradas novas em `data/pt.po`; `docker-api`'s about-text (gap pré-existente,
+  não relacionado com o dash) também ganhou tradução de caminho.
+- **Validado ao vivo neste host**: `dash --json`/`--once` (57s, incluindo o
+  scan de disco completo, correcto); TUI a arrancar em segundos (não mais de
+  um minuto) confirmado pelo estado do processo (`epoll_wait` em ~3s, não
+  bloqueado em I/O de disco); `delonix serve api` real com `/metrics`
+  (0.14-0.2s, gauges caras a preencherem-se depois da 1ª passagem em
+  background) e `/v1/dash` (JSON completo, ~33s) via socket unix real.
+
 - `container ls` tem as 7 colunas do `docker ps`. O `Up …` sai do `pid_starttime` do init e **não**
   do `created_unix`: um container criado ontem e reiniciado há 5 min mostraria "Up 1 day" — falso
   exactamente quando interessa (a depurar um crash-loop).

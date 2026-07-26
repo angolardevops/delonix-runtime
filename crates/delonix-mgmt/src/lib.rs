@@ -12,6 +12,8 @@
 //! The READ contract is each resource's own serde type (`Volume`,
 //! `Container`, `Image`, `Package`); the MUTATIONS return `{ok, output}`.
 
+pub mod dashstats;
+
 use std::path::PathBuf;
 
 use axum::extract::{Path, Query, State};
@@ -73,8 +75,31 @@ pub fn serve_blocking_with(base: PathBuf, bin: PathBuf, addr: &str) -> Result<()
         use std::os::unix::fs::PermissionsExt;
         let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
         eprintln!("delonix-mgmt (management API) listening on unix://{path}");
+        tokio::spawn(spawn_expensive_metrics_refresh(base.clone()));
         serve_over_uds(uds, router(AppState { base, bin })).await
     })
+}
+
+/// Periodically re-publishes the EXPENSIVE `dashstats` gauges (per-container
+/// network reads + the full disk-usage walk) in the background, decoupled
+/// from any single `/metrics` request. MEASURED on a real host (49
+/// containers, several full `kindest/node` rootfs copies): the storage walk
+/// alone took over a minute — computing it inline inside a request handler
+/// would blow past Prometheus's default 10s scrape timeout on every scrape.
+/// The cheap fields (container/VM counts, cgroup memory) are still collected
+/// fresh on every `/metrics` request (see `metrics()`) — only this slow half
+/// is decoupled. Runs for the lifetime of the process; best-effort (a
+/// collection panic/slow disk on one tick never stops the next one).
+async fn spawn_expensive_metrics_refresh(base: PathBuf) {
+    loop {
+        let base = base.clone();
+        let summary =
+            tokio::task::spawn_blocking(move || dashstats::collect(&base, true, true)).await;
+        if let Ok(summary) = summary {
+            dashstats::publish_to_metrics(&summary);
+        }
+        tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+    }
 }
 
 /// uid of the peer of a unix connection (via `SO_PEERCRED`). `None` on failure.
@@ -156,9 +181,13 @@ fn router(state: AppState) -> Router {
     Router::new()
         .route("/_ping", get(ping))
         // `GET /metrics` — the SAME shared Prometheus registry that `delonix-cri`
-        // exposes (defined in `delonix-runtime-core::metrics`). Only render, zero new
-        // metrics: the control-plane can scrape the engine through this management socket.
+        // exposes (defined in `delonix-runtime-core::metrics`), refreshed with a
+        // fresh `dashstats::collect` snapshot on every scrape (see `metrics()`).
+        // The Grafana-native path: point a Prometheus server at this endpoint.
         .route("/metrics", get(metrics))
+        // `GET /v1/dash` — the SAME snapshot as JSON, for anything that isn't
+        // Prometheus (a custom SRE tool, `curl`, a JSON-datasource panel).
+        .route("/v1/dash", get(dash_summary))
         .route("/v1/volumes", get(list_volumes).post(create_volume))
         .route("/v1/volumes/:name", get(get_volume).delete(delete_volume))
         // Containers: read (list/get) via library; mutation (below) via CLI.
@@ -207,9 +236,20 @@ async fn ping() -> &'static str {
 }
 
 /// `GET /metrics` — OpenMetrics body of the SHARED Prometheus registry in
-/// `delonix-runtime-core` (the same one `delonix-cri` serves). No metrics of
-/// its own: only render, so the control-plane can scrape via the management socket.
-async fn metrics() -> impl IntoResponse {
+/// `delonix-runtime-core` (the same one `delonix-cri` serves). Refreshes only
+/// the CHEAP gauges (container/VM counts, cgroup memory) inline on every
+/// request — Prometheus's default scrape timeout (10s) does not leave room
+/// for the per-container netns reads, let alone the disk-usage walk (measured
+/// over a minute on a host with heavy containers). Those two are published by
+/// `spawn_expensive_metrics_refresh`'s background loop instead — the gauges it
+/// owns are stale by up to its refresh interval, never absent.
+async fn metrics(State(s): State<AppState>) -> impl IntoResponse {
+    let base = s.base.clone();
+    let summary =
+        tokio::task::spawn_blocking(move || dashstats::collect(&base, false, false)).await;
+    if let Ok(summary) = summary {
+        dashstats::publish_to_metrics(&summary);
+    }
     (
         [(
             axum::http::header::CONTENT_TYPE,
@@ -217,6 +257,23 @@ async fn metrics() -> impl IntoResponse {
         )],
         delonix_runtime_core::metrics::encode(),
     )
+}
+
+/// `GET /v1/dash` — the same [`dashstats::DashSummary`] as JSON, WITH the
+/// expensive fields (unlike `/metrics`, which stays fast for Prometheus's
+/// scrape timeout) — this is an on-demand call, not a periodic scrape, so it
+/// can afford the full network+storage collection. Can take well over a
+/// minute on a host with many/large containers (see `dashstats::collect`'s
+/// doc comment) — a client with a request timeout shorter than that should
+/// use `/metrics` instead, which is always fast.
+async fn dash_summary(State(s): State<AppState>) -> Response {
+    match tokio::task::spawn_blocking(move || dashstats::collect(&s.base, true, true)).await {
+        Ok(summary) => Json(summary).into_response(),
+        Err(e) => err_response(Error::Runtime {
+            context: "join",
+            message: e.to_string(),
+        }),
+    }
 }
 
 /// Safe volume name at the API BOUNDARY (defense against path traversal). It is

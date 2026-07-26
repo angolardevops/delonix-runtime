@@ -2101,3 +2101,125 @@ msgstr "nenhum container em execução publica uma porta — nada para uma VM al
 
 msgid "free.pinggy.io did not return a URL (geo-routed node may be down, or the connection hung) — trying a.pinggy.io..."
 msgstr "free.pinggy.io não devolveu URL (o nó geo-encaminhado pode estar em baixo, ou a ligação ficou pendurada) — a tentar a.pinggy.io..."
+
+# ---- dash (cmd/dash.rs) — KPI dashboard --------------------------------
+
+msgid "DELONIX — SUMMARY"
+msgstr "DELONIX — RESUMO"
+
+msgid "DELONIX — CONTAINERS"
+msgstr "DELONIX — CONTAINERS"
+
+msgid "DELONIX — VMs"
+msgstr "DELONIX — VMs"
+
+msgid "DELONIX — NETWORKS"
+msgstr "DELONIX — REDES"
+
+msgid "DELONIX — STORAGE/VOLUMES"
+msgstr "DELONIX — STORAGE/VOLUMES"
+
+msgid "DELONIX — IMAGES"
+msgstr "DELONIX — IMAGENS"
+
+msgid "running / total"
+msgstr "a correr / total"
+
+msgid "NETWORKS"
+msgstr "REDES"
+
+msgid "defined"
+msgstr "definidas"
+
+msgid "+ network storage"
+msgstr "+ storage de rede"
+
+msgid "IMAGES"
+msgstr "IMAGENS"
+
+msgid "cached"
+msgstr "em cache"
+
+msgid "SECRETS"
+msgstr "SEGREDOS"
+
+msgid "in vault"
+msgstr "no cofre"
+
+msgid "MEMORY"
+msgstr "MEMÓRIA"
+
+msgid "of {limit} slice limit"
+msgstr "do limite de {limit} do slice"
+
+msgid "no configured limit"
+msgstr "sem limite configurado"
+
+msgid "TRAFFIC"
+msgstr "TRÁFEGO"
+
+msgid "rx / tx (cumulative)"
+msgstr "rx / tx (cumulativo)"
+
+msgid "STORAGE"
+msgstr "ARMAZENAMENTO"
+
+msgid "images+volumes+VMs+containers"
+msgstr "imagens+volumes+VMs+containers"
+
+msgid "RUNNING"
+msgstr "A CORRER"
+
+msgid "all states"
+msgstr "todos os estados"
+
+msgid "STOPPED"
+msgstr "PARADOS"
+
+msgid "not Running"
+msgstr "não-Running"
+
+msgid "all"
+msgstr "todas"
+
+msgid "local + network"
+msgstr "locais + rede"
+
+msgid "this store only"
+msgstr "só este store"
+
+msgid "exited with code {code}"
+msgstr "saiu com código {code}"
+
+msgid "killed by signal (crash)"
+msgstr "morto por sinal (crash)"
+
+msgid "state {state}"
+msgstr "estado {state}"
+
+msgid "no problems identified"
+msgstr "sem problemas identificados"
+
+msgid "PROBLEMS IDENTIFIED ({n})"
+msgstr "PROBLEMAS IDENTIFICADOS ({n})"
+
+msgid "q/Esc: quit   ·   m: toggle chart   ·   refresh 1s"
+msgstr "q/Esc: sair   ·   m: trocar gráfico   ·   refresh 1s"
+
+msgid "RESOURCES"
+msgstr "RECURSOS"
+
+msgid "PROBLEM IDENTIFIED"
+msgstr "PROBLEMA IDENTIFICADO"
+
+msgid "no problems"
+msgstr "sem problemas"
+
+msgid "RUNNING CONTAINERS (last 2 min) — press m for memory"
+msgstr "CONTAINERS A CORRER (últimos 2 min) — m para memória"
+
+msgid "MEMORY USAGE, MiB (last 2 min) — press m for containers"
+msgstr "USO DE MEMÓRIA, MiB (últimos 2 min) — m para containers"
+
+msgid "measuring…"
+msgstr "a medir…"

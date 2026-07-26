@@ -65,6 +65,8 @@ pub enum ImageCmd {
     Dash {
         #[arg(long)]
         once: bool,
+        #[arg(long)]
+        json: bool,
     },
     /// Pull an image from a registry. With `--vm`, no argument = the
     /// OFFICIAL Delonix golden VM image.
@@ -295,8 +297,8 @@ pub enum VmSub {
 pub fn run(vm: bool, action: ImageCmd) -> Result<()> {
     // login/logout are agnostic to container-vs-VM (same auth.json).
     match &action {
-        ImageCmd::Dash { once } => {
-            return super::dash::run(super::dash::DashScope::Images, *once);
+        ImageCmd::Dash { once, json } => {
+            return super::dash::run(super::dash::DashScope::Images, *once, *json);
         }
         ImageCmd::Login {
             registry,
