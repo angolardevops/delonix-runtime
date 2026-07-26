@@ -1083,13 +1083,33 @@ porque o utilizador julga estar protegido. Três corrigidos para fail-closed
 3. **`--network-alias`** — gravado mas o `dns_resolve` nunca o consultava.
    Passa a AVISO no `run` (implementar a resolução por alias é follow-up).
 
-**Ainda por corrigir (documentado, precisa de teste em cgroup delegado real):**
-4. **`container update --memory/--cpus` em rootless-delegado é no-op silencioso**
-   — escreve num leaf que não existe no modo delegado (systemd `Delegate=yes`),
-   enquanto o limite real vive noutro leaf. Também `cpuset`/`cpu.weight`/
-   `io.weight` só se aplicam no caminho não-delegado (root). Fechar exige apontar
-   para o leaf correcto do subtree delegado — trabalho de cgroup a validar num
-   host com delegação, não neste sandbox.
+4. **`cpuset`/`cpu.weight`/`io.weight` no cgroup rootless-delegado** — `try_delegated_base`
+   (`crates/delonix-runtime/src/lib.rs`) já activava `+cpuset`/`+io` no
+   `subtree_control` da base delegada, mas nunca ESCREVIA `cpuset.cpus`/
+   `cpu.weight`/`io.weight` na leaf — só `memory.max`/`pids.max`/`cpu.max`. O
+   caminho não-delegado (root) já aplicava os três correctamente; o delegado
+   (o modo NORMAL em rootless) não. **Corrigido**: os mesmos três `fs::write`
+   best-effort do caminho root, agora também na leaf delegada. **Validado ao
+   vivo neste host** (kaeso-sys-01, sessão sob `user@1000.service`): um
+   `container run --cpu-weight 500` real confirmou `cpu.weight=500` na leaf
+   real em `/sys/fs/cgroup/.../dlx-containers/dlx-<id>/cpu.weight` (o
+   controlador `cpu` está delegado aqui). `cpuset`/`io` continuam por
+   confirmar num host onde esses dois controladores estejam efectivamente
+   delegados — **confirmado que este host NÃO os delega** (`systemd-run
+   --user --scope -p Delegate=cpuset` só devolve `cpu memory pids`, mesmo
+   pedindo `cpuset` explicitamente — limite do próprio `user@.service` da
+   distro, não do código do delonix); o código escreve os ficheiros na
+   mesma, best-effort, exactamente como o caminho root já fazia — sem
+   controlador delegado o kernel simplesmente não cria `cpuset.cpus`/
+   `io.weight` na leaf, e o `fs::write` falha silenciosamente aí (mesmo
+   comportamento aceite no caminho root para o mesmo cenário). Teste de
+   regressão puro (sem cgroupfs real): `try_delegated_base_aplica_cpu_weight_
+   cpuset_e_io_weight_na_leaf`.
+5. **`container update --memory/--cpus`** — continua **não implementado**
+   (não existe a flag em `UpdateOpts`; ver `docs/COMPARACAO-DOCKER-PODMAN.md`
+   secção 2b para a correcção de registo: uma nota anterior descrevia isto
+   como "no-op silencioso", o que estava errado — não há caminho de código
+   nenhum para invocar, o `clap` recusaria a chamada antes de tudo).
 
 ## Auditoria de segurança #2 (código VM desta série: console/rede/cloud-init)
 

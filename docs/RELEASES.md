@@ -4,6 +4,39 @@
 > (regenerado automaticamente pelo pipeline de release a cada tag publicada).
 > Não editar à mão — edita a nota da release respectiva.
 
+## v0.31.1 — cpuset/cpu.weight/io.weight passam a aplicar-se no cgroup rootless-delegado
+
+Fecha o único gap "importante" que continuava genuinamente aberto na análise Docker/Podman: o
+cgroup rootless-delegado (o modo NORMAL em rootless, via `systemd --user` com `Delegate=yes`)
+ignorava `--cpuset`/`--cpu-weight`/`--io-weight`.
+
+### Corrigido
+
+`try_delegated_base` (`crates/delonix-runtime/src/lib.rs`) já activava os controladores `+cpuset`/
+`+io` no `subtree_control` da base delegada, mas nunca escrevia `cpuset.cpus`/`cpu.weight`/
+`io.weight` na leaf do container — só `memory.max`/`pids.max`/`cpu.max`. O caminho não-delegado
+(root) já aplicava os três correctamente; só o delegado ficava a meio. Corrigido com os mesmos
+três `fs::write` best-effort que o caminho root já usa.
+
+**Validado ao vivo** (host real, sessão `user@1000.service`): um `container run --cpu-weight 500`
+confirmou `cpu.weight=500` na leaf real do cgroup — o controlador `cpu` está delegado neste host.
+`cpuset`/`io` continuam sem confirmação ao vivo aqui especificamente: este host não delega esses
+dois controladores ao `user@.service` (confirmado tentando forçar com `systemd-run --user --scope
+-p Delegate=cpuset`, que devolveu só `cpu memory pids`) — limite de systemd/distro, não do código.
+O `fs::write` fica best-effort nesse caso, tal como o caminho root já aceita.
+
+Novo teste de regressão puro (`try_delegated_base_aplica_cpu_weight_cpuset_e_io_weight_na_leaf`) —
+`try_delegated_base` só faz `fs::write`/`fs::create_dir_all` contra o `base` recebido, por isso
+testa-se com um directório temporário simples, sem precisar de um cgroupfs real.
+
+### Validação
+
+Build/clippy/fmt/test limpos no workspace inteiro. `docs/COMPARACAO-DOCKER-PODMAN.md` actualizado —
+já não há nenhum gap "importante" de cgroups em aberto, só o `--format` Go-template (bloqueante
+isolado de scripting/CI) e a triagem dos 10 achados candidatos menores da auditoria original.
+
+---
+
 ## v0.31.0 — KPIs de RAM/rede/storage no dashboard, Prometheus, `dash --json`
 
 Pedido directo do utilizador ao ver o `delonix dash`: dashboard bonito mas sem KPIs dinâmicos de

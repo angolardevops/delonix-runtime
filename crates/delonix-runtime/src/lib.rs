@@ -2814,6 +2814,21 @@ fn try_delegated_base(base: &str, c: &Container, pid: i32, move_self: bool) -> b
     let _ = std::fs::write(format!("{leaf}/memory.max"), &c.memory_max);
     let _ = std::fs::write(format!("{leaf}/pids.max"), DEFAULT_PIDS_MAX);
     let _ = std::fs::write(format!("{leaf}/cpu.max"), cpu_max_value(&c.cpus));
+    // BUG FOUND (docs/COMPARACAO-DOCKER-PODMAN.md 2b): `+cpuset`/`+io` were
+    // already being activated in `subtree_control` above (the delegated base
+    // grants the controller), but nothing ever WROTE `cpuset.cpus`/`cpu.weight`/
+    // `io.weight` on the leaf — the one real gap left in the rootless-delegated
+    // path (the normal one; Podman applies these here too). Mirrors the
+    // non-delegated path's same three best-effort writes below.
+    if let Some(w) = &c.cpu_weight {
+        let _ = std::fs::write(format!("{leaf}/cpu.weight"), w);
+    }
+    if let Some(set) = &c.cpuset {
+        let _ = std::fs::write(format!("{leaf}/cpuset.cpus"), set);
+    }
+    if let Some(w) = &c.io_weight {
+        let _ = std::fs::write(format!("{leaf}/io.weight"), w);
+    }
     // 3) Only now does the container enter the leaf.
     if std::fs::write(format!("{leaf}/cgroup.procs"), pid.to_string()).is_err() {
         return false;
@@ -4680,6 +4695,69 @@ mod tests {
             user_service_base("/sys/fs/cgroup/system.slice/user@fake"),
             None
         );
+    }
+
+    /// BUG FIXED (docs/COMPARACAO-DOCKER-PODMAN.md 2b): `try_delegated_base`
+    /// already activated `+cpuset +io` in `subtree_control`, but never wrote
+    /// `cpuset.cpus`/`cpu.weight`/`io.weight` on the leaf — the values a
+    /// caller passed via `--cpuset`/`--cpu-weight`/`--io-weight` were silently
+    /// dropped in the rootless-delegated path (the common one), while the
+    /// non-delegated (root) path applied them correctly. `try_delegated_base`
+    /// only does plain `fs::write`/`fs::create_dir_all` against whatever
+    /// `base` string it's given — no real cgroupfs needed to exercise it, a
+    /// plain temp directory stands in fine.
+    #[test]
+    fn try_delegated_base_aplica_cpu_weight_cpuset_e_io_weight_na_leaf() {
+        let base = std::env::temp_dir().join(format!(
+            "delonix-try-delegated-base-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&base).unwrap();
+        std::fs::write(base.join("cgroup.subtree_control"), "").unwrap();
+
+        let mut c = Container::new(
+            "abc123".into(),
+            "t".into(),
+            "img".into(),
+            vec!["sh".into()],
+            "64M".into(),
+        );
+        c.cpu_weight = Some("500".into());
+        c.cpuset = Some("0-1".into());
+        c.io_weight = Some("300".into());
+
+        let base_str = base.to_str().unwrap();
+        assert!(try_delegated_base(
+            base_str,
+            &c,
+            std::process::id() as i32,
+            false
+        ));
+
+        let leaf = base.join(format!("dlx-{}", c.id));
+        assert_eq!(
+            std::fs::read_to_string(leaf.join("cpu.weight")).unwrap(),
+            "500"
+        );
+        assert_eq!(
+            std::fs::read_to_string(leaf.join("cpuset.cpus")).unwrap(),
+            "0-1"
+        );
+        assert_eq!(
+            std::fs::read_to_string(leaf.join("io.weight")).unwrap(),
+            "300"
+        );
+        // The pre-existing limits stay correct too — this isn't a regression on those.
+        assert_eq!(
+            std::fs::read_to_string(leaf.join("memory.max")).unwrap(),
+            "64M"
+        );
+
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     #[test]
