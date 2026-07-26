@@ -105,6 +105,33 @@ uma lista plana, um módulo por grupo em `crates/delonix-runtime-bin/src/cmd/`:
 - `delonix httproute` — ls/apply/rm do **reverse-proxy L7/HTTP** (`kind: HTTPRoute`). Ver a
   secção "Reverse-proxy L7" abaixo. **Não confundir** com `delonix ingress` (firewall L4 inbound).
 - `delonix stack apply [-f delonix-manifest.yaml]` — ver secção "Manifesto/apply" abaixo.
+- `delonix docker-api [--addr unix://<socket>]` — fatia da **Docker Engine API** (`cmd/dockerapi.rs`)
+  que basta para `docker version/ps/images/info` **e**, desde a v0.26.0, o ciclo de vida completo de
+  um container via `DOCKER_HOST=unix://<socket>`: `POST /containers/create|start|stop|kill|wait|
+  restart|rename`, `DELETE /containers/{id}`, `GET /containers/{id}/json`, todos delegando na MESMA
+  `cmd_run`/`cmd_stop`/`cmd_kill`/etc. do CLI (zero duplicação). Simplificação deliberada:
+  `create` já arranca de imediato (sem estado "created" dormente) — `start` numa já-a-correr devolve
+  o **304** idempotente que o docker real também devolve, o que mantém o par `create`→`start` que o
+  `docker compose up` usa a funcionar. **`exec`/attach interactivo (HTTP hijacking) fica fora de
+  escopo**; `--restart` (política que precisa do supervisor `run_supervised`, um `fork()` cru) é
+  **recusado com erro claro** em vez de arriscar um fork de um processo multi-thread (o supervisor
+  assume um chamador single-threaded, verdade só para o CLI).
+  **2 bugs reais encontrados e corrigidos ao validar contra um `docker` CLI real**: (1) um container
+  desanexado morto ficava **zombie para sempre** (`ps` mostrava `<defunct>`, `docker inspect`
+  continuava a dizer `Running`) — `spawn()` só devolve sem `waitpid` quando `detach: true`,
+  inofensivo no CLI normal (o processo sai logo a seguir, o órfão é reparentado ao `init` real do
+  host, que o reapa), mas este servidor NUNCA sai — é o pai real do container para sempre, e nunca
+  chamava `waitpid`; corrigido com uma thread reaper dedicada (`waitpid(-1, ...)` em loop). (2) o
+  **shim de logs** (`log_shim`, um `fork()` que nunca faz `execve` — corre para sempre a copiar o
+  pipe do container para o ficheiro de log) só fechava o stdio herdado (fds 0/1/2); em long-lived
+  como este servidor, herdava TAMBÉM os sockets de outras ligações HTTP vivas e ficava a segurá-los
+  abertos para sempre — corrigido a fechar tudo menos o fd de origem logo após o fork
+  (`libc::close_range`). **Limitação documentada, não bloqueante**: o subcomando de conveniência
+  `docker run` (create+start num só comando) não devolve o controlo ao terminal de forma fiável
+  contra este servidor (o `create`+`start`+`inspect`+`kill`+`wait`+`restart`+`rename`+`stop`+`rm`
+  separados — o caminho que `docker compose` usa — foram todos validados correctos e instantâneos);
+  a causa aparenta ser um comportamento interno do próprio CLI Go, não reproduzido com os comandos
+  separados.
 
 ## Output: `ls` estilo docker, `describe` estilo kubectl (`cmd/output.rs`)
 
