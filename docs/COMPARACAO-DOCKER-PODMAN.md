@@ -70,12 +70,13 @@ Validado com `cargo build`/`test`/`clippy --workspace` limpos e um teste de fumo
 | Feature | Docker/Podman tem | delonix | Evidência |
 |---|---|---|---|
 | Perfil seccomp custom (`--security-opt seccomp=/x.json`) | Carrega JSON arbitrário | **Silenciosamente ignorado** — só `==unconfined`/`detect`; caminho .json cai no allowlist embutido enquanto o utilizador julga o seu perfil activo | container.rs:1307 grava; lib.rs:3002-3003 só compara strings |
-| `container exec` com `-e/-w/-u/--privileged`, `-i` real | Todos suportados | **Parcial** — `-i` é cosmético ("stdin is inherited; the flag keeps CLI parity"); sem -e/-w/-u na assinatura | container.rs:484-495, 2378 |
-| `attach` (reanexar stdio) | sim | **Ausente** — só logs dá saída | sem variante Attach, container.rs:190-571 |
-| `wait` (bloquear + exit code) | sim (CI/scripts) | **Ausente** — Container nem guarda exit code hoje | sem variante Wait; CLAUDE.md secção spike Kind |
-| `kill -s <sinal>` | Qualquer sinal | **Ausente** — só Stop (TERM→KILL fixo) | container.rs:421-428 |
-| `restart` subcomando | Para+arranca num comando | **Parcial** — há política `--restart` e Start, mas não subcomando | container.rs:272-277, 414 |
-| `logs --tail/--since/--timestamps` | sim | **Parcial** — só `-f`; lê ficheiro inteiro; só containers detached | container.rs:3222-3267 |
+| ~~`container exec` com `-e/-w/-u`~~ | Todos suportados | ✅ **FEITO (v0.25.0)** — overrides por-chamada, nunca persistidos; `-w` também corrigiu um bug real: `exec` fazia `chdir("/")` incondicional, ignorando o `workdir` da imagem mesmo sem `-w` nenhum. `--privileged`/`-i` reais continuam por fazer | container.rs (`ExecOverrides`, `cmd_exec`) |
+| ~~`attach` (reanexar stdio)~~ | sim | ✅ **FEITO (v0.25.0), só saída** — reaproveita o mecanismo de `logs -f`; `-i` é recusado com erro claro (este motor não guarda um conduíte de stdin vivo para um container já arrancado em detached, ao contrário de um shim persistente por-container) | container.rs (`cmd_attach`) |
+| ~~`wait` (bloquear + exit code)~~ | sim (CI/scripts) | ✅ **FEITO (v0.25.0)** — bloqueia e imprime o exit code real SÓ quando um supervisor `--restart` é o pai real do processo (o único caso em que há um `waitpid` genuíno); sem supervisor, a morte continua a aparecer como `Crashed`/137 — limitação arquitectural pré-existente (o motor não é o pai real), não um bug do `wait` | container.rs (`cmd_wait`) |
+| ~~`kill -s <sinal>`~~ | Qualquer sinal | ✅ **FEITO (v0.25.0)** — nome ou número, sem forçar `Stopped` (o resultado real, ex. `Crashed` para um sinal que mata mesmo, só se reflecte na próxima observação) | container.rs (`cmd_kill`, `runtime::send_signal`) |
+| ~~`restart` subcomando~~ | Para+arranca num comando | ✅ **FEITO (v0.25.0)** — reaproveita `stop`+`start` tal-e-qual (imprime 2 linhas em vez de 1, trade-off aceite para não duplicar a lógica de rede/namespace de nenhum dos dois) | container.rs (`cmd_restart`) |
+| ~~`logs --tail/--since/--timestamps`~~ | sim | ✅ **FEITO (v0.25.0)** — só para containers corridos com `--log-cri` (o único formato com timestamps reais por linha); sem isso, erro claro em vez de uma coluna de timestamp em branco | container.rs (`parse_cri_log_line`, `cmd_logs`) |
+| `rename` / `port` (subcomandos) | Ausentes | ✅ **FEITO (v0.25.0)** | container.rs (`cmd_rename`, `cmd_port`) |
 | `--net <custom>` em rootless | podman fiável | **Limitação documentada** (mas o re-exec via nsenter já existe — a nota do CLAUDE.md está desactualizada) | infra.rs:2421, container.rs:1403-1425 |
 | `--network-alias` | aardvark-dns resolve aliases | **No-op** — gravado e mostrado mas nunca consultado no `dns_resolve` | container.rs:1346; infra.rs:3217 só casa `name` |
 | Driver macvlan/ipvlan | Realizado | **Não realizado** em rootless (`Realized=False`, precisa CAP_NET_ADMIN na init-netns) | network.rs:244-250 |
@@ -107,7 +108,6 @@ Validado com `cargo build`/`test`/`clippy --workspace` limpos e um teste de fumo
 | Feature | delonix | Evidência |
 |---|---|---|
 | `stats` em stream contínuo | Só uma amostra (dash TUI cobre o live) | container.rs:3173-3218 |
-| `rename` / `port` (subcomandos) | Ausentes | container.rs:190-571 |
 | Portas <1024 em rootless | Auto-rotas forçadas a :8080 (paridade prática c/ podman) | ingress_proxy.rs:498-499 |
 | Estabilidade de hostfwd / refcount ingress | Causa externa (delonix-engine privado); reaper morto fail-open + refcount vaza | CLAUDE.md secção "portas morriam" |
 | IPAM por hash | Colide por aniversário ~300 containers (mitigado por lease) | lib.rs:469-471 |
@@ -173,7 +173,7 @@ Honestamente, não é só "Docker com menos features" — há genuíno valor nov
 8. **`container update --memory/--cpus` no-op silencioso em rootless-delegado** + **cpuset/weights ignorados no delegado** — ainda por corrigir; precisa de teste num host com delegação systemd real. (lib.rs:4274)
 
 **Fase 5 — paridade de CLI de operação:**
-9. `wait` (+ guardar exit code real — hoje só há `crash_reason` best-effort, nunca um exit code capturado, porque o motor não é o pai real do processo), `kill -s`, `attach`, `restart` (subcomando dedicado), `logs --tail/--since`, `exec -e/-w/-u`, `rename`, `port`.
+- ✅ **FEITO (v0.25.0)**: `wait`, `kill -s`, `attach` (só saída), `restart` (subcomando), `logs --tail/--since/--timestamps`, `exec -e/-w/-u`, `rename`, `port` — ver secção 2b para o detalhe e as limitações honestas de cada um.
 
 **Fase 6 — rede/GPU/recursos avançados:**
 10. **GPU real via CDI/nvidia-container-toolkit** — bloqueante só para o segmento GPU, mas total nesse segmento; grande esforço (injecção de libs de driver).

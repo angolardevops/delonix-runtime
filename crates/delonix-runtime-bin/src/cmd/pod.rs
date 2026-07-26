@@ -298,5 +298,5 @@ fn logs(pod: &str, container_short: Option<&str>, follow: bool) -> Result<()> {
             .ok_or_else(|| Error::Invalid(format!("pod '{pod}' has no container '{short}'")))?,
         None => &members[0],
     };
-    container::cmd_logs(&images, &store, &target.name, follow)
+    container::cmd_logs(&images, &store, &target.name, follow, None, None, false)
 }

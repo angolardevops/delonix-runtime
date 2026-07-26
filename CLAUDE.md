@@ -19,7 +19,22 @@ homóloga ao Docker, distinta do `delonix`/`delonixctl` privados do `delonix-paa
 repo/branch/remote, não afectados por nada aqui). Comandos agrupados semanticamente em vez de
 uma lista plana, um módulo por grupo em `crates/delonix-runtime-bin/src/cmd/`:
 
-- `delonix container` — run/ps/stop/rm/exec/logs/**update**/**describe**. **Nome default
+- `delonix container` — run/ps/stop/rm/exec/logs/**update**/**describe**/**kill**/**wait**/
+  **restart**/**rename**/**port**/**attach** (v0.25.0, Docker/Podman CLI-verb parity). `kill -s
+  <signal>` sends an arbitrary signal (name or number) without forcing a `Stopped` status — the
+  real outcome (`Crashed` for anything that actually terminates the process) is picked up on the
+  next observation, same as any other unexpected death; `wait` blocks and prints the real exit
+  code **only when a `--restart` supervisor is the process's real parent** (it alone captures a
+  genuine `waitpid` status) — a plain `-d` container with no supervisor still surfaces as
+  `Crashed`/137 on death, a pre-existing architectural limit (the engine isn't the real parent),
+  not a bug in `wait` itself. `exec -e/-w/-u` are per-call overrides (never persisted); `exec -w`
+  also fixed a real bug found while adding it — `exec` used to hardcode `chdir("/")`
+  unconditionally, ignoring the container's own configured `workdir` even with no `-w` at all.
+  `logs --tail/--since/--timestamps` only work for containers run with `--log-cri` (the only log
+  format with real per-line timestamps to filter/show — a clear error otherwise, never a silently
+  blank column). `attach` is deliberately **output-only**: this engine keeps no live stdin
+  conduit to an already-started detached container (no persistent per-container shim like
+  containerd's), so `-i` is refused with a clear error pointing at `exec -it` instead. **Nome default
   angolano**: sem `--name`, o container chama-se `<rei>-<lugar>-NN` (ex.:
   `njinga-benguela-07`) — listas partilhadas com o kind-mode em `cmd/names.rs`;
   DETERMINÍSTICO do id (as 2 passagens do re-exec de `--net` convergem sem transporte),

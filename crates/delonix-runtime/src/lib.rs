@@ -3666,7 +3666,35 @@ fn restore_mode(saved: Option<libc::termios>) {
     }
 }
 
+/// Per-call overrides for [`exec`] — `docker exec -e/-w/-u` parity. Empty/`None`
+/// fields reproduce the exact previous behavior (container's own env, `chdir("/")`
+/// unconditionally, container's own persisted user).
+#[derive(Default)]
+pub struct ExecOverrides<'a> {
+    /// Extra `KEY=VAL` pairs applied ON TOP of the container's own env, for this
+    /// call only (never persisted) — `exec -e`.
+    pub extra_env: &'a [String],
+    /// Overrides the working directory for this call only — `exec -w`. `None`
+    /// falls back to the container's OWN configured `workdir` (BUG FIXED: `exec`
+    /// used to hardcode `chdir("/")` unconditionally, ignoring `Container::workdir`
+    /// entirely — even a plain `exec` with no `-w` landed in `/`, not the
+    /// image/`-w`-configured directory `run` itself already honors).
+    pub workdir: Option<&'a str>,
+    /// Overrides the exec'd process's uid/gid for this call only — `exec -u`.
+    /// `None` falls back to the container's own `run_uid`/`run_gid`.
+    pub user: Option<(u32, Option<u32>)>,
+}
+
 pub fn exec(container: &Container, argv: &[String], tty: bool) -> Result<i32> {
+    exec_with(container, argv, tty, &ExecOverrides::default())
+}
+
+pub fn exec_with(
+    container: &Container,
+    argv: &[String],
+    tty: bool,
+    overrides: &ExecOverrides,
+) -> Result<i32> {
     // Guard against PID reuse: the `exec` enters the namespaces via
     // setns(pid) — if the PID was recycled, we would enter the namespaces of a
     // process belonging to the host. We require the same `starttime`.
@@ -3757,7 +3785,12 @@ pub fn exec(container: &Container, argv: &[String], tty: bool) -> Result<i32> {
             // SAFETY: the grandchild does `exec` or `_exit`.
             match unsafe { fork() } {
                 Ok(ForkResult::Child) => {
-                    let _ = chdir("/");
+                    let workdir = overrides
+                        .workdir
+                        .or(container.workdir.as_deref())
+                        .filter(|w| !w.is_empty())
+                        .unwrap_or("/");
+                    let _ = chdir(workdir);
                     // pty: allocates in the container's devpts, sends the master to the parent, and
                     // uses the slave as stdio (new session + controlling terminal).
                     if let Some((sp, sc)) = pty_sock {
@@ -3804,7 +3837,16 @@ pub fn exec(container: &Container, argv: &[String], tty: bool) -> Result<i32> {
                             unsafe { libc::_exit(126) };
                         }
                     }
-                    apply_env(&container.name, &container.env); // same environment as the container
+                    // `exec -e`: extra env applied ON TOP of the container's own,
+                    // for this call only — never persisted to `Container.env`.
+                    let exec_env: Vec<String> = if overrides.extra_env.is_empty() {
+                        container.env.clone()
+                    } else {
+                        let mut v = container.env.clone();
+                        v.extend(overrides.extra_env.iter().cloned());
+                        v
+                    };
+                    apply_env(&container.name, &exec_env);
                     if let Some(p) = &container.apparmor {
                         apply_apparmor(p); // same MAC confinement as the init process
                     }
@@ -3813,8 +3855,12 @@ pub fn exec(container: &Container, argv: &[String], tty: bool) -> Result<i32> {
                     // checks (`execSync id -u` == RunAsUser). Without this, the `exec`
                     // always stayed uid 0 of the userns and `id -u` reported 0. setgid
                     // BEFORE setuid (after dropping the uid one can no longer change group).
-                    if let Some(uid) = container.run_uid.filter(|u| *u != 0) {
-                        let gid = container.run_gid.unwrap_or(uid);
+                    // `exec -u` overrides the container's own user for this call only.
+                    let exec_user = overrides
+                        .user
+                        .or_else(|| container.run_uid.map(|u| (u, container.run_gid)));
+                    if let Some((uid, gid)) = exec_user.filter(|(u, _)| *u != 0) {
+                        let gid = gid.unwrap_or(uid);
                         // SAFETY: uid/gid mapped in the container's userns (the init already
                         // mapped the range at startup); setgroups/setgid/setuid
                         // succeed while we are root in the userns.
@@ -4278,6 +4324,33 @@ pub fn stop(store: &Store, container: &mut Container, timeout_secs: u64) -> Resu
     container.pid = None;
     store.save(container)?;
     remove_container_cgroup(container);
+    Ok(())
+}
+
+/// Sends an arbitrary signal to a running container's init process — `docker
+/// kill -s <signal>` semantics. Unlike [`stop`], this does NOT wait for exit
+/// or force a `Stopped` status: the container's recorded state is left for
+/// `reconcile_status` to pick up on the next observation, same as any other
+/// unexpected death (a `SIGKILL`'d container surfaces as `Crashed`, which is
+/// accurate — from the child's perspective it really was killed, not stopped).
+/// `signal` is a plain signal number (not `nix::sys::signal::Signal`) so
+/// callers outside this crate (the CLI) don't need `nix` as a direct
+/// dependency just to send a signal — `libc`'s already everywhere.
+pub fn send_signal(container: &Container, signal: i32) -> Result<()> {
+    let pid = container
+        .pid
+        .ok_or_else(|| Error::NotRunning(container.short_id().to_string()))?;
+    if !safe_to_signal(pid, container.pid_starttime) {
+        return Err(Error::NotRunning(container.short_id().to_string()));
+    }
+    // SAFETY: `pid` confirmed alive and ours by `safe_to_signal`; `signal` is a
+    // plain signal number.
+    if unsafe { libc::kill(pid, signal) } != 0 {
+        return Err(Error::Runtime {
+            context: "kill",
+            message: std::io::Error::last_os_error().to_string(),
+        });
+    }
     Ok(())
 }
 
