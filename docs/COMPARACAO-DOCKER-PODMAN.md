@@ -6,8 +6,21 @@
 > e **as DUAS auditorias adversariais independentes que faltavam foram feitas** — núcleo de
 > syscalls + holder de rede (zero achados novos, secção 1b) e os 6 HIGH da auditoria original de
 > 2026-07-21 (5/6 confirmados sólidos, 1/6 tinha um TOCTOU residual real, agora corrigido, secção
-> 1a). A Fase 0 de segurança está fechada; o que resta é a triagem dos 11 achados candidatos e
+> 1a). A Fase 0 de segurança está fechada; o que resta é a triagem dos 10 achados candidatos e
 > gaps "importantes" não-bloqueantes (secção 2b).
+>
+> **Re-comparação de 2026-07-26 (mesmo dia, revisão posterior)**: a reorganização da CLI (v0.30.0/
+> v0.30.1, `net`/`serve`/`cluster kube`) foi um corte limpo de ROTEAMENTO, sem features novas — não
+> altera nenhum veredicto de gap. Verificação linha-a-linha de 7 itens abertos das secções 2a/2b
+> contra o código actual encontrou 2 correcções ao próprio documento (nenhuma mudança de
+> comportamento no motor): (1) a fuga de rootfs no `--rm` rootless (listada como achado "por
+> verificar" na auditoria original) **já estava corrigida** desde o commit `7bde467`, o
+> `AUDITORIA-E2E.md` é que estava desactualizado; (2) `container update --memory/--cpus` estava
+> descrito como "no-op silencioso" — na verdade **nunca existiu como flag** (não há `--memory`/
+> `--cpus` nenhum em `UpdateOpts`, e a função do motor que os aplicaria não tem UM chamador em todo
+> o histórico do repo) — corrigido para "não implementado", que é a caracterização honesta. Os
+> outros 5 itens verificados (`--format`, cpuset/weights delegados, seccomp custom, bind `:z/:Z`,
+> `--network-alias`, compose `profiles`/`extends`) continuam exactamente como descrito.
 
 ## 1. Veredicto executivo
 
@@ -18,7 +31,7 @@ do que o CLAUDE.md sugeria há poucos dias** — e em várias dimensões já ult
 independentes que faltavam foram concluídas nesta revisão**: o núcleo de syscalls + o holder de
 rede (secção 1b, zero achados novos) e os 6 HIGH da auditoria original (secção 1a — 5
 confirmados, 1 corrigido de novo). Não há mais nenhuma peça de segurança "por confirmar" em
-aberto — o que resta é a triagem dos 11 achados candidatos menores (nunca confirmados nem
+aberto — o que resta é a triagem dos 10 achados candidatos menores (nunca confirmados nem
 refutados) e gaps de correctude "importantes" mas não-bloqueantes (cgroups rootless-delegados,
 `--format` Go-template).
 
@@ -51,7 +64,7 @@ Fonte completa: [`docs/AUDITORIA-E2E.md`](AUDITORIA-E2E.md) (24 achados confirma
 | 6 | Socket de gestão sem autenticação de peer | Sem `SO_PEERCRED`/chmod — condições comuns davam `container exec` = execução arbitrária em qualquer container a qualquer processo local | `delonix-mgmt/src/lib.rs` | ✅ **CONFIRMADO FIXO (2026-07-26)** — `SO_PEERCRED` verificado DENTRO do loop de accept, antes de qualquer dispatch; mesmo padrão confirmado em `delonix-cri` |
 
 Validado com `cargo build`/`test`/`clippy --workspace` limpos. **2026-07-26: uma auditoria adversarial INDEPENDENTE destes 6 fixes foi finalmente feita** (o item que faltava desde 2026-07-23) — releu cada local, tentou reconstruir cada exploit original, e correu a suite de testes existente como verificação adicional. 5/6 confirmados sólidos; 1/6 (kubeconfig) tinha um gap residual real, agora também corrigido. **Este item da Fase 0 está agora FECHADO.**
-- **11 achados candidatos por verificar**, incluindo mais um HIGH (`container run --rm` deixa o rootfs inteiro no disco em rootless, mesmo padrão do incidente de disk-pressure já documentado) e um "egress global apaga silenciosamente as políticas por-rede".
+- **10 achados candidatos por verificar** — o 11.º (HIGH: `container run --rm` deixava o rootfs inteiro no disco em rootless, mesmo padrão do incidente de disk-pressure já documentado) **está CONFIRMADO FIXO** (re-comparação de 2026-07-26): ambos os caminhos de auto-remove (`cmd_run` em primeiro plano e `spawn_rm_watcher`) já chamam `images.remove_container_dir(&c.id)` desde o commit `7bde467` (v0.19.0) — o `docs/AUDITORIA-E2E.md` ainda o listava como aberto por lapso (o achado irmão, "egress global apaga silenciosamente", já estava correctamente marcado como corrigido na secção 1b deste documento).
 
 ---
 
@@ -145,7 +158,7 @@ esta auditoria de 2026-07-26 não os re-confirma. Continuam a precisar do seu pr
 | Auto-update de imagens | podman auto-update + timer | **Ausente** | grep autoupdate = 0 |
 | `--pids-limit` configurável | por container | **Ausente** — fixo em 512 | lib.rs:2205 |
 | cpuset/cpu.weight/io.weight no rootless-delegado (o normal) | podman aplica no cgroup delegado | **Ignorados** — só escritos no caminho não-delegado (root); delegado só faz memory/pids/cpu.max | lib.rs:2708-2710, 2796 |
-| `container update --memory/--cpus` em rootless-delegado | Reescreve o cgroup real | **No-op silencioso** — escreve num leaf que não existe no modo delegado | lib.rs:4274-4283 vs leaf real em 2677/2712 |
+| `container update --memory/--cpus` | Reescreve o cgroup real, a quente | **Não implementado** — `UpdateOpts`/`cmd_update` não têm `--memory`/`--cpus` nenhum (só publish/volume/net-connect/net-rate); `runtime::update_limits` existe no motor mas não tem NENHUM chamador em todo o histórico do repo. Correcção de registo (2026-07-26): uma versão anterior deste doc descrevia isto como "no-op silencioso" — errado, não há flag nenhuma para invocar em primeiro lugar, o `clap` recusaria a invocação antes de qualquer código correr | `cmd/container.rs` (`UpdateOpts`), `delonix-runtime/src/lib.rs::update_limits` (código morto) |
 | Limites garantidos em rootless SEM delegação systemd | podman assume Delegate=yes por omissão | **Best-effort** — memory/cpu/pids não aplicados; fork-bomb pode matar o host | lib.rs:2736-2768 |
 
 ### 2c. MENORES
@@ -199,7 +212,7 @@ Honestamente, não é só "Docker com menos features" — há genuíno valor nov
 - ✅ **FEITO (2026-07-23)**: os 6 HIGH da auditoria original (secção 1a) — path traversal no whiteout OCI, IDs do CRI, nome de VM em `generate_seed_iso`, kubeconfig em `/tmp`, symlink no `COPY` do build, socket de gestão sem `SO_PEERCRED`.
 - ✅ **FEITO (2026-07-23, confirmado 2026-07-26)**: núcleo de syscalls (`delonix-runtime/lib.rs`, 104 `unsafe`) + `delonix-net/infra.rs` — 2 CRITICAL + 3 HIGH encontrados e corrigidos na "2ª ronda", e agora com uma 2.ª auditoria independente (zero achados novos) — ver secção 1b.
 - ✅ **FEITO (2026-07-26)**: 2.ª auditoria adversarial independente dos 6 HIGH da secção 1a — 5/6 confirmados sólidos, 1/6 (kubeconfig, TOCTOU residual local) tinha um gap real, agora também corrigido. Os dois itens "por confirmar" da Fase 0 estão FECHADOS.
-- **Ainda por fazer**: triar os 11 achados candidatos da auditoria original (inclui mais um HIGH: fuga de rootfs no `--rm` rootless).
+- **Ainda por fazer**: triar os 10 achados candidatos restantes da auditoria original (o 11.º, HIGH — fuga de rootfs no `--rm` rootless — já confirmado corrigido, ver secção 1a).
 
 **Fase 1 — destrava o ecossistema (maior alavanca, um investimento resolve três bloqueantes):**
 1. ✅ **FEITO (v0.26.0)**: `delonix serve docker-api` — leitura (2026-07-23) + mutações de ciclo de vida (`create`/`start`/`stop`/`kill`/`wait`/`restart`/`rename`/`remove`/`inspect`), validado contra um `docker` CLI real e o caminho `create`+`start` que o `docker compose up/down` usa. `exec`/attach interactivo continua fora de escopo.
@@ -215,8 +228,8 @@ Honestamente, não é só "Docker com menos features" — há genuíno valor nov
 7. ✅ **FEITO (v0.29.0)**: parser de `docker-compose.yml` + `depends_on` (as 3 condições) + `compose down/ps/logs` por projecto — ver secção 2b.
 
 **Fase 4 — correcções de correctude silenciosas restantes:**
-- ✅ **FEITO**: perfil seccomp custom (erro explícito), opções de bind `:z/:Z` SELinux (erro explícito), `--network-alias` no-op (agora avisa).
-8. **`container update --memory/--cpus` no-op silencioso em rootless-delegado** + **cpuset/weights ignorados no delegado** — ainda por corrigir; precisa de teste num host com delegação systemd real. (lib.rs:4274)
+- ✅ **FEITO**: perfil seccomp custom (erro explícito), opções de bind `:z/:Z` SELinux (erro explícito), `--network-alias` no-op (agora avisa), fuga de rootfs no `--rm` rootless (confirmado fixo 2026-07-26 — ver secção 2a/o achado da auditoria original).
+8. **`cpuset`/`cpu.weight`/`io.weight` ignorados no cgroup rootless-delegado** (o modo normal) — ainda por corrigir; precisa de teste num host com delegação systemd real. `container update --memory/--cpus` continua **não implementado** de todo (não é um bug de no-op, é uma feature em falta — ver secção 2b). (lib.rs:2899-2906)
 
 **Fase 5 — paridade de CLI de operação:**
 - ✅ **FEITO (v0.25.0)**: `wait`, `kill -s`, `attach` (só saída), `restart` (subcomando), `logs --tail/--since/--timestamps`, `exec -e/-w/-u`, `rename`, `port` — ver secção 2b para o detalhe e as limitações honestas de cada um.
