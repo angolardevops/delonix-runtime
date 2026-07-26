@@ -647,6 +647,22 @@ pub fn pull_from_registry_with_creds(
     reference: &str,
     creds_override: Option<(String, String)>,
 ) -> Result<Image> {
+    pull_from_registry_with_creds_platform(store, reference, creds_override, None)
+}
+
+/// Like [`pull_from_registry_with_creds`], but with an explicit `--platform`
+/// architecture (`requested_arch`, OCI vocabulary — `amd64`/`arm64`/...):
+/// `None` keeps today's behavior (host arch, via `target_arch()`); `Some(arch)`
+/// picks that arch's entry from a multi-arch manifest index instead, and
+/// stamps it into the resulting `Image.config.architecture` — the only way a
+/// later caller can tell a locally-tagged image was pulled for a non-host arch
+/// (see [`crate::image::ImageConfig::architecture`]).
+pub fn pull_from_registry_with_creds_platform(
+    store: &ImageStore,
+    reference: &str,
+    creds_override: Option<(String, String)>,
+    requested_arch: Option<&str>,
+) -> Result<Image> {
     let (host, repo, refr) = parse_reference(reference);
     let http = reqwest::blocking::Client::builder()
         .user_agent("delonix/0.1")
@@ -681,7 +697,7 @@ pub fn pull_from_registry_with_creds(
         // Multi-arch index (`oci_spec::image::ImageIndex`) — picks the
         // linux/<arch> entry (or the first one, lacking a match).
         let index: ImageIndex = serde_json::from_slice(&body)?;
-        let arch = target_arch();
+        let arch = requested_arch.unwrap_or_else(|| target_arch());
         let pick = index
             .manifests()
             .iter()
@@ -774,6 +790,9 @@ pub fn pull_from_registry_with_creds(
             memory: None,
             security: Vec::new(),
             healthcheck: None,
+            architecture: requested_arch
+                .map(str::to_string)
+                .unwrap_or_else(|| target_arch().to_string()),
         },
         created_unix: now_unix(),
     };

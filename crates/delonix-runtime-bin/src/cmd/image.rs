@@ -47,6 +47,12 @@ struct BuildSpec {
     /// Bypasses the layer cache — same as the CLI's `--no-cache`.
     #[serde(default, rename = "noCache")]
     no_cache: bool,
+    /// `id=<name>,src=<path>` entries — same as the CLI's repeatable `--secret`.
+    #[serde(default)]
+    secrets: Vec<String>,
+    /// `linux/<arch>` — same as the CLI's `--platform`.
+    #[serde(default)]
+    platform: Option<String>,
 }
 
 fn default_context() -> PathBuf {
@@ -525,12 +531,20 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
                     .file
                     .unwrap_or_else(|| super::build::default_build_file(&b.context));
                 let build_args = super::build::parse_build_args(&b.build_args);
+                let secrets = super::build::parse_build_secrets(&b.secrets)?;
+                let platform = b
+                    .platform
+                    .as_deref()
+                    .map(super::build::parse_platform)
+                    .transpose()?;
                 let img = super::build::build_from_spec(
                     &b.context,
                     &file,
                     &b.tag,
                     &build_args,
                     !b.no_cache,
+                    &secrets,
+                    platform.as_deref(),
                 )?;
                 println!(
                     "image/{name}: {} ({})",
