@@ -9,6 +9,7 @@
 //! large by nature, so we silence `result_large_err` across the whole crate.
 #![allow(clippy::result_large_err)]
 
+use delonix_runtime_core::peer_cred::peer_uid;
 use std::path::PathBuf;
 use tokio_stream::StreamExt as _;
 use tonic::{Request, Response, Status};
@@ -268,33 +269,6 @@ async fn metrics_handler() -> impl axum::response::IntoResponse {
         )],
         delonix_runtime_core::metrics::encode(),
     )
-}
-
-/// uid of the peer of a unix connection (via `SO_PEERCRED`). `None` on failure.
-/// Same mechanism as `delonix-net::infra::peer_uid`/`delonix-mgmt::peer_uid`.
-fn peer_uid(stream: &tokio::net::UnixStream) -> Option<u32> {
-    use std::os::unix::io::AsRawFd;
-    let mut cred = libc::ucred {
-        pid: 0,
-        uid: 0,
-        gid: 0,
-    };
-    let mut len = std::mem::size_of::<libc::ucred>() as libc::socklen_t;
-    // SAFETY: getsockopt on SO_PEERCRED with a correctly-sized ucred buffer.
-    let r = unsafe {
-        libc::getsockopt(
-            stream.as_raw_fd(),
-            libc::SOL_SOCKET,
-            libc::SO_PEERCRED,
-            &mut cred as *mut libc::ucred as *mut libc::c_void,
-            &mut len,
-        )
-    };
-    if r == 0 {
-        Some(cred.uid)
-    } else {
-        None
-    }
 }
 
 pub fn serve_blocking(base: PathBuf, addr: &str) -> Result<(), delonix_runtime_core::Error> {

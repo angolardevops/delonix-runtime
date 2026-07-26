@@ -22,6 +22,7 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use delonix_image::ImageStore;
+use delonix_runtime_core::peer_cred::peer_uid;
 use delonix_runtime_core::{Error, Store};
 use delonix_volume::VolumeStore;
 
@@ -91,42 +92,29 @@ pub fn serve_blocking_with(base: PathBuf, bin: PathBuf, addr: &str) -> Result<()
 /// is decoupled. Runs for the lifetime of the process; best-effort (a
 /// collection panic/slow disk on one tick never stops the next one).
 async fn spawn_expensive_metrics_refresh(base: PathBuf) {
+    // BUG FOUND (code review): this used to `.await` `dashstats::collect`
+    // with no ceiling at all — a genuinely stuck disk/netns operation (not
+    // just "slow", an actual hang) would freeze this loop, and every
+    // expensive gauge, for the remaining lifetime of the process. Bounded
+    // with `collect_with_timeout`; see its own doc comment for why the
+    // worker thread is leaked rather than cancelled on a timeout.
+    const COLLECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
     loop {
         let base = base.clone();
-        let summary =
-            tokio::task::spawn_blocking(move || dashstats::collect(&base, true, true)).await;
-        if let Ok(summary) = summary {
-            dashstats::publish_to_metrics(&summary);
+        let summary = tokio::task::spawn_blocking(move || {
+            dashstats::collect_with_timeout(&base, true, true, COLLECT_TIMEOUT)
+        })
+        .await;
+        match summary {
+            Ok(Some(summary)) => dashstats::publish_to_metrics(&summary),
+            Ok(None) => eprintln!(
+                "delonix-mgmt: expensive metrics collection did not finish within {}s — \
+                 network/storage gauges stay at their last known value this cycle",
+                COLLECT_TIMEOUT.as_secs()
+            ),
+            Err(_) => {} // the spawn_blocking task itself panicked — already logged by tokio.
         }
         tokio::time::sleep(std::time::Duration::from_secs(30)).await;
-    }
-}
-
-/// uid of the peer of a unix connection (via `SO_PEERCRED`). `None` on failure.
-/// Same mechanism as `delonix-net::infra::peer_uid`, adapted to `tokio::net::UnixStream`
-/// (the raw fd check is identical regardless of sync/async).
-fn peer_uid(stream: &tokio::net::UnixStream) -> Option<u32> {
-    use std::os::unix::io::AsRawFd;
-    let mut cred = libc::ucred {
-        pid: 0,
-        uid: 0,
-        gid: 0,
-    };
-    let mut len = std::mem::size_of::<libc::ucred>() as libc::socklen_t;
-    // SAFETY: getsockopt on SO_PEERCRED with a correctly-sized ucred buffer.
-    let r = unsafe {
-        libc::getsockopt(
-            stream.as_raw_fd(),
-            libc::SOL_SOCKET,
-            libc::SO_PEERCRED,
-            &mut cred as *mut libc::ucred as *mut libc::c_void,
-            &mut len,
-        )
-    };
-    if r == 0 {
-        Some(cred.uid)
-    } else {
-        None
     }
 }
 

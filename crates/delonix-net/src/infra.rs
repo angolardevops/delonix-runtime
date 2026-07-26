@@ -17,6 +17,7 @@
 //! binary to [`holder_main`].
 
 use crate::{run, run_ok, SLIRP_IP};
+use delonix_runtime_core::peer_cred::peer_uid;
 use delonix_runtime_core::{Error, Result};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -621,32 +622,6 @@ pub fn holder_main() -> ! {
 /// Accepts connections on the control socket and serves one command per connection (the netns/veth
 /// factory). Runs INSIDE the holder, so the `ip`/`ip netns` operations stay
 /// in the infra netns without `nsenter`. Synchronous (one attach at a time — sufficient).
-/// uid of the peer of a Unix connection (via SO_PEERCRED). `None` on failure.
-fn peer_uid(stream: &std::os::unix::net::UnixStream) -> Option<u32> {
-    use std::os::unix::io::AsRawFd;
-    let mut cred = libc::ucred {
-        pid: 0,
-        uid: 0,
-        gid: 0,
-    };
-    let mut len = std::mem::size_of::<libc::ucred>() as libc::socklen_t;
-    // SAFETY: getsockopt on SO_PEERCRED with a correctly-sized ucred buffer.
-    let r = unsafe {
-        libc::getsockopt(
-            stream.as_raw_fd(),
-            libc::SOL_SOCKET,
-            libc::SO_PEERCRED,
-            &mut cred as *mut libc::ucred as *mut libc::c_void,
-            &mut len,
-        )
-    };
-    if r == 0 {
-        Some(cred.uid)
-    } else {
-        None
-    }
-}
-
 fn control_loop(listener: std::os::unix::net::UnixListener) -> ! {
     use std::io::{BufRead, BufReader, Write};
     // SAFETY: geteuid() has no preconditions.

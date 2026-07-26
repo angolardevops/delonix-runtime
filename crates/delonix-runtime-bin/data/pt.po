@@ -2223,3 +2223,6 @@ msgstr "USO DE MEMÓRIA, MiB (últimos 2 min) — m para containers"
 
 msgid "measuring…"
 msgstr "a medir…"
+
+msgid "rx / tx (cumulative) — {n} container(s) not measured (host/none network)"
+msgstr "rx / tx (cumulativo) — {n} container(s) não medido(s) (rede host/none)"

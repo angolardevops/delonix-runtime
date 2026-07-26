@@ -42,6 +42,7 @@ use hyper_util::rt::TokioIo;
 use serde_json::json;
 
 use delonix_image::ImageStore;
+use delonix_runtime_core::peer_cred::peer_uid;
 use delonix_runtime_core::{Container, Error, Result, Status, Store};
 
 use super::container::RunOpts;
@@ -125,35 +126,6 @@ pub fn run(addr: Option<String>) -> Result<()> {
         eprintln!("delonix-docker-api (Docker Engine API) listening on unix://{path}");
         serve(uds, state).await
     })
-}
-
-/// uid of the peer of a unix connection (via `SO_PEERCRED`). Same mechanism as
-/// `delonix-mgmt::peer_uid`/`delonix-net::infra::peer_uid` — duplicated here
-/// rather than shared, matching how each of those two already duplicate it
-/// instead of a common crate for three call sites.
-fn peer_uid(stream: &tokio::net::UnixStream) -> Option<u32> {
-    use std::os::unix::io::AsRawFd;
-    let mut cred = libc::ucred {
-        pid: 0,
-        uid: 0,
-        gid: 0,
-    };
-    let mut len = std::mem::size_of::<libc::ucred>() as libc::socklen_t;
-    // SAFETY: getsockopt on SO_PEERCRED with a correctly-sized ucred buffer.
-    let r = unsafe {
-        libc::getsockopt(
-            stream.as_raw_fd(),
-            libc::SOL_SOCKET,
-            libc::SO_PEERCRED,
-            &mut cred as *mut libc::ucred as *mut libc::c_void,
-            &mut len,
-        )
-    };
-    if r == 0 {
-        Some(cred.uid)
-    } else {
-        None
-    }
 }
 
 async fn serve(uds: tokio::net::UnixListener, state: Arc<AppState>) -> Result<()> {
