@@ -7,11 +7,33 @@ use delonix_runtime_core::{Error, Result};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+/// A `RUN --mount=type=secret,id=<name>[,target=<path>][,required=true|false]` —
+/// the only `--mount` type this build supports (see [`parse_run_flags`]).
+#[derive(Debug, Clone)]
+pub struct SecretMount {
+    /// `id=<name>` — looked up in the build's `--secret id=<name>,src=<path>` map.
+    pub id: String,
+    /// `target=<path>` — where the secret is bind-mounted inside the container
+    /// for the duration of this one `RUN`. Defaults to `/run/secrets/<id>`.
+    pub target: Option<String>,
+    /// `required=true|false` (Docker default: `false`) — missing + required is a
+    /// hard error; missing + not required silently skips that mount, same as Docker.
+    pub required: bool,
+}
+
+/// A `RUN` instruction: the shell command line plus any `--mount=type=secret`
+/// flags that preceded it on the same instruction.
+#[derive(Debug, Clone, Default)]
+pub struct RunStep {
+    pub cmdline: String,
+    pub secret_mounts: Vec<SecretMount>,
+}
+
 /// A build step, in order (order matters: `COPY` before the `RUN` that uses it).
 #[derive(Debug, Clone)]
 pub enum Step {
     /// `RUN <cmd>` — executes a command (with the accumulated `ENV`/`WORKDIR`).
-    Run(String),
+    Run(RunStep),
     /// `COPY [--from=<stage>] <src> <dst>` — copies from the build *context* (or from
     /// a previous stage, if `from` is present — multi-stage build).
     Copy {
@@ -220,11 +242,13 @@ pub fn parse_dockerfile_with_args(text: &str, cli_args: &[(String, String)]) -> 
                     steps: Vec::new(),
                 });
             }
-            "RUN" => stages
-                .last_mut()
-                .unwrap()
-                .steps
-                .push(Step::Run(rest.to_string())),
+            "RUN" => {
+                let (secret_mounts, cmdline) = parse_run_flags(rest)?;
+                stages.last_mut().unwrap().steps.push(Step::Run(RunStep {
+                    cmdline,
+                    secret_mounts,
+                }));
+            }
             "CMD" => df.cmd = parse_cmd(rest),
             "ENTRYPOINT" => df.entrypoint = parse_cmd(rest),
             "USER" => df.user = rest.trim().to_string(),
@@ -357,6 +381,80 @@ fn parse_env_pairs(rest: &str) -> Vec<(String, String)> {
     out
 }
 
+/// Parses the leading `--mount=type=secret,id=<name>[,target=<path>][,required=…]`
+/// flags off a `RUN` instruction's tail, returning the parsed mounts and the
+/// remaining shell command line. Any other `--mount=type=...` (`ssh`/`cache`/
+/// `bind`) or any other unrecognized leading `--xxx=...` token is a **hard
+/// error** naming exactly what's unsupported — never silently handed to the
+/// shell as a literal argument (which would just produce a confusing "command
+/// not found" instead of an actionable message).
+fn parse_run_flags(rest: &str) -> Result<(Vec<SecretMount>, String)> {
+    let mut mounts = Vec::new();
+    let mut remaining = rest.trim_start();
+    while let Some(flag) = remaining.strip_prefix("--") {
+        let Some((name, value)) = flag.split_once('=') else {
+            break;
+        };
+        let (value, after) = match value.split_once(char::is_whitespace) {
+            Some((v, rest)) => (v, rest.trim_start()),
+            None => (value, ""),
+        };
+        if name == "mount" {
+            mounts.push(parse_secret_mount(value)?);
+            remaining = after;
+        } else {
+            return Err(Error::Invalid(format!(
+                "RUN --{name}: flag não suportada (só --mount=type=secret,id=<nome>\
+                 [,target=<caminho>][,required=true|false])"
+            )));
+        }
+    }
+    Ok((mounts, remaining.to_string()))
+}
+
+/// Parses one `--mount=type=secret,id=<name>[,target=<path>][,required=…]`
+/// flag's value (the part after `mount=`).
+fn parse_secret_mount(value: &str) -> Result<SecretMount> {
+    let mut kv = std::collections::HashMap::new();
+    for pair in value.split(',') {
+        if let Some((k, v)) = pair.split_once('=') {
+            kv.insert(k, v);
+        }
+    }
+    match kv.get("type") {
+        Some(&"secret") => {}
+        Some(other) => {
+            return Err(Error::Invalid(format!(
+                "RUN --mount=type={other}: só type=secret é suportado (ssh/cache/bind ainda não)"
+            )))
+        }
+        None => {
+            return Err(Error::Invalid(
+                "RUN --mount=...: falta 'type=' (só type=secret é suportado)".into(),
+            ))
+        }
+    }
+    let id = kv
+        .get("id")
+        .ok_or_else(|| Error::Invalid("RUN --mount=type=secret: falta 'id=<nome>'".into()))?
+        .to_string();
+    let target = kv.get("target").map(|s| s.to_string());
+    let required = match kv.get("required") {
+        Some(&"true") => true,
+        Some(&"false") | None => false,
+        Some(other) => {
+            return Err(Error::Invalid(format!(
+                "RUN --mount=...,required={other}: espera 'true' ou 'false'"
+            )))
+        }
+    };
+    Ok(SecretMount {
+        id,
+        target,
+        required,
+    })
+}
+
 /// `CMD ["a","b"]` (JSON) or `CMD a b` (shell) → vector of arguments.
 fn parse_cmd(rest: &str) -> Vec<String> {
     if rest.starts_with('[') {
@@ -366,8 +464,10 @@ fn parse_cmd(rest: &str) -> Vec<String> {
     }
 }
 
-/// The architecture in OCI vocabulary (`amd64`, `arm64`, ...).
-fn oci_arch() -> &'static str {
+/// The HOST architecture in OCI vocabulary (`amd64`, `arm64`, ...) — the
+/// default `arch` callers of `build_image`/`commit_flat_rootfs*` should pass
+/// absent an explicit `--platform`.
+pub fn oci_arch() -> &'static str {
     match std::env::consts::ARCH {
         "x86_64" => "amd64",
         "aarch64" => "arm64",
@@ -426,12 +526,16 @@ impl ImageStore {
 
     /// Creates the final image: layers(base) + new layer, with the config derived from the
     /// Dockerfile (Cmd, Env and — Delonix extensions — CPU/memory limits).
+    /// `arch` is the OCI architecture (`amd64`/`arm64`/...) to stamp into both
+    /// the OCI config blob and `ImageConfig.architecture` — pass `oci_arch()`
+    /// for today's host-arch behavior, or the requested `--platform` arch.
     pub fn build_image(
         &self,
         base: &Image,
         new_layer: String,
         df: &Dockerfile,
         tag: &str,
+        arch: &str,
     ) -> Result<Image> {
         let mut layers = base.layers.clone();
         layers.push(new_layer);
@@ -477,7 +581,7 @@ impl ImageStore {
         };
         let config_json = serde_json::json!({
             // Standard OCI/Docker image config fields (interop).
-            "architecture": oci_arch(),
+            "architecture": arch,
             "os": "linux",
             "config": { "Cmd": cmd, "Entrypoint": entrypoint, "Env": env, "User": user, "Cpus": cpus, "Memory": memory, "Security": security },
             "rootfs": { "type": "layers", "diff_ids": diff_ids },
@@ -501,6 +605,7 @@ impl ImageStore {
                 healthcheck,
                 user,
                 working_dir: workdir.clone(),
+                architecture: arch.to_string(),
             },
             created_unix: created,
         };
@@ -522,6 +627,7 @@ impl ImageStore {
         workdir: String,
         user: String,
         tag: &str,
+        arch: &str,
     ) -> Result<Image> {
         let mut buf = Vec::new();
         {
@@ -532,7 +638,7 @@ impl ImageStore {
             b.finish()
                 .map_err(|e| Error::Invalid(format!("fechar tar: {e}")))?;
         }
-        self.commit_flat_rootfs_from_tar(buf, cmd, entrypoint, env, workdir, user, tag)
+        self.commit_flat_rootfs_from_tar(buf, cmd, entrypoint, env, workdir, user, tag, arch)
     }
 
     /// Like [`commit_flat_rootfs`], but receives the rootfs tar **already built**
@@ -552,12 +658,13 @@ impl ImageStore {
         workdir: String,
         user: String,
         tag: &str,
+        arch: &str,
     ) -> Result<Image> {
         let layer = self.cas().write(&tar_bytes)?; // uncompressed tar → diff_id = digest
         let diff_ids = vec![format!("sha256:{}", strip(&layer))];
         let created = now_unix();
         let config_json = serde_json::json!({
-            "architecture": oci_arch(),
+            "architecture": arch,
             "os": "linux",
             "config": { "Cmd": cmd, "Entrypoint": entrypoint, "Env": env, "User": user, "WorkingDir": workdir },
             "rootfs": { "type": "layers", "diff_ids": diff_ids },
@@ -579,6 +686,7 @@ impl ImageStore {
                 healthcheck: None,
                 user,
                 working_dir: workdir,
+                architecture: arch.to_string(),
             },
             created_unix: created,
         };
@@ -609,9 +717,13 @@ impl ImageStore {
         let security = base.config.security.clone();
         let healthcheck = base.config.healthcheck.clone();
         let workdir = base.config.working_dir.clone();
+        // Inherits the base's arch (a container `commit`ted from a --platform
+        // build stays that arch) rather than assuming host — commit has no
+        // --platform flag of its own to override it with.
+        let arch = base.config.architecture.clone();
         let created = now_unix();
         let config_json = serde_json::json!({
-            "architecture": oci_arch(),
+            "architecture": arch,
             "os": "linux",
             "config": { "Cmd": cmd, "Entrypoint": entrypoint, "Env": env, "Cpus": cpus, "Memory": memory, "Security": security },
             "rootfs": { "type": "layers", "diff_ids": diff_ids },
@@ -633,6 +745,7 @@ impl ImageStore {
                 healthcheck,
                 user: String::new(),
                 working_dir: workdir.clone(),
+                architecture: arch,
             },
             created_unix: created,
         };
@@ -644,7 +757,10 @@ impl ImageStore {
 
 #[cfg(test)]
 mod tests {
-    use super::{join_continuations, parse_dockerfile_with_args, parse_env_pairs, substitute_args};
+    use super::{
+        join_continuations, parse_dockerfile_with_args, parse_env_pairs, parse_run_flags,
+        substitute_args, Step,
+    };
     use std::collections::HashMap;
 
     #[test]
@@ -661,6 +777,43 @@ mod tests {
         assert_eq!(substitute_args("echo $UNKNOWN", &known), "echo $UNKNOWN");
         // `$` not followed by a valid name start: untouched.
         assert_eq!(substitute_args("price: $5", &known), "price: $5");
+    }
+
+    #[test]
+    fn run_mount_secret_e_reconhecido_e_separado_do_cmdline() {
+        let df = "FROM alpine:3.19\nRUN --mount=type=secret,id=npm,target=/root/.npmrc npm install";
+        let parsed = parse_dockerfile_with_args(df, &[]).unwrap();
+        let Step::Run(r) = &parsed.steps[0] else {
+            panic!("esperava Step::Run")
+        };
+        assert_eq!(r.cmdline, "npm install");
+        assert_eq!(r.secret_mounts.len(), 1);
+        assert_eq!(r.secret_mounts[0].id, "npm");
+        assert_eq!(r.secret_mounts[0].target.as_deref(), Some("/root/.npmrc"));
+        assert!(!r.secret_mounts[0].required);
+    }
+
+    #[test]
+    fn run_mount_secret_sem_target_usa_default_e_aceita_required() {
+        let (mounts, cmdline) =
+            parse_run_flags("--mount=type=secret,id=x,required=true cat /run/secrets/x").unwrap();
+        assert_eq!(cmdline, "cat /run/secrets/x");
+        assert_eq!(mounts.len(), 1);
+        assert_eq!(mounts[0].id, "x");
+        assert_eq!(mounts[0].target, None);
+        assert!(mounts[0].required);
+    }
+
+    #[test]
+    fn run_mount_tipo_nao_secret_e_erro_claro_nao_shell_literal() {
+        let err = parse_run_flags("--mount=type=cache,target=/root/.cache echo hi").unwrap_err();
+        assert!(err.to_string().contains("type=cache"));
+    }
+
+    #[test]
+    fn run_flag_desconhecida_e_erro_nao_ignorada_em_silencio() {
+        let err = parse_run_flags("--network=none echo hi").unwrap_err();
+        assert!(err.to_string().contains("network"));
     }
 
     #[test]
@@ -685,7 +838,7 @@ mod tests {
         let df = "FROM alpine:3.19\nRUN echo $GHOST";
         let parsed =
             parse_dockerfile_with_args(df, &[("GHOST".to_string(), "boo".to_string())]).unwrap();
-        assert!(matches!(&parsed.steps[0], super::Step::Run(s) if s == "echo $GHOST"));
+        assert!(matches!(&parsed.steps[0], super::Step::Run(s) if s.cmdline == "echo $GHOST"));
     }
 
     #[test]

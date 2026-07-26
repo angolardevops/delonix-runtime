@@ -55,13 +55,13 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use clap::Args;
-use delonix_image::build::{parse_dockerfile_with_args, Step};
+use delonix_image::build::{parse_dockerfile_with_args, RunStep, Step};
 use delonix_image::{Image, ImageStore};
 use delonix_runtime::{self as runtime, RunSpec};
 use delonix_runtime_core::{generate_id, Container, Error, Result, Store};
 use sha2::{Digest, Sha256};
 
-use super::util::{open_stores, prepare_rootfs, resolve_or_pull};
+use super::util::{open_stores, prepare_rootfs, resolve_or_pull_platform};
 
 #[derive(Args)]
 pub struct BuildArgs {
@@ -83,6 +83,18 @@ pub struct BuildArgs {
     /// as Docker's `--no-cache`.
     #[arg(long = "no-cache")]
     no_cache: bool,
+    /// `id=<name>,src=<path>` — a secret a `RUN --mount=type=secret,id=<name>`
+    /// can bind-mount for the duration of that one instruction (never baked
+    /// into a layer). Repeatable.
+    #[arg(long = "secret")]
+    secret: Vec<String>,
+    /// `linux/<arch>` (e.g. `linux/arm64`) — cross-arch build. Resolves the
+    /// correct-arch base image and stamps it into the result; actually running
+    /// a foreign-arch `RUN` needs the host's own binfmt_misc/qemu-user-static
+    /// already registered (not managed by delonix — a clear preflight error
+    /// names the missing interpreter instead of a confusing mid-build failure).
+    #[arg(long = "platform")]
+    platform: Option<String>,
 }
 
 /// Parses `KEY=VALUE` build-arg flags into pairs, dropping anything malformed
@@ -97,6 +109,78 @@ pub(crate) fn parse_build_args(raw: &[String]) -> Vec<(String, String)> {
             }
         })
         .collect()
+}
+
+/// Same character class as `delonix_runtime_core::secret`'s own secret-name
+/// validation — kept local rather than shared for a 1-line check, matching
+/// this file's own `safe_join`/`confine_to` precedent of small, self-contained
+/// security helpers next to their one use.
+fn valid_secret_id(id: &str) -> bool {
+    !id.is_empty()
+        && id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-' || c == '.')
+}
+
+/// Parses `--secret id=<name>,src=<path>` flags (repeatable) into an id→path
+/// map. Unlike `--build-arg`, a malformed entry is a **hard error** — a
+/// `RUN --mount=type=secret,id=x,required=true` silently missing its source
+/// would surface as a confusing missing-file error deep inside the build
+/// instead of an actionable one up front.
+pub(crate) fn parse_build_secrets(raw: &[String]) -> Result<HashMap<String, PathBuf>> {
+    let mut out = HashMap::new();
+    for entry in raw {
+        let mut id = None;
+        let mut src = None;
+        for pair in entry.split(',') {
+            match pair.split_once('=') {
+                Some(("id", v)) => id = Some(v),
+                Some(("src", v)) => src = Some(v),
+                _ => {
+                    return Err(Error::Invalid(format!(
+                        "--secret '{entry}': espera 'id=<nome>,src=<caminho>'"
+                    )))
+                }
+            }
+        }
+        let id =
+            id.ok_or_else(|| Error::Invalid(format!("--secret '{entry}': falta 'id=<nome>'")))?;
+        let src = src
+            .ok_or_else(|| Error::Invalid(format!("--secret '{entry}': falta 'src=<caminho>'")))?;
+        if !valid_secret_id(id) {
+            return Err(Error::Invalid(format!(
+                "--secret id='{id}': só letras/números/'_'/'-'/'.' são aceites"
+            )));
+        }
+        let path = PathBuf::from(src);
+        if !path.is_file() {
+            return Err(Error::Invalid(format!(
+                "--secret id='{id}': '{src}' não é um ficheiro existente"
+            )));
+        }
+        out.insert(id.to_string(), path);
+    }
+    Ok(out)
+}
+
+/// Parses `--platform linux/<arch>` into the OCI arch token (`amd64`, `arm64`,
+/// ...) — this engine is Linux-only, so any `os` other than `linux` is a clear
+/// error rather than a silently-ignored flag.
+pub(crate) fn parse_platform(s: &str) -> Result<String> {
+    let (os, arch) = s.split_once('/').ok_or_else(|| {
+        Error::Invalid(format!(
+            "--platform '{s}': espera 'linux/<arch>' (ex.: linux/arm64)"
+        ))
+    })?;
+    if os != "linux" {
+        return Err(Error::Invalid(format!(
+            "--platform '{s}': só 'linux/<arch>' é suportado (este motor não corre outro SO)"
+        )));
+    }
+    if arch.is_empty() {
+        return Err(Error::Invalid(format!("--platform '{s}': arch vazia")));
+    }
+    Ok(arch.to_string())
 }
 
 /// Resolves the default build file: `Delonixfile` if it exists in the
@@ -120,7 +204,17 @@ pub fn run(args: BuildArgs) -> Result<()> {
         .clone()
         .unwrap_or_else(|| default_build_file(&args.context));
     let build_args = parse_build_args(&args.build_arg);
-    let img = build_from_spec(&args.context, &file, &args.tag, &build_args, !args.no_cache)?;
+    let secrets = parse_build_secrets(&args.secret)?;
+    let platform = args.platform.as_deref().map(parse_platform).transpose()?;
+    let img = build_from_spec(
+        &args.context,
+        &file,
+        &args.tag,
+        &build_args,
+        !args.no_cache,
+        &secrets,
+        platform.as_deref(),
+    )?;
     println!("{}", img.short_id());
     Ok(())
 }
@@ -163,6 +257,7 @@ fn resolve_stage_base(
     from: &str,
     stages: &HashMap<String, StageResult>,
     new_id: &str,
+    platform: Option<&str>,
 ) -> Result<StageResult> {
     if let Some(prior) = stages.get(from) {
         let rootfs = clone_rootfs(images, &prior.rootfs, new_id)?;
@@ -178,7 +273,7 @@ fn resolve_stage_base(
             image: None,
         })
     } else {
-        let img = resolve_or_pull(images, from)?;
+        let img = resolve_or_pull_platform(images, from, platform)?;
         let rootfs = prepare_rootfs(images, &img, new_id)?;
         let workdir = if img.config.working_dir.is_empty() {
             "/".to_string()
@@ -251,6 +346,7 @@ fn clone_rootfs(images: &ImageStore, src_rootfs: &str, id: &str) -> Result<Strin
 /// so it can't be cleaned up via `runtime::remove`/a container list, only by
 /// its id. Every id — container-backed or not — is tracked here for exactly
 /// that reason.
+#[allow(clippy::too_many_arguments)]
 fn build_one_stage(
     store: &Store,
     images: &ImageStore,
@@ -259,6 +355,8 @@ fn build_one_stage(
     steps: &[Step],
     stages: &HashMap<String, StageResult>,
     use_cache: bool,
+    secrets: &HashMap<String, PathBuf>,
+    platform: Option<&str>,
 ) -> (Vec<String>, Result<StageResult>) {
     let mut all_ids: Vec<String> = Vec::new();
     let rootless = runtime::is_rootless();
@@ -272,7 +370,7 @@ fn build_one_stage(
     let use_cache = use_cache && rootless;
     let id = generate_id();
     all_ids.push(id.clone());
-    let mut base = match resolve_stage_base(images, from, stages, &id) {
+    let mut base = match resolve_stage_base(images, from, stages, &id, platform) {
         Ok(b) => b,
         Err(e) => return (all_ids, Err(e)),
     };
@@ -338,8 +436,22 @@ fn build_one_stage(
                     }
                     chain_hash = new_hash;
                 }
-                Step::Run(cmdline) => {
-                    let new_hash = hash_link(&chain_hash, &format!("RUN:{cmdline}"));
+                Step::Run(run_step) => {
+                    let cmdline = &run_step.cmdline;
+                    // Cache key includes each mount's id+target (what could
+                    // change the RUN's observable behavior across builds) but
+                    // deliberately NOT the secret's value — same choice
+                    // upstream BuildKit makes: rotating a secret's content
+                    // shouldn't by itself invalidate the cache, and hashing
+                    // secret material into a file under `<root>/build-cache`
+                    // would be its own small leak.
+                    let mount_key: String = run_step
+                        .secret_mounts
+                        .iter()
+                        .map(|m| format!("{}={}", m.id, m.target.as_deref().unwrap_or("")))
+                        .collect::<Vec<_>>()
+                        .join(",");
+                    let new_hash = hash_link(&chain_hash, &format!("RUN:{cmdline}:{mount_key}"));
                     if use_cache {
                         if let Some((cid, crootfs)) = try_clone_cached(images, &new_hash)? {
                             retire_container(store, &mut container);
@@ -351,11 +463,19 @@ fn build_one_stage(
                         }
                     }
                     ensure_container(store, &mut container, &cur_id, &cur_rootfs, from, rootless)?;
+                    let c = container.as_ref().unwrap();
+                    let mounted = mount_run_secrets(c, run_step, secrets)?;
                     let exports: String = cur_env.iter().map(|kv| sh_export(kv)).collect();
                     let shell =
                         format!("mkdir -p {cur_workdir} && cd {cur_workdir}; {exports}{cmdline}");
                     let argv = vec!["/bin/sh".to_string(), "-c".to_string(), shell];
-                    let code = runtime::exec(container.as_ref().unwrap(), &argv, false)?;
+                    let exec_result = runtime::exec(c, &argv, false);
+                    // Always unmount — success OR failure — same discipline as
+                    // `retire_container`: a secret bind-mount left attached
+                    // when a `RUN` fails would otherwise leak into whatever
+                    // touches this rootfs next.
+                    unmount_run_secrets(c, &cur_rootfs, &mounted);
+                    let code = exec_result?;
                     if code != 0 {
                         return Err(Error::Invalid(format!(
                             "RUN falhou (exit {code}): {cmdline}"
@@ -435,6 +555,83 @@ fn retire_container(store: &Store, container: &mut Option<Container>) {
     }
 }
 
+/// Bind-mounts each `RUN --mount=type=secret` into the LIVE working container
+/// right before its `exec`, via `runtime::mount_live` (the same primitive
+/// `container update --volume-add` already uses to hot-plug a mount into a
+/// running container — proven live, just never exercised against a `build`
+/// working container before this). Because the mount lives only in the
+/// container's OWN (already-`unshare`d) mount namespace, it's invisible from
+/// the host-side view of the same rootfs directory that `commit_flat_rootfs`/
+/// the layer cache read — the secret's value structurally cannot reach a
+/// layer or a cache snapshot. All-or-nothing: a partial failure (including a
+/// `required=true` mount with no matching `--secret`) unmounts whatever
+/// already succeeded before returning the error.
+fn mount_run_secrets(
+    container: &Container,
+    run_step: &RunStep,
+    secrets: &HashMap<String, PathBuf>,
+) -> Result<Vec<String>> {
+    let mut mounted: Vec<String> = Vec::new();
+    for m in &run_step.secret_mounts {
+        let Some(src) = secrets.get(&m.id) else {
+            if m.required {
+                for t in &mounted {
+                    let _ = runtime::unmount_live(container, t);
+                }
+                return Err(Error::Invalid(format!(
+                    "RUN --mount=type=secret,id={}: secreto obrigatório não fornecido \
+                     (usa --secret id={},src=<caminho>)",
+                    m.id, m.id
+                )));
+            }
+            continue;
+        };
+        let target = m
+            .target
+            .clone()
+            .unwrap_or_else(|| format!("/run/secrets/{}", m.id));
+        if let Err(e) = runtime::mount_live(
+            container,
+            &delonix_runtime_core::Mount {
+                source: src.to_string_lossy().into_owned(),
+                target: target.clone(),
+                readonly: true,
+            },
+        ) {
+            for t in &mounted {
+                let _ = runtime::unmount_live(container, t);
+            }
+            return Err(e);
+        }
+        mounted.push(target);
+    }
+    Ok(mounted)
+}
+
+/// Undoes [`mount_run_secrets`]: unmounts each target, then removes the
+/// (now-empty) mountpoint placeholder `mount_live` created on the rootfs
+/// before mounting over it — without this, an empty `/run/secrets/<id>` file
+/// or directory would survive into the next cache snapshot/commit. `cur_rootfs`
+/// is the SAME confinement boundary `COPY`'s `confine_to`/`safe_join` already
+/// use — a mount `target` is always an absolute, `mount_target_safe`-checked
+/// path (validated inside `mount_live` itself), but resolving it against the
+/// rootfs still goes through `confine_to` here for defense in depth.
+/// Best-effort throughout: called on both the success and failure path of a
+/// `RUN`, same discipline as `retire_container`.
+fn unmount_run_secrets(container: &Container, cur_rootfs: &str, targets: &[String]) {
+    for target in targets {
+        let _ = runtime::unmount_live(container, target);
+        let Ok(canon_base) = canonical_base(Path::new(cur_rootfs)) else {
+            continue;
+        };
+        let placeholder = Path::new(cur_rootfs).join(target.trim_start_matches('/'));
+        if let Ok(real) = confine_to(&canon_base, &placeholder) {
+            let _ = std::fs::remove_file(&real);
+            let _ = std::fs::remove_dir(&real); // in case the placeholder was a directory
+        }
+    }
+}
+
 /// Resolves a `COPY [--from=<stage>] <src> <dst>`'s SOURCE side: the path to
 /// hash (for the cache key) and to actually read from, and the root it's
 /// relative to (build context, or an earlier stage's rootfs).
@@ -466,12 +663,15 @@ fn resolve_copy_source<'a>(
 /// The full orchestration of a build (parse → one working container per stage
 /// → RUN/COPY → commit). Extracted from `run()` to be reused by `delonix
 /// image apply` (`kind: Image`, `spec.build`) without duplicating logic.
+#[allow(clippy::too_many_arguments)]
 pub fn build_from_spec(
     context: &Path,
     dockerfile_path: &Path,
     tag: &str,
     build_args: &[(String, String)],
     use_cache: bool,
+    secrets: &HashMap<String, PathBuf>,
+    platform: Option<&str>,
 ) -> Result<Image> {
     let (images, store) = open_stores()?;
     let text = std::fs::read_to_string(dockerfile_path).map_err(|e| {
@@ -482,6 +682,36 @@ pub fn build_from_spec(
     })?;
     let df = parse_dockerfile_with_args(&text, build_args)?;
     let rootless = runtime::is_rootless();
+    let arch = platform.unwrap_or_else(|| delonix_image::build::oci_arch());
+
+    // Fail fast, before touching anything: a cross-arch build needs the
+    // host's OWN binfmt_misc/qemu-user-static already registered (a separate,
+    // explicit, privileged host operation this engine never manages — same as
+    // `docker run --privileged tonistiigi/binfmt --install all` is for real
+    // Docker/buildx). Best-effort: unreadable `/proc` just skips the check —
+    // never blocks a normal same-arch build over it.
+    if let Some(requested) = platform {
+        if requested != delonix_image::build::oci_arch() {
+            let marker = format!("/proc/sys/fs/binfmt_misc/qemu-{requested}");
+            if let Ok(contents) = std::fs::read_to_string(&marker) {
+                if !contents.contains("enabled") {
+                    return Err(Error::Invalid(format!(
+                        "--platform linux/{requested}: o interpretador binfmt_misc '{marker}' \
+                         existe mas não está activo — sem isto os RUN desta imagem vão falhar \
+                         com 'Exec format error'"
+                    )));
+                }
+            } else if std::path::Path::new("/proc/sys/fs/binfmt_misc").exists() {
+                return Err(Error::Invalid(format!(
+                    "--platform linux/{requested}: nenhum interpretador binfmt_misc registado \
+                     para '{requested}' — instala qemu-user-static e regista-o no host antes de \
+                     correr um build cross-arch (ex.: `docker run --privileged --rm \
+                     tonistiigi/binfmt --install {requested}`); sem isto os RUN desta imagem vão \
+                     falhar com 'Exec format error'"
+                )));
+            }
+        }
+    }
 
     // Fail fast (before building anything) in the one root-mode gap: the FINAL
     // stage's `FROM` naming an earlier stage rather than a real image — see the
@@ -515,6 +745,8 @@ pub fn build_from_spec(
                 &stage.steps,
                 &stages,
                 use_cache,
+                secrets,
+                platform,
             );
             // Track EVERY id this stage allocated for cleanup BEFORE
             // propagating a step failure — otherwise a `RUN`/`COPY` that fails
@@ -529,7 +761,7 @@ pub fn build_from_spec(
         }
 
         let (ids, final_state) = build_one_stage(
-            &store, &images, context, &df.from, &df.steps, &stages, use_cache,
+            &store, &images, context, &df.from, &df.steps, &stages, use_cache, secrets, platform,
         );
         all_ids.extend(ids);
         let final_state = final_state?;
@@ -567,6 +799,7 @@ pub fn build_from_spec(
                 workdir,
                 user,
                 tag,
+                arch,
             )
         } else {
             let Some(base_image) = &final_state.image else {
@@ -578,7 +811,7 @@ pub fn build_from_spec(
                 )));
             };
             let layer = images.commit_upper(&id)?;
-            images.build_image(base_image, layer, &df, tag)
+            images.build_image(base_image, layer, &df, tag, arch)
         }
     })();
 
@@ -631,6 +864,7 @@ fn commit_flat_rootless(
     workdir: String,
     user: String,
     tag: &str,
+    arch: &str,
 ) -> Result<Image> {
     let tar_path = std::env::temp_dir().join(format!("delonix-build-{id}.tar"));
     let tar_str = tar_path.to_string_lossy().to_string();
@@ -638,15 +872,23 @@ fn commit_flat_rootless(
         Some(true) => {
             let bytes = std::fs::read(&tar_path)
                 .map_err(|e| Error::Invalid(format!("ler tar do build (userns mapeado): {e}")))?;
-            images.commit_flat_rootfs_from_tar(bytes, cmd, entrypoint, env, workdir, user, tag)
+            images
+                .commit_flat_rootfs_from_tar(bytes, cmd, entrypoint, env, workdir, user, tag, arch)
         }
         Some(false) => Err(Error::Invalid(
             "empacotar rootfs dentro do userns mapeado falhou (delonix __buildtar)".into(),
         )),
         // Without subuid (rootless single-uid): the RUN files are our uid's.
-        None => {
-            images.commit_flat_rootfs(Path::new(rootfs), cmd, entrypoint, env, workdir, user, tag)
-        }
+        None => images.commit_flat_rootfs(
+            Path::new(rootfs),
+            cmd,
+            entrypoint,
+            env,
+            workdir,
+            user,
+            tag,
+            arch,
+        ),
     };
     let _ = std::fs::remove_file(&tar_path); // best-effort, never hides the result
     result
@@ -934,8 +1176,48 @@ fn copy_dir_all(src: &Path, dst: &Path, canon_context: &Path, canon_rootfs: &Pat
 
 #[cfg(test)]
 mod tests {
-    use super::{confine_to, default_build_file, safe_join, sh_export};
+    use super::{
+        confine_to, default_build_file, parse_build_secrets, parse_platform, safe_join, sh_export,
+        valid_secret_id,
+    };
     use std::path::Path;
+
+    #[test]
+    fn valid_secret_id_aceita_charset_e_recusa_o_resto() {
+        assert!(valid_secret_id("npm_token-1.x"));
+        assert!(!valid_secret_id(""));
+        assert!(!valid_secret_id("../etc/passwd"));
+        assert!(!valid_secret_id("has space"));
+    }
+
+    #[test]
+    fn parse_build_secrets_le_id_e_src_e_recusa_ficheiro_inexistente() {
+        let tmp = std::env::temp_dir().join(format!(
+            "delonix-secret-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::write(&tmp, b"hunter2").unwrap();
+        let raw = vec![format!("id=npm,src={}", tmp.display())];
+        let secrets = parse_build_secrets(&raw).unwrap();
+        assert_eq!(secrets.get("npm"), Some(&tmp));
+        std::fs::remove_file(&tmp).ok();
+
+        assert!(parse_build_secrets(&["id=x,src=/does/not/exist".to_string()]).is_err());
+        assert!(parse_build_secrets(&["src=/tmp".to_string()]).is_err()); // missing id=
+        assert!(parse_build_secrets(&["id=bad id,src=/tmp".to_string()]).is_err());
+    }
+
+    #[test]
+    fn parse_platform_aceita_linux_e_recusa_outro_so() {
+        assert_eq!(parse_platform("linux/arm64").unwrap(), "arm64");
+        assert!(parse_platform("windows/amd64").is_err());
+        assert!(parse_platform("linux").is_err()); // no '/'
+        assert!(parse_platform("linux/").is_err()); // empty arch
+    }
 
     #[test]
     fn sh_export_cita_valor_com_espacos() {

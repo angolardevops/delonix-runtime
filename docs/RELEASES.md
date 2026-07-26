@@ -4,6 +4,62 @@
 > (regenerado automaticamente pelo pipeline de release a cada tag publicada).
 > Não editar à mão — edita a nota da release respectiva.
 
+## v0.27.0 — BuildKit-lite: `RUN --mount=secret` e `--platform`
+
+Fecha mais um dos gaps "bloqueantes" da análise Docker/Podman
+([docs/COMPARACAO-DOCKER-PODMAN.md](../COMPARACAO-DOCKER-PODMAN.md)): segredos de build sem os
+bakear numa layer, e builds cross-arch — o mínimo que um pipeline de CI a sério precisa de um
+build system moderno.
+
+### Novo
+
+- **`RUN --mount=type=secret,id=<nome>[,target=<caminho>][,required=true|false]`** — o segredo
+  (`--secret id=<nome>,src=<ficheiro>` no `delonix build`) é bind-montado AO VIVO no container de
+  trabalho só durante a janela desse `RUN` (`runtime::mount_live`/`unmount_live` — o mesmo
+  primitivo já provado por `container update --volume-add`, nunca antes exercitado contra o
+  container de trabalho do `build`). Como o mount vive só no namespace de montagem já próprio do
+  container, é INVISÍVEL do lado do host que o `commit_flat_rootfs`/a cache de layers leem — o
+  valor do segredo estruturalmente não pode chegar a uma layer ou a um snapshot de cache.
+  Default `target`: `/run/secrets/<id>` (convenção Docker). `required=false` (default, como o
+  Docker): um segredo em falta é ignorado em silêncio; `required=true`: erro claro ANTES de
+  qualquer trabalho no container. `type=ssh`/`type=cache`/`type=bind` (e qualquer outra flag
+  `RUN --xxx=`) dão erro claro — nunca viram texto literal passado ao shell (armadilha que a
+  gramática antiga tinha: `RUN --mount=... cmd` sem suporte nenhum virava um "comando não
+  encontrado" confuso).
+- **`--platform linux/<arch>`** (CLI e `kind: Image`'s `spec.build`) — resolve a imagem base do
+  arch pedido (`resolve_or_pull_platform`: só reaproveita uma imagem local se o seu
+  `config.architecture` gravado bater com o pedido; caso contrário força um pull fresco da rede —
+  conservador de propósito, para nunca resolver em silêncio para o arch errado), e carimba esse
+  arch tanto no config OCI como na imagem resultante. `ImageConfig` ganhou o campo `architecture`
+  (`#[serde(default)]` para imagens já persistidas antes deste campo existir). **Preflight claro**:
+  antes de sequer tentar um `RUN` cross-arch, verifica `/proc/sys/fs/binfmt_misc/qemu-<arch>` — se
+  não estiver registado/activo, erro imediato a apontar para `qemu-user-static`/
+  `tonistiigi/binfmt --install <arch>` (o mesmo pré-requisito de HOST que o buildx real também
+  tem — este motor não instala nem gere binfmt/QEMU, só confirma que já está lá).
+
+### Validado ao vivo (host real)
+
+Um Dockerfile `FROM alpine:3.20` + `RUN --mount=type=secret,id=x cat /run/secrets/x > /marker`:
+o valor do segredo foi lido correctamente durante o `RUN` (`/marker` mostra-o), e a imagem final
+NÃO tem `/run/secrets/x` (nem um ficheiro vazio — o placeholder que o `mount_live` cria antes de
+montar é removido depois do `unmount_live`). Um `required=true` sem `--secret` correspondente
+falha com um erro claro, antes de tocar no container. `--platform linux/riscv64` (sem QEMU
+registado neste host) falha com o erro de preflight esperado, apontando para a correcção certa.
+
+### Por fazer (deliberadamente fora desta fatia, documentado)
+
+`type=ssh`/`type=cache`/`type=bind`; heredocs; `--cache-from/to`; manifest-list multi-arch no
+push (constrói só UM arch por invocação); GPU real via CDI/nvidia-container-toolkit — o último
+gap "bloqueante" do roadmap, já com plano desenhado.
+
+### Validação
+
+Build/clippy/fmt/test limpos nos crates tocados (`delonix-image`, `delonix-runtime-bin`) — 288
+testes em `delonix-runtime-bin` (+3 novos: `parse_build_secrets`/`parse_platform`/
+`valid_secret_id`), 45 em `delonix-image` (+4 novos: parsing de `--mount=type=secret`).
+
+---
+
 ## v0.26.0 — mutações na Docker Engine API (`delonix docker-api`)
 
 Fecha mais um dos 4 gaps "bloqueantes" identificados na análise Docker/Podman

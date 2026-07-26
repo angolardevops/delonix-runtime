@@ -46,6 +46,30 @@ pub struct ImageConfig {
     /// from `/` and touch `/sys` (RO). [[delonix-rootless-user]]
     #[serde(default)]
     pub working_dir: String,
+    /// OCI architecture (`amd64`, `arm64`, ...) this image was built/pulled
+    /// for. `#[serde(default)]` to `host_arch_default()` so images persisted
+    /// before this field existed (always host-arch, since cross-arch wasn't
+    /// possible then) still deserialize correctly. Lets a `--platform`-aware
+    /// resolver (`resolve_or_pull_platform`) tell a locally-tagged image apart
+    /// from one that just happens to share the same tag under a different
+    /// arch — a plain tag lookup alone can't make that distinction.
+    #[serde(default = "host_arch_default")]
+    pub architecture: String,
+}
+
+/// OCI architecture of the HOST — the default `ImageConfig::architecture`
+/// takes for images that predate the field, and for anything built/pulled
+/// without an explicit `--platform`. Same mapping as `build::oci_arch`/
+/// `registry::target_arch` (kept private in each of those; duplicated here
+/// rather than exposed cross-module for a 3-line mapping table).
+pub(crate) fn host_arch_default() -> String {
+    match std::env::consts::ARCH {
+        "x86_64" => "amd64",
+        "aarch64" => "arm64",
+        "arm" => "arm",
+        other => other,
+    }
+    .to_string()
 }
 
 /// A locally registered image.

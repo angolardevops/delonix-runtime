@@ -3430,6 +3430,7 @@ fn cmd_commit(images: &ImageStore, store: &Store, id: &str, tag: &str) -> Result
             c.workdir.clone().unwrap_or_default(),
             String::new(),
             tag,
+            &base.config.architecture,
         )?
     } else {
         let layer = images.commit_upper(&c.id)?; // tar of the upperdir → CAS

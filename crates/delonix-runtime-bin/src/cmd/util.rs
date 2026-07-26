@@ -33,6 +33,37 @@ pub(crate) fn resolve_or_pull(images: &ImageStore, reference: &str) -> Result<Im
     }
 }
 
+/// Like [`resolve_or_pull`], but arch-aware (`--platform`): `platform: None`
+/// is byte-for-byte today's behavior (any local match wins, arch untouched).
+/// `Some(arch)` only reuses a local match if its OWN recorded
+/// `config.architecture` is that arch — a miss OR an arch mismatch always
+/// forces a fresh registry pull for that arch. Deliberately conservative (a
+/// network round-trip on any ambiguity) rather than half-implementing a
+/// multi-arch-aware local cache index: a locally-tagged image silently
+/// resolving to the WRONG arch under `--platform` would be a much worse
+/// failure mode than an extra pull.
+pub(crate) fn resolve_or_pull_platform(
+    images: &ImageStore,
+    reference: &str,
+    platform: Option<&str>,
+) -> Result<Image> {
+    let Some(arch) = platform else {
+        return resolve_or_pull(images, reference);
+    };
+    if let Ok(img) = images.resolve(reference) {
+        if img.config.architecture == arch {
+            return Ok(img);
+        }
+    }
+    eprintln!("a puxar {reference} (linux/{arch})…");
+    delonix_image::registry::pull_from_registry_with_creds_platform(
+        images,
+        reference,
+        None,
+        Some(arch),
+    )
+}
+
 /// Effective command (pure function): ENTRYPOINT + (the user's args, otherwise the
 /// image's CMD) — the same semantics as Docker/OCI (`run <cmd>` replaces the CMD, not
 /// the ENTRYPOINT).

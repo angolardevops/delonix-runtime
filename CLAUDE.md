@@ -69,14 +69,27 @@ uma lista plana, um módulo por grupo em `crates/delonix-runtime-bin/src/cmd/`:
 - `delonix image` — pull/ls/rm/export (bundle OCI para `runc`/`crun`).
 - `delonix build -t <tag> [-f Dockerfile|Delonixfile] [contexto]` — único grupo com orquestração
   nova (as outras têm API pronta nas crates, isto é "ligar os fios"): sobe um container de
-  trabalho (`sleep infinity`), corre cada `RUN` via `exec`, aplica `COPY` no rootfs em disco, e
-  empacota com `ImageStore::commit_flat_rootfs` (rootless) ou `commit_upper`+`build_image` (root).
-  **Só single-stage** — um Dockerfile com `FROM ... AS <nome>` seguido doutro `FROM` é recusado
-  com erro claro; multi-stage fica para uma iteração seguinte (precisa de desenhar a passagem de
-  rootfs entre estágios). **`Delonixfile`**: sem `-f`, `default_build_file` (`cmd/build.rs`)
-  procura `<contexto>/Delonixfile` antes de `Dockerfile` — mesma gramática (`parse_dockerfile`
-  já suporta as extensões Delonix `SCAN`/`CPUS`/`MEMORY`/`SECURITY`/`HEALTHCHECK`
-  independentemente do nome do ficheiro); `Delonixfile` é só o nome canónico por omissão.
+  trabalho (`sleep infinity`) POR ESTÁGIO, corre cada `RUN` via `exec`, aplica `COPY` no rootfs em
+  disco, e empacota com `ImageStore::commit_flat_rootfs` (rootless) ou `commit_upper`+`build_image`
+  (root). **Multi-stage** (`FROM ... AS <nome>` + `COPY --from=`) suportado — só o modo root
+  (overlay) exige que o estágio FINAL seja uma imagem real (sem lineage OCI para um estágio
+  clonado). **Cache de layers por instrução** (rootless only, `--no-cache` para saltar). **`--secret
+  id=<nome>,src=<caminho>`** + **`RUN --mount=type=secret,id=<nome>[,target=][,required=]`** —
+  bind-mount AO VIVO (`runtime::mount_live`/`unmount_live`, o mesmo primitivo do `container update
+  --volume-add`) só durante a janela desse `RUN`; como o mount vive só no namespace de montagem já
+  próprio do container de trabalho, o segredo nunca é visível do lado do host que o
+  `commit_flat_rootfs`/cache lê — estruturalmente não pode chegar a uma layer. Validado ao vivo:
+  valor lido durante o `RUN`, ausente (nem sequer um ficheiro vazio) na imagem final. `type=ssh`/
+  `type=cache`/`type=bind` dão erro claro (nunca viram texto de shell literal). **`--platform
+  linux/<arch>`** — resolve a imagem base do arch pedido (`resolve_or_pull_platform`, arch-aware:
+  só reaproveita uma imagem local se o `config.architecture` guardado bater), carimba-o no
+  resultado; preflight claro contra `/proc/sys/fs/binfmt_misc/qemu-<arch>` antes de arrancar um
+  build cross-arch (o binfmt/qemu-user-static em si é um pré-requisito do HOST, não gerido por
+  este motor — mesmo princípio do `docker run --privileged tonistiigi/binfmt` do buildx real).
+  **`Delonixfile`**: sem `-f`, `default_build_file` (`cmd/build.rs`) procura `<contexto>/
+  Delonixfile` antes de `Dockerfile` — mesma gramática (`parse_dockerfile` já suporta as extensões
+  Delonix `SCAN`/`CPUS`/`MEMORY`/`SECURITY`/`HEALTHCHECK` independentemente do nome do ficheiro);
+  `Delonixfile` é só o nome canónico por omissão.
 - `delonix vm` — create/ls/stop/rm/status, flags 1:1 com `delonix_vm::VmConfig`.
 - `delonix volumes` — create/ls/rm/inspect, wrapper fino sobre `VolumeStore`.
 - `delonix network` — ls/create/rm/inspect. **Dois stores em paralelo, deliberado**:

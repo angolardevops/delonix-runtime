@@ -73,6 +73,18 @@ pub fn load_docker_archive(store: &ImageStore, tar_path: &Path) -> Result<Image>
     // Read the runtime config from the OCI config blob (`ImageConfiguration`).
     let oci_config: ImageConfiguration = serde_json::from_slice(&config_bytes)?;
     let inner = oci_config.config().clone().unwrap_or_default();
+    // `Arch`'s own (de)serialization isn't a plain string round-trip worth
+    // fighting here — read the top-level `"architecture"` string straight off
+    // the raw JSON instead (already have the bytes; falls back to the host's
+    // own arch, same as `ImageConfig::architecture`'s serde default, if the
+    // archive's config is missing or malformed on this one field).
+    let architecture = serde_json::from_slice::<serde_json::Value>(&config_bytes)
+        .ok()
+        .and_then(|v| {
+            v.get("architecture")
+                .and_then(|a| a.as_str().map(str::to_string))
+        })
+        .unwrap_or_else(crate::image::host_arch_default);
 
     let image = Image {
         id: config_digest,
@@ -88,6 +100,7 @@ pub fn load_docker_archive(store: &ImageStore, tar_path: &Path) -> Result<Image>
             memory: None,
             security: Vec::new(),
             healthcheck: None,
+            architecture,
         },
         created_unix: now_unix(),
     };

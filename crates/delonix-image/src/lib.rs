@@ -64,7 +64,7 @@ mod tests {
         .unwrap();
         assert_eq!(df.from, "alpine:3.19");
         assert_eq!(df.steps.len(), 1);
-        assert!(matches!(&df.steps[0], build::Step::Run(c) if c == "echo hi > /a.txt"));
+        assert!(matches!(&df.steps[0], build::Step::Run(c) if c.cmdline == "echo hi > /a.txt"));
         assert_eq!(df.cmd, vec!["/bin/sh"]);
     }
 
