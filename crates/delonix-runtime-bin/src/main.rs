@@ -135,6 +135,9 @@ enum Cmd {
         /// Print ONE text snapshot and exit (no TUI) — for scripts/CI; the default when stdout is not a terminal.
         #[arg(long)]
         once: bool,
+        /// Print ONE snapshot as JSON and exit (no TUI, no ANSI) — for scripts/Grafana JSON datasource.
+        #[arg(long)]
+        json: bool,
     },
     /// Print the shell autocompletion script (bash/zsh/fish/...).
     Completion {
@@ -228,7 +231,7 @@ fn run() -> Result<()> {
         Cmd::Net { action } => cmd::net::run(action),
         Cmd::Serve { action } => cmd::serve::run(action),
         Cmd::IngressProxy { config } => cmd::ingress_proxy::run(&config),
-        Cmd::Dash { once } => cmd::dash::run(cmd::dash::DashScope::Global, once),
+        Cmd::Dash { once, json } => cmd::dash::run(cmd::dash::DashScope::Global, once, json),
         Cmd::Completion { shell } => cmd_completion(shell),
     }
 }

@@ -65,6 +65,8 @@ pub enum NetworkCmd {
     Dash {
         #[arg(long)]
         once: bool,
+        #[arg(long)]
+        json: bool,
     },
     /// List the networks.
     Ls,
@@ -127,7 +129,9 @@ pub enum NetworkCmd {
 pub fn run(action: NetworkCmd) -> Result<()> {
     let store = NetworkStore::open(state_root())?;
     match action {
-        NetworkCmd::Dash { once } => super::dash::run(super::dash::DashScope::Networks, once),
+        NetworkCmd::Dash { once, json } => {
+            super::dash::run(super::dash::DashScope::Networks, once, json)
+        }
         NetworkCmd::Ls => cmd_ls(&store),
         NetworkCmd::Node { action } => cmd_node(action),
         NetworkCmd::Create {

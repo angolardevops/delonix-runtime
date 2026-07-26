@@ -346,6 +346,8 @@ pub enum VmCmd {
     Dash {
         #[arg(long)]
         once: bool,
+        #[arg(long)]
+        json: bool,
     },
     /// Bootstrap a project with a VM manifest — files ALREADY FILLED IN (images
     /// included), ready to use without editing anything.
@@ -779,8 +781,8 @@ pub fn run(action: VmCmd) -> Result<()> {
             up,
         );
     }
-    if let VmCmd::Dash { once } = action {
-        return super::dash::run(super::dash::DashScope::Vms, once);
+    if let VmCmd::Dash { once, json } = action {
+        return super::dash::run(super::dash::DashScope::Vms, once, json);
     }
     let base = state_root();
     match action {
