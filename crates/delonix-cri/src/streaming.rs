@@ -380,6 +380,8 @@ async fn exec_tty(
         }
     };
 
+    let pid = child.id() as i32;
+
     // Resend the stdin that arrived before the spawn.
     for chunk in &pending_stdin {
         write_all(master, chunk);
@@ -444,6 +446,14 @@ async fn exec_tty(
         }
     }
 
+    // BUG FIXED: the loop above used to `break` on a WebSocket close/error
+    // without ever touching the child — an interactive shell with no client
+    // attached ran forever, leaking a process per abandoned exec session.
+    // `exit_code.is_none()` here means we broke because the CLIENT went
+    // away, not because the process exited on its own.
+    if exit_code.is_none() {
+        unsafe { libc::kill(pid, libc::SIGKILL) };
+    }
     let code = match exit_code {
         Some(c) => c,
         None => exit_rx.await.unwrap_or(-1),
@@ -483,6 +493,7 @@ async fn exec_pipes(
         }
     };
 
+    let pid = child.id() as i32;
     let mut stdin = child.stdin.take();
     let stdout = child.stdout.take();
     let stderr = child.stderr.take();
@@ -553,6 +564,11 @@ async fn exec_pipes(
         }
     }
 
+    // BUG FIXED: same leak as `exec_tty` — a broken `Close`/error meant the
+    // spawned child ran to completion unattended instead of being killed.
+    if exit_code.is_none() {
+        unsafe { libc::kill(pid, libc::SIGKILL) };
+    }
     let code = match exit_code {
         Some(c) => c,
         None => exit_rx.await.unwrap_or(-1),
