@@ -470,6 +470,13 @@ pub enum ClusterCmd {
         #[arg(long, default_value = "delonix", add = ArgValueCandidates::new(super::complete::clusters))]
         name: String,
     },
+    /// Generate a Kubernetes manifest from a container/pod already running
+    /// locally (`kube generate`) — the "ran it locally, now give me the YAML
+    /// for k8s" path (equivalent to `podman generate kube`).
+    Kube {
+        #[command(subcommand)]
+        action: super::kube::KubeCmd,
+    },
     /// Apply the `kind: Cluster` document(s) of a manifest.
     Apply {
         #[arg(short = 'f', long = "file")]
@@ -596,6 +603,7 @@ pub fn run(action: ClusterCmd) -> Result<()> {
         | ClusterCmd::Ls => {
             unreachable!("tratados acima")
         }
+        ClusterCmd::Kube { action } => super::kube::run(action),
         ClusterCmd::Apply { file } => {
             let path = manifest::resolve_path(file)?;
             let docs = manifest::load(&path)?;

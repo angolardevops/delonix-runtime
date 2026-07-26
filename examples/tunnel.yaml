@@ -4,9 +4,9 @@
 # proxy's own listening port (see httproute.yaml) to combine the two — one
 # public URL, routed by Host/path to as many backend containers as you want.
 #
-# Apply with:  delonix tunnel apply -f tunnel.yaml
+# Apply with:  delonix net tunnel apply -f tunnel.yaml
 # One-shot equivalent, no manifest:
-#   delonix tunnel expose --provider pinggy --local-port 80
+#   delonix net tunnel expose --provider pinggy --local-port 80
 apiVersion: delonix.io/v1
 kind: Tunnel
 metadata:

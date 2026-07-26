@@ -135,8 +135,8 @@ uma lista plana, um módulo por grupo em `crates/delonix-runtime-bin/src/cmd/`:
   rede e a escrita chegou ao NAS (ver `examples/storage.yaml` + `examples/nas-vm-cloud-config.yaml`,
   a receita da VM Samba+NFS de validação). **Montar NFS/CIFS precisa de CAP_SYS_ADMIN** (root ou
   sessão privilegiada) — em rootless puro o `mount -t` falha claro.
-- `delonix httproute` — ls/apply/rm do **reverse-proxy L7/HTTP** (`kind: HTTPRoute`). Ver a
-  secção "Reverse-proxy L7" abaixo. **Não confundir** com `delonix ingress` (firewall L4 inbound).
+- `delonix net httproute` — ls/apply/rm do **reverse-proxy L7/HTTP** (`kind: HTTPRoute`). Ver a
+  secção "Reverse-proxy L7" abaixo. **Não confundir** com `delonix net ingress` (firewall L4 inbound).
 - `delonix stack apply [-f delonix-manifest.yaml]` — ver secção "Manifesto/apply" abaixo.
 - `delonix compose up|down|ps|logs|config [-f <ficheiro>] [-p <projecto>]` (v0.29.0) — suporte
   NATIVO a `docker-compose.yml` (Compose Spec v2.x), `cmd/compose.rs`. Um tradutor de esquema
@@ -162,7 +162,7 @@ uma lista plana, um módulo por grupo em `crates/delonix-runtime-bin/src/cmd/`:
   volumes anónimos (sem `source` explícito), porta sem host explícito (atribuição aleatória).
   `working_dir:` é aceite mas AVISA e é ignorado — gap pré-existente do motor inteiro (nenhum
   `RunOpts`/`Container` tem override de workdir), não algo que este módulo introduz.
-- `delonix docker-api [--addr unix://<socket>]` — fatia da **Docker Engine API** (`cmd/dockerapi.rs`)
+- `delonix serve docker-api [--addr unix://<socket>]` — fatia da **Docker Engine API** (`cmd/dockerapi.rs`)
   que basta para `docker version/ps/images/info` **e**, desde a v0.26.0, o ciclo de vida completo de
   um container via `DOCKER_HOST=unix://<socket>`: `POST /containers/create|start|stop|kill|wait|
   restart|rename`, `DELETE /containers/{id}`, `GET /containers/{id}/json`, todos delegando na MESMA
@@ -189,6 +189,40 @@ uma lista plana, um módulo por grupo em `crates/delonix-runtime-bin/src/cmd/`:
   separados — o caminho que `docker compose` usa — foram todos validados correctos e instantâneos);
   a causa aparenta ser um comportamento interno do próprio CLI Go, não reproduzido com os comandos
   separados.
+
+### Reorganização da raiz da CLI (v0.30.0, BREAKING, corte limpo sem aliases)
+
+Bug report real do utilizador: a raiz do `delonix` tinha crescido para **26 subcomandos planos**
+(`netns`/`flow`/`ingress`/`egress`/`httproute`/`tunnel`/`boot`/`cri`/`api`/`docker-api`/`kube`
+lado a lado com `container`/`image`/`vm`/...) — fácil de invocar um sub-comando de baixo nível
+como se fosse um comando principal por engano. Pedido explícito: agrupamento **profundo** +
+**corte limpo** (sem aliases de retrocompatibilidade — nomes antigos removidos por inteiro).
+
+- **`delonix net <x>`** (`cmd/net.rs`) agrupa a plumbing de rede/infra de baixo nível: `netns`
+  (antigo `delonix netns`), `flow`, `ingress`, `egress`, `httproute`, `tunnel`, `boot`. Roteamento
+  puro — cada braço delega no MESMO `run()` de sempre, zero mudança de comportamento, só o
+  caminho da CLI para lá chegar.
+- **`delonix serve <x>`** (`cmd/serve.rs`) agrupa os três "serve um protocolo num socket unix":
+  `cri` (antigo `delonix cri`), `api` (antigo `delonix api`), `docker-api` (antigo `delonix
+  docker-api`).
+- **`delonix cluster kube generate`** — o antigo `delonix kube generate` dobrou para dentro de
+  `cluster` (`ClusterCmd::Kube`), por ser outra faceta do mesmo grupo "Kubernetes" que `cluster
+  apply`/`cluster kubeadm` já ocupam.
+- `delonix ingress-proxy` (subcomando OCULTO, o processo interno do proxy L7 lançado dentro do
+  netns do holder) ficou **deliberadamente de fora** desta reorganização — não é clutter visível
+  (`--help` não o lista) e mexer no seu argv arriscava partir o mecanismo de re-exec que já usa.
+- **Mapeamento antigo→novo**: `netns`→`net netns`, `flow`→`net flow`, `ingress`→`net ingress`,
+  `egress`→`net egress`, `httproute`→`net httproute`, `tunnel`→`net tunnel`, `boot`→`net boot`,
+  `cri`→`serve cri`, `api`→`serve api`, `docker-api`→`serve docker-api`, `kube`→`cluster kube`.
+  **Sem aliases** — um script/pipeline que ainda invoque a forma antiga falha com "unrecognized
+  subcommand", não silenciosamente.
+- **Mecanismo interno intocado**: o holder netns e o re-exec de `--net <rede-custom>`
+  (`container::reexec_into_netns` → `nsenter … ip netns exec`) usam interceção de
+  `std::env::args()` CRUA em `main()`, ANTES do parsing `clap` — verificam literalmente
+  `argv[1] == "netns"`/`argv[2] == "holder"`/`"run"`. Esse mecanismo é **completamente
+  independente** do enum `Cmd` público — mover `netns` para dentro de `Cmd::Net` não lhe mexe
+  em nada. Confirmado ao vivo: `container run --net <rede-existente>` neste host continua a
+  ganhar IP real na SDN depois da reorganização.
 
 ## Output: `ls` estilo docker, `describe` estilo kubectl (`cmd/output.rs`)
 
@@ -303,7 +337,7 @@ Ingress(k8s)/Egress/FirewallPolicy/Container (flat E Pod-shape, via `pod_spec_wi
 
 Reverse-proxy HTTP/HTTPS declarativo **embutido**. Roteia por `Host` + prefixo de path para
 containers backend. Módulos: `cmd/httproute.rs` (schema `HttpRouteSpec` + resolução + `apply`) e
-`cmd/ingress_proxy.rs` (o proxy `hyper` + o ciclo de vida). Superfície: `delonix httproute
+`cmd/ingress_proxy.rs` (o proxy `hyper` + o ciclo de vida). Superfície: `delonix net httproute
 ls/apply/rm` + `kind: HTTPRoute` no `stack apply`.
 
 **`kind: Ingress` = Ingress L7 estilo k8s (BREAKING v0.7.x).** Desde esta série, `kind: Ingress`
@@ -316,7 +350,7 @@ prefixo; portas nomeadas dão erro (usa `port.number`). **Migração**: o firewa
 em `kind: Ingress` passou para **`kind: FirewallPolicy` com `direction: ingress`** (já era alias);
 `firewall::apply` deixou de tratar `Ingress` (só `Egress`/`FirewallPolicy`); `validate_graph` e o
 drift-guard movidos em conformidade; `examples/firewall.yaml` migrado, `examples/ingress.yaml` é a
-nova forma L7. A CLI `delonix ingress` (publish/allow/deny) **continua L4** — só o *Kind* do
+nova forma L7. A CLI `delonix net ingress` (publish/allow/deny) **continua L4** — só o *Kind* do
 manifesto mudou de significado.
 
 - **O proxy é `hyper` puro** (server http1 + cliente `hyper-util` legacy), **confinado ao bin** —
@@ -1277,7 +1311,7 @@ reportado uma vez NÃO reproduziu (3× OK) — glitch de terminal, sem causa no 
 
 ### `tunnel expose --provider pinggy` sem URL (v0.16.1)
 
-Bug report real (host kaeso-sys-01): `delonix tunnel expose --provider pinggy --local-port 8181`
+Bug report real (host kaeso-sys-01): `delonix net tunnel expose --provider pinggy --local-port 8181`
 respondia sempre "URL ainda não confirmada", nunca uma URL real. **Causa-raiz, confirmada
 correndo o `ssh` real à mão, fora do binário**: `free.pinggy.io` (o endpoint DOCUMENTADO pela
 pinggy) tem geo-DNS — a partir deste host resolvia sempre para um PoP regional partido

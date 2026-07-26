@@ -1,6 +1,6 @@
 # Egress por-REDE declarativo (scope: network) — política de saída de uma rede
 # inteira, allowlist de CIDR/FQDN (FQDN aprendido AO VIVO do DNS) e rate-limit L4.
-# É a forma declarativa do `delonix egress net`/`egress host`/`l4guard` — assim
+# É a forma declarativa do `delonix net egress net`/`egress host`/`l4guard` — assim
 # uma rede sai fechada só em YAML, sem CLI.
 #
 #   delonix stack apply -f examples/firewall-network.yaml

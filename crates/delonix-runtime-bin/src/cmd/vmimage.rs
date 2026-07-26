@@ -451,9 +451,15 @@ pub(crate) fn cmd_pull(store: &VmImageStore, source: &str, name: Option<String>)
 pub(crate) fn cmd_ls_remote(source: &str) -> Result<()> {
     let mut tags = delonix_image::registry::list_remote_tags(&state_root(), source)?;
     tags.sort();
-    for tag in tags {
-        println!("{tag}");
+    // BUG FOUND live: printed one bare tag per line with no header — looked
+    // uncomparable next to every other `ls`-shaped command in this CLI, which
+    // all go through `output::Table` (same convention `image ls`/`vm ls`/
+    // `network ls` already use).
+    let mut t = output::Table::new(&["TAG"]);
+    for tag in tags.iter_mut() {
+        t.row(vec![std::mem::take(tag)]);
     }
+    t.print();
     Ok(())
 }
 
