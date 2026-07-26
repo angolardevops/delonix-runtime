@@ -379,7 +379,7 @@ fn cmd_snapshot(store: &VolumeStore, action: SnapshotCmd) -> Result<()> {
     Ok(())
 }
 
-fn cmd_rm(store: &VolumeStore, name: &str) -> Result<()> {
+pub(crate) fn cmd_rm(store: &VolumeStore, name: &str) -> Result<()> {
     store.remove(name)?;
     println!("{name}");
     Ok(())

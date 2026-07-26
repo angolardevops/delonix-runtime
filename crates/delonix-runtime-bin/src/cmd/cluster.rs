@@ -1604,12 +1604,24 @@ fn fetch_kubeconfig(cp1: &SshTarget, cluster_name: &str) -> Result<PathBuf> {
     // Reading it via `sudo cat` straight into the SSH session's stdout never touches
     // disk on the remote host at all — no temp file, no window, nothing to clean up.
     let kubeconfig = remote::ssh_run(cp1, "cat /etc/kubernetes/admin.conf")?;
-    std::fs::write(&dest, kubeconfig)?;
     // Defense in depth locally too: cluster-admin credentials shouldn't be readable
-    // by other local users just because of the ambient umask.
+    // by other local users just because of the ambient umask. BUG FOUND (adversarial
+    // re-audit): `fs::write` + a later `set_permissions` leaves a TOCTOU window — the
+    // file is created at umask-default mode (664 under a common umask) for the
+    // interval between `create()` and the `chmod` running, and a local
+    // watcher/attacker can win that race. `OpenOptions::mode(0o600)` sets the mode
+    // atomically AT CREATION, the same pattern `ensure_libvirt_network`'s temp-XML
+    // fix already uses elsewhere in this codebase — never a permissive window.
     {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(&dest, std::fs::Permissions::from_mode(0o600));
+        use std::io::Write;
+        use std::os::unix::fs::OpenOptionsExt;
+        let mut f = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(&dest)?;
+        f.write_all(kubeconfig.as_bytes())?;
     }
 
     if let Some(home) = std::env::var_os("HOME") {

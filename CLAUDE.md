@@ -138,6 +138,30 @@ uma lista plana, um módulo por grupo em `crates/delonix-runtime-bin/src/cmd/`:
 - `delonix httproute` — ls/apply/rm do **reverse-proxy L7/HTTP** (`kind: HTTPRoute`). Ver a
   secção "Reverse-proxy L7" abaixo. **Não confundir** com `delonix ingress` (firewall L4 inbound).
 - `delonix stack apply [-f delonix-manifest.yaml]` — ver secção "Manifesto/apply" abaixo.
+- `delonix compose up|down|ps|logs|config [-f <ficheiro>] [-p <projecto>]` (v0.29.0) — suporte
+  NATIVO a `docker-compose.yml` (Compose Spec v2.x), `cmd/compose.rs`. Um tradutor de esquema
+  estrangeiro, da mesma família que `container::pod_to_run_opts` (Pod k8s) e
+  `dockerapi::docker_config_to_run_opts` (API Docker): parser tipado à mão (sem dependência
+  nova), traduzido directamente para `RunOpts` (containers, reaproveitando `cmd_run` tal-e-qual)
+  ou para `ManifestDoc`s que reaproveitam `image`/`network`/`volume::apply` verbatim (mesma
+  idempotência, mesmo hardening de input, zero lógica de criação duplicada). **`depends_on`** com
+  as 3 condições (`service_started`/`service_healthy`/`service_completed_successfully`) via
+  ordenação topológica do grafo de serviços (ciclo → erro claro, nunca uma ordem arbitrária) +
+  espera pelo healthcheck real (inline do serviço ou o da própria imagem) — sem mudança nenhuma
+  ao schema do motor/store. **Projecto** (`compose down/ps/logs`) = label
+  `delonix.io/compose-project=<nome>` nos containers (mesma ideia de `pod.rs`'s `POD_LABEL`);
+  redes/volumes não têm campo de labels, por isso usam nomeação DETERMINÍSTICA
+  (`<projecto>_<nome>`, a mesma convenção do `docker compose` real) — `down` reconstrói os
+  mesmos nomes a partir do ficheiro compose (reanalisado), sem registo próprio, mesma filosofia
+  do `stack describe`/`cluster ls`. **Validado ao vivo de ponta-a-ponta** (Postgres+app): `web`
+  só arrancou depois do `pg_isready` do `db` ter sucesso real; `compose down -v` removeu os 2
+  containers + rede + volume sem deixar nada para trás; `up` idempotente numa 2ª chamada.
+  **Por fazer, documentado (nunca silencioso)**: `profiles`/`extends`/`configs`/`secrets`
+  top-level (usa `kind: Secret` em vez disso)/multi-ficheiro (`-f a -f b`/`include:`),
+  `build.target` (selecção de estágio), `deploy.replicas≠1`, `networks.*.ipv4_address` fixo,
+  volumes anónimos (sem `source` explícito), porta sem host explícito (atribuição aleatória).
+  `working_dir:` é aceite mas AVISA e é ignorado — gap pré-existente do motor inteiro (nenhum
+  `RunOpts`/`Container` tem override de workdir), não algo que este módulo introduz.
 - `delonix docker-api [--addr unix://<socket>]` — fatia da **Docker Engine API** (`cmd/dockerapi.rs`)
   que basta para `docker version/ps/images/info` **e**, desde a v0.26.0, o ciclo de vida completo de
   um container via `DOCKER_HOST=unix://<socket>`: `POST /containers/create|start|stop|kill|wait|
@@ -994,7 +1018,17 @@ nome de VM em `generate_seed_iso` via `valid_vm_name` na origem; kubeconfig via
 `confine_to` (canonicaliza + confere `starts_with`); socket de gestão via
 `SO_PEERCRED`+modo 0600, espelhado no `delonix-cri`) — **re-verificados ao vivo
 numa 2.ª sessão (2026-07-23), código actual lido linha a linha, os 6 continuam
-corrigidos**, sem regressão.
+corrigidos**, sem regressão. **Auditoria adversarial INDEPENDENTE genuína feita
+em 2026-07-26** (a sessão de 2026-07-23 releu o próprio código, mas não era um
+2º par de olhos externo tentando activamente reconstruir cada exploit): 5/6
+confirmados sólidos ao tentar reproduzir o exploit original; o kubeconfig
+tinha um **TOCTOU residual real** (não hipotético) — `fs::write` cria o
+ficheiro no modo do umask (664 medido ao vivo neste host) e só DEPOIS aplica
+`chmod 600`, uma janela em que outro utilizador local podia ler as
+credenciais cluster-admin. **Corrigido**: `OpenOptions::mode(0o600)` define o
+modo ATOMICAMENTE na criação (`cmd/cluster.rs::fetch_kubeconfig`), o mesmo
+padrão que `ensure_libvirt_network` já usa — ver
+`docs/COMPARACAO-DOCKER-PODMAN.md` secção 1a/1b para o relatório completo.
 
 **Os outros 29 (12 MEDIUM + 6 LOW confirmados + 11 por-verificar) continuam TODOS
 em aberto** — re-confirmados na mesma sessão (nenhum foi refutado, nenhum
@@ -1013,7 +1047,13 @@ lib.rs` (104 `unsafe`, NUNCA antes auditado), `delonix-net/infra.rs` (holder/
 control-socket), e todo o código desta MESMA sessão anterior (Tunnel, ShareVolume,
 `cluster.rs`, specs agrupados) — código com zero revisão prévia. 2 CRITICAL + 3
 HIGH, **todos já em produção no v0.10.0**, corrigidos de imediato (ver
-[docs/releases/v0.10.1.md](docs/releases/v0.10.1.md) para o detalhe completo):
+[docs/releases/v0.10.1.md](docs/releases/v0.10.1.md) para o detalhe completo).
+**Confirmado de forma independente em 2026-07-26**: uma auditoria adversarial
+fresca sobre estes DOIS mesmos ficheiros (mapeamento uid/gid, seccomp/`clone3`,
+`safe_bind_target`, eBPF do device-cgroup, higiene de fd em todos os forks,
+`SO_PEERCRED` em todo o dispatch do socket de controlo) não encontrou nenhum
+achado novo CRITICAL/HIGH — ver `docs/COMPARACAO-DOCKER-PODMAN.md` secção 1b
+para o relatório completo. Os achados originais desta ronda:
 
 1. **`kind: ShareVolume` com `name: ".."` escapava para o Storage pai inteiro** —
    `VolumeStore::valid_name` aceitava um nome só de `.` (`".."` passava no
