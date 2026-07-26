@@ -78,7 +78,7 @@ main{padding:1.4rem 1.2rem 4rem}}
 <h5>Documentação</h5>
 <a href="../index.html">Início</a><a href="../cheatsheet.html">Cheatsheet</a><a href="../kinds.html">Kinds e templates</a><a href="../arquitectura.html">Arquitectura</a><a href="../c4.html">Modelo C4 e system design</a><a href="../cri.html">CRI — kubelet sem containerd</a><a href="../comparacao.html">Delonix vs Docker vs Podman</a><a href="../tutorial-delonix-temp.html">Projecto completo: Delonix Temp</a><a href="../delonixctl.html">delonixctl — cliente PaaS</a>
 <h5>Referência CLI</h5>
-<a href="../comandos/container.html">delonix container</a><a href="../comandos/pod.html">delonix pod</a><a href="../comandos/image.html">delonix image</a><a href="../comandos/build.html" class="on">delonix build</a><a href="../comandos/vm.html">delonix vm</a><a href="../comandos/volumes.html">delonix volumes</a><a href="../comandos/network.html">delonix network</a><a href="../comandos/stack.html">delonix stack</a><a href="../comandos/cluster.html">delonix cluster</a><a href="../comandos/secret.html">delonix secret</a><a href="../comandos/storage.html">delonix storage</a><a href="../comandos/sharevolume.html">delonix sharevolume</a><a href="../comandos/ingress.html">delonix ingress</a><a href="../comandos/egress.html">delonix egress</a><a href="../comandos/httproute.html">delonix httproute</a><a href="../comandos/tunnel.html">delonix tunnel</a><a href="../comandos/flow.html">delonix flow</a><a href="../comandos/boot.html">delonix boot</a><a href="../comandos/system.html">delonix system</a><a href="../comandos/dash.html">delonix dash</a><a href="../comandos/docker-api.html">delonix docker-api</a><a href="../comandos/kube.html">delonix kube</a><a href="../comandos/netns.html">delonix netns</a><a href="../comandos/completion.html">delonix completion</a>
+<a href="../comandos/container.html">delonix container</a><a href="../comandos/pod.html">delonix pod</a><a href="../comandos/image.html">delonix image</a><a href="../comandos/build.html" class="on">delonix build</a><a href="../comandos/vm.html">delonix vm</a><a href="../comandos/volumes.html">delonix volumes</a><a href="../comandos/network.html">delonix network</a><a href="../comandos/stack.html">delonix stack</a><a href="../comandos/cluster.html">delonix cluster</a><a href="../comandos/secret.html">delonix secret</a><a href="../comandos/storage.html">delonix storage</a><a href="../comandos/sharevolume.html">delonix sharevolume</a><a href="../comandos/ingress.html">delonix net ingress</a><a href="../comandos/egress.html">delonix net egress</a><a href="../comandos/httproute.html">delonix net httproute</a><a href="../comandos/tunnel.html">delonix net tunnel</a><a href="../comandos/flow.html">delonix net flow</a><a href="../comandos/boot.html">delonix net boot</a><a href="../comandos/system.html">delonix system</a><a href="../comandos/dash.html">delonix dash</a><a href="../comandos/docker-api.html">delonix serve docker-api</a><a href="../comandos/kube.html">delonix cluster kube</a><a href="../comandos/netns.html">delonix net netns</a><a href="../comandos/completion.html">delonix completion</a>
 <h5>Projecto</h5>
 <a href="https://github.com/angolardevops/delonix-runtime">GitHub</a>
 <a href="https://github.com/angolardevops/delonix-runtime/releases">Releases</a>
@@ -101,7 +101,7 @@ para saltar; modo root continua sem cache). Sem BuildKit real (sem
 <code>RUN --mount=secret</code>, sem <code>--platform</code>).</p>
 <div class='help'><pre><code>Build an image from a Dockerfile or Delonixfile
 
-Usage: delonix build [OPTIONS] --tag &lt;TAG&gt; [CONTEXT]
+Usage: delonix-x86_64-linux build [OPTIONS] --tag &lt;TAG&gt; [CONTEXT]
 
 Arguments:
   [CONTEXT]  Build context (default: `.`) — root for `COPY` [default: .]
@@ -112,6 +112,8 @@ Options:
   -t, --tag &lt;TAG&gt;              Tag of the resulting image (`repo:tag`)
       --build-arg &lt;BUILD_ARG&gt;  Build-time variable (`KEY=VALUE`), repeatable — only takes effect for a name the Dockerfile actually declares with `ARG KEY[=default]` (an override with no matching `ARG` is silently ignored, same as Docker)
       --no-cache               Bypasses the layer cache entirely (neither reads nor writes it) — same as Docker&#x27;s `--no-cache`
+      --secret &lt;SECRET&gt;        `id=&lt;name&gt;,src=&lt;path&gt;` — a secret a `RUN --mount=type=secret,id=&lt;name&gt;` can bind-mount for the duration of that one instruction (never baked into a layer). Repeatable
+      --platform &lt;PLATFORM&gt;    `linux/&lt;arch&gt;` (e.g. `linux/arm64`) — cross-arch build. Resolves the correct-arch base image and stamps it into the result; actually running a foreign-arch `RUN` needs the host&#x27;s own binfmt_misc/qemu-user-static already registered (not managed by delonix — a clear preflight error names the missing interpreter instead of a confusing mid-build failure)
   -h, --help                   Print help</code></pre></div>
 <h2>Exemplos</h2><div class="ex"><div class="cap">Build com tag</div><pre><code>delonix build -t minha-app:1.0 .</code></pre></div><div class="ex"><div class="cap">Delonixfile explícito</div><pre><code>delonix build -t api:dev -f Delonixfile ./servico</code></pre></div>
 <footer>Delonix Engine · Apache-2.0 · <a href="https://github.com/angolardevops/delonix-runtime">angolardevops/delonix-runtime</a>

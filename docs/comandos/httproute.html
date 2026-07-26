@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>delonix httproute · Delonix Engine</title>
+<title>delonix net httproute · Delonix Engine</title>
 <style>
 :root{--accent:#e8590c;--accent-soft:#fff0e6;--ink:#1a1a2e;--muted:#5a6472;--line:#e6e8ec;
 --bg:#ffffff;--side:#f7f8fa;--code-bg:#0f172a;--code-ink:#e2e8f0;--radius:10px}
@@ -78,13 +78,13 @@ main{padding:1.4rem 1.2rem 4rem}}
 <h5>Documentação</h5>
 <a href="../index.html">Início</a><a href="../cheatsheet.html">Cheatsheet</a><a href="../kinds.html">Kinds e templates</a><a href="../arquitectura.html">Arquitectura</a><a href="../c4.html">Modelo C4 e system design</a><a href="../cri.html">CRI — kubelet sem containerd</a><a href="../comparacao.html">Delonix vs Docker vs Podman</a><a href="../tutorial-delonix-temp.html">Projecto completo: Delonix Temp</a><a href="../delonixctl.html">delonixctl — cliente PaaS</a>
 <h5>Referência CLI</h5>
-<a href="../comandos/container.html">delonix container</a><a href="../comandos/pod.html">delonix pod</a><a href="../comandos/image.html">delonix image</a><a href="../comandos/build.html">delonix build</a><a href="../comandos/vm.html">delonix vm</a><a href="../comandos/volumes.html">delonix volumes</a><a href="../comandos/network.html">delonix network</a><a href="../comandos/stack.html">delonix stack</a><a href="../comandos/cluster.html">delonix cluster</a><a href="../comandos/secret.html">delonix secret</a><a href="../comandos/storage.html">delonix storage</a><a href="../comandos/sharevolume.html">delonix sharevolume</a><a href="../comandos/ingress.html">delonix ingress</a><a href="../comandos/egress.html">delonix egress</a><a href="../comandos/httproute.html" class="on">delonix httproute</a><a href="../comandos/tunnel.html">delonix tunnel</a><a href="../comandos/flow.html">delonix flow</a><a href="../comandos/boot.html">delonix boot</a><a href="../comandos/system.html">delonix system</a><a href="../comandos/dash.html">delonix dash</a><a href="../comandos/docker-api.html">delonix docker-api</a><a href="../comandos/kube.html">delonix kube</a><a href="../comandos/netns.html">delonix netns</a><a href="../comandos/completion.html">delonix completion</a>
+<a href="../comandos/container.html">delonix container</a><a href="../comandos/pod.html">delonix pod</a><a href="../comandos/image.html">delonix image</a><a href="../comandos/build.html">delonix build</a><a href="../comandos/vm.html">delonix vm</a><a href="../comandos/volumes.html">delonix volumes</a><a href="../comandos/network.html">delonix network</a><a href="../comandos/stack.html">delonix stack</a><a href="../comandos/cluster.html">delonix cluster</a><a href="../comandos/secret.html">delonix secret</a><a href="../comandos/storage.html">delonix storage</a><a href="../comandos/sharevolume.html">delonix sharevolume</a><a href="../comandos/ingress.html">delonix net ingress</a><a href="../comandos/egress.html">delonix net egress</a><a href="../comandos/httproute.html" class="on">delonix net httproute</a><a href="../comandos/tunnel.html">delonix net tunnel</a><a href="../comandos/flow.html">delonix net flow</a><a href="../comandos/boot.html">delonix net boot</a><a href="../comandos/system.html">delonix system</a><a href="../comandos/dash.html">delonix dash</a><a href="../comandos/docker-api.html">delonix serve docker-api</a><a href="../comandos/kube.html">delonix cluster kube</a><a href="../comandos/netns.html">delonix net netns</a><a href="../comandos/completion.html">delonix completion</a>
 <h5>Projecto</h5>
 <a href="https://github.com/angolardevops/delonix-runtime">GitHub</a>
 <a href="https://github.com/angolardevops/delonix-runtime/releases">Releases</a>
 </nav>
 <main>
-<h1>delonix httproute</h1><p class='tagline'>Reverse-proxy L7/HTTP embutido (`kind: HTTPRoute`) — routing por Host + prefixo de path.</p>
+<h1>delonix net httproute</h1><p class='tagline'>Reverse-proxy L7/HTTP embutido (`kind: HTTPRoute`) — routing por Host + prefixo de path.</p>
 <p>Um reverse-proxy HTTP/HTTPS <strong>embutido</strong> (hyper puro, sem Nginx/Envoy),
 que corre dentro do netns do holder e roteia por <code>Host</code> + prefixo de <code>path</code> para
 containers backend na SDN. TLS termina no proxy (self-signed ou <code>secretRef</code>); reload a
@@ -95,7 +95,7 @@ com <code>--expose &lt;porta&gt;</code> auto-regista-se sob
 para dar uma única URL pública a vários backends.</p>
 <div class='help'><pre><code>Embedded L7/HTTP reverse-proxy (`kind: HTTPRoute`): ls/apply/rm
 
-Usage: delonix httproute [OPTIONS] &lt;COMMAND&gt;
+Usage: delonix-x86_64-linux net httproute [OPTIONS] &lt;COMMAND&gt;
 
 Commands:
   ls     State of the proxy + active routes (from the config in effect)
@@ -109,31 +109,31 @@ Options:
 <h2 id='apply'><code>httproute apply</code></h2>
 <div class='help'><pre><code>Apply the HTTPRoutes of a manifest (brings up/reloads the proxy)
 
-Usage: delonix httproute apply [OPTIONS]
+Usage: delonix-x86_64-linux net httproute apply [OPTIONS]
 
 Options:
   -f, --file &lt;FILE&gt;   Manifest file (default `./delonix-manifest.yaml`)
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
   -h, --help          Print help</code></pre></div>
-<h3>Exemplos</h3><div class="ex"><div class="cap">Aplicar as HTTPRoutes de um manifesto (sobe/recarrega o proxy)</div><pre><code>delonix httproute apply -f delonix-manifest.yaml</code></pre></div>
+<h3>Exemplos</h3><div class="ex"><div class="cap">Aplicar as HTTPRoutes de um manifesto (sobe/recarrega o proxy)</div><pre><code>delonix net httproute apply -f delonix-manifest.yaml</code></pre></div>
 <h2 id='ls'><code>httproute ls</code></h2>
 <div class='help'><pre><code>State of the proxy + active routes (from the config in effect)
 
-Usage: delonix httproute ls [OPTIONS]
+Usage: delonix-x86_64-linux net httproute ls [OPTIONS]
 
 Options:
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
   -h, --help          Print help</code></pre></div>
-<h3>Exemplos</h3><div class="ex"><div class="cap">Estado do proxy + rotas activas</div><pre><code>delonix httproute ls</code></pre></div>
+<h3>Exemplos</h3><div class="ex"><div class="cap">Estado do proxy + rotas activas</div><pre><code>delonix net httproute ls</code></pre></div>
 <h2 id='rm'><code>httproute rm</code></h2>
 <div class='help'><pre><code>Stop the proxy and unpublish the ports (teardown)
 
-Usage: delonix httproute rm [OPTIONS]
+Usage: delonix-x86_64-linux net httproute rm [OPTIONS]
 
 Options:
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
   -h, --help          Print help</code></pre></div>
-<h3>Exemplos</h3><div class="ex"><div class="cap">Parar o proxy e despublicar as portas</div><pre><code>delonix httproute rm</code></pre></div>
+<h3>Exemplos</h3><div class="ex"><div class="cap">Parar o proxy e despublicar as portas</div><pre><code>delonix net httproute rm</code></pre></div>
 <footer>Delonix Engine · Apache-2.0 · <a href="https://github.com/angolardevops/delonix-runtime">angolardevops/delonix-runtime</a>
 · Referência gerada do <code>--help</code> real do binário por <code>docs/gen.py</code>.</footer>
 </main>

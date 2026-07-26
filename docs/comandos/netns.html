@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>delonix netns · Delonix Engine</title>
+<title>delonix net netns · Delonix Engine</title>
 <style>
 :root{--accent:#e8590c;--accent-soft:#fff0e6;--ink:#1a1a2e;--muted:#5a6472;--line:#e6e8ec;
 --bg:#ffffff;--side:#f7f8fa;--code-bg:#0f172a;--code-ink:#e2e8f0;--radius:10px}
@@ -78,20 +78,20 @@ main{padding:1.4rem 1.2rem 4rem}}
 <h5>Documentação</h5>
 <a href="../index.html">Início</a><a href="../cheatsheet.html">Cheatsheet</a><a href="../kinds.html">Kinds e templates</a><a href="../arquitectura.html">Arquitectura</a><a href="../c4.html">Modelo C4 e system design</a><a href="../cri.html">CRI — kubelet sem containerd</a><a href="../comparacao.html">Delonix vs Docker vs Podman</a><a href="../tutorial-delonix-temp.html">Projecto completo: Delonix Temp</a><a href="../delonixctl.html">delonixctl — cliente PaaS</a>
 <h5>Referência CLI</h5>
-<a href="../comandos/container.html">delonix container</a><a href="../comandos/pod.html">delonix pod</a><a href="../comandos/image.html">delonix image</a><a href="../comandos/build.html">delonix build</a><a href="../comandos/vm.html">delonix vm</a><a href="../comandos/volumes.html">delonix volumes</a><a href="../comandos/network.html">delonix network</a><a href="../comandos/stack.html">delonix stack</a><a href="../comandos/cluster.html">delonix cluster</a><a href="../comandos/secret.html">delonix secret</a><a href="../comandos/storage.html">delonix storage</a><a href="../comandos/sharevolume.html">delonix sharevolume</a><a href="../comandos/ingress.html">delonix ingress</a><a href="../comandos/egress.html">delonix egress</a><a href="../comandos/httproute.html">delonix httproute</a><a href="../comandos/tunnel.html">delonix tunnel</a><a href="../comandos/flow.html">delonix flow</a><a href="../comandos/boot.html">delonix boot</a><a href="../comandos/system.html">delonix system</a><a href="../comandos/dash.html">delonix dash</a><a href="../comandos/docker-api.html">delonix docker-api</a><a href="../comandos/kube.html">delonix kube</a><a href="../comandos/netns.html" class="on">delonix netns</a><a href="../comandos/completion.html">delonix completion</a>
+<a href="../comandos/container.html">delonix container</a><a href="../comandos/pod.html">delonix pod</a><a href="../comandos/image.html">delonix image</a><a href="../comandos/build.html">delonix build</a><a href="../comandos/vm.html">delonix vm</a><a href="../comandos/volumes.html">delonix volumes</a><a href="../comandos/network.html">delonix network</a><a href="../comandos/stack.html">delonix stack</a><a href="../comandos/cluster.html">delonix cluster</a><a href="../comandos/secret.html">delonix secret</a><a href="../comandos/storage.html">delonix storage</a><a href="../comandos/sharevolume.html">delonix sharevolume</a><a href="../comandos/ingress.html">delonix net ingress</a><a href="../comandos/egress.html">delonix net egress</a><a href="../comandos/httproute.html">delonix net httproute</a><a href="../comandos/tunnel.html">delonix net tunnel</a><a href="../comandos/flow.html">delonix net flow</a><a href="../comandos/boot.html">delonix net boot</a><a href="../comandos/system.html">delonix system</a><a href="../comandos/dash.html">delonix dash</a><a href="../comandos/docker-api.html">delonix serve docker-api</a><a href="../comandos/kube.html">delonix cluster kube</a><a href="../comandos/netns.html" class="on">delonix net netns</a><a href="../comandos/completion.html">delonix completion</a>
 <h5>Projecto</h5>
 <a href="https://github.com/angolardevops/delonix-runtime">GitHub</a>
 <a href="https://github.com/angolardevops/delonix-runtime/releases">Releases</a>
 </nav>
 <main>
-<h1>delonix netns</h1><p class='tagline'>Gestão de baixo nível da infra de ingress rootless.</p>
+<h1>delonix net netns</h1><p class='tagline'>Gestão de baixo nível da infra de ingress rootless.</p>
 <p>A camada crua por baixo do <code>ingress</code>/<code>egress</code>: subir/descer o
 holder do ingress, attach/detach de netns, publish/unpublish de portas e firewall por container. A
 maioria dos utilizadores nunca precisa disto — usa os grupos de alto nível — mas está exposto para
 depuração e integração.</p>
 <div class='help'><pre><code>Low-level management of the rootless ingress infra (up/status/attach/publish/firewall)
 
-Usage: delonix netns [OPTIONS] &lt;COMMAND&gt;
+Usage: delonix-x86_64-linux net netns [OPTIONS] &lt;COMMAND&gt;
 
 Commands:
   up         Bring the ingress infra up (idempotent): holder netns + delonix0 + single slirp
@@ -111,22 +111,22 @@ Options:
 <h2 id='status'><code>netns status</code></h2>
 <div class='help'><pre><code>Show the ingress infra status (holder/slirp pids, bridge, refcount)
 
-Usage: delonix netns status [OPTIONS]
+Usage: delonix-x86_64-linux net netns status [OPTIONS]
 
 Options:
       --json          Emit JSON instead of a human summary
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
   -h, --help          Print help</code></pre></div>
-<h3>Exemplos</h3><div class="ex"><div class="cap">Estado da infra de ingress</div><pre><code>delonix netns status</code></pre></div>
+<h3>Exemplos</h3><div class="ex"><div class="cap">Estado da infra de ingress</div><pre><code>delonix net netns status</code></pre></div>
 <h2 id='up'><code>netns up</code></h2>
 <div class='help'><pre><code>Bring the ingress infra up (idempotent): holder netns + delonix0 + single slirp
 
-Usage: delonix netns up [OPTIONS]
+Usage: delonix-x86_64-linux net netns up [OPTIONS]
 
 Options:
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
   -h, --help          Print help</code></pre></div>
-<h3>Exemplos</h3><div class="ex"><div class="cap">Subir o holder do ingress</div><pre><code>delonix netns up</code></pre></div>
+<h3>Exemplos</h3><div class="ex"><div class="cap">Subir o holder do ingress</div><pre><code>delonix net netns up</code></pre></div>
 <footer>Delonix Engine · Apache-2.0 · <a href="https://github.com/angolardevops/delonix-runtime">angolardevops/delonix-runtime</a>
 · Referência gerada do <code>--help</code> real do binário por <code>docs/gen.py</code>.</footer>
 </main>
