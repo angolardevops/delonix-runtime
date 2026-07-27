@@ -1229,11 +1229,30 @@ porque o utilizador julga estar protegido. Três corrigidos para fail-closed
    comportamento aceite no caminho root para o mesmo cenário). Teste de
    regressão puro (sem cgroupfs real): `try_delegated_base_aplica_cpu_weight_
    cpuset_e_io_weight_na_leaf`.
-5. **`container update --memory/--cpus`** — continua **não implementado**
-   (não existe a flag em `UpdateOpts`; ver `docs/COMPARACAO-DOCKER-PODMAN.md`
-   secção 2b para a correcção de registo: uma nota anterior descrevia isto
-   como "no-op silencioso", o que estava errado — não há caminho de código
-   nenhum para invocar, o `clap` recusaria a chamada antes de tudo).
+5. **`container update --memory/--cpus`** — **FEITO**. A função `runtime::
+   update_limits` já existia no motor (rótulo próprio "`docker update`" no
+   doc-comment) mas nunca tinha um único chamador — exactamente o mesmo padrão
+   já visto com `mount_live`/`set_net_rate`: código morto por chamar, com um
+   bug latente que só apareceu ao ligar o primeiro caller. **BUG ENCONTRADO E
+   CORRIGIDO ao ligar isto**: `update_limits` calculava o cgroup por
+   `container.cgroup()` — a fórmula ESTÁTICA `delonix.slice/delonix-<id>`, só
+   válida em modo root. Em rootless delegado (o caminho normal), o cgroup real
+   vive algures como `.../dlx-containers/dlx-<id>` (descoberto em runtime via
+   `/proc/<pid>/cgroup`) — exactamente a razão de existir de `live_cgroup()`
+   (já usada por `set_frozen`/`is_frozen` do `pause`/`unpause`), que
+   `update_limits` simplesmente não usava. Resultado antes do fix: o comando
+   dizia "actualizado", o registo mudava, mas o cgroup REAL do container a
+   correr ficava intocado — só um `restart` (que recria o cgroup a partir do
+   registo) aplicava o novo limite. Corrigido trocando `container.cgroup()`
+   por `live_cgroup(container)` em `update_limits`. **Validado ao vivo**: `-m
+   64M --cpus 0.5` → `update --memory 128M --cpus 1.0` → `memory.max`/`cpu.max`
+   do cgroup REAL (sem `restart`) confirmam `134217728`/`100000 100000` de
+   imediato. Sem teste unitário puro (ao contrário do fix irmão de cpuset/
+   cpu.weight/io.weight): `DELONIX_SLICE` é uma constante de caminho absoluto,
+   não injectável como o `base` de `try_delegated_base`, e `live_cgroup` lê
+   `/proc/<pid>/cgroup` de um processo real — validação ao vivo é a prova
+   disponível aqui, mesmo padrão já aceite noutras correcções de fronteira de
+   cgroup/namespace nesta base de código.
 
 ## Auditoria de segurança #2 (código VM desta série: console/rede/cloud-init)
 

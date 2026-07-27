@@ -1131,6 +1131,12 @@ pub enum ContainerCmd {
         /// Remove the bandwidth cap.
         #[arg(long = "net-rate-clear", conflicts_with = "net_rate")]
         net_rate_clear: bool,
+        /// New memory limit hot (`64M`, `2G`, `max`).
+        #[arg(short = 'm', long)]
+        memory: Option<String>,
+        /// New CPU quota hot (number of cores, e.g. `0.5`, `2`).
+        #[arg(short = 'c', long)]
+        cpus: Option<String>,
     },
     /// Resource usage (CPU/memory/PIDs) of the running containers — one
     /// sample and exits (no stream). With no IDs, shows all running ones.
@@ -1210,8 +1216,8 @@ pub fn run(action: ContainerCmd) -> Result<()> {
     let (images, store) = open_stores()?;
     match action {
         // Handled at the top of `run` (returns early).
-        ContainerCmd::Init { .. } => unreachable!("tratado acima"),
-        ContainerCmd::Dash { .. } => unreachable!("tratado acima"),
+        ContainerCmd::Init { .. } => unreachable!("handled above"),
+        ContainerCmd::Dash { .. } => unreachable!("handled above"),
         ContainerCmd::Run {
             detach,
             name,
@@ -1377,6 +1383,8 @@ pub fn run(action: ContainerCmd) -> Result<()> {
             net_rate,
             net_burst,
             net_rate_clear,
+            memory,
+            cpus,
         } => cmd_update(
             &store,
             &id,
@@ -1390,6 +1398,8 @@ pub fn run(action: ContainerCmd) -> Result<()> {
                 net_rate,
                 net_burst,
                 net_rate_clear,
+                memory,
+                cpus,
             },
         ),
         ContainerCmd::Stats { ids } => cmd_stats(&store, &ids),
@@ -3869,6 +3879,8 @@ pub(crate) struct UpdateOpts {
     pub(crate) net_rate: Option<String>,
     pub(crate) net_burst: Option<String>,
     pub(crate) net_rate_clear: bool,
+    pub(crate) memory: Option<String>,
+    pub(crate) cpus: Option<String>,
 }
 
 impl UpdateOpts {
@@ -3881,6 +3893,8 @@ impl UpdateOpts {
             && self.net_disconnect.is_empty()
             && self.net_rate.is_none()
             && !self.net_rate_clear
+            && self.memory.is_none()
+            && self.cpus.is_none()
     }
 }
 
@@ -3905,7 +3919,10 @@ fn parse_rate_bits(s: &str) -> Result<u64> {
         .parse()
         .map_err(|_| Error::Invalid(format!("invalid rate: {s} (e.g. 10mbit, 512kbit, 1gbit)")))?;
     if v <= 0.0 {
-        return Err(Error::Invalid(format!("taxa tem de ser positiva: {s}")));
+        return Err(Error::Invalid(super::po::tf(
+            "rate must be positive: {s}",
+            &[("s", s)],
+        )));
     }
     Ok((v * mult as f64) as u64)
 }
@@ -3951,7 +3968,7 @@ fn next_extra_idx(c: &Container) -> u32 {
 /// fails fast and whatever went through stays (same semantics as `stack apply`).
 fn cmd_update(store: &Store, id: &str, o: UpdateOpts) -> Result<()> {
     if o.is_empty() {
-        return Err(Error::Invalid("nothing to do: pass at least one change (--publish-add/--publish-rm/--volume-add/--volume-rm/--net-connect/--net-disconnect/--net-rate/--net-rate-clear)".into()));
+        return Err(Error::Invalid("nothing to do: pass at least one change (--publish-add/--publish-rm/--volume-add/--volume-rm/--net-connect/--net-disconnect/--net-rate/--net-rate-clear/--memory/--cpus)".into()));
     }
     let mut c = find(store, id)?;
     runtime::reconcile_status(&mut c);
@@ -4087,6 +4104,32 @@ fn cmd_update(store: &Store, id: &str, o: UpdateOpts) -> Result<()> {
             super::po::tf(
                 "{name}: bandwidth limited to {rate} (burst {burst_s})",
                 &[("name", &c.name), ("rate", rate), ("burst_s", &burst_s)],
+            )
+        );
+    }
+
+    // --- memory/CPU limits ---
+    if o.memory.is_some() || o.cpus.is_some() {
+        runtime::update_limits(&c, o.memory.as_deref(), o.cpus.as_deref())?;
+        let (m, cp) = (o.memory.clone(), o.cpus.clone());
+        store.update(&c.id, |cur| {
+            if let Some(m) = &m {
+                cur.memory_max = m.clone();
+            }
+            if let Some(cp) = &cp {
+                cur.cpus = cp.clone();
+            }
+            true
+        })?;
+        println!(
+            "{}",
+            super::po::tf(
+                "{name}: resource limits updated (memory={memory}, cpus={cpus})",
+                &[
+                    ("name", &c.name),
+                    ("memory", o.memory.as_deref().unwrap_or("unchanged")),
+                    ("cpus", o.cpus.as_deref().unwrap_or("unchanged")),
+                ],
             )
         );
     }

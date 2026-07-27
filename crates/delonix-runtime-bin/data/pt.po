@@ -3312,3 +3312,9 @@ msgstr "mountpoint"
 
 msgid "quota"
 msgstr "quota"
+
+msgid "rate must be positive: {s}"
+msgstr "taxa tem de ser positiva: {s}"
+
+msgid "{name}: resource limits updated (memory={memory}, cpus={cpus})"
+msgstr "{name}: limites de recursos actualizados (memory={memory}, cpus={cpus})"
