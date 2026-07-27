@@ -22,6 +22,10 @@
 #   --with-cri     instala também o delonix-cri (nó Kubernetes)
 #   --low-ports    permite publicar portas <1024 (ex.: 80/443) sem root.
 #                  NÃO é o default — ver a secção "portas privilegiadas" abaixo.
+#   --insecure-skip-signature
+#                  NÃO verificar a assinatura da release. Só para depurar ou
+#                  para uma release antiga sem assinatura. Perde a única
+#                  garantia de que o binário veio mesmo de nós.
 #   --user         binário em ~/.local/bin em vez de /usr/local/bin
 #   --version vX   versão específica (default: latest)
 #
@@ -51,6 +55,21 @@ set -euo pipefail
 {
 
 REPO="angolardevops/delonix-runtime"
+# Chave PÚBLICA minisign das releases oficiais (só a linha base64, sem o
+# comentário). É a raiz de confiança do instalador: o SHA256SUMS é assinado em
+# CI com a privada correspondente, que nunca sai do secret do repositório.
+#
+# PORQUE ISTO EXISTE: verificar o binário contra um SHA256SUMS descarregado da
+# MESMA URL prova só que a transferência não corrompeu — não prova quem o
+# produziu. Quem consiga publicar uma release adulterada publica também o
+# SHA256SUMS a condizer, e a verificação passa. Com a assinatura, forjar exige
+# a chave privada.
+#
+# LIMITE HONESTO: isto protege os BINÁRIOS. O próprio install.sh, quando corrido
+# por `curl … | bash`, é executado sem verificação — a sua autenticidade depende
+# do TLS e do GitHub. Para fechar também esse elo, descarrega-o primeiro e
+# confere-o contra o SHA256SUMS assinado antes de o correr (ver README).
+MINISIGN_PUBKEY="__POR_PREENCHER__"
 VERSION="latest"
 WITH_VM=1
 WITH_TUNE=1
@@ -58,6 +77,7 @@ WITH_BINARY=1
 WITH_CRI=0
 USER_INSTALL=0
 LOW_PORTS=0
+SKIP_SIG=0
 
 # `command -v` falha para binários de admin (/usr/sbin) quando o PATH do
 # utilizador não os inclui (Debian) — mas o delonix invoca-os pelo PATH do
@@ -124,6 +144,7 @@ while [ $# -gt 0 ]; do
     --no-binary)  WITH_BINARY=0 ;;
     --with-cri)   WITH_CRI=1 ;;
     --low-ports)  LOW_PORTS=1 ;;
+    --insecure-skip-signature) SKIP_SIG=1 ;;
     --user)       USER_INSTALL=1 ;;
     --version)    shift; VERSION="${1:?--version requires an argument}" ;;
     -h|--help)    grep '^#' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
@@ -320,12 +341,38 @@ if [ "$WITH_BINARY" = 1 ]; then
     ( cd "$TMP" && grep -E " $1\$" SHA256SUMS | sha256sum -c - >/dev/null 2>&1 ) \
       || die "SHA256 verification FAILED for $1 — corrupted or tampered download, aborting"
   }
+  # A assinatura é o que distingue "não corrompeu" de "veio mesmo de nós". Corre
+  # ANTES de qualquer verify_asset: sem SHA256SUMS autêntico, os hashes que ele
+  # contém não valem nada. FAIL-CLOSED — qualquer coisa que corra mal aborta.
+  verify_signature() {
+    if [ "$SKIP_SIG" = 1 ]; then
+      warn "signature verification SKIPPED (--insecure-skip-signature) — you are trusting whatever the network served"
+      return 0
+    fi
+    if [ "$MINISIGN_PUBKEY" = "__POR_PREENCHER__" ]; then
+      warn "this install.sh has no release public key embedded — cannot verify authenticity, only transfer integrity"
+      return 0
+    fi
+    if ! command -v minisign >/dev/null 2>&1; then
+      step binary signature "installing minisign to verify the release..."
+      pkg_install minisign >/dev/null 2>&1 || true
+    fi
+    command -v minisign >/dev/null 2>&1 \
+      || die "minisign is needed to verify the release signature and could not be installed — install it (apt/dnf/pacman install minisign) and re-run, or use --insecure-skip-signature if you accept the risk"
+    curl -fsSL -o "$TMP/SHA256SUMS.minisig" "$BASE_URL/SHA256SUMS.minisig" \
+      || die "this release has no signature (SHA256SUMS.minisig) — releases before signing was introduced need --insecure-skip-signature"
+    printf 'untrusted comment: delonix-runtime release key\n%s\n' "$MINISIGN_PUBKEY" > "$TMP/delonix.pub"
+    ( cd "$TMP" && minisign -V -p delonix.pub -m SHA256SUMS >/dev/null 2>&1 ) \
+      || die "SIGNATURE verification FAILED for SHA256SUMS — this release was NOT signed by the delonix key. Do not install. Report it at https://github.com/$REPO/security"
+    step binary signature "minisign verified (SHA256SUMS)"
+  }
   dl_main() {
     curl -fsSL -o "$TMP/SHA256SUMS" "$BASE_URL/SHA256SUMS" || return 1
     fetch_asset delonix > "$TMP/.asset-delonix"
   }
   spin binary delonix "downloading ($VERSION, $VARIANT_LABEL)..." dl_main \
     || die "download failed — check the network and that the release exists"
+  verify_signature
   DELONIX_ASSET=$(cat "$TMP/.asset-delonix")
   verify_asset "$DELONIX_ASSET"
   step binary delonix "sha256 verified ($DELONIX_ASSET)"

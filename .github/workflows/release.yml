@@ -7,7 +7,17 @@
 # `latest` (24.04, glibc 2.39) excluiria as enterprise ainda em uso.
 #
 # Assets publicados (nomes estáveis — o scripts/install.sh depende deles):
-#   delonix-x86_64-linux, delonix-cri-x86_64-linux, SHA256SUMS, install.sh
+#   delonix-x86_64-linux, delonix-cri-x86_64-linux, SHA256SUMS,
+#   SHA256SUMS.minisig, install.sh
+#
+# ASSINATURA (porquê): o SHA256SUMS sozinho prova INTEGRIDADE DE TRANSFERÊNCIA,
+# não AUTENTICIDADE DE ORIGEM — vem da mesma URL que o binário, por isso quem
+# consiga publicar uma release adulterada (conta comprometida, token de CI
+# roubado) publica um SHA256SUMS a condizer e a verificação passa. A assinatura
+# minisign fecha isso: a chave privada nunca está na release, e o install.sh
+# traz a pública embutida. Sem o secret MINISIGN_SECRET_KEY configurado, a
+# release sai SEM assinatura e o install.sh recusa instalar (fail-closed) a não
+# ser com --insecure-skip-signature.
 #
 # Notas da release: docs/releases/<tag>.md se existir; senão, autogeradas.
 name: Release
@@ -56,6 +66,33 @@ jobs:
           V=$(dist-release/delonix-x86_64-linux --version)
           echo "$V"
           echo "$V" | grep -q "${GITHUB_REF_NAME#v}" || { echo "::error::versão do binário ($V) != tag ($GITHUB_REF_NAME) — esqueceu-se o bump no Cargo.toml?"; exit 1; }
+      - name: Assina o SHA256SUMS (minisign)
+        env:
+          MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
+          MINISIGN_PASSWORD: ${{ secrets.MINISIGN_PASSWORD }}
+        run: |
+          if [ -z "${MINISIGN_SECRET_KEY:-}" ]; then
+            echo "::error::secret MINISIGN_SECRET_KEY em falta — a release sairia SEM assinatura e o install.sh recusa-a. Ver docs/SECURITY-RELEASES.md"
+            exit 1
+          fi
+          sudo apt-get install -y minisign
+          # A chave privada só existe no disco do runner durante este passo.
+          umask 077
+          printf '%s\n' "$MINISIGN_SECRET_KEY" > /tmp/minisign.key
+          cd dist-release
+          minisign -S -s /tmp/minisign.key -m SHA256SUMS \
+            -c "delonix-runtime $GITHUB_REF_NAME" -t "delonix-runtime $GITHUB_REF_NAME"
+          shred -u /tmp/minisign.key 2>/dev/null || rm -f /tmp/minisign.key
+          # Confirma que a assinatura verifica com a pública que o install.sh
+          # traz embutida — apanha uma troca de chave ANTES de publicar, não
+          # depois, quando todos os instaladores já falham.
+          PUB=$(grep -oP '^MINISIGN_PUBKEY="\K[^"]+' ../scripts/install.sh)
+          [ "$PUB" != "__POR_PREENCHER__" ] \
+            || { echo "::error::MINISIGN_PUBKEY ainda é o placeholder em scripts/install.sh — preenche a chave pública antes de assinar releases (ver docs/SECURITY-RELEASES.md)"; exit 1; }
+          echo "untrusted comment: delonix-runtime" > /tmp/pub.pub
+          echo "$PUB" >> /tmp/pub.pub
+          minisign -V -p /tmp/pub.pub -m SHA256SUMS \
+            || { echo "::error::a assinatura NÃO verifica com a chave pública embutida no install.sh — chave trocada?"; exit 1; }
       - name: Publica a release
         env:
           GH_TOKEN: ${{ github.token }}
