@@ -4,6 +4,65 @@
 > (regenerado automaticamente pelo pipeline de release a cada tag publicada).
 > Não editar à mão — edita a nota da release respectiva.
 
+## v0.34.3 — fixes a v0.34.1 regression: publishing a port on a custom network was broken
+
+Real bug report from a live host, one command after the v0.34.2 recovery: bringing up a container
+on a custom SDN network with a published port (`kaeso-odoo`, port 8069) failed with
+
+```
+delonix: system call `slirp api-socket` failed: No such file or directory (os error 2)
+error invalid argument: the container did not start inside the network '...' (exit Some(1))
+```
+
+**Everything with `-p` on a custom network has been broken since v0.34.1** — `container run --net
+<custom> -p <port>` and `container start` of such a container. Containers with no published ports
+(and everything on `--net host`/`--net none`, which uses its own per-container slirp) were never
+affected, which is why it took a real workload with a port to surface it.
+
+### Root cause
+
+v0.34.1 (`a112754`) moved the ingress sockets out of `DELONIX_ROOT` into `runtime_dir()`
+(`/tmp/delonix-net-<uid>`) to stop a deep `DELONIX_ROOT` from blowing the 108-byte `sun_path`
+limit. That introduced a **second uid-derived path** — and only the first one was being pinned
+across the privilege boundary.
+
+`--net <custom>` publishes ports from the **2nd re-exec pass**, which runs inside the holder's
+userns via `nsenter -U … ip netns exec`, where our uid is mapped to **0**. `reexec_into_netns`
+passed `DELONIX_ROOT` explicitly (exactly because `base_root()` consults `geteuid()`), but nothing
+pinned the new socket dir. So the re-exec'd process resolved `runtime_dir()` for uid 0 —
+`/run/delonix-net` — and `slirp_add_hostfwd` spent its retry budget on a directory that does not
+exist. Before v0.34.1 the sockets were `ingress_dir()`-derived, i.e. covered by the
+`DELONIX_ROOT` that was already being passed; pinning the root alone had silently stopped being
+enough.
+
+The failure was invisible to the test suite for a structural reason worth recording: the divergence
+only exists **across a userns boundary**, in a child process, and no unit test can map a uid.
+
+### Fix
+
+- New `infra::runtime_dir_env() -> (&'static str, PathBuf)` — the single accessor for pinning
+  `runtime_dir` on a child that runs with a different uid view. Returned as one pair so no caller
+  can pass a var/value mismatch, and so `grep runtime_dir_env` finds every child that needs it.
+  `start_holder` (which had this right already) now uses it too, so there is one source of truth.
+- `cmd::container::reexec_env(id, ip)` — one env list shared by **both** re-exec sites
+  (`reexec_into_netns` for `run`, `reexec_start` for `start`), so a third one cannot be added with
+  half of it missing. Regression test asserts both uid-derived paths are pinned, and that the
+  runtime dir is pinned to *our* value rather than left to the child.
+
+### Validated live
+
+Reproduced on the reporting host with v0.34.1 (`run --net <custom> -p 18069:80` → the exact error),
+then with the fix: the container starts, `curl 127.0.0.1:18069` returns **HTTP 200**, and a
+`stop` + `start` cycle (the second re-exec site) serves **HTTP 200** again.
+
+### Known, unchanged
+
+The ingress `refcount`/`refs` leak is still open — a container whose start fails mid-flight can
+leave a ref behind for an id that no longer exists. It is harmless to traffic (it only delays the
+infra teardown) and predates this release.
+
+---
+
 ## v0.34.2 — a holder left behind by an in-place upgrade now says so (instead of a bare `ENOENT`)
 
 Bug fix release, from a real report on a live host: `delonix cluster create --name dev` failed at

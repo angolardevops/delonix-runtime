@@ -1855,6 +1855,30 @@ de todos os containers da SDN — é decisão do operador, não de um `cluster c
 para uma diagnose FUTURA não culpar um binário que já não corre. Validado ao vivo nos dois ramos
 (com e sem socket legado), mais o caminho felizinho intocado (15ms, um `stat`).
 
+### Regressão v0.34.1 → corrigida no v0.34.3: `-p` numa rede custom (o 2.º caminho derivado do uid)
+
+Bug report real, um comando depois da recuperação do v0.34.2: `container run --net <custom> -p
+<porta>` (e o `start` de um container assim) falhava com ``slirp api-socket: No such file or
+directory``. Containers SEM portas publicadas nunca foram afectados — foi preciso uma carga real
+com porta (`kaeso-odoo`, 8069) para o expor.
+
+**Causa**: o `a112754` (v0.34.1) criou um **SEGUNDO caminho derivado do uid** (`runtime_dir()`,
+`/tmp/delonix-net-<uid>`) e só o primeiro estava a ser fixado através da fronteira de privilégio.
+O publish de uma rede custom corre na **2.ª passagem do re-exec** (`nsenter -U … ip netns exec`,
+uid mapeado a **0**): o `reexec_into_netns` passava `DELONIX_ROOT` de propósito (porque
+`base_root()` consulta o `geteuid()`) mas nada fixava o dir novo dos sockets → a 2.ª passagem
+resolvia `/run/delonix-net` e gastava os retries num directório inexistente. Antes do v0.34.1 os
+sockets vinham de `ingress_dir()`, logo o `DELONIX_ROOT` que já era passado tapava-os — **fixar só
+o root deixou de ser suficiente sem ninguém notar**.
+
+**Lição a reter (a par da armadilha do `container.userns` e do `status()` por pidfile)**: sempre que
+uma constante de caminho passar a derivar do `geteuid()`, grepar por quem a resolve DO OUTRO LADO de
+um userns — `.env("DELONIX_ROOT"` marca todos esses sítios. Nenhum teste unitário apanha isto: a
+divergência só existe num processo filho com uid mapeado. Corrigido com `infra::runtime_dir_env()`
+(um par `(var, valor)` — impossível passar var/valor trocados, e `grep runtime_dir_env` acha todos
+os filhos que precisam dele) e `cmd::container::reexec_env` (uma lista partilhada pelos DOIS sítios
+de re-exec, para um terceiro não nascer com metade).
+
 ## Visão de produto: Universal Runtime (Workload Abstraction Layer)
 
 **Norte do projeto**: o Delonix Runtime não deve evoluir como "mais um motor de VMs" nem como

@@ -190,6 +190,25 @@ fn runtime_dir() -> PathBuf {
     PathBuf::from("/run/delonix-net")
 }
 
+/// The `(env var, value)` pair that PINS [`runtime_dir`] for a child that will run
+/// with a different **uid view** than ours: the holder ([`start_holder`]) and the
+/// `--net <custom>` re-exec passes (`nsenter -U … ip netns exec`, see
+/// `cmd::container::reexec_into_netns`). Inside the holder's userns `geteuid()` is
+/// **0**, so a child left to compute [`runtime_dir`] on its own resolves
+/// `/run/delonix-net` — a directory that does not exist — and every socket
+/// operation there fails with a bare `ENOENT`.
+///
+/// **Reported live (v0.34.1 regression):** `container run/start --net <custom> -p
+/// <port>` failed with ``slirp api-socket … No such file or directory`` because the
+/// re-exec passed `DELONIX_ROOT` but not this. Until v0.34.1 the sockets lived under
+/// `ingress_dir()` (i.e. `DELONIX_ROOT`-derived), so pinning the root alone happened
+/// to be enough; moving them to [`runtime_dir`] made this a second, independent
+/// thing to pin. Returned as ONE pair precisely so no caller can pass a var/value
+/// mismatch, and so `grep runtime_dir_env` finds every child that needs it.
+pub fn runtime_dir_env() -> (&'static str, PathBuf) {
+    (RUNTIME_DIR_ENV, runtime_dir())
+}
+
 /// Creates [`runtime_dir`] with restrictive permissions (`0700`) — defense in
 /// depth alongside the control socket's own `0600`+`SO_PEERCRED` guard.
 fn ensure_runtime_dir() -> Result<()> {
@@ -610,8 +629,8 @@ fn start_holder() -> Result<i32> {
         .args(["netns", "holder"])
         // the holder runs with uid->0 in the userns; forces the paths to the real base.
         .env("DELONIX_ROOT", base_root())
-        // same reason, same fix: forces the SHORT socket dir too (see `runtime_dir`'s doc).
-        .env(RUNTIME_DIR_ENV, runtime_dir())
+        // same reason, same fix: forces the SHORT socket dir too (see `runtime_dir_env`).
+        .env(runtime_dir_env().0, runtime_dir_env().1)
         .env("DELONIX_INTERNAL", "1")
         .stdin(Stdio::null())
         .stdout(Stdio::null())
