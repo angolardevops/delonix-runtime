@@ -77,6 +77,63 @@ fn control_sock_path() -> PathBuf {
     runtime_dir().join("control.sock")
 }
 
+/// Where the control socket lived BEFORE v0.34.2 (directly under `ingress_dir()`,
+/// i.e. derived from `DELONIX_ROOT`) — see [`runtime_dir`] for why it moved. Kept
+/// for ONE purpose only: a holder started by a pre-v0.34.2 binary is still bound
+/// HERE, so finding this file lets [`stale_holder_message`] name the cause
+/// (in-place upgrade) instead of leaving the operator with a bare `ENOENT`.
+/// Never bound or connected to — diagnosis only.
+fn legacy_control_sock_path() -> PathBuf {
+    ingress_dir().join("control.sock")
+}
+
+/// Waits (up to ~2s, the same budget as [`control_query`]'s retry loop) for the
+/// control socket to appear. Returns immediately on the happy path — the file is
+/// already there — so this costs one `stat` when everything is fine. The wait
+/// covers the legitimate startup race: another process spawned the holder
+/// microseconds ago and it hasn't `bind`ed yet.
+fn wait_for_control_sock() -> bool {
+    let sock = control_sock_path();
+    for _ in 0..50 {
+        if sock.exists() {
+            return true;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(40));
+    }
+    sock.exists()
+}
+
+/// The actionable message for "holder ALIVE but its control socket is absent" —
+/// the in-place-upgrade trap. [`status`] only reads pidfiles, so an old holder
+/// left running by an upgrade looks perfectly `up` while every control command
+/// hits `ENOENT` on a path that build never knew about. Reported live: a holder
+/// from a pre-v0.34.2 binary made `cluster create` fail at "Preparing nodes"
+/// with nothing but `control socket: No such file or directory`.
+///
+/// Deliberately does NOT auto-restart the infra: killing a live holder frees its
+/// netns, dropping the network of every container attached to the SDN. That is the
+/// operator's call, so the message says exactly what to run instead. PURE.
+fn stale_holder_message(holder_pid: i32, sock: &Path, legacy: Option<&Path>) -> String {
+    let cause = match legacy {
+        Some(old) => format!(
+            "it is bound to `{}` instead — the path the control socket used BEFORE v0.34.2, \
+             so this holder was started by an older delonix build (in-place upgrade)",
+            old.display()
+        ),
+        None => "it was very likely started by a different delonix build (in-place upgrade), \
+                 or its runtime directory was removed while it ran"
+            .to_string(),
+    };
+    format!(
+        "ingress holder (pid {holder_pid}) is alive but `{}` does not exist: {cause}. \
+         Restart the infra to recover: `delonix net netns down` (kills holder + slirp by \
+         pidfile, so it works whatever build started them; the next command respawns both), \
+         then `delonix container restart <name>` for each container on the SDN — they keep \
+         running but lose their veth along with the old netns.",
+        sock.display()
+    )
+}
+
 /// Env var the PARENT passes explicitly to the holder — same reason as
 /// `DELONIX_ROOT` above: the holder's uid is mapped to 0 INSIDE its userns,
 /// so a `geteuid()`-based computation done independently in each process
@@ -451,6 +508,23 @@ pub fn status() -> InfraStatus {
 pub fn ensure_up() -> Result<()> {
     let st = status();
     if st.up {
+        // "up" is a PIDFILE reading, not reachability: a holder left over from an
+        // in-place upgrade is alive and bound to a socket path this build no longer
+        // looks at. Fail LOUD and actionable at the entry point instead of letting
+        // every later attach/publish fail with a bare `ENOENT`.
+        if let Some(pid) = st.holder_pid {
+            if !wait_for_control_sock() {
+                let legacy = legacy_control_sock_path();
+                return Err(Error::Runtime {
+                    context: "control socket",
+                    message: stale_holder_message(
+                        pid,
+                        &control_sock_path(),
+                        legacy.exists().then_some(legacy.as_path()),
+                    ),
+                });
+            }
+        }
         return Ok(());
     }
     // partial state (e.g.: dead holder) → clean up before recreating.
@@ -477,6 +551,12 @@ pub fn teardown() {
     kill_pidfile(&holder_pid_path());
     let _ = std::fs::remove_file(slirp_sock_path());
     let _ = std::fs::remove_file(control_sock_path());
+    // Also the PRE-v0.34.2 locations: this is the command that recovers a host from
+    // an in-place upgrade (see `stale_holder_message`), so it has to leave no socket
+    // behind from the build it just killed — a leftover legacy file would make a
+    // LATER diagnosis blame an old binary that is no longer running.
+    let _ = std::fs::remove_file(legacy_control_sock_path());
+    let _ = std::fs::remove_file(ingress_dir().join("slirp.sock"));
     let _ = std::fs::remove_file(status_path());
     // Clean state — no stale markers holding the infra up in the next cycle.
     let _ = std::fs::remove_dir_all(refs_dir());
@@ -3073,12 +3153,12 @@ fn control_query(cmd: &str) -> Result<String> {
     // SETUP paths call `ensure_up()` first (holder alive → passes); the
     // TEARDOWN ones with the holder down exit here. The retry below still covers the
     // legitimate startup race (holder ALREADY alive, socket still coming up).
-    if status().holder_pid.is_none() {
+    let Some(holder_pid) = status().holder_pid else {
         return Err(Error::Runtime {
             context: "control socket",
             message: "ingress holder is down".into(),
         });
-    }
+    };
     let sock = control_sock_path();
     let mut last = String::from("control socket unavailable");
     for _ in 0..50 {
@@ -3110,9 +3190,23 @@ fn control_query(cmd: &str) -> Result<String> {
             }
         }
     }
+    // The retries are exhausted. A socket that never even APPEARED is not the same
+    // failure as one that exists and refuses the connection — say which (the
+    // teardown paths reach here too, hence the check on this side as well: they
+    // don't go through `ensure_up`).
+    let message = if sock.exists() {
+        last
+    } else {
+        let legacy = legacy_control_sock_path();
+        stale_holder_message(
+            holder_pid,
+            &sock,
+            legacy.exists().then_some(legacy.as_path()),
+        )
+    };
     Err(Error::Runtime {
         context: "control socket",
-        message: last,
+        message,
     })
 }
 
@@ -4175,5 +4269,36 @@ mod tests {
             Some("10.200.254.12")
         );
         assert_eq!(neigh_table_lookup(&table, "52:54:00:00:00:00"), None);
+    }
+
+    #[test]
+    fn stale_holder_message_diz_o_pid_o_socket_e_como_recuperar() {
+        let sock = PathBuf::from("/tmp/delonix-net-1000/control.sock");
+        let msg = stale_holder_message(17552, &sock, None);
+        // The three things the operator needs and the bare `ENOENT` never gave:
+        // WHICH holder, WHICH path is missing, and the exact recovery.
+        assert!(msg.contains("17552"), "{msg}");
+        assert!(msg.contains("/tmp/delonix-net-1000/control.sock"), "{msg}");
+        assert!(msg.contains("net netns down"), "{msg}");
+        assert!(msg.contains("container restart"), "{msg}");
+        // Without the legacy socket on disk the cause stays a hypothesis — it must
+        // not claim the pre-v0.34.2 path as fact.
+        assert!(!msg.contains("v0.34.2"), "{msg}");
+    }
+
+    #[test]
+    fn stale_holder_message_nomeia_o_socket_legado_quando_ele_existe() {
+        let sock = PathBuf::from("/tmp/delonix-net-1000/control.sock");
+        let legacy = PathBuf::from("/home/w/.local/share/delonix/ingress/control.sock");
+        let msg = stale_holder_message(17552, &sock, Some(&legacy));
+        // The legacy socket being present IS the proof of an in-place upgrade —
+        // the message says so, and names both paths.
+        assert!(
+            msg.contains("/home/w/.local/share/delonix/ingress/control.sock"),
+            "{msg}"
+        );
+        assert!(msg.contains("v0.34.2"), "{msg}");
+        assert!(msg.contains("older delonix build"), "{msg}");
+        assert!(msg.contains("net netns down"), "{msg}");
     }
 }

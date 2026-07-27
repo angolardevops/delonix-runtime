@@ -1827,6 +1827,34 @@ errado.
 Ver [docs/RELATORIO-PRE-PRODUCAO.md](docs/RELATORIO-PRE-PRODUCAO.md) para a bateria E2E completa
 (139 PASS / 1 FAIL) e a lista de gaps.
 
+### Holder sobrevivente a um upgrade in-place (v0.34.2) — a armadilha do `status()` por pidfile
+
+Bug report real (host kaeso-sys-01): `cluster create --name dev` falhava em `✗ Preparing nodes (1)`
+com **``system call `control socket` failed: No such file or directory (os error 2)``** e nada mais.
+O motor estava bom; o ESTADO DO HOST não: o holder a correr tinha sido arrancado por um binário
+**anterior à v0.34.1**, e essa versão mudou o socket de `<DELONIX_ROOT>/ingress/control.sock` para
+`/tmp/delonix-net-<uid>/control.sock` (commit `a112754`, ver `runtime_dir`) — um `install.sh` em
+cima deixa o holder ANTIGO vivo, ligado a um caminho que o binário novo nunca consulta.
+
+**A armadilha a reter**: `status()` decide "up" lendo **pidfiles**, nunca por alcançabilidade —
+logo `ensure_up()` saía cedo satisfeito e o fast-fail do `control_query` (que só pergunta se o
+`holder_pid` existe) deixava passar, gastando os 50×40ms de retry num caminho que nunca ia
+aparecer. Cada metade era razoável; juntas transformavam "o teu holder é da build anterior" num
+erro sem sujeito, sem caminho e sem recuperação. **`holder_pid.is_some()` não é "o holder é
+alcançável"** — mesma família do `container.userns` que não é "está num userns diferente do meu"
+(ver "Reconfiguração a quente" acima).
+
+**Corrigido** com `stale_holder_message` (pura, testada) chamada nos DOIS sítios que a condição
+alcança — `ensure_up()` (com ~2s de graça para a corrida legítima de arranque) e `control_query()`
+depois de esgotar os retries (os caminhos de teardown não passam pelo `ensure_up`; e um socket que
+nunca APARECEU é uma falha diferente de um que existe e recusa a ligação). Quando o socket legado
+ainda está em disco, isso **prova** o upgrade in-place e a mensagem di-lo, nomeando os dois
+caminhos. **Deliberadamente NÃO auto-cura**: matar um holder vivo liberta o netns e derruba a rede
+de todos os containers da SDN — é decisão do operador, não de um `cluster create`. `teardown()`
+(`delonix net netns down`, o comando de recuperação) passou também a limpar os caminhos legados,
+para uma diagnose FUTURA não culpar um binário que já não corre. Validado ao vivo nos dois ramos
+(com e sem socket legado), mais o caminho felizinho intocado (15ms, um `stat`).
+
 ## Visão de produto: Universal Runtime (Workload Abstraction Layer)
 
 **Norte do projeto**: o Delonix Runtime não deve evoluir como "mais um motor de VMs" nem como
@@ -1887,7 +1915,7 @@ sem noção de tenant) — não o "Proxmox Driver" com inventário/scheduler do 
 
 ## Estado para a próxima sessão (2026-07-27, antes do lançamento público de sexta-feira)
 
-Release actual: **v0.34.1** (ver `docs/RELEASES.md`). Motor testado sistematicamente por todos os
+Release actual: **v0.34.2** (ver `docs/RELEASES.md`). Motor testado sistematicamente por todos os
 grupos de comandos, i18n corrigido (380+ strings), docs (`README.rst`, site, `docs/comparacao.html`)
 sincronizadas com o binário publicado, ficheiros de saúde da comunidade (`CONTRIBUTING.md`/
 `SECURITY.md`/`CODE_OF_CONDUCT.md`/templates de issue/PR) no lugar, roteiro de vídeos em
