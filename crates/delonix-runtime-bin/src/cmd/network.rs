@@ -231,8 +231,15 @@ pub(crate) fn create_network(
         "bridge" => {
             let net = store.create(name)?;
             // Realize it physically (real bridge of the rootless holder) — aligned
-            // to the SAME prefix the NetworkStore just decided.
-            infra::network_create_with(name, &net.prefix)?;
+            // to the SAME prefix the NetworkStore just decided. If this fails, the
+            // declarative record just created above would otherwise be ORPHANED —
+            // `network ls` would show it, nothing could attach (NotFound), and a
+            // retry would fail with "already exists" until a manual `network rm`.
+            // Roll it back so a failed `create` leaves nothing behind to clean up.
+            if let Err(e) = infra::network_create_with(name, &net.prefix) {
+                let _ = store.remove(name);
+                return Err(e);
+            }
             Ok(net)
         }
         "macvlan" | "ipvlan" => {

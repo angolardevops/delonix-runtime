@@ -1890,34 +1890,40 @@ pub fn restart(base: &Path, name: &str) -> Result<Vm> {
 /// Current state of a VM, with `status`/`ip` reconciled by its backend.
 pub fn status(base: &Path, name: &str) -> Result<Vm> {
     let st = store(base)?;
-    let mut vm = st.load(name).map_err(|e| match e {
+    // load() first just to resolve the NotFound->VmNotFound mapping before
+    // taking the lock (update() would otherwise surface the generic NotFound).
+    st.load(name).map_err(|e| match e {
         Error::NotFound(n) => Error::VmNotFound(n),
         e => e,
     })?;
-    let backend = backend_for(&vm);
-    let old_ip = vm.ip.clone();
-    let was_running = vm.status == Status::Running;
-    if backend.is_running(&vm) {
-        vm.status = Status::Running;
-        vm.ip = backend.ip(&vm).or(vm.ip);
-    } else {
-        // A powered-off VM = Stopped (the guest may have done a clean shutdown;
-        // unlike containers, the VM is autonomous — a crash is not assumed).
-        vm.status = Status::Stopped;
-        vm.pid = None;
-        // The guest powered itself off outside our own `stop()` (e.g. `shutdown
-        // now` from inside) — reconcile `started_unix` the same way `stop()`
-        // does, so UPTIME doesn't keep counting a boot that already ended.
-        vm.started_unix = None;
-    }
-    // Persist a freshly-learnt IP (a nat VM only gets its DHCP lease well after
-    // `create` saved the record): the record is what the holder's internal DNS
-    // reads to resolve `<vm-name>` for containers — a stale null IP there means
-    // the name never resolves. Best-effort: status() stays read-mostly.
-    if vm.ip != old_ip || was_running != (vm.status == Status::Running) {
-        let _ = st.save(name, &vm);
-    }
-    Ok(vm)
+    // Everything from the backend query to the decision runs INSIDE the
+    // locked read-modify-write (`JsonStore::update`) — this used to be a bare
+    // load->mutate->save with no lock, racing the background metrics refresh
+    // (dash/delonix-mgmt) against a concurrent `vm start/stop/create` on the
+    // same VM: a narrow but real lost-update window on the IP/status field.
+    st.update(name, |vm| {
+        let backend = backend_for(vm);
+        let old_ip = vm.ip.clone();
+        let was_running = vm.status == Status::Running;
+        if backend.is_running(vm) {
+            vm.status = Status::Running;
+            vm.ip = backend.ip(vm).or_else(|| vm.ip.clone());
+        } else {
+            // A powered-off VM = Stopped (the guest may have done a clean shutdown;
+            // unlike containers, the VM is autonomous — a crash is not assumed).
+            vm.status = Status::Stopped;
+            vm.pid = None;
+            // The guest powered itself off outside our own `stop()` (e.g. `shutdown
+            // now` from inside) — reconcile `started_unix` the same way `stop()`
+            // does, so UPTIME doesn't keep counting a boot that already ended.
+            vm.started_unix = None;
+        }
+        // Persist a freshly-learnt IP (a nat VM only gets its DHCP lease well after
+        // `create` saved the record): the record is what the holder's internal DNS
+        // reads to resolve `<vm-name>` for containers — a stale null IP there means
+        // the name never resolves. Only writes when something actually changed.
+        vm.ip != old_ip || was_running != (vm.status == Status::Running)
+    })
 }
 
 /// Lists all VMs, with reconciled state.
