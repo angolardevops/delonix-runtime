@@ -1653,6 +1653,68 @@ escreve só a chain por-container e nunca lhe toca. É a mesma família de armad
 e cujo primeiro chamador real vai encontrar um bug latente. Decidir entre ligá-lo ou apagá-lo é
 uma sessão própria.
 
+### Varredura #2 do flow de comunicação (2026-07-27) — o IP primário como ponto cego
+
+Continuação directa da revisão acima, a pedido do utilizador ("há mais algum bug de comunicação?").
+Quatro achados novos, todos **reproduzidos ao vivo**. Três partilham UMA raiz: **todo o plano de
+controlo assume que um container tem UM IP**. Multi-homing (`--net-connect`) dá-lhe um segundo, e
+esse segundo é invisível para tudo o que devia governá-lo.
+
+1. **ALTO (segurança) — a firewall por-container não governa as redes adicionais.**
+   `apply_firewall(id, ip, fw)` recebia só `c.ip` e os jumps no `fwdeny` são
+   `ip daddr <ip> jump fw<hash>` — o IP extra não tem jump nenhum, logo nunca entra na chain.
+   **Ao vivo**: `ingress policy deny` em B → A→B pelo IP primário `blocked`; ligados os dois a uma
+   2.ª rede, A→B pelo IP extra **REACHABLE**. `ingress`/`egress`/`Dependency` são todos
+   contornáveis por multi-homing. **Corrigido** com `apply_firewall_all` (linha de controlo
+   `firewall <id> <ip1,ip2,…> <hex>`) + `do_firewall` a emitir um corpo por IP e um par de jumps
+   por IP. Com um só IP a linha fica byte-a-byte igual à antiga — um holder anterior continua a
+   servir o caso single-homed, só a forma multi-IP exige o novo.
+2. **ALTO (segurança) — o isolamento de namespace também é contornável por multi-homing.**
+   `do_attach_extra` nunca chamava `ns_set_join`, ao contrário do `do_attach`: o IP extra fica
+   fora de `@dlxall`/`@dlxns_<ns>`, e a regra de corte cross-namespace
+   (`ip saddr @dlxall ct state new drop`) só dispara para fontes em `@dlxall`. **Ao vivo**:
+   teamA↔teamB `blocked` pelos IPs primários, **REACHABLE** pelos extra. **Corrigido**: a linha
+   `attach-extra` ganhou o token de namespace (6 tokens = `default`, 7 = namespaced — o mesmo
+   padrão de compatibilidade que o `attach` já usava) e chama `ns_set_join`.
+   **Corolário corrigido de caminho**: os jumps do `fwdeny` passaram a ser **reconstruídos** (não
+   adicionados-se-faltarem). Um container que SAI de uma rede adicional deixava lá o jump do IP
+   libertado, e o IPAM entrega esse IP a outro container mais tarde — o inquilino seguinte
+   herdava em silêncio a firewall deste. `--net-connect`/`--net-disconnect` reaplicam agora a
+   firewall.
+3. **MÉDIO — as redes adicionais desapareciam num `stop`+`start`, em silêncio.** `cmd_start`
+   reatacha só a rede primária; `c.extra_networks` está persistido mas nunca era reproduzido.
+   **Ao vivo**: `eth1` presente antes, ausente depois, e o `describe` continuava a listar
+   `Extra: dlx-dev2 (10.239.x on eth1)`. Um serviço alcançável só por essa 2.ª rede partia no
+   primeiro restart, sem uma linha de aviso. É a MESMA família do `-v` que não era persistido
+   (ver `cluster load`, acima) — mas ao contrário desse, aqui o estado ESTAVA guardado: faltava
+   quem o replicasse. **Corrigido**: `cmd_start` reatacha cada `ExtraNet` (mesmo `id` no IPAM, por
+   isso o IP volta igual; se voltar diferente, o registo é corrigido em vez de ficar a apontar
+   para um endereço que já não existe). **Validado ao vivo**: `eth1` com o MESMO IP depois do
+   restart.
+4. **MÉDIO — o `unpublish` era cego ao protocolo, o `publish` não.** `-p 53:53/tcp` e
+   `-p 53:53/udp` coexistem como duas publicações distintas, mas `slirp_remove_hostfwd` casava só
+   por `host_port` e `do_unpublish` usava o needle `dport <n> ` — os dois derrubavam TUDO. Pior,
+   `unpublish_live` removia UMA entrada do registo. **Ao vivo**: `--publish-rm 18100` deixou o
+   registo a dizer `18100:53/tcp` com **zero** bindings no `ss` e `curl` a dar `000` — o registo a
+   mentir sobre o dataplane, e a porta a ficar reservada no `port_owner` para um container que já
+   não a serve. **Corrigido**: `slirp_remove_hostfwd_proto`/`do_unpublish(port, proto)`/
+   `unpublish_port_proto` e o `unpublish_live` a remover TODAS as entradas daquele host port.
+   **Validado ao vivo**: registo e `ss` passam ambos a vazio. (A forma de 2 tokens fica idêntica
+   para o teardown, por compatibilidade com um holder anterior.)
+
+**A lição transversal, que vale mais do que os quatro bugs**: `c.ip` não é "o endereço do
+container" — é "o endereço na rede primária". Sempre que uma função de rede receber um único IP
+vindo do registo, perguntar o que acontece com `extra_networks` não vazio. É a mesma classe da
+armadilha já documentada do `container.userns` ("não é 'está num userns diferente do meu'") e do
+`status()` por pidfile ("não é 'o holder é alcançável'").
+
+**Nota de validação, importante para quem continuar**: os achados 1, 2 e metade do 4 corrigem
+código que corre DENTRO do holder (`do_firewall`/`do_attach_extra`/`do_unpublish`). Este host tem
+containers vivos (odoo, registries, control-planes k8s) e respawnar o holder derrubaria a SDN de
+todos — por isso **os bugs foram provados ao vivo, mas as correcções desses três estão provadas
+por teste unitário e leitura, não ao vivo**. Só tomam efeito num respawn do holder. Os achados 3 e
+o lado-CLI do 4 correm no processo da CLI e estão validados ao vivo de ponta a ponta.
+
 ### `tunnel expose --provider pinggy` sem URL (v0.16.1)
 
 Bug report real (host kaeso-sys-01): `delonix net tunnel expose --provider pinggy --local-port 8181`

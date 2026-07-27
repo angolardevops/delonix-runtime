@@ -969,7 +969,9 @@ fn publish_listeners(cfg: &ProxyConfig) -> Result<()> {
         // Best-effort/idempotent: if the port ALREADY has a hostfwd (a previous proxy
         // that crashed without teardown), the slirp refuses with 'already exists' — not
         // fatal, the desired state (port published) is already there. Only warns on other errors.
-        if let Err(e) = delonix_net::slirp_add_hostfwd(&sock, &p, &p, "tcp") {
+        // No per-listener host address: an HTTPRoute listener has no `-p`-style spec,
+        // so it keeps the `DELONIX_PUBLISH_ADDR`/`127.0.0.1` fallback of `publish_bind_addr`.
+        if let Err(e) = delonix_net::slirp_add_hostfwd(&sock, &p, &p, "tcp", None) {
             let msg = e.to_string();
             if msg.contains("already") || msg.to_lowercase().contains("exist") {
                 eprintln!(
