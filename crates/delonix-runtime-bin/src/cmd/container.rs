@@ -2851,9 +2851,7 @@ fn reexec_into_netns(
         .arg(&exe)
         .args(["netns", "run"])
         .arg(&spec_path)
-        .env("DELONIX_REEXEC_ID", id)
-        .env("DELONIX_REEXEC_IP", ip)
-        .env("DELONIX_ROOT", super::util::state_root())
+        .envs(reexec_env(id, ip))
         .status();
     let _ = std::fs::remove_file(&spec_path);
     let status = status.map_err(|e| Error::Runtime {
@@ -3148,6 +3146,25 @@ pub(crate) fn cmd_start(images: &ImageStore, store: &Store, id: &str) -> Result<
     Ok(())
 }
 
+/// Env every re-exec pass needs. The 2nd pass runs inside the holder's userns with
+/// our uid mapped to **0**, so ANY path this binary resolves from `geteuid()` diverges
+/// there and has to be pinned explicitly — `DELONIX_ROOT` (state root) and the ingress
+/// sockets' runtime dir (see `infra::runtime_dir_env`, which documents the live
+/// v0.34.1 regression from pinning only the first of the two). One list, used by both
+/// re-exec sites, so a third one can't be added missing half of it. PURE.
+fn reexec_env(id: &str, ip: &str) -> Vec<(String, std::ffi::OsString)> {
+    let (rt_var, rt_dir) = infra::runtime_dir_env();
+    vec![
+        ("DELONIX_REEXEC_ID".into(), id.into()),
+        ("DELONIX_REEXEC_IP".into(), ip.into()),
+        (
+            "DELONIX_ROOT".into(),
+            super::util::state_root().into_os_string(),
+        ),
+        (rt_var.into(), rt_dir.into_os_string()),
+    ]
+}
+
 /// The 1st pass of `start` with a custom network: re-executes itself inside the
 /// netns (see `reexec_into_netns`, same mechanism, no spec — the container
 /// already exists in the store, the id is enough).
@@ -3164,9 +3181,7 @@ fn reexec_start(id: &str, netns: &str, ip: &str) -> Result<()> {
         .args(&prefix[1..])
         .arg(&exe)
         .args(["container", "start", id])
-        .env("DELONIX_REEXEC_ID", id)
-        .env("DELONIX_REEXEC_IP", ip)
-        .env("DELONIX_ROOT", super::util::state_root())
+        .envs(reexec_env(id, ip))
         .status()
         .map_err(|e| Error::Runtime {
             context: "re-exec nsenter",
@@ -4562,10 +4577,11 @@ fn cmd_init(
 #[cfg(test)]
 mod tests {
     use super::super::util::compose_command;
+    use super::infra;
     use super::{
         fmt_ports, fmt_status, next_extra_idx, normalize_container_spec, parse_burst_bytes,
-        parse_cri_log_line, parse_rate_bits, parse_signal, policy_supervised, should_restart,
-        unix_secs_to_rfc3339_prefix, valid_container_name, ContainerSpec,
+        parse_cri_log_line, parse_rate_bits, parse_signal, policy_supervised, reexec_env,
+        should_restart, unix_secs_to_rfc3339_prefix, valid_container_name, ContainerSpec,
     };
     use delonix_runtime_core::{Container, ExtraNet, Status};
 
@@ -4997,5 +5013,27 @@ containers:
         assert_eq!(opts[0].name.as_deref(), Some("myapp-web"));
         assert_eq!(opts[1].name.as_deref(), Some("myapp-side"));
         assert_eq!(opts[0].ports, vec!["8080:80/tcp"]);
+    }
+
+    #[test]
+    fn reexec_env_fixa_o_root_e_o_runtime_dir_dos_sockets() {
+        let env = reexec_env("abc123", "10.210.0.7");
+        let names: Vec<&str> = env.iter().map(|(k, _)| k.as_str()).collect();
+        assert!(names.contains(&"DELONIX_REEXEC_ID"), "{names:?}");
+        assert!(names.contains(&"DELONIX_REEXEC_IP"), "{names:?}");
+        // Both uid-derived paths, not just the state root: the 2nd pass sees
+        // `geteuid() == 0` inside the holder's userns, so leaving the ingress
+        // sockets' dir unpinned resolved `/run/delonix-net` and broke
+        // `run/start --net <custom> -p <port>` with a bare ENOENT (v0.34.1).
+        assert!(names.contains(&"DELONIX_ROOT"), "{names:?}");
+        let (rt_var, rt_dir) = infra::runtime_dir_env();
+        let got = env
+            .iter()
+            .find(|(k, _)| k == rt_var)
+            .map(|(_, v)| v.clone())
+            .unwrap_or_else(|| panic!("{rt_var} missing from the re-exec env: {names:?}"));
+        // Pinned to OUR value — the whole point is that the child must not
+        // recompute it from its own (mapped) uid.
+        assert_eq!(got, rt_dir.into_os_string());
     }
 }
