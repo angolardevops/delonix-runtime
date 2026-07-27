@@ -4,6 +4,148 @@
 > (regenerado automaticamente pelo pipeline de release a cada tag publicada).
 > Não editar à mão — edita a nota da release respectiva.
 
+## v0.36.0 — the `-p` / ingress-firewall flow: 5 bugs, 2 of them security
+
+Real bug report from a live host: *"the browser should not block when a container is exposed via
+`-p`"*. The symptom was real — and following it surfaced four worse problems sitting next to it.
+Every bug below was **reproduced live before being fixed**, and the fixes were re-verified against
+a real holder afterwards.
+
+Three of the five share one root cause worth stating on its own: **`c.ip` is not "the container's
+address", it is "the container's address on the primary network"**. Every control-plane path that
+took a single IP from the record was blind to any additional network.
+
+### SECURITY — a firewall rule silently ignored its port when the proto was `any`
+
+`fw_chain_body` only emitted the `dport` **inside** the `proto != "any"` branch. Since the CLI
+defaults `proto` to `any` whenever a bare port is written (`ingress allow <c> 9999` — the common
+form), the generated rule collapsed to `ip daddr <ip> accept`: **the whole container**.
+
+Measured live against a published port, not inferred:
+
+| command | what it says | what it did |
+|---|---|---|
+| `policy deny` + `ingress allow <c> 9999` | open port 9999 | **opened port 18099 too** |
+| `policy allow` + `ingress deny <c> 9999` | close port 9999 | **closed the whole container** |
+| `ingress deny <c> tcp/9999` (explicit proto) | close port 9999 | correct |
+
+The explicit-proto form was always correct, which is why every prior E2E test — all of which use
+`tcp/…` — passed over it.
+
+**Fix**: `any` + a port now emits `meta l4proto { tcp, udp } th dport <port>` (`th` = transport
+header, valid for both protocols, ranges included). Regression test:
+`fw_body_keeps_the_port_when_proto_is_any`.
+
+### SECURITY — multi-homing bypassed both the firewall and namespace isolation
+
+Two independent holes, one cause. `apply_firewall` was keyed on `c.ip` alone, so the `fwdeny`
+jumps (`ip daddr <ip> jump fw<hash>`) never existed for an additional network's IP; and
+`do_attach_extra` never called `ns_set_join`, so the extra IP stayed outside `@dlxall` — and the
+cross-namespace drop only fires for sources inside that set.
+
+Reproduced live, both halves:
+
+```
+ingress policy deny on B   →  A→B via primary IP  = blocked
+                              A→B via extra IP    = REACHABLE     ← firewall bypassed
+
+namespace teamA / teamB    →  A→B via primary IP  = blocked
+                              A→B via extra IP    = REACHABLE     ← isolation bypassed
+```
+
+`ingress`, `egress`, `Dependency` and namespace isolation were **all** bypassable by connecting
+the target to a second network.
+
+**Fix**: new `apply_firewall_all` (control line `firewall <id> <ip1,ip2,…> <hex>`), with
+`do_firewall` emitting one rule body per IP and a jump pair per IP; `attach-extra` carries the
+namespace (6 tokens = `default`, 7 = namespaced, the same compatibility rule `attach` already
+used) and joins the sets.
+
+**Corollary fixed on the way**: `fwdeny` jumps are now **rebuilt**, not added-if-missing. A
+container leaving an additional network used to leave the released IP's jump behind — and IPAM
+hands that address to another container later, which silently inherited this one's firewall.
+`--net-connect` / `--net-disconnect` re-apply the firewall.
+
+### Additional networks vanished on `stop` + `start`
+
+`cmd_start` re-attached only the primary network. `c.extra_networks` was persisted all along —
+nothing ever replayed it. Live: `eth1` present before, gone after, while `describe` went on
+reporting `Extra: dlx-dev2 (10.239.… on eth1)`. A service reachable only over that second network
+broke on its first restart, in silence.
+
+Same family as the `-v` bug fixed in v0.35.0, with one difference worth recording: there the state
+was never saved; here it *was* saved and simply never replayed. Both failure modes are worth
+checking for when wiring any `start`/`restart` path.
+
+**Fix**: `cmd_start` re-attaches each `ExtraNet` (same container id into IPAM, so the address
+normally comes back identical; if it differs, the record is corrected rather than left pointing at
+an address that no longer exists).
+
+### `unpublish` was proto-blind while `publish` was not
+
+`-p 53:53/tcp` and `-p 53:53/udp` are two distinct publications, but `slirp_remove_hostfwd` matched
+on `host_port` alone and `do_unpublish` used a bare `dport <n>` needle — both tore down every
+protocol. Worse, `unpublish_live` removed only ONE record entry. Live result: `--publish-rm 18100`
+left the record claiming `18100:53/tcp` with **zero** bindings and `curl` returning nothing — and
+the host port stayed reserved in `port_owner` for a container that no longer served it.
+
+**Fix**: `slirp_remove_hostfwd_proto` / `do_unpublish(port, proto)` / `unpublish_port_proto`, and
+`unpublish_live` clears every record entry for that host port. The 2-token control form is
+unchanged for teardown.
+
+### `-p [hostIp:]hostPort:contPort` — the original report
+
+Published ports bind to `127.0.0.1`. That default is correct, but it was the **only** behaviour
+reachable from the CLI: the Docker `-p <ip>:<host>:<cont>` form was rejected outright as `invalid
+port`, and the sole way to widen the bind was the undocumented `DELONIX_PUBLISH_ADDR`. A browser
+on another machine — or the host itself via its LAN address — got connection-refused with nothing
+explaining why.
+
+```
+-p 8080:80             →  binds 127.0.0.1 only   (unchanged, still the default)
+-p 0.0.0.0:8080:80     →  every interface
+-p 192.168.1.10:8080:80 → one interface
+-p 192.168.122.1:8080:80 → the libvirt gateway (reachable from VMs — see `delonix vm reach`)
+```
+
+`publish_bind_addr` concentrates the precedence (spec > env > `127.0.0.1`) in one place so the two
+publish datapaths — the per-container slirp and the single ingress slirp — cannot diverge. IPv4
+only: the value is interpolated into the slirp api-socket's JSON, and an IPv6 literal would also
+collide with the `:` splitting. A non-IPv4 host is **rejected**, never silently discarded — which
+was precisely the compose bug (`127.0.0.1:9000:80` dropped, publishing on every interface instead).
+
+Validated live: `ss` confirms the `0.0.0.0` bind and `curl http://<lan-ip>:18099/` returns **200**.
+
+### `ingress ls` stopped lying
+
+Two honesty fixes in the table people read specifically to decide whether something is exposed:
+
+- Every publish was printed as `allow / DNAT` unconditionally. Under `policy deny`, `curl` returned
+  nothing while the table still said `allow`. It now resolves the verdict the way the dataplane
+  does (`published_verdict`) and prints `BLOCKED` plus the exact recovery command. `ingress policy
+  deny` warns at the moment it blocks a published port.
+- `--net host` / `--net none` containers were listed as `allow (default)` — which reads as
+  "governed and open" — when `require_sdn_ip` rejects *any* firewall mutation for them. They now
+  read `n/a (host net)`.
+
+A related fact that was nowhere documented and is genuinely counter-intuitive: **a rule must name
+the CONTAINER port, never the host port**, because DNAT runs at `prerouting` and the per-container
+chain sees the already-translated destination. The new warnings say so explicitly. Before the
+`proto: any` fix above this went unnoticed — the rule ignored the port and "worked" by accident.
+
+### Known limitations
+
+- `infra::publish_port_allow` (publish with a CIDR allowlist applied *before* the DNAT) still has
+  **zero callers** — `ingress allow --from <cidr>` only writes the per-container chain. It is the
+  same dead-public-API trap as `mount_live` / `set_net_rate` / `update_limits` before their first
+  real caller found a latent bug. Wiring it or deleting it deserves its own session; it is
+  documented rather than rushed.
+- The holder-side fixes take effect only after a holder respawn, and a respawn does not self-heal:
+  live containers do not re-attach on their own and must be restarted. That is pre-existing
+  behaviour, not new here, but it is what an upgrade on a busy host has to plan for.
+
+---
+
 ## v0.35.1 — `cluster load` now actually reaches the kubelet, and `image save`/`image load` land
 
 **v0.35.0's `cluster load` did not work end to end.** `ctr` reported a successful import and
