@@ -318,7 +318,7 @@ NUNCA são impressos por omissão (redigidos; <code>--reveal</code> é opt-in). 
 <code>container run --secret</code>/<code>--secret-files</code> e do <code>--password-secret</code> do
 <code>storage</code> — o segredo entra uma vez, nunca fica no histórico do shell nem no manifesto.""",
         "subs": {
-            "create": {"examples": [("Criar um segredo (valor via stdin, não no argv)", "printf 's3nha' | delonix secret create db-pass")]},
+            "create": {"examples": [("Criar um segredo (valor via stdin, não no argv)", "printf 'password=s3nha' | delonix secret create db-pass --from-env-file -")]},
             "ls": {"examples": [("Listar (valores redigidos)", "delonix secret ls")]},
             "inspect": {"examples": [("Revelar explicitamente", "delonix secret inspect db-pass --reveal")]},
             "rotate-key": {"examples": [("Rodar a chave-mestra (re-cifra tudo)", "delonix secret rotate-key")]},
@@ -1242,7 +1242,7 @@ CHEAT_TASKS = [
     ("Firewall: egress da rede só p/ DNS + CIDRs", "delonix net egress net backend allowlist --to 10.0.0.0/8"),
     ("Tráfego por container ao vivo (eBPF)", "sudo delonix net flow --watch"),
     ("Volume de rede de um NAS (NFS)", "delonix storage create media --type nfs --server 10.0.0.5 --share /mnt/pool/media"),
-    ("Segredo no cofre (não no argv)", "printf 's3nha' | delonix secret create db-pass"),
+    ("Segredo no cofre (não no argv)", "printf 'password=s3nha' | delonix secret create db-pass --from-env-file -"),
     ("Expor um container à internet pública (sem conta, sem router)",
      "delonix container run -d --name web --expose 80 nginx\ndelonix net tunnel expose --provider pinggy --local-port 8080",
      "tunnel/tunnel-8080: running — https://oxipg-197-148-40-67.free.pinggy.net"),

@@ -1147,6 +1147,30 @@ acima)**:
   deadlock/corrida que os próprios comentários já documentam ter existido). Não é um bug ao vivo —
   é uma nota para quem for mexer ali a seguir.
 
+### v0.32.1 — 3 achados durante o teste sistemático de todos os grupos de comandos
+
+Continuação directa da revisão acima: testar ao vivo cada grupo/subcomando/parâmetro da CLI antes
+da publicação (não só ler código) apanhou 3 problemas que a revisão estática não tinha visto.
+
+1. **`secret create` não tinha via de stdin** — o próprio cheatsheet dos docs mostrava `printf
+   's3nha' | delonix secret create db-pass` como forma seca de criar um segredo sem tocar no argv/
+   histórico do shell, mas o comando só aceitava `--from-literal KEY=value`/`--from-env-file
+   <ficheiro>` — o próprio exemplo documentado falhava com "segredo vazio". Corrigido:
+   `--from-env-file -` lê de stdin (convenção `-`), mesmo parser `KEY=value` de um `.env` normal.
+2. **`Error::NotFound` (partilhado por secrets/redes/volumes/imagens/...) dizia sempre "no such
+   container: X"** — só `Store<Container>`'s dois call-sites dependiam da Display fixa; os outros
+   stores já embutiam o prefixo certo na própria string. Um `secret rm <inexistente>` respondia
+   literalmente "no such container: secret X". Corrigido na raiz (Display genérica `"no such
+   {0}"` + os dois call-sites de `Store<Container>` a fornecer o prefixo deles) — validado ao vivo
+   que `secret`/`volumes`/`network` passaram a nomear o recurso certo, e que `container
+   rm`/`stop`/`net ingress ls` (via `firewall.rs`) não regrediram.
+3. **`stack init` gerava um comentário desactualizado sobre `network:` em rootless** — dizia que
+   tinha "uma limitação CONHECIDA... só funciona como root", uma nota de uma versão anterior a
+   `reexec_into_netns` (ver secção "CLI" acima) ter fechado esse problema. Confirmado ao vivo
+   (`container apply` com `network: <rede>` ganha IP real em rootless) e o comentário do scaffold
+   corrigido para reflectir o estado actual — `--net host` continua o default do scaffold só por
+   simplicidade, não porque `network:` esteja limitado.
+
 ## Falhas silenciosas corrigidas (fail-closed) + 1 documentada
 
 Da análise Docker/Podman (`docs/COMPARACAO-DOCKER-PODMAN.md`), quatro casos em

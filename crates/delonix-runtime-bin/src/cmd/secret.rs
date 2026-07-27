@@ -26,7 +26,7 @@ pub enum SecretCmd {
         /// `KEY=value` pair. Repeatable.
         #[arg(long = "from-literal")]
         from_literal: Vec<String>,
-        /// Load `KEY=value` lines from a file (e.g. `.env`).
+        /// Load `KEY=value` lines from a file (e.g. `.env`), or `-` to read them from stdin (the value never touches argv/process list).
         #[arg(long = "from-env-file")]
         from_env_file: Option<PathBuf>,
     },
@@ -96,6 +96,24 @@ pub(crate) const SECRET_SPEC_FIELDS: &[&str] = &["stringData", "fromEnvFile"];
 /// otherwise a `fromEnvFile: ./app.env` would look in the CWD of whoever runs the
 /// command, not next to the manifest). Shared by `create` and `apply`.
 fn load_env_file(base: &Path, f: &Path) -> Result<BTreeMap<String, String>> {
+    // BUG FOUND (code review, live testing): the docs' own flagship example
+    // — "secret value via stdin, never in argv" — was `printf 's3nha' |
+    // delonix secret create db-pass`, but there was NO way to actually get a
+    // piped value into a secret: `create` only had `--from-literal
+    // KEY=value` (puts the value IN argv/process-list, defeating the exact
+    // thing the example was demonstrating) and `--from-env-file <path>` (a
+    // real file only). `-` as the env-file path now means "read from
+    // stdin" — the standard Unix convention (`tar -`, `docker ... -f -`) —
+    // so the documented pattern becomes real: `printf 'password=s3nha' |
+    // delonix secret create db-pass --from-env-file -`.
+    if f == Path::new("-") {
+        use std::io::Read;
+        let mut content = String::new();
+        std::io::stdin()
+            .read_to_string(&mut content)
+            .map_err(|e| Error::Invalid(format!("reading stdin: {e}")))?;
+        return Ok(parse_env_file(&content));
+    }
     let path = if f.is_absolute() {
         f.to_path_buf()
     } else {
