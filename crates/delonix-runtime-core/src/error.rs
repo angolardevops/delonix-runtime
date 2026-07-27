@@ -22,8 +22,20 @@ pub enum Error {
         message: String,
     },
 
-    /// There is no container with the given id/name.
-    #[error("no such container: {0}")]
+    /// A resource does not exist. BUG FOUND (code review, live testing):
+    /// this Display hardcoded "no such container: {0}" regardless of what
+    /// actually failed — `delonix secret rm <missing>` really did print "no
+    /// such container: secret X" (confirmed live). `Error::VmNotFound`
+    /// already existed as a workaround for this exact confusion, but only
+    /// for VMs; the SAME shared `NotFound` is also thrown by
+    /// `SecretStore`/`VolumeStore`/`NetworkStore`/`ImageStore`/etc. Every
+    /// one of THOSE call sites already embeds its own resource-type prefix
+    /// into the string (`"secret {name}"`, `"network {name}"`, `"volume
+    /// {name}"`, ...) — only `Store<Container>`'s two call sites relied on
+    /// this Display's hardcoded wording instead. Fixed at the root: the
+    /// Display is now generic, and `Store<Container>` supplies its own
+    /// "container " prefix like everyone else already did.
+    #[error("no such {0}")]
     NotFound(String),
 
     /// There is no VM with the given name. Its own variant because the

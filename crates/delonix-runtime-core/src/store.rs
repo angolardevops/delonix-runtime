@@ -192,7 +192,7 @@ impl Store {
                 return Ok(c);
             }
         }
-        Err(Error::NotFound(id_or_name.to_string()))
+        Err(Error::NotFound(format!("container: {id_or_name}")))
     }
 
     /// Lists all containers, from most recent to oldest.
@@ -216,7 +216,7 @@ impl Store {
     pub fn remove(&self, id: &str) -> Result<()> {
         let p = self.path(id);
         if !p.exists() {
-            return Err(Error::NotFound(id.to_string()));
+            return Err(Error::NotFound(format!("container: {id}")));
         }
         fs::remove_file(p)?;
         Ok(())

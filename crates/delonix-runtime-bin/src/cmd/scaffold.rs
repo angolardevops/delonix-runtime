@@ -616,18 +616,21 @@ fn manifest_stack(o: &InitOpts) -> String {
          # Semântica: \"garante presente\", idempotente por nome. Fail-fast SEM rollback:\n\
          # o que já foi aplicado antes de um erro FICA aplicado.\n\
          #\n\
-         # PORQUÊ SEM `network:` E SEM `ports:` — não é esquecimento:\n\
+         # PORQUÊ SEM `network:` E SEM `ports:` — não é esquecimento, é a opção\n\
+         # mais simples para um scaffold que tem de funcionar à primeira:\n\
          #   Estes containers ficam em `--net host` (o default) e falam entre si por\n\
-         #   `127.0.0.1` — testado e funcional em rootless. As alternativas HOJE não\n\
-         #   servem para um scaffold que tem de funcionar à primeira:\n\
-         #     * `network: <rede>` (isolamento + DNS por nome) tem uma limitação\n\
-         #       CONHECIDA em rootless — o `setns` falha (\"pod netns unavailable\"),\n\
-         #       porque a netns vive no userns do holder. Só funciona como root.\n\
+         #   `127.0.0.1` — testado e funcional em rootless, sem nenhum passo extra\n\
+         #   (`network create`).\n\
+         #     * `network: <rede>` (isolamento + DNS por nome) TAMBÉM funciona em\n\
+         #       rootless (re-exec `nsenter ... ip netns exec` para dentro da netns\n\
+         #       do holder — ver AGENTS.md/`reexec_into_netns`). Troca para esta forma\n\
+         #       quando precisares de isolamento real ou de vários stacks a partilhar\n\
+         #       portas iguais; usa o NOME do container (não `127.0.0.1`) no\n\
+         #       DATABASE_URL nesse caso.\n\
          #     * `ports:` dá ao container uma netns PRÓPRIA com slirp — óptimo para\n\
          #       expor ao mundo, mas o slirp corre com `--disable-host-loopback`, por\n\
-         #       isso a app deixaria de alcançar a BD em `127.0.0.1`.\n\
-         #   Em ROOT, ou quando o `setns` rootless estiver fechado, troca para\n\
-         #   `network:` + `ports:` e usa o nome do container no DATABASE_URL.\n\
+         #       isso a app deixaria de alcançar a BD em `127.0.0.1` (usa `network:`\n\
+         #       + o nome do container nesse caso também).\n\
          apiVersion: delonix.io/v1\n\
          kind: Volume\n\
          metadata:\n  name: {name}-data\n\

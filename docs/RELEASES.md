@@ -4,6 +4,57 @@
 > (regenerado automaticamente pelo pipeline de release a cada tag publicada).
 > Não editar à mão — edita a nota da release respectiva.
 
+## v0.32.1 — `secret create` via stdin, mensagens "no such X" correctas, doc do `stack init` actualizada
+
+Continuação directa da revisão v0.32.0: enquanto se testava sistematicamente cada grupo de
+comandos da CLI antes da publicação pública, três problemas reais apareceram — dois bugs de
+utilizador visíveis logo no primeiro uso, e uma doc gerada desactualizada.
+
+### `secret create` — stdin já funciona (bug real, achado ao testar o próprio cheatsheet)
+
+O cheatsheet dos docs mostrava `printf 's3nha' | delonix secret create db-pass` como forma
+"segura" de criar um segredo sem o valor passar pelo argv/histórico do shell — mas `secret
+create` só aceitava `--from-literal KEY=value` ou `--from-env-file <caminho>`, sem nenhuma via de
+stdin. O comando do próprio exemplo falhava com "segredo vazio". Corrigido: `--from-env-file -`
+lê de stdin (convenção `-` = stdin, a mesma de dezenas de outras CLIs), interpretado no mesmo
+formato `KEY=value` de um ficheiro `.env` normal. Cheatsheet actualizado (`docs/gen.py`) para o
+exemplo real e testado: `printf 'password=s3nha' | delonix secret create db-pass
+--from-env-file -`.
+
+### Mensagens de erro "no such X" com o substantivo correcto
+
+`Error::NotFound`, partilhado por secrets/redes/volumes/imagens/imagens-VM/clusters, tinha o
+texto de exibição fixo em `"no such container: {0}"` independentemente do recurso — um `delonix
+secret rm <inexistente>` respondia literalmente **"no such container: secret X"**. Cada um dos
+outros stores já embutia o seu próprio prefixo correcto na string (`"secret {name}"`, `"network
+{name}"`, ...) — só os dois pontos de `Store<Container>` dependiam da formatação fixa da antiga
+Display. Corrigido na raiz (`Error::NotFound` passou a `"no such {0}"`, genérico) + os dois
+call-sites de `Store<Container>` passaram a fornecer o prefixo `"container: "` deles, preservando
+byte-a-byte a mensagem já existente para containers. Validado ao vivo: `secret rm`/`volumes
+inspect`/`network inspect` num recurso inexistente agora nomeiam o recurso certo; `container
+rm`/`stop` num container inexistente continua igual (sem regressão).
+
+### `stack init` já não descreve `network:` como limitado a root
+
+O manifesto gerado por `delonix stack init` continha um comentário a dizer que `network: <rede>`
+"tem uma limitação CONHECIDA em rootless — o `setns` falha... só funciona como root". Essa
+limitação foi fechada há várias versões (re-exec `nsenter ... ip netns exec` para dentro da netns
+do holder, ver `reexec_into_netns`/AGENTS.md) — o comentário ficou desactualizado e estava a
+empurrar utilizadores novos para `--net host` sem necessidade. Confirmado ao vivo antes de
+corrigir (`container apply` com `network: <rede-existente>` ganhou IP real em rootless) e o
+comentário do scaffold foi reescrito para reflectir o estado actual: `network:` funciona em
+rootless, `--net host` continua a ser o default do scaffold só por simplicidade (zero passo
+`network create` extra num projecto que tem de funcionar à primeira).
+
+### Validação
+
+Build/clippy/fmt/test limpos no workspace inteiro. Validado ao vivo neste host: `secret create`
+via stdin (criar + inspect --reveal + rm), `secret rm`/`volumes inspect`/`network inspect` num
+recurso inexistente com a mensagem certa, `container apply -f` com `network: dlx-dev` a ganhar IP
+real em rootless.
+
+---
+
 ## v0.32.0 — revisão ampla de código/arquitectura: 7 bugs reais corrigidos
 
 Pedido explícito antes da publicação pública: revisão de código E arquitectura sobre todo o
