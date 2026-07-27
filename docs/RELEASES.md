@@ -4,6 +4,52 @@
 > (regenerado automaticamente pelo pipeline de release a cada tag publicada).
 > Não editar à mão — edita a nota da release respectiva.
 
+## v0.34.1 — ingress control/slirp sockets no longer break under a deep `DELONIX_ROOT`
+
+Bug fix release, found live while validating an unrelated feature under a deliberately deep
+`DELONIX_ROOT` (a nested test/scratch path): `container run --net <custom>` (and anything else
+that brings up the rootless ingress infra) failed with `system call "control socket" failed:
+path must be shorter than SUN_LEN`.
+
+### Root cause
+
+`slirp_sock_path`/`control_sock_path` nested their AF_UNIX sockets directly under `ingress_dir()`
+— itself derived from `DELONIX_ROOT`. Linux caps a bound socket's `sun_path` at 108 bytes
+(`SUN_LEN`); `DELONIX_ROOT` itself (a regular directory) has no such limit (`PATH_MAX`, ~4096).
+The two were sharing a length budget they never should have — the exact separation Docker/
+Podman/containerd already make (`/run/docker.sock`, `/run/podman/podman.sock`, never nested
+under `--data-root`).
+
+### Fix
+
+New `runtime_dir()`, used only by the two sockets — `/tmp/delonix-net-<uid>` for rootless,
+`/run/delonix-net` for real root (currently unreachable by this specific code path — real root
+never goes through this module's holder at all). `DELONIX_ROOT` and everything under it (VMs,
+containers, images) is completely unaffected; pidfiles/status/lock stay exactly where they were.
+
+A second real bug was found landing this fix, before settling on `/tmp`: the more conventional
+`$XDG_RUNTIME_DIR`/`/run/user/<uid>` was tried first — `setup_infra_netns()` remounts `/run` as a
+fresh, empty tmpfs *inside* the holder's own mount namespace (so containers get a private
+`/run/netns`), which makes anything under `/run` that the *parent* created invisible to the
+*holder* afterwards. Confirmed live via `ENOENT` binding a socket in a directory that
+demonstrably existed on the host's real `/run`. `/tmp` is a separate mount, untouched by that
+remount.
+
+Same shape as the existing `DELONIX_ROOT` fix already in this file: the parent resolves
+`runtime_dir()` once and passes it explicitly via `DELONIX_NET_RUNTIME_DIR` to the holder, since
+the holder's uid maps to 0 inside its own userns — an independent `geteuid()`-based computation
+there would diverge from the parent's.
+
+### Validação
+
+Build/clippy/test limpos no workspace inteiro. Validado ao vivo: reproduziu-se a falha original
+com um `DELONIX_ROOT` construído especificamente para exceder o `SUN_LEN`, confirmou-se que
+`container run --net <custom>` passa a funcionar — o container ganha um IP real da SDN e faz
+ping ao gateway — com os sockets a viverem no caminho curto `/tmp` enquanto pid/status/lock
+continuam sob o `DELONIX_ROOT` (profundo) como antes.
+
+---
+
 ## v0.34.0 — `container run -w/--workdir`, `compose` gets `working_dir:` and random host ports
 
 Continuação directa da revisão de gaps Docker/Podman/Delonix — dois itens genuinamente "dívida
