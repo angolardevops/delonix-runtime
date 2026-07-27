@@ -796,6 +796,11 @@ pub enum ContainerCmd {
         /// binary; `--entrypoint ""` clears it and runs just the COMMAND).
         #[arg(long)]
         entrypoint: Option<String>,
+        /// Working directory the container's process starts in (default: the
+        /// image's own configured workdir, or `/`). Persists in the record — an
+        /// `exec -w` overrides it for that one call only.
+        #[arg(short = 'w', long = "workdir")]
+        workdir: Option<String>,
         /// Remove the container when the process exits (with `-d`, a detached
         /// watcher handles removal when the container dies).
         #[arg(long)]
@@ -1228,6 +1233,7 @@ pub fn run(action: ContainerCmd) -> Result<()> {
             publish,
             privileged,
             entrypoint,
+            workdir,
             rm,
             restart,
             devices,
@@ -1286,6 +1292,7 @@ pub fn run(action: ContainerCmd) -> Result<()> {
                 ports: publish,
                 privileged,
                 entrypoint,
+                workdir,
                 rm,
                 restart,
                 devices,
@@ -1693,6 +1700,10 @@ pub(crate) struct RunOpts {
     pub(crate) ports: Vec<String>,
     pub(crate) privileged: bool,
     pub(crate) entrypoint: Option<String>,
+    /// Working directory the process starts in. `None` = the image's own
+    /// configured workdir, or `/`.
+    #[serde(default)]
+    pub(crate) workdir: Option<String>,
     pub(crate) rm: bool,
     pub(crate) restart: String,
     pub(crate) devices: Vec<String>,
@@ -1794,6 +1805,7 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
         ports,
         privileged,
         entrypoint,
+        workdir,
         rm,
         restart,
         mut devices,
@@ -2003,6 +2015,9 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
     c.env.extend(cdi_edits.env);
     if !img.config.working_dir.is_empty() {
         c.workdir = Some(img.config.working_dir.clone());
+    }
+    if let Some(w) = workdir {
+        c.workdir = Some(w);
     }
     // `--gpus`/CDI-qualified `--device`s were already resolved (CDI devices/
     // mounts merged in) and `--gpus dri`'s raw glob already appended, above —

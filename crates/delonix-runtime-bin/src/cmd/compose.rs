@@ -36,11 +36,11 @@
 //! (incl. `external: true`). Defers `profiles:`, `extends:`, top-level
 //! `configs:`/`secrets:` (use `kind: Secret` instead), multi-file compose
 //! (`-f a -f b` merge/`include:`), `build.target` (stage selection),
-//! `deploy.replicas != 1`, a fixed `networks.*.ipv4_address`, anonymous
-//! volumes (no explicit source), and a bare container port with no host port
-//! (random host-port assignment). `working_dir:` is accepted but WARNS and is
-//! ignored — a pre-existing engine-wide gap (no settable workdir override
-//! anywhere in `RunOpts`/`Container`), not something this module introduces.
+//! `deploy.replicas != 1`, a fixed `networks.*.ipv4_address`, and anonymous
+//! volumes (no explicit source). `working_dir:` IS applied (via `RunOpts.
+//! workdir`, itself now also exposed as `container run -w/--workdir`), and a
+//! bare container port with no host port DOES get a random free host port
+//! (resolved once, before the container is created — see `free_host_port`).
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -999,16 +999,34 @@ fn service_build_to_image_doc(
     })
 }
 
+/// Finds a currently-free TCP port on the host by binding to port 0 (the
+/// kernel picks one) and immediately releasing it — the same technique
+/// `docker run -P`/`docker-compose`'s random-port assignment relies on.
+/// Inherent TOCTOU: another process could grab the port between this call
+/// returning and the container actually publishing it. A well-known,
+/// accepted limitation of "find a free port" — not something userspace can
+/// close without a kernel-level reservation API neither Docker nor this
+/// engine has.
+fn free_host_port() -> Result<u16> {
+    std::net::TcpListener::bind(("0.0.0.0", 0))
+        .and_then(|l| l.local_addr())
+        .map(|a| a.port())
+        .map_err(|e| Error::Invalid(format!("could not find a free host port: {e}")))
+}
+
 fn resolve_ports(ports: &[ComposePort], service: &str) -> Result<Vec<String>> {
     let mut out = Vec::new();
     for p in ports {
         match p {
             ComposePort::Short(s) => {
                 if !s.contains(':') {
-                    return Err(Error::Invalid(format!(
-                        "compose: service '{service}' port '{s}': a bare container port with no host port \
-                         (random host-port assignment) is not supported in v1 — use 'hostPort:{s}'"
-                    )));
+                    // Bare container port, no host port — Compose semantics: assign a
+                    // random free host port (the engine's own `-p`/`parse_publish` has
+                    // no "auto" keyword, so the port is resolved HERE, once, and fed in
+                    // as a concrete number).
+                    let host = free_host_port()?;
+                    out.push(format!("{host}:{s}"));
+                    continue;
                 }
                 let parts: Vec<&str> = s.rsplitn(3, ':').collect();
                 if parts.len() < 2 {
@@ -1041,13 +1059,12 @@ fn resolve_ports(ports: &[ComposePort], service: &str) -> Result<Vec<String>> {
                 published,
                 protocol,
             } => {
-                let host = published.as_ref().ok_or_else(|| {
-                    Error::Invalid(format!(
-                        "compose: service '{service}': port target={} has no 'published' host port (random assignment not supported in v1)",
-                        target.as_string()
-                    ))
-                })?;
-                let host_s = host.as_string();
+                let host_s = match published {
+                    Some(host) => host.as_string(),
+                    // Same "no published port -> random free host port" semantics as
+                    // the short form's bare-port case above.
+                    None => free_host_port()?.to_string(),
+                };
                 if host_s.contains('-') {
                     return Err(Error::Invalid(format!(
                         "compose: service '{service}': port ranges ('{host_s}') are not supported in v1"
@@ -1139,12 +1156,6 @@ fn service_to_run_opts(
     volume_names: &BTreeMap<String, String>,
     image_ref: &str,
 ) -> Result<(super::container::RunOpts, String)> {
-    if svc.working_dir.is_some() {
-        output::warn(&format!(
-            "compose: service '{service}': `working_dir` is not applied yet (ignored) — the image's own configured workdir is used"
-        ));
-    }
-
     let net_keys = svc.networks.keys();
     let net_key = if net_keys.is_empty() {
         "default".to_string()
@@ -1228,6 +1239,7 @@ fn service_to_run_opts(
         ports,
         privileged: svc.privileged,
         entrypoint,
+        workdir: svc.working_dir.clone(),
         restart,
         env,
         env_file,
@@ -1779,9 +1791,31 @@ services:
         ];
         let out = resolve_ports(&ports, "svc").unwrap();
         assert_eq!(out, vec!["8080:80".to_string(), "8443:443".to_string()]);
+    }
 
+    /// A bare container port (no host port, short or long form) gets a random
+    /// free host port instead of being rejected — real Compose semantics.
+    #[test]
+    fn resolve_ports_porta_sem_host_ganha_porta_aleatoria() {
         let bare = vec![ComposePort::Short("80".to_string())];
-        assert!(resolve_ports(&bare, "svc").is_err());
+        let out = resolve_ports(&bare, "svc").unwrap();
+        assert_eq!(out.len(), 1);
+        let (host, cont) = out[0].split_once(':').unwrap();
+        assert_eq!(cont, "80");
+        assert!(
+            host.parse::<u16>().is_ok(),
+            "host port não numérico: {host}"
+        );
+
+        let bare_long = vec![ComposePort::Long {
+            target: StringOrNum::Num(443),
+            published: None,
+            protocol: None,
+        }];
+        let out2 = resolve_ports(&bare_long, "svc").unwrap();
+        let (host2, cont2) = out2[0].split_once(':').unwrap();
+        assert_eq!(cont2, "443");
+        assert!(host2.parse::<u16>().is_ok());
     }
 
     /// BUG FOUND (code review): `127.0.0.1:9000:80` used to silently drop the

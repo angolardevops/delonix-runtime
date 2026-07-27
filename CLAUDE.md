@@ -156,12 +156,22 @@ uma lista plana, um módulo por grupo em `crates/delonix-runtime-bin/src/cmd/`:
   do `stack describe`/`cluster ls`. **Validado ao vivo de ponta-a-ponta** (Postgres+app): `web`
   só arrancou depois do `pg_isready` do `db` ter sucesso real; `compose down -v` removeu os 2
   containers + rede + volume sem deixar nada para trás; `up` idempotente numa 2ª chamada.
+  **FEITO (2026-07-27)**: `working_dir:` — ganhou `container run -w/--workdir` (gap do motor
+  inteiro, não só do compose: `RunOpts`/`Container` nunca tinham override de workdir na criação,
+  só o `exec -w` já tinha um por-chamada; `c.workdir` já era aplicado no `chdir()` do init antes
+  do `execve`, só faltava uma forma de o definir a partir de fora da imagem). `compose` passou a
+  usar `RunOpts.workdir`. Validado ao vivo: `working_dir: /opt/app` → `pwd` dentro do container
+  confirma `/opt/app`. **FEITO (2026-07-27)**: porta sem host explícito (`ports: ["80"]`, formas
+  curta e longa) — em vez de recusar, atribui uma porta livre do host (`free_host_port`, bind a
+  porta 0 + liberta de imediato; TOCTOU inerente e aceite, mesma técnica que qualquer atribuição
+  aleatória de porta usa). Validado ao vivo: `compose up` com `ports: ["80"]` publicou de facto
+  numa porta livre real, confirmado por `container port`.
   **Por fazer, documentado (nunca silencioso)**: `profiles`/`extends`/`configs`/`secrets`
   top-level (usa `kind: Secret` em vez disso)/multi-ficheiro (`-f a -f b`/`include:`),
   `build.target` (selecção de estágio), `deploy.replicas≠1`, `networks.*.ipv4_address` fixo,
-  volumes anónimos (sem `source` explícito), porta sem host explícito (atribuição aleatória).
-  `working_dir:` é aceite mas AVISA e é ignorado — gap pré-existente do motor inteiro (nenhum
-  `RunOpts`/`Container` tem override de workdir), não algo que este módulo introduz.
+  volumes anónimos (sem `source` explícito) — este último deliberadamente NÃO tentado ainda:
+  precisa de semântica própria de nomeação/limpeza (quando é que um volume anónimo se apaga?
+  `down` simples ou só `down -v`?) que merece ser pensada com calma, não decidida às pressas.
 - `delonix serve docker-api [--addr unix://<socket>]` — fatia da **Docker Engine API** (`cmd/dockerapi.rs`)
   que basta para `docker version/ps/images/info` **e**, desde a v0.26.0, o ciclo de vida completo de
   um container via `DOCKER_HOST=unix://<socket>`: `POST /containers/create|start|stop|kill|wait|
