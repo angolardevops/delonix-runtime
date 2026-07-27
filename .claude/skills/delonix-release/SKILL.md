@@ -49,11 +49,24 @@ glibc 2.35). O trabalho local é: notas → bump → tag → monitorizar → val
    `delonix-paas/target/{release,debug}/delonixctl` antes de desistir da doc
    do `delonixctl` — mas a doc do `delonix` (o que importa a este repo) já
    gera correctamente com qualquer caminho válido no 2.º argumento.
+   O `gen.py` usa o **argv[0]** do binário para as linhas `Usage:` — o ficheiro
+   TEM de se chamar `dlx` (é o nome em toda a doc comitada), senão a
+   regeneração troca `Usage: dlx …` por `Usage: delonix-x86_64-linux …` em
+   TODAS as páginas e produz um diff enorme e errado. Copia o asset para um
+   ficheiro com esse nome antes de gerar.
    Comitar as páginas alteradas.
-   `docs/comparacao.html` (Delonix vs Docker vs Podman) **não** é gerado pelo
-   `gen.py` — é hand-authored e não tem protecção automática contra drift; se
-   a release mudou algo que essa página compara (compose, GPU, API Docker,
-   segurança), revê-a manualmente também, não confies só na regeneração.
+
+   `docs/comparacao.html` (Delonix vs Docker vs Podman) **É gerado** pelo
+   `gen.py`, a partir da constante `COMPARE` (≈linha 1125). A nota anterior
+   aqui dizia o contrário e custou uma quase-regressão na v0.36.0: a página
+   comitada tinha sido corrigida À MÃO no `8e67a64` sem actualizar o `COMPARE`,
+   por isso a regeneração REVERTIA-A para um texto stale que afirmava que os
+   achados de segurança "ainda NÃO foram confirmados por uma 2.ª auditoria" e
+   que o núcleo de syscalls "nunca teve revisão nenhuma" — ambos falsos desde
+   2026-07-26. Numa página sobre postura de segurança isso é activamente
+   enganador. **Nunca editar `docs/comparacao.html` directamente**: editar o
+   `COMPARE` no `gen.py` e regenerar. Depois de gerar, confirmar sempre com
+   `git diff docs/comparacao.html` que só mudou o que era suposto.
 5. **Commit + tag + push** —
    `git commit … && git push origin main && git tag vX.Y.Z && git push origin vX.Y.Z`.
    (Se o push der 403 "denied to <outra-conta>": o gh tem múltiplas contas; usar
