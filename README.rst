@@ -15,7 +15,7 @@ Not a low-level OCI *runtime* (that's ``runc``/``crun``): Delonix is a full
 container **and** VM engine — build, run, network, firewall, store, and
 bootstrap Kubernetes clusters, from one binary.
 
-:Version: 0.3.0
+:Version: 0.32.2
 :License: Apache-2.0
 :Docs: https://angolardevops.github.io/delonix-runtime/
 :Repo: https://github.com/angolardevops/delonix-runtime
@@ -50,11 +50,11 @@ Why it's different
    * - Firewall
      - basic
      - basic
-     - per-container L4 (``ingress``/``egress``) + declarative ``kind: Ingress``
+     - per-container L4 (``ingress``/``egress``) + declarative ``kind: FirewallPolicy``
    * - Observability
      - ``stats``
      - ``stats``
-     - eBPF per-container flow accounting (``delonix flow``)
+     - eBPF per-container flow accounting (``delonix net flow``)
 
 Highlights
 ==========
@@ -75,9 +75,11 @@ Highlights
 - **Network storage.** ``kind: Storage`` mounts NFS/CIFS/WebDAV shares from a NAS
   (TrueNAS/Synology/Samba/Nextcloud) as named volumes, k8s-PersistentVolume style.
 - **Firewall as code.** A unified ``ingress``/``egress`` command surface and
-  ``kind: Ingress`` / ``kind: Egress`` manifests (k8s NetworkPolicy style) that
-  compile to nftables.
-- **eBPF observability.** ``delonix flow`` attaches tc/clsact classifiers to the
+  declarative ``kind: FirewallPolicy`` manifests (k8s NetworkPolicy style,
+  ``direction: ingress``/``egress``) that compile to nftables — plus a
+  separate ``kind: Ingress`` for k8s-style L7 HTTP routing (host/path →
+  backend service), not to be confused with the L4 firewall.
+- **eBPF observability.** ``delonix net flow`` attaches tc/clsact classifiers to the
   SDN veths for live per-container traffic — activating only when it has the
   capability, degrading silently to veth counters otherwise.
 - **Kubernetes, end to end.** A CRI server (``delonix-cri``) and
@@ -162,32 +164,22 @@ real ``--help``) at https://angolardevops.github.io/delonix-runtime/cheatsheet.h
      - Encrypted-at-rest secret vault — the producer of ``run --secret``.
    * - ``storage``
      - Network volumes (NFS/CIFS/WebDAV), k8s-PersistentVolume style.
-   * - ``ingress``
-     - Inbound firewall (L4 rules + DNAT publishes) for a container on the SDN.
-   * - ``egress``
-     - Outbound firewall (L4 rules + per-network egress-to-Internet policy).
-   * - ``httproute``
-     - Embedded L7/HTTP(S) reverse-proxy (``kind: HTTPRoute``) with hot reload and container auto-registration (``run --expose``).
-   * - ``flow``
-     - Live per-container traffic via the eBPF datapath (degrades to veth counters).
+   * - ``sharevolume``
+     - An isolated, individually-quota'd slice of a ``Storage`` — several container/vm/pod share one NAS export without seeing each other's data.
    * - ``stack``
      - Apply a whole manifest — every Kind, in dependency order.
+   * - ``compose``
+     - Native ``docker-compose.yml`` support (up/down/ps/logs/config) — no Docker involved.
    * - ``cluster``
-     - Kubernetes from scratch: ``kubeadm`` bootstrap over SSH, or full VM provisioning.
-   * - ``kube``
-     - Generate Kubernetes manifests from containers.
-   * - ``boot``
-     - Boot persistence: systemd units so containers come back up on host boot.
+     - Kubernetes from scratch: ``kubeadm`` bootstrap over SSH, full VM provisioning (with automatic HA/HAProxy for multi-control-plane), or manifest generation from a running container/pod (``cluster kube generate``).
+   * - ``net``
+     - Low-level network/infra, grouped: ``netns`` (rootless ingress infra), ``flow`` (live per-container traffic via eBPF), ``ingress``/``egress`` (L4 firewall), ``httproute`` (embedded L7/HTTP(S) reverse-proxy with hot reload and ``run --expose`` auto-registration), ``tunnel`` (expose a port publicly via pinggy/ngrok/cloudflare), ``boot`` (systemd persistence across reboots).
+   * - ``serve``
+     - Serve a protocol endpoint on a unix socket, grouped: ``cri`` (Kubernetes ``runtime.v1``), ``api`` (management API, HTTP+JSON), ``docker-api`` (a slice of the Docker Engine API, full container lifecycle).
    * - ``system``
      - The engine itself: events, info, df, prune (GC), monitor, thermal.
-   * - ``netns``
-     - Low-level management of the rootless ingress infra.
-   * - ``cri``
-     - Serve the Kubernetes CRI (``runtime.v1``) on a unix socket.
-   * - ``api``
-     - Serve the management API (HTTP+JSON) for external control-planes.
    * - ``dash``
-     - Interactive htop-style TUI dashboard (global or per group; ``--once`` for scripts).
+     - Interactive htop-style TUI dashboard — RAM/network/disk KPIs, per-container uptime, ``--json`` for scripts/Grafana, plus Prometheus ``/metrics`` on ``serve api``/``serve cri``.
    * - ``completion``
      - Dynamic autocompletion for bash/zsh/fish/elvish/powershell.
 
@@ -207,11 +199,12 @@ Manifests
 
 The declarative face, Kubernetes-style: a multi-document YAML
 (``apiVersion: delonix.io/v1``) with Kinds — ``Network``, ``Volume``,
-``Storage``, ``Image``, ``Vm``, ``Container``, ``Pod``, ``Ingress``, ``Egress`` —
-applied in dependency order by ``delonix stack apply``. Ensure-present semantics
-(idempotent by name), not a reconciler. ``kind: Pod`` is a real multi-container
-pod: N containers sharing the pod's netns (same IP, ``localhost`` between them),
-IPC and UTS — managed as a unit with ``delonix pod``.
+``Storage``, ``Image``, ``Vm``, ``Container``, ``Pod``, ``FirewallPolicy``,
+``Ingress`` (k8s-style L7 HTTP routing), ``Egress`` — applied in dependency
+order by ``delonix stack apply``. Ensure-present semantics (idempotent by
+name), not a reconciler. ``kind: Pod`` is a real multi-container pod: N
+containers sharing the pod's netns (same IP, ``localhost`` between them), IPC
+and UTS — managed as a unit with ``delonix pod``.
 
 .. code-block:: yaml
 
@@ -229,10 +222,11 @@ IPC and UTS — managed as a unit with ``delonix pod``.
      ports: [ "5432:5432" ]
    ---
    apiVersion: delonix.io/v1
-   kind: Ingress                 # k8s-NetworkPolicy-style L4 firewall
+   kind: FirewallPolicy          # L4 firewall, k8s-NetworkPolicy style
    metadata: { name: db-in }
    spec:
      target: db
+     direction: ingress
      defaultPolicy: deny
      rules:
        - { proto: tcp, port: "5432", from: 10.219.0.0/16 }
