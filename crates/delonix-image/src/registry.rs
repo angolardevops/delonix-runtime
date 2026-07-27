@@ -449,7 +449,8 @@ fn with_prefix(digest: &str) -> String {
 /// Docker schema-2 media types (kept to match byte-for-byte what
 /// `docker`/registries expect; in `oci_spec` they become `MediaType::Other(...)`).
 const DOCKER_CONFIG_MEDIA_TYPE: &str = "application/vnd.docker.container.image.v1+json";
-const DOCKER_MANIFEST_MEDIA_TYPE: &str = "application/vnd.docker.distribution.manifest.v2+json";
+pub(crate) const DOCKER_MANIFEST_MEDIA_TYPE: &str =
+    "application/vnd.docker.distribution.manifest.v2+json";
 
 /// Builds an OCI [`Descriptor`] (`oci_spec`) from a mediaType, size
 /// and digest (with or without the `sha256:` prefix). Centralises the digest

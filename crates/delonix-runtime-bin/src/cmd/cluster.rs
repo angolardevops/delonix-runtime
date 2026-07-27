@@ -480,6 +480,17 @@ pub enum ClusterCmd {
         #[arg(long, default_value = "delonix", add = ArgValueCandidates::new(super::complete::clusters))]
         name: String,
     },
+    /// Load local images into a kind-mode cluster's nodes, **without a registry**
+    /// (the equivalent of `kind load docker-image`): packs each image from the
+    /// local store and imports it into every running node's containerd.
+    Load {
+        /// Images to load (`repo:tag`, as they appear in `delonix image ls`).
+        #[arg(required = true, num_args = 1..)]
+        images: Vec<String>,
+        /// Cluster name. Omit when there is only one — with several, this says which.
+        #[arg(long, add = ArgValueCandidates::new(super::complete::clusters))]
+        name: Option<String>,
+    },
     /// Generate a Kubernetes manifest from a container/pod already running
     /// locally (`kube generate`) — the "ran it locally, now give me the YAML
     /// for k8s" path (equivalent to `podman generate kube`).
@@ -603,6 +614,13 @@ pub fn run(action: ClusterCmd) -> Result<()> {
             let (images, store) = super::util::open_stores()?;
             return super::kindmode::delete(&images, &store, name);
         }
+        ClusterCmd::Load {
+            images: ref refs,
+            ref name,
+        } => {
+            let (images, store) = super::util::open_stores()?;
+            return super::kindmode::load(&images, &store, refs, name.as_deref());
+        }
         _ => {}
     }
     match action {
@@ -610,6 +628,7 @@ pub fn run(action: ClusterCmd) -> Result<()> {
         ClusterCmd::Create { .. }
         | ClusterCmd::Delete { .. }
         | ClusterCmd::Init { .. }
+        | ClusterCmd::Load { .. }
         | ClusterCmd::Ls => {
             unreachable!("tratados acima")
         }

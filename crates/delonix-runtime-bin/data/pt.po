@@ -3318,3 +3318,36 @@ msgstr "taxa tem de ser positiva: {s}"
 
 msgid "{name}: resource limits updated (memory={memory}, cpus={cpus})"
 msgstr "{name}: limites de recursos actualizados (memory={memory}, cpus={cpus})"
+
+msgid "no kind-mode cluster — create one with `delonix cluster create`"
+msgstr "não há nenhum cluster em modo kind — cria um com `delonix cluster create`"
+
+msgid "several clusters ({names}) — pick one with `--name`"
+msgstr "há vários clusters ({names}) — escolhe um com `--name`"
+
+msgid "cluster '{name}' has no running node — start it before loading images"
+msgstr "o cluster '{name}' não tem nenhum nó a correr — arranca-o antes de carregar imagens"
+
+msgid "warning: node '{node}' is not running — it will NOT get the images"
+msgstr "aviso: o nó '{node}' não está a correr — NÃO vai receber as imagens"
+
+msgid "Loading images into cluster"
+msgstr "A carregar imagens no cluster"
+
+msgid "Packing"
+msgstr "A empacotar"
+
+msgid "`ctr images import` failed on node '{node}' (exit {code}): {out}"
+msgstr "`ctr images import` falhou no nó '{node}' (saída {code}): {out}"
+
+msgid "images available to the kubelet — use `imagePullPolicy: IfNotPresent`"
+msgstr "imagens disponíveis para o kubelet — usa `imagePullPolicy: IfNotPresent`"
+
+msgid "Load local images into a kind-mode cluster's nodes, **without a registry** (the equivalent of `kind load docker-image`): packs each image from the local store and imports it into every running node's containerd"
+msgstr "Carrega imagens locais nos nós de um cluster em modo kind, **sem registo** (o equivalente ao `kind load docker-image`): empacota cada imagem do store local e importa-a no containerd de cada nó a correr"
+
+msgid "Images to load (`repo:tag`, as they appear in `delonix image ls`)"
+msgstr "Imagens a carregar (`repo:tag`, tal como aparecem em `delonix image ls`)"
+
+msgid "Cluster name. Omit when there is only one — with several, this says which"
+msgstr "Nome do cluster. Omite quando só há um — com vários, indica qual"
