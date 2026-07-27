@@ -4,6 +4,78 @@
 > (regenerado automaticamente pelo pipeline de release a cada tag publicada).
 > Não editar à mão — edita a nota da release respectiva.
 
+# v0.36.1 — instalador endurecido e cadeia de assinatura das releases
+
+Release de **segurança do canal de distribuição**. O binário é funcionalmente
+idêntico ao da v0.36.0 (nenhum ficheiro `.rs` mudou) — o que mudou foi a forma como
+ele chega à tua máquina.
+
+## O instalador executava a meio se o download fosse cortado
+
+O uso documentado é `curl … | bash`, e o **bash executa à medida que lê**. Uma
+transferência truncada — rede a cair, proxy a cortar — corria **metade** do
+instalador. E a primeira metade não é inócua: instala pacotes com `sudo`, acrescenta
+a `/etc/subuid`, carrega perfis AppArmor e escreve em `/etc/sysctl.d`. O host ficava
+meio-configurado **sem um único erro**.
+
+O corpo do `install.sh` passou a estar dentro de `{ … }`: o bash tem de ler até à
+chaveta final antes de executar seja o que for, por isso um ficheiro truncado morre
+em `syntax error: unexpected end of file` e **nada** corre. Verificado
+empiricamente, com o instalador cortado a 60% e a 80%: zero linhas executadas.
+
+## `SHA256SUMS` sozinho não protegia contra uma release adulterada
+
+O instalador sempre verificou os binários contra o `SHA256SUMS`. Isso prova
+**integridade de transferência** — não **autenticidade de origem**. O `SHA256SUMS`
+vem da mesma URL que o binário, por isso quem consiga publicar uma release adulterada
+(conta comprometida, token de CI roubado) publica também o `SHA256SUMS` a condizer: a
+verificação passava e instalava o artefacto adulterado.
+
+Esta release traz a cadeia completa, pronta a activar:
+
+- o workflow assina o `SHA256SUMS` com **minisign** e publica `SHA256SUMS.minisig`;
+- o `install.sh` traz a chave pública embutida e verifica a assinatura **antes** de
+  qualquer verificação de hash (sem um `SHA256SUMS` autêntico, os hashes que ele
+  contém não valem nada);
+- **fail-closed**: hash adulterado, assinatura de outra chave, `.minisig` em falta ou
+  `minisign` que não se consegue instalar — todos abortam. `--insecure-skip-signature`
+  existe como escape documentado.
+
+O mecanismo foi validado ponta a ponta com uma chave descartável: assinatura legítima
+verifica, `SHA256SUMS` adulterado dá *Signature verification failed*, e assinado por
+outra chave dá key id a não bater.
+
+> **Esta release ainda sai SEM assinatura.** A chave de assinatura é gerada pelo
+> mantenedor, na máquina dele, e ainda não está configurada — ver
+> [docs/SECURITY-RELEASES.md](../SECURITY-RELEASES.md). Até lá o instalador avisa e
+> verifica só integridade. Assim que a chave existir, a release seguinte é assinada
+> automaticamente e o instalador passa a exigir a assinatura.
+
+## `--low-ports`: publicar 80/443 em rootless
+
+Sem isto, `-p 80:80` e um `kind: HTTPRoute` com `entrypoints: [{port: 80}]` falham com
+`slirp_add_hostfwd failed`: quem liga a porta do lado do host é o `slirp4netns`, um
+processo sem privilégios, e o kernel reserva as portas <1024. Não é limitação deste
+motor — o podman e o docker rootless têm o mesmo muro e documentam o mesmo contorno.
+
+`install.sh --low-ports` escreve `/etc/sysctl.d/99-delonix-lowports.conf` com
+`net.ipv4.ip_unprivileged_port_start = 80`.
+
+**Deliberadamente opt-in e fora do bloco `--no-tune`**: os sysctls que já lá estavam
+afinam limites (inotify, `max_map_count`) e não mexem em nenhuma fronteira de
+privilégio; este baixa uma, para o host inteiro — a partir daí qualquer programa de
+qualquer utilizador local pode ligar-se às portas 80-1023. Num portátil de
+desenvolvimento é um compromisso razoável; numa máquina partilhada, a alternativa sem
+baixar nada é um proxy na porta 80 a correr como root.
+
+## Actualizar
+
+```bash
+curl -fsSL https://github.com/angolardevops/delonix-runtime/releases/latest/download/install.sh | bash
+```
+
+---
+
 ## v0.36.0 — the `-p` / ingress-firewall flow: 5 bugs, 2 of them security
 
 Real bug report from a live host: *"the browser should not block when a container is exposed via
