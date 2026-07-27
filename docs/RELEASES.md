@@ -4,6 +4,82 @@
 > (regenerado automaticamente pelo pipeline de release a cada tag publicada).
 > Não editar à mão — edita a nota da release respectiva.
 
+## v0.34.2 — a holder left behind by an in-place upgrade now says so (instead of a bare `ENOENT`)
+
+Bug fix release, from a real report on a live host: `delonix cluster create --name dev` failed at
+`✗ Preparing nodes (1)` with nothing but
+
+```
+error system call `control socket` failed: No such file or directory (os error 2)
+```
+
+The runtime itself was fine. What was broken was the *state of the host*: the ingress netns holder
+running there had been started by a **pre-v0.34.2 binary**, and v0.34.1 moved the control socket
+(`a112754`, "decouple the ingress control/slirp sockets from `DELONIX_ROOT`'s length") from
+`<DELONIX_ROOT>/ingress/control.sock` to `/tmp/delonix-net-<uid>/control.sock`. Upgrading the
+binary in place — the normal `install.sh` flow — leaves the *old* holder alive, bound to a path
+the *new* binary never looks at.
+
+### Why nothing caught it
+
+`status()` decides the infra is `up` by reading **pidfiles**, never by checking reachability. So:
+
+- `ensure_up()` saw `up` and returned early — no respawn, no complaint.
+- `control_query()`'s fast-fail saw `holder_pid = Some(...)` and proceeded, then burned its 50 ×
+  40 ms retry budget connecting to a path that would never appear, and reported the raw
+  `ENOENT` from the last attempt.
+
+Both were reasonable in isolation, and together they turned "your holder is from the previous
+build" into an error message with no subject, no path, and no recovery.
+
+### Fix
+
+`stale_holder_message` (pure, tested): when the holder is **alive but its control socket is
+absent**, the error now names the pid, the socket that is missing, the likely cause, and the exact
+recovery — and, when the pre-v0.34.2 socket is still on disk (which *proves* an in-place upgrade,
+rather than guessing at it), it says that outright and names both paths:
+
+```
+error system call `control socket` failed: ingress holder (pid 17552) is alive but
+`/tmp/delonix-net-1000/control.sock` does not exist: it is bound to
+`/home/w/.local/share/delonix/ingress/control.sock` instead — the path the control socket used
+BEFORE v0.34.2, so this holder was started by an older delonix build (in-place upgrade). Restart
+the infra to recover: `delonix net netns down` (kills holder + slirp by pidfile, so it works
+whatever build started them; the next command respawns both), then
+`delonix container restart <name>` for each container on the SDN — they keep running but lose
+their veth along with the old netns.
+```
+
+Checked in two places, because they are reached by different paths: `ensure_up()` (every setup
+path — fails at the entry point instead of at the first attach, with a ~2s grace for the
+legitimate startup race where another process spawned the holder microseconds ago and hasn't
+`bind`ed yet) and `control_query()` after its retries are exhausted (the teardown paths don't go
+through `ensure_up`, and a socket that never *appeared* is a different failure from one that
+exists and refuses the connection).
+
+**Deliberately not auto-healing.** Killing a live holder frees its netns and drops the network of
+every container attached to the SDN — an operator decision, not something a `cluster create`
+should do behind your back. So this release makes the condition *loud and actionable*, it does not
+"fix" it by itself.
+
+`teardown()` (i.e. `delonix net netns down`) now also removes the pre-v0.34.2 socket paths: it is
+the command that recovers a host from exactly this situation, so it must not leave a socket behind
+from the build it just killed — a leftover legacy file would make a *later* diagnosis blame an old
+binary that is no longer running.
+
+### Recovering a host that already hit this
+
+```bash
+delonix net netns down                 # kills the stale holder + its slirp (works on any build)
+delonix container restart <name>       # for each container with an SDN IP (`delonix container ls`)
+delonix cluster create --name dev      # the original command now proceeds
+```
+
+Containers on `--net host`/`--net none` are unaffected: their published ports come from their own
+per-container slirp, which has no relationship with the holder.
+
+---
+
 ## v0.34.1 — ingress control/slirp sockets no longer break under a deep `DELONIX_ROOT`
 
 Bug fix release, found live while validating an unrelated feature under a deliberately deep
