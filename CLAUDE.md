@@ -1171,6 +1171,26 @@ da publicação (não só ler código) apanhou 3 problemas que a revisão estát
    corrigido para reflectir o estado actual — `--net host` continua o default do scaffold só por
    simplicidade, não porque `network:` esteja limitado.
 
+### v0.32.2 — 380+ strings PT hardcoded fora do catálogo i18n, em 26 ficheiros
+
+O achado nº2 acima (`manifest.rs`) era só a ponta: uma varredura completa (agentes em paralelo +
+2ª passagem manual) encontrou a MESMA classe de bug — texto português hardcoded, visível mesmo em
+EN por omissão — em `crates/delonix-runtime-bin/src/cmd/{build,cluster,conditions,container,
+dependency,etcd,firewall,httproute,image,ingress_proxy,kindmode,kube,lb,manifest,mapped,network,
+scaffold,scan,secret,sharevolume,stack,storage,system,tunnel,vm,vmimage,volume}.rs` — 380 strings
+ao todo, movidas para `po::t`/`po::tf` + `pt.po` (352+ entradas novas). Duas armadilhas de
+concordância de género apanhadas antes de corromper o catálogo (a mesma chave EN "created" já
+existia traduzida como *criada* para "a rede" — reaproveitá-la para "o volume" teria produzido
+*criada:* onde devia ser *criado:*; resolvido com chaves distintas por contexto, nunca partilhando
+um `msgid` cujo `msgstr` dependa do género do sujeito). Aproveitado para corrigir 3 páginas da
+doc pública desactualizadas (`docs/gen.py`): `serve docker-api` descrito como só-leitura (é
+lifecycle completo desde v0.26.0), `cluster kubeadm` descrito sem suporte a HA (o HAProxy
+automático existe desde v0.13.0), `network` descrito como só `bridge` realizado fisicamente (o
+`overlay` também é, há várias versões) — e uma página inteira em falta (`delonix compose`, zero
+documentação desde a v0.29.0). Validado ao vivo: build/clippy/fmt/test limpos, EN por omissão +
+PT exacto via `--l18n=pt` em várias amostras, incluindo alinhamento de colunas independente por
+língua no `volumes inspect`.
+
 ## Falhas silenciosas corrigidas (fail-closed) + 1 documentada
 
 Da análise Docker/Podman (`docs/COMPARACAO-DOCKER-PODMAN.md`), quatro casos em

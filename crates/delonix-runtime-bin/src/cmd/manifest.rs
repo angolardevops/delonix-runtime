@@ -62,8 +62,11 @@ pub fn render_with_defaults(docs: &[ManifestDoc]) -> Result<String> {
         d.spec = filled_spec(doc)?;
         out.push_str(&serde_yaml::to_string(&d).map_err(|e| {
             Error::Invalid(format!(
-                "dry-run: falha a serializar {} '{}': {e}",
-                doc.kind, doc.metadata.name
+                "{}: {e}",
+                super::po::tf(
+                    "dry-run: failed to serialize {kind} '{name}'",
+                    &[("kind", &doc.kind), ("name", &doc.metadata.name)],
+                )
             ))
         })?);
     }
@@ -105,7 +108,7 @@ pub fn resolve_path(explicit: Option<PathBuf>) -> Result<PathBuf> {
         Ok(default)
     } else {
         Err(Error::Invalid(
-            "sem manifesto: passa -f <ficheiro> ou cria um ./delonix-manifest.yaml".into(),
+            super::po::t("no manifest: pass -f <file> or create a ./delonix-manifest.yaml").into(),
         ))
     }
 }
@@ -256,15 +259,21 @@ pub fn load(path: &Path) -> Result<Vec<ManifestDoc>> {
         ))
     })?;
     if text.trim().is_empty() {
-        return Err(Error::Invalid(format!(
-            "{} está vazio (sem documentos YAML)",
-            path.display()
+        return Err(Error::Invalid(super::po::tf(
+            "{path} is empty (no YAML documents)",
+            &[("path", &path.display().to_string())],
         )));
     }
     let mut docs = Vec::new();
     for de in serde_yaml::Deserializer::from_str(&text) {
         let mut doc = ManifestDoc::deserialize(de).map_err(|e| {
-            Error::Invalid(format!("manifesto inválido em {}: {e}", path.display()))
+            Error::Invalid(format!(
+                "{}: {e}",
+                super::po::tf(
+                    "invalid manifest in {path}",
+                    &[("path", &path.display().to_string())],
+                )
+            ))
         })?;
         // Canonicalize early: everything else (of_kind, stack::KINDS, describe) speaks
         // only the canonical form, and a `kind: VirtualMachine` becomes a `Vm`.
@@ -273,9 +282,14 @@ pub fn load(path: &Path) -> Result<Vec<ManifestDoc>> {
             doc.kind = canon.to_string();
         }
         if doc.api_version != SUPPORTED_API_VERSION {
-            return Err(Error::Invalid(format!(
-                "{} '{}': apiVersion '{}' desconhecida (só '{SUPPORTED_API_VERSION}' é suportada)",
-                doc.kind, doc.metadata.name, doc.api_version
+            return Err(Error::Invalid(super::po::tf(
+                "{kind} '{name}': unknown apiVersion '{version}' (only '{SUPPORTED_API_VERSION}' is supported)",
+                &[
+                    ("kind", &doc.kind),
+                    ("name", &doc.metadata.name),
+                    ("version", &doc.api_version),
+                    ("SUPPORTED_API_VERSION", SUPPORTED_API_VERSION),
+                ],
             )));
         }
         // A grouped `kind: Stack` expands into its constituent resource docs
@@ -288,9 +302,9 @@ pub fn load(path: &Path) -> Result<Vec<ManifestDoc>> {
         }
     }
     if docs.is_empty() {
-        return Err(Error::Invalid(format!(
-            "{} está vazio (sem documentos YAML)",
-            path.display()
+        return Err(Error::Invalid(super::po::tf(
+            "{path} is empty (no YAML documents)",
+            &[("path", &path.display().to_string())],
         )));
     }
     Ok(docs)
@@ -305,8 +319,11 @@ pub fn of_kind<'a>(docs: &'a [ManifestDoc], kind: &str) -> Vec<&'a ManifestDoc> 
 pub fn spec_of<T: for<'de> Deserialize<'de>>(doc: &ManifestDoc) -> Result<T> {
     serde_yaml::from_value(doc.spec.clone()).map_err(|e| {
         Error::Invalid(format!(
-            "{} '{}': spec inválido: {e}",
-            doc.kind, doc.metadata.name
+            "{}: {e}",
+            super::po::tf(
+                "{kind} '{name}': invalid spec",
+                &[("kind", &doc.kind), ("name", &doc.metadata.name)],
+            )
         ))
     })
 }
@@ -325,8 +342,11 @@ pub fn spec_of<T: for<'de> Deserialize<'de>>(doc: &ManifestDoc) -> Result<T> {
 pub fn warn_unknown_fields(doc: &ManifestDoc, known: &[&str]) {
     for key in unknown_fields(doc, known) {
         eprintln!(
-            "AVISO: {} '{}': campo desconhecido '{}' no spec — ignorado (verifica a ortografia)",
-            doc.kind, doc.metadata.name, key
+            "{}",
+            super::po::tf(
+                "WARNING: {kind} '{name}': unknown field '{key}' in spec — ignored (check the spelling)",
+                &[("kind", &doc.kind), ("name", &doc.metadata.name), ("key", &key)],
+            )
         );
     }
 }
@@ -610,7 +630,7 @@ spec: { image: alpine }
         ));
         std::fs::write(&p, "").unwrap();
         let err = load(&p).unwrap_err();
-        assert!(format!("{err}").contains("vazio"));
+        assert!(format!("{err}").contains("is empty"));
         let _ = std::fs::remove_file(&p);
     }
 
@@ -622,7 +642,7 @@ spec: { image: alpine }
         let orig = std::env::current_dir().unwrap();
         std::env::set_current_dir(&dir).unwrap();
         let err = resolve_path(None).unwrap_err();
-        assert!(format!("{err}").contains("sem manifesto"));
+        assert!(format!("{err}").contains("no manifest"));
         std::env::set_current_dir(orig).unwrap();
         let _ = std::fs::remove_dir_all(&dir);
     }

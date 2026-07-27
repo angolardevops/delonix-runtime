@@ -121,7 +121,10 @@ fn storage(doc: &ManifestDoc, env: &Env) -> Vec<Condition> {
         return vec![Condition::bad(
             "Mounted",
             "RequiresCapSysAdmin",
-            format!("montar '{ty}' precisa de CAP_SYS_ADMIN — corre como root ou numa sessão privilegiada; em rootless o mount é best-effort e falha"),
+            super::po::tf(
+                "mounting '{ty}' requires CAP_SYS_ADMIN — run as root or in a privileged session; in rootless the mount is best-effort and fails",
+                &[("ty", ty)],
+            ),
         )];
     }
     let (helper, present) = match ty {
@@ -133,7 +136,10 @@ fn storage(doc: &ManifestDoc, env: &Env) -> Vec<Condition> {
         return vec![Condition::bad(
             "Mounted",
             "MountHelperMissing",
-            format!("o helper '{helper}' não está no PATH — instala-o no host para montar '{ty}'"),
+            super::po::tf(
+                "helper '{helper}' not in PATH — install it on the host to mount '{ty}'",
+                &[("helper", helper), ("ty", ty)],
+            ),
         )];
     }
     vec![Condition::ok("Mounted")]
@@ -151,7 +157,9 @@ fn volume(doc: &ManifestDoc, env: &Env) -> Vec<Condition> {
         vec![Condition::bad(
             "QuotaEnforced",
             "RequiresRoot",
-            "a quota dura precisa de root (losetup/CAP_SYS_ADMIN) — em rootless é só MONITORIZADA, sem cap real",
+            super::po::t(
+                "the hard quota requires root (losetup/CAP_SYS_ADMIN) — in rootless it is only MONITORED, no real cap",
+            ),
         )]
     } else {
         vec![Condition::ok("QuotaEnforced")]
@@ -168,7 +176,10 @@ fn network(doc: &ManifestDoc) -> Vec<Condition> {
         "macvlan" | "ipvlan" | "overlay" => vec![Condition::bad(
             "Realized",
             "DriverNotImplemented",
-            format!("o driver '{driver}' ainda não tem plano físico — fica no registo mas os containers só atacham `bridge`"),
+            super::po::tf(
+                "driver '{driver}' has no physical plane yet — it stays in the registry but containers only attach to `bridge`",
+                &[("driver", driver)],
+            ),
         )],
         _ => vec![Condition::ok("Realized")],
     }
@@ -197,7 +208,10 @@ fn vm(doc: &ManifestDoc, env: &Env) -> Vec<Condition> {
         vec![Condition::bad(
             "RestartSupervised",
             "BackendCloudHypervisor",
-            format!("restartPolicy '{policy}' NÃO é supervisionado no Cloud Hypervisor — usa `backend: libvirt` para o materializar"),
+            super::po::tf(
+                "restartPolicy '{policy}' is NOT supervised on Cloud Hypervisor — use `backend: libvirt` to materialize it",
+                &[("policy", policy)],
+            ),
         )]
     }
 }
@@ -217,7 +231,9 @@ fn vm_volumes(doc: &ManifestDoc) -> Vec<Condition> {
         vec![Condition::bad(
             "VolumesRequireLibvirt",
             "BackendCloudHypervisor",
-            "spec.volumes usa virtio-9p, que só o backend libvirt materializa — remove `backend: cloud-hypervisor` (o apply escolhe libvirt sozinho quando há volumes)".to_string(),
+            super::po::t(
+                "spec.volumes uses virtio-9p, which only the libvirt backend materializes — remove `backend: cloud-hypervisor` (apply picks libvirt on its own when there are volumes)",
+            ),
         )]
     } else {
         Vec::new()

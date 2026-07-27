@@ -167,7 +167,7 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
             spec.options,
             spec.quota,
         )?;
-        println!("volume/{name}: garantido");
+        println!("volume/{name}: {}", super::po::t("ensured"));
     }
     Ok(())
 }
@@ -186,8 +186,9 @@ fn create_volume(
         store.create_with(name, driver, device, options)?
     };
     if let Some(q) = quota {
-        let bytes = parse_size_bytes(&q)
-            .ok_or_else(|| delonix_runtime_core::Error::Invalid(format!("quota inválida: {q}")))?;
+        let bytes = parse_size_bytes(&q).ok_or_else(|| {
+            delonix_runtime_core::Error::Invalid(super::po::tf("invalid quota: {q}", &[("q", &q)]))
+        })?;
         store.set_quota(name, Some(bytes), None, false)?;
     }
     Ok(vol)
@@ -259,13 +260,23 @@ fn describe_one(store: &VolumeStore, v: &delonix_volume::Volume) {
 fn cmd_inspect(store: &VolumeStore, name: &str) -> Result<()> {
     let v = store.inspect(name)?;
     let usage = store.usage(name);
-    println!("nome:        {}", v.name);
-    println!("driver:      {}", v.driver);
-    println!("mountpoint:  {}", v.mountpoint);
-    println!("criado:      unix={}", v.created_unix);
-    println!("uso:         {usage} bytes");
+    println!("{:<13}{}", format!("{}:", super::po::t("name")), v.name);
+    println!("{:<13}{}", format!("{}:", super::po::t("driver")), v.driver);
+    println!(
+        "{:<13}{}",
+        format!("{}:", super::po::t("mountpoint")),
+        v.mountpoint
+    );
+    println!(
+        "{}",
+        super::po::tf(
+            "created:     unix={ts}",
+            &[("ts", &v.created_unix.to_string())],
+        )
+    );
+    println!("{:<13}{usage} bytes", format!("{}:", super::po::t("usage")));
     if let Some(q) = v.quota_bytes {
-        println!("quota:       {q} bytes");
+        println!("{:<13}{q} bytes", format!("{}:", super::po::t("quota")));
     }
     Ok(())
 }
@@ -302,7 +313,10 @@ fn volsnap_run(mode: &str, data: &std::path::Path, tarball: &std::path::Path) ->
         Some(true) => Ok(()),
         Some(false) => Err(Error::Runtime {
             context: "volume snapshot",
-            message: format!("__volsnap {mode} falhou no userns mapeado (vê /etc/subuid)"),
+            message: super::po::tf(
+                "__volsnap {mode} failed in the mapped userns (see /etc/subuid)",
+                &[("mode", mode)],
+            ),
         }),
         // No rootless/helpers: run direct (already owner of the files).
         None => super::mapped::volsnap(mode, data, tarball),
@@ -324,14 +338,21 @@ fn cmd_snapshot(store: &VolumeStore, action: SnapshotCmd) -> Result<()> {
             volsnap_run("create", std::path::Path::new(&v.mountpoint), &tarball)?;
             let size = std::fs::metadata(&tarball).map(|m| m.len()).unwrap_or(0);
             println!(
-                "snapshot '{snap}' do volume '{volume}' criado ({})",
-                super::output::fmt_size(size)
+                "{}",
+                super::po::tf(
+                    "snapshot '{snap}' of volume '{volume}' created ({size})",
+                    &[
+                        ("snap", &snap),
+                        ("volume", &volume),
+                        ("size", &super::output::fmt_size(size))
+                    ],
+                )
             );
             println!(
                 "{}",
-                super::output::dim(
-                    "(crash-consistente: para consistência de BD, pára/dump o consumidor primeiro)"
-                )
+                super::output::dim(super::po::t(
+                    "(crash-consistent: for DB consistency, stop/dump the consumer first)"
+                ))
             );
         }
         SnapshotCmd::Ls { volume } => {
@@ -365,15 +386,28 @@ fn cmd_snapshot(store: &VolumeStore, action: SnapshotCmd) -> Result<()> {
                     "snapshot {snap} do volume {volume}"
                 )));
             }
-            super::output::warn(&format!(
-                "a repor '{volume}' a partir de '{snap}' — pára os consumidores do volume primeiro"
+            super::output::warn(&super::po::tf(
+                "restoring '{volume}' from '{snap}' — stop the volume's consumers first",
+                &[("volume", &volume), ("snap", &snap)],
             ));
             volsnap_run("restore", std::path::Path::new(&v.mountpoint), &tarball)?;
-            println!("volume '{volume}' reposto do snapshot '{snap}'");
+            println!(
+                "{}",
+                super::po::tf(
+                    "volume '{volume}' restored from snapshot '{snap}'",
+                    &[("volume", &volume), ("snap", &snap)],
+                )
+            );
         }
         SnapshotCmd::Rm { volume, snap } => {
             store.remove_snapshot(&volume, &snap)?;
-            println!("snapshot '{snap}' do volume '{volume}' apagado");
+            println!(
+                "{}",
+                super::po::tf(
+                    "snapshot '{snap}' of volume '{volume}' deleted",
+                    &[("snap", &snap), ("volume", &volume)],
+                )
+            );
         }
     }
     Ok(())

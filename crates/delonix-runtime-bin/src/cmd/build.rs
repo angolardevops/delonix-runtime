@@ -104,7 +104,13 @@ pub(crate) fn parse_build_args(raw: &[String]) -> Vec<(String, String)> {
         .filter_map(|kv| match kv.split_once('=') {
             Some((k, v)) => Some((k.to_string(), v.to_string())),
             None => {
-                eprintln!("aviso: --build-arg '{kv}' ignorado — esperava KEY=VALUE");
+                eprintln!(
+                    "{}",
+                    super::po::tf(
+                        "warning: --build-arg '{kv}' ignored — expected KEY=VALUE",
+                        &[("kv", kv)],
+                    )
+                );
                 None
             }
         })
@@ -137,25 +143,36 @@ pub(crate) fn parse_build_secrets(raw: &[String]) -> Result<HashMap<String, Path
                 Some(("id", v)) => id = Some(v),
                 Some(("src", v)) => src = Some(v),
                 _ => {
-                    return Err(Error::Invalid(format!(
-                        "--secret '{entry}': espera 'id=<nome>,src=<caminho>'"
+                    return Err(Error::Invalid(super::po::tf(
+                        "--secret '{entry}': expects 'id=<name>,src=<path>'",
+                        &[("entry", entry)],
                     )))
                 }
             }
         }
-        let id =
-            id.ok_or_else(|| Error::Invalid(format!("--secret '{entry}': falta 'id=<nome>'")))?;
-        let src = src
-            .ok_or_else(|| Error::Invalid(format!("--secret '{entry}': falta 'src=<caminho>'")))?;
+        let id = id.ok_or_else(|| {
+            Error::Invalid(super::po::tf(
+                "--secret '{entry}': missing 'id=<name>'",
+                &[("entry", entry)],
+            ))
+        })?;
+        let src = src.ok_or_else(|| {
+            Error::Invalid(super::po::tf(
+                "--secret '{entry}': missing 'src=<path>'",
+                &[("entry", entry)],
+            ))
+        })?;
         if !valid_secret_id(id) {
-            return Err(Error::Invalid(format!(
-                "--secret id='{id}': só letras/números/'_'/'-'/'.' são aceites"
+            return Err(Error::Invalid(super::po::tf(
+                "--secret id='{id}': only letters/digits/'_'/'-'/'.' are accepted",
+                &[("id", id)],
             )));
         }
         let path = PathBuf::from(src);
         if !path.is_file() {
-            return Err(Error::Invalid(format!(
-                "--secret id='{id}': '{src}' não é um ficheiro existente"
+            return Err(Error::Invalid(super::po::tf(
+                "--secret id='{id}': '{src}' is not an existing file",
+                &[("id", id), ("src", src)],
             )));
         }
         out.insert(id.to_string(), path);
@@ -168,17 +185,22 @@ pub(crate) fn parse_build_secrets(raw: &[String]) -> Result<HashMap<String, Path
 /// error rather than a silently-ignored flag.
 pub(crate) fn parse_platform(s: &str) -> Result<String> {
     let (os, arch) = s.split_once('/').ok_or_else(|| {
-        Error::Invalid(format!(
-            "--platform '{s}': espera 'linux/<arch>' (ex.: linux/arm64)"
+        Error::Invalid(super::po::tf(
+            "--platform '{s}': expects 'linux/<arch>' (e.g.: linux/arm64)",
+            &[("s", s)],
         ))
     })?;
     if os != "linux" {
-        return Err(Error::Invalid(format!(
-            "--platform '{s}': só 'linux/<arch>' é suportado (este motor não corre outro SO)"
+        return Err(Error::Invalid(super::po::tf(
+            "--platform '{s}': only 'linux/<arch>' is supported (this engine does not run another OS)",
+            &[("s", s)],
         )));
     }
     if arch.is_empty() {
-        return Err(Error::Invalid(format!("--platform '{s}': arch vazia")));
+        return Err(Error::Invalid(super::po::tf(
+            "--platform '{s}': empty arch",
+            &[("s", s)],
+        )));
     }
     Ok(arch.to_string())
 }
@@ -309,10 +331,16 @@ fn clone_rootfs(images: &ImageStore, src_rootfs: &str, id: &str) -> Result<Strin
         .arg(format!("{}/.", src_rootfs.trim_end_matches('/')))
         .arg(&dst)
         .status()
-        .map_err(|e| Error::Invalid(format!("cp do estágio '{src_rootfs}': {e}")))?;
+        .map_err(|e| {
+            Error::Invalid(format!(
+                "{}: {e}",
+                super::po::tf("cp of stage '{src}'", &[("src", src_rootfs)])
+            ))
+        })?;
     if !status.success() {
-        return Err(Error::Invalid(format!(
-            "cp do estágio '{src_rootfs}' falhou"
+        return Err(Error::Invalid(super::po::tf(
+            "cp of stage '{src}' failed",
+            &[("src", src_rootfs)],
         )));
     }
     if runtime::is_rootless() {
@@ -477,8 +505,9 @@ fn build_one_stage(
                     unmount_run_secrets(c, &cur_rootfs, &mounted);
                     let code = exec_result?;
                     if code != 0 {
-                        return Err(Error::Invalid(format!(
-                            "RUN falhou (exit {code}): {cmdline}"
+                        return Err(Error::Invalid(super::po::tf(
+                            "RUN failed (exit {code}): {cmdline}",
+                            &[("code", &code.to_string()), ("cmdline", cmdline)],
                         )));
                     }
                     if use_cache {
@@ -578,10 +607,9 @@ fn mount_run_secrets(
                 for t in &mounted {
                     let _ = runtime::unmount_live(container, t);
                 }
-                return Err(Error::Invalid(format!(
-                    "RUN --mount=type=secret,id={}: secreto obrigatório não fornecido \
-                     (usa --secret id={},src=<caminho>)",
-                    m.id, m.id
+                return Err(Error::Invalid(super::po::tf(
+                    "RUN --mount=type=secret,id={id}: required secret not provided (use --secret id={id},src=<path>)",
+                    &[("id", &m.id)],
                 )));
             }
             continue;
@@ -644,9 +672,9 @@ fn resolve_copy_source<'a>(
     match from {
         Some(stage_ref) => {
             let src_stage = stages.get(stage_ref).ok_or_else(|| {
-                Error::Invalid(format!(
-                    "COPY --from={stage_ref}: estágio desconhecido (só estágios JÁ definidos \
-                     antes deste ponto do Dockerfile são visíveis)"
+                Error::Invalid(super::po::tf(
+                    "COPY --from={stage_ref}: unknown stage (only stages ALREADY defined before this point in the Dockerfile are visible)",
+                    &[("stage_ref", stage_ref)],
                 ))
             })?;
             let rel = src.trim_start_matches('/').to_string();
@@ -676,8 +704,11 @@ pub fn build_from_spec(
     let (images, store) = open_stores()?;
     let text = std::fs::read_to_string(dockerfile_path).map_err(|e| {
         Error::Invalid(format!(
-            "não consegui ler {}: {e}",
-            dockerfile_path.display()
+            "{}: {e}",
+            super::po::tf(
+                "could not read {path}",
+                &[("path", &dockerfile_path.display().to_string())],
+            )
         ))
     })?;
     let df = parse_dockerfile_with_args(&text, build_args)?;
@@ -695,19 +726,15 @@ pub fn build_from_spec(
             let marker = format!("/proc/sys/fs/binfmt_misc/qemu-{requested}");
             if let Ok(contents) = std::fs::read_to_string(&marker) {
                 if !contents.contains("enabled") {
-                    return Err(Error::Invalid(format!(
-                        "--platform linux/{requested}: o interpretador binfmt_misc '{marker}' \
-                         existe mas não está activo — sem isto os RUN desta imagem vão falhar \
-                         com 'Exec format error'"
+                    return Err(Error::Invalid(super::po::tf(
+                        "--platform linux/{requested}: the binfmt_misc interpreter '{marker}' exists but is not active — without this, RUNs in this image will fail with 'Exec format error'",
+                        &[("requested", requested), ("marker", &marker)],
                     )));
                 }
             } else if std::path::Path::new("/proc/sys/fs/binfmt_misc").exists() {
-                return Err(Error::Invalid(format!(
-                    "--platform linux/{requested}: nenhum interpretador binfmt_misc registado \
-                     para '{requested}' — instala qemu-user-static e regista-o no host antes de \
-                     correr um build cross-arch (ex.: `docker run --privileged --rm \
-                     tonistiigi/binfmt --install {requested}`); sem isto os RUN desta imagem vão \
-                     falhar com 'Exec format error'"
+                return Err(Error::Invalid(super::po::tf(
+                    "--platform linux/{requested}: no binfmt_misc interpreter registered for '{requested}' — install qemu-user-static and register it on the host before running a cross-arch build (e.g.: `docker run --privileged --rm tonistiigi/binfmt --install {requested}`); without this, RUNs in this image will fail with 'Exec format error'",
+                    &[("requested", requested)],
                 )));
             }
         }
@@ -723,11 +750,9 @@ pub fn build_from_spec(
             .any(|s| s.name.as_deref() == Some(df.from.as_str()))
             || df.from.parse::<usize>().is_ok_and(|i| i < df.stages.len());
         if final_from_is_stage {
-            return Err(Error::Invalid(format!(
-                "build multi-stage em modo root (overlay): o estágio final (`FROM {}`) tem de ser \
-                 uma imagem real — `FROM <estágio-anterior>` no estágio final só é suportado em \
-                 rootless (sem lineage OCI a preservar)",
-                df.from
+            return Err(Error::Invalid(super::po::tf(
+                "multi-stage build in root mode (overlay): the final stage (`FROM {from}`) must be a real image — `FROM <earlier-stage>` in the final stage is only supported in rootless (no OCI lineage to preserve)",
+                &[("from", &df.from)],
             )));
         }
     }
@@ -803,11 +828,9 @@ pub fn build_from_spec(
             )
         } else {
             let Some(base_image) = &final_state.image else {
-                return Err(Error::Invalid(format!(
-                    "build multi-stage em modo root (overlay): o estágio final (`FROM {}`) tem de \
-                     ser uma imagem real — `FROM <estágio-anterior>` no estágio final só é \
-                     suportado em rootless (sem lineage OCI a preservar)",
-                    df.from
+                return Err(Error::Invalid(super::po::tf(
+                    "multi-stage build in root mode (overlay): the final stage (`FROM {from}`) must be a real image — `FROM <earlier-stage>` in the final stage is only supported in rootless (no OCI lineage to preserve)",
+                    &[("from", &df.from)],
                 )));
             };
             let layer = images.commit_upper(&id)?;
@@ -870,13 +893,18 @@ fn commit_flat_rootless(
     let tar_str = tar_path.to_string_lossy().to_string();
     let result = match runtime::reexec_mapped(&["__buildtar", rootfs, &tar_str]) {
         Some(true) => {
-            let bytes = std::fs::read(&tar_path)
-                .map_err(|e| Error::Invalid(format!("ler tar do build (userns mapeado): {e}")))?;
+            let bytes = std::fs::read(&tar_path).map_err(|e| {
+                Error::Invalid(format!(
+                    "{}: {e}",
+                    super::po::t("reading build tar (mapped userns)")
+                ))
+            })?;
             images
                 .commit_flat_rootfs_from_tar(bytes, cmd, entrypoint, env, workdir, user, tag, arch)
         }
         Some(false) => Err(Error::Invalid(
-            "empacotar rootfs dentro do userns mapeado falhou (delonix __buildtar)".into(),
+            super::po::t("packing rootfs inside the mapped userns failed (delonix __buildtar)")
+                .into(),
         )),
         // Without subuid (rootless single-uid): the RUN files are our uid's.
         None => images.commit_flat_rootfs(
@@ -935,16 +963,32 @@ fn hash_path_content(path: &Path) -> Result<String> {
 }
 
 fn hash_path_into(path: &Path, h: &mut Sha256) -> Result<()> {
-    let meta = std::fs::symlink_metadata(path)
-        .map_err(|e| Error::Invalid(format!("ler {}: {e}", path.display())))?;
+    let meta = std::fs::symlink_metadata(path).map_err(|e| {
+        Error::Invalid(format!(
+            "{}: {e}",
+            super::po::tf("reading {path}", &[("path", &path.display().to_string())])
+        ))
+    })?;
     if meta.file_type().is_symlink() {
-        let target = std::fs::read_link(path)
-            .map_err(|e| Error::Invalid(format!("ler symlink {}: {e}", path.display())))?;
+        let target = std::fs::read_link(path).map_err(|e| {
+            Error::Invalid(format!(
+                "{}: {e}",
+                super::po::tf(
+                    "reading symlink {path}",
+                    &[("path", &path.display().to_string())],
+                )
+            ))
+        })?;
         h.update(b"symlink:");
         h.update(target.to_string_lossy().as_bytes());
     } else if meta.is_dir() {
         let mut entries: Vec<_> = std::fs::read_dir(path)
-            .map_err(|e| Error::Invalid(format!("ler {}: {e}", path.display())))?
+            .map_err(|e| {
+                Error::Invalid(format!(
+                    "{}: {e}",
+                    super::po::tf("reading {path}", &[("path", &path.display().to_string())])
+                ))
+            })?
             .filter_map(|e| e.ok())
             .collect();
         entries.sort_by_key(|e| e.file_name());
@@ -954,14 +998,21 @@ fn hash_path_into(path: &Path, h: &mut Sha256) -> Result<()> {
             hash_path_into(&e.path(), h)?;
         }
     } else {
-        let mut f = std::fs::File::open(path)
-            .map_err(|e| Error::Invalid(format!("ler {}: {e}", path.display())))?;
+        let mut f = std::fs::File::open(path).map_err(|e| {
+            Error::Invalid(format!(
+                "{}: {e}",
+                super::po::tf("reading {path}", &[("path", &path.display().to_string())])
+            ))
+        })?;
         let mut buf = [0u8; 1 << 16];
         loop {
             use std::io::Read;
-            let n = f
-                .read(&mut buf)
-                .map_err(|e| Error::Invalid(format!("ler {}: {e}", path.display())))?;
+            let n = f.read(&mut buf).map_err(|e| {
+                Error::Invalid(format!(
+                    "{}: {e}",
+                    super::po::tf("reading {path}", &[("path", &path.display().to_string())])
+                ))
+            })?;
             if n == 0 {
                 break;
             }
@@ -1043,8 +1094,9 @@ fn safe_join(base: &Path, rel: &str) -> Result<PathBuf> {
             Component::Normal(s) => out.push(s),
             Component::CurDir => {}
             _ => {
-                return Err(Error::Invalid(format!(
-                    "caminho inválido em COPY: '{rel}' (sai do directório permitido)"
+                return Err(Error::Invalid(super::po::tf(
+                    "invalid path in COPY: '{rel}' (escapes the allowed directory)",
+                    &[("rel", rel)],
                 )))
             }
         }
@@ -1075,23 +1127,26 @@ fn confine_to(canon_base: &Path, path: &Path) -> Result<PathBuf> {
                     real.push(t);
                 }
                 if !real.starts_with(canon_base) {
-                    return Err(Error::Invalid(format!(
-                        "'{}' sai do directório permitido através de um symlink",
-                        path.display()
+                    return Err(Error::Invalid(super::po::tf(
+                        "'{path}' escapes the allowed directory through a symlink",
+                        &[("path", &path.display().to_string())],
                     )));
                 }
                 return Ok(real);
             }
             Err(_) => {
                 let Some(name) = existing.file_name() else {
-                    return Err(Error::Invalid(format!(
-                        "caminho inválido em COPY: '{}'",
-                        path.display()
+                    return Err(Error::Invalid(super::po::tf(
+                        "invalid path in COPY: '{path}'",
+                        &[("path", &path.display().to_string())],
                     )));
                 };
                 tail.push(name.to_os_string());
                 existing = existing.parent().ok_or_else(|| {
-                    Error::Invalid(format!("caminho inválido em COPY: '{}'", path.display()))
+                    Error::Invalid(super::po::tf(
+                        "invalid path in COPY: '{path}'",
+                        &[("path", &path.display().to_string())],
+                    ))
                 })?;
             }
         }
@@ -1099,8 +1154,12 @@ fn confine_to(canon_base: &Path, path: &Path) -> Result<PathBuf> {
 }
 
 fn canonical_base(p: &Path) -> Result<PathBuf> {
-    p.canonicalize()
-        .map_err(|e| Error::Invalid(format!("resolver {}: {e}", p.display())))
+    p.canonicalize().map_err(|e| {
+        Error::Invalid(format!(
+            "{}: {e}",
+            super::po::tf("resolving {path}", &[("path", &p.display().to_string())])
+        ))
+    })
 }
 
 fn copy_into_rootfs(

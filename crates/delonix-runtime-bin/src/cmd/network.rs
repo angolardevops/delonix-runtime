@@ -196,7 +196,7 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
             spec.peers,
             spec.wg_ip,
         )?;
-        println!("network/{name}: criada");
+        println!("network/{name}: {}", super::po::t("created"));
     }
     Ok(())
 }
@@ -237,13 +237,15 @@ pub(crate) fn create_network(
         }
         "macvlan" | "ipvlan" => {
             let parent = parent.ok_or_else(|| {
-                delonix_runtime_core::Error::Invalid(format!(
-                    "--parent é obrigatório para driver {driver}"
+                delonix_runtime_core::Error::Invalid(super::po::tf(
+                    "--parent is required for driver {driver}",
+                    &[("driver", driver)],
                 ))
             })?;
             let subnet = subnet.ok_or_else(|| {
-                delonix_runtime_core::Error::Invalid(format!(
-                    "--subnet é obrigatório para driver {driver}"
+                delonix_runtime_core::Error::Invalid(super::po::tf(
+                    "--subnet is required for driver {driver}",
+                    &[("driver", driver)],
                 ))
             })?;
             let net = store.create_lan(name, driver, &parent, &subnet, gateway)?;
@@ -254,18 +256,22 @@ pub(crate) fn create_network(
             // The declarative record is saved (intent preserved for a privileged
             // host), but the physical plane is NOT realized — say it loudly.
             eprintln!(
-                "aviso: rede '{name}' (driver {driver}) registada mas NÃO realizada — \
-                 condition Realized=False reason=DriverNotImplemented. macvlan/ipvlan \
-                 precisam de privilégio na init-netns do host (CAP_NET_ADMIN), que o \
-                 modelo rootless não tem; containers NÃO conseguirão atachar-se a ela. \
-                 Para rede multi-nó rootless use driver 'overlay'."
+                "{}",
+                super::po::tf(
+                    "warning: network '{name}' (driver {driver}) registered but NOT realized — \
+                     condition Realized=False reason=DriverNotImplemented. macvlan/ipvlan \
+                     need privilege in the host's init-netns (CAP_NET_ADMIN), which the \
+                     rootless model does not have; containers will NOT be able to attach to it. \
+                     For rootless multi-node networking use driver 'overlay'.",
+                    &[("name", name), ("driver", driver)],
+                )
             );
             Ok(net)
         }
         "overlay" => {
             let vni = vni.ok_or_else(|| {
                 delonix_runtime_core::Error::Invalid(
-                    "--vni é obrigatório para driver overlay".into(),
+                    super::po::t("--vni is required for driver overlay").into(),
                 )
             })?;
             let net = store.create_overlay(name, vni, &peers, wg_ip.as_deref())?;
@@ -274,15 +280,20 @@ pub(crate) fn create_network(
             // host privilege — it lives entirely in the holder netns.
             if let Err(e) = realize_overlay(&net) {
                 eprintln!(
-                    "aviso: rede overlay '{name}' registada mas o uplink físico não \
-                     subiu ({e}) — condition Realized=False. Reconcilia no próximo \
-                     'network create' quando o holder/pares estiverem disponíveis."
+                    "{}",
+                    super::po::tf(
+                        "warning: overlay network '{name}' registered but the physical uplink did not \
+                         come up ({e}) — condition Realized=False. Reconciles on the next \
+                         'network create' once the holder/peers are available.",
+                        &[("name", name), ("e", &e.to_string())],
+                    )
                 );
             }
             Ok(net)
         }
-        other => Err(delonix_runtime_core::Error::Invalid(format!(
-            "driver desconhecido: '{other}' (use bridge|macvlan|ipvlan|overlay)"
+        other => Err(delonix_runtime_core::Error::Invalid(super::po::tf(
+            "unknown driver: '{other}' (use bridge|macvlan|ipvlan|overlay)",
+            &[("other", other)],
         ))),
     }
 }
@@ -313,10 +324,12 @@ fn realize_overlay(net: &Network) -> Result<()> {
     let encrypted = net.wg_ip.is_some();
     if encrypted && !delonix_net::wg::available() {
         return Err(delonix_runtime_core::Error::Invalid(
-            "overlay cifrado (wg_ip) mas 'wg' indisponível no host — instala \
-             wireguard-tools + o módulo do kernel, ou remove wg_ip para transporte \
-             VXLAN plano (não cifrado)"
-                .into(),
+            super::po::t(
+                "encrypted overlay (wg_ip) but 'wg' is unavailable on the host — install \
+                 wireguard-tools + the kernel module, or remove wg_ip for plain (unencrypted) \
+                 VXLAN transport",
+            )
+            .into(),
         ));
     }
     // Parse the peers ONCE (reused in the FDB and in the WG loop).
@@ -365,7 +378,7 @@ fn realize_overlay(net: &Network) -> Result<()> {
 
 fn cmd_inspect(store: &NetworkStore, name: &str) -> Result<()> {
     let n = store.get(name)?;
-    println!("nome:     {}", n.name);
+    println!("{}:     {}", super::po::t("name"), n.name);
     println!("driver:   {}", n.driver);
     println!("bridge:   {}", n.bridge);
     println!("subnet:   {}", n.subnet);
@@ -469,7 +482,7 @@ fn describe_one(n: &Network) {
         None => {
             d.field(
                 "Containers",
-                "<unknown> (não consegui ler o store de containers)",
+                super::po::t("<unknown> (could not read the container store)"),
             );
         }
     }
@@ -504,7 +517,10 @@ fn cmd_node(action: NodeCmd) -> Result<()> {
                 super::po::t("node initialized — public key (hand it to the overlay peers):")
             );
             println!("  {}", key.public);
-            println!("privada protegida 0600 em <root>/wg/node.key");
+            println!(
+                "{}",
+                super::po::t("private key protected 0600 at <root>/wg/node.key")
+            );
         }
         // Just the key, no noise: this usually goes into another command.
         NodeCmd::Key => println!("{}", key.public),

@@ -230,14 +230,19 @@ automaticamente. É a camada que o <code>delonix cluster kubeadm</code> usa para
     },
     "network": {
         "title": "delonix network",
-        "tagline": "Redes de utilizador: create, ls, inspect, rm, apply.",
-        "intro": """Para o driver <code>bridge</code> (o único a que containers se atacham hoje), o
-<code>create</code> orquestra o registo declarativo (<code>NetworkStore</code>) e o plano físico
-rootless (bridge dentro do netns do holder). Drivers <code>macvlan</code>/<code>ipvlan</code>/
-<code>overlay</code> (VXLAN cifrado com WireGuard entre nós) ficam registados no store; o attach
-de containers a esses drivers é trabalho futuro.""",
+        "tagline": "Redes de utilizador: create, ls, inspect, rm, apply — bridge e overlay realizados fisicamente.",
+        "intro": """Para os drivers <code>bridge</code> e <code>overlay</code>, o <code>create</code>
+orquestra o registo declarativo (<code>NetworkStore</code>) E o plano físico rootless em conjunto —
+<code>bridge</code> dentro do netns do holder; <code>overlay</code> sobe um uplink VXLAN cifrado com
+WireGuard entre nós (device <code>dlxvx&lt;vni&gt;</code> a masterizar a bridge, FDB semeado com os
+pares), tudo realizável sem privilégio de host. <code>macvlan</code>/<code>ipvlan</code> ficam só
+registados no store — o <code>create</code> AVISA alto que a rede não foi realizada fisicamente
+(precisam de <code>CAP_NET_ADMIN</code> na init-netns do host, fora do modelo rootless).""",
         "subs": {
-            "create": {"examples": [("Rede bridge para um grupo de serviços", "delonix network create backend")]},
+            "create": {"examples": [
+                ("Rede bridge para um grupo de serviços", "delonix network create backend"),
+                ("Overlay cifrado entre nós (VXLAN + WireGuard)", "delonix network create mesh --driver overlay --vni 42 --peer 10.0.0.2"),
+            ]},
             "ls": {"examples": [("", "delonix network ls")]},
             "inspect": {"examples": [("", "delonix network inspect backend")]},
             "rm": {"examples": [("", "delonix network rm backend")]},
@@ -287,6 +292,46 @@ spec:
   env: [ "POSTGRES_PASSWORD=segredo" ]
 </code></pre>""",
     },
+    "compose": {
+        "title": "delonix compose",
+        "tagline": "Suporte NATIVO a docker-compose.yml (Compose Spec v2.x) — sem Docker, sem shim, direto para o motor.",
+        "intro": """Um tradutor de esquema estrangeiro, da mesma família do <code>kind: Pod</code> (k8s) e da
+API Docker: parser tipado à mão (sem dependência nova), traduzido directamente para o motor —
+containers reaproveitando o mesmo caminho do <code>container run</code>, redes/volumes reaproveitando
+<code>network</code>/<code>volume apply</code> verbatim (mesma idempotência, mesmo hardening de input).
+<code>depends_on</code> respeita as 3 condições reais do Compose Spec
+(<code>service_started</code>/<code>service_healthy</code>/<code>service_completed_successfully</code>)
+via ordenação topológica do grafo de serviços — um ciclo dá erro claro, nunca uma ordem arbitrária — e
+espera pelo healthcheck real (inline do serviço ou o da própria imagem). O projecto
+(<code>compose down/ps/logs</code>) é uma label nos containers; redes/volumes usam nomeação
+determinística (<code>&lt;projecto&gt;_&lt;nome&gt;</code>) — sem registo próprio, a mesma filosofia do
+<code>stack describe</code>.""",
+        "subs": {
+            "up": {"examples": [
+                ("Sobe tudo (build, rede, volumes, containers, por ordem de `depends_on`)", "delonix compose up"),
+                ("Ficheiro/projecto explícitos", "delonix compose up -f infra/docker-compose.yml -p minhaapp"),
+                ("Só valida e mostra o plano, sem criar nada", "delonix compose up --dry-run"),
+            ]},
+            "ps": {"examples": [("Containers deste projecto", "delonix compose ps")]},
+            "logs": {"examples": [
+                ("Logs de um serviço", "delonix compose logs db"),
+                ("Todos os serviços, um a seguir ao outro", "delonix compose logs"),
+            ]},
+            "config": {"examples": [("Valida e imprime o projecto resolvido (equivalente a `docker compose config`)", "delonix compose config")]},
+            "down": {"examples": [
+                ("Remove os containers deste projecto", "delonix compose down"),
+                ("Remove também os volumes NOMEADOS (nunca os `external: true`)", "delonix compose down -v"),
+            ]},
+        },
+        "extra": """<h3>Por fazer, documentado (nunca em silêncio)</h3>
+<p><code>profiles</code>/<code>extends</code>/<code>configs</code>/<code>secrets</code> top-level (usa
+<code>kind: Secret</code> em vez disso) / multi-ficheiro (<code>-f a -f b</code>/<code>include:</code>),
+<code>build.target</code> (selecção de estágio), <code>deploy.replicas != 1</code>,
+<code>networks.*.ipv4_address</code> fixo, volumes anónimos (sem <code>source</code> explícito), porta
+sem host explícito (atribuição aleatória). <code>working_dir:</code> é aceite mas AVISA e é ignorado —
+lacuna pré-existente do motor inteiro (nenhum <code>Container</code> tem override de workdir), não algo
+que este módulo introduz.</p>""",
+    },
     "cluster": {
         "title": "delonix cluster",
         "tagline": "Kubernetes de ponta a ponta: bootstrap kubeadm idempotente sobre SSH, ou provisionamento completo de VMs.",
@@ -305,9 +350,16 @@ interpolação — a injecção de comandos via manifesto foi um dos CRÍTICOS e
 auditoria ofensiva do projecto, com testes a replicar o exploit.</p>"""},
             "kubeadm": {"examples": [
                 ("Do zero: 1 control-plane + 2 workers", "delonix cluster kubeadm --name lab --control-plane 1 --workers 2"),
-            ], "notes": """<p>Limitação conhecida: por agora só 1 control-plane (HA exige um endpoint
-estável — LB/VIP — que este comando ainda não provisiona; <code>cluster apply</code> já suporta HA
-com um <code>controlPlaneEndpoint</code> externo).</p>"""},
+                ("HA: 2 control-planes + 3 workers (HAProxy automático)", "delonix cluster kubeadm --name lab --control-plane 2 --workers 3"),
+                ("Etcd externo dedicado (3 VMs extra, quórum ímpar)", "delonix cluster kubeadm --name lab --control-plane 2 --etcd-cluster 3"),
+            ], "notes": """<p><code>--control-plane &gt; 1</code> provisiona automaticamente uma VM
+extra a correr HAProxy (L4, passthrough — a TLS do apiserver termina sempre no control-plane real)
+à frente da porta 6443 de cada control-plane, e usa-a como <code>controlPlaneEndpoint</code> — sem
+flag nova, dispara sozinho a partir do número de control-planes pedido. <code>--name</code> é
+opcional (gera um nome livre no mesmo padrão dos containers); sem <code>--vm-image</code>, resolve
+a única imagem VM dourada local ou descarrega-a do repositório oficial automaticamente. Progresso
+por etapa, estilo <code>kind create cluster</code> (cada etapa fecha com ✓/✗), degrada para uma
+linha por etapa sem TTY (pipes/CI).</p>"""},
         },
     },
     "secret": {
@@ -514,34 +566,51 @@ fluxo de eventos.""",
     },
     "dash": {
         "title": "delonix dash",
-        "tagline": "Dashboard de resumo/KPIs (TUI estilo htop), global ou por grupo.",
+        "tagline": "Dashboard de resumo/KPIs (TUI estilo htop) — RAM/rede/disco, uptime por-container, JSON e Prometheus.",
         "intro": """Vista viva do estado do runtime — containers, VMs, imagens, redes, storage — num
 só ecrã, sem precisar de correr <code>ls</code> em 5 grupos diferentes. Cada grupo também tem o
 seu próprio (<code>container dash</code>, <code>vm dash</code>, ...); este é o agregado global.
-<code>--once</code> imprime um snapshot de texto e sai (scripts/CI) — é também o que acontece
-automaticamente quando o stdout não é um terminal.""",
+KPIs dinâmicos: memória do slice cgroup, tráfego rx/tx acumulado por-container (com contagem
+explícita de containers <code>--net host/none</code> não medidos, nunca somados como zero em
+silêncio), uso de disco por área (imagens/volumes/VM-images/containers), e uptime real por
+container (coluna <code>UP</code>, do <code>pid_starttime</code>). A tecla <code>m</code> alterna o
+sparkline entre containers a correr e memória usada. <code>--once</code> imprime um snapshot de
+texto e sai (scripts/CI) — é também o que acontece automaticamente quando o stdout não é um
+terminal. <code>--json</code> dá o mesmo snapshot em JSON, para scripts ou um datasource do
+Grafana. Para scrape contínuo, o <code>delonix-mgmt</code>/<code>delonix-cri</code> expõem
+<code>/metrics</code> (Prometheus — gauges de containers/VMs/memória/rede/disco) e
+<code>GET /v1/dash</code> (o mesmo <code>DashSummary</code> em JSON); os campos caros (rede/disco)
+recalculam em background a cada 30s, o scrape em si fica sempre rápido.""",
         "subs": {},
         "examples": [
             ("TUI interactiva", "delonix dash"),
             ("Snapshot único, para um script", "delonix dash --once"),
+            ("JSON, para um datasource ou pipeline", "delonix dash --json | jq '.tiles'"),
         ],
     },
     "docker-api": {
         "title": "delonix serve docker-api",
-        "tagline": "Fatia SÓ-LEITURA da API Docker Engine, num socket unix — `docker version/ps/images/info`.",
+        "tagline": "Fatia da API Docker Engine, num socket unix — ciclo de vida completo de um container, não só leitura.",
         "intro": """Serve o suficiente da API real do Docker Engine (protocolo capturado ao vivo
 contra um <code>docker</code> CLI real, versão negociada via o header <code>Api-Version</code> da
 resposta ao <code>/_ping</code>) para <code>docker version</code>/<code>ps</code>/<code>images</code>/
 <code>info</code> apontados via <code>DOCKER_HOST=unix://&lt;socket&gt;</code> funcionarem contra o
-estado REAL do delonix — útil para ferramentas que só sabem falar com a API do Docker. Mesma postura
-de segurança do socket de gestão: 0600 + <code>SO_PEERCRED</code> (só o próprio utilizador). Por
-fazer: mutações (<code>create</code>/<code>start</code>/<code>exec</code>) — o que falta para
-<code>docker run</code>/<code>docker compose up</code>; qualquer rota não implementada dá 404 claro.""",
+estado REAL do delonix. Desde a v0.26.0, também o ciclo de vida completo de um container —
+<code>POST /containers/create|start|stop|kill|wait|restart|rename</code>,
+<code>DELETE /containers/{id}</code>, <code>GET /containers/{id}/json</code> — todos a delegar nas
+mesmas funções do CLI (<code>cmd_run</code>/<code>cmd_stop</code>/<code>cmd_kill</code>/...), zero
+lógica duplicada; é o suficiente para <code>docker compose up</code> apontado a este socket
+funcionar. Mesma postura de segurança do socket de gestão: 0600 + <code>SO_PEERCRED</code> (só o
+próprio utilizador). Fora de escopo: <code>exec</code>/attach interactivo (HTTP hijacking) e
+<code>--restart</code> (precisa de um supervisor <code>fork()</code> cru, recusado com erro claro);
+qualquer rota não implementada dá 404 claro.""",
         "subs": {},
         "examples": [
             ("Servir no socket por omissão", "delonix serve docker-api &"),
             ("Um `docker` real a falar com o delonix",
              "DOCKER_HOST=unix:///run/delonix-docker.sock docker ps"),
+            ("`docker compose up` apontado ao delonix",
+             "DOCKER_HOST=unix:///run/delonix-docker.sock docker compose up -d"),
         ],
     },
     "kube": {

@@ -225,8 +225,11 @@ fn vm_spec_of(doc: &ManifestDoc) -> Result<VmSpec> {
     let normalized = normalize_vm_spec(doc.spec.clone());
     serde_yaml::from_value(normalized).map_err(|e| {
         Error::Invalid(format!(
-            "{} '{}': spec inválido: {e}",
-            doc.kind, doc.metadata.name
+            "{}: {e}",
+            super::po::tf(
+                "{kind} '{name}': invalid spec",
+                &[("kind", &doc.kind), ("name", &doc.metadata.name)],
+            )
         ))
     })
 }
@@ -622,15 +625,15 @@ fn resolve_vm_volumes(
     let mut out = Vec::with_capacity(specs.len());
     for v in specs {
         if !valid_mount_path(&v.mount_path) {
-            return Err(Error::Invalid(format!(
-                "spec.volumes: mountPath {:?} inválido (tem de ser um caminho absoluto sem , ] [ # \" nem control chars)",
-                v.mount_path
+            return Err(Error::Invalid(super::po::tf(
+                "spec.volumes: mountPath {mount_path} invalid (must be an absolute path without , ] [ # \" nor control chars)",
+                &[("mount_path", &format!("{:?}", v.mount_path))],
             )));
         }
         let vol = store.inspect(&v.name).map_err(|_| {
-            Error::Invalid(format!(
-                "spec.volumes: volume/storage '{}' não existe (cria-o antes da VM)",
-                v.name
+            Error::Invalid(super::po::tf(
+                "spec.volumes: volume/storage '{name}' does not exist (create it before the VM)",
+                &[("name", &v.name)],
             ))
         })?;
         // If it's a network Storage, ensure it's mounted on the host before sharing.
@@ -756,7 +759,7 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
             libvirt_xml: spec.libvirt_xml,
         };
         delonix_vm::create(&base, &cfg)?;
-        println!("vm/{name}: garantida");
+        println!("{}", super::po::tf("vm/{name}: ensured", &[("name", name)]));
     }
     Ok(())
 }
@@ -1794,8 +1797,11 @@ pub(crate) fn generate_seed_iso(
         Some(p) => {
             std::fs::copy(p, &user_data_path).map_err(|e| {
                 Error::Invalid(format!(
-                    "não consegui copiar --user-data '{}': {e}",
-                    p.display()
+                    "{}: {e}",
+                    super::po::tf(
+                        "could not copy --user-data '{path}'",
+                        &[("path", &p.display().to_string())],
+                    )
                 ))
             })?;
             // The user's own user-data replaces EVERYTHING — there's nowhere to
@@ -1804,8 +1810,17 @@ pub(crate) fn generate_seed_iso(
             // guest won't mount them by itself without a `mounts:` entry).
             if !volumes.is_empty() {
                 eprintln!(
-                    "AVISO: VM '{vm_name}': --user-data/seed próprio não inclui os mounts dos volumes 9p — acrescenta-os manualmente (tags: {})",
-                    volumes.iter().map(|v| v.tag.as_str()).collect::<Vec<_>>().join(", ")
+                    "{}",
+                    super::po::tf(
+                        "WARNING: VM '{vm_name}': custom --user-data/seed does not include the 9p volume mounts — add them manually (tags: {tags})",
+                        &[
+                            ("vm_name", vm_name),
+                            (
+                                "tags",
+                                &volumes.iter().map(|v| v.tag.as_str()).collect::<Vec<_>>().join(", "),
+                            ),
+                        ],
+                    )
                 );
             }
         }
@@ -1835,11 +1850,11 @@ pub(crate) fn generate_seed_iso(
         .arg(&user_data_path)
         .arg(&meta_data_path)
         .status()
-        .map_err(|e| Error::Invalid(format!("a correr cloud-localds: {e}")))?;
+        .map_err(|e| Error::Invalid(format!("{}: {e}", super::po::t("running cloud-localds"))))?;
     if !status.success() {
-        return Err(Error::Invalid(format!(
-            "cloud-localds falhou (exit {:?})",
-            status.code()
+        return Err(Error::Invalid(super::po::tf(
+            "cloud-localds failed (exit {code})",
+            &[("code", &format!("{:?}", status.code()))],
         )));
     }
     Ok(iso_path)

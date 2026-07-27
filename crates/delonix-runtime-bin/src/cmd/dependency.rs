@@ -90,20 +90,22 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
         let spec: DependencySpec = manifest::spec_of(doc)?;
         let name = &doc.metadata.name;
         if spec.to.is_empty() {
-            return Err(Error::Invalid(format!(
-                "Dependency '{name}': `to` não pode ser vazio"
+            return Err(Error::Invalid(super::po::tf(
+                "Dependency '{name}': `to` cannot be empty",
+                &[("name", name)],
             )));
         }
         let proto = spec.proto.clone().unwrap_or_else(|| "any".into());
         if !delonix_runtime_core::fw_proto_ok(&proto) {
-            return Err(Error::Invalid(format!(
-                "Dependency '{name}': proto inválido '{proto}'"
+            return Err(Error::Invalid(super::po::tf(
+                "Dependency '{name}': invalid proto '{proto}'",
+                &[("name", name), ("proto", &proto)],
             )));
         }
         let from_ip = ips.get(&spec.from).ok_or_else(|| {
-            Error::Invalid(format!(
-                "Dependency '{name}': from '{}' não tem IP na SDN (existe e está numa rede custom?)",
-                spec.from
+            Error::Invalid(super::po::tf(
+                "Dependency '{name}': from '{from}' has no IP on the SDN (does it exist and is it on a custom network?)",
+                &[("name", name), ("from", &spec.from)],
             ))
         })?;
         // Ports: empty = any; otherwise one rule per port.
@@ -114,20 +116,23 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
         };
         for port in &ports {
             if !delonix_runtime_core::fw_port_ok(port) {
-                return Err(Error::Invalid(format!(
-                    "Dependency '{name}': porta inválida '{port}'"
+                return Err(Error::Invalid(super::po::tf(
+                    "Dependency '{name}': invalid port '{port}'",
+                    &[("name", name), ("port", port)],
                 )));
             }
         }
         for target in &spec.to {
             if target == &spec.from {
-                return Err(Error::Invalid(format!(
-                    "Dependency '{name}': from e to são o mesmo ('{target}')"
+                return Err(Error::Invalid(super::po::tf(
+                    "Dependency '{name}': from and to are the same ('{target}')",
+                    &[("name", name), ("target", target)],
                 )));
             }
             if !ips.contains_key(target) {
-                return Err(Error::Invalid(format!(
-                    "Dependency '{name}': to '{target}' não tem IP na SDN (existe e está numa rede custom?)"
+                return Err(Error::Invalid(super::po::tf(
+                    "Dependency '{name}': to '{target}' has no IP on the SDN (does it exist and is it on a custom network?)",
+                    &[("name", name), ("target", target)],
                 )));
             }
             for port in &ports {
@@ -137,7 +142,10 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
                     port: port.clone(),
                     src: format!("{from_ip}/32"),
                     action: "allow".into(),
-                    note: format!("Dependency: {} conhece {target}", spec.from),
+                    note: super::po::tf(
+                        "Dependency: {from} knows {target}",
+                        &[("from", &spec.from), ("target", target)],
+                    ),
                 });
             }
         }

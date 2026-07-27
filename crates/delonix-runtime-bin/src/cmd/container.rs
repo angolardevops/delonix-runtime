@@ -191,8 +191,11 @@ fn container_spec_of(doc: &ManifestDoc) -> Result<ContainerSpec> {
     let normalized = normalize_container_spec(doc.spec.clone());
     serde_yaml::from_value(normalized).map_err(|e| {
         Error::Invalid(format!(
-            "{} '{}': spec inválido: {e}",
-            doc.kind, doc.metadata.name
+            "{}: {e}",
+            super::po::tf(
+                "{kind} '{name}': invalid spec",
+                &[("kind", &doc.kind), ("name", &doc.metadata.name)],
+            )
         ))
     })
 }
@@ -1114,10 +1117,10 @@ pub enum ContainerCmd {
         #[arg(long = "volume-rm", value_name = "TARGET")]
         volume_rm: Vec<String>,
         /// Connect the container to an additional network hot (multi-homing). Repeatable.
-        #[arg(long = "net-connect", value_name = "REDE")]
+        #[arg(long = "net-connect", value_name = "NETWORK")]
         net_connect: Vec<String>,
         /// Disconnect the container from an additional network. Repeatable.
-        #[arg(long = "net-disconnect", value_name = "REDE")]
+        #[arg(long = "net-disconnect", value_name = "NETWORK")]
         net_disconnect: Vec<String>,
         /// Bandwidth cap, in bit/s with a suffix (`10mbit`, `512kbit`, `1gbit`).
         #[arg(long = "net-rate", value_name = "RATE")]
@@ -1595,14 +1598,15 @@ fn resolve_run_user(rootfs: &str, spec: &str) -> Result<(u32, Option<u32>)> {
         None => (spec, None),
     };
     if user_part.is_empty() {
-        return Err(Error::Invalid("--user: utilizador vazio".into()));
+        return Err(Error::Invalid(super::po::t("--user: empty user").into()));
     }
     let (uid, primary_gid) = if let Ok(n) = user_part.parse::<u32>() {
         (n, None)
     } else {
         let (uid, gid) = passwd_lookup(rootfs, user_part).ok_or_else(|| {
-            Error::Invalid(format!(
-                "--user: utilizador '{user_part}' não existe na imagem (/etc/passwd)"
+            Error::Invalid(super::po::tf(
+                "--user: user '{user}' does not exist in the image (/etc/passwd)",
+                &[("user", user_part)],
             ))
         })?;
         (uid, Some(gid))
@@ -1612,8 +1616,9 @@ fn resolve_run_user(rootfs: &str, spec: &str) -> Result<(u32, Option<u32>)> {
             n
         } else {
             group_lookup(rootfs, g).ok_or_else(|| {
-                Error::Invalid(format!(
-                    "--user: grupo '{g}' não existe na imagem (/etc/group)"
+                Error::Invalid(super::po::tf(
+                    "--user: group '{group}' does not exist in the image (/etc/group)",
+                    &[("group", g)],
                 ))
             })?
         }),
@@ -1898,8 +1903,12 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
     mounts.extend(cdi_edits.mounts);
     if cdi_edits.had_unexecuted_hooks {
         eprintln!(
-            "aviso: o spec CDI declara hooks que este motor não executa (usa `ldconfig -r` no \
-             lugar) — se algo não carregar em runtime, confirma manualmente os passos do hook"
+            "{}",
+            super::po::t(
+                "warning: the CDI spec declares hooks that this engine does not execute (uses \
+                 `ldconfig -r` instead) — if something does not load at runtime, manually check \
+                 the hook steps",
+            )
         );
     }
     let img = resolve_or_pull(images, &image)?;
@@ -2100,7 +2109,11 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
     // requested). These are engine work.
     if ip.is_some() {
         return Err(Error::Invalid(
-            "--ip ainda não é suportado: o holder atribui o IP do container (não aceita um fixo). Gap de motor conhecido.".into(),
+            super::po::t(
+                "--ip is not supported yet: the holder assigns the container's IP (it does not \
+                 accept a fixed one). Known engine gap.",
+            )
+            .into(),
         ));
     }
 
@@ -2158,8 +2171,11 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
                 if let Err(e) = super::ingress_proxy::auto_register(&c.name, &namespace, &ip, port)
                 {
                     eprintln!(
-                        "aviso: --expose de '{}' não registado no proxy: {e}",
-                        c.name
+                        "{}",
+                        super::po::tf(
+                            "warning: --expose of '{name}' not registered in the proxy: {e}",
+                            &[("name", &c.name), ("e", &e.to_string())],
+                        )
                     );
                 }
             }
@@ -2286,8 +2302,11 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
                 match infra::apply_firewall(&c.id, &ip, &fw) {
                     Ok(()) => c.firewall = Some(fw),
                     Err(e) => eprintln!(
-                        "aviso: isolamento de namespace '{}' não aplicado: {e}",
-                        c.namespace
+                        "{}",
+                        super::po::tf(
+                            "warning: namespace isolation '{namespace}' not applied: {e}",
+                            &[("namespace", &c.namespace), ("e", &e.to_string())],
+                        )
                     ),
                 }
             }
@@ -2697,7 +2716,7 @@ fn run_supervised(
     if n != 1 || b[0] != 1 {
         return Err(Error::Runtime {
             context: "supervisor",
-            message: "o container não arrancou (ver o erro acima)".into(),
+            message: super::po::t("the container did not start (see the error above)").into(),
         });
     }
     println!("{id}");
@@ -2770,7 +2789,7 @@ fn reexec_into_netns(
     // `netns == sanitize(id)`; the shared POD's in `--pod`, where it differs from `id`).
     let prefix = infra::join_argv(netns).ok_or_else(|| Error::Runtime {
         context: "join_argv",
-        message: "infra de ingress em baixo — não há holder onde entrar".into(),
+        message: super::po::t("ingress infra is down — no holder to enter").into(),
     })?;
     let exe = std::env::current_exe().map_err(|e| Error::Runtime {
         context: "current_exe",
@@ -2822,9 +2841,9 @@ fn reexec_into_netns(
         if detach_on_fail {
             infra::detach_container(id, ip);
         }
-        return Err(Error::Invalid(format!(
-            "o container não arrancou dentro da rede '{netns}' (exit {:?})",
-            status.code()
+        return Err(Error::Invalid(super::po::tf(
+            "the container did not start inside the network '{netns}' (exit {code})",
+            &[("netns", netns), ("code", &format!("{:?}", status.code()))],
         )));
     }
     Ok(())
@@ -2998,8 +3017,11 @@ pub(crate) fn cmd_start(images: &ImageStore, store: &Store, id: &str) -> Result<
                 if fw.enabled {
                     if let Err(e) = infra::apply_firewall(&c.id, &ip, fw) {
                         eprintln!(
-                            "aviso: firewall/isolamento de '{}' não reaplicado no start: {e}",
-                            c.name
+                            "{}",
+                            super::po::tf(
+                                "warning: firewall/isolation of '{name}' not reapplied on start: {e}",
+                                &[("name", &c.name), ("e", &e.to_string())],
+                            )
                         );
                     }
                 }
@@ -3107,7 +3129,7 @@ pub(crate) fn cmd_start(images: &ImageStore, store: &Store, id: &str) -> Result<
 fn reexec_start(id: &str, netns: &str, ip: &str) -> Result<()> {
     let prefix = infra::join_argv(id).ok_or_else(|| Error::Runtime {
         context: "join_argv",
-        message: "infra de ingress em baixo — não há holder onde entrar".into(),
+        message: super::po::t("ingress infra is down — no holder to enter").into(),
     })?;
     let exe = std::env::current_exe().map_err(|e| Error::Runtime {
         context: "current_exe",
@@ -3127,9 +3149,9 @@ fn reexec_start(id: &str, netns: &str, ip: &str) -> Result<()> {
         })?;
     if !status.success() {
         infra::detach_container(id, ip);
-        return Err(Error::Invalid(format!(
-            "o container não rearrancou dentro da rede '{netns}' (exit {:?})",
-            status.code()
+        return Err(Error::Invalid(super::po::tf(
+            "the container did not restart inside the network '{netns}' (exit {code})",
+            &[("netns", netns), ("code", &format!("{:?}", status.code()))],
         )));
     }
     Ok(())
@@ -3451,9 +3473,9 @@ fn cmd_commit(images: &ImageStore, store: &Store, id: &str, tag: &str) -> Result
     let img = if runtime::is_rootless() {
         let rootfs = images.root().join("containers").join(&c.id).join("rootfs");
         if !rootfs.exists() {
-            return Err(Error::Invalid(format!(
-                "'{}' não tem rootfs em disco — foi removido, ou o container nunca chegou a arrancar",
-                c.name
+            return Err(Error::Invalid(super::po::tf(
+                "'{name}' has no rootfs on disk — it was removed, or the container never got to start",
+                &[("name", &c.name)],
             )));
         }
         images.commit_flat_rootfs(
@@ -3533,9 +3555,9 @@ fn cmd_top(store: &Store, id: &str) -> Result<()> {
         .pid
         .ok_or_else(|| Error::NotRunning(short_id(&c.id).to_string()))?;
     let procs = cgroup_metric(pid, "cgroup.procs").ok_or_else(|| {
-        Error::Invalid(format!(
-            "não consigo ler o cgroup.procs de '{}' — o cgroup do container não está acessível (rootless sem delegação?)",
-            c.name
+        Error::Invalid(super::po::tf(
+            "cannot read cgroup.procs of '{name}' — the container's cgroup is not accessible (rootless without delegation?)",
+            &[("name", &c.name)],
         ))
     })?;
     let mut t = output::Table::new(&["HOST-PID", "STATE", "COMMAND"]);
@@ -3580,9 +3602,9 @@ fn cmd_diff(images: &ImageStore, store: &Store, id: &str) -> Result<()> {
         // Rootless uses a FLAT rootfs (no overlay), so there's no upperdir to take
         // a diff from. Saying so is better than printing nothing and looking like
         // "no changes" — which is a different answer.
-        return Err(Error::Invalid(format!(
-            "'{}' não tem upperdir de overlay — o `diff` compara o overlay com a imagem, e em rootless o rootfs é flat",
-            c.name
+        return Err(Error::Invalid(super::po::tf(
+            "'{name}' has no overlay upperdir — `diff` compares the overlay with the image, and in rootless the rootfs is flat",
+            &[("name", &c.name)],
         )));
     }
     fn walk(
@@ -3634,9 +3656,9 @@ fn container_fs_root(images: &ImageStore, c: &Container) -> Result<std::path::Pa
             return Ok(p);
         }
     }
-    Err(Error::Invalid(format!(
-        "container '{}' parado e sem rootfs em disco — arranca-o (`delonix container start {}`)",
-        c.name, c.name
+    Err(Error::Invalid(super::po::tf(
+        "container '{name}' stopped and with no rootfs on disk — start it (`delonix container start {name}`)",
+        &[("name", &c.name)],
     )))
 }
 
@@ -3686,7 +3708,10 @@ fn cmd_cp(images: &ImageStore, store: &Store, src: &str, dst: &str) -> Result<()
         }
         _ => {
             return Err(Error::Invalid(
-                "uso: delonix container cp <SRC> <DST> — exactamente um dos lados é `container:/caminho`".into(),
+                super::po::t(
+                    "usage: delonix container cp <SRC> <DST> — exactly one of the sides is `container:/path`",
+                )
+                .into(),
             ));
         }
     }
@@ -3752,7 +3777,7 @@ fn describe_one(c: &Container) {
             "Extra",
             c.extra_networks
                 .iter()
-                .map(|n| format!("{} ({} em eth{})", n.network, n.ip, n.idx))
+                .map(|n| format!("{} ({} on eth{})", n.network, n.ip, n.idx))
                 .collect::<Vec<_>>()
                 .join(", "),
         );
@@ -3931,10 +3956,10 @@ fn cmd_update(store: &Store, id: &str, o: UpdateOpts) -> Result<()> {
     let mut c = find(store, id)?;
     runtime::reconcile_status(&mut c);
     if !matches!(c.status, Status::Running | Status::Paused) {
-        return Err(Error::Invalid(format!(
-            "o container '{}' não está a correr ({}) — o update a quente actua no processo VIVO. \
-             Arranca-o com `delonix container start {}` primeiro.",
-            c.name, c.status, c.name
+        return Err(Error::Invalid(super::po::tf(
+            "container '{name}' is not running ({status}) — the hot update acts on the LIVE \
+             process. Start it with `delonix container start {name}` first.",
+            &[("name", &c.name), ("status", &c.status.to_string())],
         )));
     }
 
@@ -3999,10 +4024,11 @@ fn cmd_update(store: &Store, id: &str, o: UpdateOpts) -> Result<()> {
     }
     for net in &o.net_connect {
         if c.network.is_none() {
-            return Err(Error::Invalid(format!(
-                "'{}' corre no caminho slirp-por-container (--net host/none), que não tem netns gerido pelo holder — \
-                 ligar redes adicionais a quente só é possível a partir de um container criado com `--net <rede>`",
-                c.name
+            return Err(Error::Invalid(super::po::tf(
+                "'{name}' runs on the slirp-per-container path (--net host/none), which has no \
+                 holder-managed netns — hot-connecting additional networks is only possible for \
+                 a container created with `--net <network>`",
+                &[("name", &c.name)],
             )));
         }
         if c.extra_networks.iter().any(|n| &n.network == net)
@@ -4039,10 +4065,11 @@ fn cmd_update(store: &Store, id: &str, o: UpdateOpts) -> Result<()> {
     }
     if let Some(rate) = &o.net_rate {
         if c.network.is_none() {
-            return Err(Error::Invalid(format!(
-                "'{}' corre no caminho slirp-por-container (--net host/none) — o shaping é feito no veth do lado do \
-                 ingress, que só existe para containers criados com `--net <rede>`",
-                c.name
+            return Err(Error::Invalid(super::po::tf(
+                "'{name}' runs on the slirp-per-container path (--net host/none) — shaping is \
+                 done on the ingress-side veth, which only exists for containers created with \
+                 `--net <network>`",
+                &[("name", &c.name)],
             )));
         }
         let bits = parse_rate_bits(rate)?;
@@ -4055,7 +4082,13 @@ fn cmd_update(store: &Store, id: &str, o: UpdateOpts) -> Result<()> {
             cur.net_burst = Some(b.clone());
             true
         })?;
-        println!("{}: banda limitada a {rate} (burst {burst_s})", c.name);
+        println!(
+            "{}",
+            super::po::tf(
+                "{name}: bandwidth limited to {rate} (burst {burst_s})",
+                &[("name", &c.name), ("rate", rate), ("burst_s", &burst_s)],
+            )
+        );
     }
     Ok(())
 }
@@ -4098,11 +4131,12 @@ pub(crate) fn publish_live(store: &Store, c: &mut Container, spec: &str) -> Resu
                 // (see `slirp_attach`): a container created without ports has no
                 // way to receive a hot hostfwd. An error that teaches, instead of
                 // a raw "connection refused" coming from the socket.
-                return Err(Error::Invalid(format!(
-                    "'{}' foi criado sem `-p` e sem `--net <rede>`, por isso o seu slirp não tem api-socket aberto — \
-                     não há por onde publicar a quente. Publica pelo menos uma porta no `run`, ou usa `--net <rede>` \
-                     (o ingress aceita publicações a quente sempre).",
-                    c.name
+                return Err(Error::Invalid(super::po::tf(
+                    "'{name}' was created without `-p` and without `--net <network>`, so its \
+                     slirp has no open api-socket — there's nowhere to publish a hot port. \
+                     Publish at least one port in `run`, or use `--net <network>` (ingress \
+                     always accepts hot publishes).",
+                    &[("name", &c.name)],
                 )));
             }
             delonix_net::slirp_add_hostfwd(&sock, &hp, &cp, &proto)?;
@@ -4201,7 +4235,7 @@ fn cmd_stats(store: &Store, ids: &[String]) -> Result<()> {
         rows.push((c.name.clone(), pid, cpu_usage_usec(pid)));
     }
     if rows.is_empty() {
-        println!("(nenhum container a correr)");
+        println!("{}", super::po::t("(no containers running)"));
         return Ok(());
     }
     std::thread::sleep(std::time::Duration::from_millis(500));

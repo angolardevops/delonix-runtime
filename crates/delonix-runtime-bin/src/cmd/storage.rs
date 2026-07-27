@@ -165,8 +165,9 @@ fn build_mount(
             )
         }
         other => {
-            return Err(Error::Invalid(format!(
-                "tipo de storage desconhecido: '{other}' (nfs|cifs|smb|webdav)"
+            return Err(Error::Invalid(super::po::tf(
+                "unknown storage type: '{other}' (nfs|cifs|smb|webdav)",
+                &[("other", other)],
             )))
         }
     };
@@ -231,7 +232,7 @@ fn write_cifs_credentials_in(
         .any(|v| v.contains('\n'))
     {
         return Err(Error::Invalid(
-            "username/password do storage não podem conter uma quebra de linha".into(),
+            super::po::t("storage username/password cannot contain a line break").into(),
         ));
     }
     let mut content = String::new();
@@ -314,8 +315,15 @@ pub fn run(action: StorageCmd) -> Result<()> {
             )?;
             let v = store.create_with(&name, &m.driver, Some(m.device.clone()), m.options)?;
             println!(
-                "storage '{}' criado e montado ({} · {})",
-                v.name, m.driver, m.device
+                "{}",
+                super::po::tf(
+                    "storage '{name}' created and mounted ({driver} · {device})",
+                    &[
+                        ("name", &v.name),
+                        ("driver", &m.driver),
+                        ("device", &m.device)
+                    ],
+                )
             );
         }
         StorageCmd::Ls => {
@@ -345,7 +353,13 @@ pub fn run(action: StorageCmd) -> Result<()> {
         }
         StorageCmd::Rm { name } => {
             store.remove(&name)?;
-            println!("storage '{name}' removido (desmontado; os dados ficam no NAS)");
+            println!(
+                "{}",
+                super::po::tf(
+                    "storage '{name}' removed (unmounted; the data stays on the NAS)",
+                    &[("name", &name)],
+                )
+            );
         }
         StorageCmd::Apply { file } => {
             let path = manifest::resolve_path(file)?;
@@ -381,7 +395,7 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
             spec.mount_options.as_deref(),
         )?;
         store.create_with(name, &m.driver, Some(m.device), m.options)?;
-        println!("storage/{name}: garantido ({})", m.driver);
+        println!("storage/{name}: {} ({})", super::po::t("ensured"), m.driver);
     }
     Ok(())
 }

@@ -125,8 +125,9 @@ pub fn volsnap(mode: &str, data: &Path, tarball: &Path) -> Result<()> {
     match mode {
         "create" => volsnap_create(data, tarball),
         "restore" => volsnap_restore(data, tarball),
-        other => Err(Error::Invalid(format!(
-            "__volsnap: modo desconhecido '{other}' (create|restore)"
+        other => Err(Error::Invalid(super::po::tf(
+            "__volsnap: unknown mode '{other}' (create|restore)",
+            &[("other", other)],
         ))),
     }
 }
@@ -245,7 +246,7 @@ mod tests {
         let d = tmpdir("snap-modo");
         let err = volsnap("destruir", &d, &d.join("t.tar.gz")).unwrap_err();
         assert!(
-            format!("{err}").contains("modo desconhecido"),
+            format!("{err}").contains("unknown mode"),
             "erro pouco claro: {err}"
         );
         let _ = std::fs::remove_dir_all(&d);

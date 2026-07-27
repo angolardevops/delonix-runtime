@@ -48,8 +48,12 @@ fn pki_dir(cluster_name: &str) -> PathBuf {
 /// (`0700`, set by the caller once per bootstrap).
 fn write_pki_file(dir: &Path, name: &str, contents: &str) -> Result<()> {
     let path = dir.join(name);
-    std::fs::write(&path, contents)
-        .map_err(|e| Error::Invalid(format!("a escrever {name}: {e}")))?;
+    std::fs::write(&path, contents).map_err(|e| {
+        Error::Invalid(format!(
+            "{}: {e}",
+            super::po::tf("writing {name}", &[("name", name)])
+        ))
+    })?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -67,8 +71,12 @@ fn write_local_tmp(tag: &str, contents: &str) -> Result<PathBuf> {
         std::process::id(),
         std::process::id()
     ));
-    std::fs::write(&tmp, contents)
-        .map_err(|e| Error::Invalid(format!("a escrever {tag} local temporário: {e}")))?;
+    std::fs::write(&tmp, contents).map_err(|e| {
+        Error::Invalid(format!(
+            "{}: {e}",
+            super::po::tf("writing local temporary {tag}", &[("tag", tag)])
+        ))
+    })?;
     Ok(tmp)
 }
 
@@ -157,20 +165,29 @@ fn download_and_cache_etcd(version: &str) -> Result<(PathBuf, PathBuf)> {
     // only publishes one linux/amd64 asset (no `-v3` build), confirmed live.
     let _ = cpu_has_x86_64_v3();
     let tmp = cache_dir.join(&asset);
-    eprintln!("a descarregar {asset}...");
+    eprintln!(
+        "{}",
+        super::po::tf("downloading {asset}...", &[("asset", &asset)])
+    );
     stream_download(&tarball_url, &tmp)?;
     let sums = http_get_text(&sums_url)?;
     let expected = sums
         .lines()
         .find(|l| l.trim_end().ends_with(&asset))
         .and_then(|l| l.split_whitespace().next())
-        .ok_or_else(|| Error::Invalid(format!("SHA256SUMS sem entrada para {asset}")))?
+        .ok_or_else(|| {
+            Error::Invalid(super::po::tf(
+                "SHA256SUMS has no entry for {asset}",
+                &[("asset", &asset)],
+            ))
+        })?
         .to_string();
     let got = hex_sha256_file(&tmp)?;
     if got != expected {
         let _ = std::fs::remove_file(&tmp);
-        return Err(Error::Invalid(format!(
-            "checksum inválido para {asset}: esperado {expected}, obtido {got} — download descartado"
+        return Err(Error::Invalid(super::po::tf(
+            "invalid checksum for {asset}: expected {expected}, got {got} — download discarded",
+            &[("asset", &asset), ("expected", &expected), ("got", &got)],
         )));
     }
     let status = std::process::Command::new("tar")
@@ -179,9 +196,17 @@ fn download_and_cache_etcd(version: &str) -> Result<(PathBuf, PathBuf)> {
         .arg("-C")
         .arg(&cache_dir)
         .status()
-        .map_err(|e| Error::Invalid(format!("a extrair {asset}: {e}")))?;
+        .map_err(|e| {
+            Error::Invalid(format!(
+                "{}: {e}",
+                super::po::tf("extracting {asset}", &[("asset", &asset)])
+            ))
+        })?;
     if !status.success() {
-        return Err(Error::Invalid(format!("tar -xzf {asset} falhou")));
+        return Err(Error::Invalid(super::po::tf(
+            "tar -xzf {asset} failed",
+            &[("asset", &asset)],
+        )));
     }
     let extracted_dir = cache_dir.join(format!("etcd-v{version}-linux-amd64"));
     std::fs::rename(extracted_dir.join("etcd"), &etcd_bin)?;
@@ -271,7 +296,7 @@ fn wait_for_etcd_healthy(
         }
         if Instant::now() >= deadline {
             return Err(Error::Invalid(
-                "etcd: o cluster não ficou saudável dentro do timeout".into(),
+                super::po::t("etcd: the cluster did not become healthy within the timeout").into(),
             ));
         }
         std::thread::sleep(Duration::from_secs(3));
@@ -291,14 +316,15 @@ pub(crate) fn bootstrap_etcd_cluster(
 ) -> Result<EtcdBootstrapResult> {
     for (label, target) in members {
         if !valid_endpoint(label) {
-            return Err(Error::Invalid(format!(
-                "etcd: nome de membro inválido '{label}'"
+            return Err(Error::Invalid(super::po::tf(
+                "etcd: invalid member name '{label}'",
+                &[("label", label)],
             )));
         }
         if !valid_endpoint(&target.host) {
-            return Err(Error::Invalid(format!(
-                "etcd: ip de membro inválido '{}'",
-                target.host
+            return Err(Error::Invalid(super::po::tf(
+                "etcd: invalid member ip '{ip}'",
+                &[("ip", &target.host)],
             )));
         }
     }

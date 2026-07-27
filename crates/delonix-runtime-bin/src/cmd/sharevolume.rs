@@ -132,18 +132,22 @@ fn apply_one(
     spec: &ShareVolumeSpec,
 ) -> Result<()> {
     let parent = vstore.inspect(&spec.storage_ref).map_err(|_| {
-        Error::Invalid(format!(
-            "ShareVolume '{name}': storageRef '{}' não existe — cria-a primeiro \
+        Error::Invalid(super::po::tf(
+            "ShareVolume '{name}': storageRef '{storage_ref}' does not exist — create it first \
              (`delonix storage create` / `kind: Storage`)",
-            spec.storage_ref
+            &[("name", name), ("storage_ref", &spec.storage_ref)],
         ))
     })?;
     let quota_bytes = spec
         .quota
         .as_deref()
         .map(|q| {
-            delonix_volume::parse_size_bytes(q)
-                .ok_or_else(|| Error::Invalid(format!("quota inválida: {q:?}")))
+            delonix_volume::parse_size_bytes(q).ok_or_else(|| {
+                Error::Invalid(super::po::tf(
+                    "invalid quota: {q}",
+                    &[("q", &format!("{q:?}"))],
+                ))
+            })
         })
         .transpose()?;
 
@@ -264,7 +268,11 @@ fn cmd_rm(
     println!(
         "sharevolume/{name}: {}{}",
         super::po::t("removed"),
-        if purge_data { " (dados apagados)" } else { "" }
+        if purge_data {
+            format!(" ({})", super::po::t("data deleted"))
+        } else {
+            String::new()
+        }
     );
     Ok(())
 }

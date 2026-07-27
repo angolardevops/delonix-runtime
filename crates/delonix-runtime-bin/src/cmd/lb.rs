@@ -35,8 +35,9 @@ pub(crate) fn build_haproxy_cfg(backend_ips: &[String]) -> String {
 pub(crate) fn ensure_haproxy(target: &SshTarget, backend_ips: &[String]) -> Result<()> {
     for ip in backend_ips {
         if !valid_endpoint(ip) {
-            return Err(Error::Invalid(format!(
-                "lb: control-plane ip inválido '{ip}' — recusado antes de entrar no haproxy.cfg"
+            return Err(Error::Invalid(super::po::tf(
+                "lb: invalid control-plane ip '{ip}' — refused before entering haproxy.cfg",
+                &[("ip", ip)],
             )));
         }
     }
@@ -48,8 +49,12 @@ pub(crate) fn ensure_haproxy(target: &SshTarget, backend_ips: &[String]) -> Resu
     // tmpfile -> scp_to (unprivileged) -> privileged mv over ssh.
     let cfg = build_haproxy_cfg(backend_ips);
     let tmp = std::env::temp_dir().join(format!("delonix-haproxy-{}.cfg", std::process::id()));
-    std::fs::write(&tmp, &cfg)
-        .map_err(|e| Error::Invalid(format!("a escrever haproxy.cfg local temporário: {e}")))?;
+    std::fs::write(&tmp, &cfg).map_err(|e| {
+        Error::Invalid(format!(
+            "{}: {e}",
+            super::po::t("writing local temporary haproxy.cfg")
+        ))
+    })?;
     let scp_result = remote::scp_to(target, &tmp, "/tmp/delonix-haproxy.cfg");
     let _ = std::fs::remove_file(&tmp);
     scp_result?;

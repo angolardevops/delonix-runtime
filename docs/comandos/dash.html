@@ -78,27 +78,37 @@ main{padding:1.4rem 1.2rem 4rem}}
 <h5>Documentação</h5>
 <a href="../index.html">Início</a><a href="../cheatsheet.html">Cheatsheet</a><a href="../kinds.html">Kinds e templates</a><a href="../arquitectura.html">Arquitectura</a><a href="../c4.html">Modelo C4 e system design</a><a href="../cri.html">CRI — kubelet sem containerd</a><a href="../comparacao.html">Delonix vs Docker vs Podman</a><a href="../tutorial-delonix-temp.html">Projecto completo: Delonix Temp</a><a href="../delonixctl.html">delonixctl — cliente PaaS</a>
 <h5>Referência CLI</h5>
-<a href="../comandos/container.html">delonix container</a><a href="../comandos/pod.html">delonix pod</a><a href="../comandos/image.html">delonix image</a><a href="../comandos/build.html">delonix build</a><a href="../comandos/vm.html">delonix vm</a><a href="../comandos/volumes.html">delonix volumes</a><a href="../comandos/network.html">delonix network</a><a href="../comandos/stack.html">delonix stack</a><a href="../comandos/cluster.html">delonix cluster</a><a href="../comandos/secret.html">delonix secret</a><a href="../comandos/storage.html">delonix storage</a><a href="../comandos/sharevolume.html">delonix sharevolume</a><a href="../comandos/ingress.html">delonix net ingress</a><a href="../comandos/egress.html">delonix net egress</a><a href="../comandos/httproute.html">delonix net httproute</a><a href="../comandos/tunnel.html">delonix net tunnel</a><a href="../comandos/flow.html">delonix net flow</a><a href="../comandos/boot.html">delonix net boot</a><a href="../comandos/system.html">delonix system</a><a href="../comandos/dash.html" class="on">delonix dash</a><a href="../comandos/docker-api.html">delonix serve docker-api</a><a href="../comandos/kube.html">delonix cluster kube</a><a href="../comandos/netns.html">delonix net netns</a><a href="../comandos/completion.html">delonix completion</a>
+<a href="../comandos/container.html">delonix container</a><a href="../comandos/pod.html">delonix pod</a><a href="../comandos/image.html">delonix image</a><a href="../comandos/build.html">delonix build</a><a href="../comandos/vm.html">delonix vm</a><a href="../comandos/volumes.html">delonix volumes</a><a href="../comandos/network.html">delonix network</a><a href="../comandos/stack.html">delonix stack</a><a href="../comandos/compose.html">delonix compose</a><a href="../comandos/cluster.html">delonix cluster</a><a href="../comandos/secret.html">delonix secret</a><a href="../comandos/storage.html">delonix storage</a><a href="../comandos/sharevolume.html">delonix sharevolume</a><a href="../comandos/ingress.html">delonix net ingress</a><a href="../comandos/egress.html">delonix net egress</a><a href="../comandos/httproute.html">delonix net httproute</a><a href="../comandos/tunnel.html">delonix net tunnel</a><a href="../comandos/flow.html">delonix net flow</a><a href="../comandos/boot.html">delonix net boot</a><a href="../comandos/system.html">delonix system</a><a href="../comandos/dash.html" class="on">delonix dash</a><a href="../comandos/docker-api.html">delonix serve docker-api</a><a href="../comandos/kube.html">delonix cluster kube</a><a href="../comandos/netns.html">delonix net netns</a><a href="../comandos/completion.html">delonix completion</a>
 <h5>Projecto</h5>
 <a href="https://github.com/angolardevops/delonix-runtime">GitHub</a>
 <a href="https://github.com/angolardevops/delonix-runtime/releases">Releases</a>
 </nav>
 <main>
-<h1>delonix dash</h1><p class='tagline'>Dashboard de resumo/KPIs (TUI estilo htop), global ou por grupo.</p>
+<h1>delonix dash</h1><p class='tagline'>Dashboard de resumo/KPIs (TUI estilo htop) — RAM/rede/disco, uptime por-container, JSON e Prometheus.</p>
 <p>Vista viva do estado do runtime — containers, VMs, imagens, redes, storage — num
 só ecrã, sem precisar de correr <code>ls</code> em 5 grupos diferentes. Cada grupo também tem o
 seu próprio (<code>container dash</code>, <code>vm dash</code>, ...); este é o agregado global.
-<code>--once</code> imprime um snapshot de texto e sai (scripts/CI) — é também o que acontece
-automaticamente quando o stdout não é um terminal.</p>
+KPIs dinâmicos: memória do slice cgroup, tráfego rx/tx acumulado por-container (com contagem
+explícita de containers <code>--net host/none</code> não medidos, nunca somados como zero em
+silêncio), uso de disco por área (imagens/volumes/VM-images/containers), e uptime real por
+container (coluna <code>UP</code>, do <code>pid_starttime</code>). A tecla <code>m</code> alterna o
+sparkline entre containers a correr e memória usada. <code>--once</code> imprime um snapshot de
+texto e sai (scripts/CI) — é também o que acontece automaticamente quando o stdout não é um
+terminal. <code>--json</code> dá o mesmo snapshot em JSON, para scripts ou um datasource do
+Grafana. Para scrape contínuo, o <code>delonix-mgmt</code>/<code>delonix-cri</code> expõem
+<code>/metrics</code> (Prometheus — gauges de containers/VMs/memória/rede/disco) e
+<code>GET /v1/dash</code> (o mesmo <code>DashSummary</code> em JSON); os campos caros (rede/disco)
+recalculam em background a cada 30s, o scrape em si fica sempre rápido.</p>
 <div class='help'><pre><code>Runtime summary/KPI dashboard (interactive htop-style TUI) — global, or per group (`container dash`, `vm dash`, ...)
 
-Usage: delonix-x86_64-linux dash [OPTIONS]
+Usage: dlx dash [OPTIONS]
 
 Options:
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
       --once          Print ONE text snapshot and exit (no TUI) — for scripts/CI; the default when stdout is not a terminal
+      --json          Print ONE snapshot as JSON and exit (no TUI, no ANSI) — for scripts/Grafana JSON datasource
   -h, --help          Print help</code></pre></div>
-<h2>Exemplos</h2><div class="ex"><div class="cap">TUI interactiva</div><pre><code>delonix dash</code></pre></div><div class="ex"><div class="cap">Snapshot único, para um script</div><pre><code>delonix dash --once</code></pre></div>
+<h2>Exemplos</h2><div class="ex"><div class="cap">TUI interactiva</div><pre><code>delonix dash</code></pre></div><div class="ex"><div class="cap">Snapshot único, para um script</div><pre><code>delonix dash --once</code></pre></div><div class="ex"><div class="cap">JSON, para um datasource ou pipeline</div><pre><code>delonix dash --json | jq &#x27;.tiles&#x27;</code></pre></div>
 <footer>Delonix Engine · Apache-2.0 · <a href="https://github.com/angolardevops/delonix-runtime">angolardevops/delonix-runtime</a>
 · Referência gerada do <code>--help</code> real do binário por <code>docs/gen.py</code>.</footer>
 </main>
