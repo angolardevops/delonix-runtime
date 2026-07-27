@@ -104,6 +104,51 @@ persistente — ao contrário de <code>rm</code>+<code>run</code>, nada do que o
 (rootless sem <code>Delegate=yes</code>), a memória cai para o VmRSS do init do container,
 marcada com <code>~</code>.</p>"""},
             "apply": {"examples": [("Aplicar só os `kind: Container` de um manifesto", "delonix container apply -f delonix-manifest.yaml")]},
+            "init": {"examples": [("Scaffold de um projecto completo, pronto a usar", "delonix container init myapp && cd myapp")]},
+            "kill": {"examples": [("Sinal arbitrário, sem forçar `Stopped`", "delonix container kill -s USR1 web")],
+                     "notes": """<p>Ao contrário de <code>stop</code>, não espera nem força o estado —
+o resultado real (ex.: <code>Crashed</code> para um <code>KILL</code>) só se confirma na
+observação seguinte.</p>"""},
+            "wait": {"examples": [("Bloqueia até sair, imprime o exit code", "delonix container wait web")],
+                     "notes": """<p>O exit code real só é garantido quando um supervisor
+<code>--restart</code> é o pai real do processo — um container <code>-d</code> simples sem
+supervisor mostra <code>Crashed</code>/137, limite arquitectural conhecido (o motor não é o pai
+real desse processo).</p>"""},
+            "restart": {"examples": [("Pára e arranca de novo, mesma configuração", "delonix container restart web")]},
+            "rename": {"examples": [("", "delonix container rename web frontend")]},
+            "port": {"examples": [("Portas publicadas deste container", "delonix container port web")]},
+            "pause": {"examples": [("Suspende os processos (cgroup v2 freezer)", "delonix container pause web")]},
+            "unpause": {"examples": [("Resume um container suspenso", "delonix container unpause web")]},
+            "commit": {"examples": [
+                ("Cria uma imagem a partir do rootfs actual do container",
+                 "delonix container commit web minha-app:debug"),
+            ]},
+            "ssh": {"examples": [("Atalho para `exec -t` — tenta bash, cai para sh", "delonix container ssh web")]},
+            "healthcheck": {"examples": [
+                ("Corre o HEALTHCHECK da imagem, exit 1 se unhealthy (usável em CI)",
+                 "delonix container healthcheck web"),
+            ]},
+            "top": {"examples": [("Processos a correr dentro do container", "delonix container top web")]},
+            "diff": {"examples": [("Ficheiros alterados relativos à imagem (A/D)", "delonix container diff web")]},
+            "cp": {"examples": [
+                ("Do container para o host", "delonix container cp web:/etc/nginx.conf ."),
+                ("Do host para o container", "delonix container cp ./nginx.conf web:/etc/nginx.conf"),
+            ]},
+            "describe": {"examples": [
+                ("Detalhe estilo `kubectl describe` (para humanos; `inspect` é para scripts)",
+                 "delonix container describe web"),
+            ]},
+            "update": {"examples": [
+                ("Troca uma porta a QUENTE, sem reiniciar", "delonix container update web --publish-add 9090:80"),
+                ("Liga a uma rede nova + limite de banda", "delonix container update web --net-connect backend --net-rate 10mbit"),
+            ], "notes": """<p>Reconfigura portas, volumes, redes e limite de banda de um container
+<strong>a correr</strong>, sem o parar — o PID não muda. Remoções correm antes das adições, para
+<code>--publish-rm 8080 --publish-add 8080:9000</code> funcionar num só comando.</p>"""},
+            "attach": {"examples": [("Volta a ligar ao stream de output de um container detached", "delonix container attach web")],
+                       "notes": """<p>Deliberadamente <strong>só output</strong> — ao contrário do
+<code>docker attach</code>, não há stdin ao vivo para um container já iniciado em detached (sem
+shim persistente por-container). <code>-i</code>/<code>--stdin</code> é recusado com um erro claro
+a apontar para <code>exec -it</code>.</p>"""},
         },
     },
     "pod": {
