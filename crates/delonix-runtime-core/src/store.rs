@@ -247,6 +247,40 @@ impl<T: Serialize + DeserializeOwned> JsonStore<T> {
         self.root.join(format!("{}.json", safe_key(key)))
     }
 
+    /// Lock file of an item (see [`FileLock`]). Same convention as
+    /// [`Store::lock_path`] — never deleted, to avoid a window where two
+    /// processes lock different inodes and both enter the critical section.
+    fn lock_path(&self, key: &str) -> PathBuf {
+        self.root.join(format!(".{}.lock", safe_key(key)))
+    }
+
+    /// **Safe read-modify-write** of an item: locks (`flock`), re-reads the
+    /// state ALREADY under the lock, applies `f` and writes — same pattern as
+    /// [`Store::update`], generalized to any `JsonStore<T>`.
+    ///
+    /// Use this (and not `load` + mutate + `save`) whenever the change depends
+    /// on the CURRENT state and more than one process may touch the same key
+    /// concurrently — e.g. `delonix-vm`'s `status()` (background metrics
+    /// refresh) racing a CLI `vm start`/`stop`/`create` on the same VM.
+    ///
+    /// `f` returns `false` to abort the write (nothing changes). The item
+    /// returned is the final state (or the one read, if it aborted).
+    pub fn update<F>(&self, key: &str, f: F) -> Result<T>
+    where
+        F: FnOnce(&mut T) -> bool,
+    {
+        let _lock = FileLock::acquire(&self.lock_path(key));
+        // Re-read UNDER the lock: between any earlier read and the `flock`
+        // another process may have written; using a stale value would
+        // reintroduce the lost update this exists to prevent.
+        let mut v = self.load(key)?;
+        if !f(&mut v) {
+            return Ok(v);
+        }
+        self.save(key, &v)?;
+        Ok(v)
+    }
+
     /// Persists an item under `key` (atomic write).
     pub fn save(&self, key: &str, value: &T) -> Result<()> {
         let safe = safe_key(key);
@@ -386,6 +420,78 @@ mod tests {
 
         let _ = fs::remove_dir_all(&root);
         let _ = fs::remove_dir_all(&outside);
+    }
+
+    /// REGRESSION (concurrency): [`JsonStore::update`] (added to close the same
+    /// gap `delonix-vm`'s `status()` had — see `update_concorrente_nao_perde_
+    /// escritas` above for the `Store<Container>` sibling this mirrors) must
+    /// sequence read-modify-write between threads exactly the same way — N
+    /// concurrent increments through a bare `load`+mutate+`save` would lose
+    /// writes; through `update`, the final count must be exactly N.
+    #[test]
+    fn jsonstore_update_concorrente_nao_perde_escritas() {
+        let root = tmp_dir("jsonstore-update-race");
+        let store: JsonStore<u64> = JsonStore::open(&root).unwrap();
+        store.save("counter", &0u64).unwrap();
+
+        const N: usize = 24;
+        std::thread::scope(|sc| {
+            for _ in 0..N {
+                let root = root.clone();
+                sc.spawn(move || {
+                    let st: JsonStore<u64> = JsonStore::open(&root).unwrap();
+                    st.update("counter", |n| {
+                        let cur = *n;
+                        // Explicit race window between the read and the write:
+                        // without a lock, guarantees the lost update.
+                        std::thread::sleep(std::time::Duration::from_millis(2));
+                        *n = cur + 1;
+                        true
+                    })
+                    .unwrap();
+                });
+            }
+        });
+
+        let got = store.load("counter").unwrap();
+        assert_eq!(got, N as u64, "perderam-se escritas: {got} de {N}");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// `update` on a key that doesn't exist yet propagates `NotFound`
+    /// (it re-reads under the lock via `load`, it doesn't create).
+    #[test]
+    fn jsonstore_update_de_chave_inexistente_da_not_found() {
+        let root = tmp_dir("jsonstore-update-missing");
+        let store: JsonStore<u64> = JsonStore::open(&root).unwrap();
+        let err = store.update("ghost", |n| {
+            *n += 1;
+            true
+        });
+        assert!(matches!(err, Err(Error::NotFound(_))));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// `f` returning `false` aborts the write — the file on disk must stay
+    /// untouched (same contract as `Store::update`).
+    #[test]
+    fn jsonstore_update_aborta_sem_escrever_quando_f_devolve_false() {
+        let root = tmp_dir("jsonstore-update-abort");
+        let store: JsonStore<u64> = JsonStore::open(&root).unwrap();
+        store.save("k", &10u64).unwrap();
+        let v = store
+            .update("k", |n| {
+                *n = 999;
+                false
+            })
+            .unwrap();
+        assert_eq!(v, 999, "o valor devolvido reflecte a mutação em memória");
+        assert_eq!(
+            store.load("k").unwrap(),
+            10,
+            "mas nada foi persistido, porque f devolveu false"
+        );
+        let _ = fs::remove_dir_all(&root);
     }
 
     #[test]

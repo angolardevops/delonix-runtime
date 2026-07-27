@@ -1122,23 +1122,34 @@ achados de arquitectura ficam registados nesta secção.
    com tecto de 120s + leak deliberado da thread presa em vez de um hang permanente; novo campo
    `network_unmeasured_containers` exposto no tile/JSON/gauge Prometheus em vez de somado como zero).
 
-**3 achados de arquitectura DOCUMENTADOS como dívida conhecida (não corrigidos nesta sessão —
-âmbito/risco vs. o prazo de publicação; nenhum é um bug ao vivo reproduzido, ao contrário dos 7
-acima)**:
+**3 achados de arquitectura documentados como dívida conhecida na revisão original — 2 FECHADOS
+em 2026-07-27, 1 ainda aberto**:
 
-- **Criação de rede não tem rollback em falha parcial** — `create_network` (bridge) faz
+- ✅ **FEITO — criação de rede já tem rollback em falha parcial.** `create_network` (bridge) fazia
   `store.create(name)?` (declarativo) e só DEPOIS `infra::network_create_with(...)?` (físico); se o
-  segundo falhar, o registo do primeiro fica órfão — `network ls` mostra a rede, nada consegue
-  anexar-se (`NotFound`), e um retry de `create` falha com "already exists" até um `network rm`
-  manual. Para `overlay` é pior: a mensagem de erro promete "reconcilia no próximo `network
-  create`", mas `NetworkStore::create_overlay` não é idempotente (ao contrário de
-  `create_with_base`) — a reconciliação prometida nunca pode acontecer tal como está escrita hoje.
-- **`delonix-vm`'s `JsonStore<Vm>` não tem primitivo de lock/update** — ao contrário de
-  `Store<Container>::update`, `delonix_vm::status()` faz load→mutar(IP)→save sem `flock`, e é
-  chamado concorrentemente pelo refresh de métricas em background (dash/`delonix-mgmt`) a par de
-  `vm start/stop/create` da CLI — uma janela real, embora estreita, de escrita perdida no estado/IP
-  de uma VM.
-- **`spawn()` (`crates/delonix-runtime/src/lib.rs`) é uma função de ~405 linhas** cobrindo
+  segundo falhasse, o registo do primeiro ficava órfão — `network ls` mostrava a rede, nada
+  conseguia anexar-se (`NotFound`), e um retry de `create` falhava com "already exists" até um
+  `network rm` manual. Corrigido: se `network_create_with` falhar, o registo recém-criado é removido
+  (`store.remove(name)`) antes de propagar o erro — uma `create` falhada não deixa nada para trás.
+  Validado ao vivo o caminho feliz (inalterado); o caminho de falha não foi disparado ao vivo (exige
+  forçar `infra::network_create_with` a falhar num host real), mas a lógica é uma reversão pura de
+  store, sem risco de fronteira de privilégio. **`overlay` continua com a mesma limitação
+  pré-existente** (a mensagem promete "reconcilia no próximo `network create`", mas
+  `NetworkStore::create_overlay` não é idempotente) — fora do âmbito desta correcção, que só cobriu
+  `bridge`.
+- ✅ **FEITO — `JsonStore<T>` ganhou um `update` genérico, mesmo padrão do `Store<Container>`.**
+  Novo `JsonStore::update` (lock por `flock`, re-lê sob o lock, aplica `f`, grava) — mesma forma de
+  `Store::update`, generalizada por `T: Serialize + DeserializeOwned`. `delonix_vm::status()`
+  (que fazia `load`→mutar(IP)→`save` sem lock nenhum, a correr concorrentemente com o refresh de
+  métricas em background do dash/`delonix-mgmt` a par de `vm start/stop/create` da CLI) passou a
+  usar `st.update(name, |vm| {...})` — a consulta ao backend (`is_running`/`ip`) e a decisão
+  correm todas dentro da secção crítica. Teste de regressão puro por concorrência real
+  (`jsonstore_update_concorrente_nao_perde_escritas`, mesmo padrão de threads +
+  `sleep` a meio da janela de corrida que `update_concorrente_nao_perde_escritas` já usava para o
+  `Store<Container>` irmão) — sem lock perderia escritas, com lock as 24 tiveram de bater certo.
+  Validado ao vivo: `vm ls` (que chama `status()` para cada VM) continua a funcionar identicamente.
+- **`spawn()` (`crates/delonix-runtime/src/lib.rs`) é uma função de ~405 linhas** — ainda aberto,
+  cobrindo
   preparação de hostname/argv, setup de pty/socketpair, cálculo de flags de clone, o próprio
   `clone()`, um handshake de userns cuja correcção depende de uma ordem só documentada em
   comentários ("CRITICAL ORDER"), fork+detach do log shim, o hook de rede, setup de cgroup e
