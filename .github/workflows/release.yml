@@ -71,24 +71,35 @@ jobs:
           MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
           MINISIGN_PASSWORD: ${{ secrets.MINISIGN_PASSWORD }}
         run: |
+          PUB=$(grep -oP '^MINISIGN_PUBKEY="\K[^"]+' scripts/install.sh)
+          # A guarda dura só se aplica quando a assinatura JÁ é esperada, i.e.
+          # quando o install.sh tem uma chave pública real embutida. Aí, sair
+          # sem assinar partiria TODOS os instaladores (fail-closed do lado do
+          # cliente) — é um erro, não um aviso. Antes disso, assinar ainda não
+          # é esperado e a release sai sem assinatura, com aviso alto.
           if [ -z "${MINISIGN_SECRET_KEY:-}" ]; then
-            echo "::error::secret MINISIGN_SECRET_KEY em falta — a release sairia SEM assinatura e o install.sh recusa-a. Ver docs/SECURITY-RELEASES.md"
-            exit 1
+            if [ "$PUB" != "__POR_PREENCHER__" ]; then
+              echo "::error::MINISIGN_PUBKEY está configurado mas o secret MINISIGN_SECRET_KEY falta — esta release sairia sem assinatura e TODOS os instaladores a recusariam. Ver docs/SECURITY-RELEASES.md"
+              exit 1
+            fi
+            echo "::warning::release SEM assinatura — a chave ainda não foi configurada (ver docs/SECURITY-RELEASES.md). O install.sh avisa e verifica só integridade de transferência."
+            exit 0
           fi
           sudo apt-get install -y minisign
           # A chave privada só existe no disco do runner durante este passo.
           umask 077
           printf '%s\n' "$MINISIGN_SECRET_KEY" > /tmp/minisign.key
           cd dist-release
-          minisign -S -s /tmp/minisign.key -m SHA256SUMS \
-            -c "delonix-runtime $GITHUB_REF_NAME" -t "delonix-runtime $GITHUB_REF_NAME"
+          # A password vai por STDIN — o minisign lê-a de lá quando não há tty.
+          # Sem isto o passo ficava pendurado à espera de input (uma chave gerada
+          # com -W, sem password, ignora o pipe sem problema).
+          printf '%s\n' "${MINISIGN_PASSWORD:-}" \
+            | minisign -S -s /tmp/minisign.key -m SHA256SUMS \
+                -c "delonix-runtime $GITHUB_REF_NAME" -t "delonix-runtime $GITHUB_REF_NAME"
           shred -u /tmp/minisign.key 2>/dev/null || rm -f /tmp/minisign.key
           # Confirma que a assinatura verifica com a pública que o install.sh
           # traz embutida — apanha uma troca de chave ANTES de publicar, não
           # depois, quando todos os instaladores já falham.
-          PUB=$(grep -oP '^MINISIGN_PUBKEY="\K[^"]+' ../scripts/install.sh)
-          [ "$PUB" != "__POR_PREENCHER__" ] \
-            || { echo "::error::MINISIGN_PUBKEY ainda é o placeholder em scripts/install.sh — preenche a chave pública antes de assinar releases (ver docs/SECURITY-RELEASES.md)"; exit 1; }
           echo "untrusted comment: delonix-runtime" > /tmp/pub.pub
           echo "$PUB" >> /tmp/pub.pub
           minisign -V -p /tmp/pub.pub -m SHA256SUMS \
