@@ -783,7 +783,11 @@ pub enum ContainerCmd {
         /// Volume/bind mount, `name:/target[:ro]` or `/host:/target[:ro]`. Repeatable.
         #[arg(short = 'v', long = "volume")]
         volumes: Vec<String>,
-        /// Publish a port, `hostPort:contPort[/tcp|udp]` or just `port`. Repeatable.
+        /// Publish a port, `[hostIp:]hostPort:contPort[/tcp|udp]` or just `port`. Repeatable.
+        /// SAFE BY DEFAULT: without `hostIp` the port binds to `127.0.0.1` only — reachable
+        /// from the host itself, NOT from a browser on another machine. Name the address to
+        /// widen it: `0.0.0.0:8080:80` (every interface), `192.168.1.10:8080:80` (one), or the
+        /// libvirt gateway to reach it from VMs (see `delonix vm reach`).
         /// With `--net host` (the default) the container moves to its own netns with
         /// userspace NAT (slirp4netns, like rootless podman); with `--net
         /// <network>` it publishes via the ingress (nft DNAT + hostfwd on the single slirp).
@@ -2893,6 +2897,31 @@ pub(crate) fn run_from_spec(path: &std::path::Path) -> Result<()> {
     cmd_run(&images, &store, opts)
 }
 
+/// EVERY IP a container holds on the SDN: the primary first, then one per additional
+/// network (multi-homing). This is what the firewall has to be keyed on — keying it on
+/// `c.ip` alone left every extra network ungoverned, so `ingress policy deny` blocked the
+/// primary address while the container answered normally on the second one.
+pub(crate) fn container_ips(c: &Container) -> Vec<String> {
+    let mut ips: Vec<String> = c.ip.iter().filter(|s| !s.is_empty()).cloned().collect();
+    ips.extend(
+        c.extra_networks
+            .iter()
+            .map(|e| e.ip.clone())
+            .filter(|s| !s.is_empty()),
+    );
+    ips
+}
+
+/// Applies `fw` over ALL of the container's IPs (see [`container_ips`]).
+pub(crate) fn apply_firewall_everywhere(
+    c: &Container,
+    fw: &delonix_runtime_core::ContainerFw,
+) -> Result<()> {
+    let ips = container_ips(c);
+    let refs: Vec<&str> = ips.iter().map(|s| s.as_str()).collect();
+    infra::apply_firewall_all(&c.id, &refs, fw)
+}
+
 /// Which LIVE container is publishing this host port? `None` = free.
 /// (Only live containers count: dead ones no longer hold it — and if some orphan
 /// process holds it, `reap_orphan_net` clears it before this.)
@@ -3045,12 +3074,57 @@ pub(crate) fn cmd_start(images: &ImageStore, store: &Store, id: &str) -> Result<
                     return Err(e);
                 }
             }
+            // Re-attach the ADDITIONAL networks. The record kept them across the stop,
+            // but nothing ever replayed them: a multi-homed container came back with
+            // `eth1` simply gone while `describe` still listed the network — a service
+            // reachable only over that second network broke on the first restart, in
+            // silence. The IP is re-requested from IPAM under the same container id, so
+            // it normally comes back identical; if it differs, the record is corrected
+            // rather than left pointing at an address that no longer exists.
+            let extras = c.extra_networks.clone();
+            for en in &extras {
+                match infra::attach_extra_container(&c.id, en.idx, &en.network, &c.namespace) {
+                    Ok((_ifname, new_ip)) if new_ip != en.ip => {
+                        let (net, ip2) = (en.network.clone(), new_ip.clone());
+                        if let Some(slot) = c
+                            .extra_networks
+                            .iter_mut()
+                            .find(|x| x.network == en.network)
+                        {
+                            slot.ip = new_ip;
+                        }
+                        let _ = store.update(&c.id, |cur| {
+                            match cur.extra_networks.iter_mut().find(|x| x.network == net) {
+                                Some(s) => {
+                                    s.ip = ip2.clone();
+                                    true
+                                }
+                                None => false,
+                            }
+                        });
+                    }
+                    Ok(_) => {}
+                    Err(e) => eprintln!(
+                        "{}",
+                        super::po::tf(
+                            "warning: network '{net}' of '{name}' not reattached on start: {e}",
+                            &[
+                                ("net", &en.network),
+                                ("name", &c.name),
+                                ("e", &e.to_string()),
+                            ],
+                        )
+                    ),
+                }
+            }
             // Re-applies the persisted firewall (namespace isolation, Dependency,
             // Ingress) — the nft chain lives in the holder's EPHEMERAL netns, so a
             // restarted container would lose the isolation without this. Best-effort.
+            // Keyed on EVERY IP (primary + extras), otherwise the additional networks
+            // come back ungoverned.
             if let Some(fw) = &c.firewall {
                 if fw.enabled {
-                    if let Err(e) = infra::apply_firewall(&c.id, &ip, fw) {
+                    if let Err(e) = apply_firewall_everywhere(&c, fw) {
                         eprintln!(
                             "{}",
                             super::po::tf(
@@ -4050,6 +4124,13 @@ fn cmd_update(store: &Store, id: &str, o: UpdateOpts) -> Result<()> {
             cur.extra_networks.retain(|x| x.network != n);
             cur.extra_networks.len() != before
         })?;
+        // Re-apply so the released IP loses its jumps: IPAM will hand that address to
+        // another container, which must not inherit this one's firewall.
+        if let Some(fw) = c.firewall.clone() {
+            if let Err(e) = apply_firewall_everywhere(&c, &fw) {
+                eprintln!("{}: firewall not re-applied after detach: {e}", c.name);
+            }
+        }
         println!("{}: detached from network {net} (eth{})", c.name, en.idx);
     }
 
@@ -4099,7 +4180,7 @@ fn cmd_update(store: &Store, id: &str, o: UpdateOpts) -> Result<()> {
             )));
         }
         let idx = next_extra_idx(&c);
-        let (ifname, ip) = infra::attach_extra_container(&c.id, idx, net)?;
+        let (ifname, ip) = infra::attach_extra_container(&c.id, idx, net, &c.namespace)?;
         let en = delonix_runtime_core::ExtraNet {
             network: net.clone(),
             ip: ip.clone(),
@@ -4109,6 +4190,15 @@ fn cmd_update(store: &Store, id: &str, o: UpdateOpts) -> Result<()> {
             cur.extra_networks.push(en.clone());
             true
         })?;
+        // The firewall has to be re-applied so the NEW IP is governed too — without this
+        // the container gains an address that no `ingress`/`egress`/`Dependency` rule
+        // reaches, which is exactly how a `policy deny` container stayed reachable over a
+        // second network.
+        if let Some(fw) = c.firewall.clone() {
+            if let Err(e) = apply_firewall_everywhere(&c, &fw) {
+                eprintln!("{}: firewall not extended to {ip}: {e}", c.name);
+            }
+        }
         println!("{}: attached to network {net} — {ip} on {ifname}", c.name);
     }
 
@@ -4180,7 +4270,7 @@ fn cmd_update(store: &Store, id: &str, o: UpdateOpts) -> Result<()> {
 
 /// Publish a port on a LIVE container, by the right path for its network.
 pub(crate) fn publish_live(store: &Store, c: &mut Container, spec: &str) -> Result<()> {
-    let (hp, cp, proto) = delonix_net::parse_publish(spec)?;
+    let (host_addr, hp, cp, proto) = delonix_net::parse_publish_addr(spec)?;
     if c.ports.iter().any(|p| {
         delonix_net::parse_publish(p)
             .map(|(h, _, _)| h == hp)
@@ -4224,7 +4314,7 @@ pub(crate) fn publish_live(store: &Store, c: &mut Container, spec: &str) -> Resu
                     &[("name", &c.name)],
                 )));
             }
-            delonix_net::slirp_add_hostfwd(&sock, &hp, &cp, &proto)?;
+            delonix_net::slirp_add_hostfwd(&sock, &hp, &cp, &proto, host_addr.as_deref())?;
         }
     }
     let s = spec.to_string();
@@ -4238,39 +4328,46 @@ pub(crate) fn publish_live(store: &Store, c: &mut Container, spec: &str) -> Resu
 
 /// Unpublish a host port on a LIVE container.
 pub(crate) fn unpublish_live(store: &Store, c: &mut Container, host_port: &str) -> Result<()> {
-    let hit = c
+    // EVERY publication on this host port, not just the first: `-p 53:53/tcp -p
+    // 53:53/udp` are two records sharing one host port. Removing one record while the
+    // dataplane tore down both left the record claiming a port that answered nothing.
+    let hits: Vec<String> = c
         .ports
         .iter()
-        .find(|p| {
+        .filter(|p| {
             delonix_net::parse_publish(p)
                 .map(|(h, _, _)| h == host_port)
                 .unwrap_or(false)
         })
         .cloned()
-        .ok_or_else(|| {
-            Error::Invalid(format!(
-                "'{}' does not publish host port {host_port}",
-                c.name
-            ))
-        })?;
-    match c.network.as_deref() {
-        Some(_) => infra::unpublish_port(host_port),
-        None => {
-            // Without a custom network, the hostfwd lives in the PER-container slirp —
-            // which dies with it. On a stopped container there's no dataplane to clean up,
-            // only the record (before: an error "container is not running" and the publish
-            // stayed stuck in the record forever — a real bug report).
-            if let Some(pid) = c.pid.filter(|&p| runtime::is_alive(p)) {
-                let sock = delonix_net::slirp_container_sock(pid);
-                if sock.exists() {
-                    infra::slirp_remove_hostfwd(&sock, host_port)?;
+        .collect();
+    if hits.is_empty() {
+        return Err(Error::Invalid(format!(
+            "'{}' does not publish host port {host_port}",
+            c.name
+        )));
+    }
+    for spec in &hits {
+        let proto = delonix_net::parse_publish(spec).map(|(_, _, pr)| pr).ok();
+        match c.network.as_deref() {
+            Some(_) => infra::unpublish_port_proto(host_port, proto.as_deref()),
+            None => {
+                // Without a custom network, the hostfwd lives in the PER-container slirp —
+                // which dies with it. On a stopped container there's no dataplane to clean up,
+                // only the record (before: an error "container is not running" and the publish
+                // stayed stuck in the record forever — a real bug report).
+                if let Some(pid) = c.pid.filter(|&p| runtime::is_alive(p)) {
+                    let sock = delonix_net::slirp_container_sock(pid);
+                    if sock.exists() {
+                        infra::slirp_remove_hostfwd_proto(&sock, host_port, proto.as_deref())?;
+                    }
                 }
             }
         }
     }
     *c = store.update(&c.id, |cur| {
         let before = cur.ports.len();
-        cur.ports.retain(|p| p != &hit);
+        cur.ports.retain(|p| !hits.contains(p));
         cur.ports.len() != before
     })?;
     println!("{}: port {host_port} hot-unpublished", c.name);
@@ -4591,11 +4688,55 @@ mod tests {
     use super::super::util::compose_command;
     use super::infra;
     use super::{
-        fmt_ports, fmt_status, next_extra_idx, normalize_container_spec, parse_burst_bytes,
-        parse_cri_log_line, parse_rate_bits, parse_signal, policy_supervised, reexec_env,
-        should_restart, unix_secs_to_rfc3339_prefix, valid_container_name, ContainerSpec,
+        container_ips, fmt_ports, fmt_status, next_extra_idx, normalize_container_spec,
+        parse_burst_bytes, parse_cri_log_line, parse_rate_bits, parse_signal, policy_supervised,
+        reexec_env, should_restart, unix_secs_to_rfc3339_prefix, valid_container_name,
+        ContainerSpec,
     };
     use delonix_runtime_core::{Container, ExtraNet, Status};
+
+    /// REGRESSION: the firewall used to be keyed on `c.ip` alone, so every additional
+    /// network was ungoverned — reproduced live, an `ingress policy deny` container
+    /// answered normally on its second address. The primary must come FIRST (the chain is
+    /// named after it, and `do_unfirewall` finds it by that name).
+    #[test]
+    fn container_ips_covers_every_network_primary_first() {
+        let mut c = Container::new(
+            "id".into(),
+            "t".into(),
+            "img".into(),
+            vec!["sh".to_string()],
+            "max".into(),
+        );
+        c.ip = Some("10.209.0.5".into());
+        c.extra_networks = vec![
+            ExtraNet {
+                network: "net2".into(),
+                ip: "10.239.0.5".into(),
+                idx: 1,
+            },
+            ExtraNet {
+                network: "net3".into(),
+                ip: "10.232.0.5".into(),
+                idx: 2,
+            },
+        ];
+        assert_eq!(
+            container_ips(&c),
+            vec!["10.209.0.5", "10.239.0.5", "10.232.0.5"]
+        );
+        // A `--net host` container has no SDN address at all — never an empty string,
+        // which would reach the holder as a malformed IP.
+        let mut host_net = c.clone();
+        host_net.ip = None;
+        host_net.extra_networks.clear();
+        assert!(container_ips(&host_net).is_empty());
+        // An extra network with a blank IP (a half-written record) is skipped, not
+        // forwarded as an empty token in the comma-separated control line.
+        let mut blank = c.clone();
+        blank.extra_networks[0].ip = String::new();
+        assert_eq!(container_ips(&blank), vec!["10.209.0.5", "10.232.0.5"]);
+    }
 
     #[test]
     fn parse_signal_aceita_nome_numero_e_variantes_de_maiusculas() {

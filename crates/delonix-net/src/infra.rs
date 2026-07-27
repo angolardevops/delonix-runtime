@@ -841,8 +841,13 @@ fn handle_control(line: &str) -> String {
         ["cni-del", netns, id, ifname, hex] => do_cni_del(netns, id, ifname, hex),
         // live multi-homing (rootless): connects/disconnects an ADDITIONAL network to a
         // container already running (extra veth to the private network's bridge).
+        // 6 tokens = `default` namespace (compat with an older client, same shape as
+        // `attach` above); 7 = namespaced.
         ["attach-extra", netns, ifname, ip, bridge, gateway] => {
-            do_attach_extra(netns, ifname, ip, bridge, gateway)
+            do_attach_extra(netns, ifname, ip, bridge, gateway, "default")
+        }
+        ["attach-extra", netns, ifname, ip, bridge, gateway, ns] => {
+            do_attach_extra(netns, ifname, ip, bridge, gateway, ns)
         }
         ["detach-extra", netns, ifname] => do_detach_extra(netns, ifname),
         // live bandwidth limit (rootless): shaping on the infra-side veth
@@ -859,7 +864,9 @@ fn handle_control(line: &str) -> String {
         ["publish-allow", proto, host_port, cip, cport, cidrs] => {
             do_publish_allow(proto, host_port, cip, cport, cidrs)
         }
-        ["unpublish", host_port] => do_unpublish(host_port),
+        // 2 tokens = every proto on the port (teardown); 3 = only that proto.
+        ["unpublish", host_port] => do_unpublish(host_port, None),
+        ["unpublish", host_port, proto] => do_unpublish(host_port, Some(proto)),
         ["firewall", _netns, ip, hex] => do_firewall(ip, hex),
         ["unfirewall", ip] => do_unfirewall(ip),
         ["egress", policy] => do_egress(policy),
@@ -1356,7 +1363,14 @@ fn do_detach(netns: &str) -> Result<()> {
 /// Attaches an ADDITIONAL network to an ALREADY-RUNNING container (live multi-homing): a
 /// second `veth` from the existing netns to the private network's bridge. Does not create the
 /// netns (it already exists) and does NOT touch the default route (the primary network keeps it).
-fn do_attach_extra(netns: &str, ifname: &str, ip: &str, bridge: &str, gateway: &str) -> Result<()> {
+fn do_attach_extra(
+    netns: &str,
+    ifname: &str,
+    ip: &str,
+    bridge: &str,
+    gateway: &str,
+    namespace: &str,
+) -> Result<()> {
     let netns = sanitize(netns);
     let ifname = sanitize(ifname);
     let bridge = sanitize(bridge);
@@ -1408,6 +1422,13 @@ fn do_attach_extra(netns: &str, ifname: &str, ip: &str, bridge: &str, gateway: &
             "drop",
         ],
     );
+    // Namespace isolation on the ADDITIONAL IP too. Its absence here was a real
+    // bypass, not a theoretical one: the cross-namespace drop only fires for sources in
+    // `@dlxall`, so two containers in different namespaces, both connected to a shared
+    // second network, reached each other freely over it — reproduced live (teamA ↔ teamB
+    // blocked on the primary IPs, REACHABLE on the extra ones). `do_attach` has always
+    // done this for the primary; the extra path simply never did.
+    ns_set_join(ip, namespace);
     Ok(())
 }
 
@@ -1676,14 +1697,25 @@ fn do_publish_allow(
 }
 
 /// Removes a `host_port`'s DNAT (by handle) from the `pre` chain. Best-effort.
-fn do_unpublish(host_port: &str) -> Result<()> {
+/// `proto` narrows it to one protocol; `None` removes every proto on that port.
+/// The `dport <n>` needle alone matched a `tcp dport n` rule and a `udp dport n` rule
+/// alike, so unpublishing one protocol tore down the other's DNAT too.
+fn do_unpublish(host_port: &str, proto: Option<&str>) -> Result<()> {
     if !is_port(host_port) {
         return Err(Error::Invalid(format!("invalid port: {host_port}")));
+    }
+    if let Some(p) = proto {
+        if p != "tcp" && p != "udp" {
+            return Err(Error::Invalid(format!("invalid proto: {p}")));
+        }
     }
     // lists the chain with handles and deletes the rule(s) matching the dport.
     let listed = crate::capture("nft", &["-a", "list", "chain", "ip", INGRESS_TABLE, "pre"])
         .unwrap_or_default();
-    let needle = format!("dport {host_port} ");
+    let needle = match proto {
+        Some(p) => format!("{p} dport {host_port} "),
+        None => format!("dport {host_port} "),
+    };
     for line in listed.lines() {
         if line.contains(&needle) {
             if let Some(handle) = line
@@ -2105,11 +2137,22 @@ pub fn fw_chain_body(ip: &str, fw: &delonix_runtime_core::ContainerFw) -> String
         if !r.src.is_empty() && r.src != "0.0.0.0/0" && r.src != "*" {
             line.push_str(&format!(" ip {peer_dir} {}", r.src));
         }
+        // The PORT has to survive `proto: any` (`allow <c> 8080`, the shape the CLI
+        // produces when the user writes a bare port). Emitting the port only inside the
+        // `proto != any` branch silently WIDENED the rule to the whole container: an
+        // `allow <c> 9999` under `policy deny` opened every port, and a `deny <c> 9999`
+        // dropped every port — the opposite of what the command says, in the one place
+        // where being wrong is a security hole. nft can't put a `dport` on a rule with
+        // no L4 proto selected, so `any` + port becomes `meta l4proto { tcp, udp } th
+        // dport <port>` (`th` = transport header, valid for both, ranges included).
+        let has_port = !r.port.is_empty() && r.port != "*";
         if !r.proto.is_empty() && r.proto != "any" {
             line.push_str(&format!(" {}", r.proto));
-            if !r.port.is_empty() && r.port != "*" {
+            if has_port {
                 line.push_str(&format!(" dport {}", r.port));
             }
+        } else if has_port {
+            line.push_str(&format!(" meta l4proto {{ tcp, udp }} th dport {}", r.port));
         }
         line.push_str(if r.action == "allow" {
             " accept"
@@ -2153,16 +2196,33 @@ pub fn dlxns_set(ns: &str) -> String {
 /// Applies a container's firewall in `dlxing` (runs in the holder): ensures the chain
 /// `fw<hash>` + jumps in the `fwd` (daddr/saddr==ip), and rebuilds the body. `hex` is the
 /// `ContainerFw` JSON in hexadecimal (the control channel is line-based).
-fn do_firewall(ip: &str, hex: &str) -> Result<()> {
-    if !is_ingress_ip(ip) {
-        return Err(Error::Invalid(format!(
-            "IP {ip} outside the ingress space (10.200-254.x)"
-        )));
+///
+/// `ips` is EVERY IP the container holds — the primary first, then one per additional
+/// network (multi-homing). It used to be a single IP, which meant a container connected
+/// to a second network was reachable on that second IP with NO firewall at all: an
+/// `ingress policy deny` blocked the primary and the container answered fine on the
+/// extra (reproduced live). Every emitted rule is anchored to a specific IP
+/// (`ip daddr <ip>` / `ip saddr <ip>`), so concatenating one body per IP is
+/// correct under the chain's first-match-terminal semantics — a packet for IP-B
+/// simply matches none of IP-A's lines.
+fn do_firewall(ips: &str, hex: &str) -> Result<()> {
+    let ips: Vec<&str> = ips.split(',').filter(|s| !s.is_empty()).collect();
+    if ips.is_empty() {
+        return Err(Error::Invalid("firewall: no IP given".into()));
+    }
+    for ip in &ips {
+        if !is_ingress_ip(ip) {
+            return Err(Error::Invalid(format!(
+                "IP {ip} outside the ingress space (10.200-254.x)"
+            )));
+        }
     }
     let bytes = hex_decode(hex).ok_or_else(|| Error::Invalid("invalid hex".into()))?;
     let fw: delonix_runtime_core::ContainerFw = serde_json::from_slice(&bytes)
         .map_err(|e| Error::Invalid(format!("firewall JSON: {e}")))?;
-    let chain = fw_chain_name(ip);
+    // The chain is named after the PRIMARY IP so it stays stable as extra networks
+    // come and go (`do_unfirewall` finds it by the same name).
+    let chain = fw_chain_name(ips[0]);
     // ensures the chain (regular, only a jump target).
     let exists = crate::capture("nft", &["list", "chain", "ip", INGRESS_TABLE, &chain])
         .map(|o| o.contains(&chain))
@@ -2170,11 +2230,29 @@ fn do_firewall(ip: &str, hex: &str) -> Result<()> {
     if !exists {
         run_ok("nft", &["add", "chain", "ip", INGRESS_TABLE, &chain]);
     }
-    // idempotent jumps in the fwd: traffic TO (daddr) and FROM (saddr) the IP.
-    let fwd_chain = crate::capture("nft", &["list", "chain", "ip", INGRESS_TABLE, "fwdeny"])
-        .unwrap_or_default();
-    for dir in ["daddr", "saddr"] {
-        if !fwd_chain.contains(&format!("ip {dir} {ip} jump {chain}")) {
+    // Jumps in the `fwd`: traffic TO (daddr) and FROM (saddr) EACH IP. Every jump to
+    // this chain is dropped and rebuilt rather than added if-missing — a container that
+    // LEAVES an additional network would otherwise keep a jump for the released IP, and
+    // IPAM hands that IP to someone else later: the next tenant would silently inherit
+    // this container's firewall. Rebuilding makes the set of jumps exactly the set of
+    // current IPs, and self-heals a chain left inconsistent by an earlier crash.
+    if let Ok(out) = crate::capture(
+        "nft",
+        &["-a", "list", "chain", "ip", INGRESS_TABLE, "fwdeny"],
+    ) {
+        for line in out.lines() {
+            if line.contains(&format!("jump {chain}")) {
+                if let Some(h) = line.rsplit("handle ").next().map(|s| s.trim()) {
+                    run_ok(
+                        "nft",
+                        &["delete", "rule", "ip", INGRESS_TABLE, "fwdeny", "handle", h],
+                    );
+                }
+            }
+        }
+    }
+    for ip in &ips {
+        for dir in ["daddr", "saddr"] {
             run_ok(
                 "nft",
                 &[
@@ -2193,7 +2271,10 @@ fn do_firewall(ip: &str, hex: &str) -> Result<()> {
         }
     }
     // flush + body rebuild in a single script (keeps the chain and the jumps).
-    let body = fw_chain_body(ip, &fw);
+    // One body per IP: the rules, the namespace isolation and the default policy are
+    // all anchored to a concrete address, so the container is governed identically on
+    // every network it is attached to.
+    let body: String = ips.iter().map(|ip| fw_chain_body(ip, &fw)).collect();
     let script = format!(
         "flush chain ip {INGRESS_TABLE} {chain}\ntable ip {INGRESS_TABLE} {{\n\tchain {chain} {{\n{body}\t}}\n}}\n"
     );
@@ -2663,14 +2744,24 @@ pub fn attach_container(id: &str, net: &str, namespace: &str) -> Result<(String,
 /// rootless): resolves the network's bridge/gateway/IP and asks the holder for the extra `veth`
 /// on the interface `eth<idx>`. No new ref-count (the primary attach already holds the infra).
 /// Returns `(ifname, ip)`.
-pub fn attach_extra_container(id: &str, idx: u32, net: &str) -> Result<(String, String)> {
+pub fn attach_extra_container(
+    id: &str,
+    idx: u32,
+    net: &str,
+    namespace: &str,
+) -> Result<(String, String)> {
     let (bridge, prefix, gateway) = resolve_net(net)?;
     let ip = crate::ipam::allocate(&prefix, id)?; // unique lease on the additional network
     let ifname = format!("eth{idx}");
     let netns = sanitize(id);
-    control_send(&format!(
-        "attach-extra {netns} {ifname} {ip} {bridge} {gateway}"
-    ))?;
+    // `default` keeps the 6-token form an older holder understands (same compat rule
+    // `attach_container` follows); only a namespaced attach needs the newer holder.
+    let line = if namespace.is_empty() || namespace == "default" {
+        format!("attach-extra {netns} {ifname} {ip} {bridge} {gateway}")
+    } else {
+        format!("attach-extra {netns} {ifname} {ip} {bridge} {gateway} {namespace}")
+    };
+    control_send(&line)?;
     Ok((ifname, ip))
 }
 
@@ -2711,12 +2802,34 @@ pub fn detach_container(id: &str, ip: &str) {
 /// **Applies a container's parameterizable firewall AT THE INGRESS** (the only place,
 /// via the bind): translates the `ContainerFw` (the same one persisted in the record, v0.1.93) to
 /// the `dlxing`'s `fw<hash>` chain, keyed by the container's `ip` on its network.
+///
+/// Covers only the PRIMARY IP — see [`apply_firewall_all`] for a multi-homed container.
+/// Kept because most callers have a single IP in hand and the wire line stays identical.
 pub fn apply_firewall(id: &str, ip: &str, fw: &delonix_runtime_core::ContainerFw) -> Result<()> {
+    apply_firewall_all(id, std::slice::from_ref(&ip), fw)
+}
+
+/// Like [`apply_firewall`], but governs EVERY IP the container holds (primary first, then
+/// one per additional network). A multi-homed container used to be firewalled on its
+/// primary address only, so `ingress`/`egress`/`Dependency`/namespace rules were all
+/// bypassable by talking to it over a second network — reproduced live before the fix.
+///
+/// With a single IP the control line is byte-identical to the old one, so an older
+/// holder keeps working for the (overwhelmingly common) single-homed case; only the
+/// comma-separated multi-IP form needs the newer holder.
+pub fn apply_firewall_all(
+    id: &str,
+    ips: &[&str],
+    fw: &delonix_runtime_core::ContainerFw,
+) -> Result<()> {
+    if ips.is_empty() {
+        return Err(Error::Invalid("apply_firewall: no IP given".into()));
+    }
     let json = serde_json::to_vec(fw).map_err(|e| Error::Invalid(e.to_string()))?;
     control_send(&format!(
         "firewall {} {} {}",
         sanitize(id),
-        ip,
+        ips.join(","),
         hex_encode(&json)
     ))
 }
@@ -2923,9 +3036,15 @@ pub fn dhcp_ip_for_mac(net: &str, mac: &str) -> Option<String> {
 /// rules live (next increment: allow/deny per port/CIDR on the same
 /// surface).
 pub fn publish_port(cip: &str, spec: &str) -> Result<()> {
-    let (host_port, cont_port, proto) = crate::parse_publish(spec)?;
+    let (host_addr, host_port, cont_port, proto) = crate::parse_publish_addr(spec)?;
     // host → tap0:host_port (the single slirp; guest_port == host_port).
-    crate::slirp_add_hostfwd(&slirp_sock_path(), &host_port, &host_port, &proto)?;
+    crate::slirp_add_hostfwd(
+        &slirp_sock_path(),
+        &host_port,
+        &host_port,
+        &proto,
+        host_addr.as_deref(),
+    )?;
     // tap0:host_port → container:cont_port (DNAT in the infra netns, via the holder).
     control_send(&format!("publish {proto} {host_port} {cip} {cont_port}"))
 }
@@ -2935,8 +3054,14 @@ pub fn publish_port(cip: &str, spec: &str) -> Result<()> {
 /// `hostPort:contPort[/proto]`; `cidrs` are validated in the holder (`fw_src_ok`).
 /// Used to expose an app's DB only to authorized IPs.
 pub fn publish_port_allow(cip: &str, spec: &str, cidrs: &[&str]) -> Result<()> {
-    let (host_port, cont_port, proto) = crate::parse_publish(spec)?;
-    crate::slirp_add_hostfwd(&slirp_sock_path(), &host_port, &host_port, &proto)?;
+    let (host_addr, host_port, cont_port, proto) = crate::parse_publish_addr(spec)?;
+    crate::slirp_add_hostfwd(
+        &slirp_sock_path(),
+        &host_port,
+        &host_port,
+        &proto,
+        host_addr.as_deref(),
+    )?;
     let csv = cidrs.join(",");
     control_send(&format!(
         "publish-allow {proto} {host_port} {cip} {cont_port} {csv}"
@@ -2946,9 +3071,22 @@ pub fn publish_port_allow(cip: &str, spec: &str, cidrs: &[&str]) -> Result<()> {
 /// Removes a `host_port`'s publication: takes the `add_hostfwd` out of the slirp and the DNAT
 /// out of the `pre` chain. Best-effort.
 pub fn unpublish_port(host_port: &str) {
+    unpublish_port_proto(host_port, None)
+}
+
+/// Like [`unpublish_port`], but for ONE protocol — `-p 53:53/tcp` and `-p 53:53/udp`
+/// are two independent publications and removing one must not take the other with it.
+/// `None` removes every proto (teardown paths, where the container is going away).
+pub fn unpublish_port_proto(host_port: &str, proto: Option<&str>) {
     trace_unpublish("unpublish_port", host_port);
-    let _ = slirp_remove_hostfwd(&slirp_sock_path(), host_port);
-    let _ = control_send(&format!("unpublish {host_port}"));
+    let _ = slirp_remove_hostfwd_proto(&slirp_sock_path(), host_port, proto);
+    // The 2-token form stays byte-identical for the teardown case, so an older holder
+    // keeps working there; only the per-proto form needs the newer one.
+    let line = match proto {
+        Some(p) => format!("unpublish {host_port} {p}"),
+        None => format!("unpublish {host_port}"),
+    };
+    let _ = control_send(&line);
 }
 
 /// Records who unpublished a port, when `DELONIX_TRACE_UNPUBLISH` is
@@ -3088,7 +3226,15 @@ fn hostfwd_entries(v: &serde_json::Value) -> Option<&Vec<serde_json::Value>> {
         .and_then(|e| e.as_array())
 }
 
-pub fn slirp_remove_hostfwd(sock: &Path, host_port: &str) -> Result<()> {
+/// `proto` selects WHICH publication to remove: `Some("tcp")`/`Some("udp")` removes only
+/// that one, `None` removes every proto on the port.
+///
+/// Publishing has always been proto-aware (`-p 53:53/tcp` and `-p 53:53/udp` coexist as
+/// two distinct hostfwds) but removal was not: matching on `host_port` alone tore down
+/// BOTH. Reproduced live — a `--publish-rm 18100` on a container publishing tcp+udp left
+/// the record still claiming `18100:53/tcp` while nothing was bound and `curl` got
+/// nothing. Removal now mirrors publication.
+pub fn slirp_remove_hostfwd_proto(sock: &Path, host_port: &str, proto: Option<&str>) -> Result<()> {
     trace_unpublish("slirp_remove_hostfwd", host_port);
     let hp: u32 = host_port
         .parse()
@@ -3097,16 +3243,30 @@ pub fn slirp_remove_hostfwd(sock: &Path, host_port: &str) -> Result<()> {
     let v: serde_json::Value = serde_json::from_str(&listed).unwrap_or(serde_json::Value::Null);
     if let Some(entries) = hostfwd_entries(&v) {
         for e in entries {
-            if e.get("host_port").and_then(|p| p.as_u64()) == Some(hp as u64) {
-                if let Some(id) = e.get("id").and_then(|i| i.as_u64()) {
-                    let cmd =
-                        format!(r#"{{"execute":"remove_hostfwd","arguments":{{"id":{id}}}}}"#);
-                    let _ = slirp_api(sock, &cmd);
+            if e.get("host_port").and_then(|p| p.as_u64()) != Some(hp as u64) {
+                continue;
+            }
+            // An entry whose proto the slirp doesn't report is NOT skipped when a proto
+            // was asked for — better to remove a publication we can't disambiguate than
+            // to leave the host port held by something the record no longer knows about.
+            if let (Some(want), Some(have)) = (proto, e.get("proto").and_then(|p| p.as_str())) {
+                if !have.eq_ignore_ascii_case(want) {
+                    continue;
                 }
+            }
+            if let Some(id) = e.get("id").and_then(|i| i.as_u64()) {
+                let cmd = format!(r#"{{"execute":"remove_hostfwd","arguments":{{"id":{id}}}}}"#);
+                let _ = slirp_api(sock, &cmd);
             }
         }
     }
     Ok(())
+}
+
+/// [`slirp_remove_hostfwd_proto`] for every proto on the port (teardown paths:
+/// `stop`/`rm`, where the whole container is going away).
+pub fn slirp_remove_hostfwd(sock: &Path, host_port: &str) -> Result<()> {
+    slirp_remove_hostfwd_proto(sock, host_port, None)
 }
 
 /// The `argv` prefix to RUN a process inside the netns of a container managed
@@ -4076,6 +4236,53 @@ mod tests {
             ..fw
         };
         assert!(fw_chain_body("10.200.0.5", &off).is_empty());
+    }
+
+    /// Regression: a rule with `proto: any` AND a port used to drop the port from the
+    /// emitted nft line, widening the rule to the WHOLE container — `allow <c> 9999`
+    /// opened every port under `policy deny`, `deny <c> 9999` closed every port.
+    /// Reproduced live against a real published port before the fix.
+    #[test]
+    fn fw_body_keeps_the_port_when_proto_is_any() {
+        let rule = |port: &str, action: &str| delonix_runtime_core::FwRule {
+            dir: "in".into(),
+            proto: "any".into(),
+            port: port.into(),
+            src: String::new(),
+            action: action.into(),
+            note: String::new(),
+        };
+        let fw = delonix_runtime_core::ContainerFw {
+            enabled: true,
+            policy_in: "deny".into(),
+            policy_out: "allow".into(),
+            rules: vec![rule("9999", "allow"), rule("100-200", "deny")],
+            namespace: "default".into(),
+        };
+        let body = fw_chain_body("10.200.0.5", &fw);
+        assert!(
+            body.contains("ip daddr 10.200.0.5 meta l4proto { tcp, udp } th dport 9999 accept"),
+            "{body}"
+        );
+        // ranges survive too (`fw_port_ok` already validates `n-m`).
+        assert!(
+            body.contains("ip daddr 10.200.0.5 meta l4proto { tcp, udp } th dport 100-200 drop"),
+            "{body}"
+        );
+        // the whole-container form must NOT appear for a rule that named a port.
+        assert!(!body.contains("ip daddr 10.200.0.5 accept"), "{body}");
+        // `proto: any` with NO port stays the whole-container rule it always was.
+        let wide = delonix_runtime_core::ContainerFw {
+            enabled: true,
+            policy_in: "deny".into(),
+            policy_out: "allow".into(),
+            rules: vec![rule("", "allow")],
+            namespace: "default".into(),
+        };
+        assert!(
+            fw_chain_body("10.200.0.5", &wide).contains("ip daddr 10.200.0.5 accept"),
+            "a portless `any` rule is still container-wide"
+        );
     }
 
     #[test]

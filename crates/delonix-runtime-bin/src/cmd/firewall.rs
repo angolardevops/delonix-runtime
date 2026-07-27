@@ -368,7 +368,9 @@ fn add_rule(
     let mut replaced: Vec<String> = Vec::new();
     let mut shadow: Option<(String, String)> = None;
     let c = update_locked(store, name, |c| {
-        let ip = require_sdn_ip(c)?;
+        // Guard only: rejects a container off the SDN. The addresses the firewall is
+        // keyed on come from `container_ips` (primary + every additional network).
+        require_sdn_ip(c)?;
         let mut fw = c.firewall.clone().unwrap_or_default();
         fw.enabled = true;
         // The LAST command wins (ufw semantics): a new rule for the SAME match
@@ -410,7 +412,7 @@ fn add_rule(
                     && field_overlaps(norm_any(&r.src), norm_any(&src), &[""])
             })
             .map(|r| (r.action.clone(), rule_spec(r)));
-        infra::apply_firewall(&c.id, &ip, &fw)?;
+        super::container::apply_firewall_everywhere(c, &fw)?;
         c.firewall = Some(fw);
         Ok(true)
     })?;
@@ -486,7 +488,7 @@ fn remove_rule(
         if empty {
             infra::clear_firewall(&ip);
         } else {
-            infra::apply_firewall(&c.id, &ip, &fw)?;
+            super::container::apply_firewall_everywhere(c, &fw)?;
         }
         c.firewall = if empty { None } else { Some(fw) };
         Ok(true)
@@ -509,7 +511,9 @@ fn remove_rule(
 
 fn set_policy(store: &Store, name: &str, dir: &str, policy: Action) -> Result<()> {
     let c = update_locked(store, name, |c| {
-        let ip = require_sdn_ip(c)?;
+        // Guard only: rejects a container off the SDN. The addresses the firewall is
+        // keyed on come from `container_ips` (primary + every additional network).
+        require_sdn_ip(c)?;
         let mut fw = c.firewall.clone().unwrap_or_default();
         fw.enabled = true;
         if dir == "in" {
@@ -517,12 +521,34 @@ fn set_policy(store: &Store, name: &str, dir: &str, policy: Action) -> Result<()
         } else {
             fw.policy_out = policy.as_str().to_string();
         }
-        infra::apply_firewall(&c.id, &ip, &fw)?;
+        super::container::apply_firewall_everywhere(c, &fw)?;
         c.firewall = Some(fw);
         Ok(true)
     })?;
     let arrow = if dir == "in" { "inbound" } else { "outbound" };
     println!("{}: default {arrow} policy = {}", c.name, policy.as_str());
+    // A `deny` default silently kills every published port whose CONTAINER port no rule
+    // covers: the DNAT stays installed, the packet dies in the per-container chain, and
+    // nothing in the output said so. Name the ports and the exact command that reopens them.
+    if dir == "in" && policy == Action::Deny {
+        let fw = c.firewall.clone().unwrap_or_default();
+        for p in &c.ports {
+            let Ok((_, cont_port, proto)) = delonix_net::parse_publish(p) else {
+                continue;
+            };
+            if !published_verdict(&fw, &cont_port, &proto) {
+                println!(
+                    "{}",
+                    super::po::tf(
+                        "warning: published port '{spec}' is now BLOCKED — reopen it with \
+                         `delonix net ingress allow {name} {cont_port}` (the CONTAINER port: \
+                         DNAT runs before the firewall)",
+                        &[("spec", p), ("name", &c.name), ("cont_port", &cont_port)],
+                    )
+                );
+            }
+        }
+    }
     Ok(())
 }
 
@@ -542,7 +568,13 @@ fn list_all(store: &Store, dir: &str) -> Result<()> {
         } else {
             &fw.policy_out
         };
-        let policy = if policy.is_empty() {
+        // Honest POLICY column: a container off the SDN cannot HAVE a firewall
+        // (`require_sdn_ip` rejects every mutation for it), so "allow (default)" read as
+        // "governed and open" when the truth is "not governed at all".
+        let governed = c.ip.as_deref().map(|s| !s.is_empty()).unwrap_or(false);
+        let policy = if !governed {
+            "n/a (host net)".to_string()
+        } else if policy.is_empty() {
             "allow (default)".to_string()
         } else {
             policy.clone()
@@ -596,19 +628,99 @@ fn list_rules(store: &Store, name: &str, dir: &str) -> Result<()> {
             r.note.clone(),
         ]);
     }
+    let mut blocked: Vec<(String, String)> = Vec::new();
     if dir == "in" {
+        // A `--net host`/`none` container has no per-container chain at all (see
+        // `require_sdn_ip`): its publishes are pure slirp hostfwds, governed by nothing
+        // here. Saying `allow` would claim a policy that does not exist.
+        let governed = c.ip.as_deref().map(|s| !s.is_empty()).unwrap_or(false);
         for p in &c.ports {
+            let (cont_port, proto) = delonix_net::parse_publish(p)
+                .map(|(_, cp, pr)| (cp, pr))
+                .unwrap_or_else(|_| (String::new(), "tcp".into()));
+            let reaches = !governed || published_verdict(&fw, &cont_port, &proto);
+            if !reaches {
+                blocked.push((p.clone(), cont_port.clone()));
+            }
+            let action = if reaches { "allow" } else { "BLOCKED" }.to_string();
+            let note = if governed {
+                "DNAT".to_string()
+            } else {
+                "DNAT (host net — no firewall)".to_string()
+            };
             t.row(vec![
                 "publish".into(),
                 p.clone(),
                 "0.0.0.0/0".into(),
-                "allow".into(),
-                "DNAT".into(),
+                action,
+                note,
             ]);
         }
     }
     t.print();
+    for (spec, cont_port) in &blocked {
+        println!();
+        println!(
+            "{}",
+            super::po::tf(
+                "warning: '{spec}' is published (DNAT is in place) but the inbound firewall \
+                 drops it — the port answers nothing.",
+                &[("spec", spec)],
+            )
+        );
+        println!(
+            "{}",
+            super::po::tf(
+                "  DNAT runs before the firewall, so a rule must name the CONTAINER port: \
+                 `delonix net ingress allow {name} {cont_port}`",
+                &[("name", &c.name), ("cont_port", cont_port)],
+            )
+        );
+    }
     Ok(())
+}
+
+/// Does an inbound rule's port field cover `port`? Mirrors `fw_chain_body`:
+/// empty/`*` means every port; otherwise an exact match or a `n-m` range.
+fn port_covers(rule_port: &str, port: &str) -> bool {
+    if rule_port.is_empty() || rule_port == "*" {
+        return true;
+    }
+    let Ok(p) = port.parse::<u32>() else {
+        return rule_port == port;
+    };
+    match rule_port.split_once('-') {
+        Some((a, b)) => match (a.parse::<u32>(), b.parse::<u32>()) {
+            (Ok(a), Ok(b)) => (a..=b).contains(&p),
+            _ => false,
+        },
+        None => rule_port.parse::<u32>().map(|r| r == p).unwrap_or(false),
+    }
+}
+
+/// The EFFECTIVE inbound verdict for a published port, resolved the way the dataplane
+/// resolves it — the reason this exists at all: `ingress ls` used to print every publish
+/// as `allow / DNAT` unconditionally, so a container under `policy deny` showed its port
+/// as open while `curl` got nothing. The table has to answer the question it is read for.
+///
+/// Two facts drive it: (1) DNAT happens at `prerouting`, so by the time the per-container
+/// chain sees the packet the destination port is the CONTAINER port, never the host port
+/// — a rule must name `cont_port` to govern a publish; (2) the chain is first-match
+/// terminal, so the first covering rule wins over the default policy.
+///
+/// Rules carrying a specific `src` are skipped: they govern one source, not the general
+/// reachability this column reports.
+fn published_verdict(fw: &delonix_runtime_core::ContainerFw, cont_port: &str, proto: &str) -> bool {
+    for r in fw.rules.iter().filter(|r| r.dir == "in") {
+        if !norm_any(&r.src).is_empty() {
+            continue;
+        }
+        let proto_covers = r.proto.is_empty() || r.proto == "any" || r.proto == proto;
+        if proto_covers && port_covers(&r.port, cont_port) {
+            return r.action == "allow";
+        }
+    }
+    fw.policy_in != "deny"
 }
 
 fn or_any(s: &str) -> String {
@@ -640,7 +752,7 @@ fn clear_dir(store: &Store, name: &str, dir: &str) -> Result<()> {
             if empty {
                 infra::clear_firewall(&ip);
             } else {
-                infra::apply_firewall(&c.id, &ip, &fw)?;
+                super::container::apply_firewall_everywhere(c, &fw)?;
             }
         }
         c.firewall = if empty { None } else { Some(fw) };
@@ -902,7 +1014,9 @@ fn apply_fw_doc(store: &Store, doc: &ManifestDoc, dir: &str) -> Result<()> {
     }
     let mut n = 0usize;
     update_locked(store, &spec.target, |c| {
-        let ip = require_sdn_ip(c)?;
+        // Guard only: rejects a container off the SDN. The addresses the firewall is
+        // keyed on come from `container_ips` (primary + every additional network).
+        require_sdn_ip(c)?;
         let mut fw = c.firewall.clone().unwrap_or_default();
         fw.enabled = true;
         // Declarative: this direction is fully replaced by the document.
@@ -913,7 +1027,7 @@ fn apply_fw_doc(store: &Store, doc: &ManifestDoc, dir: &str) -> Result<()> {
             fw.policy_out = policy.to_string();
         }
         fw.rules.extend(new_rules.iter().cloned());
-        infra::apply_firewall(&c.id, &ip, &fw)?;
+        super::container::apply_firewall_everywhere(c, &fw)?;
         n = fw.rules.iter().filter(|r| r.dir == dir).count();
         c.firewall = Some(fw);
         Ok(true)
@@ -943,13 +1057,15 @@ pub(crate) fn apply_container_ingress(
         )));
     }
     update_locked(store, target, |c| {
-        let ip = require_sdn_ip(c)?;
+        // Guard only: rejects a container off the SDN. The addresses the firewall is
+        // keyed on come from `container_ips` (primary + every additional network).
+        require_sdn_ip(c)?;
         let mut fw = c.firewall.clone().unwrap_or_default();
         fw.enabled = true;
         fw.rules.retain(|r| r.dir != "in"); // declarative: the `in` direction is replaced
         fw.policy_in = policy.to_string();
         fw.rules.extend(allows.iter().cloned());
-        infra::apply_firewall(&c.id, &ip, &fw)?;
+        super::container::apply_firewall_everywhere(c, &fw)?;
         c.firewall = Some(fw);
         Ok(true)
     })?;

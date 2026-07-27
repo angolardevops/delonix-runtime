@@ -333,8 +333,27 @@ pub fn valid_ip_in_subnet(prefix: &str, ip: &str) -> bool {
 
 /// Deterministic IP in `10.88.A.B`, derived from the id (avoids .0/.1/.255).
 /// Parses `hostPort:contPort[/tcp|udp]`, `contPort` or `hp:cp`. Returns
-/// `(host_port, cont_port, proto)`.
+/// `(host_port, cont_port, proto)` — the host ADDRESS, if the spec carries one, is
+/// dropped here; use [`parse_publish_addr`] when you need it (the bind side).
 pub fn parse_publish(spec: &str) -> Result<(String, String, String)> {
+    let (_, h, c, p) = parse_publish_addr(spec)?;
+    Ok((h, c, p))
+}
+
+/// Parses the FULL publish spec, Docker-style: `[hostIp:]hostPort:contPort[/tcp|udp]`
+/// (or a bare `contPort`). Returns `(host_addr, host_port, cont_port, proto)`.
+///
+/// `host_addr` is `None` when the spec doesn't name one — the caller then falls back to
+/// `DELONIX_PUBLISH_ADDR` and, failing that, to the safe default `127.0.0.1`. Naming the
+/// address in the spec is the ONLY way to expose a published port beyond the host's own
+/// loopback without an environment variable: `-p 0.0.0.0:8080:80` (whole LAN),
+/// `-p 192.168.1.106:8080:80` (one interface), `-p 192.168.122.1:8080:80` (the libvirt
+/// gateway — reachable from VMs on that network, see `delonix vm reach`).
+///
+/// Only IPv4 is accepted: it is interpolated into the slirp api-socket's JSON, and the
+/// `Ipv4Addr` parse is what keeps that boundary safe (same reason `DELONIX_PUBLISH_ADDR`
+/// is validated). An IPv6 literal would also collide with the `:` splitting below.
+pub fn parse_publish_addr(spec: &str) -> Result<(Option<String>, String, String, String)> {
     let (mapping, proto) = match spec.split_once('/') {
         Some((m, p)) => (m, p.to_lowercase()),
         None => (spec, "tcp".to_string()),
@@ -344,9 +363,15 @@ pub fn parse_publish(spec: &str) -> Result<(String, String, String)> {
             "invalid protocol in '{spec}' (tcp|udp)"
         )));
     }
-    let (host_port, cont_port) = match mapping.rsplit_once(':') {
+    // Split from the RIGHT: `contPort` is always last, `hostPort` before it, and
+    // whatever remains in front is the host address.
+    let (head, cont_port) = match mapping.rsplit_once(':') {
         Some((h, c)) => (h.trim(), c.trim()),
         None => (mapping.trim(), mapping.trim()),
+    };
+    let (host_addr, host_port) = match head.rsplit_once(':') {
+        Some((a, p)) => (Some(a.trim()), p.trim()),
+        None => (None, head),
     };
     let valid = |p: &str| !p.is_empty() && p.chars().all(|c| c.is_ascii_digit());
     if !valid(host_port) || !valid(cont_port) {
@@ -354,7 +379,36 @@ pub fn parse_publish(spec: &str) -> Result<(String, String, String)> {
             "invalid port in '{spec}' (e.g. 8080:80)"
         )));
     }
-    Ok((host_port.to_string(), cont_port.to_string(), proto))
+    let host_addr = match host_addr {
+        Some(a) if a.parse::<std::net::Ipv4Addr>().is_ok() => Some(a.to_string()),
+        Some(a) => {
+            return Err(Error::Invalid(format!(
+                "invalid host address '{a}' in '{spec}' (an IPv4 literal, e.g. 0.0.0.0:8080:80)"
+            )))
+        }
+        None => None,
+    };
+    Ok((
+        host_addr,
+        host_port.to_string(),
+        cont_port.to_string(),
+        proto,
+    ))
+}
+
+/// The address a published port should BIND to on the host: the spec's own
+/// `hostIp` if it names one, else `DELONIX_PUBLISH_ADDR`, else the safe default
+/// `127.0.0.1`. Single source of truth — the two publish datapaths (per-container
+/// slirp and the single ingress slirp) must not diverge on this.
+pub fn publish_bind_addr(spec_addr: Option<&str>) -> String {
+    spec_addr
+        .map(|a| a.to_string())
+        .or_else(|| {
+            std::env::var("DELONIX_PUBLISH_ADDR")
+                .ok()
+                .filter(|a| a.parse::<std::net::Ipv4Addr>().is_ok())
+        })
+        .unwrap_or_else(|| "127.0.0.1".to_string())
 }
 
 /// Specification of a container's network bandwidth limit.
@@ -1662,107 +1716,6 @@ impl Net {
         Ok(())
     }
 
-    /// Publishes a host port → `container_ip:cont_port` (DNAT), accessible from
-    /// outside and via `localhost`. `spec` is `hostPort:contPort[/tcp|udp]` or just `port`.
-    pub fn publish_port(&self, container_ip: &str, spec: &str) -> Result<()> {
-        self.ensure_bridge()?;
-        // localhost → DNAT needs route_localnet on the bridge.
-        let _ = std::fs::write(
-            format!("/proc/sys/net/ipv4/conf/{BRIDGE}/route_localnet"),
-            "1",
-        );
-        let (host_port, cont_port, proto) = parse_publish(spec)?;
-        let to = format!("{container_ip}:{cont_port}");
-        // SAFE BY DEFAULT: the port stays only on the LOOPBACK (`output` rule below).
-        // External exposure (LAN/other machines) requires explicit opt-in via
-        // DELONIX_PUBLISH_ADDR ("0.0.0.0" = all interfaces; or a host IP).
-        match std::env::var("DELONIX_PUBLISH_ADDR")
-            .ok()
-            .filter(|a| a.parse::<std::net::Ipv4Addr>().is_ok())
-        {
-            Some(ref ip) if ip == "0.0.0.0" => {
-                run(
-                    "nft",
-                    &[
-                        "add",
-                        "rule",
-                        "ip",
-                        TABLE,
-                        "prerouting",
-                        &proto,
-                        "dport",
-                        &host_port,
-                        "dnat",
-                        "to",
-                        &to,
-                    ],
-                )?;
-            }
-            Some(ip) => {
-                run(
-                    "nft",
-                    &[
-                        "add",
-                        "rule",
-                        "ip",
-                        TABLE,
-                        "prerouting",
-                        "ip",
-                        "daddr",
-                        &ip,
-                        &proto,
-                        "dport",
-                        &host_port,
-                        "dnat",
-                        "to",
-                        &to,
-                    ],
-                )?;
-            }
-            None => {} // loopback-only (safe default): no DNAT on the external prerouting
-        }
-        // From the host itself (curl localhost:port) — always.
-        run(
-            "nft",
-            &[
-                "add",
-                "rule",
-                "ip",
-                TABLE,
-                "output",
-                "ip",
-                "daddr",
-                "127.0.0.0/8",
-                &proto,
-                "dport",
-                &host_port,
-                "dnat",
-                "to",
-                &to,
-            ],
-        )?;
-        // Hairpin: traffic coming from the loopback has to be masqueraded, otherwise the
-        // container responds to 127.0.0.1 (to ITSELF) and the response never comes back.
-        run(
-            "nft",
-            &[
-                "add",
-                "rule",
-                "ip",
-                TABLE,
-                "postrouting",
-                "ip",
-                "saddr",
-                "127.0.0.0/8",
-                "ip",
-                "daddr",
-                container_ip,
-                "masquerade",
-            ],
-        )?;
-        Ok(())
-    }
-
     /// Removes all publication rules (DNAT + hairpin) that mention
     /// `container_ip` (cleanup on `rm`/`detach`).
     pub fn unpublish_all(&self, container_ip: &str) {
@@ -1778,35 +1731,6 @@ impl Net {
                             run_ok(
                                 "nft",
                                 &["delete", "rule", "ip", TABLE, chain, "handle", handle],
-                            );
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    /// Removes the publication of ONE host port (DNAT in prerouting+output) of a
-    /// container, without touching the others or the shared hairpin. Best-effort.
-    pub fn unpublish_port(&self, container_ip: &str, host_port: &str) {
-        for chain in ["prerouting", "output"] {
-            if let Ok(out) = capture("nft", &["-a", "list", "chain", "ip", TABLE, chain]) {
-                for line in out.lines() {
-                    if line.contains(&format!("dnat to {container_ip}:"))
-                        && line.contains(&format!("dport {host_port} "))
-                    {
-                        if let Some(handle) = line.rsplit("# handle ").next() {
-                            run_ok(
-                                "nft",
-                                &[
-                                    "delete",
-                                    "rule",
-                                    "ip",
-                                    TABLE,
-                                    chain,
-                                    "handle",
-                                    handle.trim(),
-                                ],
                             );
                         }
                     }
@@ -2252,8 +2176,8 @@ pub fn slirp_attach(pid: i32, publish: &[String]) -> Result<()> {
             // Publishes the ports via the api-socket (host → container, in userspace).
             if let Some(sock) = &api_sock {
                 for spec in publish {
-                    if let Ok((hp, cp, proto)) = parse_publish(spec) {
-                        if let Err(e) = slirp_add_hostfwd(sock, &hp, &cp, &proto) {
+                    if let Ok((addr, hp, cp, proto)) = parse_publish_addr(spec) {
+                        if let Err(e) = slirp_add_hostfwd(sock, &hp, &cp, &proto, addr.as_deref()) {
                             std::mem::forget(child);
                             return Err(e);
                         }
@@ -2389,17 +2313,16 @@ pub fn slirp_add_hostfwd(
     host_port: &str,
     guest_port: &str,
     proto: &str,
+    spec_addr: Option<&str>,
 ) -> Result<()> {
     use std::io::{Read, Write};
     use std::os::unix::net::UnixStream;
     // SAFE BY DEFAULT: binds the published port only to the loopback (127.0.0.1), not to
-    // all interfaces. To expose on the LAN, explicit opt-in via
-    // DELONIX_PUBLISH_ADDR (e.g.: "0.0.0.0" or a host IP). Validated as IPv4
-    // so as not to inject into the slirp api-socket's JSON.
-    let host_addr = std::env::var("DELONIX_PUBLISH_ADDR")
-        .ok()
-        .filter(|a| a.parse::<std::net::Ipv4Addr>().is_ok())
-        .unwrap_or_else(|| "127.0.0.1".to_string());
+    // all interfaces. Two explicit opt-ins widen it, in this order of precedence: the
+    // spec's own `hostIp` (`-p 0.0.0.0:8080:80`, Docker syntax) and the
+    // DELONIX_PUBLISH_ADDR env var. Both validated as IPv4 so as not to inject into the
+    // slirp api-socket's JSON — see `publish_bind_addr`.
+    let host_addr = publish_bind_addr(spec_addr);
     let cmd = format!(
         r#"{{"execute":"add_hostfwd","arguments":{{"proto":"{proto}","host_addr":"{host_addr}","host_port":{host_port},"guest_addr":"{SLIRP_IP}","guest_port":{guest_port}}}}}"#
     );
@@ -2574,6 +2497,66 @@ pub fn list_connections(ip2name: &std::collections::HashMap<String, String>) -> 
 
 #[cfg(test)]
 mod tests {
+    /// The Docker `[hostIp:]hostPort:contPort` form: the address is what lets a
+    /// published port answer anything other than the host's own loopback. Before this,
+    /// the ONLY way to widen the bind was the undocumented `DELONIX_PUBLISH_ADDR`, and a
+    /// spec carrying an address was rejected outright as an "invalid port".
+    #[test]
+    fn parse_publish_addr_reads_the_docker_host_ip_form() {
+        use super::parse_publish_addr;
+        assert_eq!(
+            parse_publish_addr("0.0.0.0:8080:80").unwrap(),
+            (
+                Some("0.0.0.0".into()),
+                "8080".into(),
+                "80".into(),
+                "tcp".into()
+            )
+        );
+        assert_eq!(
+            parse_publish_addr("192.168.1.10:8080:80/udp").unwrap(),
+            (
+                Some("192.168.1.10".into()),
+                "8080".into(),
+                "80".into(),
+                "udp".into()
+            )
+        );
+        // No address = None (the caller falls back to DELONIX_PUBLISH_ADDR/127.0.0.1),
+        // and the pre-existing forms keep parsing exactly as they did.
+        assert_eq!(
+            parse_publish_addr("8080:80").unwrap(),
+            (None, "8080".into(), "80".into(), "tcp".into())
+        );
+        assert_eq!(
+            parse_publish_addr("80").unwrap(),
+            (None, "80".into(), "80".into(), "tcp".into())
+        );
+        assert_eq!(
+            super::parse_publish("8080:80/udp").unwrap(),
+            ("8080".into(), "80".into(), "udp".into())
+        );
+        // A non-IPv4 head is REJECTED, never silently dropped — the compose bug of
+        // discarding `127.0.0.1:9000:80` and publishing on every interface instead was
+        // exactly this failure mode.
+        assert!(parse_publish_addr("localhost:8080:80").is_err());
+        assert!(parse_publish_addr("999.0.0.1:8080:80").is_err());
+        assert!(parse_publish_addr("::1:8080:80").is_err());
+    }
+
+    /// The bind address is decided in ONE place, with the spec winning over the env var
+    /// and `127.0.0.1` as the floor — the two publish datapaths (per-container slirp and
+    /// the single ingress slirp) must never diverge on it.
+    #[test]
+    fn publish_bind_addr_precedence() {
+        use super::publish_bind_addr;
+        assert_eq!(publish_bind_addr(Some("0.0.0.0")), "0.0.0.0");
+        // Without a spec address and without the env var set, the safe default holds.
+        if std::env::var_os("DELONIX_PUBLISH_ADDR").is_none() {
+            assert_eq!(publish_bind_addr(None), "127.0.0.1");
+        }
+    }
+
     /// REGRESSION: the prefix of ANY network name has to fall within the ingress
     /// workload space. It was `100 + (fnv32 % 140)` and the ingress only accepts
     /// from 200 up — 71% of the names generated a network where publishing ports
