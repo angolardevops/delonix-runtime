@@ -4524,7 +4524,7 @@ pub fn update_limits(
     memory: Option<&str>,
     cpus: Option<&str>,
 ) -> Result<()> {
-    let cg = container.cgroup();
+    let cg = live_cgroup(container);
     if !std::path::Path::new(&cg).exists() {
         return Ok(());
     }

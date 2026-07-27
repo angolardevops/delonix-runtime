@@ -141,9 +141,12 @@ real desse processo).</p>"""},
             "update": {"examples": [
                 ("Troca uma porta a QUENTE, sem reiniciar", "delonix container update web --publish-add 9090:80"),
                 ("Liga a uma rede nova + limite de banda", "delonix container update web --net-connect backend --net-rate 10mbit"),
-            ], "notes": """<p>Reconfigura portas, volumes, redes e limite de banda de um container
-<strong>a correr</strong>, sem o parar — o PID não muda. Remoções correm antes das adições, para
-<code>--publish-rm 8080 --publish-add 8080:9000</code> funcionar num só comando.</p>"""},
+                ("Sobe o limite de memória/CPU a QUENTE, sem reiniciar", "delonix container update web --memory 512M --cpus 2"),
+            ], "notes": """<p>Reconfigura portas, volumes, redes, limite de banda e limites de
+memória/CPU de um container <strong>a correr</strong>, sem o parar — o PID não muda. Remoções
+correm antes das adições, para <code>--publish-rm 8080 --publish-add 8080:9000</code> funcionar
+num só comando. <code>--memory</code>/<code>--cpus</code> reescrevem o cgroup real de imediato
+(<code>memory.max</code>/<code>cpu.max</code>) — nada de esperar por um <code>restart</code>.</p>"""},
             "attach": {"examples": [("Volta a ligar ao stream de output de um container detached", "delonix container attach web")],
                        "notes": """<p>Deliberadamente <strong>só output</strong> — ao contrário do
 <code>docker attach</code>, não há stdin ao vivo para um container já iniciado em detached (sem
