@@ -4119,8 +4119,14 @@ mod tests {
         );
         std::env::set_var(RUNTIME_DIR_ENV, "/tmp/dlx-rt-test");
         assert_eq!(runtime_dir(), PathBuf::from("/tmp/dlx-rt-test"));
-        assert_eq!(slirp_sock_path(), PathBuf::from("/tmp/dlx-rt-test/slirp.sock"));
-        assert_eq!(control_sock_path(), PathBuf::from("/tmp/dlx-rt-test/control.sock"));
+        assert_eq!(
+            slirp_sock_path(),
+            PathBuf::from("/tmp/dlx-rt-test/slirp.sock")
+        );
+        assert_eq!(
+            control_sock_path(),
+            PathBuf::from("/tmp/dlx-rt-test/control.sock")
+        );
         std::env::remove_var(RUNTIME_DIR_ENV);
 
         // Rootless fallback (no explicit override, no root): `/tmp`, uid-scoped
