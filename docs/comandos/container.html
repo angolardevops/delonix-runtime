@@ -150,6 +150,7 @@ Options:
   -p, --publish &lt;PUBLISH&gt;              Publish a port, `hostPort:contPort[/tcp|udp]` or just `port`. Repeatable. With `--net host` (the default) the container moves to its own netns with userspace NAT (slirp4netns, like rootless podman); with `--net &lt;network&gt;` it publishes via the ingress (nft DNAT + hostfwd on the single slirp)
       --privileged                     Privileged container (all caps, seccomp off) — trusted workloads
       --entrypoint &lt;ENTRYPOINT&gt;        Override the image&#x27;s ENTRYPOINT (COMMAND becomes the arguments to this binary; `--entrypoint &quot;&quot;` clears it and runs just the COMMAND)
+  -w, --workdir &lt;WORKDIR&gt;              Working directory the container&#x27;s process starts in (default: the image&#x27;s own configured workdir, or `/`). Persists in the record — an `exec -w` overrides it for that one call only
       --rm                             Remove the container when the process exits (with `-d`, a detached watcher handles removal when the container dies)
       --restart &lt;RESTART&gt;              Restart policy (only with `-d`): `no` (default), `on-failure[:max]`, `always`, `unless-stopped`. A detached supervisor (one per container, ephemeral — there&#x27;s no daemon) becomes the container&#x27;s parent, captures the real exit code, and restarts it according to the policy [default: no]
       --device &lt;DEVICES&gt;               Attach a host device, `/dev/x[:/dev/y]`. Repeatable. The container&#x27;s `/dev` is a tmpfs with a curated list (null/zero/tty/...); this adds real host nodes to it, like `docker --device`
@@ -561,12 +562,20 @@ Options:
       --net-rate-clear
           Remove the bandwidth cap
 
+  -m, --memory &lt;MEMORY&gt;
+          New memory limit hot (`64M`, `2G`, `max`)
+
+  -c, --cpus &lt;CPUS&gt;
+          New CPU quota hot (number of cores, e.g. `0.5`, `2`)
+
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)</code></pre></div>
-<p>Reconfigura portas, volumes, redes e limite de banda de um container
-<strong>a correr</strong>, sem o parar — o PID não muda. Remoções correm antes das adições, para
-<code>--publish-rm 8080 --publish-add 8080:9000</code> funcionar num só comando.</p>
-<h3>Exemplos</h3><div class="ex"><div class="cap">Troca uma porta a QUENTE, sem reiniciar</div><pre><code>delonix container update web --publish-add 9090:80</code></pre></div><div class="ex"><div class="cap">Liga a uma rede nova + limite de banda</div><pre><code>delonix container update web --net-connect backend --net-rate 10mbit</code></pre></div>
+<p>Reconfigura portas, volumes, redes, limite de banda e limites de
+memória/CPU de um container <strong>a correr</strong>, sem o parar — o PID não muda. Remoções
+correm antes das adições, para <code>--publish-rm 8080 --publish-add 8080:9000</code> funcionar
+num só comando. <code>--memory</code>/<code>--cpus</code> reescrevem o cgroup real de imediato
+(<code>memory.max</code>/<code>cpu.max</code>) — nada de esperar por um <code>restart</code>.</p>
+<h3>Exemplos</h3><div class="ex"><div class="cap">Troca uma porta a QUENTE, sem reiniciar</div><pre><code>delonix container update web --publish-add 9090:80</code></pre></div><div class="ex"><div class="cap">Liga a uma rede nova + limite de banda</div><pre><code>delonix container update web --net-connect backend --net-rate 10mbit</code></pre></div><div class="ex"><div class="cap">Sobe o limite de memória/CPU a QUENTE, sem reiniciar</div><pre><code>delonix container update web --memory 512M --cpus 2</code></pre></div>
 <h2 id='attach'><code>container attach</code></h2>
 <div class='help'><pre><code>Re-attach to a running container&#x27;s output stream (same log file `logs -f` reads). Unlike `docker attach`, this is OUTPUT-ONLY: a detached container&#x27;s stdin has nowhere to go (this engine keeps no live conduit to it once started, unlike a persistent per-container shim) — `-i`/`--stdin` is refused with a clear error instead of silently doing nothing
 
