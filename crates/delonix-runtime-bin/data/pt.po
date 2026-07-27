@@ -3351,3 +3351,30 @@ msgstr "Imagens a carregar (`repo:tag`, tal como aparecem em `delonix image ls`)
 
 msgid "Cluster name. Omit when there is only one — with several, this says which"
 msgstr "Nome do cluster. Omite quando só há um — com vários, indica qual"
+
+msgid "warning: '{spec}' is published (DNAT is in place) but the inbound firewall drops it — the port answers nothing."
+msgstr "aviso: '{spec}' está publicada (o DNAT está aplicado) mas a firewall inbound descarta-a — a porta não responde nada."
+
+msgid "  DNAT runs before the firewall, so a rule must name the CONTAINER port: `delonix net ingress allow {name} {cont_port}`"
+msgstr "  O DNAT corre antes da firewall, por isso a regra tem de nomear a porta do CONTAINER: `delonix net ingress allow {name} {cont_port}`"
+
+msgid "warning: published port '{spec}' is now BLOCKED — reopen it with `delonix net ingress allow {name} {cont_port}` (the CONTAINER port: DNAT runs before the firewall)"
+msgstr "aviso: a porta publicada '{spec}' ficou BLOQUEADA — reabre-a com `delonix net ingress allow {name} {cont_port}` (a porta do CONTAINER: o DNAT corre antes da firewall)"
+
+msgid "{ref}: saved to {path}"
+msgstr "{ref}: guardada em {path}"
+
+msgid "loaded: {tags}"
+msgstr "carregada: {tags}"
+
+msgid "Save an image to a portable archive (`docker save`'s counterpart) — the way to move an image to another machine with no registry. The archive is an OCI layout WITH the legacy `manifest.json`, so `delonix image load`, `docker load`, `podman load` and `ctr images import` all read it"
+msgstr "Guarda uma imagem num arquivo portátil (o equivalente ao `docker save`) — a forma de levar uma imagem para outra máquina sem registo. O arquivo é um OCI layout COM o `manifest.json` legado, por isso `delonix image load`, `docker load`, `podman load` e `ctr images import` leem-no todos"
+
+msgid "Load an image from an archive produced by `delonix image save`, `docker save` or `podman save` (the counterpart of `save`)"
+msgstr "Carrega uma imagem a partir de um arquivo produzido por `delonix image save`, `docker save` ou `podman save` (o inverso do `save`)"
+
+msgid "Destination file. Use `-o /dev/stdout` to pipe (e.g. into `gzip`)"
+msgstr "Ficheiro de destino. Usa `-o /dev/stdout` para encadear (ex.: para `gzip`)"
+
+msgid "Archive to read (`.tar`; a `.tar.gz` must be gunzipped first)"
+msgstr "Arquivo a ler (`.tar`; um `.tar.gz` tem de ser descomprimido primeiro)"
