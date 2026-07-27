@@ -375,10 +375,10 @@ determinística (<code>&lt;projecto&gt;_&lt;nome&gt;</code>) — sem registo pr�
 <p><code>profiles</code>/<code>extends</code>/<code>configs</code>/<code>secrets</code> top-level (usa
 <code>kind: Secret</code> em vez disso) / multi-ficheiro (<code>-f a -f b</code>/<code>include:</code>),
 <code>build.target</code> (selecção de estágio), <code>deploy.replicas != 1</code>,
-<code>networks.*.ipv4_address</code> fixo, volumes anónimos (sem <code>source</code> explícito), porta
-sem host explícito (atribuição aleatória). <code>working_dir:</code> é aceite mas AVISA e é ignorado —
-lacuna pré-existente do motor inteiro (nenhum <code>Container</code> tem override de workdir), não algo
-que este módulo introduz.</p>""",
+<code>networks.*.ipv4_address</code> fixo, e volumes anónimos (sem <code>source</code> explícito —
+precisa de semântica própria de limpeza, ainda por desenhar). <code>working_dir:</code> É aplicado
+(via <code>container run -w/--workdir</code>, novo) e uma porta sem host explícito (<code>ports:
+["80"]</code>) GANHA uma porta livre real do host, em vez de recusar.</p>""",
     },
     "cluster": {
         "title": "delonix cluster",
