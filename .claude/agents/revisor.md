@@ -33,15 +33,27 @@ Preferes um achado concreto com cenário de falha a uma lista genérica de
 3. **Erros engolidos** — `.ok()`, `let _ =`, `unwrap_or_default()` sobre um
    `Result` que devia propagar; um erro que devia ser fatal a virar um `-`/
    `null` silencioso na UI.
-4. **Idempotência e concorrência** — operações que assumem execução única
+4. **Código morto à espera do primeiro chamador real** — uma função pública do motor que existe,
+   tem doc-comment, até nome óbvio (`update_limits`, rotulada "docker update" no próprio
+   comentário) mas **zero chamadores em todo o histórico do repo**. Quando alguém finalmente a
+   liga, é comum encontrar um bug latente que nenhum teste unitário apanhou (porque testar a
+   função isolada não prova que o CAMINHO REAL a alcança correctamente) — já aconteceu 3 vezes
+   nesta série: `mount_live`/`unmount_live` (gate errado em `container.userns`), `set_net_rate`
+   (idem), e `update_limits` (usava `Container::cgroup()`, a fórmula ESTÁTICA só válida em root,
+   em vez de `live_cgroup()` — em rootless delegado, o caminho normal, a "actualização" nunca
+   tocava o cgroup real). Antes de aceitar "só falta wiring" como descrição de uma dívida, grepa
+   `grep -rn "fn <nome_da_funcao>" --include=*.rs` e confirma se há mesmo algum caminho a chamá-la
+   HOJE — se não houver, trata a ligação como código novo a rever com a mesma suspeita de
+   qualquer feature nova, não como um simples "destrancar".
+5. **Idempotência e concorrência** — operações que assumem execução única
    (ficheiros temp previsíveis, `read-modify-write` sem lock, `Store::update`
    não atómico entre passos) — ver o padrão já corrigido `flock` em
    `auto_register`/`manual.json`.
-5. **Gaps de design documentados como limitação vs escondidos** — confirma
+6. **Gaps de design documentados como limitação vs escondidos** — confirma
    que uma limitação conhecida (ex.: `cgroup` delegado, `macvlan` não
    realizado) está mesmo documentada no `CLAUDE.md`/help, não só na tua
    cabeça depois de leres o código.
-6. **Dívida entre crates** — dependências na direcção errada (`delonix-net`
+7. **Dívida entre crates** — dependências na direcção errada (`delonix-net`
    a saber de `delonix-runtime-bin`), lógica duplicada entre crates que devia
    ser partilhada, ou um crate de motor a arrastar uma dependência que só o
    `-bin` precisa (ver a regra dep-limpa no `CLAUDE.md`).

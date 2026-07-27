@@ -1885,6 +1885,38 @@ sem noção de tenant) — não o "Proxmox Driver" com inventário/scheduler do 
 - Event bus: só decidir o transporte (in-process callback vs. daemon) depois da Fase 3 acima, não
   antes — evita desenhar para um daemon que pode nunca ser aprovado.
 
+## Estado para a próxima sessão (2026-07-27, antes do lançamento público de sexta-feira)
+
+Release actual: **v0.34.1** (ver `docs/RELEASES.md`). Motor testado sistematicamente por todos os
+grupos de comandos, i18n corrigido (380+ strings), docs (`README.rst`, site, `docs/comparacao.html`)
+sincronizadas com o binário publicado, ficheiros de saúde da comunidade (`CONTRIBUTING.md`/
+`SECURITY.md`/`CODE_OF_CONDUCT.md`/templates de issue/PR) no lugar, roteiro de vídeos em
+`docs/ROTEIRO-VIDEOS.md`. **Pendente, por ordem de valor**:
+
+1. **Volumes anónimos do `compose`** (`ports:`/`working_dir:`/porta aleatória já fechados em
+   v0.34.0) — precisa de decisão de DESENHO antes de código: um `down` simples remove um volume
+   anónimo, ou só `down -v`? Nomeação determinística por posição na lista (risco de colisão se a
+   ordem mudar) vs. um registo próprio (mais peso). Não avances sem responder a isto primeiro.
+2. **6 itens de namespace/privilégio/protocolo**, cada um candidato a sessão própria — nenhum é
+   "dívida rápida", todos tocam fronteiras que este projecto trata com auditoria dedicada (ver
+   skill `delonix-runtime-sec`): `macvlan`/`ipvlan` realizados fisicamente (mesmo em root, o
+   código nunca foi escrito — distinto do caso rootless, que é limite de CAP_NET_ADMIN, não de
+   código em falta); partilha de PID em pods (`shareProcessNamespace`, toca `spawn()`, já
+   sinalizada como função de risco de ~405 linhas); isolamento de namespace sobreviver a um
+   respawn do holder; pods (CRI) e VMs cobertos pelo isolamento de namespace (hoje só containers
+   simples); WebSocket/upgrade tunelado no proxy L7 (`httproute`); `exec`/attach interactivo +
+   `--restart` na API `serve docker-api` (a primeira precisa de HTTP hijacking real, a segunda de
+   repensar o modelo de supervisor `fork()` para um servidor multi-thread).
+3. **Gravar os vídeos** — o guião (`docs/ROTEIRO-VIDEOS.md`, 6 episódios, comandos já testados) está
+   pronto; falta só a gravação, que é trabalho do utilizador, não de agente.
+
+**Lição concreta desta sessão, vale repetir**: dívida documentada como "só falta ligar" (`runtime::
+update_limits`, `JsonStore::update`) tinha um bug latente à espera do primeiro chamador real —
+mesmo padrão já visto com `mount_live`/`set_net_rate` numa sessão anterior. Antes de assumir que
+"só falta wiring", grepa por `container.cgroup()` vs `live_cgroup()` (e padrões análogos de caminho
+estático-vs-dinâmico) no código que vais ligar — ver a secção "Falhas silenciosas corrigidas" acima
+para o histórico completo. O agente `revisor` já tem este padrão explícito no seu checklist.
+
 ## Próximas fases (pedidas, não implementadas — cada uma precisa da sua própria sessão de planeamento)
 
 - **`delonix cluster --name <n> --control-plane <n> --workers <n>`** (sem `kubeadm`) — cluster k8s

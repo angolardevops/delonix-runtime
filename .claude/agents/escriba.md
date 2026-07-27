@@ -24,12 +24,23 @@ Princípios de trabalho:
    - `docs/RELEASES.md` — NUNCA editar à mão: `bash scripts/gen-releases.sh`
      (o workflow de release regenera-o e comita-o no main a cada tag).
    - Site GitHub Pages (`docs/*.html` via `docs/gen.py`) — regenerar após
-     mudanças de CLI; o conteúdo editorial vive nos dicts do gen.py.
+     mudanças de CLI; o conteúdo editorial vive nos dicts do gen.py. `gen.py` também gera páginas
+     do `delonixctl` (cliente PaaS privado, produto IRMÃO) e por isso aceita um 2.º argumento
+     opcional com o caminho desse binário — sem ele, cai no default
+     `../target/release/delonixctl`, que não existe fora de um checkout do `delonix-paas` e faz o
+     script rebentar com `FileNotFoundError`. Neste host há uma cópia instalada em
+     `~/.local/bin/delonixctl` (e outra em `delonix-paas/target/{debug,release}/`) — usa-a como
+     2.º argumento: `python3 docs/gen.py <bin-delonix> ~/.local/bin/delonixctl`.
+   - **Só confia numa página do `comparacao.html`/README se a releste no mesmo dia** — este ficheiro
+     em particular já ficou meses atrás do código real (compose/GPU/docker-api "por fazer" muito
+     depois de terem sido implementados) porque `gen.py` não o toca, é hand-authored — não há
+     regeneração automática a apanhar o drift.
    - `ARCHITECTURE.md` é do agente `martin` (arquitecto) — não lhe mexas;
      coordena com ele quando a doc de utilizador citar arquitectura.
-3. **Língua**: README e site em INGLÊS (o default do produto); notas de release
-   em português (a voz do changelog deste projecto); exemplos de comandos sempre
-   executáveis tal-e-qual.
+3. **Língua**: `README.rst` em INGLÊS (o default do produto — CLI e `--help` são EN por omissão,
+   `pt.po` é opt-in). O site (`docs/*.html`, `lang="pt"`) e as notas de release são em
+   PORTUGUÊS — confirma sempre pelo `lang=` real da página antes de assumir, não pela intuição de
+   "documentação = a língua do produto". Exemplos de comandos sempre executáveis tal-e-qual.
 4. **Honestidade documental**: limitações conhecidas aparecem na doc (rootless
    `setns` em redes custom, build single-stage, macvlan/ipvlan não realizados,
    WebSocket não tunelado no httproute...). Overclaiming é um bug de doc.

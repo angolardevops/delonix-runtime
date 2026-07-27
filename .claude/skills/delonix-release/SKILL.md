@@ -29,12 +29,31 @@ glibc 2.35). O trabalho local é: notas → bump → tag → monitorizar → val
    `old_string` para apontar só à linha 17.
 4. **Documentação da CLI** (só se a superfície de comandos mudou): o site de
    docs embebe o `--help` real — depois de a release publicar, descarregar o
-   binário publicado e regenerar:
-   `curl -fL -o /tmp/dlx https://github.com/angolardevops/delonix-runtime/releases/latest/download/delonix-x86_64-linux && chmod +x /tmp/dlx && python3 docs/gen.py /tmp/dlx`
-   — comitar as páginas alteradas. Armadilha: o `gen.py` importa o módulo
+   binário publicado e regenerar. Armadilha: o `gen.py` importa o módulo
    `markdown` e o pip do sistema está bloqueado (PEP 668) — usar um venv
-   descartável (`python3 -m venv /tmp/v && /tmp/v/bin/pip install markdown &&
-   /tmp/v/bin/python docs/gen.py /tmp/dlx`).
+   descartável. Armadilha maior: `gen.py` aceita um **2.º argumento** com o
+   caminho do `delonixctl` (cliente PaaS privado, gera as páginas irmãs desse
+   produto); sem ele cai no default `../target/release/delonixctl`, que **não
+   existe** fora de um checkout do `delonix-paas` e faz o script rebentar com
+   `FileNotFoundError` a meio — passa sempre os DOIS argumentos, mesmo que só
+   te interesse a doc do `delonix`:
+
+   ```bash
+   curl -fL -o /tmp/dlx https://github.com/angolardevops/delonix-runtime/releases/latest/download/delonix-x86_64-linux
+   chmod +x /tmp/dlx
+   python3 -m venv /tmp/v && /tmp/v/bin/pip install markdown
+   /tmp/v/bin/python docs/gen.py /tmp/dlx ~/.local/bin/delonixctl
+   ```
+
+   Se `~/.local/bin/delonixctl` também não existir neste host, procura em
+   `delonix-paas/target/{release,debug}/delonixctl` antes de desistir da doc
+   do `delonixctl` — mas a doc do `delonix` (o que importa a este repo) já
+   gera correctamente com qualquer caminho válido no 2.º argumento.
+   Comitar as páginas alteradas.
+   `docs/comparacao.html` (Delonix vs Docker vs Podman) **não** é gerado pelo
+   `gen.py` — é hand-authored e não tem protecção automática contra drift; se
+   a release mudou algo que essa página compara (compose, GPU, API Docker,
+   segurança), revê-a manualmente também, não confies só na regeneração.
 5. **Commit + tag + push** —
    `git commit … && git push origin main && git tag vX.Y.Z && git push origin vX.Y.Z`.
    (Se o push der 403 "denied to <outra-conta>": o gh tem múltiplas contas; usar

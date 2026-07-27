@@ -64,6 +64,23 @@ de `clap` (o `--help`) traduzem-se sozinhos via `translate_help` — não
 precisam de `po::t`, mas idealmente também ganham entrada no `pt.po` (senão
 degradam para EN em `--l18n=pt`, que é aceitável mas não ideal).
 
+**Armadilha real (encontrada 2026-07-27, 380 strings numa só sessão):**
+`po::t`/`po::tf` fazem lookup EXACTO pela string EN — reutilizar uma palavra
+solta como `"created"` como `msgid` em dois sítios diferentes é uma
+colisão à espera de acontecer se a tradução portuguesa depender do género do
+SUJEITO: `"created"` → *criada* quando o sujeito é "a rede", mas *criado*
+quando é "o volume" — partilhar a chave produz um dos dois errado, em
+silêncio (só se nota lendo o `pt.po`, nunca no `cargo test`). Duas defesas: (1)
+antes de adicionares uma entrada nova ao `pt.po`, `grep -n '^msgid "<texto>"'
+crates/delonix-runtime-bin/data/pt.po` — se já existir, confirma que o
+`msgstr` serve TAMBÉM ao teu contexto, não assumas; (2) quando o género
+importa, usa uma frase/template inteiro como `msgid` (via `po::tf`) em vez de
+uma palavra solta — `"created:     unix={ts}"` em vez de só `"created"` — cada
+contexto ganha a sua própria chave, sem partilha nenhuma. O mesmo cuidado
+aplica-se ao MOTOR: uma função só é "trabalho de wiring" se já tiver pelo
+menos um chamador testado — código morto (zero chamadores) ganha o mesmo
+escrutínio de código novo antes de o ligares (ver o agente `revisor`).
+
 ## 6. Antes de terminar
 
 - `docs/releases/vX.Y.Z.md` + `CLAUDE.md` (secção relevante do grupo de
