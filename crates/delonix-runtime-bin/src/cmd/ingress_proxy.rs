@@ -189,7 +189,7 @@ fn text_response(code: StatusCode, msg: &str) -> Response<RespBody> {
     Response::builder()
         .status(code)
         .body(body)
-        .expect("resposta estática válida")
+        .expect("static response is valid")
 }
 
 /// Handles a request: matches the route and forwards (streaming) to the backend, or
@@ -209,7 +209,7 @@ async fn handle(
     let Some(route) = pick_route(&snapshot, &host, &path) else {
         return Ok(text_response(
             StatusCode::NOT_FOUND,
-            "delonix: sem rota para este host/path\n",
+            &format!("{}\n", super::po::t("delonix: no route for this host/path")),
         ));
     };
     let backend = route.backend.clone();
@@ -239,7 +239,7 @@ async fn handle(
         Err(_) => {
             return Ok(text_response(
                 StatusCode::BAD_GATEWAY,
-                "delonix: pedido inválido\n",
+                &format!("{}\n", super::po::t("delonix: invalid request")),
             ))
         }
     };
@@ -258,13 +258,25 @@ async fn handle(
         }
         Ok(Err(e)) => Ok(text_response(
             StatusCode::BAD_GATEWAY,
-            &format!("delonix: backend {backend} inacessível: {e}\n"),
+            &format!(
+                "{}\n",
+                super::po::tf(
+                    "delonix: backend {backend} unreachable: {err}",
+                    &[("backend", &backend.to_string()), ("err", &e.to_string())],
+                )
+            ),
         )),
         Err(_elapsed) => Ok(text_response(
             StatusCode::GATEWAY_TIMEOUT,
             &format!(
-                "delonix: backend {backend} não respondeu em {}s\n",
-                BACKEND_TIMEOUT.as_secs()
+                "{}\n",
+                super::po::tf(
+                    "delonix: backend {backend} did not respond in {secs}s",
+                    &[
+                        ("backend", &backend.to_string()),
+                        ("secs", &BACKEND_TIMEOUT.as_secs().to_string()),
+                    ],
+                )
             ),
         )),
     }
@@ -326,7 +338,13 @@ async fn accept_loop(
                         Ok(Ok(tls_stream)) => {
                             serve_io(TokioIo::new(tls_stream), routes, client).await
                         }
-                        Ok(Err(e)) => eprintln!("ingress-proxy: handshake TLS falhou: {e}"),
+                        Ok(Err(e)) => eprintln!(
+                            "{}",
+                            super::po::tf(
+                                "ingress-proxy: TLS handshake failed: {e}",
+                                &[("e", &e.to_string())]
+                            )
+                        ),
                         Err(_) => { /* handshake did not complete in time — discard */ }
                     }
                 }
@@ -347,15 +365,17 @@ fn build_server_config(tls: &TlsMaterial) -> Result<Arc<tokio_rustls::rustls::Se
     use tokio_rustls::rustls::ServerConfig;
     let certs: Vec<_> = rustls_pemfile::certs(&mut tls.cert_pem.as_bytes())
         .collect::<std::result::Result<_, _>>()
-        .map_err(|e| Error::Invalid(format!("cert TLS inválido (PEM): {e}")))?;
+        .map_err(|e| Error::Invalid(format!("{}: {e}", super::po::t("invalid TLS cert (PEM)"))))?;
     if certs.is_empty() {
         return Err(Error::Invalid(
-            "cert TLS vazio (nenhum CERTIFICATE no PEM)".into(),
+            super::po::t("empty TLS cert (no CERTIFICATE in the PEM)").into(),
         ));
     }
     let key = rustls_pemfile::private_key(&mut tls.key_pem.as_bytes())
-        .map_err(|e| Error::Invalid(format!("chave TLS inválida (PEM): {e}")))?
-        .ok_or_else(|| Error::Invalid("chave TLS ausente (nenhuma PRIVATE KEY no PEM)".into()))?;
+        .map_err(|e| Error::Invalid(format!("{}: {e}", super::po::t("invalid TLS key (PEM)"))))?
+        .ok_or_else(|| {
+            Error::Invalid(super::po::t("missing TLS key (no PRIVATE KEY in the PEM)").into())
+        })?;
     let cfg = ServerConfig::builder()
         .with_no_client_auth()
         .with_single_cert(certs, key)
@@ -404,12 +424,21 @@ async fn serve(cfg: ProxyConfig, config_path: std::path::PathBuf) -> Result<()> 
                             Ok(mut g) => *g = Arc::new(newcfg.routes),
                             Err(_) => {
                                 eprintln!(
-                                    "ingress-proxy: lock de rotas envenenado — reload ignorado"
+                                    "{}",
+                                    super::po::t(
+                                        "ingress-proxy: poisoned routes lock — reload ignored"
+                                    )
                                 );
                                 continue;
                             }
                         }
-                        eprintln!("ingress-proxy: rotas recarregadas ({n} rota(s))");
+                        eprintln!(
+                            "{}",
+                            super::po::tf(
+                                "ingress-proxy: routes reloaded ({n} route(s))",
+                                &[("n", &n.to_string())],
+                            )
+                        );
                     }
                     None => {
                         eprintln!(
@@ -428,9 +457,9 @@ async fn serve(cfg: ProxyConfig, config_path: std::path::PathBuf) -> Result<()> 
             match &tls_acceptor {
                 Some(a) => Some(a.clone()),
                 None => {
-                    return Err(Error::Invalid(format!(
-                        "listener :{} pede TLS mas a config não tem material TLS (cert/chave)",
-                        l.port
+                    return Err(Error::Invalid(super::po::tf(
+                        "listener :{port} requests TLS but the config has no TLS material (cert/key)",
+                        &[("port", &l.port.to_string())],
                     )));
                 }
             }
@@ -443,9 +472,15 @@ async fn serve(cfg: ProxyConfig, config_path: std::path::PathBuf) -> Result<()> 
             message: format!("{addr}: {e}"),
         })?;
         eprintln!(
-            "ingress-proxy: a escutar em {addr} ({}, {} rota(s))",
-            if l.tls { "https" } else { "http" },
-            cfg.routes.len()
+            "{}",
+            super::po::tf(
+                "ingress-proxy: listening on {addr} ({scheme}, {n} route(s))",
+                &[
+                    ("addr", &addr.to_string()),
+                    ("scheme", if l.tls { "https" } else { "http" }),
+                    ("n", &cfg.routes.len().to_string()),
+                ],
+            )
         );
         handles.push(tokio::spawn(accept_loop(
             listener,
@@ -456,7 +491,7 @@ async fn serve(cfg: ProxyConfig, config_path: std::path::PathBuf) -> Result<()> 
     }
     if handles.is_empty() {
         return Err(Error::Invalid(
-            "ingress-proxy: nenhum listener HTTP para servir".into(),
+            super::po::t("ingress-proxy: no HTTP listener to serve").into(),
         ));
     }
     for h in handles {
@@ -470,12 +505,19 @@ async fn serve(cfg: ProxyConfig, config_path: std::path::PathBuf) -> Result<()> 
 pub fn run(config_path: &Path) -> Result<()> {
     let bytes = std::fs::read(config_path).map_err(|e| {
         Error::Invalid(format!(
-            "ingress-proxy: não li a config {}: {e}",
-            config_path.display()
+            "{}: {e}",
+            super::po::tf(
+                "ingress-proxy: could not read the config {path}",
+                &[("path", &config_path.display().to_string())],
+            )
         ))
     })?;
-    let cfg: ProxyConfig = serde_json::from_slice(&bytes)
-        .map_err(|e| Error::Invalid(format!("ingress-proxy: config inválida: {e}")))?;
+    let cfg: ProxyConfig = serde_json::from_slice(&bytes).map_err(|e| {
+        Error::Invalid(format!(
+            "{}: {e}",
+            super::po::t("ingress-proxy: invalid config")
+        ))
+    })?;
     // Installs rustls's cryptographic provider (ring) — the `ServerConfig::builder`
     // uses the process default; without this, it panics. Idempotent (ignores if
     // already installed by another part of the process).
@@ -589,7 +631,7 @@ fn with_auto_locked(f: impl FnOnce(&mut Vec<AutoRoute>)) -> Result<bool> {
     if unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX) } != 0 {
         return Err(Error::Runtime {
             context: "flock auto",
-            message: "não obtive o lock".into(),
+            message: super::po::t("could not acquire the lock").into(),
         });
     }
     let mut auto = read_auto();
@@ -603,7 +645,7 @@ fn with_auto_locked(f: impl FnOnce(&mut Vec<AutoRoute>)) -> Result<bool> {
         serde_json::to_vec_pretty(&auto).unwrap_or_default(),
     )
     .map_err(|e| Error::Runtime {
-        context: "escrever auto",
+        context: "write auto",
         message: e.to_string(),
     })?;
     // Still holding `lock` here — the recompose+publish happens before it's
@@ -669,7 +711,7 @@ pub fn set_manual(cfg: &ProxyConfig) -> Result<()> {
         serde_json::to_vec_pretty(cfg).unwrap_or_default(),
     )
     .map_err(|e| Error::Runtime {
-        context: "escrever manual",
+        context: "write manual",
         message: e.to_string(),
     })?;
     rebuild()
@@ -747,7 +789,7 @@ pub fn ensure_running(cfg: &ProxyConfig) -> Result<()> {
         message: e.to_string(),
     })?;
     std::fs::write(config_path(), &json).map_err(|e| Error::Runtime {
-        context: "escrever config",
+        context: "write config",
         message: e.to_string(),
     })?;
 
@@ -775,14 +817,23 @@ pub fn ensure_running(cfg: &ProxyConfig) -> Result<()> {
                 cfg.listeners.iter().map(|l| l.port).collect();
             if prev != now {
                 eprintln!(
-                    "httproute: AVISO — mudança de listeners ({prev:?} → {now:?}) NÃO tem efeito a quente; \
-                     o SIGHUP só recarrega rotas. Faz `httproute rm` + apply para religar as portas."
+                    "{}",
+                    super::po::tf(
+                        "httproute: WARNING — listener change ({prev} → {now}) has NO hot effect; SIGHUP only reloads routes. Run `httproute rm` + apply to rebind the ports.",
+                        &[("prev", &format!("{prev:?}")), ("now", &format!("{now:?}"))],
+                    )
                 );
             }
         }
         // SAFETY: SIGHUP to a pid we confirmed alive AND ours (cmdline guard).
         unsafe { libc::kill(pid, libc::SIGHUP) };
-        eprintln!("httproute: proxy #{pid} recarregado (SIGHUP)");
+        eprintln!(
+            "{}",
+            super::po::tf(
+                "httproute: proxy #{pid} reloaded (SIGHUP)",
+                &[("pid", &pid.to_string())],
+            )
+        );
         return Ok(());
     }
     spawn_proxy()?;
@@ -836,7 +887,7 @@ fn spawn_proxy() -> Result<()> {
     delonix_net::infra::ensure_up()?;
     let join = delonix_net::infra::infra_join_argv().ok_or_else(|| Error::Runtime {
         context: "holder",
-        message: "ingress holder em baixo".into(),
+        message: super::po::t("ingress holder is down").into(),
     })?;
     let self_exe = std::env::current_exe().map_err(|e| Error::Runtime {
         context: "current_exe",
@@ -856,7 +907,7 @@ fn spawn_proxy() -> Result<()> {
         .append(true)
         .open(log_path())
         .map_err(|e| Error::Runtime {
-            context: "abrir log do proxy",
+            context: "open proxy log",
             message: e.to_string(),
         })?;
     let log2 = log.try_clone().map_err(|e| Error::Runtime {
@@ -883,7 +934,7 @@ fn spawn_proxy() -> Result<()> {
         message: format!("{}: {e}", argv.join(" ")),
     })?;
     std::fs::write(pid_path(), child.id().to_string()).map_err(|e| Error::Runtime {
-        context: "escrever pidfile",
+        context: "write pidfile",
         message: e.to_string(),
     })?;
     // Confirm it really started (did not die right at bind): give it a moment and
@@ -892,15 +943,18 @@ fn spawn_proxy() -> Result<()> {
     if !std::path::Path::new(&format!("/proc/{}", child.id())).exists() {
         return Err(Error::Runtime {
             context: "ingress-proxy",
-            message: format!(
-                "o proxy caiu logo ao arrancar (porta ocupada?) — ver {}",
-                log_path().display()
+            message: super::po::tf(
+                "the proxy crashed right at startup (port taken?) — see {log}",
+                &[("log", &log_path().display().to_string())],
             ),
         });
     }
     eprintln!(
-        "httproute: proxy arrancado (#{}) no netns do holder",
-        child.id()
+        "{}",
+        super::po::tf(
+            "httproute: proxy started (#{pid}) in the holder's netns",
+            &[("pid", &child.id().to_string())],
+        )
     );
     Ok(())
 }

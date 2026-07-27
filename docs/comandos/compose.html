@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>delonix compose · Delonix Engine</title>
+<style>
+:root{--accent:#e8590c;--accent-soft:#fff0e6;--ink:#1a1a2e;--muted:#5a6472;--line:#e6e8ec;
+--bg:#ffffff;--side:#f7f8fa;--code-bg:#0f172a;--code-ink:#e2e8f0;--radius:10px}
+@media (prefers-color-scheme: dark){:root{--ink:#e6e8ee;--muted:#9aa4b2;--line:#252a33;
+--bg:#0d1117;--side:#10151c;--accent-soft:#2a1810;--code-bg:#161b22;--code-ink:#dbe2ea}}
+*{box-sizing:border-box}body{margin:0;font:16px/1.65 -apple-system,'Segoe UI',Roboto,Ubuntu,
+sans-serif;color:var(--ink);background:var(--bg)}
+a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
+.layout{display:flex;min-height:100vh}
+nav.side{width:270px;flex-shrink:0;background:var(--side);border-right:1px solid var(--line);
+padding:1.2rem 1rem 3rem;position:sticky;top:0;height:100vh;overflow-y:auto}
+nav.side .brand{display:flex;align-items:center;gap:.55rem;font-weight:700;font-size:1.12rem;
+margin-bottom:1.1rem;color:var(--ink)}
+nav.side .brand .dot{width:26px;height:26px;border-radius:7px;background:var(--accent);
+display:inline-flex;align-items:center;justify-content:center;color:#fff;font-size:.85rem}
+nav.side h5{margin:1.3rem 0 .3rem;font-size:.72rem;letter-spacing:.09em;text-transform:uppercase;
+color:var(--muted)}
+nav.side a{display:block;padding:.28rem .55rem;border-radius:6px;color:var(--ink);font-size:.93rem}
+nav.side a:hover{background:var(--accent-soft);text-decoration:none}
+nav.side a.on{background:var(--accent-soft);color:var(--accent);font-weight:600}
+main{flex:1;min-width:0;padding:2.2rem 3rem 5rem;max-width:940px}
+main h1{font-size:1.9rem;margin:.2rem 0 .4rem}
+main h2{font-size:1.35rem;margin-top:2.4rem;padding-bottom:.35rem;border-bottom:1px solid var(--line)}
+main h3{font-size:1.05rem;margin-top:1.6rem}
+.tagline{color:var(--muted);font-size:1.05rem;margin-top:0}
+code{background:var(--accent-soft);padding:.1em .35em;border-radius:5px;font-size:.9em}
+pre{background:var(--code-bg);color:var(--code-ink);padding:1rem 1.2rem;border-radius:var(--radius);
+overflow-x:auto;font-size:.86rem;line-height:1.55}
+pre code{background:none;padding:0;color:inherit;font-size:inherit}
+.help pre{border-left:4px solid var(--accent)}
+.ex{margin:.9rem 0}.ex .cap{font-size:.88rem;color:var(--muted);margin-bottom:.25rem}
+.ex .out,div.out{margin-top:.4rem}
+.ex .out pre,div.out pre{background:transparent;border:1px dashed var(--line);color:var(--muted);
+padding:.7rem 1rem;font-size:.82rem}
+.ex .out::before,div.out::before{content:"→ resultado";display:block;font-size:.75rem;color:var(--muted);
+margin-bottom:.15rem;letter-spacing:.03em;text-transform:uppercase}
+table{border-collapse:collapse;width:100%;font-size:.92rem}
+td,th{border:1px solid var(--line);padding:.5rem .7rem;text-align:left;vertical-align:top}
+th{background:var(--side)}
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:1rem;margin:1.4rem 0}
+.card{border:1px solid var(--line);border-radius:var(--radius);padding:1rem 1.1rem}
+.card b{display:block;margin-bottom:.25rem}.card a{font-weight:600}
+.card p{margin:.2rem 0 0;font-size:.88rem;color:var(--muted)}
+.arch{display:flex;flex-direction:column;gap:.6rem;margin:1.4rem 0}
+.arch .row{display:flex;gap:.6rem;flex-wrap:wrap}
+.arch .box{flex:1;min-width:150px;border:1.5px solid var(--accent);border-radius:8px;
+padding:.55rem .8rem;font-size:.85rem;background:var(--accent-soft)}
+.arch .box.mut{border-color:var(--line);background:var(--side)}
+.arch .box b{display:block;font-size:.9rem}
+.pill{display:inline-block;background:var(--accent);color:#fff;border-radius:99px;
+padding:.05rem .6rem;font-size:.75rem;font-weight:600;vertical-align:middle}
+.tag{display:inline-block;border-radius:6px;padding:.1rem .5rem;font-size:.82rem;font-weight:600}
+.tag.ok{background:#d8f3dc;color:#1b4332}.tag.mid{background:#fff3bf;color:#5c4a00}
+.tag.no{background:#ffe3e3;color:#7a1420}
+@media (prefers-color-scheme: dark){.tag.ok{background:#0f3d24;color:#8fe3ac}
+.tag.mid{background:#453800;color:#ffe066}.tag.no{background:#4a1015;color:#ffa8a8}}
+.callout{border:1.5px solid var(--accent);border-radius:var(--radius);padding:1rem 1.2rem;margin:1.4rem 0;
+background:var(--accent-soft)}
+.callout.warn{border-color:#e03131;background:#fff0f0}
+.callout.warn b{color:#c92a2a}
+@media (prefers-color-scheme: dark){.callout.warn{background:#3a1414}.callout.warn b{color:#ff8787}}
+.callout p:first-child{margin-top:0}.callout p:last-child{margin-bottom:0}
+footer{margin-top:4rem;color:var(--muted);font-size:.85rem;border-top:1px solid var(--line);padding-top:1rem}
+@media (max-width:840px){.layout{flex-direction:column}nav.side{width:100%;height:auto;position:static}
+main{padding:1.4rem 1.2rem 4rem}}
+</style>
+</head>
+<body>
+<div class="layout">
+<nav class="side">
+<div class="brand"><span class="dot">▲</span> Delonix Engine</div>
+<h5>Documentação</h5>
+<a href="../index.html">Início</a><a href="../cheatsheet.html">Cheatsheet</a><a href="../kinds.html">Kinds e templates</a><a href="../arquitectura.html">Arquitectura</a><a href="../c4.html">Modelo C4 e system design</a><a href="../cri.html">CRI — kubelet sem containerd</a><a href="../comparacao.html">Delonix vs Docker vs Podman</a><a href="../tutorial-delonix-temp.html">Projecto completo: Delonix Temp</a><a href="../delonixctl.html">delonixctl — cliente PaaS</a>
+<h5>Referência CLI</h5>
+<a href="../comandos/container.html">delonix container</a><a href="../comandos/pod.html">delonix pod</a><a href="../comandos/image.html">delonix image</a><a href="../comandos/build.html">delonix build</a><a href="../comandos/vm.html">delonix vm</a><a href="../comandos/volumes.html">delonix volumes</a><a href="../comandos/network.html">delonix network</a><a href="../comandos/stack.html">delonix stack</a><a href="../comandos/compose.html" class="on">delonix compose</a><a href="../comandos/cluster.html">delonix cluster</a><a href="../comandos/secret.html">delonix secret</a><a href="../comandos/storage.html">delonix storage</a><a href="../comandos/sharevolume.html">delonix sharevolume</a><a href="../comandos/ingress.html">delonix net ingress</a><a href="../comandos/egress.html">delonix net egress</a><a href="../comandos/httproute.html">delonix net httproute</a><a href="../comandos/tunnel.html">delonix net tunnel</a><a href="../comandos/flow.html">delonix net flow</a><a href="../comandos/boot.html">delonix net boot</a><a href="../comandos/system.html">delonix system</a><a href="../comandos/dash.html">delonix dash</a><a href="../comandos/docker-api.html">delonix serve docker-api</a><a href="../comandos/kube.html">delonix cluster kube</a><a href="../comandos/netns.html">delonix net netns</a><a href="../comandos/completion.html">delonix completion</a>
+<h5>Projecto</h5>
+<a href="https://github.com/angolardevops/delonix-runtime">GitHub</a>
+<a href="https://github.com/angolardevops/delonix-runtime/releases">Releases</a>
+</nav>
+<main>
+<h1>delonix compose</h1><p class='tagline'>Suporte NATIVO a docker-compose.yml (Compose Spec v2.x) — sem Docker, sem shim, direto para o motor.</p>
+<p>Um tradutor de esquema estrangeiro, da mesma família do <code>kind: Pod</code> (k8s) e da
+API Docker: parser tipado à mão (sem dependência nova), traduzido directamente para o motor —
+containers reaproveitando o mesmo caminho do <code>container run</code>, redes/volumes reaproveitando
+<code>network</code>/<code>volume apply</code> verbatim (mesma idempotência, mesmo hardening de input).
+<code>depends_on</code> respeita as 3 condições reais do Compose Spec
+(<code>service_started</code>/<code>service_healthy</code>/<code>service_completed_successfully</code>)
+via ordenação topológica do grafo de serviços — um ciclo dá erro claro, nunca uma ordem arbitrária — e
+espera pelo healthcheck real (inline do serviço ou o da própria imagem). O projecto
+(<code>compose down/ps/logs</code>) é uma label nos containers; redes/volumes usam nomeação
+determinística (<code>&lt;projecto&gt;_&lt;nome&gt;</code>) — sem registo próprio, a mesma filosofia do
+<code>stack describe</code>.</p>
+<div class='help'><pre><code>Native `docker-compose.yml` support (up/down/ps/logs/config)
+
+Usage: dlx compose [OPTIONS] &lt;COMMAND&gt;
+
+Commands:
+  up      Creates/starts every service — build, then network, then volume, then containers in `depends_on` order (gated on the declared condition)
+  down    Removes every container this project&#x27;s `up` created (and, with `-v`, its named volumes). Networks/volumes marked `external: true` are NEVER removed
+  ps      Containers of this project (derived from labels)
+  logs    Logs of one service (default: every service, one after another)
+  config  Validates and prints the resolved project, without creating anything (`docker compose config` equivalent)
+  help    Print this message or the help of the given subcommand(s)
+
+Options:
+      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+  -h, --help          Print help</code></pre></div>
+<h3>Por fazer, documentado (nunca em silêncio)</h3>
+<p><code>profiles</code>/<code>extends</code>/<code>configs</code>/<code>secrets</code> top-level (usa
+<code>kind: Secret</code> em vez disso) / multi-ficheiro (<code>-f a -f b</code>/<code>include:</code>),
+<code>build.target</code> (selecção de estágio), <code>deploy.replicas != 1</code>,
+<code>networks.*.ipv4_address</code> fixo, volumes anónimos (sem <code>source</code> explícito), porta
+sem host explícito (atribuição aleatória). <code>working_dir:</code> é aceite mas AVISA e é ignorado —
+lacuna pré-existente do motor inteiro (nenhum <code>Container</code> tem override de workdir), não algo
+que este módulo introduz.</p>
+<h2 id='up'><code>compose up</code></h2>
+<div class='help'><pre><code>Creates/starts every service — build, then network, then volume, then containers in `depends_on` order (gated on the declared condition)
+
+Usage: dlx compose up [OPTIONS]
+
+Options:
+  -f, --file &lt;FILE&gt;             
+      --l18n &lt;en|pt&gt;            Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+  -p, --project-name &lt;PROJECT&gt;  
+      --dry-run                 Prints the resolved project (containers/networks/volumes) and exits without creating anything
+  -h, --help                    Print help</code></pre></div>
+<h3>Exemplos</h3><div class="ex"><div class="cap">Sobe tudo (build, rede, volumes, containers, por ordem de `depends_on`)</div><pre><code>delonix compose up</code></pre></div><div class="ex"><div class="cap">Ficheiro/projecto explícitos</div><pre><code>delonix compose up -f infra/docker-compose.yml -p minhaapp</code></pre></div><div class="ex"><div class="cap">Só valida e mostra o plano, sem criar nada</div><pre><code>delonix compose up --dry-run</code></pre></div>
+<h2 id='ps'><code>compose ps</code></h2>
+<div class='help'><pre><code>Containers of this project (derived from labels)
+
+Usage: dlx compose ps [OPTIONS]
+
+Options:
+  -f, --file &lt;FILE&gt;             
+      --l18n &lt;en|pt&gt;            Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+  -p, --project-name &lt;PROJECT&gt;  
+  -h, --help                    Print help</code></pre></div>
+<h3>Exemplos</h3><div class="ex"><div class="cap">Containers deste projecto</div><pre><code>delonix compose ps</code></pre></div>
+<h2 id='logs'><code>compose logs</code></h2>
+<div class='help'><pre><code>Logs of one service (default: every service, one after another)
+
+Usage: dlx compose logs [OPTIONS] [SERVICE]
+
+Arguments:
+  [SERVICE]  
+
+Options:
+  -f, --file &lt;FILE&gt;             
+      --l18n &lt;en|pt&gt;            Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+  -p, --project-name &lt;PROJECT&gt;  
+      --follow                  No short flag (unlike real `docker compose logs -f`) — `-f` is already `--file` on every subcommand of this group, for consistency across `up`/`down`/`ps`/`config`
+  -h, --help                    Print help</code></pre></div>
+<h3>Exemplos</h3><div class="ex"><div class="cap">Logs de um serviço</div><pre><code>delonix compose logs db</code></pre></div><div class="ex"><div class="cap">Todos os serviços, um a seguir ao outro</div><pre><code>delonix compose logs</code></pre></div>
+<h2 id='config'><code>compose config</code></h2>
+<div class='help'><pre><code>Validates and prints the resolved project, without creating anything (`docker compose config` equivalent)
+
+Usage: dlx compose config [OPTIONS]
+
+Options:
+  -f, --file &lt;FILE&gt;             
+      --l18n &lt;en|pt&gt;            Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+  -p, --project-name &lt;PROJECT&gt;  
+  -h, --help                    Print help</code></pre></div>
+<h3>Exemplos</h3><div class="ex"><div class="cap">Valida e imprime o projecto resolvido (equivalente a `docker compose config`)</div><pre><code>delonix compose config</code></pre></div>
+<h2 id='down'><code>compose down</code></h2>
+<div class='help'><pre><code>Removes every container this project&#x27;s `up` created (and, with `-v`, its named volumes). Networks/volumes marked `external: true` are NEVER removed
+
+Usage: dlx compose down [OPTIONS]
+
+Options:
+  -f, --file &lt;FILE&gt;             
+      --l18n &lt;en|pt&gt;            Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+  -p, --project-name &lt;PROJECT&gt;  
+  -v, --volumes                 
+  -h, --help                    Print help</code></pre></div>
+<h3>Exemplos</h3><div class="ex"><div class="cap">Remove os containers deste projecto</div><pre><code>delonix compose down</code></pre></div><div class="ex"><div class="cap">Remove também os volumes NOMEADOS (nunca os `external: true`)</div><pre><code>delonix compose down -v</code></pre></div>
+<footer>Delonix Engine · Apache-2.0 · <a href="https://github.com/angolardevops/delonix-runtime">angolardevops/delonix-runtime</a>
+· Referência gerada do <code>--help</code> real do binário por <code>docs/gen.py</code>.</footer>
+</main>
+</div>
+</body>
+</html>

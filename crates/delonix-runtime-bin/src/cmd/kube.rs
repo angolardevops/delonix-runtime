@@ -1,6 +1,6 @@
-//! `delonix kube generate` — gera um manifesto Kubernetes (`kind: Pod`) a partir
-//! de um container ou pod já existente no runtime. É o caminho "corri-o local,
-//! agora dá-me o YAML para o k8s" (equivalente ao `podman generate kube`).
+//! `delonix kube generate` — generates a Kubernetes manifest (`kind: Pod`) from
+//! a container or pod already running in the engine. It's the "ran it locally,
+//! now give me the YAML for k8s" path (equivalent to `podman generate kube`).
 
 use clap::Subcommand;
 use delonix_runtime_core::{Container, Error, Result, Store};
@@ -9,8 +9,8 @@ use super::util::open_stores;
 
 #[derive(Subcommand)]
 pub enum KubeCmd {
-    /// Gera um `kind: Pod` a partir de um container (ou de todos os membros de
-    /// um pod) e imprime-o em stdout.
+    /// Generates a `kind: Pod` from a container (or from every member of a
+    /// pod) and prints it to stdout.
     Generate {
         #[arg(add = clap_complete::engine::ArgValueCandidates::new(super::complete::containers))]
         name: String,
@@ -26,7 +26,7 @@ pub fn run(action: KubeCmd) -> Result<()> {
 
 fn cmd_generate(store: &Store, name: &str) -> Result<()> {
     let all = store.list()?;
-    // Aceita um nome de pod (gera todos os membros) ou um único container.
+    // Accepts a pod name (generates every member) or a single container.
     let members: Vec<Container> = if store.load(&format!("pod-{name}")).is_ok() {
         all.into_iter()
             .filter(|c| c.pod.as_deref() == Some(name) && !c.name.starts_with("pod-"))
@@ -35,13 +35,16 @@ fn cmd_generate(store: &Store, name: &str) -> Result<()> {
         vec![store.load(name)?]
     };
     if members.is_empty() {
-        return Err(Error::Invalid(format!("nada a gerar para '{name}'")));
+        return Err(Error::Invalid(super::po::tf(
+            "nothing to generate for '{name}'",
+            &[("name", name)],
+        )));
     }
     print!("{}", pod_manifest(name, &members));
     Ok(())
 }
 
-/// Função pura: constrói o YAML do `kind: Pod` (testável sem Store).
+/// Pure function: builds the `kind: Pod` YAML (testable without a Store).
 fn pod_manifest(name: &str, members: &[Container]) -> String {
     let mut y = String::new();
     y.push_str("apiVersion: v1\n");

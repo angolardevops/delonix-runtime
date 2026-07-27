@@ -402,7 +402,7 @@ fn cmd_virt(tune: bool) -> Result<()> {
         return Ok(());
     }
     let kvm = if v.is_kvm {
-        "   ← KVM nativo: caminho de máximo desempenho disponível"
+        super::po::t("   ← native KVM: maximum-performance path available")
     } else {
         ""
     };

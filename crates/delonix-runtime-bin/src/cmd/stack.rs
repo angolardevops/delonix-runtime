@@ -104,7 +104,7 @@ pub fn run(action: StackCmd) -> Result<()> {
     }
     match action {
         // Handled at the top of `run` (it does a `return`).
-        StackCmd::Init { .. } => unreachable!("tratado acima"),
+        StackCmd::Init { .. } => unreachable!("handled above"),
         StackCmd::Apply { file, dry_run } => {
             if dry_run {
                 let path = manifest::resolve_path(file)?;
@@ -180,8 +180,11 @@ fn describe(file: Option<PathBuf>) -> Result<()> {
     if !desconhecidos.is_empty() {
         println!();
         println!(
-            "AVISO: kinds não suportados pelo stack (ignorados pelo `apply`): {}",
-            desconhecidos.join(", ")
+            "{}",
+            super::po::tf(
+                "WARNING: kinds not supported by the stack (ignored by `apply`): {kinds}",
+                &[("kinds", &desconhecidos.join(", "))],
+            )
         );
     }
 
@@ -328,7 +331,7 @@ fn presence(
         "Ingress" | "Egress" | "FirewallPolicy" => ("-".into(), "declarative".into()),
         "HTTPRoute" => ("-".into(), "declarative".into()),
         "Dependency" => ("-".into(), "declarative".into()),
-        _ => ("?".into(), "kind não suportado".into()),
+        _ => ("?".into(), super::po::t("unsupported kind").into()),
     }
 }
 
@@ -352,9 +355,9 @@ fn apply(file: Option<PathBuf>) -> Result<()> {
         for i in &issues {
             eprintln!("  ✗ {i}");
         }
-        return Err(delonix_runtime_core::Error::Invalid(format!(
-            "stack apply abortado: {} referência(s) por resolver (corrige o manifesto ou usa `stack validate`)",
-            issues.len()
+        return Err(delonix_runtime_core::Error::Invalid(super::po::tf(
+            "stack apply aborted: {n} unresolved reference(s) (fix the manifest or use `stack validate`)",
+            &[("n", &issues.len().to_string())],
         )));
     }
     // Secrets first: `Storage.passwordSecret` and `Container.secret` reference them.
@@ -395,17 +398,20 @@ fn validate(file: Option<PathBuf>) -> Result<()> {
     let issues = validate_graph(&docs);
     if issues.is_empty() {
         println!(
-            "stack validate: OK — {} documento(s), todas as referências resolvidas",
-            docs.len()
+            "{}",
+            super::po::tf(
+                "stack validate: OK — {n} document(s), all references resolved",
+                &[("n", &docs.len().to_string())],
+            )
         );
         Ok(())
     } else {
         for i in &issues {
             println!("  ✗ {i}");
         }
-        Err(delonix_runtime_core::Error::Invalid(format!(
-            "{} referência(s) por resolver",
-            issues.len()
+        Err(delonix_runtime_core::Error::Invalid(super::po::tf(
+            "{n} unresolved reference(s)",
+            &[("n", &issues.len().to_string())],
         )))
     }
 }
@@ -530,9 +536,9 @@ fn validate_graph_with(
     for doc in docs {
         let key = (doc.kind.clone(), doc.metadata.name.clone());
         if !seen.insert(key) {
-            issues.push(format!(
-                "{} '{}' declarado mais do que uma vez",
-                doc.kind, doc.metadata.name
+            issues.push(super::po::tf(
+                "{kind} '{name}' declared more than once",
+                &[("kind", &doc.kind), ("name", &doc.metadata.name)],
             ));
         }
     }
@@ -544,15 +550,18 @@ fn validate_graph_with(
                 let is_vm = doc.kind == "Vm";
                 if let Some(net) = doc.spec.get("network").and_then(|v| v.as_str()) {
                     if !is_builtin_net(net, is_vm) && !networks.contains(net) {
-                        issues.push(format!(
-                            "{} '{name}' → network '{net}' não é declarada nem existe",
-                            doc.kind
+                        issues.push(super::po::tf(
+                            "{kind} '{name}' → network '{net}' is not declared nor does it exist",
+                            &[("kind", &doc.kind), ("name", name), ("net", net)],
                         ));
                     }
                 }
                 for vref in volume_refs(doc) {
                     if !volumes.contains(&vref) {
-                        issues.push(format!("{} '{name}' → volume '{vref}' não é declarado (Volume/Storage) nem existe", doc.kind));
+                        issues.push(super::po::tf(
+                            "{kind} '{name}' → volume '{vref}' is not declared (Volume/Storage) nor does it exist",
+                            &[("kind", &doc.kind), ("name", name), ("vref", &vref)],
+                        ));
                     }
                 }
                 // `Vm.volumes` is a list of OBJECTS `{name, mountPath}` (not the
@@ -565,7 +574,10 @@ fn validate_graph_with(
                             .filter_map(|v| v.as_str())
                         {
                             if !volumes.contains(vname) {
-                                issues.push(format!("Vm '{name}' → volume '{vname}' não é declarado (Volume/Storage) nem existe"));
+                                issues.push(super::po::tf(
+                                    "Vm '{name}' → volume '{vname}' is not declared (Volume/Storage) nor does it exist",
+                                    &[("name", name), ("vname", vname)],
+                                ));
                             }
                         }
                     }
@@ -574,7 +586,10 @@ fn validate_graph_with(
                 if let Some(seq) = doc.spec.get("secret").and_then(|v| v.as_sequence()) {
                     for sref in seq.iter().filter_map(|v| v.as_str()) {
                         if !secrets.contains(sref) {
-                            issues.push(format!("{} '{name}' → secret '{sref}' não é um Secret declarado nem existente", doc.kind));
+                            issues.push(super::po::tf(
+                                "{kind} '{name}' → secret '{sref}' is not a declared or existing Secret",
+                                &[("kind", &doc.kind), ("name", name), ("sref", sref)],
+                            ));
                         }
                     }
                 }
@@ -584,13 +599,17 @@ fn validate_graph_with(
                 // `password` key of that Secret — `storage::resolve_password`).
                 if let Some(sref) = doc.spec.get("passwordSecret").and_then(|v| v.as_str()) {
                     if !secrets.contains(sref) {
-                        issues.push(format!("Storage '{name}' → passwordSecret '{sref}' não é um Secret declarado nem existente"));
+                        issues.push(super::po::tf(
+                            "Storage '{name}' → passwordSecret '{sref}' is not a declared or existing Secret",
+                            &[("name", name), ("sref", sref)],
+                        ));
                     } else if let Some(Some(keys)) = declared_secret_keys.get(sref) {
                         // Only when we know the keys (inline Secret without fromEnvFile):
                         // then we can assert with certainty that `password` is missing.
                         if !keys.contains("password") {
-                            issues.push(format!(
-                                "Storage '{name}' → passwordSecret '{sref}': o Secret não declara a chave 'password' (o mount lê exactamente essa chave)"
+                            issues.push(super::po::tf(
+                                "Storage '{name}' → passwordSecret '{sref}': the Secret does not declare the 'password' key (the mount reads exactly that key)",
+                                &[("name", name), ("sref", sref)],
                             ));
                         }
                     }
@@ -607,26 +626,38 @@ fn validate_graph_with(
                 if doc.kind == "FirewallPolicy" {
                     let dir = doc.spec.get("direction").and_then(|v| v.as_str());
                     if !matches!(dir, Some("ingress" | "egress")) {
-                        issues.push(format!("FirewallPolicy '{name}' → direction obrigatório e ∈ {{ingress, egress}}"));
+                        issues.push(super::po::tf(
+                            "FirewallPolicy '{name}' → direction is required and ∈ {{ingress, egress}}",
+                            &[("name", name)],
+                        ));
                     } else if dir == Some("ingress") && scope == "network" {
                         // Same incompatibility the apply rejects — catch it beforehand.
-                        issues.push(format!("FirewallPolicy '{name}' → scope: network só é suportado com direction: egress"));
+                        issues.push(super::po::tf(
+                            "FirewallPolicy '{name}' → scope: network is only supported with direction: egress",
+                            &[("name", name)],
+                        ));
                     }
                 }
                 if !matches!(scope, "container" | "network") {
                     // Message consistent with the apply (which also rejects the scope).
-                    issues.push(format!(
-                        "{} '{name}' → scope inválido '{scope}' (usa container|network)",
-                        doc.kind
+                    issues.push(super::po::tf(
+                        "{kind} '{name}' → invalid scope '{scope}' (use container|network)",
+                        &[("kind", &doc.kind), ("name", name), ("scope", scope)],
                     ));
                 } else if let Some(target) = doc.spec.get("target").and_then(|v| v.as_str()) {
                     // scope: network → the target is a NETWORK; otherwise, a Container.
                     if scope == "network" {
                         if !networks.contains(target) {
-                            issues.push(format!("{} '{name}' (scope network) → target '{target}' não é uma Network declarada nem existente", doc.kind));
+                            issues.push(super::po::tf(
+                                "{kind} '{name}' (scope network) → target '{target}' is not a declared or existing Network",
+                                &[("kind", &doc.kind), ("name", name), ("target", target)],
+                            ));
                         }
                     } else if !containers.contains(target) {
-                        issues.push(format!("{} '{name}' → target '{target}' não é um Container declarado nem existente", doc.kind));
+                        issues.push(super::po::tf(
+                            "{kind} '{name}' → target '{target}' is not a declared or existing Container",
+                            &[("kind", &doc.kind), ("name", name), ("target", target)],
+                        ));
                     }
                 }
             }
@@ -648,9 +679,9 @@ fn validate_graph_with(
                         for rule in &spec.rules {
                             for pr in &rule.paths {
                                 if !containers.contains(&pr.backend.service) {
-                                    issues.push(format!(
-                                        "HTTPRoute '{name}' → backend '{}' não é um Container declarado nem existente",
-                                        pr.backend.service
+                                    issues.push(super::po::tf(
+                                        "HTTPRoute '{name}' → backend '{service}' is not a declared or existing Container",
+                                        &[("name", name), ("service", &pr.backend.service)],
                                     ));
                                 }
                             }
@@ -659,8 +690,9 @@ fn validate_graph_with(
                             if tls.mode.as_deref() == Some("secretRef") {
                                 if let Some(sref) = &tls.secret_ref {
                                     if !secrets.contains(sref) {
-                                        issues.push(format!(
-                                            "HTTPRoute '{name}' → tls.secretRef '{sref}' não é um Secret declarado nem existente"
+                                        issues.push(super::po::tf(
+                                            "HTTPRoute '{name}' → tls.secretRef '{sref}' is not a declared or existing Secret",
+                                            &[("name", name), ("sref", sref)],
                                         ));
                                     }
                                 }
@@ -675,9 +707,15 @@ fn validate_graph_with(
                 let from = doc.spec.get("from").and_then(|v| v.as_str());
                 match from {
                     Some(f) if !containers.contains(f) => {
-                        issues.push(format!("Dependency '{name}' → from '{f}' não é um Container declarado nem existente"));
+                        issues.push(super::po::tf(
+                            "Dependency '{name}' → from '{f}' is not a declared or existing Container",
+                            &[("name", name), ("f", f)],
+                        ));
                     }
-                    None => issues.push(format!("Dependency '{name}' → `from` obrigatório")),
+                    None => issues.push(super::po::tf(
+                        "Dependency '{name}' → `from` is required",
+                        &[("name", name)],
+                    )),
                     _ => {}
                 }
                 // `to` can be a scalar OR a list.
@@ -690,11 +728,17 @@ fn validate_graph_with(
                     None => Vec::new(),
                 };
                 if tos.is_empty() {
-                    issues.push(format!("Dependency '{name}' → `to` não pode ser vazio"));
+                    issues.push(super::po::tf(
+                        "Dependency '{name}' → `to` cannot be empty",
+                        &[("name", name)],
+                    ));
                 }
                 for t in tos {
                     if !containers.contains(t) {
-                        issues.push(format!("Dependency '{name}' → to '{t}' não é um Container declarado nem existente"));
+                        issues.push(super::po::tf(
+                            "Dependency '{name}' → to '{t}' is not a declared or existing Container",
+                            &[("name", name), ("t", t)],
+                        ));
                     }
                 }
             }
@@ -878,7 +922,7 @@ spec: { direction: egress, target: fantasma }
         // invalid direction.
         let i = check("apiVersion: delonix.io/v1\nkind: FirewallPolicy\nmetadata: { name: a }\nspec: { direction: sideways, target: x }\n");
         assert!(
-            i.iter().any(|s| s.contains("direction obrigatório")),
+            i.iter().any(|s| s.contains("direction is required")),
             "{i:?}"
         );
         // ingress + scope: network is incompatible (egress only) — caught BEFORE the apply.
@@ -897,7 +941,7 @@ spec: { direction: ingress, scope: network, target: n }
         );
         assert!(
             i.iter()
-                .any(|s| s.contains("scope: network só é suportado com direction: egress")),
+                .any(|s| s.contains("scope: network is only supported with direction: egress")),
             "{i:?}"
         );
     }
@@ -960,10 +1004,7 @@ spec: {}
 ",
         );
         assert_eq!(issues.len(), 1);
-        assert!(
-            issues[0].contains("declarado mais do que uma vez"),
-            "{issues:?}"
-        );
+        assert!(issues[0].contains("declared more than once"), "{issues:?}");
     }
 
     #[test]
@@ -1038,7 +1079,7 @@ spec: { type: cifs, server: h, share: /s, passwordSecret: creds }
         );
         assert_eq!(issues.len(), 1, "{issues:?}");
         assert!(
-            issues[0].contains("não declara a chave 'password'"),
+            issues[0].contains("does not declare the 'password' key"),
             "{issues:?}"
         );
 

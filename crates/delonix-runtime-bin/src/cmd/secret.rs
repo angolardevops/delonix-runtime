@@ -141,13 +141,18 @@ pub fn apply(docs: &[ManifestDoc], base: &Path) -> Result<()> {
         // Inline overrides the file. Warning: the values stay in cleartext in the manifest.
         if !spec.string_data.is_empty() {
             eprintln!(
-                "AVISO: Secret '{name}': stringData tem valores em CLARO no manifesto — não commites isto num repo; usa fromEnvFile ou `delonix secret create` para produção"
+                "{}",
+                super::po::tf(
+                    "WARNING: Secret '{name}': stringData has values in CLEARTEXT in the manifest — do not commit this to a repo; use fromEnvFile or `delonix secret create` for production",
+                    &[("name", name)],
+                )
             );
             data.extend(spec.string_data);
         }
         if data.is_empty() {
-            return Err(Error::Invalid(format!(
-                "Secret '{name}': vazio — indica stringData e/ou fromEnvFile"
+            return Err(Error::Invalid(super::po::tf(
+                "Secret '{name}': empty — provide stringData and/or fromEnvFile",
+                &[("name", name)],
             )));
         }
         let n = data.len();
@@ -156,7 +161,13 @@ pub fn apply(docs: &[ManifestDoc], base: &Path) -> Result<()> {
             data,
             updated_unix: now_unix(),
         })?;
-        println!("secret/{name}: garantido ({n} chave(s))");
+        println!(
+            "{}",
+            super::po::tf(
+                "secret/{name}: ensured ({n} key(s))",
+                &[("name", name), ("n", &n.to_string())],
+            )
+        );
     }
     Ok(())
 }
@@ -190,15 +201,16 @@ pub fn run(action: SecretCmd) -> Result<()> {
     let mut store = SecretStore::open(state_root())?;
     match action {
         // Handled at the top (does a `return`).
-        SecretCmd::Apply { .. } => unreachable!("tratado acima"),
+        SecretCmd::Apply { .. } => unreachable!("handled above"),
         SecretCmd::Create {
             name,
             from_literal,
             from_env_file,
         } => {
             if !valid_name(&name) {
-                return Err(Error::Invalid(format!(
-                    "nome de segredo inválido: {name:?}"
+                return Err(Error::Invalid(super::po::tf(
+                    "invalid secret name: {name}",
+                    &[("name", &format!("{name:?}"))],
                 )));
             }
             let mut data = std::collections::BTreeMap::new();
@@ -208,13 +220,19 @@ pub fn run(action: SecretCmd) -> Result<()> {
             }
             for lit in &from_literal {
                 let (k, v) = parse_kv(lit).ok_or_else(|| {
-                    Error::Invalid(format!("--from-literal inválido: {lit:?} (usa KEY=value)"))
+                    Error::Invalid(super::po::tf(
+                        "invalid --from-literal: {lit} (use KEY=value)",
+                        &[("lit", &format!("{lit:?}"))],
+                    ))
                 })?;
                 data.insert(k, v);
             }
             if data.is_empty() {
                 return Err(Error::Invalid(
-                    "segredo vazio — usa --from-literal KEY=value e/ou --from-env-file".into(),
+                    super::po::t(
+                        "empty secret — use --from-literal KEY=value and/or --from-env-file",
+                    )
+                    .into(),
                 ));
             }
             let n = data.len();
@@ -223,7 +241,13 @@ pub fn run(action: SecretCmd) -> Result<()> {
                 data,
                 updated_unix: now_unix(),
             })?;
-            println!("segredo '{name}' criado ({n} chave(s))");
+            println!(
+                "{}",
+                super::po::tf(
+                    "secret '{name}' created ({n} key(s))",
+                    &[("name", &name), ("n", &n.to_string())],
+                )
+            );
         }
         SecretCmd::Ls => {
             let mut t = output::Table::new(&["NAME", "KEYS", "NAMES"]).right_align(1);
@@ -254,20 +278,25 @@ pub fn run(action: SecretCmd) -> Result<()> {
             if !reveal && !s.data.is_empty() {
                 println!(
                     "{}",
-                    output::dim("(valores ocultos — usa --reveal para os mostrar)")
+                    output::dim(super::po::t("(hidden values — use --reveal to show them)"))
                 );
             }
         }
         SecretCmd::Set { name, pairs } => {
             if pairs.is_empty() {
-                return Err(Error::Invalid("indica pelo menos um KEY=value".into()));
+                return Err(Error::Invalid(
+                    super::po::t("provide at least one KEY=value").into(),
+                ));
             }
             // Parse ALL pairs before touching the store — a bad pair must
             // fail before we ever take the lock, not half-way through.
             let mut kvs = Vec::with_capacity(pairs.len());
             for p in &pairs {
                 let (k, v) = parse_kv(p).ok_or_else(|| {
-                    Error::Invalid(format!("par inválido: {p:?} (usa KEY=value)"))
+                    Error::Invalid(super::po::tf(
+                        "invalid pair: {p} (use KEY=value)",
+                        &[("p", &format!("{p:?}"))],
+                    ))
                 })?;
                 kvs.push((k, v));
             }
@@ -286,12 +315,21 @@ pub fn run(action: SecretCmd) -> Result<()> {
                 s.updated_unix = now_unix();
                 true
             })?;
-            println!("segredo '{name}' actualizado ({} chave(s))", s.data.len());
+            println!(
+                "{}",
+                super::po::tf(
+                    "secret '{name}' updated ({n} key(s))",
+                    &[("name", &name), ("n", &s.data.len().to_string())],
+                )
+            );
         }
         SecretCmd::Unset { name, key, all } => {
             if all {
                 store.remove(&name)?;
-                println!("segredo '{name}' removido");
+                println!(
+                    "{}",
+                    super::po::tf("secret '{name}' removed", &[("name", &name)])
+                );
                 return Ok(());
             }
             let k = key.ok_or_else(|| {
@@ -307,19 +345,32 @@ pub fn run(action: SecretCmd) -> Result<()> {
                 removed
             })?;
             if !removed {
-                return Err(Error::Invalid(format!(
-                    "chave '{k}' não existe em '{name}'"
+                return Err(Error::Invalid(super::po::tf(
+                    "key '{k}' does not exist in '{name}'",
+                    &[("k", &k), ("name", &name)],
                 )));
             }
-            println!("chave '{k}' removida de '{name}'");
+            println!(
+                "{}",
+                super::po::tf(
+                    "key '{k}' removed from '{name}'",
+                    &[("k", &k), ("name", &name)],
+                )
+            );
         }
         SecretCmd::Rm { name } => {
             store.remove(&name)?;
-            println!("segredo '{name}' removido");
+            println!(
+                "{}",
+                super::po::tf("secret '{name}' removed", &[("name", &name)])
+            );
         }
         SecretCmd::RotateKey => {
             store.rotate_key()?;
-            println!("chave-mestra rodada — todos os segredos re-cifrados com a nova chave");
+            println!(
+                "{}",
+                super::po::t("master key rotated — all secrets re-encrypted with the new key")
+            );
         }
     }
     Ok(())

@@ -275,24 +275,26 @@ pub(crate) fn valid_version(s: &str) -> bool {
 
 fn validate(spec: &ClusterSpec) -> Result<()> {
     if !matches!(spec.mode.as_str(), "kind" | "vm" | "ssh") {
-        return Err(Error::Invalid(format!(
-            "spec.mode '{}' inválido — usa `kind` (containers locais), `vm` (VMs douradas) ou \
-             `ssh` (hosts remotos já vivos)",
-            spec.mode
+        return Err(Error::Invalid(super::po::tf(
+            "spec.mode '{mode}' invalid — use `kind` (local containers), `vm` (golden VMs) or \
+             `ssh` (already-live remote hosts)",
+            &[("mode", &spec.mode)],
         )));
     }
     if spec.mode == "ssh" && spec.control_plane.hosts.is_empty() {
         return Err(Error::Invalid(
-            "spec.mode `ssh` exige `spec.controlPlane.hosts` — este modo NÃO cria máquinas, \
-             elas têm de existir e estar alcançáveis"
-                .into(),
+            super::po::t(
+                "spec.mode `ssh` requires `spec.controlPlane.hosts` — this mode does NOT create \
+                 machines, they have to already exist and be reachable",
+            )
+            .into(),
         ));
     }
     if spec.mode != "ssh" && !spec.control_plane.hosts.is_empty() {
-        return Err(Error::Invalid(format!(
-            "spec.controlPlane.hosts só faz sentido no `mode: ssh` (aqui é `{}`) — nos modos \
-             kind/vm usa `replicas`, que é o delonix que cria os nós",
-            spec.mode
+        return Err(Error::Invalid(super::po::tf(
+            "spec.controlPlane.hosts only makes sense in `mode: ssh` (here it is `{mode}`) — in \
+             kind/vm modes use `replicas`, which is delonix creating the nodes",
+            &[("mode", &spec.mode)],
         )));
     }
     match spec.etcd.mode.as_str() {
@@ -306,81 +308,90 @@ fn validate(spec: &ClusterSpec) -> Result<()> {
             // internally). Rejecting here instead of silently dropping
             // `spec.etcd.hosts` avoids a silent-failure gap.
             if spec.mode != "ssh" {
-                return Err(Error::Invalid(format!(
-                    "etcd.mode 'external' só é suportado com spec.mode 'ssh' nesta versão (aqui é \
-                     '{}') — usa `mode: ssh` com `etcd.hosts` explícito, ou `cluster kubeadm \
-                     --etcd-cluster <N>`",
-                    spec.mode
+                return Err(Error::Invalid(super::po::tf(
+                    "etcd.mode 'external' is only supported with spec.mode 'ssh' in this version \
+                     (here it is '{mode}') — use `mode: ssh` with explicit `etcd.hosts`, or \
+                     `cluster kubeadm --etcd-cluster <N>`",
+                    &[("mode", &spec.mode)],
                 )));
             }
             if spec.etcd.hosts.is_empty() {
                 return Err(Error::Invalid(
-                    "etcd.mode 'external' exige etcd.hosts (pelo menos 1) — delonix cria e gere \
-                     o cluster etcd nesses hosts, eles têm de existir e estar alcançáveis"
-                        .into(),
+                    super::po::t(
+                        "etcd.mode 'external' requires etcd.hosts (at least 1) — delonix creates \
+                         and manages the etcd cluster on those hosts, they have to already exist \
+                         and be reachable",
+                    )
+                    .into(),
                 ));
             }
             if spec.etcd.hosts.len() > 1 && spec.etcd.hosts.len().is_multiple_of(2) {
-                return Err(Error::Invalid(format!(
-                    "etcd.hosts tem {} entradas — um cluster etcd precisa de um número ÍMPAR de \
-                     membros para ter quórum bem definido (1 para dev/teste, sem HA; 3, 5, ... \
-                     para produção)",
-                    spec.etcd.hosts.len()
+                return Err(Error::Invalid(super::po::tf(
+                    "etcd.hosts has {n} entries — an etcd cluster needs an ODD number of \
+                     members for well-defined quorum (1 for dev/test, no HA; 3, 5, ... for \
+                     production)",
+                    &[("n", &spec.etcd.hosts.len().to_string())],
                 )));
             }
             for h in &spec.etcd.hosts {
                 if !valid_endpoint(&h.ip) {
-                    return Err(Error::Invalid(format!(
-                        "etcd host '{}' tem ip inválido: '{}'",
-                        h.label(),
-                        h.ip
+                    return Err(Error::Invalid(super::po::tf(
+                        "etcd host '{label}' has invalid ip: '{ip}'",
+                        &[("label", &h.label()), ("ip", &h.ip)],
                     )));
                 }
             }
         }
         other => {
-            return Err(Error::Invalid(format!(
-                "etcd.mode '{other}' inválido — usa 'stacked' (default, co-localizado nos \
-                 control-planes) ou 'external' (cluster etcd dedicado, gerido por delonix)"
+            return Err(Error::Invalid(super::po::tf(
+                "etcd.mode '{other}' invalid — use 'stacked' (default, co-located on the \
+                 control-planes) or 'external' (dedicated etcd cluster, managed by delonix)",
+                &[("other", other)],
             )));
         }
     }
     if spec.control_plane.count() == 0 {
         return Err(Error::Invalid(
-            "spec.controlPlane vazio — pelo menos 1 nó obrigatório (`replicas: 1` ou 1 host)"
-                .into(),
+            super::po::t(
+                "spec.controlPlane empty — at least 1 node required (`replicas: 1` or 1 host)",
+            )
+            .into(),
         ));
     }
     if spec.control_plane.count() > 1 && spec.control_plane_endpoint.is_none() {
         return Err(Error::Invalid(
-            "spec.controlPlaneEndpoint é obrigatório com mais de 1 control-plane (kubeadm \
-             precisa de um endpoint estável — LB/VIP — à frente deles; não inventamos um)"
-                .into(),
+            super::po::t(
+                "spec.controlPlaneEndpoint is required with more than 1 control-plane (kubeadm \
+                 needs a stable endpoint — LB/VIP — in front of them; we do not invent one)",
+            )
+            .into(),
         ));
     }
     if let Some(ep) = &spec.control_plane_endpoint {
         if !valid_endpoint(ep) {
-            return Err(Error::Invalid(format!(
-                "spec.controlPlaneEndpoint '{ep}' inválido (só host/IP[:porta])"
+            return Err(Error::Invalid(super::po::tf(
+                "spec.controlPlaneEndpoint '{ep}' invalid (only host/IP[:port])",
+                &[("ep", ep)],
             )));
         }
     }
     if !valid_cidr(&spec.pod_subnet) {
-        return Err(Error::Invalid(format!(
-            "spec.podSubnet '{}' inválido (formato CIDR esperado)",
-            spec.pod_subnet
+        return Err(Error::Invalid(super::po::tf(
+            "spec.podSubnet '{subnet}' invalid (CIDR format expected)",
+            &[("subnet", &spec.pod_subnet)],
         )));
     }
     if !valid_cidr(&spec.service_subnet) {
-        return Err(Error::Invalid(format!(
-            "spec.serviceSubnet '{}' inválido (formato CIDR esperado)",
-            spec.service_subnet
+        return Err(Error::Invalid(super::po::tf(
+            "spec.serviceSubnet '{subnet}' invalid (CIDR format expected)",
+            &[("subnet", &spec.service_subnet)],
         )));
     }
     if let Some(v) = &spec.k8s_version {
         if !valid_version(v) {
-            return Err(Error::Invalid(format!(
-                "spec.k8sVersion '{v}' inválido (só dígitos e pontos, ex.: '1.31')"
+            return Err(Error::Invalid(super::po::tf(
+                "spec.k8sVersion '{v}' invalid (only digits and dots, e.g.: '1.31')",
+                &[("v", v)],
             )));
         }
     }
@@ -391,10 +402,9 @@ fn validate(spec: &ClusterSpec) -> Result<()> {
         .chain(spec.workers.hosts.iter())
     {
         if !valid_endpoint(&h.ip) {
-            return Err(Error::Invalid(format!(
-                "host '{}' tem ip inválido: '{}'",
-                h.label(),
-                h.ip
+            return Err(Error::Invalid(super::po::tf(
+                "host '{label}' has invalid ip: '{ip}'",
+                &[("label", &h.label()), ("ip", &h.ip)],
             )));
         }
     }
@@ -678,9 +688,11 @@ fn apply_one(name: &str, spec: &ClusterSpec, wait_ready: bool) -> Result<()> {
 fn apply_kind(name: &str, spec: &ClusterSpec) -> Result<()> {
     if spec.control_plane.count() > 1 {
         return Err(Error::Invalid(
-            "`mode: kind` só suporta 1 control-plane por agora (HA precisa de um endpoint \
-             estável à frente dos nós — ver cluster-ssh.yaml)"
-                .into(),
+            super::po::t(
+                "`mode: kind` only supports 1 control-plane for now (HA needs a stable endpoint \
+                 in front of the nodes — see cluster-ssh.yaml)",
+            )
+            .into(),
         ));
     }
     let (images, store) = super::util::open_stores()?;
@@ -707,7 +719,10 @@ fn apply_kind(name: &str, spec: &ClusterSpec) -> Result<()> {
 fn apply_vm(name: &str, spec: &ClusterSpec, wait_ready: bool) -> Result<()> {
     let network = spec.vm.network.clone().ok_or_else(|| {
         Error::Invalid(
-            "`mode: vm` exige `spec.vm.network` (cria-a antes com `delonix network create`)".into(),
+            super::po::t(
+                "`mode: vm` requires `spec.vm.network` (create it first with `delonix network create`)",
+            )
+            .into(),
         )
     })?;
     let boot_timeout = spec
@@ -1016,7 +1031,9 @@ fn random_kubeadm_cluster_name(base: &std::path::Path) -> Result<String> {
         let prefix = format!("{n}-");
         existing.iter().any(|vm| vm.name.starts_with(&prefix))
     })
-    .ok_or_else(|| Error::Invalid("não consegui inventar um nome livre — passa `--name`".into()))
+    .ok_or_else(|| {
+        Error::Invalid(super::po::t("could not invent a free name — pass `--name`").into())
+    })
 }
 
 /// Resolves the tag of the golden VM image to use, in order: the explicit
@@ -1083,8 +1100,11 @@ fn generate_or_load_ssh_key(name: &str, explicit: Option<PathBuf>) -> Result<(Pa
         let pub_path = key.with_extension("pub");
         let public = std::fs::read_to_string(&pub_path).map_err(|e| {
             Error::Invalid(format!(
-                "não consegui ler a chave pública '{}': {e}",
-                pub_path.display()
+                "{}: {e}",
+                super::po::tf(
+                    "could not read public key '{path}'",
+                    &[("path", &pub_path.display().to_string())],
+                )
             ))
         })?;
         return Ok((key, public.trim().to_string()));
@@ -1098,9 +1118,9 @@ fn generate_or_load_ssh_key(name: &str, explicit: Option<PathBuf>) -> Result<(Pa
             .arg(&key_path)
             .args(["-C", &format!("delonix-cluster-{name}")])
             .status()
-            .map_err(|e| Error::Invalid(format!("a correr ssh-keygen: {e}")))?;
+            .map_err(|e| Error::Invalid(format!("{}: {e}", super::po::t("running ssh-keygen"))))?;
         if !status.success() {
-            return Err(Error::Invalid("ssh-keygen falhou".into()));
+            return Err(Error::Invalid(super::po::t("ssh-keygen failed").into()));
         }
     }
     let public = std::fs::read_to_string(key_path.with_extension("pub"))?;
@@ -1120,8 +1140,9 @@ fn wait_for_vm_ssh_ready(vm_name: &str, ssh: &SshSpec, timeout: Duration) -> Res
             break ip;
         }
         if Instant::now() >= deadline {
-            return Err(Error::Invalid(format!(
-                "VM '{vm_name}': sem IP atribuído dentro do --boot-timeout"
+            return Err(Error::Invalid(super::po::tf(
+                "VM '{vm_name}': no IP assigned within --boot-timeout",
+                &[("vm_name", vm_name)],
             )));
         }
         std::thread::sleep(Duration::from_secs(3));
@@ -1153,8 +1174,9 @@ fn wait_for_vm_ssh_ready(vm_name: &str, ssh: &SshSpec, timeout: Duration) -> Res
             return Ok(ip);
         }
         if Instant::now() >= deadline {
-            return Err(Error::Invalid(format!(
-                "VM '{vm_name}' (ip={ip}): SSH não respondeu dentro do --boot-timeout — o boot pode ainda estar em curso"
+            return Err(Error::Invalid(super::po::tf(
+                "VM '{vm_name}' (ip={ip}): SSH did not respond within --boot-timeout — the boot may still be in progress",
+                &[("vm_name", vm_name), ("ip", &ip)],
             )));
         }
         std::thread::sleep(Duration::from_secs(5));
@@ -1195,7 +1217,9 @@ fn purge_known_host(ip: &str) {
 
 fn provision_and_apply(args: ProvisionArgs) -> Result<()> {
     if args.control_plane == 0 {
-        return Err(Error::Invalid("--control-plane tem de ser >= 1".into()));
+        return Err(Error::Invalid(
+            super::po::t("--control-plane must be >= 1").into(),
+        ));
     }
     let base = state_root();
     let vm_store = VmImageStore::open(&base)?;
@@ -1216,7 +1240,13 @@ fn provision_and_apply(args: ProvisionArgs) -> Result<()> {
         // `resolve_vm_image` already decided on (so this exact lookup succeeds
         // right after).
         let source = official_pull_source(&image_tag);
-        println!("imagem VM '{image_tag}' não está local — a descarregar de '{source}'...");
+        println!(
+            "{}",
+            super::po::tf(
+                "VM image '{image_tag}' is not local — downloading from '{source}'...",
+                &[("image_tag", &image_tag), ("source", &source)],
+            )
+        );
         vmimage::cmd_pull(&vm_store, &source, Some(image_tag.clone()))?;
     }
 
@@ -1469,8 +1499,12 @@ fn kubeadm_init(
             "delonix-kubeadm-config-{}.yaml",
             std::process::id()
         ));
-        std::fs::write(&tmp, &yaml)
-            .map_err(|e| Error::Invalid(format!("a escrever kubeadm-config.yaml local: {e}")))?;
+        std::fs::write(&tmp, &yaml).map_err(|e| {
+            Error::Invalid(format!(
+                "{}: {e}",
+                super::po::t("writing local kubeadm-config.yaml")
+            ))
+        })?;
         let scp_result = remote::scp_to(cp1, &tmp, "/tmp/delonix-kubeadm-config.yaml");
         let _ = std::fs::remove_file(&tmp);
         scp_result.map_err(|e| Error::Invalid(format!("[{label}] kubeadm config: {e}")))?;
@@ -1502,10 +1536,12 @@ fn kubeadm_init(
 fn recover_join_info(cp1: &SshTarget) -> Result<JoinInfo> {
     let join_cmd = remote::ssh_run(cp1, "kubeadm token create --print-join-command")?;
     let token = extract_after(&join_cmd, "--token ")
-        .ok_or_else(|| Error::Invalid("sem --token no join-command".into()))?;
+        .ok_or_else(|| Error::Invalid(super::po::t("no --token in the join-command").into()))?;
     let ca_cert_hash =
         extract_after(&join_cmd, "--discovery-token-ca-cert-hash ").ok_or_else(|| {
-            Error::Invalid("sem --discovery-token-ca-cert-hash no join-command".into())
+            Error::Invalid(
+                super::po::t("no --discovery-token-ca-cert-hash in the join-command").into(),
+            )
         })?;
     let cert_key_out = remote::ssh_run(cp1, "kubeadm init phase upload-certs --upload-certs")?;
     let certificate_key = extract_after(&cert_key_out, "Using certificate key:\n").or_else(|| {
@@ -1531,8 +1567,10 @@ fn parse_join_info(output: &str) -> Result<JoinInfo> {
     let ca_cert_hash =
         extract_after(output, "--discovery-token-ca-cert-hash ").ok_or_else(|| {
             Error::Invalid(
-                "não consegui extrair --discovery-token-ca-cert-hash do output do kubeadm init"
-                    .into(),
+                super::po::t(
+                    "could not extract --discovery-token-ca-cert-hash from the kubeadm init output",
+                )
+                .into(),
             )
         })?;
     let certificate_key = extract_after(output, "--certificate-key ");
@@ -1706,8 +1744,15 @@ fn merge_into_local_kubeconfig(source: &Path, cluster_name: &str, dest: &Path) -
 
     let read_yaml = |p: &Path| -> Result<Value> {
         let s = std::fs::read_to_string(p)?;
-        serde_yaml::from_str(&s)
-            .map_err(|e| Error::Invalid(format!("kubeconfig malformado ({}): {e}", p.display())))
+        serde_yaml::from_str(&s).map_err(|e| {
+            Error::Invalid(format!(
+                "{}: {e}",
+                super::po::tf(
+                    "malformed kubeconfig ({path})",
+                    &[("path", &p.display().to_string())],
+                )
+            ))
+        })
     };
     let as_seq = |v: &Value, key: &str| -> Vec<Value> {
         v.get(key)
@@ -1757,7 +1802,7 @@ fn merge_into_local_kubeconfig(source: &Path, cluster_name: &str, dest: &Path) -
         serde_yaml::from_str::<Value>(
             "apiVersion: v1\nkind: Config\npreferences: {}\nclusters: []\ncontexts: []\nusers: []\n",
         )
-        .expect("skeleton estático válido")
+        .expect("static skeleton is valid")
     } else {
         read_yaml(dest)?
     };
@@ -1777,8 +1822,12 @@ fn merge_into_local_kubeconfig(source: &Path, cluster_name: &str, dest: &Path) -
         merged["current-context"] = Value::String(cluster_name.to_string());
     }
 
-    let out = serde_yaml::to_string(&merged)
-        .map_err(|e| Error::Invalid(format!("falha a serializar o kubeconfig: {e}")))?;
+    let out = serde_yaml::to_string(&merged).map_err(|e| {
+        Error::Invalid(format!(
+            "{}: {e}",
+            super::po::t("failed to serialize the kubeconfig")
+        ))
+    })?;
     std::fs::write(dest, out)?;
     {
         use std::os::unix::fs::PermissionsExt;
@@ -2402,7 +2451,7 @@ kubeadm join 10.0.0.10:6443 --token abcdef.0123456789abcdef \\
             ..spec_ssh_1cp()
         };
         let err = validate(&spec).unwrap_err();
-        assert!(format!("{err}").contains("ÍMPAR"));
+        assert!(format!("{err}").contains("ODD"));
     }
 
     #[test]

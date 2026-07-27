@@ -116,9 +116,12 @@ fn render_template(tname: &str, o: &InitOpts, show_next: bool) -> Result<()> {
         .find(|(n, _)| *n == tname)
         .map(|(_, f)| *f)
         .ok_or_else(|| {
-            Error::Invalid(format!(
-                "template '{tname}' não existe — disponíveis: {}",
-                template_names().join(", ")
+            Error::Invalid(super::po::tf(
+                "template '{tname}' does not exist — available: {available}",
+                &[
+                    ("tname", tname),
+                    ("available", &template_names().join(", ")),
+                ],
             ))
         })?;
     let module = python_module(&o.name);
@@ -141,9 +144,15 @@ fn render_template(tname: &str, o: &InitOpts, show_next: bool) -> Result<()> {
         return Ok(());
     }
     println!(
-        "pronto. Projecto '{}' ({tname}) em {}.",
-        o.name,
-        o.dir.display()
+        "{}",
+        super::po::tf(
+            "done. Project '{name}' ({tname}) in {dir}.",
+            &[
+                ("name", &o.name),
+                ("tname", tname),
+                ("dir", &o.dir.display().to_string())
+            ],
+        )
     );
     if show_next {
         let cd = if o.dir == Path::new(".") {
@@ -152,10 +161,18 @@ fn render_template(tname: &str, o: &InitOpts, show_next: bool) -> Result<()> {
             format!("cd {} && ", o.dir.display())
         };
         println!(
-            "  {cd}delonix build -t {}:dev .        # constrói a imagem (Delonixfile)\n  \
-             {cd}delonix stack apply              # sobe a app\n  \
-             {cd}curl localhost:{port}{health}",
-            o.name
+            "{}",
+            super::po::tf(
+                "  {cd}delonix build -t {name}:dev .        # builds the image (Delonixfile)\n  \
+                 {cd}delonix stack apply              # brings the app up\n  \
+                 {cd}curl localhost:{port}{health}",
+                &[
+                    ("cd", &cd),
+                    ("name", &o.name),
+                    ("port", port),
+                    ("health", health),
+                ],
+            )
         );
     }
     Ok(())
@@ -165,17 +182,30 @@ fn render_template(tname: &str, o: &InitOpts, show_next: bool) -> Result<()> {
 fn write_file(path: &Path, content: &str, force: bool) -> Result<bool> {
     if path.exists() && !force {
         eprintln!(
-            "  já existe, saltado: {}  (usa --force para substituir)",
-            path.display()
+            "{}",
+            super::po::tf(
+                "  already exists, skipped: {path}  (use --force to overwrite)",
+                &[("path", &path.display().to_string())],
+            )
         );
         return Ok(false);
     }
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
     }
-    std::fs::write(path, content)
-        .map_err(|e| Error::Invalid(format!("a escrever {}: {e}", path.display())))?;
-    eprintln!("  criado: {}", path.display());
+    std::fs::write(path, content).map_err(|e| {
+        Error::Invalid(format!(
+            "{}: {e}",
+            super::po::tf("writing {path}", &[("path", &path.display().to_string())])
+        ))
+    })?;
+    eprintln!(
+        "{}",
+        super::po::tf(
+            "  created: {path}",
+            &[("path", &path.display().to_string())]
+        )
+    );
     Ok(true)
 }
 
@@ -295,10 +325,12 @@ fn run_quiet(exe: &Path, dir: &Path, args: &[&str]) -> Result<()> {
     if out.status.success() {
         Ok(())
     } else {
-        Err(Error::Invalid(format!(
-            "`delonix {}` falhou:\n{}",
-            args.join(" "),
-            String::from_utf8_lossy(&out.stderr).trim()
+        Err(Error::Invalid(super::po::tf(
+            "`delonix {args}` failed:\n{stderr}",
+            &[
+                ("args", &args.join(" ")),
+                ("stderr", String::from_utf8_lossy(&out.stderr).trim()),
+            ],
         )))
     }
 }
@@ -312,7 +344,10 @@ fn wait_health(port: &str, health: &str) -> Result<()> {
         std::thread::sleep(std::time::Duration::from_millis(500));
     }
     Err(Error::Invalid(
-        "o container arrancou mas não ficou saudável em 40s — vê `delonix container logs`".into(),
+        super::po::t(
+            "the container started but did not become healthy in 40s — see `delonix container logs`",
+        )
+        .into(),
     ))
 }
 
@@ -449,16 +484,25 @@ fn next_steps(target: Target, o: &InitOpts) -> String {
         format!("cd {} && ", o.dir.display())
     };
     match target {
-        Target::Container => format!("pronto. Agora:\n  {cd}delonix build -t {}:dev .\n  {cd}delonix container apply", o.name),
-        Target::Vm => format!("pronto. Agora:\n  {cd}delonix vm apply"),
-        Target::Cluster => format!("pronto. Agora:\n  {cd}delonix cluster create --name {}    # local, sem manifesto\n  (ou edita cluster-vm.yaml / cluster-ssh.yaml para VMs / hosts remotos)", o.name),
-        Target::Stack => format!(
-            "pronto. Projecto completo em {}. Agora:\n  \
-             {cd}delonix build -t {}:dev .        # constrói a imagem da app\n  \
-             {cd}delonix stack apply              # rede + volume + BD + app, tudo de pé\n  \
+        Target::Container => super::po::tf(
+            "done. Now:\n  {cd}delonix build -t {name}:dev .\n  {cd}delonix container apply",
+            &[("cd", &cd), ("name", &o.name)],
+        ),
+        Target::Vm => super::po::tf("done. Now:\n  {cd}delonix vm apply", &[("cd", &cd)]),
+        Target::Cluster => super::po::tf(
+            "done. Now:\n  {cd}delonix cluster create --name {name}    # local, no manifest\n  (or edit cluster-vm.yaml / cluster-ssh.yaml for VMs / remote hosts)",
+            &[("cd", &cd), ("name", &o.name)],
+        ),
+        Target::Stack => super::po::tf(
+            "done. Full project in {dir}. Now:\n  \
+             {cd}delonix build -t {name}:dev .        # builds the app's image\n  \
+             {cd}delonix stack apply              # network + volume + DB + app, all up\n  \
              {cd}delonix container ls",
-            o.dir.display(),
-            o.name
+            &[
+                ("dir", &o.dir.display().to_string()),
+                ("cd", &cd),
+                ("name", &o.name),
+            ],
         ),
     }
 }

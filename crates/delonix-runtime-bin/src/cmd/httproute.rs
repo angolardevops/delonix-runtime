@@ -40,7 +40,10 @@ pub fn run(action: HttpRouteCmd) -> Result<()> {
     match action {
         HttpRouteCmd::Ls => {
             if !ingress_proxy::is_running() {
-                println!("httproute: proxy parado (nenhum HTTPRoute activo)");
+                println!(
+                    "{}",
+                    super::po::t("httproute: proxy stopped (no active HTTPRoute)")
+                );
                 return Ok(());
             }
             let cfg = std::fs::read(ingress_proxy::config_path())
@@ -49,9 +52,14 @@ pub fn run(action: HttpRouteCmd) -> Result<()> {
             match cfg {
                 Some(c) => {
                     println!(
-                        "httproute: proxy A SERVIR — {} listener(s), {} rota(s)",
-                        c.listeners.len(),
-                        c.routes.len()
+                        "{}",
+                        super::po::tf(
+                            "httproute: proxy SERVING — {listeners} listener(s), {routes} route(s)",
+                            &[
+                                ("listeners", &c.listeners.len().to_string()),
+                                ("routes", &c.routes.len().to_string()),
+                            ],
+                        )
                     );
                     for l in &c.listeners {
                         println!(
@@ -86,9 +94,17 @@ pub fn run(action: HttpRouteCmd) -> Result<()> {
             // survive and the proxy only stops if nothing else remains.
             ingress_proxy::clear_manual()?;
             if ingress_proxy::is_running() {
-                println!("httproute: rotas manuais removidas — proxy mantém-se (há rotas auto-registadas)");
+                println!(
+                    "{}",
+                    super::po::t(
+                        "httproute: manual routes removed — proxy stays up (there are auto-registered routes)"
+                    )
+                );
             } else {
-                println!("httproute: proxy parado e portas despublicadas");
+                println!(
+                    "{}",
+                    super::po::t("httproute: proxy stopped and ports unpublished")
+                );
             }
             Ok(())
         }
@@ -212,35 +228,37 @@ pub fn validate_spec(name: &str, spec: &HttpRouteSpec) -> Result<()> {
     let err = |m: String| Error::Invalid(format!("HTTPRoute '{name}': {m}"));
 
     if spec.rules.is_empty() {
-        return Err(err(
-            "spec.rules não pode ser vazio (nada para rotear)".into()
-        ));
+        return Err(err(super::po::t(
+            "spec.rules cannot be empty (nothing to route)",
+        )
+        .into()));
     }
     // TLS: if any entrypoint asks for tls, or mode: secretRef, spec.tls has to
     // make sense.
     if let Some(tls) = &spec.tls {
         let mode = tls.mode.as_deref().unwrap_or("selfSigned");
         if !matches!(mode, "selfSigned" | "secretRef") {
-            return Err(err(format!(
-                "tls.mode inválido '{mode}' (usa selfSigned|secretRef)"
+            return Err(err(super::po::tf(
+                "tls.mode invalid '{mode}' (use selfSigned|secretRef)",
+                &[("mode", mode)],
             )));
         }
         if mode == "secretRef" && tls.secret_ref.as_deref().unwrap_or("").is_empty() {
-            return Err(err(
-                "tls.mode: secretRef exige tls.secretRef (nome do Secret com tls.crt/tls.key)"
-                    .into(),
-            ));
+            return Err(err(super::po::t(
+                "tls.mode: secretRef requires tls.secretRef (name of the Secret with tls.crt/tls.key)",
+            )
+            .into()));
         }
     }
     // An entrypoint with tls: true requires spec.tls defined (otherwise no cert).
     for ep in &spec.entrypoints {
         if ep.port == 0 {
-            return Err(err("entrypoint com port: 0 inválido".into()));
+            return Err(err(super::po::t("entrypoint with port: 0 invalid").into()));
         }
         if ep.tls && spec.tls.is_none() {
-            return Err(err(format!(
-                "entrypoint :{} pede tls mas spec.tls não está definido",
-                ep.port
+            return Err(err(super::po::tf(
+                "entrypoint :{port} requests tls but spec.tls is not defined",
+                &[("port", &ep.port.to_string())],
             )));
         }
     }
@@ -252,38 +270,53 @@ pub fn validate_spec(name: &str, spec: &HttpRouteSpec) -> Result<()> {
     for (i, rule) in spec.rules.iter().enumerate() {
         if let Some(host) = &rule.host {
             if !valid_host(host) {
-                return Err(err(format!("rules[{i}].host inválido '{host}'")));
+                return Err(err(super::po::tf(
+                    "rules[{i}].host invalid '{host}'",
+                    &[("i", &i.to_string()), ("host", host)],
+                )));
             }
         }
         if rule.paths.is_empty() {
-            return Err(err(format!(
-                "rules[{i}] sem paths (nada para rotear neste host)"
+            return Err(err(super::po::tf(
+                "rules[{i}] has no paths (nothing to route on this host)",
+                &[("i", &i.to_string())],
             )));
         }
         for (j, pr) in rule.paths.iter().enumerate() {
             if !valid_path_prefix(&pr.path) {
-                return Err(err(format!(
-                    "rules[{i}].paths[{j}].path inválido '{}'",
-                    pr.path
+                return Err(err(super::po::tf(
+                    "rules[{i}].paths[{j}].path invalid '{path}'",
+                    &[
+                        ("i", &i.to_string()),
+                        ("j", &j.to_string()),
+                        ("path", &pr.path),
+                    ],
                 )));
             }
             if !valid_service(&pr.backend.service) {
-                return Err(err(format!(
-                    "rules[{i}].paths[{j}].backend.service inválido '{}'",
-                    pr.backend.service
+                return Err(err(super::po::tf(
+                    "rules[{i}].paths[{j}].backend.service invalid '{service}'",
+                    &[
+                        ("i", &i.to_string()),
+                        ("j", &j.to_string()),
+                        ("service", &pr.backend.service),
+                    ],
                 )));
             }
             if pr.backend.port == 0 {
-                return Err(err(format!(
-                    "rules[{i}].paths[{j}].backend.port: 0 inválido"
+                return Err(err(super::po::tf(
+                    "rules[{i}].paths[{j}].backend.port: 0 invalid",
+                    &[("i", &i.to_string()), ("j", &j.to_string())],
                 )));
             }
             let route_key = (rule.host.clone().unwrap_or_default(), pr.path.clone());
             if !seen_routes.insert(route_key) {
-                return Err(err(format!(
-                    "rota duplicada host='{}' path='{}' — uma delas ficaria morta",
-                    rule.host.as_deref().unwrap_or("*"),
-                    pr.path
+                return Err(err(super::po::tf(
+                    "duplicate route host='{host}' path='{path}' — one of them would be dead",
+                    &[
+                        ("host", rule.host.as_deref().unwrap_or("*")),
+                        ("path", &pr.path),
+                    ],
                 )));
             }
         }
@@ -515,13 +548,15 @@ fn tls_from_secret(name: &str) -> Result<TlsMaterial> {
     let s = store.load(name)?;
     let pick = |a: &str, b: &str| s.data.get(a).or_else(|| s.data.get(b)).cloned();
     let cert = pick("tls_crt", "tls.crt").ok_or_else(|| {
-        Error::Invalid(format!(
-            "Secret '{name}': falta a chave tls_crt/tls.crt (cert PEM)"
+        Error::Invalid(super::po::tf(
+            "Secret '{name}': missing key tls_crt/tls.crt (PEM cert)",
+            &[("name", name)],
         ))
     })?;
     let key = pick("tls_key", "tls.key").ok_or_else(|| {
-        Error::Invalid(format!(
-            "Secret '{name}': falta a chave tls_key/tls.key (chave PEM)"
+        Error::Invalid(super::po::tf(
+            "Secret '{name}': missing key tls_key/tls.key (PEM key)",
+            &[("name", name)],
         ))
     })?;
     Ok(TlsMaterial {
@@ -584,9 +619,9 @@ fn resolve_config(specs: &[(String, HttpRouteSpec)]) -> Result<Option<ProxyConfi
             }
             for pr in &rule.paths {
                 let ip = ips.get(&pr.backend.service).ok_or_else(|| {
-                    Error::Invalid(format!(
-                        "HTTPRoute '{name}': backend '{}' não tem IP na SDN (existe e está numa rede custom?)",
-                        pr.backend.service
+                    Error::Invalid(super::po::tf(
+                        "HTTPRoute '{name}': backend '{service}' has no IP on the SDN (does it exist and is it on a custom network?)",
+                        &[("name", name), ("service", &pr.backend.service)],
                     ))
                 })?;
                 routes.push(Route {
@@ -624,15 +659,23 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
     // of `--expose` containers, without one erasing the other).
     ingress_proxy::set_manual(&cfg)?;
     println!(
-        "httproute: {} rota(s) em {} listener(s){} — proxy {}",
-        cfg.routes.len(),
-        cfg.listeners.len(),
-        if cfg.tls.is_some() { " (TLS)" } else { "" },
-        if ingress_proxy::is_running() {
-            "a servir"
-        } else {
-            "arrancado"
-        }
+        "{}",
+        super::po::tf(
+            "httproute: {routes} route(s) on {listeners} listener(s){tls} — proxy {state}",
+            &[
+                ("routes", &cfg.routes.len().to_string()),
+                ("listeners", &cfg.listeners.len().to_string()),
+                ("tls", if cfg.tls.is_some() { " (TLS)" } else { "" }),
+                (
+                    "state",
+                    if ingress_proxy::is_running() {
+                        "serving"
+                    } else {
+                        "started"
+                    },
+                ),
+            ],
+        )
     );
     Ok(())
 }

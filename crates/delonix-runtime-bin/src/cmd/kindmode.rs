@@ -218,9 +218,14 @@ fn node_must(c: &Container, what: &str, script: &str) -> Result<()> {
         .rev()
         .map(|l| format!("\n    {l}"))
         .collect::<String>();
-    Err(Error::Invalid(format!(
-        "{what} falhou no nó '{}' (exit {code}){detalhe}",
-        c.name
+    Err(Error::Invalid(super::po::tf(
+        "{what} failed on node '{name}' (exit {code}){detail}",
+        &[
+            ("what", what),
+            ("name", &c.name),
+            ("code", &code.to_string()),
+            ("detail", &detalhe),
+        ],
     )))
 }
 
@@ -236,10 +241,13 @@ fn wait_in_node(c: &Container, what: &str, check: &str, timeout: Duration) -> Re
         }
         std::thread::sleep(Duration::from_secs(2));
     }
-    Err(Error::Invalid(format!(
-        "timeout à espera de {what} no nó '{}' ({}s)",
-        c.name,
-        timeout.as_secs()
+    Err(Error::Invalid(super::po::tf(
+        "timeout waiting for {what} on node '{name}' ({secs}s)",
+        &[
+            ("what", what),
+            ("name", &c.name),
+            ("secs", &timeout.as_secs().to_string()),
+        ],
     )))
 }
 
@@ -288,10 +296,18 @@ fn parse_join_command(s: &str) -> Result<JoinInfo> {
                 super::po::t("could not read the join endpoint")
             ))
         })?;
-    let token =
-        flag("--token").ok_or_else(|| Error::Invalid(format!("join sem --token: {s:?}")))?;
-    let ca_hash = flag("--discovery-token-ca-cert-hash")
-        .ok_or_else(|| Error::Invalid(format!("join sem --discovery-token-ca-cert-hash: {s:?}")))?;
+    let token = flag("--token").ok_or_else(|| {
+        Error::Invalid(super::po::tf(
+            "join without --token: {s}",
+            &[("s", &format!("{s:?}"))],
+        ))
+    })?;
+    let ca_hash = flag("--discovery-token-ca-cert-hash").ok_or_else(|| {
+        Error::Invalid(super::po::tf(
+            "join without --discovery-token-ca-cert-hash: {s}",
+            &[("s", &format!("{s:?}"))],
+        ))
+    })?;
     Ok(JoinInfo {
         endpoint,
         token,
@@ -336,7 +352,7 @@ pub(crate) fn random_cluster_name(store: &Store) -> Result<String> {
         .filter_map(|c| c.labels.get("io.x-k8s.kind.cluster").cloned())
         .collect();
     super::names::random_name(|n| existing.iter().any(|e| e == n)).ok_or_else(|| {
-        Error::Invalid("não consegui inventar um nome livre — passa `--name`".into())
+        Error::Invalid(super::po::t("could not invent a free name — pass `--name`").into())
     })
 }
 
@@ -435,14 +451,16 @@ fn boot_node(
 pub(crate) fn create(images: &ImageStore, store: &Store, cfg: &KindCluster) -> Result<()> {
     let node = format!("{}-control-plane", cfg.name); // kind naming convention
     if store.list()?.iter().any(|c| c.name == node) {
-        return Err(Error::Invalid(format!(
-            "o nó '{node}' já existe — usa `delonix cluster delete --name {}` ou outro nome",
-            cfg.name
+        return Err(Error::Invalid(super::po::tf(
+            "node '{node}' already exists — use `delonix cluster delete --name {name}` or another name",
+            &[("node", &node), ("name", &cfg.name)],
         )));
     }
 
     if cfg.control_planes == 0 {
-        return Err(Error::Invalid("--control-planes tem de ser >= 1".into()));
+        return Err(Error::Invalid(
+            super::po::t("--control-planes must be >= 1").into(),
+        ));
     }
     if cfg.control_planes > 1 {
         // Refuse instead of pretending: with N control-planes and the
@@ -650,7 +668,7 @@ pub(crate) fn create(images: &ImageStore, store: &Store, cfg: &KindCluster) -> R
     p.step(super::po::t("Waiting for control-plane to be Ready"), "⏳");
     wait_in_node(
         &c,
-        "o control-plane ficar Ready",
+        super::po::t("the control-plane to become Ready"),
         "KUBECONFIG=/etc/kubernetes/admin.conf kubectl get nodes --no-headers 2>/dev/null | grep -qw Ready",
         Duration::from_secs(180),
     )?;
@@ -665,14 +683,16 @@ pub(crate) fn create(images: &ImageStore, store: &Store, cfg: &KindCluster) -> R
         // the rootfs would not work (see `cluster_dir`).
         node_must(
             &c,
-            "gerar o comando de join",
+            super::po::t("generate the join command"),
             &format!(
                 "KUBECONFIG=/etc/kubernetes/admin.conf kubeadm token create --print-join-command \
                  > {NODE_SHARED}/join.sh 2>/dev/null"
             ),
         )?;
-        let join_cmd = std::fs::read_to_string(cluster_dir(&cfg.name).join("join.sh"))
-            .map_err(|e| Error::Invalid(format!("a ler o comando de join: {e}")))?;
+        let join_cmd =
+            std::fs::read_to_string(cluster_dir(&cfg.name).join("join.sh")).map_err(|e| {
+                Error::Invalid(format!("{}: {e}", super::po::t("reading the join command")))
+            })?;
         // Take the line apart into (endpoint, token, hash) and write a
         // `JoinConfiguration` — see `parse_join_command` for why: running the
         // line AND passing `--config` is what kubeadm refuses with
@@ -701,7 +721,7 @@ pub(crate) fn create(images: &ImageStore, store: &Store, cfg: &KindCluster) -> R
                         let w = boot_node(images, store, cfg, &wnode, "worker", Vec::new())?;
                         node_must(
                             &w,
-                            &format!("join do worker '{wnode}'"),
+                            &super::po::tf("join of worker '{wnode}'", &[("wnode", &wnode)]),
                             &format!(
                                 "kubeadm join --config {NODE_SHARED}/{conf} \
                                  --ignore-preflight-errors=Swap,SystemVerification,FileContent--proc-sys-net-bridge-bridge-nf-call-iptables,Mem,NumCPU"
@@ -716,15 +736,17 @@ pub(crate) fn create(images: &ImageStore, store: &Store, cfg: &KindCluster) -> R
                     Ok(Ok(())) => None,
                     Ok(Err(e)) => Some(e.to_string()),
                     // A panic in a thread cannot pass for "worker ok".
-                    Err(_) => Some("uma thread de worker entrou em panic".to_string()),
+                    Err(_) => Some(super::po::t("a worker thread panicked").to_string()),
                 })
                 .collect()
         });
         if !erros.is_empty() {
-            return Err(Error::Invalid(format!(
-                "{} worker(s) falharam:\n  {}",
-                erros.len(),
-                erros.join("\n  ")
+            return Err(Error::Invalid(super::po::tf(
+                "{n} worker(s) failed:\n  {list}",
+                &[
+                    ("n", &erros.len().to_string()),
+                    ("list", &erros.join("\n  ")),
+                ],
             )));
         }
 
@@ -734,7 +756,10 @@ pub(crate) fn create(images: &ImageStore, store: &Store, cfg: &KindCluster) -> R
         let espera = Duration::from_secs(180 + 60 * u64::from(cfg.workers));
         wait_in_node(
             &c,
-            &format!("os {} worker(s) ficarem Ready", cfg.workers),
+            &super::po::tf(
+                "the {n} worker(s) to become Ready",
+                &[("n", &cfg.workers.to_string())],
+            ),
             &format!(
                 "[ \"$(KUBECONFIG=/etc/kubernetes/admin.conf kubectl get nodes --no-headers 2>/dev/null | grep -cw Ready)\" = \"{}\" ]",
                 cfg.workers + 1
@@ -838,18 +863,29 @@ fn install_kubecontext(cluster: &str) -> Result<std::path::PathBuf> {
     use serde_yaml::Value;
     let name = context_name(cluster);
     let src = kubeconfig_path(cluster);
-    let raw = std::fs::read_to_string(&src)
-        .map_err(|e| Error::Invalid(format!("a ler {}: {e}", src.display())))?;
-    let novo: Value = serde_yaml::from_str(&raw)
-        .map_err(|e| Error::Invalid(format!("kubeconfig do cluster inválido: {e}")))?;
+    let raw = std::fs::read_to_string(&src).map_err(|e| {
+        Error::Invalid(format!(
+            "{}: {e}",
+            super::po::tf("reading {path}", &[("path", &src.display().to_string())])
+        ))
+    })?;
+    let novo: Value = serde_yaml::from_str(&raw).map_err(|e| {
+        Error::Invalid(format!(
+            "{}: {e}",
+            super::po::t("invalid cluster kubeconfig")
+        ))
+    })?;
 
-    let dest =
-        user_kubeconfig_path().ok_or_else(|| Error::Invalid("sem $HOME nem $KUBECONFIG".into()))?;
+    let dest = user_kubeconfig_path()
+        .ok_or_else(|| Error::Invalid(super::po::t("no $HOME nor $KUBECONFIG").into()))?;
     let mut cfg: Value = match std::fs::read_to_string(&dest) {
         Ok(t) if !t.trim().is_empty() => serde_yaml::from_str(&t).map_err(|e| {
             Error::Invalid(format!(
-                "o {} existente não é YAML válido: {e}",
-                dest.display()
+                "{}: {e}",
+                super::po::tf(
+                    "existing {path} is not valid YAML",
+                    &[("path", &dest.display().to_string())],
+                )
             ))
         })?,
         // Does not exist (or is empty): start a kubeconfig from scratch.
@@ -862,10 +898,10 @@ fn install_kubecontext(cluster: &str) -> Result<std::path::PathBuf> {
     // Take from the cluster's kubeconfig the 1st of each list and rename it.
     let pega =
         |v: &Value, chave: &str| -> Option<Value> { v.get(chave)?.as_sequence()?.first().cloned() };
-    let mut cl =
-        pega(&novo, "clusters").ok_or_else(|| Error::Invalid("kubeconfig sem clusters".into()))?;
-    let mut us =
-        pega(&novo, "users").ok_or_else(|| Error::Invalid("kubeconfig sem users".into()))?;
+    let mut cl = pega(&novo, "clusters")
+        .ok_or_else(|| Error::Invalid(super::po::t("kubeconfig has no clusters").into()))?;
+    let mut us = pega(&novo, "users")
+        .ok_or_else(|| Error::Invalid(super::po::t("kubeconfig has no users").into()))?;
     if let Some(m) = cl.as_mapping_mut() {
         m.insert("name".into(), name.clone().into());
     }
@@ -933,7 +969,7 @@ fn write_kubeconfig(c: &Container, name: &str, api_port: u16) -> Result<()> {
     // The node writes into the SHARED dir; the host reads from there (see `cluster_dir`).
     node_must(
         c,
-        "exportar o kubeconfig",
+        super::po::t("export the kubeconfig"),
         &format!(
             "sed 's|server: https://.*:6443|server: https://127.0.0.1:{api_port}|' \
              /etc/kubernetes/admin.conf > {NODE_SHARED}/kubeconfig.yaml"

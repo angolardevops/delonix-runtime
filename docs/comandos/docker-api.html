@@ -78,30 +78,35 @@ main{padding:1.4rem 1.2rem 4rem}}
 <h5>Documentação</h5>
 <a href="../index.html">Início</a><a href="../cheatsheet.html">Cheatsheet</a><a href="../kinds.html">Kinds e templates</a><a href="../arquitectura.html">Arquitectura</a><a href="../c4.html">Modelo C4 e system design</a><a href="../cri.html">CRI — kubelet sem containerd</a><a href="../comparacao.html">Delonix vs Docker vs Podman</a><a href="../tutorial-delonix-temp.html">Projecto completo: Delonix Temp</a><a href="../delonixctl.html">delonixctl — cliente PaaS</a>
 <h5>Referência CLI</h5>
-<a href="../comandos/container.html">delonix container</a><a href="../comandos/pod.html">delonix pod</a><a href="../comandos/image.html">delonix image</a><a href="../comandos/build.html">delonix build</a><a href="../comandos/vm.html">delonix vm</a><a href="../comandos/volumes.html">delonix volumes</a><a href="../comandos/network.html">delonix network</a><a href="../comandos/stack.html">delonix stack</a><a href="../comandos/cluster.html">delonix cluster</a><a href="../comandos/secret.html">delonix secret</a><a href="../comandos/storage.html">delonix storage</a><a href="../comandos/sharevolume.html">delonix sharevolume</a><a href="../comandos/ingress.html">delonix net ingress</a><a href="../comandos/egress.html">delonix net egress</a><a href="../comandos/httproute.html">delonix net httproute</a><a href="../comandos/tunnel.html">delonix net tunnel</a><a href="../comandos/flow.html">delonix net flow</a><a href="../comandos/boot.html">delonix net boot</a><a href="../comandos/system.html">delonix system</a><a href="../comandos/dash.html">delonix dash</a><a href="../comandos/docker-api.html" class="on">delonix serve docker-api</a><a href="../comandos/kube.html">delonix cluster kube</a><a href="../comandos/netns.html">delonix net netns</a><a href="../comandos/completion.html">delonix completion</a>
+<a href="../comandos/container.html">delonix container</a><a href="../comandos/pod.html">delonix pod</a><a href="../comandos/image.html">delonix image</a><a href="../comandos/build.html">delonix build</a><a href="../comandos/vm.html">delonix vm</a><a href="../comandos/volumes.html">delonix volumes</a><a href="../comandos/network.html">delonix network</a><a href="../comandos/stack.html">delonix stack</a><a href="../comandos/compose.html">delonix compose</a><a href="../comandos/cluster.html">delonix cluster</a><a href="../comandos/secret.html">delonix secret</a><a href="../comandos/storage.html">delonix storage</a><a href="../comandos/sharevolume.html">delonix sharevolume</a><a href="../comandos/ingress.html">delonix net ingress</a><a href="../comandos/egress.html">delonix net egress</a><a href="../comandos/httproute.html">delonix net httproute</a><a href="../comandos/tunnel.html">delonix net tunnel</a><a href="../comandos/flow.html">delonix net flow</a><a href="../comandos/boot.html">delonix net boot</a><a href="../comandos/system.html">delonix system</a><a href="../comandos/dash.html">delonix dash</a><a href="../comandos/docker-api.html" class="on">delonix serve docker-api</a><a href="../comandos/kube.html">delonix cluster kube</a><a href="../comandos/netns.html">delonix net netns</a><a href="../comandos/completion.html">delonix completion</a>
 <h5>Projecto</h5>
 <a href="https://github.com/angolardevops/delonix-runtime">GitHub</a>
 <a href="https://github.com/angolardevops/delonix-runtime/releases">Releases</a>
 </nav>
 <main>
-<h1>delonix serve docker-api</h1><p class='tagline'>Fatia SÓ-LEITURA da API Docker Engine, num socket unix — `docker version/ps/images/info`.</p>
+<h1>delonix serve docker-api</h1><p class='tagline'>Fatia da API Docker Engine, num socket unix — ciclo de vida completo de um container, não só leitura.</p>
 <p>Serve o suficiente da API real do Docker Engine (protocolo capturado ao vivo
 contra um <code>docker</code> CLI real, versão negociada via o header <code>Api-Version</code> da
 resposta ao <code>/_ping</code>) para <code>docker version</code>/<code>ps</code>/<code>images</code>/
 <code>info</code> apontados via <code>DOCKER_HOST=unix://&lt;socket&gt;</code> funcionarem contra o
-estado REAL do delonix — útil para ferramentas que só sabem falar com a API do Docker. Mesma postura
-de segurança do socket de gestão: 0600 + <code>SO_PEERCRED</code> (só o próprio utilizador). Por
-fazer: mutações (<code>create</code>/<code>start</code>/<code>exec</code>) — o que falta para
-<code>docker run</code>/<code>docker compose up</code>; qualquer rota não implementada dá 404 claro.</p>
+estado REAL do delonix. Desde a v0.26.0, também o ciclo de vida completo de um container —
+<code>POST /containers/create|start|stop|kill|wait|restart|rename</code>,
+<code>DELETE /containers/{id}</code>, <code>GET /containers/{id}/json</code> — todos a delegar nas
+mesmas funções do CLI (<code>cmd_run</code>/<code>cmd_stop</code>/<code>cmd_kill</code>/...), zero
+lógica duplicada; é o suficiente para <code>docker compose up</code> apontado a este socket
+funcionar. Mesma postura de segurança do socket de gestão: 0600 + <code>SO_PEERCRED</code> (só o
+próprio utilizador). Fora de escopo: <code>exec</code>/attach interactivo (HTTP hijacking) e
+<code>--restart</code> (precisa de um supervisor <code>fork()</code> cru, recusado com erro claro);
+qualquer rota não implementada dá 404 claro.</p>
 <div class='help'><pre><code>Serve a slice of the Docker Engine API on a unix socket — `docker version`/`ps`/`images`/`info`/lifecycle mutations via `DOCKER_HOST=unix://&lt;path&gt;`
 
-Usage: delonix-x86_64-linux serve docker-api [OPTIONS]
+Usage: dlx serve docker-api [OPTIONS]
 
 Options:
       --addr &lt;ADDR&gt;   Socket address (default: `$DELONIX_DOCKER_ADDR` or `unix:///run/delonix-docker.sock`)
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
   -h, --help          Print help</code></pre></div>
-<h2>Exemplos</h2><div class="ex"><div class="cap">Servir no socket por omissão</div><pre><code>delonix serve docker-api &amp;</code></pre></div><div class="ex"><div class="cap">Um `docker` real a falar com o delonix</div><pre><code>DOCKER_HOST=unix:///run/delonix-docker.sock docker ps</code></pre></div>
+<h2>Exemplos</h2><div class="ex"><div class="cap">Servir no socket por omissão</div><pre><code>delonix serve docker-api &amp;</code></pre></div><div class="ex"><div class="cap">Um `docker` real a falar com o delonix</div><pre><code>DOCKER_HOST=unix:///run/delonix-docker.sock docker ps</code></pre></div><div class="ex"><div class="cap">`docker compose up` apontado ao delonix</div><pre><code>DOCKER_HOST=unix:///run/delonix-docker.sock docker compose up -d</code></pre></div>
 <footer>Delonix Engine · Apache-2.0 · <a href="https://github.com/angolardevops/delonix-runtime">angolardevops/delonix-runtime</a>
 · Referência gerada do <code>--help</code> real do binário por <code>docs/gen.py</code>.</footer>
 </main>

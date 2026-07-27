@@ -47,14 +47,14 @@ fn load_advisories() -> Result<(AdvisoryDb, Provenance)> {
                 let src = m
                     .get("source")
                     .and_then(|v| v.as_str())
-                    .unwrap_or("desconhecida")
+                    .unwrap_or(super::po::t("unknown"))
                     .to_string();
                 (
-                    format!("sincronizada de {src}"),
+                    super::po::tf("synced from {src}", &[("src", &src)]),
                     m.get("synced_unix").and_then(|v| v.as_u64()),
                 )
             })
-            .unwrap_or_else(|| ("sincronizada".into(), None));
+            .unwrap_or_else(|| (super::po::t("synced").into(), None));
         return Ok((
             db,
             Provenance {
@@ -79,7 +79,7 @@ fn load_advisories() -> Result<(AdvisoryDb, Provenance)> {
     Ok((
         db,
         Provenance {
-            label: "base EMBEBIDA (placeholder)".into(),
+            label: super::po::t("EMBEDDED database (placeholder)").into(),
             synced_unix: None,
             placeholder: true,
         },
@@ -111,15 +111,22 @@ pub fn cmd_scan(image: &str, sbom: bool, fail_on: Option<&str>) -> Result<()> {
                 format!("{:?}", p.ecosystem),
             ]);
         }
-        println!("SBOM de {} — {} pacotes:", img.short_id(), pkgs.len());
+        println!(
+            "{}",
+            super::po::tf(
+                "SBOM of {img} — {n} package(s):",
+                &[("img", &img.short_id()), ("n", &pkgs.len().to_string())],
+            )
+        );
         t.print();
         return Ok(());
     }
     let worst = scan_image(&images, &img)?;
     if let Some(threshold) = fail_on {
         let th = Severity::parse(threshold).ok_or_else(|| {
-            Error::Invalid(format!(
-                "severidade inválida: {threshold} (low|medium|high|critical)"
+            Error::Invalid(super::po::tf(
+                "invalid severity: {threshold} (low|medium|high|critical)",
+                &[("threshold", threshold)],
             ))
         })?;
         if worst.map(|w| w >= th).unwrap_or(false) {
@@ -149,9 +156,18 @@ pub fn scan_image(images: &ImageStore, image: &Image) -> Result<Option<Severity>
     );
     println!(
         "  {}   {}   {}",
-        output::dim(&format!("SBOM: {} pacotes", sbom.len())),
-        output::dim(&format!("advisories: {}", db.len())),
-        output::dim(&format!("vulnerabilidades: {}", findings.len())),
+        output::dim(&super::po::tf(
+            "SBOM: {n} package(s)",
+            &[("n", &sbom.len().to_string())],
+        )),
+        output::dim(&super::po::tf(
+            "advisories: {n}",
+            &[("n", &db.len().to_string())],
+        )),
+        output::dim(&super::po::tf(
+            "vulnerabilities: {n}",
+            &[("n", &findings.len().to_string())],
+        )),
     );
     println!("  {}", sev_line(crit, high, med, low));
 
@@ -160,30 +176,33 @@ pub fn scan_image(images: &ImageStore, image: &Image) -> Result<Option<Severity>
     let stale = delonix_scan::db_is_stale(prov.synced_unix, now_unix(), 14);
     println!(
         "  {}",
-        output::dim(&format!(
-            "fonte da base: {} ({} advisories)",
-            prov.label,
-            db.len()
+        output::dim(&super::po::tf(
+            "database source: {label} ({n} advisories)",
+            &[("label", &prov.label), ("n", &db.len().to_string())],
         ))
     );
     if prov.placeholder {
-        output::warn(&format!(
-            "base de CVE EMBEBIDA (placeholder, {} entradas) — NÃO é um feed real; um \"sem vulnerabilidades\" não é de confiança. \
-             Sincroniza: `delonix image scan --update --feed https://…/osv.json`",
-            db.len()
+        output::warn(&super::po::tf(
+            "EMBEDDED CVE database (placeholder, {n} entries) — NOT a real feed; a \"no vulnerabilities\" is not to be trusted. \
+             Sync: `delonix image scan --update --feed https://…/osv.json`",
+            &[("n", &db.len().to_string())],
         ));
     } else if stale {
-        output::warn("base de advisories obsoleta (>14 dias sem sync) — corre `delonix image scan --update`.");
+        output::warn(super::po::t(
+            "stale advisories database (>14 days without sync) — run `delonix image scan --update`.",
+        ));
     }
 
     if findings.is_empty() {
         if prov.placeholder {
             println!(
                 "  {}",
-                output::dim("sem correspondências na base placeholder (não conclusivo)")
+                output::dim(super::po::t(
+                    "no matches in the placeholder database (not conclusive)"
+                ))
             );
         } else {
-            println!("  ✔ sem vulnerabilidades conhecidas");
+            println!("  ✔ {}", super::po::t("no known vulnerabilities"));
         }
         return Ok(None);
     }
@@ -225,10 +244,17 @@ pub fn cmd_scan_update(feed: Option<String>) -> Result<()> {
         .or_else(|| std::env::var("DELONIX_ADVISORY_FEED").ok())
         .ok_or_else(|| {
             Error::Invalid(
-                "indica a fonte: --feed <url|ficheiro> (ou $DELONIX_ADVISORY_FEED)".into(),
+                super::po::t("indicate the source: --feed <url|file> (or $DELONIX_ADVISORY_FEED)")
+                    .into(),
             )
         })?;
-    eprintln!("a sincronizar o feed de CVE de {source}…");
+    eprintln!(
+        "{}",
+        super::po::tf(
+            "syncing the CVE feed from {source}…",
+            &[("source", &source)]
+        )
+    );
     let raw = if source.starts_with("http://") || source.starts_with("https://") {
         delonix_image::http_get(&source)?
     } else {
@@ -236,8 +262,8 @@ pub fn cmd_scan_update(feed: Option<String>) -> Result<()> {
         std::fs::read(path)?
     };
     let text = String::from_utf8_lossy(&raw);
-    let value: serde_json::Value =
-        serde_json::from_str(&text).map_err(|e| Error::Invalid(format!("feed inválido: {e}")))?;
+    let value: serde_json::Value = serde_json::from_str(&text)
+        .map_err(|e| Error::Invalid(format!("{}: {e}", super::po::t("invalid feed"))))?;
     // OSV: `{"vulns":…}` object or an array whose 1st element has `affected`.
     let is_osv = value.get("vulns").is_some()
         || value
@@ -248,15 +274,18 @@ pub fn cmd_scan_update(feed: Option<String>) -> Result<()> {
     let incoming: Vec<serde_json::Value> = if is_osv {
         let advs = delonix_scan::advisories_from_osv(&text)?;
         eprintln!(
-            "→ feed OSV detectado: {} advisories convertidas (Alpine/Debian/Ubuntu)",
-            advs.len()
+            "{}",
+            super::po::tf(
+                "→ OSV feed detected: {n} advisories converted (Alpine/Debian/Ubuntu)",
+                &[("n", &advs.len().to_string())],
+            )
         );
         advs.iter()
             .filter_map(|a| serde_json::to_value(a).ok())
             .collect()
     } else {
         serde_json::from_value(value)
-            .map_err(|e| Error::Invalid(format!("feed nativo inválido: {e}")))?
+            .map_err(|e| Error::Invalid(format!("{}: {e}", super::po::t("invalid native feed"))))?
     };
 
     let dst = images.root().join("advisories.json");
@@ -293,8 +322,15 @@ pub fn cmd_scan_update(feed: Option<String>) -> Result<()> {
         serde_json::to_string_pretty(&meta).unwrap_or_default(),
     );
     println!(
-        "base de advisories sincronizada: {} entradas ({added} novas) de {source}",
-        merged.len()
+        "{}",
+        super::po::tf(
+            "advisories database synced: {n} entries ({added} new) from {source}",
+            &[
+                ("n", &merged.len().to_string()),
+                ("added", &added.to_string()),
+                ("source", &source),
+            ],
+        )
     );
     Ok(())
 }
@@ -337,30 +373,37 @@ pub fn admission_scan_on_pull(images: &ImageStore, reference: &str, img: &Image)
     // documented as a "fail-closed GATE"; validate the policy string BEFORE
     // scanning anything, so a bad value refuses instead of admitting.
     if !valid_admission_policy(&policy) {
-        return Err(Error::Invalid(format!(
-            "DELONIX_SCAN_ON_PULL='{policy}' inválido (warn|low|medium|high|critical) — \
-             recusado (a política é um gate fail-closed; um valor desconhecido não é tratado \
-             como 'sem política')"
+        return Err(Error::Invalid(super::po::tf(
+            "DELONIX_SCAN_ON_PULL='{policy}' invalid (warn|low|medium|high|critical) — \
+             refused (the policy is a fail-closed gate; an unknown value is not treated \
+             as 'no policy')",
+            &[("policy", &policy)],
         )));
     }
     eprintln!(
-        "→ política de admissão: scan de CVE de '{reference}' (DELONIX_SCAN_ON_PULL={policy})…"
+        "{}",
+        super::po::tf(
+            "→ admission policy: CVE scan of '{reference}' (DELONIX_SCAN_ON_PULL={policy})…",
+            &[("reference", reference), ("policy", &policy)],
+        )
     );
     let worst = match scan_image(images, img) {
         Ok(w) => w,
         // No SBOM (scratch/distroless) or scan unavailable → don't block, warn.
         Err(e) => {
-            output::warn(&format!(
-                "scan de admissão indisponível ({e}); pull permitido."
+            output::warn(&super::po::tf(
+                "admission scan unavailable ({e}); pull allowed.",
+                &[("e", &e.to_string())],
             ));
             return Ok(());
         }
     };
     if admission_rejects(worst, &policy) {
         let _ = images.remove(reference); // undoes the pull (fail-closed)
-        return Err(Error::Invalid(format!(
-            "imagem '{reference}' RECUSADA pela política de admissão: vulnerabilidade >= {policy} \
-             (DELONIX_SCAN_ON_PULL). Imagem removida. Corrige a imagem ou ajusta a política."
+        return Err(Error::Invalid(super::po::tf(
+            "image '{reference}' REJECTED by the admission policy: vulnerability >= {policy} \
+             (DELONIX_SCAN_ON_PULL). Image removed. Fix the image or adjust the policy.",
+            &[("reference", reference), ("policy", &policy)],
         )));
     }
     Ok(())

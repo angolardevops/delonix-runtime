@@ -487,23 +487,26 @@ fn cmd_build(
     if no_k8s {
         if k8s_version.is_some() {
             return Err(Error::Invalid(
-                "--no-k8s e --k8s-version são mutuamente exclusivos".into(),
+                super::po::t("--no-k8s and --k8s-version are mutually exclusive").into(),
             ));
         }
         if offline {
             return Err(Error::Invalid(
-                "--no-k8s não suporta --offline (o modo offline só sabe verificar .deb do k8s)"
-                    .into(),
+                super::po::t(
+                    "--no-k8s does not support --offline (offline mode only knows how to verify k8s .deb)",
+                )
+                .into(),
             ));
         }
         if cri_bin.is_some() {
             return Err(Error::Invalid(
-                "--no-k8s e --cri-bin são mutuamente exclusivos (usa --delonix-bin)".into(),
+                super::po::t("--no-k8s and --cri-bin are mutually exclusive (use --delonix-bin)")
+                    .into(),
             ));
         }
     } else if delonix_bin.is_some() {
         return Err(Error::Invalid(
-            "--delonix-bin só se aplica com --no-k8s".into(),
+            super::po::t("--delonix-bin only applies with --no-k8s").into(),
         ));
     }
     // Rocky's dnf-family customization steps only exist for the `--no-k8s`
@@ -513,9 +516,11 @@ fn cmd_build(
     // against a dnf guest.
     if distro == Distro::Rocky && !no_k8s {
         return Err(Error::Invalid(
-            "--distro rocky só suporta --no-k8s por agora (o caminho k8s precisa do \
-             repositório RPM do pkgs.k8s.io, ainda não implementado)"
-                .into(),
+            super::po::t(
+                "--distro rocky only supports --no-k8s for now (the k8s path needs the \
+                 pkgs.k8s.io RPM repository, not implemented yet)",
+            )
+            .into(),
         ));
     }
     // `k8s_version` goes into a `format!` that becomes a `virt-customize --run-command`
@@ -524,8 +529,9 @@ fn cmd_build(
     // contain shell metacharacters). Audit finding, see AGENTS.md.
     if let Some(v) = &k8s_version {
         if !super::cluster::valid_version(v) {
-            return Err(Error::Invalid(format!(
-                "--k8s-version '{v}' inválido (só dígitos e pontos, ex.: '1.31')"
+            return Err(Error::Invalid(super::po::tf(
+                "--k8s-version '{v}' invalid (only digits and dots, e.g.: '1.31')",
+                &[("v", v)],
             )));
         }
     }
@@ -561,7 +567,12 @@ fn cmd_build(
     )?;
 
     let ops = if no_k8s {
-        eprintln!("modo --no-k8s: a preparar imagem sem Kubernetes (delonix + rootless)...");
+        eprintln!(
+            "{}",
+            super::po::t(
+                "--no-k8s mode: preparing image without Kubernetes (delonix + rootless)..."
+            )
+        );
         let delonix = resolve_delonix_bin(delonix_bin)?;
         rootless_customization_steps(&extra_run, &delonix, distro)
     } else {
@@ -570,7 +581,10 @@ fn cmd_build(
         if offline {
             // Everything that needs network happens HERE, on the host (verified), so the
             // appliance can run with `--no-network`.
-            eprintln!("modo offline: a obter os .deb do k8s no host...");
+            eprintln!(
+                "{}",
+                super::po::t("offline mode: getting the k8s .deb on the host...")
+            );
             let debs = download_k8s_debs(
                 &work_dir,
                 &work_dir.join("debs"),
@@ -591,7 +605,10 @@ fn cmd_build(
                         .is_some_and(|n| n.starts_with("kubeadm_"))
                 })
                 .and_then(|kubeadm_deb| {
-                    eprintln!("a pré-semear as imagens do kubeadm no host...");
+                    eprintln!(
+                        "{}",
+                        super::po::t("pre-seeding the kubeadm images on the host...")
+                    );
                     preseed_k8s_images(&work_dir, kubeadm_deb, k8s_version.as_deref())
                 });
             k8s_customization_steps_offline(
@@ -621,9 +638,14 @@ fn cmd_build(
     }
 
     eprintln!(
-        "a correr virt-customize ({} passos{})...",
-        ops.len(),
-        if offline { ", sem rede" } else { "" }
+        "{}",
+        super::po::tf(
+            "running virt-customize ({n} step(s){net})...",
+            &[
+                ("n", &ops.len().to_string()),
+                ("net", if offline { ", no network" } else { "" }),
+            ],
+        )
     );
     run_tool(
         "virt-customize",
@@ -732,11 +754,14 @@ fn download_ubuntu_base(store: &VmImageStore, release: &str) -> Result<PathBuf> 
     let img_url = format!("{base_url}/{img_name}");
     let sums_url = format!("{base_url}/SHA256SUMS");
 
-    eprintln!("a descarregar {img_url}...");
+    eprintln!(
+        "{}",
+        super::po::tf("downloading {url}...", &[("url", &img_url)])
+    );
     let tmp = cached.with_extension("download");
     stream_download(&img_url, &tmp)?;
 
-    eprintln!("a verificar SHA256SUMS...");
+    eprintln!("{}", super::po::t("verifying SHA256SUMS..."));
     let sums = http_get_text(&sums_url)?;
     let expected = sums
         .lines()
@@ -752,8 +777,13 @@ fn download_ubuntu_base(store: &VmImageStore, release: &str) -> Result<PathBuf> 
     let got = hex_sha256_file(&tmp)?;
     if got != expected {
         let _ = std::fs::remove_file(&tmp);
-        return Err(Error::Invalid(format!(
-            "checksum inválido para {img_name}: esperado {expected}, obtido {got} — download descartado"
+        return Err(Error::Invalid(super::po::tf(
+            "invalid checksum for {img_name}: expected {expected}, got {got} — download discarded",
+            &[
+                ("img_name", &img_name),
+                ("expected", &expected),
+                ("got", &got),
+            ],
         )));
     }
     std::fs::rename(&tmp, &cached)?;
@@ -774,8 +804,9 @@ fn debian_major_version(codename: &str) -> Result<&'static str> {
         "bullseye" => Ok("11"),
         "bookworm" => Ok("12"),
         "trixie" => Ok("13"),
-        _ => Err(Error::Invalid(format!(
-            "--debian-release '{codename}' desconhecido (bullseye|bookworm|trixie)"
+        _ => Err(Error::Invalid(super::po::tf(
+            "--debian-release '{codename}' unknown (bullseye|bookworm|trixie)",
+            &[("codename", codename)],
         ))),
     }
 }
@@ -800,11 +831,14 @@ fn download_debian_base(store: &VmImageStore, release: &str) -> Result<PathBuf> 
     let img_url = format!("{base_url}/{img_name}");
     let sums_url = format!("{base_url}/SHA512SUMS");
 
-    eprintln!("a descarregar {img_url}...");
+    eprintln!(
+        "{}",
+        super::po::tf("downloading {url}...", &[("url", &img_url)])
+    );
     let tmp = cached.with_extension("download");
     stream_download(&img_url, &tmp)?;
 
-    eprintln!("a verificar SHA512SUMS...");
+    eprintln!("{}", super::po::t("verifying SHA512SUMS..."));
     let sums = http_get_text(&sums_url)?;
     let expected = sums
         .lines()
@@ -820,8 +854,13 @@ fn download_debian_base(store: &VmImageStore, release: &str) -> Result<PathBuf> 
     let got = hex_sha512_file(&tmp)?;
     if got != expected {
         let _ = std::fs::remove_file(&tmp);
-        return Err(Error::Invalid(format!(
-            "checksum inválido para {img_name}: esperado {expected}, obtido {got} — download descartado"
+        return Err(Error::Invalid(super::po::tf(
+            "invalid checksum for {img_name}: expected {expected}, got {got} — download discarded",
+            &[
+                ("img_name", &img_name),
+                ("expected", &expected),
+                ("got", &got),
+            ],
         )));
     }
     std::fs::rename(&tmp, &cached)?;
@@ -844,8 +883,9 @@ fn valid_rocky_release(release: &str) -> Result<()> {
     if matches!(release, "8" | "9" | "10") {
         Ok(())
     } else {
-        Err(Error::Invalid(format!(
-            "--rocky-release '{release}' desconhecido (8|9|10)"
+        Err(Error::Invalid(super::po::tf(
+            "--rocky-release '{release}' unknown (8|9|10)",
+            &[("release", release)],
         )))
     }
 }
@@ -870,11 +910,14 @@ fn download_rocky_base(store: &VmImageStore, release: &str) -> Result<PathBuf> {
     let img_url = format!("https://dl.rockylinux.org/pub/rocky/{release}/images/x86_64/{img_name}");
     let sums_url = format!("{img_url}.CHECKSUM");
 
-    eprintln!("a descarregar {img_url}...");
+    eprintln!(
+        "{}",
+        super::po::tf("downloading {url}...", &[("url", &img_url)])
+    );
     let tmp = cached.with_extension("download");
     stream_download(&img_url, &tmp)?;
 
-    eprintln!("a verificar CHECKSUM...");
+    eprintln!("{}", super::po::t("verifying CHECKSUM..."));
     let sums = http_get_text(&sums_url)?;
     let expected = parse_bsd_checksum(&sums, &img_name).ok_or_else(|| {
         Error::Invalid(format!(
@@ -885,8 +928,13 @@ fn download_rocky_base(store: &VmImageStore, release: &str) -> Result<PathBuf> {
     let got = hex_sha256_file(&tmp)?;
     if got != expected {
         let _ = std::fs::remove_file(&tmp);
-        return Err(Error::Invalid(format!(
-            "checksum inválido para {img_name}: esperado {expected}, obtido {got} — download descartado"
+        return Err(Error::Invalid(super::po::tf(
+            "invalid checksum for {img_name}: expected {expected}, got {got} — download discarded",
+            &[
+                ("img_name", &img_name),
+                ("expected", &expected),
+                ("got", &got),
+            ],
         )));
     }
     std::fs::rename(&tmp, &cached)?;
@@ -910,7 +958,7 @@ pub(crate) fn stream_download(url: &str, dest: &Path) -> Result<()> {
         .user_agent("delonix/0.1")
         .timeout(std::time::Duration::from_secs(3600))
         .build()
-        .map_err(|e| Error::Invalid(format!("cliente HTTP: {e}")))?;
+        .map_err(|e| Error::Invalid(format!("{}: {e}", super::po::t("HTTP client"))))?;
     let mut resp = client
         .get(url)
         .send()
@@ -923,7 +971,7 @@ pub(crate) fn stream_download(url: &str, dest: &Path) -> Result<()> {
     loop {
         let n = resp
             .read(&mut buf)
-            .map_err(|e| Error::Invalid(format!("a ler resposta: {e}")))?;
+            .map_err(|e| Error::Invalid(format!("{}: {e}", super::po::t("reading response"))))?;
         if n == 0 {
             break;
         }
@@ -937,7 +985,7 @@ pub(crate) fn http_get_text(url: &str) -> Result<String> {
         .user_agent("delonix/0.1")
         .timeout(std::time::Duration::from_secs(60))
         .build()
-        .map_err(|e| Error::Invalid(format!("cliente HTTP: {e}")))?;
+        .map_err(|e| Error::Invalid(format!("{}: {e}", super::po::t("HTTP client"))))?;
     let resp = client
         .get(url)
         .send()
@@ -945,8 +993,12 @@ pub(crate) fn http_get_text(url: &str) -> Result<String> {
     if !resp.status().is_success() {
         return Err(Error::Invalid(format!("GET {url}: HTTP {}", resp.status())));
     }
-    resp.text()
-        .map_err(|e| Error::Invalid(format!("corpo de {url}: {e}")))
+    resp.text().map_err(|e| {
+        Error::Invalid(format!(
+            "{}: {e}",
+            super::po::tf("body of {url}", &[("url", url)])
+        ))
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -1120,9 +1172,11 @@ fn verify_inrelease(work: &Path, repo_base: &str) -> Result<String> {
     )
     .map_err(|_| {
         Error::Invalid(
-            "assinatura do InRelease do repo k8s NÃO confere com a Release.key — a abortar \
-             (possível repo comprometido ou MITM)"
-                .to_string(),
+            super::po::t(
+                "the k8s repo's InRelease signature does NOT match the Release.key — aborting \
+                 (possible compromised repo or MITM)",
+            )
+            .to_string(),
         )
     })?;
     Ok(std::fs::read_to_string(&inrelease)?)
@@ -1142,7 +1196,13 @@ fn download_k8s_debs(
     let repo_base = format!("https://pkgs.k8s.io/core:/{repo}/deb");
     std::fs::create_dir_all(dest_dir)?;
 
-    eprintln!("a verificar a assinatura do repo k8s ({repo})...");
+    eprintln!(
+        "{}",
+        super::po::tf(
+            "verifying the k8s repo signature ({repo})...",
+            &[("repo", &repo)]
+        )
+    );
     let release = verify_inrelease(work, &repo_base)?;
 
     // `Packages` authenticated by the SHA256 listed in the signed InRelease.
@@ -1156,10 +1216,12 @@ fn download_k8s_debs(
     stream_download(&format!("{repo_base}/Packages"), &packages_path)?;
     let got = hex_sha256_file(&packages_path)?;
     if got != want_sha {
-        return Err(Error::Invalid(format!(
-            "SHA256 do índice Packages não confere (esperado {}, obtido {}) — a abortar",
-            &want_sha[..16.min(want_sha.len())],
-            &got[..16.min(got.len())]
+        return Err(Error::Invalid(super::po::tf(
+            "SHA256 of the Packages index does not match (expected {expected}, got {got}) — aborting",
+            &[
+                ("expected", &want_sha[..16.min(want_sha.len())]),
+                ("got", &got[..16.min(got.len())]),
+            ],
         )));
     }
     let index = std::fs::read_to_string(&packages_path)?;
@@ -1182,8 +1244,9 @@ fn download_k8s_debs(
     let debs = parse_packages_index(&index, arch, &version_prefix, &wanted, &VERSIONED);
     for base in ["kubeadm", "kubelet", "kubectl", "kubernetes-cni"] {
         if !debs.iter().any(|d| d.name == base) {
-            return Err(Error::Invalid(format!(
-                "o repo k8s ({repo}) não tem '{base}' para {arch} — versão inexistente?"
+            return Err(Error::Invalid(super::po::tf(
+                "the k8s repo ({repo}) does not have '{base}' for {arch} — nonexistent version?",
+                &[("repo", &repo), ("base", base), ("arch", arch)],
             )));
         }
     }
@@ -1197,10 +1260,13 @@ fn download_k8s_debs(
         let got = hex_sha256_file(&dest)?;
         if got != d.sha256 {
             let _ = std::fs::remove_file(&dest);
-            return Err(Error::Invalid(format!(
-                "SHA256 de {file_name} não confere (esperado {}, obtido {}) — a abortar",
-                &d.sha256[..16.min(d.sha256.len())],
-                &got[..16.min(got.len())]
+            return Err(Error::Invalid(super::po::tf(
+                "SHA256 of {file_name} does not match (expected {expected}, got {got}) — aborting",
+                &[
+                    ("file_name", file_name),
+                    ("expected", &d.sha256[..16.min(d.sha256.len())]),
+                    ("got", &got[..16.min(got.len())]),
+                ],
             )));
         }
         out.push(dest);
@@ -1343,9 +1409,9 @@ fn now_unix() -> u64 {
 pub(crate) fn resolve_cri_bin(explicit: Option<PathBuf>) -> Result<PathBuf> {
     if let Some(p) = explicit {
         if !p.exists() {
-            return Err(Error::Invalid(format!(
-                "--cri-bin '{}' não existe",
-                p.display()
+            return Err(Error::Invalid(super::po::tf(
+                "--cri-bin '{path}' does not exist",
+                &[("path", &p.display().to_string())],
             )));
         }
         return Ok(p);
@@ -1362,8 +1428,11 @@ pub(crate) fn resolve_cri_bin(explicit: Option<PathBuf>) -> Result<PathBuf> {
     // Dev convenience: source-code workspace from the cwd.
     if let Some(workspace_root) = find_workspace_root() {
         eprintln!(
-            "a compilar delonix-cri (release) a partir de {}...",
-            workspace_root.display()
+            "{}",
+            super::po::tf(
+                "compiling delonix-cri (release) from {dir}...",
+                &[("dir", &workspace_root.display().to_string())],
+            )
         );
         let status = Command::new("cargo")
             .args([
@@ -1376,9 +1445,11 @@ pub(crate) fn resolve_cri_bin(explicit: Option<PathBuf>) -> Result<PathBuf> {
             ])
             .current_dir(&workspace_root)
             .status()
-            .map_err(|e| Error::Invalid(format!("a correr cargo build: {e}")))?;
+            .map_err(|e| Error::Invalid(format!("{}: {e}", super::po::t("running cargo build"))))?;
         if !status.success() {
-            return Err(Error::Invalid("cargo build do delonix-cri falhou".into()));
+            return Err(Error::Invalid(
+                super::po::t("cargo build of delonix-cri failed").into(),
+            ));
         }
         let built = workspace_root.join("target/release/delonix-cri");
         if built.exists() {
@@ -1442,10 +1513,22 @@ fn download_cri_bin() -> Result<PathBuf> {
     let tmp = cache_dir.join("delonix-cri.download");
     let variant = if cpu_has_x86_64_v3() { "-v3" } else { "" };
     let mut asset = format!("delonix-cri-x86_64{variant}-linux");
-    eprintln!("a descarregar {asset} (v{version})...");
+    eprintln!(
+        "{}",
+        super::po::tf(
+            "downloading {asset} (v{version})...",
+            &[("asset", &asset), ("version", version)],
+        )
+    );
     if !variant.is_empty() && stream_download(&format!("{base_url}/{asset}"), &tmp).is_err() {
         asset = "delonix-cri-x86_64-linux".to_string();
-        eprintln!("{asset} em falta nesta release — a tentar o binário genérico...");
+        eprintln!(
+            "{}",
+            super::po::tf(
+                "{asset} missing from this release — trying the generic binary...",
+                &[("asset", &asset)],
+            )
+        );
         stream_download(&format!("{base_url}/{asset}"), &tmp)?;
     } else if variant.is_empty() {
         stream_download(&format!("{base_url}/{asset}"), &tmp)?;
@@ -1460,8 +1543,9 @@ fn download_cri_bin() -> Result<PathBuf> {
     let got = hex_sha256_file(&tmp)?;
     if got != expected {
         let _ = std::fs::remove_file(&tmp);
-        return Err(Error::Invalid(format!(
-            "checksum inválido para {asset}: esperado {expected}, obtido {got} — download descartado"
+        return Err(Error::Invalid(super::po::tf(
+            "invalid checksum for {asset}: expected {expected}, got {got} — download discarded",
+            &[("asset", &asset), ("expected", &expected), ("got", &got)],
         )));
     }
     std::fs::rename(&tmp, &cached)?;
@@ -1480,9 +1564,9 @@ fn download_cri_bin() -> Result<PathBuf> {
 pub(crate) fn resolve_delonix_bin(explicit: Option<PathBuf>) -> Result<PathBuf> {
     if let Some(p) = explicit {
         if !p.exists() {
-            return Err(Error::Invalid(format!(
-                "--delonix-bin '{}' não existe",
-                p.display()
+            return Err(Error::Invalid(super::po::tf(
+                "--delonix-bin '{path}' does not exist",
+                &[("path", &p.display().to_string())],
             )));
         }
         return Ok(p);
@@ -1495,8 +1579,11 @@ pub(crate) fn resolve_delonix_bin(explicit: Option<PathBuf>) -> Result<PathBuf> 
     // Dev convenience: source-code workspace from the cwd.
     if let Some(workspace_root) = find_workspace_root() {
         eprintln!(
-            "a compilar delonix (release) a partir de {}...",
-            workspace_root.display()
+            "{}",
+            super::po::tf(
+                "compiling delonix (release) from {dir}...",
+                &[("dir", &workspace_root.display().to_string())],
+            )
         );
         let status = Command::new("cargo")
             .args([
@@ -1509,9 +1596,11 @@ pub(crate) fn resolve_delonix_bin(explicit: Option<PathBuf>) -> Result<PathBuf> 
             ])
             .current_dir(&workspace_root)
             .status()
-            .map_err(|e| Error::Invalid(format!("a correr cargo build: {e}")))?;
+            .map_err(|e| Error::Invalid(format!("{}: {e}", super::po::t("running cargo build"))))?;
         if !status.success() {
-            return Err(Error::Invalid("cargo build do delonix falhou".into()));
+            return Err(Error::Invalid(
+                super::po::t("cargo build of delonix failed").into(),
+            ));
         }
         let built = workspace_root.join("target/release/delonix");
         if built.exists() {
@@ -1541,10 +1630,22 @@ fn download_delonix_bin() -> Result<PathBuf> {
     let tmp = cache_dir.join("delonix.download");
     let variant = if cpu_has_x86_64_v3() { "-v3" } else { "" };
     let mut asset = format!("delonix-x86_64{variant}-linux");
-    eprintln!("a descarregar {asset} (v{version})...");
+    eprintln!(
+        "{}",
+        super::po::tf(
+            "downloading {asset} (v{version})...",
+            &[("asset", &asset), ("version", version)],
+        )
+    );
     if !variant.is_empty() && stream_download(&format!("{base_url}/{asset}"), &tmp).is_err() {
         asset = "delonix-x86_64-linux".to_string();
-        eprintln!("{asset} em falta nesta release — a tentar o binário genérico...");
+        eprintln!(
+            "{}",
+            super::po::tf(
+                "{asset} missing from this release — trying the generic binary...",
+                &[("asset", &asset)],
+            )
+        );
         stream_download(&format!("{base_url}/{asset}"), &tmp)?;
     } else if variant.is_empty() {
         stream_download(&format!("{base_url}/{asset}"), &tmp)?;
@@ -1559,8 +1660,9 @@ fn download_delonix_bin() -> Result<PathBuf> {
     let got = hex_sha256_file(&tmp)?;
     if got != expected {
         let _ = std::fs::remove_file(&tmp);
-        return Err(Error::Invalid(format!(
-            "checksum inválido para {asset}: esperado {expected}, obtido {got} — download descartado"
+        return Err(Error::Invalid(super::po::tf(
+            "invalid checksum for {asset}: expected {expected}, got {got} — download discarded",
+            &[("asset", &asset), ("expected", &expected), ("got", &got)],
         )));
     }
     std::fs::rename(&tmp, &cached)?;
@@ -1608,8 +1710,9 @@ pub(crate) fn workspace_dist_file(name: &str) -> Result<PathBuf> {
         }
         return Ok(cached);
     }
-    Err(Error::Invalid(format!(
-        "não encontrei dist/{name} — corre a partir do checkout do código-fonte ou fornece via --extra-run"
+    Err(Error::Invalid(super::po::tf(
+        "could not find dist/{name} — run from the source-code checkout or supply it via --extra-run",
+        &[("name", name)],
     )))
 }
 
@@ -1926,14 +2029,16 @@ pub(crate) fn customize_args(disk: &Path, ops: &[CustomizeOp]) -> Vec<String> {
 }
 
 fn run_tool(bin: &str, args: &[&str]) -> Result<()> {
-    let status = Command::new(bin)
-        .args(args)
-        .status()
-        .map_err(|e| Error::Invalid(format!("a correr {bin}: {e}")))?;
+    let status = Command::new(bin).args(args).status().map_err(|e| {
+        Error::Invalid(format!(
+            "{}: {e}",
+            super::po::tf("running {bin}", &[("bin", bin)])
+        ))
+    })?;
     if !status.success() {
-        return Err(Error::Invalid(format!(
-            "{bin} falhou (exit {:?})",
-            status.code()
+        return Err(Error::Invalid(super::po::tf(
+            "{bin} failed (exit {code})",
+            &[("bin", bin), ("code", &format!("{:?}", status.code()))],
         )));
     }
     Ok(())

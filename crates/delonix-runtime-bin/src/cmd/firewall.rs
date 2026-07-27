@@ -800,9 +800,9 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
             Some("ingress") => "in",
             Some("egress") => "out",
             other => {
-                return Err(Error::Invalid(format!(
-                    "FirewallPolicy/{}: direction obrigatório e ∈ {{ingress, egress}} (veio {other:?})",
-                    doc.metadata.name
+                return Err(Error::Invalid(super::po::tf(
+                    "FirewallPolicy/{name}: direction is required and ∈ {{ingress, egress}} (got {other})",
+                    &[("name", &doc.metadata.name), ("other", &format!("{other:?}"))],
                 )));
             }
         };
@@ -831,9 +831,13 @@ fn apply_fw_doc(store: &Store, doc: &ManifestDoc, dir: &str) -> Result<()> {
     // into the container path and fail later with 'container does not exist'.
     let scope = spec.scope.as_deref().unwrap_or("container");
     if !matches!(scope, "container" | "network") {
-        return Err(Error::Invalid(format!(
-            "{kind}/{}: scope inválido '{scope}' (usa container|network)",
-            doc.metadata.name
+        return Err(Error::Invalid(super::po::tf(
+            "{kind}/{name}: invalid scope '{scope}' (use container|network)",
+            &[
+                ("kind", kind),
+                ("name", &doc.metadata.name),
+                ("scope", scope),
+            ],
         )));
     }
 
@@ -841,9 +845,9 @@ fn apply_fw_doc(store: &Store, doc: &ManifestDoc, dir: &str) -> Result<()> {
     // is a network name; wires up the engine APIs that only had a CLI.
     if scope == "network" {
         if dir != "out" {
-            return Err(Error::Invalid(format!(
-                "{kind}/{}: scope: network só é suportado em Egress (não há política de INGRESS por-rede)",
-                doc.metadata.name
+            return Err(Error::Invalid(super::po::tf(
+                "{kind}/{name}: scope: network is only supported in Egress (there is no per-network INGRESS policy)",
+                &[("kind", kind), ("name", &doc.metadata.name)],
             )));
         }
         return apply_network_egress(kind, &doc.metadata.name, &spec);
@@ -933,8 +937,9 @@ pub(crate) fn apply_container_ingress(
     allows: &[FwRule],
 ) -> Result<()> {
     if !matches!(policy, "allow" | "deny") {
-        return Err(Error::Invalid(format!(
-            "ingress de '{target}': policy tem de ser allow|deny"
+        return Err(Error::Invalid(super::po::tf(
+            "ingress of '{target}': policy must be allow|deny",
+            &[("target", target)],
         )));
     }
     update_locked(store, target, |c| {
@@ -957,8 +962,9 @@ pub(crate) fn apply_container_ingress(
 /// exactly as it stands in the document.
 fn apply_network_egress(kind: &str, name: &str, spec: &FwDocSpec) -> Result<()> {
     if !spec.rules.is_empty() {
-        return Err(Error::Invalid(format!(
-            "{kind}/{name}: `rules` é só para scope: container — em scope: network usa allowCidrs/fqdnAllowlist"
+        return Err(Error::Invalid(super::po::tf(
+            "{kind}/{name}: `rules` is only for scope: container — in scope: network use allowCidrs/fqdnAllowlist",
+            &[("kind", kind), ("name", name)],
         )));
     }
     let policy = spec.default_policy.as_deref().unwrap_or("allow");
@@ -971,8 +977,9 @@ fn apply_network_egress(kind: &str, name: &str, spec: &FwDocSpec) -> Result<()> 
     // stays open and the list would be silently discarded (the user would think
     // they closed the network). Clear error instead of a false show of restriction.
     if policy == "allow" && (!spec.allow_cidrs.is_empty() || !spec.fqdn_allowlist.is_empty()) {
-        return Err(Error::Invalid(format!(
-            "{kind}/{name}: allowCidrs/fqdnAllowlist só fazem sentido com defaultPolicy: deny (com allow a saída fica aberta)"
+        return Err(Error::Invalid(super::po::tf(
+            "{kind}/{name}: allowCidrs/fqdnAllowlist only make sense with defaultPolicy: deny (with allow, egress stays open)",
+            &[("kind", kind), ("name", name)],
         )));
     }
     // VALIDATE EVERYTHING before applying ANYTHING (fail-before-touching): an
@@ -984,8 +991,9 @@ fn apply_network_egress(kind: &str, name: &str, spec: &FwDocSpec) -> Result<()> 
     }
     for host in &spec.fqdn_allowlist {
         if !fw_host_ok(host) {
-            return Err(Error::Invalid(format!(
-                "{kind}/{name}: hostname inválido '{host}'"
+            return Err(Error::Invalid(super::po::tf(
+                "{kind}/{name}: invalid hostname '{host}'",
+                &[("kind", kind), ("name", name), ("host", host)],
             )));
         }
     }
@@ -1028,8 +1036,17 @@ fn apply_network_egress(kind: &str, name: &str, spec: &FwDocSpec) -> Result<()> 
         }
     );
     println!(
-        "{kind}/{name}: egress por-rede aplicado a '{}' (default {policy}, {extras})",
-        spec.target
+        "{}",
+        super::po::tf(
+            "{kind}/{name}: per-network egress applied to '{target}' (default {policy}, {extras})",
+            &[
+                ("kind", kind),
+                ("name", name),
+                ("target", &spec.target),
+                ("policy", policy),
+                ("extras", &extras),
+            ],
+        )
     );
     Ok(())
 }
@@ -1160,7 +1177,7 @@ mod tests {
         .unwrap_err();
         assert!(
             e.to_string()
-                .contains("só fazem sentido com defaultPolicy: deny"),
+                .contains("only make sense with defaultPolicy: deny"),
             "{e}"
         );
         let e = apply_network_egress(
@@ -1171,7 +1188,7 @@ mod tests {
         .unwrap_err();
         assert!(
             e.to_string()
-                .contains("só fazem sentido com defaultPolicy: deny"),
+                .contains("only make sense with defaultPolicy: deny"),
             "{e}"
         );
     }
@@ -1192,7 +1209,7 @@ mod tests {
             apply_network_egress("Egress", "e", &net_spec("deny", &[], &["x;rm -rf"], vec![]))
                 .unwrap_err()
                 .to_string()
-                .contains("hostname inválido")
+                .contains("invalid hostname")
         );
         // `rules` in scope network.
         let rules = vec![FwDocRule {
@@ -1207,7 +1224,7 @@ mod tests {
             apply_network_egress("Egress", "e", &net_spec("deny", &[], &[], rules))
                 .unwrap_err()
                 .to_string()
-                .contains("`rules` é só para scope: container")
+                .contains("`rules` is only for scope: container")
         );
     }
 

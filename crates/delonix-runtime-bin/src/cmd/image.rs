@@ -309,7 +309,13 @@ pub fn run(vm: bool, action: ImageCmd) -> Result<()> {
         }
         ImageCmd::Logout { registry } => {
             delonix_image::auth::logout(&super::util::state_root(), registry)?;
-            println!("credenciais de {registry} removidas");
+            println!(
+                "{}",
+                super::po::tf(
+                    "credentials for {registry} removed",
+                    &[("registry", registry)]
+                )
+            );
             return Ok(());
         }
         _ => {}
@@ -397,7 +403,14 @@ pub fn run(vm: bool, action: ImageCmd) -> Result<()> {
             if update {
                 super::scan::cmd_scan_update(feed)
             } else {
-                let image = image.ok_or_else(|| Error::Invalid("indica a imagem a analisar, ou usa `--update` para sincronizar o feed".into()))?;
+                let image = image.ok_or_else(|| {
+                    Error::Invalid(
+                        super::po::t(
+                            "specify the image to scan, or use `--update` to sync the feed",
+                        )
+                        .into(),
+                    )
+                })?;
                 super::scan::cmd_scan(&image, sbom, fail_on.as_deref())
             }
         }
@@ -410,7 +423,10 @@ pub fn run(vm: bool, action: ImageCmd) -> Result<()> {
         }
         ImageCmd::Push { name, target } => cmd_push(&images, &name, target.as_deref()),
         ImageCmd::Build { .. } => Err(Error::Invalid(
-            "`build` neste grupo é só para imagens VM — usa `delonix image --vm build`, ou `delonix build` para imagens de container".into(),
+            super::po::t(
+                "`build` in this group is only for VM images — use `delonix image --vm build`, or `delonix build` for container images",
+            )
+            .into(),
         )),
         ImageCmd::Login { .. } | ImageCmd::Logout { .. } | ImageCmd::Vm { .. } => unreachable!("tratados acima"),
     }
@@ -421,18 +437,33 @@ pub fn run(vm: bool, action: ImageCmd) -> Result<()> {
 fn cmd_login(registry: &str, username: &str, password_stdin: bool) -> Result<()> {
     if !password_stdin {
         return Err(Error::Invalid(
-            "usa --password-stdin (ex.: `gh auth token | delonix image login ghcr.io -u USER --password-stdin`)".into(),
+            super::po::t(
+                "use --password-stdin (e.g.: `gh auth token | delonix image login ghcr.io -u USER --password-stdin`)",
+            )
+            .into(),
         ));
     }
     let mut pw = String::new();
-    std::io::Read::read_to_string(&mut std::io::stdin(), &mut pw)
-        .map_err(|e| Error::Invalid(format!("a ler a password do stdin: {e}")))?;
+    std::io::Read::read_to_string(&mut std::io::stdin(), &mut pw).map_err(|e| {
+        Error::Invalid(format!(
+            "{}: {e}",
+            super::po::t("reading the password from stdin")
+        ))
+    })?;
     let pw = pw.trim();
     if pw.is_empty() {
-        return Err(Error::Invalid("password vazia no stdin".into()));
+        return Err(Error::Invalid(
+            super::po::t("empty password on stdin").into(),
+        ));
     }
     delonix_image::auth::login(&super::util::state_root(), registry, username, pw)?;
-    println!("login em {registry} guardado (auth.json)");
+    println!(
+        "{}",
+        super::po::tf(
+            "login to {registry} saved (auth.json)",
+            &[("registry", registry)],
+        )
+    );
     Ok(())
 }
 
@@ -502,12 +533,15 @@ fn run_vm(action: ImageCmd) -> Result<()> {
         | ImageCmd::History { .. }
         | ImageCmd::Verify { .. }
         | ImageCmd::Scan { .. } => return Err(Error::Invalid(
-            "tag/history/verify são de imagens de container — não se aplicam a imagens VM (--vm)"
-                .into(),
+            super::po::t(
+                "tag/history/verify are for container images — they do not apply to VM images (--vm)",
+            )
+            .into(),
         )),
         ImageCmd::Rm { .. } | ImageCmd::Export { .. } | ImageCmd::Apply { .. } => {
             return Err(Error::Invalid(
-                "comando não disponível para imagens VM (--vm) — usa ls/pull/push/build".into(),
+                super::po::t("command not available for VM images (--vm) — use ls/pull/push/build")
+                    .into(),
             ))
         }
         ImageCmd::Login { .. } | ImageCmd::Logout { .. } | ImageCmd::Vm { .. } => {
@@ -526,7 +560,13 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
         match (spec.pull, spec.build) {
             (Some(reference), None) => {
                 resolve_or_pull(&images, &reference)?;
-                println!("image/{name}: garantida ({reference})");
+                println!(
+                    "{}",
+                    super::po::tf(
+                        "image/{name}: ensured ({reference})",
+                        &[("name", name), ("reference", &reference)],
+                    )
+                );
             }
             (None, Some(b)) => {
                 let file = b
@@ -555,13 +595,15 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
                 );
             }
             (Some(_), Some(_)) => {
-                return Err(Error::Invalid(format!(
-                    "image/{name}: spec tem `pull` E `build` — só um dos dois"
+                return Err(Error::Invalid(super::po::tf(
+                    "image/{name}: spec has BOTH `pull` AND `build` — only one of the two",
+                    &[("name", name)],
                 )))
             }
             (None, None) => {
-                return Err(Error::Invalid(format!(
-                    "image/{name}: spec sem `pull` nem `build`"
+                return Err(Error::Invalid(super::po::tf(
+                    "image/{name}: spec has neither `pull` nor `build`",
+                    &[("name", name)],
                 )))
             }
         }
@@ -607,7 +649,13 @@ fn cmd_pull(images: &ImageStore, reference: &str, verify: Option<&std::path::Pat
     if let Some(key) = verify {
         let pem = std::fs::read_to_string(key)?;
         let digest = delonix_image::verify_signature(images, reference, &pem)?;
-        println!("assinatura válida para {reference} ({digest})");
+        println!(
+            "{}",
+            super::po::tf(
+                "valid signature for {reference} ({digest})",
+                &[("reference", reference), ("digest", &digest)],
+            )
+        );
     }
     // CVE admission policy (scan-on-pull): off by default (no latency),
     // opt-in via `DELONIX_SCAN_ON_PULL`. Closes the "pull without looking inside" —
@@ -650,7 +698,13 @@ fn cmd_history(images: &ImageStore, image: &str) -> Result<()> {
 fn cmd_verify(images: &ImageStore, image: &str, key: &std::path::Path) -> Result<()> {
     let pem = std::fs::read_to_string(key)?;
     let digest = delonix_image::verify_signature(images, image, &pem)?;
-    println!("OK: assinatura válida para {image} ({digest})");
+    println!(
+        "{}",
+        super::po::tf(
+            "OK: valid signature for {image} ({digest})",
+            &[("image", image), ("digest", &digest)],
+        )
+    );
     Ok(())
 }
 
@@ -824,11 +878,27 @@ fn cmd_export(images: &ImageStore, reference: &str, dir: &std::path::Path) -> Re
     let spec = build_runtime_spec(args, img.config.env.clone(), cwd)?;
     let cfg = dir.join("config.json");
     let json = serde_json::to_vec_pretty(&spec)
-        .map_err(|e| Error::Invalid(format!("serializar spec OCI: {e}")))?;
-    std::fs::write(&cfg, json)
-        .map_err(|e| Error::Invalid(format!("escrever {}: {e}", cfg.display())))?;
-    println!("bundle OCI em {}", dir.display());
-    println!("corre com:  runc run -b {} delonix-oci", dir.display());
+        .map_err(|e| Error::Invalid(format!("{}: {e}", super::po::t("serializing OCI spec"))))?;
+    std::fs::write(&cfg, json).map_err(|e| {
+        Error::Invalid(format!(
+            "{}: {e}",
+            super::po::tf("writing {path}", &[("path", &cfg.display().to_string())])
+        ))
+    })?;
+    println!(
+        "{}",
+        super::po::tf(
+            "OCI bundle at {dir}",
+            &[("dir", &dir.display().to_string())],
+        )
+    );
+    println!(
+        "{}",
+        super::po::tf(
+            "run with:  runc run -b {dir} delonix-oci",
+            &[("dir", &dir.display().to_string())],
+        )
+    );
     Ok(())
 }
 

@@ -208,8 +208,10 @@ fn resolve_token(literal: Option<String>, secret_ref: Option<String>) -> Result<
     if let Some(t) = &token {
         if t.starts_with('-') {
             return Err(Error::Invalid(
-                "token não pode começar por '-' (seria interpretado como uma opção do binário do provider)"
-                    .into(),
+                super::po::t(
+                    "token cannot start with '-' (it would be interpreted as an option of the provider's binary)",
+                )
+                .into(),
             ));
         }
     }
@@ -265,9 +267,9 @@ fn which(bin: &str) -> Option<PathBuf> {
 
 fn apply_one(name: &str, spec: &TunnelSpec) -> Result<()> {
     if !matches!(spec.provider.as_str(), "pinggy" | "ngrok" | "cloudflare") {
-        return Err(Error::Invalid(format!(
-            "tunnel '{name}': provider '{}' desconhecido (pinggy|ngrok|cloudflare)",
-            spec.provider
+        return Err(Error::Invalid(super::po::tf(
+            "tunnel '{name}': unknown provider '{provider}' (pinggy|ngrok|cloudflare)",
+            &[("name", name), ("provider", &spec.provider)],
         )));
     }
     let token = resolve_token(spec.token.clone(), spec.token_secret_ref.clone())?;
@@ -283,7 +285,7 @@ fn apply_one(name: &str, spec: &TunnelSpec) -> Result<()> {
                 existing
                     .public_url
                     .as_deref()
-                    .unwrap_or("(a determinar URL...)")
+                    .unwrap_or(super::po::t("(determining URL...)"))
             );
             return Ok(());
         }
@@ -315,9 +317,9 @@ fn apply_one(name: &str, spec: &TunnelSpec) -> Result<()> {
     println!(
         "tunnel/{name}: {} — {}",
         super::po::t("running"),
-        rec.public_url
-            .as_deref()
-            .unwrap_or("(URL ainda não confirmada — ver `delonix tunnel describe` / o log)")
+        rec.public_url.as_deref().unwrap_or(super::po::t(
+            "(URL not confirmed yet — see `delonix tunnel describe` / the log)"
+        ))
     );
     Ok(())
 }
@@ -336,7 +338,7 @@ fn spawn_and_capture(
     use std::os::unix::process::CommandExt;
     let path = log_path(&rec.name);
     let log = std::fs::File::create(&path).map_err(|e| Error::Runtime {
-        context: "abrir log do túnel",
+        context: "open tunnel log",
         message: e.to_string(),
     })?;
     let log2 = log.try_clone().map_err(|e| Error::Runtime {
@@ -355,7 +357,10 @@ fn spawn_and_capture(
     }
     let child = cmd.spawn().map_err(|e| Error::Runtime {
         context: "spawn tunnel agent",
-        message: format!("{bin}: {e} (está instalado e no PATH?)"),
+        message: super::po::tf(
+            "{bin}: {e} (is it installed and in PATH?)",
+            &[("bin", bin), ("e", &e.to_string())],
+        ),
     })?;
     rec.pid = Some(child.id() as i32);
     std::thread::sleep(Duration::from_millis(400));
@@ -363,9 +368,15 @@ fn spawn_and_capture(
         let tail = std::fs::read_to_string(&path).unwrap_or_default();
         return Err(Error::Runtime {
             context: "tunnel",
-            message: format!(
-                "{bin} caiu logo ao arrancar — {}",
-                tail.lines().last().unwrap_or("(log vazio)")
+            message: super::po::tf(
+                "{bin} crashed right at startup — {last_line}",
+                &[
+                    ("bin", bin),
+                    (
+                        "last_line",
+                        tail.lines().last().unwrap_or(super::po::t("(empty log)")),
+                    ),
+                ],
             ),
         });
     }
@@ -521,9 +532,11 @@ fn spawn_ngrok(
 ) -> Result<()> {
     which("ngrok").ok_or_else(|| {
         Error::Invalid(
-            "`ngrok` não encontrado no PATH — instala-o (https://ngrok.com/download) antes de \
-             usar provider=ngrok"
-                .into(),
+            super::po::t(
+                "`ngrok` not found in PATH — install it (https://ngrok.com/download) before \
+                 using provider=ngrok",
+            )
+            .into(),
         )
     })?;
     let web_port = pick_free_ngrok_web_port(store)?;
@@ -583,26 +596,32 @@ fn pick_free_ngrok_web_port(store: &JsonStore<TunnelRecord>) -> Result<u16> {
         .filter_map(|r| r.agent_web_port)
         .collect();
     (4040..4140).find(|p| !used.contains(p)).ok_or_else(|| {
-        Error::Invalid("sem porta livre para o agente ngrok (4040-4139 todas em uso)".into())
+        Error::Invalid(
+            super::po::t("no free port for the ngrok agent (4040-4139 all in use)").into(),
+        )
     })
 }
 
 fn spawn_cloudflare_quick(rec: &mut TunnelRecord) -> Result<()> {
     which("cloudflared").ok_or_else(|| {
         Error::Invalid(
-            "`cloudflared` não encontrado no PATH — instala-o \
-             (https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/downloads/) \
-             antes de usar provider=cloudflare"
-                .into(),
+            super::po::t(
+                "`cloudflared` not found in PATH — install it \
+                 (https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/downloads/) \
+                 before using provider=cloudflare",
+            )
+            .into(),
         )
     })?;
     if rec.hostname.is_some() {
         return Err(Error::Invalid(
-            "provider=cloudflare com hostname pedido: só o quick-tunnel (URL efémera \
-             *.trycloudflare.com, sem conta) está implementado por agora — um tunnel NOMEADO \
-             com domínio próprio precisa da API do Cloudflare (accountId/zoneId/token) para \
-             criar o tunnel, aplicar o ingress e a rota DNS; ainda por fazer, ver AGENTS.md"
-                .into(),
+            super::po::t(
+                "provider=cloudflare with hostname requested: only the quick-tunnel (ephemeral \
+                 *.trycloudflare.com URL, no account) is implemented for now — a NAMED tunnel \
+                 with its own domain needs the Cloudflare API (accountId/zoneId/token) to \
+                 create the tunnel, apply the ingress and the DNS route; still to do, see AGENTS.md",
+            )
+            .into(),
         ));
     }
     let args = vec![
@@ -766,7 +785,7 @@ mod tests {
         // local RCE via ProxyCommand. Reject before it ever reaches argv.
         let err =
             resolve_token(Some("-oProxyCommand=touch /tmp/pwned".to_string()), None).unwrap_err();
-        assert!(format!("{err}").contains("não pode começar por"));
+        assert!(format!("{err}").contains("cannot start with"));
         // A normal token is untouched.
         assert_eq!(
             resolve_token(Some("mytoken".to_string()), None).unwrap(),
