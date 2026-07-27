@@ -20,6 +20,8 @@
 #   --no-tune      não aplica o tuning de kernel (sysctls/módulos)
 #   --no-binary    só dependências/configuração (usa um binário já instalado)
 #   --with-cri     instala também o delonix-cri (nó Kubernetes)
+#   --low-ports    permite publicar portas <1024 (ex.: 80/443) sem root.
+#                  NÃO é o default — ver a secção "portas privilegiadas" abaixo.
 #   --user         binário em ~/.local/bin em vez de /usr/local/bin
 #   --version vX   versão específica (default: latest)
 #
@@ -35,6 +37,19 @@
 #   qemu-img (discos overlay), cloud-localds (seed ISO do cloud-init).
 set -euo pipefail
 
+# ---------------------------------------------------------------------------
+# TUDO o que se segue está dentro de `{ ... }` — a chaveta final está no fim do
+# ficheiro. NÃO é decoração: o uso documentado é `curl … | bash`, e o bash
+# EXECUTA À MEDIDA QUE LÊ. Sem esta chaveta, uma transferência cortada a meio
+# (rede a cair, proxy a truncar) executa METADE do instalador — e esta metade
+# instala pacotes com sudo, acrescenta a /etc/subuid, escreve perfis AppArmor e
+# ficheiros em /etc/sysctl.d. Um host meio-configurado, sem um único erro.
+# Com a chaveta, o bash tem de ler até ao `}` antes de executar seja o que for:
+# um ficheiro truncado morre em "syntax error: unexpected end of file" e NADA
+# corre. Verificado empiricamente, não assumido.
+# ---------------------------------------------------------------------------
+{
+
 REPO="angolardevops/delonix-runtime"
 VERSION="latest"
 WITH_VM=1
@@ -42,6 +57,7 @@ WITH_TUNE=1
 WITH_BINARY=1
 WITH_CRI=0
 USER_INSTALL=0
+LOW_PORTS=0
 
 # `command -v` falha para binários de admin (/usr/sbin) quando o PATH do
 # utilizador não os inclui (Debian) — mas o delonix invoca-os pelo PATH do
@@ -107,6 +123,7 @@ while [ $# -gt 0 ]; do
     --no-tune)    WITH_TUNE=0 ;;
     --no-binary)  WITH_BINARY=0 ;;
     --with-cri)   WITH_CRI=1 ;;
+    --low-ports)  LOW_PORTS=1 ;;
     --user)       USER_INSTALL=1 ;;
     --version)    shift; VERSION="${1:?--version requires an argument}" ;;
     -h|--help)    grep '^#' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
@@ -504,6 +521,46 @@ SYSCTL
   fi
 fi
 
+# ------------------------------------------------- portas privilegiadas (opt-in)
+# Publicar a porta 80/443 em rootless (`-p 80:80`, `kind: HTTPRoute` com
+# `entrypoints: [{port: 80}]`) falha com `slirp_add_hostfwd failed`: quem liga a
+# porta do lado do host é o slirp4netns, um processo SEM privilégios, e o kernel
+# reserva as portas <1024 (`net.ipv4.ip_unprivileged_port_start`, 1024 por
+# omissão). Não é limitação deste motor — o podman e o docker rootless têm o
+# mesmo muro e documentam o mesmo contorno.
+#
+# DELIBERADAMENTE FORA do `--no-tune`/`99-delonix.conf` acima, e OFF por omissão:
+# aqueles sysctls afinam limites (inotify, max_map_count) e não alteram nenhuma
+# fronteira de privilégio; este BAIXA UMA, para o host inteiro — a partir daqui
+# QUALQUER programa de QUALQUER utilizador local pode ligar-se às portas
+# 80-1023, incluindo pôr-se à frente de um serviço que ainda não arrancou. Num
+# portátil de desenvolvimento é um compromisso razoável; numa máquina partilhada
+# ou de produção, a alternativa sem baixar nada é um proxy da porta 80 a correr
+# como root (nginx/haproxy/systemd socket) a encaminhar para uma porta alta.
+# Por isso: pedido explícito, ficheiro próprio (fácil de auditar e de reverter),
+# e o valor a dizer exactamente o que abre.
+if [ "$LOW_PORTS" = 1 ]; then
+  CUR_LOW=$(sysctl -n net.ipv4.ip_unprivileged_port_start 2>/dev/null || echo 1024)
+  if [ "$CUR_LOW" -le 80 ] 2>/dev/null; then
+    skip kernel low-ports
+  else
+    step kernel low-ports "allowing unprivileged binds from port 80 (host-wide)..."
+    $SUDO tee /etc/sysctl.d/99-delonix-lowports.conf >/dev/null <<'SYSCTL'
+# Delonix Runtime — publicar portas <1024 em rootless (install.sh --low-ports).
+# Baixa a fronteira de portas privilegiadas para TODO o host: qualquer programa
+# de qualquer utilizador local passa a poder ligar-se a 80-1023.
+# Reverter: rm este ficheiro + `sysctl -w net.ipv4.ip_unprivileged_port_start=1024`
+net.ipv4.ip_unprivileged_port_start = 80
+SYSCTL
+    if $SUDO sysctl -q -p /etc/sysctl.d/99-delonix-lowports.conf >/dev/null 2>&1; then
+      stepok kernel low-ports
+      warn "unprivileged binds now start at port 80 for the WHOLE host (see /etc/sysctl.d/99-delonix-lowports.conf to revert)"
+    else
+      warn "could not apply net.ipv4.ip_unprivileged_port_start — it retries on next boot"
+    fi
+  fi
+fi
+
 # ------------------------------------------------------------ completion (bash)
 if [ "$WITH_BINARY" = 1 ] && [ -d /etc/bash_completion.d ] && [ -x "$BIN_DIR/delonix" ]; then
   "$BIN_DIR/delonix" completion bash 2>/dev/null | $SUDO tee /etc/bash_completion.d/delonix >/dev/null \
@@ -542,3 +599,5 @@ fi
 if [ "$NEED_RELOGIN" = 1 ]; then
   warn "log out and back in (or run 'newgrp kvm') for the new group memberships to take effect"
 fi
+
+}  # fim do bloco de protecção contra download truncado (ver o topo do ficheiro)
