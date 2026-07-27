@@ -70,11 +70,80 @@ fn slirp_pid_path() -> PathBuf {
 }
 /// The single slirp's api-socket (where the `add_hostfwd`s are requested in Phase 4).
 pub fn slirp_sock_path() -> PathBuf {
-    ingress_dir().join("slirp.sock")
+    runtime_dir().join("slirp.sock")
 }
 /// The holder's control socket (netns/veth factory): the host requests attach/detach.
 fn control_sock_path() -> PathBuf {
-    ingress_dir().join("control.sock")
+    runtime_dir().join("control.sock")
+}
+
+/// Env var the PARENT passes explicitly to the holder — same reason as
+/// `DELONIX_ROOT` above: the holder's uid is mapped to 0 INSIDE its userns,
+/// so a `geteuid()`-based computation done independently in each process
+/// would DIVERGE (parent sees its real uid, holder sees 0) — the two MUST
+/// agree on this path, or the holder binds `control.sock` in a directory the
+/// parent never created and never looks in.
+const RUNTIME_DIR_ENV: &str = "DELONIX_NET_RUNTIME_DIR";
+
+/// Directory for **ephemeral runtime state** — today only the two AF_UNIX
+/// sockets (`slirp.sock`/`control.sock`) — kept DELIBERATELY separate from
+/// `base_root()`/`DELONIX_ROOT`. `DELONIX_ROOT` holds regular files (VMs,
+/// containers, images) with no length limit beyond the kernel's `PATH_MAX`
+/// (~4096 bytes); a bound AF_UNIX socket's `sun_path`, however, is capped at
+/// 108 bytes on Linux (`SUN_LEN`) — nesting sockets under an arbitrarily deep
+/// `DELONIX_ROOT` hits that limit in practice (confirmed live: `bind` failing
+/// with "path must be shorter than SUN_LEN" under a long test/tmp root).
+/// Mirrors the convention every other container/VM engine already follows —
+/// Docker's `/run/docker.sock`, Podman's `/run/podman/podman.sock`,
+/// containerd's `/run/containerd/containerd.sock` — none of which nest their
+/// control socket under the (potentially deep) data/storage root.
+fn runtime_dir() -> PathBuf {
+    if let Some(dir) = std::env::var_os(RUNTIME_DIR_ENV) {
+        return PathBuf::from(dir);
+    }
+    // SAFETY: geteuid() has no preconditions.
+    let uid = unsafe { libc::geteuid() };
+    if uid != 0 {
+        // NOT `$XDG_RUNTIME_DIR`/`/run/user/<uid>`, despite being the more
+        // conventional choice for this kind of ephemeral state (systemd-
+        // logind guarantees it's short) — BUG FOUND live trying exactly
+        // that: `setup_infra_netns()` (below) does `mount -t tmpfs none
+        // /run` INSIDE the holder's own (already `--make-rprivate`) mount
+        // namespace, to give containers a private `/run/netns`. Anything
+        // created under `/run` by the PARENT before that remount becomes
+        // INVISIBLE to the holder afterwards — confirmed live: `control.sock`
+        // (bound by `holder_main`, i.e. AFTER the remount) got ENOENT on a
+        // directory that demonstrably existed on the host's real `/run`.
+        // `slirp.sock` (bound by `slirp4netns`, spawned by the PARENT, never
+        // enters this remounted view) would have been fine under `/run` —
+        // but splitting the two sockets across different directories for a
+        // reason future maintainers can't see by reading THIS file isn't
+        // worth it. `/tmp` is a separate mount, untouched by that remount,
+        // always short, and always writable; scoped by uid so two users
+        // sharing a host never collide (the control socket is ALSO
+        // protected by SO_PEERCRED + 0600 — this is defense in depth only).
+        return std::env::temp_dir().join(format!("delonix-net-{uid}"));
+    }
+    // Real root never reaches this module's holder at all (see `infra.rs`'s
+    // top doc comment + `delonix-runtime/CLAUDE.md`'s net gotcha: a real-root
+    // process already has host `CAP_NET_ADMIN` and uses the OTHER mechanism,
+    // `Net::` in `lib.rs` — no rootless holder, no netns re-exec, no `/run`
+    // remount). Kept for symmetry/future reuse of this function, not because
+    // `control_sock_path`/`slirp_sock_path` exercise it today.
+    PathBuf::from("/run/delonix-net")
+}
+
+/// Creates [`runtime_dir`] with restrictive permissions (`0700`) — defense in
+/// depth alongside the control socket's own `0600`+`SO_PEERCRED` guard.
+fn ensure_runtime_dir() -> Result<()> {
+    let dir = runtime_dir();
+    std::fs::create_dir_all(&dir).map_err(|e| Error::Runtime {
+        context: "runtime dir",
+        message: e.to_string(),
+    })?;
+    use std::os::unix::fs::PermissionsExt;
+    let _ = std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700));
+    Ok(())
 }
 fn status_path() -> PathBuf {
     ingress_dir().join("status")
@@ -390,6 +459,7 @@ pub fn ensure_up() -> Result<()> {
         context: "ingress dir",
         message: e.to_string(),
     })?;
+    ensure_runtime_dir()?;
     let holder_pid = start_holder()?;
     if let Err(e) = start_slirp(holder_pid) {
         // if the slirp fails, we don't leave an orphan holder.
@@ -460,6 +530,8 @@ fn start_holder() -> Result<i32> {
         .args(["netns", "holder"])
         // the holder runs with uid->0 in the userns; forces the paths to the real base.
         .env("DELONIX_ROOT", base_root())
+        // same reason, same fix: forces the SHORT socket dir too (see `runtime_dir`'s doc).
+        .env(RUNTIME_DIR_ENV, runtime_dir())
         .env("DELONIX_INTERNAL", "1")
         .stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -4026,11 +4098,40 @@ mod tests {
     }
 
     #[test]
-    fn base_root_honours_explicit_root() {
+    fn base_root_e_runtime_dir_honram_env_vars_explicitas() {
         // with DELONIX_ROOT set, ingress_dir is deterministic and does NOT depend
         // on the uid (essential for the holder with uid mapped to 0).
         std::env::set_var("DELONIX_ROOT", "/tmp/dlx-test-root");
         assert_eq!(ingress_dir(), PathBuf::from("/tmp/dlx-test-root/ingress"));
+
+        // BUG FOUND live (a genuinely long DELONIX_ROOT, e.g. a deep test/tmp
+        // path): `slirp_sock_path`/`control_sock_path` used to nest directly
+        // under `ingress_dir()` (== DELONIX_ROOT-derived), and Linux's
+        // AF_UNIX `sun_path` is capped at 108 bytes — `bind()` failed with
+        // "path must be shorter than SUN_LEN" even though DELONIX_ROOT itself
+        // (a regular directory, PATH_MAX-limited) was completely valid.
+        // `runtime_dir()` MUST stay independent of DELONIX_ROOT's length,
+        // proven here with a DELONIX_ROOT deliberately deep enough that a
+        // socket nested under it would exceed SUN_LEN.
+        std::env::set_var(
+            "DELONIX_ROOT",
+            "/tmp/a/very/deeply/nested/delonix/root/that/would/exceed/SUN_LEN/if/a/socket/lived/under/it/like/before",
+        );
+        std::env::set_var(RUNTIME_DIR_ENV, "/tmp/dlx-rt-test");
+        assert_eq!(runtime_dir(), PathBuf::from("/tmp/dlx-rt-test"));
+        assert_eq!(slirp_sock_path(), PathBuf::from("/tmp/dlx-rt-test/slirp.sock"));
+        assert_eq!(control_sock_path(), PathBuf::from("/tmp/dlx-rt-test/control.sock"));
+        std::env::remove_var(RUNTIME_DIR_ENV);
+
+        // Rootless fallback (no explicit override, no root): `/tmp`, uid-scoped
+        // — NOT `/run`-based (see `runtime_dir`'s doc comment for why: the
+        // holder remounts `/run` as an empty tmpfs for its own `/run/netns`,
+        // which would hide anything the parent created there first).
+        assert_eq!(
+            runtime_dir(),
+            std::env::temp_dir().join(format!("delonix-net-{}", unsafe { libc::geteuid() }))
+        );
+
         std::env::remove_var("DELONIX_ROOT");
     }
 
