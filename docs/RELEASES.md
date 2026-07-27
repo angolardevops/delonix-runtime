@@ -4,6 +4,48 @@
 > (regenerado automaticamente pelo pipeline de release a cada tag publicada).
 > Não editar à mão — edita a nota da release respectiva.
 
+## v0.34.0 — `container run -w/--workdir`, `compose` gets `working_dir:` and random host ports
+
+Continuação directa da revisão de gaps Docker/Podman/Delonix — dois itens genuinamente "dívida
+real, sem tocar em rootless/daemonless" fechados nesta versão.
+
+### `container run -w/--workdir` (nova flag — gap do motor inteiro, não só do compose)
+
+`container run` ganha `-w`/`--workdir`. Isto fecha um gap que afectava o motor inteiro, não só o
+`compose`: `c.workdir` já era aplicado correctamente no `chdir()` do processo de init (antes do
+`execve`, depois do `pivot_root`) — só nunca havia forma de o **definir** a partir de fora da
+imagem no momento do `run`; só `exec -w` tinha um override, e só por-chamada. Com o fix, `compose`'s
+`working_dir:` (antes aceite mas ignorado, com aviso) passa a usar exactamente o mesmo caminho —
+`RunOpts.workdir`.
+
+Validado ao vivo: `container run -w /tmp alpine pwd` → `/tmp`; um serviço compose com
+`working_dir: /opt/app` → `pwd` dentro do container confirma `/opt/app`.
+
+### `compose`: porta sem host explícito já não é recusada
+
+`ports: ["80"]` (forma curta, sem `:`) ou a forma longa com `published` omitido — antes recusados
+("random assignment not supported in v1") — passam a ganhar uma porta livre real do host
+(`free_host_port`: bind à porta 0, o kernel escolhe, liberta-se de imediato — a mesma técnica que
+qualquer atribuição aleatória de porta usa). Limitação inerente e aceite: há uma janela TOCTOU
+entre encontrar a porta livre e o container a publicar de facto — o mesmo compromisso que
+qualquer sistema com esta técnica aceita, dentro ou fora deste motor.
+
+Validado ao vivo: `compose up` com `ports: ["80"]` publicou numa porta real e alcançável,
+confirmado por `container port`.
+
+### Não tentado nesta versão, documentado porquê
+
+Volumes anónimos do compose (o outro gap desta categoria) ficam de fora deliberadamente — a
+semântica de limpeza (um `down` simples remove um volume anónimo, ou só `down -v`?) merece ser
+pensada com calma, não decidida às pressas antes de uma publicação.
+
+### Validação
+
+Build/clippy/fmt/test limpos no workspace inteiro (304 testes em `delonix-runtime-bin`, +1 desde
+v0.33.0 — o novo teste de `resolve_ports` para porta aleatória). Validado ao vivo (ver acima).
+
+---
+
 ## v0.33.0 — `container update --memory/--cpus`, network create rollback, `delonix-vm` locking
 
 Três itens da lista de dívida arquitectural documentada saíram do "dívida conhecida" para "feito"
