@@ -2023,6 +2023,18 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
     // mounts merged in) and `--gpus dri`'s raw glob already appended, above —
     // `devices` here is the final list.
     c.devices = devices;
+    // BUG FOUND live: the resolved `-v` mounts went ONLY into `RunSpec` (applied at
+    // spawn) and were never written to the record — while `cmd_start` rebuilds its
+    // `RunSpec` from `c.mounts`, a field that was therefore always empty. A `container
+    // start` of anything created with `-v` came back RUNNING with no bind mounts and no
+    // named volumes: writes that should land in the volume silently went to the
+    // container's rootfs instead. It also broke kind-mode clusters — a restarted node
+    // lost `/kind/delonix`, the bind mount `cluster create`/`cluster load` exchange files
+    // through. Same family as the `-p`-on-a-custom-network regression: state needed to
+    // RECONSTRUCT the container has to be persisted, not just used once at creation.
+    // Includes the CDI mounts merged above on purpose: `start` never re-resolves a CDI
+    // spec, so leaving them out would silently drop GPU access on the first restart.
+    c.mounts = mounts.clone();
     c.privileged = privileged;
     for l in &labels {
         if let Some((k, v)) = l.split_once('=') {

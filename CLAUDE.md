@@ -1855,6 +1855,51 @@ de todos os containers da SDN — é decisão do operador, não de um `cluster c
 para uma diagnose FUTURA não culpar um binário que já não corre. Validado ao vivo nos dois ramos
 (com e sem socket legado), mais o caminho felizinho intocado (15ms, um `stat`).
 
+### `delonix cluster load` (v0.35.0) — o `kind load docker-image`, sem registo nenhum
+
+Pedido real: `make push` do `delonix-meet` fazia `kind load docker-image` e o binário `kind` não
+existe neste host (nem serviria — precisa de um provider Docker/Podman, que este host não tem por
+desenho). `delonix cluster load <IMAGEM>... [--name <cluster>]` fecha o buraco: empacota a imagem
+do store LOCAL e importa-a no containerd de CADA nó a correr.
+
+- **`delonix_image::write_oci_archive`** (`crates/delonix-image/src/save.rs`, o inverso do
+  `load_docker_archive` já existente): escreve um **OCI image layout** (tar) reaproveitando o
+  MESMO manifesto que `registry::build_manifest` publica num registo — os blobs do store vão
+  verbatim, nada é recomprimido nem re-hashado, e os digests que o nó fica a ter são idênticos aos
+  nossos. Não confundir com `image export`/`export_rootfs` (bundle de RUNTIME para runc/crun).
+  A anotação `io.containerd.image.name` é a que NOMEIA a imagem no import — sem ela o `ctr` ingere
+  os blobs e não regista referência nenhuma: o import "passa" e o pod continua em `ErrImagePull`.
+- **Canal para dentro do nó: o bind mount que já existia** (`cluster_dir` ↔ `NODE_SHARED`
+  `/kind/delonix`, o mesmo por onde o `cluster create` troca `kubeadm.conf`/`kubeconfig`) — sem
+  plumbing de stdin e sem 2.ª cópia do rootfs. O `kind` real faz `docker save | docker exec`;
+  aqui as duas metades já são nossas.
+- `--all-platforms` no `ctr images import` (senão o ctr filtra pela plataforma DELE e pode
+  importar zero reportando sucesso); o `.tar` é apagado sempre a seguir (é uma cópia completa da
+  imagem em disco — este host já teve disk-pressure por menos); nós parados são REPORTADOS, nunca
+  saltados em silêncio.
+- **Validado ao vivo** no cluster `dev`: `delonix-web`/`delonix-server` (94/45 MiB) importados,
+  visíveis no `ctr -n k8s.io images ls` E no `crictl images` do kubelet (como
+  `docker.io/library/<nome>`, a mesma normalização que o `kind load` real produz).
+
+### BUG GRAVE corrigido a caminho disto: `-v` nunca era persistido → volumes PERDIDOS no `start`
+
+Descoberto ao ver o `cluster load` falhar com o nó a não ver o `/kind/delonix`: `cmd_run` metia os
+mounts resolvidos SÓ no `RunSpec` (aplicado no spawn) e **nunca no registo**; o `cmd_start`
+reconstrói o `RunSpec` a partir de `c.mounts` — um campo que estava portanto SEMPRE vazio. Um
+`container start` de qualquer coisa criada com `-v` voltava a correr **sem bind mounts e sem
+volumes nomeados**, e as escritas que deviam ir para o volume iam em silêncio para o rootfs do
+container (uma base de dados reiniciada "funciona" e escreve para o sítio errado). Também partia
+os clusters kind: um nó reiniciado perdia o `/kind/delonix`. **Corrigido** com `c.mounts =
+mounts.clone()` antes do save (inclui os mounts de CDI de propósito — o `start` nunca re-resolve
+um spec CDI, deixá-los de fora perderia o acesso à GPU no 1.º restart). Validado ao vivo:
+ficheiro do host visível dentro do container ANTES e DEPOIS de um `stop`+`start`.
+
+**Terceiro bug da MESMA família em dois dias** (a par do `-p` numa rede custom, abaixo, e do
+`vm start` que já estava documentado): *estado necessário para RECONSTRUIR o recurso tem de ser
+persistido, não só usado uma vez na criação*. Ao ligar/rever qualquer caminho de `start`/`restart`,
+compara campo a campo o que a criação USA com o que o registo GUARDA — o que só a criação vê
+desaparece no primeiro restart, em silêncio.
+
 ### Regressão v0.34.1 → corrigida no v0.34.3: `-p` numa rede custom (o 2.º caminho derivado do uid)
 
 Bug report real, um comando depois da recuperação do v0.34.2: `container run --net <custom> -p
@@ -1939,7 +1984,7 @@ sem noção de tenant) — não o "Proxmox Driver" com inventário/scheduler do 
 
 ## Estado para a próxima sessão (2026-07-27, antes do lançamento público de sexta-feira)
 
-Release actual: **v0.34.2** (ver `docs/RELEASES.md`). Motor testado sistematicamente por todos os
+Release actual: **v0.35.0** (ver `docs/RELEASES.md`). Motor testado sistematicamente por todos os
 grupos de comandos, i18n corrigido (380+ strings), docs (`README.rst`, site, `docs/comparacao.html`)
 sincronizadas com o binário publicado, ficheiros de saúde da comunidade (`CONTRIBUTING.md`/
 `SECURITY.md`/`CODE_OF_CONDUCT.md`/templates de issue/PR) no lugar, roteiro de vídeos em

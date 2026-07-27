@@ -988,6 +988,142 @@ fn write_kubeconfig(c: &Container, name: &str, api_port: u16) -> Result<()> {
     Ok(())
 }
 
+/// The nodes of a kind-mode cluster, from the `io.x-k8s.kind.cluster` label (the
+/// single source of truth — see [`list`]). With `name: None`, resolves the ONLY
+/// existing cluster; 0 or several is an error naming the alternatives, never a
+/// blind pick (same rule as `resolve_vm_image` in `cluster.rs`).
+fn cluster_nodes(store: &Store, name: Option<&str>) -> Result<(String, Vec<Container>)> {
+    use std::collections::BTreeMap;
+    let mut by_cluster: BTreeMap<String, Vec<Container>> = BTreeMap::new();
+    for mut c in store.list()? {
+        let Some(n) = c.labels.get("io.x-k8s.kind.cluster").cloned() else {
+            continue;
+        };
+        delonix_runtime::reconcile_status(&mut c);
+        by_cluster.entry(n).or_default().push(c);
+    }
+    match name {
+        Some(n) => {
+            let nodes = by_cluster
+                .remove(n)
+                .ok_or_else(|| Error::NotFound(format!("cluster kind '{n}'")))?;
+            Ok((n.to_string(), nodes))
+        }
+        None if by_cluster.len() == 1 => Ok(by_cluster.into_iter().next().unwrap()),
+        None if by_cluster.is_empty() => Err(Error::Invalid(
+            super::po::t("no kind-mode cluster — create one with `delonix cluster create`")
+                .to_string(),
+        )),
+        None => {
+            let names: Vec<String> = by_cluster.into_keys().collect();
+            Err(Error::Invalid(super::po::tf(
+                "several clusters ({names}) — pick one with `--name`",
+                &[("names", &names.join(", "))],
+            )))
+        }
+    }
+}
+
+/// `cluster load <IMAGE>...` — the equivalent of `kind load docker-image`:
+/// imports images from the LOCAL store straight into every node's containerd,
+/// **with no registry in between**.
+///
+/// # Why this is the right shape for this engine
+///
+/// The real `kind load` shells out to `docker save` and pipes it into the node.
+/// Here both halves are already ours: [`delonix_image::write_oci_archive`] packs
+/// the store's blobs verbatim, and the nodes already bind-mount
+/// [`cluster_dir`] at [`NODE_SHARED`] (the channel `cluster create` uses for
+/// `kubeadm.conf`/`kubeconfig`) — so the archive crosses into the node as a plain
+/// file, with no stdin plumbing and no second copy of the rootfs.
+///
+/// **Every running node gets the image** (a pod can be scheduled on any of them),
+/// and a node that is NOT running is reported, never skipped in silence.
+pub(crate) fn load(
+    images: &ImageStore,
+    store: &Store,
+    refs: &[String],
+    name: Option<&str>,
+) -> Result<()> {
+    let (cluster, nodes) = cluster_nodes(store, name)?;
+    let running: Vec<&Container> = nodes
+        .iter()
+        .filter(|c| matches!(c.status, delonix_runtime_core::Status::Running))
+        .collect();
+    if running.is_empty() {
+        return Err(Error::Invalid(super::po::tf(
+            "cluster '{name}' has no running node — start it before loading images",
+            &[("name", &cluster)],
+        )));
+    }
+    for n in nodes
+        .iter()
+        .filter(|c| !matches!(c.status, delonix_runtime_core::Status::Running))
+    {
+        eprintln!(
+            "{}",
+            super::po::tf(
+                "warning: node '{node}' is not running — it will NOT get the images",
+                &[("node", &n.name)],
+            )
+        );
+    }
+
+    super::output::info(&format!(
+        "{} \"{cluster}\"",
+        super::po::t("Loading images into cluster")
+    ));
+    let dir = cluster_dir(&cluster);
+    std::fs::create_dir_all(&dir)?;
+    let mut p = super::output::Progress::new();
+    for r in refs {
+        let image = images.resolve(r)?;
+        // The name the node registers, hence what a Deployment's `image:` must
+        // say. The user's own reference is used verbatim (`delonix-web:v1.2.3`),
+        // NOT the store's first tag: an image can carry several tags and picking
+        // a different one would import under a name the manifests never mention.
+        let ref_name = delonix_image::image::normalise_tag(r);
+        p.step(&format!("{} {ref_name}", super::po::t("Packing")), "📦");
+        let tar = dir.join(format!(".load-{}.tar", image.short_id()));
+        delonix_image::write_oci_archive(images, &image, &ref_name, &tar)?;
+        p.ok();
+
+        for node in &running {
+            p.step(&format!("{ref_name} → {}", node.name), "🚚");
+            let file = tar.file_name().unwrap_or_default().to_string_lossy();
+            // `--all-platforms`: the archive holds exactly one, but ctr otherwise
+            // filters by ITS default platform string and can drop everything,
+            // reporting success with nothing imported.
+            let (code, out) = node_exec_capture(
+                node,
+                &format!("ctr -n k8s.io images import --all-platforms {NODE_SHARED}/{file}"),
+            )?;
+            if code != 0 {
+                // The open step closes with ✗ on drop (see `Progress::drop`) —
+                // no explicit failure call needed, and none exists.
+                let _ = std::fs::remove_file(&tar);
+                return Err(Error::Invalid(super::po::tf(
+                    "`ctr images import` failed on node '{node}' (exit {code}): {out}",
+                    &[
+                        ("node", &node.name),
+                        ("code", &code.to_string()),
+                        ("out", out.trim()),
+                    ],
+                )));
+            }
+            p.ok();
+        }
+        // The archive is a full second copy of the image on disk — never leave it
+        // behind (the store root already hit disk-pressure on this host once).
+        let _ = std::fs::remove_file(&tar);
+    }
+    eprintln!(
+        "{}",
+        super::po::t("images available to the kubelet — use `imagePullPolicy: IfNotPresent`")
+    );
+    Ok(())
+}
+
 /// Removes a kind cluster: stops and deletes the nodes with the cluster label.
 pub(crate) fn delete(images: &ImageStore, store: &Store, name: &str) -> Result<()> {
     let label = format!("io.x-k8s.kind.cluster={name}");
