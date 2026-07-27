@@ -105,6 +105,8 @@ Commands:
   scan       SBOM + CVE scan of an image (reads the layers from the CAS, without running anything). Pulls the image if missing. See `--sbom`, `--fail-on`, `--update`
   rm         Remove a local image
   export     Export an OCI runtime bundle (rootfs + config.json) for `runc`/`crun`
+  save       Save an image to a portable archive (`docker save`&#x27;s counterpart) — the way to move an image to another machine with no registry. The archive is an OCI layout WITH the legacy `manifest.json`, so `delonix image load`, `docker load`, `podman load` and `ctr images import` all read it
+  load       Load an image from an archive produced by `delonix image save`, `docker save` or `podman save` (the counterpart of `save`)
   apply      Apply the `kind: Image` documents of a manifest (`pull` idempotent by reference; `build` rebuilds and replaces the tag on each apply)
   login      Authenticate to an OCI registry (stores the credentials in `&lt;root&gt;/auth.json`, docker/podman format). The password ALWAYS comes from stdin — never from an argument (it would end up in the shell history and in /proc)
   logout     Remove the stored credentials of a registry

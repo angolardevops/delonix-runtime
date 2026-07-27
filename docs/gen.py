@@ -1133,34 +1133,46 @@ Docker e o Podman rootless. Noutros, fica muito atrás. Esta página diz exactam
 para uma pessoa a decidir o que instalar hoje, ou uma empresa a avaliar para produção.</p>
 
 <div class="callout warn">
-<p><b>Estado actual (2026-07): beta público, em hardening activo.</b> Uma auditoria de segurança
-independente encontrou 6 falhas de severidade alta (essencialmente: escrita/eliminação de
-ficheiros fora do esperado a partir de uma imagem ou manifesto não confiável, e um socket de
-gestão sem autenticação) — <strong>as 6 já estão corrigidas</strong>, mas ainda NÃO foram
-confirmadas por uma 2.ª auditoria adversarial independente, e o núcleo de syscalls do motor
-(clone/mount/namespaces) nunca teve revisão de segurança nenhuma. Não há indícios de execução
-remota de código a partir da rede — a fronteira rootless→root está sólida — mas
-<strong>por prudência, evita ainda imagens não confiáveis ou expor o motor num host partilhado por
-várias pessoas</strong> até à confirmação. Detalhe completo, com ficheiro e linha de cada achado e
-o estado da correcção:
+<p><b>Estado actual (2026-07): beta público, em hardening activo.</b> Várias rondas de auditoria
+ofensiva já correram sobre o núcleo de syscalls do motor (<code>clone</code>/<code>mount</code>/
+namespaces, ~104 blocos <code>unsafe</code>), a fronteira rootless→root, o socket de controlo, e o
+código mais recente (rede/cluster/manifesto) — todos os achados CRÍTICOS e ALTOS encontrados
+<strong>já estão corrigidos</strong>, e os de maior severidade (os 6 HIGH originais + os
+CRITICAL/HIGH de rondas seguintes) foram <strong>re-confirmados por uma auditoria adversarial
+INDEPENDENTE genuína (2026-07-26)</strong> — um TOCTOU adicional real foi encontrado nessa ronda
+(kubeconfig com uma janela de permissões antes do <code>chmod</code>) e já está corrigido também.
+Continuam por fechar ~27 achados de severidade MÉDIA/BAIXA (documentados, sem exploit conhecido).
+Não há indícios de execução remota de código a partir da rede — a fronteira rootless→root está
+sólida e já foi testada por um 2.º par de olhos — mas <strong>por prudência, um projecto sem anos
+de produção continua a merecer cautela</strong> em produção multi-tenant com dados sensíveis.
+Detalhe completo, com ficheiro e linha de cada achado e o estado da correcção:
 <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/AUDITORIA-E2E.md">relatório
-da auditoria</a>.</p>
+da auditoria original</a> e
+<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/COMPARACAO-DOCKER-PODMAN.md">análise
+de gaps com o histórico completo das rondas seguintes</a>.</p>
 </div>
 
 <h2>Decisão rápida</h2>
 <table>
 <tr><th>Se precisas de…</th><th>Usa</th></tr>
-<tr><td>Correr um <code>docker-compose.yml</code> já existente</td><td>Docker ou Podman</td></tr>
-<tr><td>Um pipeline de build com BuildKit (segredos de build, cross-compile)</td>
-<td>Docker ou Podman — o Delonix faz multi-stage e cache de camadas (rootless), mas não tem
-BuildKit</td></tr>
-<tr><td>Cargas GPU/CUDA</td><td>Docker ou Podman (com nvidia-container-toolkit)</td></tr>
-<tr><td><code>docker version</code>/<code>ps</code>/<code>images</code>/<code>info</code> via
-<code>DOCKER_HOST</code> (scripts/CI de leitura)</td>
+<tr><td>Correr um <code>docker-compose.yml</code> já existente</td>
+<td><strong>Delonix</strong> — <code>delonix compose up</code>, suporte nativo (Compose Spec v2.x),
+sem Docker instalado</td></tr>
+<tr><td>Um pipeline de build com BuildKit completo (cache mounts, SSH forwarding, cross-compile
+paralelo)</td>
+<td>Docker ou Podman — o Delonix faz multi-stage, <code>--mount=type=secret</code> e cache de
+camadas (rootless), mas não <code>type=cache</code>/<code>type=ssh</code> nem paralelismo de
+estágios</td></tr>
+<tr><td>Cargas GPU/CUDA</td>
+<td>Delonix via CDI funciona (mesma fonte que Docker/Podman) mas nunca foi validado num host GPU
+real — para produção GPU hoje, prefere Docker/Podman</td></tr>
+<tr><td><code>docker version</code>/<code>ps</code>/<code>images</code>/<code>info</code> e o
+ciclo de vida completo de um container via <code>DOCKER_HOST</code></td>
 <td><strong>Delonix</strong> — <code>delonix serve docker-api</code>, validado contra um
-<code>docker</code> CLI real</td></tr>
-<tr><td><code>docker run</code>/<code>docker compose up</code>/testcontainers (precisam de
-criar containers via a API)</td><td>Docker ou Podman — só a parte de leitura da API está feita</td></tr>
+<code>docker</code> CLI real, incl. <code>docker compose up</code> apontado ao socket</td></tr>
+<tr><td><code>docker exec</code>/attach interactivo via a API, ou <code>--restart</code> via a API</td>
+<td>Docker ou Podman — deliberadamente fora de escopo (hijacking HTTP / modelo de supervisor
+incompatível com um servidor multi-thread)</td></tr>
 <tr><td>Bootstrap de um cluster Kubernetes real sem instalar Docker/containerd</td>
 <td><strong>Delonix</strong> — CRI próprio, já validado com um control-plane v1.34 <code>Ready</code></td></tr>
 <tr><td>Um só motor para containers <strong>e</strong> microVMs <strong>e</strong> Kubernetes</td>
@@ -1190,11 +1202,17 @@ crash (razão + snapshot do log, não só "Exited")</td></tr>
 <tr><td>Build de imagens (<code>Dockerfile</code>)</td>
 <td><span class="tag ok">forte — multi-stage, BuildKit, cache</span></td>
 <td><span class="tag ok">forte — via buildah</span></td>
-<td><span class="tag mid">multi-stage + ARG/USER/ENTRYPOINT + cache de camadas (rootless) já
-funcionam; sem BuildKit real (sem <code>RUN --mount=secret</code>)</span></td></tr>
+<td><span class="tag mid">multi-stage + ARG/USER/ENTRYPOINT + <code>--mount=type=secret</code> +
+cache de camadas (rootless) já funcionam; sem <code>type=cache</code>/<code>type=ssh</code> nem
+paralelismo de estágios do BuildKit real</span></td></tr>
 <tr><td><code>docker compose</code> / orquestração local</td>
 <td><span class="tag ok">nativo</span></td><td><span class="tag mid">podman-compose</span></td>
-<td><span class="tag no">manifesto próprio, sem parser de compose</span></td></tr>
+<td><span class="tag ok">nativo (<code>delonix compose</code>), sem Docker — <code>depends_on</code>
+com healthcheck real</span></td></tr>
+<tr><td>API compatível com <code>DOCKER_HOST</code></td>
+<td><span class="tag ok">é a própria</span></td><td><span class="tag ok">compatível</span></td>
+<td><span class="tag mid">ciclo de vida completo do container (create/start/stop/kill/wait/
+restart/rename/rm); sem <code>exec</code>/attach interactivo nem <code>--restart</code></span></td></tr>
 <tr><td>Rede rootless avançada (overlay inter-nó, firewall por-container)</td>
 <td><span class="tag no">overlay exige swarm</span></td>
 <td><span class="tag mid">sem overlay rootless nativo</span></td>
@@ -1209,7 +1227,8 @@ funcionam; sem BuildKit real (sem <code>RUN --mount=secret</code>)</span></td></
 <tr><td>GPU/CUDA</td>
 <td><span class="tag ok">nvidia-container-toolkit maduro</span></td>
 <td><span class="tag ok">idem</span></td>
-<td><span class="tag no">só bind dos nós de dispositivo, sem injecção de driver</span></td></tr>
+<td><span class="tag mid">via CDI (a mesma fonte que Docker/Podman consomem), mas nunca validado
+num host GPU real</span></td></tr>
 <tr><td>Assinatura de imagens + scan de CVE embutidos</td>
 <td><span class="tag no">precisa de cosign/trivy à parte</span></td>
 <td><span class="tag no">idem</span></td>
@@ -1240,19 +1259,26 @@ arranque de um container <em>falha</em> se seccomp/capabilities não ficarem mes
 de seguir em frente a fingir que está protegido.</li>
 <li><strong>Storage de rede estilo Kubernetes</strong> — uma pasta NFS/CIFS/WebDAV vira um volume
 nomeado montável por qualquer container, como um <code>PersistentVolume</code>.</li>
+<li><strong><code>docker-compose.yml</code> nativo, sem Docker</strong> — <code>delonix compose
+up/down/ps/logs</code>, com <code>depends_on</code> a esperar por um healthcheck real, não só por
+ordem declarada.</li>
 </ul>
 
 <h2>Onde ainda não chega</h2>
 <ul>
-<li><strong>Não corre um <code>docker-compose.yml</code> existente</strong> — sem parser de compose.
-A API do Docker (<code>DOCKER_HOST</code>) já responde a leituras (<code>version</code>/<code>ps</code>/
-<code>images</code>/<code>info</code>), mas ainda não cria containers — testcontainers e
-<code>docker compose up</code> continuam sem se ligar.</li>
 <li><strong>Build de imagens ainda não tem BuildKit real</strong> — multi-stage,
-<code>ARG</code>/<code>--build-arg</code>, <code>USER</code>/<code>ENTRYPOINT</code> e cache de
-camadas (rootless) já funcionam, mas sem <code>RUN --mount=secret</code> nem
-<code>--platform</code>.</li>
-<li><strong>Sem GPU real</strong> — nenhuma carga CUDA corre hoje.</li>
+<code>ARG</code>/<code>--build-arg</code>, <code>USER</code>/<code>ENTRYPOINT</code>,
+<code>--mount=type=secret</code> e cache de camadas (rootless) já funcionam, mas sem
+<code>type=cache</code>/<code>type=ssh</code> nem paralelismo de estágios.</li>
+<li><strong>GPU nunca validado num host real</strong> — o caminho CDI existe e usa a mesma fonte
+que Docker/Podman consomem, mas sem um host com GPU não há confirmação ao vivo.</li>
+<li><strong><code>docker exec</code>/attach interactivo e <code>--restart</code> via a API</strong> —
+deliberadamente fora de escopo (hijacking HTTP / modelo de supervisor incompatível com um servidor
+multi-thread).</li>
+<li><strong><code>compose</code>: cobertura da spec ainda parcial</strong> — sem
+<code>profiles</code>/<code>extends</code>/<code>configs</code>/<code>secrets</code> top-level,
+multi-ficheiro, <code>build.target</code>, <code>deploy.replicas != 1</code>, IP fixo por rede, ou
+volumes anónimos.</li>
 <li><strong>Projecto novo</strong> — sem o histórico de produção que o Docker e o Podman têm; ver o
 aviso de segurança no topo desta página antes de decidir.</li>
 </ul>
@@ -1263,14 +1289,15 @@ aviso de segurança no topo desta página antes de decidir.</li>
 <tr><td>Programador(a) a experimentar em local/homelab, ou a fazer bootstrap de um cluster
 Kubernetes pequeno sem instalar Docker</td>
 <td>Experimenta o Delonix hoje — é exactamente o caso em que já está forte.</td></tr>
-<tr><td>Equipa com um pipeline de build maduro (BuildKit, compose)</td>
-<td>Fica no Docker/Podman para o build; podes correr as imagens resultantes no Delonix se quiseres
-testar a operação — multi-stage e cache de camadas já funcionam (rootless), mas sem BuildKit
-real.</td></tr>
+<tr><td>Equipa com um pipeline de build maduro que precisa de <code>--mount=type=cache</code>/
+<code>type=ssh</code> ou paralelismo de estágios</td>
+<td>Fica no Docker/Podman para esse build específico; podes correr as imagens resultantes no
+Delonix se quiseres testar a operação — <code>docker-compose.yml</code>, multi-stage e
+<code>--mount=type=secret</code> já funcionam (rootless).</td></tr>
 <tr><td>Empresa a avaliar para produção multi-tenant ou com dados sensíveis</td>
-<td>Os 6 achados de segurança altos já estão corrigidos, mas aguarda a confirmação por uma 2.ª
-auditoria independente (aviso acima) antes de expor o motor a imagens ou utilizadores não
-confiáveis — acompanha o
+<td>Os achados de severidade CRÍTICA/ALTA já estão corrigidos e re-confirmados por uma auditoria
+independente (aviso acima); ainda faltam ~27 achados MÉDIO/BAIXO documentados (sem exploit
+conhecido) e o histórico de produção que só o tempo dá — acompanha o
 <a href="https://github.com/angolardevops/delonix-runtime/releases">changelog</a>.</td></tr>
 <tr><td>Quer avaliar tecnicamente ao detalhe (gap-a-gap, com ficheiro e linha)</td>
 <td>Lê a <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/COMPARACAO-DOCKER-PODMAN.md">análise de gaps completa</a> no repositório.</td></tr>
