@@ -1024,6 +1024,73 @@ fn cluster_nodes(store: &Store, name: Option<&str>) -> Result<(String, Vec<Conta
     }
 }
 
+/// The snapshotter configured in the node's containerd (`fuse-overlayfs` in a
+/// rootless kind node, `overlayfs` under real root).
+///
+/// **Why this has to be read and passed explicitly:** `ctr images import` does
+/// NOT use the CRI plugin's snapshotter — it uses containerd's global default
+/// (`overlayfs`), which cannot mount inside a rootless userns. Reported live:
+/// the import failed with `failed to mount ... fstype: overlay ... invalid
+/// argument` on a node whose config says `snapshotter = "fuse-overlayfs"`.
+/// Real `kind` passes `--snapshotter` for the same reason.
+///
+/// `None` (config unreadable/absent) leaves containerd's default in place rather
+/// than guessing a snapshotter the node may not have compiled in.
+fn node_snapshotter(c: &Container) -> Option<String> {
+    let (code, out) = node_exec_capture(
+        c,
+        "awk -F'\"' '/snapshotter = /{print $2; exit}' /etc/containerd/config.toml",
+    )
+    .ok()?;
+    let s = out.trim().to_string();
+    (code == 0 && !s.is_empty() && s.chars().all(|ch| ch.is_ascii_alphanumeric() || ch == '-'))
+        .then_some(s)
+}
+
+/// The FULLY-QUALIFIED reference containerd must register the image under.
+///
+/// **Found live:** importing under the short name (`nginx:alpine`, as the user
+/// types it and as `ctr images ls` then shows it) makes the kubelet report
+/// `ErrImageNeverPull` for a pod requesting that very image — the CRI resolves
+/// the docker-normalized form (`docker.io/library/nginx:alpine`) and finds
+/// nothing. Real `kind` never hits this because it feeds `ctr` the name docker
+/// already normalized. PURE.
+///
+/// Only the docker default is applied: a reference that already names a registry
+/// (a first segment with a `.` or `:`, or `localhost`) is left ALONE — rewriting
+/// `10.232.67.14:5000/app:1` would point the node at the wrong place entirely.
+fn containerd_ref(reference: &str) -> String {
+    let tagged = delonix_image::image::normalise_tag(reference);
+    let first = tagged.split('/').next().unwrap_or("");
+    let has_registry = tagged.contains('/')
+        && (first.contains('.') || first.contains(':') || first == "localhost");
+    if has_registry {
+        return tagged;
+    }
+    if tagged.contains('/') {
+        // `myorg/app:1` → Docker Hub, but NOT the `library/` namespace.
+        format!("docker.io/{tagged}")
+    } else {
+        format!("docker.io/library/{tagged}")
+    }
+}
+
+/// Does this node's `ctr` accept `--local` on `images import`?
+///
+/// **Why it matters:** containerd 2.x routes `ctr images import` through the
+/// **transfer service** by default, and that path refuses to unpack unless the
+/// daemon has unpack platforms configured — reported live as `unable to
+/// initialize unpacker: no unpack platforms defined`, with the exact same
+/// archive, snapshotter and `--platform` that succeed via `--local` (the
+/// classic client-side import). The flag does not exist on containerd 1.6, so it
+/// is probed rather than assumed: passing an unknown flag would turn a working
+/// import into a parse error.
+fn node_ctr_supports_local(c: &Container) -> bool {
+    node_exec_capture(c, "ctr images import --help 2>&1 | grep -q -- '--local'")
+        .map(|(code, _)| code == 0)
+        .unwrap_or(false)
+}
+
 /// `cluster load <IMAGE>...` — the equivalent of `kind load docker-image`:
 /// imports images from the LOCAL store straight into every node's containerd,
 /// **with no registry in between**.
@@ -1079,10 +1146,10 @@ pub(crate) fn load(
     for r in refs {
         let image = images.resolve(r)?;
         // The name the node registers, hence what a Deployment's `image:` must
-        // say. The user's own reference is used verbatim (`delonix-web:v1.2.3`),
-        // NOT the store's first tag: an image can carry several tags and picking
-        // a different one would import under a name the manifests never mention.
-        let ref_name = delonix_image::image::normalise_tag(r);
+        // say. Built from the user's OWN reference (`delonix-web:v1.2.3`), not the
+        // store's first tag: an image can carry several tags and importing under a
+        // name the manifests never mention pins the wrong thing.
+        let ref_name = containerd_ref(r);
         p.step(&format!("{} {ref_name}", super::po::t("Packing")), "📦");
         let tar = dir.join(format!(".load-{}.tar", image.short_id()));
         delonix_image::write_oci_archive(images, &image, &ref_name, &tar)?;
@@ -1091,12 +1158,28 @@ pub(crate) fn load(
         for node in &running {
             p.step(&format!("{ref_name} → {}", node.name), "🚚");
             let file = tar.file_name().unwrap_or_default().to_string_lossy();
-            // `--all-platforms`: the archive holds exactly one, but ctr otherwise
-            // filters by ITS default platform string and can drop everything,
-            // reporting success with nothing imported.
+            // `--snapshotter`: `ctr` would otherwise extract with containerd's
+            // GLOBAL default (overlayfs), which cannot mount in a rootless userns
+            // — see `node_snapshotter`.
+            let snap = node_snapshotter(node)
+                .map(|s| format!(" --snapshotter {s}"))
+                .unwrap_or_default();
+            // `--platform` with the image's OWN architecture, and deliberately NOT
+            // `--all-platforms`: found live on containerd 2.1 — once the snapshotter
+            // above lets the unpack actually run, `--all-platforms` fails it with
+            // `no unpack platforms defined`. A concrete platform also stops ctr from
+            // filtering the archive down to nothing against its default matcher.
+            let plat = format!("linux/{}", image.config.architecture);
+            let local = if node_ctr_supports_local(node) {
+                " --local"
+            } else {
+                ""
+            };
             let (code, out) = node_exec_capture(
                 node,
-                &format!("ctr -n k8s.io images import --all-platforms {NODE_SHARED}/{file}"),
+                &format!(
+                    "ctr -n k8s.io images import{local} --platform {plat}{snap} {NODE_SHARED}/{file}"
+                ),
             )?;
             if code != 0 {
                 // The open step closes with ✗ on drop (see `Progress::drop`) —
@@ -1398,6 +1481,35 @@ fn remove_kubecontext(cluster: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn containerd_ref_normaliza_como_o_docker_faz() {
+        // The bug this exists for: the short name imports fine and the kubelet
+        // still says ErrImageNeverPull, because the CRI looks up the normalized
+        // form. A Deployment saying `image: nginx:alpine` must MATCH.
+        assert_eq!(
+            containerd_ref("nginx:alpine"),
+            "docker.io/library/nginx:alpine"
+        );
+        // No tag → `:latest`, same rule the store already applies.
+        assert_eq!(
+            containerd_ref("delonix-web"),
+            "docker.io/library/delonix-web:latest"
+        );
+        // A user/org namespace is Docker Hub, but NOT `library/`.
+        assert_eq!(containerd_ref("myorg/app:1"), "docker.io/myorg/app:1");
+        // An explicit registry is left ALONE — rewriting it would point the node
+        // somewhere else entirely.
+        assert_eq!(
+            containerd_ref("10.232.67.14:5000/delonix-web:v1"),
+            "10.232.67.14:5000/delonix-web:v1"
+        );
+        assert_eq!(containerd_ref("ghcr.io/org/app:2"), "ghcr.io/org/app:2");
+        assert_eq!(
+            containerd_ref("localhost:5000/app:3"),
+            "localhost:5000/app:3"
+        );
+    }
 
     #[test]
     fn nomes_de_worker_seguem_a_convencao_do_kind() {

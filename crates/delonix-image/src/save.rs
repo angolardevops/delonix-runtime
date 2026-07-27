@@ -65,6 +65,19 @@ pub fn write_oci_archive(
     });
     append_file(&mut tar, "index.json", &serde_json::to_vec(&index)?)?;
 
+    // Legacy `manifest.json`, exactly as `docker save` still emits alongside the
+    // OCI layout. It is what makes ONE archive readable by every consumer that
+    // matters here: `ctr images import` and `podman load` read the OCI layout,
+    // while `docker load` and our own [`crate::load::load_docker_archive`] read
+    // this. Writing only the layout would make `delonix image save` |
+    // `delonix image load` fail to round-trip through our own loader.
+    let legacy = serde_json::json!([{
+        "Config": blob_path(&image.id),
+        "RepoTags": [ref_name],
+        "Layers": image.layers.iter().map(|d| blob_path(d)).collect::<Vec<_>>(),
+    }]);
+    append_file(&mut tar, "manifest.json", &serde_json::to_vec(&legacy)?)?;
+
     append_blob(&mut tar, &manifest_digest, &manifest_bytes)?;
     let config = store.cas().read(&image.id)?;
     append_blob(&mut tar, &image.id, &config)?;

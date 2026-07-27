@@ -150,6 +150,24 @@ pub enum ImageCmd {
         image: String,
         dir: PathBuf,
     },
+    /// Save an image to a portable archive (`docker save`'s counterpart) — the
+    /// way to move an image to another machine with no registry. The archive is
+    /// an OCI layout WITH the legacy `manifest.json`, so `delonix image load`,
+    /// `docker load`, `podman load` and `ctr images import` all read it.
+    Save {
+        #[arg(add = ArgValueCandidates::new(super::complete::images))]
+        image: String,
+        /// Destination file. Use `-o /dev/stdout` to pipe (e.g. into `gzip`).
+        #[arg(short = 'o', long = "output", value_name = "FILE")]
+        output: PathBuf,
+    },
+    /// Load an image from an archive produced by `delonix image save`,
+    /// `docker save` or `podman save` (the counterpart of `save`).
+    Load {
+        /// Archive to read (`.tar`; a `.tar.gz` must be gunzipped first).
+        #[arg(short = 'i', long = "input", value_name = "FILE")]
+        input: PathBuf,
+    },
     /// Apply the `kind: Image` documents of a manifest (`pull` idempotent
     /// by reference; `build` rebuilds and replaces the tag on each apply).
     Apply {
@@ -416,6 +434,8 @@ pub fn run(vm: bool, action: ImageCmd) -> Result<()> {
         }
         ImageCmd::Rm { image } => cmd_rm(&images, &image),
         ImageCmd::Export { image, dir } => cmd_export(&images, &image, &dir),
+        ImageCmd::Save { image, output } => cmd_save(&images, &image, &output),
+        ImageCmd::Load { input } => cmd_load(&images, &input),
         ImageCmd::Apply { file } => {
             let path = manifest::resolve_path(file)?;
             let docs = manifest::load(&path)?;
@@ -538,7 +558,11 @@ fn run_vm(action: ImageCmd) -> Result<()> {
             )
             .into(),
         )),
-        ImageCmd::Rm { .. } | ImageCmd::Export { .. } | ImageCmd::Apply { .. } => {
+        ImageCmd::Rm { .. }
+        | ImageCmd::Export { .. }
+        | ImageCmd::Save { .. }
+        | ImageCmd::Load { .. }
+        | ImageCmd::Apply { .. } => {
             return Err(Error::Invalid(
                 super::po::t("command not available for VM images (--vm) — use ls/pull/push/build")
                     .into(),
@@ -858,6 +882,45 @@ fn cmd_rm(images: &ImageStore, reference: &str) -> Result<()> {
 }
 
 /// Writes a minimal OCI runtime bundle (rootfs + config.json) for `runc`/`crun`.
+/// `image save` — the counterpart of `docker save`/`podman save`, and what makes
+/// a registry-free deploy to ANOTHER machine possible (build here, `save`, copy,
+/// `load` there). The archive is deliberately readable by all four consumers that
+/// matter: `delonix image load`, `docker load`, `podman load` and `ctr images
+/// import` (see [`delonix_image::write_oci_archive`]).
+///
+/// The reference is written into the archive VERBATIM (not the store's first
+/// tag): an image can carry several tags, and loading under a name the caller
+/// never asked for is how a deploy ends up pinning the wrong thing.
+fn cmd_save(images: &ImageStore, reference: &str, output: &std::path::Path) -> Result<()> {
+    let img = images.resolve(reference)?;
+    let ref_name = delonix_image::image::normalise_tag(reference);
+    delonix_image::write_oci_archive(images, &img, &ref_name, output)?;
+    // stdout is a legitimate destination (`-o /dev/stdout | gzip`) — reporting to
+    // stdout there would corrupt the archive. All progress goes to stderr.
+    eprintln!(
+        "{}",
+        super::po::tf(
+            "{ref}: saved to {path}",
+            &[("ref", &ref_name), ("path", &output.display().to_string())],
+        )
+    );
+    Ok(())
+}
+
+/// `image load` — imports an archive into the local store. Accepts what
+/// `docker save`/`podman save`/`delonix image save` produce (the legacy
+/// `manifest.json` layout).
+fn cmd_load(images: &ImageStore, input: &std::path::Path) -> Result<()> {
+    let img = delonix_image::load_docker_archive(images, input)?;
+    let tags = if img.repo_tags.is_empty() {
+        img.short_id()
+    } else {
+        img.repo_tags.join(", ")
+    };
+    println!("{}", super::po::tf("loaded: {tags}", &[("tags", &tags)]));
+    Ok(())
+}
+
 fn cmd_export(images: &ImageStore, reference: &str, dir: &std::path::Path) -> Result<()> {
     let img = resolve_or_pull(images, reference)?;
     std::fs::create_dir_all(dir)

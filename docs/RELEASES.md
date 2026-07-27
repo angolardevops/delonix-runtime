@@ -4,6 +4,60 @@
 > (regenerado automaticamente pelo pipeline de release a cada tag publicada).
 > Não editar à mão — edita a nota da release respectiva.
 
+## v0.35.1 — `cluster load` now actually reaches the kubelet, and `image save`/`image load` land
+
+**v0.35.0's `cluster load` did not work end to end.** `ctr` reported a successful import and
+`crictl images` listed the image, so it looked right — but a pod requesting that image failed with
+`ErrImageNeverPull`. Found by running the test that actually matters (a pod with
+`imagePullPolicy: Never`, which no registry can rescue) instead of trusting the import's own exit
+code. Three independent defects, each of which alone breaks the feature:
+
+1. **The image was registered under the short name.** `ctr` recorded `nginx:alpine` — the name as
+   typed — while the kubelet resolves the docker-normalized `docker.io/library/nginx:alpine` and
+   found nothing. New pure, tested `containerd_ref()` applies the docker default
+   (`docker.io/library/…`, or `docker.io/<org>/…`) and deliberately leaves an explicit registry
+   alone: rewriting `10.232.67.14:5000/app:1` would point the node somewhere else entirely.
+2. **The wrong snapshotter.** `ctr images import` does not use the CRI plugin's snapshotter — it
+   uses containerd's global default (`overlayfs`), which cannot mount inside a rootless userns
+   (`failed to mount … fstype: overlay … invalid argument`). The node's configured snapshotter
+   (`fuse-overlayfs`) is now read from its containerd config and passed explicitly, exactly as
+   real `kind` does.
+3. **containerd 2.x's transfer service refuses to unpack.** Once the snapshotter was right, the
+   import failed with `unable to initialize unpacker: no unpack platforms defined`. The classic
+   client-side path (`--local`) unpacks correctly with the same archive, snapshotter and platform.
+   `--local` does not exist on containerd 1.6, so support is **probed**, not assumed. Also
+   `--platform linux/<arch>` (the image's own) instead of `--all-platforms`, which is what
+   triggers that unpacker error in the first place.
+
+**Validated the right way this time**: `delonix cluster load nginx:alpine` → `kubectl run
+--image-pull-policy=Never` → pod **Running**, on a rootless kind-mode cluster with containerd
+2.1.3.
+
+### New: `delonix image save` / `delonix image load`
+
+The counterparts of `docker save`/`docker load` — moving an image to another machine with **no
+registry**, which is what a remote Ansible deploy needs (build here, `save`, copy, `load` there).
+
+```bash
+delonix image save delonix-web:v1.2.3 -o /tmp/web.tar     # `-o /dev/stdout | gzip` also works
+delonix image load -i /tmp/web.tar
+```
+
+The archive is an OCI layout **with** the legacy `manifest.json`, exactly as `docker save` still
+emits — so one file is readable by `delonix image load`, `docker load`, `podman load` **and**
+`ctr images import`. `load` wires up `delonix_image::load_docker_archive`, a library function that
+had existed with no CLI caller.
+
+**Validated live**: `save` → `image rm` → `load` → the restored image runs and serves HTTP 200,
+with the same image id.
+
+### Note
+
+`image save` writes progress to **stderr**, never stdout — `-o /dev/stdout` is a supported
+destination and a status line there would corrupt the archive.
+
+---
+
 ## v0.35.0 — `cluster load`: the `kind load docker-image` equivalent, with no registry — and volumes no longer vanish on `container start`
 
 Feature release, from a real report: a `make push` that ends in `kind load docker-image` fails on a

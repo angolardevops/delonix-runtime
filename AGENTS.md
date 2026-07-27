@@ -1591,6 +1591,68 @@ slirp por-container, que morreu com ele; limpa-se só o registo (antes: erro
 (deny→000, allow→200 com substituição, rm→limpo). Nota: um `ingress -h` vazio
 reportado uma vez NÃO reproduziu (3× OK) — glitch de terminal, sem causa no CLI.
 
+### Revisão do flow `-p` ↔ `ingress`/`egress` (2026-07-27) — 1 bug de SEGURANÇA + 3 de coerência
+
+Bug report real do utilizador: "o browser não deve bloquear quando o container é exposto via `-p`".
+A investigação partiu do sintoma e acabou noutro sítio — o sintoma era real, mas o achado grave
+estava ao lado. Os quatro problemas partilham a mesma raiz conceptual: **`-p` (publish) e
+`ingress`/`egress` (firewall) são dois planos independentes que ninguém reconciliava**, nem no
+dataplane nem no que a CLI dizia ao utilizador.
+
+1. **CRÍTICO (segurança) — a PORTA era silenciosamente ignorada quando o proto era `any`.**
+   `fw_chain_body` (`delonix-net/src/infra.rs`) só emitia o `dport` DENTRO do ramo
+   `proto != "any"`. Como `parse_port_spec` faz `proto` cair em `any` sempre que o utilizador
+   escreve uma porta nua (`allow <c> 9999`, a forma esmagadoramente comum), a regra gerada era
+   `ip daddr <ip> accept` — **o container inteiro**, não a porta pedida. Consequência medida ao
+   vivo, não teórica: com `policy deny`, um `ingress allow <c> 9999` (porta sem relação nenhuma)
+   ABRIU a porta 18099 publicada; com `policy allow`, um `ingress deny <c> 9999` FECHOU-a. O
+   comando fazia o oposto do que dizia, exactamente onde estar errado é um buraco de segurança.
+   Com proto explícito (`tcp/9999`) sempre funcionou — é por isso que nunca apareceu nos testes
+   E2E anteriores, que usam a forma com proto. **Corrigido**: `any` + porta passa a emitir
+   `meta l4proto { tcp, udp } th dport <porta>` (`th` = transport header, válido para os dois,
+   ranges `n-m` incluídos — o `fw_port_ok` já os valida). Regressão em
+   `fw_body_keeps_the_port_when_proto_is_any`. **Provado por teste unitário, NÃO ao vivo**:
+   `fw_chain_body` corre dentro do processo do HOLDER, e este host tem containers vivos (odoo,
+   registries, control-planes k8s) — respawnar o holder derrubaria a SDN de todos (mesma nota
+   já registada para o DNS interno). Só apanha o fix num respawn do holder.
+2. **`ingress ls` mentia sobre as portas publicadas.** A tabela imprimia sempre
+   `publish <spec> 0.0.0.0/0 allow DNAT`, incondicionalmente. Reproduzido ao vivo: com
+   `policy deny`, `curl` dava `000` e a tabela continuava a dizer `allow` — na coluna que se lê
+   precisamente para decidir se algo está exposto. **Corrigido** com `published_verdict`, que
+   resolve o veredicto como o dataplane o resolve, e imprime `BLOCKED` + o comando exacto de
+   recuperação. `set_policy` ganhou o mesmo aviso no momento em que o `deny` é aplicado.
+3. **A porta que uma regra tem de nomear é a do CONTAINER, nunca a do host** — o DNAT corre no
+   `prerouting`, logo quando o pacote chega à chain por-container o `dport` já é o `cp` de
+   `hp:cp`. Não estava documentado em lado nenhum e é contra-intuitivo (o `ls` mostra `18099:80`,
+   a regra tem de dizer `80`). Antes do fix #1 isto nem se notava: com `proto: any` a regra
+   ignorava a porta e "funcionava" por acidente, pela razão errada. Agora as mensagens de aviso
+   dizem-no explicitamente.
+4. **`net ingress ls` listava containers que a firewall provavelmente não governa.** Um
+   `--net host`/`none` aparecia com `allow (default)`, que se lê como "governado e aberto",
+   quando `require_sdn_ip` recusa QUALQUER mutação de firewall para ele (`ingress allow
+   mandume-benguela-02 80` → erro). Passou a `n/a (host net)`.
+
+**O sintoma original (o browser) era o comportamento seguro por omissão, sem superfície de CLI.**
+`slirp_add_hostfwd` liga sempre a `127.0.0.1` — correcto por omissão, mas a ÚNICA forma de o
+alargar era a env var não documentada `DELONIX_PUBLISH_ADDR`, e `parse_publish` REJEITAVA a
+sintaxe Docker `-p <ip>:<hp>:<cp>` como "invalid port". Um browser noutra máquina (ou o próprio
+host pelo IP da LAN) recebia connection-refused sem nada a explicar porquê. **Corrigido**:
+`parse_publish_addr` lê a forma `[hostIp:]hostPort:contPort[/proto]` e `publish_bind_addr`
+concentra a precedência (spec > env > `127.0.0.1`) num só sítio, para os DOIS caminhos de publish
+(slirp por-container e o slirp único do ingress) não divergirem. O default seguro fica intacto —
+alargar é sempre opt-in explícito. Só IPv4 (é interpolado no JSON do api-socket do slirp; um
+literal IPv6 também colidiria com a divisão por `:`); um head não-IPv4 é **recusado**, nunca
+descartado em silêncio — que foi exactamente o bug do compose com `127.0.0.1:9000:80`.
+**Validado ao vivo**: `-p 0.0.0.0:18099:80` → `ss` confirma bind em `0.0.0.0`, e
+`curl http://192.168.1.106:18099/` → **200** (antes: spec recusada; com `8080:80`, `000` na LAN).
+
+**Dívida que fica registada, não fechada aqui**: `infra::publish_port_allow` (publish com
+allowlist de CIDRs ANTES do DNAT) continua com **zero chamadores** — `ingress allow --from <cidr>`
+escreve só a chain por-container e nunca lhe toca. É a mesma família de armadilha já documentada
+(`mount_live`/`set_net_rate`/`update_limits`): código público, morto, que muta estado partilhado
+e cujo primeiro chamador real vai encontrar um bug latente. Decidir entre ligá-lo ou apagá-lo é
+uma sessão própria.
+
 ### `tunnel expose --provider pinggy` sem URL (v0.16.1)
 
 Bug report real (host kaeso-sys-01): `delonix net tunnel expose --provider pinggy --local-port 8181`
@@ -1877,9 +1939,19 @@ do store LOCAL e importa-a no containerd de CADA nó a correr.
   importar zero reportando sucesso); o `.tar` é apagado sempre a seguir (é uma cópia completa da
   imagem em disco — este host já teve disk-pressure por menos); nós parados são REPORTADOS, nunca
   saltados em silêncio.
-- **Validado ao vivo** no cluster `dev`: `delonix-web`/`delonix-server` (94/45 MiB) importados,
-  visíveis no `ctr -n k8s.io images ls` E no `crictl images` do kubelet (como
-  `docker.io/library/<nome>`, a mesma normalização que o `kind load` real produz).
+- **3 defeitos apanhados no v0.35.1, TODOS invisíveis ao `ctr`** (que reportava sucesso, e o
+  `crictl images` até listava a imagem): (1) a imagem era registada com o nome CURTO
+  (`nginx:alpine`) e o kubelet resolve a forma normalizada (`docker.io/library/nginx:alpine`) →
+  `ErrImageNeverPull` (agora `containerd_ref()`, puro e testado, com a regra do docker; um registo
+  explícito NUNCA é reescrito); (2) o `ctr images import` não usa o snapshotter do plugin CRI mas
+  o default GLOBAL (`overlayfs`), que não monta em userns rootless — lê-se agora o
+  `fuse-overlayfs` da config do nó e passa-se `--snapshotter`, tal como o `kind` real faz; (3) o
+  **transfer service do containerd 2.x** recusa desempacotar (`no unpack platforms defined`) — o
+  caminho clássico `--local` funciona, e é PROBADO (não existe no containerd 1.6) em vez de
+  assumido; `--platform linux/<arch>` em vez de `--all-platforms` (é este que dispara o erro).
+- **Lição de validação**: "o comando devolveu 0" não é prova de nada aqui. A prova é um `kubectl
+  run --image-pull-policy=Never` a ficar **Running** — nenhum registo o pode salvar. Validado
+  assim no `delonix-stage` (containerd 2.1.3, rootless).
 
 ### BUG GRAVE corrigido a caminho disto: `-v` nunca era persistido → volumes PERDIDOS no `start`
 
@@ -1984,7 +2056,7 @@ sem noção de tenant) — não o "Proxmox Driver" com inventário/scheduler do 
 
 ## Estado para a próxima sessão (2026-07-27, antes do lançamento público de sexta-feira)
 
-Release actual: **v0.35.0** (ver `docs/RELEASES.md`). Motor testado sistematicamente por todos os
+Release actual: **v0.35.1** (ver `docs/RELEASES.md`). Motor testado sistematicamente por todos os
 grupos de comandos, i18n corrigido (380+ strings), docs (`README.rst`, site, `docs/comparacao.html`)
 sincronizadas com o binário publicado, ficheiros de saúde da comunidade (`CONTRIBUTING.md`/
 `SECURITY.md`/`CODE_OF_CONDUCT.md`/templates de issue/PR) no lugar, roteiro de vídeos em
