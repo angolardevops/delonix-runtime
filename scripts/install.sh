@@ -69,7 +69,7 @@ REPO="angolardevops/delonix-runtime"
 # por `curl … | bash`, é executado sem verificação — a sua autenticidade depende
 # do TLS e do GitHub. Para fechar também esse elo, descarrega-o primeiro e
 # confere-o contra o SHA256SUMS assinado antes de o correr (ver README).
-MINISIGN_PUBKEY="__POR_PREENCHER__"
+MINISIGN_PUBKEY="RWSiOqlKAnVVB+pJLQxgYHq/kdN6RbBQdlL5gOcZ6H/xkwSAPIqTo+GB"
 VERSION="latest"
 WITH_VM=1
 WITH_TUNE=1
