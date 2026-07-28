@@ -48,6 +48,51 @@ pub fn rmtree(path: &Path) -> Result<()> {
     })
 }
 
+/// `__duusage <path> <outfile>` — measures a tree from INSIDE the mapped userns
+/// and writes `<bytes>` to `outfile`.
+///
+/// Why this exists at all: measuring a volume as the real user is not just
+/// imprecise in rootless, it is wrong in the common case. A container in a mapped
+/// userns writes `_data` as a subuid, and every managed database `chmod 700`s its
+/// data dir — so `read_dir` returns EACCES and the walk reported **0 bytes** for
+/// volumes holding real data. That made `volumes describe` print `Usage: 0 B`
+/// over 20 MiB, `system df` print `volumes 0 B` on a filling disk, and the
+/// rootless quota monitor — the only enforcement rootless has — never fire.
+/// Here we are root in the userns, hence the effective owner of the subuids, so
+/// the walk sees everything, exactly like `__volsnap` already does for the tar.
+///
+/// The count goes through a FILE and not stdout because `reexec_mapped` only
+/// reports the child's exit status; `outfile` is left world-readable (0644) so
+/// the parent — which does not own the subuid — can read it back, the same
+/// arrangement `__buildtar` already uses.
+pub fn duusage(path: &Path, out: &Path) -> Result<()> {
+    let u = delonix_volume::measure(path);
+    let mut line = u.bytes.to_string();
+    line.push('\n');
+    std::fs::write(out, line.as_bytes()).map_err(io_err("__duusage"))?;
+    use std::os::unix::fs::PermissionsExt;
+    let _ = std::fs::set_permissions(out, std::fs::Permissions::from_mode(0o644));
+    Ok(())
+}
+
+/// Reads the whole snapshot through the gzip+tar decoders WITHOUT writing
+/// anything, so a corrupt archive is caught while the live data is still there.
+///
+/// Deliberately walks every entry and drains each one: a truncated gzip stream
+/// only errors when the reader reaches the end, so checking the header alone (or
+/// just listing names) would pass an archive that cannot actually be extracted.
+fn verify_snapshot(tarball: &Path) -> Result<()> {
+    let f = std::fs::File::open(tarball).map_err(io_err("volume restore"))?;
+    let mut a = tar::Archive::new(flate2::read::GzDecoder::new(f));
+    let entries = a.entries().map_err(io_err("volume restore"))?;
+    let mut sink = std::io::sink();
+    for e in entries {
+        let mut e = e.map_err(io_err("volume restore"))?;
+        std::io::copy(&mut e, &mut sink).map_err(io_err("volume restore"))?;
+    }
+    Ok(())
+}
+
 /// `__volsnap create <data> <tarball>` — tar.gz of a volume's `_data`.
 ///
 /// Writes to a `.tmp` and does a `rename`: a crash midway does not leave a
@@ -76,6 +121,13 @@ pub fn volsnap_create(data: &Path, tarball: &Path) -> Result<()> {
 /// may be mounted in a running container). Owners and permissions preserved — in
 /// the mapped userns the subuid chown works.
 pub fn volsnap_restore(data: &Path, tarball: &Path) -> Result<()> {
+    // VALIDATE BEFORE DESTROYING. This used to clear `_data` and only then start
+    // unpacking, so a truncated/corrupt archive (an interrupted copy, a snapshot
+    // taken when the disk filled, a hand-moved file) destroyed the live data and
+    // had nothing to put back — no rollback, total loss. A full decode pass first
+    // costs one extra read of a file we are about to read anyway, and turns that
+    // into a clean refusal with the data still intact.
+    verify_snapshot(tarball)?;
     let f = std::fs::File::open(tarball).map_err(io_err("volume restore"))?;
     for e in std::fs::read_dir(data).map_err(io_err("volume restore"))? {
         let p = e.map_err(io_err("volume restore"))?.path();

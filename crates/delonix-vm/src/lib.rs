@@ -1789,18 +1789,27 @@ fn remove_inner(base: &Path, name: &str, force: bool) -> Result<()> {
             orphan
         }
     };
-    for ext in ["qcow2", "sock", "sock.lock", "serial", "log", "pid", "xml"] {
-        let _ = std::fs::remove_file(vmdir.join(format!("{name}.{ext}")));
-    }
-    // The cloud-init seed directory (`vms/<name>/`, from `generate_seed_iso`)
-    // also belongs to the VM — it was left behind and accumulated junk per name.
-    let _ = std::fs::remove_dir_all(vmdir.join(name));
+    // CHECK BEFORE DELETING. This block used to run BEFORE the `existed` test,
+    // so `vm rm <name>` on a VM that has no record and no libvirt domain deleted
+    // `<name>.qcow2` and the whole seed directory and THEN returned "no such VM"
+    // with a non-zero exit — an operator reading that error reasonably concludes
+    // nothing happened, while a multi-gigabyte disk image has just been removed.
+    // Reproduced live: a stray `auditghost.qcow2` was destroyed by a command that
+    // reported failure. Same shape as the volume `rm` that unlinked its metadata
+    // before failing: destroy nothing until we know the object is really ours to
+    // destroy.
     if !existed {
         // Neither a local record nor a domain in libvirt — the `st.remove` below is
         // idempotent (absence is not an error) and would say Ok; an `rm` of something that
         // does not exist should say so, like docker.
         return Err(Error::VmNotFound(name.to_string()));
     }
+    for ext in ["qcow2", "sock", "sock.lock", "serial", "log", "pid", "xml"] {
+        let _ = std::fs::remove_file(vmdir.join(format!("{name}.{ext}")));
+    }
+    // The cloud-init seed directory (`vms/<name>/`, from `generate_seed_iso`)
+    // also belongs to the VM — it was left behind and accumulated junk per name.
+    let _ = std::fs::remove_dir_all(vmdir.join(name));
     st.remove(name)
 }
 

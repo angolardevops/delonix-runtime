@@ -276,14 +276,20 @@ impl RuntimeService for DelonixRuntime {
         // Register the request and return the streaming server URL. The client
         // (kubelet/crictl) upgrades (SPDY or WebSocket) there and we run
         // `delonix exec`, wiring stdin/stdout/stderr to the streams.
-        let url = self.streamer.prepare_exec(
-            req.container_id,
-            req.cmd,
-            req.tty,
-            req.stdin,
-            req.stdout,
-            req.stderr,
-        );
+        let url = self
+            .streamer
+            .prepare_exec(
+                req.container_id,
+                req.cmd,
+                req.tty,
+                req.stdin,
+                req.stdout,
+                req.stderr,
+            )
+            // FAIL CLOSED: no entropy → no session. Returning a token we could not
+            // randomize would hand out a predictable exec URL (arbitrary code
+            // execution inside the pod); `Internal` makes the kubelet retry instead.
+            .map_err(|e| Status::internal(format!("streaming token: {e}")))?;
         Ok(Response::new(ExecResponse { url }))
     }
     async fn attach(&self, r: Request<AttachRequest>) -> Result<Response<AttachResponse>, Status> {
@@ -292,13 +298,10 @@ impl RuntimeService for DelonixRuntime {
         // stdio of a detached container's main process goes to the log, so the
         // streaming server runs `delonix logs -f`. (Sending stdin to PID 1 of a
         // detached container is not supported — use `exec`.)
-        let url = self.streamer.prepare_attach(
-            req.container_id,
-            req.tty,
-            req.stdin,
-            req.stdout,
-            req.stderr,
-        );
+        let url = self
+            .streamer
+            .prepare_attach(req.container_id, req.tty, req.stdin, req.stdout, req.stderr)
+            .map_err(|e| Status::internal(format!("streaming token: {e}")))?;
         Ok(Response::new(AttachResponse { url }))
     }
     async fn port_forward(
@@ -310,7 +313,8 @@ impl RuntimeService for DelonixRuntime {
         // Returns the streaming URL; the client opens one stream per port.
         let url = self
             .streamer
-            .prepare_port_forward(req.pod_sandbox_id, req.port);
+            .prepare_port_forward(req.pod_sandbox_id, req.port)
+            .map_err(|e| Status::internal(format!("streaming token: {e}")))?;
         Ok(Response::new(PortForwardResponse { url }))
     }
     async fn container_stats(

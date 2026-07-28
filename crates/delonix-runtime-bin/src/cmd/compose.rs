@@ -95,6 +95,12 @@ pub enum ComposeCmd {
         /// without creating anything.
         #[arg(long = "dry-run")]
         dry_run: bool,
+        /// Accepted for `docker compose` compatibility. Services already start
+        /// detached here (this engine has no daemon holding them), so this is a
+        /// no-op rather than an error — every existing script and CI job writes
+        /// `up -d`, and rejecting it broke all of them for no behavioural gain.
+        #[arg(short = 'd', long = "detach")]
+        detach: bool,
     },
     /// Removes every container this project's `up` created (and, with `-v`,
     /// its named volumes). Networks/volumes marked `external: true` are NEVER
@@ -143,6 +149,7 @@ pub fn run(cmd: ComposeCmd) -> Result<()> {
             file,
             project,
             dry_run,
+            detach: _,
         } => cmd_up(file, project, dry_run),
         ComposeCmd::Down {
             file,
@@ -503,7 +510,32 @@ fn resolve_compose_path(file: Option<PathBuf>) -> Result<PathBuf> {
 /// single `_` — same shape as real `docker compose`'s own project-name
 /// normalization (exact collapsing rule flagged for live confirmation).
 pub(crate) fn default_project_name(compose_path: &Path) -> String {
-    let dir_name = compose_path
+    // BUG FIXED HERE (CRITICAL, cross-project data loss, reproduced live).
+    // The derivation below was already right, but it was fed a path that
+    // usually has NO directory component: `find_compose_file` returns a bare
+    // relative `docker-compose.yml`, and `-f docker-compose.yml` is relative
+    // too. `Path::new("docker-compose.yml").parent()` is `Some("")`, whose
+    // `file_name()` is `None` — so EVERY ordinary invocation fell through to
+    // the literal `"default"`, and the only tests here passed absolute paths,
+    // so nothing caught it.
+    //
+    // The consequence measured on a live host: two unrelated compose projects
+    // in two different directories both became project `default`, sharing
+    // network `default_default`, volume `default_<name>` and container
+    // `default-<service>`. `up` in the second directory ADOPTED the first
+    // project's running container ("already exists, nothing to do") and read
+    // its data; `down -v` there then destroyed the first project's named
+    // volume. Absolutizing first is the whole fix — a relative path is resolved
+    // against the cwd, which is exactly the directory Docker Compose names the
+    // project after.
+    let absolute = if compose_path.is_absolute() {
+        compose_path.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .map(|cwd| cwd.join(compose_path))
+            .unwrap_or_else(|_| compose_path.to_path_buf())
+    };
+    let dir_name = absolute
         .parent()
         .and_then(|p| p.file_name())
         .map(|n| n.to_string_lossy().into_owned())
@@ -1538,7 +1570,20 @@ fn cmd_down(file: Option<PathBuf>, project: Option<String>, remove_volumes: bool
                 if vol.external {
                     continue;
                 }
-                let _ = super::volume::cmd_rm(&vol_store, &volume_names[key]);
+                // NOT forced, and NOT silenced. `down -v` must respect the same
+                // reference check as `volumes rm`: this project's containers are
+                // already gone by now, so anything still holding the volume
+                // belongs to something else, and destroying it would be exactly
+                // the cross-project data loss this check exists to stop. A
+                // failure is reported instead of being swallowed by `let _ =`,
+                // which used to make `down -v` print success while leaving (or
+                // failing to leave) volumes in an unknown state.
+                if let Err(e) = super::volume::cmd_rm(&vol_store, &volume_names[key], false) {
+                    super::output::warn(&super::po::tf(
+                        "volume '{name}' not removed: {err}",
+                        &[("name", &volume_names[key]), ("err", &e.to_string())],
+                    ));
+                }
             }
         }
     }
@@ -1727,7 +1772,29 @@ mod tests {
             default_project_name(Path::new("/home/u/simple/compose.yml")),
             "simple"
         );
-        assert_eq!(default_project_name(Path::new("compose.yml")), "default");
+    }
+
+    /// REGRESSION (cross-project data loss): a RELATIVE compose path — what
+    /// `find_compose_file` always returns, and what `-f docker-compose.yml`
+    /// gives — must still be named after the directory it actually lives in.
+    /// This asserted `"default"` before, i.e. the test encoded the bug: every
+    /// real invocation collapsed onto one shared project name, so two unrelated
+    /// projects adopted each other's containers and volumes and `down -v` in one
+    /// deleted the other's data.
+    #[test]
+    fn default_project_name_resolve_caminho_relativo_contra_o_cwd() {
+        let cwd = std::env::current_dir().unwrap();
+        let esperado = default_project_name(&cwd.join("compose.yml"));
+        assert_eq!(default_project_name(Path::new("compose.yml")), esperado);
+        assert_eq!(
+            default_project_name(Path::new("./docker-compose.yml")),
+            esperado
+        );
+        assert_ne!(
+            default_project_name(Path::new("compose.yml")),
+            "default",
+            "um caminho relativo não pode cair no nome de projecto partilhado"
+        );
     }
 
     #[test]

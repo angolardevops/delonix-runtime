@@ -194,16 +194,28 @@ fn cmd_ls(vstore: &VolumeStore, sstore: &JsonStore<ShareRecord>) -> Result<()> {
     let mut t = output::Table::new(&["NAME", "STORAGE", "QUOTA", "USED", "ALERT", "MOUNTPOINT"]);
     for rec in sstore.list()? {
         let path = Path::new(&rec.mountpoint);
-        let used = vstore.usage_at(path);
-        let (warn, over) = vstore.quota_state_at(path, rec.quota_bytes, rec.alert_pct);
+        // MEASURED usage, with the mapped-userns fallback: a tenant's share is
+        // written by a container in a mapped userns, so the direct walk hits
+        // EACCES and used to report a flat `0 B` — a per-tenant quota display
+        // that could never leave 0%. See `volume::measured_usage`.
+        let u = super::volume::measured_usage(path);
+        let qs = vstore.quota_state_at_checked(path, rec.quota_bytes, rec.alert_pct);
         t.row(vec![
             rec.name,
             rec.storage_ref,
             rec.quota_bytes
                 .map(output::fmt_size)
                 .unwrap_or_else(|| "-".to_string()),
-            output::fmt_size(used),
-            alert_label(warn, over).to_string(),
+            if u.is_complete() {
+                output::fmt_size(u.bytes)
+            } else {
+                format!(">= {}", output::fmt_size(u.bytes))
+            },
+            if !u.is_complete() && !qs.measured {
+                "?".to_string()
+            } else {
+                alert_label(qs.in_alert, qs.above_quota).to_string()
+            },
             rec.mountpoint,
         ]);
     }
@@ -219,13 +231,14 @@ fn cmd_describe(vstore: &VolumeStore, sstore: &JsonStore<ShareRecord>, name: &st
         e => e,
     })?;
     let path = Path::new(&rec.mountpoint);
-    let used = vstore.usage_at(path);
-    let (warn, over) = vstore.quota_state_at(path, rec.quota_bytes, rec.alert_pct);
+    let u = super::volume::measured_usage(path);
+    let qs = vstore.quota_state_at_checked(path, rec.quota_bytes, rec.alert_pct);
+    let (warn, over) = (qs.in_alert, qs.above_quota);
     let mut d = output::Describe::new();
     d.field("Name", &rec.name);
     d.field("Storage", &rec.storage_ref);
     d.field("Mountpoint", &rec.mountpoint);
-    d.field("Used", output::fmt_size(used));
+    d.field("Used", super::volume::fmt_measured(u, None));
     d.field_opt("Quota", rec.quota_bytes.map(output::fmt_size).as_deref());
     d.field(
         "Alert",
@@ -262,9 +275,47 @@ fn cmd_rm(
     // dir (see `register_external`'s doc) — the shared data is untouched.
     let _ = vstore.remove(name);
     if purge_data {
-        let _ = std::fs::remove_dir_all(&rec.mountpoint);
+        // NEVER claim a deletion that did not happen. This was
+        // `let _ = std::fs::remove_dir_all(...)`, and in rootless a tenant's share
+        // is written by a container in a mapped userns — so the directory belongs to
+        // a SUBUID, `remove_dir_all` fails with EACCES, and the command still
+        // printed "removed (data deleted)". An operator offboarding a tenant (or
+        // answering an erasure request) was told the data was gone while every byte
+        // was still on the NAS. `remove_tree_mapped` is the same helper that makes
+        // `volumes rm` work on subuid data; if the tree STILL survives, that is an
+        // error, not a footnote.
+        //
+        // Plain removal FIRST, mapped userns only as the fallback: when we own the
+        // data (root, or a share written as our own uid) a single `remove_dir_all`
+        // is enough, and `remove_tree_mapped` forks a child that re-execs
+        // `current_exe()` — which is the right thing for the real binary but
+        // re-enters the TEST harness under a test binary, where the harness reads
+        // `__rmtree <path>` as name filters, runs zero tests and exits 0. That
+        // "success" would suppress any fallback and leave the tree in place. Trying
+        // the cheap path first avoids both the fork and that trap.
+        if std::fs::remove_dir_all(&rec.mountpoint).is_err() {
+            delonix_runtime::remove_tree_mapped(std::path::Path::new(&rec.mountpoint));
+        }
+        if std::path::Path::new(&rec.mountpoint).exists() {
+            return Err(Error::Runtime {
+                context: "sharevolume purge",
+                message: super::po::tf(
+                    "the data of '{name}' at {path} could NOT be deleted — the share record was \
+                     kept so it is not lost track of; delete it as the data's owner",
+                    &[("name", name), ("path", &rec.mountpoint)],
+                ),
+            });
+        }
     }
     sstore.remove(name)?;
+    delonix_runtime_core::events::emit(
+        &state_root(),
+        "sharevolume",
+        "remove",
+        name,
+        name,
+        if purge_data { Some("purge-data") } else { None },
+    );
     println!(
         "sharevolume/{name}: {}{}",
         super::po::t("removed"),

@@ -2344,6 +2344,77 @@ activado por `--l18n=pt`/`DELONIX_L18N=pt`. Regras para não regredir:
   re-execs escondidos o faziam; e `for_each_id` (`stop`/`rm`/... com vários ids)
   tinha o seu próprio `eprintln!` que também nunca passava por ele.
 
+## Auditoria sistemática dos 208 subcomandos (v0.37.0) — 4 caminhos de perda de dados
+
+Pedido: para cada comando do `--help`, verificar se faz o que promete com todos os
+parâmetros, e identificar bugs, gaps, problemas de segurança e crashes silenciosos que
+possam comprometer produção ou perder dados de volumes/storage. Superfície mapeada por
+dump recursivo de `-h` (208 subcomandos), testada **ao vivo num host real** — não só
+lida. 23 achados, todos reproduzidos antes de corrigidos. Notas completas em
+[docs/releases/v0.37.0.md](docs/releases/v0.37.0.md).
+
+**A lição transversal, que vale mais do que os bugs**: a classe dominante não foi
+"comando em falta" nem "comando errado" — foi **relato desonesto**. Três formas, todas
+invisíveis a um `cargo test`:
+
+1. **Destruir dados e reportar falha.** `volumes rm` em dados subuid apagava o
+   `meta.json` antes de levar EACCES no `_data` → o volume desaparecia de `ls`/`df` e
+   os bytes ficavam; um `create` do mesmo nome entregava-os ao tenant seguinte. `vm rm`
+   apagava o qcow2 **antes** de verificar se a VM existia, e depois devolvia
+   `no such VM`. Regra que fica: **não destruir nada antes de saber que o objecto é
+   nosso para destruir, e apagar a contabilidade em ÚLTIMO lugar.**
+2. **Reportar destruição sem destruir.** `sharevolume rm --purge-data` imprimia
+   "data deleted" quando o `remove_dir_all` falhava com EACCES em dados subuid.
+3. **Reportar sucesso sobre falha.** `container run` devolvia 0 para `exit 42`, para um
+   `execve` falhado e para um container que nunca arrancou (rootfs impossível de
+   preparar, 126). Um backup ou uma migração falhada passavam por bons.
+
+**Armadilhas concretas a reter para quem mexer aqui a seguir:**
+
+- **`fs::remove_dir_all` não é atómico**: apaga entradas à medida que percorre, por
+  isso um EACCES a meio deixa o directório PARCIALMENTE apagado. Nunca o usar sobre uma
+  árvore que contenha metadados cuja ausência mude o significado do objecto.
+- **`as u64` sobre `f64` é SATURANTE em Rust**: `parse_size_bytes("99999999999t")` dava
+  `u64::MAX` — uma quota que o `inspect` mostra como definida e que é, de facto, quota
+  nenhuma. Qualquer conversão de tamanho vinda de input precisa de guarda de overflow.
+- **Um `read_dir` que falha e devolve 0 é indistinguível de um directório vazio** — e em
+  rootless é o caso NORMAL, não uma extremidade (toda a base de dados gerida faz
+  `chmod 700` sob userns mapeado). Daí `Usage { bytes, unreadable }` e
+  `QuotaState { …, measured }`: medição incompleta é *desconhecida*, nunca zero. O novo
+  re-exec `__duusage` mede de dentro do userns, mesmo idioma do `__volsnap`/`__buildtar`.
+- **`remove_tree_mapped` re-executa `current_exe()`** — correcto no binário real, mas num
+  **binário de teste** re-entra no harness, que lê `__rmtree <path>` como filtros de nome,
+  corre zero testes e sai **0**. Esse falso sucesso suprime qualquer fallback. Onde
+  importa, tentar a remoção simples PRIMEIRO (mais rápida, sem fork) e o mapeado só como
+  recurso.
+- **Um teste pode codificar o bug.** `default_project_name_normaliza_o_directorio`
+  afirmava `default_project_name("compose.yml") == "default"` — exactamente o
+  comportamento que colapsava todos os projectos compose num só e fazia um `down -v`
+  apagar o volume de outro projecto. O teste só passava caminhos ABSOLUTOS; a
+  invocação real é sempre relativa. Ao escrever um teste de uma função de caminho,
+  cobrir a forma que o código de produção realmente lhe passa.
+- **O cofre cifrado não vale nada se o consumidor persistir o plaintext.** `--secret`
+  escrevia os valores decifrados em `containers/<id>.json` e o `container inspect`
+  imprimia-os — enquanto o `secret inspect` os redige atrás de `--reveal`. Os valores
+  passam a ser resolvidos no spawn a partir dos NOMES persistidos (como o
+  `--secret-files` já fazia, razão pela qual esse modo nunca teve o bug); efeito
+  secundário bem-vindo: um segredo rodado aplica-se no `start` seguinte.
+- **`let _ =` sobre entropia é fail-open.** `random_token` do streaming CRI partia de
+  `[0u8; 16]` e descartava o erro do `read_exact` — sem `/dev/urandom`, o token era a
+  constante de zeros, e estas URLs dão execução de código dentro de um pod.
+
+**Decisão de desenho registada (A7).** O exit code de um container `-d` **sem**
+`--restart` continua a não ser capturável: o motor não é o pai real do processo. A
+opção escolhida foi *parar de mentir* em vez de acrescentar um processo supervisor por
+container (o modelo do conmon do podman): `ps -a` mostra `Exited (unknown)` em vez de
+`Dead`, e `wait` recusa-se a devolver o 137 fabricado, dizendo como obter o real. Com
+supervisor (`--restart on-failure`/`always`/`unless-stopped`) o código real continua a
+ser capturado. Fechar isto por omissão fica como decisão de filosofia, não bug fix.
+
+**Por fazer, deliberadamente**: `--format json` nos comandos de listagem (a automação
+tem de parsear tabelas alinhadas) — superfície de API nova em ~10 comandos, merece
+desenho próprio.
+
 ## Regra de ouro: fronteira com o PaaS
 
 Este código **não pode depender de nada privado**. Antes de qualquer commit:

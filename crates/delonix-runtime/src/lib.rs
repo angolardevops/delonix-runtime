@@ -2992,7 +2992,13 @@ pub struct RunSpec<'a> {
 }
 
 /// Creates and starts a container (without its own network) — the Phase 1 signature.
-pub fn create(store: &Store, container: &mut Container, rootfs: &str, detach: bool) -> Result<()> {
+/// See [`create_with`] for what the returned [`Status`] means.
+pub fn create(
+    store: &Store,
+    container: &mut Container,
+    rootfs: &str,
+    detach: bool,
+) -> Result<Status> {
     spawn(
         store,
         container,
@@ -3012,7 +3018,7 @@ pub fn create_networked(
     rootfs: &str,
     detach: bool,
     on_started: &StartedHook<'_>,
-) -> Result<()> {
+) -> Result<Status> {
     spawn(
         store,
         container,
@@ -3028,12 +3034,20 @@ pub fn create_networked(
 
 /// The general entry point (Phase 4): starts a container per a
 /// [`RunSpec`] — combines volumes, network and detached mode.
+/// Creates and starts a container.
+///
+/// Returns the container's status **as of this call's return**: with
+/// `spec.detach` that is the freshly-started state (the process outlives us);
+/// without it we are the container's real parent and this is its TERMINAL status,
+/// carrying the actual exit code (`Stopped` for 0, `Failed(n)` for n≠0,
+/// `Crashed` when a signal killed it). Callers that front a shell — `container
+/// run` above all — must propagate it, or a failed workload reports success.
 pub fn create_with(
     store: &Store,
     container: &mut Container,
     rootfs: &str,
     spec: &RunSpec<'_>,
-) -> Result<()> {
+) -> Result<Status> {
     spawn(store, container, rootfs, spec)
 }
 
@@ -3085,7 +3099,12 @@ fn write_etc_files(rootfs: &str, hostname: &str, ip: Option<&str>, dns: Option<&
     let _ = std::fs::write(format!("{etc}/hosts"), hosts);
 }
 
-fn spawn(store: &Store, container: &mut Container, rootfs: &str, spec: &RunSpec<'_>) -> Result<()> {
+fn spawn(
+    store: &Store,
+    container: &mut Container,
+    rootfs: &str,
+    spec: &RunSpec<'_>,
+) -> Result<Status> {
     // `--hostname` (CRI `PodSandboxConfig.hostname`) overrides the container's
     // name in the UTS namespace and in `/etc/hostname`+`/etc/hosts`; without it,
     // the name is used (historical behavior).
@@ -3116,7 +3135,32 @@ fn spawn(store: &Store, container: &mut Container, rootfs: &str, spec: &RunSpec<
     let apparmor = spec.apparmor.clone();
     let selinux = spec.selinux.clone();
     let pod_infra_pid = spec.pod_infra_pid;
-    let env = container.env.clone();
+    // `--secret` (env mode): the values are resolved HERE, at spawn time, from the
+    // vault, and go straight into the child's environment — they are NEVER written
+    // into `container.env`, hence never into the record on disk.
+    //
+    // **This is the fix for a confirmed credential leak.** The CLI used to do
+    // `c.env.extend(sstore.resolve_env(&secrets))` before saving, so every value
+    // a `kind: Secret` protected landed in CLEARTEXT in
+    // `<root>/containers/<id>.json` and was printed verbatim by `container
+    // inspect`/`describe` — while `secret inspect` carefully redacts the same
+    // values and hides them behind `--reveal`. The vault encrypts at rest and the
+    // first consumer undid it, permanently, in a plain file that outlives the
+    // container. `--secret-files` never had the bug precisely because it resolved
+    // at spawn time (just below); this makes the env path do the same, so both
+    // modes now keep the plaintext to process memory only.
+    //
+    // Resolving per spawn also means a rotated secret takes effect on the next
+    // `start`, instead of the record pinning the value captured at create time.
+    let env = {
+        let mut env = container.env.clone();
+        if !container.secret_files && !container.secrets.is_empty() {
+            if let Ok(ss) = delonix_runtime_core::SecretStore::open(store.base()) {
+                env.extend(ss.resolve_env(&container.secrets));
+            }
+        }
+        env
+    };
     let read_only = container.read_only;
     // --privileged: keeps ALL caps + seccomp unconfined + cgroupns + /sys RW
     // (see setup_rootfs). Strictly gated — the non-privileged path is identical.
@@ -3468,7 +3512,7 @@ fn spawn(store: &Store, container: &mut Container, rootfs: &str, spec: &RunSpec<
     }
 
     if detach {
-        return Ok(());
+        return Ok(container.status.clone());
     }
 
     let status = waitpid(pid, None).map_err(syserr("waitpid"))?;
@@ -3476,7 +3520,13 @@ fn spawn(store: &Store, container: &mut Container, rootfs: &str, spec: &RunSpec<
     container.pid = None;
     store.save(container)?;
     remove_container_cgroup(container);
-    Ok(())
+    // RETURN the terminal status instead of discarding it. In the foreground we
+    // ARE the container's parent, so this `waitpid` holds the one authoritative
+    // exit code that exists — and throwing it away is why `delonix container run
+    // ... sh -c "exit 42"` exited 0, along with `exit 1` and even a failed
+    // `execve` of the entrypoint. Any CI job, migration, backup or health probe
+    // run through this path saw success on failure.
+    Ok(container.status.clone())
 }
 
 /// Waits for the container to terminate and **records the REAL state** (with the exit code) in

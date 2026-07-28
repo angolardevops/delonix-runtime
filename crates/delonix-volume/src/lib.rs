@@ -78,7 +78,66 @@ pub fn parse_size_bytes(s: &str) -> Option<u64> {
     if !n.is_finite() || n <= 0.0 {
         return None;
     }
-    Some((n * mult as f64) as u64)
+    // BUG FIXED HERE: `as u64` on an f64 is a SATURATING cast in Rust, so
+    // `--quota 99999999999t` silently produced `u64::MAX` — a quota that
+    // `inspect`/`describe` print as genuinely SET (`quota_bytes:
+    // 18446744073709551615`) but that no volume can ever reach, i.e. no quota
+    // at all. A value that does not fit is an input error, never a silent clamp
+    // to "unlimited" (the exact opposite of what the operator asked for).
+    let bytes = n * mult as f64;
+    if bytes >= u64::MAX as f64 {
+        return None;
+    }
+    Some(bytes as u64)
+}
+
+/// The result of measuring a directory tree: the bytes actually SEEN, plus how
+/// many directories could not be read at all.
+///
+/// The second field is the whole point. `dir_usage` used to swallow every
+/// `read_dir` error and return a bare `0`, which is indistinguishable from an
+/// empty volume — and in rootless that is the NORMAL case, not an edge case: a
+/// container in a mapped userns writes `_data` as a SUBUID, and anything that
+/// `chmod 700`s its data dir (Postgres, Odoo, MySQL — every managed database)
+/// becomes unreadable to the real user. The measured consequences were a
+/// `describe` reporting `Usage: 0 B` over 20 MiB of real data, a `system df`
+/// reporting `volumes 0 B` on a filling disk, and a rootless quota — documented
+/// as a MONITORED limit, the only enforcement rootless has — that could never
+/// fire. Callers must treat an incomplete measurement as *unknown*, never as
+/// zero: see [`Usage::is_complete`].
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Usage {
+    /// Bytes of every file the walk could actually stat.
+    pub bytes: u64,
+    /// Directories the calling uid could not `read_dir` (EACCES and friends).
+    /// Non-zero → `bytes` is a LOWER BOUND, not the real usage.
+    pub unreadable: u64,
+}
+
+impl Usage {
+    /// `true` when every directory in the tree was readable, so `bytes` is the
+    /// real usage rather than a floor.
+    pub fn is_complete(&self) -> bool {
+        self.unreadable == 0
+    }
+}
+
+/// Quota verdict for a measured tree. `measured: false` means the walk hit
+/// directories it could not read, so `in_alert`/`above_quota` are **unknown**
+/// (not `false`) — the caller has to say so instead of implying compliance.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct QuotaState {
+    pub in_alert: bool,
+    pub above_quota: bool,
+    pub measured: bool,
+}
+
+/// Measures any tree, reporting whether the walk was complete — the free
+/// function behind every `usage*` method, exposed so the mapped-userns helper
+/// (`__duusage`) can reuse the exact same walk instead of a second copy that
+/// could drift from it.
+pub fn measure(path: &std::path::Path) -> Usage {
+    dir_usage(path)
 }
 
 /// The volume store, under `<root>/volumes`.
@@ -377,6 +436,40 @@ impl VolumeStore {
 
     /// Removes a volume (and its data). Unmounts first if it is `nfs`.
     pub fn remove(&self, name: &str) -> Result<()> {
+        self.remove_with(name, None)
+    }
+
+    /// [`Self::remove`] with an injectable tree remover for data this process
+    /// cannot unlink directly.
+    ///
+    /// **THE ORDER IS THE WHOLE POINT — this fixes a confirmed cross-tenant
+    /// data leak.** This used to be a bare `fs::remove_dir_all(dir)`. In
+    /// rootless, `_data` written by a container in a mapped userns belongs to a
+    /// SUBUID, so `remove_dir_all` hits EACCES — but only AFTER it has already
+    /// unlinked `meta.json`, because it deletes entries as it walks. The
+    /// observed result: `rm` reported `Permission denied`, the volume vanished
+    /// from `ls`/`inspect`/`system df`, and every byte stayed on disk. A later
+    /// `create` of the SAME name then succeeded, reported `usage: 0 bytes`, and
+    /// handed the previous owner's data to whoever mounted it — in a PaaS where
+    /// volume names derive from app/addon names, tenant B silently inherits
+    /// tenant A's database. Three orphans in exactly this state were found on a
+    /// live host.
+    ///
+    /// So: **data first, bookkeeping last, and nothing at all is unlinked if
+    /// the data cannot be removed** — a failed `rm` now leaves a volume that is
+    /// still fully visible and still fully its owner's.
+    ///
+    /// `rmtree` lets the CLI inject `delonix_runtime::remove_tree_mapped` (the
+    /// same mapped-userns helper `system prune` already uses) so subuid-owned
+    /// data actually goes away instead of leaving a volume that no command can
+    /// delete. Without the hook, the plain `fs` path is used and a subuid tree
+    /// surfaces as a clean error.
+    ///
+    /// For a volume registered via [`Self::register_external`] (`kind:
+    /// ShareVolume`) the external `mountpoint` is NOT under `dir`, so it is
+    /// untouched here — unchanged behaviour, and the reason removing a share
+    /// never destroys the shared data.
+    pub fn remove_with(&self, name: &str, rmtree: Option<&dyn Fn(&std::path::Path)>) -> Result<()> {
         let dir = self.dir(name);
         if !dir.exists() {
             return Err(Error::NotFound(format!("volume {name}")));
@@ -391,7 +484,30 @@ impl VolumeStore {
                     .output();
             }
         }
-        fs::remove_dir_all(dir)?;
+        // 1) everything EXCEPT the metadata. Any failure here propagates with
+        //    the record still intact.
+        let meta = self.meta_path(name);
+        for entry in fs::read_dir(&dir)? {
+            let path = entry?.path();
+            if path == meta {
+                continue;
+            }
+            if path.is_dir() && !path.is_symlink() {
+                if let Some(rm) = rmtree {
+                    rm(&path);
+                }
+                if path.exists() {
+                    fs::remove_dir_all(&path)?;
+                }
+            } else {
+                fs::remove_file(&path)?;
+            }
+        }
+        // 2) only now the bookkeeping, and only once the data is provably gone.
+        if meta.exists() {
+            fs::remove_file(&meta)?;
+        }
+        fs::remove_dir(&dir)?;
         Ok(())
     }
 
@@ -407,7 +523,16 @@ impl VolumeStore {
 
     /// REAL usage in bytes of the volume (`du` of `_data`, recursive). For volumes with
     /// loopback, reflects what is used inside the ext4; for local ones, the data size.
+    ///
+    /// Prefer [`Self::usage_checked`] for anything a human or a quota decision
+    /// reads: this returns a bare number and so cannot tell "empty" from
+    /// "unreadable" (see [`Usage`]).
     pub fn usage(&self, name: &str) -> u64 {
+        dir_usage(&self.data_dir(name)).bytes
+    }
+
+    /// Like [`Self::usage`], but reports whether the walk was COMPLETE.
+    pub fn usage_checked(&self, name: &str) -> Usage {
         dir_usage(&self.data_dir(name))
     }
 
@@ -417,12 +542,35 @@ impl VolumeStore {
     /// `mountpoint` OUTSIDE this store) measure the SAME way without
     /// duplicating the walk.
     pub fn usage_at(&self, path: &std::path::Path) -> u64 {
+        dir_usage(path).bytes
+    }
+
+    /// Like [`Self::usage_at`], but reports whether the walk was COMPLETE.
+    pub fn usage_at_checked(&self, path: &std::path::Path) -> Usage {
         dir_usage(path)
     }
 
     /// Is the volume at (or above) the alert threshold? `(in_alert, above_quota)`.
     pub fn quota_state(&self, vol: &Volume) -> (bool, bool) {
         quota_state_of(self.usage(&vol.name), vol.quota_bytes, vol.alert_pct)
+    }
+
+    /// Like [`Self::quota_state`], but carries whether the usage was actually
+    /// measurable — an unreadable subtree must not read as "within quota".
+    pub fn quota_state_checked(&self, vol: &Volume) -> QuotaState {
+        let u = self.usage_checked(&vol.name);
+        quota_state_checked_of(u, vol.quota_bytes, vol.alert_pct)
+    }
+
+    /// [`Self::quota_state_checked`] for an arbitrary path/limit (the
+    /// `kind: ShareVolume` case — see [`Self::usage_at_checked`]).
+    pub fn quota_state_at_checked(
+        &self,
+        path: &std::path::Path,
+        quota_bytes: Option<u64>,
+        alert_pct: Option<u8>,
+    ) -> QuotaState {
+        quota_state_checked_of(self.usage_at_checked(path), quota_bytes, alert_pct)
     }
 
     /// Like [`Self::quota_state`], parameterized directly instead of reading
@@ -623,23 +771,52 @@ impl VolumeStore {
 
 /// Recursive directory size in bytes — the shared implementation behind
 /// [`VolumeStore::usage`]/[`VolumeStore::usage_at`].
-fn dir_usage(p: &std::path::Path) -> u64 {
-    let mut total = 0u64;
-    if let Ok(rd) = fs::read_dir(p) {
-        for e in rd.flatten() {
-            let Ok(ft) = e.file_type() else { continue };
-            if ft.is_dir() {
-                total += dir_usage(&e.path());
-            } else if let Ok(m) = e.metadata() {
-                total += m.len();
-            }
+fn dir_usage(p: &std::path::Path) -> Usage {
+    let mut out = Usage::default();
+    let Ok(rd) = fs::read_dir(p) else {
+        // The directory itself is unreadable — count it instead of pretending
+        // the subtree is empty. See [`Usage`] for why this mattered in practice.
+        out.unreadable += 1;
+        return out;
+    };
+    for e in rd.flatten() {
+        let Ok(ft) = e.file_type() else { continue };
+        if ft.is_dir() {
+            let sub = dir_usage(&e.path());
+            out.bytes += sub.bytes;
+            out.unreadable += sub.unreadable;
+        } else if let Ok(m) = e.metadata() {
+            out.bytes += m.len();
         }
     }
-    total
+    out
 }
 
 /// `(in_alert, above_quota)` from a measured `used` against `quota_bytes`/`alert_pct`
 /// — the shared implementation behind [`VolumeStore::quota_state`]/[`VolumeStore::quota_state_at`].
+/// [`quota_state_of`] carrying the "was it measurable at all?" bit. An
+/// incomplete walk yields `measured: false` with both verdicts `false`, which
+/// the caller must render as *unknown* — never as "within quota".
+fn quota_state_checked_of(
+    used: Usage,
+    quota_bytes: Option<u64>,
+    alert_pct: Option<u8>,
+) -> QuotaState {
+    if !used.is_complete() {
+        return QuotaState {
+            in_alert: false,
+            above_quota: false,
+            measured: false,
+        };
+    }
+    let (in_alert, above_quota) = quota_state_of(used.bytes, quota_bytes, alert_pct);
+    QuotaState {
+        in_alert,
+        above_quota,
+        measured: true,
+    }
+}
+
 fn quota_state_of(used: u64, quota_bytes: Option<u64>, alert_pct: Option<u8>) -> (bool, bool) {
     match quota_bytes {
         Some(q) if q > 0 => {
@@ -898,5 +1075,153 @@ mod tests {
         vs.remove_snapshot("v1", "s1").unwrap();
         assert!(vs.remove_snapshot("v1", "s1").is_err());
         fs::remove_dir_all(&base).ok();
+    }
+
+    fn tmpbase(tag: &str) -> PathBuf {
+        let b = std::env::temp_dir().join(format!(
+            "dlx-vol-{tag}-{}-{}",
+            std::process::id(),
+            now_unix()
+        ));
+        let _ = fs::remove_dir_all(&b);
+        fs::create_dir_all(&b).unwrap();
+        b
+    }
+
+    /// A quota that overflows `u64` is an ERROR, never a silent saturation to
+    /// `u64::MAX` — which reads as "quota set" but means "no quota at all".
+    #[test]
+    fn parse_size_bytes_recusa_overflow_em_vez_de_saturar() {
+        assert_eq!(parse_size_bytes("99999999999t"), None);
+        assert_eq!(parse_size_bytes("18446744073709551616"), None);
+        // The largest sane values still parse (no over-eager rejection).
+        assert_eq!(parse_size_bytes("1024t"), Some(1024 * 1024u64.pow(4)));
+        assert_eq!(parse_size_bytes("2g"), Some(2 * 1024 * 1024 * 1024));
+    }
+
+    /// An unreadable subtree must be reported as INCOMPLETE, never as 0 bytes
+    /// (see `Usage`): 0 is indistinguishable from an empty volume, and that is
+    /// what made a rootless quota unable to ever fire.
+    #[test]
+    fn usage_marca_subarvore_ilegivel_em_vez_de_devolver_zero() {
+        use std::os::unix::fs::PermissionsExt;
+        let base = tmpbase("usage-eacces");
+        let store = VolumeStore::open(&base).unwrap();
+        store.create("v1").unwrap();
+        let data = store.data_dir("v1");
+        let hidden = data.join("hidden");
+        fs::create_dir_all(&hidden).unwrap();
+        fs::write(hidden.join("f"), vec![7u8; 4096]).unwrap();
+        fs::write(data.join("visible"), vec![1u8; 100]).unwrap();
+
+        let before = store.usage_checked("v1");
+        assert!(before.is_complete(), "tudo legível: {before:?}");
+        assert_eq!(before.bytes, 4196);
+
+        // Make the subtree unreadable — the rootless subuid case, reproduced
+        // without needing subuids.
+        fs::set_permissions(&hidden, fs::Permissions::from_mode(0o000)).unwrap();
+        let after = store.usage_checked("v1");
+        // Root ignores the mode bits — skip the assertion there, keep it honest.
+        if !after.is_complete() {
+            assert_eq!(after.unreadable, 1);
+            assert_eq!(after.bytes, 100, "só o que foi legível conta");
+            let qs = quota_state_checked_of(after, Some(50), Some(90));
+            assert!(!qs.measured, "não medido tem de ser 'desconhecido'");
+            assert!(
+                !qs.above_quota,
+                "e nunca afirmar 'acima' nem 'dentro' da quota"
+            );
+        }
+        fs::set_permissions(&hidden, fs::Permissions::from_mode(0o755)).unwrap();
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    /// The cross-tenant leak: a `remove` that CANNOT delete the data must leave
+    /// the volume fully intact — never unlink `meta.json` first and orphan the
+    /// bytes, because the name then frees up and the next `create` of it hands
+    /// the previous owner's data to someone else.
+    #[test]
+    fn remove_que_falha_nao_apaga_o_meta_nem_orfaniza_os_dados() {
+        use std::os::unix::fs::PermissionsExt;
+        let base = tmpbase("rm-partial");
+        let store = VolumeStore::open(&base).unwrap();
+        store.create("v1").unwrap();
+        let data = store.data_dir("v1");
+        let inner = data.join("inner");
+        fs::create_dir_all(&inner).unwrap();
+        fs::write(inner.join("secret"), b"tenant-a").unwrap();
+        // `_data` itself unreadable → the recursive delete cannot finish.
+        fs::set_permissions(&data, fs::Permissions::from_mode(0o000)).unwrap();
+
+        let res = store.remove("v1");
+        fs::set_permissions(&data, fs::Permissions::from_mode(0o755)).unwrap();
+        if res.is_err() {
+            // The invariant that matters: the record survived the failure.
+            assert!(
+                store.meta_path("v1").exists(),
+                "meta.json foi apagado numa remoção FALHADA — é este o bug"
+            );
+            assert!(
+                store.inspect("v1").is_ok(),
+                "o volume tem de continuar visível"
+            );
+            assert!(
+                store.list().unwrap().iter().any(|v| v.name == "v1"),
+                "e continuar em `ls`, para não haver dados órfãos invisíveis"
+            );
+            assert_eq!(
+                fs::read(inner.join("secret")).unwrap(),
+                b"tenant-a",
+                "os dados do dono continuam lá"
+            );
+        }
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    /// The happy path still removes everything, and the injected `rmtree` hook
+    /// is what gets a chance at a tree the plain `fs` path cannot unlink.
+    #[test]
+    fn remove_apaga_tudo_e_chama_o_rmtree_injectado() {
+        let base = tmpbase("rm-ok");
+        let store = VolumeStore::open(&base).unwrap();
+        store.create("v1").unwrap();
+        fs::write(store.data_dir("v1").join("f"), b"x").unwrap();
+
+        let called = std::cell::Cell::new(0usize);
+        let hook = |_: &std::path::Path| called.set(called.get() + 1);
+        store.remove_with("v1", Some(&hook)).unwrap();
+
+        assert!(
+            !store.volume_dir("v1").exists(),
+            "o volume tem de desaparecer"
+        );
+        assert!(store.inspect("v1").is_err());
+        assert!(called.get() >= 1, "o rmtree injectado tem de ser tentado");
+        // Removing what is already gone is an error (docker parity), not a panic.
+        assert!(store.remove("v1").is_err());
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    /// A `ShareVolume`'s EXTERNAL data must survive un-registering it — only
+    /// this store's own bookkeeping dir goes away.
+    #[test]
+    fn remove_de_volume_externo_preserva_os_dados_partilhados() {
+        let base = tmpbase("rm-external");
+        let store = VolumeStore::open(&base).unwrap();
+        let shared = base.join("nas").join("shares").join("tenant-a");
+        store
+            .register_external("tenant-a", &shared, Some(1024), Some(90))
+            .unwrap();
+        fs::write(shared.join("data"), b"nas-payload").unwrap();
+
+        store.remove("tenant-a").unwrap();
+        assert!(store.inspect("tenant-a").is_err(), "o registo sai");
+        assert_eq!(
+            fs::read(shared.join("data")).unwrap(),
+            b"nas-payload",
+            "os dados do NAS NUNCA saem por um `rm` de share"
+        );
+        let _ = fs::remove_dir_all(&base);
     }
 }

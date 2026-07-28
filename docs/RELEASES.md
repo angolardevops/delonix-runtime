@@ -4,6 +4,284 @@
 > (regenerado automaticamente pelo pipeline de release a cada tag publicada).
 > Não editar à mão — edita a nota da release respectiva.
 
+# v0.37.0 — auditoria sistemática dos 208 subcomandos: 4 caminhos de perda de dados fechados
+
+Release de **integridade de dados e honestidade de relato**. Nasceu de uma auditoria
+comando a comando de toda a superfície da CLI (208 subcomandos, mapeados por dump
+recursivo de `-h`), com testes ao vivo num host real em vez de só leitura de código.
+Rendeu 23 achados confirmados, **todos reproduzidos antes de serem corrigidos** e
+re-verificados depois.
+
+O tema é um só: comandos que **destruíam dados dizendo que falharam**, ou que
+**diziam ter destruído sem destruir**, ou que **reportavam sucesso sobre uma falha**.
+Nenhum destes aparece num `cargo test` — só olhando para o estado real do host
+depois de cada comando.
+
+> **Esta release muda comportamento.** Um `container run` passa a devolver o código
+> de saída do container (era sempre 0); um `volumes rm` recusa-se a apagar um volume
+> em uso; um `image rm` recusa uma imagem em uso; um `system prune` pede confirmação.
+> Scripts que dependiam do comportamento antigo precisam de revisão — ver
+> "Compatibilidade" no fim.
+
+## Perda de dados (4 caminhos, todos reproduzidos ao vivo)
+
+### `compose` colapsava todos os projectos num só
+
+`default_project_name` derivava o nome do projecto do directório — mas recebia um
+caminho **relativo** (`find_compose_file` devolve `docker-compose.yml` nu, e
+`-f docker-compose.yml` também é relativo). `Path::new("docker-compose.yml").parent()`
+é `Some("")`, cujo `file_name()` é `None`, por isso **toda** a invocação normal caía
+no literal `"default"`. O único teste que existia passava caminhos absolutos, logo
+nunca apanhou nada — pior, o teste **codificava o bug** (`assert_eq!(…, "default")`).
+
+Medido num host real: dois projectos compose em directórios diferentes tornavam-se
+ambos o projecto `default`, partilhando a rede `default_default`, o volume
+`default_<nome>` e o container `default-<serviço>`. Um `up` no segundo directório
+**adoptava** o container do primeiro ("already exists, nothing to do") e lia os dados
+dele; um `down -v` ali **destruía o volume nomeado do primeiro projecto**.
+
+Agora o caminho é absolutizado contra o cwd antes de se derivar o nome — que é
+exactamente o directório que o Docker Compose usa. Regressão coberta por um teste
+que exige o comportamento certo para caminhos relativos.
+
+### `volumes rm` apagava um volume montado num container a correr
+
+Sem verificação de referências, sem `--force`, rc=0. Medido: o `/data` de um container
+vivo passou de 30 MiB a vazio. O Docker recusa isto há sempre.
+
+`volumes rm` passa a recusar enquanto um container (ou um `kind: ShareVolume`) o
+referenciar, nomeando quem o segura e o seu estado. `--force` continua a existir para
+quem realmente quer destruir. A verificação usa `c.mounts` — estado que já era
+persistido para o `start` reconstruir os mounts — e compara **mountpoints
+resolvidos**, por isso um bind do mesmo caminho conta tanto como uma referência
+nomeada.
+
+### `volumes rm` do Storage pai destruía os dados de todos os tenants
+
+Um `kind: Storage` com N `ShareVolume`s dentro: `volumes rm <storage>` apagava a
+árvore toda, rc=0, sem aviso. Os registos dos shares **sobreviviam** a apontar para um
+caminho apagado, e o `sharevolume ls` continuava a mostrá-los saudáveis a `USED 0 B`.
+No caso NAS real é pior: `storage rm` desmonta o export e o mountpoint do share passa
+a resolver para o disco **local** por baixo — os tenants continuam a escrever, para o
+sítio errado, sem um único erro.
+
+`volumes rm` e `storage rm` passam a recusar enquanto houver shares.
+
+### `volumes rm` parcial ressuscitava os dados de outro tenant
+
+`VolumeStore::remove` era um `fs::remove_dir_all` cru. Em rootless, o `_data` escrito
+por um container em userns mapeado pertence a um **subuid**, e qualquer base de dados
+gerida faz `chmod 700` ao seu directório — logo o `remove_dir_all` levava EACCES, mas
+só **depois** de já ter desligado o `meta.json` (apaga entradas à medida que percorre).
+
+Resultado medido: o `rm` reportava `Permission denied`, o volume **desaparecia** de
+`ls`/`inspect`/`system df`, e todos os bytes ficavam no disco. Um `create` do **mesmo
+nome** a seguir dizia `usage: 0 bytes` e entregava os dados do dono anterior a quem o
+montasse. Num PaaS onde o nome do volume deriva do nome da app/addon, o tenant B
+herdava a base de dados do tenant A — e o operador não via nada de errado.
+
+Três volumes exactamente neste estado foram encontrados no host de desenvolvimento
+(110 GB de um cluster Postgres entre eles), invisíveis ao `volumes ls`.
+
+Agora: **dados primeiro, contabilidade em último, e nada é desligado se os dados não
+saírem**. Um `rm` falhado deixa o volume inteiramente visível e inteiramente do seu
+dono. E o `remove_tree_mapped` (o mesmo helper que o `system prune` já usava) passa a
+ser injectado, para que dados subuid sejam de facto removíveis em vez de deixarem um
+volume que nenhum comando conseguia apagar.
+
+### `vm rm` apagava o disco antes de verificar se a VM existia
+
+O bloco que remove `<nome>.qcow2` e o directório de seed corria **antes** do teste de
+existência, por isso um `vm rm <nome>` sem registo nem domínio libvirt apagava o disco
+e **depois** devolvia `no such VM` com rc=1. Quem lê esse erro conclui razoavelmente
+que nada aconteceu. Reproduzido com um qcow2 real. Mesma forma que o `volumes rm`
+acima: não destruir nada antes de saber que o objecto é nosso para destruir.
+
+### `sharevolume rm --purge-data` afirmava apagar sem apagar
+
+Era `let _ = std::fs::remove_dir_all(...)`. Em rootless o directório do tenant
+pertence a um subuid, o `remove_dir_all` falha com EACCES, e o comando imprimia
+`removed (data deleted)` com todos os bytes intactos no NAS. É o **espelho** dos bugs
+acima: reportar destruição sem destruir — o que importa muito num offboarding de
+tenant ou numa resposta a pedido de apagamento.
+
+Agora tenta a remoção simples, cai no userns mapeado se preciso, e se a árvore
+**ainda** sobreviver é **erro** (com o registo do share preservado, para não se perder
+o rasto), nunca um rodapé.
+
+## Códigos de saída: `container run` era sempre 0
+
+`exit 42`, `exit 1` e um `execve` falhado do entrypoint davam todos `$? = 0`. E um
+container que **nunca arrancou** (`failed to prepare the rootfs`, que o filho reporta
+como 126) também. Qualquer job one-shot — migração de schema, `pg_dump`, health probe,
+backup — reportava sucesso ao falhar. Um backup que falha em silêncio só se descobre
+no restore.
+
+A causa era um `Ok(())` a descartar o `Status` que o `waitpid` do primeiro plano já
+calculava. Agora:
+
+| | antes | agora |
+|---|---|---|
+| `run --rm sh -c "exit 42"` | 0 | **42** |
+| `run --rm sh -c "exit 1"` | 0 | **1** |
+| `run --rm /no/such/binary` | 0 | **127** |
+| rootfs impossível de preparar | 0 | **126** |
+| `run --net <rede> sh -c "exit 42"` | 0 | **42** |
+
+O caminho `--net <rede>` merece nota própria: corre numa 2.ª passagem de re-exec, e o
+pai achatava qualquer saída não-zero num erro genérico ("o container não arrancou na
+rede"). Agora propaga o código exacto; um erro **real** de arranque continua a ser
+rc=1 com a mensagem que explica.
+
+### `wait` deixou de inventar 137
+
+Um container `-d` **sem** `--restart` era registado como `Crashed` com
+`crash_reason=process_gone` e o `wait` devolvia `137` (128+SIGKILL) — mesmo para um
+`exit 43` limpo. O motor não é o pai real do processo em modo desanexado, por isso o
+código **não existe** para ser lido; inventá-lo é pior que admiti-lo, porque um
+orquestrador não consegue distinguir sucesso, falha aplicacional e OOM-kill.
+
+- `ps -a` mostra `Exited (unknown)` em vez de `Dead` (que se lê como "morto à força");
+- `wait` recusa-se a imprimir um número, e diz como obter o real;
+- `Dead` fica reservado para o que **realmente** foi morto (OOM, SIGKILL externo).
+
+Com um supervisor (`--restart on-failure`/`always`/`unless-stopped`) o código real
+continua a ser capturado — `Exited (43)`, `wait` → 43. **O limite arquitectural
+mantém-se**: fechá-lo por omissão exigiria um processo supervisor por container (o
+modelo do conmon do podman), o que é uma decisão de filosofia, não um bug fix.
+
+## Segurança
+
+### `--secret` anulava o cofre cifrado
+
+Os valores decifrados eram escritos em **claro** no registo do container
+(`<root>/containers/<id>.json`) e impressos verbatim pelo `container
+inspect`/`describe` — enquanto o `secret inspect` redige cuidadosamente os mesmos
+valores e os esconde atrás de `--reveal`. O cofre cifra em repouso e o primeiro
+consumidor desfazia isso, permanentemente, num ficheiro que sobrevive ao container.
+
+Agora só os **nomes** são persistidos; os valores são resolvidos no spawn, como o
+`--secret-files` já fazia (e é por isso que esse modo nunca teve o bug). Efeito
+secundário bem-vindo: um segredo rodado passa a aplicar-se no `start` seguinte, em vez
+de o registo fixar o valor capturado na criação. O `exec` também os resolve, para não
+ver um ambiente diferente do processo principal (paridade docker), e um `-e` explícito
+continua a ganhar.
+
+### Token de streaming do CRI podia ser previsível
+
+`random_token` partia de `[0u8; 16]`, abria `/dev/urandom` dentro de um `if let Ok` e
+descartava o resultado do `read_exact` com `let _ =`. Sem entropia, o token tornava-se
+a constante `00000…0` — e como estas URLs dão execução de código arbitrário dentro de
+um pod, qualquer processo local poderia sequestrar uma sessão pendente; dois execs
+concorrentes também colidiriam na mesma chave. Agora falha fechado (`Status::internal`),
+incluindo o caso improvável de uma leitura toda a zeros.
+
+### Credenciais do NAS sobreviviam ao `storage rm`
+
+`store.remove(name)` só toca em `<root>/volumes/<name>/`, mas o utilizador e a password
+vivem em `<root>/storage/<name>.cifs-credentials`. A credencial ficava no disco
+indefinidamente, e só era sobreposta se alguém recriasse um storage com o mesmo nome.
+Agora sai com o storage.
+
+### `--username`/`--password` eram ignorados em `webdav`
+
+O help documenta-os como "(cifs/webdav)" e o ficheiro de credenciais era escrito para
+ambos, mas só o ramo `cifs` o referenciava — para `webdav` e `nfs` as credenciais eram
+aceites e caladamente descartadas, deixando a montagem falhar com um erro de
+autenticação opaco. Agora recusa com uma mensagem que diz onde as pôr (o davfs2 lê
+`/etc/davfs2/secrets`, configuração de host que este motor não deve escrever).
+
+## Medição de uso: `0 B` sobre dados reais
+
+`dir_usage`/`dir_size` engoliam qualquer erro de `read_dir` e devolviam `0` —
+indistinguível de um volume vazio. E em rootless esse é o caso **normal**, não uma
+extremidade: qualquer base de dados gerida faz `chmod 700` ao seu directório sob um
+userns mapeado. Consequências medidas: um `describe` a reportar `Usage: 0 B` sobre
+20 MiB reais, um `system df` a dizer `volumes 0 B` num disco a encher, e a quota
+rootless — documentada como o limite MONITORIZADO, a única imposição que o rootless
+tem — a nunca poder disparar.
+
+Novo tipo `Usage { bytes, unreadable }` e `QuotaState { …, measured }`: uma medição
+incompleta é **desconhecida**, nunca zero. E um novo re-exec mapeado (`__duusage`,
+mesmo idioma do `__volsnap`/`__buildtar` já existentes) mede de dentro do userns onde
+somos donos dos subuids. Validado: um volume com 20 MiB que reportava `0 bytes` passou
+a reportar `20971520`.
+
+## Outros achados corrigidos
+
+- **`volumes create --quota <inválida>`** criava o volume e **depois** validava a
+  quota: rc=1 mas com um volume real, **sem quota**, no disco. Um control-plane que
+  retentasse reutilizava-o sem limite. Agora valida antes de criar nada.
+- **`parse_size_bytes` saturava em silêncio**: `--quota 99999999999t` virava
+  `u64::MAX` (o cast `f64 as u64` é saturante em Rust) — uma quota que o `inspect`
+  mostra como definida mas que nenhum volume atinge, i.e. quota nenhuma. Agora é erro.
+- **`volumes snapshot restore`** limpava o `_data` **antes** de validar o arquivo: um
+  tar corrompido ou truncado destruía os dados vivos sem nada para pôr de volta.
+  Agora descodifica o arquivo inteiro primeiro (uma leitura extra de um ficheiro que
+  vai ser lido de qualquer forma) e recusa com os dados intactos.
+- **`image rm`** apagava a imagem de um container a correr, rc=0. O container
+  sobrevive (o rootfs já está materializado), por isso nada parece errado — mas o
+  workload deixa de poder ser recriado ou escalado, e num nó air-gapped essa imagem
+  simplesmente desapareceu. Agora recusa, com `--force` para quem insiste.
+- **`system prune`** removia **todos** os containers parados (incluindo os apenas
+  `Created`) sem qualquer confirmação, apesar de o help liderar com "unused images".
+  Agora pergunta, listando os que vão desaparecer; sem TTY exige `--force`, para que
+  um prune não-vigiado seja sempre explícito.
+- **`compose up -d`** era rejeitado com rc=2 — a invocação mais comum do compose,
+  presente em todo o tooling e CI existente. Aceito como no-op (os serviços já
+  arrancam desanexados: não há daemon a segurá-los).
+- **`compose down -v`** engolia os erros de remoção de volume com `let _ =`,
+  imprimindo sucesso. Agora respeita a mesma verificação de referências e reporta.
+- **Pânico em SIGPIPE**: `delonix image ls | head` terminava em
+  `panicked at … failed printing to stdout: Broken pipe` com nota de backtrace. O
+  runtime do Rust ignora SIGPIPE, por isso o `println!` fazia unwrap a um EPIPE.
+  Restaurada a disposição por omissão — o processo termina em silêncio num pipeline,
+  como qualquer outra ferramenta UNIX.
+- **Quota de `ShareVolume`** era medida pelo caminho directo (logo `0 B` para qualquer
+  tenant real); passa pela medição mapeada e distingue "não medido" de "dentro da
+  quota".
+- **`system events` era cego a dados**: só emitia eventos de `container`. Agora
+  `volume`, `storage`, `image`, `secret` e `sharevolume` também emitem — um incidente
+  de perda de dados deixa rasto.
+
+## Compatibilidade
+
+O que pode quebrar um script existente, e o que fazer:
+
+| Mudança | Impacto | Ajuste |
+|---|---|---|
+| `container run` devolve o código do container | um `run` de um job que falha já não é 0 | é o comportamento do docker; corrigir o script que assumia 0 |
+| `volumes rm` recusa volume em uso | automação que apagava volumes de containers vivos falha | parar o container primeiro, ou `--force` |
+| `storage rm` recusa com shares | idem | remover os shares primeiro |
+| `image rm` recusa imagem em uso | idem | `--force` |
+| `system prune` pede confirmação | prune em cron/CI passa a falhar | acrescentar `--force` |
+| `compose` deriva o nome do projecto do directório | recursos passam a chamar-se `<dir>_<nome>` em vez de `default_<nome>` | usar `-p default` para manter os nomes antigos, ou recriar |
+| `wait` erra em vez de devolver 137 | script que lia o 137 | usar `--restart` para capturar o código real, ou primeiro plano |
+| `storage create --username` em `webdav` | passa a erro em vez de ser ignorado | pôr as credenciais em `/etc/davfs2/secrets` |
+
+## Verificação
+
+Todos os 23 achados foram reproduzidos ao vivo **antes** da correcção e re-verificados
+depois, num host rootless real: 25/25 reprodutores passam. `cargo clippy --workspace
+--all-targets` com zero avisos, `cargo fmt` limpo, 571 testes a passar — incluindo
+testes de regressão novos para a ordem do `remove`, a medição incompleta, o overflow
+da quota, a preservação dos dados de um share externo, e o nome de projecto do compose
+a partir de um caminho relativo.
+
+Uma armadilha encontrada e documentada no caminho: `remove_tree_mapped` re-executa
+`current_exe()`, o que num **binário de teste** re-entra no harness — que lê
+`__rmtree <path>` como filtros de nome, corre zero testes e sai **0**. Esse falso
+sucesso suprimia qualquer fallback. Onde importa, tenta-se agora a remoção simples
+primeiro (mais rápida e sem fork) e o userns mapeado só como recurso.
+
+## Não incluído
+
+`--format json` nos comandos de listagem continua em falta — a automação tem de
+parsear tabelas alinhadas. É uma superfície de API nova em ~10 comandos, não um bug, e
+merece ser desenhada de propósito em vez de acrescentada às pressas.
+
+---
+
 # v0.36.1 — instalador endurecido e cadeia de assinatura das releases
 
 Release de **segurança do canal de distribuição**. O binário é funcionalmente

@@ -1864,9 +1864,50 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
             "--net-burst only makes sense together with --net-bps".into(),
         ));
     }
+    // Port RANGES (`-p 8000-8002:9000-9002`, Docker syntax) expand into one spec per
+    // port here, at the boundary — everything downstream (ownership, unpublish, the
+    // stored `ports`) is keyed on a single port and stays that way.
+    let ports: Vec<String> = ports
+        .iter()
+        .map(|s| delonix_net::expand_publish_range(s))
+        .collect::<Result<Vec<_>>>()?
+        .concat();
     // Validate the `-p`s BEFORE creating anything (clear error, no leftovers).
     for spec in &ports {
-        delonix_net::parse_publish(spec)?;
+        let (addr, hp, cp, _) = delonix_net::parse_publish_addr(spec)?;
+        // A host port below 1024 is bound by the slirp as THIS unprivileged user, so
+        // it fails with the slirp's opaque `add_hostfwd` JSON — after the container is
+        // already up. Same treatment as the port-conflict error below: state the fact,
+        // then the ways out as ready-to-copy commands.
+        let bind = delonix_net::publish_bind_addr(addr.as_deref());
+        match hp.parse::<u16>() {
+            Ok(p) if !delonix_net::can_bind_host_port(&bind, p) => {
+                return Err(Error::Invalid(super::po::tf(
+                    "host port {hp} needs privilege to bind — rootless cannot publish \
+                     ports below net.ipv4.ip_unprivileged_port_start\n\
+                     \n\
+                     fix it with ONE of these:\n\
+                     \x20 delonix container run -p {alt}:{cp} ...    # publish on an unprivileged port\n\
+                     \x20 curl -fsSL {url} | bash -s -- --low-ports    # or lower the threshold for good (host-wide)",
+                    &[
+                        ("hp", hp.as_str()),
+                        // 80 → 8080, 443 → 8443, 22 → 8022; always inside u16.
+                        ("alt", &(p as u32 + 8000).to_string()),
+                        ("cp", cp.as_str()),
+                        // The installer's `--low-ports` writes the sysctl to
+                        // /etc/sysctl.d, so it survives a reboot — a bare
+                        // `sysctl -w` here would send the user down a path that
+                        // silently reverts on the next boot.
+                        (
+                            "url",
+                            "https://github.com/angolardevops/delonix-runtime/\
+                             releases/latest/download/install.sh",
+                        ),
+                    ],
+                )));
+            }
+            _ => {}
+        }
     }
     if net == "none" && !ports.is_empty() {
         return Err(Error::Invalid(
@@ -2109,15 +2150,23 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
     }
 
     // ---- secrets ----
+    //
+    // Only the NAMES are recorded. The values are resolved by the engine at spawn
+    // time for BOTH modes (env and `--secret-files`) — see the `env` binding in
+    // `runtime::spawn`. This used to `c.env.extend(resolve_env(...))` right here,
+    // which persisted every decrypted value in cleartext in the container record
+    // and exposed it through `container inspect`/`describe`, defeating the whole
+    // encrypted-at-rest vault the moment a secret was consumed.
+    //
+    // The existence check stays: a `--secret` naming something absent must fail
+    // NOW, loudly, and not start a container missing the credential it asked for.
     if !secret.is_empty() {
         let sstore = delonix_runtime_core::SecretStore::open(super::util::state_root())?;
+        for name in &secret {
+            sstore.load(name)?;
+        }
         c.secrets = secret.clone();
         c.secret_files = secret_files;
-        // As env (default) or as files in /run/secrets (the engine handles the
-        // tmpfs when `secret_files`). The resolution to env is done here.
-        if !secret_files {
-            c.env.extend(sstore.resolve_env(&secret));
-        }
     }
 
     // ---- fs & limits ----
@@ -2328,7 +2377,7 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
         c.restart_policy = Some(restart.clone());
         return run_supervised(store, &mut c, &rootfs, &spec, &restart, &id);
     }
-    runtime::create_with(store, &mut c, &rootfs, &spec)?;
+    let final_status = runtime::create_with(store, &mut c, &rootfs, &spec)?;
     if let Some(n) = &custom_net {
         c.network = Some(n.clone());
         c.ip = attached_ip;
@@ -2389,6 +2438,10 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
             // foreground `--rm` run left its full rootfs behind forever, the
             // exact same disk-pressure leak `cmd_rm` was already fixed for.
             images.remove_container_dir(&c.id);
+            // `--rm` still has to speak the container's exit code — a one-shot
+            // job (`run --rm ... pg_dump`) is the single most common shape that
+            // depends on it.
+            propagate_exit_status(&final_status);
             return Ok(());
         }
     }
@@ -2420,7 +2473,52 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
             }
         }
     }
+    if !detach {
+        propagate_exit_status(&final_status);
+    }
     Ok(())
+}
+
+/// The shell exit code a terminal [`Status`] corresponds to, by the same
+/// convention every container engine and shell uses.
+pub(crate) fn exit_code_of(status: &Status) -> i32 {
+    match status {
+        Status::Failed(n) => *n,
+        // Killed by a signal. We do not keep WHICH signal, and 137 (128+SIGKILL)
+        // is both the overwhelmingly common case (OOM-kill, `stop` timeout) and
+        // what `wait_to_status` already reports.
+        Status::Crashed => 137,
+        // `Stopped` is a clean exit 0; the non-terminal states cannot reach here
+        // from a foreground run, and 0 is the safe reading if they somehow do.
+        _ => 0,
+    }
+}
+
+/// Makes the process exit with the container's own exit code.
+///
+/// **This is what made `container run` honest.** A foreground run used to return
+/// `Ok(())` no matter how the workload ended: `exit 42`, `exit 1` and a failed
+/// `execve` of the entrypoint all produced `$? = 0`, and so did a container that
+/// never started at all (`failed to prepare the rootfs`, which the child reports
+/// as 126). Every orchestrator, CI job and PaaS deploy step reading that exit
+/// code was told "success" — a failed schema migration or a failed backup looked
+/// fine until restore time.
+///
+/// Exiting the process directly, rather than threading a code back through
+/// `Result`, is deliberate and is what docker/podman do: by the time we get here
+/// the container is finished and any `--rm` cleanup has already run, and `main`
+/// maps every `Err` onto exit 1 — which cannot express 42. A zero code returns
+/// normally so the caller keeps its usual control flow.
+pub(crate) fn propagate_exit_status(status: &Status) {
+    let code = exit_code_of(status);
+    if code == 0 {
+        return;
+    }
+    // stdout is block-buffered when piped; `process::exit` runs no destructors.
+    use std::io::Write;
+    let _ = std::io::stdout().flush();
+    let _ = std::io::stderr().flush();
+    std::process::exit(code);
 }
 
 /// Reconciles `c`'s status and, if it just flipped to `Crashed` in THIS call, records a
@@ -2528,6 +2626,20 @@ pub(crate) fn short_id(id: &str) -> &str {
 /// STATUS column in `docker ps` style: "Up 5 minutes", "Exited (0)".
 /// `uptime` is the time since init started (`None` if unknown — a stopped
 /// container has no process to read it from).
+/// `true` when a `Crashed` record only means "the process is gone and nobody was
+/// its parent to collect the code" — as opposed to a death this process actually
+/// observed via `waitpid`.
+///
+/// The distinction is the honest half of a documented architectural limit: for a
+/// detached container the engine is never the real parent, so `reconcile_status`
+/// can see THAT it died but never WHY. It marks such records with
+/// `crash_reason = "process_gone"`. Everything downstream used to flatten that
+/// into "Dead" and a fabricated exit code of 137 — telling the operator a clean
+/// `exit 43` had been SIGKILLed. We do not have the code; saying so is the fix.
+pub(crate) fn exit_code_unknown(c: &Container) -> bool {
+    matches!(c.status, Status::Crashed) && c.crash_reason.as_deref() == Some("process_gone")
+}
+
 fn fmt_status(status: &Status, uptime: Option<u64>) -> String {
     let up = || match uptime {
         Some(s) => format!("Up {}", output::fmt_duration_secs(s)),
@@ -2546,6 +2658,20 @@ fn fmt_status(status: &Status, uptime: Option<u64>) -> String {
         Status::Failed(code) => format!("Exited ({code})"),
         Status::Crashed => "Dead".to_string(),
     }
+}
+
+/// [`fmt_status`] for a real record, so it can tell an observed death from one
+/// whose exit code was never captured.
+///
+/// A container that exited on its own while detached shows `Exited (unknown)` —
+/// not `Dead`, which reads as "killed", and not `Exited (137)`, which is a
+/// number we do not have. `Dead` stays for the cases where something really did
+/// kill it (OOM, an external SIGKILL), which `crash_reason` distinguishes.
+fn fmt_status_of(c: &Container, uptime: Option<u64>) -> String {
+    if exit_code_unknown(c) {
+        return "Exited (unknown)".to_string();
+    }
+    fmt_status(&c.status, uptime)
 }
 
 /// PORTS column in `docker ps` style: `8080->80/tcp`, comma-separated.
@@ -2612,7 +2738,7 @@ fn cmd_ps(store: &Store, all: bool, quiet: bool) -> Result<()> {
             output::truncate(&output::display_ref(&c.image), 30),
             output::truncate(&format!("\"{}\"", c.command.join(" ")), 22),
             output::fmt_age(c.created_unix),
-            fmt_status(&c.status, uptime),
+            fmt_status_of(c, uptime),
             output::truncate(&fmt_ports(&c.ports), 28),
             c.name.clone(),
         ]);
@@ -2879,6 +3005,17 @@ fn reexec_into_netns(
         // netns belongs to the sandbox and is shared — detaching it would take down the peers.
         if detach_on_fail {
             infra::detach_container(id, ip);
+        }
+        // For a FOREGROUND run the 2nd pass IS the container's parent, so the code
+        // it exits with is the CONTAINER's own code (see `propagate_exit_status`,
+        // which the inner `cmd_run` calls). Flattening that into a generic error
+        // meant `run --net <net> sh -c "exit 42"` came back as 1 — better than the
+        // 0 it used to be before exit codes propagated at all, but still not the
+        // number the workload chose, so a job runner on a custom network still
+        // could not tell one failure from another. Detached runs keep the old
+        // message: there the child only ever reports whether the START worked.
+        if !opts.detach {
+            propagate_exit_status(&Status::Failed(status.code().unwrap_or(1)));
         }
         return Err(Error::Invalid(super::po::tf(
             "the container did not start inside the network '{netns}' (exit {code})",
@@ -3390,6 +3527,23 @@ pub(crate) fn wait_for_exit(store: &Store, id: &str) -> Result<i32> {
         let mut c = find(store, id)?;
         reconcile_with_diagnostics(store, &mut c);
         if c.status.is_terminal() {
+            // FAIL LOUD instead of fabricating a code. `Status::exit_code()`
+            // maps `Crashed` to 137, which is right when a signal really did
+            // kill it — but a detached container that exited on its OWN is also
+            // recorded as `Crashed` (nobody was its parent to `waitpid`), and
+            // returning 137 for a clean `exit 43` is a lie in the one place an
+            // orchestrator trusts absolutely. `on-failure`/CI cannot tell
+            // success from failure from OOM if we invent the number.
+            if exit_code_unknown(&c) {
+                return Err(Error::Invalid(super::po::tf(
+                    "exit code of '{name}' was not captured: this engine is not the process's \
+                     parent when detached, so only THAT it died is known. To get the real code, \
+                     run it in the FOREGROUND (the CLI is then the parent and exits with the \
+                     container's own code), or detach it under a supervisor with `--restart \
+                     on-failure` / `always` / `unless-stopped`.",
+                    &[("name", &c.name)],
+                )));
+            }
             return Ok(c.status.exit_code());
         }
         std::thread::sleep(std::time::Duration::from_millis(500));
@@ -3541,8 +3695,24 @@ fn cmd_exec(
     let user_override = user
         .map(|u| resolve_run_user(&live_rootfs_path(images, &c.id).to_string_lossy(), u))
         .transpose()?;
+    // `--secret` (env mode) values are no longer baked into `c.env` — they are
+    // resolved from the vault at spawn time and live only in the init process's
+    // memory. An `exec` therefore has to resolve them too, or a debugging shell
+    // would silently see a DIFFERENT environment from the container's own process
+    // (docker's `exec` inherits the container's env). `extra_env` is exactly the
+    // right channel: applied on top for this call only, never persisted.
+    //
+    // The explicit `-e` comes LAST so it still wins over a vault value, matching
+    // the precedence the flag already had.
+    let mut extra_env: Vec<String> = Vec::new();
+    if !c.secret_files && !c.secrets.is_empty() {
+        if let Ok(ss) = delonix_runtime_core::SecretStore::open(super::util::state_root()) {
+            extra_env.extend(ss.resolve_env(&c.secrets));
+        }
+    }
+    extra_env.extend(env.iter().cloned());
     let overrides = runtime::ExecOverrides {
-        extra_env: env,
+        extra_env: &extra_env,
         workdir,
         user: user_override,
     };
@@ -3874,7 +4044,7 @@ fn describe_one(c: &Container) {
         Status::Running | Status::Paused => c.pid_starttime.and_then(output::uptime_from_starttime),
         _ => None,
     };
-    d.field("Status", fmt_status(&c.status, uptime));
+    d.field("Status", fmt_status_of(c, uptime));
     match c.pid {
         Some(p) => d.field("PID", p.to_string()),
         None => d.field("PID", "<none>"),
@@ -4135,8 +4305,13 @@ fn cmd_update(store: &Store, id: &str, o: UpdateOpts) -> Result<()> {
     }
 
     // --- additions ---
+    // Ranges expand here too, so `update --publish-add 8000-8002:9000-9002` behaves
+    // exactly like the same range on `run` — a flag that works in one place and not
+    // the other is worse than one that exists nowhere.
     for spec in &o.publish_add {
-        publish_live(store, &mut c, spec)?;
+        for one in delonix_net::expand_publish_range(spec)? {
+            publish_live(store, &mut c, &one)?;
+        }
     }
     for spec in &o.volume_add {
         let mounts = resolve_mounts(std::slice::from_ref(spec))?;

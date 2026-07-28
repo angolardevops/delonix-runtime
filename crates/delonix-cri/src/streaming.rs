@@ -80,8 +80,12 @@ impl Streamer {
     /// Registers a `port_forward` and returns the streaming URL. The
     /// `pod_sandbox_id` is resolved at connection time to the `pid` of the pod's
     /// infra container (`pod-cri-<id>`), whose netns is where the TCP proxy runs.
-    pub fn prepare_port_forward(&self, pod_sandbox_id: String, ports: Vec<i32>) -> String {
-        let token = random_token();
+    pub fn prepare_port_forward(
+        &self,
+        pod_sandbox_id: String,
+        ports: Vec<i32>,
+    ) -> std::io::Result<String> {
+        let token = random_token()?;
         let mut m = self.pforwards.lock().unwrap();
         m.retain(|_, p| Instant::now().duration_since(p.created) < Duration::from_secs(300));
         m.insert(
@@ -92,7 +96,7 @@ impl Streamer {
                 created: Instant::now(),
             },
         );
-        format!("{}/portforward/{}", self.advertised, token)
+        Ok(format!("{}/portforward/{}", self.advertised, token))
     }
 
     /// Registers an `exec` and returns the URL the client will contact.
@@ -105,8 +109,8 @@ impl Streamer {
         stdin: bool,
         stdout: bool,
         stderr: bool,
-    ) -> String {
-        let token = random_token();
+    ) -> std::io::Result<String> {
+        let token = random_token()?;
         let mut m = self.execs.lock().unwrap();
         purge_expired(&mut m);
         m.insert(
@@ -122,7 +126,7 @@ impl Streamer {
                 created: Instant::now(),
             },
         );
-        format!("{}/exec/{}", self.advertised, token)
+        Ok(format!("{}/exec/{}", self.advertised, token))
     }
 
     /// Registers an `attach` (container output) and returns the streaming URL.
@@ -135,8 +139,8 @@ impl Streamer {
         stdin: bool,
         stdout: bool,
         stderr: bool,
-    ) -> String {
-        let token = random_token();
+    ) -> std::io::Result<String> {
+        let token = random_token()?;
         let mut m = self.execs.lock().unwrap();
         purge_expired(&mut m);
         m.insert(
@@ -152,7 +156,7 @@ impl Streamer {
                 created: Instant::now(),
             },
         );
-        format!("{}/exec/{}", self.advertised, token)
+        Ok(format!("{}/exec/{}", self.advertised, token))
     }
 
     /// Builds the axum `Router` with the streaming routes. Accepts `GET`
@@ -227,12 +231,27 @@ fn purge_expired(m: &mut HashMap<String, Pending>) {
 }
 
 /// Random token (16 bytes from `/dev/urandom`, hex) — unguessable on loopback.
-fn random_token() -> String {
+///
+/// **FAILS CLOSED.** This used to start from `[0u8; 16]`, open `/dev/urandom`
+/// inside `if let Ok(..)` and discard the `read_exact` result with `let _ =` — so
+/// if the device could not be opened, or the read came up short, the token
+/// silently became the CONSTANT `00000000000000000000000000000000`. Every
+/// `exec`/`portforward` URL would then carry a predictable token, and since these
+/// grant arbitrary code execution inside a pod, any local process could hijack a
+/// pending session; two concurrent execs would also collide on the same HashMap
+/// key. The entropy source is not optional, so an error here has to be an error,
+/// never a usable-looking token.
+fn random_token() -> std::io::Result<String> {
     let mut buf = [0u8; 16];
-    if let Ok(mut f) = std::fs::File::open("/dev/urandom") {
-        let _ = f.read_exact(&mut buf);
+    std::fs::File::open("/dev/urandom")?.read_exact(&mut buf)?;
+    // A read that somehow yielded all zeros is astronomically unlikely and much
+    // more plausibly a broken entropy source — refuse rather than hand it out.
+    if buf.iter().all(|b| *b == 0) {
+        return Err(std::io::Error::other(
+            "/dev/urandom returned all zeros — refusing to issue a predictable streaming token",
+        ));
     }
-    buf.iter().map(|b| format!("{b:02x}")).collect()
+    Ok(buf.iter().map(|b| format!("{b:02x}")).collect())
 }
 
 fn delonix_bin() -> PathBuf {

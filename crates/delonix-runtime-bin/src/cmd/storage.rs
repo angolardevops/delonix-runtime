@@ -177,6 +177,23 @@ fn build_mount(
         if let Some(path) = credentials_file {
             opts.push(format!("credentials={}", path.display()));
         }
+    } else if credentials_file.is_some() {
+        // FAIL CLOSED instead of ignoring them. `--username`/`--password` are
+        // documented as "(cifs/webdav)" and the credentials file was written for
+        // both, but only the `cifs` branch ever referenced it — so for `webdav`
+        // (davfs) and `nfs` the credentials were accepted and then silently
+        // dropped, leaving the mount to fail with an opaque auth error or hang
+        // waiting for davfs to prompt. davfs2 does not take a credentials path as
+        // a mount option at all: it reads `/etc/davfs2/secrets` (root-owned,
+        // host-level configuration this engine has no business writing), which is
+        // why this is a clear refusal and not a quiet best-effort.
+        return Err(Error::Invalid(super::po::tf(
+            "storage type '{type}' does not support --username/--password here: only `cifs`/`smb` \
+             take a credentials file. For `webdav`, put the credentials in \
+             /etc/davfs2/secrets on the host; for `nfs`, authentication is by \
+             export/host, not by user.",
+            &[("type", r#type)],
+        )));
     }
     if read_only {
         opts.push("ro".to_string());
@@ -211,6 +228,50 @@ fn write_cifs_credentials(
     password: Option<&str>,
 ) -> Result<Option<PathBuf>> {
     write_cifs_credentials_in(&state_root().join("storage"), name, username, password)
+}
+
+/// Sanitized filename of a storage's credentials file — the ONE place that
+/// derives it, so the writer and the remover can never disagree about which file
+/// belongs to a given storage name.
+fn credentials_name(name: &str) -> String {
+    let safe: String = name
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.') {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    format!("{safe}.cifs-credentials")
+}
+
+/// Deletes a storage's credentials file.
+///
+/// **`storage rm` never did this.** `store.remove(name)` only touches
+/// `<root>/volumes/<name>/`, while the NAS username+password live in
+/// `<root>/storage/<name>.cifs-credentials` — so the credential outlived the
+/// storage it belonged to, indefinitely, and was only ever overwritten if someone
+/// happened to re-create a storage with the exact same name. Removing a storage
+/// has to take its secret with it.
+///
+/// Best-effort by design: failing to unlink a credentials file must not block the
+/// removal of the storage itself (which is what the operator asked for), but it is
+/// reported so it never disappears in silence.
+fn remove_credentials(name: &str) {
+    let path = state_root().join("storage").join(credentials_name(name));
+    match std::fs::remove_file(&path) {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => super::output::warn(&super::po::tf(
+            "could not remove the credentials file {path}: {err}",
+            &[
+                ("path", &path.display().to_string()),
+                ("err", &e.to_string()),
+            ],
+        )),
+    }
 }
 
 /// Testable core of [`write_cifs_credentials`] — takes the directory
@@ -257,7 +318,8 @@ fn write_cifs_credentials_in(
             }
         })
         .collect();
-    let path = dir.join(format!("{safe_name}.cifs-credentials"));
+    let _ = &safe_name; // kept for the comment above; the shared helper derives it
+    let path = dir.join(credentials_name(name));
     use std::io::Write as _;
     use std::os::unix::fs::OpenOptionsExt as _;
     let _ = std::fs::remove_file(&path); // leftover OF OURS from a previous create/apply of the same name
@@ -352,7 +414,22 @@ pub fn run(action: StorageCmd) -> Result<()> {
             d.print();
         }
         StorageCmd::Rm { name } => {
-            store.remove(&name)?;
+            // Same reference check as `volumes rm`: a Storage is a volume, and a
+            // `kind: ShareVolume` carved out of it (or a container mounting it)
+            // must not have the ground pulled out from under it. Removing a
+            // Storage unmounts the NAS export, after which a share's mountpoint
+            // silently resolves to the LOCAL directory underneath — tenants keep
+            // writing, to the wrong place, with no error.
+            super::volume::cmd_rm_storage(&store, &name)?;
+            remove_credentials(&name);
+            delonix_runtime_core::events::emit(
+                &state_root(),
+                "storage",
+                "remove",
+                &name,
+                &name,
+                None,
+            );
             println!(
                 "{}",
                 super::po::tf(
