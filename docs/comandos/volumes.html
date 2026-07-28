@@ -97,7 +97,7 @@ Commands:
   ls        List the volumes
   inspect   Details of a volume (includes real on-disk usage)
   describe  Readable detail of one or more volumes, `kubectl describe` style (for humans; use `inspect` for the usual compact view)
-  rm        Remove a volume
+  rm        Remove a volume. Refuses while a container or a `kind: ShareVolume` still references it (use `--force` to remove it anyway)
   apply     Apply the `kind: Volume` documents from a manifest (idempotent by name)
   snapshot  Point-in-time snapshots of a volume (tar.gz under the volume; safe in rootless)
   help      Print this message or the help of the given subcommand(s)
@@ -143,7 +143,7 @@ Options:
   -h, --help          Print help</code></pre></div>
 <h3>Exemplos</h3><div class="ex"><pre><code>delonix volumes inspect dados</code></pre></div>
 <h2 id='rm'><code>volumes rm</code></h2>
-<div class='help'><pre><code>Remove a volume
+<div class='help'><pre><code>Remove a volume. Refuses while a container or a `kind: ShareVolume` still references it (use `--force` to remove it anyway)
 
 Usage: dlx volumes rm [OPTIONS] &lt;NAME&gt;
 
@@ -151,6 +151,7 @@ Arguments:
   &lt;NAME&gt;  
 
 Options:
+  -f, --force         Remove it even with live references — DESTROYS the data of whatever is still using it
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
   -h, --help          Print help</code></pre></div>
 <h3>Exemplos</h3><div class="ex"><pre><code>delonix volumes rm dados</code></pre></div>
