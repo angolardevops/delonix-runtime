@@ -974,6 +974,17 @@ container.</p>
 (rede rootless, VMs, tuning de kernel), escolhendo a variante certa para o teu CPU.
 Funciona em Debian/Ubuntu, Fedora/RHEL, openSUSE e Arch:</p>
 <pre><code>curl -fsSL https://github.com/angolardevops/delonix-runtime/releases/latest/download/install.sh | bash</code></pre>
+<p>Para publicar a porta <strong>80</strong> ou <strong>443</strong> (<code>-p 80:80</code>)
+acrescenta <code>--low-ports</code>:</p>
+<pre><code>curl -fsSL .../install.sh | bash -s -- --low-ports</code></pre>
+<p>Sem essa flag, <code>-p 80:80</code> é recusado: quem liga a porta do lado do host é o
+<code>slirp4netns</code>, sem privilégios, e o kernel reserva as portas abaixo de
+<code>net.ipv4.ip_unprivileged_port_start</code> (1024 por omissão) — o Podman e o Docker
+rootless têm o mesmo muro. É opt-in porque baixa esse limiar para o <em>host inteiro</em>:
+a partir daí qualquer programa local pode ligar-se às portas 80-1023. Num portátil é um
+compromisso razoável; numa máquina partilhada, a alternativa que não baixa nada é um proxy
+como root na porta 80 a encaminhar para uma porta alta. Reverter: apagar
+<code>/etc/sysctl.d/99-delonix-lowports.conf</code>.</p>
 <p>Alternativa (só o binário, dependências por tua conta):</p>
 <pre><code>curl -fL -o ~/.local/bin/delonix \\
   https://github.com/angolardevops/delonix-runtime/releases/latest/download/delonix-x86_64-linux

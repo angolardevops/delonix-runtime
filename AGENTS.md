@@ -1646,12 +1646,53 @@ descartado em silêncio — que foi exactamente o bug do compose com `127.0.0.1:
 **Validado ao vivo**: `-p 0.0.0.0:18099:80` → `ss` confirma bind em `0.0.0.0`, e
 `curl http://192.168.1.106:18099/` → **200** (antes: spec recusada; com `8080:80`, `000` na LAN).
 
-**Dívida que fica registada, não fechada aqui**: `infra::publish_port_allow` (publish com
-allowlist de CIDRs ANTES do DNAT) continua com **zero chamadores** — `ingress allow --from <cidr>`
-escreve só a chain por-container e nunca lhe toca. É a mesma família de armadilha já documentada
-(`mount_live`/`set_net_rate`/`update_limits`): código público, morto, que muta estado partilhado
-e cujo primeiro chamador real vai encontrar um bug latente. Decidir entre ligá-lo ou apagá-lo é
-uma sessão própria.
+**Dívida registada aqui e FECHADA a 2026-07-28** (ver "Endurecimento do ingress/egress" abaixo):
+`infra::publish_port_allow` (publish com allowlist de CIDRs ANTES do DNAT) tinha **zero
+chamadores** — a mesma família de armadilha de `mount_live`/`set_net_rate`/`update_limits`. Foi
+**apagado**, não ligado: o tráfego publicado chega todo com o gateway do slirp como origem, por
+isso a allowlist não casaria com nada e o `!= { … } drop` teria dropado TUDO.
+
+### `-p 80:80` respondia com o JSON cru do slirp (2026-07-27)
+
+Bug report real: `container run --rm -p 80:80 nginx` →
+``system call `slirp hostfwd` failed: port 80: {"error":{"desc":"bad request: add_hostfwd:
+slirp_add_hostfwd failed"}}``. **Não é bug de dataplane** — o `add_hostfwd` do slirp faz o bind do
+lado do HOST, como este mesmo utilizador não privilegiado, e uma porta abaixo de
+`net.ipv4.ip_unprivileged_port_start` (1024) precisa de `CAP_NET_BIND_SERVICE`. A limitação já
+estava documentada (é a razão de as auto-rotas do proxy L7 servirem em `:8080`), mas o utilizador
+recebia JSON opaco **depois** do container já estar criado.
+
+- **Preflight no `cmd_run`**, ao lado do erro de porta ocupada e no mesmo formato (facto primeiro,
+  depois os comandos prontos a copiar: `-p 8080:80`, ou `sysctl -w ip_unprivileged_port_start=80`).
+  Falha antes de criar seja o que for.
+- **`delonix_net::can_bind_host_port`** decide por um **bind real**, não por comparação com o
+  sysctl: o sysctl não é a regra toda (um binário com `CAP_NET_BIND_SERVICE` liga a 80 com ele
+  intocado). `EADDRINUSE` **não** conta como falha — porta ocupada é outro diagnóstico, com erro
+  próprio que nomeia o dono, e este check não lho pode roubar (coberto por teste).
+- `slirp_add_hostfwd` passou a acrescentar a mesma explicação à mensagem quando a porta é
+  privilegiada — os caminhos que não fazem preflight (ingress, compose, `container update
+  --publish-add`, a API docker) aterram todos ali.
+
+Validado ao vivo em EN e PT. Nota de teste: um `run` falhado com `--rm` deixou um `slirp4netns`
+órfão a segurar a porta (o caso conhecido do `reap_orphan_slirp`, reapado no `run` seguinte) —
+limpo à mão nesta sessão.
+
+**Onde é que o utilizador baixa o limiar (decisão fechada, 2026-07-28).** O `install.sh --low-ports`
+(commit `ec8f079`) já escrevia `/etc/sysctl.d/99-delonix-lowports.conf` — o que faltava era ser
+DESCOBRÍVEL: não estava no `README.rst` (só nas notas da v0.36.1) e o erro acima mandava um `sysctl
+-w` avulso, que não sobrevive ao reboot. Corrigido nos dois sítios (o erro aponta agora para o
+instalador com a flag). **O default público mantém-se opt-in** — baixar a fronteira num host
+partilhado/de produção deixa qualquer programa local ligar-se a 80-1023, e a alternativa que não
+baixa nada é um proxy root na 80 a reencaminhar para uma porta alta.
+
+**A golden VM rootless (`--no-k8s`) é a excepção e traz o sysctl JÁ aplicado**
+(`rootless_customization_steps`): é uma VM descartável, de um só inquilino, cujo propósito inteiro
+é correr Delonix rootless — o compromisso host-wide não tem ali significado. **A golden k8s NÃO o
+leva** (o kubelet/kube-proxy desse nó já correm como root); por isso o passo fica no
+`rootless_customization_steps` e não no `shared_account_steps`. Escrito como FICHEIRO em
+`/etc/sysctl.d`, nunca `sysctl -w`: o `virt-customize` corre contra um convidado offline, só o que
+fica em disco chega ao primeiro boot. Teste:
+`so_a_golden_rootless_traz_as_portas_baixas_abertas` (as 3 distros levam-no, a golden k8s não).
 
 ### Varredura #2 do flow de comunicação (2026-07-27) — o IP primário como ponto cego
 
@@ -1714,6 +1755,103 @@ containers vivos (odoo, registries, control-planes k8s) e respawnar o holder der
 todos — por isso **os bugs foram provados ao vivo, mas as correcções desses três estão provadas
 por teste unitário e leitura, não ao vivo**. Só tomam efeito num respawn do holder. Os achados 3 e
 o lado-CLI do 4 correm no processo da CLI e estão validados ao vivo de ponta a ponta.
+
+### Endurecimento do ingress/egress (2026-07-28) — o `policy deny` estava partido nos dois sentidos
+
+Pedido: tornar o ingress/egress maduro ao nível do Docker/Podman. A revisão começou por uma
+avaliação e acabou em correcções, porque o primeiro achado invalidava o subsistema inteiro.
+**Todos os achados foram reproduzidos ao vivo primeiro, e todas as correcções validadas ao vivo
+depois** (o holder estava DOWN com refcount 0 e sem redes — foi possível respawná-lo com o binário
+novo sem derrubar nada, ao contrário das sessões anteriores).
+
+1. **CRÍTICO — `policy deny` matava o tráfego legítimo, nos dois sentidos.** `ingress policy deny`
+   tirava a saída ao PRÓPRIO container (DNS incluído); `egress policy deny` deixava um serviço
+   publicado sem resposta (`curl` 200 → 000). Causa única: a política default emitia um
+   `ip daddr <ip> drop`/`ip saddr <ip> drop` **sem `ct state`**, numa chain pendurada em
+   `forward priority -10` — ANTES do `ct state established,related accept` do `forward`
+   (priority 0). O tráfego de retorno nunca chegava a ver o accept. O isolamento de namespace, ao
+   lado, já fazia a coisa certa (`ct state new drop`) — só a política ficou de fora. Consequência:
+   "default-deny + allow explícito", a razão de existir do subsistema, era inexprimível.
+   **Corrigido** com `fw_chain_prologue` (emitido UMA vez por chain, não por IP — o estado é do
+   fluxo, não do endereço): `ct state invalid drop` + `ct state established,related accept`.
+   **Efeito colateral a saber**: um `deny` explícito deixa de derrubar um fluxo JÁ estabelecido, só
+   impede novos — é o que o iptables/nft/NetworkPolicy do k8s fazem, e é para isso que o
+   `conntrack` (já uma dependência do instalador) existe. Validado ao vivo: com `ingress policy
+   deny` a saída funciona E uma ligação nova de entrada continua bloqueada; com `egress policy
+   deny` o publicado responde E a saída continua bloqueada.
+2. **A aplicação da firewall não era atómica.** `do_firewall` era uma sequência de invocações
+   separadas do `nft` (add chain → list → N× delete rule → 2×IPs add rule → e só então o
+   flush+corpo). Cada uma é uma transação do kernel, por isso **entre apagar os jumps antigos e
+   pôr os novos o container ficava sem firewall nenhuma** — janela aberta por qualquer
+   `ingress deny`/`--net-connect`. Passou a **um único script `nft -f`**: o kernel aplica-o
+   atomicamente e um erro de sintaxe deixa o ruleset anterior intacto em vez de meio-aplicado.
+3. **Dispatch linear → verdict map.** O `fwdeny` levava **2 regras de jump por IP por container**;
+   com os 49 containers que este host já teve, cada pacote percorria ~100 regras antes de chegar à
+   sua. Agora há um `map fwmap { type ipv4_addr : verdict }` e uma chain própria **`fwcont`**
+   (priority -5) com exactamente 2 regras (`ip daddr vmap @fwmap` / `ip saddr vmap @fwmap`),
+   independentemente do número de containers. **A chain própria não é cosmética**: pôr as regras de
+   dispatch no `fwdeny` deixaria a sua ordem relativa às regras de egress por-rede a depender da
+   ORDEM DOS EVENTOS (que comando correu primeiro), não da intenção. Separadas, a política de
+   egress da rede corre primeiro e continua autoritativa, e as regras por-container aplicam-se
+   dentro dela (um `accept` não é terminal entre base chains, por isso um accept de rede nunca
+   contorna a firewall do container). Confirmado ao vivo no `nft list chain ip dlxing fwcont`.
+4. **`counter` em TODAS as regras + colunas PACKETS/BYTES no `ls`.** Não havia forma de responder a
+   "esta regra alguma vez casou?" — metade do que uma firewall serve para dizer. `fw_rule_tail`
+   (novo) é partilhado pelo GERADOR e pelo LEITOR: o tail é idêntico em todos os endereços de um
+   container multi-homed, o que é exactamente o que permite somar os counters de uma regra ao longo
+   das redes. Se os dois tivessem cópias próprias da formatação, o leitor deixava de casar em
+   silêncio no dia em que o gerador mudasse um espaço. Validado ao vivo (`2 packets / 88 B` reais).
+5. **IPv6 era uma armadilha, agora é recusa clara.** `fw_src_ok` aceitava CIDR v6 mas o dataplane é
+   `table ip` (v4): o utilizador levava um dump cru do nft vindo do fundo do holder. Validador
+   apertado para IPv4 + `check_cidr` (um só sítio para todos os pontos de entrada) a nomear o IPv6
+   explicitamente. Suporte v6 a sério é tabela `inet` + SDN v6 — trabalho próprio, não um
+   relaxamento de validador.
+6. **Ranges de portas** (`-p 8000-8002:9000-9002`, sintaxe Docker) via `expand_publish_range`, que
+   expande **na fronteira** — tudo a jusante (posse da porta, `unpublish`, o `ports` do registo)
+   continua a ser por-porta-única, e é assim que deve ficar. Larguras diferentes são **recusadas**
+   com a contagem dos dois lados, nunca truncadas em silêncio. Ligado ao `run` E ao
+   `update --publish-add` (uma flag que funciona num sítio e não no outro é pior que nenhuma).
+   Também apanhado: porta `0` e `70000` passavam no teste "só dígitos".
+7. **`publish_port_allow`/`do_publish_allow`/`publish-allow` REMOVIDOS.** Zero chamadores desde
+   sempre — e não podiam funcionar: todo o tráfego que chega por uma porta publicada traz o
+   **gateway do slirp** como origem, por isso uma allowlist de CIDRs reais não casaria com nada e o
+   `!= { … } drop` antes do DNAT teria dropado TUDO. Era a armadilha que esta base de código já
+   levou três vezes (`mount_live`, `set_net_rate`, `update_limits`): pública, morta, a mutar estado
+   partilhado, com o bug latente à espera do primeiro chamador.
+
+**`delonix_net::SLIRP_GW` (`10.0.2.2`) — e a correcção de uma conclusão larga demais.** A primeira
+medição desta sessão (cliente em `127.0.0.1`) viu `10.0.2.2` no log do nginx e daí concluiu-se que
+o IP de origem NUNCA sobrevive ao hostfwd. **Errado, e corrigido no mesmo dia com três clientes em
+vez de um**: `127.0.0.1` → `10.0.2.2`, mas `172.16.31.103` (LAN) e `192.168.122.1` (gateway
+libvirt) chegam ao container **como eles próprios**. A libslirp não pode usar um endereço de
+loopback como origem dentro da rede emulada — não há rota de volta — por isso substitui-o pelo
+gateway; toda a origem roteável passa intacta. **Lição de método**: um único cliente de teste não
+caracteriza um caminho de rede, e o cliente mais à mão (`localhost`) é precisamente o caso especial.
+
+Consequências, todas confirmadas ao vivo: **a filtragem por origem FUNCIONA em portas publicadas**
+(`policy deny` + `allow <porta> --from <cidr>` → origem permitida 200, outra origem 000), e o
+rate-limit por-origem do `do_l4guard` separa clientes reais. A única excepção é o cliente loopback,
+que não casa com uma regra escrita para um endereço real — o que importa saber é que testar uma
+regra dessas com `curl localhost` falha por uma razão que nada tem que ver com a regra.
+
+Três coisas ficaram erradas com o modelo correcto e foram corrigidas: (1) o `ingress ls` mostrava
+`-` nos counters de uma regra `--from <ip>/32` com tráfego real — o kernel renderiza um prefixo de
+host único como endereço nu, por isso o `/32` gerado nunca casava com a listagem; `fw_rule_tail`
+passa a omiti-lo; (2) `published_verdict` (booleano) dizia **BLOCKED** a um publish restrito a uma
+origem, com um aviso a afirmar "the port answers nothing" — falso exactamente na configuração mais
+útil que existe (expor uma porta a uma só rede); passou a `published_reach` com três estados
+(`Open`/`Sources`/`Blocked`); (3) a coluna FROM do publish, que esta sessão tinha acabado de mudar
+para `10.0.2.2`, passou a mostrar as origens reais autorizadas, com a ressalva do loopback na nota.
+
+E **`publish_port_allow` continua removido, mas por outra razão**: não é impossível, é
+**redundante** — a chain por-container já faz filtragem por origem e fá-la bem. Dois mecanismos
+paralelos para o mesmo trabalho, em chains diferentes com precedências diferentes, é como duas
+respostas à mesma pergunta começam a divergir.
+
+**Também continua em aberto** (não tocado nesta sessão): o `l4guard` só é alcançável por manifesto
+(sem comando de CLI) e só é global; regras sem ordenação/prioridade explícita; sem `log prefix` por
+regra; o isolamento não é reconstruído num respawn do holder; pods (CRI) e VMs ainda fora do
+isolamento de namespace.
 
 ### `tunnel expose --provider pinggy` sem URL (v0.16.1)
 
