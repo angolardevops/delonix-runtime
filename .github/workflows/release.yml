@@ -85,7 +85,14 @@ jobs:
             echo "::warning::release SEM assinatura — a chave ainda não foi configurada (ver docs/SECURITY-RELEASES.md). O install.sh avisa e verifica só integridade de transferência."
             exit 0
           fi
-          sudo apt-get install -y minisign
+          # `install` sem `update`: o índice do runner é fresco na maioria dos
+          # dias, mas quando não é, o apt falha com 404 num URL de pacote stale.
+          # Aqui isso abortaria a release INTEIRA por um motivo que nada tem a
+          # ver com o código — e, uma vez a chave configurada, sair sem assinar
+          # não é opção (todos os instaladores recusariam). Uma re-tentativa com
+          # o índice actualizado cobre esse caso sem custo no caminho feliz.
+          sudo apt-get install -y minisign \
+            || { sudo apt-get update -qq && sudo apt-get install -y minisign; }
           # A chave privada só existe no disco do runner durante este passo.
           umask 077
           printf '%s\n' "$MINISIGN_SECRET_KEY" > /tmp/minisign.key
