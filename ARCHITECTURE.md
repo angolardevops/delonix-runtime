@@ -274,8 +274,15 @@ O que torna o *hot reconfig* possível: a publicação vive no slirp (hostfwd) e
 do holder — nenhum dos dois pertence ao processo do container. `unpublish_ports`
 corre no `stop`/`rm` (`cmd/container.rs`), e `reap_orphan_hostfwds` reconcilia o
 slirp contra os containers vivos quando algo morreu sem limpar. O mesmo dataplane
-suporta `publish_port_allow` (allowlist de CIDRs à frente do DNAT), firewall por
-container (`fw_chain_body`), egress policy e rate-limit (`do_netrate`).
+suporta firewall por container (`fw_chain_body`, despachada em O(1) pelo verdict map
+`fwmap` na chain `fwcont`), egress policy e rate-limit (`do_netrate`).
+
+Restringir uma porta publicada por CIDR de origem **funciona** (`net ingress allow <c>
+<porta> --from <cidr>`): o endereço do cliente sobrevive ao hostfwd para qualquer origem
+roteável. A excepção é o cliente no loopback do próprio host, que chega como o gateway
+do slirp (`delonix_net::SLIRP_GW`) porque a libslirp não tem rota de volta para
+`127.0.0.1` — testar uma regra dessas com `curl localhost` falha por essa razão, não
+por causa da regra.
 
 ### (c) Pod CRI — sandbox e `join_netns`
 

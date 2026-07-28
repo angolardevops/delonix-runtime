@@ -106,8 +106,24 @@ containers, Kubernetes and VMs need (inotify limits, ip_forward,
 
 Useful flags (pass after ``bash -s --``): ``--no-vm`` skips the microVM stack,
 ``--no-tune`` skips kernel tuning, ``--with-cri`` also installs ``delonix-cri``
-(Kubernetes node), ``--user`` installs to ``~/.local/bin``, ``--version
-vX.Y.Z`` pins a release.
+(Kubernetes node), ``--low-ports`` allows publishing ports below 1024,
+``--user`` installs to ``~/.local/bin``, ``--version vX.Y.Z`` pins a release.
+
+Publishing port 80 or 443 (``-p 80:80``) needs ``--low-ports``:
+
+.. code-block:: bash
+
+   curl -fsSL .../install.sh | bash -s -- --low-ports
+
+Without it, ``-p 80:80`` is refused — the host-side bind is done by
+``slirp4netns`` as your unprivileged user, and the kernel reserves ports below
+``net.ipv4.ip_unprivileged_port_start`` (1024 by default). Rootless Podman and
+Docker hit the same wall. The flag is **opt-in** because it lowers that
+threshold to 80 for the *whole host*: from then on any local program can bind
+80-1023. On a workstation that is a fair trade; on a shared or production
+machine, the alternative that lowers nothing is a root-owned proxy on port 80
+(nginx/haproxy/systemd socket activation) forwarding to a high port. It writes
+``/etc/sysctl.d/99-delonix-lowports.conf`` — delete it to revert.
 
 Manual alternative (binary only — you install the runtime deps yourself):
 

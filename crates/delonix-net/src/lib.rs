@@ -373,11 +373,25 @@ pub fn parse_publish_addr(spec: &str) -> Result<(Option<String>, String, String,
         Some((a, p)) => (Some(a.trim()), p.trim()),
         None => (None, head),
     };
-    let valid = |p: &str| !p.is_empty() && p.chars().all(|c| c.is_ascii_digit());
+    let valid = |p: &str| {
+        !p.is_empty()
+            && p.chars().all(|c| c.is_ascii_digit())
+            && p.parse::<u16>().map(|n| n > 0).unwrap_or(false)
+    };
     if !valid(host_port) || !valid(cont_port) {
-        return Err(Error::Invalid(format!(
-            "invalid port in '{spec}' (e.g. 8080:80)"
-        )));
+        // A range (`8000-8010:8000-8010`) is the shape people reach for next, and the
+        // generic "invalid port" left them guessing whether it was the syntax or the
+        // range that was wrong. Name it: expanding a range means N hostfwds and N DNAT
+        // rules, which `expand_publish_range` does at the CLI boundary — this parser
+        // stays one-spec-one-port on purpose, since everything downstream (port
+        // ownership, unpublish, the store's `ports`) is keyed on a single port.
+        let ranged = host_port.contains('-') || cont_port.contains('-');
+        let hint = if ranged {
+            " — a port RANGE has to be expanded first (`8000-8010:8000-8010` becomes one publish per port)"
+        } else {
+            " (e.g. 8080:80)"
+        };
+        return Err(Error::Invalid(format!("invalid port in '{spec}'{hint}")));
     }
     let host_addr = match host_addr {
         Some(a) if a.parse::<std::net::Ipv4Addr>().is_ok() => Some(a.to_string()),
@@ -396,6 +410,71 @@ pub fn parse_publish_addr(spec: &str) -> Result<(Option<String>, String, String,
     ))
 }
 
+/// Expands a publish spec that carries a port RANGE into one spec per port —
+/// `-p 8000-8002:9000-9002` becomes `8000:9000`, `8001:9001`, `8002:9002`. A spec
+/// without a range comes back unchanged (one element), so callers can pipe every
+/// spec through this unconditionally.
+///
+/// Docker/Podman accept ranges and this engine did not: `parse_publish_addr` takes a
+/// single port because everything downstream — port ownership, `unpublish`, the
+/// container's stored `ports` — is keyed on one port, and that is worth keeping.
+/// Expanding at the boundary gives the familiar syntax without making a range a
+/// second kind of thing the whole stack has to understand.
+///
+/// Both sides must have the SAME width; a one-sided range (`8000-8002:80`) is refused
+/// rather than guessed at. The host side may also be a single port with a ranged
+/// container side, which Docker reads as "start here" — also refused, because it makes
+/// the host allocation implicit and it is the shape people get wrong.
+pub fn expand_publish_range(spec: &str) -> Result<Vec<String>> {
+    let (mapping, proto_suffix) = match spec.split_once('/') {
+        Some((m, p)) => (m, format!("/{p}")),
+        None => (spec, String::new()),
+    };
+    if !mapping.contains('-') {
+        return Ok(vec![spec.to_string()]);
+    }
+    // Split off the container port from the right, exactly like `parse_publish_addr`,
+    // so a `hostIp:` head keeps working (`0.0.0.0:8000-8002:9000-9002`).
+    let Some((head, cont)) = mapping.rsplit_once(':') else {
+        return Err(Error::Invalid(format!(
+            "invalid port range in '{spec}' (expected hostStart-hostEnd:contStart-contEnd)"
+        )));
+    };
+    let (addr_prefix, host) = match head.rsplit_once(':') {
+        Some((a, p)) => (format!("{a}:"), p),
+        None => (String::new(), head),
+    };
+    let bounds = |s: &str| -> Option<(u32, u32)> {
+        match s.split_once('-') {
+            Some((a, b)) => Some((a.trim().parse().ok()?, b.trim().parse().ok()?)),
+            None => {
+                let n = s.trim().parse().ok()?;
+                Some((n, n))
+            }
+        }
+    };
+    let (Some((hs, he)), Some((cs, ce))) = (bounds(host), bounds(cont)) else {
+        return Err(Error::Invalid(format!(
+            "invalid port range in '{spec}' (ports must be numbers)"
+        )));
+    };
+    if hs > he || cs > ce || he > 65535 || ce > 65535 || hs == 0 || cs == 0 {
+        return Err(Error::Invalid(format!(
+            "invalid port range in '{spec}' (start must be <= end, within 1-65535)"
+        )));
+    }
+    if he - hs != ce - cs {
+        return Err(Error::Invalid(format!(
+            "port range mismatch in '{spec}': {} host port(s) for {} container port(s) — both sides must be the same width",
+            he - hs + 1,
+            ce - cs + 1
+        )));
+    }
+    Ok((0..=(he - hs))
+        .map(|i| format!("{addr_prefix}{}:{}{proto_suffix}", hs + i, cs + i))
+        .collect())
+}
+
 /// The address a published port should BIND to on the host: the spec's own
 /// `hostIp` if it names one, else `DELONIX_PUBLISH_ADDR`, else the safe default
 /// `127.0.0.1`. Single source of truth — the two publish datapaths (per-container
@@ -409,6 +488,26 @@ pub fn publish_bind_addr(spec_addr: Option<&str>) -> String {
                 .filter(|a| a.parse::<std::net::Ipv4Addr>().is_ok())
         })
         .unwrap_or_else(|| "127.0.0.1".to_string())
+}
+
+/// Can this process bind `port` on `addr`, as far as PERMISSION goes? Ports below
+/// `net.ipv4.ip_unprivileged_port_start` (1024 by default) need `CAP_NET_BIND_SERVICE`,
+/// which a rootless engine does not have — and the bind that publishes a port happens
+/// on the HOST side, performed by `slirp4netns` as this same unprivileged user. Hence
+/// `-p 80:80` failing with the slirp's raw `add_hostfwd` JSON while `-p 8080:80` works.
+///
+/// Probes with a REAL bind instead of comparing against the sysctl: the sysctl is not
+/// the whole rule (a binary carrying `CAP_NET_BIND_SERVICE` binds 80 with the sysctl
+/// untouched), and only the kernel knows for sure. `EADDRINUSE` is deliberately NOT a
+/// failure here — a busy port is a different diagnosis, with its own error that names
+/// the owner, and this check must not steal it.
+pub fn can_bind_host_port(addr: &str, port: u16) -> bool {
+    use std::net::{Ipv4Addr, SocketAddrV4, TcpListener};
+    let ip: Ipv4Addr = addr.parse().unwrap_or(Ipv4Addr::LOCALHOST);
+    match TcpListener::bind(SocketAddrV4::new(ip, port)) {
+        Ok(_) => true,
+        Err(e) => !matches!(e.kind(), std::io::ErrorKind::PermissionDenied),
+    }
 }
 
 /// Specification of a container's network bandwidth limit.
@@ -2095,6 +2194,23 @@ impl Net {
 /// Default slirp4netns IP/gateway/DNS (rootless network).
 pub const SLIRP_IP: &str = "10.0.2.100";
 pub const SLIRP_DNS: &str = "10.0.2.3";
+/// The slirp's own gateway address — and the source address a published port sees for
+/// clients coming from the host's own **loopback**, and only those.
+///
+/// Measured, not assumed (three clients, one container, nginx access log): a client on
+/// `127.0.0.1` arrives as this address, while a client on the host's LAN address or on
+/// a libvirt gateway arrives as ITSELF. libslirp cannot use a loopback address as a
+/// source inside the emulated network — there is no route back to it — so it
+/// substitutes the gateway; every routable source is carried through unchanged.
+///
+/// So source-based filtering DOES work on published ports (`ingress allow <c> <port>
+/// --from <cidr>`, validated end to end: the allowed source gets 200, another source
+/// gets nothing), and the per-source rate limit (`infra::do_l4guard`, keyed on
+/// `ip saddr`) buckets real clients apart. The single exception is the loopback client,
+/// which no source rule written for a real address will match — worth knowing when
+/// testing a rule with `curl localhost`, since it fails for a reason that has nothing
+/// to do with the rule.
+pub const SLIRP_GW: &str = "10.0.2.2";
 
 /// Attaches a **rootless** network to the container via `slirp4netns`: creates a `tap0` in the
 /// container's netns (by PID) with NAT in *userspace* — **without root**. Waits for the
@@ -2335,9 +2451,23 @@ pub fn slirp_add_hostfwd(
                 let mut resp = String::new();
                 let _ = s.read_to_string(&mut resp);
                 if resp.contains("\"error\"") {
+                    // The slirp answers with an opaque `add_hostfwd failed` for every
+                    // cause. The overwhelmingly common one in rootless is a port below
+                    // 1024, so name it here instead of leaving raw JSON as the only
+                    // clue — the callers that don't preflight (ingress, compose,
+                    // `container update --publish-add`, the docker API) all land here.
+                    let hint = match host_port.parse::<u16>() {
+                        Ok(p) if !can_bind_host_port(&host_addr, p) => format!(
+                            " — binding port {p} on the host needs privilege \
+                             (rootless cannot publish below \
+                             net.ipv4.ip_unprivileged_port_start); publish on a higher \
+                             port instead, e.g. -p 8080:{guest_port}"
+                        ),
+                        _ => String::new(),
+                    };
                     return Err(Error::Runtime {
                         context: "slirp hostfwd",
-                        message: format!("port {host_port}: {}", resp.trim()),
+                        message: format!("port {host_port}: {}{hint}", resp.trim()),
                     });
                 }
                 return Ok(()); // {"return":{}} = success
@@ -2544,6 +2674,48 @@ mod tests {
         assert!(parse_publish_addr("::1:8080:80").is_err());
     }
 
+    /// Ranges expand at the boundary into one spec per port, so nothing downstream has
+    /// to learn about ranges. The mismatched-width case is the one that matters: it
+    /// must be REFUSED, never silently truncated to the shorter side (which would
+    /// publish some ports and quietly skip others).
+    #[test]
+    fn expand_publish_range_expande_e_recusa_larguras_diferentes() {
+        use super::expand_publish_range;
+        assert_eq!(
+            expand_publish_range("8000-8002:9000-9002").unwrap(),
+            vec!["8000:9000", "8001:9001", "8002:9002"]
+        );
+        // Protocol and host address survive the expansion.
+        assert_eq!(
+            expand_publish_range("0.0.0.0:8000-8001:80-81/udp").unwrap(),
+            vec!["0.0.0.0:8000:80/udp", "0.0.0.0:8001:81/udp"]
+        );
+        // No range = untouched, so callers can pipe every spec through this.
+        assert_eq!(expand_publish_range("8080:80").unwrap(), vec!["8080:80"]);
+        // Different widths, a one-sided range, and an inverted range are all refused.
+        for bad in ["8000-8010:9000-9002", "8000-8002:80", "8002-8000:9002-9000"] {
+            assert!(
+                expand_publish_range(bad).is_err(),
+                "{bad} should be refused"
+            );
+        }
+        // Out of range must not wrap around into a valid-looking port.
+        assert!(expand_publish_range("65534-65536:1-3").is_err());
+    }
+
+    /// A range that reaches `parse_publish_addr` unexpanded has to say so — the generic
+    /// "invalid port" left the user unable to tell a typo from an unsupported shape.
+    #[test]
+    fn parse_publish_addr_nomeia_o_range_em_vez_de_porta_invalida() {
+        let err = super::parse_publish_addr("8000-8010:80")
+            .unwrap_err()
+            .to_string();
+        assert!(err.to_lowercase().contains("range"), "{err}");
+        // Port 0 is not a port, and used to pass the digits-only check.
+        assert!(super::parse_publish_addr("0:80").is_err());
+        assert!(super::parse_publish_addr("70000:80").is_err());
+    }
+
     /// The bind address is decided in ONE place, with the spec winning over the env var
     /// and `127.0.0.1` as the floor — the two publish datapaths (per-container slirp and
     /// the single ingress slirp) must never diverge on it.
@@ -2554,6 +2726,33 @@ mod tests {
         // Without a spec address and without the env var set, the safe default holds.
         if std::env::var_os("DELONIX_PUBLISH_ADDR").is_none() {
             assert_eq!(publish_bind_addr(None), "127.0.0.1");
+        }
+    }
+
+    /// The permission probe answers about PERMISSION only: an unprivileged port is
+    /// always bindable, and a port already TAKEN must still come back `true` — a busy
+    /// port has its own diagnosis (which names the owner) and this check must not
+    /// shadow it with a "needs privilege" that would be plain wrong.
+    #[test]
+    fn can_bind_host_port_separa_privilegio_de_porta_ocupada() {
+        use super::can_bind_host_port;
+        use std::net::TcpListener;
+        let held = TcpListener::bind("127.0.0.1:0").expect("bind an ephemeral port");
+        let busy = held.local_addr().unwrap().port();
+        assert!(can_bind_host_port("127.0.0.1", busy));
+        // Unprivileged and free.
+        drop(held);
+        assert!(can_bind_host_port("127.0.0.1", busy));
+        // A privileged port is only refused when we really lack the privilege — as
+        // root (or with the sysctl lowered) the answer legitimately flips, so the
+        // assertion is conditioned on what the kernel actually allows here.
+        let root = unsafe { libc::geteuid() } == 0;
+        let low = std::fs::read_to_string("/proc/sys/net/ipv4/ip_unprivileged_port_start")
+            .ok()
+            .and_then(|s| s.trim().parse::<u16>().ok())
+            .unwrap_or(1024);
+        if !root && low > 80 {
+            assert!(!can_bind_host_port("127.0.0.1", 80));
         }
     }
 

@@ -351,6 +351,27 @@ where
     }
 }
 
+/// One place to reject a bad CIDR, so every entry point says the same thing — and says
+/// the useful thing for the mistake that actually happens: an IPv6 CIDR. It used to
+/// pass validation and then surface as a raw nft parse error from deep inside the
+/// dataplane, because the ruleset is a v4 `table ip` (reproduced live).
+fn check_cidr(src: &str) -> Result<()> {
+    if src.is_empty() || fw_src_ok(src) {
+        return Ok(());
+    }
+    Err(Error::Invalid(if src.contains(':') {
+        super::po::tf(
+            "invalid CIDR '{src}' — IPv6 is not supported (the SDN and the firewall are IPv4 only)",
+            &[("src", src)],
+        )
+    } else {
+        super::po::tf(
+            "invalid CIDR '{src}' (expected an IPv4 address or CIDR, e.g. 10.0.0.0/8)",
+            &[("src", src)],
+        )
+    }))
+}
+
 fn add_rule(
     store: &Store,
     name: &str,
@@ -362,9 +383,7 @@ fn add_rule(
 ) -> Result<()> {
     let (proto, port) = parse_port_spec(port_spec)?;
     let src = cidr.unwrap_or_default();
-    if !src.is_empty() && !fw_src_ok(&src) {
-        return Err(Error::Invalid(format!("invalid CIDR '{src}'")));
-    }
+    check_cidr(&src)?;
     let mut replaced: Vec<String> = Vec::new();
     let mut shadow: Option<(String, String)> = None;
     let c = update_locked(store, name, |c| {
@@ -459,9 +478,7 @@ fn remove_rule(
 ) -> Result<()> {
     let (proto, port) = parse_port_spec(port_spec)?;
     let src = cidr.unwrap_or_default();
-    if !src.is_empty() && !fw_src_ok(&src) {
-        return Err(Error::Invalid(format!("invalid CIDR '{src}'")));
-    }
+    check_cidr(&src)?;
     let mut n = 0usize;
     let c = update_locked(store, name, |c| {
         let ip = require_sdn_ip(c)?;
@@ -536,8 +553,8 @@ fn set_policy(store: &Store, name: &str, dir: &str, policy: Action) -> Result<()
             let Ok((_, cont_port, proto)) = delonix_net::parse_publish(p) else {
                 continue;
             };
-            if !published_verdict(&fw, &cont_port, &proto) {
-                println!(
+            match published_reach(&fw, &cont_port, &proto) {
+                PublishReach::Blocked => println!(
                     "{}",
                     super::po::tf(
                         "warning: published port '{spec}' is now BLOCKED — reopen it with \
@@ -545,7 +562,19 @@ fn set_policy(store: &Store, name: &str, dir: &str, policy: Action) -> Result<()
                          DNAT runs before the firewall)",
                         &[("spec", p), ("name", &c.name), ("cont_port", &cont_port)],
                     )
-                );
+                ),
+                // Not a warning: this is the shape a default-deny is usually set up FOR.
+                // Saying it out loud still helps, because the source that keeps working
+                // is easy to lose track of once the policy flips.
+                PublishReach::Sources(s) => println!(
+                    "{}",
+                    super::po::tf(
+                        "published port '{spec}' now answers only {from} \
+                         (a client on the host's own loopback arrives as the gateway and will not match)",
+                        &[("spec", p), ("from", &s.join(","))],
+                    )
+                ),
+                PublishReach::Open => {}
             }
         }
     }
@@ -612,19 +641,41 @@ fn list_rules(store: &Store, name: &str, dir: &str) -> Result<()> {
         "{} firewall for {} — default policy: {}",
         arrow, c.name, default
     );
+    // Live counters straight off the dataplane. A firewall that cannot say whether a
+    // rule ever matched is half a tool — this is the column an operator reads to tell
+    // a rule that is protecting something from one that is dead weight (or worse,
+    // silently shadowed by an earlier rule). Empty when the holder is down, in which
+    // case the rules still print, with `-` instead of a made-up zero.
+    let counters =
+        c.ip.as_deref()
+            .filter(|s| !s.is_empty())
+            .map(delonix_net::infra::fw_counters)
+            .unwrap_or_default();
+    let hits = |r: &FwRule| match delonix_net::infra::fw_rule_tail(r) {
+        Some(tail) => match counters.get(&tail) {
+            Some((packets, bytes)) => (packets.to_string(), output::fmt_size(*bytes)),
+            None => ("-".into(), "-".into()),
+        },
+        None => ("-".into(), "-".into()),
+    };
     let mut t = output::Table::new(&[
         "PROTO",
         "PORT",
         if dir == "in" { "FROM" } else { "TO" },
         "ACTION",
+        "PACKETS",
+        "BYTES",
         "NOTE",
     ]);
     for r in fw.rules.iter().filter(|r| r.dir == dir) {
+        let (packets, bytes) = hits(r);
         t.row(vec![
             or_any(&r.proto),
             or_any(&r.port),
             or_any(&r.src),
             r.action.clone(),
+            packets,
+            bytes,
             r.note.clone(),
         ]);
     }
@@ -638,21 +689,37 @@ fn list_rules(store: &Store, name: &str, dir: &str) -> Result<()> {
             let (cont_port, proto) = delonix_net::parse_publish(p)
                 .map(|(_, cp, pr)| (cp, pr))
                 .unwrap_or_else(|_| (String::new(), "tcp".into()));
-            let reaches = !governed || published_verdict(&fw, &cont_port, &proto);
-            if !reaches {
+            let reach = if governed {
+                published_reach(&fw, &cont_port, &proto)
+            } else {
+                PublishReach::Open
+            };
+            if let PublishReach::Blocked = reach {
                 blocked.push((p.clone(), cont_port.clone()));
             }
-            let action = if reaches { "allow" } else { "BLOCKED" }.to_string();
-            let note = if governed {
-                "DNAT".to_string()
-            } else {
+            let (from, action) = match &reach {
+                PublishReach::Open => ("any".to_string(), "allow"),
+                PublishReach::Sources(s) => (s.join(","), "allow"),
+                PublishReach::Blocked => ("any".to_string(), "BLOCKED"),
+            };
+            let note = if !governed {
                 "DNAT (host net — no firewall)".to_string()
+            } else if matches!(reach, PublishReach::Sources(_)) {
+                // Worth spelling out, because it is the one case where the FROM column
+                // does not describe every client: a request from the host's own
+                // loopback reaches the container as the slirp gateway, so it does not
+                // match a source rule written for the real client address.
+                "DNAT (loopback clients arrive as the gateway)".to_string()
+            } else {
+                "DNAT".to_string()
             };
             t.row(vec![
                 "publish".into(),
                 p.clone(),
-                "0.0.0.0/0".into(),
-                action,
+                from,
+                action.to_string(),
+                "-".into(),
+                "-".into(),
                 note,
             ]);
         }
@@ -708,19 +775,51 @@ fn port_covers(rule_port: &str, port: &str) -> bool {
 /// — a rule must name `cont_port` to govern a publish; (2) the chain is first-match
 /// terminal, so the first covering rule wins over the default policy.
 ///
-/// Rules carrying a specific `src` are skipped: they govern one source, not the general
-/// reachability this column reports.
-fn published_verdict(fw: &delonix_runtime_core::ContainerFw, cont_port: &str, proto: &str) -> bool {
+/// Source-restricted rules are NOT ignored — they are the third answer. A publish
+/// governed by `policy deny` + `allow <port> --from <cidr>` is neither open nor
+/// blocked, and calling it `BLOCKED` (which this used to do) is wrong in the most
+/// useful configuration there is: expose a port to exactly one network. Source
+/// filtering does work on published ports, because the client address survives the
+/// hop for every non-loopback client — see [`delonix_net::SLIRP_GW`].
+enum PublishReach {
+    /// Reachable from anywhere the bind address allows.
+    Open,
+    /// Reachable only from these sources.
+    Sources(Vec<String>),
+    /// The firewall drops it — the port answers nothing.
+    Blocked,
+}
+
+fn published_reach(
+    fw: &delonix_runtime_core::ContainerFw,
+    cont_port: &str,
+    proto: &str,
+) -> PublishReach {
+    let mut sources: Vec<String> = Vec::new();
     for r in fw.rules.iter().filter(|r| r.dir == "in") {
-        if !norm_any(&r.src).is_empty() {
+        let proto_covers = r.proto.is_empty() || r.proto == "any" || r.proto == proto;
+        if !proto_covers || !port_covers(&r.port, cont_port) {
             continue;
         }
-        let proto_covers = r.proto.is_empty() || r.proto == "any" || r.proto == proto;
-        if proto_covers && port_covers(&r.port, cont_port) {
-            return r.action == "allow";
+        let src = norm_any(&r.src);
+        if src.is_empty() {
+            // A rule with no source is terminal for EVERY source: whatever came
+            // before it still stands, nothing after it is ever reached.
+            return match (r.action.as_str(), sources.is_empty()) {
+                ("allow", _) => PublishReach::Open,
+                (_, true) => PublishReach::Blocked,
+                (_, false) => PublishReach::Sources(sources),
+            };
+        }
+        if r.action == "allow" {
+            sources.push(src.to_string());
         }
     }
-    fw.policy_in != "deny"
+    match (fw.policy_in == "deny", sources.is_empty()) {
+        (false, _) => PublishReach::Open,
+        (true, true) => PublishReach::Blocked,
+        (true, false) => PublishReach::Sources(sources),
+    }
 }
 
 fn or_any(s: &str) -> String {
@@ -790,9 +889,7 @@ fn egress_net(network: &str, mode: EgressMode, to: Option<String>) -> Result<()>
                 .filter(|s| !s.is_empty())
                 .collect();
             for c in &cidrs {
-                if !fw_src_ok(c) {
-                    return Err(Error::Invalid(format!("invalid CIDR '{c}'")));
-                }
+                check_cidr(c)?;
             }
             infra::set_egress_policy_net_allowlist(&bridge, &cidrs)?;
             println!(
@@ -990,11 +1087,8 @@ fn apply_fw_doc(store: &Store, doc: &ManifestDoc, dir: &str) -> Result<()> {
             )));
         }
         let src = r.from.clone().or_else(|| r.to.clone()).unwrap_or_default();
-        if !src.is_empty() && !fw_src_ok(&src) {
-            return Err(Error::Invalid(format!(
-                "{kind}/{}: invalid CIDR '{src}'",
-                doc.metadata.name
-            )));
+        if let Err(e) = check_cidr(&src) {
+            return Err(Error::Invalid(format!("{kind}/{}: {e}", doc.metadata.name)));
         }
         let action = r.action.clone().unwrap_or_else(|| "allow".into());
         if !matches!(action.as_str(), "allow" | "deny") {
@@ -1101,8 +1195,8 @@ fn apply_network_egress(kind: &str, name: &str, spec: &FwDocSpec) -> Result<()> 
     // VALIDATE EVERYTHING before applying ANYTHING (fail-before-touching): an
     // invalid CIDR or FQDN midway must not leave egress in a partial state.
     for c in &spec.allow_cidrs {
-        if !fw_src_ok(c) {
-            return Err(Error::Invalid(format!("{kind}/{name}: invalid CIDR '{c}'")));
+        if let Err(e) = check_cidr(c) {
+            return Err(Error::Invalid(format!("{kind}/{name}: {e}")));
         }
     }
     for host in &spec.fqdn_allowlist {
@@ -1307,6 +1401,74 @@ mod tests {
                 .contains("only make sense with defaultPolicy: deny"),
             "{e}"
         );
+    }
+
+    /// A publish under `policy deny` + `allow <port> --from <cidr>` is the single most
+    /// useful shape there is (expose a port to exactly one network) and it used to be
+    /// reported as `BLOCKED`, with a warning claiming "the port answers nothing" —
+    /// while it answered that source perfectly well. Validated live before and after:
+    /// allowed source 200, other source nothing.
+    #[test]
+    fn publish_restrito_a_uma_origem_nao_e_bloqueado() {
+        let rule = |port: &str, src: &str, action: &str| FwRule {
+            dir: "in".into(),
+            proto: "any".into(),
+            port: port.into(),
+            src: src.into(),
+            action: action.into(),
+            note: String::new(),
+        };
+        let fw = |policy: &str, rules: Vec<FwRule>| delonix_runtime_core::ContainerFw {
+            enabled: true,
+            policy_in: policy.into(),
+            policy_out: String::new(),
+            rules,
+            namespace: "default".into(),
+        };
+        // deny + a source-restricted allow → reachable, from that source.
+        match published_reach(
+            &fw("deny", vec![rule("80", "10.0.0.0/8", "allow")]),
+            "80",
+            "tcp",
+        ) {
+            PublishReach::Sources(s) => assert_eq!(s, vec!["10.0.0.0/8"]),
+            _ => panic!("a source-restricted publish is neither open nor blocked"),
+        }
+        // deny with nothing covering the port → genuinely blocked.
+        assert!(matches!(
+            published_reach(&fw("deny", vec![]), "80", "tcp"),
+            PublishReach::Blocked
+        ));
+        // A general allow covering the port opens it to everyone.
+        assert!(matches!(
+            published_reach(&fw("deny", vec![rule("80", "", "allow")]), "80", "tcp"),
+            PublishReach::Open
+        ));
+        // First-match terminal: a general DENY placed BEFORE the source rule wins for
+        // every source, so nothing gets through.
+        assert!(matches!(
+            published_reach(
+                &fw(
+                    "allow",
+                    vec![rule("80", "", "deny"), rule("80", "10.0.0.0/8", "allow")]
+                ),
+                "80",
+                "tcp"
+            ),
+            PublishReach::Blocked
+        ));
+        // ...and placed AFTER it, the source that was already allowed keeps working.
+        match published_reach(
+            &fw(
+                "allow",
+                vec![rule("80", "10.0.0.0/8", "allow"), rule("80", "", "deny")],
+            ),
+            "80",
+            "tcp",
+        ) {
+            PublishReach::Sources(s) => assert_eq!(s, vec!["10.0.0.0/8"]),
+            _ => panic!("the earlier source rule still matches first"),
+        }
     }
 
     #[test]

@@ -269,6 +269,16 @@ pub fn ingress_table_ruleset() -> String {
     // over the default. The `forward` (priority 0) allows returns + egress +
     // inbound + **same network** (intra-bridge `delonix0`); the rest falls into the `policy drop`.
     //
+    // WHERE THE PER-CONTAINER FIREWALL IS DISPATCHED: its own base chain `fwcont`
+    // (priority -5), between `fwdeny` (-10) and `forward` (0). Deliberately NOT in
+    // `fwdeny`: the dispatch rules would be appended among the network-wide egress
+    // rules, and their relative order would then depend on the ORDER OF EVENTS (which
+    // command ran first), not on intent. Placing it in its own chain makes precedence
+    // a property of the design — network-level egress policy is evaluated first and
+    // stays authoritative, per-container rules apply within it. An `accept` in
+    // `fwdeny` is not terminal across base chains, so a network-level accept never
+    // bypasses the container's own firewall.
+    //
     // INTRA-NETWORK: with `br_netfilter` (bridge-nf-call-iptables=1) the traffic between
     // containers on the SAME bridge traverses the forward and would fall into the drop → apps
     // wouldn't reach their services/addons on the same network. We accept `delonix0↔delonix0`
@@ -289,6 +299,11 @@ pub fn ingress_table_ruleset() -> String {
     format!(
         "table ip {INGRESS_TABLE} {{\n\
          \x20 set {DLXALL_SET} {{ type ipv4_addr; }}\n\
+         \x20 map {FWMAP} {{ type ipv4_addr : verdict; }}\n\
+         \x20 chain fwcont {{ type filter hook forward priority -5;\n\
+         \x20\x20 ip daddr vmap @{FWMAP}\n\
+         \x20\x20 ip saddr vmap @{FWMAP}\n\
+         \x20 }}\n\
          \x20 chain pre {{ type nat hook prerouting priority -100; }}\n\
          \x20 chain post {{ type nat hook postrouting priority 100; oifname \"tap0\" masquerade; }}\n\
          \x20 chain fwdeny {{ type filter hook forward priority -10; }}\n\
@@ -832,6 +847,20 @@ fn handle_control(line: &str) -> String {
     if let ["egress-show", bridge] = parts.as_slice() {
         return format!("ok {}\n", egress_set_members(bridge).join(","));
     }
+    // Query: the container's firewall chain WITH its counters, for `ingress/egress ls`.
+    // Hex-encoded because the reply is a single line and an nft listing is not — the
+    // same encoding the `firewall` command already uses in the other direction.
+    if let ["fwstats", ip] = parts.as_slice() {
+        if !is_ingress_ip(ip) {
+            return "err: IP outside the ingress space\n".to_string();
+        }
+        let listing = crate::capture(
+            "nft",
+            &["list", "chain", "ip", INGRESS_TABLE, &fw_chain_name(ip)],
+        )
+        .unwrap_or_default();
+        return format!("ok {}\n", hex_encode(listing.as_bytes()));
+    }
     let res = match parts.as_slice() {
         ["ping"] => Ok(()),
         // 5 tokens = `default` namespace (compat with the old client); 6 = namespaced.
@@ -861,9 +890,6 @@ fn handle_control(line: &str) -> String {
         ["vmtap", tap, bridge, gateway] => do_vmtap(tap, bridge, gateway),
         ["vmtapdel", tap] => do_vmtapdel(tap),
         ["publish", proto, host_port, cip, cport] => do_publish(proto, host_port, cip, cport),
-        ["publish-allow", proto, host_port, cip, cport, cidrs] => {
-            do_publish_allow(proto, host_port, cip, cport, cidrs)
-        }
         // 2 tokens = every proto on the port (teardown); 3 = only that proto.
         ["unpublish", host_port] => do_unpublish(host_port, None),
         ["unpublish", host_port, proto] => do_unpublish(host_port, Some(proto)),
@@ -1649,53 +1675,6 @@ fn do_publish(proto: &str, host_port: &str, cip: &str, cport: &str) -> Result<()
     )
 }
 
-/// Like [`do_publish`], but with a **source allowlist**: only the given CIDRs
-/// reach the `host_port`; the rest is dropped BEFORE the DNAT (`insert` at the top of the
-/// `pre` chain). The CIDRs are validated (`fw_src_ok`) — nft anti-injection. Used
-/// to expose an app's DB only to authorized IPs (firewall).
-fn do_publish_allow(
-    proto: &str,
-    host_port: &str,
-    cip: &str,
-    cport: &str,
-    cidrs_csv: &str,
-) -> Result<()> {
-    validate_publish(proto, host_port, cip, cport)?;
-    let cidrs: Vec<&str> = cidrs_csv
-        .split(',')
-        .map(|c| c.trim())
-        .filter(|c| !c.is_empty() && delonix_runtime_core::fw_src_ok(c))
-        .collect();
-    if cidrs.is_empty() {
-        return Err(Error::Invalid("empty allowlist or no valid CIDRs".into()));
-    }
-    // drop at the top of `pre`: traffic to this host_port whose saddr is NOT in the
-    // allowlist is discarded before reaching the DNAT rule (which comes after).
-    let set = format!("{{ {} }}", cidrs.join(", "));
-    run(
-        "nft",
-        &[
-            "insert",
-            "rule",
-            "ip",
-            INGRESS_TABLE,
-            "pre",
-            "ip",
-            "daddr",
-            SLIRP_IP,
-            proto,
-            "dport",
-            host_port,
-            "ip",
-            "saddr",
-            "!=",
-            &set,
-            "drop",
-        ],
-    )?;
-    do_publish(proto, host_port, cip, cport)
-}
-
 /// Removes a `host_port`'s DNAT (by handle) from the `pre` chain. Best-effort.
 /// `proto` narrows it to one protocol; `None` removes every proto on that port.
 /// The `dport <n>` needle alone matched a `tcp dport n` rule and a `udp dport n` rule
@@ -2117,6 +2096,132 @@ fn fw_chain_name(ip: &str) -> String {
 /// in the infra netns. PURE — same semantics as the root model (`apply_container_firewall`),
 /// but applied at the ingress. `in` = traffic TO the container (daddr==ip); `out` = FROM it
 /// (saddr==ip); `src` matches the other end (peer). Testable without a kernel.
+/// nft map that dispatches a packet straight to its container's chain, keyed by
+/// address. Replaces the two `ip {daddr,saddr} <ip> jump fw…` rules PER CONTAINER
+/// that used to pile up in a base chain: with 50 containers every packet walked
+/// ~100 rules before reaching its own. A verdict map is one hashed lookup,
+/// independent of how many containers exist.
+pub const FWMAP: &str = "fwmap";
+
+/// Head of a container's firewall chain, emitted ONCE per chain (not per IP,
+/// unlike [`fw_chain_body`] — conntrack state is a property of the flow, not of
+/// which address it entered by).
+///
+/// This is the standard stateful-firewall shape, and it is what makes a default
+/// policy USABLE. Without it, `policy_in: deny` emitted a bare `ip daddr <ip>
+/// drop` in a chain hooked at forward priority -10 — BEFORE the `forward`
+/// chain's own `ct state established,related accept` at priority 0. So the
+/// container's own outbound traffic died on the REPLY: `ingress policy deny`
+/// killed DNS and every outbound connection, and the symmetric `egress policy
+/// deny` dropped the SYN-ACK of an inbound connection, making a published
+/// service unreachable. Both reproduced live before this fix. Between them they
+/// made "default-deny, then allow exactly what is needed" — the whole point of
+/// the subsystem — impossible to express.
+///
+/// Consequence worth knowing: an explicit `deny` no longer tears down a flow
+/// that is ALREADY established, it only stops new ones. That is what iptables/
+/// nftables/Kubernetes NetworkPolicy all do, and it is why `conntrack -D` exists
+/// (the CLI already ships conntrack for exactly this kind of cleanup).
+pub fn fw_chain_prologue(fw: &delonix_runtime_core::ContainerFw) -> String {
+    if !fw.enabled {
+        return String::new();
+    }
+    "\t\tct state invalid counter drop\n\
+     \t\tct state established,related counter accept\n"
+        .to_string()
+}
+
+/// Everything in a rule's nft line AFTER the `ip {daddr,saddr} <own-ip>` anchor —
+/// the peer match, the L4 match, the counter and the verdict. `None` for a rule whose
+/// fields are not safe to interpolate.
+///
+/// Shared on purpose between the GENERATOR ([`fw_chain_body`]) and the counter READER
+/// (`ingress ls`): the tail is identical on every address a multi-homed container
+/// holds, which is exactly what makes it usable as the key to sum a rule's counters
+/// back across networks. If the two had separate copies of this formatting, the
+/// reader would silently stop matching the day the generator changed a space.
+pub fn fw_rule_tail(r: &delonix_runtime_core::FwRule) -> Option<String> {
+    // Defense against nft injection: refuses rules with unsafe fields
+    // (src/proto/port are interpolated into the ruleset fed to `nft -f`).
+    if !r.nft_safe() {
+        return None;
+    }
+    let peer_dir = if r.dir == "out" { "daddr" } else { "saddr" };
+    let mut tail = String::new();
+    if !r.src.is_empty() && r.src != "0.0.0.0/0" && r.src != "*" {
+        // `/32` is dropped: the kernel renders a single-host prefix as a bare address,
+        // so emitting it would make the generated text and the LISTED text differ — and
+        // the listed text is what the counter lookup matches on. Caught live: an
+        // `--from 172.16.31.103/32` rule with real traffic on it (`packets 1 bytes 44`
+        // in the chain) showed `-` in `ingress ls`. Same rule either way for nft.
+        let src = r.src.strip_suffix("/32").unwrap_or(&r.src);
+        tail.push_str(&format!("ip {peer_dir} {src} "));
+    }
+    // The PORT has to survive `proto: any` (`allow <c> 8080`, the shape the CLI
+    // produces when the user writes a bare port). Emitting the port only inside the
+    // `proto != any` branch silently WIDENED the rule to the whole container: an
+    // `allow <c> 9999` under `policy deny` opened every port, and a `deny <c> 9999`
+    // dropped every port — the opposite of what the command says, in the one place
+    // where being wrong is a security hole. nft can't put a `dport` on a rule with
+    // no L4 proto selected, so `any` + port becomes `meta l4proto { tcp, udp } th
+    // dport <port>` (`th` = transport header, valid for both, ranges included).
+    let has_port = !r.port.is_empty() && r.port != "*";
+    if !r.proto.is_empty() && r.proto != "any" {
+        tail.push_str(&r.proto);
+        if has_port {
+            tail.push_str(&format!(" dport {}", r.port));
+        }
+        tail.push(' ');
+    } else if has_port {
+        tail.push_str(&format!("meta l4proto {{ tcp, udp }} th dport {} ", r.port));
+    }
+    // `counter` on EVERY rule: without it there is no way to answer "did this rule
+    // ever match?" — the question a firewall exists to answer. Read back by
+    // `ingress/egress ls` (PACKETS/BYTES columns). Cost is one counter per rule, the
+    // same thing iptables has always done unconditionally.
+    tail.push_str(if r.action == "allow" {
+        "counter accept"
+    } else {
+        "counter drop"
+    });
+    Some(tail)
+}
+
+/// Rule lines of an `nft list chain` listing, as `(text with the counter VALUES
+/// removed, packets, bytes)`. The kernel renders a counter as `counter packets N
+/// bytes M`, so stripping the two numbers turns the listed line back into the exact
+/// text [`fw_rule_tail`] produces — which is what lets a rule find its own counters
+/// without depending on rule ORDER (fragile: the body repeats per address, with the
+/// namespace and policy lines interleaved between repetitions).
+pub fn parse_fw_counters(listing: &str) -> Vec<(String, u64, u64)> {
+    let mut out = Vec::new();
+    for line in listing.lines() {
+        let line = line.trim();
+        let Some((before, after)) = line.split_once("counter packets ") else {
+            continue;
+        };
+        let mut it = after.split_whitespace();
+        let Some(packets) = it.next().and_then(|p| p.parse::<u64>().ok()) else {
+            continue;
+        };
+        if it.next() != Some("bytes") {
+            continue;
+        }
+        let Some(bytes) = it.next().and_then(|b| b.parse::<u64>().ok()) else {
+            continue;
+        };
+        let rest: Vec<&str> = it.collect();
+        out.push((
+            format!("{before}counter {}", rest.join(" "))
+                .trim()
+                .to_string(),
+            packets,
+            bytes,
+        ));
+    }
+    out
+}
+
 pub fn fw_chain_body(ip: &str, fw: &delonix_runtime_core::ContainerFw) -> String {
     let mut body = String::new();
     if !fw.enabled {
@@ -2128,38 +2233,11 @@ pub fn fw_chain_body(ip: &str, fw: &delonix_runtime_core::ContainerFw) -> String
         if !r.nft_safe() {
             continue;
         }
-        let (self_dir, peer_dir) = if r.dir == "out" {
-            ("saddr", "daddr")
-        } else {
-            ("daddr", "saddr")
+        let self_dir = if r.dir == "out" { "saddr" } else { "daddr" };
+        let Some(tail) = fw_rule_tail(r) else {
+            continue;
         };
-        let mut line = format!("ip {self_dir} {ip}");
-        if !r.src.is_empty() && r.src != "0.0.0.0/0" && r.src != "*" {
-            line.push_str(&format!(" ip {peer_dir} {}", r.src));
-        }
-        // The PORT has to survive `proto: any` (`allow <c> 8080`, the shape the CLI
-        // produces when the user writes a bare port). Emitting the port only inside the
-        // `proto != any` branch silently WIDENED the rule to the whole container: an
-        // `allow <c> 9999` under `policy deny` opened every port, and a `deny <c> 9999`
-        // dropped every port — the opposite of what the command says, in the one place
-        // where being wrong is a security hole. nft can't put a `dport` on a rule with
-        // no L4 proto selected, so `any` + port becomes `meta l4proto { tcp, udp } th
-        // dport <port>` (`th` = transport header, valid for both, ranges included).
-        let has_port = !r.port.is_empty() && r.port != "*";
-        if !r.proto.is_empty() && r.proto != "any" {
-            line.push_str(&format!(" {}", r.proto));
-            if has_port {
-                line.push_str(&format!(" dport {}", r.port));
-            }
-        } else if has_port {
-            line.push_str(&format!(" meta l4proto {{ tcp, udp }} th dport {}", r.port));
-        }
-        line.push_str(if r.action == "allow" {
-            " accept"
-        } else {
-            " drop"
-        });
-        body.push_str(&format!("\t\t{line}\n"));
+        body.push_str(&format!("\t\tip {self_dir} {ip} {tail}\n"));
     }
     // NAMESPACE isolation on INGRESS — only when there is NO explicit inbound
     // policy (a Dependency/Ingress is authoritative and replaces this): accepts the
@@ -2170,16 +2248,20 @@ pub fn fw_chain_body(ip: &str, fw: &delonix_runtime_core::ContainerFw) -> String
     let has_explicit_in = fw.policy_in == "deny" || fw.rules.iter().any(|r| r.dir == "in");
     if !has_explicit_in {
         let nsset = dlxns_set(&fw.namespace);
-        body.push_str(&format!("\t\tip daddr {ip} ip saddr @{nsset} accept\n"));
         body.push_str(&format!(
-            "\t\tip daddr {ip} ip saddr @{DLXALL_SET} ct state new drop\n"
+            "\t\tip daddr {ip} ip saddr @{nsset} counter accept\n"
+        ));
+        body.push_str(&format!(
+            "\t\tip daddr {ip} ip saddr @{DLXALL_SET} ct state new counter drop\n"
         ));
     }
+    // The default policy is reached only by NEW flows — the prologue already let
+    // established/related through. See `fw_chain_prologue` for why that matters.
     if fw.policy_in == "deny" {
-        body.push_str(&format!("\t\tip daddr {ip} drop\n"));
+        body.push_str(&format!("\t\tip daddr {ip} counter drop\n"));
     }
     if fw.policy_out == "deny" {
-        body.push_str(&format!("\t\tip saddr {ip} drop\n"));
+        body.push_str(&format!("\t\tip saddr {ip} counter drop\n"));
     }
     body
 }
@@ -2193,9 +2275,40 @@ pub fn dlxns_set(ns: &str) -> String {
     format!("dlxns{:08x}", crate::fnv32(ns))
 }
 
+/// Parses `nft list map ip dlxing fwmap` into `(address, chain)` pairs. Text and
+/// not `-j`: the JSON shape of a verdict map is markedly more code to walk, for a
+/// listing whose text form is two tokens around a `:`. Pure and tested.
+///
+/// The `elements = { … }` block wraps over several lines and the last entry has no
+/// trailing comma, so splitting on `,` alone loses entries — parse per `jump`.
+pub fn parse_fwmap_elements(listing: &str) -> Vec<(String, String)> {
+    let Some(rest) = listing.split_once("elements = {").map(|(_, r)| r) else {
+        return Vec::new();
+    };
+    let body = rest.split_once('}').map(|(b, _)| b).unwrap_or(rest);
+    body.split(',')
+        .filter_map(|entry| {
+            let (addr, verdict) = entry.split_once(':')?;
+            let chain = verdict.trim().strip_prefix("jump ")?.trim();
+            let addr = addr.trim();
+            (!addr.is_empty() && !chain.is_empty()).then(|| (addr.to_string(), chain.to_string()))
+        })
+        .collect()
+}
+
 /// Applies a container's firewall in `dlxing` (runs in the holder): ensures the chain
-/// `fw<hash>` + jumps in the `fwd` (daddr/saddr==ip), and rebuilds the body. `hex` is the
-/// `ContainerFw` JSON in hexadecimal (the control channel is line-based).
+/// `fw<hash>`, points every one of the container's addresses at it through the `fwmap`
+/// verdict map, and rebuilds the body. `hex` is the `ContainerFw` JSON in hexadecimal
+/// (the control channel is line-based).
+///
+/// **ONE nft transaction.** This used to be a sequence of separate `nft` invocations —
+/// `add chain`, a `list`, one `delete rule` per stale jump, one `add rule` per jump, and
+/// only then the flush+body as its own script. Each is a separate kernel transaction, so
+/// between deleting the old jumps and adding the new ones the container was, briefly,
+/// governed by NOTHING. Any `ingress deny`/`--net-connect` opened that window. A single
+/// `nft -f` script is applied atomically by the kernel: the ruleset goes from fully-old
+/// to fully-new with no observable state in between, and a syntax error anywhere leaves
+/// the previous ruleset untouched instead of half-applied.
 ///
 /// `ips` is EVERY IP the container holds — the primary first, then one per additional
 /// network (multi-homing). It used to be a single IP, which meant a container connected
@@ -2223,84 +2336,74 @@ fn do_firewall(ips: &str, hex: &str) -> Result<()> {
     // The chain is named after the PRIMARY IP so it stays stable as extra networks
     // come and go (`do_unfirewall` finds it by the same name).
     let chain = fw_chain_name(ips[0]);
-    // ensures the chain (regular, only a jump target).
-    let exists = crate::capture("nft", &["list", "chain", "ip", INGRESS_TABLE, &chain])
-        .map(|o| o.contains(&chain))
-        .unwrap_or(false);
-    if !exists {
-        run_ok("nft", &["add", "chain", "ip", INGRESS_TABLE, &chain]);
-    }
-    // Jumps in the `fwd`: traffic TO (daddr) and FROM (saddr) EACH IP. Every jump to
-    // this chain is dropped and rebuilt rather than added if-missing — a container that
-    // LEAVES an additional network would otherwise keep a jump for the released IP, and
-    // IPAM hands that IP to someone else later: the next tenant would silently inherit
-    // this container's firewall. Rebuilding makes the set of jumps exactly the set of
-    // current IPs, and self-heals a chain left inconsistent by an earlier crash.
-    if let Ok(out) = crate::capture(
-        "nft",
-        &["-a", "list", "chain", "ip", INGRESS_TABLE, "fwdeny"],
-    ) {
-        for line in out.lines() {
-            if line.contains(&format!("jump {chain}")) {
-                if let Some(h) = line.rsplit("handle ").next().map(|s| s.trim()) {
-                    run_ok(
-                        "nft",
-                        &["delete", "rule", "ip", INGRESS_TABLE, "fwdeny", "handle", h],
-                    );
-                }
-            }
-        }
-    }
-    for ip in &ips {
-        for dir in ["daddr", "saddr"] {
-            run_ok(
-                "nft",
-                &[
-                    "add",
-                    "rule",
-                    "ip",
-                    INGRESS_TABLE,
-                    "fwdeny",
-                    "ip",
-                    dir,
-                    ip,
-                    "jump",
-                    &chain,
-                ],
-            );
-        }
-    }
-    // flush + body rebuild in a single script (keeps the chain and the jumps).
+    // Which map entries have to go before the new ones land. Two groups, and BOTH
+    // are needed: (a) every address still pointing at THIS chain — a container that
+    // left an additional network would otherwise keep an entry for the released
+    // address, and IPAM hands that address to someone else later, silently giving the
+    // next tenant this container's firewall; (b) any address we are about to claim
+    // that is currently mapped elsewhere — `add element` on an existing key is an
+    // error, which would abort the whole transaction and leave the container
+    // unprotected. Reading is outside the transaction, which is harmless: a stale
+    // read can only leave an entry that the next apply removes.
+    let listing =
+        crate::capture("nft", &["list", "map", "ip", INGRESS_TABLE, FWMAP]).unwrap_or_default();
+    let mut stale: Vec<String> = parse_fwmap_elements(&listing)
+        .into_iter()
+        .filter(|(addr, c)| c == &chain || ips.contains(&addr.as_str()))
+        .map(|(addr, _)| addr)
+        .collect();
+    stale.sort();
+    stale.dedup();
+
     // One body per IP: the rules, the namespace isolation and the default policy are
     // all anchored to a concrete address, so the container is governed identically on
-    // every network it is attached to.
-    let body: String = ips.iter().map(|ip| fw_chain_body(ip, &fw)).collect();
-    let script = format!(
-        "flush chain ip {INGRESS_TABLE} {chain}\ntable ip {INGRESS_TABLE} {{\n\tchain {chain} {{\n{body}\t}}\n}}\n"
-    );
+    // every network it is attached to. The prologue (conntrack fast-path) is emitted
+    // once for the whole chain — state belongs to the flow, not to an address.
+    let body: String = std::iter::once(fw_chain_prologue(&fw))
+        .chain(ips.iter().map(|ip| fw_chain_body(ip, &fw)))
+        .collect();
+    let mut script = String::new();
+    // Idempotent re-declarations: they let a table created by an older holder grow
+    // the map/chain instead of failing, and cost nothing when they already exist.
+    script.push_str(&format!(
+        "add map ip {INGRESS_TABLE} {FWMAP} {{ type ipv4_addr : verdict; }}\n\
+         add chain ip {INGRESS_TABLE} {chain}\n\
+         flush chain ip {INGRESS_TABLE} {chain}\n"
+    ));
+    for addr in &stale {
+        script.push_str(&format!(
+            "delete element ip {INGRESS_TABLE} {FWMAP} {{ {addr} }}\n"
+        ));
+    }
+    for ip in &ips {
+        script.push_str(&format!(
+            "add element ip {INGRESS_TABLE} {FWMAP} {{ {ip} : jump {chain} }}\n"
+        ));
+    }
+    script.push_str(&format!(
+        "table ip {INGRESS_TABLE} {{\n\tchain {chain} {{\n{body}\t}}\n}}\n"
+    ));
     apply_nft_stdin(&script)
 }
 
-/// Removes a container's firewall from `dlxing`: takes the jumps out of the `fwd` (by
-/// handle) and deletes the chain. Best-effort.
+/// Removes a container's firewall from `dlxing`: drops every `fwmap` entry pointing at
+/// its chain, then the chain itself — one transaction, same reasoning as
+/// [`do_firewall`]. Best-effort: a teardown that half-fails must not block the rest of
+/// the container's cleanup.
 fn do_unfirewall(ip: &str) -> Result<()> {
     let chain = fw_chain_name(ip);
-    if let Ok(out) = crate::capture(
-        "nft",
-        &["-a", "list", "chain", "ip", INGRESS_TABLE, "fwdeny"],
-    ) {
-        for line in out.lines() {
-            if line.contains(&format!("jump {chain}")) {
-                if let Some(h) = line.rsplit("handle ").next().map(|s| s.trim()) {
-                    run_ok(
-                        "nft",
-                        &["delete", "rule", "ip", INGRESS_TABLE, "fwdeny", "handle", h],
-                    );
-                }
-            }
+    let listing =
+        crate::capture("nft", &["list", "map", "ip", INGRESS_TABLE, FWMAP]).unwrap_or_default();
+    let mut script = String::new();
+    for (addr, c) in parse_fwmap_elements(&listing) {
+        if c == chain {
+            script.push_str(&format!(
+                "delete element ip {INGRESS_TABLE} {FWMAP} {{ {addr} }}\n"
+            ));
         }
     }
-    run_ok("nft", &["delete", "chain", "ip", INGRESS_TABLE, &chain]);
+    script.push_str(&format!("delete chain ip {INGRESS_TABLE} {chain}\n"));
+    let _ = apply_nft_stdin(&script);
     Ok(())
 }
 
@@ -2515,6 +2618,45 @@ fn egress_set_members(bridge: &str) -> Vec<String> {
     ips.sort();
     ips.dedup();
     ips
+}
+
+/// Live counters of a container's firewall rules, keyed by the rule tail
+/// ([`fw_rule_tail`]) and SUMMED across every address the container holds — a rule
+/// on a multi-homed container has one counter per network, and the user asked about
+/// the rule, not about the network.
+///
+/// Empty map when the holder is down or the chain does not exist yet: a firewall
+/// listing must still print its rules when the dataplane is not up, showing no
+/// traffic rather than refusing to answer.
+pub fn fw_counters(ip: &str) -> std::collections::HashMap<String, (u64, u64)> {
+    let mut out = std::collections::HashMap::new();
+    let Ok(body) = control_query(&format!("fwstats {ip}")) else {
+        return out;
+    };
+    let Some(listing) = hex_decode(body.trim()).and_then(|b| String::from_utf8(b).ok()) else {
+        return out;
+    };
+    for (text, packets, bytes) in parse_fw_counters(&listing) {
+        let entry = out.entry(strip_fw_anchor(&text)).or_insert((0, 0));
+        entry.0 += packets;
+        entry.1 += bytes;
+    }
+    out
+}
+
+/// Drops the leading `ip {daddr,saddr} <address>` anchor from a listed rule, leaving
+/// the tail — the address is what varies between a container's networks, the tail is
+/// what identifies the rule. Lines without an anchor (the conntrack prologue) come
+/// back unchanged; they simply never match a rule tail.
+fn strip_fw_anchor(text: &str) -> String {
+    let mut it = text.split_whitespace();
+    match (it.next(), it.next()) {
+        (Some("ip"), Some("daddr" | "saddr")) => {
+            it.next(); // the address itself
+            it.collect::<Vec<_>>().join(" ")
+        }
+        _ => text.to_string(),
+    }
 }
 
 /// FQDN IPs learned live for a bridge — asks the holder (`egress show`
@@ -3049,24 +3191,19 @@ pub fn publish_port(cip: &str, spec: &str) -> Result<()> {
     control_send(&format!("publish {proto} {host_port} {cip} {cont_port}"))
 }
 
-/// Like [`publish_port`], but restricts access to the `host_port` to an **allowlist**
-/// of CIDRs (inbound firewall): the rest is dropped before the DNAT. `spec` is
-/// `hostPort:contPort[/proto]`; `cidrs` are validated in the holder (`fw_src_ok`).
-/// Used to expose an app's DB only to authorized IPs.
-pub fn publish_port_allow(cip: &str, spec: &str, cidrs: &[&str]) -> Result<()> {
-    let (host_addr, host_port, cont_port, proto) = crate::parse_publish_addr(spec)?;
-    crate::slirp_add_hostfwd(
-        &slirp_sock_path(),
-        &host_port,
-        &host_port,
-        &proto,
-        host_addr.as_deref(),
-    )?;
-    let csv = cidrs.join(",");
-    control_send(&format!(
-        "publish-allow {proto} {host_port} {cip} {cont_port} {csv}"
-    ))
-}
+// REMOVED: `publish_port_allow` / the `publish-allow` control verb — a pre-DNAT
+// source allowlist for a published port.
+//
+// Removed as REDUNDANT, not as impossible. The per-container chain already filters a
+// published port by source and does it correctly (`ingress allow <c> <port> --from
+// <cidr>`, validated end to end against a real remote client), because the client
+// address survives the hostfwd for every routable source — see `crate::SLIRP_GW`. A
+// second, parallel mechanism for the same job, sitting in a different chain with
+// different precedence, is how two answers to one question start disagreeing.
+//
+// It also had zero callers since the day it was written: the trap this codebase has
+// been bitten by three times (`mount_live`, `set_net_rate`, `update_limits`) — public,
+// dead, mutating shared state, with the latent bug waiting for the first real caller.
 
 /// Removes a `host_port`'s publication: takes the `add_hostfwd` out of the slirp and the DNAT
 /// out of the `pre` chain. Best-effort.
@@ -4221,13 +4358,15 @@ mod tests {
         let body = fw_chain_body("10.200.0.5", &fw);
         // in rule: daddr==ip, peer saddr==src, tcp dport 8080 accept
         assert!(
-            body.contains("ip daddr 10.200.0.5 ip saddr 10.200.0.0/16 tcp dport 8080 accept"),
+            body.contains(
+                "ip daddr 10.200.0.5 ip saddr 10.200.0.0/16 tcp dport 8080 counter accept"
+            ),
             "{body}"
         );
         // out rule: saddr==ip, drop (proto any → no proto/dport)
-        assert!(body.contains("ip saddr 10.200.0.5 drop"), "{body}");
+        assert!(body.contains("ip saddr 10.200.0.5 counter drop"), "{body}");
         // policy in=deny → final drop on the daddr
-        assert!(body.contains("ip daddr 10.200.0.5 drop"), "{body}");
+        assert!(body.contains("ip daddr 10.200.0.5 counter drop"), "{body}");
         // EXPLICIT inbound policy (deny) → does NOT emit namespace rules.
         assert!(!body.contains("@dlxall"), "{body}");
         // disabled → empty body
@@ -4261,16 +4400,23 @@ mod tests {
         };
         let body = fw_chain_body("10.200.0.5", &fw);
         assert!(
-            body.contains("ip daddr 10.200.0.5 meta l4proto { tcp, udp } th dport 9999 accept"),
+            body.contains(
+                "ip daddr 10.200.0.5 meta l4proto { tcp, udp } th dport 9999 counter accept"
+            ),
             "{body}"
         );
         // ranges survive too (`fw_port_ok` already validates `n-m`).
         assert!(
-            body.contains("ip daddr 10.200.0.5 meta l4proto { tcp, udp } th dport 100-200 drop"),
+            body.contains(
+                "ip daddr 10.200.0.5 meta l4proto { tcp, udp } th dport 100-200 counter drop"
+            ),
             "{body}"
         );
         // the whole-container form must NOT appear for a rule that named a port.
-        assert!(!body.contains("ip daddr 10.200.0.5 accept"), "{body}");
+        assert!(
+            !body.contains("ip daddr 10.200.0.5 counter accept"),
+            "{body}"
+        );
         // `proto: any` with NO port stays the whole-container rule it always was.
         let wide = delonix_runtime_core::ContainerFw {
             enabled: true,
@@ -4280,7 +4426,7 @@ mod tests {
             namespace: "default".into(),
         };
         assert!(
-            fw_chain_body("10.200.0.5", &wide).contains("ip daddr 10.200.0.5 accept"),
+            fw_chain_body("10.200.0.5", &wide).contains("ip daddr 10.200.0.5 counter accept"),
             "a portless `any` rule is still container-wide"
         );
     }
@@ -4297,13 +4443,123 @@ mod tests {
         let nsset = dlxns_set("web");
         // same-ns accept + cross-ns (container) NEW drop, com ct state new.
         assert!(
-            body.contains(&format!("ip daddr 10.200.0.7 ip saddr @{nsset} accept")),
+            body.contains(&format!(
+                "ip daddr 10.200.0.7 ip saddr @{nsset} counter accept"
+            )),
             "{body}"
         );
         assert!(
-            body.contains("ip daddr 10.200.0.7 ip saddr @dlxall ct state new drop"),
+            body.contains("ip daddr 10.200.0.7 ip saddr @dlxall ct state new counter drop"),
             "{body}"
         );
+    }
+
+    /// REGRESSION (reproduced live, both directions): the default policy used to be a
+    /// bare `drop` in a chain hooked BEFORE the `forward` chain's own
+    /// `ct state established,related accept`, so `ingress policy deny` killed the
+    /// container's outbound traffic on the reply (DNS included) and `egress policy
+    /// deny` dropped the SYN-ACK of an inbound connection, making a published service
+    /// unreachable. The conntrack fast-path is what makes a default-deny posture
+    /// expressible at all; without it the whole subsystem is decorative.
+    #[test]
+    fn prologo_deixa_passar_o_trafego_ja_estabelecido() {
+        let fw = delonix_runtime_core::ContainerFw {
+            enabled: true,
+            policy_in: "deny".into(),
+            policy_out: "deny".into(),
+            ..Default::default()
+        };
+        let head = fw_chain_prologue(&fw);
+        assert!(
+            head.contains("ct state established,related counter accept"),
+            "{head}"
+        );
+        assert!(head.contains("ct state invalid counter drop"), "{head}");
+        // The fast-path has to come BEFORE the policy drops it exists to survive.
+        let full = format!("{head}{}", fw_chain_body("10.200.0.5", &fw));
+        let accept = full.find("established,related").expect("prologue present");
+        let deny = full
+            .find("ip daddr 10.200.0.5 counter drop")
+            .expect("policy present");
+        assert!(
+            accept < deny,
+            "the conntrack accept must precede the policy drop:\n{full}"
+        );
+        // A firewall that is off stays a completely empty chain.
+        let off = delonix_runtime_core::ContainerFw {
+            enabled: false,
+            ..fw
+        };
+        assert_eq!(fw_chain_prologue(&off), "");
+    }
+
+    /// The tail is the key a rule's counters are looked up by, so generator and reader
+    /// must agree byte for byte. Reading a real `nft list chain` line back through
+    /// `parse_fw_counters` has to land exactly on what `fw_rule_tail` produced —
+    /// otherwise `ingress ls` silently shows `-` on every rule.
+    #[test]
+    fn counters_voltam_a_casar_com_a_regra_que_os_gerou() {
+        let r = delonix_runtime_core::FwRule {
+            dir: "in".into(),
+            proto: "tcp".into(),
+            port: "5432".into(),
+            src: "10.200.0.0/16".into(),
+            action: "allow".into(),
+            note: String::new(),
+        };
+        let tail = fw_rule_tail(&r).expect("safe rule");
+        // A single-host source must NOT carry `/32`: the kernel prints it as a bare
+        // address, and the listed text is what the counter lookup matches on. Caught
+        // live — an `--from <ip>/32` rule with real traffic showed `-` in `ingress ls`.
+        let host = delonix_runtime_core::FwRule {
+            src: "172.16.31.103/32".into(),
+            ..r.clone()
+        };
+        let host_tail = fw_rule_tail(&host).expect("safe rule");
+        assert!(host_tail.contains("ip saddr 172.16.31.103 "), "{host_tail}");
+        assert!(!host_tail.contains("/32"), "{host_tail}");
+        // A real prefix is left exactly as it is.
+        let net = delonix_runtime_core::FwRule {
+            src: "10.200.0.0/16".into(),
+            ..r.clone()
+        };
+        assert!(fw_rule_tail(&net).unwrap().contains("10.200.0.0/16"));
+        // Exactly how the kernel renders that rule once it has seen traffic.
+        let listing = format!(
+            "table ip dlxing {{\n\tchain fwdeadbeef {{\n\
+             \t\tct state established,related counter packets 9 bytes 900 accept\n\
+             \t\tip daddr 10.201.0.5 {} accept\n\
+             \t\tip daddr 10.202.0.9 {} accept\n\t}}\n}}\n",
+            tail.replace("counter accept", "counter packets 4 bytes 400"),
+            tail.replace("counter accept", "counter packets 6 bytes 620"),
+        );
+        let parsed = parse_fw_counters(&listing);
+        let summed: (u64, u64) = parsed
+            .iter()
+            .filter(|(text, _, _)| strip_fw_anchor(text) == tail)
+            .fold((0, 0), |acc, (_, p, b)| (acc.0 + p, acc.1 + b));
+        // Both addresses of a multi-homed container add up into the one rule.
+        assert_eq!(summed, (10, 1020), "parsed: {parsed:?}\ntail: {tail}");
+    }
+
+    /// The verdict map is what a container's teardown and re-apply are keyed on, so a
+    /// listing that spans lines (the shape nft actually prints) must not lose entries.
+    #[test]
+    fn parse_fwmap_le_todas_as_entradas_multilinha() {
+        let listing = "table ip dlxing {\n\tmap fwmap {\n\t\ttype ipv4_addr : verdict\n\
+                       \t\telements = { 10.201.0.5 : jump fwaaaaaaaa,\n\
+                       \t\t             10.202.0.9 : jump fwaaaaaaaa,\n\
+                       \t\t             10.203.0.7 : jump fwbbbbbbbb }\n\t}\n}\n";
+        let els = parse_fwmap_elements(listing);
+        assert_eq!(els.len(), 3, "{els:?}");
+        // The LAST entry has no trailing comma — the one a naive split drops.
+        assert!(
+            els.contains(&("10.203.0.7".into(), "fwbbbbbbbb".into())),
+            "{els:?}"
+        );
+        let mine: Vec<_> = els.iter().filter(|(_, c)| c == "fwaaaaaaaa").collect();
+        assert_eq!(mine.len(), 2, "both addresses of the multi-homed container");
+        assert!(parse_fwmap_elements("map fwmap { type ipv4_addr : verdict }").is_empty());
     }
 
     #[test]

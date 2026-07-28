@@ -149,8 +149,17 @@ pub fn fw_port_ok(p: &str) -> bool {
     }
 }
 
-/// safe `src`: empty, `*`, `0.0.0.0/0`, or an IP/CIDR (v4/v6) — only IP/CIDR
+/// safe `src`: empty, `*`, `0.0.0.0/0`, or an IPv4 address/CIDR — only IP/CIDR
 /// characters (no spaces/`;`/`{`/`}`/newline, which would inject nft syntax).
+///
+/// **IPv4 only, deliberately.** This used to accept v6 too, which was not support but
+/// a trap: the whole dataplane is a `table ip` (v4) and the SDN hands out v4
+/// addresses, so a v6 CIDR passed validation, was interpolated into `ip saddr
+/// <v6-cidr>`, and the user got a raw nft parse error dumped at them
+/// (reproduced live with `--from 2001:db8::/32`). Refusing here turns that into a
+/// clear message at the boundary, and keeps the promise that anything accepted is
+/// actually enforced. Real v6 support means an `inet` table and a v6 SDN — a
+/// separate piece of work, not a validator relaxation.
 pub fn fw_src_ok(s: &str) -> bool {
     if s.is_empty() || s == "*" || s == "0.0.0.0/0" {
         return true;
@@ -158,7 +167,7 @@ pub fn fw_src_ok(s: &str) -> bool {
     if s.len() > 64
         || !s
             .bytes()
-            .all(|b| b.is_ascii_hexdigit() || matches!(b, b'.' | b':' | b'/'))
+            .all(|b| b.is_ascii_digit() || matches!(b, b'.' | b'/'))
     {
         return false;
     }
@@ -168,11 +177,11 @@ pub fn fw_src_ok(s: &str) -> bool {
         .unwrap_or((s, None));
     if let Some(m) = mask {
         match m.parse::<u32>() {
-            Ok(n) if n <= 128 => {}
+            Ok(n) if n <= 32 => {}
             _ => return false,
         }
     }
-    addr.parse::<std::net::IpAddr>().is_ok()
+    addr.parse::<std::net::Ipv4Addr>().is_ok()
 }
 
 impl FwRule {
@@ -756,6 +765,15 @@ mod tests {
         ));
         assert!(!fw_src_ok("1.2.3.4\n\t\taccept"));
         assert!(!fw_src_ok("$(reboot)"));
+        // IPv6 is REFUSED, not "supported": the dataplane is a v4 `table ip`, so a v6
+        // CIDR used to pass here and blow up as a raw nft parse error deep inside the
+        // holder (reproduced live). Accepting only what is actually enforced is the
+        // whole contract of this validator.
+        assert!(!fw_src_ok("2001:db8::/32"));
+        assert!(!fw_src_ok("::1"));
+        assert!(!fw_src_ok("fe80::1/64"));
+        // A v4 mask wider than 32 is not a mask.
+        assert!(!fw_src_ok("10.0.0.0/64"));
         // complete rule
         let bad = FwRule {
             src: "x; flush ruleset".into(),

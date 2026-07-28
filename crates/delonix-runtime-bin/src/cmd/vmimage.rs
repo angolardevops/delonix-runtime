@@ -1999,6 +1999,26 @@ pub(crate) fn rootless_customization_steps(
                 .into(),
         ));
     }
+    // Publishing 80/443 rootless (`-p 80:80`) is refused by the kernel: the
+    // host-side bind is done by `slirp4netns` as the unprivileged `delonix`
+    // user, and ports below `net.ipv4.ip_unprivileged_port_start` (1024 by
+    // default) need CAP_NET_BIND_SERVICE.
+    //
+    // `install.sh` keeps this OPT-IN (`--low-ports`) because it lowers a
+    // privilege boundary for a whole host that may be shared or in production:
+    // from then on any local program can bind 80-1023. THIS image is the
+    // opposite situation — a disposable, single-tenant VM whose entire purpose
+    // is running Delonix rootless — so the trade-off flips and it ships applied.
+    // Deliberately NOT in `shared_account_steps`: the k8s golden is a Kubernetes
+    // node whose kubelet/kube-proxy already run as root and never needed it.
+    //
+    // Written as a file, not `sysctl -w`: `virt-customize` runs against an
+    // offline guest, so only what lands in /etc/sysctl.d survives to first boot.
+    ops.push(CustomizeOp::RunCommand(
+        "printf '# Delonix Runtime — publish ports <1024 rootless (see install.sh --low-ports).\\n\
+         net.ipv4.ip_unprivileged_port_start = 80\\n' > /etc/sysctl.d/99-delonix-lowports.conf"
+            .into(),
+    ));
     ops
 }
 
@@ -2495,6 +2515,36 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
         assert!(!ops
             .iter()
             .any(|o| matches!(o, CustomizeOp::RunCommand(c) if c.contains("apparmor"))));
+    }
+
+    /// The rootless golden ships `ip_unprivileged_port_start=80` applied, so
+    /// `-p 80:80` works out of the box in it — a disposable single-tenant VM is
+    /// exactly the case where the host-wide trade-off is acceptable, unlike the
+    /// public `install.sh` (where it stays behind `--low-ports`). Every distro,
+    /// since the file is a kernel path, not a packaging convention. The k8s
+    /// golden must NOT get it: that node's kubelet/kube-proxy run as root.
+    #[test]
+    fn so_a_golden_rootless_traz_as_portas_baixas_abertas() {
+        let has_lowports = |ops: &[CustomizeOp]| {
+            ops.iter().any(
+                |o| matches!(o, CustomizeOp::RunCommand(c) if c.contains("ip_unprivileged_port_start")),
+            )
+        };
+        for d in [Distro::Ubuntu, Distro::Debian, Distro::Rocky] {
+            let ops = rootless_customization_steps(&[], &PathBuf::from("/tmp/delonix"), d);
+            assert!(
+                has_lowports(&ops),
+                "rootless golden ({d:?}) needs the sysctl"
+            );
+        }
+        assert!(!has_lowports(&k8s_customization_steps(
+            None,
+            &[],
+            &[],
+            &PathBuf::from("/tmp/delonix-cri"),
+            &PathBuf::from("/tmp/delonix-cri.service"),
+            Distro::Ubuntu,
+        )));
     }
 
     #[test]
