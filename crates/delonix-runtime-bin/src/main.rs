@@ -258,6 +258,20 @@ fn cmd_completion(shell: CompShell) -> Result<()> {
 }
 
 fn main() {
+    // `delonix image ls | head` used to end in a Rust PANIC — "failed printing to
+    // stdout: Broken pipe (os error 32)" plus a backtrace note — because Rust's
+    // runtime sets SIGPIPE to ignore, so a write to a closed pipe returns EPIPE
+    // and `println!` unwraps it. Piping into `head`/`grep -q`/`less` is completely
+    // ordinary CLI use, and every one of those turned into a crash trace in the
+    // logs of whatever was calling us. Restoring the default disposition makes the
+    // kernel end the process quietly on SIGPIPE, exactly like every other UNIX
+    // tool in a pipeline.
+    //
+    // SAFETY: `signal(2)` with SIG_DFL has no preconditions; done first, before
+    // any thread exists, so no other thread can be mid-write.
+    unsafe {
+        libc::signal(libc::SIGPIPE, libc::SIG_DFL);
+    }
     delonix_runtime_core::telemetry::init();
     // Hidden re-exec of the netns holder (`delonix netns holder`, invoked by
     // `delonix-net::infra::start_holder` itself via `unshare` — never by the
@@ -304,6 +318,15 @@ fn main() {
             std::path::Path::new(&raw[3]),
             std::path::Path::new(&raw[4]),
         ) {
+            eprintln!("delonix: {}", cmd::po::t_dyn(&e.to_string()));
+            std::process::exit(1);
+        }
+        std::process::exit(0);
+    }
+    if raw.len() == 4 && raw[1] == "__duusage" {
+        if let Err(e) =
+            cmd::mapped::duusage(std::path::Path::new(&raw[2]), std::path::Path::new(&raw[3]))
+        {
             eprintln!("delonix: {}", cmd::po::t_dyn(&e.to_string()));
             std::process::exit(1);
         }

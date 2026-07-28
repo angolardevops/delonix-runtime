@@ -360,6 +360,19 @@ pub fn run(action: SecretCmd) -> Result<()> {
         }
         SecretCmd::Rm { name } => {
             store.remove(&name)?;
+            // The event log had NO record of any secret/volume/storage lifecycle
+            // operation — only containers. A credential being destroyed is exactly
+            // what an operator needs to find in `system events` afterwards. The
+            // NAME only: values never leave the vault, and events are deliberately
+            // short (see `events.rs` on PIPE_BUF atomicity).
+            delonix_runtime_core::events::emit(
+                &state_root(),
+                "secret",
+                "remove",
+                &name,
+                &name,
+                None,
+            );
             println!(
                 "{}",
                 super::po::tf("secret '{name}' removed", &[("name", &name)])

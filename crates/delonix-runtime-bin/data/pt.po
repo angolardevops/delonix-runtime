@@ -422,6 +422,15 @@ msgstr "não consegui ler a chave SSH de"
 msgid "port {hp} is already published by container '{owner}'\n\nfix it with ONE of these:\n  delonix container stop {owner}    # stops whoever holds port {hp}\n  delonix container run -p {alt}:{cp} ...    # or publish on another port\n  delonix container update {owner} --publish-rm {hp}    # or hot-unpublish it"
 msgstr "a porta {hp} já está publicada pelo container '{owner}'\n\nresolve com UMA destas opções:\n  delonix container stop {owner}    # pára quem segura a porta {hp}\n  delonix container run -p {alt}:{cp} ...    # ou publica noutra porta\n  delonix container update {owner} --publish-rm {hp}    # ou despublica-a a quente"
 
+msgid "invalid CIDR '{src}' — IPv6 is not supported (the SDN and the firewall are IPv4 only)"
+msgstr "CIDR inválido '{src}' — IPv6 não é suportado (a SDN e a firewall são só IPv4)"
+
+msgid "invalid CIDR '{src}' (expected an IPv4 address or CIDR, e.g. 10.0.0.0/8)"
+msgstr "CIDR inválido '{src}' (esperava um endereço ou CIDR IPv4, ex.: 10.0.0.0/8)"
+
+msgid "host port {hp} needs privilege to bind — rootless cannot publish ports below net.ipv4.ip_unprivileged_port_start\n\nfix it with ONE of these:\n  delonix container run -p {alt}:{cp} ...    # publish on an unprivileged port\n  curl -fsSL {url} | bash -s -- --low-ports    # or lower the threshold for good (host-wide)"
+msgstr "a porta {hp} do host precisa de privilégio para o bind — em rootless não se publicam portas abaixo de net.ipv4.ip_unprivileged_port_start\n\nresolve com UMA destas opções:\n  delonix container run -p {alt}:{cp} ...    # publica numa porta não privilegiada\n  curl -fsSL {url} | bash -s -- --low-ports    # ou baixa o limiar de vez (afecta o host todo)"
+
 msgid "the name '{name}' is already in use by container {id} — pick another or remove it first"
 msgstr "o nome '{name}' já está em uso pelo container {id} — escolhe outro ou remove-o primeiro"
 
@@ -3378,3 +3387,49 @@ msgstr "Ficheiro de destino. Usa `-o /dev/stdout` para encadear (ex.: para `gzip
 
 msgid "Archive to read (`.tar`; a `.tar.gz` must be gunzipped first)"
 msgstr "Arquivo a ler (`.tar`; um `.tar.gz` tem de ser descomprimido primeiro)"
+
+# --- Auditoria 2026-07-28: protecção de volumes/storage, exit codes, segredos ---
+
+# Estado de um container numa lista de referências ("nome (parado)"). "running"
+# já existe acima ("a correr") e é reutilizado. Sujeito masculino (o container).
+msgid "stopped"
+msgstr "parado"
+
+msgid "container(s): {list}"
+msgstr "container(s): {list}"
+
+msgid "share volume(s): {list}"
+msgstr "share volume(s): {list}"
+
+msgid "volume '{name}' is in use by {who} — stop/remove them first, or pass --force to destroy the data anyway"
+msgstr "o volume '{name}' está em uso por {who} — pára/remove-os primeiro, ou passa --force para destruir os dados mesmo assim"
+
+msgid "unknown (>= {seen}, {n} dir(s) unreadable — run as the data's owner)"
+msgstr "desconhecido (>= {seen}, {n} directório(s) ilegíveis — corre como o dono dos dados)"
+
+msgid "volume '{name}' not removed: {err}"
+msgstr "volume '{name}' não removido: {err}"
+
+msgid "could not remove the credentials file {path}: {err}"
+msgstr "não foi possível remover o ficheiro de credenciais {path}: {err}"
+
+msgid "This will remove {n} stopped container(s): {list}"
+msgstr "Isto vai remover {n} container(s) parado(s): {list}"
+
+msgid "Also removes unused images, CAS blobs and orphan directories. Continue? [y/N]"
+msgstr "Remove também imagens sem uso, blobs CAS e directórios órfãos. Continuar? [s/N]"
+
+msgid "aborted"
+msgstr "abortado"
+
+msgid "exit code of '{name}' was not captured: this engine is not the process's parent when detached, so only THAT it died is known. To get the real code, run it in the FOREGROUND (the CLI is then the parent and exits with the container's own code), or detach it under a supervisor with `--restart on-failure` / `always` / `unless-stopped`."
+msgstr "o código de saída de '{name}' não foi capturado: em modo desanexado este motor não é o pai do processo, por isso só se sabe QUE morreu. Para obter o código real, corre-o em PRIMEIRO PLANO (aí a CLI é o pai e sai com o código do próprio container), ou desanexa-o sob um supervisor com `--restart on-failure` / `always` / `unless-stopped`."
+
+msgid "storage type '{type}' does not support --username/--password here: only `cifs`/`smb` take a credentials file. For `webdav`, put the credentials in /etc/davfs2/secrets on the host; for `nfs`, authentication is by export/host, not by user."
+msgstr "o tipo de storage '{type}' não suporta --username/--password aqui: só `cifs`/`smb` aceitam um ficheiro de credenciais. Para `webdav`, põe as credenciais em /etc/davfs2/secrets no host; para `nfs`, a autenticação é por export/host, não por utilizador."
+
+msgid "image '{ref}' is in use by container(s): {list} — remove them first, or pass --force (the image can then no longer be used to recreate them)"
+msgstr "a imagem '{ref}' está em uso por container(s): {list} — remove-os primeiro, ou passa --force (a imagem deixa então de poder recriá-los)"
+
+msgid "`system prune` removes every stopped container and unreferenced data — pass --force to confirm when not on a terminal"
+msgstr "`system prune` remove todos os containers parados e os dados sem referência — passa --force para confirmar fora de um terminal"

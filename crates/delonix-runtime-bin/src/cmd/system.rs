@@ -38,6 +38,9 @@ pub enum SystemCmd {
     /// — **orphan container directories** (from nodes/containers that died
     /// abruptly without `rm`, with no registry entry).
     Prune {
+        /// Skip the confirmation prompt (REQUIRED when stdin is not a terminal).
+        #[arg(short = 'f', long)]
+        force: bool,
         /// Also remove unused images that DO have a tag (not just the dangling ones).
         #[arg(short, long)]
         all: bool,
@@ -78,7 +81,7 @@ pub fn run(action: SystemCmd) -> Result<()> {
         SystemCmd::Events { follow, tail } => cmd_events(follow, tail),
         SystemCmd::Info => cmd_info(),
         SystemCmd::Df => cmd_df(),
-        SystemCmd::Prune { all } => cmd_prune(all),
+        SystemCmd::Prune { all, force } => cmd_prune(all, force),
         SystemCmd::Monitor {
             interval,
             no_stream,
@@ -186,9 +189,65 @@ fn cmd_monitor(interval: u64, no_stream: bool) -> Result<()> {
 /// cluster nodes and containers that died from SIGKILL/crash/closed-session **without
 /// `rm`**, so nobody ever swept them. The normal `container rm` never
 /// catches them (they aren't in the registry); only an explicit GC like this one.
-fn cmd_prune(all: bool) -> Result<()> {
+fn cmd_prune(all: bool, force: bool) -> Result<()> {
     use std::collections::HashSet;
     let (images, store) = open_stores()?;
+
+    // CONFIRM FIRST. This is destructive well beyond what its name suggests: the
+    // help leads with "unused images", but step 1 below removes EVERY stopped
+    // container — including ones merely `Created` and not yet started — with no
+    // prompt at all. Docker asks. An operator who types `delonix system prune`
+    // expecting a disk cleanup should not discover afterwards that a stopped
+    // container they were about to `start` is gone.
+    //
+    // Only when stdin is a TTY: in a script/CI there is nobody to answer, and
+    // blocking forever would be worse than the old behaviour — there, `--force`
+    // is required instead, so an unattended prune is always explicit.
+    if !force {
+        let doomed: Vec<String> = store
+            .list()?
+            .into_iter()
+            .filter(|c| !c.pid.map(delonix_runtime::is_alive).unwrap_or(false))
+            .map(|c| c.name)
+            .collect();
+        let tty = unsafe { libc::isatty(libc::STDIN_FILENO) } == 1;
+        if !tty {
+            return Err(delonix_runtime_core::Error::Invalid(
+                super::po::t(
+                    "`system prune` removes every stopped container and unreferenced data — pass \
+                     --force to confirm when not on a terminal",
+                )
+                .into(),
+            ));
+        }
+        if !doomed.is_empty() {
+            println!(
+                "{}",
+                super::po::tf(
+                    "This will remove {n} stopped container(s): {list}",
+                    &[
+                        ("n", &doomed.len().to_string()),
+                        ("list", &doomed.join(", ")),
+                    ],
+                )
+            );
+        }
+        print!(
+            "{} ",
+            super::po::t(
+                "Also removes unused images, CAS blobs and orphan directories. Continue? [y/N]"
+            )
+        );
+        use std::io::Write as _;
+        let _ = std::io::stdout().flush();
+        let mut answer = String::new();
+        if std::io::stdin().read_line(&mut answer).is_err()
+            || !matches!(answer.trim().to_lowercase().as_str(), "y" | "yes")
+        {
+            println!("{}", super::po::t("aborted"));
+            return Ok(());
+        }
+    }
 
     // Orphan slirps (dead target) — the SAFE reaper (never the fail-open
     // `reap_orphan_hostfwds`; see the history of the reaper that deleted live ports).

@@ -143,6 +143,9 @@ pub enum ImageCmd {
     Rm {
         #[arg(add = ArgValueCandidates::new(super::complete::images))]
         image: String,
+        /// Remove it even if a container still uses it.
+        #[arg(short = 'f', long)]
+        force: bool,
     },
     /// Export an OCI runtime bundle (rootfs + config.json) for `runc`/`crun`.
     Export {
@@ -388,7 +391,7 @@ pub fn run(vm: bool, action: ImageCmd) -> Result<()> {
     if vm {
         return run_vm(action);
     }
-    let (images, _store) = open_stores()?;
+    let (images, store) = open_stores()?;
     match action {
         ImageCmd::Dash { .. } => unreachable!("tratado no topo de run"),
         ImageCmd::Pull {
@@ -432,7 +435,7 @@ pub fn run(vm: bool, action: ImageCmd) -> Result<()> {
                 super::scan::cmd_scan(&image, sbom, fail_on.as_deref())
             }
         }
-        ImageCmd::Rm { image } => cmd_rm(&images, &image),
+        ImageCmd::Rm { image, force } => cmd_rm(&images, &store, &image, force),
         ImageCmd::Export { image, dir } => cmd_export(&images, &image, &dir),
         ImageCmd::Save { image, output } => cmd_save(&images, &image, &output),
         ImageCmd::Load { input } => cmd_load(&images, &input),
@@ -875,8 +878,56 @@ fn describe_one(images: &ImageStore, img: &delonix_image::Image) {
     d.print();
 }
 
-fn cmd_rm(images: &ImageStore, reference: &str) -> Result<()> {
+/// `image rm` — refuses while a container still references the image.
+///
+/// Docker refuses this ("image is being used by ... container"); this used to
+/// delete it unconditionally and report success. The running container keeps
+/// working (its rootfs is already materialized), so nothing looks wrong — but the
+/// workload can no longer be recreated or scaled, and on an air-gapped node or
+/// after the upstream tag moves, that image is simply gone. A latent outage that
+/// only surfaces at the worst moment is exactly the class of silent failure this
+/// engine's own invariant forbids.
+fn cmd_rm(
+    images: &ImageStore,
+    store: &delonix_runtime_core::Store,
+    reference: &str,
+    force: bool,
+) -> Result<()> {
+    if !force {
+        let img = images.resolve(reference)?;
+        let mut users: Vec<String> = Vec::new();
+        for c in store.list()? {
+            // A record points at the image either by id or by any of its tags —
+            // `run` stores whatever reference the user typed.
+            if c.image == img.id
+                || delonix_image::cas::strip(&c.image) == delonix_image::cas::strip(&img.id)
+                || img.repo_tags.contains(&c.image)
+            {
+                let alive = c.pid.map(delonix_runtime::is_alive).unwrap_or(false);
+                let state = if alive {
+                    super::po::t("running")
+                } else {
+                    super::po::t("stopped")
+                };
+                users.push(format!("{} ({state})", c.name));
+            }
+        }
+        if !users.is_empty() {
+            return Err(Error::Invalid(super::po::tf(
+ "image '{ref}' is in use by container(s): {list} — remove them first, or pass --force (the image can then no longer be used to recreate them)",
+                &[("ref", reference), ("list", &users.join(", "))],
+            )));
+        }
+    }
     let removed = images.remove(reference)?;
+    delonix_runtime_core::events::emit(
+        &super::util::state_root(),
+        "image",
+        "remove",
+        &removed,
+        reference,
+        if force { Some("force") } else { None },
+    );
     println!("{removed}");
     Ok(())
 }
