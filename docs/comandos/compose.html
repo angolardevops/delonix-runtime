@@ -129,6 +129,7 @@ Options:
       --l18n &lt;en|pt&gt;            Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
   -p, --project-name &lt;PROJECT&gt;  
       --dry-run                 Prints the resolved project (containers/networks/volumes) and exits without creating anything
+  -d, --detach                  Accepted for `docker compose` compatibility. Services already start detached here (this engine has no daemon holding them), so this is a no-op rather than an error — every existing script and CI job writes `up -d`, and rejecting it broke all of them for no behavioural gain
   -h, --help                    Print help</code></pre></div>
 <h3>Exemplos</h3><div class="ex"><div class="cap">Sobe tudo (build, rede, volumes, containers, por ordem de `depends_on`)</div><pre><code>delonix compose up</code></pre></div><div class="ex"><div class="cap">Ficheiro/projecto explícitos</div><pre><code>delonix compose up -f infra/docker-compose.yml -p minhaapp</code></pre></div><div class="ex"><div class="cap">Só valida e mostra o plano, sem criar nada</div><pre><code>delonix compose up --dry-run</code></pre></div>
 <h2 id='ps'><code>compose ps</code></h2>

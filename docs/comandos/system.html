@@ -112,8 +112,9 @@ Options:
 Usage: dlx system prune [OPTIONS]
 
 Options:
-  -a, --all           Also remove unused images that DO have a tag (not just the dangling ones)
+  -f, --force         Skip the confirmation prompt (REQUIRED when stdin is not a terminal)
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+  -a, --all           Also remove unused images that DO have a tag (not just the dangling ones)
   -h, --help          Print help</code></pre></div>
 <h3>Exemplos</h3><div class="ex"><div class="cap">Recuperar espaço (GC)</div><pre><code>delonix system prune</code></pre></div>
 <h2 id='df'><code>system df</code></h2>

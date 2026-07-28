@@ -369,8 +369,14 @@ tabela nft dentro do netns de infra</strong> (<code>infra::attach_container</cod
 do holder — nenhum dos dois pertence ao processo do container. <code>unpublish_ports</code>
 corre no <code>stop</code>/<code>rm</code> (<code>cmd/container.rs</code>), e <code>reap_orphan_hostfwds</code> reconcilia o
 slirp contra os containers vivos quando algo morreu sem limpar. O mesmo dataplane
-suporta <code>publish_port_allow</code> (allowlist de CIDRs à frente do DNAT), firewall por
-container (<code>fw_chain_body</code>), egress policy e rate-limit (<code>do_netrate</code>).</p>
+suporta firewall por container (<code>fw_chain_body</code>, despachada em O(1) pelo verdict map
+<code>fwmap</code> na chain <code>fwcont</code>), egress policy e rate-limit (<code>do_netrate</code>).</p>
+<p>Restringir uma porta publicada por CIDR de origem <strong>funciona</strong> (<code>net ingress allow &lt;c&gt;
+&lt;porta&gt; --from &lt;cidr&gt;</code>): o endereço do cliente sobrevive ao hostfwd para qualquer origem
+roteável. A excepção é o cliente no loopback do próprio host, que chega como o gateway
+do slirp (<code>delonix_net::SLIRP_GW</code>) porque a libslirp não tem rota de volta para
+<code>127.0.0.1</code> — testar uma regra dessas com <code>curl localhost</code> falha por essa razão, não
+por causa da regra.</p>
 <h3>(c) Pod CRI — sandbox e <code>join_netns</code></h3>
 <p>O CRI (<code>crates/delonix-cri/src/runtime_svc/lifecycle.rs</code>) guarda o estado
 CRI em JSON próprio e <strong>delega no binário <code>delonix</code></strong> as operações que usam <code>clone</code>
