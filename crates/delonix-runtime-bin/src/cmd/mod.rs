@@ -45,3 +45,4 @@ pub mod vm;
 pub mod vmbridge;
 pub mod vmimage;
 pub mod volume;
+pub mod workload;
