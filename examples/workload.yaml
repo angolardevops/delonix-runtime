@@ -31,3 +31,14 @@ spec:
     disk: delonix-vm-k8s:1.34
     vcpus: 2
     memory: 4G
+---
+apiVersion: delonix.io/v1
+kind: Workload
+metadata:
+  name: web-app
+spec:
+  type: pod                # lowers to kind: Pod (real multi-container pod)
+  pod:                     # == kind: Pod spec (examples/pod-multi.yaml)
+    containers:
+      - { name: web, image: nginx:latest }
+      - { name: sidecar, image: busybox:latest }

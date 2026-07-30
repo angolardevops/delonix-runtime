@@ -402,18 +402,19 @@ container}.rs`) tem um `spec` tipado próprio (`NetworkSpec`, `VolumeSpec`, ...)
 
 **`kind: Workload` (ADR-0001, `docs/adr/0001-workload-kind-schema.md`)** — o começo do
 Runtime Abstraction Layer: UM objecto declarativo para os dois tipos de computação.
-`spec.type: container|vm` + um bloco nomeado pelo tipo (`spec.container`/`spec.vm`) que é
-EXACTAMENTE a `ContainerSpec`/`VmSpec` do Kind autónomo (não redefine um único campo, logo não
-pode divergir). **Açúcar que baixa no `manifest::load`** — um `kind: Workload` é reescrito num
-`kind: Container`/`kind: Vm` sintético (herda `metadata`) e segue o apply por-Kind normal, tal
-como um filho de `kind: Stack`; o Workload não sobrevive ao load, por isso `apply`/`stack apply`/
-`--dry-run`/`ls`/`describe` e o `apply -f` por-Kind vêem o filho SEM wiring novo. `cmd/workload.rs`
-(`lower_workload`, puro/testado) + o ramo no `load()`. **Fail-closed**: `pod`/`microvm` são
-reservados (erro com hint dirigido — "usa kind: Pod"/"usa type: vm", nunca silêncio), tipo
-desconhecido/em falta ou bloco que não bate com o tipo → erro claro. Zero motor novo, zero daemon,
-zero dependência (tudo em `-bin`). Validado ao vivo (dry-run baixa Container+Vm; apply real cria o
-container; os 4 caminhos fail-closed em EN e PT). **Por fazer, documentado**: `type: pod`→`kind: Pod`
-e `type: microvm` (variante de backend do `vm`), cada um um ADR futuro. Ver `examples/workload.yaml`.
+`spec.type: container|vm|pod` + um bloco nomeado pelo tipo (`spec.container`/`spec.vm`/`spec.pod`)
+que é EXACTAMENTE a `ContainerSpec`/`VmSpec`/`PodSpec` do Kind autónomo (não redefine um único
+campo, logo não pode divergir). **Açúcar que baixa no `manifest::load`** — um `kind: Workload` é
+reescrito num `kind: Container`/`kind: Vm`/`kind: Pod` sintético (herda `metadata`) e segue o apply
+por-Kind normal, tal como um filho de `kind: Stack`; o Workload não sobrevive ao load, por isso
+`apply`/`stack apply`/`--dry-run`/`ls`/`describe` e o `apply -f` por-Kind vêem o filho SEM wiring
+novo. `cmd/workload.rs` (`lower_workload`, puro/testado) + o ramo no `load()`. **Fail-closed**: o
+tipo tem de trazer exactamente o seu bloco (os outros dois ausentes, senão erro de mismatch); tipo
+desconhecido/em falta → erro claro. **`microvm` continua reservado** (erro dirigido "usa type: vm")
+— distingui-lo de `vm` implica FORÇAR um backend (CH vs libvirt), uma opinião semântica que merece
+um ADR, não um alias silencioso. Zero motor novo, zero daemon, zero dependência (tudo em `-bin`).
+Validado ao vivo (dry-run + apply real de container/pod; caminhos fail-closed em EN e PT). Ver
+`examples/workload.yaml`.
 
 **`delonix workload {ls,describe,stop,rm}` (ADR-0002, Fase 2a, `docs/adr/0002-compute-driver-trait.md`)** —
 o lado IMPERATIVO/day-2 da unificação (a criação é declarativa, via `kind: Workload`). Um trait
