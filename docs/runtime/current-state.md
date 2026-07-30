@@ -85,9 +85,14 @@ and are wired, built in the **daemonless idiom** (file/registry, not a backgroun
 `delonix-cri` implements the full `runtime.v1` method set: pod sandbox lifecycle, container
 lifecycle, `exec`/`attach`/`port_forward`, `container_stats`/`pod_sandbox_stats`,
 `update_container_resources`, `get_container_events`, `list_metric_descriptors`, and
-`checkpoint_container`. **Note:** `checkpoint_container` is *declared* in the surface — its
-implementation depth (real CRIU checkpoint vs. `Unimplemented` stub) is **unverified** and
-must be confirmed before treating it as a "Recovery Engine" seed.
+`checkpoint_container`. **Verified (2026-07-30):** `checkpoint_container` is a **stub** —
+`todo("checkpoint_container")` → `Status::unimplemented` (`runtime_svc.rs:354`), and there is
+**zero CRIU** anywhere in the repo. So there is **no Recovery-Engine foundation** today. The only
+real building block is `set_frozen`/`is_frozen` (cgroup-freeze, `delonix-runtime/lib.rs:4498`, used
+by `pause`/`unpause`) — that is *freeze*, not *checkpoint* (no memory image, no restore-from-disk).
+Returning `Unimplemented` for this optional CRI method (forensic checkpointing, KEP-2008) is
+standard and acceptable; it just means checkpoint/restore is unbuilt, not merely unverified. See
+[ADR-0004](../adr/0004-container-checkpoint-restore.md) for the scoping decision.
 
 ## 6. Process & daemon model (the daemonless nuance)
 
