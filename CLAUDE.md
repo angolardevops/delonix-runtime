@@ -410,10 +410,14 @@ por-Kind normal, tal como um filho de `kind: Stack`; o Workload não sobrevive a
 `apply`/`stack apply`/`--dry-run`/`ls`/`describe` e o `apply -f` por-Kind vêem o filho SEM wiring
 novo. `cmd/workload.rs` (`lower_workload`, puro/testado) + o ramo no `load()`. **Fail-closed**: o
 tipo tem de trazer exactamente o seu bloco (os outros dois ausentes, senão erro de mismatch); tipo
-desconhecido/em falta → erro claro. **`microvm` continua reservado** (erro dirigido "usa type: vm")
-— distingui-lo de `vm` implica FORÇAR um backend (CH vs libvirt), uma opinião semântica que merece
-um ADR, não um alias silencioso. Zero motor novo, zero daemon, zero dependência (tudo em `-bin`).
-Validado ao vivo (dry-run + apply real de container/pod; caminhos fail-closed em EN e PT). Ver
+desconhecido/em falta → erro claro. **`type: microvm` (ADR-0006, `docs/adr/0006-workload-type-
+microvm.md`)** baixa para `kind: Vm` com o **backend forçado a `cloud-hypervisor`** (o VMM de
+microVM) — `spec.microvm` é uma `VmSpec`; um bloco que peça outro backend (ex.: `backend: libvirt`)
+é contradição e dá erro dirigido (`force_microvm_backend`, injecta/valida o backend no `Value` cru
+antes da desserialização). Precisa de CH instalado + imagem que arranque em CH (não o golden k8s,
+que é libvirt-only) — fail-closed no boot se faltar. Já não há tipos reservados. Zero motor novo,
+zero daemon, zero dependência (tudo em `-bin`). Validado ao vivo (dry-run + apply real de container/
+pod; microvm injecta o backend e recusa o conflito; caminhos fail-closed em EN e PT). Ver
 `examples/workload.yaml`.
 
 **`delonix workload {ls,describe,stop,rm}` (ADR-0002, Fase 2a, `docs/adr/0002-compute-driver-trait.md`)** —

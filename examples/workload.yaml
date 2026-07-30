@@ -42,3 +42,15 @@ spec:
     containers:
       - { name: web, image: nginx:latest }
       - { name: sidecar, image: busybox:latest }
+---
+apiVersion: delonix.io/v1
+kind: Workload
+metadata:
+  name: fast-vm
+spec:
+  type: microvm            # lowers to kind: Vm, forcing the microVM hypervisor
+  microvm:                 # == kind: Vm spec, but backend is forced to cloud-hypervisor
+    disk: ubuntu-24.04.qcow2   # needs a CH-bootable image (not the libvirt-only k8s golden)
+    vcpus: 2
+    memory: 2G
+    # backend: libvirt       # <- a contradiction: type: microvm rejects it (use type: vm)
