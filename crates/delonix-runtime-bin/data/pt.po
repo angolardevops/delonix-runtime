@@ -3469,3 +3469,12 @@ msgstr "workload '{name}': spec.type é obrigatório (container | vm | pod)"
 
 msgid "workload '{name}': unknown type '{type}' (supported: container, vm, pod)"
 msgstr "workload '{name}': type '{type}' desconhecido (suportados: container, vm, pod)"
+
+msgid "workload '{name}': spec.type is required (container | vm | pod | microvm)"
+msgstr "workload '{name}': spec.type é obrigatório (container | vm | pod | microvm)"
+
+msgid "workload '{name}': unknown type '{type}' (supported: container, vm, pod, microvm)"
+msgstr "workload '{name}': type '{type}' desconhecido (suportados: container, vm, pod, microvm)"
+
+msgid "workload '{name}': type: microvm forces the cloud-hypervisor backend — remove 'backend: {backend}' (or use type: vm)"
+msgstr "workload '{name}': type: microvm força o backend cloud-hypervisor — remove 'backend: {backend}' (ou usa type: vm)"
