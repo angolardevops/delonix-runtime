@@ -415,13 +415,13 @@ zero dependência (tudo em `-bin`). Validado ao vivo (dry-run baixa Container+Vm
 container; os 4 caminhos fail-closed em EN e PT). **Por fazer, documentado**: `type: pod`→`kind: Pod`
 e `type: microvm` (variante de backend do `vm`), cada um um ADR futuro. Ver `examples/workload.yaml`.
 
-**`delonix workload {ls,stop,rm}` (ADR-0002, Fase 2a, `docs/adr/0002-compute-driver-trait.md`)** —
+**`delonix workload {ls,describe,stop,rm}` (ADR-0002, Fase 2a, `docs/adr/0002-compute-driver-trait.md`)** —
 o lado IMPERATIVO/day-2 da unificação (a criação é declarativa, via `kind: Workload`). Um trait
-`ComputeDriver { list, owns, stop, remove }` (`cmd/workload.rs`) com adaptadores `ContainerDriver`/
+`ComputeDriver { list, owns, stop, remove, describe }` (`cmd/workload.rs`) com adaptadores `ContainerDriver`/
 `VmDriver` que delegam em `cmd::{container,vm}::workload_*` — wrappers finos sobre a lógica de
-list/stop/rm JÁ testada dos motores (zero duplicação, zero crate de motor tocado). `workload ls`
-mostra containers E VMs numa só tabela (TYPE/NAME/STATUS/INFO); `stop`/`rm` fazem routing por nome
-EXACTO, **fail-closed**: zero donos → `no such workload`; um container E uma vm com o mesmo nome →
+list/describe/stop/rm JÁ testada dos motores (zero duplicação, zero crate de motor tocado). `workload
+ls` mostra containers E VMs numa só tabela (TYPE/NAME/STATUS/INFO); `describe`/`stop`/`rm` fazem
+routing por nome EXACTO, **fail-closed**: zero donos → `no such workload`; um container E uma vm com o mesmo nome →
 `ambiguous` (aponta para o comando específico, nunca adivinha). `owner()` é puro sobre a lista de
 drivers, testado com drivers falsos. O trait foi feito com um consumidor real de propósito (não
 scaffolding morto — o anti-padrão "código à espera do 1.º caller" do `revisor`): cada método tem

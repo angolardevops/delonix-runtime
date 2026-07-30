@@ -2568,6 +2568,11 @@ pub(crate) fn workload_remove(name: &str, force: bool) -> Result<()> {
     cmd_rm(&images, &store, name, force)
 }
 
+pub(crate) fn workload_describe(name: &str) -> Result<()> {
+    let (_images, store) = super::util::open_stores()?;
+    cmd_describe(&store, &[name.to_string()])
+}
+
 /// Reconciles `c`'s status and, if it just flipped to `Crashed` in THIS call, records a
 /// best-effort forensic snapshot (see [`record_crash_forensics`]). Same idiom as the
 /// repeated `if reconcile_status(c) { store.update(...) }` seen throughout this file —
