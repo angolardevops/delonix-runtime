@@ -56,14 +56,12 @@ the flag is unused — zero change for existing users.
 `WorkloadRow` derives `Serialize` (its fields are already the stable names). The `OutputFormat`
 enum + the emit helper land in `output.rs` so the remaining commands adopt them mechanically.
 
-**Rollout status:**
-- **Done:** `workload ls`, `container ps`, `vm ls`, `pod ls`, `network ls`, `volumes ls`,
-  `secret ls` (key names only — never values), `storage ls`, `sharevolume ls`.
-- **Remaining:** `image ls` only. Its `ImageCmd::Ls` is **dual-purpose** — it also serves
-  `image --vm ls` (mapped to `VmImageCmd::Ls`). Adding `-o json` there must cover the vm-image
-  path too, otherwise `image --vm ls -o json` would silently ignore the flag (violating the
-  no-silent-failure guardrail). Deferred to a dedicated slice that touches both `cmd::image` and
-  `cmd::vmimage` together — tracked, not a silent gap.
+**Rollout status: COMPLETE (10/10 listing commands).**
+`workload ls`, `container ps`, `vm ls`, `pod ls`, `network ls`, `volumes ls`,
+`secret ls` (key names only — never values), `storage ls`, `sharevolume ls`, and `image ls`
+(all three entry points — `image ls`, `image --vm ls`, `image vm ls` — the dual-purpose `Ls`
+threads `output` through to `VmImageCmd::Ls`, so the `--vm` path does NOT silently ignore the
+flag). Every one emits a stable, language-independent JSON array; the default `table` is unchanged.
 
 ## Alternatives considered
 

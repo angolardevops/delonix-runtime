@@ -92,7 +92,12 @@ pub enum ImageCmd {
         no_k8s: bool,
     },
     /// List local images.
-    Ls,
+    Ls {
+        /// Output format: `table` (default) or `json` (ADR-0005). Works for both
+        /// `image ls` and `image --vm ls`.
+        #[arg(short = 'o', long = "output", value_enum, default_value_t)]
+        output: super::output::OutputFormat,
+    },
     /// Human-readable detail of one or more images, `kubectl describe`-style
     /// (tags/digest/size/layers + the OCI config: entrypoint/cmd/env/workdir).
     /// With `--vm`, describes golden VM images.
@@ -245,7 +250,11 @@ pub enum ImageCmd {
 #[derive(Subcommand)]
 pub enum VmSub {
     /// List the local VM images.
-    Ls,
+    Ls {
+        /// Output format: `table` (default) or `json` (ADR-0005).
+        #[arg(short = 'o', long = "output", value_enum, default_value_t)]
+        output: super::output::OutputFormat,
+    },
     /// Human-readable detail of one or more VM images, `kubectl describe`-style.
     Describe {
         #[arg(required = true)]
@@ -344,7 +353,7 @@ pub fn run(vm: bool, action: ImageCmd) -> Result<()> {
     if let ImageCmd::Vm { action } = action {
         use super::vmimage::{self, VmImageCmd};
         return vmimage::run(match action {
-            VmSub::Ls => VmImageCmd::Ls,
+            VmSub::Ls { output } => VmImageCmd::Ls { output },
             VmSub::Describe { names } => VmImageCmd::Describe { names },
             VmSub::Pull {
                 source,
@@ -415,7 +424,7 @@ pub fn run(vm: bool, action: ImageCmd) -> Result<()> {
             )
             .into(),
         )),
-        ImageCmd::Ls => cmd_ls(&images),
+        ImageCmd::Ls { output } => cmd_ls(&images, output),
         ImageCmd::Describe { names } => cmd_describe(&images, &names),
         ImageCmd::Tag { source, target } => cmd_tag(&images, &source, &target),
         ImageCmd::History { image } => cmd_history(&images, &image),
@@ -494,7 +503,7 @@ fn run_vm(action: ImageCmd) -> Result<()> {
     use super::vmimage::{self, VmImageCmd};
     let mapped = match action {
         ImageCmd::Dash { .. } => unreachable!("tratado no topo de run"),
-        ImageCmd::Ls => VmImageCmd::Ls,
+        ImageCmd::Ls { output } => VmImageCmd::Ls { output },
         ImageCmd::Describe { names } => VmImageCmd::Describe { names },
         // BUG FIXED HERE, found live on a real host: `delonix image --vm
         // pull` (no argument) should default to the official golden image,
@@ -769,10 +778,33 @@ pub(crate) fn image_size(images: &ImageStore, img: &delonix_image::Image) -> Opt
     seen_any.then_some(total)
 }
 
-fn cmd_ls(images: &ImageStore) -> Result<()> {
+/// `image ls -o json` row (ADR-0005): all tags (not just the first), full id,
+/// numeric `created_unix`/`size_bytes` (`size_bytes` null when unmeasurable).
+#[derive(serde::Serialize)]
+struct ImageLsRow {
+    repo_tags: Vec<String>,
+    id: String,
+    created_unix: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    size_bytes: Option<u64>,
+}
+
+fn cmd_ls(images: &ImageStore, format: super::output::OutputFormat) -> Result<()> {
     let mut imgs = images.list()?;
     // Newest first, as in `docker images`.
     imgs.sort_by_key(|i| std::cmp::Reverse(i.created_unix));
+    if format == super::output::OutputFormat::Json {
+        let rows: Vec<ImageLsRow> = imgs
+            .iter()
+            .map(|img| ImageLsRow {
+                repo_tags: img.repo_tags.clone(),
+                id: img.id.clone(),
+                created_unix: img.created_unix,
+                size_bytes: image_size(images, img),
+            })
+            .collect();
+        return super::output::print_json(&rows);
+    }
     let mut t = super::output::Table::new(&["REPOSITORY:TAG", "IMAGE ID", "CREATED", "SIZE"])
         .right_align(3);
     for img in imgs {
