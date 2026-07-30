@@ -48,6 +48,31 @@ cargo clippy --workspace --all-targets     # zero warnings, SEMPRE
 cargo test -p <crate-tocada> -p delonix-runtime-bin
 ```
 
+## Robustez (fuzz), bench e cobertura — a infra e porque é esta
+
+O repo fixa-se a **stable Rust** e é dep-restrito. Isso decide as ferramentas:
+
+- **Fuzz → `proptest`, não `cargo-fuzz`.** `cargo-fuzz` exige nightly + libfuzzer —
+  fora das restrições do repo. `proptest` (já na árvore) atira input arbitrário/
+  estruturado aos parsers puros e prova que **nunca entram em pânico** (a mesma classe
+  de bug que o fuzzing apanha), em stable. Exemplo: `delonix-image::registry::
+  parse_reference` (parseia refs não-confiáveis, já teve bugs reais) tem um teste
+  `*_never_panics_on_arbitrary_input` (`".*"`) + um `*_digest_wins_over_tag` sobre refs
+  estruturadas. Padrão: **fuzz e bench o MESMO alvo** (o parser), para partilharem
+  ground truth. `proptest` entra como **dev-dependency** (nunca no release tree).
+- **Bench → `criterion` (dev-dependency, stable).** `[[bench]] harness=false` +
+  `benches/<x>.rs`. Corre com `cargo bench -p <crate>` ou `make bench`. Pré-abençoado
+  em `dependency-map.md §4` (dev-deps não contam para `cargo tree -e normal`). Exemplo:
+  `delonix-image/benches/parse_reference.rs` (~70-82 ns/parse, medido). Escolhe uma
+  função **pura e quente**; benchar setup impuro (rede/disco) mede o SO, não o código.
+- **Cobertura → `cargo-llvm-cov`** (source-based, stable) via `./scripts/coverage.sh`
+  (`--html`/`--lcov`) ou `make coverage`. O script **não instala nada à força**: se
+  faltar, diz como o obter e sai (fail-closed). Precisa do `PROTOC` como os testes.
+
+Regra de ouro destas três: **dev-only sempre** — nada disto pode aparecer em
+`cargo tree -e normal` de um crate de motor (a mesma fronteira que confina `ratatui`/
+`hyper` ao `-bin`). Ver o agente `performance-engineer` para o método de bench.
+
 ## Validação-ao-vivo — o que o `cargo test` não pode provar
 
 Fronteiras de privilégio (rootless, userns, cgroup delegado, netns do holder,
