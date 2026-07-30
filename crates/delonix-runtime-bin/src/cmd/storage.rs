@@ -18,6 +18,16 @@ use super::manifest::{self, ManifestDoc};
 use super::output;
 use super::util::state_root;
 
+/// `storage ls -o json` row (ADR-0005). `r#type` serializes as the JSON key `type`.
+#[derive(serde::Serialize)]
+struct StorageLsRow {
+    name: String,
+    r#type: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    device: Option<String>,
+    mountpoint: String,
+}
+
 #[derive(Subcommand)]
 pub enum StorageCmd {
     /// Storage/volumes dashboard (KPIs + table) — TUI, or `--once` snapshot.
@@ -57,7 +67,11 @@ pub enum StorageCmd {
         options: Option<String>,
     },
     /// List the network storages (volumes with a network driver).
-    Ls,
+    Ls {
+        /// Output format: `table` (default) or `json` (ADR-0005).
+        #[arg(short = 'o', long = "output", value_enum, default_value_t)]
+        output: output::OutputFormat,
+    },
     /// Details of a storage.
     Inspect {
         #[arg(add = clap_complete::engine::ArgValueCandidates::new(super::complete::volumes))]
@@ -388,17 +402,32 @@ pub fn run(action: StorageCmd) -> Result<()> {
                 )
             );
         }
-        StorageCmd::Ls => {
+        StorageCmd::Ls { output } => {
+            let nets: Vec<_> = store
+                .list()?
+                .into_iter()
+                .filter(|v| delonix_volume::is_network_driver(&v.driver))
+                .collect();
+            if output == crate::cmd::output::OutputFormat::Json {
+                let rows: Vec<StorageLsRow> = nets
+                    .into_iter()
+                    .map(|v| StorageLsRow {
+                        name: v.name,
+                        r#type: v.driver,
+                        device: v.device,
+                        mountpoint: v.mountpoint,
+                    })
+                    .collect();
+                return crate::cmd::output::print_json(&rows);
+            }
             let mut t = output::Table::new(&["NAME", "TYPE", "DEVICE", "MOUNTPOINT"]);
-            for v in store.list()? {
-                if delonix_volume::is_network_driver(&v.driver) {
-                    t.row(vec![
-                        v.name,
-                        v.driver,
-                        v.device.unwrap_or_default(),
-                        v.mountpoint,
-                    ]);
-                }
+            for v in nets {
+                t.row(vec![
+                    v.name,
+                    v.driver,
+                    v.device.unwrap_or_default(),
+                    v.mountpoint,
+                ]);
             }
             t.print();
         }

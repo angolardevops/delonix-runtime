@@ -954,6 +954,10 @@ pub enum ContainerCmd {
         /// Print only the IDs (to compose with `stop`/`rm`).
         #[arg(short, long)]
         quiet: bool,
+        /// Output format: `table` (default) or `json` (ADR-0005). `json` honors
+        /// `--all` (same filter as the table) and ignores `--quiet`.
+        #[arg(short = 'o', long = "output", value_enum, default_value_t)]
+        output: super::output::OutputFormat,
     },
     /// (Re)start stopped/crashed containers, reusing the persistent rootfs
     /// (writes made inside the container survive, like in docker) and the same
@@ -1341,7 +1345,7 @@ pub fn run(action: ContainerCmd) -> Result<()> {
                 log_cri,
             },
         ),
-        ContainerCmd::Ps { all, quiet } => cmd_ps(&store, all, quiet),
+        ContainerCmd::Ps { all, quiet, output } => cmd_ps(&store, all, quiet, output),
         ContainerCmd::Start { ids } => for_each_id(&ids, |id| cmd_start(&images, &store, id)),
         ContainerCmd::Stop { ids, time } => for_each_id(&ids, |id| cmd_stop(&store, id, time)),
         ContainerCmd::Kill { ids, signal } => for_each_id(&ids, |id| cmd_kill(&store, id, &signal)),
@@ -2751,10 +2755,65 @@ fn fmt_ports(ports: &[String]) -> String {
         .join(", ")
 }
 
-fn cmd_ps(store: &Store, all: bool, quiet: bool) -> Result<()> {
+/// `container ps -o json` row (ADR-0005): stable keys mirroring the columns, with
+/// machine-friendly values (full `id`, `created_unix` as a number, raw command/image).
+#[derive(serde::Serialize)]
+struct ContainerLsRow {
+    id: String,
+    image: String,
+    command: String,
+    created_unix: u64,
+    status: String,
+    ports: String,
+    name: String,
+}
+
+fn cmd_ps(
+    store: &Store,
+    all: bool,
+    quiet: bool,
+    format: super::output::OutputFormat,
+) -> Result<()> {
     let mut cs = store.list()?;
     // Stable, useful order: most recent first, like `docker ps`.
     cs.sort_by_key(|c| std::cmp::Reverse(c.created_unix));
+    // Reconcile + apply the `--all` filter once, then render in the chosen format.
+    // `update` (flock) and not `save`: the CRI is concurrent and may be
+    // reconciling the same container right now — see `Store::update`.
+    let mut included: Vec<Container> = Vec::new();
+    for mut c in cs {
+        reconcile_with_diagnostics(store, &mut c);
+        let hidden = matches!(c.status, Status::Failed(_) | Status::Crashed);
+        if !all && hidden {
+            continue;
+        }
+        included.push(c);
+    }
+    let uptime_of = |c: &Container| match c.status {
+        Status::Running | Status::Paused => c.pid_starttime.and_then(output::uptime_from_starttime),
+        _ => None,
+    };
+    if format == super::output::OutputFormat::Json {
+        let rows: Vec<ContainerLsRow> = included
+            .iter()
+            .map(|c| ContainerLsRow {
+                id: c.id.clone(),
+                image: output::display_ref(&c.image),
+                command: c.command.join(" "),
+                created_unix: c.created_unix,
+                status: fmt_status_of(c, uptime_of(c)),
+                ports: fmt_ports(&c.ports),
+                name: c.name.clone(),
+            })
+            .collect();
+        return output::print_json(&rows);
+    }
+    if quiet {
+        for c in &included {
+            println!("{}", short_id(&c.id));
+        }
+        return Ok(());
+    }
     let mut t = output::Table::new(&[
         "CONTAINER ID",
         "IMAGE",
@@ -2764,24 +2823,7 @@ fn cmd_ps(store: &Store, all: bool, quiet: bool) -> Result<()> {
         "PORTS",
         "NAMES",
     ]);
-    for c in cs.iter_mut() {
-        // `update` (flock) and not `save`: the CRI is concurrent and may be
-        // reconciling the same container right now — see `Store::update`.
-        reconcile_with_diagnostics(store, c);
-        let hidden = matches!(c.status, Status::Failed(_) | Status::Crashed);
-        if !all && hidden {
-            continue;
-        }
-        if quiet {
-            println!("{}", short_id(&c.id));
-            continue;
-        }
-        let uptime = match c.status {
-            Status::Running | Status::Paused => {
-                c.pid_starttime.and_then(output::uptime_from_starttime)
-            }
-            _ => None,
-        };
+    for c in &included {
         t.row(vec![
             short_id(&c.id).to_string(),
             // `display_ref` strips the `@sha256:…` when there's a tag: a
@@ -2790,14 +2832,12 @@ fn cmd_ps(store: &Store, all: bool, quiet: bool) -> Result<()> {
             output::truncate(&output::display_ref(&c.image), 30),
             output::truncate(&format!("\"{}\"", c.command.join(" ")), 22),
             output::fmt_age(c.created_unix),
-            fmt_status_of(c, uptime),
+            fmt_status_of(c, uptime_of(c)),
             output::truncate(&fmt_ports(&c.ports), 28),
             c.name.clone(),
         ]);
     }
-    if !quiet {
-        t.print();
-    }
+    t.print();
     Ok(())
 }
 
