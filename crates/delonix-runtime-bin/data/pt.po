@@ -3463,3 +3463,9 @@ msgstr "workload inexistente: {name}"
 
 msgid "workload '{name}' is ambiguous (both a container and a vm) — use `delonix container` or `delonix vm` directly"
 msgstr "workload '{name}' é ambíguo (existe como container E como vm) — usa `delonix container` ou `delonix vm` directamente"
+
+msgid "workload '{name}': spec.type is required (container | vm | pod)"
+msgstr "workload '{name}': spec.type é obrigatório (container | vm | pod)"
+
+msgid "workload '{name}': unknown type '{type}' (supported: container, vm, pod)"
+msgstr "workload '{name}': type '{type}' desconhecido (suportados: container, vm, pod)"

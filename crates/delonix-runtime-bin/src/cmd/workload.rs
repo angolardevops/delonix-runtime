@@ -2,15 +2,17 @@
 //! (`Container`/`Vm`). See `docs/adr/0001-workload-kind-schema.md`.
 //!
 //! A `Workload` is sugar: it does NOT survive [`super::manifest::load`]. It is
-//! rewritten into a synthetic `kind: Container`/`kind: Vm` doc (inheriting the
-//! Workload's `metadata`) that then flows through the normal per-Kind apply —
-//! exactly like a `kind: Stack` child. Nothing downstream (`apply`, per-Kind
-//! `apply -f`, `stack apply`, `--dry-run`, `ls`, `describe`) needs new wiring.
+//! rewritten into a synthetic `kind: Container`/`kind: Vm`/`kind: Pod` doc
+//! (inheriting the Workload's `metadata`) that then flows through the normal
+//! per-Kind apply — exactly like a `kind: Stack` child. Nothing downstream
+//! (`apply`, per-Kind `apply -f`, `stack apply`, `--dry-run`, `ls`, `describe`)
+//! needs new wiring.
 //!
 //! The block that carries the underlying spec is named after the type
-//! (`spec.container` / `spec.vm`) and is deserialized by the SAME typed structs
-//! the standalone Kinds use (`ContainerSpec`/`VmSpec`) — the Workload spec cannot
-//! drift from the spec it wraps, because it does not redefine a single field.
+//! (`spec.container` / `spec.vm` / `spec.pod`) and is deserialized by the SAME
+//! typed structs the standalone Kinds use (`ContainerSpec`/`VmSpec`/`PodSpec`) —
+//! the Workload spec cannot drift from the spec it wraps, because it does not
+//! redefine a single field. (`microvm` stays reserved — see `lower_workload`.)
 
 use clap::Subcommand;
 use delonix_runtime_core::{Error, Result};
@@ -19,7 +21,7 @@ use serde::Deserialize;
 use super::manifest::ManifestDoc;
 
 /// Top-level `spec` keys a `kind: Workload` accepts (drives the unknown-field warning).
-pub const WORKLOAD_SPEC_FIELDS: &[&str] = &["type", "container", "vm"];
+pub const WORKLOAD_SPEC_FIELDS: &[&str] = &["type", "container", "vm", "pod"];
 
 /// The `spec` of a `kind: Workload`: a `type` discriminator plus the single
 /// type-named block that holds the underlying spec, kept raw until the target
@@ -32,6 +34,8 @@ struct WorkloadSpec {
     container: Option<serde_yaml::Value>,
     #[serde(default)]
     vm: Option<serde_yaml::Value>,
+    #[serde(default)]
+    pod: Option<serde_yaml::Value>,
 }
 
 /// Lowers a `kind: Workload` doc into its underlying `kind: Container`/`kind: Vm`
@@ -49,32 +53,44 @@ pub fn lower_workload(doc: &ManifestDoc) -> Result<ManifestDoc> {
             if spec.vm.is_some() {
                 return Err(mismatch(&name, "container", "vm"));
             }
+            if spec.pod.is_some() {
+                return Err(mismatch(&name, "container", "pod"));
+            }
             (
                 "Container",
-                spec.container.ok_or_else(|| missing_block(&name, "container"))?,
+                spec.container
+                    .ok_or_else(|| missing_block(&name, "container"))?,
             )
         }
         "vm" => {
             if spec.container.is_some() {
                 return Err(mismatch(&name, "vm", "container"));
             }
+            if spec.pod.is_some() {
+                return Err(mismatch(&name, "vm", "pod"));
+            }
             ("Vm", spec.vm.ok_or_else(|| missing_block(&name, "vm"))?)
+        }
+        "pod" => {
+            if spec.container.is_some() {
+                return Err(mismatch(&name, "pod", "container"));
+            }
+            if spec.vm.is_some() {
+                return Err(mismatch(&name, "pod", "vm"));
+            }
+            // Lowers to `kind: Pod` (a real multi-container pod) — the block is the
+            // same `PodSpec` (`spec.containers[]`) the standalone Kind takes.
+            ("Pod", spec.pod.ok_or_else(|| missing_block(&name, "pod"))?)
         }
         "" => {
             return Err(Error::Invalid(super::po::tf(
-                "workload '{name}': spec.type is required (container | vm)",
+                "workload '{name}': spec.type is required (container | vm | pod)",
                 &[("name", &name)],
             )))
         }
-        // Reserved: recognized by name so the error is targeted ("use kind: Pod")
-        // instead of a generic "unknown type". Each is a future ADR, never a
-        // silent acceptance.
-        "pod" => {
-            return Err(Error::Invalid(super::po::tf(
-                "workload '{name}': type: pod not yet supported — use kind: Pod for multi-container pods",
-                &[("name", &name)],
-            )))
-        }
+        // Reserved: recognized by name so the error is targeted instead of a
+        // generic "unknown type". `microvm` needs a design decision (which
+        // hypervisor backend it forces) — a future ADR, never a silent alias.
         "microvm" => {
             return Err(Error::Invalid(super::po::tf(
                 "workload '{name}': type: microvm not yet supported — use type: vm",
@@ -83,7 +99,7 @@ pub fn lower_workload(doc: &ManifestDoc) -> Result<ManifestDoc> {
         }
         other => {
             return Err(Error::Invalid(super::po::tf(
-                "workload '{name}': unknown type '{type}' (supported: container, vm)",
+                "workload '{name}': unknown type '{type}' (supported: container, vm, pod)",
                 &[("name", &name), ("type", other)],
             )))
         }
@@ -348,15 +364,28 @@ mod tests {
     }
 
     #[test]
-    fn reserved_types_fail_closed_with_targeted_hint() {
-        let pod = lower_workload(&wl("type: pod\ncontainer: { image: x }"))
-            .unwrap_err()
-            .to_string();
-        assert!(pod.contains("use kind: Pod"), "{pod}");
+    fn lowers_pod() {
+        let child = lower_workload(&wl(
+            "type: pod\npod: { containers: [ { name: web, image: nginx } ] }",
+        ))
+        .unwrap();
+        assert_eq!(child.kind, "Pod");
+        assert_eq!(child.metadata.name, "app");
+        assert!(child.spec.get("containers").is_some());
+    }
+
+    #[test]
+    fn microvm_still_reserved_pod_now_supported() {
+        // `microvm` remains reserved (needs a backend-semantics decision).
         let mv = lower_workload(&wl("type: microvm\nvm: { disk: x }"))
             .unwrap_err()
             .to_string();
         assert!(mv.contains("use type: vm"), "{mv}");
+        // `type: pod` with the WRONG block is a mismatch, not "reserved".
+        let e = lower_workload(&wl("type: pod\ncontainer: { image: x }"))
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains("must not carry a 'container:' block"), "{e}");
     }
 
     #[test]
