@@ -142,6 +142,8 @@ pub trait ComputeDriver {
     fn stop(&self, name: &str) -> Result<()>;
     /// Remove it (delegates to the engine's own rm, unchanged).
     fn remove(&self, name: &str, force: bool) -> Result<()>;
+    /// Print its full description (delegates to the engine's own `describe`).
+    fn describe(&self, name: &str) -> Result<()>;
 }
 
 struct ContainerDriver;
@@ -160,6 +162,9 @@ impl ComputeDriver for ContainerDriver {
     fn remove(&self, name: &str, force: bool) -> Result<()> {
         super::container::workload_remove(name, force)
     }
+    fn describe(&self, name: &str) -> Result<()> {
+        super::container::workload_describe(name)
+    }
 }
 
 impl ComputeDriver for VmDriver {
@@ -174,6 +179,9 @@ impl ComputeDriver for VmDriver {
     }
     fn remove(&self, name: &str, force: bool) -> Result<()> {
         super::vm::workload_remove(name, force)
+    }
+    fn describe(&self, name: &str) -> Result<()> {
+        super::vm::workload_describe(name)
     }
 }
 
@@ -210,6 +218,11 @@ fn owner<'a>(ds: &'a [Box<dyn ComputeDriver>], name: &str) -> Result<&'a dyn Com
 pub enum WorkloadCmd {
     /// List all workloads — containers AND VMs — in one table.
     Ls,
+    /// Describe a workload by name (routed to the owning backend, kubectl-style).
+    Describe {
+        /// Workload name.
+        name: String,
+    },
     /// Stop a workload by name (routed to the owning backend).
     Stop {
         /// Workload name.
@@ -228,6 +241,7 @@ pub enum WorkloadCmd {
 pub fn run(action: WorkloadCmd) -> Result<()> {
     match action {
         WorkloadCmd::Ls => ls(),
+        WorkloadCmd::Describe { name } => owner(&drivers(), &name)?.describe(&name),
         // The adapters delegate to each engine's own stop/rm, which already emit
         // the success line (container → id, vm → name) — mirroring what the
         // native `container stop`/`vm stop` print. No extra println here, so the
@@ -369,6 +383,9 @@ mod tests {
             Ok(())
         }
         fn remove(&self, _: &str, _: bool) -> Result<()> {
+            Ok(())
+        }
+        fn describe(&self, _: &str) -> Result<()> {
             Ok(())
         }
     }
