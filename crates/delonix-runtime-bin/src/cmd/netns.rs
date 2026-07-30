@@ -72,6 +72,30 @@ pub fn run(action: NetnsCmd) -> Result<()> {
                 return Ok(());
             }
             infra::ensure_up()?;
+            // `up` asserts the DESIRED state of the infra, and "no container holds an
+            // IPv6 address" is now part of that state. It matters here and not only at
+            // attach time because of the in-place upgrade: the new binary lands while
+            // the old holder and every container it serves keep running, and those
+            // containers keep the unfiltered v6 addresses they were given. This engine
+            // reconfigures live containers without restarting them — a firewall fix is
+            // no reason to make an exception. Idempotent, so re-running costs nothing.
+            match infra::disable_ipv6_live() {
+                Ok(0) => {}
+                Ok(n) => println!(
+                    "{}",
+                    super::po::tf(
+                        "IPv6 refused on {n} running container netns (no restart needed)",
+                        &[("n", &n.to_string())],
+                    )
+                ),
+                Err(e) => eprintln!(
+                    "{}",
+                    super::po::tf(
+                        "warning: could not refuse IPv6 on the running containers: {e}",
+                        &[("e", &e.to_string())],
+                    )
+                ),
+            }
             let st = infra::status();
             println!(
                 "ingress UP — holder pid {} · slirp pid {} · bridge {} ({})",
