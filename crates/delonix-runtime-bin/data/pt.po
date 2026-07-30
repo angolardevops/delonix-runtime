@@ -422,6 +422,12 @@ msgstr "não consegui ler a chave SSH de"
 msgid "port {hp} is already published by container '{owner}'\n\nfix it with ONE of these:\n  delonix container stop {owner}    # stops whoever holds port {hp}\n  delonix container run -p {alt}:{cp} ...    # or publish on another port\n  delonix container update {owner} --publish-rm {hp}    # or hot-unpublish it"
 msgstr "a porta {hp} já está publicada pelo container '{owner}'\n\nresolve com UMA destas opções:\n  delonix container stop {owner}    # pára quem segura a porta {hp}\n  delonix container run -p {alt}:{cp} ...    # ou publica noutra porta\n  delonix container update {owner} --publish-rm {hp}    # ou despublica-a a quente"
 
+msgid "IPv6 refused on {n} running container netns (no restart needed)"
+msgstr "IPv6 recusado em {n} netns de containers a correr (sem precisar de reiniciar)"
+
+msgid "warning: could not refuse IPv6 on the running containers: {e}"
+msgstr "aviso: não consegui recusar IPv6 nos containers a correr: {e}"
+
 msgid "invalid CIDR '{src}' — IPv6 is not supported (the SDN and the firewall are IPv4 only)"
 msgstr "CIDR inválido '{src}' — IPv6 não é suportado (a SDN e a firewall são só IPv4)"
 
