@@ -1853,6 +1853,59 @@ respostas à mesma pergunta começam a divergir.
 regra; o isolamento não é reconstruído num respawn do holder; pods (CRI) e VMs ainda fora do
 isolamento de namespace.
 
+### Bloco 0 do plano 33 (v0.37.1) — o caminho IPv6 não filtrado
+
+Discovery da Fase 0 em `docs/discovery/33_GAPS_ENCONTRADOS.md`; notas em
+`docs/releases/v0.37.1.md`. Este bloco existe porque o discovery encontrou um contorno
+COMPLETO do modelo de política, e nenhum outro trabalho fazia sentido antes de o fechar.
+
+**A SDN atribuía IPv6 ULA a cada container (`fd00:<o2>::<o3>:<o4>`, derivado do IPv4) e
+a firewall inteira é `table ip`.** Segundo caminho de dados, zero política. Reproduzido
+ao vivo: com a firewall a NEGAR em IPv4, o mesmo alvo respondeu 200 na porta 80 pela
+ULA. Contornava `ingress`/`egress`, `policy deny`, isolamento de namespace,
+`kind: Dependency` e o guarda L4 — todos `table ip`. Sem privilégio, e descobrível com
+um `ping -6 ff02::1%eth0` (enumera todos os vizinhos da bridge numa passagem).
+
+**Corrigido com DUAS camadas independentes, de propósito**: (1) `disable_ipv6` dentro do
+netns do container no `attach` — tira a ULA *e* o link-local, sem depender de nada do
+host; (2) `table ip6 dlxing` com `forward policy drop` no holder — apanha um container
+PRIVILEGIADO que remonte `/proc/sys` rw e volte a ligar o v6. A camada 2 depende de
+`bridge-nf-call-ip6tables`, que um host pode não ter — é por isso que é a segunda e não
+a única. Nada se perdeu: não há uplink v6 (o slirp corre sem `--enable-ipv6`) e o
+resolvedor interno só responde registos A.
+
+**RF-NET-02**: chain `fwguard` a `forward priority -20` (antes do `fwdeny` -10, do
+`fwcont` -5 e da política 0) com `169.254.0.0/16` e `127.0.0.0/8` negados
+incondicionalmente. O contador da regra provou-o ao vivo (`packets 4 bytes 240`). O
+loopback do host já estava fechado pelo `--disable-host-loopback` do slirp; a regra
+existe porque isso é uma flag à distância de uma regressão.
+
+**Escapatórias ruidosas** (mesma forma do `DELONIX_FORWARD_POLICY=accept`):
+`DELONIX_ENABLE_IPV6=1` e `DELONIX_ALLOW_LINK_LOCAL=1`, ambas validadas ao vivo.
+
+**Armadilha apanhada a escrever o teste, vale reter**: a primeira versão do teste de
+ordenação comparava a POSIÇÃO TEXTUAL das chains no ruleset, e depois os VALORES de
+prioridade de todas elas — as duas erradas. Prioridade em nftables só ordena chains do
+MESMO hook; comparar `-20` com o `-100` da chain de `nat prerouting` não quer dizer
+nada. O teste só passou a valer alguma coisa quando restringiu a comparação a
+`hook forward`.
+
+**Endurecimento a QUENTE dos containers já a correr** (`infra::disable_ipv6_live`,
+chamado pelo `net netns up`): a recusa entra no `attach`, o que só cobre containers
+novos. Mandar reiniciar os outros seria a resposta errada NESTE motor — o dataplane não
+pertence ao ciclo de vida do processo, e é essa a diferença de fundo para o docker
+(`container update` já troca portas, volumes e redes com o PID inalterado). A varredura
+entra nos netns vivos e desliga-lhes o v6 no lugar. Validado ao vivo contra containers
+criados ANTES da correcção, com o bypass aberto: PID igual (`771209` antes e depois),
+uptime a contar, v6 a zero, bypass fechado, IPv4 intacto.
+
+**Porque é `nsenter` e não um verbo do socket de controlo** (a primeira forma tentada):
+o caso que isto existe para resolver é o upgrade in-place, em que o binário novo é
+instalado e o holder ANTIGO continua a correr com todos os containers agarrados a ele
+(ver `stale_holder_message`). Um holder antigo não conhece um verbo acrescentado hoje —
+o comando de controlo falharia exactamente no cenário que importa. Entrar-lhe nos
+namespaces a partir do host funciona com qualquer binário de holder.
+
 ### `tunnel expose --provider pinggy` sem URL (v0.16.1)
 
 Bug report real (host kaeso-sys-01): `delonix net tunnel expose --provider pinggy --local-port 8181`
