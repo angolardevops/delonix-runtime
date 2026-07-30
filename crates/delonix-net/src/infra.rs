@@ -296,10 +296,48 @@ pub fn ingress_table_ruleset() -> String {
     } else {
         " policy drop;"
     };
+    // RF-NET-02 — destinations that are denied REGARDLESS of the declared policy, in
+    // their own base chain at priority -20, so they are evaluated before `fwdeny`
+    // (-10), before the per-container chains (-5) and before the default policy (0).
+    // A user rule cannot reach in front of them; only the opt-in below removes them.
+    //
+    //   169.254.0.0/16 — cloud metadata (`169.254.169.254`). On a cloud host this is
+    //     the instance's credentials endpoint, one HTTP GET away from any container.
+    //     Measured on this workstation: nothing answers, because nothing is listening
+    //     — NOT because anything blocked it. There was no denial anywhere in the tree.
+    //   127.0.0.0/8 — the host's own loopback. Already unreachable in practice because
+    //     `slirp4netns` runs with `--disable-host-loopback` (verified live: `Network is
+    //     unreachable`), but that is one flag in one spawn path away from regressing,
+    //     and this costs one rule.
+    //
+    // IPv6 link-local (`fe80::/10`) is covered by the v6 refusal instead — there are no
+    // v6 addresses to filter, see `ipv6_sdn_enabled`.
+    //
+    // NOT covered here, and deliberately so: the management sockets. `serve api`,
+    // `serve cri` and `serve docker-api` all default to UNIX sockets, not TCP
+    // (`unix:///run/delonix-*.sock`), so there is no address for a container to reach.
+    // Guarding a service the holder itself exposes (the internal DNS, the L7 proxy)
+    // would need an `input` chain, which this netns does not have today — recorded as
+    // follow-up rather than half-done here.
+    let guard = if std::env::var("DELONIX_ALLOW_LINK_LOCAL").ok().as_deref() == Some("1") {
+        tracing::warn!(
+            "SECURITY WARNING — DELONIX_ALLOW_LINK_LOCAL=1: containers may reach \
+             169.254.0.0/16 (cloud metadata / instance credentials) and the host loopback. \
+             For debugging only — do NOT use in production."
+        );
+        String::new()
+    } else {
+        "\x20\x20 ip daddr 169.254.0.0/16 counter drop\n\
+         \x20\x20 ip daddr 127.0.0.0/8 counter drop\n"
+            .to_string()
+    };
     format!(
         "table ip {INGRESS_TABLE} {{\n\
          \x20 set {DLXALL_SET} {{ type ipv4_addr; }}\n\
          \x20 map {FWMAP} {{ type ipv4_addr : verdict; }}\n\
+         \x20 chain fwguard {{ type filter hook forward priority -20;\n\
+         {guard}\
+         \x20 }}\n\
          \x20 chain fwcont {{ type filter hook forward priority -5;\n\
          \x20\x20 ip daddr vmap @{FWMAP}\n\
          \x20\x20 ip saddr vmap @{FWMAP}\n\
@@ -1182,6 +1220,157 @@ fn dhcp_opt(opts: &[u8], want: u8) -> Option<Vec<u8>> {
 }
 
 // ---- ingress IPv6 (ULA): fd00:<2nd octet>::/64 per network -----------------
+//
+// **IPv6 IS REFUSED BY DEFAULT — and this is a security fix, not a feature removal.**
+//
+// The SDN used to hand every container an IPv6 ULA derived from its v4 address
+// (`fd00:<o2>::<o3>:<o4>`) while the ENTIRE firewall lives in `table ip` — v4 only.
+// That is a second, completely unfiltered data path to every container. Reproduced
+// live: with the firewall dropping on IPv4, the same target answered on port 80 over
+// its ULA. It defeats `ingress`/`egress` rules, `policy deny`, namespace isolation,
+// `kind: Dependency` and the L4 guard alike, because all of them are `table ip`.
+// Discovery is a single `ping -6 ff02::1%eth0`, which enumerates every neighbour on
+// the bridge, and the address is derivable from the v4 one anyway.
+//
+// Two independent layers close it, deliberately not one:
+//   1. `disable_ipv6` inside the container's netns — no ULA, no link-local, no
+//      addresses at all. Does not depend on any host setting.
+//   2. `table ip6 dlxing` with `forward policy drop` in the holder — catches whatever
+//      still routes v6, e.g. a PRIVILEGED container that remounts `/proc/sys` rw and
+//      turns v6 back on. Depends on `bridge-nf-call-ip6tables`, which is why it is the
+//      SECOND layer and not the only one.
+//
+// Nothing was lost: there is no v6 uplink (`slirp4netns` runs without
+// `--enable-ipv6`, so v6 to the Internet was always `Network is unreachable`) and the
+// internal resolver only ever answered A records. The ULA served east-west traffic
+// that no policy could govern — which is precisely the problem.
+//
+// `DELONIX_ENABLE_IPV6=1` restores the old behaviour, loudly, for whoever needs the
+// v6 SDN and accepts that no firewall rule applies to it. Same escape-hatch shape as
+// `DELONIX_FORWARD_POLICY=accept`. Real dual-stack — `table inet` plus a v6 IPAM and
+// v6 sets — is separate work; this is the explicit refusal that must exist until then.
+
+/// Is the (unfiltered) IPv6 SDN explicitly opted back in?
+pub fn ipv6_sdn_enabled() -> bool {
+    let on = std::env::var("DELONIX_ENABLE_IPV6").ok().as_deref() == Some("1");
+    if on {
+        tracing::warn!(
+            "SECURITY WARNING — DELONIX_ENABLE_IPV6=1: containers get IPv6 addresses that \
+             NO firewall rule governs (ingress/egress, policy deny, namespace isolation and \
+             Dependency are all IPv4-only). Any container can reach any other over IPv6, \
+             bypassing every policy. For debugging only — do NOT use in production."
+        );
+    }
+    on
+}
+
+/// The v6 refusal table: forwarding of IPv6 dies in the holder's netns. Second layer
+/// of the fix above — [`disable_ipv6_argv`] is the first. Its own table so it is as
+/// isolated and identifiable as `dlxing`, and so tearing one down never touches the
+/// other.
+pub fn ingress_v6_refusal_ruleset() -> String {
+    format!(
+        "table ip6 {INGRESS_TABLE} {{\n\
+         \x20 chain forward {{ type filter hook forward priority -10; policy drop;\n\
+         \x20\x20 counter\n\
+         \x20 }}\n\
+         }}\n"
+    )
+}
+
+/// Turns IPv6 off in EVERY netns the holder currently owns — the already-running
+/// containers, without restarting a single one.
+///
+/// This exists because the refusal is applied at `attach` time, which closes the hole
+/// for containers created from now on and does NOTHING for the ones already up. Telling
+/// the operator to restart them would be the wrong answer in this engine: hot
+/// reconfiguration is the whole point (`container update` changes ports, volumes and
+/// networks with the PID unchanged), and the dataplane does not belong to the
+/// container's process lifecycle. A netns is entered and its sysctls written whenever
+/// the holder feels like it — the container never notices.
+///
+/// Idempotent and best-effort per netns: one that disappears mid-sweep (a container
+/// stopping concurrently) must not abort the rest. Returns how many were hardened.
+///
+/// Deliberately NOT a control-socket verb, which was the first shape tried. The case
+/// this exists for is an in-place upgrade: the new binary is installed and the OLD
+/// holder is still running (see `stale_holder_message`) with every container attached
+/// to it. An old holder does not know a verb added today, so a control command would
+/// fail in exactly the scenario that matters. Entering its namespaces from the host
+/// works whatever binary the holder came from — the same `nsenter` the L7 proxy
+/// already uses (`infra_join_argv`), and the same one that was used by hand to prove
+/// this is possible at all.
+pub fn disable_ipv6_live() -> Result<usize> {
+    let Some(holder) = read_pid(&holder_pid_path()).filter(|&p| pid_alive(p)) else {
+        return Ok(0); // holder down: nothing is running to protect
+    };
+    // `-m` as well as `-U -n`: `ip netns exec` reads `/run/netns`, which lives in the
+    // holder's MOUNT namespace.
+    let join = |args: &[&str]| -> Vec<String> {
+        let mut v: Vec<String> = [
+            "-t",
+            &holder.to_string(),
+            "-U",
+            "-m",
+            "-n",
+            "--preserve-credentials",
+            "--",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+        v.extend(args.iter().map(|s| s.to_string()));
+        v
+    };
+    let listed = {
+        let a = join(&["ip", "netns", "list"]);
+        let refs: Vec<&str> = a.iter().map(String::as_str).collect();
+        crate::capture("nsenter", &refs).unwrap_or_default()
+    };
+    let mut n = 0;
+    for line in listed.lines() {
+        // `ip netns list` prints `<name>` or `<name> (id: N)`.
+        let Some(ns) = line.split_whitespace().next().filter(|s| !s.is_empty()) else {
+            continue;
+        };
+        let ns = sanitize(ns);
+        if ns.is_empty() {
+            continue;
+        }
+        for argv in disable_ipv6_argv(&ns) {
+            let mut a = vec!["ip".to_string()];
+            a.extend(argv);
+            let full = join(&a.iter().map(String::as_str).collect::<Vec<_>>());
+            let refs: Vec<&str> = full.iter().map(String::as_str).collect();
+            run_ok("nsenter", &refs);
+        }
+        n += 1;
+    }
+    Ok(n)
+}
+
+/// `ip` args that turn IPv6 off inside a container's netns. Pure, so the exact
+/// invocation is testable without a kernel.
+///
+/// `all` alone is not enough: the per-interface knob wins for an interface that
+/// already exists, and `eth0` is moved in before this runs. Setting `default` too
+/// means an interface created later (an additional network) starts off as well.
+pub fn disable_ipv6_argv(netns: &str) -> Vec<Vec<String>> {
+    ["all", "default", "eth0"]
+        .iter()
+        .map(|k| {
+            vec![
+                "netns".to_string(),
+                "exec".to_string(),
+                netns.to_string(),
+                "sysctl".to_string(),
+                "-q".to_string(),
+                "-w".to_string(),
+                format!("net.ipv6.conf.{k}.disable_ipv6=1"),
+            ]
+        })
+        .collect()
+}
 
 /// A network's IPv6 group from the `/16` prefix (`10.201` → `201`).
 fn v6_group(v4prefix: &str) -> String {
@@ -1320,23 +1509,34 @@ fn do_attach(netns: &str, ip: &str, bridge: &str, gateway: &str, namespace: &str
     ] {
         run("ip", &argv)?;
     }
-    // IPv6 (ULA) on eth0 + v6 default route (best-effort; the host may have v6 off).
-    let p = prefix_of(gateway);
-    let gw6 = v6_gw(&p);
-    if let Some(v6) = v6_of(ip) {
-        let cidr6 = format!("{v6}/64");
-        run_ok(
-            "ip",
-            &[
-                "netns", "exec", &netns, "ip", "-6", "addr", "add", &cidr6, "dev", "eth0", "nodad",
-            ],
-        );
-        run_ok(
-            "ip",
-            &[
-                "netns", "exec", &netns, "ip", "-6", "route", "add", "default", "via", &gw6,
-            ],
-        );
+    // IPv6: REFUSED by default — see the long note on `ipv6_sdn_enabled`. Turning it
+    // off here, in the container's own netns, removes the ULA *and* the kernel's
+    // link-local, so there is no v6 address left to reach anything with. Opting back
+    // in restores the ULA + v6 default route exactly as before.
+    if ipv6_sdn_enabled() {
+        let p = prefix_of(gateway);
+        let gw6 = v6_gw(&p);
+        if let Some(v6) = v6_of(ip) {
+            let cidr6 = format!("{v6}/64");
+            run_ok(
+                "ip",
+                &[
+                    "netns", "exec", &netns, "ip", "-6", "addr", "add", &cidr6, "dev", "eth0",
+                    "nodad",
+                ],
+            );
+            run_ok(
+                "ip",
+                &[
+                    "netns", "exec", &netns, "ip", "-6", "route", "add", "default", "via", &gw6,
+                ],
+            );
+        }
+    } else {
+        for argv in disable_ipv6_argv(&netns) {
+            let args: Vec<&str> = argv.iter().map(String::as_str).collect();
+            run_ok("ip", &args);
+        }
     }
     // ANTI-SPOOFING: traffic entering from this veth MUST have the assigned IP as
     // source — otherwise a container could forge the source-IP and bypass the per-IP
@@ -1419,13 +1619,34 @@ fn do_attach_extra(
     ] {
         run("ip", &argv)?;
     }
-    // IPv6 (ULA) on the new interface (best-effort; no v6 default route — the primary keeps it).
-    if let Some(v6) = v6_of(ip) {
-        let cidr6 = format!("{v6}/64");
+    // IPv6: REFUSED by default, same as the primary interface. An additional network
+    // is exactly where this mattered most — a multi-homed container carried a second
+    // unfiltered v6 address, on a second bridge, and the firewall governed neither.
+    // The `default` knob set on the primary attach covers an interface created later,
+    // but this is not left to that: `--net-connect` can land on a container that
+    // predates the fix.
+    if ipv6_sdn_enabled() {
+        if let Some(v6) = v6_of(ip) {
+            let cidr6 = format!("{v6}/64");
+            run_ok(
+                "ip",
+                &[
+                    "netns", "exec", &netns, "ip", "-6", "addr", "add", &cidr6, "dev", &ifname,
+                    "nodad",
+                ],
+            );
+        }
+    } else {
         run_ok(
             "ip",
             &[
-                "netns", "exec", &netns, "ip", "-6", "addr", "add", &cidr6, "dev", &ifname, "nodad",
+                "netns",
+                "exec",
+                &netns,
+                "sysctl",
+                "-q",
+                "-w",
+                &format!("net.ipv6.conf.{ifname}.disable_ipv6=1"),
             ],
         );
     }
@@ -3554,6 +3775,22 @@ fn setup_infra_netns() -> Result<()> {
     run_ok("mount", &["-t", "tmpfs", "none", "/run"]);
     let _ = std::fs::create_dir_all("/run/netns");
     apply_nft_stdin(&ingress_table_ruleset())?;
+    // Second layer of the IPv6 refusal (the first is `disable_ipv6` per container, in
+    // `do_attach`). Best-effort ON PURPOSE and not `?`: a kernel built without
+    // `nf_tables` IPv6 support would otherwise take the whole holder down with it,
+    // and on such a kernel there is no v6 forwarding to protect against anyway. When
+    // v6 is explicitly opted back in, the refusal is not installed at all — the whole
+    // point of the opt-in.
+    if !ipv6_sdn_enabled() {
+        if let Err(e) = apply_nft_stdin(&ingress_v6_refusal_ruleset()) {
+            tracing::warn!(
+                error = %e,
+                "could not install the IPv6 refusal table; containers still have no v6 \
+                 addresses (disable_ipv6 per netns), but a privileged container that turns \
+                 v6 back on would not be filtered"
+            );
+        }
+    }
     // L4 DDoS protection by default (req #5): PER-SOURCE rate-limit + ct-count.
     // Conservative limits (legitimate traffic is not affected), best-effort and with
     // `nft -c` pre-flight (degrades on kernels without `meter`). Configurable via API.
@@ -4560,6 +4797,75 @@ mod tests {
         let mine: Vec<_> = els.iter().filter(|(_, c)| c == "fwaaaaaaaa").collect();
         assert_eq!(mine.len(), 2, "both addresses of the multi-homed container");
         assert!(parse_fwmap_elements("map fwmap { type ipv4_addr : verdict }").is_empty());
+    }
+
+    /// RF-NET-11 — the IPv6 bypass, reproduced live before this fix: with the firewall
+    /// dropping on IPv4, the same container answered on port 80 over its ULA, because
+    /// every rule the engine writes lives in `table ip`. Both layers of the refusal are
+    /// asserted here; the live reproduction is in the release notes.
+    #[test]
+    fn ipv6_e_recusado_nas_duas_camadas() {
+        // Layer 2 — forwarding of v6 dies in the holder, in its own table.
+        let v6 = ingress_v6_refusal_ruleset();
+        assert!(v6.contains("table ip6"), "{v6}");
+        assert!(v6.contains("hook forward"), "{v6}");
+        assert!(v6.contains("policy drop"), "{v6}");
+        // Layer 1 — no v6 addresses at all inside the container's netns. `all` alone
+        // is not enough (the per-interface knob wins for an interface that already
+        // exists) and `default` is what covers an interface created later.
+        let argv = disable_ipv6_argv("dlx-abc");
+        let joined: Vec<String> = argv.iter().map(|a| a.join(" ")).collect();
+        for key in ["all", "default", "eth0"] {
+            assert!(
+                joined
+                    .iter()
+                    .any(|c| c.contains(&format!("net.ipv6.conf.{key}.disable_ipv6=1"))),
+                "missing the `{key}` knob: {joined:?}"
+            );
+        }
+        assert!(joined.iter().all(|c| c.starts_with("netns exec dlx-abc ")));
+    }
+
+    /// RF-NET-02 — the denials that no user rule can get in front of. The PRIORITY is
+    /// the requirement, not just the presence of the rules: `fwguard` has to be
+    /// evaluated before `fwdeny` (-10), before the per-container dispatch (-5) and
+    /// before the default policy (0). A rule in a later chain cannot pre-empt it.
+    #[test]
+    fn destinos_sensiveis_sao_negados_antes_de_qualquer_regra() {
+        let rs = ingress_table_ruleset();
+        assert!(rs.contains("chain fwguard"), "{rs}");
+        assert!(rs.contains("priority -20"), "{rs}");
+        assert!(rs.contains("ip daddr 169.254.0.0/16 counter drop"), "{rs}");
+        assert!(rs.contains("ip daddr 127.0.0.0/8 counter drop"), "{rs}");
+        // The ordering claim, asserted rather than assumed — and asserted on the
+        // VALUES, not on where the chains happen to appear in the text (the ruleset
+        // declares `fwcont` before `fwdeny`, so textual order says nothing).
+        // Only the FORWARD hook: priority orders chains within one hook, so comparing
+        // against the nat chains (-100 prerouting, 100 postrouting) would be
+        // meaningless — that is what the first version of this test got wrong.
+        let priorities: Vec<i32> = rs
+            .match_indices("hook forward priority ")
+            .filter_map(|(i, m)| {
+                rs[i + m.len()..]
+                    .split(|c: char| c == ';' || c.is_whitespace())
+                    .find(|t| !t.is_empty())?
+                    .parse()
+                    .ok()
+            })
+            .collect();
+        assert!(
+            priorities.len() >= 4,
+            "expected every forward chain: {priorities:?}"
+        );
+        let guard = rs[rs.find("chain fwguard").unwrap()..]
+            .split_once("priority ")
+            .and_then(|(_, r)| r.split(';').next()?.trim().parse::<i32>().ok())
+            .expect("fwguard declares a priority");
+        assert!(
+            priorities.iter().all(|p| guard <= *p),
+            "fwguard ({guard}) must run before every other hook: {priorities:?}"
+        );
+        assert!(priorities.iter().filter(|p| **p == guard).count() == 1);
     }
 
     #[test]
