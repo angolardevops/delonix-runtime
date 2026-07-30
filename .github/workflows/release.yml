@@ -85,24 +85,21 @@ jobs:
             echo "::warning::release SEM assinatura — a chave ainda não foi configurada (ver docs/SECURITY-RELEASES.md). O install.sh avisa e verifica só integridade de transferência."
             exit 0
           fi
-          # minisign vive no componente `universe` do apt. O padrão antigo
-          # (`install || update -qq && install`) falhou DETERMINISTICAMENTE em
-          # duas corridas da v0.38.0 (`Unable to locate package minisign`): o
-          # `-qq` mascarava o erro do `update` e o universe nem sempre está no
-          # índice do runner. Activa o universe explicitamente, faz um `update`
-          # visível, e retenta o install para aguentar um mirror instável.
-          sudo add-apt-repository -y universe
-          sudo apt-get update
-          n=0
-          until sudo apt-get install -y minisign; do
-            n=$((n + 1))
-            if [ "$n" -ge 3 ]; then
-              echo "::error::minisign não instalável via apt após 3 tentativas (universe/mirror) — endurecer o passo (binário estático de jedisct1/minisign, versão+checksum fixados)"
-              exit 1
-            fi
-            echo "retry install minisign ($n)…"
-            sleep 5
-          done
+          # minisign NÃO está no índice apt deste runner (mirror Azure, sem o
+          # componente `universe` servido) — `apt-get install minisign` falhou
+          # DETERMINISTICAMENTE em 3 corridas da v0.38.0, mesmo com o universe
+          # "adicionado" e o `update` limpo. Em vez do apt, descarrega o binário
+          # estático OFICIAL, com versão + SHA256 FIXADOS e verificados (o mesmo
+          # padrão de confiança-por-digest do resto do projecto — nunca um
+          # download sem verificar). Fail-closed: um checksum errado aborta aqui.
+          MINISIGN_VER=0.12
+          MINISIGN_SHA=9a599b48ba6eb7b1e80f12f36b94ceca7c00b7a5173c95c3efc88d9822957e73
+          curl -fsSL -o /tmp/minisign.tgz \
+            "https://github.com/jedisct1/minisign/releases/download/${MINISIGN_VER}/minisign-${MINISIGN_VER}-linux.tar.gz"
+          echo "${MINISIGN_SHA}  /tmp/minisign.tgz" | sha256sum -c -
+          tar xzf /tmp/minisign.tgz -C /tmp
+          sudo install -m 0755 /tmp/minisign-linux/x86_64/minisign /usr/local/bin/minisign
+          minisign -v
           # A chave privada só existe no disco do runner durante este passo.
           umask 077
           printf '%s\n' "$MINISIGN_SECRET_KEY" > /tmp/minisign.key
