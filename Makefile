@@ -17,7 +17,7 @@ IMAGE_REPO ?= delonix/runtime
 IMAGE      := $(IMAGE_REPO):$(TAG)
 GHCR_IMAGE ?= ghcr.io/angolardevops/delonix-runtime
 
-.PHONY: help binaries image ghcr-push kind-load image-tag
+.PHONY: help binaries image ghcr-push kind-load image-tag bench coverage
 
 help: ## Mostra esta ajuda
 	@awk 'BEGIN{FS":.*## "} /^[a-zA-Z0-9_.-]+:.*## /{printf "  \033[36m%-14s\033[0m %s\n",$$1,$$2}' $(MAKEFILE_LIST)
@@ -43,3 +43,9 @@ kind-load: ## no-op — o runtime é um motor de host, não um workload k8s
 
 image-tag: ## Imprime a tag versionada calculada
 	@echo $(TAG)
+
+bench: ## Corre os micro-benchmarks criterion (dev-only, stable)
+	PROTOC=$$(command -v protoc) cargo bench -p delonix-image
+
+coverage: ## Cobertura de testes do workspace (precisa de cargo-llvm-cov) — ./scripts/coverage.sh [--html|--lcov]
+	./scripts/coverage.sh $(ARGS)
