@@ -116,13 +116,13 @@ explicit `type`, already fail-closed in ADR-0001). Phase 2b re-runs this audit f
 
 ## Implementation note (Phase 2a, 2026-07-30)
 
-Landed as `cmd/workload.rs`: `trait ComputeDriver { list, owns, stop, remove }` with
+Landed as `cmd/workload.rs`: `trait ComputeDriver { list, owns, stop, remove, describe }` with
 `ContainerDriver`/`VmDriver` adapters that delegate to `cmd::container::workload_*` /
 `cmd::vm::workload_*` (thin wrappers over the engines' existing, tested list/stop/rm — no logic
-duplicated, no engine crate touched). Its **real consumer** is the new `delonix workload {ls,stop,rm}`
+duplicated, no engine crate touched). Its **real consumer** is the new `delonix workload {ls,describe,stop,rm}`
 command group — the trait was deliberately not built as bare scaffolding (that would be the repo's
 documented "dead code awaiting a caller" anti-pattern). Every trait method has a caller (`ls`→`list`,
-`stop`/`rm`→`owns`+`stop`/`remove`). Routing is by exact name and fail-closed: zero owners →
+`describe`→`owns`+`describe`, `stop`/`rm`→`owns`+`stop`/`remove`). Routing is by exact name and fail-closed: zero owners →
 `no such workload`; a container AND a vm sharing a name → `ambiguous`, pointing at the type-specific
 command. `owner()` is pure over the driver slice and unit-tested with fake drivers. `ensure`
 (declarative create) stays out — creation is `kind: Workload` via `stack apply` (ADR-0001), so the
