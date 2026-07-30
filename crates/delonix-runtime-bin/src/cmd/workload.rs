@@ -134,8 +134,12 @@ fn mismatch(name: &str, ty: &str, other: &str) -> Error {
 
 /// One row in the unified `delonix workload ls` — the small common denominator
 /// across compute types. Each engine's adapter (`cmd::container`/`cmd::vm`) fills it.
+/// `Serialize` backs `-o json` (ADR-0005): the field names below are the STABLE,
+/// language-independent JSON keys — never the i18n'd table headers.
+#[derive(serde::Serialize)]
 pub struct WorkloadRow {
-    /// `"container"` | `"vm"`.
+    /// `"container"` | `"vm"` | `"pod"`. JSON key `type` (Rust keyword, hence the rename).
+    #[serde(rename = "type")]
     pub kind: &'static str,
     pub name: String,
     /// Human, already-reconciled status (`Up 3m`, `Running`, `Exited (0)`…).
@@ -232,8 +236,13 @@ fn owner<'a>(ds: &'a [Box<dyn ComputeDriver>], name: &str) -> Result<&'a dyn Com
 /// this group is the imperative day-2 side (list/stop/rm).
 #[derive(Debug, Subcommand)]
 pub enum WorkloadCmd {
-    /// List all workloads — containers AND VMs — in one table.
-    Ls,
+    /// List all workloads — containers AND VMs — in one table (or `-o json`).
+    Ls {
+        /// Output format: `table` (default, human) or `json` (machine, stable
+        /// field names — see ADR-0005). `-o json | jq` is the automation path.
+        #[arg(short = 'o', long = "output", value_enum, default_value_t)]
+        output: super::output::OutputFormat,
+    },
     /// Describe a workload by name (routed to the owning backend, kubectl-style).
     Describe {
         /// Workload name.
@@ -256,7 +265,7 @@ pub enum WorkloadCmd {
 
 pub fn run(action: WorkloadCmd) -> Result<()> {
     match action {
-        WorkloadCmd::Ls => ls(),
+        WorkloadCmd::Ls { output } => ls(output),
         WorkloadCmd::Describe { name } => owner(&drivers(), &name)?.describe(&name),
         // The adapters delegate to each engine's own stop/rm, which already emit
         // the success line (container → id, vm → name) — mirroring what the
@@ -267,15 +276,28 @@ pub fn run(action: WorkloadCmd) -> Result<()> {
     }
 }
 
-fn ls() -> Result<()> {
-    let mut t = super::output::Table::new(&["TYPE", "NAME", "STATUS", "INFO"]);
+fn ls(format: super::output::OutputFormat) -> Result<()> {
+    // Collect first: `-o json` needs the whole array; the table path is unchanged.
+    let mut rows = Vec::new();
     for d in drivers() {
-        for r in d.list()? {
-            t.row(vec![r.kind.to_string(), r.name, r.status, r.info]);
+        rows.extend(d.list()?);
+    }
+    match format {
+        super::output::OutputFormat::Json => super::output::print_json(&rows),
+        super::output::OutputFormat::Table => {
+            let mut t = super::output::Table::new(&["TYPE", "NAME", "STATUS", "INFO"]);
+            for r in &rows {
+                t.row(vec![
+                    r.kind.to_string(),
+                    r.name.clone(),
+                    r.status.clone(),
+                    r.info.clone(),
+                ]);
+            }
+            t.print();
+            Ok(())
         }
     }
-    t.print();
-    Ok(())
 }
 
 #[cfg(test)]

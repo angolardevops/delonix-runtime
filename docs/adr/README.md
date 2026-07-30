@@ -15,6 +15,7 @@ never rewritten — supersede them with a new one.
 | [0002](0002-compute-driver-trait.md) | Where a generic compute driver trait lives (and whether to extract one now) | Accepted (Phase 2a implemented) |
 | [0003](0003-capability-model.md) | A tenancy-free capability model at the control-socket boundary | Proposed |
 | [0004](0004-container-checkpoint-restore.md) | Container checkpoint/restore is gated on a rootless-CRIU GO/NO-GO spike | Proposed |
+| [0005](0005-structured-output-json.md) | Structured output (`-o json`) for listing commands | Accepted (contract + first slice) |
 
 ## Roadmap (from `CLAUDE.md` "Universal Runtime" — each phase needs its own accepted ADR)
 
