@@ -1253,6 +1253,10 @@ pub(crate) fn workload_remove(name: &str, force: bool) -> Result<()> {
     Ok(())
 }
 
+pub(crate) fn workload_describe(name: &str) -> Result<()> {
+    cmd_describe(&state_root(), &[name.to_string()])
+}
+
 /// UPTIME column: "Up X" since the CURRENT boot (`started_unix`, distinct
 /// from `created_unix` — see the field doc in `delonix-runtime-core`), or
 /// "-" for a stopped VM / an old record predating this field.
