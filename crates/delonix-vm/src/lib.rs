@@ -459,6 +459,32 @@ pub trait VmBackend {
     /// delete the local record of a VM that is still defined in the hypervisor) or
     /// to ignore it (`vm rm --force`).
     fn stop(&self, vmdir: &Path, vm: &Vm) -> Result<()>;
+
+    /// Takes a named snapshot of the VM. On libvirt this is a **system checkpoint**
+    /// (`virsh snapshot-create-as`): for a running domain it captures memory + disk
+    /// state; `restore` reverts to it. Default: unsupported — a backend that does not
+    /// override this fails closed with a clear message (never a silent no-op).
+    fn snapshot(&self, _vmdir: &Path, _vm: &Vm, _name: &str) -> Result<()> {
+        Err(unsupported_snapshot(self.id(), "snapshot"))
+    }
+    /// Reverts the VM to a named snapshot (libvirt: `virsh snapshot-revert`).
+    /// Default: unsupported (fail closed).
+    fn restore(&self, _vmdir: &Path, _vm: &Vm, _name: &str) -> Result<()> {
+        Err(unsupported_snapshot(self.id(), "restore"))
+    }
+    /// Lists the VM's snapshot names. Default: unsupported (fail closed).
+    fn snapshots(&self, _vm: &Vm) -> Result<Vec<String>> {
+        Err(unsupported_snapshot(self.id(), "snapshots"))
+    }
+}
+
+/// Fail-closed error for a backend that does not implement snapshot/restore
+/// (today: cloud-hypervisor — its restore relaunches a fresh vmm, a different
+/// lifecycle than libvirt's in-place revert, and needs `ch-remote`; deferred).
+fn unsupported_snapshot(backend: &str, op: &str) -> Error {
+    Error::Invalid(format!(
+        "{op} is not supported on the '{backend}' backend yet — use the libvirt backend"
+    ))
 }
 
 /// Selects a backend from an explicit request or by auto-detection
@@ -797,6 +823,36 @@ fn libvirt_uri_of(name: &str) -> &'static str {
     } else {
         "qemu:///system"
     }
+}
+
+/// Pure argv for `virsh snapshot-create-as`. A running domain's snapshot is a
+/// system checkpoint (memory + disk); `--atomic` fails cleanly instead of leaving
+/// a half-made snapshot. `--domain`/`--name` are flags (not positional), so the
+/// already-validated names can never be read as options — no `--` needed.
+fn libvirt_snapshot_argv(uri: &str, domain: &str, snap: &str) -> Vec<String> {
+    vec![
+        "-c".into(),
+        uri.into(),
+        "snapshot-create-as".into(),
+        "--domain".into(),
+        domain.into(),
+        "--name".into(),
+        snap.into(),
+        "--atomic".into(),
+    ]
+}
+
+/// Pure argv for `virsh snapshot-revert`.
+fn libvirt_revert_argv(uri: &str, domain: &str, snap: &str) -> Vec<String> {
+    vec![
+        "-c".into(),
+        uri.into(),
+        "snapshot-revert".into(),
+        "--domain".into(),
+        domain.into(),
+        "--snapshotname".into(),
+        snap.into(),
+    ]
 }
 
 /// `true` if this user can use the libvirt SYSTEM connection (the `libvirt`
@@ -1491,6 +1547,50 @@ impl VmBackend for LibvirtBackend {
         let _ = std::fs::remove_file(vmdir.join(format!("{}.xml", vm.name)));
         Ok(())
     }
+
+    fn snapshot(&self, _vmdir: &Path, vm: &Vm, name: &str) -> Result<()> {
+        let uri = libvirt_uri_of(&vm.name);
+        let argv = libvirt_snapshot_argv(uri, &vm.name, name);
+        quiet(
+            "virsh",
+            &argv.iter().map(String::as_str).collect::<Vec<_>>(),
+        )
+        .map(|_| ())
+        .map_err(|e| Error::Runtime {
+            context: "virsh snapshot-create-as",
+            message: e,
+        })
+    }
+
+    fn restore(&self, _vmdir: &Path, vm: &Vm, name: &str) -> Result<()> {
+        let uri = libvirt_uri_of(&vm.name);
+        let argv = libvirt_revert_argv(uri, &vm.name, name);
+        quiet(
+            "virsh",
+            &argv.iter().map(String::as_str).collect::<Vec<_>>(),
+        )
+        .map(|_| ())
+        .map_err(|e| Error::Runtime {
+            context: "virsh snapshot-revert",
+            message: e,
+        })
+    }
+
+    fn snapshots(&self, vm: &Vm) -> Result<Vec<String>> {
+        let uri = libvirt_uri_of(&vm.name);
+        // `--name` → one snapshot name per line (empty output = none).
+        let out = capture(
+            "virsh",
+            &["-c", uri, "snapshot-list", "--domain", &vm.name, "--name"],
+        )
+        .unwrap_or_default();
+        Ok(out
+            .lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty())
+            .map(String::from)
+            .collect())
+    }
 }
 
 impl LibvirtBackend {
@@ -1840,6 +1940,42 @@ pub fn stop(base: &Path, name: &str) -> Result<()> {
     st.save(name, &vm)
 }
 
+/// Loads a VM record, mapping the shared `NotFound` to the VM-specific
+/// `VmNotFound` ("no such VM: …") — same idiom as `stop`/`status`.
+fn load_vm(base: &Path, name: &str) -> Result<Vm> {
+    store(base)?.load(name).map_err(|e| match e {
+        Error::NotFound(_) => Error::VmNotFound(name.to_string()),
+        e => e,
+    })
+}
+
+/// Takes a named snapshot of VM `name` (see [`VmBackend::snapshot`]). On libvirt a
+/// running VM's snapshot is a system checkpoint (memory + disk).
+pub fn snapshot(base: &Path, name: &str, snap: &str) -> Result<()> {
+    if !valid_vm_name(snap) {
+        return Err(Error::Invalid(format!("invalid snapshot name: {snap}")));
+    }
+    let vmdir = vms_dir(base);
+    let vm = load_vm(base, name)?;
+    backend_for(&vm).snapshot(&vmdir, &vm, snap)
+}
+
+/// Reverts VM `name` to the named snapshot (see [`VmBackend::restore`]).
+pub fn restore(base: &Path, name: &str, snap: &str) -> Result<()> {
+    if !valid_vm_name(snap) {
+        return Err(Error::Invalid(format!("invalid snapshot name: {snap}")));
+    }
+    let vmdir = vms_dir(base);
+    let vm = load_vm(base, name)?;
+    backend_for(&vm).restore(&vmdir, &vm, snap)
+}
+
+/// Lists VM `name`'s snapshot names (see [`VmBackend::snapshots`]).
+pub fn snapshots(base: &Path, name: &str) -> Result<Vec<String>> {
+    let vm = load_vm(base, name)?;
+    backend_for(&vm).snapshots(&vm)
+}
+
 /// Reconstructs the subset of [`VmConfig`] reliably recoverable from a
 /// persisted [`Vm`] record, for [`start`]/[`restart`]. `Vm` does NOT persist
 /// everything `VmConfig` needs to boot — only what survives past the initial
@@ -2019,6 +2155,47 @@ mod tests {
         assert!(super::valid_vm_name("dev"));
         assert!(super::valid_vm_name("kadm-cp1"));
         assert!(super::valid_vm_name("my.vm_02"));
+    }
+
+    #[test]
+    fn libvirt_snapshot_argv_uses_flags_not_positional() {
+        // Names go via --domain/--name (flags), never positional — so a
+        // (validated) name can't be read as an option, and a reorder is caught.
+        let a = super::libvirt_snapshot_argv("qemu:///system", "dev", "before-upgrade");
+        assert_eq!(
+            a,
+            vec![
+                "-c",
+                "qemu:///system",
+                "snapshot-create-as",
+                "--domain",
+                "dev",
+                "--name",
+                "before-upgrade",
+                "--atomic",
+            ]
+        );
+        let r = super::libvirt_revert_argv("qemu:///session", "dev", "before-upgrade");
+        assert_eq!(
+            r,
+            vec![
+                "-c",
+                "qemu:///session",
+                "snapshot-revert",
+                "--domain",
+                "dev",
+                "--snapshotname",
+                "before-upgrade",
+            ]
+        );
+    }
+
+    #[test]
+    fn unsupported_snapshot_names_the_backend_and_op() {
+        let e = super::unsupported_snapshot("cloud-hypervisor", "restore").to_string();
+        assert!(e.contains("restore"), "{e}");
+        assert!(e.contains("cloud-hypervisor"), "{e}");
+        assert!(e.contains("libvirt"), "{e}");
     }
 
     #[test]

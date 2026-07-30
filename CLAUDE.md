@@ -1473,6 +1473,31 @@ Como `vm console <nome>` é um comando de um único operador, uma sessão presa
 da tua PRÓPRIA ligação anterior é o caso esmagadoramente comum, não um
 segundo espectador real a proteger.
 
+### `vm snapshot`/`restore`/`snapshots` — checkpoint de sistema first-class (libvirt)
+
+Snapshot/restore como métodos de 1.ª classe do `VmBackend` (antes só existiam como
+nada — o trait tinha `boot/stop/is_running/ip`, ver a matriz da descoberta Fase 1).
+`vm snapshot <vm> <nome>` / `vm restore <vm> <nome>` / `vm snapshots <vm>`, com as
+funções de motor `delonix_vm::{snapshot,restore,snapshots}` (espelham `stop`/`status`:
+`load_vm` + `backend_for` + dispatch).
+
+- **libvirt**: `virsh snapshot-create-as --domain <vm> --name <n> --atomic` — de uma VM
+  **a correr** é um checkpoint de SISTEMA (memória **+** disco), e `restore`
+  (`snapshot-revert`) volta a ele. Argv puro e testado (`libvirt_snapshot_argv`/
+  `libvirt_revert_argv`, via `--domain`/`--name`, nunca posicional → um nome validado
+  não vira opção). Nome do snapshot validado com `valid_vm_name` (recusa `..`/`-`
+  inicial/injecção). **Armadilha a reter**: `vm stop` faz *undefine* do domínio
+  (para não deixar órfãos), por isso **o snapshot exige a VM a correr** — parar
+  primeiro dá "failed to get domain" (fail-closed, reporta o erro, não finge). 
+- **Cloud Hypervisor**: **fail-closed**, não implementado (`unsupported_snapshot`) — o
+  restore do CH relança um vmm novo (ciclo diferente do revert in-place do libvirt) e
+  precisa de `ch-remote`; deferido, com erro claro que aponta para o backend libvirt em
+  vez de argv não-testado.
+- **Validado ao vivo** (host com `qemu:///session`): VM real da golden 1.34 →
+  `snapshot` (checkpoint) → `snapshots` lista → `restore` → limpo, sem domínios órfãos.
+  Os default methods do trait (erro "not supported") são o mecanismo que dá ao CH o
+  fail-closed de graça; só o libvirt faz override.
+
 ### `vm start`/`vm restart` (v0.12.0) — trazer de volta uma VM parada, sem redigitar as flags
 
 Bug report real (o mesmo `dev` do achado acima): depois de o `vm console`
