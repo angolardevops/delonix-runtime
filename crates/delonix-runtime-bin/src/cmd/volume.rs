@@ -53,7 +53,11 @@ pub enum VolumeCmd {
         quota: Option<String>,
     },
     /// List the volumes.
-    Ls,
+    Ls {
+        /// Output format: `table` (default) or `json` (ADR-0005).
+        #[arg(short = 'o', long = "output", value_enum, default_value_t)]
+        output: output::OutputFormat,
+    },
     /// Details of a volume (includes real on-disk usage).
     Inspect {
         #[arg(add = ArgValueCandidates::new(super::complete::volumes))]
@@ -137,7 +141,7 @@ pub fn run(action: VolumeCmd) -> Result<()> {
             println!("{}", vol.name);
             Ok(())
         }
-        VolumeCmd::Ls => cmd_ls(&store),
+        VolumeCmd::Ls { output } => cmd_ls(&store, output),
         VolumeCmd::Inspect { name } => cmd_inspect(&store, &name),
         VolumeCmd::Describe { names } => cmd_describe(&store, &names),
         VolumeCmd::Rm { name, force } => cmd_rm(&store, &name, force),
@@ -218,9 +222,29 @@ fn create_volume(
     Ok(vol)
 }
 
-fn cmd_ls(store: &VolumeStore) -> Result<()> {
+/// `volumes ls -o json` row (ADR-0005): stable keys mirroring the table columns.
+#[derive(serde::Serialize)]
+struct VolumeLsRow {
+    name: String,
+    driver: String,
+    mountpoint: String,
+}
+
+fn cmd_ls(store: &VolumeStore, format: output::OutputFormat) -> Result<()> {
+    let vols = store.list()?;
+    if format == output::OutputFormat::Json {
+        let rows: Vec<VolumeLsRow> = vols
+            .into_iter()
+            .map(|v| VolumeLsRow {
+                name: v.name,
+                driver: v.driver,
+                mountpoint: v.mountpoint,
+            })
+            .collect();
+        return output::print_json(&rows);
+    }
     let mut t = output::Table::new(&["NAME", "DRIVER", "MOUNTPOINT"]);
-    for v in store.list()? {
+    for v in vols {
         t.row(vec![v.name, v.driver, v.mountpoint]);
     }
     t.print();
