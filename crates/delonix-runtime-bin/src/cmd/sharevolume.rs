@@ -77,7 +77,11 @@ pub enum ShareVolumeCmd {
         file: Option<PathBuf>,
     },
     /// List share volumes (parent storage, quota, live usage).
-    Ls,
+    Ls {
+        /// Output format: `table` (default) or `json` (ADR-0005).
+        #[arg(short = 'o', long = "output", value_enum, default_value_t)]
+        output: output::OutputFormat,
+    },
     /// Human-readable detail of one share volume.
     Describe { name: String },
     /// Un-register a share volume. The underlying data (a subdirectory of
@@ -98,7 +102,7 @@ pub fn run(action: ShareVolumeCmd) -> Result<()> {
             let docs = manifest::load(&path)?;
             apply_with(&vstore, &sstore, &docs)
         }
-        ShareVolumeCmd::Ls => cmd_ls(&vstore, &sstore),
+        ShareVolumeCmd::Ls { output } => cmd_ls(&vstore, &sstore, output),
         ShareVolumeCmd::Describe { name } => cmd_describe(&vstore, &sstore, &name),
         ShareVolumeCmd::Rm { name, purge_data } => cmd_rm(&vstore, &sstore, &name, purge_data),
     }
@@ -190,7 +194,48 @@ fn alert_label(warn: bool, over: bool) -> &'static str {
     }
 }
 
-fn cmd_ls(vstore: &VolumeStore, sstore: &JsonStore<ShareRecord>) -> Result<()> {
+/// `sharevolume ls -o json` row (ADR-0005): raw bytes + booleans (not the human
+/// `">= X"`/`OVER`/`?` strings), with `used_complete`/`measured` so a consumer can
+/// tell an incomplete measurement (mapped-userns EACCES) from a real value.
+#[derive(serde::Serialize)]
+struct ShareVolumeLsRow {
+    name: String,
+    storage: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    quota_bytes: Option<u64>,
+    used_bytes: u64,
+    used_complete: bool,
+    in_alert: bool,
+    above_quota: bool,
+    measured: bool,
+    mountpoint: String,
+}
+
+fn cmd_ls(
+    vstore: &VolumeStore,
+    sstore: &JsonStore<ShareRecord>,
+    format: output::OutputFormat,
+) -> Result<()> {
+    if format == output::OutputFormat::Json {
+        let mut rows = Vec::new();
+        for rec in sstore.list()? {
+            let path = Path::new(&rec.mountpoint);
+            let u = super::volume::measured_usage(path);
+            let qs = vstore.quota_state_at_checked(path, rec.quota_bytes, rec.alert_pct);
+            rows.push(ShareVolumeLsRow {
+                name: rec.name,
+                storage: rec.storage_ref,
+                quota_bytes: rec.quota_bytes,
+                used_bytes: u.bytes,
+                used_complete: u.is_complete(),
+                in_alert: qs.in_alert,
+                above_quota: qs.above_quota,
+                measured: qs.measured,
+                mountpoint: rec.mountpoint,
+            });
+        }
+        return output::print_json(&rows);
+    }
     let mut t = output::Table::new(&["NAME", "STORAGE", "QUOTA", "USED", "ALERT", "MOUNTPOINT"]);
     for rec in sstore.list()? {
         let path = Path::new(&rec.mountpoint);

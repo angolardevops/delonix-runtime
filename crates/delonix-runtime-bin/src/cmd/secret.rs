@@ -18,6 +18,14 @@ use super::manifest::{self, ManifestDoc};
 use super::output;
 use super::util::state_root;
 
+/// `secret ls -o json` row (ADR-0005): name + key NAMES + count. NEVER the values.
+#[derive(serde::Serialize)]
+struct SecretLsRow {
+    name: String,
+    keys: usize,
+    names: Vec<String>,
+}
+
 #[derive(Subcommand)]
 pub enum SecretCmd {
     /// Create/replace a secret from literals and/or a `.env` file.
@@ -31,7 +39,11 @@ pub enum SecretCmd {
         from_env_file: Option<PathBuf>,
     },
     /// List the secrets (name + number of keys; values NEVER shown).
-    Ls,
+    Ls {
+        /// Output format: `table` (default) or `json` (ADR-0005).
+        #[arg(short = 'o', long = "output", value_enum, default_value_t)]
+        output: crate::cmd::output::OutputFormat,
+    },
     /// Show the keys of a secret (values redacted, unless `--reveal`).
     Inspect {
         #[arg(add = clap_complete::engine::ArgValueCandidates::new(super::complete::secrets))]
@@ -249,7 +261,21 @@ pub fn run(action: SecretCmd) -> Result<()> {
                 )
             );
         }
-        SecretCmd::Ls => {
+        SecretCmd::Ls { output } => {
+            if output == crate::cmd::output::OutputFormat::Json {
+                // Key NAMES + count only — never the values (those stay redacted,
+                // revealed only by `secret inspect --reveal`).
+                let rows: Vec<SecretLsRow> = store
+                    .list()
+                    .into_iter()
+                    .map(|s| SecretLsRow {
+                        name: s.name.clone(),
+                        keys: s.data.len(),
+                        names: s.data.keys().cloned().collect(),
+                    })
+                    .collect();
+                return crate::cmd::output::print_json(&rows);
+            }
             let mut t = output::Table::new(&["NAME", "KEYS", "NAMES"]).right_align(1);
             for s in store.list() {
                 let keys: Vec<&str> = s.data.keys().map(String::as_str).collect();
