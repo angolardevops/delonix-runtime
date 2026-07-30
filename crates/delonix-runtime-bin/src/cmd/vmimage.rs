@@ -169,7 +169,11 @@ impl VmImageStore {
 #[derive(Subcommand)]
 pub enum VmImageCmd {
     /// List the local VM images.
-    Ls,
+    Ls {
+        /// Output format: `table` (default) or `json` (ADR-0005).
+        #[arg(short = 'o', long = "output", value_enum, default_value_t)]
+        output: output::OutputFormat,
+    },
     /// Human-readable detail of one or more VM images, `kubectl describe` style.
     Describe { names: Vec<String> },
     /// Publish a local VM image to an OCI registry (single-blob artifact).
@@ -252,7 +256,7 @@ pub enum VmImageCmd {
 pub fn run(action: VmImageCmd) -> Result<()> {
     let store = VmImageStore::open(state_root())?;
     match action {
-        VmImageCmd::Ls => cmd_ls(&store),
+        VmImageCmd::Ls { output } => cmd_ls(&store, output),
         VmImageCmd::Describe { names } => cmd_describe(&store, &names),
         VmImageCmd::Push { name, target } => cmd_push(&store, &name, &target),
         VmImageCmd::Pull {
@@ -308,7 +312,36 @@ pub fn run(action: VmImageCmd) -> Result<()> {
     }
 }
 
-fn cmd_ls(store: &VmImageStore) -> Result<()> {
+/// `image --vm ls -o json` / `image vm ls -o json` row (ADR-0005): machine-friendly
+/// values (`created_unix`/`size_bytes` as numbers; nullable kernel/k8s).
+#[derive(serde::Serialize)]
+struct VmImageLsRow {
+    name: String,
+    distro: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    kernel_version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    k8s_version: Option<String>,
+    created_unix: u64,
+    size_bytes: u64,
+}
+
+fn cmd_ls(store: &VmImageStore, format: output::OutputFormat) -> Result<()> {
+    if format == output::OutputFormat::Json {
+        let rows: Vec<VmImageLsRow> = store
+            .list()?
+            .into_iter()
+            .map(|img| VmImageLsRow {
+                distro: distro_label(&img),
+                name: img.name,
+                kernel_version: img.kernel_version,
+                k8s_version: img.k8s_version,
+                created_unix: img.created_unix,
+                size_bytes: img.size,
+            })
+            .collect();
+        return output::print_json(&rows);
+    }
     let mut t =
         output::Table::new(&["NAME", "DISTRO", "KERNEL", "K8S", "CREATED", "SIZE"]).right_align(5);
     for img in store.list()? {
