@@ -400,6 +400,35 @@ não entra em nenhum crate de mecanismo). Cada grupo (`cmd/{network,volume,image
 container}.rs`) tem um `spec` tipado próprio (`NetworkSpec`, `VolumeSpec`, ...) e uma função
 `pub fn apply(docs: &[ManifestDoc])` que filtra o seu Kind e aplica.
 
+**`kind: Workload` (ADR-0001, `docs/adr/0001-workload-kind-schema.md`)** — o começo do
+Runtime Abstraction Layer: UM objecto declarativo para os dois tipos de computação.
+`spec.type: container|vm` + um bloco nomeado pelo tipo (`spec.container`/`spec.vm`) que é
+EXACTAMENTE a `ContainerSpec`/`VmSpec` do Kind autónomo (não redefine um único campo, logo não
+pode divergir). **Açúcar que baixa no `manifest::load`** — um `kind: Workload` é reescrito num
+`kind: Container`/`kind: Vm` sintético (herda `metadata`) e segue o apply por-Kind normal, tal
+como um filho de `kind: Stack`; o Workload não sobrevive ao load, por isso `apply`/`stack apply`/
+`--dry-run`/`ls`/`describe` e o `apply -f` por-Kind vêem o filho SEM wiring novo. `cmd/workload.rs`
+(`lower_workload`, puro/testado) + o ramo no `load()`. **Fail-closed**: `pod`/`microvm` são
+reservados (erro com hint dirigido — "usa kind: Pod"/"usa type: vm", nunca silêncio), tipo
+desconhecido/em falta ou bloco que não bate com o tipo → erro claro. Zero motor novo, zero daemon,
+zero dependência (tudo em `-bin`). Validado ao vivo (dry-run baixa Container+Vm; apply real cria o
+container; os 4 caminhos fail-closed em EN e PT). **Por fazer, documentado**: `type: pod`→`kind: Pod`
+e `type: microvm` (variante de backend do `vm`), cada um um ADR futuro. Ver `examples/workload.yaml`.
+
+**`delonix workload {ls,stop,rm}` (ADR-0002, Fase 2a, `docs/adr/0002-compute-driver-trait.md`)** —
+o lado IMPERATIVO/day-2 da unificação (a criação é declarativa, via `kind: Workload`). Um trait
+`ComputeDriver { list, owns, stop, remove }` (`cmd/workload.rs`) com adaptadores `ContainerDriver`/
+`VmDriver` que delegam em `cmd::{container,vm}::workload_*` — wrappers finos sobre a lógica de
+list/stop/rm JÁ testada dos motores (zero duplicação, zero crate de motor tocado). `workload ls`
+mostra containers E VMs numa só tabela (TYPE/NAME/STATUS/INFO); `stop`/`rm` fazem routing por nome
+EXACTO, **fail-closed**: zero donos → `no such workload`; um container E uma vm com o mesmo nome →
+`ambiguous` (aponta para o comando específico, nunca adivinha). `owner()` é puro sobre a lista de
+drivers, testado com drivers falsos. O trait foi feito com um consumidor real de propósito (não
+scaffolding morto — o anti-padrão "código à espera do 1.º caller" do `revisor`): cada método tem
+caller. **`ensure`/create fica de fora** — criar é `kind: Workload`. **Fase 2b (promover o trait
+para o `core` ou um crate `delonix-compute`) só quando houver um 2.º consumidor** (cri/mgmt) — não
+antes. Output de uma linha, a espelhar o subcomando nativo (container→id, vm→nome).
+
 **Aproximação ao k8s (4 fatias, todas em main).** (1) **`kind: Container` forma de Pod** —
 `spec.containers[]` (k8s) com `env:[{name,value}]`/`ports:[{containerPort,hostPort}]`/`resources.
 limits`/`securityContext`/`volumeMounts`+`volumes`, normalizado para o `RunOpts` interno
