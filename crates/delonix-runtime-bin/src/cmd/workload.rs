@@ -9,10 +9,11 @@
 //! needs new wiring.
 //!
 //! The block that carries the underlying spec is named after the type
-//! (`spec.container` / `spec.vm` / `spec.pod`) and is deserialized by the SAME
-//! typed structs the standalone Kinds use (`ContainerSpec`/`VmSpec`/`PodSpec`) —
-//! the Workload spec cannot drift from the spec it wraps, because it does not
-//! redefine a single field. (`microvm` stays reserved — see `lower_workload`.)
+//! (`spec.container` / `spec.vm` / `spec.pod` / `spec.microvm`) and is deserialized
+//! by the SAME typed structs the standalone Kinds use (`ContainerSpec`/`VmSpec`/
+//! `PodSpec`) — the Workload spec cannot drift from the spec it wraps, because it
+//! does not redefine a single field. `type: microvm` lowers to `kind: Vm` with the
+//! backend forced to cloud-hypervisor (ADR-0006); no reserved types remain.
 
 use clap::Subcommand;
 use delonix_runtime_core::{Error, Result};
@@ -21,7 +22,7 @@ use serde::Deserialize;
 use super::manifest::ManifestDoc;
 
 /// Top-level `spec` keys a `kind: Workload` accepts (drives the unknown-field warning).
-pub const WORKLOAD_SPEC_FIELDS: &[&str] = &["type", "container", "vm", "pod"];
+pub const WORKLOAD_SPEC_FIELDS: &[&str] = &["type", "container", "vm", "pod", "microvm"];
 
 /// The `spec` of a `kind: Workload`: a `type` discriminator plus the single
 /// type-named block that holds the underlying spec, kept raw until the target
@@ -36,6 +37,8 @@ struct WorkloadSpec {
     vm: Option<serde_yaml::Value>,
     #[serde(default)]
     pod: Option<serde_yaml::Value>,
+    #[serde(default)]
+    microvm: Option<serde_yaml::Value>,
 }
 
 /// Lowers a `kind: Workload` doc into its underlying `kind: Container`/`kind: Vm`
@@ -48,62 +51,77 @@ pub fn lower_workload(doc: &ManifestDoc) -> Result<ManifestDoc> {
     let name = doc.metadata.name.clone();
     let ty = spec.workload_type.trim().to_ascii_lowercase();
 
-    let (child_kind, block) = match ty.as_str() {
-        "container" => {
-            if spec.vm.is_some() {
-                return Err(mismatch(&name, "container", "vm"));
-            }
-            if spec.pod.is_some() {
-                return Err(mismatch(&name, "container", "pod"));
-            }
-            (
+    // Exactly one type-named block, matching the type; the others must be absent.
+    let (child_kind, block) =
+        match ty.as_str() {
+            "container" => (
                 "Container",
-                spec.container
-                    .ok_or_else(|| missing_block(&name, "container"))?,
-            )
-        }
-        "vm" => {
-            if spec.container.is_some() {
-                return Err(mismatch(&name, "vm", "container"));
+                select_block(
+                    &name,
+                    "container",
+                    spec.container,
+                    &[
+                        ("vm", spec.vm.is_some()),
+                        ("pod", spec.pod.is_some()),
+                        ("microvm", spec.microvm.is_some()),
+                    ],
+                )?,
+            ),
+            "vm" => (
+                "Vm",
+                select_block(
+                    &name,
+                    "vm",
+                    spec.vm,
+                    &[
+                        ("container", spec.container.is_some()),
+                        ("pod", spec.pod.is_some()),
+                        ("microvm", spec.microvm.is_some()),
+                    ],
+                )?,
+            ),
+            // `kind: Pod` (a real multi-container pod) — the block is the same `PodSpec`
+            // (`spec.containers[]`) the standalone Kind takes.
+            "pod" => (
+                "Pod",
+                select_block(
+                    &name,
+                    "pod",
+                    spec.pod,
+                    &[
+                        ("container", spec.container.is_some()),
+                        ("vm", spec.vm.is_some()),
+                        ("microvm", spec.microvm.is_some()),
+                    ],
+                )?,
+            ),
+            // `microvm` = a VM on the microVM hypervisor: lowers to `kind: Vm` (same
+            // `VmSpec`) with the backend forced to cloud-hypervisor (ADR-0006).
+            "microvm" => {
+                let mut b = select_block(
+                    &name,
+                    "microvm",
+                    spec.microvm,
+                    &[
+                        ("container", spec.container.is_some()),
+                        ("vm", spec.vm.is_some()),
+                        ("pod", spec.pod.is_some()),
+                    ],
+                )?;
+                force_microvm_backend(&name, &mut b)?;
+                ("Vm", b)
             }
-            if spec.pod.is_some() {
-                return Err(mismatch(&name, "vm", "pod"));
+            "" => {
+                return Err(Error::Invalid(super::po::tf(
+                    "workload '{name}': spec.type is required (container | vm | pod | microvm)",
+                    &[("name", &name)],
+                )))
             }
-            ("Vm", spec.vm.ok_or_else(|| missing_block(&name, "vm"))?)
-        }
-        "pod" => {
-            if spec.container.is_some() {
-                return Err(mismatch(&name, "pod", "container"));
-            }
-            if spec.vm.is_some() {
-                return Err(mismatch(&name, "pod", "vm"));
-            }
-            // Lowers to `kind: Pod` (a real multi-container pod) — the block is the
-            // same `PodSpec` (`spec.containers[]`) the standalone Kind takes.
-            ("Pod", spec.pod.ok_or_else(|| missing_block(&name, "pod"))?)
-        }
-        "" => {
-            return Err(Error::Invalid(super::po::tf(
-                "workload '{name}': spec.type is required (container | vm | pod)",
-                &[("name", &name)],
-            )))
-        }
-        // Reserved: recognized by name so the error is targeted instead of a
-        // generic "unknown type". `microvm` needs a design decision (which
-        // hypervisor backend it forces) — a future ADR, never a silent alias.
-        "microvm" => {
-            return Err(Error::Invalid(super::po::tf(
-                "workload '{name}': type: microvm not yet supported — use type: vm",
-                &[("name", &name)],
-            )))
-        }
-        other => {
-            return Err(Error::Invalid(super::po::tf(
-                "workload '{name}': unknown type '{type}' (supported: container, vm, pod)",
+            other => return Err(Error::Invalid(super::po::tf(
+                "workload '{name}': unknown type '{type}' (supported: container, vm, pod, microvm)",
                 &[("name", &name), ("type", other)],
-            )))
-        }
-    };
+            ))),
+        };
 
     Ok(ManifestDoc {
         api_version: doc.api_version.clone(),
@@ -119,6 +137,53 @@ fn missing_block(name: &str, ty: &str) -> Error {
         "workload '{name}': type: {type} requires a '{type}:' block",
         &[("name", name), ("type", ty)],
     ))
+}
+
+/// Returns the type's own block, after checking the OTHER type blocks are absent
+/// (a `Workload` carries exactly one). Fail-closed on both mismatch and missing.
+fn select_block(
+    name: &str,
+    ty: &str,
+    own: Option<serde_yaml::Value>,
+    others: &[(&str, bool)],
+) -> Result<serde_yaml::Value> {
+    for (other, present) in others {
+        if *present {
+            return Err(mismatch(name, ty, other));
+        }
+    }
+    own.ok_or_else(|| missing_block(name, ty))
+}
+
+/// `true` for the cloud-hypervisor backend, by any of the names `select_backend`
+/// (`delonix-vm`) accepts.
+fn is_ch_backend(b: &str) -> bool {
+    matches!(
+        b.trim().to_ascii_lowercase().as_str(),
+        "cloud-hypervisor" | "ch" | "cloudhypervisor"
+    )
+}
+
+/// microvm = a VM on the microVM hypervisor (ADR-0006). Forces
+/// `backend: cloud-hypervisor` in the lowered `VmSpec`; a block that explicitly
+/// asks for a different backend is a contradiction (fail-closed, points at `type: vm`).
+/// A non-mapping block is left as-is — the `VmSpec` deserialization surfaces the real error.
+fn force_microvm_backend(name: &str, block: &mut serde_yaml::Value) -> Result<()> {
+    use serde_yaml::Value;
+    let Value::Mapping(m) = block else {
+        return Ok(());
+    };
+    let key = Value::from("backend");
+    if let Some(b) = m.get(&key).and_then(Value::as_str) {
+        if !is_ch_backend(b) {
+            return Err(Error::Invalid(super::po::tf(
+                "workload '{name}': type: microvm forces the cloud-hypervisor backend — remove 'backend: {backend}' (or use type: vm)",
+                &[("name", name), ("backend", b)],
+            )));
+        }
+    }
+    m.insert(key, Value::from("cloud-hypervisor"));
+    Ok(())
 }
 
 fn mismatch(name: &str, ty: &str, other: &str) -> Error {
@@ -397,17 +462,56 @@ mod tests {
     }
 
     #[test]
-    fn microvm_still_reserved_pod_now_supported() {
-        // `microvm` remains reserved (needs a backend-semantics decision).
-        let mv = lower_workload(&wl("type: microvm\nvm: { disk: x }"))
-            .unwrap_err()
-            .to_string();
-        assert!(mv.contains("use type: vm"), "{mv}");
-        // `type: pod` with the WRONG block is a mismatch, not "reserved".
+    fn pod_wrong_block_is_mismatch() {
+        // `type: pod` with the WRONG block is a mismatch.
         let e = lower_workload(&wl("type: pod\ncontainer: { image: x }"))
             .unwrap_err()
             .to_string();
         assert!(e.contains("must not carry a 'container:' block"), "{e}");
+    }
+
+    #[test]
+    fn lowers_microvm_forcing_ch_backend() {
+        // microvm → kind: Vm with backend forced to cloud-hypervisor (ADR-0006).
+        let child = lower_workload(&wl("type: microvm\nmicrovm: { disk: golden.qcow2 }")).unwrap();
+        assert_eq!(child.kind, "Vm");
+        assert_eq!(
+            child.spec.get("backend").unwrap().as_str(),
+            Some("cloud-hypervisor")
+        );
+        assert_eq!(
+            child.spec.get("disk").unwrap().as_str(),
+            Some("golden.qcow2")
+        );
+    }
+
+    #[test]
+    fn microvm_normalizes_explicit_ch_backend() {
+        let child =
+            lower_workload(&wl("type: microvm\nmicrovm: { disk: x, backend: ch }")).unwrap();
+        assert_eq!(
+            child.spec.get("backend").unwrap().as_str(),
+            Some("cloud-hypervisor")
+        );
+    }
+
+    #[test]
+    fn microvm_rejects_conflicting_backend() {
+        // A microvm asking for libvirt is a contradiction — fail closed.
+        let e = lower_workload(&wl("type: microvm\nmicrovm: { disk: x, backend: libvirt }"))
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains("cloud-hypervisor"), "{e}");
+        assert!(e.contains("libvirt"), "{e}");
+    }
+
+    #[test]
+    fn microvm_wrong_block_is_mismatch() {
+        // `type: microvm` needs a `microvm:` block; a `vm:` block is a mismatch.
+        let e = lower_workload(&wl("type: microvm\nvm: { disk: x }"))
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains("must not carry a 'vm:' block"), "{e}");
     }
 
     #[test]
