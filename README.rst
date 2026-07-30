@@ -15,7 +15,7 @@ Not a low-level OCI *runtime* (that's ``runc``/``crun``): Delonix is a full
 container **and** VM engine — build, run, network, firewall, store, and
 bootstrap Kubernetes clusters, from one binary.
 
-:Version: 0.32.2
+:Version: 0.38.0
 :License: Apache-2.0
 :Docs: https://angolardevops.github.io/delonix-runtime/
 :Repo: https://github.com/angolardevops/delonix-runtime
@@ -71,7 +71,15 @@ Highlights
   sharing the pod's network namespace (same IP, ``localhost`` between them), IPC
   and UTS — a Kubernetes-style pod, rootless (PID sharing is a follow-up).
 - **Declarative microVMs.** ``kind: Vm`` on a pluggable ``VmBackend`` (Cloud
-  Hypervisor or libvirt), with per-instance cloud-init.
+  Hypervisor or libvirt), with per-instance cloud-init and libvirt system
+  checkpoints (``vm snapshot``/``restore``).
+- **One workload model.** ``kind: Workload`` (``spec.type: container | vm |
+  pod | microvm``) is a single declarative object that lowers to the right Kind,
+  and ``delonix workload ls/describe/stop/rm`` manages containers **and** VMs
+  from one imperative surface.
+- **Structured output.** ``-o json`` on every list command emits stable,
+  language-independent field names — ``delonix workload ls -o json | jq`` is the
+  automation path.
 - **Network storage.** ``kind: Storage`` mounts NFS/CIFS/WebDAV shares from a NAS
   (TrueNAS/Synology/Samba/Nextcloud) as named volumes, k8s-PersistentVolume style.
 - **Firewall as code.** A unified ``ingress``/``egress`` command surface and
@@ -153,8 +161,10 @@ Command groups
 ==============
 
 The CLI is grouped semantically; every group has ``--help`` and most accept a
-per-Kind manifest via ``apply -f``. Full, always-current reference (embeds the
-real ``--help``) at https://angolardevops.github.io/delonix-runtime/cheatsheet.html.
+per-Kind manifest via ``apply -f``. Every list command also takes ``-o json``
+for stable, language-independent output (ADR-0005). Full, always-current
+reference (embeds the real ``--help``) at
+https://angolardevops.github.io/delonix-runtime/cheatsheet.html.
 
 .. list-table::
    :header-rows: 1
@@ -171,7 +181,9 @@ real ``--help``) at https://angolardevops.github.io/delonix-runtime/cheatsheet.h
    * - ``build``
      - Build an image from a Dockerfile or Delonixfile (no daemon, no BuildKit).
    * - ``vm``
-     - Declarative microVMs: create, ls, status, stop, rm, apply.
+     - Declarative microVMs: create, ls, status, start, stop, rm, apply, snapshot/restore (libvirt system checkpoints).
+   * - ``workload``
+     - Unified compute layer over containers **and** VMs (ADR-0002): ls, describe, stop, rm — creation stays declarative via ``kind: Workload``.
    * - ``volumes``
      - Named volumes and bind mounts: create, ls, inspect, snapshot, rm.
    * - ``network``
@@ -215,12 +227,19 @@ Manifests
 
 The declarative face, Kubernetes-style: a multi-document YAML
 (``apiVersion: delonix.io/v1``) with Kinds — ``Network``, ``Volume``,
-``Storage``, ``Image``, ``Vm``, ``Container``, ``Pod``, ``FirewallPolicy``,
-``Ingress`` (k8s-style L7 HTTP routing), ``Egress`` — applied in dependency
+``Storage``, ``Image``, ``Vm``, ``Container``, ``Pod``, ``Workload``,
+``FirewallPolicy``, ``Ingress`` (k8s-style L7 HTTP routing), ``Egress`` —
+applied in dependency
 order by ``delonix stack apply``. Ensure-present semantics (idempotent by
 name), not a reconciler. ``kind: Pod`` is a real multi-container pod: N
 containers sharing the pod's netns (same IP, ``localhost`` between them), IPC
 and UTS — managed as a unit with ``delonix pod``.
+
+``kind: Workload`` (``spec.type: container | vm | pod | microvm``) is a single
+declarative object for both compute types: it lowers to the matching Kind at
+load time (``type: microvm`` pins the Cloud Hypervisor backend), so one schema
+covers everything. The imperative day-2 side is ``delonix workload
+ls/describe/stop/rm``, which routes by name across containers and VMs.
 
 .. code-block:: yaml
 

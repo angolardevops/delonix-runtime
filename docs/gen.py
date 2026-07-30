@@ -154,6 +154,28 @@ shim persistente por-container). <code>-i</code>/<code>--stdin</code> é recusad
 a apontar para <code>exec -it</code>.</p>"""},
         },
     },
+    "workload": {
+        "title": "delonix workload",
+        "tagline": "Camada unificada sobre containers E VMs: ls, describe, stop, rm (ADR-0002).",
+        "intro": """O grupo <code>workload</code> é o lado imperativo do Runtime Abstraction Layer:
+um trait <code>ComputeDriver</code> despacha por nome para o motor de containers ou de VMs, para
+geres os dois como uma coisa só. A <strong>criação é declarativa</strong> — <code>kind: Workload</code>
+num manifesto (<code>spec.type: container|vm|pod|microvm</code>) baixa para o Kind respectivo no
+<code>manifest::load</code>; ver <a href="../kinds.html">Kinds</a> e <code>examples/workload.yaml</code>.""",
+        "subs": {
+            "ls": {"examples": [
+                ("Containers E VMs numa só tabela", "delonix workload ls"),
+                ("Saída estruturada para automação (chaves estáveis, independentes de língua)",
+                 "delonix workload ls -o json | jq '.[] | select(.type==\"vm\")'"),
+            ], "notes": """<p><strong>Routing por nome exacto</strong>, fail-closed: um nome inexistente dá
+<code>no such workload</code>; um container E uma vm com o mesmo nome dão <code>ambiguous</code> (aponta
+para o comando específico, nunca adivinha).</p>"""},
+            "describe": {"examples": [("Detalhe do workload, com routing automático para o motor certo",
+                                       "delonix workload describe web")]},
+            "stop": {"examples": [("Parar por nome, seja container ou vm", "delonix workload stop web")]},
+            "rm": {"examples": [("Remover por nome", "delonix workload rm -f web")]},
+        },
+    },
     "pod": {
         "title": "delonix pod",
         "tagline": "Pods reais multi-container (create, ls, describe, rm, logs) — N containers como uma unidade.",
