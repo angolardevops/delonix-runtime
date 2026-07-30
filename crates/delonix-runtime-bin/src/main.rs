@@ -73,6 +73,12 @@ enum Cmd {
         #[command(subcommand)]
         action: cmd::vm::VmCmd,
     },
+    /// Unified compute layer over containers AND VMs: ls/stop/rm (ADR-0002).
+    /// Creation stays declarative — see `kind: Workload` (`stack apply`).
+    Workload {
+        #[command(subcommand)]
+        action: cmd::workload::WorkloadCmd,
+    },
     /// Named volumes and bind mounts: create/ls/rm/inspect.
     Volumes {
         #[command(subcommand)]
@@ -219,6 +225,7 @@ fn run() -> Result<()> {
         Cmd::Image { vm, action } => cmd::image::run(vm, action),
         Cmd::Build(args) => cmd::build::run(args),
         Cmd::Vm { action } => cmd::vm::run(action),
+        Cmd::Workload { action } => cmd::workload::run(action),
         Cmd::Volumes { action } => cmd::volume::run(action),
         Cmd::Network { action } => cmd::network::run(action),
         Cmd::Secret { action } => cmd::secret::run(action),

@@ -1208,6 +1208,55 @@ fn fmt_vm_status(status: &delonix_runtime_core::Status) -> String {
     }
 }
 
+// ---- Adapters for the unified `delonix workload` layer (ADR-0002, Phase 2a) ----
+// Thin wrappers over the existing vm list/stop/rm APIs (mirror `vm ls`/`vm stop`/
+// `vm rm`) so `cmd/workload.rs` can drive VMs uniformly. `vm ls` uses the stored
+// records (not a per-VM `status()` reconcile), so this matches it exactly.
+
+pub(crate) fn workload_rows() -> Result<Vec<super::workload::WorkloadRow>> {
+    let base = state_root();
+    let mut rows = Vec::new();
+    for vm in delonix_vm::list(&base)? {
+        rows.push(super::workload::WorkloadRow {
+            kind: "vm",
+            name: vm.name.clone(),
+            status: fmt_vm_status(&vm.status),
+            info: format!("{} vCPU, {}", vm.vcpus, vm.memory),
+        });
+    }
+    Ok(rows)
+}
+
+/// `true` if a VM with this exact NAME exists.
+pub(crate) fn workload_owns(name: &str) -> Result<bool> {
+    Ok(delonix_vm::list(&state_root())?
+        .iter()
+        .any(|v| v.name == name))
+}
+
+pub(crate) fn workload_stop(name: &str) -> Result<()> {
+    delonix_vm::stop(&state_root(), name)?;
+    // Echo the name on success, mirroring the native `vm stop` (whose CLI arm
+    // prints it — `delonix_vm::stop` itself is silent).
+    println!("{name}");
+    Ok(())
+}
+
+pub(crate) fn workload_remove(name: &str, force: bool) -> Result<()> {
+    let base = state_root();
+    if force {
+        delonix_vm::remove_force(&base, name)?;
+    } else {
+        delonix_vm::remove(&base, name)?;
+    }
+    println!("{name}");
+    Ok(())
+}
+
+pub(crate) fn workload_describe(name: &str) -> Result<()> {
+    cmd_describe(&state_root(), &[name.to_string()])
+}
+
 /// UPTIME column: "Up X" since the CURRENT boot (`started_unix`, distinct
 /// from `created_unix` — see the field doc in `delonix-runtime-core`), or
 /// "-" for a stopped VM / an old record predating this field.

@@ -134,6 +134,7 @@ pub fn canonical_kind(kind: &str) -> &str {
         "knowdepends" | "dependency" => "Dependency",
         "stack" => "Stack",
         "pod" => "Pod",
+        "workload" => "Workload",
         _ => kind,
     }
 }
@@ -297,6 +298,11 @@ pub fn load(path: &Path) -> Result<Vec<ManifestDoc>> {
         // itself does not survive — it becomes its parts.
         if doc.kind == "Stack" {
             docs.extend(expand_stack(&doc)?);
+        } else if doc.kind == "Workload" {
+            // A `kind: Workload` lowers to a synthetic `kind: Container`/`kind: Vm`
+            // doc (ADR-0001), which then flows through the normal per-Kind apply —
+            // exactly like a Stack child. The Workload doc does not survive.
+            docs.push(crate::cmd::workload::lower_workload(&doc)?);
         } else {
             docs.push(doc);
         }
@@ -395,6 +401,40 @@ spec: { image: \"alpine:3.19\" }
         assert_eq!(docs[0].kind, "Network");
         assert_eq!(docs[0].metadata.name, "appnet");
         assert_eq!(docs[2].kind, "Container");
+        let _ = std::fs::remove_file(&p);
+    }
+
+    #[test]
+    fn workload_lowers_to_underlying_kind_through_load() {
+        // End-to-end through the real load() path: a Workload does not survive —
+        // it becomes its underlying Kind, inheriting name/namespace. (ADR-0001)
+        let text = "\
+apiVersion: delonix.io/v1
+kind: Workload
+metadata: { name: web, namespace: prod }
+spec:
+  type: container
+  container: { image: \"nginx:alpine\" }
+---
+apiVersion: delonix.io/v1
+kind: Workload
+metadata: { name: db }
+spec:
+  type: vm
+  vm: { disk: \"golden.qcow2\" }
+";
+        let p =
+            std::env::temp_dir().join(format!("delonix-workload-test-{}.yaml", std::process::id()));
+        std::fs::write(&p, text).unwrap();
+        let docs = load(&p).unwrap();
+        assert_eq!(docs.len(), 2);
+        assert_eq!(docs[0].kind, "Container");
+        assert_eq!(docs[0].metadata.name, "web");
+        assert_eq!(docs[0].metadata.namespace.as_deref(), Some("prod"));
+        assert_eq!(docs[1].kind, "Vm");
+        assert_eq!(docs[1].metadata.name, "db");
+        // No `Workload` doc survives the load.
+        assert!(of_kind(&docs, "Workload").is_empty());
         let _ = std::fs::remove_file(&p);
     }
 

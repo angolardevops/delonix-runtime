@@ -3433,3 +3433,27 @@ msgstr "a imagem '{ref}' está em uso por container(s): {list} — remove-os pri
 
 msgid "`system prune` removes every stopped container and unreferenced data — pass --force to confirm when not on a terminal"
 msgstr "`system prune` remove todos os containers parados e os dados sem referência — passa --force para confirmar fora de um terminal"
+
+msgid "workload '{name}': spec.type is required (container | vm)"
+msgstr "workload '{name}': spec.type é obrigatório (container | vm)"
+
+msgid "workload '{name}': type: pod not yet supported — use kind: Pod for multi-container pods"
+msgstr "workload '{name}': type: pod ainda não é suportado — usa kind: Pod para pods multi-container"
+
+msgid "workload '{name}': type: microvm not yet supported — use type: vm"
+msgstr "workload '{name}': type: microvm ainda não é suportado — usa type: vm"
+
+msgid "workload '{name}': unknown type '{type}' (supported: container, vm)"
+msgstr "workload '{name}': type '{type}' desconhecido (suportados: container, vm)"
+
+msgid "workload '{name}': type: {type} requires a '{type}:' block"
+msgstr "workload '{name}': type: {type} exige um bloco '{type}:'"
+
+msgid "workload '{name}': type: {type} must not carry a '{other}:' block"
+msgstr "workload '{name}': type: {type} não pode levar um bloco '{other}:'"
+
+msgid "no such workload: {name}"
+msgstr "workload inexistente: {name}"
+
+msgid "workload '{name}' is ambiguous (both a container and a vm) — use `delonix container` or `delonix vm` directly"
+msgstr "workload '{name}' é ambíguo (existe como container E como vm) — usa `delonix container` ou `delonix vm` directamente"
