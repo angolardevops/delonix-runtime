@@ -56,9 +56,13 @@ the flag is unused — zero change for existing users.
 `WorkloadRow` derives `Serialize` (its fields are already the stable names). The `OutputFormat`
 enum + the emit helper land in `output.rs` so the remaining commands adopt them mechanically.
 
-**Follow-up (documented, not silent):** `container ls`, `vm ls`, `pod ls`, `network ls`,
-`volumes ls`, `image ls`, `secret ls`, `storage ls`, `sharevolume ls` — each a small feature-dev
-task applying the same enum + a `Serialize` row struct. Tracked; not done here.
+**Rollout status:**
+- **Done:** `workload ls` (first slice), `vm ls`, `network ls`, `volumes ls`.
+- **Remaining (documented, not silent):** `container ps` (more complex — reconcile loop; and
+  containers are already covered by `workload ls -o json`), `pod ls`, `image ls` (its `Ls` is
+  dual-purpose — also serves `image --vm ls` — so `-o json` there needs the vm-image path too, to
+  avoid silently ignoring the flag), `secret ls`, `storage ls`, `sharevolume ls`. Each is the same
+  enum + a `Serialize` row struct; tracked, not done here.
 
 ## Alternatives considered
 
