@@ -57,12 +57,13 @@ the flag is unused — zero change for existing users.
 enum + the emit helper land in `output.rs` so the remaining commands adopt them mechanically.
 
 **Rollout status:**
-- **Done:** `workload ls` (first slice), `vm ls`, `network ls`, `volumes ls`.
-- **Remaining (documented, not silent):** `container ps` (more complex — reconcile loop; and
-  containers are already covered by `workload ls -o json`), `pod ls`, `image ls` (its `Ls` is
-  dual-purpose — also serves `image --vm ls` — so `-o json` there needs the vm-image path too, to
-  avoid silently ignoring the flag), `secret ls`, `storage ls`, `sharevolume ls`. Each is the same
-  enum + a `Serialize` row struct; tracked, not done here.
+- **Done:** `workload ls`, `container ps`, `vm ls`, `pod ls`, `network ls`, `volumes ls`,
+  `secret ls` (key names only — never values), `storage ls`, `sharevolume ls`.
+- **Remaining:** `image ls` only. Its `ImageCmd::Ls` is **dual-purpose** — it also serves
+  `image --vm ls` (mapped to `VmImageCmd::Ls`). Adding `-o json` there must cover the vm-image
+  path too, otherwise `image --vm ls -o json` would silently ignore the flag (violating the
+  no-silent-failure guardrail). Deferred to a dedicated slice that touches both `cmd::image` and
+  `cmd::vmimage` together — tracked, not a silent gap.
 
 ## Alternatives considered
 

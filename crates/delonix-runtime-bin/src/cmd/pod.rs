@@ -40,7 +40,11 @@ pub enum PodCmd {
         file: Option<PathBuf>,
     },
     /// List the pods (derived from container labels).
-    Ls,
+    Ls {
+        /// Output format: `table` (default) or `json` (ADR-0005).
+        #[arg(short = 'o', long = "output", value_enum, default_value_t)]
+        output: output::OutputFormat,
+    },
     /// Details of one or more pods (containers + the shared IP), `kubectl` style.
     Describe { names: Vec<String> },
     /// Remove a pod: stop/remove ALL its containers + the shared netns.
@@ -68,7 +72,7 @@ pub fn run(action: PodCmd) -> Result<()> {
             let docs = manifest::load(&path)?;
             apply(&docs)
         }
-        PodCmd::Ls => ls(),
+        PodCmd::Ls { output } => ls(output),
         PodCmd::Describe { names } => describe(&names),
         PodCmd::Rm { names, force } => {
             for n in &names {
@@ -216,7 +220,18 @@ fn remove_pod(name: &str, force: bool) -> Result<()> {
     Ok(())
 }
 
-fn ls() -> Result<()> {
+/// `pod ls -o json` row (ADR-0005): running/total as numbers (not `"1/2"`), ip nullable.
+#[derive(serde::Serialize)]
+struct PodLsRow {
+    name: String,
+    running: usize,
+    total: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    ip: Option<String>,
+    status: String,
+}
+
+fn ls(format: output::OutputFormat) -> Result<()> {
     let (_images, store) = open_stores()?;
     let mut pods: BTreeMap<String, Vec<Container>> = BTreeMap::new();
     for c in store.list()? {
@@ -224,7 +239,7 @@ fn ls() -> Result<()> {
             pods.entry(pod.clone()).or_default().push(c);
         }
     }
-    let mut t = output::Table::new(&["POD", "CONTAINERS", "IP", "STATUS"]);
+    let mut rows = Vec::new();
     for (pod, mut members) in pods {
         let mut running = 0;
         for c in members.iter_mut() {
@@ -235,17 +250,30 @@ fn ls() -> Result<()> {
         }
         let ip = infra::container_ip(&pod_netns_name(&pod));
         let status = if running == members.len() {
-            "Running".to_string()
+            "Running"
         } else if running == 0 {
-            "Stopped".to_string()
+            "Stopped"
         } else {
-            "Degraded".to_string()
+            "Degraded"
         };
+        rows.push(PodLsRow {
+            name: pod,
+            running,
+            total: members.len(),
+            ip: (!ip.is_empty()).then_some(ip),
+            status: status.to_string(),
+        });
+    }
+    if format == output::OutputFormat::Json {
+        return output::print_json(&rows);
+    }
+    let mut t = output::Table::new(&["POD", "CONTAINERS", "IP", "STATUS"]);
+    for r in rows {
         t.row(vec![
-            pod,
-            format!("{running}/{}", members.len()),
-            if ip.is_empty() { "-".to_string() } else { ip },
-            status,
+            r.name,
+            format!("{}/{}", r.running, r.total),
+            r.ip.unwrap_or_else(|| "-".to_string()),
+            r.status,
         ]);
     }
     t.print();
