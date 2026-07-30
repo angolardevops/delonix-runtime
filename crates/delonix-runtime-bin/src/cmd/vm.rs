@@ -570,6 +570,27 @@ pub enum VmCmd {
         #[arg(long, short = 'f')]
         force: bool,
     },
+    /// Take a named snapshot (libvirt: a running VM's snapshot is a system
+    /// checkpoint — memory + disk; `restore` reverts to it). Not yet supported
+    /// on the cloud-hypervisor backend.
+    Snapshot {
+        #[arg(add = ArgValueCandidates::new(super::complete::vms))]
+        name: String,
+        /// Snapshot name.
+        snapshot: String,
+    },
+    /// Revert the VM to a named snapshot.
+    Restore {
+        #[arg(add = ArgValueCandidates::new(super::complete::vms))]
+        name: String,
+        /// Snapshot name to revert to.
+        snapshot: String,
+    },
+    /// List the VM's snapshots.
+    Snapshots {
+        #[arg(add = ArgValueCandidates::new(super::complete::vms))]
+        name: String,
+    },
     /// Apply the `kind: Vm` documents of a manifest (`delonix_vm::create` is
     /// already idempotent by name — creates or auto-recovers).
     Apply {
@@ -1013,6 +1034,22 @@ pub fn run(action: VmCmd) -> Result<()> {
         VmCmd::Restart { name } => {
             delonix_vm::restart(&base, &name)?;
             println!("{name}");
+            Ok(())
+        }
+        VmCmd::Snapshot { name, snapshot } => {
+            delonix_vm::snapshot(&base, &name, &snapshot)?;
+            println!("{snapshot}");
+            Ok(())
+        }
+        VmCmd::Restore { name, snapshot } => {
+            delonix_vm::restore(&base, &name, &snapshot)?;
+            println!("{name}");
+            Ok(())
+        }
+        VmCmd::Snapshots { name } => {
+            for s in delonix_vm::snapshots(&base, &name)? {
+                println!("{s}");
+            }
             Ok(())
         }
         VmCmd::Rm { name, force } => {
