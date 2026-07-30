@@ -20,3 +20,16 @@ zstd = "0.13"
 base64 = "0.22"
 # Verificação de assinaturas cosign/sigstore (B8): ECDSA P-256.
 ring = "0.17"
+
+[dev-dependencies]
+# Property-based robustness ("fuzz on stable"): the repo pins to stable Rust, so
+# `cargo-fuzz` (nightly + libfuzzer) is out — `proptest` throws structured/arbitrary
+# input at the pure parsers and asserts they never panic. Dev-only: never in the
+# release tree (`cargo tree -e normal` stays clean). See the `delonix-testing` skill.
+proptest = "1"
+# Micro-benchmarks (dev-only, stable). Pre-blessed in dependency-map.md §4.
+criterion = "0.5"
+
+[[bench]]
+name = "parse_reference"
+harness = false

@@ -37,7 +37,13 @@ fn reg_err(e: reqwest::Error) -> Error {
 /// Splits the reference into (API host, repository, tag/digest), applying
 /// Docker's rules: default registry `registry-1.docker.io`, official
 /// images under `library/`.
-fn parse_reference(input: &str) -> (String, String, String) {
+/// Splits an image reference into `(registry_host, repository, reference)` — where
+/// `reference` is the digest if present (it rules resolution), otherwise the tag.
+/// Pure and total (never panics, never errors — malformed input just yields the
+/// best-effort split). `pub` so the robustness (proptest) test and the criterion
+/// bench can reach it; a workspace-internal crate with no external consumers, so
+/// widening this is free.
+pub fn parse_reference(input: &str) -> (String, String, String) {
     // tag (`:`) or digest (`@`) — the `:` must be AFTER the last `/`.
     let (name, reference) = if let Some(idx) = input.find('@') {
         // `repo:tag@digest` (combined format, valid in Docker/OCI — the digest
@@ -1154,6 +1160,42 @@ mod tests {
         assert_eq!(h, "ghcr.io");
         assert_eq!(r, "owner/app");
         assert_eq!(t, "sha256:deadbeef");
+    }
+
+    // ---- Robustness ("fuzz on stable" via proptest) ----------------------
+    // `parse_reference` parses UNTRUSTED input (an image ref from a manifest,
+    // a CLI arg, a compose file). It has already had real bugs (the combined
+    // `repo:tag@digest` form). It is total by contract; this proves it against
+    // arbitrary and structured input instead of the handful of hand-picked cases.
+
+    proptest::proptest! {
+        // Arbitrary bytes-as-string: must never panic, always return owned parts.
+        #[test]
+        fn parse_reference_never_panics_on_arbitrary_input(s in ".*") {
+            let _ = parse_reference(&s);
+        }
+
+        // Structured refs built from realistic fragments (registry/repo/tag/digest,
+        // plus the separators and empties that break naive splitters) — same
+        // no-panic guarantee, over inputs shaped like the real thing. When a
+        // non-empty digest is present it must win the reference slot (the
+        // resolution-authoritative half — the invariant a `repo:tag@digest` relies on).
+        #[test]
+        fn parse_reference_digest_wins_over_tag(
+            host in proptest::option::of("[a-z0-9.-]{1,30}"),
+            repo in "[a-z0-9][a-z0-9/_.-]{0,40}",
+            tag in proptest::option::of("[A-Za-z0-9_.-]{1,20}"),
+            hex in "[0-9a-f]{64}",
+        ) {
+            let mut r = String::new();
+            if let Some(h) = host { r.push_str(&h); r.push('/'); }
+            r.push_str(&repo);
+            if let Some(t) = tag { r.push(':'); r.push_str(&t); }
+            r.push_str("@sha256:");
+            r.push_str(&hex);
+            let (_h, _repo, reference) = parse_reference(&r);
+            proptest::prop_assert_eq!(reference, format!("sha256:{hex}"));
+        }
     }
 
     /// Minimal HTTP server (one connection, one canonical response) — enough
