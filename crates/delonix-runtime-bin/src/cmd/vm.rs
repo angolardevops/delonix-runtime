@@ -492,6 +492,11 @@ pub enum VmCmd {
         /// and can add latency, especially for an unreachable/booting VM.
         #[arg(long)]
         ports: bool,
+        /// Output format: `table` (default) or `json` (ADR-0005). The
+        /// `ports_open` field is included only with `--ports` (same as the table
+        /// column — the probe does live network I/O, off by default).
+        #[arg(short = 'o', long = "output", value_enum, default_value_t)]
+        output: super::output::OutputFormat,
     },
     /// Attach to the VM's serial console (interactive terminal) — works with no
     /// IP (boot logs, login). Escape: Ctrl-] .
@@ -959,7 +964,25 @@ pub fn run(action: VmCmd) -> Result<()> {
             let store = super::vmimage::VmImageStore::open(super::util::state_root())?;
             super::vmimage::cmd_push(&store, &name, &target)
         }
-        VmCmd::Ls { ports } => {
+        VmCmd::Ls { ports, output } => {
+            if output == super::output::OutputFormat::Json {
+                let rows: Vec<VmLsRow> = delonix_vm::list(&base)?
+                    .into_iter()
+                    .map(|vm| VmLsRow {
+                        name: vm.name.clone(),
+                        vcpus: vm.vcpus,
+                        memory: vm.memory,
+                        status: fmt_vm_status(&vm.status),
+                        ip: vm.ip.clone(),
+                        started_unix: vm.started_unix,
+                        role: vm_role(&vm.name).to_string(),
+                        gpu: fmt_vm_gpu(&vm.devices),
+                        // The probe does live network I/O — only when --ports (like the column).
+                        ports_open: ports.then(|| fmt_open_ports(vm.ip.as_deref())),
+                    })
+                    .collect();
+                return output::print_json(&rows);
+            }
             let mut cols = vec![
                 "NAME", "VCPUS", "MEMORY", "STATUS", "IP", "UPTIME", "ROLE", "GPU",
             ];
@@ -1233,6 +1256,25 @@ fn cmd_reach(_base: &std::path::Path) -> Result<()> {
 /// A VM's state as text, without the raw enum `{:?}`: `Failed(137)` from
 /// `Debug` would become "Failed(137)" — readable, but `Exited (137)` is the
 /// vocabulary the rest of the CLI already uses (`container ps`). Pure.
+/// `vm ls -o json` row (ADR-0005): stable keys mirroring the table columns, with
+/// machine-friendly values (`ip`/`started_unix` as nullable raw, not `<none>`/a
+/// human duration). `ports_open` present only with `--ports`.
+#[derive(serde::Serialize)]
+struct VmLsRow {
+    name: String,
+    vcpus: u32,
+    memory: String,
+    status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    ip: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    started_unix: Option<u64>,
+    role: String,
+    gpu: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    ports_open: Option<String>,
+}
+
 fn fmt_vm_status(status: &delonix_runtime_core::Status) -> String {
     use delonix_runtime_core::Status as S;
     match status {

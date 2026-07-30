@@ -69,7 +69,11 @@ pub enum NetworkCmd {
         json: bool,
     },
     /// List the networks.
-    Ls,
+    Ls {
+        /// Output format: `table` (default) or `json` (ADR-0005).
+        #[arg(short = 'o', long = "output", value_enum, default_value_t)]
+        output: output::OutputFormat,
+    },
     /// WireGuard identity of THIS node, for the encrypted VXLAN overlay between nodes
     /// (`network create --driver overlay`). The private key stays 0600 in
     /// `<root>/wg/node.key`; the public one is what you hand out to the peers.
@@ -132,7 +136,7 @@ pub fn run(action: NetworkCmd) -> Result<()> {
         NetworkCmd::Dash { once, json } => {
             super::dash::run(super::dash::DashScope::Networks, once, json)
         }
-        NetworkCmd::Ls => cmd_ls(&store),
+        NetworkCmd::Ls { output } => cmd_ls(&store, output),
         NetworkCmd::Node { action } => cmd_node(action),
         NetworkCmd::Create {
             name,
@@ -201,9 +205,31 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
     Ok(())
 }
 
-fn cmd_ls(store: &NetworkStore) -> Result<()> {
+/// `network ls -o json` row (ADR-0005): stable keys mirroring the table columns.
+#[derive(serde::Serialize)]
+struct NetworkLsRow {
+    name: String,
+    driver: String,
+    bridge: String,
+    subnet: String,
+}
+
+fn cmd_ls(store: &NetworkStore, format: output::OutputFormat) -> Result<()> {
+    let nets = store.list()?;
+    if format == output::OutputFormat::Json {
+        let rows: Vec<NetworkLsRow> = nets
+            .into_iter()
+            .map(|n| NetworkLsRow {
+                name: n.name,
+                driver: n.driver,
+                bridge: n.bridge,
+                subnet: n.subnet,
+            })
+            .collect();
+        return output::print_json(&rows);
+    }
     let mut t = output::Table::new(&["NAME", "DRIVER", "BRIDGE", "SUBNET"]);
-    for n in store.list()? {
+    for n in nets {
         t.row(vec![n.name, n.driver, n.bridge, n.subnet]);
     }
     t.print();
