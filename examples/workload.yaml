@@ -1,0 +1,33 @@
+# Workload — one declarative object for BOTH compute types (ADR-0001).
+#
+#   delonix stack apply -f examples/workload.yaml
+#   delonix stack apply --dry-run -f examples/workload.yaml   # see what it lowers to
+#
+# A `kind: Workload` is sugar: it does NOT survive the load — it is rewritten into
+# a `kind: Container` or `kind: Vm` and flows through the normal per-Kind apply,
+# exactly like a `kind: Stack` child. `spec.type` picks the type; the block named
+# after the type (`container:` / `vm:`) is the SAME spec the standalone Kind takes
+# (see examples/container.yaml and examples/vm.yaml for every field).
+apiVersion: delonix.io/v1
+kind: Workload
+metadata:
+  name: web
+  namespace: default
+spec:
+  type: container          # container | vm   (pod / microvm are reserved — a clear error, not silent)
+  container:               # == kind: Container spec (examples/container.yaml)
+    image: nginx:alpine
+    restartPolicy: always
+    env:
+      - TZ=Africa/Luanda
+---
+apiVersion: delonix.io/v1
+kind: Workload
+metadata:
+  name: db
+spec:
+  type: vm                 # lowers to kind: Vm
+  vm:                      # == kind: Vm spec (examples/vm.yaml)
+    disk: delonix-vm-k8s:1.34
+    vcpus: 2
+    memory: 4G
