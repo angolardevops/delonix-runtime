@@ -15,6 +15,30 @@
 const GAP: usize = 3;
 
 // ---------------------------------------------------------------------------
+// Output format (ADR-0005) — `-o/--output <table|json>` for listing commands
+// ---------------------------------------------------------------------------
+
+/// Output format shared by every listing command, so `-o json` behaves
+/// identically everywhere. `table` (default) is the human view; `json` is the
+/// machine view (stable, language-independent field names — see ADR-0005).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, clap::ValueEnum)]
+pub enum OutputFormat {
+    #[default]
+    Table,
+    Json,
+}
+
+/// Prints `items` as a pretty JSON **array** (one element per resource, `[]` when
+/// empty) — the ADR-0005 contract for `-o json`. Newline-terminated, no human
+/// chrome, safe to pipe into `jq`.
+pub fn print_json<T: serde::Serialize>(items: &[T]) -> delonix_runtime_core::Result<()> {
+    let s = serde_json::to_string_pretty(items)
+        .map_err(|e| delonix_runtime_core::Error::Invalid(format!("json output: {e}")))?;
+    println!("{s}");
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
 // Color
 // ---------------------------------------------------------------------------
 
