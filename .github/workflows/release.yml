@@ -85,14 +85,24 @@ jobs:
             echo "::warning::release SEM assinatura — a chave ainda não foi configurada (ver docs/SECURITY-RELEASES.md). O install.sh avisa e verifica só integridade de transferência."
             exit 0
           fi
-          # `install` sem `update`: o índice do runner é fresco na maioria dos
-          # dias, mas quando não é, o apt falha com 404 num URL de pacote stale.
-          # Aqui isso abortaria a release INTEIRA por um motivo que nada tem a
-          # ver com o código — e, uma vez a chave configurada, sair sem assinar
-          # não é opção (todos os instaladores recusariam). Uma re-tentativa com
-          # o índice actualizado cobre esse caso sem custo no caminho feliz.
-          sudo apt-get install -y minisign \
-            || { sudo apt-get update -qq && sudo apt-get install -y minisign; }
+          # minisign vive no componente `universe` do apt. O padrão antigo
+          # (`install || update -qq && install`) falhou DETERMINISTICAMENTE em
+          # duas corridas da v0.38.0 (`Unable to locate package minisign`): o
+          # `-qq` mascarava o erro do `update` e o universe nem sempre está no
+          # índice do runner. Activa o universe explicitamente, faz um `update`
+          # visível, e retenta o install para aguentar um mirror instável.
+          sudo add-apt-repository -y universe
+          sudo apt-get update
+          n=0
+          until sudo apt-get install -y minisign; do
+            n=$((n + 1))
+            if [ "$n" -ge 3 ]; then
+              echo "::error::minisign não instalável via apt após 3 tentativas (universe/mirror) — endurecer o passo (binário estático de jedisct1/minisign, versão+checksum fixados)"
+              exit 1
+            fi
+            echo "retry install minisign ($n)…"
+            sleep 5
+          done
           # A chave privada só existe no disco do runner durante este passo.
           umask 077
           printf '%s\n' "$MINISIGN_SECRET_KEY" > /tmp/minisign.key
