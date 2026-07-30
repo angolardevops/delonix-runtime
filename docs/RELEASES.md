@@ -4,6 +4,279 @@
 > (regenerado automaticamente pelo pipeline de release a cada tag publicada).
 > Não editar à mão — edita a nota da release respectiva.
 
+# v0.38.0 — Universal Runtime: kind: Workload, snapshots de VM, e uma API `-o json`
+
+A maior release de superfície desde o início do **Runtime Abstraction Layer**. Um único
+objecto declarativo passa a descrever os quatro tipos de computação, o motor de VMs ganha
+snapshots de sistema de 1.ª classe, e **todos** os comandos de listagem ganham saída JSON
+máquina-legível — a fundação para GitOps/CI/observabilidade por cima do runtime. Inclui
+também o endurecimento de segurança do caminho de dados IPv6 (antes marcado v0.37.1, nunca
+lançado em separado).
+
+Cada peça foi validada ao vivo num host real, não só com `cargo test` — e as limitações
+conhecidas estão incluídas, como sempre.
+
+## `kind: Workload` — um objecto para os 4 tipos de computação (ADR-0001, ADR-0006)
+
+O começo do Universal Runtime: `kind: Workload` + `spec.type: container | vm | pod | microvm`,
+com um bloco nomeado pelo tipo (`spec.container`/`spec.vm`/`spec.pod`/`spec.microvm`) que é
+**exactamente** a `ContainerSpec`/`VmSpec`/`PodSpec` do Kind autónomo — não redefine um único
+campo, logo não pode divergir.
+
+```yaml
+apiVersion: delonix.io/v1
+kind: Workload
+metadata: { name: web }
+spec:
+  type: container          # container | vm | pod | microvm
+  container:
+    image: nginx:alpine
+    ports: ["8080:80"]
+```
+
+- **Açúcar que baixa no `manifest::load`** — um `kind: Workload` é reescrito num
+  `kind: Container`/`Vm`/`Pod` sintético (herda `metadata`) e segue o apply por-Kind normal,
+  tal como um filho de `kind: Stack`. `apply`/`stack apply`/`--dry-run`/`ls`/`describe` e o
+  `apply -f` por-Kind vêem o filho **sem wiring novo**.
+- **`type: microvm`** (ADR-0006) baixa para `kind: Vm` com o **backend forçado a
+  `cloud-hypervisor`** (o VMM de microVM). Um bloco que peça outro backend (`backend: libvirt`)
+  é contradição → erro dirigido. Precisa de CH instalado + imagem CH-bootável (não o golden k8s,
+  que é libvirt-only).
+- **Fail-closed** em todo o lado: cada tipo tem de trazer exactamente o seu bloco (os outros
+  ausentes), tipo desconhecido/em falta → erro claro. Já não há tipos reservados.
+
+Ver `examples/workload.yaml`.
+
+## `delonix workload {ls,describe,stop,rm}` — day-2 unificado (ADR-0002)
+
+O lado imperativo da unificação (a criação é declarativa, via `kind: Workload`). Um trait
+`ComputeDriver` com adaptadores para os motores de container e VM:
+
+- **`workload ls`** mostra containers **E** VMs numa só tabela (e com `-o json`, ver abaixo).
+- **`describe`/`stop`/`rm`** fazem routing por nome exacto, **fail-closed**: zero donos →
+  `no such workload`; um container E uma vm com o mesmo nome → `ambiguous` (aponta para o
+  comando específico, nunca adivinha).
+
+## Snapshot/restore de VM de 1.ª classe
+
+O `VmBackend` ganha snapshot/restore como métodos de 1.ª classe:
+
+- **`vm snapshot <vm> <nome>`** — no libvirt, de uma VM **a correr** é um checkpoint de
+  **sistema** (memória **+** disco).
+- **`vm restore <vm> <nome>`** — volta ao checkpoint (`virsh snapshot-revert`).
+- **`vm snapshots <vm>`** — lista os snapshots.
+- **Cloud Hypervisor**: fail-closed (o restore do CH relança um vmm novo — ciclo diferente —
+  e precisa de `ch-remote`; deferido, com erro claro a apontar para o backend libvirt).
+- **Armadilha a saber**: `vm stop` faz *undefine* do domínio (para não deixar órfãos), por isso
+  o snapshot exige a VM **a correr**.
+
+## `-o json` — saída estruturada em todos os comandos de listagem (ADR-0005)
+
+O runtime deixa de ser só-CLI. **Todos os 10 comandos de listagem** aceitam
+`-o/--output json` (default continua `table`), emitindo um array JSON com **chaves estáveis,
+independentes de língua** (nunca os headers traduzidos) — a "API" para automação/GitOps/SRE:
+
+```
+delonix workload ls -o json | jq '.[] | select(.status | startswith("Up"))'
+```
+
+Cobertura: `workload · container ps · vm · pod · network · volumes · secret · storage ·
+sharevolume · image` (incl. imagens VM pelos três pontos de entrada `image ls`/`image --vm
+ls`/`image vm ls`).
+
+- **`secret ls -o json` nunca expõe valores** — só nomes de chaves + contagem (os valores só
+  saem por `secret inspect --reveal`).
+- Valores máquina-crus onde faz sentido: `created_unix`/`size_bytes` numéricos,
+  `running`/`total` de pods, bytes/booleans de quota (com `used_complete`/`measured` para
+  distinguir medição incompleta de valor real).
+
+## Segurança: o caminho de dados IPv6 não filtrado (era v0.37.1)
+
+**Actualização de segurança recomendada.** A SDN atribuía um IPv6 ULA a cada container e a
+firewall inteira é `table ip` (v4) — um segundo caminho de dados com zero política, que
+contornava `ingress`/`egress`, `policy deny`, isolamento de namespace, `kind: Dependency` e o
+guarda L4. Corrigido com **duas camadas independentes**: `disable_ipv6` no attach (tira ULA +
+link-local) e `table ip6 dlxing` (`forward policy drop`) no holder, mais uma chain `fwguard`
+que nega `169.254.0.0/16` e `127.0.0.0/8`. Endurecimento a quente dos containers já a correr
+(`net netns up`), sem reiniciar. Escapatórias ruidosas: `DELONIX_ENABLE_IPV6=1`,
+`DELONIX_ALLOW_LINK_LOCAL=1`. Detalhe em `docs/releases/v0.37.1.md`.
+
+## Qualidade e processo
+
+- **Infra de testes** (dev-only, stable Rust): robustez via `proptest` ("fuzz on stable" — o
+  `cargo-fuzz` exige nightly), micro-benchmarks `criterion`, e cobertura via `cargo-llvm-cov`
+  (`scripts/coverage.sh`, `make bench`/`make coverage`). Tudo confinado a dev-dependencies — a
+  árvore de release continua limpa.
+- **6 ADRs** (`docs/adr/`) registam as decisões estruturais: Workload (0001), driver de
+  computação (0002), modelo de capacidades sem-tenancy (0003, *proposed*), checkpoint/CRIU
+  (0004, *proposed*), saída `-o json` (0005), `type: microvm` (0006). Mais a descoberta de
+  arquitectura em `docs/runtime/`.
+
+## Compatibilidade
+
+- **Aditivo, sem breaking changes de CLI.** O default de todos os `ls` continua a tabela
+  humana; `-o json` é opt-in. `kind: Container`/`Vm`/`Pod` continuam a funcionar tal e qual —
+  `kind: Workload` é açúcar por cima, não um substituto.
+- `type: microvm` é host-dependente (precisa de Cloud Hypervisor) de uma forma que `type: vm`
+  não é — por desenho, e fail-closed no boot se o CH faltar.
+
+## Limitações conhecidas
+
+- Snapshot/restore de VM só no backend **libvirt** (o Cloud Hypervisor recusa com erro claro).
+- A validação end-to-end do snapshot cobre as operações libvirt numa VM real; o rollback de
+  estado *dentro* do convidado não foi exercitado.
+- ADR-0003 (capacidades) e ADR-0004 (checkpoint) ficam *proposed* — por desenho, à espera de um
+  consumidor/necessidade concreta, para não construir abstracção prematura.
+
+---
+
+# v0.37.1 — versão de SEGURANÇA: o caminho IPv6 não filtrado
+
+**Actualização recomendada a todos.** Esta versão fecha um contorno completo do modelo
+de política de rede. Quem corre containers de mais do que um inquilino no mesmo host
+deve actualizar antes de qualquer outra coisa.
+
+Bloco 0 do plano `33_delonix_runtime_ingress_egress_hardening` — RF-NET-11 (mitigação)
+e RF-NET-02. O relatório de discovery que o motivou está em
+[`docs/discovery/33_GAPS_ENCONTRADOS.md`](../discovery/33_GAPS_ENCONTRADOS.md).
+
+---
+
+## O problema (RF-NET-11)
+
+A SDN atribuía a cada container um endereço IPv6 ULA derivado do seu IPv4
+(`fd00:<2º octeto>::<o3>:<o4>`), enquanto **toda** a firewall vive em `table ip` — IPv4
+apenas. Isso é um segundo caminho de dados, completamente sem política, para todos os
+containers do host.
+
+Reproduzido ao vivo, dois containers na mesma rede:
+
+```
+# a firewall a NEGAR em IPv4
+$ delonix container exec cli wget -T3 -O/dev/null http://10.216.133.231/
+wget: download timed out
+
+# o mesmo alvo, o mesmo porto, por IPv6
+$ delonix container exec cli wget -T3 -O/dev/null 'http://[fd00:216::5081:c3ff:fe63:8bd1]:80/'
+                                                            → 200
+```
+
+**O que era contornável:** regras `ingress`/`egress`, `policy deny`, isolamento de
+namespace, `kind: Dependency` e o guarda L4 — todos são `table ip`.
+
+**Facilidade de exploração:** trivial. O endereço deriva do IPv4, e um único
+`ping -6 ff02::1%eth0` enumera todos os vizinhos da bridge numa passagem (medido: três
+respostas, incluindo o alvo). As imagens modernas escutam em `[::]` por omissão — o
+`nginx:alpine` activa `listen [::]:80` no seu próprio entrypoint.
+
+**Privilégio necessário:** nenhum. Um container normal chega a qualquer outro.
+
+## A correcção
+
+IPv6 passa a ser **explicitamente recusado** na SDN, em duas camadas independentes:
+
+1. **Sem endereços** — `disable_ipv6` dentro do netns de cada container, no `attach`.
+   Remove a ULA *e* o link-local que o kernel atribui sozinho. Não depende de nenhuma
+   configuração do host.
+2. **Sem encaminhamento** — `table ip6 dlxing` com `forward policy drop` no holder.
+   Apanha o que ainda assim rotear v6, por exemplo um container **privilegiado** que
+   remonte `/proc/sys` em escrita e volte a ligar o v6.
+
+São duas e não uma de propósito: a camada 2 depende de `bridge-nf-call-ip6tables`, que
+um host pode não ter; a camada 1 não depende de nada.
+
+**Nada se perdeu.** Não havia uplink v6 (`slirp4netns` corre sem `--enable-ipv6`, e a
+saída v6 sempre respondeu `Network is unreachable`) e o resolvedor interno só alguma vez
+respondeu registos A. A ULA servia tráfego leste-oeste que nenhuma política governava —
+que é exactamente o problema.
+
+Validado ao vivo com holder fresco: zero endereços `inet6` no container, `nginx` arranca
+e serve normalmente em IPv4, e o próprio `ping -6` falha na origem
+(`Cannot assign requested address`).
+
+## Destinos sensíveis negados por omissão (RF-NET-02)
+
+Chain nova `fwguard`, a `forward priority -20` — antes do `fwdeny` (-10), do dispatch
+por container (-5) e da política por omissão (0). Nenhuma regra de utilizador se lhe
+pode pôr à frente:
+
+- `169.254.0.0/16` — metadados de instância cloud. Num host cloud é o *endpoint* de
+  credenciais da instância, a um `GET` de distância de qualquer container. Não existia
+  negação nenhuma na árvore.
+- `127.0.0.0/8` — loopback do host. Já inalcançável na prática pelo
+  `--disable-host-loopback` do slirp, mas isso é uma flag num caminho de arranque à
+  distância de uma regressão, e a regra custa uma linha.
+
+Confirmado ao vivo pelo contador da própria regra: `packets 4 bytes 240` após uma
+tentativa de alcançar `169.254.169.254`.
+
+`fe80::/10` fica coberto pela recusa de v6 acima — não há endereços v6 para filtrar.
+
+**Fora desta versão, deliberadamente**: os sockets de gestão (`serve api`/`cri`/
+`docker-api`) são UNIX por omissão, logo não há endereço para um container alcançar;
+proteger os serviços que o próprio holder expõe (DNS interno, proxy L7) exigiria uma
+chain `input`, que este netns não tem. Fica registado como seguimento em vez de meio
+feito.
+
+## Escapatórias (opt-in, ruidosas)
+
+| Variável | Efeito |
+|---|---|
+| `DELONIX_ENABLE_IPV6=1` | Repõe a SDN IPv6 anterior: ULA + rota v6, e a tabela de recusa não é instalada |
+| `DELONIX_ALLOW_LINK_LOCAL=1` | Remove as negações do `fwguard` |
+
+Ambas emitem aviso de segurança no arranque do holder e existem para depuração. Mesma
+forma do `DELONIX_FORWARD_POLICY=accept` já existente. As duas foram validadas ao vivo
+(com `DELONIX_ENABLE_IPV6=1` o container volta a ter 3 endereços v6 e não há
+`table ip6`).
+
+## Compatibilidade
+
+- **Sem alterações de CLI, de manifesto ou de esquema do `Store`.**
+- Um container que dependesse de alcançar outro por IPv6 dentro da SDN deixa de o
+  conseguir. Não era uma funcionalidade documentada nem governável por política; quem
+  precise dela tem a escapatória acima, e deve saber que nenhuma regra de firewall se
+  lhe aplica.
+- **Containers já a correr são endurecidos A QUENTE — sem reiniciar nenhum.** A recusa
+  entra no `attach`, o que só cobria containers criados a partir daqui; mandar reiniciar
+  os outros seria a resposta errada neste motor, onde o dataplane não pertence ao ciclo
+  de vida do processo (`container update` já troca portas, volumes e redes com o PID
+  inalterado). `delonix net netns up` — idempotente — varre os netns vivos e desliga-lhes
+  o IPv6 no lugar:
+
+  ```
+  $ delonix net netns up
+  IPv6 refused on 2 running container netns (no restart needed)
+  ingress UP — holder pid 771156 · slirp pid 771174 · bridge delonix0 (10.200.0.1)
+  ```
+
+  Validado ao vivo contra containers criados **antes** da correcção, com o bypass aberto:
+  o PID ficou igual (`771209` antes e depois), o uptime continuou a contar, os endereços
+  v6 passaram a zero, o bypass fechou (`Cannot assign requested address`) e o serviço
+  IPv4 nunca piscou.
+
+  A varredura entra nos namespaces do holder por `nsenter` em vez de usar um verbo do
+  socket de controlo, **de propósito**: o caso que interessa é o upgrade in-place, em que
+  o holder ainda corre o binário ANTIGO e não conheceria um verbo acrescentado hoje.
+
+## Como confirmar depois de actualizar
+
+```bash
+# 1. sem endereços v6 dentro do container
+delonix container exec <c> ip -6 addr show          # deve vir vazio
+
+# 2. tabela de recusa presente no holder
+delonix net netns status                            # obtém o pid do holder
+nsenter -t <pid> -U -n --preserve-credentials -- nft list tables
+#   table ip dlxing
+#   table ip6 dlxing        ← esta
+
+# 3. as negações incondicionais, com os seus contadores
+nsenter -t <pid> -U -n --preserve-credentials -- nft list chain ip dlxing fwguard
+```
+
+---
+
 # v0.37.0 — auditoria sistemática dos 208 subcomandos: 4 caminhos de perda de dados fechados
 
 Release de **integridade de dados e honestidade de relato**. Nasceu de uma auditoria
