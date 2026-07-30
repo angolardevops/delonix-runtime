@@ -2521,6 +2521,53 @@ pub(crate) fn propagate_exit_status(status: &Status) {
     std::process::exit(code);
 }
 
+// ---- Adapters for the unified `delonix workload` layer (ADR-0002, Phase 2a) ----
+// Thin wrappers over the existing listing/stop/rm logic so `cmd/workload.rs` can
+// drive containers uniformly WITHOUT reaching into this module's private helpers.
+
+/// Rows for `delonix workload ls` — the container half. Reconciles status like
+/// `container ps` (same `reconcile_with_diagnostics`, so a workload seen here
+/// matches what `container ps` reports).
+pub(crate) fn workload_rows() -> Result<Vec<super::workload::WorkloadRow>> {
+    let (_images, store) = super::util::open_stores()?;
+    let mut cs = store.list()?;
+    cs.sort_by_key(|c| std::cmp::Reverse(c.created_unix));
+    let mut rows = Vec::new();
+    for c in cs.iter_mut() {
+        reconcile_with_diagnostics(&store, c);
+        let uptime = match c.status {
+            Status::Running | Status::Paused => {
+                c.pid_starttime.and_then(output::uptime_from_starttime)
+            }
+            _ => None,
+        };
+        rows.push(super::workload::WorkloadRow {
+            kind: "container",
+            name: c.name.clone(),
+            status: fmt_status_of(c, uptime),
+            info: output::display_ref(&c.image),
+        });
+    }
+    Ok(rows)
+}
+
+/// `true` if a container with this exact NAME exists (workload routing is by
+/// name, not id-prefix — deliberately unambiguous).
+pub(crate) fn workload_owns(name: &str) -> Result<bool> {
+    let (_images, store) = super::util::open_stores()?;
+    Ok(store.list()?.iter().any(|c| c.name == name))
+}
+
+pub(crate) fn workload_stop(name: &str) -> Result<()> {
+    let (_images, store) = super::util::open_stores()?;
+    cmd_stop(&store, name, 10)
+}
+
+pub(crate) fn workload_remove(name: &str, force: bool) -> Result<()> {
+    let (images, store) = super::util::open_stores()?;
+    cmd_rm(&images, &store, name, force)
+}
+
 /// Reconciles `c`'s status and, if it just flipped to `Crashed` in THIS call, records a
 /// best-effort forensic snapshot (see [`record_crash_forensics`]). Same idiom as the
 /// repeated `if reconcile_status(c) { store.update(...) }` seen throughout this file —
