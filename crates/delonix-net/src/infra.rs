@@ -959,6 +959,23 @@ fn handle_control(line: &str) -> String {
         // 5 tokens = `default` namespace (compat with the old client); 6 = namespaced.
         ["attach", netns, ip, bridge, gateway] => do_attach(netns, ip, bridge, gateway, "default"),
         ["attach", netns, ip, bridge, gateway, ns] => do_attach(netns, ip, bridge, gateway, ns),
+        // Reconciliation after a holder respawn: adopt the netns of a container
+        // that is STILL RUNNING (by pid) instead of creating a fresh one. See
+        // `do_reattach`. A holder from an older binary does not know this verb
+        // and answers `err:` — the caller reports it rather than pretending the
+        // container was recovered.
+        // Does this holder already serve that netns? Lets the host side skip
+        // containers that are healthy, so reconciliation is idempotent and an
+        // explicit `net netns up` on a working system does not tear down and
+        // rebuild every container's wire for nothing.
+        ["has-netns", netns] => {
+            let name = sanitize(netns);
+            return if std::path::Path::new(&format!("/run/netns/{name}")).exists() {
+                "ok yes\n".to_string()
+            } else {
+                "ok no\n".to_string()
+            };
+        }
         ["detach", netns] => do_detach(netns),
         ["cni-del", netns, id, ifname, hex] => do_cni_del(netns, id, ifname, hex),
         // live multi-homing (rootless): connects/disconnects an ADDITIONAL network to a
@@ -3125,6 +3142,20 @@ pub fn cni_detach_container(id: &str, conf_json: &str) -> Result<()> {
     ));
     release(id);
     Ok(())
+}
+
+/// `true` when the live holder already serves this container's netns.
+///
+/// The idempotence guard for reconciliation: without it, an explicit
+/// `net netns up` on a perfectly healthy system would rebuild every container's
+/// wire and cause the outage it exists to prevent. A holder too old to know the
+/// verb answers `err:` — treated as "already served", i.e. the conservative
+/// answer that changes nothing.
+pub fn holder_serves_netns(id: &str) -> bool {
+    match control_query(&format!("has-netns {}", sanitize(id))) {
+        Ok(body) => body.trim() != "no",
+        Err(_) => true,
+    }
 }
 
 /// **Attaches a container to an ingress network** (`net`=`ingress` or a private
