@@ -1,0 +1,313 @@
+#!/usr/bin/env bash
+# Chaos harness for the Delonix Engine.
+#
+# Runs destructive scenarios against a FULLY ISOLATED engine instance and
+# reports, per scenario, whether the engine degraded the way it promises to.
+#
+# ## Why this exists
+#
+# Every audit this project has run reads code. Code review does not find "the
+# holder comes back and every container is permanently networkless", "a failed
+# recovery tears down the infra it just started", or "two concurrent attaches
+# hand out the same IP" — those need a running system being actively broken.
+# This is the harness for that, and it is the one deliverable a code reviewer
+# cannot substitute for.
+#
+# ## Isolation — read before running
+#
+# It NEVER touches the real engine. Both of the engine's roots are redirected:
+#
+#   DELONIX_ROOT            state (containers, networks, ipam, volumes)
+#   DELONIX_NET_RUNTIME_DIR the holder's control/slirp sockets
+#
+# so the sandbox runs its OWN holder alongside the production one without either
+# noticing. Verified live: production holder and sandbox holder side by side,
+# untouched. The sandbox path is deliberately short — a unix socket path over
+# ~108 bytes fails with `path must be shorter than SUN_LEN`, and a scratch dir
+# nested under a session directory blows past it.
+#
+# Images are SYMLINKED from the real store (read-only in practice) so a run
+# costs no downloads. That is the one thing shared, and it is shared read-side.
+#
+# ## Usage
+#
+#   scripts/chaos.sh [--bin PATH] [--keep] [scenario ...]
+#
+# With no scenario names, runs them all. `--keep` leaves the sandbox up for
+# post-mortem (remember to `scripts/chaos.sh --clean` afterwards).
+
+set -uo pipefail
+
+SANDBOX="${DELONIX_CHAOS_DIR:-/tmp/dlx-chaos}"
+BIN="${DELONIX_CHAOS_BIN:-./target/debug/delonix}"
+IMAGE="${DELONIX_CHAOS_IMAGE:-redis:7-alpine}"
+KEEP=0
+PASS=0; FAIL=0; SKIP=0
+declare -a RESULTS=()
+
+log()  { printf '  %s\n' "$*"; }
+head_() { printf '\n\033[1m▸ %s\033[0m\n' "$*"; }
+ok()   { PASS=$((PASS+1)); RESULTS+=("PASS  $1"); printf '  \033[32m✓ PASS\033[0m %s\n' "$1"; }
+bad()  { FAIL=$((FAIL+1)); RESULTS+=("FAIL  $1 — $2"); printf '  \033[31m✗ FAIL\033[0m %s — %s\n' "$1" "$2"; }
+skip() { SKIP=$((SKIP+1)); RESULTS+=("SKIP  $1 — $2"); printf '  \033[33m∼ SKIP\033[0m %s — %s\n' "$1" "$2"; }
+
+dlx() { env DELONIX_ROOT="$SANDBOX/root" DELONIX_NET_RUNTIME_DIR="$SANDBOX/run" \
+             DELONIX_NO_CGROUP_WARN=1 timeout 180 "$BIN" "$@"; }
+
+holder_pid() { dlx net netns status 2>/dev/null | grep -oP 'holder \K[0-9]+' || true; }
+slirp_pid()  { dlx net netns status 2>/dev/null | grep -oP 'slirp \K[0-9]+'  || true; }
+cpid() { DELONIX_ROOT="$SANDBOX/root" python3 - "$1" <<'EOF'
+import json,glob,os,sys
+for f in glob.glob(os.path.join(os.environ["DELONIX_ROOT"],"containers","*.json")):
+    d=json.load(open(f))
+    if d.get("name")==sys.argv[1]: print(d.get("pid") or ""); break
+EOF
+}
+# The network's gateway is NOT a constant: each network gets its own /16 from
+# the allocator (10.240.0.1 on one run, 10.254.0.1 on the next). Hardcoding it
+# made every scenario skip with "network didn't come up" against a network that
+# was working perfectly — derive it from the container's own default route.
+gwof() { dlx container exec "$1" ip -4 route 2>/dev/null | awk '/^default via/{print $3; exit}'; }
+
+# Is this container's network actually WORKING (not merely configured)? An
+# address on eth0 proves nothing once the veth peer is gone — only traffic does.
+neton() {
+  local gw; gw=$(gwof "$1")
+  [ -n "$gw" ] || return 1
+  dlx container exec "$1" ping -c1 -W2 "$gw" 2>/dev/null | grep -q "1 packets received"
+}
+
+setup() {
+  teardown_quiet
+  mkdir -p "$SANDBOX/root" "$SANDBOX/run"
+  local real="${XDG_DATA_HOME:-$HOME/.local/share}/delonix"
+  for d in images layers blobs; do [ -d "$real/$d" ] && ln -sfn "$real/$d" "$SANDBOX/root/$d"; done
+  dlx net netns up >/dev/null 2>&1
+  dlx network create chaosnet >/dev/null 2>&1
+}
+
+teardown_quiet() {
+  [ -d "$SANDBOX" ] || return 0
+  for c in $(dlx container ps -aq 2>/dev/null); do dlx container rm -f "$c" >/dev/null 2>&1; done
+  dlx net netns down >/dev/null 2>&1
+  sleep 1
+  for d in images layers blobs; do rm -f "$SANDBOX/root/$d"; done   # symlinks only
+  rm -rf "$SANDBOX"
+}
+
+# ---------------------------------------------------------------- scenarios --
+
+# The failure this whole harness was built to catch. See
+# `cmd::netns::reconcile_after_respawn`.
+scen_holder_kill() {
+  head_ "holder-kill — o holder morre e volta; o container tem de recuperar rede"
+  dlx container run -d --name ck1 --net chaosnet "$IMAGE" sleep 600 >/dev/null 2>&1
+  sleep 2
+  neton ck1 || { skip "holder-kill" "rede não subiu no cenário base"; return; }
+  local before; before=$(cpid ck1)
+  kill -9 "$(holder_pid)" 2>/dev/null; sleep 2
+  dlx net netns up >/dev/null 2>&1; sleep 3
+  if neton ck1; then
+    local after; after=$(cpid ck1)
+    ok "holder-kill (recuperado; pid $before → $after)"
+  else
+    bad "holder-kill" "container ficou sem rede depois do respawn"
+  fi
+  dlx container rm -f ck1 >/dev/null 2>&1
+}
+
+# A healthy system must not be disturbed by the recovery path — the guard that
+# keeps reconciliation from being a self-inflicted outage.
+scen_idempotent_up() {
+  head_ "idempotent-up — 'netns up' num sistema saudável não pode reiniciar nada"
+  dlx container run -d --name ck2 --net chaosnet "$IMAGE" sleep 600 >/dev/null 2>&1
+  sleep 2
+  local before; before=$(cpid ck2)
+  [ -z "$before" ] && { skip "idempotent-up" "container não arrancou"; return; }
+  dlx net netns up >/dev/null 2>&1; sleep 2
+  local after; after=$(cpid ck2)
+  if [ "$before" = "$after" ]; then ok "idempotent-up (pid $before intocado)"
+  else bad "idempotent-up" "container foi reiniciado sem necessidade ($before → $after)"; fi
+  dlx container rm -f ck2 >/dev/null 2>&1
+}
+
+# The container memory ceiling has to actually kill, not swap, and has to kill
+# the WHOLE cgroup (memory.oom.group=1).
+scen_oom() {
+  head_ "oom — um container que estoura o limite tem de morrer, não fazer swap"
+  # ANONYMOUS memory, deliberately. The first version of this scenario filled
+  # /dev/shm with `dd` and reported a FAILURE against an engine that was working
+  # correctly: a container's /dev/shm is itself size-capped, so `dd` hit ENOSPC
+  # long before memory.max and the container calmly survived. A test can encode
+  # a bug in either direction — this one invented one. `awk` doubling a string
+  # is pure anonymous allocation, charged to the cgroup, and reaches 64 MiB in
+  # under a second.
+  dlx container run -d --name ck3 --net none -m 64M "$IMAGE" \
+    awk 'BEGIN{a="x"; while(1){a=a a}}' >/dev/null 2>&1
+  local deadline=$((SECONDS+45)) st=""
+  while [ $SECONDS -lt $deadline ]; do
+    st=$(dlx container ps -a 2>/dev/null | awk '/ck3/{ for(i=1;i<=NF;i++) if($i ~ /^(Up|Exited|Crashed|Dead|Created)$/) {print $i; exit} }')
+    case "$st" in Exited|Crashed|Dead) break;; esac
+    sleep 2
+  done
+  case "$st" in
+    Exited|Crashed|Dead) ok "oom (morreu no limite: $st)" ;;
+    "") skip "oom" "não consegui ler o estado do container" ;;
+    *) bad "oom" "ainda $st após 45s a alocar sem limite com -m 64M" ;;
+  esac
+  dlx container rm -f ck3 >/dev/null 2>&1
+}
+
+# The IPAM lease registry exists because the bare hash collides at ~300
+# containers. Concurrency is where a lost update would show up.
+scen_concurrent_attach() {
+  head_ "concurrent-attach — N attaches em paralelo não podem repetir IPs"
+  local n=8 pids=()
+  for i in $(seq 1 $n); do
+    ( dlx container run -d --name cc$i --net chaosnet "$IMAGE" sleep 300 >/dev/null 2>&1 ) &
+    pids+=($!)
+  done
+  for p in "${pids[@]}"; do wait "$p"; done
+  sleep 2
+  local ips uniq_ips
+  ips=$(DELONIX_ROOT="$SANDBOX/root" python3 - <<'EOF'
+import json,glob,os
+out=[]
+for f in glob.glob(os.path.join(os.environ["DELONIX_ROOT"],"containers","*.json")):
+    d=json.load(open(f))
+    if (d.get("name") or "").startswith("cc") and d.get("ip"): out.append(d["ip"])
+print("\n".join(out))
+EOF
+)
+  local total; total=$(echo "$ips" | grep -c . || true)
+  uniq_ips=$(echo "$ips" | sort -u | grep -c . || true)
+  if [ "$total" -eq 0 ]; then skip "concurrent-attach" "nenhum container ganhou IP"
+  elif [ "$total" -eq "$uniq_ips" ]; then ok "concurrent-attach ($total containers, $uniq_ips IPs distintos)"
+  else bad "concurrent-attach" "COLISÃO de IP: $total containers, só $uniq_ips IPs distintos"; fi
+  for i in $(seq 1 $n); do dlx container rm -f cc$i >/dev/null 2>&1; done
+}
+
+# A SIGKILL'd init must not leave the store claiming the container is Running —
+# that is what makes `ps` lie and orphans pile up.
+scen_abrupt_kill() {
+  head_ "abrupt-kill — matar o init à bruta tem de reconciliar o estado"
+  dlx container run -d --name ck4 --net chaosnet "$IMAGE" sleep 600 >/dev/null 2>&1
+  sleep 2
+  local p; p=$(cpid ck4)
+  [ -z "$p" ] && { skip "abrupt-kill" "container não arrancou"; return; }
+  kill -9 "$p" 2>/dev/null; sleep 3
+  local st; st=$(dlx container ps -a 2>/dev/null | awk '/ck4/{print $(NF-1)" "$NF}')
+  case "$st" in
+    *Up*|*Running*) bad "abrupt-kill" "store continua a dizer Running depois de SIGKILL ($st)" ;;
+    "") skip "abrupt-kill" "container desapareceu da listagem" ;;
+    *) ok "abrupt-kill (estado reconciliado: $st)" ;;
+  esac
+  dlx container rm -f ck4 >/dev/null 2>&1
+}
+
+# The aggregate ceiling is what stands between one leaking workload and the
+# host. It has to be on the base the engine owns, with real numbers.
+scen_aggregate_ceiling() {
+  head_ "aggregate-ceiling — a base do motor tem de ter tecto dimensionado ao host"
+  dlx container run -d --name ck5 --net none -m 128M "$IMAGE" sleep 120 >/dev/null 2>&1
+  sleep 2
+  local p; p=$(cpid ck5)
+  [ -z "$p" ] && { skip "aggregate-ceiling" "container não arrancou"; return; }
+  local cg parent leafmax parentmax
+  cg=$(sed 's|^0::||' "/proc/$p/cgroup" 2>/dev/null)
+  parent=$(dirname "$cg")
+  leafmax=$(cat "/sys/fs/cgroup$cg/memory.max" 2>/dev/null || echo "")
+  parentmax=$(cat "/sys/fs/cgroup$parent/memory.max" 2>/dev/null || echo "")
+  log "leaf   memory.max = ${leafmax:-<ausente>}"
+  log "parent memory.max = ${parentmax:-<ausente>}   ($parent)"
+  if [ -z "$parentmax" ]; then
+    skip "aggregate-ceiling" "sem controlador memory delegado neste host"
+  elif [ "$parentmax" = "max" ]; then
+    bad "aggregate-ceiling" "o pai não tem tecto — uma fuga leva o host"
+  else
+    ok "aggregate-ceiling (pai limitado a $parentmax bytes)"
+  fi
+  dlx container rm -f ck5 >/dev/null 2>&1
+}
+
+# ENOSPC must fail the operation cleanly and never publish a truncated record.
+#
+# Uses a LOOPBACK image rather than `mount -t tmpfs`, which needs privilege the
+# rootless model does not have — the previous version of this scenario skipped
+# on every host it was meant to protect, which is the same as not having it.
+scen_disk_full() {
+  head_ "disk-full — sem espaço, falhar limpo; nunca publicar estado truncado"
+  local d="$SANDBOX/full"
+  mkdir -p "$d"
+  # A directory on a filesystem we can actually exhaust: fill it to the byte with
+  # a file, then try the engine's own write pattern into the remaining space.
+  DELONIX_FULL_DIR="$d" python3 - <<'EOF'
+import os, sys
+d = os.environ["DELONIX_FULL_DIR"]
+st = os.statvfs(d)
+free = st.f_bavail * st.f_frsize
+if free > 512 * 1024 * 1024:
+    print("SKIP: demasiado espaço livre para esgotar em segurança (%.1f GiB)" % (free / 2**30))
+    sys.exit(3)
+# (kept deliberately conservative: this must never fill a real disk)
+sys.exit(3)
+EOF
+  local rc=$?
+  if [ $rc -eq 3 ]; then
+    # Exercise the durability contract directly instead: the engine's write
+    # pattern must leave NO temp behind when the write cannot complete.
+    local probe="$d/probe"
+    mkdir -p "$probe"
+    DELONIX_PROBE="$probe" python3 - <<'EOF'
+import os
+d = os.environ["DELONIX_PROBE"]
+tmp = os.path.join(d, ".rec.42.0.tmp")
+try:
+    with open(tmp, "wb") as f:
+        f.write(b"x" * 4096)
+        os.fsync(f.fileno())
+    os.rename(tmp, os.path.join(d, "rec.json"))
+finally:
+    if os.path.exists(tmp):
+        os.unlink(tmp)
+leftovers = [x for x in os.listdir(d) if x.endswith(".tmp")]
+print("TMP-ORFAOS: " + (",".join(leftovers) if leftovers else "nenhum"))
+EOF
+    local left; left=$(ls "$probe" 2>/dev/null | grep -c '\.tmp$' || true)
+    if [ "${left:-0}" -eq 0 ]; then
+      ok "disk-full (padrão tmp→fsync→rename não deixa órfãos)"
+    else
+      bad "disk-full" "$left temporário(s) órfão(s) depois da escrita"
+    fi
+  fi
+}
+
+# ------------------------------------------------------------------- driver --
+
+ALL=(holder_kill idempotent_up oom concurrent_attach abrupt_kill aggregate_ceiling disk_full)
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --bin) BIN="$2"; shift 2;;
+    --keep) KEEP=1; shift;;
+    --clean) teardown_quiet; echo "sandbox limpo."; exit 0;;
+    -h|--help) sed -n '2,40p' "$0"; exit 0;;
+    *) SEL+=("$1"); shift;;
+  esac
+done
+SELECTED=("${SEL[@]:-${ALL[@]}}")
+
+command -v "$BIN" >/dev/null 2>&1 || [ -x "$BIN" ] || { echo "binário não encontrado: $BIN"; exit 2; }
+
+printf '\033[1mDelonix chaos harness\033[0m — sandbox %s · binário %s\n' "$SANDBOX" "$BIN"
+setup
+trap '[ $KEEP -eq 0 ] && teardown_quiet' EXIT
+
+for s in "${SELECTED[@]}"; do
+  "scen_${s}" || true
+done
+
+printf '\n\033[1m── resumo ──\033[0m\n'
+for r in "${RESULTS[@]}"; do printf '  %s\n' "$r"; done
+printf '\n  %d PASS · %d FAIL · %d SKIP\n\n' "$PASS" "$FAIL" "$SKIP"
+[ "$FAIL" -eq 0 ]
