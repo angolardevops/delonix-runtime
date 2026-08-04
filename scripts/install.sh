@@ -212,9 +212,16 @@ RAM_GB=$(awk '/MemTotal/ {printf "%d", $2/1048576}' /proc/meminfo 2>/dev/null ||
 DISK_FREE_GB=$(df -k --output=avail "$REAL_HOME" 2>/dev/null | tail -1 | awk '{printf "%d", $1/1048576}')
 GPU_INFO=""
 if command -v lspci >/dev/null 2>&1; then
+  # `|| true` is NOT cosmetic. Under `set -euo pipefail`, a `grep` that matches
+  # NOTHING exits 1, `pipefail` propagates it, and the assignment fails — which
+  # aborted the whole installer, silently, right after the "preparing the host"
+  # line. Any machine with no VGA/3D device hits it: every headless server and
+  # essentially every VM. Reproduced in a clean Ubuntu 24.04 VM, where the
+  # installer died before installing anything and printed no error at all.
+  # A cosmetic GPU label must never be able to fail an installation.
   GPU_INFO=$(lspci 2>/dev/null | grep -Ei 'vga|3d controller' \
     | sed -E 's/^[0-9a-f:.]+ +//; s/^(VGA compatible controller|3D controller): +//' \
-    | paste -sd ';' - | sed 's/;/ · /g')
+    | paste -sd ';' - | sed 's/;/ · /g' || true)
 elif [ -d /sys/class/drm ] && ls /sys/class/drm/card[0-9] >/dev/null 2>&1; then
   GPU_INFO="present (install pciutils for details)"
 fi
@@ -614,6 +621,33 @@ if [ "$WITH_BINARY" = 1 ] && [ -d /etc/bash_completion.d ] && [ -x "$BIN_DIR/del
     && stepok binary "bash completion" || true
 fi
 
+# ------------------------------------------------- delegação de cgroup (limites)
+# SEM ISTO, `-m`/`--cpus`/`--pids-limit` são silenciosamente inertes.
+#
+# Medido numa VM limpa, por SSH normal, com `-m 128M --cpus 0.5`:
+#
+#     cgroup: /user.slice/user-1000.slice/session-40.scope   (partilhado com sshd)
+#     memory.max=max  cpu.max=max  pids.max=max
+#
+# A causa é uma regra do cgroup v2, não um bug do motor: um scope de sessão SSH é
+# IRMÃO de `user@<uid>.service`, não filho, e migrar um pid entre os dois exige
+# escrever o `cgroup.procs` do antepassado comum (`user-<uid>.slice`), que é da
+# root. O motor avisa quando isto acontece, mas um aviso não é um limite.
+#
+# `enable-linger` garante que o `user@<uid>.service` existe e persiste mesmo sem
+# sessão aberta — é o pré-requisito para qualquer uso não interactivo (cron, CI,
+# um serviço de utilizador). É o mesmo requisito que o Podman rootless tem.
+if command -v loginctl >/dev/null 2>&1 && [ -n "$REAL_USER" ]; then
+  if loginctl show-user "$REAL_USER" -p Linger 2>/dev/null | grep -q 'Linger=yes'; then
+    skip rootless linger
+  else
+    step rootless linger "enabling systemd lingering for $REAL_USER..."
+    $SUDO loginctl enable-linger "$REAL_USER" 2>/dev/null \
+      && stepok rootless linger \
+      || step rootless linger "could not enable (non-fatal; affects non-interactive use only)"
+  fi
+fi
+
 # ----------------------------------------------------------------- verificação
 msg "verifying the installation..."
 FAIL=0
@@ -636,12 +670,64 @@ if [ "$WITH_VM" = 1 ]; then
   check "VM backend (cloud-hypervisor or virsh)" sh -c 'command -v cloud-hypervisor || command -v virsh'
 fi
 
+# Testa a delegação DE VERDADE — cria um cgroup filho e tenta activar os
+# controladores. `cat /sys/fs/cgroup/.../cgroup.controllers` não chega: o
+# controlador pode estar listado e a migração continuar proibida.
+CGROUP_DELEGATED=0
+if [ "$(stat -fc %T /sys/fs/cgroup 2>/dev/null)" = cgroup2fs ]; then
+  _cg=$(sed -n 's|^0::||p' /proc/self/cgroup 2>/dev/null)
+  _probe="/sys/fs/cgroup${_cg}/.delonix-probe"
+  if mkdir -p "$_probe" 2>/dev/null &&
+     printf '+memory' > "/sys/fs/cgroup${_cg}/cgroup.subtree_control" 2>/dev/null; then
+    CGROUP_DELEGATED=1
+    printf '\055memory' > "/sys/fs/cgroup${_cg}/cgroup.subtree_control" 2>/dev/null || true
+  fi
+  rmdir "$_probe" 2>/dev/null || true
+fi
+if [ "$CGROUP_DELEGATED" = 1 ]; then
+  stepok verify "cgroup delegation (resource limits apply)"
+else
+  printf '[verify] %s: %sNOT DELEGATED%s\n' "cgroup delegation" "$C_WARN" "$C_0"
+fi
+
 echo
 if [ "$FAIL" = 0 ]; then
   msg "ready"
   echo "    delonix container run -d -p 8080:80 nginx && curl localhost:8080"
 else
   warn "installation finished with warnings — review the FAILED lines above"
+fi
+
+if [ "$CGROUP_DELEGATED" != 1 ]; then
+  echo
+  warn "resource limits (-m / --cpus / --pids-limit) will NOT be applied from this shell"
+  cat <<'CGHINT'
+    This shell has no delegated cgroup, so the engine cannot create one to put a
+    container in. It is a cgroup v2 rule, not a limitation of Delonix: an SSH
+    session scope is a SIBLING of user@<uid>.service, and moving a process
+    between them needs write access to a cgroup owned by root. Rootless Podman
+    has exactly the same requirement.
+
+    Namespace and seccomp isolation are unaffected — only the resource ceilings.
+
+    Run workloads inside a delegated scope:
+
+        systemd-run --user --scope -p Delegate=yes -- delonix container run ...
+
+    …or, for anything long-lived, from a systemd USER unit (which already gets a
+    delegated cgroup):
+
+        systemctl --user edit --force --full delonix-app.service
+        # [Service]
+        # Delegate=yes
+        # ExecStart=/usr/local/bin/delonix container run ...
+
+    Verify it took effect:
+
+        systemd-run --user --scope -p Delegate=yes -- \
+          delonix container run -d --name t -m 128M alpine sleep 60
+        # memory.max should read 134217728, not "max"
+CGHINT
 fi
 if [ "$NEED_RELOGIN" = 1 ]; then
   warn "log out and back in (or run 'newgrp kvm') for the new group memberships to take effect"

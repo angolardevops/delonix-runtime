@@ -2533,6 +2533,54 @@ ser capturado. Fechar isto por omissão fica como decisão de filosofia, não bu
 tem de parsear tabelas alinhadas) — superfície de API nova em ~10 comandos, merece
 desenho próprio.
 
+## Limites de recurso exigem cgroup delegado (medido numa VM limpa, 2026-08-04)
+
+**`-m`/`--cpus`/`--pids-limit` são inertes numa sessão SSH normal.** Descoberto a
+correr o arnês de caos DENTRO de uma VM criada com o próprio `delonix vm create` —
+um host limpo alcançado por SSH, que é como se chega a um servidor a sério. No host
+de desenvolvimento passava despercebido porque a shell corre sob o scope do VS Code,
+que ESTÁ dentro de `user@<uid>.service`.
+
+Medido, com `-m 128M --cpus 0.5`:
+
+```
+cgroup: /user.slice/user-1000.slice/session-40.scope   (partilhado com sshd)
+memory.max=max  cpu.max=max  pids.max=max  memory.swap.max=max
+```
+
+**É regra do cgroup v2, não bug.** Um scope de sessão SSH é IRMÃO de
+`user@<uid>.service`, não filho; migrar um pid entre os dois exige escrever o
+`cgroup.procs` do antepassado comum (`user-<uid>.slice`), que é da root:
+
+```
+mkdir  user@1000.service/probe                  → ok
+echo $$ > user@1000.service/probe/cgroup.procs  → EACCES
+```
+
+Derivar a fronteira do uid em vez de a procurar no caminho **foi tentado e medido a
+não funcionar** — o comentário antigo do `user_service_base` afirmava que a migração
+era permitida, e não é. O fallback foi apagado em vez de deixar código que só cria um
+directório onde nada entra.
+
+**O que funciona** (validado, os cinco limites aplicados + tecto agregado):
+
+```
+systemd-run --user --scope -p Delegate=yes -- delonix container run ...
+```
+
+O `install.sh` passou a TESTAR a delegação de verdade (cria um cgroup filho e tenta
+activar `+memory`; ler `cgroup.controllers` não chega — o controlador pode estar
+listado e a migração continuar proibida) e imprime o remédio quando falta. O arnês
+distingue os dois casos: `aggregate-ceiling` reconhece um `session-*.scope` e faz SKIP
+com o remédio; `delegated-scope` VERIFICA que sob um scope delegado tudo aplica.
+
+**Armadilha do `install.sh` apanhada ao mesmo tempo**: `GPU_INFO=$(lspci | grep -Ei
+'vga|3d controller' | ...)` sob `set -euo pipefail` — um `grep` sem correspondência
+sai 1, o `pipefail` propaga, a atribuição falha e o instalador MORRIA em silêncio logo
+depois de "preparing the host". Acontecia em todo o host sem dispositivo VGA: qualquer
+servidor headless e praticamente toda a VM. Uma etiqueta cosmética de GPU nunca pode
+poder falhar uma instalação.
+
 ## Regra de ouro: fronteira com o PaaS
 
 Este código **não pode depender de nada privado**. Antes de qualquer commit:
