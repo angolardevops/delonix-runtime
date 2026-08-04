@@ -1,0 +1,128 @@
+name: Chaos
+
+# Corre o arnês de caos (`scripts/chaos.sh`) num runner LIMPO.
+#
+# Porque existe um workflow separado do `ci.yml`: os testes unitários e o clippy
+# provam propriedades do código; isto prova propriedades do SISTEMA A CORRER, e
+# só as encontra quem o parte de propósito. Todos os bugs mais graves desta série
+# vieram daqui e nenhum de leitura de código:
+#
+#   * o holder volta e cada container fica sem rede PARA SEMPRE;
+#   * `container rm` deixava o rootfs inteiro em disco (a fuga de disk-pressure);
+#   * o isolamento por namespace estava desligado — e nada falhava, porque uma
+#     firewall que nunca é instalada não devolve erro;
+#   * uma recuperação falhada derrubava a infra que tinha acabado de arrancar.
+#
+# E — a razão de ser deste ficheiro — vários deles SÓ aparecem num host limpo. O
+# instalador morria em qualquer máquina sem GPU; os limites de recurso são inertes
+# numa sessão sem cgroup delegado. Nenhum dos dois é visível na máquina de quem
+# escreve o código. Um runner do GitHub é uma VM limpa: é o ambiente certo.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Semanal, à segunda de manhã. O caos não é só um gate de PR: apanha
+    # regressões que vêm de mudanças no HOST (kernel, systemd, iproute2), não do
+    # nosso código — e essas ninguém dispara com um commit.
+    - cron: '17 6 * * 1'
+  workflow_dispatch:
+    inputs:
+      scale:
+        description: 'Nº de containers no cenário `scale`'
+        default: '30'
+      scenarios:
+        description: 'Cenários a correr (vazio = todos)'
+        default: ''
+
+concurrency:
+  group: chaos-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  chaos:
+    name: chaos harness (runner limpo)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Instala protoc
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq protobuf-compiler
+
+      - name: Instala toolchain fixada
+        run: rustup show
+
+      # As mesmas dependências que o `install.sh` exige. Deliberadamente NÃO se
+      # corre o `install.sh` aqui: este job tem de exercitar o motor, e um
+      # instalador partido deve falhar no seu próprio teste, não neste.
+      - name: Dependências rootless
+        run: sudo apt-get install -y -qq slirp4netns uidmap nftables iproute2 conntrack
+
+      - name: Constrói o binário
+        run: cargo build --release -p delonix-runtime-bin
+
+      # O passo que este projecto aprendeu à força: sem um cgroup DELEGADO os
+      # limites de recurso são silenciosamente inertes, e o arnês reportá-lo-ia
+      # como ambiente em vez de os testar. Medido: numa sessão sem delegação,
+      # `-m 128M` deixa `memory.max=max`.
+      - name: Prepara a delegação de cgroup
+        run: |
+          sudo loginctl enable-linger "$USER" || true
+          systemctl --user show-environment >/dev/null 2>&1 \
+            && echo "gestor de utilizador: presente" \
+            || echo "gestor de utilizador: AUSENTE (os cenários de limites farão skip)"
+
+      - name: Puxa a imagem de teste
+        run: |
+          ./target/release/delonix image pull docker.io/library/redis:7-alpine
+
+      # `systemd-run --scope -p Delegate=yes` é o que dá ao arnês um cgroup onde
+      # os limites aplicam mesmo. Se o runner não tiver gestor de utilizador, o
+      # arnês faz SKIP dos cenários afectados e continua — o exit code só reflecte
+      # FALHAS, nunca skips.
+      - name: Corre o arnês de caos
+        env:
+          DELONIX_CHAOS_BIN: ./target/release/delonix
+          DELONIX_CHAOS_SCALE: ${{ github.event.inputs.scale || '30' }}
+          DELONIX_CHAOS_IMAGE: docker.io/library/redis:7-alpine
+        run: |
+          set -o pipefail
+          if systemctl --user show-environment >/dev/null 2>&1; then
+            systemd-run --user --scope -p Delegate=yes -q -- \
+              bash scripts/chaos.sh ${{ github.event.inputs.scenarios }} 2>&1 | tee chaos.log
+          else
+            bash scripts/chaos.sh ${{ github.event.inputs.scenarios }} 2>&1 | tee chaos.log
+          fi
+
+      # O resumo no sumário do job para não ser preciso abrir os logs — e para
+      # que um SKIP fique visível em vez de se perder no ruído. Um skip não falha
+      # o job, mas é informação: significa que aquela propriedade não foi provada.
+      - name: Resumo
+        if: always()
+        run: |
+          {
+            echo '## Arnês de caos'
+            echo
+            echo '```'
+            sed -n '/── resumo ──/,$p' chaos.log 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g' || echo '(sem resumo — ver o log do passo anterior)'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Guarda o log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: chaos-log
+          path: chaos.log
+          retention-days: 30
+
+      # O motor deixa infra por-nó (holder netns, slirp) e directórios de
+      # container. Num runner descartável não faria diferença — mas se este job
+      # alguma vez correr num runner self-hosted, deixar isso para trás é
+      # exactamente a fuga que o próprio arnês existe para apanhar.
+      - name: Limpeza
+        if: always()
+        run: bash scripts/chaos.sh --clean || true
