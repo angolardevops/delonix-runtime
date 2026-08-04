@@ -4,6 +4,75 @@
 > (regenerado automaticamente pelo pipeline de release a cada tag publicada).
 > Não editar à mão — edita a nota da release respectiva.
 
+# v0.39.3 — SEGURANÇA: o isolamento por namespace estava desligado desde a v0.39.0
+
+**Actualize imediatamente se corre containers de mais do que um inquilino no mesmo
+host.** As versões v0.39.0, v0.39.1 e v0.39.2 aplicam `metadata.namespace` /
+`--namespace` mas **não instalam a firewall que o faz valer**. Um container de uma
+namespace alcança containers de outra.
+
+## O que aconteceu
+
+Tornar o supervisor universal (v0.39.0, para capturar exit codes) fez com que
+**todos** os containers desanexados passassem a sair de `cmd_run` mais cedo — antes
+do bloco que aplica o isolamento por namespace. Enquanto o supervisor estava
+condicionado a `--restart`, isso não tinha efeito prático; deixou de estar.
+
+E **nada falhou**. Uma firewall que nunca é instalada não devolve erro: o tráfego
+simplesmente passa. Foi preciso atravessar a fronteira para o descobrir.
+
+Medido, mesmo cenário, dois binários:
+
+```
+v0.38.2 (supervisor só com --restart)   teamA → teamB   bloqueado
+v0.39.0 (supervisor universal)          teamA → teamB   ALCANÇA
+```
+
+## A correcção
+
+O isolamento passou a ser aplicado **antes** do ramo do supervisor, onde o IP já é
+conhecido, por isso os dois caminhos o recebem. Verificado nos dois sentidos:
+cross-namespace bloqueado, same-namespace aberto — porque um isolamento demasiado
+agressivo é outro bug, não uma correcção.
+
+É a **terceira** ocorrência da mesma armadilha estrutural nesta série: estado
+necessário depois da criação vivia depois de um `return` antecipado. As duas
+anteriores foram `ip`/`network` (v0.39.0) e o rootfs no `rm` (v0.39.1). A lição que
+fica no código: quando um `return` novo é acrescentado a `cmd_run`, tudo o que vem
+depois dele deixa de acontecer para esse caminho — e nada avisa.
+
+## O que impede a repetição
+
+Cenário novo no arnês de caos, `namespace-isolation`, que **atravessa a fronteira**
+em vez de verificar configuração: cross-namespace tem de estar bloqueado, e
+same-namespace aberto. Uma firewall ausente falha o cenário.
+
+Bateria: **14 PASS · 0 FAIL · 0 SKIP**.
+
+## Também nesta versão
+
+**O último wedge do holder.** `handle_control` saiu da thread do accept para um
+worker dedicado que mantém a serialização da fábrica de netns/veth/nft. Um `nft`/`ip`
+preso deixou de pendurar o holder inteiro:
+
+- o accept continua a aceitar, e um chamador recebe `holder busy` ao fim de 60 s em
+  vez de nunca receber nada;
+- os verbos de leitura (`ping`, `has-netns`, `fwstats`, `egress-show`) continuam a
+  ser servidos, por isso o nó permanece observável — e a reconciliação do
+  `net netns up` continua a poder perguntar que containers estão servidos.
+
+**Dito com todas as letras**: isto não torna um `handle_control` preso inofensivo. O
+worker é único por desenho, logo uma mutação encravada continua a bloquear as
+mutações seguintes — que agora falham com erro limitado e diagnosticável em vez de
+nunca voltarem. Tornar isso progresso real exige a fábrica ser interrompível, que é
+outro trabalho.
+
+## Validação
+
+`clippy --workspace --all-targets` a zero avisos; **622 testes**; arnês 14/14.
+
+---
+
 # v0.39.2 — o instalador morria em servidores headless; e os limites de recurso precisam de cgroup delegado
 
 Dois achados de uma corrida do arnês de caos **dentro de uma VM** criada com o

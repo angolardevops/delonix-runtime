@@ -898,8 +898,68 @@ fn read_control_line(stream: &std::os::unix::net::UnixStream) -> Option<String> 
 /// Fixing that needs the dispatch to move off this thread, which would break the
 /// serialization the factory depends on — a separate change with its own design,
 /// not a timeout.
+/// How long a caller waits for a MUTATING command before being told the factory
+/// is busy. Generous: a legitimate `cni-add` runs external plugins, and an
+/// `attach` runs several `ip` invocations.
+const CONTROL_WORK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// Verbs that only READ holder state and mutate nothing.
+///
+/// These are the ones worth serving off the serialized worker: they cannot
+/// corrupt the netns/veth/nft factory by interleaving, and keeping them
+/// answerable is what lets an operator still SEE the node while a mutating
+/// command is stuck. Anything not listed here is treated as mutating —
+/// fail-closed, so a verb added later is serialized by default rather than
+/// silently racing the factory.
+fn is_readonly_verb(line: &str) -> bool {
+    matches!(
+        line.split_whitespace().next().unwrap_or(""),
+        "ping" | "has-netns" | "fwstats" | "egress-show"
+    )
+}
+
+/// Accepts connections on the control socket and serves one command per connection (the netns/veth
+/// factory). Runs INSIDE the holder, so the `ip`/`ip netns` operations stay
+/// in the infra netns without `nsenter`.
+///
+/// **Mutating commands are still strictly serialized** — they are the netns/veth/
+/// nft factory and interleaving them would corrupt state. What changed is WHERE
+/// that serialization lives: a single dedicated worker owns it, instead of it
+/// being an accidental property of running everything on the accept thread.
+///
+/// That distinction buys two things a hung `nft`/`ip` used to take away:
+///
+///  * **the accept loop keeps accepting**, so a caller gets a clear
+///    `holder busy` after [`CONTROL_WORK_TIMEOUT`] instead of hanging forever
+///    on a socket that will never answer;
+///  * **read-only verbs keep being served** ([`is_readonly_verb`]) — `ping`,
+///    `has-netns`, `fwstats`, `egress-show` — so the node stays observable, and
+///    `net netns up`'s reconciliation can still ask which containers are served,
+///    while a mutation is wedged.
+///
+/// **What it does NOT do, deliberately stated**: it cannot make a hung
+/// `handle_control` harmless. The worker is single by design, so a command
+/// stuck in a netlink lock still blocks every LATER mutation — they now fail
+/// with a bounded, diagnosable error rather than never returning. Turning that
+/// into real progress needs the factory itself to become interruptible, which
+/// is a different piece of work.
 fn control_loop(listener: std::os::unix::net::UnixListener) -> ! {
     use std::io::Write;
+    use std::sync::mpsc;
+
+    // Bounded: a flood of mutating commands must not grow memory without limit
+    // while the worker is busy. Callers beyond the queue get the same busy
+    // error as a timeout, which is the truth.
+    let (tx, rx) = mpsc::sync_channel::<(String, mpsc::SyncSender<String>)>(64);
+    std::thread::spawn(move || {
+        // THE serialization point. Every mutating command in the holder runs
+        // here, one at a time, in arrival order — exactly the invariant the
+        // single-threaded accept loop used to provide by accident.
+        for (line, reply_to) in rx {
+            let _ = reply_to.try_send(handle_control(line.trim()));
+        }
+    });
+
     // SAFETY: geteuid() has no preconditions.
     let own_uid = unsafe { libc::geteuid() };
     for conn in listener.incoming() {
@@ -912,7 +972,26 @@ fn control_loop(listener: std::os::unix::net::UnixListener) -> ! {
         let Some(line) = read_control_line(&stream) else {
             continue;
         };
-        let reply = handle_control(line.trim());
+        let line = line.trim().to_string();
+
+        let reply = if is_readonly_verb(&line) {
+            // Cheap and non-mutating: answer here so the node stays observable
+            // even while the factory is busy.
+            handle_control(&line)
+        } else {
+            let (rtx, rrx) = mpsc::sync_channel::<String>(1);
+            match tx.try_send((line, rtx)) {
+                Ok(()) => rrx.recv_timeout(CONTROL_WORK_TIMEOUT).unwrap_or_else(|_| {
+                    format!(
+                        "err: holder busy — a network operation has been running for over {}s; \
+                         inspect with `delonix net netns status` and see if an `nft`/`ip` is stuck\n",
+                        CONTROL_WORK_TIMEOUT.as_secs()
+                    )
+                }),
+                Err(_) => "err: holder busy — too many network operations queued\n".to_string(),
+            }
+        };
+
         // The reply is a single short line, but a peer that never reads it would
         // otherwise be able to block the holder in `write_all` once the socket
         // buffer filled — the same wedge from the other direction.
@@ -4452,6 +4531,47 @@ pub fn dhcp_ip6_for_mac(_net: &str, mac: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    /// Os verbos read-only são o que mantém o nó OBSERVÁVEL enquanto uma
+    /// mutação está presa: podem ser servidos fora do worker serializado porque
+    /// não tocam na fábrica de netns/veth/nft.
+    ///
+    /// Fail-closed de propósito: um verbo acrescentado amanhã é tratado como
+    /// mutante até alguém decidir o contrário, em vez de correr em paralelo com
+    /// a fábrica por omissão.
+    #[test]
+    fn so_os_verbos_de_leitura_saem_do_worker_serializado() {
+        for ro in [
+            "ping",
+            "has-netns abc123",
+            "fwstats 10.0.0.5",
+            "egress-show delonix0",
+        ] {
+            assert!(super::is_readonly_verb(ro), "{ro:?} devia ser read-only");
+        }
+        // Tudo o que muda estado TEM de passar pelo worker.
+        for mutating in [
+            "attach ns 10.0.0.5 br gw",
+            "attach-extra ns eth1 10.0.0.6 br gw",
+            "detach ns",
+            "publish 10.0.0.5 8080:80",
+            "unpublish 8080",
+            "firewall id 10.0.0.5 aabb",
+            "cni-add ns id eth0 aabb",
+            "cni-del ns id eth0 aabb",
+        ] {
+            assert!(
+                !super::is_readonly_verb(mutating),
+                "{mutating:?} NÃO pode escapar à serialização"
+            );
+        }
+        // Um verbo desconhecido (futuro) é serializado por omissão.
+        assert!(!super::is_readonly_verb("verbo-novo-qualquer x y"));
+        assert!(!super::is_readonly_verb(""));
+        // Um prefixo parecido não engana o matcher.
+        assert!(!super::is_readonly_verb("pingx"));
+        assert!(!super::is_readonly_verb("has-netns-evil"));
+    }
+
     /// REGRESSION (availability): a control connection that never completes its
     /// command line must NOT block the holder forever.
     ///

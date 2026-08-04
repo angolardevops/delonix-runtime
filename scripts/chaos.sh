@@ -463,9 +463,54 @@ scen_delegated_scope() {
   dlx container rm -f cd1 >/dev/null 2>&1
 }
 
+
+# The namespace boundary, exercised as a boundary. A firewall that is never
+# installed fails silently — nothing errors, traffic just flows — so the only
+# way to know it is there is to try to cross it.
+#
+# This scenario exists because that is exactly what happened: making the
+# supervisor universal moved every detached container past the code that applies
+# namespace isolation, and NOTHING failed. Measured, same scenario, two binaries:
+# v0.38.2 blocked the crossing, v0.39.0 did not.
+scen_namespace_isolation() {
+  head_ "namespace-isolation — cross-namespace bloqueado, same-namespace aberto"
+  dlx net netns up >/dev/null 2>&1
+  dlx container run -d --name nsa --net chaosnet --namespace teamA "$IMAGE" sleep 300 >/dev/null 2>&1
+  dlx container run -d --name nsa2 --net chaosnet --namespace teamA "$IMAGE" sleep 300 >/dev/null 2>&1
+  dlx container run -d --name nsb --net chaosnet --namespace teamB "$IMAGE" sleep 300 >/dev/null 2>&1
+  sleep 3
+  local ipb ipa2
+  ipb=$(DELONIX_ROOT="$SANDBOX/root" python3 -c '
+import json,glob,os,sys
+for f in glob.glob(os.path.join(os.environ["DELONIX_ROOT"],"containers","*.json")):
+    d=json.load(open(f))
+    if d.get("name")=="nsb": print(d.get("ip") or ""); break')
+  ipa2=$(DELONIX_ROOT="$SANDBOX/root" python3 -c '
+import json,glob,os,sys
+for f in glob.glob(os.path.join(os.environ["DELONIX_ROOT"],"containers","*.json")):
+    d=json.load(open(f))
+    if d.get("name")=="nsa2": print(d.get("ip") or ""); break')
+  if [ -z "$ipb" ] || [ -z "$ipa2" ]; then
+    skip "namespace-isolation" "containers não ganharam IP"
+  else
+    local cross same
+    dlx container exec nsa ping -c1 -W2 "$ipb"  >/dev/null 2>&1 && cross=open || cross=blocked
+    dlx container exec nsa ping -c1 -W2 "$ipa2" >/dev/null 2>&1 && same=open  || same=blocked
+    log "cross-ns=$cross · same-ns=$same"
+    if [ "$cross" = blocked ] && [ "$same" = open ]; then
+      ok "namespace-isolation (fronteira fechada, mesma namespace aberta)"
+    elif [ "$cross" = open ]; then
+      bad "namespace-isolation" "teamA alcança teamB — o isolamento NÃO está aplicado"
+    else
+      bad "namespace-isolation" "same-namespace bloqueado — o isolamento é demasiado agressivo"
+    fi
+  fi
+  for c in nsa nsa2 nsb; do dlx container rm -f "$c" >/dev/null 2>&1; done
+}
+
 # ------------------------------------------------------------------- driver --
 
-ALL=(holder_kill holder_wedge slirp_kill idempotent_up oom concurrent_attach scale abrupt_kill aggregate_ceiling delegated_scope disk_full write_failure)
+ALL=(holder_kill holder_wedge slirp_kill idempotent_up oom concurrent_attach namespace_isolation scale abrupt_kill aggregate_ceiling delegated_scope disk_full write_failure)
 
 while [ $# -gt 0 ]; do
   case "$1" in

@@ -2512,6 +2512,38 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
     if let Some(n) = &custom_net {
         c.network = Some(n.clone());
         c.ip = attached_ip.clone();
+        // SECURITY REGRESSION FIXED HERE (mine, shipped in v0.39.0).
+        //
+        // Namespace isolation was applied only in the block BELOW, which sits
+        // after the supervisor's early return. That was harmless while the
+        // supervisor was gated on `--restart`; once it took every detached
+        // container, isolation stopped being applied to any of them — silently,
+        // because nothing fails when a firewall is simply never installed.
+        //
+        // Measured, same scenario on both binaries:
+        //   v0.38.2 (no universal supervisor): teamA → teamB  blocked
+        //   v0.39.0 (universal supervisor):    teamA → teamB  REACHABLE
+        //
+        // It is applied here, before the branch, so both paths get it. The
+        // block below is now a no-op repeat for the unsupervised path rather
+        // than the only place it happens.
+        if c.namespace != "default" {
+            if let Some(ip) = c.ip.clone() {
+                let mut fw = c.firewall.clone().unwrap_or_default();
+                fw.enabled = true;
+                fw.namespace = c.namespace.clone();
+                match infra::apply_firewall(&c.id, &ip, &fw) {
+                    Ok(()) => c.firewall = Some(fw),
+                    Err(e) => eprintln!(
+                        "{}",
+                        super::po::tf(
+                            "warning: namespace isolation '{namespace}' not applied: {e}",
+                            &[("namespace", &c.namespace), ("e", &e.to_string())],
+                        )
+                    ),
+                }
+            }
+        }
     }
     if should_supervise(&restart, detach, !no_supervisor) {
         if policy_supervised(&restart) {
