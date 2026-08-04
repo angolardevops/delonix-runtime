@@ -106,11 +106,21 @@ async fn spawn_expensive_metrics_refresh(base: PathBuf) {
         })
         .await;
         match summary {
-            Ok(Some(summary)) => dashstats::publish_to_metrics(&summary),
-            Ok(None) => eprintln!(
+            Ok(dashstats::Bounded::Done(summary)) => dashstats::publish_to_metrics(&summary),
+            Ok(dashstats::Bounded::TimedOut) => eprintln!(
                 "delonix-mgmt: expensive metrics collection did not finish within {}s — \
                  network/storage gauges stay at their last known value this cycle",
                 COLLECT_TIMEOUT.as_secs()
+            ),
+            // Distinct from a timeout, and the distinction is the whole point:
+            // nothing was attempted this cycle because the PREVIOUS collection
+            // is still wedged in the same underlying operation (a hung network
+            // volume, a stuck netns read). Saying "did not finish within 120s"
+            // here would be a lie — we never started. See `run_bounded`.
+            Ok(dashstats::Bounded::Skipped) => eprintln!(
+                "delonix-mgmt: skipping expensive metrics collection — a previous one is \
+                 still stuck (hung volume or netns read?); not starting another until it \
+                 returns. Network/storage gauges stay at their last known value."
             ),
             Err(_) => {} // the spawn_blocking task itself panicked — already logged by tokio.
         }

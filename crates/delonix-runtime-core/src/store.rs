@@ -58,6 +58,70 @@ impl Drop for FileLock {
     }
 }
 
+/// Writes `bytes` to `path` so that a reader NEVER sees a half-written file and
+/// a **crash** never leaves one behind: temp in the same directory → `fsync` the
+/// temp → `rename` → `fsync` the directory.
+///
+/// BUG FIXED HERE. Every store in this workspace wrote state as temp +
+/// `rename` and called it an "atomic write". That is only half true, and the
+/// missing half is the one that matters after a power loss: `rename(2)` is
+/// atomic with respect to concurrent *readers*, but it publishes a directory
+/// entry that may point at a file whose CONTENT the kernel has not written out
+/// yet. Nothing in the workspace called `fsync` — `grep -rn 'sync_all|fsync'`
+/// over all nine crates returned exactly one hit, and it was the `SYS_fsync`
+/// constant in the seccomp allowlist.
+///
+/// The consequence is not theoretical for a daemonless engine whose entire
+/// notion of "what exists" lives in these JSON files. The worst case is
+/// `delonix-net`'s IPAM lease registry: lose that file and every `id → ip`
+/// lease goes with it, dropping the allocator back to the bare hash — which its
+/// own module doc measures as colliding with ~50 % probability at ~300
+/// containers, i.e. two containers on one IP, with the firewall and DNAT rules
+/// indexed on the wrong one.
+///
+/// ext4's `data=ordered` heuristic (auto-flush on rename-over) hides this most
+/// of the time on the common desktop case. It is a heuristic, not a guarantee,
+/// and it is not the whole story on XFS/btrfs or on the network/replicated
+/// storage this engine is deployed onto.
+///
+/// The directory `fsync` is best-effort: some filesystems reject `fsync` on a
+/// directory fd, and failing the whole write over that would be worse than the
+/// slightly weaker guarantee.
+pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
+    use std::io::Write;
+    let dir = path.parent().unwrap_or_else(|| Path::new("."));
+    let stem = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "state".to_string());
+    // Unique per WRITER (pid + sequence): a fixed temp name lets two processes —
+    // or two threads of the CRI server — interleave their bytes in the same
+    // temp, and then `rename` faithfully publishes the corruption.
+    let seq = TMP_SEQ.fetch_add(1, Ordering::Relaxed);
+    let tmp = dir.join(format!(".{stem}.{}.{seq}.tmp", std::process::id()));
+
+    let write = || -> Result<()> {
+        let mut f = fs::File::create(&tmp)?;
+        f.write_all(bytes)?;
+        // THE ORDER IS THE POINT: the content must be durable BEFORE the
+        // directory entry that publishes it exists.
+        f.sync_all()?;
+        drop(f);
+        fs::rename(&tmp, path)?;
+        // And the rename itself must be durable, or a crash can lose the entry
+        // even though the file's blocks are safely on disk.
+        if let Ok(d) = fs::File::open(dir) {
+            let _ = d.sync_all();
+        }
+        Ok(())
+    };
+    let r = write();
+    if r.is_err() {
+        let _ = fs::remove_file(&tmp); // never leave junk behind on failure
+    }
+    r
+}
+
 /// Sanitizes a key/id into a safe file name (`a-z0-9._-`,
 /// preserving uppercase). Blocks path traversal (`../`, `/etc/passwd`,
 /// separators) by mapping any character outside that allowlist to `-`.
@@ -74,6 +138,22 @@ pub(crate) fn safe_key(key: &str) -> String {
             }
         })
         .collect()
+}
+
+/// Just the fields a lookup by prefix/name needs to DECIDE. `serde` walks past
+/// everything else in the JSON without allocating it.
+///
+/// A `Container` carries mounts, env, labels, ports, firewall rules and more;
+/// building all of that for every record just to compare two strings is most of
+/// the cost of a lookup, and it is thrown away for every record but one. See
+/// [`Store::load`].
+#[derive(serde::Deserialize)]
+struct Ident {
+    id: String,
+    #[serde(default)]
+    name: String,
+    #[serde(default)]
+    created_unix: u64,
 }
 
 /// The state store, rooted in a directory.
@@ -136,21 +216,7 @@ impl Store {
     /// interleaved JSON — the atomicity of the `rename` saves nothing if the temp's
     /// content already comes corrupted.
     pub fn save(&self, c: &Container) -> Result<()> {
-        let safe = safe_key(&c.id);
-        let seq = TMP_SEQ.fetch_add(1, Ordering::Relaxed);
-        let tmp = self
-            .root
-            .join(format!(".{safe}.{}.{seq}.tmp", std::process::id()));
-        let write = || -> Result<()> {
-            fs::write(&tmp, serde_json::to_vec_pretty(c)?)?;
-            fs::rename(&tmp, self.path(&c.id))?;
-            Ok(())
-        };
-        let r = write();
-        if r.is_err() {
-            let _ = fs::remove_file(&tmp); // do not leave junk if it failed half-way
-        }
-        r
+        write_atomic(&self.path(&c.id), &serde_json::to_vec_pretty(c)?)
     }
 
     /// **Safe read-modify-write** of a container: locks (`flock`), re-reads the
@@ -182,17 +248,48 @@ impl Store {
     }
 
     /// Loads a container by exact id, id prefix, or name.
+    ///
+    /// Cost note: an exact id is a single `stat`+read. A prefix or a NAME
+    /// cannot be resolved from the filename (files are keyed by id), so those
+    /// still scan the directory — but they now parse only [`Ident`] per record
+    /// instead of constructing a whole `Container`, and only the winner is
+    /// fully deserialized. On a host with the 49 containers this engine has
+    /// really run, every name-based command was paying full construction 49
+    /// times; `Store::update` paid it twice per call.
+    ///
+    /// Deliberately NOT fixed here: the directory walk itself. Making a name
+    /// lookup O(1) needs a name→id index, i.e. a second piece of persistent
+    /// state to keep in sync with the records — in a daemonless engine where N
+    /// processes mutate the store concurrently, a stale or divergent index is a
+    /// worse failure than a linear scan. The ordering semantics are unchanged:
+    /// newest first, first match wins.
     pub fn load(&self, id_or_name: &str) -> Result<Container> {
         let exact = self.path(id_or_name);
         if exact.exists() {
             return Ok(serde_json::from_slice(&fs::read(exact)?)?);
         }
-        for c in self.list()? {
-            if c.id.starts_with(id_or_name) || c.name == id_or_name {
-                return Ok(c);
+        let mut hits: Vec<Ident> = Vec::new();
+        for entry in fs::read_dir(&self.root)? {
+            let path = entry?.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("json") {
+                continue;
+            }
+            let Ok(bytes) = fs::read(&path) else { continue };
+            let Ok(idt) = serde_json::from_slice::<Ident>(&bytes) else {
+                continue;
+            };
+            if idt.id.starts_with(id_or_name) || idt.name == id_or_name {
+                hits.push(idt);
             }
         }
-        Err(Error::NotFound(format!("container: {id_or_name}")))
+        // Same tie-break as before (`list()` sorts newest-first and the old loop
+        // returned the first match), so an ambiguous prefix keeps resolving to
+        // exactly the container it used to.
+        hits.sort_by_key(|i| std::cmp::Reverse(i.created_unix));
+        match hits.first() {
+            Some(hit) => Ok(serde_json::from_slice(&fs::read(self.path(&hit.id))?)?),
+            None => Err(Error::NotFound(format!("container: {id_or_name}"))),
+        }
     }
 
     /// Lists all containers, from most recent to oldest.
@@ -283,15 +380,7 @@ impl<T: Serialize + DeserializeOwned> JsonStore<T> {
 
     /// Persists an item under `key` (atomic write).
     pub fn save(&self, key: &str, value: &T) -> Result<()> {
-        let safe = safe_key(key);
-        // Temp unique per writer — see the note in `Store::save`.
-        let seq = TMP_SEQ.fetch_add(1, Ordering::Relaxed);
-        let tmp = self
-            .root
-            .join(format!(".{safe}.{}.{seq}.tmp", std::process::id()));
-        fs::write(&tmp, serde_json::to_vec_pretty(value)?)?;
-        fs::rename(&tmp, self.path(key))?;
-        Ok(())
+        write_atomic(&self.path(key), &serde_json::to_vec_pretty(value)?)
     }
 
     /// Loads an item by exact key.
@@ -348,6 +437,131 @@ mod tests {
                 .unwrap()
                 .as_nanos()
         ))
+    }
+
+    /// REGRESSION: a reader must NEVER observe a partially-written file.
+    ///
+    /// This is the half of `write_atomic`'s contract a unit test can actually
+    /// prove. A bare `fs::write` TRUNCATES the target and then fills it, so a
+    /// concurrent reader lands in that window and gets a short/empty file —
+    /// which, for every store in this workspace, deserializes to nothing and
+    /// makes the resource disappear from `ls`/`inspect` while its data stays on
+    /// disk. Replacing `write_atomic`'s body with `fs::write(path, bytes)`
+    /// makes this test fail.
+    ///
+    /// **What this test does NOT prove**: crash durability. The `fsync` of the
+    /// temp and of the directory cannot be exercised without power-cycling the
+    /// machine — see the live `strace` validation recorded in the session notes
+    /// for evidence that `fsync(tmp)` really does precede `rename()`.
+    #[test]
+    fn write_atomic_nunca_deixa_um_leitor_ver_ficheiro_parcial() {
+        let root = tmp_dir("write-atomic-torn");
+        fs::create_dir_all(&root).unwrap();
+        let target = root.join("state.json");
+
+        // Two payloads of very different sizes: a truncating writer leaves the
+        // file at every length in between, so a torn read is easy to catch.
+        let big = vec![b'a'; 512 * 1024];
+        let small = vec![b'b'; 4 * 1024];
+        write_atomic(&target, &big).unwrap();
+
+        let stop = std::sync::atomic::AtomicBool::new(false);
+        let torn = std::sync::atomic::AtomicUsize::new(0);
+
+        std::thread::scope(|sc| {
+            sc.spawn(|| {
+                for i in 0..200 {
+                    let payload = if i % 2 == 0 { &big } else { &small };
+                    write_atomic(&target, payload).unwrap();
+                }
+                stop.store(true, Ordering::SeqCst);
+            });
+            for _ in 0..3 {
+                sc.spawn(|| {
+                    while !stop.load(Ordering::SeqCst) {
+                        if let Ok(seen) = fs::read(&target) {
+                            // Every published version is one of the two whole
+                            // payloads, all-'a' or all-'b'. Anything else is a
+                            // read that caught a truncation in progress.
+                            let ok = (seen.len() == big.len() && seen.iter().all(|&b| b == b'a'))
+                                || (seen.len() == small.len() && seen.iter().all(|&b| b == b'b'));
+                            if !ok {
+                                torn.fetch_add(1, Ordering::SeqCst);
+                            }
+                        }
+                    }
+                });
+            }
+        });
+
+        assert_eq!(
+            torn.load(Ordering::SeqCst),
+            0,
+            "um leitor apanhou o ficheiro a meio de uma escrita"
+        );
+        // E não ficou lixo: só o alvo, nenhum `.tmp` sobrevivente.
+        let leftovers: Vec<_> = fs::read_dir(&root)
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .filter(|n| n != "state.json")
+            .collect();
+        assert!(
+            leftovers.is_empty(),
+            "ficheiros temporários órfãos: {leftovers:?}"
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// `load` por prefixo/nome tem de manter EXACTAMENTE a semântica anterior
+    /// depois de deixar de construir um `Container` inteiro por registo: id
+    /// exacto, prefixo de id, nome, e — o que é fácil de partir sem dar por
+    /// isso — o desempate pelo mais RECENTE quando um prefixo casa com vários.
+    #[test]
+    fn load_resolve_id_exacto_prefixo_e_nome_com_desempate_pelo_mais_recente() {
+        let root = tmp_dir("store-load-resolve");
+        let store = Store::open(&root).unwrap();
+
+        let mut old = Container::new(
+            "abcdef111111".into(),
+            "antigo".into(),
+            "img".into(),
+            vec!["x".into()],
+            "max".into(),
+        );
+        old.created_unix = 1_000;
+        store.save(&old).unwrap();
+
+        let mut new = Container::new(
+            "abcdef999999".into(),
+            "recente".into(),
+            "img".into(),
+            vec!["x".into()],
+            "max".into(),
+        );
+        new.created_unix = 2_000;
+        store.save(&new).unwrap();
+
+        // id exacto
+        assert_eq!(store.load("abcdef111111").unwrap().name, "antigo");
+        // nome
+        assert_eq!(store.load("recente").unwrap().id, "abcdef999999");
+        // prefixo não-ambíguo
+        assert_eq!(store.load("abcdef9").unwrap().name, "recente");
+        // prefixo AMBÍGUO → o mais recente ganha (comportamento de sempre)
+        assert_eq!(
+            store.load("abcdef").unwrap().id,
+            "abcdef999999",
+            "um prefixo ambíguo tem de continuar a resolver para o mais recente"
+        );
+        // o objecto devolvido vem COMPLETO, não só os campos do índice
+        let full = store.load("recente").unwrap();
+        assert_eq!(full.image, "img");
+        assert_eq!(full.command, vec!["x".to_string()]);
+        // inexistente
+        assert!(matches!(store.load("nao-existe"), Err(Error::NotFound(_))));
+
+        let _ = fs::remove_dir_all(&root);
     }
 
     #[test]

@@ -584,12 +584,18 @@ mod tui {
                 // they last showed for the rest of the TUI session (with no
                 // indication anything was wrong). Bounded the same way the
                 // mgmt server's equivalent refresh loop is.
+                // `.ok()` folds TimedOut and Skipped together on purpose here:
+                // the TUI has nowhere to put a diagnostic (it owns the whole
+                // terminal), so either way it just keeps showing the last known
+                // values. The mgmt loop, which HAS a log, distinguishes them.
                 if let Some(full) = delonix_mgmt::dashstats::collect_with_timeout(
                     &root,
                     true,
                     true,
                     COLLECT_TIMEOUT,
-                ) {
+                )
+                .ok()
+                {
                     if let Ok(mut slot) = shared.lock() {
                         *slot = full;
                     }
