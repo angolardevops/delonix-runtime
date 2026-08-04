@@ -91,20 +91,62 @@ jobs:
             echo "o host não restringe userns — perfil desnecessário"
           fi
 
+      # PREFLIGHT, e faz DUAS perguntas distintas que nunca se podem confundir:
+      #
+      #   1. este host CONSEGUE correr o motor?   → problema de AMBIENTE
+      #   2. o motor arranca?                     → problema de CÓDIGO
+      #
+      # A lição que o obrigou a existir: o arnês silencia a saída de cada comando
+      # (é o que o torna legível), por isso um motor que nem arranca produzia uma
+      # parede de SKIPs sem UMA linha a dizer porquê.
+      #
+      # MEDIDO no runner alojado `ubuntu-24.04`: user namespaces não privilegiados
+      # estão bloqueados —
+      #
+      #     unshare: write failed /proc/self/uid_map: Operation not permitted
+      #
+      # …e sem eles um motor rootless não corre de todo. Isso NÃO é uma falha do
+      # Delonix, e marcar o job vermelho por causa disso todas as semanas só ensina
+      # a ignorar o CI. Quando o ambiente não dá, o job diz-o alto e sai verde SEM
+      # afirmar que passou; quando o ambiente dá e o motor falha, é vermelho.
+      - name: Preflight — o ambiente suporta rootless?
+        id: preflight
+        run: |
+          if unshare -r -n true 2>/tmp/userns.err; then
+            echo "userns=ok" >> "$GITHUB_OUTPUT"
+            echo "user namespaces: disponíveis"
+          else
+            echo "userns=blocked" >> "$GITHUB_OUTPUT"
+            echo "::warning title=Arnês de caos NÃO CORREU::user namespaces não privilegiados bloqueados neste runner — $(cat /tmp/userns.err)"
+            {
+              echo '## Arnês de caos — NÃO CORREU'
+              echo
+              echo 'O runner alojado não permite user namespaces não privilegiados:'
+              echo
+              echo '```'
+              cat /tmp/userns.err
+              echo '```'
+              echo
+              echo 'Um motor rootless não corre sem eles. **Isto não é um resultado do arnês** —'
+              echo 'nada foi provado nesta corrida.'
+              echo
+              echo 'Para o exercitar a sério é preciso um runner **self-hosted**, ou uma VM'
+              echo '(`delonix vm create` + `scripts/chaos.sh`), que é como os achados desta'
+              echo 'série foram encontrados.'
+              [ -e /dev/kvm ] && echo && echo '`/dev/kvm` está presente: uma VM aninhada neste runner é viável como passo seguinte.'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
       - name: Puxa a imagem de teste
+        if: steps.preflight.outputs.userns == 'ok'
         run: |
           ./target/release/delonix image pull docker.io/library/redis:7-alpine
 
-      # PREFLIGHT RUIDOSO, e é uma lição desta série: o arnês silencia a saída de
-      # cada comando (é o que o torna legível), por isso um motor que nem arranca
-      # produz uma parede de SKIPs sem UMA linha a dizer porquê. Este passo corre
-      # o caminho mínimo com o stderr à vista e falha o job com o erro REAL — um
-      # problema de ambiente tem de se distinguir de um bug do motor à primeira
-      # leitura, não ao fim de escavar logs.
-      - name: Preflight (o motor arranca de todo?)
+      # Só corre quando o ambiente dá. Aqui um erro é do MOTOR, e é vermelho.
+      - name: Preflight — o motor arranca?
+        if: steps.preflight.outputs.userns == 'ok'
         run: |
           set -x
-          unshare -r -n true
           export DELONIX_ROOT=/tmp/dlx-preflight DELONIX_NET_RUNTIME_DIR=/tmp/dlx-pf
           mkdir -p "$DELONIX_ROOT" "$DELONIX_NET_RUNTIME_DIR"
           for d in images layers blobs; do ln -sfn "$HOME/.local/share/delonix/$d" "$DELONIX_ROOT/$d"; done
@@ -121,6 +163,7 @@ jobs:
       # arnês faz SKIP dos cenários afectados e continua — o exit code só reflecte
       # FALHAS, nunca skips.
       - name: Corre o arnês de caos
+        if: steps.preflight.outputs.userns == 'ok'
         env:
           DELONIX_CHAOS_BIN: ./target/release/delonix
           DELONIX_CHAOS_SCALE: ${{ github.event.inputs.scale || '30' }}
@@ -138,7 +181,7 @@ jobs:
       # que um SKIP fique visível em vez de se perder no ruído. Um skip não falha
       # o job, mas é informação: significa que aquela propriedade não foi provada.
       - name: Resumo
-        if: always()
+        if: always() && steps.preflight.outputs.userns == 'ok'
         run: |
           {
             echo '## Arnês de caos'
@@ -149,7 +192,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Guarda o log
-        if: always()
+        if: always() && steps.preflight.outputs.userns == 'ok'
         uses: actions/upload-artifact@v4
         with:
           name: chaos-log
