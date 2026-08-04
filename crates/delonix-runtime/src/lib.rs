@@ -2851,6 +2851,21 @@ fn try_delegated_base(base: &str, c: &Container, pid: i32, move_self: bool) -> b
     if let Some(w) = &c.io_weight {
         let _ = std::fs::write(format!("{leaf}/io.weight"), w);
     }
+    // ABSOLUTE I/O ceiling (`--device-read-bps` & friends). `io.weight` is only
+    // proportional: alone on the box, one container still saturates the disk and
+    // starves the host's own journald/store/swap. This is the hard cap Docker
+    // and Podman both expose and this engine did not.
+    //
+    // Silently a no-op in the usual rootless setup, and that is a KERNEL/systemd
+    // boundary rather than a gap here: measured on this host, `user@.service`
+    // delegates `cpu memory pids` and NOT `io`, so no unprivileged engine —
+    // Podman included — can write `io.max`. The CLI says so at parse time
+    // instead of accepting a flag it cannot honour.
+    if let Some(limits) = &c.io_max {
+        if let Some(dev) = slice_io_device() {
+            let _ = std::fs::write(format!("{leaf}/io.max"), format!("{dev} {limits}"));
+        }
+    }
     // 3) Only now does the container enter the leaf.
     if std::fs::write(format!("{leaf}/cgroup.procs"), pid.to_string()).is_err() {
         // Do not leave the empty leaf behind — see `abandon_leaf`.
@@ -3069,6 +3084,14 @@ fn setup_cgroup(c: &Container, pid: i32) -> Result<()> {
     }
     if let Some(w) = &c.io_weight {
         let _ = std::fs::write(format!("{cg}/io.weight"), w); // I/O priority
+    }
+    // Same absolute ceiling on the non-delegated (root) path — see the delegated
+    // twin in `try_delegated_base`. Here `io` IS available, so this is the path
+    // where `--device-read-bps` actually bites.
+    if let Some(limits) = &c.io_max {
+        if let Some(dev) = slice_io_device() {
+            let _ = std::fs::write(format!("{cg}/io.max"), format!("{dev} {limits}"));
+        }
     }
     std::fs::write(format!("{cg}/cgroup.procs"), pid.to_string())?;
     Ok(())

@@ -843,6 +843,18 @@ pub enum ContainerCmd {
         /// Relative I/O weight (`io.weight`, 1–10000).
         #[arg(long = "io-weight")]
         io_weight: Option<String>,
+        /// Absolute read limit from the store's disk (`10mb`, `1g`). Docker's `--device-read-bps`.
+        #[arg(long = "device-read-bps")]
+        device_read_bps: Option<String>,
+        /// Absolute write limit to the store's disk (`10mb`, `1g`). Docker's `--device-write-bps`.
+        #[arg(long = "device-write-bps")]
+        device_write_bps: Option<String>,
+        /// Absolute read IOPS limit from the store's disk.
+        #[arg(long = "device-read-iops")]
+        device_read_iops: Option<String>,
+        /// Absolute write IOPS limit to the store's disk.
+        #[arg(long = "device-write-iops")]
+        device_write_iops: Option<String>,
         // ---- security ----
         /// Read-only rootfs (writes go to tmpfs/volumes).
         #[arg(long = "read-only")]
@@ -1252,6 +1264,10 @@ pub fn run(action: ContainerCmd) -> Result<()> {
             cpu_weight,
             cpuset,
             io_weight,
+            device_read_bps,
+            device_write_bps,
+            device_read_iops,
+            device_write_iops,
             read_only,
             cap_add,
             cap_drop,
@@ -1314,6 +1330,13 @@ pub fn run(action: ContainerCmd) -> Result<()> {
                 cpu_weight,
                 cpuset,
                 io_weight,
+                io_max: compose_io_max(
+                    device_read_bps.as_deref(),
+                    device_write_bps.as_deref(),
+                    device_read_iops.as_deref(),
+                    device_write_iops.as_deref(),
+                )
+                .map_err(delonix_runtime_core::Error::Invalid)?,
                 read_only,
                 cap_add,
                 cap_drop,
@@ -1504,6 +1527,7 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
                 cpu_weight: spec.cpu_weight,
                 cpuset: spec.cpuset,
                 io_weight: spec.io_weight,
+                io_max: None,
                 read_only: spec.read_only,
                 cap_add: spec.cap_add,
                 cap_drop: spec.cap_drop,
@@ -1680,6 +1704,84 @@ fn group_lookup(rootfs: &str, name: &str) -> Option<u32> {
     None
 }
 
+/// Parses one `--device-*-bps`/`--device-*-iops` value into a plain number.
+///
+/// Docker's syntax is `<device>:<rate>` (`/dev/sda:10mb`). The device part is
+/// accepted and IGNORED, on purpose: a container's writes can only ever reach
+/// the disk backing the store, so there is exactly one device to limit and
+/// letting the user name a different one would accept an instruction the engine
+/// cannot honour. Bare `10mb` — the useful form here — works too.
+///
+/// Sizes take the same binary suffixes as `-m` (`k`/`m`/`g`/`t`, optional
+/// trailing `b`). IOPS values are plain counts.
+pub(crate) fn parse_io_rate(spec: &str, is_bytes: bool) -> std::result::Result<u64, String> {
+    // Drop a leading `<device>:` if present. Split from the RIGHT so a device
+    // path containing ':' can't eat the rate.
+    let raw = match spec.rsplit_once(':') {
+        Some((dev, rate)) if dev.starts_with('/') || dev.contains(':') => rate,
+        _ => spec,
+    };
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return Err(format!("empty I/O rate in {spec:?}"));
+    }
+    if !is_bytes {
+        return raw
+            .parse::<u64>()
+            .map_err(|_| format!("invalid IOPS value {raw:?} (expected a plain number)"));
+    }
+    let lower = raw.to_ascii_lowercase();
+    let body = lower.strip_suffix('b').unwrap_or(&lower);
+    let (num, mult) = match body.chars().last() {
+        Some('k') => (&body[..body.len() - 1], 1024u64),
+        Some('m') => (&body[..body.len() - 1], 1024 * 1024),
+        Some('g') => (&body[..body.len() - 1], 1024 * 1024 * 1024),
+        Some('t') => (&body[..body.len() - 1], 1024u64.pow(4)),
+        _ => (body, 1),
+    };
+    let n: f64 = num
+        .trim()
+        .parse()
+        .map_err(|_| format!("invalid size {raw:?} (use e.g. 10mb, 1g)"))?;
+    if !n.is_finite() || n <= 0.0 {
+        return Err(format!("I/O rate must be positive: {raw:?}"));
+    }
+    let bytes = n * mult as f64;
+    // Same overflow guard as `parse_size_bytes`: `as u64` on f64 SATURATES, so
+    // an absurd value would become u64::MAX — a limit that reads as set and is
+    // no limit at all.
+    if bytes >= u64::MAX as f64 {
+        return Err(format!("I/O rate does not fit in 64 bits: {raw:?}"));
+    }
+    Ok(bytes as u64)
+}
+
+/// Composes the four `--device-*` flags into the value half of a cgroup-v2
+/// `io.max` line (`rbps=… wbps=… riops=… wiops=…`). `None` when none was given.
+///
+/// The engine prepends the store device's `major:minor` — see
+/// `delonix_runtime`'s `slice_io_device`.
+pub(crate) fn compose_io_max(
+    read_bps: Option<&str>,
+    write_bps: Option<&str>,
+    read_iops: Option<&str>,
+    write_iops: Option<&str>,
+) -> std::result::Result<Option<String>, String> {
+    let mut parts = Vec::new();
+    for (flag, key, val, bytes) in [
+        ("--device-read-bps", "rbps", read_bps, true),
+        ("--device-write-bps", "wbps", write_bps, true),
+        ("--device-read-iops", "riops", read_iops, false),
+        ("--device-write-iops", "wiops", write_iops, false),
+    ] {
+        if let Some(v) = val {
+            let n = parse_io_rate(v, bytes).map_err(|e| format!("{flag}: {e}"))?;
+            parts.push(format!("{key}={n}"));
+        }
+    }
+    Ok((!parts.is_empty()).then(|| parts.join(" ")))
+}
+
 /// Arguments for `container run` (CLI and manifest), grouped — the list passed
 /// the `too_many_arguments` threshold long ago.
 ///
@@ -1735,6 +1837,10 @@ pub(crate) struct RunOpts {
     pub(crate) cpuset: Option<String>,
     #[serde(default)]
     pub(crate) io_weight: Option<String>,
+    /// Composed cgroup-v2 `io.max` value half (`rbps=… wbps=…`), device excluded
+    /// — the engine prepends the store device. `None` = no absolute ceiling.
+    pub(crate) io_max: Option<String>,
+    // (see `compose_io_max` for how the four `--device-*` flags become this)
     #[serde(default)]
     pub(crate) read_only: bool,
     #[serde(default)]
@@ -1827,6 +1933,7 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
         cpu_weight,
         cpuset,
         io_weight,
+        io_max,
         read_only,
         cap_add,
         cap_drop,
@@ -2110,6 +2217,7 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
     c.cpu_weight = cpu_weight;
     c.cpuset = cpuset;
     c.io_weight = io_weight;
+    c.io_max = io_max;
 
     // ---- security ----
     c.read_only = read_only;
@@ -4952,8 +5060,62 @@ fn cmd_init(
 
 #[cfg(test)]
 mod tests {
+    /// O tecto ABSOLUTO de I/O (`--device-read-bps` & família) — o que o
+    /// `io.weight` não dá: sozinho na máquina, um container com peso continua a
+    /// saturar o disco e a esfomear o journald/store/swap do host.
+    #[test]
+    fn compoe_o_io_max_a_partir_das_quatro_flags() {
+        // Só leitura.
+        assert_eq!(
+            compose_io_max(Some("10mb"), None, None, None).unwrap(),
+            Some("rbps=10485760".to_string())
+        );
+        // Os quatro, pela ordem canónica do cgroup-v2.
+        assert_eq!(
+            compose_io_max(Some("1m"), Some("2m"), Some("100"), Some("200")).unwrap(),
+            Some("rbps=1048576 wbps=2097152 riops=100 wiops=200".to_string())
+        );
+        // Nenhuma flag → sem linha `io.max` nenhuma (não escrever é diferente de
+        // escrever "max").
+        assert_eq!(compose_io_max(None, None, None, None).unwrap(), None);
+    }
+
+    /// Sintaxe do Docker (`<device>:<rate>`) aceite; o device é IGNORADO de
+    /// propósito — as escritas de um container só chegam ao disco do store, e
+    /// aceitar outro seria aceitar uma instrução que o motor não pode honrar.
+    #[test]
+    fn parse_io_rate_aceita_a_sintaxe_docker_e_ignora_o_device() {
+        assert_eq!(
+            parse_io_rate("/dev/sda:10mb", true).unwrap(),
+            10 * 1024 * 1024
+        );
+        assert_eq!(parse_io_rate("10mb", true).unwrap(), 10 * 1024 * 1024);
+        assert_eq!(parse_io_rate("1g", true).unwrap(), 1024 * 1024 * 1024);
+        assert_eq!(parse_io_rate("1024", true).unwrap(), 1024);
+        assert_eq!(parse_io_rate("/dev/nvme0n1:500", false).unwrap(), 500);
+    }
+
+    /// Fail-closed no input: um valor absurdo NUNCA pode virar `u64::MAX` — um
+    /// limite que se lê como definido e é limite nenhum (a mesma armadilha do
+    /// `as u64` saturante que a quota de volumes já pagou).
+    #[test]
+    fn parse_io_rate_recusa_input_invalido_em_vez_de_saturar() {
+        for bad in ["", "abc", "0", "-5", "99999999999t", "10xb"] {
+            assert!(
+                parse_io_rate(bad, true).is_err(),
+                "aceitou o valor inválido {bad:?}"
+            );
+        }
+        // IOPS não leva sufixos de tamanho.
+        assert!(parse_io_rate("10mb", false).is_err());
+        // E o erro nomeia a flag, para o utilizador saber qual corrigir.
+        let e = compose_io_max(None, Some("xpto"), None, None).unwrap_err();
+        assert!(e.contains("--device-write-bps"), "{e}");
+    }
+
     use super::super::util::compose_command;
     use super::infra;
+    use super::{compose_io_max, parse_io_rate};
     use super::{
         container_ips, fmt_ports, fmt_status, next_extra_idx, normalize_container_spec,
         parse_burst_bytes, parse_cri_log_line, parse_rate_bits, parse_signal, policy_supervised,

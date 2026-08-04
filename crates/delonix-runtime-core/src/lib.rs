@@ -22,7 +22,7 @@ pub mod workload_net;
 
 pub use error::{Error, Result};
 pub use secret::{Secret, SecretStore};
-pub use store::{write_atomic, JsonStore, Store};
+pub use store::{write_atomic, write_atomic_mode, JsonStore, Store};
 
 /// Formats a unix instant as LOCAL date/time "YYYY-MM-DD HH:MM:SS".
 /// Uses `localtime_r` (honors /etc/localtime|TZ); on failure, returns the raw value.
@@ -333,6 +333,19 @@ pub struct Container {
     /// Disk I/O weight (cgroup `io.weight`, 1–10000).
     #[serde(default)]
     pub io_weight: Option<String>,
+    /// ABSOLUTE disk I/O ceiling — the value half of a cgroup-v2 `io.max` line,
+    /// without the device (e.g. `rbps=1048576 wbps=2097152`). The engine
+    /// prepends the major:minor of the device backing the store, which is the
+    /// only device a container's writes can reach.
+    ///
+    /// Distinct from [`Self::io_weight`], and the distinction matters: weight is
+    /// PROPORTIONAL (how you split contention between cgroups) and gives no
+    /// ceiling at all when nothing else is competing — one container alone can
+    /// still saturate the disk and starve the host's journald/store/swap. This
+    /// is the hard cap, the `--device-read-bps` family Docker and Podman both
+    /// have and this engine did not.
+    #[serde(default)]
+    pub io_max: Option<String>,
     /// Pod the container belongs to (shares the network namespace).
     #[serde(default)]
     pub pod: Option<String>,
@@ -534,6 +547,7 @@ impl Container {
             cpu_weight: None,
             cpuset: None,
             io_weight: None,
+            io_max: None,
             pod: None,
             ports: Vec::new(),
             env: Vec::new(),

@@ -283,9 +283,19 @@ mod tests {
     /// Isolates the registry in a tmpdir (via `DELONIX_ROOT`) so as not to touch the
     /// user's real store. Serialized by a process lock — this module's tests
     /// share the global `DELONIX_ROOT` env var.
+    /// `DELONIX_ROOT` é uma variável de ambiente GLOBAL ao processo: todo o
+    /// teste que lhe mexa tem de partilhar ESTE mutex.
+    ///
+    /// BUG apanhado pela suite completa: o teste de fail-closed adicionado na
+    /// v0.38.1 trazia um `static LOCK` PRÓPRIO, o que não serializa nada — dois
+    /// mutexes distintos deixam os testes correr em paralelo, e o `DELONIX_ROOT`
+    /// só-leitura que ele instala vazava para um `allocate` concorrente, que
+    /// falhava com ENOENT. Flaky, e por isso passou despercebido na corrida em
+    /// que foi introduzido.
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     fn with_root<T>(tag: &str, f: impl FnOnce() -> T) -> T {
-        static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-        let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let dir = std::env::temp_dir().join(format!("dlx-ipam-test-{tag}"));
         let _ = std::fs::remove_dir_all(&dir);
         // SAFETY: single-thread test under the Mutex above.
@@ -398,8 +408,7 @@ mod tests {
     #[test]
     fn allocate_recusa_quando_nao_consegue_trancar_o_registo() {
         use std::os::unix::fs::PermissionsExt;
-        static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-        let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
 
         let dir = std::env::temp_dir().join(format!("dlx-ipam-nolock-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);

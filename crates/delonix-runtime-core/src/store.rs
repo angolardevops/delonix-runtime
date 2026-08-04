@@ -88,7 +88,20 @@ impl Drop for FileLock {
 /// directory fd, and failing the whole write over that would be worse than the
 /// slightly weaker guarantee.
 pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
+    write_atomic_mode(path, bytes, None)
+}
+
+/// [`write_atomic`] with an explicit file mode, set **atomically at creation**.
+///
+/// For anything secret this is the only correct form. The alternative —
+/// `fs::write` then `set_permissions` — creates the file under the ambient
+/// umask and narrows it afterwards, leaving a window in which another local
+/// user can open it. That is exactly the residual TOCTOU an earlier audit found
+/// in the kubeconfig path and closed with `OpenOptions::mode`; the secret store
+/// had the same shape and had not been converted.
+pub fn write_atomic_mode(path: &Path, bytes: &[u8], mode: Option<u32>) -> Result<()> {
     use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
     let dir = path.parent().unwrap_or_else(|| Path::new("."));
     let stem = path
         .file_name()
@@ -101,7 +114,12 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
     let tmp = dir.join(format!(".{stem}.{}.{seq}.tmp", std::process::id()));
 
     let write = || -> Result<()> {
-        let mut f = fs::File::create(&tmp)?;
+        let mut opts = fs::OpenOptions::new();
+        opts.write(true).create(true).truncate(true);
+        if let Some(m) = mode {
+            opts.mode(m); // atomic at creation — never widen-then-narrow
+        }
+        let mut f = opts.open(&tmp)?;
         f.write_all(bytes)?;
         // THE ORDER IS THE POINT: the content must be durable BEFORE the
         // directory entry that publishes it exists.
@@ -561,6 +579,41 @@ mod tests {
         // inexistente
         assert!(matches!(store.load("nao-existe"), Err(Error::NotFound(_))));
 
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// REGRESSION: um ficheiro secreto tem de nascer JÁ com o modo restrito.
+    ///
+    /// `fs::write` + `set_permissions` cria-o sob o umask e só depois o aperta —
+    /// uma janela em que outro utilizador local o consegue abrir. É o mesmo
+    /// TOCTOU residual que o caminho do kubeconfig fechou com `OpenOptions::mode`,
+    /// e que o cofre de segredos ainda tinha.
+    #[test]
+    fn write_atomic_mode_cria_o_ficheiro_ja_restrito() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = tmp_dir("write-atomic-mode");
+        fs::create_dir_all(&root).unwrap();
+        let target = root.join("segredo.json");
+
+        write_atomic_mode(&target, b"selado", Some(0o600)).unwrap();
+        let mode = fs::metadata(&target).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600, "o segredo nasceu com o modo errado: {mode:o}");
+        assert_eq!(fs::read(&target).unwrap(), b"selado");
+
+        // Sem modo explícito, o comportamento antigo (umask) mantém-se — não é
+        // uma mudança para quem não pediu nada.
+        let plain = root.join("normal.json");
+        write_atomic(&plain, b"x").unwrap();
+        assert!(plain.exists());
+
+        // E nenhum dos dois deixou temporários para trás.
+        let leftovers: Vec<_> = fs::read_dir(&root)
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .filter(|n| n.ends_with(".tmp"))
+            .collect();
+        assert!(leftovers.is_empty(), "temporários órfãos: {leftovers:?}");
         let _ = fs::remove_dir_all(&root);
     }
 

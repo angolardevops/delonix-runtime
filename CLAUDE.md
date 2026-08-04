@@ -1377,10 +1377,16 @@ modo ATOMICAMENTE na criação (`cmd/cluster.rs::fetch_kubeconfig`), o mesmo
 padrão que `ensure_libvirt_network` já usa — ver
 `docs/COMPARACAO-DOCKER-PODMAN.md` secção 1a/1b para o relatório completo.
 
-**Dos outros 29 (12 MEDIUM + 6 LOW confirmados + 11 por-verificar), 27 continuam
-em aberto** — re-confirmados na mesma sessão (nenhum foi refutado, nenhum
-parcialmente corrigido); ver o relatório completo para detalhe/correcção de cada
-um. Os 2 "por-verificar" de maior severidade da corrida original **já estão
+**Dos outros 29 (12 MEDIUM + 6 LOW confirmados + 11 por-verificar), a
+re-triagem de 2026-08-04 confirmou que praticamente TODOS já estão fechados** —
+esta nota dizia «27 continuam em aberto» e estava ERRADA: era o `AUDITORIA-E2E.md`
+que nunca tinha sido actualizado à medida que as correcções entravam. Cada um foi
+re-verificado por leitura do código actual (não pela tabela), e o cabeçalho do
+`docs/AUDITORIA-E2E.md` regista a amostra do que foi confirmado e como. O único
+resíduo real encontrado nessa triagem foi o #11 (`SecretStore::save` sem `fsync` e
+com TOCTOU de modo), corrigido no v0.38.3. **Lição de método**: uma tabela de
+achados que não é actualizada com as correcções passa a mentir nos dois sentidos —
+aqui fez 27 problemas resolvidos parecerem dívida viva durante semanas. Os 2 "por-verificar" de maior severidade da corrida original **já estão
 CONFIRMADOS CORRIGIDOS** (o `AUDITORIA-E2E.md` ainda os lista como abertos por
 lapso — `docs/COMPARACAO-DOCKER-PODMAN.md` tem o detalhe de cada um): fuga de
 rootfs no `--rm` rootless (`container.rs`, ambos os ramos foreground/watcher já
