@@ -101,6 +101,7 @@ teardown_quiet() {
 # `cmd::netns::reconcile_after_respawn`.
 scen_holder_kill() {
   head_ "holder-kill — o holder morre e volta; o container tem de recuperar rede"
+  dlx net netns up >/dev/null 2>&1
   dlx container run -d --name ck1 --net chaosnet "$IMAGE" sleep 600 >/dev/null 2>&1
   sleep 2
   neton ck1 || { skip "holder-kill" "rede não subiu no cenário base"; return; }
@@ -120,6 +121,7 @@ scen_holder_kill() {
 # keeps reconciliation from being a self-inflicted outage.
 scen_idempotent_up() {
   head_ "idempotent-up — 'netns up' num sistema saudável não pode reiniciar nada"
+  dlx net netns up >/dev/null 2>&1
   dlx container run -d --name ck2 --net chaosnet "$IMAGE" sleep 600 >/dev/null 2>&1
   sleep 2
   local before; before=$(cpid ck2)
@@ -162,6 +164,7 @@ scen_oom() {
 # containers. Concurrency is where a lost update would show up.
 scen_concurrent_attach() {
   head_ "concurrent-attach — N attaches em paralelo não podem repetir IPs"
+  dlx net netns up >/dev/null 2>&1
   local n=8 pids=()
   for i in $(seq 1 $n); do
     ( dlx container run -d --name cc$i --net chaosnet "$IMAGE" sleep 300 >/dev/null 2>&1 ) &
@@ -282,9 +285,142 @@ EOF
   fi
 }
 
+
+# The v0.38.1 fix, validated LIVE for the first time. `control_loop` serves one
+# connection at a time; before the fix a peer that connected and never completed
+# a line blocked the holder forever — and with it every attach, detach, publish
+# and firewall call on the node. That could only be proven by unit test until
+# there was a sandbox holder safe to wedge.
+scen_holder_wedge() {
+  head_ "holder-wedge — um par que liga e não escreve não pode prender o holder"
+  # The infra is ref-counted: removing the LAST container takes the holder down
+  # with it, so a scenario cannot assume the previous one left it running. This
+  # is by design, and it made this scenario skip silently in the full battery
+  # while passing in isolation — a harness bug that looked like a missing socket.
+  dlx net netns up >/dev/null 2>&1
+  local sock="$SANDBOX/run/control.sock"
+  [ -S "$sock" ] || { skip "holder-wedge" "socket de controlo não encontrado"; return; }
+
+  # Hold a connection open, silent, for 20s — well past CONTROL_IO_TIMEOUT (5s).
+  DLX_SOCK="$sock" python3 -c '
+import socket, time, os
+s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+s.connect(os.environ["DLX_SOCK"])
+time.sleep(20)          # connected, never writes a line
+' &
+  local wedger=$!
+  sleep 1
+
+  # With the holder wedged, this attach would never return. Time it.
+  local t0=$SECONDS
+  dlx container run -d --name cw1 --net chaosnet "$IMAGE" sleep 60 >/dev/null 2>&1
+  local elapsed=$((SECONDS-t0))
+  kill "$wedger" 2>/dev/null; wait "$wedger" 2>/dev/null
+
+  if [ "$elapsed" -lt 20 ] && [ -n "$(cpid cw1)" ]; then
+    ok "holder-wedge (attach serviu em ${elapsed}s, com um par silencioso agarrado)"
+  else
+    bad "holder-wedge" "attach demorou ${elapsed}s — o holder ficou preso no par silencioso"
+  fi
+  dlx container rm -f cw1 >/dev/null 2>&1
+}
+
+# slirp holds the holder's netns alive and carries every published port. Killing
+# it is the other half of the "holder infra dies" story.
+scen_slirp_kill() {
+  head_ "slirp-kill — matar o slirp não pode deixar o motor num estado que mente"
+  dlx net netns up >/dev/null 2>&1
+  dlx container run -d --name cs1 --net chaosnet "$IMAGE" sleep 300 >/dev/null 2>&1
+  sleep 2
+  local sp; sp=$(slirp_pid)
+  [ -z "$sp" ] && { skip "slirp-kill" "slirp não encontrado"; return; }
+  kill -9 "$sp" 2>/dev/null; sleep 2
+
+  # The engine must not claim the infra is healthy when its slirp is gone.
+  local st; st=$(dlx net netns status 2>/dev/null)
+  log "status após a morte do slirp: $st"
+  if echo "$st" | grep -qE 'slirp (—|-)\b|slirp $|DOWN'; then
+    ok "slirp-kill (o estado reporta a ausência, não finge saúde)"
+  else
+    bad "slirp-kill" "status continua a afirmar um slirp que já não existe: $st"
+  fi
+  dlx net netns up >/dev/null 2>&1; sleep 2
+  dlx container rm -f cs1 >/dev/null 2>&1
+}
+
+# The IPAM lease registry exists because the bare hash collides at ~300
+# containers in a /16. Eight proves the lock; this proves it at a scale where
+# the birthday paradox is actually pushing.
+scen_scale() {
+  local n="${DELONIX_CHAOS_SCALE:-30}"
+  head_ "scale — $n containers: IPs únicos, tecto agregado de pé, limpeza completa"
+  dlx net netns up >/dev/null 2>&1
+  # `du` do SANDBOX, NÃO `df` do filesystem: `/` é partilhado com a produção e
+  # com os builds, e a primeira versão deste cenário reportou 1168 MiB de "fuga"
+  # que eram, em boa parte, outra coisa qualquer a escrever no mesmo disco. Um
+  # número de fuga tem de medir só o que o cenário criou.
+  local before_kb; before_kb=$(du -sk "$SANDBOX/root" 2>/dev/null | cut -f1)
+  for i in $(seq 1 "$n"); do
+    dlx container run -d --name sc$i --net chaosnet "$IMAGE" sleep 300 >/dev/null 2>&1 &
+  done
+  wait
+  sleep 3
+  local ips total uniq_ips
+  ips=$(DELONIX_ROOT="$SANDBOX/root" python3 - <<'EOF'
+import json,glob,os
+print("\n".join(d["ip"] for d in
+      (json.load(open(f)) for f in glob.glob(os.path.join(os.environ["DELONIX_ROOT"],"containers","*.json")))
+      if (d.get("name") or "").startswith("sc") and d.get("ip")))
+EOF
+)
+  total=$(echo "$ips" | grep -c . || true)
+  uniq_ips=$(echo "$ips" | sort -u | grep -c . || true)
+  log "containers com IP: $total/$n · IPs distintos: $uniq_ips"
+  if [ "$total" -lt "$n" ]; then
+    bad "scale" "só $total de $n containers ganharam IP"
+  elif [ "$total" -ne "$uniq_ips" ]; then
+    bad "scale" "COLISÃO: $total containers, $uniq_ips IPs distintos"
+  else
+    ok "scale ($n containers, $uniq_ips IPs distintos)"
+  fi
+  for i in $(seq 1 "$n"); do dlx container rm -f sc$i >/dev/null 2>&1; done
+  sleep 2
+  # Cleanup must give the disk back — this engine has had a real disk-pressure
+  # incident from container dirs surviving their containers.
+  local after_kb; after_kb=$(du -sk "$SANDBOX/root" 2>/dev/null | cut -f1)
+  local leaked=$(( (after_kb - before_kb) / 1024 ))
+  log "disco não devolvido após a limpeza: ${leaked} MiB"
+  if [ "$leaked" -lt 200 ]; then ok "scale-cleanup (${leaked} MiB retidos)"
+  else bad "scale-cleanup" "${leaked} MiB não devolvidos ao disco depois de remover $n containers"; fi
+}
+
+# Fault injection without privilege: make the store unwritable mid-flight. A
+# write that cannot complete must fail LOUDLY and leave no half-published state.
+scen_write_failure() {
+  head_ "write-failure — escrita impossível tem de falhar alto e não deixar lixo"
+  local dir="$SANDBOX/root/containers"
+  [ -d "$dir" ] || { skip "write-failure" "store de containers ainda não existe"; return; }
+  local mode; mode=$(stat -c '%a' "$dir")
+  chmod 500 "$dir" 2>/dev/null || { skip "write-failure" "não consegui tornar o store só-leitura"; return; }
+
+  local out rc
+  out=$(dlx container run -d --name wf1 --net none "$IMAGE" sleep 60 2>&1); rc=$?
+  chmod "$mode" "$dir"
+
+  local orphans; orphans=$(find "$dir" -name '*.tmp' 2>/dev/null | wc -l)
+  if [ "$rc" -eq 0 ]; then
+    bad "write-failure" "reportou SUCESSO com o store só-leitura"
+  elif [ "$orphans" -ne 0 ]; then
+    bad "write-failure" "$orphans temporário(s) órfão(s) deixados para trás"
+  else
+    ok "write-failure (falhou alto, rc=$rc, zero temporários órfãos)"
+  fi
+  dlx container rm -f wf1 >/dev/null 2>&1
+}
+
 # ------------------------------------------------------------------- driver --
 
-ALL=(holder_kill idempotent_up oom concurrent_attach abrupt_kill aggregate_ceiling disk_full)
+ALL=(holder_kill holder_wedge slirp_kill idempotent_up oom concurrent_attach scale abrupt_kill aggregate_ceiling disk_full write_failure)
 
 while [ $# -gt 0 ]; do
   case "$1" in

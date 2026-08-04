@@ -2579,7 +2579,7 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
             // (see `cmd_rm`, which already does this); without it every
             // foreground `--rm` run left its full rootfs behind forever, the
             // exact same disk-pressure leak `cmd_rm` was already fixed for.
-            images.remove_container_dir(&c.id);
+            purge_container_dir(images, &c.id);
             // `--rm` still has to speak the container's exit code — a one-shot
             // job (`run --rm ... pg_dump`) is the single most common shape that
             // depends on it.
@@ -2805,7 +2805,7 @@ fn spawn_rm_watcher(images: &ImageStore, store: &Store, id: &str) {
                 // Same fix as the foreground `--rm` branch above: `unmount_rootfs`
                 // preserves the flat rootless rootfs on purpose, only this
                 // actually deletes it.
-                images.remove_container_dir(&c.id);
+                purge_container_dir(images, &c.id);
                 std::process::exit(0);
             }
         }
@@ -3897,8 +3897,47 @@ pub(crate) fn remove_container(
     runtime::remove(store, c, force)?;
     unpublish_ports(c, pid);
     let _ = images.unmount_rootfs(&c.id);
-    images.remove_container_dir(&c.id);
+    purge_container_dir(images, &c.id);
     Ok(())
+}
+
+/// Deletes a container's directory, falling back to the mapped-userns remover
+/// when the plain path cannot.
+///
+/// BUG FIXED HERE, found by the chaos harness and not by any test. `rm` left the
+/// ENTIRE flat rootfs behind — measured at 39 MiB for a `redis:7-alpine`, ~1.2
+/// GiB per 30 containers — while reporting success, with the record already
+/// deleted so nothing pointed at the orphan any more. Root cause: EACCES.
+/// A rootless container's tree contains directories the extraction left
+/// read-only, and files written inside a mapped userns as SUBUIDs; the calling
+/// uid cannot unlink through them, and `remove_dir_all`'s error was discarded.
+///
+/// This is the disk-pressure incident class this engine has already suffered
+/// once (49 orphan rootfs directories, ~45 GiB, kubelet tainting the node).
+///
+/// The remedy already existed on both sides and was simply never wired:
+/// `ImageStore::container_path` was added — its doc comment says "so `rm` can
+/// remove it in a mapped userns (subuid files) via the runtime" — and
+/// `remove_tree_mapped` is the runtime helper that does it, already used by
+/// `volume rm` and `system prune`. `container_path` had **zero callers**: the
+/// same "public API waiting for its first caller" trap this codebase has paid
+/// for three times (`mount_live`, `set_net_rate`, `update_limits`), and here it
+/// cost a silent disk leak.
+///
+/// Plain removal FIRST (cheap, no fork, and the only thing needed when there are
+/// no subuids); the mapped re-exec only as the fallback.
+fn purge_container_dir(images: &ImageStore, id: &str) {
+    if images.remove_container_dir(id) {
+        return;
+    }
+    let path = images.container_path(id);
+    runtime::remove_tree_mapped(&path);
+    if path.exists() {
+        super::output::warn(&super::po::tf(
+            "container directory {path} could not be removed — reclaim it with `delonix system prune`",
+            &[("path", &path.display().to_string())],
+        ));
+    }
 }
 
 pub(crate) fn cmd_rm(images: &ImageStore, store: &Store, id: &str, force: bool) -> Result<()> {
@@ -3915,9 +3954,9 @@ pub(crate) fn cmd_rm(images: &ImageStore, store: &Store, id: &str, force: bool) 
                                           // `unmount_rootfs` PRESERVES it on purpose (it's the container's state, for
                                           // `start` to reuse); only `rm` may delete it. Without this the rootfs was left
                                           // orphaned forever: 49 directories (45 GiB) piled up in a single test session,
-                                          // and the kubelet marked the node with `disk-pressure`. The `remove_container_dir`
+                                          // and the kubelet marked the node with `disk-pressure`. The `purge_container_dir`
                                           // doc already said "called by `rm`" — but it wasn't.
-    images.remove_container_dir(&c.id);
+    purge_container_dir(images, &c.id);
     delonix_runtime_core::events::emit(
         &super::util::state_root(),
         "container",
