@@ -223,6 +223,20 @@ scen_aggregate_ceiling() {
   parentmax=$(cat "/sys/fs/cgroup$parent/memory.max" 2>/dev/null || echo "")
   log "leaf   memory.max = ${leafmax:-<ausente>}"
   log "parent memory.max = ${parentmax:-<ausente>}   ($parent)"
+  # An SSH session scope is a SIBLING of `user@<uid>.service`, so a rootless
+  # engine started from one has NO delegated cgroup to work in and applies no
+  # limits at all — measured in a clean VM, `-m 128M --cpus 0.5` gave
+  # memory.max=max/cpu.max=max/pids.max=max, sharing the scope with sshd. That is
+  # a cgroup-v2 delegation rule, not a bug: the migration is refused because the
+  # common ancestor (`user-<uid>.slice`) belongs to root. Report it as the
+  # ENVIRONMENT problem it is, with the remedy, instead of a failure of the code
+  # — and never as a pass.
+  case "$cg" in
+    */session-*.scope)
+      skip "aggregate-ceiling" "sessão SSH sem cgroup delegado — sem limites NENHUNS; \
+usa: systemd-run --user --scope -p Delegate=yes -- <comando>"
+      return ;;
+  esac
   if [ -z "$parentmax" ]; then
     skip "aggregate-ceiling" "sem controlador memory delegado neste host"
   elif [ "$parentmax" = "max" ]; then
@@ -418,9 +432,40 @@ scen_write_failure() {
   dlx container rm -f wf1 >/dev/null 2>&1
 }
 
+
+# The remedy for the SSH case, verified rather than assumed. If this fails, the
+# engine has no way at all to apply limits on that host and the operator needs to
+# know before shipping anything to it.
+scen_delegated_scope() {
+  head_ "delegated-scope — sob um scope delegado, TODOS os limites têm de aplicar"
+  command -v systemd-run >/dev/null 2>&1 || { skip "delegated-scope" "sem systemd-run"; return; }
+  systemd-run --user --scope -p Delegate=yes -q -- \
+    env DELONIX_ROOT="$SANDBOX/root" DELONIX_NET_RUNTIME_DIR="$SANDBOX/run" \
+    "$BIN" container run -d --name cd1 --net none -m 128M --cpus 0.5 "$IMAGE" sleep 120 \
+    >/dev/null 2>&1
+  sleep 3
+  local p; p=$(cpid cd1)
+  [ -z "$p" ] && { skip "delegated-scope" "container não arrancou sob o scope"; return; }
+  local cg; cg=$(sed 's|^0::||' "/proc/$p/cgroup" 2>/dev/null)
+  local mem cpu pids swap oom
+  mem=$(cat "/sys/fs/cgroup$cg/memory.max" 2>/dev/null)
+  cpu=$(cat "/sys/fs/cgroup$cg/cpu.max" 2>/dev/null)
+  pids=$(cat "/sys/fs/cgroup$cg/pids.max" 2>/dev/null)
+  swap=$(cat "/sys/fs/cgroup$cg/memory.swap.max" 2>/dev/null)
+  oom=$(cat "/sys/fs/cgroup$cg/memory.oom.group" 2>/dev/null)
+  log "memory.max=$mem cpu.max=$cpu pids.max=$pids swap=$swap oom.group=$oom"
+  if [ "$mem" = "134217728" ] && [ "$cpu" = "50000 100000" ] && [ "$pids" = "512" ] \
+     && [ "$swap" = "0" ] && [ "$oom" = "1" ]; then
+    ok "delegated-scope (os cinco limites aplicados)"
+  else
+    bad "delegated-scope" "limites em falta sob um scope delegado: mem=$mem cpu=$cpu pids=$pids swap=$swap oom=$oom"
+  fi
+  dlx container rm -f cd1 >/dev/null 2>&1
+}
+
 # ------------------------------------------------------------------- driver --
 
-ALL=(holder_kill holder_wedge slirp_kill idempotent_up oom concurrent_attach scale abrupt_kill aggregate_ceiling disk_full write_failure)
+ALL=(holder_kill holder_wedge slirp_kill idempotent_up oom concurrent_attach scale abrupt_kill aggregate_ceiling delegated_scope disk_full write_failure)
 
 while [ $# -gt 0 ]; do
   case "$1" in

@@ -2735,6 +2735,37 @@ fn user_service_base(cur_abs: &str) -> Option<String> {
             return Some(format!("{}/dlx-containers", &cur_abs[..end - 1]));
         }
     }
+    // **Deliberately gives up here, and the reason is a kernel rule.**
+    //
+    // The scan above only finds the delegation boundary when the CALLER already
+    // sits inside `user@<uid>.service`. A desktop/IDE session does (its app
+    // scope is nested under it). **An SSH session does not**: systemd puts it in
+    // `/user.slice/user-<uid>.slice/session-N.scope`, a SIBLING of
+    // `user@<uid>.service`. So on the normal way anyone reaches a real server,
+    // neither candidate works — the session scope is populated (sshd + shell) so
+    // it cannot delegate, and the boundary is elsewhere.
+    //
+    // Deriving the boundary from the uid instead was tried, and MEASURED not to
+    // work: cgroup v2 only lets an unprivileged process migrate a pid between
+    // cgroups if it can write the COMMON ANCESTOR's `cgroup.procs`. Between a
+    // session scope and `user@<uid>.service` that ancestor is
+    // `user-<uid>.slice`, which belongs to root. Reproduced in a clean VM:
+    //
+    //     mkdir  user@1000.service/probe        → ok
+    //     echo $$ > user@1000.service/probe/cgroup.procs → EACCES
+    //
+    // (The comment on the caller used to claim this move was allowed. It is not.)
+    //
+    // So over plain SSH a rootless engine CANNOT apply cgroup limits, and no
+    // amount of code changes that. What does work — measured in the same VM, all
+    // limits applied including the aggregate ceiling — is for the caller to own a
+    // delegated cgroup from the start:
+    //
+    //     systemd-run --user --scope -p Delegate=yes -- delonix container run ...
+    //
+    // `setup_cgroup`'s warning says exactly that, and `warn_if_unprotected_memory`
+    // repeats it for the memory case. Returning `None` here is what makes that
+    // warning fire instead of silently building a cgroup nobody can enter.
     None
 }
 
@@ -4908,6 +4939,19 @@ mod tests {
                 .as_deref(),
             Some("/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/dlx-containers")
         );
+        // An SSH session scope is a SIBLING of `user@<uid>.service`
+        // (`/user.slice/user-<uid>.slice/session-N.scope`), so there is no
+        // boundary on the path and the answer is `None` — which is what makes
+        // the engine WARN instead of silently building a cgroup it can never
+        // move the container into. Measured in a clean VM: the migration is
+        // refused by cgroup v2's common-ancestor rule (EACCES), so returning a
+        // uid-derived base here would only create an unusable directory.
+        assert_eq!(
+            user_service_base("/sys/fs/cgroup/user.slice/user-1000.slice/session-40.scope"),
+            None,
+            "uma sessão SSH não tem fronteira de delegação alcançável"
+        );
+
         // outside the session tree (system service) → no escape.
         assert_eq!(
             user_service_base("/sys/fs/cgroup/system.slice/foo.service"),
