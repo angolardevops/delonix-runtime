@@ -52,17 +52,53 @@ fn prefix_file(prefix: &str) -> PathBuf {
 /// are short and rare compared to the container's lifecycle). `Drop` releases it.
 struct IpamLock(i32);
 impl IpamLock {
-    fn acquire() -> IpamLock {
+    /// Acquires the lock. `None` when it could not be taken — the caller MUST
+    /// then refuse the operation.
+    ///
+    /// BUG FIXED HERE: this used to be infallible. On `open` failure it
+    /// returned `IpamLock(-1)` and the callers, which bind it to `let _lock =`,
+    /// carried on **with no lock at all** — running exactly the unsynchronized
+    /// read-modify-write (`load` → mutate → `store`) that this module exists to
+    /// prevent. Two concurrent attaches then both read the same map, both write,
+    /// and one lease is lost: two containers on ONE IP, with the firewall and
+    /// DNAT rules indexed on the wrong one. Silently failing OPEN on the lock
+    /// that guards address uniqueness is the worst possible direction.
+    ///
+    /// (`Store`'s `FileLock` degrades the same way, but it at least says so in
+    /// its doc and the loss there is one overwritten record, not a duplicated
+    /// address. Here the failure is not recoverable by a retry of the same
+    /// command.)
+    fn acquire() -> Option<IpamLock> {
         let _ = std::fs::create_dir_all(ipam_dir());
         let path = ipam_dir().join("lock");
-        let c = std::ffi::CString::new(path.as_os_str().to_string_lossy().as_bytes().to_vec())
-            .unwrap_or_else(|_| std::ffi::CString::new("/tmp/dlxipamlock").unwrap());
-        // SAFETY: open/flock with a valid path; -1 on failure is handled next.
+        let c =
+            std::ffi::CString::new(path.as_os_str().to_string_lossy().as_bytes().to_vec()).ok()?;
+        // SAFETY: open/flock with a valid NUL-terminated path; -1 is handled.
         let fd = unsafe { libc::open(c.as_ptr(), libc::O_CREAT | libc::O_RDWR, 0o600) };
-        if fd >= 0 {
-            unsafe { libc::flock(fd, libc::LOCK_EX) };
+        if fd < 0 {
+            return None;
         }
-        IpamLock(fd)
+        // SAFETY: fd is ours and open; LOCK_EX blocks until granted.
+        if unsafe { libc::flock(fd, libc::LOCK_EX) } != 0 {
+            // SAFETY: closing our own fd; we are about to drop it on the floor.
+            unsafe { libc::close(fd) };
+            return None;
+        }
+        Some(IpamLock(fd))
+    }
+
+    /// The error every caller reports when the lock cannot be taken. Naming the
+    /// consequence matters: "could not lock" alone reads like a transient
+    /// annoyance, when what it prevents is a duplicate address.
+    fn unavailable() -> Error {
+        Error::Runtime {
+            context: "ipam",
+            message: format!(
+                "could not lock the IPAM registry at {} — refusing to allocate, \
+                 since an unsynchronized allocation can hand the same IP to two containers",
+                ipam_dir().join("lock").display()
+            ),
+        }
     }
 }
 impl Drop for IpamLock {
@@ -86,11 +122,19 @@ fn load(prefix: &str) -> Option<BTreeMap<String, String>> {
 }
 
 /// Persists the `id → ip` map of a prefix (pretty, like the `NetDef`s).
-/// **Atomic write** (temporary file + `rename`): a lockless reader
-/// (`lookup`, on the cleanup path) never sees a file truncated in the middle of a
-/// concurrent `store` — it would see the OLD map or the NEW one, never garbage. Without this, a
-/// torn read returned `None` and cleanup fell back to the DERIVED IP (wrong, if the
-/// real one had been probed on top of a collision), leaving orphan rules.
+///
+/// **Atomic AND durable** (temp → `fsync` → `rename` → `fsync` the dir, via
+/// [`delonix_runtime_core::write_atomic`]): a lockless reader (`lookup`, on the
+/// cleanup path) never sees a file truncated in the middle of a concurrent
+/// `store` — it sees the OLD map or the NEW one, never garbage. Without that, a
+/// torn read returned `None` and cleanup fell back to the DERIVED IP (wrong, if
+/// the real one had been probed on top of a collision), leaving orphan rules.
+///
+/// The `fsync` half was added later and matters MOST here: this file is the
+/// only thing standing between the allocator and the birthday collision this
+/// whole module exists to eliminate (~50 % at ~300 containers). Losing it to a
+/// crash is not a degraded metric — it is two containers on one IP, with the
+/// firewall and DNAT rules indexed on the wrong one.
 fn store(prefix: &str, map: &BTreeMap<String, String>) -> Result<()> {
     std::fs::create_dir_all(ipam_dir()).map_err(|e| Error::Runtime {
         context: "ipam dir",
@@ -100,21 +144,9 @@ fn store(prefix: &str, map: &BTreeMap<String, String>) -> Result<()> {
         context: "ipam serialize",
         message: e.to_string(),
     })?;
-    let final_path = prefix_file(prefix);
-    // The tmp stays in the SAME directory (atomic rename only within the same filesystem);
-    // suffixed by the pid so two processes under the flock don't clobber the same tmp.
-    // SAFETY: getpid() has no preconditions.
-    let tmp = ipam_dir().join(format!(".{prefix}.{}.tmp", unsafe { libc::getpid() }));
-    std::fs::write(&tmp, json).map_err(|e| Error::Runtime {
-        context: "ipam write tmp",
+    delonix_runtime_core::write_atomic(&prefix_file(prefix), &json).map_err(|e| Error::Runtime {
+        context: "ipam write",
         message: e.to_string(),
-    })?;
-    std::fs::rename(&tmp, &final_path).map_err(|e| {
-        let _ = std::fs::remove_file(&tmp);
-        Error::Runtime {
-            context: "ipam rename",
-            message: e.to_string(),
-        }
     })
 }
 
@@ -123,7 +155,7 @@ fn store(prefix: &str, map: &BTreeMap<String, String>) -> Result<()> {
 /// it starts from the preferred hash IP and, if held by another id, linearly probes the
 /// rest of the `/16`. Clear error if the `/16` is full (~65k hosts). Under `flock`.
 pub fn allocate(prefix: &str, id: &str) -> Result<String> {
-    let _lock = IpamLock::acquire();
+    let _lock = IpamLock::acquire().ok_or_else(IpamLock::unavailable)?;
     let mut map = load(prefix).unwrap_or_default();
     if let Some(ip) = map.get(id) {
         return Ok(ip.clone());
@@ -175,7 +207,15 @@ fn probe_free(
 /// so that other containers' probing sees it as occupied and never reassigns it.
 /// Idempotent. Under `flock`.
 pub fn reserve(prefix: &str, id: &str, ip: &str) {
-    let _lock = IpamLock::acquire();
+    // Sem lock não se escreve: um read-modify-write destravado aqui apaga o
+    // lease de outro container tão bem como no `allocate`.
+    let Some(_lock) = IpamLock::acquire() else {
+        tracing::error!(
+            prefix = %prefix, container_id = %id,
+            "{}", IpamLock::unavailable()
+        );
+        return;
+    };
     let mut map = load(prefix).unwrap_or_default();
     if map.get(id).map(String::as_str) == Some(ip) {
         return;
@@ -209,7 +249,15 @@ pub fn lookup(prefix: &str, id: &str) -> Option<String> {
 /// Frees `id`'s lease in `prefix`'s `/16` (on detach). Best-effort and
 /// idempotent. Under `flock`.
 pub fn release(prefix: &str, id: &str) {
-    let _lock = IpamLock::acquire();
+    // Idem: um release destravado pode reescrever o mapa por cima de um
+    // allocate concorrente e ressuscitar um lease já libertado.
+    let Some(_lock) = IpamLock::acquire() else {
+        tracing::error!(
+            prefix = %prefix, container_id = %id,
+            "{}", IpamLock::unavailable()
+        );
+        return;
+    };
     if let Some(mut map) = load(prefix) {
         if map.remove(id).is_some() {
             let _ = store(prefix, &map);
@@ -336,6 +384,57 @@ mod tests {
                 "o lease da rede primária NÃO pode ser afetado"
             );
         });
+    }
+
+    /// REGRESSION (fail-closed): if the registry lock cannot be taken,
+    /// `allocate` must REFUSE, never allocate unsynchronized.
+    ///
+    /// `acquire()` used to be infallible — on `open` failure it handed back a
+    /// lock holding fd `-1` and the caller ran the whole read-modify-write with
+    /// no mutual exclusion at all. That is the exact race this module exists to
+    /// prevent, and its outcome is two containers sharing one IP. Restoring the
+    /// infallible `acquire()` makes this test fail: `allocate` would return
+    /// `Ok(ip)` from an unlocked path.
+    #[test]
+    fn allocate_recusa_quando_nao_consegue_trancar_o_registo() {
+        use std::os::unix::fs::PermissionsExt;
+        static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+
+        let dir = std::env::temp_dir().join(format!("dlx-ipam-nolock-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        // Read-only root: `ipam/` cannot be created, so the lock file cannot be
+        // opened — the same shape as a full disk or a lost mount.
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o500)).unwrap();
+
+        // SAFETY: single-threaded under the mutex above.
+        unsafe { std::env::set_var("DELONIX_ROOT", &dir) };
+        let got = allocate("10.88", "cafe0001");
+        unsafe { std::env::remove_var("DELONIX_ROOT") };
+
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+
+        match got {
+            Err(e) => {
+                let msg = format!("{e}");
+                assert!(
+                    msg.contains("same IP to two containers"),
+                    "o erro tem de nomear a consequência, não só 'falhou': {msg}"
+                );
+            }
+            // Root ignores the mode bits, so the lock opens fine and the
+            // allocation legitimately succeeds — declare it instead of letting
+            // the test pass for the wrong reason.
+            Ok(ip) => {
+                assert!(
+                    unsafe { libc::geteuid() } == 0,
+                    "allocate devolveu {ip} sem conseguir trancar o registo — é este o bug"
+                );
+                eprintln!("aviso: a correr como root, os bits de permissão não se aplicam — asserção saltada");
+            }
+        }
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

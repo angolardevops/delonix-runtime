@@ -843,11 +843,63 @@ pub fn holder_main() -> ! {
     }
 }
 
+/// How long the holder waits for a client to finish sending its command line,
+/// and for it to drain the reply.
+///
+/// BUG FIXED HERE: `control_loop` serves ONE connection at a time (deliberately
+/// — it is the netns/veth/nft factory and those operations must not interleave),
+/// and it used to `read_line` with **no deadline at all**. A client that
+/// connected and never completed a line therefore blocked the holder *forever*,
+/// and with it the control plane of every container on the node: no attach, no
+/// detach, no publish, no firewall, no `cni-add`. Nothing ever recovered it —
+/// there was no timeout to expire and no second thread to make progress.
+///
+/// It does not take a malicious peer (`SO_PEERCRED` already restricts callers to
+/// the engine's own uid). The reachable trigger is ordinary: `control_query`
+/// does `connect` then `write`, so any CLI descheduled, `SIGSTOP`ped, or
+/// OOM-throttled in that window wedges the node. This is the same class of hang
+/// that `recv_fd` already grew an `SO_RCVTIMEO` for; the holder simply never got
+/// the same treatment.
+///
+/// Generous on purpose: the client has already written its command before the
+/// holder is scheduled in the normal case, so this only ever fires on a peer
+/// that is genuinely stuck. It matches the client's own 5s read timeout in
+/// `control_query`.
+const CONTROL_IO_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// Reads ONE command line from a control connection, bounded by
+/// [`CONTROL_IO_TIMEOUT`]. `None` when the peer sent nothing in time, hung up,
+/// or the deadline could not be armed — in every case the caller drops the
+/// connection and moves on to the next one instead of blocking the holder.
+///
+/// Extracted from `control_loop` so the deadline is exercisable by a test
+/// without standing up a real holder (which would need a userns/netns and would
+/// run `nft` for real).
+fn read_control_line(stream: &std::os::unix::net::UnixStream) -> Option<String> {
+    use std::io::{BufRead, BufReader};
+    // Fail CLOSED: if the deadline cannot be armed we refuse the connection
+    // rather than fall back to the unbounded read this exists to prevent.
+    stream.set_read_timeout(Some(CONTROL_IO_TIMEOUT)).ok()?;
+    let mut line = String::new();
+    match BufReader::new(stream).read_line(&mut line) {
+        Ok(0) => None, // peer hung up without sending anything
+        Ok(_) => Some(line),
+        Err(_) => None, // includes WouldBlock/TimedOut once the deadline fires
+    }
+}
+
 /// Accepts connections on the control socket and serves one command per connection (the netns/veth
 /// factory). Runs INSIDE the holder, so the `ip`/`ip netns` operations stay
 /// in the infra netns without `nsenter`. Synchronous (one attach at a time — sufficient).
+///
+/// Both halves of the exchange are bounded by [`CONTROL_IO_TIMEOUT`] — see there
+/// for why. **Residual, deliberately not closed here**: a `handle_control` that
+/// itself hangs (an `nft`/`ip` blocked on a netlink lock) still stalls the loop.
+/// Fixing that needs the dispatch to move off this thread, which would break the
+/// serialization the factory depends on — a separate change with its own design,
+/// not a timeout.
 fn control_loop(listener: std::os::unix::net::UnixListener) -> ! {
-    use std::io::{BufRead, BufReader, Write};
+    use std::io::Write;
     // SAFETY: geteuid() has no preconditions.
     let own_uid = unsafe { libc::geteuid() };
     for conn in listener.incoming() {
@@ -857,11 +909,14 @@ fn control_loop(listener: std::os::unix::net::UnixListener) -> ! {
         if peer_uid(&stream) != Some(own_uid) {
             continue;
         }
-        let mut line = String::new();
-        if BufReader::new(&stream).read_line(&mut line).is_err() {
+        let Some(line) = read_control_line(&stream) else {
             continue;
-        }
+        };
         let reply = handle_control(line.trim());
+        // The reply is a single short line, but a peer that never reads it would
+        // otherwise be able to block the holder in `write_all` once the socket
+        // buffer filled — the same wedge from the other direction.
+        let _ = stream.set_write_timeout(Some(CONTROL_IO_TIMEOUT));
         let _ = stream.write_all(reply.as_bytes());
     }
     std::process::exit(0);
@@ -3654,19 +3709,74 @@ pub fn join_argv(id: &str) -> Option<Vec<String>> {
 /// (via `join_argv`). From the container's point of view, `rx`=download and `tx`=upload
 /// (without the swap of the root model, where the host-side veth is read). Returns
 /// `(download, upload)` or `None` if the infra/container isn't up.
-pub fn container_net_bytes(id: &str) -> Option<(u64, u64)> {
-    let prefix = join_argv(id)?;
-    let read = |stat: &str| -> Option<u64> {
-        let mut argv = prefix.clone();
-        argv.push("cat".into());
-        argv.push(format!("/sys/class/net/eth0/statistics/{stat}"));
-        let out = Command::new(&argv[0]).args(&argv[1..]).output().ok()?;
-        if !out.status.success() {
-            return None;
+/// Sums `(rx_bytes, tx_bytes)` over every non-loopback interface in a
+/// `/proc/net/dev` dump. `None` when the text has no usable interface line at
+/// all (an empty/unparseable read must not masquerade as "0 bytes of traffic").
+///
+/// Column layout, fixed since forever: `iface: rx_bytes rx_packets rx_errs
+/// rx_drop rx_fifo rx_frame rx_compressed rx_multicast tx_bytes …` — so rx is
+/// field 0 and tx is field 8 after the colon.
+///
+/// `lo` is excluded: container-local loopback traffic is not network usage, and
+/// on a busy container it dwarfs the real numbers (this host's own `lo` shows
+/// 487 GB against 13 GB on the actual NIC).
+fn parse_proc_net_dev(text: &str) -> Option<(u64, u64)> {
+    let mut rx_total = 0u64;
+    let mut tx_total = 0u64;
+    let mut seen = false;
+    for line in text.lines() {
+        let Some((name, rest)) = line.split_once(':') else {
+            continue; // the two header lines have no colon in the name position
+        };
+        let name = name.trim();
+        if name.is_empty() || name == "lo" {
+            continue;
         }
-        String::from_utf8_lossy(&out.stdout).trim().parse().ok()
-    };
-    Some((read("rx_bytes")?, read("tx_bytes")?))
+        let f: Vec<&str> = rest.split_whitespace().collect();
+        if f.len() < 9 {
+            continue;
+        }
+        let (Ok(rx), Ok(tx)) = (f[0].parse::<u64>(), f[8].parse::<u64>()) else {
+            continue;
+        };
+        rx_total = rx_total.saturating_add(rx);
+        tx_total = tx_total.saturating_add(tx);
+        seen = true;
+    }
+    seen.then_some((rx_total, tx_total))
+}
+
+/// Cumulative `(rx_bytes, tx_bytes)` of a container, summed over ALL of its
+/// interfaces. `None` when the container has no netns to enter (`--net
+/// host`/`--net none`) — callers must surface that as *unmeasured*, never fold
+/// it in as zero.
+///
+/// BUG FIXED HERE: this read `/sys/class/net/**eth0**/statistics/*`, a single
+/// hardcoded interface. A multi-homed container — `container update
+/// --net-connect`, a first-class feature — carries its second network on
+/// `eth1`, and every byte of it was invisible. Worse than invisible: the
+/// function still returned `Some`, so `dashstats::collect` counted the
+/// container as successfully measured and `network_unmeasured_containers`
+/// stayed at zero. The gauge came out **falsely complete** — exactly the
+/// failure mode that field was added to prevent for `--net host/none`.
+///
+/// This is the same blind spot the firewall and the namespace isolation both
+/// had (see the "primary IP" lesson in CLAUDE.md): a container does not have
+/// *an* interface, it has a primary one plus however many `--net-connect`
+/// added. Reading `/proc/net/dev` enumerates whatever is actually there instead
+/// of naming one.
+///
+/// Cheaper, too: ONE `nsenter`+`cat` per container instead of two (this runs
+/// per running container on every expensive collection).
+pub fn container_net_bytes(id: &str) -> Option<(u64, u64)> {
+    let mut argv = join_argv(id)?;
+    argv.push("cat".into());
+    argv.push("/proc/net/dev".into());
+    let out = Command::new(&argv[0]).args(&argv[1..]).output().ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    parse_proc_net_dev(&String::from_utf8_lossy(&out.stdout))
 }
 
 /// Sends a command to the holder's control socket and waits for `ok`. Retries
@@ -4311,6 +4421,125 @@ pub fn dhcp_ip6_for_mac(_net: &str, mac: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    /// REGRESSION (availability): a control connection that never completes its
+    /// command line must NOT block the holder forever.
+    ///
+    /// `control_loop` serves one connection at a time by design, so an unbounded
+    /// `read_line` there takes down the control plane of every container on the
+    /// node — no attach/detach/publish/firewall — with nothing to ever recover
+    /// it. Reverting `read_control_line`'s `set_read_timeout` makes this test
+    /// fail.
+    ///
+    /// The read runs on its own thread with a `recv_timeout` well above
+    /// `CONTROL_IO_TIMEOUT`, so a regression FAILS CLEANLY (assert on a closed
+    /// channel) instead of hanging `cargo test` — the whole point being that the
+    /// unfixed code never returns at all.
+    #[test]
+    fn read_control_line_desiste_de_um_par_que_nunca_escreve() {
+        use std::io::Write;
+        use std::os::unix::net::{UnixListener, UnixStream};
+
+        let sock = std::env::temp_dir().join(format!(
+            "dlx-ctl-timeout-{}-{}.sock",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = std::fs::remove_file(&sock);
+        let listener = UnixListener::bind(&sock).unwrap();
+
+        // A peer that connects and sends NOTHING — held open for the whole test,
+        // which is exactly the wedge: the fd stays valid, so there is no EOF to
+        // unblock the read.
+        let silent = UnixStream::connect(&sock).unwrap();
+        let (server_side, _) = listener.accept().unwrap();
+
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let started = std::time::Instant::now();
+            let got = super::read_control_line(&server_side);
+            let _ = tx.send((got, started.elapsed()));
+        });
+
+        let grace = super::CONTROL_IO_TIMEOUT * 3;
+        let (got, elapsed) = rx.recv_timeout(grace).expect(
+            "read_control_line NUNCA devolveu — o holder fica preso para sempre \
+             num par que não escreve (é este o bug)",
+        );
+        assert!(
+            got.is_none(),
+            "um par que nada enviou não pode produzir um comando: {got:?}"
+        );
+        assert!(
+            elapsed < grace,
+            "devolveu, mas só depois de {elapsed:?} — o prazo não está a ser aplicado"
+        );
+
+        // Não regride o caminho feliz: um comando completo continua a ser lido.
+        let mut client = UnixStream::connect(&sock).unwrap();
+        let (server_side2, _) = listener.accept().unwrap();
+        client.write_all(b"ping\n").unwrap();
+        assert_eq!(
+            super::read_control_line(&server_side2).as_deref(),
+            Some("ping\n"),
+            "um comando completo tem de continuar a ser servido"
+        );
+
+        drop(silent);
+        let _ = std::fs::remove_file(&sock);
+    }
+
+    /// REGRESSION: the traffic total must cover EVERY interface, not just
+    /// `eth0`.
+    ///
+    /// A multi-homed container (`container update --net-connect`) carries its
+    /// second network on `eth1`; the old implementation read a hardcoded
+    /// `/sys/class/net/eth0/...` and silently reported only half the traffic —
+    /// while still returning `Some`, so the collector counted it as fully
+    /// measured. Header lines and `lo` must be excluded, and an unusable dump
+    /// must be `None` (unmeasured), never `Some(0)`.
+    ///
+    /// The header/column layout below is verbatim from a real `/proc/net/dev`
+    /// on this host — parsing a shape invented for the test would prove nothing.
+    #[test]
+    fn container_net_bytes_soma_todas_as_interfaces_nao_so_eth0() {
+        let dump = "\
+Inter-|   Receive                                                |  Transmit
+ face |bytes    packets errs drop fifo frame compressed multicast|bytes    packets errs drop fifo colls carrier compressed
+    lo: 487295143 1281691    0    0    0     0          0         0 487295143 1281691    0    0    0     0       0          0
+  eth0: 13058207  101175    0    0    0     0          0         0  3728721   31476    0   31    0     0       0          0
+  eth1:  5000000   40000    0    0    0     0          0         0  1000000   10000    0    0    0     0       0          0
+";
+        let (rx, tx) = super::parse_proc_net_dev(dump).expect("dump válido tem de medir");
+        assert_eq!(
+            rx,
+            13_058_207 + 5_000_000,
+            "o rx da 2.ª rede (eth1) tem de entrar na soma"
+        );
+        assert_eq!(tx, 3_728_721 + 1_000_000, "idem para o tx");
+
+        // `lo` fica de fora: tráfego de loopback não é uso de rede, e neste
+        // host mede 487 GB contra 13 GB da interface real — somá-lo tornaria
+        // a métrica inútil.
+        assert!(rx < 487_295_143, "o loopback não pode entrar na soma");
+
+        // Uma leitura sem interfaces nenhumas é DESCONHECIDA, não "zero
+        // bytes" — a mesma distinção que `network_unmeasured_containers` faz.
+        assert_eq!(super::parse_proc_net_dev(""), None);
+        assert_eq!(
+            super::parse_proc_net_dev("Inter-|   Receive\n face |bytes\n"),
+            None,
+            "só cabeçalhos não é uma medição"
+        );
+        // Um container só com loopback também não tem tráfego de rede medível.
+        assert_eq!(
+            super::parse_proc_net_dev("    lo: 100 1 0 0 0 0 0 0 100 1 0 0 0 0 0 0\n"),
+            None
+        );
+    }
+
     /// The IP computed by `dhcp_ip_for_mac` MUST match what
     /// `dhcp_serve` assigns — same formula. If one of the two changes without the other,
     /// VMs show an IP they don't respond to. Locks the shared formula.

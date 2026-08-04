@@ -22,7 +22,7 @@ pub mod workload_net;
 
 pub use error::{Error, Result};
 pub use secret::{Secret, SecretStore};
-pub use store::{JsonStore, Store};
+pub use store::{write_atomic, JsonStore, Store};
 
 /// Formats a unix instant as LOCAL date/time "YYYY-MM-DD HH:MM:SS".
 /// Uses `localtime_r` (honors /etc/localtime|TZ); on failure, returns the raw value.
