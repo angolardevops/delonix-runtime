@@ -34,7 +34,8 @@ Why it's different
    * - Daemon
      - ``dockerd`` (root)
      - none (a ``conmon`` per container)
-     - none — and no residing per-container monitor either
+     - none — a short-lived supervisor per container (same model as ``conmon``),
+       which is what makes a detached container's exit code knowable
    * - Rootless
      - opt-in
      - yes (a slirp/pasta per container)
@@ -55,6 +56,54 @@ Why it's different
      - ``stats``
      - ``stats``
      - eBPF per-container flow accounting (``delonix net flow``)
+   * - Resource limits, rootless
+     - n/a (daemon is root)
+     - needs a delegated cgroup
+     - needs a delegated cgroup — see `Resource limits need a delegated cgroup`_
+
+Resource limits need a delegated cgroup
+=======================================
+
+``-m`` / ``--cpus`` / ``--pids-limit`` only take effect when the process that
+starts the container owns a **delegated cgroup**. From an ordinary SSH session
+they are silently inert — and that is a cgroup v2 rule, not a limitation of this
+engine: ``rootless Podman has exactly the same requirement``.
+
+Measured on a clean Ubuntu 24.04 VM over plain SSH, with ``-m 128M --cpus 0.5``::
+
+    cgroup: /user.slice/user-1000.slice/session-40.scope   (shared with sshd)
+    memory.max=max   cpu.max=max   pids.max=max
+
+The reason is that an SSH session scope is a **sibling** of
+``user@<uid>.service``, not a child, and moving a process between them needs
+write access to their common ancestor ``user-<uid>.slice``, which belongs to
+root. Namespace and seccomp isolation are unaffected — only the resource
+ceilings.
+
+``install.sh`` detects this and prints the remedy. Run workloads inside a
+delegated scope::
+
+    systemd-run --user --scope -p Delegate=yes -- delonix container run -d -m 512M myapp
+
+…or, for anything long-lived, from a systemd **user** unit, which already gets a
+delegated cgroup::
+
+    [Service]
+    Delegate=yes
+    ExecStart=/usr/local/bin/delonix container run ...
+
+Verify it took effect — this is the check worth putting in your provisioning::
+
+    systemd-run --user --scope -p Delegate=yes -- \
+      delonix container run -d --name t -m 128M alpine sleep 60
+    # memory.max must read 134217728, not "max"
+
+With delegation in place the engine applies the whole set: the per-container
+``memory.max`` / ``cpu.max`` / ``pids.max``, ``memory.swap.max=0`` (so a limit
+bounds real memory and not just the resident set), ``memory.oom.group=1`` (so an
+OOM kills the container, not one process inside it), **and** an aggregate ceiling
+on the parent sized from the host — the thing that stops N containers, none of
+which carry ``-m``, from summing to more than the machine has.
 
 Highlights
 ==========
