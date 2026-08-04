@@ -295,8 +295,30 @@ impl ImageStore {
 
     /// Removes the ENTIRE container directory (incl. the flat `rootfs/`). Use in `rm`
     /// (definitive destroy), unlike `unmount_rootfs` (stop, which preserves).
-    pub fn remove_container_dir(&self, container_id: &str) {
-        let _ = std::fs::remove_dir_all(self.container_dir(container_id));
+    /// **Reports failure instead of swallowing it.** This used to be a bare
+    /// `let _ = remove_dir_all(...)`, and that silence hid a real leak for a
+    /// long time: on the custom-network path a removed container left its whole
+    /// flat rootfs behind — measured at 39 MiB for a `redis:7-alpine`, ~1.2 GiB
+    /// per 30 containers — while `rm` reported success and the record was gone,
+    /// so nothing anywhere pointed at the orphan. It is the same shape as the
+    /// disk-pressure incident that once taunted a kubelet with 49 orphan
+    /// rootfs directories.
+    ///
+    /// Returns whether the directory is gone. **Says nothing on failure**, on
+    /// purpose: the caller has a mapped-userns fallback that usually succeeds
+    /// right after (`cmd::container::purge_container_dir`), and a warning
+    /// printed here would announce a leak that is about to be cleaned up — the
+    /// dishonest reporting this engine treats as its worst class of bug, just
+    /// pointing the other way. Only the caller knows the final outcome, so only
+    /// the caller speaks.
+    pub fn remove_container_dir(&self, container_id: &str) -> bool {
+        let dir = self.container_dir(container_id);
+        match std::fs::remove_dir_all(&dir) {
+            Ok(()) => true,
+            // Already gone is success, not failure.
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => true,
+            Err(_) => false,
+        }
     }
 
     /// Path of a container's directory (`<root>/containers/<id>`). So `rm`
