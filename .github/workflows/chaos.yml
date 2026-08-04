@@ -75,9 +75,46 @@ jobs:
             && echo "gestor de utilizador: presente" \
             || echo "gestor de utilizador: AUSENTE (os cenários de limites farão skip)"
 
+      # O Ubuntu 23.10+ traz `kernel.apparmor_restrict_unprivileged_userns=1`: um
+      # binário SEM perfil não pode criar user namespaces, e o motor morre logo no
+      # `unshare()`. É o mesmo perfil que o `install.sh` escreve. A primeira versão
+      # deste workflow omitiu-o de propósito («o arnês não deve depender do
+      # instalador») e o resultado foi uma bateria inteira de SKIPs a tapar a causa.
+      - name: Perfil AppArmor para userns
+        run: |
+          if [ "$(sysctl -n kernel.apparmor_restrict_unprivileged_userns 2>/dev/null || echo 0)" = 1 ]; then
+            printf 'abi <abi/4.0>,\ninclude <tunables/global>\nprofile delonix %s/target/release/delonix flags=(unconfined) {\n  userns,\n}\n' "$PWD" \
+              | sudo tee /etc/apparmor.d/delonix >/dev/null
+            sudo apparmor_parser -r /etc/apparmor.d/delonix
+            echo "perfil AppArmor instalado"
+          else
+            echo "o host não restringe userns — perfil desnecessário"
+          fi
+
       - name: Puxa a imagem de teste
         run: |
           ./target/release/delonix image pull docker.io/library/redis:7-alpine
+
+      # PREFLIGHT RUIDOSO, e é uma lição desta série: o arnês silencia a saída de
+      # cada comando (é o que o torna legível), por isso um motor que nem arranca
+      # produz uma parede de SKIPs sem UMA linha a dizer porquê. Este passo corre
+      # o caminho mínimo com o stderr à vista e falha o job com o erro REAL — um
+      # problema de ambiente tem de se distinguir de um bug do motor à primeira
+      # leitura, não ao fim de escavar logs.
+      - name: Preflight (o motor arranca de todo?)
+        run: |
+          set -x
+          unshare -r -n true
+          export DELONIX_ROOT=/tmp/dlx-preflight DELONIX_NET_RUNTIME_DIR=/tmp/dlx-pf
+          mkdir -p "$DELONIX_ROOT" "$DELONIX_NET_RUNTIME_DIR"
+          for d in images layers blobs; do ln -sfn "$HOME/.local/share/delonix/$d" "$DELONIX_ROOT/$d"; done
+          ./target/release/delonix net netns up
+          ./target/release/delonix container run -d --name preflight --net none \
+            docker.io/library/redis:7-alpine sleep 20
+          ./target/release/delonix container ps
+          ./target/release/delonix container rm -f preflight
+          ./target/release/delonix net netns down || true
+          rm -rf "$DELONIX_ROOT" "$DELONIX_NET_RUNTIME_DIR"
 
       # `systemd-run --scope -p Delegate=yes` é o que dá ao arnês um cgroup onde
       # os limites aplicam mesmo. Se o runner não tiver gestor de utilizador, o
