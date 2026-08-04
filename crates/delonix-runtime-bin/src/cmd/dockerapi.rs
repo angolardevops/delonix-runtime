@@ -604,6 +604,12 @@ fn docker_config_to_run_opts(name: String, cfg: &serde_json::Value) -> Result<Ru
 
     Ok(RunOpts {
         detach: true,
+        // This server is MULTI-THREADED and `run_supervised` does a bare
+        // `fork()` that assumes a single-threaded caller — the same reason
+        // `--restart` is already refused here. Opting out keeps the pre-existing
+        // behaviour (no supervisor, so no captured exit code over this API) as a
+        // documented gap, instead of forking from a threaded process.
+        no_supervisor: true,
         name: Some(name),
         net: "host".to_string(),
         volumes,

@@ -1330,6 +1330,7 @@ pub fn run(action: ContainerCmd) -> Result<()> {
                 cpu_weight,
                 cpuset,
                 io_weight,
+                no_supervisor: false,
                 io_max: compose_io_max(
                     device_read_bps.as_deref(),
                     device_write_bps.as_deref(),
@@ -1840,6 +1841,11 @@ pub(crate) struct RunOpts {
     /// Composed cgroup-v2 `io.max` value half (`rbps=… wbps=…`), device excluded
     /// — the engine prepends the store device. `None` = no absolute ceiling.
     pub(crate) io_max: Option<String>,
+    /// Caller cannot safely `fork()` — see [`should_supervise`]. Set by the
+    /// `serve docker-api` server, which is multi-threaded; everything else
+    /// leaves it `false`.
+    #[serde(default)]
+    pub(crate) no_supervisor: bool,
     // (see `compose_io_max` for how the four `--device-*` flags become this)
     #[serde(default)]
     pub(crate) read_only: bool,
@@ -1934,6 +1940,7 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
         cpuset,
         io_weight,
         io_max,
+        no_supervisor,
         read_only,
         cap_add,
         cap_drop,
@@ -2485,8 +2492,31 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
     // `--restart`: instead of the CLI creating the container and exiting (leaving
     // it orphaned from `init`, with the exit code lost), a detached SUPERVISOR
     // creates it and becomes its parent — see `run_supervised`.
-    if detach && policy_supervised(&restart) {
-        c.restart_policy = Some(restart.clone());
+    // BUG FIXED HERE (pre-existing, and found by the chaos harness rather than
+    // by any test): the block further down that persists `network`/`ip` lives
+    // AFTER the supervisor's early return, so the supervised path never reached
+    // it. Measured on a container started with `--restart always --net <rede>`,
+    // BEFORE this session touched the supervisor at all:
+    //
+    //     ip persistido: None   network: None
+    //
+    // …while the container had a working address on the wire. The consequences
+    // are the same family as the documented `-v`-not-persisted bug: `container
+    // start` after a stop cannot re-attach a network it has no record of, the
+    // internal DNS has no address to answer with, the firewall has no IP to
+    // govern, and `describe` reports a container with no network at all.
+    //
+    // Both values are already known here — the attach happened above — so
+    // recording them BEFORE the branch fixes the supervised path and leaves the
+    // normal one byte-for-byte unchanged (it assigns the same values again).
+    if let Some(n) = &custom_net {
+        c.network = Some(n.clone());
+        c.ip = attached_ip.clone();
+    }
+    if should_supervise(&restart, detach, !no_supervisor) {
+        if policy_supervised(&restart) {
+            c.restart_policy = Some(restart.clone());
+        }
         return run_supervised(store, &mut c, &rootfs, &spec, &restart, &id);
     }
     let final_status = runtime::create_with(store, &mut c, &rootfs, &spec)?;
@@ -3120,6 +3150,41 @@ pub(crate) fn policy_supervised(policy: &str) -> bool {
         policy.split(':').next().unwrap_or(""),
         "always" | "unless-stopped" | "on-failure"
     )
+}
+
+/// Should this `run` fork a supervisor?
+///
+/// **This is what makes a detached container's exit code knowable at all.**
+/// `waitpid` is the only source of a real exit status and the kernel grants it
+/// to the PARENT alone. A plain `run -d` had no lasting parent: the CLI exited,
+/// the container was reparented to `init`, and the status died with it — so
+/// `ps -a` could only ever say `Exited (unknown)` and `wait` had to refuse. Any
+/// CI job, migration, backup or health probe driven through that path could not
+/// tell success from failure.
+///
+/// The supervisor already existed; it was simply gated on a restart policy. With
+/// no policy `should_restart` returns `false`, so it does exactly one useful
+/// thing — `wait_and_record` the true code, emit `die`, exit — and costs one
+/// short-lived process that goes away with the container.
+///
+/// **This does not cross the daemonless line, despite appearances.** Daemonless
+/// here means *no central daemon* — no `dockerd` that owns every container and
+/// takes them all down with it. A supervisor per container is the standard
+/// daemonless design: Podman is daemonless and runs a `conmon` per container for
+/// this precise reason. This engine already keeps persistent per-node processes
+/// (the netns holder, slirp) and already forked this very supervisor for
+/// `--restart`.
+///
+/// `forkable` is the one real constraint. `run_supervised` does a bare `fork()`
+/// of a process it assumes is single-threaded; that holds for the CLI and NOT
+/// for the `serve docker-api` server, which is why that path already refuses
+/// `--restart`. It keeps the old behaviour rather than risking a fork from a
+/// multi-threaded process — an honest, documented gap instead of a crash.
+pub(crate) fn should_supervise(_policy: &str, detach: bool, forkable: bool) -> bool {
+    // The policy is no longer part of the decision — it only decides what the
+    // supervisor DOES once the container dies (`should_restart`). The parameter
+    // stays so the call sites read as the question they are asking.
+    detach && forkable
 }
 
 /// **Closes the known limitation of `--net <network>` in rootless.**
@@ -5060,6 +5125,30 @@ fn cmd_init(
 
 #[cfg(test)]
 mod tests {
+    /// O supervisor é o que torna o exit code de um container `-d` conhecível:
+    /// `waitpid` é a única fonte de um estado real e o kernel só o dá ao PAI.
+    /// Sem supervisor o CLI saía, o container era reparentado ao `init`, e o
+    /// código morria com ele — `Exited (unknown)`.
+    #[test]
+    fn supervisiona_todo_o_detached_excepto_quem_nao_pode_fazer_fork() {
+        use super::should_supervise;
+        // Detached, com ou sem política: supervisiona (a política só decide o
+        // que o supervisor FAZ depois da morte, não se existe).
+        for pol in ["", "no", "always", "on-failure:3", "unless-stopped"] {
+            assert!(
+                should_supervise(pol, true, true),
+                "política {pol:?} devia ser supervisionada em -d"
+            );
+        }
+        // Em primeiro plano o CLI JÁ é o pai — não há nada a resolver.
+        assert!(!should_supervise("always", false, true));
+        // Chamador que não pode fazer fork em segurança (o servidor docker-api,
+        // multi-thread): mantém o comportamento antigo em vez de arriscar um
+        // fork de um processo com threads.
+        assert!(!should_supervise("", true, false));
+        assert!(!should_supervise("always", true, false));
+    }
+
     /// O tecto ABSOLUTO de I/O (`--device-read-bps` & família) — o que o
     /// `io.weight` não dá: sozinho na máquina, um container com peso continua a
     /// saturar o disco e a esfomear o journald/store/swap do host.
