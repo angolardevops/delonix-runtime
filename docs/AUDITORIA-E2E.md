@@ -11,6 +11,43 @@ refutações salvo nota). Outros **11 achados ficaram por verificar** por quota 
 nos subsistemas mais críticos (`delonix-runtime/lib.rs`, `delonix-net/infra.rs`,
 `container.rs`) — e estão listados à parte, a precisar de confirmação.
 
+> ## ⚠️ ESTADO ACTUAL (re-triagem de 2026-08-04) — este documento estava STALE
+> 
+> O `AGENTS.md` afirmava que «27 dos 35 continuam em aberto». **Não continuam.**
+> Foi feita uma re-triagem achado a achado, lendo o código ACTUAL em vez de
+> confiar nesta tabela — e praticamente todos já tinham sido corrigidos, cada um
+> com o seu comentário `BUG FOUND`/`BUG FIXED HERE` no sítio e, na maioria dos
+> casos, teste de regressão dedicado.
+> 
+> **Verificados FECHADOS por leitura directa do código:**
+> #7, #8, #9, #10, #11 (ver ressalva abaixo), #12, #13, #14, #15, #16, #17, #18,
+> #19, #20, #21, #22, #23, #24, e os não-verificados NV-3 a NV-11.
+> 
+> Amostra do que foi confirmado, para dar confiança na triagem e não pedir fé:
+> 
+> | Achado | Como está fechado hoje |
+> |---|---|
+> | #10 traversal em secrets | `load`/`remove` chamam `valid_name` antes de tocar no caminho |
+> | #13 confusão de rotas | `path_prefix_matches` com fronteira de segmento (semântica Gateway API) |
+> | #15 gate de CVE fail-open | `valid_admission_policy` recusa ANTES de scanear |
+> | #18 DNS O(n) | passou a `dns_index()` (mapa), não varrimento |
+> | #20 duplo spawn do proxy | lock dedicado sobre o check-then-spawn |
+> | #22 dash reconcilia 2× | `delonix_vm::list` já devolve reconciliado |
+> | NV-5 sequestro de DNS | `valid_container_name` exclui o `.` deliberadamente |
+> | NV-9 prefixo ambíguo | `find` erra; dois testes de regressão a prová-lo |
+> | NV-10 fuga de fds | `open_container_ns` devolve `OwnedFd` (fecha por RAII) |
+> 
+> **Resíduo real encontrado NESTA triagem e corrigido em v0.38.3** — o #11 estava
+> só meio fechado: o temporário já era por-escritor, mas o `SecretStore::save`
+> (a) não fazia `fsync`, logo uma queda podia publicar credenciais cifradas
+> apontando para blocos por escrever, e (b) criava o ficheiro sob o umask e só
+> depois o apertava para `0600` — a mesma janela TOCTOU que o achado #4
+> (kubeconfig) já tinha fechado com `OpenOptions::mode`. Passou a
+> `write_atomic_mode`.
+> 
+> **Conclusão**: a dívida do ponto era de DOCUMENTAÇÃO, não de código. Este
+> cabeçalho fica como registo da verificação; a tabela abaixo é histórica.
+
 ## Resumo executivo
 
 | Severidade | Confirmados | Não-verificados (quota) |

@@ -1024,6 +1024,35 @@ fn libvirt_cleanup(name: &str) -> Result<()> {
 /// `<memoryBacking>`), virtio disk (qcow2 overlay), cloud-init seed (cdrom),
 /// virtio user-mode network (rootless egress), serial console, and VFIO passthrough of
 /// PCI devices (`<hostdev>`).
+/// The `<iotune>` block for the root disk, or an empty string when no ceiling is
+/// configured. See the call site in [`libvirt_domain_xml`] for why this one is
+/// opt-in while the memory and CPU ceilings are not.
+fn vm_iotune_xml() -> String {
+    let num = |var: &str| {
+        std::env::var(var)
+            .ok()
+            .and_then(|v| v.trim().parse::<u64>().ok())
+            .filter(|n| *n > 0)
+    };
+    let bps = num("DELONIX_VM_IO_MAX_BPS");
+    let iops = num("DELONIX_VM_IO_MAX_IOPS");
+    if bps.is_none() && iops.is_none() {
+        return String::new();
+    }
+    let mut s = String::from("      <iotune>\n");
+    if let Some(b) = bps {
+        // `total_bytes_sec` rather than a read/write pair: the resource being
+        // protected is the DEVICE's throughput, and a guest can exhaust it from
+        // either direction.
+        s.push_str(&format!("        <total_bytes_sec>{b}</total_bytes_sec>\n"));
+    }
+    if let Some(i) = iops {
+        s.push_str(&format!("        <total_iops_sec>{i}</total_iops_sec>\n"));
+    }
+    s.push_str("      </iotune>\n");
+    s
+}
+
 /// The `<memtune><hard_limit>` for a guest of `guest_kib`, in KiB — the host-side
 /// ceiling on the whole QEMU process. `None` disables the element
 /// (`DELONIX_VM_MEM_HARD_LIMIT=off`).
@@ -1216,6 +1245,22 @@ pub fn libvirt_domain_xml(cfg: &VmConfig, overlay: &str, mac: &str) -> String {
         s.push_str("      </backingStore>\n");
     }
     s.push_str("      <target dev='vda' bus='virtio'/>\n");
+    // CONTAINMENT (3/3): a per-disk I/O ceiling — the VM-side analogue of the
+    // container path's `io.max`, and the last of the three resources a guest can
+    // exhaust on its host.
+    //
+    // Without it a VM writing flat out saturates the disk that also carries the
+    // host's journald, the engine's own store and swap — with CPU and memory
+    // already capped, this was the remaining way for one guest to make the whole
+    // box unresponsive. Applied to the ROOT disk only: that is the one the guest
+    // can drive arbitrarily hard, and the cdrom seed is read once at boot.
+    //
+    // OFF by default, unlike the memory/CPU ceilings. Throttling disk on VMs
+    // that already exist would be a silent performance change on upgrade, and
+    // unlike a memory cap there is no safe "generous" value — the right number
+    // depends on the device. `DELONIX_VM_IO_MAX_BPS` (and the `_IOPS` twin) turn
+    // it on; both accept plain byte/op counts.
+    s.push_str(&vm_iotune_xml());
     s.push_str("    </disk>\n");
     // cloud-init seed (NoCloud) as cdrom.
     if let Some(seed) = &cfg.seed {
@@ -2449,6 +2494,76 @@ mod tests {
         // quota = (vcpus + 1) cores
         assert_eq!(super::cpu_quota_micros(1), Some(200_000));
         assert_eq!(super::cpu_quota_micros(8), Some(900_000));
+    }
+
+    /// REGRESSION: o tecto de I/O por-disco das VMs — o último recurso que um
+    /// guest podia esgotar no host depois de CPU e memória ficarem limitadas.
+    /// Opt-in de propósito: ligar throttling de disco a VMs já existentes seria
+    /// uma mudança silenciosa de desempenho num upgrade, e ao contrário da
+    /// memória não há valor "generoso" seguro — depende do dispositivo.
+    #[test]
+    fn iotune_das_vms_e_opt_in_e_so_no_disco_raiz() {
+        let cfg = VmConfig {
+            name: "v".into(),
+            vcpus: 1,
+            memory: "1G".into(),
+            seed: Some("/seed.iso".into()),
+            ..Default::default()
+        };
+        // Sem env: nenhum <iotune> — o XML fica byte-a-byte como antes.
+        assert!(
+            !super::libvirt_domain_xml(&cfg, "/x.qcow2", "52:54:00:aa:bb:cc").contains("<iotune>"),
+            "o iotune tem de ser opt-in"
+        );
+
+        // A função pura é o que se testa: mexer em env vars num teste paralelo
+        // é uma corrida com todos os outros.
+        assert_eq!(super::vm_iotune_xml(), "");
+    }
+
+    /// A composição do bloco, em cada combinação — `total_*` e não um par
+    /// read/write, porque o recurso protegido é o DÉBITO do dispositivo e um
+    /// guest esgota-o por qualquer das direcções.
+    #[test]
+    fn iotune_compoe_bytes_e_iops() {
+        // Correr em série e limpar sempre: env vars são globais ao processo.
+        static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let clear = || unsafe {
+            std::env::remove_var("DELONIX_VM_IO_MAX_BPS");
+            std::env::remove_var("DELONIX_VM_IO_MAX_IOPS");
+        };
+        clear();
+
+        unsafe { std::env::set_var("DELONIX_VM_IO_MAX_BPS", "104857600") };
+        let x = super::vm_iotune_xml();
+        assert!(
+            x.contains("<total_bytes_sec>104857600</total_bytes_sec>"),
+            "{x}"
+        );
+        assert!(!x.contains("iops"), "{x}");
+
+        unsafe { std::env::set_var("DELONIX_VM_IO_MAX_IOPS", "2000") };
+        let x = super::vm_iotune_xml();
+        assert!(
+            x.contains("<total_bytes_sec>104857600</total_bytes_sec>"),
+            "{x}"
+        );
+        assert!(x.contains("<total_iops_sec>2000</total_iops_sec>"), "{x}");
+        assert!(
+            x.starts_with("      <iotune>") && x.trim_end().ends_with("</iotune>"),
+            "{x}"
+        );
+
+        // Lixo ou zero não produz um tecto de zero (que bloquearia o disco todo).
+        unsafe { std::env::set_var("DELONIX_VM_IO_MAX_BPS", "0") };
+        unsafe { std::env::set_var("DELONIX_VM_IO_MAX_IOPS", "abc") };
+        assert_eq!(
+            super::vm_iotune_xml(),
+            "",
+            "valores inválidos têm de não gerar tecto"
+        );
+        clear();
     }
 
     #[test]

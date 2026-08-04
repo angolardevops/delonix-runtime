@@ -10,17 +10,15 @@ use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::io::AsRawFd;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde::{Deserialize, Serialize};
 
 use crate::cred_vault::CredVault;
 use crate::{Error, Result};
 
-/// Sequence to make the temporary file of [`SecretStore::save`] unique PER
-/// WRITER — same reasoning as `Store::save`'s own `TMP_SEQ`: the pid alone
-/// is not enough (a multi-threaded process could collide on the same temp).
-static TMP_SEQ: AtomicU64 = AtomicU64::new(0);
+// The per-writer temp sequence that used to live here moved into
+// `crate::write_atomic_mode`, along with the `fsync` and the atomic mode that
+// `SecretStore::save` was missing — see the note there.
 
 /// Exclusive file lock (`flock`) sequencing [`SecretStore::update`]'s
 /// read-modify-write BETWEEN PROCESSES. Same pattern as `Store`'s own
@@ -152,21 +150,18 @@ impl SecretStore {
         // value encrypted at-rest: header || nonce || ciphertext.
         let mut blob = Vec::from(SEALED_MAGIC);
         blob.extend_from_slice(&self.vault.seal(&serde_json::to_vec(s)?)?);
-        let seq = TMP_SEQ.fetch_add(1, Ordering::Relaxed);
-        let tmp = self
-            .root
-            .join(format!(".{}.{}.{seq}.tmp", s.name, std::process::id()));
-        let write = || -> Result<()> {
-            fs::write(&tmp, &blob)?;
-            fs::set_permissions(&tmp, fs::Permissions::from_mode(0o600))?;
-            fs::rename(&tmp, self.path(&s.name))?;
-            Ok(())
-        };
-        let r = write();
-        if r.is_err() {
-            let _ = fs::remove_file(&tmp); // do not leave junk if it failed half-way
-        }
-        r
+        // Durable AND mode-atomic. Two gaps closed here, both of which this
+        // file had and its siblings did not:
+        //
+        //  * no `fsync` — the whole workspace shipped "atomic" temp+rename with
+        //    no flush, so a crash could publish a directory entry pointing at
+        //    unwritten blocks. For the SECRET store that means losing the
+        //    encrypted credentials of every workload that depends on them.
+        //  * `fs::write` then `set_permissions` created the file under the
+        //    ambient umask and narrowed it after — a window in which another
+        //    local user could read the sealed blob. Same residual TOCTOU the
+        //    kubeconfig path already fixed with `OpenOptions::mode`.
+        crate::write_atomic_mode(&self.path(&s.name), &blob, Some(0o600))
     }
 
     /// **Safe read-modify-write** of a secret, under an exclusive flock —
