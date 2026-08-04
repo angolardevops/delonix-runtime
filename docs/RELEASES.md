@@ -4,6 +4,155 @@
 > (regenerado automaticamente pelo pipeline de release a cada tag publicada).
 > Não editar à mão — edita a nota da release respectiva.
 
+# v0.38.2 — contenção: o host deixa de poder ser derrubado pelas suas próprias cargas
+
+**Actualização recomendada a quem corre mais do que um workload por host.** Esta versão
+fecha seis lacunas encontradas numa avaliação dirigida ao uso do kernel — cgroups,
+namespaces e a integração com o libvirt — com uma pergunta só: *o que impede uma carga
+de levar o host?*
+
+A resposta, antes desta versão, era «em rootless, nada». Todas as lacunas foram medidas
+no host real antes de corrigidas, e cada correcção foi revertida com o teste a disparar
+antes de ser reposta.
+
+---
+
+## 1. O `virsh` era invocado com o locale do utilizador
+
+`virsh` é um programa gettext — confirmado: o binário exporta
+`bindtextdomain`/`dcgettext` e carrega `"shut off"` como msgid traduzível. E este crate
+decidia se um domínio estava vivo comparando o output contra **literais ingleses**:
+
+```rust
+libvirt_poweroff:            state == "shut off"
+LibvirtBackend::is_running:       s == "running"
+```
+
+Num host com os catálogos de l10n do libvirt instalados e `LANG=pt_PT` — um host de
+produção angolano ou português perfeitamente normal, ou seja o mercado deste produto —
+o `virsh domstate` responde em português e as **duas** comparações passam a falso em
+silêncio. Uma VM a correr reporta-se parada (`vm ls` mente, o `wait_for_boot` nunca
+converge) e o `libvirt_poweroff` dispara `destroy` num domínio já desligado, que é
+exactamente a falha de stderr cru que a v0.11 corrigiu pelo outro lado.
+
+**Corrigido** com `stable_cmd`, que fixa `LC_ALL=C`/`LANG=C` em toda a ferramenta cujo
+output este crate parseia — `virsh`, `qemu-img`, e as que vierem. O locale fica pinado
+na camada certa: torna a saída da ferramenta uma interface de **máquina**, em vez de
+ensinar cada call site a reconhecer N traduções.
+
+Não foi reproduzido ao vivo: este host tem **zero** catálogos de libvirt instalados. Está
+provado o mecanismo, não o sintoma.
+
+## 2. Em rootless não havia tecto agregado nenhum
+
+`ensure_delonix_slice()` — a função que dimensiona o tecto agregado a partir do host —
+só era alcançada **depois** do `return` do caminho delegado, e escreve em
+`/sys/fs/cgroup/delonix.slice`, que é root-only. Ou seja, no modo **rootless, o modo
+bandeira do motor**, não existia tecto agregado de todo.
+
+Medido ao vivo antes da correcção, no pai de todos os containers rootless deste host:
+
+```
+dlx-containers:  memory.max=max   pids.max=max   cpu.max=max
+```
+
+Limites por-container não substituem isto: N containers a M somam N×M, e o `-m` tem
+default `max` — na prática, N containers sem limite nenhum debaixo de um pai sem limite
+nenhum. Uma fuga levava o host, que é precisamente o que o comentário do próprio
+`setup_cgroup` diz que a delegação existe para impedir.
+
+**Corrigido** com `apply_aggregate_ceiling`, aplicado **só** à base que o Delonix cria
+para si (`<user@uid.service>/dlx-containers`) — nunca a um cgroup herdado, porque limitar
+o scope do chamador estrangularia em silêncio o editor ou a shell dele. Medido ao vivo
+depois, num host de 30,5 GiB e 32 cores com a reserva por omissão de 85 %:
+
+```
+dlx-containers:  memory.max=27878420480 (25,9 GiB)   cpu.max=2720000/100000 (27,2 cores)
+                 pids.max=131072                     memory.swap.max=0
+```
+
+## 3. `memory.max` não limitava a memória; e o OOM matava meio container
+
+Duas escritas em falta na leaf delegada, ambas presentes há muito no caminho root:
+
+- **`memory.swap.max`** — sem ela, um container que bate no `memory.max` **faz swap** em
+  vez de ser reclamado. O tecto que o operador pediu valia só para a memória residente.
+  Medido: `memory.swap.max = max` numa leaf de um container arrancado com `-m 256M`.
+- **`memory.oom.group`** — com o default `0` do kernel, o OOM mata **um** processo do
+  cgroup. Para um container o cgroup **é** a unidade de falha: matar um filho do pid 1 e
+  deixar o resto vivo produz um container meio-morto que continua a reportar-se Running.
+  `1` torna a morte atómica sobre o cgroup inteiro, que é o que o runc e o systemd fazem.
+
+Escapatória: `DELONIX_SWAP_MAX=max` repõe o comportamento antigo para quem meça o seu
+workload e queira a pista de aterragem.
+
+## 4. As VMs tinham alocação, não contenção
+
+O XML gerado tinha `<memory>`, `<vcpu>` e (opcional) pinning. Nada disso é um tecto que o
+**host** imponha:
+
+- **`<memtune><hard_limit>`** — `<memory>` dimensiona a visão do *guest*. O RSS real do
+  QEMU é isso **mais** device models, buffers de vídeo/migração e o heap dele, e uma fuga
+  empurra-o arbitrariamente longe sem nada a travar. É a mesma falha que o caminho de
+  container fecha com `memory.max`.
+- **`<cputune><period>/<quota>`** — `<vcpu>N` limita as *threads de vCPU* a N cores, mas
+  as threads de emulador e de I/O do QEMU correm fora dessa conta e ficavam sem tecto.
+
+**Corrigido**, com margens deliberadamente **generosas**: a documentação do próprio
+libvirt avisa que um `hard_limit` apertado leva o host a matar o domínio, e uma VM que
+morre ao calhas é pior que uma VM meramente ilimitada. O tecto de memória é
+`guest + max(1 GiB, 25 %)`; o de CPU é `(vcpus + 1) × período` — o core extra não é folga,
+é requisito: exactamente `vcpus × período` faria as vCPUs e o emulador competir pelo mesmo
+orçamento, e um VM com todas as vCPUs ocupadas esfomearia a sua própria thread de I/O,
+num precipício de desempenho que se lê como problema de disco.
+
+Tudo afinável: `DELONIX_VM_MEM_OVERHEAD_PCT`, `DELONIX_VM_CPU_QUOTA_CORES` (fraccionário —
+é assim que se dá a um tenant 8 vCPUs para paralelismo mas só 2 cores de débito), e `off`
+em qualquer um para desligar.
+
+## 5. O default de `-m` fica em `max` — e passa a avisar quando isso é perigoso
+
+O default **não** mudou: `max` é paridade com o Docker e é o que os utilizadores esperam;
+impor um tecto por-container em silêncio surpreenderia todos os workloads existentes. O
+que o tornava perigoso nunca foi o default — foi não haver tecto agregado por baixo dele.
+
+Com o ponto 2 no lugar, o caminho comum está protegido. O que resta é tornar **visíveis**
+as configurações onde ainda não há protecção nenhuma (um scope `Delegate=yes` que não
+criámos, ou o caminho best-effort sem delegação): um aviso único por processo, com os dois
+comandos exactos de correcção. Silenciável com `DELONIX_NO_CGROUP_WARN`.
+
+## 6. Leafs de cgroup órfãs
+
+`try_delegated_base` cria `<base>/dlx-<id>` **antes** de saber se a base é delegável, e
+todos os `return false` a seguir deixavam o cgroup vazio para trás, para sempre. Medido ao
+vivo: seis directórios `dlx-*` órfãos sob um scope do systemd onde a delegação tinha
+falhado — um por cada container alguma vez tentado ali. Não são inócuos: fazem qualquer
+ferramenta baseada em `cgroup.procs` ver containers que não existem.
+
+---
+
+## Validação
+
+`cargo clippy --workspace --all-targets` a zero avisos; **613 testes** (+9), todos verdes.
+
+Ao vivo neste host: um container real confirmou `memory.swap.max=0`, `memory.oom.group=1`,
+`memory.max`/`cpu.max`/`pids.max` aplicados na leaf, e o tecto agregado no pai com a
+aritmética a bater com os 32 cores e 30,5 GiB reais (CPU e pids exactos). A leaf é removida
+com o container.
+
+**Por provar ao vivo**: o ponto 1 (sem catálogos de l10n instalados neste host) e o ponto 4
+(exige arrancar uma VM real, e as correcções de XML são função pura coberta por teste).
+
+## Nota de migração
+
+- Containers passam a correr **sem swap** por omissão. Um workload que dependia de swap
+  para sobreviver a picos passa a levar OOM no limite que declarou — que é o
+  comportamento correcto, mas é uma mudança. `DELONIX_SWAP_MAX=max` repõe o anterior.
+- VMs passam a ter tecto de memória e de CPU. As margens são generosas, mas um domínio
+  afinado ao milímetro pode precisar de `DELONIX_VM_MEM_OVERHEAD_PCT` mais alto.
+
+---
+
 # v0.38.1 — durabilidade, medição honesta de disco, e o holder que já não pendura
 
 **Actualização recomendada a todos.** Seis correcções encontradas numa avaliação

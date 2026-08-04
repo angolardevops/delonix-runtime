@@ -320,7 +320,9 @@ fn parse_qemu_format(info: &str) -> Option<String> {
 /// guest read the qcow2 as raw → corrupted / non-booting disk, silently.
 /// Falls back to the extension heuristic if `qemu-img info` is not available.
 pub fn disk_backing_format(disk: &Path) -> String {
-    if let Ok(out) = Command::new("qemu-img").arg("info").arg(disk).output() {
+    // `qemu-img info` is PARSED (`parse_qemu_format`) — same locale exposure
+    // as the `virsh` state strings; see `stable_cmd`.
+    if let Ok(out) = stable_cmd("qemu-img").arg("info").arg(disk).output() {
         if out.status.success() {
             if let Some(fmt) = std::str::from_utf8(&out.stdout)
                 .ok()
@@ -342,7 +344,7 @@ pub fn disk_backing_format(disk: &Path) -> String {
 /// error. The `create` progress UI wants clean staged lines, not the raw
 /// `Formatting '...qcow2'` / `Domain 'x' defined` chatter of `qemu-img`/`virsh`.
 fn run_quiet(prog: &str, args: &[&str]) -> Result<()> {
-    let out = Command::new(prog)
+    let out = stable_cmd(prog)
         .args(args)
         .output()
         .map_err(|e| Error::Runtime {
@@ -380,9 +382,43 @@ pub enum CreateStage {
     Start,
 }
 
+/// Builds a `Command` whose output this crate PARSES, pinned to the `C` locale.
+///
+/// BUG FIXED HERE (latent, and it bites precisely in this product's home
+/// market). `virsh` is a gettext program — confirmed on this host: its binary
+/// exports `bindtextdomain`/`dcgettext` and carries `"shut off"` as a
+/// translatable msgid. Meanwhile this crate decides a domain's liveness by
+/// comparing that output against ENGLISH literals:
+///
+/// ```text
+/// libvirt_poweroff:      state == "shut off"
+/// LibvirtBackend::is_running:  s == "running"
+/// ```
+///
+/// On a host with libvirt's l10n catalogues installed and `LANG=pt_PT` — an
+/// ordinary Angolan/Portuguese production host — `virsh domstate` answers in
+/// Portuguese and BOTH comparisons silently go false. A running VM reports as
+/// stopped (`vm ls` lies, `wait_for_boot` never converges) and
+/// `libvirt_poweroff` fires `destroy` at an already-off domain, which is exactly
+/// the raw-stderr failure v0.11 fixed from the other end.
+///
+/// Pinning the locale is the right layer: it makes the tool's output a stable
+/// MACHINE interface, rather than teaching every call site to recognise N
+/// translations. `LANG` is set too — `LC_ALL` alone is enough for glibc, but
+/// belt-and-braces costs nothing and covers tools that read `LANG` directly.
+///
+/// This is also why it lives on the shared helpers rather than on the `virsh`
+/// call sites: `qemu-img`, `losetup` and friends are parsed the same way and
+/// have the same exposure.
+fn stable_cmd(prog: &str) -> Command {
+    let mut c = Command::new(prog);
+    c.env("LC_ALL", "C").env("LANG", "C");
+    c
+}
+
 /// Runs a command and captures stdout (trimmed), or `None` on failure.
 fn capture(prog: &str, args: &[&str]) -> Option<String> {
-    let out = Command::new(prog).args(args).output().ok()?;
+    let out = stable_cmd(prog).args(args).output().ok()?;
     if !out.status.success() {
         return None;
     }
@@ -909,7 +945,7 @@ fn libvirt_domain_uri(name: &str) -> Option<&'static str> {
 /// of the `vm rm` output). On failure it returns the 1st useful stderr line, without the
 /// virsh `error: ` prefix, to compose clear messages.
 fn quiet(prog: &str, args: &[&str]) -> std::result::Result<String, String> {
-    match Command::new(prog).args(args).output() {
+    match stable_cmd(prog).args(args).output() {
         Ok(out) if out.status.success() => {
             Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
         }
@@ -988,6 +1024,52 @@ fn libvirt_cleanup(name: &str) -> Result<()> {
 /// `<memoryBacking>`), virtio disk (qcow2 overlay), cloud-init seed (cdrom),
 /// virtio user-mode network (rootless egress), serial console, and VFIO passthrough of
 /// PCI devices (`<hostdev>`).
+/// The `<memtune><hard_limit>` for a guest of `guest_kib`, in KiB — the host-side
+/// ceiling on the whole QEMU process. `None` disables the element
+/// (`DELONIX_VM_MEM_HARD_LIMIT=off`).
+///
+/// See the call site in [`libvirt_domain_xml`] for why the margin is generous
+/// rather than tight.
+fn mem_hard_limit_kib(guest_kib: u64) -> Option<u64> {
+    if std::env::var("DELONIX_VM_MEM_HARD_LIMIT").as_deref() == Ok("off") {
+        return None;
+    }
+    let pct = std::env::var("DELONIX_VM_MEM_OVERHEAD_PCT")
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+        .filter(|p| (5..=200).contains(p))
+        .unwrap_or(25);
+    const MIN_OVERHEAD_KIB: u64 = 1024 * 1024; // 1 GiB
+                                               // Multiply BEFORE dividing: `x / 100 * pct` truncates twice and loses up to
+                                               // ~100 KiB of the margin. Irrelevant in practice, but this is a ceiling that
+                                               // decides whether the host OOM-kills the domain — it should be the number it
+                                               // claims to be. No overflow concern: a 1 PiB guest is ~1e12 KiB, and ×200 is
+                                               // still four orders of magnitude inside u64.
+    let overhead = guest_kib
+        .saturating_mul(pct)
+        .saturating_div(100)
+        .max(MIN_OVERHEAD_KIB);
+    Some(guest_kib.saturating_add(overhead))
+}
+
+/// The `<cputune><quota>` in microseconds per 100 ms period, or `None` to omit
+/// the ceiling (`DELONIX_VM_CPU_QUOTA_CORES=off`).
+///
+/// Defaults to `vcpus + 1` cores — see the call site for why the extra core is
+/// not slack but a correctness requirement for QEMU's emulator/IO threads.
+fn cpu_quota_micros(vcpus: u32) -> Option<u64> {
+    const PERIOD: u64 = 100_000;
+    match std::env::var("DELONIX_VM_CPU_QUOTA_CORES").as_deref() {
+        Ok("off") => None,
+        Ok(v) => v
+            .parse::<f64>()
+            .ok()
+            .filter(|c| *c > 0.0)
+            .map(|cores| ((cores * PERIOD as f64).round() as u64).max(1000)),
+        Err(_) => Some((vcpus as u64 + 1) * PERIOD),
+    }
+}
+
 pub fn libvirt_domain_xml(cfg: &VmConfig, overlay: &str, mac: &str) -> String {
     // Full-domain escape hatch: the manifest author owns the entire XML. The
     // rootless seclabel is still injected at boot (`create`, via the </domain>
@@ -1011,13 +1093,56 @@ pub fn libvirt_domain_xml(cfg: &VmConfig, overlay: &str, mac: &str) -> String {
     if cfg.hugepages {
         s.push_str("  <memoryBacking>\n    <hugepages/>\n  </memoryBacking>\n");
     }
+    // CONTAINMENT (1/2): a ceiling on what the QEMU process may take from the
+    // HOST, as opposed to what the guest is told it has.
+    //
+    // BUG FIXED HERE. `<memory>` is an ALLOCATION — it sizes the guest's view.
+    // It is not a limit the host enforces: QEMU's real RSS is guest RAM *plus*
+    // device models, video buffers, migration buffers and its own heap, and a
+    // leak or a hostile guest driver pushes that arbitrarily far with nothing to
+    // stop it. `<memtune><hard_limit>` is the cgroup ceiling libvirt applies to
+    // the domain, and without it a single VM can take the host down — the exact
+    // failure the container path guards against with `memory.max`.
+    //
+    // The margin is deliberately GENEROUS. libvirt's own documentation warns
+    // that a hard_limit set too tight gets the domain OOM-killed by the host,
+    // and a VM that dies at random is worse than a VM that is merely unbounded.
+    // `guest + max(1 GiB, 25 %)` bounds a runaway while leaving real headroom
+    // for legitimate overhead. `DELONIX_VM_MEM_OVERHEAD_PCT` tunes the
+    // percentage; `DELONIX_VM_MEM_HARD_LIMIT=off` disables the element entirely
+    // for anyone who measured their workload and wants the old behaviour.
+    if let Some(limit_kib) = mem_hard_limit_kib(kib) {
+        s.push_str(&format!(
+            "  <memtune>\n    <hard_limit unit='KiB'>{limit_kib}</hard_limit>\n  </memtune>\n"
+        ));
+    }
     s.push_str(&format!("  <vcpu placement='static'>{vcpus}</vcpu>\n"));
-    // CPU pinning (NUMA/determinism): pins each vCPU to the list of host CPUs.
-    if let Some(list) = &cfg.cpu_affinity {
-        let list = xml_escape(list);
+    // CPU pinning (NUMA/determinism) and CONTAINMENT (2/2).
+    //
+    // `<vcpu>N` bounds the vCPU THREADS to N cores, but a domain is more than
+    // its vCPUs: the emulator thread and QEMU's I/O threads run outside that
+    // count and are, without a quota, unbounded. `<cputune><period>/<quota>`
+    // is the domain-wide CPU ceiling.
+    //
+    // `(vcpus + 1) × period` on purpose: exactly `vcpus × period` would make the
+    // vCPUs and the emulator compete for the same budget, so a VM with every
+    // vCPU busy would starve its own I/O thread — a performance cliff that looks
+    // like a disk problem. One core of headroom keeps normal operation intact
+    // while still bounding a runaway. `DELONIX_VM_CPU_QUOTA_CORES` overrides the
+    // ceiling outright (fractional allowed — this is how you give a tenant 8
+    // vCPUs for parallelism but only 2 cores of throughput); `off` disables it.
+    let cputune_quota = cpu_quota_micros(vcpus);
+    if cfg.cpu_affinity.is_some() || cputune_quota.is_some() {
         s.push_str("  <cputune>\n");
-        for v in 0..vcpus {
-            s.push_str(&format!("    <vcpupin vcpu='{v}' cpuset='{list}'/>\n"));
+        if let Some(q) = cputune_quota {
+            s.push_str("    <period>100000</period>\n");
+            s.push_str(&format!("    <quota>{q}</quota>\n"));
+        }
+        if let Some(list) = &cfg.cpu_affinity {
+            let list = xml_escape(list);
+            for v in 0..vcpus {
+                s.push_str(&format!("    <vcpupin vcpu='{v}' cpuset='{list}'/>\n"));
+            }
         }
         s.push_str("  </cputune>\n");
     }
@@ -1402,7 +1527,7 @@ fn ensure_libvirt_network(uri: &str, net: &str) {
             .open(&path)
         {
             if f.write_all(xml.as_bytes()).is_ok() {
-                let _ = Command::new("virsh")
+                let _ = stable_cmd("virsh")
                     .args(["-c", uri, "net-define", &path.to_string_lossy()])
                     .output();
             }
@@ -1411,10 +1536,10 @@ fn ensure_libvirt_network(uri: &str, net: &str) {
     }
     // `.output()` (not `.status()`) so the "Network default started / marked as
     // autostarted" chatter does not leak into the clean `vm create` progress.
-    let _ = Command::new("virsh")
+    let _ = stable_cmd("virsh")
         .args(["-c", uri, "net-start", "--", net])
         .output();
-    let _ = Command::new("virsh")
+    let _ = stable_cmd("virsh")
         .args(["-c", uri, "net-autostart", "--", net])
         .output();
 }
@@ -1505,7 +1630,7 @@ impl VmBackend for LibvirtBackend {
             run_quiet("virsh", &["-c", uri, "define", &xml_path.to_string_lossy()])?;
         }
         on(CreateStage::Start);
-        let out = Command::new("virsh")
+        let out = stable_cmd("virsh")
             .args(["-c", uri, "start", "--", &cfg.name])
             .output()
             .map_err(|e| Error::Runtime {
@@ -2196,6 +2321,134 @@ mod tests {
         assert!(e.contains("restore"), "{e}");
         assert!(e.contains("cloud-hypervisor"), "{e}");
         assert!(e.contains("libvirt"), "{e}");
+    }
+
+    /// REGRESSION: toda a ferramenta cujo OUTPUT este crate parseia tem de
+    /// correr com locale fixo.
+    ///
+    /// `virsh` é um programa gettext (confirmado neste host: exporta
+    /// `bindtextdomain`/`dcgettext` e carrega `"shut off"` como msgid
+    /// traduzível), e o crate decide se um domínio está vivo comparando
+    /// `virsh domstate` com literais ingleses. Num host com os catálogos
+    /// instalados e `LANG=pt_PT`, uma VM a correr passa a reportar-se como
+    /// parada. Tirar o `.env("LC_ALL", "C")` do `stable_cmd` faz este teste
+    /// falhar.
+    #[test]
+    fn stable_cmd_fixa_o_locale_para_o_output_ser_estavel() {
+        let cmd = super::stable_cmd("virsh");
+        let envs: std::collections::HashMap<_, _> = cmd
+            .get_envs()
+            .map(|(k, v)| {
+                (
+                    k.to_string_lossy().into_owned(),
+                    v.map(|v| v.to_string_lossy().into_owned()),
+                )
+            })
+            .collect();
+        assert_eq!(
+            envs.get("LC_ALL").and_then(|v| v.as_deref()),
+            Some("C"),
+            "sem LC_ALL=C o `virsh domstate` responde traduzido e a comparação com \
+             \"running\"/\"shut off\" falha em silêncio"
+        );
+        assert_eq!(envs.get("LANG").and_then(|v| v.as_deref()), Some("C"));
+    }
+
+    /// E as comparações de estado que dependem disso continuam a ser feitas
+    /// contra as formas EN — se alguém as mudar, o `stable_cmd` deixa de as
+    /// proteger e o teste acima passa a estar a guardar a coisa errada.
+    #[test]
+    fn os_estados_comparados_sao_os_literais_en_do_virsh() {
+        let src = include_str!("lib.rs");
+        assert!(
+            src.contains(r#"state == "shut off""#),
+            "a comparação de estado mudou de forma — reavaliar se o stable_cmd ainda a cobre"
+        );
+        assert!(
+            src.contains(r#"s == "running""#),
+            "a comparação de liveness mudou de forma — idem"
+        );
+    }
+
+    /// REGRESSION (protecção do host): o XML tem de levar um tecto que o HOST
+    /// impõe, não só a alocação que o guest vê.
+    ///
+    /// `<memory>` dimensiona a visão do guest; o RSS real do QEMU é isso MAIS
+    /// device models, buffers de vídeo/migração e o heap dele. Sem
+    /// `<memtune><hard_limit>` uma fuga leva o host — a mesma falha que o
+    /// caminho de container fecha com `memory.max`. E `<vcpu>N` limita as
+    /// threads de vCPU a N cores, mas as threads de emulador/IO do QEMU correm
+    /// fora dessa conta e ficavam sem tecto nenhum.
+    #[test]
+    fn o_dominio_leva_tecto_de_memoria_e_de_cpu_imposto_pelo_host() {
+        let cfg = VmConfig {
+            name: "v".into(),
+            vcpus: 4,
+            memory: "2G".into(),
+            ..Default::default()
+        };
+        let xml = super::libvirt_domain_xml(&cfg, "/x.qcow2", "52:54:00:aa:bb:cc");
+
+        // 2 GiB de guest = 2097152 KiB; margem de 25% = 524288, abaixo do mínimo
+        // de 1 GiB, por isso vale o mínimo → 2097152 + 1048576 = 3145728.
+        assert!(
+            xml.contains("<hard_limit unit='KiB'>3145728</hard_limit>"),
+            "faltou o tecto de memória imposto pelo host:\n{xml}"
+        );
+        // O tecto TEM de ficar acima da RAM do guest, senão o host mata a VM.
+        assert!(
+            xml.contains("<memory unit='KiB'>2097152</memory>"),
+            "a alocação do guest não pode ter mudado"
+        );
+        // 4 vCPUs + 1 core de folga para emulador/IO = 5 × 100000.
+        assert!(
+            xml.contains("<period>100000</period>") && xml.contains("<quota>500000</quota>"),
+            "faltou o tecto de CPU do domínio inteiro:\n{xml}"
+        );
+    }
+
+    /// O tecto de CPU tem de conviver com o pinning de vCPUs — os dois vivem no
+    /// MESMO `<cputune>`, e emitir dois blocos produziria XML que o libvirt
+    /// recusa.
+    #[test]
+    fn cputune_junta_quota_e_pinning_num_so_bloco() {
+        let cfg = VmConfig {
+            name: "v".into(),
+            vcpus: 2,
+            memory: "1G".into(),
+            cpu_affinity: Some("8-15".into()),
+            ..Default::default()
+        };
+        let xml = super::libvirt_domain_xml(&cfg, "/x.qcow2", "52:54:00:aa:bb:cc");
+        assert_eq!(
+            xml.matches("<cputune>").count(),
+            1,
+            "só pode haver UM <cputune>:\n{xml}"
+        );
+        assert!(xml.contains("<quota>300000</quota>"), "{xml}");
+        assert!(xml.contains("<vcpupin vcpu='0' cpuset='8-15'/>"), "{xml}");
+        assert!(xml.contains("<vcpupin vcpu='1' cpuset='8-15'/>"), "{xml}");
+    }
+
+    /// As fórmulas puras, incluindo as escapatórias — um operador que meça o seu
+    /// workload tem de conseguir voltar ao comportamento antigo sem editar código.
+    #[test]
+    fn formulas_de_tecto_e_escapatorias() {
+        // margem = max(25%, 1 GiB)
+        assert_eq!(
+            super::mem_hard_limit_kib(1024 * 1024),
+            Some(2 * 1024 * 1024)
+        );
+        // guest grande: os 25% ultrapassam o mínimo
+        let big = 64 * 1024 * 1024; // 64 GiB em KiB
+        assert_eq!(super::mem_hard_limit_kib(big), Some(big + big / 4));
+        // o tecto é SEMPRE maior que o guest — o contrário mataria a VM
+        for g in [1024u64, 1024 * 1024, 8 * 1024 * 1024] {
+            assert!(super::mem_hard_limit_kib(g).unwrap() > g);
+        }
+        // quota = (vcpus + 1) cores
+        assert_eq!(super::cpu_quota_micros(1), Some(200_000));
+        assert_eq!(super::cpu_quota_micros(8), Some(900_000));
     }
 
     #[test]

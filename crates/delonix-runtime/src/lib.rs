@@ -2747,16 +2747,13 @@ fn user_service_base(cur_abs: &str) -> Option<String> {
 /// is not delegated/clean (e.g. shared scope without `cpu`), the caller falling back to
 /// current behavior (no regression). Requires the engine in a delegated cgroup
 /// (`systemd-run --user --scope -p Delegate=yes` or a user service).
-fn setup_cgroup_delegated(c: &Container, pid: i32) -> bool {
-    let cur = match current_cgroup_v2() {
-        Some(b) => b,
-        None => return false,
-    };
+fn setup_cgroup_delegated(c: &Container, pid: i32) -> Option<String> {
+    let cur = current_cgroup_v2()?;
     // Candidate 1: the CURRENT cgroup as base (works when delonix runs in a
     // `Delegate=yes` DEDICATED scope, e.g. `systemd-run --user --scope`). Moves
     // our process to a `dlx-mgr` to free the base.
     if try_delegated_base(&cur, c, pid, true) {
-        return true;
+        return Some(cur);
     }
     // Candidate 2 (escape): the session's cgroup is POPULATED (the
     // no-internal-processes rule refuses `subtree_control`) — use an OWN base
@@ -2764,11 +2761,19 @@ fn setup_cgroup_delegated(c: &Container, pid: i32) -> bool {
     // `cpu memory pids` in the `user@` subtree). The common-ancestor rule
     // allows moving the pid from the session scope there (user's files).
     if let Some(base) = user_service_base(&cur) {
-        if std::fs::create_dir_all(&base).is_ok() && try_delegated_base(&base, c, pid, false) {
-            return true;
+        if std::fs::create_dir_all(&base).is_ok() {
+            // The aggregate ceiling goes HERE and only here: this base is ours
+            // (we just created it), unlike candidate 1 which is whatever cgroup
+            // the caller happened to be in. Applied BEFORE the container enters,
+            // so it holds from the first allocation — same reasoning as the
+            // per-leaf limits. See `apply_aggregate_ceiling`.
+            apply_aggregate_ceiling(&base);
+            if try_delegated_base(&base, c, pid, false) {
+                return Some(base);
+            }
         }
     }
-    false
+    None
 }
 
 /// Tries to use `base` as a delegated base: moves the container to `<base>/dlx-<id>`,
@@ -2784,6 +2789,7 @@ fn try_delegated_base(base: &str, c: &Container, pid: i32, move_self: bool) -> b
     if std::fs::create_dir_all(&leaf).is_err() {
         return false;
     }
+    // From here on every early return has to clean the leaf up — see `abandon_leaf`.
     if move_self {
         // free the base of DIRECT processes (no-internal-processes) before
         // trying the subtree_control.
@@ -2807,11 +2813,27 @@ fn try_delegated_base(base: &str, c: &Container, pid: i32, move_self: bool) -> b
         }
     }
     if !any {
+        abandon_leaf(&leaf);
         return false; // no delegation (no-internal-processes or no permission)
     }
     // 2) Limits on the leaf (controllers already active) — BEFORE the process enters,
     //    so the ceiling holds from the first allocation.
     let _ = std::fs::write(format!("{leaf}/memory.max"), &c.memory_max);
+    // BUG FIXED HERE (1/2): `memory.max` alone does NOT bound a container's
+    // memory pressure on a host that has swap — the container simply swaps at
+    // the limit instead of being reclaimed/killed, so the ceiling the operator
+    // asked for is silently a ceiling on RESIDENT memory only. The root path
+    // (`ensure_delonix_slice`) has always written `memory.swap.max = 0`; the
+    // rootless-delegated leaf — the NORMAL path — never did. Measured live:
+    // `memory.swap.max = max` on a container started with `-m 256M`.
+    let _ = std::fs::write(format!("{leaf}/memory.swap.max"), swap_max_value());
+    // BUG FIXED HERE (2/2): with `memory.oom.group = 0` (the kernel default) an
+    // OOM kills ONE process inside the cgroup, not the container. For a
+    // container the cgroup IS the unit of failure: killing its pid 1's child
+    // and leaving the rest alive produces a half-dead container that still
+    // reports Running. `1` makes the kill atomic over the whole cgroup, which
+    // is what runc/systemd do for exactly this reason.
+    let _ = std::fs::write(format!("{leaf}/memory.oom.group"), "1");
     let _ = std::fs::write(format!("{leaf}/pids.max"), DEFAULT_PIDS_MAX);
     let _ = std::fs::write(format!("{leaf}/cpu.max"), cpu_max_value(&c.cpus));
     // BUG FOUND (docs/COMPARACAO-DOCKER-PODMAN.md 2b): `+cpuset`/`+io` were
@@ -2831,9 +2853,132 @@ fn try_delegated_base(base: &str, c: &Container, pid: i32, move_self: bool) -> b
     }
     // 3) Only now does the container enter the leaf.
     if std::fs::write(format!("{leaf}/cgroup.procs"), pid.to_string()).is_err() {
+        // Do not leave the empty leaf behind — see `abandon_leaf`.
+        abandon_leaf(&leaf);
         return false;
     }
     true
+}
+
+/// Removes a leaf this function created but could not use.
+///
+/// BUG FIXED HERE: `try_delegated_base` creates `<base>/dlx-<id>` BEFORE it
+/// knows whether the base is actually delegable, and every `return false` after
+/// that left the empty cgroup behind forever. Measured live on this host: six
+/// orphan `dlx-*` directories under a systemd scope where delegation had failed,
+/// one per container ever attempted there.
+///
+/// They are not free. An empty cgroup still costs kernel memory and, more to the
+/// point, it makes `cgroup.procs`-based tooling and any future reconciler see
+/// containers that do not exist. `rmdir` on a cgroup directory is how cgroup v2
+/// deletes it, and it only succeeds when the cgroup is empty — which is exactly
+/// the case here, so a failure means someone else got in and we must NOT force it.
+fn abandon_leaf(leaf: &str) {
+    let _ = std::fs::remove_dir(leaf);
+}
+
+/// Value for a container leaf's `memory.swap.max`.
+///
+/// `0` by default — the same value `ensure_delonix_slice` has always written on
+/// the root slice, so the two privilege models finally agree. Swap turns a
+/// memory limit into a soft one: the workload keeps running, degraded, instead
+/// of failing where the operator said it should.
+///
+/// `DELONIX_SWAP_MAX` overrides it (`max` restores the old behaviour) for the
+/// workloads that genuinely want the runway.
+fn swap_max_value() -> String {
+    std::env::var("DELONIX_SWAP_MAX").unwrap_or_else(|_| "0".to_string())
+}
+
+/// `true` when a container ends up with **no memory ceiling at any level** —
+/// neither its own nor an inherited one.
+///
+/// This is the residue of the `-m` default, and the reason that default was NOT
+/// changed. `-m` defaulting to `max` matches Docker and is what users expect;
+/// silently imposing a per-container cap would surprise every existing
+/// workload. What made it dangerous was never the default itself — it was that
+/// in rootless there was no aggregate ceiling underneath it either (see
+/// [`apply_aggregate_ceiling`]), so "no limit" meant genuinely no limit.
+///
+/// With the aggregate ceiling in place the common path is safe, and the honest
+/// close for the default is to make the REMAINING unprotected configurations
+/// visible instead of silently pretending they are fine. Those are: a
+/// `Delegate=yes` scope we did not create (we deliberately do not cap a cgroup
+/// the caller owns — it would throttle their shell/editor), and the
+/// best-effort path with no delegation at all.
+///
+/// Pure so the decision is testable without a cgroupfs; the caller supplies the
+/// parent's `memory.max` (`None` = could not read it, which is itself no
+/// protection).
+fn unprotected_memory(memory_max: &str, aggregate_ceiling: Option<&str>) -> bool {
+    let unlimited = |v: &str| {
+        let v = v.trim();
+        v.is_empty() || v.eq_ignore_ascii_case("max")
+    };
+    unlimited(memory_max) && aggregate_ceiling.map(unlimited).unwrap_or(true)
+}
+
+/// Warns ONCE per process when a container has no memory ceiling anywhere.
+///
+/// Once, not per container: starting twenty containers in a `stack apply`
+/// should not print twenty identical blocks. `DELONIX_NO_CGROUP_WARN` silences
+/// it, the same switch the sibling cgroup warning already honours.
+fn warn_if_unprotected_memory(c: &Container, leaf_parent: Option<&str>) {
+    if std::env::var_os("DELONIX_NO_CGROUP_WARN").is_some() {
+        return;
+    }
+    let aggregate =
+        leaf_parent.and_then(|p| std::fs::read_to_string(format!("{p}/memory.max")).ok());
+    if !unprotected_memory(&c.memory_max, aggregate.as_deref()) {
+        return;
+    }
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        eprintln!(
+            "delonix: warning — this container has NO memory ceiling, at any level.\n\
+             \x20 `-m` defaults to `max` (as in Docker) and no aggregate ceiling applies here,\n\
+             \x20 so a leak in the workload can take the whole host down.\n\
+             \x20 Fix it with either:\n\
+             \x20   delonix container run -m 512M …            # cap this container\n\
+             \x20   systemd-run --user --scope -p Delegate=yes …  # let Delonix own a cgroup it can cap"
+        );
+    });
+}
+
+/// Applies the AGGREGATE ceiling to a base cgroup that Delonix owns.
+///
+/// BUG FIXED HERE — the gap that made every per-container limit insufficient.
+/// `ensure_delonix_slice()` (memory/cpu/pids/io ceiling sized from the host)
+/// is only ever reached AFTER the delegated path returns, and it writes to
+/// `/sys/fs/cgroup/delonix.slice`, which is root-only. So in **rootless — the
+/// engine's flagship mode — there was no aggregate ceiling at all**. Measured
+/// live: `dlx-containers`, the parent of every rootless container on this host,
+/// had `memory.max=max`, `pids.max=max`, `cpu.max=max`.
+///
+/// Per-container limits do not substitute for this. N containers each capped at
+/// M still sum to N×M, and `-m` defaults to `max`, so in practice N containers
+/// with no cap at all shared an unbounded parent. A single leak took the host —
+/// which is precisely what `setup_cgroup`'s own comment says the delegation was
+/// introduced to prevent.
+///
+/// **Only ever called on a base Delonix CREATED** (`<user@uid.service>/dlx-containers`),
+/// never on a cgroup we merely inherited: capping the caller's own scope would
+/// silently throttle the user's editor, shell, or whatever else shares it.
+/// Best-effort per write — a controller the host does not delegate simply is
+/// not there, and that must not fail the container.
+fn apply_aggregate_ceiling(base: &str) {
+    let pct = host_reserve_pct();
+    let mem = host_mem_bytes();
+    if mem > 0 {
+        let _ = std::fs::write(format!("{base}/memory.max"), (mem / 100 * pct).to_string());
+        let _ = std::fs::write(format!("{base}/memory.swap.max"), swap_max_value());
+    }
+    let ncpu = host_ncpu();
+    let _ = std::fs::write(
+        format!("{base}/cpu.max"),
+        format!("{} 100000", ncpu * 100_000 / 100 * pct),
+    );
+    let _ = std::fs::write(format!("{base}/pids.max"), (ncpu * 4096).to_string());
 }
 
 fn setup_cgroup(c: &Container, pid: i32) -> Result<()> {
@@ -2848,8 +2993,13 @@ fn setup_cgroup(c: &Container, pid: i32) -> Result<()> {
     // delegated + empty cgroup-ns root, kubelet invariants). Placing them
     // here in the parent changed the base the child uses and broke that validated dance.
     let kind_node = c.labels.keys().any(|k| k.starts_with("io.x-k8s.kind"));
-    if !kind_node && (is_rootless() || in_userns()) && setup_cgroup_delegated(c, pid) {
-        return Ok(());
+    if !kind_node && (is_rootless() || in_userns()) {
+        if let Some(base) = setup_cgroup_delegated(c, pid) {
+            // The leaf's parent IS the base — that is where the aggregate
+            // ceiling lives (or does not).
+            warn_if_unprotected_memory(c, Some(&base));
+            return Ok(());
+        }
     }
     ensure_delonix_slice(); // the parent-slice with the aggregate limits (robustness)
     let cgroup = c.cgroup();
@@ -4756,6 +4906,191 @@ mod tests {
     /// only does plain `fs::write`/`fs::create_dir_all` against whatever
     /// `base` string it's given — no real cgroupfs needed to exercise it, a
     /// plain temp directory stands in fine.
+    /// O default de `-m` é `max` (paridade com o Docker) e assim FICA — o que o
+    /// tornava perigoso era não haver tecto agregado por baixo. Com esse tecto
+    /// no lugar, o que resta é tornar VISÍVEIS as configurações em que
+    /// continua a não haver protecção nenhuma, em vez de fingir que estão bem.
+    #[test]
+    fn so_avisa_quando_nao_ha_tecto_a_nivel_nenhum() {
+        // Sem limite próprio E sem tecto agregado → é o caso perigoso.
+        assert!(unprotected_memory("max", Some("max")));
+        assert!(
+            unprotected_memory("max", None),
+            "pai ilegível não é protecção"
+        );
+        assert!(unprotected_memory("", Some("max")));
+        assert!(unprotected_memory("MAX", Some("max")), "case-insensitive");
+
+        // Limite PRÓPRIO → protegido, independentemente do pai.
+        assert!(!unprotected_memory("512M", Some("max")));
+        assert!(!unprotected_memory("512M", None));
+        // Sem limite próprio mas COM tecto agregado → protegido (é o efeito da
+        // correcção do ponto 2; era este o caso que antes passava despercebido).
+        assert!(!unprotected_memory("max", Some("8589934592")));
+        // Espaços/newline do `read_to_string` do cgroupfs não podem enganar.
+        assert!(unprotected_memory(" max \n", Some(" max \n")));
+        assert!(!unprotected_memory("max", Some(" 1073741824 \n")));
+    }
+
+    /// Cria uma base de cgroup falsa (só ficheiros — não é preciso cgroupfs real).
+    fn fake_base(tag: &str) -> std::path::PathBuf {
+        let base = std::env::temp_dir().join(format!(
+            "delonix-cg-{tag}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&base).unwrap();
+        std::fs::write(base.join("cgroup.subtree_control"), "").unwrap();
+        base
+    }
+
+    /// REGRESSION: `memory.max` sozinho NÃO limita a pressão de memória num host
+    /// com swap — o container passa a fazer swap no limite em vez de ser
+    /// reclamado/morto, e o tecto que o operador pediu vale só para a memória
+    /// residente. E com `memory.oom.group = 0` (o default do kernel) o OOM mata
+    /// UM processo do cgroup, deixando um container meio-morto que continua a
+    /// reportar-se Running.
+    ///
+    /// Medido ao vivo antes da correcção: `memory.swap.max = max` numa leaf de
+    /// um container arrancado com `-m 256M`. Tirar qualquer uma das duas
+    /// escritas de `try_delegated_base` faz este teste falhar.
+    #[test]
+    fn leaf_delegada_fecha_o_swap_e_mata_o_cgroup_inteiro_no_oom() {
+        let base = fake_base("swap-oom");
+        let c = Container::new(
+            "swap01".into(),
+            "t".into(),
+            "img".into(),
+            vec!["sh".into()],
+            "64M".into(),
+        );
+        assert!(try_delegated_base(
+            base.to_str().unwrap(),
+            &c,
+            std::process::id() as i32,
+            false
+        ));
+        let leaf = base.join(format!("dlx-{}", c.id));
+        assert_eq!(
+            std::fs::read_to_string(leaf.join("memory.swap.max")).unwrap(),
+            "0",
+            "sem isto o limite de memória é só sobre a residente"
+        );
+        assert_eq!(
+            std::fs::read_to_string(leaf.join("memory.oom.group")).unwrap(),
+            "1",
+            "o OOM tem de matar o container inteiro, não um processo dele"
+        );
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// REGRESSION: uma leaf criada e NÃO usada tem de ser removida.
+    ///
+    /// `try_delegated_base` cria `<base>/dlx-<id>` antes de saber se a base é
+    /// delegável, e todos os `return false` depois disso deixavam o cgroup vazio
+    /// para trás — para sempre. Medido ao vivo: seis directórios `dlx-*` órfãos
+    /// sob um scope do systemd onde a delegação tinha falhado, um por cada
+    /// container alguma vez tentado ali.
+    #[test]
+    fn base_nao_delegavel_nao_deixa_leaf_orfa() {
+        // Base SEM `cgroup.subtree_control` gravável de verdade: o
+        // `create_dir_all` da leaf passa, mas a activação de controladores
+        // falha — exactamente o caso do scope populado (no-internal-processes).
+        let base = std::env::temp_dir().join(format!(
+            "delonix-cg-orfa-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&base).unwrap();
+        // `subtree_control` existe (passa o gate inicial) mas é só-leitura, por
+        // isso os `+ctrl` falham todos e `any` fica false.
+        std::fs::write(base.join("cgroup.subtree_control"), "").unwrap();
+        let mut perm = std::fs::metadata(base.join("cgroup.subtree_control"))
+            .unwrap()
+            .permissions();
+        #[allow(clippy::permissions_set_readonly_false)]
+        perm.set_readonly(true);
+        std::fs::set_permissions(base.join("cgroup.subtree_control"), perm).unwrap();
+
+        let c = Container::new(
+            "orfa01".into(),
+            "t".into(),
+            "img".into(),
+            vec!["sh".into()],
+            "64M".into(),
+        );
+        let ok = try_delegated_base(base.to_str().unwrap(), &c, std::process::id() as i32, false);
+        let leaf = base.join(format!("dlx-{}", c.id));
+        if ok {
+            // Root ignora os bits de permissão — declara-o em vez de passar por
+            // acaso.
+            assert!(
+                unsafe { libc::geteuid() } == 0,
+                "a delegação devia ter falhado numa base só-leitura"
+            );
+            eprintln!("aviso: a correr como root — asserção da leaf órfã saltada");
+        } else {
+            assert!(
+                !leaf.exists(),
+                "a leaf ficou órfã depois de a delegação falhar — é este o bug"
+            );
+        }
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// REGRESSION (protecção do host): a base que o Delonix cria para si tem de
+    /// levar um tecto AGREGADO. Sem ele, N containers — que por omissão não
+    /// levam `-m` nenhum — somam sem limite e um leak leva o host, que é
+    /// exactamente o que a delegação existe para impedir.
+    ///
+    /// Medido ao vivo antes da correcção: `dlx-containers`, o pai de todos os
+    /// containers rootless deste host, tinha `memory.max=max`, `pids.max=max`,
+    /// `cpu.max=max`.
+    #[test]
+    fn a_base_propria_leva_tecto_agregado_dimensionado_ao_host() {
+        let base = fake_base("agregado");
+        let bs = base.to_str().unwrap();
+        apply_aggregate_ceiling(bs);
+
+        let mem: u64 = std::fs::read_to_string(base.join("memory.max"))
+            .expect("memory.max tem de ser escrito")
+            .trim()
+            .parse()
+            .expect("memory.max tem de ser um número, não `max`");
+        assert!(mem > 0, "o tecto agregado não pode ser zero");
+        assert!(
+            mem < host_mem_bytes(),
+            "o tecto ({mem}) tem de reservar memória para o HOST (total {})",
+            host_mem_bytes()
+        );
+
+        let pids: u64 = std::fs::read_to_string(base.join("pids.max"))
+            .unwrap()
+            .trim()
+            .parse()
+            .unwrap();
+        assert!(pids > 0 && pids != u64::MAX);
+
+        let cpu = std::fs::read_to_string(base.join("cpu.max")).unwrap();
+        assert!(
+            !cpu.starts_with("max"),
+            "cpu.max continuou sem tecto: {cpu:?}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(base.join("memory.swap.max"))
+                .unwrap()
+                .trim(),
+            "0"
+        );
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
     #[test]
     fn try_delegated_base_aplica_cpu_weight_cpuset_e_io_weight_na_leaf() {
         let base = std::env::temp_dir().join(format!(
