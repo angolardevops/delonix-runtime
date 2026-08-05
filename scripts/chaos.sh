@@ -54,7 +54,10 @@ skip() { SKIP=$((SKIP+1)); RESULTS+=("SKIP  $1 — $2"); printf '  \033[33m∼ S
 dlx() { env DELONIX_ROOT="$SANDBOX/root" DELONIX_NET_RUNTIME_DIR="$SANDBOX/run" \
              DELONIX_NO_CGROUP_WARN=1 timeout 180 "$BIN" "$@"; }
 
-holder_pid() { dlx net netns status 2>/dev/null | grep -oP 'holder \K[0-9]+' || true; }
+# The pin owns the namespaces (see `infra::pin_main`); killing it is what a
+# "holder death" now means for every workload on the node.
+holder_pid() { dlx net netns status 2>/dev/null | grep -oP 'pin \K[0-9]+' || true; }
+control_pid() { dlx net netns status 2>/dev/null | grep -oP 'control \K[0-9]+' || true; }
 slirp_pid()  { dlx net netns status 2>/dev/null | grep -oP 'slirp \K[0-9]+'  || true; }
 cpid() { DELONIX_ROOT="$SANDBOX/root" python3 - "$1" <<'EOF'
 import json,glob,os,sys
@@ -594,9 +597,53 @@ scen_pod_holder_respawn() {
   rm -rf "$d"
 }
 
+# THE guarantee of the pin/control split: killing the control plane must not cost
+# a single workload its network, and must not restart anything.
+#
+# Before the split there was one process that both owned the namespaces and ran
+# the control plane, so its death took the netns with it and every workload on the
+# node was permanently unplugged — `holder_kill` above recovers from exactly that,
+# by RESTARTING each one. This scenario asserts the stronger property: with the
+# pin alive, the control comes back and nothing else moves at all.
+#
+# It checks PIDs and not just connectivity on purpose. A recovery-by-restart would
+# also leave the network working, and would look identical here — the whole point
+# is that no workload was touched.
+scen_control_restart() {
+  head_ "control-restart — matar o plano de controlo não pode mexer em nada"
+  dlx net netns up >/dev/null 2>&1
+  dlx container run -d --name cr1 --net chaosnet "$IMAGE" sleep 300 >/dev/null 2>&1
+  sleep 2
+  neton cr1 || { skip "control-restart" "rede não subiu no cenário base"; dlx container rm -f cr1 >/dev/null 2>&1; return; }
+  local pin_before ctl_before wl_before
+  pin_before=$(holder_pid); ctl_before=$(control_pid); wl_before=$(cpid cr1)
+  if [ -z "$ctl_before" ]; then
+    skip "control-restart" "binário sem plano de controlo separado"
+    dlx container rm -f cr1 >/dev/null 2>&1; return
+  fi
+  kill -9 "$ctl_before" 2>/dev/null; sleep 2
+  dlx net netns up >/dev/null 2>&1
+  sleep 2
+  local pin_after ctl_after wl_after
+  pin_after=$(holder_pid); ctl_after=$(control_pid); wl_after=$(cpid cr1)
+  log "pin $pin_before→$pin_after · control $ctl_before→$ctl_after · workload $wl_before→$wl_after"
+  if [ "$pin_before" != "$pin_after" ]; then
+    bad "control-restart" "o pin foi substituído ($pin_before→$pin_after) — a netns foi deitada fora"
+  elif [ "$wl_before" != "$wl_after" ]; then
+    bad "control-restart" "o container foi REINICIADO ($wl_before→$wl_after) em vez de intocado"
+  elif [ "$ctl_before" = "$ctl_after" ]; then
+    bad "control-restart" "o controlo não foi reiniciado (pid inalterado) — ficou sem plano de controlo"
+  elif ! neton cr1; then
+    bad "control-restart" "o container perdeu a rede"
+  else
+    ok "control-restart (pin e workload intocados, controlo reposto)"
+  fi
+  dlx container rm -f cr1 >/dev/null 2>&1
+}
+
 # ------------------------------------------------------------------- driver --
 
-ALL=(holder_kill holder_wedge slirp_kill idempotent_up oom concurrent_attach namespace_isolation pod_namespace_isolation pod_holder_respawn scale abrupt_kill aggregate_ceiling delegated_scope disk_full write_failure)
+ALL=(holder_kill control_restart holder_wedge slirp_kill idempotent_up oom concurrent_attach namespace_isolation pod_namespace_isolation pod_holder_respawn scale abrupt_kill aggregate_ceiling delegated_scope disk_full write_failure)
 
 while [ $# -gt 0 ]; do
   case "$1" in

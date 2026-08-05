@@ -688,9 +688,71 @@ Núcleo em `ContainerFw.namespace` + `infra::fw_chain_body`/`ns_set_join`.
   - **Continua por fazer**: a recuperação é por REINÍCIO, não por adopção (adoptar a netns viva é
     impossível no kernel em rootless — medido e documentado desde a v0.39); e as **VMs continuam
     fora da reconciliação** (o `tap` morre com o holder e nada o repõe).
+- **O holder deixou de ser ponto único de falha (v0.42.0)** — ver a secção «Pin/controlo» abaixo.
+  Um reinício do plano de controlo já não mexe em workload nenhum; só a morte do *pin* obriga a
+  reconstruir.
 - **Limitações v1 (conhecidas)**: (1) `default↔não-default` é **assimétrico** (o `default` é o
   namespace "público" — alcançável de dentro de qualquer namespace, mas não alcança para dentro
-  delas); (2) VMs não são recuperadas num respawn do holder (ver acima).
+  delas); (2) se o PIN morrer, as VMs não são recuperadas (containers e pods são, por reinício).
+
+## Pin/controlo: o holder deixou de ser ponto único de falha (v0.42.0)
+
+Até à v0.41.0 UM processo segurava os namespaces **e** corria o plano de controlo. Reiniciar o
+plano de controlo — crash, `kill`, upgrade in-place — destruía a netns e desligava
+permanentemente todos os workloads do nó. A v0.41.0 tratou o sintoma (recuperar por reinício);
+esta trata a causa.
+
+**A medição que inverteu a premissa** (feita antes de escrever código, com uma VM CH viva): matar
+o holder deixa **tudo** de pé — o processo da VM, a netns (mesmo inode), `delonix0`, o `tap` da
+VM, o `tap0` do slirp com IP e rota, o ruleset `nft` com a chain de isolamento, e o próprio
+`slirp4netns`. E entra-se nessa netns órfã **sem privilégio**, por um membro vivo
+(`nsenter -t <pid> -U -m -n`). O que matava a rede era o `ensure_up` seguinte **deitar fora uma
+netns funcional** para construir outra. Corrige de passagem uma afirmação larga demais que estava
+registada: o impossível em rootless é `ip netns attach` a partir do host (CAP_SYS_ADMIN sobre o
+userns morto); **entrar** a partir de um membro vivo é outra operação e funciona.
+
+- **`delonix netns pin`** faz o `unshare` e adormece — sem sockets, sem threads, sem estado.
+  **`delonix netns control`** corre lá dentro por `nsenter` e é reiniciável (socket de controlo,
+  DNS, RA, DHCP por bridge). `ensure_up` tem três casos: pin+controlo vivos (nada); pin vivo e
+  controlo ausente (**repõe só o controlo**); pin morto (reconstrução + recuperação por reinício).
+- **O pidfile do pin mantém o nome histórico de propósito** (`holder.pid`): é o pid que todos os
+  `nsenter -t <holder>` da árvore visam (`join_argv`/`infra_join_argv`/`disable_ipv6_live`) e
+  agora é o que NUNCA muda. Renomeá-lo era mexer em todos os consumidores para dizer o mesmo.
+- **Efeito lateral valioso**: o pin não tem comportamento versionado, logo **pin antigo +
+  controlo novo é seguro por construção** — a armadilha do upgrade in-place da v0.34.2 desaparece
+  do caminho normal (a detecção do socket legado fica, para um holder pré-split).
+- **O reattach NÃO repete os passos destrutivos** (cada um verificado, não assumido):
+  `mount -t tmpfs none /run` montaria um SEGUNDO tmpfs por cima, escondendo `/run/netns` — a netns
+  nomeada de cada pod e de cada container `--net <custom>` do nó; `ip link add`/`ip addr add`
+  devolvem `File exists` e abortariam o arranque; reaplicar o ruleset base reacrescenta as regras
+  de dispatch do `fwcont` (o ruleset FUNDE-SE na tabela — não tem `flush`, e é por isso que as
+  firewalls dos containers sobrevivem de todo). No reattach reconstrói-se só o que é **local ao
+  processo**: os servidores de DHCP, que são threads.
+
+**Três bugs que só a validação ao vivo revelou** — os três da mesma família («X não é Y»):
+
+1. **`/sys/class/net` não reflecte a netns do processo.** Reporta a netns de quem **montou** o
+   sysfs, e o pin nunca remonta `/sys`: de dentro do controlo aquele directório é o do HOST. A
+   sonda dizia «netns vazia» para uma que tinha bridge, e o controlo morria em `ip link add
+   delonix0: File exists`. Passou a perguntar por netlink (`link_exists`, `ip link show`).
+2. **`capture()` devolve `Ok` mesmo quando o comando falha** — não olha para o exit status de
+   todo. A 2ª versão da sonda usava `.is_ok()` e era SEMPRE verdadeira: numa netns virgem o
+   controlo tomava o reattach, não construía nada, e o `net netns up` anunciava `ingress UP` sobre
+   uma netns sem bridge. Lê-se agora a SAÍDA. **Nota para quem mexer aqui**: `capture` é lenient
+   por desenho e tem muitos chamadores — verificar sempre o que ela devolve, nunca o `Result`.
+3. **Um ficheiro de socket sobrevive ao processo que o criou.** `wait_for_control_sock` era
+   `path.exists()` — 3.ª aparição do mesmo erro nesta base (depois do `status()` por pidfile e do
+   `container.userns`). Só passou a doer quando o split deu ao controlo forma de morrer sozinho:
+   com o ficheiro órfão a passar, o `ensure_up` devolvia `ingress UP` sobre um nó SEM plano de
+   controlo — dataplane bem (é o objectivo), mas sem attach/publish/DNS e sem um aviso. Agora faz
+   um `connect` real; a função que ficou sem chamadores foi APAGADA, não deixada à espera.
+
+**Validado ao vivo** com pod + container em rede custom + VM CH ao mesmo tempo: `kill -9` no
+controlo → pin `77461→77461`, controlo `77464→77722`, e **VM/pod/container com o PID inalterado**,
+rede intacta, isolamento preservado, trabalho novo aceite de imediato. Matar o PIN continua a cair
+na reconstrução completa. Cenário de caos `control_restart`, que compara **PIDs** e não só
+conectividade — uma recuperação por reinício também deixaria a rede a funcionar e seria
+indistinguível de outra forma. Arnês: 17/17.
 
 ## Imagem VM dourada (`delonix image --vm`)
 
