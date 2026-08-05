@@ -549,9 +549,54 @@ scen_pod_namespace_isolation() {
   rm -rf "$d"
 }
 
+# A holder respawn with a POD alive. The container case is `holder_kill` above;
+# this is the same failure for the workload the recovery did not know about.
+#
+# Measured before the fix, and it is the shape of the bug that matters: the
+# reconciliation printed `recovered 1 container(s)` while the pod next to it sat
+# `Up 32 seconds` with `Network unreachable` — stranded for good, its isolation
+# chain gone, and NOT ONE WORD about it. A recovery that reports success over a
+# workload it silently abandoned is worse than one that does nothing.
+#
+# TWO containers in the pod on purpose. With one, a broken guard still passes:
+# the first member recovered makes the holder serve the shared netns, and every
+# remaining member is then skipped as "healthy" while still inside the dead one.
+# That is exactly what the first version of this fix did, and only a live
+# multi-member pod showed it.
+scen_pod_holder_respawn() {
+  head_ "pod-holder-respawn — um pod tem de recuperar a rede como um container"
+  dlx net netns up >/dev/null 2>&1
+  local d="$SANDBOX/pods"; mkdir -p "$d"
+  printf 'apiVersion: delonix.io/v1\nkind: Pod\nmetadata:\n  name: rp\n  namespace: teamA\nspec:\n  containers:\n    - { name: c0, image: %s, command: ["sleep","300"] }\n    - { name: c1, image: %s, command: ["sleep","300"] }\n' \
+    "$IMAGE" "$IMAGE" > "$d/rp.yaml"
+  dlx pod create -f "$d/rp.yaml" >/dev/null 2>&1
+  sleep 3
+  if ! neton rp-c0; then
+    skip "pod-holder-respawn" "o pod não ganhou rede no cenário base"
+    dlx pod rm -f rp >/dev/null 2>&1; rm -rf "$d"; return
+  fi
+  local before after
+  before=$(holder_pid)
+  kill -9 "$before" 2>/dev/null; sleep 2
+  dlx net netns up >/dev/null 2>&1
+  sleep 4
+  after=$(holder_pid)
+  local c0 c1
+  neton rp-c0 && c0=up || c0=down
+  neton rp-c1 && c1=up || c1=down
+  log "holder $before → $after · rp-c0=$c0 · rp-c1=$c1"
+  if [ "$c0" = up ] && [ "$c1" = up ]; then
+    ok "pod-holder-respawn (os dois membros recuperaram a netns partilhada)"
+  else
+    bad "pod-holder-respawn" "membro sem rede depois do respawn (c0=$c0 c1=$c1)"
+  fi
+  dlx pod rm -f rp >/dev/null 2>&1
+  rm -rf "$d"
+}
+
 # ------------------------------------------------------------------- driver --
 
-ALL=(holder_kill holder_wedge slirp_kill idempotent_up oom concurrent_attach namespace_isolation pod_namespace_isolation scale abrupt_kill aggregate_ceiling delegated_scope disk_full write_failure)
+ALL=(holder_kill holder_wedge slirp_kill idempotent_up oom concurrent_attach namespace_isolation pod_namespace_isolation pod_holder_respawn scale abrupt_kill aggregate_ceiling delegated_scope disk_full write_failure)
 
 while [ $# -gt 0 ]; do
   case "$1" in

@@ -67,16 +67,27 @@ pub enum NetnsCmd {
 /// Decides, for one container record, whether it is a candidate for
 /// re-attachment. Pure so the policy is testable without a store or a holder.
 ///
-/// A candidate is a container that is RUNNING, sits on a custom network (only
-/// those have a veth in the holder; `--net host/none` carry their own slirp and
-/// are unaffected by a holder respawn), and still has a live pid to adopt.
+/// A candidate is a container that is RUNNING, still has a live pid, and holds a
+/// wire inside the holder — which means EITHER a custom network of its own, OR
+/// membership of a pod (whose shared netns lives in the holder just the same).
+/// `--net host/none` containers carry their own slirp and a holder respawn does
+/// not touch them.
+///
+/// Pods were missing here, and the omission was measured, not theorised: after a
+/// holder respawn the reconciliation reported `recovered 1 container(s)` while a
+/// pod sat next to it `Up 32 seconds` with `Network unreachable` — permanently
+/// stranded, its isolation chain gone, and not a word about it. Worse than the
+/// container case it was modelled on, because at least that one got reported.
 pub(crate) fn is_reattach_candidate(
     status: &delonix_runtime_core::Status,
     network: Option<&str>,
     pid: Option<i32>,
+    pod: Option<&str>,
 ) -> bool {
+    let wired = network.map(|n| !n.is_empty()).unwrap_or(false)
+        || pod.map(|p| !p.is_empty()).unwrap_or(false);
     matches!(status, delonix_runtime_core::Status::Running)
-        && network.map(|n| !n.is_empty()).unwrap_or(false)
+        && wired
         && pid.map(|p| p > 1).unwrap_or(false)
 }
 
@@ -119,14 +130,44 @@ fn reconcile_after_respawn() -> Result<(usize, usize)> {
     let store = delonix_runtime_core::Store::open(delonix_runtime_core::Store::default_root())?;
     let manual = std::env::var_os("DELONIX_NO_AUTO_RECOVER").is_some();
     let (mut ok, mut failed) = (0usize, 0usize);
+
+    // Idempotence guard: a workload the CURRENT holder already serves is healthy,
+    // and restarting it would be a self-inflicted outage. The netns to ask about
+    // is the POD's for a member and the container's own otherwise.
+    //
+    // The answer is SNAPSHOTTED before the loop, and that is the whole point.
+    // Asking live inside the loop was measured to break multi-container pods: the
+    // members share ONE netns, so the first one recovered makes the holder serve
+    // it, and every remaining member is then skipped as "healthy" while still
+    // sitting in the old, dead netns. Live, a two-container pod came back with
+    // `recovered 2 container(s)` and `pa-c0` on `Network unreachable` — the
+    // reconciliation reporting success over a container it had just abandoned.
+    //
+    // Taken up front, the question is the right one: at the start of the pass the
+    // holder either served the pod's netns (nothing died — skip every member) or
+    // it did not (they are all stranded — restart every member). For a plain
+    // container, whose netns is its own, snapshot and live are equivalent.
+    let mut candidates = Vec::new();
     for mut c in store.list()? {
         delonix_runtime::reconcile_status(&mut c);
-        if !is_reattach_candidate(&c.status, c.network.as_deref(), c.pid) {
-            continue;
+        if is_reattach_candidate(&c.status, c.network.as_deref(), c.pid, c.pod.as_deref()) {
+            candidates.push(c);
         }
-        // Idempotence guard: a container the CURRENT holder already serves is
-        // healthy, and restarting it would be a self-inflicted outage.
-        if infra::holder_serves_netns(&c.id) {
+    }
+    let mut served = std::collections::BTreeMap::new();
+    for c in &candidates {
+        let key = c.pod.clone().unwrap_or_else(|| c.id.clone());
+        served
+            .entry(key)
+            .or_insert_with_key(|k: &String| infra::holder_serves_netns(k));
+    }
+
+    for c in candidates {
+        if served
+            .get(c.pod.as_deref().unwrap_or(&c.id))
+            .copied()
+            .unwrap_or(false)
+        {
             continue;
         }
         if manual {
@@ -330,6 +371,42 @@ mod tests {
     use super::is_reattach_candidate;
     use delonix_runtime_core::Status;
 
+    /// Um MEMBRO DE POD também fica sem rede num respawn — a netns partilhada
+    /// morre com o holder antigo tal como qualquer veth. Sem isto, a
+    /// reconciliação anunciava «recovered 1 container(s)» com um pod ao lado
+    /// `Up 32 seconds` e `Network unreachable`, para sempre e em silêncio.
+    #[test]
+    fn membro_de_pod_tambem_e_candidato_a_recuperacao() {
+        // Um membro de pod NÃO tem rede custom no registo (é `--net host` para si
+        // próprio) — é o campo `pod` que prova que tem um fio dentro do holder.
+        assert!(is_reattach_candidate(
+            &Status::Running,
+            None,
+            Some(42),
+            Some("pod-pa")
+        ));
+        // …e as outras condições continuam a valer para ele.
+        assert!(!is_reattach_candidate(
+            &Status::Stopped,
+            None,
+            Some(42),
+            Some("pod-pa")
+        ));
+        assert!(!is_reattach_candidate(
+            &Status::Running,
+            None,
+            None,
+            Some("pod-pa")
+        ));
+        // Um `pod` vazio não é membro de pod nenhum.
+        assert!(!is_reattach_candidate(
+            &Status::Running,
+            None,
+            Some(42),
+            Some("")
+        ));
+    }
+
     /// Só é candidato a recuperação quem PODE ter ficado sem rede num respawn do
     /// holder: a correr, numa rede custom (só essas têm veth no holder — o
     /// `--net host/none` traz slirp próprio e é indiferente ao respawn), e com
@@ -339,27 +416,45 @@ mod tests {
         assert!(is_reattach_candidate(
             &Status::Running,
             Some("dev"),
-            Some(42)
+            Some(42),
+            None
         ));
 
         // parado / criado / morto → não se toca
         for st in [Status::Created, Status::Stopped, Status::Paused] {
-            assert!(!is_reattach_candidate(&st, Some("dev"), Some(42)));
+            assert!(!is_reattach_candidate(&st, Some("dev"), Some(42), None));
         }
         // sem rede custom (host/none) → o respawn não lhe mexeu
-        assert!(!is_reattach_candidate(&Status::Running, None, Some(42)));
-        assert!(!is_reattach_candidate(&Status::Running, Some(""), Some(42)));
+        assert!(!is_reattach_candidate(
+            &Status::Running,
+            None,
+            Some(42),
+            None
+        ));
+        assert!(!is_reattach_candidate(
+            &Status::Running,
+            Some(""),
+            Some(42),
+            None
+        ));
         // sem pid utilizável → não há nada para recuperar
-        assert!(!is_reattach_candidate(&Status::Running, Some("dev"), None));
         assert!(!is_reattach_candidate(
             &Status::Running,
             Some("dev"),
-            Some(0)
+            None,
+            None
         ));
         assert!(!is_reattach_candidate(
             &Status::Running,
             Some("dev"),
-            Some(1)
+            Some(0),
+            None
+        ));
+        assert!(!is_reattach_candidate(
+            &Status::Running,
+            Some("dev"),
+            Some(1),
+            None
         ));
     }
 }
