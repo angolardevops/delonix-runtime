@@ -270,8 +270,9 @@ pub fn run(action: NetnsCmd) -> Result<()> {
             }
             let st = infra::status();
             println!(
-                "ingress UP — holder pid {} · slirp pid {} · bridge {} ({})",
+                "ingress UP — pin pid {} · control pid {} · slirp pid {} · bridge {} ({})",
                 fmt_pid(st.holder_pid),
+                fmt_pid(st.control_pid),
                 fmt_pid(st.slirp_pid),
                 st.bridge,
                 st.gateway,
@@ -284,9 +285,10 @@ pub fn run(action: NetnsCmd) -> Result<()> {
                 println!("{}", serde_json::to_string_pretty(&st).unwrap_or_default());
             } else {
                 println!(
-                    "ingress {} — holder {} · slirp {} · bridge {} ({}) · refcount {}",
+                    "ingress {} — pin {} · control {} · slirp {} · bridge {} ({}) · refcount {}",
                     if st.up { "UP" } else { "DOWN" },
                     fmt_pid(st.holder_pid),
+                    fmt_pid(st.control_pid),
                     fmt_pid(st.slirp_pid),
                     st.bridge,
                     st.gateway,

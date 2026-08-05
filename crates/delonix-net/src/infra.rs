@@ -62,8 +62,21 @@ pub(crate) fn base_root() -> PathBuf {
 fn ingress_dir() -> PathBuf {
     base_root().join("ingress")
 }
+/// The **pin**'s pid — the process that owns the userns/netns/mountns and does
+/// nothing else.
+///
+/// Deliberately keeps the historic file name and the `holder_*` naming across the
+/// codebase: this is the pid every `nsenter -t <holder>` in the tree targets
+/// (`join_argv`, `infra_join_argv`, `disable_ipv6_live`, …), and after the
+/// pin/control split it is the pid that NEVER changes. Renaming it would have
+/// meant touching every consumer to say the same thing.
 fn holder_pid_path() -> PathBuf {
     ingress_dir().join("holder.pid")
+}
+/// The **control** process's pid — the restartable half (control socket, DNS, RA,
+/// DHCP). Killing it does not touch a single wire.
+fn control_pid_path() -> PathBuf {
+    ingress_dir().join("control.pid")
 }
 fn slirp_pid_path() -> PathBuf {
     ingress_dir().join("slirp.pid")
@@ -92,15 +105,22 @@ fn legacy_control_sock_path() -> PathBuf {
 /// already there — so this costs one `stat` when everything is fine. The wait
 /// covers the legitimate startup race: another process spawned the holder
 /// microseconds ago and it hasn't `bind`ed yet.
-fn wait_for_control_sock() -> bool {
-    let sock = control_sock_path();
-    for _ in 0..50 {
-        if sock.exists() {
-            return true;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(40));
-    }
-    sock.exists()
+/// Is something actually LISTENING on the control socket?
+///
+/// BUG FIXED HERE: this used to be `path.exists()`. A unix socket file outlives
+/// the process that bound it, so a control plane that had died left a file that
+/// answered "yes" forever — the third appearance in this codebase of the same
+/// mistake, after `status()` reading pidfiles ("`holder_pid.is_some()` is not
+/// «the holder is reachable»") and `container.userns`. It mattered the moment
+/// the pin/control split gave the control plane a way to die on its own: with
+/// the stale file passing, `ensure_up` returned a cheerful `ingress UP` over a
+/// node with NO control plane at all — dataplane fine (that is the point of the
+/// split), but no attach, no publish, no DNS, and not a word about it.
+///
+/// A connect is the only question worth asking: a leftover file gives
+/// `ECONNREFUSED`, a live listener accepts.
+fn control_reachable() -> bool {
+    std::os::unix::net::UnixStream::connect(control_sock_path()).is_ok()
 }
 
 /// The actionable message for "holder ALIVE but its control socket is absent" —
@@ -547,8 +567,14 @@ pub fn reap_orphan_refs(live: &std::collections::HashSet<String>) -> usize {
 /// Observable state of the ingress infra (for `ingress status` and the Console).
 #[derive(Clone, Debug, Default, serde::Serialize)]
 pub struct InfraStatus {
-    /// Host-visible PID of the netns holder (alive as long as the infra exists).
+    /// Host-visible PID of the **pin** — the process that owns the namespaces and
+    /// does nothing else. Alive for the whole life of the infra; if it dies, every
+    /// wire dies with it.
     pub holder_pid: Option<i32>,
+    /// PID of the **control plane** (control socket, DNS, RA, DHCP). Restartable:
+    /// it can be absent for a moment without any workload noticing, so it is
+    /// reported separately rather than folded into `up`.
+    pub control_pid: Option<i32>,
     /// PID of the single `slirp4netns` (the host↔infra bridge).
     pub slirp_pid: Option<i32>,
     /// `true` if holder AND slirp are alive.
@@ -562,10 +588,12 @@ pub struct InfraStatus {
 /// Reads the current state from the pidfiles (without touching the kernel).
 pub fn status() -> InfraStatus {
     let holder = read_pid(&holder_pid_path()).filter(|&p| pid_alive(p));
+    let control = read_pid(&control_pid_path()).filter(|&p| pid_alive(p));
     let slirp = read_pid(&slirp_pid_path()).filter(|&p| pid_alive(p));
     InfraStatus {
         up: holder.is_some() && slirp.is_some(),
         holder_pid: holder,
+        control_pid: control,
         slirp_pid: slirp,
         bridge: INFRA_BRIDGE.to_string(),
         gateway: INFRA_GATEWAY.to_string(),
@@ -578,41 +606,130 @@ pub fn status() -> InfraStatus {
 /// Ensures the infra is up (holder + bridge + single slirp). **Idempotent**: if
 /// everything is already alive, does nothing. It's the manager's entry point.
 pub fn ensure_up() -> Result<()> {
-    let st = status();
-    if st.up {
-        // "up" is a PIDFILE reading, not reachability: a holder left over from an
-        // in-place upgrade is alive and bound to a socket path this build no longer
-        // looks at. Fail LOUD and actionable at the entry point instead of letting
-        // every later attach/publish fail with a bare `ENOENT`.
-        if let Some(pid) = st.holder_pid {
-            if !wait_for_control_sock() {
-                let legacy = legacy_control_sock_path();
-                return Err(Error::Runtime {
-                    context: "control socket",
-                    message: stale_holder_message(
-                        pid,
-                        &control_sock_path(),
-                        legacy.exists().then_some(legacy.as_path()),
-                    ),
-                });
-            }
+    // The pin is alive: the namespaces, and everything plugged into them, are
+    // intact. The only question is whether the CONTROL plane is there.
+    if let Some(pin) = read_pid(&holder_pid_path()).filter(|&p| pid_alive(p)) {
+        if control_reachable() {
+            return Ok(());
+        }
+        // An in-place upgrade over a PRE-split build: that holder is a single
+        // process serving the legacy socket path, and its presence on disk is the
+        // proof. Deliberately NOT auto-healed — killing it frees the netns and
+        // drops the network of every workload on it. The operator's call.
+        let legacy = legacy_control_sock_path();
+        if legacy.exists() {
+            return Err(Error::Runtime {
+                context: "control socket",
+                message: stale_holder_message(pin, &control_sock_path(), Some(legacy.as_path())),
+            });
+        }
+        // THE CASE THIS SPLIT EXISTS FOR: the pin is alive — so the netns, every
+        // veth, every tap, the nft ruleset and the slirp uplink are all still
+        // there — and only the control plane died (a crash, a kill, an in-place
+        // upgrade of the control half). Restart it INSIDE the surviving
+        // namespaces and not a single wire moves. Before the split this path did
+        // not exist: a dead holder meant a brand-new netns and every workload on
+        // the node permanently unplugged.
+        std::fs::create_dir_all(ingress_dir()).map_err(|e| Error::Runtime {
+            context: "ingress dir",
+            message: e.to_string(),
+        })?;
+        ensure_runtime_dir()?;
+        let _ = std::fs::remove_file(control_sock_path());
+        start_control(pin)?;
+        // The slirp is the uplink and belongs to the pin, not to the control — it
+        // only needs restarting if it, too, is gone.
+        if read_pid(&slirp_pid_path())
+            .filter(|&p| pid_alive(p))
+            .is_none()
+        {
+            start_slirp(pin)?;
         }
         return Ok(());
     }
-    // partial state (e.g.: dead holder) → clean up before recreating.
+
+    // The pin itself is gone: the namespaces went with it and there is nothing to
+    // salvage. Full rebuild, and the stranded workloads are recovered by restart
+    // (`netns::reconcile_after_respawn`) exactly as before.
     teardown();
     std::fs::create_dir_all(ingress_dir()).map_err(|e| Error::Runtime {
         context: "ingress dir",
         message: e.to_string(),
     })?;
     ensure_runtime_dir()?;
-    let holder_pid = start_holder()?;
-    if let Err(e) = start_slirp(holder_pid) {
-        // if the slirp fails, we don't leave an orphan holder.
+    let pin_pid = start_pin()?;
+    if let Err(e) = start_control(pin_pid) {
+        teardown();
+        return Err(e);
+    }
+    if let Err(e) = start_slirp(pin_pid) {
+        // if the slirp fails, we don't leave an orphan pin.
         teardown();
         return Err(e);
     }
     Ok(())
+}
+
+/// Starts the control plane inside the pin's namespaces (`nsenter -t <pin> -U -m
+/// -n`) and waits for it to signal `ready` on the state file.
+///
+/// `-m` as well as `-U -n`: the control needs the pin's MOUNT namespace, where
+/// `/run/netns` lives — that is where every named netns of every pod and
+/// `--net <custom>` container is pinned.
+fn start_control(pin: i32) -> Result<i32> {
+    let exe = std::env::current_exe().map_err(|e| Error::Runtime {
+        context: "current_exe",
+        message: e.to_string(),
+    })?;
+    let _ = std::fs::remove_file(status_path());
+    let child = Command::new("nsenter")
+        .args([
+            "-t",
+            &pin.to_string(),
+            "-U",
+            "-m",
+            "-n",
+            "--preserve-credentials",
+            "--",
+        ])
+        .arg(&exe)
+        .args(["netns", "control"])
+        .env("DELONIX_ROOT", base_root())
+        .env(runtime_dir_env().0, runtime_dir_env().1)
+        .env("DELONIX_INTERNAL", "1")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|e| Error::Runtime {
+            context: "spawn nsenter (control)",
+            message: e.to_string(),
+        })?;
+    let pid = child.id() as i32;
+    let _ = std::fs::write(control_pid_path(), pid.to_string());
+    std::mem::forget(child);
+    for _ in 0..100 {
+        if !pid_alive(pid) {
+            return Err(Error::Runtime {
+                context: "ingress control",
+                message: "the control plane died during startup".into(),
+            });
+        }
+        match std::fs::read_to_string(status_path()) {
+            Ok(s) if s.trim() == "ready" => return Ok(pid),
+            Ok(s) if s.trim_start().starts_with("err:") => {
+                return Err(Error::Runtime {
+                    context: "ingress control",
+                    message: s.trim().trim_start_matches("err:").trim().to_string(),
+                });
+            }
+            _ => std::thread::sleep(std::time::Duration::from_millis(50)),
+        }
+    }
+    Err(Error::Runtime {
+        context: "ingress control",
+        message: "timeout waiting for the control plane".into(),
+    })
 }
 
 /// Tears down the infra: kills the slirp and the holder (which frees the netns) and cleans up the
@@ -620,6 +737,9 @@ pub fn ensure_up() -> Result<()> {
 pub fn teardown() {
     // the DHCP/DNS/RA servers are threads of the holder — they die when it's killed.
     kill_pidfile(&slirp_pid_path());
+    // Control BEFORE pin: the control lives inside the pin's namespaces, and
+    // killing the pin first would leave it running in a netns nobody can name.
+    kill_pidfile(&control_pid_path());
     kill_pidfile(&holder_pid_path());
     let _ = std::fs::remove_file(slirp_sock_path());
     let _ = std::fs::remove_file(control_sock_path());
@@ -659,7 +779,7 @@ pub(crate) fn wait_readable(fd: i32, timeout_ms: i32) -> bool {
     unsafe { libc::poll(&mut pfd, 1, timeout_ms) > 0 }
 }
 
-fn start_holder() -> Result<i32> {
+fn start_pin() -> Result<i32> {
     let exe = std::env::current_exe().map_err(|e| Error::Runtime {
         context: "current_exe",
         message: e.to_string(),
@@ -679,7 +799,7 @@ fn start_holder() -> Result<i32> {
             "--",
         ])
         .arg(&exe)
-        .args(["netns", "holder"])
+        .args(["netns", "pin"])
         // the holder runs with uid->0 in the userns; forces the paths to the real base.
         .env("DELONIX_ROOT", base_root())
         // same reason, same fix: forces the SHORT socket dir too (see `runtime_dir_env`).
@@ -708,7 +828,7 @@ fn start_holder() -> Result<i32> {
             });
         }
         match std::fs::read_to_string(status_path()) {
-            Ok(s) if s.trim() == "ready" => return Ok(pid),
+            Ok(s) if s.trim() == "pinned" => return Ok(pid),
             Ok(s) if s.trim_start().starts_with("err:") => {
                 teardown();
                 return Err(Error::Runtime {
@@ -810,8 +930,44 @@ fn start_slirp(holder_pid: i32) -> Result<()> {
 /// writes "ready" and **serves** container attach/detach requests (the netns/veth
 /// factory). The netns lives as long as this process lives; SIGTERM (teardown)
 /// kills it → the kernel frees the netns. On startup failure it writes `err:<msg>`.
-pub fn holder_main() -> ! {
-    let started = setup_infra_netns().and_then(|_| {
+/// The **pin**: owns the userns/netns/mountns and does nothing else, forever.
+///
+/// This is the whole point of the pin/control split. Before it, ONE process both
+/// owned the namespaces and ran the control plane, so restarting the control
+/// plane — an in-place upgrade, a crash, a `kill` — destroyed the netns and with
+/// it every wire in it. Measured on a live VM: kill the old single-process
+/// holder and the netns actually SURVIVES (the VM process keeps it alive, bridge
+/// and taps and nft ruleset all intact) — what killed connectivity was the next
+/// `ensure_up` throwing that netns away and building a fresh one.
+///
+/// So the pin never does anything that can fail after startup: no sockets, no
+/// threads, no state. The only way it dies is a kill or the machine going down.
+/// The control plane runs INSIDE it via `nsenter` and is free to come and go.
+///
+/// It also removes a whole class of upgrade hazard: the pin has no
+/// version-specific behaviour, so a pin from an older build plus a control from a
+/// newer one is safe by construction (see `stale_holder_message` for what that
+/// used to cost).
+pub fn pin_main() -> ! {
+    write_status("pinned");
+    // Nothing to serve, nothing to poll — just stay alive holding the namespaces.
+    loop {
+        // SAFETY: `pause()` only returns on a signal; no arguments, no state.
+        unsafe {
+            libc::pause();
+        }
+    }
+}
+
+/// The **control plane**, running inside the pin's namespaces: control socket,
+/// DNS, Router Advertisements and the per-bridge DHCP servers.
+///
+/// Restartable by design. On a FRESH netns it builds the infra; on one that is
+/// already configured (the pin survived, only this process restarted) it
+/// reattaches instead — see `setup_infra_netns` for why re-running the build
+/// would be actively destructive.
+pub fn control_main() -> ! {
+    let started = reattach_or_setup_infra_netns().and_then(|_| {
         let _ = std::fs::remove_file(control_sock_path());
         let listener =
             std::os::unix::net::UnixListener::bind(control_sock_path()).map_err(|e| {
@@ -4068,6 +4224,68 @@ fn write_status(s: &str) {
 /// Configures the infra netns (runs inside the holder). The proven recipe: lo up
 /// → bridge `delonix0` 10.200.0.1/16 up → `ip_forward=1` → tmpfs at `/run/netns`
 /// (for Phase 3 to create container netns) → ingress `nft` table.
+/// `true` if this netns is ALREADY set up (the pin survived and only the control
+/// process restarted). Probed from the kernel — the presence of the ingress
+/// bridge — rather than from a flag, because a flag can be stale and the wire
+/// cannot.
+fn infra_netns_already_built() -> bool {
+    link_exists(INFRA_BRIDGE)
+}
+
+/// Does `name` exist as a link IN THE CURRENT NETNS?
+///
+/// Asked over netlink (`ip link show`) and deliberately NOT via
+/// `/sys/class/net/<name>`, which was the first attempt and is wrong here:
+/// sysfs reports the netns of the process that MOUNTED it, not the caller's. The
+/// pin never remounts `/sys`, so from inside the control plane that directory is
+/// still the HOST's — it showed no `delonix0` for a netns that had one, the
+/// reattach never triggered, and the control died on
+/// `ip link add delonix0: File exists`. Measured, not reasoned about.
+fn link_exists(name: &str) -> bool {
+    // On the OUTPUT, never on the `Result`: `capture` returns `Ok(stdout)` even
+    // when the command exits non-zero — it does not look at the status at all.
+    // The first version of this used `.is_ok()` and was therefore ALWAYS true, so
+    // the control plane took the reattach path on a virgin netns, built nothing,
+    // and reported `ingress UP` over a netns with no bridge in it. `ip link show`
+    // prints the link when it exists and nothing when it does not, which is the
+    // signal worth reading.
+    crate::capture("ip", &["link", "show", name])
+        .map(|s| !s.trim().is_empty())
+        .unwrap_or(false)
+}
+
+/// Builds the infra netns, or REATTACHES to one that is already built.
+///
+/// Re-running the build over a live netns is not merely wasteful, it is
+/// destructive, and each of these was checked rather than assumed:
+///
+///   * `mount -t tmpfs none /run` would mount a SECOND tmpfs over the existing
+///     one, hiding `/run/netns` — i.e. every named netns of every pod and every
+///     container on the node, instantly unreachable by name;
+///   * `ip link add delonix0` / `ip addr add` return `File exists` and, being
+///     `?`-propagated, would abort the whole control startup;
+///   * re-applying the base `nft` ruleset re-appends the dispatch rules of
+///     `fwcont` on every restart (the ruleset merges into the existing table —
+///     it has no `flush`, which is why the container firewalls survive at all).
+///
+/// So on reattach only the PROCESS-LOCAL state is rebuilt: the DHCP servers,
+/// which are threads and died with the previous control. `DHCP_STARTED` is a
+/// process-local static, so a fresh process starts with an empty set and every
+/// bridge legitimately needs one again — the default ingress plus each private
+/// network's own.
+fn reattach_or_setup_infra_netns() -> Result<()> {
+    if !infra_netns_already_built() {
+        return setup_infra_netns();
+    }
+    start_dhcp(INFRA_BRIDGE, INFRA_PREFIX);
+    for def in network_list() {
+        if link_exists(&def.bridge) {
+            start_dhcp(&def.bridge, &def.prefix);
+        }
+    }
+    Ok(())
+}
+
 fn setup_infra_netns() -> Result<()> {
     // the holder's mounts become private (don't leak to the host).
     run_ok("mount", &["--make-rprivate", "/"]);

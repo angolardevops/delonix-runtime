@@ -287,8 +287,15 @@ fn main() {
     // "timeout waiting for the netns holder" (the re-exec falls into the normal
     // parser and is rejected as an unknown subcommand).
     let raw: Vec<String> = std::env::args().collect();
-    if raw.len() == 3 && raw[1] == "netns" && raw[2] == "holder" {
-        delonix_net::infra::holder_main(); // never returns
+    // The PIN: owns the userns/netns/mountns and does nothing else, for the whole
+    // life of the infra. The CONTROL runs inside it and is restartable — that
+    // split is what stops a control-plane restart from destroying every wire on
+    // the node (see `infra::pin_main`).
+    if raw.len() == 3 && raw[1] == "netns" && raw[2] == "pin" {
+        delonix_net::infra::pin_main(); // never returns
+    }
+    if raw.len() == 3 && raw[1] == "netns" && raw[2] == "control" {
+        delonix_net::infra::control_main(); // never returns
     }
     // Hidden re-exec of the 2nd step of `--net <network>` (see
     // `container::reexec_into_netns`): we already run INSIDE the holder's
