@@ -214,7 +214,7 @@ fn members_of(store: &delonix_runtime_core::Store, pod: &str) -> Result<Vec<Cont
 ///
 /// Best-effort, like the container path: a pod whose isolation could not be
 /// installed still runs, but says so loudly instead of pretending to be fenced.
-fn apply_pod_namespace_isolation(netns: &str, ip: &str, ns: &str) {
+pub(crate) fn apply_pod_namespace_isolation(netns: &str, ip: &str, ns: &str) {
     if ns == "default" {
         return; // `default` is the open SDN — same contract as containers
     }

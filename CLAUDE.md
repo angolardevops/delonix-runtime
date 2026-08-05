@@ -649,11 +649,48 @@ Núcleo em `ContainerFw.namespace` + `infra::fw_chain_body`/`ns_set_join`.
     VM foi um veth real na bridge do holder, não o convidado. O que isso deixa por confirmar é
     apenas o caminho `tap`→guest, que é o mesmo de qualquer VM CH sem namespace nenhuma; a chain,
     o endereço e a decisão do kernel foram exercitados com pacotes verdadeiros.
-- **Limitações v1 (conhecidas)**: (1) o isolamento **não é reconstruído num respawn do holder** —
-  os sets/chains recriam-se vazios e os containers vivos não se re-atacham sozinhos (reiniciar cada
-  um repõe); (2) `default↔não-default` é **assimétrico** (o `default` é o namespace "público" —
-  alcançável de dentro de qualquer namespace, mas não alcança para dentro delas). Fechar (1) é o
-  próximo passo.
+- **Recuperação a um respawn do holder (v0.41.0)** — a v0.40.0 trouxe os pods para dentro do
+  isolamento e isso tornou visível a pergunta seguinte. **Medido antes de qualquer código**: a
+  reconciliação imprimia `recovered 1 container(s)` enquanto um pod ao lado ficava `Up 32 seconds`
+  com `Network unreachable` — vivo, sem rede, sem chain, e **sem uma linha a dizê-lo**. Uma
+  recuperação que reporta sucesso por cima de um workload que abandonou é pior que nenhuma.
+  - **Raiz: `Container.pod` nunca era persistido.** O campo existe desde sempre, o `describe`
+    sempre o imprimiu, e NADA lho atribuía — o único traço de pertença em disco era uma label.
+    **Quarta ocorrência da mesma armadilha** (`-v` não persistido, `-p` em rede custom, redes
+    extra perdidas no restart): *estado necessário para RECONSTRUIR o recurso tem de ser
+    persistido, não só usado na criação*. Consequências reproduzidas: `describe` de um membro não
+    mostrava pod nenhum, e `container restart` de um membro morria com `clone failed: EPERM`
+    deixando-o **`Dead` sem caminho de volta**.
+  - **`cmd_start` ganhou ramo de pod** (espelho do ramo de rede custom): re-entra na netns
+    partilhada; se o holder já não a serve, recria-a COM a namespace do membro, portanto o
+    isolamento volta com ela. `reconcile_after_respawn` passou a aceitar membros de pod como
+    candidatos (`is_reattach_candidate` ganhou o parâmetro `pod` — um membro tem `network` vazio
+    no registo, é o `pod` que prova que tem um fio dentro do holder).
+  - **BUG LATENTE apanhado ao ligar isto: `reexec_start` ignorava o próprio parâmetro `netns`** e
+    usava o `id`. Funcionava por coincidência — o único chamador passava um netns igual ao id. Um
+    membro de pod é o primeiro caso em que diferem. Mesma família dos ajudantes públicos-mortos-com-
+    defeito que este repo já apagou duas vezes (`publish_port_allow`, `reap_orphan_hostfwds`). O
+    caminho de falha ganhou `owns_netns`: só se desmonta uma netns nossa — a de um pod é
+    partilhada, e derrubá-la porque um membro não voltou tiraria a rede aos peers.
+  - **BUG QUE SÓ UM POD DE DOIS MEMBROS MOSTRA**: a guarda de idempotência perguntava DENTRO do
+    ciclo «o holder serve esta netns?», e a resposta passa a *sim* assim que o PRIMEIRO membro
+    recupera — todos os seguintes eram saltados como saudáveis dentro da netns morta
+    (`recovered 2 container(s)` com `pa-c0 → Network unreachable`). A pergunta passou a ser feita
+    UMA vez, **antes** do ciclo: aí ou o holder servia a netns (nada morreu — saltam-se todos) ou
+    não servia (estão todos encalhados — reiniciam-se todos). Para um container, cuja netns é só
+    sua, snapshot e consulta ao vivo são equivalentes. **Lição de método**: uma guarda de
+    idempotência que consulta estado que o próprio ciclo MUTA não é uma guarda — e um cenário com
+    UM elemento nunca o revela; o cenário de caos usa dois de propósito.
+  - **Validado ao vivo**: `restart` de um membro com peer vivo (o peer não perde um pacote, o
+    membro volta ao mesmo IP do pod); respawn do holder com pod de 2 membros + container em rede
+    custom → **os três recuperados**, isolamento reconstruído (cross-ns bloqueado nos dois
+    sentidos). Cenário de caos `pod_holder_respawn`, que falha com a correcção revertida.
+  - **Continua por fazer**: a recuperação é por REINÍCIO, não por adopção (adoptar a netns viva é
+    impossível no kernel em rootless — medido e documentado desde a v0.39); e as **VMs continuam
+    fora da reconciliação** (o `tap` morre com o holder e nada o repõe).
+- **Limitações v1 (conhecidas)**: (1) `default↔não-default` é **assimétrico** (o `default` é o
+  namespace "público" — alcançável de dentro de qualquer namespace, mas não alcança para dentro
+  delas); (2) VMs não são recuperadas num respawn do holder (ver acima).
 
 ## Imagem VM dourada (`delonix image --vm`)
 
@@ -1960,8 +1997,8 @@ respostas à mesma pergunta começam a divergir.
 
 **Também continua em aberto** (não tocado nesta sessão): o `l4guard` só é alcançável por manifesto
 (sem comando de CLI) e só é global; regras sem ordenação/prioridade explícita; sem `log prefix` por
-regra; o isolamento não é reconstruído num respawn do holder. (Pods e VMs entraram no isolamento
-na v0.40.0 — ver a secção «Isolamento de namespace».)
+regra. (Pods e VMs entraram no isolamento na v0.40.0 e a recuperação pós-respawn cobre pods
+desde a v0.41.0 — ver a secção «Isolamento de namespace».)
 
 ### Bloco 0 do plano 33 (v0.37.1) — o caminho IPv6 não filtrado
 
@@ -2435,8 +2472,8 @@ sincronizadas com o binário publicado, ficheiros de saúde da comunidade (`CONT
    skill `delonix-runtime-sec`): `macvlan`/`ipvlan` realizados fisicamente (mesmo em root, o
    código nunca foi escrito — distinto do caso rootless, que é limite de CAP_NET_ADMIN, não de
    código em falta); partilha de PID em pods (`shareProcessNamespace`, toca `spawn()`, já
-   sinalizada como função de risco de ~405 linhas); isolamento de namespace sobreviver a um
-   respawn do holder; WebSocket/upgrade tunelado no proxy L7 (`httproute`); `exec`/attach interactivo +
+   sinalizada como função de risco de ~405 linhas); recuperar VMs num respawn do holder (pods e
+   containers já recuperam desde a v0.41.0); WebSocket/upgrade tunelado no proxy L7 (`httproute`); `exec`/attach interactivo +
    `--restart` na API `serve docker-api` (a primeira precisa de HTTP hijacking real, a segunda de
    repensar o modelo de supervisor `fork()` para um servidor multi-thread).
 3. **Gravar os vídeos** — o guião (`docs/ROTEIRO-VIDEOS.md`, 6 episódios, comandos já testados) está

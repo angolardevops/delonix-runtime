@@ -2399,6 +2399,17 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
     // container). It does NOT detach the netns on failure — it belongs to the pod, not to
     // this container (the pod's other containers share it).
     if let Some(pn) = &pod {
+        // PERSIST THE MEMBERSHIP, and do it BEFORE the branch — the fourth time
+        // this exact trap has been paid for in this repo (`-v` never persisted,
+        // `-p` on a custom network, extra networks lost on restart). `Container`
+        // has had a `pod` field all along, `describe` has always printed it, and
+        // NOTHING ever assigned it: the only trace of membership on disk was a
+        // label. Consequences, both measured: `container describe` on a pod
+        // member showed no pod at all, and `cmd_start` — which rebuilds the spec
+        // from the record — had no way to know it must re-enter the pod's shared
+        // netns, so a member's `restart` died with `clone failed: EPERM` and left
+        // it `Dead` with no path back.
+        c.pod = Some(pn.clone());
         if reexec {
             attached_ip = std::env::var("DELONIX_REEXEC_IP").ok();
         } else {
@@ -3496,7 +3507,7 @@ pub(crate) fn cmd_start(images: &ImageStore, store: &Store, id: &str) -> Result<
             if let Some(port) = c.expose {
                 let _ = super::ingress_proxy::auto_register(&c.name, &c.namespace, &ip, port);
             }
-            return reexec_start(&c.id, &netns, &ip);
+            return reexec_start(&c.id, &netns, &ip, true);
         }
         c.ip = std::env::var("DELONIX_REEXEC_IP").ok();
         if let Some(ip) = c.ip.clone() {
@@ -3572,6 +3583,36 @@ pub(crate) fn cmd_start(images: &ImageStore, store: &Store, id: &str) -> Result<
         }
     }
 
+    // POD MEMBER: re-enter the pod's SHARED netns, the same two-pass re-exec the
+    // custom-network branch above uses — but pointed at the pod's netns instead of
+    // one named after this container.
+    //
+    // Two cases, and telling them apart is what makes this safe:
+    //
+    //   * the holder still serves the pod's netns (a peer is alive, or this is a
+    //     lone member being restarted) — re-enter it and touch nothing else.
+    //     Re-attaching here would DESTROY the netns and take the peers' network
+    //     with it, which is the failure this guard exists to prevent;
+    //   * the holder came back and the netns died with the old one — recreate it,
+    //     with the member's own namespace so the isolation comes back with it.
+    //
+    // Before this, a pod member had no path back at all: `restart` rebuilt a spec
+    // that could not work and died with `clone failed: EPERM`, leaving it `Dead`.
+    if let Some(pn) = c.pod.clone() {
+        if !reexec {
+            if !infra::holder_serves_netns(&pn) {
+                let (_, ip) = infra::attach_container(&pn, "ingress", &c.namespace)?;
+                super::pod::apply_pod_namespace_isolation(&pn, &ip, &c.namespace);
+            }
+            let ip = infra::container_ip(&pn);
+            return reexec_start(&c.id, &pn, &ip, false);
+        }
+        // Deliberately NOT setting `c.ip` here: `cmd_run` leaves a pod member's
+        // record without one (the address belongs to the pod's netns, not to the
+        // member), and a restarted member reporting an IP that a freshly-run one
+        // does not would be a new inconsistency, not a fix.
+    }
+
     let rootfs = if runtime::is_rootless() {
         let rfs = images.root().join("containers").join(&c.id).join("rootfs");
         if !rfs.exists() {
@@ -3599,6 +3640,10 @@ pub(crate) fn cmd_start(images: &ImageStore, store: &Store, id: &str) -> Result<
     // with `-p`, or the host's (`--net host`) — see `run`.
     let dns = match &c.network {
         Some(n) => infra::resolve_net(n).ok().map(|(_, _, gw)| gw),
+        // Mirrors `cmd_run`'s pod arm. A pod member sits on `delonix0` like any
+        // custom-network container, so its resolver is the ingress gateway —
+        // without this arm a restarted member came back resolving nothing by name.
+        None if c.pod.is_some() => Some(infra::INFRA_GATEWAY.to_string()),
         None if !slirp_ports.is_empty() => Some(delonix_net::SLIRP_DNS.to_string()),
         None => None,
     };
@@ -3688,8 +3733,21 @@ fn reexec_env(id: &str, ip: &str) -> Vec<(String, std::ffi::OsString)> {
 /// The 1st pass of `start` with a custom network: re-executes itself inside the
 /// netns (see `reexec_into_netns`, same mechanism, no spec — the container
 /// already exists in the store, the id is enough).
-fn reexec_start(id: &str, netns: &str, ip: &str) -> Result<()> {
-    let prefix = infra::join_argv(id).ok_or_else(|| Error::Runtime {
+/// `owns_netns` says whether the netns belongs to THIS container. It does for a
+/// custom network (`netns == sanitize(id)`); it does not for a pod member, whose
+/// netns is the pod's and is shared with its peers — tearing it down on one
+/// member's failed start would take the whole pod's network with it. Same
+/// contract `cmd_run`'s `--pod` branch already states.
+fn reexec_start(id: &str, netns: &str, ip: &str, owns_netns: bool) -> Result<()> {
+    // BUG FIXED HERE: this used `join_argv(id)` and never read its own `netns`
+    // parameter. It worked only because the sole caller passed a netns equal to
+    // the id (the custom-network case), so the two were the same string. A pod
+    // member is the first caller where they differ — and with the old code it
+    // would have tried to enter a netns named after the container, which does not
+    // exist. Same family as the dead-but-public helpers this repo has had to
+    // delete twice: an argument accepted and ignored, with the defect waiting on
+    // the first caller that made the difference visible.
+    let prefix = infra::join_argv(netns).ok_or_else(|| Error::Runtime {
         context: "join_argv",
         message: super::po::t("ingress infra is down — no holder to enter").into(),
     })?;
@@ -3708,7 +3766,13 @@ fn reexec_start(id: &str, netns: &str, ip: &str) -> Result<()> {
             message: e.to_string(),
         })?;
     if !status.success() {
-        infra::detach_container(id, ip);
+        // Only tear down a netns we OWN. For a pod member the netns is the pod's
+        // and is shared with its peers — detaching it here would take their
+        // network down too, and free an IPAM lease that is still in use, over one
+        // member failing to come back.
+        if owns_netns {
+            infra::detach_container(id, ip);
+        }
         return Err(Error::Invalid(super::po::tf(
             "the container did not restart inside the network '{netns}' (exit {code})",
             &[("netns", netns), ("code", &format!("{:?}", status.code()))],
