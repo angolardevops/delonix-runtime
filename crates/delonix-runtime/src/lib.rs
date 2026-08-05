@@ -2506,6 +2506,17 @@ fn parse_mem_bytes(s: &str) -> u64 {
 /// Exists so the caller can warn ONCE BEFORE starting N nodes (e.g.
 /// `cluster create`), instead of letting each node re-exec repeat the same warning.
 pub fn cgroup_limits_apply() -> bool {
+    if is_rootless() {
+        // BUG FIXED HERE: this only ever tested `delonix.slice`, the ROOT-mode
+        // base. In rootless — the normal mode — `setup_cgroup_delegated` uses the
+        // CURRENT cgroup instead, so the probe was answering about a path the
+        // engine would never touch (`/sys/fs/cgroup/delonix.slice` does not even
+        // exist on a rootless host). Same static-vs-dynamic base mistake that
+        // `update_limits` made with `container.cgroup()` instead of
+        // `live_cgroup()`.
+        return current_cgroup_v2()
+            .is_some_and(|cur| delegated_base_usable(std::path::Path::new(&cur)));
+    }
     let probe = format!(
         "{}/.delonix-probe-{}",
         delonix_runtime_core::DELONIX_SLICE,
@@ -2523,6 +2534,42 @@ pub fn cgroup_limits_apply() -> bool {
         }
         Err(_) => false,
     }
+}
+
+/// Can `base` serve as a DELEGATED cgroup base — i.e. can the engine create a
+/// leaf under it and actually put limits on that leaf?
+///
+/// Two questions, and it took measuring all three candidates to find which pair
+/// discriminates:
+///
+///   * **creating a child** — necessary, but NOT sufficient: an undelegated
+///     session scope allows it too;
+///   * **`cgroup.subtree_control` writable by us** — this is the one that
+///     separates a real `Delegate=yes` scope (systemd chowns these files to the
+///     user) from a plain SSH `session-N.scope`, whose files stay `root:root`.
+///     Measured on this host: the delegated scope's file is `walter:walter`, the
+///     live `session-2.scope`'s is `root` — exactly the case where all five
+///     limits were found to be silently inert.
+///
+/// Deliberately does NOT try to actually enable `+memory`, even though that is
+/// the ultimate proof: the kernel's no-internal-processes rule refuses that write
+/// while our own process still sits in the cgroup, so it reports a FALSE negative
+/// for a base that is genuinely delegated. The engine gets around that by moving
+/// itself into a `dlx-mgr` child first (`try_delegated_base`'s `move_self`), which
+/// is far too invasive for a read-only diagnostic to do.
+fn delegated_base_usable(base: &std::path::Path) -> bool {
+    let probe = base.join(format!(".delonix-probe-{}", std::process::id()));
+    let created = match std::fs::create_dir(&probe) {
+        Ok(()) => true,
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => true,
+        Err(_) => false,
+    };
+    let _ = std::fs::remove_dir(&probe);
+    created
+        && std::fs::OpenOptions::new()
+            .write(true)
+            .open(base.join("cgroup.subtree_control"))
+            .is_ok()
 }
 
 /// Ensures the `delonix.slice` with AGGREGATE limits (a fraction of the host) and the
@@ -5156,6 +5203,42 @@ mod tests {
             "0"
         );
         let _ = std::fs::remove_dir_all(&base);
+    }
+    /// A sonda de delegação tem de separar os DOIS casos que este projecto já
+    /// mediu em hosts reais: um scope `Delegate=yes` (systemd faz chown dos
+    /// ficheiros de controlo para o utilizador) e um `session-N.scope` de SSH,
+    /// cujos ficheiros ficam `root:root`. Criar um filho é possível nos dois —
+    /// só a escrita no `cgroup.subtree_control` os distingue.
+    #[test]
+    fn delegated_base_usable_exige_subtree_control_gravavel() {
+        use std::os::unix::fs::PermissionsExt;
+        let base = std::env::temp_dir().join(format!(
+            "delonix-deleg-probe-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&base).unwrap();
+
+        // Sem `cgroup.subtree_control` nenhum: não é uma base delegável.
+        assert!(!delegated_base_usable(&base));
+
+        // Com um gravável (o scope delegado): serve.
+        let sc = base.join("cgroup.subtree_control");
+        std::fs::write(&sc, "").unwrap();
+        assert!(delegated_base_usable(&base));
+
+        // Só de leitura (o `session-N.scope` do SSH, dono root): NÃO serve.
+        std::fs::set_permissions(&sc, std::fs::Permissions::from_mode(0o444)).unwrap();
+        let readonly_rejected = !delegated_base_usable(&base);
+        std::fs::set_permissions(&sc, std::fs::Permissions::from_mode(0o644)).unwrap();
+        std::fs::remove_dir_all(&base).unwrap();
+        assert!(
+            readonly_rejected,
+            "um subtree_control não gravável tem de ser recusado — é o caso do SSH"
+        );
     }
 
     #[test]

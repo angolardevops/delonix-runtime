@@ -789,11 +789,20 @@ fn cmd_info() -> Result<()> {
             super::po::t("root (daemonless)")
         }
     );
-    // This is the #1 question when the limits "don't work".
-    let delegated = std::path::Path::new("/sys/fs/cgroup/cgroup.controllers").exists()
-        && std::fs::read_to_string("/sys/fs/cgroup/cgroup.subtree_control")
-            .map(|s| s.contains("memory"))
-            .unwrap_or(false);
+    // This is the #1 question when the limits "don't work" — so it has to be
+    // answered about THIS session, not about the host in general.
+    //
+    // BUG FIXED HERE: it used to read `/sys/fs/cgroup/cgroup.controllers` and
+    // `/sys/fs/cgroup/cgroup.subtree_control` — the files of the HOST'S ROOT
+    // cgroup, which on any systemd machine list `memory` regardless. So this
+    // reported `cgroup2 delegated: yes` unconditionally, including on the plain
+    // SSH session where all five limits were measured to be silently inert. The
+    // one command a user runs to diagnose "why aren't my limits working" gave the
+    // confidently wrong answer.
+    //
+    // `cgroup_limits_apply` asks the engine's own question, about the base
+    // `spawn` would actually use.
+    let delegated = delonix_runtime::cgroup_limits_apply();
     println!(
         "  {:<19} {}",
         super::po::t("cgroup2 delegated:"),
