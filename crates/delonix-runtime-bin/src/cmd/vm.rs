@@ -391,6 +391,16 @@ pub enum VmCmd {
         /// custom network must be created first with `delonix network create`).
         #[arg(long, default_value = "ingress")]
         network: String,
+        /// Isolation namespace (default `default`): VMs of different namespaces do not reach each other. Requires `--backend cloud-hypervisor`
+        //
+        // Deliberately ONE line, like every other flag in this group: clap's
+        // derive turns a multi-paragraph doc comment into a `long_help`, and the
+        // help translation looks the rendered string up verbatim — so a second
+        // paragraph would silently come out untranslated under `--l18n=pt`.
+        // The nuance (why libvirt is refused) is in the error the user actually
+        // hits, in `vm_namespace_supported`, and in the release notes.
+        #[arg(long)]
+        namespace: Option<String>,
         /// Kernel for direct boot.
         #[arg(long)]
         kernel: Option<String>,
@@ -734,6 +744,9 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
             vcpus: spec.vcpus,
             memory: spec.memory,
             network: spec.network,
+            // `metadata.namespace`, the same source every other Kind reads it
+            // from — a VM does not get a namespace field of its own in `spec`.
+            namespace: doc.metadata.namespace.clone(),
             kernel: spec.kernel,
             initrd: spec.initrd,
             firmware: spec.firmware,
@@ -824,6 +837,7 @@ pub fn run(action: VmCmd) -> Result<()> {
             vcpus,
             memory,
             network,
+            namespace,
             kernel,
             initrd,
             firmware,
@@ -881,6 +895,7 @@ pub fn run(action: VmCmd) -> Result<()> {
                 vcpus,
                 memory,
                 network,
+                namespace,
                 kernel,
                 initrd,
                 firmware,
@@ -1793,6 +1808,10 @@ fn describe_one(vm: &delonix_runtime_core::Vm) {
 
     d.section("Network");
     d.sub("Network", &vm.network);
+    // An isolation boundary that is invisible is an isolation boundary nobody
+    // audits — shown always, `default` included, so "which namespace is this VM
+    // in" never needs a guess or a look at the JSON.
+    d.sub("Namespace", &vm.namespace);
     d.sub("IP", vm.ip.as_deref().unwrap_or("<none>"));
     d.sub("TAP", if vm.tap.is_empty() { "<none>" } else { &vm.tap });
     d.sub("MAC", &vm.mac);

@@ -3478,3 +3478,6 @@ msgstr "workload '{name}': type '{type}' desconhecido (suportados: container, vm
 
 msgid "workload '{name}': type: microvm forces the cloud-hypervisor backend — remove 'backend: {backend}' (or use type: vm)"
 msgstr "workload '{name}': type: microvm força o backend cloud-hypervisor — remove 'backend: {backend}' (ou usa type: vm)"
+
+msgid "Isolation namespace (default `default`): VMs of different namespaces do not reach each other. Requires `--backend cloud-hypervisor`"
+msgstr "Namespace de isolamento (por omissão `default`): VMs de namespaces diferentes não se alcançam. Exige `--backend cloud-hypervisor`"

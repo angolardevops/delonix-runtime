@@ -508,9 +508,50 @@ for f in glob.glob(os.path.join(os.environ["DELONIX_ROOT"],"containers","*.json"
   for c in nsa nsa2 nsb; do dlx container rm -f "$c" >/dev/null 2>&1; done
 }
 
+# The SAME boundary, but for pods — which had it half-wired. `attach_container`
+# takes the namespace, so a pod's IP DID join `@dlxall`/`@dlxns_<ns>`; what never
+# existed was a chain of its own, and the chain is what drops. Measured before
+# the fix: podA(teamA) reached podB(teamB) while the holder's sets were perfectly
+# correct and `@fwmap` was empty.
+#
+# Pods live on the DEFAULT bridge (`attach_container(netns, "ingress", ns)`),
+# not on a custom network — hence no `--net` here, unlike the container scenario.
+scen_pod_namespace_isolation() {
+  head_ "pod-namespace-isolation — pods de namespaces diferentes não se alcançam"
+  dlx net netns up >/dev/null 2>&1
+  local d="$SANDBOX/pods"; mkdir -p "$d"
+  local n
+  for n in pa:teamA pa2:teamA pb:teamB; do
+    printf 'apiVersion: delonix.io/v1\nkind: Pod\nmetadata:\n  name: %s\n  namespace: %s\nspec:\n  containers:\n    - name: c0\n      image: %s\n      command: ["sleep", "300"]\n' \
+      "${n%%:*}" "${n##*:}" "$IMAGE" > "$d/${n%%:*}.yaml"
+    dlx pod create -f "$d/${n%%:*}.yaml" >/dev/null 2>&1
+  done
+  sleep 3
+  local ipb ipa2
+  ipb=$(dlx container exec pb-c0 ip -4 -o addr show eth0 2>/dev/null | awk '{print $4}' | cut -d/ -f1)
+  ipa2=$(dlx container exec pa2-c0 ip -4 -o addr show eth0 2>/dev/null | awk '{print $4}' | cut -d/ -f1)
+  if [ -z "$ipb" ] || [ -z "$ipa2" ]; then
+    skip "pod-namespace-isolation" "os pods não ganharam IP"
+  else
+    local cross same
+    dlx container exec pa-c0 ping -c1 -W2 "$ipb"  >/dev/null 2>&1 && cross=open || cross=blocked
+    dlx container exec pa-c0 ping -c1 -W2 "$ipa2" >/dev/null 2>&1 && same=open  || same=blocked
+    log "cross-ns=$cross · same-ns=$same"
+    if [ "$cross" = blocked ] && [ "$same" = open ]; then
+      ok "pod-namespace-isolation (fronteira fechada entre pods, mesma namespace aberta)"
+    elif [ "$cross" = open ]; then
+      bad "pod-namespace-isolation" "pod de teamA alcança pod de teamB — os pods estão fora do isolamento"
+    else
+      bad "pod-namespace-isolation" "same-namespace bloqueado — o isolamento é demasiado agressivo"
+    fi
+  fi
+  for n in pa pa2 pb; do dlx pod rm -f "$n" >/dev/null 2>&1; done
+  rm -rf "$d"
+}
+
 # ------------------------------------------------------------------- driver --
 
-ALL=(holder_kill holder_wedge slirp_kill idempotent_up oom concurrent_attach namespace_isolation scale abrupt_kill aggregate_ceiling delegated_scope disk_full write_failure)
+ALL=(holder_kill holder_wedge slirp_kill idempotent_up oom concurrent_attach namespace_isolation pod_namespace_isolation scale abrupt_kill aggregate_ceiling delegated_scope disk_full write_failure)
 
 while [ $# -gt 0 ]; do
   case "$1" in

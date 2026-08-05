@@ -75,6 +75,10 @@ pub struct VmConfig {
     pub memory: String,
     /// Ingress network for the `tap`.
     pub network: String,
+    /// Logical isolation namespace (`None`/`"default"` = the open SDN), the same
+    /// notion `container run --namespace` uses. Only meaningful for a VM that
+    /// actually lives on the holder's SDN — see [`vm_namespace_supported`].
+    pub namespace: Option<String>,
     /// Kernel for *direct boot* (vmlinux/bzImage).
     pub kernel: Option<String>,
     /// Initrd/initramfs (with `kernel`).
@@ -272,6 +276,27 @@ fn shq(s: &str) -> String {
 }
 
 /// Deterministic MAC (QEMU/KVM prefix `52:54:00`) derived from the name.
+/// The VM's requested isolation namespace, normalized (`None`/empty = `default`).
+fn vm_namespace_of(cfg: &VmConfig) -> String {
+    match cfg.namespace.as_deref() {
+        None | Some("") => "default".to_string(),
+        Some(ns) => ns.to_string(),
+    }
+}
+
+/// Whether `backend` puts its VMs on the holder's SDN, where namespace isolation
+/// is enforceable at all.
+///
+/// **Only Cloud Hypervisor does.** A libvirt VM lives on `virbr0`, in the HOST's
+/// network namespace — a different L2 entirely, governed by libvirt's own
+/// filtering, which this engine does not program. Accepting `--namespace` there
+/// and quietly doing nothing would be the exact anti-pattern this codebase has
+/// already had to correct three times over (`--security-opt seccomp=`,
+/// `-v …:z`, `--network-alias`): an option accepted, ignored, and believed.
+pub fn vm_namespace_supported(backend_id: &str) -> bool {
+    backend_id == "cloud-hypervisor"
+}
+
 fn mac_for(name: &str) -> String {
     let h = infra::name_hash(name);
     format!(
@@ -621,13 +646,18 @@ impl VmBackend for CloudHypervisorBackend {
         if !matches!(cfg.network.as_str(), "" | "ingress" | "bridge" | "default") {
             let _ = infra::network_create(&cfg.network);
         }
-        let tap = infra::vm_attach(&cfg.name, &cfg.network)?;
+        // The MAC is needed BEFORE the attach now, not after: it is what makes
+        // the guest's future DHCP address computable, and that address is what
+        // the attach registers in the namespace sets.
         let mac = mac_for(&cfg.name);
+        let ns = vm_namespace_of(cfg);
+        let tap = infra::vm_attach(&cfg.name, &cfg.network, &mac, &ns)?;
+        let lease = infra::dhcp_ip_for_mac(&cfg.network, &mac);
         on(CreateStage::Start);
         let pid = match boot_ch(vmdir, cfg, overlay, &tap, &mac) {
             Ok(p) => p,
             Err(e) => {
-                infra::vm_detach(&cfg.name);
+                infra::vm_detach(&cfg.name, lease.as_deref());
                 return Err(e);
             }
         };
@@ -658,7 +688,13 @@ impl VmBackend for CloudHypervisorBackend {
                 }
             }
         }
-        infra::vm_detach(&vm.name);
+        // The record's own address if it learned one; otherwise the lease its MAC
+        // maps to — so a VM stopped before it ever DHCP'd still gives up its chain.
+        let ip = vm
+            .ip
+            .clone()
+            .or_else(|| infra::dhcp_ip_for_mac(&vm.network, &vm.mac));
+        infra::vm_detach(&vm.name, ip.as_deref());
         Ok(())
     }
 }
@@ -1930,6 +1966,19 @@ pub fn create_with(base: &Path, cfg: &VmConfig, on: &dyn Fn(CreateStage)) -> Res
     // Only the VMs that will REALLY boot (not the idempotent already-running one above).
     vm_admission_check(cfg)?;
 
+    // Namespace isolation is enforceable only where the VM is on OUR dataplane.
+    // Refuse rather than accept-and-ignore — see `vm_namespace_supported`.
+    let ns = vm_namespace_of(cfg);
+    if ns != "default" && !vm_namespace_supported(backend.id()) {
+        return Err(Error::Invalid(format!(
+            "namespace '{ns}' is not enforceable on the '{}' backend: its VMs live on the host's \
+             libvirt bridge, outside the Delonix SDN, so nothing here can isolate them. Use \
+             `--backend cloud-hypervisor` (its VMs share the containers' SDN), or drop \
+             `--namespace`",
+            backend.id()
+        )));
+    }
+
     let disk_path = std::fs::canonicalize(&cfg.disk)
         .map_err(|_| Error::Invalid(format!("image not found: {}", cfg.disk)))?;
     let overlay = vmdir.join(format!("{}.qcow2", cfg.name));
@@ -1975,6 +2024,7 @@ pub fn create_with(base: &Path, cfg: &VmConfig, on: &dyn Fn(CreateStage)) -> Res
     vm.pid = boot.pid;
     vm.status = Status::Running;
     vm.restart_policy = cfg.restart_policy.clone();
+    vm.namespace = ns.clone();
     vm.ip = boot.ip;
     vm.backend = backend.id().to_string();
     vm.devices = cfg.devices.clone();
@@ -2055,7 +2105,9 @@ fn remove_inner(base: &Path, name: &str, force: bool) -> Result<()> {
                     return Err(e);
                 }
             }
-            infra::vm_detach(name);
+            // No record, so no address to trust — the tap goes, the firewall
+            // teardown is skipped rather than guessed at.
+            infra::vm_detach(name, None);
             orphan
         }
     };
@@ -2163,6 +2215,7 @@ fn config_from(vm: &Vm) -> VmConfig {
         vcpus: vm.vcpus,
         memory: vm.memory.clone(),
         network: vm.network.clone(),
+        namespace: Some(vm.namespace.clone()),
         restart_policy: vm.restart_policy.clone(),
         devices: vm.devices.clone(),
         backend: Some(vm.backend.clone()),
@@ -2978,5 +3031,54 @@ mod tests {
         let cfg = config_from(&vm);
         assert_eq!(cfg.backend.as_deref(), Some("cloud-hypervisor"));
         assert!(cfg.net_mode.is_none());
+    }
+
+    // ---- namespace isolation for VMs ----------------------------------------
+
+    #[test]
+    fn vm_namespace_of_normaliza_ausencia_e_vazio() {
+        let mut cfg = VmConfig {
+            name: "v".into(),
+            ..Default::default()
+        };
+        assert_eq!(vm_namespace_of(&cfg), "default");
+        cfg.namespace = Some(String::new());
+        assert_eq!(vm_namespace_of(&cfg), "default");
+        cfg.namespace = Some("teamA".into());
+        assert_eq!(vm_namespace_of(&cfg), "teamA");
+    }
+
+    /// libvirt VMs live on `virbr0`, in the HOST netns — a different L2 that this
+    /// engine does not program. Reporting that honestly (a refusal) instead of
+    /// accepting `--namespace` and doing nothing is the whole point: an isolation
+    /// option that silently does nothing is worse than not having one.
+    #[test]
+    fn so_o_cloud_hypervisor_suporta_namespace() {
+        assert!(vm_namespace_supported("cloud-hypervisor"));
+        assert!(!vm_namespace_supported("libvirt"));
+        assert!(!vm_namespace_supported("qualquer-outro"));
+    }
+
+    /// `start`/`restart` rebuild the `VmConfig` from the record — a namespace that
+    /// did not survive that round-trip would silently drop the VM's isolation on
+    /// the first restart. Exactly the family of bug this repo has already been
+    /// bitten by three times (`-v` not persisted, `-p` on a custom net, extra
+    /// networks lost on restart).
+    #[test]
+    fn config_from_preserva_a_namespace() {
+        let mut vm = Vm::new(
+            "v".into(),
+            "d".into(),
+            "o".into(),
+            1,
+            "1G".into(),
+            "ingress".into(),
+            "t".into(),
+            "52:54:00:00:00:01".into(),
+            "s".into(),
+        );
+        vm.namespace = "teamA".into();
+        assert_eq!(config_from(&vm).namespace.as_deref(), Some("teamA"));
+        assert_eq!(vm_namespace_of(&config_from(&vm)), "teamA");
     }
 }
