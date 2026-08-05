@@ -604,11 +604,56 @@ Núcleo em `ContainerFw.namespace` + `infra::fw_chain_body`/`ns_set_join`.
 - **`default` = SDN aberta** (tudo na mesma namespace) → **comportamento inalterado** para quem não
   usa namespaces. Attach de `default` mantém a forma de 5 tokens do control-line (compat com um
   holder antigo num upgrade in-place; só attaches namespaced exigem o holder novo).
+- **Pods e VMs também estão dentro (v0.40.0)** — antes ficavam de fora, cada um por sua razão:
+  - **Pods estavam META-ligados, o que é pior que desligados.** `create_pod` já passava a
+    namespace ao `infra::attach_container`, por isso o IP do pod ENTRAVA em `@dlxall`/`@dlxns_<ns>`
+    — as chains dos OUTROS já recusavam ligações vindas dele. O que nunca existiu foi chain
+    PRÓPRIA: as regras de isolamento vivem na chain de cada workload, e sem chain nada dropava o
+    tráfego a ENTRAR. Fronteira aberta num sentido só, que é o mesmo que aberta. **Medido antes da
+    correcção** (3 pods de 1 container na bridge default): `podA(teamA) → podB(teamB)` **REACHABLE**,
+    com os sets do holder perfeitamente correctos (`@dlxall={.2,.3,.4}`, teamA=`{.2,.4}`,
+    teamB=`{.3}`) e o `@fwmap` **vazio**. Corrigido com `pod::apply_pod_namespace_isolation`,
+    chaveada pelo NOME DA NETNS do pod (não pelo id de um membro: a netns é que segura o endereço,
+    todos os membros a partilham, e o verdict map é chaveado por IP — uma entrada é tudo o que
+    caberia). O teardown já estava coberto (`remove_pod` → `detach_container` → `unfirewall`).
+  - **VMs não tinham namespace nenhuma** e havia um obstáculo estrutural: o IP da VM vem por
+    **DHCP**, logo no `vm_attach` ainda não se sabe qual é. Resolvido pelo facto de o servidor DHCP
+    ser NOSSO e nativo (`dhcp_serve`, em Rust dentro do holder) e o lease ser **determinístico do
+    MAC** — `infra::dhcp_lease_ip` calcula-o do lado do host, antes de o guest arrancar. A mesma
+    aritmética estava **duplicada em dois sítios** (`dhcp_serve` e `dhcp_ip_for_mac`) e esta sessão
+    quase fez uma terceira: agora há UMA função e os três consumidores (servidor, `vm ls`, attach)
+    passam por ela. Duas cópias divergiriam no dia em que a pool mudasse, e o sintoma seria o pior
+    possível — uma VM com firewall num endereço que ninguém usa, reportada como isolada.
+  - **`vm create --namespace` + `metadata.namespace` no `kind: Vm`**; `Vm.namespace` persistido
+    (`#[serde(default)]` = `default`, que é exactamente o que os registos antigos eram) e
+    reconstruído pelo `config_from`, com teste de regressão dedicado — a namespace desaparecer no
+    primeiro `start` seria a 4.ª ocorrência da armadilha já documentada (`-v`, `-p` em rede custom,
+    redes extra).
+  - **Só o backend `cloud-hypervisor`** — uma VM libvirt vive na `virbr0`, no netns do HOST, um L2
+    diferente que este motor não programa. `--namespace` aí é **RECUSADO com erro dirigido**, nunca
+    aceite-e-ignorado (a armadilha que este repo já teve de corrigir três vezes:
+    `--security-opt seccomp=`, `-v …:z`, `--network-alias`).
+  - **Compatibilidade de holder**: a linha de controlo `vmtap` cresce para 6 tokens só quando há
+    mesmo namespace a aplicar (`vmtap_line`, pura e testada) — o mesmo idioma que `attach`/
+    `attach-extra` já usavam. Contra um holder antigo, uma VM namespaced falha **ALTO**
+    (`invalid control command`), nunca arranca sem isolamento em silêncio. Confirmado ao vivo.
+  - **Validado ao vivo (2026-08-05)**: pods — cross-ns bloqueado nos DOIS sentidos, same-ns aberto,
+    gateway intacto, `@fwmap` com uma chain por pod; VMs — `vm create --backend cloud-hypervisor
+    --namespace teamA` real, chain instalada em `10.200.254.20` (o lease previsto, e o mesmo que o
+    `vm ls` reporta), e **tráfego real** contra esse endereço através da chain instalada:
+    same-ns `1 packet accepted` pela regra `@dlxnse20c4037`, cross-ns + `default`
+    `4 packets dropped` pela regra `@dlxall ct state new`. Cenário de caos novo
+    (`pod_namespace_isolation`) que **falha com a correcção revertida** e passa com ela.
+  - **O que NÃO foi provado com um guest a sério**: nenhuma imagem deste host arranca em Cloud
+    Hypervisor (a golden é libvirt-only e não há `hypervisor-fw`), por isso o alvo no endereço da
+    VM foi um veth real na bridge do holder, não o convidado. O que isso deixa por confirmar é
+    apenas o caminho `tap`→guest, que é o mesmo de qualquer VM CH sem namespace nenhuma; a chain,
+    o endereço e a decisão do kernel foram exercitados com pacotes verdadeiros.
 - **Limitações v1 (conhecidas)**: (1) o isolamento **não é reconstruído num respawn do holder** —
   os sets/chains recriam-se vazios e os containers vivos não se re-atacham sozinhos (reiniciar cada
-  um repõe); (2) **pods (CRI) e VMs** ainda ficam em `default` (attach por caminhos distintos);
-  (3) `default↔não-default` é **assimétrico** (o `default` é o namespace "público" — alcançável de
-  dentro de qualquer namespace, mas não alcança para dentro delas). Fechar (1)/(2) é o próximo passo.
+  um repõe); (2) `default↔não-default` é **assimétrico** (o `default` é o namespace "público" —
+  alcançável de dentro de qualquer namespace, mas não alcança para dentro delas). Fechar (1) é o
+  próximo passo.
 
 ## Imagem VM dourada (`delonix image --vm`)
 
@@ -1915,8 +1960,8 @@ respostas à mesma pergunta começam a divergir.
 
 **Também continua em aberto** (não tocado nesta sessão): o `l4guard` só é alcançável por manifesto
 (sem comando de CLI) e só é global; regras sem ordenação/prioridade explícita; sem `log prefix` por
-regra; o isolamento não é reconstruído num respawn do holder; pods (CRI) e VMs ainda fora do
-isolamento de namespace.
+regra; o isolamento não é reconstruído num respawn do holder. (Pods e VMs entraram no isolamento
+na v0.40.0 — ver a secção «Isolamento de namespace».)
 
 ### Bloco 0 do plano 33 (v0.37.1) — o caminho IPv6 não filtrado
 
@@ -2384,14 +2429,14 @@ sincronizadas com o binário publicado, ficheiros de saúde da comunidade (`CONT
    v0.34.0) — precisa de decisão de DESENHO antes de código: um `down` simples remove um volume
    anónimo, ou só `down -v`? Nomeação determinística por posição na lista (risco de colisão se a
    ordem mudar) vs. um registo próprio (mais peso). Não avances sem responder a isto primeiro.
-2. **6 itens de namespace/privilégio/protocolo**, cada um candidato a sessão própria — nenhum é
+2. **5 itens de namespace/privilégio/protocolo** (eram 6 — «pods e VMs no isolamento» fechou na
+   v0.40.0), cada um candidato a sessão própria — nenhum é
    "dívida rápida", todos tocam fronteiras que este projecto trata com auditoria dedicada (ver
    skill `delonix-runtime-sec`): `macvlan`/`ipvlan` realizados fisicamente (mesmo em root, o
    código nunca foi escrito — distinto do caso rootless, que é limite de CAP_NET_ADMIN, não de
    código em falta); partilha de PID em pods (`shareProcessNamespace`, toca `spawn()`, já
    sinalizada como função de risco de ~405 linhas); isolamento de namespace sobreviver a um
-   respawn do holder; pods (CRI) e VMs cobertos pelo isolamento de namespace (hoje só containers
-   simples); WebSocket/upgrade tunelado no proxy L7 (`httproute`); `exec`/attach interactivo +
+   respawn do holder; WebSocket/upgrade tunelado no proxy L7 (`httproute`); `exec`/attach interactivo +
    `--restart` na API `serve docker-api` (a primeira precisa de HTTP hijacking real, a segunda de
    repensar o modelo de supervisor `fork()` para um servidor multi-thread).
 3. **Gravar os vídeos** — o guião (`docs/ROTEIRO-VIDEOS.md`, 6 episódios, comandos já testados) está

@@ -4,6 +4,111 @@
 > (regenerado automaticamente pelo pipeline de release a cada tag publicada).
 > Não editar à mão — edita a nota da release respectiva.
 
+## v0.40.0 — pods e VMs entram no isolamento de namespace
+
+O isolamento por `--namespace` cobria containers simples. Pods e VMs ficavam de
+fora — cada um por uma razão diferente, e a dos pods era a pior das duas.
+
+### Pods estavam meta-ligados, o que é pior que desligados
+
+`pod create` já passava a namespace ao attach, por isso o IP do pod **entrava**
+nos sets `@dlxall`/`@dlxns_<ns>`: as chains dos outros workloads já recusavam
+ligações vindas dele. O que nunca existiu foi chain **própria** — e as regras de
+isolamento vivem na chain de cada workload. Sem chain, nada dropava o tráfego a
+**entrar** no pod. Uma fronteira aberta num sentido só é uma fronteira aberta.
+
+Medido antes da correcção, três pods de um container na bridge default:
+
+```
+podA(teamA) → podB(teamB)    REACHABLE    ← devia estar bloqueado
+podA(teamA) → podA2(teamA)   reachable    ← correcto
+```
+
+…com os sets do holder perfeitamente correctos (`@dlxall = {.2,.3,.4}`,
+teamA = `{.2,.4}`, teamB = `{.3}`) e o `@fwmap` **vazio**. A metade da
+composição estava lá; a metade que aplica, não.
+
+Corrigido no `create_pod`, chaveado pelo **nome da netns do pod** e não pelo id
+de um container membro: a netns é que segura o endereço, todos os membros a
+partilham, e o verdict map do dataplane é chaveado por IP — uma entrada é tudo
+o que caberia de qualquer forma. O teardown já estava coberto (`pod rm` →
+`detach_container` → `unfirewall`).
+
+### VMs não tinham namespace — e havia um obstáculo real
+
+O IP de uma VM vem por **DHCP**, portanto no momento do attach ainda não se sabe
+qual é. A saída veio de o servidor DHCP ser nosso: `dhcp_serve` corre em Rust
+dentro do holder e o lease é **determinístico do MAC**. `infra::dhcp_lease_ip`
+calcula-o do lado do host, antes de o guest sequer arrancar — e é isso que
+permite registar a membership e instalar a chain no momento certo, em vez de
+esperar por um lease que ninguém observa.
+
+Essa aritmética estava **duplicada em dois sítios** (`dhcp_serve` e
+`dhcp_ip_for_mac`) e esta sessão quase acrescentou uma terceira. Agora há uma só
+função, e os três consumidores — o servidor que entrega o lease, o `vm ls` que o
+reporta, e o attach que o isola — passam todos por ela. Duas cópias divergiriam
+no dia em que a pool mudasse, e o sintoma seria o pior possível: uma VM com
+firewall num endereço que ninguém usa, reportada como isolada.
+
+Novidades de superfície: `vm create --namespace <ns>`, `metadata.namespace` no
+`kind: Vm`, e a namespace visível no `vm describe`. `Vm.namespace` é persistido
+(registos antigos ficam em `default`, que é exactamente o que eram) e
+reconstruído pelo `config_from`, com teste dedicado — a namespace desaparecer no
+primeiro `vm start` seria a quarta ocorrência de uma armadilha já documentada
+neste repo (`-v` não persistido, `-p` em rede custom, redes extra perdidas no
+restart).
+
+### Só o backend `cloud-hypervisor` — e a recusa é explícita
+
+Uma VM libvirt vive na `virbr0`, no netns do **host**: outro L2, que este motor
+não programa. `--namespace` nesse backend é **recusado com erro dirigido**, nunca
+aceite-e-ignorado. Aceitar uma opção de isolamento e não fazer nada é a armadilha
+que este projecto já teve de corrigir três vezes (`--security-opt seccomp=`,
+`-v …:z`, `--network-alias`), e num campo de segurança custa mais do que não ter
+a opção.
+
+### Compatibilidade de holder
+
+A linha de controlo `vmtap` só cresce para 6 tokens quando há mesmo namespace a
+aplicar (`vmtap_line`, pura e testada) — o mesmo idioma que `attach` e
+`attach-extra` já usavam. Contra um holder de uma build anterior, uma VM
+namespaced falha **alto** (`invalid control command`) em vez de arrancar sem
+isolamento em silêncio. Confirmado ao vivo.
+
+### Validação
+
+**Pods**, ao vivo no sandbox isolado: cross-namespace bloqueado nos **dois**
+sentidos, same-namespace aberto, gateway intacto, uma chain por pod no `@fwmap`.
+
+**VMs**, ao vivo: `vm create --backend cloud-hypervisor --namespace teamA` real,
+chain instalada em `10.200.254.20` — o lease previsto no attach, e o mesmo
+endereço que o `vm ls` reporta. Com tráfego verdadeiro contra esse endereço,
+através da chain instalada, os contadores do kernel nomeiam a regra que decidiu:
+
+```
+ct state established,related          counter packets 1 bytes 84   accept
+ip daddr … ip saddr @dlxnse20c4037    counter packets 1 bytes 84   accept   ← same-ns
+ip daddr … ip saddr @dlxall ct new    counter packets 4 bytes 336  drop     ← cross-ns
+```
+
+**Cenário de caos novo** (`pod_namespace_isolation`), que falha com a correcção
+revertida e passa com ela. Arnês completo: 15 PASS · 0 FAIL · 0 SKIP.
+
+**O que não foi provado com um convidado a sério**: nenhuma imagem deste host
+arranca em Cloud Hypervisor (a golden é libvirt-only e falta o `hypervisor-fw`),
+por isso o alvo no endereço da VM foi um veth real na bridge do holder e não o
+guest. O que fica por confirmar é só o troço `tap`→convidado, que é idêntico ao
+de qualquer VM CH sem namespace nenhuma; a chain, o endereço e a decisão do
+kernel foram exercitados com pacotes verdadeiros.
+
+### Ainda em aberto
+
+O isolamento continua a **não ser reconstruído num respawn do holder** (os
+sets/chains voltam vazios e os workloads vivos não se re-atacham sozinhos;
+reiniciar cada um repõe). É agora a última limitação conhecida do modelo.
+
+---
+
 # v0.39.3 — SEGURANÇA: o isolamento por namespace estava desligado desde a v0.39.0
 
 **Actualize imediatamente se corre containers de mais do que um inquilino no mesmo

@@ -1076,7 +1076,13 @@ fn handle_control(line: &str) -> String {
             Ok(())
         }
         ["netdel", bridge] => do_netdel(bridge),
-        ["vmtap", tap, bridge, gateway] => do_vmtap(tap, bridge, gateway),
+        ["vmtap", tap, bridge, gateway] => do_vmtap(tap, bridge, gateway, None, None),
+        // Namespaced form. Same compat idiom `attach`/`attach-extra` already use:
+        // the short line keeps working against an older holder, only the
+        // namespaced one needs the newer binary.
+        ["vmtap", tap, bridge, gateway, ip, ns] => {
+            do_vmtap(tap, bridge, gateway, Some(ip), Some(ns))
+        }
         ["vmtapdel", tap] => do_vmtapdel(tap),
         ["publish", proto, host_port, cip, cport] => do_publish(proto, host_port, cip, cport),
         // 2 tokens = every proto on the port (teardown); 3 = only that proto.
@@ -1243,6 +1249,32 @@ fn start_dhcp(bridge: &str, prefix: &str) {
     std::thread::spawn(move || dhcp_serve(b, p));
 }
 
+/// The IPv4 address the holder's native DHCP server will hand to `mac` on a
+/// bridge whose `prefix` is `<o0>.<o1>` — pool `<prefix>.254.10–.254.249`.
+///
+/// Deterministic from the MAC, and deliberately so: it is the ONLY reason the
+/// HOST side can know a VM's address before the guest has even booted, which is
+/// what lets `vm_attach` place that address under namespace isolation at attach
+/// time instead of waiting for a lease it has no way to observe (the DHCP
+/// exchange happens inside the holder, minutes later, and for a guest that may
+/// never come up at all).
+///
+/// Shared by the server (`dhcp_serve`) and the attach path on purpose. Two
+/// copies of this arithmetic would diverge the day the pool changes, and the
+/// symptom would be the worst kind: a VM firewalled at an address nobody uses,
+/// reported as isolated.
+pub fn dhcp_lease_ip(prefix: &str, mac: &str) -> Option<String> {
+    let oct: Vec<u8> = prefix.split('.').filter_map(|x| x.parse().ok()).collect();
+    if oct.len() != 2 {
+        return None;
+    }
+    // The server hashes the MAC as it renders it off the wire: lowercase,
+    // `:`-separated. Normalizing here (and not at each call site) is what stops
+    // an upper-case MAC from a record producing a different, unused address.
+    let host = 10 + (crate::fnv32(&mac.to_lowercase()) % 240) as u8; // pool .254.10–.254.249
+    Some(format!("{}.{}.254.{}", oct[0], oct[1], host))
+}
+
 /// Native DHCPv4 server of a bridge: listens on UDP `:67` (only on that bridge, via
 /// `SO_BINDTODEVICE`) and responds to DISCOVER/REQUEST with an IP from the pool
 /// `<prefix>.254.10–.254.250` (deterministic from the MAC), **gateway/DNS = ingress**.
@@ -1316,7 +1348,13 @@ fn dhcp_serve(bridge: String, prefix: String) {
             .map(|b| format!("{b:02x}"))
             .collect::<Vec<_>>()
             .join(":");
-        let host = 10 + (crate::fnv32(&macs) % 240) as u8; // pool .254.10–.254.249
+        // Same arithmetic the host side used at attach time — see `dhcp_lease_ip`.
+        let host = match dhcp_lease_ip(&prefix, &macs)
+            .and_then(|ip| ip.rsplit('.').next().and_then(|h| h.parse::<u8>().ok()))
+        {
+            Some(h) => h,
+            None => continue,
+        };
         let yi = [o0, o1, 254, host];
         let mut r = vec![0u8; 240];
         r[0] = 2; // BOOTREPLY
@@ -1916,7 +1954,20 @@ fn clear_antispoof(vh: &str) {
 /// Creates a `tap` for a VM, attached to its network's BRIDGE (creates the bridge + DHCP if
 /// missing). QEMU (running in the infra netns) uses this tap; the guest gets an IP from the
 /// network's udhcpd (gateway = ingress). Runs in the holder.
-fn do_vmtap(tap: &str, bridge: &str, gateway: &str) -> Result<()> {
+/// `ip`/`namespace` are `None` for the legacy 4-token control line (a VM in the
+/// `default` namespace, and any caller running an older binary): the tap is
+/// created exactly as before and nothing joins the namespace sets. With them,
+/// the VM's future DHCP address is registered in `@dlxall`/`@dlxns_<ns>` — the
+/// same membership `do_attach` gives a container, which is half of what makes
+/// the isolation hold (the other half is the chain, installed host-side by
+/// `apply_firewall`).
+fn do_vmtap(
+    tap: &str,
+    bridge: &str,
+    gateway: &str,
+    ip: Option<&str>,
+    namespace: Option<&str>,
+) -> Result<()> {
     let tap = sanitize(tap);
     let bridge = sanitize(bridge);
     ensure_net_bridge(&bridge, gateway)?;
@@ -1924,6 +1975,9 @@ fn do_vmtap(tap: &str, bridge: &str, gateway: &str) -> Result<()> {
     run("ip", &["tuntap", "add", "dev", &tap, "mode", "tap"])?;
     run("ip", &["link", "set", &tap, "master", &bridge])?;
     run("ip", &["link", "set", &tap, "up"])?;
+    if let (Some(ip), Some(ns)) = (ip, namespace) {
+        ns_set_join(ip, ns);
+    }
     Ok(())
 }
 
@@ -3480,24 +3534,66 @@ pub fn name_hash(s: &str) -> u32 {
 /// **Attaches a VM to the ingress**: ensures the infra is up (ref-count++), resolves the network
 /// and asks the holder for a `tap` on that network's bridge (with DHCP). Returns the tap name
 /// (which QEMU uses). The guest gets an IP via DHCP (the network's pool; gateway = ingress).
-pub fn vm_attach(vm: &str, net: &str) -> Result<String> {
-    let (bridge, _prefix, gateway) = resolve_net(net)?;
+/// The `vmtap` control line for a VM attach.
+///
+/// The 4-token form is emitted whenever there is nothing to isolate (the
+/// `default` namespace, or a network whose lease could not be derived), so an
+/// older holder keeps serving the overwhelmingly common case unchanged. Only a
+/// genuinely namespaced VM needs the 6-token form — the same compatibility
+/// idiom `attach` and `attach-extra` already use.
+fn vmtap_line(tap: &str, bridge: &str, gateway: &str, ip: Option<&str>, namespace: &str) -> String {
+    match (namespace, ip) {
+        ("default", _) | (_, None) => format!("vmtap {tap} {bridge} {gateway}"),
+        (ns, Some(ip)) => format!("vmtap {tap} {bridge} {gateway} {ip} {}", sanitize(ns)),
+    }
+}
+
+/// `mac` is the guest's MAC (deterministic from the VM name — see
+/// `delonix_vm::mac_for`) and `namespace` its logical isolation namespace.
+/// Together they are what makes a VM a first-class citizen of the namespace
+/// model: [`dhcp_lease_ip`] turns them into the address the guest WILL get, so
+/// the membership (in the holder) and the chain (here) can both be installed
+/// now rather than after a lease nobody watches for.
+pub fn vm_attach(vm: &str, net: &str, mac: &str, namespace: &str) -> Result<String> {
+    let (bridge, prefix, gateway) = resolve_net(net)?;
     // Ref key `vm-<name>` — its own namespace, distinct from the container ids
     // and the `cri-*` pods; the `prune` reaper preserves the `vm-*` (managed by
     // another store) just like the `cri-*`.
     acquire(&format!("vm-{vm}"))?;
     let tap = vm_tap_name(vm);
-    match control_send(&format!("vmtap {tap} {bridge} {gateway}")) {
-        Ok(()) => Ok(tap),
-        Err(e) => {
-            release(&format!("vm-{vm}"));
-            Err(e)
+    let lease = dhcp_lease_ip(&prefix, mac);
+    let line = vmtap_line(&tap, &bridge, &gateway, lease.as_deref(), namespace);
+    if let Err(e) = control_send(&line) {
+        release(&format!("vm-{vm}"));
+        return Err(e);
+    }
+    // The chain is what actually DROPS cross-namespace traffic; the set
+    // membership above only makes the VM visible to everyone else's rules. A
+    // VM with membership and no chain is exactly the half-wired state pods were
+    // found in — reachable from another namespace while looking isolated.
+    if namespace != "default" {
+        if let Some(ip) = &lease {
+            let fw = delonix_runtime_core::ContainerFw {
+                enabled: true,
+                namespace: namespace.to_string(),
+                ..Default::default()
+            };
+            apply_firewall(&format!("vm-{vm}"), ip, &fw)?;
         }
     }
+    Ok(tap)
 }
 
-/// **Detaches a VM from the ingress**: removes the `tap` and lowers the ref-count. Best-effort.
-pub fn vm_detach(vm: &str) {
+/// **Detaches a VM from the ingress**: removes the `tap`, drops its firewall chain
+/// and lowers the ref-count. Best-effort.
+///
+/// `ip` is the VM's SDN address when the caller knows it (from the record, or
+/// recomputed with [`dhcp_lease_ip`]); `None` skips the firewall teardown, which
+/// is right for the orphan-cleanup path where there is no record to trust.
+pub fn vm_detach(vm: &str, ip: Option<&str>) {
+    if let Some(ip) = ip {
+        clear_firewall(ip);
+    }
     let _ = control_send(&format!("vmtapdel {}", vm_tap_name(vm)));
     release(&format!("vm-{vm}"));
 }
@@ -3547,15 +3643,7 @@ pub fn dhcp_ip_for_mac(net: &str, mac: &str) -> Option<String> {
     // (the real reported case). This is the IP the VM gets from DHCP, available
     // as soon as it exists, and the right one for SSH.
     let (_bridge, prefix, _gw) = resolve_net(net).ok()?;
-    let oct: Vec<u8> = prefix.split('.').filter_map(|x| x.parse().ok()).collect();
-    if oct.len() != 2 {
-        return None;
-    }
-    // Same string format that `dhcp_serve` puts into the `fnv32` (lowercase,
-    // `:`-separated) — otherwise the hash diverges and the IP doesn't match the assigned one.
-    let macs = mac.to_lowercase();
-    let host = 10 + (crate::fnv32(&macs) % 240) as u8;
-    Some(format!("{}.{}.254.{host}", oct[0], oct[1]))
+    dhcp_lease_ip(&prefix, mac)
 }
 
 /// **Publishes a port through the ingress** (the container's bind): `add_hostfwd` on the
@@ -5468,5 +5556,88 @@ Inter-|   Receive                                                |  Transmit
         assert!(msg.contains("v0.34.2"), "{msg}");
         assert!(msg.contains("older delonix build"), "{msg}");
         assert!(msg.contains("net netns down"), "{msg}");
+    }
+
+    // ---- VMs inside namespace isolation -------------------------------------
+
+    /// The whole VM half of namespace isolation rests on ONE claim: the host can
+    /// know a VM's address before the guest boots, because the holder's DHCP is
+    /// deterministic from the MAC. If that stops holding, VMs get firewalled at
+    /// an address nobody uses — and, worse, report as isolated.
+    #[test]
+    fn dhcp_lease_ip_e_deterministico_e_cai_no_pool() {
+        let a = dhcp_lease_ip("10.200", "52:54:00:ab:cd:ef").unwrap();
+        assert_eq!(a, dhcp_lease_ip("10.200", "52:54:00:ab:cd:ef").unwrap());
+        assert_ne!(a, dhcp_lease_ip("10.200", "52:54:00:ab:cd:ee").unwrap());
+        // Different network, same MAC → same host byte on the network's own /16.
+        assert_eq!(
+            a.rsplit('.').next(),
+            dhcp_lease_ip("10.240", "52:54:00:ab:cd:ef")
+                .unwrap()
+                .rsplit('.')
+                .next()
+        );
+        // The documented pool is `<prefix>.254.10-.254.249` — a lease outside it
+        // would collide with the IPAM range the containers draw from.
+        for i in 0..300u32 {
+            let ip = dhcp_lease_ip("10.200", &format!("52:54:00:00:00:{i:02x}")).unwrap();
+            let o: Vec<&str> = ip.split('.').collect();
+            assert_eq!(&o[..3], &["10", "200", "254"], "{ip}");
+            let host: u16 = o[3].parse().unwrap();
+            assert!((10..=249).contains(&host), "{ip} out of pool");
+        }
+    }
+
+    #[test]
+    fn dhcp_lease_ip_recusa_prefixo_invalido() {
+        assert!(dhcp_lease_ip("10", "52:54:00:ab:cd:ef").is_none());
+        assert!(dhcp_lease_ip("10.200.0", "52:54:00:ab:cd:ef").is_none());
+        assert!(dhcp_lease_ip("", "52:54:00:ab:cd:ef").is_none());
+    }
+
+    /// A VM with nothing to isolate must keep emitting the OLD line, so a holder
+    /// from a previous build goes on serving it. Only the namespaced VM — which
+    /// genuinely needs the new behaviour — requires the new holder.
+    #[test]
+    fn vmtap_line_mantem_a_forma_curta_sem_namespace() {
+        assert_eq!(
+            vmtap_line(
+                "vt01",
+                "delonix0",
+                "10.200.0.1",
+                Some("10.200.254.42"),
+                "default"
+            ),
+            "vmtap vt01 delonix0 10.200.0.1"
+        );
+        // No derivable lease → nothing to register, so the short form again
+        // rather than a line with a hole in it.
+        assert_eq!(
+            vmtap_line("vt01", "delonix0", "10.200.0.1", None, "teamA"),
+            "vmtap vt01 delonix0 10.200.0.1"
+        );
+        assert_eq!(
+            vmtap_line(
+                "vt01",
+                "delonix0",
+                "10.200.0.1",
+                Some("10.200.254.42"),
+                "teamA"
+            ),
+            "vmtap vt01 delonix0 10.200.0.1 10.200.254.42 teamA"
+        );
+    }
+
+    /// A DHCP lease has to be recognized as an SDN address, or `ns_set_join`
+    /// silently drops it and the VM never joins a namespace set. The pool sits at
+    /// `.254.x`, well away from the container IPAM range, so this is not obvious.
+    #[test]
+    fn lease_de_vm_conta_como_ip_da_sdn() {
+        assert!(is_ingress_ip(
+            &dhcp_lease_ip("10.200", "52:54:00:ab:cd:ef").unwrap()
+        ));
+        assert!(is_ingress_ip(
+            &dhcp_lease_ip("10.240", "52:54:00:11:22:33").unwrap()
+        ));
     }
 }

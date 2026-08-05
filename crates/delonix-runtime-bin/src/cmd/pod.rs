@@ -149,6 +149,7 @@ fn create_pod(name: &str, namespace: Option<String>, spec: PodSpec) -> Result<()
         context: "pod",
         message: format!("failed to create the pod netns '{netns}': {e}"),
     })?;
+    apply_pod_namespace_isolation(&netns, &ip, &ns);
 
     // 2. Each container joins THAT netns (via `--pod`) — same IP, localhost peers.
     // The FIRST container holds the pod's IPC/UTS namespaces; the rest join them
@@ -181,6 +182,56 @@ fn members_of(store: &delonix_runtime_core::Store, pod: &str) -> Result<Vec<Cont
         .into_iter()
         .filter(|c| c.labels.get(POD_LABEL).map(|v| v == pod).unwrap_or(false))
         .collect())
+}
+
+/// Installs namespace isolation on a pod's SHARED netns address.
+///
+/// Pods were half-wired: `attach_container` above takes the namespace, so the
+/// pod's IP DOES join `@dlxall`/`@dlxns_<ns>` — which means other namespaces'
+/// containers already refuse new connections coming FROM the pod. What never
+/// existed is the other direction. The isolation rules live in each workload's
+/// OWN chain (`fw_chain_body`: same-namespace accept, then `@dlxall ct state
+/// new drop`), and a pod had no chain at all, so nothing dropped traffic INTO
+/// it. The boundary was open in exactly one direction, which is the same as
+/// open.
+///
+/// Measured before the fix — three single-container pods on the default bridge:
+///
+/// ```text
+///   podA(teamA) → podB(teamB)   REACHABLE   ← should be blocked
+///   podA(teamA) → podA2(teamA)  reachable   ← correct
+/// ```
+///
+/// with the holder's sets already correct (`@dlxall = {.2,.3,.4}`, teamA =
+/// `{.2,.4}`, teamB = `{.3}`) and `@fwmap` **empty**. Membership was there;
+/// enforcement was not.
+///
+/// Keyed by the pod's NETNS name rather than by a member container's id: the
+/// netns is what holds the address, every member shares it, and the dataplane's
+/// verdict map is keyed by IP — one entry is all it could hold anyway. The
+/// teardown is already covered: `remove_pod` calls `detach_container`, which
+/// sends `unfirewall <ip>`.
+///
+/// Best-effort, like the container path: a pod whose isolation could not be
+/// installed still runs, but says so loudly instead of pretending to be fenced.
+fn apply_pod_namespace_isolation(netns: &str, ip: &str, ns: &str) {
+    if ns == "default" {
+        return; // `default` is the open SDN — same contract as containers
+    }
+    let fw = delonix_runtime_core::ContainerFw {
+        enabled: true,
+        namespace: ns.to_string(),
+        ..Default::default()
+    };
+    if let Err(e) = infra::apply_firewall(netns, ip, &fw) {
+        eprintln!(
+            "{}",
+            super::po::tf(
+                "warning: namespace isolation '{namespace}' not applied: {e}",
+                &[("namespace", ns), ("e", &e.to_string())],
+            )
+        );
+    }
 }
 
 fn remove_pod(name: &str, force: bool) -> Result<()> {

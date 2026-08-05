@@ -639,6 +639,13 @@ pub struct Vm {
     /// IP assigned by DHCP (resolved from the MAC), when known.
     #[serde(default)]
     pub ip: Option<String>,
+    /// Logical isolation namespace, the same notion `Container.namespace` carries:
+    /// VMs of different namespaces do not reach each other, even on the same
+    /// network. Old records default to `default` (the open SDN) — which is
+    /// exactly what they were, so the default is a statement of fact and not a
+    /// guess.
+    #[serde(default = "default_namespace")]
+    pub namespace: String,
     /// Virtualization backend that started this VM (`"cloud-hypervisor"` or
     /// `"libvirt"`). Determines how to reconcile liveness/stop. Default for old
     /// records = `cloud-hypervisor` (the only backend before the VmBackend trait).
@@ -698,6 +705,7 @@ impl Vm {
             created_unix,
             restart_policy: None,
             ip: None,
+            namespace: default_namespace(),
             backend: default_vm_backend(),
             devices: Vec::new(),
             started_unix: None,
