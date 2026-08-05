@@ -4,6 +4,44 @@
 > (regenerado automaticamente pelo pipeline de release a cada tag publicada).
 > Não editar à mão — edita a nota da release respectiva.
 
+## v0.42.1 — «sem pid de controlo» e «sem plano de controlo» deixam de se ler igual
+
+Follow-up directo da v0.42.0, encontrado ao testar o caminho que mais interessa a
+quem já tem um nó a correr: um **upgrade in-place sobre um holder pré-split**.
+
+Esse caminho funciona, e foi validado ao vivo com o binário v0.41.0 real a segurar
+a netns: o v0.42.0 reconhece o holder antigo como pin, encontra o socket de
+controlo alcançável, e **não toca em nada** — holder e container mantêm o PID, a
+rede fica intacta, e o binário novo cria containers novos contra ele sem
+problema.
+
+O que estava mal era o relato. O `status` mostrava `control pid —`, porque um
+holder pré-split não tem ficheiro de pid do controlo — é um só processo a fazer
+os dois trabalhos. Só que um plano de controlo genuinamente **morto** mostrava
+exactamente a mesma coisa. Dois estados opostos, a mesma linha:
+
+```
+ingress UP — pin 98880 · control — · slirp 98900 …   ← tudo bem
+ingress UP — pin 100733 · control — · slirp 100755 … ← sem plano de controlo
+```
+
+`InfraStatus` ganhou `control_reachable` (decidido por um `connect`, não por um
+pidfile nem pela existência de um ficheiro) e o `status` passou a nomear os três
+estados:
+
+```
+control 100736   → processo de controlo próprio, vivo
+control in-pin   → holder pré-split: um só processo faz os dois trabalhos
+control DOWN     → não há ninguém a servir o socket
+```
+
+É a mesma lição que esta base de código já pagou três vezes — `holder_pid.is_some()`
+não é «o holder é alcançável», `container.userns` não é «está num userns
+diferente do meu», e um ficheiro de socket não é um listener. Aqui era `None` a
+significar duas coisas contrárias.
+
+---
+
 ## v0.42.0 — o holder deixa de ser um ponto único de falha da rede
 
 Até aqui, um só processo fazia duas coisas sem relação: **segurava** os

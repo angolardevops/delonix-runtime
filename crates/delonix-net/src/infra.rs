@@ -574,7 +574,18 @@ pub struct InfraStatus {
     /// PID of the **control plane** (control socket, DNS, RA, DHCP). Restartable:
     /// it can be absent for a moment without any workload noticing, so it is
     /// reported separately rather than folded into `up`.
+    ///
+    /// `None` does NOT mean "no control plane" — see `control_reachable`. A
+    /// PRE-SPLIT holder (a single process doing both jobs, which is what an
+    /// in-place upgrade leaves running) serves the socket perfectly while having
+    /// no control pidfile at all.
     pub control_pid: Option<i32>,
+    /// Is something actually LISTENING on the control socket? Decided by a
+    /// connect, not by a pidfile or a file's existence — the two states that look
+    /// identical without it ("no separate control process because the holder
+    /// predates the split" and "the control plane is dead") are the two that most
+    /// need telling apart when diagnosing a node.
+    pub control_reachable: bool,
     /// PID of the single `slirp4netns` (the host↔infra bridge).
     pub slirp_pid: Option<i32>,
     /// `true` if holder AND slirp are alive.
@@ -594,6 +605,7 @@ pub fn status() -> InfraStatus {
         up: holder.is_some() && slirp.is_some(),
         holder_pid: holder,
         control_pid: control,
+        control_reachable: control_reachable(),
         slirp_pid: slirp,
         bridge: INFRA_BRIDGE.to_string(),
         gateway: INFRA_GATEWAY.to_string(),

@@ -78,6 +78,18 @@ pub enum NetnsCmd {
 /// pod sat next to it `Up 32 seconds` with `Network unreachable` — permanently
 /// stranded, its isolation chain gone, and not a word about it. Worse than the
 /// container case it was modelled on, because at least that one got reported.
+/// Renders the control plane's state. `None` pid is NOT "absent": a holder from
+/// before the pin/control split does both jobs in one process and has no control
+/// pidfile, while serving the socket perfectly. Only "no pid AND unreachable" is
+/// a control plane that is actually gone.
+fn fmt_control(st: &delonix_net::infra::InfraStatus) -> String {
+    match (st.control_pid, st.control_reachable) {
+        (Some(p), _) => p.to_string(),
+        (None, true) => "in-pin".to_string(),
+        (None, false) => "DOWN".to_string(),
+    }
+}
+
 pub(crate) fn is_reattach_candidate(
     status: &delonix_runtime_core::Status,
     network: Option<&str>,
@@ -272,7 +284,7 @@ pub fn run(action: NetnsCmd) -> Result<()> {
             println!(
                 "ingress UP — pin pid {} · control pid {} · slirp pid {} · bridge {} ({})",
                 fmt_pid(st.holder_pid),
-                fmt_pid(st.control_pid),
+                fmt_control(&st),
                 fmt_pid(st.slirp_pid),
                 st.bridge,
                 st.gateway,
@@ -288,7 +300,7 @@ pub fn run(action: NetnsCmd) -> Result<()> {
                     "ingress {} — pin {} · control {} · slirp {} · bridge {} ({}) · refcount {}",
                     if st.up { "UP" } else { "DOWN" },
                     fmt_pid(st.holder_pid),
-                    fmt_pid(st.control_pid),
+                    fmt_control(&st),
                     fmt_pid(st.slirp_pid),
                     st.bridge,
                     st.gateway,
