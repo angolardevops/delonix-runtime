@@ -4,6 +4,78 @@
 > (regenerado automaticamente pelo pipeline de release a cada tag publicada).
 > Não editar à mão — edita a nota da release respectiva.
 
+## v0.42.2 — `system info` mentia sobre a delegação de cgroup
+
+Varredura pedida sobre uma CLASSE de bug, não sobre um caso: cinco defeitos desta
+série eram todos a mesma frase — **X não é Y**. Um ficheiro de socket não é um
+listener; `/sys/class/net` não é a netns do processo; `capture()` devolver `Ok`
+não é o comando ter passado; uma label não é o estado persistido; `None` no pid
+do controlo não é ausência de controlo.
+
+A varredura encontrou mais um da mesma família, e no pior sítio possível.
+
+### `delonix system info` respondia sempre «yes»
+
+A linha `cgroup2 delegated:` — a que se lê exactamente para perceber porque é que
+`-m`/`--cpus`/`--pids-limit` não estão a pegar — era decidida assim:
+
+```rust
+Path::new("/sys/fs/cgroup/cgroup.controllers").exists()
+    && read_to_string("/sys/fs/cgroup/cgroup.subtree_control").contains("memory")
+```
+
+Os dois ficheiros são do cgroup **raiz do host**. Em qualquer máquina com systemd
+o segundo contém `memory` (medido aqui: `cpuset cpu io memory pids`). O comando
+respondia portanto **`yes` incondicionalmente** — incluindo na sessão SSH onde
+este projecto já tinha medido os cinco limites silenciosamente inertes.
+
+É a mesma lição que o `install.sh` já tinha aprendido («ler `cgroup.controllers`
+não chega») e que o `system info` nunca recebeu.
+
+### A função certa existia e ninguém a chamava
+
+`delonix_runtime::cgroup_limits_apply()` já fazia a pergunta certa — mas só tinha
+um chamador (`cluster create`) e, pior, **só testava o caminho root**
+(`delonix.slice`, que num host rootless nem existe). Em rootless o `spawn` usa o
+cgroup **actual**. É o mesmo erro de base-estática-vs-dinâmica que o
+`update_limits` fez com `container.cgroup()` em vez de `live_cgroup()`.
+
+Agora é consciente do modo, e o `system info` chama-a.
+
+### Qual é a sonda que discrimina (medido, não deduzido)
+
+Testaram-se os três candidatos no cgroup real desta sessão:
+
+| sonda | scope delegado | sessão SSH |
+|---|---|---|
+| criar um filho | OK | OK ← não discrimina |
+| `cgroup.subtree_control` gravável | OK | **recusa** |
+| activar `+memory` | **falha** | falha ← falso negativo |
+
+Criar um filho é possível nos dois. Activar `+memory` falha mesmo num scope
+genuinamente delegado, porque a regra de *no internal processes* do kernel a
+recusa enquanto o nosso próprio processo estiver no cgroup (o motor contorna-o
+movendo-se para um `dlx-mgr` primeiro — demasiado invasivo para um diagnóstico
+só-de-leitura). **O que separa os dois casos é a posse do
+`cgroup.subtree_control`**: o systemd faz chown dele para o utilizador num
+`Delegate=yes`, e num `session-N.scope` fica `root:root`. Confirmado neste host:
+o scope delegado é `walter:walter`, o `session-2.scope` real é `root`.
+
+### O que a varredura NÃO encontrou
+
+Nenhum outro `capture(...)` a ser lido pelo `Result` em vez da saída, e os
+`unwrap_or_default()` restantes são todos «listar para decidir o que
+acrescentar», onde vazio leva a criar (idempotente) e nunca a apagar.
+
+Fica registada uma armadilha de API, sem bug vivo: `reap_orphan_hostfwds` é
+público e falha ABERTO com uma lista vazia (lista vazia ⇒ tudo é órfão ⇒ apaga
+tudo). O único chamador deste repo é seguro — propaga o erro do `store.list()`
+em vez de passar um conjunto vazio, e o comentário raciocina sobre isso — mas a
+função continua a ser uma armadilha para um consumidor externo, e foi exactamente
+assim que as portas publicadas morriam sozinhas.
+
+---
+
 ## v0.42.1 — «sem pid de controlo» e «sem plano de controlo» deixam de se ler igual
 
 Follow-up directo da v0.42.0, encontrado ao testar o caminho que mais interessa a

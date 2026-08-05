@@ -2725,6 +2725,43 @@ depois de "preparing the host". Acontecia em todo o host sem dispositivo VGA: qu
 servidor headless e praticamente toda a VM. Uma etiqueta cosmética de GPU nunca pode
 poder falhar uma instalação.
 
+## A classe «X não é Y» — varredura de 2026-08-05
+
+Pedido do utilizador ao ver que cinco bugs de uma série eram a mesma frase. Vale mais como
+checklist para quem mexer aqui do que como lista de correcções:
+
+- um **ficheiro de socket** não é um listener (`wait_for_control_sock` era `.exists()`);
+- **`/sys/class/net`** não é a netns do processo (reporta a de quem MONTOU o sysfs);
+- **`capture()` devolver `Ok`** não é o comando ter passado (não olha para o exit status — lê-se
+  sempre a SAÍDA, nunca o `Result`);
+- uma **label** não é o estado persistido (`Container.pod` existia e nunca era atribuído);
+- **`None` no pid do controlo** não é ausência de controlo (um holder pré-split faz os dois
+  trabalhos num processo só);
+- **`holder_pid.is_some()`** não é «o holder é alcançável» (v0.34.2);
+- **`container.userns`** não é «está num userns diferente do meu»;
+- **`/sys/fs/cgroup/cgroup.subtree_control` conter `memory`** não é «a MINHA sessão tem
+  delegação» — é do cgroup RAIZ do host, e contém-no sempre (v0.42.2, ver abaixo).
+
+**Achado vivo da varredura (v0.42.2)**: `delonix system info` reportava `cgroup2 delegated: yes`
+incondicionalmente, por ler os ficheiros do cgroup raiz do host — o comando que se corre para
+diagnosticar porque é que os limites não pegam dava a resposta errada, com confiança. A função
+certa (`cgroup_limits_apply`) já existia, tinha UM chamador, e só testava o caminho ROOT
+(`delonix.slice`, que num host rootless nem existe) — o mesmo erro de base-estática-vs-dinâmica
+do `update_limits`. **A sonda que discrimina, medida e não deduzida**: criar um filho é possível
+num scope delegado E numa sessão SSH; activar `+memory` falha nos DOIS (a regra de *no internal
+processes* recusa-o enquanto o nosso processo estiver no cgroup — o motor contorna-o movendo-se
+para um `dlx-mgr`, invasivo demais para um diagnóstico). O que separa é a **posse do
+`cgroup.subtree_control`**: `walter:walter` num `Delegate=yes`, `root:root` num `session-N.scope`.
+
+**Armadilha de API registada, sem bug vivo**: `reap_orphan_hostfwds` é público e falha ABERTO com
+lista vazia (vazio ⇒ tudo é órfão ⇒ apaga tudo). O chamador deste repo é seguro (propaga o erro
+do `store.list()`, e o comentário raciocina sobre isso), mas foi exactamente esta forma que fez
+as portas publicadas morrerem sozinhas quando um consumidor externo lhe passou a sua lista parcial.
+
+**O que a varredura NÃO encontrou**: nenhum outro `capture(...)` lido pelo `Result`; os
+`unwrap_or_default()` restantes são todos «listar para decidir o que acrescentar», onde vazio
+leva a criar (idempotente) e nunca a apagar.
+
 ## Regra de ouro: fronteira com o PaaS
 
 Este código **não pode depender de nada privado**. Antes de qualquer commit:
