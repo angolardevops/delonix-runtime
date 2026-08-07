@@ -271,8 +271,23 @@ impl RuntimeService for DelonixRuntime {
     }
     async fn reopen_container_log(
         &self,
-        _r: Request<ReopenContainerLogRequest>,
+        r: Request<ReopenContainerLogRequest>,
     ) -> Result<Response<ReopenContainerLogResponse>, Status> {
+        // WAS A NO-OP THAT REPORTED SUCCESS. The kubelet rotates a container's
+        // log by renaming the file and then calling this; answering "done"
+        // without doing anything meant every line after a rotation went to an
+        // inode nobody would ever read again — silently, and only for the
+        // containers that live long enough to be rotated.
+        //
+        // Two halves, and both are needed: the logging shim now FOLLOWS THE
+        // PATH (it compares inodes before each batch, see `log_shim`), and this
+        // recreates the file so it exists the moment the call returns — which
+        // is what the caller checks, and what the kubelet's log reader opens.
+        let base = self.base.clone();
+        let id = r.into_inner().container_id;
+        tokio::task::spawn_blocking(move || lifecycle::reopen_container_log(&base, &id))
+            .await
+            .map_err(|e| Status::internal(e.to_string()))??;
         Ok(Response::new(ReopenContainerLogResponse {}))
     }
     async fn exec_sync(

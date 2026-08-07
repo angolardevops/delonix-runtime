@@ -937,6 +937,16 @@ fn detach_stdio(out_fd: Option<i32>, err_fd: Option<i32>) {
     }
 }
 
+/// Inode of a path, or `None` if it is not there.
+///
+/// Used by the logging shim to notice that its file was rotated away from
+/// under it: comparing the PATH's inode with the one it holds open is the only
+/// way to tell, since an open handle survives a rename perfectly happily.
+fn file_inode(path: &str) -> Option<u64> {
+    use std::os::unix::fs::MetadataExt;
+    std::fs::metadata(path).ok().map(|m| m.ino())
+}
+
 /// Maximum log file size before rotating (1 MiB).
 const MAX_LOG_BYTES: u64 = 1024 * 1024;
 
@@ -976,13 +986,31 @@ fn log_shim(
     // Writes a block, rotating BEFORE if it would exceed `max_bytes` — in CRI mode
     // this is called only with COMPLETE records, so rotation never splits a
     // record in the middle (and the count includes the prefix, unlike before).
+    // Inode of the file we currently hold open. The log can be MOVED out from
+    // under us — the kubelet rotates by renaming and then calling
+    // `ReopenContainerLog` — and a shim that keeps writing to the old inode
+    // sends every subsequent line to a file nobody will ever read again.
+    // Following the path instead of the handle is what makes rotation work at
+    // all, and it costs one `stat` per batch.
+    let mut cur_ino: Option<u64> = file_inode(&log_path);
     macro_rules! write_block {
         ($bytes:expr) => {{
             let b: &[u8] = $bytes;
+            {
+                let now = file_inode(&log_path);
+                if now != cur_ino {
+                    // Either it was renamed (a new file exists at the path) or
+                    // it is gone. Reopening `create(true)` covers both.
+                    out = open_log(true);
+                    written = std::fs::metadata(&log_path).map(|m| m.len()).unwrap_or(0);
+                    cur_ino = file_inode(&log_path);
+                }
+            }
             if written + b.len() as u64 > max_bytes && written > 0 {
                 drop(out);
                 let _ = std::fs::rename(&log_path, format!("{log_path}.1"));
                 out = open_log(false);
+                cur_ino = file_inode(&log_path);
                 written = 0;
             }
             if let Ok(f) = out.as_mut() {
@@ -1615,7 +1643,11 @@ fn write_userns_maps(pid: i32, want_range: bool) -> Result<()> {
     // delegated subuids. This way the `setuid(1000)` inside the container becomes
     // valid. If the helpers/subuid do not exist, it falls back to the single-uid map (and the
     // caller degrades to running as root, with a warning).
-    if want_range && euid != 0 && have_subid_helpers() {
+    // `newuidmap` validates the requested range against `/etc/subuid` for the
+    // REAL uid, so inside a nested user namespace it refuses whatever we ask —
+    // skip it there rather than burn a failed exec on every container start.
+    let nested = !delonix_runtime_core::in_initial_userns();
+    if want_range && euid != 0 && !nested && have_subid_helpers() {
         // Do NOT write `setgroups=deny` here. It is only MANDATORY when a non-root
         // writes the `gid_map` BY HAND (see the branch below) — the kernel requires it to
         // prevent a restrictive group from being dropped. With `newgidmap` (setuid
@@ -1637,7 +1669,16 @@ fn write_userns_maps(pid: i32, want_range: bool) -> Result<()> {
     }
     // `setgroups=deny` before the gid_map (good practice; mandatory for non-root).
     let _ = std::fs::write(format!("/proc/{pid}/setgroups"), "deny");
-    let (uid_map, gid_map) = if euid == 0 {
+    // `euid == 0` alone is NOT the root path. Inside a NESTED user namespace we
+    // are uid 0 with a `uid_map` of `0 <parent-uid> 1` — we own exactly one uid,
+    // and asking the kernel to map a 65536-wide range from it fails with EPERM.
+    // The engine then reported `uid_map failed: Operation not permitted` and no
+    // container started at all under `unshare --user --map-root-user`.
+    //
+    // Third place in this workspace where `geteuid()` was mistaken for "real
+    // root" (after `is_rootless` and `delonix-net::runtime_dir`). Same predicate,
+    // same fix: map the single uid we actually hold.
+    let (uid_map, gid_map) = if euid == 0 && delonix_runtime_core::in_initial_userns() {
         let m = format!("0 {USERNS_UID_BASE} {USERNS_RANGE}\n");
         (m.clone(), m)
     } else {
