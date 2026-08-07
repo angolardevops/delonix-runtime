@@ -44,6 +44,17 @@ struct SandboxRec {
     /// Pod `sysctl`s (`key=value`), applied to the sandbox's containers.
     #[serde(default)]
     sysctls: Vec<String>,
+    /// The pod's `DNSConfig` and `PortMappings`, both of which were read by
+    /// nobody. Same shape of gap as the container mounts: accepted by the API,
+    /// dropped on the floor, and invisible because nothing errored.
+    #[serde(default)]
+    dns_servers: Vec<String>,
+    #[serde(default)]
+    dns_searches: Vec<String>,
+    #[serde(default)]
+    dns_options: Vec<String>,
+    #[serde(default)]
+    port_mappings: Vec<String>,
     /// IP (address, without CIDR) assigned by the CNI IPAM when the sandbox was
     /// configured by CNI plugins (rootless, via holder). Empty = native SDN.
     #[serde(default)]
@@ -96,6 +107,36 @@ struct ContainerRec {
     privileged: bool,
     #[serde(default)]
     seccomp_unconfined: bool,
+    /// `-v host:container[:opts]` specs, from the CRI's `ContainerConfig.mounts`.
+    ///
+    /// This was NOT implemented at all: `cfg.mounts` was read by nobody, so a
+    /// kubelet's configMaps, secrets, emptyDirs and hostPaths simply did not
+    /// reach the container — silently, since nothing errored. Five conformance
+    /// specs failed on it (two volume, three mount-propagation) and they read as
+    /// five separate gaps rather than one missing feature.
+    #[serde(default)]
+    volumes: Vec<String>,
+    /// Path to a `localhostProfile` on the node. Stored as the PATH here (the
+    /// CRI server reads it at start, on the host, where it resolves) and passed
+    /// to the engine, which reads the content before entering the container.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    seccomp_profile_path: Option<String>,
+    #[serde(default)]
+    supplemental_groups: Vec<i64>,
+    #[serde(default)]
+    masked_paths: Vec<String>,
+    #[serde(default)]
+    readonly_paths: Vec<String>,
+    /// The kubelet's `no_new_privs`, honoured LITERALLY.
+    ///
+    /// The engine's own default is ON, stricter than Docker and Podman. Here it
+    /// is not ours to pick: the CRI field is a plain bool whose zero value is
+    /// `false`, containerd and CRI-O pass it through as-is, and a kubelet that
+    /// says `false` for a pod with `allowPrivilegeEscalation: true` is exercising
+    /// a policy it owns. A CRI implementation that quietly hardened past its
+    /// client would break setuid workloads with no way to see why.
+    #[serde(default)]
+    no_new_privs: bool,
     #[serde(default)]
     cap_add: Vec<String>,
     #[serde(default)]
@@ -235,17 +276,41 @@ fn delonix(base: &Path, args: &[&str]) -> Result<std::process::Output, Status> {
 /// `.output()` the `wait` would block until the container exits (the "run -d |
 /// tail hangs" bug).
 fn delonix_detached(base: &Path, args: &[&str]) -> Result<bool, Status> {
+    Ok(delonix_detached_why(base, args)?.is_none())
+}
+
+/// Runs a `delonix` subcommand and, on failure, returns WHY.
+///
+/// This used to send stderr to `/dev/null` and return a bare bool, so every
+/// sandbox failure surfaced to the kubelet as "failed to create the ingress
+/// sandbox <id>" with no cause — a message that names the victim and hides the
+/// killer. It cost a full `critest` run to find that the actual error had been
+/// `unrecognized subcommand 'netns'` all along: the v0.30.0 CLI reorganisation
+/// moved `netns` under `net` with a deliberate clean break, and this call site
+/// was never updated. A visible stderr would have said so on the first pod.
+fn delonix_detached_why(base: &Path, args: &[&str]) -> Result<Option<String>, Status> {
     use std::process::Stdio;
-    let status = Command::new(delonix_bin())
+    let out = Command::new(delonix_bin())
         .env("DELONIX_ROOT", base)
         .env("DELONIX_INTERNAL", "1")
         .args(args)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
+        .stderr(Stdio::piped())
+        .output()
         .map_err(st)?;
-    Ok(status.success())
+    if out.status.success() {
+        return Ok(None);
+    }
+    let why = String::from_utf8_lossy(&out.stderr);
+    let why = why.trim();
+    Ok(Some(if why.is_empty() {
+        format!("`delonix {}` exited {}", args.join(" "), out.status)
+    } else {
+        // First line only: clap appends usage text, and a kubelet event that
+        // carries a whole help screen is unreadable where it actually shows up.
+        why.lines().next().unwrap_or(why).to_string()
+    }))
 }
 
 /// Loads a CRI container and **reconciles** its status against the kernel
@@ -351,15 +416,16 @@ pub fn run_pod_sandbox(
         } else if delonix_runtime::is_rootless() {
             // ROOTLESS: the pod is a SHARED ingress netns (delonix0 + DHCP +
             // DNS + firewall); the sandbox's containers join via `--pod`.
-            if !delonix_detached(base, &["netns", "attach", &pod])? {
+            if let Some(why) = delonix_detached_why(base, &["net", "netns", "attach", &pod])? {
                 return Err(Status::internal(format!(
-                    "failed to create the ingress sandbox {pod}"
+                    "failed to create the ingress sandbox {pod}: {why}"
                 )));
             }
-        } else if !delonix_detached(base, &["pod", "create", &pod, "--network"])? {
+        } else if let Some(why) = delonix_detached_why(base, &["pod", "create", &pod, "--network"])?
+        {
             // ROOT: infra container (`pod-cri-<id>`) holds the netns ("pause"-style).
             return Err(Status::internal(format!(
-                "failed to create the pod sandbox {pod}"
+                "failed to create the pod sandbox {pod}: {why}"
             )));
         }
     }
@@ -379,6 +445,22 @@ pub fn run_pod_sandbox(
         host_pid,
         host_ipc,
         sysctls,
+        dns_servers: cfg
+            .dns_config
+            .as_ref()
+            .map(|d| d.servers.clone())
+            .unwrap_or_default(),
+        dns_searches: cfg
+            .dns_config
+            .as_ref()
+            .map(|d| d.searches.clone())
+            .unwrap_or_default(),
+        dns_options: cfg
+            .dns_config
+            .as_ref()
+            .map(|d| d.options.clone())
+            .unwrap_or_default(),
+        port_mappings: cri_port_specs(&cfg.port_mappings),
         cni_ip,
     };
     write_rec(&sb_dir(base), &id, &rec)?;
@@ -423,7 +505,7 @@ pub fn remove_pod_sandbox(
                     let _ = delonix_net::infra::cni_detach_container(&format!("cri-{id}"), &cj);
                 }
             } else if delonix_runtime::is_rootless() {
-                let _ = delonix(base, &["netns", "detach", &format!("cri-{id}")]);
+                let _ = delonix(base, &["net", "netns", "detach", &format!("cri-{id}")]);
             } else {
                 let _ = delonix(base, &["pod", "rm", &format!("cri-{id}")]);
             }
@@ -533,6 +615,21 @@ pub fn create_container(
         .and_then(|s| s.seccomp.as_ref())
         .map(|p| p.profile_type == security_profile::ProfileType::Unconfined as i32)
         .unwrap_or(false);
+    // `SecurityProfile::Localhost` — a path to an OCI profile on the node, which
+    // is what a pod's `securityContext.seccompProfile.localhostProfile`
+    // becomes. Resolved at CREATE so a missing or malformed file is an error the
+    // kubelet sees immediately, not a container that dies at start.
+    let seccomp_profile_path = sc
+        .and_then(|s| s.seccomp.as_ref())
+        .filter(|p| p.profile_type == security_profile::ProfileType::Localhost as i32)
+        .map(|p| p.localhost_ref.clone())
+        .filter(|p| !p.is_empty());
+    if let Some(path) = &seccomp_profile_path {
+        let json = std::fs::read_to_string(path)
+            .map_err(|e| Status::invalid_argument(format!("seccomp profile {path}: {e}")))?;
+        delonix_runtime::seccomp_profile::parse(&json)
+            .map_err(|e| Status::invalid_argument(format!("seccomp profile {path}: {e}")))?;
+    }
     // AppArmor: the NEW field (`apparmor`, SecurityProfile) takes precedence; if it
     // is not set, it falls back to the DEPRECATED field `apparmor_profile` (string,
     // format `unconfined` | `localhost/<profile>` | `runtime/default` | `<profile>`).
@@ -618,6 +715,14 @@ pub fn create_container(
         readonly_rootfs,
         privileged,
         seccomp_unconfined,
+        seccomp_profile_path,
+        volumes: cri_mount_specs(&cfg.mounts)?,
+        supplemental_groups: sc
+            .map(|s| s.supplemental_groups.clone())
+            .unwrap_or_default(),
+        masked_paths: sc.map(|s| s.masked_paths.clone()).unwrap_or_default(),
+        readonly_paths: sc.map(|s| s.readonly_paths.clone()).unwrap_or_default(),
+        no_new_privs: sc.map(|s| s.no_new_privs).unwrap_or(false),
         cap_add,
         cap_drop,
         apparmor,
@@ -672,16 +777,52 @@ pub fn start_container(
         if sb.host_ipc {
             args.push("--host-ipc".into());
         }
+        // The pod's resolver and published ports belong to every container of
+        // the sandbox: they share the pod's netns, so this is where both live.
+        for d in &sb.dns_servers {
+            args.push("--dns".into());
+            args.push(d.clone());
+        }
+        for d in &sb.dns_searches {
+            args.push("--dns-search".into());
+            args.push(d.clone());
+        }
+        for d in &sb.dns_options {
+            args.push("--dns-option".into());
+            args.push(d.clone());
+        }
+        for p in &sb.port_mappings {
+            args.push("--publish".into());
+            args.push(p.clone());
+        }
         // pod sysctls, applied to the container (shares the pod's namespaces).
         for s in &sb.sysctls {
             args.push("--sysctl".into());
             args.push(s.clone());
         }
     }
+    for v in &rec.volumes {
+        args.push("--volume".into());
+        args.push(v.clone());
+    }
     // Security context → flags.
     if rec.readonly_rootfs {
         args.push("--read-only".into());
     }
+    for g in &rec.supplemental_groups {
+        args.push("--group-add".into());
+        args.push(g.to_string());
+    }
+    for p in &rec.masked_paths {
+        args.push("--masked-path".into());
+        args.push(p.clone());
+    }
+    for p in &rec.readonly_paths {
+        args.push("--readonly-path".into());
+        args.push(p.clone());
+    }
+    args.push("--security-opt".into());
+    args.push(format!("no-new-privileges={}", rec.no_new_privs));
     if rec.privileged {
         args.push("--cap-add".into());
         args.push("ALL".into());
@@ -690,6 +831,9 @@ pub fn start_container(
     } else if rec.seccomp_unconfined {
         args.push("--security-opt".into());
         args.push("seccomp=unconfined".into());
+    } else if let Some(p) = &rec.seccomp_profile_path {
+        args.push("--security-opt".into());
+        args.push(format!("seccomp={p}"));
     }
     for c in &rec.cap_add {
         args.push("--cap-add".into());
@@ -1181,6 +1325,77 @@ pub fn list_pod_sandbox_stats(
         .map(|s| pod_sandbox_stats_for(base, &s))
         .collect();
     Ok(Response::new(ListPodSandboxStatsResponse { stats }))
+}
+
+/// Translates the CRI's `Mount` list into the engine's `-v` specs.
+///
+/// The `-v` grammar splits on `:`, so a path containing one would be parsed into
+/// the wrong pieces. The kubelet never produces such a path, but "never" is not
+/// a validation: a colon is REFUSED here with the offending path named, rather
+/// than quietly mounting somewhere else. Same rule this repo applies to every
+/// other foreign-schema translator.
+fn cri_mount_specs(mounts: &[Mount]) -> Result<Vec<String>, Status> {
+    let mut out = Vec::with_capacity(mounts.len());
+    for m in mounts {
+        for (what, p) in [
+            ("host_path", &m.host_path),
+            ("container_path", &m.container_path),
+        ] {
+            if p.is_empty() {
+                return Err(Status::invalid_argument(format!("mount with empty {what}")));
+            }
+            if p.contains(':') {
+                return Err(Status::invalid_argument(format!(
+                    "mount {what} {p:?} contains ':', which the volume spec uses as a separator"
+                )));
+            }
+        }
+        // The propagation names are the engine's (`rslave`/`rshared`), which are
+        // also Docker's — the enum is the kubelet's, and the mapping is the
+        // whole reason this function is not a `format!` at the call site.
+        let prop = match MountPropagation::try_from(m.propagation) {
+            Ok(MountPropagation::PropagationHostToContainer) => Some("rslave"),
+            Ok(MountPropagation::PropagationBidirectional) => Some("rshared"),
+            // PRIVATE is the default and needs no third field; an UNKNOWN value
+            // is treated as private, which is the safe direction (no propagation
+            // rather than more than asked).
+            _ => None,
+        };
+        let spec = match (m.readonly, prop) {
+            (false, None) => format!("{}:{}", m.host_path, m.container_path),
+            (true, None) => format!("{}:{}:ro", m.host_path, m.container_path),
+            (false, Some(p)) => format!("{}:{}:{p}", m.host_path, m.container_path),
+            (true, Some(p)) => format!("{}:{}:ro,{p}", m.host_path, m.container_path),
+        };
+        out.push(spec);
+    }
+    Ok(out)
+}
+
+/// Translates the CRI's `PortMapping` list into `-p` specs.
+///
+/// A mapping with no `host_port` is DROPPED, not published on a random port:
+/// the kubelet sends `container_port` alone for ports that are merely declared
+/// (a `containerPort` with no `hostPort`), and publishing those would expose on
+/// the node every port a pod ever named.
+fn cri_port_specs(mappings: &[PortMapping]) -> Vec<String> {
+    mappings
+        .iter()
+        .filter(|m| m.host_port > 0 && m.container_port > 0)
+        .map(|m| {
+            let proto = match Protocol::try_from(m.protocol) {
+                Ok(Protocol::Udp) => "udp",
+                Ok(Protocol::Sctp) => "sctp",
+                _ => "tcp",
+            };
+            // `host_ip` is deliberately left out of the spec: the engine's
+            // publish already concentrates the bind address decision in one
+            // place (spec > `DELONIX_PUBLISH_ADDR` > loopback), and a CRI
+            // mapping that names an address the node does not have would fail
+            // at bind time with a confusing error.
+            format!("{}:{}/{proto}", m.host_port, m.container_port)
+        })
+        .collect()
 }
 
 #[cfg(test)]

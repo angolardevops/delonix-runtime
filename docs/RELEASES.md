@@ -4,6 +4,197 @@
 > (regenerado automaticamente pelo pipeline de release a cada tag publicada).
 > Não editar à mão — edita a nota da release respectiva.
 
+# v0.43.0 — conformidade CRI medida: 65 → 77 de 103
+
+Esta série começou por uma comparação honesta com o Docker e o Podman
+(`docs/paridade-docker-podman.md`) e acabou a correr a suite de conformidade de
+upstream a sério. **É o resultado dessa medição que dá o valor à release**:
+«serve um kubelet» é uma alegação, «77 de 103 specs nomeados» é um facto que
+outra pessoa verifica — `tests/compat/cri-conformance.sh` reproduz.
+
+O detalhe completo, incluindo o que falha e porquê, está em
+[docs/cri-conformance.md](../cri-conformance.md).
+
+## O bug que estava escondido há mais tempo
+
+O `delonix-cri` invocava **`delonix netns attach`**. A reorganização da CLI da
+v0.30.0 moveu esse comando para **`delonix net netns attach`**, com corte limpo
+e sem aliases — decisão deliberada e registada — e este chamador nunca foi
+actualizado. **A criação de pod em rootless estava partida desde essa versão.**
+
+Duas coisas o esconderam, e a segunda é a mais grave: o `delonix_detached`
+mandava o **stderr para `/dev/null`** e devolvia um `bool`, por isso a mensagem
+que chegava ao kubelet nomeava a vítima e escondia o assassino. Uma linha de
+correcção levou a corrida de **19 para 65 passes**.
+
+## `euid 0` não é ser root
+
+`is_rootless()` era `geteuid() != 0`. **euid 0 é uid 0 nalgum user namespace**, e
+num aninhado não compra nada no host: nem escrita no cgroup do host, nem `/run`,
+nem montagem privilegiada. O motor tomava o caminho ROOT exactamente onde tem
+menos poder, e o mesmo erro estava num segundo sítio independente
+(`delonix-net::runtime_dir`, que resolvia `/run/delonix-net` e falhava com
+`Permission denied`).
+
+Corrigido na raiz, com o predicado num só sítio
+(`delonix_runtime_core::in_initial_userns`, lido de `/proc/self/uid_map`) e
+testes puros do parsing.
+
+**Consequência prática**: o motor passa a correr inteiro sob
+`unshare --user --map-root-user` — continua rootless e daemonless, mas com
+`CAP_SYS_ADMIN` sobre os seus PRÓPRIOS namespaces, que é o tecto honesto do
+modelo. O holder degrada em vez de pendurar (o `--map-auto` precisa de
+`newuidmap`, que num userns aninhado é recusado) e o seu stderr deixou de ir
+para `/dev/null`.
+
+## O log do CRI dizia que tudo era `stdout`
+
+O `log_shim` escrevia `format!("{ts} stdout {stream} …")` — com **`stdout`
+literal**. Os dois fluxos do contentor iam por UM pipe e saíam todos com a mesma
+etiqueta; a variável chamada `stream` era afinal a etiqueta F/P de linha
+completa/parcial, confusão que ajudou o bug a durar.
+
+Não é só conformidade: **qualquer `kubectl logs` sobre este motor afirmava que
+tudo era stdout.** Corrigido com um segundo pipe (só em modo CRI — o formato
+não-CRI não tem etiqueta e separar lá só interlaçaria pior) e um `poll()` sobre
+os dois.
+
+## Metade do `ContainerConfig` não estava ligada
+
+`ContainerConfig.mounts` era lido por ninguém. Nem uma linha. Um kubelet a montar
+configMaps, secrets, emptyDirs ou hostPaths não punha nada dentro do contentor —
+em silêncio, porque nada dava erro. O mesmo padrão apareceu em `dns_config` e
+`port_mappings` do sandbox.
+
+Vale grepar cada campo do `PodSandboxConfig`/`ContainerConfig` antes de assumir
+que está ligado.
+
+## Uma linha que valeu quatro specs
+
+O `exec` juntava-se a `user/uts/net/pid/mnt` — **faltava o `ipc`**. Um `exec`
+deve parecer o contentor visto de dentro; sem o IPC vê os objectos System V do
+HOST e os `kernel.shm*`/`fs.mqueue.*` do host, que são precisamente os knobs que
+o `--sysctl` mexe. Um contentor criado com `kernel.shm_rmid_forced=1` reportava
+`0` através do `exec`, porque o valor é resolvido na ipc-ns de QUEM LÊ. Lia-se
+como «o sysctl não foi aplicado» e mandou investigar um caminho que estava
+correcto desde o início.
+
+## `NetworkReady` era um impasse permanente
+
+A condição era `infra.up`, e este motor é daemonless: a netns de infra arranca A
+PEDIDO. Num nó acabado de arrancar isso dava `NetworkReady: false` → o kubelet
+marcava-o NotReady → não agendava pod nenhum → nada trazia a infra acima →
+NotReady **para sempre**. A verificação existia para apanhar uma falha real de
+SDN e descrevia o estado normal de repouso do motor.
+
+Passou a distinguir pelo ref-count: infra em baixo COM workloads é falha, em
+baixo sem nenhum é ócio. O teste de regressão que a guardava passou a codificar
+a regra refinada, com a decisão extraída para uma função pura.
+
+---
+
+# Funcionalidades
+
+## Perfis seccomp OCI — a última recusa fail-closed do motor
+
+`--security-opt seccomp=<perfil.json>` e o `localhostProfile` do CRI. Formato
+runc/Docker/containerd. O motor recusava-os com um erro claro — honesto como
+marcador, mas era uma lacuna.
+
+362 syscalls resolvidas **por arquitectura** (de `libc::SYS_*`, não literais: os
+números diferem em aarch64 e uma tabela fixa estaria silenciosamente errada num
+dos dois). Fail-closed no que não percebe — regras com `args` são **recusadas**,
+não alargadas: uma regra que só queria bloquear `clone(CLONE_NEWUSER)` viraria
+«bloquear clone» e partia todo o programa com threads lá dentro.
+
+## Health check contínuo, sem daemon
+
+`--health-cmd`, `--health-interval`, `--health-timeout`, `--health-retries`,
+`--health-start-period`; o `STATUS` do `ps` passa a `Up 21 seconds (healthy)`.
+
+**Quem monitoriza** era a decisão de desenho: é o supervisor do contentor
+destacado — já existe, um por contentor, sobrevive à CLI e morre com aquilo que
+vigia. Sem processo de frota. O Podman precisa de timers do systemd para o
+mesmo; aqui funciona num contentor, num chroot, num host sem systemd.
+
+**O probe limita-se a si próprio** dentro do contentor: o motor não o consegue
+matar de fora sem deixar o processo vivo no pid-namespace, e isso repetir-se-ia
+a cada intervalo, para sempre.
+
+## `run --wait`
+
+Bloqueia até o `HEALTHCHECK` da imagem passar. Medido: 64 ms sem a flag (serviço
+ainda a arrancar) contra 6086 ms com ela e o serviço pronto à saída. Substitui o
+`until curl …; do sleep; done` que toda a gente acaba por escrever mal.
+
+## Segurança e namespaces
+
+* **`--add-host`**, persistido (o `/etc/hosts` é reescrito em cada arranque).
+* **`--masked-path`** (ficheiro tapado com `/dev/null`, directório com tmpfs
+  vazio read-only — a técnica do runc) e **`--readonly-path`**.
+* **`--group-add`**, aplicado mesmo com o contentor a correr como root, e também
+  no `exec`.
+* **`--security-opt no-new-privileges=[true|false]`**. O default do motor
+  continua ON, mais apertado que o Docker e o Podman.
+* **`-v src:dst:rprivate|rslave|rshared`** — propagação de mounts. A raiz do
+  namespace passa a `MS_SLAVE` **só** quando alguma montagem o pede.
+* **`--dns`, `--dns-search`, `--dns-option`.**
+
+## Ergonomia e contrato
+
+* **Atalhos de topo**: `ps`, `run`, `exec`, `logs`, `rm`, `images`. Por
+  reescrita de argv, não por variantes clap duplicadas — são o MESMO comando por
+  construção, `--help` incluído. `stop`/`start` ficam de fora de propósito: este
+  motor também pára VMs e pods.
+* **`system setup [--delegate]`** — diagnostica e corrige a delegação de cgroup,
+  com os DOIS remédios: um `session-N.scope` de login é IRMÃO do
+  `user@.service` e não herda nada dele.
+* **`serve docker-api --matrix`** — as 14 rotas implementadas e as 7 ausentes
+  com a razão. Um teste lê o código-fonte do próprio dispatch e falha se existir
+  um braço sem linha na tabela.
+* **[docs/cli-stability.md](../cli-stability.md)** — o que é estável dentro de
+  0.x, o que é estável em conteúdo mas não em formato, e o que não promete nada.
+
+## Correcções
+
+* `commit_flat_rootfs_from_tar` **descartava o `HEALTHCHECK`** no caminho
+  rootless (o normal) enquanto o caminho overlay o honrava — o mesmo Dockerfile
+  dava imagens diferentes conforme o modo do motor.
+* `apply_sysctls` **deitava fora o erro da escrita**.
+* Um membro de pod levava **dois caminhos de publicação** — a netns é do pod, e
+  o slirp por-contentor reclamava a mesma porta que o ingress já publicara.
+  Pelo caminho, a quinta ocorrência da armadilha antiga: `c.ip` nunca era
+  atribuído a um membro de pod.
+* **ALTO, apanhado em revisão**: o `--add-host` armou um primitivo de escrita
+  fora do rootfs. O `write_etc_files` usava `format!` + `fs::write`, ambos
+  seguindo symlinks, e em rootless a árvore pertence ao uid mapeado — o próprio
+  contentor podia plantar `etc/hosts -> ~/.ssh/authorized_keys`. Já existia como
+  truncar-com-conteúdo-fixo; o `--add-host` tornou o conteúdo escolhido pelo
+  atacante. Fechado com `safe_bind_target` + validação na fronteira.
+
+## O que NÃO fecha, e porquê
+
+* **AppArmor (9 specs)** — carregar perfis exige `CAP_MAC_ADMIN` no user
+  namespace INICIAL. Medido: um aninhado responde `You need policy admin
+  privileges`. **O Docker e o containerd têm exactamente o mesmo limite.**
+* **`nil profile = unconfined`** — divergência **deliberada**: sem perfil
+  declarado aplica-se o allowlist embutido. Somos mais restritos do que a
+  especificação pede e isso não muda para ganhar um spec.
+* **`shareProcessNamespace`** e o `chown_tree_once` que tira o dono ao binário
+  setuid são compromissos de desenho por decidir, não esquecimentos.
+* O port mapping só com container port precisa que o IP do pod seja alcançável
+  do host, o que o modelo rootless não dá.
+
+## Validação
+
+658 testes verdes, clippy e `fmt` limpos. Conformidade CRI 77/103 num root
+limpo (correr sempre assim: com estado acumulado, três specs falham por poluição
+e não por conformidade). Smoke da API Docker com o SDK oficial de Python —
+`create` → `start` → `inspect` → `rename` → `stop` → `remove`, a sequência que
+o Testcontainers usa de facto: 14/14.
+
+---
+
 ## v0.42.2 — `system info` mentia sobre a delegação de cgroup
 
 Varredura pedida sobre uma CLASSE de bug, não sobre um caso: cinco defeitos desta

@@ -9,3 +9,5 @@ delonix-runtime-core = { path = "../delonix-runtime-core" }
 nix = { workspace = true }
 libc = { workspace = true }
 seccompiler = { workspace = true }
+# Already in the tree (the Store uses it) — no new supply-chain surface.
+serde_json = { workspace = true }

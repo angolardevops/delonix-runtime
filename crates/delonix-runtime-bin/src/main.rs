@@ -31,7 +31,8 @@ enum CompShell {
     name = "delonix",
     version,
     long_version = long_version_text(),
-    about = "Delonix Runtime — a daemonless, rootless-first container & microVM engine (kernel-native, Rust). The open-source engine that powers Delonix."
+    about = "Delonix Runtime — a daemonless, rootless-first container & microVM engine (kernel-native, Rust). The open-source engine that powers Delonix.",
+    after_help = "SHORTCUTS:\n  ps, run, exec, logs, rm      same as `delonix container <verb>`\n  images                       same as `delonix image ls`"
 )]
 struct Cli {
     /// Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable
@@ -201,6 +202,42 @@ fn long_version_text() -> &'static str {
     )
 }
 
+/// Top-level aliases for the verbs used dozens of times a day.
+///
+/// `delonix ps`, not `delonix container ps`. On its own that is a detail;
+/// multiplied by every day of use it is the constant friction anyone coming
+/// from Docker or Podman feels first, and the reason a grouped CLI reads as
+/// bureaucracy even when the grouping is right.
+///
+/// **Implemented by rewriting argv, deliberately, and not by duplicating the
+/// clap variants.** A second declaration of `run`'s ~70 flags is a second
+/// declaration to keep in sync, and the day they diverge the alias silently
+/// stops accepting a flag the real command has. Splicing the group name in
+/// makes them the SAME command by construction — including `--help`, which
+/// prints the real one.
+///
+/// The groups stay: this shortens the hot path, it does not flatten the tree.
+fn expand_alias(argv: &mut Vec<String>) {
+    // Only the verbs whose meaning is unambiguous across engines. `stop`/
+    // `start`/`restart` are deliberately NOT here: this engine also stops VMs
+    // and pods, and a top-level `delonix stop <name>` that silently means
+    // "container" would be guessing at the user's intent — `workload stop`
+    // already exists for the cross-type case, and it refuses ambiguity out loud.
+    const CONTAINER: &[&str] = &["ps", "run", "exec", "logs", "rm"];
+    let Some(first) = argv.get(1) else { return };
+    let group = if CONTAINER.contains(&first.as_str()) {
+        "container"
+    } else if first == "images" {
+        // `docker images` is `image ls` here — the alias carries the rename,
+        // which is exactly the friction it exists to remove.
+        argv[1] = "ls".to_string();
+        "image"
+    } else {
+        return;
+    };
+    argv.insert(1, group.to_string());
+}
+
 fn run() -> Result<()> {
     // Language BEFORE the clap parse: the help is generated DURING the parse,
     // so the decision has to come from a peek at the argv/environment (`--l18n`
@@ -214,7 +251,10 @@ fn run() -> Result<()> {
         // Help source in EN; in pt, rewrite about/help via the pt.po catalog.
         command = cmd::po::translate_help(command);
     }
-    let cli = match <Cli as clap::FromArgMatches>::from_arg_matches(&command.get_matches()) {
+    let mut argv: Vec<String> = std::env::args().collect();
+    expand_alias(&mut argv);
+    let cli = match <Cli as clap::FromArgMatches>::from_arg_matches(&command.get_matches_from(argv))
+    {
         Ok(v) => v,
         Err(e) => e.exit(),
     };
@@ -372,5 +412,55 @@ fn main() {
         // (same graceful fallback `t_dyn` already guarantees everywhere else).
         cmd::output::error(&cmd::po::t_dyn(&e.to_string()));
         std::process::exit(1);
+    }
+}
+
+#[cfg(test)]
+mod alias_tests {
+    use super::expand_alias;
+
+    fn ex(a: &[&str]) -> Vec<String> {
+        let mut v: Vec<String> = a.iter().map(|s| s.to_string()).collect();
+        expand_alias(&mut v);
+        v
+    }
+
+    #[test]
+    fn atalhos_expandem_para_o_comando_real() {
+        assert_eq!(
+            ex(&["delonix", "ps", "-a"]),
+            ["delonix", "container", "ps", "-a"]
+        );
+        assert_eq!(
+            ex(&["delonix", "rm", "-f", "x"]),
+            ["delonix", "container", "rm", "-f", "x"]
+        );
+        // `images` carrega também o renome do verbo — é a fricção que existe
+        // para remover.
+        assert_eq!(ex(&["delonix", "images"]), ["delonix", "image", "ls"]);
+    }
+
+    #[test]
+    fn nao_toca_no_que_nao_e_atalho() {
+        assert_eq!(
+            ex(&["delonix", "container", "ps"]),
+            ["delonix", "container", "ps"]
+        );
+        assert_eq!(ex(&["delonix", "vm", "ls"]), ["delonix", "vm", "ls"]);
+        assert_eq!(ex(&["delonix"]), ["delonix"]);
+        // `stop` fica DE FORA: este motor também pára VMs e pods, e adivinhar
+        // "container" seria escolher pelo utilizador — `workload stop` já cobre
+        // o caso cruzado e recusa a ambiguidade em voz alta.
+        assert_eq!(ex(&["delonix", "stop", "x"]), ["delonix", "stop", "x"]);
+    }
+
+    #[test]
+    fn um_argumento_com_o_nome_de_um_atalho_nao_e_reescrito() {
+        // Só a POSIÇÃO 1 conta. Um container chamado `ps` passado a outro
+        // comando não pode fazer o argv mudar de forma.
+        assert_eq!(
+            ex(&["delonix", "vm", "rm", "ps"]),
+            ["delonix", "vm", "rm", "ps"]
+        );
     }
 }

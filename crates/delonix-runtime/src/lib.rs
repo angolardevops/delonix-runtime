@@ -12,6 +12,8 @@ use std::ffi::CString;
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
 use std::time::Duration;
 
+pub mod seccomp_profile;
+
 use delonix_runtime_core::{Container, Error, Mount, Result, Status, Store};
 
 /// RFC3339 with nanosecond precision, for the *logging shim* (timestamped
@@ -177,7 +179,39 @@ fn apply_filter_logged(prog: &seccompiler::BpfProgram) {
     }
 }
 
-fn apply_seccomp(unconfined: bool, detect: bool) {
+fn apply_seccomp(unconfined: bool, detect: bool, keep_privs: bool, profile: Option<&str>) {
+    // A custom OCI profile REPLACES the built-in allowlist — it is the whole
+    // point of passing one. Applied first and returned from: mixing the two
+    // would enforce a policy neither the operator nor the engine wrote.
+    if let Some(json) = profile {
+        match seccomp_profile::parse(json).and_then(|(p, unknown)| {
+            for u in &unknown {
+                eprintln!(
+                    "delonix: seccomp profile names '{u}', which this architecture does not have"
+                );
+            }
+            seccomp_profile::compile(&p)
+        }) {
+            Ok(prog) => {
+                let installed = if keep_privs {
+                    install_filter_privileged(&prog).is_ok()
+                } else {
+                    apply_filter(&prog).is_ok()
+                };
+                if !installed {
+                    eprintln!("delonix: failed to apply the seccomp profile; aborting");
+                    // SAFETY: exits the container init; no destructors to run.
+                    unsafe { libc::_exit(126) };
+                }
+            }
+            Err(e) => {
+                eprintln!("delonix: seccomp profile: {e}; aborting the container");
+                // SAFETY: same.
+                unsafe { libc::_exit(126) };
+            }
+        }
+        return;
+    }
     if unconfined {
         return; // `--security-opt seccomp=unconfined`: no filter (trusted use)
     }
@@ -225,7 +259,15 @@ fn apply_seccomp(unconfined: bool, detect: bool) {
         arch,
     ) {
         if let Ok(pp) = TryInto::<seccompiler::BpfProgram>::try_into(pf) {
-            let _ = apply_filter(&pp);
+            // The clone3 pre-filter goes in through the SAME door as the main
+            // one. Missing this is what made the first version of `keep_privs`
+            // do nothing at all: this call runs first, and `apply_filter` sets
+            // NO_NEW_PRIVS before the main filter ever gets a say.
+            if keep_privs {
+                let _ = install_filter_privileged(&pp);
+            } else {
+                let _ = apply_filter(&pp);
+            }
         }
     }
 
@@ -245,10 +287,73 @@ fn apply_seccomp(unconfined: bool, detect: bool) {
     };
     if detect {
         apply_filter_logged(&prog); // B12: logs denied syscalls
+    } else if keep_privs {
+        // The caller asked for NO_NEW_PRIVS to stay OFF, and `seccompiler`'s
+        // `apply_filter` turns it on unconditionally (lib.rs:347) — it has to,
+        // because the kernel only lets an UNPRIVILEGED process install a filter
+        // when NNP is set. With CAP_SYS_ADMIN that requirement does not apply,
+        // so the same program goes in through the raw syscall and NNP is left
+        // alone. This is what libseccomp's `SCMP_FLTATR_CTL_NNP=0` does, and it
+        // is why this branch has to run BEFORE the capabilities are dropped.
+        //
+        // FALLS BACK rather than aborting. CAP_SYS_ADMIN is not there on every
+        // path — a container joining a pod inherits the holder's user namespace
+        // and does not necessarily have it — and the first version of this
+        // branch exited 126 in exactly that case, taking twelve unrelated specs
+        // down with it. Between "no filter", "no container" and "the filter,
+        // plus a stricter NNP than asked for", the last is the only one that is
+        // both safe and useful. It says so out loud.
+        if let Err(e) = install_filter_privileged(&prog) {
+            eprintln!(
+                "delonix: could not keep NO_NEW_PRIVS off with a seccomp filter ({e});                  applying the filter WITH NO_NEW_PRIVS instead"
+            );
+            if let Err(e2) = apply_filter(&prog) {
+                eprintln!("delonix: failed to apply seccomp: {e2}; aborting the container");
+                unsafe { libc::_exit(126) };
+            }
+        }
     } else if let Err(e) = apply_filter(&prog) {
         eprintln!("delonix: failed to apply seccomp: {e}; aborting the container");
         unsafe { libc::_exit(126) };
     }
+}
+
+/// Installs a BPF program with `seccomp(SECCOMP_SET_MODE_FILTER)` directly,
+/// WITHOUT touching `PR_SET_NO_NEW_PRIVS`.
+///
+/// Only valid while the caller still holds CAP_SYS_ADMIN in its user namespace —
+/// that is the whole point: it is the one way to have a seccomp filter and no
+/// NO_NEW_PRIVS at the same time. Anywhere else it fails with EACCES, which is
+/// the honest outcome rather than a container that silently runs unfiltered.
+fn install_filter_privileged(prog: &seccompiler::BpfProgram) -> std::result::Result<(), String> {
+    #[repr(C)]
+    struct SockFprog {
+        len: u16,
+        filter: *const seccompiler::sock_filter,
+    }
+    const SECCOMP_SET_MODE_FILTER: libc::c_ulong = 1;
+    let len = u16::try_from(prog.len()).map_err(|_| "filter too long".to_string())?;
+    let fprog = SockFprog {
+        len,
+        filter: prog.as_ptr(),
+    };
+    // SAFETY: `fprog` describes a live, correctly sized BPF program owned by the
+    // caller for the duration of this call; the syscall reads it and returns.
+    let rc = unsafe {
+        libc::syscall(
+            libc::SYS_seccomp,
+            SECCOMP_SET_MODE_FILTER,
+            0 as libc::c_ulong,
+            &fprog as *const SockFprog,
+        )
+    };
+    if rc != 0 {
+        return Err(format!(
+            "seccomp(SET_MODE_FILTER) without NO_NEW_PRIVS needs CAP_SYS_ADMIN: {}",
+            std::io::Error::last_os_error()
+        ));
+    }
+    Ok(())
 }
 
 /// Allowlist of safe syscalls (based on Docker's default profile, for
@@ -719,7 +824,8 @@ fn drop_capabilities(keep: u64) {
 }
 
 /// Decides whether the confinement REALLY took effect, from the fields read from
-/// `/proc/self/status`. Pure logic (testable): requires `NO_NEW_PRIVS`, seccomp in
+/// `/proc/self/status`. Pure logic (testable): requires `NO_NEW_PRIVS` when it was
+/// requested, seccomp in
 /// filter mode (2) when expected, and NO capability outside `cap_keep` in the
 /// bounding set nor in the effective set. `CapBnd`/`CapEff` absent = unverifiable =
 /// error (fail-closed).
@@ -730,8 +836,15 @@ fn confinement_ok(
     cap_eff: Option<u64>,
     seccomp_expected: bool,
     cap_keep: u64,
+    nnp_expected: bool,
 ) -> std::result::Result<(), String> {
-    if no_new_privs != Some(1) {
+    // Only assert what was ASKED for. The check used to demand NO_NEW_PRIVS
+    // unconditionally, which was right while the engine always set it — the day a
+    // caller could turn it off (the CRI's `no_new_privs: false`, which the
+    // kubelet owns), the verifier started aborting those containers with 126.
+    // A fail-closed check has to verify the requested policy, not a fixed one,
+    // or it becomes a second policy nobody declared.
+    if nnp_expected && no_new_privs != Some(1) {
         return Err(format!("NO_NEW_PRIVS inactive ({no_new_privs:?})"));
     }
     // 2 = SECCOMP_MODE_FILTER. (`detect` also applies a filter → mode 2.)
@@ -759,7 +872,11 @@ fn confinement_ok(
 /// confidence. If the check fails, `container_init`/`exec` aborts. Explicit opt-out
 /// by the OPERATOR (not the container, whose env has not yet been applied):
 /// `DELONIX_INSECURE_BESTEFFORT=1`.
-fn verify_confinement(seccomp_expected: bool, cap_keep: u64) -> std::result::Result<(), String> {
+fn verify_confinement(
+    seccomp_expected: bool,
+    cap_keep: u64,
+    nnp_expected: bool,
+) -> std::result::Result<(), String> {
     let status = std::fs::read_to_string("/proc/self/status")
         .map_err(|e| format!("/proc/self/status unreadable: {e}"))?;
     let (mut nnp, mut sec, mut bnd, mut eff) = (None, None, None, None);
@@ -774,7 +891,7 @@ fn verify_confinement(seccomp_expected: bool, cap_keep: u64) -> std::result::Res
             eff = u64::from_str_radix(v.trim(), 16).ok();
         }
     }
-    confinement_ok(nnp, sec, bnd, eff, seccomp_expected, cap_keep)
+    confinement_ok(nnp, sec, bnd, eff, seccomp_expected, cap_keep, nnp_expected)
 }
 
 /// Did the operator turn off the fail-closed checks? (ENGINE variable, read before
@@ -789,7 +906,7 @@ fn insecure_besteffort() -> bool {
 ///
 /// Without this, whoever invoked `$(delonix run -d ...)` would block until the
 /// container closed its stdout — that is, until it terminated.
-fn detach_stdio(out_fd: Option<i32>) {
+fn detach_stdio(out_fd: Option<i32>, err_fd: Option<i32>) {
     // SAFETY: direct FFI; duplicates the standard descriptors. Best-effort.
     unsafe {
         let null = libc::open(c"/dev/null".as_ptr(), libc::O_RDWR);
@@ -797,15 +914,22 @@ fn detach_stdio(out_fd: Option<i32>) {
             libc::dup2(null, 0);
         }
         let out = out_fd.unwrap_or(null);
+        // `err_fd` absent = the historical behaviour, both streams down the same
+        // pipe. It is what the non-CRI log format wants (no stream tag, and two
+        // pipes would just interleave worse). The CRI format DOES carry the tag,
+        // and merging there made every line claim to be `stdout` — see `log_shim`.
+        let err = err_fd.or(out_fd).unwrap_or(null);
         if out >= 0 {
             libc::dup2(out, 1);
-            libc::dup2(out, 2);
+        }
+        if err >= 0 {
+            libc::dup2(err, 2);
         }
         if null > 2 {
             libc::close(null);
         }
-        // the original pipe end is no longer needed (it was dup'd into 1/2).
-        if let Some(fd) = out_fd {
+        // the original pipe ends are no longer needed (they were dup'd into 1/2).
+        for fd in [out_fd, err_fd].into_iter().flatten() {
             if fd > 2 {
                 libc::close(fd);
             }
@@ -826,6 +950,7 @@ const MAX_LOG_BYTES: u64 = 1024 * 1024;
 #[allow(unused_assignments)]
 fn log_shim(
     read_fd: i32,
+    err_fd: Option<i32>,
     log_path: String,
     max_bytes: u64,
     driver: String,
@@ -837,10 +962,7 @@ fn log_shim(
     if driver == "journald" || driver == "syslog" {
         log_shim_syslog(read_fd, tag);
     }
-    use std::io::{Read, Write};
-    use std::os::fd::FromRawFd;
-    // SAFETY: `read_fd` is the pipe's read end, inherited and valid.
-    let mut reader = unsafe { std::fs::File::from_raw_fd(read_fd) };
+    use std::io::Write;
     let open_log = |append: bool| {
         std::fs::OpenOptions::new()
             .create(true)
@@ -851,12 +973,6 @@ fn log_shim(
     };
     let mut out = open_log(true);
     let mut written: u64 = std::fs::metadata(&log_path).map(|m| m.len()).unwrap_or(0);
-    let mut buf = [0u8; 8192];
-    // In CRI mode each line comes out as `<rfc3339nano> stdout F <line>\n` — which the
-    // kubelet/crictl know how to parse. Accumulates up to `\n` (lines may arrive split
-    // across `read`s). Cap so a line without `\n` does not grow RAM without bound.
-    let mut line = Vec::<u8>::new();
-    const MAX_LINE: usize = 256 * 1024;
     // Writes a block, rotating BEFORE if it would exceed `max_bytes` — in CRI mode
     // this is called only with COMPLETE records, so rotation never splits a
     // record in the middle (and the count includes the prefix, unlike before).
@@ -875,33 +991,91 @@ fn log_shim(
             written += b.len() as u64;
         }};
     }
-    loop {
-        let n = match reader.read(&mut buf) {
-            Ok(0) | Err(_) => break, // EOF: the container closed the pipe (terminated)
-            Ok(n) => n,
-        };
-        if !cri {
-            write_block!(&buf[..n]);
-            continue;
+
+    // One source per stream. `err_fd` only exists in CRI mode (see `spawn`);
+    // without it there is a single source and everything is `stdout`, which is
+    // what the untagged format already meant.
+    let mut srcs: Vec<(i32, &'static str, Vec<u8>)> = vec![(read_fd, "stdout", Vec::new())];
+    if let Some(e) = err_fd {
+        srcs.push((e, "stderr", Vec::new()));
+    }
+    let mut buf = [0u8; 8192];
+    const MAX_LINE: usize = 256 * 1024;
+
+    // `poll` and not two threads: the shim is a bare `fork()` that never execs,
+    // and spawning threads in a forked child of a possibly-threaded parent is
+    // the kind of thing this file already documents as a footgun. One loop, no
+    // locks, and the write ordering is whatever the timestamps say.
+    while !srcs.is_empty() {
+        let mut fds: Vec<libc::pollfd> = srcs
+            .iter()
+            .map(|(fd, _, _)| libc::pollfd {
+                fd: *fd,
+                events: libc::POLLIN,
+                revents: 0,
+            })
+            .collect();
+        // SAFETY: `fds` is a valid array of `len` pollfd; -1 = block indefinitely.
+        let n = unsafe { libc::poll(fds.as_mut_ptr(), fds.len() as libc::nfds_t, -1) };
+        if n < 0 {
+            // EINTR is ordinary here (the shim outlives the CLI and gets signals);
+            // anything else and there is nothing sane left to do but stop.
+            if std::io::Error::last_os_error().kind() == std::io::ErrorKind::Interrupted {
+                continue;
+            }
+            break;
         }
-        for &b in &buf[..n] {
-            line.push(b);
-            let full = b == b'\n';
-            if full || line.len() >= MAX_LINE {
-                let ts = now_rfc3339_nano();
-                let stream = if full { "F" } else { "P" };
-                let body = String::from_utf8_lossy(line.strip_suffix(b"\n").unwrap_or(&line));
-                let rec = format!("{ts} stdout {stream} {body}\n");
-                write_block!(rec.as_bytes());
-                line.clear();
+        let mut closed: Vec<usize> = Vec::new();
+        for (i, pfd) in fds.iter().enumerate() {
+            if pfd.revents == 0 {
+                continue;
+            }
+            // SAFETY: `pfd.fd` is one of our inherited read ends; `buf` is ours.
+            let got =
+                unsafe { libc::read(pfd.fd, buf.as_mut_ptr() as *mut libc::c_void, buf.len()) };
+            if got <= 0 {
+                // EOF (or a hard error): this stream is done. POLLHUP alone with
+                // data still buffered would come back as a readable poll first,
+                // so nothing is lost by only acting on the read.
+                closed.push(i);
+                continue;
+            }
+            let (_, name, line) = &mut srcs[i];
+            for &b in &buf[..got as usize] {
+                if !cri {
+                    continue;
+                }
+                line.push(b);
+                let full = b == b'\n';
+                if full || line.len() >= MAX_LINE {
+                    let ts = now_rfc3339_nano();
+                    // F = full line, P = partial (the line was cut by MAX_LINE).
+                    // This is the CRI record's third field; the SECOND is the
+                    // stream, and conflating the two is what made every line
+                    // claim `stdout`.
+                    let completeness = if full { "F" } else { "P" };
+                    let body = String::from_utf8_lossy(line.strip_suffix(b"\n").unwrap_or(line));
+                    let rec = format!("{ts} {name} {completeness} {body}\n");
+                    write_block!(rec.as_bytes());
+                    line.clear();
+                }
+            }
+            if !cri {
+                write_block!(&buf[..got as usize]);
             }
         }
-    }
-    // final line without `\n` (CRI mode) — emit it anyway as partial.
-    if cri && !line.is_empty() {
-        let ts = now_rfc3339_nano();
-        let rec = format!("{ts} stdout P {}\n", String::from_utf8_lossy(&line));
-        write_block!(rec.as_bytes());
+        for i in closed.into_iter().rev() {
+            // final line without `\n` (CRI mode) — emit it anyway as partial.
+            let (fd, name, line) = &srcs[i];
+            if cri && !line.is_empty() {
+                let ts = now_rfc3339_nano();
+                let rec = format!("{ts} {name} P {}\n", String::from_utf8_lossy(line));
+                write_block!(rec.as_bytes());
+            }
+            // SAFETY: our own inherited read end, used nowhere else after this.
+            unsafe { libc::close(*fd) };
+            srcs.remove(i);
+        }
     }
     // SAFETY: exits without running destructors inherited from the parent process.
     unsafe { libc::_exit(0) }
@@ -1042,6 +1216,26 @@ fn bind_volume(rootfs: &str, m: &Mount) -> nix::Result<()> {
         rflags,
         None::<&str>,
     )?;
+    // Propagation LAST, and as its OWN `mount()` by kernel rule: the propagation
+    // flag cannot be combined with `MS_BIND` in a single call — passed together
+    // it is silently ignored, the same trap `MS_RDONLY` on a first bind has.
+    if let Some(p) = m.propagation.as_deref() {
+        let flag = match p {
+            "rslave" | "slave" => MsFlags::MS_SLAVE,
+            "rshared" | "shared" => MsFlags::MS_SHARED,
+            // `private` is already the kernel's default for a fresh bind under a
+            // private root — but say it anyway: under a SLAVE root, which
+            // ANOTHER mount on the same container may have forced, it is not.
+            _ => MsFlags::MS_PRIVATE,
+        };
+        mount(
+            None::<&str>,
+            dst.as_str(),
+            None::<&str>,
+            flag | MsFlags::MS_REC,
+            None::<&str>,
+        )?;
+    }
     Ok(())
 }
 
@@ -1219,13 +1413,22 @@ fn setup_rootfs(
     has_own_netns: bool,
 ) -> nix::Result<()> {
     sethostname(hostname)?;
-    mount(
-        None::<&str>,
-        "/",
-        None::<&str>,
-        MsFlags::MS_REC | MsFlags::MS_PRIVATE,
-        None::<&str>,
-    )?;
+    // Root propagation. `MS_PRIVATE` severs every link with the host's mount
+    // tree, which is the right default and stays the default — but it also makes
+    // `rslave`/`rshared` on any individual mount a no-op, because there is no
+    // peer group left to receive events from. `MS_SLAVE` keeps the one-way link
+    // the propagating mounts need (and is what Docker and runc use for ALL
+    // containers; here it costs nothing to anyone who did not ask).
+    //
+    // Deliberately decided by what the mounts ask for, not by a flag: a root
+    // that is slave for a container with no propagating mount would be a wider
+    // opening than the caller requested, and invisible.
+    let root_prop = if mounts.iter().any(|m| m.wants_propagation()) {
+        MsFlags::MS_REC | MsFlags::MS_SLAVE
+    } else {
+        MsFlags::MS_REC | MsFlags::MS_PRIVATE
+    };
+    mount(None::<&str>, "/", None::<&str>, root_prop, None::<&str>)?;
     mount(
         Some(rootfs),
         rootfs,
@@ -1488,8 +1691,7 @@ fn run_idmap(tool: &str, pid: i32, map: &str) -> Result<()> {
 
 /// `true` if the engine runs without root privileges (*rootless* mode, A13).
 pub fn is_rootless() -> bool {
-    // SAFETY: geteuid has no preconditions.
-    unsafe { libc::geteuid() != 0 }
+    delonix_runtime_core::is_rootless()
 }
 
 /// Removes a file tree that may contain **subuid** files (chowned
@@ -1798,7 +2000,15 @@ fn apply_sysctls(specs: &[String], has_own_netns: bool) {
                 continue;
             }
             let path = format!("/proc/sys/{}", k.replace('.', "/"));
-            let _ = std::fs::write(&path, v.trim());
+            // The error used to be DISCARDED (`let _ = ...`). A sysctl the
+            // caller asked for, silently not applied, is the failure mode this
+            // repo names as its worst: the container runs, the record says the
+            // knob is set, and the value inside is whatever it was. It hid a
+            // real one — a pod's sysctls come back as the default whenever the
+            // container does not own the namespace that knob belongs to.
+            if let Err(e) = std::fs::write(&path, v.trim()) {
+                eprintln!("delonix: --sysctl {k}={v}: {e}");
+            }
         }
     }
 }
@@ -2027,6 +2237,7 @@ fn container_init(
     argv: &[CString],
     detach: bool,
     log_fd: Option<i32>,
+    log_err_fd: Option<i32>,
     mounts: &[Mount],
     sync: Option<(i32, i32)>,
     apparmor: Option<&str>,
@@ -2036,10 +2247,15 @@ fn container_init(
     read_only: bool,
     cap_keep: u64,
     seccomp_unconfined: bool,
+    seccomp_profile_json: Option<&str>,
     seccomp_detect: bool,
     devices: &[String],
     tmpfs: &[String],
     ulimits: &[String],
+    group_add: &[u32],
+    masked_paths: &[String],
+    readonly_paths: &[String],
+    no_new_privs: bool,
     sysctls: &[String],
     has_own_netns: bool,
     host_pid: bool,
@@ -2101,7 +2317,7 @@ fn container_init(
         }
     }
     if detach {
-        detach_stdio(log_fd);
+        detach_stdio(log_fd, log_err_fd);
     }
     // KIND node: BEFORE mounting the rootfs (which remounts `/sys`), gives the node a dedicated,
     // empty cgroup-ns root (uncovers the real cgroup2, moves us to a leaf,
@@ -2180,14 +2396,39 @@ fn container_init(
         );
     }
     apply_ulimits(ulimits); // --ulimit (before dropping CAP_SYS_RESOURCE)
-    set_no_new_privs(); // no execve gains privileges (anti-escalation) — always
-    drop_capabilities(cap_keep); // drop caps (after the mounts, before the exec)
-    apply_seccomp(seccomp_unconfined, seccomp_detect); // allowlist (default-deny)
-                                                       // FAIL-CLOSED: confirms the confinement REALLY took effect before the execve.
-                                                       // Runs BEFORE the USER's `setuid` (further below) and BEFORE `apply_env` (so it reads the
-                                                       // ENGINE's opt-out, not the container's). See `verify_confinement`.
+                            // Masked/read-only paths run HERE: after `pivot_root` (so the paths are the
+                            // container's own) and before `drop_capabilities` (they are mounts, and need
+                            // CAP_SYS_ADMIN in this mount namespace). Getting the order wrong either
+                            // masks the host's path or silently fails with EPERM.
+    apply_masked_paths(masked_paths);
+    apply_readonly_paths(readonly_paths);
+    if no_new_privs {
+        set_no_new_privs(); // no execve gains privileges (anti-escalation)
+        drop_capabilities(cap_keep); // drop caps (after the mounts, before the exec)
+        apply_seccomp(
+            seccomp_unconfined,
+            seccomp_detect,
+            false,
+            seccomp_profile_json,
+        ); // allowlist (default-deny)
+    } else {
+        // NNP off: the filter has to go in while CAP_SYS_ADMIN is still held
+        // (see `install_filter_privileged`), so the two steps swap. Confined to
+        // THIS branch on purpose — the default path above stays byte-for-byte as
+        // it was, and `verify_confinement` below checks the result of either.
+        apply_seccomp(
+            seccomp_unconfined,
+            seccomp_detect,
+            true,
+            seccomp_profile_json,
+        );
+        drop_capabilities(cap_keep);
+    }
+    // FAIL-CLOSED: confirms the confinement REALLY took effect before the execve.
+    // Runs BEFORE the USER's `setuid` (further below) and BEFORE `apply_env` (so it reads the
+    // ENGINE's opt-out, not the container's). See `verify_confinement`.
     if !insecure_besteffort() {
-        if let Err(e) = verify_confinement(!seccomp_unconfined, cap_keep) {
+        if let Err(e) = verify_confinement(!seccomp_unconfined, cap_keep, no_new_privs) {
             eprintln!("delonix: confinement NOT verified ({e}); aborting the container");
             return 126;
         }
@@ -2230,7 +2471,10 @@ fn container_init(
             }
             // SAFETY: we are root in the user ns → setgid/setgroups/setuid succeed.
             unsafe {
-                libc::setgroups(1, [gid].as_ptr());
+                let mut groups: Vec<u32> = vec![gid];
+                groups.extend_from_slice(group_add);
+                groups.dedup();
+                libc::setgroups(groups.len(), groups.as_ptr());
                 if libc::setgid(gid) != 0 {
                     eprintln!("delonix: setgid({gid}) failed");
                 }
@@ -2243,9 +2487,97 @@ fn container_init(
             }
         }
     }
+    // Supplementary groups with NO uid switch. The block above only runs for a
+    // non-root `USER`, and a container that stays root still needs its groups —
+    // that is exactly the `SupplementalGroups` case, and reading `id -G` was how
+    // it showed up as missing.
+    if run_uid.is_none_or(|u| u == 0) && !group_add.is_empty() {
+        let mut groups: Vec<u32> = group_add.to_vec();
+        groups.dedup();
+        // SAFETY: we are root in the user ns → setgroups succeeds for mapped gids.
+        if unsafe { libc::setgroups(groups.len(), groups.as_ptr()) } != 0 {
+            eprintln!(
+                "delonix: setgroups({groups:?}) failed — are the gids inside the mapped range?"
+            );
+        }
+    }
     let _ = execvp(&argv[0], argv);
     eprintln!("delonix: exec failed: {:?}", argv[0]);
     127
+}
+
+/// Makes each path unreadable inside the container.
+///
+/// runc's technique, and the reason it is two techniques: a FILE is covered by
+/// bind-mounting `/dev/null` over it (reads give EOF, exec gives EACCES), a
+/// DIRECTORY by mounting an empty read-only tmpfs (listing gives nothing). There
+/// is no single mount that does both, and using the tmpfs on a file fails with
+/// ENOTDIR.
+///
+/// Best-effort per path, and loudly: a path that cannot be masked is a hole in a
+/// confinement the caller asked for, so it says so rather than failing the whole
+/// container — the same shape as the other `apply_*` in this file.
+fn apply_masked_paths(paths: &[String]) {
+    for p in paths {
+        let Ok(md) = std::fs::metadata(p) else {
+            // Not present = nothing to mask. `/proc/kcore` on a kernel without it
+            // is the ordinary case, not an error.
+            continue;
+        };
+        let r = if md.is_dir() {
+            mount(
+                Some("tmpfs"),
+                p.as_str(),
+                Some("tmpfs"),
+                MsFlags::MS_RDONLY | MsFlags::MS_NOSUID | MsFlags::MS_NODEV | MsFlags::MS_NOEXEC,
+                Some("size=0k"),
+            )
+        } else {
+            mount(
+                Some("/dev/null"),
+                p.as_str(),
+                None::<&str>,
+                MsFlags::MS_BIND,
+                None::<&str>,
+            )
+        };
+        if let Err(e) = r {
+            eprintln!("delonix: could not mask '{p}': {e}");
+        }
+    }
+}
+
+/// Remounts each path read-only inside the container.
+///
+/// Two steps, and both are required: a bind of the path onto ITSELF to get a
+/// mount to modify, then a `MS_REMOUNT|MS_RDONLY|MS_BIND` on it. Passing
+/// `MS_RDONLY` on the first bind is silently ignored by the kernel — the classic
+/// mistake, and it produces a path that reports success and stays writable.
+fn apply_readonly_paths(paths: &[String]) {
+    for p in paths {
+        if std::fs::metadata(p).is_err() {
+            continue;
+        }
+        if let Err(e) = mount(
+            Some(p.as_str()),
+            p.as_str(),
+            None::<&str>,
+            MsFlags::MS_BIND | MsFlags::MS_REC,
+            None::<&str>,
+        ) {
+            eprintln!("delonix: could not bind '{p}' for read-only: {e}");
+            continue;
+        }
+        if let Err(e) = mount(
+            Some(p.as_str()),
+            p.as_str(),
+            None::<&str>,
+            MsFlags::MS_BIND | MsFlags::MS_REMOUNT | MsFlags::MS_RDONLY | MsFlags::MS_REC,
+            None::<&str>,
+        ) {
+            eprintln!("delonix: could not remount '{p}' read-only: {e}");
+        }
+    }
 }
 
 /// `chown -R <uid>:<gid>` of `root` using **`lchown`** (never follows symlinks — a
@@ -2736,7 +3068,7 @@ pub fn slice_budget() -> (u64, u64, u64, f64, u64) {
 }
 
 /// Current cgroup v2 of the process (from `/proc/self/cgroup`, the `0::` line).
-fn current_cgroup_v2() -> Option<String> {
+pub fn current_cgroup_v2() -> Option<String> {
     let s = std::fs::read_to_string("/proc/self/cgroup").ok()?;
     let rel = s.lines().find_map(|l| l.strip_prefix("0::"))?.trim();
     Some(format!("/sys/fs/cgroup{rel}"))
@@ -3175,6 +3507,39 @@ fn setup_cgroup(c: &Container, pid: i32) -> Result<()> {
     Ok(())
 }
 
+/// An explicit `/etc/resolv.conf`, as the CRI's `DNSConfig` describes it.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DnsConfig {
+    pub servers: Vec<String>,
+    pub searches: Vec<String>,
+    pub options: Vec<String>,
+}
+
+impl DnsConfig {
+    /// Is there anything to write? An all-empty config is the same as none, and
+    /// writing an EMPTY `resolv.conf` would be worse than not writing one: the
+    /// libc resolver falls back to `127.0.0.1` and nothing resolves at all.
+    pub fn is_empty(&self) -> bool {
+        self.servers.is_empty() && self.searches.is_empty() && self.options.is_empty()
+    }
+
+    /// Renders it in `resolv.conf` order — the one `resolv.conf(5)` documents
+    /// and every resolver expects.
+    pub fn render(&self) -> String {
+        let mut out = String::new();
+        for s in &self.servers {
+            out.push_str(&format!("nameserver {s}\n"));
+        }
+        if !self.searches.is_empty() {
+            out.push_str(&format!("search {}\n", self.searches.join(" ")));
+        }
+        if !self.options.is_empty() {
+            out.push_str(&format!("options {}\n", self.options.join(" ")));
+        }
+        out
+    }
+}
+
 /// The startup specification of a container. Gathers the options that
 /// grew over the phases: `detach` (1), `mounts`/volumes (4),
 /// `new_netns`+`on_started` (3).
@@ -3221,6 +3586,10 @@ pub struct RunSpec<'a> {
     /// rest; with `-p` (slirp) it is the slirp DNS. `None` → the host's is copied
     /// (`--net host` containers inherit the machine's DNS).
     pub dns: Option<String>,
+    /// Caller-supplied resolver, which OVERRIDES `dns` when present. Carries
+    /// searches and options too, which a single address cannot express — and
+    /// which the CRI's `DNSConfig` always sends together.
+    pub dns_config: Option<DnsConfig>,
     /// Shares the host's *PID namespace* (`--host-pid`; CRI `namespace_options.pid
     /// = NODE`): the container sees the host's processes. By default, isolated.
     pub host_pid: bool,
@@ -3302,6 +3671,35 @@ pub fn create_with(
     spawn(store, container, rootfs, spec)
 }
 
+/// Writes a file INSIDE the rootfs, refusing to follow a symlink planted by the
+/// image.
+///
+/// HIGH FIXED HERE. These three files were written with `format!("{rootfs}/
+/// etc/...")` + `fs::write`, and both `metadata()` and `write()` FOLLOW
+/// symlinks. The rootfs is image-controlled content and, in rootless, the tree
+/// belongs to the mapped uid — so the container itself can plant
+/// `etc/hosts -> /home/<user>/.ssh/authorized_keys` at runtime, and the next
+/// start writes it AS THE ENGINE, outside the rootfs.
+///
+/// It was a truncate-with-engine-fixed-content primitive until `--add-host`
+/// made the CONTENT attacker-chosen, which turns it into code execution.
+/// Proven live on this host before the fix.
+///
+/// `safe_bind_target` (this same file) resolves component by component and
+/// refuses any symlink — it is the fix this repo already applied twice, to
+/// bind mounts and to the build's `COPY`. This path had been left out.
+fn write_inside_rootfs(rootfs: &str, rel: &str, contents: &str) {
+    let Some(path) = safe_bind_target(rootfs, rel) else {
+        // Loud, not silent: a refusal here means the image tried to redirect
+        // us out of its own tree, which is the interesting case.
+        eprintln!("delonix: refusing to write '{rel}': path escapes the rootfs (symlink?)");
+        return;
+    };
+    if let Err(e) = std::fs::write(&path, contents) {
+        eprintln!("delonix: could not write '{rel}': {e}");
+    }
+}
+
 /// Writes `/etc/hostname` and `/etc/hosts` into the rootfs, as Docker/Podman (which
 /// always manage these files). Done in the PARENT, before the clone, because it is here
 /// that the name and IP are known; the rootfs is a host path (flat copy in
@@ -3314,25 +3712,36 @@ pub fn create_with(
 /// - **`/etc/hosts`**: without it, `getent ahostsv4 $(hostname)` does not resolve — and it is
 ///   EXACTLY how the `kindest/node` entrypoint discovers the node's IP
 ///   ("detected IPv4 address:"); it came empty and the node did not start as control-plane.
-fn write_etc_files(rootfs: &str, hostname: &str, ip: Option<&str>, dns: Option<&str>) {
-    let etc = format!("{rootfs}/etc");
-    if std::fs::metadata(&etc).is_err() {
+fn write_etc_files(
+    rootfs: &str,
+    hostname: &str,
+    ip: Option<&str>,
+    dns: Option<&str>,
+    dns_config: Option<&DnsConfig>,
+    extra_hosts: &[String],
+) {
+    // `symlink_metadata`, not `metadata`: an `/etc` that is itself a symlink
+    // must not be followed just to decide whether to proceed.
+    if std::fs::symlink_metadata(format!("{rootfs}/etc")).is_err() {
         return; // image without /etc (e.g. scratch) — nothing to do
     }
-    let _ = std::fs::write(format!("{etc}/hostname"), format!("{hostname}\n"));
+    write_inside_rootfs(rootfs, "etc/hostname", &format!("{hostname}\n"));
     // `/etc/resolv.conf`: without it the libc resolver falls back to 127.0.0.1 and NOTHING
     // resolves by name (only by IP). On a custom network it points to the gateway (the
     // ingress resolver); on `--net host` the host's is copied. Like Docker.
-    match dns {
-        Some(server) => {
-            let _ = std::fs::write(
-                format!("{etc}/resolv.conf"),
-                format!("nameserver {server}\noptions ndots:0\n"),
-            );
-        }
-        None => {
-            if let Ok(host_resolv) = std::fs::read("/etc/resolv.conf") {
-                let _ = std::fs::write(format!("{etc}/resolv.conf"), host_resolv);
+    match (dns_config, dns) {
+        // Explicit config wins: whoever passed `--dns`/the CRI's `DNSConfig`
+        // named a resolver on purpose, and falling back to the gateway would
+        // quietly resolve against something else.
+        (Some(cfg), _) => write_inside_rootfs(rootfs, "etc/resolv.conf", &cfg.render()),
+        (None, Some(server)) => write_inside_rootfs(
+            rootfs,
+            "etc/resolv.conf",
+            &format!("nameserver {server}\noptions ndots:0\n"),
+        ),
+        (None, None) => {
+            if let Ok(host_resolv) = std::fs::read_to_string("/etc/resolv.conf") {
+                write_inside_rootfs(rootfs, "etc/resolv.conf", &host_resolv);
             }
         }
     }
@@ -3344,10 +3753,27 @@ fn write_etc_files(rootfs: &str, hostname: &str, ip: Option<&str>, dns: Option<&
          ff02::1\tip6-allnodes\n\
          ff02::2\tip6-allrouters\n",
     );
+    // `--add-host name:ip`. As entradas chegam JÁ VALIDADAS e normalizadas por
+    // `cmd::container::parse_add_host` (nome LDH, endereço parseado como
+    // `IpAddr`) — aqui não há saneamento a fazer, e é deliberado que não haja:
+    // duas validações em sítios diferentes divergem, e a que fica para trás é
+    // a que passa a mentir. Uma entrada sem `:` só pode vir de um registo
+    // corrompido à mão; salta-se.
+    //
+    // Escritas ANTES da linha canónica `<ip> <hostname>`: o resolvedor da libc
+    // devolve a PRIMEIRA correspondência, portanto é esta a ordem que faz o
+    // override do utilizador ganhar — é o que Docker e Podman fazem, e a
+    // versão anterior tinha-a ao contrário (a entrada era aceite e não tinha
+    // efeito nenhum).
+    for entry in extra_hosts {
+        if let Some((name, addr)) = entry.split_once(':') {
+            hosts.push_str(&format!("{addr}\t{name}\n"));
+        }
+    }
     if let Some(ip) = ip {
         hosts.push_str(&format!("{ip}\t{hostname}\n"));
     }
-    let _ = std::fs::write(format!("{etc}/hosts"), hosts);
+    write_inside_rootfs(rootfs, "etc/hosts", &hosts);
 }
 
 fn spawn(
@@ -3368,6 +3794,10 @@ fn spawn(
         &hostname,
         spec.hosts_ip.as_deref(),
         spec.dns.as_deref(),
+        // Do REGISTO, não da invocação: é isso que faz as entradas
+        // sobreviverem a `stop`/`start` e `restart`, que reconstroem a spec.
+        spec.dns_config.as_ref(),
+        &container.extra_hosts,
     );
     let argv: Vec<CString> = container
         .command
@@ -3422,10 +3852,19 @@ fn spawn(
         resolve_cap_keep(&container.cap_drop, &container.cap_add)
     };
     let seccomp_unconfined = privileged || container.seccomp.as_deref() == Some("unconfined");
+    // The profile travels as its CONTENT, not its path: the file lives on the
+    // host and the init runs after `pivot_root`, where that path no longer
+    // resolves. Read once, in the parent, where it still exists.
+    let seccomp_profile_json = container.seccomp_profile.clone();
     let seccomp_detect = container.seccomp.as_deref() == Some("detect");
     let devices = container.devices.clone();
     let tmpfs = container.tmpfs.clone();
     let ulimits = container.ulimits.clone();
+    let group_add = container.group_add.clone();
+    let masked_paths = container.masked_paths.clone();
+    let readonly_paths = container.readonly_paths.clone();
+    // Default ON — stricter than Docker/Podman, deliberately. See `no_new_privs`.
+    let no_new_privs = container.no_new_privs.unwrap_or(true);
     let sysctls = container.sysctls.clone();
 
     // Console (pty) for PID 1: ONLY in `--privileged` detached with log (Kind
@@ -3452,6 +3891,28 @@ fn spawn(
         _ => None,
     };
     let log_fd = log_pipe.map(|(_, w)| w); // the container writes to the write end
+                                           // SECOND pipe, for stderr, and ONLY in CRI mode. The CRI log line carries a
+                                           // stream tag (`<ts> stdout|stderr F <line>`) and the kubelet — and
+                                           // `critest` — read it; with a single pipe every line was emitted as
+                                           // `stdout`, including a `touch: ...: Read-only file system` that is stderr
+                                           // by definition. Two specs failed on exactly that, and the cause looked like
+                                           // a missing security feature rather than a mislabelled stream.
+                                           //
+                                           // The non-CRI format has no tag, so splitting there would only interleave
+                                           // the two streams worse. That path stays byte-for-byte as it was.
+    let log_err_pipe: Option<(i32, i32)> = match (log_pipe.is_some(), spec.log_cri) {
+        (true, true) => {
+            let mut fds = [0i32; 2];
+            // SAFETY: pipe() fills 2 fds.
+            if unsafe { libc::pipe(fds.as_mut_ptr()) } == 0 {
+                Some((fds[0], fds[1]))
+            } else {
+                None
+            }
+        }
+        _ => None,
+    };
+    let log_err_fd = log_err_pipe.map(|(_, w)| w);
 
     // Socketpair of the *console socket* (runc): the init allocates the pty in the container's
     // devpts and returns the master through here. `(parent, child)`; the child inherits both in the
@@ -3568,6 +4029,7 @@ fn spawn(
             &argv,
             detach,
             log_fd,
+            log_err_fd,
             &mounts,
             sync,
             apparmor.as_deref(),
@@ -3577,10 +4039,15 @@ fn spawn(
             read_only,
             cap_keep,
             seccomp_unconfined,
+            seccomp_profile_json.as_deref(),
             seccomp_detect,
             &devices,
             &tmpfs,
             &ulimits,
+            &group_add,
+            &masked_paths,
+            &readonly_paths,
+            no_new_privs,
             &sysctls,
             has_own_netns,
             host_pid,
@@ -3696,6 +4163,9 @@ fn spawn(
             if let Some((_, logw)) = log_pipe {
                 unsafe { libc::close(logw) };
             }
+            if let Some((_, errw)) = log_err_pipe {
+                unsafe { libc::close(errw) };
+            }
             // This shim never execs — it just loops copying `src` to the log file for as
             // long as the container lives — so CLOEXEC never takes effect for it: every
             // OTHER fd the caller had open at fork time (e.g. a long-lived server's OTHER
@@ -3705,12 +4175,23 @@ fn spawn(
             // with them. Close everything except `src` before doing anything else —
             // `close_range` is a raw syscall (no allocation), the safe choice this soon
             // after forking a process that may have other threads.
-            let srcu = src as u32;
+            // Keep BOTH read ends (stdout and, in CRI mode, stderr) — close
+            // everything else. They are not adjacent, so the ranges are computed
+            // from the sorted pair rather than assumed contiguous.
+            let mut keep: Vec<u32> = vec![src as u32];
+            if let Some((r, _)) = log_err_pipe {
+                keep.push(r as u32);
+            }
+            keep.sort_unstable();
             unsafe {
-                if srcu > 3 {
-                    libc::close_range(3, srcu - 1, 0);
+                let mut lo = 3u32;
+                for k in &keep {
+                    if *k > lo {
+                        libc::close_range(lo, k - 1, 0);
+                    }
+                    lo = k + 1;
                 }
-                libc::close_range(srcu + 1, u32::MAX, 0);
+                libc::close_range(lo, u32::MAX, 0);
             }
             // The shim outlives `delonix run` (it lives as long as the container lives).
             // It must DROP the stdio inherited from the parent — otherwise a caller that captures
@@ -3729,13 +4210,30 @@ fn spawn(
                     }
                 }
             }
-            log_shim(src, lp, MAX_LOG_BYTES, driver, tag, spec.log_cri); // does not return (the parent does not wait)
+            log_shim(
+                src,
+                log_err_pipe.map(|(r, _)| r),
+                lp,
+                MAX_LOG_BYTES,
+                driver,
+                tag,
+                spec.log_cri,
+            ); // does not return (the parent does not wait)
         }
         // The parent drops the ends: only the container (the source, via fd 1/2 or the pty
         // slave) and the shim (src) keep them. When the container dies, the shim sees EOF/EIO.
         unsafe { libc::close(src) };
         if let Some((_, logw)) = log_pipe {
             unsafe { libc::close(logw) };
+        }
+        // Both ends of the stderr pipe: the read one belongs to the shim now, the
+        // write one to the container. A copy left open here would keep the shim
+        // from ever seeing EOF, so it would outlive the container forever.
+        if let Some((r, w)) = log_err_pipe {
+            unsafe {
+                libc::close(r);
+                libc::close(w);
+            }
         }
     }
 
@@ -4057,7 +4555,18 @@ pub fn exec_with(
     // container). Crucial for the rootless INGRESS containers, which **inherit** the holder's user ns
     // (they do not create their own) and therefore had `container.userns=false` — without the
     // setns(user) the setns(uts) gave EPERM (the UTS belongs to that user ns).
-    let ns_list: &[&str] = &["user", "uts", "net", "pid", "mnt"];
+    // IPC WAS MISSING, and its absence was invisible until something read a
+    // value that depends on it. An `exec` is supposed to look like the container
+    // from the inside; without joining the IPC namespace it sees the HOST's
+    // System V objects and the host's `kernel.shm*`/`fs.mqueue.*` — the very
+    // knobs `--sysctl` sets. Measured: a container created with
+    // `kernel.shm_rmid_forced=1` reported `0` through `exec`, because the value
+    // is resolved in the READER's ipc namespace, not the one the file lives in.
+    // It read as "the sysctl was not applied" and cost a detour through the
+    // engine's sysctl path, which was correct all along.
+    //
+    // `mnt` stays LAST: the order is load-bearing (see below).
+    let ns_list: &[&str] = &["user", "uts", "net", "ipc", "pid", "mnt"];
     // Open the fds in the PARENT (they resolve in the host context); they are inherited by the fork.
     // Skip the namespaces we ALREADY share (same inode) — e.g. a container
     // with a user ns but no network shares the host's `net`, and joining it after
@@ -4161,6 +4670,15 @@ pub fn exec_with(
                             unsafe { libc::close(sc) };
                         }
                     }
+                    // ALWAYS, even for a container created with NO_NEW_PRIVS off.
+                    //
+                    // An `exec` is a fresh process the operator starts, not the
+                    // workload's own pid 1, so being stricter than the container
+                    // costs nothing real — and the alternative was measured to
+                    // cost plenty: making this conditional while
+                    // `verify_confinement` below still demanded NNP made every
+                    // `exec` into such a container abort with 126, which showed
+                    // up as four unrelated seccomp specs failing.
                     set_no_new_privs();
                     // Mirrors the INIT's confinement (see `spawn`): a `--privileged`
                     // container keeps ALL caps also in `exec` — without
@@ -4176,11 +4694,33 @@ pub fn exec_with(
                     drop_capabilities(exec_keep); // same confinement
                     let exec_unconf =
                         container.privileged || container.seccomp.as_deref() == Some("unconfined");
-                    apply_seccomp(exec_unconf, container.seccomp.as_deref() == Some("detect"));
+                    // The `exec` mirrors the container's profile, like it
+                    // mirrors its capabilities: a process that could run inside
+                    // the container must not be more permitted just because it
+                    // arrived through `exec`.
+                    let exec_profile = container.seccomp_profile.clone();
+                    // `keep_privs: false` ALWAYS here, even for a container
+                    // created with NO_NEW_PRIVS off. Two reasons, and the second
+                    // is the one that bit: the privileged install needs
+                    // CAP_SYS_ADMIN and this runs AFTER `drop_capabilities`, so
+                    // it could only ever fail; and its fallback warning would go
+                    // to the EXEC's stderr — which callers read. `ExecSync` in
+                    // the CRI returns stderr verbatim and the conformance suite
+                    // compares it to an exact string, so one line of well-meant
+                    // diagnostics failed a dozen unrelated specs.
+                    apply_seccomp(
+                        exec_unconf,
+                        container.seccomp.as_deref() == Some("detect"),
+                        false,
+                        exec_profile.as_deref(),
+                    );
                     // FAIL-CLOSED: the `exec` process must stay as confined as
                     // the container's init; aborts if some control failed silently.
                     if !insecure_besteffort() {
-                        if let Err(e) = verify_confinement(!exec_unconf, exec_keep) {
+                        // The filter above installs NO_NEW_PRIVS whatever the container's own
+                        // policy, so that is what to verify — asserting the container's
+                        // `false` here would check a claim this process never made.
+                        if let Err(e) = verify_confinement(!exec_unconf, exec_keep, true) {
                             eprintln!("delonix: exec confinement NOT verified ({e}); aborting");
                             unsafe { libc::_exit(126) };
                         }
@@ -4207,13 +4747,31 @@ pub fn exec_with(
                     let exec_user = overrides
                         .user
                         .or_else(|| container.run_uid.map(|u| (u, container.run_gid)));
+                    // Supplementary groups, exactly as the init got them. An `exec`
+                    // is supposed to look like the container from the inside, and
+                    // the CRI checks precisely that — `execSync id -G` is how the
+                    // conformance suite reads a container's groups, there being no
+                    // other way in. Without this the exec kept the CALLER's groups,
+                    // which show up as a row of 65534 (unmapped in the userns): not
+                    // just the wrong answer, a small leak of the host's identity.
+                    if !container.group_add.is_empty() {
+                        let mut groups = container.group_add.clone();
+                        groups.dedup();
+                        // SAFETY: gids mapped in the container's userns; we are root there.
+                        if unsafe { libc::setgroups(groups.len(), groups.as_ptr()) } != 0 {
+                            eprintln!("delonix: exec setgroups({groups:?}) failed");
+                        }
+                    }
                     if let Some((uid, gid)) = exec_user.filter(|(u, _)| *u != 0) {
                         let gid = gid.unwrap_or(uid);
                         // SAFETY: uid/gid mapped in the container's userns (the init already
                         // mapped the range at startup); setgroups/setgid/setuid
                         // succeed while we are root in the userns.
                         unsafe {
-                            libc::setgroups(1, [gid].as_ptr());
+                            let mut groups: Vec<u32> = vec![gid];
+                            groups.extend_from_slice(&container.group_add);
+                            groups.dedup();
+                            libc::setgroups(groups.len(), groups.as_ptr());
                             if libc::setgid(gid) != 0 {
                                 eprintln!("delonix: exec setgid({gid}) failed");
                             }
@@ -4858,6 +5416,47 @@ pub fn remove(store: &Store, container: &Container, force: bool) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    /// `--add-host` tem de aparecer no `/etc/hosts` do rootfs, DEPOIS das
+    /// entradas canónicas, e sem partir o ficheiro quando a entrada é
+    /// malformada (um `/etc/hosts` inválido quebra a resolução TODA dentro do
+    /// contentor — é preferível perder uma entrada a perder o ficheiro).
+    #[test]
+    fn write_etc_files_escreve_as_entradas_de_add_host() {
+        let dir = std::env::temp_dir().join(format!("dlx-hosts-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("etc")).unwrap();
+        let rootfs = dir.to_str().unwrap();
+
+        super::write_etc_files(
+            rootfs,
+            "app",
+            Some("10.0.0.5"),
+            None,
+            None,
+            // Chegam já validadas por `parse_add_host` (ver os testes lá).
+            &[
+                "meet.kaeso.local:10.0.0.9".to_string(),
+                "erp.local:10.0.0.10".to_string(),
+            ],
+        );
+
+        let hosts = std::fs::read_to_string(dir.join("etc/hosts")).unwrap();
+        assert!(hosts.contains("10.0.0.9\tmeet.kaeso.local\n"));
+        assert!(hosts.contains("10.0.0.10\terp.local\n"));
+        assert!(hosts.starts_with("127.0.0.1\tlocalhost\n"));
+        // ORDEM: as do utilizador vêm ANTES da canónica `<ip> <hostname>`.
+        // A libc devolve a primeira correspondência, portanto é esta a ordem
+        // que faz o override ganhar — como no Docker e no Podman. A versão
+        // anterior tinha-a ao contrário e a entrada não tinha efeito nenhum.
+        let pos_extra = hosts.find("meet.kaeso.local").unwrap();
+        let pos_canonica = hosts.find("10.0.0.5\tapp").unwrap();
+        assert!(
+            pos_extra < pos_canonica,
+            "o override do utilizador tem de vir primeiro"
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
     use super::*;
 
     /// `lchown_tree` can NEVER follow symlinks: a symlink inside the tree to
@@ -5313,21 +5912,31 @@ mod tests {
     fn confinement_ok_is_fail_closed() {
         let keep = (1u64 << 1) | (1u64 << 3); // only caps 1 and 3 on the allowlist
                                               // good state: no_new_privs, seccomp filter mode, caps ⊆ keep
-        assert!(confinement_ok(Some(1), Some(2), Some(keep), Some(keep), true, keep).is_ok());
+        assert!(confinement_ok(Some(1), Some(2), Some(keep), Some(keep), true, keep, true).is_ok());
         // NO_NEW_PRIVS inactive → aborts
-        assert!(confinement_ok(Some(0), Some(2), Some(keep), Some(keep), true, keep).is_err());
+        assert!(
+            confinement_ok(Some(0), Some(2), Some(keep), Some(keep), true, keep, true).is_err()
+        );
         // seccomp expected but not in filter mode (failed to apply) → aborts
-        assert!(confinement_ok(Some(1), Some(0), Some(keep), Some(keep), true, keep).is_err());
+        assert!(
+            confinement_ok(Some(1), Some(0), Some(keep), Some(keep), true, keep, true).is_err()
+        );
         // cap outside the allowlist persists in the bounding set (capset/capbset failed) → aborts
         let leaked = keep | (1u64 << 21); // + CAP_SYS_ADMIN
-        assert!(confinement_ok(Some(1), Some(2), Some(leaked), Some(keep), true, keep).is_err());
+        assert!(
+            confinement_ok(Some(1), Some(2), Some(leaked), Some(keep), true, keep, true).is_err()
+        );
         // …or in the effective
-        assert!(confinement_ok(Some(1), Some(2), Some(keep), Some(leaked), true, keep).is_err());
+        assert!(
+            confinement_ok(Some(1), Some(2), Some(keep), Some(leaked), true, keep, true).is_err()
+        );
         // unconfined (--security-opt seccomp=unconfined): mode 0 is accepted
-        assert!(confinement_ok(Some(1), Some(0), Some(keep), Some(keep), false, keep).is_ok());
+        assert!(
+            confinement_ok(Some(1), Some(0), Some(keep), Some(keep), false, keep, true).is_ok()
+        );
         // cap fields absent = unverifiable = aborts (fail-closed)
-        assert!(confinement_ok(Some(1), Some(2), None, Some(keep), true, keep).is_err());
-        assert!(confinement_ok(Some(1), Some(2), Some(keep), None, true, keep).is_err());
+        assert!(confinement_ok(Some(1), Some(2), None, Some(keep), true, keep, true).is_err());
+        assert!(confinement_ok(Some(1), Some(2), Some(keep), None, true, keep, true).is_err());
         // privileged (keep = all caps): nothing ends up "outside" → ok
         let allcaps = u64::MAX;
         assert!(confinement_ok(
@@ -5336,9 +5945,48 @@ mod tests {
             Some(allcaps),
             Some(allcaps),
             true,
-            allcaps
+            allcaps,
+            true
         )
         .is_ok());
+    }
+
+    /// A fail-closed check has to verify the policy that was ASKED FOR.
+    ///
+    /// This demanded NO_NEW_PRIVS unconditionally, which was right only while
+    /// the engine always set it. The moment a caller could turn it off (the
+    /// CRI's `no_new_privs: false`, which the kubelet owns), every such
+    /// container aborted with 126 — and the symptom was four unrelated seccomp
+    /// specs failing, not anything naming NO_NEW_PRIVS.
+    #[test]
+    fn confinement_ok_so_exige_no_new_privs_quando_foi_pedido() {
+        let keep = (1u64 << 1) | (1u64 << 3);
+        // Pedido e ausente → aborta.
+        assert!(
+            confinement_ok(Some(0), Some(2), Some(keep), Some(keep), true, keep, true).is_err()
+        );
+        // NÃO pedido e ausente → é a política, não uma falha.
+        assert!(
+            confinement_ok(Some(0), Some(2), Some(keep), Some(keep), true, keep, false).is_ok()
+        );
+        // Não pedido mas activo na mesma → também não é problema (mais apertado
+        // do que o pedido nunca é motivo para recusar).
+        assert!(
+            confinement_ok(Some(1), Some(2), Some(keep), Some(keep), true, keep, false).is_ok()
+        );
+        // E o resto do fail-closed continua a valer com nnp desligado: uma cap
+        // fora da allowlist aborta na mesma.
+        let leaked = keep | (1u64 << 21);
+        assert!(confinement_ok(
+            Some(0),
+            Some(2),
+            Some(leaked),
+            Some(keep),
+            true,
+            keep,
+            false
+        )
+        .is_err());
     }
 
     #[test]
@@ -5455,5 +6103,30 @@ mod tests {
         assert!(sysctl_namespaced("net.ipv4.ip_forward", true));
         assert!(sysctl_namespaced("kernel.sem", false));
         assert!(sysctl_namespaced("fs.mqueue.msg_max", false));
+    }
+
+    /// `euid 0` is not proof of real root, and this is the parse that decides.
+    #[test]
+    fn initial_uid_map_reconhece_so_a_namespace_inicial() {
+        use delonix_runtime_core as super_;
+        // A namespace inicial: mapa identidade sobre o intervalo inteiro.
+        assert!(super_::initial_uid_map(
+            "         0          0 4294967295\n"
+        ));
+        // Um userns aninhado com `--map-root-user`: um só uid mapeado.
+        assert!(!super_::initial_uid_map(
+            "         0       1000          1\n"
+        ));
+        // Um userns com intervalo de subuid: várias linhas.
+        assert!(!super_::initial_uid_map(
+            "         0       1000          1\n         1     100000      65536\n"
+        ));
+        // Identidade mas com alcance limitado — NÃO é a inicial.
+        assert!(!super_::initial_uid_map(
+            "         0          0      65536\n"
+        ));
+        // Ilegível/vazio: mantém a resposta histórica, para um ambiente
+        // inesperado não trocar de modo de execução em silêncio.
+        assert!(super_::initial_uid_map(""));
     }
 }

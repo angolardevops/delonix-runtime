@@ -624,6 +624,7 @@ fn mount_run_secrets(
                 source: src.to_string_lossy().into_owned(),
                 target: target.clone(),
                 readonly: true,
+                propagation: None,
             },
         ) {
             for t in &mounted {
@@ -825,6 +826,16 @@ pub fn build_from_spec(
                 user,
                 tag,
                 arch,
+                // O `HEALTHCHECK` do ficheiro, com a base como fallback — a
+                // mesma precedência que o caminho overlay (root) já usava em
+                // `build_image`. Sem isto, o mesmo Dockerfile dava imagens
+                // diferentes conforme o modo do motor.
+                df.healthcheck.clone().or_else(|| {
+                    final_state
+                        .image
+                        .as_ref()
+                        .and_then(|i| i.config.healthcheck.clone())
+                }),
             )
         } else {
             let Some(base_image) = &final_state.image else {
@@ -888,6 +899,7 @@ fn commit_flat_rootless(
     user: String,
     tag: &str,
     arch: &str,
+    healthcheck: Option<String>,
 ) -> Result<Image> {
     let tar_path = std::env::temp_dir().join(format!("delonix-build-{id}.tar"));
     let tar_str = tar_path.to_string_lossy().to_string();
@@ -899,8 +911,17 @@ fn commit_flat_rootless(
                     super::po::t("reading build tar (mapped userns)")
                 ))
             })?;
-            images
-                .commit_flat_rootfs_from_tar(bytes, cmd, entrypoint, env, workdir, user, tag, arch)
+            images.commit_flat_rootfs_from_tar(
+                bytes,
+                cmd,
+                entrypoint,
+                env,
+                workdir,
+                user,
+                tag,
+                arch,
+                healthcheck,
+            )
         }
         Some(false) => Err(Error::Invalid(
             super::po::t("packing rootfs inside the mapped userns failed (delonix __buildtar)")
@@ -916,6 +937,7 @@ fn commit_flat_rootless(
             user,
             tag,
             arch,
+            healthcheck,
         ),
     };
     let _ = std::fs::remove_file(&tar_path); // best-effort, never hides the result

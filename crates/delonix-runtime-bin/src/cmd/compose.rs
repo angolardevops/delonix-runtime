@@ -216,6 +216,11 @@ struct ComposeService {
     privileged: bool,
     #[serde(default)]
     tmpfs: OneOrMany<String>,
+    /// `extra_hosts:` — mesmo formato `name:ip` do Docker, e por isso o mesmo
+    /// parser (`container::parse_add_host`). Aceita a forma de lista e a de
+    /// mapa (`{ nome: ip }`), como o Compose Spec.
+    #[serde(default)]
+    extra_hosts: ComposeEnv,
     deploy: Option<ComposeDeploy>,
     container_name: Option<String>,
     hostname: Option<String>,
@@ -276,6 +281,33 @@ impl ComposeEnv {
                         None => String::new(),
                     };
                     format!("{k}={val}")
+                })
+                .collect(),
+        }
+    }
+
+    /// `extra_hosts` no formato `name:ip` que o parser do motor espera.
+    ///
+    /// Método próprio e não `to_kv_pairs`: o Compose Spec aceita as duas
+    /// formas (lista `- "nome:ip"` e mapa `nome: ip`), e a de mapa sairia como
+    /// `nome=ip` — que o validador recusa de propósito, porque `db=2001:db8::1`
+    /// é ambíguo. Aqui o separador é sempre `:`, e o valor do mapa nunca é
+    /// dividido, portanto um IPv6 chega inteiro.
+    fn to_host_pairs(&self) -> Vec<String> {
+        match self {
+            ComposeEnv::List(v) => v.clone(),
+            ComposeEnv::Map(m) => m
+                .iter()
+                .map(|(k, v)| {
+                    let val = match v {
+                        Some(serde_yaml::Value::String(s)) => s.clone(),
+                        Some(other) => serde_yaml::to_string(other)
+                            .unwrap_or_default()
+                            .trim()
+                            .to_string(),
+                        None => String::new(),
+                    };
+                    format!("{k}:{val}")
                 })
                 .collect(),
         }
@@ -1285,6 +1317,18 @@ fn service_to_run_opts(
         cap_drop: svc.cap_drop.clone(),
         read_only: svc.read_only,
         tmpfs,
+        // Validado AQUI, com o mesmo parser do `container run` — um
+        // `extra_hosts:` malformado falha o `compose up` com a razão, em vez
+        // de ser descartado em silêncio (a regra explícita deste módulo).
+        add_host: {
+            let mut out = Vec::new();
+            for entry in svc.extra_hosts.to_host_pairs() {
+                let (name, ip) = super::container::parse_add_host(&entry)
+                    .map_err(delonix_runtime_core::Error::Invalid)?;
+                out.push(format!("{name}:{ip}"));
+            }
+            out
+        },
         ..Default::default()
     };
     Ok((opts, final_name))
@@ -1321,6 +1365,14 @@ fn health_params(hc: &Option<ComposeHealthcheck>) -> Result<(Duration, Duration,
         .transpose()?
         .unwrap_or(Duration::ZERO);
     Ok((interval, timeout, retries, start_period))
+}
+
+/// O comando de health check declarado na IMAGEM (`HEALTHCHECK`), sem passar
+/// por um serviço compose. Exposto para o `container run --wait` usar
+/// exactamente a mesma resolução — dois resolvedores divergiriam, e o que
+/// ficasse para trás passaria a dizer "saudável" por outra regra.
+pub(crate) fn image_health_argv(images: &ImageStore, image_ref: &str) -> Option<Vec<String>> {
+    resolve_test_argv(&None, images, image_ref)
 }
 
 fn resolve_test_argv(

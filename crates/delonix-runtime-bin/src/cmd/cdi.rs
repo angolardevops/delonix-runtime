@@ -218,6 +218,7 @@ fn apply_edits(edits: &ContainerEdits, out: &mut CdiEdits) {
             source: m.host_path.clone(),
             target: m.container_path.clone(),
             readonly: m.options.iter().any(|o| o == "ro"),
+            propagation: None,
         });
     }
     out.env.extend(edits.env.iter().cloned());
