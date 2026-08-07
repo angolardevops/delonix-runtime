@@ -92,7 +92,7 @@ JSON no <code>$DELONIX_ROOT</code>. Em rootless, o rootfs do container é uma c�
 <em>persistente</em> — as escritas sobrevivem a <code>stop</code>/<code>start</code>, como no Docker.</p>
 <div class='help'><pre><code>Containers: run/ps/stop/rm/exec/logs/update/describe
 
-Usage: dlx container [OPTIONS] &lt;COMMAND&gt;
+Usage: delonix container [OPTIONS] &lt;COMMAND&gt;
 
 Commands:
   dash         Dashboard (KPIs + table + problems) of the containers — interactive TUI, or `--once` for a text snapshot
@@ -131,65 +131,153 @@ Options:
 <h2 id='run'><code>container run</code></h2>
 <div class='help'><pre><code>Run a container from an image (pulls it if missing)
 
-Usage: dlx container run [OPTIONS] &lt;IMAGE&gt; [COMMAND]...
+Usage: delonix container run [OPTIONS] &lt;IMAGE&gt; [COMMAND]...
 
 Arguments:
   &lt;IMAGE&gt;       Image (e.g. `alpine:3.19`)
   [COMMAND]...  Command + arguments (default: the image&#x27;s ENTRYPOINT/CMD)
 
 Options:
-  -d, --detach                         Run in the background and print the ID
-      --l18n &lt;en|pt&gt;                   Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-      --name &lt;NAME&gt;                    Container name (default: `dlx-&lt;id&gt;`)
-      --hostname &lt;HOSTNAME&gt;            Hostname inside the container (UTS namespace + `/etc/hostname`). Default: the container name (docker `--hostname`)
-  -u, --user &lt;USER&gt;                    Run the process as this user: `uid[:gid]` or `name[:group]` (docker `--user`). Names are resolved in the image&#x27;s `/etc/passwd`/`/etc/group`
-      --net &lt;NET&gt;                      Network: `host` (shares the host&#x27;s, default), `none` (isolated netns with no connectivity), or the NAME of a network created with `delonix network create` [default: host]
-      --namespace &lt;NAMESPACE&gt;          Logical ISOLATION namespace (default `default`). Containers in different namespaces cannot reach each other (even on the same network); only a `kind: Dependency` crosses the boundary
-      --expose &lt;EXPOSE&gt;                Auto-register this container&#x27;s HTTP port in the L7 proxy under its internal FQDN `&lt;name&gt;.&lt;namespace&gt;.delonix.internal` (reachable via the proxy). Needs `--net &lt;network&gt;`. Removed automatically on `container rm`
-  -v, --volume &lt;VOLUMES&gt;               Volume/bind mount, `name:/target[:ro]` or `/host:/target[:ro]`. Repeatable
-  -p, --publish &lt;PUBLISH&gt;              Publish a port, `[hostIp:]hostPort:contPort[/tcp|udp]` or just `port`. Repeatable. SAFE BY DEFAULT: without `hostIp` the port binds to `127.0.0.1` only — reachable from the host itself, NOT from a browser on another machine. Name the address to widen it: `0.0.0.0:8080:80` (every interface), `192.168.1.10:8080:80` (one), or the libvirt gateway to reach it from VMs (see `delonix vm reach`). With `--net host` (the default) the container moves to its own netns with userspace NAT (slirp4netns, like rootless podman); with `--net &lt;network&gt;` it publishes via the ingress (nft DNAT + hostfwd on the single slirp)
-      --privileged                     Privileged container (all caps, seccomp off) — trusted workloads
-      --entrypoint &lt;ENTRYPOINT&gt;        Override the image&#x27;s ENTRYPOINT (COMMAND becomes the arguments to this binary; `--entrypoint &quot;&quot;` clears it and runs just the COMMAND)
-  -w, --workdir &lt;WORKDIR&gt;              Working directory the container&#x27;s process starts in (default: the image&#x27;s own configured workdir, or `/`). Persists in the record — an `exec -w` overrides it for that one call only
-      --rm                             Remove the container when the process exits (with `-d`, a detached watcher handles removal when the container dies)
-      --restart &lt;RESTART&gt;              Restart policy (only with `-d`): `no` (default), `on-failure[:max]`, `always`, `unless-stopped`. A detached supervisor (one per container, ephemeral — there&#x27;s no daemon) becomes the container&#x27;s parent, captures the real exit code, and restarts it according to the policy [default: no]
-      --device &lt;DEVICES&gt;               Attach a host device, `/dev/x[:/dev/y]`. Repeatable. The container&#x27;s `/dev` is a tmpfs with a curated list (null/zero/tty/...); this adds real host nodes to it, like `docker --device`
-  -e, --env &lt;ENV&gt;                      Additional environment variables (`KEY=VAL`), repeatable
-      --label &lt;LABELS&gt;                 Label (`KEY=VAL`), repeatable — e.g. `io.x-k8s.kind.role=control-plane` enables the dedicated cgroup2 delegation for Kind nodes (see `setup_node_cgroup_ns`)
-  -m, --memory &lt;MEMORY&gt;                Memory limit (`64M`, `2G`, `max`). Default: `max` (no cap)
-  -c, --cpus &lt;CPUS&gt;                    CPU quota (number of cores, e.g. `0.5`, `2`). Default: `1.0`
-      --cpu-weight &lt;CPU_WEIGHT&gt;        Relative CPU weight (`cpu.weight`, 1–10000) under contention
-      --cpuset &lt;CPUSET&gt;                CPUs the container is pinned to (`cpuset.cpus`, e.g. `0-3`, `0,2`)
-      --io-weight &lt;IO_WEIGHT&gt;          Relative I/O weight (`io.weight`, 1–10000)
-      --read-only                      Read-only rootfs (writes go to tmpfs/volumes)
-      --cap-add &lt;CAP_ADD&gt;              Add a capability (e.g. `NET_ADMIN`). Repeatable
-      --cap-drop &lt;CAP_DROP&gt;            Drop a capability. Repeatable
-      --security-opt &lt;SECURITY_OPT&gt;    `seccomp=unconfined` | `apparmor=&lt;profile&gt;` (docker-style). Repeatable
-      --apparmor &lt;APPARMOR&gt;            AppArmor profile to apply (`unconfined`, `delonix-default`, or an already-loaded name). `delonix-default` is loaded automatically
-      --selinux &lt;SELINUX&gt;              SELinux context/profile to apply
-      --userns                         User namespace: enables the subuid mapping (default in rootless)
-      --no-userns                      Disable the automatic activation of the user namespace
-      --host-pid                       Share the host&#x27;s PID namespace (`--pid host`)
-      --host-ipc                       Share the host&#x27;s IPC namespace
-      --detect                         Detection mode: seccomp in log mode (doesn&#x27;t block), to discover syscalls
-      --secret &lt;SECRET&gt;                Inject a secret from the vault (`name`), as an environment variable. Repeatable. With `--secret-files`, it goes to `/run/secrets/&lt;name&gt;`
-      --secret-files                   The `--secret`s come in as files in `/run/secrets/` (tmpfs), not env
-      --env-file &lt;ENV_FILE&gt;            Load variables from a `.env` file (`KEY=VAL` per line). Repeatable
-      --tmpfs &lt;TMPFS&gt;                  Mount a tmpfs (`/path[:options]`). Repeatable
-      --ulimit &lt;ULIMIT&gt;                Ulimit (`nofile=1024:2048`). Repeatable
-      --sysctl &lt;SYSCTL&gt;                Container sysctl (`net.core.somaxconn=1024`). Repeatable
-      --gpus &lt;GPUS&gt;                    Expose GPUs: `all` | `nvidia` | `dri` (expands to the `/dev` nodes)
-      --ip &lt;IP&gt;                        Fixed IP on the network (`--net &lt;network&gt;`), e.g. `10.89.0.10`
-      --network-alias &lt;NETWORK_ALIAS&gt;  The container&#x27;s DNS alias on the network. Repeatable
-      --knows &lt;KNOWS&gt;                  Restrict DNS resolution to these containers (isolation). Repeatable
-      --knows-none                     The container resolves NO other container by name
-      --pod &lt;POD&gt;                      Join a pod&#x27;s netns (`--net &lt;network&gt;`), sharing IP/ports
-      --net-bps &lt;NET_BPS&gt;              Egress bandwidth cap (`10mbit`, `512kbit`). Only with `--net &lt;network&gt;`
-      --net-burst &lt;NET_BURST&gt;          Burst for the bandwidth cap. Only with `--net-bps`
-      --log-driver &lt;LOG_DRIVER&gt;        Log driver (`json`, `cri`, ...)
-      --log-file &lt;LOG_FILE&gt;            Log file path (overrides the default)
-      --log-cri                        CRI format in the log file (for the kubelet/`crictl logs`)
-  -h, --help                           Print help</code></pre></div>
+  -d, --detach
+          Run in the background and print the ID
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+      --name &lt;NAME&gt;
+          Container name (default: `dlx-&lt;id&gt;`)
+      --hostname &lt;HOSTNAME&gt;
+          Hostname inside the container (UTS namespace + `/etc/hostname`). Default: the container name (docker `--hostname`)
+  -u, --user &lt;USER&gt;
+          Run the process as this user: `uid[:gid]` or `name[:group]` (docker `--user`). Names are resolved in the image&#x27;s `/etc/passwd`/`/etc/group`
+      --net &lt;NET&gt;
+          Network: `host` (shares the host&#x27;s, default), `none` (isolated netns with no connectivity), or the NAME of a network created with `delonix network create` [default: host]
+      --namespace &lt;NAMESPACE&gt;
+          Logical ISOLATION namespace (default `default`). Containers in different namespaces cannot reach each other (even on the same network); only a `kind: Dependency` crosses the boundary
+      --expose &lt;EXPOSE&gt;
+          Auto-register this container&#x27;s HTTP port in the L7 proxy under its internal FQDN `&lt;name&gt;.&lt;namespace&gt;.delonix.internal` (reachable via the proxy). Needs `--net &lt;network&gt;`. Removed automatically on `container rm`
+  -v, --volume &lt;VOLUMES&gt;
+          Volume/bind mount, `name:/target[:ro]` or `/host:/target[:ro]`. Repeatable
+  -p, --publish &lt;PUBLISH&gt;
+          Publish a port, `[hostIp:]hostPort:contPort[/tcp|udp]` or just `port`. Repeatable. SAFE BY DEFAULT: without `hostIp` the port binds to `127.0.0.1` only — reachable from the host itself, NOT from a browser on another machine. Name the address to widen it: `0.0.0.0:8080:80` (every interface), `192.168.1.10:8080:80` (one), or the libvirt gateway to reach it from VMs (see `delonix vm reach`). With `--net host` (the default) the container moves to its own netns with userspace NAT (slirp4netns, like rootless podman); with `--net &lt;network&gt;` it publishes via the ingress (nft DNAT + hostfwd on the single slirp)
+      --privileged
+          Privileged container (all caps, seccomp off) — trusted workloads
+      --entrypoint &lt;ENTRYPOINT&gt;
+          Override the image&#x27;s ENTRYPOINT (COMMAND becomes the arguments to this binary; `--entrypoint &quot;&quot;` clears it and runs just the COMMAND)
+  -w, --workdir &lt;WORKDIR&gt;
+          Working directory the container&#x27;s process starts in (default: the image&#x27;s own configured workdir, or `/`). Persists in the record — an `exec -w` overrides it for that one call only
+      --rm
+          Remove the container when the process exits (with `-d`, a detached watcher handles removal when the container dies)
+      --restart &lt;RESTART&gt;
+          Restart policy (only with `-d`): `no` (default), `on-failure[:max]`, `always`, `unless-stopped`. A detached supervisor (one per container, ephemeral — there&#x27;s no daemon) becomes the container&#x27;s parent, captures the real exit code, and restarts it according to the policy [default: no]
+      --device &lt;DEVICES&gt;
+          Attach a host device, `/dev/x[:/dev/y]`. Repeatable. The container&#x27;s `/dev` is a tmpfs with a curated list (null/zero/tty/...); this adds real host nodes to it, like `docker --device`
+  -e, --env &lt;ENV&gt;
+          Additional environment variables (`KEY=VAL`), repeatable
+      --label &lt;LABELS&gt;
+          Label (`KEY=VAL`), repeatable — e.g. `io.x-k8s.kind.role=control-plane` enables the dedicated cgroup2 delegation for Kind nodes (see `setup_node_cgroup_ns`)
+  -m, --memory &lt;MEMORY&gt;
+          Memory limit (`64M`, `2G`, `max`). Default: `max` (no cap)
+  -c, --cpus &lt;CPUS&gt;
+          CPU quota (number of cores, e.g. `0.5`, `2`). Default: `1.0`
+      --cpu-weight &lt;CPU_WEIGHT&gt;
+          Relative CPU weight (`cpu.weight`, 1–10000) under contention
+      --cpuset &lt;CPUSET&gt;
+          CPUs the container is pinned to (`cpuset.cpus`, e.g. `0-3`, `0,2`)
+      --io-weight &lt;IO_WEIGHT&gt;
+          Relative I/O weight (`io.weight`, 1–10000)
+      --device-read-bps &lt;DEVICE_READ_BPS&gt;
+          Absolute read limit from the store&#x27;s disk (`10mb`, `1g`). Docker&#x27;s `--device-read-bps`
+      --device-write-bps &lt;DEVICE_WRITE_BPS&gt;
+          Absolute write limit to the store&#x27;s disk (`10mb`, `1g`). Docker&#x27;s `--device-write-bps`
+      --device-read-iops &lt;DEVICE_READ_IOPS&gt;
+          Absolute read IOPS limit from the store&#x27;s disk
+      --device-write-iops &lt;DEVICE_WRITE_IOPS&gt;
+          Absolute write IOPS limit to the store&#x27;s disk
+      --read-only
+          Read-only rootfs (writes go to tmpfs/volumes)
+      --cap-add &lt;CAP_ADD&gt;
+          Add a capability (e.g. `NET_ADMIN`). Repeatable
+      --cap-drop &lt;CAP_DROP&gt;
+          Drop a capability. Repeatable
+      --security-opt &lt;SECURITY_OPT&gt;
+          Security options (docker-style), repeatable: `seccomp=unconfined` | `seccomp=&lt;profile.json&gt;` (OCI/runc format) | `apparmor=&lt;profile&gt;` | `no-new-privileges[=true|false]` (default true, stricter than docker/podman)
+      --apparmor &lt;APPARMOR&gt;
+          AppArmor profile to apply (`unconfined`, `delonix-default`, or an already-loaded name). `delonix-default` is loaded automatically
+      --selinux &lt;SELINUX&gt;
+          SELinux context/profile to apply
+      --userns
+          User namespace: enables the subuid mapping (default in rootless)
+      --no-userns
+          Disable the automatic activation of the user namespace
+      --host-pid
+          Share the host&#x27;s PID namespace (`--pid host`)
+      --host-ipc
+          Share the host&#x27;s IPC namespace
+      --detect
+          Detection mode: seccomp in log mode (doesn&#x27;t block), to discover syscalls
+      --secret &lt;SECRET&gt;
+          Inject a secret from the vault (`name`), as an environment variable. Repeatable. With `--secret-files`, it goes to `/run/secrets/&lt;name&gt;`
+      --secret-files
+          The `--secret`s come in as files in `/run/secrets/` (tmpfs), not env
+      --env-file &lt;ENV_FILE&gt;
+          Load variables from a `.env` file (`KEY=VAL` per line). Repeatable
+      --tmpfs &lt;TMPFS&gt;
+          Mount a tmpfs (`/path[:options]`). Repeatable
+      --ulimit &lt;ULIMIT&gt;
+          Ulimit (`nofile=1024:2048`). Repeatable
+      --dns &lt;DNS&gt;
+          DNS server for the container&#x27;s `/etc/resolv.conf`. Repeatable. Overrides the resolver the engine would pick (network gateway, slirp, or the host&#x27;s copy)
+      --dns-search &lt;DNS_SEARCH&gt;
+          DNS search domain. Repeatable
+      --dns-option &lt;DNS_OPTION&gt;
+          `resolv.conf` option (`ndots:2`, `timeout:1`). Repeatable
+      --group-add &lt;GROUP_ADD&gt;
+          Supplementary group id for the process (`--group-add 1234`). Repeatable. Applied even when the container runs as root — a root process still needs a group to reach a mounted share
+      --masked-path &lt;MASKED_PATH&gt;
+          Make a path unreadable inside the container (`--masked-path /proc/kcore`). Repeatable. A file is covered with `/dev/null`, a directory with an empty read-only tmpfs
+      --readonly-path &lt;READONLY_PATH&gt;
+          Remount a path read-only inside the container (`--readonly-path /proc/sys`). Repeatable
+      --sysctl &lt;SYSCTL&gt;
+          Container sysctl (`net.core.somaxconn=1024`). Repeatable
+      --gpus &lt;GPUS&gt;
+          Expose GPUs: `all` | `nvidia` | `dri` (expands to the `/dev` nodes)
+      --ip &lt;IP&gt;
+          Fixed IP on the network (`--net &lt;network&gt;`), e.g. `10.89.0.10`
+      --network-alias &lt;NETWORK_ALIAS&gt;
+          The container&#x27;s DNS alias on the network. Repeatable
+      --add-host &lt;ADD_HOST&gt;
+          Extra `/etc/hosts` entry, `name:ip` (as Docker/Podman). Repeatable. PERSISTED: survives `stop`/`start` and `restart`, which rewrite `/etc/hosts` from scratch
+      --wait
+          With `-d`, block until the image&#x27;s `HEALTHCHECK` passes (or the timeout elapses). Replaces the `until curl ...; do sleep; done` that every script ends up writing. No `HEALTHCHECK` in the image is a clear error, never a silent instant return
+      --wait-timeout &lt;WAIT_TIMEOUT&gt;
+          How long `--wait` waits before giving up (seconds) [default: 60]
+      --health-cmd &lt;HEALTH_CMD&gt;
+          Probe command, run with `/bin/sh -c` inside the container. Without it, the image&#x27;s own `HEALTHCHECK` is monitored; any other `--health-*` flag turns monitoring on for an image that has one
+      --health-interval &lt;HEALTH_INTERVAL&gt;
+          Seconds between probes [default: 30]
+      --health-timeout &lt;HEALTH_TIMEOUT&gt;
+          A probe that runs longer than this counts as a failure. The probe kills ITSELF (the wrapper is `sh`), so nothing is left stuck inside the container [default: 30]
+      --health-retries &lt;HEALTH_RETRIES&gt;
+          Consecutive failures before the container is `unhealthy` [default: 3]
+      --health-start-period &lt;HEALTH_START_PERIOD&gt;
+          Grace at startup: failures inside this window do not count, and the container reads `starting` rather than `unhealthy` [default: 0]
+      --knows &lt;KNOWS&gt;
+          Restrict DNS resolution to these containers (isolation). Repeatable
+      --knows-none
+          The container resolves NO other container by name
+      --pod &lt;POD&gt;
+          Join a pod&#x27;s netns (`--net &lt;network&gt;`), sharing IP/ports
+      --net-bps &lt;NET_BPS&gt;
+          Egress bandwidth cap (`10mbit`, `512kbit`). Only with `--net &lt;network&gt;`
+      --net-burst &lt;NET_BURST&gt;
+          Burst for the bandwidth cap. Only with `--net-bps`
+      --log-driver &lt;LOG_DRIVER&gt;
+          Log driver (`json`, `cri`, ...)
+      --log-file &lt;LOG_FILE&gt;
+          Log file path (overrides the default)
+      --log-cri
+          CRI format in the log file (for the kubelet/`crictl logs`)
+  -h, --help
+          Print help</code></pre></div>
 <p><strong><code>-p</code> e a rede:</strong> com <code>--net host</code> (o default) o
 container muda para um netns próprio com NAT em userspace (slirp4netns — o modelo do podman
 rootless); com <code>--net &lt;rede&gt;</code> a porta é publicada pelo <em>ingress</em> (hostfwd no
@@ -200,7 +288,7 @@ delonix container run -d --net minha-rede -p 8443:443 caddy</code></pre></div><d
 <h2 id='ps'><code>container ps</code></h2>
 <div class='help'><pre><code>List containers
 
-Usage: dlx container ps [OPTIONS]
+Usage: delonix container ps [OPTIONS]
 
 Options:
   -a, --all              Include stopped/failed ones
@@ -212,7 +300,7 @@ Options:
 <h2 id='start'><code>container start</code></h2>
 <div class='help'><pre><code>(Re)start stopped/crashed containers, reusing the persistent rootfs (writes made inside the container survive, like in docker) and the same network/ports/volumes as the original `run`. Always detached
 
-Usage: dlx container start [OPTIONS] &lt;IDS&gt;...
+Usage: delonix container start [OPTIONS] &lt;IDS&gt;...
 
 Arguments:
   &lt;IDS&gt;...  
@@ -226,7 +314,7 @@ persistente — ao contrário de <code>rm</code>+<code>run</code>, nada do que o
 <h2 id='stop'><code>container stop</code></h2>
 <div class='help'><pre><code>Stop one or more containers (SIGTERM, then SIGKILL)
 
-Usage: dlx container stop [OPTIONS] &lt;IDS&gt;...
+Usage: delonix container stop [OPTIONS] &lt;IDS&gt;...
 
 Arguments:
   &lt;IDS&gt;...  
@@ -239,7 +327,7 @@ Options:
 <h2 id='rm'><code>container rm</code></h2>
 <div class='help'><pre><code>Remove one or more containers
 
-Usage: dlx container rm [OPTIONS] &lt;IDS&gt;...
+Usage: delonix container rm [OPTIONS] &lt;IDS&gt;...
 
 Arguments:
   &lt;IDS&gt;...  
@@ -252,7 +340,7 @@ Options:
 <h2 id='exec'><code>container exec</code></h2>
 <div class='help'><pre><code>Execute a command inside a running container
 
-Usage: dlx container exec [OPTIONS] &lt;ID&gt; &lt;COMMAND&gt;...
+Usage: delonix container exec [OPTIONS] &lt;ID&gt; &lt;COMMAND&gt;...
 
 Arguments:
   &lt;ID&gt;          
@@ -270,7 +358,7 @@ Options:
 <h2 id='logs'><code>container logs</code></h2>
 <div class='help'><pre><code>Show the logs (detached containers)
 
-Usage: dlx container logs [OPTIONS] &lt;ID&gt;
+Usage: delonix container logs [OPTIONS] &lt;ID&gt;
 
 Arguments:
   &lt;ID&gt;  
@@ -286,7 +374,7 @@ Options:
 <h2 id='inspect'><code>container inspect</code></h2>
 <div class='help'><pre><code>Show the full spec of one or more containers (Store JSON)
 
-Usage: dlx container inspect [OPTIONS] &lt;IDS&gt;...
+Usage: delonix container inspect [OPTIONS] &lt;IDS&gt;...
 
 Arguments:
   &lt;IDS&gt;...  
@@ -298,7 +386,7 @@ Options:
 <h2 id='stats'><code>container stats</code></h2>
 <div class='help'><pre><code>Resource usage (CPU/memory/PIDs) of the running containers — one sample and exits (no stream). With no IDs, shows all running ones
 
-Usage: dlx container stats [OPTIONS] [IDS]...
+Usage: delonix container stats [OPTIONS] [IDS]...
 
 Arguments:
   [IDS]...  
@@ -314,7 +402,7 @@ marcada com <code>~</code>.</p>
 <h2 id='apply'><code>container apply</code></h2>
 <div class='help'><pre><code>Apply the `kind: Container` documents of a manifest (idempotent by name — an existing container with that name is neither recreated nor checked for spec drift, see `cmd::manifest`)
 
-Usage: dlx container apply [OPTIONS]
+Usage: delonix container apply [OPTIONS]
 
 Options:
   -f, --file &lt;FILE&gt;   
@@ -324,7 +412,7 @@ Options:
 <h2 id='init'><code>container init</code></h2>
 <div class='help'><pre><code>Initialize a project with a Delonixfile + manifest — files ALREADY FILLED IN (images included), ready to use without editing anything
 
-Usage: dlx container init [OPTIONS] [DIR]
+Usage: delonix container init [OPTIONS] [DIR]
 
 Arguments:
   [DIR]  Project directory (default: the current one) [default: .]
@@ -341,7 +429,7 @@ Options:
 <h2 id='kill'><code>container kill</code></h2>
 <div class='help'><pre><code>Send a signal to one or more containers (default SIGKILL) — unlike `stop`, does not wait or force a `Stopped` status: the real outcome (e.g. `Crashed` for a `KILL`) is picked up on the next observation
 
-Usage: dlx container kill [OPTIONS] &lt;IDS&gt;...
+Usage: delonix container kill [OPTIONS] &lt;IDS&gt;...
 
 Arguments:
   &lt;IDS&gt;...  
@@ -357,7 +445,7 @@ observação seguinte.</p>
 <h2 id='wait'><code>container wait</code></h2>
 <div class='help'><pre><code>Block until one or more containers exit, then print their exit code (one per line, in the order given)
 
-Usage: dlx container wait [OPTIONS] &lt;IDS&gt;...
+Usage: delonix container wait [OPTIONS] &lt;IDS&gt;...
 
 Arguments:
   &lt;IDS&gt;...  
@@ -373,7 +461,7 @@ real desse processo).</p>
 <h2 id='restart'><code>container restart</code></h2>
 <div class='help'><pre><code>Stop then start one or more containers (reuses the persistent rootfs and the original run configuration, like `start`)
 
-Usage: dlx container restart [OPTIONS] &lt;IDS&gt;...
+Usage: delonix container restart [OPTIONS] &lt;IDS&gt;...
 
 Arguments:
   &lt;IDS&gt;...  
@@ -386,7 +474,7 @@ Options:
 <h2 id='rename'><code>container rename</code></h2>
 <div class='help'><pre><code>Give a container a new name
 
-Usage: dlx container rename [OPTIONS] &lt;ID&gt; &lt;NEW_NAME&gt;
+Usage: delonix container rename [OPTIONS] &lt;ID&gt; &lt;NEW_NAME&gt;
 
 Arguments:
   &lt;ID&gt;        
@@ -399,7 +487,7 @@ Options:
 <h2 id='port'><code>container port</code></h2>
 <div class='help'><pre><code>Published ports of a container (`hostPort/proto -&gt; containerPort`)
 
-Usage: dlx container port [OPTIONS] &lt;ID&gt;
+Usage: delonix container port [OPTIONS] &lt;ID&gt;
 
 Arguments:
   &lt;ID&gt;  
@@ -411,7 +499,7 @@ Options:
 <h2 id='pause'><code>container pause</code></h2>
 <div class='help'><pre><code>Suspend a container&#x27;s processes (cgroup v2 freezer) — the state stays in memory, unlike `stop`. Resume with `unpause`
 
-Usage: dlx container pause [OPTIONS] &lt;IDS&gt;...
+Usage: delonix container pause [OPTIONS] &lt;IDS&gt;...
 
 Arguments:
   &lt;IDS&gt;...  
@@ -423,7 +511,7 @@ Options:
 <h2 id='unpause'><code>container unpause</code></h2>
 <div class='help'><pre><code>Resume a container suspended with `pause`
 
-Usage: dlx container unpause [OPTIONS] &lt;IDS&gt;...
+Usage: delonix container unpause [OPTIONS] &lt;IDS&gt;...
 
 Arguments:
   &lt;IDS&gt;...  
@@ -435,7 +523,7 @@ Options:
 <h2 id='commit'><code>container commit</code></h2>
 <div class='help'><pre><code>Create an image from a container&#x27;s CURRENT rootfs state (whatever was written inside becomes a new layer)
 
-Usage: dlx container commit [OPTIONS] &lt;ID&gt; &lt;TAG&gt;
+Usage: delonix container commit [OPTIONS] &lt;ID&gt; &lt;TAG&gt;
 
 Arguments:
   &lt;ID&gt;   
@@ -448,7 +536,7 @@ Options:
 <h2 id='ssh'><code>container ssh</code></h2>
 <div class='help'><pre><code>Interactive shell inside a container (shortcut for `exec -t`): with no command, it tries `bash` and falls back to `sh`, which exists in any image
 
-Usage: dlx container ssh [OPTIONS] &lt;ID&gt; [COMMAND]...
+Usage: delonix container ssh [OPTIONS] &lt;ID&gt; [COMMAND]...
 
 Arguments:
   &lt;ID&gt;          
@@ -461,7 +549,7 @@ Options:
 <h2 id='healthcheck'><code>container healthcheck</code></h2>
 <div class='help'><pre><code>Run the image&#x27;s `HEALTHCHECK` inside the container. Exits with 1 if `unhealthy` — usable in a script/CI
 
-Usage: dlx container healthcheck [OPTIONS] &lt;ID&gt;
+Usage: delonix container healthcheck [OPTIONS] &lt;ID&gt;
 
 Arguments:
   &lt;ID&gt;  
@@ -473,7 +561,7 @@ Options:
 <h2 id='top'><code>container top</code></h2>
 <div class='help'><pre><code>Processes running inside a container (read from `cgroup.procs`)
 
-Usage: dlx container top [OPTIONS] &lt;ID&gt;
+Usage: delonix container top [OPTIONS] &lt;ID&gt;
 
 Arguments:
   &lt;ID&gt;  
@@ -485,7 +573,7 @@ Options:
 <h2 id='diff'><code>container diff</code></h2>
 <div class='help'><pre><code>Files changed relative to the image: `A` = created/changed, `D` = deleted
 
-Usage: dlx container diff [OPTIONS] &lt;ID&gt;
+Usage: delonix container diff [OPTIONS] &lt;ID&gt;
 
 Arguments:
   &lt;ID&gt;  
@@ -497,7 +585,7 @@ Options:
 <h2 id='cp'><code>container cp</code></h2>
 <div class='help'><pre><code>Copy files between the host and a container. Exactly one side is `container:/path` (e.g. `delonix container cp web:/etc/nginx.conf .`)
 
-Usage: dlx container cp [OPTIONS] &lt;SRC&gt; &lt;DST&gt;
+Usage: delonix container cp [OPTIONS] &lt;SRC&gt; &lt;DST&gt;
 
 Arguments:
   &lt;SRC&gt;  
@@ -510,7 +598,7 @@ Options:
 <h2 id='describe'><code>container describe</code></h2>
 <div class='help'><pre><code>Human-readable detail of one or more containers, `kubectl describe`-style (for humans; use `inspect` for script-consumable JSON)
 
-Usage: dlx container describe [OPTIONS] &lt;IDS&gt;...
+Usage: delonix container describe [OPTIONS] &lt;IDS&gt;...
 
 Arguments:
   &lt;IDS&gt;...  
@@ -526,7 +614,7 @@ Unlike docker (where changing a port or a volume forces recreating the container
 
 The changes are persisted in the registry, so a later `container start` reproduces the new configuration, not the original.
 
-Usage: dlx container update [OPTIONS] &lt;ID&gt;
+Usage: delonix container update [OPTIONS] &lt;ID&gt;
 
 Arguments:
   &lt;ID&gt;
@@ -580,7 +668,7 @@ num só comando. <code>--memory</code>/<code>--cpus</code> reescrevem o cgroup r
 <h2 id='attach'><code>container attach</code></h2>
 <div class='help'><pre><code>Re-attach to a running container&#x27;s output stream (same log file `logs -f` reads). Unlike `docker attach`, this is OUTPUT-ONLY: a detached container&#x27;s stdin has nowhere to go (this engine keeps no live conduit to it once started, unlike a persistent per-container shim) — `-i`/`--stdin` is refused with a clear error instead of silently doing nothing
 
-Usage: dlx container attach [OPTIONS] &lt;ID&gt;
+Usage: delonix container attach [OPTIONS] &lt;ID&gt;
 
 Arguments:
   &lt;ID&gt;  

@@ -15,7 +15,7 @@ Not a low-level OCI *runtime* (that's ``runc``/``crun``): Delonix is a full
 container **and** VM engine — build, run, network, firewall, store, and
 bootstrap Kubernetes clusters, from one binary.
 
-:Version: 0.38.0
+:Version: 0.43.0
 :License: Apache-2.0
 :Docs: https://angolardevops.github.io/delonix-runtime/
 :Repo: https://github.com/angolardevops/delonix-runtime
@@ -47,7 +47,19 @@ Why it's different
    * - Kubernetes
      - —
      - —
-     - own CRI + ``kubeadm`` bootstrap from scratch (``delonix cluster``)
+     - own CRI + ``kubeadm`` bootstrap from scratch (``delonix cluster``).
+       Conformance is **measured and published**: 79/103 specs of the upstream
+       ``critest`` — see `Kubernetes CRI conformance`_
+   * - Health checks
+     - continuous
+     - continuous (needs systemd timers)
+     - continuous, **without systemd** — the detached container's own supervisor
+       runs the probe
+   * - Custom seccomp profiles
+     - yes
+     - yes
+     - yes (OCI JSON), and a profile it cannot fully express is **refused**,
+       never silently downgraded
    * - Firewall
      - basic
      - basic
@@ -80,8 +92,13 @@ write access to their common ancestor ``user-<uid>.slice``, which belongs to
 root. Namespace and seccomp isolation are unaffected — only the resource
 ceilings.
 
-``install.sh`` detects this and prints the remedy. Run workloads inside a
-delegated scope::
+``delonix system setup`` diagnoses it, and ``--delegate`` writes the fix. It
+gives **two** remedies because there are two problems, and most answers online
+only cover one: a drop-in on ``user@.service`` fixes future logins, but *not*
+the shell you are typing in — an SSH ``session-N.scope`` is a **sibling** of
+``user@.service`` and inherits nothing from it.
+
+For the live session, run workloads inside a delegated scope::
 
     systemd-run --user --scope -p Delegate=yes -- delonix container run -d -m 512M myapp
 
@@ -141,7 +158,51 @@ Highlights
   capability, degrading silently to veth counters otherwise.
 - **Kubernetes, end to end.** A CRI server (``delonix-cri``) and
   ``delonix cluster kubeadm`` provision VMs and bootstrap a real cluster whose
-  node runtime *is* Delonix.
+  node runtime *is* Delonix. Conformance is measured, not asserted — see
+  `Kubernetes CRI conformance`_.
+- **Health checks without a daemon.** ``--health-cmd`` and friends, with the
+  ``STATUS`` column showing ``Up 21 seconds (healthy)``. The probe is run by the
+  detached container's **own supervisor** — no fleet-wide process, and no
+  systemd timers (which rootless Podman needs for the same thing). ``run
+  --wait`` blocks until the image's ``HEALTHCHECK`` passes, replacing the
+  ``until curl …; do sleep; done`` everyone ends up writing badly.
+- **Custom seccomp profiles.** ``--security-opt seccomp=<profile.json>`` in the
+  OCI/runc format, and Kubernetes' ``localhostProfile`` through the CRI. Syscall
+  names resolve **per architecture** rather than from a table of numbers, and a
+  profile this engine cannot express exactly — argument-filtered rules, for
+  instance — is refused rather than approximated into a weaker one.
+- **Short paths for the hot verbs.** ``delonix ps``, ``run``, ``exec``,
+  ``logs``, ``rm``, ``images``. They are the same commands, reached by rewriting
+  argv, so they cannot drift from the grouped form.
+
+Kubernetes CRI conformance
+==========================
+
+``delonix-cri`` is measured against **cri-tools ``critest``**, the upstream
+suite, and the number is published rather than claimed: *serves a kubelet* is an
+assertion, *79 of 103 named specs* is a fact somebody else can check.
+
+::
+
+    Ran 103 of 122 Specs
+    79 Passed | 24 Failed | 19 Skipped        # rootless, cgroup v2
+
+Reproduce with ``tests/compat/cri-conformance.sh``. The full breakdown of what
+fails and why — including what is **not** ours — is in
+`docs/cri-conformance.md <docs/cri-conformance.md>`_.
+
+Of the remaining failures, roughly half are not engine gaps: nine are AppArmor
+specs, which need ``CAP_MAC_ADMIN`` in the *initial* user namespace (Docker and
+containerd have exactly the same limit), and four are mount tests where the
+suite itself cannot mount on the host without root.
+
+One divergence is **deliberate** and will not change to win a spec: a container
+with no seccomp profile declared runs under the engine's built-in allowlist, not
+unconfined. That is stricter than the specification asks for.
+
+There is also a Docker Engine API compatibility layer, whose coverage is
+published the same way — ``delonix serve docker-api --matrix`` prints the routes
+that exist and the ones that deliberately do not, with the reason for each.
 
 Install
 =======

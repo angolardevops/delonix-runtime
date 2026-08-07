@@ -3481,3 +3481,56 @@ msgstr "workload '{name}': type: microvm força o backend cloud-hypervisor — r
 
 msgid "Isolation namespace (default `default`): VMs of different namespaces do not reach each other. Requires `--backend cloud-hypervisor`"
 msgstr "Namespace de isolamento (por omissão `default`): VMs de namespaces diferentes não se alcançam. Exige `--backend cloud-hypervisor`"
+
+# ---- help: flags novas da série v0.43 (container run, system, serve) -------
+
+msgid "Extra `/etc/hosts` entry, `name:ip` (as Docker/Podman). Repeatable. PERSISTED: survives `stop`/`start` and `restart`, which rewrite `/etc/hosts` from scratch."
+msgstr "Entrada extra no `/etc/hosts`, `nome:ip` (como no Docker/Podman). Repetível. PERSISTIDA: sobrevive a `stop`/`start` e a `restart`, que reescrevem o `/etc/hosts` de raiz."
+
+msgid "With `-d`, block until the image's `HEALTHCHECK` passes (or the timeout elapses). Replaces the `until curl ...; do sleep; done` that every script ends up writing. No `HEALTHCHECK` in the image is a clear error, never a silent instant return."
+msgstr "Com `-d`, bloqueia até o `HEALTHCHECK` da imagem passar (ou esgotar o tempo). Substitui o `until curl ...; do sleep; done` que todos os scripts acabam por escrever. Sem `HEALTHCHECK` na imagem é erro claro, nunca um retorno instantâneo em silêncio."
+
+msgid "How long `--wait` waits before giving up (seconds)."
+msgstr "Quanto tempo o `--wait` espera antes de desistir (segundos)."
+
+msgid "Probe command, run with `/bin/sh -c` inside the container. Without it, the image's own `HEALTHCHECK` is monitored; any other `--health-*` flag turns monitoring on for an image that has one."
+msgstr "Comando da sonda, corrido com `/bin/sh -c` dentro do container. Sem ele, monitoriza-se o `HEALTHCHECK` da própria imagem; qualquer outra flag `--health-*` liga a monitorização para uma imagem que o tenha."
+
+msgid "Seconds between probes."
+msgstr "Segundos entre sondas."
+
+msgid "A probe that runs longer than this counts as a failure. The probe kills ITSELF (the wrapper is `sh`), so nothing is left stuck inside the container."
+msgstr "Uma sonda que demore mais do que isto conta como falha. A sonda mata-se A SI PRÓPRIA (o invólucro é `sh`), por isso não fica nada preso dentro do container."
+
+msgid "Consecutive failures before the container is `unhealthy`."
+msgstr "Falhas seguidas antes de o container ficar `unhealthy`."
+
+msgid "Grace at startup: failures inside this window do not count, and the container reads `starting` rather than `unhealthy`."
+msgstr "Tolerância no arranque: falhas dentro desta janela não contam, e o container lê-se `starting` em vez de `unhealthy`."
+
+msgid "DNS server for the container's `/etc/resolv.conf`. Repeatable. Overrides the resolver the engine would pick (network gateway, slirp, or the host's copy)."
+msgstr "Servidor DNS para o `/etc/resolv.conf` do container. Repetível. Substitui o resolvedor que o motor escolheria (gateway da rede, slirp, ou a cópia do host)."
+
+msgid "DNS search domain. Repeatable."
+msgstr "Domínio de pesquisa DNS. Repetível."
+
+msgid "`resolv.conf` option (`ndots:2`, `timeout:1`). Repeatable."
+msgstr "Opção do `resolv.conf` (`ndots:2`, `timeout:1`). Repetível."
+
+msgid "Supplementary group id for the process (`--group-add 1234`). Repeatable. Applied even when the container runs as root — a root process still needs a group to reach a mounted share."
+msgstr "Id de grupo suplementar para o processo (`--group-add 1234`). Repetível. Aplicado mesmo com o container a correr como root — um processo root precisa na mesma de um grupo para chegar a uma partilha montada."
+
+msgid "Make a path unreadable inside the container (`--masked-path /proc/kcore`). Repeatable. A file is covered with `/dev/null`, a directory with an empty read-only tmpfs."
+msgstr "Torna um caminho ilegível dentro do container (`--masked-path /proc/kcore`). Repetível. Um ficheiro é tapado com `/dev/null`, um directório com um tmpfs vazio read-only."
+
+msgid "Remount a path read-only inside the container (`--readonly-path /proc/sys`). Repeatable."
+msgstr "Remonta um caminho como read-only dentro do container (`--readonly-path /proc/sys`). Repetível."
+
+msgid "Security options (docker-style), repeatable: `seccomp=unconfined` | `seccomp=<profile.json>` (OCI/runc format) | `apparmor=<profile>` | `no-new-privileges[=true|false]` (default true, stricter than docker/podman)."
+msgstr "Opções de segurança (estilo docker), repetível: `seccomp=unconfined` | `seccomp=<perfil.json>` (formato OCI/runc) | `apparmor=<perfil>` | `no-new-privileges[=true|false]` (default true, mais apertado que o docker/podman)."
+
+msgid "Print the coverage matrix and exit, without serving anything. This layer is a SLICE of the Docker API, and third-party tooling deserves to know where it ends before it hits a 404 mid-run."
+msgstr "Imprime a matriz de cobertura e sai, sem servir nada. Esta camada é uma FATIA da API do Docker, e as ferramentas de terceiros merecem saber onde ela acaba antes de apanharem um 404 a meio."
+
+msgid "Apply the fix instead of only reporting it. Writing the system-wide drop-in needs root; the per-session remedy never does."
+msgstr "Aplica a correcção em vez de só a reportar. Escrever o drop-in do sistema exige root; o remédio por-sessão nunca exige."

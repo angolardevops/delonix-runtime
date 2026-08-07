@@ -990,7 +990,10 @@ pub enum ContainerCmd {
         /// Drop a capability. Repeatable.
         #[arg(long = "cap-drop")]
         cap_drop: Vec<String>,
-        /// `seccomp=unconfined` | `apparmor=<profile>` (docker-style). Repeatable.
+        /// Security options (docker-style), repeatable:
+        /// `seccomp=unconfined` | `seccomp=<profile.json>` (OCI/runc format) |
+        /// `apparmor=<profile>` | `no-new-privileges[=true|false]` (default true,
+        /// stricter than docker/podman).
         #[arg(long = "security-opt")]
         security_opt: Vec<String>,
         /// AppArmor profile to apply (`unconfined`, `delonix-default`, or an

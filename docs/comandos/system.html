@@ -91,11 +91,12 @@ mostra o uso de disco; <code>system monitor</code> segue ligações/conntrack; <
 fluxo de eventos.</p>
 <div class='help'><pre><code>The engine itself: events, state and disk usage
 
-Usage: dlx system [OPTIONS] &lt;COMMAND&gt;
+Usage: delonix system [OPTIONS] &lt;COMMAND&gt;
 
 Commands:
   events   Engine events (create/start/die/remove/…), from oldest to most recent. With no daemon, the log is a shared append-only file — each command appends its own line (see `delonix_runtime_core::events`)
   info     Engine state: rootless?, cgroup delegation, network infra, counts
+  setup    Diagnose — and, with `--delegate`, fix — cgroup delegation, the prerequisite for `--memory`/`--cpus`/`--pids-limit` to mean anything
   df       Disk usage by area (images, containers, volumes, VM images)
   virt     Host virtualization: hypervisor, KVM, virtio — and what there is to tune
   prune    Reclaim space: remove stopped containers, unused images, CAS blobs nobody references, empty cgroups and — the biggest space saver — **orphan container directories** (from nodes/containers that died abruptly without `rm`, with no registry entry)
@@ -109,7 +110,7 @@ Options:
 <h2 id='prune'><code>system prune</code></h2>
 <div class='help'><pre><code>Reclaim space: remove stopped containers, unused images, CAS blobs nobody references, empty cgroups and — the biggest space saver — **orphan container directories** (from nodes/containers that died abruptly without `rm`, with no registry entry)
 
-Usage: dlx system prune [OPTIONS]
+Usage: delonix system prune [OPTIONS]
 
 Options:
   -f, --force         Skip the confirmation prompt (REQUIRED when stdin is not a terminal)
@@ -120,7 +121,7 @@ Options:
 <h2 id='df'><code>system df</code></h2>
 <div class='help'><pre><code>Disk usage by area (images, containers, volumes, VM images)
 
-Usage: dlx system df [OPTIONS]
+Usage: delonix system df [OPTIONS]
 
 Options:
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
@@ -129,7 +130,7 @@ Options:
 <h2 id='info'><code>system info</code></h2>
 <div class='help'><pre><code>Engine state: rootless?, cgroup delegation, network infra, counts
 
-Usage: dlx system info [OPTIONS]
+Usage: delonix system info [OPTIONS]
 
 Options:
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
