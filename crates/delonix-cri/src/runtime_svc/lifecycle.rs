@@ -107,7 +107,17 @@ struct ContainerRec {
     privileged: bool,
     #[serde(default)]
     seccomp_unconfined: bool,
-    /// `-v host:container[:opts]` specs, from the CRI's `ContainerConfig.mounts`.
+    /// The CRI's `ContainerConfig.mounts`, kept FIELD BY FIELD.
+    ///
+    /// Not the `-v` strings alone: `ContainerStatus` has to give the mounts back
+    /// exactly as they were set, and a spec string cannot round-trip
+    /// `selinux_relabel` or tell `PROPAGATION_PRIVATE` from "no propagation
+    /// given". Reconstructing from the string would answer a question the
+    /// string never carried. The `-v` specs are DERIVED from these, so there is
+    /// one source of truth.
+    #[serde(default)]
+    mounts: Vec<CriMount>,
+    /// `-v host:container[:opts]` specs, derived from `mounts`.
     ///
     /// This was NOT implemented at all: `cfg.mounts` was read by nobody, so a
     /// kubelet's configMaps, secrets, emptyDirs and hostPaths simply did not
@@ -716,6 +726,7 @@ pub fn create_container(
         privileged,
         seccomp_unconfined,
         seccomp_profile_path,
+        mounts: cfg.mounts.iter().map(CriMount::from_cri).collect(),
         volumes: cri_mount_specs(&cfg.mounts)?,
         supplemental_groups: sc
             .map(|s| s.supplemental_groups.clone())
@@ -1015,6 +1026,9 @@ pub fn container_status(
         // back exactly as they were set; with `..Default::default()` they came empty.
         labels: r.labels.clone(),
         annotations: r.annotations.clone(),
+        // Mounts came back EMPTY, which reads as "this container has no
+        // volumes" — the opposite of the truth for anything a kubelet mounts.
+        mounts: r.mounts.iter().map(CriMount::to_cri).collect(),
         ..Default::default()
     };
     Ok(Response::new(ContainerStatusResponse {
@@ -1227,10 +1241,24 @@ pub fn list_container_stats(
     base: &Path,
     filter: Option<ContainerStatsFilter>,
 ) -> Result<Response<ListContainerStatsResponse>, Status> {
-    let (fid, fsb) = filter.map(|f| (f.id, f.pod_sandbox_id)).unwrap_or_default();
+    // `label_selector` was DROPPED. The filter has three fields and only two
+    // were read, so a caller narrowing by label got every container back — a
+    // filter that silently returns more than asked is worse than one that
+    // errors, because the extra rows look like real answers.
+    let (fid, fsb, flabels) = filter
+        .map(|f| (f.id, f.pod_sandbox_id, f.label_selector))
+        .unwrap_or_default();
     let stats = list_recs::<ContainerRec>(&ct_dir(base))
         .into_iter()
-        .filter(|r| (fid.is_empty() || r.id == fid) && (fsb.is_empty() || r.sandbox_id == fsb))
+        .filter(|r| {
+            (fid.is_empty() || r.id == fid)
+                && (fsb.is_empty() || r.sandbox_id == fsb)
+                // SUBSET, as the CRI defines it: every selector pair must match,
+                // extra labels on the container are fine.
+                && flabels
+                    .iter()
+                    .all(|(k, v)| r.labels.get(k).is_some_and(|got| got == v))
+        })
         .map(|r| container_stats_for(base, &r))
         .collect();
     Ok(Response::new(ListContainerStatsResponse { stats }))
@@ -1325,6 +1353,82 @@ pub fn list_pod_sandbox_stats(
         .map(|s| pod_sandbox_stats_for(base, &s))
         .collect();
     Ok(Response::new(ListPodSandboxStatsResponse { stats }))
+}
+
+/// `ReopenContainerLog` — recreates the container's log file at its configured
+/// path.
+///
+/// The shim is what actually redirects the writes (it compares the path's inode
+/// with the one it holds open, before every batch). This half exists because the
+/// caller checks the file the instant the call returns, and because a rotation
+/// whose new file only appears on the next log line looks like data loss to
+/// whatever is tailing it.
+pub fn reopen_container_log(base: &Path, id: &str) -> Result<(), Status> {
+    let rec: ContainerRec = read_rec(&ct_dir(base), id)
+        .map_err(|_| Status::not_found(format!("no such container: {id}")))?;
+    if rec.log_path.is_empty() {
+        return Err(Status::failed_precondition(
+            "container has no log path (created without one)",
+        ));
+    }
+    if let Some(parent) = Path::new(&rec.log_path).parent() {
+        std::fs::create_dir_all(parent).map_err(|e| Status::internal(e.to_string()))?;
+    }
+    // `create_new` would fail when the file is still there — which is the case
+    // whenever the caller rotates by COPY-truncate rather than rename. Opening
+    // with `create(true)` and no truncate is right for both.
+    std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&rec.log_path)
+        .map_err(|e| Status::internal(format!("{}: {e}", rec.log_path)))?;
+    Ok(())
+}
+
+/// A CRI mount, persisted.
+///
+/// Mirrors the proto's fields rather than reusing the generated type: the
+/// record is `serde` JSON on disk and the prost type is not `Serialize`. The
+/// two conversions live next to each other so a field added to one is obvious
+/// in the other.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+struct CriMount {
+    #[serde(default)]
+    host_path: String,
+    #[serde(default)]
+    container_path: String,
+    #[serde(default)]
+    readonly: bool,
+    #[serde(default)]
+    selinux_relabel: bool,
+    /// The proto's enum value, kept as the integer it arrived as. Mapping it to
+    /// a name here and back would be two places to get wrong for no gain — the
+    /// only consumer is the round-trip.
+    #[serde(default)]
+    propagation: i32,
+}
+
+impl CriMount {
+    fn from_cri(m: &Mount) -> Self {
+        Self {
+            host_path: m.host_path.clone(),
+            container_path: m.container_path.clone(),
+            readonly: m.readonly,
+            selinux_relabel: m.selinux_relabel,
+            propagation: m.propagation,
+        }
+    }
+
+    fn to_cri(&self) -> Mount {
+        Mount {
+            host_path: self.host_path.clone(),
+            container_path: self.container_path.clone(),
+            readonly: self.readonly,
+            selinux_relabel: self.selinux_relabel,
+            propagation: self.propagation,
+            ..Default::default()
+        }
+    }
 }
 
 /// Translates the CRI's `Mount` list into the engine's `-v` specs.
