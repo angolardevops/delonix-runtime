@@ -27,6 +27,11 @@ pub enum ServeCmd {
         /// Socket address (default: `$DELONIX_DOCKER_ADDR` or `unix:///run/delonix-docker.sock`).
         #[arg(long)]
         addr: Option<String>,
+        /// Print the coverage matrix and exit, without serving anything.
+        /// This layer is a SLICE of the Docker API, and third-party tooling
+        /// deserves to know where it ends before it hits a 404 mid-run.
+        #[arg(long)]
+        matrix: bool,
     },
 }
 
@@ -44,6 +49,12 @@ pub fn run(action: ServeCmd) -> Result<()> {
                 .unwrap_or_else(|| "unix:///run/delonix-mgmt.sock".to_string());
             delonix_mgmt::serve_blocking(super::util::state_root(), &addr)
         }
-        ServeCmd::DockerApi { addr } => super::dockerapi::run(addr),
+        ServeCmd::DockerApi { addr, matrix } => {
+            if matrix {
+                super::dockerapi::print_matrix();
+                return Ok(());
+            }
+            super::dockerapi::run(addr)
+        }
     }
 }

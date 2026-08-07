@@ -24,6 +24,53 @@ pub use error::{Error, Result};
 pub use secret::{Secret, SecretStore};
 pub use store::{write_atomic, write_atomic_mode, JsonStore, Store};
 
+/// Are we in the INITIAL user namespace — i.e. is uid 0 here the host's root?
+///
+/// **`geteuid() == 0` does not answer this**, and the difference matters
+/// everywhere the engine picks a privileged path. uid 0 inside a nested user
+/// namespace buys nothing on the host: no write to the host's cgroup tree, no
+/// `/run`, no privileged mount of the host's filesystems. Two independent
+/// places in this workspace decided by `geteuid()` alone and both took the
+/// ROOT path in exactly the environment where they had the least power.
+///
+/// The initial namespace is the only one whose `uid_map` is the identity map
+/// over the whole range; anything else is nested. It is how podman answers the
+/// same question. Unreadable `/proc` answers "initial" — the behaviour this
+/// workspace had for years, so an unexpected environment keeps working exactly
+/// as before instead of silently switching execution modes.
+pub fn in_initial_userns() -> bool {
+    let Ok(map) = std::fs::read_to_string("/proc/self/uid_map") else {
+        return true;
+    };
+    initial_uid_map(&map)
+}
+
+/// Pure half of [`in_initial_userns`], so the parsing is tested without a
+/// namespace to set up.
+pub fn initial_uid_map(map: &str) -> bool {
+    let mut lines = map.lines().filter(|l| !l.trim().is_empty());
+    let Some(first) = lines.next() else {
+        return true; // empty map: cannot tell, keep the historical answer
+    };
+    if lines.next().is_some() {
+        return false; // more than one range is never the initial namespace
+    }
+    let f: Vec<&str> = first.split_whitespace().collect();
+    f == ["0", "0", "4294967295"]
+}
+
+/// Is this process rootless — i.e. WITHOUT privilege over the host?
+///
+/// True when the euid is not 0, and ALSO when it is 0 inside a nested user
+/// namespace. See [`in_initial_userns`].
+pub fn is_rootless() -> bool {
+    // SAFETY: geteuid has no preconditions.
+    if unsafe { libc::geteuid() } != 0 {
+        return true;
+    }
+    !in_initial_userns()
+}
+
 /// Formats a unix instant as LOCAL date/time "YYYY-MM-DD HH:MM:SS".
 /// Uses `localtime_r` (honors /etc/localtime|TZ); on failure, returns the raw value.
 pub fn fmt_local_ts(unix: u64) -> String {
@@ -58,6 +105,23 @@ pub struct Mount {
     pub target: String,
     /// If `true`, mounts read-only.
     pub readonly: bool,
+    /// Mount propagation: `private` (default), `rslave` (host → container) or
+    /// `rshared` (both ways). `None` = `private`.
+    ///
+    /// Anything other than private has a cost that is easy to miss: the
+    /// container's mount namespace root has to stop being `MS_PRIVATE`, so
+    /// mount events from the host reach the container for EVERY mount, not just
+    /// this one. That is what Docker and runc do by default; here it is opt-in,
+    /// and only turns on when a mount actually asks for it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub propagation: Option<String>,
+}
+
+impl Mount {
+    /// Does this mount ask for host events to reach the container?
+    pub fn wants_propagation(&self) -> bool {
+        matches!(self.propagation.as_deref(), Some("rslave" | "rshared"))
+    }
 }
 
 /// An L4 per-container firewall rule (shape from the Console UI). It is the
@@ -84,6 +148,84 @@ pub struct FwRule {
     /// Free-form UI note (cosmetic; preserved in the persistence round-trip).
     #[serde(default)]
     pub note: String,
+}
+
+/// A container's continuous health check — the `--health-*` family.
+///
+/// Docker's semantics, deliberately, down to the defaults: the probe runs every
+/// `interval`, a run that exceeds `timeout` counts as a failure, `retries`
+/// consecutive failures flip the container to `unhealthy`, and failures during
+/// `start_period` do not count (a service that takes 40s to open its port is
+/// starting, not broken).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct HealthConfig {
+    /// Command line, run with `/bin/sh -c` INSIDE the container. Empty means
+    /// "use the image's `HEALTHCHECK`" — resolved at monitoring time so a
+    /// rebuilt image is picked up without recreating the container.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub cmd: String,
+    pub interval_secs: u64,
+    pub timeout_secs: u64,
+    pub retries: u32,
+    pub start_period_secs: u64,
+}
+
+impl Default for HealthConfig {
+    fn default() -> Self {
+        // Docker's own defaults. Matching them matters more than picking
+        // "better" numbers: someone porting a compose file gets the cadence
+        // their service was tuned for, not ours.
+        Self {
+            cmd: String::new(),
+            interval_secs: 30,
+            timeout_secs: 30,
+            retries: 3,
+            start_period_secs: 0,
+        }
+    }
+}
+
+/// Where a monitored container's health stands right now.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum Health {
+    /// Inside the start period, or no probe has completed yet.
+    Starting,
+    Healthy,
+    Unhealthy,
+}
+
+impl std::fmt::Display for Health {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Health::Starting => "starting",
+            Health::Healthy => "healthy",
+            Health::Unhealthy => "unhealthy",
+        })
+    }
+}
+
+/// The last health observation, as written by the monitor.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct HealthState {
+    pub health: Health,
+    /// Consecutive failures so far. Reset to 0 by any success — `retries` is
+    /// about a RUN of failures, not a total, so a service that fails once an
+    /// hour is not unhealthy.
+    #[serde(default)]
+    pub failing_streak: u32,
+    /// Exit code of the last probe.
+    ///
+    /// The probe's OUTPUT is deliberately not kept. Capturing it would mean
+    /// redirecting the supervisor's stdio around each `exec`, which is
+    /// process-global and races with the container the supervisor is also
+    /// starting. `container healthcheck <id>` runs the same probe in the
+    /// foreground and shows everything — a verdict here, the evidence there.
+    #[serde(default)]
+    pub last_exit: i32,
+    /// Unix seconds of the last completed probe.
+    #[serde(default)]
+    pub checked_unix: i64,
 }
 
 /// L4 firewall configuration of a container, applied via nftables and
@@ -409,6 +551,21 @@ pub struct Container {
     /// network). `None` = no network.
     #[serde(default)]
     pub network: Option<String>,
+    /// What the caller ASKED FOR in `--net` (`host`, `none`, or a network
+    /// name), as opposed to `network`, which is what it ENDED UP on.
+    ///
+    /// The two differ in the case that matters: a container that asked for a
+    /// network and did not get one. Without this, `None` in `network` is
+    /// indistinguishable between "I asked for `--net host`" and "my network
+    /// went away", and `describe` reported BOTH as `host` — the second one
+    /// silently, on a container with no name resolution and no route to its
+    /// peers. Diagnosing it meant grepping the raw record for `"network":
+    /// null`, which is what a Makefile in the wild actually ended up doing.
+    ///
+    /// `None` on old records = unknown intent; the display falls back to the
+    /// previous behaviour rather than inventing one.
+    #[serde(default)]
+    pub net_mode: Option<String>,
     /// Logical ISOLATION namespace (default `default`). Containers of different
     /// namespaces do NOT reach each other (even on the same network); only a `kind: Dependency`
     /// pierces the boundary. Propagates to `ContainerFw.namespace` and to registration in the
@@ -435,6 +592,31 @@ pub struct Container {
     /// vice versa.
     #[serde(default)]
     pub dns_knows: Option<Vec<String>>,
+    /// Extra `/etc/hosts` entries (`--add-host name:ip`), as Docker/Podman.
+    ///
+    /// PERSISTED on purpose. `/etc/hosts` is rewritten from scratch on every
+    /// start (`write_etc_files`), so anything injected by hand into a running
+    /// container is gone at the next `start`/`restart` — silently, and the
+    /// symptom lands far from the cause ("connection refused" to a name that
+    /// worked five minutes ago). Keeping the entries on the record is what
+    /// makes them survive, and it is the same trap already paid for by `-v`,
+    /// by `-p` on a custom network and by pod membership.
+    #[serde(default)]
+    pub extra_hosts: Vec<String>,
+    /// Continuous health check (`--health-cmd` and friends), when the user asked
+    /// for one. `None` means only the image's `HEALTHCHECK` exists, evaluated
+    /// on demand by `container healthcheck` — never monitored.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub health: Option<HealthConfig>,
+    /// Last observed health, written by whoever is monitoring (the detached
+    /// container's supervisor).
+    ///
+    /// SEPARATE from `status` on purpose: an unhealthy container is still
+    /// `Running`, and collapsing the two would make `ps` lie in both directions
+    /// — a failing service reported as dead, or a restart policy reading
+    /// "unhealthy" as an exit that never happened.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub health_state: Option<HealthState>,
     /// tmpfs file systems to mount (`--tmpfs /path[:opts]`).
     #[serde(default)]
     pub tmpfs: Vec<String>,
@@ -444,6 +626,47 @@ pub struct Container {
     /// namespaced `sysctl`s (`--sysctl key=value`), written to `/proc/sys`.
     #[serde(default)]
     pub sysctls: Vec<String>,
+    /// A custom OCI seccomp profile, stored as its JSON CONTENT.
+    ///
+    /// The content and not the path, deliberately: the file lives on the host,
+    /// the container's init runs after `pivot_root`, and a path recorded here
+    /// would resolve to something else — or nothing — by the time it is read.
+    /// It also makes the policy survive a `restart` even if the file moved.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub seccomp_profile: Option<String>,
+    /// Explicit `/etc/resolv.conf` contents (`--dns`/`--dns-search`/
+    /// `--dns-option`). When any of these is set they REPLACE the resolver the
+    /// engine would have picked (network gateway, slirp, or the host's copy) —
+    /// the caller asked for a specific one, and merging would produce a resolver
+    /// nobody configured.
+    #[serde(default)]
+    pub dns_servers: Vec<String>,
+    #[serde(default)]
+    pub dns_searches: Vec<String>,
+    #[serde(default)]
+    pub dns_options: Vec<String>,
+    /// Supplementary group ids (`--group-add`). Applied with `setgroups(2)`
+    /// before the exec, whatever the uid — a container running as root can still
+    /// need a group to reach a mounted share.
+    #[serde(default)]
+    pub group_add: Vec<u32>,
+    /// Paths made unreadable inside the container (`--masked-path`). A file is
+    /// covered with `/dev/null`, a directory with an empty read-only tmpfs —
+    /// runc's own technique, and the reason `/proc/kcore` is not a hole in every
+    /// container that ever ran.
+    #[serde(default)]
+    pub masked_paths: Vec<String>,
+    /// Paths remounted read-only inside the container (`--readonly-path`).
+    #[serde(default)]
+    pub readonly_paths: Vec<String>,
+    /// `PR_SET_NO_NEW_PRIVS`. `None` = the engine's own default, which is ON.
+    ///
+    /// Stricter than Docker and Podman, which only set it when asked. Kept as
+    /// the default here deliberately; `Some(false)` is how a caller that owns
+    /// the policy — the kubelet, through the CRI — says otherwise, and there it
+    /// is the kubelet's call, not ours.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub no_new_privs: Option<bool>,
     /// Devices to expose (`--device /dev/x[:/dev/y]`), attached in `/dev`.
     #[serde(default)]
     pub devices: Vec<String>,
@@ -569,9 +792,21 @@ impl Container {
             extra_networks: Vec::new(),
             net_aliases: Vec::new(),
             dns_knows: None,
+            net_mode: None,
+            extra_hosts: Vec::new(),
+            health: None,
+            health_state: None,
             tmpfs: Vec::new(),
             ulimits: Vec::new(),
             sysctls: Vec::new(),
+            seccomp_profile: None,
+            dns_servers: Vec::new(),
+            dns_searches: Vec::new(),
+            dns_options: Vec::new(),
+            group_add: Vec::new(),
+            masked_paths: Vec::new(),
+            readonly_paths: Vec::new(),
+            no_new_privs: None,
             devices: Vec::new(),
             restart_policy: None,
             stopped_by_user: false,

@@ -628,6 +628,7 @@ impl ImageStore {
         user: String,
         tag: &str,
         arch: &str,
+        healthcheck: Option<String>,
     ) -> Result<Image> {
         let mut buf = Vec::new();
         {
@@ -638,7 +639,17 @@ impl ImageStore {
             b.finish()
                 .map_err(|e| Error::Invalid(format!("fechar tar: {e}")))?;
         }
-        self.commit_flat_rootfs_from_tar(buf, cmd, entrypoint, env, workdir, user, tag, arch)
+        self.commit_flat_rootfs_from_tar(
+            buf,
+            cmd,
+            entrypoint,
+            env,
+            workdir,
+            user,
+            tag,
+            arch,
+            healthcheck,
+        )
     }
 
     /// Like [`commit_flat_rootfs`], but receives the rootfs tar **already built**
@@ -659,6 +670,17 @@ impl ImageStore {
         user: String,
         tag: &str,
         arch: &str,
+        // BUG FIXED HERE: this was hardcoded to `None`, so a `HEALTHCHECK` in
+        // a Dockerfile/Delonixfile was parsed, accepted, and then DROPPED —
+        // on the rootless path, which is the normal one. The overlay (root)
+        // path at `build_image` had always honoured it, so the same file
+        // produced different images depending on how the engine ran.
+        //
+        // Silent, and with the symptom far from the cause: `compose`'s
+        // `depends_on: service_healthy` fails with "declares no healthcheck"
+        // against an image whose source clearly declares one. Found while
+        // wiring `container run --wait`.
+        healthcheck: Option<String>,
     ) -> Result<Image> {
         let layer = self.cas().write(&tar_bytes)?; // uncompressed tar → diff_id = digest
         let diff_ids = vec![format!("sha256:{}", strip(&layer))];
@@ -666,7 +688,7 @@ impl ImageStore {
         let config_json = serde_json::json!({
             "architecture": arch,
             "os": "linux",
-            "config": { "Cmd": cmd, "Entrypoint": entrypoint, "Env": env, "User": user, "WorkingDir": workdir },
+            "config": { "Cmd": cmd, "Entrypoint": entrypoint, "Env": env, "User": user, "WorkingDir": workdir, "Healthcheck": healthcheck },
             "rootfs": { "type": "layers", "diff_ids": diff_ids },
             "created_unix": created,
         });
@@ -683,7 +705,7 @@ impl ImageStore {
                 cpus: None,
                 memory: None,
                 security: Vec::new(),
-                healthcheck: None,
+                healthcheck,
                 user,
                 working_dir: workdir,
                 architecture: arch.to_string(),

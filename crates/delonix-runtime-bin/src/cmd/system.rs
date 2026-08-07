@@ -6,7 +6,8 @@
 //! (`container stats`, `image ls`).
 
 use clap::Subcommand;
-use delonix_runtime_core::{events, Result, Store};
+use delonix_runtime::{self as runtime};
+use delonix_runtime_core::{events, Error, Result, Store};
 
 use super::util::{open_stores, state_root};
 
@@ -25,6 +26,18 @@ pub enum SystemCmd {
     },
     /// Engine state: rootless?, cgroup delegation, network infra, counts.
     Info,
+    /// Diagnose — and, with `--delegate`, fix — cgroup delegation, the
+    /// prerequisite for `--memory`/`--cpus`/`--pids-limit` to mean anything.
+    ///
+    /// Without it the flags are ACCEPTED and INERT: the container runs with no
+    /// limit at all. That is the failure mode this command exists for, and it
+    /// is invisible without asking.
+    Setup {
+        /// Apply the fix instead of only reporting it. Writing the system-wide
+        /// drop-in needs root; the per-session remedy never does.
+        #[arg(long)]
+        delegate: bool,
+    },
     /// Disk usage by area (images, containers, volumes, VM images).
     Df,
     /// Host virtualization: hypervisor, KVM, virtio — and what there is to tune.
@@ -80,6 +93,7 @@ pub fn run(action: SystemCmd) -> Result<()> {
     match action {
         SystemCmd::Events { follow, tail } => cmd_events(follow, tail),
         SystemCmd::Info => cmd_info(),
+        SystemCmd::Setup { delegate } => cmd_setup(delegate),
         SystemCmd::Df => cmd_df(),
         SystemCmd::Prune { all, force } => cmd_prune(all, force),
         SystemCmd::Monitor {
@@ -916,5 +930,196 @@ mod tests {
         }
 
         let _ = std::fs::remove_dir_all(&root);
+    }
+}
+
+/// Is this cgroup a LOGIN session scope — the case where the system-wide
+/// drop-in does not help?
+///
+/// **Pure, and the subtle half of the whole command.** systemd puts an SSH or
+/// tty login in `user-<uid>.slice/session-<n>.scope`, a SIBLING of
+/// `user@<uid>.service`, so `Delegate=yes` on the latter never reaches it —
+/// measured on this host, where the session scope's `cgroup.subtree_control` is
+/// `root:root` while the user manager's is the user's own. Telling someone in
+/// that shell to write a drop-in and log back in is the answer that wastes an
+/// afternoon.
+///
+/// A scope UNDER `user@.service` (`systemd-run --user --scope`, an app scope) is
+/// a different animal: it inherits the delegation and needs no warning.
+pub(crate) fn is_login_session_scope(cgroup: &str) -> bool {
+    cgroup
+        .rsplit('/')
+        .find(|c| !c.is_empty())
+        .map(|leaf| leaf.starts_with("session-") && leaf.ends_with(".scope"))
+        .unwrap_or(false)
+}
+
+/// The system-wide drop-in that gives every user's `user@.service` a delegated
+/// cgroup. System scope, so it needs root — and it is the only half that
+/// persists across reboots.
+const DELEGATE_DROPIN: &str = "/etc/systemd/system/user@.service.d/50-delonix-delegate.conf";
+const DELEGATE_BODY: &str = "# Written by `delonix system setup --delegate`.\n\
+                             # Gives each user's systemd manager a delegated cgroup subtree, so\n\
+                             # rootless containers can actually carry --memory/--cpus/--pids-limit.\n\
+                             [Service]\n\
+                             Delegate=yes\n";
+
+/// `system setup [--delegate]` — the one command for cgroup delegation.
+///
+/// It exists because the engine's honest warning ("no delegation, limits will
+/// not apply") left the user with a research problem: the fix is a systemd
+/// drop-in whose location, scope and reboot semantics are not obvious, and the
+/// answer differs for the CURRENT shell and for future ones.
+///
+/// **Two remedies, because there are two problems**, and this is the part every
+/// StackOverflow answer gets half of. A drop-in on `user@.service` fixes user
+/// services and future logins. It does NOT fix the shell you are typing in over
+/// SSH: a `session-N.scope` is a SIBLING of `user@.service`, not a child, so it
+/// inherits nothing from it — measured on this host, not assumed. For the live
+/// session the only answer is a delegated scope of your own.
+fn cmd_setup(delegate: bool) -> Result<()> {
+    let rootless = runtime::is_rootless();
+    let ok = runtime::cgroup_limits_apply();
+    let cur = runtime::current_cgroup_v2().unwrap_or_else(|| "<unknown>".into());
+
+    println!("{}", super::po::t("cgroup delegation"));
+    println!("  mode:     {}", if rootless { "rootless" } else { "root" });
+    println!("  cgroup:   {cur}");
+    println!(
+        "  limits:   {}",
+        if ok {
+            super::po::t("APPLY — --memory/--cpus/--pids-limit take effect")
+        } else {
+            super::po::t("INERT — --memory/--cpus/--pids-limit are accepted and ignored")
+        }
+    );
+
+    if ok {
+        println!("\n{}", super::po::t("Nothing to do."));
+        return Ok(());
+    }
+    if !rootless {
+        // As root the engine owns `delonix.slice` outright; a missing delegation
+        // there is a different problem (cgroup v1, or no cgroup2 mount) and this
+        // drop-in would not touch it.
+        println!(
+            "\n{}",
+            super::po::t(
+                "Running as root: delegation is not the blocker. Check that cgroup v2 is \
+                 mounted (`stat -fc %T /sys/fs/cgroup` should say `cgroup2fs`)."
+            )
+        );
+        return Ok(());
+    }
+
+    let session_scope = is_login_session_scope(&cur);
+    println!(
+        "\n{}",
+        super::po::t("Two fixes, for two different problems:")
+    );
+    println!(
+        "\n  1. {}\n     systemd-run --user --scope -p Delegate=yes -- delonix container run ...",
+        super::po::t("THIS shell, right now (no root):")
+    );
+    if session_scope {
+        println!(
+            "     {}",
+            super::po::t(
+                "(you are in an SSH/login session scope — a SIBLING of user@.service, so \
+                 fix 2 alone will NOT reach it)"
+            )
+        );
+    }
+    println!(
+        "\n  2. {}\n     {DELEGATE_DROPIN}",
+        super::po::t("every FUTURE user session (needs root, survives reboot):")
+    );
+
+    if !delegate {
+        println!(
+            "\n{}",
+            super::po::t("Re-run with --delegate to write fix 2. (This run changed nothing.)")
+        );
+        return Ok(());
+    }
+
+    // SAFETY: geteuid() has no preconditions.
+    if unsafe { libc::geteuid() } != 0 {
+        return Err(Error::Invalid(
+            super::po::t(
+                "--delegate writes under /etc/systemd/system and needs root: re-run with sudo. \
+                 Fix 1 above needs no privilege and works right now.",
+            )
+            .to_string(),
+        ));
+    }
+    let dir = std::path::Path::new(DELEGATE_DROPIN)
+        .parent()
+        .expect("drop-in path has a parent");
+    std::fs::create_dir_all(dir).map_err(|e| Error::Runtime {
+        context: "create_dir_all",
+        message: format!("{}: {e}", dir.display()),
+    })?;
+    std::fs::write(DELEGATE_DROPIN, DELEGATE_BODY).map_err(|e| Error::Runtime {
+        context: "write",
+        message: format!("{DELEGATE_DROPIN}: {e}"),
+    })?;
+    println!("\n{DELEGATE_DROPIN} {}", super::po::t("written"));
+    // Best effort on purpose: the file on disk is the durable half. A failing
+    // `daemon-reload` (no systemd in a container image, for instance) must not
+    // make a successful write report as failure.
+    let reloaded = std::process::Command::new("systemctl")
+        .arg("daemon-reload")
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    println!(
+        "{}",
+        if reloaded {
+            super::po::t("systemctl daemon-reload: ok")
+        } else {
+            super::po::t("systemctl daemon-reload: FAILED — run it by hand")
+        }
+    );
+    println!(
+        "\n{}",
+        super::po::t(
+            "Takes effect on the NEXT login (an already-running user@.service keeps the old \
+             setting). For this shell, use fix 1."
+        )
+    );
+    Ok(())
+}
+
+#[cfg(test)]
+mod setup_tests {
+    use super::is_login_session_scope;
+
+    #[test]
+    fn scope_de_login_e_o_unico_que_o_dropin_nao_alcanca() {
+        // O caso que dói: irmão do user@.service, subtree_control root:root.
+        assert!(is_login_session_scope(
+            "/sys/fs/cgroup/user.slice/user-1000.slice/session-223.scope"
+        ));
+        // Um scope POR BAIXO do user@.service herda a delegação — avisar aqui
+        // mandaria a pessoa resolver um problema que não tem.
+        assert!(!is_login_session_scope(
+            "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice/run-r0.scope"
+        ));
+        assert!(!is_login_session_scope(
+            "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service"
+        ));
+        assert!(!is_login_session_scope("/sys/fs/cgroup/"));
+        assert!(!is_login_session_scope(""));
+    }
+
+    #[test]
+    fn so_a_folha_e_que_decide() {
+        // Um caminho que CONTÉM "session-N.scope" a meio, mas cuja folha é
+        // outra coisa, não é uma sessão de login — a primeira versão desta
+        // função usava `contains` e teria dito que sim.
+        assert!(!is_login_session_scope(
+            "/sys/fs/cgroup/user.slice/session-9.scope/delonix/dlx-abc"
+        ));
     }
 }

@@ -89,7 +89,21 @@ impl RuntimeService for DelonixRuntime {
         // privilege at all).
         let network_ready = if delonix_runtime::is_rootless() {
             let st = delonix_net::infra::status();
-            if st.up {
+            // DOWN-AND-UNUSED IS NOT BROKEN, and conflating the two deadlocks
+            // the node. This engine is daemonless: the infra netns starts on
+            // DEMAND, when the first workload needs it. Reporting `NetworkReady:
+            // false` on a freshly booted node meant the kubelet marked it
+            // NotReady, so it scheduled no pod, so nothing ever brought the
+            // infra up, so it stayed NotReady — forever. The check was written
+            // to catch a real SDN failure and instead described the normal
+            // resting state of the engine.
+            //
+            // The distinguishing fact is the ref-count: infra down with
+            // workloads attached IS a failure; down with none is just idle.
+            // Same family as the traps this repo already documents — `status()`
+            // by pidfile is not "the holder is reachable", a socket file is not
+            // a listener, and here "not running" is not "cannot run".
+            if network_ready_rootless(st.up, st.refcount) {
                 cond("NetworkReady", true, "", "")
             } else {
                 cond(
@@ -97,8 +111,9 @@ impl RuntimeService for DelonixRuntime {
                     false,
                     "InfraDown",
                     &format!(
-                        "rootless infra netns is down (holder={:?}, slirp={:?})",
-                        st.holder_pid, st.slirp_pid
+                        "rootless infra netns is down with {} workload(s) attached \
+                         (holder={:?}, slirp={:?})",
+                        st.refcount, st.holder_pid, st.slirp_pid
                     ),
                 )
             }
@@ -389,6 +404,12 @@ impl RuntimeService for DelonixRuntime {
 
 pub mod lifecycle;
 
+/// Is the rootless network plane ready? **Pure**, so the rule can be tested
+/// without an infra namespace — see `network_ready_distingue_ocio_de_avaria`.
+fn network_ready_rootless(up: bool, refcount: i64) -> bool {
+    up || refcount == 0
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -452,17 +473,46 @@ mod tests {
             .iter()
             .find(|c| c.r#type == "NetworkReady")
             .unwrap();
+        // A REGRA MUDOU, e a razão está no `status()`: infra em baixo SEM
+        // workloads é o estado de repouso de um motor daemonless, não uma
+        // falha, e reportá-la como falha bloqueava o nó em NotReady para
+        // sempre. O que este teste guarda continua a ser o mesmo: que a
+        // condição é DERIVADA do estado real e não fabricada.
+        //
+        // Aqui não há infra a correr nem containers agarrados, logo `true` com
+        // razão vazia é a resposta certa. O caso que interessa proteger — em
+        // baixo COM workloads — vive no teste puro abaixo, porque exige um
+        // ref-count que este ambiente não consegue montar.
         assert!(
-            !network_ready.status,
-            "NetworkReady devia ser FALSE (sem infra rootless a correr neste teste) — \
-             se vier true sem verificação real, é a regressão que corrigimos"
+            network_ready.status,
+            "sem infra E sem workloads é ócio, não avaria"
         );
-        assert_eq!(network_ready.reason, "InfraDown");
         assert!(
-            !network_ready.message.is_empty(),
-            "devia explicar a causa concreta"
+            network_ready.reason.is_empty(),
+            "uma condição verdadeira não tem razão de falha"
         );
 
         let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// A regra que decide `NetworkReady`, isolada do ambiente.
+    ///
+    /// A versão anterior era `infra.up`, o que num motor daemonless descreve o
+    /// estado de REPOUSO como avaria: num nó acabado de arrancar a infra ainda
+    /// não subiu, o kubelet marcava-o NotReady, não agendava pod nenhum, e por
+    /// isso nada trazia a infra acima. Impasse permanente.
+    ///
+    /// O facto que discrimina é o ref-count, e é isso que este teste fixa.
+    #[test]
+    fn network_ready_distingue_ocio_de_avaria() {
+        // Em baixo e sem ninguém a precisar: ócio.
+        assert!(super::network_ready_rootless(false, 0));
+        // Em baixo COM workloads agarrados: avaria a sério — foi para isto que
+        // a verificação foi escrita, e continua a apanhá-la.
+        assert!(!super::network_ready_rootless(false, 1));
+        assert!(!super::network_ready_rootless(false, 7));
+        // A correr: pronta, haja workloads ou não.
+        assert!(super::network_ready_rootless(true, 0));
+        assert!(super::network_ready_rootless(true, 3));
     }
 }

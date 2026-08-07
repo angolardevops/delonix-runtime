@@ -753,12 +753,20 @@ impl VolumeStore {
         // bind mounted without the SELinux label and failed on RHEL/Fedora enforcing
         // with the user believing `:z` was handled. Fail-closed: explicit
         // error (finding from the Docker/Podman analysis; "no silent failure").
-        let readonly = match parts.get(2) {
-            None | Some(&"rw") => false,
-            Some(&"ro") => true,
+        // Propagation joined `ro`/`rw` here; SELinux labels did NOT, and the
+        // error still says so rather than accepting them and doing nothing.
+        let (readonly, propagation) = match parts.get(2) {
+            None | Some(&"rw") => (false, None),
+            Some(&"ro") => (true, None),
+            Some(&"private") | Some(&"rprivate") => (false, Some("private".to_string())),
+            Some(&"rslave") | Some(&"slave") => (false, Some("rslave".to_string())),
+            Some(&"rshared") | Some(&"shared") => (false, Some("rshared".to_string())),
+            Some(&"ro,rslave") => (true, Some("rslave".to_string())),
+            Some(&"ro,rshared") => (true, Some("rshared".to_string())),
+            Some(&"ro,rprivate") | Some(&"ro,private") => (true, Some("private".to_string())),
             Some(other) => {
                 return Err(Error::Invalid(format!(
-                    "unsupported bind option ':{other}' — only ':ro'/':rw' are supported (SELinux ':z'/':Z', ':U' and propagation are not implemented)"
+                    "unsupported bind option ':{other}' — supported: ':ro'/':rw', ':rprivate'/':rslave'/':rshared' (and 'ro,<propagation>'); SELinux ':z'/':Z' and ':U' are not implemented"
                 )))
             }
         };
@@ -784,6 +792,7 @@ impl VolumeStore {
             source,
             target: target.to_string(),
             readonly,
+            propagation,
         })
     }
 }

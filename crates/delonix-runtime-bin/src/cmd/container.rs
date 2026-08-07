@@ -7,7 +7,9 @@ use clap_complete::engine::ArgValueCandidates;
 use delonix_image::ImageStore;
 use delonix_net::infra;
 use delonix_runtime::{self as runtime, RunSpec};
-use delonix_runtime_core::{generate_id, Container, Error, Result, Status, Store};
+use delonix_runtime_core::{
+    generate_id, Container, Error, Health, HealthConfig, HealthState, Result, Status, Store,
+};
 use delonix_volume::VolumeStore;
 use serde::{Deserialize, Serialize};
 
@@ -110,6 +112,8 @@ struct ContainerSpec {
     gpus: Option<String>,
     #[serde(default, rename = "networkAlias")]
     network_alias: Vec<String>,
+    #[serde(default, rename = "addHost")]
+    add_host: Vec<String>,
     #[serde(default)]
     knows: Vec<String>,
     #[serde(default, rename = "netBps")]
@@ -167,6 +171,7 @@ pub(crate) const CONTAINER_SPEC_FIELDS: &[&str] = &[
     "netBurst",
     "logDriver",
     "expose",
+    "addHost",
     // Grouped-form-only keys (see `normalize_container_spec`) — `network`
     // and `env` need no entry of their own: they're ALREADY above, reused
     // for both shapes (a scalar/array in the old flat form, a mapping in
@@ -305,6 +310,76 @@ fn default_net() -> String {
 }
 /// `host`/`none` are the two built-in networks (no user bridge); anything else
 /// is the name of a custom `delonix network` to attach to.
+/// Como mostrar o modo de rede, cruzando a INTENÇÃO com o RESULTADO.
+///
+/// Puro e testado de propósito: é a única coisa que separa uma degradação de
+/// uma escolha deliberada, e uma regressão aqui volta a torná-la invisível.
+pub(crate) fn net_mode_display(c: &delonix_runtime_core::Container) -> String {
+    match (c.net_mode.as_deref(), c.network.as_deref()) {
+        // Ligado à rede que pediu — o caso normal.
+        (_, Some(net)) => net.to_string(),
+        // Pediu explicitamente host/none: não há nada de errado.
+        (Some("host"), None) => "host".to_string(),
+        (Some("none"), None) => "none".to_string(),
+        // Pediu uma REDE e não a tem. É o caso que estava mudo.
+        (Some(asked), None) => format!("host (degraded: asked for '{asked}')"),
+        // Registo anterior a este campo: não se inventa intenção.
+        (None, None) => "host".to_string(),
+    }
+}
+
+/// Valida uma entrada `--add-host`, no formato `name:ip` (o do Docker).
+///
+/// Devolve `(nome, ip)` normalizados, ou o erro a mostrar. Validar AQUI, na
+/// fronteira, e não no sítio onde o ficheiro é escrito: uma entrada má tem de
+/// falhar antes de o contentor existir, não ser descartada em silêncio no
+/// arranque seguinte (a armadilha que este repo já converteu em erro para
+/// `--security-opt seccomp=`, `-v :z` e `--network-alias`).
+///
+/// O `\n` é o ponto central: sem o recusar, uma entrada injecta linhas
+/// arbitrárias no `/etc/hosts`, o que — combinado com um symlink plantado
+/// pela imagem — dava escrita de conteúdo escolhido fora do rootfs.
+///
+/// Só a forma `name:ip`. A forma `name=ip` foi tentada e removida: como o
+/// `:` é procurado primeiro, `db=2001:db8::1` partia em `db=2001` + `db8::1`
+/// e escrevia uma entrada errada sem uma palavra. O Docker não a aceita.
+pub(crate) fn parse_add_host(entry: &str) -> std::result::Result<(String, String), String> {
+    // Parte no PRIMEIRO `:`, como o Docker (`SplitN(..., 2)`). O nome nunca
+    // contém `:` (a whitelist LDH abaixo garante-o), logo tudo o que vem
+    // depois é o endereço — e é assim que um IPv6 (`db:2001:db8::1`) fica
+    // inteiro. Com `rsplit_once` partia-se no último `:` e o IPv6 saía
+    // truncado; foi o teste que o apanhou.
+    let Some((name, addr)) = entry.split_once(':') else {
+        return Err(format!("invalid --add-host '{entry}': expected 'name:ip'"));
+    };
+    let (name, addr) = (name.trim(), addr.trim());
+    if name.is_empty() {
+        return Err(format!("invalid --add-host '{entry}': empty name"));
+    }
+    if name.len() > 253 {
+        return Err(format!("invalid --add-host '{entry}': name too long"));
+    }
+    // Whitelist LDH. O `.` É permitido aqui — ao contrário de
+    // `valid_container_name`, que o recusa porque um nome de contentor entra
+    // no DNS PARTILHADO do holder e podia sequestrar um domínio para o nó
+    // inteiro. Isto escreve-se só no `/etc/hosts` do próprio contentor.
+    if !name
+        .bytes()
+        .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-' | b'_'))
+    {
+        return Err(format!(
+            "invalid --add-host '{entry}': name may only contain letters, digits, '.', '-' and '_'"
+        ));
+    }
+    // O endereço é PARSEADO, não copiado. É o que torna a injecção
+    // estruturalmente impossível deste lado — o mesmo que o Docker faz ao
+    // guardar um `netip.Addr` em vez de uma string.
+    let ip: std::net::IpAddr = addr
+        .parse()
+        .map_err(|_| format!("invalid --add-host '{entry}': '{addr}' is not an IP address"))?;
+    Ok((name.to_string(), ip.to_string()))
+}
+
 fn custom_net_name(net: &str) -> Option<String> {
     (net != "host" && net != "none").then(|| net.to_string())
 }
@@ -330,6 +405,27 @@ fn valid_container_name(name: &str) -> bool {
 // spec stays fully supported (back-compat); the two shapes never mix.
 // ===========================================================================
 
+/// k8s `hostAliases[]` entry: one IP, N hostnames.
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub(crate) struct HostAlias {
+    pub(crate) ip: String,
+    #[serde(default)]
+    pub(crate) hostnames: Vec<String>,
+}
+
+impl HostAlias {
+    /// k8s (`{ip, hostnames[]}`) → docker (`name:ip`), validado pelo mesmo
+    /// parser do `--add-host`. Uma entrada k8s com N nomes vira N entradas.
+    pub(crate) fn to_add_host(&self) -> std::result::Result<Vec<String>, String> {
+        let mut out = Vec::with_capacity(self.hostnames.len());
+        for name in &self.hostnames {
+            let (n, ip) = parse_add_host(&format!("{}:{}", name.trim(), self.ip.trim()))?;
+            out.push(format!("{n}:{ip}"));
+        }
+        Ok(out)
+    }
+}
+
 /// k8s-like Pod spec: `spec.containers[]`. Used by `kind: Container` (Pod shape,
 /// 1 container) AND by `kind: Pod` (N containers sharing the pod's namespaces —
 /// see `cmd::pod`).
@@ -351,6 +447,15 @@ pub(crate) struct PodSpec {
     expose: Option<u16>,
     #[serde(default = "default_true")]
     detach: bool,
+    /// k8s `hostAliases`: extra `/etc/hosts` entries, in the k8s shape
+    /// (`{ip, hostnames[]}`) rather than docker's `name:ip`. Same effect as
+    /// `--add-host`; normalized below.
+    ///
+    /// Wired on purpose: without it, the SAME `kind: Container` gained or lost
+    /// the feature depending on which shape of spec was used — flat had it,
+    /// k8s silently did not.
+    #[serde(default, rename = "hostAliases")]
+    host_aliases: Vec<HostAlias>,
     /// k8s `shareProcessNamespace`: the pod's containers see each other's
     /// processes (shared PID namespace). Default `false`, like k8s. Honored by
     /// `kind: Pod` (see `cmd::pod`); ignored for a single `kind: Container`.
@@ -494,6 +599,7 @@ pub(crate) const POD_SPEC_FIELDS: &[&str] = &[
     "expose",
     "detach",
     "shareProcessNamespace",
+    "hostAliases",
 ];
 
 /// k8s CPU quantity → docker-style core count: `"500m"` → `"0.5"`, `"2"` → `"2"`.
@@ -522,7 +628,8 @@ fn pod_to_run_opts(name: &str, namespace: Option<String>, pod: PodSpec) -> Resul
         )));
     }
     let c = pod.containers.into_iter().next().unwrap();
-    container_to_run_opts(
+    let add_host = pod_add_host(&pod.host_aliases)?;
+    let mut opts = container_to_run_opts(
         name,
         namespace,
         c,
@@ -532,7 +639,20 @@ fn pod_to_run_opts(name: &str, namespace: Option<String>, pod: PodSpec) -> Resul
         pod.hostname,
         pod.expose,
         pod.detach,
-    )
+    )?;
+    opts.add_host = add_host;
+    Ok(opts)
+}
+
+/// `hostAliases` (k8s) → `--add-host` (docker), validado. Partilhado pelo
+/// `kind: Container` na forma de pod e por cada membro de um `kind: Pod`, para
+/// as duas formas não poderem divergir.
+fn pod_add_host(aliases: &[HostAlias]) -> Result<Vec<String>> {
+    let mut out = Vec::new();
+    for a in aliases {
+        out.extend(a.to_add_host().map_err(Error::Invalid)?);
+    }
+    Ok(out)
 }
 
 /// Builds the [`RunOpts`] for EACH container of a `kind: Pod`, wired to the shared
@@ -552,6 +672,10 @@ pub(crate) fn pod_member_run_opts(
         )));
     }
     let hostname = pod.hostname.clone().unwrap_or_else(|| pod_name.to_string());
+    // Os membros partilham a netns, por isso partilham também as entradas de
+    // `/etc/hosts` do pod — mas cada um tem rootfs próprio, logo é preciso
+    // escrevê-las em cada um.
+    let add_host = pod_add_host(&pod.host_aliases)?;
     let mut out = Vec::with_capacity(pod.containers.len());
     for (i, c) in pod.containers.into_iter().enumerate() {
         let member = c.name.clone().unwrap_or_else(|| format!("c{i}"));
@@ -570,6 +694,7 @@ pub(crate) fn pod_member_run_opts(
             true,
         )?;
         opts.pod = Some(pod_netns.to_string());
+        opts.add_host = add_host.clone();
         opts.labels.push(format!("delonix.io/pod={pod_name}"));
         opts.labels
             .push(format!("delonix.io/pod-role=app.{member}"));
@@ -908,6 +1033,31 @@ pub enum ContainerCmd {
         /// Ulimit (`nofile=1024:2048`). Repeatable.
         #[arg(long)]
         ulimit: Vec<String>,
+        /// DNS server for the container's `/etc/resolv.conf`. Repeatable.
+        /// Overrides the resolver the engine would pick (network gateway, slirp,
+        /// or the host's copy).
+        #[arg(long = "dns")]
+        dns: Vec<String>,
+        /// DNS search domain. Repeatable.
+        #[arg(long = "dns-search")]
+        dns_search: Vec<String>,
+        /// `resolv.conf` option (`ndots:2`, `timeout:1`). Repeatable.
+        #[arg(long = "dns-option")]
+        dns_option: Vec<String>,
+        /// Supplementary group id for the process (`--group-add 1234`).
+        /// Repeatable. Applied even when the container runs as root — a root
+        /// process still needs a group to reach a mounted share.
+        #[arg(long = "group-add")]
+        group_add: Vec<String>,
+        /// Make a path unreadable inside the container (`--masked-path /proc/kcore`).
+        /// Repeatable. A file is covered with `/dev/null`, a directory with an
+        /// empty read-only tmpfs.
+        #[arg(long = "masked-path")]
+        masked_path: Vec<String>,
+        /// Remount a path read-only inside the container (`--readonly-path /proc/sys`).
+        /// Repeatable.
+        #[arg(long = "readonly-path")]
+        readonly_path: Vec<String>,
         /// Container sysctl (`net.core.somaxconn=1024`). Repeatable.
         #[arg(long)]
         sysctl: Vec<String>,
@@ -921,6 +1071,41 @@ pub enum ContainerCmd {
         /// The container's DNS alias on the network. Repeatable.
         #[arg(long = "network-alias")]
         network_alias: Vec<String>,
+        /// Extra `/etc/hosts` entry, `name:ip` (as Docker/Podman). Repeatable.
+        /// PERSISTED: survives `stop`/`start` and `restart`, which rewrite
+        /// `/etc/hosts` from scratch.
+        #[arg(long = "add-host")]
+        add_host: Vec<String>,
+        /// With `-d`, block until the image's `HEALTHCHECK` passes (or the
+        /// timeout elapses). Replaces the `until curl ...; do sleep; done`
+        /// that every script ends up writing. No `HEALTHCHECK` in the image
+        /// is a clear error, never a silent instant return.
+        #[arg(long = "wait")]
+        wait_healthy: bool,
+        /// How long `--wait` waits before giving up (seconds).
+        #[arg(long = "wait-timeout", default_value_t = 60)]
+        wait_timeout: u64,
+        // ---- continuous health check ----
+        /// Probe command, run with `/bin/sh -c` inside the container. Without
+        /// it, the image's own `HEALTHCHECK` is monitored; any other
+        /// `--health-*` flag turns monitoring on for an image that has one.
+        #[arg(long = "health-cmd")]
+        health_cmd: Option<String>,
+        /// Seconds between probes.
+        #[arg(long = "health-interval", default_value_t = 30)]
+        health_interval: u64,
+        /// A probe that runs longer than this counts as a failure. The probe
+        /// kills ITSELF (the wrapper is `sh`), so nothing is left stuck inside
+        /// the container.
+        #[arg(long = "health-timeout", default_value_t = 30)]
+        health_timeout: u64,
+        /// Consecutive failures before the container is `unhealthy`.
+        #[arg(long = "health-retries", default_value_t = 3)]
+        health_retries: u32,
+        /// Grace at startup: failures inside this window do not count, and the
+        /// container reads `starting` rather than `unhealthy`.
+        #[arg(long = "health-start-period", default_value_t = 0)]
+        health_start_period: u64,
         /// Restrict DNS resolution to these containers (isolation). Repeatable.
         #[arg(long)]
         knows: Vec<String>,
@@ -1284,10 +1469,24 @@ pub fn run(action: ContainerCmd) -> Result<()> {
             env_file,
             tmpfs,
             ulimit,
+            dns,
+            dns_search,
+            dns_option,
+            group_add,
+            masked_path,
+            readonly_path,
             sysctl,
             gpus,
             ip,
             network_alias,
+            add_host,
+            wait_healthy,
+            wait_timeout,
+            health_cmd,
+            health_interval,
+            health_timeout,
+            health_retries,
+            health_start_period,
             knows,
             knows_none,
             pod,
@@ -1354,10 +1553,26 @@ pub fn run(action: ContainerCmd) -> Result<()> {
                 env_file,
                 tmpfs,
                 ulimit,
+                dns,
+                dns_search,
+                dns_option,
+                group_add,
+                masked_path,
+                readonly_path,
                 sysctl,
                 gpus,
                 ip,
                 network_alias,
+                add_host,
+                wait_healthy,
+                wait_timeout,
+                health: health_opts(
+                    health_cmd,
+                    health_interval,
+                    health_timeout,
+                    health_retries,
+                    health_start_period,
+                ),
                 knows,
                 knows_none,
                 pod,
@@ -1547,6 +1762,7 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
                 sysctl: spec.sysctl,
                 gpus: spec.gpus,
                 network_alias: spec.network_alias,
+                add_host: spec.add_host,
                 knows: spec.knows,
                 net_bps: spec.net_bps,
                 net_burst: spec.net_burst,
@@ -1880,6 +2096,18 @@ pub(crate) struct RunOpts {
     #[serde(default)]
     pub(crate) ulimit: Vec<String>,
     #[serde(default)]
+    pub(crate) dns: Vec<String>,
+    #[serde(default)]
+    pub(crate) dns_search: Vec<String>,
+    #[serde(default)]
+    pub(crate) dns_option: Vec<String>,
+    #[serde(default)]
+    pub(crate) group_add: Vec<String>,
+    #[serde(default)]
+    pub(crate) masked_path: Vec<String>,
+    #[serde(default)]
+    pub(crate) readonly_path: Vec<String>,
+    #[serde(default)]
     pub(crate) sysctl: Vec<String>,
     #[serde(default)]
     pub(crate) gpus: Option<String>,
@@ -1887,6 +2115,20 @@ pub(crate) struct RunOpts {
     pub(crate) ip: Option<String>,
     #[serde(default)]
     pub(crate) network_alias: Vec<String>,
+    /// `--add-host name:ip` — extra `/etc/hosts` entries, PERSISTED so they
+    /// survive the rewrite that every start does.
+    #[serde(default)]
+    pub(crate) add_host: Vec<String>,
+    /// `--wait`: block until the image's HEALTHCHECK passes. Not persisted —
+    /// it is a property of THIS invocation, not of the container.
+    #[serde(default)]
+    pub(crate) wait_healthy: bool,
+    #[serde(default)]
+    pub(crate) wait_timeout: u64,
+    /// Continuous health check. PERSISTED (unlike `--wait`): it describes the
+    /// container, and the monitor has to find it again after a `restart`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) health: Option<HealthConfig>,
     #[serde(default)]
     pub(crate) knows: Vec<String>,
     #[serde(default)]
@@ -1895,6 +2137,7 @@ pub(crate) struct RunOpts {
     pub(crate) pod: Option<String>,
     /// (internal) init PID of the pod's infra container. When set, this container
     /// joins the infra's IPC/UTS namespaces (shared pod IPC + hostname). Set by
+
     /// `cmd::pod` for the pod's app containers; flows through the `--pod` re-exec.
     #[serde(default)]
     pub(crate) pod_infra_pid: Option<i32>,
@@ -1908,6 +2151,21 @@ pub(crate) struct RunOpts {
     pub(crate) log_file: Option<String>,
     #[serde(default)]
     pub(crate) log_cri: bool,
+}
+
+/// The explicit resolver a container was created with, if any.
+///
+/// Shared by `cmd_run` and `cmd_start` on purpose: the DNS the container gets on
+/// a `restart` has to be the one it was created with. Every field of this family
+/// that only the creation path read has ended up lost on the first restart —
+/// `-v`, `-p` on a custom network, extra networks, pod membership. Four times.
+pub(crate) fn dns_config_of(c: &Container) -> Option<runtime::DnsConfig> {
+    let cfg = runtime::DnsConfig {
+        servers: c.dns_servers.clone(),
+        searches: c.dns_searches.clone(),
+        options: c.dns_options.clone(),
+    };
+    (!cfg.is_empty()).then_some(cfg)
 }
 
 pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Result<()> {
@@ -1957,10 +2215,20 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
         env_file,
         tmpfs,
         ulimit,
+        dns,
+        dns_search,
+        dns_option,
+        group_add,
+        masked_path,
+        readonly_path,
         sysctl,
         gpus,
         ip,
         network_alias,
+        add_host,
+        wait_healthy,
+        wait_timeout,
+        health,
         knows,
         knows_none,
         pod,
@@ -2243,15 +2511,42 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
             // thought theirs was active. Fail-closed: explicit error (a finding from
             // the Docker/Podman analysis; invariant "no silent failure").
             Some(("seccomp", "unconfined")) => c.seccomp = Some("unconfined".into()),
+            // A custom OCI profile: `seccomp=/path/to/profile.json`. Read HERE,
+            // at the boundary, and stored as content — the container's init runs
+            // after `pivot_root`, where a host path means nothing. Parsed here
+            // too, so a broken profile is a clear error at `run` instead of a
+            // container that exits 126 with the reason buried in its log.
             Some(("seccomp", v)) => {
-                return Err(Error::Invalid(format!(
-                    "unsupported seccomp profile '{v}' — only `seccomp=unconfined` is supported (the built-in profile applies otherwise); custom profiles are not implemented yet"
-                )))
+                let json = std::fs::read_to_string(v).map_err(|e| {
+                    Error::Invalid(format!("--security-opt seccomp={v}: {e}"))
+                })?;
+                let (_, unknown) = runtime::seccomp_profile::parse(&json)
+                    .map_err(|e| Error::Invalid(format!("--security-opt seccomp={v}: {e}")))?;
+                for u in &unknown {
+                    eprintln!(
+                        "delonix: warning — seccomp profile names '{u}', which this architecture does not have"
+                    );
+                }
+                c.seccomp_profile = Some(json);
             }
             Some(("apparmor", v)) => apparmor_profile = Some(v.to_string()),
+            // `no-new-privileges` — docker's spelling, and docker's value-less
+            // form (`--security-opt no-new-privileges`) means TRUE. The engine
+            // already defaults to true, so the useful form here is `=false`,
+            // which is how the CRI's own `no_new_privs: false` reaches us.
+            Some(("no-new-privileges", v)) => match v {
+                "true" | "1" => c.no_new_privs = Some(true),
+                "false" | "0" => c.no_new_privs = Some(false),
+                _ => {
+                    return Err(Error::Invalid(format!(
+                        "invalid --security-opt no-new-privileges='{v}': expected true or false"
+                    )))
+                }
+            },
+            None if opt == "no-new-privileges" => c.no_new_privs = Some(true),
             _ => {
                 return Err(Error::Invalid(format!(
-                    "invalid --security-opt: '{opt}' (seccomp=… | apparmor=…)"
+                    "invalid --security-opt: '{opt}' (seccomp=unconfined|<profile.json> | apparmor=… | no-new-privileges[=true|false])"
                 )))
             }
         }
@@ -2289,8 +2584,48 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
     }
 
     // ---- fs & limits ----
+    // PERSISTIDO, não só usado no spawn: `/etc/hosts` é reescrito do zero em
+    // cada arranque (`write_etc_files`), portanto sem isto as entradas
+    // desapareciam no primeiro `stop`/`start` — em silêncio, e com o sintoma
+    // ("connection refused" a um nome que funcionava) longe da causa. É a
+    // MESMA armadilha já paga pelo `-v`, pelo `-p` em rede custom e pela
+    // pertença a pod: estado necessário para RECONSTRUIR tem de ser guardado.
+    // Validado na FRONTEIRA: uma entrada má falha aqui, antes de existir
+    // contentor, em vez de ser descartada em silêncio no arranque.
+    c.extra_hosts = {
+        let mut out = Vec::with_capacity(add_host.len());
+        for entry in &add_host {
+            let (name, ip) = parse_add_host(entry).map_err(Error::Invalid)?;
+            out.push(format!("{name}:{ip}"));
+        }
+        out
+    };
+    // A INTENÇÃO, ao lado do resultado — ver `Container::net_mode`.
+    c.net_mode = Some(net.clone());
     c.tmpfs = tmpfs;
     c.ulimits = ulimit;
+    // Parsed at the boundary, not inside the container: a bad gid here is a typo
+    // the user fixes, and finding out from a `setgroups` failure buried in the
+    // init's stderr is the worst possible place to learn it.
+    c.group_add = {
+        let mut out = Vec::new();
+        for g in &group_add {
+            match g.trim().parse::<u32>() {
+                Ok(v) => out.push(v),
+                Err(_) => {
+                    return Err(Error::Invalid(format!(
+                        "--group-add '{g}': expected a numeric gid"
+                    )))
+                }
+            }
+        }
+        out
+    };
+    c.dns_servers = dns;
+    c.dns_searches = dns_search;
+    c.dns_options = dns_option;
+    c.masked_paths = masked_path;
+    c.readonly_paths = readonly_path;
     c.sysctls = sysctl;
 
     // ---- network ----
@@ -2412,6 +2747,13 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
         c.pod = Some(pn.clone());
         if reexec {
             attached_ip = std::env::var("DELONIX_REEXEC_IP").ok();
+            // PERSIST IT. `c.ip` stayed `None` for every pod member: the branch
+            // that assigns it only runs for a custom network. The record then
+            // described a container with no address — so `describe` lied, and
+            // anything rebuilding from the record (`ingress ls`, a firewall
+            // reapply) had no address to work with. Fifth instance of the same
+            // trap in this file.
+            c.ip = attached_ip.clone();
         } else {
             let ip = infra::container_ip(pn);
             return reexec_into_netns(&id, pn, &ip, &opts_copy, false);
@@ -2439,7 +2781,14 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
     // stops sharing the host's network and gets its own netns with slirp4netns +
     // the requested hostfwds — the behavior of `docker run -p` (NAT network by
     // default), in podman's rootless model. The slirp dies with the netns.
-    let slirp_ports = if custom_net.is_none() {
+    // A POD MEMBER is excluded as well, and that omission was a live bug: its
+    // netns belongs to the pod, not to it. Taking this path spawned a SECOND
+    // slirp against the shared netns while `publish_with_retry` above had
+    // already published the same host port through the ingress — two things
+    // claiming one port, and the traffic reaching neither. Measured: the DNAT
+    // `10.0.2.100:12345 -> 10.200.0.2:80` was correct, nginx answered 200 from
+    // inside the holder, and `curl 127.0.0.1:12345` from the host still hung.
+    let slirp_ports = if custom_net.is_none() && pod.is_none() {
         ports.clone()
     } else {
         Vec::new()
@@ -2459,6 +2808,7 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
         None => None,
     };
     let spec = RunSpec {
+        dns_config: dns_config_of(&c),
         detach,
         // On re-exec we're already in the right netns: DON'T create another (nor join
         // anything — the `ip netns exec` handled that).
@@ -2556,11 +2906,19 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
             }
         }
     }
+    c.health = health.clone();
     if should_supervise(&restart, detach, !no_supervisor) {
         if policy_supervised(&restart) {
             c.restart_policy = Some(restart.clone());
         }
-        return run_supervised(store, &mut c, &rootfs, &spec, &restart, &id);
+        run_supervised(store, &mut c, &rootfs, &spec, &restart, &id)?;
+        // O supervisor tomou TODO o caminho detached (não só o `--restart`),
+        // por isso é aqui que a maioria dos `-d` termina — e era aqui que o
+        // `--wait` estava a ser silenciosamente ignorado.
+        if wait_healthy {
+            wait_until_healthy(images, store, &id, wait_timeout)?;
+        }
+        return Ok(());
     }
     let final_status = runtime::create_with(store, &mut c, &rootfs, &spec)?;
     if let Some(n) = &custom_net {
@@ -2658,10 +3016,84 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
             }
         }
     }
+    // `--wait`: só depois de o container estar registado e a correr — e depois
+    // da guarda de morte-ao-nascer acima, para não esperar 60s por algo que já
+    // morreu.
+    if wait_healthy {
+        wait_until_healthy(images, store, &id, wait_timeout)?;
+    }
     if !detach {
         propagate_exit_status(&final_status);
     }
     Ok(())
+}
+
+/// Bloqueia até o `HEALTHCHECK` da imagem passar, ou até ao tempo limite.
+///
+/// Existe porque toda a gente acaba por escrever `until curl ...; do sleep 2;
+/// done` à volta de um `run -d` — e escreve-o mal (sem limite, ou a sondar uma
+/// coisa que não é a saúde real do serviço). A resolução do comando é a MESMA
+/// que o `depends_on: service_healthy` do compose usa (`image_health_argv`),
+/// para os dois não poderem divergir.
+///
+/// Sem `HEALTHCHECK` na imagem é ERRO, não um retorno instantâneo: quem pede
+/// `--wait` está a dizer "não continues até isto servir", e devolver de
+/// imediato seria responder à pergunta errada em silêncio.
+fn wait_until_healthy(
+    images: &ImageStore,
+    store: &Store,
+    id: &str,
+    timeout_secs: u64,
+) -> Result<()> {
+    let c = find(store, id)?;
+    let Some(argv) = super::compose::image_health_argv(images, &c.image) else {
+        return Err(Error::Invalid(format!(
+            "--wait: image '{}' declares no HEALTHCHECK — nothing to wait for \
+             (add one to the image, or drop --wait)",
+            c.image
+        )));
+    };
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(timeout_secs);
+    let mut attempt: u32 = 0;
+    // Same self-limiting wrapper the monitor uses: a probe that hangs would
+    // otherwise pin `--wait` past its own deadline, which is the one thing the
+    // flag exists to prevent.
+    let script = argv.join(" ");
+    let argv = if argv.len() == 3 && argv[0] == "/bin/sh" && argv[1] == "-c" {
+        health_probe_argv(&argv[2], 30)
+    } else {
+        health_probe_argv(&script, 30)
+    };
+    loop {
+        if runtime::exec(&c, &argv, false).unwrap_or(1) == 0 {
+            return Ok(());
+        }
+        // Morreu enquanto esperávamos: dizer "não ficou saudável em 60s" seria
+        // esconder a causa real, que está nos logs.
+        if let Ok(cur) = find(store, id) {
+            let dead = match cur.pid {
+                // SAFETY: kill(pid, 0) sends no signal — it only tests existence.
+                Some(p) => (unsafe { libc::kill(p, 0) } != 0),
+                None => true,
+            };
+            if dead {
+                return Err(Error::Invalid(format!(
+                    "--wait: container '{}' exited while waiting to become healthy \
+                     — see `delonix container logs {}`",
+                    cur.name, cur.name
+                )));
+            }
+        }
+        if std::time::Instant::now() >= deadline {
+            return Err(Error::Invalid(format!(
+                "--wait: '{}' did not become healthy within {timeout_secs}s \
+                 ({attempt} check(s)) — see `delonix container logs {}`",
+                c.name, c.name
+            )));
+        }
+        attempt += 1;
+        std::thread::sleep(std::time::Duration::from_secs(1));
+    }
 }
 
 /// The shell exit code a terminal [`Status`] corresponds to, by the same
@@ -2908,7 +3340,14 @@ fn fmt_status_of(c: &Container, uptime: Option<u64>) -> String {
     if exit_code_unknown(c) {
         return "Exited (unknown)".to_string();
     }
-    fmt_status(&c.status, uptime)
+    let base = fmt_status(&c.status, uptime);
+    // Health only qualifies a RUNNING container. Appending "(healthy)" to
+    // `Exited (0)` would be reporting the last thing we saw as if it were still
+    // true — the exact silent-staleness this column exists to prevent.
+    match (&c.status, &c.health_state) {
+        (Status::Running, Some(h)) => format!("{base} ({})", h.health),
+        _ => base,
+    }
 }
 
 /// PORTS column in `docker ps` style: `8080->80/tcp`, comma-separated.
@@ -3075,6 +3514,9 @@ fn run_supervised(
         });
     }
     let (rd, wr) = (fds[0], fds[1]);
+    // Read BEFORE the fork: after it, `c` is the child's own copy and this is
+    // the value the monitor thread has to carry.
+    let health = c.health.clone();
 
     // SAFETY: fork of a single-threaded process (CLI).
     if unsafe { libc::fork() } == 0 {
@@ -3107,6 +3549,13 @@ fn run_supervised(
                     }
                 }
                 first = false;
+                // The health monitor starts only after the handshake: before
+                // it, an `eprintln!` from a failing probe would land on the
+                // user's terminal interleaved with the real startup error.
+                if let Some(cfg) = health.clone() {
+                    let cid = c.id.clone();
+                    std::thread::spawn(move || health_monitor_loop(cid, cfg));
+                }
             }
             if started.is_err() {
                 std::process::exit(1);
@@ -4183,6 +4632,9 @@ fn cmd_commit(images: &ImageStore, store: &Store, id: &str, tag: &str) -> Result
             String::new(),
             tag,
             &base.config.architecture,
+            // `container commit` herda o health check da base, tal como o
+            // caminho overlay (`commit_container`) já fazia.
+            base.config.healthcheck.clone(),
         )?
     } else {
         let layer = images.commit_upper(&c.id)?; // tar of the upperdir → CAS
@@ -4466,7 +4918,11 @@ fn describe_one(c: &Container) {
     d.sub_opt("Nice", c.nice.map(|n| n.to_string()));
 
     d.section("Network");
-    d.sub("Mode", c.network.as_deref().unwrap_or("host"));
+    // Diz a VERDADE sobre os três casos que `network: None` esconde: pedi
+    // host, pedi none, ou pedi uma rede e fiquei sem ela. O terceiro é o que
+    // interessa — um contentor assim está vivo, sem resolução de nomes e sem
+    // rota para os pares, e antes disto aparecia aqui como um `host` normal.
+    d.sub("Mode", net_mode_display(c));
     d.sub("IP", c.ip.as_deref().unwrap_or("<none>"));
     if !c.extra_networks.is_empty() {
         d.sub(
@@ -4480,6 +4936,40 @@ fn describe_one(c: &Container) {
     }
     if !c.net_aliases.is_empty() {
         d.sub("Aliases", c.net_aliases.join(", "));
+    }
+    // Sendo a persistência o ponto desta funcionalidade, tem de haver forma de
+    // confirmar o que ficou gravado sem ler o JSON à mão.
+    if let Some(hc) = &c.health {
+        let probe = if hc.cmd.is_empty() {
+            "<image HEALTHCHECK>".to_string()
+        } else {
+            hc.cmd.clone()
+        };
+        d.sub("Health probe", probe);
+        d.sub(
+            "Probe policy",
+            format!(
+                "every {}s, timeout {}s, {} retries, {}s start period",
+                hc.interval_secs, hc.timeout_secs, hc.retries, hc.start_period_secs
+            ),
+        );
+    }
+    if let Some(h) = &c.health_state {
+        let when = if h.checked_unix > 0 {
+            delonix_runtime_core::fmt_local_ts(h.checked_unix as u64)
+        } else {
+            "never".to_string()
+        };
+        d.sub(
+            "Health",
+            format!(
+                "{} (last exit {}, {} consecutive failure(s), checked {when})",
+                h.health, h.last_exit, h.failing_streak
+            ),
+        );
+    }
+    if !c.extra_hosts.is_empty() {
+        d.sub("Extra hosts", c.extra_hosts.join(", "));
     }
     if let Some(bps) = &c.net_bps {
         d.sub(
@@ -5258,8 +5748,275 @@ fn cmd_init(
     )
 }
 
+// ============================ health check contínuo ============================
+
+/// Builds the [`HealthConfig`] from the `--health-*` flags, or `None` when the
+/// user asked for no monitoring at all.
+///
+/// The trigger is DELIBERATELY "any `--health-*` flag was given", not just
+/// `--health-cmd`: an image that already declares a `HEALTHCHECK` is the common
+/// case, and `--health-interval 5` on it has an obvious meaning. Requiring a
+/// `--health-cmd` that merely repeats the image would be ceremony.
+///
+/// It is not turned on by the mere presence of a `HEALTHCHECK` in the image
+/// either: monitoring costs a probe process every interval, forever, and the
+/// image cannot know whether this particular run wants that.
+pub(crate) fn health_opts(
+    cmd: Option<String>,
+    interval: u64,
+    timeout: u64,
+    retries: u32,
+    start_period: u64,
+) -> Option<HealthConfig> {
+    let d = HealthConfig::default();
+    let asked = cmd.is_some()
+        || interval != d.interval_secs
+        || timeout != d.timeout_secs
+        || retries != d.retries
+        || start_period != d.start_period_secs;
+    if !asked {
+        return None;
+    }
+    Some(HealthConfig {
+        cmd: cmd.unwrap_or_default(),
+        interval_secs: interval.max(1),
+        timeout_secs: timeout.max(1),
+        retries: retries.max(1),
+        start_period_secs: start_period,
+    })
+}
+
+/// Wraps a probe so it enforces its OWN timeout, inside the container.
+///
+/// The engine cannot do it from outside: `runtime::exec` blocks in `waitpid`
+/// on an intermediate process, and killing that intermediate leaves the actual
+/// probe running in the container's pid namespace — a leak that repeats every
+/// interval, forever. Making the probe kill itself has no such hole, needs no
+/// new host-side plumbing, and works in any image that already has the
+/// `/bin/sh` the probe requires anyway.
+///
+/// The exit code survives: a probe killed by the watchdog comes back as 137
+/// (128+SIGKILL), which is a failure by the same rule as any non-zero.
+pub(crate) fn health_probe_argv(cmd: &str, timeout_secs: u64) -> Vec<String> {
+    let script = format!(
+        "{cmd} & __p=$!; (sleep {timeout_secs}; kill -9 $__p 2>/dev/null) & __w=$!; \
+         wait $__p; __rc=$?; kill $__w 2>/dev/null; exit $__rc"
+    );
+    vec!["/bin/sh".to_string(), "-c".to_string(), script]
+}
+
+/// The probe command line for a container: its own `--health-cmd`, else the
+/// image's `HEALTHCHECK`. `None` when neither exists.
+fn health_command(images: &ImageStore, c: &Container) -> Option<String> {
+    if let Some(h) = &c.health {
+        if !h.cmd.is_empty() {
+            return Some(h.cmd.clone());
+        }
+    }
+    // Resolved from the image EVERY time rather than frozen at create: a
+    // rebuilt image is picked up on the next probe, and this is the same
+    // resolution `--wait` and compose's `service_healthy` use.
+    let argv = super::compose::image_health_argv(images, &c.image)?;
+    // `image_health_argv` already returns `["/bin/sh","-c",<script>]` for the
+    // shell form; anything else is an exec-form vector we re-join.
+    if argv.len() == 3 && argv[0] == "/bin/sh" && argv[1] == "-c" {
+        Some(argv[2].clone())
+    } else {
+        Some(argv.join(" "))
+    }
+}
+
+/// Applies one probe result to the state machine. **Pure** — the whole of the
+/// `starting`/`retries` semantics is tested here, with no container involved.
+///
+/// `age_secs` is how long the container has been up, which is what decides
+/// whether we are still inside the start period. Docker's rule: a failure in
+/// the grace window keeps the container `starting`, but a SUCCESS promotes it
+/// to `healthy` immediately — the window is a licence to fail, not a delay.
+pub(crate) fn apply_probe(
+    prev: Option<&HealthState>,
+    cfg: &HealthConfig,
+    exit: i32,
+    age_secs: u64,
+    now_unix: i64,
+) -> HealthState {
+    let streak = if exit == 0 {
+        0
+    } else {
+        prev.map(|p| p.failing_streak).unwrap_or(0) + 1
+    };
+    let health = if exit == 0 {
+        Health::Healthy
+    } else if age_secs < cfg.start_period_secs || streak < cfg.retries {
+        Health::Starting
+    } else {
+        Health::Unhealthy
+    };
+    HealthState {
+        health,
+        failing_streak: streak,
+        last_exit: exit,
+        checked_unix: now_unix,
+    }
+}
+
+/// The monitoring loop, run by the detached container's supervisor.
+///
+/// **Who runs it was the design decision.** This engine is daemonless, so there
+/// is nobody resident to poll. The supervisor is the honest answer: it already
+/// exists, one per detached container, it already outlives the CLI, and it dies
+/// with the container it watches — no fleet-wide process, no new lifecycle to
+/// reason about. The cost is that a FOREGROUND container is not monitored, and
+/// that is correct rather than a gap: you are looking at it.
+fn health_monitor_loop(id: String, cfg: HealthConfig) {
+    let Ok((images, store)) = open_stores() else {
+        return;
+    };
+    loop {
+        std::thread::sleep(std::time::Duration::from_secs(cfg.interval_secs));
+        // The record disappearing (`rm`) is the signal to stop. Any other
+        // error is transient (a concurrent write) and worth another round.
+        let Ok(c) = store.load(&id) else {
+            return;
+        };
+        // Not running: leave the last verdict alone rather than writing a
+        // fresh "unhealthy" over a container the user stopped on purpose. The
+        // supervisor's own restart loop is what brings it back, and the next
+        // probe after that will speak for itself.
+        if !c.pid.map(runtime::is_alive).unwrap_or(false) {
+            continue;
+        }
+        let Some(cmd) = health_command(&images, &c) else {
+            // Asked to monitor something with no probe anywhere. Saying so once
+            // and stopping beats an empty column nobody can explain.
+            eprintln!("delonix: no health probe for '{}' — monitoring off", c.name);
+            return;
+        };
+        let argv = health_probe_argv(&cmd, cfg.timeout_secs);
+        let exit = runtime::exec(&c, &argv, false).unwrap_or(-1);
+        let age = c
+            .pid_starttime
+            .and_then(output::uptime_from_starttime)
+            .unwrap_or(0);
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0);
+        let next = apply_probe(c.health_state.as_ref(), &cfg, exit, age, now);
+        let was = c.health_state.as_ref().map(|s| s.health);
+        // `Store::update` and not save: the CLI writes to this same record
+        // (`rename`, `update --publish-add`) and a read-modify-write without
+        // the flock loses whichever change lands second.
+        let _ = store.update(&id, |cur| {
+            cur.health_state = Some(next.clone());
+            true
+        });
+        if was != Some(next.health) {
+            delonix_runtime_core::events::emit(
+                &super::util::state_root(),
+                "container",
+                "health_status",
+                &c.id,
+                &c.name,
+                Some(&next.health.to_string()),
+            );
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    /// `hostAliases` do k8s (um IP, N nomes) tem de dar o mesmo resultado que
+    /// N `--add-host`. Sem isto, o MESMO `kind: Container` tinha a
+    /// funcionalidade na forma plana e não na forma k8s.
+    #[test]
+    fn host_alias_k8s_converte_para_add_host() {
+        let a = super::HostAlias {
+            ip: "10.0.0.9".into(),
+            hostnames: vec!["meet.local".into(), "erp.local".into()],
+        };
+        assert_eq!(
+            a.to_add_host().unwrap(),
+            vec!["meet.local:10.0.0.9", "erp.local:10.0.0.9"]
+        );
+        // Passa pelo MESMO validador — um IP inválido falha aqui também.
+        let mau = super::HostAlias {
+            ip: "nao-e-ip".into(),
+            hostnames: vec!["x.local".into()],
+        };
+        assert!(mau.to_add_host().is_err());
+        // E a injecção também.
+        let inj = super::HostAlias {
+            ip: "10.0.0.9".into(),
+            hostnames: vec!["a\nb 9.9.9.9 evil".into()],
+        };
+        assert!(inj.to_add_host().is_err());
+    }
+
+    /// O `\n` era o que armava a escrita de conteúdo arbitrário fora do
+    /// rootfs (achado ALTO, provado ao vivo antes desta correcção): permitia
+    /// injectar linhas no `/etc/hosts`, e um symlink plantado pela imagem
+    /// levava-as para um caminho do host.
+    #[test]
+    fn parse_add_host_recusa_injeccao_e_exige_ip() {
+        use super::parse_add_host as p;
+        // O exploit exacto do revisor.
+        assert!(p("x:1.2.3.4\nLINHA-ARBITRARIA\n#").is_err());
+        assert!(p("x:1.2.3.4 evil\n9.9.9.9 deb.debian.org").is_err());
+        // Espaço = alias no formato do /etc/hosts: uma entrada mapeava N nomes.
+        assert!(p("registry-1.docker.io deb.debian.org:10.66.66.66").is_err());
+        assert!(p("a\tb:1.2.3.4").is_err());
+        // O endereço TEM de ser um IP — antes escrevia-se o que viesse.
+        assert!(p("nome:isto-nao-e-ip").is_err());
+        assert!(p("10.0.0.9:meet.local").is_err()); // ordem trocada
+        assert!(p("semseparador").is_err());
+        assert!(p(":10.0.0.1").is_err()); // nome vazio
+                                          // Válidos, incluindo IPv6 (é por isso que se parte pelo ÚLTIMO `:`).
+        assert_eq!(
+            p("meet.kaeso.local:10.0.0.9").unwrap(),
+            ("meet.kaeso.local".into(), "10.0.0.9".into())
+        );
+        assert_eq!(
+            p("db:2001:db8::1").unwrap(),
+            ("db".into(), "2001:db8::1".into())
+        );
+        // A forma `=` foi removida: partia IPv6 em silêncio.
+        assert!(p("db=2001:db8::1").is_err());
+    }
+
+    /// A degradação de rede tem de ser DISTINGUÍVEL de uma escolha
+    /// deliberada. Antes disto, os três casos abaixo diziam todos "host".
+    #[test]
+    fn net_mode_display_separa_degradacao_de_escolha() {
+        let base = |net_mode: Option<&str>, network: Option<&str>| {
+            let mut c = delonix_runtime_core::Container::new(
+                "id".into(),
+                "n".into(),
+                "img".into(),
+                vec!["sh".into()],
+                "max".into(),
+            );
+            c.net_mode = net_mode.map(str::to_string);
+            c.network = network.map(str::to_string);
+            c
+        };
+        // Ligado: mostra a rede.
+        assert_eq!(
+            super::net_mode_display(&base(Some("dev"), Some("dev"))),
+            "dev"
+        );
+        // Escolhas deliberadas: sem alarme.
+        assert_eq!(super::net_mode_display(&base(Some("host"), None)), "host");
+        assert_eq!(super::net_mode_display(&base(Some("none"), None)), "none");
+        // O caso que estava mudo: pediu rede, não a tem.
+        assert_eq!(
+            super::net_mode_display(&base(Some("dev"), None)),
+            "host (degraded: asked for 'dev')"
+        );
+        // Registo antigo (sem o campo): não inventa intenção.
+        assert_eq!(super::net_mode_display(&base(None, None)), "host");
+    }
+
     /// O supervisor é o que torna o exit code de um container `-d` conhecível:
     /// `waitpid` é a única fonte de um estado real e o kernel só o dá ao PAI.
     /// Sem supervisor o CLI saía, o container era reparentado ao `init`, e o
@@ -5841,5 +6598,131 @@ containers:
         // Pinned to OUR value — the whole point is that the child must not
         // recompute it from its own (mapped) uid.
         assert_eq!(got, rt_dir.into_os_string());
+    }
+
+    // ---- health check contínuo ----
+
+    use super::{apply_probe, fmt_status_of, health_opts, health_probe_argv};
+    use delonix_runtime_core::{Health, HealthConfig, HealthState};
+
+    fn hc(retries: u32, start_period: u64) -> HealthConfig {
+        HealthConfig {
+            retries,
+            start_period_secs: start_period,
+            ..HealthConfig::default()
+        }
+    }
+
+    #[test]
+    fn health_opts_so_liga_quando_o_utilizador_pede() {
+        let d = HealthConfig::default();
+        // Só os defaults: monitorização DESLIGADA. Uma imagem com HEALTHCHECK
+        // não passa a custar um processo por intervalo só por existir.
+        assert!(health_opts(
+            None,
+            d.interval_secs,
+            d.timeout_secs,
+            d.retries,
+            d.start_period_secs
+        )
+        .is_none());
+        // Um --health-interval sozinho basta para ligar sobre o HEALTHCHECK da
+        // imagem, sem obrigar a repetir o comando.
+        let on = health_opts(None, 5, d.timeout_secs, d.retries, d.start_period_secs).unwrap();
+        assert_eq!(on.interval_secs, 5);
+        assert!(on.cmd.is_empty());
+    }
+
+    #[test]
+    fn health_opts_nunca_aceita_zero() {
+        // Um intervalo de 0 seria um ciclo apertado a correr um processo dentro
+        // do container para sempre — o clap aceita o número, nós não.
+        let o = health_opts(Some("true".into()), 0, 0, 0, 0).unwrap();
+        assert_eq!((o.interval_secs, o.timeout_secs, o.retries), (1, 1, 1));
+    }
+
+    #[test]
+    fn apply_probe_precisa_de_retries_seguidos_para_ficar_unhealthy() {
+        let cfg = hc(3, 0);
+        let mut st = apply_probe(None, &cfg, 1, 100, 0);
+        assert_eq!(
+            st.health,
+            Health::Starting,
+            "1 falha de 3 ainda não é doente"
+        );
+        st = apply_probe(Some(&st), &cfg, 1, 100, 0);
+        assert_eq!(st.health, Health::Starting);
+        st = apply_probe(Some(&st), &cfg, 1, 100, 0);
+        assert_eq!(st.health, Health::Unhealthy);
+        assert_eq!(st.failing_streak, 3);
+    }
+
+    #[test]
+    fn apply_probe_um_sucesso_zera_a_sequencia() {
+        let cfg = hc(3, 0);
+        // Duas falhas, um sucesso, duas falhas: NUNCA doente. `retries` é uma
+        // sequência, não um total — um serviço que falha uma vez por hora não
+        // pode acumular até ser declarado morto.
+        let mut st = apply_probe(None, &cfg, 1, 100, 0);
+        st = apply_probe(Some(&st), &cfg, 1, 100, 0);
+        st = apply_probe(Some(&st), &cfg, 0, 100, 0);
+        assert_eq!(st.health, Health::Healthy);
+        assert_eq!(st.failing_streak, 0);
+        st = apply_probe(Some(&st), &cfg, 1, 100, 0);
+        st = apply_probe(Some(&st), &cfg, 1, 100, 0);
+        assert_eq!(st.health, Health::Starting);
+    }
+
+    #[test]
+    fn apply_probe_start_period_protege_e_o_sucesso_promove_de_imediato() {
+        let cfg = hc(1, 60);
+        // Dentro da janela, mesmo com retries=1, uma falha não condena.
+        let st = apply_probe(None, &cfg, 1, 10, 0);
+        assert_eq!(st.health, Health::Starting);
+        // Mas um sucesso promove já — a janela é licença para falhar, não atraso.
+        let st = apply_probe(Some(&st), &cfg, 0, 11, 0);
+        assert_eq!(st.health, Health::Healthy);
+        // Passada a janela, a mesma falha condena.
+        let st = apply_probe(Some(&st), &cfg, 1, 61, 0);
+        assert_eq!(st.health, Health::Unhealthy);
+    }
+
+    #[test]
+    fn health_probe_argv_mata_se_a_si_proprio() {
+        let a = health_probe_argv("curl -f localhost", 7);
+        assert_eq!(a[0], "/bin/sh");
+        assert_eq!(a[1], "-c");
+        // O comando corre em background e um watchdog mata-o: sem isto, um
+        // probe pendurado ficava dentro do container a cada intervalo, para
+        // sempre — e o motor não tem como o alcançar de fora (o `exec` bloqueia
+        // num intermediário, e matar esse deixa o neto vivo no pid-ns).
+        assert!(a[2].contains("curl -f localhost &"));
+        assert!(a[2].contains("sleep 7"));
+        assert!(a[2].contains("kill -9 $__p"));
+        // O código de saída do probe sobrevive ao wrapper.
+        assert!(a[2].contains("exit $__rc"));
+    }
+
+    #[test]
+    fn status_so_mostra_saude_de_um_container_a_correr() {
+        let mut c = Container::new(
+            "id".into(),
+            "t".into(),
+            "img".into(),
+            v(&["sh"]),
+            "max".into(),
+        );
+        c.status = Status::Running;
+        c.health_state = Some(HealthState {
+            health: Health::Unhealthy,
+            failing_streak: 3,
+            last_exit: 1,
+            checked_unix: 0,
+        });
+        assert!(fmt_status_of(&c, Some(90)).contains("(unhealthy)"));
+        // Parado, o último veredicto deixa de ser afirmado: seria dar por
+        // presente uma observação que já não se está a fazer.
+        c.status = Status::Stopped;
+        assert_eq!(fmt_status_of(&c, None), "Exited (0)");
     }
 }

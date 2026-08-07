@@ -236,6 +236,106 @@ fn err_response(e: &Error) -> (StatusCode, Vec<u8>) {
     (status, json!({ "message": msg }).to_string().into_bytes())
 }
 
+/// Every Docker Engine API route this layer implements, and what each one maps
+/// to internally.
+///
+/// **This table is the published contract**, not a comment: `serve docker-api
+/// --matrix` prints it, the docs are generated from it, and
+/// `matriz_cobre_todas_as_rotas_do_dispatch` reads THIS FILE'S OWN SOURCE and
+/// fails if a dispatch arm exists without an entry here. A compatibility layer
+/// whose coverage is only discoverable by trying it is worse than a smaller one
+/// that says where it ends — third-party tooling (Testcontainers, CI plugins,
+/// IDEs) breaks unpredictably against the first and cleanly against the second.
+pub(crate) const API_MATRIX: &[(&str, &str, &str)] = &[
+    ("GET|HEAD", "/_ping", "liveness"),
+    ("GET", "/version", "engine version"),
+    ("GET", "/info", "engine state"),
+    ("GET", "/containers/json", "container ps"),
+    ("GET", "/images/json", "image ls"),
+    (
+        "POST",
+        "/containers/create",
+        "container run -d (creates AND starts; HostConfig.RestartPolicy is REFUSED)",
+    ),
+    (
+        "POST",
+        "/containers/{id}/start",
+        "idempotent 304 if already running",
+    ),
+    ("POST", "/containers/{id}/stop", "container stop"),
+    ("POST", "/containers/{id}/kill", "container kill"),
+    ("POST", "/containers/{id}/wait", "container wait"),
+    ("POST", "/containers/{id}/restart", "container restart"),
+    ("POST", "/containers/{id}/rename", "container rename"),
+    ("DELETE", "/containers/{id}", "container rm"),
+    ("GET", "/containers/{id}/json", "container inspect"),
+];
+
+/// Routes deliberately NOT implemented, each with the reason.
+///
+/// Kept next to the matrix on purpose. "Not in the list" and "will never be in
+/// the list" are different answers, and the second one saves someone the work
+/// of waiting for it.
+///
+/// ROUTES ONLY. A caveat about one FIELD of an implemented route (say
+/// `HostConfig.RestartPolicy`, which `create` refuses) belongs in that route's
+/// own description — mixing the two granularities made the overlap check
+/// ambiguous, which is how this distinction got noticed.
+pub(crate) const API_UNIMPLEMENTED: &[(&str, &str, &str)] = &[
+    (
+        "POST",
+        "/containers/{id}/exec",
+        "needs HTTP hijacking (a raw bidirectional stream over the upgraded \
+         connection); use `delonix container exec`",
+    ),
+    (
+        "POST",
+        "/containers/{id}/attach",
+        "same hijacking requirement, and this engine keeps no live stdin conduit \
+         to an already-started detached container",
+    ),
+    (
+        "GET",
+        "/containers/{id}/logs",
+        "not written yet; `delonix container logs` covers it",
+    ),
+    (
+        "GET",
+        "/events",
+        "not written yet; `delonix system events` covers it",
+    ),
+    (
+        "POST",
+        "/build",
+        "not written yet; `delonix build` covers it",
+    ),
+    (
+        "GET|POST|DELETE",
+        "/networks",
+        "not written yet; `delonix network` covers it",
+    ),
+    (
+        "GET|POST|DELETE",
+        "/volumes",
+        "not written yet; `delonix volumes` covers it",
+    ),
+];
+
+/// Prints [`API_MATRIX`] and [`API_UNIMPLEMENTED`] as a table.
+pub(crate) fn print_matrix() {
+    let mut t = super::output::Table::new(&["METHOD", "PATH", "MAPS TO"]);
+    for (m, p, to) in API_MATRIX {
+        t.row(vec![m.to_string(), p.to_string(), to.to_string()]);
+    }
+    t.print();
+    println!("\nNOT implemented (a 404 names the route, never a silent success):");
+    let mut u = super::output::Table::new(&["METHOD", "PATH", "WHY"]);
+    for (m, p, why) in API_UNIMPLEMENTED {
+        u.row(vec![m.to_string(), p.to_string(), why.to_string()]);
+    }
+    u.print();
+}
+
 async fn handle(
     req: Request<Incoming>,
     state: Arc<AppState>,
@@ -285,9 +385,14 @@ async fn handle(
                 _ => (
                     StatusCode::NOT_FOUND,
                     json!({
+                        // Naming the route AND the way to see the whole
+                        // contract beats a bare 404: a client that hits this is
+                        // exactly the client that needs to know what else is
+                        // missing before it writes around one gap at a time.
                         "message": format!(
                             "{method} {path}: not implemented in delonix's Docker API \
-                             compatibility layer yet — see docs/COMPARACAO-DOCKER-PODMAN.md"
+                             compatibility slice — run `delonix serve docker-api --matrix` \
+                             for the full coverage table"
                         )
                     })
                     .to_string()
@@ -524,6 +629,9 @@ fn handle_inspect(state: &Arc<AppState>, id: &str) -> (StatusCode, Vec<u8>) {
 /// JSON to `RunOpts` — the SAME struct `container run`'s CLI parsing builds,
 /// so this reuses `cmd_run` wholesale rather than a second create/spawn path.
 ///
+/// `HostConfig.ExtraHosts` IS mapped (same `host:ip` format as `--add-host`,
+/// same validator) — it is what Testcontainers uses.
+///
 /// **Deliberately NOT mapped** (documented limitation, not a silent gap):
 /// `HostConfig.NetworkMode`/`NetworkingConfig` (Docker's bridge/user-defined
 /// network model has no equivalent here — every API-created container gets
@@ -555,6 +663,19 @@ fn docker_config_to_run_opts(name: String, cfg: &serde_json::Value) -> Result<Ru
 
     let host = &cfg["HostConfig"];
     let volumes: Vec<String> = json_str_array(&host["Binds"]);
+    // `HostConfig.ExtraHosts` — o formato é `host:ip`, o mesmo do
+    // `--add-host`, logo o mesmo parser. É o campo que o Testcontainers usa;
+    // ignorá-lo em silêncio dava um contentor sem a resolução que o teste
+    // configurou, e uma falha longe da causa.
+    let add_host: Vec<String> = {
+        let mut out = Vec::new();
+        for entry in json_str_array(&host["ExtraHosts"]) {
+            let (n, ip) = super::container::parse_add_host(&entry)
+                .map_err(delonix_runtime_core::Error::Invalid)?;
+            out.push(format!("{n}:{ip}"));
+        }
+        out
+    };
     let ports = docker_port_bindings_to_publish_specs(&host["PortBindings"]);
     let restart = host["RestartPolicy"]["Name"]
         .as_str()
@@ -613,6 +734,7 @@ fn docker_config_to_run_opts(name: String, cfg: &serde_json::Value) -> Result<Ru
         name: Some(name),
         net: "host".to_string(),
         volumes,
+        add_host,
         ports,
         privileged,
         entrypoint,
@@ -863,4 +985,102 @@ fn images_json(state: &AppState) -> Result<Vec<u8>> {
         })
         .collect();
     Ok(serde_json::to_vec(&items)?)
+}
+
+#[cfg(test)]
+mod matrix_tests {
+    use super::{API_MATRIX, API_UNIMPLEMENTED};
+
+    /// Reads THIS FILE'S OWN SOURCE and requires every dispatch arm to have a
+    /// row in the matrix.
+    ///
+    /// A hand-kept table drifts the first time someone adds a route and forgets
+    /// the doc — and a coverage table that is wrong is worse than none, because
+    /// it is believed. Parsing the source is crude but it fails LOUDLY at
+    /// `cargo test`, which is exactly where that mistake should surface.
+    #[test]
+    fn matriz_cobre_todas_as_rotas_do_dispatch() {
+        let src = include_str!("dockerapi.rs");
+        // The literal-path arms: ("GET", "/version") => ...
+        let mut missing = Vec::new();
+        for line in src.lines() {
+            let l = line.trim();
+            if !l.contains("=>") || !l.starts_with('(') {
+                continue;
+            }
+            // ("POST", ["containers", id, "start"]) => ...
+            if let Some(rest) = l.strip_prefix('(') {
+                let Some((methods, tail)) = rest.split_once(", ") else {
+                    continue;
+                };
+                let methods = methods.trim().trim_matches('"');
+                if !methods
+                    .split(" | ")
+                    .all(|m| matches!(m.trim_matches('"'), "GET" | "HEAD" | "POST" | "DELETE"))
+                {
+                    continue;
+                }
+                let path = if let Some(seg) = tail.strip_prefix('[') {
+                    // segment form -> rebuild "/containers/{id}/start"
+                    let inner = seg.split(']').next().unwrap_or("");
+                    let parts: Vec<String> = inner
+                        .split(',')
+                        .map(|p| {
+                            let p = p.trim();
+                            if p.starts_with('"') {
+                                p.trim_matches('"').to_string()
+                            } else {
+                                "{id}".to_string()
+                            }
+                        })
+                        .collect();
+                    format!("/{}", parts.join("/"))
+                } else if tail.trim_start().starts_with('"') {
+                    tail.trim_start()
+                        .trim_start_matches('"')
+                        .split('"')
+                        .next()
+                        .unwrap_or("")
+                        .to_string()
+                } else {
+                    continue;
+                };
+                let methods_norm = methods.replace("\" | \"", "|");
+                if !API_MATRIX
+                    .iter()
+                    .any(|(m, p, _)| *p == path && *m == methods_norm)
+                {
+                    missing.push(format!("{methods_norm} {path}"));
+                }
+            }
+        }
+        assert!(
+            missing.is_empty(),
+            "dispatch arms with no row in API_MATRIX: {missing:?}"
+        );
+        // And the parser has to have FOUND something — a regex that matches
+        // nothing would make this test pass forever while proving nothing.
+        assert!(API_MATRIX.len() >= 14);
+    }
+
+    /// The two lists must not overlap on (method, path).
+    ///
+    /// The first version of this check compared with `contains`, and failed
+    /// twice for reasons worth keeping: once legitimately (a caveat about ONE
+    /// FIELD of `create` was filed as if the whole route were missing) and once
+    /// falsely (`DELETE /containers/{id}` is a substring of `GET
+    /// /containers/{id}/logs`). Both pushed the "not implemented" list into the
+    /// same (method, path, why) shape as the matrix, which is what makes an
+    /// exact comparison possible at all.
+    #[test]
+    fn nada_esta_nas_duas_listas() {
+        for (m, path, _) in API_MATRIX {
+            assert!(
+                !API_UNIMPLEMENTED
+                    .iter()
+                    .any(|(um, up, _)| up == path && um == m),
+                "{m} {path} appears as both implemented and not"
+            );
+        }
+    }
 }

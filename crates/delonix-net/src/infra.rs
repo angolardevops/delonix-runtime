@@ -180,7 +180,13 @@ fn runtime_dir() -> PathBuf {
     }
     // SAFETY: geteuid() has no preconditions.
     let uid = unsafe { libc::geteuid() };
-    if uid != 0 {
+    // NOT `uid != 0`. That was the same mistake `is_rootless` made: uid 0
+    // inside a NESTED user namespace is not the host's root, and this branch
+    // then resolved `/run/delonix-net` — a directory it cannot create — so
+    // every socket operation failed with a bare `Permission denied`. Found by
+    // running the whole engine under `unshare --user --map-root-user`, which is
+    // a legitimate rootless environment, not an exotic one.
+    if !delonix_runtime_core::in_initial_userns() || uid != 0 {
         // NOT `$XDG_RUNTIME_DIR`/`/run/user/<uid>`, despite being the more
         // conventional choice for this kind of ephemeral state (systemd-
         // logind guarantees it's short) — BUG FOUND live trying exactly
@@ -201,7 +207,8 @@ fn runtime_dir() -> PathBuf {
         // protected by SO_PEERCRED + 0600 — this is defense in depth only).
         return std::env::temp_dir().join(format!("delonix-net-{uid}"));
     }
-    // Real root never reaches this module's holder at all (see `infra.rs`'s
+    // Real root — the INITIAL namespace's root — never reaches this module's
+    // holder at all (see `infra.rs`'s
     // top doc comment + `delonix-runtime/AGENTS.md`'s net gotcha: a real-root
     // process already has host `CAP_NET_ADMIN` and uses the OTHER mechanism,
     // `Net::` in `lib.rs` — no rootless holder, no netns re-exec, no `/run`
@@ -801,15 +808,24 @@ fn start_pin() -> Result<i32> {
     // not just root: real images (nginx uid 101, postgres, …) need chown
     // to uids != 0 INSIDE the container, which thus become mappable. `--map-root-user`
     // maps the userns's uid 0 → the user's uid on the host.
+    // `--map-auto` needs `newuidmap`, which validates the requested range
+    // against `/etc/subuid` for the REAL uid — and inside a NESTED user
+    // namespace that check fails ("uid range not allowed") however the outer
+    // namespace was set up. The holder then never came up and the caller got
+    // `timeout waiting for the netns holder`: a symptom five seconds and one
+    // layer away from the cause.
+    //
+    // Nested → map only uid 0. Containers that need a non-root uid INSIDE
+    // (nginx's 101, postgres) lose that there, which is a real reduction — but
+    // a documented one, and strictly better than an engine that hangs.
+    let nested = !delonix_runtime_core::in_initial_userns();
+    let mut unshare_args: Vec<&str> = vec!["--user"];
+    if !nested {
+        unshare_args.push("--map-auto");
+    }
+    unshare_args.extend(["--map-root-user", "--net", "--mount", "--"]);
     let child = Command::new("unshare")
-        .args([
-            "--user",
-            "--map-auto",
-            "--map-root-user",
-            "--net",
-            "--mount",
-            "--",
-        ])
+        .args(&unshare_args)
         .arg(&exe)
         .args(["netns", "pin"])
         // the holder runs with uid->0 in the userns; forces the paths to the real base.
@@ -819,7 +835,12 @@ fn start_pin() -> Result<i32> {
         .env("DELONIX_INTERNAL", "1")
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        // Kept out of `/dev/null`, deliberately. The holder failing to start is
+        // reported to the caller as a bare timeout, and the reason — an
+        // `unshare`/`newuidmap` refusal, printed here and nowhere else — used to
+        // be discarded. Inheriting stderr costs nothing (the process is
+        // detached) and turns a five-second silence into a sentence.
+        .stderr(Stdio::inherit())
         .spawn()
         .map_err(|e| Error::Runtime {
             context: "spawn unshare",
