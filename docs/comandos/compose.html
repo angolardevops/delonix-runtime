@@ -98,7 +98,7 @@ determinística (<code>&lt;projecto&gt;_&lt;nome&gt;</code>) — sem registo pr�
 <code>stack describe</code>.</p>
 <div class='help'><pre><code>Native `docker-compose.yml` support (up/down/ps/logs/config)
 
-Usage: dlx compose [OPTIONS] &lt;COMMAND&gt;
+Usage: delonix compose [OPTIONS] &lt;COMMAND&gt;
 
 Commands:
   up      Creates/starts every service — build, then network, then volume, then containers in `depends_on` order (gated on the declared condition)
@@ -122,7 +122,7 @@ precisa de semântica própria de limpeza, ainda por desenhar). <code>working_di
 <h2 id='up'><code>compose up</code></h2>
 <div class='help'><pre><code>Creates/starts every service — build, then network, then volume, then containers in `depends_on` order (gated on the declared condition)
 
-Usage: dlx compose up [OPTIONS]
+Usage: delonix compose up [OPTIONS]
 
 Options:
   -f, --file &lt;FILE&gt;             
@@ -135,7 +135,7 @@ Options:
 <h2 id='ps'><code>compose ps</code></h2>
 <div class='help'><pre><code>Containers of this project (derived from labels)
 
-Usage: dlx compose ps [OPTIONS]
+Usage: delonix compose ps [OPTIONS]
 
 Options:
   -f, --file &lt;FILE&gt;             
@@ -146,7 +146,7 @@ Options:
 <h2 id='logs'><code>compose logs</code></h2>
 <div class='help'><pre><code>Logs of one service (default: every service, one after another)
 
-Usage: dlx compose logs [OPTIONS] [SERVICE]
+Usage: delonix compose logs [OPTIONS] [SERVICE]
 
 Arguments:
   [SERVICE]  
@@ -161,7 +161,7 @@ Options:
 <h2 id='config'><code>compose config</code></h2>
 <div class='help'><pre><code>Validates and prints the resolved project, without creating anything (`docker compose config` equivalent)
 
-Usage: dlx compose config [OPTIONS]
+Usage: delonix compose config [OPTIONS]
 
 Options:
   -f, --file &lt;FILE&gt;             
@@ -172,7 +172,7 @@ Options:
 <h2 id='down'><code>compose down</code></h2>
 <div class='help'><pre><code>Removes every container this project&#x27;s `up` created (and, with `-v`, its named volumes). Networks/volumes marked `external: true` are NEVER removed
 
-Usage: dlx compose down [OPTIONS]
+Usage: delonix compose down [OPTIONS]
 
 Options:
   -f, --file &lt;FILE&gt;             

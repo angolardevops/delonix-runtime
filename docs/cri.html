@@ -114,6 +114,24 @@ estado e remoção</td></tr>
 <tr><td>Rede</td><td>compatibilidade CNI (attach/detach por conf JSON)</td></tr>
 </table>
 
+<h2>Conformidade — medida, não afirmada</h2>
+<p>«Serve um kubelet» é uma alegação; <strong>79 de 103 specs nomeados</strong> é um facto que
+outra pessoa verifica. O <code>delonix-cri</code> é corrido contra o
+<code>critest</code> do <a href="https://github.com/kubernetes-sigs/cri-tools">cri-tools</a>, a
+suite de upstream, e o número é publicado:</p>
+<pre><code>Ran 103 of 122 Specs
+79 Passed | 24 Failed | 19 Skipped        # rootless, cgroup v2</code></pre>
+<p>Reproduz com <code>tests/compat/cri-conformance.sh</code>. O detalhe completo do que falha e
+porquê — incluindo o que <em>não</em> é nosso — está em
+<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/cri-conformance.md">docs/cri-conformance.md</a>.</p>
+<p>Cerca de metade das falhas restantes não são lacunas do motor: nove são specs de AppArmor, que
+exigem <code>CAP_MAC_ADMIN</code> no user namespace <em>inicial</em> (o Docker e o containerd têm
+exactamente o mesmo limite), e quatro são testes de montagem em que a própria suite não consegue
+montar no host sem root.</p>
+<p>Uma divergência é <strong>deliberada</strong> e não muda para ganhar um spec: um container sem
+perfil seccomp declarado corre sob o allowlist embutido do motor, não <em>unconfined</em>. É mais
+apertado do que a especificação pede.</p>
+
 <h2>Do zero a um cluster</h2>
 <p>É esta peça que fecha o ciclo do <code>delonix cluster</code>: a imagem VM dourada
 (<code>delonix image --vm build</code>) já traz kubeadm/kubelet/kubectl e o

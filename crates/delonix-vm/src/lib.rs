@@ -1070,8 +1070,22 @@ fn vm_iotune_xml() -> String {
             .and_then(|v| v.trim().parse::<u64>().ok())
             .filter(|n| *n > 0)
     };
-    let bps = num("DELONIX_VM_IO_MAX_BPS");
-    let iops = num("DELONIX_VM_IO_MAX_IOPS");
+    iotune_xml_from(num("DELONIX_VM_IO_MAX_BPS"), num("DELONIX_VM_IO_MAX_IOPS"))
+}
+
+/// Composes the `<iotune>` block. **Pure**, and that is the point.
+///
+/// The composition used to be tested by SETTING the environment variables, in a
+/// test binary where every test runs in the same process, in parallel. The
+/// sibling test that asserts iotune is opt-in reads the same variables — so it
+/// saw whatever this one had just set, and failed with "o iotune tem de ser
+/// opt-in" depending on scheduling. The test's own comment warned about exactly
+/// this ("mexer em env vars num teste paralelo é uma corrida com todos os
+/// outros") while its neighbour did it anyway.
+///
+/// Reading the environment is now the ONLY thing `vm_iotune_xml` does that is
+/// not testable in isolation, and nothing tests it.
+fn iotune_xml_from(bps: Option<u64>, iops: Option<u64>) -> String {
     if bps.is_none() && iops.is_none() {
         return String::new();
     }
@@ -2579,25 +2593,17 @@ mod tests {
     /// guest esgota-o por qualquer das direcções.
     #[test]
     fn iotune_compoe_bytes_e_iops() {
-        // Correr em série e limpar sempre: env vars são globais ao processo.
-        static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-        let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let clear = || unsafe {
-            std::env::remove_var("DELONIX_VM_IO_MAX_BPS");
-            std::env::remove_var("DELONIX_VM_IO_MAX_IOPS");
-        };
-        clear();
-
-        unsafe { std::env::set_var("DELONIX_VM_IO_MAX_BPS", "104857600") };
-        let x = super::vm_iotune_xml();
+        // Sem env vars: a composição é uma função pura, e testá-la assim é o que
+        // impede a corrida que fazia o teste irmão (`iotune ... opt-in`) falhar
+        // por ordem de escalonamento.
+        let x = super::iotune_xml_from(Some(104_857_600), None);
         assert!(
             x.contains("<total_bytes_sec>104857600</total_bytes_sec>"),
             "{x}"
         );
         assert!(!x.contains("iops"), "{x}");
 
-        unsafe { std::env::set_var("DELONIX_VM_IO_MAX_IOPS", "2000") };
-        let x = super::vm_iotune_xml();
+        let x = super::iotune_xml_from(Some(104_857_600), Some(2000));
         assert!(
             x.contains("<total_bytes_sec>104857600</total_bytes_sec>"),
             "{x}"
@@ -2608,15 +2614,10 @@ mod tests {
             "{x}"
         );
 
-        // Lixo ou zero não produz um tecto de zero (que bloquearia o disco todo).
-        unsafe { std::env::set_var("DELONIX_VM_IO_MAX_BPS", "0") };
-        unsafe { std::env::set_var("DELONIX_VM_IO_MAX_IOPS", "abc") };
-        assert_eq!(
-            super::vm_iotune_xml(),
-            "",
-            "valores inválidos têm de não gerar tecto"
-        );
-        clear();
+        // Nenhum valor = nenhum tecto. O filtro de lixo/zero vive no leitor de
+        // ambiente (`vm_iotune_xml`), que só sabe transformar "0"/"abc" em
+        // `None` — o que esta função recebe já é o resultado disso.
+        assert_eq!(super::iotune_xml_from(None, None), "");
     }
 
     #[test]

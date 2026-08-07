@@ -100,11 +100,12 @@ próprio utilizador). Fora de escopo: <code>exec</code>/attach interactivo (HTTP
 qualquer rota não implementada dá 404 claro.</p>
 <div class='help'><pre><code>Serve a slice of the Docker Engine API on a unix socket — `docker version`/`ps`/`images`/`info`/lifecycle mutations via `DOCKER_HOST=unix://&lt;path&gt;`
 
-Usage: dlx serve docker-api [OPTIONS]
+Usage: delonix serve docker-api [OPTIONS]
 
 Options:
       --addr &lt;ADDR&gt;   Socket address (default: `$DELONIX_DOCKER_ADDR` or `unix:///run/delonix-docker.sock`)
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+      --matrix        Print the coverage matrix and exit, without serving anything. This layer is a SLICE of the Docker API, and third-party tooling deserves to know where it ends before it hits a 404 mid-run
   -h, --help          Print help</code></pre></div>
 <h2>Exemplos</h2><div class="ex"><div class="cap">Servir no socket por omissão</div><pre><code>delonix serve docker-api &amp;</code></pre></div><div class="ex"><div class="cap">Um `docker` real a falar com o delonix</div><pre><code>DOCKER_HOST=unix:///run/delonix-docker.sock docker ps</code></pre></div><div class="ex"><div class="cap">`docker compose up` apontado ao delonix</div><pre><code>DOCKER_HOST=unix:///run/delonix-docker.sock docker compose up -d</code></pre></div>
 <footer>Delonix Engine · Apache-2.0 · <a href="https://github.com/angolardevops/delonix-runtime">angolardevops/delonix-runtime</a>

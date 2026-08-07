@@ -92,7 +92,7 @@ num manifesto (<code>spec.type: container|vm|pod|microvm</code>) baixa para o Ki
 <code>manifest::load</code>; ver <a href="../kinds.html">Kinds</a> e <code>examples/workload.yaml</code>.</p>
 <div class='help'><pre><code>Unified compute layer over containers AND VMs: ls/stop/rm (ADR-0002). Creation stays declarative — see `kind: Workload` (`stack apply`)
 
-Usage: dlx workload [OPTIONS] &lt;COMMAND&gt;
+Usage: delonix workload [OPTIONS] &lt;COMMAND&gt;
 
 Commands:
   ls        List all workloads — containers AND VMs — in one table (or `-o json`)
@@ -107,7 +107,7 @@ Options:
 <h2 id='ls'><code>workload ls</code></h2>
 <div class='help'><pre><code>List all workloads — containers AND VMs — in one table (or `-o json`)
 
-Usage: dlx workload ls [OPTIONS]
+Usage: delonix workload ls [OPTIONS]
 
 Options:
       --l18n &lt;en|pt&gt;     Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
@@ -120,7 +120,7 @@ para o comando específico, nunca adivinha).</p>
 <h2 id='describe'><code>workload describe</code></h2>
 <div class='help'><pre><code>Describe a workload by name (routed to the owning backend, kubectl-style)
 
-Usage: dlx workload describe [OPTIONS] &lt;NAME&gt;
+Usage: delonix workload describe [OPTIONS] &lt;NAME&gt;
 
 Arguments:
   &lt;NAME&gt;  Workload name
@@ -132,7 +132,7 @@ Options:
 <h2 id='stop'><code>workload stop</code></h2>
 <div class='help'><pre><code>Stop a workload by name (routed to the owning backend)
 
-Usage: dlx workload stop [OPTIONS] &lt;NAME&gt;
+Usage: delonix workload stop [OPTIONS] &lt;NAME&gt;
 
 Arguments:
   &lt;NAME&gt;  Workload name
@@ -144,7 +144,7 @@ Options:
 <h2 id='rm'><code>workload rm</code></h2>
 <div class='help'><pre><code>Remove a workload by name
 
-Usage: dlx workload rm [OPTIONS] &lt;NAME&gt;
+Usage: delonix workload rm [OPTIONS] &lt;NAME&gt;
 
 Arguments:
   &lt;NAME&gt;  Workload name
