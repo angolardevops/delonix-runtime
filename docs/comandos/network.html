@@ -94,7 +94,7 @@ registados no store — o <code>create</code> AVISA alto que a rede não foi rea
 (precisam de <code>CAP_NET_ADMIN</code> na init-netns do host, fora do modelo rootless).</p>
 <div class='help'><pre><code>User networks: ls/create/rm/inspect
 
-Usage: delonix network [OPTIONS] &lt;COMMAND&gt;
+Usage: dlx network [OPTIONS] &lt;COMMAND&gt;
 
 Commands:
   dash      Dashboard (KPIs + table) of the networks — interactive TUI, or `--once` snapshot
@@ -113,7 +113,7 @@ Options:
 <h2 id='create'><code>network create</code></h2>
 <div class='help'><pre><code>Create a network
 
-Usage: delonix network create [OPTIONS] &lt;NAME&gt;
+Usage: dlx network create [OPTIONS] &lt;NAME&gt;
 
 Arguments:
   &lt;NAME&gt;  
@@ -132,7 +132,7 @@ Options:
 <h2 id='ls'><code>network ls</code></h2>
 <div class='help'><pre><code>List the networks
 
-Usage: delonix network ls [OPTIONS]
+Usage: dlx network ls [OPTIONS]
 
 Options:
       --l18n &lt;en|pt&gt;     Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
@@ -142,7 +142,7 @@ Options:
 <h2 id='inspect'><code>network inspect</code></h2>
 <div class='help'><pre><code>Detail of a network
 
-Usage: delonix network inspect [OPTIONS] &lt;NAME&gt;
+Usage: dlx network inspect [OPTIONS] &lt;NAME&gt;
 
 Arguments:
   &lt;NAME&gt;  
@@ -154,7 +154,7 @@ Options:
 <h2 id='rm'><code>network rm</code></h2>
 <div class='help'><pre><code>Remove a network
 
-Usage: delonix network rm [OPTIONS] &lt;NAME&gt;
+Usage: dlx network rm [OPTIONS] &lt;NAME&gt;
 
 Arguments:
   &lt;NAME&gt;  
@@ -166,7 +166,7 @@ Options:
 <h2 id='apply'><code>network apply</code></h2>
 <div class='help'><pre><code>Apply the `kind: Network` documents of a manifest (idempotent by name)
 
-Usage: delonix network apply [OPTIONS]
+Usage: dlx network apply [OPTIONS]
 
 Options:
   -f, --file &lt;FILE&gt;   
