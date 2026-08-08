@@ -91,7 +91,7 @@ mostra o uso de disco; <code>system monitor</code> segue ligações/conntrack; <
 fluxo de eventos.</p>
 <div class='help'><pre><code>The engine itself: events, state and disk usage
 
-Usage: delonix system [OPTIONS] &lt;COMMAND&gt;
+Usage: dlx system [OPTIONS] &lt;COMMAND&gt;
 
 Commands:
   events   Engine events (create/start/die/remove/…), from oldest to most recent. With no daemon, the log is a shared append-only file — each command appends its own line (see `delonix_runtime_core::events`)
@@ -110,7 +110,7 @@ Options:
 <h2 id='prune'><code>system prune</code></h2>
 <div class='help'><pre><code>Reclaim space: remove stopped containers, unused images, CAS blobs nobody references, empty cgroups and — the biggest space saver — **orphan container directories** (from nodes/containers that died abruptly without `rm`, with no registry entry)
 
-Usage: delonix system prune [OPTIONS]
+Usage: dlx system prune [OPTIONS]
 
 Options:
   -f, --force         Skip the confirmation prompt (REQUIRED when stdin is not a terminal)
@@ -121,7 +121,7 @@ Options:
 <h2 id='df'><code>system df</code></h2>
 <div class='help'><pre><code>Disk usage by area (images, containers, volumes, VM images)
 
-Usage: delonix system df [OPTIONS]
+Usage: dlx system df [OPTIONS]
 
 Options:
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
@@ -130,7 +130,7 @@ Options:
 <h2 id='info'><code>system info</code></h2>
 <div class='help'><pre><code>Engine state: rootless?, cgroup delegation, network infra, counts
 
-Usage: delonix system info [OPTIONS]
+Usage: dlx system info [OPTIONS]
 
 Options:
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand

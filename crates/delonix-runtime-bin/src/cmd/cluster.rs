@@ -1104,9 +1104,101 @@ pub(crate) fn resolve_vm_image(
         )),
         1 => Ok(images.remove(0).name),
         n => Err(Error::Invalid(super::po::tf(
-            "{n} local VM images — say which one: `--vm-image <tag>` (cluster) or `--disk <path>` (vm create), or `--k8s-version <v>` if `delonix-vm-k8s:<v>` is one of them; see `delonix image --vm ls`",
-            &[("n", &n.to_string())],
+            "{n} local VM images — say which one: `--vm-image <tag>` (cluster) or `--disk <path>` (vm create), or `--k8s-version <v>` if `delonix-vm-k8s:<v>` is one of them. Available: {names}",
+            &[
+                ("n", &n.to_string()),
+                (
+                    "names",
+                    // NAMING them, instead of sending the reader to another
+                    // command: the answer to "which one" is three words long and
+                    // was one command away for no reason.
+                    &images
+                        .iter()
+                        .map(|i| i.name.clone())
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                ),
+            ],
         ))),
+    }
+}
+
+/// Resolves the VM image to use, DOWNLOADING the official one when nothing is
+/// local.
+///
+/// Shared by `cluster kubeadm` and `vm create` on purpose. The pull already
+/// existed on the cluster path only, so the same missing image was a helpful
+/// download in one command and a dead end in the other — `vm create` answered
+/// "no local VM images — run `delonix image --vm build` (or `pull`) first",
+/// which is a research task for something the project publishes as an OCI
+/// artifact precisely so it never has to be built by hand.
+///
+/// When the download is not possible either, the error LISTS what the official
+/// repository actually offers rather than naming a command to run to find out.
+pub(crate) fn resolve_or_pull_vm_image(
+    store: &VmImageStore,
+    explicit: Option<String>,
+    k8s_version: Option<&str>,
+) -> Result<String> {
+    match resolve_vm_image(store, explicit.clone(), k8s_version) {
+        Ok(tag) if store.qcow2_path(&tag).exists() => Ok(tag),
+        // Resolved to a name whose qcow2 is absent (a `pull` that recorded
+        // metadata and lost the blob, or a hand-edited store): fall through to
+        // the download, which is what the caller wanted anyway.
+        Ok(tag) => pull_official(store, &tag).map(|()| tag),
+        Err(e) => {
+            // Only the "nothing local" case is ours to fix. "Several local
+            // images" is a question only the caller can answer, and downloading
+            // a third would make it worse.
+            if store.list().map(|l| !l.is_empty()).unwrap_or(true) {
+                return Err(e);
+            }
+            let tag = explicit
+                .or_else(|| k8s_version.map(|v| format!("delonix-vm-k8s:{v}")))
+                .unwrap_or_else(|| {
+                    vmimage::OFFICIAL_VM_IMAGE
+                        .rsplit('/')
+                        .next()
+                        .unwrap_or(vmimage::OFFICIAL_VM_IMAGE)
+                        .to_string()
+                });
+            pull_official(store, &tag).map(|()| tag)
+        }
+    }
+}
+
+/// Downloads `tag` from the official repository, or explains what IS there.
+fn pull_official(store: &VmImageStore, tag: &str) -> Result<()> {
+    let source = official_pull_source(tag);
+    println!(
+        "{}",
+        super::po::tf(
+            "VM image '{tag}' is not local — downloading from '{source}'...",
+            &[("tag", tag), ("source", &source)],
+        )
+    );
+    match vmimage::cmd_pull(store, &source, Some(tag.to_string())) {
+        Ok(()) => Ok(()),
+        Err(e) => {
+            let repo = source.rsplit_once(':').map(|(r, _)| r).unwrap_or(&source);
+            let choices =
+                delonix_image::registry::list_remote_tags(&super::util::state_root(), repo)
+                    .map(|t| t.join(", "))
+                    .unwrap_or_default();
+            if choices.is_empty() {
+                return Err(e);
+            }
+            Err(Error::Invalid(super::po::tf(
+                "could not download '{source}': {e}. Published there: {choices} — pick one with \
+                 `delonix vm pull {repo}:<tag>`, or build your own with `delonix image --vm build`.",
+                &[
+                    ("source", &source),
+                    ("e", &e.to_string()),
+                    ("choices", &choices),
+                    ("repo", repo),
+                ],
+            )))
+        }
     }
 }
 
@@ -1242,32 +1334,17 @@ fn provision_and_apply(args: ProvisionArgs) -> Result<()> {
     }
     let base = state_root();
     let vm_store = VmImageStore::open(&base)?;
-    let image_tag = resolve_vm_image(
+    // The whole "resolve, and download the official one if nothing is local"
+    // now lives in ONE place, shared with `vm create`. It used to be inlined
+    // here only, so the SAME missing image was a helpful download from
+    // `cluster kubeadm` and a dead end from `vm create` — and when this copy
+    // gained a better error, the other did not.
+    let image_tag = resolve_or_pull_vm_image(
         &vm_store,
         args.vm_image.clone(),
         args.k8s_version.as_deref(),
     )?;
     let disk = vm_store.qcow2_path(&image_tag);
-    if !disk.exists() {
-        // BUG FIXED HERE, found live: `resolve_vm_image` happily returns an
-        // explicit `--vm-image`/`--k8s-version`-derived tag that has no local
-        // qcow2 — this used to be a dead end ("não tem qcow2 em disco"), even
-        // though the whole point of the golden image being a published OCI
-        // artifact (`ghcr.io/angolardevops/delonix-vm-k8s`, see `vmimage.rs`)
-        // is that it does not need to be pre-pulled by hand. Download it now,
-        // same as `vm pull`/`image vm pull` would, under the SAME local name
-        // `resolve_vm_image` already decided on (so this exact lookup succeeds
-        // right after).
-        let source = official_pull_source(&image_tag);
-        println!(
-            "{}",
-            super::po::tf(
-                "VM image '{image_tag}' is not local — downloading from '{source}'...",
-                &[("image_tag", &image_tag), ("source", &source)],
-            )
-        );
-        vmimage::cmd_pull(&vm_store, &source, Some(image_tag.clone()))?;
-    }
 
     output::info(&super::po::tf(
         "Creating cluster \"{name}\" (kubeadm, {image})...",

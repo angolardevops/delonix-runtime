@@ -241,14 +241,54 @@ fn wait_in_node(c: &Container, what: &str, check: &str, timeout: Duration) -> Re
         }
         std::thread::sleep(Duration::from_secs(2));
     }
+    // The timeout used to be the WHOLE message: it named the service that never
+    // came up and said nothing about why, so `timeout waiting for containerd`
+    // was the only trace of a node whose entrypoint had exited 1 seconds after
+    // start. The two things that actually diagnose it are the node's own last
+    // lines and whether it is still alive at all — both cheap, both here.
+    let alive = c.pid.map(delonix_runtime::is_alive).unwrap_or(false);
+    let tail = node_log_tail(c, 8);
     Err(Error::Invalid(super::po::tf(
-        "timeout waiting for {what} on node '{name}' ({secs}s)",
+        "timeout waiting for {what} on node '{name}' ({secs}s){state}{detail}",
         &[
             ("what", what),
             ("name", &c.name),
             ("secs", &timeout.as_secs().to_string()),
+            (
+                "state",
+                if alive {
+                    ""
+                } else {
+                    " — the node is NOT running (it exited); the wait never had a chance"
+                },
+            ),
+            ("detail", &tail),
         ],
     )))
+}
+
+/// The last `n` lines of a node's log, formatted for an error message.
+///
+/// Empty when there is nothing to show, so a message with no log reads cleanly
+/// rather than ending in a dangling header.
+fn node_log_tail(c: &Container, n: usize) -> String {
+    let path = super::util::state_root()
+        .join("containers")
+        .join(&c.id)
+        .join("log");
+    let Ok(txt) = std::fs::read_to_string(&path) else {
+        return String::new();
+    };
+    let lines: Vec<&str> = txt.lines().filter(|l| !l.trim().is_empty()).collect();
+    if lines.is_empty() {
+        return String::new();
+    }
+    let start = lines.len().saturating_sub(n);
+    let body: String = lines[start..]
+        .iter()
+        .map(|l| format!("\n    {l}"))
+        .collect();
+    format!("\n  last lines from the node:{body}")
 }
 
 /// The join data that the control-plane emits, extracted from
@@ -447,6 +487,42 @@ fn boot_node(
     Ok(c)
 }
 
+/// Refuses early when the cgroup controllers a Kubernetes node needs are not
+/// delegated.
+///
+/// The check is cheap and the alternative is expensive and misleading: an image
+/// pull, a container start, and a 90-second wait for `containerd` inside a node
+/// whose entrypoint already exited 1 with `UserNS: cpu controller needs to be
+/// delegated` — a message the operator never sees, because the failure surfaces
+/// as a timeout on a different service.
+fn preflight_cgroup_controllers() -> Result<()> {
+    if !delonix_runtime::is_rootless() {
+        return Ok(()); // real root owns the whole tree
+    }
+    let Some(cur) = delonix_runtime::current_cgroup_v2() else {
+        return Ok(()); // cannot tell — do not block on a guess
+    };
+    let have: Vec<String> = std::fs::read_to_string(format!("{cur}/cgroup.controllers"))
+        .map(|s| s.split_whitespace().map(str::to_string).collect())
+        .unwrap_or_default();
+    if have.is_empty() {
+        return Ok(()); // unreadable: same reasoning as above
+    }
+    // Only `cpu` is fatal. `cpuset`/`io` are missing on plenty of working hosts
+    // and the node boots fine without them, so blocking on those would refuse
+    // clusters that would have worked.
+    if have.iter().any(|c| c == "cpu") {
+        return Ok(());
+    }
+    Err(Error::Invalid(super::po::tf(
+        "the `cpu` cgroup controller is not delegated, and a Kubernetes node cannot boot without \
+         it (its entrypoint exits with `UserNS: cpu controller needs to be delegated`). \
+         Delegated here: {have}. Run `delonix system setup` for the diagnosis and \
+         `sudo delonix system setup --delegate` for the fix, then log out and back in.",
+        &[("have", &have.join(" "))],
+    )))
+}
+
 /// Creates the cluster: boots the control-plane node and bootstraps it with `kubeadm`.
 pub(crate) fn create(images: &ImageStore, store: &Store, cfg: &KindCluster) -> Result<()> {
     let node = format!("{}-control-plane", cfg.name); // kind naming convention
@@ -462,6 +538,14 @@ pub(crate) fn create(images: &ImageStore, store: &Store, cfg: &KindCluster) -> R
             super::po::t("--control-planes must be >= 1").into(),
         ));
     }
+    // PREFLIGHT, before pulling ~425 MB and waiting 90 s for a node that cannot
+    // boot. `kindest/node`'s entrypoint refuses to start without the `cpu`
+    // controller and exits 1 immediately; the only thing the operator saw was
+    // `timeout waiting for containerd`, which names a service that never had a
+    // chance to run. Reported live on this host, where `system setup` said
+    // limits APPLY (they do — `memory` and `pids` were delegated) while `cpu`
+    // was not.
+    preflight_cgroup_controllers()?;
     if cfg.control_planes > 1 {
         // Refuse instead of pretending: with N control-planes and the
         // `controlPlaneEndpoint` pointing to the IP of the FIRST one, all the

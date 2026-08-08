@@ -866,7 +866,12 @@ pub fn run(action: VmCmd) -> Result<()> {
                 Some(d) => d,
                 None => {
                     let store = super::vmimage::VmImageStore::open(super::util::state_root())?;
-                    let tag = super::cluster::resolve_vm_image(&store, None, None)?;
+                    // Downloads the official golden when nothing is local — the
+                    // same helper `cluster kubeadm` uses. This path used to
+                    // fail with "run `image --vm build` (or `pull`) first",
+                    // which is a research task for an image the project
+                    // publishes so it never has to be built by hand.
+                    let tag = super::cluster::resolve_or_pull_vm_image(&store, None, None)?;
                     store.qcow2_path(&tag).to_string_lossy().into_owned()
                 }
             };

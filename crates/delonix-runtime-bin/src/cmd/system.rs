@@ -960,9 +960,14 @@ pub(crate) fn is_login_session_scope(cgroup: &str) -> bool {
 const DELEGATE_DROPIN: &str = "/etc/systemd/system/user@.service.d/50-delonix-delegate.conf";
 const DELEGATE_BODY: &str = "# Written by `delonix system setup --delegate`.\n\
                              # Gives each user's systemd manager a delegated cgroup subtree, so\n\
-                             # rootless containers can actually carry --memory/--cpus/--pids-limit.\n\
+                             # rootless containers can carry --memory/--cpus/--pids-limit AND a\n\
+                             # Kubernetes node can boot (its entrypoint refuses without `cpu`).\n\
+                             #\n\
+                             # The controllers are NAMED rather than `Delegate=yes`: on this host\n\
+                             # `yes` produced only `memory pids`, which passes every check the\n\
+                             # engine makes and still kills a kind node at boot.\n\
                              [Service]\n\
-                             Delegate=yes\n";
+                             Delegate=cpu cpuset io memory pids\n";
 
 /// `system setup [--delegate]` — the one command for cgroup delegation.
 ///
@@ -977,6 +982,36 @@ const DELEGATE_BODY: &str = "# Written by `delonix system setup --delegate`.\n\
 /// SSH: a `session-N.scope` is a SIBLING of `user@.service`, not a child, so it
 /// inherits nothing from it — measured on this host, not assumed. For the live
 /// session the only answer is a delegated scope of your own.
+/// The cgroup v2 controllers actually available in `cgroup`.
+///
+/// **Reading them is the half the diagnostic was missing.** `cgroup_limits_apply`
+/// answers "can I make a child and write `subtree_control`" — which is necessary
+/// and says nothing about WHICH knobs exist. A host can pass that check with only
+/// `memory pids` delegated, and then a Kubernetes node dies at boot with
+/// `UserNS: cpu controller needs to be delegated` while `system setup` reports
+/// everything fine. Measured on this host.
+fn delegated_controllers(cgroup: &str) -> Vec<String> {
+    std::fs::read_to_string(format!("{cgroup}/cgroup.controllers"))
+        .map(|s| s.split_whitespace().map(str::to_string).collect())
+        .unwrap_or_default()
+}
+
+/// Controllers a Kubernetes node needs, beyond what the engine itself uses.
+///
+/// `cpu` is the one that actually bites: `kindest/node`'s entrypoint refuses to
+/// boot without it, and a plain container never notices it is missing.
+const K8S_CONTROLLERS: &[&str] = &["cpu", "cpuset", "io", "memory", "pids"];
+
+/// Which of [`K8S_CONTROLLERS`] are absent. **Pure**, so the rule is testable
+/// without a cgroup tree.
+pub(crate) fn missing_controllers(have: &[String]) -> Vec<&'static str> {
+    K8S_CONTROLLERS
+        .iter()
+        .copied()
+        .filter(|c| !have.iter().any(|h| h == c))
+        .collect()
+}
+
 fn cmd_setup(delegate: bool) -> Result<()> {
     let rootless = runtime::is_rootless();
     let ok = runtime::cgroup_limits_apply();
@@ -994,9 +1029,56 @@ fn cmd_setup(delegate: bool) -> Result<()> {
         }
     );
 
-    if ok {
+    let have = delegated_controllers(&cur);
+    println!(
+        "  controllers: {}",
+        if have.is_empty() {
+            "<none readable>".to_string()
+        } else {
+            have.join(" ")
+        }
+    );
+    let missing = missing_controllers(&have);
+    if !missing.is_empty() {
+        println!(
+            "  missing:  {}  {}",
+            missing.join(" "),
+            super::po::t("← a Kubernetes node needs these")
+        );
+    }
+
+    if ok && missing.is_empty() {
         println!("\n{}", super::po::t("Nothing to do."));
         return Ok(());
+    }
+    // Limits apply but a controller a k8s node needs is absent. Reporting
+    // "nothing to do" here — which is what this did — sends the operator into a
+    // 90-second timeout and a dead node with no connection to this command.
+    if ok && !missing.is_empty() {
+        println!(
+            "\n{}",
+            super::po::tf(
+                "Container limits work, but `{missing}` is not delegated. `delonix cluster create` \
+                 (kind mode) will fail: the node's entrypoint refuses to boot without it \
+                 (`UserNS: cpu controller needs to be delegated`).",
+                &[("missing", &missing.join("`, `"))],
+            )
+        );
+        println!(
+            "\n  {}\n     {DELEGATE_DROPIN}\n     {}",
+            super::po::t("Fix (needs root, survives reboot):"),
+            super::po::t(
+                "then log out and back in — a running user@.service keeps the old setting"
+            ),
+        );
+        if !delegate {
+            println!(
+                "\n{}",
+                super::po::t("Re-run with --delegate to write it. (This run changed nothing.)")
+            );
+            return Ok(());
+        }
+        return write_delegate_dropin();
     }
     if !rootless {
         // As root the engine owns `delonix.slice` outright; a missing delegation
@@ -1043,6 +1125,13 @@ fn cmd_setup(delegate: bool) -> Result<()> {
         return Ok(());
     }
 
+    write_delegate_dropin()
+}
+
+/// Writes the system-wide delegation drop-in. Shared by both paths that reach
+/// it — "no delegation at all" and "delegation without the controllers a
+/// Kubernetes node needs" — so the remedy cannot drift between them.
+fn write_delegate_dropin() -> Result<()> {
     // SAFETY: geteuid() has no preconditions.
     if unsafe { libc::geteuid() } != 0 {
         return Err(Error::Invalid(
