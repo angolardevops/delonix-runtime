@@ -158,7 +158,7 @@ Options:
 
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)</code></pre></div>
-<h3>Exemplos</h3><div class="ex"><div class="cap">Diagnosticar a delegação de cgroup — porque é que -m/--cpus não pegam</div><pre><code>delonix system setup</code></pre></div><div class="ex"><div class="cap">Escrever a correcção (precisa de root; faz efeito no PRÓXIMO login)</div><pre><code>sudo delonix system setup --delegate</code></pre></div>
+<h3>Exemplos</h3><div class="ex"><div class="cap">Diagnosticar a delegação de cgroup — porque é que -m/--cpus não pegam</div><pre><code>delonix system setup</code></pre></div><div class="ex"><div class="cap">A 1.ª correcção: um scope delegado (sem root, sem reboot, vale já)</div><pre><code>systemd-run --user --scope -p Delegate=yes -- delonix system setup</code></pre></div><div class="ex"><div class="cap">Só se a de cima ainda disser que falta o `cpu` (precisa de root, sobrevive ao reboot)</div><pre><code>sudo delonix system setup --delegate</code></pre></div>
 <h2 id='events'><code>system events</code></h2>
 <div class='help'><pre><code>Engine events (create/start/die/remove/…), from oldest to most recent. With no daemon, the log is a shared append-only file — each command appends its own line (see `delonix_runtime_core::events`)
 

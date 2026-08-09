@@ -667,8 +667,19 @@ fi
 # se lê como completa é pior do que nenhuma.
 DELEGATE_DROPIN=/etc/systemd/system/user@.service.d/50-delonix-delegate.conf
 if [ "$WITH_DELEGATE" = 1 ] && [ "$USER_INSTALL" != 1 ] && [ -d /run/systemd/system ]; then
+  # A distro pode já delegar o `cpu` por omissão — o Ubuntu 24.04 traz
+  # `Delegate=pids memory cpu` no `user@.service`. Escrever um drop-in por cima
+  # disso é mexer no /etc de toda a máquina para repetir o que já lá está, e
+  # dá a impressão de ter resolvido um problema que o utilizador continua a ter
+  # (o que costuma faltar é o `cpu` chegar ao slice de ONDE ele corre, não a
+  # delegação em si). Perguntar é uma linha; a alternativa é uma alteração
+  # global inútil.
+  _u_deleg=$(systemctl cat user@.service 2>/dev/null | sed -n 's/^Delegate=//p' | tail -1)
   if [ -f "$DELEGATE_DROPIN" ]; then
     skip rootless delegation
+  elif [ "$_u_deleg" = yes ] || case " $_u_deleg " in *" cpu "*) true ;; *) false ;; esac; then
+    skip rootless delegation
+    printf '[skip] %s\n' "user@.service already delegates: $_u_deleg (no drop-in needed)"
   elif [ -z "$SUDO" ] && [ "$(id -u)" != 0 ]; then
     warn "no sudo: skipping the cgroup delegation drop-in (resource limits will be inert)"
   else

@@ -515,10 +515,11 @@ fn preflight_cgroup_controllers() -> Result<()> {
         return Ok(());
     }
     Err(Error::Invalid(super::po::tf(
-        "the `cpu` cgroup controller is not delegated, and a Kubernetes node cannot boot without \
-         it (its entrypoint exits with `UserNS: cpu controller needs to be delegated`). \
-         Delegated here: {have}. Run `delonix system setup` for the diagnosis and \
-         `sudo delonix system setup --delegate` for the fix, then log out and back in.",
+        "the `cpu` cgroup controller is not delegated to this shell, and a Kubernetes node cannot \
+         boot without it (its entrypoint exits with `UserNS: cpu controller needs to be \
+         delegated`). Delegated here: {have}.\n\n  Try this first — no root, no reboot:\n    \
+         systemd-run --user --scope -p Delegate=yes -- delonix cluster create …\n\n  \
+         `delonix system setup` explains it, and only sends you to /etc if that is not enough.",
         &[("have", &have.join(" "))],
     )))
 }
