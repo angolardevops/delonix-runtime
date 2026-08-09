@@ -153,7 +153,7 @@ images</strong> (a <code>.qcow2</code> plus per-image metadata): Ubuntu cloud im
 kubeadm/kubelet/kubectl + <code>delonix-cri</code> — the base <code>delonix cluster</code> builds
 on.</p>
 <p class='src-link'>📄 Implementação real em Rust: <a href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/delonix-runtime-bin/src/cmd/image.rs"><code>cmd/image.rs</code></a></p>
-<div class='help'><pre><code>Usage: delonix image [OPTIONS] &lt;COMMAND&gt;
+<div class='help'><pre><code>Usage: dlx image [OPTIONS] &lt;COMMAND&gt;
 
 Commands:
   dash       Dashboard (KPIs + table) of images — interactive TUI, or `--once` snapshot
@@ -184,7 +184,7 @@ Options:
   -h, --help          Print help</code></pre></div>
 <h2 id='init'><code>image init</code></h2>
 <p class='intro'>(only with <code>--vm</code>) Build the golden VM image (Ubuntu + kubeadm/kubelet/ kubectl + <code>delonix-cri</code>). Scaffold a <code>VMfile</code> (and a cloud-init) for building your own image</p>
-<div class='help'><pre><code>Usage: delonix image init [OPTIONS] [NAME]
+<div class='help'><pre><code>Usage: dlx image init [OPTIONS] [NAME]
 
 Arguments:
   [NAME]  Name to use in the scaffold (image tag, hostname, account) [default: myimage]
@@ -197,7 +197,7 @@ Options:
 <h3>Exemplos</h3><div class="ex"><div class="cap">Scaffold de um VMfile (equivalente a vm init --vmfile)</div><pre><code>delonix image --vm init minha-base</code></pre></div>
 <h2 id='vm'><code>image vm</code></h2>
 <p class='intro'>Golden VM images (<code>&lt;root&gt;/vm-images/</code>): ls/pull/push/build. Equivalent to <code>image --vm &lt;cmd&gt;</code> (old form, kept)</p>
-<div class='help'><pre><code>Usage: delonix image vm [OPTIONS] &lt;COMMAND&gt;
+<div class='help'><pre><code>Usage: dlx image vm [OPTIONS] &lt;COMMAND&gt;
 
 Commands:
   ls         List the local VM images
@@ -215,7 +215,7 @@ Options:
 <h3>Exemplos</h3><div class="ex"><div class="cap">O mesmo grupo de imagens VM, por outro caminho</div><pre><code>delonix image vm ls</code></pre></div>
 <h2 id='logout'><code>image logout</code></h2>
 <p class='intro'>Remove the stored credentials of a registry</p>
-<div class='help'><pre><code>Usage: delonix image logout [OPTIONS] &lt;REGISTRY&gt;
+<div class='help'><pre><code>Usage: dlx image logout [OPTIONS] &lt;REGISTRY&gt;
 
 Arguments:
   &lt;REGISTRY&gt;  
@@ -226,7 +226,7 @@ Options:
 <h3>Exemplos</h3><div class="ex"><div class="cap">Esquecer as credenciais desse registo</div><pre><code>delonix image logout ghcr.io</code></pre></div>
 <h2 id='login'><code>image login</code></h2>
 <p class='intro'>Authenticate to an OCI registry (stores the credentials in <code>&lt;root&gt;/auth.json</code>, docker/podman format). The password ALWAYS comes from stdin — never from an argument (it would end up in the shell history and in /proc)</p>
-<div class='help'><pre><code>Usage: delonix image login [OPTIONS] --username &lt;USERNAME&gt; &lt;REGISTRY&gt;
+<div class='help'><pre><code>Usage: dlx image login [OPTIONS] --username &lt;USERNAME&gt; &lt;REGISTRY&gt;
 
 Arguments:
   &lt;REGISTRY&gt;  Registry (e.g. `ghcr.io`, `docker.io`)
@@ -239,7 +239,7 @@ Options:
 <h3>Exemplos</h3><div class="ex"><div class="cap">Autenticar num registo (a password vem do stdin, fora do histórico)</div><pre><code>printf &#x27;%s&#x27; &quot;$GHCR_TOKEN&quot; | delonix image login ghcr.io --username aminhaorg</code></pre></div>
 <h2 id='load'><code>image load</code></h2>
 <p class='intro'>Load an image from an archive produced by <code>delonix image save</code>, <code>docker save</code> or <code>podman save</code> (the counterpart of <code>save</code>)</p>
-<div class='help'><pre><code>Usage: delonix image load [OPTIONS] --input &lt;FILE&gt;
+<div class='help'><pre><code>Usage: dlx image load [OPTIONS] --input &lt;FILE&gt;
 
 Options:
   -i, --input &lt;FILE&gt;  Archive to read (`.tar`; a `.tar.gz` must be gunzipped first)
@@ -248,7 +248,7 @@ Options:
 <h3>Exemplos</h3><div class="ex"><div class="cap">Importar esse tar do outro lado</div><pre><code>delonix image load --input app-dev.tar</code></pre></div>
 <h2 id='save'><code>image save</code></h2>
 <p class='intro'>Save an image to a portable archive (<code>docker save</code>&#x27;s counterpart) — the way to move an image to another machine with no registry. The archive is an OCI layout WITH the legacy <code>manifest.json</code>, so <code>delonix image load</code>, <code>docker load</code>, <code>podman load</code> and <code>ctr images import</code> all read it</p>
-<div class='help'><pre><code>Usage: delonix image save [OPTIONS] --output &lt;FILE&gt; &lt;IMAGE&gt;
+<div class='help'><pre><code>Usage: dlx image save [OPTIONS] --output &lt;FILE&gt; &lt;IMAGE&gt;
 
 Arguments:
   &lt;IMAGE&gt;  
@@ -260,7 +260,7 @@ Options:
 <h3>Exemplos</h3><div class="ex"><div class="cap">Exportar para um tar (para levar para uma máquina sem rede)</div><pre><code>delonix image save app:dev --output app-dev.tar</code></pre></div>
 <h2 id='scan'><code>image scan</code></h2>
 <p class='intro'>SBOM + CVE scan of an image (reads the layers from the CAS, without running anything). Pulls the image if missing. See <code>--sbom</code>, <code>--fail-on</code>, <code>--update</code></p>
-<div class='help'><pre><code>Usage: delonix image scan [OPTIONS] [IMAGE]
+<div class='help'><pre><code>Usage: dlx image scan [OPTIONS] [IMAGE]
 
 Arguments:
   [IMAGE]  Image to scan (optional with `--update`)
@@ -275,7 +275,7 @@ Options:
 <h3>Exemplos</h3><div class="ex"><div class="cap">Procurar vulnerabilidades conhecidas numa imagem</div><pre><code>delonix image scan nginx:alpine</code></pre></div><div class="ex"><div class="cap">Varrer todas as imagens locais</div><pre><code>delonix image scan</code></pre></div>
 <h2 id='verify'><code>image verify</code></h2>
 <p class='intro'>Verify the cosign signature of a local image against a public key</p>
-<div class='help'><pre><code>Usage: delonix image verify [OPTIONS] &lt;IMAGE&gt; &lt;PEM&gt;
+<div class='help'><pre><code>Usage: dlx image verify [OPTIONS] &lt;IMAGE&gt; &lt;PEM&gt;
 
 Arguments:
   &lt;IMAGE&gt;  
@@ -287,7 +287,7 @@ Options:
 <h3>Exemplos</h3><div class="ex"><div class="cap">Confirmar a assinatura contra uma chave pública</div><pre><code>delonix image verify ghcr.io/aminhaorg/app:1.0 chave.pem</code></pre></div>
 <h2 id='history'><code>image history</code></h2>
 <p class='intro'>Layers of an image (digest + size), from base to top</p>
-<div class='help'><pre><code>Usage: delonix image history [OPTIONS] &lt;IMAGE&gt;
+<div class='help'><pre><code>Usage: dlx image history [OPTIONS] &lt;IMAGE&gt;
 
 Arguments:
   &lt;IMAGE&gt;  
@@ -298,7 +298,7 @@ Options:
 <h3>Exemplos</h3><div class="ex"><div class="cap">Que instrução criou cada camada</div><pre><code>delonix image history app:dev</code></pre></div>
 <h2 id='tag'><code>image tag</code></h2>
 <p class='intro'>Give another name/tag to a local image (copies nothing — it&#x27;s just a new name for the same content)</p>
-<div class='help'><pre><code>Usage: delonix image tag [OPTIONS] &lt;SOURCE&gt; &lt;TARGET&gt;
+<div class='help'><pre><code>Usage: dlx image tag [OPTIONS] &lt;SOURCE&gt; &lt;TARGET&gt;
 
 Arguments:
   &lt;SOURCE&gt;  
@@ -310,7 +310,7 @@ Options:
 <h3>Exemplos</h3><div class="ex"><div class="cap">Dar um segundo nome à mesma imagem (não copia nada)</div><pre><code>delonix image tag app:dev ghcr.io/aminhaorg/app:1.0</code></pre></div>
 <h2 id='describe'><code>image describe</code></h2>
 <p class='intro'>Human-readable detail of one or more images, <code>kubectl describe</code>-style (tags/digest/size/layers + the OCI config: entrypoint/cmd/env/workdir). With <code>--vm</code>, describes golden VM images</p>
-<div class='help'><pre><code>Usage: delonix image describe [OPTIONS] &lt;NAMES&gt;...
+<div class='help'><pre><code>Usage: dlx image describe [OPTIONS] &lt;NAMES&gt;...
 
 Arguments:
   &lt;NAMES&gt;...  
@@ -321,7 +321,7 @@ Options:
 <h3>Exemplos</h3><div class="ex"><div class="cap">Camadas, config e digest de uma imagem</div><pre><code>delonix image describe nginx:alpine</code></pre></div>
 <h2 id='ls-remote'><code>image ls-remote</code></h2>
 <p class='intro'>(only with <code>--vm</code>) List the tags available in a remote OCI repository — with no argument, the OFFICIAL Delonix golden image repo</p>
-<div class='help'><pre><code>Usage: delonix image ls-remote [OPTIONS] [SOURCE]
+<div class='help'><pre><code>Usage: dlx image ls-remote [OPTIONS] [SOURCE]
 
 Arguments:
   [SOURCE]  
@@ -333,7 +333,7 @@ Options:
 <h3>Exemplos</h3><div class="ex"><div class="cap">Tags publicadas num repositório, sem puxar nada</div><pre><code>delonix image ls-remote ghcr.io/aminhaorg/app</code></pre></div>
 <h2 id='dash'><code>image dash</code></h2>
 <p class='intro'>Dashboard (KPIs + table) of images — interactive TUI, or <code>--once</code> snapshot</p>
-<div class='help'><pre><code>Usage: delonix image dash [OPTIONS]
+<div class='help'><pre><code>Usage: dlx image dash [OPTIONS]
 
 Options:
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
@@ -343,7 +343,7 @@ Options:
 <h3>Exemplos</h3><div class="ex"><div class="cap">Dashboard só das imagens</div><pre><code>delonix image dash</code></pre></div>
 <h2 id='pull'><code>image pull</code></h2>
 <p class='intro'>Pull an image from a registry. With <code>--vm</code>, no argument = the OFFICIAL Delonix golden VM image</p>
-<div class='help'><pre><code>Usage: delonix image pull [OPTIONS] [IMAGE]
+<div class='help'><pre><code>Usage: dlx image pull [OPTIONS] [IMAGE]
 
 Arguments:
   [IMAGE]  
@@ -356,7 +356,7 @@ Options:
 <h3>Exemplos</h3><div class="ex"><div class="cap">Referência com tag e digest (formato combinado suportado)</div><pre><code>delonix image pull kindest/node:v1.34.0@sha256:7416a6…</code></pre></div>
 <h2 id='ls'><code>image ls</code></h2>
 <p class='intro'>List local images</p>
-<div class='help'><pre><code>Usage: delonix image ls [OPTIONS]
+<div class='help'><pre><code>Usage: dlx image ls [OPTIONS]
 
 Options:
       --l18n &lt;en|pt&gt;     Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
@@ -365,7 +365,7 @@ Options:
 <h3>Exemplos</h3><div class="ex"><pre><code>delonix image ls</code></pre></div>
 <h2 id='rm'><code>image rm</code></h2>
 <p class='intro'>Remove a local image</p>
-<div class='help'><pre><code>Usage: delonix image rm [OPTIONS] &lt;IMAGE&gt;
+<div class='help'><pre><code>Usage: dlx image rm [OPTIONS] &lt;IMAGE&gt;
 
 Arguments:
   &lt;IMAGE&gt;  
@@ -377,7 +377,7 @@ Options:
 <h3>Exemplos</h3><div class="ex"><pre><code>delonix image rm alpine:3.19</code></pre></div>
 <h2 id='export'><code>image export</code></h2>
 <p class='intro'>Export an OCI runtime bundle (rootfs + config.json) for <code>runc</code>/<code>crun</code></p>
-<div class='help'><pre><code>Usage: delonix image export [OPTIONS] &lt;IMAGE&gt; &lt;DIR&gt;
+<div class='help'><pre><code>Usage: dlx image export [OPTIONS] &lt;IMAGE&gt; &lt;DIR&gt;
 
 Arguments:
   &lt;IMAGE&gt;  
@@ -389,7 +389,7 @@ Options:
 <h3>Exemplos</h3><div class="ex"><div class="cap">Bundle OCI runtime para correr com runc/crun</div><pre><code>delonix image export alpine:3.19 /tmp/bundle &amp;&amp; sudo runc run -b /tmp/bundle teste</code></pre></div>
 <h2 id='push'><code>image push</code></h2>
 <p class='intro'>Publish a local image to an OCI registry. Without <code>target</code>, publishes under the image&#x27;s own reference. With <code>--vm</code>, <code>target</code> is required</p>
-<div class='help'><pre><code>Usage: delonix image push [OPTIONS] &lt;NAME&gt; [TARGET]
+<div class='help'><pre><code>Usage: dlx image push [OPTIONS] &lt;NAME&gt; [TARGET]
 
 Arguments:
   &lt;NAME&gt;    
@@ -400,7 +400,7 @@ Options:
   -h, --help          Print help</code></pre></div>
 <h3>Exemplos</h3><div class="ex"><div class="cap">Publicar a imagem VM dourada como artefacto OCI (padrão ORAS)</div><pre><code>delonix image --vm push k8s-golden ghcr.io/angolardevops/delonix-vm-k8s:1.34</code></pre></div>
 <h2 id='build'><code>image build</code></h2>
-<div class='help'><pre><code>Usage: delonix image build [OPTIONS] --tag &lt;TAG&gt; [CONTEXT]
+<div class='help'><pre><code>Usage: dlx image build [OPTIONS] --tag &lt;TAG&gt; [CONTEXT]
 
 Arguments:
   [CONTEXT]  Build context — the directory `COPY` reads from [default: .]
@@ -443,7 +443,7 @@ Options:
 <h3>Exemplos</h3><div class="ex"><div class="cap">Construir a imagem VM dourada (descarrega Ubuntu, valida SHA256SUMS, virt-customize)</div><pre><code>delonix image --vm build --name k8s-golden --k8s-version 1.34</code></pre></div>
 <h2 id='apply'><code>image apply</code></h2>
 <p class='intro'>Apply the <code>kind: Image</code> documents of a manifest (<code>pull</code> idempotent by reference; <code>build</code> rebuilds and replaces the tag on each apply)</p>
-<div class='help'><pre><code>Usage: delonix image apply [OPTIONS]
+<div class='help'><pre><code>Usage: dlx image apply [OPTIONS]
 
 Options:
   -f, --file &lt;FILE&gt;   

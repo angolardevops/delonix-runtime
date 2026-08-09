@@ -173,7 +173,7 @@ N containers allowed). <strong>Known limitation:</strong> the <strong>PID</stron
 (<code>shareProcessNamespace</code>, already in the schema) is NOT shared yet — each container
 keeps its own process tree; that's the next slice.</p>
 <p class='src-link'>📄 Implementação real em Rust: <a href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/delonix-runtime-bin/src/cmd/pod.rs"><code>cmd/pod.rs</code></a></p>
-<div class='help'><pre><code>Usage: delonix pod [OPTIONS] &lt;COMMAND&gt;
+<div class='help'><pre><code>Usage: dlx pod [OPTIONS] &lt;COMMAND&gt;
 
 Commands:
   create    Create a pod (N containers sharing a netns) from a manifest (`kind: Pod`)
@@ -188,7 +188,7 @@ Options:
   -h, --help          Print help</code></pre></div>
 <h2 id='create'><code>pod create</code></h2>
 <p class='intro'>Create a pod (N containers sharing a netns) from a manifest (<code>kind: Pod</code>)</p>
-<div class='help'><pre><code>Usage: delonix pod create [OPTIONS]
+<div class='help'><pre><code>Usage: dlx pod create [OPTIONS]
 
 Options:
   -f, --file &lt;FILE&gt;   
@@ -201,7 +201,7 @@ falha, o pod é desfeito por inteiro (sem meio-pod).</p>
 <h3>Exemplos</h3><div class="ex"><div class="cap">Criar um pod (web + sidecar que fala por localhost) de um manifesto</div><pre><code>delonix pod create -f examples/pod-multi.yaml</code></pre></div>
 <h2 id='ls'><code>pod ls</code></h2>
 <p class='intro'>List the pods (derived from container labels)</p>
-<div class='help'><pre><code>Usage: delonix pod ls [OPTIONS]
+<div class='help'><pre><code>Usage: dlx pod ls [OPTIONS]
 
 Options:
       --l18n &lt;en|pt&gt;     Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
@@ -210,7 +210,7 @@ Options:
 <h3>Exemplos</h3><div class="ex"><div class="cap">Listar os pods (POD, CONTAINERS n/N, IP, STATUS)</div><pre><code>delonix pod ls</code></pre></div>
 <h2 id='describe'><code>pod describe</code></h2>
 <p class='intro'>Details of one or more pods (containers + the shared IP), <code>kubectl</code> style</p>
-<div class='help'><pre><code>Usage: delonix pod describe [OPTIONS] [NAMES]...
+<div class='help'><pre><code>Usage: dlx pod describe [OPTIONS] [NAMES]...
 
 Arguments:
   [NAMES]...  
@@ -221,7 +221,7 @@ Options:
 <h3>Exemplos</h3><div class="ex"><div class="cap">Detalhe estilo kubectl: containers + IP e netns partilhados</div><pre><code>delonix pod describe web-app</code></pre></div>
 <h2 id='rm'><code>pod rm</code></h2>
 <p class='intro'>Remove a pod: stop/remove ALL its containers + the shared netns</p>
-<div class='help'><pre><code>Usage: delonix pod rm [OPTIONS] [NAMES]...
+<div class='help'><pre><code>Usage: dlx pod rm [OPTIONS] [NAMES]...
 
 Arguments:
   [NAMES]...  
@@ -233,7 +233,7 @@ Options:
 <h3>Exemplos</h3><div class="ex"><div class="cap">Remover o pod: pára/remove TODOS os containers + a netns partilhada</div><pre><code>delonix pod rm web-app</code></pre></div><div class="ex"><div class="cap">Forçar (mata os que estão a correr)</div><pre><code>delonix pod rm -f web-app</code></pre></div>
 <h2 id='logs'><code>pod logs</code></h2>
 <p class='intro'>Logs of a pod&#x27;s container (defaults to the first member)</p>
-<div class='help'><pre><code>Usage: delonix pod logs [OPTIONS] &lt;POD&gt;
+<div class='help'><pre><code>Usage: dlx pod logs [OPTIONS] &lt;POD&gt;
 
 Arguments:
   &lt;POD&gt;  

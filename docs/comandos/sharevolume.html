@@ -161,7 +161,7 @@ isolation is pure path confinement, and consumption uses the usual
 SOFT (measured usage + alert) — the HARD path (a loopback ext4 image) needs local block storage
 and doesn't compose with a subdirectory of a network mount.</p>
 <p class='src-link'>📄 Implementação real em Rust: <a href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/delonix-runtime-bin/src/cmd/sharevolume.rs"><code>cmd/sharevolume.rs</code></a></p>
-<div class='help'><pre><code>Usage: delonix sharevolume [OPTIONS] &lt;COMMAND&gt;
+<div class='help'><pre><code>Usage: dlx sharevolume [OPTIONS] &lt;COMMAND&gt;
 
 Commands:
   apply     Apply the `kind: ShareVolume` documents of a manifest (idempotent)
@@ -175,7 +175,7 @@ Options:
   -h, --help          Print help</code></pre></div>
 <h2 id='apply'><code>sharevolume apply</code></h2>
 <p class='intro'>Apply the <code>kind: ShareVolume</code> documents of a manifest (idempotent)</p>
-<div class='help'><pre><code>Usage: delonix sharevolume apply [OPTIONS]
+<div class='help'><pre><code>Usage: dlx sharevolume apply [OPTIONS]
 
 Options:
   -f, --file &lt;FILE&gt;   
@@ -185,7 +185,7 @@ Options:
 sharevolume/tenant-b: ready (nas-shared -&gt; /var/lib/delonix/volumes/nas-shared/_data/shares/tenant-b)</code></pre></div></div>
 <h2 id='ls'><code>sharevolume ls</code></h2>
 <p class='intro'>List share volumes (parent storage, quota, live usage)</p>
-<div class='help'><pre><code>Usage: delonix sharevolume ls [OPTIONS]
+<div class='help'><pre><code>Usage: dlx sharevolume ls [OPTIONS]
 
 Options:
       --l18n &lt;en|pt&gt;     Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
@@ -196,7 +196,7 @@ tenant-b   nas-shared   2.0 MiB   0 B    -       .../shares/tenant-b
 tenant-a   nas-shared   1.0 MiB   1.0 MiB   OVER    .../shares/tenant-a</code></pre></div></div>
 <h2 id='describe'><code>sharevolume describe</code></h2>
 <p class='intro'>Human-readable detail of one share volume</p>
-<div class='help'><pre><code>Usage: delonix sharevolume describe [OPTIONS] &lt;NAME&gt;
+<div class='help'><pre><code>Usage: dlx sharevolume describe [OPTIONS] &lt;NAME&gt;
 
 Arguments:
   &lt;NAME&gt;  
@@ -213,7 +213,7 @@ Alert:          OVER QUOTA
 Consume with:   -v tenant-a:/path/in/container</code></pre></div></div>
 <h2 id='rm'><code>sharevolume rm</code></h2>
 <p class='intro'>Un-register a share volume. The underlying data (a subdirectory of the parent Storage) is PRESERVED unless <code>--purge-data</code> is passed</p>
-<div class='help'><pre><code>Usage: delonix sharevolume rm [OPTIONS] &lt;NAME&gt;
+<div class='help'><pre><code>Usage: dlx sharevolume rm [OPTIONS] &lt;NAME&gt;
 
 Arguments:
   &lt;NAME&gt;  

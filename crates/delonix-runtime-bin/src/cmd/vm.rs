@@ -491,6 +491,11 @@ pub enum VmCmd {
         /// Do not compress the final qcow2.
         #[arg(long)]
         no_compress: bool,
+        /// Give the guest network access during `RUN` (for `apt-get install`
+        /// and friends). Off by default: a build that reaches the internet
+        /// produces a different image depending on when it ran.
+        #[arg(long)]
+        network: bool,
     },
     /// Pull a golden VM image from an OCI registry — with no argument, the
     /// OFFICIAL Delonix image (ready for `vm create`/`cluster kubeadm`).
@@ -936,6 +941,10 @@ pub fn run(action: VmCmd) -> Result<()> {
             // unreachable" in the guest, a real case). The minimal seed
             // (network-config DHCP + hostname = VM name) makes cloud-init bring
             // up the network and apply the ssh-keys/hostname when given.
+            // Recorded before `ssh_keys` is moved into the seed, and only for
+            // the generated-seed path: a caller who brought their OWN `--seed`
+            // decided the accounts themselves, and we would be guessing.
+            let injected_key = seed.is_none() && !ssh_keys.is_empty();
             let seed = match seed {
                 Some(s) => Some(s),
                 None => {
@@ -1017,7 +1026,10 @@ pub fn run(action: VmCmd) -> Result<()> {
                     std::time::Duration::from_secs(boot_timeout),
                 );
             }
-            print_vm_next_steps(&vm.name);
+            let ip = delonix_vm::status(&base, &vm.name)
+                .ok()
+                .and_then(|v| v.ip.clone());
+            print_vm_next_steps(&vm.name, ip.as_deref(), injected_key);
             Ok(())
         }
         VmCmd::Build {
@@ -1025,6 +1037,7 @@ pub fn run(action: VmCmd) -> Result<()> {
             file,
             context,
             no_compress,
+            network,
         } => {
             // The VMfile path only — this group has no golden-recipe flags, so
             // there is nothing to disambiguate. `-f` absent means
@@ -1040,7 +1053,7 @@ pub fn run(action: VmCmd) -> Result<()> {
                     &[("path", &path.display().to_string())],
                 )));
             }
-            super::vmfile::build(&store, &path, &context, &tag, !no_compress)
+            super::vmfile::build(&store, &path, &context, &tag, !no_compress, network)
         }
         VmCmd::Pull {
             source,
@@ -1645,8 +1658,18 @@ fn cmd_vnc(base: &std::path::Path, name: &str) -> Result<()> {
 /// Prints the "what now?" block after a successful `vm create` — on STDERR so
 /// STDOUT stays the bare VM name for scripts. The console hint spells out the
 /// escape key because with serial autologin `exit`/`logout` just loop.
-fn print_vm_next_steps(name: &str) {
-    let rows = [
+/// The account the injected key lands in.
+///
+/// Named here rather than inlined because the next-steps block has to agree
+/// with `build_user_data`, and a reader who guesses is a reader who is wrong:
+/// on an Ubuntu cloud image the obvious guess is `ubuntu`, and that account
+/// exists — it just does not have the key, so it answers
+/// `Permission denied (publickey)`, which reads as a broken key rather than a
+/// wrong username. Hit while validating `vm create --url-img`.
+const GUEST_SSH_USER: &str = "delonix";
+
+fn print_vm_next_steps(name: &str, ip: Option<&str>, has_key: bool) {
+    let mut rows = vec![
         (
             format!("delonix vm console {name}"),
             super::po::t("open the serial console (back to host: Ctrl+])"),
@@ -1664,6 +1687,17 @@ fn print_vm_next_steps(name: &str) {
             super::po::t("stop it (keeps the disk)"),
         ),
     ];
+    if has_key {
+        // Second row, not last: it is what most people want first, and it is
+        // the one piece of the block they cannot derive themselves.
+        rows.insert(
+            1,
+            (
+                format!("ssh {GUEST_SSH_USER}@{}", ip.unwrap_or("<ip>")),
+                super::po::t("log in with the key you injected"),
+            ),
+        );
+    }
     eprintln!("\n{}", super::po::t("Next steps:"));
     for (cmd, desc) in rows {
         eprintln!("  {cmd:<30} # {desc}");

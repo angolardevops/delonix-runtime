@@ -172,7 +172,7 @@ survive the build (including in rootless). <strong>Per-instruction layer cache</
 it; root mode still has no cache). No real BuildKit (no <code>RUN --mount=secret</code>, no
 <code>--platform</code>).</p>
 <p class='src-link'>📄 Implementação real em Rust: <a href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/delonix-runtime-bin/src/cmd/build.rs"><code>cmd/build.rs</code></a></p>
-<div class='help'><pre><code>Usage: delonix build [OPTIONS] --tag &lt;TAG&gt; [CONTEXT]
+<div class='help'><pre><code>Usage: dlx build [OPTIONS] --tag &lt;TAG&gt; [CONTEXT]
 
 Arguments:
   [CONTEXT]  Build context (default: `.`) — root for `COPY` [default: .]

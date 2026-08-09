@@ -266,6 +266,10 @@ pub enum VmImageCmd {
         /// on backing-file reads at runtime).
         #[arg(long)]
         no_compress: bool,
+        /// Give the guest network access during `RUN` — VMfile builds only.
+        /// The golden recipe already decides this with `--offline`.
+        #[arg(long)]
+        network: bool,
         /// Fetch the k8s .deb files on the HOST (verified: InRelease signature +
         /// SHA256) and install them with `dpkg` — the appliance runs without
         /// network (`--no-network`). Dispenses with DHCP/DNS in the guest, so it
@@ -325,6 +329,7 @@ pub fn run(action: VmImageCmd) -> Result<()> {
             extra_run,
             cri_bin,
             no_compress,
+            network,
             offline,
             no_k8s,
             delonix_bin,
@@ -360,7 +365,13 @@ pub fn run(action: VmImageCmd) -> Result<()> {
                         &[("flags", &used.join(", "))],
                     ).to_string()));
                 }
-                return super::vmfile::build(&store, &path, &context, &tag, !no_compress);
+                return super::vmfile::build(&store, &path, &context, &tag, !no_compress, network);
+            }
+            if network {
+                return Err(Error::Invalid(super::po::t(
+                    "`--network` is for VMfile builds; the golden recipe decides it with `--offline`",
+                )
+                .to_string()));
             }
             cmd_build(
                 &store,
@@ -2273,8 +2284,40 @@ pub(crate) fn customize_args(disk: &Path, ops: &[CustomizeOp]) -> Vec<String> {
     args
 }
 
+/// The package that ships `bin`, for the two families this engine builds for.
+///
+/// Split out and pure because the message it feeds is the whole value: an
+/// absent tool surfaces from `Command::status()` as `ENOENT`, which renders as
+/// "No such file or directory" — a sentence that sends the reader looking for
+/// a missing *file*. Measured on a host without libguestfs, that is exactly
+/// what `vm build` printed after a 600 MB download had already succeeded.
+pub(crate) fn tool_package(bin: &str) -> Option<(&'static str, &'static str)> {
+    match bin {
+        "virt-customize" | "virt-sparsify" | "virt-copy-out" => {
+            Some(("libguestfs-tools", "guestfs-tools"))
+        }
+        "qemu-img" => Some(("qemu-utils", "qemu-img")),
+        "cloud-localds" => Some(("cloud-image-utils", "cloud-utils")),
+        "virsh" => Some(("libvirt-clients", "libvirt-client")),
+        _ => None,
+    }
+}
+
 pub(crate) fn run_tool(bin: &str, args: &[&str]) -> Result<()> {
     let status = Command::new(bin).args(args).status().map_err(|e| {
+        if e.kind() == std::io::ErrorKind::NotFound {
+            if let Some((deb, rpm)) = tool_package(bin) {
+                return Error::Invalid(super::po::tf(
+                    "`{bin}` is not installed. Install it with `sudo apt install {deb}` \
+                     (Debian/Ubuntu) or `sudo dnf install {rpm}` (Fedora/Rocky).",
+                    &[("bin", bin), ("deb", deb), ("rpm", rpm)],
+                ));
+            }
+            return Error::Invalid(super::po::tf(
+                "`{bin}` is not installed, and it is needed here.",
+                &[("bin", bin)],
+            ));
+        }
         Error::Invalid(format!(
             "{}: {e}",
             super::po::tf("running {bin}", &[("bin", bin)])
@@ -3014,5 +3057,27 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
             hex_sha256(b"abc"),
             "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
         );
+    }
+
+    /// An absent tool is not a missing file, and the message has to say so.
+    ///
+    /// Measured on a host without libguestfs: `vm build` downloaded 600 MB,
+    /// verified the checksum, resized the disk, and then said
+    /// `running virt-customize: No such file or directory` — which reads as a
+    /// broken path, not as «install this package». The mapping is the fix, so
+    /// it is the mapping that gets the test.
+    #[test]
+    fn ferramenta_ausente_nomeia_o_pacote_das_duas_familias() {
+        assert_eq!(
+            super::tool_package("virt-customize"),
+            Some(("libguestfs-tools", "guestfs-tools"))
+        );
+        assert_eq!(
+            super::tool_package("qemu-img"),
+            Some(("qemu-utils", "qemu-img"))
+        );
+        // Unknown tools still get a sentence, just without a package name —
+        // never a silent fallthrough to the ENOENT text.
+        assert_eq!(super::tool_package("whatever"), None);
     }
 }

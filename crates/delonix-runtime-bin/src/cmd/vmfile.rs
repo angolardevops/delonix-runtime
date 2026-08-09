@@ -347,10 +347,22 @@ SIZE 20G
 
 HOSTNAME {name}
 
-# Runs inside the guest, offline. No network in the build: everything a RUN
-# needs has to come from the base image or from a COPY.
-RUN apt-get update && apt-get install -y --no-install-recommends nginx
-RUN systemctl enable nginx
+# Runs inside the guest. Offline by default — everything a RUN needs comes from
+# the base image or from a COPY — because a build that reaches the internet
+# gives a different image depending on when it ran.
+#
+# These two build as written, with no network:
+RUN echo "built by delonix vm build" > /etc/motd
+RUN systemctl enable ssh
+
+# To install packages the guest needs the network, and you ask for it:
+#
+#   delonix vm build --network -t {name}:1.0 .
+#
+# with the RUN you actually want, for example:
+#
+#   RUN apt-get update && apt-get install -y --no-install-recommends nginx
+#   RUN systemctl enable nginx
 
 # From the build context into the guest.
 # COPY ./site /var/www/html
@@ -428,17 +440,22 @@ use super::vmimage::{CustomizeOp, Distro, VmImage, VmImageStore};
 /// grown if asked, customized offline with `virt-customize`, and kept for
 /// later stages to copy out of. Only the last one is stored.
 ///
-/// `virt-customize` runs `--no-network` throughout, deliberately: a build that
-/// reaches the internet from inside the guest is a build whose result depends
-/// on when it ran. Everything a `RUN` needs comes from the base image or from
-/// a `COPY`, which is the same contract the offline golden build already has —
-/// and the reason that path avoids the DHCP/passt host workarounds entirely.
+/// `virt-customize` runs `--no-network` unless `network` is set. Offline is the
+/// default deliberately: a build that reaches the internet from inside the
+/// guest is a build whose result depends on when it ran, and it is the reason
+/// the offline golden path avoids the DHCP/passt host workarounds entirely.
+///
+/// It is opt-in rather than absent because the most common thing a `VMfile`
+/// wants to do is install a package, and an engine that makes that impossible
+/// is not offering a choice — it is just refusing. The reproducibility cost is
+/// the caller's to take, once they are told about it.
 pub(crate) fn build(
     store: &VmImageStore,
     path: &std::path::Path,
     context: &std::path::Path,
     tag: &str,
     compress: bool,
+    network: bool,
 ) -> Result<()> {
     let text = std::fs::read_to_string(path)
         .map_err(|e| Error::Invalid(format!("{}: {e}", path.display())))?;
@@ -494,7 +511,9 @@ pub(crate) fn build(
         let ops = stage_ops(stage, context, &built, &work_dir, &label)?;
         if !ops.is_empty() {
             let mut args = super::vmimage::customize_args(&disk, &ops);
-            args.push("--no-network".into());
+            if !network {
+                args.push("--no-network".into());
+            }
             let argv: Vec<&str> = args.iter().map(String::as_str).collect();
             super::vmimage::run_tool("virt-customize", &argv)?;
         }

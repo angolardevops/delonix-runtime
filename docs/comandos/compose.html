@@ -166,7 +166,7 @@ via topological ordering of the service graph — a cycle is a clear error, neve
 deterministic naming (<code>&lt;project&gt;_&lt;name&gt;</code>) — no registry of its own, the same
 philosophy as <code>stack describe</code>.</p>
 <p class='src-link'>📄 Implementação real em Rust: <a href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/delonix-runtime-bin/src/cmd/compose.rs"><code>cmd/compose.rs</code></a></p>
-<div class='help'><pre><code>Usage: delonix compose [OPTIONS] &lt;COMMAND&gt;
+<div class='help'><pre><code>Usage: dlx compose [OPTIONS] &lt;COMMAND&gt;
 
 Commands:
   up      Creates/starts every service — build, then network, then volume, then containers in `depends_on` order (gated on the declared condition)
@@ -189,7 +189,7 @@ precisa de semântica própria de limpeza, ainda por desenhar). <code>working_di
 ["80"]</code>) GANHA uma porta livre real do host, em vez de recusar.</p>
 <h2 id='up'><code>compose up</code></h2>
 <p class='intro'>Creates/starts every service — build, then network, then volume, then containers in <code>depends_on</code> order (gated on the declared condition)</p>
-<div class='help'><pre><code>Usage: delonix compose up [OPTIONS]
+<div class='help'><pre><code>Usage: dlx compose up [OPTIONS]
 
 Options:
   -f, --file &lt;FILE&gt;             
@@ -201,7 +201,7 @@ Options:
 <h3>Exemplos</h3><div class="ex"><div class="cap">Sobe tudo (build, rede, volumes, containers, por ordem de `depends_on`)</div><pre><code>delonix compose up</code></pre></div><div class="ex"><div class="cap">Ficheiro/projecto explícitos</div><pre><code>delonix compose up -f infra/docker-compose.yml -p minhaapp</code></pre></div><div class="ex"><div class="cap">Só valida e mostra o plano, sem criar nada</div><pre><code>delonix compose up --dry-run</code></pre></div>
 <h2 id='ps'><code>compose ps</code></h2>
 <p class='intro'>Containers of this project (derived from labels)</p>
-<div class='help'><pre><code>Usage: delonix compose ps [OPTIONS]
+<div class='help'><pre><code>Usage: dlx compose ps [OPTIONS]
 
 Options:
   -f, --file &lt;FILE&gt;             
@@ -211,7 +211,7 @@ Options:
 <h3>Exemplos</h3><div class="ex"><div class="cap">Containers deste projecto</div><pre><code>delonix compose ps</code></pre></div>
 <h2 id='logs'><code>compose logs</code></h2>
 <p class='intro'>Logs of one service (default: every service, one after another)</p>
-<div class='help'><pre><code>Usage: delonix compose logs [OPTIONS] [SERVICE]
+<div class='help'><pre><code>Usage: dlx compose logs [OPTIONS] [SERVICE]
 
 Arguments:
   [SERVICE]  
@@ -225,7 +225,7 @@ Options:
 <h3>Exemplos</h3><div class="ex"><div class="cap">Logs de um serviço</div><pre><code>delonix compose logs db</code></pre></div><div class="ex"><div class="cap">Todos os serviços, um a seguir ao outro</div><pre><code>delonix compose logs</code></pre></div>
 <h2 id='config'><code>compose config</code></h2>
 <p class='intro'>Validates and prints the resolved project, without creating anything (<code>docker compose config</code> equivalent)</p>
-<div class='help'><pre><code>Usage: delonix compose config [OPTIONS]
+<div class='help'><pre><code>Usage: dlx compose config [OPTIONS]
 
 Options:
   -f, --file &lt;FILE&gt;             
@@ -235,7 +235,7 @@ Options:
 <h3>Exemplos</h3><div class="ex"><div class="cap">Valida e imprime o projecto resolvido (equivalente a `docker compose config`)</div><pre><code>delonix compose config</code></pre></div>
 <h2 id='down'><code>compose down</code></h2>
 <p class='intro'>Removes every container this project&#x27;s <code>up</code> created (and, with <code>-v</code>, its named volumes). Networks/volumes marked <code>external: true</code> are NEVER removed</p>
-<div class='help'><pre><code>Usage: delonix compose down [OPTIONS]
+<div class='help'><pre><code>Usage: dlx compose down [OPTIONS]
 
 Options:
   -f, --file &lt;FILE&gt;             
