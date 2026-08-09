@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Laboratórios · Delonix Engine</title>
+<style>
+:root{--accent:#e8590c;--accent-soft:#fff0e6;--ink:#1a1a2e;--muted:#5a6472;--line:#e6e8ec;
+--bg:#ffffff;--side:#f7f8fa;--code-bg:#0f172a;--code-ink:#e2e8f0;--radius:10px}
+@media (prefers-color-scheme: dark){:root{--ink:#e6e8ee;--muted:#9aa4b2;--line:#252a33;
+--bg:#0d1117;--side:#10151c;--accent-soft:#2a1810;--code-bg:#161b22;--code-ink:#dbe2ea}}
+*{box-sizing:border-box}body{margin:0;font:16px/1.65 -apple-system,'Segoe UI',Roboto,Ubuntu,
+sans-serif;color:var(--ink);background:var(--bg)}
+a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
+.layout{display:flex;min-height:100vh}
+nav.side{width:270px;flex-shrink:0;background:var(--side);border-right:1px solid var(--line);
+padding:1.2rem 1rem 3rem;position:sticky;top:0;height:100vh;overflow-y:auto}
+nav.side .brand{display:flex;align-items:center;gap:.55rem;font-weight:700;font-size:1.12rem;
+margin-bottom:1.1rem;color:var(--ink)}
+nav.side .brand .dot{width:26px;height:26px;border-radius:7px;background:var(--accent);
+display:inline-flex;align-items:center;justify-content:center;color:#fff;font-size:.85rem}
+nav.side h5{margin:1.3rem 0 .3rem;font-size:.72rem;letter-spacing:.09em;text-transform:uppercase;
+color:var(--muted)}
+nav.side a{display:block;padding:.28rem .55rem;border-radius:6px;color:var(--ink);font-size:.93rem}
+nav.side a:hover{background:var(--accent-soft);text-decoration:none}
+nav.side a.on{background:var(--accent-soft);color:var(--accent);font-weight:600}
+main{flex:1;min-width:0;padding:2.2rem 3rem 5rem;max-width:940px}
+main h1{font-size:1.9rem;margin:.2rem 0 .4rem}
+main h2{font-size:1.35rem;margin-top:2.4rem;padding-bottom:.35rem;border-bottom:1px solid var(--line)}
+main h3{font-size:1.05rem;margin-top:1.6rem}
+.tagline{color:var(--muted);font-size:1.05rem;margin-top:0}
+code{background:var(--accent-soft);padding:.1em .35em;border-radius:5px;font-size:.9em}
+pre{background:var(--code-bg);color:var(--code-ink);padding:1rem 1.2rem;border-radius:var(--radius);
+overflow-x:auto;font-size:.86rem;line-height:1.55}
+pre code{background:none;padding:0;color:inherit;font-size:inherit}
+.help pre{border-left:4px solid var(--accent)}
+.ex{margin:.9rem 0}.ex .cap{font-size:.88rem;color:var(--muted);margin-bottom:.25rem}
+.ex .out,div.out{margin-top:.4rem}
+.ex .out pre,div.out pre{background:transparent;border:1px dashed var(--line);color:var(--muted);
+padding:.7rem 1rem;font-size:.82rem}
+.ex .out::before,div.out::before{content:"→ resultado";display:block;font-size:.75rem;color:var(--muted);
+margin-bottom:.15rem;letter-spacing:.03em;text-transform:uppercase}
+table{border-collapse:collapse;width:100%;font-size:.92rem}
+td,th{border:1px solid var(--line);padding:.5rem .7rem;text-align:left;vertical-align:top}
+th{background:var(--side)}
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:1rem;margin:1.4rem 0}
+.card{border:1px solid var(--line);border-radius:var(--radius);padding:1rem 1.1rem}
+.card b{display:block;margin-bottom:.25rem}.card a{font-weight:600}
+.card p{margin:.2rem 0 0;font-size:.88rem;color:var(--muted)}
+.arch{display:flex;flex-direction:column;gap:.6rem;margin:1.4rem 0}
+.arch .row{display:flex;gap:.6rem;flex-wrap:wrap}
+.arch .box{flex:1;min-width:150px;border:1.5px solid var(--accent);border-radius:8px;
+padding:.55rem .8rem;font-size:.85rem;background:var(--accent-soft)}
+.arch .box.mut{border-color:var(--line);background:var(--side)}
+.arch .box b{display:block;font-size:.9rem}
+.pill{display:inline-block;background:var(--accent);color:#fff;border-radius:99px;
+padding:.05rem .6rem;font-size:.75rem;font-weight:600;vertical-align:middle}
+.tag{display:inline-block;border-radius:6px;padding:.1rem .5rem;font-size:.82rem;font-weight:600}
+.tag.ok{background:#d8f3dc;color:#1b4332}.tag.mid{background:#fff3bf;color:#5c4a00}
+.tag.no{background:#ffe3e3;color:#7a1420}
+@media (prefers-color-scheme: dark){.tag.ok{background:#0f3d24;color:#8fe3ac}
+.tag.mid{background:#453800;color:#ffe066}.tag.no{background:#4a1015;color:#ffa8a8}}
+.callout{border:1.5px solid var(--accent);border-radius:var(--radius);padding:1rem 1.2rem;margin:1.4rem 0;
+background:var(--accent-soft)}
+.callout.warn{border-color:#e03131;background:#fff0f0}
+.callout.warn b{color:#c92a2a}
+@media (prefers-color-scheme: dark){.callout.warn{background:#3a1414}.callout.warn b{color:#ff8787}}
+.callout p:first-child{margin-top:0}.callout p:last-child{margin-bottom:0}
+footer{margin-top:4rem;color:var(--muted);font-size:.85rem;border-top:1px solid var(--line);padding-top:1rem}
+@media (max-width:840px){.layout{flex-direction:column}nav.side{width:100%;height:auto;position:static}
+main{padding:1.4rem 1.2rem 4rem}}
+</style>
+</head>
+<body>
+<div class="layout">
+<nav class="side">
+<div class="brand"><span class="dot">▲</span> Delonix Engine</div>
+<h5>Documentação</h5>
+<a href="index.html">Início</a><a href="cheatsheet.html">Cheatsheet</a><a href="kinds.html">Kinds e templates</a><a href="cloud.html">cloud-init, cloud-img e CH</a><a href="labs.html" class="on">Laboratórios</a><a href="arquitectura.html">Arquitectura</a><a href="c4.html">Modelo C4 e system design</a><a href="cri.html">CRI — kubelet sem containerd</a><a href="comparacao.html">Delonix vs Docker vs Podman</a><a href="tutorial-delonix-temp.html">Projecto completo: Delonix Temp</a><a href="delonixctl.html">delonixctl — cliente PaaS</a>
+<h5>Referência CLI</h5>
+<a href="comandos/container.html">delonix container</a><a href="comandos/workload.html">delonix workload</a><a href="comandos/pod.html">delonix pod</a><a href="comandos/image.html">delonix image</a><a href="comandos/build.html">delonix build</a><a href="comandos/vm.html">delonix vm</a><a href="comandos/volumes.html">delonix volumes</a><a href="comandos/network.html">delonix network</a><a href="comandos/stack.html">delonix stack</a><a href="comandos/compose.html">delonix compose</a><a href="comandos/cluster.html">delonix cluster</a><a href="comandos/secret.html">delonix secret</a><a href="comandos/storage.html">delonix storage</a><a href="comandos/sharevolume.html">delonix sharevolume</a><a href="comandos/ingress.html">delonix net ingress</a><a href="comandos/egress.html">delonix net egress</a><a href="comandos/httproute.html">delonix net httproute</a><a href="comandos/tunnel.html">delonix net tunnel</a><a href="comandos/flow.html">delonix net flow</a><a href="comandos/boot.html">delonix net boot</a><a href="comandos/system.html">delonix system</a><a href="comandos/dash.html">delonix dash</a><a href="comandos/docker-api.html">delonix serve docker-api</a><a href="comandos/kube.html">delonix cluster kube</a><a href="comandos/netns.html">delonix net netns</a><a href="comandos/completion.html">delonix completion</a>
+<h5>Projecto</h5>
+<a href="https://github.com/angolardevops/delonix-runtime">GitHub</a>
+<a href="https://github.com/angolardevops/delonix-runtime/releases">Releases</a>
+</nav>
+<main>
+<h1>Laboratórios</h1>
+<p class='tagline'>Sessões curtas, do zero a um resultado que se verifica. Cada uma inclui a limpeza — nenhuma deixa nada para trás.</p>
+<p>A verificação no fim de cada lab não é decorativa: é o que separa «copiei comandos» de «sei o que isto faz». Onde um passo pode falhar em silêncio, o lab diz exactamente o que olhar.</p>
+<h2 id='lab-1'>Primeiro serviço, em 60 segundos <span class='badge'>iniciante</span></h2>
+
+<p>Objectivo: perceber o ciclo <code>run → ps → logs → exec → rm</code> e ver
+que não há daemon nenhum por baixo.</p>
+<pre><code># 1. Um serviço web, em segundo plano, publicado na porta 8080 do host
+delonix container run -d --name web -p 8080:80 nginx:alpine
+
+# 2. Confirmar — o STATUS diz há quanto tempo está de pé
+delonix ps
+
+# 3. A prova de que não há daemon: NENHUM processo residente do motor
+pgrep -a delonix || echo "sem daemon — o container é filho do init do host"
+
+# 4. Falar com ele
+curl -s localhost:8080 | head -3
+
+# 5. Entrar lá dentro
+delonix exec -it web sh -c 'hostname; id; ls /etc/nginx'
+
+# 6. Ver o que ele escreveu
+delonix logs web | tail -5
+
+# 7. Limpar
+delonix rm -f web</code></pre>
+<p class="note"><strong>Verificação:</strong> o passo 3 não imprime processo
+nenhum do motor. Um container a correr sem supervisor residente é a diferença
+de fundo para o Docker, e vê-se aqui em duas linhas.</p>
+<h2 id='lab-2'>Limites de recursos que pegam mesmo <span class='badge'>iniciante</span></h2>
+
+<p>Objectivo: descobrir se este host aplica limites — e o que fazer quando não
+aplica. É o erro nº1 de quem começa em rootless.</p>
+<pre><code># 1. Perguntar ANTES de assumir
+delonix system setup
+
+# 2. Se disser INERT ou PARTIAL, escrever a correcção e voltar a entrar
+sudo delonix system setup --delegate
+#   … logout / login …
+
+# 3. Um container com tecto de memória
+delonix container run -d --name limitado -m 128M alpine sleep 300
+
+# 4. A prova: ler o cgroup REAL, não o que o comando diz
+PID=$(delonix container inspect limitado | jq -r .pid)
+cat /sys/fs/cgroup$(awk -F: '/^0::/{print $3}' /proc/$PID/cgroup)/memory.max
+
+delonix rm -f limitado</code></pre>
+<p class="note"><strong>Verificação:</strong> o passo 4 imprime
+<code>134217728</code> (128 MiB), não <code>max</code>. Se imprimir
+<code>max</code>, a delegação não está feita — e o container corre <em>sem</em>
+limite nenhum, em silêncio. É por isso que o passo 1 existe.</p>
+<h2 id='lab-3'>Duas aplicações que se falam por nome <span class='badge'>intermédio</span></h2>
+
+<p>Objectivo: rede de utilizador, DNS interno, e isolamento — sem configurar
+DNS nenhum.</p>
+<pre><code># 1. Uma rede própria
+delonix network create loja
+
+# 2. Base de dados e app, ambas nela
+delonix container run -d --name db  --net loja -e POSTGRES_PASSWORD=x postgres:16-alpine
+delonix container run -d --name app --net loja -p 8080:80 nginx:alpine
+
+# 3. A app resolve a db PELO NOME, sem /etc/hosts nem variáveis
+delonix exec app sh -c 'getent hosts db; nc -z db 5432 && echo "porta aberta"'
+
+# 4. Fechar a db a tudo menos à app (alcançabilidade DIRIGIDA)
+cat &gt; dep.yaml &lt;&lt;'EOF'
+apiVersion: delonix.io/v1
+kind: Dependency
+metadata:
+  name: app-conhece-db
+spec:
+  from: app
+  to: db
+  ports: ["5432"]
+EOF
+delonix stack apply -f dep.yaml
+
+# 5. Provar: um terceiro container na MESMA rede já não alcança a db
+delonix container run --rm --net loja alpine sh -c 'nc -z -w2 db 5432 || echo BLOQUEADO'
+
+delonix rm -f db app; delonix network rm loja; rm dep.yaml</code></pre>
+<p class="note"><strong>Verificação:</strong> o passo 3 diz "porta aberta" e o
+passo 5 diz "BLOQUEADO". A mesma rede, dois resultados — é isso que
+<code>kind: Dependency</code> faz e uma rede sozinha não faz.</p>
+<h2 id='lab-4'>Do Dockerfile à imagem, sem daemon <span class='badge'>intermédio</span></h2>
+
+<p>Objectivo: construir uma imagem e correr o que construíste.</p>
+<pre><code>mkdir -p lab-build &amp;&amp; cd lab-build
+cat &gt; Delonixfile &lt;&lt;'EOF'
+FROM alpine:latest
+RUN apk add --no-cache curl
+COPY ola.txt /ola.txt
+HEALTHCHECK CMD test -f /ola.txt
+CMD ["sh", "-c", "cat /ola.txt; sleep 300"]
+EOF
+echo "construído com delonix" &gt; ola.txt
+
+# `Delonixfile` é procurado antes de `Dockerfile` — sem -f nenhum
+delonix build -t minha-app:1.0 .
+
+# `--wait` bloqueia até o HEALTHCHECK passar: sem isto escreve-se
+# `until ...; do sleep 1; done`, e escreve-se mal
+delonix run -d --name a1 --wait --health-interval 2 minha-app:1.0
+delonix ps
+
+delonix rm -f a1; delonix image rm minha-app:1.0; cd ..; rm -rf lab-build</code></pre>
+<p class="note"><strong>Verificação:</strong> o <code>ps</code> mostra
+<code>(healthy)</code> na coluna STATUS. O motor está a sondar o container
+sozinho — sem systemd, ao contrário do Podman rootless.</p>
+<h2 id='lab-5'>Uma microVM a sério <span class='badge'>intermédio</span></h2>
+
+<p>Objectivo: uma VM completa com o mesmo CLI dos containers.</p>
+<pre><code># 1. Sem imagem local, o create descarrega a oficial sozinho
+delonix vm create dev
+
+# 2. Onde ficou, e com que IP
+delonix vm ls
+delonix vm describe dev
+
+# 3. Entrar (voltar ao host: Ctrl+])
+delonix vm console dev
+
+# 4. Checkpoint de sistema — memória E disco, com a VM a correr
+delonix vm snapshot dev limpa
+delonix vm snapshots dev
+
+# 5. Estragar alguma coisa lá dentro e voltar atrás
+delonix vm restore dev limpa
+
+delonix vm rm dev</code></pre>
+<p class="note"><strong>Verificação:</strong> o passo 4 devolve sem erro com a
+VM A CORRER. Um snapshot de uma VM parada falha de propósito — o
+<code>vm stop</code> faz <em>undefine</em> do domínio para não deixar
+órfãos.</p>
+<h2 id='lab-6'>A tua própria imagem de VM, com VMfile <span class='badge'>avançado</span></h2>
+
+<p>Objectivo: construir uma imagem qcow2 à tua medida, como se constrói uma
+imagem de container.</p>
+<pre><code>mkdir -p lab-vm &amp;&amp; cd lab-vm
+
+# Scaffold que CONSTRÓI COMO ESTÁ — apaga o que não precisares
+delonix vm init --vmfile --name minha-base
+cat VMfile
+
+delonix vm build -t minha-base:1.0 .
+delonix vm ls
+
+# Arrancar a partir dela
+delonix vm create teste --disk-image minha-base:1.0
+
+# …ou a partir de um qcow2 publicado por ti, sem passar pelo store
+delonix vm create outra --url-img https://o-teu-bucket/imagem.qcow2
+
+delonix vm rm teste; cd ..; rm -rf lab-vm</code></pre>
+<p class="note"><strong>Verificação:</strong> o build imprime
+<code>[1/1] stage-1: FROM ubuntu:24.04</code> e verifica o checksum da cloud
+image. Com <code>--url-img</code>, se não houver <code>&lt;url&gt;.sha256</code>
+publicado, o motor <em>diz</em> que está a confiar só no TLS — em vez de calar.</p>
+<h2 id='lab-7'>Kubernetes sem Docker <span class='badge'>avançado</span></h2>
+
+<p>Objectivo: um cluster local cujo runtime dos nós É o Delonix.</p>
+<pre><code># 1. Preflight — falha em milissegundos se faltar a delegação de `cpu`,
+#    em vez de descarregar 425 MB para morrer aos 90 segundos
+delonix system setup
+
+# 2. O cluster
+delonix cluster create --name lab
+
+# 3. Falar com ele
+export KUBECONFIG=$(delonix cluster ls -o json | jq -r '.[0].kubeconfig')
+kubectl get nodes -o wide
+
+# 4. Levar uma imagem TUA para dentro dos nós, sem registo nenhum
+delonix build -t app:dev .
+delonix cluster load app:dev --name lab
+kubectl run app --image=app:dev --image-pull-policy=Never
+
+# 5. A prova que interessa
+kubectl get pod app -w
+
+delonix cluster delete --name lab</code></pre>
+<p class="note"><strong>Verificação:</strong> o passo 5 chega a
+<code>Running</code>. Nem o <code>ctr images import</code> nem o
+<code>crictl images</code> provam isto — os dois já reportaram sucesso sobre
+uma imagem que o kubelet depois não resolvia.</p>
+<footer>Delonix Engine · Apache-2.0 · <a href="https://github.com/angolardevops/delonix-runtime">angolardevops/delonix-runtime</a>
+· Referência gerada do <code>--help</code> real do binário por <code>docs/gen.py</code>.</footer>
+</main>
+</div>
+</body>
+</html>

@@ -1108,7 +1108,7 @@ fn save_to_cache(hash: &str, rootfs: &str) {
 /// finding**: without this, `COPY ../../../etc/passwd x` read
 /// arbitrary host files into the image, and a `dst` with `..` wrote
 /// outside the rootfs — see AGENTS.md.
-fn safe_join(base: &Path, rel: &str) -> Result<PathBuf> {
+pub(crate) fn safe_join(base: &Path, rel: &str) -> Result<PathBuf> {
     use std::path::Component;
     let mut out = base.to_path_buf();
     for c in Path::new(rel).components() {

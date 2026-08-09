@@ -21,6 +21,7 @@
 #   --no-binary    só dependências/configuração (usa um binário já instalado)
 #   --with-cri     instala também o delonix-cri (nó Kubernetes)
 #   --low-ports    permite publicar portas <1024 (ex.: 80/443) sem root.
+#   --no-delegate  NÃO escreve o drop-in de delegação de cgroup (ver abaixo).
 #                  NÃO é o default — ver a secção "portas privilegiadas" abaixo.
 #   --insecure-skip-signature
 #                  NÃO verificar a assinatura da release. Só para depurar ou
@@ -72,6 +73,10 @@ REPO="angolardevops/delonix-runtime"
 MINISIGN_PUBKEY="RWSiOqlKAnVVB+pJLQxgYHq/kdN6RbBQdlL5gOcZ6H/xkwSAPIqTo+GB"
 VERSION="latest"
 WITH_VM=1
+# Delegação de cgroup ligada POR OMISSÃO: sem ela `-m`/`--cpus`/`--pids-limit`
+# são silenciosamente inertes e um nó Kubernetes nem arranca. Instalar um motor
+# de containers cujos limites não pegam é entregar metade do produto.
+WITH_DELEGATE=1
 WITH_TUNE=1
 WITH_BINARY=1
 WITH_CRI=0
@@ -144,6 +149,7 @@ while [ $# -gt 0 ]; do
     --no-binary)  WITH_BINARY=0 ;;
     --with-cri)   WITH_CRI=1 ;;
     --low-ports)  LOW_PORTS=1 ;;
+    --no-delegate) WITH_DELEGATE=0 ;;
     --insecure-skip-signature) SKIP_SIG=1 ;;
     --user)       USER_INSTALL=1 ;;
     --version)    shift; VERSION="${1:?--version requires an argument}" ;;
@@ -648,6 +654,50 @@ if command -v loginctl >/dev/null 2>&1 && [ -n "$REAL_USER" ]; then
   fi
 fi
 
+# ------------------------------------------------ ACTIVAR a delegação de cgroup
+# Escrever o drop-in é a diferença entre avisar e resolver. Um aviso deixa o
+# utilizador com um problema de pesquisa cuja resposta está espalhada por
+# metades: quase toda a documentação online cobre o `user@.service` e esquece
+# que uma sessão de login é IRMÃ dele.
+#
+# `Delegate=cpu cpuset io memory pids` e NÃO `Delegate=yes`: medido neste host,
+# o `yes` produziu apenas `memory pids`. Isso passa em todas as verificações que
+# o motor faz e mata um nó `kindest/node` no arranque
+# (`UserNS: cpu controller needs to be delegated`) — uma delegação parcial que
+# se lê como completa é pior do que nenhuma.
+DELEGATE_DROPIN=/etc/systemd/system/user@.service.d/50-delonix-delegate.conf
+if [ "$WITH_DELEGATE" = 1 ] && [ "$USER_INSTALL" != 1 ] && [ -d /run/systemd/system ]; then
+  if [ -f "$DELEGATE_DROPIN" ]; then
+    skip rootless delegation
+  elif [ -z "$SUDO" ] && [ "$(id -u)" != 0 ]; then
+    warn "no sudo: skipping the cgroup delegation drop-in (resource limits will be inert)"
+  else
+    step rootless delegation "delegating cgroup controllers to user@.service..."
+    $SUDO mkdir -p /etc/systemd/system/user@.service.d 2>/dev/null || true
+    if $SUDO tee "$DELEGATE_DROPIN" >/dev/null <<'DELEGATE'
+# Delonix Runtime — written by install.sh.
+#
+# Gives each user's systemd manager a delegated cgroup subtree, so rootless
+# containers can actually carry --memory/--cpus/--pids-limit, and so a
+# Kubernetes node can boot (its entrypoint refuses without `cpu`).
+#
+# The controllers are NAMED rather than `Delegate=yes`: on some hosts `yes`
+# yields only `memory pids`, which passes every check and still kills a node.
+#
+# Revert: rm this file && systemctl daemon-reload
+[Service]
+Delegate=cpu cpuset io memory pids
+DELEGATE
+    then
+      $SUDO systemctl daemon-reload 2>/dev/null || true
+      stepok rootless delegation
+      NEED_RELOGIN=1
+    else
+      warn "could not write $DELEGATE_DROPIN — resource limits will be inert"
+    fi
+  fi
+fi
+
 # ----------------------------------------------------------------- verificação
 msg "verifying the installation..."
 FAIL=0
@@ -684,8 +734,20 @@ if [ "$(stat -fc %T /sys/fs/cgroup 2>/dev/null)" = cgroup2fs ]; then
   fi
   rmdir "$_probe" 2>/dev/null || true
 fi
-if [ "$CGROUP_DELEGATED" = 1 ]; then
+# QUAIS controladores, não só "há delegação". A sonda acima responde "consigo
+# criar um filho e mexer no subtree_control" — necessário, e cego ao que
+# interessa: um host com `memory pids` delegados passa nela e não arranca um nó
+# Kubernetes. Mesmo ponto cego que o `delonix system setup` teve até à v0.43.1.
+CGROUP_HAVE=$(cat "/sys/fs/cgroup$(sed -n 's|^0::||p' /proc/self/cgroup 2>/dev/null)/cgroup.controllers" 2>/dev/null || true)
+CGROUP_MISSING=""
+for _c in cpu cpuset io memory pids; do
+  case " $CGROUP_HAVE " in *" $_c "*) ;; *) CGROUP_MISSING="$CGROUP_MISSING $_c" ;; esac
+done
+if [ "$CGROUP_DELEGATED" = 1 ] && [ -z "$CGROUP_MISSING" ]; then
   stepok verify "cgroup delegation (resource limits apply)"
+elif [ "$CGROUP_DELEGATED" = 1 ]; then
+  printf '[verify] %s: %sPARTIAL%s (have:%s · missing:%s)\n' \
+    "cgroup delegation" "$C_WARN" "$C_0" " ${CGROUP_HAVE:-none}" "$CGROUP_MISSING"
 else
   printf '[verify] %s: %sNOT DELEGATED%s\n' "cgroup delegation" "$C_WARN" "$C_0"
 fi
@@ -698,6 +760,22 @@ else
   warn "installation finished with warnings — review the FAILED lines above"
 fi
 
+if [ "$CGROUP_DELEGATED" = 1 ] && [ -n "$CGROUP_MISSING" ]; then
+  echo
+  warn "delegation is PARTIAL:$CGROUP_MISSING not delegated"
+  cat <<CGPART
+    Container limits work, but \`delonix cluster create\` (kind mode) will not:
+    a Kubernetes node's entrypoint refuses to boot without the \`cpu\` controller
+    (\`UserNS: cpu controller needs to be delegated\`).
+
+    The drop-in this installer writes fixes it — it takes effect on the NEXT
+    login, because a running user@.service keeps the old setting:
+
+        $DELEGATE_DROPIN
+
+    Log out and back in, then check with:  delonix system setup
+CGPART
+fi
 if [ "$CGROUP_DELEGATED" != 1 ]; then
   echo
   warn "resource limits (-m / --cpus / --pids-limit) will NOT be applied from this shell"

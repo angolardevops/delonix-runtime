@@ -3,6 +3,16 @@
 # The familiar Pod schema: spec.containers[] with structured ports/env/resources/
 # securityContext + pod-level volumes. v1 accepts ONE container (>1 is an error).
 # The flat single-container spec (see examples/*, `image:` at the top) still works.
+# ---------------------------------------------------------------------------
+# A rede que o pod usa, declarada aqui para o exemplo validar sozinho.
+# ---------------------------------------------------------------------------
+apiVersion: delonix.io/v1
+kind: Network
+metadata:
+  name: web-net
+spec:
+  driver: bridge
+---
 apiVersion: delonix.io/v1
 kind: Container
 metadata:
