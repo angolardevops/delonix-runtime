@@ -838,7 +838,9 @@ fluxo de eventos.""",
             "setup": {"examples": [
                 ('Diagnosticar a delegação de cgroup — porque é que -m/--cpus não pegam',
                  'delonix system setup'),
-                ('Escrever a correcção (precisa de root; faz efeito no PRÓXIMO login)',
+                ('A 1.ª correcção: um scope delegado (sem root, sem reboot, vale já)',
+                 'systemd-run --user --scope -p Delegate=yes -- delonix system setup'),
+                ('Só se a de cima ainda disser que falta o `cpu` (precisa de root, sobrevive ao reboot)',
                  'sudo delonix system setup --delegate')]},
             "events": {"examples": [
                 ('Ver o que o motor andou a fazer',
@@ -1789,9 +1791,11 @@ aplica. É o erro nº1 de quem começa em rootless.</p>
 <pre><code># 1. Perguntar ANTES de assumir
 delonix system setup
 
-# 2. Se disser INERT ou PARTIAL, escrever a correcção e voltar a entrar
-sudo delonix system setup --delegate
-#   … logout / login …
+# 2. Se disser INERT ou PARTIAL, a 1.ª correcção não precisa de root nenhum
+systemd-run --user --scope -p Delegate=yes -- delonix system setup
+#   … e é dentro desse scope que corres os passos seguintes.
+#   Só se ELE ainda disser que falta o `cpu`:
+#     sudo delonix system setup --delegate   (+ logout / login)
 
 # 3. Um container com tecto de memória
 delonix container run -d --name limitado -m 128M alpine sleep 300
@@ -1804,7 +1808,11 @@ delonix rm -f limitado</code></pre>
 <p class="note"><strong>Verificação:</strong> o passo 4 imprime
 <code>134217728</code> (128 MiB), não <code>max</code>. Se imprimir
 <code>max</code>, a delegação não está feita — e o container corre <em>sem</em>
-limite nenhum, em silêncio. É por isso que o passo 1 existe.</p>"""),
+limite nenhum, em silêncio. É por isso que o passo 1 existe.</p>
+<p class="note"><strong>Nota:</strong> <code>cpuset</code> e <code>io</code>
+aparecem quase sempre como <em>absent</em>, e está certo — num Ubuntu de
+fábrica o <code>user.slice</code> (da root) só passa <code>cpu memory
+pids</code> para baixo. Nada aqui precisa deles.</p>"""),
 
     ("lab-3", "Duas aplicações que se falam por nome", "intermédio", """
 <p>Objectivo: rede de utilizador, DNS interno, e isolamento — sem configurar

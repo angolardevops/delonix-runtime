@@ -15,7 +15,7 @@ Not a low-level OCI *runtime* (that's ``runc``/``crun``): Delonix is a full
 container **and** VM engine — build, run, network, firewall, store, and
 bootstrap Kubernetes clusters, from one binary.
 
-:Version: 0.43.0
+:Version: 0.44.0
 :License: Apache-2.0
 :Docs: https://angolardevops.github.io/delonix-runtime/
 :Repo: https://github.com/angolardevops/delonix-runtime
@@ -92,13 +92,14 @@ write access to their common ancestor ``user-<uid>.slice``, which belongs to
 root. Namespace and seccomp isolation are unaffected — only the resource
 ceilings.
 
-``delonix system setup`` diagnoses it, and ``--delegate`` writes the fix. It
-gives **two** remedies because there are two problems, and most answers online
-only cover one: a drop-in on ``user@.service`` fixes future logins, but *not*
-the shell you are typing in — an SSH ``session-N.scope`` is a **sibling** of
-``user@.service`` and inherits nothing from it.
+``delonix system setup`` diagnoses it. It gives **two** remedies, in this
+order, because most answers online jump straight to the second one and it is
+usually not the one you need:
 
-For the live session, run workloads inside a delegated scope::
+**1. A delegated scope.** No root, no reboot, works in the shell you are
+typing in. Try this first — on a distro that already delegates ``cpu`` (Ubuntu
+24.04 ships ``Delegate=pids memory cpu`` on ``user@.service``) it is the whole
+fix, and editing ``/etc`` would only restate what is already there::
 
     systemd-run --user --scope -p Delegate=yes -- delonix container run -d -m 512M myapp
 
@@ -108,6 +109,18 @@ delegated cgroup::
     [Service]
     Delegate=yes
     ExecStart=/usr/local/bin/delonix container run ...
+
+**2. A drop-in on** ``user@.service`` (``sudo delonix system setup --delegate``).
+Needs root, survives reboots, and is only worth writing when step 1 still
+reports ``cpu`` missing — that means the distro itself does not delegate it.
+Note it fixes *future* logins, not the shell you are in: an SSH
+``session-N.scope`` is a **sibling** of ``user@.service`` and inherits nothing
+from it, so you still enter a scope (or log out and back in) afterwards.
+
+``cpuset`` and ``io`` are a separate matter: on a stock Ubuntu the root-owned
+``user.slice`` passes only ``cpu memory pids`` down, so no drop-in of yours can
+make them appear. Nothing in this engine needs them — ``system setup`` lists
+them as *absent*, not *missing*.
 
 Verify it took effect — this is the check worth putting in your provisioning::
 

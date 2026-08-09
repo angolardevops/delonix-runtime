@@ -3596,3 +3596,23 @@ msgstr "[{n}/{total}] {label}: FROM {from}"
 
 msgid "SSHKEY {key}: not a public key, and no such file — pass a path or the key itself"
 msgstr "SSHKEY {key}: não é uma chave pública, e o ficheiro não existe — passa um caminho ou a própria chave"
+
+# ---- delegação de cgroup: fatal vs desejável (v0.43.2) ---------------------
+
+msgid "← a Kubernetes node CANNOT boot without this"
+msgstr "← um nó Kubernetes NÃO arranca sem isto"
+
+msgid "← optional; nothing here needs them"
+msgstr "← opcionais; nada aqui precisa deles"
+
+msgid "Try this first — no root, no reboot, works right now:"
+msgstr "Tenta isto primeiro — sem root, sem reiniciar sessão, funciona já:"
+
+msgid "(check it with: systemd-run --user --scope -p Delegate=yes -- delonix system setup)"
+msgstr "(confirma com: systemd-run --user --scope -p Delegate=yes -- delonix system setup)"
+
+msgid "Only if the above still says `cpu` is missing (needs root, survives reboot):"
+msgstr "Só se o acima continuar a dizer que falta o `cpu` (precisa de root, sobrevive ao reboot):"
+
+msgid "Re-run with --delegate to write fix 2. (This run changed nothing.)"
+msgstr "Volta a correr com --delegate para escrever a correcção 2. (Esta execução não mudou nada.)"

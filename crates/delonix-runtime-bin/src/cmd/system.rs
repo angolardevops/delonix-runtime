@@ -996,20 +996,40 @@ fn delegated_controllers(cgroup: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// Controllers a Kubernetes node needs, beyond what the engine itself uses.
+/// Controllers whose ABSENCE stops a Kubernetes node from booting.
 ///
-/// `cpu` is the one that actually bites: `kindest/node`'s entrypoint refuses to
-/// boot without it, and a plain container never notices it is missing.
-const K8S_CONTROLLERS: &[&str] = &["cpu", "cpuset", "io", "memory", "pids"];
+/// Only `cpu`. Measured: `kindest/node`'s entrypoint exits with
+/// `UserNS: cpu controller needs to be delegated` and nothing else in that list
+/// is checked by it. This is deliberately narrower than "what a node would
+/// like" — see [`NICE_CONTROLLERS`].
+const FATAL_CONTROLLERS: &[&str] = &["cpu"];
 
-/// Which of [`K8S_CONTROLLERS`] are absent. **Pure**, so the rule is testable
-/// without a cgroup tree.
-pub(crate) fn missing_controllers(have: &[String]) -> Vec<&'static str> {
-    K8S_CONTROLLERS
-        .iter()
-        .copied()
-        .filter(|c| !have.iter().any(|h| h == c))
-        .collect()
+/// Controllers a node uses when they are there and lives without when they are
+/// not.
+///
+/// `cpuset` and `io` are missing on plenty of hosts where a node boots fine —
+/// on Ubuntu 24.04 the root passes them down but `user.slice` does not, and
+/// that `subtree_control` belongs to root, so NO drop-in on `user@.service` can
+/// conjure them. Reporting their absence as a failure would send people to edit
+/// `/etc` for something that was never going to work and that they do not need.
+const NICE_CONTROLLERS: &[&str] = &["cpuset", "io", "memory", "pids"];
+
+/// Splits the missing controllers into the ones that BREAK a Kubernetes node
+/// and the ones that merely limit it. **Pure**, so the rule is testable without
+/// a cgroup tree.
+///
+/// The previous version returned one flat list and the caller printed the `cpu`
+/// error text next to it — so a host missing only `cpuset`/`io` was told
+/// `cluster create` would fail with a message quoting a controller it actually
+/// had. Two different facts wearing the same sentence.
+pub(crate) fn missing_controllers(have: &[String]) -> (Vec<&'static str>, Vec<&'static str>) {
+    let absent = |set: &[&'static str]| -> Vec<&'static str> {
+        set.iter()
+            .copied()
+            .filter(|c| !have.iter().any(|h| h == c))
+            .collect()
+    };
+    (absent(FATAL_CONTROLLERS), absent(NICE_CONTROLLERS))
 }
 
 fn cmd_setup(delegate: bool) -> Result<()> {
@@ -1038,35 +1058,57 @@ fn cmd_setup(delegate: bool) -> Result<()> {
             have.join(" ")
         }
     );
-    let missing = missing_controllers(&have);
-    if !missing.is_empty() {
+    let (fatal, nice) = missing_controllers(&have);
+    if !fatal.is_empty() {
         println!(
             "  missing:  {}  {}",
-            missing.join(" "),
-            super::po::t("← a Kubernetes node needs these")
+            fatal.join(" "),
+            super::po::t("← a Kubernetes node CANNOT boot without this")
+        );
+    }
+    if !nice.is_empty() {
+        println!(
+            "  absent:   {}  {}",
+            nice.join(" "),
+            super::po::t("← optional; nothing here needs them")
         );
     }
 
-    if ok && missing.is_empty() {
+    if ok && fatal.is_empty() {
+        // `cpuset`/`io` absent is the NORMAL state on a stock Ubuntu and breaks
+        // nothing. Calling that "something to do" sent people to edit /etc for a
+        // delegation their distro's `user.slice` will never pass down anyway.
         println!("\n{}", super::po::t("Nothing to do."));
         return Ok(());
     }
     // Limits apply but a controller a k8s node needs is absent. Reporting
     // "nothing to do" here — which is what this did — sends the operator into a
     // 90-second timeout and a dead node with no connection to this command.
-    if ok && !missing.is_empty() {
+    if ok && !fatal.is_empty() {
         println!(
             "\n{}",
-            super::po::tf(
-                "Container limits work, but `{missing}` is not delegated. `delonix cluster create` \
-                 (kind mode) will fail: the node's entrypoint refuses to boot without it \
-                 (`UserNS: cpu controller needs to be delegated`).",
-                &[("missing", &missing.join("`, `"))],
+            super::po::t(
+                "Container limits work, but `cpu` is not delegated here. `delonix cluster create` \
+                 (kind mode) will fail: the node's entrypoint exits with `UserNS: cpu controller \
+                 needs to be delegated`.",
             )
         );
+        // THE FREE FIX FIRST. A delegated scope needs no root, no reboot and no
+        // change to the machine, and on a stock Ubuntu it is usually enough —
+        // `user@.service` already ships `Delegate=pids memory cpu`, and what is
+        // missing is only that THIS shell's slice does not pass `cpu` down.
+        // Leading with the /etc drop-in sent people to change the whole machine
+        // for something a prefix on one command already solves.
         println!(
-            "\n  {}\n     {DELEGATE_DROPIN}\n     {}",
-            super::po::t("Fix (needs root, survives reboot):"),
+            "\n  1. {}\n     systemd-run --user --scope -p Delegate=yes -- delonix cluster create …\n     {}",
+            super::po::t("Try this first — no root, no reboot, works right now:"),
+            super::po::t("(check it with: systemd-run --user --scope -p Delegate=yes -- delonix system setup)"),
+        );
+        println!(
+            "\n  2. {}\n     {DELEGATE_DROPIN}\n     {}",
+            super::po::t(
+                "Only if the above still says `cpu` is missing (needs root, survives reboot):"
+            ),
             super::po::t(
                 "then log out and back in — a running user@.service keeps the old setting"
             ),
@@ -1074,7 +1116,7 @@ fn cmd_setup(delegate: bool) -> Result<()> {
         if !delegate {
             println!(
                 "\n{}",
-                super::po::t("Re-run with --delegate to write it. (This run changed nothing.)")
+                super::po::t("Re-run with --delegate to write fix 2. (This run changed nothing.)")
             );
             return Ok(());
         }
@@ -1210,5 +1252,32 @@ mod setup_tests {
         assert!(!is_login_session_scope(
             "/sys/fs/cgroup/user.slice/session-9.scope/delonix/dlx-abc"
         ));
+    }
+
+    /// `cpu` em falta e `cpuset`/`io` em falta são factos DIFERENTES, e a
+    /// primeira versão disto devolvia uma lista só.
+    ///
+    /// A consequência foi medida, não imaginada: num Ubuntu 24.04 de fábrica o
+    /// `user.slice` não passa `cpuset`/`io` para baixo — é o estado NORMAL — e
+    /// o comando dizia que o `cluster create` ia falhar, citando o erro de um
+    /// controlador que a máquina tinha. Mandava editar o `/etc` para uma
+    /// delegação que aquele `subtree_control` (da root) nunca ia passar.
+    #[test]
+    fn so_o_cpu_e_fatal_para_um_no_kubernetes() {
+        let have = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+
+        // O caso deste host dentro de um scope delegado: o nó arranca.
+        let (fatal, nice) = super::missing_controllers(&have(&["cpu", "memory", "pids"]));
+        assert!(fatal.is_empty(), "cpu presente ⇒ nada de fatal");
+        assert_eq!(nice, vec!["cpuset", "io"]);
+
+        // O caso que realmente parte um nó.
+        let (fatal, _) = super::missing_controllers(&have(&["memory", "pids"]));
+        assert_eq!(fatal, vec!["cpu"]);
+
+        // Tudo delegado: nada a dizer.
+        let (fatal, nice) =
+            super::missing_controllers(&have(&["cpu", "cpuset", "io", "memory", "pids"]));
+        assert!(fatal.is_empty() && nice.is_empty());
     }
 }
