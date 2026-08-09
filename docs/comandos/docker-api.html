@@ -170,7 +170,7 @@ scope: interactive <code>exec</code>/attach (HTTP hijacking) and <code>--restart
 raw <code>fork()</code> supervisor, refused with a clear error); any unimplemented route gives a
 clear 404.</p>
 <p class='src-link'>📄 Implementação real em Rust: <a href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/delonix-runtime-bin/src/cmd/dockerapi.rs"><code>cmd/dockerapi.rs</code></a></p>
-<div class='help'><pre><code>Usage: delonix serve docker-api [OPTIONS]
+<div class='help'><pre><code>Usage: dlx serve docker-api [OPTIONS]
 
 Options:
       --addr &lt;ADDR&gt;   Socket address (default: `$DELONIX_DOCKER_ADDR` or `unix:///run/delonix-docker.sock`)

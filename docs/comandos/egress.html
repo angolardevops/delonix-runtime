@@ -152,7 +152,7 @@ ou <code>allowlist</code> (nega tudo excepto DNS e os CIDRs dados). Tudo sobre o
 <code>allow</code>/<code>deny</code>, or <code>allowlist</code> (denies everything except DNS and
 the given CIDRs). All on the same <code>ContainerFw</code>/nft as <code>ingress</code>.</p>
 <p class='src-link'>📄 Implementação real em Rust: <a href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/delonix-runtime-bin/src/cmd/firewall.rs"><code>cmd/firewall.rs</code></a></p>
-<div class='help'><pre><code>Usage: delonix net egress [OPTIONS] &lt;COMMAND&gt;
+<div class='help'><pre><code>Usage: dlx net egress [OPTIONS] &lt;COMMAND&gt;
 
 Commands:
   allow   Allow outbound traffic from a container: `[proto/]port` to an optional CIDR
@@ -171,7 +171,7 @@ Options:
   -h, --help          Print help</code></pre></div>
 <h2 id='clear'><code>egress clear</code></h2>
 <p class='intro'>Remove all outbound rules</p>
-<div class='help'><pre><code>Usage: delonix net egress clear [OPTIONS] &lt;CONTAINER&gt;
+<div class='help'><pre><code>Usage: dlx net egress clear [OPTIONS] &lt;CONTAINER&gt;
 
 Arguments:
   &lt;CONTAINER&gt;  
@@ -182,7 +182,7 @@ Options:
 <h3>Exemplos</h3><div class="ex"><div class="cap">Limpar as regras de saída desse container</div><pre><code>delonix net egress clear web</code></pre></div>
 <h2 id='rm'><code>egress rm</code></h2>
 <p class='intro'>Remove outbound rule(s) matching <code>[proto/]port</code> (all protos if none given)</p>
-<div class='help'><pre><code>Usage: delonix net egress rm [OPTIONS] &lt;CONTAINER&gt; &lt;PORT&gt;
+<div class='help'><pre><code>Usage: dlx net egress rm [OPTIONS] &lt;CONTAINER&gt; &lt;PORT&gt;
 
 Arguments:
   &lt;CONTAINER&gt;  
@@ -195,7 +195,7 @@ Options:
 <h3>Exemplos</h3><div class="ex"><div class="cap">Tirar UMA regra de saída</div><pre><code>delonix net egress rm web tcp/443</code></pre></div>
 <h2 id='deny'><code>egress deny</code></h2>
 <p class='intro'>Deny outbound traffic from a container (same shape as <code>allow</code>)</p>
-<div class='help'><pre><code>Usage: delonix net egress deny [OPTIONS] &lt;CONTAINER&gt; &lt;PORT&gt;
+<div class='help'><pre><code>Usage: dlx net egress deny [OPTIONS] &lt;CONTAINER&gt; &lt;PORT&gt;
 
 Arguments:
   &lt;CONTAINER&gt;  
@@ -209,7 +209,7 @@ Options:
 <h3>Exemplos</h3><div class="ex"><div class="cap">Bloquear a saída para uma rede</div><pre><code>delonix net egress deny web --to 10.0.0.0/8</code></pre></div>
 <h2 id='allow'><code>egress allow</code></h2>
 <p class='intro'>Allow outbound traffic from a container: <code>[proto/]port</code> to an optional CIDR</p>
-<div class='help'><pre><code>Usage: delonix net egress allow [OPTIONS] &lt;CONTAINER&gt; &lt;PORT&gt;
+<div class='help'><pre><code>Usage: dlx net egress allow [OPTIONS] &lt;CONTAINER&gt; &lt;PORT&gt;
 
 Arguments:
   &lt;CONTAINER&gt;  
@@ -223,7 +223,7 @@ Options:
 <h3>Exemplos</h3><div class="ex"><div class="cap">Só deixar sair HTTPS</div><pre><code>delonix net egress allow app tcp/443 --to 0.0.0.0/0</code></pre></div>
 <h2 id='policy'><code>egress policy</code></h2>
 <p class='intro'>Set the default outbound policy when no rule matches</p>
-<div class='help'><pre><code>Usage: delonix net egress policy [OPTIONS] &lt;CONTAINER&gt; &lt;POLICY&gt;
+<div class='help'><pre><code>Usage: dlx net egress policy [OPTIONS] &lt;CONTAINER&gt; &lt;POLICY&gt;
 
 Arguments:
   &lt;CONTAINER&gt;  
@@ -235,7 +235,7 @@ Options:
 <h3>Exemplos</h3><div class="ex"><div class="cap">Default-deny de saída</div><pre><code>delonix net egress policy app deny</code></pre></div>
 <h2 id='net'><code>egress net</code></h2>
 <p class='intro'>Govern a whole network&#x27;s egress to the Internet</p>
-<div class='help'><pre><code>Usage: delonix net egress net [OPTIONS] &lt;NETWORK&gt; &lt;MODE&gt;
+<div class='help'><pre><code>Usage: dlx net egress net [OPTIONS] &lt;NETWORK&gt; &lt;MODE&gt;
 
 Arguments:
   &lt;NETWORK&gt;
@@ -259,7 +259,7 @@ Options:
 <h3>Exemplos</h3><div class="ex"><div class="cap">Egress de uma rede em allowlist (só DNS + estes CIDRs)</div><pre><code>delonix net egress net backend allowlist --to 10.0.0.0/8,1.1.1.1/32</code></pre></div>
 <h2 id='host'><code>egress host</code></h2>
 <p class='intro'>Allow a network&#x27;s egress to a HOSTNAME (and <code>*.hostname</code>), learnt live from DNS answers — the FQDN allowlist nft/CIDR can&#x27;t express. Repeatable</p>
-<div class='help'><pre><code>Usage: delonix net egress host [OPTIONS] &lt;NETWORK&gt; &lt;HOSTNAME&gt;
+<div class='help'><pre><code>Usage: dlx net egress host [OPTIONS] &lt;NETWORK&gt; &lt;HOSTNAME&gt;
 
 Arguments:
   &lt;NETWORK&gt;   
@@ -275,7 +275,7 @@ rootless (sem eBPF) — a FQDN-policy do Cilium, via nftables. Repetível para v
 <h3>Exemplos</h3><div class="ex"><div class="cap">Só deixar sair para o GitHub (e *.github.com), aprendido do DNS</div><pre><code>delonix net egress host backend github.com</code></pre></div>
 <h2 id='show'><code>egress show</code></h2>
 <p class='intro'>Show a NETWORK&#x27;s egress policy: CIDR allowlist, FQDN hosts, and the IPs currently learnt from DNS for those hosts</p>
-<div class='help'><pre><code>Usage: delonix net egress show [OPTIONS] &lt;NETWORK&gt;
+<div class='help'><pre><code>Usage: dlx net egress show [OPTIONS] &lt;NETWORK&gt;
 
 Arguments:
   &lt;NETWORK&gt;  
@@ -286,7 +286,7 @@ Options:
 <h3>Exemplos</h3><div class="ex"><div class="cap">Ver a política de egress de uma rede + os IPs FQDN aprendidos ao vivo</div><pre><code>delonix net egress show backend</code></pre></div>
 <h2 id='ls'><code>egress ls</code></h2>
 <p class='intro'>Show the outbound firewall (policy + rules)</p>
-<div class='help'><pre><code>Usage: delonix net egress ls [OPTIONS] [CONTAINER]
+<div class='help'><pre><code>Usage: dlx net egress ls [OPTIONS] [CONTAINER]
 
 Arguments:
   [CONTAINER]  Container to inspect (omit to list every container&#x27;s outbound state)

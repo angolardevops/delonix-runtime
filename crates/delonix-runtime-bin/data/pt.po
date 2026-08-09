@@ -3616,3 +3616,17 @@ msgstr "Só se o acima continuar a dizer que falta o `cpu` (precisa de root, sob
 
 msgid "Re-run with --delegate to write fix 2. (This run changed nothing.)"
 msgstr "Volta a correr com --delegate para escrever a correcção 2. (Esta execução não mudou nada.)"
+
+# ---- ferramentas de host em falta / rede no build (v0.44.1) ---------------
+
+msgid "`{bin}` is not installed. Install it with `sudo apt install {deb}` (Debian/Ubuntu) or `sudo dnf install {rpm}` (Fedora/Rocky)."
+msgstr "`{bin}` não está instalado. Instala-o com `sudo apt install {deb}` (Debian/Ubuntu) ou `sudo dnf install {rpm}` (Fedora/Rocky)."
+
+msgid "`{bin}` is not installed, and it is needed here."
+msgstr "`{bin}` não está instalado, e é preciso aqui."
+
+msgid "`--network` is for VMfile builds; the golden recipe decides it with `--offline`"
+msgstr "`--network` é para builds de VMfile; a receita dourada decide isso com `--offline`"
+
+msgid "log in with the key you injected"
+msgstr "entrar com a chave que injectaste"

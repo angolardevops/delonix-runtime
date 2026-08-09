@@ -252,6 +252,10 @@ pub enum ImageCmd {
         /// cost on backing-file reads at runtime).
         #[arg(long)]
         no_compress: bool,
+        /// Give the guest network access during `RUN` — VMfile builds only.
+        /// The golden recipe already decides this with `--offline`.
+        #[arg(long)]
+        network: bool,
         /// Fetch the k8s .deb packages on the HOST (verified) and install them with `dpkg` —
         /// the appliance runs without network. No DHCP/DNS needed in the guest.
         #[arg(long)]
@@ -347,6 +351,10 @@ pub enum VmSub {
         /// cost on backing-file reads at runtime).
         #[arg(long)]
         no_compress: bool,
+        /// Give the guest network access during `RUN` — VMfile builds only.
+        /// The golden recipe already decides this with `--offline`.
+        #[arg(long)]
+        network: bool,
         /// Fetch the k8s .deb packages on the HOST (verified) and install them with `dpkg` —
         /// the appliance runs without network. No DHCP/DNS needed in the guest.
         #[arg(long)]
@@ -419,6 +427,7 @@ pub fn run(vm: bool, action: ImageCmd) -> Result<()> {
                 extra_run,
                 cri_bin,
                 no_compress,
+                network,
                 offline,
                 no_k8s,
                 delonix_bin,
@@ -435,6 +444,7 @@ pub fn run(vm: bool, action: ImageCmd) -> Result<()> {
                 extra_run,
                 cri_bin,
                 no_compress,
+                network,
                 offline,
                 no_k8s,
                 delonix_bin,
@@ -598,6 +608,7 @@ fn run_vm(action: ImageCmd) -> Result<()> {
             extra_run,
             cri_bin,
             no_compress,
+            network,
             offline,
             no_k8s,
             delonix_bin,
@@ -614,6 +625,7 @@ fn run_vm(action: ImageCmd) -> Result<()> {
             extra_run,
             cri_bin,
             no_compress,
+            network,
             offline,
             no_k8s,
             delonix_bin,

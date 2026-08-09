@@ -445,7 +445,10 @@ automaticamente. É a camada que o <code>delonix cluster kubeadm</code> usa para
                 ('Construir a partir do VMfile do directório actual',
                  'delonix vm build -t minha-base:1.0 .'),
                 ('VMfile noutro caminho, sem compressão (build mais rápido, imagem maior)',
-                 'delonix vm build -t minha-base:dev -f receitas/VMfile --no-compress .')]},
+                 'delonix vm build -t minha-base:dev -f receitas/VMfile --no-compress .'),
+                ('Com rede no convidado — precisa disto para `apt-get install` num RUN '
+                 '(o build deixa de ser reproduzível: o resultado passa a depender do dia)',
+                 'delonix vm build --network -t minha-base:1.0 .')]},
             "init": {"examples": [
                 ('Projecto com manifesto, pronto a correr',
                  'delonix vm init --name lab'),
@@ -2886,11 +2889,15 @@ imagem de container.</p>
 delonix vm init --vmfile --name minha-base
 cat VMfile
 
+# Precisa de libguestfs no host: sudo apt install libguestfs-tools
 delonix vm build -t minha-base:1.0 .
 delonix vm ls
 
+# Um RUN com `apt-get install` precisa de rede no convidado, e pede-se:
+#   delonix vm build --network -t minha-base:1.0 .
+
 # Arrancar a partir dela
-delonix vm create teste --disk-image minha-base:1.0
+delonix vm create teste --disk-image minha-base:1.0 --ssh-key @~/.ssh/id_ed25519.pub
 
 # …ou a partir de um qcow2 publicado por ti, sem passar pelo store
 delonix vm create outra --url-img https://o-teu-bucket/imagem.qcow2
@@ -2899,7 +2906,10 @@ delonix vm rm teste; cd ..; rm -rf lab-vm</code></pre>
 <p class="note"><strong>Verificação:</strong> o build imprime
 <code>[1/1] stage-1: FROM ubuntu:24.04</code> e verifica o checksum da cloud
 image. Com <code>--url-img</code>, se não houver <code>&lt;url&gt;.sha256</code>
-publicado, o motor <em>diz</em> que está a confiar só no TLS — em vez de calar.</p>"""),
+publicado, o motor <em>diz</em> que está a confiar só no TLS — em vez de calar.
+A chave que injectas vai para a conta <code>delonix</code>, não para a conta
+default da distro — o bloco de próximos passos do <code>vm create</code>
+imprime o <code>ssh</code> exacto.</p>"""),
 
     ("lab-7", "Kubernetes sem Docker", "avançado", """
 <p>Objectivo: um cluster local cujo runtime dos nós É o Delonix.</p>

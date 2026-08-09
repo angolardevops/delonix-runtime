@@ -155,7 +155,7 @@ the ingress chain. <code>ingress</code> governs INBOUND traffic: allow/deny rule
 containers on a custom network (they have an IP on <code>delonix0</code>); <code>--net host</code>
 is refused.</p>
 <p class='src-link'>📄 Implementação real em Rust: <a href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/delonix-runtime-bin/src/cmd/firewall.rs"><code>cmd/firewall.rs</code></a></p>
-<div class='help'><pre><code>Usage: delonix net ingress [OPTIONS] &lt;COMMAND&gt;
+<div class='help'><pre><code>Usage: dlx net ingress [OPTIONS] &lt;COMMAND&gt;
 
 Commands:
   allow      Allow inbound traffic to a container: `[proto/]port` from an optional CIDR
@@ -173,7 +173,7 @@ Options:
   -h, --help          Print help</code></pre></div>
 <h2 id='clear'><code>ingress clear</code></h2>
 <p class='intro'>Remove all inbound rules (keeps published ports)</p>
-<div class='help'><pre><code>Usage: delonix net ingress clear [OPTIONS] &lt;CONTAINER&gt;
+<div class='help'><pre><code>Usage: dlx net ingress clear [OPTIONS] &lt;CONTAINER&gt;
 
 Arguments:
   &lt;CONTAINER&gt;  
@@ -184,7 +184,7 @@ Options:
 <h3>Exemplos</h3><div class="ex"><div class="cap">Limpar a firewall inteira desse container</div><pre><code>delonix net ingress clear web</code></pre></div>
 <h2 id='rm'><code>ingress rm</code></h2>
 <p class='intro'>Remove inbound rule(s) matching <code>[proto/]port</code> (all protos if none given)</p>
-<div class='help'><pre><code>Usage: delonix net ingress rm [OPTIONS] &lt;CONTAINER&gt; &lt;PORT&gt;
+<div class='help'><pre><code>Usage: dlx net ingress rm [OPTIONS] &lt;CONTAINER&gt; &lt;PORT&gt;
 
 Arguments:
   &lt;CONTAINER&gt;  
@@ -197,7 +197,7 @@ Options:
 <h3>Exemplos</h3><div class="ex"><div class="cap">Tirar UMA regra, sem limpar as outras</div><pre><code>delonix net ingress rm web tcp/80</code></pre></div>
 <h2 id='unpublish'><code>ingress unpublish</code></h2>
 <p class='intro'>Remove a published host port</p>
-<div class='help'><pre><code>Usage: delonix net ingress unpublish [OPTIONS] &lt;CONTAINER&gt; &lt;HOST_PORT&gt;
+<div class='help'><pre><code>Usage: dlx net ingress unpublish [OPTIONS] &lt;CONTAINER&gt; &lt;HOST_PORT&gt;
 
 Arguments:
   &lt;CONTAINER&gt;  
@@ -209,7 +209,7 @@ Options:
 <h3>Exemplos</h3><div class="ex"><div class="cap">Deixar de publicar uma porta</div><pre><code>delonix net ingress unpublish 8080</code></pre></div>
 <h2 id='allow'><code>ingress allow</code></h2>
 <p class='intro'>Allow inbound traffic to a container: <code>[proto/]port</code> from an optional CIDR</p>
-<div class='help'><pre><code>Usage: delonix net ingress allow [OPTIONS] &lt;CONTAINER&gt; &lt;PORT&gt;
+<div class='help'><pre><code>Usage: dlx net ingress allow [OPTIONS] &lt;CONTAINER&gt; &lt;PORT&gt;
 
 Arguments:
   &lt;CONTAINER&gt;  
@@ -223,7 +223,7 @@ Options:
 <h3>Exemplos</h3><div class="ex"><div class="cap">Deixar entrar Postgres só da própria SDN</div><pre><code>delonix net ingress allow db tcp/5432 --from 10.219.0.0/16</code></pre></div>
 <h2 id='deny'><code>ingress deny</code></h2>
 <p class='intro'>Deny inbound traffic to a container (same shape as <code>allow</code>)</p>
-<div class='help'><pre><code>Usage: delonix net ingress deny [OPTIONS] &lt;CONTAINER&gt; &lt;PORT&gt;
+<div class='help'><pre><code>Usage: dlx net ingress deny [OPTIONS] &lt;CONTAINER&gt; &lt;PORT&gt;
 
 Arguments:
   &lt;CONTAINER&gt;  
@@ -237,7 +237,7 @@ Options:
 <h3>Exemplos</h3><div class="ex"><div class="cap">Bloquear uma porta específica</div><pre><code>delonix net ingress deny web tcp/22</code></pre></div>
 <h2 id='policy'><code>ingress policy</code></h2>
 <p class='intro'>Set the default inbound policy when no rule matches</p>
-<div class='help'><pre><code>Usage: delonix net ingress policy [OPTIONS] &lt;CONTAINER&gt; &lt;POLICY&gt;
+<div class='help'><pre><code>Usage: dlx net ingress policy [OPTIONS] &lt;CONTAINER&gt; &lt;POLICY&gt;
 
 Arguments:
   &lt;CONTAINER&gt;  
@@ -249,7 +249,7 @@ Options:
 <h3>Exemplos</h3><div class="ex"><div class="cap">Default-deny (allowlist)</div><pre><code>delonix net ingress policy db deny</code></pre></div>
 <h2 id='publish'><code>ingress publish</code></h2>
 <p class='intro'>Publish a host port to the container (DNAT through the ingress)</p>
-<div class='help'><pre><code>Usage: delonix net ingress publish [OPTIONS] &lt;CONTAINER&gt; &lt;SPEC&gt;
+<div class='help'><pre><code>Usage: dlx net ingress publish [OPTIONS] &lt;CONTAINER&gt; &lt;SPEC&gt;
 
 Arguments:
   &lt;CONTAINER&gt;  
@@ -261,7 +261,7 @@ Options:
 <h3>Exemplos</h3><div class="ex"><div class="cap">Publicar uma porta pelo ingress (DNAT)</div><pre><code>delonix net ingress publish web 8080:80</code></pre></div>
 <h2 id='ls'><code>ingress ls</code></h2>
 <p class='intro'>Show the inbound firewall (policy + rules) and published ports</p>
-<div class='help'><pre><code>Usage: delonix net ingress ls [OPTIONS] [CONTAINER]
+<div class='help'><pre><code>Usage: dlx net ingress ls [OPTIONS] [CONTAINER]
 
 Arguments:
   [CONTAINER]  Container to inspect (omit to list every container&#x27;s inbound state)

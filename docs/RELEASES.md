@@ -4,6 +4,96 @@
 > (regenerado automaticamente pelo pipeline de release a cada tag publicada).
 > Não editar à mão — edita a nota da release respectiva.
 
+## v0.45.0 — o que se descobre ao correr aquilo que se acabou de escrever
+
+A v0.44.0 publicou o `VMfile`. Esta release é o resultado de o usar como um
+utilizador o usaria, num host que não é a máquina de quem o escreveu. Quatro
+achados, todos reproduzidos antes de corrigidos, nenhum deles visível a um
+`cargo test`.
+
+## O esqueleto do `vm init --vmfile` não construía
+
+O VMfile gerado dizia, em comentário, «*Builds as written*». Não construía: o
+primeiro `RUN` era `apt-get update && apt-get install nginx`, e o `vm build`
+passa **sempre** `--no-network` ao `virt-customize`. A primeira coisa que um
+utilizador faz com o comando novo — correr o que ele acabou de escrever — não
+podia funcionar.
+
+O `--no-network` está certo como omissão (um build que vai à internet dá uma
+imagem diferente conforme o dia em que correu). Mas a coisa mais comum que se
+quer fazer numa imagem é instalar um pacote, e um motor que a torna impossível
+não está a oferecer uma escolha: está só a recusar. Por isso:
+
+* **`delonix vm build --network`** — opt-in explícito, com o custo de
+  reprodutibilidade dito no `--help`. Ligado aos **três** caminhos (`vm build`,
+  `image vm build`, `image --vm build`); na receita dourada é recusado com um
+  erro que aponta para o `--offline`, que é quem decide isso lá.
+* **O esqueleto passou a construir tal como está escrito**, offline, e mostra o
+  `apt-get` como o exemplo comentado do que fazer *com* `--network`.
+
+## «No such file or directory» quando o que falta é um pacote
+
+Num host sem libguestfs, o `vm build` descarregou 600 MB, verificou o
+`SHA256SUMS`, redimensionou o disco — e depois disse:
+
+```
+error invalid argument: running virt-customize: No such file or directory (os error 2)
+```
+
+O `ENOENT` de um `Command::status()` é a ferramenta não existir, mas a frase
+lê-se como um **ficheiro** em falta e manda o leitor procurar um caminho.
+Agora nomeia o pacote, nas duas famílias:
+
+```
+error invalid argument: `virt-customize` is not installed. Install it with
+`sudo apt install libguestfs-tools` (Debian/Ubuntu) or
+`sudo dnf install guestfs-tools` (Fedora/Rocky).
+```
+
+Vale para `virt-customize`/`virt-sparsify`/`virt-copy-out`, `qemu-img`,
+`cloud-localds` e `virsh`. A tabela é pura e testada, porque é ela que carrega
+o valor todo.
+
+## `vm create --url-img` — validado de ponta a ponta, e o utilizador errado
+
+Correu inteiro: descarregou o qcow2 de um URL absoluto (com o aviso honesto de
+que não há `.sha256` publicado ao lado, logo a confiança é só do TLS), montou o
+overlay, gerou o seed NoCloud, arrancou em libvirt, e o cloud-init aplicou
+hostname e chave. Entrei na VM por SSH e confirmei `Ubuntu 24.04.4 LTS`,
+1 vCPU, ~1 GiB, `cloud-init status: done`.
+
+O que falhou foi eu adivinhar o utilizador. Numa cloud image de Ubuntu o palpite
+óbvio é `ubuntu`, essa conta **existe**, e não tem a chave — por isso responde
+`Permission denied (publickey)`, que se lê como chave partida e não como nome
+errado. A chave vai para `delonix`, e nada no output o dizia. O bloco de
+próximos passos passou a incluir a linha, com o IP quando já é conhecido:
+
+```
+Next steps:
+  delonix vm console urltest2    # open the serial console (back to host: Ctrl+])
+  ssh delonix@<ip>               # log in with the key you injected
+  ...
+```
+
+Só no caminho em que o seed é gerado por nós — quem trouxe o seu próprio
+`--seed` decidiu as contas e nós estaríamos a adivinhar.
+
+## O `vm build` completo continua por validar aqui, e digo porquê
+
+Este host não tem `libguestfs-tools` e não posso instalá-lo. Fica provado tudo
+até à fronteira: download, verificação de `SHA256SUMS`, achatamento para qcow2,
+`SIZE` aplicado antes de qualquer `RUN`, e a recusa clara na ferramenta em
+falta. O que falta exercitar é o `virt-customize` em si — um
+`sudo apt install libguestfs-tools` e o `delonix vm build -t x:1.0 .` do
+esqueleto fecha-o.
+
+## Validação
+
+669 testes verdes em duas corridas independentes, clippy e `fmt` limpos. Os
+caminhos novos verificados também em `--l18n=pt`.
+
+---
+
 ## v0.44.0 — VMfile, e um diagnóstico de cgroup que estava a mandar editar o /etc por nada
 
 Duas metades. A primeira é funcionalidade nova: construir a imagem qcow2 de uma

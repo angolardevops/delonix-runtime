@@ -151,7 +151,7 @@ user units + <code>loginctl enable-linger</code>; root → system units), com <c
 <code>ExecStart</code>=<code>container start</code>. So containers come back up when the host
 boots, with no daemon.</p>
 <p class='src-link'>📄 Implementação real em Rust: <a href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/delonix-runtime-bin/src/cmd/boot.rs"><code>cmd/boot.rs</code></a></p>
-<div class='help'><pre><code>Usage: delonix net boot [OPTIONS] &lt;COMMAND&gt;
+<div class='help'><pre><code>Usage: dlx net boot [OPTIONS] &lt;COMMAND&gt;
 
 Commands:
   enable   Install + enable systemd units for the RUNNING containers, so they come back up when the host boots. Rootless uses user units + linger
@@ -164,7 +164,7 @@ Options:
   -h, --help          Print help</code></pre></div>
 <h2 id='enable'><code>boot enable</code></h2>
 <p class='intro'>Install + enable systemd units for the RUNNING containers, so they come back up when the host boots. Rootless uses user units + linger</p>
-<div class='help'><pre><code>Usage: delonix net boot enable [OPTIONS]
+<div class='help'><pre><code>Usage: dlx net boot enable [OPTIONS]
 
 Options:
       --l18n &lt;en|pt&gt;       Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
@@ -173,7 +173,7 @@ Options:
 <h3>Exemplos</h3><div class="ex"><div class="cap">Persistir os que correm agora</div><pre><code>delonix net boot enable</code></pre></div>
 <h2 id='status'><code>boot status</code></h2>
 <p class='intro'>Show boot-persistence status (installed units + mode)</p>
-<div class='help'><pre><code>Usage: delonix net boot status [OPTIONS]
+<div class='help'><pre><code>Usage: dlx net boot status [OPTIONS]
 
 Options:
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
@@ -181,7 +181,7 @@ Options:
 <h3>Exemplos</h3><div class="ex"><div class="cap">Ver o que está instalado</div><pre><code>delonix net boot status</code></pre></div>
 <h2 id='disable'><code>boot disable</code></h2>
 <p class='intro'>Disable + remove the generated boot units</p>
-<div class='help'><pre><code>Usage: delonix net boot disable [OPTIONS]
+<div class='help'><pre><code>Usage: dlx net boot disable [OPTIONS]
 
 Options:
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand

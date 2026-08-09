@@ -150,7 +150,7 @@ main{padding:1.4rem 1.2rem 4rem;max-width:none}}
 <code>-v name:/dest[:ro]</code> resolves to a named volume (created on demand) and
 <code>-v /host:/dest[:ro]</code> to a bind mount — the distinction is automatic.</p>
 <p class='src-link'>📄 Implementação real em Rust: <a href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/delonix-runtime-bin/src/cmd/volume.rs"><code>cmd/volume.rs</code></a></p>
-<div class='help'><pre><code>Usage: delonix volumes [OPTIONS] &lt;COMMAND&gt;
+<div class='help'><pre><code>Usage: dlx volumes [OPTIONS] &lt;COMMAND&gt;
 
 Commands:
   create    Create a named volume
@@ -167,7 +167,7 @@ Options:
   -h, --help          Print help</code></pre></div>
 <h2 id='snapshot'><code>volumes snapshot</code></h2>
 <p class='intro'>Point-in-time snapshots of a volume (tar.gz under the volume; safe in rootless)</p>
-<div class='help'><pre><code>Usage: delonix volumes snapshot [OPTIONS] &lt;COMMAND&gt;
+<div class='help'><pre><code>Usage: dlx volumes snapshot [OPTIONS] &lt;COMMAND&gt;
 
 Commands:
   create   Create a snapshot NOW (default name: UTC timestamp)
@@ -183,7 +183,7 @@ Options:
 delonix volumes snapshot ls dados</code></pre></div>
 <h2 id='describe'><code>volumes describe</code></h2>
 <p class='intro'>Readable detail of one or more volumes, <code>kubectl describe</code> style (for humans; use <code>inspect</code> for the usual compact view)</p>
-<div class='help'><pre><code>Usage: delonix volumes describe [OPTIONS] &lt;NAMES&gt;...
+<div class='help'><pre><code>Usage: dlx volumes describe [OPTIONS] &lt;NAMES&gt;...
 
 Arguments:
   &lt;NAMES&gt;...  
@@ -194,7 +194,7 @@ Options:
 <h3>Exemplos</h3><div class="ex"><div class="cap">Detalhe de um volume (uso, quota, montagens)</div><pre><code>delonix volumes describe dados</code></pre></div>
 <h2 id='create'><code>volumes create</code></h2>
 <p class='intro'>Create a named volume</p>
-<div class='help'><pre><code>Usage: delonix volumes create [OPTIONS] &lt;NAME&gt;
+<div class='help'><pre><code>Usage: dlx volumes create [OPTIONS] &lt;NAME&gt;
 
 Arguments:
   &lt;NAME&gt;  
@@ -209,7 +209,7 @@ Options:
 <h3>Exemplos</h3><div class="ex"><div class="cap">Com quota e driver nfs disponíveis</div><pre><code>delonix volumes create dados --quota 10G</code></pre></div>
 <h2 id='ls'><code>volumes ls</code></h2>
 <p class='intro'>List the volumes</p>
-<div class='help'><pre><code>Usage: delonix volumes ls [OPTIONS]
+<div class='help'><pre><code>Usage: dlx volumes ls [OPTIONS]
 
 Options:
       --l18n &lt;en|pt&gt;     Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
@@ -218,7 +218,7 @@ Options:
 <h3>Exemplos</h3><div class="ex"><pre><code>delonix volumes ls</code></pre></div>
 <h2 id='inspect'><code>volumes inspect</code></h2>
 <p class='intro'>Details of a volume (includes real on-disk usage)</p>
-<div class='help'><pre><code>Usage: delonix volumes inspect [OPTIONS] &lt;NAME&gt;
+<div class='help'><pre><code>Usage: dlx volumes inspect [OPTIONS] &lt;NAME&gt;
 
 Arguments:
   &lt;NAME&gt;  
@@ -229,7 +229,7 @@ Options:
 <h3>Exemplos</h3><div class="ex"><pre><code>delonix volumes inspect dados</code></pre></div>
 <h2 id='rm'><code>volumes rm</code></h2>
 <p class='intro'>Remove a volume. Refuses while a container or a <code>kind: ShareVolume</code> still references it (use <code>--force</code> to remove it anyway)</p>
-<div class='help'><pre><code>Usage: delonix volumes rm [OPTIONS] &lt;NAME&gt;
+<div class='help'><pre><code>Usage: dlx volumes rm [OPTIONS] &lt;NAME&gt;
 
 Arguments:
   &lt;NAME&gt;  
@@ -241,7 +241,7 @@ Options:
 <h3>Exemplos</h3><div class="ex"><pre><code>delonix volumes rm dados</code></pre></div>
 <h2 id='apply'><code>volumes apply</code></h2>
 <p class='intro'>Apply the <code>kind: Volume</code> documents from a manifest (idempotent by name)</p>
-<div class='help'><pre><code>Usage: delonix volumes apply [OPTIONS]
+<div class='help'><pre><code>Usage: dlx volumes apply [OPTIONS]
 
 Options:
   -f, --file &lt;FILE&gt;   

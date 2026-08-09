@@ -172,7 +172,7 @@ container/VM/memory/network/disk gauges) and <code>GET /v1/dash</code> (the same
 <code>DashSummary</code> as JSON); the expensive fields (network/disk) recompute in the background
 every 30s, so the scrape itself always stays fast.</p>
 <p class='src-link'>📄 Implementação real em Rust: <a href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/delonix-runtime-bin/src/cmd/dash.rs"><code>cmd/dash.rs</code></a></p>
-<div class='help'><pre><code>Usage: delonix dash [OPTIONS]
+<div class='help'><pre><code>Usage: dlx dash [OPTIONS]
 
 Options:
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand

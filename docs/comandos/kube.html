@@ -148,7 +148,7 @@ main{padding:1.4rem 1.2rem 4rem;max-width:none}}
 container existente — a ponte para exportar uma carga do runtime local para um cluster.</p><p class='lang-en'><code>kube generate</code> produces a <code>kind: Pod</code> manifest from an
 existing container — the bridge for exporting a workload from the local runtime to a cluster.</p>
 <p class='src-link'>📄 Implementação real em Rust: <a href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/delonix-runtime-bin/src/cmd/kube.rs"><code>cmd/kube.rs</code></a></p>
-<div class='help'><pre><code>Usage: delonix cluster kube [OPTIONS] &lt;COMMAND&gt;
+<div class='help'><pre><code>Usage: dlx cluster kube [OPTIONS] &lt;COMMAND&gt;
 
 Commands:
   generate  Generates a `kind: Pod` from a container (or from every member of a pod) and prints it to stdout
@@ -159,7 +159,7 @@ Options:
   -h, --help          Print help</code></pre></div>
 <h2 id='generate'><code>kube generate</code></h2>
 <p class='intro'>Generates a <code>kind: Pod</code> from a container (or from every member of a pod) and prints it to stdout</p>
-<div class='help'><pre><code>Usage: delonix cluster kube generate [OPTIONS] &lt;NAME&gt;
+<div class='help'><pre><code>Usage: dlx cluster kube generate [OPTIONS] &lt;NAME&gt;
 
 Arguments:
   &lt;NAME&gt;  
