@@ -3357,18 +3357,242 @@ delonix cluster delete --name lab</code></pre>
 uma imagem que o kubelet depois não resolvia.</p>"""),
 ]
 
+# Tradução EN de `LABS` — dict por âncora (title, level, body), para não
+# depender de ordem posicional. Nomes de recursos de exemplo (redes/
+# containers arbitrários, ex.: "loja"→"shop") traduzem-se também, por
+# naturalidade de leitura; os comandos em si nunca mudam.
+LABS_EN = {
+    "lab-1": ("First service, in 60 seconds", "beginner", """
+<p>Goal: understand the <code>run → ps → logs → exec → rm</code> cycle and see
+that there's no daemon underneath.</p>
+<pre><code># 1. A web service, in the background, published on host port 8080
+delonix container run -d --name web -p 8080:80 nginx:alpine
+
+# 2. Confirm — STATUS shows how long it's been up
+delonix ps
+
+# 3. Proof there's no daemon: NO resident engine process
+pgrep -a delonix || echo "no daemon — the container is a child of the host's init"
+
+# 4. Talk to it
+curl -s localhost:8080 | head -3
+
+# 5. Go inside
+delonix exec -it web sh -c 'hostname; id; ls /etc/nginx'
+
+# 6. See what it wrote
+delonix logs web | tail -5
+
+# 7. Clean up
+delonix rm -f web</code></pre>
+<p class="note"><strong>Verification:</strong> step 3 prints no engine process
+at all. A container running with no resident supervisor is the fundamental
+difference from Docker, and you can see it here in two lines.</p>"""),
+
+    "lab-2": ("Resource limits that actually take", "beginner", """
+<p>Goal: find out whether this host enforces limits — and what to do when it
+doesn't. It's mistake #1 for anyone starting out in rootless.</p>
+<pre><code># 1. Ask BEFORE assuming
+delonix system setup
+
+# 2. If it says INERT or PARTIAL, the 1st fix needs no root at all
+systemd-run --user --scope -p Delegate=yes -- delonix system setup
+#   … and you run the following steps INSIDE that scope.
+#   Only if it STILL says `cpu` is missing:
+#     sudo delonix system setup --delegate   (+ logout / login)
+
+# 3. A container with a memory ceiling
+delonix container run -d --name limited -m 128M alpine sleep 300
+
+# 4. The proof: read the REAL cgroup, not what the command says
+PID=$(delonix container inspect limited | jq -r .pid)
+cat /sys/fs/cgroup$(awk -F: '/^0::/{print $3}' /proc/$PID/cgroup)/memory.max
+
+delonix rm -f limited</code></pre>
+<p class="note"><strong>Verification:</strong> step 4 prints
+<code>134217728</code> (128 MiB), not <code>max</code>. If it prints
+<code>max</code>, delegation isn't set up — and the container runs with
+<em>no</em> limit at all, silently. That's why step 1 exists.</p>
+<p class="note"><strong>Note:</strong> <code>cpuset</code> and <code>io</code>
+almost always show up as <em>absent</em>, and that's correct — on a stock
+Ubuntu, root's <code>user.slice</code> only passes <code>cpu memory
+pids</code> down. Nothing here needs them.</p>"""),
+
+    "lab-3": ("Two apps that talk to each other by name", "intermediate", """
+<p>Goal: user network, internal DNS, and isolation — with zero DNS
+configuration.</p>
+<pre><code># 1. Your own network
+delonix network create shop
+
+# 2. Database and app, both on it
+delonix container run -d --name db  --net shop -e POSTGRES_PASSWORD=x postgres:16-alpine
+delonix container run -d --name app --net shop -p 8080:80 nginx:alpine
+
+# 3. The app resolves db BY NAME, no /etc/hosts, no env vars
+delonix exec app sh -c 'getent hosts db; nc -z db 5432 && echo "port open"'
+
+# 4. Lock db down to everyone except app (DIRECTED reachability)
+cat &gt; dep.yaml &lt;&lt;'EOF'
+apiVersion: delonix.io/v1
+kind: Dependency
+metadata:
+  name: app-knows-db
+spec:
+  from: app
+  to: db
+  ports: ["5432"]
+EOF
+delonix stack apply -f dep.yaml
+
+# 5. Prove it: a third container on the SAME network can no longer reach db
+delonix container run --rm --net shop alpine sh -c 'nc -z -w2 db 5432 || echo BLOCKED'
+
+delonix rm -f db app; delonix network rm shop; rm dep.yaml</code></pre>
+<p class="note"><strong>Verification:</strong> step 3 says "port open" and
+step 5 says "BLOCKED". Same network, two different outcomes — that's what
+<code>kind: Dependency</code> does that a plain network alone doesn't.</p>"""),
+
+    "lab-4": ("From Dockerfile to image, no daemon", "intermediate", """
+<p>Goal: build an image and run what you built.</p>
+<pre><code>mkdir -p lab-build &amp;&amp; cd lab-build
+cat &gt; Delonixfile &lt;&lt;'EOF'
+FROM alpine:latest
+RUN apk add --no-cache curl
+COPY hello.txt /hello.txt
+HEALTHCHECK CMD test -f /hello.txt
+CMD ["sh", "-c", "cat /hello.txt; sleep 300"]
+EOF
+echo "built with delonix" &gt; hello.txt
+
+# `Delonixfile` is looked for before `Dockerfile` — no -f needed
+delonix build -t my-app:1.0 .
+
+# `--wait` blocks until HEALTHCHECK passes: without it you'd have to
+# write `until ...; do sleep 1; done` yourself, and get it wrong
+delonix run -d --name a1 --wait --health-interval 2 my-app:1.0
+delonix ps
+
+delonix rm -f a1; delonix image rm my-app:1.0; cd ..; rm -rf lab-build</code></pre>
+<p class="note"><strong>Verification:</strong> <code>ps</code> shows
+<code>(healthy)</code> in the STATUS column. The engine is probing the
+container on its own — no systemd, unlike rootless Podman.</p>"""),
+
+    "lab-5": ("A real microVM", "intermediate", """
+<p>Goal: a full VM with the same CLI as containers.</p>
+<pre><code># 1. With no local image, create downloads the official one on its own
+delonix vm create dev
+
+# 2. Where it landed, and with what IP
+delonix vm ls
+delonix vm describe dev
+
+# 3. Go in (back to the host: Ctrl+])
+delonix vm console dev
+
+# 4. System checkpoint — memory AND disk, VM still running
+delonix vm snapshot dev clean
+delonix vm snapshots dev
+
+# 5. Break something inside and roll back
+delonix vm restore dev clean
+
+delonix vm rm dev</code></pre>
+<p class="note"><strong>Verification:</strong> step 4 returns with no error
+and the VM STILL RUNNING. A snapshot of a stopped VM fails on purpose —
+<code>vm stop</code> <em>undefines</em> the domain to avoid leaving orphans.</p>"""),
+
+    "lab-6": ("Your own VM image, with a VMfile", "advanced", """
+<p>Goal: build your own qcow2 image, the same way you build a container
+image.</p>
+<pre><code>mkdir -p lab-vm &amp;&amp; cd lab-vm
+
+# Scaffold that BUILDS AS-IS — delete what you don't need
+delonix vm init --vmfile --name my-base
+cat VMfile
+
+# Needs libguestfs on the host: sudo apt install libguestfs-tools
+delonix vm build -t my-base:1.0 .
+delonix vm ls
+
+# A RUN with `apt-get install` needs guest networking, so ask for it:
+#   delonix vm build --network -t my-base:1.0 .
+
+# Boot from it
+delonix vm create test --disk-image my-base:1.0 --ssh-key @~/.ssh/id_ed25519.pub
+
+# …or from a qcow2 you published yourself, bypassing the store
+delonix vm create other --url-img https://your-bucket/image.qcow2
+
+delonix vm rm test; cd ..; rm -rf lab-vm</code></pre>
+<p class="note"><strong>Verification:</strong> the build prints
+<code>[1/1] stage-1: FROM ubuntu:24.04</code> and verifies the cloud image's
+checksum. With <code>--url-img</code>, if there's no published
+<code>&lt;url&gt;.sha256</code>, the engine <em>says</em> it's trusting TLS
+alone — instead of staying quiet. The key you inject goes to the
+<code>delonix</code> account, not the distro's default account — the
+"next steps" block from <code>vm create</code> prints the exact
+<code>ssh</code> command.</p>"""),
+
+    "lab-7": ("Kubernetes with no Docker", "advanced", """
+<p>Goal: a local cluster whose node runtime IS Delonix.</p>
+<pre><code># 1. Preflight — fails in milliseconds if `cpu` delegation is missing,
+#    instead of downloading 425 MB just to die at the 90-second mark
+delonix system setup
+
+# 2. The cluster
+delonix cluster create --name lab
+
+# 3. Talk to it
+export KUBECONFIG=$(delonix cluster ls -o json | jq -r '.[0].kubeconfig')
+kubectl get nodes -o wide
+
+# 4. Get an image of YOURS into the nodes, with no registry at all
+delonix build -t app:dev .
+delonix cluster load app:dev --name lab
+kubectl run app --image=app:dev --image-pull-policy=Never
+
+# 5. The proof that matters
+kubectl get pod app -w
+
+delonix cluster delete --name lab</code></pre>
+<p class="note"><strong>Verification:</strong> step 5 reaches
+<code>Running</code>. Neither <code>ctr images import</code> nor
+<code>crictl images</code> prove this — both have reported success on an
+image the kubelet then couldn't resolve.</p>"""),
+}
+
 
 def labs_page():
     body = ["<h1>Laboratórios</h1>",
-            "<p class='tagline'>Sessões curtas, do zero a um resultado que se verifica. "
-            "Cada uma inclui a limpeza — nenhuma deixa nada para trás.</p>",
-            "<p>A verificação no fim de cada lab não é decorativa: é o que separa "
-            "«copiei comandos» de «sei o que isto faz». Onde um passo pode falhar em "
-            "silêncio, o lab diz exactamente o que olhar.</p>"]
+            bi("p",
+               "Sessões curtas, do zero a um resultado que se verifica. "
+               "Cada uma inclui a limpeza — nenhuma deixa nada para trás.",
+               "Short sessions, from zero to a verifiable result. "
+               "Each one includes cleanup — none of them leaves anything behind.",
+               cls="tagline"),
+            bi("p",
+               "A verificação no fim de cada lab não é decorativa: é o que separa "
+               "«copiei comandos» de «sei o que isto faz». Onde um passo pode falhar em "
+               "silêncio, o lab diz exactamente o que olhar.",
+               "The verification at the end of each lab isn't decorative: it's what tells apart "
+               "\"I copied commands\" from \"I know what this does.\" Where a step could fail "
+               "silently, the lab tells you exactly what to look at.")]
     for anchor, title, level, html_body in LABS:
-        body.append(f"<h2 id='{anchor}'>{html.escape(title)} "
-                    f"<span class='badge'>{html.escape(level)}</span></h2>")
-        body.append(html_body)
+        en = LABS_EN.get(anchor)
+        if en:
+            title_en, level_en, body_en = en
+            heading = (
+                bi("span", html.escape(title), html.escape(title_en))
+                + " <span class='badge'>"
+                + bi("span", html.escape(level), html.escape(level_en))
+                + "</span>"
+            )
+            body.append(f"<h2 id='{anchor}'>{heading}</h2>")
+            body.append(bi("div", html_body, body_en))
+        else:
+            body.append(f"<h2 id='{anchor}'>{html.escape(title)} "
+                        f"<span class='badge'>{html.escape(level)}</span></h2>")
+            body.append(html_body)
     page("labs.html", "Laboratórios", "\n".join(body))
 
 
