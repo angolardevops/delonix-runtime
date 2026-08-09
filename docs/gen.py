@@ -2745,6 +2745,193 @@ conhecido) e o histórico de produção que só o tempo dá — acompanha o
 </table>
 """
 
+COMPARE_EN = """
+<h1>Delonix vs Docker vs Podman</h1>
+<p class="tagline">An honest comparison, to help you decide which engine to build on — not a sales
+pitch.</p>
+
+<p>Delonix Engine is a <strong>daemonless, rootless-first</strong> container and microVM engine, in
+Rust, with Kubernetes built in from the ground up (its own CRI). On several concrete points it
+already goes further than Docker and rootless Podman. On others, it lags well behind. This page
+says exactly where is where — for someone deciding what to install today, or a company evaluating
+it for production.</p>
+
+<div class="callout warn">
+<p><b>Current status (2026-07): public beta, under active hardening.</b> Several rounds of
+offensive audit have already run over the engine's syscall core (<code>clone</code>/<code>mount</code>/
+namespaces, ~104 <code>unsafe</code> blocks), the rootless→root boundary, the control socket, and the
+most recent code (networking/cluster/manifest) — every CRITICAL and HIGH finding
+<strong>is already fixed</strong>, and the highest-severity ones (the original 6 HIGH findings plus
+the CRITICAL/HIGH ones from later rounds) were <strong>re-confirmed by a genuinely INDEPENDENT
+adversarial audit (2026-07-26)</strong> — one additional real TOCTOU was found in that round
+(a kubeconfig permissions window before <code>chmod</code>) and is already fixed too.
+About 27 MEDIUM/LOW findings remain open (documented, no known exploit).
+There's no sign of remote code execution from the network — the rootless→root boundary is
+solid and has already been tested by a second pair of eyes — but <strong>out of caution, a project
+without years of production history still deserves care</strong> in multi-tenant production with
+sensitive data. Full detail, with the file and line of every finding and its fix status:
+<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/AUDITORIA-E2E.md">original audit
+report</a> and
+<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/COMPARACAO-DOCKER-PODMAN.md">gap
+analysis with the full history of later rounds</a>.</p>
+</div>
+
+<h2>Quick decision</h2>
+<table>
+<tr><th>If you need…</th><th>Use</th></tr>
+<tr><td>To run an existing <code>docker-compose.yml</code></td>
+<td><strong>Delonix</strong> — <code>delonix compose up</code>, native support (Compose Spec v2.x),
+no Docker installed</td></tr>
+<tr><td>A build pipeline with full BuildKit (cache mounts, SSH forwarding, parallel
+cross-compile)</td>
+<td>Docker or Podman — Delonix does multi-stage, <code>--mount=type=secret</code> and layer
+caching (rootless), but not <code>type=cache</code>/<code>type=ssh</code> or stage
+parallelism</td></tr>
+<tr><td>GPU/CUDA workloads</td>
+<td>Delonix works via CDI (the same source as Docker/Podman) but has never been validated on a
+real GPU host — for GPU production today, prefer Docker/Podman</td></tr>
+<tr><td><code>docker version</code>/<code>ps</code>/<code>images</code>/<code>info</code> and the
+full lifecycle of a container via <code>DOCKER_HOST</code></td>
+<td><strong>Delonix</strong> — <code>delonix serve docker-api</code>, validated against a real
+<code>docker</code> CLI, including <code>docker compose up</code> pointed at the socket</td></tr>
+<tr><td>Interactive <code>docker exec</code>/attach via the API, or <code>--restart</code> via the
+API</td>
+<td>Docker or Podman — deliberately out of scope (HTTP hijacking / supervisor model incompatible
+with a multi-threaded server)</td></tr>
+<tr><td>Bootstrapping a real Kubernetes cluster with no Docker/containerd installed</td>
+<td><strong>Delonix</strong> — own CRI, already validated with a <code>Ready</code> v1.34
+control-plane</td></tr>
+<tr><td>One engine for containers <strong>and</strong> microVMs <strong>and</strong> Kubernetes</td>
+<td><strong>Delonix</strong> — nobody in the Docker/Podman space covers this together</td></tr>
+<tr><td>Swapping a container's ports/volumes/networks on the fly, with no recreate</td>
+<td><strong>Delonix</strong> — Docker forces a recreate</td></tr>
+<tr><td>Advanced rootless networking (encrypted inter-node overlay, per-container directed
+firewall)</td>
+<td><strong>Delonix</strong> — ahead of rootless Podman on these points</td></tr>
+<tr><td>An engine with years of production use, a huge community, maximum tooling
+compatibility</td>
+<td>Docker or Podman — still no substitute in sight</td></tr>
+</table>
+
+<h2>Comparison by area</h2>
+<p><span class="tag ok">strong</span> · <span class="tag mid">partial or limited</span> ·
+<span class="tag no">absent</span></p>
+
+<table>
+<tr><th>Area</th><th>Docker</th><th>Podman</th><th>Delonix</th></tr>
+<tr><td>Run/stop/inspect containers</td>
+<td><span class="tag ok">strong</span></td><td><span class="tag ok">strong</span></td>
+<td><span class="tag ok">strong</span> — plus hot reconfiguration and automatic crash diagnosis
+(reason + log snapshot, not just "Exited")</td></tr>
+<tr><td>Rootless by default</td>
+<td><span class="tag no">not the default mode</span></td>
+<td><span class="tag ok">strong, it's Podman's whole pitch</span></td>
+<td><span class="tag ok">strong — and fails on purpose if isolation doesn't actually come up</span></td></tr>
+<tr><td>Image builds (<code>Dockerfile</code>)</td>
+<td><span class="tag ok">strong — multi-stage, BuildKit, cache</span></td>
+<td><span class="tag ok">strong — via buildah</span></td>
+<td><span class="tag mid">multi-stage + ARG/USER/ENTRYPOINT + <code>--mount=type=secret</code> +
+layer cache (rootless) already work; no real BuildKit
+<code>type=cache</code>/<code>type=ssh</code> or stage parallelism</span></td></tr>
+<tr><td><code>docker compose</code> / local orchestration</td>
+<td><span class="tag ok">native</span></td><td><span class="tag mid">podman-compose</span></td>
+<td><span class="tag ok">native (<code>delonix compose</code>), no Docker — <code>depends_on</code>
+with a real healthcheck</span></td></tr>
+<tr><td><code>DOCKER_HOST</code>-compatible API</td>
+<td><span class="tag ok">is the real thing</span></td><td><span class="tag ok">compatible</span></td>
+<td><span class="tag mid">full container lifecycle (create/start/stop/kill/wait/
+restart/rename/rm); no interactive <code>exec</code>/attach or <code>--restart</code></span></td></tr>
+<tr><td>Advanced rootless networking (inter-node overlay, per-container firewall)</td>
+<td><span class="tag no">overlay needs swarm</span></td>
+<td><span class="tag mid">no native rootless overlay</span></td>
+<td><span class="tag ok">rootless VXLAN+WireGuard, per-container directed firewall</span></td></tr>
+<tr><td>Kubernetes bootstrap with no Docker/containerd</td>
+<td><span class="tag no">not Docker's job</span></td>
+<td><span class="tag no">no own CRI</span></td>
+<td><span class="tag ok">own CRI + <code>cluster kubeadm</code>, validated with a real cluster</span></td></tr>
+<tr><td>MicroVMs in the same engine</td>
+<td><span class="tag no">absent</span></td><td><span class="tag no">absent</span></td>
+<td><span class="tag ok">Cloud Hypervisor / libvirt, declarative</span></td></tr>
+<tr><td>GPU/CUDA</td>
+<td><span class="tag ok">mature nvidia-container-toolkit</span></td>
+<td><span class="tag ok">same</span></td>
+<td><span class="tag mid">via CDI (the same source Docker/Podman consume), but never validated on
+a real GPU host</span></td></tr>
+<tr><td>Built-in image signing + CVE scan</td>
+<td><span class="tag no">needs separate cosign/trivy</span></td>
+<td><span class="tag no">same</span></td>
+<td><span class="tag ok">cosign/sigstore + CVE scan in the engine itself</span></td></tr>
+<tr><td>Security maturity IN PRODUCTION (years of real adversarial use)</td>
+<td><span class="tag ok">very mature</span></td><td><span class="tag ok">very mature</span></td>
+<td><span class="tag mid">new project — its own audit already found and fixed high-severity
+flaws, still no independent confirmation beyond what's noted above</span></td></tr>
+<tr><td>Ecosystem (docs, forums, third-party integrations)</td>
+<td><span class="tag ok">huge</span></td><td><span class="tag ok">large</span></td>
+<td><span class="tag no">early days — this site plus the repository is all there is for now</span></td></tr>
+</table>
+
+<h2>Where Delonix already goes further</h2>
+<ul>
+<li><strong>One engine, three problems</strong> — containers, microVMs and Kubernetes (via its own
+CRI) in the same tool. A full Kubernetes v1.34 control-plane has already run <code>Ready</code>,
+with <code>kube-proxy</code> itself programming netfilter inside the rootless model.</li>
+<li><strong>Hot reconfiguration</strong> — changing a container's ports, volumes, networks or
+bandwidth limit <em>without recreating it</em>, same PID. On Docker, changing a port means deleting
+and recreating the container.</li>
+<li><strong>Automatic crash diagnosis</strong> — when a container dies unexpectedly, Delonix
+records the reason (process disappeared vs. recycled PID) and automatically saves a log excerpt.
+Docker and Podman just say "Exited"/"Dead".</li>
+<li><strong>Stricter rootless security by design</strong> — no-new-privs always on, and a
+container's start <em>fails</em> if seccomp/capabilities don't actually take effect, instead of
+proceeding while pretending to be protected.</li>
+<li><strong>Kubernetes-style network storage</strong> — an NFS/CIFS/WebDAV folder becomes a named
+volume any container can mount, like a <code>PersistentVolume</code>.</li>
+<li><strong>Native <code>docker-compose.yml</code>, no Docker</strong> — <code>delonix compose
+up/down/ps/logs</code>, with <code>depends_on</code> waiting for a real healthcheck, not just
+declared order.</li>
+</ul>
+
+<h2>Where it still falls short</h2>
+<ul>
+<li><strong>Image builds still have no real BuildKit</strong> — multi-stage,
+<code>ARG</code>/<code>--build-arg</code>, <code>USER</code>/<code>ENTRYPOINT</code>,
+<code>--mount=type=secret</code> and layer caching (rootless) already work, but no
+<code>type=cache</code>/<code>type=ssh</code> or stage parallelism.</li>
+<li><strong>GPU never validated on a real host</strong> — the CDI path exists and uses the same
+source Docker/Podman consume, but with no GPU host there's no live confirmation.</li>
+<li><strong>Interactive <code>docker exec</code>/attach and <code>--restart</code> via the
+API</strong> — deliberately out of scope (HTTP hijacking / supervisor model incompatible with a
+multi-threaded server).</li>
+<li><strong><code>compose</code>: spec coverage still partial</strong> — no top-level
+<code>profiles</code>/<code>extends</code>/<code>configs</code>/<code>secrets</code>,
+multi-file, <code>build.target</code>, <code>deploy.replicas != 1</code>, fixed per-network IP, or
+anonymous volumes.</li>
+<li><strong>New project</strong> — without the production track record Docker and Podman have; see
+the security notice at the top of this page before deciding.</li>
+</ul>
+
+<h2>Recommendation by profile</h2>
+<table>
+<tr><th>Who you are</th><th>Suggestion</th></tr>
+<tr><td>Developer experimenting locally/homelab, or bootstrapping a small Kubernetes cluster with
+no Docker install</td>
+<td>Try Delonix today — it's exactly the case where it's already strong.</td></tr>
+<tr><td>Team with a mature build pipeline that needs <code>--mount=type=cache</code>/
+<code>type=ssh</code> or stage parallelism</td>
+<td>Stay on Docker/Podman for that specific build; you can run the resulting images on Delonix if
+you want to test operations — <code>docker-compose.yml</code>, multi-stage and
+<code>--mount=type=secret</code> already work (rootless).</td></tr>
+<tr><td>Company evaluating for multi-tenant production or with sensitive data</td>
+<td>CRITICAL/HIGH severity findings are already fixed and re-confirmed by an independent audit
+(notice above); about 27 documented MEDIUM/LOW findings remain (no known exploit), plus the
+production track record only time can give — follow the
+<a href="https://github.com/angolardevops/delonix-runtime/releases">changelog</a>.</td></tr>
+<tr><td>Wants to evaluate it technically in detail (gap by gap, with file and line)</td>
+<td>Read the <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/COMPARACAO-DOCKER-PODMAN.md">full gap
+analysis</a> in the repository.</td></tr>
+</table>
+"""
+
 
 def c4_page():
     """`c4.html` a partir do ARCHITECTURE.md canónico (Martin): markdown →
@@ -3585,7 +3772,7 @@ def main():
     page("cloud.html", "cloud-init, cloud image e Cloud Hypervisor", CLOUD)
     labs_page()
     page("cri.html", "CRI", CRI)
-    page("comparacao.html", "Delonix vs Docker vs Podman", COMPARE)
+    page("comparacao.html", "Delonix vs Docker vs Podman", bi("div", COMPARE, COMPARE_EN))
     page("tutorial-delonix-temp.html", "Projecto completo: Delonix Temp", TUTORIAL)
     for n, g in GROUPS.items():
         group_page(n, g)
