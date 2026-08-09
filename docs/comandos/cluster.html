@@ -157,7 +157,7 @@ idempotent <em>with no state file</em> (every step has a <code>check</code> and 
 for SSH, and runs the SAME bootstrap — one command, from zero to a cluster running
 <code>delonix-cri</code> as its runtime (no containerd).</p>
 <p class='src-link'>📄 Implementação real em Rust: <a href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/delonix-runtime-bin/src/cmd/cluster.rs"><code>cmd/cluster.rs</code></a></p>
-<div class='help'><pre><code>Usage: dlx cluster [OPTIONS] &lt;COMMAND&gt;
+<div class='help'><pre><code>Usage: delonix cluster [OPTIONS] &lt;COMMAND&gt;
 
 Commands:
   init     Initialize a project with the cluster manifests (kind/vm/ssh) — files ALREADY FILLED IN (images included), ready to use without editing anything
@@ -175,7 +175,7 @@ Options:
   -h, --help          Print help</code></pre></div>
 <h2 id='kube'><code>cluster kube</code></h2>
 <p class='intro'>Generate a Kubernetes manifest from a container/pod already running locally (<code>kube generate</code>) — the &quot;ran it locally, now give me the YAML for k8s&quot; path (equivalent to <code>podman generate kube</code>)</p>
-<div class='help'><pre><code>Usage: dlx cluster kube [OPTIONS] &lt;COMMAND&gt;
+<div class='help'><pre><code>Usage: delonix cluster kube [OPTIONS] &lt;COMMAND&gt;
 
 Commands:
   generate  Generates a `kind: Pod` from a container (or from every member of a pod) and prints it to stdout
@@ -187,7 +187,7 @@ Options:
 <h3>Exemplos</h3><div class="ex"><div class="cap">Gerar manifestos Kubernetes a partir de um recurso Delonix</div><pre><code>delonix cluster kube generate</code></pre></div>
 <h2 id='load'><code>cluster load</code></h2>
 <p class='intro'>Load local images into a kind-mode cluster&#x27;s nodes, <strong>without a registry</strong> (the equivalent of <code>kind load docker-image</code>): packs each image from the local store and imports it into every running node&#x27;s containerd</p>
-<div class='help'><pre><code>Usage: dlx cluster load [OPTIONS] &lt;IMAGES&gt;...
+<div class='help'><pre><code>Usage: delonix cluster load [OPTIONS] &lt;IMAGES&gt;...
 
 Arguments:
   &lt;IMAGES&gt;...  Images to load (`repo:tag`, as they appear in `delonix image ls`)
@@ -200,7 +200,7 @@ Options:
 delonix cluster load app:dev --name lab</code></pre></div>
 <h2 id='delete'><code>cluster delete</code></h2>
 <p class='intro'>Remove a kind-mode cluster (stops and deletes the nodes + kubeconfig)</p>
-<div class='help'><pre><code>Usage: dlx cluster delete [OPTIONS]
+<div class='help'><pre><code>Usage: delonix cluster delete [OPTIONS]
 
 Options:
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
@@ -209,7 +209,7 @@ Options:
 <h3>Exemplos</h3><div class="ex"><div class="cap">Apagar o cluster e os seus nós</div><pre><code>delonix cluster delete --name lab</code></pre></div>
 <h2 id='ls'><code>cluster ls</code></h2>
 <p class='intro'>List the clusters and the state of their nodes</p>
-<div class='help'><pre><code>Usage: dlx cluster ls [OPTIONS]
+<div class='help'><pre><code>Usage: delonix cluster ls [OPTIONS]
 
 Options:
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
@@ -217,7 +217,7 @@ Options:
 <h3>Exemplos</h3><div class="ex"><div class="cap">Que clusters existem neste host</div><pre><code>delonix cluster ls</code></pre></div>
 <h2 id='create'><code>cluster create</code></h2>
 <p class='intro'>Create a local Kubernetes cluster <strong>without a manifest and without Docker</strong> (native kind mode): starts the <code>kindest/node</code> nodes in the Delonix engine itself and bootstraps them with <code>kubeadm</code>. No flags = 1 control-plane ready to use</p>
-<div class='help'><pre><code>Usage: dlx cluster create [OPTIONS]
+<div class='help'><pre><code>Usage: delonix cluster create [OPTIONS]
 
 Options:
       --l18n &lt;en|pt&gt;
@@ -243,7 +243,7 @@ Options:
 <h3>Exemplos</h3><div class="ex"><div class="cap">Cluster local em modo kind (containers como nós, sem Docker)</div><pre><code>delonix cluster create --name lab</code></pre></div><div class="ex"><div class="cap">Com workers</div><pre><code>delonix cluster create --name lab --workers 2</code></pre></div>
 <h2 id='init'><code>cluster init</code></h2>
 <p class='intro'>Initialize a project with the cluster manifests (kind/vm/ssh) — files ALREADY FILLED IN (images included), ready to use without editing anything</p>
-<div class='help'><pre><code>Usage: dlx cluster init [OPTIONS] [DIR]
+<div class='help'><pre><code>Usage: delonix cluster init [OPTIONS] [DIR]
 
 Arguments:
   [DIR]  Project directory (default: the current one) [default: .]
@@ -257,20 +257,23 @@ Options:
 <h3>Exemplos</h3><div class="ex"><div class="cap">Scaffold de um cloud.yaml para cluster apply</div><pre><code>delonix cluster init ./meu-cluster</code></pre></div>
 <h2 id='apply'><code>cluster apply</code></h2>
 <p class='intro'>Apply the <code>kind: Cluster</code> document(s) of a manifest</p>
-<div class='help'><pre><code>Usage: dlx cluster apply [OPTIONS]
+<div class='help'><pre><code>Usage: delonix cluster apply [OPTIONS]
 
 Options:
   -f, --file &lt;FILE&gt;   
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
   -h, --help          Print help</code></pre></div>
-<p>Todas as entradas do manifesto que chegam a comandos remotos
+<div class='lang-pt'><p>Todas as entradas do manifesto que chegam a comandos remotos
 (<code>controlPlaneEndpoint</code>, subnets, versão) passam por validação estrita antes de qualquer
 interpolação — a injecção de comandos via manifesto foi um dos CRÍTICOS encontrados e fechados na
-auditoria ofensiva do projecto, com testes a replicar o exploit.</p>
+auditoria ofensiva do projecto, com testes a replicar o exploit.</p></div><div class='lang-en'><p>Every manifest field that reaches remote commands
+(<code>controlPlaneEndpoint</code>, subnets, version) goes through strict validation before any
+interpolation — command injection via the manifest was one of the CRITICAL findings closed in the
+project's offensive audit, with tests replicating the exploit.</p></div>
 <h3>Exemplos</h3><div class="ex"><div class="cap">Bootstrap num manifesto `kind: Cluster`</div><pre><code>delonix cluster apply -f cloud.yaml</code></pre></div>
 <h2 id='kubeadm'><code>cluster kubeadm</code></h2>
 <p class='intro'>Provision VMs (golden VM image) + <code>kubeadm</code> bootstrap — from zero to a working cluster, without writing a manifest by hand</p>
-<div class='help'><pre><code>Usage: dlx cluster kubeadm [OPTIONS] --network &lt;NETWORK&gt;
+<div class='help'><pre><code>Usage: delonix cluster kubeadm [OPTIONS] --network &lt;NETWORK&gt;
 
 Options:
       --l18n &lt;en|pt&gt;
@@ -305,14 +308,22 @@ Options:
           Auto-provision N more VMs as a DEDICATED etcd cluster (delonix generates its own CA + certs and bootstraps it) instead of the default `stacked` etcd (co-located with the control-planes). Use an ODD number for a well-defined quorum (3, 5, ...) — 1 is allowed for dev/test but has no HA (a single point of failure). Omit for today&#x27;s default behavior
   -h, --help
           Print help</code></pre></div>
-<p><code>--control-plane &gt; 1</code> provisiona automaticamente uma VM
+<div class='lang-pt'><p><code>--control-plane &gt; 1</code> provisiona automaticamente uma VM
 extra a correr HAProxy (L4, passthrough — a TLS do apiserver termina sempre no control-plane real)
 à frente da porta 6443 de cada control-plane, e usa-a como <code>controlPlaneEndpoint</code> — sem
 flag nova, dispara sozinho a partir do número de control-planes pedido. <code>--name</code> é
 opcional (gera um nome livre no mesmo padrão dos containers); sem <code>--vm-image</code>, resolve
 a única imagem VM dourada local ou descarrega-a do repositório oficial automaticamente. Progresso
 por etapa, estilo <code>kind create cluster</code> (cada etapa fecha com ✓/✗), degrada para uma
-linha por etapa sem TTY (pipes/CI).</p>
+linha por etapa sem TTY (pipes/CI).</p></div><div class='lang-en'><p><code>--control-plane &gt; 1</code> automatically provisions an
+extra VM running HAProxy (L4, passthrough — the apiserver's TLS always terminates on the real
+control-plane) in front of port 6443 on each control-plane, and uses it as
+<code>controlPlaneEndpoint</code> — no new flag, it triggers on its own from the number of
+control-planes requested. <code>--name</code> is optional (generates a free name in the same
+pattern as containers); without <code>--vm-image</code>, it resolves the single local golden VM
+image or downloads it from the official repository automatically. Step-by-step progress,
+<code>kind create cluster</code>-style (each step closes with ✓/✗), degrading to one line per step
+with no TTY (pipes/CI).</p></div>
 <h3>Exemplos</h3><div class="ex"><div class="cap">Do zero: 1 control-plane + 2 workers</div><pre><code>delonix cluster kubeadm --name lab --control-plane 1 --workers 2</code></pre></div><div class="ex"><div class="cap">HA: 2 control-planes + 3 workers (HAProxy automático)</div><pre><code>delonix cluster kubeadm --name lab --control-plane 2 --workers 3</code></pre></div><div class="ex"><div class="cap">Etcd externo dedicado (3 VMs extra, quórum ímpar)</div><pre><code>delonix cluster kubeadm --name lab --control-plane 2 --etcd-cluster 3</code></pre></div>
 <h2><span class='lang-pt'>Laboratório</span><span class='lang-en'>Lab</span></h2>
 <div class='callout lang-pt'><p>Um comando, do zero a um cluster Kubernetes real a correr —
@@ -412,12 +423,25 @@ function visibleHeadingText(h){
   var pick=h.querySelector(':scope > .'+want);
   return (pick?pick.textContent:h.textContent).trim();
 }
+function isVisibleForLang(el,lang){
+  // Páginas como o index duplicam a secção INTEIRA por idioma (dois <h2>
+  // separados, um por língua) em vez de um <h2> só com dois spans — sem
+  // este filtro o índice listava as duas línguas ao mesmo tempo.
+  var wrap=el.closest('.lang-pt, .lang-en');
+  if(!wrap)return true;
+  return lang==='en'?wrap.classList.contains('lang-en'):wrap.classList.contains('lang-pt');
+}
 function buildToc(){
   var main=document.querySelector('main'),nav=document.getElementById('toc-nav'),
       aside=document.getElementById('pagetoc');
   if(!main||!nav)return;
-  var heads=main.querySelectorAll('h2');
+  var lang=document.documentElement.getAttribute('data-lang')||'pt';
+  var heads=[].slice.call(main.querySelectorAll('h2')).filter(function(h){
+    return isVisibleForLang(h,lang);
+  });
+  nav.innerHTML='';
   if(heads.length<2){if(aside)aside.style.display='none';return;}
+  if(aside)aside.style.display='';
   var used={};
   heads.forEach(function(h){
     var label=visibleHeadingText(h);
@@ -444,12 +468,6 @@ function initThemeToggle(){
   });
 }
 
-function refreshTocLabels(){
-  document.querySelectorAll('#toc-nav a').forEach(function(a){
-    var h=document.getElementById(a.getAttribute('href').slice(1));
-    if(h)a.textContent=visibleHeadingText(h);
-  });
-}
 function initLangToggle(){
   var KEY='delonix-docs-lang',btn=document.querySelector('.lang-toggle');
   if(!btn)return;
@@ -458,7 +476,7 @@ function initLangToggle(){
     var next=eff==='en'?'pt':'en';
     document.documentElement.setAttribute('data-lang',next);
     try{localStorage.setItem(KEY,next);}catch(e){}
-    refreshTocLabels();
+    buildToc();
   });
 }
 

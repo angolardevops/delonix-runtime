@@ -1813,6 +1813,74 @@ itself, with no manual editing.</p>"""},
     },
 }
 
+# Tradução EN das `notes` por-subcomando (autoral, técnicas) — chave
+# (grupo, subcomando). Só 14 blocos no total; ver `group_page` para onde
+# entram no render.
+NOTES_EN = {
+    ("container", "run"): """<p><strong><code>-p</code> and networking:</strong> with
+<code>--net host</code> (the default) the container switches to its own netns with userspace NAT
+(slirp4netns — the podman rootless model); with <code>--net &lt;network&gt;</code> the port is
+published by the <em>ingress</em> (hostfwd on the single slirp + nft DNAT), the path that lets you
+swap ports on the fly without stopping the container. <code>--net none</code> refuses
+<code>-p</code>.</p>""",
+    ("container", "start"): """<p>Reuses the saved spec (command, env, volumes, network, ports)
+and the persistent rootfs — unlike <code>rm</code>+<code>run</code>, nothing the container wrote
+is lost.</p>""",
+    ("container", "stats"): """<p>CPU%/memory/PIDs read from the container's own cgroup v2
+(resolved via <code>/proc/&lt;pid&gt;/cgroup</code>, whatever the delegated base is). Without
+cgroup delegation (rootless with no <code>Delegate=yes</code>), memory falls back to the container
+init's VmRSS, marked with <code>~</code>.</p>""",
+    ("container", "kill"): """<p>Unlike <code>stop</code>, it doesn't wait for or force the state
+— the real outcome (e.g. <code>Crashed</code> for a <code>KILL</code>) is only confirmed on the
+next observation.</p>""",
+    ("container", "wait"): """<p>The real exit code is only guaranteed when a
+<code>--restart</code> supervisor is the process's real parent — a plain <code>-d</code> container
+with no supervisor shows <code>Crashed</code>/137, a known architectural limit (the engine isn't
+that process's real parent).</p>""",
+    ("container", "update"): """<p>Reconfigures a <strong>running</strong> container's ports,
+volumes, networks, bandwidth limit and memory/CPU limits without stopping it — the PID doesn't
+change. Removals run before additions, so <code>--publish-rm 8080 --publish-add 8080:9000</code>
+works in a single command. <code>--memory</code>/<code>--cpus</code> rewrite the real cgroup
+immediately (<code>memory.max</code>/<code>cpu.max</code>) — no waiting for a
+<code>restart</code>.</p>""",
+    ("container", "attach"): """<p>Deliberately <strong>output-only</strong> — unlike
+<code>docker attach</code>, there's no live stdin to an already-started detached container (no
+persistent per-container shim). <code>-i</code>/<code>--stdin</code> is refused with a clear error
+pointing at <code>exec -it</code>.</p>""",
+    ("workload", "ls"): """<p><strong>Exact-name routing</strong>, fail-closed: a name that
+doesn't exist gives <code>no such workload</code>; a container AND a vm with the same name give
+<code>ambiguous</code> (points at the specific command, never guesses).</p>""",
+    ("pod", "create"): """<p>Idempotent (<em>ensure-present</em>): if the pod already has
+containers, it does nothing. Can also be applied via <code>delonix stack apply</code> (the
+<code>pods:</code> group in <code>kind: Stack</code>) and previewed with <code>--dry-run</code>.
+If creating one member fails, the whole pod is torn down (no half-pod).</p>""",
+    ("stack", "init"): """<p><code>--template &lt;name&gt;</code> generates a real, functional
+project for a language/framework, with best practices (non-root multi-stage, healthcheck, tests,
+dotfiles) and already delonix-native (Delonixfile + manifest). Without <code>--template</code>,
+<code>init</code> generates the generic scaffold. The <code>__NAME__</code>/<code>__MODULE__</code>
+tokens get replaced with the project name.</p>""",
+    ("cluster", "apply"): """<p>Every manifest field that reaches remote commands
+(<code>controlPlaneEndpoint</code>, subnets, version) goes through strict validation before any
+interpolation — command injection via the manifest was one of the CRITICAL findings closed in the
+project's offensive audit, with tests replicating the exploit.</p>""",
+    ("cluster", "kubeadm"): """<p><code>--control-plane &gt; 1</code> automatically provisions an
+extra VM running HAProxy (L4, passthrough — the apiserver's TLS always terminates on the real
+control-plane) in front of port 6443 on each control-plane, and uses it as
+<code>controlPlaneEndpoint</code> — no new flag, it triggers on its own from the number of
+control-planes requested. <code>--name</code> is optional (generates a free name in the same
+pattern as containers); without <code>--vm-image</code>, it resolves the single local golden VM
+image or downloads it from the official repository automatically. Step-by-step progress,
+<code>kind create cluster</code>-style (each step closes with ✓/✗), degrading to one line per step
+with no TTY (pipes/CI).</p>""",
+    ("egress", "host"): """<p>What nft/CIDR can't do: allowlisting by <strong>hostname</strong>.
+The internal ingress DNS resolver starts snooping the A-records in responses and injects them into
+a per-network nft <code>set</code> (with a timeout = expires with the TTL); egress accepts that
+set plus DNS and drops the rest. 100% rootless (no eBPF) — Cilium's FQDN policy, via nftables.
+Repeatable for several hostnames.</p>""",
+    ("tunnel", "expose"): """<p>Validated live in this very session: real HTTPS traffic from the
+internet reached a local server through the tunnel (HTTP 200) using exactly this command.</p>""",
+}
+
 # ---------------------------------------------------------------- template
 
 CSS = """
@@ -2065,12 +2133,25 @@ function visibleHeadingText(h){
   var pick=h.querySelector(':scope > .'+want);
   return (pick?pick.textContent:h.textContent).trim();
 }
+function isVisibleForLang(el,lang){
+  // Páginas como o index duplicam a secção INTEIRA por idioma (dois <h2>
+  // separados, um por língua) em vez de um <h2> só com dois spans — sem
+  // este filtro o índice listava as duas línguas ao mesmo tempo.
+  var wrap=el.closest('.lang-pt, .lang-en');
+  if(!wrap)return true;
+  return lang==='en'?wrap.classList.contains('lang-en'):wrap.classList.contains('lang-pt');
+}
 function buildToc(){
   var main=document.querySelector('main'),nav=document.getElementById('toc-nav'),
       aside=document.getElementById('pagetoc');
   if(!main||!nav)return;
-  var heads=main.querySelectorAll('h2');
+  var lang=document.documentElement.getAttribute('data-lang')||'pt';
+  var heads=[].slice.call(main.querySelectorAll('h2')).filter(function(h){
+    return isVisibleForLang(h,lang);
+  });
+  nav.innerHTML='';
   if(heads.length<2){if(aside)aside.style.display='none';return;}
+  if(aside)aside.style.display='';
   var used={};
   heads.forEach(function(h){
     var label=visibleHeadingText(h);
@@ -2097,12 +2178,6 @@ function initThemeToggle(){
   });
 }
 
-function refreshTocLabels(){
-  document.querySelectorAll('#toc-nav a').forEach(function(a){
-    var h=document.getElementById(a.getAttribute('href').slice(1));
-    if(h)a.textContent=visibleHeadingText(h);
-  });
-}
 function initLangToggle(){
   var KEY='delonix-docs-lang',btn=document.querySelector('.lang-toggle');
   if(!btn)return;
@@ -2111,7 +2186,7 @@ function initLangToggle(){
     var next=eff==='en'?'pt':'en';
     document.documentElement.setAttribute('data-lang',next);
     try{localStorage.setItem(KEY,next);}catch(e){}
-    refreshTocLabels();
+    buildToc();
   });
 }
 
@@ -2210,7 +2285,11 @@ def group_page(name, g):
                     body.append(f"<p class='intro'>{render_prose(para.strip())}</p>")
         body.append(f"<div class='help'><pre><code>{html.escape(sub_rest)}</code></pre></div>")
         if meta.get("notes"):
-            body.append(meta["notes"])
+            notes_en = NOTES_EN.get((name, sub))
+            if notes_en:
+                body.append(bi("div", meta["notes"], notes_en))
+            else:
+                body.append(meta["notes"])
         if meta.get("examples"):
             body.append("<h3>Exemplos</h3>" + examples_html(meta["examples"]))
     if name in CLI_LABS:
@@ -2218,7 +2297,7 @@ def group_page(name, g):
     page(f"comandos/{name}.html", g["title"], "\n".join(body), depth=1)
 
 
-INDEX = """
+INDEX_PT = """
 <h1>Delonix Engine <span class="pill">v{ver}</span></h1>
 <p class="tagline"><strong>Engine</strong> de containers e microVMs <strong>daemonless</strong>,
 <strong>rootless-first</strong>, kernel-native, em Rust — com CRI próprio para Kubernetes.
@@ -2278,6 +2357,67 @@ delonix container start web      # rearranca com o mesmo estado</code></pre>
 <tr><td>Rootless</td><td>opcional</td><td>sim (slirp/pasta por container)</td><td>por omissão — 1 slirp partilhado + ingress nft</td></tr>
 <tr><td>VMs</td><td>—</td><td>machine (para si próprio)</td><td>microVMs declarativas de 1.ª classe (Cloud Hypervisor/libvirt)</td></tr>
 <tr><td>Kubernetes</td><td>—</td><td>—</td><td>CRI próprio + bootstrap kubeadm do zero (<code>delonix cluster</code>)</td></tr>
+</table>
+"""
+
+INDEX_EN = """
+<h1>Delonix Engine <span class="pill">v{ver}</span></h1>
+<p class="tagline"><strong>Engine</strong> for containers and microVMs, <strong>daemonless</strong>,
+<strong>rootless-first</strong>, kernel-native, in Rust — with its own CRI for Kubernetes.
+<em>The open-source engine that powers Delonix.</em></p>
+
+<p>Not a low-level OCI <em>runtime</em> (that's <code>runc</code>/<code>crun</code>): it's a
+COMPLETE engine for containers <strong>and</strong> VMs — build, run, networking, firewall,
+storage and Kubernetes cluster bootstrap, all in a single binary. It's the open layer
+(Apache-2.0) the <strong>Delonix</strong> platform is built on.</p>
+
+<p>Delonix Engine does Docker/Podman's job with no resident daemon: every command is an ephemeral
+process that talks to the kernel directly (namespaces, cgroups v2, pivot_root), keeps its state in
+files, and exits. In rootless mode, networking is served by a single shared holder-netns +
+slirp4netns pair — not one slirp per container — with nft DNAT for port publishing, which is what
+lets you <em>swap ports and volumes on the fly</em>, with no container restart.</p>
+
+<h2>Install</h2>
+<p>One command installs the binary <strong>and</strong> every runtime dependency (rootless
+networking, VMs, kernel tuning), picking the right variant for your CPU. Works on
+Debian/Ubuntu, Fedora/RHEL, openSUSE and Arch:</p>
+<pre><code>curl -fsSL https://github.com/angolardevops/delonix-runtime/releases/latest/download/install.sh | bash</code></pre>
+<p>To publish port <strong>80</strong> or <strong>443</strong> (<code>-p 80:80</code>) add
+<code>--low-ports</code>:</p>
+<pre><code>curl -fsSL .../install.sh | bash -s -- --low-ports</code></pre>
+<p>Without that flag, <code>-p 80:80</code> is refused: the process that binds the port on the
+host side is <code>slirp4netns</code>, unprivileged, and the kernel reserves ports below
+<code>net.ipv4.ip_unprivileged_port_start</code> (1024 by default) — rootless Podman and Docker
+hit the same wall. It's opt-in because it lowers that threshold for the <em>whole host</em>: from
+then on, any local program can bind ports 80-1023. On a laptop that's a reasonable trade-off; on a
+shared machine, the alternative that doesn't lower anything is a root proxy on port 80 forwarding
+to a high port. To revert: delete <code>/etc/sysctl.d/99-delonix-lowports.conf</code>.</p>
+<p>Alternative (binary only, dependencies are on you):</p>
+<pre><code>curl -fL -o ~/.local/bin/delonix \\
+  https://github.com/angolardevops/delonix-runtime/releases/latest/download/delonix-x86_64-linux
+chmod +x ~/.local/bin/delonix
+echo 'source &lt;(delonix completion bash)' &gt;&gt; ~/.bashrc</code></pre>
+
+<h2>Getting started</h2>
+<pre><code># a web service on port 8080, no root, no daemon
+delonix container run -d --name web -p 8080:80 nginx
+curl localhost:8080
+
+delonix container stats          # CPU/memory/PIDs
+delonix container logs -f web    # follow logs
+delonix container stop web       # the port closes on its own
+delonix container start web      # restarts with the same state</code></pre>
+
+<h2>CLI reference</h2>
+<div class="cards">{cards}</div>
+
+<h2>Why it's different</h2>
+<table>
+<tr><th></th><th>Docker</th><th>Podman</th><th>Delonix</th></tr>
+<tr><td>Daemon</td><td>dockerd (root)</td><td>no (conmon per container)</td><td>no — and no resident per-container monitor</td></tr>
+<tr><td>Rootless</td><td>optional</td><td>yes (slirp/pasta per container)</td><td>by default — 1 shared slirp + nft ingress</td></tr>
+<tr><td>VMs</td><td>—</td><td>machine (for itself)</td><td>first-class declarative microVMs (Cloud Hypervisor/libvirt)</td></tr>
+<tr><td>Kubernetes</td><td>—</td><td>—</td><td>own CRI + kubeadm bootstrap from scratch (<code>delonix cluster</code>)</td></tr>
 </table>
 """
 
@@ -3308,12 +3448,18 @@ def main():
         .splitlines()[0]
         .split()[-1]
     )
+    def card_tagline(n, g):
+        en = GROUPS_EN.get(n, {}).get("tagline")
+        if en:
+            return bi("span", html.escape(g["tagline"]), html.escape(en))
+        return html.escape(g["tagline"])
     cards = "".join(
         f'<div class="card"><b><a href="comandos/{n}.html">{html.escape(g["title"])}</a></b>'
-        f'<p>{html.escape(g["tagline"])}</p></div>'
+        f'<p>{card_tagline(n, g)}</p></div>'
         for n, g in GROUPS.items()
     )
-    page("index.html", "Delonix Engine", INDEX.replace("{ver}", ver).replace("{cards}", cards))
+    index_html = bi("div", INDEX_PT, INDEX_EN).replace("{ver}", ver).replace("{cards}", cards)
+    page("index.html", "Delonix Engine", index_html)
     cheatsheet_page()
     kinds_page()
     page("arquitectura.html", "Arquitectura", ARCH)
