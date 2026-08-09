@@ -64,6 +64,18 @@ def split_help_intro(help_text):
     return (intro or None), help_text[idx:]
 
 
+def bi(tag, pt_html, en_html, cls=""):
+    """Emits a PT block then an EN block (same tag), tagged for the language
+    toggle. Both stay in the DOM — CSS shows only the active one — so a
+    reader never sees blank content while a translation is still pending
+    for that particular piece of text."""
+    c = (cls + " ").lstrip()
+    return (
+        f"<{tag} class='{c}lang-pt'>{pt_html}</{tag}>"
+        f"<{tag} class='{c}lang-en'>{en_html}</{tag}>"
+    )
+
+
 def render_prose(text):
     """Escapa HTML e traduz as convenções markdown-ish do `--help` (clap
     `about`/`long_about`) para HTML real: `` `code` `` e `**bold**`."""
@@ -1019,6 +1031,785 @@ fica desactualizado à mão.""",
     },
 }
 
+# Tradução EN de `tagline`/`intro` por grupo (nível de página, não por
+# subcomando) — usada pelo toggle de idioma no cabeçalho. Fica num dict à
+# parte em vez de dentro de `GROUPS` para não obrigar a tocar em 26 entradas
+# grandes já existentes; `group_page` funde os dois por chave.
+GROUPS_EN = {
+    "container": {
+        "tagline": "Container lifecycle: run, ps, start, stop, rm, exec, logs, inspect, stats, apply.",
+        "intro": """The <code>container</code> group is the runtime's everyday surface — the
+counterpart to <code>docker container</code>. Each invocation is an ephemeral process (no daemon):
+<code>run</code> does a direct <code>clone()</code> with the requested namespaces and the state
+lands as JSON under <code>$DELONIX_ROOT</code>. In rootless mode, a container's rootfs is a
+<em>persistent</em> flat copy — writes survive <code>stop</code>/<code>start</code>, just like in
+Docker.""",
+    },
+    "workload": {
+        "tagline": "Unified layer over containers AND VMs: ls, describe, stop, rm (ADR-0002).",
+        "intro": """The <code>workload</code> group is the imperative side of the Runtime
+Abstraction Layer: a <code>ComputeDriver</code> trait dispatches by name to either the container
+or the VM engine, so you can manage both as one thing. <strong>Creation stays declarative</strong>
+— a <code>kind: Workload</code> in a manifest (<code>spec.type: container|vm|pod|microvm</code>)
+lowers to the matching Kind in <code>manifest::load</code>; see
+<a href="../kinds.html">Kinds</a> and <code>examples/workload.yaml</code>.""",
+    },
+    "pod": {
+        "tagline": "Real multi-container pods (create, ls, describe, rm, logs) — N containers as one unit.",
+        "intro": """Real Kubernetes-style pods: N containers that <strong>share the pod's
+namespaces</strong> and are managed as a single unit. Today they share <strong>netns</strong>
+(same IP, reachable via <code>localhost</code>), <strong>IPC</strong> (System V/POSIX) and
+<strong>UTS</strong> (the hostname). All of it <em>rootless and daemonless</em>: the pod is a
+named SDN netns on the holder (<code>pod-&lt;name&gt;</code>, with an IP on
+<code>delonix0</code>), and each container joins it through the <code>nsenter … ip netns
+exec</code> re-exec (the internal <code>--pod</code> flag); the first container holds the
+IPC/UTS namespaces and the rest <code>setns</code> into <code>/proc/&lt;pid&gt;/ns/{ipc,uts}</code>
+— possible without privilege because the re-exec already places them in the holder's userns.
+<em>Membership</em> needs no new store: it derives from the <code>delonix.io/pod=&lt;name&gt;</code>
+label (like <code>cluster</code>/<code>stack</code>). Created from a <code>kind: Pod</code>
+manifest (the same <code>spec.containers[]</code> schema as <code>kind: Container</code>, but with
+N containers allowed). <strong>Known limitation:</strong> the <strong>PID</strong> namespace
+(<code>shareProcessNamespace</code>, already in the schema) is NOT shared yet — each container
+keeps its own process tree; that's the next slice.""",
+    },
+    "image": {
+        "tagline": "OCI images: pull, ls, rm, export — and, with --vm, the golden VM images (build/push).",
+        "intro": """Container image management (OCI registries: Docker Hub, ghcr.io, …) with
+digest verification on pull. With <code>--vm</code>, the SAME group operates on <strong>golden VM
+images</strong> (a <code>.qcow2</code> plus per-image metadata): Ubuntu cloud image +
+kubeadm/kubelet/kubectl + <code>delonix-cri</code> — the base <code>delonix cluster</code> builds
+on.""",
+    },
+    "build": {
+        "tagline": "Builds an image from a Dockerfile or Delonixfile.",
+        "intro": """Build with no daemon and no BuildKit: it spins up one working container per
+stage, runs each <code>RUN</code> via <code>exec</code>, applies <code>COPY</code> to the rootfs
+(confined to the build context — path traversal is rejected) and packages the result. Without
+<code>-f</code>, it looks for a <code>Delonixfile</code> in the context first and only then a
+<code>Dockerfile</code> — same grammar, with extensions (<code>SCAN</code>, <code>CPUS</code>,
+<code>MEMORY</code>, <code>SECURITY</code>, <code>HEALTHCHECK</code>). <strong>Multi-stage
+supported</strong> (<code>FROM ... AS &lt;name&gt;</code> + <code>COPY --from=&lt;stage&gt;</code>);
+known limitation: in root mode (overlay), the final stage still has to be a real image, not
+another stage (no OCI lineage for a cloned stage) — no such restriction in rootless.
+<code>ARG</code>/<code>--build-arg</code> and <code>USER</code>/<code>ENTRYPOINT</code> already
+survive the build (including in rootless). <strong>Per-instruction layer cache</strong> (rootless
+— a repeated <code>RUN</code>/<code>COPY</code> doesn't re-execute; <code>--no-cache</code> to skip
+it; root mode still has no cache). No real BuildKit (no <code>RUN --mount=secret</code>, no
+<code>--platform</code>).""",
+    },
+    "vm": {
+        "tagline": "Declarative microVMs: create, ls, status, stop, rm, apply.",
+        "intro": """MicroVMs managed by the <code>VmBackend</code> trait — Cloud Hypervisor or
+libvirt. <code>create</code> is idempotent (creates or self-heals) and supports per-instance
+cloud-init: <code>--hostname</code>, <code>--ssh-key</code> and <code>--user-data</code> generate a
+NoCloud ISO automatically. It's the layer <code>delonix cluster kubeadm</code> uses to provision
+nodes.""",
+    },
+    "volumes": {
+        "tagline": "Named volumes and bind mounts: create, ls, inspect, rm, apply.",
+        "intro": """A thin wrapper over <code>VolumeStore</code>. In <code>container run</code>,
+<code>-v name:/dest[:ro]</code> resolves to a named volume (created on demand) and
+<code>-v /host:/dest[:ro]</code> to a bind mount — the distinction is automatic.""",
+    },
+    "network": {
+        "tagline": "User networks: create, ls, inspect, rm, apply — bridge and overlay are physically realized.",
+        "intro": """For the <code>bridge</code> and <code>overlay</code> drivers,
+<code>create</code> orchestrates both the declarative record (<code>NetworkStore</code>) AND the
+rootless physical plane together — <code>bridge</code> inside the holder's netns;
+<code>overlay</code> brings up a WireGuard-encrypted VXLAN uplink between nodes (a
+<code>dlxvx&lt;vni&gt;</code> device enslaved to the bridge, FDB seeded with the peers), all
+achievable without host privilege. <code>macvlan</code>/<code>ipvlan</code> only get recorded in
+the store — <code>create</code> WARNS loudly that the network wasn't physically realized (they
+need <code>CAP_NET_ADMIN</code> in the host's init-netns, outside the rootless model).""",
+    },
+    "stack": {
+        "tagline": "Applies a whole manifest (delonix-manifest.yaml) — every Kind, in dependency order.",
+        "intro": """The declarative, Kubernetes-style counterpart to compose: a multi-document
+YAML (<code>apiVersion: delonix.io/v1</code>) with 5 Kinds — <code>Network</code>,
+<code>Volume</code>, <code>Image</code>, <code>Vm</code>, <code>Container</code> — applied in that
+dependency order. <em>Ensure-present</em> semantics (idempotent by name), not a reconciler: no
+diffing, rollout or rollback — fail-fast, whatever was already applied stays applied.""",
+    },
+    "compose": {
+        "tagline": "NATIVE support for docker-compose.yml (Compose Spec v2.x) — no Docker, no shim, straight into the engine.",
+        "intro": """A foreign-schema translator, the same family as <code>kind: Pod</code> (k8s)
+and the Docker API: a hand-written typed parser (no new dependency), translated directly into the
+engine — containers reusing the exact <code>container run</code> path, networks/volumes reusing
+<code>network</code>/<code>volume apply</code> verbatim (same idempotency, same input hardening).
+<code>depends_on</code> honors the 3 real Compose Spec conditions
+(<code>service_started</code>/<code>service_healthy</code>/<code>service_completed_successfully</code>)
+via topological ordering of the service graph — a cycle is a clear error, never an arbitrary order
+— and waits for the real healthcheck (inline in the service, or the image's own). The project
+(<code>compose down/ps/logs</code>) is a label on the containers; networks/volumes use
+deterministic naming (<code>&lt;project&gt;_&lt;name&gt;</code>) — no registry of its own, the same
+philosophy as <code>stack describe</code>.""",
+    },
+    "cluster": {
+        "tagline": "End-to-end Kubernetes: idempotent kubeadm bootstrap over SSH, or full VM provisioning.",
+        "intro": """Two paths to a real (not emulated) cluster: <code>cluster apply</code>
+bootstraps <code>kubeadm</code> on hosts that are already alive and reachable over SSH —
+idempotent <em>with no state file</em> (every step has a <code>check</code> and an
+<code>apply</code>; it can never drift from a .tfstate because there isn't one).
+<code>cluster kubeadm</code> goes further: it provisions the VMs from the golden VM image, waits
+for SSH, and runs the SAME bootstrap — one command, from zero to a cluster running
+<code>delonix-cri</code> as its runtime (no containerd).""",
+    },
+    "secret": {
+        "tagline": "Encrypted-at-rest secret vault — the source behind `run --secret`.",
+        "intro": """A local vault (<code>SecretStore</code>) encrypted with XChaCha20-Poly1305.
+Values are NEVER printed by default (redacted; <code>--reveal</code> is opt-in). It's the source
+for <code>container run --secret</code>/<code>--secret-files</code> and <code>storage</code>'s
+<code>--password-secret</code> — the secret goes in once, and never ends up in shell history or in
+the manifest.""",
+    },
+    "storage": {
+        "tagline": "NETWORK volumes (NFS/CIFS/WebDAV) you can mount, k8s PersistentVolume-style.",
+        "intro": """Mounts a folder from a NAS (TrueNAS/Synology/Samba/Nextcloud) as a named
+volume. Under the hood it's a <code>delonix-volume</code> volume with a network driver —
+<code>mount -t nfs|cifs|davfs</code>. The password comes from the vault
+(<code>--password-secret</code>), never from argv. Wired into <code>stack apply</code> (order
+Network→Volume→<strong>Storage</strong>→Image→Vm→Container). Mounting needs CAP_SYS_ADMIN.""",
+    },
+    "sharevolume": {
+        "tagline": "An ISOLATED, individually-QUOTA'd slice of a `Storage` — several container/vm/pod share one NAS.",
+        "intro": """Solves a concrete multi-tenant problem: several workloads sharing ONE
+NFS/CIFS/WebDAV export, each with ITS OWN isolated mount point and ITS OWN quota, without seeing
+each other. Under the hood there's no new mount mechanism at all: each <code>ShareVolume</code> is
+a real SUBDIRECTORY of the tree already mounted by the parent <code>kind: Storage</code>
+(<code>&lt;storage&gt;/_data/shares/&lt;name&gt;</code>), registered as its own volume — the
+isolation is pure path confinement, and consumption uses the usual
+<code>-v &lt;name&gt;:/dest</code>, no new code at all on the container/vm/pod side. The quota is
+SOFT (measured usage + alert) — the HARD path (a loopback ext4 image) needs local block storage
+and doesn't compose with a subdirectory of a network mount.""",
+    },
+    "ingress": {
+        "tagline": "INBOUND firewall (L4 rules + DNAT publishes) for a container on the SDN.",
+        "intro": """Half of the unified firewall surface (the other is <code>egress</code>). Edits
+the single source of truth — the per-container <code>ContainerFw</code>, applied as nft rules in
+the ingress chain. <code>ingress</code> governs INBOUND traffic: allow/deny rules by
+<code>[proto/]port</code> and CIDR, the default policy, and DNAT <em>publishes</em>. Only acts on
+containers on a custom network (they have an IP on <code>delonix0</code>); <code>--net host</code>
+is refused.""",
+    },
+    "egress": {
+        "tagline": "OUTBOUND firewall (L4 rules + per-network egress→Internet policy).",
+        "intro": """The other half of the firewall. Governs a container's OUTBOUND traffic
+(allow/deny rules + default policy) and, at the NETWORK level, egress policy to the Internet:
+<code>allow</code>/<code>deny</code>, or <code>allowlist</code> (denies everything except DNS and
+the given CIDRs). All on the same <code>ContainerFw</code>/nft as <code>ingress</code>.""",
+    },
+    "httproute": {
+        "tagline": "Built-in L7/HTTP reverse proxy (`kind: HTTPRoute`) — routing by Host + path prefix.",
+        "intro": """A <strong>built-in</strong> HTTP/HTTPS reverse proxy (pure hyper, no
+Nginx/Envoy), running inside the holder's netns and routing by <code>Host</code> + <code>path</code>
+prefix to backend containers on the SDN. TLS terminates at the proxy (self-signed or
+<code>secretRef</code>); hot reload via SIGHUP (routes swap with no downtime, listeners stay fixed
+at startup). A container with <code>--expose &lt;port&gt;</code> self-registers under
+<code>&lt;name&gt;.&lt;namespace&gt;.delonix.internal</code>, with no manual
+<code>kind: HTTPRoute</code> needed. It's what <code>kind: Tunnel</code> normally sits in front of
+to give several backends a single public URL.""",
+    },
+    "tunnel": {
+        "tagline": "Exposes a local port to the public internet via pinggy/ngrok/cloudflare (`kind: Tunnel`).",
+        "intro": """Does ONE thing: carries traffic from the public internet down to ONE local
+port — no account, no public IP, no router config. Pairs with <code>httproute</code> by pointing
+<code>--local-port</code> at the port the L7 proxy listens on, and <code>Host</code>-based routing
+on the other end still decides which container each request goes to — one public URL, several
+backends. Three providers, each the REAL binary/mechanism of that service (never simulated):
+<strong>pinggy</strong> (zero extra binary — plain <code>ssh</code>, already a project dependency),
+<strong>ngrok</strong> (needs the <code>ngrok</code> agent on PATH; the public URL comes from the
+agent's own local API) and <strong>cloudflare</strong> (needs <code>cloudflared</code>; for now
+only the ephemeral quick-tunnel <code>*.trycloudflare.com</code>, no account — a NAMED tunnel with
+its own domain needs the Cloudflare API, not implemented yet).""",
+    },
+    "flow": {
+        "tagline": "Live per-container traffic — eBPF datapath (degrades to veth counters).",
+        "intro": """Per-container network telemetry. When run with privilege (CAP_BPF/root), it
+attaches two eBPF tc/clsact classifiers to the SDN veths, which count bytes/packets per IP in a
+shared BPF map — <strong>never dropping anything</strong> (nft remains the only enforcer). Without
+privilege (the common rootless case) it says so and falls back to veth counters, which always
+work. <code>--watch</code> redraws every 2s.""",
+    },
+    "boot": {
+        "tagline": "Boot persistence: systemd units so containers come back up after a reboot.",
+        "intro": """<code>boot enable</code> generates one systemd unit per running container
+(rootless → user units + <code>loginctl enable-linger</code>; root → system units), with
+<code>ExecStart</code>=<code>container start</code>. So containers come back up when the host
+boots, with no daemon.""",
+    },
+    "system": {
+        "tagline": "The engine itself: events, info, df, prune, monitor, thermal.",
+        "intro": """Introspection and maintenance. <code>system prune</code> is the GC (reclaims
+space: stopped containers, orphan dirs, dangling images, CAS blobs, orphan hostfwds, empty
+networks); <code>system df</code> shows disk usage; <code>system monitor</code> follows
+connections/conntrack; <code>system events</code> the event stream.""",
+    },
+    "dash": {
+        "tagline": "Summary/KPI dashboard (htop-style TUI) — RAM/network/disk, per-container uptime, JSON and Prometheus.",
+        "intro": """A live view of runtime state — containers, VMs, images, networks, storage —
+in one screen, without running <code>ls</code> across 5 different groups. Each group also has its
+own (<code>container dash</code>, <code>vm dash</code>, ...); this is the global aggregate.
+Dynamic KPIs: cgroup slice memory, accumulated rx/tx traffic per container (with an explicit count
+of unmeasured <code>--net host/none</code> containers, never silently summed as zero), disk usage
+by area (images/volumes/VM-images/containers), and real per-container uptime (the <code>UP</code>
+column, from <code>pid_starttime</code>). The <code>m</code> key toggles the sparkline between
+running containers and memory used. <code>--once</code> prints a text snapshot and exits
+(scripts/CI) — also what happens automatically when stdout isn't a terminal. <code>--json</code>
+gives the same snapshot as JSON, for scripts or a Grafana datasource. For continuous scraping,
+<code>delonix-mgmt</code>/<code>delonix-cri</code> expose <code>/metrics</code> (Prometheus —
+container/VM/memory/network/disk gauges) and <code>GET /v1/dash</code> (the same
+<code>DashSummary</code> as JSON); the expensive fields (network/disk) recompute in the background
+every 30s, so the scrape itself always stays fast.""",
+    },
+    "docker-api": {
+        "tagline": "A slice of the Docker Engine API, on a unix socket — full container lifecycle, not just reads.",
+        "intro": """Serves enough of the real Docker Engine API (protocol captured live against a
+real <code>docker</code> CLI, version negotiated via the <code>Api-Version</code> header on the
+<code>/_ping</code> response) for <code>docker version</code>/<code>ps</code>/<code>images</code>/
+<code>info</code> pointed at <code>DOCKER_HOST=unix://&lt;socket&gt;</code> to work against
+delonix's REAL state. Since v0.26.0, also the full container lifecycle —
+<code>POST /containers/create|start|stop|kill|wait|restart|rename</code>,
+<code>DELETE /containers/{id}</code>, <code>GET /containers/{id}/json</code> — all delegating to
+the same CLI functions (<code>cmd_run</code>/<code>cmd_stop</code>/<code>cmd_kill</code>/...), zero
+duplicated logic; enough for <code>docker compose up</code> pointed at this socket to work. Same
+security posture as the management socket: 0600 + <code>SO_PEERCRED</code> (owner only). Out of
+scope: interactive <code>exec</code>/attach (HTTP hijacking) and <code>--restart</code> (needs a
+raw <code>fork()</code> supervisor, refused with a clear error); any unimplemented route gives a
+clear 404.""",
+    },
+    "kube": {
+        "tagline": "Generates Kubernetes manifests from containers.",
+        "intro": """<code>kube generate</code> produces a <code>kind: Pod</code> manifest from an
+existing container — the bridge for exporting a workload from the local runtime to a cluster.""",
+    },
+    "netns": {
+        "tagline": "Low-level management of the rootless ingress infrastructure.",
+        "intro": """The raw layer underneath <code>ingress</code>/<code>egress</code>: bringing
+the ingress holder up/down, attaching/detaching netns, publishing/unpublishing ports and
+per-container firewalling. Most users never need this — they use the higher-level groups — but
+it's exposed for debugging and integration.""",
+    },
+    "completion": {
+        "tagline": "Dynamic autocompletion for bash, zsh, fish, elvish and powershell.",
+        "intro": """Prints the shell registration script. The engine is dynamic: the script asks
+the binary itself for suggestions in real time, from the SAME definition used for parsing — it
+never goes stale by hand.""",
+    },
+}
+
+
+def lab_challenge_html(entry):
+    """Secção "Laboratório"/"Desafio" bilingue de uma página de referência
+    CLI: um exercício guiado com comandos reais desse grupo, e um desafio
+    mais aberto a seguir — para o leitor aprender fazendo, não só lendo."""
+    parts = [f"<h2>{bi('span', 'Laboratório', 'Lab')}</h2>"]
+    parts.append(bi("div", entry["lab"]["pt"], entry["lab"]["en"], cls="callout"))
+    parts.append(f"<h2>{bi('span', 'Desafio', 'Challenge')}</h2>")
+    parts.append(bi("div", entry["challenge"]["pt"], entry["challenge"]["en"], cls="callout"))
+    return "\n".join(parts)
+
+
+# Lab + Desafio por grupo de comandos — cada um usa SÓ subcomandos/flags reais
+# (confirmados contra `GROUPS[name]["subs"]` e o `CLAUDE.md` do projecto),
+# nunca inventados. `lab` é guiado (passo a passo); `challenge` é mais aberto,
+# normalmente estica uma garantia já documentada do motor (idempotência,
+# isolamento, persistência) em vez de introduzir comportamento novo.
+CLI_LABS = {
+    "container": {
+        "lab": {"pt": """<p>Sobe um nginx publicado, confirma que responde, e prova que o estado
+sobrevive a um <code>stop</code>/<code>start</code> (ao contrário de recriar o container).</p>
+<pre><code>delonix container run -d --name web -p 8080:80 nginx
+curl localhost:8080
+delonix container logs web
+delonix container stop web
+delonix container start web
+curl localhost:8080</code></pre>""",
+                "en": """<p>Bring up a published nginx, confirm it answers, and prove the state
+survives a <code>stop</code>/<code>start</code> (unlike recreating the container).</p>
+<pre><code>delonix container run -d --name web -p 8080:80 nginx
+curl localhost:8080
+delonix container logs web
+delonix container stop web
+delonix container start web
+curl localhost:8080</code></pre>"""},
+        "challenge": {"pt": """<p>Sem parar o <code>web</code>, troca a porta publicada a quente
+com <code>container update</code> (o PID não muda) e confirma com <code>container diff</code> que
+escrever um ficheiro dentro do container aparece na comparação com a imagem original.</p>
+<pre><code>delonix container update web --publish-rm 8080 --publish-add 9090:80
+delonix container exec web sh -c 'echo oi > /tmp/marca'
+delonix container diff web</code></pre>""",
+                "en": """<p>Without stopping <code>web</code>, hot-swap the published port with
+<code>container update</code> (the PID doesn't change) and confirm with <code>container diff</code>
+that writing a file inside the container shows up against the original image.</p>
+<pre><code>delonix container update web --publish-rm 8080 --publish-add 9090:80
+delonix container exec web sh -c 'echo hi > /tmp/mark'
+delonix container diff web</code></pre>"""},
+    },
+    "workload": {
+        "lab": {"pt": """<p>Cria um container normal e observa-o pela lente unificada — o mesmo
+<code>workload</code> que também sabe falar de VMs.</p>
+<pre><code>delonix container run -d --name api nginx
+delonix workload ls
+delonix workload describe api
+delonix workload stop api</code></pre>""",
+                "en": """<p>Create a plain container and look at it through the unified lens — the
+same <code>workload</code> group that also knows how to talk about VMs.</p>
+<pre><code>delonix container run -d --name api nginx
+delonix workload ls
+delonix workload describe api
+delonix workload stop api</code></pre>"""},
+        "challenge": {"pt": """<p>Cria um container E uma VM com o MESMO nome e chama
+<code>workload describe &lt;nome&gt;</code> — confirma que o comando recusa por ambiguidade em vez
+de adivinhar qual dos dois querias, e que a mensagem aponta para o comando específico.</p>""",
+                "en": """<p>Create a container AND a VM with the SAME name and call
+<code>workload describe &lt;name&gt;</code> — confirm the command refuses for ambiguity instead of
+guessing which of the two you meant, and that the message points at the specific command.</p>"""},
+    },
+    "pod": {
+        "lab": {"pt": """<p>Cria um pod de 2 containers e confirma que partilham IP —
+alcançam-se por <code>localhost</code>, como no Kubernetes.</p>
+<pre><code>delonix pod create web-pod --container nginx --container redis
+delonix pod describe web-pod
+delonix pod logs web-pod</code></pre>""",
+                "en": """<p>Create a 2-container pod and confirm they share an IP — reachable via
+<code>localhost</code> from each other, just like in Kubernetes.</p>
+<pre><code>delonix pod create web-pod --container nginx --container redis
+delonix pod describe web-pod
+delonix pod logs web-pod</code></pre>"""},
+        "challenge": {"pt": """<p>Escreve o MESMO pod como um <code>kind: Pod</code> num
+manifesto e aplica-o com <code>stack apply</code>. Compara o <code>pod describe</code> resultante
+com o pod criado pela CLI — devem ter a mesma forma (netns/IPC/UTS partilhados).</p>""",
+                "en": """<p>Write the SAME pod as a <code>kind: Pod</code> in a manifest and apply
+it with <code>stack apply</code>. Compare the resulting <code>pod describe</code> against the
+CLI-created pod — they should look the same (shared netns/IPC/UTS).</p>"""},
+    },
+    "image": {
+        "lab": {"pt": """<p>Traz uma imagem, dá-lhe uma tag própria, e olha para o histórico de
+camadas antes de a exportar.</p>
+<pre><code>delonix image pull alpine:3.20
+delonix image tag alpine:3.20 meu-alpine:v1
+delonix image history meu-alpine:v1
+delonix image export meu-alpine:v1 -o alpine.tar</code></pre>""",
+                "en": """<p>Pull an image, give it your own tag, and look at the layer history
+before exporting it.</p>
+<pre><code>delonix image pull alpine:3.20
+delonix image tag alpine:3.20 my-alpine:v1
+delonix image history my-alpine:v1
+delonix image export my-alpine:v1 -o alpine.tar</code></pre>"""},
+        "challenge": {"pt": """<p>Antes de trazer a imagem VM dourada, vê que versões existem
+publicadas com <code>ls-remote</code> — sem descarregar nada — e só depois traz a que quiseres.</p>
+<pre><code>delonix image --vm ls-remote
+delonix image --vm pull</code></pre>""",
+                "en": """<p>Before pulling the golden VM image, check which versions are
+published with <code>ls-remote</code> — without downloading anything — and only then pull the one
+you want.</p>
+<pre><code>delonix image --vm ls-remote
+delonix image --vm pull</code></pre>"""},
+    },
+    "build": {
+        "lab": {"pt": """<p>Escreve um <code>Delonixfile</code> multi-stage pequeno e constrói-o
+— sem daemon, sem BuildKit.</p>
+<pre><code>printf 'FROM golang:1.22 AS build\\nWORKDIR /src\\nCOPY . .\\nRUN go build -o app\\n\\nFROM alpine\\nCOPY --from=build /src/app /app\\nENTRYPOINT ["/app"]\\n' > Delonixfile
+delonix build -t minha-app .
+delonix container run --rm minha-app</code></pre>""",
+                "en": """<p>Write a small multi-stage <code>Delonixfile</code> and build it — no
+daemon, no BuildKit.</p>
+<pre><code>printf 'FROM golang:1.22 AS build\\nWORKDIR /src\\nCOPY . .\\nRUN go build -o app\\n\\nFROM alpine\\nCOPY --from=build /src/app /app\\nENTRYPOINT ["/app"]\\n' > Delonixfile
+delonix build -t my-app .
+delonix container run --rm my-app</code></pre>"""},
+        "challenge": {"pt": """<p>Passa um segredo com <code>--secret id=token,src=./token.txt</code>
+e usa <code>RUN --mount=type=secret,id=token</code> dentro de uma instrução. Depois de o build
+terminar, confirma que o valor NÃO está na imagem final (nem sequer um ficheiro vazio).</p>""",
+                "en": """<p>Pass a secret with <code>--secret id=token,src=./token.txt</code> and
+use <code>RUN --mount=type=secret,id=token</code> in one instruction. After the build finishes,
+confirm the value is NOT in the final image (not even an empty file).</p>"""},
+    },
+    "vm": {
+        "lab": {"pt": """<p>Cria uma microVM com cloud-init automático e liga-te por SSH.</p>
+<pre><code>delonix vm create dev --hostname dev --ssh-key ~/.ssh/id_ed25519.pub
+delonix vm status dev
+ssh delonix@$(delonix vm status dev --ip)</code></pre>""",
+                "en": """<p>Create a microVM with automatic cloud-init and SSH into it.</p>
+<pre><code>delonix vm create dev --hostname dev --ssh-key ~/.ssh/id_ed25519.pub
+delonix vm status dev
+ssh delonix@$(delonix vm status dev --ip)</code></pre>"""},
+        "challenge": {"pt": """<p>Só no backend libvirt: tira um <code>snapshot</code> da VM a
+correr, muda alguma coisa lá dentro, e usa <code>restore</code> para voltar atrás. Confirma que a
+mudança desapareceu.</p>
+<pre><code>delonix vm snapshot dev antes-da-mudanca
+delonix vm restore dev antes-da-mudanca</code></pre>""",
+                "en": """<p>libvirt backend only: take a <code>snapshot</code> of the running VM,
+change something inside it, then use <code>restore</code> to roll back. Confirm the change is
+gone.</p>
+<pre><code>delonix vm snapshot dev before-the-change
+delonix vm restore dev before-the-change</code></pre>"""},
+    },
+    "volumes": {
+        "lab": {"pt": """<p>Prova que um volume nomeado sobrevive a um restart do container —
+ao contrário de escrever directamente no rootfs.</p>
+<pre><code>delonix volumes create dados
+delonix container run -d --name db -v dados:/var/lib/data alpine sleep infinity
+delonix container exec db sh -c 'echo ok > /var/lib/data/marca'
+delonix container stop db && delonix container start db
+delonix container exec db cat /var/lib/data/marca</code></pre>""",
+                "en": """<p>Prove a named volume survives a container restart — unlike writing
+straight to the rootfs.</p>
+<pre><code>delonix volumes create data
+delonix container run -d --name db -v data:/var/lib/data alpine sleep infinity
+delonix container exec db sh -c 'echo ok > /var/lib/data/mark'
+delonix container stop db && delonix container start db
+delonix container exec db cat /var/lib/data/mark</code></pre>"""},
+        "challenge": {"pt": """<p>Tira um <code>snapshot</code> do volume <code>dados</code> depois
+de escrever nele, e usa <code>volumes describe</code> para veres o histórico de snapshots.</p>""",
+                "en": """<p>Take a <code>snapshot</code> of the <code>data</code> volume after
+writing to it, and use <code>volumes describe</code> to see the snapshot history.</p>"""},
+    },
+    "network": {
+        "lab": {"pt": """<p>Cria uma rede própria e confirma a descoberta por nome (DNS interno)
+entre dois containers na mesma rede.</p>
+<pre><code>delonix network create minha-rede
+delonix container run -d --name db --net minha-rede postgres:16-alpine
+delonix container run --rm --net minha-rede alpine ping -c1 db</code></pre>""",
+                "en": """<p>Create your own network and confirm name-based discovery (internal
+DNS) between two containers on the same network.</p>
+<pre><code>delonix network create my-net
+delonix container run -d --name db --net my-net postgres:16-alpine
+delonix container run --rm --net my-net alpine ping -c1 db</code></pre>"""},
+        "challenge": {"pt": """<p>Corre <code>network describe minha-rede</code> e identifica que
+IP a rede atribuiu ao <code>db</code>; depois tenta <code>network create --driver macvlan</code> e
+lê o aviso — porque é que esse driver não é realizado fisicamente em rootless?</p>""",
+                "en": """<p>Run <code>network describe my-net</code> and find the IP it assigned to
+<code>db</code>; then try <code>network create --driver macvlan</code> and read the warning — why
+isn't that driver physically realized in rootless?</p>"""},
+    },
+    "stack": {
+        "lab": {"pt": """<p>Gera um projecto COMPLETO já pronto (código + Delonixfile +
+manifesto) a partir de um template, e aplica-o.</p>
+<pre><code>delonix stack init minha-api --template python
+cd minha-api
+delonix stack apply</code></pre>""",
+                "en": """<p>Generate a COMPLETE, ready-to-run project (code + Delonixfile +
+manifest) from a template, and apply it.</p>
+<pre><code>delonix stack init my-api --template python
+cd my-api
+delonix stack apply</code></pre>"""},
+        "challenge": {"pt": """<p>Corre <code>stack apply --dry-run</code> e compara o YAML
+impresso (com todos os defaults preenchidos) com o teu <code>delonix-manifest.yaml</code>
+original — que campos é que o motor preencheu por ti?</p>""",
+                "en": """<p>Run <code>stack apply --dry-run</code> and compare the printed YAML
+(every default filled in) against your original <code>delonix-manifest.yaml</code> — which fields
+did the engine fill in for you?</p>"""},
+    },
+    "compose": {
+        "lab": {"pt": """<p>Sobe um <code>docker-compose.yml</code> com uma app que só arranca
+depois da base de dados estar saudável (<code>depends_on: condition: service_healthy</code>).</p>
+<pre><code>delonix compose up -d
+delonix compose ps
+delonix compose logs -f app</code></pre>""",
+                "en": """<p>Bring up a <code>docker-compose.yml</code> where the app only starts
+after the database is healthy (<code>depends_on: condition: service_healthy</code>).</p>
+<pre><code>delonix compose up -d
+delonix compose ps
+delonix compose logs -f app</code></pre>"""},
+        "challenge": {"pt": """<p>Corre <code>compose down -v</code> e confirma com
+<code>delonix volumes ls</code> que o volume nomeado do projecto foi mesmo removido — não só os
+containers.</p>""",
+                "en": """<p>Run <code>compose down -v</code> and confirm with
+<code>delonix volumes ls</code> that the project's named volume was actually removed — not just
+the containers.</p>"""},
+    },
+    "cluster": {
+        "lab": {"pt": """<p>Um comando, do zero a um cluster Kubernetes real a correr —
+sem Docker, sem containerd, com <code>delonix-cri</code> como runtime.</p>
+<pre><code>delonix cluster kubeadm --control-plane 1 --workers 2
+export KUBECONFIG=~/.delonix/clusters/*-kubeconfig.yaml
+kubectl get nodes</code></pre>""",
+                "en": """<p>One command, from zero to a real Kubernetes cluster running — no
+Docker, no containerd, with <code>delonix-cri</code> as the runtime.</p>
+<pre><code>delonix cluster kubeadm --control-plane 1 --workers 2
+export KUBECONFIG=~/.delonix/clusters/*-kubeconfig.yaml
+kubectl get nodes</code></pre>"""},
+        "challenge": {"pt": """<p>Constrói uma imagem local com <code>delonix build</code>,
+importa-a directamente no containerd de cada nó com <code>cluster load</code> (sem passar por
+registo nenhum) e corre um pod com <code>imagePullPolicy: Never</code> a usá-la.</p>
+<pre><code>delonix cluster load minha-app:v1</code></pre>""",
+                "en": """<p>Build a local image with <code>delonix build</code>, import it
+directly into every node's containerd with <code>cluster load</code> (no registry involved), and
+run a pod with <code>imagePullPolicy: Never</code> using it.</p>
+<pre><code>delonix cluster load my-app:v1</code></pre>"""},
+    },
+    "secret": {
+        "lab": {"pt": """<p>Cria um segredo, usa-o num container, e confirma que fica redigido
+por omissão.</p>
+<pre><code>printf 's3nha' | delonix secret create db-pass
+delonix container run --rm --secret db-pass alpine env
+delonix secret inspect db-pass
+delonix secret inspect db-pass --reveal</code></pre>""",
+                "en": """<p>Create a secret, use it in a container, and confirm it's redacted by
+default.</p>
+<pre><code>printf 's3cr3t' | delonix secret create db-pass
+delonix container run --rm --secret db-pass alpine env
+delonix secret inspect db-pass
+delonix secret inspect db-pass --reveal</code></pre>"""},
+        "challenge": {"pt": """<p>Roda a chave do cofre com <code>secret rotate-key</code> e
+confirma que o segredo <code>db-pass</code> criado antes continua legível depois — a rotação não
+pode obrigar a recriar segredos.</p>""",
+                "en": """<p>Rotate the vault key with <code>secret rotate-key</code> and confirm
+the <code>db-pass</code> secret created earlier is still readable afterwards — rotation must never
+force you to recreate secrets.</p>"""},
+    },
+    "storage": {
+        "lab": {"pt": """<p>Regista um export NFS como <code>storage</code> e monta-o num
+container, com a password a vir do cofre em vez do manifesto.</p>
+<pre><code>printf 'password-do-nas' | delonix secret create nas-pass
+delonix storage create nas1 --server 192.168.1.50 --share /export/dados --password-secret nas-pass
+delonix container run --rm -v nas1:/mnt alpine sh -c 'echo ok > /mnt/teste'</code></pre>""",
+                "en": """<p>Register an NFS export as <code>storage</code> and mount it into a
+container, with the password coming from the vault instead of the manifest.</p>
+<pre><code>printf 'nas-password' | delonix secret create nas-pass
+delonix storage create nas1 --server 192.168.1.50 --share /export/data --password-secret nas-pass
+delonix container run --rm -v nas1:/mnt alpine sh -c 'echo ok > /mnt/test'</code></pre>"""},
+        "challenge": {"pt": """<p>Confirma no próprio NAS (por outra via — outro host, ou o
+painel do NAS) que o ficheiro <code>teste</code> chegou mesmo lá — a prova de que o
+<code>storage</code> não é um volume local disfarçado.</p>""",
+                "en": """<p>Confirm on the NAS itself (through another path — another host, or the
+NAS's own panel) that the <code>test</code> file really landed there — the proof that
+<code>storage</code> isn't a local volume in disguise.</p>"""},
+    },
+    "sharevolume": {
+        "lab": {"pt": """<p>Duas fatias isoladas do MESMO <code>Storage</code>, cada uma com a
+sua quota, para dois containers que não se devem ver.</p>
+<pre><code>delonix sharevolume apply -f sharevolume-a.yaml
+delonix sharevolume apply -f sharevolume-b.yaml
+delonix sharevolume ls</code></pre>""",
+                "en": """<p>Two isolated slices of the SAME <code>Storage</code>, each with its
+own quota, for two containers that shouldn't see each other.</p>
+<pre><code>delonix sharevolume apply -f sharevolume-a.yaml
+delonix sharevolume apply -f sharevolume-b.yaml
+delonix sharevolume ls</code></pre>"""},
+        "challenge": {"pt": """<p>Monta o ShareVolume A num container e o B noutro. Confirma que
+listar o ponto de montagem de um NUNCA mostra ficheiros do outro — a isolação é só confinamento de
+caminho, sem mecanismo de montagem novo.</p>""",
+                "en": """<p>Mount ShareVolume A into one container and B into another. Confirm
+that listing one's mount point never shows the other's files — the isolation is pure path
+confinement, no new mount mechanism involved.</p>"""},
+    },
+    "ingress": {
+        "lab": {"pt": """<p>Fecha tudo por omissão e abre só uma porta — o modelo
+default-deny.</p>
+<pre><code>delonix net ingress policy web deny
+delonix net ingress allow web 80
+curl web-host:80</code></pre>""",
+                "en": """<p>Close everything by default and open just one port — the
+default-deny model.</p>
+<pre><code>delonix net ingress policy web deny
+delonix net ingress allow web 80
+curl web-host:80</code></pre>"""},
+        "challenge": {"pt": """<p>Reproduz o bug histórico já corrigido: <code>ingress allow web
+9999</code> (SEM indicar proto) só deveria abrir a porta 9999. Confirma com <code>ingress ls</code>
+que as outras portas continuam fechadas — o veredicto da coluna tem de bater com o que o
+<code>curl</code> mostra.</p>""",
+                "en": """<p>Reproduce the historical bug that's already fixed: <code>ingress allow
+web 9999</code> (with NO proto given) should only open port 9999. Confirm with
+<code>ingress ls</code> that the other ports stay closed — the column's verdict has to match what
+<code>curl</code> actually shows.</p>"""},
+    },
+    "egress": {
+        "lab": {"pt": """<p>Nega tudo excepto DNS e um destino específico — a política
+<code>allowlist</code> por rede.</p>
+<pre><code>delonix net egress policy minha-rede allowlist --allow 1.1.1.1/32
+delonix container run --rm --net minha-rede alpine wget -qO- https://1.1.1.1
+delonix container run --rm --net minha-rede alpine wget -qO- https://example.com</code></pre>""",
+                "en": """<p>Deny everything except DNS and one specific destination — the
+per-network <code>allowlist</code> policy.</p>
+<pre><code>delonix net egress policy my-net allowlist --allow 1.1.1.1/32
+delonix container run --rm --net my-net alpine wget -qO- https://1.1.1.1
+delonix container run --rm --net my-net alpine wget -qO- https://example.com</code></pre>"""},
+        "challenge": {"pt": """<p>Abre uma ligação de saída de longa duração e só DEPOIS aplica
+<code>egress policy deny</code>. Confirma que a ligação já estabelecida continua viva — só ligações
+NOVAS são bloqueadas.</p>""",
+                "en": """<p>Open a long-lived outbound connection and only THEN apply
+<code>egress policy deny</code>. Confirm the already-established connection keeps working — only
+NEW connections get blocked.</p>"""},
+    },
+    "httproute": {
+        "lab": {"pt": """<p>Um proxy L7, duas apps, uma porta — routing por <code>Host</code>.</p>
+<pre><code>delonix net httproute apply -f httproute.yaml
+curl app1.local:8443 -H 'Host: app1.local'
+curl app2.local:8443 -H 'Host: app2.local'</code></pre>""",
+                "en": """<p>One L7 proxy, two apps, one port — routing by <code>Host</code>.</p>
+<pre><code>delonix net httproute apply -f httproute.yaml
+curl app1.local:8443 -H 'Host: app1.local'
+curl app2.local:8443 -H 'Host: app2.local'</code></pre>"""},
+        "challenge": {"pt": """<p>Em vez de escreveres um <code>kind: HTTPRoute</code> à mão, usa
+<code>container run --expose 8080</code> e alcança o container pelo FQDN interno automático
+(<code>&lt;nome&gt;.&lt;namespace&gt;.delonix.internal</code>) — zero configuração manual de
+rota.</p>""",
+                "en": """<p>Instead of writing a <code>kind: HTTPRoute</code> by hand, use
+<code>container run --expose 8080</code> and reach the container through the automatic internal
+FQDN (<code>&lt;name&gt;.&lt;namespace&gt;.delonix.internal</code>) — zero manual route
+configuration.</p>"""},
+    },
+    "tunnel": {
+        "lab": {"pt": """<p>Uma porta local, uma URL pública — sem conta, sem router.</p>
+<pre><code>delonix net tunnel expose --provider pinggy --local-port 8080
+delonix net tunnel ls</code></pre>""",
+                "en": """<p>One local port, one public URL — no account, no router config.</p>
+<pre><code>delonix net tunnel expose --provider pinggy --local-port 8080
+delonix net tunnel ls</code></pre>"""},
+        "challenge": {"pt": """<p>Aponta o <code>--local-port</code> do tunnel para a porta onde o
+proxy L7 (<code>httproute</code>) escuta, e confirma que a MESMA URL pública consegue servir vários
+containers backend diferentes, decididos pelo <code>Host</code> do pedido.</p>""",
+                "en": """<p>Point the tunnel's <code>--local-port</code> at the port the L7 proxy
+(<code>httproute</code>) listens on, and confirm the SAME public URL can serve several different
+backend containers, decided by the request's <code>Host</code>.</p>"""},
+    },
+    "flow": {
+        "lab": {"pt": """<p>Observa tráfego por-container ao vivo enquanto geras carga noutro
+terminal.</p>
+<pre><code># num terminal
+delonix net flow --watch
+# noutro terminal
+while true; do curl -s localhost:8080 >/dev/null; done</code></pre>""",
+                "en": """<p>Watch live per-container traffic while generating load in another
+terminal.</p>
+<pre><code># in one terminal
+delonix net flow --watch
+# in another terminal
+while true; do curl -s localhost:8080 >/dev/null; done</code></pre>"""},
+        "challenge": {"pt": """<p>Corre <code>flow</code> sem privilégio e depois com
+CAP_BPF/root, e compara: sem privilégio cai nos contadores veth (sempre funciona); com privilégio
+usa os classificadores eBPF tc/clsact — nos dois casos o nft continua o único a fazer drop.</p>""",
+                "en": """<p>Run <code>flow</code> without privilege and then with CAP_BPF/root, and
+compare: without privilege it falls back to veth counters (always works); with privilege it uses
+the eBPF tc/clsact classifiers — in both cases nft remains the only thing that drops packets.</p>"""},
+    },
+    "boot": {
+        "lab": {"pt": """<p>Faz um container sobreviver a um reboot do host, sem daemon
+nenhum a vigiá-lo.</p>
+<pre><code>delonix container run -d --name web nginx
+delonix net boot enable web
+delonix net boot status web</code></pre>""",
+                "en": """<p>Make a container survive a host reboot, with no daemon watching over
+it.</p>
+<pre><code>delonix container run -d --name web nginx
+delonix net boot enable web
+delonix net boot status web</code></pre>"""},
+        "challenge": {"pt": """<p>Em rootless, confirma que a unit gerada é uma <em>user unit</em>
+(não system) e que <code>loginctl enable-linger</code> ficou activo para a tua conta — sem isso a
+unit nunca arrancaria antes do login.</p>""",
+                "en": """<p>In rootless mode, confirm the generated unit is a <em>user unit</em>
+(not a system one) and that <code>loginctl enable-linger</code> got enabled for your account —
+without it, the unit would never start before login.</p>"""},
+    },
+    "system": {
+        "lab": {"pt": """<p>Enche disco com lixo (containers parados) e depois recupera-o.</p>
+<pre><code>for i in 1 2 3; do delonix container run --name lixo-$i alpine true; done
+delonix system df
+delonix system prune
+delonix system df</code></pre>""",
+                "en": """<p>Fill up disk with junk (stopped containers) and then reclaim it.</p>
+<pre><code>for i in 1 2 3; do delonix container run --name junk-$i alpine true; done
+delonix system df
+delonix system prune
+delonix system df</code></pre>"""},
+        "challenge": {"pt": """<p>Segue <code>system events</code> num terminal enquanto corres
+<code>container run</code>/<code>stop</code>/<code>rm</code> noutro, e mapeia cada acção da CLI ao
+evento exacto que ela emite.</p>""",
+                "en": """<p>Follow <code>system events</code> in one terminal while running
+<code>container run</code>/<code>stop</code>/<code>rm</code> in another, and map each CLI action
+to the exact event it emits.</p>"""},
+    },
+    "dash": {
+        "lab": {"pt": """<p>Um ecrã só, sem correr <code>ls</code> em 5 grupos diferentes.</p>
+<pre><code>delonix dash --once
+delonix dash</code></pre>
+<p>Na TUI, carrega em <code>m</code> para alternar o sparkline entre containers a correr e memória
+usada.</p>""",
+                "en": """<p>One screen, instead of running <code>ls</code> across 5 different
+groups.</p>
+<pre><code>delonix dash --once
+delonix dash</code></pre>
+<p>In the TUI, press <code>m</code> to toggle the sparkline between running containers and memory
+used.</p>"""},
+        "challenge": {"pt": """<p>Corre <code>delonix dash --json | jq</code> e confirma que os
+campos de rede/disco vêm marcados de forma explícita quando ainda não foram medidos — nunca
+disfarçados de zero.</p>""",
+                "en": """<p>Run <code>delonix dash --json | jq</code> and confirm the network/disk
+fields are explicitly marked when they haven't been measured yet — never disguised as zero.</p>"""},
+    },
+    "docker-api": {
+        "lab": {"pt": """<p>Aponta o próprio <code>docker</code> CLI para o delonix, sem Docker
+Desktop nenhum instalado.</p>
+<pre><code>delonix serve docker-api --addr unix:///tmp/delonix.sock &
+DOCKER_HOST=unix:///tmp/delonix.sock docker ps
+DOCKER_HOST=unix:///tmp/delonix.sock docker run -d --name web nginx</code></pre>""",
+                "en": """<p>Point the real <code>docker</code> CLI at delonix, with no Docker
+Desktop installed at all.</p>
+<pre><code>delonix serve docker-api --addr unix:///tmp/delonix.sock &
+DOCKER_HOST=unix:///tmp/delonix.sock docker ps
+DOCKER_HOST=unix:///tmp/delonix.sock docker run -d --name web nginx</code></pre>"""},
+        "challenge": {"pt": """<p>Aponta um <code>docker-compose.yml</code> real para o mesmo
+socket (<code>DOCKER_HOST=unix://... docker compose up</code>) e confirma que funciona de ponta a
+ponta contra o delonix.</p>""",
+                "en": """<p>Point a real <code>docker-compose.yml</code> at the same socket
+(<code>DOCKER_HOST=unix://... docker compose up</code>) and confirm it works end to end against
+delonix.</p>"""},
+    },
+    "kube": {
+        "lab": {"pt": """<p>Exporta um container já a correr localmente para um manifesto
+Kubernetes pronto a aplicar.</p>
+<pre><code>delonix container run -d --name web nginx
+delonix cluster kube generate web > web-pod.yaml
+cat web-pod.yaml</code></pre>""",
+                "en": """<p>Export a container already running locally into a Kubernetes manifest
+ready to apply.</p>
+<pre><code>delonix container run -d --name web nginx
+delonix cluster kube generate web > web-pod.yaml
+cat web-pod.yaml</code></pre>"""},
+        "challenge": {"pt": """<p>Aplica o <code>web-pod.yaml</code> gerado a um cluster real
+criado com <code>delonix cluster kubeadm</code> e confirma com <code>kubectl get pods</code> que o
+pod agenda e arranca.</p>""",
+                "en": """<p>Apply the generated <code>web-pod.yaml</code> to a real cluster created
+with <code>delonix cluster kubeadm</code> and confirm with <code>kubectl get pods</code> that the
+pod schedules and starts.</p>"""},
+    },
+    "netns": {
+        "lab": {"pt": """<p>Olha para dentro da infra de rede rootless que a maioria dos
+utilizadores nunca precisa de tocar.</p>
+<pre><code>delonix net netns status
+delonix net netns exec -- ip addr show delonix0</code></pre>""",
+                "en": """<p>Look inside the rootless network infrastructure most users never need
+to touch.</p>
+<pre><code>delonix net netns status
+delonix net netns exec -- ip addr show delonix0</code></pre>"""},
+        "challenge": {"pt": """<p>Desliga o holder com <code>net netns down</code>, depois corre
+QUALQUER <code>container run</code> — confirma que ele reaparece sozinho (<code>ensure_up</code>) e
+que <code>net netns status</code> volta a mostrar tudo saudável.</p>""",
+                "en": """<p>Bring the holder down with <code>net netns down</code>, then run ANY
+<code>container run</code> — confirm it comes back up by itself (<code>ensure_up</code>) and that
+<code>net netns status</code> reports everything healthy again.</p>"""},
+    },
+    "completion": {
+        "lab": {"pt": """<p>Autocompletion real, gerado a partir da MESMA definição da CLI —
+nunca fica desactualizado à mão.</p>
+<pre><code>echo 'source <(delonix completion bash)' >> ~/.bashrc
+source ~/.bashrc
+delonix con&lt;TAB&gt;</code></pre>""",
+                "en": """<p>Real autocompletion, generated from the SAME CLI definition — it never
+goes stale by hand.</p>
+<pre><code>echo 'source <(delonix completion bash)' >> ~/.bashrc
+source ~/.bashrc
+delonix con&lt;TAB&gt;</code></pre>"""},
+        "challenge": {"pt": """<p>Compara o output de <code>delonix completion bash</code> entre
+duas versões do binário (antes/depois de um upgrade) — confirma que um comando novo aparece
+sozinho no script, sem qualquer edição manual.</p>""",
+                "en": """<p>Compare the output of <code>delonix completion bash</code> between two
+binary versions (before/after an upgrade) — confirm a new command shows up in the script by
+itself, with no manual editing.</p>"""},
+    },
+}
+
 # ---------------------------------------------------------------- template
 
 CSS = """
@@ -1050,15 +1841,29 @@ color:var(--muted)}
 nav.side a{display:block;padding:.28rem .55rem;border-radius:6px;color:var(--ink);font-size:.93rem}
 nav.side a:hover{background:var(--accent-soft);text-decoration:none}
 nav.side a.on{background:var(--accent-soft);color:var(--accent);font-weight:600}
+nav.side .brand .toggles{display:flex;align-items:center;gap:.4rem;margin-left:auto}
 .theme-toggle{appearance:none;border:1px solid var(--line);background:var(--bg);color:var(--ink);
 border-radius:8px;width:30px;height:30px;flex-shrink:0;display:inline-flex;align-items:center;
-justify-content:center;cursor:pointer;font-size:.95rem;margin-left:auto;line-height:1}
+justify-content:center;cursor:pointer;font-size:.95rem;line-height:1}
 .theme-toggle:hover{border-color:var(--accent)}
 .theme-toggle .i-sun{display:none}
 :root[data-theme="dark"] .theme-toggle .i-moon{display:none}
 :root[data-theme="dark"] .theme-toggle .i-sun{display:inline}
 @media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .theme-toggle .i-moon{display:none}
 :root:not([data-theme="light"]) .theme-toggle .i-sun{display:inline}}
+.lang-toggle{appearance:none;border:1px solid var(--line);background:var(--bg);color:var(--ink);
+border-radius:8px;height:30px;padding:0 .55rem;flex-shrink:0;display:inline-flex;align-items:center;
+justify-content:center;cursor:pointer;font-size:.72rem;font-weight:700;letter-spacing:.02em;line-height:1}
+.lang-toggle:hover{border-color:var(--accent)}
+.lang-toggle .lbl-pt{display:none}
+:root[data-lang="en"] .lang-toggle .lbl-en{display:none}
+:root[data-lang="en"] .lang-toggle .lbl-pt{display:inline}
+.lang-en{display:none}
+:root[data-lang="en"] .lang-en{display:inline}
+:root[data-lang="en"] .lang-pt{display:none}
+p.lang-en,p.lang-pt,div.lang-en,div.lang-pt{display:none}
+:root[data-lang="en"] p.lang-en,:root[data-lang="en"] div.lang-en{display:block}
+:root:not([data-lang="en"]) p.lang-pt,:root:not([data-lang="en"]) div.lang-pt{display:block}
 main{min-width:0;padding:2.2rem 3rem 5rem;max-width:860px;margin:0 auto}
 main h1{font-size:1.9rem;margin:.2rem 0 .4rem}
 main h2{font-size:1.35rem;margin-top:2.4rem;padding-bottom:.35rem;border-bottom:1px solid var(--line)}
@@ -1123,31 +1928,44 @@ main{padding:1.4rem 1.2rem 4rem;max-width:none}}
 
 def sidebar(active, depth=0):
     p = "../" * depth
+    # (href, rótulo PT, rótulo EN) — as páginas ligadas continuam PT-only por
+    # agora (ver relatório de âmbito), mas o rótulo do menu já traduz.
     items_docs = [
-        ("index.html", "Início"),
-        ("cheatsheet.html", "Cheatsheet"),
-        ("kinds.html", "Kinds e templates"),
-        ("cloud.html", "cloud-init, cloud-img e CH"),
-        ("labs.html", "Laboratórios"),
-        ("arquitectura.html", "Arquitectura"),
-        ("c4.html", "Modelo C4 e system design"),
-        ("cri.html", "CRI — kubelet sem containerd"),
-        ("comparacao.html", "Delonix vs Docker vs Podman"),
-        ("tutorial-delonix-temp.html", "Projecto completo: Delonix Temp"),
+        ("index.html", "Início", "Home"),
+        ("cheatsheet.html", "Cheatsheet", "Cheatsheet"),
+        ("kinds.html", "Kinds e templates", "Kinds & templates"),
+        ("cloud.html", "cloud-init, cloud-img e CH", "cloud-init, cloud-img & CH"),
+        ("labs.html", "Laboratórios", "Labs"),
+        ("arquitectura.html", "Arquitectura", "Architecture"),
+        ("c4.html", "Modelo C4 e system design", "C4 model & system design"),
+        ("cri.html", "CRI — kubelet sem containerd", "CRI — kubelet without containerd"),
+        ("comparacao.html", "Delonix vs Docker vs Podman", "Delonix vs Docker vs Podman"),
+        ("tutorial-delonix-temp.html", "Projecto completo: Delonix Temp", "Full project: Delonix Temp"),
     ]
     items_cmd = [(f"comandos/{g}.html", GROUPS[g]["title"]) for g in GROUPS]
+    def link_bi(href, pt, en):
+        cls = ' class="on"' if href == active else ""
+        return (
+            f'<a href="{p}{href}"{cls}>'
+            f"<span class='lang-pt'>{html.escape(pt)}</span>"
+            f"<span class='lang-en'>{html.escape(en)}</span></a>"
+        )
     def link(href, label):
         cls = ' class="on"' if href == active else ""
         return f'<a href="{p}{href}"{cls}>{html.escape(label)}</a>'
     return f"""<nav class="side">
 <div class="brand"><span class="dot">▲</span> Delonix Engine
+<div class="toggles">
+<button class="lang-toggle" type="button" aria-label="Switch language / Mudar idioma" title="EN / PT">
+<span class="lbl-en">EN</span><span class="lbl-pt">PT</span></button>
 <button class="theme-toggle" type="button" aria-label="Alternar tema claro/escuro" title="Tema claro/escuro">
-<span class="i-moon">🌙</span><span class="i-sun">☀️</span></button></div>
-<h5>Documentação</h5>
-{''.join(link(h, l) for h, l in items_docs)}
-<h5>Referência CLI</h5>
+<span class="i-moon">🌙</span><span class="i-sun">☀️</span></button>
+</div></div>
+<h5>{bi('span', 'Documentação', 'Docs')}</h5>
+{''.join(link_bi(h, pt, en) for h, pt, en in items_docs)}
+<h5>{bi('span', 'Referência CLI', 'CLI reference')}</h5>
 {''.join(link(h, l) for h, l in items_cmd)}
-<h5>Projecto</h5>
+<h5>{bi('span', 'Projecto', 'Project')}</h5>
 <a href="https://github.com/angolardevops/delonix-runtime">GitHub</a>
 <a href="https://github.com/angolardevops/delonix-runtime/releases">Releases</a>
 </nav>"""
@@ -1160,6 +1978,8 @@ def sidebar(active, depth=0):
 THEME_INIT_JS = """<script>(function(){try{
 var t=localStorage.getItem('delonix-docs-theme');
 if(t)document.documentElement.setAttribute('data-theme',t);
+var l=localStorage.getItem('delonix-docs-lang');
+if(l)document.documentElement.setAttribute('data-lang',l);
 }catch(e){}})();</script>"""
 
 # JS partilhado por todas as páginas: toggle de tema (persistido), índice
@@ -1233,6 +2053,15 @@ function highlightAll(){
   });
 }
 
+function visibleHeadingText(h){
+  // A heading pode conter os dois <span class="lang-pt/lang-en"> do bi() —
+  // h.textContent junta os dois, mesmo com um deles escondido por CSS. Usa
+  // só o do idioma activo à data da construção do índice.
+  var lang=document.documentElement.getAttribute('data-lang')||'pt';
+  var want=lang==='en'?'lang-en':'lang-pt';
+  var pick=h.querySelector(':scope > .'+want);
+  return (pick?pick.textContent:h.textContent).trim();
+}
 function buildToc(){
   var main=document.querySelector('main'),nav=document.getElementById('toc-nav'),
       aside=document.getElementById('pagetoc');
@@ -1241,13 +2070,14 @@ function buildToc(){
   if(heads.length<2){if(aside)aside.style.display='none';return;}
   var used={};
   heads.forEach(function(h){
+    var label=visibleHeadingText(h);
     if(!h.id){
-      var slug=h.textContent.toLowerCase().trim().replace(/[^a-z0-9]+/g,'-').replace(/(^-|-$)/g,'')||'sec';
+      var slug=label.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/(^-|-$)/g,'')||'sec';
       while(used[slug])slug+='-x';
       used[slug]=1;h.id=slug;
     }
     var a=document.createElement('a');
-    a.href='#'+h.id;a.textContent=h.textContent.trim();
+    a.href='#'+h.id;a.textContent=label;
     nav.appendChild(a);
   });
 }
@@ -1264,10 +2094,38 @@ function initThemeToggle(){
   });
 }
 
+function refreshTocLabels(){
+  document.querySelectorAll('#toc-nav a').forEach(function(a){
+    var h=document.getElementById(a.getAttribute('href').slice(1));
+    if(h)a.textContent=visibleHeadingText(h);
+  });
+}
+function initLangToggle(){
+  var KEY='delonix-docs-lang',btn=document.querySelector('.lang-toggle');
+  if(!btn)return;
+  btn.addEventListener('click',function(){
+    var eff=document.documentElement.getAttribute('data-lang')||'pt';
+    var next=eff==='en'?'pt':'en';
+    document.documentElement.setAttribute('data-lang',next);
+    try{localStorage.setItem(KEY,next);}catch(e){}
+    refreshTocLabels();
+  });
+}
+
 document.addEventListener('DOMContentLoaded',function(){
-  initThemeToggle();buildToc();highlightAll();
+  initThemeToggle();initLangToggle();buildToc();highlightAll();
 });
 })();</script>"""
+
+
+FOOTER_PT = ('Delonix Engine · Apache-2.0 · '
+             '<a href="https://github.com/angolardevops/delonix-runtime">angolardevops/delonix-runtime</a>'
+             ' · Referência gerada do <code>--help</code> real do binário por <code>docs/gen.py</code>.')
+FOOTER_EN = ('Delonix Engine · Apache-2.0 · '
+             '<a href="https://github.com/angolardevops/delonix-runtime">angolardevops/delonix-runtime</a>'
+             ' · Reference generated from the real <code>--help</code> of the binary by <code>docs/gen.py</code>.')
+FOOTER_HTML = bi("span", FOOTER_PT, FOOTER_EN)
+TOC_HEADING_HTML = bi("span", "Nesta página", "On this page")
 
 
 def page(path, title, body, depth=0):
@@ -1285,10 +2143,9 @@ def page(path, title, body, depth=0):
 {sidebar(path, depth)}
 <main>
 {body}
-<footer>Delonix Engine · Apache-2.0 · <a href="https://github.com/angolardevops/delonix-runtime">angolardevops/delonix-runtime</a>
-· Referência gerada do <code>--help</code> real do binário por <code>docs/gen.py</code>.</footer>
+<footer>{FOOTER_HTML}</footer>
 </main>
-<aside class="toc" id="pagetoc"><div class="toc-inner"><h5>Nesta página</h5><nav id="toc-nav"></nav></div></aside>
+<aside class="toc" id="pagetoc"><div class="toc-inner"><h5>{TOC_HEADING_HTML}</h5><nav id="toc-nav"></nav></div></aside>
 </div>
 {SITE_JS}
 </body>
@@ -1317,8 +2174,16 @@ def examples_html(exs):
 
 
 def group_page(name, g):
-    body = [f"<h1>{html.escape(g['title'])}</h1><p class='tagline'>{html.escape(g['tagline'])}</p>"]
-    body.append(f"<p>{g['intro']}</p>")
+    en = GROUPS_EN.get(name, {})
+    body = [f"<h1>{html.escape(g['title'])}</h1>"]
+    if en.get("tagline"):
+        body.append(bi("p", html.escape(g["tagline"]), html.escape(en["tagline"]), cls="tagline"))
+    else:
+        body.append(f"<p class='tagline'>{html.escape(g['tagline'])}</p>")
+    if en.get("intro"):
+        body.append(bi("p", g["intro"], en["intro"]))
+    else:
+        body.append(f"<p>{g['intro']}</p>")
     body.append(source_link_html(name))
     top_help = help_of(*group_argv(name))
     # A intro já vem de `g['intro']` (prosa autoral) — o `about` do clap aqui
@@ -1345,6 +2210,8 @@ def group_page(name, g):
             body.append(meta["notes"])
         if meta.get("examples"):
             body.append("<h3>Exemplos</h3>" + examples_html(meta["examples"]))
+    if name in CLI_LABS:
+        body.append(lab_challenge_html(CLI_LABS[name]))
     page(f"comandos/{name}.html", g["title"], "\n".join(body), depth=1)
 
 
