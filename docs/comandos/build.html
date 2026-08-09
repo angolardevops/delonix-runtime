@@ -7,6 +7,8 @@
 <script>(function(){try{
 var t=localStorage.getItem('delonix-docs-theme');
 if(t)document.documentElement.setAttribute('data-theme',t);
+var l=localStorage.getItem('delonix-docs-lang');
+if(l)document.documentElement.setAttribute('data-lang',l);
 }catch(e){}})();</script>
 <style>
 :root{--accent:#e8590c;--accent-soft:#fff0e6;--ink:#1a1a2e;--muted:#5a6472;--line:#e6e8ec;
@@ -37,15 +39,29 @@ color:var(--muted)}
 nav.side a{display:block;padding:.28rem .55rem;border-radius:6px;color:var(--ink);font-size:.93rem}
 nav.side a:hover{background:var(--accent-soft);text-decoration:none}
 nav.side a.on{background:var(--accent-soft);color:var(--accent);font-weight:600}
+nav.side .brand .toggles{display:flex;align-items:center;gap:.4rem;margin-left:auto}
 .theme-toggle{appearance:none;border:1px solid var(--line);background:var(--bg);color:var(--ink);
 border-radius:8px;width:30px;height:30px;flex-shrink:0;display:inline-flex;align-items:center;
-justify-content:center;cursor:pointer;font-size:.95rem;margin-left:auto;line-height:1}
+justify-content:center;cursor:pointer;font-size:.95rem;line-height:1}
 .theme-toggle:hover{border-color:var(--accent)}
 .theme-toggle .i-sun{display:none}
 :root[data-theme="dark"] .theme-toggle .i-moon{display:none}
 :root[data-theme="dark"] .theme-toggle .i-sun{display:inline}
 @media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .theme-toggle .i-moon{display:none}
 :root:not([data-theme="light"]) .theme-toggle .i-sun{display:inline}}
+.lang-toggle{appearance:none;border:1px solid var(--line);background:var(--bg);color:var(--ink);
+border-radius:8px;height:30px;padding:0 .55rem;flex-shrink:0;display:inline-flex;align-items:center;
+justify-content:center;cursor:pointer;font-size:.72rem;font-weight:700;letter-spacing:.02em;line-height:1}
+.lang-toggle:hover{border-color:var(--accent)}
+.lang-toggle .lbl-pt{display:none}
+:root[data-lang="en"] .lang-toggle .lbl-en{display:none}
+:root[data-lang="en"] .lang-toggle .lbl-pt{display:inline}
+.lang-en{display:none}
+:root[data-lang="en"] .lang-en{display:inline}
+:root[data-lang="en"] .lang-pt{display:none}
+p.lang-en,p.lang-pt,div.lang-en,div.lang-pt{display:none}
+:root[data-lang="en"] p.lang-en,:root[data-lang="en"] div.lang-en{display:block}
+:root:not([data-lang="en"]) p.lang-pt,:root:not([data-lang="en"]) div.lang-pt{display:block}
 main{min-width:0;padding:2.2rem 3rem 5rem;max-width:860px;margin:0 auto}
 main h1{font-size:1.9rem;margin:.2rem 0 .4rem}
 main h2{font-size:1.35rem;margin-top:2.4rem;padding-bottom:.35rem;border-bottom:1px solid var(--line)}
@@ -111,19 +127,24 @@ main{padding:1.4rem 1.2rem 4rem;max-width:none}}
 <div class="layout">
 <nav class="side">
 <div class="brand"><span class="dot">▲</span> Delonix Engine
+<div class="toggles">
+<button class="lang-toggle" type="button" aria-label="Switch language / Mudar idioma" title="EN / PT">
+<span class="lbl-en">EN</span><span class="lbl-pt">PT</span></button>
 <button class="theme-toggle" type="button" aria-label="Alternar tema claro/escuro" title="Tema claro/escuro">
-<span class="i-moon">🌙</span><span class="i-sun">☀️</span></button></div>
-<h5>Documentação</h5>
-<a href="../index.html">Início</a><a href="../cheatsheet.html">Cheatsheet</a><a href="../kinds.html">Kinds e templates</a><a href="../cloud.html">cloud-init, cloud-img e CH</a><a href="../labs.html">Laboratórios</a><a href="../arquitectura.html">Arquitectura</a><a href="../c4.html">Modelo C4 e system design</a><a href="../cri.html">CRI — kubelet sem containerd</a><a href="../comparacao.html">Delonix vs Docker vs Podman</a><a href="../tutorial-delonix-temp.html">Projecto completo: Delonix Temp</a>
-<h5>Referência CLI</h5>
+<span class="i-moon">🌙</span><span class="i-sun">☀️</span></button>
+</div></div>
+<h5><span class='lang-pt'>Documentação</span><span class='lang-en'>Docs</span></h5>
+<a href="../index.html"><span class='lang-pt'>Início</span><span class='lang-en'>Home</span></a><a href="../cheatsheet.html"><span class='lang-pt'>Cheatsheet</span><span class='lang-en'>Cheatsheet</span></a><a href="../kinds.html"><span class='lang-pt'>Kinds e templates</span><span class='lang-en'>Kinds &amp; templates</span></a><a href="../cloud.html"><span class='lang-pt'>cloud-init, cloud-img e CH</span><span class='lang-en'>cloud-init, cloud-img &amp; CH</span></a><a href="../labs.html"><span class='lang-pt'>Laboratórios</span><span class='lang-en'>Labs</span></a><a href="../arquitectura.html"><span class='lang-pt'>Arquitectura</span><span class='lang-en'>Architecture</span></a><a href="../c4.html"><span class='lang-pt'>Modelo C4 e system design</span><span class='lang-en'>C4 model &amp; system design</span></a><a href="../cri.html"><span class='lang-pt'>CRI — kubelet sem containerd</span><span class='lang-en'>CRI — kubelet without containerd</span></a><a href="../comparacao.html"><span class='lang-pt'>Delonix vs Docker vs Podman</span><span class='lang-en'>Delonix vs Docker vs Podman</span></a><a href="../tutorial-delonix-temp.html"><span class='lang-pt'>Projecto completo: Delonix Temp</span><span class='lang-en'>Full project: Delonix Temp</span></a>
+<h5><span class='lang-pt'>Referência CLI</span><span class='lang-en'>CLI reference</span></h5>
 <a href="../comandos/container.html">delonix container</a><a href="../comandos/workload.html">delonix workload</a><a href="../comandos/pod.html">delonix pod</a><a href="../comandos/image.html">delonix image</a><a href="../comandos/build.html" class="on">delonix build</a><a href="../comandos/vm.html">delonix vm</a><a href="../comandos/volumes.html">delonix volumes</a><a href="../comandos/network.html">delonix network</a><a href="../comandos/stack.html">delonix stack</a><a href="../comandos/compose.html">delonix compose</a><a href="../comandos/cluster.html">delonix cluster</a><a href="../comandos/secret.html">delonix secret</a><a href="../comandos/storage.html">delonix storage</a><a href="../comandos/sharevolume.html">delonix sharevolume</a><a href="../comandos/ingress.html">delonix net ingress</a><a href="../comandos/egress.html">delonix net egress</a><a href="../comandos/httproute.html">delonix net httproute</a><a href="../comandos/tunnel.html">delonix net tunnel</a><a href="../comandos/flow.html">delonix net flow</a><a href="../comandos/boot.html">delonix net boot</a><a href="../comandos/system.html">delonix system</a><a href="../comandos/dash.html">delonix dash</a><a href="../comandos/docker-api.html">delonix serve docker-api</a><a href="../comandos/kube.html">delonix cluster kube</a><a href="../comandos/netns.html">delonix net netns</a><a href="../comandos/completion.html">delonix completion</a>
-<h5>Projecto</h5>
+<h5><span class='lang-pt'>Projecto</span><span class='lang-en'>Project</span></h5>
 <a href="https://github.com/angolardevops/delonix-runtime">GitHub</a>
 <a href="https://github.com/angolardevops/delonix-runtime/releases">Releases</a>
 </nav>
 <main>
-<h1>delonix build</h1><p class='tagline'>Constrói uma imagem a partir de um Dockerfile ou Delonixfile.</p>
-<p>Build sem daemon nem BuildKit: sobe um container de trabalho por estágio, corre
+<h1>delonix build</h1>
+<p class='tagline lang-pt'>Constrói uma imagem a partir de um Dockerfile ou Delonixfile.</p><p class='tagline lang-en'>Builds an image from a Dockerfile or Delonixfile.</p>
+<p class='lang-pt'>Build sem daemon nem BuildKit: sobe um container de trabalho por estágio, corre
 cada <code>RUN</code> por <code>exec</code>, aplica <code>COPY</code> no rootfs (confinado ao
 contexto — path traversal é rejeitado) e empacota o resultado. Sem <code>-f</code>, procura
 primeiro um <code>Delonixfile</code> no contexto e só depois um <code>Dockerfile</code> — a
@@ -136,7 +157,20 @@ estágio (sem lineage OCI para um estágio clonado) — sem restrição em rootl
 sobrevivem ao build (incluindo em rootless). <strong>Cache de camadas por instrução</strong>
 (rootless — um <code>RUN</code>/<code>COPY</code> repetido não re-executa; <code>--no-cache</code>
 para saltar; modo root continua sem cache). Sem BuildKit real (sem
-<code>RUN --mount=secret</code>, sem <code>--platform</code>).</p>
+<code>RUN --mount=secret</code>, sem <code>--platform</code>).</p><p class='lang-en'>Build with no daemon and no BuildKit: it spins up one working container per
+stage, runs each <code>RUN</code> via <code>exec</code>, applies <code>COPY</code> to the rootfs
+(confined to the build context — path traversal is rejected) and packages the result. Without
+<code>-f</code>, it looks for a <code>Delonixfile</code> in the context first and only then a
+<code>Dockerfile</code> — same grammar, with extensions (<code>SCAN</code>, <code>CPUS</code>,
+<code>MEMORY</code>, <code>SECURITY</code>, <code>HEALTHCHECK</code>). <strong>Multi-stage
+supported</strong> (<code>FROM ... AS &lt;name&gt;</code> + <code>COPY --from=&lt;stage&gt;</code>);
+known limitation: in root mode (overlay), the final stage still has to be a real image, not
+another stage (no OCI lineage for a cloned stage) — no such restriction in rootless.
+<code>ARG</code>/<code>--build-arg</code> and <code>USER</code>/<code>ENTRYPOINT</code> already
+survive the build (including in rootless). <strong>Per-instruction layer cache</strong> (rootless
+— a repeated <code>RUN</code>/<code>COPY</code> doesn't re-execute; <code>--no-cache</code> to skip
+it; root mode still has no cache). No real BuildKit (no <code>RUN --mount=secret</code>, no
+<code>--platform</code>).</p>
 <p class='src-link'>📄 Implementação real em Rust: <a href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/delonix-runtime-bin/src/cmd/build.rs"><code>cmd/build.rs</code></a></p>
 <div class='help'><pre><code>Usage: delonix build [OPTIONS] --tag &lt;TAG&gt; [CONTEXT]
 
@@ -153,10 +187,25 @@ Options:
       --platform &lt;PLATFORM&gt;    `linux/&lt;arch&gt;` (e.g. `linux/arm64`) — cross-arch build. Resolves the correct-arch base image and stamps it into the result; actually running a foreign-arch `RUN` needs the host&#x27;s own binfmt_misc/qemu-user-static already registered (not managed by delonix — a clear preflight error names the missing interpreter instead of a confusing mid-build failure)
   -h, --help                   Print help</code></pre></div>
 <h2>Exemplos</h2><div class="ex"><div class="cap">Build com tag</div><pre><code>delonix build -t minha-app:1.0 .</code></pre></div><div class="ex"><div class="cap">Delonixfile explícito</div><pre><code>delonix build -t api:dev -f Delonixfile ./servico</code></pre></div>
-<footer>Delonix Engine · Apache-2.0 · <a href="https://github.com/angolardevops/delonix-runtime">angolardevops/delonix-runtime</a>
-· Referência gerada do <code>--help</code> real do binário por <code>docs/gen.py</code>.</footer>
+<h2><span class='lang-pt'>Laboratório</span><span class='lang-en'>Lab</span></h2>
+<div class='callout lang-pt'><p>Escreve um <code>Delonixfile</code> multi-stage pequeno e constrói-o
+— sem daemon, sem BuildKit.</p>
+<pre><code>printf 'FROM golang:1.22 AS build\nWORKDIR /src\nCOPY . .\nRUN go build -o app\n\nFROM alpine\nCOPY --from=build /src/app /app\nENTRYPOINT ["/app"]\n' > Delonixfile
+delonix build -t minha-app .
+delonix container run --rm minha-app</code></pre></div><div class='callout lang-en'><p>Write a small multi-stage <code>Delonixfile</code> and build it — no
+daemon, no BuildKit.</p>
+<pre><code>printf 'FROM golang:1.22 AS build\nWORKDIR /src\nCOPY . .\nRUN go build -o app\n\nFROM alpine\nCOPY --from=build /src/app /app\nENTRYPOINT ["/app"]\n' > Delonixfile
+delonix build -t my-app .
+delonix container run --rm my-app</code></pre></div>
+<h2><span class='lang-pt'>Desafio</span><span class='lang-en'>Challenge</span></h2>
+<div class='callout lang-pt'><p>Passa um segredo com <code>--secret id=token,src=./token.txt</code>
+e usa <code>RUN --mount=type=secret,id=token</code> dentro de uma instrução. Depois de o build
+terminar, confirma que o valor NÃO está na imagem final (nem sequer um ficheiro vazio).</p></div><div class='callout lang-en'><p>Pass a secret with <code>--secret id=token,src=./token.txt</code> and
+use <code>RUN --mount=type=secret,id=token</code> in one instruction. After the build finishes,
+confirm the value is NOT in the final image (not even an empty file).</p></div>
+<footer><span class='lang-pt'>Delonix Engine · Apache-2.0 · <a href="https://github.com/angolardevops/delonix-runtime">angolardevops/delonix-runtime</a> · Referência gerada do <code>--help</code> real do binário por <code>docs/gen.py</code>.</span><span class='lang-en'>Delonix Engine · Apache-2.0 · <a href="https://github.com/angolardevops/delonix-runtime">angolardevops/delonix-runtime</a> · Reference generated from the real <code>--help</code> of the binary by <code>docs/gen.py</code>.</span></footer>
 </main>
-<aside class="toc" id="pagetoc"><div class="toc-inner"><h5>Nesta página</h5><nav id="toc-nav"></nav></div></aside>
+<aside class="toc" id="pagetoc"><div class="toc-inner"><h5><span class='lang-pt'>Nesta página</span><span class='lang-en'>On this page</span></h5><nav id="toc-nav"></nav></div></aside>
 </div>
 <script>(function(){
 function esc(s){return s.replace(/[&<>]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;'}[c];});}
@@ -225,6 +274,15 @@ function highlightAll(){
   });
 }
 
+function visibleHeadingText(h){
+  // A heading pode conter os dois <span class="lang-pt/lang-en"> do bi() —
+  // h.textContent junta os dois, mesmo com um deles escondido por CSS. Usa
+  // só o do idioma activo à data da construção do índice.
+  var lang=document.documentElement.getAttribute('data-lang')||'pt';
+  var want=lang==='en'?'lang-en':'lang-pt';
+  var pick=h.querySelector(':scope > .'+want);
+  return (pick?pick.textContent:h.textContent).trim();
+}
 function buildToc(){
   var main=document.querySelector('main'),nav=document.getElementById('toc-nav'),
       aside=document.getElementById('pagetoc');
@@ -233,13 +291,14 @@ function buildToc(){
   if(heads.length<2){if(aside)aside.style.display='none';return;}
   var used={};
   heads.forEach(function(h){
+    var label=visibleHeadingText(h);
     if(!h.id){
-      var slug=h.textContent.toLowerCase().trim().replace(/[^a-z0-9]+/g,'-').replace(/(^-|-$)/g,'')||'sec';
+      var slug=label.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/(^-|-$)/g,'')||'sec';
       while(used[slug])slug+='-x';
       used[slug]=1;h.id=slug;
     }
     var a=document.createElement('a');
-    a.href='#'+h.id;a.textContent=h.textContent.trim();
+    a.href='#'+h.id;a.textContent=label;
     nav.appendChild(a);
   });
 }
@@ -256,8 +315,26 @@ function initThemeToggle(){
   });
 }
 
+function refreshTocLabels(){
+  document.querySelectorAll('#toc-nav a').forEach(function(a){
+    var h=document.getElementById(a.getAttribute('href').slice(1));
+    if(h)a.textContent=visibleHeadingText(h);
+  });
+}
+function initLangToggle(){
+  var KEY='delonix-docs-lang',btn=document.querySelector('.lang-toggle');
+  if(!btn)return;
+  btn.addEventListener('click',function(){
+    var eff=document.documentElement.getAttribute('data-lang')||'pt';
+    var next=eff==='en'?'pt':'en';
+    document.documentElement.setAttribute('data-lang',next);
+    try{localStorage.setItem(KEY,next);}catch(e){}
+    refreshTocLabels();
+  });
+}
+
 document.addEventListener('DOMContentLoaded',function(){
-  initThemeToggle();buildToc();highlightAll();
+  initThemeToggle();initLangToggle();buildToc();highlightAll();
 });
 })();</script>
 </body>
