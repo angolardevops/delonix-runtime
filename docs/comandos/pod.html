@@ -173,7 +173,7 @@ N containers allowed). <strong>Known limitation:</strong> the <strong>PID</stron
 (<code>shareProcessNamespace</code>, already in the schema) is NOT shared yet — each container
 keeps its own process tree; that's the next slice.</p>
 <p class='src-link'>📄 Implementação real em Rust: <a href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/delonix-runtime-bin/src/cmd/pod.rs"><code>cmd/pod.rs</code></a></p>
-<div class='help'><pre><code>Usage: dlx pod [OPTIONS] &lt;COMMAND&gt;
+<div class='help'><pre><code>Usage: delonix pod [OPTIONS] &lt;COMMAND&gt;
 
 Commands:
   create    Create a pod (N containers sharing a netns) from a manifest (`kind: Pod`)
@@ -188,20 +188,23 @@ Options:
   -h, --help          Print help</code></pre></div>
 <h2 id='create'><code>pod create</code></h2>
 <p class='intro'>Create a pod (N containers sharing a netns) from a manifest (<code>kind: Pod</code>)</p>
-<div class='help'><pre><code>Usage: dlx pod create [OPTIONS]
+<div class='help'><pre><code>Usage: delonix pod create [OPTIONS]
 
 Options:
   -f, --file &lt;FILE&gt;   
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
   -h, --help          Print help</code></pre></div>
-<p>Idempotente (<em>garante-presente</em>): se o pod já tem containers, não
+<div class='lang-pt'><p>Idempotente (<em>garante-presente</em>): se o pod já tem containers, não
 faz nada. Também se pode aplicar pelo <code>delonix stack apply</code> (grupo <code>pods:</code> no
 <code>kind: Stack</code>) e pré-visualizar com <code>--dry-run</code>. Se a criação de um membro
-falha, o pod é desfeito por inteiro (sem meio-pod).</p>
+falha, o pod é desfeito por inteiro (sem meio-pod).</p></div><div class='lang-en'><p>Idempotent (<em>ensure-present</em>): if the pod already has
+containers, it does nothing. Can also be applied via <code>delonix stack apply</code> (the
+<code>pods:</code> group in <code>kind: Stack</code>) and previewed with <code>--dry-run</code>.
+If creating one member fails, the whole pod is torn down (no half-pod).</p></div>
 <h3>Exemplos</h3><div class="ex"><div class="cap">Criar um pod (web + sidecar que fala por localhost) de um manifesto</div><pre><code>delonix pod create -f examples/pod-multi.yaml</code></pre></div>
 <h2 id='ls'><code>pod ls</code></h2>
 <p class='intro'>List the pods (derived from container labels)</p>
-<div class='help'><pre><code>Usage: dlx pod ls [OPTIONS]
+<div class='help'><pre><code>Usage: delonix pod ls [OPTIONS]
 
 Options:
       --l18n &lt;en|pt&gt;     Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
@@ -210,7 +213,7 @@ Options:
 <h3>Exemplos</h3><div class="ex"><div class="cap">Listar os pods (POD, CONTAINERS n/N, IP, STATUS)</div><pre><code>delonix pod ls</code></pre></div>
 <h2 id='describe'><code>pod describe</code></h2>
 <p class='intro'>Details of one or more pods (containers + the shared IP), <code>kubectl</code> style</p>
-<div class='help'><pre><code>Usage: dlx pod describe [OPTIONS] [NAMES]...
+<div class='help'><pre><code>Usage: delonix pod describe [OPTIONS] [NAMES]...
 
 Arguments:
   [NAMES]...  
@@ -221,7 +224,7 @@ Options:
 <h3>Exemplos</h3><div class="ex"><div class="cap">Detalhe estilo kubectl: containers + IP e netns partilhados</div><pre><code>delonix pod describe web-app</code></pre></div>
 <h2 id='rm'><code>pod rm</code></h2>
 <p class='intro'>Remove a pod: stop/remove ALL its containers + the shared netns</p>
-<div class='help'><pre><code>Usage: dlx pod rm [OPTIONS] [NAMES]...
+<div class='help'><pre><code>Usage: delonix pod rm [OPTIONS] [NAMES]...
 
 Arguments:
   [NAMES]...  
@@ -233,7 +236,7 @@ Options:
 <h3>Exemplos</h3><div class="ex"><div class="cap">Remover o pod: pára/remove TODOS os containers + a netns partilhada</div><pre><code>delonix pod rm web-app</code></pre></div><div class="ex"><div class="cap">Forçar (mata os que estão a correr)</div><pre><code>delonix pod rm -f web-app</code></pre></div>
 <h2 id='logs'><code>pod logs</code></h2>
 <p class='intro'>Logs of a pod&#x27;s container (defaults to the first member)</p>
-<div class='help'><pre><code>Usage: dlx pod logs [OPTIONS] &lt;POD&gt;
+<div class='help'><pre><code>Usage: delonix pod logs [OPTIONS] &lt;POD&gt;
 
 Arguments:
   &lt;POD&gt;  
@@ -340,12 +343,25 @@ function visibleHeadingText(h){
   var pick=h.querySelector(':scope > .'+want);
   return (pick?pick.textContent:h.textContent).trim();
 }
+function isVisibleForLang(el,lang){
+  // Páginas como o index duplicam a secção INTEIRA por idioma (dois <h2>
+  // separados, um por língua) em vez de um <h2> só com dois spans — sem
+  // este filtro o índice listava as duas línguas ao mesmo tempo.
+  var wrap=el.closest('.lang-pt, .lang-en');
+  if(!wrap)return true;
+  return lang==='en'?wrap.classList.contains('lang-en'):wrap.classList.contains('lang-pt');
+}
 function buildToc(){
   var main=document.querySelector('main'),nav=document.getElementById('toc-nav'),
       aside=document.getElementById('pagetoc');
   if(!main||!nav)return;
-  var heads=main.querySelectorAll('h2');
+  var lang=document.documentElement.getAttribute('data-lang')||'pt';
+  var heads=[].slice.call(main.querySelectorAll('h2')).filter(function(h){
+    return isVisibleForLang(h,lang);
+  });
+  nav.innerHTML='';
   if(heads.length<2){if(aside)aside.style.display='none';return;}
+  if(aside)aside.style.display='';
   var used={};
   heads.forEach(function(h){
     var label=visibleHeadingText(h);
@@ -372,12 +388,6 @@ function initThemeToggle(){
   });
 }
 
-function refreshTocLabels(){
-  document.querySelectorAll('#toc-nav a').forEach(function(a){
-    var h=document.getElementById(a.getAttribute('href').slice(1));
-    if(h)a.textContent=visibleHeadingText(h);
-  });
-}
 function initLangToggle(){
   var KEY='delonix-docs-lang',btn=document.querySelector('.lang-toggle');
   if(!btn)return;
@@ -386,7 +396,7 @@ function initLangToggle(){
     var next=eff==='en'?'pt':'en';
     document.documentElement.setAttribute('data-lang',next);
     try{localStorage.setItem(KEY,next);}catch(e){}
-    refreshTocLabels();
+    buildToc();
   });
 }
 

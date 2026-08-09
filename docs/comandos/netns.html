@@ -152,7 +152,7 @@ the ingress holder up/down, attaching/detaching netns, publishing/unpublishing p
 per-container firewalling. Most users never need this — they use the higher-level groups — but
 it's exposed for debugging and integration.</p>
 <p class='src-link'>📄 Implementação real em Rust: <a href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/delonix-runtime-bin/src/cmd/netns.rs"><code>cmd/netns.rs</code></a></p>
-<div class='help'><pre><code>Usage: dlx net netns [OPTIONS] &lt;COMMAND&gt;
+<div class='help'><pre><code>Usage: delonix net netns [OPTIONS] &lt;COMMAND&gt;
 
 Commands:
   up         Bring the ingress infra up (idempotent): holder netns + delonix0 + single slirp
@@ -171,7 +171,7 @@ Options:
   -h, --help          Print help</code></pre></div>
 <h2 id='firewall'><code>netns firewall</code></h2>
 <p class='intro'>Apply (or clear) a container&#x27;s parameterizable firewall AT THE INGRESS</p>
-<div class='help'><pre><code>Usage: dlx net netns firewall [OPTIONS] &lt;NAME&gt;
+<div class='help'><pre><code>Usage: delonix net netns firewall [OPTIONS] &lt;NAME&gt;
 
 Arguments:
   &lt;NAME&gt;  Netns/container name
@@ -184,7 +184,7 @@ Options:
 <h3>Exemplos</h3><div class="ex"><div class="cap">Aplicar a firewall de um container no ingress</div><pre><code>delonix net netns firewall &lt;id&gt; 10.200.0.5</code></pre></div>
 <h2 id='unpublish'><code>netns unpublish</code></h2>
 <p class='intro'>Unpublish a host port from the ingress</p>
-<div class='help'><pre><code>Usage: dlx net netns unpublish [OPTIONS] &lt;HOST_PORT&gt;
+<div class='help'><pre><code>Usage: delonix net netns unpublish [OPTIONS] &lt;HOST_PORT&gt;
 
 Arguments:
   &lt;HOST_PORT&gt;  
@@ -195,7 +195,7 @@ Options:
 <h3>Exemplos</h3><div class="ex"><div class="cap">Despublicar</div><pre><code>delonix net netns unpublish 8080</code></pre></div>
 <h2 id='publish'><code>netns publish</code></h2>
 <p class='intro'>Publish a port through the ingress (add_hostfwd + DNAT) to a container</p>
-<div class='help'><pre><code>Usage: dlx net netns publish [OPTIONS] &lt;NAME&gt; &lt;SPEC&gt;
+<div class='help'><pre><code>Usage: delonix net netns publish [OPTIONS] &lt;NAME&gt; &lt;SPEC&gt;
 
 Arguments:
   &lt;NAME&gt;  Netns/container name (its IP is derived unless `--ip` is given)
@@ -208,7 +208,7 @@ Options:
 <h3>Exemplos</h3><div class="ex"><div class="cap">Publicar uma porta pelo ingress, à mão</div><pre><code>delonix net netns publish 8080:80 10.200.0.5</code></pre></div>
 <h2 id='exec'><code>netns exec</code></h2>
 <p class='intro'>Run a command inside an attached netns (exercises the runtime join path)</p>
-<div class='help'><pre><code>Usage: dlx net netns exec [OPTIONS] &lt;NAME&gt; &lt;COMMAND&gt;...
+<div class='help'><pre><code>Usage: delonix net netns exec [OPTIONS] &lt;NAME&gt; &lt;COMMAND&gt;...
 
 Arguments:
   &lt;NAME&gt;        
@@ -220,7 +220,7 @@ Options:
 <h3>Exemplos</h3><div class="ex"><div class="cap">Correr um comando DENTRO de uma netns anexada — para depurar a rede</div><pre><code>delonix net netns exec minha-netns ip -br addr</code></pre></div>
 <h2 id='detach'><code>netns detach</code></h2>
 <p class='intro'>Detach (and destroy) a previously attached netns</p>
-<div class='help'><pre><code>Usage: dlx net netns detach [OPTIONS] &lt;NAME&gt;
+<div class='help'><pre><code>Usage: delonix net netns detach [OPTIONS] &lt;NAME&gt;
 
 Arguments:
   &lt;NAME&gt;  
@@ -231,7 +231,7 @@ Options:
 <h3>Exemplos</h3><div class="ex"><div class="cap">Desligar e destruir essa netns</div><pre><code>delonix net netns detach minha-netns</code></pre></div>
 <h2 id='attach'><code>netns attach</code></h2>
 <p class='intro'>Attach a netns to delonix0 via veth (the holder is the netns/veth factory)</p>
-<div class='help'><pre><code>Usage: dlx net netns attach [OPTIONS] &lt;NAME&gt;
+<div class='help'><pre><code>Usage: delonix net netns attach [OPTIONS] &lt;NAME&gt;
 
 Arguments:
   &lt;NAME&gt;  Netns name (typically a container id/short-id)
@@ -243,7 +243,7 @@ Options:
 <h3>Exemplos</h3><div class="ex"><div class="cap">Ligar uma netns à bridge (o motor faz isto sozinho no run)</div><pre><code>delonix net netns attach minha-netns</code></pre></div>
 <h2 id='down'><code>netns down</code></h2>
 <p class='intro'>Force tear-down of the ingress infra (kills slirp + holder, frees the netns)</p>
-<div class='help'><pre><code>Usage: dlx net netns down [OPTIONS]
+<div class='help'><pre><code>Usage: delonix net netns down [OPTIONS]
 
 Options:
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
@@ -251,7 +251,7 @@ Options:
 <h3>Exemplos</h3><div class="ex"><div class="cap">Derrubar a infra de rede (mata slirp + holder) — derruba TODOS os containers da SDN</div><pre><code>delonix net netns down</code></pre></div>
 <h2 id='status'><code>netns status</code></h2>
 <p class='intro'>Show the ingress infra status (holder/slirp pids, bridge, refcount)</p>
-<div class='help'><pre><code>Usage: dlx net netns status [OPTIONS]
+<div class='help'><pre><code>Usage: delonix net netns status [OPTIONS]
 
 Options:
       --json          Emit JSON instead of a human summary
@@ -260,7 +260,7 @@ Options:
 <h3>Exemplos</h3><div class="ex"><div class="cap">Estado da infra de ingress</div><pre><code>delonix net netns status</code></pre></div>
 <h2 id='up'><code>netns up</code></h2>
 <p class='intro'>Bring the ingress infra up (idempotent): holder netns + delonix0 + single slirp</p>
-<div class='help'><pre><code>Usage: dlx net netns up [OPTIONS]
+<div class='help'><pre><code>Usage: delonix net netns up [OPTIONS]
 
 Options:
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
@@ -360,12 +360,25 @@ function visibleHeadingText(h){
   var pick=h.querySelector(':scope > .'+want);
   return (pick?pick.textContent:h.textContent).trim();
 }
+function isVisibleForLang(el,lang){
+  // Páginas como o index duplicam a secção INTEIRA por idioma (dois <h2>
+  // separados, um por língua) em vez de um <h2> só com dois spans — sem
+  // este filtro o índice listava as duas línguas ao mesmo tempo.
+  var wrap=el.closest('.lang-pt, .lang-en');
+  if(!wrap)return true;
+  return lang==='en'?wrap.classList.contains('lang-en'):wrap.classList.contains('lang-pt');
+}
 function buildToc(){
   var main=document.querySelector('main'),nav=document.getElementById('toc-nav'),
       aside=document.getElementById('pagetoc');
   if(!main||!nav)return;
-  var heads=main.querySelectorAll('h2');
+  var lang=document.documentElement.getAttribute('data-lang')||'pt';
+  var heads=[].slice.call(main.querySelectorAll('h2')).filter(function(h){
+    return isVisibleForLang(h,lang);
+  });
+  nav.innerHTML='';
   if(heads.length<2){if(aside)aside.style.display='none';return;}
+  if(aside)aside.style.display='';
   var used={};
   heads.forEach(function(h){
     var label=visibleHeadingText(h);
@@ -392,12 +405,6 @@ function initThemeToggle(){
   });
 }
 
-function refreshTocLabels(){
-  document.querySelectorAll('#toc-nav a').forEach(function(a){
-    var h=document.getElementById(a.getAttribute('href').slice(1));
-    if(h)a.textContent=visibleHeadingText(h);
-  });
-}
 function initLangToggle(){
   var KEY='delonix-docs-lang',btn=document.querySelector('.lang-toggle');
   if(!btn)return;
@@ -406,7 +413,7 @@ function initLangToggle(){
     var next=eff==='en'?'pt':'en';
     document.documentElement.setAttribute('data-lang',next);
     try{localStorage.setItem(KEY,next);}catch(e){}
-    refreshTocLabels();
+    buildToc();
   });
 }
 

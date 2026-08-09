@@ -154,7 +154,7 @@ shared BPF map — <strong>never dropping anything</strong> (nft remains the onl
 privilege (the common rootless case) it says so and falls back to veth counters, which always
 work. <code>--watch</code> redraws every 2s.</p>
 <p class='src-link'>📄 Implementação real em Rust: <a href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/delonix-runtime-bin/src/cmd/flow.rs"><code>cmd/flow.rs</code></a></p>
-<div class='help'><pre><code>Usage: dlx net flow [OPTIONS]
+<div class='help'><pre><code>Usage: delonix net flow [OPTIONS]
 
 Options:
       --iface &lt;IFACE&gt;  Watch only this interface (default: auto — every SDN veth)
@@ -260,12 +260,25 @@ function visibleHeadingText(h){
   var pick=h.querySelector(':scope > .'+want);
   return (pick?pick.textContent:h.textContent).trim();
 }
+function isVisibleForLang(el,lang){
+  // Páginas como o index duplicam a secção INTEIRA por idioma (dois <h2>
+  // separados, um por língua) em vez de um <h2> só com dois spans — sem
+  // este filtro o índice listava as duas línguas ao mesmo tempo.
+  var wrap=el.closest('.lang-pt, .lang-en');
+  if(!wrap)return true;
+  return lang==='en'?wrap.classList.contains('lang-en'):wrap.classList.contains('lang-pt');
+}
 function buildToc(){
   var main=document.querySelector('main'),nav=document.getElementById('toc-nav'),
       aside=document.getElementById('pagetoc');
   if(!main||!nav)return;
-  var heads=main.querySelectorAll('h2');
+  var lang=document.documentElement.getAttribute('data-lang')||'pt';
+  var heads=[].slice.call(main.querySelectorAll('h2')).filter(function(h){
+    return isVisibleForLang(h,lang);
+  });
+  nav.innerHTML='';
   if(heads.length<2){if(aside)aside.style.display='none';return;}
+  if(aside)aside.style.display='';
   var used={};
   heads.forEach(function(h){
     var label=visibleHeadingText(h);
@@ -292,12 +305,6 @@ function initThemeToggle(){
   });
 }
 
-function refreshTocLabels(){
-  document.querySelectorAll('#toc-nav a').forEach(function(a){
-    var h=document.getElementById(a.getAttribute('href').slice(1));
-    if(h)a.textContent=visibleHeadingText(h);
-  });
-}
 function initLangToggle(){
   var KEY='delonix-docs-lang',btn=document.querySelector('.lang-toggle');
   if(!btn)return;
@@ -306,7 +313,7 @@ function initLangToggle(){
     var next=eff==='en'?'pt':'en';
     document.documentElement.setAttribute('data-lang',next);
     try{localStorage.setItem(KEY,next);}catch(e){}
-    refreshTocLabels();
+    buildToc();
   });
 }
 

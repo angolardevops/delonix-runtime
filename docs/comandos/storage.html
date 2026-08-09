@@ -153,7 +153,7 @@ volume. Under the hood it's a <code>delonix-volume</code> volume with a network 
 (<code>--password-secret</code>), never from argv. Wired into <code>stack apply</code> (order
 Network→Volume→<strong>Storage</strong>→Image→Vm→Container). Mounting needs CAP_SYS_ADMIN.</p>
 <p class='src-link'>📄 Implementação real em Rust: <a href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/delonix-runtime-bin/src/cmd/storage.rs"><code>cmd/storage.rs</code></a></p>
-<div class='help'><pre><code>Usage: dlx storage [OPTIONS] &lt;COMMAND&gt;
+<div class='help'><pre><code>Usage: delonix storage [OPTIONS] &lt;COMMAND&gt;
 
 Commands:
   dash     Storage/volumes dashboard (KPIs + table) — TUI, or `--once` snapshot
@@ -169,7 +169,7 @@ Options:
   -h, --help          Print help</code></pre></div>
 <h2 id='apply'><code>storage apply</code></h2>
 <p class='intro'>Apply the <code>kind: Storage</code> documents from a manifest</p>
-<div class='help'><pre><code>Usage: dlx storage apply [OPTIONS]
+<div class='help'><pre><code>Usage: delonix storage apply [OPTIONS]
 
 Options:
   -f, --file &lt;FILE&gt;   
@@ -178,7 +178,7 @@ Options:
 <h3>Exemplos</h3><div class="ex"><div class="cap">Declarar o NAS num manifesto kind: Storage</div><pre><code>delonix storage apply -f storage.yaml</code></pre></div>
 <h2 id='inspect'><code>storage inspect</code></h2>
 <p class='intro'>Details of a storage</p>
-<div class='help'><pre><code>Usage: dlx storage inspect [OPTIONS] &lt;NAME&gt;
+<div class='help'><pre><code>Usage: delonix storage inspect [OPTIONS] &lt;NAME&gt;
 
 Arguments:
   &lt;NAME&gt;  
@@ -189,7 +189,7 @@ Options:
 <h3>Exemplos</h3><div class="ex"><div class="cap">JSON do storage (para scripts)</div><pre><code>delonix storage inspect nas-fotos</code></pre></div>
 <h2 id='dash'><code>storage dash</code></h2>
 <p class='intro'>Storage/volumes dashboard (KPIs + table) — TUI, or <code>--once</code> snapshot</p>
-<div class='help'><pre><code>Usage: dlx storage dash [OPTIONS]
+<div class='help'><pre><code>Usage: delonix storage dash [OPTIONS]
 
 Options:
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
@@ -199,7 +199,7 @@ Options:
 <h3>Exemplos</h3><div class="ex"><div class="cap">Dashboard só do armazenamento de rede</div><pre><code>delonix storage dash</code></pre></div>
 <h2 id='create'><code>storage create</code></h2>
 <p class='intro'>Create (and mount) a network storage</p>
-<div class='help'><pre><code>Usage: dlx storage create [OPTIONS] --type &lt;TYPE&gt; --server &lt;SERVER&gt; --share &lt;SHARE&gt; &lt;NAME&gt;
+<div class='help'><pre><code>Usage: delonix storage create [OPTIONS] --type &lt;TYPE&gt; --server &lt;SERVER&gt; --share &lt;SHARE&gt; &lt;NAME&gt;
 
 Arguments:
   &lt;NAME&gt;  
@@ -228,7 +228,7 @@ Options:
 <h3>Exemplos</h3><div class="ex"><div class="cap">NFS de um TrueNAS</div><pre><code>delonix storage create media --type nfs --server 10.0.0.5 --share /mnt/pool/media</code></pre></div><div class="ex"><div class="cap">SMB/CIFS com password do cofre</div><pre><code>delonix storage create docs --type cifs --server nas --share docs --username user --password-secret nas-pass</code></pre></div>
 <h2 id='ls'><code>storage ls</code></h2>
 <p class='intro'>List the network storages (volumes with a network driver)</p>
-<div class='help'><pre><code>Usage: dlx storage ls [OPTIONS]
+<div class='help'><pre><code>Usage: delonix storage ls [OPTIONS]
 
 Options:
       --l18n &lt;en|pt&gt;     Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
@@ -237,7 +237,7 @@ Options:
 <h3>Exemplos</h3><div class="ex"><pre><code>delonix storage ls</code></pre></div>
 <h2 id='rm'><code>storage rm</code></h2>
 <p class='intro'>Remove (and unmount) a storage. The DATA stays on the NAS — only the local mount is torn down, like docker</p>
-<div class='help'><pre><code>Usage: dlx storage rm [OPTIONS] &lt;NAME&gt;
+<div class='help'><pre><code>Usage: delonix storage rm [OPTIONS] &lt;NAME&gt;
 
 Arguments:
   &lt;NAME&gt;  
@@ -342,12 +342,25 @@ function visibleHeadingText(h){
   var pick=h.querySelector(':scope > .'+want);
   return (pick?pick.textContent:h.textContent).trim();
 }
+function isVisibleForLang(el,lang){
+  // Páginas como o index duplicam a secção INTEIRA por idioma (dois <h2>
+  // separados, um por língua) em vez de um <h2> só com dois spans — sem
+  // este filtro o índice listava as duas línguas ao mesmo tempo.
+  var wrap=el.closest('.lang-pt, .lang-en');
+  if(!wrap)return true;
+  return lang==='en'?wrap.classList.contains('lang-en'):wrap.classList.contains('lang-pt');
+}
 function buildToc(){
   var main=document.querySelector('main'),nav=document.getElementById('toc-nav'),
       aside=document.getElementById('pagetoc');
   if(!main||!nav)return;
-  var heads=main.querySelectorAll('h2');
+  var lang=document.documentElement.getAttribute('data-lang')||'pt';
+  var heads=[].slice.call(main.querySelectorAll('h2')).filter(function(h){
+    return isVisibleForLang(h,lang);
+  });
+  nav.innerHTML='';
   if(heads.length<2){if(aside)aside.style.display='none';return;}
+  if(aside)aside.style.display='';
   var used={};
   heads.forEach(function(h){
     var label=visibleHeadingText(h);
@@ -374,12 +387,6 @@ function initThemeToggle(){
   });
 }
 
-function refreshTocLabels(){
-  document.querySelectorAll('#toc-nav a').forEach(function(a){
-    var h=document.getElementById(a.getAttribute('href').slice(1));
-    if(h)a.textContent=visibleHeadingText(h);
-  });
-}
 function initLangToggle(){
   var KEY='delonix-docs-lang',btn=document.querySelector('.lang-toggle');
   if(!btn)return;
@@ -388,7 +395,7 @@ function initLangToggle(){
     var next=eff==='en'?'pt':'en';
     document.documentElement.setAttribute('data-lang',next);
     try{localStorage.setItem(KEY,next);}catch(e){}
-    refreshTocLabels();
+    buildToc();
   });
 }
 

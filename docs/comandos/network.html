@@ -159,7 +159,7 @@ achievable without host privilege. <code>macvlan</code>/<code>ipvlan</code> only
 the store — <code>create</code> WARNS loudly that the network wasn't physically realized (they
 need <code>CAP_NET_ADMIN</code> in the host's init-netns, outside the rootless model).</p>
 <p class='src-link'>📄 Implementação real em Rust: <a href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/delonix-runtime-bin/src/cmd/network.rs"><code>cmd/network.rs</code></a></p>
-<div class='help'><pre><code>Usage: dlx network [OPTIONS] &lt;COMMAND&gt;
+<div class='help'><pre><code>Usage: delonix network [OPTIONS] &lt;COMMAND&gt;
 
 Commands:
   dash      Dashboard (KPIs + table) of the networks — interactive TUI, or `--once` snapshot
@@ -177,7 +177,7 @@ Options:
   -h, --help          Print help</code></pre></div>
 <h2 id='describe'><code>network describe</code></h2>
 <p class='intro'>Readable detail of one or more networks, <code>kubectl describe</code> style (for humans; use <code>inspect</code> for the usual compact view)</p>
-<div class='help'><pre><code>Usage: dlx network describe [OPTIONS] &lt;NAMES&gt;...
+<div class='help'><pre><code>Usage: delonix network describe [OPTIONS] &lt;NAMES&gt;...
 
 Arguments:
   &lt;NAMES&gt;...  
@@ -188,7 +188,7 @@ Options:
 <h3>Exemplos</h3><div class="ex"><div class="cap">Detalhe de uma rede, estilo kubectl</div><pre><code>delonix network describe minha-rede</code></pre></div>
 <h2 id='node'><code>network node</code></h2>
 <p class='intro'>WireGuard identity of THIS node, for the encrypted VXLAN overlay between nodes (<code>network create --driver overlay</code>). The private key stays 0600 in <code>&lt;root&gt;/wg/node.key</code>; the public one is what you hand out to the peers</p>
-<div class='help'><pre><code>Usage: dlx network node [OPTIONS] &lt;COMMAND&gt;
+<div class='help'><pre><code>Usage: delonix network node [OPTIONS] &lt;COMMAND&gt;
 
 Commands:
   init  Generate the node key (if it does not exist yet) and print the public one with the context of what to do with it. Idempotent
@@ -201,7 +201,7 @@ Options:
 <h3>Exemplos</h3><div class="ex"><div class="cap">Gerir nós de uma rede overlay entre máquinas</div><pre><code>delonix network node ls</code></pre></div>
 <h2 id='dash'><code>network dash</code></h2>
 <p class='intro'>Dashboard (KPIs + table) of the networks — interactive TUI, or <code>--once</code> snapshot</p>
-<div class='help'><pre><code>Usage: dlx network dash [OPTIONS]
+<div class='help'><pre><code>Usage: delonix network dash [OPTIONS]
 
 Options:
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
@@ -211,7 +211,7 @@ Options:
 <h3>Exemplos</h3><div class="ex"><div class="cap">Dashboard só das redes</div><pre><code>delonix network dash</code></pre></div>
 <h2 id='create'><code>network create</code></h2>
 <p class='intro'>Create a network</p>
-<div class='help'><pre><code>Usage: dlx network create [OPTIONS] &lt;NAME&gt;
+<div class='help'><pre><code>Usage: delonix network create [OPTIONS] &lt;NAME&gt;
 
 Arguments:
   &lt;NAME&gt;  
@@ -229,7 +229,7 @@ Options:
 <h3>Exemplos</h3><div class="ex"><div class="cap">Rede bridge para um grupo de serviços</div><pre><code>delonix network create backend</code></pre></div><div class="ex"><div class="cap">Overlay cifrado entre nós (VXLAN + WireGuard)</div><pre><code>delonix network create mesh --driver overlay --vni 42 --peer 10.0.0.2</code></pre></div>
 <h2 id='ls'><code>network ls</code></h2>
 <p class='intro'>List the networks</p>
-<div class='help'><pre><code>Usage: dlx network ls [OPTIONS]
+<div class='help'><pre><code>Usage: delonix network ls [OPTIONS]
 
 Options:
       --l18n &lt;en|pt&gt;     Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
@@ -238,7 +238,7 @@ Options:
 <h3>Exemplos</h3><div class="ex"><pre><code>delonix network ls</code></pre></div>
 <h2 id='inspect'><code>network inspect</code></h2>
 <p class='intro'>Detail of a network</p>
-<div class='help'><pre><code>Usage: dlx network inspect [OPTIONS] &lt;NAME&gt;
+<div class='help'><pre><code>Usage: delonix network inspect [OPTIONS] &lt;NAME&gt;
 
 Arguments:
   &lt;NAME&gt;  
@@ -249,7 +249,7 @@ Options:
 <h3>Exemplos</h3><div class="ex"><pre><code>delonix network inspect backend</code></pre></div>
 <h2 id='rm'><code>network rm</code></h2>
 <p class='intro'>Remove a network</p>
-<div class='help'><pre><code>Usage: dlx network rm [OPTIONS] &lt;NAME&gt;
+<div class='help'><pre><code>Usage: delonix network rm [OPTIONS] &lt;NAME&gt;
 
 Arguments:
   &lt;NAME&gt;  
@@ -260,7 +260,7 @@ Options:
 <h3>Exemplos</h3><div class="ex"><pre><code>delonix network rm backend</code></pre></div>
 <h2 id='apply'><code>network apply</code></h2>
 <p class='intro'>Apply the <code>kind: Network</code> documents of a manifest (idempotent by name)</p>
-<div class='help'><pre><code>Usage: dlx network apply [OPTIONS]
+<div class='help'><pre><code>Usage: delonix network apply [OPTIONS]
 
 Options:
   -f, --file &lt;FILE&gt;   
@@ -363,12 +363,25 @@ function visibleHeadingText(h){
   var pick=h.querySelector(':scope > .'+want);
   return (pick?pick.textContent:h.textContent).trim();
 }
+function isVisibleForLang(el,lang){
+  // Páginas como o index duplicam a secção INTEIRA por idioma (dois <h2>
+  // separados, um por língua) em vez de um <h2> só com dois spans — sem
+  // este filtro o índice listava as duas línguas ao mesmo tempo.
+  var wrap=el.closest('.lang-pt, .lang-en');
+  if(!wrap)return true;
+  return lang==='en'?wrap.classList.contains('lang-en'):wrap.classList.contains('lang-pt');
+}
 function buildToc(){
   var main=document.querySelector('main'),nav=document.getElementById('toc-nav'),
       aside=document.getElementById('pagetoc');
   if(!main||!nav)return;
-  var heads=main.querySelectorAll('h2');
+  var lang=document.documentElement.getAttribute('data-lang')||'pt';
+  var heads=[].slice.call(main.querySelectorAll('h2')).filter(function(h){
+    return isVisibleForLang(h,lang);
+  });
+  nav.innerHTML='';
   if(heads.length<2){if(aside)aside.style.display='none';return;}
+  if(aside)aside.style.display='';
   var used={};
   heads.forEach(function(h){
     var label=visibleHeadingText(h);
@@ -395,12 +408,6 @@ function initThemeToggle(){
   });
 }
 
-function refreshTocLabels(){
-  document.querySelectorAll('#toc-nav a').forEach(function(a){
-    var h=document.getElementById(a.getAttribute('href').slice(1));
-    if(h)a.textContent=visibleHeadingText(h);
-  });
-}
 function initLangToggle(){
   var KEY='delonix-docs-lang',btn=document.querySelector('.lang-toggle');
   if(!btn)return;
@@ -409,7 +416,7 @@ function initLangToggle(){
     var next=eff==='en'?'pt':'en';
     document.documentElement.setAttribute('data-lang',next);
     try{localStorage.setItem(KEY,next);}catch(e){}
-    refreshTocLabels();
+    buildToc();
   });
 }
 

@@ -164,7 +164,7 @@ agent's own local API) and <strong>cloudflare</strong> (needs <code>cloudflared<
 only the ephemeral quick-tunnel <code>*.trycloudflare.com</code>, no account — a NAMED tunnel with
 its own domain needs the Cloudflare API, not implemented yet).</p>
 <p class='src-link'>📄 Implementação real em Rust: <a href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/delonix-runtime-bin/src/cmd/tunnel.rs"><code>cmd/tunnel.rs</code></a></p>
-<div class='help'><pre><code>Usage: dlx net tunnel [OPTIONS] &lt;COMMAND&gt;
+<div class='help'><pre><code>Usage: delonix net tunnel [OPTIONS] &lt;COMMAND&gt;
 
 Commands:
   apply     Apply the `kind: Tunnel` documents of a manifest (idempotent)
@@ -179,7 +179,7 @@ Options:
   -h, --help          Print help</code></pre></div>
 <h2 id='apply'><code>tunnel apply</code></h2>
 <p class='intro'>Apply the <code>kind: Tunnel</code> documents of a manifest (idempotent)</p>
-<div class='help'><pre><code>Usage: dlx net tunnel apply [OPTIONS]
+<div class='help'><pre><code>Usage: delonix net tunnel apply [OPTIONS]
 
 Options:
   -f, --file &lt;FILE&gt;   
@@ -188,7 +188,7 @@ Options:
 <h3>Exemplos</h3><div class="ex"><div class="cap">Declarar o túnel num manifesto kind: Tunnel</div><pre><code>delonix net tunnel apply -f tunel.yaml</code></pre></div>
 <h2 id='expose'><code>tunnel expose</code></h2>
 <p class='intro'>One-shot expose of a local port, no manifest needed</p>
-<div class='help'><pre><code>Usage: dlx net tunnel expose [OPTIONS] --provider &lt;PROVIDER&gt; --local-port &lt;LOCAL_PORT&gt;
+<div class='help'><pre><code>Usage: delonix net tunnel expose [OPTIONS] --provider &lt;PROVIDER&gt; --local-port &lt;LOCAL_PORT&gt;
 
 Options:
       --l18n &lt;en|pt&gt;                 Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
@@ -199,12 +199,13 @@ Options:
       --token &lt;TOKEN&gt;                
       --token-secret &lt;TOKEN_SECRET&gt;  
   -h, --help                         Print help</code></pre></div>
-<p>Validado ao vivo nesta mesma sessão: tráfego HTTPS real da internet
-chegou a um servidor local através do tunnel (HTTP 200) usando exactamente este comando.</p>
+<div class='lang-pt'><p>Validado ao vivo nesta mesma sessão: tráfego HTTPS real da internet
+chegou a um servidor local através do tunnel (HTTP 200) usando exactamente este comando.</p></div><div class='lang-en'><p>Validated live in this very session: real HTTPS traffic from the
+internet reached a local server through the tunnel (HTTP 200) using exactly this command.</p></div>
 <h3>Exemplos</h3><div class="ex"><div class="cap">Expor uma porta local sem escrever manifesto (pinggy, grátis, efémero)</div><pre><code>delonix net tunnel expose --name demo --provider pinggy --local-port 8080</code></pre><div class="out"><pre><code>tunnel/demo: running — https://oxipg-197-148-40-67.free.pinggy.net</code></pre></div></div>
 <h2 id='ls'><code>tunnel ls</code></h2>
 <p class='intro'>List tunnels (state + public URL)</p>
-<div class='help'><pre><code>Usage: dlx net tunnel ls [OPTIONS]
+<div class='help'><pre><code>Usage: delonix net tunnel ls [OPTIONS]
 
 Options:
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
@@ -213,7 +214,7 @@ Options:
 test1   pinggy          18234   https://oxipg-197-148-40-67.free.pinggy.net   Running   Up 34 seconds</code></pre></div></div>
 <h2 id='describe'><code>tunnel describe</code></h2>
 <p class='intro'>Human-readable detail of one tunnel</p>
-<div class='help'><pre><code>Usage: dlx net tunnel describe [OPTIONS] &lt;NAME&gt;
+<div class='help'><pre><code>Usage: delonix net tunnel describe [OPTIONS] &lt;NAME&gt;
 
 Arguments:
   &lt;NAME&gt;  
@@ -224,7 +225,7 @@ Options:
 <h3>Exemplos</h3><div class="ex"><div class="cap">Detalhe de um túnel</div><pre><code>delonix net tunnel describe demo</code></pre></div>
 <h2 id='rm'><code>tunnel rm</code></h2>
 <p class='intro'>Stop and remove a tunnel</p>
-<div class='help'><pre><code>Usage: dlx net tunnel rm [OPTIONS] &lt;NAME&gt;
+<div class='help'><pre><code>Usage: delonix net tunnel rm [OPTIONS] &lt;NAME&gt;
 
 Arguments:
   &lt;NAME&gt;  
@@ -325,12 +326,25 @@ function visibleHeadingText(h){
   var pick=h.querySelector(':scope > .'+want);
   return (pick?pick.textContent:h.textContent).trim();
 }
+function isVisibleForLang(el,lang){
+  // Páginas como o index duplicam a secção INTEIRA por idioma (dois <h2>
+  // separados, um por língua) em vez de um <h2> só com dois spans — sem
+  // este filtro o índice listava as duas línguas ao mesmo tempo.
+  var wrap=el.closest('.lang-pt, .lang-en');
+  if(!wrap)return true;
+  return lang==='en'?wrap.classList.contains('lang-en'):wrap.classList.contains('lang-pt');
+}
 function buildToc(){
   var main=document.querySelector('main'),nav=document.getElementById('toc-nav'),
       aside=document.getElementById('pagetoc');
   if(!main||!nav)return;
-  var heads=main.querySelectorAll('h2');
+  var lang=document.documentElement.getAttribute('data-lang')||'pt';
+  var heads=[].slice.call(main.querySelectorAll('h2')).filter(function(h){
+    return isVisibleForLang(h,lang);
+  });
+  nav.innerHTML='';
   if(heads.length<2){if(aside)aside.style.display='none';return;}
+  if(aside)aside.style.display='';
   var used={};
   heads.forEach(function(h){
     var label=visibleHeadingText(h);
@@ -357,12 +371,6 @@ function initThemeToggle(){
   });
 }
 
-function refreshTocLabels(){
-  document.querySelectorAll('#toc-nav a').forEach(function(a){
-    var h=document.getElementById(a.getAttribute('href').slice(1));
-    if(h)a.textContent=visibleHeadingText(h);
-  });
-}
 function initLangToggle(){
   var KEY='delonix-docs-lang',btn=document.querySelector('.lang-toggle');
   if(!btn)return;
@@ -371,7 +379,7 @@ function initLangToggle(){
     var next=eff==='en'?'pt':'en';
     document.documentElement.setAttribute('data-lang',next);
     try{localStorage.setItem(KEY,next);}catch(e){}
-    refreshTocLabels();
+    buildToc();
   });
 }
 

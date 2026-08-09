@@ -154,7 +154,7 @@ YAML (<code>apiVersion: delonix.io/v1</code>) with 5 Kinds — <code>Network</co
 dependency order. <em>Ensure-present</em> semantics (idempotent by name), not a reconciler: no
 diffing, rollout or rollback — fail-fast, whatever was already applied stays applied.</p>
 <p class='src-link'>📄 Implementação real em Rust: <a href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/delonix-runtime-bin/src/cmd/stack.rs"><code>cmd/stack.rs</code></a></p>
-<div class='help'><pre><code>Usage: dlx stack [OPTIONS] &lt;COMMAND&gt;
+<div class='help'><pre><code>Usage: delonix stack [OPTIONS] &lt;COMMAND&gt;
 
 Commands:
   init      Initializes a COMPLETE project: Delonixfile + manifest + cluster + README — files ALREADY FILLED IN (images included), ready to use without editing anything
@@ -188,7 +188,7 @@ spec:
 </code></pre>
 <h2 id='validate'><code>stack validate</code></h2>
 <p class='intro'>Validates the manifest WITHOUT touching anything (dry-run): resolves the cross-references (<code>Container.network</code>/<code>.volumes</code>, <code>Vm.network</code>, <code>Ingress/Egress. target</code>) against what the manifest declares PLUS what already exists in the stores. Exits with an error if any reference is left unresolved — it is the safety net against an <code>apply</code> that would only fail halfway through (fail-fast, no rollback)</p>
-<div class='help'><pre><code>Usage: dlx stack validate [OPTIONS]
+<div class='help'><pre><code>Usage: delonix stack validate [OPTIONS]
 
 Options:
   -f, --file &lt;FILE&gt;   
@@ -196,7 +196,7 @@ Options:
   -h, --help          Print help</code></pre></div>
 <h3>Exemplos</h3><div class="ex"><div class="cap">Validar o manifesto SEM aplicar nada</div><pre><code>delonix stack validate -f delonix-manifest.yaml</code></pre></div>
 <h2 id='describe'><code>stack describe</code></h2>
-<div class='help'><pre><code>Usage: dlx stack describe [OPTIONS]
+<div class='help'><pre><code>Usage: delonix stack describe [OPTIONS]
 
 Options:
   -f, --file &lt;FILE&gt;   
@@ -207,7 +207,7 @@ Options:
 <p class='intro'>Stack detail in <code>kubectl describe</code> style: each resource DECLARED in the manifest and whether or not it is present on the machine.</p>
 <p class='intro'><strong>The stack has no state of its own</strong> — there is no registry of &quot;stacks&quot;, only a manifest and the resources it creates. That is why this <code>describe</code> always starts from the file and goes to confirm each resource against the respective store, instead of inventing a new registry that would drift out of sync (the same reason <code>cluster ls</code> derives its state from the container labels).</p>
 <p class='intro'>The column that matters is PRESENCE: an <code>apply</code> is fail-fast and without rollback, so a half-applied stack is a normal state and this is exactly what it shows. List the structure the manifest composes (containers, volumes, networks, ...) and whether each resource exists — the tabular summary of <code>describe</code>.</p>
-<div class='help'><pre><code>Usage: dlx stack ls [OPTIONS]
+<div class='help'><pre><code>Usage: delonix stack ls [OPTIONS]
 
 Options:
   -f, --file &lt;FILE&gt;
@@ -221,7 +221,7 @@ Options:
 <h3>Exemplos</h3><div class="ex"><div class="cap">Que recursos do manifesto existem de facto neste host</div><pre><code>delonix stack ls</code></pre></div>
 <h2 id='init'><code>stack init</code></h2>
 <p class='intro'>Initializes a COMPLETE project: Delonixfile + manifest + cluster + README — files ALREADY FILLED IN (images included), ready to use without editing anything</p>
-<div class='help'><pre><code>Usage: dlx stack init [OPTIONS] [DIR]
+<div class='help'><pre><code>Usage: delonix stack init [OPTIONS] [DIR]
 
 Arguments:
   [DIR]  Project directory (default: the current one) [default: .]
@@ -234,15 +234,19 @@ Options:
   -t, --template &lt;TEMPLATE&gt;  Generates a complete PROJECT for a stack (e.g. `python`) with best practices, instead of the generic scaffold. `--template list` shows the available ones
       --up                   After generating, builds the image, starts it and waits for it to become healthy
   -h, --help                 Print help</code></pre></div>
-<p><code>--template &lt;nome&gt;</code> gera um projecto real e funcional de uma
+<div class='lang-pt'><p><code>--template &lt;nome&gt;</code> gera um projecto real e funcional de uma
 linguagem/framework, com boas práticas (multi-stage não-root, healthcheck, testes, dotfiles) e já
 delonix-native (Delonixfile + manifesto). Sem <code>--template</code>, o <code>init</code> gera o
 scaffold genérico. Os tokens <code>__NAME__</code>/<code>__MODULE__</code> são substituídos pelo nome
-do projecto.</p>
+do projecto.</p></div><div class='lang-en'><p><code>--template &lt;name&gt;</code> generates a real, functional
+project for a language/framework, with best practices (non-root multi-stage, healthcheck, tests,
+dotfiles) and already delonix-native (Delonixfile + manifest). Without <code>--template</code>,
+<code>init</code> generates the generic scaffold. The <code>__NAME__</code>/<code>__MODULE__</code>
+tokens get replaced with the project name.</p></div>
 <h3>Exemplos</h3><div class="ex"><div class="cap">Projecto COMPLETO de uma stack (FastAPI): código + Delonixfile + manifesto + testes</div><pre><code>delonix stack init myapi --template python</code></pre></div><div class="ex"><div class="cap">Ver os templates disponíveis</div><pre><code>delonix stack init --template list</code></pre></div>
 <h2 id='apply'><code>stack apply</code></h2>
 <p class='intro'>Applies all the manifest Kinds (Network → Volume → Image → Vm → Container)</p>
-<div class='help'><pre><code>Usage: dlx stack apply [OPTIONS]
+<div class='help'><pre><code>Usage: delonix stack apply [OPTIONS]
 
 Options:
   -f, --file &lt;FILE&gt;   
@@ -346,12 +350,25 @@ function visibleHeadingText(h){
   var pick=h.querySelector(':scope > .'+want);
   return (pick?pick.textContent:h.textContent).trim();
 }
+function isVisibleForLang(el,lang){
+  // Páginas como o index duplicam a secção INTEIRA por idioma (dois <h2>
+  // separados, um por língua) em vez de um <h2> só com dois spans — sem
+  // este filtro o índice listava as duas línguas ao mesmo tempo.
+  var wrap=el.closest('.lang-pt, .lang-en');
+  if(!wrap)return true;
+  return lang==='en'?wrap.classList.contains('lang-en'):wrap.classList.contains('lang-pt');
+}
 function buildToc(){
   var main=document.querySelector('main'),nav=document.getElementById('toc-nav'),
       aside=document.getElementById('pagetoc');
   if(!main||!nav)return;
-  var heads=main.querySelectorAll('h2');
+  var lang=document.documentElement.getAttribute('data-lang')||'pt';
+  var heads=[].slice.call(main.querySelectorAll('h2')).filter(function(h){
+    return isVisibleForLang(h,lang);
+  });
+  nav.innerHTML='';
   if(heads.length<2){if(aside)aside.style.display='none';return;}
+  if(aside)aside.style.display='';
   var used={};
   heads.forEach(function(h){
     var label=visibleHeadingText(h);
@@ -378,12 +395,6 @@ function initThemeToggle(){
   });
 }
 
-function refreshTocLabels(){
-  document.querySelectorAll('#toc-nav a').forEach(function(a){
-    var h=document.getElementById(a.getAttribute('href').slice(1));
-    if(h)a.textContent=visibleHeadingText(h);
-  });
-}
 function initLangToggle(){
   var KEY='delonix-docs-lang',btn=document.querySelector('.lang-toggle');
   if(!btn)return;
@@ -392,7 +403,7 @@ function initLangToggle(){
     var next=eff==='en'?'pt':'en';
     document.documentElement.setAttribute('data-lang',next);
     try{localStorage.setItem(KEY,next);}catch(e){}
-    refreshTocLabels();
+    buildToc();
   });
 }
 

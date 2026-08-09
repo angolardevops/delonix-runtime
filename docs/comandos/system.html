@@ -152,7 +152,7 @@ space: stopped containers, orphan dirs, dangling images, CAS blobs, orphan hostf
 networks); <code>system df</code> shows disk usage; <code>system monitor</code> follows
 connections/conntrack; <code>system events</code> the event stream.</p>
 <p class='src-link'>📄 Implementação real em Rust: <a href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/delonix-runtime-bin/src/cmd/system.rs"><code>cmd/system.rs</code></a></p>
-<div class='help'><pre><code>Usage: dlx system [OPTIONS] &lt;COMMAND&gt;
+<div class='help'><pre><code>Usage: delonix system [OPTIONS] &lt;COMMAND&gt;
 
 Commands:
   events   Engine events (create/start/die/remove/…), from oldest to most recent. With no daemon, the log is a shared append-only file — each command appends its own line (see `delonix_runtime_core::events`)
@@ -170,7 +170,7 @@ Options:
   -h, --help          Print help</code></pre></div>
 <h2 id='thermal'><code>system thermal</code></h2>
 <p class='intro'>Thermal governor: lowers Delonix&#x27;s CPU budget when the CPU heats up and restores it when it cools down. Runs continuously (see <code>--once</code>)</p>
-<div class='help'><pre><code>Usage: dlx system thermal [OPTIONS]
+<div class='help'><pre><code>Usage: delonix system thermal [OPTIONS]
 
 Options:
       --high &lt;HIGH&gt;          Temperature (°C) at or above which it cools down [default: 85]
@@ -183,7 +183,7 @@ Options:
 <h3>Exemplos</h3><div class="ex"><div class="cap">Temperatura e throttling do host</div><pre><code>delonix system thermal</code></pre></div>
 <h2 id='monitor'><code>system monitor</code></h2>
 <p class='intro'>Active network connections per container (via conntrack): who comes in, who goes out, and between containers. Refreshes continuously (see <code>--no-stream</code>)</p>
-<div class='help'><pre><code>Usage: dlx system monitor [OPTIONS]
+<div class='help'><pre><code>Usage: delonix system monitor [OPTIONS]
 
 Options:
       --interval &lt;INTERVAL&gt;  Milliseconds between refreshes (minimum 300) [default: 1000]
@@ -193,7 +193,7 @@ Options:
 <h3>Exemplos</h3><div class="ex"><div class="cap">Acompanhar os eventos ao vivo</div><pre><code>delonix system monitor</code></pre></div>
 <h2 id='virt'><code>system virt</code></h2>
 <p class='intro'>Host virtualization: hypervisor, KVM, virtio — and what there is to tune</p>
-<div class='help'><pre><code>Usage: dlx system virt [OPTIONS]
+<div class='help'><pre><code>Usage: delonix system virt [OPTIONS]
 
 Options:
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
@@ -203,7 +203,7 @@ Options:
 <h2 id='setup'><code>system setup</code></h2>
 <p class='intro'>Diagnose — and, with <code>--delegate</code>, fix — cgroup delegation, the prerequisite for <code>--memory</code>/<code>--cpus</code>/<code>--pids-limit</code> to mean anything.</p>
 <p class='intro'>Without it the flags are ACCEPTED and INERT: the container runs with no limit at all. That is the failure mode this command exists for, and it is invisible without asking.</p>
-<div class='help'><pre><code>Usage: dlx system setup [OPTIONS]
+<div class='help'><pre><code>Usage: delonix system setup [OPTIONS]
 
 Options:
       --delegate
@@ -217,7 +217,7 @@ Options:
 <h3>Exemplos</h3><div class="ex"><div class="cap">Diagnosticar a delegação de cgroup — porque é que -m/--cpus não pegam</div><pre><code>delonix system setup</code></pre></div><div class="ex"><div class="cap">A 1.ª correcção: um scope delegado (sem root, sem reboot, vale já)</div><pre><code>systemd-run --user --scope -p Delegate=yes -- delonix system setup</code></pre></div><div class="ex"><div class="cap">Só se a de cima ainda disser que falta o `cpu` (precisa de root, sobrevive ao reboot)</div><pre><code>sudo delonix system setup --delegate</code></pre></div>
 <h2 id='events'><code>system events</code></h2>
 <p class='intro'>Engine events (create/start/die/remove/…), from oldest to most recent. With no daemon, the log is a shared append-only file — each command appends its own line (see <code>delonix_runtime_core::events</code>)</p>
-<div class='help'><pre><code>Usage: dlx system events [OPTIONS]
+<div class='help'><pre><code>Usage: delonix system events [OPTIONS]
 
 Options:
   -f, --follow        Follow continuously (Ctrl-C to exit)
@@ -227,7 +227,7 @@ Options:
 <h3>Exemplos</h3><div class="ex"><div class="cap">Ver o que o motor andou a fazer</div><pre><code>delonix system events -n 20</code></pre></div><div class="ex"><div class="cap">Seguir em tempo real (Ctrl-C sai)</div><pre><code>delonix system events --follow</code></pre></div>
 <h2 id='prune'><code>system prune</code></h2>
 <p class='intro'>Reclaim space: remove stopped containers, unused images, CAS blobs nobody references, empty cgroups and — the biggest space saver — <strong>orphan container directories</strong> (from nodes/containers that died abruptly without <code>rm</code>, with no registry entry)</p>
-<div class='help'><pre><code>Usage: dlx system prune [OPTIONS]
+<div class='help'><pre><code>Usage: delonix system prune [OPTIONS]
 
 Options:
   -f, --force         Skip the confirmation prompt (REQUIRED when stdin is not a terminal)
@@ -237,7 +237,7 @@ Options:
 <h3>Exemplos</h3><div class="ex"><div class="cap">Recuperar espaço (GC)</div><pre><code>delonix system prune</code></pre></div>
 <h2 id='df'><code>system df</code></h2>
 <p class='intro'>Disk usage by area (images, containers, volumes, VM images)</p>
-<div class='help'><pre><code>Usage: dlx system df [OPTIONS]
+<div class='help'><pre><code>Usage: delonix system df [OPTIONS]
 
 Options:
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
@@ -245,7 +245,7 @@ Options:
 <h3>Exemplos</h3><div class="ex"><div class="cap">Uso de disco</div><pre><code>delonix system df</code></pre></div>
 <h2 id='info'><code>system info</code></h2>
 <p class='intro'>Engine state: rootless?, cgroup delegation, network infra, counts</p>
-<div class='help'><pre><code>Usage: dlx system info [OPTIONS]
+<div class='help'><pre><code>Usage: delonix system info [OPTIONS]
 
 Options:
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
@@ -347,12 +347,25 @@ function visibleHeadingText(h){
   var pick=h.querySelector(':scope > .'+want);
   return (pick?pick.textContent:h.textContent).trim();
 }
+function isVisibleForLang(el,lang){
+  // Páginas como o index duplicam a secção INTEIRA por idioma (dois <h2>
+  // separados, um por língua) em vez de um <h2> só com dois spans — sem
+  // este filtro o índice listava as duas línguas ao mesmo tempo.
+  var wrap=el.closest('.lang-pt, .lang-en');
+  if(!wrap)return true;
+  return lang==='en'?wrap.classList.contains('lang-en'):wrap.classList.contains('lang-pt');
+}
 function buildToc(){
   var main=document.querySelector('main'),nav=document.getElementById('toc-nav'),
       aside=document.getElementById('pagetoc');
   if(!main||!nav)return;
-  var heads=main.querySelectorAll('h2');
+  var lang=document.documentElement.getAttribute('data-lang')||'pt';
+  var heads=[].slice.call(main.querySelectorAll('h2')).filter(function(h){
+    return isVisibleForLang(h,lang);
+  });
+  nav.innerHTML='';
   if(heads.length<2){if(aside)aside.style.display='none';return;}
+  if(aside)aside.style.display='';
   var used={};
   heads.forEach(function(h){
     var label=visibleHeadingText(h);
@@ -379,12 +392,6 @@ function initThemeToggle(){
   });
 }
 
-function refreshTocLabels(){
-  document.querySelectorAll('#toc-nav a').forEach(function(a){
-    var h=document.getElementById(a.getAttribute('href').slice(1));
-    if(h)a.textContent=visibleHeadingText(h);
-  });
-}
 function initLangToggle(){
   var KEY='delonix-docs-lang',btn=document.querySelector('.lang-toggle');
   if(!btn)return;
@@ -393,7 +400,7 @@ function initLangToggle(){
     var next=eff==='en'?'pt':'en';
     document.documentElement.setAttribute('data-lang',next);
     try{localStorage.setItem(KEY,next);}catch(e){}
-    refreshTocLabels();
+    buildToc();
   });
 }
 
