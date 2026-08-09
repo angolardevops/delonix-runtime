@@ -4137,6 +4137,129 @@ delonix container rm -f delonix-temp</code></pre>
 </table>
 """
 
+TUTORIAL_EN = """
+<h1>Full project: Delonix Temp</h1>
+<p class="tagline">From zero to a service on the public internet — build, run, and a real URL, in 4
+commands. Everything in this guide was actually run; the output is real, copied from the run.</p>
+
+<p>A real-time API in <a href="https://fastapi.tiangolo.com/">FastAPI</a> — looks up the CURRENT
+temperature of any city (via <a href="https://open-meteo.com/">Open-Meteo</a>, no API key) and
+serves a page that refreshes itself every 30s. The goal is to walk the full Delonix cycle in one
+small project: multi-stage <code>build</code> → <code>container
+run</code> → expose to the internet with <code>tunnel</code>. The complete files are in
+<a href="https://github.com/angolardevops/delonix-runtime/tree/main/examples/delonix-temp"><code>examples/delonix-temp/</code></a>
+— <code>git clone</code> it and follow the steps below exactly as they are.</p>
+
+<h2>1. The app</h2>
+<p>Three files. <code>main.py</code> — two routes: <code>/api/weather/{city}</code> (geocodes the
+city, asks for the current temperature, returns JSON) and <code>/</code> (an HTML page that calls
+the API itself via <code>fetch</code> and redoes it every 30s):</p>
+<pre><code>from fastapi import FastAPI, HTTPException
+from fastapi.responses import HTMLResponse
+import httpx
+
+app = FastAPI(title="Delonix Temp")
+
+@app.get("/api/weather/{city}")
+async def weather(city: str):
+    async with httpx.AsyncClient(timeout=8.0) as client:
+        geo = await client.get("https://geocoding-api.open-meteo.com/v1/search",
+                                params={"name": city, "count": 1})
+        place = geo.json()["results"][0]
+        fc = await client.get("https://api.open-meteo.com/v1/forecast", params={
+            "latitude": place["latitude"], "longitude": place["longitude"],
+            "current": "temperature_2m,weather_code",
+        })
+    current = fc.json()["current"]
+    return {"city": place["name"], "country": place.get("country"),
+            "temperature_c": current["temperature_2m"], "observed_at": current["time"]}
+
+@app.get("/", response_class=HTMLResponse)
+async def index():
+    return PAGE  # HTML with a &lt;script&gt; that fetch("/api/weather/"+city) every 30s
+</code></pre>
+<p>(full version, with the HTML page and <code>/health</code>, in the repo's real file.)</p>
+
+<p><code>requirements.txt</code> — <code>fastapi</code>, <code>uvicorn[standard]</code>,
+<code>httpx</code>, with pinned versions.</p>
+
+<p><code>Delonixfile</code> — a <strong>multi-stage</strong> build: one stage installs the Python
+dependencies, the other just copies the result plus the code — the final image carries no pip
+cache and no build tools:</p>
+<pre><code>FROM python:3.12-slim AS builder
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
+
+FROM python:3.12-slim
+WORKDIR /app
+COPY --from=builder /install /usr/local
+COPY main.py .
+ENV PYTHONUNBUFFERED=1
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "80"]</code></pre>
+
+<h2>2. Build</h2>
+<pre><code>cd examples/delonix-temp
+delonix build -t delonix-temp:1 .</code></pre>
+<div class="out"><pre><code>Collecting fastapi==0.115.0 (from -r requirements.txt (line 1))
+...
+Successfully installed annotated-types-0.7.0 anyio-4.14.2 ... fastapi-0.115.0 ...
+ef708d73f029</code></pre></div>
+<p>The ID at the end (<code>ef708d73f029</code>) is the image. <code>delonix image ls</code>
+confirms the size — the final stage, with no build tools, ends up much smaller than if everything
+were in a single <code>FROM</code>:</p>
+<pre><code>delonix image ls</code></pre>
+<div class="out"><pre><code>REPOSITORY:TAG     IMAGE ID       CREATED          SIZE
+delonix-temp:1     ef708d73f029   just now         157.2 MiB
+python:3.12-slim   25c5b8011a34   just now          41.2 MiB</code></pre></div>
+
+<h2>3. Run it</h2>
+<pre><code>delonix container run -d --name delonix-temp -p 8080:80 delonix-temp:1
+curl -s http://localhost:8080/api/weather/Luanda</code></pre>
+<div class="out"><pre><code>{"city":"Luanda","country":"Angola","temperature_c":20.2,"observed_at":"2026-07-23T19:00"}</code></pre></div>
+<p>A REAL temperature, looked up live — not a fixed value. The container's logs confirm the
+requests:</p>
+<pre><code>delonix container logs delonix-temp</code></pre>
+<div class="out"><pre><code>INFO:     Uvicorn running on http://0.0.0.0:80 (Press CTRL+C to quit)
+INFO:     10.0.2.2:57786 - "GET /health HTTP/1.1" 200 OK
+INFO:     10.0.2.2:57802 - "GET /api/weather/Luanda HTTP/1.1" 200 OK</code></pre></div>
+
+<h2>4. Expose it to the internet</h2>
+<p>A local port isn't enough — the goal is a URL anyone, on any network, can open. This is where
+<a href="comandos/tunnel.html"><code>kind: Tunnel</code></a> comes in:</p>
+<pre><code>delonix net tunnel expose --name delonix-temp --provider pinggy --local-port 8080</code></pre>
+<div class="out"><pre><code>tunnel/delonix-temp: running — https://lfdhz-197-148-40-67.free.pinggy.net</code></pre></div>
+<p>That URL is REAL — it's the one this guide got when the command was actually run. (Yours will
+be different every time: the free provider assigns a new one each session.) Confirmation, from
+the outside, without touching anything local:</p>
+<pre><code>curl https://lfdhz-197-148-40-67.free.pinggy.net/api/weather/Luanda</code></pre>
+<div class="out"><pre><code>{"city":"Luanda","country":"Angola","temperature_c":20.2,"observed_at":"2026-07-23T19:00"}</code></pre></div>
+<p>The same JSON, this time arriving from outside the machine, through an SSH tunnel to a public
+server (pinggy) and back — zero router configuration, zero public IP of your own, zero account.
+Opening the URL in a browser shows the <em>Delonix Temp</em> page updating itself.</p>
+
+<div class="callout">
+<p><b>Going further:</b> with more than one service, put <a href="comandos/httproute.html"><code>kind:
+HTTPRoute</code></a> in front (routing by <code>Host</code>/path to several containers) and point
+<code>tunnel</code> at the PROXY'S PORT instead of directly at the container — one public URL, as
+many backends as you need. See <code>examples/httproute.yaml</code> +
+<code>examples/tunnel.yaml</code>.</p>
+</div>
+
+<h2>Cleanup</h2>
+<pre><code>delonix net tunnel rm delonix-temp
+delonix container rm -f delonix-temp</code></pre>
+
+<h2>What this proved</h2>
+<table>
+<tr><th>Command</th><th>What it validated</th></tr>
+<tr><td><code>delonix build</code></td><td>a real multi-stage build (2 stages, <code>COPY --from</code>), with build networking</td></tr>
+<tr><td><code>delonix container run -p</code></td><td>userspace NAT with no root, port published on the host</td></tr>
+<tr><td><code>delonix container logs</code></td><td>observability of a real service running</td></tr>
+<tr><td><code>delonix net tunnel expose</code></td><td>REAL public internet traffic reaching a local container, no account, no public IP</td></tr>
+</table>
+"""
+
 
 def main():
     # Só a 1.ª linha: desde a v0.6.1 o --version é um cartão multi-linha e o
@@ -4167,7 +4290,7 @@ def main():
     labs_page()
     page("cri.html", "CRI", CRI)
     page("comparacao.html", "Delonix vs Docker vs Podman", bi("div", COMPARE, COMPARE_EN))
-    page("tutorial-delonix-temp.html", "Projecto completo: Delonix Temp", TUTORIAL)
+    page("tutorial-delonix-temp.html", "Projecto completo: Delonix Temp", bi("div", TUTORIAL, TUTORIAL_EN))
     for n, g in GROUPS.items():
         group_page(n, g)
     open(os.path.join(ROOT, ".nojekyll"), "w").close()
