@@ -4,16 +4,29 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>delonix container · Delonix Engine</title>
+<script>(function(){try{
+var t=localStorage.getItem('delonix-docs-theme');
+if(t)document.documentElement.setAttribute('data-theme',t);
+}catch(e){}})();</script>
 <style>
 :root{--accent:#e8590c;--accent-soft:#fff0e6;--ink:#1a1a2e;--muted:#5a6472;--line:#e6e8ec;
---bg:#ffffff;--side:#f7f8fa;--code-bg:#0f172a;--code-ink:#e2e8f0;--radius:10px}
-@media (prefers-color-scheme: dark){:root{--ink:#e6e8ee;--muted:#9aa4b2;--line:#252a33;
---bg:#0d1117;--side:#10151c;--accent-soft:#2a1810;--code-bg:#161b22;--code-ink:#dbe2ea}}
+--bg:#ffffff;--side:#f7f8fa;--code-bg:#0f172a;--code-ink:#e2e8f0;--radius:10px;
+--tok-key:#0550ae;--tok-string:#116329;--tok-comment:#6e7781;--tok-flag:#953800;
+--tok-cmd:#8250df;--tok-ph:#6e7781;--tok-head:#c2410c;--tok-sep:#6e7781}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--ink:#e6e8ee;--muted:#9aa4b2;--line:#252a33;
+--bg:#0d1117;--side:#10151c;--accent-soft:#2a1810;--code-bg:#161b22;--code-ink:#dbe2ea;
+--tok-key:#79c0ff;--tok-string:#7ee787;--tok-comment:#8b949e;--tok-flag:#ffa657;
+--tok-cmd:#d2a8ff;--tok-ph:#8b949e;--tok-head:#ff9a5a;--tok-sep:#8b949e}}
+:root[data-theme="dark"]{--ink:#e6e8ee;--muted:#9aa4b2;--line:#252a33;
+--bg:#0d1117;--side:#10151c;--accent-soft:#2a1810;--code-bg:#161b22;--code-ink:#dbe2ea;
+--tok-key:#79c0ff;--tok-string:#7ee787;--tok-comment:#8b949e;--tok-flag:#ffa657;
+--tok-cmd:#d2a8ff;--tok-ph:#8b949e;--tok-head:#ff9a5a;--tok-sep:#8b949e}
 *{box-sizing:border-box}body{margin:0;font:16px/1.65 -apple-system,'Segoe UI',Roboto,Ubuntu,
 sans-serif;color:var(--ink);background:var(--bg)}
 a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
-.layout{display:flex;min-height:100vh}
-nav.side{width:270px;flex-shrink:0;background:var(--side);border-right:1px solid var(--line);
+.layout{display:grid;grid-template-columns:270px minmax(0,1fr) 240px;max-width:1600px;
+margin:0 auto;min-height:100vh}
+nav.side{width:270px;background:var(--side);border-right:1px solid var(--line);
 padding:1.2rem 1rem 3rem;position:sticky;top:0;height:100vh;overflow-y:auto}
 nav.side .brand{display:flex;align-items:center;gap:.55rem;font-weight:700;font-size:1.12rem;
 margin-bottom:1.1rem;color:var(--ink)}
@@ -24,16 +37,33 @@ color:var(--muted)}
 nav.side a{display:block;padding:.28rem .55rem;border-radius:6px;color:var(--ink);font-size:.93rem}
 nav.side a:hover{background:var(--accent-soft);text-decoration:none}
 nav.side a.on{background:var(--accent-soft);color:var(--accent);font-weight:600}
-main{flex:1;min-width:0;padding:2.2rem 3rem 5rem;max-width:940px}
+.theme-toggle{appearance:none;border:1px solid var(--line);background:var(--bg);color:var(--ink);
+border-radius:8px;width:30px;height:30px;flex-shrink:0;display:inline-flex;align-items:center;
+justify-content:center;cursor:pointer;font-size:.95rem;margin-left:auto;line-height:1}
+.theme-toggle:hover{border-color:var(--accent)}
+.theme-toggle .i-sun{display:none}
+:root[data-theme="dark"] .theme-toggle .i-moon{display:none}
+:root[data-theme="dark"] .theme-toggle .i-sun{display:inline}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .theme-toggle .i-moon{display:none}
+:root:not([data-theme="light"]) .theme-toggle .i-sun{display:inline}}
+main{min-width:0;padding:2.2rem 3rem 5rem;max-width:860px;margin:0 auto}
 main h1{font-size:1.9rem;margin:.2rem 0 .4rem}
 main h2{font-size:1.35rem;margin-top:2.4rem;padding-bottom:.35rem;border-bottom:1px solid var(--line)}
 main h3{font-size:1.05rem;margin-top:1.6rem}
 .tagline{color:var(--muted);font-size:1.05rem;margin-top:0}
+p.intro{font-size:1.02rem;margin:1rem 0}
+p.src-link{margin:.7rem 0 0;font-size:.85rem;color:var(--muted)}
+p.src-link a{font-weight:600}
 code{background:var(--accent-soft);padding:.1em .35em;border-radius:5px;font-size:.9em}
 pre{background:var(--code-bg);color:var(--code-ink);padding:1rem 1.2rem;border-radius:var(--radius);
-overflow-x:auto;font-size:.86rem;line-height:1.55}
+overflow-x:auto;font-size:.86rem;line-height:1.55;white-space:pre-wrap;word-break:break-word}
 pre code{background:none;padding:0;color:inherit;font-size:inherit}
 .help pre{border-left:4px solid var(--accent)}
+.tok-key{color:var(--tok-key)}.tok-string{color:var(--tok-string)}
+.tok-comment{color:var(--tok-comment);font-style:italic}
+.tok-flag{color:var(--tok-flag)}.tok-cmd{color:var(--tok-cmd);font-weight:600}
+.tok-ph{color:var(--tok-ph);font-style:italic}.tok-head{color:var(--tok-head);font-weight:700}
+.tok-sep{color:var(--tok-sep)}
 .ex{margin:.9rem 0}.ex .cap{font-size:.88rem;color:var(--muted);margin-bottom:.25rem}
 .ex .out,div.out{margin-top:.4rem}
 .ex .out pre,div.out pre{background:transparent;border:1px dashed var(--line);color:var(--muted);
@@ -67,16 +97,24 @@ background:var(--accent-soft)}
 @media (prefers-color-scheme: dark){.callout.warn{background:#3a1414}.callout.warn b{color:#ff8787}}
 .callout p:first-child{margin-top:0}.callout p:last-child{margin-bottom:0}
 footer{margin-top:4rem;color:var(--muted);font-size:.85rem;border-top:1px solid var(--line);padding-top:1rem}
-@media (max-width:840px){.layout{flex-direction:column}nav.side{width:100%;height:auto;position:static}
-main{padding:1.4rem 1.2rem 4rem}}
+aside.toc{padding:2.2rem 1.2rem 3rem 0;position:sticky;top:0;height:100vh;overflow-y:auto;font-size:.82rem}
+aside.toc .toc-inner{border-left:1px solid var(--line);padding-left:1rem}
+aside.toc h5{margin:0 0 .5rem;font-size:.72rem;letter-spacing:.09em;text-transform:uppercase;color:var(--muted)}
+aside.toc a{display:block;padding:.2rem 0;color:var(--muted);line-height:1.4}
+aside.toc a:hover{color:var(--accent);text-decoration:none}
+@media (max-width:1200px){.layout{grid-template-columns:270px minmax(0,1fr)}aside.toc{display:none}}
+@media (max-width:840px){.layout{display:block}nav.side{width:100%;height:auto;position:static}
+main{padding:1.4rem 1.2rem 4rem;max-width:none}}
 </style>
 </head>
 <body>
 <div class="layout">
 <nav class="side">
-<div class="brand"><span class="dot">▲</span> Delonix Engine</div>
+<div class="brand"><span class="dot">▲</span> Delonix Engine
+<button class="theme-toggle" type="button" aria-label="Alternar tema claro/escuro" title="Tema claro/escuro">
+<span class="i-moon">🌙</span><span class="i-sun">☀️</span></button></div>
 <h5>Documentação</h5>
-<a href="../index.html">Início</a><a href="../cheatsheet.html">Cheatsheet</a><a href="../kinds.html">Kinds e templates</a><a href="../cloud.html">cloud-init, cloud-img e CH</a><a href="../labs.html">Laboratórios</a><a href="../arquitectura.html">Arquitectura</a><a href="../c4.html">Modelo C4 e system design</a><a href="../cri.html">CRI — kubelet sem containerd</a><a href="../comparacao.html">Delonix vs Docker vs Podman</a><a href="../tutorial-delonix-temp.html">Projecto completo: Delonix Temp</a><a href="../delonixctl.html">delonixctl — cliente PaaS</a>
+<a href="../index.html">Início</a><a href="../cheatsheet.html">Cheatsheet</a><a href="../kinds.html">Kinds e templates</a><a href="../cloud.html">cloud-init, cloud-img e CH</a><a href="../labs.html">Laboratórios</a><a href="../arquitectura.html">Arquitectura</a><a href="../c4.html">Modelo C4 e system design</a><a href="../cri.html">CRI — kubelet sem containerd</a><a href="../comparacao.html">Delonix vs Docker vs Podman</a><a href="../tutorial-delonix-temp.html">Projecto completo: Delonix Temp</a>
 <h5>Referência CLI</h5>
 <a href="../comandos/container.html" class="on">delonix container</a><a href="../comandos/workload.html">delonix workload</a><a href="../comandos/pod.html">delonix pod</a><a href="../comandos/image.html">delonix image</a><a href="../comandos/build.html">delonix build</a><a href="../comandos/vm.html">delonix vm</a><a href="../comandos/volumes.html">delonix volumes</a><a href="../comandos/network.html">delonix network</a><a href="../comandos/stack.html">delonix stack</a><a href="../comandos/compose.html">delonix compose</a><a href="../comandos/cluster.html">delonix cluster</a><a href="../comandos/secret.html">delonix secret</a><a href="../comandos/storage.html">delonix storage</a><a href="../comandos/sharevolume.html">delonix sharevolume</a><a href="../comandos/ingress.html">delonix net ingress</a><a href="../comandos/egress.html">delonix net egress</a><a href="../comandos/httproute.html">delonix net httproute</a><a href="../comandos/tunnel.html">delonix net tunnel</a><a href="../comandos/flow.html">delonix net flow</a><a href="../comandos/boot.html">delonix net boot</a><a href="../comandos/system.html">delonix system</a><a href="../comandos/dash.html">delonix dash</a><a href="../comandos/docker-api.html">delonix serve docker-api</a><a href="../comandos/kube.html">delonix cluster kube</a><a href="../comandos/netns.html">delonix net netns</a><a href="../comandos/completion.html">delonix completion</a>
 <h5>Projecto</h5>
@@ -90,9 +128,8 @@ main{padding:1.4rem 1.2rem 4rem}}
 <code>run</code> faz <code>clone()</code> directo com os namespaces pedidos e o estado fica em
 JSON no <code>$DELONIX_ROOT</code>. Em rootless, o rootfs do container é uma cópia flat
 <em>persistente</em> — as escritas sobrevivem a <code>stop</code>/<code>start</code>, como no Docker.</p>
-<div class='help'><pre><code>Containers: run/ps/stop/rm/exec/logs/update/describe
-
-Usage: dlx container [OPTIONS] &lt;COMMAND&gt;
+<p class='src-link'>📄 Implementação real em Rust: <a href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/delonix-runtime-bin/src/cmd/container.rs"><code>cmd/container.rs</code></a></p>
+<div class='help'><pre><code>Usage: delonix container [OPTIONS] &lt;COMMAND&gt;
 
 Commands:
   dash         Dashboard (KPIs + table + problems) of the containers — interactive TUI, or `--once` for a text snapshot
@@ -129,9 +166,8 @@ Options:
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
   -h, --help          Print help</code></pre></div>
 <h2 id='dash'><code>container dash</code></h2>
-<div class='help'><pre><code>Dashboard (KPIs + table + problems) of the containers — interactive TUI, or `--once` for a text snapshot
-
-Usage: dlx container dash [OPTIONS]
+<p class='intro'>Dashboard (KPIs + table + problems) of the containers — interactive TUI, or <code>--once</code> for a text snapshot</p>
+<div class='help'><pre><code>Usage: delonix container dash [OPTIONS]
 
 Options:
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
@@ -140,9 +176,8 @@ Options:
   -h, --help          Print help</code></pre></div>
 <h3>Exemplos</h3><div class="ex"><div class="cap">Dashboard só dos containers</div><pre><code>delonix container dash</code></pre></div>
 <h2 id='run'><code>container run</code></h2>
-<div class='help'><pre><code>Run a container from an image (pulls it if missing)
-
-Usage: dlx container run [OPTIONS] &lt;IMAGE&gt; [COMMAND]...
+<p class='intro'>Run a container from an image (pulls it if missing)</p>
+<div class='help'><pre><code>Usage: delonix container run [OPTIONS] &lt;IMAGE&gt; [COMMAND]...
 
 Arguments:
   &lt;IMAGE&gt;       Image (e.g. `alpine:3.19`)
@@ -297,9 +332,8 @@ slirp único + DNAT nft), o caminho que permite trocar portas a quente sem parar
 <h3>Exemplos</h3><div class="ex"><div class="cap">Servir nginx na porta 8080 do host (NAT userspace, sem root)</div><pre><code>delonix container run -d --name web -p 8080:80 nginx</code></pre></div><div class="ex"><div class="cap">Correr numa rede criada pelo utilizador, publicando pelo ingress</div><pre><code>delonix network create minha-rede
 delonix container run -d --net minha-rede -p 8443:443 caddy</code></pre></div><div class="ex"><div class="cap">Shell descartável (remove-se sozinho à saída)</div><pre><code>delonix container run --rm -e TERM=xterm alpine sh -c &#x27;echo olá&#x27;</code></pre></div><div class="ex"><div class="cap">Sobrepor o ENTRYPOINT para depurar uma imagem</div><pre><code>delonix container run --rm --entrypoint /bin/sh nginx -c &#x27;nginx -t&#x27;</code></pre></div>
 <h2 id='ps'><code>container ps</code></h2>
-<div class='help'><pre><code>List containers
-
-Usage: dlx container ps [OPTIONS]
+<p class='intro'>List containers</p>
+<div class='help'><pre><code>Usage: delonix container ps [OPTIONS]
 
 Options:
   -a, --all              Include stopped/failed ones
@@ -309,9 +343,8 @@ Options:
   -h, --help             Print help</code></pre></div>
 <h3>Exemplos</h3><div class="ex"><div class="cap">Listar (alias `ls` também funciona)</div><pre><code>delonix container ls -a</code></pre></div><div class="ex"><div class="cap">Compor com stop/rm</div><pre><code>delonix container rm -f $(delonix container ps -aq)</code></pre></div>
 <h2 id='start'><code>container start</code></h2>
-<div class='help'><pre><code>(Re)start stopped/crashed containers, reusing the persistent rootfs (writes made inside the container survive, like in docker) and the same network/ports/volumes as the original `run`. Always detached
-
-Usage: dlx container start [OPTIONS] &lt;IDS&gt;...
+<p class='intro'>(Re)start stopped/crashed containers, reusing the persistent rootfs (writes made inside the container survive, like in docker) and the same network/ports/volumes as the original <code>run</code>. Always detached</p>
+<div class='help'><pre><code>Usage: delonix container start [OPTIONS] &lt;IDS&gt;...
 
 Arguments:
   &lt;IDS&gt;...  
@@ -323,9 +356,8 @@ Options:
 persistente — ao contrário de <code>rm</code>+<code>run</code>, nada do que o container escreveu se perde.</p>
 <h3>Exemplos</h3><div class="ex"><div class="cap">Rearrancar um container parado, preservando o que foi escrito lá dentro</div><pre><code>delonix container start web</code></pre></div>
 <h2 id='stop'><code>container stop</code></h2>
-<div class='help'><pre><code>Stop one or more containers (SIGTERM, then SIGKILL)
-
-Usage: dlx container stop [OPTIONS] &lt;IDS&gt;...
+<p class='intro'>Stop one or more containers (SIGTERM, then SIGKILL)</p>
+<div class='help'><pre><code>Usage: delonix container stop [OPTIONS] &lt;IDS&gt;...
 
 Arguments:
   &lt;IDS&gt;...  
@@ -336,9 +368,8 @@ Options:
   -h, --help          Print help</code></pre></div>
 <h3>Exemplos</h3><div class="ex"><div class="cap">SIGTERM, e SIGKILL ao fim de 5s</div><pre><code>delonix container stop -t 5 web db</code></pre></div>
 <h2 id='rm'><code>container rm</code></h2>
-<div class='help'><pre><code>Remove one or more containers
-
-Usage: dlx container rm [OPTIONS] &lt;IDS&gt;...
+<p class='intro'>Remove one or more containers</p>
+<div class='help'><pre><code>Usage: delonix container rm [OPTIONS] &lt;IDS&gt;...
 
 Arguments:
   &lt;IDS&gt;...  
@@ -349,9 +380,8 @@ Options:
   -h, --help          Print help</code></pre></div>
 <h3>Exemplos</h3><div class="ex"><div class="cap">Forçar remoção de vários</div><pre><code>delonix container rm -f web db cache</code></pre></div>
 <h2 id='exec'><code>container exec</code></h2>
-<div class='help'><pre><code>Execute a command inside a running container
-
-Usage: dlx container exec [OPTIONS] &lt;ID&gt; &lt;COMMAND&gt;...
+<p class='intro'>Execute a command inside a running container</p>
+<div class='help'><pre><code>Usage: delonix container exec [OPTIONS] &lt;ID&gt; &lt;COMMAND&gt;...
 
 Arguments:
   &lt;ID&gt;          
@@ -367,9 +397,8 @@ Options:
   -h, --help               Print help</code></pre></div>
 <h3>Exemplos</h3><div class="ex"><div class="cap">Shell interactiva</div><pre><code>delonix container exec -it web sh</code></pre></div>
 <h2 id='logs'><code>container logs</code></h2>
-<div class='help'><pre><code>Show the logs (detached containers)
-
-Usage: dlx container logs [OPTIONS] &lt;ID&gt;
+<p class='intro'>Show the logs (detached containers)</p>
+<div class='help'><pre><code>Usage: delonix container logs [OPTIONS] &lt;ID&gt;
 
 Arguments:
   &lt;ID&gt;  
@@ -383,9 +412,8 @@ Options:
   -h, --help           Print help</code></pre></div>
 <h3>Exemplos</h3><div class="ex"><div class="cap">Seguir em contínuo (sai quando o container parar)</div><pre><code>delonix container logs -f web</code></pre></div>
 <h2 id='inspect'><code>container inspect</code></h2>
-<div class='help'><pre><code>Show the full spec of one or more containers (Store JSON)
-
-Usage: dlx container inspect [OPTIONS] &lt;IDS&gt;...
+<p class='intro'>Show the full spec of one or more containers (Store JSON)</p>
+<div class='help'><pre><code>Usage: delonix container inspect [OPTIONS] &lt;IDS&gt;...
 
 Arguments:
   &lt;IDS&gt;...  
@@ -395,9 +423,8 @@ Options:
   -h, --help          Print help</code></pre></div>
 <h3>Exemplos</h3><div class="ex"><div class="cap">Spec completa em JSON</div><pre><code>delonix container inspect web | jq .[0].ports</code></pre></div>
 <h2 id='stats'><code>container stats</code></h2>
-<div class='help'><pre><code>Resource usage (CPU/memory/PIDs) of the running containers — one sample and exits (no stream). With no IDs, shows all running ones
-
-Usage: dlx container stats [OPTIONS] [IDS]...
+<p class='intro'>Resource usage (CPU/memory/PIDs) of the running containers — one sample and exits (no stream). With no IDs, shows all running ones</p>
+<div class='help'><pre><code>Usage: delonix container stats [OPTIONS] [IDS]...
 
 Arguments:
   [IDS]...  
@@ -411,9 +438,8 @@ Options:
 marcada com <code>~</code>.</p>
 <h3>Exemplos</h3><div class="ex"><div class="cap">Uma amostra de todos os que correm</div><pre><code>delonix container stats</code></pre></div>
 <h2 id='apply'><code>container apply</code></h2>
-<div class='help'><pre><code>Apply the `kind: Container` documents of a manifest (idempotent by name — an existing container with that name is neither recreated nor checked for spec drift, see `cmd::manifest`)
-
-Usage: dlx container apply [OPTIONS]
+<p class='intro'>Apply the <code>kind: Container</code> documents of a manifest (idempotent by name — an existing container with that name is neither recreated nor checked for spec drift, see <code>cmd::manifest</code>)</p>
+<div class='help'><pre><code>Usage: delonix container apply [OPTIONS]
 
 Options:
   -f, --file &lt;FILE&gt;   
@@ -421,9 +447,8 @@ Options:
   -h, --help          Print help</code></pre></div>
 <h3>Exemplos</h3><div class="ex"><div class="cap">Aplicar só os `kind: Container` de um manifesto</div><pre><code>delonix container apply -f delonix-manifest.yaml</code></pre></div>
 <h2 id='init'><code>container init</code></h2>
-<div class='help'><pre><code>Initialize a project with a Delonixfile + manifest — files ALREADY FILLED IN (images included), ready to use without editing anything
-
-Usage: dlx container init [OPTIONS] [DIR]
+<p class='intro'>Initialize a project with a Delonixfile + manifest — files ALREADY FILLED IN (images included), ready to use without editing anything</p>
+<div class='help'><pre><code>Usage: delonix container init [OPTIONS] [DIR]
 
 Arguments:
   [DIR]  Project directory (default: the current one) [default: .]
@@ -438,9 +463,8 @@ Options:
   -h, --help                 Print help</code></pre></div>
 <h3>Exemplos</h3><div class="ex"><div class="cap">Scaffold de um projecto completo, pronto a usar</div><pre><code>delonix container init myapp &amp;&amp; cd myapp</code></pre></div>
 <h2 id='kill'><code>container kill</code></h2>
-<div class='help'><pre><code>Send a signal to one or more containers (default SIGKILL) — unlike `stop`, does not wait or force a `Stopped` status: the real outcome (e.g. `Crashed` for a `KILL`) is picked up on the next observation
-
-Usage: dlx container kill [OPTIONS] &lt;IDS&gt;...
+<p class='intro'>Send a signal to one or more containers (default SIGKILL) — unlike <code>stop</code>, does not wait or force a <code>Stopped</code> status: the real outcome (e.g. <code>Crashed</code> for a <code>KILL</code>) is picked up on the next observation</p>
+<div class='help'><pre><code>Usage: delonix container kill [OPTIONS] &lt;IDS&gt;...
 
 Arguments:
   &lt;IDS&gt;...  
@@ -454,9 +478,8 @@ o resultado real (ex.: <code>Crashed</code> para um <code>KILL</code>) só se co
 observação seguinte.</p>
 <h3>Exemplos</h3><div class="ex"><div class="cap">Sinal arbitrário, sem forçar `Stopped`</div><pre><code>delonix container kill -s USR1 web</code></pre></div>
 <h2 id='wait'><code>container wait</code></h2>
-<div class='help'><pre><code>Block until one or more containers exit, then print their exit code (one per line, in the order given)
-
-Usage: dlx container wait [OPTIONS] &lt;IDS&gt;...
+<p class='intro'>Block until one or more containers exit, then print their exit code (one per line, in the order given)</p>
+<div class='help'><pre><code>Usage: delonix container wait [OPTIONS] &lt;IDS&gt;...
 
 Arguments:
   &lt;IDS&gt;...  
@@ -470,9 +493,8 @@ supervisor mostra <code>Crashed</code>/137, limite arquitectural conhecido (o mo
 real desse processo).</p>
 <h3>Exemplos</h3><div class="ex"><div class="cap">Bloqueia até sair, imprime o exit code</div><pre><code>delonix container wait web</code></pre></div>
 <h2 id='restart'><code>container restart</code></h2>
-<div class='help'><pre><code>Stop then start one or more containers (reuses the persistent rootfs and the original run configuration, like `start`)
-
-Usage: dlx container restart [OPTIONS] &lt;IDS&gt;...
+<p class='intro'>Stop then start one or more containers (reuses the persistent rootfs and the original run configuration, like <code>start</code>)</p>
+<div class='help'><pre><code>Usage: delonix container restart [OPTIONS] &lt;IDS&gt;...
 
 Arguments:
   &lt;IDS&gt;...  
@@ -483,9 +505,8 @@ Options:
   -h, --help          Print help</code></pre></div>
 <h3>Exemplos</h3><div class="ex"><div class="cap">Pára e arranca de novo, mesma configuração</div><pre><code>delonix container restart web</code></pre></div>
 <h2 id='rename'><code>container rename</code></h2>
-<div class='help'><pre><code>Give a container a new name
-
-Usage: dlx container rename [OPTIONS] &lt;ID&gt; &lt;NEW_NAME&gt;
+<p class='intro'>Give a container a new name</p>
+<div class='help'><pre><code>Usage: delonix container rename [OPTIONS] &lt;ID&gt; &lt;NEW_NAME&gt;
 
 Arguments:
   &lt;ID&gt;        
@@ -496,9 +517,8 @@ Options:
   -h, --help          Print help</code></pre></div>
 <h3>Exemplos</h3><div class="ex"><pre><code>delonix container rename web frontend</code></pre></div>
 <h2 id='port'><code>container port</code></h2>
-<div class='help'><pre><code>Published ports of a container (`hostPort/proto -&gt; containerPort`)
-
-Usage: dlx container port [OPTIONS] &lt;ID&gt;
+<p class='intro'>Published ports of a container (<code>hostPort/proto -&gt; containerPort</code>)</p>
+<div class='help'><pre><code>Usage: delonix container port [OPTIONS] &lt;ID&gt;
 
 Arguments:
   &lt;ID&gt;  
@@ -508,9 +528,8 @@ Options:
   -h, --help          Print help</code></pre></div>
 <h3>Exemplos</h3><div class="ex"><div class="cap">Portas publicadas deste container</div><pre><code>delonix container port web</code></pre></div>
 <h2 id='pause'><code>container pause</code></h2>
-<div class='help'><pre><code>Suspend a container&#x27;s processes (cgroup v2 freezer) — the state stays in memory, unlike `stop`. Resume with `unpause`
-
-Usage: dlx container pause [OPTIONS] &lt;IDS&gt;...
+<p class='intro'>Suspend a container&#x27;s processes (cgroup v2 freezer) — the state stays in memory, unlike <code>stop</code>. Resume with <code>unpause</code></p>
+<div class='help'><pre><code>Usage: delonix container pause [OPTIONS] &lt;IDS&gt;...
 
 Arguments:
   &lt;IDS&gt;...  
@@ -520,9 +539,8 @@ Options:
   -h, --help          Print help</code></pre></div>
 <h3>Exemplos</h3><div class="ex"><div class="cap">Suspende os processos (cgroup v2 freezer)</div><pre><code>delonix container pause web</code></pre></div>
 <h2 id='unpause'><code>container unpause</code></h2>
-<div class='help'><pre><code>Resume a container suspended with `pause`
-
-Usage: dlx container unpause [OPTIONS] &lt;IDS&gt;...
+<p class='intro'>Resume a container suspended with <code>pause</code></p>
+<div class='help'><pre><code>Usage: delonix container unpause [OPTIONS] &lt;IDS&gt;...
 
 Arguments:
   &lt;IDS&gt;...  
@@ -532,9 +550,8 @@ Options:
   -h, --help          Print help</code></pre></div>
 <h3>Exemplos</h3><div class="ex"><div class="cap">Resume um container suspenso</div><pre><code>delonix container unpause web</code></pre></div>
 <h2 id='commit'><code>container commit</code></h2>
-<div class='help'><pre><code>Create an image from a container&#x27;s CURRENT rootfs state (whatever was written inside becomes a new layer)
-
-Usage: dlx container commit [OPTIONS] &lt;ID&gt; &lt;TAG&gt;
+<p class='intro'>Create an image from a container&#x27;s CURRENT rootfs state (whatever was written inside becomes a new layer)</p>
+<div class='help'><pre><code>Usage: delonix container commit [OPTIONS] &lt;ID&gt; &lt;TAG&gt;
 
 Arguments:
   &lt;ID&gt;   
@@ -545,9 +562,8 @@ Options:
   -h, --help          Print help</code></pre></div>
 <h3>Exemplos</h3><div class="ex"><div class="cap">Cria uma imagem a partir do rootfs actual do container</div><pre><code>delonix container commit web minha-app:debug</code></pre></div>
 <h2 id='ssh'><code>container ssh</code></h2>
-<div class='help'><pre><code>Interactive shell inside a container (shortcut for `exec -t`): with no command, it tries `bash` and falls back to `sh`, which exists in any image
-
-Usage: dlx container ssh [OPTIONS] &lt;ID&gt; [COMMAND]...
+<p class='intro'>Interactive shell inside a container (shortcut for <code>exec -t</code>): with no command, it tries <code>bash</code> and falls back to <code>sh</code>, which exists in any image</p>
+<div class='help'><pre><code>Usage: delonix container ssh [OPTIONS] &lt;ID&gt; [COMMAND]...
 
 Arguments:
   &lt;ID&gt;          
@@ -558,9 +574,8 @@ Options:
   -h, --help          Print help</code></pre></div>
 <h3>Exemplos</h3><div class="ex"><div class="cap">Atalho para `exec -t` — tenta bash, cai para sh</div><pre><code>delonix container ssh web</code></pre></div>
 <h2 id='healthcheck'><code>container healthcheck</code></h2>
-<div class='help'><pre><code>Run the image&#x27;s `HEALTHCHECK` inside the container. Exits with 1 if `unhealthy` — usable in a script/CI
-
-Usage: dlx container healthcheck [OPTIONS] &lt;ID&gt;
+<p class='intro'>Run the image&#x27;s <code>HEALTHCHECK</code> inside the container. Exits with 1 if <code>unhealthy</code> — usable in a script/CI</p>
+<div class='help'><pre><code>Usage: delonix container healthcheck [OPTIONS] &lt;ID&gt;
 
 Arguments:
   &lt;ID&gt;  
@@ -570,9 +585,8 @@ Options:
   -h, --help          Print help</code></pre></div>
 <h3>Exemplos</h3><div class="ex"><div class="cap">Corre o HEALTHCHECK da imagem, exit 1 se unhealthy (usável em CI)</div><pre><code>delonix container healthcheck web</code></pre></div>
 <h2 id='top'><code>container top</code></h2>
-<div class='help'><pre><code>Processes running inside a container (read from `cgroup.procs`)
-
-Usage: dlx container top [OPTIONS] &lt;ID&gt;
+<p class='intro'>Processes running inside a container (read from <code>cgroup.procs</code>)</p>
+<div class='help'><pre><code>Usage: delonix container top [OPTIONS] &lt;ID&gt;
 
 Arguments:
   &lt;ID&gt;  
@@ -582,9 +596,8 @@ Options:
   -h, --help          Print help</code></pre></div>
 <h3>Exemplos</h3><div class="ex"><div class="cap">Processos a correr dentro do container</div><pre><code>delonix container top web</code></pre></div>
 <h2 id='diff'><code>container diff</code></h2>
-<div class='help'><pre><code>Files changed relative to the image: `A` = created/changed, `D` = deleted
-
-Usage: dlx container diff [OPTIONS] &lt;ID&gt;
+<p class='intro'>Files changed relative to the image: <code>A</code> = created/changed, <code>D</code> = deleted</p>
+<div class='help'><pre><code>Usage: delonix container diff [OPTIONS] &lt;ID&gt;
 
 Arguments:
   &lt;ID&gt;  
@@ -594,9 +607,8 @@ Options:
   -h, --help          Print help</code></pre></div>
 <h3>Exemplos</h3><div class="ex"><div class="cap">Ficheiros alterados relativos à imagem (A/D)</div><pre><code>delonix container diff web</code></pre></div>
 <h2 id='cp'><code>container cp</code></h2>
-<div class='help'><pre><code>Copy files between the host and a container. Exactly one side is `container:/path` (e.g. `delonix container cp web:/etc/nginx.conf .`)
-
-Usage: dlx container cp [OPTIONS] &lt;SRC&gt; &lt;DST&gt;
+<p class='intro'>Copy files between the host and a container. Exactly one side is <code>container:/path</code> (e.g. <code>delonix container cp web:/etc/nginx.conf .</code>)</p>
+<div class='help'><pre><code>Usage: delonix container cp [OPTIONS] &lt;SRC&gt; &lt;DST&gt;
 
 Arguments:
   &lt;SRC&gt;  
@@ -607,9 +619,8 @@ Options:
   -h, --help          Print help</code></pre></div>
 <h3>Exemplos</h3><div class="ex"><div class="cap">Do container para o host</div><pre><code>delonix container cp web:/etc/nginx.conf .</code></pre></div><div class="ex"><div class="cap">Do host para o container</div><pre><code>delonix container cp ./nginx.conf web:/etc/nginx.conf</code></pre></div>
 <h2 id='describe'><code>container describe</code></h2>
-<div class='help'><pre><code>Human-readable detail of one or more containers, `kubectl describe`-style (for humans; use `inspect` for script-consumable JSON)
-
-Usage: dlx container describe [OPTIONS] &lt;IDS&gt;...
+<p class='intro'>Human-readable detail of one or more containers, <code>kubectl describe</code>-style (for humans; use <code>inspect</code> for script-consumable JSON)</p>
+<div class='help'><pre><code>Usage: delonix container describe [OPTIONS] &lt;IDS&gt;...
 
 Arguments:
   &lt;IDS&gt;...  
@@ -619,13 +630,10 @@ Options:
   -h, --help          Print help</code></pre></div>
 <h3>Exemplos</h3><div class="ex"><div class="cap">Detalhe estilo `kubectl describe` (para humanos; `inspect` é para scripts)</div><pre><code>delonix container describe web</code></pre></div>
 <h2 id='update'><code>container update</code></h2>
-<div class='help'><pre><code>**Reconfigure a RUNNING container without stopping it** — ports, volumes, networks, and bandwidth cap.
-
-Unlike docker (where changing a port or a volume forces recreating the container), here the dataplane doesn&#x27;t belong to the process lifecycle: ports are DNAT/hostfwd in front of the network and volumes come in through the kernel&#x27;s mount API (`open_tree`/`move_mount`) in the mount namespace of the already-live container. The PID doesn&#x27;t change and the process is never interrupted.
-
-The changes are persisted in the registry, so a later `container start` reproduces the new configuration, not the original.
-
-Usage: dlx container update [OPTIONS] &lt;ID&gt;
+<p class='intro'><strong>Reconfigure a RUNNING container without stopping it</strong> — ports, volumes, networks, and bandwidth cap.</p>
+<p class='intro'>Unlike docker (where changing a port or a volume forces recreating the container), here the dataplane doesn&#x27;t belong to the process lifecycle: ports are DNAT/hostfwd in front of the network and volumes come in through the kernel&#x27;s mount API (<code>open_tree</code>/<code>move_mount</code>) in the mount namespace of the already-live container. The PID doesn&#x27;t change and the process is never interrupted.</p>
+<p class='intro'>The changes are persisted in the registry, so a later <code>container start</code> reproduces the new configuration, not the original.</p>
+<div class='help'><pre><code>Usage: delonix container update [OPTIONS] &lt;ID&gt;
 
 Arguments:
   &lt;ID&gt;
@@ -677,9 +685,8 @@ num só comando. <code>--memory</code>/<code>--cpus</code> reescrevem o cgroup r
 (<code>memory.max</code>/<code>cpu.max</code>) — nada de esperar por um <code>restart</code>.</p>
 <h3>Exemplos</h3><div class="ex"><div class="cap">Troca uma porta a QUENTE, sem reiniciar</div><pre><code>delonix container update web --publish-add 9090:80</code></pre></div><div class="ex"><div class="cap">Liga a uma rede nova + limite de banda</div><pre><code>delonix container update web --net-connect backend --net-rate 10mbit</code></pre></div><div class="ex"><div class="cap">Sobe o limite de memória/CPU a QUENTE, sem reiniciar</div><pre><code>delonix container update web --memory 512M --cpus 2</code></pre></div>
 <h2 id='attach'><code>container attach</code></h2>
-<div class='help'><pre><code>Re-attach to a running container&#x27;s output stream (same log file `logs -f` reads). Unlike `docker attach`, this is OUTPUT-ONLY: a detached container&#x27;s stdin has nowhere to go (this engine keeps no live conduit to it once started, unlike a persistent per-container shim) — `-i`/`--stdin` is refused with a clear error instead of silently doing nothing
-
-Usage: dlx container attach [OPTIONS] &lt;ID&gt;
+<p class='intro'>Re-attach to a running container&#x27;s output stream (same log file <code>logs -f</code> reads). Unlike <code>docker attach</code>, this is OUTPUT-ONLY: a detached container&#x27;s stdin has nowhere to go (this engine keeps no live conduit to it once started, unlike a persistent per-container shim) — <code>-i</code>/<code>--stdin</code> is refused with a clear error instead of silently doing nothing</p>
+<div class='help'><pre><code>Usage: delonix container attach [OPTIONS] &lt;ID&gt;
 
 Arguments:
   &lt;ID&gt;  
@@ -696,6 +703,109 @@ a apontar para <code>exec -it</code>.</p>
 <footer>Delonix Engine · Apache-2.0 · <a href="https://github.com/angolardevops/delonix-runtime">angolardevops/delonix-runtime</a>
 · Referência gerada do <code>--help</code> real do binário por <code>docs/gen.py</code>.</footer>
 </main>
+<aside class="toc" id="pagetoc"><div class="toc-inner"><h5>Nesta página</h5><nav id="toc-nav"></nav></div></aside>
 </div>
+<script>(function(){
+function esc(s){return s.replace(/[&<>]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;'}[c];});}
+
+function tokBash(line){
+  var out='',last=0,m;
+  var re=/(#.*$)|("(?:[^"\\]|\\.)*")|('(?:[^'\\]|\\.)*')|(--?[A-Za-z][\w-]*)|\b(delonix|delonixctl|dlx)\b/g;
+  while((m=re.exec(line))){
+    out+=esc(line.slice(last,m.index));
+    if(m[1])out+='<span class="tok-comment">'+esc(m[1])+'</span>';
+    else if(m[2]||m[3])out+='<span class="tok-string">'+esc(m[0])+'</span>';
+    else if(m[4])out+='<span class="tok-flag">'+esc(m[0])+'</span>';
+    else if(m[5])out+='<span class="tok-cmd">'+esc(m[0])+'</span>';
+    last=re.lastIndex;
+  }
+  return out+esc(line.slice(last));
+}
+function highlightBash(text){return text.split('\n').map(tokBash).join('\n');}
+
+function highlightFlagsPh(line){
+  var out='',last=0,m;
+  var re=/(--?[A-Za-z][\w-]*)|(<[^>]+>)|(\[[^\]]+\])/g;
+  while((m=re.exec(line))){
+    out+=esc(line.slice(last,m.index));
+    if(m[1])out+='<span class="tok-flag">'+esc(m[0])+'</span>';
+    else out+='<span class="tok-ph">'+esc(m[0])+'</span>';
+    last=re.lastIndex;
+  }
+  return out+esc(line.slice(last));
+}
+function highlightHelp(text){
+  return text.split('\n').map(function(line){
+    var mm=line.match(/^(Usage|Commands|Options|Arguments|Examples):(.*)$/);
+    if(mm)return '<span class="tok-head">'+mm[1]+':</span>'+highlightFlagsPh(mm[2]);
+    return highlightFlagsPh(line);
+  }).join('\n');
+}
+function highlightYaml(text){
+  return text.split('\n').map(function(line){
+    if(/^\s*#/.test(line))return '<span class="tok-comment">'+esc(line)+'</span>';
+    if(/^---\s*$/.test(line))return '<span class="tok-sep">'+esc(line)+'</span>';
+    var m=line.match(/^(\s*(?:- )?)([A-Za-z0-9_.-]+)(:)(.*)$/);
+    if(m){
+      var rest=m[4],restHtml=esc(rest);
+      var sm=rest.match(/^(\s*)("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|[^\s#][^#]*?)(\s*(#.*)?)$/);
+      if(sm&&sm[2])restHtml=esc(sm[1])+'<span class="tok-string">'+esc(sm[2])+'</span>'+esc(sm[3]||'');
+      return esc(m[1])+'<span class="tok-key">'+esc(m[2])+'</span>'+esc(m[3])+restHtml;
+    }
+    return esc(line);
+  }).join('\n');
+}
+
+function highlightAll(){
+  document.querySelectorAll('pre > code').forEach(function(code){
+    if(code.dataset.hl)return;
+    code.dataset.hl='1';
+    var pre=code.parentElement;
+    if(pre.closest('.out'))return;
+    var text=code.textContent,html;
+    var isHelp=pre.parentElement&&pre.parentElement.classList.contains('help');
+    if(isHelp)html=highlightHelp(text);
+    else if(/^apiVersion:|\nkind:\s/.test(text))html=highlightYaml(text);
+    else if(pre.closest('.ex')||/^(delonix|delonixctl|dlx)\b/.test(text.trim()))html=highlightBash(text);
+    else return;
+    code.innerHTML=html;
+  });
+}
+
+function buildToc(){
+  var main=document.querySelector('main'),nav=document.getElementById('toc-nav'),
+      aside=document.getElementById('pagetoc');
+  if(!main||!nav)return;
+  var heads=main.querySelectorAll('h2');
+  if(heads.length<2){if(aside)aside.style.display='none';return;}
+  var used={};
+  heads.forEach(function(h){
+    if(!h.id){
+      var slug=h.textContent.toLowerCase().trim().replace(/[^a-z0-9]+/g,'-').replace(/(^-|-$)/g,'')||'sec';
+      while(used[slug])slug+='-x';
+      used[slug]=1;h.id=slug;
+    }
+    var a=document.createElement('a');
+    a.href='#'+h.id;a.textContent=h.textContent.trim();
+    nav.appendChild(a);
+  });
+}
+
+function initThemeToggle(){
+  var KEY='delonix-docs-theme',btn=document.querySelector('.theme-toggle');
+  if(!btn)return;
+  btn.addEventListener('click',function(){
+    var sys=matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';
+    var eff=document.documentElement.getAttribute('data-theme')||sys;
+    var next=eff==='dark'?'light':'dark';
+    document.documentElement.setAttribute('data-theme',next);
+    try{localStorage.setItem(KEY,next);}catch(e){}
+  });
+}
+
+document.addEventListener('DOMContentLoaded',function(){
+  initThemeToggle();buildToc();highlightAll();
+});
+})();</script>
 </body>
 </html>

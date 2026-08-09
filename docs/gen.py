@@ -13,16 +13,12 @@ O conteúdo editorial (introduções, exemplos, notas) vive nos dicts abaixo.
 
 import html
 import os
+import re
 import subprocess
 import sys
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 BIN = sys.argv[1] if len(sys.argv) > 1 else os.path.join(ROOT, "..", "target", "release", "delonix")
-# `delonixctl` — cliente remoto do Delonix PaaS, produto IRMÃO deste engine mas de um repo
-# PRIVADO diferente (angolardevops/delonix-paas). Não introspectamos o repo (não temos acesso
-# aqui) — só o binário JÁ COMPILADO, passado como 2.º argumento, para manter a mesma promessa
-# do resto deste gerador: o `--help` embebido é sempre o REAL, nunca inventado.
-BIN_CTL = sys.argv[2] if len(sys.argv) > 2 else os.path.join(ROOT, "..", "target", "release", "delonixctl")
 
 
 # v0.30.0 nested some former top-level groups under `net`/`serve`/`cluster`
@@ -53,9 +49,75 @@ def help_of(*args):
     return (out.stdout or out.stderr).strip()
 
 
-def help_of_ctl(*args):
-    out = subprocess.run([BIN_CTL, *args, "--help"], capture_output=True, text=True)
-    return (out.stdout or out.stderr).strip()
+def split_help_intro(help_text):
+    """Separa o parágrafo `about` (clap) — se existir — do resto do `--help`.
+
+    O `about` é sempre o texto ANTES da primeira linha `Usage:`. Promovê-lo a
+    parágrafo próprio evita mostrá-lo duas vezes (uma como prosa, outra
+    dentro do bloco de código) e dá a cada secção uma introdução real, feita
+    do texto que já existe no binário — nunca inventada.
+    """
+    idx = help_text.find("Usage:")
+    if idx <= 0:
+        return None, help_text
+    intro = help_text[:idx].strip()
+    return (intro or None), help_text[idx:]
+
+
+def render_prose(text):
+    """Escapa HTML e traduz as convenções markdown-ish do `--help` (clap
+    `about`/`long_about`) para HTML real: `` `code` `` e `**bold**`."""
+    out = html.escape(text)
+    out = re.sub(r"`([^`]+)`", r"<code>\1</code>", out)
+    out = re.sub(r"\*\*([^*]+)\*\*", r"<strong>\1</strong>", out)
+    return out
+
+
+# Mapeia cada grupo de comandos (chave de `GROUPS`) para o ficheiro Rust que o
+# implementa, para a página de referência poder linkar para a implementação
+# real — quem quiser contribuir vê imediatamente onde mexer.
+SOURCE_FILES = {
+    "container": "container.rs",
+    "workload": "workload.rs",
+    "pod": "pod.rs",
+    "image": "image.rs",
+    "build": "build.rs",
+    "vm": "vm.rs",
+    "volumes": "volume.rs",
+    "network": "network.rs",
+    "stack": "stack.rs",
+    "compose": "compose.rs",
+    "cluster": "cluster.rs",
+    "secret": "secret.rs",
+    "storage": "storage.rs",
+    "sharevolume": "sharevolume.rs",
+    "ingress": "firewall.rs",
+    "egress": "firewall.rs",
+    "httproute": "httproute.rs",
+    "tunnel": "tunnel.rs",
+    "flow": "flow.rs",
+    "boot": "boot.rs",
+    "system": "system.rs",
+    "dash": "dash.rs",
+    "docker-api": "dockerapi.rs",
+    "kube": "kube.rs",
+    "netns": "netns.rs",
+    "completion": "complete.rs",
+}
+SOURCE_BASE_URL = (
+    "https://github.com/angolardevops/delonix-runtime/blob/main/"
+    "crates/delonix-runtime-bin/src/cmd/"
+)
+
+
+def source_link_html(name):
+    fname = SOURCE_FILES.get(name)
+    if not fname:
+        return ""
+    return (
+        "<p class='src-link'>📄 Implementação real em Rust: "
+        f"<a href=\"{SOURCE_BASE_URL}{fname}\"><code>cmd/{fname}</code></a></p>"
+    )
 
 
 # ---------------------------------------------------------------- conteúdo
@@ -961,14 +1023,23 @@ fica desactualizado à mão.""",
 
 CSS = """
 :root{--accent:#e8590c;--accent-soft:#fff0e6;--ink:#1a1a2e;--muted:#5a6472;--line:#e6e8ec;
---bg:#ffffff;--side:#f7f8fa;--code-bg:#0f172a;--code-ink:#e2e8f0;--radius:10px}
-@media (prefers-color-scheme: dark){:root{--ink:#e6e8ee;--muted:#9aa4b2;--line:#252a33;
---bg:#0d1117;--side:#10151c;--accent-soft:#2a1810;--code-bg:#161b22;--code-ink:#dbe2ea}}
+--bg:#ffffff;--side:#f7f8fa;--code-bg:#0f172a;--code-ink:#e2e8f0;--radius:10px;
+--tok-key:#0550ae;--tok-string:#116329;--tok-comment:#6e7781;--tok-flag:#953800;
+--tok-cmd:#8250df;--tok-ph:#6e7781;--tok-head:#c2410c;--tok-sep:#6e7781}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--ink:#e6e8ee;--muted:#9aa4b2;--line:#252a33;
+--bg:#0d1117;--side:#10151c;--accent-soft:#2a1810;--code-bg:#161b22;--code-ink:#dbe2ea;
+--tok-key:#79c0ff;--tok-string:#7ee787;--tok-comment:#8b949e;--tok-flag:#ffa657;
+--tok-cmd:#d2a8ff;--tok-ph:#8b949e;--tok-head:#ff9a5a;--tok-sep:#8b949e}}
+:root[data-theme="dark"]{--ink:#e6e8ee;--muted:#9aa4b2;--line:#252a33;
+--bg:#0d1117;--side:#10151c;--accent-soft:#2a1810;--code-bg:#161b22;--code-ink:#dbe2ea;
+--tok-key:#79c0ff;--tok-string:#7ee787;--tok-comment:#8b949e;--tok-flag:#ffa657;
+--tok-cmd:#d2a8ff;--tok-ph:#8b949e;--tok-head:#ff9a5a;--tok-sep:#8b949e}
 *{box-sizing:border-box}body{margin:0;font:16px/1.65 -apple-system,'Segoe UI',Roboto,Ubuntu,
 sans-serif;color:var(--ink);background:var(--bg)}
 a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
-.layout{display:flex;min-height:100vh}
-nav.side{width:270px;flex-shrink:0;background:var(--side);border-right:1px solid var(--line);
+.layout{display:grid;grid-template-columns:270px minmax(0,1fr) 240px;max-width:1600px;
+margin:0 auto;min-height:100vh}
+nav.side{width:270px;background:var(--side);border-right:1px solid var(--line);
 padding:1.2rem 1rem 3rem;position:sticky;top:0;height:100vh;overflow-y:auto}
 nav.side .brand{display:flex;align-items:center;gap:.55rem;font-weight:700;font-size:1.12rem;
 margin-bottom:1.1rem;color:var(--ink)}
@@ -979,16 +1050,33 @@ color:var(--muted)}
 nav.side a{display:block;padding:.28rem .55rem;border-radius:6px;color:var(--ink);font-size:.93rem}
 nav.side a:hover{background:var(--accent-soft);text-decoration:none}
 nav.side a.on{background:var(--accent-soft);color:var(--accent);font-weight:600}
-main{flex:1;min-width:0;padding:2.2rem 3rem 5rem;max-width:940px}
+.theme-toggle{appearance:none;border:1px solid var(--line);background:var(--bg);color:var(--ink);
+border-radius:8px;width:30px;height:30px;flex-shrink:0;display:inline-flex;align-items:center;
+justify-content:center;cursor:pointer;font-size:.95rem;margin-left:auto;line-height:1}
+.theme-toggle:hover{border-color:var(--accent)}
+.theme-toggle .i-sun{display:none}
+:root[data-theme="dark"] .theme-toggle .i-moon{display:none}
+:root[data-theme="dark"] .theme-toggle .i-sun{display:inline}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .theme-toggle .i-moon{display:none}
+:root:not([data-theme="light"]) .theme-toggle .i-sun{display:inline}}
+main{min-width:0;padding:2.2rem 3rem 5rem;max-width:860px;margin:0 auto}
 main h1{font-size:1.9rem;margin:.2rem 0 .4rem}
 main h2{font-size:1.35rem;margin-top:2.4rem;padding-bottom:.35rem;border-bottom:1px solid var(--line)}
 main h3{font-size:1.05rem;margin-top:1.6rem}
 .tagline{color:var(--muted);font-size:1.05rem;margin-top:0}
+p.intro{font-size:1.02rem;margin:1rem 0}
+p.src-link{margin:.7rem 0 0;font-size:.85rem;color:var(--muted)}
+p.src-link a{font-weight:600}
 code{background:var(--accent-soft);padding:.1em .35em;border-radius:5px;font-size:.9em}
 pre{background:var(--code-bg);color:var(--code-ink);padding:1rem 1.2rem;border-radius:var(--radius);
-overflow-x:auto;font-size:.86rem;line-height:1.55}
+overflow-x:auto;font-size:.86rem;line-height:1.55;white-space:pre-wrap;word-break:break-word}
 pre code{background:none;padding:0;color:inherit;font-size:inherit}
 .help pre{border-left:4px solid var(--accent)}
+.tok-key{color:var(--tok-key)}.tok-string{color:var(--tok-string)}
+.tok-comment{color:var(--tok-comment);font-style:italic}
+.tok-flag{color:var(--tok-flag)}.tok-cmd{color:var(--tok-cmd);font-weight:600}
+.tok-ph{color:var(--tok-ph);font-style:italic}.tok-head{color:var(--tok-head);font-weight:700}
+.tok-sep{color:var(--tok-sep)}
 .ex{margin:.9rem 0}.ex .cap{font-size:.88rem;color:var(--muted);margin-bottom:.25rem}
 .ex .out,div.out{margin-top:.4rem}
 .ex .out pre,div.out pre{background:transparent;border:1px dashed var(--line);color:var(--muted);
@@ -1022,8 +1110,14 @@ background:var(--accent-soft)}
 @media (prefers-color-scheme: dark){.callout.warn{background:#3a1414}.callout.warn b{color:#ff8787}}
 .callout p:first-child{margin-top:0}.callout p:last-child{margin-bottom:0}
 footer{margin-top:4rem;color:var(--muted);font-size:.85rem;border-top:1px solid var(--line);padding-top:1rem}
-@media (max-width:840px){.layout{flex-direction:column}nav.side{width:100%;height:auto;position:static}
-main{padding:1.4rem 1.2rem 4rem}}
+aside.toc{padding:2.2rem 1.2rem 3rem 0;position:sticky;top:0;height:100vh;overflow-y:auto;font-size:.82rem}
+aside.toc .toc-inner{border-left:1px solid var(--line);padding-left:1rem}
+aside.toc h5{margin:0 0 .5rem;font-size:.72rem;letter-spacing:.09em;text-transform:uppercase;color:var(--muted)}
+aside.toc a{display:block;padding:.2rem 0;color:var(--muted);line-height:1.4}
+aside.toc a:hover{color:var(--accent);text-decoration:none}
+@media (max-width:1200px){.layout{grid-template-columns:270px minmax(0,1fr)}aside.toc{display:none}}
+@media (max-width:840px){.layout{display:block}nav.side{width:100%;height:auto;position:static}
+main{padding:1.4rem 1.2rem 4rem;max-width:none}}
 """
 
 
@@ -1040,14 +1134,15 @@ def sidebar(active, depth=0):
         ("cri.html", "CRI — kubelet sem containerd"),
         ("comparacao.html", "Delonix vs Docker vs Podman"),
         ("tutorial-delonix-temp.html", "Projecto completo: Delonix Temp"),
-        ("delonixctl.html", "delonixctl — cliente PaaS"),
     ]
     items_cmd = [(f"comandos/{g}.html", GROUPS[g]["title"]) for g in GROUPS]
     def link(href, label):
         cls = ' class="on"' if href == active else ""
         return f'<a href="{p}{href}"{cls}>{html.escape(label)}</a>'
     return f"""<nav class="side">
-<div class="brand"><span class="dot">▲</span> Delonix Engine</div>
+<div class="brand"><span class="dot">▲</span> Delonix Engine
+<button class="theme-toggle" type="button" aria-label="Alternar tema claro/escuro" title="Tema claro/escuro">
+<span class="i-moon">🌙</span><span class="i-sun">☀️</span></button></div>
 <h5>Documentação</h5>
 {''.join(link(h, l) for h, l in items_docs)}
 <h5>Referência CLI</h5>
@@ -1058,6 +1153,123 @@ def sidebar(active, depth=0):
 </nav>"""
 
 
+# Script anti-FOUC: corre em <head>, SÍNCRONO, antes de qualquer pintura —
+# só lê a escolha manual do leitor (`localStorage`) e marca `data-theme` no
+# <html> logo de início. Sem isto, a página pintava sempre no tema do SO por
+# uma fracção de segundo antes do JS do fim da página a corrigir.
+THEME_INIT_JS = """<script>(function(){try{
+var t=localStorage.getItem('delonix-docs-theme');
+if(t)document.documentElement.setAttribute('data-theme',t);
+}catch(e){}})();</script>"""
+
+# JS partilhado por todas as páginas: toggle de tema (persistido), índice
+# "Nesta página" gerado a partir dos <h2> reais, e um highlighter leve
+# (bash/YAML/`--help`) — tudo vendored, sem dependência externa nenhuma,
+# coerente com o resto do site ser 100% auto-contido.
+SITE_JS = """<script>(function(){
+function esc(s){return s.replace(/[&<>]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;'}[c];});}
+
+function tokBash(line){
+  var out='',last=0,m;
+  var re=/(#.*$)|("(?:[^"\\\\]|\\\\.)*")|('(?:[^'\\\\]|\\\\.)*')|(--?[A-Za-z][\\w-]*)|\\b(delonix|delonixctl|dlx)\\b/g;
+  while((m=re.exec(line))){
+    out+=esc(line.slice(last,m.index));
+    if(m[1])out+='<span class="tok-comment">'+esc(m[1])+'</span>';
+    else if(m[2]||m[3])out+='<span class="tok-string">'+esc(m[0])+'</span>';
+    else if(m[4])out+='<span class="tok-flag">'+esc(m[0])+'</span>';
+    else if(m[5])out+='<span class="tok-cmd">'+esc(m[0])+'</span>';
+    last=re.lastIndex;
+  }
+  return out+esc(line.slice(last));
+}
+function highlightBash(text){return text.split('\\n').map(tokBash).join('\\n');}
+
+function highlightFlagsPh(line){
+  var out='',last=0,m;
+  var re=/(--?[A-Za-z][\\w-]*)|(<[^>]+>)|(\\[[^\\]]+\\])/g;
+  while((m=re.exec(line))){
+    out+=esc(line.slice(last,m.index));
+    if(m[1])out+='<span class="tok-flag">'+esc(m[0])+'</span>';
+    else out+='<span class="tok-ph">'+esc(m[0])+'</span>';
+    last=re.lastIndex;
+  }
+  return out+esc(line.slice(last));
+}
+function highlightHelp(text){
+  return text.split('\\n').map(function(line){
+    var mm=line.match(/^(Usage|Commands|Options|Arguments|Examples):(.*)$/);
+    if(mm)return '<span class="tok-head">'+mm[1]+':</span>'+highlightFlagsPh(mm[2]);
+    return highlightFlagsPh(line);
+  }).join('\\n');
+}
+function highlightYaml(text){
+  return text.split('\\n').map(function(line){
+    if(/^\\s*#/.test(line))return '<span class="tok-comment">'+esc(line)+'</span>';
+    if(/^---\\s*$/.test(line))return '<span class="tok-sep">'+esc(line)+'</span>';
+    var m=line.match(/^(\\s*(?:- )?)([A-Za-z0-9_.-]+)(:)(.*)$/);
+    if(m){
+      var rest=m[4],restHtml=esc(rest);
+      var sm=rest.match(/^(\\s*)("(?:[^"\\\\]|\\\\.)*"|'(?:[^'\\\\]|\\\\.)*'|[^\\s#][^#]*?)(\\s*(#.*)?)$/);
+      if(sm&&sm[2])restHtml=esc(sm[1])+'<span class="tok-string">'+esc(sm[2])+'</span>'+esc(sm[3]||'');
+      return esc(m[1])+'<span class="tok-key">'+esc(m[2])+'</span>'+esc(m[3])+restHtml;
+    }
+    return esc(line);
+  }).join('\\n');
+}
+
+function highlightAll(){
+  document.querySelectorAll('pre > code').forEach(function(code){
+    if(code.dataset.hl)return;
+    code.dataset.hl='1';
+    var pre=code.parentElement;
+    if(pre.closest('.out'))return;
+    var text=code.textContent,html;
+    var isHelp=pre.parentElement&&pre.parentElement.classList.contains('help');
+    if(isHelp)html=highlightHelp(text);
+    else if(/^apiVersion:|\\nkind:\\s/.test(text))html=highlightYaml(text);
+    else if(pre.closest('.ex')||/^(delonix|delonixctl|dlx)\\b/.test(text.trim()))html=highlightBash(text);
+    else return;
+    code.innerHTML=html;
+  });
+}
+
+function buildToc(){
+  var main=document.querySelector('main'),nav=document.getElementById('toc-nav'),
+      aside=document.getElementById('pagetoc');
+  if(!main||!nav)return;
+  var heads=main.querySelectorAll('h2');
+  if(heads.length<2){if(aside)aside.style.display='none';return;}
+  var used={};
+  heads.forEach(function(h){
+    if(!h.id){
+      var slug=h.textContent.toLowerCase().trim().replace(/[^a-z0-9]+/g,'-').replace(/(^-|-$)/g,'')||'sec';
+      while(used[slug])slug+='-x';
+      used[slug]=1;h.id=slug;
+    }
+    var a=document.createElement('a');
+    a.href='#'+h.id;a.textContent=h.textContent.trim();
+    nav.appendChild(a);
+  });
+}
+
+function initThemeToggle(){
+  var KEY='delonix-docs-theme',btn=document.querySelector('.theme-toggle');
+  if(!btn)return;
+  btn.addEventListener('click',function(){
+    var sys=matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';
+    var eff=document.documentElement.getAttribute('data-theme')||sys;
+    var next=eff==='dark'?'light':'dark';
+    document.documentElement.setAttribute('data-theme',next);
+    try{localStorage.setItem(KEY,next);}catch(e){}
+  });
+}
+
+document.addEventListener('DOMContentLoaded',function(){
+  initThemeToggle();buildToc();highlightAll();
+});
+})();</script>"""
+
+
 def page(path, title, body, depth=0):
     doc = f"""<!DOCTYPE html>
 <html lang="pt">
@@ -1065,6 +1277,7 @@ def page(path, title, body, depth=0):
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{html.escape(title)} · Delonix Engine</title>
+{THEME_INIT_JS}
 <style>{CSS}</style>
 </head>
 <body>
@@ -1075,7 +1288,9 @@ def page(path, title, body, depth=0):
 <footer>Delonix Engine · Apache-2.0 · <a href="https://github.com/angolardevops/delonix-runtime">angolardevops/delonix-runtime</a>
 · Referência gerada do <code>--help</code> real do binário por <code>docs/gen.py</code>.</footer>
 </main>
+<aside class="toc" id="pagetoc"><div class="toc-inner"><h5>Nesta página</h5><nav id="toc-nav"></nav></div></aside>
 </div>
+{SITE_JS}
 </body>
 </html>"""
     out = os.path.join(ROOT, path)
@@ -1104,8 +1319,14 @@ def examples_html(exs):
 def group_page(name, g):
     body = [f"<h1>{html.escape(g['title'])}</h1><p class='tagline'>{html.escape(g['tagline'])}</p>"]
     body.append(f"<p>{g['intro']}</p>")
+    body.append(source_link_html(name))
     top_help = help_of(*group_argv(name))
-    body.append(f"<div class='help'><pre><code>{html.escape(top_help)}</code></pre></div>")
+    # A intro já vem de `g['intro']` (prosa autoral) — o `about` do clap aqui
+    # seria quase sempre uma repetição em EN da mesma frase, por isso só se
+    # descarta (nunca se duplica), mantendo o bloco de código a começar já
+    # em "Usage:".
+    _, top_rest = split_help_intro(top_help)
+    body.append(f"<div class='help'><pre><code>{html.escape(top_rest)}</code></pre></div>")
     if g.get("examples"):
         body.append("<h2>Exemplos</h2>" + examples_html(g["examples"]))
     if g.get("extra"):
@@ -1113,105 +1334,18 @@ def group_page(name, g):
     for sub, meta in g["subs"].items():
         args = ["image", "--vm", sub] if name == "image" and sub in ("push", "build") else list(group_argv(name)) + [sub]
         body.append(f"<h2 id='{sub}'><code>{html.escape(name)} {html.escape(sub)}</code></h2>")
-        body.append(f"<div class='help'><pre><code>{html.escape(help_of(*args))}</code></pre></div>")
+        sub_help = help_of(*args)
+        sub_intro, sub_rest = split_help_intro(sub_help)
+        if sub_intro:
+            for para in sub_intro.split("\n\n"):
+                if para.strip():
+                    body.append(f"<p class='intro'>{render_prose(para.strip())}</p>")
+        body.append(f"<div class='help'><pre><code>{html.escape(sub_rest)}</code></pre></div>")
         if meta.get("notes"):
             body.append(meta["notes"])
         if meta.get("examples"):
             body.append("<h3>Exemplos</h3>" + examples_html(meta["examples"]))
     page(f"comandos/{name}.html", g["title"], "\n".join(body), depth=1)
-
-
-CTL_GROUPS = {
-    "auth": {
-        "title": "delonixctl auth",
-        "tagline": "Device-flow (RFC 8628) contra o portal do teu operador — nunca pede password directamente.",
-        "examples": [
-            ("Autenticar (abre um código no browser)", "delonixctl auth login --portal https://portal.o-teu-operador.example"),
-            ("Confirmar credenciais guardadas", "delonixctl auth status"),
-            ("Sem device-flow, token já em mão (CI/automação)", "delonixctl auth login --token \"o-teu-token\""),
-        ],
-    },
-    "team": {
-        "title": "delonixctl team",
-        "tagline": "Teams (`/v2/teams`) — `set` substitui a lista de membros inteira (sem add/remove incremental hoje).",
-        "examples": [
-            ("Listar", "delonixctl team ls", "(sem teams)"),
-            ("Criar/substituir membros", "delonixctl team set backend --org acme --member ana:admin --member joao"),
-        ],
-    },
-    "addons": {
-        "title": "delonixctl addons",
-        "tagline": "Addons geridos — postgres/pgvector/redis/kafka/minio/mongodb/qdrant.",
-        "examples": [
-            ("Provisionar", "delonixctl addons create cache --type redis --ha --metrics"),
-            ("Backup on-demand", "delonixctl addons backup cache"),
-        ],
-    },
-    "app": {
-        "title": "delonixctl app",
-        "tagline": "Apps por preset — nextcloud/onlyoffice/mattermost/odoo/collab/coturn.",
-        "examples": [
-            ("Catálogo", "delonixctl app presets",
-             "ID           NOME           DESCRIÇÃO\nnextcloud    Nextcloud      Ficheiros + colaboração; Postgres gerido, HTTPS.\nonlyoffice   OnlyOffice     Document Server; edição de documentos (JWT).\nmattermost   Mattermost     Chat de equipa + Calls (vídeo/voz); Postgres gerido.\nodoo         Odoo           ERP/CRM; Postgres gerido, filestore, ingress.\ncollab       Suite colab    Nextcloud + OnlyOffice + Mattermost integrados.\ncoturn       coturn (TURN)  Relay TURN/STUN para media WebRTC (RTC)."),
-            ("Criar (assíncrono — devolve um job)", "delonixctl app create a-minha-app --preset nextcloud --domain files.example.com"),
-            ("Bloquear até terminar", "delonixctl app create outra --preset odoo --wait"),
-        ],
-    },
-    "org": {
-        "title": "delonixctl org",
-        "tagline": "Organizações (`/v2/orgs`).",
-        "examples": [("Criar/actualizar", "delonixctl org set acme --owner eu@example.com --sso-domain example.com")],
-    },
-    "odoo": {
-        "title": "delonixctl odoo",
-        "tagline": "Único preset com grupo próprio (módulos, operações, ficheiros) — os outros usam só `app create --preset`.",
-        "examples": [
-            ("Criar", "delonixctl odoo create a-minha-erp --version 17 --domain erp.example.com"),
-            ("Instalar um módulo", "delonixctl odoo module install a-minha-erp o_modulo --upgrade"),
-        ],
-    },
-    "apply": {
-        "title": "delonixctl apply / delete",
-        "tagline": "Manifesto genérico (`/v2/apply`, `/v2/delete`, admin) — QUALQUER Kind, não só os com grupo dedicado.",
-        "examples": [
-            ("Aplicar", "delonixctl apply -f app.yaml"),
-            ("De stdin", "delonixctl apply -f - < app.yaml"),
-        ],
-    },
-    "version": {
-        "title": "delonixctl version",
-        "tagline": "Client + Server version lado a lado (estilo `kubectl version`) — substitui o `--version`/`-V` do clap.",
-        "examples": [
-            ("Contra uma plataforma viva", "delonixctl version",
-             "Cliente: delonixctl v0.9.74  (commit c8cd0e46c, compilado 2026-07-24)\nServidor: delonix-engine v0.9.74  (API v2) — https://127.0.0.1:9443"),
-        ],
-    },
-}
-
-
-def delonixctl_page():
-    body = [
-        "<h1>delonixctl <span class='pill'>cliente PaaS</span></h1>",
-        "<p class='tagline'>O cliente REMOTO do Delonix PaaS — homólogo ao <code>kubectl</code>. "
-        "Produto irmão deste engine, dum repositório diferente (privado): fala só HTTP com a API "
-        "<code>/v2/*</code> de uma plataforma Delonix PaaS já a correr — nunca toca em containers/VMs "
-        "directamente (isso é o <code>delonix</code> documentado no resto deste site).</p>",
-        "<table><tr><th></th><th><code>delonix</code></th><th><code>delonixctl</code></th></tr>"
-        "<tr><td>Papel</td><td>Motor local de containers/VMs/rede</td><td>Cliente remoto do PaaS</td></tr>"
-        "<tr><td>Onde corre</td><td>Na máquina do Delonix Engine</td><td>De qualquer máquina</td></tr>"
-        "<tr><td>Fala com</td><td>O kernel directamente</td><td>Só HTTP com <code>/v2/*</code></td></tr>"
-        "</table>",
-        "<div class='help'><pre><code>" + html.escape(help_of_ctl()) + "</code></pre></div>",
-        "<p>Guia completo (auth, todos os grupos, troubleshooting) no repo do PaaS: "
-        "<code>docs/user/DELONIXCTL.md</code>.</p>",
-    ]
-    for name, g in CTL_GROUPS.items():
-        body.append(f"<h2 id='{name}'><code>{html.escape(g['title'])}</code></h2>")
-        body.append(f"<p>{html.escape(g['tagline'])}</p>")
-        body.append(f"<div class='help'><pre><code>{html.escape(help_of_ctl(name))}</code></pre></div>")
-        if g.get("examples"):
-            body.append("<h3>Exemplos</h3>" + examples_html(g["examples"]))
-    page("delonixctl.html", "delonixctl", "\n".join(body))
 
 
 INDEX = """
@@ -1275,12 +1409,6 @@ delonix container start web      # rearranca com o mesmo estado</code></pre>
 <tr><td>VMs</td><td>—</td><td>machine (para si próprio)</td><td>microVMs declarativas de 1.ª classe (Cloud Hypervisor/libvirt)</td></tr>
 <tr><td>Kubernetes</td><td>—</td><td>—</td><td>CRI próprio + bootstrap kubeadm do zero (<code>delonix cluster</code>)</td></tr>
 </table>
-
-<h2>Já usas uma plataforma Delonix PaaS?</h2>
-<p>Este site documenta o <strong>engine</strong> (<code>delonix</code>, o que corre na máquina).
-Para operar uma plataforma <strong>Delonix PaaS</strong> já a correr de qualquer máquina — apps,
-addons geridos, organizações, teams — o cliente é o <a href="delonixctl.html"><code>delonixctl</code></a>
-(homólogo ao <code>kubectl</code>, produto irmão, repo diferente).</p>
 """
 
 ARCH = """
@@ -1650,22 +1778,6 @@ def subcommands_of(group):
     return rows
 
 
-def subcommands_of_ctl(group):
-    """Mesmo que `subcommands_of`, mas lendo o `--help` do `delonixctl` (BIN_CTL)."""
-    out, seen, rows = help_of_ctl(group), False, []
-    for line in out.splitlines():
-        if line.strip().startswith("Commands:"):
-            seen = True
-            continue
-        if seen:
-            if line.strip().startswith("Options:") or not line.strip():
-                if rows:
-                    break
-                continue
-            m = line.strip().split(None, 1)
-            if m and m[0] not in ("help",) and m[0][0].isalpha():
-                rows.append((m[0], m[1] if len(m) > 1 else ""))
-    return rows
 
 
 # Tarefas comuns — o "cola e corre" no topo do cheatsheet.
@@ -2183,21 +2295,6 @@ def cheatsheet_page():
     body.append("<h2>Global</h2><p><code>--l18n en|pt</code> — idioma da saída (EN por omissão; "
                 "<code>pt</code> para pt_AO). <code>$DELONIX_ROOT</code> — raiz do estado. "
                 "<code>delonix completion &lt;shell&gt;</code> — autocompletion.</p>")
-    body.append("<h2>delonixctl (cliente remoto do PaaS) <a href='delonixctl.html'>→</a></h2>")
-    body.append("<p>Produto irmão (repo diferente, privado) — ver <a href='delonixctl.html'>a página "
-                 "dedicada</a> para exemplos e o guia completo. Grupos:</p>")
-    for g in CTL_GROUPS:
-        title = CTL_GROUPS[g]["title"]
-        subs = subcommands_of_ctl(g)
-        head = f"<h3 id='ctl-{g}'><a href='delonixctl.html#{g}'><code>{html.escape(title)}</code></a></h3>"
-        if not subs:
-            body.append(head + f"<p>{html.escape(CTL_GROUPS[g]['tagline'])}</p>")
-            continue
-        rows = "".join(
-            f"<tr><td><code>{html.escape(g)} {html.escape(s)}</code></td><td>{html.escape(d)}</td></tr>"
-            for s, d in subs
-        )
-        body.append(head + f"<table><tr><th>Comando</th><th>O que faz</th></tr>{rows}</table>")
     page("cheatsheet.html", "Cheatsheet", "\n".join(body))
 
 
@@ -2351,10 +2448,6 @@ def main():
     page("tutorial-delonix-temp.html", "Projecto completo: Delonix Temp", TUTORIAL)
     for n, g in GROUPS.items():
         group_page(n, g)
-    if os.path.isfile(BIN_CTL) and os.access(BIN_CTL, os.X_OK):
-        delonixctl_page()
-    else:
-        print(f"aviso: delonixctl não encontrado em {BIN_CTL} — delonixctl.html NÃO regenerado")
     open(os.path.join(ROOT, ".nojekyll"), "w").close()
     print(f"docs geradas (delonix {ver}) em {ROOT}")
 
