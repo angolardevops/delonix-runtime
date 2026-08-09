@@ -70,6 +70,9 @@ GROUPS = {
 JSON no <code>$DELONIX_ROOT</code>. Em rootless, o rootfs do container é uma cópia flat
 <em>persistente</em> — as escritas sobrevivem a <code>stop</code>/<code>start</code>, como no Docker.""",
         "subs": {
+            "dash": {"examples": [
+                ('Dashboard só dos containers',
+                 'delonix container dash')]},
             "run": {"examples": [
                 ("Servir nginx na porta 8080 do host (NAT userspace, sem root)",
                  "delonix container run -d --name web -p 8080:80 nginx"),
@@ -221,6 +224,47 @@ verificação de digest no pull. Com <code>--vm</code>, o MESMO grupo opera sobr
 <strong>imagens VM douradas</strong> (um <code>.qcow2</code> + metadados por imagem): Ubuntu cloud
 image + kubeadm/kubelet/kubectl + <code>delonix-cri</code> — a base do <code>delonix cluster</code>.""",
         "subs": {
+            "init": {"examples": [
+                ('Scaffold de um VMfile (equivalente a vm init --vmfile)',
+                 'delonix image --vm init minha-base')]},
+            "vm": {"examples": [
+                ('O mesmo grupo de imagens VM, por outro caminho',
+                 'delonix image vm ls')]},
+            "logout": {"examples": [
+                ('Esquecer as credenciais desse registo',
+                 'delonix image logout ghcr.io')]},
+            "login": {"examples": [
+                ('Autenticar num registo (a password vem do stdin, fora do histórico)',
+                 'printf \'%s\' "$GHCR_TOKEN" | delonix image login ghcr.io --username aminhaorg')]},
+            "load": {"examples": [
+                ('Importar esse tar do outro lado',
+                 'delonix image load --input app-dev.tar')]},
+            "save": {"examples": [
+                ('Exportar para um tar (para levar para uma máquina sem rede)',
+                 'delonix image save app:dev --output app-dev.tar')]},
+            "scan": {"examples": [
+                ('Procurar vulnerabilidades conhecidas numa imagem',
+                 'delonix image scan nginx:alpine'),
+                ('Varrer todas as imagens locais',
+                 'delonix image scan')]},
+            "verify": {"examples": [
+                ('Confirmar a assinatura contra uma chave pública',
+                 'delonix image verify ghcr.io/aminhaorg/app:1.0 chave.pem')]},
+            "history": {"examples": [
+                ('Que instrução criou cada camada',
+                 'delonix image history app:dev')]},
+            "tag": {"examples": [
+                ('Dar um segundo nome à mesma imagem (não copia nada)',
+                 'delonix image tag app:dev ghcr.io/aminhaorg/app:1.0')]},
+            "describe": {"examples": [
+                ('Camadas, config e digest de uma imagem',
+                 'delonix image describe nginx:alpine')]},
+            "ls-remote": {"examples": [
+                ('Tags publicadas num repositório, sem puxar nada',
+                 'delonix image ls-remote ghcr.io/aminhaorg/app')]},
+            "dash": {"examples": [
+                ('Dashboard só das imagens',
+                 'delonix image dash')]},
             "pull": {"examples": [
                 ("Referência com tag e digest (formato combinado suportado)",
                  "delonix image pull kindest/node:v1.34.0@sha256:7416a6…"),
@@ -273,6 +317,71 @@ O <code>create</code> é idempotente (cria ou auto-recupera) e suporta cloud-ini
 <code>--hostname</code>, <code>--ssh-key</code> e <code>--user-data</code> geram um ISO NoCloud
 automaticamente. É a camada que o <code>delonix cluster kubeadm</code> usa para provisionar nós.""",
         "subs": {
+            "snapshots": {"examples": [
+                ('Listar os checkpoints de uma VM',
+                 'delonix vm snapshots dev')]},
+            "restore": {"examples": [
+                ('Voltar ao checkpoint',
+                 'delonix vm restore dev antes-do-upgrade')]},
+            "snapshot": {"examples": [
+                ('Checkpoint de sistema (memória + disco) de uma VM A CORRER',
+                 'delonix vm snapshot dev antes-do-upgrade')]},
+            "restart": {"examples": [
+                ('Reinício forçado (pára e volta a arrancar)',
+                 'delonix vm restart dev')]},
+            "start": {"examples": [
+                ('Voltar a arrancar uma VM parada, sem repetir as flags do create',
+                 'delonix vm start dev')]},
+            "describe": {"examples": [
+                ('Tudo sobre uma VM, estilo kubectl describe',
+                 'delonix vm describe dev')]},
+            "unbridge": {"examples": [
+                ('Fechar a ponte VM↔container',
+                 'sudo delonix vm unbridge minha-rede')]},
+            "bridge": {"examples": [
+                ('Ver o plano SEM aplicar (o default é dry-run)',
+                 'delonix vm bridge minha-rede'),
+                ('Aplicar mesmo — precisa de root, é a excepção deliberada ao rootless',
+                 'sudo delonix vm bridge minha-rede --apply')]},
+            "reach": {"examples": [
+                ('Que portas de container é que as VMs conseguem alcançar',
+                 'delonix vm reach')]},
+            "vnc": {"examples": [
+                ('Abrir o ecrã gráfico da VM',
+                 'delonix vm vnc dev')]},
+            "console": {"examples": [
+                ('Consola série (voltar ao host: Ctrl+])',
+                 'delonix vm console dev')]},
+            "push": {"examples": [
+                ('Publicar a tua imagem como artefacto OCI',
+                 'printf \'%s\' "$GHCR_TOKEN" | delonix image login ghcr.io --username aminhaorg\ndelonix vm push minha-base:1.0 ghcr.io/aminhaorg/minha-base:1.0')]},
+            "ls-remote": {"examples": [
+                ('Que versões existem publicadas, antes de puxar',
+                 'delonix vm ls-remote'),
+                ('As tags de um repositório teu',
+                 'delonix vm ls-remote ghcr.io/aminhaorg/base')]},
+            "pull": {"examples": [
+                ('A golden oficial com Kubernetes (sem argumento)',
+                 'delonix vm pull'),
+                ('A golden SEM Kubernetes — só o motor, pronta a rootless',
+                 'delonix vm pull --no-k8s'),
+                ('De um registo teu, com nome local próprio',
+                 'delonix vm pull ghcr.io/aminhaorg/base:24.04 --name base:24.04')]},
+            "build": {"examples": [
+                ('Construir a partir do VMfile do directório actual',
+                 'delonix vm build -t minha-base:1.0 .'),
+                ('VMfile noutro caminho, sem compressão (build mais rápido, imagem maior)',
+                 'delonix vm build -t minha-base:dev -f receitas/VMfile --no-compress .')]},
+            "init": {"examples": [
+                ('Projecto com manifesto, pronto a correr',
+                 'delonix vm init --name lab'),
+                ('Scaffold de um VMfile para CONSTRUIR a tua imagem',
+                 'delonix vm init --vmfile --name minha-base')]},
+            "dash": {"examples": [
+                ('Dashboard só das VMs (htop-style; `q` sai)',
+                 'delonix vm dash'),
+                ('Snapshot para um script ou para o Grafana',
+                 "delonix vm dash --json | jq '.tiles'")]},
             "create": {"examples": [
                 ("VM a partir da imagem dourada, com chave SSH",
                  "delonix vm create --name node1 --image k8s-golden --cpus 2 --memory 4096 --ssh-key @~/.ssh/id_ed25519.pub"),
@@ -291,6 +400,12 @@ automaticamente. É a camada que o <code>delonix cluster kubeadm</code> usa para
 <code>-v nome:/destino[:ro]</code> resolve para um volume nomeado (criado on-demand) e
 <code>-v /host:/destino[:ro]</code> para um bind mount — a distinção é automática.""",
         "subs": {
+            "snapshot": {"examples": [
+                ('Tirar e listar snapshots de um volume',
+                 'delonix volumes snapshot create dados antes-da-migracao\ndelonix volumes snapshot ls dados')]},
+            "describe": {"examples": [
+                ('Detalhe de um volume (uso, quota, montagens)',
+                 'delonix volumes describe dados')]},
             "create": {"examples": [("Com quota e driver nfs disponíveis", "delonix volumes create dados --quota 10G")]},
             "ls": {"examples": [("", "delonix volumes ls")]},
             "inspect": {"examples": [("", "delonix volumes inspect dados")]},
@@ -309,6 +424,15 @@ pares), tudo realizável sem privilégio de host. <code>macvlan</code>/<code>ipv
 registados no store — o <code>create</code> AVISA alto que a rede não foi realizada fisicamente
 (precisam de <code>CAP_NET_ADMIN</code> na init-netns do host, fora do modelo rootless).""",
         "subs": {
+            "describe": {"examples": [
+                ('Detalhe de uma rede, estilo kubectl',
+                 'delonix network describe minha-rede')]},
+            "node": {"examples": [
+                ('Gerir nós de uma rede overlay entre máquinas',
+                 'delonix network node ls')]},
+            "dash": {"examples": [
+                ('Dashboard só das redes',
+                 'delonix network dash')]},
             "create": {"examples": [
                 ("Rede bridge para um grupo de serviços", "delonix network create backend"),
                 ("Overlay cifrado entre nós (VXLAN + WireGuard)", "delonix network create mesh --driver overlay --vni 42 --peer 10.0.0.2"),
@@ -328,6 +452,15 @@ registados no store — o <code>create</code> AVISA alto que a rede não foi rea
 Semântica <em>garante-presente</em> (idempotente por nome), não um reconciliador: sem diffing,
 rollout nem rollback — fail-fast, o que já foi aplicado fica.""",
         "subs": {
+            "validate": {"examples": [
+                ('Validar o manifesto SEM aplicar nada',
+                 'delonix stack validate -f delonix-manifest.yaml')]},
+            "describe": {"examples": [
+                ('Estado recurso a recurso, confrontado com o manifesto',
+                 'delonix stack describe')]},
+            "ls": {"examples": [
+                ('Que recursos do manifesto existem de facto neste host',
+                 'delonix stack ls')]},
             "init": {"examples": [
                 ("Projecto COMPLETO de uma stack (FastAPI): código + Delonixfile + manifesto + testes",
                  "delonix stack init myapi --template python"),
@@ -412,6 +545,26 @@ nunca dessincroniza de um .tfstate porque não há nenhum). <code>cluster kubead
 provisiona as VMs a partir da imagem VM dourada, espera pelo SSH e corre o MESMO bootstrap — um
 comando, do zero a um cluster com o <code>delonix-cri</code> como runtime (sem containerd).""",
         "subs": {
+            "kube": {"examples": [
+                ('Gerar manifestos Kubernetes a partir de um recurso Delonix',
+                 'delonix cluster kube generate')]},
+            "load": {"examples": [
+                ('Levar uma imagem local para dentro dos nós (o kind load, sem registo)',
+                 'delonix build -t app:dev .\ndelonix cluster load app:dev --name lab')]},
+            "delete": {"examples": [
+                ('Apagar o cluster e os seus nós',
+                 'delonix cluster delete --name lab')]},
+            "ls": {"examples": [
+                ('Que clusters existem neste host',
+                 'delonix cluster ls')]},
+            "create": {"examples": [
+                ('Cluster local em modo kind (containers como nós, sem Docker)',
+                 'delonix cluster create --name lab'),
+                ('Com workers',
+                 'delonix cluster create --name lab --workers 2')]},
+            "init": {"examples": [
+                ('Scaffold de um cloud.yaml para cluster apply',
+                 'delonix cluster init ./meu-cluster')]},
             "apply": {"examples": [
                 ("Bootstrap num manifesto `kind: Cluster`", "delonix cluster apply -f cloud.yaml"),
             ], "notes": """<p>Todas as entradas do manifesto que chegam a comandos remotos
@@ -440,6 +593,18 @@ NUNCA são impressos por omissão (redigidos; <code>--reveal</code> é opt-in). 
 <code>container run --secret</code>/<code>--secret-files</code> e do <code>--password-secret</code> do
 <code>storage</code> — o segredo entra uma vez, nunca fica no histórico do shell nem no manifesto.""",
         "subs": {
+            "apply": {"examples": [
+                ('Criar segredos a partir de um manifesto kind: Secret',
+                 'delonix secret apply -f segredos.yaml')]},
+            "rm": {"examples": [
+                ('Apagar o segredo inteiro',
+                 'delonix secret rm db-creds')]},
+            "unset": {"examples": [
+                ('Remover UMA chave (sem apagar o segredo)',
+                 'delonix secret unset db-creds password')]},
+            "set": {"examples": [
+                ('Acrescentar/actualizar chaves de um segredo existente',
+                 'delonix secret set db-creds user=admin password=s3cr3t')]},
             "create": {"examples": [("Criar um segredo (valor via stdin, não no argv)", "printf 'password=s3nha' | delonix secret create db-pass --from-env-file -")]},
             "ls": {"examples": [("Listar (valores redigidos)", "delonix secret ls")]},
             "inspect": {"examples": [("Revelar explicitamente", "delonix secret inspect db-pass --reveal")]},
@@ -454,6 +619,15 @@ Por baixo é um volume do <code>delonix-volume</code> com driver de rede — <co
 A password vem do cofre (<code>--password-secret</code>), nunca do argv. Ligado ao <code>stack apply</code>
 (ordem Network→Volume→<strong>Storage</strong>→Image→Vm→Container). Montar precisa de CAP_SYS_ADMIN.""",
         "subs": {
+            "apply": {"examples": [
+                ('Declarar o NAS num manifesto kind: Storage',
+                 'delonix storage apply -f storage.yaml')]},
+            "inspect": {"examples": [
+                ('JSON do storage (para scripts)',
+                 'delonix storage inspect nas-fotos')]},
+            "dash": {"examples": [
+                ('Dashboard só do armazenamento de rede',
+                 'delonix storage dash')]},
             "create": {"examples": [
                 ("NFS de um TrueNAS", "delonix storage create media --type nfs --server 10.0.0.5 --share /mnt/pool/media"),
                 ("SMB/CIFS com password do cofre", "delonix storage create docs --type cifs --server nas --share docs --username user --password-secret nas-pass"),
@@ -508,6 +682,15 @@ ingress. <code>ingress</code> governa a ENTRADA: regras allow/deny por <code>[pr
 a política por omissão, e os <em>publishes</em> DNAT. Só actua em containers numa rede custom (têm IP na
 <code>delonix0</code>); <code>--net host</code> é recusado.""",
         "subs": {
+            "clear": {"examples": [
+                ('Limpar a firewall inteira desse container',
+                 'delonix net ingress clear web')]},
+            "rm": {"examples": [
+                ('Tirar UMA regra, sem limpar as outras',
+                 'delonix net ingress rm web tcp/80')]},
+            "unpublish": {"examples": [
+                ('Deixar de publicar uma porta',
+                 'delonix net ingress unpublish 8080')]},
             "allow": {"examples": [("Deixar entrar Postgres só da própria SDN", "delonix net ingress allow db tcp/5432 --from 10.219.0.0/16")]},
             "deny": {"examples": [("Bloquear uma porta específica", "delonix net ingress deny web tcp/22")]},
             "policy": {"examples": [("Default-deny (allowlist)", "delonix net ingress policy db deny")]},
@@ -523,6 +706,15 @@ por omissão) e, ao nível da REDE, a política de egress para a Internet: <code
 ou <code>allowlist</code> (nega tudo excepto DNS e os CIDRs dados). Tudo sobre o mesmo <code>ContainerFw</code>
 /nft do <code>ingress</code>.""",
         "subs": {
+            "clear": {"examples": [
+                ('Limpar as regras de saída desse container',
+                 'delonix net egress clear web')]},
+            "rm": {"examples": [
+                ('Tirar UMA regra de saída',
+                 'delonix net egress rm web tcp/443')]},
+            "deny": {"examples": [
+                ('Bloquear a saída para uma rede',
+                 'delonix net egress deny web --to 10.0.0.0/8')]},
             "allow": {"examples": [("Só deixar sair HTTPS", "delonix net egress allow app tcp/443 --to 0.0.0.0/0")]},
             "policy": {"examples": [("Default-deny de saída", "delonix net egress policy app deny")]},
             "net": {"examples": [("Egress de uma rede em allowlist (só DNS + estes CIDRs)", "delonix net egress net backend allowlist --to 10.0.0.0/8,1.1.1.1/32")]},
@@ -575,6 +767,9 @@ da API local do próprio agente) e <strong>cloudflare</strong> (precisa de <code
 por agora só o quick-tunnel efémero <code>*.trycloudflare.com</code>, sem conta — um tunnel
 NOMEADO com domínio próprio precisa da API do Cloudflare, ainda por implementar).""",
         "subs": {
+            "apply": {"examples": [
+                ('Declarar o túnel num manifesto kind: Tunnel',
+                 'delonix net tunnel apply -f tunel.yaml')]},
             "expose": {"examples": [
                 ("Expor uma porta local sem escrever manifesto (pinggy, grátis, efémero)",
                  "delonix net tunnel expose --name demo --provider pinggy --local-port 8080",
@@ -629,6 +824,27 @@ parados, dirs órfãos, imagens dangling, blobs CAS, hostfwds órfãos, redes va
 mostra o uso de disco; <code>system monitor</code> segue ligações/conntrack; <code>system events</code> o
 fluxo de eventos.""",
         "subs": {
+            "thermal": {"examples": [
+                ('Temperatura e throttling do host',
+                 'delonix system thermal')]},
+            "monitor": {"examples": [
+                ('Acompanhar os eventos ao vivo',
+                 'delonix system monitor')]},
+            "virt": {"examples": [
+                ('O que o host oferece de virtualização, e o que há para afinar',
+                 'delonix system virt'),
+                ('Aplicar a afinação recomendada',
+                 'sudo delonix system virt --tune')]},
+            "setup": {"examples": [
+                ('Diagnosticar a delegação de cgroup — porque é que -m/--cpus não pegam',
+                 'delonix system setup'),
+                ('Escrever a correcção (precisa de root; faz efeito no PRÓXIMO login)',
+                 'sudo delonix system setup --delegate')]},
+            "events": {"examples": [
+                ('Ver o que o motor andou a fazer',
+                 'delonix system events -n 20'),
+                ('Seguir em tempo real (Ctrl-C sai)',
+                 'delonix system events --follow')]},
             "prune": {"examples": [("Recuperar espaço (GC)", "delonix system prune")]},
             "df": {"examples": [("Uso de disco", "delonix system df")]},
             "info": {"examples": [("", "delonix system info")]},
@@ -700,6 +916,27 @@ holder do ingress, attach/detach de netns, publish/unpublish de portas e firewal
 maioria dos utilizadores nunca precisa disto — usa os grupos de alto nível — mas está exposto para
 depuração e integração.""",
         "subs": {
+            "firewall": {"examples": [
+                ('Aplicar a firewall de um container no ingress',
+                 'delonix net netns firewall <id> 10.200.0.5')]},
+            "unpublish": {"examples": [
+                ('Despublicar',
+                 'delonix net netns unpublish 8080')]},
+            "publish": {"examples": [
+                ('Publicar uma porta pelo ingress, à mão',
+                 'delonix net netns publish 8080:80 10.200.0.5')]},
+            "exec": {"examples": [
+                ('Correr um comando DENTRO de uma netns anexada — para depurar a rede',
+                 'delonix net netns exec minha-netns ip -br addr')]},
+            "detach": {"examples": [
+                ('Desligar e destruir essa netns',
+                 'delonix net netns detach minha-netns')]},
+            "attach": {"examples": [
+                ('Ligar uma netns à bridge (o motor faz isto sozinho no run)',
+                 'delonix net netns attach minha-netns')]},
+            "down": {"examples": [
+                ('Derrubar a infra de rede (mata slirp + holder) — derruba TODOS os containers da SDN',
+                 'delonix net netns down')]},
             "status": {"examples": [("Estado da infra de ingress", "delonix net netns status")]},
             "up": {"examples": [("Subir o holder do ingress", "delonix net netns up")]},
         },
@@ -794,6 +1031,8 @@ def sidebar(active, depth=0):
         ("index.html", "Início"),
         ("cheatsheet.html", "Cheatsheet"),
         ("kinds.html", "Kinds e templates"),
+        ("cloud.html", "cloud-init, cloud-img e CH"),
+        ("labs.html", "Laboratórios"),
         ("arquitectura.html", "Arquitectura"),
         ("c4.html", "Modelo C4 e system design"),
         ("cri.html", "CRI — kubelet sem containerd"),
@@ -1455,6 +1694,28 @@ CHEAT_TASKS = [
 # Kinds do manifesto — cada um com um template COMPLETO e funcional (lido dos
 # `examples/*.yaml`, que são a referência canónica com todos os campos + defaults).
 KINDS_DOC = [
+    ("Secret", "secret.yaml", "Um segredo do cofre cifrado em repouso. Consumido por <code>run --secret</code>/"
+     "<code>--secret-files</code> e por <code>passwordSecret</code> do Storage. Os valores NUNCA ficam no registo do "
+     "container em texto — são resolvidos no arranque a partir do NOME."),
+    ("Pod", "pod.yaml", "A forma de Pod do Kubernetes (<code>spec.containers[]</code>) para <code>kind: Container</code> — "
+     "portas/env/resources/securityContext/volumeMounts estruturados. v1 aceita UM container; para vários, "
+     "<code>kind: Pod</code> (ver <code>examples/pod-multi.yaml</code>)."),
+    ("Workload", "workload.yaml", "UM objecto declarativo para os dois tipos de computação: "
+     "<code>spec.type: container | vm | pod | microvm</code> + o bloco com o mesmo nome. Baixa para o Kind "
+     "correspondente no load — não redefine um único campo, por isso não pode divergir dele."),
+    ("Dependency", "dependency.yaml", "Alcançabilidade DIRIGIDA entre containers (ao contrário da rede, que é "
+     "bidireccional): <code>from</code> alcança <code>to</code>, e <code>to</code> não fica exposto aos outros. "
+     "Compila para firewall L4 por-container, sem dataplane novo."),
+    ("FirewallPolicy", "firewallpolicy.yaml", "Firewall L4 por container, estilo NetworkPolicy do k8s, com a "
+     "direcção em <code>spec.direction</code>. Aplicar substitui as regras dessa direcção e deixa a outra intacta."),
+    ("Ingress", "ingress.yaml", "Ingress L7 no formato <code>networking.k8s.io/v1</code> (host/path → backend), "
+     "compilado para o proxy embutido. Limitações herdadas: um só certificado (sem SNI) e "
+     "<code>pathType: Exact</code> tratado como prefixo."),
+    ("Stack", "stack.yaml", "Agrupa vários recursos num só documento. Expandido no load para os Kinds individuais, "
+     "em ordem de dependência — o Stack não sobrevive ao load, tudo o resto vê os filhos."),
+    ("Cluster", "cluster-ssh.yaml", "Bootstrap kubeadm idempotente sobre hosts JÁ vivos, por SSH. Sem ficheiro de "
+     "estado: cada passo tem um <code>check</code>, por isso nunca dessincroniza. Ver também "
+     "<code>cluster-vm.yaml</code> (provisiona as VMs) e <code>cluster-kind.yaml</code> (modo kind)."),
     ("Network", "network.yaml", "Uma rede de utilizador. Os containers juntam-se com <code>--net &lt;nome&gt;</code>; "
      "as VMs com <code>network:</code>. Driver <code>bridge</code> é o único a que containers se atacham hoje."),
     ("Volume", "volume.yaml", "Um volume local nomeado — os dados sobrevivem a <code>container rm</code>. Para "
@@ -1485,6 +1746,386 @@ KINDS_DOC = [
      "mount pai, registado como o seu próprio volume; consome-se com <code>-v &lt;nome&gt;:/destino</code>, sem "
      "nada de novo do lado do consumidor."),
 ]
+
+
+# ---------------------------------------------------------------------------
+# Laboratórios — o que falta entre "li a referência" e "sei usar isto"
+# ---------------------------------------------------------------------------
+#
+# Cada lab é uma sessão curta, do zero a um resultado verificável, com a
+# LIMPEZA incluída. A verificação não é decorativa: um lab que não diz como
+# confirmar o resultado ensina a copiar comandos, não a usar a ferramenta.
+LABS = [
+    ("lab-1", "Primeiro serviço, em 60 segundos", "iniciante", """
+<p>Objectivo: perceber o ciclo <code>run → ps → logs → exec → rm</code> e ver
+que não há daemon nenhum por baixo.</p>
+<pre><code># 1. Um serviço web, em segundo plano, publicado na porta 8080 do host
+delonix container run -d --name web -p 8080:80 nginx:alpine
+
+# 2. Confirmar — o STATUS diz há quanto tempo está de pé
+delonix ps
+
+# 3. A prova de que não há daemon: NENHUM processo residente do motor
+pgrep -a delonix || echo "sem daemon — o container é filho do init do host"
+
+# 4. Falar com ele
+curl -s localhost:8080 | head -3
+
+# 5. Entrar lá dentro
+delonix exec -it web sh -c 'hostname; id; ls /etc/nginx'
+
+# 6. Ver o que ele escreveu
+delonix logs web | tail -5
+
+# 7. Limpar
+delonix rm -f web</code></pre>
+<p class="note"><strong>Verificação:</strong> o passo 3 não imprime processo
+nenhum do motor. Um container a correr sem supervisor residente é a diferença
+de fundo para o Docker, e vê-se aqui em duas linhas.</p>"""),
+
+    ("lab-2", "Limites de recursos que pegam mesmo", "iniciante", """
+<p>Objectivo: descobrir se este host aplica limites — e o que fazer quando não
+aplica. É o erro nº1 de quem começa em rootless.</p>
+<pre><code># 1. Perguntar ANTES de assumir
+delonix system setup
+
+# 2. Se disser INERT ou PARTIAL, escrever a correcção e voltar a entrar
+sudo delonix system setup --delegate
+#   … logout / login …
+
+# 3. Um container com tecto de memória
+delonix container run -d --name limitado -m 128M alpine sleep 300
+
+# 4. A prova: ler o cgroup REAL, não o que o comando diz
+PID=$(delonix container inspect limitado | jq -r .pid)
+cat /sys/fs/cgroup$(awk -F: '/^0::/{print $3}' /proc/$PID/cgroup)/memory.max
+
+delonix rm -f limitado</code></pre>
+<p class="note"><strong>Verificação:</strong> o passo 4 imprime
+<code>134217728</code> (128 MiB), não <code>max</code>. Se imprimir
+<code>max</code>, a delegação não está feita — e o container corre <em>sem</em>
+limite nenhum, em silêncio. É por isso que o passo 1 existe.</p>"""),
+
+    ("lab-3", "Duas aplicações que se falam por nome", "intermédio", """
+<p>Objectivo: rede de utilizador, DNS interno, e isolamento — sem configurar
+DNS nenhum.</p>
+<pre><code># 1. Uma rede própria
+delonix network create loja
+
+# 2. Base de dados e app, ambas nela
+delonix container run -d --name db  --net loja -e POSTGRES_PASSWORD=x postgres:16-alpine
+delonix container run -d --name app --net loja -p 8080:80 nginx:alpine
+
+# 3. A app resolve a db PELO NOME, sem /etc/hosts nem variáveis
+delonix exec app sh -c 'getent hosts db; nc -z db 5432 && echo "porta aberta"'
+
+# 4. Fechar a db a tudo menos à app (alcançabilidade DIRIGIDA)
+cat &gt; dep.yaml &lt;&lt;'EOF'
+apiVersion: delonix.io/v1
+kind: Dependency
+metadata:
+  name: app-conhece-db
+spec:
+  from: app
+  to: db
+  ports: ["5432"]
+EOF
+delonix stack apply -f dep.yaml
+
+# 5. Provar: um terceiro container na MESMA rede já não alcança a db
+delonix container run --rm --net loja alpine sh -c 'nc -z -w2 db 5432 || echo BLOQUEADO'
+
+delonix rm -f db app; delonix network rm loja; rm dep.yaml</code></pre>
+<p class="note"><strong>Verificação:</strong> o passo 3 diz "porta aberta" e o
+passo 5 diz "BLOQUEADO". A mesma rede, dois resultados — é isso que
+<code>kind: Dependency</code> faz e uma rede sozinha não faz.</p>"""),
+
+    ("lab-4", "Do Dockerfile à imagem, sem daemon", "intermédio", """
+<p>Objectivo: construir uma imagem e correr o que construíste.</p>
+<pre><code>mkdir -p lab-build &amp;&amp; cd lab-build
+cat &gt; Delonixfile &lt;&lt;'EOF'
+FROM alpine:latest
+RUN apk add --no-cache curl
+COPY ola.txt /ola.txt
+HEALTHCHECK CMD test -f /ola.txt
+CMD ["sh", "-c", "cat /ola.txt; sleep 300"]
+EOF
+echo "construído com delonix" &gt; ola.txt
+
+# `Delonixfile` é procurado antes de `Dockerfile` — sem -f nenhum
+delonix build -t minha-app:1.0 .
+
+# `--wait` bloqueia até o HEALTHCHECK passar: sem isto escreve-se
+# `until ...; do sleep 1; done`, e escreve-se mal
+delonix run -d --name a1 --wait --health-interval 2 minha-app:1.0
+delonix ps
+
+delonix rm -f a1; delonix image rm minha-app:1.0; cd ..; rm -rf lab-build</code></pre>
+<p class="note"><strong>Verificação:</strong> o <code>ps</code> mostra
+<code>(healthy)</code> na coluna STATUS. O motor está a sondar o container
+sozinho — sem systemd, ao contrário do Podman rootless.</p>"""),
+
+    ("lab-5", "Uma microVM a sério", "intermédio", """
+<p>Objectivo: uma VM completa com o mesmo CLI dos containers.</p>
+<pre><code># 1. Sem imagem local, o create descarrega a oficial sozinho
+delonix vm create dev
+
+# 2. Onde ficou, e com que IP
+delonix vm ls
+delonix vm describe dev
+
+# 3. Entrar (voltar ao host: Ctrl+])
+delonix vm console dev
+
+# 4. Checkpoint de sistema — memória E disco, com a VM a correr
+delonix vm snapshot dev limpa
+delonix vm snapshots dev
+
+# 5. Estragar alguma coisa lá dentro e voltar atrás
+delonix vm restore dev limpa
+
+delonix vm rm dev</code></pre>
+<p class="note"><strong>Verificação:</strong> o passo 4 devolve sem erro com a
+VM A CORRER. Um snapshot de uma VM parada falha de propósito — o
+<code>vm stop</code> faz <em>undefine</em> do domínio para não deixar
+órfãos.</p>"""),
+
+    ("lab-6", "A tua própria imagem de VM, com VMfile", "avançado", """
+<p>Objectivo: construir uma imagem qcow2 à tua medida, como se constrói uma
+imagem de container.</p>
+<pre><code>mkdir -p lab-vm &amp;&amp; cd lab-vm
+
+# Scaffold que CONSTRÓI COMO ESTÁ — apaga o que não precisares
+delonix vm init --vmfile --name minha-base
+cat VMfile
+
+delonix vm build -t minha-base:1.0 .
+delonix vm ls
+
+# Arrancar a partir dela
+delonix vm create teste --disk-image minha-base:1.0
+
+# …ou a partir de um qcow2 publicado por ti, sem passar pelo store
+delonix vm create outra --url-img https://o-teu-bucket/imagem.qcow2
+
+delonix vm rm teste; cd ..; rm -rf lab-vm</code></pre>
+<p class="note"><strong>Verificação:</strong> o build imprime
+<code>[1/1] stage-1: FROM ubuntu:24.04</code> e verifica o checksum da cloud
+image. Com <code>--url-img</code>, se não houver <code>&lt;url&gt;.sha256</code>
+publicado, o motor <em>diz</em> que está a confiar só no TLS — em vez de calar.</p>"""),
+
+    ("lab-7", "Kubernetes sem Docker", "avançado", """
+<p>Objectivo: um cluster local cujo runtime dos nós É o Delonix.</p>
+<pre><code># 1. Preflight — falha em milissegundos se faltar a delegação de `cpu`,
+#    em vez de descarregar 425 MB para morrer aos 90 segundos
+delonix system setup
+
+# 2. O cluster
+delonix cluster create --name lab
+
+# 3. Falar com ele
+export KUBECONFIG=$(delonix cluster ls -o json | jq -r '.[0].kubeconfig')
+kubectl get nodes -o wide
+
+# 4. Levar uma imagem TUA para dentro dos nós, sem registo nenhum
+delonix build -t app:dev .
+delonix cluster load app:dev --name lab
+kubectl run app --image=app:dev --image-pull-policy=Never
+
+# 5. A prova que interessa
+kubectl get pod app -w
+
+delonix cluster delete --name lab</code></pre>
+<p class="note"><strong>Verificação:</strong> o passo 5 chega a
+<code>Running</code>. Nem o <code>ctr images import</code> nem o
+<code>crictl images</code> provam isto — os dois já reportaram sucesso sobre
+uma imagem que o kubelet depois não resolvia.</p>"""),
+]
+
+
+def labs_page():
+    body = ["<h1>Laboratórios</h1>",
+            "<p class='tagline'>Sessões curtas, do zero a um resultado que se verifica. "
+            "Cada uma inclui a limpeza — nenhuma deixa nada para trás.</p>",
+            "<p>A verificação no fim de cada lab não é decorativa: é o que separa "
+            "«copiei comandos» de «sei o que isto faz». Onde um passo pode falhar em "
+            "silêncio, o lab diz exactamente o que olhar.</p>"]
+    for anchor, title, level, html_body in LABS:
+        body.append(f"<h2 id='{anchor}'>{html.escape(title)} "
+                    f"<span class='badge'>{html.escape(level)}</span></h2>")
+        body.append(html_body)
+    page("labs.html", "Laboratórios", "\n".join(body))
+
+
+CLOUD = """
+<h1>cloud-init, cloud image e Cloud Hypervisor</h1>
+<p class="tagline">Três nomes que aparecem juntos e fazem coisas diferentes.
+Confundi-los é a causa mais comum de uma VM que arranca e não faz nada — ou que
+não arranca de todo.</p>
+
+<h2>Os três em uma frase</h2>
+<table>
+<tr><th>Peça</th><th>O que é</th><th>Quando aparece</th></tr>
+<tr><td><strong>cloud image</strong> (cloud-img)</td>
+    <td>Um disco <code>.qcow2</code> publicado por uma distro, já instalado e
+    pronto a arrancar. Não tem utilizador, nem password, nem chave SSH.</td>
+    <td>O <code>FROM</code> de um <code>VMfile</code>, e o disco base de
+    <code>vm create</code>.</td></tr>
+<tr><td><strong>cloud-init</strong></td>
+    <td>O programa que corre DENTRO dessa imagem no primeiro arranque e a
+    personaliza: hostname, utilizadores, chaves, rede, comandos.</td>
+    <td>É o que torna a cloud image utilizável. Sem ele, ficas com um disco
+    genérico onde não consegues entrar.</td></tr>
+<tr><td><strong>Cloud Hypervisor</strong></td>
+    <td>Um VMM — o programa do HOST que executa a VM. Alternativa ao
+    QEMU/libvirt, feito para microVMs.</td>
+    <td><code>--backend cloud-hypervisor</code>, e obrigatório para
+    <code>type: microvm</code>.</td></tr>
+</table>
+<p>Analogia com containers, que ajuda mais do que qualquer definição:
+a <strong>cloud image</strong> é a imagem, o <strong>cloud-init</strong> é o
+<code>ENTRYPOINT</code> da primeira execução, e o
+<strong>Cloud Hypervisor</strong> é o runtime — o equivalente ao
+<code>runc</code>.</p>
+
+<h2>1 · Cloud image — o disco</h2>
+<p>Cada distro publica um qcow2 pré-instalado, pequeno (algumas centenas de MB)
+e com o cloud-init já lá dentro. O motor sabe descarregar três famílias e
+<strong>verifica sempre o checksum</strong> — nunca aceita um download sem o
+confrontar.</p>
+<pre><code># Num VMfile
+FROM ubuntu:24.04        # cloud-images.ubuntu.com
+FROM debian:bookworm     # cloud.debian.org
+FROM rocky:9             # dl.rockylinux.org
+
+# Ou directamente, sem VMfile nenhum
+delonix vm create dev --url-img https://.../imagem.qcow2</code></pre>
+<p class="note"><strong>Os três publicam checksums de maneiras diferentes</strong>,
+e isso está tratado: Ubuntu usa <code>SHA256SUMS</code> no formato GNU, Debian
+publica <strong>só</strong> <code>SHA512SUMS</code> (não há SHA256 nenhum), e
+Rocky usa um <code>.CHECKSUM</code> por ficheiro no formato BSD
+<code>SHA256 (ficheiro) = hash</code>. Com <code>--url-img</code>, o motor
+procura um <code>&lt;url&gt;.sha256</code> ao lado; se não existir,
+<strong>diz</strong> que está a confiar só no TLS em vez de calar.</p>
+<p><strong>O disco vem pequeno de propósito</strong> — tipicamente 2 GB. Cresce-o
+antes de instalares seja o que for, com <code>SIZE 20G</code> no VMfile: crescer
+depois de um <code>RUN</code> ter enchido o disco é tarde.</p>
+
+<h2>2 · cloud-init — a personalização do primeiro arranque</h2>
+<p>Uma cloud image acabada de descarregar não tem conta nenhuma. O cloud-init
+procura um <em>datasource</em> no arranque, lê de lá o <code>user-data</code>, e
+aplica-o. O Delonix usa o datasource <strong>NoCloud</strong>: gera um ISO por
+instância e liga-o à VM.</p>
+<pre><code># O motor gera o seed sozinho quando lhe dás qualquer um destes
+delonix vm create dev --hostname dev-01 --ssh-key ~/.ssh/id_ed25519.pub
+delonix vm create dev --user-data ./user-data.yaml
+delonix vm create dev --seed ./o-meu-seed.iso   # ISO já feito por ti</code></pre>
+<p>Um <code>user-data</code> mínimo e completo:</p>
+<pre><code>#cloud-config
+hostname: dev-01
+users:
+  - name: delonix
+    groups: [sudo]
+    shell: /bin/bash
+    sudo: ['ALL=(ALL) NOPASSWD:ALL']
+    ssh_authorized_keys:
+      - ssh-ed25519 AAAA... o-teu-email@exemplo
+
+package_update: true
+packages: [nginx]
+
+runcmd:
+  - [systemctl, enable, --now, nginx]
+
+final_message: "pronto em $UPTIME segundos"</code></pre>
+<p class="note"><strong>Duas camadas, e a distinção importa.</strong> O
+<code>CLOUDINIT</code> de um VMfile é assado NA IMAGEM (fica em
+<code>/etc/cloud/cloud.cfg.d</code>) — é o comportamento por omissão de
+<em>todas</em> as VMs feitas a partir dela. O <code>--user-data</code> do
+<code>vm create</code> é POR INSTÂNCIA e assenta por cima. Uma é a receita da
+imagem, a outra é a configuração daquela VM.</p>
+<p class="note"><strong>Armadilha real, já paga:</strong> um <code>kind: Vm</code>
+sem seed nenhum fazia o cloud-init saltar a fase de rede, e a VM ficava sem IP e
+sem rota (<em>Network is unreachable</em> lá dentro). Por isso o motor gera
+<strong>sempre</strong> um seed mínimo, mesmo quando não pedes nada — não é
+opcional.</p>
+<p>E o cloud-init só corre uma vez: guarda um marcador em
+<code>/var/lib/cloud</code>. Um <code>vm restart</code> não o volta a executar —
+para reaplicar, ou limpas esse estado dentro da VM ou crias outra.</p>
+
+<h2>3 · Cloud Hypervisor — o VMM</h2>
+<p>Quem executa a VM. O Delonix tem dois backends por trás do mesmo trait, e a
+escolha não é cosmética:</p>
+<table>
+<tr><th></th><th>Cloud Hypervisor</th><th>libvirt/QEMU</th></tr>
+<tr><td>Arranque</td><td>Muito rápido (dezenas de ms) — feito para microVMs</td>
+    <td>Segundos; máquina completa emulada</td></tr>
+<tr><td>Dispositivos</td><td>Só virtio, mínimo</td><td>Tudo (TPM, vídeo, USB, …)</td></tr>
+<tr><td>Rede</td><td><code>tap</code> na SDN do holder — <strong>alcança os
+    containers por IP directo</strong></td>
+    <td><code>virbr0</code>, no netns do HOST — outra L2</td></tr>
+<tr><td>Isolamento por namespace</td><td>Sim</td>
+    <td><strong>Não</strong> — <code>--namespace</code> é recusado com erro, não
+    aceite-e-ignorado</td></tr>
+<tr><td>Snapshots</td><td>Não implementado (fail-closed, com erro que aponta para o libvirt)</td>
+    <td><code>vm snapshot</code>/<code>restore</code>: memória + disco</td></tr>
+<tr><td>Arranque de cloud image</td><td>Precisa de firmware
+    (<code>hypervisor-fw</code>/EDK2) ou de kernel+initrd directos</td>
+    <td>Arranca a cloud image tal como está</td></tr>
+</table>
+<pre><code>delonix vm create micro --backend cloud-hypervisor --firmware /usr/share/hypervisor-fw
+delonix vm create pesada --backend libvirt          # default quando CH não está instalado</code></pre>
+
+<h2>Qual usar, e quando</h2>
+<table>
+<tr><th>Se queres…</th><th>Usa</th></tr>
+<tr><td>Uma VM de trabalho, com snapshots e consola</td>
+    <td><code>--backend libvirt</code> (é o que a golden do Kubernetes exige — não arranca em CH)</td></tr>
+<tr><td>Arranque em milissegundos, isolamento por namespace, ou alcançar containers por IP</td>
+    <td><code>--backend cloud-hypervisor</code> + firmware</td></tr>
+<tr><td>Personalizar UMA VM</td><td>cloud-init por instância: <code>--hostname</code>/<code>--ssh-key</code>/<code>--user-data</code></td></tr>
+<tr><td>Personalizar TODAS as VMs de um modelo</td><td>Um <code>VMfile</code> com <code>CLOUDINIT</code>, e <code>vm build</code></td></tr>
+<tr><td>Um disco à tua medida, publicável</td><td><code>vm init --vmfile</code> → <code>vm build</code> → <code>vm push</code></td></tr>
+</table>
+
+<h2>Onde isto falha, e o que ver</h2>
+<table>
+<tr><th>Sintoma</th><th>Quase sempre é</th></tr>
+<tr><td>A VM arranca e não entras por SSH</td>
+    <td>Sem seed de cloud-init — não há utilizador nenhum. Passa
+    <code>--ssh-key</code>.</td></tr>
+<tr><td><code>IP &lt;none&gt;</code> para sempre</td>
+    <td>libvirt caiu em modo <em>user</em> (SLIRP), cujo IP é invisível. Junta-te
+    ao grupo <code>libvirt</code> — o motor avisa-o no <code>create</code>.</td></tr>
+<tr><td>A VM não arranca em Cloud Hypervisor</td>
+    <td>Falta o firmware. CH não faz boot BIOS: precisa de
+    <code>--firmware</code> ou de <code>--kernel</code>+<code>--initrd</code>.</td></tr>
+<tr><td>O disco enche a meio do <code>vm build</code></td>
+    <td><code>SIZE</code> em falta, ou depois de um <code>RUN</code>. É
+    propriedade da stage, e corre antes de tudo.</td></tr>
+<tr><td>Mudaste o <code>user-data</code> e nada muda</td>
+    <td>O cloud-init já correu naquela VM. Cria outra, ou limpa
+    <code>/var/lib/cloud</code> lá dentro.</td></tr>
+</table>
+
+<h2>Referências</h2>
+<ul>
+<li><a href="https://cloudinit.readthedocs.io/">Documentação do cloud-init</a> —
+    e em especial os
+    <a href="https://cloudinit.readthedocs.io/en/latest/reference/examples.html">exemplos de user-data</a>
+    e o <a href="https://cloudinit.readthedocs.io/en/latest/reference/datasources/nocloud.html">datasource NoCloud</a>,
+    que é o que o Delonix usa.</li>
+<li><a href="https://cloud-images.ubuntu.com/">Cloud images do Ubuntu</a> ·
+    <a href="https://cloud.debian.org/images/cloud/">do Debian</a> ·
+    <a href="https://dl.rockylinux.org/pub/rocky/">do Rocky</a></li>
+<li><a href="https://www.cloudhypervisor.org/">Cloud Hypervisor</a> e o
+    <a href="https://github.com/cloud-hypervisor/rust-hypervisor-firmware">rust-hypervisor-firmware</a>
+    (o <code>--firmware</code> que uma cloud image precisa para arrancar em CH).</li>
+<li><a href="https://libvirt.org/formatdomain.html">Formato do domínio libvirt</a> —
+    útil se usares os escape-hatches <code>libvirtXml</code>/<code>libvirtXmlOverlay</code>
+    do <code>kind: Vm</code>.</li>
+</ul>
+"""
 
 
 def kinds_page():
@@ -1695,6 +2336,8 @@ def main():
     kinds_page()
     page("arquitectura.html", "Arquitectura", ARCH)
     c4_page()
+    page("cloud.html", "cloud-init, cloud image e Cloud Hypervisor", CLOUD)
+    labs_page()
     page("cri.html", "CRI", CRI)
     page("comparacao.html", "Delonix vs Docker vs Podman", COMPARE)
     page("tutorial-delonix-temp.html", "Projecto completo: Delonix Temp", TUTORIAL)

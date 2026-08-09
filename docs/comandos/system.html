@@ -76,7 +76,7 @@ main{padding:1.4rem 1.2rem 4rem}}
 <nav class="side">
 <div class="brand"><span class="dot">▲</span> Delonix Engine</div>
 <h5>Documentação</h5>
-<a href="../index.html">Início</a><a href="../cheatsheet.html">Cheatsheet</a><a href="../kinds.html">Kinds e templates</a><a href="../arquitectura.html">Arquitectura</a><a href="../c4.html">Modelo C4 e system design</a><a href="../cri.html">CRI — kubelet sem containerd</a><a href="../comparacao.html">Delonix vs Docker vs Podman</a><a href="../tutorial-delonix-temp.html">Projecto completo: Delonix Temp</a><a href="../delonixctl.html">delonixctl — cliente PaaS</a>
+<a href="../index.html">Início</a><a href="../cheatsheet.html">Cheatsheet</a><a href="../kinds.html">Kinds e templates</a><a href="../cloud.html">cloud-init, cloud-img e CH</a><a href="../labs.html">Laboratórios</a><a href="../arquitectura.html">Arquitectura</a><a href="../c4.html">Modelo C4 e system design</a><a href="../cri.html">CRI — kubelet sem containerd</a><a href="../comparacao.html">Delonix vs Docker vs Podman</a><a href="../tutorial-delonix-temp.html">Projecto completo: Delonix Temp</a><a href="../delonixctl.html">delonixctl — cliente PaaS</a>
 <h5>Referência CLI</h5>
 <a href="../comandos/container.html">delonix container</a><a href="../comandos/workload.html">delonix workload</a><a href="../comandos/pod.html">delonix pod</a><a href="../comandos/image.html">delonix image</a><a href="../comandos/build.html">delonix build</a><a href="../comandos/vm.html">delonix vm</a><a href="../comandos/volumes.html">delonix volumes</a><a href="../comandos/network.html">delonix network</a><a href="../comandos/stack.html">delonix stack</a><a href="../comandos/compose.html">delonix compose</a><a href="../comandos/cluster.html">delonix cluster</a><a href="../comandos/secret.html">delonix secret</a><a href="../comandos/storage.html">delonix storage</a><a href="../comandos/sharevolume.html">delonix sharevolume</a><a href="../comandos/ingress.html">delonix net ingress</a><a href="../comandos/egress.html">delonix net egress</a><a href="../comandos/httproute.html">delonix net httproute</a><a href="../comandos/tunnel.html">delonix net tunnel</a><a href="../comandos/flow.html">delonix net flow</a><a href="../comandos/boot.html">delonix net boot</a><a href="../comandos/system.html" class="on">delonix system</a><a href="../comandos/dash.html">delonix dash</a><a href="../comandos/docker-api.html">delonix serve docker-api</a><a href="../comandos/kube.html">delonix cluster kube</a><a href="../comandos/netns.html">delonix net netns</a><a href="../comandos/completion.html">delonix completion</a>
 <h5>Projecto</h5>
@@ -107,6 +107,69 @@ Commands:
 Options:
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
   -h, --help          Print help</code></pre></div>
+<h2 id='thermal'><code>system thermal</code></h2>
+<div class='help'><pre><code>Thermal governor: lowers Delonix&#x27;s CPU budget when the CPU heats up and restores it when it cools down. Runs continuously (see `--once`)
+
+Usage: dlx system thermal [OPTIONS]
+
+Options:
+      --high &lt;HIGH&gt;          Temperature (°C) at or above which it cools down [default: 85]
+      --l18n &lt;en|pt&gt;         Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+      --low &lt;LOW&gt;            Temperature (°C) below which it restores [default: 70]
+      --floor &lt;FLOOR&gt;        Minimum CPU percentage it drops to [default: 40]
+      --interval &lt;INTERVAL&gt;  Seconds between readings [default: 5]
+      --once                 One reading and exit (for cron/scripts, instead of the loop)
+  -h, --help                 Print help</code></pre></div>
+<h3>Exemplos</h3><div class="ex"><div class="cap">Temperatura e throttling do host</div><pre><code>delonix system thermal</code></pre></div>
+<h2 id='monitor'><code>system monitor</code></h2>
+<div class='help'><pre><code>Active network connections per container (via conntrack): who comes in, who goes out, and between containers. Refreshes continuously (see `--no-stream`)
+
+Usage: dlx system monitor [OPTIONS]
+
+Options:
+      --interval &lt;INTERVAL&gt;  Milliseconds between refreshes (minimum 300) [default: 1000]
+      --l18n &lt;en|pt&gt;         Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+      --no-stream            One sample and exit (without clearing the screen or repeating)
+  -h, --help                 Print help</code></pre></div>
+<h3>Exemplos</h3><div class="ex"><div class="cap">Acompanhar os eventos ao vivo</div><pre><code>delonix system monitor</code></pre></div>
+<h2 id='virt'><code>system virt</code></h2>
+<div class='help'><pre><code>Host virtualization: hypervisor, KVM, virtio — and what there is to tune
+
+Usage: dlx system virt [OPTIONS]
+
+Options:
+      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+      --tune          Apply the recommended tuning (needs root)
+  -h, --help          Print help</code></pre></div>
+<h3>Exemplos</h3><div class="ex"><div class="cap">O que o host oferece de virtualização, e o que há para afinar</div><pre><code>delonix system virt</code></pre></div><div class="ex"><div class="cap">Aplicar a afinação recomendada</div><pre><code>sudo delonix system virt --tune</code></pre></div>
+<h2 id='setup'><code>system setup</code></h2>
+<div class='help'><pre><code>Diagnose — and, with `--delegate`, fix — cgroup delegation, the prerequisite for `--memory`/`--cpus`/`--pids-limit` to mean anything.
+
+Without it the flags are ACCEPTED and INERT: the container runs with no limit at all. That is the failure mode this command exists for, and it is invisible without asking.
+
+Usage: dlx system setup [OPTIONS]
+
+Options:
+      --delegate
+          Apply the fix instead of only reporting it. Writing the system-wide drop-in needs root; the per-session remedy never does
+
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)</code></pre></div>
+<h3>Exemplos</h3><div class="ex"><div class="cap">Diagnosticar a delegação de cgroup — porque é que -m/--cpus não pegam</div><pre><code>delonix system setup</code></pre></div><div class="ex"><div class="cap">Escrever a correcção (precisa de root; faz efeito no PRÓXIMO login)</div><pre><code>sudo delonix system setup --delegate</code></pre></div>
+<h2 id='events'><code>system events</code></h2>
+<div class='help'><pre><code>Engine events (create/start/die/remove/…), from oldest to most recent. With no daemon, the log is a shared append-only file — each command appends its own line (see `delonix_runtime_core::events`)
+
+Usage: dlx system events [OPTIONS]
+
+Options:
+  -f, --follow        Follow continuously (Ctrl-C to exit)
+      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+  -n, --tail &lt;TAIL&gt;   Show only the last N (default: all)
+  -h, --help          Print help</code></pre></div>
+<h3>Exemplos</h3><div class="ex"><div class="cap">Ver o que o motor andou a fazer</div><pre><code>delonix system events -n 20</code></pre></div><div class="ex"><div class="cap">Seguir em tempo real (Ctrl-C sai)</div><pre><code>delonix system events --follow</code></pre></div>
 <h2 id='prune'><code>system prune</code></h2>
 <div class='help'><pre><code>Reclaim space: remove stopped containers, unused images, CAS blobs nobody references, empty cgroups and — the biggest space saver — **orphan container directories** (from nodes/containers that died abruptly without `rm`, with no registry entry)
 

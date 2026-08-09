@@ -76,7 +76,7 @@ main{padding:1.4rem 1.2rem 4rem}}
 <nav class="side">
 <div class="brand"><span class="dot">▲</span> Delonix Engine</div>
 <h5>Documentação</h5>
-<a href="index.html">Início</a><a href="cheatsheet.html">Cheatsheet</a><a href="kinds.html" class="on">Kinds e templates</a><a href="arquitectura.html">Arquitectura</a><a href="c4.html">Modelo C4 e system design</a><a href="cri.html">CRI — kubelet sem containerd</a><a href="comparacao.html">Delonix vs Docker vs Podman</a><a href="tutorial-delonix-temp.html">Projecto completo: Delonix Temp</a><a href="delonixctl.html">delonixctl — cliente PaaS</a>
+<a href="index.html">Início</a><a href="cheatsheet.html">Cheatsheet</a><a href="kinds.html" class="on">Kinds e templates</a><a href="cloud.html">cloud-init, cloud-img e CH</a><a href="labs.html">Laboratórios</a><a href="arquitectura.html">Arquitectura</a><a href="c4.html">Modelo C4 e system design</a><a href="cri.html">CRI — kubelet sem containerd</a><a href="comparacao.html">Delonix vs Docker vs Podman</a><a href="tutorial-delonix-temp.html">Projecto completo: Delonix Temp</a><a href="delonixctl.html">delonixctl — cliente PaaS</a>
 <h5>Referência CLI</h5>
 <a href="comandos/container.html">delonix container</a><a href="comandos/workload.html">delonix workload</a><a href="comandos/pod.html">delonix pod</a><a href="comandos/image.html">delonix image</a><a href="comandos/build.html">delonix build</a><a href="comandos/vm.html">delonix vm</a><a href="comandos/volumes.html">delonix volumes</a><a href="comandos/network.html">delonix network</a><a href="comandos/stack.html">delonix stack</a><a href="comandos/compose.html">delonix compose</a><a href="comandos/cluster.html">delonix cluster</a><a href="comandos/secret.html">delonix secret</a><a href="comandos/storage.html">delonix storage</a><a href="comandos/sharevolume.html">delonix sharevolume</a><a href="comandos/ingress.html">delonix net ingress</a><a href="comandos/egress.html">delonix net egress</a><a href="comandos/httproute.html">delonix net httproute</a><a href="comandos/tunnel.html">delonix net tunnel</a><a href="comandos/flow.html">delonix net flow</a><a href="comandos/boot.html">delonix net boot</a><a href="comandos/system.html">delonix system</a><a href="comandos/dash.html">delonix dash</a><a href="comandos/docker-api.html">delonix serve docker-api</a><a href="comandos/kube.html">delonix cluster kube</a><a href="comandos/netns.html">delonix net netns</a><a href="comandos/completion.html">delonix completion</a>
 <h5>Projecto</h5>
@@ -86,6 +86,427 @@ main{padding:1.4rem 1.2rem 4rem}}
 <main>
 <h1>Kinds do manifesto</h1><p class='tagline'>Cada Kind com um template COMPLETO e funcional — todos os campos, com os defaults e um comentário. Aplica um só com <code>delonix &lt;grupo&gt; apply -f</code>, ou todos de uma vez com <code>delonix stack apply</code> (ordem por dependência: Secret → Network → Volume → Storage → ShareVolume → Image → Vm → Container → Pod → Ingress/Egress → Dependency → HTTPRoute → Tunnel).</p>
 <p>Semântica <em>garante-presente</em> (idempotente por nome), não um reconciliador: sem diffing, rollout nem rollback — fail-fast, o que já foi aplicado fica. Os templates abaixo são os ficheiros reais em <a href='https://github.com/angolardevops/delonix-runtime/tree/main/examples'><code>examples/</code></a>.</p>
+<h2 id='secret'>Secret</h2>
+<p>Um segredo do cofre cifrado em repouso. Consumido por <code>run --secret</code>/<code>--secret-files</code> e por <code>passwordSecret</code> do Storage. Os valores NUNCA ficam no registo do container em texto — são resolvidos no arranque a partir do NOME.</p>
+<pre><code># Secret — um saco de pares CHAVE=valor, cifrado em repouso (XChaCha20-Poly1305
+# sob a chave-mestra do host). Consumido por `Container.secret` (env ou
+# /run/secrets/&lt;nome&gt;) e por `Storage.passwordSecret` (lê a chave `password`).
+#
+# É a forma DECLARATIVA do `delonix secret create` — assim o ciclo fecha-se só
+# em YAML, sem CLI. Apply:  delonix secret apply -f examples/secret.yaml
+#   (ou, junto com o resto, `delonix stack apply` — os Secrets são aplicados
+#    ANTES do Storage/Container que os referenciam.)
+
+# ── Inline (stringData) — cómodo para dev, mas os VALORES ficam em CLARO no
+#    ficheiro. NÃO commites um manifesto destes num repositório. ───────────────
+apiVersion: delonix.io/v1
+kind: Secret
+metadata:
+  name: nas-creds
+spec:
+  stringData:
+    password: s3cr3t          # Storage.passwordSecret lê exactamente esta chave
+---
+# ── fromEnvFile — mantém os valores FORA do manifesto (carrega linhas
+#    KEY=value de um ficheiro .env, tipicamente fora do controlo de versões). ──
+apiVersion: delonix.io/v1
+kind: Secret
+metadata:
+  name: app-env
+spec:
+  fromEnvFile: ./app.env      # ex.: DATABASE_URL=..., API_TOKEN=...</code></pre>
+<h2 id='pod'>Pod</h2>
+<p>A forma de Pod do Kubernetes (<code>spec.containers[]</code>) para <code>kind: Container</code> — portas/env/resources/securityContext/volumeMounts estruturados. v1 aceita UM container; para vários, <code>kind: Pod</code> (ver <code>examples/pod-multi.yaml</code>).</p>
+<pre><code># kind: Container — Pod-shaped (k8s-like). Apply with:
+#   delonix container apply -f examples/pod.yaml
+# The familiar Pod schema: spec.containers[] with structured ports/env/resources/
+# securityContext + pod-level volumes. v1 accepts ONE container (&gt;1 is an error).
+# The flat single-container spec (see examples/*, `image:` at the top) still works.
+# ---------------------------------------------------------------------------
+# A rede que o pod usa, declarada aqui para o exemplo validar sozinho.
+# ---------------------------------------------------------------------------
+apiVersion: delonix.io/v1
+kind: Network
+metadata:
+  name: web-net
+spec:
+  driver: bridge
+---
+apiVersion: delonix.io/v1
+kind: Container
+metadata:
+  name: web
+  namespace: default
+spec:
+  # delonix extensions (pod-level):
+  network: web-net            # host | none | &lt;custom network&gt;
+  restartPolicy: Always       # Always | OnFailure | Never  (delonix values also OK)
+  expose: 80                  # auto-register this HTTP port in the L7 proxy (optional)
+  containers:
+    - name: web
+      image: nginx:latest
+      command: [&quot;/bin/sh&quot;, &quot;-c&quot;]         # overrides ENTRYPOINT (k8s semantics)
+      args: [&quot;nginx -g &#x27;daemon off;&#x27;&quot;]   # overrides CMD
+      ports:
+        - containerPort: 80
+          hostPort: 8080                 # published only when hostPort is set
+          protocol: TCP
+      env:
+        - name: TZ
+          value: UTC
+      volumeMounts:
+        - name: site
+          mountPath: /usr/share/nginx/html
+          readOnly: true
+        - name: scratch
+          mountPath: /tmp/cache
+      resources:
+        limits:
+          cpu: &quot;500m&quot;                     # 500m → 0.5 cores
+          memory: 256Mi
+      securityContext:
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop: [&quot;ALL&quot;]
+          add: [&quot;NET_BIND_SERVICE&quot;]
+  volumes:
+    - name: site
+      hostPath:
+        path: /srv/www                    # bind mount
+    - name: scratch
+      emptyDir: {}                        # ephemeral → tmpfs</code></pre>
+<h2 id='workload'>Workload</h2>
+<p>UM objecto declarativo para os dois tipos de computação: <code>spec.type: container | vm | pod | microvm</code> + o bloco com o mesmo nome. Baixa para o Kind correspondente no load — não redefine um único campo, por isso não pode divergir dele.</p>
+<pre><code># Workload — one declarative object for BOTH compute types (ADR-0001).
+#
+#   delonix stack apply -f examples/workload.yaml
+#   delonix stack apply --dry-run -f examples/workload.yaml   # see what it lowers to
+#
+# A `kind: Workload` is sugar: it does NOT survive the load — it is rewritten into
+# a `kind: Container` or `kind: Vm` and flows through the normal per-Kind apply,
+# exactly like a `kind: Stack` child. `spec.type` picks the type; the block named
+# after the type (`container:` / `vm:`) is the SAME spec the standalone Kind takes
+# (see examples/container.yaml and examples/vm.yaml for every field).
+apiVersion: delonix.io/v1
+kind: Workload
+metadata:
+  name: web
+  namespace: default
+spec:
+  type: container          # container | vm   (pod / microvm are reserved — a clear error, not silent)
+  container:               # == kind: Container spec (examples/container.yaml)
+    image: nginx:alpine
+    restartPolicy: always
+    env:
+      - TZ=Africa/Luanda
+---
+apiVersion: delonix.io/v1
+kind: Workload
+metadata:
+  name: db
+spec:
+  type: vm                 # lowers to kind: Vm
+  vm:                      # == kind: Vm spec (examples/vm.yaml)
+    disk: delonix-vm-k8s:1.34
+    vcpus: 2
+    memory: 4G
+---
+apiVersion: delonix.io/v1
+kind: Workload
+metadata:
+  name: web-app
+spec:
+  type: pod                # lowers to kind: Pod (real multi-container pod)
+  pod:                     # == kind: Pod spec (examples/pod-multi.yaml)
+    containers:
+      - { name: web, image: nginx:latest }
+      - { name: sidecar, image: busybox:latest }
+---
+apiVersion: delonix.io/v1
+kind: Workload
+metadata:
+  name: fast-vm
+spec:
+  type: microvm            # lowers to kind: Vm, forcing the microVM hypervisor
+  microvm:                 # == kind: Vm spec, but backend is forced to cloud-hypervisor
+    disk: ubuntu-24.04.qcow2   # needs a CH-bootable image (not the libvirt-only k8s golden)
+    vcpus: 2
+    memory: 2G
+    # backend: libvirt       # &lt;- a contradiction: type: microvm rejects it (use type: vm)</code></pre>
+<h2 id='dependency'>Dependency</h2>
+<p>Alcançabilidade DIRIGIDA entre containers (ao contrário da rede, que é bidireccional): <code>from</code> alcança <code>to</code>, e <code>to</code> não fica exposto aos outros. Compila para firewall L4 por-container, sem dataplane novo.</p>
+<pre><code># kind: Dependency (alias: KnowDepends) — alcançabilidade DIRIGIDA entre containers.
+# Ao contrário de uma Network (bidirecional), abre UM sentido: `from` alcança `to`,
+# mas `to` NÃO inicia para `from`. Caso clássico: a app conhece a DB, a DB não
+# conhece a app — a DB deixa de ficar exposta a todos os containers da rede.
+#
+# Compila para firewall L4 por-container: no `to`, ingress default-deny (protege) +
+# allow do IP do `from`. Várias Dependency para o mesmo `to` acumulam os allow.
+# Aplicar com `delonix stack apply -f dependency.yaml`.
+---
+apiVersion: delonix.io/v1
+kind: Network
+metadata: { name: appnet }
+spec:
+  driver: bridge
+---
+apiVersion: delonix.io/v1
+kind: Container
+metadata: { name: db }
+spec:
+  image: &quot;postgres:16&quot;
+  network: appnet
+  env: { POSTGRES_PASSWORD: dev }
+---
+apiVersion: delonix.io/v1
+kind: Container
+metadata: { name: app }
+spec:
+  image: &quot;alpine:3.19&quot;
+  network: appnet
+  command: [&quot;sleep&quot;, &quot;infinity&quot;]
+---
+apiVersion: delonix.io/v1
+kind: Dependency
+metadata: { name: app-knows-db }
+spec:
+  from: app          # quem inicia (o &quot;conhecedor&quot;)
+  to: db             # alvo protegido (aceita um nome ou uma lista: [db, cache])
+  ports: [&quot;5432&quot;]    # opcional — vazio = qualquer porta
+  proto: tcp         # opcional — default any</code></pre>
+<h2 id='firewallpolicy'>FirewallPolicy</h2>
+<p>Firewall L4 por container, estilo NetworkPolicy do k8s, com a direcção em <code>spec.direction</code>. Aplicar substitui as regras dessa direcção e deixa a outra intacta.</p>
+<pre><code># kind: FirewallPolicy — a forma UNIFICADA do firewall declarativo. A direcção
+# vem de `spec.direction` (ingress|egress) em vez do nome do Kind. Resolve a
+# confusão de que, aqui, `kind: Ingress` é firewall L4 (não o Ingress L7/HTTP do
+# k8s). `kind: Ingress`/`kind: Egress` continuam a funcionar como alias — este é
+# só a superfície unificada equivalente.
+#
+#   delonix stack apply -f examples/firewallpolicy.yaml
+# ---------------------------------------------------------------------------
+# Os recursos que as políticas abaixo referenciam. Estão aqui DE PROPÓSITO: um
+# exemplo que nomeia um container inexistente dá `unresolved reference(s)` a
+# quem o copia, e copiar é a primeira coisa que se faz com um exemplo.
+# ---------------------------------------------------------------------------
+---
+apiVersion: delonix.io/v1
+kind: Network
+metadata:
+  name: sdn-demo
+spec:
+  driver: bridge
+---
+apiVersion: delonix.io/v1
+kind: Container
+metadata:
+  name: dbapp
+spec:
+  image: postgres:16-alpine
+  network: sdn-demo          # a firewall L4 só actua em containers na SDN
+  env:
+    - POSTGRES_PASSWORD=exemplo
+---
+apiVersion: delonix.io/v1
+kind: FirewallPolicy
+metadata:
+  name: db-inbound
+spec:
+  direction: ingress         # = kind: Ingress
+  target: dbapp              # container-alvo (na SDN)
+  defaultPolicy: deny
+  rules:
+    - proto: tcp
+      port: &quot;5432&quot;
+      from: 10.219.0.0/16
+      note: postgres-from-sdn
+---
+apiVersion: delonix.io/v1
+kind: FirewallPolicy
+metadata:
+  name: db-outbound
+spec:
+  direction: egress          # = kind: Egress
+  target: dbapp
+  defaultPolicy: deny
+  rules:
+    - proto: udp
+      port: &quot;53&quot;
+      note: dns
+    - proto: tcp
+      port: &quot;443&quot;
+      to: 0.0.0.0/0
+      note: https</code></pre>
+<h2 id='ingress'>Ingress</h2>
+<p>Ingress L7 no formato <code>networking.k8s.io/v1</code> (host/path → backend), compilado para o proxy embutido. Limitações herdadas: um só certificado (sem SNI) e <code>pathType: Exact</code> tratado como prefixo.</p>
+<pre><code># kind: Ingress — Kubernetes-shaped L7/HTTP Ingress (host/path → backend service).
+# This is the networking.k8s.io/v1 Ingress schema; it compiles to the embedded L7
+# reverse-proxy (same engine as kind: HTTPRoute). Apply with:
+#   delonix net httproute apply -f examples/ingress.yaml   (or `stack apply`)
+#
+# NOTE: `kind: Ingress` used to be the L4 firewall — that moved to
+# `kind: FirewallPolicy` (direction: ingress); see examples/firewall.yaml.
+# Backends must be containers WITH an IP on a custom SDN network (not --net host/none).
+# ---------------------------------------------------------------------------
+# Os backends e o certificado que a rota abaixo referencia. Estão aqui DE
+# PROPÓSITO: sem eles o exemplo não valida, e quem o copia recebe
+# `unresolved reference(s)` em vez de um ingress a funcionar.
+# ---------------------------------------------------------------------------
+apiVersion: delonix.io/v1
+kind: Network
+metadata:
+  name: sdn-demo
+spec:
+  driver: bridge
+---
+apiVersion: delonix.io/v1
+kind: Container
+metadata:
+  name: web
+spec:
+  image: nginx:alpine
+  network: sdn-demo          # o proxy L7 só alcança backends na SDN
+---
+apiVersion: delonix.io/v1
+kind: Container
+metadata:
+  name: api
+spec:
+  image: caddy:alpine
+  network: sdn-demo
+---
+apiVersion: delonix.io/v1
+kind: Secret
+metadata:
+  name: shop-tls
+stringData:
+  # Substitui pelo teu par real. Para experimentar sem certificado, apaga o
+  # bloco `tls:` da rota e serve em HTTP.
+  tls_crt: &quot;-----BEGIN CERTIFICATE-----\n...\n-----END CERTIFICATE-----&quot;
+  tls_key: &quot;-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----&quot;
+---
+apiVersion: delonix.io/v1
+kind: Ingress
+metadata:
+  name: shop
+spec:
+  ingressClassName: delonix        # accepted for k8s fidelity (the embedded proxy)
+  tls:                             # v1 serves a SINGLE cert (no SNI) — first entry wins
+    - hosts: [shop.example.ao]
+      secretName: shop-tls         # a kind: Secret with tls.crt/tls.key; omit → self-signed
+  rules:
+    - host: shop.example.ao
+      http:
+        paths:
+          - path: /
+            pathType: Prefix       # matched by prefix (Exact accepted, treated as prefix)
+            backend:
+              service:
+                name: web          # a container name (resolved to its SDN IP at apply)
+                port:
+                  number: 80
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: api
+                port:
+                  number: 8080
+  # defaultBackend:                # optional catch-all when no rule matches
+  #   service: { name: web, port: { number: 80 } }</code></pre>
+<h2 id='stack'>Stack</h2>
+<p>Agrupa vários recursos num só documento. Expandido no load para os Kinds individuais, em ordem de dependência — o Stack não sobrevive ao load, tudo o resto vê os filhos.</p>
+<pre><code># kind: Stack — groups a whole app (networks, containers, storage, …) in ONE
+# document (k8s-Service-like). Apply with:
+#   delonix stack apply -f examples/stack.yaml
+# At load time the Stack expands into its constituent resources, which then flow
+# through the normal per-Kind apply IN DEPENDENCY ORDER (Secret → Network → Volume
+# → Storage → ShareVolume → Image → Vm → Container → Pod → Ingress/Egress →
+# Dependency → HTTPRoute → Tunnel). Each child inherits the Stack&#x27;s namespace
+# unless it sets its own. You can still write the resources as separate documents
+# — the Stack is just a convenient single place to bundle them.
+apiVersion: delonix.io/v1
+kind: Stack
+metadata:
+  name: blog
+  namespace: default
+spec:
+  networks:
+    - name: blog-net
+      spec:
+        driver: bridge
+  containers:
+    - name: web
+      spec:
+        image: nginx:latest
+        network: blog-net
+        ports: [&quot;8080:80&quot;]
+        expose: 80
+    - name: db
+      spec:
+        image: postgres:16
+        network: blog-net
+        env: [&quot;POSTGRES_PASSWORD=change-me&quot;]
+  # Every groupable Kind is available: secrets, volumes, storage, shareVolumes,
+  # images, vms, containers, pods, ingress, egress, firewallPolicies,
+  # httpRoutes, tunnels, dependencies.
+  dependencies:
+    - name: web-knows-db
+      spec:
+        from: web
+        to: db</code></pre>
+<h2 id='cluster'>Cluster</h2>
+<p>Bootstrap kubeadm idempotente sobre hosts JÁ vivos, por SSH. Sem ficheiro de estado: cada passo tem um <code>check</code>, por isso nunca dessincroniza. Ver também <code>cluster-vm.yaml</code> (provisiona as VMs) e <code>cluster-kind.yaml</code> (modo kind).</p>
+<pre><code># Cluster Kubernetes em **hosts remotos JÁ EXISTENTES** (bare-metal ou VMs de
+# outrem), via SSH.
+#
+#   delonix cluster apply -f examples/cluster-ssh.yaml
+#
+# O delonix NÃO cria estas máquinas — elas já têm de estar vivas e alcançáveis,
+# com o utilizador SSH a ter `sudo` NOPASSWD. É o modo para datacenter.
+#
+# **Idempotente sem ficheiro de estado** (&quot;Terraform sem .tfstate&quot;): cada passo
+# tem um `check` (comando shell; êxito = já satisfeito) e um `apply`. Correr
+# duas vezes não faz nada de novo — e nunca dessincroniza de um estado paralelo,
+# porque não existe nenhum.
+apiVersion: delonix.io/v1
+kind: Cluster
+metadata:
+  name: prod
+spec:
+  mode: ssh
+
+  # --- comum a todos os modos ---
+  k8sVersion: &quot;1.34&quot;
+  podSubnet: 10.244.0.0/16
+  serviceSubnet: 10.96.0.0/12
+  cni: none            # em produção, normalmente instalas a TUA CNI (Cilium, Calico…)
+
+  # HA: com &gt;1 control-plane, o `controlPlaneEndpoint` é OBRIGATÓRIO — o kubeadm
+  # precisa de um endereço estável (LB/VIP) à frente deles. O delonix não
+  # provisiona o LB; aponta para um que já tenhas.
+  controlPlaneEndpoint: &quot;k8s-api.exemplo.ao:6443&quot;
+
+  controlPlane:
+    hosts:
+      - address: 10.0.0.11
+      - address: 10.0.0.12
+      - address: 10.0.0.13
+  workers:
+    hosts:
+      - address: 10.0.0.21
+      - address: 10.0.0.22
+
+  # --- específico do modo ssh ---
+  ssh:
+    user: delonix       # tem de ter sudo NOPASSWD nos hosts
+    keyPath: ~/.ssh/id_ed25519
+    port: 22
+
+  # Só `stacked` (etcd nos control-planes, o default do kubeadm) está suportado.
+  # `external` é reconhecido no schema mas recusado com erro claro — etcd externo
+  # (TLS entre membros, discovery) é um subprojecto à parte.
+  etcd:
+    mode: stacked</code></pre>
 <h2 id='network'>Network</h2>
 <p>Uma rede de utilizador. Os containers juntam-se com <code>--net &lt;nome&gt;</code>; as VMs com <code>network:</code>. Driver <code>bridge</code> é o único a que containers se atacham hoje.</p>
 <pre><code># Network — a user-defined network. Containers join it with `--net &lt;name&gt;`.
@@ -129,6 +550,24 @@ spec:
 # Each field below is shown with a sensible value; delete what you don&#x27;t need.
 
 # ── NFS (TrueNAS &quot;Unix (NFS) Shares&quot;, or any nfs-kernel-server) ───────────────
+# ---------------------------------------------------------------------------
+# As credenciais do NAS. Ficam num `kind: Secret` (cofre cifrado) e NUNCA em
+# texto no manifesto do storage — é essa a razão de existir do `passwordSecret`.
+# ---------------------------------------------------------------------------
+apiVersion: delonix.io/v1
+kind: Secret
+metadata:
+  name: nas-creds
+stringData:
+  password: troca-me
+---
+apiVersion: delonix.io/v1
+kind: Secret
+metadata:
+  name: cloud-creds
+stringData:
+  password: troca-me
+---
 apiVersion: delonix.io/v1
 kind: Storage
 metadata:
@@ -362,6 +801,28 @@ spec:
 # k8s (host/path→backend, ver examples/ingress.yaml). Para o firewall inbound usa
 # `kind: FirewallPolicy` com `direction: ingress` (como abaixo). `kind: Egress`
 # (firewall outbound) continua a funcionar.
+# ---------------------------------------------------------------------------
+# Os recursos que as políticas abaixo referenciam. Estão aqui DE PROPÓSITO: um
+# exemplo que nomeia um container inexistente dá `unresolved reference(s)` a
+# quem o copia, e copiar é a primeira coisa que se faz com um exemplo.
+# ---------------------------------------------------------------------------
+---
+apiVersion: delonix.io/v1
+kind: Network
+metadata:
+  name: sdn-demo
+spec:
+  driver: bridge
+---
+apiVersion: delonix.io/v1
+kind: Container
+metadata:
+  name: dbapp
+spec:
+  image: postgres:16-alpine
+  network: sdn-demo          # a firewall L4 só actua em containers na SDN
+  env:
+    - POSTGRES_PASSWORD=exemplo
 ---
 apiVersion: delonix.io/v1
 kind: FirewallPolicy

@@ -211,9 +211,27 @@ pub enum ImageCmd {
     },
     /// (only with `--vm`) Build the golden VM image (Ubuntu + kubeadm/kubelet/
     /// kubectl + `delonix-cri`).
+    /// Scaffold a `VMfile` (and a cloud-init) for building your own image.
+    Init {
+        /// Name to use in the scaffold (image tag, hostname, account).
+        #[arg(default_value = "myimage")]
+        name: String,
+        /// Where to write it (default: the current directory).
+        #[arg(short = 'd', long)]
+        dir: Option<PathBuf>,
+        /// Overwrite an existing `VMfile`.
+        #[arg(long)]
+        force: bool,
+    },
     Build {
         #[arg(short = 't', long = "tag")]
         tag: String,
+        /// Build from a `VMfile` instead of the built-in golden recipe.
+        #[arg(short = 'f', long = "file")]
+        file: Option<PathBuf>,
+        /// Build context — the directory `COPY` reads from.
+        #[arg(default_value = ".")]
+        context: PathBuf,
         #[arg(long, value_enum, default_value = "ubuntu")]
         distro: Distro,
         #[arg(long, default_value = "26.04")]
@@ -247,6 +265,9 @@ pub enum ImageCmd {
 }
 
 /// Subcommands of `image vm` — mirror `cmd::vmimage::VmImageCmd` 1:1.
+// A CLI enum parsed once per invocation, not a hot path — the same
+// justification the sibling command enums already carry.
+#[allow(clippy::large_enum_variant)]
 #[derive(Subcommand)]
 pub enum VmSub {
     /// List the local VM images.
@@ -285,9 +306,27 @@ pub enum VmSub {
     /// Publish a local VM image to an OCI registry.
     Push { name: String, target: String },
     /// Build the golden VM image (Ubuntu + kubeadm/kubelet/kubectl + `delonix-cri`).
+    /// Scaffold a `VMfile` (and a cloud-init) for building your own image.
+    Init {
+        /// Name to use in the scaffold (image tag, hostname, account).
+        #[arg(default_value = "myimage")]
+        name: String,
+        /// Where to write it (default: the current directory).
+        #[arg(short = 'd', long)]
+        dir: Option<PathBuf>,
+        /// Overwrite an existing `VMfile`.
+        #[arg(long)]
+        force: bool,
+    },
     Build {
         #[arg(short = 't', long = "tag")]
         tag: String,
+        /// Build from a `VMfile` instead of the built-in golden recipe.
+        #[arg(short = 'f', long = "file")]
+        file: Option<PathBuf>,
+        /// Build context — the directory `COPY` reads from.
+        #[arg(default_value = ".")]
+        context: PathBuf,
         #[arg(long, value_enum, default_value = "ubuntu")]
         distro: Distro,
         #[arg(long, default_value = "26.04")]
@@ -366,8 +405,11 @@ pub fn run(vm: bool, action: ImageCmd) -> Result<()> {
             },
             VmSub::LsRemote { source, no_k8s } => VmImageCmd::LsRemote { source, no_k8s },
             VmSub::Push { name, target } => VmImageCmd::Push { name, target },
+            VmSub::Init { name, dir, force } => VmImageCmd::Init { name, dir, force },
             VmSub::Build {
                 tag,
+                file,
+                context,
                 distro,
                 ubuntu_release,
                 debian_release,
@@ -382,6 +424,8 @@ pub fn run(vm: bool, action: ImageCmd) -> Result<()> {
                 delonix_bin,
             } => VmImageCmd::Build {
                 tag,
+                file,
+                context,
                 distro,
                 ubuntu_release,
                 debian_release,
@@ -454,6 +498,14 @@ pub fn run(vm: bool, action: ImageCmd) -> Result<()> {
             apply(&docs)
         }
         ImageCmd::Push { name, target } => cmd_push(&images, &name, target.as_deref()),
+        // `init` scaffolds a VMfile, which only describes a VM image — the
+        // container equivalent is `delonix build`'s Dockerfile/Delonixfile.
+        ImageCmd::Init { .. } => Err(Error::Invalid(
+            super::po::t(
+                "`init` in this group is only for VM images — use `delonix vm init` (or `delonix image --vm init`)",
+            )
+            .into(),
+        )),
         ImageCmd::Build { .. } => Err(Error::Invalid(
             super::po::t(
                 "`build` in this group is only for VM images — use `delonix image --vm build`, or `delonix build` for container images",
@@ -505,6 +557,7 @@ fn run_vm(action: ImageCmd) -> Result<()> {
         ImageCmd::Dash { .. } => unreachable!("tratado no topo de run"),
         ImageCmd::Ls { output } => VmImageCmd::Ls { output },
         ImageCmd::Describe { names } => VmImageCmd::Describe { names },
+        ImageCmd::Init { name, dir, force } => VmImageCmd::Init { name, dir, force },
         // BUG FIXED HERE, found live on a real host: `delonix image --vm
         // pull` (no argument) should default to the official golden image,
         // same as `delonix vm pull` — this mapping used to pass `image`
@@ -534,6 +587,8 @@ fn run_vm(action: ImageCmd) -> Result<()> {
         },
         ImageCmd::Build {
             tag,
+            file,
+            context,
             distro,
             ubuntu_release,
             debian_release,
@@ -548,6 +603,8 @@ fn run_vm(action: ImageCmd) -> Result<()> {
             delonix_bin,
         } => VmImageCmd::Build {
             tag,
+            file,
+            context,
             distro,
             ubuntu_release,
             debian_release,

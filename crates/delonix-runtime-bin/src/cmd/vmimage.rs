@@ -166,6 +166,9 @@ impl VmImageStore {
     }
 }
 
+// A CLI enum parsed once per invocation, not a hot path — the same
+// justification the sibling command enums already carry.
+#[allow(clippy::large_enum_variant)]
 #[derive(Subcommand)]
 pub enum VmImageCmd {
     /// List the local VM images.
@@ -199,11 +202,40 @@ pub enum VmImageCmd {
         #[arg(long)]
         no_k8s: bool,
     },
-    /// Build the golden image: Ubuntu cloud image + kubeadm/kubelet/kubectl
-    /// + `delonix-cri` (CRI endpoint for the kubelet), via `virt-customize`.
+    /// Scaffold a `VMfile` (and a cloud-init) for building your own image.
+    ///
+    /// Writes a recipe that BUILDS AS WRITTEN — a scaffold nobody can run is
+    /// documentation that lies. Delete what you do not need.
+    Init {
+        /// Name to use in the scaffold (image tag, hostname, account).
+        #[arg(default_value = "myimage")]
+        name: String,
+        /// Where to write it (default: the current directory).
+        #[arg(short = 'd', long)]
+        dir: Option<PathBuf>,
+        /// Overwrite an existing `VMfile`.
+        #[arg(long)]
+        force: bool,
+    },
+    /// Build a VM image: from a `VMfile` when there is one, otherwise the
+    /// built-in golden recipe (Ubuntu cloud image + kubeadm/kubelet/kubectl +
+    /// `delonix-cri`), via `virt-customize`.
     Build {
         #[arg(short = 't', long = "tag")]
         tag: String,
+        /// Build from a `VMfile` instead of the built-in golden recipe.
+        ///
+        /// With no `-f`, a `VMfile` in the context directory is used if there
+        /// is one — same rule `delonix build` follows for `Delonixfile`. The
+        /// flags below (`--distro`, `--k8s-version`, …) belong to the golden
+        /// recipe and are REFUSED with a VMfile, which describes all of that
+        /// itself; accepting and ignoring them is the failure this repo names
+        /// as its worst.
+        #[arg(short = 'f', long = "file")]
+        file: Option<PathBuf>,
+        /// Build context — the directory `COPY` reads from (default: `.`).
+        #[arg(default_value = ".")]
+        context: PathBuf,
         /// Base distro for the cloud image.
         #[arg(long, value_enum, default_value = "ubuntu")]
         distro: Distro,
@@ -279,8 +311,11 @@ pub fn run(action: VmImageCmd) -> Result<()> {
             let src = source.unwrap_or_else(|| default_pull_source(no_k8s).to_string());
             cmd_ls_remote(&src)
         }
+        VmImageCmd::Init { name, dir, force } => cmd_init(&name, dir, force),
         VmImageCmd::Build {
             tag,
+            file,
+            context,
             distro,
             ubuntu_release,
             debian_release,
@@ -293,23 +328,91 @@ pub fn run(action: VmImageCmd) -> Result<()> {
             offline,
             no_k8s,
             delonix_bin,
-        } => cmd_build(
-            &store,
-            &tag,
-            distro,
-            &ubuntu_release,
-            &debian_release,
-            &rocky_release,
-            k8s_version,
-            extra_packages,
-            extra_run,
-            cri_bin,
-            !no_compress,
-            offline,
-            no_k8s,
-            delonix_bin,
-        ),
+        } => {
+            // A `VMfile` in the context beats the golden recipe, the same way a
+            // `Delonixfile` beats a `Dockerfile` for `delonix build`. Explicit
+            // `-f` always wins.
+            let vmfile = file.or_else(|| {
+                let p = context.join("VMfile");
+                p.exists().then_some(p)
+            });
+            if let Some(path) = vmfile {
+                // The golden-recipe flags describe a recipe the VMfile replaces.
+                // Silently ignoring them would let someone believe their
+                // `--k8s-version` took effect.
+                let golden: &[(&str, bool)] = &[
+                    ("--k8s-version", k8s_version.is_some()),
+                    ("--extra-package", !extra_packages.is_empty()),
+                    ("--extra-run", !extra_run.is_empty()),
+                    ("--offline", offline),
+                    ("--no-k8s", no_k8s),
+                    ("--cri-bin", cri_bin.is_some()),
+                    ("--delonix-bin", delonix_bin.is_some()),
+                ];
+                let used: Vec<&str> = golden
+                    .iter()
+                    .filter(|(_, on)| *on)
+                    .map(|(n, _)| *n)
+                    .collect();
+                if !used.is_empty() {
+                    return Err(Error::Invalid(super::po::tf(
+                        "{flags} belong to the built-in golden recipe and mean nothing with a VMfile — the VMfile describes all of that itself",
+                        &[("flags", &used.join(", "))],
+                    ).to_string()));
+                }
+                return super::vmfile::build(&store, &path, &context, &tag, !no_compress);
+            }
+            cmd_build(
+                &store,
+                &tag,
+                distro,
+                &ubuntu_release,
+                &debian_release,
+                &rocky_release,
+                k8s_version,
+                extra_packages,
+                extra_run,
+                cri_bin,
+                !no_compress,
+                offline,
+                no_k8s,
+                delonix_bin,
+            )
+        }
     }
+}
+
+/// `vm init` — writes the scaffold.
+fn cmd_init(name: &str, dir: Option<PathBuf>, force: bool) -> Result<()> {
+    let dir = super::vmfile::init_dir(dir);
+    std::fs::create_dir_all(&dir).map_err(|e| Error::Invalid(format!("{}: {e}", dir.display())))?;
+    let vmfile = dir.join("VMfile");
+    if vmfile.exists() && !force {
+        return Err(Error::Invalid(super::po::tf(
+            "{path} already exists — use --force to overwrite",
+            &[("path", &vmfile.display().to_string())],
+        )));
+    }
+    std::fs::write(&vmfile, super::vmfile::scaffold(name))
+        .map_err(|e| Error::Invalid(format!("{}: {e}", vmfile.display())))?;
+    let ci_dir = dir.join("cloud-init");
+    std::fs::create_dir_all(&ci_dir)
+        .map_err(|e| Error::Invalid(format!("{}: {e}", ci_dir.display())))?;
+    let ci = ci_dir.join("user-data.yaml");
+    if !ci.exists() || force {
+        std::fs::write(&ci, super::vmfile::scaffold_cloud_init(name))
+            .map_err(|e| Error::Invalid(format!("{}: {e}", ci.display())))?;
+    }
+    println!("{}", vmfile.display());
+    println!("{}", ci.display());
+    println!(
+        "\n{}",
+        super::po::tf(
+            "Next: `delonix vm build -t {name}:1.0 {dir}` then `delonix vm create dev --disk-image {name}:1.0`",
+            &[("name", name), ("dir", &dir.display().to_string())],
+        )
+    );
+    Ok(())
 }
 
 /// `image --vm ls -o json` / `image vm ls -o json` row (ADR-0005): machine-friendly
@@ -409,6 +512,95 @@ pub(crate) const OFFICIAL_VM_IMAGE: &str = "ghcr.io/angolardevops/delonix-vm-k8s
 /// `Pull`/`LsRemote --no-k8s` when no explicit `source` is given.
 pub(crate) const OFFICIAL_VM_BASE_IMAGE: &str =
     "ghcr.io/angolardevops/delonix-vm-base:ubuntu-24.04";
+
+/// Downloads a cloud image from an ARBITRARY URL, for `FROM https://…`.
+///
+/// Verified when the publisher makes it possible: a sibling `<url>.sha256` (the
+/// convention almost everyone follows) is fetched and checked. When there is
+/// none, the download proceeds over TLS and **says so** — because the
+/// alternative is a build that silently trusts whatever answered, and someone
+/// pointing `FROM` at their own bucket deserves to know which of the two they
+/// got.
+pub(crate) fn download_url_base(store: &VmImageStore, url: &str) -> Result<PathBuf> {
+    if !url.starts_with("https://") && !url.starts_with("http://") {
+        return Err(Error::Invalid(format!("not an absolute URL: {url}")));
+    }
+    if url.starts_with("http://") {
+        eprintln!(
+            "{} {}",
+            super::po::t("warning:"),
+            super::po::t("plain http — the image is downloaded without any transport protection")
+        );
+    }
+    // Cache key from the URL, not from its last path segment: two different
+    // buckets publish `noble-server-cloudimg-amd64.img` and they are not the
+    // same file.
+    let key = format!("url-{}", hex_sha256(url.as_bytes()));
+    let cached = store.base_cache_path(Distro::Ubuntu, &key);
+    if cached.exists() {
+        return Ok(cached);
+    }
+    if let Some(parent) = cached.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let tmp = cached.with_extension("part");
+    eprintln!("{}", super::po::tf("downloading {url}...", &[("url", url)]));
+    stream_download(url, &tmp)?;
+
+    let sums_url = format!("{url}.sha256");
+    let sums = std::env::temp_dir().join(format!("delonix-url-sha-{}", std::process::id()));
+    match stream_download(&sums_url, &sums) {
+        Ok(()) => {
+            let want = std::fs::read_to_string(&sums)
+                .unwrap_or_default()
+                .split_whitespace()
+                .next()
+                .unwrap_or_default()
+                .to_ascii_lowercase();
+            let _ = std::fs::remove_file(&sums);
+            let got = hex_sha256_file(&tmp)?;
+            if want.is_empty() || want != got {
+                let _ = std::fs::remove_file(&tmp);
+                return Err(Error::Invalid(super::po::tf(
+                    "{url}: checksum mismatch (expected {want}, got {got}) — refusing the image",
+                    &[("url", url), ("want", &want), ("got", &got)],
+                )));
+            }
+            eprintln!("{}", super::po::t("checksum verified against <url>.sha256"));
+        }
+        Err(_) => {
+            let _ = std::fs::remove_file(&sums);
+            eprintln!(
+                "{} {}",
+                super::po::t("warning:"),
+                super::po::tf(
+                    "no {sums} published — the image is trusted on TLS alone. Publish one next to it to have this verified.",
+                    &[("sums", &sums_url)],
+                )
+            );
+        }
+    }
+    std::fs::rename(&tmp, &cached)?;
+    Ok(cached)
+}
+
+/// Dispatches to the right per-distro downloader.
+///
+/// Each publisher does checksums differently — Ubuntu ships GNU `SHA256SUMS`,
+/// Debian only `SHA512SUMS`, Rocky a per-file BSD-format `.CHECKSUM` — and that
+/// knowledge already lives in the three functions below. This is the one place
+/// that picks between them.
+pub(crate) fn download_base(
+    store: &VmImageStore,
+    distro: Distro,
+    release: &str,
+) -> Result<PathBuf> {
+    match distro {
+        Distro::Ubuntu => download_ubuntu_base(store, release),
+        Distro::Debian => download_debian_base(store, release),
+        Distro::Rocky => download_rocky_base(store, release),
+    }
+}
 
 /// Picks the default source for `Pull`/`LsRemote` when no explicit `source`
 /// is given. BUG FIXED (gap): `OFFICIAL_VM_BASE_IMAGE` existed but had no way
@@ -777,7 +969,7 @@ fn cmd_build(
 // Download + verification of the Ubuntu cloud image
 // ---------------------------------------------------------------------------
 
-fn download_ubuntu_base(store: &VmImageStore, release: &str) -> Result<PathBuf> {
+pub(crate) fn download_ubuntu_base(store: &VmImageStore, release: &str) -> Result<PathBuf> {
     let cached = store.base_cache_path(Distro::Ubuntu, release);
     if cached.exists() {
         return Ok(cached);
@@ -853,7 +1045,7 @@ fn debian_major_version(codename: &str) -> Result<&'static str> {
 /// Debian publishes `SHA512SUMS`, NOT `SHA256SUMS` (no SHA256 checksums file
 /// exists at all) — same `<hash>  <filename>` line format, different hash
 /// algorithm, hence `hex_sha512_file` below.
-fn download_debian_base(store: &VmImageStore, release: &str) -> Result<PathBuf> {
+pub(crate) fn download_debian_base(store: &VmImageStore, release: &str) -> Result<PathBuf> {
     let cached = store.base_cache_path(Distro::Debian, release);
     if cached.exists() {
         return Ok(cached);
@@ -933,7 +1125,7 @@ fn valid_rocky_release(release: &str) -> Result<()> {
 /// `<hash>  <filename>` — hence `parse_bsd_checksum` below. SHA256 (not
 /// SHA512 like Debian), so
 /// `hex_sha256_file` is reused as-is.
-fn download_rocky_base(store: &VmImageStore, release: &str) -> Result<PathBuf> {
+pub(crate) fn download_rocky_base(store: &VmImageStore, release: &str) -> Result<PathBuf> {
     valid_rocky_release(release)?;
     let cached = store.base_cache_path(Distro::Rocky, release);
     if cached.exists() {
@@ -1387,7 +1579,7 @@ fn preseed_k8s_images(
     Some(preseed_root)
 }
 
-fn hex_sha256(data: &[u8]) -> String {
+pub(crate) fn hex_sha256(data: &[u8]) -> String {
     let mut h = Sha256::new();
     h.update(data);
     hex(&h.finalize())
@@ -1428,7 +1620,7 @@ fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
-fn now_unix() -> u64 {
+pub(crate) fn now_unix() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs())
@@ -2081,7 +2273,7 @@ pub(crate) fn customize_args(disk: &Path, ops: &[CustomizeOp]) -> Vec<String> {
     args
 }
 
-fn run_tool(bin: &str, args: &[&str]) -> Result<()> {
+pub(crate) fn run_tool(bin: &str, args: &[&str]) -> Result<()> {
     let status = Command::new(bin).args(args).status().map_err(|e| {
         Error::Invalid(format!(
             "{}: {e}",

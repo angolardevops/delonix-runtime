@@ -43,6 +43,7 @@ pub mod tunnel;
 pub mod util;
 pub mod vm;
 pub mod vmbridge;
+pub mod vmfile;
 pub mod vmimage;
 pub mod volume;
 pub mod workload;

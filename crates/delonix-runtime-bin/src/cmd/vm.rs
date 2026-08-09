@@ -367,6 +367,11 @@ pub enum VmCmd {
         /// Overwrite existing files.
         #[arg(long)]
         force: bool,
+        /// Scaffold a `VMfile` for BUILDING your own qcow2 image, instead of a
+        /// manifest for RUNNING an existing one. The two are different jobs and
+        /// this is the same verb for both: `init` starts a project either way.
+        #[arg(long)]
+        vmfile: bool,
         /// Generate a complete PROJECT for a stack (e.g. `python`) with best
         /// practices, instead of the generic scaffold. `--template list` shows the available ones.
         #[arg(long, short = 't')]
@@ -378,6 +383,15 @@ pub enum VmCmd {
     /// Create (or auto-recover) a VM.
     Create {
         name: String,
+        /// Absolute URL of a qcow2 cloud image to boot this VM from.
+        ///
+        /// Downloaded once and cached, so a second `create` from the same URL
+        /// costs nothing. Verified against a sibling `<url>.sha256` when the
+        /// publisher offers one; without it, the download is trusted on TLS
+        /// alone and SAYS SO — someone pointing this at their own bucket
+        /// deserves to know which of the two they got.
+        #[arg(long = "url-img", conflicts_with_all = ["disk"])]
+        url_img: Option<String>,
         /// Base disk (qcow2/raw) — becomes a per-VM overlay. Omit to use the
         /// local golden VM image (if there is exactly one; `image --vm ls`).
         #[arg(long)]
@@ -463,6 +477,20 @@ pub enum VmCmd {
         /// Seconds to wait with --wait (default 120).
         #[arg(long = "boot-timeout", default_value_t = 120)]
         boot_timeout: u64,
+    },
+    /// Build a qcow2 VM image from a `VMfile`.
+    Build {
+        #[arg(short = 't', long = "tag")]
+        tag: String,
+        /// The `VMfile` (default: `<context>/VMfile`).
+        #[arg(short = 'f', long = "file")]
+        file: Option<PathBuf>,
+        /// Build context — the directory `COPY` reads from.
+        #[arg(default_value = ".")]
+        context: PathBuf,
+        /// Do not compress the final qcow2.
+        #[arg(long)]
+        no_compress: bool,
     },
     /// Pull a golden VM image from an OCI registry — with no argument, the
     /// OFFICIAL Delonix image (ready for `vm create`/`cluster kubeadm`).
@@ -809,10 +837,27 @@ pub fn run(action: VmCmd) -> Result<()> {
         name,
         image,
         force,
+        vmfile,
         template,
         up,
     } = action
     {
+        if vmfile {
+            // Building an image and running one are different jobs; `init`
+            // starts a project for either. The name defaults to the directory,
+            // like the manifest scaffold already does.
+            let project = name.unwrap_or_else(|| {
+                dir.file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .filter(|n| !n.is_empty() && n != ".")
+                    .unwrap_or_else(|| "myimage".to_string())
+            });
+            return super::vmimage::run(super::vmimage::VmImageCmd::Init {
+                name: project,
+                dir: Some(dir),
+                force,
+            });
+        }
         return cmd_init(
             super::scaffold::Target::Vm,
             dir,
@@ -833,6 +878,7 @@ pub fn run(action: VmCmd) -> Result<()> {
         VmCmd::Dash { .. } => unreachable!("tratado acima"),
         VmCmd::Create {
             name,
+            url_img,
             disk,
             vcpus,
             memory,
@@ -862,9 +908,18 @@ pub fn run(action: VmCmd) -> Result<()> {
             // No --disk: the single golden VM image (same resolution as
             // `cluster kubeadm` — 0 or several images give a clear error, never
             // a blind choice).
-            let disk = match disk {
-                Some(d) => d,
-                None => {
+            let disk = match (url_img, disk) {
+                // An explicit URL is the most specific thing the caller can
+                // say, so nothing else gets consulted — not the local store,
+                // not the official image.
+                (Some(url), _) => {
+                    let store = super::vmimage::VmImageStore::open(super::util::state_root())?;
+                    super::vmimage::download_url_base(&store, &url)?
+                        .to_string_lossy()
+                        .into_owned()
+                }
+                (None, Some(d)) => d,
+                (None, None) => {
                     let store = super::vmimage::VmImageStore::open(super::util::state_root())?;
                     // Downloads the official golden when nothing is local — the
                     // same helper `cluster kubeadm` uses. This path used to
@@ -964,6 +1019,28 @@ pub fn run(action: VmCmd) -> Result<()> {
             }
             print_vm_next_steps(&vm.name);
             Ok(())
+        }
+        VmCmd::Build {
+            tag,
+            file,
+            context,
+            no_compress,
+        } => {
+            // The VMfile path only — this group has no golden-recipe flags, so
+            // there is nothing to disambiguate. `-f` absent means
+            // `<context>/VMfile`, and its absence is an error rather than a
+            // silent fallback to the golden recipe: `delonix vm build` in a
+            // directory with no VMfile is a mistake, not a request for
+            // Kubernetes.
+            let store = super::vmimage::VmImageStore::open(super::util::state_root())?;
+            let path = file.unwrap_or_else(|| context.join("VMfile"));
+            if !path.exists() {
+                return Err(Error::Invalid(super::po::tf(
+                    "no VMfile at {path} — run `delonix vm init` to scaffold one",
+                    &[("path", &path.display().to_string())],
+                )));
+            }
+            super::vmfile::build(&store, &path, &context, &tag, !no_compress)
         }
         VmCmd::Pull {
             source,

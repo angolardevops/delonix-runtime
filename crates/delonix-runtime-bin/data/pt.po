@@ -3534,3 +3534,65 @@ msgstr "Imprime a matriz de cobertura e sai, sem servir nada. Esta camada é uma
 
 msgid "Apply the fix instead of only reporting it. Writing the system-wide drop-in needs root; the per-session remedy never does."
 msgstr "Aplica a correcção em vez de só a reportar. Escrever o drop-in do sistema exige root; o remédio por-sessão nunca exige."
+
+# ---- help e mensagens do VMfile (vm init --vmfile / vm build / --url-img) ---
+
+msgid "Scaffold a `VMfile` (and a cloud-init) for building your own image."
+msgstr "Cria um `VMfile` (e um cloud-init) para construíres a tua própria imagem."
+
+msgid "Build a qcow2 VM image from a `VMfile`."
+msgstr "Constrói uma imagem VM qcow2 a partir de um `VMfile`."
+
+msgid "Build from a `VMfile` instead of the built-in golden recipe."
+msgstr "Constrói a partir de um `VMfile` em vez da receita dourada embutida."
+
+msgid "Build context — the directory `COPY` reads from."
+msgstr "Contexto do build — o directório de onde o `COPY` lê."
+
+msgid "The `VMfile` (default: `<context>/VMfile`)."
+msgstr "O `VMfile` (por omissão: `<contexto>/VMfile`)."
+
+msgid "Name to use in the scaffold (image tag, hostname, account)."
+msgstr "Nome a usar no scaffold (tag da imagem, hostname, conta)."
+
+msgid "Where to write it (default: the current directory)."
+msgstr "Onde escrevê-lo (por omissão: o directório actual)."
+
+msgid "Overwrite an existing `VMfile`."
+msgstr "Sobrescreve um `VMfile` existente."
+
+msgid "{path} already exists — use --force to overwrite"
+msgstr "{path} já existe — usa --force para sobrescrever"
+
+msgid "Next: `delonix vm build -t {name}:1.0 {dir}` then `delonix vm create dev --disk-image {name}:1.0`"
+msgstr "A seguir: `delonix vm build -t {name}:1.0 {dir}` e depois `delonix vm create dev --disk-image {name}:1.0`"
+
+msgid "no VMfile at {path} — run `delonix vm init` to scaffold one"
+msgstr "não há VMfile em {path} — corre `delonix vm init` para criar um"
+
+msgid "FROM {name}: no such local VM image, and it is not a URL nor a known cloud image (ubuntu:/debian:/rocky:) — see `delonix vm ls`"
+msgstr "FROM {name}: não há imagem VM local com esse nome, e não é um URL nem uma cloud image conhecida (ubuntu:/debian:/rocky:) — ver `delonix vm ls`"
+
+msgid "downloading {url}..."
+msgstr "a descarregar {url}..."
+
+msgid "checksum verified against <url>.sha256"
+msgstr "checksum verificado contra o <url>.sha256"
+
+msgid "no {sums} published — the image is trusted on TLS alone. Publish one next to it to have this verified."
+msgstr "não há {sums} publicado — a imagem é confiada só no TLS. Publica um ao lado dela para isto ser verificado."
+
+msgid "{url}: checksum mismatch (expected {want}, got {got}) — refusing the image"
+msgstr "{url}: checksum não bate (esperado {want}, obtido {got}) — imagem recusada"
+
+msgid "plain http — the image is downloaded without any transport protection"
+msgstr "http simples — a imagem é descarregada sem protecção nenhuma no transporte"
+
+msgid "{flags} belong to the built-in golden recipe and mean nothing with a VMfile — the VMfile describes all of that itself"
+msgstr "{flags} pertencem à receita dourada embutida e não significam nada com um VMfile — o VMfile descreve tudo isso por si"
+
+msgid "[{n}/{total}] {label}: FROM {from}"
+msgstr "[{n}/{total}] {label}: FROM {from}"
+
+msgid "SSHKEY {key}: not a public key, and no such file — pass a path or the key itself"
+msgstr "SSHKEY {key}: não é uma chave pública, e o ficheiro não existe — passa um caminho ou a própria chave"

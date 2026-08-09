@@ -9,6 +9,24 @@
 # Each field below is shown with a sensible value; delete what you don't need.
 
 # ── NFS (TrueNAS "Unix (NFS) Shares", or any nfs-kernel-server) ───────────────
+# ---------------------------------------------------------------------------
+# As credenciais do NAS. Ficam num `kind: Secret` (cofre cifrado) e NUNCA em
+# texto no manifesto do storage — é essa a razão de existir do `passwordSecret`.
+# ---------------------------------------------------------------------------
+apiVersion: delonix.io/v1
+kind: Secret
+metadata:
+  name: nas-creds
+stringData:
+  password: troca-me
+---
+apiVersion: delonix.io/v1
+kind: Secret
+metadata:
+  name: cloud-creds
+stringData:
+  password: troca-me
+---
 apiVersion: delonix.io/v1
 kind: Storage
 metadata:

@@ -8,6 +8,28 @@
 # k8s (host/path→backend, ver examples/ingress.yaml). Para o firewall inbound usa
 # `kind: FirewallPolicy` com `direction: ingress` (como abaixo). `kind: Egress`
 # (firewall outbound) continua a funcionar.
+# ---------------------------------------------------------------------------
+# Os recursos que as políticas abaixo referenciam. Estão aqui DE PROPÓSITO: um
+# exemplo que nomeia um container inexistente dá `unresolved reference(s)` a
+# quem o copia, e copiar é a primeira coisa que se faz com um exemplo.
+# ---------------------------------------------------------------------------
+---
+apiVersion: delonix.io/v1
+kind: Network
+metadata:
+  name: sdn-demo
+spec:
+  driver: bridge
+---
+apiVersion: delonix.io/v1
+kind: Container
+metadata:
+  name: dbapp
+spec:
+  image: postgres:16-alpine
+  network: sdn-demo          # a firewall L4 só actua em containers na SDN
+  env:
+    - POSTGRES_PASSWORD=exemplo
 ---
 apiVersion: delonix.io/v1
 kind: FirewallPolicy

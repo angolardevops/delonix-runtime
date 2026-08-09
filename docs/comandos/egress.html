@@ -76,7 +76,7 @@ main{padding:1.4rem 1.2rem 4rem}}
 <nav class="side">
 <div class="brand"><span class="dot">▲</span> Delonix Engine</div>
 <h5>Documentação</h5>
-<a href="../index.html">Início</a><a href="../cheatsheet.html">Cheatsheet</a><a href="../kinds.html">Kinds e templates</a><a href="../arquitectura.html">Arquitectura</a><a href="../c4.html">Modelo C4 e system design</a><a href="../cri.html">CRI — kubelet sem containerd</a><a href="../comparacao.html">Delonix vs Docker vs Podman</a><a href="../tutorial-delonix-temp.html">Projecto completo: Delonix Temp</a><a href="../delonixctl.html">delonixctl — cliente PaaS</a>
+<a href="../index.html">Início</a><a href="../cheatsheet.html">Cheatsheet</a><a href="../kinds.html">Kinds e templates</a><a href="../cloud.html">cloud-init, cloud-img e CH</a><a href="../labs.html">Laboratórios</a><a href="../arquitectura.html">Arquitectura</a><a href="../c4.html">Modelo C4 e system design</a><a href="../cri.html">CRI — kubelet sem containerd</a><a href="../comparacao.html">Delonix vs Docker vs Podman</a><a href="../tutorial-delonix-temp.html">Projecto completo: Delonix Temp</a><a href="../delonixctl.html">delonixctl — cliente PaaS</a>
 <h5>Referência CLI</h5>
 <a href="../comandos/container.html">delonix container</a><a href="../comandos/workload.html">delonix workload</a><a href="../comandos/pod.html">delonix pod</a><a href="../comandos/image.html">delonix image</a><a href="../comandos/build.html">delonix build</a><a href="../comandos/vm.html">delonix vm</a><a href="../comandos/volumes.html">delonix volumes</a><a href="../comandos/network.html">delonix network</a><a href="../comandos/stack.html">delonix stack</a><a href="../comandos/compose.html">delonix compose</a><a href="../comandos/cluster.html">delonix cluster</a><a href="../comandos/secret.html">delonix secret</a><a href="../comandos/storage.html">delonix storage</a><a href="../comandos/sharevolume.html">delonix sharevolume</a><a href="../comandos/ingress.html">delonix net ingress</a><a href="../comandos/egress.html" class="on">delonix net egress</a><a href="../comandos/httproute.html">delonix net httproute</a><a href="../comandos/tunnel.html">delonix net tunnel</a><a href="../comandos/flow.html">delonix net flow</a><a href="../comandos/boot.html">delonix net boot</a><a href="../comandos/system.html">delonix system</a><a href="../comandos/dash.html">delonix dash</a><a href="../comandos/docker-api.html">delonix serve docker-api</a><a href="../comandos/kube.html">delonix cluster kube</a><a href="../comandos/netns.html">delonix net netns</a><a href="../comandos/completion.html">delonix completion</a>
 <h5>Projecto</h5>
@@ -108,6 +108,47 @@ Commands:
 Options:
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
   -h, --help          Print help</code></pre></div>
+<h2 id='clear'><code>egress clear</code></h2>
+<div class='help'><pre><code>Remove all outbound rules
+
+Usage: dlx net egress clear [OPTIONS] &lt;CONTAINER&gt;
+
+Arguments:
+  &lt;CONTAINER&gt;  
+
+Options:
+      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+  -h, --help          Print help</code></pre></div>
+<h3>Exemplos</h3><div class="ex"><div class="cap">Limpar as regras de saída desse container</div><pre><code>delonix net egress clear web</code></pre></div>
+<h2 id='rm'><code>egress rm</code></h2>
+<div class='help'><pre><code>Remove outbound rule(s) matching `[proto/]port` (all protos if none given)
+
+Usage: dlx net egress rm [OPTIONS] &lt;CONTAINER&gt; &lt;PORT&gt;
+
+Arguments:
+  &lt;CONTAINER&gt;  
+  &lt;PORT&gt;       `tcp/5432`, `5432` (any proto), or `*` (all ports)
+
+Options:
+      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+      --to &lt;TO&gt;       Only rules to this destination CIDR (default: any recorded destination)
+  -h, --help          Print help</code></pre></div>
+<h3>Exemplos</h3><div class="ex"><div class="cap">Tirar UMA regra de saída</div><pre><code>delonix net egress rm web tcp/443</code></pre></div>
+<h2 id='deny'><code>egress deny</code></h2>
+<div class='help'><pre><code>Deny outbound traffic from a container (same shape as `allow`)
+
+Usage: dlx net egress deny [OPTIONS] &lt;CONTAINER&gt; &lt;PORT&gt;
+
+Arguments:
+  &lt;CONTAINER&gt;  
+  &lt;PORT&gt;       
+
+Options:
+      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+      --to &lt;TO&gt;       
+      --note &lt;NOTE&gt;   
+  -h, --help          Print help</code></pre></div>
+<h3>Exemplos</h3><div class="ex"><div class="cap">Bloquear a saída para uma rede</div><pre><code>delonix net egress deny web --to 10.0.0.0/8</code></pre></div>
 <h2 id='allow'><code>egress allow</code></h2>
 <div class='help'><pre><code>Allow outbound traffic from a container: `[proto/]port` to an optional CIDR
 

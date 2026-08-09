@@ -76,7 +76,7 @@ main{padding:1.4rem 1.2rem 4rem}}
 <nav class="side">
 <div class="brand"><span class="dot">▲</span> Delonix Engine</div>
 <h5>Documentação</h5>
-<a href="../index.html">Início</a><a href="../cheatsheet.html">Cheatsheet</a><a href="../kinds.html">Kinds e templates</a><a href="../arquitectura.html">Arquitectura</a><a href="../c4.html">Modelo C4 e system design</a><a href="../cri.html">CRI — kubelet sem containerd</a><a href="../comparacao.html">Delonix vs Docker vs Podman</a><a href="../tutorial-delonix-temp.html">Projecto completo: Delonix Temp</a><a href="../delonixctl.html">delonixctl — cliente PaaS</a>
+<a href="../index.html">Início</a><a href="../cheatsheet.html">Cheatsheet</a><a href="../kinds.html">Kinds e templates</a><a href="../cloud.html">cloud-init, cloud-img e CH</a><a href="../labs.html">Laboratórios</a><a href="../arquitectura.html">Arquitectura</a><a href="../c4.html">Modelo C4 e system design</a><a href="../cri.html">CRI — kubelet sem containerd</a><a href="../comparacao.html">Delonix vs Docker vs Podman</a><a href="../tutorial-delonix-temp.html">Projecto completo: Delonix Temp</a><a href="../delonixctl.html">delonixctl — cliente PaaS</a>
 <h5>Referência CLI</h5>
 <a href="../comandos/container.html">delonix container</a><a href="../comandos/workload.html">delonix workload</a><a href="../comandos/pod.html">delonix pod</a><a href="../comandos/image.html">delonix image</a><a href="../comandos/build.html">delonix build</a><a href="../comandos/vm.html">delonix vm</a><a href="../comandos/volumes.html">delonix volumes</a><a href="../comandos/network.html">delonix network</a><a href="../comandos/stack.html">delonix stack</a><a href="../comandos/compose.html">delonix compose</a><a href="../comandos/cluster.html">delonix cluster</a><a href="../comandos/secret.html">delonix secret</a><a href="../comandos/storage.html">delonix storage</a><a href="../comandos/sharevolume.html">delonix sharevolume</a><a href="../comandos/ingress.html">delonix net ingress</a><a href="../comandos/egress.html">delonix net egress</a><a href="../comandos/httproute.html">delonix net httproute</a><a href="../comandos/tunnel.html">delonix net tunnel</a><a href="../comandos/flow.html">delonix net flow</a><a href="../comandos/boot.html">delonix net boot</a><a href="../comandos/system.html">delonix system</a><a href="../comandos/dash.html">delonix dash</a><a href="../comandos/docker-api.html">delonix serve docker-api</a><a href="../comandos/kube.html">delonix cluster kube</a><a href="../comandos/netns.html" class="on">delonix net netns</a><a href="../comandos/completion.html">delonix completion</a>
 <h5>Projecto</h5>
@@ -108,6 +108,93 @@ Commands:
 Options:
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
   -h, --help          Print help</code></pre></div>
+<h2 id='firewall'><code>netns firewall</code></h2>
+<div class='help'><pre><code>Apply (or clear) a container&#x27;s parameterizable firewall AT THE INGRESS
+
+Usage: dlx net netns firewall [OPTIONS] &lt;NAME&gt;
+
+Arguments:
+  &lt;NAME&gt;  Netns/container name
+
+Options:
+      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+      --spec &lt;SPEC&gt;   ContainerFw as JSON, e.g. `{&quot;enabled&quot;:true,&quot;policyIn&quot;:&quot;deny&quot;,&quot;rules&quot;:[...]}`
+      --clear         Remove the container&#x27;s firewall from the ingress
+  -h, --help          Print help</code></pre></div>
+<h3>Exemplos</h3><div class="ex"><div class="cap">Aplicar a firewall de um container no ingress</div><pre><code>delonix net netns firewall &lt;id&gt; 10.200.0.5</code></pre></div>
+<h2 id='unpublish'><code>netns unpublish</code></h2>
+<div class='help'><pre><code>Unpublish a host port from the ingress
+
+Usage: dlx net netns unpublish [OPTIONS] &lt;HOST_PORT&gt;
+
+Arguments:
+  &lt;HOST_PORT&gt;  
+
+Options:
+      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+  -h, --help          Print help</code></pre></div>
+<h3>Exemplos</h3><div class="ex"><div class="cap">Despublicar</div><pre><code>delonix net netns unpublish 8080</code></pre></div>
+<h2 id='publish'><code>netns publish</code></h2>
+<div class='help'><pre><code>Publish a port through the ingress (add_hostfwd + DNAT) to a container
+
+Usage: dlx net netns publish [OPTIONS] &lt;NAME&gt; &lt;SPEC&gt;
+
+Arguments:
+  &lt;NAME&gt;  Netns/container name (its IP is derived unless `--ip` is given)
+  &lt;SPEC&gt;  Port mapping `hostPort:containerPort[/tcp|udp]`
+
+Options:
+      --ip &lt;IP&gt;       Override the container IP (defaults to the deterministic one from `name`)
+      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+  -h, --help          Print help</code></pre></div>
+<h3>Exemplos</h3><div class="ex"><div class="cap">Publicar uma porta pelo ingress, à mão</div><pre><code>delonix net netns publish 8080:80 10.200.0.5</code></pre></div>
+<h2 id='exec'><code>netns exec</code></h2>
+<div class='help'><pre><code>Run a command inside an attached netns (exercises the runtime join path)
+
+Usage: dlx net netns exec [OPTIONS] &lt;NAME&gt; &lt;COMMAND&gt;...
+
+Arguments:
+  &lt;NAME&gt;        
+  &lt;COMMAND&gt;...  
+
+Options:
+      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+  -h, --help          Print help</code></pre></div>
+<h3>Exemplos</h3><div class="ex"><div class="cap">Correr um comando DENTRO de uma netns anexada — para depurar a rede</div><pre><code>delonix net netns exec minha-netns ip -br addr</code></pre></div>
+<h2 id='detach'><code>netns detach</code></h2>
+<div class='help'><pre><code>Detach (and destroy) a previously attached netns
+
+Usage: dlx net netns detach [OPTIONS] &lt;NAME&gt;
+
+Arguments:
+  &lt;NAME&gt;  
+
+Options:
+      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+  -h, --help          Print help</code></pre></div>
+<h3>Exemplos</h3><div class="ex"><div class="cap">Desligar e destruir essa netns</div><pre><code>delonix net netns detach minha-netns</code></pre></div>
+<h2 id='attach'><code>netns attach</code></h2>
+<div class='help'><pre><code>Attach a netns to delonix0 via veth (the holder is the netns/veth factory)
+
+Usage: dlx net netns attach [OPTIONS] &lt;NAME&gt;
+
+Arguments:
+  &lt;NAME&gt;  Netns name (typically a container id/short-id)
+
+Options:
+      --ip &lt;IP&gt;       IP in the infra subnet. Defaults to a deterministic one derived from `name`
+      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+  -h, --help          Print help</code></pre></div>
+<h3>Exemplos</h3><div class="ex"><div class="cap">Ligar uma netns à bridge (o motor faz isto sozinho no run)</div><pre><code>delonix net netns attach minha-netns</code></pre></div>
+<h2 id='down'><code>netns down</code></h2>
+<div class='help'><pre><code>Force tear-down of the ingress infra (kills slirp + holder, frees the netns)
+
+Usage: dlx net netns down [OPTIONS]
+
+Options:
+      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+  -h, --help          Print help</code></pre></div>
+<h3>Exemplos</h3><div class="ex"><div class="cap">Derrubar a infra de rede (mata slirp + holder) — derruba TODOS os containers da SDN</div><pre><code>delonix net netns down</code></pre></div>
 <h2 id='status'><code>netns status</code></h2>
 <div class='help'><pre><code>Show the ingress infra status (holder/slirp pids, bridge, refcount)
 
