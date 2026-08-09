@@ -143,10 +143,10 @@ main{padding:1.4rem 1.2rem 4rem;max-width:none}}
 </nav>
 <main>
 <h1>Laboratórios</h1>
-<p class='tagline'>Sessões curtas, do zero a um resultado que se verifica. Cada uma inclui a limpeza — nenhuma deixa nada para trás.</p>
-<p>A verificação no fim de cada lab não é decorativa: é o que separa «copiei comandos» de «sei o que isto faz». Onde um passo pode falhar em silêncio, o lab diz exactamente o que olhar.</p>
-<h2 id='lab-1'>Primeiro serviço, em 60 segundos <span class='badge'>iniciante</span></h2>
-
+<p class='tagline lang-pt'>Sessões curtas, do zero a um resultado que se verifica. Cada uma inclui a limpeza — nenhuma deixa nada para trás.</p><p class='tagline lang-en'>Short sessions, from zero to a verifiable result. Each one includes cleanup — none of them leaves anything behind.</p>
+<p class='lang-pt'>A verificação no fim de cada lab não é decorativa: é o que separa «copiei comandos» de «sei o que isto faz». Onde um passo pode falhar em silêncio, o lab diz exactamente o que olhar.</p><p class='lang-en'>The verification at the end of each lab isn't decorative: it's what tells apart "I copied commands" from "I know what this does." Where a step could fail silently, the lab tells you exactly what to look at.</p>
+<h2 id='lab-1'><span class='lang-pt'>Primeiro serviço, em 60 segundos</span><span class='lang-en'>First service, in 60 seconds</span> <span class='badge'><span class='lang-pt'>iniciante</span><span class='lang-en'>beginner</span></span></h2>
+<div class='lang-pt'>
 <p>Objectivo: perceber o ciclo <code>run → ps → logs → exec → rm</code> e ver
 que não há daemon nenhum por baixo.</p>
 <pre><code># 1. Um serviço web, em segundo plano, publicado na porta 8080 do host
@@ -171,9 +171,34 @@ delonix logs web | tail -5
 delonix rm -f web</code></pre>
 <p class="note"><strong>Verificação:</strong> o passo 3 não imprime processo
 nenhum do motor. Um container a correr sem supervisor residente é a diferença
-de fundo para o Docker, e vê-se aqui em duas linhas.</p>
-<h2 id='lab-2'>Limites de recursos que pegam mesmo <span class='badge'>iniciante</span></h2>
+de fundo para o Docker, e vê-se aqui em duas linhas.</p></div><div class='lang-en'>
+<p>Goal: understand the <code>run → ps → logs → exec → rm</code> cycle and see
+that there's no daemon underneath.</p>
+<pre><code># 1. A web service, in the background, published on host port 8080
+delonix container run -d --name web -p 8080:80 nginx:alpine
 
+# 2. Confirm — STATUS shows how long it's been up
+delonix ps
+
+# 3. Proof there's no daemon: NO resident engine process
+pgrep -a delonix || echo "no daemon — the container is a child of the host's init"
+
+# 4. Talk to it
+curl -s localhost:8080 | head -3
+
+# 5. Go inside
+delonix exec -it web sh -c 'hostname; id; ls /etc/nginx'
+
+# 6. See what it wrote
+delonix logs web | tail -5
+
+# 7. Clean up
+delonix rm -f web</code></pre>
+<p class="note"><strong>Verification:</strong> step 3 prints no engine process
+at all. A container running with no resident supervisor is the fundamental
+difference from Docker, and you can see it here in two lines.</p></div>
+<h2 id='lab-2'><span class='lang-pt'>Limites de recursos que pegam mesmo</span><span class='lang-en'>Resource limits that actually take</span> <span class='badge'><span class='lang-pt'>iniciante</span><span class='lang-en'>beginner</span></span></h2>
+<div class='lang-pt'>
 <p>Objectivo: descobrir se este host aplica limites — e o que fazer quando não
 aplica. É o erro nº1 de quem começa em rootless.</p>
 <pre><code># 1. Perguntar ANTES de assumir
@@ -200,9 +225,36 @@ limite nenhum, em silêncio. É por isso que o passo 1 existe.</p>
 <p class="note"><strong>Nota:</strong> <code>cpuset</code> e <code>io</code>
 aparecem quase sempre como <em>absent</em>, e está certo — num Ubuntu de
 fábrica o <code>user.slice</code> (da root) só passa <code>cpu memory
-pids</code> para baixo. Nada aqui precisa deles.</p>
-<h2 id='lab-3'>Duas aplicações que se falam por nome <span class='badge'>intermédio</span></h2>
+pids</code> para baixo. Nada aqui precisa deles.</p></div><div class='lang-en'>
+<p>Goal: find out whether this host enforces limits — and what to do when it
+doesn't. It's mistake #1 for anyone starting out in rootless.</p>
+<pre><code># 1. Ask BEFORE assuming
+delonix system setup
 
+# 2. If it says INERT or PARTIAL, the 1st fix needs no root at all
+systemd-run --user --scope -p Delegate=yes -- delonix system setup
+#   … and you run the following steps INSIDE that scope.
+#   Only if it STILL says `cpu` is missing:
+#     sudo delonix system setup --delegate   (+ logout / login)
+
+# 3. A container with a memory ceiling
+delonix container run -d --name limited -m 128M alpine sleep 300
+
+# 4. The proof: read the REAL cgroup, not what the command says
+PID=$(delonix container inspect limited | jq -r .pid)
+cat /sys/fs/cgroup$(awk -F: '/^0::/{print $3}' /proc/$PID/cgroup)/memory.max
+
+delonix rm -f limited</code></pre>
+<p class="note"><strong>Verification:</strong> step 4 prints
+<code>134217728</code> (128 MiB), not <code>max</code>. If it prints
+<code>max</code>, delegation isn't set up — and the container runs with
+<em>no</em> limit at all, silently. That's why step 1 exists.</p>
+<p class="note"><strong>Note:</strong> <code>cpuset</code> and <code>io</code>
+almost always show up as <em>absent</em>, and that's correct — on a stock
+Ubuntu, root's <code>user.slice</code> only passes <code>cpu memory
+pids</code> down. Nothing here needs them.</p></div>
+<h2 id='lab-3'><span class='lang-pt'>Duas aplicações que se falam por nome</span><span class='lang-en'>Two apps that talk to each other by name</span> <span class='badge'><span class='lang-pt'>intermédio</span><span class='lang-en'>intermediate</span></span></h2>
+<div class='lang-pt'>
 <p>Objectivo: rede de utilizador, DNS interno, e isolamento — sem configurar
 DNS nenhum.</p>
 <pre><code># 1. Uma rede própria
@@ -234,9 +286,41 @@ delonix container run --rm --net loja alpine sh -c 'nc -z -w2 db 5432 || echo BL
 delonix rm -f db app; delonix network rm loja; rm dep.yaml</code></pre>
 <p class="note"><strong>Verificação:</strong> o passo 3 diz "porta aberta" e o
 passo 5 diz "BLOQUEADO". A mesma rede, dois resultados — é isso que
-<code>kind: Dependency</code> faz e uma rede sozinha não faz.</p>
-<h2 id='lab-4'>Do Dockerfile à imagem, sem daemon <span class='badge'>intermédio</span></h2>
+<code>kind: Dependency</code> faz e uma rede sozinha não faz.</p></div><div class='lang-en'>
+<p>Goal: user network, internal DNS, and isolation — with zero DNS
+configuration.</p>
+<pre><code># 1. Your own network
+delonix network create shop
 
+# 2. Database and app, both on it
+delonix container run -d --name db  --net shop -e POSTGRES_PASSWORD=x postgres:16-alpine
+delonix container run -d --name app --net shop -p 8080:80 nginx:alpine
+
+# 3. The app resolves db BY NAME, no /etc/hosts, no env vars
+delonix exec app sh -c 'getent hosts db; nc -z db 5432 && echo "port open"'
+
+# 4. Lock db down to everyone except app (DIRECTED reachability)
+cat &gt; dep.yaml &lt;&lt;'EOF'
+apiVersion: delonix.io/v1
+kind: Dependency
+metadata:
+  name: app-knows-db
+spec:
+  from: app
+  to: db
+  ports: ["5432"]
+EOF
+delonix stack apply -f dep.yaml
+
+# 5. Prove it: a third container on the SAME network can no longer reach db
+delonix container run --rm --net shop alpine sh -c 'nc -z -w2 db 5432 || echo BLOCKED'
+
+delonix rm -f db app; delonix network rm shop; rm dep.yaml</code></pre>
+<p class="note"><strong>Verification:</strong> step 3 says "port open" and
+step 5 says "BLOCKED". Same network, two different outcomes — that's what
+<code>kind: Dependency</code> does that a plain network alone doesn't.</p></div>
+<h2 id='lab-4'><span class='lang-pt'>Do Dockerfile à imagem, sem daemon</span><span class='lang-en'>From Dockerfile to image, no daemon</span> <span class='badge'><span class='lang-pt'>intermédio</span><span class='lang-en'>intermediate</span></span></h2>
+<div class='lang-pt'>
 <p>Objectivo: construir uma imagem e correr o que construíste.</p>
 <pre><code>mkdir -p lab-build &amp;&amp; cd lab-build
 cat &gt; Delonixfile &lt;&lt;'EOF'
@@ -259,9 +343,32 @@ delonix ps
 delonix rm -f a1; delonix image rm minha-app:1.0; cd ..; rm -rf lab-build</code></pre>
 <p class="note"><strong>Verificação:</strong> o <code>ps</code> mostra
 <code>(healthy)</code> na coluna STATUS. O motor está a sondar o container
-sozinho — sem systemd, ao contrário do Podman rootless.</p>
-<h2 id='lab-5'>Uma microVM a sério <span class='badge'>intermédio</span></h2>
+sozinho — sem systemd, ao contrário do Podman rootless.</p></div><div class='lang-en'>
+<p>Goal: build an image and run what you built.</p>
+<pre><code>mkdir -p lab-build &amp;&amp; cd lab-build
+cat &gt; Delonixfile &lt;&lt;'EOF'
+FROM alpine:latest
+RUN apk add --no-cache curl
+COPY hello.txt /hello.txt
+HEALTHCHECK CMD test -f /hello.txt
+CMD ["sh", "-c", "cat /hello.txt; sleep 300"]
+EOF
+echo "built with delonix" &gt; hello.txt
 
+# `Delonixfile` is looked for before `Dockerfile` — no -f needed
+delonix build -t my-app:1.0 .
+
+# `--wait` blocks until HEALTHCHECK passes: without it you'd have to
+# write `until ...; do sleep 1; done` yourself, and get it wrong
+delonix run -d --name a1 --wait --health-interval 2 my-app:1.0
+delonix ps
+
+delonix rm -f a1; delonix image rm my-app:1.0; cd ..; rm -rf lab-build</code></pre>
+<p class="note"><strong>Verification:</strong> <code>ps</code> shows
+<code>(healthy)</code> in the STATUS column. The engine is probing the
+container on its own — no systemd, unlike rootless Podman.</p></div>
+<h2 id='lab-5'><span class='lang-pt'>Uma microVM a sério</span><span class='lang-en'>A real microVM</span> <span class='badge'><span class='lang-pt'>intermédio</span><span class='lang-en'>intermediate</span></span></h2>
+<div class='lang-pt'>
 <p>Objectivo: uma VM completa com o mesmo CLI dos containers.</p>
 <pre><code># 1. Sem imagem local, o create descarrega a oficial sozinho
 delonix vm create dev
@@ -284,9 +391,31 @@ delonix vm rm dev</code></pre>
 <p class="note"><strong>Verificação:</strong> o passo 4 devolve sem erro com a
 VM A CORRER. Um snapshot de uma VM parada falha de propósito — o
 <code>vm stop</code> faz <em>undefine</em> do domínio para não deixar
-órfãos.</p>
-<h2 id='lab-6'>A tua própria imagem de VM, com VMfile <span class='badge'>avançado</span></h2>
+órfãos.</p></div><div class='lang-en'>
+<p>Goal: a full VM with the same CLI as containers.</p>
+<pre><code># 1. With no local image, create downloads the official one on its own
+delonix vm create dev
 
+# 2. Where it landed, and with what IP
+delonix vm ls
+delonix vm describe dev
+
+# 3. Go in (back to the host: Ctrl+])
+delonix vm console dev
+
+# 4. System checkpoint — memory AND disk, VM still running
+delonix vm snapshot dev clean
+delonix vm snapshots dev
+
+# 5. Break something inside and roll back
+delonix vm restore dev clean
+
+delonix vm rm dev</code></pre>
+<p class="note"><strong>Verification:</strong> step 4 returns with no error
+and the VM STILL RUNNING. A snapshot of a stopped VM fails on purpose —
+<code>vm stop</code> <em>undefines</em> the domain to avoid leaving orphans.</p></div>
+<h2 id='lab-6'><span class='lang-pt'>A tua própria imagem de VM, com VMfile</span><span class='lang-en'>Your own VM image, with a VMfile</span> <span class='badge'><span class='lang-pt'>avançado</span><span class='lang-en'>advanced</span></span></h2>
+<div class='lang-pt'>
 <p>Objectivo: construir uma imagem qcow2 à tua medida, como se constrói uma
 imagem de container.</p>
 <pre><code>mkdir -p lab-vm &amp;&amp; cd lab-vm
@@ -315,9 +444,39 @@ image. Com <code>--url-img</code>, se não houver <code>&lt;url&gt;.sha256</code
 publicado, o motor <em>diz</em> que está a confiar só no TLS — em vez de calar.
 A chave que injectas vai para a conta <code>delonix</code>, não para a conta
 default da distro — o bloco de próximos passos do <code>vm create</code>
-imprime o <code>ssh</code> exacto.</p>
-<h2 id='lab-7'>Kubernetes sem Docker <span class='badge'>avançado</span></h2>
+imprime o <code>ssh</code> exacto.</p></div><div class='lang-en'>
+<p>Goal: build your own qcow2 image, the same way you build a container
+image.</p>
+<pre><code>mkdir -p lab-vm &amp;&amp; cd lab-vm
 
+# Scaffold that BUILDS AS-IS — delete what you don't need
+delonix vm init --vmfile --name my-base
+cat VMfile
+
+# Needs libguestfs on the host: sudo apt install libguestfs-tools
+delonix vm build -t my-base:1.0 .
+delonix vm ls
+
+# A RUN with `apt-get install` needs guest networking, so ask for it:
+#   delonix vm build --network -t my-base:1.0 .
+
+# Boot from it
+delonix vm create test --disk-image my-base:1.0 --ssh-key @~/.ssh/id_ed25519.pub
+
+# …or from a qcow2 you published yourself, bypassing the store
+delonix vm create other --url-img https://your-bucket/image.qcow2
+
+delonix vm rm test; cd ..; rm -rf lab-vm</code></pre>
+<p class="note"><strong>Verification:</strong> the build prints
+<code>[1/1] stage-1: FROM ubuntu:24.04</code> and verifies the cloud image's
+checksum. With <code>--url-img</code>, if there's no published
+<code>&lt;url&gt;.sha256</code>, the engine <em>says</em> it's trusting TLS
+alone — instead of staying quiet. The key you inject goes to the
+<code>delonix</code> account, not the distro's default account — the
+"next steps" block from <code>vm create</code> prints the exact
+<code>ssh</code> command.</p></div>
+<h2 id='lab-7'><span class='lang-pt'>Kubernetes sem Docker</span><span class='lang-en'>Kubernetes with no Docker</span> <span class='badge'><span class='lang-pt'>avançado</span><span class='lang-en'>advanced</span></span></h2>
+<div class='lang-pt'>
 <p>Objectivo: um cluster local cujo runtime dos nós É o Delonix.</p>
 <pre><code># 1. Preflight — falha em milissegundos se faltar a delegação de `cpu`,
 #    em vez de descarregar 425 MB para morrer aos 90 segundos
@@ -342,7 +501,32 @@ delonix cluster delete --name lab</code></pre>
 <p class="note"><strong>Verificação:</strong> o passo 5 chega a
 <code>Running</code>. Nem o <code>ctr images import</code> nem o
 <code>crictl images</code> provam isto — os dois já reportaram sucesso sobre
-uma imagem que o kubelet depois não resolvia.</p>
+uma imagem que o kubelet depois não resolvia.</p></div><div class='lang-en'>
+<p>Goal: a local cluster whose node runtime IS Delonix.</p>
+<pre><code># 1. Preflight — fails in milliseconds if `cpu` delegation is missing,
+#    instead of downloading 425 MB just to die at the 90-second mark
+delonix system setup
+
+# 2. The cluster
+delonix cluster create --name lab
+
+# 3. Talk to it
+export KUBECONFIG=$(delonix cluster ls -o json | jq -r '.[0].kubeconfig')
+kubectl get nodes -o wide
+
+# 4. Get an image of YOURS into the nodes, with no registry at all
+delonix build -t app:dev .
+delonix cluster load app:dev --name lab
+kubectl run app --image=app:dev --image-pull-policy=Never
+
+# 5. The proof that matters
+kubectl get pod app -w
+
+delonix cluster delete --name lab</code></pre>
+<p class="note"><strong>Verification:</strong> step 5 reaches
+<code>Running</code>. Neither <code>ctr images import</code> nor
+<code>crictl images</code> prove this — both have reported success on an
+image the kubelet then couldn't resolve.</p></div>
 <footer><span class='lang-pt'>Delonix Engine · Apache-2.0 · <a href="https://github.com/angolardevops/delonix-runtime">angolardevops/delonix-runtime</a> · Referência gerada do <code>--help</code> real do binário por <code>docs/gen.py</code>.</span><span class='lang-en'>Delonix Engine · Apache-2.0 · <a href="https://github.com/angolardevops/delonix-runtime">angolardevops/delonix-runtime</a> · Reference generated from the real <code>--help</code> of the binary by <code>docs/gen.py</code>.</span></footer>
 </main>
 <aside class="toc" id="pagetoc"><div class="toc-inner"><h5><span class='lang-pt'>Nesta página</span><span class='lang-en'>On this page</span></h5><nav id="toc-nav"></nav></div></aside>
