@@ -4,16 +4,29 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>delonix net tunnel · Delonix Engine</title>
+<script>(function(){try{
+var t=localStorage.getItem('delonix-docs-theme');
+if(t)document.documentElement.setAttribute('data-theme',t);
+}catch(e){}})();</script>
 <style>
 :root{--accent:#e8590c;--accent-soft:#fff0e6;--ink:#1a1a2e;--muted:#5a6472;--line:#e6e8ec;
---bg:#ffffff;--side:#f7f8fa;--code-bg:#0f172a;--code-ink:#e2e8f0;--radius:10px}
-@media (prefers-color-scheme: dark){:root{--ink:#e6e8ee;--muted:#9aa4b2;--line:#252a33;
---bg:#0d1117;--side:#10151c;--accent-soft:#2a1810;--code-bg:#161b22;--code-ink:#dbe2ea}}
+--bg:#ffffff;--side:#f7f8fa;--code-bg:#0f172a;--code-ink:#e2e8f0;--radius:10px;
+--tok-key:#0550ae;--tok-string:#116329;--tok-comment:#6e7781;--tok-flag:#953800;
+--tok-cmd:#8250df;--tok-ph:#6e7781;--tok-head:#c2410c;--tok-sep:#6e7781}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--ink:#e6e8ee;--muted:#9aa4b2;--line:#252a33;
+--bg:#0d1117;--side:#10151c;--accent-soft:#2a1810;--code-bg:#161b22;--code-ink:#dbe2ea;
+--tok-key:#79c0ff;--tok-string:#7ee787;--tok-comment:#8b949e;--tok-flag:#ffa657;
+--tok-cmd:#d2a8ff;--tok-ph:#8b949e;--tok-head:#ff9a5a;--tok-sep:#8b949e}}
+:root[data-theme="dark"]{--ink:#e6e8ee;--muted:#9aa4b2;--line:#252a33;
+--bg:#0d1117;--side:#10151c;--accent-soft:#2a1810;--code-bg:#161b22;--code-ink:#dbe2ea;
+--tok-key:#79c0ff;--tok-string:#7ee787;--tok-comment:#8b949e;--tok-flag:#ffa657;
+--tok-cmd:#d2a8ff;--tok-ph:#8b949e;--tok-head:#ff9a5a;--tok-sep:#8b949e}
 *{box-sizing:border-box}body{margin:0;font:16px/1.65 -apple-system,'Segoe UI',Roboto,Ubuntu,
 sans-serif;color:var(--ink);background:var(--bg)}
 a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
-.layout{display:flex;min-height:100vh}
-nav.side{width:270px;flex-shrink:0;background:var(--side);border-right:1px solid var(--line);
+.layout{display:grid;grid-template-columns:270px minmax(0,1fr) 240px;max-width:1600px;
+margin:0 auto;min-height:100vh}
+nav.side{width:270px;background:var(--side);border-right:1px solid var(--line);
 padding:1.2rem 1rem 3rem;position:sticky;top:0;height:100vh;overflow-y:auto}
 nav.side .brand{display:flex;align-items:center;gap:.55rem;font-weight:700;font-size:1.12rem;
 margin-bottom:1.1rem;color:var(--ink)}
@@ -24,16 +37,33 @@ color:var(--muted)}
 nav.side a{display:block;padding:.28rem .55rem;border-radius:6px;color:var(--ink);font-size:.93rem}
 nav.side a:hover{background:var(--accent-soft);text-decoration:none}
 nav.side a.on{background:var(--accent-soft);color:var(--accent);font-weight:600}
-main{flex:1;min-width:0;padding:2.2rem 3rem 5rem;max-width:940px}
+.theme-toggle{appearance:none;border:1px solid var(--line);background:var(--bg);color:var(--ink);
+border-radius:8px;width:30px;height:30px;flex-shrink:0;display:inline-flex;align-items:center;
+justify-content:center;cursor:pointer;font-size:.95rem;margin-left:auto;line-height:1}
+.theme-toggle:hover{border-color:var(--accent)}
+.theme-toggle .i-sun{display:none}
+:root[data-theme="dark"] .theme-toggle .i-moon{display:none}
+:root[data-theme="dark"] .theme-toggle .i-sun{display:inline}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .theme-toggle .i-moon{display:none}
+:root:not([data-theme="light"]) .theme-toggle .i-sun{display:inline}}
+main{min-width:0;padding:2.2rem 3rem 5rem;max-width:860px;margin:0 auto}
 main h1{font-size:1.9rem;margin:.2rem 0 .4rem}
 main h2{font-size:1.35rem;margin-top:2.4rem;padding-bottom:.35rem;border-bottom:1px solid var(--line)}
 main h3{font-size:1.05rem;margin-top:1.6rem}
 .tagline{color:var(--muted);font-size:1.05rem;margin-top:0}
+p.intro{font-size:1.02rem;margin:1rem 0}
+p.src-link{margin:.7rem 0 0;font-size:.85rem;color:var(--muted)}
+p.src-link a{font-weight:600}
 code{background:var(--accent-soft);padding:.1em .35em;border-radius:5px;font-size:.9em}
 pre{background:var(--code-bg);color:var(--code-ink);padding:1rem 1.2rem;border-radius:var(--radius);
-overflow-x:auto;font-size:.86rem;line-height:1.55}
+overflow-x:auto;font-size:.86rem;line-height:1.55;white-space:pre-wrap;word-break:break-word}
 pre code{background:none;padding:0;color:inherit;font-size:inherit}
 .help pre{border-left:4px solid var(--accent)}
+.tok-key{color:var(--tok-key)}.tok-string{color:var(--tok-string)}
+.tok-comment{color:var(--tok-comment);font-style:italic}
+.tok-flag{color:var(--tok-flag)}.tok-cmd{color:var(--tok-cmd);font-weight:600}
+.tok-ph{color:var(--tok-ph);font-style:italic}.tok-head{color:var(--tok-head);font-weight:700}
+.tok-sep{color:var(--tok-sep)}
 .ex{margin:.9rem 0}.ex .cap{font-size:.88rem;color:var(--muted);margin-bottom:.25rem}
 .ex .out,div.out{margin-top:.4rem}
 .ex .out pre,div.out pre{background:transparent;border:1px dashed var(--line);color:var(--muted);
@@ -67,16 +97,24 @@ background:var(--accent-soft)}
 @media (prefers-color-scheme: dark){.callout.warn{background:#3a1414}.callout.warn b{color:#ff8787}}
 .callout p:first-child{margin-top:0}.callout p:last-child{margin-bottom:0}
 footer{margin-top:4rem;color:var(--muted);font-size:.85rem;border-top:1px solid var(--line);padding-top:1rem}
-@media (max-width:840px){.layout{flex-direction:column}nav.side{width:100%;height:auto;position:static}
-main{padding:1.4rem 1.2rem 4rem}}
+aside.toc{padding:2.2rem 1.2rem 3rem 0;position:sticky;top:0;height:100vh;overflow-y:auto;font-size:.82rem}
+aside.toc .toc-inner{border-left:1px solid var(--line);padding-left:1rem}
+aside.toc h5{margin:0 0 .5rem;font-size:.72rem;letter-spacing:.09em;text-transform:uppercase;color:var(--muted)}
+aside.toc a{display:block;padding:.2rem 0;color:var(--muted);line-height:1.4}
+aside.toc a:hover{color:var(--accent);text-decoration:none}
+@media (max-width:1200px){.layout{grid-template-columns:270px minmax(0,1fr)}aside.toc{display:none}}
+@media (max-width:840px){.layout{display:block}nav.side{width:100%;height:auto;position:static}
+main{padding:1.4rem 1.2rem 4rem;max-width:none}}
 </style>
 </head>
 <body>
 <div class="layout">
 <nav class="side">
-<div class="brand"><span class="dot">▲</span> Delonix Engine</div>
+<div class="brand"><span class="dot">▲</span> Delonix Engine
+<button class="theme-toggle" type="button" aria-label="Alternar tema claro/escuro" title="Tema claro/escuro">
+<span class="i-moon">🌙</span><span class="i-sun">☀️</span></button></div>
 <h5>Documentação</h5>
-<a href="../index.html">Início</a><a href="../cheatsheet.html">Cheatsheet</a><a href="../kinds.html">Kinds e templates</a><a href="../cloud.html">cloud-init, cloud-img e CH</a><a href="../labs.html">Laboratórios</a><a href="../arquitectura.html">Arquitectura</a><a href="../c4.html">Modelo C4 e system design</a><a href="../cri.html">CRI — kubelet sem containerd</a><a href="../comparacao.html">Delonix vs Docker vs Podman</a><a href="../tutorial-delonix-temp.html">Projecto completo: Delonix Temp</a><a href="../delonixctl.html">delonixctl — cliente PaaS</a>
+<a href="../index.html">Início</a><a href="../cheatsheet.html">Cheatsheet</a><a href="../kinds.html">Kinds e templates</a><a href="../cloud.html">cloud-init, cloud-img e CH</a><a href="../labs.html">Laboratórios</a><a href="../arquitectura.html">Arquitectura</a><a href="../c4.html">Modelo C4 e system design</a><a href="../cri.html">CRI — kubelet sem containerd</a><a href="../comparacao.html">Delonix vs Docker vs Podman</a><a href="../tutorial-delonix-temp.html">Projecto completo: Delonix Temp</a>
 <h5>Referência CLI</h5>
 <a href="../comandos/container.html">delonix container</a><a href="../comandos/workload.html">delonix workload</a><a href="../comandos/pod.html">delonix pod</a><a href="../comandos/image.html">delonix image</a><a href="../comandos/build.html">delonix build</a><a href="../comandos/vm.html">delonix vm</a><a href="../comandos/volumes.html">delonix volumes</a><a href="../comandos/network.html">delonix network</a><a href="../comandos/stack.html">delonix stack</a><a href="../comandos/compose.html">delonix compose</a><a href="../comandos/cluster.html">delonix cluster</a><a href="../comandos/secret.html">delonix secret</a><a href="../comandos/storage.html">delonix storage</a><a href="../comandos/sharevolume.html">delonix sharevolume</a><a href="../comandos/ingress.html">delonix net ingress</a><a href="../comandos/egress.html">delonix net egress</a><a href="../comandos/httproute.html">delonix net httproute</a><a href="../comandos/tunnel.html" class="on">delonix net tunnel</a><a href="../comandos/flow.html">delonix net flow</a><a href="../comandos/boot.html">delonix net boot</a><a href="../comandos/system.html">delonix system</a><a href="../comandos/dash.html">delonix dash</a><a href="../comandos/docker-api.html">delonix serve docker-api</a><a href="../comandos/kube.html">delonix cluster kube</a><a href="../comandos/netns.html">delonix net netns</a><a href="../comandos/completion.html">delonix completion</a>
 <h5>Projecto</h5>
@@ -95,9 +133,8 @@ projecto), <strong>ngrok</strong> (precisa do agente <code>ngrok</code> no PATH;
 da API local do próprio agente) e <strong>cloudflare</strong> (precisa de <code>cloudflared</code>;
 por agora só o quick-tunnel efémero <code>*.trycloudflare.com</code>, sem conta — um tunnel
 NOMEADO com domínio próprio precisa da API do Cloudflare, ainda por implementar).</p>
-<div class='help'><pre><code>Expose a local port to the public internet via pinggy/ngrok/cloudflare (`kind: Tunnel`) — pair with `httproute`&#x27;s listening port to route by Host header behind ONE public URL
-
-Usage: dlx net tunnel [OPTIONS] &lt;COMMAND&gt;
+<p class='src-link'>📄 Implementação real em Rust: <a href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/delonix-runtime-bin/src/cmd/tunnel.rs"><code>cmd/tunnel.rs</code></a></p>
+<div class='help'><pre><code>Usage: delonix net tunnel [OPTIONS] &lt;COMMAND&gt;
 
 Commands:
   apply     Apply the `kind: Tunnel` documents of a manifest (idempotent)
@@ -111,9 +148,8 @@ Options:
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
   -h, --help          Print help</code></pre></div>
 <h2 id='apply'><code>tunnel apply</code></h2>
-<div class='help'><pre><code>Apply the `kind: Tunnel` documents of a manifest (idempotent)
-
-Usage: dlx net tunnel apply [OPTIONS]
+<p class='intro'>Apply the <code>kind: Tunnel</code> documents of a manifest (idempotent)</p>
+<div class='help'><pre><code>Usage: delonix net tunnel apply [OPTIONS]
 
 Options:
   -f, --file &lt;FILE&gt;   
@@ -121,9 +157,8 @@ Options:
   -h, --help          Print help</code></pre></div>
 <h3>Exemplos</h3><div class="ex"><div class="cap">Declarar o túnel num manifesto kind: Tunnel</div><pre><code>delonix net tunnel apply -f tunel.yaml</code></pre></div>
 <h2 id='expose'><code>tunnel expose</code></h2>
-<div class='help'><pre><code>One-shot expose of a local port, no manifest needed
-
-Usage: dlx net tunnel expose [OPTIONS] --provider &lt;PROVIDER&gt; --local-port &lt;LOCAL_PORT&gt;
+<p class='intro'>One-shot expose of a local port, no manifest needed</p>
+<div class='help'><pre><code>Usage: delonix net tunnel expose [OPTIONS] --provider &lt;PROVIDER&gt; --local-port &lt;LOCAL_PORT&gt;
 
 Options:
       --l18n &lt;en|pt&gt;                 Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
@@ -138,9 +173,8 @@ Options:
 chegou a um servidor local através do tunnel (HTTP 200) usando exactamente este comando.</p>
 <h3>Exemplos</h3><div class="ex"><div class="cap">Expor uma porta local sem escrever manifesto (pinggy, grátis, efémero)</div><pre><code>delonix net tunnel expose --name demo --provider pinggy --local-port 8080</code></pre><div class="out"><pre><code>tunnel/demo: running — https://oxipg-197-148-40-67.free.pinggy.net</code></pre></div></div>
 <h2 id='ls'><code>tunnel ls</code></h2>
-<div class='help'><pre><code>List tunnels (state + public URL)
-
-Usage: dlx net tunnel ls [OPTIONS]
+<p class='intro'>List tunnels (state + public URL)</p>
+<div class='help'><pre><code>Usage: delonix net tunnel ls [OPTIONS]
 
 Options:
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
@@ -148,9 +182,8 @@ Options:
 <h3>Exemplos</h3><div class="ex"><div class="cap">Listar túneis (estado + URL pública)</div><pre><code>delonix net tunnel ls</code></pre><div class="out"><pre><code>NAME    PROVIDER   LOCAL PORT   PUBLIC URL                                    STATUS    UPTIME
 test1   pinggy          18234   https://oxipg-197-148-40-67.free.pinggy.net   Running   Up 34 seconds</code></pre></div></div>
 <h2 id='describe'><code>tunnel describe</code></h2>
-<div class='help'><pre><code>Human-readable detail of one tunnel
-
-Usage: dlx net tunnel describe [OPTIONS] &lt;NAME&gt;
+<p class='intro'>Human-readable detail of one tunnel</p>
+<div class='help'><pre><code>Usage: delonix net tunnel describe [OPTIONS] &lt;NAME&gt;
 
 Arguments:
   &lt;NAME&gt;  
@@ -160,9 +193,8 @@ Options:
   -h, --help          Print help</code></pre></div>
 <h3>Exemplos</h3><div class="ex"><div class="cap">Detalhe de um túnel</div><pre><code>delonix net tunnel describe demo</code></pre></div>
 <h2 id='rm'><code>tunnel rm</code></h2>
-<div class='help'><pre><code>Stop and remove a tunnel
-
-Usage: dlx net tunnel rm [OPTIONS] &lt;NAME&gt;
+<p class='intro'>Stop and remove a tunnel</p>
+<div class='help'><pre><code>Usage: delonix net tunnel rm [OPTIONS] &lt;NAME&gt;
 
 Arguments:
   &lt;NAME&gt;  
@@ -174,6 +206,109 @@ Options:
 <footer>Delonix Engine · Apache-2.0 · <a href="https://github.com/angolardevops/delonix-runtime">angolardevops/delonix-runtime</a>
 · Referência gerada do <code>--help</code> real do binário por <code>docs/gen.py</code>.</footer>
 </main>
+<aside class="toc" id="pagetoc"><div class="toc-inner"><h5>Nesta página</h5><nav id="toc-nav"></nav></div></aside>
 </div>
+<script>(function(){
+function esc(s){return s.replace(/[&<>]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;'}[c];});}
+
+function tokBash(line){
+  var out='',last=0,m;
+  var re=/(#.*$)|("(?:[^"\\]|\\.)*")|('(?:[^'\\]|\\.)*')|(--?[A-Za-z][\w-]*)|\b(delonix|delonixctl|dlx)\b/g;
+  while((m=re.exec(line))){
+    out+=esc(line.slice(last,m.index));
+    if(m[1])out+='<span class="tok-comment">'+esc(m[1])+'</span>';
+    else if(m[2]||m[3])out+='<span class="tok-string">'+esc(m[0])+'</span>';
+    else if(m[4])out+='<span class="tok-flag">'+esc(m[0])+'</span>';
+    else if(m[5])out+='<span class="tok-cmd">'+esc(m[0])+'</span>';
+    last=re.lastIndex;
+  }
+  return out+esc(line.slice(last));
+}
+function highlightBash(text){return text.split('\n').map(tokBash).join('\n');}
+
+function highlightFlagsPh(line){
+  var out='',last=0,m;
+  var re=/(--?[A-Za-z][\w-]*)|(<[^>]+>)|(\[[^\]]+\])/g;
+  while((m=re.exec(line))){
+    out+=esc(line.slice(last,m.index));
+    if(m[1])out+='<span class="tok-flag">'+esc(m[0])+'</span>';
+    else out+='<span class="tok-ph">'+esc(m[0])+'</span>';
+    last=re.lastIndex;
+  }
+  return out+esc(line.slice(last));
+}
+function highlightHelp(text){
+  return text.split('\n').map(function(line){
+    var mm=line.match(/^(Usage|Commands|Options|Arguments|Examples):(.*)$/);
+    if(mm)return '<span class="tok-head">'+mm[1]+':</span>'+highlightFlagsPh(mm[2]);
+    return highlightFlagsPh(line);
+  }).join('\n');
+}
+function highlightYaml(text){
+  return text.split('\n').map(function(line){
+    if(/^\s*#/.test(line))return '<span class="tok-comment">'+esc(line)+'</span>';
+    if(/^---\s*$/.test(line))return '<span class="tok-sep">'+esc(line)+'</span>';
+    var m=line.match(/^(\s*(?:- )?)([A-Za-z0-9_.-]+)(:)(.*)$/);
+    if(m){
+      var rest=m[4],restHtml=esc(rest);
+      var sm=rest.match(/^(\s*)("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|[^\s#][^#]*?)(\s*(#.*)?)$/);
+      if(sm&&sm[2])restHtml=esc(sm[1])+'<span class="tok-string">'+esc(sm[2])+'</span>'+esc(sm[3]||'');
+      return esc(m[1])+'<span class="tok-key">'+esc(m[2])+'</span>'+esc(m[3])+restHtml;
+    }
+    return esc(line);
+  }).join('\n');
+}
+
+function highlightAll(){
+  document.querySelectorAll('pre > code').forEach(function(code){
+    if(code.dataset.hl)return;
+    code.dataset.hl='1';
+    var pre=code.parentElement;
+    if(pre.closest('.out'))return;
+    var text=code.textContent,html;
+    var isHelp=pre.parentElement&&pre.parentElement.classList.contains('help');
+    if(isHelp)html=highlightHelp(text);
+    else if(/^apiVersion:|\nkind:\s/.test(text))html=highlightYaml(text);
+    else if(pre.closest('.ex')||/^(delonix|delonixctl|dlx)\b/.test(text.trim()))html=highlightBash(text);
+    else return;
+    code.innerHTML=html;
+  });
+}
+
+function buildToc(){
+  var main=document.querySelector('main'),nav=document.getElementById('toc-nav'),
+      aside=document.getElementById('pagetoc');
+  if(!main||!nav)return;
+  var heads=main.querySelectorAll('h2');
+  if(heads.length<2){if(aside)aside.style.display='none';return;}
+  var used={};
+  heads.forEach(function(h){
+    if(!h.id){
+      var slug=h.textContent.toLowerCase().trim().replace(/[^a-z0-9]+/g,'-').replace(/(^-|-$)/g,'')||'sec';
+      while(used[slug])slug+='-x';
+      used[slug]=1;h.id=slug;
+    }
+    var a=document.createElement('a');
+    a.href='#'+h.id;a.textContent=h.textContent.trim();
+    nav.appendChild(a);
+  });
+}
+
+function initThemeToggle(){
+  var KEY='delonix-docs-theme',btn=document.querySelector('.theme-toggle');
+  if(!btn)return;
+  btn.addEventListener('click',function(){
+    var sys=matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';
+    var eff=document.documentElement.getAttribute('data-theme')||sys;
+    var next=eff==='dark'?'light':'dark';
+    document.documentElement.setAttribute('data-theme',next);
+    try{localStorage.setItem(KEY,next);}catch(e){}
+  });
+}
+
+document.addEventListener('DOMContentLoaded',function(){
+  initThemeToggle();buildToc();highlightAll();
+});
+})();</script>
 </body>
 </html>
