@@ -2871,6 +2871,66 @@ KINDS_DOC = [
      "nada de novo do lado do consumidor."),
 ]
 
+# Tradução EN das intros do `KINDS_DOC` (mesma ordem/tamanho — o YAML em si
+# vem sempre de `examples/*.yaml`, ficheiros reais, e não se traduz).
+KINDS_DOC_EN = [
+    "A secret from the vault, encrypted at rest. Consumed by <code>run --secret</code>/"
+    "<code>--secret-files</code> and by Storage's <code>passwordSecret</code>. Values are NEVER kept in the "
+    "container's registry as plaintext — they're resolved at startup from the NAME.",
+    "The Kubernetes Pod shape (<code>spec.containers[]</code>) for <code>kind: Container</code> — "
+    "structured ports/env/resources/securityContext/volumeMounts. v1 accepts ONE container; for several, "
+    "use <code>kind: Pod</code> (see <code>examples/pod-multi.yaml</code>).",
+    "ONE declarative object for both kinds of compute: "
+    "<code>spec.type: container | vm | pod | microvm</code> plus the block with that same name. Lowers to the "
+    "matching Kind on load — it doesn't redefine a single field, so it can never drift from it.",
+    "DIRECTED reachability between containers (unlike a network, which is "
+    "bidirectional): <code>from</code> reaches <code>to</code>, and <code>to</code> stays unexposed to the "
+    "others. Compiles to a per-container L4 firewall, with no new dataplane.",
+    "Per-container L4 firewall, k8s NetworkPolicy-style, with the "
+    "direction in <code>spec.direction</code>. Applying replaces that direction's rules and leaves the other "
+    "intact.",
+    "L7 Ingress in the <code>networking.k8s.io/v1</code> shape (host/path → backend), "
+    "compiled to the built-in proxy. Inherited limitations: one certificate only (no SNI) and "
+    "<code>pathType: Exact</code> treated as a prefix.",
+    "Groups several resources into one document. Expanded on load into the "
+    "individual Kinds, in dependency order — the Stack doesn't survive the load, everything else sees the "
+    "children.",
+    "Idempotent kubeadm bootstrap on hosts that are ALREADY alive, over SSH. No state "
+    "file: every step has a <code>check</code>, so it can never drift. See also "
+    "<code>cluster-vm.yaml</code> (provisions the VMs) and <code>cluster-kind.yaml</code> (kind mode).",
+    "A user network. Containers join it with <code>--net &lt;name&gt;</code>; "
+    "VMs with <code>network:</code>. <code>bridge</code> is the only driver containers can attach to today.",
+    "A named local volume — the data survives <code>container rm</code>. For "
+    "NETWORK storage (NFS/SMB/WebDAV) use <code>kind: Storage</code> instead.",
+    "A NETWORK volume mounted from a NAS (TrueNAS/Synology/Samba/Nextcloud), "
+    "k8s PersistentVolume-style. The password comes from the vault (<code>--password-secret</code>). Mounting "
+    "needs CAP_SYS_ADMIN.",
+    "Pre-pulls (or builds) an image before the containers that depend on it. With "
+    "<code>--vm</code> the same Kind covers golden VM images.",
+    "A declarative microVM (Cloud Hypervisor or libvirt), with per-instance cloud-init. "
+    "It's the layer <code>delonix cluster kubeadm</code> uses to provision nodes.",
+    "The everyday workload. Only <code>image</code> is required; every other field "
+    "has a default. Covers networking, storage, resources (cgroup v2), secrets, security, devices and limits.",
+    "A REAL multi-container pod: N containers sharing the pod's namespaces (the same "
+    "<code>spec.containers[]</code> schema as <code>kind: Container</code>, but with N containers allowed). "
+    "They share <strong>netns</strong> (same IP, reachable via <code>localhost</code>), <strong>IPC</strong> "
+    "and <strong>UTS</strong> (hostname). The PID namespace (<code>shareProcessNamespace</code>) is a "
+    "follow-up. Managed with <code>delonix pod create/ls/describe/rm/logs</code>.",
+    "Declarative per-direction L4 firewall (k8s NetworkPolicy-style). Each "
+    "document is the desired state of one direction for one target container — allowlist + default-deny, "
+    "idempotent.",
+    "Built-in L7/HTTP reverse proxy — routing by <code>Host</code> + "
+    "<code>path</code> prefix to backend containers. TLS terminates at the proxy (self-signed or "
+    "<code>secretRef</code>); hot reload via SIGHUP.",
+    "Exposes ONE local port to the public internet via pinggy/ngrok/cloudflare — no "
+    "account, no public IP. Pairs with <code>HTTPRoute</code> by pointing <code>localPort</code> at where the "
+    "L7 proxy listens: one public URL, Host-based routing on the other end to several backends.",
+    "An ISOLATED, individually-quota'd slice of a <code>Storage</code> — several "
+    "container/vm/pod share ONE NFS/CIFS/WebDAV export without seeing each other. Each slice is a real "
+    "subdirectory of the parent mount, registered as its own volume; consumed with "
+    "<code>-v &lt;name&gt;:/dest</code>, nothing new on the consumer side.",
+]
+
 
 # ---------------------------------------------------------------------------
 # Laboratórios — o que falta entre "li a referência" e "sei usar isto"
@@ -3266,18 +3326,27 @@ delonix vm create pesada --backend libvirt          # default quando CH não est
 
 
 def kinds_page():
-    body = ["<h1>Kinds do manifesto</h1><p class='tagline'>Cada Kind com um template COMPLETO e funcional — "
-            "todos os campos, com os defaults e um comentário. Aplica um só com "
-            "<code>delonix &lt;grupo&gt; apply -f</code>, ou todos de uma vez com <code>delonix stack apply</code> "
-            "(ordem por dependência: Secret → Network → Volume → Storage → ShareVolume → Image → Vm → Container → "
-            "Pod → Ingress/Egress → Dependency → HTTPRoute → Tunnel).</p>"]
-    body.append("<p>Semântica <em>garante-presente</em> (idempotente por nome), não um reconciliador: sem diffing, "
-                "rollout nem rollback — fail-fast, o que já foi aplicado fica. Os templates abaixo são os ficheiros "
-                "reais em <a href='https://github.com/angolardevops/delonix-runtime/tree/main/examples'><code>examples/</code></a>.</p>")
-    for kind, fname, intro in KINDS_DOC:
+    body = [f"<h1>Kinds do manifesto</h1>{bi('p', 'Cada Kind com um template COMPLETO e funcional — '
+            'todos os campos, com os defaults e um comentário. Aplica um só com '
+            '<code>delonix &lt;grupo&gt; apply -f</code>, ou todos de uma vez com <code>delonix stack apply</code> '
+            '(ordem por dependência: Secret → Network → Volume → Storage → ShareVolume → Image → Vm → Container → '
+            'Pod → Ingress/Egress → Dependency → HTTPRoute → Tunnel).',
+            'Each Kind with a COMPLETE, functional template — '
+            'every field, with defaults and a comment. Apply just one with '
+            '<code>delonix &lt;group&gt; apply -f</code>, or all at once with <code>delonix stack apply</code> '
+            '(dependency order: Secret → Network → Volume → Storage → ShareVolume → Image → Vm → Container → '
+            'Pod → Ingress/Egress → Dependency → HTTPRoute → Tunnel).', cls='tagline')}"]
+    body.append(bi('p',
+        "Semântica <em>garante-presente</em> (idempotente por nome), não um reconciliador: sem diffing, "
+        "rollout nem rollback — fail-fast, o que já foi aplicado fica. Os templates abaixo são os ficheiros "
+        "reais em <a href='https://github.com/angolardevops/delonix-runtime/tree/main/examples'><code>examples/</code></a>.",
+        "<em>Ensure-present</em> semantics (idempotent by name), not a reconciler: no diffing, "
+        "rollout or rollback — fail-fast, whatever was already applied stays applied. The templates below are the "
+        "real files in <a href='https://github.com/angolardevops/delonix-runtime/tree/main/examples'><code>examples/</code></a>."))
+    for (kind, fname, intro), intro_en in zip(KINDS_DOC, KINDS_DOC_EN):
         anchor = kind.split()[0].lower()
         body.append(f"<h2 id='{anchor}'>{html.escape(kind)}</h2>")
-        body.append(f"<p>{intro}</p>")
+        body.append(bi('p', intro, intro_en))
         path = os.path.join(ROOT, "..", "examples", fname)
         try:
             yaml = open(path).read().strip()
