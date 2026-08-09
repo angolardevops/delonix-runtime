@@ -2234,16 +2234,27 @@ def page(path, title, body, depth=0):
         f.write(doc)
 
 
-def examples_html(exs):
+def examples_html(exs, captions_en=None):
     """Each example is (caption, command) or (caption, command, output) — the
     3rd, optional element is REAL output captured from an actual run (never
     invented), rendered in a dimmer block right under the command so a reader
-    sees not just how to invoke something but what it actually returns."""
+    sees not just how to invoke something but what it actually returns.
+
+    `captions_en`, when given, is an EN caption per example (same order) —
+    the caption renders bilingually via `bi()`; without it, the caption
+    stays PT-only (unaffected, the default for the ~200 examples not yet
+    translated)."""
     parts = []
-    for ex in exs:
+    for i, ex in enumerate(exs):
         cap, cmd = ex[0], ex[1]
         out = ex[2] if len(ex) > 2 else None
-        cap_html = f'<div class="cap">{html.escape(cap)}</div>' if cap else ""
+        cap_en = captions_en[i] if captions_en else None
+        if cap and cap_en:
+            cap_html = bi("div", html.escape(cap), html.escape(cap_en), cls="cap")
+        elif cap:
+            cap_html = f'<div class="cap">{html.escape(cap)}</div>'
+        else:
+            cap_html = ""
         out_html = f'<div class="out"><pre><code>{html.escape(out)}</code></pre></div>' if out else ""
         parts.append(
             f'<div class="ex">{cap_html}<pre><code>{html.escape(cmd)}</code></pre>{out_html}</div>'
@@ -2814,6 +2825,26 @@ CHEAT_TASKS = [
     ("Recuperar espaço (GC)", "delonix system prune"),
 ]
 
+# Tradução EN das legendas de `CHEAT_TASKS` (mesma ordem/tamanho).
+CHEAT_TASKS_EN = [
+    "Web service, no root, no daemon",
+    "Disposable shell",
+    "Own network + publish via ingress",
+    "Hot-swap a port (no restart)",
+    "Firewall: only let Postgres in from the SDN",
+    "Firewall: network egress to DNS + CIDRs only",
+    "Live per-container traffic (eBPF)",
+    "Network volume from a NAS (NFS)",
+    "Secret in the vault (not in argv)",
+    "Expose a container to the public internet (no account, no router)",
+    "NAS shared by several tenants, each with its own quota",
+    "microVM with cloud-init",
+    "Kubernetes cluster from scratch",
+    "Apply a whole manifest",
+    "Persist containers on boot",
+    "Reclaim space (GC)",
+]
+
 
 # Kinds do manifesto — cada um com um template COMPLETO e funcional (lido dos
 # `examples/*.yaml`, que são a referência canónica com todos os campos + defaults).
@@ -3357,11 +3388,16 @@ def kinds_page():
 
 
 def cheatsheet_page():
-    body = ["<h1>Cheatsheet</h1><p class='tagline'>Todos os grupos de comandos e subcomandos, "
-            "num só sítio. Gerado do <code>--help</code> real do binário.</p>"]
-    body.append("<h2>Tarefas comuns</h2>")
-    body.append(examples_html(CHEAT_TASKS))
-    body.append("<h2>Todos os grupos</h2>")
+    cheatsheet_tagline = bi(
+        "p",
+        "Todos os grupos de comandos e subcomandos, num só sítio. Gerado do <code>--help</code> real do binário.",
+        "All command groups and subcommands, in one place. Generated from the real <code>--help</code> of the binary.",
+        cls="tagline",
+    )
+    body = [f"<h1>Cheatsheet</h1>{cheatsheet_tagline}"]
+    body.append(f"<h2>{bi('span', 'Tarefas comuns', 'Common tasks')}</h2>")
+    body.append(examples_html(CHEAT_TASKS, CHEAT_TASKS_EN))
+    body.append(f"<h2>{bi('span', 'Todos os grupos', 'All groups')}</h2>")
     order = list(GROUPS.keys()) + ["cri"]
     for g in order:
         title = GROUPS[g]["title"] if g in GROUPS else "delonix serve cri"
@@ -3369,18 +3405,31 @@ def cheatsheet_page():
         subs = subcommands_of(g)
         head = f"<h3 id='{g}'><a href='{href}'><code>{html.escape(title)}</code></a></h3>"
         if not subs:
+            tl_en = GROUPS_EN.get(g, {}).get("tagline") if g in GROUPS else "Serves the CRI endpoint (runtime.v1) on a unix socket."
             tl = GROUPS[g]["tagline"] if g in GROUPS else "Serve o endpoint CRI (runtime.v1) num socket unix."
-            body.append(head + f"<p>{html.escape(tl)}</p>")
+            if tl_en:
+                body.append(head + bi("p", html.escape(tl), html.escape(tl_en)))
+            else:
+                body.append(head + f"<p>{html.escape(tl)}</p>")
             continue
         prefix = " ".join(group_argv(g)) if g in GROUPS else "serve cri"
         rows = "".join(
             f"<tr><td><code>{html.escape(prefix)} {html.escape(s)}</code></td><td>{html.escape(d)}</td></tr>"
             for s, d in subs
         )
-        body.append(head + f"<table><tr><th>Comando</th><th>O que faz</th></tr>{rows}</table>")
-    body.append("<h2>Global</h2><p><code>--l18n en|pt</code> — idioma da saída (EN por omissão; "
-                "<code>pt</code> para pt_AO). <code>$DELONIX_ROOT</code> — raiz do estado. "
-                "<code>delonix completion &lt;shell&gt;</code> — autocompletion.</p>")
+        # `d` (a descrição curta) vem do `--help` REAL do binário, que já é EN
+        # por omissão — não precisa de tradução própria, ao contrário da prosa
+        # autoral desta página.
+        table_head = bi("span", "Comando", "Command") + "</th><th>" + bi("span", "O que faz", "What it does")
+        body.append(head + f"<table><tr><th>{table_head}</th></tr>{rows}</table>")
+    body.append(f"<h2>{bi('span', 'Global', 'Global')}</h2>")
+    body.append(bi("p",
+        "<code>--l18n en|pt</code> — idioma da saída (EN por omissão; "
+        "<code>pt</code> para pt_AO). <code>$DELONIX_ROOT</code> — raiz do estado. "
+        "<code>delonix completion &lt;shell&gt;</code> — autocompletion.",
+        "<code>--l18n en|pt</code> — output language (EN by default; "
+        "<code>pt</code> for pt_AO). <code>$DELONIX_ROOT</code> — the state root. "
+        "<code>delonix completion &lt;shell&gt;</code> — autocompletion."))
     page("cheatsheet.html", "Cheatsheet", "\n".join(body))
 
 
