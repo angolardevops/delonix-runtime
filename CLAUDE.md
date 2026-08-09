@@ -2739,6 +2739,14 @@ checklist para quem mexer aqui do que como lista de correcções:
   trabalhos num processo só);
 - **`holder_pid.is_some()`** não é «o holder é alcançável» (v0.34.2);
 - **`container.userns`** não é «está num userns diferente do meu»;
+- um **directório ilegível** não é um directório vazio — `ls`/`du` sobre um `_data` `chmod 700`
+  de um subuid mapeado devolvem zero, e em rootless isso é o caso NORMAL (2026-08-09: relatei
+  cinco volumes Postgres como perdidos com base nisto; lidos de DENTRO do userns estavam todos
+  lá, um deles com 128 GiB). O motor já tem a resposta certa — `volumes inspect`/`__duusage`
+  medem de dentro e distinguem *desconhecido* de *zero*; a leitura de fora é que mente;
+- o **`ENOENT` de um `Command::status()`** não é um ficheiro em falta — é a FERRAMENTA não
+  existir, e a frase «No such file or directory» manda o leitor procurar um caminho
+  (`vmimage::tool_package`, v0.45.0);
 - **`/sys/fs/cgroup/cgroup.subtree_control` conter `memory`** não é «a MINHA sessão tem
   delegação» — é do cgroup RAIZ do host, e contém-no sempre (v0.42.2, ver abaixo).
 
@@ -2795,3 +2803,68 @@ Este código **não pode depender de nada privado**. Antes de qualquer commit:
 
 Extraído de `delonix-paas` via `git filter-repo` (histórico real preservado, não squash) —
 ver a skill `delonix-paas` no control dir para o produto de origem.
+
+
+## VMfile, `vm build` e o `--network` (v0.44.0/v0.45.0)
+
+`delonix vm init --vmfile` gera o esqueleto, `vm build` constrói o qcow2, `vm create --url-img`
+arranca de um qcow2 publicado. `FROM` é uma **cloud image** (ubuntu/debian/rocky ou um URL
+absoluto), não uma imagem OCI — é o cloud-init que faz o primeiro boot aplicar hostname, chaves
+e contas. Multi-stage com `COPY --from=` (cada estágio é um DISCO inteiro, não uma layer).
+
+- **`--no-network` é a omissão e `--network` é opt-in**, nos três caminhos (`vm build`,
+  `image vm build`, `image --vm build`); na receita dourada é recusado, porque lá quem decide é
+  o `--offline`. A v0.44.0 saiu com um esqueleto que dizia «*Builds as written*» e cujo primeiro
+  `RUN` era `apt-get install` — impossível offline. Offline continua certo por omissão (um build
+  que vai à internet dá uma imagem diferente conforme o dia), mas a coisa mais comum que se quer
+  fazer numa imagem é instalar um pacote, e um motor que a torna impossível não oferece uma
+  escolha: recusa.
+- **A chave injectada vai para a conta `delonix`**, não para a default da distro. Numa cloud
+  image de Ubuntu o palpite é `ubuntu`, essa conta EXISTE e não tem a chave — responde
+  `Permission denied (publickey)`, que se lê como chave partida e não como nome errado. Por isso
+  o bloco de próximos passos do `vm create` imprime o `ssh` exacto (só no caminho em que o seed é
+  gerado por nós; com `--seed` próprio estaríamos a adivinhar).
+- **Validado ao vivo**: `vm create --url-img` de ponta a ponta (download, overlay, seed NoCloud,
+  boot em libvirt, cloud-init aplicado, SSH lá dentro). O `vm build` está provado até à fronteira
+  do `virt-customize` (download + `SHA256SUMS` + achatamento + `SIZE` antes de qualquer `RUN`);
+  o `virt-customize` em si **continua por exercitar** — a máquina de desenvolvimento não tem
+  `libguestfs-tools` e o `install.sh` não o instala.
+
+## Delegação de cgroup: `cpu` fatal, `cpuset`/`io` opcionais (v0.44.0)
+
+Correcção a uma recomendação errada que esteve publicada: **`sudo delonix system setup
+--delegate` não era a correcção** para este host. Medido no Ubuntu 24.04 de fábrica:
+
+- o `user@.service` já traz `Delegate=pids memory cpu`, e o `subtree_control` do
+  `user@<uid>.service` já é do utilizador — a delegação não estava em falta, estava feita;
+- o que faltava o `cpu` era o **slice de ONDE o comando corre** (`app.slice`, o scope do editor),
+  e nenhum drop-in no `/etc` lhe toca;
+- **`cpuset`/`io` nunca podem aparecer**: o `user.slice`, que é da root, só passa
+  `cpu memory pids` para baixo. Pedi-los é pedir o que o antepassado não tem para dar.
+
+Daí: `missing` (só `cpu` — um nó Kubernetes não arranca sem ele) e `absent` (`cpuset`/`io`, o
+estado normal) são factos DIFERENTES; o remédio 1 é `systemd-run --user --scope -p Delegate=yes`
+(sem root, sem reiniciar sessão) e o drop-in no `/etc` é o 2, só para quando o 1 ainda acusar o
+`cpu`. O `install.sh` **salta** o drop-in num host que já delega `cpu`. Teste que fixa a
+distinção: `so_o_cpu_e_fatal_para_um_no_kubernetes`.
+
+**Armadilha do próprio cgroup desta shell**: numa sessão pode MUDAR entre invocações (o scope do
+editor ganhou `cpu` a meio de uma sessão de 2026-08-09), e o mesmo comando recusou e depois
+avançou. `system setup` e o preflight do `cluster create` lêem a mesma coisa; o que varia é o
+host.
+
+## O cgroup de um container desaparece com ele (medido 2026-08-09)
+
+Relevante para quem for fazer o `OOMKilled` do CRI, que é uma das lacunas reais: **não há
+detecção post-mortem possível**. Medido com um `tail /dev/zero` sob `-m 48M`:
+
+- em vida, o cgroup está em `…/user@<uid>.service/dlx-containers/dlx-<id>` (a base de escape,
+  logo SOBREVIVE ao scope efémero de onde o comando foi lançado);
+- o container morre em ~1s e, sem nenhum comando nosso a correr entre a morte e a leitura, o
+  directório **já não existe** — `memory.events`/`oom_kill` não são legíveis a seguir;
+- o registo fica `status: Crashed` com `crash_reason: null`, e o CRI reporta
+  `reason: "Error"` (o `container_status` só sabe `Completed`/`Error`).
+
+Portanto o `oom_kill` tem de ser capturado **ao vivo** por quem já vive tanto quanto o container
+— o candidato natural é o shim de logs, que é o único processo por-container que existe neste
+modelo — e persistido no registo. Não tentar lê-lo depois: a informação já não está lá.

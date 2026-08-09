@@ -142,7 +142,7 @@ main{padding:1.4rem 1.2rem 4rem;max-width:none}}
 <a href="https://github.com/angolardevops/delonix-runtime/releases">Releases</a>
 </nav>
 <main>
-
+<div class='lang-pt'>
 <h1>cloud-init, cloud image e Cloud Hypervisor</h1>
 <p class="tagline">Três nomes que aparecem juntos e fazem coisas diferentes.
 Confundi-los é a causa mais comum de uma VM que arranca e não faz nada — ou que
@@ -310,7 +310,175 @@ delonix vm create pesada --backend libvirt          # default quando CH não est
     útil se usares os escape-hatches <code>libvirtXml</code>/<code>libvirtXmlOverlay</code>
     do <code>kind: Vm</code>.</li>
 </ul>
+</div><div class='lang-en'>
+<h1>cloud-init, cloud image and Cloud Hypervisor</h1>
+<p class="tagline">Three names that show up together and do different things.
+Mixing them up is the most common reason a VM boots and does nothing — or doesn't
+boot at all.</p>
 
+<h2>The three, in one sentence each</h2>
+<table>
+<tr><th>Piece</th><th>What it is</th><th>Where it shows up</th></tr>
+<tr><td><strong>cloud image</strong> (cloud-img)</td>
+    <td>A <code>.qcow2</code> disk published by a distro, already installed and
+    ready to boot. No user, no password, no SSH key.</td>
+    <td>The <code>FROM</code> of a <code>VMfile</code>, and the base disk for
+    <code>vm create</code>.</td></tr>
+<tr><td><strong>cloud-init</strong></td>
+    <td>The program that runs INSIDE that image on first boot and
+    customizes it: hostname, users, keys, networking, commands.</td>
+    <td>It's what makes the cloud image usable. Without it you're left with a
+    generic disk you can't log into.</td></tr>
+<tr><td><strong>Cloud Hypervisor</strong></td>
+    <td>A VMM — the HOST-side program that runs the VM. An alternative to
+    QEMU/libvirt, built for microVMs.</td>
+    <td><code>--backend cloud-hypervisor</code>, and required for
+    <code>type: microvm</code>.</td></tr>
+</table>
+<p>A container analogy helps more than any definition:
+the <strong>cloud image</strong> is the image, <strong>cloud-init</strong> is the
+<code>ENTRYPOINT</code> of the first run, and
+<strong>Cloud Hypervisor</strong> is the runtime — the equivalent of
+<code>runc</code>.</p>
+
+<h2>1 · Cloud image — the disk</h2>
+<p>Every distro publishes a small (a few hundred MB), pre-installed qcow2 with
+cloud-init already inside. The engine knows how to download three families and
+<strong>always verifies the checksum</strong> — it never accepts a download without
+checking it against one.</p>
+<pre><code># In a VMfile
+FROM ubuntu:24.04        # cloud-images.ubuntu.com
+FROM debian:bookworm     # cloud.debian.org
+FROM rocky:9             # dl.rockylinux.org
+
+# Or directly, with no VMfile at all
+delonix vm create dev --url-img https://.../image.qcow2</code></pre>
+<p class="note"><strong>The three publish checksums differently</strong>,
+and that's handled: Ubuntu uses <code>SHA256SUMS</code> in GNU format, Debian
+publishes <strong>only</strong> <code>SHA512SUMS</code> (no SHA256 at all), and
+Rocky uses a per-file <code>.CHECKSUM</code> in BSD format
+(<code>SHA256 (file) = hash</code>). With <code>--url-img</code>, the engine
+looks for a <code>&lt;url&gt;.sha256</code> next to it; if it doesn't exist, it
+<strong>says so</strong> — trusting TLS alone — instead of staying quiet.</p>
+<p><strong>The disk comes small on purpose</strong> — typically 2 GB. Grow it
+before installing anything, with <code>SIZE 20G</code> in the VMfile: growing it
+after a <code>RUN</code> has already filled the disk is too late.</p>
+
+<h2>2 · cloud-init — first-boot customization</h2>
+<p>A freshly downloaded cloud image has no account at all. cloud-init
+looks for a <em>datasource</em> at boot, reads <code>user-data</code> from it, and
+applies it. Delonix uses the <strong>NoCloud</strong> datasource: it generates a
+per-instance ISO and attaches it to the VM.</p>
+<pre><code># The engine generates the seed on its own when you give it any of these
+delonix vm create dev --hostname dev-01 --ssh-key ~/.ssh/id_ed25519.pub
+delonix vm create dev --user-data ./user-data.yaml
+delonix vm create dev --seed ./my-seed.iso   # ISO you already built yourself</code></pre>
+<p>A minimal, complete <code>user-data</code>:</p>
+<pre><code>#cloud-config
+hostname: dev-01
+users:
+  - name: delonix
+    groups: [sudo]
+    shell: /bin/bash
+    sudo: ['ALL=(ALL) NOPASSWD:ALL']
+    ssh_authorized_keys:
+      - ssh-ed25519 AAAA... your-email@example
+
+package_update: true
+packages: [nginx]
+
+runcmd:
+  - [systemctl, enable, --now, nginx]
+
+final_message: "ready in $UPTIME seconds"</code></pre>
+<p class="note"><strong>Two layers, and the distinction matters.</strong> A
+VMfile's <code>CLOUDINIT</code> is baked INTO THE IMAGE (it lands in
+<code>/etc/cloud/cloud.cfg.d</code>) — it's the default behavior of
+<em>every</em> VM made from it. <code>vm create</code>'s <code>--user-data</code>
+is PER INSTANCE and sits on top. One is the image's recipe, the other is that
+particular VM's configuration.</p>
+<p class="note"><strong>Real trap, already paid for:</strong> a <code>kind: Vm</code>
+with no seed at all made cloud-init skip the networking phase, leaving the VM
+with no IP and no route (<em>Network is unreachable</em> inside). That's why the
+engine <strong>always</strong> generates a minimal seed, even when you ask for
+nothing — it isn't optional.</p>
+<p>And cloud-init only runs once: it keeps a marker in
+<code>/var/lib/cloud</code>. A <code>vm restart</code> doesn't re-run it —
+to reapply it, either clear that state inside the VM or create another one.</p>
+
+<h2>3 · Cloud Hypervisor — the VMM</h2>
+<p>The thing that runs the VM. Delonix has two backends behind the same trait, and
+the choice isn't cosmetic:</p>
+<table>
+<tr><th></th><th>Cloud Hypervisor</th><th>libvirt/QEMU</th></tr>
+<tr><td>Boot</td><td>Very fast (tens of ms) — built for microVMs</td>
+    <td>Seconds; a full emulated machine</td></tr>
+<tr><td>Devices</td><td>virtio only, minimal</td><td>Everything (TPM, video, USB, …)</td></tr>
+<tr><td>Networking</td><td><code>tap</code> on the holder's SDN — <strong>reaches
+    containers by direct IP</strong></td>
+    <td><code>virbr0</code>, in the HOST's netns — a different L2</td></tr>
+<tr><td>Per-namespace isolation</td><td>Yes</td>
+    <td><strong>No</strong> — <code>--namespace</code> is refused with an error,
+    never accepted-and-ignored</td></tr>
+<tr><td>Snapshots</td><td>Not implemented (fail-closed, with an error pointing at libvirt)</td>
+    <td><code>vm snapshot</code>/<code>restore</code>: memory + disk</td></tr>
+<tr><td>Booting a cloud image</td><td>Needs firmware
+    (<code>hypervisor-fw</code>/EDK2) or a direct kernel+initrd</td>
+    <td>Boots the cloud image as-is</td></tr>
+</table>
+<pre><code>delonix vm create micro --backend cloud-hypervisor --firmware /usr/share/hypervisor-fw
+delonix vm create heavy --backend libvirt          # default when CH isn't installed</code></pre>
+
+<h2>Which to use, and when</h2>
+<table>
+<tr><th>If you want…</th><th>Use</th></tr>
+<tr><td>A workhorse VM, with snapshots and a console</td>
+    <td><code>--backend libvirt</code> (it's what the Kubernetes golden image needs — it won't boot in CH)</td></tr>
+<tr><td>Millisecond boot, per-namespace isolation, or to reach containers by IP</td>
+    <td><code>--backend cloud-hypervisor</code> + firmware</td></tr>
+<tr><td>To customize ONE VM</td><td>Per-instance cloud-init: <code>--hostname</code>/<code>--ssh-key</code>/<code>--user-data</code></td></tr>
+<tr><td>To customize EVERY VM from one template</td><td>A <code>VMfile</code> with <code>CLOUDINIT</code>, and <code>vm build</code></td></tr>
+<tr><td>Your own publishable disk</td><td><code>vm init --vmfile</code> → <code>vm build</code> → <code>vm push</code></td></tr>
+</table>
+
+<h2>Where this breaks, and what to check</h2>
+<table>
+<tr><th>Symptom</th><th>Almost always</th></tr>
+<tr><td>The VM boots and you can't SSH in</td>
+    <td>No cloud-init seed — there's no user at all. Pass
+    <code>--ssh-key</code>.</td></tr>
+<tr><td><code>IP &lt;none&gt;</code> forever</td>
+    <td>libvirt fell back to <em>user</em> mode (SLIRP), whose IP is invisible. Join
+    the <code>libvirt</code> group — the engine warns about it at <code>create</code>.</td></tr>
+<tr><td>The VM won't boot under Cloud Hypervisor</td>
+    <td>Missing firmware. CH doesn't do BIOS boot: it needs
+    <code>--firmware</code> or <code>--kernel</code>+<code>--initrd</code>.</td></tr>
+<tr><td>The disk fills up mid-<code>vm build</code></td>
+    <td>Missing <code>SIZE</code>, or set after a <code>RUN</code>. It's a
+    stage property, and runs before everything else.</td></tr>
+<tr><td>You changed <code>user-data</code> and nothing changes</td>
+    <td>cloud-init already ran on that VM. Create another one, or clear
+    <code>/var/lib/cloud</code> inside it.</td></tr>
+</table>
+
+<h2>References</h2>
+<ul>
+<li><a href="https://cloudinit.readthedocs.io/">cloud-init documentation</a> —
+    especially the
+    <a href="https://cloudinit.readthedocs.io/en/latest/reference/examples.html">user-data examples</a>
+    and the <a href="https://cloudinit.readthedocs.io/en/latest/reference/datasources/nocloud.html">NoCloud datasource</a>,
+    which is what Delonix uses.</li>
+<li><a href="https://cloud-images.ubuntu.com/">Ubuntu cloud images</a> ·
+    <a href="https://cloud.debian.org/images/cloud/">Debian's</a> ·
+    <a href="https://dl.rockylinux.org/pub/rocky/">Rocky's</a></li>
+<li><a href="https://www.cloudhypervisor.org/">Cloud Hypervisor</a> and
+    <a href="https://github.com/cloud-hypervisor/rust-hypervisor-firmware">rust-hypervisor-firmware</a>
+    (the <code>--firmware</code> a cloud image needs to boot under CH).</li>
+<li><a href="https://libvirt.org/formatdomain.html">libvirt domain format</a> —
+    useful if you use the <code>kind: Vm</code> escape hatches
+    <code>libvirtXml</code>/<code>libvirtXmlOverlay</code>.</li>
+</ul>
+</div>
 <footer><span class='lang-pt'>Delonix Engine · Apache-2.0 · <a href="https://github.com/angolardevops/delonix-runtime">angolardevops/delonix-runtime</a> · Referência gerada do <code>--help</code> real do binário por <code>docs/gen.py</code>.</span><span class='lang-en'>Delonix Engine · Apache-2.0 · <a href="https://github.com/angolardevops/delonix-runtime">angolardevops/delonix-runtime</a> · Reference generated from the real <code>--help</code> of the binary by <code>docs/gen.py</code>.</span></footer>
 </main>
 <aside class="toc" id="pagetoc"><div class="toc-inner"><h5><span class='lang-pt'>Nesta página</span><span class='lang-en'>On this page</span></h5><nav id="toc-nav"></nav></div></aside>
