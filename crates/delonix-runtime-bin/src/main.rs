@@ -459,9 +459,23 @@ fn main() {
 mod help_i18n_tests {
     use clap::CommandFactory;
 
+    /// Flag descriptions still waiting for a translation. This is a RATCHET, not
+    /// a tolerance: the test fails when the number goes UP (a regression) *and*
+    /// when it goes DOWN (translate some, lower the number in the same commit).
+    /// A plain `<=` would let the debt sit here forever while still reading as
+    /// green.
+    ///
+    /// Measured after the `container` group was translated: 206 → 120.
+    const ARG_HELP_PENDING: usize = 120;
+
     /// Walks about/long_about of the whole command tree, collecting whatever the
     /// catalog does not translate.
-    fn untranslated(cmd: &clap::Command, path: &str, out: &mut Vec<String>) {
+    fn untranslated(
+        cmd: &clap::Command,
+        path: &str,
+        out: &mut Vec<String>,
+        args: &mut Vec<String>,
+    ) {
         for (what, text) in [
             ("about", cmd.get_about().map(|s| s.to_string())),
             ("long_about", cmd.get_long_about().map(|s| s.to_string())),
@@ -474,11 +488,22 @@ mod help_i18n_tests {
                 out.push(format!("{path} ({what}): {text}"));
             }
         }
+        for arg in cmd.get_arguments() {
+            for (what, text) in [
+                ("help", arg.get_help().map(|s| s.to_string())),
+                ("long_help", arg.get_long_help().map(|s| s.to_string())),
+            ] {
+                let Some(text) = text else { continue };
+                if !crate::cmd::po::has_pt_translation(&text) && !is_same_in_both(&text) {
+                    args.push(format!("{path} --{} ({what}): {text}", arg.get_id()));
+                }
+            }
+        }
         for sub in cmd.get_subcommands() {
             if sub.get_name() == "help" {
                 continue;
             }
-            untranslated(sub, &format!("{path} {}", sub.get_name()), out);
+            untranslated(sub, &format!("{path} {}", sub.get_name()), out, args);
         }
     }
 
@@ -488,15 +513,32 @@ mod help_i18n_tests {
         s.starts_with("Containers: run/ps/stop")
     }
 
+    /// The command descriptions — what `--help` shows at the top and what the
+    /// parent lists next to each subcommand. Strict: zero tolerated.
     #[test]
-    fn todo_o_help_tem_traducao_pt() {
-        let mut missing = Vec::new();
-        untranslated(&super::Cli::command(), "delonix", &mut missing);
+    fn todo_o_help_de_comando_tem_traducao_pt() {
+        let (mut missing, mut args) = (Vec::new(), Vec::new());
+        untranslated(&super::Cli::command(), "delonix", &mut missing, &mut args);
         assert!(
             missing.is_empty(),
-            "{} help string(s) sem entrada no pt.po:\n  {}",
+            "{} descrição(ões) de comando sem entrada no pt.po:\n  {}",
             missing.len(),
             missing.join("\n  ")
+        );
+    }
+
+    #[test]
+    fn o_help_dos_argumentos_so_pode_encolher() {
+        let (mut missing, mut args) = (Vec::new(), Vec::new());
+        untranslated(&super::Cli::command(), "delonix", &mut missing, &mut args);
+        assert_eq!(
+            args.len(),
+            ARG_HELP_PENDING,
+            "help de argumento por traduzir: {} (esperado {ARG_HELP_PENDING}). \
+             Se subiu, é uma flag nova sem entrada no pt.po; se desceu, baixa a \
+             constante no mesmo commit.\n  {}",
+            args.len(),
+            args.join("\n  ")
         );
     }
 }
