@@ -125,6 +125,7 @@ pub enum Distro {
     Ubuntu,
     Debian,
     Rocky,
+    Fedora,
 }
 
 impl Distro {
@@ -133,6 +134,7 @@ impl Distro {
             Distro::Ubuntu => "ubuntu",
             Distro::Debian => "debian",
             Distro::Rocky => "rocky",
+            Distro::Fedora => "fedora",
         }
     }
 }
@@ -195,6 +197,10 @@ impl VmImageStore {
                 Self::sanitize(release)
             ),
             Distro::Rocky => format!("rocky-{}-genericcloud-amd64.qcow2", Self::sanitize(release)),
+            Distro::Fedora => format!(
+                "Fedora-Cloud-Base-Generic-{}.x86_64.qcow2",
+                Self::sanitize(release)
+            ),
         };
         self.root.join("_base").join(filename)
     }
@@ -332,6 +338,13 @@ pub enum VmImageCmd {
         /// rocky`. Rocky currently only supports `--no-k8s` builds.
         #[arg(long, default_value = "9")]
         rocky_release: String,
+        /// Fedora release AND build, as shown on Fedora's download page
+        /// (e.g. `42-1.1`) — only used with `--distro fedora`. The build
+        /// number is not derivable from the release, and Fedora's redirector
+        /// offers no listing to look it up, so it is asked for rather than
+        /// guessed.
+        #[arg(long, default_value = "42-1.1")]
+        fedora_release: String,
         /// Kubernetes version (e.g. `1.31`) — omit to use the latest stable.
         #[arg(long)]
         k8s_version: Option<String>,
@@ -410,6 +423,7 @@ pub fn run(action: VmImageCmd) -> Result<()> {
             ubuntu_release,
             debian_release,
             rocky_release,
+            fedora_release,
             k8s_version,
             extra_packages,
             extra_run,
@@ -466,6 +480,7 @@ pub fn run(action: VmImageCmd) -> Result<()> {
                 &ubuntu_release,
                 &debian_release,
                 &rocky_release,
+                &fedora_release,
                 k8s_version,
                 extra_packages,
                 extra_run,
@@ -716,6 +731,7 @@ pub(crate) fn download_base(
         Distro::Ubuntu => download_ubuntu_base(store, release),
         Distro::Debian => download_debian_base(store, release),
         Distro::Rocky => download_rocky_base(store, release),
+        Distro::Fedora => download_fedora_base(store, release),
     }
 }
 
@@ -1091,6 +1107,7 @@ fn cmd_build(
     ubuntu_release: &str,
     debian_release: &str,
     rocky_release: &str,
+    fedora_release: &str,
     k8s_version: Option<String>,
     extra_packages: Vec<String>,
     extra_run: Vec<String>,
@@ -1134,11 +1151,12 @@ fn cmd_build(
     // (pkgs.k8s.io's RPM repo has a different URL/GPG scheme, not
     // implemented). Fail closed rather than silently running apt commands
     // against a dnf guest.
-    if distro == Distro::Rocky && !no_k8s {
+    if matches!(distro, Distro::Rocky | Distro::Fedora) && !no_k8s {
         return Err(Error::Invalid(
-            super::po::t(
-                "--distro rocky only supports --no-k8s for now (the k8s path needs the \
+            super::po::tf(
+                "--distro {distro} only supports --no-k8s for now (the k8s path needs the \
                  pkgs.k8s.io RPM repository, not implemented yet)",
+                &[("distro", distro.as_str())],
             )
             .into(),
         ));
@@ -1159,11 +1177,13 @@ fn cmd_build(
         Distro::Ubuntu => ubuntu_release,
         Distro::Debian => debian_release,
         Distro::Rocky => rocky_release,
+        Distro::Fedora => fedora_release,
     };
     let base = match distro {
         Distro::Ubuntu => download_ubuntu_base(store, ubuntu_release)?,
         Distro::Debian => download_debian_base(store, debian_release)?,
         Distro::Rocky => download_rocky_base(store, rocky_release)?,
+        Distro::Fedora => download_fedora_base(store, fedora_release)?,
     };
 
     let work_dir =
@@ -1516,6 +1536,88 @@ fn valid_rocky_release(release: &str) -> Result<()> {
             &[("release", release)],
         )))
     }
+}
+
+/// Fedora Cloud base image.
+///
+/// Fedora's artifact name carries a BUILD number that the release number does
+/// not determine (`42` ships as `42-1.1`), and its download redirector serves
+/// no directory listing — so there is nothing to derive it from. Rather than
+/// guess, `--fedora-release` takes the full `<release>-<build>` exactly as
+/// Fedora's own download page shows it, and says so when given anything else.
+/// Same principle as the Proxmox ISO inputs in the appliance workflow: an
+/// unverifiable guess presented as a fact is worse than asking.
+///
+/// The CHECKSUM is BSD-style (`SHA256 (file) = hash`), the same shape Rocky
+/// uses — `parse_bsd_checksum` is shared, not duplicated.
+pub(crate) fn download_fedora_base(store: &VmImageStore, release: &str) -> Result<PathBuf> {
+    valid_fedora_release(release)?;
+    let cached = store.base_cache_path(Distro::Fedora, release);
+    if cached.exists() {
+        return Ok(cached);
+    }
+    let major = release.split('-').next().unwrap_or(release);
+    let img_name = format!("Fedora-Cloud-Base-Generic-{release}.x86_64.qcow2");
+    let base_url = format!(
+        "https://download.fedoraproject.org/pub/fedora/linux/releases/{major}/Cloud/x86_64/images"
+    );
+    let img_url = format!("{base_url}/{img_name}");
+    let sums_url = format!("{base_url}/Fedora-Cloud-{release}-x86_64-CHECKSUM");
+
+    eprintln!(
+        "{}",
+        super::po::tf("downloading {url}...", &[("url", &img_url)])
+    );
+    let tmp = cached.with_extension("download");
+    stream_download(&img_url, &tmp)?;
+
+    eprintln!("{}", super::po::t("verifying CHECKSUM..."));
+    let sums = http_get_text(&sums_url)?;
+    let expected = parse_bsd_checksum(&sums, &img_name).ok_or_else(|| {
+        Error::Invalid(format!(
+            "{} {img_name}",
+            super::po::t("CHECKSUM has no entry for")
+        ))
+    })?;
+    let got = hex_sha256_file(&tmp)?;
+    if got != expected {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(Error::Invalid(super::po::tf(
+            "invalid checksum for {img_name}: expected {expected}, got {got} — download discarded",
+            &[
+                ("img_name", &img_name),
+                ("expected", &expected),
+                ("got", &got),
+            ],
+        )));
+    }
+    std::fs::rename(&tmp, &cached)?;
+    Ok(cached)
+}
+
+/// `<release>-<build>`, e.g. `42-1.1`. Both parts are numeric; the build may
+/// have several dotted components. Rejecting a bare `42` here is the point:
+/// it looks right and produces a 404 several hundred megabytes later.
+fn valid_fedora_release(release: &str) -> Result<()> {
+    let bad = || {
+        Error::Invalid(super::po::tf(
+            "--fedora-release '{release}' must be `<release>-<build>` as shown on Fedora's \
+             download page (e.g. `42-1.1`) — the build number is not derivable from the release",
+            &[("release", release)],
+        ))
+    };
+    let (major, build) = release.split_once('-').ok_or_else(bad)?;
+    if major.is_empty() || !major.chars().all(|c| c.is_ascii_digit()) {
+        return Err(bad());
+    }
+    if build.is_empty()
+        || !build.chars().all(|c| c.is_ascii_digit() || c == '.')
+        || build.starts_with('.')
+        || build.ends_with('.')
+    {
+        return Err(bad());
+    }
+    Ok(())
 }
 
 /// Same shape as `download_ubuntu_base`/`download_debian_base`, confirmed
@@ -2483,11 +2585,11 @@ fn install_cri_steps(cri_bin: &Path, cri_service: &Path) -> Vec<CustomizeOp> {
 fn shared_account_steps(extra_run: &[String], distro: Distro) -> Vec<CustomizeOp> {
     let sudo_group = match distro {
         Distro::Ubuntu | Distro::Debian => "sudo",
-        Distro::Rocky => "wheel",
+        Distro::Rocky | Distro::Fedora => "wheel",
     };
     let bashrc_path = match distro {
         Distro::Ubuntu | Distro::Debian => "/etc/bash.bashrc",
-        Distro::Rocky => "/etc/bashrc",
+        Distro::Rocky | Distro::Fedora => "/etc/bashrc",
     };
     let mut ops: Vec<CustomizeOp> = Vec::new();
     ops.extend([
@@ -2583,7 +2685,7 @@ fn shared_account_steps(extra_run: &[String], distro: Distro) -> Vec<CustomizeOp
     // not of host preparation.
     let cleanup_cmd = match distro {
         Distro::Ubuntu | Distro::Debian => "apt-get clean && rm -rf /var/lib/apt/lists/*",
-        Distro::Rocky => "dnf clean all",
+        Distro::Rocky | Distro::Fedora => "dnf clean all",
     };
     ops.push(CustomizeOp::RunCommand(cleanup_cmd.into()));
     // BUG FOUND LIVE (delonix cluster kubeadm, multi-VM libvirt NAT): every VM
@@ -2630,7 +2732,11 @@ pub(crate) fn rootless_customization_steps(
             "apt-get update && apt-get install -y slirp4netns uidmap nftables iproute2 conntrack"
                 .to_string()
         }
-        Distro::Rocky => {
+        // Fedora is the same dnf/RPM family as Rocky and uses the same package
+        // names — the four that differ from Debian's (`shadow-utils`, `iproute`,
+        // `conntrack-tools`, and the shared `nftables`/`slirp4netns`) are named
+        // identically in Fedora's repos.
+        Distro::Rocky | Distro::Fedora => {
             "dnf install -y slirp4netns shadow-utils nftables iproute conntrack-tools".to_string()
         }
     };
@@ -3352,6 +3458,7 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
             "24.04",
             "bookworm",
             "9",
+            "42-1.1",
             None,
             vec![],
             vec![],
@@ -3477,6 +3584,7 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
                 "24.04",
                 "bookworm",
                 "9",
+                "42-1.1",
                 k8s_version,
                 vec![],
                 vec![],
@@ -3503,6 +3611,7 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
             "24.04",
             "bookworm",
             "9",
+            "42-1.1",
             None,
             vec![],
             vec![],
@@ -3674,5 +3783,90 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
         // only the first is honest for a field nobody filled in.
         let a = annotations_of(&bare_img());
         assert!(a.is_empty(), "nada sabido, nada anunciado: {a:?}");
+    }
+
+    #[test]
+    fn valid_fedora_release_exige_release_e_build() {
+        // Fedora's artifact name carries a build number the release does not
+        // determine, and its redirector has no listing to look it up in — so a
+        // bare `42` is rejected here rather than 404-ing several hundred
+        // megabytes into the download.
+        assert!(valid_fedora_release("42-1.1").is_ok());
+        assert!(valid_fedora_release("41-1.4").is_ok());
+        assert!(valid_fedora_release("43-1.10.2").is_ok());
+        for bad in [
+            "42", "42-", "-1.1", "abc-1.1", "42-1.1a", "42-.1", "42-1.", "",
+        ] {
+            let e = valid_fedora_release(bad)
+                .expect_err("devia recusar")
+                .to_string();
+            assert!(e.contains("<release>-<build>"), "{bad}: {e}");
+        }
+    }
+
+    #[test]
+    fn fedora_partilha_as_convencoes_rpm_do_rocky() {
+        // Same dnf/RPM family: `wheel` (not `sudo`), `/etc/bashrc` (not
+        // `/etc/bash.bashrc`), `dnf clean all`. Verified against the Rocky
+        // steps rather than restated, so the two cannot drift apart.
+        let bin = PathBuf::from("/tmp/delonix");
+        let fedora = rootless_customization_steps(&[], &bin, Distro::Fedora);
+        let rocky = rootless_customization_steps(&[], &bin, Distro::Rocky);
+        let cmds = |ops: &[CustomizeOp]| -> Vec<String> {
+            ops.iter()
+                .filter_map(|o| match o {
+                    CustomizeOp::RunCommand(c) => Some(c.clone()),
+                    _ => None,
+                })
+                .collect()
+        };
+        let (f, r) = (cmds(&fedora), cmds(&rocky));
+        assert_eq!(f, r, "Fedora e Rocky partilham os passos da familia RPM");
+        assert!(f.iter().any(|c| c.contains("dnf install -y")));
+        assert!(f.iter().any(|c| c.contains("wheel")));
+        assert!(f.iter().any(|c| c.contains("dnf clean all")));
+    }
+
+    #[test]
+    fn fedora_nunca_escreve_perfil_apparmor() {
+        // AppArmor is an Ubuntu-only workaround (the
+        // `kernel.apparmor_restrict_unprivileged_userns` patch); Fedora uses
+        // SELinux and has no /etc/apparmor.d, so writing there would fail the
+        // whole `virt-customize` run — the same trap already fixed for Rocky.
+        let ops = rootless_customization_steps(&[], &PathBuf::from("/tmp/delonix"), Distro::Fedora);
+        assert!(!ops.iter().any(|o| matches!(
+            o,
+            CustomizeOp::RunCommand(c) if c.contains("apparmor")
+        )));
+    }
+
+    #[test]
+    fn fedora_sem_no_k8s_e_rejeitado() {
+        let (store, dir) = tmp_store();
+        let err = cmd_build(
+            &store,
+            "t",
+            Distro::Fedora,
+            "24.04",
+            "bookworm",
+            "9",
+            "42-1.1",
+            None,
+            vec![],
+            vec![],
+            None,
+            true,
+            false,
+            false,
+            None,
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(
+            err.contains("fedora"),
+            "a recusa tem de nomear a distro: {err}"
+        );
+        assert!(err.contains("--no-k8s"), "{err}");
+        let _ = std::fs::remove_dir_all(dir);
     }
 }
