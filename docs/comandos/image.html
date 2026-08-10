@@ -206,7 +206,7 @@ Commands:
   describe   Human-readable detail of one or more VM images, `kubectl describe`-style
   pull       Fetch a VM image from an OCI registry (single-blob artifact) — with no argument, the OFFICIAL Delonix image
   ls-remote  List the tags available in a remote OCI repository — with no argument, the OFFICIAL Delonix golden image repo (discover which k8s versions are published before `pull`/`--k8s-version`)
-  push       Publish a local VM image to an OCI registry
+  push       Publish a local VM image to an OCI registry. Omit the destination to publish to the OFFICIAL repository the image belongs in
   import     Register an existing disk image under a name, so `vm create --disk &lt;name&gt;` and `image vm push` can use it
   convert    Convert a VM disk to the format another ecosystem imports — `qcow2`, `raw`, `vmdk` (VMware), `vdi` (VirtualBox), `vhdx`/`vhd` (Hyper-V, Azure). Flattened either way: the result is a standalone file
   init       Build the golden VM image (Ubuntu + kubeadm/kubelet/kubectl + `delonix-cri`). Scaffold a `VMfile` (and a cloud-init) for building your own image

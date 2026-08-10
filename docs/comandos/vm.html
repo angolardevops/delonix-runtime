@@ -353,11 +353,11 @@ Options:
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Consola série (voltar ao host: Ctrl+])</div><div class='cap lang-en'>Serial console (back to the host: Ctrl+])</div><pre><code>delonix vm console dev</code></pre></div>
 <h2 id='push'><code>vm push</code></h2>
 <p class='intro'>Push a local golden VM image to an OCI registry (<code>vm push &lt;name&gt; &lt;target&gt;</code>)</p>
-<div class='help'><pre><code>Usage: delonix vm push [OPTIONS] &lt;NAME&gt; &lt;TARGET&gt;
+<div class='help'><pre><code>Usage: delonix vm push [OPTIONS] &lt;NAME&gt; [TARGET]
 
 Arguments:
   &lt;NAME&gt;    
-  &lt;TARGET&gt;  
+  [TARGET]  Destination. Omit it to publish to the OFFICIAL repository this image belongs in (decided from the image&#x27;s own metadata)
 
 Options:
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
