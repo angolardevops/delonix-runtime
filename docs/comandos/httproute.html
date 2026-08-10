@@ -179,7 +179,7 @@ Options:
   -f, --file &lt;FILE&gt;   Manifest file (default `./delonix-manifest.yaml`)
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
   -h, --help          Print help</code></pre></div>
-<h3>Exemplos</h3><div class="ex"><div class="cap">Aplicar as HTTPRoutes de um manifesto (sobe/recarrega o proxy)</div><pre><code>delonix net httproute apply -f delonix-manifest.yaml</code></pre></div>
+<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Aplicar as HTTPRoutes de um manifesto (sobe/recarrega o proxy)</div><div class='cap lang-en'>Apply the HTTPRoutes from a manifest (brings up/reloads the proxy)</div><pre><code>delonix net httproute apply -f delonix-manifest.yaml</code></pre></div>
 <h2 id='ls'><code>httproute ls</code></h2>
 <p class='intro'>State of the proxy + active routes (from the config in effect)</p>
 <div class='help'><pre><code>Usage: delonix net httproute ls [OPTIONS]
@@ -187,7 +187,7 @@ Options:
 Options:
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
   -h, --help          Print help</code></pre></div>
-<h3>Exemplos</h3><div class="ex"><div class="cap">Estado do proxy + rotas activas</div><pre><code>delonix net httproute ls</code></pre></div>
+<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Estado do proxy + rotas activas</div><div class='cap lang-en'>Proxy status + active routes</div><pre><code>delonix net httproute ls</code></pre></div>
 <h2 id='rm'><code>httproute rm</code></h2>
 <p class='intro'>Stop the proxy and unpublish the ports (teardown)</p>
 <div class='help'><pre><code>Usage: delonix net httproute rm [OPTIONS]
@@ -195,7 +195,7 @@ Options:
 Options:
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
   -h, --help          Print help</code></pre></div>
-<h3>Exemplos</h3><div class="ex"><div class="cap">Parar o proxy e despublicar as portas</div><pre><code>delonix net httproute rm</code></pre></div>
+<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Parar o proxy e despublicar as portas</div><div class='cap lang-en'>Stop the proxy and unpublish the ports</div><pre><code>delonix net httproute rm</code></pre></div>
 <h2><span class='lang-pt'>Laboratório</span><span class='lang-en'>Lab</span></h2>
 <div class='callout lang-pt'><p>Um proxy L7, duas apps, uma porta — routing por <code>Host</code>.</p>
 <pre><code>delonix net httproute apply -f httproute.yaml

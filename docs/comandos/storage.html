@@ -175,7 +175,7 @@ Options:
   -f, --file &lt;FILE&gt;   
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
   -h, --help          Print help</code></pre></div>
-<h3>Exemplos</h3><div class="ex"><div class="cap">Declarar o NAS num manifesto kind: Storage</div><pre><code>delonix storage apply -f storage.yaml</code></pre></div>
+<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Declarar o NAS num manifesto kind: Storage</div><div class='cap lang-en'>Declare the NAS in a kind: Storage manifest</div><pre><code>delonix storage apply -f storage.yaml</code></pre></div>
 <h2 id='inspect'><code>storage inspect</code></h2>
 <p class='intro'>Details of a storage</p>
 <div class='help'><pre><code>Usage: delonix storage inspect [OPTIONS] &lt;NAME&gt;
@@ -186,7 +186,7 @@ Arguments:
 Options:
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
   -h, --help          Print help</code></pre></div>
-<h3>Exemplos</h3><div class="ex"><div class="cap">JSON do storage (para scripts)</div><pre><code>delonix storage inspect nas-fotos</code></pre></div>
+<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>JSON do storage (para scripts)</div><div class='cap lang-en'>Storage as JSON (for scripts)</div><pre><code>delonix storage inspect nas-fotos</code></pre></div>
 <h2 id='dash'><code>storage dash</code></h2>
 <p class='intro'>Storage/volumes dashboard (KPIs + table) — TUI, or <code>--once</code> snapshot</p>
 <div class='help'><pre><code>Usage: delonix storage dash [OPTIONS]
@@ -196,7 +196,7 @@ Options:
       --once          
       --json          
   -h, --help          Print help</code></pre></div>
-<h3>Exemplos</h3><div class="ex"><div class="cap">Dashboard só do armazenamento de rede</div><pre><code>delonix storage dash</code></pre></div>
+<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Dashboard só do armazenamento de rede</div><div class='cap lang-en'>Network storage-only dashboard</div><pre><code>delonix storage dash</code></pre></div>
 <h2 id='create'><code>storage create</code></h2>
 <p class='intro'>Create (and mount) a network storage</p>
 <div class='help'><pre><code>Usage: delonix storage create [OPTIONS] --type &lt;TYPE&gt; --server &lt;SERVER&gt; --share &lt;SHARE&gt; &lt;NAME&gt;
@@ -225,7 +225,7 @@ Options:
           Extra mount options (`vers=4.1,soft`), appended to the derived ones
   -h, --help
           Print help</code></pre></div>
-<h3>Exemplos</h3><div class="ex"><div class="cap">NFS de um TrueNAS</div><pre><code>delonix storage create media --type nfs --server 10.0.0.5 --share /mnt/pool/media</code></pre></div><div class="ex"><div class="cap">SMB/CIFS com password do cofre</div><pre><code>delonix storage create docs --type cifs --server nas --share docs --username user --password-secret nas-pass</code></pre></div>
+<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>NFS de um TrueNAS</div><div class='cap lang-en'>NFS from a TrueNAS</div><pre><code>delonix storage create media --type nfs --server 10.0.0.5 --share /mnt/pool/media</code></pre></div><div class="ex"><div class='cap lang-pt'>SMB/CIFS com password do cofre</div><div class='cap lang-en'>SMB/CIFS with the password from the vault</div><pre><code>delonix storage create docs --type cifs --server nas --share docs --username user --password-secret nas-pass</code></pre></div>
 <h2 id='ls'><code>storage ls</code></h2>
 <p class='intro'>List the network storages (volumes with a network driver)</p>
 <div class='help'><pre><code>Usage: delonix storage ls [OPTIONS]
@@ -234,7 +234,7 @@ Options:
       --l18n &lt;en|pt&gt;     Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
   -o, --output &lt;OUTPUT&gt;  Output format: `table` (default) or `json` (ADR-0005) [default: table] [possible values: table, json]
   -h, --help             Print help</code></pre></div>
-<h3>Exemplos</h3><div class="ex"><pre><code>delonix storage ls</code></pre></div>
+<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><pre><code>delonix storage ls</code></pre></div>
 <h2 id='rm'><code>storage rm</code></h2>
 <p class='intro'>Remove (and unmount) a storage. The DATA stays on the NAS — only the local mount is torn down, like docker</p>
 <div class='help'><pre><code>Usage: delonix storage rm [OPTIONS] &lt;NAME&gt;
@@ -245,7 +245,7 @@ Arguments:
 Options:
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
   -h, --help          Print help</code></pre></div>
-<h3>Exemplos</h3><div class="ex"><div class="cap">Desmonta; os dados ficam no NAS</div><pre><code>delonix storage rm media</code></pre></div>
+<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Desmonta; os dados ficam no NAS</div><div class='cap lang-en'>Unmounts; the data stays on the NAS</div><pre><code>delonix storage rm media</code></pre></div>
 <h2><span class='lang-pt'>Laboratório</span><span class='lang-en'>Lab</span></h2>
 <div class='callout lang-pt'><p>Regista um export NFS como <code>storage</code> e monta-o num
 container, com a password a vir do cofre em vez do manifesto.</p>

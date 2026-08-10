@@ -179,7 +179,7 @@ Commands:
 Options:
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
   -h, --help          Print help</code></pre></div>
-<h3>Exemplos</h3><div class="ex"><div class="cap">Tirar e listar snapshots de um volume</div><pre><code>delonix volumes snapshot create dados antes-da-migracao
+<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Tirar e listar snapshots de um volume</div><div class='cap lang-en'>Take and list a volume&#x27;s snapshots</div><pre><code>delonix volumes snapshot create dados antes-da-migracao
 delonix volumes snapshot ls dados</code></pre></div>
 <h2 id='describe'><code>volumes describe</code></h2>
 <p class='intro'>Readable detail of one or more volumes, <code>kubectl describe</code> style (for humans; use <code>inspect</code> for the usual compact view)</p>
@@ -191,7 +191,7 @@ Arguments:
 Options:
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
   -h, --help          Print help</code></pre></div>
-<h3>Exemplos</h3><div class="ex"><div class="cap">Detalhe de um volume (uso, quota, montagens)</div><pre><code>delonix volumes describe dados</code></pre></div>
+<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Detalhe de um volume (uso, quota, montagens)</div><div class='cap lang-en'>Volume detail (usage, quota, mounts)</div><pre><code>delonix volumes describe dados</code></pre></div>
 <h2 id='create'><code>volumes create</code></h2>
 <p class='intro'>Create a named volume</p>
 <div class='help'><pre><code>Usage: delonix volumes create [OPTIONS] &lt;NAME&gt;
@@ -206,7 +206,7 @@ Options:
       --options &lt;OPTIONS&gt;  Additional mount options (`nfs` driver)
       --quota &lt;QUOTA&gt;      Quota (e.g. `2g`) — only applied if `--quota` is given
   -h, --help               Print help</code></pre></div>
-<h3>Exemplos</h3><div class="ex"><div class="cap">Com quota e driver nfs disponíveis</div><pre><code>delonix volumes create dados --quota 10G</code></pre></div>
+<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Com quota e driver nfs disponíveis</div><div class='cap lang-en'>With quota and the nfs driver available</div><pre><code>delonix volumes create dados --quota 10G</code></pre></div>
 <h2 id='ls'><code>volumes ls</code></h2>
 <p class='intro'>List the volumes</p>
 <div class='help'><pre><code>Usage: delonix volumes ls [OPTIONS]
@@ -215,7 +215,7 @@ Options:
       --l18n &lt;en|pt&gt;     Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
   -o, --output &lt;OUTPUT&gt;  Output format: `table` (default) or `json` (ADR-0005) [default: table] [possible values: table, json]
   -h, --help             Print help</code></pre></div>
-<h3>Exemplos</h3><div class="ex"><pre><code>delonix volumes ls</code></pre></div>
+<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><pre><code>delonix volumes ls</code></pre></div>
 <h2 id='inspect'><code>volumes inspect</code></h2>
 <p class='intro'>Details of a volume (includes real on-disk usage)</p>
 <div class='help'><pre><code>Usage: delonix volumes inspect [OPTIONS] &lt;NAME&gt;
@@ -226,7 +226,7 @@ Arguments:
 Options:
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
   -h, --help          Print help</code></pre></div>
-<h3>Exemplos</h3><div class="ex"><pre><code>delonix volumes inspect dados</code></pre></div>
+<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><pre><code>delonix volumes inspect dados</code></pre></div>
 <h2 id='rm'><code>volumes rm</code></h2>
 <p class='intro'>Remove a volume. Refuses while a container or a <code>kind: ShareVolume</code> still references it (use <code>--force</code> to remove it anyway)</p>
 <div class='help'><pre><code>Usage: delonix volumes rm [OPTIONS] &lt;NAME&gt;
@@ -238,7 +238,7 @@ Options:
   -f, --force         Remove it even with live references — DESTROYS the data of whatever is still using it
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
   -h, --help          Print help</code></pre></div>
-<h3>Exemplos</h3><div class="ex"><pre><code>delonix volumes rm dados</code></pre></div>
+<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><pre><code>delonix volumes rm dados</code></pre></div>
 <h2 id='apply'><code>volumes apply</code></h2>
 <p class='intro'>Apply the <code>kind: Volume</code> documents from a manifest (idempotent by name)</p>
 <div class='help'><pre><code>Usage: delonix volumes apply [OPTIONS]
@@ -247,7 +247,7 @@ Options:
   -f, --file &lt;FILE&gt;   
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
   -h, --help          Print help</code></pre></div>
-<h3>Exemplos</h3><div class="ex"><pre><code>delonix volumes apply -f delonix-manifest.yaml</code></pre></div>
+<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><pre><code>delonix volumes apply -f delonix-manifest.yaml</code></pre></div>
 <h2><span class='lang-pt'>Laboratório</span><span class='lang-en'>Lab</span></h2>
 <div class='callout lang-pt'><p>Prova que um volume nomeado sobrevive a um restart do container —
 ao contrário de escrever directamente no rootfs.</p>

@@ -180,7 +180,7 @@ Options:
 para o comando específico, nunca adivinha).</p></div><div class='lang-en'><p><strong>Exact-name routing</strong>, fail-closed: a name that
 doesn't exist gives <code>no such workload</code>; a container AND a vm with the same name give
 <code>ambiguous</code> (points at the specific command, never guesses).</p></div>
-<h3>Exemplos</h3><div class="ex"><div class="cap">Containers E VMs numa só tabela</div><pre><code>delonix workload ls</code></pre></div><div class="ex"><div class="cap">Saída estruturada para automação (chaves estáveis, independentes de língua)</div><pre><code>delonix workload ls -o json | jq &#x27;.[] | select(.type==&quot;vm&quot;)&#x27;</code></pre></div>
+<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Containers E VMs numa só tabela</div><div class='cap lang-en'>Containers AND VMs in one table</div><pre><code>delonix workload ls</code></pre></div><div class="ex"><div class='cap lang-pt'>Saída estruturada para automação (chaves estáveis, independentes de língua)</div><div class='cap lang-en'>Structured output for automation (stable keys, language-independent)</div><pre><code>delonix workload ls -o json | jq &#x27;.[] | select(.type==&quot;vm&quot;)&#x27;</code></pre></div>
 <h2 id='describe'><code>workload describe</code></h2>
 <p class='intro'>Describe a workload by name (routed to the owning backend, kubectl-style)</p>
 <div class='help'><pre><code>Usage: delonix workload describe [OPTIONS] &lt;NAME&gt;
@@ -191,7 +191,7 @@ Arguments:
 Options:
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
   -h, --help          Print help</code></pre></div>
-<h3>Exemplos</h3><div class="ex"><div class="cap">Detalhe do workload, com routing automático para o motor certo</div><pre><code>delonix workload describe web</code></pre></div>
+<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Detalhe do workload, com routing automático para o motor certo</div><div class='cap lang-en'>Workload detail, auto-routed to the right engine</div><pre><code>delonix workload describe web</code></pre></div>
 <h2 id='stop'><code>workload stop</code></h2>
 <p class='intro'>Stop a workload by name (routed to the owning backend)</p>
 <div class='help'><pre><code>Usage: delonix workload stop [OPTIONS] &lt;NAME&gt;
@@ -202,7 +202,7 @@ Arguments:
 Options:
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
   -h, --help          Print help</code></pre></div>
-<h3>Exemplos</h3><div class="ex"><div class="cap">Parar por nome, seja container ou vm</div><pre><code>delonix workload stop web</code></pre></div>
+<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Parar por nome, seja container ou vm</div><div class='cap lang-en'>Stop by name, whether container or vm</div><pre><code>delonix workload stop web</code></pre></div>
 <h2 id='rm'><code>workload rm</code></h2>
 <p class='intro'>Remove a workload by name</p>
 <div class='help'><pre><code>Usage: delonix workload rm [OPTIONS] &lt;NAME&gt;
@@ -214,7 +214,7 @@ Options:
   -f, --force         Force removal even if running / if backend cleanup refuses
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
   -h, --help          Print help</code></pre></div>
-<h3>Exemplos</h3><div class="ex"><div class="cap">Remover por nome</div><pre><code>delonix workload rm -f web</code></pre></div>
+<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Remover por nome</div><div class='cap lang-en'>Remove by name</div><pre><code>delonix workload rm -f web</code></pre></div>
 <h2><span class='lang-pt'>Laboratório</span><span class='lang-en'>Lab</span></h2>
 <div class='callout lang-pt'><p>Cria um container normal e observa-o pela lente unificada — o mesmo
 <code>workload</code> que também sabe falar de VMs.</p>

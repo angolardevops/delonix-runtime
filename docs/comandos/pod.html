@@ -201,7 +201,7 @@ falha, o pod é desfeito por inteiro (sem meio-pod).</p></div><div class='lang-e
 containers, it does nothing. Can also be applied via <code>delonix stack apply</code> (the
 <code>pods:</code> group in <code>kind: Stack</code>) and previewed with <code>--dry-run</code>.
 If creating one member fails, the whole pod is torn down (no half-pod).</p></div>
-<h3>Exemplos</h3><div class="ex"><div class="cap">Criar um pod (web + sidecar que fala por localhost) de um manifesto</div><pre><code>delonix pod create -f examples/pod-multi.yaml</code></pre></div>
+<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Criar um pod (web + sidecar que fala por localhost) de um manifesto</div><div class='cap lang-en'>Create a pod (web + sidecar talking over localhost) from a manifest</div><pre><code>delonix pod create -f examples/pod-multi.yaml</code></pre></div>
 <h2 id='ls'><code>pod ls</code></h2>
 <p class='intro'>List the pods (derived from container labels)</p>
 <div class='help'><pre><code>Usage: delonix pod ls [OPTIONS]
@@ -210,7 +210,7 @@ Options:
       --l18n &lt;en|pt&gt;     Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
   -o, --output &lt;OUTPUT&gt;  Output format: `table` (default) or `json` (ADR-0005) [default: table] [possible values: table, json]
   -h, --help             Print help</code></pre></div>
-<h3>Exemplos</h3><div class="ex"><div class="cap">Listar os pods (POD, CONTAINERS n/N, IP, STATUS)</div><pre><code>delonix pod ls</code></pre></div>
+<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Listar os pods (POD, CONTAINERS n/N, IP, STATUS)</div><div class='cap lang-en'>List pods (POD, CONTAINERS n/N, IP, STATUS)</div><pre><code>delonix pod ls</code></pre></div>
 <h2 id='describe'><code>pod describe</code></h2>
 <p class='intro'>Details of one or more pods (containers + the shared IP), <code>kubectl</code> style</p>
 <div class='help'><pre><code>Usage: delonix pod describe [OPTIONS] [NAMES]...
@@ -221,7 +221,7 @@ Arguments:
 Options:
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
   -h, --help          Print help</code></pre></div>
-<h3>Exemplos</h3><div class="ex"><div class="cap">Detalhe estilo kubectl: containers + IP e netns partilhados</div><pre><code>delonix pod describe web-app</code></pre></div>
+<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Detalhe estilo kubectl: containers + IP e netns partilhados</div><div class='cap lang-en'>kubectl-style detail: containers + shared IP and netns</div><pre><code>delonix pod describe web-app</code></pre></div>
 <h2 id='rm'><code>pod rm</code></h2>
 <p class='intro'>Remove a pod: stop/remove ALL its containers + the shared netns</p>
 <div class='help'><pre><code>Usage: delonix pod rm [OPTIONS] [NAMES]...
@@ -233,7 +233,7 @@ Options:
   -f, --force         Force (kill) running containers
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
   -h, --help          Print help</code></pre></div>
-<h3>Exemplos</h3><div class="ex"><div class="cap">Remover o pod: pára/remove TODOS os containers + a netns partilhada</div><pre><code>delonix pod rm web-app</code></pre></div><div class="ex"><div class="cap">Forçar (mata os que estão a correr)</div><pre><code>delonix pod rm -f web-app</code></pre></div>
+<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Remover o pod: pára/remove TODOS os containers + a netns partilhada</div><div class='cap lang-en'>Remove the pod: stops/removes ALL containers + the shared netns</div><pre><code>delonix pod rm web-app</code></pre></div><div class="ex"><div class='cap lang-pt'>Forçar (mata os que estão a correr)</div><div class='cap lang-en'>Force (kills the ones still running)</div><pre><code>delonix pod rm -f web-app</code></pre></div>
 <h2 id='logs'><code>pod logs</code></h2>
 <p class='intro'>Logs of a pod&#x27;s container (defaults to the first member)</p>
 <div class='help'><pre><code>Usage: delonix pod logs [OPTIONS] &lt;POD&gt;
@@ -246,7 +246,7 @@ Options:
       --l18n &lt;en|pt&gt;           Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
   -f, --follow                 
   -h, --help                   Print help</code></pre></div>
-<h3>Exemplos</h3><div class="ex"><div class="cap">Logs do 1.º container do pod</div><pre><code>delonix pod logs web-app</code></pre></div><div class="ex"><div class="cap">Logs de um container específico (nome curto dentro do pod)</div><pre><code>delonix pod logs web-app --container sidecar -f</code></pre></div>
+<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Logs do 1.º container do pod</div><div class='cap lang-en'>Logs from the pod&#x27;s 1st container</div><pre><code>delonix pod logs web-app</code></pre></div><div class="ex"><div class='cap lang-pt'>Logs de um container específico (nome curto dentro do pod)</div><div class='cap lang-en'>Logs from a specific container (short name inside the pod)</div><pre><code>delonix pod logs web-app --container sidecar -f</code></pre></div>
 <h2><span class='lang-pt'>Laboratório</span><span class='lang-en'>Lab</span></h2>
 <div class='callout lang-pt'><p>Cria um pod de 2 containers e confirma que partilham IP —
 alcançam-se por <code>localhost</code>, como no Kubernetes.</p>

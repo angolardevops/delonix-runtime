@@ -200,7 +200,7 @@ Options:
       --once          
       --json          
   -h, --help          Print help</code></pre></div>
-<h3>Exemplos</h3><div class="ex"><div class="cap">Dashboard só dos containers</div><pre><code>delonix container dash</code></pre></div>
+<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Dashboard só dos containers</div><div class='cap lang-en'>Containers-only dashboard</div><pre><code>delonix container dash</code></pre></div>
 <h2 id='run'><code>container run</code></h2>
 <p class='intro'>Run a container from an image (pulls it if missing)</p>
 <div class='help'><pre><code>Usage: delonix container run [OPTIONS] &lt;IMAGE&gt; [COMMAND]...
@@ -360,8 +360,8 @@ slirp único + DNAT nft), o caminho que permite trocar portas a quente sem parar
 published by the <em>ingress</em> (hostfwd on the single slirp + nft DNAT), the path that lets you
 swap ports on the fly without stopping the container. <code>--net none</code> refuses
 <code>-p</code>.</p></div>
-<h3>Exemplos</h3><div class="ex"><div class="cap">Servir nginx na porta 8080 do host (NAT userspace, sem root)</div><pre><code>delonix container run -d --name web -p 8080:80 nginx</code></pre></div><div class="ex"><div class="cap">Correr numa rede criada pelo utilizador, publicando pelo ingress</div><pre><code>delonix network create minha-rede
-delonix container run -d --net minha-rede -p 8443:443 caddy</code></pre></div><div class="ex"><div class="cap">Shell descartável (remove-se sozinho à saída)</div><pre><code>delonix container run --rm -e TERM=xterm alpine sh -c &#x27;echo olá&#x27;</code></pre></div><div class="ex"><div class="cap">Sobrepor o ENTRYPOINT para depurar uma imagem</div><pre><code>delonix container run --rm --entrypoint /bin/sh nginx -c &#x27;nginx -t&#x27;</code></pre></div>
+<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Servir nginx na porta 8080 do host (NAT userspace, sem root)</div><div class='cap lang-en'>Serve nginx on host port 8080 (userspace NAT, no root)</div><pre><code>delonix container run -d --name web -p 8080:80 nginx</code></pre></div><div class="ex"><div class='cap lang-pt'>Correr numa rede criada pelo utilizador, publicando pelo ingress</div><div class='cap lang-en'>Run on a user-created network, published via ingress</div><pre><code>delonix network create minha-rede
+delonix container run -d --net minha-rede -p 8443:443 caddy</code></pre></div><div class="ex"><div class='cap lang-pt'>Shell descartável (remove-se sozinho à saída)</div><div class='cap lang-en'>Disposable shell (removes itself on exit)</div><pre><code>delonix container run --rm -e TERM=xterm alpine sh -c &#x27;echo olá&#x27;</code></pre></div><div class="ex"><div class='cap lang-pt'>Sobrepor o ENTRYPOINT para depurar uma imagem</div><div class='cap lang-en'>Override ENTRYPOINT to debug an image</div><pre><code>delonix container run --rm --entrypoint /bin/sh nginx -c &#x27;nginx -t&#x27;</code></pre></div>
 <h2 id='ps'><code>container ps</code></h2>
 <p class='intro'>List containers</p>
 <div class='help'><pre><code>Usage: delonix container ps [OPTIONS]
@@ -372,7 +372,7 @@ Options:
   -q, --quiet            Print only the IDs (to compose with `stop`/`rm`)
   -o, --output &lt;OUTPUT&gt;  Output format: `table` (default) or `json` (ADR-0005). `json` honors `--all` (same filter as the table) and ignores `--quiet` [default: table] [possible values: table, json]
   -h, --help             Print help</code></pre></div>
-<h3>Exemplos</h3><div class="ex"><div class="cap">Listar (alias `ls` também funciona)</div><pre><code>delonix container ls -a</code></pre></div><div class="ex"><div class="cap">Compor com stop/rm</div><pre><code>delonix container rm -f $(delonix container ps -aq)</code></pre></div>
+<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Listar (alias `ls` também funciona)</div><div class='cap lang-en'>List (the `ls` alias also works)</div><pre><code>delonix container ls -a</code></pre></div><div class="ex"><div class='cap lang-pt'>Compor com stop/rm</div><div class='cap lang-en'>Compose with stop/rm</div><pre><code>delonix container rm -f $(delonix container ps -aq)</code></pre></div>
 <h2 id='start'><code>container start</code></h2>
 <p class='intro'>(Re)start stopped/crashed containers, reusing the persistent rootfs (writes made inside the container survive, like in docker) and the same network/ports/volumes as the original <code>run</code>. Always detached</p>
 <div class='help'><pre><code>Usage: delonix container start [OPTIONS] &lt;IDS&gt;...
@@ -387,7 +387,7 @@ Options:
 persistente — ao contrário de <code>rm</code>+<code>run</code>, nada do que o container escreveu se perde.</p></div><div class='lang-en'><p>Reuses the saved spec (command, env, volumes, network, ports)
 and the persistent rootfs — unlike <code>rm</code>+<code>run</code>, nothing the container wrote
 is lost.</p></div>
-<h3>Exemplos</h3><div class="ex"><div class="cap">Rearrancar um container parado, preservando o que foi escrito lá dentro</div><pre><code>delonix container start web</code></pre></div>
+<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Rearrancar um container parado, preservando o que foi escrito lá dentro</div><div class='cap lang-en'>Restart a stopped container, preserving what was written inside</div><pre><code>delonix container start web</code></pre></div>
 <h2 id='stop'><code>container stop</code></h2>
 <p class='intro'>Stop one or more containers (SIGTERM, then SIGKILL)</p>
 <div class='help'><pre><code>Usage: delonix container stop [OPTIONS] &lt;IDS&gt;...
@@ -399,7 +399,7 @@ Options:
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
   -t, --time &lt;TIME&gt;   Seconds until SIGKILL [default: 10]
   -h, --help          Print help</code></pre></div>
-<h3>Exemplos</h3><div class="ex"><div class="cap">SIGTERM, e SIGKILL ao fim de 5s</div><pre><code>delonix container stop -t 5 web db</code></pre></div>
+<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>SIGTERM, e SIGKILL ao fim de 5s</div><div class='cap lang-en'>SIGTERM, then SIGKILL after 5s</div><pre><code>delonix container stop -t 5 web db</code></pre></div>
 <h2 id='rm'><code>container rm</code></h2>
 <p class='intro'>Remove one or more containers</p>
 <div class='help'><pre><code>Usage: delonix container rm [OPTIONS] &lt;IDS&gt;...
@@ -411,7 +411,7 @@ Options:
   -f, --force         Force (kill it if running)
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
   -h, --help          Print help</code></pre></div>
-<h3>Exemplos</h3><div class="ex"><div class="cap">Forçar remoção de vários</div><pre><code>delonix container rm -f web db cache</code></pre></div>
+<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Forçar remoção de vários</div><div class='cap lang-en'>Force-remove several</div><pre><code>delonix container rm -f web db cache</code></pre></div>
 <h2 id='exec'><code>container exec</code></h2>
 <p class='intro'>Execute a command inside a running container</p>
 <div class='help'><pre><code>Usage: delonix container exec [OPTIONS] &lt;ID&gt; &lt;COMMAND&gt;...
@@ -428,7 +428,7 @@ Options:
   -w, --workdir &lt;WORKDIR&gt;  Working directory for this call only (default: the container&#x27;s own configured `workdir`, or `/`)
   -u, --user &lt;USER&gt;        Run as this user for this call only: `uid[:gid]` or `name[:group]` (resolved against the container&#x27;s own `/etc/passwd`/`/etc/group`). Default: the container&#x27;s own configured user
   -h, --help               Print help</code></pre></div>
-<h3>Exemplos</h3><div class="ex"><div class="cap">Shell interactiva</div><pre><code>delonix container exec -it web sh</code></pre></div>
+<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Shell interactiva</div><div class='cap lang-en'>Interactive shell</div><pre><code>delonix container exec -it web sh</code></pre></div>
 <h2 id='logs'><code>container logs</code></h2>
 <p class='intro'>Show the logs (detached containers)</p>
 <div class='help'><pre><code>Usage: delonix container logs [OPTIONS] &lt;ID&gt;
@@ -443,7 +443,7 @@ Options:
       --since &lt;SINCE&gt;  Show only lines at or after this Unix timestamp (seconds). Same `--log-cri` requirement as `--tail`
       --timestamps     Prefix each line with its RFC3339 timestamp. Only available for containers run with `--log-cri` (`container run --log-cri`) — the plain log format is raw bytes with no per-line timestamp to show; a container without it gets a clear error naming the flag, not a silently-blank column
   -h, --help           Print help</code></pre></div>
-<h3>Exemplos</h3><div class="ex"><div class="cap">Seguir em contínuo (sai quando o container parar)</div><pre><code>delonix container logs -f web</code></pre></div>
+<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Seguir em contínuo (sai quando o container parar)</div><div class='cap lang-en'>Follow continuously (exits when the container stops)</div><pre><code>delonix container logs -f web</code></pre></div>
 <h2 id='inspect'><code>container inspect</code></h2>
 <p class='intro'>Show the full spec of one or more containers (Store JSON)</p>
 <div class='help'><pre><code>Usage: delonix container inspect [OPTIONS] &lt;IDS&gt;...
@@ -454,7 +454,7 @@ Arguments:
 Options:
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
   -h, --help          Print help</code></pre></div>
-<h3>Exemplos</h3><div class="ex"><div class="cap">Spec completa em JSON</div><pre><code>delonix container inspect web | jq .[0].ports</code></pre></div>
+<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Spec completa em JSON</div><div class='cap lang-en'>Full spec as JSON</div><pre><code>delonix container inspect web | jq .[0].ports</code></pre></div>
 <h2 id='stats'><code>container stats</code></h2>
 <p class='intro'>Resource usage (CPU/memory/PIDs) of the running containers — one sample and exits (no stream). With no IDs, shows all running ones</p>
 <div class='help'><pre><code>Usage: delonix container stats [OPTIONS] [IDS]...
@@ -472,7 +472,7 @@ marcada com <code>~</code>.</p></div><div class='lang-en'><p>CPU%/memory/PIDs re
 (resolved via <code>/proc/&lt;pid&gt;/cgroup</code>, whatever the delegated base is). Without
 cgroup delegation (rootless with no <code>Delegate=yes</code>), memory falls back to the container
 init's VmRSS, marked with <code>~</code>.</p></div>
-<h3>Exemplos</h3><div class="ex"><div class="cap">Uma amostra de todos os que correm</div><pre><code>delonix container stats</code></pre></div>
+<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Uma amostra de todos os que correm</div><div class='cap lang-en'>One sample of everything running</div><pre><code>delonix container stats</code></pre></div>
 <h2 id='apply'><code>container apply</code></h2>
 <p class='intro'>Apply the <code>kind: Container</code> documents of a manifest (idempotent by name — an existing container with that name is neither recreated nor checked for spec drift, see <code>cmd::manifest</code>)</p>
 <div class='help'><pre><code>Usage: delonix container apply [OPTIONS]
@@ -481,7 +481,7 @@ Options:
   -f, --file &lt;FILE&gt;   
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
   -h, --help          Print help</code></pre></div>
-<h3>Exemplos</h3><div class="ex"><div class="cap">Aplicar só os `kind: Container` de um manifesto</div><pre><code>delonix container apply -f delonix-manifest.yaml</code></pre></div>
+<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Aplicar só os `kind: Container` de um manifesto</div><div class='cap lang-en'>Apply just the `kind: Container` entries from a manifest</div><pre><code>delonix container apply -f delonix-manifest.yaml</code></pre></div>
 <h2 id='init'><code>container init</code></h2>
 <p class='intro'>Initialize a project with a Delonixfile + manifest — files ALREADY FILLED IN (images included), ready to use without editing anything</p>
 <div class='help'><pre><code>Usage: delonix container init [OPTIONS] [DIR]
@@ -497,7 +497,7 @@ Options:
   -t, --template &lt;TEMPLATE&gt;  Generate a complete PROJECT for a stack (e.g. `python`) with best practices, instead of the generic scaffold. `--template list` shows the available ones
       --up                   After generating, build the image, start it, and wait until it&#x27;s healthy
   -h, --help                 Print help</code></pre></div>
-<h3>Exemplos</h3><div class="ex"><div class="cap">Scaffold de um projecto completo, pronto a usar</div><pre><code>delonix container init myapp &amp;&amp; cd myapp</code></pre></div>
+<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Scaffold de um projecto completo, pronto a usar</div><div class='cap lang-en'>Scaffold a complete, ready-to-use project</div><pre><code>delonix container init myapp &amp;&amp; cd myapp</code></pre></div>
 <h2 id='kill'><code>container kill</code></h2>
 <p class='intro'>Send a signal to one or more containers (default SIGKILL) — unlike <code>stop</code>, does not wait or force a <code>Stopped</code> status: the real outcome (e.g. <code>Crashed</code> for a <code>KILL</code>) is picked up on the next observation</p>
 <div class='help'><pre><code>Usage: delonix container kill [OPTIONS] &lt;IDS&gt;...
@@ -514,7 +514,7 @@ o resultado real (ex.: <code>Crashed</code> para um <code>KILL</code>) só se co
 observação seguinte.</p></div><div class='lang-en'><p>Unlike <code>stop</code>, it doesn't wait for or force the state
 — the real outcome (e.g. <code>Crashed</code> for a <code>KILL</code>) is only confirmed on the
 next observation.</p></div>
-<h3>Exemplos</h3><div class="ex"><div class="cap">Sinal arbitrário, sem forçar `Stopped`</div><pre><code>delonix container kill -s USR1 web</code></pre></div>
+<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Sinal arbitrário, sem forçar `Stopped`</div><div class='cap lang-en'>Arbitrary signal, without forcing `Stopped`</div><pre><code>delonix container kill -s USR1 web</code></pre></div>
 <h2 id='wait'><code>container wait</code></h2>
 <p class='intro'>Block until one or more containers exit, then print their exit code (one per line, in the order given)</p>
 <div class='help'><pre><code>Usage: delonix container wait [OPTIONS] &lt;IDS&gt;...
@@ -532,7 +532,7 @@ real desse processo).</p></div><div class='lang-en'><p>The real exit code is onl
 <code>--restart</code> supervisor is the process's real parent — a plain <code>-d</code> container
 with no supervisor shows <code>Crashed</code>/137, a known architectural limit (the engine isn't
 that process's real parent).</p></div>
-<h3>Exemplos</h3><div class="ex"><div class="cap">Bloqueia até sair, imprime o exit code</div><pre><code>delonix container wait web</code></pre></div>
+<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Bloqueia até sair, imprime o exit code</div><div class='cap lang-en'>Blocks until it exits, prints the exit code</div><pre><code>delonix container wait web</code></pre></div>
 <h2 id='restart'><code>container restart</code></h2>
 <p class='intro'>Stop then start one or more containers (reuses the persistent rootfs and the original run configuration, like <code>start</code>)</p>
 <div class='help'><pre><code>Usage: delonix container restart [OPTIONS] &lt;IDS&gt;...
@@ -544,7 +544,7 @@ Options:
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
   -t, --time &lt;TIME&gt;   Seconds until SIGKILL, for the `stop` half [default: 10]
   -h, --help          Print help</code></pre></div>
-<h3>Exemplos</h3><div class="ex"><div class="cap">Pára e arranca de novo, mesma configuração</div><pre><code>delonix container restart web</code></pre></div>
+<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Pára e arranca de novo, mesma configuração</div><div class='cap lang-en'>Stop and start again, same configuration</div><pre><code>delonix container restart web</code></pre></div>
 <h2 id='rename'><code>container rename</code></h2>
 <p class='intro'>Give a container a new name</p>
 <div class='help'><pre><code>Usage: delonix container rename [OPTIONS] &lt;ID&gt; &lt;NEW_NAME&gt;
@@ -556,7 +556,7 @@ Arguments:
 Options:
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
   -h, --help          Print help</code></pre></div>
-<h3>Exemplos</h3><div class="ex"><pre><code>delonix container rename web frontend</code></pre></div>
+<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><pre><code>delonix container rename web frontend</code></pre></div>
 <h2 id='port'><code>container port</code></h2>
 <p class='intro'>Published ports of a container (<code>hostPort/proto -&gt; containerPort</code>)</p>
 <div class='help'><pre><code>Usage: delonix container port [OPTIONS] &lt;ID&gt;
@@ -567,7 +567,7 @@ Arguments:
 Options:
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
   -h, --help          Print help</code></pre></div>
-<h3>Exemplos</h3><div class="ex"><div class="cap">Portas publicadas deste container</div><pre><code>delonix container port web</code></pre></div>
+<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Portas publicadas deste container</div><div class='cap lang-en'>This container&#x27;s published ports</div><pre><code>delonix container port web</code></pre></div>
 <h2 id='pause'><code>container pause</code></h2>
 <p class='intro'>Suspend a container&#x27;s processes (cgroup v2 freezer) — the state stays in memory, unlike <code>stop</code>. Resume with <code>unpause</code></p>
 <div class='help'><pre><code>Usage: delonix container pause [OPTIONS] &lt;IDS&gt;...
@@ -578,7 +578,7 @@ Arguments:
 Options:
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
   -h, --help          Print help</code></pre></div>
-<h3>Exemplos</h3><div class="ex"><div class="cap">Suspende os processos (cgroup v2 freezer)</div><pre><code>delonix container pause web</code></pre></div>
+<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Suspende os processos (cgroup v2 freezer)</div><div class='cap lang-en'>Suspends the processes (cgroup v2 freezer)</div><pre><code>delonix container pause web</code></pre></div>
 <h2 id='unpause'><code>container unpause</code></h2>
 <p class='intro'>Resume a container suspended with <code>pause</code></p>
 <div class='help'><pre><code>Usage: delonix container unpause [OPTIONS] &lt;IDS&gt;...
@@ -589,7 +589,7 @@ Arguments:
 Options:
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
   -h, --help          Print help</code></pre></div>
-<h3>Exemplos</h3><div class="ex"><div class="cap">Resume um container suspenso</div><pre><code>delonix container unpause web</code></pre></div>
+<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Resume um container suspenso</div><div class='cap lang-en'>Resumes a suspended container</div><pre><code>delonix container unpause web</code></pre></div>
 <h2 id='commit'><code>container commit</code></h2>
 <p class='intro'>Create an image from a container&#x27;s CURRENT rootfs state (whatever was written inside becomes a new layer)</p>
 <div class='help'><pre><code>Usage: delonix container commit [OPTIONS] &lt;ID&gt; &lt;TAG&gt;
@@ -601,7 +601,7 @@ Arguments:
 Options:
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
   -h, --help          Print help</code></pre></div>
-<h3>Exemplos</h3><div class="ex"><div class="cap">Cria uma imagem a partir do rootfs actual do container</div><pre><code>delonix container commit web minha-app:debug</code></pre></div>
+<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Cria uma imagem a partir do rootfs actual do container</div><div class='cap lang-en'>Creates an image from the container&#x27;s current rootfs</div><pre><code>delonix container commit web minha-app:debug</code></pre></div>
 <h2 id='ssh'><code>container ssh</code></h2>
 <p class='intro'>Interactive shell inside a container (shortcut for <code>exec -t</code>): with no command, it tries <code>bash</code> and falls back to <code>sh</code>, which exists in any image</p>
 <div class='help'><pre><code>Usage: delonix container ssh [OPTIONS] &lt;ID&gt; [COMMAND]...
@@ -613,7 +613,7 @@ Arguments:
 Options:
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
   -h, --help          Print help</code></pre></div>
-<h3>Exemplos</h3><div class="ex"><div class="cap">Atalho para `exec -t` — tenta bash, cai para sh</div><pre><code>delonix container ssh web</code></pre></div>
+<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Atalho para `exec -t` — tenta bash, cai para sh</div><div class='cap lang-en'>Shortcut for `exec -t` — tries bash, falls back to sh</div><pre><code>delonix container ssh web</code></pre></div>
 <h2 id='healthcheck'><code>container healthcheck</code></h2>
 <p class='intro'>Run the image&#x27;s <code>HEALTHCHECK</code> inside the container. Exits with 1 if <code>unhealthy</code> — usable in a script/CI</p>
 <div class='help'><pre><code>Usage: delonix container healthcheck [OPTIONS] &lt;ID&gt;
@@ -624,7 +624,7 @@ Arguments:
 Options:
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
   -h, --help          Print help</code></pre></div>
-<h3>Exemplos</h3><div class="ex"><div class="cap">Corre o HEALTHCHECK da imagem, exit 1 se unhealthy (usável em CI)</div><pre><code>delonix container healthcheck web</code></pre></div>
+<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Corre o HEALTHCHECK da imagem, exit 1 se unhealthy (usável em CI)</div><div class='cap lang-en'>Runs the image&#x27;s HEALTHCHECK, exit 1 if unhealthy (usable in CI)</div><pre><code>delonix container healthcheck web</code></pre></div>
 <h2 id='top'><code>container top</code></h2>
 <p class='intro'>Processes running inside a container (read from <code>cgroup.procs</code>)</p>
 <div class='help'><pre><code>Usage: delonix container top [OPTIONS] &lt;ID&gt;
@@ -635,7 +635,7 @@ Arguments:
 Options:
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
   -h, --help          Print help</code></pre></div>
-<h3>Exemplos</h3><div class="ex"><div class="cap">Processos a correr dentro do container</div><pre><code>delonix container top web</code></pre></div>
+<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Processos a correr dentro do container</div><div class='cap lang-en'>Processes running inside the container</div><pre><code>delonix container top web</code></pre></div>
 <h2 id='diff'><code>container diff</code></h2>
 <p class='intro'>Files changed relative to the image: <code>A</code> = created/changed, <code>D</code> = deleted</p>
 <div class='help'><pre><code>Usage: delonix container diff [OPTIONS] &lt;ID&gt;
@@ -646,7 +646,7 @@ Arguments:
 Options:
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
   -h, --help          Print help</code></pre></div>
-<h3>Exemplos</h3><div class="ex"><div class="cap">Ficheiros alterados relativos à imagem (A/D)</div><pre><code>delonix container diff web</code></pre></div>
+<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Ficheiros alterados relativos à imagem (A/D)</div><div class='cap lang-en'>Files changed relative to the image (A/D)</div><pre><code>delonix container diff web</code></pre></div>
 <h2 id='cp'><code>container cp</code></h2>
 <p class='intro'>Copy files between the host and a container. Exactly one side is <code>container:/path</code> (e.g. <code>delonix container cp web:/etc/nginx.conf .</code>)</p>
 <div class='help'><pre><code>Usage: delonix container cp [OPTIONS] &lt;SRC&gt; &lt;DST&gt;
@@ -658,7 +658,7 @@ Arguments:
 Options:
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
   -h, --help          Print help</code></pre></div>
-<h3>Exemplos</h3><div class="ex"><div class="cap">Do container para o host</div><pre><code>delonix container cp web:/etc/nginx.conf .</code></pre></div><div class="ex"><div class="cap">Do host para o container</div><pre><code>delonix container cp ./nginx.conf web:/etc/nginx.conf</code></pre></div>
+<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Do container para o host</div><div class='cap lang-en'>From the container to the host</div><pre><code>delonix container cp web:/etc/nginx.conf .</code></pre></div><div class="ex"><div class='cap lang-pt'>Do host para o container</div><div class='cap lang-en'>From the host to the container</div><pre><code>delonix container cp ./nginx.conf web:/etc/nginx.conf</code></pre></div>
 <h2 id='describe'><code>container describe</code></h2>
 <p class='intro'>Human-readable detail of one or more containers, <code>kubectl describe</code>-style (for humans; use <code>inspect</code> for script-consumable JSON)</p>
 <div class='help'><pre><code>Usage: delonix container describe [OPTIONS] &lt;IDS&gt;...
@@ -669,7 +669,7 @@ Arguments:
 Options:
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
   -h, --help          Print help</code></pre></div>
-<h3>Exemplos</h3><div class="ex"><div class="cap">Detalhe estilo `kubectl describe` (para humanos; `inspect` é para scripts)</div><pre><code>delonix container describe web</code></pre></div>
+<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Detalhe estilo `kubectl describe` (para humanos; `inspect` é para scripts)</div><div class='cap lang-en'>`kubectl describe`-style detail (for humans; `inspect` is for scripts)</div><pre><code>delonix container describe web</code></pre></div>
 <h2 id='update'><code>container update</code></h2>
 <p class='intro'><strong>Reconfigure a RUNNING container without stopping it</strong> — ports, volumes, networks, and bandwidth cap.</p>
 <p class='intro'>Unlike docker (where changing a port or a volume forces recreating the container), here the dataplane doesn&#x27;t belong to the process lifecycle: ports are DNAT/hostfwd in front of the network and volumes come in through the kernel&#x27;s mount API (<code>open_tree</code>/<code>move_mount</code>) in the mount namespace of the already-live container. The PID doesn&#x27;t change and the process is never interrupted.</p>
@@ -729,7 +729,7 @@ change. Removals run before additions, so <code>--publish-rm 8080 --publish-add 
 works in a single command. <code>--memory</code>/<code>--cpus</code> rewrite the real cgroup
 immediately (<code>memory.max</code>/<code>cpu.max</code>) — no waiting for a
 <code>restart</code>.</p></div>
-<h3>Exemplos</h3><div class="ex"><div class="cap">Troca uma porta a QUENTE, sem reiniciar</div><pre><code>delonix container update web --publish-add 9090:80</code></pre></div><div class="ex"><div class="cap">Liga a uma rede nova + limite de banda</div><pre><code>delonix container update web --net-connect backend --net-rate 10mbit</code></pre></div><div class="ex"><div class="cap">Sobe o limite de memória/CPU a QUENTE, sem reiniciar</div><pre><code>delonix container update web --memory 512M --cpus 2</code></pre></div>
+<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Troca uma porta a QUENTE, sem reiniciar</div><div class='cap lang-en'>Hot-swap a port, no restart</div><pre><code>delonix container update web --publish-add 9090:80</code></pre></div><div class="ex"><div class='cap lang-pt'>Liga a uma rede nova + limite de banda</div><div class='cap lang-en'>Connect to a new network + bandwidth limit</div><pre><code>delonix container update web --net-connect backend --net-rate 10mbit</code></pre></div><div class="ex"><div class='cap lang-pt'>Sobe o limite de memória/CPU a QUENTE, sem reiniciar</div><div class='cap lang-en'>Raise the memory/CPU limit on the fly, no restart</div><pre><code>delonix container update web --memory 512M --cpus 2</code></pre></div>
 <h2 id='attach'><code>container attach</code></h2>
 <p class='intro'>Re-attach to a running container&#x27;s output stream (same log file <code>logs -f</code> reads). Unlike <code>docker attach</code>, this is OUTPUT-ONLY: a detached container&#x27;s stdin has nowhere to go (this engine keeps no live conduit to it once started, unlike a persistent per-container shim) — <code>-i</code>/<code>--stdin</code> is refused with a clear error instead of silently doing nothing</p>
 <div class='help'><pre><code>Usage: delonix container attach [OPTIONS] &lt;ID&gt;
@@ -748,7 +748,7 @@ a apontar para <code>exec -it</code>.</p></div><div class='lang-en'><p>Deliberat
 <code>docker attach</code>, there's no live stdin to an already-started detached container (no
 persistent per-container shim). <code>-i</code>/<code>--stdin</code> is refused with a clear error
 pointing at <code>exec -it</code>.</p></div>
-<h3>Exemplos</h3><div class="ex"><div class="cap">Volta a ligar ao stream de output de um container detached</div><pre><code>delonix container attach web</code></pre></div>
+<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Volta a ligar ao stream de output de um container detached</div><div class='cap lang-en'>Reconnect to a detached container&#x27;s output stream</div><pre><code>delonix container attach web</code></pre></div>
 <h2><span class='lang-pt'>Laboratório</span><span class='lang-en'>Lab</span></h2>
 <div class='callout lang-pt'><p>Sobe um nginx publicado, confirma que responde, e prova que o estado
 sobrevive a um <code>stop</code>/<code>start</code> (ao contrário de recriar o container).</p>
