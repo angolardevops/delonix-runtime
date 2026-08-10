@@ -210,7 +210,7 @@ Duas portas de entrada para o mesmo resultado: o manifesto declarativo nativo do
 ### Objectivos
 
 - `delonix stack init` → projecto completo pronto a editar
-- `stack apply` — manifesto declarativo "garante presente"
+- `stack plan`/`apply` — manifesto declarativo que CONVERGE (a quente, sem mudar o PID)
 - `compose up` — o mesmo `docker-compose.yml`, sem tradução manual
 
 ### Guião de ecrã

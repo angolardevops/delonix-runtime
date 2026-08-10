@@ -594,10 +594,11 @@ registados no store — o <code>create</code> AVISA alto que a rede não foi rea
         "tagline": "Aplica um manifesto inteiro (delonix-manifest.yaml) — todos os Kinds, por ordem.",
         "intro": """O equivalente declarativo do compose, ao estilo Kubernetes: um YAML multi-documento
 (<code>apiVersion: delonix.io/v1</code>) aplicado por ordem de dependência.
-<strong>Converge</strong> para <code>Container</code>, <code>Pod</code>, <code>Volume</code> e
-<code>Network</code> — muda-se um campo no manifesto e o <code>apply</code> aplica-o, a quente e
-sem mudar o PID quando é possível; os restantes Kinds continuam <em>garante-presente</em> e o
-<code>plan</code> marca-os com <code>!</code> em vez de os esconder. Continua fail-fast e
+<strong>Converge</strong> em onze dos doze Kinds — muda-se um campo no manifesto e o
+<code>apply</code> aplica-o, a quente e sem mudar o PID quando é possível. Só o
+<code>Secret</code> continua <em>garante-presente</em> (o estado são valores cifrados, e um plano
+não os decifra para comparar), e o <code>plan</code> marca-o com <code>!</code> em vez de o
+esconder. A lista exacta sai de <code>delonix stack plan --fields</code>. Continua fail-fast e
 <strong>sem rollback</strong>: o que já foi aplicado fica, e é o <code>plan</code> seguinte que
 mostra o que faltou. Guia completo de CI e deriva em <a href="../gitops.html">GitOps e CI</a>.""",
         "subs": {
@@ -4592,20 +4593,28 @@ def kinds_page():
     body = [f"<h1>Kinds do manifesto</h1>{bi('p', 'Cada Kind com um template COMPLETO e funcional — '
             'todos os campos, com os defaults e um comentário. Aplica um só com '
             '<code>delonix &lt;grupo&gt; apply -f</code>, ou todos de uma vez com <code>delonix stack apply</code> '
-            '(ordem por dependência: Secret → Network → Volume → Storage → ShareVolume → Image → Vm → Container → '
-            'Pod → Ingress/Egress → Dependency → HTTPRoute → Tunnel).',
+            '(ordem por dependência: Secret → Network → Volume → ShareVolume → Image → Vm → Container → '
+            'Pod → Ingress → FirewallPolicy → HTTPRoute → Tunnel).',
             'Each Kind with a COMPLETE, functional template — '
             'every field, with defaults and a comment. Apply just one with '
             '<code>delonix &lt;group&gt; apply -f</code>, or all at once with <code>delonix stack apply</code> '
-            '(dependency order: Secret → Network → Volume → Storage → ShareVolume → Image → Vm → Container → '
-            'Pod → Ingress/Egress → Dependency → HTTPRoute → Tunnel).', cls='tagline')}"]
+            '(dependency order: Secret → Network → Volume → ShareVolume → Image → Vm → Container → '
+            'Pod → Ingress → FirewallPolicy → HTTPRoute → Tunnel).', cls='tagline')}"]
     body.append(bi('p',
-        "Semântica <em>garante-presente</em> (idempotente por nome), não um reconciliador: sem diffing, "
-        "rollout nem rollback — fail-fast, o que já foi aplicado fica. Os templates abaixo são os ficheiros "
-        "reais em <a href='https://github.com/angolardevops/delonix-runtime/tree/main/examples'><code>examples/</code></a>.",
-        "<em>Ensure-present</em> semantics (idempotent by name), not a reconciler: no diffing, "
-        "rollout or rollback — fail-fast, whatever was already applied stays applied. The templates below are the "
-        "real files in <a href='https://github.com/angolardevops/delonix-runtime/tree/main/examples'><code>examples/</code></a>."))
+        "Desde a v0.47.0 o <code>apply</code> <strong>converge</strong>: o <code>stack plan</code> diz o "
+        "que mudaria e porquê, e o <code>apply</code> reconfigura portas, volumes, redes, memória e CPU "
+        "<strong>a quente, sem mudar o PID</strong> — recusando, com o nome do campo, o que obrigaria a "
+        "recriar (a não ser com <code>--replace</code>). Sem ficheiro de estado: o último spec aplicado vive "
+        "no próprio recurso. Continua fail-fast e sem rollback, e é convergência <em>a pedido</em> — não um "
+        "loop. Os templates abaixo são os ficheiros reais em "
+        "<a href='https://github.com/angolardevops/delonix-runtime/tree/main/examples'><code>examples/</code></a>.",
+        "Since v0.47.0 <code>apply</code> <strong>converges</strong>: <code>stack plan</code> says what would "
+        "change and why, and <code>apply</code> reconfigures ports, volumes, networks, memory and CPU "
+        "<strong>hot, with the PID unchanged</strong> — refusing, by field name, anything that would need a "
+        "recreate (unless you pass <code>--replace</code>). No state file: the last applied spec lives on the "
+        "resource itself. Still fail-fast and without rollback, and still convergence <em>on demand</em> — not "
+        "a loop. The templates below are the real files in "
+        "<a href='https://github.com/angolardevops/delonix-runtime/tree/main/examples'><code>examples/</code></a>."))
     for (kind, fname, intro), intro_en in zip(KINDS_DOC, KINDS_DOC_EN):
         anchor = kind.split()[0].lower()
         body.append(f"<h2 id='{anchor}'>{html.escape(kind)}</h2>")

@@ -146,10 +146,11 @@ main{padding:1.4rem 1.2rem 4rem;max-width:none}}
 <p class='tagline lang-pt'>Aplica um manifesto inteiro (delonix-manifest.yaml) — todos os Kinds, por ordem.</p><p class='tagline lang-en'>Applies a whole manifest (delonix-manifest.yaml) — every Kind, in dependency order.</p>
 <p class='lang-pt'>O equivalente declarativo do compose, ao estilo Kubernetes: um YAML multi-documento
 (<code>apiVersion: delonix.io/v1</code>) aplicado por ordem de dependência.
-<strong>Converge</strong> para <code>Container</code>, <code>Pod</code>, <code>Volume</code> e
-<code>Network</code> — muda-se um campo no manifesto e o <code>apply</code> aplica-o, a quente e
-sem mudar o PID quando é possível; os restantes Kinds continuam <em>garante-presente</em> e o
-<code>plan</code> marca-os com <code>!</code> em vez de os esconder. Continua fail-fast e
+<strong>Converge</strong> em onze dos doze Kinds — muda-se um campo no manifesto e o
+<code>apply</code> aplica-o, a quente e sem mudar o PID quando é possível. Só o
+<code>Secret</code> continua <em>garante-presente</em> (o estado são valores cifrados, e um plano
+não os decifra para comparar), e o <code>plan</code> marca-o com <code>!</code> em vez de o
+esconder. A lista exacta sai de <code>delonix stack plan --fields</code>. Continua fail-fast e
 <strong>sem rollback</strong>: o que já foi aplicado fica, e é o <code>plan</code> seguinte que
 mostra o que faltou. Guia completo de CI e deriva em <a href="../gitops.html">GitOps e CI</a>.</p><p class='lang-en'>The declarative, Kubernetes-style counterpart to compose: a multi-document
 YAML (<code>apiVersion: delonix.io/v1</code>) applied in dependency order.
