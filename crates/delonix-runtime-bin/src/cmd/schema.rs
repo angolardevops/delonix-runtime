@@ -221,35 +221,58 @@ pub fn explain(path: &str) -> Result<()> {
     node = deref(node, &defs);
     // `spec.containers.image` — a list segment steps THROUGH the item type, the
     // way the user thinks about it, rather than making them type `items`.
-    for seg in rest
-        .map(|r| r.split('.').collect::<Vec<_>>())
-        .unwrap_or_default()
-    {
-        if seg.is_empty() {
-            continue;
-        }
+    let segs: Vec<&str> = rest
+        .map(|r| r.split('.').filter(|s| !s.is_empty()).collect())
+        .unwrap_or_default();
+    for (i, seg) in segs.iter().enumerate() {
         let next = node
             .get("properties")
             .and_then(|p| p.get(seg))
             .cloned()
             .ok_or_else(|| Error::Invalid(format!("no field '{seg}' in {}", trail.join("."))))?;
-        trail.push(seg.to_string());
+        trail.push((*seg).to_string());
         node = deref(next, &defs);
-        if let Some(items) = node.get("items").cloned() {
-            node = deref(items, &defs);
+        // Step THROUGH a list only when there is more path to walk — the user
+        // thinks `containers.image`, not `containers.items.image`. Doing it on
+        // the LAST segment reported a list's ITEM type as the field's own type:
+        // `explain Container.ports` answered `string` for an `array<string>`.
+        if i + 1 < segs.len() {
+            if let Some(items) = node.get("items").cloned() {
+                node = deref(items, &defs);
+            }
         }
     }
     print_node(&trail.join("."), &node, &defs);
     Ok(())
 }
 
-/// Follows a `$ref` into `$defs` (one hop is all this schema ever produces).
+/// Follows a `$ref` into `$defs`, and picks the CANONICAL branch of an `anyOf`.
+///
+/// A Kind with two accepted spellings is an `anyOf` in the schema, which a
+/// validator handles fine and a human reading `explain` cannot: the union has no
+/// `properties` of its own, so walking it produced an empty answer and
+/// `explain Container.ports` failed outright — a regression this very schema
+/// work introduced when `kind: Container` gained the deprecated Pod spelling.
+///
+/// The FIRST branch is the canonical one by construction (`manifest_schema`
+/// builds it that way), so `explain` describes the shape people should be
+/// writing, not the union of everything still accepted.
 fn deref(node: serde_json::Value, defs: &serde_json::Value) -> serde_json::Value {
-    let Some(r) = node.get("$ref").and_then(|r| r.as_str()) else {
-        return node;
+    let node = match node.get("$ref").and_then(|r| r.as_str()) {
+        Some(r) => {
+            let name = r.rsplit('/').next().unwrap_or_default();
+            defs.get(name).cloned().unwrap_or(node)
+        }
+        None => node,
     };
-    let name = r.rsplit('/').next().unwrap_or_default();
-    defs.get(name).cloned().unwrap_or(node)
+    match node
+        .get("anyOf")
+        .and_then(|a| a.as_array())
+        .and_then(|a| a.first())
+    {
+        Some(first) => deref(first.clone(), defs),
+        None => node,
+    }
 }
 
 fn print_node(path: &str, node: &serde_json::Value, defs: &serde_json::Value) {
@@ -473,5 +496,28 @@ mod tests {
             "the published schema is stale — regenerate it with \
              `delonix schema print > docs/schema/v1/delonix.json`"
         );
+    }
+
+    /// Um Kind com duas grafias aceites é um `anyOf` no schema — um validador
+    /// lida com isso, um humano a ler o `explain` não: a união não tem
+    /// `properties` próprias, por isso a resposta vinha VAZIA e o
+    /// `explain Container.ports` falhava. Regressão introduzida por este
+    /// mesmo trabalho, quando o `kind: Container` ganhou a grafia-Pod.
+    #[test]
+    fn explain_atravessa_um_anyof_pela_forma_canonica() {
+        assert!(explain("Container").is_ok());
+        assert!(explain("Container.ports").is_ok());
+        assert!(explain("Container.image").is_ok());
+    }
+
+    /// Atravessar uma lista só faz sentido quando há mais caminho a percorrer.
+    /// Fazê-lo no ÚLTIMO segmento reportava o tipo do ITEM como o tipo do
+    /// campo: `Container.ports` respondia `string` para um `array<string>`.
+    #[test]
+    fn uma_lista_como_folha_reporta_o_tipo_da_lista() {
+        let s = manifest_schema(None).unwrap();
+        let defs = &s["$defs"];
+        let ports = deref(defs["ContainerSpec"]["properties"]["ports"].clone(), defs);
+        assert_eq!(type_of(&ports).unwrap(), "array<string>");
     }
 }

@@ -3870,3 +3870,8 @@ msgstr "um volume declara mais do que uma partilha de rede ({kinds}) — um volu
 
 msgid "{kind} '{name}': unknown field '{key}' in spec.{block} — ignored (check the spelling)"
 msgstr "{kind} '{name}': campo desconhecido '{key}' em spec.{block} — ignorado (verifica a escrita)"
+
+# forma-Pod do kind: Container, depreciada mas NAO reescrita (fase A4)
+
+msgid "Container '{name}': `spec.containers[]` on a `kind: Container` is the deprecated spelling — it still runs ONE container, named '{name}'. For containers that share a namespace use `kind: Pod` (its members are named '{name}-<member>', which is why this is not rewritten for you)"
+msgstr "Container '{name}': `spec.containers[]` num `kind: Container` é a forma depreciada — continua a correr UM container, chamado '{name}'. Para containers que partilham namespace usa `kind: Pod` (os membros dele chamam-se '{name}-<membro>', que é a razão de isto não ser reescrito por ti)"
