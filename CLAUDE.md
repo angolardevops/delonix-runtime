@@ -2848,9 +2848,22 @@ bloco pequeno (`delonix init`/`version`, o `scan` a recusar imagens VM, a extrac
 **Publicar é decisão do dono** — bump + tag `vX.Y.Z`, o CI faz o resto.
 
 **Estado verificável hoje** (medido, não afirmado): `cargo build --workspace`, `clippy
---all-targets` e `fmt` limpos; **443 testes** em 21 suites; arnês de caos **20/20**; a
-documentação sem um único comando ou flag que não exista no binário; i18n a **232/232**
-comandos e **0** descrições de flag por traduzir, com dois testes a travar a regressão.
+--all-targets` e `fmt` limpos; **792 testes** em 21 suites; arnês de caos **20/20**; bateria E2E
+da CLI **198/198**; a documentação sem um único comando ou flag que não exista no binário; i18n a
+**232/232** comandos e **0** descrições de flag por traduzir, com dois testes a travar a regressão.
+
+**Três gates novos, e cada um nasceu de uma falha real desta série:**
+1. **`ci.yml` → `docs`** — regenera o site e falha se o commitado deixar de ser o gerado, mais o
+   `--dry-run`/`validate` de todos os `examples/`. Pagou-se no mesmo dia: apanhou sete páginas
+   fora de dia com o `--help` real. **O que NÃO verifica está escrito no job** — um campo
+   desconhecido escapa, porque o `warn_unknown_fields` só corre no apply REAL.
+2. **`chaos.yml` → bateria E2E** (`scripts/e2e.sh`, 198 verificações sobre a CLI a sério). Fica ao
+   lado do caos e não no `ci.yml` porque precisa do MESMO ambiente rootless que aquele job já
+   monta. Não corria desde a v0.3.0 — 44 versões — e tinha nove falhas, **oito porque o teste
+   codificava um bug entretanto corrigido** (usava `--subnet …/24`, aceite-e-ignorado até o
+   `--subnet` passar a valer). Regra: quando uma correcção faz um teste antigo falhar, a primeira
+   hipótese é que o teste fixava o comportamento errado.
+3. **Cenário de caos `stack_converge`** — ver a secção do IaC.
 
 **Pendente, por ordem de valor:**
 
