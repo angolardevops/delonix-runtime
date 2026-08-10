@@ -203,6 +203,22 @@ fn t_help(s: &str) -> String {
     }
 }
 
+/// Is there a pt_AO entry for this HELP string? Asks the CATALOG directly,
+/// deliberately ignoring the active language: `t_help` returns the input
+/// unchanged when running in English, which would make a coverage test pass
+/// for the wrong reason. Same lookup rule as `t_help` (exact, then with the
+/// trailing period the clap derive strips).
+///
+/// Exists for one consumer — the test that walks the whole command tree and
+/// fails when a help string has no translation. `#[cfg(test)]` on purpose: a
+/// public helper with no production caller is exactly the shape this repo has
+/// had to delete twice (`publish_port_allow`, `reap_orphan_hostfwds`).
+#[cfg(test)]
+pub fn has_pt_translation(s: &str) -> bool {
+    let hit = |k: &str| matches!(catalog().get(k), Some(v) if !v.is_empty());
+    hit(s) || hit(&format!("{s}."))
+}
+
 /// Translates the help text of an entire `clap::Command` (about/long_about of
 /// each subcommand + help of each argument), recursively, via the catalog.
 ///
