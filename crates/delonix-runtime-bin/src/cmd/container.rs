@@ -434,9 +434,17 @@ pub(crate) struct PodSpec {
     pub(crate) containers: Vec<PodContainer>,
     #[serde(default)]
     volumes: Vec<PodVolume>,
-    /// delonix extension: network to attach (`host`|`none`|`<custom>`). Default `host`.
+    /// delonix extension: the SDN network the POD's shared netns attaches to.
+    ///
+    /// A `<custom>` name selects that network's bridge. `host`/`none` (the default) mean
+    /// "the pod's own netns on the default bridge" — a pod IS a shared netns, so it never
+    /// gets the host's. They are kept as the default because every existing manifest relies
+    /// on it; only a custom name changes anything.
+    ///
+    /// Was parsed and **entirely ignored** until v0.47.0: `create_pod` hardcoded `ingress`,
+    /// so a pod declared on a custom network landed on the default bridge in silence.
     #[serde(default = "default_net")]
-    network: String,
+    pub(crate) network: String,
     /// k8s `restartPolicy`: `Always`|`OnFailure`|`Never` (delonix values also accepted).
     #[serde(default = "default_restart", rename = "restartPolicy")]
     restart_policy: String,
