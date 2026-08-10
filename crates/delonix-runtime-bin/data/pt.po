@@ -4798,9 +4798,6 @@ msgstr "Sem `source`, puxa a dourada oficial SEM Kubernetes em vez da de Kuberne
 msgid "Absolute URL of a qcow2 cloud image to boot this VM from"
 msgstr "URL absoluto de uma cloud image qcow2 a partir da qual arrancar esta VM"
 
-msgid "Absolute URL of a qcow2 cloud image to boot this VM from."
-msgstr "URL absoluto de uma cloud image qcow2 a partir da qual arrancar esta VM."
-
 msgid "Actually run the privileged plan (requires root). Without it: dry-run"
 msgstr "Executa mesmo o plano privilegiado (precisa de root). Sem isto: dry-run"
 
@@ -4909,6 +4906,132 @@ msgstr "Política de reinício embutida nas unidades (`no|on-failure[:max]|alway
 msgid "`tcp/5432`, `udp/53`, `5432` (any proto), or `tcp/*` (all ports)"
 msgstr "`tcp/5432`, `udp/53`, `5432` (qualquer proto), ou `tcp/*` (todas as portas)"
 
+# help dos ARGUMENTOS restantes (build/cluster/compose/pod/secret/stack/
+# storage/sharevolume/volumes/workload/network/system/serve/dash)
+
+msgid "Absolute URL of a qcow2 cloud image to boot this VM from."
+msgstr "URL absoluto de uma cloud image qcow2 a partir da qual arrancar esta VM."
+
+msgid "Accepted for `docker compose` compatibility. Services already start detached here (this engine has no daemon holding them), so this is a no-op rather than an error — every existing script and CI job writes `up -d`, and rejecting it broke all of them for no behavioural gain"
+msgstr "Aceite por compatibilidade com o `docker compose`. Aqui os serviços já arrancam desanexados (este motor não tem daemon a segurá-los), por isso isto não faz nada em vez de dar erro — todos os scripts e jobs de CI que existem escrevem `up -d`, e recusá-lo partia-os a todos sem ganho de comportamento nenhum"
+
+msgid "Additional mount options (`nfs` driver)"
+msgstr "Opções de montagem adicionais (driver `nfs`)"
+
+msgid "Auto-provision N more VMs as a DEDICATED etcd cluster (delonix generates its own CA + certs and bootstraps it) instead of the default `stacked` etcd (co-located with the control-planes). Use an ODD number for a well-defined quorum (3, 5, ...) — 1 is allowed for dev/test but has no HA (a single point of failure). Omit for today's default behavior"
+msgstr "Provisiona automaticamente mais N VMs como cluster etcd DEDICADO (o delonix gera a sua própria CA + certificados e faz-lhe o bootstrap) em vez do etcd `stacked` por omissão (co-localizado com os control-planes). Usa um número ÍMPAR para um quórum bem definido (3, 5, ...) — 1 é aceite para dev/teste mas não tem HA (ponto único de falha). Omite-o para o comportamento por omissão de hoje"
+
+msgid "Build-time variable (`KEY=VALUE`), repeatable — only takes effect for a name the Dockerfile actually declares with `ARG KEY[=default]` (an override with no matching `ARG` is silently ignored, same as Docker)"
+msgstr "Variável de build (`CHAVE=VALOR`), repetível — só tem efeito para um nome que o Dockerfile declare mesmo com `ARG CHAVE[=default]` (um override sem `ARG` correspondente é ignorado em silêncio, tal como no Docker)"
+
+msgid "Bypasses the layer cache entirely (neither reads nor writes it) — same as Docker's `--no-cache`"
+msgstr "Ignora por completo a cache de layers (não a lê nem escreve) — o mesmo que o `--no-cache` do Docker"
+
+msgid "Cluster name (used for `<name>-cp1`/`<name>-w1` VM names and the kubeconfig context). Omit for an auto-generated Angolan name (`<king>-<place>-NN`) — same pattern as auto-named containers and `cluster create` (kind mode)"
+msgstr "Nome do cluster (usado nos nomes de VM `<nome>-cp1`/`<nome>-w1` e no contexto do kubeconfig). Omite-o para um nome angolano gerado automaticamente (`<rei>-<lugar>-NN`) — o mesmo padrão dos containers auto-nomeados e do `cluster create` (modo kind)"
+
+msgid "Device/export (`nfs` driver)"
+msgstr "Dispositivo/export (driver `nfs`)"
+
+msgid "Don't apply anything — print the full manifest with every default filled in (like `kubectl apply --dry-run=client -o yaml`). Stacks are expanded and Kinds canonicalized, so you see exactly what WOULD run"
+msgstr "Não aplica nada — imprime o manifesto completo com todos os defaults preenchidos (como o `kubectl apply --dry-run=client -o yaml`). Os stacks são expandidos e os Kinds canonicalizados, por isso vês exactamente o que CORRERIA"
+
+msgid "Export/share: NFS path (`/mnt/pool/media`), CIFS share name (`media`), or the path in the WebDAV URL (`/remote.php/dav/...`)"
+msgstr "Export/partilha: caminho NFS (`/mnt/pool/media`), nome da partilha CIFS (`media`), ou o caminho no URL WebDAV (`/remote.php/dav/...`)"
+
+msgid "Extra mount options (`vers=4.1,soft`), appended to the derived ones"
+msgstr "Opções de montagem extra (`vers=4.1,soft`), acrescentadas às derivadas"
+
+msgid "Force a template instead of the detected one (`stack init -t list` shows them)"
+msgstr "Força um template em vez do detectado (`stack init -t list` mostra-os)"
+
+msgid "Force (kill) running containers"
+msgstr "Força (mata) os containers a correr"
+
+msgid "Force removal even if running / if backend cleanup refuses"
+msgstr "Força a remoção mesmo a correr / mesmo que a limpeza no backend recuse"
+
+msgid "Gateway (macvlan/ipvlan)"
+msgstr "Gateway (macvlan/ipvlan)"
+
+msgid "`id=<name>,src=<path>` — a secret a `RUN --mount=type=secret,id=<name>` can bind-mount for the duration of that one instruction (never baked into a layer). Repeatable"
+msgstr "`id=<nome>,src=<caminho>` — um segredo que um `RUN --mount=type=secret,id=<nome>` pode montar por bind durante essa instrução apenas (nunca fica cozido numa layer). Repetível"
+
+msgid "`KEY=value` pair. Repeatable"
+msgstr "Par `CHAVE=valor`. Repetível"
+
+msgid "`KEY=value` pairs"
+msgstr "Pares `CHAVE=valor`"
+
+msgid "`linux/<arch>` (e.g. `linux/arm64`) — cross-arch build. Resolves the correct-arch base image and stamps it into the result; actually running a foreign-arch `RUN` needs the host's own binfmt_misc/qemu-user-static already registered (not managed by delonix — a clear preflight error names the missing interpreter instead of a confusing mid-build failure)"
+msgstr "`linux/<arch>` (ex.: `linux/arm64`) — build cross-arch. Resolve a imagem base do arch certo e carimba-o no resultado; correr de facto um `RUN` de outro arch exige que o binfmt_misc/qemu-user-static do próprio host já esteja registado (não é gerido pelo delonix — um erro claro de preflight nomeia o interpretador em falta, em vez de uma falha confusa a meio do build)"
+
+msgid "Load `KEY=value` lines from a file (e.g. `.env`), or `-` to read them from stdin (the value never touches argv/process list)"
+msgstr "Carrega linhas `CHAVE=valor` de um ficheiro (ex.: `.env`), ou `-` para as ler do stdin (o valor nunca passa pelo argv/lista de processos)"
+
+msgid "`local` (default) or `nfs`"
+msgstr "`local` (por omissão) ou `nfs`"
+
+msgid "Namespace that owns the share (default `default`)"
+msgstr "Namespace dona da partilha (por omissão `default`)"
+
+msgid "No short flag (unlike real `docker compose logs -f`) — `-f` is already `--file` on every subcommand of this group, for consistency across `up`/`down`/`ps`/`config`"
+msgstr "Sem flag curta (ao contrário do `docker compose logs -f` real) — o `-f` já é `--file` em todos os subcomandos deste grupo, por coerência entre `up`/`down`/`ps`/`config`"
+
+msgid "Output format: `table` (default, human) or `json` (machine, stable field names — see ADR-0005). `-o json | jq` is the automation path"
+msgstr "Formato de saída: `table` (por omissão, para humanos) ou `json` (para máquinas, com nomes de campo estáveis — ver ADR-0005). O `-o json | jq` é o caminho da automação"
+
+msgid "Overwrite files that already exist"
+msgstr "Sobrescreve ficheiros que já existam"
+
+msgid "Password (cifs/webdav) — prefer `--password-secret` to avoid exposing it"
+msgstr "Password (cifs/webdav) — prefere o `--password-secret` para não a expor"
+
+msgid "Print ONE snapshot as JSON and exit (no TUI, no ANSI) — for scripts/Grafana JSON datasource"
+msgstr "Imprime UMA snapshot em JSON e sai (sem TUI, sem ANSI) — para scripts/datasource JSON do Grafana"
+
+msgid "Prints the resolved project (containers/networks/volumes) and exits without creating anything"
+msgstr "Imprime o projecto resolvido (containers/redes/volumes) e sai sem criar nada"
+
+msgid "Quota (e.g. `2g`) — only applied if `--quota` is given"
+msgstr "Quota (ex.: `2g`) — só aplicada se vier `--quota`"
+
+msgid "Remove it even with live references — DESTROYS the data of whatever is still using it"
+msgstr "Remove-o mesmo com referências vivas — DESTRÓI os dados de quem ainda o estiver a usar"
+
+msgid "Server (host/IP), or the base URL in the `webdav` case"
+msgstr "Servidor (host/IP), ou o URL base no caso do `webdav`"
+
+msgid "Show what would move, change nothing"
+msgstr "Mostra o que seria movido, sem mudar nada"
+
+msgid "Skip the confirmation prompt (REQUIRED when stdin is not a terminal)"
+msgstr "Salta o pedido de confirmação (OBRIGATÓRIO quando o stdin não é um terminal)"
+
+msgid "Snapshot name (default: `YYYYMMDD-HHMMSS`)"
+msgstr "Nome do snapshot (por omissão: `AAAAMMDD-HHMMSS`)"
+
+msgid "Snapshot name (see `snapshot ls`)"
+msgstr "Nome do snapshot (ver `snapshot ls`)"
+
+msgid "Socket address (default: `$DELONIX_DOCKER_ADDR` or `unix:///run/delonix-docker.sock`)"
+msgstr "Endereço do socket (por omissão: `$DELONIX_DOCKER_ADDR` ou `unix:///run/delonix-docker.sock`)"
+
+msgid "Type: `nfs` | `cifs`/`smb` (Samba/Windows) | `webdav` (Nextcloud/ownCloud)"
+msgstr "Tipo: `nfs` | `cifs`/`smb` (Samba/Windows) | `webdav` (Nextcloud/ownCloud)"
+
+msgid "Vault secret with the `password` key (cifs/webdav) — does not leak in shell history"
+msgstr "Segredo do cofre com a chave `password` (cifs/webdav) — não vaza no histórico da shell"
+
+msgid "Wait for every node to report `Ready` (CNI up) before fetching the kubeconfig, then MERGE it into `~/.kube/config` as its own cluster/user/context (named after `--name`) instead of leaving other clusters' contexts untouched only by accident. Without this, the kubeconfig is still written to `<root>/clusters/<name>-kubeconfig.yaml` right after `kubeadm join`, before the CNI has necessarily finished"
+msgstr "Espera que todos os nós reportem `Ready` (CNI de pé) antes de ir buscar o kubeconfig, e FUNDE-O depois no `~/.kube/config` como cluster/user/contexto próprios (com o nome do `--name`), em vez de deixar os contextos dos outros clusters intactos só por acaso. Sem isto, o kubeconfig continua a ser escrito em `<root>/clusters/<nome>-kubeconfig.yaml` logo a seguir ao `kubeadm join`, antes de o CNI ter necessariamente terminado"
+
+msgid "Which container (its short name inside the pod). Default: the first"
+msgstr "Qual container (o nome curto dele dentro do pod). Por omissão: o primeiro"
+
+msgid "Workload name"
+msgstr "Nome do workload"
+
 # help dos comandos novos do bloco C
 msgid "Start the right project for THIS directory: detects and dispatches to `stack init`/`vm init` with the matching template, saying what it detected and why"
 msgstr "Arranca o projecto certo para ESTA pasta: detecta e despacha para o `stack init`/`vm init` com o template adequado, dizendo o que detectou e porquê"
@@ -4924,3 +5047,14 @@ msgstr "Força um template em vez do detectado (`stack init -t list` mostra-os).
 
 msgid "Overwrite files that already exist."
 msgstr "Sobrescreve ficheiros que já existam."
+
+# long_help multi-paragrafo do `vm create --url-img`
+
+msgid ""
+"Absolute URL of a qcow2 cloud image to boot this VM from.\n"
+"\n"
+"Downloaded once and cached, so a second `create` from the same URL costs nothing. Verified against a sibling `<url>.sha256` when the publisher offers one; without it, the download is trusted on TLS alone and SAYS SO — someone pointing this at their own bucket deserves to know which of the two they got."
+msgstr ""
+"URL absoluto de uma cloud image qcow2 a partir da qual arrancar esta VM.\n"
+"\n"
+"Descarregada uma vez e guardada em cache, por isso um segundo `create` a partir do mesmo URL não custa nada. Verificada contra um `<url>.sha256` irmão quando o publicador o oferece; sem ele, o download é confiado só ao TLS e ISSO É DITO — quem aponta isto ao seu próprio bucket merece saber qual dos dois casos lhe calhou."
