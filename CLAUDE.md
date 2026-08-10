@@ -3101,6 +3101,52 @@ natureza da golden k8s — documentadas no README dos scripts, para mudar no pri
 `GITHUB_TOKEN` não cria packages novos de user, ver a lição da golden); e um workflow de CI que
 reconstrua estas imagens como o `vm-image.yml` já faz para a golden.
 
+## A subnet de uma rede passou a valer, e o que isso abriu (v0.48.0)
+
+Pedido: poder passar CIDRs ao criar VMs/redes (`vpc_cidr`, `public_subnets_cidr`,
+`private_subnets_cidr`, `single_nat_gateway` — o vocabulário do módulo VPC do Terraform), para
+que uma VM OPNsense faça de firewall de uma infra de rede gerida sem quebrar o ingress/egress
+nativo.
+
+**O primeiro degrau era um bug, não uma feature**: `--subnet` e `spec.subnet` eram aceites e
+deitados fora com o driver `bridge` — o único que o rootless realiza. O `create_with_base`
+existia para isso, dizia-o no doc-comment, e tinha **zero chamadores** (5.ª ocorrência do padrão).
+Ver o commit `net: a subnet de uma rede passa a valer`. Fechou de caminho uma **deriva eterna no
+reconciler**: `RECONCILED_NETWORK_FIELDS` já comparava `subnet`, logo um manifesto com `subnet:`
+dava plano `-/+` a cada `stack plan` e o apply nunca o resolvia.
+
+**O que o espaço de endereçamento permite, e porquê**: o registo de uma rede guarda UM OCTETO,
+não um CIDR; tudo o resto (bridge, gateway `.0.1`, range do IPAM) é derivado. Daí `10.<200-254>.
+0.0/16` e nada mais — `172.20.0.0/16` ou um `/20` exigem mudar o formato do registo e o IPAM.
+A recusa nomeia sempre a forma que funciona.
+
+**NO-GO medido, com controlo: o OPNsense não arranca em Cloud Hypervisor.** Nem com o
+`rust-hypervisor-fw` (fica a enumerar PCI, guest nunca sobe) nem com o **EDK2 `CLOUDHV.fd`** do
+fork oficial (`gh release download --repo cloud-hypervisor/edk2`) — nos dois casos zero entradas
+ARP no holder e 100% de perda. **O controlo é o que torna isto uma conclusão e não um palpite**:
+a golden Linux, com o MESMO EDK2, responde em ~15s. Logo o firmware e a plumbing estão bons e o
+problema é o guest FreeBSD. Como o CH é a única via de pôr uma VM na SDN do holder (com libvirt a
+VM vive na `virbr0`, noutro netns), **o OPNsense não pode hoje ser gateway dos containers por essa
+via** — a alternativa é `vm bridge` (privilegiado, EXPERIMENTAL, já validado E2E).
+
+**Achado lateral que corrige uma nota desactualizada**: este documento dizia que a golden k8s é
+«libvirt-only (não há hypervisor-fw)». Com o EDK2 `CLOUDHV.fd` ela **arranca em Cloud Hypervisor**
+— medido nesta sessão, IP na SDN em ~15s.
+
+**Porque é que `single_nat_gateway` é recusado e não aceite-como-no-op**: num nó só não há AZs
+onde espalhar NAT gateways, e uma rede é uma bridge plana, não um conjunto de subnets roteadas.
+Aceitá-lo seria repetir exactamente o bug que esta mesma sessão encontrou. `vpcCidr`/
+`publicSubnets`/`privateSubnets`/`singleNatGateway` dão erro que diz o que existe aqui, antes do
+genérico «unknown field — check the spelling» (quem escreve `singleNatGateway` não errou a
+escrita; tem um modelo mental que não mapeia).
+
+**O ponto técnico para quem continuar** (subnets pública/privada + OPNsense como gateway): hoje
+TUDO o que sai leva masquerade em `oifname "tap0"`. Se as cargas privadas passarem a sair por um
+gateway-appliance, o masquerade tem de acontecer **nele** e não antes — senão vê todo o tráfego
+com um IP só e as regras por-origem dele deixam de valer. As chains por-workload (`fwcont`) são
+FILTRO, não NAT, por isso compõem-se bem: o delonix decide se o pacote sai do workload, o
+appliance decide o que atravessa a fronteira.
+
 ## Regra de ouro: fronteira com o PaaS
 
 Este código **não pode depender de nada privado**. Antes de qualquer commit:
