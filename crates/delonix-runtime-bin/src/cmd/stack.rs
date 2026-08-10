@@ -1441,6 +1441,53 @@ fn validate_graph_with(
             _ => {}
         }
     }
+    // Two firewall policies claiming the SAME (target, direction) is silent data
+    // loss on a security surface: `apply_fw_doc` REPLACES the rules of a
+    // direction, so the second document wipes the first's rules while both
+    // report success. Measured: `stack validate` said "OK — all references
+    // resolved" for exactly that manifest.
+    //
+    // Refused rather than merged, unlike `kind: Dependency` (which merges by
+    // target when it lowers). A Dependency states one peer's access and several
+    // of them plainly add up; a FirewallPolicy states the WHOLE desired state of
+    // a direction — `defaultPolicy` included — so two of them are two different
+    // answers to the same question, and on a firewall a contradiction must not
+    // be resolved by document order.
+    let mut seen: std::collections::HashMap<(String, String, String), String> = Default::default();
+    for doc in docs.iter().filter(|d| d.kind == "FirewallPolicy") {
+        let get = |k: &str, dflt: &str| {
+            doc.spec
+                .get(k)
+                .and_then(|v| v.as_str())
+                .unwrap_or(dflt)
+                .to_string()
+        };
+        let key = (
+            get("target", ""),
+            get("direction", ""),
+            get("scope", "container"),
+        );
+        if key.0.is_empty() || key.1.is_empty() {
+            continue; // already reported by the checks above
+        }
+        match seen.get(&key) {
+            Some(first) => issues.push(super::po::tf(
+                "FirewallPolicy '{name}' and '{first}' both define {direction} for '{target}' — \
+                 a policy is the WHOLE desired state of a direction, so the second would \
+                 silently replace the first; merge them into one document",
+                &[
+                    ("name", &doc.metadata.name),
+                    ("first", first),
+                    ("direction", &key.1),
+                    ("target", &key.0),
+                ],
+            )),
+            None => {
+                seen.insert(key, doc.metadata.name.clone());
+            }
+        }
+    }
+
     issues
 }
 
@@ -1925,5 +1972,39 @@ spec: {}
         assert!(idx("Network") < idx("Volume"));
         assert!(idx("Volume") < idx("Container"));
         assert!(idx("Container") < idx("Pod"));
+    }
+
+    /// **Perda silenciosa numa superfície de segurança.** O `apply_fw_doc`
+    /// SUBSTITUI as regras de uma direcção, por isso duas políticas para o mesmo
+    /// alvo+direcção fazem a segunda apagar as regras da primeira — e ambas
+    /// reportavam sucesso. Medido: o `stack validate` dizia «OK, todas as
+    /// referências resolvidas» para exactamente esse manifesto.
+    ///
+    /// Recusado e não fundido, ao contrário do `kind: Dependency`: uma
+    /// Dependency declara o acesso de UM peer e várias somam-se; uma
+    /// FirewallPolicy declara o estado desejado INTEIRO de uma direcção,
+    /// `defaultPolicy` incluído, logo duas são duas respostas à mesma pergunta.
+    #[test]
+    fn duas_politicas_para_o_mesmo_alvo_e_direccao_sao_recusadas() {
+        let mk = |name: &str, dir: &str| -> super::manifest::ManifestDoc {
+            serde_yaml::from_str(&format!(
+                "apiVersion: delonix.io/v1\nkind: FirewallPolicy\nmetadata: {{ name: {name} }}\nspec: {{ direction: {dir}, target: db }}\n"
+            ))
+            .unwrap()
+        };
+        let dois = vec![mk("a", "ingress"), mk("b", "ingress")];
+        let issues = super::validate_graph_with(&dois, &[], &[], &["db".into()], &[]);
+        assert_eq!(issues.len(), 1, "{issues:?}");
+        assert!(
+            issues[0].contains("ingress") && issues[0].contains("db"),
+            "{issues:?}"
+        );
+
+        // Uma por DIRECÇÃO não colide — são estados desejados de coisas
+        // diferentes, e é assim que se escreve uma política completa.
+        let por_direccao = vec![mk("a", "ingress"), mk("b", "egress")];
+        assert!(
+            super::validate_graph_with(&por_direccao, &[], &[], &["db".into()], &[]).is_empty()
+        );
     }
 }
