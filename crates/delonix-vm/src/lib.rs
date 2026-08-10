@@ -624,7 +624,9 @@ pub fn get_default_backend(base: &Path) -> Option<String> {
 pub fn set_default_backend(base: &Path, backend: &str) -> Result<()> {
     let canon = valid_backend_name(backend)?;
     std::fs::create_dir_all(base)?;
-    std::fs::write(default_backend_file(base), canon)?;
+    // Atomic: a torn write leaves a truncated backend name, and the reader has no way to
+    // tell "libvir" from a value someone meant to write.
+    delonix_runtime_core::write_atomic(&default_backend_file(base), canon.as_bytes())?;
     Ok(())
 }
 
@@ -1778,7 +1780,7 @@ impl VmBackend for LibvirtBackend {
             xml = xml.replace("</domain>\n", &format!("{sec}</domain>\n"));
         }
         let xml_path = vmdir.join(format!("{}.xml", cfg.name));
-        std::fs::write(&xml_path, &xml)?;
+        delonix_runtime_core::write_atomic(&xml_path, xml.as_bytes())?;
 
         // Idempotent: if the domain already exists (auto-heal), it just (re)starts; otherwise
         // define + start. `virsh start` on an already-running domain is a benign no-op.

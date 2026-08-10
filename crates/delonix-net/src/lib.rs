@@ -51,7 +51,7 @@ fn default_base() -> u8 {
     if let Some(parent) = path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
-    let _ = std::fs::write(&path, base.to_string());
+    let _ = delonix_runtime_core::write_atomic(&path, base.to_string().as_bytes());
     base
 }
 
@@ -1035,7 +1035,7 @@ impl NetworkStore {
                 base + 1
             };
         }
-        std::fs::write(self.path(name), base.to_string())?;
+        delonix_runtime_core::write_atomic(&self.path(name), base.to_string().as_bytes())?;
         self.get(name)
     }
 
@@ -1063,7 +1063,7 @@ impl NetworkStore {
                 "invalid /16 base octet: {base} (1..=254)"
             )));
         }
-        std::fs::write(self.path(name), base.to_string())?;
+        delonix_runtime_core::write_atomic(&self.path(name), base.to_string().as_bytes())?;
         self.get(name)
     }
 
@@ -1128,10 +1128,7 @@ impl NetworkStore {
         };
         upsert("label.", labels);
         upsert("annotation.", annotations);
-        std::fs::write(self.path(name), out.join("\n") + "\n").map_err(|e| Error::Runtime {
-            context: "write network",
-            message: e.to_string(),
-        })?;
+        delonix_runtime_core::write_atomic(&self.path(name), (out.join("\n") + "\n").as_bytes())?;
         self.get(name)
     }
 
@@ -1189,7 +1186,7 @@ impl NetworkStore {
             "driver=overlay\nbase={base}\nvni={vni}\npeers={}\n{wgip_line}",
             peers.join(",")
         );
-        std::fs::write(self.path(name), body)?;
+        delonix_runtime_core::write_atomic(&self.path(name), body.as_bytes())?;
         self.get(name)
     }
 
@@ -1232,10 +1229,7 @@ impl NetworkStore {
         if !out.iter().any(|l| l.starts_with("peers=")) {
             out.push(new_line);
         }
-        std::fs::write(self.path(name), out.join("\n") + "\n").map_err(|e| Error::Runtime {
-            context: "write overlay",
-            message: e.to_string(),
-        })?;
+        delonix_runtime_core::write_atomic(&self.path(name), (out.join("\n") + "\n").as_bytes())?;
         self.get(name)
     }
 
@@ -1296,7 +1290,7 @@ impl NetworkStore {
         );
         let body =
             format!("driver={driver}\nparent={parent}\nsubnet={subnet}\ngateway={gateway}\n");
-        std::fs::write(self.path(name), body)?;
+        delonix_runtime_core::write_atomic(&self.path(name), body.as_bytes())?;
         self.get(name)
     }
 
@@ -1425,6 +1419,9 @@ impl Net {
             )?;
             run("ip", &["link", "set", BRIDGE, "up"])?;
         }
+        // procfs, not a store: the kernel takes the value on write, there is no file to
+        // publish and nothing to tear. `write_atomic` (rename into place) does not even
+        // apply here — /proc rejects it.
         let _ = std::fs::write("/proc/sys/net/ipv4/ip_forward", "1");
 
         if !table_exists() {
@@ -2152,6 +2149,9 @@ impl Net {
     pub fn set_policy(&self, from_ip: &str, to_ip: &str, deny: bool) -> Result<()> {
         self.ensure_bridge()?;
         // the IP filter has to see bridged traffic (as Docker does).
+        // procfs, not a store: the kernel takes the value on write, there is no file to
+        // publish and nothing to tear. `write_atomic` (rename into place) does not even
+        // apply here — /proc rejects it.
         let _ = std::fs::write("/proc/sys/net/bridge/bridge-nf-call-iptables", "1");
         for (a, b) in [(from_ip, to_ip), (to_ip, from_ip)] {
             let needle = format!("ip saddr {a} ip daddr {b} ");
@@ -2781,6 +2781,53 @@ mod tests {
     /// line by line and must not eat the lines it does not own — an overlay that
     /// lost its `vni`/`peers` to an ownership stamp would silently stop reaching
     /// the other nodes.
+    /// REGRESSION: a reader must NEVER observe a partially-written network record.
+    ///
+    /// Every record here was written with a bare `fs::write`, which TRUNCATES the target
+    /// and only then fills it — while `ipam.rs`, in this same crate, had been using
+    /// `write_atomic` all along. Two failure modes, and the second is the nasty one:
+    ///
+    /// * a torn multi-line body loses lines, and `get()` ignores missing keys on purpose
+    ///   (that is what lets an older binary read a newer record), so the network comes back
+    ///   DEGRADED rather than failing;
+    /// * a torn base-octet write is worse — `get()` parses a bare number as the old format,
+    ///   so `"142"` truncated to `"14"` is still a perfectly valid octet. The network
+    ///   silently moves to another /16 and every container on the old prefix goes dark.
+    ///
+    /// Same technique as `store.rs`'s `save_concorrente_nunca_publica_json_corrompido`:
+    /// writers of DIFFERENT sizes so the interleaving is observable. Reverting
+    /// `write_atomic` to `fs::write` makes this fail.
+    #[test]
+    fn escrita_de_rede_nunca_deixa_um_leitor_ver_registo_parcial() {
+        let tmp = std::env::temp_dir().join(format!("dlx-net-atomic-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        let st = NetworkStore::open(&tmp).unwrap();
+        st.create_overlay("ov", 42, &[], None).unwrap();
+
+        std::thread::scope(|sc| {
+            for i in 0..16 {
+                let tmp = tmp.clone();
+                sc.spawn(move || {
+                    let st = NetworkStore::open(&tmp).unwrap();
+                    // Peers of growing length: the body changes size on every write.
+                    let peer = format!("10.0.0.{}={}", i + 1, "k".repeat(i * 9));
+                    let _ = st.add_overlay_peer("ov", &peer);
+                    // Whatever the interleaving, a reader sees a COMPLETE record.
+                    let n = st
+                        .get("ov")
+                        .expect("registo parcial publicado pela escrita");
+                    assert_eq!(n.driver, "overlay", "driver perdido num corpo truncado");
+                    assert_eq!(n.vni, Some(42), "vni perdido num corpo truncado");
+                });
+            }
+        });
+
+        let n = st.get("ov").expect("estado final tem de ser legivel");
+        assert_eq!(n.driver, "overlay");
+        assert_eq!(n.vni, Some(42));
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
     #[test]
     fn set_metadata_preserva_vni_e_peers_de_um_overlay() {
         use super::NetworkStore;
