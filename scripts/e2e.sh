@@ -125,7 +125,13 @@ check "volumes describe" ok "$BIN" volumes describe "$VOL"
 section "network: ciclo de vida"
 ########################################
 NET="net-$PFX"
-check "network create" ok "$BIN" network create "$NET" --subnet 10.199.0.0/24
+# `/16` na gama 10.<200-254>, e não o `/24` que este teste usou durante meses: até
+# a v0.48.0 o `--subnet` era ACEITE e deitado fora com o driver bridge, por isso um
+# `/24` "passava" sem nunca ter sido aplicado. Fechado o bug, o teste que o
+# codificava passou a falhar — a armadilha «um teste pode codificar o bug» que este
+# repo já tinha catalogado com o `default_project_name` do compose. Octetos altos
+# de propósito, para não colidirem com uma rede real do host.
+check "network create" ok "$BIN" network create "$NET" --subnet 10.253.0.0/16
 check "network ls mostra-a" ok bash -c "'$BIN' network ls | grep -q '$NET'"
 check "network inspect" ok "$BIN" network inspect "$NET"
 check "network describe" ok "$BIN" network describe "$NET"
@@ -134,7 +140,11 @@ check "network describe" ok "$BIN" network describe "$NET"
 section "image"
 ########################################
 IMG="${E2E_IMAGE:-alpine:3.19}"
-if "$BIN" image ls 2>/dev/null | grep -q "${IMG%%:*}"; then
+# A guarda tem de procurar a REFERÊNCIA inteira, não só o repositório: com um
+# `alpine:latest` no store e `alpine:3.19` ausente, o `grep alpine` passava e o
+# `image describe alpine:3.19` a seguir falhava. `redis:7-alpine` também casava
+# com `alpine`, o que tornava o falso positivo ainda mais fácil.
+if "$BIN" image ls 2>/dev/null | grep -qF "$IMG "; then
   check "image describe" ok "$BIN" image describe "$IMG"
 else
   check "image pull ($IMG)" ok "$BIN" image pull "$IMG"
@@ -189,7 +199,7 @@ section "container em rede custom: hot reconfig pelo ingress"
 ########################################
 CN="cn-$PFX"
 NET2="net2-$PFX"
-if "$BIN" network create "$NET2" --subnet 10.198.0.0/24 >/dev/null 2>&1 && \
+if "$BIN" network create "$NET2" --subnet 10.252.0.0/16 >/dev/null 2>&1 && \
    "$BIN" container run -d --name "$CN" --net "$NET" "$IMG" sleep 600 >/dev/null 2>&1; then
   check "update: net-connect a quente" ok "$BIN" container update "$CN" --net-connect "$NET2"
   check "update: rede extra no describe" ok bash -c "'$BIN' container describe '$CN' | grep -q '$NET2'"
@@ -222,7 +232,7 @@ metadata:
   name: sn-$PFX
 spec:
   driver: bridge
-  subnet: 10.197.0.0/24
+  subnet: 10.251.0.0/16
 YAML
 check "stack apply" ok "$BIN" stack apply -f "$WORK/delonix-manifest.yaml"
 check "stack apply idempotente" ok "$BIN" stack apply -f "$WORK/delonix-manifest.yaml"
