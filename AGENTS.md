@@ -391,6 +391,69 @@ falhava (código 124). É o mesmo bug que o `exec` já teve e corrigiu — passa
 `user` e a deixar o skip-por-inode do `open_container_ns` decidir. Lição a reter: **`container.
 userns` não é "está num userns diferente do meu"**; nunca o usar para essa pergunta.
 
+## IaC nativo: `stack plan`/`apply` convergente/`destroy` (v0.47.0)
+
+Pedido: tornar o IaC do Delonix aceitável pela comunidade **sem ser Terraform nem Ansible** — que
+não sejam precisos. A revisão que o motivou está em
+[docs/discovery/47_IAC_REVISAO.md](docs/discovery/47_IAC_REVISAO.md).
+
+**O defeito estrutural que isto fecha**: o `apply` só criava. Um recurso existente imprimia
+`already exists, nothing to do` e o comando devolvia **0** — mudar a imagem no manifesto não fazia
+nada e reportava sucesso. Gémeo declarativo do relato desonesto que a v0.37.0 tirou do CLI
+imperativo, e pior, porque o utilizador mudou o ficheiro de propósito. Agrava-o o facto de a
+capacidade já cá estar: o `cmd_update` reconfigura portas/volumes/redes/memória/CPU **a quente sem
+mudar o PID** e o caminho declarativo nunca lhe chamou — 5.ª ocorrência do padrão
+`mount_live`/`set_net_rate`/`update_limits`/`JsonStore::update`.
+
+- **`cmd/reconcile.rs` é PURO** — recebe os dois lados já lidos, devolve `Vec<Change>`; nunca abre
+  um store nem corre um comando. É o que torna testáveis como dados os casos que interessam.
+- **Diff de 3 vias.** O último spec aplicado vive no PRÓPRIO recurso
+  (`delonix.io/last-applied`, o mecanismo do kubectl no sítio do kubectl) — **sem ficheiro de
+  estado**, coerente com o que o projecto já publicou. É o 3.º lado que distingue «tiraste o campo
+  do ficheiro» (reverte) de «alguém pôs isto à mão» (não mexe).
+- **Posse por label** `delonix.io/stack` (mesmo idioma do `POD_LABEL`/`COMPOSE_PROJECT_LABEL`).
+  Um recurso criado à mão é `Adopt` (dispensa um comando `import`); de outra stack é `Conflict` e
+  nunca é tocado; e nem `--prune` nem `destroy` vêem o que não têm a label.
+- **Fail-closed na recriação**: `-/+` nomeia TODOS os campos frios e o `apply` recusa sem
+  `--replace <Kind>/<nome>`, antes da primeira criação (o apply é fail-fast sem rollback — recusar
+  a meio deixaria a stack meio convergida E com erro). `--prune` nunca por omissão, e corre em
+  ÚLTIMO lugar. `destroy` usa a ordem INVERSA de `KINDS`, **derivada** e não escrita 2.ª vez.
+- **`--detailed-exitcode`** (0/2/1) — contrato do `terraform plan`, para um gate de deriva em CI.
+- **Âmbito v1: Container/Pod/Volume/Network.** Os outros 14 Kinds continuam «garante presente» e o
+  plano marca-os `!` — **nunca os omite** (um plano que esconde um recurso lê-se como «sem
+  alterações»).
+- **A normalização é o ponto crítico**: se os dois lados não derem a mesma string, tudo aparece
+  como deriva para sempre. O conjunto comparado é conservador, cada Kind tem teste a provar que um
+  manifesto inalterado dá ZERO diferenças, e **`stack plan --fields`** diz o que é comparado e o
+  que não é e porquê (`env`/`command` vêm fundidos com os da imagem, `user` é guardado como uid).
+- `mount_to_spec` é o inverso do `resolve_spec` de propósito — aquele **cria** o volume, e calcular
+  um plano não pode criar nada.
+- **`Volume`/`Network` ganharam `labels`/`annotations`** (`#[serde(default)]`, registos antigos
+  continuam válidos). O `Network` não é serde — é `key=value` com vários escritores, por isso o
+  `set_metadata` reescreve LINHA A LINHA (idioma do `add_overlay_peer`) e promove um registo legado
+  (octeto nu) a `base=<n>`; um valor com newline é **recusado** (partiria o registo em duas linhas).
+
+**Schema GERADO do código (ADR-0007)** — `delonix schema print` + `delonix explain
+Container.ports`, publicado em `docs/schema/v1/delonix.json` com teste a garantir que É o gerado.
+`schemars` é a **2.ª excepção deliberada** à regra de sem-dependências-novas (depois do `ratatui`),
+confinada ao `-bin`, com os 8 crates de motor verificados dep-limpos. O schema é tão estrito quanto
+o motor (`additionalProperties: false`, para apanhar o typo num nome de campo), mas a lista de
+aceites vem dos MESMOS `*_SPEC_FIELDS` do `warn_unknown_fields`: a forma agrupada do Container é
+hoisteada antes de o `ContainerSpec` existir, e derivar a estritez só do struct sinalizaria
+manifestos correctos — falso positivo, pior que a lacuna.
+
+**BUG REAL apanhado a validar os `examples/` contra o schema**, num exemplo publicado:
+`env: { POSTGRES_PASSWORD: dev }` (a forma que qualquer pessoa vinda do compose escreve) era aceite
+e **silenciosamente descartada** — o Postgres do `examples/dependency.yaml` arrancava sem password.
+A forma agrupada passa a ser identificada pelas suas chaves (`vars`/`files`/`secrets`/
+`secretFiles`), e uma mapping simples vira `["K=v"]`.
+
+**O schema dos manifestos passou a ESTÁVEL** em `docs/cli-stability.md` (estava declarado o
+contrário — a CLI mais protegida que o formato que as pessoas põem em git). Guia transversal novo
+em `docs/gitops.md` (plan num PR, apply no merge, gate de deriva, e o que fazer quando um apply
+morre a meio). `scripts/schema-diff.sh` compara campo a campo entre duas tags e sai 1 com
+diferenças.
+
 ## Manifesto/apply (`delonix-manifest.yaml`)
 
 Manifesto declarativo multi-documento, ao estilo Kubernetes (`apiVersion: delonix.io/v1` /

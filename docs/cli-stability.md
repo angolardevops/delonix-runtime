@@ -53,16 +53,74 @@ ps`, `image ls`, `volumes ls`, `network ls`, `vm ls`, `pod ls`, `secret ls`,
 > exactamente o erro que o `paridade-docker-podman.md` abre por corrigir: inferir
 > ausência a partir de um sintoma, sem ir ver.
 
+## O schema dos manifestos — estável, e é o que mais importa
+
+> Esta secção **substitui** a linha que dizia que o schema «é aditivo na prática,
+> mas não é uma promessa». Era o compromisso ao contrário: a CLI estava mais
+> protegida que o formato declarativo, quando é o formato que as pessoas põem em
+> git e revêem em PR. Um `delonix-manifest.yaml` só se versiona se se souber que
+> não parte sozinho.
+
+Para os Kinds com spec tipado — **`Container`, `Pod`, `Volume`, `Network`** —
+garante-se, dentro do `0.x`:
+
+* **Um campo nunca é removido, nem muda de tipo, nem muda de significado.**
+* **Um campo novo é sempre opcional** e tem um default que preserva o
+  comportamento anterior. Um manifesto escrito hoje continua a fazer o mesmo
+  amanhã.
+* **Um nome antigo que seja renomeado mantém-se aceite como alias** (é o que já
+  acontece com `restart`→`restartPolicy`, `options`→`mountOptions`,
+  `wg_ip`→`wgIp`).
+* **`apiVersion: delonix.io/v1` só muda com um `v2`**, e um `v2` não sai sem o
+  `v1` continuar a ser aceite.
+
+A verdade não é este texto, é o schema: **`delonix schema print`** emite-o a
+partir do próprio código (ADR-0007), e o mesmo ficheiro está publicado em
+[`schema/v1/delonix.json`](schema/v1/delonix.json). Um teste do repositório
+falha se o publicado deixar de ser o gerado, precisamente para esta página não
+voltar a poder mentir.
+
+Aponta o editor e escreve manifestos com completação e validação:
+
+```yaml
+# yaml-language-server: $schema=https://angolardevops.github.io/delonix-runtime/schema/v1/delonix.json
+apiVersion: delonix.io/v1
+kind: Container
+metadata: { name: web }
+spec:
+  image: nginx:1.27
+```
+
+Para saber o que mudou entre duas versões, não há uma página escrita à mão —
+haveria a segunda fonte de verdade que a ADR-0007 aboliu. Há um comando:
+
+```bash
+scripts/schema-diff.sh v0.46.0          # dessa tag até à árvore actual
+scripts/schema-diff.sh v0.46.0 v0.47.0  # entre duas tags
+```
+
+Compara campo a campo (nome e tipo), não o JSON cru, e sai **1** quando há
+diferenças — serve directamente como gate de CI. Um campo removido ou com o
+tipo mudado é assinalado como **quebra de contrato**, que é o que esta secção
+promete não acontecer.
+
+**O que fica de fora, e é honesto dizê-lo:** os restantes 14 Kinds
+(`Vm`, `Cluster`, `Storage`, `ShareVolume`, `Image`, `Secret`, `Ingress`,
+`Egress`, `FirewallPolicy`, `HTTPRoute`, `Dependency`, `Tunnel`, `Workload`,
+`Stack`) ainda não têm schema gerado, e por isso continuam sem promessa. O
+`delonix schema`/`explain` diz quais são, em vez de os omitir.
+
 ## NÃO estável — pode mudar em qualquer versão
 
 * **`serve cri`, `serve api`, `serve docker-api`** — superfícies de protocolo
   em construção. O `docker-api` publica a sua cobertura em
   `delonix serve docker-api --matrix`, e é essa tabela que diz o que existe
-  hoje, não esta promessa.
+  hoje, não esta promessa. A **API de gestão** (`serve api`) é local (socket
+  unix, só o próprio uid) e não tem contrato publicado: não construas automação
+  sobre ela — para isso existe a CLI, com `-o json`.
 * **`cluster`, `vm`, `pod`, `workload`, `storage`, `sharevolume`, `net`** —
-  a superfície ainda está a assentar.
-* **O schema dos manifestos** (`kind: *`). Campos são aditivos na prática, mas
-  não é uma promessa.
+  a superfície ainda está a assentar. (O *schema* de `kind: Pod` é estável, ver
+  acima; o que não é estável é o grupo de comandos `delonix pod`.)
 * **Tudo o que começa por `net netns`** — plumbing interno exposto por
   conveniência de depuração.
 * **O formato dos ficheiros de estado** em `$DELONIX_ROOT`. Lê-se pelo `inspect`,
