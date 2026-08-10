@@ -527,10 +527,7 @@ pub enum VmCmd {
         no_k8s: bool,
     },
     /// Push a local golden VM image to an OCI registry (`vm push <name> <target>`).
-    Push {
-        name: String,
-        target: String,
-    },
+    Push { name: String, target: String },
     /// Convert a VM disk to the format another ecosystem imports — `qcow2`,
     /// `raw`, `vmdk` (VMware), `vdi` (VirtualBox), `vhdx`/`vhd` (Hyper-V,
     /// Azure). Flattened either way, so the result is a standalone file with
@@ -594,6 +591,10 @@ pub enum VmCmd {
         #[arg(add = ArgValueCandidates::new(super::complete::vms))]
         name: Option<String>,
     },
+    /// Which published ports a VM can actually reach, and how to fix the ones
+    /// it cannot. A port published to the default `127.0.0.1` is invisible to a
+    /// VM — this lists the libvirt gateways, reads each port's LIVE bind, and
+    /// for every loopback-only one prints the exact republish command.
     Reach,
     /// EXPERIMENTAL (root): give a libvirt VM DIRECT IP reachability to a
     /// container SDN network (veth from the host into the holder netns + routes).

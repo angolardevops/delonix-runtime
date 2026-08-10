@@ -336,6 +336,9 @@ pub enum ImageCmd {
         #[arg(long)]
         force: bool,
     },
+    /// (only with `--vm`) Build a VM image: the built-in golden recipe
+    /// (Ubuntu + kubeadm/kubelet/kubectl + `delonix-cri`), or a `VMfile`
+    /// of your own with `-f`.
     Build {
         #[arg(short = 't', long = "tag")]
         tag: String,
@@ -455,6 +458,9 @@ pub enum VmSub {
         #[arg(long)]
         force: bool,
     },
+    /// Build a VM image: the built-in golden recipe
+    /// (Ubuntu + kubeadm/kubelet/kubectl + `delonix-cri`), or a `VMfile`
+    /// of your own with `-f`.
     Build {
         #[arg(short = 't', long = "tag")]
         tag: String,

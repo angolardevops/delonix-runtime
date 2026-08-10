@@ -147,6 +147,13 @@ pub enum StackCmd {
         #[arg(long = "fields")]
         fields: bool,
     },
+    /// List the structure the manifest composes (containers, volumes,
+    /// networks, ...) and whether each resource exists — the tabular summary
+    /// of `describe`.
+    Ls {
+        #[arg(short = 'f', long = "file")]
+        file: Option<PathBuf>,
+    },
     /// Stack detail in `kubectl describe` style: each resource DECLARED in the
     /// manifest and whether or not it is present on the machine.
     ///
@@ -159,13 +166,6 @@ pub enum StackCmd {
     /// The column that matters is PRESENCE: an `apply` is fail-fast and without
     /// rollback, so a half-applied stack is a normal state and this is exactly
     /// what it shows.
-    /// List the structure the manifest composes (containers, volumes,
-    /// networks, ...) and whether each resource exists — the tabular summary
-    /// of `describe`.
-    Ls {
-        #[arg(short = 'f', long = "file")]
-        file: Option<PathBuf>,
-    },
     Describe {
         #[arg(short = 'f', long = "file")]
         file: Option<PathBuf>,
