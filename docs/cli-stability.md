@@ -104,11 +104,18 @@ diferenças — serve directamente como gate de CI. Um campo removido ou com o
 tipo mudado é assinalado como **quebra de contrato**, que é o que esta secção
 promete não acontecer.
 
-**O que fica de fora, e é honesto dizê-lo:** os restantes 14 Kinds
-(`Vm`, `Cluster`, `Storage`, `ShareVolume`, `Image`, `Secret`, `Ingress`,
-`Egress`, `FirewallPolicy`, `HTTPRoute`, `Dependency`, `Tunnel`, `Workload`,
-`Stack`) ainda não têm schema gerado, e por isso continuam sem promessa. O
-`delonix schema`/`explain` diz quais são, em vez de os omitir.
+**O que fica de fora, e é honesto dizê-lo:** os restantes Kinds
+(`Vm`, `Cluster`, `ShareVolume`, `Image`, `Secret`, `Ingress`,
+`FirewallPolicy`, `HTTPRoute`, `Tunnel`, `Workload`, `Stack`) ainda não têm
+schema gerado, e por isso continuam sem promessa. O `delonix schema`/`explain`
+diz quais são, em vez de os omitir.
+
+> **Três Kinds deixaram de existir** nesta série, fundidos no que já faziam:
+> `Egress` → `FirewallPolicy` com `direction: egress`; `Dependency` →
+> `FirewallPolicy` (açúcar, reduzido no load); `Storage` → `kind: Volume` com um
+> bloco `nfs:`/`cifs:`/`webdav:`. Os nomes antigos continuam a carregar, com
+> aviso de depreciação — a regra do «corte limpo» aplica-se a comandos, e um
+> manifesto em git merece um degrau em vez de um erro.
 
 ## NÃO estável — pode mudar em qualquer versão
 

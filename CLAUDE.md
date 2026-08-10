@@ -419,9 +419,27 @@ mudar o PID** e o caminho declarativo nunca lhe chamou — 5.ª ocorrência do p
   a meio deixaria a stack meio convergida E com erro). `--prune` nunca por omissão, e corre em
   ÚLTIMO lugar. `destroy` usa a ordem INVERSA de `KINDS`, **derivada** e não escrita 2.ª vez.
 - **`--detailed-exitcode`** (0/2/1) — contrato do `terraform plan`, para um gate de deriva em CI.
-- **Âmbito v1: Container/Pod/Volume/Network.** Os outros 14 Kinds continuam «garante presente» e o
-  plano marca-os `!` — **nunca os omite** (um plano que esconde um recurso lê-se como «sem
-  alterações»).
+- **Âmbito: 8 Kinds convergem** — Container/Pod/Volume/ShareVolume/Network/Image/Vm/
+  FirewallPolicy. Os restantes continuam «garante presente» e o plano marca-os `!` — **nunca os
+  omite** (um plano que esconde um recurso lê-se como «sem alterações») — e o
+  `stack plan --fields` diz o OBSTÁCULO CONCRETO de cada um, porque «ainda não converge» lê-se
+  como «ninguém chegou lá» e para a maioria isso é falso: o `HTTPRoute` não converge porque o
+  `resolve_config` funde todos os documentos numa só config sem registar proveniência (é isso
+  que o desbloquearia), o `Secret` porque o estado são valores cifrados e um plano não os decifra,
+  o `Tunnel` porque a URL vem do provider e é status. O `Cluster` fica fora por ser um
+  procedimento remoto e não um recurso local.
+- **`Desired.ownable`** separa «converge» de «é possuível». Uma `Image` é cache partilhada com
+  endereço de conteúdo (o mesmo `alpine:latest` serve todas as stacks — carimbá-la para uma e
+  removê-la quando essa deixasse de a declarar tirava-a debaixo das outras); uma `FirewallPolicy`
+  e uma `ShareVolume` não têm registo próprio onde carimbar. As três convergem e nenhuma é
+  adoptada nem podada. Sem esta distinção, um recurso sem dono aparecia como `Adopt` em TODOS os
+  planos — medido, não suposto.
+- **Três listas de Kinds convergentes têm de concordar, e derivaram uma vez.** O
+  `CONVERGING_KINDS` decide três coisas (se o `actual_of` sonda a presença, se o
+  `converge_and_stamp` aplica, se carimba) e os braços do `match` e a tabela do `--fields` são
+  escritos à parte. Vm/FirewallPolicy/ShareVolume ganharam adaptador e ficaram fora da constante,
+  logo eram SALTADOS — e o sintoma escondeu-se porque o `apply` antigo de cada Kind é idempotente
+  e convergia pelo caminho errado. Há agora teste a exigir as três de acordo nos dois sentidos.
 - **A normalização é o ponto crítico**: se os dois lados não derem a mesma string, tudo aparece
   como deriva para sempre. O conjunto comparado é conservador, cada Kind tem teste a provar que um
   manifesto inalterado dá ZERO diferenças, e **`stack plan --fields`** diz o que é comparado e o
@@ -447,6 +465,40 @@ manifestos correctos — falso positivo, pior que a lacuna.
 e **silenciosamente descartada** — o Postgres do `examples/dependency.yaml` arrancava sem password.
 A forma agrupada passa a ser identificada pelas suas chaves (`vars`/`files`/`secrets`/
 `secretFiles`), e uma mapping simples vira `["K=v"]`.
+
+**Fusões de Kinds (18 → 15).** `Egress`→`FirewallPolicy` (partilhavam a struct `FwDocSpec`
+inteira), `Dependency`→açúcar reduzido para `FirewallPolicy` no `load` (fundindo por ALVO, porque
+várias dependências ACUMULAM allows e um documento por dependência faria a última apagar as
+anteriores), `Storage`→bloco `nfs:`/`cifs:`/`webdav:` de `kind: Volume`. Os nomes antigos carregam
+com aviso. **A 4.ª fusão NÃO se fez**: `kind: Container` com `spec.containers` NÃO é um `kind: Pod`
+de um elemento — o primeiro cria um container chamado `<name>`, o segundo cria a netns `pod-<name>`
+e chama-lhe `<name>-c0`; reescrever renomearia o container e partiria o DNS, os backends de
+HTTPRoute e as referências cruzadas. Fica só o aviso de depreciação. **Regra que a fusão do Egress
+revelou**: os filhos de um `kind: Stack` são construídos DENTRO do `load` e não passam pelo ciclo,
+por isso qualquer redução tem de correr nos DOIS caminhos ou um grupo do Stack produz documentos
+que nenhum handler reclama.
+
+**`FirewallPolicy`: duas políticas para o mesmo (alvo, direcção) são RECUSADAS** no
+`validate_graph`. O `apply_fw_doc` substitui as regras de uma direcção, logo a segunda apagava as
+da primeira com ambas a reportar sucesso — e o `validate` dizia «OK». Recusar e não fundir (ao
+contrário da Dependency): uma Dependency declara o acesso de um peer e várias somam-se; uma
+política declara o estado desejado INTEIRO de uma direcção, logo duas são duas respostas à mesma
+pergunta.
+
+**`vm convert` fala com os ecossistemas todos** — `qcow2`/`raw`/`vmdk`/`vdi`/`vhdx`/`vhd`. Este
+motor não ganha um backend por produto (o VirtualBox não coexiste com o KVM, o vSphere/Proxmox são
+APIs remotas, o Hyper-V é Windows), mas uma imagem construída aqui é importada por todos. **`vhd`
+é `vpc` no qemu-img e `.vhd` no ficheiro** — a única combinação em que o nome do formato e a
+extensão divergem, e daí serem duas funções. `--compress` só em qcow2/vmdk, recusado nos outros
+com a lista em vez de um erro do qemu-img. Validado com `qemu-img info` E `file(1)`.
+**VirtualBox/VMware Workstation ficam por fazer**: `VBoxManage`/`vmrun` não existem neste host,
+logo um backend seria código não validável.
+
+**O `vm build` do VMfile foi validado ao vivo pela primeira vez** (o `virt-customize` corre neste
+host; o bloqueio do `/boot/vmlinuz` a 0600 não morde). Build em 13s de uma base local, conteúdo
+confirmado com `virt-cat`. Uma imagem construída passou a HERDAR distro e kernel da base quando o
+`FROM` é local — **herdar metade era medivelmente pior**: com a distro da base e o release a ser
+a ref do FROM, a coluna imprimia `debian/delonix-vm-base:debian-bookworm`.
 
 **O schema dos manifestos passou a ESTÁVEL** em `docs/cli-stability.md` (estava declarado o
 contrário — a CLI mais protegida que o formato que as pessoas põem em git). Guia transversal novo
