@@ -5,8 +5,10 @@ quem o aplica. Não é preciso Terraform nem Ansible por cima — esta página �
 fluxo completo.
 
 > Aplica-se aos Kinds que **convergem**: `Container`, `Pod`, `Volume`,
-> `Network`. Os restantes são «garante presente» (criados se faltarem, nunca
-> actualizados) e o `plan` marca-os com `!` em vez de os esconder. Vê
+> `ShareVolume`, `Network`, `Image`, `Vm` e `FirewallPolicy`. Os restantes são
+> «garante presente» (criados se faltarem, nunca actualizados) e o `plan`
+> marca-os com `!` em vez de os esconder — cada um com o obstáculo concreto
+> nomeado, que `delonix stack plan --fields` imprime. Vê
 > [`cli-stability.md`](cli-stability.md).
 
 ## Os quatro comandos
@@ -44,7 +46,12 @@ delonix stack plan --fields
 
 Diz exactamente que campos são comparados por Kind, e quais não são e porquê
 (`env` e `command` vêm fundidos com os da imagem; `user` é guardado como uid
-resolvido).
+resolvido). E, para os Kinds que ainda não convergem, **porque não** — o
+`HTTPRoute` porque a config do proxy funde todos os documentos num só sem
+registar proveniência, o `Secret` porque o estado são valores cifrados e um
+plano não os decifra para comparar, o `Tunnel` porque a URL vem do provider e é
+status. Um obstáculo nomeado é uma decisão; «ainda não converge» seria só
+silêncio.
 
 ## Quem é o dono
 
@@ -57,6 +64,12 @@ Consequências que interessam:
 * Um recurso criado à mão **nunca** é apagado por um `--prune` ou por um
   `destroy` — não tem a label. Aparece no plano como `+~` e é adoptado no
   primeiro apply, que é o que dispensa um comando `import`.
+* **Nem tudo é possuível, e isso é deliberado.** Uma `Image` é cache partilhada
+  com endereço de conteúdo — o mesmo `alpine:latest` serve todas as stacks do
+  host, por isso carimbá-la para uma e removê-la quando essa deixasse de a
+  declarar tirava-a debaixo das outras. Uma `FirewallPolicy` e uma
+  `ShareVolume` não têm registo próprio onde carimbar. Nenhuma das três é
+  adoptada nem podada; todas convergem.
 * Duas stacks a declarar o mesmo nome dão **conflito** (`✗`), não uma corrida.
   O `apply` recusa antes de tocar em nada.
 

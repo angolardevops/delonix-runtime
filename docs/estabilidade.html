@@ -232,11 +232,19 @@ scripts/schema-diff.sh v0.46.0 v0.47.0  # entre duas tags
 diferenças — serve directamente como gate de CI. Um campo removido ou com o
 tipo mudado é assinalado como <strong>quebra de contrato</strong>, que é o que esta secção
 promete não acontecer.</p>
-<p><strong>O que fica de fora, e é honesto dizê-lo:</strong> os restantes 14 Kinds
-(<code>Vm</code>, <code>Cluster</code>, <code>Storage</code>, <code>ShareVolume</code>, <code>Image</code>, <code>Secret</code>, <code>Ingress</code>,
-<code>Egress</code>, <code>FirewallPolicy</code>, <code>HTTPRoute</code>, <code>Dependency</code>, <code>Tunnel</code>, <code>Workload</code>,
-<code>Stack</code>) ainda não têm schema gerado, e por isso continuam sem promessa. O
-<code>delonix schema</code>/<code>explain</code> diz quais são, em vez de os omitir.</p>
+<p><strong>O que fica de fora, e é honesto dizê-lo:</strong> os restantes Kinds
+(<code>Vm</code>, <code>Cluster</code>, <code>ShareVolume</code>, <code>Image</code>, <code>Secret</code>, <code>Ingress</code>,
+<code>FirewallPolicy</code>, <code>HTTPRoute</code>, <code>Tunnel</code>, <code>Workload</code>, <code>Stack</code>) ainda não têm
+schema gerado, e por isso continuam sem promessa. O <code>delonix schema</code>/<code>explain</code>
+diz quais são, em vez de os omitir.</p>
+<blockquote>
+<p><strong>Três Kinds deixaram de existir</strong> nesta série, fundidos no que já faziam:
+<code>Egress</code> → <code>FirewallPolicy</code> com <code>direction: egress</code>; <code>Dependency</code> →
+<code>FirewallPolicy</code> (açúcar, reduzido no load); <code>Storage</code> → <code>kind: Volume</code> com um
+bloco <code>nfs:</code>/<code>cifs:</code>/<code>webdav:</code>. Os nomes antigos continuam a carregar, com
+aviso de depreciação — a regra do «corte limpo» aplica-se a comandos, e um
+manifesto em git merece um degrau em vez de um erro.</p>
+</blockquote>
 <h2 id="nao-estavel-pode-mudar-em-qualquer-versao">NÃO estável — pode mudar em qualquer versão</h2>
 <ul>
 <li><strong><code>serve cri</code>, <code>serve api</code>, <code>serve docker-api</code></strong> — superfícies de protocolo

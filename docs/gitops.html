@@ -148,8 +148,10 @@ quem o aplica. Não é preciso Terraform nem Ansible por cima — esta página �
 fluxo completo.</p>
 <blockquote>
 <p>Aplica-se aos Kinds que <strong>convergem</strong>: <code>Container</code>, <code>Pod</code>, <code>Volume</code>,
-<code>Network</code>. Os restantes são «garante presente» (criados se faltarem, nunca
-actualizados) e o <code>plan</code> marca-os com <code>!</code> em vez de os esconder. Vê
+<code>ShareVolume</code>, <code>Network</code>, <code>Image</code>, <code>Vm</code> e <code>FirewallPolicy</code>. Os restantes são
+«garante presente» (criados se faltarem, nunca actualizados) e o <code>plan</code>
+marca-os com <code>!</code> em vez de os esconder — cada um com o obstáculo concreto
+nomeado, que <code>delonix stack plan --fields</code> imprime. Vê
 <a href="cli-stability.md"><code>cli-stability.md</code></a>.</p>
 </blockquote>
 <h2 id="os-quatro-comandos">Os quatro comandos</h2>
@@ -210,7 +212,12 @@ mexe).</p>
 </code></pre>
 <p>Diz exactamente que campos são comparados por Kind, e quais não são e porquê
 (<code>env</code> e <code>command</code> vêm fundidos com os da imagem; <code>user</code> é guardado como uid
-resolvido).</p>
+resolvido). E, para os Kinds que ainda não convergem, <strong>porque não</strong> — o
+<code>HTTPRoute</code> porque a config do proxy funde todos os documentos num só sem
+registar proveniência, o <code>Secret</code> porque o estado são valores cifrados e um
+plano não os decifra para comparar, o <code>Tunnel</code> porque a URL vem do provider e é
+status. Um obstáculo nomeado é uma decisão; «ainda não converge» seria só
+silêncio.</p>
 <h2 id="quem-e-o-dono">Quem é o dono</h2>
 <p>A posse vem da label <code>delonix.io/stack</code>, carimbada em cada recurso pelo próprio
 <code>apply</code>. O nome da stack é, por esta ordem: <code>--name</code>, o <code>metadata.name</code> de um
@@ -220,6 +227,12 @@ resolvido).</p>
 <li>Um recurso criado à mão <strong>nunca</strong> é apagado por um <code>--prune</code> ou por um
   <code>destroy</code> — não tem a label. Aparece no plano como <code>+~</code> e é adoptado no
   primeiro apply, que é o que dispensa um comando <code>import</code>.</li>
+<li><strong>Nem tudo é possuível, e isso é deliberado.</strong> Uma <code>Image</code> é cache partilhada
+  com endereço de conteúdo — o mesmo <code>alpine:latest</code> serve todas as stacks do
+  host, por isso carimbá-la para uma e removê-la quando essa deixasse de a
+  declarar tirava-a debaixo das outras. Uma <code>FirewallPolicy</code> e uma
+  <code>ShareVolume</code> não têm registo próprio onde carimbar. Nenhuma das três é
+  adoptada nem podada; todas convergem.</li>
 <li>Duas stacks a declarar o mesmo nome dão <strong>conflito</strong> (<code>✗</code>), não uma corrida.
   O <code>apply</code> recusa antes de tocar em nada.</li>
 </ul>
