@@ -3956,3 +3956,6 @@ msgstr "{fmt} não pode ser comprimido — só o qcow2 e o vmdk podem"
 
 msgid "Compress the output. Only `qcow2` and `vmdk` can — refused for the others rather than handed to `qemu-img` to fail on."
 msgstr "Comprime a saída. Só o `qcow2` e o `vmdk` podem — recusado nos outros em vez de ser entregue ao `qemu-img` para falhar."
+
+msgid "FirewallPolicy/{name}: changing `target` or `direction` cannot be undone automatically — the previous target keeps its rules. Clear them by hand with `delonix net ingress clear <old-target>` (or `net egress clear`), then apply again"
+msgstr "FirewallPolicy/{name}: mudar o `target` ou a `direction` não se desfaz automaticamente — o alvo anterior fica com as regras. Limpa-as à mão com `delonix net ingress clear <alvo-antigo>` (ou `net egress clear`) e aplica outra vez"

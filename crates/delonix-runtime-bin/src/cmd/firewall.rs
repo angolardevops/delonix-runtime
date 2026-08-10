@@ -1038,6 +1038,184 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
     Ok(())
 }
 
+/// Fields the reconciler compares for a `kind: FirewallPolicy`.
+///
+/// `defaultPolicy` and `rules` converge HOT — `apply_fw_doc` already replaces
+/// the whole direction, in place, with no container restart. `target` and
+/// `direction` do not: they IDENTIFY which direction of which container this
+/// policy governs, so changing one leaves the old target's rules exactly where
+/// they were. That is a `Replace`, and the recreation clears the direction on
+/// the old target — which is the only way the change means what it reads like.
+pub(crate) const RECONCILED_FW_FIELDS: &[&str] =
+    &["target", "direction", "defaultPolicy", "rules", "scope"];
+
+/// One rule, rendered as one comparable string.
+///
+/// Sorted by the caller, never here: the ORDER of allow rules in a policy does
+/// not change what it permits (the chain is built from the whole set), so a
+/// reordered manifest must not read as a change.
+fn rule_key(r: &FwDocRule) -> String {
+    format!(
+        "{}|{}|{}|{}|{}",
+        r.action.as_deref().unwrap_or("allow"),
+        r.proto.as_deref().unwrap_or("any"),
+        r.port,
+        r.from.as_deref().or(r.to.as_deref()).unwrap_or(""),
+        r.from_workload
+            .as_deref()
+            .or(r.to_workload.as_deref())
+            .unwrap_or(""),
+    )
+}
+
+/// The same rendering, from a persisted [`FwRule`].
+///
+/// A persisted rule holds the RESOLVED address, never the workload name it may
+/// have come from — so a policy written with `fromWorkload` compares its
+/// resolved `/32` against the record's. That is why the desired side resolves
+/// too (below): comparing a name against an address would report drift on every
+/// plan for every rule that names a peer.
+fn stored_rule_key(r: &delonix_runtime_core::FwRule) -> String {
+    format!("{}|{}|{}|{}|", r.action, r.proto, r.port, r.src)
+}
+
+/// What the manifest declares, for the reconciler.
+pub(crate) fn desired(doc: &ManifestDoc) -> Result<super::reconcile::Desired> {
+    let spec: FwDocSpec = manifest::spec_of(doc)?;
+    let (_images, store) = open_stores()?;
+    let mut f = std::collections::BTreeMap::new();
+    f.insert("target".into(), spec.target.clone());
+    f.insert(
+        "direction".into(),
+        spec.direction.clone().unwrap_or_default(),
+    );
+    f.insert(
+        "scope".into(),
+        spec.scope.clone().unwrap_or_else(|| "container".into()),
+    );
+    f.insert(
+        "defaultPolicy".into(),
+        spec.default_policy.clone().unwrap_or_else(|| "deny".into()),
+    );
+    let mut keys: Vec<String> = Vec::new();
+    for r in &spec.rules {
+        // Resolve a workload name to its address, exactly as the apply will —
+        // the record stores addresses. A workload that does not exist yet
+        // resolves to nothing and the rule compares by name; the policy cannot
+        // have been applied yet either, so there is nothing to be wrong about.
+        let by_name = r.from_workload.clone().or_else(|| r.to_workload.clone());
+        let resolved = by_name
+            .as_deref()
+            .and_then(|w| workload_cidr(&store, w).ok());
+        match resolved {
+            Some(cidr) => keys.push(format!(
+                "{}|{}|{}|{}|",
+                r.action.as_deref().unwrap_or("allow"),
+                r.proto.as_deref().unwrap_or("any"),
+                r.port,
+                cidr
+            )),
+            None => keys.push(rule_key(r)),
+        }
+    }
+    keys.sort();
+    f.insert("rules".into(), keys.join(","));
+    Ok(super::reconcile::Desired {
+        kind: "FirewallPolicy".into(),
+        name: doc.metadata.name.clone(),
+        fields: f,
+        converges: true,
+        // NOT prunable, and for a different reason than an `Image`: a policy has
+        // no record of its own — it lives on the target container's
+        // `ContainerFw`. Once it leaves the manifest, nothing on disk says which
+        // target and direction it governed, so there is nothing a prune could
+        // safely clear. This matches what the firewall docs already promise
+        // («removing the Dependency does NOT unprotect the `to`»); what changes
+        // is that the plan no longer implies otherwise.
+        ownable: false,
+    })
+}
+
+/// What is on the machine, for the reconciler.
+///
+/// A firewall policy has no record of its own — it lives on the TARGET
+/// container's `ContainerFw`. So the actual side is keyed by the document name
+/// (what the plan matches on) and read from the target named by that document.
+pub(crate) fn actual(docs: &[ManifestDoc]) -> Result<Vec<super::reconcile::Actual>> {
+    let (_images, store) = open_stores()?;
+    let mut out = Vec::new();
+    for doc in manifest::of_kind(docs, "FirewallPolicy") {
+        let Ok(spec) = manifest::spec_of::<FwDocSpec>(doc) else {
+            continue;
+        };
+        let Ok(c) = store.load(&spec.target) else {
+            continue; // target not created yet — the plan will say Create
+        };
+        let Some(fw) = &c.firewall else { continue };
+        let dir = match spec.direction.as_deref() {
+            Some("ingress") => "in",
+            Some("egress") => "out",
+            _ => continue,
+        };
+        let mut f = std::collections::BTreeMap::new();
+        f.insert("target".into(), spec.target.clone());
+        f.insert(
+            "direction".into(),
+            spec.direction.clone().unwrap_or_default(),
+        );
+        f.insert(
+            "scope".into(),
+            spec.scope.clone().unwrap_or_else(|| "container".into()),
+        );
+        let policy = if dir == "in" {
+            &fw.policy_in
+        } else {
+            &fw.policy_out
+        };
+        f.insert(
+            "defaultPolicy".into(),
+            if policy.is_empty() {
+                "deny".into()
+            } else {
+                policy.clone()
+            },
+        );
+        let mut keys: Vec<String> = fw
+            .rules
+            .iter()
+            .filter(|r| r.dir == dir)
+            .map(stored_rule_key)
+            .collect();
+        keys.sort();
+        f.insert("rules".into(), keys.join(","));
+        out.push(super::reconcile::Actual {
+            kind: "FirewallPolicy".into(),
+            name: doc.metadata.name.clone(),
+            fields: f,
+            owner: c.labels.get(super::reconcile::STACK_LABEL).cloned(),
+            last_applied: c
+                .annotations
+                .get(&format!("{}/{}", super::reconcile::LAST_APPLIED, dir))
+                .and_then(|raw| super::reconcile::decode_last_applied(raw)),
+        });
+    }
+    Ok(out)
+}
+
+/// Converges a policy: re-apply the document. `apply_fw_doc` already replaces
+/// the whole direction, so «converging» is exactly «applying» — there is no
+/// partial path to write, and writing one would be a second way to build the
+/// same chain.
+pub(crate) fn converge_doc(doc: &ManifestDoc) -> Result<()> {
+    let (_images, store) = open_stores()?;
+    let dir = match doc.spec.get("direction").and_then(|v| v.as_str()) {
+        Some("ingress") => "in",
+        Some("egress") => "out",
+        _ => return Ok(()),
+    };
+    apply_fw_doc(&store, doc, dir)
+}
+
 /// Resolves a workload name to the `/32` of its SDN address.
 ///
 /// Fails LOUDLY when the container has no address, and says why: a workload on
