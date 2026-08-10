@@ -76,11 +76,19 @@ fn has_cap_bpf() -> bool {
 
 /// Materialize the embedded object to a temp file so `tc`/`bpftool` can read it.
 /// Returns the path (caller keeps it alive for the duration of the load).
+///
+/// The name is unique and the file is created with `O_EXCL` + `0600`. It used to
+/// be the FIXED path `/tmp/delonix_flow.bpf.o` written with `fs::write`, which
+/// is a local privilege escalation: `/tmp` is world-writable, so any local user
+/// could create that path first. `fs::write` follows symlinks (so the write
+/// could be redirected anywhere this process can reach — and this path runs with
+/// `CAP_BPF`/root), and because the squatter would OWN the file, sticky-bit
+/// `/tmp` means we cannot remove it — leaving them free to swap the contents
+/// between our write and `bpftool prog loadall` reading it, i.e. getting their
+/// own BPF program loaded into the kernel by a privileged process.
 fn stage_object() -> Option<std::path::PathBuf> {
     let bytes = object_bytes()?;
-    let path = std::env::temp_dir().join("delonix_flow.bpf.o");
-    std::fs::write(&path, bytes).ok()?;
-    Some(path)
+    delonix_runtime_core::write_private_temp("delonix_flow.bpf.o", bytes).ok()
 }
 
 /// Load the programs + shared map ONCE, pinned under [`PIN_DIR`]. Idempotent: if
@@ -104,10 +112,16 @@ where
         Some(p) => p,
         None => return false,
     };
-    let obj = obj.to_string_lossy().into_owned();
-    run(&[
-        "bpftool", "prog", "loadall", &obj, PIN_DIR, "pinmaps", PIN_DIR,
-    ])
+    let obj_str = obj.to_string_lossy().into_owned();
+    let loaded = run(&[
+        "bpftool", "prog", "loadall", &obj_str, PIN_DIR, "pinmaps", PIN_DIR,
+    ]);
+    // The staged name is now unique per call (it has to be — see `stage_object`),
+    // so unlike the old fixed path it is not overwritten next time round and has
+    // to be removed here, or every `flow` invocation leaves an object behind.
+    // The program lives in the kernel from `loadall` on; the file is not needed.
+    let _ = std::fs::remove_file(&obj);
+    loaded
 }
 
 /// Attach the accounting classifiers to `iface` (a container veth). Loads the

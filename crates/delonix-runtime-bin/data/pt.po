@@ -3199,6 +3199,9 @@ msgstr "storage '{name}' criado e montado ({driver} · {device})"
 msgid "storage '{name}' removed (unmounted; the data stays on the NAS)"
 msgstr "storage '{name}' removido (desmontado; os dados ficam no NAS)"
 
+msgid "hostname cannot start with '-' (it would be interpreted as an option of the provider's binary)"
+msgstr "hostname não pode começar por '-' (seria interpretado como uma opção do binário do provider)"
+
 msgid "token cannot start with '-' (it would be interpreted as an option of the provider's binary)"
 msgstr "token não pode começar por '-' (seria interpretado como uma opção do binário do provider)"
 

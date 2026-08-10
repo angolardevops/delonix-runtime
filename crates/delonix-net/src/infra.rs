@@ -1970,23 +1970,7 @@ fn do_attach(netns: &str, ip: &str, bridge: &str, gateway: &str, namespace: &str
     // latent; the fix will be an anti-spoof exception for the pod-CIDR when the
     // container is a cluster node (alongside the inter-node routing work).
     clear_antispoof(&vh);
-    run_ok(
-        "nft",
-        &[
-            "insert",
-            "rule",
-            "ip",
-            INGRESS_TABLE,
-            "fwdeny",
-            "iifname",
-            &vh,
-            "ip",
-            "saddr",
-            "!=",
-            ip,
-            "drop",
-        ],
-    );
+    run_ok("nft", &antispoof_rule_args(&vh, ip));
     // Namespace isolation: registers the IP in @dlxall + @dlxns_<ns> (the
     // container's fw_chain_body references these sets). Behavior unchanged
     // for everything in `default` (the same namespace contains all = open SDN).
@@ -2071,23 +2055,7 @@ fn do_attach_extra(
     }
     // ANTI-SPOOFING also on the additional interface (same per-IP guarantee as eth0).
     clear_antispoof(&vh);
-    run_ok(
-        "nft",
-        &[
-            "insert",
-            "rule",
-            "ip",
-            INGRESS_TABLE,
-            "fwdeny",
-            "iifname",
-            &vh,
-            "ip",
-            "saddr",
-            "!=",
-            ip,
-            "drop",
-        ],
-    );
+    run_ok("nft", &antispoof_rule_args(&vh, ip));
     // Namespace isolation on the ADDITIONAL IP too. Its absence here was a real
     // bypass, not a theoretical one: the cross-namespace drop only fires for sources in
     // `@dlxall`, so two containers in different namespaces, both connected to a shared
@@ -2149,6 +2117,33 @@ fn do_netrate_clear(vh: &str) {
     );
 }
 
+/// The anti-spoofing rule for an interface pinned to a single address: anything
+/// arriving on `iface` whose source is not `ip` is dropped.
+///
+/// ONE definition shared by all three attach paths (container veth, extra veth,
+/// VM tap). They had drifted apart before — the VM tap simply never got the rule,
+/// which let a guest kernel forge a source address and bypass namespace isolation
+/// and `kind: Dependency` alike. Keeping the argv in a single function is also
+/// what lets `clear_antispoof` stay in step with what is emitted: the same
+/// generator-and-reader-share-the-format discipline `fw_rule_tail` already
+/// follows.
+fn antispoof_rule_args<'a>(iface: &'a str, ip: &'a str) -> [&'a str; 12] {
+    [
+        "insert",
+        "rule",
+        "ip",
+        INGRESS_TABLE,
+        "fwdeny",
+        "iifname",
+        iface,
+        "ip",
+        "saddr",
+        "!=",
+        ip,
+        "drop",
+    ]
+}
+
 /// Removes a veth's anti-spoofing rules from the `forward` (idempotency).
 fn clear_antispoof(vh: &str) {
     let listed = crate::capture(
@@ -2206,6 +2201,18 @@ fn do_vmtap(
     run("ip", &["link", "set", &tap, "master", &bridge])?;
     run("ip", &["link", "set", &tap, "up"])?;
     if let (Some(ip), Some(ns)) = (ip, namespace) {
+        // ANTI-SPOOFING on the VM's tap, for the same reason `do_attach`/
+        // `do_attach_extra` have it on a container's veth — and it matters MORE
+        // here: a VM runs a guest kernel we do not control, so nothing inside it
+        // stops it from putting an arbitrary source address on the wire. Every
+        // policy this engine enforces keys off the source IP (the cross-namespace
+        // drop matches `@dlxall`, a `kind: Dependency` allows a specific peer
+        // address), so without this rule a guest forges a saddr outside `@dlxall`
+        // — or one belonging to a peer of the target namespace — and walks
+        // straight through the isolation. The bridge forwards on MAC and does not
+        // look at the IP, so this is the only place it can be caught.
+        clear_antispoof(&tap);
+        run_ok("nft", &antispoof_rule_args(&tap, ip));
         ns_set_join(ip, ns);
     }
     Ok(())
@@ -2213,7 +2220,12 @@ fn do_vmtap(
 
 /// Removes a VM's `tap` (on `vm rm`/stop). Best-effort.
 fn do_vmtapdel(tap: &str) -> Result<()> {
-    run_ok("ip", &["link", "del", &sanitize(tap)]);
+    let tap = sanitize(tap);
+    // Drop the anti-spoof rule with the tap, exactly as `do_detach_extra` does
+    // for a veth: tap names are reused across VM restarts, and a leftover rule
+    // pinned to the previous VM's address would silently blackhole the next one.
+    clear_antispoof(&tap);
+    run_ok("ip", &["link", "del", &tap]);
     Ok(())
 }
 
@@ -3971,12 +3983,42 @@ pub fn trace_unpublish(func: &str, host_port: &str) {
     }
 }
 
+/// Proof, from the caller, that a set of host ports is the COMPLETE node-wide
+/// picture of what is published on the shared ingress — and not just the subset
+/// that one component happens to know about.
+///
+/// This type exists because of a real outage. `reap_orphan_hostfwds` treats
+/// "not in the set" as "orphan, delete it", so a caller that passes a PARTIAL
+/// list silently deletes everyone else's published ports — and an empty list
+/// deletes them all. That is exactly what happened when a separate product's
+/// engine called this with only its own containers: ports published through the
+/// CLI died on their own, seconds after being created, and the cause took
+/// several sessions to find because the deletion looked like it came from
+/// nowhere.
+///
+/// Constructing this is therefore a deliberate act: whoever writes
+/// `AuthoritativeLivePorts::new(...)` is asserting they own the whole ingress.
+/// If you cannot honestly assert that, do not call the reaper.
+pub struct AuthoritativeLivePorts<'a>(&'a std::collections::HashSet<u32>);
+
+impl<'a> AuthoritativeLivePorts<'a> {
+    /// Asserts that `ports` lists EVERY host port in use on this node's ingress,
+    /// so that anything else really is an orphan. An empty set means "nothing is
+    /// published", not "I don't know".
+    pub fn new(ports: &'a std::collections::HashSet<u32>) -> Self {
+        Self(ports)
+    }
+}
+
 /// Reconciles the SINGLE ingress slirp's `hostfwd`s against the ports ACTUALLY in
 /// use by live containers: removes the orphan entries (from containers already removed,
 /// or that died without cleaning up) that would otherwise block the reuse of the host
-/// port. `live_ports` = host_ports published by live containers. Part of reaper
-/// #1 (port-leak). Returns how many it removed. Cheap (1 query to the api-socket).
-pub fn reap_orphan_hostfwds(live_ports: &std::collections::HashSet<u32>) -> usize {
+/// port. Part of reaper #1 (port-leak). Returns how many it removed. Cheap (1
+/// query to the api-socket).
+///
+/// See [`AuthoritativeLivePorts`] for why the argument is not a plain set.
+pub fn reap_orphan_hostfwds(live_ports: AuthoritativeLivePorts<'_>) -> usize {
+    let live_ports = live_ports.0;
     let sock = slirp_sock_path();
     if !sock.exists() {
         return 0;
@@ -5885,6 +5927,33 @@ Inter-|   Receive                                                |  Transmit
         assert!(dhcp_lease_ip("10", "52:54:00:ab:cd:ef").is_none());
         assert!(dhcp_lease_ip("10.200.0", "52:54:00:ab:cd:ef").is_none());
         assert!(dhcp_lease_ip("", "52:54:00:ab:cd:ef").is_none());
+    }
+
+    /// Achado de auditoria (MÉDIO): o `tap` de uma VM não levava regra
+    /// anti-spoofing, ao contrário do veth de um container. O kernel do
+    /// convidado não é nosso, logo pode pôr no fio o endereço de origem que
+    /// quiser — e TODA a política deste motor (isolamento cross-namespace,
+    /// `kind: Dependency`) decide pelo IP de origem. A regra tem de ser
+    /// exactamente a mesma do veth, senão a fronteira vale para uns e não
+    /// para outros.
+    #[test]
+    fn a_regra_antispoof_e_a_mesma_para_veth_e_para_tap_de_vm() {
+        let veth = super::antispoof_rule_args("dlxn1a2b", "10.200.0.7");
+        let tap = super::antispoof_rule_args("vt01", "10.200.254.42");
+
+        // Mesma FORMA nos dois (só interface e endereço mudam).
+        assert_eq!(veth.len(), tap.len());
+        assert_eq!(veth[5], "iifname");
+        assert_eq!(tap[5], "iifname");
+        assert_eq!(tap[6], "vt01");
+        assert_eq!(tap[10], "10.200.254.42");
+        // O verdicto tem de ser `drop` sobre "origem != o endereço atribuído".
+        assert_eq!(&tap[7..10], &["ip", "saddr", "!="]);
+        assert_eq!(tap[11], "drop");
+        // Vai para a chain que o `clear_antispoof` também varre, senão a
+        // remoção nunca encontraria a regra que a criação emitiu.
+        assert_eq!(tap[4], "fwdeny");
+        assert_eq!(tap[3], super::INGRESS_TABLE);
     }
 
     /// A VM with nothing to isolate must keep emitting the OLD line, so a holder

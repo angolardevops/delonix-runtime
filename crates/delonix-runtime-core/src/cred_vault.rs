@@ -52,12 +52,19 @@ pub fn valid_cred_name(name: &str) -> bool {
         })
 }
 
+/// Writes a vault file atomically, restricted from the moment it exists.
+///
+/// This used to have its own implementation — fixed temp name, `fs::write`,
+/// `chmod` afterwards, no `fsync` — which is the exact shape `SecretStore::save`
+/// was fixed away from, and it matters more here: the contents are AEAD blobs,
+/// so a torn write is not a corrupted-but-recoverable file, it is a credential
+/// that can never be decrypted again. A fixed temp name lets two concurrent
+/// `put`/`rotate_key` calls interleave into the same path and then publish the
+/// result, and skipping `fsync` lets a crash publish a directory entry pointing
+/// at blocks that were never written. `write_atomic_mode` handles all three
+/// (per-writer temp, fsync of file and directory, mode at creation).
 fn write_0600(path: &Path, bytes: &[u8]) -> Result<()> {
-    let tmp = path.with_extension("tmp");
-    fs::write(&tmp, bytes)?;
-    fs::set_permissions(&tmp, fs::Permissions::from_mode(0o600))?;
-    fs::rename(&tmp, path)?;
-    Ok(())
+    crate::write_atomic_mode(path, bytes, Some(0o600))
 }
 
 impl CredVault {

@@ -337,11 +337,21 @@ impl VolumeStore {
                 vol.driver, vol.name
             ))
         })?;
-        let mut args = vec!["-t", fstype, device.as_str(), vol.mountpoint.as_str()];
+        // `--` before the positional device/mountpoint: `device` is built from a
+        // `kind: Storage` manifest (`<server>:<share>`), and a server starting
+        // with `-` would otherwise be read by `mount` as an option (`-r`, `-o …`)
+        // rather than as an address. Not exploitable as RCE — this is argv, not a
+        // shell, and `mount` runs no commands — but it is the same "a value must
+        // never be mistaken for a flag" rule the ssh/scp/virsh call sites already
+        // follow.
+        let mut args = vec!["-t", fstype];
         if let Some(o) = &vol.options {
             args.push("-o");
             args.push(o);
         }
+        args.push("--");
+        args.push(device.as_str());
+        args.push(vol.mountpoint.as_str());
         let ctx: &'static str = match fstype {
             "cifs" => "mount cifs",
             "davfs" => "mount webdav",
