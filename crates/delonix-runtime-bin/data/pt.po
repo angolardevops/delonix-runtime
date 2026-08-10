@@ -3945,3 +3945,8 @@ msgstr "GET {url}: desisti ao fim de {attempts} tentativas ({err}) — o ficheir
 
 msgid "prerequisite"
 msgstr "pré-requisito"
+
+# colisao de politicas de firewall (fase C)
+
+msgid "FirewallPolicy '{name}' and '{first}' both define {direction} for '{target}' — a policy is the WHOLE desired state of a direction, so the second would silently replace the first; merge them into one document"
+msgstr "As FirewallPolicy '{name}' e '{first}' definem ambas {direction} para '{target}' — uma política é o estado desejado INTEIRO de uma direcção, por isso a segunda substituiria a primeira em silêncio; junta-as num só documento"
