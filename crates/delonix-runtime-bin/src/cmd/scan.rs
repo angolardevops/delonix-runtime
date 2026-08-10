@@ -93,6 +93,27 @@ pub fn cmd_scan(image: &str, sbom: bool, fail_on: Option<&str>) -> Result<()> {
     let img = match images.resolve(image) {
         Ok(img) => img,
         Err(Error::NotFound(_)) => {
+            // A VM image is NOT a container image, and the difference has to be said before
+            // the pull. Measured: `image scan delonix-vm-base:ubuntu-24.04` — an image that
+            // IS on this node — announced "not local", went to Docker Hub for
+            // `library/delonix-vm-base` and died on `HTTP 401 Unauthorized`. The user asked
+            // to scan something they have and got an auth error from a public registry.
+            //
+            // Refused rather than implemented: scanning a qcow2 means walking the GUEST
+            // filesystem (libguestfs), which is a different SBOM path entirely — and a scan
+            // that silently does nothing useful is the failure this command exists to avoid.
+            if super::vmimage::VmImageStore::open(state_root())
+                .ok()
+                .and_then(|st| st.get(image).ok())
+                .is_some()
+            {
+                return Err(Error::Invalid(super::po::tf(
+                    "'{img}' is a VM image, not a container image — scanning a qcow2 guest \
+                     filesystem is not implemented. Scan the container images it runs, or \
+                     inspect the guest yourself (`virt-filesystems`/`guestfish`).",
+                    &[("img", image)],
+                )));
+            }
             eprintln!(
                 "{}",
                 super::po::tf("image '{img}' is not local — pulling…", &[("img", image)])

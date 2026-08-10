@@ -1016,7 +1016,7 @@ pub fn run(action: VmCmd) -> Result<()> {
                 force,
             });
         }
-        return cmd_init(
+        return init_for(
             super::scaffold::Target::Vm,
             dir,
             name,
@@ -2361,7 +2361,9 @@ pub(crate) fn generate_seed_iso(
 }
 
 /// Handles the `init` of this group (see `cmd::scaffold`).
-fn cmd_init(
+/// The generator behind `vm init`, exposed so `delonix init` can dispatch here once it has
+/// DETECTED a VM project (a `VMfile`) instead of duplicating it.
+pub(crate) fn init_for(
     target: super::scaffold::Target,
     dir: PathBuf,
     name: Option<String>,

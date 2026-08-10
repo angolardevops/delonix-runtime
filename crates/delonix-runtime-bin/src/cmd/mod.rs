@@ -15,6 +15,7 @@ pub mod flow;
 pub mod httproute;
 pub mod image;
 pub mod ingress_proxy;
+pub mod init;
 pub mod k8s_recipes;
 pub mod kindmode;
 pub mod kube;
