@@ -2635,10 +2635,27 @@ pub fn slirp_add_hostfwd(
     for _ in 0..50 {
         match UnixStream::connect(sock) {
             Ok(mut s) => {
-                let _ = s.set_read_timeout(Some(std::time::Duration::from_millis(500)));
+                // 500ms was too tight for the SINGLE slirp the whole ingress
+                // shares, and the discarded read error made the consequence
+                // silent AND wrong: a timeout left `resp` empty, an empty string
+                // does not contain `"error"`, and the function fell through to
+                // `Ok(())` — reporting a publish that may never have happened.
+                // Same class as the control socket's 5s ceiling, one step worse:
+                // there the symptom was an error with no subject, here it is a
+                // false success.
+                let _ = s.set_read_timeout(Some(std::time::Duration::from_secs(10)));
                 s.write_all(cmd.as_bytes()).map_err(|e| reg_io(&e))?;
                 let mut resp = String::new();
-                let _ = s.read_to_string(&mut resp);
+                if let Err(e) = s.read_to_string(&mut resp) {
+                    return Err(Error::Runtime {
+                        context: "slirp hostfwd",
+                        message: format!(
+                            "port {host_port}: no reply from the slirp api-socket ({e}) - \
+                             the publish may or may not have been applied; check with \
+                             `delonix net ingress ls`"
+                        ),
+                    });
+                }
                 if resp.contains("\"error\"") {
                     // The slirp answers with an opaque `add_hostfwd failed` for every
                     // cause. The overwhelmingly common one in rootless is a port below
