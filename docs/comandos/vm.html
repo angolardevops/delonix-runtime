@@ -163,13 +163,13 @@ Commands:
   pull             Pull a golden VM image from an OCI registry — with no argument, the OFFICIAL Delonix image (ready for `vm create`/`cluster kubeadm`)
   ls-remote        List the tags available in a remote OCI repository — with no argument, the OFFICIAL Delonix golden image repo (discover which k8s versions are published before `pull`)
   push             Push a local golden VM image to an OCI registry (`vm push &lt;name&gt; &lt;target&gt;`)
-  convert          Convert a VM disk between `qcow2` and `raw` — flattened either way, ready to boot on either backend (libvirt/QEMU and Cloud Hypervisor already share this same pair of formats)
+  convert          Convert a VM disk to the format another ecosystem imports — `qcow2`, `raw`, `vmdk` (VMware), `vdi` (VirtualBox), `vhdx`/`vhd` (Hyper-V, Azure). Flattened either way, so the result is a standalone file with no backing chain. This engine&#x27;s own two backends already share `qcow2`/`raw`; the rest exist so an image built here is importable elsewhere without a backend per product
   default-backend  Get or set the default VM backend, used by `vm create` when neither `--backend` nor `DELONIX_VM_BACKEND` is given — above the engine&#x27;s own auto-detection heuristic. With no flag, prints the current default (`none` if auto-detection decides)
   ls               List the VMs
   console          Attach to the VM&#x27;s serial console (interactive terminal) — works with no IP (boot logs, login). Escape: Ctrl-] 
   vnc              Print the VNC address of a graphical VM (created with `--vnc`, libvirt)
   status           Current state (reconciles liveness/IP with the backend)
-  reach            
+  reach            Which published ports a VM can actually reach, and how to fix the ones it cannot. A port published to the default `127.0.0.1` is invisible to a VM — this lists the libvirt gateways, reads each port&#x27;s LIVE bind, and for every loopback-only one prints the exact republish command
   bridge           EXPERIMENTAL (root): give a libvirt VM DIRECT IP reachability to a container SDN network (veth from the host into the holder netns + routes). Defaults to a DRY-RUN; add `--apply` (as root) to establish it
   unbridge         Tear down a `vm bridge` (dry-run without `--apply`)
   describe         Human-readable detail of one or more VMs, `kubectl describe` style (for humans; use `status` for the usual compact view). Includes the LIVE state — `delonix_vm::status` reconciles liveness/IP with the backend
@@ -187,17 +187,34 @@ Options:
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
   -h, --help          Print help</code></pre></div>
 <h2 id='convert'><code>vm convert</code></h2>
-<p class='intro'>Convert a VM disk between <code>qcow2</code> and <code>raw</code> — flattened either way, ready to boot on either backend (libvirt/QEMU and Cloud Hypervisor already share this same pair of formats)</p>
+<p class='intro'>Convert a VM disk to the format another ecosystem imports — <code>qcow2</code>, <code>raw</code>, <code>vmdk</code> (VMware), <code>vdi</code> (VirtualBox), <code>vhdx</code>/<code>vhd</code> (Hyper-V, Azure). Flattened either way, so the result is a standalone file with no backing chain. This engine&#x27;s own two backends already share <code>qcow2</code>/<code>raw</code>; the rest exist so an image built here is importable elsewhere without a backend per product</p>
 <div class='help'><pre><code>Usage: delonix vm convert [OPTIONS] --to &lt;TO&gt; &lt;SOURCE&gt;
 
 Arguments:
-  &lt;SOURCE&gt;  A local VM image name (`vm ls`) or a literal `.qcow2`/`.raw` path
+  &lt;SOURCE&gt;
+          A local VM image name (`vm ls`) or a literal `.qcow2`/`.raw` path
 
 Options:
-      --l18n &lt;en|pt&gt;     Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-      --to &lt;TO&gt;          [possible values: qcow2, raw]
-  -o, --output &lt;OUTPUT&gt;  Destination file (default: alongside the source, with the new extension)
-  -h, --help             Print help</code></pre></div>
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+      --to &lt;TO&gt;
+          Possible values:
+          - qcow2: QEMU/KVM, libvirt, Cloud Hypervisor — this engine&#x27;s own two backends
+          - raw:   Raw sectors: Proxmox VE (its default for LVM/ZFS/Ceph storage), and the universal fallback anything can read. Not sparse on a filesystem that does not support holes — expect the full virtual size on disk
+          - vmdk:  VMware — Workstation, Fusion, ESXi/vSphere
+          - vdi:   VirtualBox
+          - vhdx:  Hyper-V (Windows 8/2012 and later), and Azure&#x27;s modern disk format
+          - vhd:   Hyper-V&#x27;s older VHD (`vpc` in qemu-img&#x27;s own naming). Kept separate from `vhdx` because they are different formats, not spellings — an importer that wants one rejects the other
+
+  -o, --output &lt;OUTPUT&gt;
+          Destination file (default: alongside the source, with the new extension)
+
+      --compress
+          Compress the output. Only `qcow2` and `vmdk` can — refused for the others rather than handed to `qemu-img` to fail on
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class="cap">Levar uma imagem construída aqui para outro ecossistema</div><pre><code>delonix vm convert minha-base --to vmdk        # VMware
 delonix vm convert minha-base --to vdi         # VirtualBox
 delonix vm convert minha-base --to vhdx        # Hyper-V / Azure</code></pre></div><div class="ex"><div class="cap">Comprimir — só `qcow2` e `vmdk` o sabem fazer; nos outros é recusado com a lista, em vez de entregue ao qemu-img para falhar lá</div><pre><code>delonix vm convert minha-base --to qcow2 --compress</code></pre></div>
@@ -305,6 +322,7 @@ Options:
   -h, --help                   Print help</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Ver o plano SEM aplicar (o default é dry-run)</div><div class='cap lang-en'>See the plan WITHOUT applying it (dry-run is the default)</div><pre><code>delonix vm bridge minha-rede</code></pre></div><div class="ex"><div class='cap lang-pt'>Aplicar mesmo — precisa de root, é a excepção deliberada ao rootless</div><div class='cap lang-en'>Actually apply it — needs root, the deliberate exception to rootless</div><pre><code>sudo delonix vm bridge minha-rede --apply</code></pre></div>
 <h2 id='reach'><code>vm reach</code></h2>
+<p class='intro'>Which published ports a VM can actually reach, and how to fix the ones it cannot. A port published to the default <code>127.0.0.1</code> is invisible to a VM — this lists the libvirt gateways, reads each port&#x27;s LIVE bind, and for every loopback-only one prints the exact republish command</p>
 <div class='help'><pre><code>Usage: delonix vm reach [OPTIONS]
 
 Options:

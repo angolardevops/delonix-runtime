@@ -168,8 +168,9 @@ Commands:
   apply     Applies all the manifest Kinds (Network → Volume → Image → Vm → Container)
   destroy   Removes everything this stack owns (by the `delonix.io/stack` label)
   plan      Shows what an `apply` WOULD change, without changing anything
-  ls        Stack detail in `kubectl describe` style: each resource DECLARED in the manifest and whether or not it is present on the machine
-  describe  
+  ls        List the structure the manifest composes (containers, volumes, networks, ...) and whether each resource exists — the tabular summary of `describe`
+  describe  Stack detail in `kubectl describe` style: each resource DECLARED in the manifest and whether or not it is present on the machine
+  wait      Blocks until every declared resource is present and, where it has one, healthy
   validate  Validates the manifest WITHOUT touching anything (dry-run): resolves the cross-references (`Container.network`/`.volumes`, `Vm.network`, `Ingress/Egress. target`) against what the manifest declares PLUS what already exists in the stores. Exits with an error if any reference is left unresolved — it is the safety net against an `apply` that would only fail halfway through (fail-fast, no rollback)
   help      Print this message or the help of the given subcommand(s)
 
@@ -205,18 +206,10 @@ Options:
   -h, --help          Print help</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Validar o manifesto SEM aplicar nada</div><div class='cap lang-en'>Validate the manifest WITHOUT applying anything</div><pre><code>delonix stack validate -f delonix-manifest.yaml</code></pre></div>
 <h2 id='describe'><code>stack describe</code></h2>
-<div class='help'><pre><code>Usage: delonix stack describe [OPTIONS]
-
-Options:
-  -f, --file &lt;FILE&gt;   
-      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-  -h, --help          Print help</code></pre></div>
-<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Estado recurso a recurso, confrontado com o manifesto</div><div class='cap lang-en'>Resource-by-resource state, checked against the manifest</div><pre><code>delonix stack describe</code></pre></div>
-<h2 id='ls'><code>stack ls</code></h2>
 <p class='intro'>Stack detail in <code>kubectl describe</code> style: each resource DECLARED in the manifest and whether or not it is present on the machine.</p>
 <p class='intro'><strong>The stack has no state of its own</strong> — there is no registry of &quot;stacks&quot;, only a manifest and the resources it creates. That is why this <code>describe</code> always starts from the file and goes to confirm each resource against the respective store, instead of inventing a new registry that would drift out of sync (the same reason <code>cluster ls</code> derives its state from the container labels).</p>
-<p class='intro'>The column that matters is PRESENCE: an <code>apply</code> is fail-fast and without rollback, so a half-applied stack is a normal state and this is exactly what it shows. List the structure the manifest composes (containers, volumes, networks, ...) and whether each resource exists — the tabular summary of <code>describe</code>.</p>
-<div class='help'><pre><code>Usage: delonix stack ls [OPTIONS]
+<p class='intro'>The column that matters is PRESENCE: an <code>apply</code> is fail-fast and without rollback, so a half-applied stack is a normal state and this is exactly what it shows.</p>
+<div class='help'><pre><code>Usage: delonix stack describe [OPTIONS]
 
 Options:
   -f, --file &lt;FILE&gt;
@@ -227,6 +220,15 @@ Options:
 
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)</code></pre></div>
+<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Estado recurso a recurso, confrontado com o manifesto</div><div class='cap lang-en'>Resource-by-resource state, checked against the manifest</div><pre><code>delonix stack describe</code></pre></div>
+<h2 id='ls'><code>stack ls</code></h2>
+<p class='intro'>List the structure the manifest composes (containers, volumes, networks, ...) and whether each resource exists — the tabular summary of <code>describe</code></p>
+<div class='help'><pre><code>Usage: delonix stack ls [OPTIONS]
+
+Options:
+  -f, --file &lt;FILE&gt;   
+      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+  -h, --help          Print help</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Que recursos do manifesto existem de facto neste host</div><div class='cap lang-en'>Which manifest resources actually exist on this host</div><pre><code>delonix stack ls</code></pre></div>
 <h2 id='init'><code>stack init</code></h2>
 <p class='intro'>Initializes a COMPLETE project: Delonixfile + manifest + cluster + README — files ALREADY FILLED IN (images included), ready to use without editing anything</p>
