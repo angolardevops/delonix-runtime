@@ -749,6 +749,87 @@ spec: { disk: k8s-golden }
         let _ = std::fs::remove_file(&p);
     }
 
+    /// Every Kind survives a round-trip through its typed spec without losing or changing a
+    /// field — proved against the manifests the project SHIPS, not against fixtures written
+    /// to pass.
+    ///
+    /// `filled_spec` is what `--dry-run` prints: the spec re-serialized through the typed
+    /// struct, so every `#[serde(default)]` materializes. If a Kind's `Serialize` drops a
+    /// field its `Deserialize` accepts (or renames one on the way out), feeding the output
+    /// back in produces something DIFFERENT the second time — and the user is looking at a
+    /// dry-run that does not describe what will be applied. Asserting `once == twice`
+    /// catches exactly that asymmetry.
+    ///
+    /// Driven by `examples/`, so a new example is covered the day it lands and nobody has to
+    /// remember to add a case here. `nas-vm-cloud-config.yaml` is skipped by CONTENT (it is
+    /// cloud-init, not a delonix manifest) rather than by name, and the test fails if the
+    /// directory ever stops holding manifests — a green run over zero files would be the
+    /// most comfortable kind of lie.
+    ///
+    /// **What it catches, and what it does not — both measured, not assumed.** Renaming the
+    /// serialization of `NetworkSpec::subnet` (which `examples/network.yaml` sets to
+    /// `10.89.0.0/24`) makes this test FAIL, as it should. Renaming `driver` does NOT, and
+    /// the reason is the blind spot: the example sets `driver: bridge`, which is the
+    /// DEFAULT, so the second pass loses the key, falls back to the same value and the
+    /// asymmetry cancels itself out.
+    ///
+    /// So the guarantee is: no Kind loses a field that some published example sets to a
+    /// NON-default value. A field that every example leaves at its default is not covered
+    /// here, and the way to cover it is to set it in an example — which is worth doing for
+    /// its own sake, since an example that only shows defaults teaches nothing either.
+    #[test]
+    fn os_exemplos_publicados_fazem_round_trip_sem_perder_campos() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
+        let mut files = 0usize;
+        let mut docs_seen = 0usize;
+        let mut kinds = std::collections::BTreeSet::new();
+        for entry in std::fs::read_dir(&dir).expect("examples/ tem de existir") {
+            let path = entry.expect("entrada legivel").path();
+            if path.extension().and_then(|s| s.to_str()) != Some("yaml") {
+                continue;
+            }
+            let text = std::fs::read_to_string(&path).expect("exemplo legivel");
+            if !text.contains("apiVersion: delonix.io/") {
+                continue; // cloud-init e afins: nao sao manifestos deste motor
+            }
+            files += 1;
+            let name = path.file_name().unwrap().to_string_lossy().to_string();
+            // Que o exemplo publicado sequer CARREGUE ja e uma afirmacao que vale a pena.
+            let loaded = load(&path).unwrap_or_else(|e| panic!("{name}: nao carrega: {e}"));
+            for doc in &loaded {
+                docs_seen += 1;
+                kinds.insert(doc.kind.clone());
+                let once = filled_spec(doc)
+                    .unwrap_or_else(|e| panic!("{name}: {} nao serializa: {e}", doc.kind));
+                let mut again = doc.clone();
+                again.spec = once.clone();
+                let twice = filled_spec(&again)
+                    .unwrap_or_else(|e| panic!("{name}: {} nao re-parseia: {e}", doc.kind));
+                assert_eq!(
+                    once, twice,
+                    "{name}: o round-trip de {} mudou o spec — o --dry-run nao descreve o que sera aplicado",
+                    doc.kind
+                );
+            }
+        }
+        assert!(
+            files >= 20,
+            "so {files} exemplos: o filtro esta a comer manifestos"
+        );
+        assert!(
+            docs_seen >= files,
+            "menos documentos que ficheiros ({docs_seen} < {files})"
+        );
+        // Os Kinds com renderizador tipado tem MESMO de aparecer, senao o teste passa por
+        // nao ter exercitado nada deles.
+        for k in ["Container", "Network", "Volume", "Vm", "Pod"] {
+            assert!(
+                kinds.contains(k),
+                "nenhum exemplo cobre o kind {k}: {kinds:?}"
+            );
+        }
+    }
+
     /// `metadata.namespace` is honored exactly where the engine applies it, and the alias
     /// forms must not fall through the crack: `kind: VirtualMachine` is canonicalized
     /// BEFORE the check, so it has to end up on the honored side. Asserting the two
