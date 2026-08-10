@@ -24,6 +24,15 @@ ANSWER=${ANSWER:-$HERE/answer-$PRODUCT.toml}
 echo "############ $PRODUCT"
 "$HERE/mkiso.sh" "$SRC_ISO" "$ANSWER" "$ISO" "$HERE/w-$PRODUCT"
 
+# KVM when the host has it, TCG when it does not (a CI runner may not expose
+# /dev/kvm). Without acceleration an install takes far longer but still works,
+# and `-cpu host` is meaningless under TCG.
+if [ -w /dev/kvm ]; then
+  ACCEL=(-enable-kvm -cpu host)
+else
+  echo "==> /dev/kvm not available: falling back to TCG (slow)"
+  ACCEL=(-cpu max)
+fi
 rm -f "$RAW" "$LOG"
 qemu-img create -f qcow2 "$RAW" "${DISK_GB}G" >/dev/null
 
@@ -31,8 +40,8 @@ echo "==> installing (headless, serial log: $LOG)"
 # -no-reboot: the installer reboots when it is done, which ends the run with
 # the disk quiesced — exactly the moment to capture it.
 # cache=unsafe: this is a throwaway build, and it roughly halves install time.
-timeout 3600 qemu-system-x86_64 \
-  -enable-kvm -m "$MEM" -smp 4 -cpu host \
+timeout "${INSTALL_TIMEOUT:-7200}" qemu-system-x86_64 \
+  "${ACCEL[@]}" -m "$MEM" -smp 4 \
   -drive file="$RAW",if=virtio,format=qcow2,cache=unsafe \
   -cdrom "$ISO" -boot d \
   -netdev user,id=n0 -device virtio-net-pci,netdev=n0 \

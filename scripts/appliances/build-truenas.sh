@@ -30,12 +30,21 @@ LOG="$OUT/truenas-install.log"
 PIDFILE="$OUT/truenas-qemu.pid"
 
 echo "############ truenas-scale"
+# KVM when the host has it, TCG when it does not (a CI runner may not expose
+# /dev/kvm). Without acceleration an install takes far longer but still works,
+# and `-cpu host` is meaningless under TCG.
+if [ -w /dev/kvm ]; then
+  ACCEL=(-enable-kvm -cpu host)
+else
+  echo "==> /dev/kvm not available: falling back to TCG (slow)"
+  ACCEL=(-cpu max)
+fi
 rm -f "$RAW" "$LOG" "$PIDFILE"
 qemu-img create -f qcow2 "$RAW" "${DISK_GB}G" >/dev/null
 
 echo "==> booting installer ISO (RPC forwarded to 127.0.0.1:$PORT)"
 qemu-system-x86_64 \
-  -enable-kvm -m "$MEM" -smp 4 -cpu host \
+  "${ACCEL[@]}" -m "$MEM" -smp 4 \
   -drive file="$RAW",if=virtio,format=qcow2,cache=unsafe \
   -cdrom "$SRC_ISO" -boot d \
   -netdev "user,id=n0,hostfwd=tcp::$PORT-:8080" -device virtio-net-pci,netdev=n0 \
