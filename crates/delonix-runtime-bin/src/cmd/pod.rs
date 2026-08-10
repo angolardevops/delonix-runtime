@@ -387,6 +387,7 @@ pub(crate) fn desired(doc: &ManifestDoc) -> Result<super::reconcile::Desired> {
         name: doc.metadata.name.clone(),
         fields: f,
         converges: true,
+        ownable: true,
     })
 }
 

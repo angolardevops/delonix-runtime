@@ -262,7 +262,7 @@ const KINDS: [&str; 10] = [
 /// loud (`Action::NotConverged`) instead of leaving the resource out. A plan
 /// that omits a resource reads as «no changes», which is the exact dishonesty
 /// this whole feature exists to remove.
-pub(crate) const CONVERGING_KINDS: [&str; 4] = ["Network", "Volume", "Container", "Pod"];
+pub(crate) const CONVERGING_KINDS: [&str; 5] = ["Network", "Volume", "Image", "Container", "Pod"];
 
 /// Everything the manifest asks for, in the reconciler's comparable form.
 fn desired_of(docs: &[manifest::ManifestDoc]) -> Result<Vec<reconcile::Desired>> {
@@ -274,11 +274,13 @@ fn desired_of(docs: &[manifest::ManifestDoc]) -> Result<Vec<reconcile::Desired>>
                 "Volume" => super::volume::desired(doc)?,
                 "Network" => super::network::desired(doc)?,
                 "Pod" => super::pod::desired(doc)?,
+                "Image" => super::image::desired(doc)?,
                 _ => reconcile::Desired {
                     kind: kind.to_string(),
                     name: doc.metadata.name.clone(),
                     fields: Default::default(),
                     converges: false,
+                    ownable: true,
                 },
             });
         }
@@ -298,6 +300,7 @@ fn actual_of(docs: &[manifest::ManifestDoc]) -> Result<Vec<reconcile::Actual>> {
     out.extend(super::volume::actual()?);
     out.extend(super::network::actual()?);
     out.extend(super::pod::actual()?);
+    out.extend(super::image::actual(docs)?);
     let (_, cstore) = super::util::open_stores()?;
     let containers = cstore.list().unwrap_or_default();
     for kind in KINDS {
@@ -305,7 +308,7 @@ fn actual_of(docs: &[manifest::ManifestDoc]) -> Result<Vec<reconcile::Actual>> {
             continue;
         }
         for doc in manifest::of_kind(docs, kind) {
-            let (present, _) = presence(kind, &doc.metadata.name, &containers);
+            let (present, _) = presence(kind, doc, &containers);
             if present == "yes" {
                 out.push(reconcile::Actual {
                     kind: kind.to_string(),
@@ -371,6 +374,7 @@ fn print_compared_fields() {
         ("Container", super::container::RECONCILED_CONTAINER_FIELDS),
         ("Volume", super::volume::RECONCILED_VOLUME_FIELDS),
         ("Network", super::network::RECONCILED_NETWORK_FIELDS),
+        ("Image", super::image::RECONCILED_IMAGE_FIELDS),
         ("Pod", super::pod::RECONCILED_POD_FIELDS),
     ] {
         t.row(vec![kind.to_string(), fields.join(", ")]);
@@ -551,7 +555,7 @@ fn ls(file: Option<PathBuf>) -> Result<()> {
     for kind in KINDS {
         for doc in manifest::of_kind(&docs, kind) {
             let name = &doc.metadata.name;
-            let (present, status) = presence(kind, name, &containers);
+            let (present, status) = presence(kind, doc, &containers);
             t.row(vec![kind.to_string(), name.clone(), present, status]);
         }
     }
@@ -598,7 +602,7 @@ fn describe(file: Option<PathBuf>) -> Result<()> {
         let mut t = super::output::Table::new(&["KIND", "NAME", "PRESENT", "STATUS", "LABELS"]);
         for doc in of {
             let name = &doc.metadata.name;
-            let (present, status) = presence(kind, name, &containers);
+            let (present, status) = presence(kind, doc, &containers);
             t.row(vec![
                 kind.to_string(),
                 name.clone(),
@@ -666,12 +670,19 @@ fn fmt_labels(meta: &manifest::Metadata) -> String {
 /// answers "is there something with this name?", never compares the declared spec
 /// with the real one (drift-detection is an orchestrator's job, deliberately out of
 /// scope for this runtime — see `cmd::manifest`).
+/// Whether a declared resource is present on the machine.
+///
+/// Takes the DOCUMENT and not just the name: an `Image`'s identity is its ref
+/// (`spec.pull`/`spec.build.tag`), not `metadata.name`, and resolving the name
+/// reported every image as absent unless the document happened to be named after
+/// the tag.
 fn presence(
     kind: &str,
-    name: &str,
+    doc: &manifest::ManifestDoc,
     containers: &[delonix_runtime_core::Container],
 ) -> (String, String) {
     let root = super::util::state_root();
+    let name = doc.metadata.name.as_str();
     match kind {
         "Container" => match containers.iter().find(|c| c.name == name) {
             Some(c) => {
@@ -707,8 +718,12 @@ fn presence(
             Ok(ns) => yes_no(ns.iter().any(|n| n.name == name)),
             Err(e) => ("?".into(), e.to_string()),
         },
+        // An image's identity is its REF, never the document name.
         "Image" => match delonix_image::ImageStore::open(&root) {
-            Ok(s) => yes_no(s.resolve(name).is_ok()),
+            Ok(s) => yes_no(
+                s.resolve(super::image::image_ref(doc).as_deref().unwrap_or(name))
+                    .is_ok(),
+            ),
             Err(e) => ("?".into(), e.to_string()),
         },
         "Secret" => match delonix_runtime_core::SecretStore::open(&root) {
@@ -1008,6 +1023,7 @@ fn converge_and_stamp(
                 "Container" => super::container::converge(&c.name, &c.diffs)?,
                 "Volume" => super::volume::converge(&c.name, &c.diffs)?,
                 "Network" => super::network::converge(&c.name, &c.diffs)?,
+                "Image" => super::image::converge(&c.name, &c.diffs)?,
                 // A Pod has no hot field at all, so the planner can never emit
                 // `Update` for one. Saying so beats a silent no-op if that ever
                 // changes.
@@ -1032,6 +1048,9 @@ fn converge_and_stamp(
             "Volume" => super::volume::stamp(&d.name, stack, &d.fields),
             "Network" => super::network::stamp(&d.name, stack, &d.fields),
             "Pod" => super::pod::stamp(&d.name, stack, &d.fields),
+            // `Image` is shared content and deliberately not ownable — stamping
+            // it for one stack would hand another stack's cache an owner.
+            "Image" => Ok(()),
             _ => Ok(()),
         };
         // A stamp that fails must not fail the apply — the resource IS created

@@ -191,6 +191,7 @@ pub(crate) fn desired(doc: &ManifestDoc) -> Result<super::reconcile::Desired> {
         name: doc.metadata.name.clone(),
         fields: desired_network_fields(&spec),
         converges: true,
+        ownable: true,
     })
 }
 
