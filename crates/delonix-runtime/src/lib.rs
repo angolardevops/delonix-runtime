@@ -12,8 +12,10 @@ use std::ffi::CString;
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
 use std::time::Duration;
 
+pub mod capabilities;
 pub mod seccomp_profile;
 
+use capabilities::{all_caps_mask, resolve_cap_keep};
 use delonix_runtime_core::{Container, Error, Mount, Result, Status, Store};
 
 /// RFC3339 with nanosecond precision, for the *logging shim* (timestamped
@@ -663,7 +665,6 @@ fn allowed_syscalls() -> Vec<i64> {
     ]);
     v
 }
-
 
 /// Enables `NO_NEW_PRIVS`: an `execve` never gains privileges (nullifies setuid/
 /// setgid/file capabilities). Key defense against escalation — always active.
@@ -6120,7 +6121,7 @@ mod tests {
         // SYS_PTRACE(19), BPF(39) can NOT be on the allowlist.
         for dangerous in [21u8, 16, 22, 27, 17, 19, 39] {
             assert!(
-                !KEPT_CAPS.contains(&dangerous),
+                !crate::capabilities::KEPT_CAPS.contains(&dangerous),
                 "cap {dangerous} não devia ser mantida"
             );
         }

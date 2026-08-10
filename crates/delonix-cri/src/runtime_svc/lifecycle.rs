@@ -603,6 +603,7 @@ pub fn pod_sandbox_status(
 pub fn create_container(
     base: &Path,
     req: CreateContainerRequest,
+    ceiling: crate::CapCeiling,
 ) -> Result<Response<CreateContainerResponse>, Status> {
     let cfg = req
         .config
@@ -621,6 +622,35 @@ pub fn create_container(
         .and_then(|s| s.capabilities.as_ref())
         .map(|c| (c.add_capabilities.clone(), c.drop_capabilities.clone()))
         .unwrap_or_default();
+    // Node capability ceiling (`DELONIX_CRI_CAP_CEILING`) — enforced HERE, at
+    // create, like the rest of the security context (AppArmor profile, the
+    // run_as_group contract): the kubelet then surfaces the refusal on the pod
+    // right away, instead of a container that starts with less privilege than its
+    // spec asked for and fails later for a reason that looks unrelated. In `clamp`
+    // mode `rejected()` is empty by construction and the reduction happens at
+    // start; see `cap_ceiling`.
+    let denied = ceiling.rejected(&cap_add, privileged);
+    if !denied.is_empty() {
+        let asked = if privileged {
+            "privileged: true".to_string()
+        } else {
+            cap_add.join(",")
+        };
+        tracing::warn!(
+            denied = %denied.join(","),
+            requested = %asked,
+            ceiling = %ceiling.describe(),
+            "cri: capability request denied by the node ceiling"
+        );
+        return Err(Status::permission_denied(format!(
+            "capabilities denied by the node ceiling: {} (requested via {}; ceiling: {}). \
+             Lower the pod's securityContext, or widen {} on this node.",
+            denied.join(", "),
+            asked,
+            ceiling.describe(),
+            crate::cap_ceiling::CEILING_ENV,
+        )));
+    }
     let seccomp_unconfined = sc
         .and_then(|s| s.seccomp.as_ref())
         .map(|p| p.profile_type == security_profile::ProfileType::Unconfined as i32)
@@ -746,9 +776,31 @@ pub fn create_container(
     Ok(Response::new(CreateContainerResponse { container_id: id }))
 }
 
+/// Whether the clamped argv takes away something the container EXPLICITLY asked
+/// for — as opposed to merely lowering the engine's implicit default set, which is
+/// the ceiling's ordinary job and would otherwise log a line on every single
+/// container start on the node.
+fn ceiling_reduces(capped: &[String], rec: &ContainerRec) -> bool {
+    if rec.privileged {
+        // `privileged` asks for every capability the kernel has; a ceiling narrow
+        // enough to be expressed as names always gives back less.
+        return true;
+    }
+    let granted: Vec<&str> = capped
+        .chunks(2)
+        .filter(|p| p[0] == "--cap-add")
+        .map(|p| p[1].as_str())
+        .collect();
+    rec.cap_add.iter().any(|c| {
+        let want = c.trim_start_matches("CAP_");
+        !granted.iter().any(|g| g.eq_ignore_ascii_case(want))
+    })
+}
+
 pub fn start_container(
     base: &Path,
     id: String,
+    ceiling: crate::CapCeiling,
 ) -> Result<Response<StartContainerResponse>, Status> {
     let mut rec: ContainerRec = read_rec(&ct_dir(base), &id)?;
     let name = format!("cri-{id}");
@@ -834,25 +886,56 @@ pub fn start_container(
     }
     args.push("--security-opt".into());
     args.push(format!("no-new-privileges={}", rec.no_new_privs));
-    if rec.privileged {
-        args.push("--cap-add".into());
-        args.push("ALL".into());
-        args.push("--security-opt".into());
-        args.push("seccomp=unconfined".into());
-    } else if rec.seccomp_unconfined {
+    // `privileged` implies unconfined seccomp (the engine does the same on its
+    // side), and either way an explicit profile path only applies when nothing
+    // asked for unconfined.
+    if rec.privileged || rec.seccomp_unconfined {
         args.push("--security-opt".into());
         args.push("seccomp=unconfined".into());
     } else if let Some(p) = &rec.seccomp_profile_path {
         args.push("--security-opt".into());
         args.push(format!("seccomp={p}"));
     }
-    for c in &rec.cap_add {
-        args.push("--cap-add".into());
-        args.push(c.trim_start_matches("CAP_").to_string());
-    }
-    for c in &rec.cap_drop {
-        args.push("--cap-drop".into());
-        args.push(c.trim_start_matches("CAP_").to_string());
+    // Capabilities. With a node ceiling in force, the final set is computed once
+    // (engine semantics ∩ ceiling) and emitted as `--cap-drop ALL` + explicit
+    // adds; without one, the flags are exactly what they always were —
+    // `privileged` keeps its `--cap-add ALL` and the pod's own add/drop lists pass
+    // through verbatim. NOTE: the ceiling bounds capabilities only; the other
+    // facets of `privileged` (unconfined seccomp above, writable `/sys`, cgroupns)
+    // are untouched by design.
+    match ceiling.cap_args(&rec.cap_add, &rec.cap_drop, rec.privileged) {
+        Some(capped) => {
+            if ceiling_reduces(&capped, &rec) {
+                tracing::warn!(
+                    container = %id,
+                    privileged = rec.privileged,
+                    requested_add = %rec.cap_add.join(","),
+                    ceiling = %ceiling.describe(),
+                    effective = %capped
+                        .chunks(2)
+                        .filter(|p| p[0] == "--cap-add")
+                        .map(|p| p[1].as_str())
+                        .collect::<Vec<_>>()
+                        .join(","),
+                    "cri: capabilities clamped by the node ceiling"
+                );
+            }
+            args.extend(capped);
+        }
+        None => {
+            if rec.privileged {
+                args.push("--cap-add".into());
+                args.push("ALL".into());
+            }
+            for c in &rec.cap_add {
+                args.push("--cap-add".into());
+                args.push(c.trim_start_matches("CAP_").to_string());
+            }
+            for c in &rec.cap_drop {
+                args.push("--cap-drop".into());
+                args.push(c.trim_start_matches("CAP_").to_string());
+            }
+        }
     }
     if let Some(prof) = &rec.apparmor {
         args.push("--apparmor".into());

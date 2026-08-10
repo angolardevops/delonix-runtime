@@ -225,13 +225,47 @@ O resultado é um relay não governado: quem alcança o gateway alcança **qualq
 registado, em **qualquer** namespace. O FQDN nem precisa de ser adivinhado — é
 `<nome>.<namespace>.delonix.internal`, e o DNS interno resolve nomes.
 
-**Nota de desenho, para quem corrigir:** a contenção mais estreita é uma chain de `input`
-no netns do pin que só aceite as portas do proxy vindas de `tap0` (o caminho
-host→slirp→proxy, que é o propósito de um ingress), recusando-as das bridges de container.
-Isso **não** parece partir a descoberta de serviço, porque o DNS interno resolve o FQDN
-para o **IP do container**, não para o proxy — container→container por nome não passa pelo
-proxy. Mas é uma mudança de comportamento observável e merece confirmação explícita antes
-de entrar.
+#### Spike GO/NO-GO das duas contenções (medido, sem alterar código)
+
+**Opção A — chain de `input` no netns do pin.** Prototipada **à mão** dentro do netns, com
+`nft -f`, e depois removida — sem tocar em código nem respawnar o holder:
+
+```
+chain dlxinput { type filter hook input priority filter; policy accept;
+                 iifname "tap0" accept ; iifname "lo" accept ; tcp dport 8080 counter drop }
+```
+
+| Medição | Antes | Depois |
+|---|---|---|
+| host → proxy → backend (o propósito do ingress) | `WIN` | `WIN` |
+| **teamB → proxy → backend (a fuga)** | `WIN` | **`download timed out`** |
+| DNS do FQDN interno a partir de um container | 1 registo A | 1 registo A |
+| teamA → teamA directo (não-regressão) | — | `WIN` |
+| contador da regra de drop | — | `6 packets / 360 B` |
+
+**GO.** Fecha a fuga, preserva o ingress, e o contador prova que foi a regra. Duas
+verificações que interessavam e passaram: a descoberta de serviço **não** depende do proxy
+— `s46-be.teamA.delonix.internal` resolve para `10.210.243.29`, o IP do próprio container,
+logo container→container por nome vai directo e continua governado pelo isolamento; e o
+tráfego legítimo dentro da mesma namespace não foi afectado.
+
+Alcance: é estrutural — cobre **qualquer** listener residente no holder, presente ou
+futuro, não só este proxy. Custo por pacote: 3 regras num hook que hoje não tem chain
+nenhuma. Limitação: é uma fronteira grossa — um container deixa de poder usar o proxy
+**mesmo dentro da sua própria namespace** (por exemplo para terminação TLS, ou para
+alcançar um backend de um `kind: HTTPRoute` manual).
+
+**Opção B — o proxy decide ao nível L7.** Viável e mais fina, confirmado por leitura:
+`ingress_proxy.rs:319` já é `let (stream, _peer) = listener.accept().await` — **o endereço
+do cliente existe e está a ser descartado**; e o processo já resolve `state_root()`
+(linha 545), portanto pode mapear IP→container→namespace. Exige decidir o caso «cliente sem
+identidade» (o pedido normal vem de fora do nó e não tem namespace — presumivelmente
+permitir), invalidação de cache do registo, e só governa **este** proxy. Não é validável por
+um contador do kernel: obriga a reconstruir e respawnar o proxy.
+
+**Não são exclusivas.** A é a contenção estrutural, barata e verificável; B é a política
+fina por cima. A recomendação é A primeiro (fecha a fuga já, com prova), e B só se aparecer
+o caso de uso de um container querer usar o ingress da sua própria namespace.
 
 ---
 
