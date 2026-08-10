@@ -4462,3 +4462,263 @@ msgstr ""
 "Diagnostica — e, com `--delegate`, corrige — a delegação de cgroup, o pré-requisito para que `--memory`/`--cpus`/`--pids-limit` queiram dizer alguma coisa.\n"
 "\n"
 "Sem ela as flags são ACEITES e INERTES: o container corre sem limite nenhum. É esse o modo de falha que este comando existe para apanhar, e é invisível sem se perguntar."
+
+# help dos ARGUMENTOS do grupo `container` (86 flags)
+
+msgid "Absolute read IOPS limit from the store's disk"
+msgstr "Limite absoluto de IOPS de leitura no disco do store"
+
+msgid "Absolute read limit from the store's disk (`10mb`, `1g`). Docker's `--device-read-bps`"
+msgstr "Limite absoluto de leitura no disco do store (`10mb`, `1g`). O `--device-read-bps` do Docker"
+
+msgid "Absolute write IOPS limit to the store's disk"
+msgstr "Limite absoluto de IOPS de escrita no disco do store"
+
+msgid "Absolute write limit to the store's disk (`10mb`, `1g`). Docker's `--device-write-bps`"
+msgstr "Limite absoluto de escrita no disco do store (`10mb`, `1g`). O `--device-write-bps` do Docker"
+
+msgid "Add a capability (e.g. `NET_ADMIN`). Repeatable"
+msgstr "Acrescenta uma capability (ex.: `NET_ADMIN`). Repetível"
+
+msgid "Additional environment variables (`KEY=VAL`), repeatable"
+msgstr "Variáveis de ambiente adicionais (`CHAVE=VALOR`), repetível"
+
+msgid "Allocate a pseudo-terminal"
+msgstr "Aloca um pseudo-terminal"
+
+msgid "AppArmor profile to apply (`unconfined`, `delonix-default`, or an already-loaded name). `delonix-default` is loaded automatically"
+msgstr "Perfil AppArmor a aplicar (`unconfined`, `delonix-default`, ou um nome já carregado). O `delonix-default` é carregado automaticamente"
+
+msgid "Attach a host device, `/dev/x[:/dev/y]`. Repeatable. The container's `/dev` is a tmpfs with a curated list (null/zero/tty/...); this adds real host nodes to it, like `docker --device`"
+msgstr "Liga um dispositivo do host, `/dev/x[:/dev/y]`. Repetível. O `/dev` do container é um tmpfs com uma lista curada (null/zero/tty/...); isto acrescenta-lhe nós reais do host, como o `docker --device`"
+
+msgid "Auto-register this container's HTTP port in the L7 proxy under its internal FQDN `<name>.<namespace>.delonix.internal` (reachable via the proxy). Needs `--net <network>`. Removed automatically on `container rm`"
+msgstr "Regista automaticamente a porta HTTP deste container no proxy L7 sob o seu FQDN interno `<nome>.<namespace>.delonix.internal` (alcançável pelo proxy). Precisa de `--net <rede>`. Removido automaticamente no `container rm`"
+
+msgid "Bandwidth cap, in bit/s with a suffix (`10mbit`, `512kbit`, `1gbit`)"
+msgstr "Tecto de largura de banda, em bit/s com sufixo (`10mbit`, `512kbit`, `1gbit`)"
+
+msgid "Burst for the bandwidth cap (default: `32kb`). Only with `--net-rate`"
+msgstr "Burst do tecto de largura de banda (por omissão: `32kb`). Só com `--net-rate`"
+
+msgid "Burst for the bandwidth cap. Only with `--net-bps`"
+msgstr "Burst do tecto de largura de banda. Só com `--net-bps`"
+
+msgid "Command + arguments (default: the image's ENTRYPOINT/CMD)"
+msgstr "Comando + argumentos (por omissão: o ENTRYPOINT/CMD da imagem)"
+
+msgid "Connect the container to an additional network hot (multi-homing). Repeatable"
+msgstr "Liga o container a uma rede adicional a quente (multi-homing). Repetível"
+
+msgid "Container name (default: `dlx-<id>`)"
+msgstr "Nome do container (por omissão: `dlx-<id>`)"
+
+msgid "Container sysctl (`net.core.somaxconn=1024`). Repeatable"
+msgstr "Sysctl do container (`net.core.somaxconn=1024`). Repetível"
+
+msgid "CPU quota (number of cores, e.g. `0.5`, `2`). Default: `1.0`"
+msgstr "Quota de CPU (número de cores, ex.: `0.5`, `2`). Por omissão: `1.0`"
+
+msgid "CPUs the container is pinned to (`cpuset.cpus`, e.g. `0-3`, `0,2`)"
+msgstr "CPUs a que o container fica preso (`cpuset.cpus`, ex.: `0-3`, `0,2`)"
+
+msgid "CRI format in the log file (for the kubelet/`crictl logs`)"
+msgstr "Formato CRI no ficheiro de log (para o kubelet/`crictl logs`)"
+
+msgid "Detection mode: seccomp in log mode (doesn't block), to discover syscalls"
+msgstr "Modo de detecção: seccomp em modo de log (não bloqueia), para descobrir syscalls"
+
+msgid "Disable the automatic activation of the user namespace"
+msgstr "Desliga a activação automática do user namespace"
+
+msgid "Disconnect the container from an additional network. Repeatable"
+msgstr "Desliga o container de uma rede adicional. Repetível"
+
+msgid "Drop a capability. Repeatable"
+msgstr "Retira uma capability. Repetível"
+
+msgid "Egress bandwidth cap (`10mbit`, `512kbit`). Only with `--net <network>`"
+msgstr "Tecto de largura de banda de saída (`10mbit`, `512kbit`). Só com `--net <rede>`"
+
+msgid "Expose GPUs: `all` | `nvidia` | `dri` (expands to the `/dev` nodes)"
+msgstr "Expõe GPUs: `all` | `nvidia` | `dri` (expande para os nós de `/dev`)"
+
+msgid "Extra environment variable (`KEY=VAL`) for this call only, on top of the container's own env. Repeatable"
+msgstr "Variável de ambiente extra (`CHAVE=VALOR`) só para esta chamada, por cima do ambiente do próprio container. Repetível"
+
+msgid "Fixed IP on the network (`--net <network>`), e.g. `10.89.0.10`"
+msgstr "IP fixo na rede (`--net <rede>`), ex.: `10.89.0.10`"
+
+msgid "Follow the log continuously (exits when the container stops)"
+msgstr "Segue o log continuamente (sai quando o container pára)"
+
+msgid "Force (kill it if running)"
+msgstr "Força (mata-o se estiver a correr)"
+
+msgid "Hostname inside the container (UTS namespace + `/etc/hostname`). Default: the container name (docker `--hostname`)"
+msgstr "Hostname dentro do container (UTS namespace + `/etc/hostname`). Por omissão: o nome do container (o `--hostname` do docker)"
+
+msgid "Image (e.g. `alpine:3.19`)"
+msgstr "Imagem (ex.: `alpine:3.19`)"
+
+msgid "Image to use. Omit = fill in with the default image"
+msgstr "Imagem a usar. Omitir = preenche com a imagem por omissão"
+
+msgid "Include stopped/failed ones"
+msgstr "Inclui os parados/falhados"
+
+msgid "Inject a secret from the vault (`name`), as an environment variable. Repeatable. With `--secret-files`, it goes to `/run/secrets/<name>`"
+msgstr "Injecta um segredo do cofre (`nome`), como variável de ambiente. Repetível. Com `--secret-files`, vai para `/run/secrets/<nome>`"
+
+msgid "Interactive (attaches stdin)"
+msgstr "Interactivo (liga o stdin)"
+
+msgid "(internal) init PID of the pod's infra container — join its IPC/UTS namespaces (shared pod IPC + hostname). Set by `delonix pod`"
+msgstr "(interno) PID do init do container de infra do pod — junta-se às suas namespaces IPC/UTS (IPC e hostname partilhados do pod). Definido pelo `delonix pod`"
+
+msgid "Join a pod's netns (`--net <network>`), sharing IP/ports"
+msgstr "Junta-se à netns de um pod (`--net <rede>`), partilhando IP/portas"
+
+msgid "Label (`KEY=VAL`), repeatable — e.g. `io.x-k8s.kind.role=control-plane` enables the dedicated cgroup2 delegation for Kind nodes (see `setup_node_cgroup_ns`)"
+msgstr "Label (`CHAVE=VALOR`), repetível — ex.: `io.x-k8s.kind.role=control-plane` activa a delegação de cgroup2 dedicada aos nós Kind (ver `setup_node_cgroup_ns`)"
+
+msgid "Load variables from a `.env` file (`KEY=VAL` per line). Repeatable"
+msgstr "Carrega variáveis de um ficheiro `.env` (`CHAVE=VALOR` por linha). Repetível"
+
+msgid "Log driver (`json`, `cri`, ...)"
+msgstr "Driver de log (`json`, `cri`, ...)"
+
+msgid "Log file path (overrides the default)"
+msgstr "Caminho do ficheiro de log (substitui o por omissão)"
+
+msgid "Logical ISOLATION namespace (default `default`). Containers in different namespaces cannot reach each other (even on the same network); only a `kind: Dependency` crosses the boundary"
+msgstr "Namespace lógica de ISOLAMENTO (por omissão `default`). Containers em namespaces diferentes não se alcançam (mesmo na mesma rede); só um `kind: Dependency` atravessa a fronteira"
+
+msgid "Memory limit (`64M`, `2G`, `max`). Default: `max` (no cap)"
+msgstr "Limite de memória (`64M`, `2G`, `max`). Por omissão: `max` (sem tecto)"
+
+msgid "Mount a tmpfs (`/path[:options]`). Repeatable"
+msgstr "Monta um tmpfs (`/caminho[:opções]`). Repetível"
+
+msgid "Mount a volume hot, `name:/target[:ro]` or `/host:/target[:ro]`. Repeatable"
+msgstr "Monta um volume a quente, `nome:/destino[:ro]` ou `/host:/destino[:ro]`. Repetível"
+
+msgid "Network: `host` (shares the host's, default), `none` (isolated netns with no connectivity), or the NAME of a network created with `delonix network create`"
+msgstr "Rede: `host` (partilha a do host, por omissão), `none` (netns isolada, sem ligação), ou o NOME de uma rede criada com `delonix network create`"
+
+msgid "New CPU quota hot (number of cores, e.g. `0.5`, `2`)"
+msgstr "Nova quota de CPU a quente (número de cores, ex.: `0.5`, `2`)"
+
+msgid "New memory limit hot (`64M`, `2G`, `max`)"
+msgstr "Novo limite de memória a quente (`64M`, `2G`, `max`)"
+
+msgid "Output format: `table` (default) or `json` (ADR-0005). `json` honors `--all` (same filter as the table) and ignores `--quiet`"
+msgstr "Formato de saída: `table` (por omissão) ou `json` (ADR-0005). O `json` respeita o `--all` (o mesmo filtro da tabela) e ignora o `--quiet`"
+
+msgid "Override the image's ENTRYPOINT (COMMAND becomes the arguments to this binary; `--entrypoint \"\"` clears it and runs just the COMMAND)"
+msgstr "Substitui o ENTRYPOINT da imagem (o COMANDO passa a ser os argumentos deste binário; `--entrypoint \"\"` limpa-o e corre só o COMANDO)"
+
+msgid "Prefix each line with its RFC3339 timestamp. Only available for containers run with `--log-cri` (`container run --log-cri`) — the plain log format is raw bytes with no per-line timestamp to show; a container without it gets a clear error naming the flag, not a silently-blank column"
+msgstr "Prefixa cada linha com o seu timestamp RFC3339. Só disponível para containers corridos com `--log-cri` (`container run --log-cri`) — o formato de log simples são bytes crus, sem timestamp por linha para mostrar; um container sem ele recebe um erro claro a nomear a flag, e não uma coluna vazia em silêncio"
+
+msgid "Print only the IDs (to compose with `stop`/`rm`)"
+msgstr "Imprime só os ids (para compor com `stop`/`rm`)"
+
+msgid "Privileged container (all caps, seccomp off) — trusted workloads"
+msgstr "Container privilegiado (todas as caps, seccomp desligado) — cargas de confiança"
+
+msgid "Publish one more port hot, `hostPort:contPort[/tcp|udp]`. Repeatable"
+msgstr "Publica mais uma porta a quente, `portaHost:portaContainer[/tcp|udp]`. Repetível"
+
+msgid "Read-only rootfs (writes go to tmpfs/volumes)"
+msgstr "Rootfs só de leitura (as escritas vão para tmpfs/volumes)"
+
+msgid "Refused: stdin forwarding isn't supported (see the command's own doc above)"
+msgstr "Recusado: não há reencaminhamento de stdin (ver a documentação do próprio comando, acima)"
+
+msgid "Relative CPU weight (`cpu.weight`, 1–10000) under contention"
+msgstr "Peso relativo de CPU (`cpu.weight`, 1–10000) sob contenção"
+
+msgid "Relative I/O weight (`io.weight`, 1–10000)"
+msgstr "Peso relativo de I/O (`io.weight`, 1–10000)"
+
+msgid "Remove the bandwidth cap"
+msgstr "Remove o tecto de largura de banda"
+
+msgid "Remove the container when the process exits (with `-d`, a detached watcher handles removal when the container dies)"
+msgstr "Remove o container quando o processo sair (com `-d`, um vigia desanexado trata da remoção quando o container morrer)"
+
+msgid "Restart policy (only with `-d`): `no` (default), `on-failure[:max]`, `always`, `unless-stopped`. A detached supervisor (one per container, ephemeral — there's no daemon) becomes the container's parent, captures the real exit code, and restarts it according to the policy"
+msgstr "Política de reinício (só com `-d`): `no` (por omissão), `on-failure[:max]`, `always`, `unless-stopped`. Um supervisor desanexado (um por container, efémero — não há daemon) passa a ser o pai do container, captura o código de saída real, e reinicia-o segundo a política"
+
+msgid "Restrict DNS resolution to these containers (isolation). Repeatable"
+msgstr "Restringe a resolução de DNS a estes containers (isolamento). Repetível"
+
+msgid "Run as this user for this call only: `uid[:gid]` or `name[:group]` (resolved against the container's own `/etc/passwd`/`/etc/group`). Default: the container's own configured user"
+msgstr "Corre como este utilizador só nesta chamada: `uid[:gid]` ou `nome[:grupo]` (resolvido contra o `/etc/passwd`/`/etc/group` do próprio container). Por omissão: o utilizador configurado do container"
+
+msgid "Run in the background and print the ID"
+msgstr "Corre em segundo plano e imprime o id"
+
+msgid "Run the process as this user: `uid[:gid]` or `name[:group]` (docker `--user`). Names are resolved in the image's `/etc/passwd`/`/etc/group`"
+msgstr "Corre o processo como este utilizador: `uid[:gid]` ou `nome[:grupo]` (o `--user` do docker). Os nomes resolvem-se no `/etc/passwd`/`/etc/group` da imagem"
+
+msgid "Seconds until SIGKILL"
+msgstr "Segundos até ao SIGKILL"
+
+msgid "Seconds until SIGKILL, for the `stop` half"
+msgstr "Segundos até ao SIGKILL, na metade do `stop`"
+
+msgid "SELinux context/profile to apply"
+msgstr "Contexto/perfil SELinux a aplicar"
+
+msgid "Share the host's IPC namespace"
+msgstr "Partilha a namespace IPC do host"
+
+msgid "Share the host's PID namespace (`--pid host`)"
+msgstr "Partilha a namespace de PID do host (`--pid host`)"
+
+msgid "Show only lines at or after this Unix timestamp (seconds). Same `--log-cri` requirement as `--tail`"
+msgstr "Mostra só as linhas a partir deste timestamp Unix (segundos). Mesma exigência de `--log-cri` que o `--tail`"
+
+msgid "Show only the last N lines. Requires the container to have been run with `--log-cri` (per-line timestamps needed to find \"the last N\" — see `--timestamps`'s doc for why)"
+msgstr "Mostra só as últimas N linhas. Exige que o container tenha sido corrido com `--log-cri` (são precisos timestamps por linha para encontrar «as últimas N» — ver a documentação do `--timestamps` para saber porquê)"
+
+msgid "Signal name (`KILL`, `SIGKILL`, case-insensitive, `SIG` prefix optional) or number (`9`)"
+msgstr "Nome do sinal (`KILL`, `SIGKILL`, indiferente a maiúsculas, prefixo `SIG` opcional) ou número (`9`)"
+
+msgid "Tag for the new image (e.g. `app:v2`)"
+msgstr "Tag da imagem nova (ex.: `app:v2`)"
+
+msgid "The container resolves NO other container by name"
+msgstr "O container não resolve NENHUM outro container por nome"
+
+msgid "The container's DNS alias on the network. Repeatable"
+msgstr "O alias de DNS do container na rede. Repetível"
+
+msgid "The `--secret`s come in as files in `/run/secrets/` (tmpfs), not env"
+msgstr "Os `--secret` entram como ficheiros em `/run/secrets/` (tmpfs), e não no ambiente"
+
+msgid "Ulimit (`nofile=1024:2048`). Repeatable"
+msgstr "Ulimit (`nofile=1024:2048`). Repetível"
+
+msgid "Unmount hot, by the TARGET path inside the container. Repeatable"
+msgstr "Desmonta a quente, pelo caminho de DESTINO dentro do container. Repetível"
+
+msgid "Unpublish a port hot, by HOST PORT. Repeatable"
+msgstr "Retira a publicação de uma porta a quente, pela PORTA DO HOST. Repetível"
+
+msgid "User namespace: enables the subuid mapping (default in rootless)"
+msgstr "User namespace: activa o mapeamento de subuid (por omissão em rootless)"
+
+msgid "Volume/bind mount, `name:/target[:ro]` or `/host:/target[:ro]`. Repeatable"
+msgstr "Volume/bind mount, `nome:/destino[:ro]` ou `/host:/destino[:ro]`. Repetível"
+
+msgid "Working directory for this call only (default: the container's own configured `workdir`, or `/`)"
+msgstr "Directório de trabalho só para esta chamada (por omissão: o `workdir` configurado do próprio container, ou `/`)"
+
+msgid "Working directory the container's process starts in (default: the image's own configured workdir, or `/`). Persists in the record — an `exec -w` overrides it for that one call only"
+msgstr "Directório de trabalho em que o processo do container arranca (por omissão: o workdir configurado da própria imagem, ou `/`). Fica persistido no registo — um `exec -w` substitui-o só nessa chamada"
+
+msgid "Publish a port, `[hostIp:]hostPort:contPort[/tcp|udp]` or just `port`. Repeatable. SAFE BY DEFAULT: without `hostIp` the port binds to `127.0.0.1` only — reachable from the host itself, NOT from a browser on another machine. Name the address to widen it: `0.0.0.0:8080:80` (every interface), `192.168.1.10:8080:80` (one), or the libvirt gateway to reach it from VMs (see `delonix vm reach`). With `--net host` (the default) the container moves to its own netns with userspace NAT (slirp4netns, like rootless podman); with `--net <network>` it publishes via the ingress (nft DNAT + hostfwd on the single slirp)"
+msgstr "Publica uma porta, `[ipHost:]portaHost:portaContainer[/tcp|udp]` ou só `porta`. Repetível. SEGURO POR OMISSÃO: sem `ipHost` a porta liga-se só a `127.0.0.1` — alcançável do próprio host, NÃO de um browser noutra máquina. Nomeia o endereço para a alargar: `0.0.0.0:8080:80` (todas as interfaces), `192.168.1.10:8080:80` (uma), ou o gateway do libvirt para lhe chegares de uma VM (ver `delonix vm reach`). Com `--net host` (o default) o container muda-se para a sua própria netns com NAT em espaço de utilizador (slirp4netns, como o podman rootless); com `--net <rede>` publica pelo ingress (DNAT nft + hostfwd no slirp único)"
