@@ -4187,8 +4187,17 @@ fn slirp_api(sock: &Path, json: &str) -> Result<String> {
         context: "slirp api write",
         message: e.to_string(),
     })?;
+    // Same class as the control socket's (see `control_send`): a read that FAILS
+    // is not an empty reply. Here the caller that hurts is
+    // `slirp_remove_hostfwd`, which parses this as JSON — an empty string parses
+    // to `Null`, `hostfwd_entries` finds nothing, and the unpublish reports
+    // success having removed NOTHING, leaving the host port held by an entry the
+    // record no longer knows about.
     let mut resp = String::new();
-    let _ = s.read_to_string(&mut resp);
+    s.read_to_string(&mut resp).map_err(|e| Error::Runtime {
+        context: "slirp api read",
+        message: format!("no reply from the slirp api-socket: {e}"),
+    })?;
     Ok(resp)
 }
 

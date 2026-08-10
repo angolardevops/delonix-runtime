@@ -3119,7 +3119,14 @@ checklist para quem mexer aqui do que como lista de correcções:
   e escala com a concorrência (não é ruído do host): 10 attaches concorrentes → 0 falhas, 20 → 3,
   30 → **15**. Com o erro lido e o tecto em 30s: **30/30 em 21s**. Fica registado porque a minha
   primeira leitura foi «o servidor fecha mudo» e estava ERRADA — o servidor não fechou nada, fomos
-  nós que desistimos (v0.47.0);
+  nós que desistimos (v0.47.0). **A varredura por padrão a seguir encontrou mais dois `let _ =`
+  sobre um `read`, e um deles era pior**: o `slirp_add_hostfwd` tinha 500 ms de tecto no slirp
+  ÚNICO que todo o ingress partilha, e a seguir ao read fazia `if resp.contains("\"error\"")`
+  → senão `Ok(())`. Um timeout deixa `resp` vazio, uma string vazia não contém `"error"`, e a
+  função devolvia **SUCESSO** para um publish que pode nunca ter acontecido. Ali o sintoma era um
+  erro sem sujeito; aqui era um falso sucesso. O `slirp_api` (o outro) devolvia `Ok("")`, que o
+  `slirp_remove_hostfwd` parseia como JSON `Null` e conclui que não há nada a remover — um
+  unpublish a reportar sucesso sem ter removido nada, com a porta do host presa;
 - **«não está no store de containers» não é «não é local»** — o `image scan` de uma imagem VM
   anunciava «not local», ia à Docker Hub buscar `library/<nome>` e morria num **401**. Recusa
   agora com o nome da alternativa; percorrer o sistema de ficheiros de um convidado é outro
