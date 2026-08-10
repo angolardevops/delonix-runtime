@@ -243,10 +243,14 @@ impl CapCeiling {
         privileged: bool,
     ) -> Option<Vec<String>> {
         let mask = self.mask?;
+        // Character-for-character the engine's own branch in `spawn`:
+        //   if privileged { all_caps_mask() } else { resolve_cap_keep(drop, add) }
+        // In particular `privileged` OVERRIDES `cap_drop` there (a privileged
+        // container with `drop: [ALL]` still gets everything). Modelling that as
+        // `resolve_cap_keep(drop, ["ALL"])` looks equivalent and is not — this
+        // clamp must predict what the engine grants, not what it arguably should.
         let granted = if privileged {
-            // Mirrors the engine: `privileged` means every capability, and any
-            // `cap_drop` the pod also set still applies on top.
-            all_caps_mask() & resolve_cap_keep(cap_drop, &["ALL".to_string()])
+            all_caps_mask()
         } else {
             resolve_cap_keep(cap_drop, cap_add)
         };
@@ -373,10 +377,27 @@ mod tests {
         let added: Vec<&str> = args[2..].chunks(2).map(|p| p[1].as_str()).collect();
         assert!(!added.contains(&"CHOWN"), "o pod pediu para largar CHOWN");
         assert!(added.contains(&"SETUID"));
+    }
 
-        // ...and also on top of `privileged`, mirroring the engine.
-        let args = c.cap_args(&[], &s(&["ALL"]), true).unwrap();
-        assert_eq!(args, s(&["--cap-drop", "ALL"]));
+    /// `privileged` OVERRIDES `cap_drop` in the engine (`if privileged {
+    /// all_caps_mask() }` — the drop list is not even consulted). The clamp has to
+    /// predict what the engine actually grants: the ceiling, not the empty set.
+    /// The first version of this test asserted the intuitive-but-wrong behavior
+    /// and the code had been written to match it.
+    #[test]
+    fn privileged_ignora_o_cap_drop_como_no_motor() {
+        let c = CapCeiling::parse("CHOWN,NET_ADMIN", "clamp").unwrap();
+        assert_eq!(
+            c.cap_args(&[], &s(&["ALL"]), true),
+            Some(s(&[
+                "--cap-drop",
+                "ALL",
+                "--cap-add",
+                "CHOWN",
+                "--cap-add",
+                "NET_ADMIN"
+            ]))
+        );
     }
 
     /// The clamp must be expressible as engine flags: what we emit has to resolve
