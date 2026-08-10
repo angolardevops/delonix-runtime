@@ -2832,37 +2832,57 @@ sem noção de tenant) — não o "Proxmox Driver" com inventário/scheduler do 
 - Event bus: só decidir o transporte (in-process callback vs. daemon) depois da Fase 3 acima, não
   antes — evita desenhar para um daemon que pode nunca ser aprovado.
 
-## Estado para a próxima sessão (2026-07-27, antes do lançamento público de sexta-feira)
+## Estado para a próxima sessão (2026-08-10)
 
-Release actual: **v0.35.1** (ver `docs/RELEASES.md`). Motor testado sistematicamente por todos os
-grupos de comandos, i18n corrigido (380+ strings), docs (`README.rst`, site, `docs/comparacao.html`)
-sincronizadas com o binário publicado, ficheiros de saúde da comunidade (`CONTRIBUTING.md`/
-`SECURITY.md`/`CODE_OF_CONDUCT.md`/templates de issue/PR) no lugar, roteiro de vídeos em
-`docs/ROTEIRO-VIDEOS.md`. **Pendente, por ordem de valor**:
+> A versão anterior desta secção estava parada em **2026-07-27 / v0.35.1** — onze versões atrás,
+> e era a primeira coisa que uma sessão lia para saber onde as coisas estavam. Uma secção de
+> «estado» desactualizada mente nos dois sentidos: dá por fazer o que já está feito, e por
+> pendente o que já foi fechado. É o mesmo defeito que o `AUDITORIA-E2E.md` teve durante semanas.
 
-1. **Volumes anónimos do `compose`** (`ports:`/`working_dir:`/porta aleatória já fechados em
-   v0.34.0) — precisa de decisão de DESENHO antes de código: um `down` simples remove um volume
-   anónimo, ou só `down -v`? Nomeação determinística por posição na lista (risco de colisão se a
-   ordem mudar) vs. um registo próprio (mais peso). Não avances sem responder a isto primeiro.
-2. **5 itens de namespace/privilégio/protocolo** (eram 6 — «pods e VMs no isolamento» fechou na
-   v0.40.0), cada um candidato a sessão própria — nenhum é
-   "dívida rápida", todos tocam fronteiras que este projecto trata com auditoria dedicada (ver
-   skill `delonix-runtime-sec`): `macvlan`/`ipvlan` realizados fisicamente (mesmo em root, o
-   código nunca foi escrito — distinto do caso rootless, que é limite de CAP_NET_ADMIN, não de
-   código em falta); partilha de PID em pods (`shareProcessNamespace`, toca `spawn()`, já
-   sinalizada como função de risco de ~405 linhas); recuperar VMs num respawn do holder (pods e
-   containers já recuperam desde a v0.41.0); WebSocket/upgrade tunelado no proxy L7 (`httproute`); `exec`/attach interactivo +
-   `--restart` na API `serve docker-api` (a primeira precisa de HTTP hijacking real, a segunda de
-   repensar o modelo de supervisor `fork()` para um servidor multi-thread).
-3. **Gravar os vídeos** — o guião (`docs/ROTEIRO-VIDEOS.md`, 6 episódios, comandos já testados) está
-   pronto; falta só a gravação, que é trabalho do utilizador, não de agente.
+Última tag publicada: **v0.46.0**; o `Cargo.toml` ainda diz `0.46.0` e o branch de trabalho é
+`ciclo-v046-bloco-a`, com **82 commits por publicar**. As notas da **v0.47.0** já estão escritas
+(`docs/releases/v0.47.0.md`) e cobrem os três blocos: o ciclo declarativo (`stack plan`/`apply`
+convergente/`destroy`, schema gerado e estável, 18→15 Kinds), o tecto de capabilities do CRI, e o
+bloco pequeno (`delonix init`/`version`, o `scan` a recusar imagens VM, a extracção a dobrar).
+**Publicar é decisão do dono** — bump + tag `vX.Y.Z`, o CI faz o resto.
 
-**Lição concreta desta sessão, vale repetir**: dívida documentada como "só falta ligar" (`runtime::
-update_limits`, `JsonStore::update`) tinha um bug latente à espera do primeiro chamador real —
-mesmo padrão já visto com `mount_live`/`set_net_rate` numa sessão anterior. Antes de assumir que
-"só falta wiring", grepa por `container.cgroup()` vs `live_cgroup()` (e padrões análogos de caminho
-estático-vs-dinâmico) no código que vais ligar — ver a secção "Falhas silenciosas corrigidas" acima
-para o histórico completo. O agente `revisor` já tem este padrão explícito no seu checklist.
+**Estado verificável hoje** (medido, não afirmado): `cargo build --workspace`, `clippy
+--all-targets` e `fmt` limpos; **443 testes** em 21 suites; arnês de caos **20/20**; a
+documentação sem um único comando ou flag que não exista no binário; i18n a **232/232**
+comandos e **0** descrições de flag por traduzir, com dois testes a travar a regressão.
+
+**Pendente, por ordem de valor:**
+
+1. **Três ADRs em `Proposed`, cada um uma sessão própria** — `0008` (backend Proxmox VE num crate
+   à parte), `0009` (provisionamento de datasets TrueNAS pela API), `0010` (o que seria preciso
+   para a API de gestão ser remota — e cuja conclusão esperada é que **não deve** ser, porque a
+   remoteness pertence ao PaaS). Nenhum deles se começa sem ler o ADR primeiro.
+2. **Volumes anónimos do `compose`** — precisa de decisão de DESENHO antes de código: um `down`
+   simples remove um volume anónimo, ou só `down -v`? Nomeação determinística por posição na
+   lista (risco de colisão se a ordem mudar) vs. um registo próprio (mais peso). Não avances sem
+   responder a isto primeiro.
+3. **5 itens de namespace/privilégio/protocolo**, cada um candidato a sessão própria — nenhum é
+   dívida rápida, todos tocam fronteiras que este projecto trata com auditoria dedicada (skill
+   `delonix-runtime-sec`): `macvlan`/`ipvlan` realizados fisicamente (mesmo em root o código
+   nunca foi escrito — distinto do caso rootless, que é limite de CAP_NET_ADMIN e não de código
+   em falta); partilha de PID em pods (`shareProcessNamespace`, toca no `spawn()`, já sinalizado
+   como função de risco de ~405 linhas); recuperar VMs num respawn do holder (pods e containers já
+   recuperam desde a v0.41.0); WebSocket/upgrade tunelado no proxy L7 (`httproute`); `exec`/attach
+   interactivo + `--restart` na API `serve docker-api` (a primeira precisa de HTTP hijacking real,
+   a segunda de repensar o modelo de supervisor `fork()` para um servidor multi-thread).
+4. **Publicar as imagens de appliance** em `ghcr.io/angolardevops/delonix-vm-appliances` — exige
+   um PAT classic com `write:packages` (o token do `gh` deste host tem só `gist,read:org,repo,
+   workflow`, e o `GITHUB_TOKEN` não cria packages novos de user; ver a lição da golden) — e um
+   workflow de CI que as reconstrua, como o `vm-image.yml` já faz para a golden.
+5. **Gravar os vídeos** — o guião (`docs/ROTEIRO-VIDEOS.md`, 6 episódios, comandos já testados)
+   está pronto; a gravação é trabalho do utilizador, não de agente.
+
+**Lição de método que esta série repetiu três vezes, e vale mais que qualquer dos itens acima:**
+uma verificação só vale o que o seu filtro deixa passar. Um `grep "^  delonix"` sobre a saída de
+um teste cortou-me as linhas seguintes de um bloco multi-parágrafo; um limiar de «mais de 25
+caracteres» escondeu-me o `container ps`; e silenciar o `stderr` de um gerador deixou-o falhar a
+meio com o site escrito por metade. Quando uma medição parecer boa demais, **desliga o filtro e
+volta a contar**.
 
 ## Próximas fases (pedidas, não implementadas — cada uma precisa da sua própria sessão de planeamento)
 
