@@ -240,7 +240,7 @@ pub fn run(action: StackCmd) -> Result<()> {
 /// The stack Kinds, in the SAME order as `apply` — whoever reads `describe` sees
 /// the order in which things are created, which is half the diagnosis when an
 /// apply stops halfway.
-const KINDS: [&str; 12] = [
+const KINDS: [&str; 11] = [
     "Secret",
     "Network",
     "Volume",
@@ -252,7 +252,6 @@ const KINDS: [&str; 12] = [
     "Ingress",
     "FirewallPolicy",
     "HTTPRoute",
-    "Dependency",
 ];
 
 /// `stack ls` — the structure the manifest composes, in a single TABLE
@@ -794,9 +793,6 @@ fn apply(file: Option<PathBuf>, replace: Vec<String>, do_prune: bool) -> Result<
     super::container::apply(&docs)?;
     super::pod::apply(&docs)?;
     super::firewall::apply(&docs)?;
-    // Dependency (directed reachability) — after the firewall and the containers
-    // (it needs the IPs); compiles to default-deny ingress + allows on the `to`.
-    super::dependency::apply(&docs)?;
     // HTTPRoute LAST: it needs the backend containers already created (with IP) to
     // resolve the routes; brings up/reloads the L7 reverse-proxy.
     super::httproute::apply(&docs)?;

@@ -3836,3 +3836,17 @@ msgstr "Egress '{name}': o spec tem de ser uma mapping"
 
 msgid "Egress '{name}': `kind: Egress` is deprecated — use `kind: FirewallPolicy` with `direction: egress` (same fields, same behaviour)"
 msgstr "Egress '{name}': `kind: Egress` está depreciado — usa `kind: FirewallPolicy` com `direction: egress` (mesmos campos, mesmo comportamento)"
+
+# Dependency -> FirewallPolicy e regras por workload (fase A2)
+
+msgid "{kind}/{name}: a rule uses both an address (from/to) and a workload (fromWorkload/toWorkload) — pick one"
+msgstr "{kind}/{name}: uma regra usa ao mesmo tempo um endereço (from/to) e um workload (fromWorkload/toWorkload) — escolhe um"
+
+msgid "workload '{name}' does not exist (a rule names it as the other end)"
+msgstr "o workload '{name}' não existe (uma regra nomeia-o como a outra ponta)"
+
+msgid "workload '{name}' has no address on the SDN (is it on a custom network?) — a rule cannot name it"
+msgstr "o workload '{name}' não tem endereço na SDN (está numa rede custom?) — uma regra não o pode nomear"
+
+msgid "Dependency '{name}': `from` cannot be empty"
+msgstr "Dependency '{name}': o `from` não pode estar vazio"
