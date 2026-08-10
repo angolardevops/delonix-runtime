@@ -2921,7 +2921,7 @@ delonix container start web      # restarts with the same state</code></pre>
 
 ARCH = """
 <h1>Arquitectura</h1>
-<p class="tagline">8 crates, um binário — e nenhum processo residente.</p>
+<p class="tagline">10 crates, um binário — e nenhum processo residente.</p>
 
 <h2>Visão geral</h2>
 <div class="arch">
@@ -2996,7 +2996,7 @@ projecto.</p>
 
 ARCH_EN = """
 <h1>Architecture</h1>
-<p class="tagline">8 crates, one binary — and no resident process.</p>
+<p class="tagline">10 crates, one binary — and no resident process.</p>
 
 <h2>Overview</h2>
 <div class="arch">
