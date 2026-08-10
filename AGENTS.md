@@ -3111,6 +3111,15 @@ checklist para quem mexer aqui do que como lista de correcções:
   preenchida custa preço inteiro — não há poupança acidental. A correcção é **rootless-only de
   propósito**: como root o `prepare_rootfs` MONTA um overlay, e um mount da 1.ª passagem não é
   necessariamente visível na namespace onde o re-exec aterra (v0.47.0);
+- **um `read` que FALHA não é uma resposta vazia** — o cliente do socket de controlo fazia
+  `let _ = s.read_to_string(&mut resp)`, descartando o erro, por isso um timeout de leitura e um
+  holder que respondesse nada eram indistinguíveis: os dois davam ``system call `ingress control`
+  failed:`` **sem nada depois dos dois pontos**. E o tecto era 5s enquanto o `handle_control` é O
+  ponto de serialização — um chamador em fila espera por todos os attaches à frente dele. Medido,
+  e escala com a concorrência (não é ruído do host): 10 attaches concorrentes → 0 falhas, 20 → 3,
+  30 → **15**. Com o erro lido e o tecto em 30s: **30/30 em 21s**. Fica registado porque a minha
+  primeira leitura foi «o servidor fecha mudo» e estava ERRADA — o servidor não fechou nada, fomos
+  nós que desistimos (v0.47.0);
 - **«não está no store de containers» não é «não é local»** — o `image scan` de uma imagem VM
   anunciava «not local», ia à Docker Hub buscar `library/<nome>` e morria num **401**. Recusa
   agora com o nome da alternativa; percorrer o sistema de ficheiros de um convidado é outro
