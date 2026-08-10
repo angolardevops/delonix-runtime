@@ -240,10 +240,15 @@ pub fn run(action: StackCmd) -> Result<()> {
 /// The stack Kinds, in the SAME order as `apply` — whoever reads `describe` sees
 /// the order in which things are created, which is half the diagnosis when an
 /// apply stops halfway.
-const KINDS: [&str; 10] = [
+const KINDS: [&str; 12] = [
     "Secret",
     "Network",
     "Volume",
+    // Carved out of a Volume, so it comes after one. It was APPLIED by
+    // `stack apply` and missing from this list, which meant `ls`, `describe`
+    // and `plan` never mentioned a resource the apply creates — the same silent
+    // omission this whole effort keeps removing. Same for `Tunnel` below.
+    "ShareVolume",
     "Image",
     "Vm",
     "Container",
@@ -251,6 +256,9 @@ const KINDS: [&str; 10] = [
     "Ingress",
     "FirewallPolicy",
     "HTTPRoute",
+    // Last, like the apply: a tunnel's `localPort` is typically the L7 proxy's
+    // own listening port, so the proxy has to be up first.
+    "Tunnel",
 ];
 
 /// `stack ls` — the structure the manifest composes, in a single TABLE
@@ -277,6 +285,7 @@ fn desired_of(docs: &[manifest::ManifestDoc]) -> Result<Vec<reconcile::Desired>>
                 "Image" => super::image::desired(doc)?,
                 "Vm" => super::vm::desired(doc)?,
                 "FirewallPolicy" => super::firewall::desired(doc)?,
+                "ShareVolume" => super::sharevolume::desired(doc)?,
                 _ => reconcile::Desired {
                     kind: kind.to_string(),
                     name: doc.metadata.name.clone(),
@@ -305,6 +314,7 @@ fn actual_of(docs: &[manifest::ManifestDoc]) -> Result<Vec<reconcile::Actual>> {
     out.extend(super::image::actual(docs)?);
     out.extend(super::vm::actual()?);
     out.extend(super::firewall::actual(docs)?);
+    out.extend(super::sharevolume::actual(docs)?);
     let (_, cstore) = super::util::open_stores()?;
     let containers = cstore.list().unwrap_or_default();
     for kind in KINDS {
@@ -381,6 +391,7 @@ fn print_compared_fields() {
         ("Image", super::image::RECONCILED_IMAGE_FIELDS),
         ("Vm", super::vm::RECONCILED_VM_FIELDS),
         ("FirewallPolicy", super::firewall::RECONCILED_FW_FIELDS),
+        ("ShareVolume", super::sharevolume::RECONCILED_SHARE_FIELDS),
         ("Pod", super::pod::RECONCILED_POD_FIELDS),
     ] {
         t.row(vec![kind.to_string(), fields.join(", ")]);
@@ -1059,6 +1070,22 @@ fn converge_and_stamp(
                             ))
                         })?;
                     super::firewall::converge_doc(doc)?
+                }
+                // Same shape as a firewall policy: `apply_one` is already
+                // idempotent and updates the record in place, so converging IS
+                // applying — a per-field path would be a second way to write the
+                // same record.
+                "ShareVolume" => {
+                    let doc = docs
+                        .iter()
+                        .find(|d| d.kind == c.kind && d.metadata.name == c.name)
+                        .ok_or_else(|| {
+                            delonix_runtime_core::Error::Invalid(format!(
+                                "ShareVolume/{}: not in the manifest",
+                                c.name
+                            ))
+                        })?;
+                    super::sharevolume::converge_doc(doc)?
                 }
                 // A Pod has no hot field at all, so the planner can never emit
                 // `Update` for one. Saying so beats a silent no-op if that ever
