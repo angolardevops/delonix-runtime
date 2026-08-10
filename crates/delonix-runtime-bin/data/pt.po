@@ -3993,3 +3993,162 @@ msgstr "esgotou o tempo ao fim de {secs}s à espera de {n} recurso(s)"
 
 msgid "{kind}/{name}: {message}"
 msgstr "{kind}/{name}: {message}"
+
+# help dos comandos introduzidos nesta serie e que ainda so falavam EN
+# (medido: 103 dos 232 subcomandos ficam em EN sob `--l18n=pt`; estes sao os
+# que esta serie acrescentou, e por isso os que lhe cabem)
+
+msgid "JSON Schema of the manifest, GENERATED from the code (ADR-0007)."
+msgstr "JSON Schema do manifesto, GERADO a partir do código (ADR-0007)."
+
+msgid ""
+"Point an editor at it with one comment at the top of the manifest and you get "
+"completion, type checking and the field docs while you type: `# yaml-language-"
+"server: $schema=./delonix.schema.json`"
+msgstr ""
+"Aponta o editor para ele com um comentário no topo do manifesto e ganhas "
+"completação, verificação de tipos e a documentação dos campos enquanto "
+"escreves: `# yaml-language-server: $schema=./delonix.schema.json`"
+
+msgid ""
+"Field reference for a Kind, `kubectl explain` style — from the SAME generated "
+"schema, so it cannot drift from the code."
+msgstr ""
+"Referência de campos de um Kind, ao estilo do `kubectl explain` — a partir do "
+"MESMO schema gerado, por isso não pode divergir do código."
+
+msgid ""
+"`delonix explain Container` · `delonix explain Container.ports` · `delonix "
+"explain Pod.containers.image`"
+msgstr ""
+"`delonix explain Container` · `delonix explain Container.ports` · `delonix "
+"explain Pod.containers.image`"
+
+msgid ""
+"Convert a VM disk to the format another ecosystem imports — `qcow2`, `raw`, "
+"`vmdk` (VMware), `vdi` (VirtualBox), `vhdx`/`vhd` (Hyper-V, Azure). Flattened "
+"either way, so the result is a standalone file with no backing chain. This "
+"engine's own two backends already share `qcow2`/`raw`; the rest exist so an "
+"image built here is importable elsewhere without a backend per product."
+msgstr ""
+"Converte um disco de VM para o formato que outro ecossistema importa — "
+"`qcow2`, `raw`, `vmdk` (VMware), `vdi` (VirtualBox), `vhdx`/`vhd` (Hyper-V, "
+"Azure). Achatado em qualquer dos casos, por isso o resultado é um ficheiro "
+"autónomo, sem cadeia de backing. Os dois backends deste motor já partilham "
+"`qcow2`/`raw`; os restantes existem para que uma imagem construída aqui seja "
+"importável noutro lado sem um backend por produto."
+
+msgid ""
+"Get or set the default VM backend, used by `vm create` when neither `--"
+"backend` nor `DELONIX_VM_BACKEND` is given — above the engine's own auto-"
+"detection heuristic. With no flag, prints the current default (`none` if auto-"
+"detection decides)."
+msgstr ""
+"Lê ou fixa o backend de VM por omissão, usado pelo `vm create` quando não vem "
+"nem `--backend` nem `DELONIX_VM_BACKEND` — acima da heurística de auto-"
+"detecção do próprio motor. Sem flag nenhuma, imprime o que está fixado "
+"(`none` = decide a auto-detecção)."
+
+msgid "Set the persisted default (`cloud-hypervisor` or `libvirt`)."
+msgstr "Fixa o valor persistido (`cloud-hypervisor` ou `libvirt`)."
+
+msgid "Clear the persisted default (fall back to auto-detection)."
+msgstr "Limpa o valor persistido (volta à auto-detecção)."
+
+msgid ""
+"Register an existing disk image under a name, so `vm create --disk <name>` "
+"and `image vm push` can use it."
+msgstr ""
+"Regista um disco já existente sob um nome, para que o `vm create --disk "
+"<nome>` e o `image vm push` o possam usar."
+
+msgid "Move the pre-scoping share records into the `default` namespace."
+msgstr ""
+"Traz os registos de partilha anteriores ao scoping para a namespace `default`."
+
+# help do grupo `container` — 27 subcomandos que ficavam em EN sob `--l18n=pt`
+# (o grupo do dia a dia, e o maior bloco dos 97 medidos)
+
+msgid "Containers: run/ps/stop/rm/exec/logs/update/describe."
+msgstr "Containers: run/ps/stop/rm/exec/logs/update/describe."
+
+msgid "Initialize a project with a Delonixfile + manifest — files ALREADY FILLED IN (images included), ready to use without editing anything."
+msgstr "Inicia um projecto com um Delonixfile + manifesto — ficheiros JÁ PREENCHIDOS (imagens incluídas), prontos a usar sem editar nada."
+
+msgid "Run a container from an image (pulls it if missing)."
+msgstr "Corre um container a partir de uma imagem (puxa-a se faltar)."
+
+msgid "(Re)start stopped/crashed containers, reusing the persistent rootfs (writes made inside the container survive, like in docker) and the same network/ports/volumes as the original `run`. Always detached."
+msgstr "(Re)arranca containers parados/caídos, reaproveitando o rootfs persistente (o que foi escrito lá dentro sobrevive, como no docker) e a mesma rede/portas/volumes do `run` original. Sempre desanexado."
+
+msgid "Stop one or more containers (SIGTERM, then SIGKILL)."
+msgstr "Pára um ou mais containers (SIGTERM, depois SIGKILL)."
+
+msgid "Send a signal to one or more containers (default SIGKILL) — unlike `stop`, does not wait or force a `Stopped` status: the real outcome (e.g. `Crashed` for a `KILL`) is picked up on the next observation."
+msgstr "Envia um sinal a um ou mais containers (por omissão SIGKILL) — ao contrário do `stop`, não espera nem força o estado `Stopped`: o desfecho real (ex.: `Crashed` para um `KILL`) é apanhado na observação seguinte."
+
+msgid "Block until one or more containers exit, then print their exit code (one per line, in the order given)."
+msgstr "Bloqueia até um ou mais containers saírem e imprime o código de saída (um por linha, na ordem dada)."
+
+msgid "Stop then start one or more containers (reuses the persistent rootfs and the original run configuration, like `start`)."
+msgstr "Pára e volta a arrancar um ou mais containers (reaproveita o rootfs persistente e a configuração original, como o `start`)."
+
+msgid "Give a container a new name."
+msgstr "Dá um nome novo a um container."
+
+msgid "Published ports of a container (`hostPort/proto -> containerPort`)."
+msgstr "Portas publicadas de um container (`portaHost/proto -> portaContainer`)."
+
+msgid "Remove one or more containers."
+msgstr "Remove um ou mais containers."
+
+msgid "Suspend a container's processes (cgroup v2 freezer) — the state stays in memory, unlike `stop`. Resume with `unpause`."
+msgstr "Suspende os processos de um container (freezer do cgroup v2) — o estado fica em memória, ao contrário do `stop`. Retoma-se com `unpause`."
+
+msgid "Resume a container suspended with `pause`."
+msgstr "Retoma um container suspenso com `pause`."
+
+msgid "Create an image from a container's CURRENT rootfs state (whatever was written inside becomes a new layer)."
+msgstr "Cria uma imagem a partir do estado ACTUAL do rootfs de um container (o que lá foi escrito passa a ser uma layer nova)."
+
+msgid "Interactive shell inside a container (shortcut for `exec -t`): with no command, it tries `bash` and falls back to `sh`, which exists in any image."
+msgstr "Shell interactiva dentro de um container (atalho para `exec -t`): sem comando, tenta o `bash` e cai para o `sh`, que existe em qualquer imagem."
+
+msgid "Run the image's `HEALTHCHECK` inside the container. Exits with 1 if `unhealthy` — usable in a script/CI."
+msgstr "Corre o `HEALTHCHECK` da imagem dentro do container. Sai com 1 se `unhealthy` — usável num script/CI."
+
+msgid "Processes running inside a container (read from `cgroup.procs`)."
+msgstr "Processos a correr dentro de um container (lidos do `cgroup.procs`)."
+
+msgid "Files changed relative to the image: `A` = created/changed, `D` = deleted."
+msgstr "Ficheiros alterados face à imagem: `A` = criado/alterado, `D` = apagado."
+
+msgid "Copy files between the host and a container. Exactly one side is `container:/path` (e.g. `delonix container cp web:/etc/nginx.conf .`)."
+msgstr "Copia ficheiros entre o host e um container. Exactamente um dos lados é `container:/caminho` (ex.: `delonix container cp web:/etc/nginx.conf .`)."
+
+msgid "Execute a command inside a running container."
+msgstr "Executa um comando dentro de um container a correr."
+
+msgid "Show the full spec of one or more containers (Store JSON)."
+msgstr "Mostra o spec completo de um ou mais containers (JSON do Store)."
+
+msgid "Human-readable detail of one or more containers, `kubectl describe`-style (for humans; use `inspect` for script-consumable JSON)."
+msgstr "Detalhe legível de um ou mais containers, ao estilo do `kubectl describe` (para humanos; para JSON consumível por scripts usa o `inspect`)."
+
+msgid "**Reconfigure a RUNNING container without stopping it** — ports, volumes, networks, and bandwidth cap."
+msgstr "**Reconfigura um container A CORRER sem o parar** — portas, volumes, redes e tecto de largura de banda."
+
+msgid "Resource usage (CPU/memory/PIDs) of the running containers — one sample and exits (no stream). With no IDs, shows all running ones."
+msgstr "Uso de recursos (CPU/memória/PIDs) dos containers a correr — uma amostra e sai (sem stream). Sem ids, mostra todos os que estão a correr."
+
+msgid "Show the logs (detached containers)."
+msgstr "Mostra os logs (containers desanexados)."
+
+msgid "Re-attach to a running container's output stream (same log file `logs -f` reads). Unlike `docker attach`, this is OUTPUT-ONLY: a detached container's stdin has nowhere to go (this engine keeps no live conduit to it once started, unlike a persistent per-container shim) — `-i`/`--stdin` is refused with a clear error instead of silently doing nothing."
+msgstr "Volta a ligar-se ao fluxo de saída de um container a correr (o mesmo ficheiro de log que o `logs -f` lê). Ao contrário do `docker attach`, isto é SÓ-SAÍDA: o stdin de um container desanexado não tem para onde ir (este motor não guarda um canal vivo para ele depois de arrancado, ao contrário de um shim persistente por container) — `-i`/`--stdin` é recusado com um erro claro em vez de não fazer nada em silêncio."
+
+msgid "Apply the `kind: Container` documents of a manifest (idempotent by name — an existing container with that name is neither recreated nor checked for spec drift, see `cmd::manifest`)."
+msgstr "Aplica os documentos `kind: Container` de um manifesto (idempotente por nome — um container existente com esse nome não é recriado nem verificado quanto a deriva de spec, ver `cmd::manifest`)."
+
+msgid "List containers."
+msgstr "Lista os containers."
