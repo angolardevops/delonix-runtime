@@ -73,7 +73,7 @@ expectativa.
 | 5 | `proto: any` + porta nua | `allow 9999` **não** abre a 8080; `allow 8080` abre | ✅ correcto — **provado ao vivo** (era só teste unitário) |
 | 6 | Saída do próprio container sob `policy deny` | `REACHABLE` (o `ct state` da v0.37.x) | ✅ correcto |
 | 7 | `--net host` / `none` | `ingress ls` diz `n/a (host net)` | ✅ honesto |
-| 8 | **Proxy L7 (`httproute` / `--expose`)** | teamB→teamA directo `blocked`; **pelo proxy `WIN`**, inclusive com `policy deny` no backend | ❌ **ALTO — §4.2** |
+| 8 | Proxy L7 (`httproute` / `--expose`) | era: teamB→proxy→teamA `WIN` mesmo com `policy deny`. Agora: `timeout`, host→proxy `WIN` (§4.2, corrigido) | ✅ fechado |
 | 9 | netns de pod | cross-namespace `blocked` na rede custom; `spec.network` era ignorado (§4.4, corrigido) | ✅ coberto |
 | 10 | `tap` de VM | **NÃO MEDIDO** — nenhuma imagem deste host arranca em Cloud Hypervisor (a golden é libvirt-only). O antispoof existe no `main` (`antispoof_rule_args`), ausente no holder vivo | — |
 | 11 | `vm bridge` (privilegiado) | **NÃO MEDIDO** — exige `root` e um veth no init-netns do host; não executado num host com produção viva | — |
@@ -267,9 +267,37 @@ um contador do kernel: obriga a reconstruir e respawnar o proxy.
 fina por cima. A recomendação é A primeiro (fecha a fuga já, com prova), e B só se aparecer
 o caso de uso de um container querer usar o ingress da sua própria namespace.
 
+#### Estado: A implementada e validada ao vivo com o holder respawnado
+
+A chain `dlxinput` entrou no ruleset base (`ingress_table_ruleset`), com escapatória ruidosa
+`DELONIX_ALLOW_HOLDER_INGRESS=1`. Confirmada no kernel depois do respawn:
+
+```
+chain dlxinput { type filter hook input priority filter; policy accept;
+  ct state established,related accept ; iifname "lo" accept ; iifname "tap0" accept
+  udp dport { 53, 67, 68 } accept ; tcp dport 53 accept ; meta l4proto icmp accept
+  ct state new counter packets 7 bytes 420 drop }
+```
+
+| Medição com o código (não com o protótipo) | Resultado |
+|---|---|
+| host → proxy → backend | `WIN` |
+| teamB → proxy → backend | `download timed out` |
+| contador da regra de drop | `7 packets / 420 B` |
+| DNS interno de dentro de um container | `kaeso-db.default.delonix.internal` → `10.210.58.41` |
+| DNS externo (reencaminhamento) | `github.com` resolve |
+| saída de um container para a internet | `rc=0` |
+| produção durante tudo isto | Odoo `HTTP 303`, Postgres aceita ligação |
+
+O `SERVFAIL` de um nome **simples** (`nslookup kaeso-db`) aparece antes e depois da mudança
+— foi medido no início da sessão, com o holder antigo, e não é regressão desta chain.
+
+O teste de regressão afirma a **ordem** (o drop tem de ser a última regra, senão a allowlist
+a seguir é regra morta) e foi demonstrado a falhar com a protecção revertida.
+
 ---
 
-### 4.3 MÉDIO — o set `@dlxall` só cresce
+### 4.3 MÉDIO — o set `@dlxall` só cresce — **CORRIGIDO**
 
 ```
 @dlxall entries : 49        veths vivos : 8        containers registados : 5
@@ -283,7 +311,17 @@ nada trata a saída definitiva.
 Não é uma fuga de política — `@dlxall` só é lido para *dropar* (`ip saddr @dlxall ct state
 new drop`), portanto uma entrada a mais nunca abre nada. É crescimento sem tecto de estado
 do kernel e ruído de diagnóstico: um `@dlxall` com 49 endereços num nó com 8 veths não
-serve para responder a nenhuma pergunta operacional.
+serve para responder a nenhuma pergunta operacional. Durante esta própria sessão subiu de
+**49 para 74** — a fuga medida a acontecer.
+
+**Corrigido** com `ns_set_leave`, numa linha de controlo própria (`nsleave <ip>`) e não
+dentro do `detach`: o `detach` não leva endereço nenhum, e o `unfirewall` — que leva — também
+é enviado pelo `clear_firewall` para um container **vivo**, pelo que pendurar ali a remoção
+despejaria um peer vivo dos sets. Enviada best-effort, por isso um holder antigo limita-se a
+recusá-la e comporta-se como sempre, em vez de falhar o teardown.
+
+Validado ao vivo com o holder respawnado: **5 → 4 → 3 → 2** elementos, um por remoção, e os
+dois que sobram são exactamente os IPs dos dois containers de produção.
 
 ---
 
