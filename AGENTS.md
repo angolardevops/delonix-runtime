@@ -506,6 +506,15 @@ em `docs/gitops.md` (plan num PR, apply no merge, gate de deriva, e o que fazer 
 morre a meio). `scripts/schema-diff.sh` compara campo a campo entre duas tags e sai 1 com
 diferenças.
 
+**Cenário de caos `stack_converge`** (arnês: 20/20), com **dois** containers de propósito — o
+segundo é o CONTROLO, e prova que a convergência tocou só no que o plano nomeou. A primeira versão
+verificava apenas que o PID não mudava, e isso **não prova nada**: um apply que não faz nada também
+deixa o PID intacto. As asserções que valem são o registo ter mudado (`memory_max`) **e** o
+`stack plan --detailed-exitcode` seguinte nada ter a propor. Verificado pela regra do repo, com as
+duas correcções revertidas uma de cada vez: sem `container::converge` falha em «reportou sucesso
+sem convergir a memória (64M)»; sem `refuse_unallowed` falha em «a recusa mexeu no container» — o
+apply destrói-o para o recriar com uma imagem que não existe, e deixa-o sem PID.
+
 ## Manifesto/apply (`delonix-manifest.yaml`)
 
 Manifesto declarativo multi-documento, ao estilo Kubernetes (`apiVersion: delonix.io/v1` /
