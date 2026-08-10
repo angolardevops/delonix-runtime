@@ -556,6 +556,21 @@ fn spawn_ngrok(
     if let Some(h) = hostname {
         // Reserved/custom domain — paid plans only; ngrok itself errors
         // clearly if the account doesn't have it, we don't pre-validate.
+        //
+        // A leading `-` is refused for the same reason `resolve_token` refuses
+        // it: this lands in an argv slot of someone else's binary, and a value
+        // that can pass for a flag is a value that can change what that binary
+        // does. The token got this guard when it turned out to be exploitable;
+        // the hostname sits in the same kind of slot and simply had not been
+        // looked at.
+        if h.starts_with('-') {
+            return Err(Error::Invalid(
+                super::po::t(
+                    "hostname cannot start with '-' (it would be interpreted as an option of the provider's binary)",
+                )
+                .into(),
+            ));
+        }
         args.push("--url".to_string());
         args.push(h.to_string());
     }

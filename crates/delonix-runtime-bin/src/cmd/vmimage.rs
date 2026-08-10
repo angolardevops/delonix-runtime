@@ -757,6 +757,9 @@ pub(crate) fn cmd_convert(
             "convert",
             "-O",
             to.as_str(),
+            // `--` so a source path starting with `-` is a path, not an option:
+            // `source` here may be a literal path straight from the caller.
+            "--",
             &src_path.to_string_lossy(),
             &dest.to_string_lossy(),
         ],
@@ -1333,6 +1336,7 @@ pub(crate) fn stream_download(url: &str, dest: &Path) -> Result<()> {
     }
     let mut file = std::fs::File::create(dest)?;
     let mut buf = [0u8; 1 << 20];
+    let mut written: u64 = 0;
     loop {
         let n = resp
             .read(&mut buf)
@@ -1340,10 +1344,30 @@ pub(crate) fn stream_download(url: &str, dest: &Path) -> Result<()> {
         if n == 0 {
             break;
         }
+        written += n as u64;
+        // Ceiling on ACTUAL bytes read, not on the advertised `Content-Length`:
+        // a hostile or misconfigured server can simply keep streaming, and this
+        // writes to disk, so the failure is a full filesystem — on a node that
+        // may be running everything else this host serves. The limit is
+        // deliberately far above any real cloud image (they run 0.5–3 GiB), so
+        // it only ever fires on something that is not an image. Same shape as
+        // the registry blob cap in `delonix-image`.
+        if written > MAX_DOWNLOAD_BYTES {
+            let _ = std::fs::remove_file(dest);
+            return Err(Error::Invalid(format!(
+                "GET {url}: aborted after {written} bytes (over the {MAX_DOWNLOAD_BYTES}-byte limit) \
+                 — the server is streaming more than any expected image"
+            )));
+        }
         file.write_all(&buf[..n])?;
     }
     Ok(())
 }
+
+/// Ceiling for a single downloaded artifact (cloud image, `.deb`, binary).
+/// 32 GiB: an order of magnitude above the largest cloud image anyone ships,
+/// so a legitimate download never approaches it.
+const MAX_DOWNLOAD_BYTES: u64 = 32 * 1024 * 1024 * 1024;
 
 pub(crate) fn http_get_text(url: &str) -> Result<String> {
     let client = reqwest::blocking::Client::builder()
@@ -2217,6 +2241,33 @@ fn shared_account_steps(extra_run: &[String], distro: Distro) -> Vec<CustomizeOp
             "echo 'delonix ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/90-delonix && chmod 440 /etc/sudoers.d/90-delonix"
                 .into(),
         ),
+        // Those two passwords are FIXED, PUBLIC (they are right here, in an
+        // open-source repo) and the account has passwordless sudo — so anyone
+        // who can reach a login prompt on a golden VM is root on it. Password
+        // login over SSH is therefore turned OFF in the image: every supported
+        // way in gets you in without it (cloud-init injects the SSH keys, and
+        // `cluster kubeadm` authenticates with a generated key), while the
+        // serial console still takes the password, which is what you want when
+        // a VM has lost its network and you need to get in and fix it.
+        //
+        // Both places, deliberately: `sshd_config.d` is the modern drop-in, but
+        // Debian bullseye's stock `sshd_config` has no `Include` line, so there
+        // the drop-in alone would be silently ignored. In the main file the
+        // existing directives are commented out first rather than appended to —
+        // sshd takes the FIRST occurrence of a keyword, so an append lands after
+        // the distro's own line and does nothing.
+        CustomizeOp::RunCommand(
+            "mkdir -p /etc/ssh/sshd_config.d && \
+             printf 'PasswordAuthentication no\\nPermitRootLogin prohibit-password\\nKbdInteractiveAuthentication no\\n' \
+               > /etc/ssh/sshd_config.d/99-delonix-hardening.conf && \
+             chmod 644 /etc/ssh/sshd_config.d/99-delonix-hardening.conf && \
+             if [ -f /etc/ssh/sshd_config ]; then \
+               sed -i -E 's/^[[:space:]]*(PasswordAuthentication|PermitRootLogin|KbdInteractiveAuthentication|ChallengeResponseAuthentication)[[:space:]]/#&/I' /etc/ssh/sshd_config && \
+               printf '\\n# --- Delonix golden image hardening (the built-in password is public) ---\\nPasswordAuthentication no\\nPermitRootLogin prohibit-password\\nKbdInteractiveAuthentication no\\n' \
+                 >> /etc/ssh/sshd_config; \
+             fi"
+                .into(),
+        ),
         // Shell UX the Kubernetes docs recommend: kubectl/kubeadm bash completion
         // + the `k` alias (with completion wired to it). Written to the
         // system-wide interactive-bash file (sourced for every interactive
@@ -2897,6 +2948,52 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
         assert!(!cmds.iter().any(|c| c.contains("/etc/bash.bashrc")));
         assert!(cmds.iter().any(|c| c == &"dnf clean all"));
         assert!(!cmds.iter().any(|c| c.contains("apt-get clean")));
+    }
+
+    /// Achado de auditoria (MÉDIO): a golden traz `root/delonix` e
+    /// `delonix:delonix` com sudo NOPASSWD — credenciais FIXAS e públicas (estão
+    /// no código-fonte aberto). Sem desligar o login por password no SSH, uma
+    /// golden exposta à rede é root remoto com credenciais conhecidas. Todos os
+    /// caminhos suportados entram por chave (cloud-init injecta-a, o
+    /// `cluster kubeadm` gera a sua), por isso desligar não custa nada; a
+    /// consola série continua a aceitar a password para recuperação.
+    #[test]
+    fn todas_as_goldens_desligam_o_login_por_password_no_ssh() {
+        let hardened = |ops: &[CustomizeOp]| {
+            ops.iter().any(
+                |o| matches!(o, CustomizeOp::RunCommand(c) if c.contains("PasswordAuthentication no")),
+            )
+        };
+        for d in [Distro::Ubuntu, Distro::Debian, Distro::Rocky] {
+            let ops = rootless_customization_steps(&[], &PathBuf::from("/tmp/delonix"), d);
+            assert!(
+                hardened(&ops),
+                "a golden rootless ({d:?}) tem de desligar o login por password"
+            );
+            // Tem de mexer nos DOIS sítios: o `sshd_config` do bullseye não tem
+            // linha `Include`, logo só o drop-in seria ignorado em silêncio.
+            let cmds: Vec<&String> = ops
+                .iter()
+                .filter_map(|o| match o {
+                    CustomizeOp::RunCommand(c) => Some(c),
+                    _ => None,
+                })
+                .collect();
+            assert!(cmds
+                .iter()
+                .any(|c| c.contains("sshd_config.d") && c.contains("/etc/ssh/sshd_config")));
+        }
+        // A golden k8s partilha os mesmos passos de conta, logo também vem
+        // endurecida — é a que corre em nós de produção.
+        let k8s = k8s_customization_steps(
+            None,
+            &[],
+            &[],
+            &PathBuf::from("/tmp/delonix-cri"),
+            &PathBuf::from("/tmp/delonix-cri.service"),
+            Distro::Ubuntu,
+        );
+        assert!(hardened(&k8s), "a golden k8s também tem de vir endurecida");
     }
 
     #[test]

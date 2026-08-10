@@ -227,6 +227,23 @@ fn apply_seccomp(unconfined: bool, detect: bool, keep_privs: bool, profile: Opti
         libc::SYS_clone,
         vec![rule_arg_masked(0, libc::CLONE_NEWUSER as u64, 0)], // NEWUSER not set
     );
+    // `personality`: permit only the personas that do not weaken the process's
+    // own hardening. Docker's default profile restricts this syscall the same
+    // way, and the reason is that `READ_IMPLIES_EXEC` (0x0400000) makes every
+    // readable page executable — turning data the attacker controls into
+    // shellcode-friendly memory — while `ADDR_NO_RANDOMIZE` (0x0040000) turns
+    // ASLR off. Neither is an escape by itself; both remove a mitigation that
+    // an exploit inside the container would otherwise have to defeat. The
+    // allowed values are the ones a legitimate program actually asks for:
+    // PER_LINUX (0), PER_LINUX32 (8), and the 0xffffffff query form.
+    rules.insert(
+        libc::SYS_personality,
+        vec![
+            rule_arg_masked(0, 0xffff_ffff, 0x0000_0000), // PER_LINUX
+            rule_arg_masked(0, 0xffff_ffff, 0x0000_0008), // PER_LINUX32
+            rule_arg_masked(0, 0xffff_ffff, 0xffff_ffff), // query, changes nothing
+        ],
+    );
 
     let arch = match std::env::consts::ARCH.try_into() {
         Ok(a) => a,
@@ -1390,6 +1407,13 @@ fn bind_devices(src_prefix: &str, rootfs: &str, devices: &[String]) {
         if host.is_empty() {
             continue;
         }
+        if is_forbidden_device(host) {
+            eprintln!(
+                "delonix: --device {host}: refused (raw memory/port access would compromise \
+                 the host); char devices other than /dev/mem, /dev/kmem and /dev/port are allowed"
+            );
+            continue;
+        }
         let src = format!("{src_prefix}{host}");
         // Refuses BLOCK devices in code (does not rely solely on eBPF, which is
         // best-effort and may fail to load): giving `/dev/sda` to a container =
@@ -1412,11 +1436,35 @@ fn bind_devices(src_prefix: &str, rootfs: &str, devices: &[String]) {
             Some(c) if c.starts_with('/') => c,
             _ => host,
         };
-        let target = format!("{rootfs}{cont}");
+        // Confine the destination exactly as `bind_volume` does. Without this the
+        // target was built by raw concatenation, so a `--device /dev/null:/../../etc/x`
+        // (reachable from an untrusted manifest's `spec.devices`) escaped the rootfs
+        // and `File::create` TRUNCATED that host file before mounting over it. Same
+        // bug class already closed for `-v` and for the build's COPY; this was the
+        // last bind path in the engine without it.
+        if !mount_target_safe(cont) {
+            eprintln!("delonix: --device {host}: invalid destination '{cont}' (must be absolute, no '..')");
+            continue;
+        }
+        // An empty `rootfs` means the destination is already relative to the
+        // container's own `/` (post-`pivot_root` call site) — anchor at `/` so the
+        // walk is absolute, not relative to the cwd.
+        let base = if rootfs.is_empty() { "/" } else { rootfs };
+        let Some(dst_path) = safe_bind_target(base, cont) else {
+            eprintln!("delonix: --device {host}: destination '{cont}' crosses a symlink; refused");
+            continue;
+        };
+        let target = dst_path.to_string_lossy().into_owned();
         if let Some(parent) = std::path::Path::new(&target).parent() {
             let _ = std::fs::create_dir_all(parent);
         }
-        let _ = std::fs::File::create(&target); // mount point
+        // Mount point WITHOUT truncating: `File::create` would zero an existing
+        // file, which is destructive on its own even when the path is confined.
+        let _ = std::fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(false)
+            .open(&target);
         let _ = mount(
             Some(src.as_str()),
             target.as_str(),
@@ -1425,6 +1473,20 @@ fn bind_devices(src_prefix: &str, rootfs: &str, devices: &[String]) {
             None::<&str>,
         );
     }
+}
+
+/// Device nodes never handed to a container, even in root mode where the caps
+/// would make them real. These are char devices, so the block-device check
+/// above lets them through: `/dev/mem` and `/dev/kmem` are raw physical/kernel
+/// memory and `/dev/port` is raw I/O port access — any of them is a complete
+/// host compromise, not an isolation weakening. Rootless makes them inert (the
+/// nodes are root-owned and unmapped in the user ns), but the engine also runs
+/// as root for the CRI/kubelet path, where they are not.
+fn is_forbidden_device(host: &str) -> bool {
+    matches!(
+        host.trim_end_matches('/'),
+        "/dev/mem" | "/dev/kmem" | "/dev/port"
+    )
 }
 
 /// Mounts the container rootfs and does `pivot_root` (runs INSIDE the `clone`).
@@ -2558,6 +2620,46 @@ fn container_init(
 /// Best-effort per path, and loudly: a path that cannot be masked is a hole in a
 /// confinement the caller asked for, so it says so rather than failing the whole
 /// container — the same shape as the other `apply_*` in this file.
+/// The paths runc masks by default, and for the same reasons. `mask_proc_paths`
+/// already covers `/proc/sysrq-trigger` (host panic/reboot) and `/proc/kcore`
+/// (kernel RAM) because those are the ones that grant host CONTROL; these are
+/// the rest of runc's list, which leak host INFORMATION:
+/// `/proc/timer_list` and `/proc/sched_debug` print kernel pointers (material
+/// for defeating KASLR), `/proc/interrupts` has been used as a timing
+/// side-channel against keystrokes, `/proc/keys` exposes the host keyring, and
+/// `/sys/firmware` carries platform tables. Read-only in a rootless user
+/// namespace, but reading is the whole attack here.
+///
+/// A caller that passes its own list (the CRI, which relays the kubelet's) is
+/// authoritative and this default does not apply — a privileged pod empties the
+/// list deliberately.
+pub const DEFAULT_MASKED_PATHS: &[&str] = &[
+    "/proc/acpi",
+    "/proc/asound",
+    "/proc/interrupts",
+    "/proc/keys",
+    "/proc/kcore",
+    "/proc/latency_stats",
+    "/proc/sched_debug",
+    "/proc/scsi",
+    "/proc/timer_list",
+    "/proc/timer_stats",
+    "/sys/devices/virtual/powercap",
+    "/sys/firmware",
+];
+
+/// The paths runc keeps read-only by default. `/proc/sys` is already remounted
+/// read-only wholesale by `mask_proc_paths`; these are the remaining `/proc`
+/// subtrees where a write is a host-level effect (`/proc/irq` steers interrupt
+/// affinity, `/proc/bus` reaches PCI config space).
+pub const DEFAULT_READONLY_PATHS: &[&str] = &[
+    "/proc/bus",
+    "/proc/fs",
+    "/proc/irq",
+    "/proc/sys",
+    "/proc/sysrq-trigger",
+];
+
 fn apply_masked_paths(paths: &[String]) {
     for p in paths {
         let Ok(md) = std::fs::metadata(p) else {
@@ -5457,6 +5559,96 @@ pub fn remove(store: &Store, container: &Container, force: bool) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    /// Achado de auditoria (MÉDIO): a lista default de masked/readonly paths era
+    /// mais curta que a do runc — o motor mascarava só `sysrq-trigger`/`kcore`
+    /// (controlo do host) e deixava passar os que vazam INFORMAÇÃO do host.
+    /// Medido ao vivo antes da correcção: `/proc/interrupts` com 109 linhas e
+    /// `/sys/firmware` com 4 entradas visíveis de dentro do container.
+    #[test]
+    fn os_defaults_de_masked_paths_cobrem_a_lista_do_runc() {
+        // Os que vazam ponteiros do kernel (KASLR) e side-channels de temporização.
+        for p in [
+            "/proc/timer_list",
+            "/proc/sched_debug",
+            "/proc/interrupts",
+            "/proc/keys",
+            "/sys/firmware",
+            "/proc/kcore",
+        ] {
+            assert!(
+                super::DEFAULT_MASKED_PATHS.contains(&p),
+                "{p} tem de estar mascarado por omissão (o runc mascara-o)"
+            );
+        }
+        // Escrita nestes é efeito ao nível do host (afinidade de IRQ, config PCI).
+        for p in ["/proc/irq", "/proc/bus", "/proc/sys"] {
+            assert!(
+                super::DEFAULT_READONLY_PATHS.contains(&p),
+                "{p} tem de ser read-only por omissão"
+            );
+        }
+    }
+
+    /// Achado de auditoria (MÉDIO): `bind_devices` construía o destino por
+    /// concatenação crua e criava o mountpoint com `File::create` (que TRUNCA).
+    /// Um `spec.devices` de um manifesto não-confiado — `/dev/null:/../../x` —
+    /// escapava o rootfs e truncava um ficheiro real do host. Este teste replica
+    /// o exploit: um ficheiro "do host" com conteúdo, fora do rootfs, tem de
+    /// ficar INTACTO. Sem a correcção, ficaria com 0 bytes.
+    #[test]
+    fn bind_devices_recusa_destino_que_escapa_o_rootfs() {
+        let dir = std::env::temp_dir().join(format!(
+            "dlx-devesc-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let rootfs = dir.join("rootfs");
+        std::fs::create_dir_all(&rootfs).unwrap();
+        // O "ficheiro do host" que o atacante quer destruir (fora do rootfs).
+        let victim = dir.join("etc_crontab_do_host");
+        std::fs::write(&victim, b"* * * * * root /usr/bin/legitimo\n").unwrap();
+        let before = std::fs::read(&victim).unwrap();
+
+        // `/dev/null:/../etc_crontab_do_host` → sai do rootfs para o ficheiro acima.
+        super::bind_devices(
+            "",
+            rootfs.to_str().unwrap(),
+            &["/dev/null:/../etc_crontab_do_host".to_string()],
+        );
+
+        let after = std::fs::read(&victim).unwrap();
+        assert_eq!(
+            before, after,
+            "o ficheiro do host FORA do rootfs foi modificado/truncado — traversal via --device"
+        );
+        assert!(
+            !after.is_empty(),
+            "o ficheiro do host foi truncado para 0 bytes"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Os device nodes de memória/porta crua nunca são entregues a um container.
+    /// São CHAR devices, logo passam o filtro de block-device — em modo root
+    /// (o caminho CRI/kubelet) qualquer um deles é compromisso total do host.
+    #[test]
+    fn bind_devices_recusa_dev_mem_kmem_e_port() {
+        for d in ["/dev/mem", "/dev/kmem", "/dev/port"] {
+            assert!(
+                super::is_forbidden_device(d),
+                "{d} tinha de ser recusado explicitamente"
+            );
+        }
+        // Um char device legítimo continua permitido (não é um denylist cego).
+        assert!(!super::is_forbidden_device("/dev/null"));
+        assert!(!super::is_forbidden_device("/dev/nvidia0"));
+        assert!(!super::is_forbidden_device("/dev/dri/renderD128"));
+    }
+
     /// `--add-host` tem de aparecer no `/etc/hosts` do rootfs, DEPOIS das
     /// entradas canónicas, e sem partir o ficheiro quando a entrada é
     /// malformada (um `/etc/hosts` inválido quebra a resolução TODA dentro do

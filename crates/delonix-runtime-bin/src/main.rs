@@ -395,6 +395,18 @@ fn main() {
         }
         std::process::exit(0);
     }
+    // `serve docker-api` starting a container: the API server is a MULTI-THREADED
+    // tokio runtime, and `spawn()` reaches `clone()`, whose safety argument is
+    // "single-threaded". `clone()` does NOT run the `pthread_atfork` handlers
+    // (unlike `fork()`), so the child inherits the glibc malloc arena lock exactly
+    // as it stood at clone time — if another worker thread held it (parsing the
+    // next request's JSON, say), the child's first allocation in `container_init`
+    // deadlocks forever. Re-exec ourselves so the `clone()` happens in a fresh,
+    // single-threaded process, which is what the CRI already does for the same
+    // reason. Intercepted before clap, like the four above.
+    if raw.len() == 3 && raw[1] == "__apirun" {
+        cmd::dockerapi::run_from_spec_file(std::path::Path::new(&raw[2]));
+    }
 
     // Dynamic autocompletion: if the shell asked for suggestions (env
     // COMPLETE), handle that and exit; otherwise, follow the normal flow.

@@ -1453,6 +1453,120 @@ porque o utilizador julga estar protegido. Três corrigidos para fail-closed
    disponível aqui, mesmo padrão já aceite noutras correcções de fronteira de
    cgroup/namespace nesta base de código.
 
+## Auditoria de segurança #3 (2026-08-10) — as classes de CVE do mercado, 6 finders em paralelo
+
+Pedido: rever a estrutura de segurança inteira contra os ataques críticos que Docker/K8s/runc/
+CRI-O/Podman já sofreram. Seis auditorias adversariais em paralelo (escalada rootless→root e fuga
+de namespace; injecção de comandos/argv; fuga de container por mounts/proc/sys/caps; memory safety
+dos ~245 `unsafe`; cadeia de fornecimento e path traversal; isolamento de rede e segredos). **Zero
+CRÍTICOS. 1 ALTO, 5 MÉDIOS, 7 BAIXOS — todos corrigidos nesta sessão**, cada um com teste de
+regressão e, onde o caminho o permitia, validação ao vivo.
+
+**Postura confirmada contra os ataques conhecidos** (lida no código, não deduzida): CVE-2019-5736
+(o re-exec usa `current_exe()` do host, antes de qualquer rootfs), CVE-2024-21626 «Leaky Vessels»
+(`close_range` nos forks, CLOEXEC, e o `chdir(workdir)` do `exec` corre já dentro do mnt-ns do
+container), CVE-2022-0811 «cr8escape» (allowlist de sysctls + `/proc/sys` RO), CVE-2022-0492
+(release_agent do cgroup v1 — **não aplicável**, o motor é v2-only), userns aninhado (`clone`
+filtrado + `clone3`→ENOSYS *sempre* instalado), tar-slip, Shocker/`CAP_DAC_READ_SEARCH`.
+
+**O que a auditoria encontrou de novo, e a lição de cada um:**
+
+1. **ALTO — o digest-pinning era decorativo.** `pull …@sha256:X` verificava cada BLOB contra o que
+   o manifesto declarava, mas nunca o MANIFESTO contra o digest pedido — um registo comprometido
+   (ou um mirror/HTTP malicioso) devolvia um manifesto totalmente diferente, internamente
+   consistente, e instalava o conteúdo do atacante sem um erro. É o mesmo threat model do achado
+   CRÍTICO #3 de 2026-07 (blob-vs-manifesto), **um nível acima** — e é a razão de existir de um pin.
+   `verify_manifest_digest` (`registry.rs`) nos dois caminhos de pull + no sub-manifesto multi-arch.
+   Teste que **falha com a correcção revertida** (medido: sem ela o pull devolve uma `Image`).
+2. **MÉDIO — `bind_devices` era o último caminho de bind sem confinamento.** Destino por
+   concatenação crua + `File::create` (que TRUNCA): um `spec.devices: ["/dev/null:/../../etc/x"]`
+   de um manifesto não-confiado escapava o rootfs e **truncava um ficheiro do host**. Dois finders
+   independentes convergiram no mesmo sink. Passou a usar o `mount_target_safe`+`safe_bind_target`
+   +`truncate(false)` que o `bind_volume` já usava a poucas linhas dali. Medido antes/depois: o
+   ficheiro-vítima ficava com **0 bytes**. Fechou-se de caminho o `/dev/mem`//`kmem`//`port`
+   (char devices, logo passavam o filtro que só recusa BLOCK — inertes em rootless, compromisso
+   total do host no caminho root/CRI).
+3. **MÉDIO — o `tap` de uma VM não tinha anti-spoofing.** Os veths têm-no desde sempre
+   (`iifname … ip saddr != <ip> drop`), o tap nunca teve — e é onde MAIS importa, porque o kernel
+   do convidado não é nosso e toda a política deste motor (isolamento cross-namespace,
+   `kind: Dependency`) decide pelo IP de ORIGEM. Uma VM forjava um `saddr` fora de `@dlxall` — ou
+   de um peer da namespace-alvo — e atravessava a fronteira. A regra passou a ter **uma só
+   definição** (`antispoof_rule_args`) partilhada pelos três sítios, a mesma disciplina
+   gerador-e-leitor-partilham-o-formato do `fw_rule_tail`; `do_vmtapdel` limpa-a como o
+   `do_detach_extra` já fazia (nomes de tap são reutilizados entre reinícios).
+4. **MÉDIO — a lista default de masked paths era mais curta que a do runc.** O motor mascarava só
+   o que dá CONTROLO do host (`sysrq-trigger`, `kcore`); faltava o que vaza INFORMAÇÃO
+   (`timer_list`/`sched_debug` = ponteiros do kernel/KASLR, `interrupts` = side-channel de
+   temporização, `/sys/firmware`). O caminho CRI estava bem (o kubelet manda a sua lista); só a
+   CLI ficava exposta. `DEFAULT_MASKED_PATHS`/`DEFAULT_READONLY_PATHS` aplicados quando o chamador
+   não passa `--masked-path` e não é `--privileged` (semântica Docker/runc). **Medido ao vivo**:
+   `/proc/interrupts` vazava 109 linhas e `/sys/firmware` 4 entradas; passaram a 0.
+5. **MÉDIO — `clone()` multi-thread no `serve docker-api`.** O `// SAFETY: single-threaded` do
+   `clone()` é FALSO neste caminho: o servidor é um runtime tokio multi-thread, e `clone()` (ao
+   contrário de `fork()`) **não corre os handlers `pthread_atfork`** que repõem o lock do malloc no
+   filho — sob pedidos concorrentes o `container_init` podia bloquear para sempre. Passou a
+   re-exec (`__apirun` com o spec por ficheiro `0600`/`O_EXCL`, mais `container start/restart` pela
+   CLI), o mesmo padrão que o CRI já usava. **O spec vai por ficheiro e não por argv de propósito**:
+   o `RunOpts` tem dezenas de campos e reconstruir uma linha de comando perderia em silêncio o que
+   não tem flag — a armadilha que este repo já pagou várias vezes.
+   - **Bug encontrado a validar ao vivo, e previsto pelo próprio código**: o comentário do
+     `spawn_zombie_reaper` avisava que um `waitpid(-1)` cego «corromperia o estado de saída» de
+     qualquer caminho que fizesse o seu próprio `waitpid` — e o re-exec é exactamente esse caminho.
+     O container arrancava bem e o `create` respondia `ECHILD`. O reaper passou a **espreitar com
+     `WNOWAIT`** e a só colher pids que ninguém reclamou (`AuthoritativeLivePorts` do lado da rede,
+     `CLAIMED_PIDS` aqui). Validado: ciclo de vida completo (create/start-304/restart/stop/rm), **8
+     creates concorrentes → 8 containers a correr**, e zero zombies.
+6. **MÉDIO — credenciais da golden não documentadas.** `root/delonix` + `delonix:delonix` com sudo
+   NOPASSWD são FIXAS e públicas (estão no código), e não havia uma linha sobre isso no README. A
+   golden passou a desligar o **login por password no SSH** (drop-in **e** `sshd_config` — o
+   bullseye não tem linha `Include`, e o sshd usa a PRIMEIRA ocorrência, por isso um append cego
+   seria ignorado); a consola série continua a aceitar a password, que é o caso em que ela serve.
+   Documentado no README.
+
+**BAIXOS fechados**: `reap_orphan_hostfwds` deixou de aceitar um `HashSet` cru — exige agora
+`AuthoritativeLivePorts::new(...)`, um tipo cuja única função é obrigar quem chama a **afirmar que
+possui o ingress inteiro** (foi um chamador externo com lista parcial que fez as portas publicadas
+morrerem sozinhas, e custou várias sessões a diagnosticar); `CredVault::write_0600` passou a usar o
+`write_atomic_mode` do `SecretStore` irmão (temp por-escritor + fsync + modo na criação — num blob
+AEAD uma escrita rasgada não é um ficheiro corrompido, é uma credencial **para sempre**
+indecifrável); `~/.kube/config` deixou de ser escrito-e-depois-`chmod`; `--` antes dos posicionais
+do `mount` e do `qemu-img convert`; guarda de `-` inicial no hostname do ngrok (o token já a tinha,
+por ter sido explorável — o hostname está no mesmo tipo de slot e nunca fora olhado); tecto de
+32 GiB no `stream_download`; `personality(2)` restrito aos valores seguros (o default do Docker
+bloqueia `READ_IMPLIES_EXEC`/`ADDR_NO_RANDOMIZE`, que não são fuga mas removem mitigações).
+
+**Passagem 2 — a classe que os finders não viram: ficheiro temporário sequestrável.** Uma varredura
+posterior a `std::env::temp_dir()` encontrou três chamadores de PRODUÇÃO da mesma classe que a
+auditoria de 2026-07 já corrigira em `ensure_libvirt_network` — nenhum dos seis finders lá chegou
+porque `bpf.rs` não estava na superfície que lhes foi atribuída (**lição de método**: uma varredura
+por PADRÃO, feita depois dos finders por-subsistema, apanha o que a divisão por ficheiros deixa
+cair).
+
+- **`delonix-net::bpf::stage_object` — escalada de privilégio local.** Escrevia o objecto BPF no
+  caminho **FIXO** `/tmp/delonix_flow.bpf.o` com `fs::write`, e esse ficheiro é entregue a
+  `bpftool prog loadall` por um processo com **CAP_BPF/root**. `/tmp` é world-writable, `fs::write`
+  segue symlinks, e — o pior — quem pré-criasse o caminho ficava **DONO** do ficheiro: num `/tmp`
+  sticky nem o conseguimos apagar, por isso podia trocar-lhe o conteúdo entre a nossa escrita e a
+  leitura do `bpftool`. Um utilizador local sem privilégio punha o SEU programa BPF dentro do
+  kernel. Os outros dois (`cluster.rs` kubeadm-config, `lb.rs` haproxy.cfg, ambos enviados por
+  `scp`) tinham nome derivado do pid — igualmente adivinhável, mesmo vector de redirecção.
+- **`delonix_runtime_core::write_private_temp`** (novo, um só sítio em vez de uma 4.ª cópia): nome
+  único + **`O_EXCL`** (recusa um caminho existente e **não segue symlinks**) + `0600` na criação.
+  O objecto BPF passa também a ser **removido depois do load** — com nome fixo era sobrescrito na
+  chamada seguinte, com nome único ficaria a acumular.
+- **`fetch_kubeconfig`: `mode()` só se aplica na CRIAÇÃO.** A correcção anterior
+  (`OpenOptions::create(true).mode(0o600)`) fechava a janela de umask mas tinha um buraco mais
+  silencioso: um `cluster apply` repetido sobre um kubeconfig deixado por uma build antiga
+  reescrevia as credenciais e **mantinha o 0644 de lá**. Passou a `write_atomic_mode` — o rename dá
+  o modo certo sempre, substitui um symlink em vez de o seguir, e torna a actualização atómica.
+  (O comentário anterior invocava equivalência com o fix do `ensure_libvirt_network`, que usa
+  `create_new`; não era equivalente, e é essa a diferença.)
+
+**Estado**: `cargo build/test --workspace` limpo (0 falhas), `clippy` 0, `fmt` aplicado. Validado ao
+vivo neste host: mascaramento dentro de containers reais (musl E glibc), `docker-api` ponta-a-ponta
+com concorrência, `net flow` (degrada para contadores de veth sem CAP_BPF, e já não cria o caminho
+fixo nem deixa restos), e o `container run` normal sem regressão.
+
 ## Auditoria de segurança #2 (código VM desta série: console/rede/cloud-init)
 
 Skill `delonix-runtime-sec` corrida sobre a superfície NOVA das v0.7.x (VM

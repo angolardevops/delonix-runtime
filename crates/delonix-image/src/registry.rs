@@ -676,6 +676,31 @@ pub fn pull_from_registry_with_creds_platform(
 /// `(layer_index_1_based, layer_total, bytes_done, bytes_total)`.
 pub type PullProgressCb<'a> = &'a dyn Fn(usize, usize, u64, Option<u64>);
 
+/// When `reference` names a content digest (`sha256:...`), verifies the fetched
+/// manifest bytes hash to EXACTLY that digest. A digest-pinned pull
+/// (`repo@sha256:...`) is the whole point of pinning: even a compromised or
+/// MITM'd registry must not be able to substitute the content. The blobs are
+/// already checked against the digests the manifest declares — but if the
+/// manifest ITSELF is not checked against the pinned reference, the registry
+/// can serve a completely different, internally-consistent manifest (pointing
+/// at the attacker's blobs) and the pin becomes decorative. The chain of trust
+/// for a digest pull rests entirely on this check. A tag reference (`:latest`)
+/// has no digest to verify, so it is a no-op there — TLS is the only integrity
+/// for tags, same as `docker pull`.
+fn verify_manifest_digest(reference: &str, manifest_bytes: &[u8]) -> Result<()> {
+    if let Some(want) = reference.strip_prefix("sha256:") {
+        let got = sha256_hex(manifest_bytes);
+        if !got.eq_ignore_ascii_case(want) {
+            return Err(Error::Registry(format!(
+                "manifest digest mismatch: reference pins sha256:{want} but the registry \
+                 served a manifest hashing to sha256:{got} — refusing (possible compromised \
+                 registry or MITM)"
+            )));
+        }
+    }
+    Ok(())
+}
+
 /// Like [`pull_from_registry_with_creds_platform`], with an optional per-layer
 /// download progress callback — the multi-layer sibling of
 /// `pull_oci_artifact_with_progress` (single-blob VM artifacts). BUG FOUND
@@ -719,6 +744,10 @@ pub fn pull_from_registry_with_creds_full(
         .unwrap_or("")
         .to_string();
     let body = resp.bytes().map_err(reg_err)?.to_vec();
+    // A digest pin (`@sha256:...`) covers whatever the registry returned for it —
+    // the index (multi-arch) OR a single manifest. Verify it here, before we act
+    // on any of it (before picking a platform, before fetching any blob).
+    verify_manifest_digest(&refr, &body)?;
 
     let manifest_bytes = if content_type.contains("index") || content_type.contains("manifest.list")
     {
@@ -740,7 +769,12 @@ pub fn pull_from_registry_with_creds_full(
         tracing::info!(arch = %arch, "platform selected: linux/{arch}");
         let purl = c.manifest_url(pick.digest().as_ref());
         let r = c.fetch(&purl, ACCEPT_MANIFEST)?;
-        r.bytes().map_err(reg_err)?.to_vec()
+        let sub = r.bytes().map_err(reg_err)?.to_vec();
+        // The picked sub-manifest is addressed by the index's own digest for that
+        // platform — verify the bytes hash to it, or a registry that passed the
+        // index check could still swap the per-arch manifest underneath us.
+        verify_manifest_digest(pick.digest().as_ref(), &sub)?;
+        sub
     } else {
         body
     };
@@ -1046,6 +1080,11 @@ pub fn pull_oci_artifact_with_progress(
     let accept = "application/vnd.oci.image.manifest.v1+json";
     let url = c.manifest_url(&refr);
     let manifest_bytes = c.fetch(&url, accept)?.bytes().map_err(reg_err)?.to_vec();
+    // A digest-pinned artifact pull (a golden VM image referenced by
+    // `@sha256:...`) must verify the manifest against the pin too — otherwise a
+    // compromised registry substitutes the whole manifest and the single-blob
+    // check below only proves it is self-consistent with the attacker's bytes.
+    verify_manifest_digest(&refr, &manifest_bytes)?;
     let manifest: ImageManifest = serde_json::from_slice(&manifest_bytes)
         .map_err(|e| Error::Registry(format!("invalid artifact manifest: {e}")))?;
     let layer = manifest
@@ -1621,6 +1660,125 @@ mod tests {
         let err =
             pull_oci_artifact(&tmp, &target).expect_err("pull devia recusar o blob adulterado");
         assert!(format!("{err}").contains("tampered") || format!("{err}").contains("digest"));
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    /// Security-audit finding (ALTO): a digest-pinned pull (`repo@sha256:...`) must
+    /// verify the MANIFEST against the pinned digest, not only the blobs against the
+    /// manifest. Simulates a compromised/MITM registry that answers a request for
+    /// `sha256:<X>` with a completely different (but internally consistent) manifest —
+    /// the pull must refuse before touching a single blob, or digest-pinning is
+    /// decorative. Before the fix, `verify_manifest_digest` did not exist and this
+    /// substituted manifest would have been accepted and its blobs pulled.
+    #[test]
+    fn pull_por_digest_recusa_manifesto_substituido() {
+        let (port, blob_gets, _handle) = serve_anon_registry();
+        let tmp = std::env::temp_dir().join(format!(
+            "delonix-image-manifest-pin-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&tmp).unwrap();
+
+        // A well-formed manifest the attacker WOULD serve (points at their own blobs).
+        let mut c = test_client(&format!("127.0.0.1:{port}"), "pin");
+        let config_bytes =
+            br#"{"architecture":"amd64","os":"linux","rootfs":{"type":"layers","diff_ids":[]}}"#
+                .to_vec();
+        let config_digest = format!("sha256:{}", sha256_hex(&config_bytes));
+        c.push_blob(&config_digest, &config_bytes).unwrap();
+        let manifest = serde_json::json!({
+            "schemaVersion": 2,
+            "mediaType": "application/vnd.oci.image.manifest.v1+json",
+            "config": {
+                "mediaType": "application/vnd.oci.image.config.v1+json",
+                "size": config_bytes.len(),
+                "digest": config_digest,
+            },
+            "layers": [],
+        });
+        let manifest_bytes = serde_json::to_vec(&manifest).unwrap();
+        let real_digest = format!("sha256:{}", sha256_hex(&manifest_bytes));
+
+        // The victim pins a DIFFERENT digest (the legit image they meant to pull).
+        // The registry stores the attacker's manifest UNDER that pinned digest key
+        // — exactly what a compromised registry/backend does.
+        let pinned = format!("sha256:{}", "a".repeat(64));
+        assert_ne!(pinned, real_digest);
+        c.push_manifest(
+            &pinned,
+            &manifest_bytes,
+            "application/vnd.oci.image.manifest.v1+json",
+        )
+        .unwrap();
+
+        let target = format!("127.0.0.1:{port}/pin@{pinned}");
+        let store = crate::ImageStore::open(&tmp).unwrap();
+        let err = pull_from_registry_with_creds(&store, &target, None)
+            .expect_err("pull por digest devia recusar um manifesto que não corresponde ao pin");
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("manifest digest mismatch"),
+            "erro inesperado: {msg}"
+        );
+        // Must refuse BEFORE fetching any blob.
+        assert_eq!(
+            blob_gets.load(std::sync::atomic::Ordering::SeqCst),
+            0,
+            "não devia ter pedido nenhum blob antes de validar o manifesto"
+        );
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    /// The positive half: pulling by the CORRECT digest passes the new manifest
+    /// verification (the check must not reject a legitimate digest pull).
+    #[test]
+    fn pull_por_digest_correto_passa_a_verificacao_do_manifesto() {
+        let (port, _blob_gets, _handle) = serve_anon_registry();
+        let tmp = std::env::temp_dir().join(format!(
+            "delonix-image-manifest-pin-ok-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&tmp).unwrap();
+
+        let mut c = test_client(&format!("127.0.0.1:{port}"), "pinok");
+        let config_bytes =
+            br#"{"architecture":"amd64","os":"linux","rootfs":{"type":"layers","diff_ids":[]}}"#
+                .to_vec();
+        let config_digest = format!("sha256:{}", sha256_hex(&config_bytes));
+        c.push_blob(&config_digest, &config_bytes).unwrap();
+        let manifest = serde_json::json!({
+            "schemaVersion": 2,
+            "mediaType": "application/vnd.oci.image.manifest.v1+json",
+            "config": {
+                "mediaType": "application/vnd.oci.image.config.v1+json",
+                "size": config_bytes.len(),
+                "digest": config_digest,
+            },
+            "layers": [],
+        });
+        let manifest_bytes = serde_json::to_vec(&manifest).unwrap();
+        let real_digest = format!("sha256:{}", sha256_hex(&manifest_bytes));
+        c.push_manifest(
+            &real_digest,
+            &manifest_bytes,
+            "application/vnd.oci.image.manifest.v1+json",
+        )
+        .unwrap();
+
+        let target = format!("127.0.0.1:{port}/pinok@{real_digest}");
+        let store = crate::ImageStore::open(&tmp).unwrap();
+        pull_from_registry_with_creds(&store, &target, None)
+            .expect("pull pelo digest correcto devia passar a verificação do manifesto");
 
         let _ = std::fs::remove_dir_all(&tmp);
     }

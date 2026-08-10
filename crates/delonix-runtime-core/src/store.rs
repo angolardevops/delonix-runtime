@@ -91,6 +91,67 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
     write_atomic_mode(path, bytes, None)
 }
 
+/// Writes `bytes` to a NEW file in the system temp directory that a hostile
+/// local user can neither pre-create, redirect, nor read. Returns its path; the
+/// caller owns it and should delete it when done.
+///
+/// `std::env::temp_dir()` is world-writable, so `fs::write` to a name another
+/// local user can guess is a real vulnerability, not a style issue:
+///
+/// * `fs::write` FOLLOWS SYMLINKS, so a pre-planted symlink redirects the write
+///   to any file the writing process can reach — and some of these callers run
+///   as root.
+/// * It creates at the ambient umask (0644 on a default install), so the
+///   contents are readable while they exist.
+/// * If the attacker creates the file first, THEY own it, and in a sticky `/tmp`
+///   we cannot unlink it — they can then rewrite it between our write and
+///   whatever reads it back. That last one is why this matters most for
+///   `delonix-net`'s BPF object: the file is handed to `bpftool prog loadall`,
+///   so winning that race means an unprivileged user gets their own BPF program
+///   loaded into the kernel by a privileged process.
+///
+/// `O_EXCL` (via `create_new`) is what closes all three: it refuses to open an
+/// existing path and does not follow symlinks, so a pre-planted anything makes
+/// us fail rather than obey. On collision we simply try the next name; the mode
+/// is set at creation, never widened-then-narrowed.
+///
+/// The same shape an earlier audit fixed in `ensure_libvirt_network`; these
+/// callers had been left behind, which is exactly why it lives here now instead
+/// of being written out a fourth time.
+pub fn write_private_temp(prefix: &str, bytes: &[u8]) -> Result<PathBuf> {
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
+    let dir = std::env::temp_dir();
+    let mut last_err: Option<std::io::Error> = None;
+    for _ in 0..64 {
+        let seq = TMP_SEQ.fetch_add(1, Ordering::Relaxed);
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.subsec_nanos())
+            .unwrap_or(0);
+        let path = dir.join(format!(".{prefix}.{}.{seq}.{nanos}", std::process::id()));
+        match fs::OpenOptions::new()
+            .write(true)
+            .create_new(true) // O_EXCL: refuses an existing path, ignores symlinks
+            .mode(0o600)
+            .open(&path)
+        {
+            Ok(mut f) => {
+                f.write_all(bytes)?;
+                return Ok(path);
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                last_err = Some(e);
+                continue; // taken (or squatted) — just pick another name
+            }
+            Err(e) => return Err(e.into()),
+        }
+    }
+    Err(last_err
+        .unwrap_or_else(|| std::io::Error::other("could not create a private temp file"))
+        .into())
+}
+
 /// [`write_atomic`] with an explicit file mode, set **atomically at creation**.
 ///
 /// For anything secret this is the only correct form. The alternative —
@@ -580,6 +641,67 @@ mod tests {
         assert!(matches!(store.load("nao-existe"), Err(Error::NotFound(_))));
 
         let _ = fs::remove_dir_all(&root);
+    }
+
+    /// REGRESSÃO (auditoria de segurança): um ficheiro temporário em `/tmp` não
+    /// pode ser sequestrável por outro utilizador local.
+    ///
+    /// O caso que motivou isto: `delonix-net::bpf` escrevia o objecto BPF no
+    /// caminho FIXO `/tmp/delonix_flow.bpf.o` com `fs::write`, e esse ficheiro é
+    /// depois carregado no kernel por um processo com `CAP_BPF`/root. Quem
+    /// pré-criasse o caminho ficava DONO dele (num `/tmp` sticky nem sequer o
+    /// podemos apagar) e podia trocar-lhe o conteúdo antes do `bpftool` o ler.
+    ///
+    /// O que este teste prova é a propriedade que fecha isso: com o caminho já
+    /// ocupado — inclusive por um SYMLINK, que é o vector de redirecção —, a
+    /// escrita nunca lhe toca. Nasce sempre um ficheiro NOVO, e a vítima do
+    /// symlink fica intacta.
+    #[test]
+    fn write_private_temp_nao_escreve_num_caminho_sequestrado() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = tmp_dir("private-temp");
+        fs::create_dir_all(&root).unwrap();
+        // O "ficheiro do sistema" que o atacante quer que nós sobrescrevamos.
+        let victim = root.join("ficheiro-importante");
+        fs::write(&victim, b"conteudo-original").unwrap();
+
+        // Não se consegue plantar um symlink no nome que a função VAI escolher
+        // (é único por desenho — e é essa a outra metade da defesa). O que se
+        // prova aqui é a primitiva de que ela depende, com o symlink já no
+        // lugar: `create_new` recusa um caminho existente e não o segue.
+        let squatted = root.join("squatted");
+        std::os::unix::fs::symlink(&victim, &squatted).unwrap();
+        let r = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&squatted);
+        assert!(
+            r.is_err(),
+            "create_new tem de recusar um caminho já existente (incluindo symlink)"
+        );
+        assert_eq!(
+            fs::read(&victim).unwrap(),
+            b"conteudo-original",
+            "a vítima do symlink foi escrita — a redirecção não foi bloqueada"
+        );
+
+        // E o caminho feliz: ficheiro novo, modo 0600 desde a criação, e cada
+        // chamada devolve um caminho DIFERENTE (senão a 2.ª invocação voltaria a
+        // ser um alvo previsível).
+        let a = write_private_temp("dlx-test-priv", b"aaa").unwrap();
+        let b = write_private_temp("dlx-test-priv", b"bbb").unwrap();
+        assert_ne!(a, b, "dois stages seguidos não podem partilhar o nome");
+        assert_eq!(fs::read(&a).unwrap(), b"aaa");
+        assert_eq!(fs::read(&b).unwrap(), b"bbb");
+        for p in [&a, &b] {
+            let mode = fs::metadata(p).unwrap().permissions().mode() & 0o777;
+            assert_eq!(
+                mode, 0o600,
+                "temp privado nasceu com o modo errado: {mode:o}"
+            );
+            let _ = fs::remove_file(p);
+        }
     }
 
     /// REGRESSION: um ficheiro secreto tem de nascer JÁ com o modo restrito.

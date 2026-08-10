@@ -48,13 +48,16 @@ pub(crate) fn ensure_haproxy(target: &SshTarget, backend_ips: &[String]) -> Resu
     // file — mirror `prepare_host`'s exact idiom (delonix-cri): local
     // tmpfile -> scp_to (unprivileged) -> privileged mv over ssh.
     let cfg = build_haproxy_cfg(backend_ips);
-    let tmp = std::env::temp_dir().join(format!("delonix-haproxy-{}.cfg", std::process::id()));
-    std::fs::write(&tmp, &cfg).map_err(|e| {
-        Error::Invalid(format!(
-            "{}: {e}",
-            super::po::t("writing local temporary haproxy.cfg")
-        ))
-    })?;
+    // Private temp file (O_EXCL + 0600), not a guessable name in world-writable
+    // `/tmp`: the old form could be pre-planted as a symlink to redirect this
+    // write, the same hole already closed elsewhere in this codebase.
+    let tmp = delonix_runtime_core::write_private_temp("delonix-haproxy.cfg", cfg.as_bytes())
+        .map_err(|e| {
+            Error::Invalid(format!(
+                "{}: {e}",
+                super::po::t("writing local temporary haproxy.cfg")
+            ))
+        })?;
     let scp_result = remote::scp_to(target, &tmp, "/tmp/delonix-haproxy.cfg");
     let _ = std::fs::remove_file(&tmp);
     scp_result?;

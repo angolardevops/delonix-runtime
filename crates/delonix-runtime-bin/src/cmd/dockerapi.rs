@@ -59,6 +59,130 @@ struct AppState {
     store: Store,
 }
 
+/// Starts a container by RE-EXECUTING this binary, instead of calling the engine
+/// in-process.
+///
+/// This server is a multi-threaded tokio runtime (worker threads + the blocking
+/// pool + the zombie reaper). `spawn()` ends in `clone()`, whose safety argument
+/// is "single-threaded", and `clone()` — unlike `fork()` — does NOT run the
+/// `pthread_atfork` handlers that reset the glibc malloc arena lock in the child.
+/// So if any other thread happened to hold that lock at clone time, the child
+/// inherits it held, by a thread that does not exist there, and the first
+/// allocation inside `container_init` blocks forever: the container never starts,
+/// the API answered "created", and the process leaks. The window is narrow but
+/// real, and it widens exactly when the server is busy — `docker compose up`
+/// creating several services at once.
+///
+/// Handing the work to a fresh process makes `clone()`'s precondition true again,
+/// which is the same reason `delonix-cri` shells out to the CLI rather than
+/// linking the engine in. The spec travels as a file (`0600`, `O_EXCL`) rather
+/// than as argv: `RunOpts` has dozens of fields, and rebuilding a CLI command
+/// line from it would silently drop whatever has no flag — the failure mode this
+/// codebase has paid for repeatedly (state used at creation but never persisted).
+fn spawn_run_via_reexec(opts: &RunOpts) -> Result<()> {
+    let dir = state_root().join("run");
+    std::fs::create_dir_all(&dir)?;
+    let path = dir.join(format!(
+        "apirun-{}-{}.json",
+        std::process::id(),
+        REEXEC_SEQ.fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+    ));
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        // `create_new` + mode at creation: the spec can carry resolved secret
+        // names and mount paths, so it must never exist world-readable, not even
+        // for the instant between `write` and a later `chmod`.
+        let f = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&path)?;
+        serde_json::to_writer(f, opts)?;
+    }
+    let exe = std::env::current_exe().map_err(Error::Io)?;
+    let mut cmd = std::process::Command::new(exe);
+    cmd.arg("__apirun")
+        .arg(&path)
+        .env("DELONIX_ROOT", state_root());
+    let out = run_claimed(cmd);
+    // The child removes it on success; clean up here too so a child that died
+    // before reading does not leave the spec behind.
+    let _ = std::fs::remove_file(&path);
+    match out {
+        Ok(o) if o.status.success() => Ok(()),
+        // Carry the child's own message back to the HTTP client: swallowing it
+        // would turn every engine failure into an opaque exit code.
+        Ok(o) => {
+            let msg = String::from_utf8_lossy(&o.stderr).trim().to_string();
+            Err(Error::Invalid(if msg.is_empty() {
+                format!(
+                    "container start failed (exit {})",
+                    o.status.code().unwrap_or(-1)
+                )
+            } else {
+                msg
+            }))
+        }
+        Err(e) => Err(e),
+    }
+}
+
+static REEXEC_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Re-execs a public CLI verb that only needs a container id (`start`,
+/// `restart`), for the same single-threaded-`clone()` reason as
+/// `spawn_run_via_reexec`. The child's stderr is carried back into the error so
+/// the caller can still recognise engine messages — `handle_start` keys the
+/// idempotent 304 off "already running", and losing that text would turn a
+/// no-op into a 500.
+fn cli_verb_via_reexec(args: &[&str]) -> Result<()> {
+    let exe = std::env::current_exe().map_err(Error::Io)?;
+    let mut cmd = std::process::Command::new(exe);
+    cmd.arg("container")
+        .args(args)
+        .env("DELONIX_ROOT", state_root());
+    let out = run_claimed(cmd)?;
+    if out.status.success() {
+        return Ok(());
+    }
+    let msg = String::from_utf8_lossy(&out.stderr).trim().to_string();
+    Err(Error::Invalid(if msg.is_empty() {
+        format!("`container {}` failed", args.join(" "))
+    } else {
+        msg
+    }))
+}
+
+fn start_via_reexec(id: &str) -> Result<()> {
+    cli_verb_via_reexec(&["start", id])
+}
+
+/// The `__apirun <spec.json>` half: runs in a FRESH, single-threaded process, so
+/// the `clone()` in `spawn()` is safe again. Never returns.
+pub(crate) fn run_from_spec_file(path: &std::path::Path) -> ! {
+    let code = match run_from_spec_file_inner(path) {
+        Ok(()) => 0,
+        Err(e) => {
+            eprintln!("delonix: {}", super::po::t_dyn(&e.to_string()));
+            1
+        }
+    };
+    let _ = std::fs::remove_file(path);
+    std::process::exit(code);
+}
+
+fn run_from_spec_file_inner(path: &std::path::Path) -> Result<()> {
+    let data = std::fs::read(path)?;
+    let opts: RunOpts = serde_json::from_slice(&data)?;
+    let root = state_root();
+    let images = ImageStore::open(&root)?;
+    // `containers` subdir, exactly as the server itself opens it — `Store::open`
+    // takes the directory verbatim, so passing the bare root would write the
+    // records one level up, where nothing else looks for them.
+    let store = Store::open(root.join("containers"))?;
+    super::container::cmd_run(&images, &store, opts)
+}
+
 /// Reaps zombie children of THIS process for as long as it runs.
 ///
 /// A detached container's init process is a **direct child of whoever called
@@ -73,28 +197,80 @@ struct AppState {
 /// returned success but `docker inspect` kept showing `Running` indefinitely;
 /// `ps` traced the process to `<defunct>` with this server as PPID.
 ///
-/// **Precondition this relies on**: `waitpid(-1, ...)` reaps ANY child of this
-/// process, so it would race a codepath that does its OWN blocking
-/// `waitpid(<specific pid>, ...)` on a child it just forked (e.g.
-/// `reexec_mapped`/`remove_tree_mapped` in this same engine crate, used by
-/// `build`/`volsnap`/`prune`) — this server's routes never reach those today
-/// (only container create/start/stop/kill/wait/restart/rename/remove/inspect,
-/// none of which fork-and-waitpid directly; they all poll liveness via
-/// `kill(pid, 0)`). If a future route ever wires in `build`/`volsnap`/`prune`,
-/// revisit this — a blind `waitpid(-1)` would silently corrupt their exit
-/// status.
+/// **Precondition this used to rely on, and no longer does**: the original
+/// version called a blind `waitpid(-1, ...)`, and its own comment warned that
+/// this would race any codepath doing its OWN `waitpid(<specific pid>)` on a
+/// child it had just forked. The re-exec added for container create/start/
+/// restart (see `spawn_run_via_reexec`) is exactly that codepath, and the race
+/// was observed on the first live run: the container started correctly, but the
+/// reaper consumed its exit status first and `Command::output()` came back
+/// `ECHILD`, so a perfectly good create reported an I/O error.
+///
+/// So the reaper now PEEKS with `WNOWAIT` (which reports a dead child without
+/// consuming it) and only reaps pids nobody has claimed. A claimed pid is left
+/// alone for its owner to wait on, exactly as before the reaper existed.
 fn spawn_zombie_reaper() {
     std::thread::spawn(|| loop {
-        let mut status: i32 = 0;
-        // SAFETY: waitpid(-1, ...) only reaps this process's own children.
-        let pid = unsafe { libc::waitpid(-1, &mut status, 0) };
-        if pid < 0 {
-            // ECHILD (nothing to reap right now) or a transient error — a
-            // container gets created whenever a request comes in, so just
-            // check back shortly instead of busy-looping.
+        let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
+        // SAFETY: `waitid` with a zeroed `siginfo_t` out-param. `WNOWAIT` leaves
+        // the child in its zombie state so the owner (if any) can still wait on
+        // it; `WNOHANG` keeps this from blocking while we hold no claim.
+        let r = unsafe {
+            libc::waitid(
+                libc::P_ALL,
+                0,
+                &mut info,
+                libc::WEXITED | libc::WNOWAIT | libc::WNOHANG,
+            )
+        };
+        // SAFETY: reading `si_pid` from a `siginfo_t` `waitid` just filled in.
+        let pid = if r == 0 { unsafe { info.si_pid() } } else { 0 };
+        if pid <= 0 {
+            // Nothing dead right now — check back shortly rather than spin.
             std::thread::sleep(std::time::Duration::from_millis(200));
+            continue;
         }
+        if claimed_pid(pid) {
+            // Somebody is going to wait on this one; taking it would steal
+            // their exit status. Back off briefly — once the owner reaps it,
+            // the next peek moves on.
+            std::thread::sleep(std::time::Duration::from_millis(20));
+            continue;
+        }
+        let mut status: i32 = 0;
+        // SAFETY: reaps that specific, unclaimed child of ours.
+        unsafe { libc::waitpid(pid, &mut status, libc::WNOHANG) };
     });
+}
+
+/// Pids this process spawned and intends to `wait` on itself — the reaper must
+/// not consume them. See `spawn_zombie_reaper`.
+static CLAIMED_PIDS: std::sync::Mutex<Vec<i32>> = std::sync::Mutex::new(Vec::new());
+
+fn claimed_pid(pid: i32) -> bool {
+    CLAIMED_PIDS
+        .lock()
+        .map(|v| v.contains(&pid))
+        .unwrap_or(false)
+}
+
+/// Runs a child to completion with its exit status and stderr intact, claiming
+/// it against the reaper for the duration.
+fn run_claimed(mut cmd: std::process::Command) -> Result<std::process::Output> {
+    let child = cmd
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .map_err(Error::Io)?;
+    let pid = child.id() as i32;
+    if let Ok(mut v) = CLAIMED_PIDS.lock() {
+        v.push(pid);
+    }
+    let out = child.wait_with_output().map_err(Error::Io);
+    if let Ok(mut v) = CLAIMED_PIDS.lock() {
+        v.retain(|p| *p != pid);
+    }
+    out
 }
 
 pub fn run(addr: Option<String>) -> Result<()> {
@@ -454,7 +630,8 @@ async fn handle_create(
     };
     let state = state.clone();
     let result: Result<String> = run_blocking(move || {
-        super::container::cmd_run(&state.images, &state.store, opts)?;
+        // Re-exec instead of running the engine here: see `spawn_run_via_reexec`.
+        spawn_run_via_reexec(&opts)?;
         let c = state
             .store
             .list()?
@@ -475,11 +652,12 @@ async fn handle_create(
     }
 }
 
-async fn handle_start(state: &Arc<AppState>, id: &str) -> (StatusCode, Vec<u8>) {
-    let state = state.clone();
+async fn handle_start(_state: &Arc<AppState>, id: &str) -> (StatusCode, Vec<u8>) {
     let id = id.to_string();
-    match run_blocking(move || super::container::cmd_start(&state.images, &state.store, &id)).await
-    {
+    // Same reason as create: `cmd_start` reaches `spawn()`→`clone()`, which is
+    // only safe single-threaded. Here the CLI verb takes just an id, so a plain
+    // re-exec of the public command does it — no spec file needed.
+    match run_blocking(move || start_via_reexec(&id)).await {
         Ok(()) => (StatusCode::NO_CONTENT, Vec::new()),
         // Docker's own real semantics: starting an already-running container
         // is a no-op success (304), not an error.
@@ -531,17 +709,15 @@ async fn handle_wait(state: &Arc<AppState>, id: &str) -> (StatusCode, Vec<u8>) {
 }
 
 async fn handle_restart(
-    state: &Arc<AppState>,
+    _state: &Arc<AppState>,
     id: &str,
     params: &std::collections::HashMap<String, String>,
 ) -> (StatusCode, Vec<u8>) {
     let timeout: u64 = params.get("t").and_then(|v| v.parse().ok()).unwrap_or(10);
-    let state = state.clone();
     let id = id.to_string();
-    match run_blocking(move || {
-        super::container::cmd_restart(&state.images, &state.store, &id, timeout)
-    })
-    .await
+    // Restart starts the container again, so it reaches `clone()` too — re-exec.
+    match run_blocking(move || cli_verb_via_reexec(&["restart", "-t", &timeout.to_string(), &id]))
+        .await
     {
         Ok(()) => (StatusCode::NO_CONTENT, Vec::new()),
         Err(e) => err_response(&e),
