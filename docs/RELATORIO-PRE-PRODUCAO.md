@@ -1,5 +1,18 @@
 # Relatório pré-produção — CLI `delonix`
 
+> **Recorrido a 2026-08-10, na v0.47.0: 198 PASS · 0 FAIL · 0 SKIP.** A bateria não
+> corria desde a v0.3.0 e tinha nove falhas — **oito delas porque o teste codificava
+> um bug que entretanto foi corrigido**: usava `--subnet …/24`, que o motor ACEITAVA
+> e deitava fora com o driver bridge até a v0.48.0 lhe dar significado. É a mesma
+> armadilha que o `default_project_name` do compose já tinha dado, e a lição é a
+> mesma: quando uma correcção faz um teste antigo falhar, a primeira hipótese a
+> testar é que o teste estava a fixar o comportamento errado. A nona era uma guarda
+> a comparar o REPOSITÓRIO quando o comando a seguir usava a TAG (`alpine:latest`
+> no store, `alpine:3.19` ausente → o `grep alpine` passava e o `describe` falhava).
+> Corrido numa sandbox isolada (`DELONIX_ROOT`/`DELONIX_NET_RUNTIME_DIR` próprios),
+> sem tocar nos containers de produção deste host. O resto deste documento é o
+> relatório ORIGINAL, de 2026-07-17, e fica como está: é um registo datado.
+
 **Data**: 2026-07-17 · **Binário**: `delonix 0.3.0` (build local, `target/debug`)
 **Bateria**: [`scripts/e2e.sh`](../scripts/e2e.sh) — 140 verificações sobre a CLI real, com
 containers/redes/volumes a sério. **Resultado: 139 PASS · 1 FAIL · 0 SKIP.**
