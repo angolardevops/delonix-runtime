@@ -2786,7 +2786,33 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
     let id = std::env::var("DELONIX_REEXEC_ID").unwrap_or_else(|_| generate_id());
     let reexec = std::env::var("DELONIX_REEXEC_ID").is_ok();
     let rootless = runtime::is_rootless();
-    let rootfs = prepare_rootfs(images, &img, &id)?;
+    // The 2nd pass of the `--net <custom>`/`--pod` re-exec must NOT extract the image
+    // again. The 1st pass already did it, to the same path (same container id), and then
+    // re-exec'd — so the work was being done twice, in full.
+    //
+    // Measured before/after on this host (`pgvector/pgvector:pg16`, 10 296 entries,
+    // 431 MB): `--net none` 1 526 ms vs `--net <custom>` 3 143 ms. The 1 617 ms delta is
+    // exactly ONE extraction (1 666 ms measured on its own via `image export`), and
+    // re-extracting over an already-populated tree costs full price — there is no
+    // accidental saving. `strace` agrees: 2 060 canonicalizations of the destination,
+    // exactly 2 × the 1 030 of a single pass.
+    //
+    // Rootless ONLY, deliberately. There the rootfs is a flat directory on disk, visible
+    // from any mount namespace, so the 2nd pass just uses it. Under root
+    // `prepare_rootfs` MOUNTS an overlay, and a mount made by the 1st pass is not
+    // necessarily visible in the namespace the re-exec lands in — skipping it there would
+    // trade a slow container for a broken one.
+    let rootfs = if reexec && rootless {
+        images
+            .root()
+            .join("containers")
+            .join(&id)
+            .join("rootfs")
+            .to_string_lossy()
+            .into_owned()
+    } else {
+        prepare_rootfs(images, &img, &id)?
+    };
 
     // `--entrypoint X` replaces the image's ENTRYPOINT (COMMAND becomes its
     // arguments, without inheriting the image's CMD — docker semantics);
