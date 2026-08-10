@@ -270,7 +270,7 @@ const KINDS: [&str; 12] = [
 /// loud (`Action::NotConverged`) instead of leaving the resource out. A plan
 /// that omits a resource reads as «no changes», which is the exact dishonesty
 /// this whole feature exists to remove.
-pub(crate) const CONVERGING_KINDS: [&str; 10] = [
+pub(crate) const CONVERGING_KINDS: [&str; 11] = [
     "Network",
     "Volume",
     "ShareVolume",
@@ -281,6 +281,7 @@ pub(crate) const CONVERGING_KINDS: [&str; 10] = [
     "FirewallPolicy",
     "HTTPRoute",
     "Ingress",
+    "Tunnel",
 ];
 
 /// Everything the manifest asks for, in the reconciler's comparable form.
@@ -298,6 +299,7 @@ fn desired_of(docs: &[manifest::ManifestDoc]) -> Result<Vec<reconcile::Desired>>
                 "FirewallPolicy" => super::firewall::desired(doc)?,
                 "ShareVolume" => super::sharevolume::desired(doc)?,
                 "HTTPRoute" | "Ingress" => super::httproute::desired(doc)?,
+                "Tunnel" => super::tunnel::desired(doc)?,
                 _ => reconcile::Desired {
                     kind: kind.to_string(),
                     name: doc.metadata.name.clone(),
@@ -328,6 +330,7 @@ fn actual_of(docs: &[manifest::ManifestDoc]) -> Result<Vec<reconcile::Actual>> {
     out.extend(super::firewall::actual(docs)?);
     out.extend(super::sharevolume::actual(docs)?);
     out.extend(super::httproute::actual(docs)?);
+    out.extend(super::tunnel::actual(docs)?);
     let (_, cstore) = super::util::open_stores()?;
     let containers = cstore.list().unwrap_or_default();
     for kind in KINDS {
@@ -407,7 +410,6 @@ fn not_converged_reason(kind: &str) -> &'static str {
         // A tunnel's identity is a live process and a URL a third party hands
         // out; the declared half (`localPort`/`provider`) is comparable, the
         // rest is status.
-        "Tunnel" => super::po::t("the URL is assigned by the provider — it is status, not spec"),
         _ => super::po::t("not converged in this version"),
     }
 }
@@ -447,6 +449,7 @@ fn compared_fields_table() -> Vec<(&'static str, &'static [&'static str])> {
         ("ShareVolume", super::sharevolume::RECONCILED_SHARE_FIELDS),
         ("HTTPRoute", super::httproute::RECONCILED_HTTPROUTE_FIELDS),
         ("Ingress", super::httproute::RECONCILED_HTTPROUTE_FIELDS),
+        ("Tunnel", super::tunnel::RECONCILED_TUNNEL_FIELDS),
         ("Pod", super::pod::RECONCILED_POD_FIELDS),
     ]
 }
@@ -1136,6 +1139,18 @@ fn converge_and_stamp(
                 // whole thing — which is what `apply` does, and it SIGHUPs the
                 // live proxy instead of restarting it.
                 "HTTPRoute" | "Ingress" => super::httproute::converge_all(docs)?,
+                "Tunnel" => {
+                    let doc = docs
+                        .iter()
+                        .find(|d| d.kind == c.kind && d.metadata.name == c.name)
+                        .ok_or_else(|| {
+                            delonix_runtime_core::Error::Invalid(format!(
+                                "Tunnel/{}: not in the manifest",
+                                c.name
+                            ))
+                        })?;
+                    super::tunnel::converge_doc(doc)?
+                }
                 "ShareVolume" => {
                     let doc = docs
                         .iter()
