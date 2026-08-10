@@ -316,6 +316,10 @@ pub enum ImageCmd {
         to: super::vmimage::ConvertFormat,
         #[arg(short = 'o', long = "output")]
         output: Option<PathBuf>,
+        /// Compress the output. Only `qcow2` and `vmdk` can — refused for the
+        /// others rather than handed to `qemu-img` to fail on.
+        #[arg(long)]
+        compress: bool,
     },
     /// (only with `--vm`) Build the golden VM image (Ubuntu + kubeadm/kubelet/
     /// kubectl + `delonix-cri`).
@@ -431,6 +435,10 @@ pub enum VmSub {
         to: super::vmimage::ConvertFormat,
         #[arg(short = 'o', long = "output")]
         output: Option<PathBuf>,
+        /// Compress the output. Only `qcow2` and `vmdk` can — refused for the
+        /// others rather than handed to `qemu-img` to fail on.
+        #[arg(long)]
+        compress: bool,
     },
     /// Build the golden VM image (Ubuntu + kubeadm/kubelet/kubectl + `delonix-cri`).
     /// Scaffold a `VMfile` (and a cloud-init) for building your own image.
@@ -540,7 +548,17 @@ pub fn run(vm: bool, action: ImageCmd) -> Result<()> {
             VmSub::LsRemote { source, no_k8s } => VmImageCmd::LsRemote { source, no_k8s },
             VmSub::Push { name, target } => VmImageCmd::Push { name, target },
             VmSub::Import(args) => VmImageCmd::Import(args),
-            VmSub::Convert { source, to, output } => VmImageCmd::Convert { source, to, output },
+            VmSub::Convert {
+                source,
+                to,
+                output,
+                compress,
+            } => VmImageCmd::Convert {
+                source,
+                to,
+                output,
+                compress,
+            },
             VmSub::Init { name, dir, force } => VmImageCmd::Init { name, dir, force },
             VmSub::Build {
                 tag,
@@ -740,7 +758,17 @@ fn run_vm(action: ImageCmd) -> Result<()> {
             })?,
         },
         ImageCmd::Import(args) => VmImageCmd::Import(args),
-        ImageCmd::Convert { source, to, output } => VmImageCmd::Convert { source, to, output },
+        ImageCmd::Convert {
+            source,
+            to,
+            output,
+            compress,
+        } => VmImageCmd::Convert {
+            source,
+            to,
+            output,
+            compress,
+        },
         ImageCmd::Build {
             tag,
             file,

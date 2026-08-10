@@ -3950,3 +3950,9 @@ msgstr "pré-requisito"
 
 msgid "FirewallPolicy '{name}' and '{first}' both define {direction} for '{target}' — a policy is the WHOLE desired state of a direction, so the second would silently replace the first; merge them into one document"
 msgstr "As FirewallPolicy '{name}' e '{first}' definem ambas {direction} para '{target}' — uma política é o estado desejado INTEIRO de uma direcção, por isso a segunda substituiria a primeira em silêncio; junta-as num só documento"
+
+msgid "{fmt} cannot be compressed — only qcow2 and vmdk can"
+msgstr "{fmt} não pode ser comprimido — só o qcow2 e o vmdk podem"
+
+msgid "Compress the output. Only `qcow2` and `vmdk` can — refused for the others rather than handed to `qemu-img` to fail on."
+msgstr "Comprime a saída. Só o `qcow2` e o `vmdk` podem — recusado nos outros em vez de ser entregue ao `qemu-img` para falhar."

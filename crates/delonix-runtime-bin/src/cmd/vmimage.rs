@@ -100,21 +100,75 @@ impl VmImage {
     }
 }
 
-/// Target format for `image vm convert`. Both are already understood by the
-/// two `delonix_vm::VmBackend`s (libvirt/QEMU and Cloud Hypervisor) — this is
-/// not a per-hypervisor format choice, just `qemu-img convert`'s two shapes.
+/// Target format for `image vm convert` — **the integration point with every
+/// other hypervisor's ecosystem**.
+///
+/// This engine runs two backends (libvirt/QEMU and Cloud Hypervisor) and will
+/// not grow a backend for every product on the market: VirtualBox does not
+/// coexist with KVM on one host, vSphere and Proxmox are remote datacenter APIs
+/// rather than local hypervisors, and Hyper-V is Windows. But an IMAGE built
+/// here can be imported by all of them, and `qemu-img` already writes every one
+/// of their formats — so the cheap, honest integration is the artifact, not a
+/// driver. Build here, import there.
+///
+/// The mapping is not decorative; each format is what a specific product's
+/// importer expects:
 #[derive(clap::ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ConvertFormat {
+    /// QEMU/KVM, libvirt, Cloud Hypervisor — this engine's own two backends.
     Qcow2,
+    /// Raw sectors: Proxmox VE (its default for LVM/ZFS/Ceph storage), and the
+    /// universal fallback anything can read. Not sparse on a filesystem that
+    /// does not support holes — expect the full virtual size on disk.
     Raw,
+    /// VMware — Workstation, Fusion, ESXi/vSphere.
+    Vmdk,
+    /// VirtualBox.
+    Vdi,
+    /// Hyper-V (Windows 8/2012 and later), and Azure's modern disk format.
+    Vhdx,
+    /// Hyper-V's older VHD (`vpc` in qemu-img's own naming). Kept separate from
+    /// `vhdx` because they are different formats, not spellings — an importer
+    /// that wants one rejects the other.
+    Vhd,
 }
 
 impl ConvertFormat {
+    /// The name `qemu-img -O` knows. **VHD is `vpc` there** — qemu's historical
+    /// name for it — which is exactly the kind of detail a user should not have
+    /// to know to get a file Hyper-V accepts.
     fn as_str(self) -> &'static str {
         match self {
             ConvertFormat::Qcow2 => "qcow2",
             ConvertFormat::Raw => "raw",
+            ConvertFormat::Vmdk => "vmdk",
+            ConvertFormat::Vdi => "vdi",
+            ConvertFormat::Vhdx => "vhdx",
+            ConvertFormat::Vhd => "vpc",
         }
+    }
+
+    /// The file extension the target ecosystem expects — NOT always the same as
+    /// the qemu format name (`vpc` produces a `.vhd`), which is why the two are
+    /// separate functions instead of one string used twice.
+    fn extension(self) -> &'static str {
+        match self {
+            ConvertFormat::Qcow2 => "qcow2",
+            ConvertFormat::Raw => "raw",
+            ConvertFormat::Vmdk => "vmdk",
+            ConvertFormat::Vdi => "vdi",
+            ConvertFormat::Vhdx => "vhdx",
+            ConvertFormat::Vhd => "vhd",
+        }
+    }
+
+    /// Whether the format supports `qemu-img`'s `-c` (compressed) output.
+    ///
+    /// Only qcow2 and vmdk do. Passing `-c` to the others makes `qemu-img` fail
+    /// outright, so this is what keeps `--compress` from turning into a
+    /// confusing tool error on a flag the user was invited to use.
+    fn supports_compression(self) -> bool {
+        matches!(self, ConvertFormat::Qcow2 | ConvertFormat::Vmdk)
     }
 }
 
@@ -262,6 +316,10 @@ pub enum VmImageCmd {
         /// Destination file (default: alongside the source, with the new extension).
         #[arg(short = 'o', long = "output")]
         output: Option<PathBuf>,
+        /// Compress the output. Only `qcow2` and `vmdk` can — refused for the
+        /// others rather than handed to `qemu-img` to fail on.
+        #[arg(long)]
+        compress: bool,
     },
     /// Register an existing disk image under a name, so `vm create --disk
     /// <name>` and `image vm push` can use it.
@@ -392,7 +450,12 @@ pub fn run(action: VmImageCmd) -> Result<()> {
         VmImageCmd::Ls { output } => cmd_ls(&store, output),
         VmImageCmd::Describe { names } => cmd_describe(&store, &names),
         VmImageCmd::Push { name, target } => cmd_push(&store, &name, &target),
-        VmImageCmd::Convert { source, to, output } => cmd_convert(&store, &source, to, output),
+        VmImageCmd::Convert {
+            source,
+            to,
+            output,
+            compress,
+        } => cmd_convert(&store, &source, to, output, compress),
         VmImageCmd::Import(args) => cmd_import(&store, args),
         VmImageCmd::Pull {
             source,
@@ -999,7 +1062,17 @@ pub(crate) fn cmd_convert(
     source: &str,
     to: ConvertFormat,
     output: Option<PathBuf>,
+    compress: bool,
 ) -> Result<()> {
+    // Refused HERE, not handed to `qemu-img` to reject: the tool's own error for
+    // `-c` on a format that cannot compress says nothing about which formats
+    // can, and the flag was offered by this CLI in the first place.
+    if compress && !to.supports_compression() {
+        return Err(Error::Invalid(super::po::tf(
+            "{fmt} cannot be compressed — only qcow2 and vmdk can",
+            &[("fmt", to.extension())],
+        )));
+    }
     let src_path = {
         let by_name = store.qcow2_path(source);
         if by_name.exists() {
@@ -1019,7 +1092,7 @@ pub(crate) fn cmd_convert(
             .file_stem()
             .and_then(|s| s.to_str())
             .unwrap_or("image");
-        src_path.with_file_name(format!("{stem}.{}", to.as_str()))
+        src_path.with_file_name(format!("{stem}.{}", to.extension()))
     });
     if dest == src_path {
         return Err(Error::Invalid(
@@ -1040,19 +1113,16 @@ pub(crate) fn cmd_convert(
             ],
         )
     );
-    run_tool(
-        "qemu-img",
-        &[
-            "convert",
-            "-O",
-            to.as_str(),
-            // `--` so a source path starting with `-` is a path, not an option:
-            // `source` here may be a literal path straight from the caller.
-            "--",
-            &src_path.to_string_lossy(),
-            &dest.to_string_lossy(),
-        ],
-    )?;
+    let mut args: Vec<&str> = vec!["convert", "-O", to.as_str()];
+    if compress {
+        args.push("-c");
+    }
+    let (src, dst) = (src_path.to_string_lossy(), dest.to_string_lossy());
+    // `--` so a source path starting with `-` is a path, not an option:
+    // `source` here may be a literal path straight from the caller.
+    args.extend(["--", &src, &dst]);
+    run_tool("qemu-img", &args)?;
+    let _unused = ();
     println!("{}", dest.display());
     Ok(())
 }
@@ -4132,6 +4202,39 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
                 mid.contains("mkdir -p /var/lib/dbus"),
                 "{d:?}: sem mkdir, o ln falha onde o dir nao existe: {mid}"
             );
+        }
+    }
+
+    /// **`vhd` é `vpc` para o qemu-img, e `.vhd` para quem importa.** É a única
+    /// combinação em que o nome do formato e a extensão divergem, e é
+    /// exactamente o detalhe que um utilizador não devia ter de saber para
+    /// obter um ficheiro que o Hyper-V aceita — daí serem duas funções e não
+    /// uma string usada duas vezes.
+    #[test]
+    fn o_formato_do_qemu_e_a_extensao_do_ecossistema_podem_divergir() {
+        use super::ConvertFormat as F;
+        for (f, qemu, ext) in [
+            (F::Qcow2, "qcow2", "qcow2"),
+            (F::Raw, "raw", "raw"),
+            (F::Vmdk, "vmdk", "vmdk"),
+            (F::Vdi, "vdi", "vdi"),
+            (F::Vhdx, "vhdx", "vhdx"),
+            (F::Vhd, "vpc", "vhd"),
+        ] {
+            assert_eq!(f.as_str(), qemu, "{f:?}");
+            assert_eq!(f.extension(), ext, "{f:?}");
+        }
+    }
+
+    /// Só o qcow2 e o vmdk aceitam o `-c` do qemu-img; passá-lo aos outros faz
+    /// a ferramenta falhar, e o utilizador levaria um erro de tool numa flag
+    /// que lhe foi oferecida.
+    #[test]
+    fn so_dois_formatos_aceitam_compressao() {
+        use super::ConvertFormat as F;
+        assert!(F::Qcow2.supports_compression() && F::Vmdk.supports_compression());
+        for f in [F::Raw, F::Vdi, F::Vhdx, F::Vhd] {
+            assert!(!f.supports_compression(), "{f:?}");
         }
     }
 }
