@@ -5074,3 +5074,8 @@ msgid ""
 msgstr ""
 "--replace '{value}': não há nenhum recurso com esse nome neste manifesto (o "
 "`stack plan` lista-os)"
+
+# ls-remote: dizer que repositorio esta a ser listado
+
+msgid "repository: {source}"
+msgstr "repositório: {source}"

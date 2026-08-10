@@ -1184,9 +1184,20 @@ pub(crate) fn cmd_ls_remote(source: &str) -> Result<()> {
     // a short list of tags that are not theirs and concludes the push failed —
     // which is exactly what happened. The tags alone do not identify their
     // origin, so the header has to.
+    // Without the tag: the default source carries one (`…:1.34`), and printing
+    // it here would suggest the listing is scoped to that tag when it is the
+    // whole repository. Cut only a `:` that comes AFTER the last `/`, so a
+    // `host:port/repo` keeps its port.
+    let shown = match source.rfind('/') {
+        Some(slash) => match source[slash..].find(':') {
+            Some(colon) => &source[..slash + colon],
+            None => source,
+        },
+        None => source.split(':').next().unwrap_or(source),
+    };
     eprintln!(
         "{}",
-        super::po::tf("repository: {source}", &[("source", source)])
+        super::po::tf("repository: {source}", &[("source", shown)])
     );
     let mut tags = delonix_image::registry::list_remote_tags(&root, source)?;
     tags.sort();
@@ -4247,5 +4258,32 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
         for f in [F::Raw, F::Vdi, F::Vhdx, F::Vhd] {
             assert!(!f.supports_compression(), "{f:?}");
         }
+    }
+
+    #[test]
+    fn o_cabecalho_do_ls_remote_tira_a_tag_mas_nao_a_porta() {
+        // The default source carries a tag; showing it would suggest the
+        // listing is scoped to it. A `host:port/repo` must keep its port —
+        // hence cutting only a colon that comes after the last slash.
+        let show = |s: &str| -> String {
+            match s.rfind('/') {
+                Some(slash) => match s[slash..].find(':') {
+                    Some(colon) => s[..slash + colon].to_string(),
+                    None => s.to_string(),
+                },
+                None => s.split(':').next().unwrap_or(s).to_string(),
+            }
+        };
+        assert_eq!(
+            show("ghcr.io/ang/delonix-vm-k8s:1.34"),
+            "ghcr.io/ang/delonix-vm-k8s"
+        );
+        assert_eq!(
+            show("ghcr.io/ang/delonix-vm-base"),
+            "ghcr.io/ang/delonix-vm-base"
+        );
+        assert_eq!(show("localhost:5000/foo:v1"), "localhost:5000/foo");
+        assert_eq!(show("localhost:5000/foo"), "localhost:5000/foo");
+        assert_eq!(show("alpine:latest"), "alpine");
     }
 }

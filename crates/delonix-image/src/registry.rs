@@ -164,11 +164,29 @@ impl Client {
         if status.is_success() {
             Ok(resp)
         } else if status == reqwest::StatusCode::NOT_FOUND {
-            Err(Error::NotFound(format!(
-                "image {}:{}",
-                self.repo,
-                url.rsplit('/').next().unwrap_or("")
-            )))
+            // The tag-listing endpoint ends in `/tags/list`, so the old code —
+            // which took the last path segment as the tag — reported
+            // `no such image <repo>:list`, naming a tag that does not exist and
+            // never did. Say what was actually not found.
+            //
+            // And say the other half: a registry answers 404 for a repository
+            // that exists but is PRIVATE to these credentials, because telling
+            // the two apart would leak which private repositories exist. A
+            // reader who has just pushed there needs to know that "not found"
+            // may mean "not visible to you".
+            if url.ends_with("/tags/list") {
+                Err(Error::NotFound(format!(
+                    "repository {} — it does not exist, or it is private and these \
+                     credentials cannot see it (`delonix image login <registry>`)",
+                    self.repo
+                )))
+            } else {
+                Err(Error::NotFound(format!(
+                    "image {}:{}",
+                    self.repo,
+                    url.rsplit('/').next().unwrap_or("")
+                )))
+            }
         } else {
             Err(Error::Registry(format!("HTTP {status} at {url}")))
         }
