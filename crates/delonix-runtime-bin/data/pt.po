@@ -3668,3 +3668,16 @@ msgstr "O que fazer a um pod que pede mais do que o `--cap-ceiling`: `reject` (o
 # aviso de namespace sem efeito (bloco A2)
 msgid "{kind} '{name}': metadata.namespace has no effect — only Container, Pod and Vm are namespaced (it scopes network isolation, not naming)"
 msgstr "{kind} '{name}': o metadata.namespace não tem efeito — só Container, Pod e Vm têm namespace (delimita o isolamento de rede, não a nomeação)"
+
+# sharevolume por namespace + migrate (bloco B2)
+msgid "would migrate sharevolume/{name} to namespace default"
+msgstr "migraria o sharevolume/{name} para a namespace default"
+
+msgid "sharevolume/{name}: migrated to namespace default"
+msgstr "sharevolume/{name}: migrado para a namespace default"
+
+msgid "nothing to migrate"
+msgstr "nada a migrar"
+
+msgid "sharevolume '{name}': a namespaced record already exists — left alone, resolve it by hand"
+msgstr "sharevolume '{name}': já existe um registo com namespace — deixado como está, resolve-o à mão"
