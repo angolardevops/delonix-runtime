@@ -1788,6 +1788,10 @@ fn parse_bsd_checksum(text: &str, filename: &str) -> Option<String> {
 /// up to the published hash or the download is discarded.
 pub(crate) fn stream_download(url: &str, dest: &Path) -> Result<()> {
     const ATTEMPTS: u32 = 5;
+    /// How long a sample must run before its rate means anything.
+    const STALL_WINDOW_SECS: f64 = 20.0;
+    /// Bounded: a link that is simply slow must not reconnect forever.
+    const MAX_STALL_RECONNECTS: u32 = 3;
     let client = reqwest::blocking::Client::builder()
         .user_agent("delonix/0.1")
         .timeout(std::time::Duration::from_secs(3600))
@@ -1795,7 +1799,13 @@ pub(crate) fn stream_download(url: &str, dest: &Path) -> Result<()> {
         .map_err(|e| Error::Invalid(format!("{}: {e}", super::po::t("HTTP client"))))?;
 
     let mut last_err = String::new();
-    for attempt in 1..=ATTEMPTS {
+    let mut stalls: u32 = 0;
+    // A reconnect for slowness is not a failed attempt — it is the same
+    // transfer continuing on (hopefully) a better node, so it must not consume
+    // the retry budget that exists for genuine errors.
+    let mut attempt = 0u32;
+    while attempt < ATTEMPTS + stalls {
+        attempt += 1;
         // Where a previous attempt stopped. `dest` is the caller's `.download`
         // temp file, never the final cached image, so a leftover here is always
         // ours to continue.
@@ -1838,6 +1848,19 @@ pub(crate) fn stream_download(url: &str, dest: &Path) -> Result<()> {
         }
         let mut buf = [0u8; 1 << 20];
         let mut broke = false;
+        // Stall detection. A CDN redirect can land the connection on a slow
+        // node and keep it there: measured here, a resumed Rocky transfer sat
+        // at 242 KiB/s while a FRESH request to the same URL got 1732 KiB/s —
+        // 7x, same host, same second. Reconnecting used to mean throwing the
+        // whole file away, so it was never worth it; with `Range` resume it
+        // costs nothing, which is what makes this worth doing at all.
+        //
+        // The threshold is RELATIVE to the best window this transfer has seen,
+        // not an absolute number: a uniformly slow link (satellite, rural) must
+        // not reconnect forever chasing a speed it will never reach.
+        let mut window_start = std::time::Instant::now();
+        let mut window_bytes: u64 = 0;
+        let mut best_rate: f64 = 0.0;
         loop {
             let n = match resp.read(&mut buf) {
                 Ok(n) => n,
@@ -1866,6 +1889,31 @@ pub(crate) fn stream_download(url: &str, dest: &Path) -> Result<()> {
                 )));
             }
             file.write_all(&buf[..n])?;
+
+            window_bytes += n as u64;
+            let elapsed = window_start.elapsed().as_secs_f64();
+            if elapsed >= STALL_WINDOW_SECS {
+                let rate = window_bytes as f64 / elapsed;
+                if rate > best_rate {
+                    best_rate = rate;
+                } else if stalls < MAX_STALL_RECONNECTS && rate < best_rate / 4.0 {
+                    stalls += 1;
+                    eprintln!(
+                        "{}",
+                        super::po::tf(
+                            "download slowed to {now} KiB/s (peak {peak}) — reconnecting to resume",
+                            &[
+                                ("now", &format!("{:.0}", rate / 1024.0)),
+                                ("peak", &format!("{:.0}", best_rate / 1024.0)),
+                            ],
+                        )
+                    );
+                    broke = true;
+                    break;
+                }
+                window_start = std::time::Instant::now();
+                window_bytes = 0;
+            }
         }
         if !broke {
             return Ok(());
