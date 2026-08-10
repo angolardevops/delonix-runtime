@@ -491,6 +491,49 @@ que torna isto uma conclusão e não um palpite: a golden Linux, com o MESMO fir
 responde em ~15s. Corrige também uma nota antiga do `AGENTS.md` que dizia que a golden é
 «libvirt-only» — com o EDK2 `CLOUDHV.fd` ela arranca em Cloud Hypervisor.
 
+## 15 de 30 containers perdiam a rede, e o erro não dizia nada
+
+Apanhado pelo arnês de caos, não por leitura: o cenário `scale` passou a falhar
+com «só 15 de 30 containers ganharam IP», e o erro era
+
+```
+error system call `ingress control` failed:
+```
+
+— nada depois dos dois pontos.
+
+**Não era saturação do host, e mede-se**: escala com a concorrência.
+
+| attaches concorrentes | falhas |
+|---|---|
+| 10 | 0 |
+| 20 | 3 |
+| 30 | **15** |
+
+O `handle_control` é *o* ponto de serialização do holder — todo o comando que
+muta rede corre lá, um de cada vez — e o cliente esperava **5 segundos** pela
+resposta. Quem entrava na fila atrás de vinte attaches não era servido a tempo.
+
+O que escondeu isto durante todo esse tempo foi uma linha: o cliente fazia
+`let _ = s.read_to_string(&mut resp)`, **descartando o erro**. Um timeout de
+leitura ficava indistinguível de um holder que respondesse nada, e os dois
+imprimiam um erro sem sujeito.
+
+Corrigido nos dois lados. O cliente lê o erro, distingue timeout de qualquer
+outra falha, e diz o que fazer («o plano de controlo serializa cada operação de
+rede, por isso uma rajada de `run`s concorrentes fica em fila atrás de si
+própria — repete, ou arranca-os em lotes mais pequenos»); o tecto passou a 30s,
+generoso de propósito porque sob rajada a espera **é a fila**, não um hang — mas
+continua limitado. O holder, por seu lado, deixou de fechar a ligação mudo
+quando desiste de ler o comando. O `SO_PEERCRED` recusado continua mudo de
+propósito: esse é o caso hostil, e não leva oráculo.
+
+Depois: **30/30 em 21 segundos**, e o arnês de volta a 20/20.
+
+A nota de método vale mais que a correcção: a primeira leitura foi «o servidor
+fecha mudo», e estava **errada** — o servidor não fechou nada, fomos nós que
+desistimos. Foi o erro descartado que o escondeu.
+
 ---
 
 ## v0.46.0 — a auditoria que se faz antes de alguém a fazer por nós
