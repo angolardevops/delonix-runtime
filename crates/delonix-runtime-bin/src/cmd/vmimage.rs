@@ -1249,13 +1249,11 @@ fn cmd_build(
     // implemented). Fail closed rather than silently running apt commands
     // against a dnf guest.
     if matches!(distro, Distro::Rocky | Distro::Fedora) && !no_k8s {
-        return Err(Error::Invalid(
-            super::po::tf(
-                "--distro {distro} only supports --no-k8s for now (the k8s path needs the \
+        return Err(Error::Invalid(super::po::tf(
+            "--distro {distro} only supports --no-k8s for now (the k8s path needs the \
                  pkgs.k8s.io RPM repository, not implemented yet)",
-                &[("distro", distro.as_str())],
-            ),
-        ));
+            &[("distro", distro.as_str())],
+        )));
     }
     // `k8s_version` goes into a `format!` that becomes a `virt-customize --run-command`
     // (via `k8s_recipes::k8s_host_recipes`) — validating here closes the same security
@@ -1779,47 +1777,110 @@ fn parse_bsd_checksum(text: &str, filename: &str) -> Option<String> {
         .map(|s| s.trim().to_string())
 }
 
+/// Downloads `url` to `dest`, RESUMING a partial file and retrying a dropped
+/// connection.
+///
+/// Measured here, and the reason this exists: a Rocky cloud image (646 MiB) died
+/// 3.8 MiB in. The old version had no retry at all — one failed `read()` threw
+/// away everything and the next run started from zero, so on a slow or flaky
+/// link a build was a coin toss. Every caller verifies a checksum afterwards,
+/// which is what makes resuming safe: bytes stitched from two ranges either add
+/// up to the published hash or the download is discarded.
 pub(crate) fn stream_download(url: &str, dest: &Path) -> Result<()> {
+    const ATTEMPTS: u32 = 5;
     let client = reqwest::blocking::Client::builder()
         .user_agent("delonix/0.1")
         .timeout(std::time::Duration::from_secs(3600))
         .build()
         .map_err(|e| Error::Invalid(format!("{}: {e}", super::po::t("HTTP client"))))?;
-    let mut resp = client
-        .get(url)
-        .send()
-        .map_err(|e| Error::Invalid(format!("GET {url}: {e}")))?;
-    if !resp.status().is_success() {
-        return Err(Error::Invalid(format!("GET {url}: HTTP {}", resp.status())));
-    }
-    let mut file = std::fs::File::create(dest)?;
-    let mut buf = [0u8; 1 << 20];
-    let mut written: u64 = 0;
-    loop {
-        let n = resp
-            .read(&mut buf)
-            .map_err(|e| Error::Invalid(format!("{}: {e}", super::po::t("reading response"))))?;
-        if n == 0 {
-            break;
+
+    let mut last_err = String::new();
+    for attempt in 1..=ATTEMPTS {
+        // Where a previous attempt stopped. `dest` is the caller's `.download`
+        // temp file, never the final cached image, so a leftover here is always
+        // ours to continue.
+        let have = std::fs::metadata(dest).map(|m| m.len()).unwrap_or(0);
+        let mut req = client.get(url);
+        if have > 0 {
+            req = req.header("Range", format!("bytes={have}-"));
         }
-        written += n as u64;
-        // Ceiling on ACTUAL bytes read, not on the advertised `Content-Length`:
-        // a hostile or misconfigured server can simply keep streaming, and this
-        // writes to disk, so the failure is a full filesystem — on a node that
-        // may be running everything else this host serves. The limit is
-        // deliberately far above any real cloud image (they run 0.5–3 GiB), so
-        // it only ever fires on something that is not an image. Same shape as
-        // the registry blob cap in `delonix-image`.
-        if written > MAX_DOWNLOAD_BYTES {
-            let _ = std::fs::remove_file(dest);
-            return Err(Error::Invalid(format!(
-                "GET {url}: aborted after {written} bytes (over the {MAX_DOWNLOAD_BYTES}-byte limit) \
-                 — the server is streaming more than any expected image"
-            )));
+        let mut resp = match req.send() {
+            Ok(r) => r,
+            Err(e) => {
+                last_err = format!("{e}");
+                continue;
+            }
+        };
+        if !resp.status().is_success() {
+            return Err(Error::Invalid(format!("GET {url}: HTTP {}", resp.status())));
         }
-        file.write_all(&buf[..n])?;
+        // 206 means the server honoured the range and we append; anything else
+        // (a mirror without range support, or a redirect to a fresh object)
+        // means it is sending the whole thing again, so start over.
+        let resuming = have > 0 && resp.status().as_u16() == 206;
+        let mut file = if resuming {
+            std::fs::OpenOptions::new().append(true).open(dest)?
+        } else {
+            std::fs::File::create(dest)?
+        };
+        let mut written: u64 = if resuming { have } else { 0 };
+        if attempt > 1 || resuming {
+            eprintln!(
+                "{}",
+                super::po::tf(
+                    "resuming download at {have} bytes (attempt {attempt})...",
+                    &[
+                        ("have", &written.to_string()),
+                        ("attempt", &attempt.to_string())
+                    ],
+                )
+            );
+        }
+        let mut buf = [0u8; 1 << 20];
+        let mut broke = false;
+        loop {
+            let n = match resp.read(&mut buf) {
+                Ok(n) => n,
+                Err(e) => {
+                    // Keep what is on disk: the next attempt continues from here.
+                    last_err = format!("{e}");
+                    broke = true;
+                    break;
+                }
+            };
+            if n == 0 {
+                break;
+            }
+            written += n as u64;
+            // Ceiling on ACTUAL bytes read, not on the advertised
+            // `Content-Length`: a hostile or misconfigured server can simply
+            // keep streaming, and this writes to disk, so the failure is a full
+            // filesystem — on a node that may be running everything else this
+            // host serves. Deliberately far above any real cloud image, so it
+            // only ever fires on something that is not an image.
+            if written > MAX_DOWNLOAD_BYTES {
+                let _ = std::fs::remove_file(dest);
+                return Err(Error::Invalid(format!(
+                    "GET {url}: aborted after {written} bytes (over the {MAX_DOWNLOAD_BYTES}-byte limit) \
+                     — the server is streaming more than any expected image"
+                )));
+            }
+            file.write_all(&buf[..n])?;
+        }
+        if !broke {
+            return Ok(());
+        }
+        file.flush()?;
     }
-    Ok(())
+    Err(Error::Invalid(super::po::tf(
+        "GET {url}: gave up after {attempts} attempts ({err}) — partial file kept, \
+         a later run resumes from it",
+        &[
+            ("url", url),
+            ("attempts", &ATTEMPTS.to_string()),
+            ("err", &last_err),
+        ],
+    )))
 }
 
 /// Ceiling for a single downloaded artifact (cloud image, `.deb`, binary).
