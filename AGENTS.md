@@ -3011,6 +3011,96 @@ as portas publicadas morrerem sozinhas quando um consumidor externo lhe passou a
 `unwrap_or_default()` restantes são todos «listar para decidir o que acrescentar», onde vazio
 leva a criar (idempotente) e nunca a apagar.
 
+## Imagens de appliance (OPNsense, Proxmox, TrueNAS) — v0.48.0
+
+Pedido: transformar ISOs de instalação em imagens VM oficiais do Delonix. Scripts em
+`scripts/appliances/` (com README próprio); seis imagens produzidas e registadas.
+
+**O que as separa de tudo o resto no `VmImageStore`: não correm cloud-init.** Instalam-se e
+configuram-se sozinhas, por consola ou interface web. O `vm create` gerava **sempre** um seed
+NoCloud — o próprio comentário dizia «ALWAYS», e para uma cloud image está certo (sem datasource
+o cloud-init salta a fase de rede e a VM fica sem IP). Para um appliance é um ISO que ninguém lê,
+num CD-ROM que muda a lista de dispositivos do convidado sem razão.
+
+- **`VmImage.cloud_init`** (`#[serde(default)]`): `None` — todos os metadados escritos até hoje —
+  conta como `true`, por isso nada muda para as imagens que este motor sempre construiu (há teste
+  a carregar um `.json` antigo e a exigir exactamente isso). Com `Some(false)` o `vm create` salta
+  o seed e **recusa** `--hostname`/`--ssh-key`/`--user-data` a NOMEAR as flags, em vez de as
+  aceitar e deitar fora — a armadilha que este repo já corrigiu três vezes (`--security-opt
+  seccomp=`, `-v …:z`, `--network-alias`). O `describe` mostra a linha `Cloud-init`, senão a
+  recusa lê-se como arbitrária.
+- **`image vm import`** regista um disco que este motor não construiu, nos três pontos de entrada
+  de sempre. Os argumentos vivem num só `ImportArgs` `flatten`ado — escrevê-los três vezes é como
+  esses caminhos divergem. **Comprime com zstd por omissão** (`--no-compress` para não o fazer),
+  pela razão já registada para a golden: uma imagem do store é o backing file read-only de cada VM
+  criada a partir dela. Medido: um `convert` sem `-c` inflava 646 MiB para **2,15 GiB** à entrada.
+- **Metadados no artefacto OCI (annotations do manifesto)** — `push_oci_artifact_with_annotations`
+  / `pull_oci_artifact_with_meta`. Fecha de caminho o gap já documentado de `ubuntu_release`/
+  `k8s_version` desaparecerem num `vm pull`; para o `cloud_init` não era cosmético — um appliance
+  publicado voltava a receber seed do outro lado. Lidas **depois** da verificação do digest, para
+  que annotations de um manifesto adulterado nunca cheguem ao chamador. O `cmd_push` já lia os
+  metadados e fazia `let _ = img;`: era o consumidor que faltava.
+
+**Como cada uma é construída** (nenhuma monta um convidado à mão — cada produto instala-se como se
+instalaria em metal):
+
+| Appliance | Via | Tamanho |
+|---|---|---|
+| OPNsense 26.1.2 | imagem `nano` oficial (já instalada) — zero instalação | 646 MiB |
+| Proxmox VE 9.1 / PBS 4.1 / PMG 9.0 / PDM 1.0 | auto-install nativo (`answer.toml` no ISO) | 1,45 / 1,11 / 1,22 / 1,06 GiB |
+| TrueNAS SCALE 25.10.5 | JSON-RPC do próprio instalador | 2,41 GiB |
+
+**Três achados que custaram uma build cada** (todos por medição, nenhum por leitura):
+
+1. **As imagens `vga`/`serial`/`dvd` do OPNsense NÃO são sistemas instalados** — arrancam em modo
+   live a partir do media (`Root file system: /dev/ufs/OPNsense_Install`, «running in live mode
+   from install media»). São o instalador em forma de disco. Só a **`nano`** tem raiz em
+   `/dev/ufs/OPNsense_Nano`. Escolhi a `serial` primeiro precisamente por assumir o contrário.
+2. **O ISO do Proxmox não se edita no lugar.** `xorriso -boot_image any replay` morre na GPT
+   híbrida (`GPT partitions 1 and 2 overlap by 80 blocks`) e o `keep` produz um ISO que o SeaBIOS
+   não passa de `Booting from DVD/CD...` (confirmado por screendump do próprio ecrã, não deduzido).
+   O `mkiso.sh` extrai a árvore e volta a autorar o ISO a partir da receita
+   `-report_el_torito as_mkisofs` do **próprio original** — que é também o que torna UM script
+   correcto para os quatro produtos: diferem no volume id **e** na geometria (`-partition_hd_cyl`
+   é 110 no VE e **91** no PBS, logo valores fixos teriam produzido ISOs errados). Dispensa o
+   `proxmox-auto-install-assistant`, que aliás é ininstalável neste host (`download.proxmox.com`
+   inacessível daqui, testado).
+3. **O TrueNAS não tem answer file, mas tem API.** A unit `truenas-installer.service` do ISO live
+   é literalmente `python3 -m truenas_installer --server` — um servidor JSON-RPC sobre WebSocket
+   em `:8080`, com `install`/`list_disks`/`system_info`/`shutdown`. Não é preciso reempacotar
+   squashfs nenhum nem conduzir o TUI às cegas.
+
+**Duas armadilhas de método, da família «X não é Y» já catalogada:**
+
+- **Um socket que aceita não é um servidor a responder.** O `hostfwd` do QEMU aceita a ligação TCP
+  quer haja quer não haja algo à escuta no convidado, por isso a sonda `/dev/tcp` dava porta aberta
+  ao primeiro segundo de boot e o handshake WebSocket morria a seguir. Passou a tentar o handshake
+  real em retry.
+- **`modprobe: ERROR:` num log do instalador Proxmox não é uma falha** — é o kernel a encolher os
+  ombros perante hardware ausente. Um guarda `grep -i ERROR:` deu três builds boas por falhadas.
+  Só `ERROR: Installation failed`, `Auto-installation failed` e `unable to continue` são do
+  instalador.
+
+**Validado ao vivo, e a afirmação é «serve», não «arranca»** (`verify-boot.sh`): PBS responde na
+:8007 em ~20s, PMG na :8006 em ~30s, PDM na :8443 em ~20s, TrueNAS na :80 em ~50s, e o PVE na
+:8006 (medido à parte, com `pve login:` na consola). Cada um sobre um overlay, para a sonda nunca
+escrever na imagem. **O OPNsense é a excepção deliberada**: a web UI dele só escuta na LAN, e uma
+sonda pela WAN receberia recusa — que é o comportamento CORRECTO de uma firewall, não uma falha.
+Para ele a prova foi a consola: raiz em `/dev/ufs/OPNsense_Nano`, `LAN (vtnet0) -> 192.168.1.1/24`,
+`WAN (vtnet1) -> DHCP4`, e o fingerprint do certificado HTTPS já gerado.
+
+O caminho appliance do `vm create` foi provado com uma VM libvirt real da imagem OPNsense: 2 vCPU
+e 2 GiB **herdados da imagem**, zero `seed.iso` em disco e zero `cdrom` no XML do domínio.
+
+**Credenciais: conhecidas e públicas** (`root/opnsense` no OPNsense por omissão do fabricante;
+`root`/`truenas_admin` com `delonix-admin` nas restantes, definidas pelo answer file/RPC). Mesma
+natureza da golden k8s — documentadas no README dos scripts, para mudar no primeiro arranque.
+
+**Por fazer**: publicar em `ghcr.io/angolardevops/delonix-vm-appliances` (exige um PAT classic com
+`write:packages` — o token do `gh` deste host tem só `gist,read:org,repo,workflow`, e o
+`GITHUB_TOKEN` não cria packages novos de user, ver a lição da golden); e um workflow de CI que
+reconstrua estas imagens como o `vm-image.yml` já faz para a golden.
+
 ## Regra de ouro: fronteira com o PaaS
 
 Este código **não pode depender de nada privado**. Antes de qualquer commit:
