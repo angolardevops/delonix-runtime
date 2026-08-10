@@ -323,11 +323,34 @@ fn actual_of(docs: &[manifest::ManifestDoc]) -> Result<Vec<reconcile::Actual>> {
 /// Reads both sides and decides. The decision itself is
 /// [`reconcile::plan`] — pure, and tested as data.
 pub(crate) fn build_plan(docs: &[manifest::ManifestDoc], stack: &str) -> Result<Vec<Change>> {
-    Ok(reconcile::plan(
-        &desired_of(docs)?,
-        &actual_of(docs)?,
-        stack,
-    ))
+    let mut changes = reconcile::plan(&desired_of(docs)?, &actual_of(docs)?, stack);
+    // Attach the prerequisites the host does not meet — the difference between
+    // «will exist» and «will work». They were already computed before this, but
+    // only the END of an `apply` printed them: a user learned that their NFS
+    // volume does not actually mount AFTER creating it, and only if the apply
+    // got that far (it often does not — the mount is what fails).
+    //
+    // The host is probed ONCE for the whole plan: the probe shells out looking
+    // for mount helpers and a hypervisor, and doing it per resource would make a
+    // plan of twenty volumes twenty times slower for twenty identical answers.
+    let env = super::conditions::Env::probe();
+    for c in changes.iter_mut() {
+        // A deletion candidate is not in the manifest at all — there is no
+        // document to derive prerequisites from, and it is on its way out.
+        let Some(doc) = docs
+            .iter()
+            .find(|d| d.kind == c.kind && d.metadata.name == c.name)
+        else {
+            continue;
+        };
+        // Only the FAILING ones: a list of satisfied prerequisites is noise, and
+        // noise in a plan is what makes people stop reading it.
+        c.conditions = super::conditions::conditions_for(doc, &env)
+            .into_iter()
+            .filter(|x| !x.ok)
+            .collect();
+    }
+    Ok(changes)
 }
 
 /// Which fields the plan compares, per converging Kind.
@@ -454,6 +477,18 @@ fn render_plan(path: &Path, stack: &str, changes: &[Change]) {
         match explain(c) {
             Some(r) => println!("{head}  — {r}"),
             None => println!("{head}"),
+        }
+        // A prerequisite the host does not meet is printed right under the
+        // resource, because that is where it changes the decision: `+ Volume/x`
+        // alone reads as "this will work", and this is the line that says it
+        // will exist WITHOUT working.
+        for cond in &c.conditions {
+            println!(
+                "        {} {}: {}",
+                super::po::t("prerequisite"),
+                cond.kind,
+                cond.message
+            );
         }
         for d in &c.diffs {
             // `∅` for absent on either side: an empty string and «the field is
@@ -1850,6 +1885,7 @@ spec: {}
             reason: None,
             cold_fields: vec![],
             owner: None,
+            conditions: vec![],
             diffs: vec![],
             changed: true,
         };

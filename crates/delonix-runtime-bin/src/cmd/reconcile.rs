@@ -178,6 +178,19 @@ pub struct Change {
     /// On `Conflict`: the stack that already owns this resource.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub owner: Option<String>,
+    /// Prerequisites this resource needs and the host does not have — the
+    /// difference between «exists» and «exists and works».
+    ///
+    /// Until this field, that difference was unsayable in a plan: `conditions.rs`
+    /// computed them and only the END of an `apply` printed them, so a user
+    /// learned that their NFS volume does not actually mount AFTER creating it,
+    /// and only if the apply got that far. A plan that says `+ Volume/media`
+    /// and nothing else is not wrong, it is just not the whole truth.
+    ///
+    /// Only the FAILING ones are carried: a list of satisfied prerequisites is
+    /// noise, and noise in a plan is what makes people stop reading it.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub conditions: Vec<super::conditions::Condition>,
     pub diffs: Vec<FieldDiff>,
     /// Convenience for consumers: `action.is_change()`.
     pub changed: bool,
@@ -192,6 +205,7 @@ impl Change {
             reason: None,
             cold_fields: Vec::new(),
             owner: None,
+            conditions: Vec::new(),
             diffs: Vec::new(),
             changed: action.is_change(),
         }
