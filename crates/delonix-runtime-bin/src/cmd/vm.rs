@@ -542,6 +542,10 @@ pub enum VmCmd {
         /// Destination file (default: alongside the source, with the new extension).
         #[arg(short = 'o', long = "output")]
         output: Option<PathBuf>,
+        /// Compress the output. Only `qcow2` and `vmdk` can — refused for the
+        /// others rather than handed to `qemu-img` to fail on.
+        #[arg(long)]
+        compress: bool,
     },
     /// Get or set the default VM backend, used by `vm create` when neither
     /// `--backend` nor `DELONIX_VM_BACKEND` is given — above the engine's own
@@ -1173,9 +1177,14 @@ pub fn run(action: VmCmd) -> Result<()> {
             let store = super::vmimage::VmImageStore::open(super::util::state_root())?;
             super::vmimage::cmd_push(&store, &name, &target)
         }
-        VmCmd::Convert { source, to, output } => {
+        VmCmd::Convert {
+            source,
+            to,
+            output,
+            compress,
+        } => {
             let store = super::vmimage::VmImageStore::open(super::util::state_root())?;
-            super::vmimage::cmd_convert(&store, &source, to, output)
+            super::vmimage::cmd_convert(&store, &source, to, output, compress)
         }
         VmCmd::DefaultBackend { set, clear } => {
             if clear {
