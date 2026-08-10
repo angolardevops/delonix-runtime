@@ -24,7 +24,7 @@ use super::util::{effective_command, find, open_stores, prepare_rootfs, resolve_
 /// foreground would block waiting for the process to exit — dangerous for a
 /// declarative command. Pass `detach: false` explicitly in the YAML if you want
 /// the synchronous behavior of the interactive `run`.
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, schemars::JsonSchema)]
 pub(crate) struct ContainerSpec {
     pub(crate) image: String,
     #[serde(default = "default_true")]
@@ -597,13 +597,48 @@ fn normalize_container_spec(mut v: serde_yaml::Value) -> serde_yaml::Value {
         hoist(m, &net, "rateBurst", "netBurst");
     }
     if let Some(Value::Mapping(env)) = m.get("env").cloned() {
+        // Two different mappings can appear under `env`, and telling them apart
+        // matters: the GROUPED form (`vars`/`files`/`secrets`/`secretFiles`) and
+        // a plain `KEY: value` map, which is what anyone coming from compose or
+        // k8s writes.
+        //
+        // BUG THIS FIXES: only the grouped form was handled, and the `env` key
+        // was removed BEFORE checking — so `env: { POSTGRES_PASSWORD: dev }` was
+        // accepted and silently dropped. It shipped that way in
+        // `examples/dependency.yaml`, where it meant the example's Postgres came
+        // up with no password variable at all. Accepted-then-ignored is the
+        // failure mode this repo has removed everywhere else; it survived here
+        // because nothing ever compared the parsed spec against the file.
+        let grouped = ["vars", "files", "secrets", "secretFiles"]
+            .iter()
+            .any(|k| env.get(*k).is_some());
         m.remove("env");
-        if let Some(vars) = env.get("vars") {
-            m.insert(Value::from("env"), vars.clone());
+        if grouped {
+            if let Some(vars) = env.get("vars") {
+                m.insert(Value::from("env"), vars.clone());
+            }
+            hoist(m, &env, "files", "envFile");
+            hoist(m, &env, "secrets", "secret");
+            hoist(m, &env, "secretFiles", "secretFiles");
+        } else {
+            // `{K: v}` → `["K=v"]`, the flat form the engine already speaks.
+            let vars: Vec<Value> = env
+                .iter()
+                .map(|(k, v)| {
+                    let key = k.as_str().unwrap_or_default();
+                    let val = match v {
+                        Value::String(s) => s.clone(),
+                        Value::Null => String::new(),
+                        other => serde_yaml::to_string(other)
+                            .unwrap_or_default()
+                            .trim()
+                            .to_string(),
+                    };
+                    Value::from(format!("{key}={val}"))
+                })
+                .collect();
+            m.insert(Value::from("env"), Value::Sequence(vars));
         }
-        hoist(m, &env, "files", "envFile");
-        hoist(m, &env, "secrets", "secret");
-        hoist(m, &env, "secretFiles", "secretFiles");
     }
     for (group, pairs) in [
         (
@@ -770,7 +805,7 @@ fn valid_container_name(name: &str) -> bool {
 // ===========================================================================
 
 /// k8s `hostAliases[]` entry: one IP, N hostnames.
-#[derive(Debug, Deserialize, Serialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone, schemars::JsonSchema)]
 pub(crate) struct HostAlias {
     pub(crate) ip: String,
     #[serde(default)]
@@ -793,7 +828,7 @@ impl HostAlias {
 /// k8s-like Pod spec: `spec.containers[]`. Used by `kind: Container` (Pod shape,
 /// 1 container) AND by `kind: Pod` (N containers sharing the pod's namespaces —
 /// see `cmd::pod`).
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, schemars::JsonSchema)]
 pub(crate) struct PodSpec {
     pub(crate) containers: Vec<PodContainer>,
     #[serde(default)]
@@ -836,7 +871,7 @@ pub(crate) struct PodSpec {
 }
 
 /// One entry of `spec.containers[]`.
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, schemars::JsonSchema)]
 pub(crate) struct PodContainer {
     /// k8s member name. Absent → `c<i>` by position, the fallback
     /// `pod_member_run_opts` uses to build the container name `<pod>-<member>`;
@@ -868,7 +903,7 @@ pub(crate) struct PodContainer {
     tty: bool,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, schemars::JsonSchema)]
 struct PodPort {
     #[serde(rename = "containerPort")]
     container_port: u16,
@@ -880,14 +915,14 @@ struct PodPort {
     host_ip: Option<String>,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, schemars::JsonSchema)]
 struct PodEnvVar {
     name: String,
     #[serde(default)]
     value: String,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, schemars::JsonSchema)]
 struct PodVolumeMount {
     name: String,
     #[serde(rename = "mountPath")]
@@ -896,7 +931,7 @@ struct PodVolumeMount {
     read_only: bool,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, schemars::JsonSchema)]
 struct PodResources {
     #[serde(default)]
     limits: Option<PodResourceList>,
@@ -905,7 +940,7 @@ struct PodResources {
     requests: Option<PodResourceList>,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, schemars::JsonSchema)]
 struct PodResourceList {
     #[serde(default)]
     cpu: Option<String>,
@@ -913,7 +948,7 @@ struct PodResourceList {
     memory: Option<String>,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, schemars::JsonSchema)]
 struct PodSecurityContext {
     #[serde(default)]
     privileged: bool,
@@ -925,7 +960,7 @@ struct PodSecurityContext {
     capabilities: Option<PodCapabilities>,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, schemars::JsonSchema)]
 struct PodCapabilities {
     #[serde(default)]
     add: Vec<String>,
@@ -934,7 +969,7 @@ struct PodCapabilities {
 }
 
 /// One entry of the Pod-level `spec.volumes[]` (referenced by `volumeMounts`).
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, schemars::JsonSchema)]
 pub(crate) struct PodVolume {
     name: String,
     #[serde(default, rename = "hostPath")]
@@ -948,17 +983,17 @@ pub(crate) struct PodVolume {
     source: Option<String>,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, schemars::JsonSchema)]
 struct PodHostPath {
     path: String,
 }
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, schemars::JsonSchema)]
 struct PodEmptyDir {
     #[serde(default)]
     #[allow(dead_code)] // "" | "Memory" — delonix maps emptyDir to tmpfs either way
     medium: Option<String>,
 }
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, schemars::JsonSchema)]
 struct PodPvc {
     #[serde(rename = "claimName")]
     claim_name: String,
@@ -6752,6 +6787,51 @@ mod tests {
         // Without the field → the default `no`.
         let vazio: ContainerSpec = serde_yaml::from_str("image: alpine\n").unwrap();
         assert_eq!(vazio.restart, "no");
+    }
+
+    /// BUG REAL, apanhado a gerar o JSON Schema e presente num exemplo
+    /// PUBLICADO (`examples/dependency.yaml`): `env: { K: v }` — a forma que
+    /// qualquer pessoa vinda do compose ou do k8s escreve — era aceite e
+    /// silenciosamente DESCARTADA, porque o `env` era removido antes de se
+    /// verificar se a mapping era mesmo a forma agrupada. O Postgres do exemplo
+    /// arrancava sem password nenhuma.
+    #[test]
+    fn env_como_mapa_simples_nao_e_descartado() {
+        let v: serde_yaml::Value =
+            serde_yaml::from_str("image: postgres:16\nenv: { POSTGRES_PASSWORD: dev, DEBUG: 1 }\n")
+                .unwrap();
+        let out = super::normalize_container_spec(v);
+        let env = out.get("env").unwrap().as_sequence().unwrap();
+        let mut got: Vec<String> = env
+            .iter()
+            .map(|x| x.as_str().unwrap().to_string())
+            .collect();
+        got.sort();
+        assert_eq!(
+            got,
+            vec!["DEBUG=1".to_string(), "POSTGRES_PASSWORD=dev".to_string()]
+        );
+    }
+
+    /// ...e a forma AGRUPADA continua a ser a forma agrupada. É a presença de
+    /// uma das quatro chaves conhecidas que a identifica, não o facto de ser
+    /// uma mapping — senão a correcção acima trocaria uma perda silenciosa por
+    /// outra.
+    #[test]
+    fn env_agrupado_continua_a_ser_hoisteado() {
+        let v: serde_yaml::Value = serde_yaml::from_str(
+            "image: nginx\nenv:\n  vars: [K=v]\n  files: [.env]\n  secretFiles: true\n",
+        )
+        .unwrap();
+        let out = super::normalize_container_spec(v);
+        assert_eq!(
+            out.get("env").unwrap().as_sequence().unwrap()[0]
+                .as_str()
+                .unwrap(),
+            "K=v"
+        );
+        assert!(out.get("envFile").is_some());
+        assert_eq!(out.get("secretFiles").unwrap().as_bool(), Some(true));
     }
 
     #[test]

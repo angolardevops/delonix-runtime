@@ -3805,3 +3805,23 @@ msgstr "Nome da stack. Omissão: o nome de um `kind: Stack`, senão o directóri
 
 msgid "List what would be removed, and remove nothing."
 msgstr "Lista o que seria removido, e não remove nada."
+
+# schema / explain (bloco 5, ADR-0007)
+
+msgid "Path"
+msgstr "Caminho"
+
+msgid "Type"
+msgstr "Tipo"
+
+msgid "Description"
+msgstr "Descrição"
+
+msgid "Print the JSON Schema of the manifest (all Kinds, or one)."
+msgstr "Imprime o JSON Schema do manifesto (todos os Kinds, ou um só)."
+
+msgid "Only this Kind's spec (e.g. `Container`)."
+msgstr "Só o spec deste Kind (ex.: `Container`)."
+
+msgid "`<Kind>[.field[.field…]]`."
+msgstr "`<Kind>[.campo[.campo…]]`."
