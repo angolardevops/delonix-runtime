@@ -524,10 +524,13 @@ registados no store — o <code>create</code> AVISA alto que a rede não foi rea
         "title": "delonix stack",
         "tagline": "Aplica um manifesto inteiro (delonix-manifest.yaml) — todos os Kinds, por ordem.",
         "intro": """O equivalente declarativo do compose, ao estilo Kubernetes: um YAML multi-documento
-(<code>apiVersion: delonix.io/v1</code>) com 5 Kinds — <code>Network</code>, <code>Volume</code>,
-<code>Image</code>, <code>Vm</code>, <code>Container</code> — aplicados por essa ordem de dependência.
-Semântica <em>garante-presente</em> (idempotente por nome), não um reconciliador: sem diffing,
-rollout nem rollback — fail-fast, o que já foi aplicado fica.""",
+(<code>apiVersion: delonix.io/v1</code>) aplicado por ordem de dependência.
+<strong>Converge</strong> para <code>Container</code>, <code>Pod</code>, <code>Volume</code> e
+<code>Network</code> — muda-se um campo no manifesto e o <code>apply</code> aplica-o, a quente e
+sem mudar o PID quando é possível; os restantes Kinds continuam <em>garante-presente</em> e o
+<code>plan</code> marca-os com <code>!</code> em vez de os esconder. Continua fail-fast e
+<strong>sem rollback</strong>: o que já foi aplicado fica, e é o <code>plan</code> seguinte que
+mostra o que faltou. Guia completo de CI e deriva em <a href="../gitops.html">GitOps e CI</a>.""",
         "subs": {
             "validate": {"examples": [
                 ('Validar o manifesto SEM aplicar nada',
@@ -550,7 +553,36 @@ do projecto.</p>"""},
             "apply": {"examples": [
                 ("Aplicar o manifesto por omissão (./delonix-manifest.yaml)", "delonix stack apply"),
                 ("Manifesto explícito", "delonix stack apply -f infra/stack.yaml"),
-            ]},
+                ("Autorizar a recriação de um recurso que não converge a quente",
+                 "delonix stack apply --replace Container/api"),
+                ("Aplicar E remover o que saiu do manifesto", "delonix stack apply --prune"),
+            ], "notes": """<p>Uma alteração que <strong>não converge a quente</strong> (imagem,
+entrypoint, capabilities, driver de um volume) é RECUSADA sem <code>--replace</code>, e nada é
+alterado — recriar significa downtime e, num volume, perder os dados. O <code>plan</code> nomeia
+sempre o campo que a obriga.</p>
+<p>O <code>--prune</code> nunca acontece sozinho, e só toca no que esta stack possui (label
+<code>delonix.io/stack</code>): um recurso criado à mão é invisível para ele.</p>"""},
+            "plan": {"examples": [
+                ("O que um apply mudaria — sem mudar nada", "delonix stack plan"),
+                ("Gate de deriva em CI (sai 2 quando há alterações)",
+                 "delonix stack plan --detailed-exitcode"),
+                ("Para alimentar outra ferramenta", "delonix stack plan -o json"),
+                ("Que campos são comparados, e quais não são e porquê",
+                 "delonix stack plan --fields"),
+            ], "notes": """<p>Compara TRÊS coisas: o manifesto, a máquina, e o último spec que esta
+stack aplicou. É esse terceiro lado que distingue «tiraste este campo do ficheiro» (reverte) de
+«alguém pôs isto à mão com <code>container update</code>» (não mexe). Com o manifesto inalterado,
+o que ele imprimir É deriva.</p>
+<p>Símbolos: <code>+</code> criar · <code>+~</code> adoptar (existe e não é de stack nenhuma) ·
+<code>~</code> actualizar a quente · <code>-/+</code> recriar · <code>-</code> remover ·
+<code>=</code> sem alteração · <code>✗</code> conflito (é de outra stack) · <code>!</code> Kind
+não convergente.</p>"""},
+            "destroy": {"examples": [
+                ("Ver o que seria removido", "delonix stack destroy --dry-run"),
+                ("Remover tudo o que esta stack possui", "delonix stack destroy"),
+            ], "notes": """<p>Remove pela ordem INVERSA da de criação, para não arrancar uma rede
+debaixo dos containers ainda ligados a ela. Só toca no que tem a label
+<code>delonix.io/stack</code>; é idempotente (destruir uma stack já destruída devolve 0).</p>"""},
         },
         "extra": """<h3>Exemplo de manifesto</h3>
 <pre><code>apiVersion: delonix.io/v1
@@ -1128,10 +1160,13 @@ need <code>CAP_NET_ADMIN</code> in the host's init-netns, outside the rootless m
     "stack": {
         "tagline": "Applies a whole manifest (delonix-manifest.yaml) — every Kind, in dependency order.",
         "intro": """The declarative, Kubernetes-style counterpart to compose: a multi-document
-YAML (<code>apiVersion: delonix.io/v1</code>) with 5 Kinds — <code>Network</code>,
-<code>Volume</code>, <code>Image</code>, <code>Vm</code>, <code>Container</code> — applied in that
-dependency order. <em>Ensure-present</em> semantics (idempotent by name), not a reconciler: no
-diffing, rollout or rollback — fail-fast, whatever was already applied stays applied.""",
+YAML (<code>apiVersion: delonix.io/v1</code>) applied in dependency order.
+It <strong>converges</strong> for <code>Container</code>, <code>Pod</code>, <code>Volume</code> and
+<code>Network</code> — change a field in the manifest and <code>apply</code> applies it, live and
+without changing the PID where that is possible; the remaining Kinds stay <em>ensure-present</em>
+and <code>plan</code> marks them <code>!</code> rather than hiding them. Still fail-fast and
+<strong>without rollback</strong>: whatever was applied stays, and the next <code>plan</code> is
+what shows the rest. Full CI and drift guide in <a href="../gitops.html">GitOps &amp; CI</a>.""",
     },
     "compose": {
         "tagline": "NATIVE support for docker-compose.yml (Compose Spec v2.x) — no Docker, no shim, straight into the engine.",
@@ -2020,7 +2055,22 @@ EXAMPLES_EN = {
         "COMPLETE stack project (FastAPI): code + Delonixfile + manifest + tests",
         "See the available templates",
     ],
-    ("stack", "apply"): ["Apply the default manifest (./delonix-manifest.yaml)", "Explicit manifest"],
+    ("stack", "apply"): [
+        "Apply the default manifest (./delonix-manifest.yaml)",
+        "Explicit manifest",
+        "Authorize recreating a resource that does not converge live",
+        "Apply AND remove whatever left the manifest",
+    ],
+    ("stack", "plan"): [
+        "What an apply would change — without changing anything",
+        "Drift gate in CI (exits 2 when there are changes)",
+        "To feed another tool",
+        "Which fields are compared, and which are not and why",
+    ],
+    ("stack", "destroy"): [
+        "See what would be removed",
+        "Remove everything this stack owns",
+    ],
     ("compose", "up"): [
         "Bring everything up (build, network, volumes, containers, in `depends_on` order)",
         "Explicit file/project",
@@ -2244,6 +2294,8 @@ def sidebar(active, depth=0):
         ("index.html", "Início", "Home"),
         ("cheatsheet.html", "Cheatsheet", "Cheatsheet"),
         ("kinds.html", "Kinds e templates", "Kinds & templates"),
+        ("gitops.html", "GitOps e CI", "GitOps & CI"),
+        ("estabilidade.html", "Promessa de estabilidade", "Stability promise"),
         ("cloud.html", "cloud-init, cloud-img e CH", "cloud-init, cloud-img & CH"),
         ("labs.html", "Laboratórios", "Labs"),
         ("arquitectura.html", "Arquitectura", "Architecture"),
@@ -3335,6 +3387,21 @@ main{max-width:1280px}
 </style>"""
     )
     page("c4.html", "Modelo C4 e system design", body)
+
+
+def md_page(src_name, out_name, title):
+    """Uma página do site a partir de um `.md` do repositório.
+
+    Mesmo caminho markdown→HTML que o `c4_page` já usa para o
+    `ARCHITECTURE.md` — o ficheiro `.md` continua a ser a fonte, legível no
+    GitHub, e o site é gerado dele. Escrever o mesmo texto duas vezes é como
+    uma das duas cópias começa a mentir.
+    """
+    import markdown
+
+    src = open(os.path.join(ROOT, src_name)).read()
+    body = markdown.markdown(src, extensions=["tables", "fenced_code", "toc"])
+    page(out_name, title, body)
 
 
 def subcommands_of(group):
@@ -4657,6 +4724,8 @@ def main():
     c4_page()
     page("cloud.html", "cloud-init, cloud image e Cloud Hypervisor", bi("div", CLOUD, CLOUD_EN))
     labs_page()
+    md_page("gitops.md", "gitops.html", "GitOps e CI")
+    md_page("cli-stability.md", "estabilidade.html", "Promessa de estabilidade")
     page("cri.html", "CRI", bi("div", CRI, CRI_EN))
     page("comparacao.html", "Delonix vs Docker vs Podman", bi("div", COMPARE, COMPARE_EN))
     page("tutorial-delonix-temp.html", "Projecto completo: Delonix Temp", bi("div", TUTORIAL, TUTORIAL_EN))
