@@ -1,6 +1,7 @@
 #cloud-config
 # A throwaway NAS VM that serves the SAME folder over both NFS and SMB — used to
-# validate `kind: Storage` end-to-end against a real network file server.
+# validate a `kind: Volume` network-share block (`nfs:`/`cifs:`) end-to-end
+# against a real network file server.
 #
 # Boot it:
 #   delonix vm create nas \

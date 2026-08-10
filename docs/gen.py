@@ -1243,7 +1243,7 @@ volume. Under the hood it's a <code>delonix-volume</code> volume with a network 
 Network→Volume→<strong>Storage</strong>→Image→Vm→Container). Mounting needs CAP_SYS_ADMIN.""",
     },
     "sharevolume": {
-        "tagline": "An ISOLATED, individually-QUOTA'd slice of a `Storage` — several container/vm/pod share one NAS.",
+        "tagline": "An ISOLATED, individually-QUOTA'd slice of a network share — several container/vm/pod share one NAS.",
         "intro": """Solves a concrete multi-tenant problem: several workloads sharing ONE
 NFS/CIFS/WebDAV export, each with ITS OWN isolated mount point and ITS OWN quota, without seeing
 each other. Under the hood there's no new mount mechanism at all: each <code>ShareVolume</code> is
@@ -3525,15 +3525,19 @@ KINDS_DOC = [
     ("Secret", "secret.yaml", "Um segredo do cofre cifrado em repouso. Consumido por <code>run --secret</code>/"
      "<code>--secret-files</code> e por <code>passwordSecret</code> do Storage. Os valores NUNCA ficam no registo do "
      "container em texto — são resolvidos no arranque a partir do NOME."),
-    ("Pod", "pod.yaml", "A forma de Pod do Kubernetes (<code>spec.containers[]</code>) para <code>kind: Container</code> — "
-     "portas/env/resources/securityContext/volumeMounts estruturados. v1 aceita UM container; para vários, "
-     "<code>kind: Pod</code> (ver <code>examples/pod-multi.yaml</code>)."),
+    ("Pod", "pod.yaml", "O schema de Pod do Kubernetes (<code>spec.containers[]</code>) — portas/env/resources/"
+     "securityContext/volumeMounts estruturados. O MESMO schema continua aceite num <code>kind: Container</code>, "
+     "com aviso, e <strong>não é reescrito de propósito</strong>: um <code>kind: Container</code> chamado "
+     "<code>web</code> cria um container <code>web</code>, este cria a netns <code>pod-web</code> cujo membro é "
+     "<code>web-c0</code> — renomear um workload nas costas de quem o escreveu partiria o DNS e os backends de "
+     "HTTPRoute."),
     ("Workload", "workload.yaml", "UM objecto declarativo para os dois tipos de computação: "
      "<code>spec.type: container | vm | pod | microvm</code> + o bloco com o mesmo nome. Baixa para o Kind "
      "correspondente no load — não redefine um único campo, por isso não pode divergir dele."),
     ("Dependency", "dependency.yaml", "Alcançabilidade DIRIGIDA entre containers (ao contrário da rede, que é "
      "bidireccional): <code>from</code> alcança <code>to</code>, e <code>to</code> não fica exposto aos outros. "
-     "Compila para firewall L4 por-container, sem dataplane novo."),
+     "É açúcar reduzido no load para <code>kind: FirewallPolicy</code> — sem dataplane novo. Várias dependências "
+     "para o mesmo alvo ACUMULAM os allows (por isso são fundidas por alvo, e não uma política por dependência)."),
     ("FirewallPolicy", "firewallpolicy.yaml", "Firewall L4 por container, estilo NetworkPolicy do k8s, com a "
      "direcção em <code>spec.direction</code>. Aplicar substitui as regras dessa direcção e deixa a outra intacta."),
     ("Ingress", "ingress.yaml", "Ingress L7 no formato <code>networking.k8s.io/v1</code> (host/path → backend), "
@@ -3547,9 +3551,13 @@ KINDS_DOC = [
     ("Network", "network.yaml", "Uma rede de utilizador. Os containers juntam-se com <code>--net &lt;nome&gt;</code>; "
      "as VMs com <code>network:</code>. Driver <code>bridge</code> é o único a que containers se atacham hoje."),
     ("Volume", "volume.yaml", "Um volume local nomeado — os dados sobrevivem a <code>container rm</code>. Para "
-     "armazenamento de REDE (NFS/SMB/WebDAV) usa antes <code>kind: Storage</code>."),
-    ("Storage", "storage.yaml", "Um volume de REDE montado de um NAS (TrueNAS/Synology/Samba/Nextcloud), estilo "
-     "PersistentVolume do k8s. A password vem do cofre (<code>--password-secret</code>). Montar precisa de CAP_SYS_ADMIN."),
+     "armazenamento de REDE (NFS/SMB/WebDAV) o MESMO Kind leva um bloco <code>nfs:</code>/"
+     "<code>cifs:</code>/<code>webdav:</code> — ver <code>storage.yaml</code>."),
+    ("Volume com bloco de rede", "storage.yaml", "Um volume de REDE montado de um NAS (TrueNAS/Synology/Samba/"
+     "Nextcloud), estilo PersistentVolume do k8s — o bloco <code>nfs:</code>/<code>cifs:</code>/<code>webdav:</code> "
+     "de um <code>kind: Volume</code>. A password vem do cofre (<code>passwordSecret</code>); montar precisa de "
+     "CAP_SYS_ADMIN. <strong>O <code>kind: Storage</code> ainda carrega</strong>, reescrito nisto com aviso de "
+     "depreciação — descreviam a mesma montagem de duas maneiras e aterravam no mesmo store."),
     ("Image", "image.yaml", "Pré-puxa (ou constrói) uma imagem antes dos containers que dependem dela. Com "
      "<code>--vm</code> o mesmo Kind cobre as imagens VM douradas."),
     ("Vm", "vm.yaml", "Uma microVM declarativa (Cloud Hypervisor ou libvirt), com cloud-init por instância. É a "
@@ -3561,15 +3569,19 @@ KINDS_DOC = [
      "<strong>netns</strong> (mesmo IP, <code>localhost</code> entre si), <strong>IPC</strong> e <strong>UTS</strong> "
      "(hostname). A namespace de PID (<code>shareProcessNamespace</code>) é follow-up. Gere-se com "
      "<code>delonix pod create/ls/describe/rm/logs</code>."),
-    ("Ingress / Egress", "firewall.yaml", "Firewall L4 declarativo por direcção (estilo k8s NetworkPolicy). Cada "
-     "documento é o estado desejado de uma direcção de um container-alvo — allowlist + default-deny, idempotente."),
+    ("FirewallPolicy (as duas direcções)", "firewall.yaml", "Firewall L4 declarativo por direcção (estilo k8s "
+     "NetworkPolicy). Cada documento é o estado desejado de UMA direcção de um container-alvo — allowlist + "
+     "default-deny, idempotente. <strong>O <code>kind: Egress</code> deixou de existir</strong>: é "
+     "<code>direction: egress</code> nesta mesma política (partilhavam a struct inteira). Duas políticas para o "
+     "mesmo par (alvo, direcção) são RECUSADAS — a segunda apagaria as regras da primeira com ambas a dizer que "
+     "correu bem."),
     ("HTTPRoute", "httproute.yaml", "Reverse-proxy L7/HTTP embutido — routing por <code>Host</code> + prefixo de "
      "<code>path</code> para containers backend. TLS termina no proxy (self-signed ou <code>secretRef</code>); "
      "reload a quente por SIGHUP."),
     ("Tunnel", "tunnel.yaml", "Expõe UMA porta local à internet pública via pinggy/ngrok/cloudflare — sem conta, "
      "sem IP público. Junta-se ao <code>HTTPRoute</code> apontando <code>localPort</code> para onde o proxy L7 "
      "escuta: uma URL pública, routing por Host do lado de lá para vários backends."),
-    ("ShareVolume", "sharevolume.yaml", "Uma fatia ISOLADA e com quota própria de um <code>Storage</code> — vários "
+    ("ShareVolume", "sharevolume.yaml", "Uma fatia ISOLADA e com quota própria de uma partilha de rede — vários "
      "container/vm/pod partilham UM export NFS/CIFS/WebDAV sem se verem. Cada fatia é um subdirectório real do "
      "mount pai, registado como o seu próprio volume; consome-se com <code>-v &lt;nome&gt;:/destino</code>, sem "
      "nada de novo do lado do consumidor."),
@@ -3581,15 +3593,20 @@ KINDS_DOC_EN = [
     "A secret from the vault, encrypted at rest. Consumed by <code>run --secret</code>/"
     "<code>--secret-files</code> and by Storage's <code>passwordSecret</code>. Values are NEVER kept in the "
     "container's registry as plaintext — they're resolved at startup from the NAME.",
-    "The Kubernetes Pod shape (<code>spec.containers[]</code>) for <code>kind: Container</code> — "
-    "structured ports/env/resources/securityContext/volumeMounts. v1 accepts ONE container; for several, "
-    "use <code>kind: Pod</code> (see <code>examples/pod-multi.yaml</code>).",
+    "The Kubernetes Pod schema (<code>spec.containers[]</code>) — structured "
+    "ports/env/resources/securityContext/volumeMounts. The SAME schema is still accepted on a "
+    "<code>kind: Container</code>, with a warning, and is <strong>deliberately not rewritten for you</strong>: "
+    "a <code>kind: Container</code> named <code>web</code> creates a container <code>web</code>, this creates "
+    "the pod netns <code>pod-web</code> whose member is <code>web-c0</code> — renaming a workload behind your "
+    "back would break DNS and HTTPRoute backends.",
     "ONE declarative object for both kinds of compute: "
     "<code>spec.type: container | vm | pod | microvm</code> plus the block with that same name. Lowers to the "
     "matching Kind on load — it doesn't redefine a single field, so it can never drift from it.",
     "DIRECTED reachability between containers (unlike a network, which is "
     "bidirectional): <code>from</code> reaches <code>to</code>, and <code>to</code> stays unexposed to the "
-    "others. Compiles to a per-container L4 firewall, with no new dataplane.",
+    "others. Sugar lowered on load into <code>kind: FirewallPolicy</code> — no new dataplane. Several "
+    "dependencies on the same target ACCUMULATE their allows, which is why they are merged by target rather "
+    "than one policy per dependency.",
     "Per-container L4 firewall, k8s NetworkPolicy-style, with the "
     "direction in <code>spec.direction</code>. Applying replaces that direction's rules and leaves the other "
     "intact.",
@@ -3605,10 +3622,13 @@ KINDS_DOC_EN = [
     "A user network. Containers join it with <code>--net &lt;name&gt;</code>; "
     "VMs with <code>network:</code>. <code>bridge</code> is the only driver containers can attach to today.",
     "A named local volume — the data survives <code>container rm</code>. For "
-    "NETWORK storage (NFS/SMB/WebDAV) use <code>kind: Storage</code> instead.",
+    "NETWORK storage (NFS/SMB/WebDAV) the SAME Kind takes an <code>nfs:</code>/<code>cifs:</code>/"
+    "<code>webdav:</code> block — see <code>storage.yaml</code>.",
     "A NETWORK volume mounted from a NAS (TrueNAS/Synology/Samba/Nextcloud), "
-    "k8s PersistentVolume-style. The password comes from the vault (<code>--password-secret</code>). Mounting "
-    "needs CAP_SYS_ADMIN.",
+    "k8s PersistentVolume-style — the <code>nfs:</code>/<code>cifs:</code>/<code>webdav:</code> block of a "
+    "<code>kind: Volume</code>. The password comes from the vault (<code>passwordSecret</code>); mounting needs "
+    "CAP_SYS_ADMIN. <strong><code>kind: Storage</code> still loads</strong>, rewritten into this with a "
+    "deprecation warning — the two described the same mount two ways and landed in the same store.",
     "Pre-pulls (or builds) an image before the containers that depend on it. With "
     "<code>--vm</code> the same Kind covers golden VM images.",
     "A declarative microVM (Cloud Hypervisor or libvirt), with per-instance cloud-init. "
@@ -3629,7 +3649,7 @@ KINDS_DOC_EN = [
     "Exposes ONE local port to the public internet via pinggy/ngrok/cloudflare — no "
     "account, no public IP. Pairs with <code>HTTPRoute</code> by pointing <code>localPort</code> at where the "
     "L7 proxy listens: one public URL, Host-based routing on the other end to several backends.",
-    "An ISOLATED, individually-quota'd slice of a <code>Storage</code> — several "
+    "An ISOLATED, individually-quota'd slice of a network share — several "
     "container/vm/pod share ONE NFS/CIFS/WebDAV export without seeing each other. Each slice is a real "
     "subdirectory of the parent mount, registered as its own volume; consumed with "
     "<code>-v &lt;name&gt;:/dest</code>, nothing new on the consumer side.",

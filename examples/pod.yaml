@@ -1,7 +1,14 @@
-# kind: Container — Pod-shaped (k8s-like). Apply with:
-#   delonix container apply -f examples/pod.yaml
-# The familiar Pod schema: spec.containers[] with structured ports/env/resources/
-# securityContext + pod-level volumes. v1 accepts ONE container (>1 is an error).
+# kind: Pod — the familiar k8s schema: spec.containers[] with structured
+# ports/env/resources/securityContext + pod-level volumes. Apply with:
+#   delonix stack apply -f examples/pod.yaml
+#
+# The SAME schema is still accepted on a `kind: Container`, but with a
+# deprecation warning, and it is deliberately not rewritten for you: a
+# `kind: Container` named `web` creates a container called `web`, while this
+# creates the pod netns `pod-web` whose member is `web-c0`. Renaming a workload
+# behind your back would break DNS, HTTPRoute backends and cross-references.
+#
+# For a pod with SEVERAL containers sharing the namespaces, see pod-multi.yaml.
 # The flat single-container spec (see examples/*, `image:` at the top) still works.
 # ---------------------------------------------------------------------------
 # A rede que o pod usa, declarada aqui para o exemplo validar sozinho.
@@ -14,7 +21,7 @@ spec:
   driver: bridge
 ---
 apiVersion: delonix.io/v1
-kind: Container
+kind: Pod
 metadata:
   name: web
   namespace: default

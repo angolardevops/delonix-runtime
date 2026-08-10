@@ -186,8 +186,10 @@ Highlights
 - **Structured output.** ``-o json`` on every list command emits stable,
   language-independent field names — ``delonix workload ls -o json | jq`` is the
   automation path.
-- **Network storage.** ``kind: Storage`` mounts NFS/CIFS/WebDAV shares from a NAS
-  (TrueNAS/Synology/Samba/Nextcloud) as named volumes, k8s-PersistentVolume style.
+- **Network storage.** A ``kind: Volume`` with an ``nfs:``/``cifs:``/``webdav:``
+  block mounts a share from a NAS (TrueNAS/Synology/Samba/Nextcloud) as a named
+  volume, k8s-PersistentVolume style. (``kind: Storage`` still loads, rewritten
+  into exactly this with a deprecation warning.)
 - **Firewall as code.** A unified ``ingress``/``egress`` command surface and
   declarative ``kind: FirewallPolicy`` manifests (k8s NetworkPolicy style,
   ``direction: ingress``/``egress``) that compile to nftables — plus a
