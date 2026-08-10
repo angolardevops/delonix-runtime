@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>delonix net netns · Delonix Engine</title>
+<title>delonix init · Delonix Engine</title>
 <script>(function(){try{
 var t=localStorage.getItem('delonix-docs-theme');
 if(t)document.documentElement.setAttribute('data-theme',t);
@@ -136,150 +136,48 @@ main{padding:1.4rem 1.2rem 4rem;max-width:none}}
 <h5><span class='lang-pt'>Documentação</span><span class='lang-en'>Docs</span></h5>
 <a href="../index.html"><span class='lang-pt'>Início</span><span class='lang-en'>Home</span></a><a href="../cheatsheet.html"><span class='lang-pt'>Cheatsheet</span><span class='lang-en'>Cheatsheet</span></a><a href="../kinds.html"><span class='lang-pt'>Kinds e templates</span><span class='lang-en'>Kinds &amp; templates</span></a><a href="../gitops.html"><span class='lang-pt'>GitOps e CI</span><span class='lang-en'>GitOps &amp; CI</span></a><a href="../estabilidade.html"><span class='lang-pt'>Promessa de estabilidade</span><span class='lang-en'>Stability promise</span></a><a href="../cloud.html"><span class='lang-pt'>cloud-init, cloud-img e CH</span><span class='lang-en'>cloud-init, cloud-img &amp; CH</span></a><a href="../labs.html"><span class='lang-pt'>Laboratórios</span><span class='lang-en'>Labs</span></a><a href="../arquitectura.html"><span class='lang-pt'>Arquitectura</span><span class='lang-en'>Architecture</span></a><a href="../c4.html"><span class='lang-pt'>Modelo C4 e system design</span><span class='lang-en'>C4 model &amp; system design</span></a><a href="../cri.html"><span class='lang-pt'>CRI — kubelet sem containerd</span><span class='lang-en'>CRI — kubelet without containerd</span></a><a href="../comparacao.html"><span class='lang-pt'>Delonix vs Docker vs Podman</span><span class='lang-en'>Delonix vs Docker vs Podman</span></a><a href="../tutorial-delonix-temp.html"><span class='lang-pt'>Projecto completo: Delonix Temp</span><span class='lang-en'>Full project: Delonix Temp</span></a>
 <h5><span class='lang-pt'>Referência CLI</span><span class='lang-en'>CLI reference</span></h5>
-<a href="../comandos/init.html">delonix init</a><a href="../comandos/container.html">delonix container</a><a href="../comandos/workload.html">delonix workload</a><a href="../comandos/pod.html">delonix pod</a><a href="../comandos/image.html">delonix image</a><a href="../comandos/build.html">delonix build</a><a href="../comandos/vm.html">delonix vm</a><a href="../comandos/volumes.html">delonix volumes</a><a href="../comandos/network.html">delonix network</a><a href="../comandos/stack.html">delonix stack</a><a href="../comandos/compose.html">delonix compose</a><a href="../comandos/cluster.html">delonix cluster</a><a href="../comandos/secret.html">delonix secret</a><a href="../comandos/storage.html">delonix storage</a><a href="../comandos/sharevolume.html">delonix sharevolume</a><a href="../comandos/ingress.html">delonix net ingress</a><a href="../comandos/egress.html">delonix net egress</a><a href="../comandos/httproute.html">delonix net httproute</a><a href="../comandos/tunnel.html">delonix net tunnel</a><a href="../comandos/flow.html">delonix net flow</a><a href="../comandos/boot.html">delonix net boot</a><a href="../comandos/system.html">delonix system</a><a href="../comandos/dash.html">delonix dash</a><a href="../comandos/docker-api.html">delonix serve docker-api</a><a href="../comandos/kube.html">delonix cluster kube</a><a href="../comandos/netns.html" class="on">delonix net netns</a><a href="../comandos/completion.html">delonix completion</a><a href="../comandos/schema.html">delonix schema · explain</a>
+<a href="../comandos/init.html" class="on">delonix init</a><a href="../comandos/container.html">delonix container</a><a href="../comandos/workload.html">delonix workload</a><a href="../comandos/pod.html">delonix pod</a><a href="../comandos/image.html">delonix image</a><a href="../comandos/build.html">delonix build</a><a href="../comandos/vm.html">delonix vm</a><a href="../comandos/volumes.html">delonix volumes</a><a href="../comandos/network.html">delonix network</a><a href="../comandos/stack.html">delonix stack</a><a href="../comandos/compose.html">delonix compose</a><a href="../comandos/cluster.html">delonix cluster</a><a href="../comandos/secret.html">delonix secret</a><a href="../comandos/storage.html">delonix storage</a><a href="../comandos/sharevolume.html">delonix sharevolume</a><a href="../comandos/ingress.html">delonix net ingress</a><a href="../comandos/egress.html">delonix net egress</a><a href="../comandos/httproute.html">delonix net httproute</a><a href="../comandos/tunnel.html">delonix net tunnel</a><a href="../comandos/flow.html">delonix net flow</a><a href="../comandos/boot.html">delonix net boot</a><a href="../comandos/system.html">delonix system</a><a href="../comandos/dash.html">delonix dash</a><a href="../comandos/docker-api.html">delonix serve docker-api</a><a href="../comandos/kube.html">delonix cluster kube</a><a href="../comandos/netns.html">delonix net netns</a><a href="../comandos/completion.html">delonix completion</a><a href="../comandos/schema.html">delonix schema · explain</a>
 <h5><span class='lang-pt'>Projecto</span><span class='lang-en'>Project</span></h5>
 <a href="https://github.com/angolardevops/delonix-runtime">GitHub</a>
 <a href="https://github.com/angolardevops/delonix-runtime/releases">Releases</a>
 </nav>
 <main>
-<h1>delonix net netns</h1>
-<p class='tagline lang-pt'>Gestão de baixo nível da infra de ingress rootless.</p><p class='tagline lang-en'>Low-level management of the rootless ingress infrastructure.</p>
-<p class='lang-pt'>A camada crua por baixo do <code>ingress</code>/<code>egress</code>: subir/descer o
-holder do ingress, attach/detach de netns, publish/unpublish de portas e firewall por container. A
-maioria dos utilizadores nunca precisa disto — usa os grupos de alto nível — mas está exposto para
-depuração e integração.</p><p class='lang-en'>The raw layer underneath <code>ingress</code>/<code>egress</code>: bringing
-the ingress holder up/down, attaching/detaching netns, publishing/unpublishing ports and
-per-container firewalling. Most users never need this — they use the higher-level groups — but
-it's exposed for debugging and integration.</p>
-<p class='src-link'>📄 Implementação real em Rust: <a href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/delonix-runtime-bin/src/cmd/netns.rs"><code>cmd/netns.rs</code></a></p>
-<div class='help'><pre><code>Usage: delonix net netns [OPTIONS] &lt;COMMAND&gt;
+<h1>delonix init</h1>
+<p class='tagline lang-pt'>Começa o projecto CERTO para este directório — detecta, explica-se, e delega.</p><p class='tagline lang-en'>Start the RIGHT project for this directory — detect, explain, dispatch.</p>
+<p class='lang-pt'>O <code>stack init</code> já gera um projecto completo e preenchido, e o
+<code>vm init</code> faz o mesmo para uma VM. O que faltava era o passo ANTES desses: saber qual
+deles chamar, e com qual dos onze templates. É esse o trabalho todo aqui — detectar,
+<strong>dizer o que detectou e porquê</strong>, e delegar. Não gera nada de seu.<br><br>
+A detecção é uma função pura sobre os nomes de ficheiro presentes, ordenada do mais específico
+para o mais genérico (um projecto Django também tem <code>.py</code>, e um Next.js também tem
+<code>package.json</code> — a regra mais larga não pode ganhar só por ter sido verificada
+primeiro). E <strong>explica-se sempre</strong>: um palpite errado que se vê é um palpite que se
+corrige com <code>-t</code>; um palpite errado em silêncio produz um projecto que não bate certo
+com o código ao lado.<br><br>
+Há um caso em que a resposta certa é <strong>não gerar nada</strong>: um directório com
+<code>docker-compose.yml</code> já corre nativamente com <code>delonix compose up</code>, e um
+segundo manifesto deixaria o projecto com duas fontes de verdade. O comando di-lo, em vez de
+gerar na mesma.</p><p class='lang-en'><code>stack init</code> already generates a complete, filled-in project, and
+<code>vm init</code> does the same for a VM. What was missing is the step BEFORE those: knowing
+which one to call, and with which of the eleven templates. That is the whole job here — detect,
+<strong>say what was detected and why</strong>, and dispatch. It generates nothing of its own.<br><br>
+Detection is a pure function over the file names present, ordered most-specific first (a Django
+project also has <code>.py</code> files, and a Next.js one also has <code>package.json</code> — the
+broader rule must not win just because it was checked earlier). And it <strong>always explains
+itself</strong>: a wrong guess you can see is a wrong guess you can override with <code>-t</code>,
+while a silent one just produces a project that does not match the code sitting next to it.<br><br>
+There is one case where the right answer is <strong>to generate nothing</strong>: a directory with
+a <code>docker-compose.yml</code> already runs natively under <code>delonix compose up</code>, and
+a second manifest would leave the project with two sources of truth. The command says so instead
+of generating anyway.</p>
+<p class='src-link'>📄 Implementação real em Rust: <a href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/delonix-runtime-bin/src/cmd/init.rs"><code>cmd/init.rs</code></a></p>
+<div class='help'><pre><code>Usage: delonix [OPTIONS] &lt;COMMAND&gt;
 
-Commands:
-  up         Bring the ingress infra up (idempotent): holder netns + delonix0 + single slirp
-  status     Show the ingress infra status (holder/slirp pids, bridge, refcount)
-  down       Force tear-down of the ingress infra (kills slirp + holder, frees the netns)
-  attach     Attach a netns to delonix0 via veth (the holder is the netns/veth factory)
-  detach     Detach (and destroy) a previously attached netns
-  exec       Run a command inside an attached netns (exercises the runtime join path)
-  publish    Publish a port through the ingress (add_hostfwd + DNAT) to a container
-  unpublish  Unpublish a host port from the ingress
-  firewall   Apply (or clear) a container&#x27;s parameterizable firewall AT THE INGRESS
-  help       Print this message or the help of the given subcommand(s)
-
-Options:
-      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-  -h, --help          Print help</code></pre></div>
-<h2 id='firewall'><code>netns firewall</code></h2>
-<p class='intro'>Apply (or clear) a container&#x27;s parameterizable firewall AT THE INGRESS</p>
-<div class='help'><pre><code>Usage: delonix net netns firewall [OPTIONS] &lt;NAME&gt;
-
-Arguments:
-  &lt;NAME&gt;  Netns/container name
-
-Options:
-      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-      --spec &lt;SPEC&gt;   ContainerFw as JSON, e.g. `{&quot;enabled&quot;:true,&quot;policyIn&quot;:&quot;deny&quot;,&quot;rules&quot;:[...]}`
-      --clear         Remove the container&#x27;s firewall from the ingress
-  -h, --help          Print help</code></pre></div>
-<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Aplicar a firewall de um container no ingress</div><div class='cap lang-en'>Apply a container&#x27;s firewall on the ingress</div><pre><code>delonix net netns firewall &lt;id&gt; 10.200.0.5</code></pre></div>
-<h2 id='unpublish'><code>netns unpublish</code></h2>
-<p class='intro'>Unpublish a host port from the ingress</p>
-<div class='help'><pre><code>Usage: delonix net netns unpublish [OPTIONS] &lt;HOST_PORT&gt;
-
-Arguments:
-  &lt;HOST_PORT&gt;  
-
-Options:
-      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-  -h, --help          Print help</code></pre></div>
-<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Despublicar</div><div class='cap lang-en'>Unpublish</div><pre><code>delonix net netns unpublish 8080</code></pre></div>
-<h2 id='publish'><code>netns publish</code></h2>
-<p class='intro'>Publish a port through the ingress (add_hostfwd + DNAT) to a container</p>
-<div class='help'><pre><code>Usage: delonix net netns publish [OPTIONS] &lt;NAME&gt; &lt;SPEC&gt;
-
-Arguments:
-  &lt;NAME&gt;  Netns/container name (its IP is derived unless `--ip` is given)
-  &lt;SPEC&gt;  Port mapping `hostPort:containerPort[/tcp|udp]`
-
-Options:
-      --ip &lt;IP&gt;       Override the container IP (defaults to the deterministic one from `name`)
-      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-  -h, --help          Print help</code></pre></div>
-<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Publicar uma porta pelo ingress, à mão</div><div class='cap lang-en'>Publish a port via ingress, by hand</div><pre><code>delonix net netns publish 8080:80 10.200.0.5</code></pre></div>
-<h2 id='exec'><code>netns exec</code></h2>
-<p class='intro'>Run a command inside an attached netns (exercises the runtime join path)</p>
-<div class='help'><pre><code>Usage: delonix net netns exec [OPTIONS] &lt;NAME&gt; &lt;COMMAND&gt;...
-
-Arguments:
-  &lt;NAME&gt;        
-  &lt;COMMAND&gt;...  
-
-Options:
-      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-  -h, --help          Print help</code></pre></div>
-<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Correr um comando DENTRO de uma netns anexada — para depurar a rede</div><div class='cap lang-en'>Run a command INSIDE an attached netns — for debugging the network</div><pre><code>delonix net netns exec minha-netns ip -br addr</code></pre></div>
-<h2 id='detach'><code>netns detach</code></h2>
-<p class='intro'>Detach (and destroy) a previously attached netns</p>
-<div class='help'><pre><code>Usage: delonix net netns detach [OPTIONS] &lt;NAME&gt;
-
-Arguments:
-  &lt;NAME&gt;  
-
-Options:
-      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-  -h, --help          Print help</code></pre></div>
-<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Desligar e destruir essa netns</div><div class='cap lang-en'>Detach and destroy that netns</div><pre><code>delonix net netns detach minha-netns</code></pre></div>
-<h2 id='attach'><code>netns attach</code></h2>
-<p class='intro'>Attach a netns to delonix0 via veth (the holder is the netns/veth factory)</p>
-<div class='help'><pre><code>Usage: delonix net netns attach [OPTIONS] &lt;NAME&gt;
-
-Arguments:
-  &lt;NAME&gt;  Netns name (typically a container id/short-id)
-
-Options:
-      --ip &lt;IP&gt;       IP in the infra subnet. Defaults to a deterministic one derived from `name`
-      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-  -h, --help          Print help</code></pre></div>
-<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Ligar uma netns à bridge (o motor faz isto sozinho no run)</div><div class='cap lang-en'>Attach a netns to the bridge (the engine does this on its own during run)</div><pre><code>delonix net netns attach minha-netns</code></pre></div>
-<h2 id='down'><code>netns down</code></h2>
-<p class='intro'>Force tear-down of the ingress infra (kills slirp + holder, frees the netns)</p>
-<div class='help'><pre><code>Usage: delonix net netns down [OPTIONS]
-
-Options:
-      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-  -h, --help          Print help</code></pre></div>
-<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Derrubar a infra de rede (mata slirp + holder) — derruba TODOS os containers da SDN</div><div class='cap lang-en'>Tear down the network infra (kills slirp + holder) — brings down EVERY container on the SDN</div><pre><code>delonix net netns down</code></pre></div>
-<h2 id='status'><code>netns status</code></h2>
-<p class='intro'>Show the ingress infra status (holder/slirp pids, bridge, refcount)</p>
-<div class='help'><pre><code>Usage: delonix net netns status [OPTIONS]
-
-Options:
-      --json          Emit JSON instead of a human summary
-      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-  -h, --help          Print help</code></pre></div>
-<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Estado da infra de ingress</div><div class='cap lang-en'>Ingress infra status</div><pre><code>delonix net netns status</code></pre></div>
-<h2 id='up'><code>netns up</code></h2>
-<p class='intro'>Bring the ingress infra up (idempotent): holder netns + delonix0 + single slirp</p>
-<div class='help'><pre><code>Usage: delonix net netns up [OPTIONS]
-
-Options:
-      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-  -h, --help          Print help</code></pre></div>
-<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Subir o holder do ingress</div><div class='cap lang-en'>Bring up the ingress holder</div><pre><code>delonix net netns up</code></pre></div>
-<h2><span class='lang-pt'>Laboratório</span><span class='lang-en'>Lab</span></h2>
-<div class='callout lang-pt'><p>Olha para dentro da infra de rede rootless que a maioria dos
-utilizadores nunca precisa de tocar.</p>
-<pre><code>delonix net netns status
-delonix net netns exec -- ip addr show delonix0</code></pre></div><div class='callout lang-en'><p>Look inside the rootless network infrastructure most users never need
-to touch.</p>
-<pre><code>delonix net netns status
-delonix net netns exec -- ip addr show delonix0</code></pre></div>
-<h2><span class='lang-pt'>Desafio</span><span class='lang-en'>Challenge</span></h2>
-<div class='callout lang-pt'><p>Desliga o holder com <code>net netns down</code>, depois corre
-QUALQUER <code>container run</code> — confirma que ele reaparece sozinho (<code>ensure_up</code>) e
-que <code>net netns status</code> volta a mostrar tudo saudável.</p></div><div class='callout lang-en'><p>Bring the holder down with <code>net netns down</code>, then run ANY
-<code>container run</code> — confirm it comes back up by itself (<code>ensure_up</code>) and that
-<code>net netns status</code> reports everything healthy again.</p></div>
+For more information, try &#x27;--help&#x27;.</code></pre></div>
+<h2><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h2><div class="ex"><div class="cap">Detecta e gera — a saída diz sempre qual foi a prova</div><pre><code>delonix init</code></pre><div class="out"><pre><code>detected go.mod → stack init --template go
+  created: ./Delonixfile
+  created: ./delonix-manifest.yaml
+  already exists, skipped: ./go.mod  (use --force to overwrite)</code></pre></div></div><div class="ex"><div class="cap">Forçar um template em vez do detectado</div><pre><code>delonix init -t django</code></pre></div><div class="ex"><div class="cap">Ver os templates que existem</div><pre><code>delonix stack init -t list</code></pre></div><div class="ex"><div class="cap">Um `VMfile` presente manda para o outro gerador</div><pre><code>delonix init</code></pre></div><div class="ex"><div class="cap">Um projecto compose não é reescrito — é assinalado</div><pre><code>delonix init</code></pre><div class="out"><pre><code>warning found docker-compose.yml — this project already runs natively with `delonix compose up`; generating a second manifest would give it two sources of truth</code></pre></div></div>
 <footer><span class='lang-pt'>Delonix Engine · Apache-2.0 · <a href="https://github.com/angolardevops/delonix-runtime">angolardevops/delonix-runtime</a> · Referência gerada do <code>--help</code> real do binário por <code>docs/gen.py</code>.</span><span class='lang-en'>Delonix Engine · Apache-2.0 · <a href="https://github.com/angolardevops/delonix-runtime">angolardevops/delonix-runtime</a> · Reference generated from the real <code>--help</code> of the binary by <code>docs/gen.py</code>.</span></footer>
 </main>
 <aside class="toc" id="pagetoc"><div class="toc-inner"><h5><span class='lang-pt'>Nesta página</span><span class='lang-en'>On this page</span></h5><nav id="toc-nav"></nav></div></aside>
