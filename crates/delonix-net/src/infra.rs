@@ -1331,6 +1331,16 @@ fn handle_control(line: &str) -> String {
             };
         }
         ["detach", netns] => do_detach(netns),
+        // Takes the IP out of `@dlxall`/`@dlxns_*`. Its OWN line, and not part of `detach`,
+        // for two reasons: `detach` carries no address, and `unfirewall` (which does) is
+        // also sent by `clear_firewall` for a container that is still very much alive —
+        // hanging the removal there would evict a live peer from the namespace sets.
+        // Additive and sent best-effort, so an older holder just refuses it and behaves
+        // exactly as before (it leaks, as it always did) instead of failing the teardown.
+        ["nsleave", ip] => {
+            ns_set_leave(ip);
+            Ok(())
+        }
         ["cni-del", netns, id, ifname, hex] => do_cni_del(netns, id, ifname, hex),
         // live multi-homing (rootless): connects/disconnects an ADDITIONAL network to a
         // container already running (extra veth to the private network's bridge).
@@ -1905,6 +1915,44 @@ fn do_cni_del(netns: &str, id: &str, ifname: &str, hex: &str) -> Result<()> {
 /// IPs) + `@dlxns_<ns>` (the container's namespace). Beforehand, **removes it from
 /// any previous `@dlxns_*`** — so a re-attach (or namespace change)
 /// stays correct without needing cleanup on detach. Best-effort/idempotent.
+/// Removes `elem` from EVERY `@dlxns_*` set (the set name is the 2nd token of `set X {`).
+/// Shared by join (which moves an IP between namespaces) and leave (which takes it out for
+/// good) — two copies of this scan would drift the day the naming changes.
+fn drop_from_every_ns_set(elem: &str) {
+    let sets = crate::capture("nft", &["list", "sets", "ip", INGRESS_TABLE]).unwrap_or_default();
+    for line in sets.lines() {
+        if let Some(name) = line.split_whitespace().nth(1) {
+            if name.starts_with("dlxns") {
+                run_ok(
+                    "nft",
+                    &["delete", "element", "ip", INGRESS_TABLE, name, elem],
+                );
+            }
+        }
+    }
+}
+
+/// Takes an IP OUT of the namespace sets, on detach. The counterpart `ns_set_join` existed
+/// from the start and this did not, so `@dlxall` only ever grew: measured at **49 elements
+/// for 8 live veths and 5 registered containers** on a development host
+/// (`docs/discovery/46_GAPS_ENCONTRADOS.md` §4.3).
+///
+/// Not a policy leak — `@dlxall` is only ever read to *drop*
+/// (`ip saddr @dlxall ct state new drop`), so a stale element never opens anything. It is
+/// unbounded kernel state and, worse for whoever is debugging, a set that cannot answer the
+/// question it exists to answer: which addresses on this node belong to containers.
+fn ns_set_leave(ip: &str) {
+    if !is_ingress_ip(ip) {
+        return; // only SDN IPs
+    }
+    let elem = format!("{{ {ip} }}");
+    run_ok(
+        "nft",
+        &["delete", "element", "ip", INGRESS_TABLE, DLXALL_SET, &elem],
+    );
+    drop_from_every_ns_set(&elem);
+}
+
 fn ns_set_join(ip: &str, ns: &str) {
     if !is_ingress_ip(ip) {
         return; // only SDN IPs
@@ -1915,17 +1963,7 @@ fn ns_set_join(ip: &str, ns: &str) {
         &["add", "element", "ip", INGRESS_TABLE, DLXALL_SET, &elem],
     );
     // takes the IP out of any previous namespace (set name = 2nd token of "set X {").
-    let sets = crate::capture("nft", &["list", "sets", "ip", INGRESS_TABLE]).unwrap_or_default();
-    for line in sets.lines() {
-        if let Some(name) = line.split_whitespace().nth(1) {
-            if name.starts_with("dlxns") {
-                run_ok(
-                    "nft",
-                    &["delete", "element", "ip", INGRESS_TABLE, name, &elem],
-                );
-            }
-        }
-    }
+    drop_from_every_ns_set(&elem);
     let nsset = dlxns_set(ns);
     run_ok(
         "nft",
@@ -3655,6 +3693,7 @@ pub fn detach_extra_container(id: &str, idx: u32, ip: &str) {
     let netns = sanitize(id);
     let ifname = format!("eth{idx}");
     let _ = control_send(&format!("detach-extra {netns} {ifname}"));
+    let _ = control_send(&format!("nsleave {ip}"));
     crate::ipam::release(&crate::ipam::prefix_of(ip), id); // frees the extra network's lease
 }
 
@@ -3664,6 +3703,7 @@ pub fn detach_container(id: &str, ip: &str) {
     let netns = sanitize(id);
     let _ = control_send(&format!("unfirewall {ip}"));
     let _ = control_send(&format!("detach {netns}"));
+    let _ = control_send(&format!("nsleave {ip}"));
     crate::ipam::release(&crate::ipam::prefix_of(ip), id); // frees the IP lease
     release(id); // removes the ref marker (teardown when it becomes empty)
 }
