@@ -191,7 +191,7 @@ pub fn run(action: StackCmd) -> Result<()> {
         up,
     } = action
     {
-        return cmd_init(
+        return init_for(
             super::scaffold::Target::Stack,
             dir,
             name,
@@ -1391,7 +1391,9 @@ fn validate_graph_with(
 }
 
 /// Handles the `init` of this group (see `cmd::scaffold`).
-fn cmd_init(
+/// The generator behind `stack init`/`vm init`, exposed so `delonix init` can dispatch to
+/// it after DETECTING which one the directory calls for (`cmd::init`) instead of copying it.
+pub(crate) fn init_for(
     target: super::scaffold::Target,
     dir: PathBuf,
     name: Option<String>,

@@ -49,6 +49,24 @@ struct Cli {
 #[allow(clippy::large_enum_variant)]
 #[derive(Subcommand)]
 enum Cmd {
+    /// Start the right project for THIS directory: detects and dispatches to `stack
+    /// init`/`vm init` with the matching template, saying what it detected and why.
+    Init {
+        /// Project directory (default: the current one).
+        dir: Option<std::path::PathBuf>,
+        /// Force a template instead of the detected one (`stack init -t list` shows them).
+        #[arg(short = 't', long)]
+        template: Option<String>,
+        /// Overwrite files that already exist.
+        #[arg(long)]
+        force: bool,
+    },
+    /// Print the version (same output as `--version`).
+    ///
+    /// A subcommand as well as a flag because `<tool> version` is what people type first —
+    /// git, docker, kubectl and podman all answer to it. It prints the flag's text VERBATIM
+    /// (`long_version_text`), so the two can never drift into saying different things.
+    Version,
     /// Containers: run/ps/stop/rm/exec/logs/update/describe.
     Container {
         #[command(subcommand)]
@@ -293,6 +311,20 @@ fn run() -> Result<()> {
         Cmd::Explain { path } => cmd::schema::explain(&path),
         Cmd::Stack { action } => cmd::stack::run(action),
         Cmd::Compose { action } => cmd::compose::run(action),
+        // clap prints "<name> <long_version>"; reproduced here so `delonix version` and
+        // `delonix --version` are byte-for-byte identical.
+        Cmd::Init {
+            dir,
+            template,
+            force,
+        } => cmd::init::run(dir, template, force),
+        Cmd::Version => {
+            // CARGO_BIN_NAME, not CARGO_PKG_NAME: the package is `delonix-runtime-bin`
+            // and the binary clap names is `delonix`. Caught by diffing the two outputs —
+            // "byte-for-byte" is the requirement precisely because this misses by one word.
+            println!("{} {}", env!("CARGO_BIN_NAME"), long_version_text());
+            Ok(())
+        }
         Cmd::System { action } => cmd::system::run(action),
         Cmd::Cluster { action } => cmd::cluster::run(action),
         Cmd::Net { action } => cmd::net::run(action),
