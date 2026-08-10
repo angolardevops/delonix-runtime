@@ -1179,6 +1179,15 @@ pub(crate) fn cmd_pull(store: &VmImageStore, source: &str, name: Option<String>)
 
 pub(crate) fn cmd_ls_remote(source: &str) -> Result<()> {
     let root = state_root();
+    // Say WHICH repository is being listed. With no argument this command
+    // lists a default one, and a reader who has just published elsewhere sees
+    // a short list of tags that are not theirs and concludes the push failed —
+    // which is exactly what happened. The tags alone do not identify their
+    // origin, so the header has to.
+    eprintln!(
+        "{}",
+        super::po::tf("repository: {source}", &[("source", source)])
+    );
     let mut tags = delonix_image::registry::list_remote_tags(&root, source)?;
     tags.sort();
     // A bare list of tags does not answer the question the reader has, which is

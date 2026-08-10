@@ -136,6 +136,13 @@ delonix stack apply --replace Container/api
 Isto é deliberado: recriar significa downtime, e num volume significa perder os
 dados. Um `apply` distraído não deve poder fazê-lo.
 
+E o valor é **verificado**, em duas etapas: a forma (`<Kind>/<nome>`, um nome nu,
+ou `all`) e depois se nomeia mesmo alguma coisa deste manifesto. Um
+`--replace Container/wev` com o erro de escrita é **recusado a nomear o valor**,
+em vez de se ler como autorizado e deixar a recusa seguinte a falar do recurso —
+nunca do engano que a causou. Numa flag que autoriza uma operação destrutiva,
+aceitar um valor que não pode casar com nada é dar a ilusão de ter autorizado.
+
 ## O gate de deriva
 
 Deriva é o `plan` a dizer alguma coisa com o manifesto inalterado. O exit code
