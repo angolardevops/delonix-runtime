@@ -531,9 +531,12 @@ pub enum VmCmd {
         name: String,
         target: String,
     },
-    /// Convert a VM disk between `qcow2` and `raw` — flattened either way,
-    /// ready to boot on either backend (libvirt/QEMU and Cloud Hypervisor
-    /// already share this same pair of formats).
+    /// Convert a VM disk to the format another ecosystem imports — `qcow2`,
+    /// `raw`, `vmdk` (VMware), `vdi` (VirtualBox), `vhdx`/`vhd` (Hyper-V,
+    /// Azure). Flattened either way, so the result is a standalone file with
+    /// no backing chain. This engine's own two backends already share
+    /// `qcow2`/`raw`; the rest exist so an image built here is importable
+    /// elsewhere without a backend per product.
     Convert {
         /// A local VM image name (`vm ls`) or a literal `.qcow2`/`.raw` path.
         source: String,

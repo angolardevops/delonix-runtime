@@ -1051,8 +1051,10 @@ pub(crate) fn apply_pulled_annotations(
     img
 }
 
-/// `image vm convert` — flattens/converts a disk between `qcow2` and `raw`
-/// with `qemu-img convert` (same tool `cmd_build`/`vmfile::build` already use
+/// `image vm convert` — flattens/converts a disk to the format another
+/// ecosystem imports (`vmdk` for VMware, `vdi` for VirtualBox, `vhdx`/`vhd`
+/// for Hyper-V and Azure, plus this engine's own `qcow2`/`raw`), using
+/// `qemu-img convert` (same tool `cmd_build`/`vmfile::build` already use
 /// to flatten a base image). `source` is tried as a local VM image name
 /// first (so `convert my-image --to raw` works without knowing the qcow2's
 /// on-disk path), falling back to a literal path — never an error to pass a

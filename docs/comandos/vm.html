@@ -186,6 +186,31 @@ Commands:
 Options:
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
   -h, --help          Print help</code></pre></div>
+<h2 id='convert'><code>vm convert</code></h2>
+<p class='intro'>Convert a VM disk between <code>qcow2</code> and <code>raw</code> — flattened either way, ready to boot on either backend (libvirt/QEMU and Cloud Hypervisor already share this same pair of formats)</p>
+<div class='help'><pre><code>Usage: delonix vm convert [OPTIONS] --to &lt;TO&gt; &lt;SOURCE&gt;
+
+Arguments:
+  &lt;SOURCE&gt;  A local VM image name (`vm ls`) or a literal `.qcow2`/`.raw` path
+
+Options:
+      --l18n &lt;en|pt&gt;     Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+      --to &lt;TO&gt;          [possible values: qcow2, raw]
+  -o, --output &lt;OUTPUT&gt;  Destination file (default: alongside the source, with the new extension)
+  -h, --help             Print help</code></pre></div>
+<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class="cap">Levar uma imagem construída aqui para outro ecossistema</div><pre><code>delonix vm convert minha-base --to vmdk        # VMware
+delonix vm convert minha-base --to vdi         # VirtualBox
+delonix vm convert minha-base --to vhdx        # Hyper-V / Azure</code></pre></div><div class="ex"><div class="cap">Comprimir — só `qcow2` e `vmdk` o sabem fazer; nos outros é recusado com a lista, em vez de entregue ao qemu-img para falhar lá</div><pre><code>delonix vm convert minha-base --to qcow2 --compress</code></pre></div>
+<h2 id='default-backend'><code>vm default-backend</code></h2>
+<p class='intro'>Get or set the default VM backend, used by <code>vm create</code> when neither <code>--backend</code> nor <code>DELONIX_VM_BACKEND</code> is given — above the engine&#x27;s own auto-detection heuristic. With no flag, prints the current default (<code>none</code> if auto-detection decides)</p>
+<div class='help'><pre><code>Usage: delonix vm default-backend [OPTIONS]
+
+Options:
+      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+      --set &lt;SET&gt;     Set the persisted default (`cloud-hypervisor` or `libvirt`)
+      --clear         Clear the persisted default (fall back to auto-detection)
+  -h, --help          Print help</code></pre></div>
+<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class="cap">Fixar o backend que o `vm create` usa quando não lhe dizem nada</div><pre><code>delonix vm default-backend --set libvirt</code></pre></div><div class="ex"><div class="cap">Ver o que está fixado (`none` = decide a auto-detecção)</div><pre><code>delonix vm default-backend</code></pre></div><div class="ex"><div class="cap">Voltar à auto-detecção</div><pre><code>delonix vm default-backend --clear</code></pre></div>
 <h2 id='snapshots'><code>vm snapshots</code></h2>
 <p class='intro'>List the VM&#x27;s snapshots</p>
 <div class='help'><pre><code>Usage: delonix vm snapshots [OPTIONS] &lt;NAME&gt;
