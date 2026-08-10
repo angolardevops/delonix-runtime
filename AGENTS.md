@@ -3137,7 +3137,7 @@ as portas publicadas morrerem sozinhas quando um consumidor externo lhe passou a
 `unwrap_or_default()` restantes são todos «listar para decidir o que acrescentar», onde vazio
 leva a criar (idempotente) e nunca a apagar.
 
-## Imagens de appliance (OPNsense, Proxmox, TrueNAS) — v0.48.0
+## Imagens de appliance (OPNsense, Proxmox, TrueNAS) — v0.47.0
 
 Pedido: transformar ISOs de instalação em imagens VM oficiais do Delonix. Scripts em
 `scripts/appliances/` (com README próprio); seis imagens produzidas e registadas.
@@ -3227,7 +3227,7 @@ natureza da golden k8s — documentadas no README dos scripts, para mudar no pri
 `GITHUB_TOKEN` não cria packages novos de user, ver a lição da golden); e um workflow de CI que
 reconstrua estas imagens como o `vm-image.yml` já faz para a golden.
 
-## A subnet de uma rede passou a valer, e o que isso abriu (v0.48.0)
+## A subnet de uma rede passou a valer, e o que isso abriu (v0.47.0)
 
 Pedido: poder passar CIDRs ao criar VMs/redes (`vpc_cidr`, `public_subnets_cidr`,
 `private_subnets_cidr`, `single_nat_gateway` — o vocabulário do módulo VPC do Terraform), para
@@ -3273,7 +3273,7 @@ com um IP só e as regras por-origem dele deixam de valer. As chains por-workloa
 FILTRO, não NAT, por isso compõem-se bem: o delonix decide se o pacote sai do workload, o
 appliance decide o que atravessa a fronteira.
 
-## Imagens base de SO, e o que o host precisa para as construir (v0.48.0)
+## Imagens base de SO, e o que o host precisa para as construir (v0.47.0)
 
 Cinco variantes do `--no-k8s`: Ubuntu 24.04/26.04, Debian bookworm, Rocky 9 e **Fedora** (novo).
 O Fedora é da família dnf/RPM do Rocky e o código diz isso em vez de o repetir — há teste a
