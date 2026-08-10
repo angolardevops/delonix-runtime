@@ -61,11 +61,14 @@ enum Cmd {
         #[arg(long)]
         force: bool,
     },
+    // A subcommand as well as a flag because `<tool> version` is what people type first —
+    // git, docker, kubectl and podman all answer to it. It prints the flag's text VERBATIM
+    // (`long_version_text`), so the two can never drift into saying different things.
+    //
+    // Plain `//`, not `///`: clap turns a doc comment into the user's `--help`, and design
+    // rationale has no business there. Caught by the i18n guard, which demanded a
+    // translation for three paragraphs nobody should have been reading in a help screen.
     /// Print the version (same output as `--version`).
-    ///
-    /// A subcommand as well as a flag because `<tool> version` is what people type first —
-    /// git, docker, kubectl and podman all answer to it. It prints the flag's text VERBATIM
-    /// (`long_version_text`), so the two can never drift into saying different things.
     Version,
     /// Containers: run/ps/stop/rm/exec/logs/update/describe.
     Container {
@@ -498,7 +501,7 @@ mod help_i18n_tests {
     /// green.
     ///
     /// Measured after the `container` group was translated: 206 → 120.
-    const ARG_HELP_PENDING: usize = 120;
+    const ARG_HELP_PENDING: usize = 0;
 
     /// Walks about/long_about of the whole command tree, collecting whatever the
     /// catalog does not translate.
