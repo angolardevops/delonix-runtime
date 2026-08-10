@@ -177,6 +177,33 @@ jobs:
             bash scripts/chaos.sh ${{ github.event.inputs.scenarios }} 2>&1 | tee chaos.log
           fi
 
+      # A bateria E2E ao lado do caos, e não no `ci.yml`, pela mesma razão: toca
+      # no estado REAL (containers, redes, volumes) e precisa do mesmo ambiente
+      # rootless que os passos acima já montaram. Duplicá-lo noutro workflow era
+      # manter duas cópias do preflight.
+      #
+      # Porque isto passou a ser um gate: a bateria não corria desde a v0.3.0 —
+      # quarenta e quatro versões — e quando correu tinha nove falhas, oito delas
+      # porque o TESTE codificava um bug que entretanto foi corrigido. Uma bateria
+      # que ninguém corre não prova nada e ainda mente sobre o que cobre.
+      #
+      # `DELONIX_ROOT`/`DELONIX_NET_RUNTIME_DIR` próprios: mesmo isolamento do
+      # arnês, para o E2E nunca tocar no que outro passo deixou de pé.
+      - name: Bateria E2E da CLI
+        if: steps.preflight.outputs.userns == 'ok'
+        run: |
+          set -o pipefail
+          E2E=/tmp/dlx-e2e
+          rm -rf "$E2E"; mkdir -p "$E2E/root" "$E2E/run"
+          for d in images layers blobs; do
+            ln -sfn "$HOME/.local/share/delonix/$d" "$E2E/root/$d"
+          done
+          export DELONIX_ROOT="$E2E/root" DELONIX_NET_RUNTIME_DIR="$E2E/run"
+          export DELONIX_NO_CGROUP_WARN=1 OUT=/tmp/delonix-e2e
+          export E2E_IMAGE=docker.io/library/redis:7-alpine
+          bash scripts/e2e.sh ./target/release/delonix 2>&1 | tee e2e.log
+          ./target/release/delonix net netns down >/dev/null 2>&1 || true
+
       # O resumo no sumário do job para não ser preciso abrir os logs — e para
       # que um SKIP fique visível em vez de se perder no ruído. Um skip não falha
       # o job, mas é informação: significa que aquela propriedade não foi provada.
@@ -189,6 +216,12 @@ jobs:
             echo '```'
             sed -n '/── resumo ──/,$p' chaos.log 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g' || echo '(sem resumo — ver o log do passo anterior)'
             echo '```'
+            echo
+            echo '## Bateria E2E'
+            echo
+            echo '```'
+            grep -E '^ (PASS|FAIL|SKIP)=|^ *- ' e2e.log 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g' || echo '(sem resumo)'
+            echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Guarda o log
@@ -196,7 +229,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: chaos-log
-          path: chaos.log
+          path: |
+            chaos.log
+            e2e.log
           retention-days: 30
 
       # O motor deixa infra por-nó (holder netns, slirp) e directórios de
