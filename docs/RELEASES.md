@@ -4,6 +4,269 @@
 > (regenerado automaticamente pelo pipeline de release a cada tag publicada).
 > Não editar à mão — edita a nota da release respectiva.
 
+## v0.47.0 — o `apply` deixou de mentir, e o nó ganhou opinião sobre capabilities
+
+Duas metades independentes. Uma fecha um defeito estrutural do caminho
+declarativo — um `apply` que reportava sucesso sem convergir nada. A outra dá ao
+nó a primeira palavra própria sobre privilégio, em vez de aceitar sem opinião
+tudo o que a cadeia de admission lhe mandar.
+
+# O tecto de capabilities do CRI
+
+Até aqui, tudo o que chegava a este runtime pelo CRI vinha já autorizado. O
+`securityContext` de um pod era traduzido em flags sem opinião nenhuma —
+`privileged: true` virava `--cap-add ALL`, `capabilities.add` virava um
+`--cap-add` por nome — e isso está certo: o runtime não é o admission
+controller. O problema é o que essa correcção implica. A única coisa entre um
+`privileged: true` e todas as capabilities do kernel era a cadeia de admission
+do API server: outro processo, noutra máquina, cuja configuração este nó não
+consegue ver nem verificar.
+
+**`DELONIX_CRI_CAP_CEILING` é a resposta local do nó.** Um limite máximo para as
+capabilities de qualquer container criado através do CRI, que vale mesmo com o
+Pod Security mal configurado, com um `crictl` a falar directamente com o socket,
+ou com um static pod que nunca passou pelo API server. Defesa em profundidade —
+não um substituto do admission.
+
+```ini
+# /etc/systemd/system/delonix-cri.service.d/ceiling.conf
+[Service]
+Environment=DELONIX_CRI_CAP_CEILING=default,NET_ADMIN
+Environment=DELONIX_CRI_CAP_CEILING_MODE=reject
+```
+
+Ou, para quem serve o CRI pela CLI:
+
+```bash
+delonix serve cri --cap-ceiling default,NET_ADMIN --cap-ceiling-mode reject
+```
+
+Sem nenhuma das duas coisas **não há tecto** e o comportamento é byte-a-byte o
+de sempre. Isto é opt-in por uma razão concreta: um tecto estreito num nó com
+DaemonSets privilegiados (CNI, CSI, kube-proxy) é exactamente o que o operador
+quer ou exactamente o que lhe parte o nó, e essa decisão não é nossa.
+
+## O que se pode escrever
+
+| Valor | Significado |
+|---|---|
+| ausente, vazio, `all` | sem tecto |
+| `none` | capability nenhuma, para ninguém |
+| `default` | o conjunto por omissão do motor |
+| `default,NET_ADMIN,…` | esse conjunto mais as nomeadas |
+| `CHOWN,NET_BIND_SERVICE,…` | exactamente as nomeadas (`CAP_` opcional, maiúsculas indiferentes) |
+
+Um nome desconhecido, um modo desconhecido, ou um valor só com separadores
+**impedem o servidor de arrancar**, antes de qualquer `bind`. Um tecto que
+caísse em silêncio para «ilimitado» por causa de um typo seria pior que não ter
+tecto nenhum — quem o configurou passaria a contar com uma protecção que não
+existe.
+
+## Recusar ou cortar, e porque a assimetria é deliberada
+
+Um pedido **explícito** acima do tecto — `capabilities.add`, ou `privileged:
+true` — falha no `CreateContainer` com `PermissionDenied` e a lista das
+capabilities negadas pelo nome, que o kubelet mostra no pod de imediato. O modo
+`clamp` corta-o e regista um aviso, para endurecer um nó cujos PodSpecs não se
+podem mudar hoje; é a troca de honestidade por disponibilidade, e é por isso que
+não é a omissão.
+
+O **baseline implícito** — o conjunto que um container recebe sem pedir nada — é
+reduzido ao tecto **sem erro, nos dois modos**. Baixar um default que o workload
+nunca pediu é o que a palavra «tecto» significa; recusar todos os pods do nó
+porque o default do próprio motor é mais largo que o limite tornaria a
+funcionalidade inútil.
+
+## O clamp não tem aritmética própria
+
+O conjunto final é `resolve_cap_keep` **do motor** intersectado com o tecto, e
+sai como `--cap-drop ALL` + um `--cap-add` por capability. Para isso, o módulo
+`delonix_runtime::capabilities` passou a ser público (a tabela nome↔número, o
+`KEPT_CAPS`, a resolução) em vez de viver escondido no meio do `lib.rs`. Uma
+segunda tabela do lado do CRI divergiria no dia em que uma capability fosse
+acrescentada aqui, e o sintoma seria o pior possível: uma capability que o
+operador autorizou e que desaparece sem um erro.
+
+Há teste de ida e volta nos dois sentidos — `cap_name`↔`cap_num` para todas as
+capabilities conhecidas, e máscara → nomes → máscara.
+
+## Limita capabilities, e diz que é só isso
+
+Um pod privilegiado continua a ficar com `seccomp=unconfined`, `/sys`
+escrivível e o seu próprio cgroup namespace. São eixos separados do
+`--privileged`, e cortar capabilities não torna um pod privilegiado seguro. O
+tecto é deliberadamente estreito e di-lo, em vez de sugerir um endurecimento que
+não entrega.
+
+## A armadilha que o teste apanhou
+
+A primeira versão modelava `privileged` como `resolve_cap_keep(cap_drop,
+["ALL"])`. Parece equivalente e não é: no motor, `privileged` **ignora** o
+`cap_drop` por completo (`if privileged { all_caps_mask() }`). Um clamp tem de
+prever o que o motor CONCEDE, não o que discutivelmente devia conceder — e o
+primeiro teste a cobrir isto afirmava o comportamento intuitivo e errado, com o
+código escrito para lhe corresponder. Ficou um teste com o nome do facto:
+`privileged_ignora_o_cap_drop_como_no_motor`.
+
+## Como se vê que está em vigor
+
+O tecto é anunciado no arranque (stdout do servidor e `tracing`) e publicado em
+`status(verbose)` → `info["capabilityCeiling"]`, onde um `crictl info` o lê. Sem
+isto, um tecto activo mas invisível seria diagnosticado como «o runtime largou-me
+as capabilities sem razão». O aviso do modo `clamp` só sai quando um pedido
+explícito foi efectivamente cortado — avisar quando apenas o baseline baixou
+daria uma linha por cada container que arranca no nó.
+
+## Validação
+
+Ao vivo, neste host: os dois pontos de entrada recusam um valor e um modo
+inválidos, em EN e em PT, sem chegar a criar socket; um `delonix-cri` real
+anuncia o tecto expandido; e o pressuposto central do clamp foi confirmado no
+kernel — o argv que ele emite dá `CapEff 0x1001` (CHOWN e NET_ADMIN, exactos),
+contra `0xa0042dfb` do baseline e `0x1ffffffffff` de um `--privileged`.
+
+**Não foi validado com um kubelet ou `crictl` real**: nenhum dos dois existe
+nesta máquina, e o `build.rs` não gera stubs de cliente gRPC (`build_client(false)`,
+deliberado). O caminho de pedido está coberto por um teste sobre o
+`create_container` verdadeiro — as duas formas de pedir privilégio, o caso que
+passa, o caso sem tecto e o modo `clamp` — mais os testes das funções que
+constroem os flags. O que fica por exercitar é a camada tonic, que são três
+linhas de `blocking(...)`.
+
+---
+
+# O `apply` deixou de mentir
+
+A mesma versão fecha um defeito estrutural do lado declarativo, e é o maior dos
+dois. O `stack apply` só criava:
+
+```
+container/web: already exists, nothing to do
+```
+
+e devolvia **0**. Mudar a imagem no manifesto não fazia nada e reportava
+sucesso. É o gémeo declarativo do relato desonesto que a v0.37.0 tirou do CLI
+imperativo, e é pior, porque o utilizador mudou o ficheiro de propósito. Agrava-o
+o facto de a capacidade já cá estar: o `container update` reconfigura portas,
+volumes, redes, memória e CPU **a quente, sem mudar o PID** — e o caminho
+declarativo nunca lhe chamou. Quinta ocorrência do padrão
+`mount_live`/`set_net_rate`/`update_limits`/`JsonStore::update`: capacidade
+testada, à espera do primeiro chamador.
+
+## O ciclo completo
+
+```bash
+delonix stack plan    -f m.yaml   # o que mudaria, e porquê
+delonix stack apply   -f m.yaml   # converge; recusa o que não converge
+delonix stack destroy -f m.yaml   # leva o que a stack possui, e só isso
+```
+
+```
+Plano do stack "web"  (manifesto: ./delonix-manifest.yaml)
+
+  ~ container/web              actualizar a quente
+      memory:  256M → 512M
+  -/+ container/api            RECRIAR — `image` não converge a quente
+      image:   nginx:1.24 → nginx:1.27
+  !  cluster/prod              não convergente — procedimento remoto, não um recurso local
+```
+
+**`--detailed-exitcode`** devolve 0/2/1 como o `terraform plan`, o que faz de um
+`plan` num cron um gate de deriva em CI sem escrever um parser.
+
+## Sem ficheiro de estado — porque já era essa a promessa
+
+O último spec aplicado vive **no próprio recurso**, na anotação
+`delonix.io/last-applied`. É o mecanismo do `kubectl`, e é o terceiro lado que
+distingue «tiraste o campo do ficheiro» (reverte) de «alguém pôs isto à mão»
+(não mexe). A posse é a label `delonix.io/stack`, o mesmo idioma que o `pod` e o
+`compose` já usavam: um recurso criado à mão é **adoptado** sem precisar de um
+comando `import`, um de outra stack é **conflito** e nunca é tocado, e nem
+`--prune` nem `destroy` vêem o que não tem a label.
+
+Nada disto acrescenta um registo novo, o que mantém a linha que o projecto já
+tinha publicado — `cluster ls` e `stack describe` derivam tudo do que existe.
+
+## Recriar é fail-closed
+
+Um `-/+` nomeia **todos** os campos frios e o `apply` recusa sem
+`--replace <Kind>/<nome>`, antes da primeira criação. O apply é fail-fast sem
+rollback: recusar a meio deixaria a stack meio convergida **e** com erro.
+
+## Três Kinds deixaram de existir
+
+18 → 15, cada fusão porque os dois lados já faziam o mesmo:
+
+| Antes | Agora |
+|---|---|
+| `Egress` | `FirewallPolicy` com `direction: egress` — partilhavam a struct inteira |
+| `Dependency` | açúcar reduzido para `FirewallPolicy` no load, fundindo por alvo |
+| `Storage` | bloco `nfs:`/`cifs:`/`webdav:` de `kind: Volume` |
+
+Os nomes antigos carregam com aviso de depreciação. O corte limpo aplica-se a
+comandos; um manifesto em git merece um degrau, não um erro.
+
+**A quarta fusão não se fez, e a razão vale mais que a fusão**: um `kind:
+Container` com `spec.containers` **não** é um `kind: Pod` de um elemento. O
+primeiro cria um container chamado `<name>`; o segundo cria a netns `pod-<name>`
+e chama-lhe `<name>-c0`. Reescrever renomearia o container e partiria o DNS, os
+backends de HTTPRoute e as referências cruzadas.
+
+## O schema passou a ser gerado, e a ser estável
+
+`delonix schema print` emite-o a partir do próprio código, `delonix explain
+Container.ports` responde como o `kubectl explain`, e o ficheiro está publicado
+em `docs/schema/v1/delonix.json` com um teste a falhar se o publicado deixar de
+ser o gerado. Uma linha no topo do YAML dá completação e validação no editor:
+
+```yaml
+# yaml-language-server: $schema=https://angolardevops.github.io/delonix-runtime/schema/v1/delonix.json
+```
+
+O schema dos manifestos passou de **não estável** a **estável** em
+`cli-stability.md` — estava o compromisso ao contrário, com a CLI mais protegida
+que o formato que as pessoas põem em git.
+
+`schemars` é a **segunda excepção deliberada** à regra de sem-dependências-novas,
+depois do `ratatui`, com a mesma disciplina: confinada ao binário, os oito crates
+de motor verificados dep-limpos.
+
+## Dois bugs que só apareceram por causa disto
+
+**Um exemplo publicado arrancava sem password.** A validação dos `examples/`
+contra o schema gerado apanhou `env: { POSTGRES_PASSWORD: dev }` — a forma que
+qualquer pessoa vinda do compose escreve — a ser aceite e **silenciosamente
+descartada**. O Postgres do `examples/dependency.yaml` subia sem password.
+
+**Três listas de Kinds convergentes tinham derivado.** A constante que decide se
+o `apply` converge estava desactualizada face aos braços do `match` que fazem a
+convergência, por isso `Vm`, `FirewallPolicy` e `ShareVolume` eram **saltados** —
+e o sintoma escondeu-se porque o apply antigo de cada um é idempotente e
+convergia pelo caminho errado. Há agora um teste a exigir que as três listas
+concordem nos dois sentidos.
+
+## Validação
+
+Ao vivo, o ciclo inteiro: um campo quente convergido com o **PID inalterado**
+(618350) e o `memory.max` do cgroup real a passar a 134217728; a recriação
+recusada sem `--replace`, sem tocar em nada; e uma deriva provocada por um
+`container update` fora do manifesto apanhada pelo plano seguinte.
+
+Cenário de caos novo, `stack_converge`, com **dois** containers de propósito — o
+segundo é o controlo, e prova que a convergência tocou só no que o plano nomeou.
+A primeira versão verificava apenas que o PID não mudava, e isso não prova nada:
+um apply que não faz nada também deixa o PID intacto. Falha com cada uma das duas
+correcções revertida. Arnês: 20/20.
+
+## Guia novo
+
+[`docs/gitops.md`](../gitops.md) — `plan` num PR, `apply` no merge, gate de
+deriva num cron, e o que fazer quando um apply morre a meio.
+`scripts/schema-diff.sh` compara campo a campo entre duas tags e sai 1 com
+diferenças, o que serve directamente como gate de CI.
+
+---
+
 ## v0.46.0 — a auditoria que se faz antes de alguém a fazer por nós
 
 Seis revisões adversariais em paralelo sobre os oito crates, cada uma apontada a
