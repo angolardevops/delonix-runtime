@@ -184,7 +184,7 @@ Commands:
 Options:
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
   -h, --help          Print help</code></pre></div>
-<h3>Exemplos</h3><div class="ex"><div class="cap">Gerar manifestos Kubernetes a partir de um recurso Delonix</div><pre><code>delonix cluster kube generate</code></pre></div>
+<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Gerar manifestos Kubernetes a partir de um recurso Delonix</div><div class='cap lang-en'>Generate Kubernetes manifests from a Delonix resource</div><pre><code>delonix cluster kube generate</code></pre></div>
 <h2 id='load'><code>cluster load</code></h2>
 <p class='intro'>Load local images into a kind-mode cluster&#x27;s nodes, <strong>without a registry</strong> (the equivalent of <code>kind load docker-image</code>): packs each image from the local store and imports it into every running node&#x27;s containerd</p>
 <div class='help'><pre><code>Usage: delonix cluster load [OPTIONS] &lt;IMAGES&gt;...
@@ -196,7 +196,7 @@ Options:
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
       --name &lt;NAME&gt;   Cluster name. Omit when there is only one — with several, this says which
   -h, --help          Print help</code></pre></div>
-<h3>Exemplos</h3><div class="ex"><div class="cap">Levar uma imagem local para dentro dos nós (o kind load, sem registo)</div><pre><code>delonix build -t app:dev .
+<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Levar uma imagem local para dentro dos nós (o kind load, sem registo)</div><div class='cap lang-en'>Get a local image into the nodes (kind load, no registry)</div><pre><code>delonix build -t app:dev .
 delonix cluster load app:dev --name lab</code></pre></div>
 <h2 id='delete'><code>cluster delete</code></h2>
 <p class='intro'>Remove a kind-mode cluster (stops and deletes the nodes + kubeconfig)</p>
@@ -206,7 +206,7 @@ Options:
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
       --name &lt;NAME&gt;   [default: delonix]
   -h, --help          Print help</code></pre></div>
-<h3>Exemplos</h3><div class="ex"><div class="cap">Apagar o cluster e os seus nós</div><pre><code>delonix cluster delete --name lab</code></pre></div>
+<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Apagar o cluster e os seus nós</div><div class='cap lang-en'>Delete the cluster and its nodes</div><pre><code>delonix cluster delete --name lab</code></pre></div>
 <h2 id='ls'><code>cluster ls</code></h2>
 <p class='intro'>List the clusters and the state of their nodes</p>
 <div class='help'><pre><code>Usage: delonix cluster ls [OPTIONS]
@@ -214,7 +214,7 @@ Options:
 Options:
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
   -h, --help          Print help</code></pre></div>
-<h3>Exemplos</h3><div class="ex"><div class="cap">Que clusters existem neste host</div><pre><code>delonix cluster ls</code></pre></div>
+<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Que clusters existem neste host</div><div class='cap lang-en'>Which clusters exist on this host</div><pre><code>delonix cluster ls</code></pre></div>
 <h2 id='create'><code>cluster create</code></h2>
 <p class='intro'>Create a local Kubernetes cluster <strong>without a manifest and without Docker</strong> (native kind mode): starts the <code>kindest/node</code> nodes in the Delonix engine itself and bootstraps them with <code>kubeadm</code>. No flags = 1 control-plane ready to use</p>
 <div class='help'><pre><code>Usage: delonix cluster create [OPTIONS]
@@ -240,7 +240,7 @@ Options:
           `default` (kindnet, from the image itself) or `none` (node stays NotReady until you apply yours — plain kubeadm behavior) [default: default]
   -h, --help
           Print help</code></pre></div>
-<h3>Exemplos</h3><div class="ex"><div class="cap">Cluster local em modo kind (containers como nós, sem Docker)</div><pre><code>delonix cluster create --name lab</code></pre></div><div class="ex"><div class="cap">Com workers</div><pre><code>delonix cluster create --name lab --workers 2</code></pre></div>
+<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Cluster local em modo kind (containers como nós, sem Docker)</div><div class='cap lang-en'>Local cluster in kind mode (containers as nodes, no Docker)</div><pre><code>delonix cluster create --name lab</code></pre></div><div class="ex"><div class='cap lang-pt'>Com workers</div><div class='cap lang-en'>With workers</div><pre><code>delonix cluster create --name lab --workers 2</code></pre></div>
 <h2 id='init'><code>cluster init</code></h2>
 <p class='intro'>Initialize a project with the cluster manifests (kind/vm/ssh) — files ALREADY FILLED IN (images included), ready to use without editing anything</p>
 <div class='help'><pre><code>Usage: delonix cluster init [OPTIONS] [DIR]
@@ -254,7 +254,7 @@ Options:
       --image &lt;IMAGE&gt;  Image to use. Omit = fills in with the default image
       --force          Overwrite existing files
   -h, --help           Print help</code></pre></div>
-<h3>Exemplos</h3><div class="ex"><div class="cap">Scaffold de um cloud.yaml para cluster apply</div><pre><code>delonix cluster init ./meu-cluster</code></pre></div>
+<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Scaffold de um cloud.yaml para cluster apply</div><div class='cap lang-en'>Scaffold a cloud.yaml for cluster apply</div><pre><code>delonix cluster init ./meu-cluster</code></pre></div>
 <h2 id='apply'><code>cluster apply</code></h2>
 <p class='intro'>Apply the <code>kind: Cluster</code> document(s) of a manifest</p>
 <div class='help'><pre><code>Usage: delonix cluster apply [OPTIONS]
@@ -270,7 +270,7 @@ auditoria ofensiva do projecto, com testes a replicar o exploit.</p></div><div c
 (<code>controlPlaneEndpoint</code>, subnets, version) goes through strict validation before any
 interpolation — command injection via the manifest was one of the CRITICAL findings closed in the
 project's offensive audit, with tests replicating the exploit.</p></div>
-<h3>Exemplos</h3><div class="ex"><div class="cap">Bootstrap num manifesto `kind: Cluster`</div><pre><code>delonix cluster apply -f cloud.yaml</code></pre></div>
+<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Bootstrap num manifesto `kind: Cluster`</div><div class='cap lang-en'>Bootstrap from a `kind: Cluster` manifest</div><pre><code>delonix cluster apply -f cloud.yaml</code></pre></div>
 <h2 id='kubeadm'><code>cluster kubeadm</code></h2>
 <p class='intro'>Provision VMs (golden VM image) + <code>kubeadm</code> bootstrap — from zero to a working cluster, without writing a manifest by hand</p>
 <div class='help'><pre><code>Usage: delonix cluster kubeadm [OPTIONS] --network &lt;NETWORK&gt;
@@ -324,7 +324,7 @@ pattern as containers); without <code>--vm-image</code>, it resolves the single 
 image or downloads it from the official repository automatically. Step-by-step progress,
 <code>kind create cluster</code>-style (each step closes with ✓/✗), degrading to one line per step
 with no TTY (pipes/CI).</p></div>
-<h3>Exemplos</h3><div class="ex"><div class="cap">Do zero: 1 control-plane + 2 workers</div><pre><code>delonix cluster kubeadm --name lab --control-plane 1 --workers 2</code></pre></div><div class="ex"><div class="cap">HA: 2 control-planes + 3 workers (HAProxy automático)</div><pre><code>delonix cluster kubeadm --name lab --control-plane 2 --workers 3</code></pre></div><div class="ex"><div class="cap">Etcd externo dedicado (3 VMs extra, quórum ímpar)</div><pre><code>delonix cluster kubeadm --name lab --control-plane 2 --etcd-cluster 3</code></pre></div>
+<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Do zero: 1 control-plane + 2 workers</div><div class='cap lang-en'>From scratch: 1 control-plane + 2 workers</div><pre><code>delonix cluster kubeadm --name lab --control-plane 1 --workers 2</code></pre></div><div class="ex"><div class='cap lang-pt'>HA: 2 control-planes + 3 workers (HAProxy automático)</div><div class='cap lang-en'>HA: 2 control-planes + 3 workers (automatic HAProxy)</div><pre><code>delonix cluster kubeadm --name lab --control-plane 2 --workers 3</code></pre></div><div class="ex"><div class='cap lang-pt'>Etcd externo dedicado (3 VMs extra, quórum ímpar)</div><div class='cap lang-en'>Dedicated external etcd (3 extra VMs, odd quorum)</div><pre><code>delonix cluster kubeadm --name lab --control-plane 2 --etcd-cluster 3</code></pre></div>
 <h2><span class='lang-pt'>Laboratório</span><span class='lang-en'>Lab</span></h2>
 <div class='callout lang-pt'><p>Um comando, do zero a um cluster Kubernetes real a correr —
 sem Docker, sem containerd, com <code>delonix-cri</code> como runtime.</p>

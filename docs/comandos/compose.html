@@ -198,7 +198,7 @@ Options:
       --dry-run                 Prints the resolved project (containers/networks/volumes) and exits without creating anything
   -d, --detach                  Accepted for `docker compose` compatibility. Services already start detached here (this engine has no daemon holding them), so this is a no-op rather than an error — every existing script and CI job writes `up -d`, and rejecting it broke all of them for no behavioural gain
   -h, --help                    Print help</code></pre></div>
-<h3>Exemplos</h3><div class="ex"><div class="cap">Sobe tudo (build, rede, volumes, containers, por ordem de `depends_on`)</div><pre><code>delonix compose up</code></pre></div><div class="ex"><div class="cap">Ficheiro/projecto explícitos</div><pre><code>delonix compose up -f infra/docker-compose.yml -p minhaapp</code></pre></div><div class="ex"><div class="cap">Só valida e mostra o plano, sem criar nada</div><pre><code>delonix compose up --dry-run</code></pre></div>
+<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Sobe tudo (build, rede, volumes, containers, por ordem de `depends_on`)</div><div class='cap lang-en'>Bring everything up (build, network, volumes, containers, in `depends_on` order)</div><pre><code>delonix compose up</code></pre></div><div class="ex"><div class='cap lang-pt'>Ficheiro/projecto explícitos</div><div class='cap lang-en'>Explicit file/project</div><pre><code>delonix compose up -f infra/docker-compose.yml -p minhaapp</code></pre></div><div class="ex"><div class='cap lang-pt'>Só valida e mostra o plano, sem criar nada</div><div class='cap lang-en'>Just validate and show the plan, without creating anything</div><pre><code>delonix compose up --dry-run</code></pre></div>
 <h2 id='ps'><code>compose ps</code></h2>
 <p class='intro'>Containers of this project (derived from labels)</p>
 <div class='help'><pre><code>Usage: delonix compose ps [OPTIONS]
@@ -208,7 +208,7 @@ Options:
       --l18n &lt;en|pt&gt;            Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
   -p, --project-name &lt;PROJECT&gt;  
   -h, --help                    Print help</code></pre></div>
-<h3>Exemplos</h3><div class="ex"><div class="cap">Containers deste projecto</div><pre><code>delonix compose ps</code></pre></div>
+<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Containers deste projecto</div><div class='cap lang-en'>This project&#x27;s containers</div><pre><code>delonix compose ps</code></pre></div>
 <h2 id='logs'><code>compose logs</code></h2>
 <p class='intro'>Logs of one service (default: every service, one after another)</p>
 <div class='help'><pre><code>Usage: delonix compose logs [OPTIONS] [SERVICE]
@@ -222,7 +222,7 @@ Options:
   -p, --project-name &lt;PROJECT&gt;  
       --follow                  No short flag (unlike real `docker compose logs -f`) — `-f` is already `--file` on every subcommand of this group, for consistency across `up`/`down`/`ps`/`config`
   -h, --help                    Print help</code></pre></div>
-<h3>Exemplos</h3><div class="ex"><div class="cap">Logs de um serviço</div><pre><code>delonix compose logs db</code></pre></div><div class="ex"><div class="cap">Todos os serviços, um a seguir ao outro</div><pre><code>delonix compose logs</code></pre></div>
+<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Logs de um serviço</div><div class='cap lang-en'>One service&#x27;s logs</div><pre><code>delonix compose logs db</code></pre></div><div class="ex"><div class='cap lang-pt'>Todos os serviços, um a seguir ao outro</div><div class='cap lang-en'>All services, one after another</div><pre><code>delonix compose logs</code></pre></div>
 <h2 id='config'><code>compose config</code></h2>
 <p class='intro'>Validates and prints the resolved project, without creating anything (<code>docker compose config</code> equivalent)</p>
 <div class='help'><pre><code>Usage: delonix compose config [OPTIONS]
@@ -232,7 +232,7 @@ Options:
       --l18n &lt;en|pt&gt;            Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
   -p, --project-name &lt;PROJECT&gt;  
   -h, --help                    Print help</code></pre></div>
-<h3>Exemplos</h3><div class="ex"><div class="cap">Valida e imprime o projecto resolvido (equivalente a `docker compose config`)</div><pre><code>delonix compose config</code></pre></div>
+<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Valida e imprime o projecto resolvido (equivalente a `docker compose config`)</div><div class='cap lang-en'>Validates and prints the resolved project (equivalent to `docker compose config`)</div><pre><code>delonix compose config</code></pre></div>
 <h2 id='down'><code>compose down</code></h2>
 <p class='intro'>Removes every container this project&#x27;s <code>up</code> created (and, with <code>-v</code>, its named volumes). Networks/volumes marked <code>external: true</code> are NEVER removed</p>
 <div class='help'><pre><code>Usage: delonix compose down [OPTIONS]
@@ -243,7 +243,7 @@ Options:
   -p, --project-name &lt;PROJECT&gt;  
   -v, --volumes                 
   -h, --help                    Print help</code></pre></div>
-<h3>Exemplos</h3><div class="ex"><div class="cap">Remove os containers deste projecto</div><pre><code>delonix compose down</code></pre></div><div class="ex"><div class="cap">Remove também os volumes NOMEADOS (nunca os `external: true`)</div><pre><code>delonix compose down -v</code></pre></div>
+<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Remove os containers deste projecto</div><div class='cap lang-en'>Removes this project&#x27;s containers</div><pre><code>delonix compose down</code></pre></div><div class="ex"><div class='cap lang-pt'>Remove também os volumes NOMEADOS (nunca os `external: true`)</div><div class='cap lang-en'>Also removes NAMED volumes (never `external: true` ones)</div><pre><code>delonix compose down -v</code></pre></div>
 <h2><span class='lang-pt'>Laboratório</span><span class='lang-en'>Lab</span></h2>
 <div class='callout lang-pt'><p>Sobe um <code>docker-compose.yml</code> com uma app que só arranca
 depois da base de dados estar saudável (<code>depends_on: condition: service_healthy</code>).</p>

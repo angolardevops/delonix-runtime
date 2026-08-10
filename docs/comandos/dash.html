@@ -179,7 +179,7 @@ Options:
       --once          Print ONE text snapshot and exit (no TUI) — for scripts/CI; the default when stdout is not a terminal
       --json          Print ONE snapshot as JSON and exit (no TUI, no ANSI) — for scripts/Grafana JSON datasource
   -h, --help          Print help</code></pre></div>
-<h2>Exemplos</h2><div class="ex"><div class="cap">TUI interactiva</div><pre><code>delonix dash</code></pre></div><div class="ex"><div class="cap">Snapshot único, para um script</div><pre><code>delonix dash --once</code></pre></div><div class="ex"><div class="cap">JSON, para um datasource ou pipeline</div><pre><code>delonix dash --json | jq &#x27;.tiles&#x27;</code></pre></div>
+<h2><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h2><div class="ex"><div class='cap lang-pt'>TUI interactiva</div><div class='cap lang-en'>Interactive TUI</div><pre><code>delonix dash</code></pre></div><div class="ex"><div class='cap lang-pt'>Snapshot único, para um script</div><div class='cap lang-en'>One-off snapshot, for a script</div><pre><code>delonix dash --once</code></pre></div><div class="ex"><div class='cap lang-pt'>JSON, para um datasource ou pipeline</div><div class='cap lang-en'>JSON, for a datasource or pipeline</div><pre><code>delonix dash --json | jq &#x27;.tiles&#x27;</code></pre></div>
 <h2><span class='lang-pt'>Laboratório</span><span class='lang-en'>Lab</span></h2>
 <div class='callout lang-pt'><p>Um ecrã só, sem correr <code>ls</code> em 5 grupos diferentes.</p>
 <pre><code>delonix dash --once

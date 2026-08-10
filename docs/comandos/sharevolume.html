@@ -181,7 +181,7 @@ Options:
   -f, --file &lt;FILE&gt;   
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
   -h, --help          Print help</code></pre></div>
-<h3>Exemplos</h3><div class="ex"><div class="cap">Duas fatias isoladas do mesmo NAS, cada uma com a sua quota</div><pre><code>delonix sharevolume apply -f sharevolume.yaml</code></pre><div class="out"><pre><code>sharevolume/tenant-a: ready (nas-shared -&gt; /var/lib/delonix/volumes/nas-shared/_data/shares/tenant-a)
+<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Duas fatias isoladas do mesmo NAS, cada uma com a sua quota</div><div class='cap lang-en'>Two isolated slices of the same NAS, each with its own quota</div><pre><code>delonix sharevolume apply -f sharevolume.yaml</code></pre><div class="out"><pre><code>sharevolume/tenant-a: ready (nas-shared -&gt; /var/lib/delonix/volumes/nas-shared/_data/shares/tenant-a)
 sharevolume/tenant-b: ready (nas-shared -&gt; /var/lib/delonix/volumes/nas-shared/_data/shares/tenant-b)</code></pre></div></div>
 <h2 id='ls'><code>sharevolume ls</code></h2>
 <p class='intro'>List share volumes (parent storage, quota, live usage)</p>
@@ -191,7 +191,7 @@ Options:
       --l18n &lt;en|pt&gt;     Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
   -o, --output &lt;OUTPUT&gt;  Output format: `table` (default) or `json` (ADR-0005) [default: table] [possible values: table, json]
   -h, --help             Print help</code></pre></div>
-<h3>Exemplos</h3><div class="ex"><div class="cap">Listar (quota + uso real medido)</div><pre><code>delonix sharevolume ls</code></pre><div class="out"><pre><code>NAME       STORAGE      QUOTA     USED   ALERT   MOUNTPOINT
+<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Listar (quota + uso real medido)</div><div class='cap lang-en'>List (quota + measured real usage)</div><pre><code>delonix sharevolume ls</code></pre><div class="out"><pre><code>NAME       STORAGE      QUOTA     USED   ALERT   MOUNTPOINT
 tenant-b   nas-shared   2.0 MiB   0 B    -       .../shares/tenant-b
 tenant-a   nas-shared   1.0 MiB   1.0 MiB   OVER    .../shares/tenant-a</code></pre></div></div>
 <h2 id='describe'><code>sharevolume describe</code></h2>
@@ -204,7 +204,7 @@ Arguments:
 Options:
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
   -h, --help          Print help</code></pre></div>
-<h3>Exemplos</h3><div class="ex"><div class="cap">Detalhe de uma fatia (aponta o comando -v para a consumir)</div><pre><code>delonix sharevolume describe tenant-a</code></pre><div class="out"><pre><code>Name:           tenant-a
+<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Detalhe de uma fatia (aponta o comando -v para a consumir)</div><div class='cap lang-en'>Slice detail (points at the -v command to consume it)</div><pre><code>delonix sharevolume describe tenant-a</code></pre><div class="out"><pre><code>Name:           tenant-a
 Storage:        nas-shared
 Mountpoint:     .../shares/tenant-a
 Used:           1.0 MiB
@@ -222,7 +222,7 @@ Options:
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
       --purge-data    
   -h, --help          Print help</code></pre></div>
-<h3>Exemplos</h3><div class="ex"><div class="cap">Remove o registo; os DADOS ficam (a não ser que peças --purge-data)</div><pre><code>delonix sharevolume rm tenant-a</code></pre></div>
+<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Remove o registo; os DADOS ficam (a não ser que peças --purge-data)</div><div class='cap lang-en'>Removes the record; the DATA stays (unless you ask for --purge-data)</div><pre><code>delonix sharevolume rm tenant-a</code></pre></div>
 <h2><span class='lang-pt'>Laboratório</span><span class='lang-en'>Lab</span></h2>
 <div class='callout lang-pt'><p>Duas fatias isoladas do MESMO <code>Storage</code>, cada uma com a
 sua quota, para dois containers que não se devem ver.</p>

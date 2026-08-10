@@ -185,7 +185,7 @@ Options:
   -f, --file &lt;FILE&gt;   
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
   -h, --help          Print help</code></pre></div>
-<h3>Exemplos</h3><div class="ex"><div class="cap">Declarar o túnel num manifesto kind: Tunnel</div><pre><code>delonix net tunnel apply -f tunel.yaml</code></pre></div>
+<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Declarar o túnel num manifesto kind: Tunnel</div><div class='cap lang-en'>Declare the tunnel in a kind: Tunnel manifest</div><pre><code>delonix net tunnel apply -f tunel.yaml</code></pre></div>
 <h2 id='expose'><code>tunnel expose</code></h2>
 <p class='intro'>One-shot expose of a local port, no manifest needed</p>
 <div class='help'><pre><code>Usage: delonix net tunnel expose [OPTIONS] --provider &lt;PROVIDER&gt; --local-port &lt;LOCAL_PORT&gt;
@@ -202,7 +202,7 @@ Options:
 <div class='lang-pt'><p>Validado ao vivo nesta mesma sessão: tráfego HTTPS real da internet
 chegou a um servidor local através do tunnel (HTTP 200) usando exactamente este comando.</p></div><div class='lang-en'><p>Validated live in this very session: real HTTPS traffic from the
 internet reached a local server through the tunnel (HTTP 200) using exactly this command.</p></div>
-<h3>Exemplos</h3><div class="ex"><div class="cap">Expor uma porta local sem escrever manifesto (pinggy, grátis, efémero)</div><pre><code>delonix net tunnel expose --name demo --provider pinggy --local-port 8080</code></pre><div class="out"><pre><code>tunnel/demo: running — https://oxipg-197-148-40-67.free.pinggy.net</code></pre></div></div>
+<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Expor uma porta local sem escrever manifesto (pinggy, grátis, efémero)</div><div class='cap lang-en'>Expose a local port with no manifest (pinggy, free, ephemeral)</div><pre><code>delonix net tunnel expose --name demo --provider pinggy --local-port 8080</code></pre><div class="out"><pre><code>tunnel/demo: running — https://oxipg-197-148-40-67.free.pinggy.net</code></pre></div></div>
 <h2 id='ls'><code>tunnel ls</code></h2>
 <p class='intro'>List tunnels (state + public URL)</p>
 <div class='help'><pre><code>Usage: delonix net tunnel ls [OPTIONS]
@@ -210,7 +210,7 @@ internet reached a local server through the tunnel (HTTP 200) using exactly this
 Options:
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
   -h, --help          Print help</code></pre></div>
-<h3>Exemplos</h3><div class="ex"><div class="cap">Listar túneis (estado + URL pública)</div><pre><code>delonix net tunnel ls</code></pre><div class="out"><pre><code>NAME    PROVIDER   LOCAL PORT   PUBLIC URL                                    STATUS    UPTIME
+<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Listar túneis (estado + URL pública)</div><div class='cap lang-en'>List tunnels (status + public URL)</div><pre><code>delonix net tunnel ls</code></pre><div class="out"><pre><code>NAME    PROVIDER   LOCAL PORT   PUBLIC URL                                    STATUS    UPTIME
 test1   pinggy          18234   https://oxipg-197-148-40-67.free.pinggy.net   Running   Up 34 seconds</code></pre></div></div>
 <h2 id='describe'><code>tunnel describe</code></h2>
 <p class='intro'>Human-readable detail of one tunnel</p>
@@ -222,7 +222,7 @@ Arguments:
 Options:
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
   -h, --help          Print help</code></pre></div>
-<h3>Exemplos</h3><div class="ex"><div class="cap">Detalhe de um túnel</div><pre><code>delonix net tunnel describe demo</code></pre></div>
+<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Detalhe de um túnel</div><div class='cap lang-en'>Tunnel detail</div><pre><code>delonix net tunnel describe demo</code></pre></div>
 <h2 id='rm'><code>tunnel rm</code></h2>
 <p class='intro'>Stop and remove a tunnel</p>
 <div class='help'><pre><code>Usage: delonix net tunnel rm [OPTIONS] &lt;NAME&gt;
@@ -233,7 +233,7 @@ Arguments:
 Options:
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
   -h, --help          Print help</code></pre></div>
-<h3>Exemplos</h3><div class="ex"><div class="cap">Parar e remover (mata o processo agente a sério)</div><pre><code>delonix net tunnel rm demo</code></pre><div class="out"><pre><code>tunnel/demo: removed</code></pre></div></div>
+<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Parar e remover (mata o processo agente a sério)</div><div class='cap lang-en'>Stop and remove (really kills the agent process)</div><pre><code>delonix net tunnel rm demo</code></pre><div class="out"><pre><code>tunnel/demo: removed</code></pre></div></div>
 <h2><span class='lang-pt'>Laboratório</span><span class='lang-en'>Lab</span></h2>
 <div class='callout lang-pt'><p>Uma porta local, uma URL pública — sem conta, sem router.</p>
 <pre><code>delonix net tunnel expose --provider pinggy --local-port 8080

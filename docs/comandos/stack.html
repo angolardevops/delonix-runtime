@@ -194,7 +194,7 @@ Options:
   -f, --file &lt;FILE&gt;   
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
   -h, --help          Print help</code></pre></div>
-<h3>Exemplos</h3><div class="ex"><div class="cap">Validar o manifesto SEM aplicar nada</div><pre><code>delonix stack validate -f delonix-manifest.yaml</code></pre></div>
+<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Validar o manifesto SEM aplicar nada</div><div class='cap lang-en'>Validate the manifest WITHOUT applying anything</div><pre><code>delonix stack validate -f delonix-manifest.yaml</code></pre></div>
 <h2 id='describe'><code>stack describe</code></h2>
 <div class='help'><pre><code>Usage: delonix stack describe [OPTIONS]
 
@@ -202,7 +202,7 @@ Options:
   -f, --file &lt;FILE&gt;   
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
   -h, --help          Print help</code></pre></div>
-<h3>Exemplos</h3><div class="ex"><div class="cap">Estado recurso a recurso, confrontado com o manifesto</div><pre><code>delonix stack describe</code></pre></div>
+<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Estado recurso a recurso, confrontado com o manifesto</div><div class='cap lang-en'>Resource-by-resource state, checked against the manifest</div><pre><code>delonix stack describe</code></pre></div>
 <h2 id='ls'><code>stack ls</code></h2>
 <p class='intro'>Stack detail in <code>kubectl describe</code> style: each resource DECLARED in the manifest and whether or not it is present on the machine.</p>
 <p class='intro'><strong>The stack has no state of its own</strong> — there is no registry of &quot;stacks&quot;, only a manifest and the resources it creates. That is why this <code>describe</code> always starts from the file and goes to confirm each resource against the respective store, instead of inventing a new registry that would drift out of sync (the same reason <code>cluster ls</code> derives its state from the container labels).</p>
@@ -218,7 +218,7 @@ Options:
 
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)</code></pre></div>
-<h3>Exemplos</h3><div class="ex"><div class="cap">Que recursos do manifesto existem de facto neste host</div><pre><code>delonix stack ls</code></pre></div>
+<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Que recursos do manifesto existem de facto neste host</div><div class='cap lang-en'>Which manifest resources actually exist on this host</div><pre><code>delonix stack ls</code></pre></div>
 <h2 id='init'><code>stack init</code></h2>
 <p class='intro'>Initializes a COMPLETE project: Delonixfile + manifest + cluster + README — files ALREADY FILLED IN (images included), ready to use without editing anything</p>
 <div class='help'><pre><code>Usage: delonix stack init [OPTIONS] [DIR]
@@ -243,7 +243,7 @@ project for a language/framework, with best practices (non-root multi-stage, hea
 dotfiles) and already delonix-native (Delonixfile + manifest). Without <code>--template</code>,
 <code>init</code> generates the generic scaffold. The <code>__NAME__</code>/<code>__MODULE__</code>
 tokens get replaced with the project name.</p></div>
-<h3>Exemplos</h3><div class="ex"><div class="cap">Projecto COMPLETO de uma stack (FastAPI): código + Delonixfile + manifesto + testes</div><pre><code>delonix stack init myapi --template python</code></pre></div><div class="ex"><div class="cap">Ver os templates disponíveis</div><pre><code>delonix stack init --template list</code></pre></div>
+<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Projecto COMPLETO de uma stack (FastAPI): código + Delonixfile + manifesto + testes</div><div class='cap lang-en'>COMPLETE stack project (FastAPI): code + Delonixfile + manifest + tests</div><pre><code>delonix stack init myapi --template python</code></pre></div><div class="ex"><div class='cap lang-pt'>Ver os templates disponíveis</div><div class='cap lang-en'>See the available templates</div><pre><code>delonix stack init --template list</code></pre></div>
 <h2 id='apply'><code>stack apply</code></h2>
 <p class='intro'>Applies all the manifest Kinds (Network → Volume → Image → Vm → Container)</p>
 <div class='help'><pre><code>Usage: delonix stack apply [OPTIONS]
@@ -253,7 +253,7 @@ Options:
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
       --dry-run       Don&#x27;t apply anything — print the full manifest with every default filled in (like `kubectl apply --dry-run=client -o yaml`). Stacks are expanded and Kinds canonicalized, so you see exactly what WOULD run
   -h, --help          Print help</code></pre></div>
-<h3>Exemplos</h3><div class="ex"><div class="cap">Aplicar o manifesto por omissão (./delonix-manifest.yaml)</div><pre><code>delonix stack apply</code></pre></div><div class="ex"><div class="cap">Manifesto explícito</div><pre><code>delonix stack apply -f infra/stack.yaml</code></pre></div>
+<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Aplicar o manifesto por omissão (./delonix-manifest.yaml)</div><div class='cap lang-en'>Apply the default manifest (./delonix-manifest.yaml)</div><pre><code>delonix stack apply</code></pre></div><div class="ex"><div class='cap lang-pt'>Manifesto explícito</div><div class='cap lang-en'>Explicit manifest</div><pre><code>delonix stack apply -f infra/stack.yaml</code></pre></div>
 <h2><span class='lang-pt'>Laboratório</span><span class='lang-en'>Lab</span></h2>
 <div class='callout lang-pt'><p>Gera um projecto COMPLETO já pronto (código + Delonixfile +
 manifesto) a partir de um template, e aplica-o.</p>

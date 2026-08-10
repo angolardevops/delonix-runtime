@@ -186,7 +186,7 @@ Options:
       --secret &lt;SECRET&gt;        `id=&lt;name&gt;,src=&lt;path&gt;` — a secret a `RUN --mount=type=secret,id=&lt;name&gt;` can bind-mount for the duration of that one instruction (never baked into a layer). Repeatable
       --platform &lt;PLATFORM&gt;    `linux/&lt;arch&gt;` (e.g. `linux/arm64`) — cross-arch build. Resolves the correct-arch base image and stamps it into the result; actually running a foreign-arch `RUN` needs the host&#x27;s own binfmt_misc/qemu-user-static already registered (not managed by delonix — a clear preflight error names the missing interpreter instead of a confusing mid-build failure)
   -h, --help                   Print help</code></pre></div>
-<h2>Exemplos</h2><div class="ex"><div class="cap">Build com tag</div><pre><code>delonix build -t minha-app:1.0 .</code></pre></div><div class="ex"><div class="cap">Delonixfile explícito</div><pre><code>delonix build -t api:dev -f Delonixfile ./servico</code></pre></div>
+<h2><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h2><div class="ex"><div class='cap lang-pt'>Build com tag</div><div class='cap lang-en'>Build with a tag</div><pre><code>delonix build -t minha-app:1.0 .</code></pre></div><div class="ex"><div class='cap lang-pt'>Delonixfile explícito</div><div class='cap lang-en'>Explicit Delonixfile</div><pre><code>delonix build -t api:dev -f Delonixfile ./servico</code></pre></div>
 <h2><span class='lang-pt'>Laboratório</span><span class='lang-en'>Lab</span></h2>
 <div class='callout lang-pt'><p>Escreve um <code>Delonixfile</code> multi-stage pequeno e constrói-o
 — sem daemon, sem BuildKit.</p>
