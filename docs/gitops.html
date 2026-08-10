@@ -350,6 +350,58 @@ delonix explain Container.ports
 delonix explain Pod.containers.image
 delonix stack apply --dry-run   # o manifesto com TODOS os defaults preenchidos
 </code></pre>
+<h2 id="validado-ao-vivo-com-um-container-real">Validado ao vivo, com um container real</h2>
+<p>O ciclo inteiro, num <code>DELONIX_ROOT</code> isolado — e a prova que interessa não é o
+comando devolver 0:</p>
+<table>
+<thead>
+<tr>
+<th>Passo</th>
+<th>Resultado</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>apply</code> de um manifesto novo</td>
+<td>container criado, PID <code>618350</code></td>
+</tr>
+<tr>
+<td><code>plan</code> outra vez</td>
+<td>«sem alterações»</td>
+</tr>
+<tr>
+<td>mudar <code>memory: 64M</code> → <code>128M</code></td>
+<td>plano diz <code>~ update</code>, com os dois valores</td>
+</tr>
+<tr>
+<td><code>apply</code></td>
+<td><strong>PID inalterado (618350)</strong> e o <code>memory.max</code> do cgroup REAL passa a <code>134217728</code></td>
+</tr>
+<tr>
+<td>mudar a <code>image</code></td>
+<td>plano diz <code>-/+</code>, nomeando <code>image</code></td>
+</tr>
+<tr>
+<td><code>apply</code> sem <code>--replace</code></td>
+<td><strong>RECUSA</strong>, e o PID continua <code>618350</code> — nada foi tocado</td>
+</tr>
+<tr>
+<td><code>container update</code> por fora</td>
+<td>o <code>plan</code> seguinte apanha a deriva (<code>256M → 128M</code>)</td>
+</tr>
+<tr>
+<td><code>stack wait</code></td>
+<td>devolve de imediato</td>
+</tr>
+<tr>
+<td><code>stack destroy</code></td>
+<td>container removido, <code>ps -a</code> vazio</td>
+</tr>
+</tbody>
+</table>
+<p>O PID inalterado é o ponto: é o que distingue convergência a quente de um
+restart disfarçado, e é a diferença de fundo entre este motor e recriar o
+container como o Docker faria.</p>
 <h2 id="o-que-este-fluxo-nao-faz">O que este fluxo não faz</h2>
 <ul>
 <li><strong>Não reconcilia continuamente.</strong> Converge quando lhe chamas. Um loop de
