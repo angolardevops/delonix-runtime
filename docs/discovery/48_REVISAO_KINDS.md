@@ -315,7 +315,19 @@ máquina. Enfiá-los no mesmo trait faria o `delonix vm create` significar duas
 coisas diferentes conforme o backend, que é exactamente a confusão que esta
 revisão está a tentar remover dos Kinds.
 
-**Proposta de desenho**: dois traços, não um.
+> **SUPERSEDIDO pelo [ADR-0008](../adr/0008-proxmox-vm-backend.md)**, escrito em
+> paralelo e com um desenho melhor que o que segue. A proposta abaixo era **dois
+> traits** — um local, um remoto. O ADR mostra que chega **um**: o `VmBackend`
+> mantém-se, e a selecção de backend passa a ser REGISTÁVEL (hoje o
+> `backend_for` é um `match` privado sobre duas strings, com um `_ =>` que cai
+> em silêncio no Cloud Hypervisor). Um backend Proxmox implementa o mesmo trait
+> e fala HTTP por dentro, num crate próprio (`delonix-proxmox`), pelo que o
+> `delonix-vm` não ganha dependência nenhuma. O âmbito continua a ser um NÓ, sem
+> inventário nem scheduler — a fronteira com o PaaS que esta revisão também
+> identificou. Deixo o texto original por baixo porque a análise das seis
+> ferramentas continua a valer; a conclusão de desenho é a do ADR.
+
+**Proposta de desenho (superada, ver acima)**: dois traços, não um.
 - **`VmBackend` (local)** — o que existe. Ganha `VirtualBox` e `VMwareWorkstation`.
 - **`VmProvider` (remoto)** — novo, para vSphere/Proxmox: cria numa frota que não
   é esta máquina, e por isso precisa de credenciais, de endpoint e de uma noção

@@ -24,8 +24,8 @@ nos dois sentidos.** Cada achado leva o seu estado real.
 | 🔴 | **F1** `apply` não actualiza | ✅ **FECHADO** — `cmd/reconcile.rs`, diff de 3 vias; 11 dos 12 Kinds aplicáveis convergem |
 | 🔴 | **F2** sem `destroy`/prune | ✅ **FECHADO** — `stack destroy` + `apply --prune`, posse por `delonix.io/stack` |
 | 🔴 | **F3** sem drift nem `plan` | ✅ **FECHADO** — `stack plan`, `--detailed-exitcode` (0/2/1) |
-| 🟠 | **F4** API de gestão é uma fatia | ⬜ **EM ABERTO** — depende do F5 |
-| 🟠 | **F5** API sem contrato nem acesso remoto | ⬜ **EM ABERTO, deliberado** — precisa de ADR próprio (transporte, identidade, fronteira com o `delonix-paas`). Entretanto documentada como local e não-estável em `cli-stability.md`, para ninguém construir automação sobre ela por engano |
+| 🟠 | **F4** API de gestão é uma fatia | ⬜ **EM ABERTO, e correctamente** — alargá-la só vale a pena depois de o F5 estar decidido; superfície de API acrescentada antes disso é superfície que depois se tem de manter |
+| 🟠 | **F5** API sem contrato nem acesso remoto | 🟨 **ENQUADRADO** — [ADR-0010](../adr/0010-remote-management-api.md) escreve a decisão em vez de a tomar, e a resposta que espera é que a API **não** deve ficar remota: o consumidor que a justificaria é uma control-plane de frota, e essa é do `delonix-paas`. Entretanto documentada como local e não-estável |
 | 🟠 | **F6** saída de `apply` não máquina-legível | ✅ **FECHADO** — `plan -o json` com `action`/`changed` estáveis |
 | 🟡 | **F7** `--dry-run` só no `stack apply` | 🟨 **PARCIAL** — o `plan` cobre o declarativo; os comandos imperativos continuam sem check-mode |
 | 🟡 | **F8** identidade e leitura não uniformes | 🟨 **PARCIAL** — a identidade foi corrigida onde estava ERRADA (a de uma `Image` é a ref, não o nome do documento — era bug), mas `inspect`/`describe`/`ls -o json` continuam três formas |
