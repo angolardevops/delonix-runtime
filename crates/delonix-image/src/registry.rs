@@ -1075,6 +1075,66 @@ pub fn list_remote_tags(root: &std::path::Path, source: &str) -> Result<Vec<Stri
     c.list_tags()
 }
 
+/// What a remote artifact says about itself WITHOUT downloading it: the size
+/// and digest of its single layer, plus whatever
+/// [`push_oci_artifact_with_annotations`] stamped on the manifest.
+///
+/// Enough for `image vm ls-remote` to show what a tag actually is — distro,
+/// size, whether it runs cloud-init — instead of a bare list of names that
+/// tells the reader nothing about which one to pull.
+#[derive(Debug, Clone)]
+pub struct RemoteArtifact {
+    pub tag: String,
+    pub digest: String,
+    pub size: u64,
+    pub annotations: BTreeMap<String, String>,
+}
+
+/// Reads one tag's manifest (a single GET, no blob transfer).
+pub fn describe_remote_artifact(
+    root: &std::path::Path,
+    source: &str,
+    tag: &str,
+) -> Result<RemoteArtifact> {
+    let (host, repo, _) = parse_reference(source);
+    let http = reqwest::blocking::Client::builder()
+        .user_agent("delonix/0.1")
+        .timeout(Duration::from_secs(60))
+        .build()
+        .map_err(reg_err)?;
+    let creds = crate::auth::lookup(root, &host);
+    let mut c = Client {
+        http,
+        host,
+        repo,
+        token: None,
+        creds,
+    };
+    let url = c.manifest_url(tag);
+    let bytes = c
+        .fetch(&url, "application/vnd.oci.image.manifest.v1+json")?
+        .bytes()
+        .map_err(reg_err)?
+        .to_vec();
+    let manifest: ImageManifest = serde_json::from_slice(&bytes)
+        .map_err(|e| Error::Registry(format!("invalid artifact manifest: {e}")))?;
+    let layer = manifest
+        .layers()
+        .first()
+        .ok_or_else(|| Error::Registry("artifact manifest has no layers".into()))?;
+    Ok(RemoteArtifact {
+        tag: tag.to_string(),
+        digest: layer.digest().to_string(),
+        size: layer.size() as u64,
+        annotations: manifest
+            .annotations()
+            .clone()
+            .unwrap_or_default()
+            .into_iter()
+            .collect(),
+    })
+}
+
 /// Pull of an artifact published by [`push_oci_artifact`] — resolves the
 /// manifest and returns the bytes of the (single) layer.
 pub fn pull_oci_artifact(root: &std::path::Path, source: &str) -> Result<Vec<u8>> {

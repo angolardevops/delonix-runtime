@@ -3912,3 +3912,8 @@ msgstr "Network '{name}': `{field}` — {why}"
 
 msgid "WARNING: network '{name}': the manifest asks for {want} but it exists as {have} — NOT renumbered (workloads are addressed on it). Remove and recreate it to change the subnet."
 msgstr "AVISO: rede '{name}': o manifesto pede {want} mas ela existe como {have} — NÃO foi renumerada (há workloads endereçados nela). Remove-a e cria-a de novo para mudar a subnet."
+
+# saidas mais informativas do image vm ls / ls-remote
+
+msgid "appliance"
+msgstr "appliance"
