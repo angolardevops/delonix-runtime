@@ -180,7 +180,7 @@ Options:
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
   -h, --help          Print help</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Tirar e listar snapshots de um volume</div><div class='cap lang-en'>Take and list a volume&#x27;s snapshots</div><pre><code>delonix volumes snapshot create dados antes-da-migracao
-delonix volumes snapshot ls dados</code></pre></div>
+delonix volumes snapshot ls dados</code></pre></div><div class="ex"><div class='cap lang-pt'>Voltar a um snapshot (o conteúdo actual do volume é substituído)</div><div class='cap lang-en'>Roll back to a snapshot (the volume&#x27;s current contents are replaced)</div><pre><code>delonix volumes snapshot restore dados antes-da-migracao</code></pre></div><div class="ex"><div class='cap lang-pt'>Apagar um snapshot que já não serve</div><div class='cap lang-en'>Delete a snapshot that is no longer useful</div><pre><code>delonix volumes snapshot rm dados antes-da-migracao</code></pre></div>
 <h2 id='describe'><code>volumes describe</code></h2>
 <p class='intro'>Readable detail of one or more volumes, <code>kubectl describe</code> style (for humans; use <code>inspect</code> for the usual compact view)</p>
 <div class='help'><pre><code>Usage: delonix volumes describe [OPTIONS] &lt;NAMES&gt;...

@@ -309,7 +309,8 @@ pub enum ImageCmd {
     },
     /// (only with `--vm`) Register an existing disk image under a name.
     Import(super::vmimage::ImportArgs),
-    /// (only with `--vm`) Convert a VM disk between `qcow2` and `raw`.
+    /// (only with `--vm`) Convert a VM disk to the format another ecosystem
+    /// imports — `qcow2`, `raw`, `vmdk`, `vdi`, `vhdx`, `vhd`.
     Convert {
         source: String,
         #[arg(long = "to", value_enum)]
@@ -427,8 +428,9 @@ pub enum VmSub {
     /// Register an existing disk image under a name, so `vm create --disk
     /// <name>` and `image vm push` can use it.
     Import(super::vmimage::ImportArgs),
-    /// Convert a VM disk between `qcow2` and `raw` — flattened either way,
-    /// ready to boot on either backend.
+    /// Convert a VM disk to the format another ecosystem imports — `qcow2`,
+    /// `raw`, `vmdk` (VMware), `vdi` (VirtualBox), `vhdx`/`vhd` (Hyper-V,
+    /// Azure). Flattened either way: the result is a standalone file.
     Convert {
         source: String,
         #[arg(long = "to", value_enum)]

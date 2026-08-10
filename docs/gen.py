@@ -304,7 +304,17 @@ image + kubeadm/kubelet/kubectl + <code>delonix-cri</code> — a base do <code>d
                  'delonix image --vm init minha-base')]},
             "vm": {"examples": [
                 ('O mesmo grupo de imagens VM, por outro caminho',
-                 'delonix image vm ls')]},
+                 'delonix image vm ls'),
+                ('Registar um disco que NÃO foi construído aqui — o único ponto de '
+                 'entrada para `import`, que não tem forma `delonix vm …`',
+                 'delonix image vm import ./OPNsense-26.1.2.qcow2 -t opnsense:26.1.2 \\\n'
+                 '  --appliance --distro opnsense --release 26.1.2 \\\n'
+                 '  --default-vcpus 2 --default-memory 2G'),
+                ('`--appliance` diz que o convidado se configura sozinho (OPNsense, '
+                 'Proxmox, TrueNAS) — o `vm create` salta o seed NoCloud em vez de lhe '
+                 'colar um ISO que ninguém lá dentro lê, e RECUSA `--hostname`/'
+                 '`--ssh-key` a nomeá-los, em vez de os aceitar e deitar fora',
+                 'delonix vm create fw --disk opnsense:26.1.2')]},
             "logout": {"examples": [
                 ('Esquecer as credenciais desse registo',
                  'delonix image logout ghcr.io')]},
@@ -392,6 +402,21 @@ O <code>create</code> é idempotente (cria ou auto-recupera) e suporta cloud-ini
 <code>--hostname</code>, <code>--ssh-key</code> e <code>--user-data</code> geram um ISO NoCloud
 automaticamente. É a camada que o <code>delonix cluster kubeadm</code> usa para provisionar nós.""",
         "subs": {
+            "convert": {"examples": [
+                ('Levar uma imagem construída aqui para outro ecossistema',
+                 'delonix vm convert minha-base --to vmdk        # VMware\n'
+                 'delonix vm convert minha-base --to vdi         # VirtualBox\n'
+                 'delonix vm convert minha-base --to vhdx        # Hyper-V / Azure'),
+                ('Comprimir — só `qcow2` e `vmdk` o sabem fazer; nos outros é '
+                 'recusado com a lista, em vez de entregue ao qemu-img para falhar lá',
+                 'delonix vm convert minha-base --to qcow2 --compress')]},
+            "default-backend": {"examples": [
+                ('Fixar o backend que o `vm create` usa quando não lhe dizem nada',
+                 'delonix vm default-backend --set libvirt'),
+                ('Ver o que está fixado (`none` = decide a auto-detecção)',
+                 'delonix vm default-backend'),
+                ('Voltar à auto-detecção',
+                 'delonix vm default-backend --clear')]},
             "snapshots": {"examples": [
                 ('Listar os checkpoints de uma VM',
                  'delonix vm snapshots dev')]},
@@ -480,7 +505,11 @@ automaticamente. É a camada que o <code>delonix cluster kubeadm</code> usa para
         "subs": {
             "snapshot": {"examples": [
                 ('Tirar e listar snapshots de um volume',
-                 'delonix volumes snapshot create dados antes-da-migracao\ndelonix volumes snapshot ls dados')]},
+                 'delonix volumes snapshot create dados antes-da-migracao\ndelonix volumes snapshot ls dados'),
+                ('Voltar a um snapshot (o conteúdo actual do volume é substituído)',
+                 'delonix volumes snapshot restore dados antes-da-migracao'),
+                ('Apagar um snapshot que já não serve',
+                 'delonix volumes snapshot rm dados antes-da-migracao')]},
             "describe": {"examples": [
                 ('Detalhe de um volume (uso, quota, montagens)',
                  'delonix volumes describe dados')]},
@@ -750,7 +779,7 @@ A password vem do cofre (<code>--password-secret</code>), nunca do argv. Ligado 
     },
     "sharevolume": {
         "title": "delonix sharevolume",
-        "tagline": "Uma fatia ISOLADA e com QUOTA própria de um `Storage` — vários container/vm/pod partilham um NAS.",
+        "tagline": "Uma fatia ISOLADA e com QUOTA própria de uma partilha de rede — vários container/vm/pod partilham um NAS.",
         "intro": """Resolve um problema concreto de multi-tenant: várias cargas a partilhar UM export
 NFS/CIFS/WebDAV, cada uma com o SEU ponto de montagem isolado e a SUA quota, sem se verem. Por baixo
 não há mecanismo de montagem novo nenhum: cada <code>ShareVolume</code> é um SUBDIRECTÓRIO real da
@@ -760,6 +789,10 @@ registado como o seu próprio volume — a isolação é confinamento de caminho
 quota é SOFT (uso medido + alerta) — o caminho HARD (imagem ext4 loopback) precisa de armazenamento de
 bloco local e não compõe com um subdirectório de um mount de rede.""",
         "subs": {
+            "migrate": {"examples": [
+                ('Trazer registos anteriores ao scoping por namespace para a `default` '
+                 '— move só o REGISTO, nunca os bytes de um inquilino',
+                 'delonix sharevolume migrate')]},
             "apply": {"examples": [
                 ("Duas fatias isoladas do mesmo NAS, cada uma com a sua quota",
                  "delonix sharevolume apply -f sharevolume.yaml",
@@ -2030,7 +2063,15 @@ EXAMPLES_EN = {
         "Logs from a specific container (short name inside the pod)",
     ],
     ("image", "init"): ["Scaffold a VMfile (equivalent to vm init --vmfile)"],
-    ("image", "vm"): ["The same VM image group, via another path"],
+    ("image", "vm"): [
+        "The same VM image group, via another path",
+        "Register a disk this engine did NOT build — the only entry point for "
+        "`import`, which has no `delonix vm …` spelling",
+        "`--appliance` says the guest configures itself (OPNsense, Proxmox, TrueNAS) — "
+        "`vm create` then skips the NoCloud seed instead of attaching an ISO nothing "
+        "inside reads, and REFUSES `--hostname`/`--ssh-key` by name rather than "
+        "accepting and discarding them",
+    ],
     ("image", "logout"): ["Forget that registry's credentials"],
     ("image", "login"): ["Authenticate to a registry (the password comes from stdin, out of history)"],
     ("image", "load"): ["Import that tar on the other end"],
@@ -2085,7 +2126,11 @@ EXAMPLES_EN = {
     ("vm", "stop"): [""],
     ("vm", "rm"): [""],
     ("vm", "apply"): [""],
-    ("volumes", "snapshot"): ["Take and list a volume's snapshots"],
+    ("volumes", "snapshot"): [
+        "Take and list a volume's snapshots",
+        "Roll back to a snapshot (the volume's current contents are replaced)",
+        "Delete a snapshot that is no longer useful",
+    ],
     ("volumes", "describe"): ["Volume detail (usage, quota, mounts)"],
     ("volumes", "create"): ["With quota and the nfs driver available"],
     ("volumes", "ls"): [""],
