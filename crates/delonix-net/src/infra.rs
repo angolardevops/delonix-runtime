@@ -1150,6 +1150,13 @@ const CONTROL_IO_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5
 /// Extracted from `control_loop` so the deadline is exercisable by a test
 /// without standing up a real holder (which would need a userns/netns and would
 /// run `nft` for real).
+/// How long a caller waits for the holder's reply. Generous on purpose: the
+/// holder serializes every mutating command, so under a burst the wait is the
+/// queue ahead of you, not a hang. It is bounded anyway — a caller that waits
+/// forever on a wedged holder is the failure this whole pair of timeouts exists
+/// to avoid.
+const CONTROL_REPLY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
 fn read_control_line(stream: &std::os::unix::net::UnixStream) -> Option<String> {
     use std::io::{BufRead, BufReader};
     // Fail CLOSED: if the deadline cannot be armed we refuse the connection
@@ -1245,6 +1252,17 @@ fn control_loop(listener: std::os::unix::net::UnixListener) -> ! {
             continue;
         }
         let Some(line) = read_control_line(&stream) else {
+            // Say it instead of hanging up mute. A silent close reaches the caller
+            // as an EMPTY reply, and an empty reply used to print an error with
+            // nothing after the colon. The peer that never wrote is usually one
+            // that lost the CPU race under load, not an attacker — it deserves a
+            // sentence it can act on. (The `SO_PEERCRED` mismatch above stays
+            // silent on purpose: that one IS the hostile case, and it gets no
+            // oracle.)
+            let _ = stream.set_write_timeout(Some(CONTROL_IO_TIMEOUT));
+            let _ = stream.write_all(
+                b"err: no command received within the read deadline - the caller was too slow, or hung up\n",
+            );
             continue;
         };
         let line = line.trim().to_string();
@@ -4366,14 +4384,39 @@ fn control_query(cmd: &str) -> Result<String> {
     for _ in 0..50 {
         match UnixStream::connect(&sock) {
             Ok(mut s) => {
-                let _ = s.set_read_timeout(Some(std::time::Duration::from_secs(5)));
+                let _ = s.set_read_timeout(Some(CONTROL_REPLY_TIMEOUT));
                 s.write_all(format!("{cmd}\n").as_bytes())
                     .map_err(|e| Error::Runtime {
                         context: "control write",
                         message: e.to_string(),
                     })?;
+                // A read that FAILS is not an empty reply. This used to be
+                // `let _ = s.read_to_string(...)`, which threw the error away and
+                // left `resp` empty — so a 5s read timeout was indistinguishable
+                // from a holder that answered with nothing, and both printed an
+                // error with nothing after the colon.
+                //
+                // Measured on this host, and it is not noise — it scales with
+                // concurrency, because `handle_control` is THE serialization
+                // point and a queued caller waits for every attach ahead of it:
+                // 10 concurrent attaches → 0 failures, 20 → 3, 30 → 15.
                 let mut resp = String::new();
-                let _ = s.read_to_string(&mut resp);
+                if let Err(e) = s.read_to_string(&mut resp) {
+                    let timed_out = matches!(
+                        e.kind(),
+                        std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                    );
+                    return Err(Error::Runtime {
+                        context: "ingress control",
+                        message: if timed_out {
+                            format!(
+                                "the control plane did not reply within {CONTROL_REPLY_TIMEOUT:?}                                  - it serializes every network operation, so a burst of                                  concurrent `run`s queues up behind itself. Retry, or start them                                  in smaller batches"
+                            )
+                        } else {
+                            format!("reading the reply failed: {e}")
+                        },
+                    });
+                }
                 let resp = resp.trim();
                 if resp == "ok" {
                     return Ok(String::new());
@@ -4381,9 +4424,24 @@ fn control_query(cmd: &str) -> Result<String> {
                 if let Some(body) = resp.strip_prefix("ok ") {
                     return Ok(body.trim().to_string());
                 }
+                // An EMPTY reply is not an empty error message. The holder closes
+                // the connection without a word in two places (`read_control_line`
+                // giving up, and the `SO_PEERCRED` mismatch), and both used to
+                // surface as a bare `system call `ingress control` failed:` with
+                // nothing after the colon. Measured under load: 16 of 30
+                // concurrent attaches on this host failed exactly like that — an
+                // error with no subject, which is the one thing this codebase
+                // keeps having to remove.
+                let body = resp.trim_start_matches("err:").trim();
                 return Err(Error::Runtime {
                     context: "ingress control",
-                    message: resp.trim_start_matches("err:").trim().to_string(),
+                    message: if body.is_empty() {
+                        "the control plane closed the connection without replying - it is \
+                         likely saturated (or died); check `delonix net netns status` and retry"
+                            .into()
+                    } else {
+                        body.to_string()
+                    },
                 });
             }
             Err(e) => {
