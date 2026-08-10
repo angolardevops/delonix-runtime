@@ -395,6 +395,37 @@ fn lower_legacy_kind(doc: &mut ManifestDoc) -> Result<()> {
     if doc.kind == "Storage" {
         lower_storage(doc)?;
     }
+    // `kind: Container` with `spec.containers[]` — the k8s Pod grammar applied to
+    // a single container. It gets a WARNING and **no rewrite**, unlike the two
+    // above, and the reason is worth writing down because the obvious move here
+    // is wrong.
+    //
+    // The plan for this merge was to rewrite it into `kind: Pod`, on the reading
+    // that a one-element Pod and a pod-shaped Container are the same object.
+    // They are not, and the code says so:
+    //
+    //   * `pod_to_run_opts` builds ONE container named `<metadata.name>`, with
+    //     no shared namespace;
+    //   * `pod::create_pod` creates a shared netns `pod-<name>` and names its
+    //     members `<name>-<member>` (`c0` when unnamed).
+    //
+    // So the rewrite would rename the container — `web` becomes `web-c0` — and
+    // every reference to the old name would break: the internal DNS record, an
+    // `HTTPRoute` backend, a `Dependency`'s `from`/`to`, `stack validate`'s
+    // cross-references. Renaming somebody's running container as a side effect
+    // of a tidy-up is not a merge, it is an outage.
+    //
+    // What is left is the honest half: say it is the deprecated spelling, name
+    // the difference concretely, and change nothing.
+    if doc.kind == "Container" && doc.spec.get("containers").is_some() {
+        super::output::warn(&super::po::tf(
+            "Container '{name}': `spec.containers[]` on a `kind: Container` is the deprecated \
+             spelling — it still runs ONE container, named '{name}'. For containers that share \
+             a namespace use `kind: Pod` (its members are named '{name}-<member>', which is why \
+             this is not rewritten for you)",
+            &[("name", &doc.metadata.name)],
+        ));
+    }
     Ok(())
 }
 
