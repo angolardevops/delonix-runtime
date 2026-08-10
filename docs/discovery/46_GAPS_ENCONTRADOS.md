@@ -74,7 +74,7 @@ expectativa.
 | 6 | Saída do próprio container sob `policy deny` | `REACHABLE` (o `ct state` da v0.37.x) | ✅ correcto |
 | 7 | `--net host` / `none` | `ingress ls` diz `n/a (host net)` | ✅ honesto |
 | 8 | **Proxy L7 (`httproute` / `--expose`)** | teamB→teamA directo `blocked`; **pelo proxy `WIN`**, inclusive com `policy deny` no backend | ❌ **ALTO — §4.2** |
-| 9 | netns de pod | pod com `spec.network: kaeso-net` foi parar à bridge **default** (`10.200.0.2`) | ⚠️ **§4.4, por confirmar** |
+| 9 | netns de pod | cross-namespace `blocked` na rede custom; `spec.network` era ignorado (§4.4, corrigido) | ✅ coberto |
 | 10 | `tap` de VM | **NÃO MEDIDO** — nenhuma imagem deste host arranca em Cloud Hypervisor (a golden é libvirt-only). O antispoof existe no `main` (`antispoof_rule_args`), ausente no holder vivo | — |
 | 11 | `vm bridge` (privilegiado) | **NÃO MEDIDO** — exige `root` e um veth no init-netns do host; não executado num host com produção viva | — |
 | 12 | Storage de rede (NFS/CIFS) | **NÃO MEDIDO** — `mount -t nfs` exige `CAP_SYS_ADMIN`, indisponível em rootless puro | — |
@@ -287,15 +287,35 @@ serve para responder a nenhuma pergunta operacional.
 
 ---
 
-### 4.4 POR CONFIRMAR — `kind: Pod` e o `spec.network`
+### 4.4 MÉDIO — `kind: Pod` ignorava o `spec.network`, e o IP reportado era recomputado
 
-Um `kind: Pod` com `metadata.namespace: teamC` e `spec.network: kaeso-net` arrancou em
-`10.200.0.2` — a bridge **default**, não a `kaeso-net` (`10.210.0.0/16`). A `PodSpec` tem
-campo `network` com omissão `host` (`container.rs:437-439`), pelo que há duas hipóteses e
-não foram separadas nesta sessão: o campo é ignorado no caminho do pod, ou o manifesto de
-ensaio pô-lo no nível errado. Como a medição de isolamento do pod dependia disto (bridges
-diferentes já se bloqueiam entre si por `fwdeny`, por razão que nada tem que ver com
-namespaces), **a linha 9 da matriz fica inconclusiva** em vez de ser dada por boa.
+**CORRIGIDO.** Um `kind: Pod` com `spec.network: kaeso-net` arrancou em `10.200.0.2` — a
+bridge **default**, não a `kaeso-net` (`10.210.0.0/16`). Não era o manifesto: `create_pod`
+passava um **`"ingress"` hardcoded** ao `attach_container` (`pod.rs:148`), e a palavra
+`network` não aparecia mais nenhuma vez no módulo. O campo era parseado, documentado como
+extensão delonix, e não tinha efeito nenhum — um pod ficava inalcançável da rede que pediu e
+alcançável por tudo o que estava na que levou.
+
+**A correcção óbvia sozinha teria posto o motor a mentir**, e é a parte que interessa
+registar. `ls`/`describe`/`rm` nunca **liam** o endereço: recomputavam-no com
+`infra::container_ip`, que fixa o prefixo default. Estava acidentalmente certo enquanto
+todos os pods caíam na bridge default; assim que a rede passa a ser respeitada, os três
+passaram a reportar — e o `rm` a **detachar** — um endereço que o pod nunca teve. Medido:
+`pod create` dizia `10.210.0.2` e `pod ls`, ao lado, dizia `10.200.0.2`.
+
+O endereço real passa a ser gravado numa label no momento do attach
+(`delonix.io/pod-ip`, o mesmo idioma «membership a partir de labels» do `POD_LABEL`, sem
+store novo), com recurso à recomputação antiga para pods criados antes da label.
+
+Validado ao vivo: `create`/`ls`/`describe` dizem os três `10.210.0.2`, igual ao que o kernel
+tem na netns (`ip netns exec pod-d46-pod` → `10.210.0.2/16`); o isolamento cross-namespace
+do pod continua a bloquear na rede custom; e o `rm` limpa a netns sem restos. **A linha 9 da
+matriz passa a ✅.**
+
+> **Lição, a mesma de §4.1 por outro caminho:** o valor não estava a ser lido de onde foi
+> decidido — estava a ser *re-derivado* por uma fórmula que só coincidia com a realidade
+> enquanto houvesse um só caso. Uma fórmula que reproduz o estado em vez de o ler é uma
+> segunda fonte de verdade à espera de divergir.
 
 ---
 
