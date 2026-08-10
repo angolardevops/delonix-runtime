@@ -65,3 +65,56 @@ jobs:
       - uses: EmbarkStudios/cargo-deny-action@v2
         with:
           command: check advisories licenses sources
+
+  # ---- O site e os exemplos: gerados do binário, e por isso verificáveis ----
+  #
+  # Duas classes de falha que só se descobriam à mão, e ambas já aconteceram:
+  #
+  #  1. `docs/gen.py` rebenta a MEIO (uma lista PT/EN que divergiu no tamanho,
+  #     por exemplo) e deixa o site PARCIALMENTE escrito — com a página velha no
+  #     lugar e nada a dizê-lo. Aqui falha alto.
+  #  2. O site commitado deixa de ser o gerado. É o mesmo contrato que o
+  #     `docs/schema/v1/delonix.json` já tem em teste (ADR-0007): se a fonte é o
+  #     código, o publicado tem de bater com o que ela produz.
+  #
+  # E os `examples/` passam pelo `--dry-run` e pelo `validate` do binário desta
+  # árvore — um exemplo publicado é o que as pessoas copiam. O `--dry-run` apanha
+  # um Kind depreciado e um erro de parsing; o `validate` apanha uma referência
+  # cruzada que não resolve. **Um campo desconhecido fica de fora**, e é medido,
+  # não suposto: o `warn_unknown_fields` só corre no apply REAL, e um apply real
+  # em CI criaria recursos — a verificação promete o que faz.
+  docs:
+    name: docs geradas e exemplos válidos
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Instala protoc
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+      - name: Instala toolchain fixada
+        run: rustup show
+      - run: cargo build --release --locked -p delonix-runtime-bin
+      - name: Regenera o site
+        run: python3 docs/gen.py
+      - name: O site publicado tem de ser o gerado
+        run: |
+          if ! git diff --quiet -- docs/; then
+            echo "::error::docs/ está desactualizado — corre 'python3 docs/gen.py' e commita."
+            git --no-pager diff --stat -- docs/
+            exit 1
+          fi
+      - name: Nenhum exemplo depreciado, e todas as referências resolvem
+        run: |
+          rc=0
+          for f in examples/*.yaml; do
+            # o cloud-config da VM de validação NFS não é um manifesto Delonix
+            head -1 "$f" | grep -q '^#cloud-config' && continue
+            out=$(./target/release/delonix stack apply -f "$f" --dry-run 2>&1) || {
+              echo "::error file=$f::$f não passa no --dry-run"; echo "$out" | head -5; rc=1; continue; }
+            if echo "$out" | grep -iq deprecated; then
+              echo "::error file=$f::$f usa uma forma depreciada"
+              echo "$out" | grep -i deprecated; rc=1
+            fi
+            vout=$(./target/release/delonix stack validate -f "$f" 2>&1) || {
+              echo "::error file=$f::$f não passa no validate"; echo "$vout" | head -5; rc=1; }
+          done
+          exit $rc
