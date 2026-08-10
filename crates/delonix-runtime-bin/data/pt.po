@@ -3850,3 +3850,23 @@ msgstr "o workload '{name}' não tem endereço na SDN (está numa rede custom?) 
 
 msgid "Dependency '{name}': `from` cannot be empty"
 msgstr "Dependency '{name}': o `from` não pode estar vazio"
+
+# fusao Storage -> Volume (fase A3)
+
+msgid "Storage '{name}': `kind: Storage` is deprecated — use `kind: Volume` with a `{block}:` block (same fields, same behaviour)"
+msgstr "Storage '{name}': `kind: Storage` está depreciado — usa `kind: Volume` com um bloco `{block}:` (mesmos campos, mesmo comportamento)"
+
+msgid "Storage '{name}': spec.type is required (nfs|cifs|smb|webdav)"
+msgstr "Storage '{name}': o spec.type é obrigatório (nfs|cifs|smb|webdav)"
+
+msgid "Storage '{name}': unknown type '{other}' (nfs|cifs|smb|webdav)"
+msgstr "Storage '{name}': tipo desconhecido '{other}' (nfs|cifs|smb|webdav)"
+
+msgid "Storage '{name}': spec must be a mapping"
+msgstr "Storage '{name}': o spec tem de ser uma mapping"
+
+msgid "a volume declares more than one network share ({kinds}) — a volume is one mount"
+msgstr "um volume declara mais do que uma partilha de rede ({kinds}) — um volume é uma montagem"
+
+msgid "{kind} '{name}': unknown field '{key}' in spec.{block} — ignored (check the spelling)"
+msgstr "{kind} '{name}': campo desconhecido '{key}' em spec.{block} — ignorado (verifica a escrita)"

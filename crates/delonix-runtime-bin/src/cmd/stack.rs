@@ -240,11 +240,10 @@ pub fn run(action: StackCmd) -> Result<()> {
 /// The stack Kinds, in the SAME order as `apply` — whoever reads `describe` sees
 /// the order in which things are created, which is half the diagnosis when an
 /// apply stops halfway.
-const KINDS: [&str; 11] = [
+const KINDS: [&str; 10] = [
     "Secret",
     "Network",
     "Volume",
-    "Storage",
     "Image",
     "Vm",
     "Container",
@@ -665,12 +664,10 @@ fn presence(
             }
         }
         // Storage is a network volume — it lives in the same store as the volumes.
-        "Volume" | "Storage" => {
-            match delonix_volume::VolumeStore::open(&root).and_then(|s| s.list()) {
-                Ok(vs) => yes_no(vs.iter().any(|v| v.name == name)),
-                Err(e) => ("?".into(), e.to_string()),
-            }
-        }
+        "Volume" => match delonix_volume::VolumeStore::open(&root).and_then(|s| s.list()) {
+            Ok(vs) => yes_no(vs.iter().any(|v| v.name == name)),
+            Err(e) => ("?".into(), e.to_string()),
+        },
         "Network" => match delonix_net::NetworkStore::open(&root).and_then(|s| s.list()) {
             Ok(ns) => yes_no(ns.iter().any(|n| n.name == name)),
             Err(e) => ("?".into(), e.to_string()),
@@ -784,7 +781,6 @@ fn apply(file: Option<PathBuf>, replace: Vec<String>, do_prune: bool) -> Result<
     super::secret::apply(&docs, base)?;
     super::network::apply(&docs)?;
     super::volume::apply(&docs)?;
-    super::storage::apply(&docs)?;
     // ShareVolume right after Storage: it carves subdirectories out of an
     // already-mounted Storage, so the parent must exist first.
     super::sharevolume::apply(&docs)?;
@@ -1228,13 +1224,25 @@ fn validate_graph_with(
                     }
                 }
             }
-            "Storage" => {
-                // `Storage.passwordSecret` references a Secret (the mount reads the
-                // `password` key of that Secret — `storage::resolve_password`).
-                if let Some(sref) = doc.spec.get("passwordSecret").and_then(|v| v.as_str()) {
+            "Volume" => {
+                // A network share's `passwordSecret` references a Secret (the mount
+                // reads that Secret's `password` key — `storage::resolve_password`).
+                //
+                // Read from INSIDE the block: `kind: Storage` folded into
+                // `kind: Volume`, so the field moved from `spec.passwordSecret` to
+                // `spec.<nfs|cifs|webdav>.passwordSecret`. Looking at the old place
+                // would silently stop validating it — a check that quietly stops
+                // running is worse than one that was never written.
+                let sref = ["nfs", "cifs", "webdav"].iter().find_map(|b| {
+                    doc.spec
+                        .get(b)
+                        .and_then(|v| v.get("passwordSecret"))
+                        .and_then(|v| v.as_str())
+                });
+                if let Some(sref) = sref {
                     if !secrets.contains(sref) {
                         issues.push(super::po::tf(
-                            "Storage '{name}' → passwordSecret '{sref}' is not a declared or existing Secret",
+                            "Volume '{name}' → passwordSecret '{sref}' is not a declared or existing Secret",
                             &[("name", name), ("sref", sref)],
                         ));
                     } else if let Some(Some(keys)) = declared_secret_keys.get(sref) {
@@ -1242,7 +1250,7 @@ fn validate_graph_with(
                         // then we can assert with certainty that `password` is missing.
                         if !keys.contains("password") {
                             issues.push(super::po::tf(
-                                "Storage '{name}' → passwordSecret '{sref}': the Secret does not declare the 'password' key (the mount reads exactly that key)",
+                                "Volume '{name}' → passwordSecret '{sref}': the Secret does not declare the 'password' key (the mount reads exactly that key)",
                                 &[("name", name), ("sref", sref)],
                             ));
                         }

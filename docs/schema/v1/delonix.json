@@ -320,6 +320,55 @@
       ],
       "type": "object"
     },
+    "NetShareSpec": {
+      "description": "A network share, as declared inside a `kind: Volume` (`spec.nfs`,\n`spec.cifs`, `spec.webdav`).\n\nThis is `StorageSpec` minus the `type` field — the type is now the BLOCK's\nname, the same shape `kind: Workload` uses (`spec.container`/`spec.vm`), and\nfor the same reason: a type that names its own block cannot contradict it.\n\n`kind: Volume` and `kind: Storage` used to describe the SAME mount two ways\nand land in the SAME store, with nothing to say which to use — `volumes ls`\nshowed both (one store) while `storage ls` showed only some, so the same\nquestion got different answers depending on the command.",
+      "properties": {
+        "mountOptions": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "password": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "passwordSecret": {
+          "default": null,
+          "description": "Vault secret (`password` key) — preferred over an inline `password`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "readOnly": {
+          "default": false,
+          "type": "boolean"
+        },
+        "server": {
+          "type": "string"
+        },
+        "share": {
+          "type": "string"
+        },
+        "username": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "server",
+        "share"
+      ],
+      "type": "object"
+    },
     "NetworkSpec": {
       "additionalProperties": false,
       "description": "`spec` for `kind: Network` — mirrors the fields of `NetworkCmd::Create`.",
@@ -788,6 +837,18 @@
       "additionalProperties": false,
       "description": "`spec` of `kind: Volume` — mirrors the fields of `VolumeCmd::Create`.",
       "properties": {
+        "cifs": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NetShareSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "SMB/CIFS share (Samba, Windows, TrueNAS SMB)."
+        },
         "device": {
           "type": [
             "string",
@@ -805,12 +866,36 @@
             "null"
           ]
         },
+        "nfs": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NetShareSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "NFS export. One of the three network-share blocks — the block's NAME is\nthe type, so a type cannot contradict its own declaration (the same shape\n`kind: Workload` uses for `spec.container`/`spec.vm`)."
+        },
         "options": {},
         "quota": {
           "type": [
             "string",
             "null"
           ]
+        },
+        "webdav": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NetShareSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "WebDAV (Nextcloud, ownCloud)."
         }
       },
       "type": "object"
