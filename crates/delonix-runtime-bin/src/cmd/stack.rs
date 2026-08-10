@@ -270,7 +270,16 @@ const KINDS: [&str; 12] = [
 /// loud (`Action::NotConverged`) instead of leaving the resource out. A plan
 /// that omits a resource reads as «no changes», which is the exact dishonesty
 /// this whole feature exists to remove.
-pub(crate) const CONVERGING_KINDS: [&str; 5] = ["Network", "Volume", "Image", "Container", "Pod"];
+pub(crate) const CONVERGING_KINDS: [&str; 8] = [
+    "Network",
+    "Volume",
+    "ShareVolume",
+    "Image",
+    "Vm",
+    "Container",
+    "Pod",
+    "FirewallPolicy",
+];
 
 /// Everything the manifest asks for, in the reconciler's comparable form.
 fn desired_of(docs: &[manifest::ManifestDoc]) -> Result<Vec<reconcile::Desired>> {
@@ -370,6 +379,39 @@ pub(crate) fn build_plan(docs: &[manifest::ManifestDoc], stack: &str) -> Result<
     Ok(changes)
 }
 
+/// Why a Kind is still ensure-present.
+///
+/// A generic «this Kind does not converge yet» reads as «nobody got to it», and
+/// for most of these that is not true — each one has a concrete obstacle, and
+/// naming it is the difference between a gap and a decision. Kept next to
+/// `CONVERGING_KINDS` so adding a Kind to that list without removing its excuse
+/// here is visible in one screen.
+fn not_converged_reason(kind: &str) -> &'static str {
+    match kind {
+        // The applied state is COLLECTIVE: `resolve_config` merges every
+        // HTTPRoute document into one proxy config, and `manual.json` records no
+        // provenance — nothing says which document produced which route. So a
+        // per-document diff has nothing to compare against. Recording provenance
+        // in the proxy config is what would change this.
+        "HTTPRoute" | "Ingress" => super::po::t(
+            "the proxy config merges every document into one, with no record of which \
+             document produced which route",
+        ),
+        // A secret's VALUES are the state, and they are encrypted at rest and
+        // never read back for display. A diff would either say nothing useful or
+        // decrypt to compare — and decrypting to draw a plan is not a trade
+        // worth making.
+        "Secret" => super::po::t(
+            "the state is the encrypted values, and a plan will not decrypt them to compare",
+        ),
+        // A tunnel's identity is a live process and a URL a third party hands
+        // out; the declared half (`localPort`/`provider`) is comparable, the
+        // rest is status.
+        "Tunnel" => super::po::t("the URL is assigned by the provider — it is status, not spec"),
+        _ => super::po::t("not converged in this version"),
+    }
+}
+
 /// Which fields the plan compares, per converging Kind.
 ///
 /// This exists because the honest answer to «why did my `env:` change not show
@@ -384,7 +426,18 @@ fn print_compared_fields() {
     );
     println!();
     let mut t = super::output::Table::new(&["KIND", "FIELDS"]);
-    for (kind, fields) in [
+    for (kind, fields) in compared_fields_table() {
+        t.row(vec![kind.to_string(), fields.join(", ")]);
+    }
+    t.print();
+    println!();
+    print_not_converged();
+}
+
+/// The compared fields, per Kind — ONE source for the printed table and for the
+/// test that keeps it aligned with `CONVERGING_KINDS`.
+fn compared_fields_table() -> Vec<(&'static str, &'static [&'static str])> {
+    vec![
         ("Container", super::container::RECONCILED_CONTAINER_FIELDS),
         ("Volume", super::volume::RECONCILED_VOLUME_FIELDS),
         ("Network", super::network::RECONCILED_NETWORK_FIELDS),
@@ -393,27 +446,28 @@ fn print_compared_fields() {
         ("FirewallPolicy", super::firewall::RECONCILED_FW_FIELDS),
         ("ShareVolume", super::sharevolume::RECONCILED_SHARE_FIELDS),
         ("Pod", super::pod::RECONCILED_POD_FIELDS),
-    ] {
-        t.row(vec![kind.to_string(), fields.join(", ")]);
-    }
-    t.print();
+    ]
+}
+
+/// The reasons, printed under the table.
+fn print_not_converged() {
     println!();
     println!(
         "{}",
-        super::po::tf(
-            "Every other Kind ({kinds}) is ensure-present: `apply` creates it if missing and \
-             never updates it.",
-            &[(
-                "kinds",
-                &KINDS
-                    .iter()
-                    .filter(|k| !CONVERGING_KINDS.contains(k))
-                    .copied()
-                    .collect::<Vec<_>>()
-                    .join(", "),
-            )],
+        super::po::t(
+            "The remaining Kinds are ensure-present — `apply` creates them if missing \
+                      and never updates them. Each for a concrete reason, not for lack of \
+                      attention:"
         )
     );
+    let mut t = super::output::Table::new(&["KIND", "WHY IT DOES NOT CONVERGE"]);
+    for kind in KINDS.iter().filter(|k| !CONVERGING_KINDS.contains(k)) {
+        t.row(vec![
+            kind.to_string(),
+            not_converged_reason(kind).to_string(),
+        ]);
+    }
+    t.print();
     println!(
         "{}",
         super::po::t(
@@ -2070,5 +2124,47 @@ spec: {}
         assert!(
             super::validate_graph_with(&por_direccao, &[], &[], &["db".into()], &[]).is_empty()
         );
+    }
+
+    /// **Três listas que têm de concordar, e que derivaram.** O
+    /// `CONVERGING_KINDS` decide TRÊS coisas — se o `actual_of` sonda a presença
+    /// em vez de usar o adaptador, se o `converge_and_stamp` aplica um Update, e
+    /// se carimba a posse — enquanto os braços do `match` em `desired_of` e a
+    /// tabela do `--fields` são escritos à parte.
+    ///
+    /// Aconteceu mesmo: o `Vm`, o `FirewallPolicy` e o `ShareVolume` ganharam
+    /// adaptador e ficaram fora da constante, por isso o `converge_and_stamp`
+    /// SALTAVA-OS. O sintoma escondeu-se porque o `apply` de cada Kind continua a
+    /// correr na cadeia antiga e é idempotente — convergiam pelo caminho errado,
+    /// e o resultado observado parecia certo.
+    #[test]
+    fn as_tres_listas_de_kinds_convergentes_concordam() {
+        // Tudo o que a constante declara tem de ter uma linha no `--fields`...
+        let com_campos: Vec<&str> = compared_fields_table()
+            .into_iter()
+            .map(|(k, _)| k)
+            .collect();
+        for k in super::CONVERGING_KINDS {
+            assert!(
+                com_campos.contains(&k),
+                "{k} converge mas o `--fields` não diz que campos compara"
+            );
+        }
+        // ...e o inverso: nada no `--fields` pode estar fora da constante, senão
+        // a tabela promete uma comparação que o apply nunca faz.
+        for k in com_campos {
+            assert!(
+                super::CONVERGING_KINDS.contains(&k),
+                "o `--fields` lista {k} mas o converge_and_stamp salta-o"
+            );
+        }
+        // E um Kind convergente nunca pode ter uma desculpa de não-convergência.
+        for k in super::CONVERGING_KINDS {
+            assert_eq!(
+                super::not_converged_reason(k),
+                "not converged in this version",
+                "{k} converge e ainda assim tem uma razão para não convergir"
+            );
+        }
     }
 }

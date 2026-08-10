@@ -3959,3 +3959,20 @@ msgstr "Comprime a saída. Só o `qcow2` e o `vmdk` podem — recusado nos outro
 
 msgid "FirewallPolicy/{name}: changing `target` or `direction` cannot be undone automatically — the previous target keeps its rules. Clear them by hand with `delonix net ingress clear <old-target>` (or `net egress clear`), then apply again"
 msgstr "FirewallPolicy/{name}: mudar o `target` ou a `direction` não se desfaz automaticamente — o alvo anterior fica com as regras. Limpa-as à mão com `delonix net ingress clear <alvo-antigo>` (ou `net egress clear`) e aplica outra vez"
+
+# razoes de nao-convergencia por Kind (fase C)
+
+msgid "The remaining Kinds are ensure-present — `apply` creates them if missing and never updates them. Each for a concrete reason, not for lack of attention:"
+msgstr "Os restantes Kinds são «garante presente» — o `apply` cria-os se faltarem e nunca os actualiza. Cada um por uma razão concreta, não por falta de atenção:"
+
+msgid "the proxy config merges every document into one, with no record of which document produced which route"
+msgstr "a config do proxy funde todos os documentos num só, sem registo de que documento produziu que rota"
+
+msgid "the state is the encrypted values, and a plan will not decrypt them to compare"
+msgstr "o estado são os valores cifrados, e um plano não os decifra para comparar"
+
+msgid "the URL is assigned by the provider — it is status, not spec"
+msgstr "a URL é atribuída pelo provider — é status, não spec"
+
+msgid "not converged in this version"
+msgstr "não converge nesta versão"
