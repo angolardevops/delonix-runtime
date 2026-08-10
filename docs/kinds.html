@@ -174,11 +174,18 @@ metadata:
 spec:
   fromEnvFile: ./app.env      # ex.: DATABASE_URL=..., API_TOKEN=...</code></pre>
 <h2 id='pod'>Pod</h2>
-<p class='lang-pt'>A forma de Pod do Kubernetes (<code>spec.containers[]</code>) para <code>kind: Container</code> — portas/env/resources/securityContext/volumeMounts estruturados. v1 aceita UM container; para vários, <code>kind: Pod</code> (ver <code>examples/pod-multi.yaml</code>).</p><p class='lang-en'>The Kubernetes Pod shape (<code>spec.containers[]</code>) for <code>kind: Container</code> — structured ports/env/resources/securityContext/volumeMounts. v1 accepts ONE container; for several, use <code>kind: Pod</code> (see <code>examples/pod-multi.yaml</code>).</p>
-<pre><code># kind: Container — Pod-shaped (k8s-like). Apply with:
-#   delonix container apply -f examples/pod.yaml
-# The familiar Pod schema: spec.containers[] with structured ports/env/resources/
-# securityContext + pod-level volumes. v1 accepts ONE container (&gt;1 is an error).
+<p class='lang-pt'>O schema de Pod do Kubernetes (<code>spec.containers[]</code>) — portas/env/resources/securityContext/volumeMounts estruturados. O MESMO schema continua aceite num <code>kind: Container</code>, com aviso, e <strong>não é reescrito de propósito</strong>: um <code>kind: Container</code> chamado <code>web</code> cria um container <code>web</code>, este cria a netns <code>pod-web</code> cujo membro é <code>web-c0</code> — renomear um workload nas costas de quem o escreveu partiria o DNS e os backends de HTTPRoute.</p><p class='lang-en'>The Kubernetes Pod schema (<code>spec.containers[]</code>) — structured ports/env/resources/securityContext/volumeMounts. The SAME schema is still accepted on a <code>kind: Container</code>, with a warning, and is <strong>deliberately not rewritten for you</strong>: a <code>kind: Container</code> named <code>web</code> creates a container <code>web</code>, this creates the pod netns <code>pod-web</code> whose member is <code>web-c0</code> — renaming a workload behind your back would break DNS and HTTPRoute backends.</p>
+<pre><code># kind: Pod — the familiar k8s schema: spec.containers[] with structured
+# ports/env/resources/securityContext + pod-level volumes. Apply with:
+#   delonix stack apply -f examples/pod.yaml
+#
+# The SAME schema is still accepted on a `kind: Container`, but with a
+# deprecation warning, and it is deliberately not rewritten for you: a
+# `kind: Container` named `web` creates a container called `web`, while this
+# creates the pod netns `pod-web` whose member is `web-c0`. Renaming a workload
+# behind your back would break DNS, HTTPRoute backends and cross-references.
+#
+# For a pod with SEVERAL containers sharing the namespaces, see pod-multi.yaml.
 # The flat single-container spec (see examples/*, `image:` at the top) still works.
 # ---------------------------------------------------------------------------
 # A rede que o pod usa, declarada aqui para o exemplo validar sozinho.
@@ -191,7 +198,7 @@ spec:
   driver: bridge
 ---
 apiVersion: delonix.io/v1
-kind: Container
+kind: Pod
 metadata:
   name: web
   namespace: default
@@ -292,7 +299,7 @@ spec:
     memory: 2G
     # backend: libvirt       # &lt;- a contradiction: type: microvm rejects it (use type: vm)</code></pre>
 <h2 id='dependency'>Dependency</h2>
-<p class='lang-pt'>Alcançabilidade DIRIGIDA entre containers (ao contrário da rede, que é bidireccional): <code>from</code> alcança <code>to</code>, e <code>to</code> não fica exposto aos outros. Compila para firewall L4 por-container, sem dataplane novo.</p><p class='lang-en'>DIRECTED reachability between containers (unlike a network, which is bidirectional): <code>from</code> reaches <code>to</code>, and <code>to</code> stays unexposed to the others. Compiles to a per-container L4 firewall, with no new dataplane.</p>
+<p class='lang-pt'>Alcançabilidade DIRIGIDA entre containers (ao contrário da rede, que é bidireccional): <code>from</code> alcança <code>to</code>, e <code>to</code> não fica exposto aos outros. É açúcar reduzido no load para <code>kind: FirewallPolicy</code> — sem dataplane novo. Várias dependências para o mesmo alvo ACUMULAM os allows (por isso são fundidas por alvo, e não uma política por dependência).</p><p class='lang-en'>DIRECTED reachability between containers (unlike a network, which is bidirectional): <code>from</code> reaches <code>to</code>, and <code>to</code> stays unexposed to the others. Sugar lowered on load into <code>kind: FirewallPolicy</code> — no new dataplane. Several dependencies on the same target ACCUMULATE their allows, which is why they are merged by target rather than one policy per dependency.</p>
 <pre><code># kind: Dependency (alias: KnowDepends) — alcançabilidade DIRIGIDA entre containers.
 # Ao contrário de uma Network (bidirecional), abre UM sentido: `from` alcança `to`,
 # mas `to` NÃO inicia para `from`. Caso clássico: a app conhece a DB, a DB não
@@ -591,21 +598,22 @@ spec:
   peers: []                 # overlay peers: &quot;&lt;ip&gt;&quot; or &quot;&lt;ip&gt;=&lt;wg_pubkey&gt;=&lt;wg_ip&gt;&quot;
   wgIp: null                # this node&#x27;s WireGuard tunnel IP (encrypted overlay)  (alias: wg_ip)</code></pre>
 <h2 id='volume'>Volume</h2>
-<p class='lang-pt'>Um volume local nomeado — os dados sobrevivem a <code>container rm</code>. Para armazenamento de REDE (NFS/SMB/WebDAV) usa antes <code>kind: Storage</code>.</p><p class='lang-en'>A named local volume — the data survives <code>container rm</code>. For NETWORK storage (NFS/SMB/WebDAV) use <code>kind: Storage</code> instead.</p>
+<p class='lang-pt'>Um volume local nomeado — os dados sobrevivem a <code>container rm</code>. Para armazenamento de REDE (NFS/SMB/WebDAV) o MESMO Kind leva um bloco <code>nfs:</code>/<code>cifs:</code>/<code>webdav:</code> — ver <code>storage.yaml</code>.</p><p class='lang-en'>A named local volume — the data survives <code>container rm</code>. For NETWORK storage (NFS/SMB/WebDAV) the SAME Kind takes an <code>nfs:</code>/<code>cifs:</code>/<code>webdav:</code> block — see <code>storage.yaml</code>.</p>
 <pre><code># Volume — a named local volume (data survives `container rm`). For NETWORK
-# storage (NFS/SMB/WebDAV) use `kind: Storage` instead (see examples/storage.yaml).
+# storage (NFS/SMB/WebDAV) the SAME Kind takes an `nfs:`/`cifs:`/`webdav:` block
+# (see examples/storage.yaml).
 # Apply with:  delonix volume apply -f examples/volume.yaml
 apiVersion: delonix.io/v1
 kind: Volume
 metadata:
   name: appdata
 spec:
-  driver: local             # local | nfs (for nfs, prefer kind: Storage)
+  driver: local             # local | nfs (for a NAS, prefer an `nfs:` block — storage.yaml)
   quota: null               # size cap, e.g. &quot;2g&quot; (hard cap as root, monitored in rootless)
   device: null              # nfs export &quot;server:/export&quot; (only with driver: nfs)
   mountOptions: null        # mount options, e.g. &quot;vers=4,ro&quot; (only with driver: nfs)  (alias: options)</code></pre>
-<h2 id='storage'>Storage</h2>
-<p class='lang-pt'>Um volume de REDE montado de um NAS (TrueNAS/Synology/Samba/Nextcloud), estilo PersistentVolume do k8s. A password vem do cofre (<code>--password-secret</code>). Montar precisa de CAP_SYS_ADMIN.</p><p class='lang-en'>A NETWORK volume mounted from a NAS (TrueNAS/Synology/Samba/Nextcloud), k8s PersistentVolume-style. The password comes from the vault (<code>--password-secret</code>). Mounting needs CAP_SYS_ADMIN.</p>
+<h2 id='volume'>Volume com bloco de rede</h2>
+<p class='lang-pt'>Um volume de REDE montado de um NAS (TrueNAS/Synology/Samba/Nextcloud), estilo PersistentVolume do k8s — o bloco <code>nfs:</code>/<code>cifs:</code>/<code>webdav:</code> de um <code>kind: Volume</code>. A password vem do cofre (<code>passwordSecret</code>); montar precisa de CAP_SYS_ADMIN. <strong>O <code>kind: Storage</code> ainda carrega</strong>, reescrito nisto com aviso de depreciação — descreviam a mesma montagem de duas maneiras e aterravam no mesmo store.</p><p class='lang-en'>A NETWORK volume mounted from a NAS (TrueNAS/Synology/Samba/Nextcloud), k8s PersistentVolume-style — the <code>nfs:</code>/<code>cifs:</code>/<code>webdav:</code> block of a <code>kind: Volume</code>. The password comes from the vault (<code>passwordSecret</code>); mounting needs CAP_SYS_ADMIN. <strong><code>kind: Storage</code> still loads</strong>, rewritten into this with a deprecation warning — the two described the same mount two ways and landed in the same store.</p>
 <pre><code># Network shares mounted as volumes, like Kubernetes PersistentVolumes.
 #
 # A share on a NAS (TrueNAS, Synology, Nextcloud, a plain NFS/Samba box) becomes
@@ -862,8 +870,8 @@ spec:
       image: busybox:latest
       # Reaches the web container on localhost — they share the pod&#x27;s netns.
       command: [&quot;sh&quot;, &quot;-c&quot;, &quot;while true; do wget -qO- http://localhost:80/ &gt;/dev/null 2&gt;&amp;1; sleep 10; done&quot;]</code></pre>
-<h2 id='ingress'>Ingress / Egress</h2>
-<p class='lang-pt'>Firewall L4 declarativo por direcção (estilo k8s NetworkPolicy). Cada documento é o estado desejado de uma direcção de um container-alvo — allowlist + default-deny, idempotente.</p><p class='lang-en'>Declarative per-direction L4 firewall (k8s NetworkPolicy-style). Each document is the desired state of one direction for one target container — allowlist + default-deny, idempotent.</p>
+<h2 id='firewallpolicy'>FirewallPolicy (as duas direcções)</h2>
+<p class='lang-pt'>Firewall L4 declarativo por direcção (estilo k8s NetworkPolicy). Cada documento é o estado desejado de UMA direcção de um container-alvo — allowlist + default-deny, idempotente. <strong>O <code>kind: Egress</code> deixou de existir</strong>: é <code>direction: egress</code> nesta mesma política (partilhavam a struct inteira). Duas políticas para o mesmo par (alvo, direcção) são RECUSADAS — a segunda apagaria as regras da primeira com ambas a dizer que correu bem.</p><p class='lang-en'>Declarative per-direction L4 firewall (k8s NetworkPolicy-style). Each document is the desired state of one direction for one target container — allowlist + default-deny, idempotent.</p>
 <pre><code># kind: FirewallPolicy — firewall L4 declarativo por container (estilo k8s
 # NetworkPolicy), com a direcção em `spec.direction`. Cada documento é o ESTADO
 # DESEJADO de uma direcção do container-alvo: aplicar substitui as regras dessa
@@ -1009,32 +1017,35 @@ spec:
   token: null                  # pinggy pro token / ngrok authtoken (literal — prefer tokenSecretRef)
   tokenSecretRef: null         # pull the token from a `kind: Secret`&#x27;s `token` key instead</code></pre>
 <h2 id='sharevolume'>ShareVolume</h2>
-<p class='lang-pt'>Uma fatia ISOLADA e com quota própria de um <code>Storage</code> — vários container/vm/pod partilham UM export NFS/CIFS/WebDAV sem se verem. Cada fatia é um subdirectório real do mount pai, registado como o seu próprio volume; consome-se com <code>-v &lt;nome&gt;:/destino</code>, sem nada de novo do lado do consumidor.</p><p class='lang-en'>An ISOLATED, individually-quota'd slice of a <code>Storage</code> — several container/vm/pod share ONE NFS/CIFS/WebDAV export without seeing each other. Each slice is a real subdirectory of the parent mount, registered as its own volume; consumed with <code>-v &lt;name&gt;:/dest</code>, nothing new on the consumer side.</p>
+<p class='lang-pt'>Uma fatia ISOLADA e com quota própria de uma partilha de rede — vários container/vm/pod partilham UM export NFS/CIFS/WebDAV sem se verem. Cada fatia é um subdirectório real do mount pai, registado como o seu próprio volume; consome-se com <code>-v &lt;nome&gt;:/destino</code>, sem nada de novo do lado do consumidor.</p><p class='lang-en'>An ISOLATED, individually-quota'd slice of a network share — several container/vm/pod share ONE NFS/CIFS/WebDAV export without seeing each other. Each slice is a real subdirectory of the parent mount, registered as its own volume; consumed with <code>-v &lt;name&gt;:/dest</code>, nothing new on the consumer side.</p>
 <pre><code># kind: ShareVolume — an isolated, individually-quota&#x27;d slice of an existing
-# kind: Storage (NFS/CIFS/WebDAV), so multiple container/vm/pod can share ONE
-# NAS export without seeing each other&#x27;s data or exhausting each other&#x27;s
-# quota. Each ShareVolume is a real subdirectory of the Storage&#x27;s own mount,
-# registered as its own named volume — consume it exactly like any other
-# volume: `-v &lt;name&gt;:/path`.
+# network share, so multiple container/vm/pod can share ONE NAS export without
+# seeing each other&#x27;s data or exhausting each other&#x27;s quota. Each ShareVolume is
+# a real subdirectory of the parent&#x27;s own mount, registered as its own named
+# volume — consume it exactly like any other volume: `-v &lt;name&gt;:/path`.
+#
+# The parent is a `kind: Volume` with a network-share block (`nfs:`/`cifs:`/
+# `webdav:`) — see examples/storage.yaml. `kind: Storage` still loads, rewritten
+# into exactly this with a deprecation warning, but the manifest you write today
+# should use the block.
 #
 # Apply with:  delonix sharevolume apply -f sharevolume.yaml
-# (the storageRef below must already exist — create it first, e.g.
-#  `delonix storage create nas --type nfs --server 10.0.0.5 --share /pool/data`)
+# (the storageRef below must already exist — this file creates it first)
 apiVersion: delonix.io/v1
-kind: Storage
+kind: Volume
 metadata:
   name: nas
 spec:
-  type: nfs
-  server: 10.0.0.5
-  share: /pool/data
+  nfs:
+    server: 10.0.0.5
+    share: /pool/data
 ---
 apiVersion: delonix.io/v1
 kind: ShareVolume
 metadata:
   name: app-a
 spec:
-  storageRef: nas             # required — an existing kind: Storage
+  storageRef: nas             # required — an existing network-share volume
   quota: 5G                   # optional; SOFT quota (measured usage + alert), omit = unlimited
   alertPct: 90                 # optional; usage % above which ls/describe flag a WARN (default 90)
 ---
@@ -1043,7 +1054,7 @@ kind: ShareVolume
 metadata:
   name: app-b
 spec:
-  storageRef: nas              # the SAME parent Storage — app-a and app-b never see each other&#x27;s files
+  storageRef: nas              # the SAME parent share — app-a and app-b never see each other&#x27;s files
   quota: 2G</code></pre>
 <footer><span class='lang-pt'>Delonix Engine · Apache-2.0 · <a href="https://github.com/angolardevops/delonix-runtime">angolardevops/delonix-runtime</a> · Referência gerada do <code>--help</code> real do binário por <code>docs/gen.py</code>.</span><span class='lang-en'>Delonix Engine · Apache-2.0 · <a href="https://github.com/angolardevops/delonix-runtime">angolardevops/delonix-runtime</a> · Reference generated from the real <code>--help</code> of the binary by <code>docs/gen.py</code>.</span></footer>
 </main>
