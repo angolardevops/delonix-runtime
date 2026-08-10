@@ -115,6 +115,7 @@ SOURCE_FILES = {
     "kube": "kube.rs",
     "netns": "netns.rs",
     "completion": "complete.rs",
+    "schema": "schema.rs",
 }
 SOURCE_BASE_URL = (
     "https://github.com/angolardevops/delonix-runtime/blob/main/"
@@ -1064,6 +1065,39 @@ fica desactualizado à mão.""",
             ("Zsh", 'echo \'source <(delonix completion zsh)\' >> ~/.zshrc'),
         ],
     },
+    "schema": {
+        "title": "delonix schema · explain",
+        "tagline": "O schema dos manifestos, gerado do próprio código — e a referência de campos.",
+        "intro": """Um schema escrito à mão diverge do motor, e este repositório já pagou essa
+divergência três vezes. Por isso o schema não se escreve: <strong>gera-se</strong> a partir dos
+mesmos structs que fazem o parsing (ADR-0007), e um teste do repositório falha se o ficheiro
+publicado deixar de ser o gerado.<br><br>
+Aponta o editor para ele com uma linha no topo do manifesto e ganhas completação, verificação de
+tipos e a documentação dos campos enquanto escreves. O <code>explain</code> lê da MESMA fonte,
+para responder no terminal o que o editor mostra em linha.<br><br>
+O schema é <strong>estável</strong> dentro do <code>0.x</code>: um campo nunca é removido nem muda
+de tipo ou de significado, e um campo novo é sempre opcional com um default que preserva o
+comportamento anterior — ver a
+<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/cli-stability.md">promessa
+de estabilidade</a>. Para saber o que mudou entre duas versões há
+<code>scripts/schema-diff.sh</code>, que compara campo a campo e sai 1 com diferenças.""",
+        "subs": {
+            "print": {
+                "desc": "Imprime o JSON Schema do manifesto (todos os Kinds, ou só um).",
+                "flags": [
+                    ("--kind &lt;Kind&gt;", "só o spec deste Kind (ex.: <code>Container</code>)"),
+                ],
+            },
+        },
+        "examples": [
+            ("Publicar o schema para o editor",
+             "delonix schema print > delonix.schema.json"),
+            ("Só um Kind", "delonix schema print --kind Container"),
+            ("O que um Kind aceita", "delonix explain Container"),
+            ("Um campo em concreto", "delonix explain Container.ports"),
+            ("Um campo aninhado", "delonix explain Pod.containers.image"),
+        ],
+    },
 }
 
 # Tradução EN de `tagline`/`intro` por grupo (nível de página, não por
@@ -1332,6 +1366,22 @@ it's exposed for debugging and integration.""",
         "intro": """Prints the shell registration script. The engine is dynamic: the script asks
 the binary itself for suggestions in real time, from the SAME definition used for parsing — it
 never goes stale by hand.""",
+    },
+    "schema": {
+        "tagline": "The manifest schema, generated from the code — and the field reference.",
+        "intro": """A hand-written schema drifts from the engine, and this repository has paid for
+that drift three times. So the schema is not written: it is <strong>generated</strong> from the
+same structs that do the parsing (ADR-0007), and a test fails if the published file stops being
+the generated one.<br><br>
+Point an editor at it with one line at the top of the manifest and you get completion, type
+checking and the field docs as you type. <code>explain</code> reads from the SAME source, so the
+terminal answers what the editor shows inline.<br><br>
+The schema is <strong>stable</strong> within <code>0.x</code>: a field is never removed and never
+changes type or meaning, and a new field is always optional with a default that preserves the
+previous behaviour — see the
+<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/cli-stability.md">stability
+promise</a>. To see what changed between two versions there is
+<code>scripts/schema-diff.sh</code>, which compares field by field and exits 1 on differences.""",
     },
 }
 
