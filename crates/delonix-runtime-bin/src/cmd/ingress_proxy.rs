@@ -83,6 +83,20 @@ pub struct Route {
     pub host: String,
     pub path: String,
     pub backend: String,
+    /// Which `kind: HTTPRoute` document produced this route.
+    ///
+    /// **Provenance is what makes the Kind convergeable at all.** Every
+    /// HTTPRoute document is merged by `resolve_config` into ONE proxy config,
+    /// and without this field nothing recorded which document contributed which
+    /// route — so a plan had nothing to compare a single document against, and
+    /// `stack plan --fields` said exactly that as the Kind's reason for not
+    /// converging.
+    ///
+    /// `#[serde(default)]` so a `manual.json` written before this keeps loading;
+    /// an empty source means "unknown", which the reconciler reads as "not
+    /// mine", never as "everyone's".
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub source: String,
 }
 
 /// The unified response body (proxied OR generated locally for 404/502).
@@ -584,6 +598,10 @@ impl AutoRoute {
     }
 }
 
+pub(crate) fn read_manual_config() -> Option<ProxyConfig> {
+    read_manual()
+}
+
 fn read_manual() -> Option<ProxyConfig> {
     serde_json::from_slice(&std::fs::read(manual_path()).ok()?).ok()
 }
@@ -686,6 +704,11 @@ fn rebuild() -> Result<()> {
             host: a.fqdn(),
             path: "/".into(),
             backend: format!("{}:{}", a.ip, a.port),
+            // An auto-registered route comes from a `container run --expose`,
+            // not from any document — left empty so the reconciler never
+            // mistakes it for a manifest's, which is what would let a `plan`
+            // propose removing a route nobody declared.
+            source: String::new(),
         });
     }
 
@@ -1034,6 +1057,7 @@ mod tests {
             host: host.to_string(),
             path: path.to_string(),
             backend: backend.to_string(),
+            source: String::new(),
         }
     }
 
