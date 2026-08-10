@@ -3976,3 +3976,20 @@ msgstr "a URL é atribuída pelo provider — é status, não spec"
 
 msgid "not converged in this version"
 msgstr "não converge nesta versão"
+
+# stack wait (fase B)
+
+msgid "Blocks until every declared resource is present and, where it has one, healthy."
+msgstr "Bloqueia até todos os recursos declarados existirem e, onde exista, estarem saudáveis."
+
+msgid "Give up after this many seconds (default 120)."
+msgstr "Desiste ao fim destes segundos (omissão: 120)."
+
+msgid "stack \"{stack}\" is up"
+msgstr "a stack \"{stack}\" está de pé"
+
+msgid "timed out after {secs}s waiting for {n} resource(s)"
+msgstr "esgotou o tempo ao fim de {secs}s à espera de {n} recurso(s)"
+
+msgid "{kind}/{name}: {message}"
+msgstr "{kind}/{name}: {message}"

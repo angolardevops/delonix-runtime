@@ -11,12 +11,13 @@ fluxo completo.
 > nomeado, que `delonix stack plan --fields` imprime. Vê
 > [`cli-stability.md`](cli-stability.md).
 
-## Os quatro comandos
+## Os cinco comandos
 
 ```bash
 delonix stack plan       # o que mudaria — não muda nada
 delonix stack apply      # converge
 delonix stack apply --prune   # converge e remove o que saiu do manifesto
+delonix stack wait       # bloqueia até estar mesmo de pé
 delonix stack destroy    # remove tudo o que esta stack possui
 ```
 
@@ -112,7 +113,16 @@ primeira criação, não a meio.
     steps:
       - uses: actions/checkout@v4
       - run: delonix stack apply --prune
+      - run: delonix stack wait --timeout 180
 ```
+
+O `wait` não é decoração: o `apply` devolve assim que **criou** as coisas, o que
+não é o mesmo que a stack estar a funcionar. Sem ele, cada pipeline inventa o
+seu `sleep`. Bloqueia até cada recurso declarado existir e — onde isso significa
+alguma coisa — estar a correr e saudável; falha nomeando exactamente o que não
+subiu. Um pré-requisito em falta (o `!` do plano) é **avisado e não esperado**:
+um volume que não monta em rootless não começa a montar ao fim de noventa
+segundos, e bloquear nisso transformaria um aviso honesto num pendura.
 
 Uma recriação **não passa sozinha**. Se o plano trouxer um `-/+`, o job falha
 com o nome do campo que a obriga, e alguém tem de decidir:

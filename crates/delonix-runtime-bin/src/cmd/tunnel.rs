@@ -214,6 +214,18 @@ pub(crate) fn actual(docs: &[ManifestDoc]) -> Result<Vec<super::reconcile::Actua
     Ok(out)
 }
 
+/// Presence for `stack ls`/`describe`/`wait` — same gap as `ShareVolume`: the
+/// Kind was applied and never listed, so nothing asked until now.
+pub(crate) fn presence_of(name: &str) -> (String, String) {
+    match record_store().and_then(|s| s.load(name)) {
+        Ok(rec) => (
+            "yes".into(),
+            rec.public_url.unwrap_or_else(|| rec.provider.clone()),
+        ),
+        Err(_) => ("no".into(), "-".into()),
+    }
+}
+
 /// Converges a tunnel: re-apply the document.
 ///
 /// `apply_one` already compares the effective `config_hash` and restarts the

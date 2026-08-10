@@ -170,6 +170,18 @@ pub enum StackCmd {
         #[arg(short = 'f', long = "file")]
         file: Option<PathBuf>,
     },
+    /// Blocks until every declared resource is present and, where it has one, healthy.
+    ///
+    /// The command an `apply` in CI is missing: `apply` returns as soon as it has
+    /// created things, which is not the same as the stack working. Exits non-zero
+    /// on timeout, naming exactly what did not come up.
+    Wait {
+        #[arg(short = 'f', long = "file")]
+        file: Option<PathBuf>,
+        /// Give up after this many seconds (default 120).
+        #[arg(long, default_value_t = 120)]
+        timeout: u64,
+    },
     /// Validates the manifest WITHOUT touching anything (dry-run): resolves the
     /// cross-references (`Container.network`/`.volumes`, `Vm.network`, `Ingress/Egress.
     /// target`) against what the manifest declares PLUS what already exists in the stores.
@@ -231,6 +243,7 @@ pub fn run(action: StackCmd) -> Result<()> {
             name,
             dry_run,
         } => destroy(file, name, dry_run),
+        StackCmd::Wait { file, timeout } => wait(file, timeout),
         StackCmd::Ls { file } => ls(file),
         StackCmd::Describe { file } => describe(file),
         StackCmd::Validate { file } => validate(file),
@@ -622,6 +635,106 @@ fn render_plan(path: &Path, stack: &str, changes: &[Change]) {
     }
 }
 
+/// `stack wait` — block until the stack is actually up.
+///
+/// **Why this is a command and not a `status` field on the manifest.** The
+/// review that started this work asked for `status` separated from `spec`, and
+/// the honest place for it turned out not to be the schema: a manifest
+/// describes what the user WRITES, and nobody writes status. This engine also
+/// persists no status — `reconcile_status`, `vm status` and `pod_ip` all derive
+/// it on read, so a stored field would be a copy that goes stale. What was
+/// genuinely missing is the CONSUMER: `apply` returns as soon as it has created
+/// things, which is not the same as the stack working, and every CI pipeline
+/// then invents its own `sleep`.
+///
+/// A failing PREREQUISITE (`conditions`) is reported but never waited on: a
+/// volume that cannot mount in rootless will not start mounting in ninety
+/// seconds, and blocking on it would turn an honest warning into a hang.
+fn wait(file: Option<PathBuf>, timeout: u64) -> Result<()> {
+    let path = manifest::resolve_path(file)?;
+    let docs = manifest::load(&path)?;
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(timeout);
+    let env = super::conditions::Env::probe();
+
+    // Said ONCE, up front: these never become true by waiting.
+    for doc in &docs {
+        for c in super::conditions::conditions_for(doc, &env)
+            .into_iter()
+            .filter(|c| !c.ok)
+        {
+            super::output::warn(&super::po::tf(
+                "{kind}/{name}: {message}",
+                &[
+                    ("kind", &doc.kind),
+                    ("name", &doc.metadata.name),
+                    ("message", &c.message),
+                ],
+            ));
+        }
+    }
+
+    loop {
+        let (_, cstore) = super::util::open_stores()?;
+        let containers = cstore.list().unwrap_or_default();
+        let mut pending: Vec<String> = Vec::new();
+        for kind in KINDS {
+            for doc in manifest::of_kind(&docs, kind) {
+                let (present, status) = presence(kind, doc, &containers);
+                let ready = present == "yes" && ready_status(kind, &status);
+                if !ready {
+                    pending.push(format!(
+                        "{kind}/{} ({})",
+                        doc.metadata.name,
+                        if present == "yes" { &status } else { "absent" }
+                    ));
+                }
+            }
+        }
+        if pending.is_empty() {
+            println!(
+                "{}",
+                super::po::tf(
+                    "stack \"{stack}\" is up",
+                    &[("stack", &stack_name(&path, None))],
+                )
+            );
+            return Ok(());
+        }
+        if std::time::Instant::now() >= deadline {
+            for p in &pending {
+                eprintln!("  ✗ {p}");
+            }
+            return Err(delonix_runtime_core::Error::Invalid(super::po::tf(
+                "timed out after {secs}s waiting for {n} resource(s)",
+                &[
+                    ("secs", &timeout.to_string()),
+                    ("n", &pending.len().to_string()),
+                ],
+            )));
+        }
+        std::thread::sleep(std::time::Duration::from_secs(1));
+    }
+}
+
+/// Whether a resource's reported status counts as ready.
+///
+/// Only the Kinds that HAVE a runtime state are judged on it. A volume or a
+/// network is ready by existing — inventing a readiness notion for them would
+/// make `wait` block on something that will never change.
+fn ready_status(kind: &str, status: &str) -> bool {
+    match kind {
+        // `unhealthy` is deliberately NOT ready, and `starting` is not either:
+        // a container with a healthcheck is exactly the case this command
+        // exists for, and treating "starting" as done would return the moment
+        // the process forks — which is the `sleep 5` this replaces.
+        "Container" | "Pod" => {
+            status.starts_with("Running") || status.starts_with("running") || status == "healthy"
+        }
+        "Vm" => status.starts_with("Running") || status.starts_with("running"),
+        _ => true,
+    }
+}
+
 fn ls(file: Option<PathBuf>) -> Result<()> {
     let path = manifest::resolve_path(file)?;
     let docs = manifest::load(&path)?;
@@ -818,6 +931,13 @@ fn presence(
         "Ingress" | "FirewallPolicy" => ("-".into(), "declarative".into()),
         "HTTPRoute" => ("-".into(), "declarative".into()),
         "Dependency" => ("-".into(), "declarative".into()),
+        // A share has a record of its own, keyed by (namespace, name) — the
+        // namespace comes from the document, which is why `load_record` takes
+        // both and why guessing it is not an option.
+        "ShareVolume" => super::sharevolume::presence_of(&root, doc),
+        // A tunnel's record says whether an agent was started; the public URL
+        // is status and deliberately not part of "is it there".
+        "Tunnel" => super::tunnel::presence_of(name),
         _ => ("?".into(), super::po::t("unsupported kind").into()),
     }
 }
