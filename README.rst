@@ -15,7 +15,7 @@ Not a low-level OCI *runtime* (that's ``runc``/``crun``): Delonix is a full
 container **and** VM engine — build, run, network, firewall, store, and
 bootstrap Kubernetes clusters, from one binary.
 
-:Version: 0.45.0
+:Version: 0.46.0
 :License: Apache-2.0
 :Docs: https://angolardevops.github.io/delonix-runtime/
 :Repo: https://github.com/angolardevops/delonix-runtime
@@ -186,6 +186,15 @@ Highlights
 - **Structured output.** ``-o json`` on every list command emits stable,
   language-independent field names — ``delonix workload ls -o json | jq`` is the
   automation path.
+- **IaC that converges, with no state file.** ``stack plan``/``apply``/
+  ``destroy``, three-way diff against ``delonix.io/last-applied`` on the
+  resource itself, ownership by label, hot convergence with the PID unchanged,
+  and a fail-closed refusal for anything needing a recreate. The manifest schema
+  is generated from the code and **stable** within ``0.x``.
+- **One command to start.** ``delonix init`` looks at the directory, says what it
+  detected and why, and dispatches to ``stack init``/``vm init`` with the right
+  template — or tells you to keep your ``docker-compose.yml``, which already runs
+  natively under ``delonix compose up``.
 - **Network storage.** A ``kind: Volume`` with an ``nfs:``/``cifs:``/``webdav:``
   block mounts a share from a NAS (TrueNAS/Synology/Samba/Nextcloud) as a named
   volume, k8s-PersistentVolume style. (``kind: Storage`` still loads, rewritten
@@ -324,6 +333,8 @@ https://angolardevops.github.io/delonix-runtime/cheatsheet.html.
 
    * - Group
      - What it does
+   * - ``init``
+     - Starts the RIGHT project for this directory: detects, says what it detected and why, and dispatches to ``stack init``/``vm init``.
    * - ``container``
      - Lifecycle: run, ps, start, stop, rm, exec, logs, inspect, stats, update, apply.
    * - ``pod``
@@ -343,11 +354,13 @@ https://angolardevops.github.io/delonix-runtime/cheatsheet.html.
    * - ``secret``
      - Encrypted-at-rest secret vault — the producer of ``run --secret``.
    * - ``storage``
-     - Network volumes (NFS/CIFS/WebDAV), k8s-PersistentVolume style.
+     - Network volumes (NFS/CIFS/WebDAV), k8s-PersistentVolume style — the same thing as a ``kind: Volume`` with an ``nfs:``/``cifs:``/``webdav:`` block.
+   * - ``schema`` · ``explain``
+     - The manifest schema, generated from the code, and the ``kubectl explain``-style field reference that reads from it.
    * - ``sharevolume``
-     - An isolated, individually-quota'd slice of a ``Storage`` — several container/vm/pod share one NAS export without seeing each other's data.
+     - An isolated, individually-quota'd slice of a network share — several container/vm/pod share one NAS export without seeing each other's data.
    * - ``stack``
-     - Apply a whole manifest — every Kind, in dependency order.
+     - The IaC cycle over a whole manifest: ``plan`` (what would change, and why), ``apply`` (converges hot; refuses a recreate without ``--replace``), ``destroy``, ``wait``, ``validate``, ``init``.
    * - ``compose``
      - Native ``docker-compose.yml`` support (up/down/ps/logs/config) — no Docker involved.
    * - ``cluster``
@@ -379,11 +392,29 @@ Manifests
 
 The declarative face, Kubernetes-style: a multi-document YAML
 (``apiVersion: delonix.io/v1``) with Kinds — ``Network``, ``Volume``,
-``Storage``, ``Image``, ``Vm``, ``Container``, ``Pod``, ``Workload``,
-``FirewallPolicy``, ``Ingress`` (k8s-style L7 HTTP routing), ``Egress`` —
-applied in dependency
-order by ``delonix stack apply``. Ensure-present semantics (idempotent by
-name), not a reconciler. ``kind: Pod`` is a real multi-container pod: N
+``Image``, ``Vm``, ``Container``, ``Pod``, ``Workload``, ``FirewallPolicy``,
+``Ingress`` (k8s-style L7 HTTP routing), ``HTTPRoute``, ``Secret``,
+``ShareVolume``, ``Tunnel``, ``Cluster``, ``Stack`` — applied in dependency
+order by ``delonix stack apply``.
+
+**It converges** (since v0.47.0): ``stack plan`` shows what would change and
+why, ``stack apply`` reconfigures ports, volumes, networks, memory and CPU
+**hot, with the PID unchanged**, and refuses — naming the field — anything that
+would need a recreate, unless you pass ``--replace``. There is **no state
+file**: the last applied spec lives on the resource itself
+(``delonix.io/last-applied``) and ownership is the ``delonix.io/stack`` label,
+so a resource created by hand is adopted and one belonging to another stack is
+never touched. ``stack destroy`` removes what the stack owns, in reverse order.
+``--detailed-exitcode`` returns 0/2/1 like ``terraform plan``, which makes a
+drift gate in CI one command.
+
+The schema is **generated from the code** (``delonix schema print``,
+``delonix explain Container.ports``) and published, so an editor gives you
+completion and type checking from one comment at the top of the file — see
+`the stability promise <docs/cli-stability.md>`_ and `the GitOps guide
+<docs/gitops.md>`_.
+
+``kind: Pod`` is a real multi-container pod: N
 containers sharing the pod's netns (same IP, ``localhost`` between them), IPC
 and UTS — managed as a unit with ``delonix pod``.
 
