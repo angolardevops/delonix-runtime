@@ -5079,3 +5079,17 @@ msgstr ""
 
 msgid "repository: {source}"
 msgstr "repositório: {source}"
+
+# catalogo oficial: destino do push opcional
+
+msgid "Publish a local VM image to an OCI registry. Omit the destination to publish to the OFFICIAL repository the image belongs in"
+msgstr "Publica uma imagem VM local num registo OCI. Omite o destino para publicar no repositório OFICIAL a que a imagem pertence"
+
+msgid "Destination. Omit it to publish to the OFFICIAL repository this image belongs in (decided from the image's own metadata)"
+msgstr "Destino. Omite-o para publicar no repositório OFICIAL a que esta imagem pertence (decidido a partir dos metadados da própria imagem)"
+
+msgid "Destination. Omit it for an OFFICIAL repository: which one is decided by what the image says about itself (an appliance goes to the appliances repo, a Kubernetes golden to the k8s one). Give it to publish anywhere else"
+msgstr "Destino. Omite-o para um repositório OFICIAL: qual deles é decidido pelo que a imagem diz de si (um appliance vai para o repo de appliances, uma golden Kubernetes para o de k8s). Indica-o para publicar em qualquer outro sítio"
+
+msgid "Publish a local VM image to an OCI registry. Omit the destination to publish to the OFFICIAL repository this image belongs in."
+msgstr "Publica uma imagem VM local num registo OCI. Omite o destino para publicar no repositório OFICIAL a que esta imagem pertence."
