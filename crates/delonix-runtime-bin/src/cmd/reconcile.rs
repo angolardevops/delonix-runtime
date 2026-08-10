@@ -724,4 +724,34 @@ mod tests {
             "conteúdo partilhado nunca entra no --prune"
         );
     }
+
+    /// **Numa VM nada converge a quente, e isso não é uma lacuna.** Este motor
+    /// não faz hotplug: mudar vCPUs, memória ou disco é arrancar outra máquina.
+    /// Por isso qualquer alteração é `Replace` — e recriar uma VM deita fora o
+    /// overlay, ou seja, tudo o que o convidado escreveu desde que existe.
+    /// Recusar sem `--replace` é o comportamento certo, não um obstáculo.
+    #[test]
+    fn qualquer_alteracao_numa_vm_e_uma_recriacao() {
+        assert!(
+            hot_fields("Vm").is_empty(),
+            "um campo quente numa VM prometeria um update que o motor não sabe fazer"
+        );
+        let d = Desired {
+            kind: "Vm".into(),
+            name: "db".into(),
+            fields: map(&[("memory", "4G")]),
+            converges: true,
+            ownable: true,
+        };
+        let a = Actual {
+            kind: "Vm".into(),
+            name: "db".into(),
+            fields: map(&[("memory", "2G")]),
+            owner: Some("s".into()),
+            last_applied: None,
+        };
+        let p = plan(&[d], &[a], "s");
+        assert_eq!(p[0].action, Action::Replace);
+        assert_eq!(p[0].cold_fields, vec!["memory".to_string()]);
+    }
 }

@@ -897,6 +897,16 @@ pub struct Vm {
     /// records = `cloud-hypervisor` (the only backend before the VmBackend trait).
     #[serde(default = "default_vm_backend")]
     pub backend: String,
+    /// Free labels (k8s style) — short, identifying. The declarative reconciler
+    /// stamps ownership here (`delonix.io/stack=<name>`), the same as it does on
+    /// a `Container`, a `Volume` and a `Network`. `#[serde(default)]` so every
+    /// record already on disk keeps deserializing.
+    #[serde(default)]
+    pub labels: std::collections::BTreeMap<String, String>,
+    /// Free annotations — non-identifying data that may be large; the
+    /// reconciler's `delonix.io/last-applied` lives here, never in `labels`.
+    #[serde(default)]
+    pub annotations: std::collections::BTreeMap<String, String>,
     /// PCI passthrough device addresses (SR-IOV VFs, typically GPUs) attached
     /// at boot — copied from `VmConfig.devices`. Empty = none. Old records
     /// (pre this field) default to empty, same honesty as `backend` above:
@@ -938,6 +948,8 @@ impl Vm {
             .unwrap_or(0);
         Self {
             name,
+            labels: std::collections::BTreeMap::new(),
+            annotations: std::collections::BTreeMap::new(),
             disk,
             overlay,
             vcpus,
@@ -1034,6 +1046,32 @@ mod tests {
         // The labels of the same record are untouched — the two maps are
         // independent on purpose (see the field's doc-comment).
         assert_eq!(old.labels.get("delonix.io/stack").unwrap(), "web");
+    }
+
+    /// Um registo de VM escrito antes destes campos tem de continuar a
+    /// desserializar — senão toda a VM de um host actualizado desaparece do
+    /// `vm ls` enquanto o disco continua lá.
+    #[test]
+    fn registo_de_vm_sem_labels_continua_a_desserializar() {
+        let mut vm = Vm::new(
+            "db".into(),
+            "base.qcow2".into(),
+            "db.qcow2".into(),
+            2,
+            "2G".into(),
+            "bridge".into(),
+            "tap0".into(),
+            "52:54:00:00:00:01".into(),
+            "/run/db.sock".into(),
+        );
+        vm.labels.insert("delonix.io/stack".into(), "s".into());
+        let mut v: serde_json::Value = serde_json::to_value(&vm).unwrap();
+        let o = v.as_object_mut().unwrap();
+        o.remove("labels");
+        o.remove("annotations");
+        let old: Vm = serde_json::from_value(v).unwrap();
+        assert!(old.labels.is_empty() && old.annotations.is_empty());
+        assert_eq!(old.name, "db");
     }
 
     #[test]

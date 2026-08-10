@@ -275,6 +275,7 @@ fn desired_of(docs: &[manifest::ManifestDoc]) -> Result<Vec<reconcile::Desired>>
                 "Network" => super::network::desired(doc)?,
                 "Pod" => super::pod::desired(doc)?,
                 "Image" => super::image::desired(doc)?,
+                "Vm" => super::vm::desired(doc)?,
                 _ => reconcile::Desired {
                     kind: kind.to_string(),
                     name: doc.metadata.name.clone(),
@@ -301,6 +302,7 @@ fn actual_of(docs: &[manifest::ManifestDoc]) -> Result<Vec<reconcile::Actual>> {
     out.extend(super::network::actual()?);
     out.extend(super::pod::actual()?);
     out.extend(super::image::actual(docs)?);
+    out.extend(super::vm::actual()?);
     let (_, cstore) = super::util::open_stores()?;
     let containers = cstore.list().unwrap_or_default();
     for kind in KINDS {
@@ -375,6 +377,7 @@ fn print_compared_fields() {
         ("Volume", super::volume::RECONCILED_VOLUME_FIELDS),
         ("Network", super::network::RECONCILED_NETWORK_FIELDS),
         ("Image", super::image::RECONCILED_IMAGE_FIELDS),
+        ("Vm", super::vm::RECONCILED_VM_FIELDS),
         ("Pod", super::pod::RECONCILED_POD_FIELDS),
     ] {
         t.row(vec![kind.to_string(), fields.join(", ")]);
@@ -1048,6 +1051,7 @@ fn converge_and_stamp(
             "Volume" => super::volume::stamp(&d.name, stack, &d.fields),
             "Network" => super::network::stamp(&d.name, stack, &d.fields),
             "Pod" => super::pod::stamp(&d.name, stack, &d.fields),
+            "Vm" => super::vm::stamp(&d.name, stack, &d.fields),
             // `Image` is shared content and deliberately not ownable — stamping
             // it for one stack would hand another stack's cache an owner.
             "Image" => Ok(()),
