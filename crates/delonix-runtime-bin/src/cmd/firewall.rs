@@ -975,12 +975,31 @@ struct FwDocRule {
     proto: Option<String>,
     /// Port, range `n-m`, or `*`.
     port: String,
-    /// Source CIDR (Ingress) — the other end of inbound traffic.
+    /// Source CIDR (ingress) — the other end of inbound traffic.
     #[serde(default)]
     from: Option<String>,
-    /// Destination CIDR (Egress) — the other end of outbound traffic.
+    /// Destination CIDR (egress) — the other end of outbound traffic.
     #[serde(default)]
     to: Option<String>,
+    /// Source **by workload name** (ingress), resolved to that container's SDN
+    /// address at apply time.
+    ///
+    /// Exists because **a container's IP is not stable**: it comes from the SDN
+    /// and changes on a restart. A policy written as a CIDR is therefore a policy
+    /// that silently stops matching the workload it was written for — the same
+    /// lesson `vm bridge` already paid for, where the follow-up recorded is
+    /// exactly "discovery by NAME, so as not to depend on dynamic IPs".
+    ///
+    /// A NAME and not a permissive `from` that also accepts names: a value that
+    /// fails to parse as a CIDR falling back to "treat it as a name" would be a
+    /// silent reinterpretation on a security field, which is the one place this
+    /// engine refuses to guess.
+    #[serde(default, rename = "fromWorkload")]
+    from_workload: Option<String>,
+    /// Destination by workload name (egress). Same reasoning as
+    /// [`FwDocRule::from_workload`].
+    #[serde(default, rename = "toWorkload")]
+    to_workload: Option<String>,
     /// `allow` (default) or `deny`.
     #[serde(default)]
     action: Option<String>,
@@ -1017,6 +1036,34 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
         apply_fw_doc(&store, doc, dir)?;
     }
     Ok(())
+}
+
+/// Resolves a workload name to the `/32` of its SDN address.
+///
+/// Fails LOUDLY when the container has no address, and says why: a workload on
+/// `--net host`/`none` has no address on the SDN for a rule to name, and
+/// producing an empty source instead would silently widen the rule to
+/// `0.0.0.0/0` — turning "allow this one peer" into "allow everyone", which is
+/// the worst possible way for a firewall to fail.
+fn workload_cidr(store: &Store, name: &str) -> Result<String> {
+    let c = store
+        .list()?
+        .into_iter()
+        .find(|c| c.name == name)
+        .ok_or_else(|| {
+            Error::Invalid(super::po::tf(
+                "workload '{name}' does not exist (a rule names it as the other end)",
+                &[("name", name)],
+            ))
+        })?;
+    let ip = c.ip.as_deref().filter(|s| !s.is_empty()).ok_or_else(|| {
+        Error::Invalid(super::po::tf(
+            "workload '{name}' has no address on the SDN (is it on a custom network?) — \
+             a rule cannot name it",
+            &[("name", name)],
+        ))
+    })?;
+    Ok(format!("{ip}/32"))
 }
 
 /// Applies ONE firewall document (Ingress/Egress/FirewallPolicy) in the `dir`
@@ -1076,10 +1123,29 @@ fn apply_fw_doc(store: &Store, doc: &ManifestDoc, dir: &str) -> Result<()> {
                 doc.metadata.name, r.port
             )));
         }
-        let src = r.from.clone().or_else(|| r.to.clone()).unwrap_or_default();
-        if let Err(e) = check_cidr(&src) {
-            return Err(Error::Invalid(format!("{kind}/{}: {e}", doc.metadata.name)));
+        // A rule names the other end EITHER by address or by workload, never
+        // both — two answers to "who is the other end" is a contradiction, and
+        // on a firewall a contradiction is not something to resolve by
+        // precedence.
+        let by_name = r.from_workload.clone().or_else(|| r.to_workload.clone());
+        if by_name.is_some() && (r.from.is_some() || r.to.is_some()) {
+            return Err(Error::Invalid(super::po::tf(
+                "{kind}/{name}: a rule uses both an address (from/to) and a workload \
+                 (fromWorkload/toWorkload) — pick one",
+                &[("kind", kind), ("name", &doc.metadata.name)],
+            )));
         }
+        let src = match &by_name {
+            Some(w) => workload_cidr(store, w)
+                .map_err(|e| Error::Invalid(format!("{kind}/{}: {e}", doc.metadata.name)))?,
+            None => {
+                let s = r.from.clone().or_else(|| r.to.clone()).unwrap_or_default();
+                if let Err(e) = check_cidr(&s) {
+                    return Err(Error::Invalid(format!("{kind}/{}: {e}", doc.metadata.name)));
+                }
+                s
+            }
+        };
         let action = r.action.clone().unwrap_or_else(|| "allow".into());
         if !matches!(action.as_str(), "allow" | "deny") {
             return Err(Error::Invalid(format!(
@@ -1120,39 +1186,6 @@ fn apply_fw_doc(store: &Store, doc: &ManifestDoc, dir: &str) -> Result<()> {
         "{kind}/{}: applied to {} ({n} rule(s), default {policy})",
         doc.metadata.name, spec.target
     );
-    Ok(())
-}
-
-/// **Shared per-container ingress core**: replaces a container's `in` direction
-/// (default-policy + `allow` rules), preserving the outbound rules. Used by
-/// `kind: Dependency` ('A knows B' compiles to: on B, ingress default-deny +
-/// allow of A's IP) without duplicating the `ContainerFw` construction.
-/// The `allows` already come with `dir="in"`.
-pub(crate) fn apply_container_ingress(
-    store: &Store,
-    target: &str,
-    policy: &str,
-    allows: &[FwRule],
-) -> Result<()> {
-    if !matches!(policy, "allow" | "deny") {
-        return Err(Error::Invalid(super::po::tf(
-            "ingress of '{target}': policy must be allow|deny",
-            &[("target", target)],
-        )));
-    }
-    update_locked(store, target, |c| {
-        // Guard only: rejects a container off the SDN. The addresses the firewall is
-        // keyed on come from `container_ips` (primary + every additional network).
-        require_sdn_ip(c)?;
-        let mut fw = c.firewall.clone().unwrap_or_default();
-        fw.enabled = true;
-        fw.rules.retain(|r| r.dir != "in"); // declarative: the `in` direction is replaced
-        fw.policy_in = policy.to_string();
-        fw.rules.extend(allows.iter().cloned());
-        super::container::apply_firewall_everywhere(c, &fw)?;
-        c.firewall = Some(fw);
-        Ok(true)
-    })?;
     Ok(())
 }
 
@@ -1481,6 +1514,8 @@ mod tests {
         );
         // `rules` in scope network.
         let rules = vec![FwDocRule {
+            from_workload: None,
+            to_workload: None,
             proto: None,
             port: "80".into(),
             from: None,

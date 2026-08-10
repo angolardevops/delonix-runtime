@@ -298,8 +298,17 @@ spec:
 # mas `to` NÃO inicia para `from`. Caso clássico: a app conhece a DB, a DB não
 # conhece a app — a DB deixa de ficar exposta a todos os containers da rede.
 #
-# Compila para firewall L4 por-container: no `to`, ingress default-deny (protege) +
-# allow do IP do `from`. Várias Dependency para o mesmo `to` acumulam os allow.
+# É AÇÚCAR, e agora diz-se: no `load` cada Dependency é reescrita para um
+# `kind: FirewallPolicy` com `direction: ingress`, default-deny no `to` + um allow
+# por `from`. Corre `stack apply --dry-run` para ver a política real — antes desta
+# fusão a tradução era invisível, e um `to` nomeado por uma Dependency E por uma
+# FirewallPolicy obrigava o motor a AVISAR sobre o seu próprio gémeo.
+#
+# Várias Dependency para o mesmo `to` acumulam: fundem-se numa só política (a
+# anotação `delonix.io/from-dependencies` regista de quais vieram). A regra nomeia
+# o peer por WORKLOAD (`fromWorkload`), não por IP — o endereço de um container
+# vem da SDN e muda num restart, por isso uma regra escrita como CIDR é uma regra
+# que deixa de casar com o workload para que foi escrita.
 # Aplicar com `delonix stack apply -f dependency.yaml`.
 ---
 apiVersion: delonix.io/v1

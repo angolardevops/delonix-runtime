@@ -84,7 +84,6 @@ fn filled_spec(doc: &ManifestDoc) -> Result<serde_yaml::Value> {
         // Secret is intentionally left as raw (no typed round-trip) — no need to
         // reformat its `stringData` through the renderer.
         "Image" => cmd::image::spec_with_defaults(doc),
-        "Dependency" => cmd::dependency::spec_with_defaults(doc),
         "Vm" => cmd::vm::spec_with_defaults(doc),
         "Pod" => cmd::pod::spec_with_defaults(doc),
         "HTTPRoute" => cmd::httproute::spec_with_defaults(doc),
@@ -353,6 +352,16 @@ pub fn load(path: &Path) -> Result<Vec<ManifestDoc>> {
             "{path} is empty (no YAML documents)",
             &[("path", &path.display().to_string())],
         )));
+    }
+    // `kind: Dependency` lowers to `kind: FirewallPolicy`, LAST and over the whole
+    // list — unlike the per-document lowerings above, it has to see every
+    // Dependency at once, because several pointing at the same target accumulate
+    // into ONE policy (see `dependency::lower_dependencies`). Doing it per
+    // document would silently drop every peer but the last.
+    let lowered = crate::cmd::dependency::lower_dependencies(&docs)?;
+    if !lowered.is_empty() {
+        docs.retain(|d| d.kind != "Dependency");
+        docs.extend(lowered);
     }
     Ok(docs)
 }
