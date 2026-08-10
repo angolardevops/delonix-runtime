@@ -32,6 +32,25 @@ use super::util::open_stores;
 /// Label that ties a container to its pod (membership, derived state).
 pub(crate) const POD_LABEL: &str = "delonix.io/pod";
 
+/// The address the pod's shared netns actually got, recorded on each member at create time.
+///
+/// `ls`/`describe`/`rm` used to RECOMPUTE it with `infra::container_ip`, which hardcodes the
+/// default prefix (`10.200/16`). That was accidentally right only while every pod landed on
+/// the default bridge — the moment `spec.network` started being honored, all three reported
+/// (and `rm` *detached*) an address the pod never had. Same "membership from labels" idiom
+/// as [`POD_LABEL`]: derived state, no new store.
+pub(crate) const POD_IP_LABEL: &str = "delonix.io/pod-ip";
+
+/// The pod's real address: what was allocated at attach time, read back from any member's
+/// label. Falls back to the legacy recomputation for pods created before the label existed
+/// (those are all on the default bridge, where the recomputation is correct).
+fn pod_ip(members: &[Container], netns: &str) -> String {
+    members
+        .iter()
+        .find_map(|c| c.labels.get(POD_IP_LABEL).cloned())
+        .unwrap_or_else(|| infra::container_ip(netns))
+}
+
 #[derive(Subcommand)]
 pub enum PodCmd {
     /// Create a pod (N containers sharing a netns) from a manifest (`kind: Pod`).
@@ -128,6 +147,24 @@ fn valid_pod_name(name: &str) -> Result<()> {
     }
 }
 
+/// The SDN network a pod's shared netns attaches to, from `spec.network`.
+///
+/// `create_pod` used to pass a hardcoded `ingress` here, so `spec.network` was parsed,
+/// documented as a delonix extension, and had no effect whatsoever — a pod declared on a
+/// custom network came up on the default bridge, unreachable from the network it asked for
+/// and reachable by everything on the one it got. Measured in
+/// `docs/discovery/46_GAPS_ENCONTRADOS.md` §4.4.
+///
+/// `host`/`none`/empty keep meaning the default bridge: a pod IS a shared netns, so it
+/// never gets the host's, and `host` is the field's default — erroring on it would reject
+/// every pod manifest that exists.
+fn pod_network(spec_network: &str) -> &str {
+    match spec_network.trim() {
+        "" | "host" | "none" => "ingress",
+        other => other,
+    }
+}
+
 fn create_pod(name: &str, namespace: Option<String>, spec: PodSpec) -> Result<()> {
     valid_pod_name(name)?;
     let (images, store) = open_stores()?;
@@ -145,7 +182,8 @@ fn create_pod(name: &str, namespace: Option<String>, spec: PodSpec) -> Result<()
     // 1. The pod's SHARED netns on the SDN (holder). One attach for the whole pod.
     let netns = pod_netns_name(name);
     let ns = namespace.clone().unwrap_or_else(|| "default".to_string());
-    let (_, ip) = infra::attach_container(&netns, "ingress", &ns).map_err(|e| Error::Runtime {
+    let net = pod_network(&spec.network);
+    let (_, ip) = infra::attach_container(&netns, net, &ns).map_err(|e| Error::Runtime {
         context: "pod",
         message: format!("failed to create the pod netns '{netns}': {e}"),
     })?;
@@ -155,6 +193,13 @@ fn create_pod(name: &str, namespace: Option<String>, spec: PodSpec) -> Result<()
     // The FIRST container holds the pod's IPC/UTS namespaces; the rest join them
     // (via `pod_infra_pid`), so the pod shares System V/POSIX IPC + the hostname.
     let mut members = container::pod_member_run_opts(name, namespace, spec, &netns)?;
+    // Record the address the pod REALLY got, so nothing downstream has to guess it (see
+    // [`POD_IP_LABEL`]). Set here and not in `pod_member_run_opts` because the attach —
+    // the only thing that knows the address — happens after that function's inputs are
+    // fixed but before it is called.
+    for opts in members.iter_mut() {
+        opts.labels.push(format!("{POD_IP_LABEL}={ip}"));
+    }
     let count = members.len();
     let first = members.remove(0);
     let first_name = first.name.clone().unwrap_or_else(|| format!("{name}-c0"));
@@ -263,7 +308,7 @@ fn remove_pod(name: &str, force: bool) -> Result<()> {
     }
     // Now safe to tear down the shared netns (all members gone).
     let netns = pod_netns_name(name);
-    infra::detach_container(&netns, &infra::container_ip(&netns));
+    infra::detach_container(&netns, &pod_ip(&members, &netns));
     println!(
         "pod/{name}: removed ({} container(s) + shared netns)",
         members.len()
@@ -299,7 +344,7 @@ fn ls(format: output::OutputFormat) -> Result<()> {
                 running += 1;
             }
         }
-        let ip = infra::container_ip(&pod_netns_name(&pod));
+        let ip = pod_ip(&members, &pod_netns_name(&pod));
         let status = if running == members.len() {
             "Running"
         } else if running == 0 {
@@ -343,7 +388,7 @@ fn describe(names: &[String]) -> Result<()> {
         let mut d = output::Describe::new();
         d.field("Pod", name);
         d.field("Namespace", &members[0].namespace);
-        d.field("IP", infra::container_ip(&pod_netns_name(name)));
+        d.field("IP", pod_ip(&members, &pod_netns_name(name)));
         d.field("Netns", pod_netns_name(name));
         d.print();
         let mut t = output::Table::new(&["CONTAINER", "IMAGE", "STATUS"]);
@@ -378,4 +423,27 @@ fn logs(pod: &str, container_short: Option<&str>, follow: bool) -> Result<()> {
         None => &members[0],
     };
     container::cmd_logs(&images, &store, &target.name, follow, None, None, false)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Regression: `spec.network` was parsed and ignored — `create_pod` passed a hardcoded
+    /// `ingress`, so a pod asking for a custom network came up on the default bridge in
+    /// silence (`docs/discovery/46_GAPS_ENCONTRADOS.md` §4.4). The custom name is the whole
+    /// point of the field; `host`/`none` keep meaning the default bridge because a pod IS a
+    /// shared netns and `host` is the field's own default.
+    #[test]
+    fn o_spec_network_de_um_pod_escolhe_mesmo_a_rede() {
+        assert_eq!(pod_network("kaeso-net"), "kaeso-net");
+        assert_eq!(pod_network("  kaeso-net  "), "kaeso-net");
+        for default_ish in ["", "host", "none"] {
+            assert_eq!(
+                pod_network(default_ish),
+                "ingress",
+                "`{default_ish}` has to keep meaning the default bridge"
+            );
+        }
+    }
 }
