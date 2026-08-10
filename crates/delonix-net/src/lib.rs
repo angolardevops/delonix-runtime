@@ -738,6 +738,25 @@ pub struct Network {
     /// `ensure_overlay_wg` brings up the wg and the VXLAN FDB uses the peers' `wg_ip`,
     /// encrypting the transport.
     pub wg_ip: Option<String>,
+    /// Free labels (k8s style) — short, identifying. The declarative reconciler
+    /// stamps ownership here (`delonix.io/stack=<name>`), which is what makes
+    /// `stack destroy`/`--prune` possible without a registry of stacks that would
+    /// drift out of sync.
+    ///
+    /// Persisted as `label.<key>=<value>` lines in the record. A record written
+    /// by an older binary simply has none, and an older binary reading a record
+    /// with them ignores the unknown keys — this file format has always parsed
+    /// `key=value` into a map and only read the keys it knows.
+    pub labels: std::collections::BTreeMap<String, String>,
+    /// Free annotations — same idea, for data that is NOT identifying and may be
+    /// large (the reconciler's `delonix.io/last-applied` lives here, never in
+    /// `labels`). Persisted as `annotation.<key>=<value>`.
+    ///
+    /// The value must not contain a literal newline (it would split the record
+    /// into two lines); `set_metadata` rejects one rather than writing a record
+    /// that reads back as something else. Compact JSON is safe — `serde_json`
+    /// escapes newlines inside strings as `\n`, two characters.
+    pub annotations: std::collections::BTreeMap<String, String>,
 }
 
 /// `bridge` driver (the default case of a user network/`delonix0`).
@@ -776,6 +795,8 @@ impl Network {
             vni: None,
             peers: Vec::new(),
             wg_ip: None,
+            labels: std::collections::BTreeMap::new(),
+            annotations: std::collections::BTreeMap::new(),
         }
     }
 
@@ -794,6 +815,8 @@ impl Network {
             vni: None,
             peers: Vec::new(),
             wg_ip: None,
+            labels: std::collections::BTreeMap::new(),
+            annotations: std::collections::BTreeMap::new(),
         }
     }
 
@@ -830,6 +853,8 @@ impl Network {
             vni: None,
             peers: Vec::new(),
             wg_ip: None,
+            labels: std::collections::BTreeMap::new(),
+            annotations: std::collections::BTreeMap::new(),
         }
     }
 
@@ -896,11 +921,24 @@ impl NetworkStore {
                 kv.insert(k.trim(), v.trim().to_string());
             }
         }
+        // `label.<k>` / `annotation.<k>` — collected in their own pass because they
+        // are the only PREFIXED keys in this format; everything else is a fixed
+        // name. Unknown keys keep being ignored, which is what lets an older
+        // binary read a record written by this one.
+        let mut labels = std::collections::BTreeMap::new();
+        let mut annotations = std::collections::BTreeMap::new();
+        for (k, v) in &kv {
+            if let Some(key) = k.strip_prefix("label.") {
+                labels.insert(key.to_string(), v.clone());
+            } else if let Some(key) = k.strip_prefix("annotation.") {
+                annotations.insert(key.to_string(), v.clone());
+            }
+        }
         let driver = kv
             .get("driver")
             .map(String::as_str)
             .unwrap_or(DRIVER_BRIDGE);
-        match driver {
+        let mut net = match driver {
             DRIVER_MACVLAN | DRIVER_IPVLAN => {
                 let parent = kv.get("parent").cloned().ok_or_else(|| {
                     Error::Invalid(format!("network '{name}' ({driver}) has no parent"))
@@ -909,7 +947,7 @@ impl NetworkStore {
                     Error::Invalid(format!("network '{name}' ({driver}) has no subnet"))
                 })?;
                 let gateway = kv.get("gateway").cloned().unwrap_or_default();
-                Ok(Network::lan(name, driver, &parent, &subnet, &gateway))
+                Network::lan(name, driver, &parent, &subnet, &gateway)
             }
             DRIVER_OVERLAY => {
                 let base: u8 = kv
@@ -932,16 +970,19 @@ impl NetworkStore {
                     .get("wgip")
                     .map(|s| s.trim().to_string())
                     .filter(|s| !s.is_empty());
-                Ok(Network::overlay_with_base(name, base, vni, peers, wg_ip))
+                Network::overlay_with_base(name, base, vni, peers, wg_ip)
             }
             _ => {
                 let base: u8 = kv
                     .get("base")
                     .and_then(|b| b.parse().ok())
                     .ok_or_else(|| Error::Invalid(format!("network '{name}' is corrupted")))?;
-                Ok(Network::user_with_base(name, base))
+                Network::user_with_base(name, base)
             }
-        }
+        };
+        net.labels = labels;
+        net.annotations = annotations;
+        Ok(net)
     }
 
     /// Lists the user networks (does not include the default `bridge`).
@@ -1023,6 +1064,74 @@ impl NetworkStore {
             )));
         }
         std::fs::write(self.path(name), base.to_string())?;
+        self.get(name)
+    }
+
+    /// Merges `labels`/`annotations` into an existing network's record. A key
+    /// mapped to `None` is REMOVED — the only way to unstamp a network that left
+    /// a stack, so it has to be expressible.
+    ///
+    /// Rewrites the record LINE BY LINE, preserving every line it does not own —
+    /// the same idiom as [`NetworkStore::add_overlay_peer`], and for the same
+    /// reason: this format has several independent writers (`create`,
+    /// `create_overlay`, `create_lan`) and a full re-serialization here would have
+    /// to reproduce all of them correctly forever.
+    ///
+    /// Upgrades a legacy plain-integer record (`create` still writes that form) to
+    /// `base=<n>` on the way, because a bare integer has nowhere to put a key.
+    /// `get()` reads both, so the upgrade is invisible.
+    pub fn set_metadata(
+        &self,
+        name: &str,
+        labels: &[(String, Option<String>)],
+        annotations: &[(String, Option<String>)],
+    ) -> Result<Network> {
+        if name.is_empty() || name == DEFAULT_NET {
+            // The default bridge has no record on disk — there is nothing to stamp,
+            // and silently succeeding would make a stack believe it owns it.
+            return Err(Error::Invalid(
+                "the default 'bridge' network has no record to annotate".into(),
+            ));
+        }
+        for (k, v) in labels.iter().chain(annotations.iter()) {
+            if k.is_empty() || k.contains('=') || k.contains('\n') {
+                return Err(Error::Invalid(format!("invalid metadata key: {k:?}")));
+            }
+            // A literal newline would split the record into two lines and the
+            // second one would read back as a key of its own. Refuse instead of
+            // writing a record that means something else than what was asked.
+            if v.as_deref().is_some_and(|v| v.contains('\n')) {
+                return Err(Error::Invalid(format!(
+                    "metadata value for {k:?} contains a newline"
+                )));
+            }
+        }
+        let raw = std::fs::read_to_string(self.path(name))
+            .map_err(|_| Error::NotFound(format!("network {name}")))?;
+        // Legacy form: the whole record is the base octet.
+        let mut out: Vec<String> = if let Ok(base) = raw.trim().parse::<u8>() {
+            vec![format!("base={base}")]
+        } else {
+            raw.lines()
+                .filter(|l| !l.trim().is_empty())
+                .map(|l| l.to_string())
+                .collect()
+        };
+        let mut upsert = |prefix: &str, pairs: &[(String, Option<String>)]| {
+            for (k, v) in pairs {
+                let head = format!("{prefix}{k}=");
+                out.retain(|l| !l.starts_with(&head));
+                if let Some(v) = v {
+                    out.push(format!("{head}{v}"));
+                }
+            }
+        };
+        upsert("label.", labels);
+        upsert("annotation.", annotations);
+        std::fs::write(self.path(name), out.join("\n") + "\n").map_err(|e| Error::Runtime {
+            context: "write network",
+            message: e.to_string(),
+        })?;
         self.get(name)
     }
 
@@ -2627,6 +2736,101 @@ pub fn list_connections(ip2name: &std::collections::HashMap<String, String>) -> 
 
 #[cfg(test)]
 mod tests {
+    /// `create` still writes the LEGACY form (the bare base octet), which has
+    /// nowhere to put a key. Stamping ownership has to upgrade it to `base=<n>`
+    /// on the way — and the upgrade must be invisible, i.e. the network keeps the
+    /// exact same bridge/prefix/subnet it had, because containers are already
+    /// attached to them.
+    #[test]
+    fn set_metadata_actualiza_um_registo_legado_sem_mudar_a_rede() {
+        use super::NetworkStore;
+        let tmp = std::env::temp_dir().join(format!("dlx-net-meta-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        let store = NetworkStore::open(&tmp).unwrap();
+        let before = store.create("interna").unwrap();
+        // Precondition: the record really is the legacy bare-integer form.
+        let raw = std::fs::read_to_string(tmp.join("networks/interna")).unwrap();
+        assert!(raw.trim().parse::<u8>().is_ok(), "raw={raw:?}");
+
+        let after = store
+            .set_metadata(
+                "interna",
+                &[("delonix.io/stack".into(), Some("web".into()))],
+                &[(
+                    "delonix.io/last-applied".into(),
+                    Some("{\"subnet\":1}".into()),
+                )],
+            )
+            .unwrap();
+        assert_eq!(after.bridge, before.bridge);
+        assert_eq!(after.subnet, before.subnet);
+        assert_eq!(after.gateway, before.gateway);
+        assert_eq!(after.labels.get("delonix.io/stack").unwrap(), "web");
+        assert_eq!(
+            after.annotations.get("delonix.io/last-applied").unwrap(),
+            "{\"subnet\":1}"
+        );
+        // Re-reading from disk gives the same thing (the upgrade was persisted).
+        let reread = store.get("interna").unwrap();
+        assert_eq!(reread.labels, after.labels);
+        assert_eq!(reread.subnet, before.subnet);
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    /// The record has several independent writers, so `set_metadata` rewrites it
+    /// line by line and must not eat the lines it does not own — an overlay that
+    /// lost its `vni`/`peers` to an ownership stamp would silently stop reaching
+    /// the other nodes.
+    #[test]
+    fn set_metadata_preserva_vni_e_peers_de_um_overlay() {
+        use super::NetworkStore;
+        let tmp = std::env::temp_dir().join(format!("dlx-net-ovl-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        let store = NetworkStore::open(&tmp).unwrap();
+        store
+            .create_overlay("malha", 42, &["10.0.0.7".to_string()], Some("10.9.0.1"))
+            .unwrap();
+        let after = store
+            .set_metadata(
+                "malha",
+                &[("delonix.io/stack".into(), Some("infra".into()))],
+                &[],
+            )
+            .unwrap();
+        assert_eq!(after.vni, Some(42));
+        assert_eq!(after.peers, vec!["10.0.0.7".to_string()]);
+        assert_eq!(after.wg_ip.as_deref(), Some("10.9.0.1"));
+        assert_eq!(after.driver, super::DRIVER_OVERLAY);
+        assert_eq!(after.labels.get("delonix.io/stack").unwrap(), "infra");
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    /// A literal newline in a value would split the record in two and the second
+    /// half would read back as a key of its own. Refuse, rather than write a
+    /// record that means something different from what was asked. (Compact JSON
+    /// is safe — `serde_json` escapes newlines as two characters.)
+    #[test]
+    fn set_metadata_recusa_um_valor_com_newline() {
+        use super::NetworkStore;
+        let tmp = std::env::temp_dir().join(format!("dlx-net-nl-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        let store = NetworkStore::open(&tmp).unwrap();
+        store.create("interna").unwrap();
+        assert!(store
+            .set_metadata(
+                "interna",
+                &[("k".into(), Some("linha1\nbase=7".into()))],
+                &[]
+            )
+            .is_err());
+        // The refusal is total: nothing was written.
+        assert!(store.get("interna").unwrap().labels.is_empty());
+        // The default bridge has no record on disk — stamping it would make a
+        // stack believe it owns something it cannot own.
+        assert!(store.set_metadata("bridge", &[], &[]).is_err());
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
     /// The Docker `[hostIp:]hostPort:contPort` form: the address is what lets a
     /// published port answer anything other than the host's own loopback. Before this,
     /// the ONLY way to widen the bind was the undocumented `DELONIX_PUBLISH_ADDR`, and a

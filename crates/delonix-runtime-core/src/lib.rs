@@ -528,6 +528,16 @@ pub struct Container {
     /// nodes by `io.x-k8s.kind.cluster`).
     #[serde(default)]
     pub labels: std::collections::BTreeMap<String, String>,
+    /// `key→value` annotations — deliberately SEPARATE from `labels`, the same
+    /// split Kubernetes makes and for the same reason: labels are short,
+    /// identifying and get shown/filtered on (`ps --filter label=`), annotations
+    /// hold non-identifying data that may be large.
+    ///
+    /// The declarative reconciler keeps the last applied spec here
+    /// (`delonix.io/last-applied`); putting a whole JSON spec in a label would
+    /// wreck every listing that prints labels.
+    #[serde(default)]
+    pub annotations: std::collections::BTreeMap<String, String>,
     /// Capabilities to drop (`--cap-drop`; `ALL` drops all).
     #[serde(default)]
     pub cap_drop: Vec<String>,
@@ -780,6 +790,7 @@ impl Container {
             read_only: false,
             privileged: false,
             labels: std::collections::BTreeMap::new(),
+            annotations: std::collections::BTreeMap::new(),
             cap_drop: Vec::new(),
             cap_add: Vec::new(),
             seccomp: None,
@@ -999,6 +1010,31 @@ pub fn self_bin() -> std::path::PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A container record written before `annotations` existed must still
+    /// deserialize. Built by REMOVING the key from a real serialization rather
+    /// than hand-writing a legacy blob — a hand-written fixture drifts out of
+    /// date the moment another field is added, and would stop testing anything.
+    #[test]
+    fn registo_de_container_sem_annotations_continua_a_desserializar() {
+        let mut c = Container::new(
+            "abc123".into(),
+            "web".into(),
+            "nginx".into(),
+            vec!["nginx".into()],
+            "64M".into(),
+        );
+        c.labels.insert("delonix.io/stack".into(), "web".into());
+        c.annotations
+            .insert("delonix.io/last-applied".into(), "{}".into());
+        let mut v: serde_json::Value = serde_json::to_value(&c).unwrap();
+        v.as_object_mut().unwrap().remove("annotations");
+        let old: Container = serde_json::from_value(v).unwrap();
+        assert!(old.annotations.is_empty());
+        // The labels of the same record are untouched — the two maps are
+        // independent on purpose (see the field's doc-comment).
+        assert_eq!(old.labels.get("delonix.io/stack").unwrap(), "web");
+    }
 
     #[test]
     fn fw_fields_reject_nft_injection() {
