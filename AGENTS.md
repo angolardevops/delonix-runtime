@@ -2,7 +2,7 @@
 
 Motor de **containers e microVMs daemonless, rootless-first, kernel-native, em Rust**.
 Repositório **público** (`angolardevops/delonix-runtime`, Apache-2.0) — extraído do monorepo
-privado `delonix-paas` (ver [README.md](README.md) para a arquitectura dos 8 crates).
+privado `delonix-paas` (ver [README.md](README.md) para a arquitectura dos 10 crates).
 
 ## Comandos
 
@@ -467,7 +467,7 @@ mudar o PID** e o caminho declarativo nunca lhe chamou — 5.ª ocorrência do p
 **Schema GERADO do código (ADR-0007)** — `delonix schema print` + `delonix explain
 Container.ports`, publicado em `docs/schema/v1/delonix.json` com teste a garantir que É o gerado.
 `schemars` é a **2.ª excepção deliberada** à regra de sem-dependências-novas (depois do `ratatui`),
-confinada ao `-bin`, com os 8 crates de motor verificados dep-limpos. O schema é tão estrito quanto
+confinada ao `-bin`, com os 9 crates de motor verificados dep-limpos (`cargo tree -e normal -p <crate>` de cada um, medido: nem `schemars` nem `ratatui` aparecem em nenhum). O schema é tão estrito quanto
 o motor (`additionalProperties: false`, para apanhar o typo num nome de campo), mas a lista de
 aceites vem dos MESMOS `*_SPEC_FIELDS` do `warn_unknown_fields`: a forma agrupada do Container é
 hoisteada antes de o `ContainerSpec` existir, e derivar a estritez só do struct sinalizaria
@@ -3345,7 +3345,7 @@ Este código **não pode depender de nada privado**. Antes de qualquer commit:
    genuína (fica aqui). O broker de control-plane que decide QUANDO publicar portas
    (`Router`, multi-tenant) ficou no lado privado (`delonix-overlay`, em `delonix-paas`).
 
-## Arquitetura (8 crates)
+## Arquitetura (10 crates)
 
 | Crate | Responsabilidade |
 |---|---|
@@ -3356,6 +3356,8 @@ Este código **não pode depender de nada privado**. Antes de qualquer commit:
 | `delonix-vm` | microVMs declarativas — trait `VmBackend` (Cloud Hypervisor ou libvirt) |
 | `delonix-volume` | volumes nomeados e bind mounts |
 | `delonix-cri` | servidor CRI (`runtime.v1`) — permite ao Delonix servir de runtime a um `kubelet` |
+| `delonix-mgmt` | API de gestão LOCAL (HTTP+JSON num socket unix, só o próprio uid) para um control-plane externo, mais o registo Prometheus partilhado e os spans OpenTelemetry. Não é remota, e o `cli-stability.md` diz que não se deve construir automação sobre ela — ver ADR-0010 |
+| `delonix-scan` | SBOM + varredura de CVE (`image scan`, e a imposição de scan-on-pull) |
 
 ## Histórico
 

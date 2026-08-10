@@ -145,7 +145,7 @@ main{padding:1.4rem 1.2rem 4rem;max-width:none}}
 <h1>Arquitectura — Delonix Engine</h1>
 <p>Modelo C4 (Contexto → Contentores → Componentes) e system design funcional do
 <strong>Delonix Engine</strong>: motor de containers e microVMs <strong>daemonless, rootless-first,
-kernel-native</strong>, em Rust (8 crates, workspace <code>crates/</code>). Este documento é canónico
+kernel-native</strong>, em Rust (10 crates, workspace <code>crates/</code>). Este documento é canónico
 e mantido contra o código — cada afirmação estrutural tem a referência do
 crate/ficheiro onde foi confirmada. Onde há limites, eles aparecem nos diagramas,
 não escondidos em rodapés.</p>
@@ -297,7 +297,7 @@ leitura — <code>reconcile_status</code> (<code>crates/delonix-runtime/src/lib.
 de PID) e reclassifica <code>Running</code>→<code>Crashed</code>/<code>Paused</code>. O CRI chama-o em
 <code>load_reconciled</code> antes de responder ao kubelet.</p>
 <hr />
-<h2>C4 — Nível 3: Componentes (os 8 crates)</h2>
+<h2>C4 — Nível 3: Componentes (os 10 crates)</h2>
 <p>Setas = dependências <strong>reais</strong>, confirmadas nos <code>Cargo.toml</code> de <code>crates/*/</code> e nos
 <code>use delonix_*</code> dos <code>src/</code>. Não há ciclos; <code>delonix-runtime-core</code> é a raiz comum.</p>
 <pre class="mermaid">graph TB
@@ -309,6 +309,8 @@ de PID) e reclassifica <code>Running</code>→<code>Crashed</code>/<code>Paused<
     VM2[&quot;delonix-vm&lt;br&gt;microVMs declarativas: trait VmBackend —&lt;br&gt;Cloud Hypervisor ou libvirt&quot;]
     VOL[&quot;delonix-volume&lt;br&gt;volumes nomeados e bind mounts, sintaxe -v Docker,&lt;br&gt;driver local ou nfs&quot;]
     CORE[&quot;delonix-runtime-core&lt;br&gt;Container, Vm, Status, Store e JsonStore, Mount,&lt;br&gt;typestate, virt, secret e cred_vault — Secret Manager&quot;]
+    MGMT[&quot;delonix-mgmt&lt;br&gt;API de gestao LOCAL (HTTP+JSON num socket unix, so o proprio uid)&lt;br&gt;registo Prometheus partilhado e spans OpenTelemetry&quot;]
+    SCAN[&quot;delonix-scan&lt;br&gt;SBOM e varredura de CVE — image scan&lt;br&gt;e a imposicao de scan-on-pull&quot;]
 
     BIN --&gt; RT
     BIN --&gt; IMG
@@ -316,6 +318,20 @@ de PID) e reclassifica <code>Running</code>→<code>Crashed</code>/<code>Paused<
     BIN --&gt; VOL
     BIN --&gt; NET
     BIN --&gt; CORE
+    BIN --&gt; CRI
+    BIN --&gt; MGMT
+    BIN --&gt; SCAN
+
+    MGMT --&gt; RT
+    MGMT --&gt; IMG
+    MGMT --&gt; VM2
+    MGMT --&gt; VOL
+    MGMT --&gt; NET
+    MGMT --&gt; SCAN
+    MGMT --&gt; CORE
+
+    SCAN --&gt; IMG
+    SCAN --&gt; CORE
 
     CRI --&gt; RT
     CRI --&gt; IMG
@@ -332,9 +348,18 @@ de PID) e reclassifica <code>Running</code>→<code>Crashed</code>/<code>Paused<
 </pre>
 <p>Notas de leitura do grafo (todas verificadas):</p>
 <ul>
-<li><strong><code>delonix-runtime-bin</code> não depende de <code>delonix-cri</code></strong> — são dois binários
-  independentes. O CRI, por sua vez, <strong>não</strong> depende de <code>delonix-vm</code> nem de
+<li><strong><code>delonix-runtime-bin</code> DEPENDE de <code>delonix-cri</code></strong> — uma versão anterior deste
+  documento afirmava o contrário («são dois binários independentes»), e isso deixou de
+  ser verdade quando o <code>delonix serve cri</code> passou a servir o CRI a partir da própria
+  CLI. Confirmado em <code>crates/delonix-runtime-bin/Cargo.toml:21</code>. O <code>delonix-cri</code>
+  continua a ter o seu <code>[[bin]]</code> próprio, e é a razão de o <code>hyper</code>/<code>tonic</code>/<code>tokio-rustls</code>
+  já estarem na árvore do <code>-bin</code> sem custo novo de supply-chain (ver a secção do
+  proxy L7 no <code>AGENTS.md</code>). O CRI, por sua vez, <strong>não</strong> depende de <code>delonix-vm</code> nem de
   <code>delonix-volume</code> (só <code>runtime</code>/<code>image</code>/<code>net</code>/<code>core</code> — <code>crates/delonix-cri/Cargo.toml</code>).</li>
+<li><strong><code>delonix-mgmt</code> é o crate com mais dependências internas</strong> (sete: <code>runtime</code>,
+  <code>image</code>, <code>vm</code>, <code>volume</code>, <code>net</code>, <code>scan</code>, <code>core</code>) e é isso que a sua função exige —
+  responde por todo o motor a um control-plane local. Nada depende dele a não ser o
+  <code>-bin</code>, e é local por desenho: socket unix, <code>SO_PEERCRED</code>, só o próprio uid (ADR-0010).</li>
 <li><strong><code>delonix-runtime</code> só depende de <code>core</code></strong> — o motor de containers não conhece
   rede: a integração faz-se por inversão de controlo, com o hook <code>on_started</code> do
   <code>RunSpec</code> (a CLI passa closures que chamam <code>delonix-net</code>).</li>
