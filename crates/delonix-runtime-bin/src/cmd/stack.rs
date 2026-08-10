@@ -276,6 +276,7 @@ fn desired_of(docs: &[manifest::ManifestDoc]) -> Result<Vec<reconcile::Desired>>
                 "Pod" => super::pod::desired(doc)?,
                 "Image" => super::image::desired(doc)?,
                 "Vm" => super::vm::desired(doc)?,
+                "FirewallPolicy" => super::firewall::desired(doc)?,
                 _ => reconcile::Desired {
                     kind: kind.to_string(),
                     name: doc.metadata.name.clone(),
@@ -303,6 +304,7 @@ fn actual_of(docs: &[manifest::ManifestDoc]) -> Result<Vec<reconcile::Actual>> {
     out.extend(super::pod::actual()?);
     out.extend(super::image::actual(docs)?);
     out.extend(super::vm::actual()?);
+    out.extend(super::firewall::actual(docs)?);
     let (_, cstore) = super::util::open_stores()?;
     let containers = cstore.list().unwrap_or_default();
     for kind in KINDS {
@@ -378,6 +380,7 @@ fn print_compared_fields() {
         ("Network", super::network::RECONCILED_NETWORK_FIELDS),
         ("Image", super::image::RECONCILED_IMAGE_FIELDS),
         ("Vm", super::vm::RECONCILED_VM_FIELDS),
+        ("FirewallPolicy", super::firewall::RECONCILED_FW_FIELDS),
         ("Pod", super::pod::RECONCILED_POD_FIELDS),
     ] {
         t.row(vec![kind.to_string(), fields.join(", ")]);
@@ -897,6 +900,16 @@ fn destroy_one(kind: &str, name: &str) -> Result<()> {
         "Network" => super::network::remove_for_replace(name),
         "Pod" => super::pod::remove_pod(name, true),
         "Vm" => super::vm::remove_for_replace(name),
+        // A firewall policy cannot be torn down automatically, and saying so is
+        // the only honest answer: it has no record of its own (it lives on the
+        // target's `ContainerFw`), so when `target`/`direction` change the OLD
+        // target is not written down anywhere — the manifest holds the new one.
+        // Leaving stale rules on a container nobody is looking at any more is
+        // the worst outcome available, so the user is told exactly what to run.
+        "FirewallPolicy" => Err(delonix_runtime_core::Error::Invalid(super::po::tf(
+            "FirewallPolicy/{name}: changing `target` or `direction` cannot be undone              automatically — the previous target keeps its rules. Clear them by hand with              `delonix net ingress clear <old-target>` (or `net egress clear`), then apply again",
+            &[("name", name)],
+        ))),
         // `Image` is deliberately absent: it is not ownable (shared content), so
         // it never reaches a prune or a destroy — and a `Replace` of an image is
         // just a pull, handled by `converge`, never by destroying anything.
@@ -1031,6 +1044,22 @@ fn converge_and_stamp(
                 "Volume" => super::volume::converge(&c.name, &c.diffs)?,
                 "Network" => super::network::converge(&c.name, &c.diffs)?,
                 "Image" => super::image::converge(&c.name, &c.diffs)?,
+                // A firewall policy re-applies WHOLE: `apply_fw_doc` already
+                // replaces the entire direction, so there is no per-field path
+                // to write — and writing one would be a second way to build the
+                // same nft chain, which is how two ways start to disagree.
+                "FirewallPolicy" => {
+                    let doc = docs
+                        .iter()
+                        .find(|d| d.kind == c.kind && d.metadata.name == c.name)
+                        .ok_or_else(|| {
+                            delonix_runtime_core::Error::Invalid(format!(
+                                "FirewallPolicy/{}: not in the manifest",
+                                c.name
+                            ))
+                        })?;
+                    super::firewall::converge_doc(doc)?
+                }
                 // A Pod has no hot field at all, so the planner can never emit
                 // `Update` for one. Saying so beats a silent no-op if that ever
                 // changes.

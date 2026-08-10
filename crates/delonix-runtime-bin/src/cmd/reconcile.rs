@@ -251,6 +251,11 @@ fn hot_fields(kind: &str) -> &'static [&'static str] {
         // Fetching a ref destroys nothing — an image is shared cache, so its
         // whole comparable surface converges without recreating anything.
         "Image" => &["ref", "digest"],
+        // `apply_fw_doc` replaces the whole direction in place, with no restart.
+        // `target`/`direction` stay cold: they identify WHICH direction of WHICH
+        // container the policy governs, so changing one leaves the old target's
+        // rules exactly where they were.
+        "FirewallPolicy" => &["defaultPolicy", "rules", "scope"],
         _ => &[],
     }
 }
