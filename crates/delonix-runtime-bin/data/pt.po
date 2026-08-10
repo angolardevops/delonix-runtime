@@ -3779,3 +3779,29 @@ msgstr "já não está declarado no manifesto"
 
 msgid "this Kind is ensure-present in this version"
 msgstr "este Kind é «garante presente» nesta versão"
+
+# destroy / prune (bloco 4)
+
+msgid "{kind}/{name}: removing (no longer in the manifest)"
+msgstr "{kind}/{name}: a remover (já não está no manifesto)"
+
+msgid "{kind}/{name}: removing"
+msgstr "{kind}/{name}: a remover"
+
+msgid "stack \"{stack}\" owns nothing — nothing to remove"
+msgstr "a stack \"{stack}\" não possui nada — nada a remover"
+
+msgid "stack \"{stack}\" would remove {n} resource(s):"
+msgstr "a stack \"{stack}\" removeria {n} recurso(s):"
+
+msgid "Also REMOVE what this stack owns and the manifest no longer declares. Never happens without this flag."
+msgstr "REMOVE também o que esta stack possui e o manifesto já não declara. Nunca acontece sem esta flag."
+
+msgid "Removes everything this stack owns (by the `delonix.io/stack` label)."
+msgstr "Remove tudo o que esta stack possui (pela label `delonix.io/stack`)."
+
+msgid "Stack name. Default: a `kind: Stack`'s name, else the manifest's directory."
+msgstr "Nome da stack. Omissão: o nome de um `kind: Stack`, senão o directório do manifesto."
+
+msgid "List what would be removed, and remove nothing."
+msgstr "Lista o que seria removido, e não remove nada."

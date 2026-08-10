@@ -102,6 +102,25 @@ pub enum StackCmd {
         /// `--replace all`. Without it, `apply` refuses and changes nothing.
         #[arg(long = "replace", value_name = "KIND/NAME")]
         replace: Vec<String>,
+        /// Also REMOVE what this stack owns and the manifest no longer declares.
+        /// Never happens without this flag.
+        #[arg(long = "prune")]
+        prune: bool,
+    },
+    /// Removes everything this stack owns (by the `delonix.io/stack` label).
+    ///
+    /// A resource created by hand, or belonging to another stack, is never
+    /// touched. Removal happens in the REVERSE of the creation order, so a
+    /// network is not pulled from under the containers still attached to it.
+    Destroy {
+        #[arg(short = 'f', long = "file")]
+        file: Option<PathBuf>,
+        /// Stack name. Default: a `kind: Stack`'s name, else the manifest's directory.
+        #[arg(long)]
+        name: Option<String>,
+        /// List what would be removed, and remove nothing.
+        #[arg(long = "dry-run")]
+        dry_run: bool,
     },
     /// Shows what an `apply` WOULD change, without changing anything.
     ///
@@ -189,6 +208,7 @@ pub fn run(action: StackCmd) -> Result<()> {
             file,
             dry_run,
             replace,
+            prune,
         } => {
             if dry_run {
                 let path = manifest::resolve_path(file)?;
@@ -196,7 +216,7 @@ pub fn run(action: StackCmd) -> Result<()> {
                 print!("{}", manifest::render_with_defaults(&docs)?);
                 Ok(())
             } else {
-                apply(file, replace)
+                apply(file, replace, prune)
             }
         }
         StackCmd::Plan {
@@ -206,6 +226,11 @@ pub fn run(action: StackCmd) -> Result<()> {
             detailed_exitcode,
             fields,
         } => plan_cmd(file, name, output, detailed_exitcode, fields),
+        StackCmd::Destroy {
+            file,
+            name,
+            dry_run,
+        } => destroy(file, name, dry_run),
         StackCmd::Ls { file } => ls(file),
         StackCmd::Describe { file } => describe(file),
         StackCmd::Validate { file } => validate(file),
@@ -726,7 +751,7 @@ fn refuse_unallowed(changes: &[Change], replace: &[String]) -> Result<()> {
     )))
 }
 
-fn apply(file: Option<PathBuf>, replace: Vec<String>) -> Result<()> {
+fn apply(file: Option<PathBuf>, replace: Vec<String>, do_prune: bool) -> Result<()> {
     let path = manifest::resolve_path(file)?;
     let docs = manifest::load(&path)?;
     // Validate the graph BEFORE touching anything: the `apply` is fail-fast without
@@ -785,6 +810,13 @@ fn apply(file: Option<PathBuf>, replace: Vec<String>) -> Result<()> {
     // NEXT plan a three-way diff instead of a two-way one.
     converge_and_stamp(&docs, &stack, &changes)?;
 
+    // Pruning LAST, and only when asked. Removing before converging could pull a
+    // network out from under a container this same apply is about to attach to
+    // it — the resource is only really unused once everything else has settled.
+    if do_prune {
+        prune(&changes)?;
+    }
+
     // After creating everything, say what was created but will NOT work as it
     // appears without a host prerequisite (network mount in rootless, etc.) —
     // it is here, in the real creation flow, that the user needs to know it.
@@ -803,18 +835,118 @@ fn destroy_for_replace(changes: &[Change]) -> Result<()> {
                 &[("kind", &c.kind), ("name", &c.name)],
             )
         );
-        match c.kind.as_str() {
-            "Container" => super::container::remove_for_replace(&c.name)?,
-            "Volume" => super::volume::remove_for_replace(&c.name)?,
-            "Network" => super::network::remove_for_replace(&c.name)?,
-            "Pod" => super::pod::remove_pod(&c.name, true)?,
-            other => {
-                return Err(delonix_runtime_core::Error::Invalid(format!(
-                    "{other}/{}: recreation is not implemented for this Kind",
-                    c.name
-                )))
-            }
+        destroy_one(&c.kind, &c.name)?;
+    }
+    Ok(())
+}
+
+/// Destroys ONE resource of a converging Kind.
+///
+/// Deliberately the single place that removes anything: `--replace`, `--prune`
+/// and `destroy` all come through here, so there is no chance of three subtly
+/// different teardown paths — which is how a resource ends up half-removed in
+/// one of them.
+fn destroy_one(kind: &str, name: &str) -> Result<()> {
+    match kind {
+        "Container" => super::container::remove_for_replace(name),
+        "Volume" => super::volume::remove_for_replace(name),
+        "Network" => super::network::remove_for_replace(name),
+        "Pod" => super::pod::remove_pod(name, true),
+        other => Err(delonix_runtime_core::Error::Invalid(format!(
+            "{other}/{name}: removing this Kind declaratively is not implemented"
+        ))),
+    }
+}
+
+/// The order in which resources are torn down: the REVERSE of the order they
+/// are created in.
+///
+/// Removing a network while containers are still attached to it, or a volume
+/// while a container still mounts it, is how a teardown leaves a mess behind.
+/// `KINDS` already encodes the dependency order for creation; reversing it is
+/// the only correct teardown order, and deriving it instead of writing a second
+/// list means the two cannot drift apart.
+fn teardown_order(changes: &[Change]) -> Vec<&Change> {
+    let mut out: Vec<&Change> = Vec::new();
+    for kind in KINDS.iter().rev() {
+        out.extend(changes.iter().filter(|c| c.kind == **kind));
+    }
+    out
+}
+
+/// Removes what this stack owns and the manifest no longer declares.
+///
+/// Never runs unless asked for. An `apply` that deletes without being told to is
+/// the failure that destroys trust in an IaC tool, and no amount of correctness
+/// elsewhere makes up for it.
+fn prune(changes: &[Change]) -> Result<()> {
+    let doomed: Vec<&Change> = teardown_order(changes)
+        .into_iter()
+        .filter(|c| c.action == Action::Delete)
+        .collect();
+    for c in doomed {
+        println!(
+            "{}",
+            super::po::tf(
+                "{kind}/{name}: removing (no longer in the manifest)",
+                &[("kind", &c.kind), ("name", &c.name)],
+            )
+        );
+        destroy_one(&c.kind, &c.name)?;
+    }
+    Ok(())
+}
+
+/// `stack destroy` — removes everything this stack owns.
+///
+/// Ownership comes from the `delonix.io/stack` label, so a resource created by
+/// hand, or belonging to another stack, is never touched. That is also why the
+/// candidate list is computed against an EMPTY desired set: «nothing is
+/// declared any more» is exactly what a destroy means, and it reuses the same
+/// planner rather than a second, divergent notion of what belongs to a stack.
+fn destroy(file: Option<PathBuf>, name: Option<String>, dry_run: bool) -> Result<()> {
+    let path = manifest::resolve_path(file)?;
+    let docs = manifest::load(&path)?;
+    let stack = stack_name(&path, name.as_deref());
+    let changes: Vec<Change> = reconcile::plan(&[], &actual_of(&docs)?, &stack)
+        .into_iter()
+        .filter(|c| c.action == Action::Delete)
+        .collect();
+    if changes.is_empty() {
+        println!(
+            "{}",
+            super::po::tf(
+                "stack \"{stack}\" owns nothing — nothing to remove",
+                &[("stack", &stack)],
+            )
+        );
+        // Deliberately not an error: a destroy of an already-destroyed stack
+        // succeeding is what makes it safe to put in a teardown script.
+        return Ok(());
+    }
+    let ordered = teardown_order(&changes);
+    if dry_run {
+        println!(
+            "{}",
+            super::po::tf(
+                "stack \"{stack}\" would remove {n} resource(s):",
+                &[("stack", &stack), ("n", &ordered.len().to_string())],
+            )
+        );
+        for c in ordered {
+            println!("  -   {}/{}", c.kind, c.name);
         }
+        return Ok(());
+    }
+    for c in ordered {
+        println!(
+            "{}",
+            super::po::tf(
+                "{kind}/{name}: removing",
+                &[("kind", &c.kind), ("name", &c.name)],
+            )
+        );
+        destroy_one(&c.kind, &c.name)?;
     }
     Ok(())
 }
@@ -1697,5 +1829,43 @@ spec: {}
         // ...but an explicit `--name` still wins over it.
         assert_eq!(super::stack_name(&file, Some("x")), "x");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Teardown must be the REVERSE of creation: pulling a network out from
+    /// under the containers still attached to it, or a volume from under a
+    /// container that mounts it, is how a destroy leaves a mess behind.
+    ///
+    /// The order is DERIVED from `KINDS` rather than written down a second
+    /// time, so the two cannot drift apart — this test is what fixes that
+    /// property, not just the current ordering.
+    #[test]
+    fn a_ordem_de_remocao_e_a_inversa_da_de_criacao() {
+        let mk = |kind: &str| super::reconcile::Change {
+            kind: kind.to_string(),
+            name: "x".into(),
+            action: super::reconcile::Action::Delete,
+            reason: None,
+            cold_fields: vec![],
+            owner: None,
+            diffs: vec![],
+            changed: true,
+        };
+        // Deliberately fed in creation order, to prove the function reorders.
+        let changes: Vec<_> = ["Network", "Volume", "Container", "Pod"]
+            .iter()
+            .map(|k| mk(k))
+            .collect();
+        let order: Vec<&str> = super::teardown_order(&changes)
+            .iter()
+            .map(|c| c.kind.as_str())
+            .collect();
+        assert_eq!(order, vec!["Pod", "Container", "Volume", "Network"]);
+
+        // And it really is derived: every ordered kind keeps the relative
+        // position `KINDS` gives it, reversed.
+        let idx = |k: &str| super::KINDS.iter().position(|x| *x == k).unwrap();
+        assert!(idx("Network") < idx("Volume"));
+        assert!(idx("Volume") < idx("Container"));
+        assert!(idx("Container") < idx("Pod"));
     }
 }
