@@ -270,7 +270,7 @@ const KINDS: [&str; 12] = [
 /// loud (`Action::NotConverged`) instead of leaving the resource out. A plan
 /// that omits a resource reads as «no changes», which is the exact dishonesty
 /// this whole feature exists to remove.
-pub(crate) const CONVERGING_KINDS: [&str; 8] = [
+pub(crate) const CONVERGING_KINDS: [&str; 10] = [
     "Network",
     "Volume",
     "ShareVolume",
@@ -279,6 +279,8 @@ pub(crate) const CONVERGING_KINDS: [&str; 8] = [
     "Container",
     "Pod",
     "FirewallPolicy",
+    "HTTPRoute",
+    "Ingress",
 ];
 
 /// Everything the manifest asks for, in the reconciler's comparable form.
@@ -295,6 +297,7 @@ fn desired_of(docs: &[manifest::ManifestDoc]) -> Result<Vec<reconcile::Desired>>
                 "Vm" => super::vm::desired(doc)?,
                 "FirewallPolicy" => super::firewall::desired(doc)?,
                 "ShareVolume" => super::sharevolume::desired(doc)?,
+                "HTTPRoute" | "Ingress" => super::httproute::desired(doc)?,
                 _ => reconcile::Desired {
                     kind: kind.to_string(),
                     name: doc.metadata.name.clone(),
@@ -324,6 +327,7 @@ fn actual_of(docs: &[manifest::ManifestDoc]) -> Result<Vec<reconcile::Actual>> {
     out.extend(super::vm::actual()?);
     out.extend(super::firewall::actual(docs)?);
     out.extend(super::sharevolume::actual(docs)?);
+    out.extend(super::httproute::actual(docs)?);
     let (_, cstore) = super::util::open_stores()?;
     let containers = cstore.list().unwrap_or_default();
     for kind in KINDS {
@@ -393,10 +397,6 @@ fn not_converged_reason(kind: &str) -> &'static str {
         // provenance — nothing says which document produced which route. So a
         // per-document diff has nothing to compare against. Recording provenance
         // in the proxy config is what would change this.
-        "HTTPRoute" | "Ingress" => super::po::t(
-            "the proxy config merges every document into one, with no record of which \
-             document produced which route",
-        ),
         // A secret's VALUES are the state, and they are encrypted at rest and
         // never read back for display. A diff would either say nothing useful or
         // decrypt to compare — and decrypting to draw a plan is not a trade
@@ -445,6 +445,8 @@ fn compared_fields_table() -> Vec<(&'static str, &'static [&'static str])> {
         ("Vm", super::vm::RECONCILED_VM_FIELDS),
         ("FirewallPolicy", super::firewall::RECONCILED_FW_FIELDS),
         ("ShareVolume", super::sharevolume::RECONCILED_SHARE_FIELDS),
+        ("HTTPRoute", super::httproute::RECONCILED_HTTPROUTE_FIELDS),
+        ("Ingress", super::httproute::RECONCILED_HTTPROUTE_FIELDS),
         ("Pod", super::pod::RECONCILED_POD_FIELDS),
     ]
 }
@@ -1129,6 +1131,11 @@ fn converge_and_stamp(
                 // idempotent and updates the record in place, so converging IS
                 // applying — a per-field path would be a second way to write the
                 // same record.
+                // The proxy config is COLLECTIVE: there is no per-document
+                // apply to call, so converging one route means recomposing the
+                // whole thing — which is what `apply` does, and it SIGHUPs the
+                // live proxy instead of restarting it.
+                "HTTPRoute" | "Ingress" => super::httproute::converge_all(docs)?,
                 "ShareVolume" => {
                     let doc = docs
                         .iter()
