@@ -251,6 +251,23 @@ fn expand_stack(doc: &ManifestDoc) -> Result<Vec<ManifestDoc>> {
 }
 
 /// Loads ALL the documents (`---`-separated) of a manifest.
+/// Whether `metadata.namespace` does anything on this Kind.
+///
+/// Namespace here is **network isolation** — the `@dlxns_<ns>` accept plus the
+/// cross-namespace `ct state new` drop — so it only means something for a workload that
+/// holds an address: `Container`, `Pod`, `Vm`. `Workload` lowers to one of those and
+/// `Stack` propagates its namespace to the children it expands into, so both carry it.
+///
+/// It is deliberately NOT a naming scope: two namespaces cannot hold a volume of the same
+/// name today, and making them able to is a store-keying change with its own migration
+/// question — see the `Storage`/`ShareVolume` item of the cycle, not this one.
+///
+/// Takes the CANONICAL kind (`canonical_kind` has already run at the call site), so
+/// `VirtualMachine`/`VM` never reach here as such.
+pub(crate) fn kind_honors_namespace(kind: &str) -> bool {
+    matches!(kind, "Container" | "Pod" | "Vm" | "Workload" | "Stack")
+}
+
 pub fn load(path: &Path) -> Result<Vec<ManifestDoc>> {
     let text = std::fs::read_to_string(path).map_err(|e| {
         Error::Invalid(format!(
@@ -292,6 +309,22 @@ pub fn load(path: &Path) -> Result<Vec<ManifestDoc>> {
                     ("SUPPORTED_API_VERSION", SUPPORTED_API_VERSION),
                 ],
             )));
+        }
+        // `metadata.namespace` was accepted on EVERY Kind and honored by three
+        // (`docs/discovery/46_GAPS_ENCONTRADOS.md` §5). On the rest it parsed and went
+        // nowhere — and "accepted and ignored" on an ISOLATION field reads as "isolated"
+        // to whoever wrote it, which is the worst way for a boundary to fail.
+        //
+        // Warned HERE, before the Stack expansion, on purpose: a namespaced Stack
+        // propagates its namespace to every child it expands into, so warning afterwards
+        // would fire once per child for a field the user never wrote on that child. Only
+        // a namespace written on the document itself is worth a word.
+        if doc.metadata.namespace.is_some() && !kind_honors_namespace(&doc.kind) {
+            super::output::warn(&super::po::tf(
+                "{kind} '{name}': metadata.namespace has no effect — only Container, Pod \
+                 and Vm are namespaced (it scopes network isolation, not naming)",
+                &[("kind", &doc.kind), ("name", &doc.metadata.name)],
+            ));
         }
         // A grouped `kind: Stack` expands into its constituent resource docs
         // (which then flow through the normal per-Kind apply). The Stack doc
@@ -487,6 +520,42 @@ spec: { disk: k8s-golden }
         assert_eq!(docs[0].kind, "Vm");
         assert_eq!(docs[1].kind, "Vm");
         let _ = std::fs::remove_file(&p);
+    }
+
+    /// `metadata.namespace` is honored exactly where the engine applies it, and the alias
+    /// forms must not fall through the crack: `kind: VirtualMachine` is canonicalized
+    /// BEFORE the check, so it has to end up on the honored side. Asserting the two
+    /// functions together is the point — checking `kind_honors_namespace("Vm")` alone
+    /// would still pass the day an alias stopped being canonicalized.
+    #[test]
+    fn so_os_workloads_com_endereco_e_que_honram_a_namespace() {
+        for kind in ["Container", "Pod", "Vm", "Workload", "Stack"] {
+            assert!(kind_honors_namespace(kind), "{kind} tem de honrar");
+        }
+        for alias in ["VirtualMachine", "VM", "vm", "pod", "workload"] {
+            assert!(
+                kind_honors_namespace(canonical_kind(alias)),
+                "o alias {alias} tem de chegar canonicalizado ao lado honrado"
+            );
+        }
+        // Sem semantica de namespace hoje: aceitam o campo e nao fazem nada com ele,
+        // que e precisamente o que passa a ser avisado no `load`.
+        for kind in [
+            "Network",
+            "Volume",
+            "Storage",
+            "ShareVolume",
+            "Secret",
+            "Image",
+            "HTTPRoute",
+            "Ingress",
+            "Egress",
+            "FirewallPolicy",
+            "Dependency",
+            "Cluster",
+        ] {
+            assert!(!kind_honors_namespace(kind), "{kind} nao honra hoje");
+        }
     }
 
     #[test]
