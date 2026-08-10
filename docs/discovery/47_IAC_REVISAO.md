@@ -12,6 +12,43 @@
 > está dito como foi procurada. Nada é inferido da documentação — este repo já
 > registou pelo menos dois casos em que a documentação afirmava o contrário do código.
 
+## ESTADO — actualizado a 2026-08-10, depois de executar o roteiro
+
+Esta secção existe porque este repo já pagou por não a ter. O `AUDITORIA-E2E.md`
+ficou meses a listar 27 achados corrigidos como se fossem dívida viva, e o
+`AGENTS.md` regista a lição: **uma tabela de achados que não é actualizada mente
+nos dois sentidos.** Cada achado leva o seu estado real.
+
+| | Achado | Estado |
+|---|---|---|
+| 🔴 | **F1** `apply` não actualiza | ✅ **FECHADO** — `cmd/reconcile.rs`, diff de 3 vias; 11 dos 12 Kinds aplicáveis convergem |
+| 🔴 | **F2** sem `destroy`/prune | ✅ **FECHADO** — `stack destroy` + `apply --prune`, posse por `delonix.io/stack` |
+| 🔴 | **F3** sem drift nem `plan` | ✅ **FECHADO** — `stack plan`, `--detailed-exitcode` (0/2/1) |
+| 🟠 | **F4** API de gestão é uma fatia | ⬜ **EM ABERTO** — depende do F5 |
+| 🟠 | **F5** API sem contrato nem acesso remoto | ⬜ **EM ABERTO, deliberado** — precisa de ADR próprio (transporte, identidade, fronteira com o `delonix-paas`). Entretanto documentada como local e não-estável em `cli-stability.md`, para ninguém construir automação sobre ela por engano |
+| 🟠 | **F6** saída de `apply` não máquina-legível | ✅ **FECHADO** — `plan -o json` com `action`/`changed` estáveis |
+| 🟡 | **F7** `--dry-run` só no `stack apply` | 🟨 **PARCIAL** — o `plan` cobre o declarativo; os comandos imperativos continuam sem check-mode |
+| 🟡 | **F8** identidade e leitura não uniformes | 🟨 **PARCIAL** — a identidade foi corrigida onde estava ERRADA (a de uma `Image` é a ref, não o nome do documento — era bug), mas `inspect`/`describe`/`ls -o json` continuam três formas |
+| 🟡 | **F9** sem concorrência optimista | ⬜ **EM ABERTO** — dois `apply` em paralelo continuam a sobrepor-se |
+| 🟡 | **F10** ordem por Kind, não por grafo | ⬜ **EM ABERTO** — sem `dependsOn` por recurso; o `stack wait` cobre o «espera que esteja de pé» a jusante |
+| 🟡 | **F11** schema declarado não estável | ✅ **FECHADO** — promovido a estável, com `scripts/schema-diff.sh` como gate |
+| 🟡 | **F12** sem `explain`, schema à mão | ✅ **FECHADO** — ADR-0007: gerados do código, com teste a garantir que o publicado É o gerado |
+
+**Sobre o veredicto do §7.** Dizia que faltava «o motor de convergência» e que os
+blocos 1 e 2 eram maioritariamente ligação. Confirmou-se em parte: a ligação
+existia (`cmd_update`, `-o json`, `conditions.rs`), mas o trabalho real foi a
+**normalização** — fazer os dois lados produzirem a mesma string. Cada Kind tem
+hoje um teste a provar que um manifesto inalterado dá zero diferenças, e a
+maioria dos bugs desta série veio daí.
+
+**O que a revisão não previu**, e só apareceu a executar: sete bugs reais, todos
+por medição — a identidade de uma `Image`; duas `FirewallPolicy` a apagarem-se
+em silêncio; o `env: {K: v}` descartado num exemplo publicado; dois Kinds
+aplicados que o `ls` nunca mostrava; a condição de montagem que ficou muda
+depois de uma fusão; e três listas de Kinds convergentes que derivaram. A
+revisão dos Kinds que se seguiu, e que reordenou o trabalho, está em
+[48_REVISAO_KINDS.md](48_REVISAO_KINDS.md).
+
 ---
 
 ## 0. O critério
