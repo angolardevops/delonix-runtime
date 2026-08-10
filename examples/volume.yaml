@@ -1,7 +1,7 @@
 # Volume — a named local volume (data survives `container rm`). For NETWORK
 # storage (NFS/SMB/WebDAV) the SAME Kind takes an `nfs:`/`cifs:`/`webdav:` block
 # (see examples/storage.yaml).
-# Apply with:  delonix volume apply -f examples/volume.yaml
+# Apply with:  delonix volumes apply -f examples/volume.yaml
 apiVersion: delonix.io/v1
 kind: Volume
 metadata:

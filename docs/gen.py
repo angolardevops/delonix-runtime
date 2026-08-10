@@ -506,8 +506,10 @@ registados no store — o <code>create</code> AVISA alto que a rede não foi rea
                 ('Detalhe de uma rede, estilo kubectl',
                  'delonix network describe minha-rede')]},
             "node": {"examples": [
-                ('Gerir nós de uma rede overlay entre máquinas',
-                 'delonix network node ls')]},
+                ('A chave WireGuard DESTE nó, para dar aos pares do overlay',
+                 'delonix network node init'),
+                ('Só a chave pública, para compor num script',
+                 'delonix network node key')]},
             "dash": {"examples": [
                 ('Dashboard só das redes',
                  'delonix network dash')]},
@@ -2091,7 +2093,10 @@ EXAMPLES_EN = {
     ("volumes", "rm"): [""],
     ("volumes", "apply"): [""],
     ("network", "describe"): ["Network detail, kubectl-style"],
-    ("network", "node"): ["Manage nodes of an overlay network between machines"],
+    ("network", "node"): [
+        "This node's WireGuard key, to hand out to the overlay's peers",
+        "Just the public key, for composing in a script",
+    ],
     ("network", "dash"): ["Networks-only dashboard"],
     ("network", "create"): ["Bridge network for a group of services", "Encrypted overlay between nodes (VXLAN + WireGuard)"],
     ("network", "ls"): [""],
@@ -2575,7 +2580,7 @@ def page(path, title, body, depth=0):
         f.write(doc)
 
 
-def examples_html(exs, captions_en=None):
+def examples_html(exs, captions_en=None, key=None):
     """Each example is (caption, command) or (caption, command, output) — the
     3rd, optional element is REAL output captured from an actual run (never
     invented), rendered in a dimmer block right under the command so a reader
@@ -2585,6 +2590,15 @@ def examples_html(exs, captions_en=None):
     the caption renders bilingually via `bi()`; without it, the caption
     stays PT-only (unaffected, the default for the ~200 examples not yet
     translated)."""
+    # As duas listas são PARALELAS por posição, e é o suficiente para uma
+    # divergir em silêncio: acrescentar um exemplo sem a legenda EN dava um
+    # `IndexError` cru a meio da geração, deixando o site PARCIALMENTE escrito
+    # com a página velha no lugar. Falha aqui, a dizer qual é a chave.
+    if captions_en is not None and len(captions_en) != len(exs):
+        raise SystemExit(
+            f"EXAMPLES_EN{key!r}: {len(captions_en)} legenda(s) EN para "
+            f"{len(exs)} exemplo(s) — as duas listas são paralelas por posição."
+        )
     parts = []
     for i, ex in enumerate(exs):
         cap, cmd = ex[0], ex[1]
@@ -2623,7 +2637,7 @@ def group_page(name, g):
     _, top_rest = split_help_intro(top_help)
     body.append(f"<div class='help'><pre><code>{html.escape(top_rest)}</code></pre></div>")
     if g.get("examples"):
-        body.append(f"<h2>{bi('span', 'Exemplos', 'Examples')}</h2>" + examples_html(g["examples"], EXAMPLES_EN.get((name, None))))
+        body.append(f"<h2>{bi('span', 'Exemplos', 'Examples')}</h2>" + examples_html(g["examples"], EXAMPLES_EN.get((name, None)), (name, None)))
     if g.get("extra"):
         body.append(g["extra"])
     for sub, meta in g["subs"].items():
@@ -2643,7 +2657,7 @@ def group_page(name, g):
             else:
                 body.append(meta["notes"])
         if meta.get("examples"):
-            body.append(f"<h3>{bi('span', 'Exemplos', 'Examples')}</h3>" + examples_html(meta["examples"], EXAMPLES_EN.get((name, sub))))
+            body.append(f"<h3>{bi('span', 'Exemplos', 'Examples')}</h3>" + examples_html(meta["examples"], EXAMPLES_EN.get((name, sub)), (name, sub)))
     if name in CLI_LABS:
         body.append(lab_challenge_html(CLI_LABS[name]))
     page(f"comandos/{name}.html", g["title"], "\n".join(body), depth=1)
