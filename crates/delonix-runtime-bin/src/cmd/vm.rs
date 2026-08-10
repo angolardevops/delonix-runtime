@@ -396,11 +396,14 @@ pub enum VmCmd {
         /// local golden VM image (if there is exactly one; `image --vm ls`).
         #[arg(long)]
         disk: Option<String>,
-        #[arg(long, default_value_t = 1)]
-        vcpus: u32,
-        /// Memory (`"2G"`/`"1024M"`).
-        #[arg(long, default_value = "1G")]
-        memory: String,
+        /// vCPUs (default: 1, or the image's `VCPUS` — see `HYPERVISOR`/`VCPUS`
+        /// in `delonix vm init --vmfile` — when `--disk` names a local image).
+        #[arg(long)]
+        vcpus: Option<u32>,
+        /// Memory (`"2G"`/`"1024M"`; default: `1G`, or the image's `MEMORY`
+        /// when `--disk` names a local image).
+        #[arg(long)]
+        memory: Option<String>,
         /// Ingress network for the tap (default: the system ingress network; a
         /// custom network must be created first with `delonix network create`).
         #[arg(long, default_value = "ingress")]
@@ -453,7 +456,9 @@ pub enum VmCmd {
         /// VFIO PCI passthrough, repeatable.
         #[arg(long = "device")]
         devices: Vec<String>,
-        /// `cloud-hypervisor`|`libvirt` (omit = auto-detection).
+        /// `cloud-hypervisor`|`libvirt` (omit: the image's `HYPERVISOR` if
+        /// `--disk` names a local one, else `DELONIX_VM_BACKEND`/`vm
+        /// default-backend`/auto-detection, in that order).
         #[arg(long)]
         backend: Option<String>,
         /// libvirt only: `user`|`nat`|`bridge`.
@@ -525,6 +530,30 @@ pub enum VmCmd {
     Push {
         name: String,
         target: String,
+    },
+    /// Convert a VM disk between `qcow2` and `raw` — flattened either way,
+    /// ready to boot on either backend (libvirt/QEMU and Cloud Hypervisor
+    /// already share this same pair of formats).
+    Convert {
+        /// A local VM image name (`vm ls`) or a literal `.qcow2`/`.raw` path.
+        source: String,
+        #[arg(long = "to", value_enum)]
+        to: super::vmimage::ConvertFormat,
+        /// Destination file (default: alongside the source, with the new extension).
+        #[arg(short = 'o', long = "output")]
+        output: Option<PathBuf>,
+    },
+    /// Get or set the default VM backend, used by `vm create` when neither
+    /// `--backend` nor `DELONIX_VM_BACKEND` is given — above the engine's own
+    /// auto-detection heuristic. With no flag, prints the current default
+    /// (`none` if auto-detection decides).
+    DefaultBackend {
+        /// Set the persisted default (`cloud-hypervisor` or `libvirt`).
+        #[arg(long)]
+        set: Option<String>,
+        /// Clear the persisted default (fall back to auto-detection).
+        #[arg(long)]
+        clear: bool,
     },
     /// List the VMs.
     Ls {
@@ -836,6 +865,28 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
     Ok(())
 }
 
+/// Applies `--vcpus`/`--memory`/`--backend` precedence over an image's
+/// recorded `VCPUS`/`MEMORY`/`HYPERVISOR` (a `VMfile` build — see
+/// `cmd::vmfile`): an explicit CLI value always wins; the image's value is
+/// the fallback; the final vcpus/memory default (1 / `"1G"`) only applies
+/// when NEITHER said anything. Pure — no `VmImageStore` I/O — so the
+/// precedence itself is testable without a real disk on the file system.
+fn resolve_vm_defaults(
+    vcpus: Option<u32>,
+    memory: Option<String>,
+    backend: Option<String>,
+    image_meta: Option<&super::vmimage::VmImage>,
+) -> (u32, String, Option<String>) {
+    let vcpus = vcpus
+        .or_else(|| image_meta.and_then(|m| m.default_vcpus))
+        .unwrap_or(1);
+    let memory = memory
+        .or_else(|| image_meta.and_then(|m| m.default_memory.clone()))
+        .unwrap_or_else(|| "1G".to_string());
+    let backend = backend.or_else(|| image_meta.and_then(|m| m.default_backend.clone()));
+    (vcpus, memory, backend)
+}
+
 pub fn run(action: VmCmd) -> Result<()> {
     if let VmCmd::Init {
         dir,
@@ -912,7 +963,14 @@ pub fn run(action: VmCmd) -> Result<()> {
         } => {
             // No --disk: the single golden VM image (same resolution as
             // `cluster kubeadm` — 0 or several images give a clear error, never
-            // a blind choice).
+            // a blind choice). When `--disk` names a KNOWN local image (or
+            // none is given at all, which always resolves to one), its
+            // `VCPUS`/`MEMORY`/`HYPERVISOR` (recorded by a `VMfile` build —
+            // see `cmd::vmfile`) become defaults for `--vcpus`/`--memory`/
+            // `--backend` below, applied only where the caller left the flag
+            // unset. A `--disk` that names an ordinary path (no store entry)
+            // behaves exactly as before this change.
+            let mut image_meta: Option<super::vmimage::VmImage> = None;
             let disk = match (url_img, disk) {
                 // An explicit URL is the most specific thing the caller can
                 // say, so nothing else gets consulted — not the local store,
@@ -923,7 +981,17 @@ pub fn run(action: VmCmd) -> Result<()> {
                         .to_string_lossy()
                         .into_owned()
                 }
-                (None, Some(d)) => d,
+                (None, Some(d)) => {
+                    let store = super::vmimage::VmImageStore::open(super::util::state_root())?;
+                    let known = store.get(&d).ok().map(|meta| (store.qcow2_path(&d), meta));
+                    match known {
+                        Some((path, meta)) => {
+                            image_meta = Some(meta);
+                            path.to_string_lossy().into_owned()
+                        }
+                        None => d,
+                    }
+                }
                 (None, None) => {
                     let store = super::vmimage::VmImageStore::open(super::util::state_root())?;
                     // Downloads the official golden when nothing is local — the
@@ -932,9 +1000,12 @@ pub fn run(action: VmCmd) -> Result<()> {
                     // which is a research task for an image the project
                     // publishes so it never has to be built by hand.
                     let tag = super::cluster::resolve_or_pull_vm_image(&store, None, None)?;
+                    image_meta = store.get(&tag).ok();
                     store.qcow2_path(&tag).to_string_lossy().into_owned()
                 }
             };
+            let (vcpus, memory, backend) =
+                resolve_vm_defaults(vcpus, memory, backend, image_meta.as_ref());
             // ALWAYS a cloud-init seed (unless an explicit `--seed`). Without a
             // datasource, the cloud image's cloud-init doesn't run the network
             // phase and the VM ends up with no IP nor route ("Network is
@@ -1073,6 +1144,37 @@ pub fn run(action: VmCmd) -> Result<()> {
         VmCmd::Push { name, target } => {
             let store = super::vmimage::VmImageStore::open(super::util::state_root())?;
             super::vmimage::cmd_push(&store, &name, &target)
+        }
+        VmCmd::Convert { source, to, output } => {
+            let store = super::vmimage::VmImageStore::open(super::util::state_root())?;
+            super::vmimage::cmd_convert(&store, &source, to, output)
+        }
+        VmCmd::DefaultBackend { set, clear } => {
+            if clear {
+                delonix_vm::clear_default_backend(&base)?;
+                println!(
+                    "{}",
+                    super::po::t("default backend cleared (falls back to auto-detection)")
+                );
+            } else if let Some(backend) = set {
+                delonix_vm::set_default_backend(&base, &backend)?;
+                let canon = delonix_vm::get_default_backend(&base).unwrap_or(backend);
+                println!(
+                    "{}",
+                    super::po::tf("default backend set to {backend}", &[("backend", &canon)])
+                );
+            } else {
+                match delonix_vm::get_default_backend(&base) {
+                    Some(b) => println!("{b}"),
+                    None => println!(
+                        "{}",
+                        super::po::t(
+                            "none (auto-detection: cloud-hypervisor if installed, else libvirt)"
+                        )
+                    ),
+                }
+            }
+            Ok(())
         }
         VmCmd::Ls { ports, output } => {
             if output == super::output::OutputFormat::Json {
@@ -2165,9 +2267,72 @@ fn cmd_init(
 mod tests {
     use super::{
         build_meta_data, build_user_data, fmt_vm_gpu, fmt_vm_status, fmt_vm_uptime,
-        normalize_vm_spec, parse_ip_gateways, parse_ss_binds, vm_role, VmSpec,
+        normalize_vm_spec, parse_ip_gateways, parse_ss_binds, resolve_vm_defaults, vm_role, VmSpec,
     };
     use delonix_runtime_core::Status;
+
+    fn image_with_defaults(
+        vcpus: Option<u32>,
+        memory: Option<String>,
+        backend: Option<String>,
+    ) -> super::super::vmimage::VmImage {
+        super::super::vmimage::VmImage {
+            name: "img".to_string(),
+            tag: "img".to_string(),
+            digest: "sha256:x".to_string(),
+            size: 0,
+            ubuntu_release: None,
+            k8s_version: None,
+            created_unix: 0,
+            kernel_version: None,
+            distro: None,
+            default_vcpus: vcpus,
+            default_memory: memory,
+            default_backend: backend,
+        }
+    }
+
+    #[test]
+    fn resolve_vm_defaults_cli_explicito_ganha_a_imagem() {
+        let img = image_with_defaults(Some(4), Some("4G".into()), Some("cloud-hypervisor".into()));
+        // O CLI diz tudo — a imagem é ignorada por inteiro.
+        assert_eq!(
+            resolve_vm_defaults(
+                Some(2),
+                Some("2G".into()),
+                Some("libvirt".into()),
+                Some(&img)
+            ),
+            (2, "2G".to_string(), Some("libvirt".to_string()))
+        );
+    }
+
+    #[test]
+    fn resolve_vm_defaults_cai_para_a_imagem_quando_o_cli_nao_diz_nada() {
+        let img = image_with_defaults(Some(4), Some("4G".into()), Some("libvirt".into()));
+        assert_eq!(
+            resolve_vm_defaults(None, None, None, Some(&img)),
+            (4, "4G".to_string(), Some("libvirt".to_string()))
+        );
+    }
+
+    #[test]
+    fn resolve_vm_defaults_sem_cli_nem_imagem_usa_1_vcpu_1g_e_backend_none() {
+        assert_eq!(
+            resolve_vm_defaults(None, None, None, None),
+            (1, "1G".to_string(), None)
+        );
+    }
+
+    #[test]
+    fn resolve_vm_defaults_campo_a_campo_da_imagem_so_preenche_o_que_falta_no_cli() {
+        // A imagem só tem VCPUS — MEMORY/HYPERVISOR ficam nos defaults finais.
+        let img = image_with_defaults(Some(8), None, None);
+        assert_eq!(
+            resolve_vm_defaults(None, None, None, Some(&img)),
+            (8, "1G".to_string(), None)
+        );
+    }
 
     #[test]
     fn vm_role_le_o_sufixo_determinístico_do_cluster_kubeadm() {

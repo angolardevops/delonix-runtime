@@ -3630,3 +3630,26 @@ msgstr "`--network` é para builds de VMfile; a receita dourada decide isso com 
 
 msgid "log in with the key you injected"
 msgstr "entrar com a chave que injectaste"
+
+# ---- vm convert / default-backend / HYPERVISOR do VMfile -------------------
+
+msgid "no such local VM image or file: {source} (see `delonix image vm ls`)"
+msgstr "sem tal imagem VM local nem ficheiro: {source} (ver `delonix image vm ls`)"
+
+msgid "destination is the same as the source — pass `-o <file>` to convert in place"
+msgstr "o destino é igual à origem — passa `-o <ficheiro>` para converter no lugar"
+
+msgid "converting {src} to {fmt} → {dst}..."
+msgstr "a converter {src} para {fmt} → {dst}..."
+
+msgid "default backend cleared (falls back to auto-detection)"
+msgstr "backend por omissão removido (volta à auto-detecção)"
+
+msgid "default backend set to {backend}"
+msgstr "backend por omissão definido para {backend}"
+
+msgid "none (auto-detection: cloud-hypervisor if installed, else libvirt)"
+msgstr "nenhum (auto-detecção: cloud-hypervisor se instalado, senão libvirt)"
+
+msgid "`convert` is only for VM images — use `delonix image --vm convert`"
+msgstr "`convert` é só para imagens VM — usa `delonix image --vm convert`"

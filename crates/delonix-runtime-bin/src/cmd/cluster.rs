@@ -2231,6 +2231,9 @@ users:
                 created_unix: 0,
                 kernel_version: None,
                 distro: None,
+                default_vcpus: None,
+                default_memory: None,
+                default_backend: None,
             })
             .unwrap();
         assert_eq!(
@@ -2254,6 +2257,9 @@ users:
                 created_unix: 0,
                 kernel_version: None,
                 distro: None,
+                default_vcpus: None,
+                default_memory: None,
+                default_backend: None,
             })
             .unwrap();
         assert_eq!(
@@ -2293,6 +2299,9 @@ users:
                 created_unix: 0,
                 kernel_version: None,
                 distro: None,
+                default_vcpus: None,
+                default_memory: None,
+                default_backend: None,
             })
             .unwrap();
         assert_eq!(
@@ -2321,6 +2330,9 @@ users:
                     created_unix: 0,
                     kernel_version: None,
                     distro: None,
+                    default_vcpus: None,
+                    default_memory: None,
+                    default_backend: None,
                 })
                 .unwrap();
         }
@@ -2350,6 +2362,9 @@ users:
                     created_unix: 0,
                     kernel_version: None,
                     distro: None,
+                    default_vcpus: None,
+                    default_memory: None,
+                    default_backend: None,
                 })
                 .unwrap();
         }

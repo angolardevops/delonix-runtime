@@ -2868,3 +2868,61 @@ detecção post-mortem possível**. Medido com um `tail /dev/zero` sob `-m 48M`:
 Portanto o `oom_kill` tem de ser capturado **ao vivo** por quem já vive tanto quanto o container
 — o candidato natural é o shim de logs, que é o único processo por-container que existe neste
 modelo — e persistido no registo. Não tentar lê-lo depois: a informação já não está lá.
+
+## `HYPERVISOR` no VMfile + `vm convert` + `vm default-backend` (v0.45.x)
+
+Três lacunas fechadas na pilha de imagens VM já existente (`vm build`/`vm create`), pedidas
+juntas: "converter para hypervisor", "VMfile compatível com os principais hypervisors" e "definir
+o default hypervisor (libvirt ou cloud hypervisor)" — os dois backends que o `delonix-vm` já
+suporta, não o Microsoft Hyper-V (o motor corre em Linux/KVM/rootless; "hyperv" aqui é abreviatura
+informal de "hypervisor").
+
+- **`delonix image vm convert <origem> --to qcow2|raw [-o <destino>]`** (`vmimage::cmd_convert`,
+  nos 3 pontos de entrada de sempre — `vm convert`/`image vm convert`/`image --vm convert`, +
+  recusa clara em `image convert` sem `--vm`). `qemu-img convert` puro, mesmo padrão já usado em
+  `cmd_build`; `origem` tenta primeiro um nome local do `VmImageStore`, cai para caminho literal
+  se não bater. Não existe "formato Hyper-V" a converter — libvirt (QEMU) e Cloud Hypervisor já
+  partilham qcow2/raw, por isso a conversão é só entre esses dois.
+- **`HYPERVISOR <cloud-hypervisor|libvirt>` no VMfile** (`cmd::vmfile`, mesmo espírito de
+  `VCPUS`/`MEMORY`) — canonicalizado no parse via `delonix_vm::valid_backend_name` (fail-closed a
+  um nome desconhecido). **Corrigiu de caminho um gap pré-existente**: `vf.vcpus`/`vf.memory` já
+  eram parseados e testados desde sempre, mas `vmfile::build()` nunca os escrevia no `VmImage`
+  final — a doc-comment do `VmFile` prometia "defaults recorded in the image's metadata" e isso
+  nunca tinha acontecido, o mesmo padrão de código morto (parseado, nunca ligado) que este repo já
+  encontrou várias vezes noutros sítios. `VmImage` ganhou `default_vcpus`/`default_memory`/
+  `default_backend` (`#[serde(default)]`, `None` em imagens antigas/`vm pull`ed — mesmo gap
+  conhecido de `ubuntu_release`/`k8s_version`).
+- **`vm create` aplica os defaults da imagem** quando `--disk` nomeia uma imagem local conhecida
+  (ou nenhum `--disk` é dado, que resolve sempre a uma) — `--vcpus`/`--memory` passaram a
+  `Option<u32>`/`Option<String>` (eram `default_value_t`/`default_value` do clap, que não permitem
+  distinguir "omitido" de "valor igual ao default") para a precedência: `--vcpus`/`--memory`/
+  `--backend` explícito > o que a imagem recomenda > `1`/`"1G"`/`None`. Lógica extraída para
+  `resolve_vm_defaults` (pura, testada) — nenhuma chamada a `VmImageStore` dentro dela.
+- **`DELONIX_VM_BACKEND` + `delonix vm default-backend [--set <backend>|--clear]`** — o motor só
+  tinha auto-detecção (prefere Cloud Hypervisor se instalado, senão libvirt) sem forma de fixar
+  uma preferência persistente. Vive em `delonix-vm` (`get/set/clear_default_backend`,
+  `<DELONIX_ROOT>/vm-default-backend`, um nome canónico por linha — sem JSON novo, dependência
+  zero), não só no bin, para `stack apply`/`cluster kubeadm` herdarem a preferência de borla, tal
+  como o resto do módulo já documenta para a regra volumes⇒libvirt. **Precedência completa em
+  `create_with`**: `cfg.backend` explícito (que já inclui o `HYPERVISOR` da imagem, resolvido no
+  bin) > `DELONIX_VM_BACKEND` > o default persistido > a heurística de capacidade já existente
+  (volumes⇒libvirt; cloud image sem kernel⇒libvirt se disponível). Os dois níveis novos comportam-se
+  como um `--backend` explícito — incluindo ultrapassar a heurística e falhar tarde e alto no
+  `boot` se pedirem um backend incompatível (ex.: CH + volumes) — porque são escolha explícita do
+  operador, só feita uma vez em vez de por comando.
+- **Validado ao vivo** (`DELONIX_ROOT` isolado no scratchpad, sem tocar em VMs/imagens reais deste
+  host): `vm default-backend --set ch` normaliza para `cloud-hypervisor`, `--clear` volta a "none
+  (auto-detecção)", nome desconhecido recusa sem escrever nada; `qemu-img create` de 4 MiB
+  convertido nos 3 caminhos (`vm convert`/`image vm convert`/`image --vm convert`), `image convert`
+  sem `--vm` recusa com a mensagem certa; `VMfile` com `FROM <imagem local>` + `HYPERVISOR
+  libvirt` construído com `vm build` produz um `.json` com `"default_backend": "libvirt"`; as
+  strings novas traduzem correctamente sob `--l18n=pt` (`pt.po`, secção "vm convert /
+  default-backend / HYPERVISOR do VMfile"). **Não validado ao vivo** (deliberado, para não deixar
+  uma VM real presa neste host partilhado nem exigir rede/`virt-customize`): o caminho completo
+  `vm create --disk <imagem-com-HYPERVISOR>` a arrancar de facto no backend recomendado — coberto
+  só por `resolve_vm_defaults`, que é pura e testada.
+- **Por fazer, deliberadamente fora deste incremento**: um ISO de instalação/live-boot a partir de
+  um build (a leitura "converter para hypervisor" nunca foi sobre isto — ver a nota de decisão que
+  fixou "hyperv" = hypervisor genérico); expor `generate_seed_iso` como comando standalone fora de
+  `vm create`; propagar `default_vcpus`/`default_memory`/`default_backend` a `cluster kubeadm`/
+  `kind: Vm` (manifesto) — hoje só o `vm create` via CLI os lê.

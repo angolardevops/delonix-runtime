@@ -16,7 +16,7 @@
 //! (SLIRP/passt: egress without a `tap`); integration with the ingress bridge (inbound
 //! via the SDN) is a follow-up.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -548,17 +548,30 @@ fn unsupported_snapshot(backend: &str, op: &str) -> Error {
     ))
 }
 
+/// Normalizes any accepted alias (`ch`, `cloudhypervisor`, `kvm`, `qemu`, …)
+/// to the canonical backend id (`"cloud-hypervisor"`/`"libvirt"`). `None` for
+/// an empty string (the "no opinion" case, distinct from an unknown name —
+/// callers that need to reject unknown names do so themselves, since an empty
+/// string is valid here but not in [`select_backend`]'s explicit-request arm).
+fn canonical_backend_name(s: &str) -> Option<&'static str> {
+    match s.trim().to_lowercase().as_str() {
+        "cloud-hypervisor" | "ch" | "cloudhypervisor" => Some("cloud-hypervisor"),
+        "libvirt" | "kvm" | "qemu" => Some("libvirt"),
+        _ => None,
+    }
+}
+
 /// Selects a backend from an explicit request or by auto-detection
 /// (prefers cloud-hypervisor if installed; otherwise libvirt).
 pub fn select_backend(want: Option<&str>) -> Result<Box<dyn VmBackend>> {
-    match want.map(|s| s.trim().to_lowercase()).as_deref() {
-        Some("cloud-hypervisor") | Some("ch") | Some("cloudhypervisor") => {
-            Ok(Box::new(CloudHypervisorBackend))
-        }
-        Some("libvirt") | Some("kvm") | Some("qemu") => Ok(Box::new(LibvirtBackend)),
-        Some(other) if !other.is_empty() => Err(Error::Invalid(format!(
-            "unknown VM backend: '{other}' (use 'cloud-hypervisor' or 'libvirt')"
-        ))),
+    match want.map(str::trim) {
+        Some(other) if !other.is_empty() => match canonical_backend_name(other) {
+            Some("cloud-hypervisor") => Ok(Box::new(CloudHypervisorBackend)),
+            Some(_) => Ok(Box::new(LibvirtBackend)),
+            None => Err(Error::Invalid(format!(
+                "unknown VM backend: '{other}' (use 'cloud-hypervisor' or 'libvirt')"
+            ))),
+        },
         _ => {
             let ch = CloudHypervisorBackend;
             if ch.available() {
@@ -572,6 +585,56 @@ pub fn select_backend(want: Option<&str>) -> Result<Box<dyn VmBackend>> {
                 "no VM backend available: install 'cloud-hypervisor' or 'libvirt'+'qemu'".into(),
             ))
         }
+    }
+}
+
+/// Validates and normalizes a backend name for external callers (the CLI's
+/// `HYPERVISOR` VMfile instruction, `vm default-backend --set`) — same
+/// acceptance rules as [`select_backend`]'s explicit-request arm, without
+/// needing to construct a [`VmBackend`] just to validate a string.
+pub fn valid_backend_name(s: &str) -> Result<&'static str> {
+    canonical_backend_name(s).ok_or_else(|| {
+        Error::Invalid(format!(
+            "unknown VM backend: '{}' (use 'cloud-hypervisor' or 'libvirt')",
+            s.trim()
+        ))
+    })
+}
+
+/// File that persists the machine-wide default backend (`<base>/vm-default-backend`,
+/// a bare canonical name, no JSON — this repo avoids new parsing surface for a
+/// single string). Sibling of `vms_dir(base)`/`store(base)`'s root.
+fn default_backend_file(base: &Path) -> PathBuf {
+    base.join("vm-default-backend")
+}
+
+/// The persisted default backend, if one was set with [`set_default_backend`].
+/// Best-effort: a missing or unreadable file is `None`, never an error — this
+/// is a convenience default, not a requirement, and a corrupt/stale file must
+/// not block `vm create` (fall through to auto-detection instead).
+pub fn get_default_backend(base: &Path) -> Option<String> {
+    let raw = std::fs::read_to_string(default_backend_file(base)).ok()?;
+    canonical_backend_name(raw.trim()).map(str::to_string)
+}
+
+/// Persists the default backend used when neither `--backend` nor
+/// `DELONIX_VM_BACKEND` is given (see the precedence documented on
+/// [`create_with`]). Validated before writing — refusing an unknown name here
+/// is cheap; discovering it at the next `vm create` is not.
+pub fn set_default_backend(base: &Path, backend: &str) -> Result<()> {
+    let canon = valid_backend_name(backend)?;
+    std::fs::create_dir_all(base)?;
+    std::fs::write(default_backend_file(base), canon)?;
+    Ok(())
+}
+
+/// Removes the persisted default (falls back to `DELONIX_VM_BACKEND`/auto-detection).
+/// Idempotent: a default that was never set is not an error.
+pub fn clear_default_backend(base: &Path) -> Result<()> {
+    match std::fs::remove_file(default_backend_file(base)) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(e.into()),
     }
 }
 
@@ -1915,6 +1978,13 @@ pub fn create(base: &Path, cfg: &VmConfig) -> Result<Vm> {
 /// [`create`] with a progress callback: `on` fires once per [`CreateStage`] as
 /// the VM is built (disk → network → define → start), so the CLI can render
 /// step-by-step progress. The engine emits only the enum; the text lives in the bin.
+///
+/// Backend precedence when `cfg.backend` is `None`: `DELONIX_VM_BACKEND` env
+/// var, then [`get_default_backend`] (persisted, [`set_default_backend`]),
+/// then the capability heuristic (volumes ⇒ libvirt; cloud image without a
+/// kernel ⇒ libvirt if available). Lives here (not just in the CLI) so every
+/// consumer of this API — `stack apply`/`cluster kubeadm` included — inherits
+/// it for free.
 pub fn create_with(base: &Path, cfg: &VmConfig, on: &dyn Fn(CreateStage)) -> Result<Vm> {
     if !valid_vm_name(&cfg.name) {
         return Err(Error::Invalid(format!(
@@ -1960,10 +2030,26 @@ pub fn create_with(base: &Path, cfg: &VmConfig, on: &dyn Fn(CreateStage)) -> Res
             // boots them. CH is left for DIRECT-KERNEL boot (k8s nodes with their own
             // kernel), where it is the best. Only if libvirt exists; otherwise CH with
             // a warning (better to try than to refuse).
-            let want = match cfg.backend.as_deref() {
-                Some(b) => Some(b),
-                None if !cfg.volumes.is_empty() => Some("libvirt"),
-                None if cfg.kernel.is_none() && LibvirtBackend.available() => Some("libvirt"),
+            //
+            // Precedence for "no opinion from the caller" (`cfg.backend` is
+            // `None`): `DELONIX_VM_BACKEND` (session-wide), then the
+            // persisted default (`set_default_backend`, machine-wide), then
+            // the capability heuristic below. Both env/persisted act exactly
+            // like an explicit `cfg.backend` — including bypassing the
+            // heuristic and its warning — because they ARE an explicit
+            // choice, just made once instead of per-command; a backend
+            // requested this way that can't actually boot the VM (e.g. the
+            // volumes/9p case above) still fails loud at boot, never silently.
+            let standing_choice = std::env::var("DELONIX_VM_BACKEND")
+                .ok()
+                .filter(|s| !s.trim().is_empty())
+                .or_else(|| get_default_backend(base));
+            let want = match cfg.backend.as_deref().or(standing_choice.as_deref()) {
+                Some(b) => Some(b.to_string()),
+                None if !cfg.volumes.is_empty() => Some("libvirt".to_string()),
+                None if cfg.kernel.is_none() && LibvirtBackend.available() => {
+                    Some("libvirt".to_string())
+                }
                 None if cfg.kernel.is_none() => {
                     eprintln!(
                         "warning: booting a cloud image on Cloud Hypervisor (libvirt not found) —                          if it panics on 'unable to mount root fs', install libvirt+qemu"
@@ -1972,7 +2058,7 @@ pub fn create_with(base: &Path, cfg: &VmConfig, on: &dyn Fn(CreateStage)) -> Res
                 }
                 None => None,
             };
-            select_backend(want)?
+            select_backend(want.as_deref())?
         }
     };
 
@@ -2839,6 +2925,58 @@ mod tests {
             "cloud-hypervisor"
         );
         assert!(select_backend(Some("xpto")).is_err());
+    }
+
+    #[test]
+    fn valid_backend_name_normalizes_aliases_and_rejects_unknown() {
+        assert_eq!(valid_backend_name("ch").unwrap(), "cloud-hypervisor");
+        assert_eq!(
+            valid_backend_name("CloudHypervisor").unwrap(),
+            "cloud-hypervisor"
+        );
+        assert_eq!(valid_backend_name("KVM").unwrap(), "libvirt");
+        assert_eq!(valid_backend_name(" libvirt ").unwrap(), "libvirt");
+        assert!(valid_backend_name("hyperv").is_err());
+        assert!(valid_backend_name("").is_err());
+    }
+
+    #[test]
+    fn default_backend_persistence_roundtrip() {
+        let dir = std::env::temp_dir().join(format!(
+            "delonix-vm-default-backend-test-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        // Nothing set yet.
+        assert_eq!(get_default_backend(&dir), None);
+
+        set_default_backend(&dir, "KVM").unwrap();
+        assert_eq!(get_default_backend(&dir).as_deref(), Some("libvirt"));
+
+        set_default_backend(&dir, "ch").unwrap();
+        assert_eq!(
+            get_default_backend(&dir).as_deref(),
+            Some("cloud-hypervisor")
+        );
+
+        // Unknown name refused, previous value untouched.
+        assert!(set_default_backend(&dir, "hyperv").is_err());
+        assert_eq!(
+            get_default_backend(&dir).as_deref(),
+            Some("cloud-hypervisor")
+        );
+
+        clear_default_backend(&dir).unwrap();
+        assert_eq!(get_default_backend(&dir), None);
+        // Clearing an already-cleared default is not an error.
+        clear_default_backend(&dir).unwrap();
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

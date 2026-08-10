@@ -54,6 +54,44 @@ pub struct VmImage {
     /// `bookworm`, not just an Ubuntu release number).
     #[serde(default)]
     pub distro: Option<String>,
+    /// Recommended vCPUs (`VCPUS` in the `VMfile` that built this image).
+    /// `vm create` uses it as the default when `--vcpus` is not given AND the
+    /// disk resolves to this image (by local name) — never overrides an
+    /// explicit `--vcpus`. `#[serde(default)]`: absent on images built before
+    /// this field existed, or `vm pull`ed (the OCI artifact only carries the
+    /// qcow2 blob, same known gap as `ubuntu_release`/`k8s_version`).
+    #[serde(default)]
+    pub default_vcpus: Option<u32>,
+    /// Recommended memory (`MEMORY` in the `VMfile`, e.g. `"2G"`). Same rule
+    /// as `default_vcpus`.
+    #[serde(default)]
+    pub default_memory: Option<String>,
+    /// Recommended VM backend (`HYPERVISOR` in the `VMfile`):
+    /// `"cloud-hypervisor"` or `"libvirt"`, already canonicalized by
+    /// `delonix_vm::valid_backend_name`. Same rule as `default_vcpus` — wins
+    /// over the engine's own auto-detection heuristic but never over an
+    /// explicit `--backend`/`DELONIX_VM_BACKEND`/persisted default (see
+    /// `cmd::vm::resolve_disk_and_defaults`).
+    #[serde(default)]
+    pub default_backend: Option<String>,
+}
+
+/// Target format for `image vm convert`. Both are already understood by the
+/// two `delonix_vm::VmBackend`s (libvirt/QEMU and Cloud Hypervisor) — this is
+/// not a per-hypervisor format choice, just `qemu-img convert`'s two shapes.
+#[derive(clap::ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ConvertFormat {
+    Qcow2,
+    Raw,
+}
+
+impl ConvertFormat {
+    fn as_str(self) -> &'static str {
+        match self {
+            ConvertFormat::Qcow2 => "qcow2",
+            ConvertFormat::Raw => "raw",
+        }
+    }
 }
 
 /// Base distro for a golden image build. `Ubuntu` stays the default (no
@@ -181,6 +219,20 @@ pub enum VmImageCmd {
     Describe { names: Vec<String> },
     /// Publish a local VM image to an OCI registry (single-blob artifact).
     Push { name: String, target: String },
+    /// Convert a VM disk between `qcow2` (default, per-VM overlay) and `raw`
+    /// — flattened (no backing file) either way, ready to boot on either
+    /// backend (libvirt/QEMU and Cloud Hypervisor already share this same
+    /// pair of formats; there is no separate "per-hypervisor" format here).
+    Convert {
+        /// A local VM image name (`image vm ls`) or a literal `.qcow2`/`.raw` path.
+        source: String,
+        /// Target format.
+        #[arg(long = "to", value_enum)]
+        to: ConvertFormat,
+        /// Destination file (default: alongside the source, with the new extension).
+        #[arg(short = 'o', long = "output")]
+        output: Option<PathBuf>,
+    },
     /// Pull a VM image from an OCI registry — with no argument, the OFFICIAL
     /// Delonix image (ready for `vm create`/`cluster kubeadm`).
     Pull {
@@ -295,6 +347,7 @@ pub fn run(action: VmImageCmd) -> Result<()> {
         VmImageCmd::Ls { output } => cmd_ls(&store, output),
         VmImageCmd::Describe { names } => cmd_describe(&store, &names),
         VmImageCmd::Push { name, target } => cmd_push(&store, &name, &target),
+        VmImageCmd::Convert { source, to, output } => cmd_convert(&store, &source, to, output),
         VmImageCmd::Pull {
             source,
             name,
@@ -646,6 +699,72 @@ pub(crate) fn cmd_push(store: &VmImageStore, name: &str, target: &str) -> Result
     Ok(())
 }
 
+/// `image vm convert` — flattens/converts a disk between `qcow2` and `raw`
+/// with `qemu-img convert` (same tool `cmd_build`/`vmfile::build` already use
+/// to flatten a base image). `source` is tried as a local VM image name
+/// first (so `convert my-image --to raw` works without knowing the qcow2's
+/// on-disk path), falling back to a literal path — never an error to pass a
+/// path that happens to collide with no store entry.
+pub(crate) fn cmd_convert(
+    store: &VmImageStore,
+    source: &str,
+    to: ConvertFormat,
+    output: Option<PathBuf>,
+) -> Result<()> {
+    let src_path = {
+        let by_name = store.qcow2_path(source);
+        if by_name.exists() {
+            by_name
+        } else {
+            PathBuf::from(source)
+        }
+    };
+    if !src_path.exists() {
+        return Err(Error::Invalid(super::po::tf(
+            "no such local VM image or file: {source} (see `delonix image vm ls`)",
+            &[("source", source)],
+        )));
+    }
+    let dest = output.unwrap_or_else(|| {
+        let stem = src_path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("image");
+        src_path.with_file_name(format!("{stem}.{}", to.as_str()))
+    });
+    if dest == src_path {
+        return Err(Error::Invalid(
+            super::po::t(
+                "destination is the same as the source — pass `-o <file>` to convert in place",
+            )
+            .to_string(),
+        ));
+    }
+    eprintln!(
+        "{}",
+        super::po::tf(
+            "converting {src} to {fmt} → {dst}...",
+            &[
+                ("src", &src_path.display().to_string()),
+                ("fmt", to.as_str()),
+                ("dst", &dest.display().to_string()),
+            ],
+        )
+    );
+    run_tool(
+        "qemu-img",
+        &[
+            "convert",
+            "-O",
+            to.as_str(),
+            &src_path.to_string_lossy(),
+            &dest.to_string_lossy(),
+        ],
+    )?;
+    println!("{}", dest.display());
+    Ok(())
+}
+
 pub(crate) fn cmd_pull(store: &VmImageStore, source: &str, name: Option<String>) -> Result<()> {
     // Download progress bar (the golden is hundreds of MB): the engine
     // reports (bytes, total) every 64KB; we redraw at most every ~2MB
@@ -678,6 +797,11 @@ pub(crate) fn cmd_pull(store: &VmImageStore, source: &str, name: Option<String>)
         created_unix: now_unix(),
         kernel_version: None,
         distro: None,
+        // The OCI artifact only carries the qcow2 blob, not build metadata —
+        // same known gap as `ubuntu_release`/`k8s_version` above.
+        default_vcpus: None,
+        default_memory: None,
+        default_backend: None,
     };
     store.save(&img)?;
     println!("{name}");
@@ -970,6 +1094,11 @@ fn cmd_build(
         created_unix: now_unix(),
         kernel_version,
         distro: Some(distro.as_str().to_string()),
+        // The built-in golden recipe has no VMfile to carry a recommendation
+        // from — only a `VMfile` build (`vmfile::build`) sets these.
+        default_vcpus: None,
+        default_memory: None,
+        default_backend: None,
     };
     store.save(&img)?;
     println!("{tag}");
@@ -2927,6 +3056,9 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
             created_unix: 0,
             kernel_version: None,
             distro: None,
+            default_vcpus: None,
+            default_memory: None,
+            default_backend: None,
         };
         // Pulled image, no build metadata at all — pre-existing gap, not new.
         assert_eq!(distro_label(&img), "-");
