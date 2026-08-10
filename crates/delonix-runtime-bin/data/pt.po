@@ -4315,3 +4315,150 @@ msgstr "Aplica os documentos `kind: Storage` de um manifesto."
 
 msgid "Diagnose — and, with `--delegate`, fix — cgroup delegation, the prerequisite for `--memory`/`--cpus`/`--pids-limit` to mean anything."
 msgstr "Diagnostica — e, com `--delegate`, corrige — a delegação de cgroup, o pré-requisito para que `--memory`/`--cpus`/`--pids-limit` queiram dizer alguma coisa."
+
+# help do grupo `net` — netns/egress/tunnel/boot, os ultimos 21 dos 103 medidos
+
+msgid "Bring the ingress infra up (idempotent): holder netns + delonix0 + single slirp."
+msgstr "Levanta a infra de ingress (idempotente): netns do holder + delonix0 + slirp único."
+
+msgid "Show the ingress infra status (holder/slirp pids, bridge, refcount)."
+msgstr "Mostra o estado da infra de ingress (pids do holder/slirp, bridge, refcount)."
+
+msgid "Force tear-down of the ingress infra (kills slirp + holder, frees the netns)."
+msgstr "Força a demolição da infra de ingress (mata o slirp + o holder, liberta a netns)."
+
+msgid "Attach a netns to delonix0 via veth (the holder is the netns/veth factory)."
+msgstr "Liga uma netns à delonix0 por veth (o holder é a fábrica de netns/veth)."
+
+msgid "Detach (and destroy) a previously attached netns."
+msgstr "Desliga (e destrói) uma netns previamente ligada."
+
+msgid "Run a command inside an attached netns (exercises the runtime join path)."
+msgstr "Corre um comando dentro de uma netns ligada (exercita o caminho de junção do runtime)."
+
+msgid "Publish a port through the ingress (add_hostfwd + DNAT) to a container."
+msgstr "Publica uma porta através do ingress (add_hostfwd + DNAT) para um container."
+
+msgid "Unpublish a host port from the ingress."
+msgstr "Retira do ingress a publicação de uma porta do host."
+
+msgid "Apply (or clear) a container's parameterizable firewall AT THE INGRESS."
+msgstr "Aplica (ou limpa) a firewall parametrizável de um container NO INGRESS."
+
+msgid "Allow a network's egress to a HOSTNAME (and `*.hostname`), learnt live from DNS answers — the FQDN allowlist nft/CIDR can't express. Repeatable."
+msgstr "Permite a saída de uma rede para um HOSTNAME (e `*.hostname`), aprendido ao vivo das respostas de DNS — a allowlist por FQDN que nft/CIDR não conseguem exprimir. Repetível."
+
+msgid "Show a NETWORK's egress policy: CIDR allowlist, FQDN hosts, and the IPs currently learnt from DNS for those hosts."
+msgstr "Mostra a política de saída de uma REDE: allowlist de CIDR, hosts por FQDN, e os IPs aprendidos do DNS neste momento para esses hosts."
+
+msgid "Remove all outbound rules."
+msgstr "Remove todas as regras de saída."
+
+msgid "Expose a local port to the public internet via pinggy/ngrok/cloudflare (`kind: Tunnel`) — pair with `httproute`'s listening port to route by Host header behind ONE public URL."
+msgstr "Expõe uma porta local à internet pública via pinggy/ngrok/cloudflare (`kind: Tunnel`) — junta-o à porta de escuta do `httproute` para rotear pelo header Host atrás de UMA só URL pública."
+
+msgid "Apply the `kind: Tunnel` documents of a manifest (idempotent)."
+msgstr "Aplica os documentos `kind: Tunnel` de um manifesto (idempotente)."
+
+msgid "One-shot expose of a local port, no manifest needed."
+msgstr "Exposição pontual de uma porta local, sem precisar de manifesto."
+
+msgid "List tunnels (state + public URL)."
+msgstr "Lista os túneis (estado + URL pública)."
+
+msgid "Human-readable detail of one tunnel."
+msgstr "Detalhe legível de um túnel."
+
+msgid "Stop and remove a tunnel."
+msgstr "Pára e remove um túnel."
+
+msgid "Install + enable systemd units for the RUNNING containers, so they come back up when the host boots. Rootless uses user units + linger."
+msgstr "Instala + activa unidades systemd para os containers A CORRER, para que voltem a subir quando o host arrancar. Em rootless usa unidades de utilizador + linger."
+
+msgid "Disable + remove the generated boot units."
+msgstr "Desactiva + remove as unidades de arranque geradas."
+
+msgid "Show boot-persistence status (installed units + mode)."
+msgstr "Mostra o estado da persistência ao arranque (unidades instaladas + modo)."
+
+# long_about (o texto do `--help` longo) dos oito que faltavam
+
+msgid ""
+"**Reconfigure a RUNNING container without stopping it** — ports, volumes, networks, and bandwidth cap.\n"
+"\n"
+"Unlike docker (where changing a port or a volume forces recreating the container), here the dataplane doesn't belong to the process lifecycle: ports are DNAT/hostfwd in front of the network and volumes come in through the kernel's mount API (`open_tree`/`move_mount`) in the mount namespace of the already-live container. The PID doesn't change and the process is never interrupted.\n"
+"\n"
+"The changes are persisted in the registry, so a later `container start` reproduces the new configuration, not the original."
+msgstr ""
+"**Reconfigura um container A CORRER sem o parar** — portas, volumes, redes e tecto de largura de banda.\n"
+"\n"
+"Ao contrário do docker (onde mudar uma porta ou um volume obriga a recriar o container), aqui o dataplane não pertence ao ciclo de vida do processo: as portas são DNAT/hostfwd à frente da rede e os volumes entram pela API de montagem do kernel (`open_tree`/`move_mount`) no namespace de montagem do container já vivo. O PID não muda e o processo nunca é interrompido.\n"
+"\n"
+"As alterações ficam persistidas no registo, por isso um `container start` posterior reproduz a configuração nova, e não a original."
+
+msgid ""
+"Move the pre-scoping share records into the `default` namespace.\n"
+"\n"
+"Records only: the DATA is not moved, because each record carries the path it was created with and moving a tenant's bytes is not something a migration should do behind their back. What changes is where the record lives and that its backing volume becomes `default`-scoped, so `-v <name>` resolves through the namespaced path like every share created from now on."
+msgstr ""
+"Traz os registos de partilha anteriores ao scoping para a namespace `default`.\n"
+"\n"
+"Só os registos: os DADOS não são movidos, porque cada registo carrega o caminho com que foi criado e mover os bytes de um inquilino não é coisa que uma migração deva fazer nas suas costas. O que muda é onde o registo vive e que o volume que o suporta passa a ter âmbito `default`, para que `-v <nome>` resolva pelo caminho com namespace como qualquer partilha criada de agora em diante."
+
+msgid ""
+"JSON Schema of the manifest, GENERATED from the code (ADR-0007).\n"
+"\n"
+"Point an editor at it with one comment at the top of the manifest and you get completion, type checking and the field docs while you type: `# yaml-language-server: $schema=./delonix.schema.json`"
+msgstr ""
+"JSON Schema do manifesto, GERADO a partir do código (ADR-0007).\n"
+"\n"
+"Aponta o editor para ele com um comentário no topo do manifesto e ganhas completação, verificação de tipos e a documentação dos campos enquanto escreves: `# yaml-language-server: $schema=./delonix.schema.json`"
+
+msgid ""
+"Field reference for a Kind, `kubectl explain` style — from the SAME generated schema, so it cannot drift from the code.\n"
+"\n"
+"`delonix explain Container` · `delonix explain Container.ports` · `delonix explain Pod.containers.image`"
+msgstr ""
+"Referência de campos de um Kind, ao estilo do `kubectl explain` — a partir do MESMO schema gerado, por isso não pode divergir do código.\n"
+"\n"
+"`delonix explain Container` · `delonix explain Container.ports` · `delonix explain Pod.containers.image`"
+
+msgid ""
+"Removes everything this stack owns (by the `delonix.io/stack` label).\n"
+"\n"
+"A resource created by hand, or belonging to another stack, is never touched. Removal happens in the REVERSE of the creation order, so a network is not pulled from under the containers still attached to it."
+msgstr ""
+"Remove tudo o que esta stack possui (pela label `delonix.io/stack`).\n"
+"\n"
+"Um recurso criado à mão, ou pertencente a outra stack, nunca é tocado. A remoção faz-se pela ordem INVERSA da criação, para não se tirar uma rede debaixo dos containers que ainda estão ligados a ela."
+
+msgid ""
+"Stack detail in `kubectl describe` style: each resource DECLARED in the manifest and whether or not it is present on the machine.\n"
+"\n"
+"**The stack has no state of its own** — there is no registry of \"stacks\", only a manifest and the resources it creates. That is why this `describe` always starts from the file and goes to confirm each resource against the respective store, instead of inventing a new registry that would drift out of sync (the same reason `cluster ls` derives its state from the container labels).\n"
+"\n"
+"The column that matters is PRESENCE: an `apply` is fail-fast and without rollback, so a half-applied stack is a normal state and this is exactly what it shows."
+msgstr ""
+"Detalhe do stack ao estilo do `kubectl describe`: cada recurso DECLARADO no manifesto e se está ou não presente na máquina.\n"
+"\n"
+"**O stack não tem estado próprio** — não há registo de «stacks», só um manifesto e os recursos que ele cria. É por isso que este `describe` parte sempre do ficheiro e vai confirmar cada recurso ao store respectivo, em vez de inventar um registo novo que ficaria dessincronizado (a mesma razão pela qual o `cluster ls` deriva o seu estado das labels dos containers).\n"
+"\n"
+"A coluna que interessa é a PRESENÇA: um `apply` é fail-fast e sem rollback, por isso uma stack meio aplicada é um estado normal, e é exactamente isso que isto mostra."
+
+msgid ""
+"Blocks until every declared resource is present and, where it has one, healthy.\n"
+"\n"
+"The command an `apply` in CI is missing: `apply` returns as soon as it has created things, which is not the same as the stack working. Exits non-zero on timeout, naming exactly what did not come up."
+msgstr ""
+"Bloqueia até todos os recursos declarados estarem presentes e, onde houver uma, saudáveis.\n"
+"\n"
+"O comando que falta a um `apply` em CI: o `apply` devolve assim que criou as coisas, o que não é o mesmo que a stack estar a funcionar. Sai com código diferente de zero ao esgotar o tempo, nomeando exactamente o que não subiu."
+
+msgid ""
+"Diagnose — and, with `--delegate`, fix — cgroup delegation, the prerequisite for `--memory`/`--cpus`/`--pids-limit` to mean anything.\n"
+"\n"
+"Without it the flags are ACCEPTED and INERT: the container runs with no limit at all. That is the failure mode this command exists for, and it is invisible without asking."
+msgstr ""
+"Diagnostica — e, com `--delegate`, corrige — a delegação de cgroup, o pré-requisito para que `--memory`/`--cpus`/`--pids-limit` queiram dizer alguma coisa.\n"
+"\n"
+"Sem ela as flags são ACEITES e INERTES: o container corre sem limite nenhum. É esse o modo de falha que este comando existe para apanhar, e é invisível sem se perguntar."

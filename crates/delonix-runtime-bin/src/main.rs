@@ -447,6 +447,60 @@ fn main() {
     }
 }
 
+/// Every user-facing help string has to have a Portuguese translation, and the
+/// only honest way to know is to walk the built `Command` and ask the catalog.
+///
+/// Measured before this test existed: **103 of the 232 subcommands printed
+/// their help in English under `--l18n=pt`** — the `container` group, the
+/// everyday surface, was 28 of them. The mechanism was never broken (see
+/// `po::translate_help`); what was missing were the catalog entries, and
+/// nothing was watching.
+#[cfg(test)]
+mod help_i18n_tests {
+    use clap::CommandFactory;
+
+    /// Walks about/long_about of the whole command tree, collecting whatever the
+    /// catalog does not translate.
+    fn untranslated(cmd: &clap::Command, path: &str, out: &mut Vec<String>) {
+        for (what, text) in [
+            ("about", cmd.get_about().map(|s| s.to_string())),
+            ("long_about", cmd.get_long_about().map(|s| s.to_string())),
+        ] {
+            let Some(text) = text else { continue };
+            // A string that is the SAME in both languages (`Containers:
+            // run/ps/stop/...`) is not a gap — asking for a translation that
+            // would be identical is how a catalog grows noise.
+            if !crate::cmd::po::has_pt_translation(&text) && !is_same_in_both(&text) {
+                out.push(format!("{path} ({what}): {text}"));
+            }
+        }
+        for sub in cmd.get_subcommands() {
+            if sub.get_name() == "help" {
+                continue;
+            }
+            untranslated(sub, &format!("{path} {}", sub.get_name()), out);
+        }
+    }
+
+    /// The short list of strings that read identically in EN and pt_AO — a
+    /// command-name enumeration is the same text in both.
+    fn is_same_in_both(s: &str) -> bool {
+        s.starts_with("Containers: run/ps/stop")
+    }
+
+    #[test]
+    fn todo_o_help_tem_traducao_pt() {
+        let mut missing = Vec::new();
+        untranslated(&super::Cli::command(), "delonix", &mut missing);
+        assert!(
+            missing.is_empty(),
+            "{} help string(s) sem entrada no pt.po:\n  {}",
+            missing.len(),
+            missing.join("\n  ")
+        );
+    }
+}
+
 #[cfg(test)]
 mod alias_tests {
     use super::expand_alias;
