@@ -1535,9 +1535,37 @@ por ter sido explorável — o hostname está no mesmo tipo de slot e nunca fora
 32 GiB no `stream_download`; `personality(2)` restrito aos valores seguros (o default do Docker
 bloqueia `READ_IMPLIES_EXEC`/`ADDR_NO_RANDOMIZE`, que não são fuga mas removem mitigações).
 
+**Passagem 2 — a classe que os finders não viram: ficheiro temporário sequestrável.** Uma varredura
+posterior a `std::env::temp_dir()` encontrou três chamadores de PRODUÇÃO da mesma classe que a
+auditoria de 2026-07 já corrigira em `ensure_libvirt_network` — nenhum dos seis finders lá chegou
+porque `bpf.rs` não estava na superfície que lhes foi atribuída (**lição de método**: uma varredura
+por PADRÃO, feita depois dos finders por-subsistema, apanha o que a divisão por ficheiros deixa
+cair).
+
+- **`delonix-net::bpf::stage_object` — escalada de privilégio local.** Escrevia o objecto BPF no
+  caminho **FIXO** `/tmp/delonix_flow.bpf.o` com `fs::write`, e esse ficheiro é entregue a
+  `bpftool prog loadall` por um processo com **CAP_BPF/root**. `/tmp` é world-writable, `fs::write`
+  segue symlinks, e — o pior — quem pré-criasse o caminho ficava **DONO** do ficheiro: num `/tmp`
+  sticky nem o conseguimos apagar, por isso podia trocar-lhe o conteúdo entre a nossa escrita e a
+  leitura do `bpftool`. Um utilizador local sem privilégio punha o SEU programa BPF dentro do
+  kernel. Os outros dois (`cluster.rs` kubeadm-config, `lb.rs` haproxy.cfg, ambos enviados por
+  `scp`) tinham nome derivado do pid — igualmente adivinhável, mesmo vector de redirecção.
+- **`delonix_runtime_core::write_private_temp`** (novo, um só sítio em vez de uma 4.ª cópia): nome
+  único + **`O_EXCL`** (recusa um caminho existente e **não segue symlinks**) + `0600` na criação.
+  O objecto BPF passa também a ser **removido depois do load** — com nome fixo era sobrescrito na
+  chamada seguinte, com nome único ficaria a acumular.
+- **`fetch_kubeconfig`: `mode()` só se aplica na CRIAÇÃO.** A correcção anterior
+  (`OpenOptions::create(true).mode(0o600)`) fechava a janela de umask mas tinha um buraco mais
+  silencioso: um `cluster apply` repetido sobre um kubeconfig deixado por uma build antiga
+  reescrevia as credenciais e **mantinha o 0644 de lá**. Passou a `write_atomic_mode` — o rename dá
+  o modo certo sempre, substitui um symlink em vez de o seguir, e torna a actualização atómica.
+  (O comentário anterior invocava equivalência com o fix do `ensure_libvirt_network`, que usa
+  `create_new`; não era equivalente, e é essa a diferença.)
+
 **Estado**: `cargo build/test --workspace` limpo (0 falhas), `clippy` 0, `fmt` aplicado. Validado ao
 vivo neste host: mascaramento dentro de containers reais (musl E glibc), `docker-api` ponta-a-ponta
-com concorrência, e o `container run` normal sem regressão.
+com concorrência, `net flow` (degrada para contadores de veth sem CAP_BPF, e já não cria o caminho
+fixo nem deixa restos), e o `container run` normal sem regressão.
 
 ## Auditoria de segurança #2 (código VM desta série: console/rede/cloud-init)
 
