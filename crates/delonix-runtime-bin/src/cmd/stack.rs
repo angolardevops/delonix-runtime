@@ -896,6 +896,10 @@ fn destroy_one(kind: &str, name: &str) -> Result<()> {
         "Volume" => super::volume::remove_for_replace(name),
         "Network" => super::network::remove_for_replace(name),
         "Pod" => super::pod::remove_pod(name, true),
+        "Vm" => super::vm::remove_for_replace(name),
+        // `Image` is deliberately absent: it is not ownable (shared content), so
+        // it never reaches a prune or a destroy — and a `Replace` of an image is
+        // just a pull, handled by `converge`, never by destroying anything.
         other => Err(delonix_runtime_core::Error::Invalid(format!(
             "{other}/{name}: removing this Kind declaratively is not implemented"
         ))),
