@@ -4,6 +4,200 @@
 > (regenerado automaticamente pelo pipeline de release a cada tag publicada).
 > Não editar à mão — edita a nota da release respectiva.
 
+## v0.46.0 — a auditoria que se faz antes de alguém a fazer por nós
+
+Seis revisões adversariais em paralelo sobre os oito crates, cada uma apontada a
+uma classe de ataque que o Docker, o Kubernetes, o runc, o CRI-O ou o Podman já
+sofreram em produção. Depois, uma varredura por padrão que apanhou aquilo que a
+divisão do trabalho por ficheiros deixou cair — e foi lá que estava o pior
+achado.
+
+**Nenhum achado crítico.** A fronteira rootless→root aguentou: o mapeamento de
+uid/gid nunca aponta para o uid 0 real do host em nenhum dos três caminhos, o
+socket de controlo do holder verifica `SO_PEERCRED` antes de qualquer dispatch, e
+o bloqueio de user namespaces aninhados (`clone` filtrado **mais** `clone3`→
+`ENOSYS` sempre instalado) está no estado da arte. Catorze achados corrigidos, um
+ALTO e seis MÉDIOS entre eles, cada um com teste de regressão.
+
+## Onde estamos face aos CVE que os outros já levaram
+
+Isto foi lido no código, não deduzido da documentação:
+
+| Ataque | Estado |
+|---|---|
+| CVE-2019-5736 (runc, sobrescrever `/proc/self/exe`) | protegido — o re-exec usa o binário do host, antes de existir qualquer rootfs |
+| CVE-2024-21626 «Leaky Vessels» | protegido — `close_range` nos forks, CLOEXEC, e o `chdir` do `exec` corre já dentro do mount namespace do container |
+| CVE-2022-0811 «cr8escape» (sysctls) | protegido — allowlist de sysctls e `/proc/sys` remontado read-only |
+| CVE-2022-0492 (`release_agent` do cgroup v1) | não aplicável — o motor é cgroup v2-only e não existe `release_agent` |
+| userns aninhado, incluindo o desvio por `clone3` | protegido |
+| tar-slip / zip-slip | protegido |
+
+## O pin de digest não estava a segurar nada
+
+`delonix image pull imagem@sha256:X` verificava cada *blob* contra o digest que o
+manifesto declarava. Nunca verificava o **manifesto** contra o `X` que o
+utilizador pediu.
+
+Um registo comprometido — ou um mirror hostil, ou um registo servido em HTTP —
+respondia ao pedido de `sha256:X` com um manifesto completamente diferente, a
+apontar para os blobs do atacante. Como esse manifesto era internamente coerente,
+todas as verificações de blob passavam e a imagem instalava sem um único erro.
+
+Que é precisamente o contrário do que um pin existe para garantir. Está fechado
+nos dois caminhos de pull e também no sub-manifesto de um índice multi-arch,
+antes de se descarregar um byte de conteúdo. O teste de regressão falha com a
+correcção revertida: sem ela, o pull devolve a imagem substituída.
+
+## Uma VM podia mentir sobre quem era
+
+Os `veth` dos containers levam, desde sempre, uma regra anti-spoofing: o que
+entrar por esta interface com um endereço de origem que não é o teu é deitado
+fora. O `tap` de uma VM nunca a levou.
+
+E é na VM que ela mais falta faz, porque o kernel do convidado não é nosso — nada
+lá dentro nos impede de pôr no fio o endereço que apetecer. Como **toda** a
+política deste motor decide pelo endereço de origem (o corte cross-namespace
+casa `@dlxall`, um `kind: Dependency` autoriza um endereço concreto), uma VM
+forjava um `saddr` fora do conjunto — ou o de um vizinho da namespace-alvo — e
+atravessava a fronteira.
+
+A regra passou a ter uma definição só, partilhada pelos três sítios que a
+emitem, e é limpa no teardown: nomes de `tap` são reutilizados entre reinícios, e
+uma regra órfã fixada no endereço da VM anterior calaria a seguinte.
+
+## Um `--device` chegava para truncar um ficheiro do host
+
+O `bind_devices` era o último caminho de montagem do motor sem confinamento de
+destino: construía-o por concatenação de strings e criava o ponto de montagem com
+`File::create`, que **trunca**. Um `spec.devices: ["/dev/null:/../../etc/x"]` num
+manifesto saía do rootfs e zerava o ficheiro do outro lado — medido, ficava com
+zero bytes.
+
+O padrão seguro estava a poucas linhas dali, em uso pelo `-v` desde há muito.
+Fechou-se também, de caminho, o `/dev/mem`, o `/dev/kmem` e o `/dev/port`: são
+*character devices*, por isso passavam pelo filtro que só recusava *block
+devices*. Em rootless são inertes; no caminho root/CRI são o host inteiro.
+
+## O container via mais do host do que devia
+
+O motor mascarava o que dá **controlo** do host (`/proc/sysrq-trigger`,
+`/proc/kcore`) mas não o que vaza **informação**. O caminho do CRI estava bem — o
+kubelet manda sempre a sua lista — e só a CLI ficava a descoberto.
+
+Medido dentro de um container real, antes: `/proc/interrupts` com 109 linhas
+legíveis (já serviu de canal lateral para temporização de teclas) e
+`/sys/firmware` com quatro entradas. Agora zero, com a lista por omissão do runc
+— `timer_list` e `sched_debug` incluídos, que imprimem ponteiros do kernel e
+ajudam a derrotar o KASLR. Uma lista explícita continua a mandar, e
+`--privileged` continua a desligar tudo, como no Docker.
+
+## O `docker-api` podia ficar preso a arrancar containers
+
+O `clone()` do motor documenta, em comentário, que assume um chamador
+single-threaded. No `delonix serve docker-api` isso é falso: o servidor é um
+runtime tokio multi-thread. E `clone()`, ao contrário de `fork()`, **não** corre
+os handlers `pthread_atfork` que repõem o lock do alocador no filho — se outra
+thread o tivesse na mão naquele instante, a primeira alocação do
+`container_init` bloqueava para sempre. Container que nunca arranca, API que já
+respondeu «criado».
+
+Passou a arrancar por re-exec, num processo fresco onde a premissa volta a ser
+verdadeira — o mesmo que o CRI já fazia. A especificação viaja em ficheiro
+(`0600`, `O_EXCL`) e não em argv: o `RunOpts` tem dezenas de campos e reconstruir
+uma linha de comando perderia em silêncio tudo o que não tem flag.
+
+**O bug que a correcção destapou já estava previsto no código.** O comentário do
+reaper de zombies avisava que um `waitpid(-1)` cego «corromperia o estado de
+saída» de qualquer caminho que fizesse o seu próprio `waitpid` — e o re-exec é
+esse caminho. Apareceu na primeira validação ao vivo: o container arrancava bem e
+o `create` devolvia um erro de I/O. O reaper passa agora a espreitar sem consumir
+e só colhe filhos que ninguém reclamou. Validado com o ciclo de vida completo e
+oito criações concorrentes.
+
+## Escalada de privilégio local por um ficheiro em `/tmp`
+
+Este é o achado que nenhuma das seis revisões viu, porque o ficheiro não estava
+na superfície atribuída a nenhuma delas. Apareceu numa varredura por padrão feita
+no fim.
+
+O `delonix net flow` materializava o seu objecto eBPF no caminho **fixo**
+`/tmp/delonix_flow.bpf.o`, com `fs::write`, e entregava-o ao `bpftool prog
+loadall` — um processo com `CAP_BPF`/root. O `/tmp` é escrevível por toda a
+gente, o `fs::write` segue symlinks, e — o pior — quem criasse o caminho primeiro
+ficava **dono** do ficheiro: num `/tmp` com sticky bit nem sequer o podemos
+apagar, o que lhe deixava a janela para lhe trocar o conteúdo entre a nossa
+escrita e a leitura do `bpftool`.
+
+Ou seja: um utilizador local sem privilégio nenhum conseguia que um processo
+privilegiado carregasse o programa eBPF **dele** dentro do kernel.
+
+Outros dois sítios (a config do `kubeadm` e a do HAProxy, ambas enviadas por
+`scp`) tinham nome derivado do pid — igualmente adivinhável, com o mesmo vector
+de redirecção. Os três passaram a usar um helper único: nome irrepetível,
+`O_EXCL` (que recusa um caminho existente e não segue symlinks) e `0600` desde a
+criação.
+
+## A golden trazia credenciais conhecidas e não o dizia
+
+`root/delonix` e `delonix:delonix`, com `sudo` sem password. São fixas, estão na
+receita de build deste repositório aberto e, portanto, são públicas — mas não
+havia uma linha sobre isso no README.
+
+Existem por uma razão boa: uma VM que ficou sem rede ainda se alcança pela
+consola série. Todo o resto entra por chave (o cloud-init injecta a tua, o
+`cluster kubeadm` gera a dele), pelo que as imagens passam a sair com o **login
+por password desligado no SSH**. A password serve na consola, que é onde faz
+falta, e não pela rede.
+
+Está escrito no README, com o que fazer se correres uma destas imagens algures
+onde se lhe chegue.
+
+## O resto
+
+`reap_orphan_hostfwds` deixou de aceitar um conjunto de portas qualquer: exige
+agora um tipo cuja única função é obrigar quem chama a **afirmar** que conhece o
+ingress inteiro. Foi um chamador externo com uma lista parcial que fez as portas
+publicadas morrerem sozinhas, e custou várias sessões a diagnosticar — a forma da
+API era o convite.
+
+O `CredVault` passou a escrever como o cofre de segredos irmão já escrevia
+(temporário por escritor, `fsync`, modo na criação): num blob AEAD uma escrita
+rasgada não é um ficheiro corrompido que se recupera, é uma credencial
+indecifrável para sempre.
+
+E ainda: o `fetch_kubeconfig` — o `mode()` só se aplica na criação, por isso um
+`cluster apply` repetido sobre um kubeconfig deixado por uma build antiga
+reescrevia as credenciais e mantinha o `0644` de lá; `--` antes dos posicionais
+do `mount` e do `qemu-img convert`; a mesma guarda de `-` inicial que o token do
+túnel já tinha, agora também no hostname; um tecto no tamanho dos downloads; e o
+`personality(2)` restrito aos valores que não enfraquecem o ASLR nem o NX, como
+no perfil por omissão do Docker.
+
+## O que ficou deliberadamente por mudar
+
+O `--cap-add` continua a aceitar qualquer capability e o `--device` continua a
+ser opt-in do operador. É paridade com o Docker e o containerd, e é decisão de
+quem escolhe correr o `delonix-cri` como root e aceitar pods privilegiados —
+mudá-lo seria alterar a semântica esperada, não corrigir um defeito.
+
+O checksum lateral de um `FROM https://…` no VMfile continua a vir da mesma
+origem que a imagem, o que só protege contra corrupção de transporte e não contra
+uma origem hostil. É opt-in e o URL é escolha de quem constrói; fica registado
+como risco aceite, ao lado dos binários do Cloud Hypervisor.
+
+## Verificação
+
+`cargo build`, `cargo test --workspace` (zero falhas), `clippy` e `fmt` limpos.
+Validado ao vivo neste host: o mascaramento dentro de containers reais com musl e
+com glibc, o `docker-api` de ponta a ponta com criações concorrentes, o `net
+flow`, e o `container run` normal sem regressão.
+
+**Mudança de API pública** (`delonix-net`): `reap_orphan_hostfwds` passou a
+receber `AuthoritativeLivePorts` em vez de `&HashSet<u32>`. Quem a chamava tem de
+passar a construir o tipo — que é o objectivo.
+
+---
+
 ## v0.45.0 — o que se descobre ao correr aquilo que se acabou de escrever
 
 A v0.44.0 publicou o `VMfile`. Esta release é o resultado de o usar como um
