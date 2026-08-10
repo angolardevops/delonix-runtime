@@ -4152,3 +4152,166 @@ msgstr "Aplica os documentos `kind: Container` de um manifesto (idempotente por 
 
 msgid "List containers."
 msgstr "Lista os containers."
+
+# help dos grupos `pod`, `image`, `vm` e `compose` (os user-facing dos 75 medidos)
+
+msgid "Real multi-container pods (N containers sharing a netns): create/ls/describe/rm/logs."
+msgstr "Pods multi-container REAIS (N containers a partilhar uma netns): create/ls/describe/rm/logs."
+
+msgid "Create a pod (N containers sharing a netns) from a manifest (`kind: Pod`)."
+msgstr "Cria um pod (N containers a partilhar uma netns) a partir de um manifesto (`kind: Pod`)."
+
+msgid "List the pods (derived from container labels)."
+msgstr "Lista os pods (derivados das labels dos containers)."
+
+msgid "Details of one or more pods (containers + the shared IP), `kubectl` style."
+msgstr "Detalhe de um ou mais pods (containers + o IP partilhado), ao estilo do `kubectl`."
+
+msgid "Remove a pod: stop/remove ALL its containers + the shared netns."
+msgstr "Remove um pod: pára/remove TODOS os seus containers + a netns partilhada."
+
+msgid "Logs of a pod's container (defaults to the first member)."
+msgstr "Logs de um container do pod (por omissão, o primeiro membro)."
+
+msgid "Pull an image from a registry. With `--vm`, no argument = the OFFICIAL Delonix golden VM image."
+msgstr "Puxa uma imagem de um registo. Com `--vm`, sem argumento = a imagem VM dourada OFICIAL do Delonix."
+
+msgid "(only with `--vm`) List the tags available in a remote OCI repository — with no argument, the OFFICIAL Delonix golden image repo."
+msgstr "(só com `--vm`) Lista as tags disponíveis num repositório OCI remoto — sem argumento, o repositório OFICIAL da imagem dourada do Delonix."
+
+msgid "Fetch a VM image from an OCI registry (single-blob artifact) — with no argument, the OFFICIAL Delonix image."
+msgstr "Obtém uma imagem VM de um registo OCI (artefacto de blob único) — sem argumento, a imagem OFICIAL do Delonix."
+
+msgid "List the tags available in a remote OCI repository — with no argument, the OFFICIAL Delonix golden image repo (discover which k8s versions are published before `pull`/`--k8s-version`)."
+msgstr "Lista as tags disponíveis num repositório OCI remoto — sem argumento, o repositório OFICIAL da imagem dourada do Delonix (descobre que versões de k8s estão publicadas antes de um `pull`/`--k8s-version`)."
+
+msgid "List the tags available in a remote OCI repository — with no argument, the OFFICIAL Delonix golden image repo (discover which k8s versions are published before `pull`)."
+msgstr "Lista as tags disponíveis num repositório OCI remoto — sem argumento, o repositório OFICIAL da imagem dourada do Delonix (descobre que versões de k8s estão publicadas antes de um `pull`)."
+
+msgid "Convert a VM disk to the format another ecosystem imports — `qcow2`, `raw`, `vmdk` (VMware), `vdi` (VirtualBox), `vhdx`/`vhd` (Hyper-V, Azure). Flattened either way: the result is a standalone file."
+msgstr "Converte um disco de VM para o formato que outro ecossistema importa — `qcow2`, `raw`, `vmdk` (VMware), `vdi` (VirtualBox), `vhdx`/`vhd` (Hyper-V, Azure). Achatado em qualquer dos casos: o resultado é um ficheiro autónomo."
+
+msgid "(only with `--vm`) Convert a VM disk to the format another ecosystem imports — `qcow2`, `raw`, `vmdk`, `vdi`, `vhdx`, `vhd`."
+msgstr "(só com `--vm`) Converte um disco de VM para o formato que outro ecossistema importa — `qcow2`, `raw`, `vmdk`, `vdi`, `vhdx`, `vhd`."
+
+msgid "(only with `--vm`) Register an existing disk image under a name."
+msgstr "(só com `--vm`) Regista um disco já existente sob um nome."
+
+msgid "Build the golden VM image (Ubuntu + kubeadm/kubelet/kubectl + `delonix-cri`). Scaffold a `VMfile` (and a cloud-init) for building your own image."
+msgstr "Constrói a imagem VM dourada (Ubuntu + kubeadm/kubelet/kubectl + `delonix-cri`). Gera o esqueleto de um `VMfile` (e de um cloud-init) para construíres a tua própria imagem."
+
+msgid "(only with `--vm`) Build the golden VM image (Ubuntu + kubeadm/kubelet/ kubectl + `delonix-cri`). Scaffold a `VMfile` (and a cloud-init) for building your own image."
+msgstr "(só com `--vm`) Constrói a imagem VM dourada (Ubuntu + kubeadm/kubelet/ kubectl + `delonix-cri`). Gera o esqueleto de um `VMfile` (e de um cloud-init) para construíres a tua própria imagem."
+
+msgid "Build a VM image: the built-in golden recipe (Ubuntu + kubeadm/kubelet/kubectl + `delonix-cri`), or a `VMfile` of your own with `-f`."
+msgstr "Constrói uma imagem VM: a receita dourada embutida (Ubuntu + kubeadm/kubelet/kubectl + `delonix-cri`), ou um `VMfile` teu com `-f`."
+
+msgid "(only with `--vm`) Build a VM image: the built-in golden recipe (Ubuntu + kubeadm/kubelet/kubectl + `delonix-cri`), or a `VMfile` of your own with `-f`."
+msgstr "(só com `--vm`) Constrói uma imagem VM: a receita dourada embutida (Ubuntu + kubeadm/kubelet/kubectl + `delonix-cri`), ou um `VMfile` teu com `-f`."
+
+msgid "Which published ports a VM can actually reach, and how to fix the ones it cannot. A port published to the default `127.0.0.1` is invisible to a VM — this lists the libvirt gateways, reads each port's LIVE bind, and for every loopback-only one prints the exact republish command."
+msgstr "Que portas publicadas uma VM alcança de facto, e como corrigir as que não alcança. Uma porta publicada no `127.0.0.1` por omissão é invisível para uma VM — isto lista os gateways do libvirt, lê o bind VIVO de cada porta e, para cada uma que esteja só no loopback, imprime o comando exacto de republicação."
+
+msgid "EXPERIMENTAL (root): give a libvirt VM DIRECT IP reachability to a container SDN network (veth from the host into the holder netns + routes). Defaults to a DRY-RUN; add `--apply` (as root) to establish it."
+msgstr "EXPERIMENTAL (root): dá a uma VM libvirt alcançabilidade DIRECTA por IP a uma rede SDN de containers (veth do host para dentro da netns do holder + rotas). Por omissão é DRY-RUN; acrescenta `--apply` (como root) para a estabelecer."
+
+msgid "Tear down a `vm bridge` (dry-run without `--apply`)."
+msgstr "Desfaz um `vm bridge` (dry-run sem `--apply`)."
+
+msgid "Take a named snapshot (libvirt: a running VM's snapshot is a system checkpoint — memory + disk; `restore` reverts to it). Not yet supported on the cloud-hypervisor backend."
+msgstr "Tira um snapshot com nome (libvirt: o snapshot de uma VM a correr é um checkpoint de sistema — memória + disco; o `restore` volta a ele). Ainda não suportado no backend cloud-hypervisor."
+
+msgid "Revert the VM to a named snapshot."
+msgstr "Volta a VM a um snapshot com nome."
+
+msgid "List the VM's snapshots."
+msgstr "Lista os snapshots da VM."
+
+msgid "Native `docker-compose.yml` support (up/down/ps/logs/config)."
+msgstr "Suporte NATIVO a `docker-compose.yml` (up/down/ps/logs/config)."
+
+msgid "Creates/starts every service — build, then network, then volume, then containers in `depends_on` order (gated on the declared condition)."
+msgstr "Cria/arranca todos os serviços — build, depois rede, depois volume, depois os containers pela ordem do `depends_on` (à espera da condição declarada)."
+
+msgid "Removes every container this project's `up` created (and, with `-v`, its named volumes). Networks/volumes marked `external: true` are NEVER removed."
+msgstr "Remove todos os containers que o `up` deste projecto criou (e, com `-v`, os seus volumes nomeados). Redes/volumes marcados `external: true` NUNCA são removidos."
+
+msgid "Containers of this project (derived from labels)."
+msgstr "Containers deste projecto (derivados das labels)."
+
+msgid "Logs of one service (default: every service, one after another)."
+msgstr "Logs de um serviço (por omissão: todos os serviços, um a seguir ao outro)."
+
+msgid "Validates and prints the resolved project, without creating anything (`docker compose config` equivalent)."
+msgstr "Valida e imprime o projecto resolvido, sem criar nada (equivalente ao `docker compose config`)."
+
+# help de `workload`, `sharevolume`, `secret`, `volumes`, `stack`, `storage`, `system`
+
+msgid "Unified compute layer over containers AND VMs: ls/stop/rm (ADR-0002). Creation stays declarative — see `kind: Workload` (`stack apply`)."
+msgstr "Camada de computação unificada sobre containers E VMs: ls/stop/rm (ADR-0002). A criação continua declarativa — ver `kind: Workload` (`stack apply`)."
+
+msgid "List all workloads — containers AND VMs — in one table (or `-o json`)."
+msgstr "Lista todos os workloads — containers E VMs — numa só tabela (ou `-o json`)."
+
+msgid "Describe a workload by name (routed to the owning backend, kubectl-style)."
+msgstr "Descreve um workload por nome (encaminhado para o backend que o possui, ao estilo do kubectl)."
+
+msgid "Stop a workload by name (routed to the owning backend)."
+msgstr "Pára um workload por nome (encaminhado para o backend que o possui)."
+
+msgid "Remove a workload by name."
+msgstr "Remove um workload por nome."
+
+msgid "An isolated, individually-quota'd slice of a `Storage` — multiple container/vm/pod share ONE NAS export without seeing each other's data."
+msgstr "Uma fatia isolada e com quota própria de uma partilha de rede — vários container/vm/pod partilham UM export de NAS sem verem os dados uns dos outros."
+
+msgid "Apply the `kind: ShareVolume` documents of a manifest (idempotent)."
+msgstr "Aplica os documentos `kind: ShareVolume` de um manifesto (idempotente)."
+
+msgid "List share volumes (parent storage, quota, live usage)."
+msgstr "Lista as fatias de partilha (partilha-mãe, quota, uso ao vivo)."
+
+msgid "Human-readable detail of one share volume."
+msgstr "Detalhe legível de uma fatia de partilha."
+
+msgid "Un-register a share volume. The underlying data (a subdirectory of the parent Storage) is PRESERVED unless `--purge-data` is passed."
+msgstr "Retira do registo uma fatia de partilha. Os dados por baixo (um subdirectório da partilha-mãe) são PRESERVADOS, a não ser que se passe `--purge-data`."
+
+msgid "Create/replace a secret from literals and/or a `.env` file."
+msgstr "Cria/substitui um segredo a partir de literais e/ou de um ficheiro `.env`."
+
+msgid "Show the keys of a secret (values redacted, unless `--reveal`)."
+msgstr "Mostra as chaves de um segredo (valores ocultados, a não ser com `--reveal`)."
+
+msgid "Remove a key from a secret (or the whole secret with `--all`)."
+msgstr "Remove uma chave de um segredo (ou o segredo inteiro, com `--all`)."
+
+msgid "Apply the `kind: Secret` documents from a manifest (declarative — creates the secret without needing `secret create` on the CLI)."
+msgstr "Aplica os documentos `kind: Secret` de um manifesto (declarativo — cria o segredo sem precisar do `secret create` na CLI)."
+
+msgid "Readable detail of one or more volumes, `kubectl describe` style (for humans; use `inspect` for the usual compact view)."
+msgstr "Detalhe legível de um ou mais volumes, ao estilo do `kubectl describe` (para humanos; para a vista compacta do costume usa o `inspect`)."
+
+msgid "Remove a volume. Refuses while a container or a `kind: ShareVolume` still references it (use `--force` to remove it anyway)."
+msgstr "Remove um volume. Recusa enquanto um container ou um `kind: ShareVolume` ainda lhe fizer referência (usa `--force` para o remover à mesma)."
+
+msgid "Apply the `kind: Volume` documents from a manifest (idempotent by name)."
+msgstr "Aplica os documentos `kind: Volume` de um manifesto (idempotente por nome)."
+
+msgid "List the structure the manifest composes (containers, volumes, networks, ...) and whether each resource exists — the tabular summary of `describe`."
+msgstr "Lista a estrutura que o manifesto compõe (containers, volumes, redes, ...) e se cada recurso existe — o resumo tabular do `describe`."
+
+msgid "Stack detail in `kubectl describe` style: each resource DECLARED in the manifest and whether or not it is present on the machine."
+msgstr "Detalhe do stack ao estilo do `kubectl describe`: cada recurso DECLARADO no manifesto e se está ou não presente na máquina."
+
+msgid "Validates the manifest WITHOUT touching anything (dry-run): resolves the cross-references (`Container.network`/`.volumes`, `Vm.network`, `Ingress/Egress. target`) against what the manifest declares PLUS what already exists in the stores. Exits with an error if any reference is left unresolved — it is the safety net against an `apply` that would only fail halfway through (fail-fast, no rollback)."
+msgstr "Valida o manifesto SEM tocar em nada (dry-run): resolve as referências cruzadas (`Container.network`/`.volumes`, `Vm.network`, `Ingress/Egress. target`) contra o que o manifesto declara MAIS o que já existe nos stores. Sai com erro se ficar alguma referência por resolver — é a rede de segurança contra um `apply` que só falharia a meio (fail-fast, sem rollback)."
+
+msgid "Storage/volumes dashboard (KPIs + table) — TUI, or `--once` snapshot."
+msgstr "Dashboard de armazenamento/volumes (KPIs + tabela) — TUI, ou snapshot com `--once`."
+
+msgid "Apply the `kind: Storage` documents from a manifest."
+msgstr "Aplica os documentos `kind: Storage` de um manifesto."
+
+msgid "Diagnose — and, with `--delegate`, fix — cgroup delegation, the prerequisite for `--memory`/`--cpus`/`--pids-limit` to mean anything."
+msgstr "Diagnostica — e, com `--delegate`, corrige — a delegação de cgroup, o pré-requisito para que `--memory`/`--cpus`/`--pids-limit` queiram dizer alguma coisa."
