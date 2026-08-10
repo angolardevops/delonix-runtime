@@ -1,8 +1,35 @@
 # ADR-0008: Add a Proxmox VE backend as a separate crate, and make backends registrable
 
-- **Status:** Proposed
+- **Status:** **Accepted, in two phases** (2026-08-10) — phase 1 lands now,
+  phase 2 is blocked on a real target
 - **Date:** 2026-08-10
 - **Deciders:** Walter Angolar
+
+## Decision taken
+
+**Accepted, and split**, because the two halves of this ADR have very different
+evidence behind them.
+
+**Phase 1 — the registry, now.** It is worth doing on its own merits, and it is
+testable here. Today `backend_for` ends in `_ => CloudHypervisorBackend`: an
+unknown backend name falls through to a default instead of failing, which is
+guardrail #6 (no silent failure) broken in the one place a user is most likely
+to typo. The registry closes that with a named error, and it is the change that
+makes any third backend possible — Firecracker included. Small, pure, and
+provable without a Proxmox host.
+
+**Phase 2 — the Proxmox backend, deferred.** Not rejected: **blocked on a real
+target**, the same way the kind spike was blocked and said so. This ADR itself
+admits "the backend is not testable end-to-end here", and this repository does
+not ship a compute backend it has never watched boot a VM. The appliance built
+in this series (`proxmox-ve:9.1`) is the intended test target; when one runs
+somewhere reachable, phase 2 starts with a GO/NO-GO spike against it, not with
+a merge.
+
+**What would flip this to Rejected:** if the registry turns out to cost more
+than a `match` a reader takes in at a glance — the ADR's own condition. It does
+not: the default registration stays inside `delonix-vm` and existing callers see
+no change.
 
 ## Context
 
