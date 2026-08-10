@@ -1039,6 +1039,57 @@ impl NetworkStore {
         self.get(name)
     }
 
+    /// The base octet a requested `subnet` maps to — `10.<base>.0.0/16` is the
+    /// only shape a bridge network has ever had here, because the on-disk
+    /// record holds ONE OCTET and everything else (bridge name, gateway, IPAM
+    /// range) is derived from it.
+    ///
+    /// Anything else is REFUSED, naming what is supported. Until this existed,
+    /// `--subnet` and `spec.subnet` were accepted and silently dropped for the
+    /// bridge driver: the caller asked for `10.50.0.0/16`, got whatever octet
+    /// the store picked from the network's name hash, and was told nothing.
+    pub fn base_from_subnet(subnet: &str) -> Result<u8> {
+        let lo = delonix_runtime_core::workload_net::WORKLOAD_IPV4_LO.octets()[1];
+        let hi = delonix_runtime_core::workload_net::WORKLOAD_IPV4_HI.octets()[1];
+        let unsupported = |why: &str| {
+            Error::Invalid(format!(
+                "subnet '{subnet}': {why}. A bridge network is always \
+                 `10.<{lo}-{hi}>.0.0/16` (the record holds one octet, and the \
+                 gateway/IPAM are derived from it) — pass one of those, or omit \
+                 --subnet to let the engine pick a free one"
+            ))
+        };
+        let (addr, prefix_len) = subnet
+            .split_once('/')
+            .ok_or_else(|| unsupported("no prefix length"))?;
+        if prefix_len.trim() != "16" {
+            return Err(unsupported("only /16 is supported"));
+        }
+        let octets: Vec<&str> = addr.split('.').collect();
+        if octets.len() != 4 {
+            return Err(unsupported("not an IPv4 network"));
+        }
+        let parsed: Vec<u8> = octets
+            .iter()
+            .map(|o| {
+                o.parse::<u8>()
+                    .map_err(|_| unsupported("not an IPv4 network"))
+            })
+            .collect::<Result<Vec<u8>>>()?;
+        if parsed[0] != 10 {
+            return Err(unsupported("outside the workload address space"));
+        }
+        // A /16 whose host part is not zero is a typo, not an intent — say so
+        // rather than quietly rounding it down to the network address.
+        if parsed[2] != 0 || parsed[3] != 0 {
+            return Err(unsupported("a /16 must end in .0.0"));
+        }
+        if !(lo..=hi).contains(&parsed[1]) {
+            return Err(unsupported("outside the workload address space"));
+        }
+        Ok(parsed[1])
+    }
+
     /// Creates a user network with an **explicit base octet** (`10.{base}.0.0/16`).
     /// Used to honor a `kind: Network`'s `spec.subnet` and to ALIGN the VMs' (infra)
     /// network plan to this — the `NetworkStore` is the source of truth for the
@@ -1056,11 +1107,40 @@ impl NetworkStore {
             return Err(Error::Invalid(format!("invalid network name: '{name}'")));
         }
         if self.path(name).exists() {
-            return self.get(name);
+            let existing = self.get(name)?;
+            // Idempotent for the SAME subnet (a re-`apply` of an unchanged
+            // manifest must be a no-op), but a different one is a change this
+            // cannot make: the base octet is the network's identity here, and
+            // renumbering a live network would strand every workload already
+            // addressed on it. Say so instead of returning the old one as if
+            // the request had been honoured.
+            if existing.prefix != format!("10.{base}") {
+                return Err(Error::Invalid(format!(
+                    "network '{name}' already exists as {} — a subnet cannot be \
+                     changed in place (workloads are addressed on it); remove it \
+                     and create it again if that is what you want",
+                    existing.subnet
+                )));
+            }
+            return Ok(existing);
         }
-        if !(1..=254).contains(&base) {
+        let lo = delonix_runtime_core::workload_net::WORKLOAD_IPV4_LO.octets()[1];
+        let hi = delonix_runtime_core::workload_net::WORKLOAD_IPV4_HI.octets()[1];
+        if !(lo..=hi).contains(&base) {
             return Err(Error::Invalid(format!(
-                "invalid /16 base octet: {base} (1..=254)"
+                "invalid /16 base octet: {base} (workload space is 10.{lo}..10.{hi})"
+            )));
+        }
+        // Two networks on the same /16 would share an IPAM range without either
+        // knowing — the second one's allocations would collide with the first's.
+        if let Some(clash) = self
+            .list()?
+            .into_iter()
+            .find(|n| n.prefix == format!("10.{base}"))
+        {
+            return Err(Error::Invalid(format!(
+                "10.{base}.0.0/16 is already used by network '{}'",
+                clash.name
             )));
         }
         delonix_runtime_core::write_atomic(&self.path(name), base.to_string().as_bytes())?;
@@ -3237,5 +3317,85 @@ mod tests {
         s.remove("alpha").unwrap();
         assert_eq!(s.list().unwrap().len(), 1);
         let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn base_from_subnet_aceita_a_forma_suportada() {
+        assert_eq!(
+            NetworkStore::base_from_subnet("10.200.0.0/16").unwrap(),
+            200
+        );
+        assert_eq!(
+            NetworkStore::base_from_subnet("10.254.0.0/16").unwrap(),
+            254
+        );
+    }
+
+    #[test]
+    fn base_from_subnet_recusa_e_diz_o_que_e_suportado() {
+        // Each of these used to be ACCEPTED and silently dropped, which is the
+        // whole reason this function exists. The message has to name the shape
+        // that works, or the refusal is just a different way of being useless.
+        for bad in [
+            "172.20.0.0/16", // outside the workload space
+            "10.50.0.0/16",  // right shape, wrong range
+            "10.200.0.0/24", // only /16
+            "10.200.0.0",    // no prefix length
+            "10.200.1.0/16", // /16 that does not end in .0.0
+            "banana",
+        ] {
+            let e = NetworkStore::base_from_subnet(bad)
+                .expect_err("devia recusar {bad}")
+                .to_string();
+            assert!(
+                e.contains("10.<200-254>.0.0/16"),
+                "a recusa de {bad} tem de dizer o que e suportado: {e}"
+            );
+        }
+    }
+
+    #[test]
+    fn create_with_base_e_idempotente_mas_nao_renumera() {
+        let dir = std::env::temp_dir().join(format!(
+            "delonix-netstore-test-{}-{}",
+            std::process::id(),
+            fnv32("renumera")
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        let store = NetworkStore::open(&dir).unwrap();
+
+        let a = store.create_with_base("vpc", 210).unwrap();
+        assert_eq!(a.subnet, "10.210.0.0/16");
+        // Same subnet again: a no-op, so re-applying an unchanged manifest works.
+        assert_eq!(store.create_with_base("vpc", 210).unwrap().subnet, a.subnet);
+        // A DIFFERENT one must fail loudly: returning the old network as if the
+        // request had been honoured is exactly the silence being removed here.
+        let e = store.create_with_base("vpc", 211).unwrap_err().to_string();
+        assert!(e.contains("cannot be changed in place"), "{e}");
+
+        // And two networks may not share a /16 — their IPAM ranges would collide.
+        let e = store
+            .create_with_base("outra", 210)
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains("already used by network 'vpc'"), "{e}");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn create_with_base_recusa_fora_do_espaco_de_workload() {
+        let dir = std::env::temp_dir().join(format!(
+            "delonix-netstore-range-{}-{}",
+            std::process::id(),
+            fnv32("range")
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        let store = NetworkStore::open(&dir).unwrap();
+        // 50 is a valid octet but not a valid WORKLOAD one; the old guard was
+        // `1..=254`, which let a network be created where nothing else looks.
+        assert!(store.create_with_base("x", 50).is_err());
+        assert!(store.create_with_base("x", 200).is_ok());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
