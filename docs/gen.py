@@ -3237,6 +3237,14 @@ incompatível com um servidor multi-thread)</td></tr>
 <td><strong>Delonix</strong> — ninguém no espaço Docker/Podman cobre isto junto</td></tr>
 <tr><td>Trocar portas/volumes/redes de um container a quente, sem o recriar</td>
 <td><strong>Delonix</strong> — o Docker obriga a recriar</td></tr>
+<tr><td>Versionar a infra em git e ter um <code>plan</code> antes de aplicar, sem Terraform</td>
+<td><strong>Delonix</strong> — <code>stack plan</code>/<code>apply</code>/<code>destroy</code>
+convergem, com diff de 3 vias e <strong>sem ficheiro de estado</strong>. Nem o Docker nem o
+Podman têm equivalente: o <code>compose up</code> dos dois recria o container para mudar um
+campo, e nenhum dos dois te diz o que ia mudar antes de mudar</td></tr>
+<tr><td>Um gate de deriva em CI (falhar o build se a máquina saiu do que o git declara)</td>
+<td><strong>Delonix</strong> — <code>stack plan --detailed-exitcode</code>, o contrato 0/2/1 do
+<code>terraform plan</code>, num comando</td></tr>
 <tr><td>Rede rootless avançada (overlay cifrado entre nós, firewall dirigido por container)</td>
 <td><strong>Delonix</strong> — acima do Podman rootless nestes pontos</td></tr>
 <tr><td>Um motor com anos de produção, comunidade enorme, máxima compatibilidade de ferramentas</td>
@@ -3267,6 +3275,12 @@ paralelismo de estágios do BuildKit real</span></td></tr>
 <td><span class="tag ok">nativo</span></td><td><span class="tag mid">podman-compose</span></td>
 <td><span class="tag ok">nativo (<code>delonix compose</code>), sem Docker — <code>depends_on</code>
 com healthcheck real</span></td></tr>
+<tr><td>IaC declarativo com <code>plan</code> antes do <code>apply</code></td>
+<td><span class="tag no">ausente</span></td><td><span class="tag no">ausente</span></td>
+<td><span class="tag ok"><code>stack plan</code>/<code>apply</code>/<code>destroy</code>: diff de
+3 vias, convergência a quente sem mudar o PID, recusa fail-closed do que obriga a recriar, posse
+por label, <strong>sem ficheiro de estado</strong>, e <code>--detailed-exitcode</code> como gate
+de deriva. Schema gerado do código e estável</span></td></tr>
 <tr><td>API compatível com <code>DOCKER_HOST</code></td>
 <td><span class="tag ok">é a própria</span></td><td><span class="tag ok">compatível</span></td>
 <td><span class="tag mid">ciclo de vida completo do container (create/start/stop/kill/wait/
@@ -3422,6 +3436,15 @@ control-plane</td></tr>
 <td><strong>Delonix</strong> — nobody in the Docker/Podman space covers this together</td></tr>
 <tr><td>Swapping a container's ports/volumes/networks on the fly, with no recreate</td>
 <td><strong>Delonix</strong> — Docker forces a recreate</td></tr>
+<tr><td>Versioning infrastructure in git with a <code>plan</code> before you apply, without
+Terraform</td>
+<td><strong>Delonix</strong> — <code>stack plan</code>/<code>apply</code>/<code>destroy</code>
+converge, with a three-way diff and <strong>no state file</strong>. Neither Docker nor Podman has
+an equivalent: <code>compose up</code> recreates the container to change a field, and neither
+tells you what would change before it changes</td></tr>
+<tr><td>A drift gate in CI (fail the build when the machine left what git declares)</td>
+<td><strong>Delonix</strong> — <code>stack plan --detailed-exitcode</code>, the 0/2/1 contract of
+<code>terraform plan</code>, in one command</td></tr>
 <tr><td>Advanced rootless networking (encrypted inter-node overlay, per-container directed
 firewall)</td>
 <td><strong>Delonix</strong> — ahead of rootless Podman on these points</td></tr>
@@ -3454,6 +3477,13 @@ layer cache (rootless) already work; no real BuildKit
 <td><span class="tag ok">native</span></td><td><span class="tag mid">podman-compose</span></td>
 <td><span class="tag ok">native (<code>delonix compose</code>), no Docker — <code>depends_on</code>
 with a real healthcheck</span></td></tr>
+<tr><td>Declarative IaC with a <code>plan</code> before the <code>apply</code></td>
+<td><span class="tag no">absent</span></td><td><span class="tag no">absent</span></td>
+<td><span class="tag ok"><code>stack plan</code>/<code>apply</code>/<code>destroy</code>:
+three-way diff, hot convergence with the PID unchanged, a fail-closed refusal for anything needing
+a recreate, ownership by label, <strong>no state file</strong>, and
+<code>--detailed-exitcode</code> as a drift gate. Schema generated from the code, and
+stable</span></td></tr>
 <tr><td><code>DOCKER_HOST</code>-compatible API</td>
 <td><span class="tag ok">is the real thing</span></td><td><span class="tag ok">compatible</span></td>
 <td><span class="tag mid">full container lifecycle (create/start/stop/kill/wait/
