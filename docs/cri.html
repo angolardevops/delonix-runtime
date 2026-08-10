@@ -142,7 +142,7 @@ main{padding:1.4rem 1.2rem 4rem;max-width:none}}
 <a href="https://github.com/angolardevops/delonix-runtime/releases">Releases</a>
 </nav>
 <main>
-
+<div class='lang-pt'>
 <h1>CRI — kubelet sem containerd</h1>
 <p class="tagline">O crate <code>delonix-cri</code> implementa o Container Runtime Interface
 (<code>runtime.v1</code>) do Kubernetes.</p>
@@ -195,7 +195,59 @@ apertado do que a especificação pede.</p>
 (<code>delonix image --vm build</code>) já traz kubeadm/kubelet/kubectl e o
 <code>delonix-cri</code> activo; <code>delonix cluster kubeadm</code> provisiona as VMs e faz o
 bootstrap — o cluster resultante corre Kubernetes com o Delonix como runtime de ponta a ponta.</p>
+</div><div class='lang-en'>
+<h1>CRI — kubelet with no containerd</h1>
+<p class="tagline">The <code>delonix-cri</code> crate implements Kubernetes' Container Runtime
+Interface (<code>runtime.v1</code>).</p>
 
+<p>The kubelet doesn't know how to run containers — it delegates to a runtime over CRI (gRPC over
+a unix socket). Usually that runtime is containerd or CRI-O; with Delonix, it's the
+<code>delonix-cri</code> binary: <em>Kubernetes pods and containers running directly on the
+Delonix engine</em>, with no other piece involved.</p>
+
+<h2>How it connects</h2>
+<pre><code># the service (the golden VM image already ships it as a systemd unit)
+DELONIX_CRI_ADDR=/run/delonix-cri.sock delonix-cri
+
+# the kubelet points at it
+kubelet --container-runtime-endpoint=unix:///run/delonix-cri.sock …</code></pre>
+
+<h2>What it implements</h2>
+<table>
+<tr><th>CRI area</th><th>Support</th></tr>
+<tr><td>RuntimeService — sandboxes (pods)</td><td>pod sandbox creation with shared netns
+(the pod's containers join the sandbox's network via <code>join_netns</code>), labels/annotations,
+status and removal</td></tr>
+<tr><td>RuntimeService — containers</td><td>create/start/stop/remove, exec, logs in CRI format
+(<code>&lt;rfc3339nano&gt; stdout F line</code>), per-pod cpu/memory limits via cgroups v2</td></tr>
+<tr><td>ImageService</td><td>pull (digest verified), list, status, remove — over Delonix's normal
+<code>ImageStore</code></td></tr>
+<tr><td>Networking</td><td>CNI compatibility (attach/detach via JSON conf)</td></tr>
+</table>
+
+<h2>Conformance — measured, not claimed</h2>
+<p>"Serves a kubelet" is a claim; <strong>79 of 103 named specs</strong> is a fact someone else
+can verify. <code>delonix-cri</code> is run against <a href="https://github.com/kubernetes-sigs/cri-tools">cri-tools</a>'
+<code>critest</code>, the upstream suite, and the number is published:</p>
+<pre><code>Ran 103 of 122 Specs
+79 Passed | 24 Failed | 19 Skipped        # rootless, cgroup v2</code></pre>
+<p>Reproduce it with <code>tests/compat/cri-conformance.sh</code>. Full detail on what fails and
+why — including what <em>isn't</em> ours to fix — is in
+<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/cri-conformance.md">docs/cri-conformance.md</a>.</p>
+<p>About half of the remaining failures aren't engine gaps: nine are AppArmor specs, which need
+<code>CAP_MAC_ADMIN</code> in the <em>initial</em> user namespace (Docker and containerd hit
+exactly the same limit), and four are mount tests where the suite itself can't mount on the host
+without root.</p>
+<p>One divergence is <strong>deliberate</strong> and doesn't change just to pass a spec: a
+container with no declared seccomp profile runs under the engine's built-in allowlist, not
+<em>unconfined</em>. That's stricter than the spec asks for.</p>
+
+<h2>From zero to a cluster</h2>
+<p>This is the piece that closes the <code>delonix cluster</code> loop: the golden VM image
+(<code>delonix image --vm build</code>) already ships kubeadm/kubelet/kubectl and
+<code>delonix-cri</code> running; <code>delonix cluster kubeadm</code> provisions the VMs and does
+the bootstrap — the resulting cluster runs Kubernetes with Delonix as the runtime end to end.</p>
+</div>
 <footer><span class='lang-pt'>Delonix Engine · Apache-2.0 · <a href="https://github.com/angolardevops/delonix-runtime">angolardevops/delonix-runtime</a> · Referência gerada do <code>--help</code> real do binário por <code>docs/gen.py</code>.</span><span class='lang-en'>Delonix Engine · Apache-2.0 · <a href="https://github.com/angolardevops/delonix-runtime">angolardevops/delonix-runtime</a> · Reference generated from the real <code>--help</code> of the binary by <code>docs/gen.py</code>.</span></footer>
 </main>
 <aside class="toc" id="pagetoc"><div class="toc-inner"><h5><span class='lang-pt'>Nesta página</span><span class='lang-en'>On this page</span></h5><nav id="toc-nav"></nav></div></aside>

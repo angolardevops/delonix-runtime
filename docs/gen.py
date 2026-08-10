@@ -2507,6 +2507,82 @@ projecto.</p>
 </div>
 """
 
+ARCH_EN = """
+<h1>Architecture</h1>
+<p class="tagline">8 crates, one binary — and no resident process.</p>
+
+<h2>Overview</h2>
+<div class="arch">
+<div class="row"><div class="box mut" style="flex:3"><b>delonix (CLI) — delonix-runtime-bin</b>
+grouped commands: container · image · build · vm · volumes · network · stack · cluster</div></div>
+<div class="row">
+<div class="box"><b>delonix-runtime</b>clone() + namespaces (mount/pid/ipc/uts/net/user/cgroup),
+pivot_root, seccomp/caps, delegated cgroups v2, exec, reconcile</div>
+<div class="box"><b>delonix-image</b>OCI pull (digest verified), build, export, CNB buildpacks,
+signatures, registry</div>
+<div class="box"><b>delonix-net</b>rootless SDN: holder netns + bridge + single slirp, nft
+DNAT/firewall, internal DNS, WireGuard overlay</div>
+</div>
+<div class="row">
+<div class="box"><b>delonix-vm</b>microVMs (VmBackend trait: Cloud Hypervisor · libvirt), cloud-init</div>
+<div class="box"><b>delonix-volume</b>named volumes, bind mounts, quotas, nfs</div>
+<div class="box"><b>delonix-cri</b>runtime.v1 CRI server — the kubelet talks to Delonix</div>
+<div class="box mut"><b>delonix-runtime-core</b>shared types: Container, Vm, Status, JSON Store,
+Secret Manager</div>
+</div>
+</div>
+
+<h2>Genuinely daemonless</h2>
+<p>There's no daemon, not even a per-container monitor (podman's conmon). <code>run</code> does a
+direct <code>clone()</code>; in detached mode, an ephemeral logging <em>shim</em> just drains
+stdout/stderr to the log file (with rotation) and dies with the container. State
+(the full spec of every container/VM/volume/network) lives as JSON under
+<code>$DELONIX_ROOT</code> — <code>ps</code>/<code>start</code>/<code>inspect</code> rebuild
+everything from there, and opportunistic <em>reapers</em> clean up orphans (slirp with no target,
+hostfwd with no container) on every relevant invocation.</p>
+
+<h2>Rootless-first</h2>
+<p>Without root, isolation comes from user namespaces with subuid mapping
+(<code>newuidmap</code>/<code>newgidmap</code>, like podman) — the container's uid 0 is an
+unprivileged host uid. The rootfs is a persistent flat copy per container (in root mode, overlayfs
+with the upper layer preserved). With <code>--privileged</code> plus Kind node labels, the runtime
+sets up the dedicated cgroup v2 delegation a nested systemd (kindest/node) needs.</p>
+
+<h2>Rootless networking: the ingress</h2>
+<div class="arch">
+<div class="row">
+<div class="box mut" style="flex:1"><b>host</b>published ports (127.0.0.1 by default;
+<code>DELONIX_PUBLISH_ADDR</code> to expose)</div>
+<div class="box" style="flex:1"><b>holder netns (1 per user)</b>delonix0 bridge ·
+single slirp4netns · nft (DNAT "pre", firewall) · internal DNS with container names</div>
+<div class="box mut" style="flex:1"><b>containers</b>one veth per container, attached to the
+bridge; deterministic IP per id</div>
+</div>
+</div>
+<p>Publishing a port = one <code>add_hostfwd</code> on the single slirp's api-socket plus one DNAT
+rule in the ingress chain — <strong>dataplane state, not container state</strong>. That's why ports
+(and volumes, via live mounts) swap on the fly: the container process is never touched. With
+<code>--net host</code> + <code>-p</code>, the container gets its own netns with a dedicated
+slirp4netns (the podman model), which dies with it.</p>
+
+<h2>Security</h2>
+<p>Rootless by default; seccomp and capability drop outside <code>--privileged</code>, with startup
+FAILING if they don't actually come up; pull with digest verification (including OCI VM
+artifacts); manifest inputs for resources like <code>Cluster</code>/<code>Vm</code> validated by
+whitelist before reaching any remote shell.</p>
+<div class="callout warn">
+<p><b>2026-07-21 audit — 6 high-severity findings, FIXED by 2026-07-23</b> (the build's
+<code>COPY</code>, for instance, was bypassable via symlink despite an earlier fix having tried to
+close it — it now canonicalizes and confirms confinement). There's no sign of remote code
+execution, but the fixes haven't yet been confirmed by a 2nd independent audit and the syscall core
+has never had a security review — out of caution, still avoid untrusted images/manifests or
+exposing the engine on a shared host until confirmed. Full detail in
+<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/AUDITORIA-E2E.md">AUDITORIA-E2E.md</a>
+— see also the <a href="comparacao.html">comparison with Docker/Podman</a> for the project's
+overall status.</p>
+</div>
+"""
+
 CRI = """
 <h1>CRI — kubelet sem containerd</h1>
 <p class="tagline">O crate <code>delonix-cri</code> implementa o Container Runtime Interface
@@ -2560,6 +2636,60 @@ apertado do que a especificação pede.</p>
 (<code>delonix image --vm build</code>) já traz kubeadm/kubelet/kubectl e o
 <code>delonix-cri</code> activo; <code>delonix cluster kubeadm</code> provisiona as VMs e faz o
 bootstrap — o cluster resultante corre Kubernetes com o Delonix como runtime de ponta a ponta.</p>
+"""
+
+CRI_EN = """
+<h1>CRI — kubelet with no containerd</h1>
+<p class="tagline">The <code>delonix-cri</code> crate implements Kubernetes' Container Runtime
+Interface (<code>runtime.v1</code>).</p>
+
+<p>The kubelet doesn't know how to run containers — it delegates to a runtime over CRI (gRPC over
+a unix socket). Usually that runtime is containerd or CRI-O; with Delonix, it's the
+<code>delonix-cri</code> binary: <em>Kubernetes pods and containers running directly on the
+Delonix engine</em>, with no other piece involved.</p>
+
+<h2>How it connects</h2>
+<pre><code># the service (the golden VM image already ships it as a systemd unit)
+DELONIX_CRI_ADDR=/run/delonix-cri.sock delonix-cri
+
+# the kubelet points at it
+kubelet --container-runtime-endpoint=unix:///run/delonix-cri.sock …</code></pre>
+
+<h2>What it implements</h2>
+<table>
+<tr><th>CRI area</th><th>Support</th></tr>
+<tr><td>RuntimeService — sandboxes (pods)</td><td>pod sandbox creation with shared netns
+(the pod's containers join the sandbox's network via <code>join_netns</code>), labels/annotations,
+status and removal</td></tr>
+<tr><td>RuntimeService — containers</td><td>create/start/stop/remove, exec, logs in CRI format
+(<code>&lt;rfc3339nano&gt; stdout F line</code>), per-pod cpu/memory limits via cgroups v2</td></tr>
+<tr><td>ImageService</td><td>pull (digest verified), list, status, remove — over Delonix's normal
+<code>ImageStore</code></td></tr>
+<tr><td>Networking</td><td>CNI compatibility (attach/detach via JSON conf)</td></tr>
+</table>
+
+<h2>Conformance — measured, not claimed</h2>
+<p>"Serves a kubelet" is a claim; <strong>79 of 103 named specs</strong> is a fact someone else
+can verify. <code>delonix-cri</code> is run against <a href="https://github.com/kubernetes-sigs/cri-tools">cri-tools</a>'
+<code>critest</code>, the upstream suite, and the number is published:</p>
+<pre><code>Ran 103 of 122 Specs
+79 Passed | 24 Failed | 19 Skipped        # rootless, cgroup v2</code></pre>
+<p>Reproduce it with <code>tests/compat/cri-conformance.sh</code>. Full detail on what fails and
+why — including what <em>isn't</em> ours to fix — is in
+<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/cri-conformance.md">docs/cri-conformance.md</a>.</p>
+<p>About half of the remaining failures aren't engine gaps: nine are AppArmor specs, which need
+<code>CAP_MAC_ADMIN</code> in the <em>initial</em> user namespace (Docker and containerd hit
+exactly the same limit), and four are mount tests where the suite itself can't mount on the host
+without root.</p>
+<p>One divergence is <strong>deliberate</strong> and doesn't change just to pass a spec: a
+container with no declared seccomp profile runs under the engine's built-in allowlist, not
+<em>unconfined</em>. That's stricter than the spec asks for.</p>
+
+<h2>From zero to a cluster</h2>
+<p>This is the piece that closes the <code>delonix cluster</code> loop: the golden VM image
+(<code>delonix image --vm build</code>) already ships kubeadm/kubelet/kubectl and
+<code>delonix-cri</code> running; <code>delonix cluster kubeadm</code> provisions the VMs and does
+the bootstrap — the resulting cluster runs Kubernetes with Delonix as the runtime end to end.</p>
 """
 
 
@@ -4284,11 +4414,11 @@ def main():
     page("index.html", "Delonix Engine", index_html)
     cheatsheet_page()
     kinds_page()
-    page("arquitectura.html", "Arquitectura", ARCH)
+    page("arquitectura.html", "Arquitectura", bi("div", ARCH, ARCH_EN))
     c4_page()
     page("cloud.html", "cloud-init, cloud image e Cloud Hypervisor", bi("div", CLOUD, CLOUD_EN))
     labs_page()
-    page("cri.html", "CRI", CRI)
+    page("cri.html", "CRI", bi("div", CRI, CRI_EN))
     page("comparacao.html", "Delonix vs Docker vs Podman", bi("div", COMPARE, COMPARE_EN))
     page("tutorial-delonix-temp.html", "Projecto completo: Delonix Temp", bi("div", TUTORIAL, TUTORIAL_EN))
     for n, g in GROUPS.items():

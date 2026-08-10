@@ -142,7 +142,7 @@ main{padding:1.4rem 1.2rem 4rem;max-width:none}}
 <a href="https://github.com/angolardevops/delonix-runtime/releases">Releases</a>
 </nav>
 <main>
-
+<div class='lang-pt'>
 <h1>Arquitectura</h1>
 <p class="tagline">8 crates, um binário — e nenhum processo residente.</p>
 
@@ -215,7 +215,81 @@ não confiáveis ou expor o motor num host partilhado até à confirmação. Det
 — ver também a <a href="comparacao.html">comparação com Docker/Podman</a> para o estado geral do
 projecto.</p>
 </div>
+</div><div class='lang-en'>
+<h1>Architecture</h1>
+<p class="tagline">8 crates, one binary — and no resident process.</p>
 
+<h2>Overview</h2>
+<div class="arch">
+<div class="row"><div class="box mut" style="flex:3"><b>delonix (CLI) — delonix-runtime-bin</b>
+grouped commands: container · image · build · vm · volumes · network · stack · cluster</div></div>
+<div class="row">
+<div class="box"><b>delonix-runtime</b>clone() + namespaces (mount/pid/ipc/uts/net/user/cgroup),
+pivot_root, seccomp/caps, delegated cgroups v2, exec, reconcile</div>
+<div class="box"><b>delonix-image</b>OCI pull (digest verified), build, export, CNB buildpacks,
+signatures, registry</div>
+<div class="box"><b>delonix-net</b>rootless SDN: holder netns + bridge + single slirp, nft
+DNAT/firewall, internal DNS, WireGuard overlay</div>
+</div>
+<div class="row">
+<div class="box"><b>delonix-vm</b>microVMs (VmBackend trait: Cloud Hypervisor · libvirt), cloud-init</div>
+<div class="box"><b>delonix-volume</b>named volumes, bind mounts, quotas, nfs</div>
+<div class="box"><b>delonix-cri</b>runtime.v1 CRI server — the kubelet talks to Delonix</div>
+<div class="box mut"><b>delonix-runtime-core</b>shared types: Container, Vm, Status, JSON Store,
+Secret Manager</div>
+</div>
+</div>
+
+<h2>Genuinely daemonless</h2>
+<p>There's no daemon, not even a per-container monitor (podman's conmon). <code>run</code> does a
+direct <code>clone()</code>; in detached mode, an ephemeral logging <em>shim</em> just drains
+stdout/stderr to the log file (with rotation) and dies with the container. State
+(the full spec of every container/VM/volume/network) lives as JSON under
+<code>$DELONIX_ROOT</code> — <code>ps</code>/<code>start</code>/<code>inspect</code> rebuild
+everything from there, and opportunistic <em>reapers</em> clean up orphans (slirp with no target,
+hostfwd with no container) on every relevant invocation.</p>
+
+<h2>Rootless-first</h2>
+<p>Without root, isolation comes from user namespaces with subuid mapping
+(<code>newuidmap</code>/<code>newgidmap</code>, like podman) — the container's uid 0 is an
+unprivileged host uid. The rootfs is a persistent flat copy per container (in root mode, overlayfs
+with the upper layer preserved). With <code>--privileged</code> plus Kind node labels, the runtime
+sets up the dedicated cgroup v2 delegation a nested systemd (kindest/node) needs.</p>
+
+<h2>Rootless networking: the ingress</h2>
+<div class="arch">
+<div class="row">
+<div class="box mut" style="flex:1"><b>host</b>published ports (127.0.0.1 by default;
+<code>DELONIX_PUBLISH_ADDR</code> to expose)</div>
+<div class="box" style="flex:1"><b>holder netns (1 per user)</b>delonix0 bridge ·
+single slirp4netns · nft (DNAT "pre", firewall) · internal DNS with container names</div>
+<div class="box mut" style="flex:1"><b>containers</b>one veth per container, attached to the
+bridge; deterministic IP per id</div>
+</div>
+</div>
+<p>Publishing a port = one <code>add_hostfwd</code> on the single slirp's api-socket plus one DNAT
+rule in the ingress chain — <strong>dataplane state, not container state</strong>. That's why ports
+(and volumes, via live mounts) swap on the fly: the container process is never touched. With
+<code>--net host</code> + <code>-p</code>, the container gets its own netns with a dedicated
+slirp4netns (the podman model), which dies with it.</p>
+
+<h2>Security</h2>
+<p>Rootless by default; seccomp and capability drop outside <code>--privileged</code>, with startup
+FAILING if they don't actually come up; pull with digest verification (including OCI VM
+artifacts); manifest inputs for resources like <code>Cluster</code>/<code>Vm</code> validated by
+whitelist before reaching any remote shell.</p>
+<div class="callout warn">
+<p><b>2026-07-21 audit — 6 high-severity findings, FIXED by 2026-07-23</b> (the build's
+<code>COPY</code>, for instance, was bypassable via symlink despite an earlier fix having tried to
+close it — it now canonicalizes and confirms confinement). There's no sign of remote code
+execution, but the fixes haven't yet been confirmed by a 2nd independent audit and the syscall core
+has never had a security review — out of caution, still avoid untrusted images/manifests or
+exposing the engine on a shared host until confirmed. Full detail in
+<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/AUDITORIA-E2E.md">AUDITORIA-E2E.md</a>
+— see also the <a href="comparacao.html">comparison with Docker/Podman</a> for the project's
+overall status.</p>
+</div>
+</div>
 <footer><span class='lang-pt'>Delonix Engine · Apache-2.0 · <a href="https://github.com/angolardevops/delonix-runtime">angolardevops/delonix-runtime</a> · Referência gerada do <code>--help</code> real do binário por <code>docs/gen.py</code>.</span><span class='lang-en'>Delonix Engine · Apache-2.0 · <a href="https://github.com/angolardevops/delonix-runtime">angolardevops/delonix-runtime</a> · Reference generated from the real <code>--help</code> of the binary by <code>docs/gen.py</code>.</span></footer>
 </main>
 <aside class="toc" id="pagetoc"><div class="toc-inner"><h5><span class='lang-pt'>Nesta página</span><span class='lang-en'>On this page</span></h5><nav id="toc-nav"></nav></div></aside>
