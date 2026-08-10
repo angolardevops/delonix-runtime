@@ -156,30 +156,32 @@ nodes.</p>
 <div class='help'><pre><code>Usage: delonix vm [OPTIONS] &lt;COMMAND&gt;
 
 Commands:
-  dash       Dashboard (KPIs + table) of the VMs — interactive TUI, or `--once` snapshot
-  init       Bootstrap a project with a VM manifest — files ALREADY FILLED IN (images included), ready to use without editing anything
-  create     Create (or auto-recover) a VM
-  build      Build a qcow2 VM image from a `VMfile`
-  pull       Pull a golden VM image from an OCI registry — with no argument, the OFFICIAL Delonix image (ready for `vm create`/`cluster kubeadm`)
-  ls-remote  List the tags available in a remote OCI repository — with no argument, the OFFICIAL Delonix golden image repo (discover which k8s versions are published before `pull`)
-  push       Push a local golden VM image to an OCI registry (`vm push &lt;name&gt; &lt;target&gt;`)
-  ls         List the VMs
-  console    Attach to the VM&#x27;s serial console (interactive terminal) — works with no IP (boot logs, login). Escape: Ctrl-] 
-  vnc        Print the VNC address of a graphical VM (created with `--vnc`, libvirt)
-  status     Current state (reconciles liveness/IP with the backend)
-  reach      
-  bridge     EXPERIMENTAL (root): give a libvirt VM DIRECT IP reachability to a container SDN network (veth from the host into the holder netns + routes). Defaults to a DRY-RUN; add `--apply` (as root) to establish it
-  unbridge   Tear down a `vm bridge` (dry-run without `--apply`)
-  describe   Human-readable detail of one or more VMs, `kubectl describe` style (for humans; use `status` for the usual compact view). Includes the LIVE state — `delonix_vm::status` reconciles liveness/IP with the backend
-  stop       Stop the VM (preserves disk/record)
-  start      Start an existing, stopped VM — idempotent (already running = no-op). Reboots with the base disk/vcpus/memory/network/backend recorded at its last `create`/`start`, reusing the same overlay (disk state preserved). Does NOT restore anything that only ever existed as a `vm create` flag (custom kernel/seed/volumes/static IP/VNC/advanced libvirt knobs) — a VM using those needs the original `vm create` invocation instead (also idempotent/auto-heal)
-  restart    Stop (if running) then start — always a real reboot, unlike `start`. Same recovered-fields limits as `start`
-  rm         Remove the VM (stops + deletes overlay/state)
-  snapshot   Take a named snapshot (libvirt: a running VM&#x27;s snapshot is a system checkpoint — memory + disk; `restore` reverts to it). Not yet supported on the cloud-hypervisor backend
-  restore    Revert the VM to a named snapshot
-  snapshots  List the VM&#x27;s snapshots
-  apply      Apply the `kind: Vm` documents of a manifest (`delonix_vm::create` is already idempotent by name — creates or auto-recovers)
-  help       Print this message or the help of the given subcommand(s)
+  dash             Dashboard (KPIs + table) of the VMs — interactive TUI, or `--once` snapshot
+  init             Bootstrap a project with a VM manifest — files ALREADY FILLED IN (images included), ready to use without editing anything
+  create           Create (or auto-recover) a VM
+  build            Build a qcow2 VM image from a `VMfile`
+  pull             Pull a golden VM image from an OCI registry — with no argument, the OFFICIAL Delonix image (ready for `vm create`/`cluster kubeadm`)
+  ls-remote        List the tags available in a remote OCI repository — with no argument, the OFFICIAL Delonix golden image repo (discover which k8s versions are published before `pull`)
+  push             Push a local golden VM image to an OCI registry (`vm push &lt;name&gt; &lt;target&gt;`)
+  convert          Convert a VM disk between `qcow2` and `raw` — flattened either way, ready to boot on either backend (libvirt/QEMU and Cloud Hypervisor already share this same pair of formats)
+  default-backend  Get or set the default VM backend, used by `vm create` when neither `--backend` nor `DELONIX_VM_BACKEND` is given — above the engine&#x27;s own auto-detection heuristic. With no flag, prints the current default (`none` if auto-detection decides)
+  ls               List the VMs
+  console          Attach to the VM&#x27;s serial console (interactive terminal) — works with no IP (boot logs, login). Escape: Ctrl-] 
+  vnc              Print the VNC address of a graphical VM (created with `--vnc`, libvirt)
+  status           Current state (reconciles liveness/IP with the backend)
+  reach            
+  bridge           EXPERIMENTAL (root): give a libvirt VM DIRECT IP reachability to a container SDN network (veth from the host into the holder netns + routes). Defaults to a DRY-RUN; add `--apply` (as root) to establish it
+  unbridge         Tear down a `vm bridge` (dry-run without `--apply`)
+  describe         Human-readable detail of one or more VMs, `kubectl describe` style (for humans; use `status` for the usual compact view). Includes the LIVE state — `delonix_vm::status` reconciles liveness/IP with the backend
+  stop             Stop the VM (preserves disk/record)
+  start            Start an existing, stopped VM — idempotent (already running = no-op). Reboots with the base disk/vcpus/memory/network/backend recorded at its last `create`/`start`, reusing the same overlay (disk state preserved). Does NOT restore anything that only ever existed as a `vm create` flag (custom kernel/seed/volumes/static IP/VNC/advanced libvirt knobs) — a VM using those needs the original `vm create` invocation instead (also idempotent/auto-heal)
+  restart          Stop (if running) then start — always a real reboot, unlike `start`. Same recovered-fields limits as `start`
+  rm               Remove the VM (stops + deletes overlay/state)
+  snapshot         Take a named snapshot (libvirt: a running VM&#x27;s snapshot is a system checkpoint — memory + disk; `restore` reverts to it). Not yet supported on the cloud-hypervisor backend
+  restore          Revert the VM to a named snapshot
+  snapshots        List the VM&#x27;s snapshots
+  apply            Apply the `kind: Vm` documents of a manifest (`delonix_vm::create` is already idempotent by name — creates or auto-recovers)
+  help             Print this message or the help of the given subcommand(s)
 
 Options:
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
@@ -407,12 +409,10 @@ Options:
           Base disk (qcow2/raw) — becomes a per-VM overlay. Omit to use the local golden VM image (if there is exactly one; `image --vm ls`)
 
       --vcpus &lt;VCPUS&gt;
-          [default: 1]
+          vCPUs (default: 1, or the image&#x27;s `VCPUS` — see `HYPERVISOR`/`VCPUS` in `delonix vm init --vmfile` — when `--disk` names a local image)
 
       --memory &lt;MEMORY&gt;
-          Memory (`&quot;2G&quot;`/`&quot;1024M&quot;`)
-          
-          [default: 1G]
+          Memory (`&quot;2G&quot;`/`&quot;1024M&quot;`; default: `1G`, or the image&#x27;s `MEMORY` when `--disk` names a local image)
 
       --network &lt;NETWORK&gt;
           Ingress network for the tap (default: the system ingress network; a custom network must be created first with `delonix network create`)
@@ -459,7 +459,7 @@ Options:
           VFIO PCI passthrough, repeatable
 
       --backend &lt;BACKEND&gt;
-          `cloud-hypervisor`|`libvirt` (omit = auto-detection)
+          `cloud-hypervisor`|`libvirt` (omit: the image&#x27;s `HYPERVISOR` if `--disk` names a local one, else `DELONIX_VM_BACKEND`/`vm default-backend`/auto-detection, in that order)
 
       --net-mode &lt;NET_MODE&gt;
           libvirt only: `user`|`nat`|`bridge`

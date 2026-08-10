@@ -39,10 +39,10 @@ glibc 2.35). O trabalho local é: notas → bump → tag → monitorizar → val
    te interesse a doc do `delonix`:
 
    ```bash
-   curl -fL -o /tmp/dlx https://github.com/angolardevops/delonix-runtime/releases/latest/download/delonix-x86_64-linux
-   chmod +x /tmp/dlx
+   curl -fL -o /tmp/delonix https://github.com/angolardevops/delonix-runtime/releases/latest/download/delonix-x86_64-linux
+   chmod +x /tmp/delonix
    python3 -m venv /tmp/v && /tmp/v/bin/pip install markdown
-   /tmp/v/bin/python docs/gen.py /tmp/dlx ~/.local/bin/delonixctl
+   /tmp/v/bin/python docs/gen.py /tmp/delonix ~/.local/bin/delonixctl
    ```
 
    Se `~/.local/bin/delonixctl` também não existir neste host, procura em
@@ -50,8 +50,12 @@ glibc 2.35). O trabalho local é: notas → bump → tag → monitorizar → val
    do `delonixctl` — mas a doc do `delonix` (o que importa a este repo) já
    gera correctamente com qualquer caminho válido no 2.º argumento.
    O `gen.py` usa o **argv[0]** do binário para as linhas `Usage:` — o ficheiro
-   TEM de se chamar `dlx` (é o nome em toda a doc comitada), senão a
-   regeneração troca `Usage: dlx …` por `Usage: delonix-x86_64-linux …` em
+   TEM de se chamar `delonix` (é o nome em toda a doc comitada; **esta nota
+   dizia `dlx` e estava ERRADA**, o que na v0.46.0 produziu exactamente o diff
+   enorme que ela existe para evitar — 26 ficheiros trocados só por causa do
+   nome. Confirma sempre com `git show HEAD:docs/comandos/vm.html | grep -oE
+   "Usage: [a-z0-9-]+" | sort -u` antes de gerar), senão a regeneração troca
+   `Usage: delonix …` por `Usage: delonix-x86_64-linux …` em
    TODAS as páginas e produz um diff enorme e errado. Copia o asset para um
    ficheiro com esse nome antes de gerar.
    Comitar as páginas alteradas.
