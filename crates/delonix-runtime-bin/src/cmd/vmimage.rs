@@ -2858,8 +2858,16 @@ fn shared_account_steps(extra_run: &[String], distro: Distro) -> Vec<CustomizeOp
     // connectivity mid-`kubeadm init`. Confirmed live: `lab-cp1` and `lab-w1`
     // reported the byte-for-byte identical machine-id. MUST be the very last
     // step (after `--extra-run`/apt cleanup) so nothing after it regenerates one.
+    //
+    // `mkdir -p /var/lib/dbus` FOUND LIVE building Fedora: that directory does
+    // not exist there (dbus reads /etc/machine-id directly), so `ln -sf` failed
+    // and took the whole `virt-customize` run with it — the same class of trap
+    // as the AppArmor step that had to be made Ubuntu-only for Rocky. The
+    // symlink is still created where the directory does exist, because that is
+    // the case the compat matters for.
     ops.push(CustomizeOp::RunCommand(
-        "truncate -s 0 /etc/machine-id && rm -f /var/lib/dbus/machine-id && ln -sf /etc/machine-id /var/lib/dbus/machine-id"
+        "truncate -s 0 /etc/machine-id && rm -f /var/lib/dbus/machine-id && \
+         mkdir -p /var/lib/dbus && ln -sf /etc/machine-id /var/lib/dbus/machine-id"
             .into(),
     ));
     ops
@@ -4025,5 +4033,57 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
         );
         assert!(err.contains("--no-k8s"), "{err}");
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn image_type_label_distingue_appliance_de_cloud_init_e_de_desconhecido() {
+        // The three states are genuinely different and the column must not
+        // collapse them: an appliance REFUSES --ssh-key, a cloud-init image
+        // accepts it, and an unknown one (pre-existing metadata, or a tag
+        // published before annotations existed) is treated as cloud-init but
+        // should not claim to be one.
+        assert_eq!(image_type_label(Some("false")), "appliance");
+        assert_eq!(image_type_label(Some("true")), "cloud-init");
+        assert_eq!(image_type_label(None), "-");
+        assert_eq!(image_type_label(Some("sim")), "-");
+    }
+
+    #[test]
+    fn defaults_label_mostra_so_o_que_a_imagem_recomenda() {
+        let mut img = bare_img();
+        assert_eq!(defaults_label(&img), "-");
+        img.default_vcpus = Some(4);
+        assert_eq!(defaults_label(&img), "4cpu");
+        img.default_memory = Some("8G".into());
+        assert_eq!(defaults_label(&img), "4cpu/8G");
+        img.default_vcpus = None;
+        assert_eq!(defaults_label(&img), "8G");
+    }
+
+    #[test]
+    fn o_reset_do_machine_id_cria_o_dir_do_dbus_antes_de_lhe_apontar() {
+        // Found live on Fedora: /var/lib/dbus does not exist there, so the
+        // `ln -sf` failed and virt-customize aborted the whole build. Every
+        // distro must get a command that cannot fail on a missing directory.
+        for d in [
+            Distro::Ubuntu,
+            Distro::Debian,
+            Distro::Rocky,
+            Distro::Fedora,
+        ] {
+            let ops = shared_account_steps(&[], d);
+            let mid = ops
+                .iter()
+                .filter_map(|o| match o {
+                    CustomizeOp::RunCommand(c) if c.contains("machine-id") => Some(c),
+                    _ => None,
+                })
+                .next_back()
+                .expect("o reset de machine-id tem de existir");
+            assert!(
+                mid.contains("mkdir -p /var/lib/dbus"),
+                "{d:?}: sem mkdir, o ln falha onde o dir nao existe: {mid}"
+            );
+        }
     }
 }
