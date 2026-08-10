@@ -171,9 +171,16 @@ a <code>docker-compose.yml</code> already runs natively under <code>delonix comp
 a second manifest would leave the project with two sources of truth. The command says so instead
 of generating anyway.</p>
 <p class='src-link'>📄 Implementação real em Rust: <a href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/delonix-runtime-bin/src/cmd/init.rs"><code>cmd/init.rs</code></a></p>
-<div class='help'><pre><code>Usage: delonix [OPTIONS] &lt;COMMAND&gt;
+<div class='help'><pre><code>Usage: delonix init [OPTIONS] [DIR]
 
-For more information, try &#x27;--help&#x27;.</code></pre></div>
+Arguments:
+  [DIR]  Project directory (default: the current one)
+
+Options:
+      --l18n &lt;en|pt&gt;         Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+  -t, --template &lt;TEMPLATE&gt;  Force a template instead of the detected one (`stack init -t list` shows them)
+      --force                Overwrite files that already exist
+  -h, --help                 Print help</code></pre></div>
 <h2><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h2><div class="ex"><div class="cap">Detecta e gera — a saída diz sempre qual foi a prova</div><pre><code>delonix init</code></pre><div class="out"><pre><code>detected go.mod → stack init --template go
   created: ./Delonixfile
   created: ./delonix-manifest.yaml

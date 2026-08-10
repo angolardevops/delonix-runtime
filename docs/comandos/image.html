@@ -175,9 +175,9 @@ Commands:
   vm         Golden VM images (`&lt;root&gt;/vm-images/`): ls/pull/push/build. Equivalent to `image --vm &lt;cmd&gt;` (old form, kept)
   push       Publish a local image to an OCI registry. Without `target`, publishes under the image&#x27;s own reference. With `--vm`, `target` is required
   import     (only with `--vm`) Register an existing disk image under a name
-  convert    (only with `--vm`) Convert a VM disk between `qcow2` and `raw`
+  convert    (only with `--vm`) Convert a VM disk to the format another ecosystem imports — `qcow2`, `raw`, `vmdk`, `vdi`, `vhdx`, `vhd`
   init       (only with `--vm`) Build the golden VM image (Ubuntu + kubeadm/kubelet/ kubectl + `delonix-cri`). Scaffold a `VMfile` (and a cloud-init) for building your own image
-  build      
+  build      (only with `--vm`) Build a VM image: the built-in golden recipe (Ubuntu + kubeadm/kubelet/kubectl + `delonix-cri`), or a `VMfile` of your own with `-f`
   help       Print this message or the help of the given subcommand(s)
 
 Options:
@@ -208,9 +208,9 @@ Commands:
   ls-remote  List the tags available in a remote OCI repository — with no argument, the OFFICIAL Delonix golden image repo (discover which k8s versions are published before `pull`/`--k8s-version`)
   push       Publish a local VM image to an OCI registry
   import     Register an existing disk image under a name, so `vm create --disk &lt;name&gt;` and `image vm push` can use it
-  convert    Convert a VM disk between `qcow2` and `raw` — flattened either way, ready to boot on either backend
+  convert    Convert a VM disk to the format another ecosystem imports — `qcow2`, `raw`, `vmdk` (VMware), `vdi` (VirtualBox), `vhdx`/`vhd` (Hyper-V, Azure). Flattened either way: the result is a standalone file
   init       Build the golden VM image (Ubuntu + kubeadm/kubelet/kubectl + `delonix-cri`). Scaffold a `VMfile` (and a cloud-init) for building your own image
-  build      
+  build      Build a VM image: the built-in golden recipe (Ubuntu + kubeadm/kubelet/kubectl + `delonix-cri`), or a `VMfile` of your own with `-f`
   help       Print this message or the help of the given subcommand(s)
 
 Options:
@@ -406,6 +406,7 @@ Options:
   -h, --help          Print help</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Publicar a imagem VM dourada como artefacto OCI (padrão ORAS)</div><div class='cap lang-en'>Publish the golden VM image as an OCI artifact (ORAS pattern)</div><pre><code>delonix image --vm push k8s-golden ghcr.io/angolardevops/delonix-vm-k8s:1.34</code></pre></div>
 <h2 id='build'><code>image build</code></h2>
+<p class='intro'>(only with <code>--vm</code>) Build a VM image: the built-in golden recipe (Ubuntu + kubeadm/kubelet/kubectl + <code>delonix-cri</code>), or a <code>VMfile</code> of your own with <code>-f</code></p>
 <div class='help'><pre><code>Usage: delonix image build [OPTIONS] --tag &lt;TAG&gt; [CONTEXT]
 
 Arguments:
