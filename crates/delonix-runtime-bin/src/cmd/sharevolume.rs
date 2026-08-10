@@ -151,6 +151,21 @@ pub(crate) fn actual(docs: &[ManifestDoc]) -> Result<Vec<super::reconcile::Actua
     Ok(out)
 }
 
+/// Presence for `stack ls`/`describe`/`wait`.
+///
+/// Added when `ShareVolume` finally entered `KINDS` — until then the Kind was
+/// applied and never listed, so nothing ever asked this question. Without the
+/// arm it fell to the «unsupported kind» default, which reads as absent: a
+/// `stack wait` on a manifest whose shares were all up would have waited for
+/// them forever.
+pub(crate) fn presence_of(root: &Path, doc: &ManifestDoc) -> (String, String) {
+    let ns = doc.metadata.namespace.as_deref().unwrap_or("default");
+    match load_record(root, ns, &doc.metadata.name) {
+        Ok((rec, _)) => ("yes".into(), rec.storage_ref),
+        Err(_) => ("no".into(), "-".into()),
+    }
+}
+
 /// Converges a share: re-run the same `apply_one` that created it. Idempotent by
 /// design — it already updates `quota_bytes`/`alert_pct` in place and keeps the
 /// path a share was created with.
