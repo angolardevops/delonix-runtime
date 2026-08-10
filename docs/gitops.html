@@ -147,11 +147,13 @@ main{padding:1.4rem 1.2rem 4rem;max-width:none}}
 quem o aplica. Não é preciso Terraform nem Ansible por cima — esta página é o
 fluxo completo.</p>
 <blockquote>
-<p>Aplica-se aos Kinds que <strong>convergem</strong>: <code>Container</code>, <code>Pod</code>, <code>Volume</code>,
-<code>ShareVolume</code>, <code>Network</code>, <code>Image</code>, <code>Vm</code> e <code>FirewallPolicy</code>. Os restantes são
-«garante presente» (criados se faltarem, nunca actualizados) e o <code>plan</code>
-marca-os com <code>!</code> em vez de os esconder — cada um com o obstáculo concreto
-nomeado, que <code>delonix stack plan --fields</code> imprime. Vê
+<p>Aplica-se aos Kinds que <strong>convergem</strong>, que são onze dos doze: <code>Network</code>,
+<code>Volume</code>, <code>ShareVolume</code>, <code>Image</code>, <code>Vm</code>, <code>Container</code>, <code>Pod</code>, <code>FirewallPolicy</code>,
+<code>HTTPRoute</code>, <code>Ingress</code> e <code>Tunnel</code>. Só o <code>Secret</code> continua «garante presente»
+(criado se faltar, nunca actualizado), porque o estado são valores cifrados e
+um plano não os decifra para comparar — e o <code>plan</code> marca-o com <code>!</code> em vez de o
+esconder, com o obstáculo nomeado. A lista autoritativa não é este parágrafo:
+é <code>delonix stack plan --fields</code>, que a imprime do próprio código. Vê também
 <a href="cli-stability.md"><code>cli-stability.md</code></a>.</p>
 </blockquote>
 <h2 id="os-cinco-comandos">Os cinco comandos</h2>

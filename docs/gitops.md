@@ -4,11 +4,13 @@ O manifesto é a fonte de verdade; o repositório é onde ele vive; o `delonix` 
 quem o aplica. Não é preciso Terraform nem Ansible por cima — esta página é o
 fluxo completo.
 
-> Aplica-se aos Kinds que **convergem**: `Container`, `Pod`, `Volume`,
-> `ShareVolume`, `Network`, `Image`, `Vm` e `FirewallPolicy`. Os restantes são
-> «garante presente» (criados se faltarem, nunca actualizados) e o `plan`
-> marca-os com `!` em vez de os esconder — cada um com o obstáculo concreto
-> nomeado, que `delonix stack plan --fields` imprime. Vê
+> Aplica-se aos Kinds que **convergem**, que são onze dos doze: `Network`,
+> `Volume`, `ShareVolume`, `Image`, `Vm`, `Container`, `Pod`, `FirewallPolicy`,
+> `HTTPRoute`, `Ingress` e `Tunnel`. Só o `Secret` continua «garante presente»
+> (criado se faltar, nunca actualizado), porque o estado são valores cifrados e
+> um plano não os decifra para comparar — e o `plan` marca-o com `!` em vez de o
+> esconder, com o obstáculo nomeado. A lista autoritativa não é este parágrafo:
+> é `delonix stack plan --fields`, que a imprime do próprio código. Vê também
 > [`cli-stability.md`](cli-stability.md).
 
 ## Os cinco comandos

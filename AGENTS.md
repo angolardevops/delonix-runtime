@@ -431,15 +431,16 @@ mudar o PID** e o caminho declarativo nunca lhe chamou — 5.ª ocorrência do p
   a meio deixaria a stack meio convergida E com erro). `--prune` nunca por omissão, e corre em
   ÚLTIMO lugar. `destroy` usa a ordem INVERSA de `KINDS`, **derivada** e não escrita 2.ª vez.
 - **`--detailed-exitcode`** (0/2/1) — contrato do `terraform plan`, para um gate de deriva em CI.
-- **Âmbito: 8 Kinds convergem** — Container/Pod/Volume/ShareVolume/Network/Image/Vm/
-  FirewallPolicy. Os restantes continuam «garante presente» e o plano marca-os `!` — **nunca os
-  omite** (um plano que esconde um recurso lê-se como «sem alterações») — e o
-  `stack plan --fields` diz o OBSTÁCULO CONCRETO de cada um, porque «ainda não converge» lê-se
-  como «ninguém chegou lá» e para a maioria isso é falso: o `HTTPRoute` não converge porque o
-  `resolve_config` funde todos os documentos numa só config sem registar proveniência (é isso
-  que o desbloquearia), o `Secret` porque o estado são valores cifrados e um plano não os decifra,
-  o `Tunnel` porque a URL vem do provider e é status. O `Cluster` fica fora por ser um
-  procedimento remoto e não um recurso local.
+- **Âmbito: 11 dos 12 Kinds convergem** (`CONVERGING_KINDS`) — Network/Volume/ShareVolume/Image/
+  Vm/Container/Pod/FirewallPolicy/HTTPRoute/Ingress/Tunnel. A Fase C fechou os três que a v1
+  deixara de fora (HTTPRoute/Ingress por proveniência no `resolve_config`, Tunnel por separar o
+  spec do status); **esta linha dizia 8 e estava desactualizada pela própria sessão que os
+  acrescentou** — a lista autoritativa é a constante, e `stack plan --fields` imprime-a.
+  **Só o `Secret` fica** «garante presente», e por uma razão que não é falta de atenção: o estado
+  são valores cifrados, e um plano não os decifra para comparar. O plano marca-o `!` — **nunca o
+  omite** (um plano que esconde um recurso lê-se como «sem alterações») — e o `--fields` diz o
+  obstáculo concreto, porque «ainda não converge» lê-se como «ninguém chegou lá». O `Cluster`
+  fica fora do próprio `KINDS` por ser um procedimento remoto e não um recurso local.
 - **`Desired.ownable`** separa «converge» de «é possuível». Uma `Image` é cache partilhada com
   endereço de conteúdo (o mesmo `alpine:latest` serve todas as stacks — carimbá-la para uma e
   removê-la quando essa deixasse de a declarar tirava-a debaixo das outras); uma `FirewallPolicy`

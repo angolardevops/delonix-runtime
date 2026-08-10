@@ -492,10 +492,13 @@ estado local.
 **Porquê.** A condição real no host é a única verdade — nunca dessincroniza de um
 `.tfstate` porque não há nenhum; re-correr o `apply` é sempre seguro. O catálogo é
 partilhado com o build da imagem dourada para os dois caminhos nunca divergirem.
-**Trade-offs.** Cada execução re-verifica tudo (mais lento, hoje sequencial);
-`stack apply` local segue a mesma filosofia "garante presente" e é fail-fast sem
-rollback — reconciliação contínua é, por decisão, trabalho de um orchestrator
-externo, não deste runtime.
+**Trade-offs.** Cada execução re-verifica tudo (mais lento, hoje sequencial). O
+`stack apply` local partilha a ausência de ficheiro de estado, mas desde a v0.47.0
+**converge**: calcula um plano (`stack plan`) e reconfigura portas, volumes, redes,
+memória e CPU a quente, sem mudar o PID, recusando com o nome do campo o que
+obrigaria a recriar. Continua fail-fast sem rollback, e continua a ser convergência
+**a pedido** — um loop de reconciliação contínua é, por decisão, trabalho de um
+orchestrator externo e não deste runtime.
 **Nota de segurança.** Tudo o que entra num comando remoto é validado por whitelist
 antes de qualquer interpolação (`valid_endpoint`/`valid_cidr`/`valid_version`,
 `cmd/cluster.rs`) — `shell_quote` protege a fronteira ssh, nunca o conteúdo.
