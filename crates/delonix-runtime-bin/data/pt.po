@@ -3929,3 +3929,14 @@ msgstr "nada a migrar"
 
 msgid "sharevolume '{name}': a namespaced record already exists — left alone, resolve it by hand"
 msgstr "sharevolume '{name}': já existe um registo com namespace — deixado como está, resolve-o à mão"
+
+# scan de imagem VM: recusa clara antes de ir ao registo (bloco C5)
+msgid "'{img}' is a VM image, not a container image — scanning a qcow2 guest filesystem is not implemented. Scan the container images it runs, or inspect the guest yourself (`virt-filesystems`/`guestfish`)."
+msgstr "'{img}' é uma imagem VM, não uma imagem de container — analisar o sistema de ficheiros de um convidado qcow2 não está implementado. Analisa as imagens de container que ela corre, ou inspecciona o convidado à mão (`virt-filesystems`/`guestfish`)."
+
+# delonix init — detector de contexto (bloco C4)
+msgid "detected {evidence} → {what}"
+msgstr "detectado {evidence} → {what}"
+
+msgid "found {evidence} — this project already runs natively with `{cmd}`; generating a second manifest would give it two sources of truth"
+msgstr "encontrei {evidence} — este projecto já corre nativamente com `{cmd}`; gerar um segundo manifesto dava-lhe duas fontes de verdade"
