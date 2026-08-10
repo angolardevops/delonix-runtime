@@ -81,6 +81,13 @@ pub(crate) struct VmFile {
     /// not a hard limit.
     pub(crate) vcpus: Option<u32>,
     pub(crate) memory: Option<String>,
+    /// `HYPERVISOR <cloud-hypervisor|libvirt>` — which backend `vm create`
+    /// should prefer for images built from this recipe, canonicalized at
+    /// parse time (`delonix_vm::valid_backend_name`). Same spirit as
+    /// `vcpus`/`memory`: a recorded intent, not a hard requirement — an
+    /// explicit `--backend`/`DELONIX_VM_BACKEND`/persisted default at `vm
+    /// create` time still wins (see `delonix_vm::create_with`'s precedence).
+    pub(crate) backend: Option<String>,
     /// `LABEL k=v`.
     pub(crate) labels: Vec<(String, String)>,
 }
@@ -231,6 +238,13 @@ pub(crate) fn parse(text: &str) -> Result<VmFile> {
                 )
             }
             "MEMORY" => vf.memory = Some(rest),
+            "HYPERVISOR" => {
+                vf.backend = Some(
+                    delonix_vm::valid_backend_name(&rest)
+                        .map_err(|e| err(ln, &e.to_string()))?
+                        .to_string(),
+                )
+            }
             "LABEL" => {
                 let (k, v) = rest
                     .split_once('=')
@@ -242,7 +256,8 @@ pub(crate) fn parse(text: &str) -> Result<VmFile> {
                     ln,
                     &format!(
                         "unknown instruction '{other}' — supported: FROM RUN COPY ENV USER \
-                         PASSWORD ROOTPASSWORD CLOUDINIT SSHKEY SIZE HOSTNAME VCPUS MEMORY LABEL"
+                         PASSWORD ROOTPASSWORD CLOUDINIT SSHKEY SIZE HOSTNAME VCPUS MEMORY \
+                         HYPERVISOR LABEL"
                     ),
                 ))
             }
@@ -383,6 +398,7 @@ SSHKEY {name} ~/.ssh/id_ed25519.pub
 # Defaults recorded in the image, so `vm create` needs no flags.
 VCPUS 2
 MEMORY 2G
+# HYPERVISOR cloud-hypervisor   # or `libvirt` — omit to let `vm create` decide
 LABEL org.opencontainers.image.title={name}
 
 # ---------------------------------------------------------------------------
@@ -545,6 +561,15 @@ pub(crate) fn build(
         created_unix: super::vmimage::now_unix(),
         kernel_version: None,
         distro: None,
+        // `VCPUS`/`MEMORY`/`HYPERVISOR` from the VMfile, if given — `vm
+        // create` applies them when the disk resolves to this image AND the
+        // caller did not already say otherwise (CLI flag, env var, or
+        // persisted default). Previously parsed but never wired anywhere —
+        // fixed here, the same "dead code with no caller yet" class of gap
+        // this repo's own audits keep finding (see AGENTS.md).
+        default_vcpus: vf.vcpus,
+        default_memory: vf.memory.clone(),
+        default_backend: vf.backend.clone(),
     };
     store.save(&img)?;
     println!("{tag}");
@@ -782,6 +807,18 @@ mod tests {
             e.to_string().contains("no earlier stage named 'nada'"),
             "{e}"
         );
+    }
+
+    #[test]
+    fn hypervisor_normaliza_alias_e_recusa_desconhecido() {
+        let vf = parse("FROM ubuntu:24.04\nHYPERVISOR ch\n").unwrap();
+        assert_eq!(vf.backend.as_deref(), Some("cloud-hypervisor"));
+
+        let vf = parse("FROM ubuntu:24.04\nHYPERVISOR KVM\n").unwrap();
+        assert_eq!(vf.backend.as_deref(), Some("libvirt"));
+
+        let e = parse("FROM ubuntu:24.04\nHYPERVISOR hyperv\n").unwrap_err();
+        assert!(e.to_string().contains("unknown VM backend"), "{e}");
     }
 
     #[test]

@@ -209,6 +209,14 @@ pub enum ImageCmd {
         name: String,
         target: Option<String>,
     },
+    /// (only with `--vm`) Convert a VM disk between `qcow2` and `raw`.
+    Convert {
+        source: String,
+        #[arg(long = "to", value_enum)]
+        to: super::vmimage::ConvertFormat,
+        #[arg(short = 'o', long = "output")]
+        output: Option<PathBuf>,
+    },
     /// (only with `--vm`) Build the golden VM image (Ubuntu + kubeadm/kubelet/
     /// kubectl + `delonix-cri`).
     /// Scaffold a `VMfile` (and a cloud-init) for building your own image.
@@ -309,6 +317,15 @@ pub enum VmSub {
     },
     /// Publish a local VM image to an OCI registry.
     Push { name: String, target: String },
+    /// Convert a VM disk between `qcow2` and `raw` — flattened either way,
+    /// ready to boot on either backend.
+    Convert {
+        source: String,
+        #[arg(long = "to", value_enum)]
+        to: super::vmimage::ConvertFormat,
+        #[arg(short = 'o', long = "output")]
+        output: Option<PathBuf>,
+    },
     /// Build the golden VM image (Ubuntu + kubeadm/kubelet/kubectl + `delonix-cri`).
     /// Scaffold a `VMfile` (and a cloud-init) for building your own image.
     Init {
@@ -413,6 +430,7 @@ pub fn run(vm: bool, action: ImageCmd) -> Result<()> {
             },
             VmSub::LsRemote { source, no_k8s } => VmImageCmd::LsRemote { source, no_k8s },
             VmSub::Push { name, target } => VmImageCmd::Push { name, target },
+            VmSub::Convert { source, to, output } => VmImageCmd::Convert { source, to, output },
             VmSub::Init { name, dir, force } => VmImageCmd::Init { name, dir, force },
             VmSub::Build {
                 tag,
@@ -508,6 +526,12 @@ pub fn run(vm: bool, action: ImageCmd) -> Result<()> {
             apply(&docs)
         }
         ImageCmd::Push { name, target } => cmd_push(&images, &name, target.as_deref()),
+        ImageCmd::Convert { .. } => Err(Error::Invalid(
+            super::po::t(
+                "`convert` is only for VM images — use `delonix image --vm convert`",
+            )
+            .into(),
+        )),
         // `init` scaffolds a VMfile, which only describes a VM image — the
         // container equivalent is `delonix build`'s Dockerfile/Delonixfile.
         ImageCmd::Init { .. } => Err(Error::Invalid(
@@ -595,6 +619,7 @@ fn run_vm(action: ImageCmd) -> Result<()> {
                 )
             })?,
         },
+        ImageCmd::Convert { source, to, output } => VmImageCmd::Convert { source, to, output },
         ImageCmd::Build {
             tag,
             file,
