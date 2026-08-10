@@ -106,6 +106,24 @@ enum Cmd {
         #[command(subcommand)]
         action: cmd::sharevolume::ShareVolumeCmd,
     },
+    /// JSON Schema of the manifest, GENERATED from the code (ADR-0007).
+    ///
+    /// Point an editor at it with one comment at the top of the manifest and you
+    /// get completion, type checking and the field docs while you type:
+    /// `# yaml-language-server: $schema=./delonix.schema.json`
+    Schema {
+        #[command(subcommand)]
+        action: cmd::schema::SchemaCmd,
+    },
+    /// Field reference for a Kind, `kubectl explain` style — from the SAME
+    /// generated schema, so it cannot drift from the code.
+    ///
+    /// `delonix explain Container` · `delonix explain Container.ports` ·
+    /// `delonix explain Pod.containers.image`
+    Explain {
+        /// `<Kind>[.field[.field…]]`.
+        path: String,
+    },
     /// Apply a whole manifest (`delonix-manifest.yaml`) — every Kind, in dependency order.
     Stack {
         #[command(subcommand)]
@@ -271,6 +289,8 @@ fn run() -> Result<()> {
         Cmd::Secret { action } => cmd::secret::run(action),
         Cmd::Storage { action } => cmd::storage::run(action),
         Cmd::Sharevolume { action } => cmd::sharevolume::run(action),
+        Cmd::Schema { action } => cmd::schema::run(action),
+        Cmd::Explain { path } => cmd::schema::explain(&path),
         Cmd::Stack { action } => cmd::stack::run(action),
         Cmd::Compose { action } => cmd::compose::run(action),
         Cmd::System { action } => cmd::system::run(action),

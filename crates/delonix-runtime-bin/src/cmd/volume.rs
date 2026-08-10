@@ -13,8 +13,8 @@ use super::output;
 use super::util::state_root;
 
 /// `spec` of `kind: Volume` — mirrors the fields of `VolumeCmd::Create`.
-#[derive(Debug, Deserialize, Serialize)]
-struct VolumeSpec {
+#[derive(Debug, Deserialize, Serialize, schemars::JsonSchema)]
+pub(crate) struct VolumeSpec {
     #[serde(default = "default_driver")]
     driver: String,
     device: Option<String>,

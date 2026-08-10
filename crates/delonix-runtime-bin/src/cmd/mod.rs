@@ -34,6 +34,7 @@ pub mod reconcile;
 pub mod remote;
 pub mod scaffold;
 pub mod scan;
+pub mod schema;
 pub mod secret;
 pub mod serve;
 pub mod sharevolume;

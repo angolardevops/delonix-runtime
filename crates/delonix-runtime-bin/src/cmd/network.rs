@@ -32,8 +32,8 @@ use super::output;
 use super::util::state_root;
 
 /// `spec` for `kind: Network` — mirrors the fields of `NetworkCmd::Create`.
-#[derive(Debug, Deserialize, Serialize)]
-struct NetworkSpec {
+#[derive(Debug, Deserialize, Serialize, schemars::JsonSchema)]
+pub(crate) struct NetworkSpec {
     #[serde(default = "default_driver")]
     driver: String,
     parent: Option<String>,
