@@ -5058,3 +5058,19 @@ msgstr ""
 "URL absoluto de uma cloud image qcow2 a partir da qual arrancar esta VM.\n"
 "\n"
 "Descarregada uma vez e guardada em cache, por isso um segundo `create` a partir do mesmo URL não custa nada. Verificada contra um `<url>.sha256` irmão quando o publicador o oferece; sem ele, o download é confiado só ao TLS e ISSO É DITO — quem aponta isto ao seu próprio bucket merece saber qual dos dois casos lhe calhou."
+
+# validacao do `--replace` (v0.47.0)
+
+msgid ""
+"--replace '{value}': expected `<Kind>/<name>` (e.g. `Container/web`), a bare "
+"resource name, or `all`"
+msgstr ""
+"--replace '{value}': esperava `<Kind>/<nome>` (ex.: `Container/web`), um nome "
+"de recurso nu, ou `all`"
+
+msgid ""
+"--replace '{value}': no resource with that name in this manifest (`stack "
+"plan` lists them)"
+msgstr ""
+"--replace '{value}': não há nenhum recurso com esse nome neste manifesto (o "
+"`stack plan` lista-os)"
