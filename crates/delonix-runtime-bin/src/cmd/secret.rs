@@ -103,6 +103,50 @@ struct SecretSpec {
 /// Names accepted in the `kind: Secret` `spec`, for the unknown-field warning.
 pub(crate) const SECRET_SPEC_FIELDS: &[&str] = &["stringData", "fromEnvFile"];
 
+/// What a redacted value renders as. A fixed marker, and deliberately not
+/// something length-preserving like `****` — the LENGTH of a secret is itself a
+/// hint, and a dry-run that leaks the shape of a password has only moved the
+/// leak somewhere less obvious.
+const REDACTED: &str = "<redacted>";
+
+/// Dry-run of a `kind: Secret` — the keys, never the values.
+///
+/// Secret was the ONE Kind `render_with_defaults` skipped, on the reasoning that
+/// there was no point reformatting `stringData`. The consequence was worse than
+/// the cost: the most sensitive Kind in the manifest was also the only one with
+/// no `--dry-run` at all, so the one document where you most want to check
+/// «did it read the keys I meant?» before applying was the one you could not
+/// check.
+///
+/// It is answerable without printing a single value: what a reader needs is the
+/// KEY NAMES and where they came from. The values are replaced by [`REDACTED`]
+/// — including the ones a `fromEnvFile` would contribute, which are not even
+/// read here (resolving the file is the apply's job, and a dry-run that opened
+/// it would turn planning into an I/O side effect).
+pub fn spec_with_defaults(doc: &ManifestDoc) -> Result<serde_yaml::Value> {
+    let spec: SecretSpec = manifest::spec_of(doc)?;
+    let mut out = serde_yaml::Mapping::new();
+    let mut redacted = serde_yaml::Mapping::new();
+    for k in spec.string_data.keys() {
+        redacted.insert(
+            serde_yaml::Value::from(k.clone()),
+            serde_yaml::Value::from(REDACTED),
+        );
+    }
+    out.insert(
+        serde_yaml::Value::from("stringData"),
+        serde_yaml::Value::Mapping(redacted),
+    );
+    out.insert(
+        serde_yaml::Value::from("fromEnvFile"),
+        match &spec.from_env_file {
+            Some(p) => serde_yaml::Value::from(p.display().to_string()),
+            None => serde_yaml::Value::Null,
+        },
+    );
+    Ok(serde_yaml::Value::Mapping(out))
+}
+
 /// Reads and parses a `KEY=value` file, resolving the path relative to `base`
 /// (the CWD for the `secret create` CLI; the MANIFEST folder for `kind: Secret` —
 /// otherwise a `fromEnvFile: ./app.env` would look in the CWD of whoever runs the
@@ -430,5 +474,37 @@ mod tests {
         // An empty key is not valid.
         assert_eq!(parse_kv("=v"), None);
         assert_eq!(parse_kv("semigual"), None);
+    }
+
+    /// **A propriedade que interessa**: o dry-run mostra as CHAVES e nunca um
+    /// valor. Sem isto o Kind mais sensível do manifesto era o único sem
+    /// `--dry-run` — o sítio onde mais se quer confirmar «leu as chaves que eu
+    /// queria?» era o único onde não se podia confirmar.
+    #[test]
+    fn o_dry_run_de_um_secret_mostra_as_chaves_e_nunca_os_valores() {
+        let doc: super::ManifestDoc = serde_yaml::from_str(
+            "apiVersion: delonix.io/v1\nkind: Secret\nmetadata: { name: s }\nspec:\n  stringData: { password: hunter2, token: abc123 }\n",
+        )
+        .unwrap();
+        let out = serde_yaml::to_string(&super::spec_with_defaults(&doc).unwrap()).unwrap();
+        assert!(out.contains("password"), "{out}");
+        assert!(out.contains("token"), "{out}");
+        assert!(!out.contains("hunter2"), "valor vazado: {out}");
+        assert!(!out.contains("abc123"), "valor vazado: {out}");
+        assert_eq!(out.matches(super::REDACTED).count(), 2);
+    }
+
+    /// Um `fromEnvFile` não é aberto para o dry-run: resolver o ficheiro é
+    /// trabalho do apply, e um plano que o lesse tornaria o planeamento um
+    /// efeito de I/O. O caminho aparece; o conteúdo nunca.
+    #[test]
+    fn o_dry_run_nao_abre_o_fromenvfile() {
+        let doc: super::ManifestDoc = serde_yaml::from_str(
+            "apiVersion: delonix.io/v1\nkind: Secret\nmetadata: { name: s }\nspec: { fromEnvFile: /nao/existe/app.env }\n",
+        )
+        .unwrap();
+        // Não falha, apesar de o ficheiro não existir — prova que não foi lido.
+        let out = serde_yaml::to_string(&super::spec_with_defaults(&doc).unwrap()).unwrap();
+        assert!(out.contains("/nao/existe/app.env"), "{out}");
     }
 }

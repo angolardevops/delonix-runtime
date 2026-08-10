@@ -80,8 +80,12 @@ fn filled_spec(doc: &ManifestDoc) -> Result<serde_yaml::Value> {
     match doc.kind.as_str() {
         "Network" => cmd::network::spec_with_defaults(doc),
         "Volume" => cmd::volume::spec_with_defaults(doc),
-        // Secret is intentionally left as raw (no typed round-trip) — no need to
-        // reformat its `stringData` through the renderer.
+        // Secret DOES get a round-trip, and its values are redacted on the way
+        // (`secret::spec_with_defaults`). It used to be the one Kind skipped
+        // here, which made the most sensitive document in the manifest the only
+        // one with no `--dry-run` — the one place you most want to check what
+        // was read before applying was the one place you could not.
+        "Secret" => cmd::secret::spec_with_defaults(doc),
         "Image" => cmd::image::spec_with_defaults(doc),
         "Vm" => cmd::vm::spec_with_defaults(doc),
         "Pod" => cmd::pod::spec_with_defaults(doc),
