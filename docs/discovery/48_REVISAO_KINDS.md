@@ -11,6 +11,35 @@
 > Cada afirmação aponta para o ficheiro que a sustenta. Onde a conclusão vem de
 > ausência, está dito como foi procurada.
 
+## ESTADO — executado a 2026-08-10
+
+| Proposta | Resultado |
+|---|---|
+| **D1** fundir `Egress` em `FirewallPolicy` | ✅ feito — reduzido no `load`, com `direction: egress` escrito no spec e fail-closed numa contradição |
+| **D2** `Dependency` → açúcar de `FirewallPolicy` | ✅ feito — fundido por ALVO (várias acumulam allows), com a origem numa anotação |
+| **D3** `Ingress`/`HTTPRoute` — manter os dois, dizer o canónico | ✅ feito — e ambos passaram a CONVERGIR, depois de as rotas ganharem proveniência |
+| **D4** `Storage` → forma de `Volume` | ✅ feito — blocos `nfs:`/`cifs:`/`webdav:`, com a tradução partida em metade pura e metade com efeito |
+| **D5** forma-Pod de `Container` → `Pod` | ❌ **NÃO FEITO — a premissa estava errada.** Ver abaixo |
+| **D6** `Workload` é a direcção certa | 🟨 inalterado — continua subaproveitado na documentação |
+| `status` (§3) | ✅ decidido — **não é campo do manifesto**; entrou como condições no plano e como `stack wait` |
+| Providers de VM (§4) | 🟨 metade — `vm convert` para os cinco ecossistemas; backends VirtualBox/VMware bloqueados (ferramentas ausentes no host, medido) |
+
+**O D5 é o achado mais importante desta revisão, e contradiz-a.** A proposta
+assumia que um `kind: Container` com `spec.containers` de um elemento e um
+`kind: Pod` de um elemento são o mesmo objecto. Lendo o código de criação dos
+dois: o primeiro cria um container chamado `<name>`, sem namespace partilhada; o
+segundo cria a netns `pod-<name>` e chama ao membro `<name>-c0`. Reescrever
+renomearia o container e partiria o DNS interno, os backends de `HTTPRoute`, o
+`from`/`to` de uma `Dependency` e as referências cruzadas do `validate`.
+
+Renomear o container de alguém como efeito secundário de uma arrumação não é uma
+fusão. Ficou o aviso de depreciação — e os Kinds passaram de 18 a **15**, não 14.
+
+**A sequência recomendada confirmou-se.** Fundir primeiro poupou converger três
+Kinds que deixaram de existir, e o `cli-stability.md` só promoveu a estável o que
+já estava fundido. Se a ordem tivesse sido a inversa, cada fusão custaria uma
+quebra de contrato.
+
 ---
 
 ## 0. O achado que muda a ordem do trabalho
