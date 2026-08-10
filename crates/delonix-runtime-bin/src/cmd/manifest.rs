@@ -256,14 +256,21 @@ fn expand_stack(doc: &ManifestDoc) -> Result<Vec<ManifestDoc>> {
 /// holds an address: `Container`, `Pod`, `Vm`. `Workload` lowers to one of those and
 /// `Stack` propagates its namespace to the children it expands into, so both carry it.
 ///
-/// It is deliberately NOT a naming scope: two namespaces cannot hold a volume of the same
-/// name today, and making them able to is a store-keying change with its own migration
-/// question — see the `Storage`/`ShareVolume` item of the cycle, not this one.
+/// `ShareVolume` honors it too, and for the OTHER meaning: there it is a naming scope — two
+/// namespaces can hold a share of the same name, each with its own data directory, and
+/// `-v <name>` resolves to the one belonging to the workload's namespace
+/// (`VolumeStore::resolve_spec_in`). That is the only Kind where namespace scopes a NAME
+/// rather than reachability; `Volume`/`Storage`/`Secret` still do not, and `Storage` in
+/// particular is deliberately left global because it is the NAS mount itself — node
+/// infrastructure, not a tenant object.
 ///
 /// Takes the CANONICAL kind (`canonical_kind` has already run at the call site), so
 /// `VirtualMachine`/`VM` never reach here as such.
 pub(crate) fn kind_honors_namespace(kind: &str) -> bool {
-    matches!(kind, "Container" | "Pod" | "Vm" | "Workload" | "Stack")
+    matches!(
+        kind,
+        "Container" | "Pod" | "Vm" | "Workload" | "Stack" | "ShareVolume"
+    )
 }
 
 pub fn load(path: &Path) -> Result<Vec<ManifestDoc>> {
@@ -744,8 +751,8 @@ spec: { disk: k8s-golden }
     /// functions together is the point — checking `kind_honors_namespace("Vm")` alone
     /// would still pass the day an alias stopped being canonicalized.
     #[test]
-    fn so_os_workloads_com_endereco_e_que_honram_a_namespace() {
-        for kind in ["Container", "Pod", "Vm", "Workload", "Stack"] {
+    fn a_namespace_e_honrada_exactamente_onde_o_motor_a_aplica() {
+        for kind in ["Container", "Pod", "Vm", "Workload", "Stack", "ShareVolume"] {
             assert!(kind_honors_namespace(kind), "{kind} tem de honrar");
         }
         for alias in ["VirtualMachine", "VM", "vm", "pod", "workload"] {
@@ -760,7 +767,6 @@ spec: { disk: k8s-golden }
             "Network",
             "Volume",
             "Storage",
-            "ShareVolume",
             "Secret",
             "Image",
             "HTTPRoute",

@@ -485,3 +485,76 @@ aponta para o NAS. A escapatória já existe e não precisa de flag nova: passar
 
 **NÃO medido** — este host não monta NFS/CIFS de todo (`mount -t` exige `CAP_SYS_ADMIN`,
 indisponível em rootless). O acima é lido das opções emitidas e do `nfs(5)`, não observado.
+
+---
+
+## 9. Bloco B2 — storage partilhado por namespace
+
+Decisões tomadas pelo utilizador antes de qualquer código: *context* **é a namespace**, e a
+migração é por **comando explícito** (os registos antigos continuam a funcionar).
+
+### 9.1 O defeito, e a segunda camada que o enunciado não antecipava
+
+O caminho dos dados era `<storage>/shares/<nome>`, **sem namespace**: dois inquilinos que
+chamassem `db` ao seu share apontavam para o MESMO directório, e o `--purge-data` de um
+levava os dados do outro.
+
+Escopar só o registo e o caminho teria feito o critério de aceitação passar **à letra** e
+deixado lá um bug da mesma família: o share também é registado como **volume**
+(`register_external`), e é por esse nome que um container o consome (`-v db:/data`). Os dois
+continuariam a registar um volume `db`, o segundo por cima do primeiro — e `-v db` passaria
+a resolver para os dados do outro namespace.
+
+E não havia separador seguro para inventar: `VolumeStore::valid_name` aceita alfanuméricos,
+`-`, `_` e `.`, logo qualquer `<ns><sep><nome>` é ambíguo — a classe de colisão que os nomes
+de projecto do compose já tiveram de resolver. A saída foi uma **fronteira de directório**:
+`volumes/.ns/<namespace>/`, e o `.ns` é impossível de colidir porque `valid_name` recusa
+nomes começados por ponto.
+
+### 9.2 Resolução, e porque RECUSA em vez de escolher
+
+`resolve_spec_in(spec, namespace)` procura primeiro o volume da namespace e depois o global
+— os «dois caminhos de leitura» que a decisão de migração pedia, para que nada do que existe
+hoje deixe de resolver. Se os dois existirem, **recusa**: dois volumes diferentes respondem
+ao mesmo `-v db`, e escolher um em silêncio é exactamente como um workload acaba a escrever
+nos dados de outro inquilino. O erro nomeia o `migrate`.
+
+O `Storage` fica **global de propósito**: é a montagem do NAS, infraestrutura do nó.
+Escopá-lo seria uma montagem por namespace da mesma exportação.
+
+### 9.3 Validado ao vivo, com NFS real
+
+Impossível neste host (`mount -t nfs` exige `CAP_SYS_ADMIN`), por isso a validação correu
+**dentro de uma VM** (`delonix-vm-base:ubuntu-24.04`, libvirt), onde há root — com um
+`nfs-kernel-server` a exportar `/srv/nas` e o `delonix storage create` a montá-lo a sério.
+
+```
+$ delonix sharevolume ls
+NAMESPACE   NAME   STORAGE   MOUNTPOINT
+teamA       db     nas1      …/volumes/nas1/_data/shares/teamA/db
+teamB       db     nas1      …/volumes/nas1/_data/shares/teamB/db
+
+$ find /srv/nas -type d          # no NAS de verdade
+/srv/nas/shares/teamA/db
+/srv/nas/shares/teamB/db
+
+ANTES:  teamA/db/marca:dados-do-teamA
+        teamB/db/marca:dados-do-teamB
+$ delonix sharevolume rm db --namespace teamA --purge-data
+sharevolume/db: removed (data deleted)
+DEPOIS: teamB/db/marca:dados-do-teamB          ← intacto
+```
+
+**Migração, também ao vivo.** Um registo no formato PRÉ-escopo (plano em `sharevolumes/`,
+**sem** campo `namespace`) é lido e reportado como `default`; `migrate --dry-run` diz o que
+faria sem mudar nada; `migrate` move `sharevolumes/antigo.json` para
+`sharevolumes/default/antigo.json` — e os dados legados continuam onde estavam
+(`dados-legados`, lido depois da migração). Move **registos, não dados**: cada registo
+carrega o caminho com que foi criado, e mexer nos bytes de um inquilino não é coisa que uma
+migração deva fazer nas costas dele.
+
+### 9.4 Consequência no A2
+
+`kind_honors_namespace` passou a incluir `ShareVolume`, e é o **único** Kind onde a namespace
+escopa um NOME em vez de alcançabilidade. O comentário do A2 dizia o contrário e foi
+corrigido — deixá-lo era pôr o código a mentir sobre si próprio.
