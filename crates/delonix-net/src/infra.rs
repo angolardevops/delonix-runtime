@@ -360,9 +360,10 @@ pub fn ingress_table_ruleset() -> String {
     // NOT covered here, and deliberately so: the management sockets. `serve api`,
     // `serve cri` and `serve docker-api` all default to UNIX sockets, not TCP
     // (`unix:///run/delonix-*.sock`), so there is no address for a container to reach.
-    // Guarding a service the holder itself exposes (the internal DNS, the L7 proxy)
-    // would need an `input` chain, which this netns does not have today — recorded as
-    // follow-up rather than half-done here.
+    //
+    // The services the holder itself exposes ARE covered now, by `dlxinput` below —
+    // this comment used to record that as a follow-up, and the follow-up turned out to be
+    // an exploitable bypass (measured, see `docs/discovery/46_GAPS_ENCONTRADOS.md` §4.2).
     let guard = if std::env::var("DELONIX_ALLOW_LINK_LOCAL").ok().as_deref() == Some("1") {
         tracing::warn!(
             "SECURITY WARNING — DELONIX_ALLOW_LINK_LOCAL=1: containers may reach \
@@ -374,6 +375,41 @@ pub fn ingress_table_ruleset() -> String {
         "\x20\x20 ip daddr 169.254.0.0/16 counter drop\n\
          \x20\x20 ip daddr 127.0.0.0/8 counter drop\n"
             .to_string()
+    };
+    // `dlxinput` — the holder's OWN services are not reachable from a container.
+    //
+    // Every policy chain in this table hangs off `forward`, and traffic addressed TO the
+    // holder never goes through `forward` — it goes through `input`, which had no chain at
+    // all. That is a whole side of the node with no policy on it, and it was exploitable:
+    // the L7 proxy listens in this netns, so any container could reach it on its bridge
+    // gateway and be relayed to ANY registered backend — across namespaces, and past a
+    // `ingress policy deny` on the backend (both measured; the proxy→backend leg originates
+    // here, so it never meets `fwcont` either).
+    //
+    // The allowlist is what a container legitimately needs FROM the holder, and nothing
+    // else: the internal DNS, DHCP (the VM leases), ICMP for diagnostics, and the return
+    // traffic of anything the holder itself opened. `tap0` is the host→slirp→holder path,
+    // which is the whole point of an ingress, so it stays open.
+    //
+    // Deliberately keyed on what is ALLOWED, not on the proxy's ports: the listeners are
+    // dynamic (`kind: HTTPRoute` declares its own) and this chain is built once at
+    // `ensure_up`, long before any proxy exists. Enumerating ports would have to be kept in
+    // sync with a moving target — and would leave every FUTURE holder-resident listener
+    // exposed by default, which is the same shape of gap being closed here.
+    let holder_input = if std::env::var("DELONIX_ALLOW_HOLDER_INGRESS")
+        .ok()
+        .as_deref()
+        == Some("1")
+    {
+        tracing::warn!(
+            "SECURITY WARNING — DELONIX_ALLOW_HOLDER_INGRESS=1: containers may reach the \
+             services the holder exposes (the L7 proxy, the internal DNS). Through the proxy \
+             a container reaches ANY registered backend, in ANY namespace, past that \
+             backend's own ingress policy. For debugging only — do NOT use in production."
+        );
+        String::new()
+    } else {
+        "\x20\x20 ct state new counter drop\n".to_string()
     };
     format!(
         "table ip {INGRESS_TABLE} {{\n\
@@ -389,6 +425,15 @@ pub fn ingress_table_ruleset() -> String {
          \x20 chain pre {{ type nat hook prerouting priority -100; }}\n\
          \x20 chain post {{ type nat hook postrouting priority 100; oifname \"tap0\" masquerade; }}\n\
          \x20 chain fwdeny {{ type filter hook forward priority -10; }}\n\
+         \x20 chain dlxinput {{ type filter hook input priority 0;\n\
+         \x20\x20 ct state established,related accept\n\
+         \x20\x20 iifname \"lo\" accept\n\
+         \x20\x20 iifname \"tap0\" accept\n\
+         \x20\x20 udp dport {{ 53, 67, 68 }} accept\n\
+         \x20\x20 tcp dport 53 accept\n\
+         \x20\x20 meta l4proto icmp accept\n\
+         {holder_input}\
+         \x20 }}\n\
          \x20 chain forward {{ type filter hook forward priority 0;{policy}\n\
          \x20\x20 ct state established,related accept\n\
          \x20\x20 ct state invalid drop\n\
@@ -5626,6 +5671,72 @@ Inter-|   Receive                                                |  Transmit
             );
         }
         assert!(joined.iter().all(|c| c.starts_with("netns exec dlx-abc ")));
+    }
+
+    /// The holder's own services are not reachable from a container.
+    ///
+    /// Regression for the measured bypass of §4.2: every policy chain hangs off `forward`,
+    /// and traffic addressed to the holder goes through `input` — so with no `input` chain
+    /// a container reached the L7 proxy on its bridge gateway and was relayed to any
+    /// backend, across namespaces and past the backend's `ingress policy deny`.
+    ///
+    /// Asserts the ORDER, not just the presence: the terminal drop has to be LAST. An
+    /// allowlist entry emitted after it would be dead rule, and the failure mode of that
+    /// mistake is silent (DNS stops working for every container on the node).
+    #[test]
+    fn os_servicos_do_holder_nao_sao_alcancaveis_de_um_container() {
+        let rs = ingress_table_ruleset();
+        // Extracted LINE BY LINE, not by splitting on braces: a `split_once("}")` cuts at
+        // the closing brace of the `{ 53, 67, 68 }` set, not at the end of the chain — the
+        // first version of this test did exactly that and failed on a rule that was there
+        // all along. The chain ends at the first line whose whole content is `}`.
+        let lines: Vec<&str> = rs.lines().collect();
+        let start = lines
+            .iter()
+            .position(|l| l.contains("chain dlxinput"))
+            .expect("the input chain has to exist");
+        let end = start
+            + 1
+            + lines[start + 1..]
+                .iter()
+                .position(|l| l.trim() == "}")
+                .expect("the input chain has to close");
+        let body_lines: Vec<&str> = lines[start..end]
+            .iter()
+            .copied()
+            .filter(|l| !l.trim().is_empty())
+            .collect();
+        let body = body_lines.join("\n");
+        let body = body.as_str();
+        assert!(body.contains("hook input"), "{body}");
+        // What a container legitimately needs FROM the holder — and the host→slirp path.
+        for allowed in [
+            "ct state established,related accept",
+            "iifname \"lo\" accept",
+            "iifname \"tap0\" accept",
+            "udp dport { 53, 67, 68 } accept",
+            "tcp dport 53 accept",
+            "meta l4proto icmp accept",
+        ] {
+            assert!(body.contains(allowed), "missing `{allowed}`: {body}");
+        }
+        // Everything else that is NEW gets dropped, and that rule is the last one.
+        let drop = body
+            .find("ct state new counter drop")
+            .expect("the terminal drop has to exist");
+        assert!(
+            body_lines
+                .last()
+                .expect("a non-empty chain body")
+                .contains("ct state new counter drop"),
+            "the drop must be the LAST rule, or the allowlist after it is dead: {body}"
+        );
+        for allowed in ["dport 53", "iifname \"tap0\""] {
+            assert!(
+                body.find(allowed).expect("allowlist entry") < drop,
+                "`{allowed}` must be evaluated BEFORE the drop: {body}"
+            );
+        }
     }
 
     /// RF-NET-02 — the denials that no user rule can get in front of. The PRIORITY is
