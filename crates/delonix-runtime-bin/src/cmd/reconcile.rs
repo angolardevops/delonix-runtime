@@ -76,6 +76,17 @@ pub struct Desired {
     /// still ensure-present» — the plan SAYS so rather than omitting the
     /// resource, because a plan that hides a resource reads as «no changes».
     pub converges: bool,
+    /// Whether a stack can OWN this resource.
+    ///
+    /// `false` for shared, content-addressed things — an `Image` is the clear
+    /// case: the same `nginx:alpine` backs every stack on the host, so stamping
+    /// it for one and pruning it when that one stops declaring it would pull the
+    /// image out from under the others. Docker treats images as shared cache
+    /// rather than owned resources, and so does this.
+    ///
+    /// A non-ownable resource is never adopted (it has no owner by design, so
+    /// «unowned» is not a state to fix) and never a deletion candidate.
+    pub ownable: bool,
 }
 
 /// What is actually on the machine.
@@ -237,6 +248,9 @@ fn hot_fields(kind: &str) -> &'static [&'static str] {
         "Container" => &["ports", "volumes", "memory", "cpus", "netBps", "netBurst"],
         "Volume" => &["quota"],
         "Network" => &["peers"],
+        // Fetching a ref destroys nothing — an image is shared cache, so its
+        // whole comparable surface converges without recreating anything.
+        "Image" => &["ref", "digest"],
         _ => &[],
     }
 }
@@ -322,7 +336,9 @@ pub fn plan(desired: &[Desired], actual: &[Actual], stack: &str) -> Vec<Change> 
             continue;
         }
         let diffs = diff_fields(&d.kind, d, a);
-        let unmanaged = a.owner.is_none();
+        // A non-ownable resource is never «unowned and therefore to adopt»:
+        // having no owner is its normal state, not something to fix.
+        let unmanaged = d.ownable && a.owner.is_none();
         let action = if let Some(cold) = diffs.iter().find(|x| !x.hot) {
             let _ = cold;
             Action::Replace
@@ -359,6 +375,8 @@ pub fn plan(desired: &[Desired], actual: &[Actual], stack: &str) -> Vec<Change> 
         if a.owner.as_deref() != Some(stack) {
             continue;
         }
+        // (A non-ownable resource never carries the label, so it never reaches
+        // here — the guard above is what keeps shared content out of `--prune`.)
         if desired.iter().any(|d| d.kind == a.kind && d.name == a.name) {
             continue;
         }
@@ -448,6 +466,7 @@ mod tests {
             name: name.into(),
             fields: map(fields),
             converges: true,
+            ownable: true,
         }
     }
 
@@ -620,6 +639,7 @@ mod tests {
             name: "db".into(),
             fields: map(&[("memory", "4G")]),
             converges: false,
+            ownable: true,
         };
         let a = Actual {
             kind: "Vm".into(),
@@ -671,5 +691,37 @@ mod tests {
         let s = summary(&p);
         assert_eq!(s.get("create"), Some(&1));
         assert_eq!(s.get("unchanged"), Some(&1));
+    }
+
+    /// Conteúdo PARTILHADO não se adopta nem se poda. A mesma imagem serve
+    /// todas as stacks do host; carimbá-la para uma e removê-la quando essa
+    /// deixasse de a declarar tirava-a debaixo das outras.
+    #[test]
+    fn um_recurso_nao_possuivel_nunca_e_adoptado_nem_removido() {
+        let d = Desired {
+            kind: "Image".into(),
+            name: "base".into(),
+            fields: map(&[("ref", "alpine:latest")]),
+            converges: true,
+            ownable: false,
+        };
+        let a = Actual {
+            kind: "Image".into(),
+            name: "base".into(),
+            fields: map(&[("ref", "alpine:latest")]),
+            owner: None,
+            last_applied: None,
+        };
+        let p = plan(&[d], std::slice::from_ref(&a), "s");
+        assert_eq!(
+            p[0].action,
+            Action::NoOp,
+            "sem dono é o estado NORMAL de conteúdo partilhado, não algo a corrigir"
+        );
+        // E fora do manifesto continua a não ser candidato a remoção.
+        assert!(
+            plan(&[], &[a], "s").is_empty(),
+            "conteúdo partilhado nunca entra no --prune"
+        );
     }
 }

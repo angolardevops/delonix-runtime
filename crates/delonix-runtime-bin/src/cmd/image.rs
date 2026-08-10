@@ -34,6 +34,104 @@ pub fn spec_with_defaults(doc: &ManifestDoc) -> Result<serde_yaml::Value> {
 /// Field names accepted in the `spec` of `kind: Image`, for the unknown-field warning.
 pub(crate) const IMAGE_SPEC_FIELDS: &[&str] = &["pull", "build"];
 
+/// Fields the reconciler compares for a `kind: Image`.
+///
+/// `ref` converges HOT — «converging» an image means fetching the ref, and
+/// nothing is destroyed doing it. That is the opposite of every other Kind's
+/// cold field, and it follows from what an image IS: shared, content-addressed
+/// cache, not a resource with a lifecycle.
+pub(crate) const RECONCILED_IMAGE_FIELDS: &[&str] = &["ref", "digest"];
+
+/// The reference a `kind: Image` document is ABOUT.
+///
+/// **An image's identity is its ref, never `metadata.name`.** `presence()` used
+/// to resolve the document name, so a `kind: Image` named `web-base` with
+/// `pull: nginx:alpine` reported as absent even with `nginx:alpine` sitting in
+/// the store — measured on this host: `image ls` listed it, the plan said
+/// `+ Image/web-base`. Every `stack ls`/`describe`/`plan` was wrong for any
+/// document whose name was not literally the tag.
+pub(crate) fn image_ref(doc: &ManifestDoc) -> Option<String> {
+    let spec: ImageSpec = manifest::spec_of(doc).ok()?;
+    spec.pull.or_else(|| spec.build.map(|b| b.tag))
+}
+
+/// What the manifest declares, for the reconciler.
+pub(crate) fn desired(doc: &ManifestDoc) -> Result<super::reconcile::Desired> {
+    let spec: ImageSpec = manifest::spec_of(doc)?;
+    let mut f = std::collections::BTreeMap::new();
+    // A BUILT image does not converge, and saying so is the honest answer.
+    // There is no build cache: `apply` reruns the build and replaces the tag
+    // every single time. Reporting `=` would be a lie, and reporting a change on
+    // every plan would make `--detailed-exitcode` return 2 forever in any repo
+    // that builds an image — breaking the drift gate for everyone else.
+    let built = spec.build.is_some();
+    if let Some(r) = image_ref(doc) {
+        f.insert("ref".into(), r.clone());
+        // A ref pinned by digest is the only case where the DESIRED digest is
+        // knowable without asking a registry — and asking one would make
+        // computing a plan a network round-trip. For a moving tag the plan
+        // compares the ref alone; that a tag may have moved upstream is not
+        // something a local plan can see, and pretending otherwise would be
+        // worse than the gap.
+        if let Some((_, digest)) = r.split_once("@sha256:") {
+            f.insert("digest".into(), format!("sha256:{digest}"));
+        }
+    }
+    Ok(super::reconcile::Desired {
+        kind: "Image".into(),
+        name: doc.metadata.name.clone(),
+        fields: f,
+        converges: !built,
+        // Shared content: the same `nginx:alpine` backs every stack on the host.
+        ownable: false,
+    })
+}
+
+/// What is on the machine, for the reconciler — keyed by the DOCUMENT name (that
+/// is what the plan matches on) but resolved by the REF.
+pub(crate) fn actual(docs: &[ManifestDoc]) -> Result<Vec<super::reconcile::Actual>> {
+    let (images, _) = open_stores()?;
+    let mut out = Vec::new();
+    for doc in manifest::of_kind(docs, "Image") {
+        let Some(r) = image_ref(doc) else { continue };
+        let Ok(img) = images.resolve(&r) else {
+            continue;
+        };
+        let mut f = std::collections::BTreeMap::new();
+        f.insert("ref".into(), r);
+        f.insert("digest".into(), img.id.clone());
+        out.push(super::reconcile::Actual {
+            kind: "Image".into(),
+            name: doc.metadata.name.clone(),
+            fields: f,
+            owner: None,
+            last_applied: None,
+        });
+    }
+    Ok(out)
+}
+
+/// Converges an image: fetch the ref. Nothing is destroyed — an image is cache.
+pub(crate) fn converge(name: &str, diffs: &[super::reconcile::FieldDiff]) -> Result<()> {
+    let (images, _) = open_stores()?;
+    for d in diffs {
+        match d.field.as_str() {
+            "ref" | "digest" => {
+                if let Some(r) = &d.to {
+                    resolve_or_pull(&images, r)?;
+                }
+            }
+            other => {
+                return Err(Error::Invalid(format!(
+                    "image/{name}: '{other}' does not converge hot — bug in \
+                     `reconcile::hot_fields`"
+                )))
+            }
+        }
+    }
+    Ok(())
+}
+
 #[derive(Debug, Deserialize, Serialize)]
 struct BuildSpec {
     #[serde(default = "default_context")]

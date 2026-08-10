@@ -225,6 +225,7 @@ pub(crate) fn desired(doc: &ManifestDoc) -> Result<super::reconcile::Desired> {
         name: doc.metadata.name.clone(),
         fields: desired_volume_fields(&doc.metadata.name, &spec)?,
         converges: true,
+        ownable: true,
     })
 }
 

@@ -168,6 +168,7 @@ Commands:
   ls        List share volumes (parent storage, quota, live usage)
   describe  Human-readable detail of one share volume
   rm        Un-register a share volume. The underlying data (a subdirectory of the parent Storage) is PRESERVED unless `--purge-data` is passed
+  migrate   Move the pre-scoping share records into the `default` namespace
   help      Print this message or the help of the given subcommand(s)
 
 Options:
@@ -202,8 +203,9 @@ Arguments:
   &lt;NAME&gt;  
 
 Options:
-      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-  -h, --help          Print help</code></pre></div>
+      --l18n &lt;en|pt&gt;           Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+  -n, --namespace &lt;NAMESPACE&gt;  Namespace that owns the share (default `default`)
+  -h, --help                   Print help</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Detalhe de uma fatia (aponta o comando -v para a consumir)</div><div class='cap lang-en'>Slice detail (points at the -v command to consume it)</div><pre><code>delonix sharevolume describe tenant-a</code></pre><div class="out"><pre><code>Name:           tenant-a
 Storage:        nas-shared
 Mountpoint:     .../shares/tenant-a
@@ -219,9 +221,10 @@ Arguments:
   &lt;NAME&gt;  
 
 Options:
-      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-      --purge-data    
-  -h, --help          Print help</code></pre></div>
+      --l18n &lt;en|pt&gt;           Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+      --purge-data             
+  -n, --namespace &lt;NAMESPACE&gt;  Namespace that owns the share (default `default`)
+  -h, --help                   Print help</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Remove o registo; os DADOS ficam (a não ser que peças --purge-data)</div><div class='cap lang-en'>Removes the record; the DATA stays (unless you ask for --purge-data)</div><pre><code>delonix sharevolume rm tenant-a</code></pre></div>
 <h2><span class='lang-pt'>Laboratório</span><span class='lang-en'>Lab</span></h2>
 <div class='callout lang-pt'><p>Duas fatias isoladas do MESMO <code>Storage</code>, cada uma com a
