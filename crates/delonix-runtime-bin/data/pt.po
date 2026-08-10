@@ -3875,3 +3875,29 @@ msgstr "{kind} '{name}': campo desconhecido '{key}' em spec.{block} — ignorado
 
 msgid "Container '{name}': `spec.containers[]` on a `kind: Container` is the deprecated spelling — it still runs ONE container, named '{name}'. For containers that share a namespace use `kind: Pod` (its members are named '{name}-<member>', which is why this is not rewritten for you)"
 msgstr "Container '{name}': `spec.containers[]` num `kind: Container` é a forma depreciada — continua a correr UM container, chamado '{name}'. Para containers que partilham namespace usa `kind: Pod` (os membros dele chamam-se '{name}-<membro>', que é a razão de isto não ser reescrito por ti)"
+
+# imagens de appliance (sem cloud-init): import + o que o vm create recusa
+
+msgid "{flags}: this image is an appliance and does not run cloud-init, so these would be silently ignored — configure it on first boot (console or web UI), or pass your own `--seed` if you know the guest reads one"
+msgstr "{flags}: esta imagem é um appliance e não corre cloud-init, por isso seriam ignorados em silêncio — configura-o no primeiro arranque (consola ou interface web), ou passa o teu próprio `--seed` se souberes que o convidado lê um"
+
+msgid "importing {source} as '{tag}'..."
+msgstr "a importar {source} como '{tag}'..."
+
+msgid "no such file: {source}"
+msgstr "não existe o ficheiro: {source}"
+
+msgid "VM image '{tag}' already exists — pass --force to replace it"
+msgstr "a imagem VM '{tag}' já existe — passa --force para a substituir"
+
+msgid "`import` is only for VM images — use `delonix image --vm import` (for a container image tarball, use `delonix image load`)"
+msgstr "`import` é só para imagens VM — usa `delonix image --vm import` (para um tarball de imagem de container, usa `delonix image load`)"
+
+msgid "yes"
+msgstr "sim"
+
+msgid "no (appliance — configure it on first boot)"
+msgstr "não (appliance — configura-o no primeiro arranque)"
+
+msgid "<unknown> (assumed yes)"
+msgstr "<desconhecido> (assume-se que sim)"

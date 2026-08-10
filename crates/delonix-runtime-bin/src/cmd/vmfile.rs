@@ -570,6 +570,9 @@ pub(crate) fn build(
         default_vcpus: vf.vcpus,
         default_memory: vf.memory.clone(),
         default_backend: vf.backend.clone(),
+        // A VMfile build starts `FROM` a cloud image and is customized by
+        // cloud-init on first boot — that is the whole premise of the format.
+        cloud_init: Some(true),
     };
     store.save(&img)?;
     println!("{tag}");

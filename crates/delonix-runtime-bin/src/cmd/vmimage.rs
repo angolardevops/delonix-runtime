@@ -74,6 +74,30 @@ pub struct VmImage {
     /// `cmd::vm::resolve_disk_and_defaults`).
     #[serde(default)]
     pub default_backend: Option<String>,
+    /// Whether the guest runs cloud-init. `None` (every image built before
+    /// this field existed) means *unknown* and is treated as `true` — the
+    /// cloud images this engine has always built do run it, so nothing about
+    /// them changes.
+    ///
+    /// `Some(false)` marks an **appliance**: a vendor system that installs and
+    /// configures itself (OPNsense, Proxmox, TrueNAS). For those, `vm create`
+    /// must NOT attach the NoCloud seed it otherwise always builds — an ISO
+    /// nothing reads, on a CD-ROM that changes the guest's device list. And
+    /// `--hostname`/`--ssh-key`/`--user-data` are refused outright rather than
+    /// accepted and silently dropped, which is the failure mode this repo
+    /// names as its worst (see `--security-opt seccomp=`, `-v …:z`,
+    /// `--network-alias` in AGENTS.md).
+    #[serde(default)]
+    pub cloud_init: Option<bool>,
+}
+
+impl VmImage {
+    /// True when this image's guest runs cloud-init, so a NoCloud seed is
+    /// worth generating. Unknown (pre-existing metadata) counts as yes: that
+    /// is what those images have always been.
+    pub fn uses_cloud_init(&self) -> bool {
+        self.cloud_init.unwrap_or(true)
+    }
 }
 
 /// Target format for `image vm convert`. Both are already understood by the
@@ -233,6 +257,14 @@ pub enum VmImageCmd {
         #[arg(short = 'o', long = "output")]
         output: Option<PathBuf>,
     },
+    /// Register an existing disk image under a name, so `vm create --disk
+    /// <name>` and `image vm push` can use it.
+    ///
+    /// The counterpart to `build` for a disk this engine did not produce: a
+    /// vendor appliance installed from its own ISO, or an image exported from
+    /// somewhere else. The file is copied into the store as-is — nothing is
+    /// booted, nothing is inspected.
+    Import(ImportArgs),
     /// Pull a VM image from an OCI registry — with no argument, the OFFICIAL
     /// Delonix image (ready for `vm create`/`cluster kubeadm`).
     Pull {
@@ -348,6 +380,7 @@ pub fn run(action: VmImageCmd) -> Result<()> {
         VmImageCmd::Describe { names } => cmd_describe(&store, &names),
         VmImageCmd::Push { name, target } => cmd_push(&store, &name, &target),
         VmImageCmd::Convert { source, to, output } => cmd_convert(&store, &source, to, output),
+        VmImageCmd::Import(args) => cmd_import(&store, args),
         VmImageCmd::Pull {
             source,
             name,
@@ -491,6 +524,11 @@ struct VmImageLsRow {
     k8s_version: Option<String>,
     created_unix: u64,
     size_bytes: u64,
+    /// Whether the guest runs cloud-init; `null` for images registered before
+    /// the field existed. Automation reads this to know whether passing
+    /// `--hostname`/`--ssh-key` to `vm create` would be refused.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cloud_init: Option<bool>,
 }
 
 fn cmd_ls(store: &VmImageStore, format: output::OutputFormat) -> Result<()> {
@@ -505,6 +543,7 @@ fn cmd_ls(store: &VmImageStore, format: output::OutputFormat) -> Result<()> {
                 k8s_version: img.k8s_version,
                 created_unix: img.created_unix,
                 size_bytes: img.size,
+                cloud_init: img.cloud_init,
             })
             .collect();
         return output::print_json(&rows);
@@ -555,6 +594,20 @@ fn describe_one(store: &VmImageStore, img: &VmImage) {
         img.kernel_version.as_deref().unwrap_or("<unknown>"),
     );
     d.field("K8s", img.k8s_version.as_deref().unwrap_or("<unknown>"));
+    // Worth a line of its own: this is what makes `vm create` skip the seed
+    // and refuse `--hostname`/`--ssh-key`, and without it that refusal reads
+    // as arbitrary.
+    d.field(
+        "Cloud-init",
+        match img.cloud_init {
+            Some(true) => super::po::t("yes"),
+            Some(false) => super::po::t("no (appliance — configure it on first boot)"),
+            None => super::po::t("<unknown> (assumed yes)"),
+        },
+    );
+    d.field_opt("Default vCPUs", img.default_vcpus.map(|v| v.to_string()));
+    d.field_opt("Default memory", img.default_memory.clone());
+    d.field_opt("Default backend", img.default_backend.clone());
     let qcow2 = store.qcow2_path(&img.name);
     d.field("Path", qcow2.to_string_lossy());
     // The `size` above is the build/pull one; this is what IS on disk now. If
@@ -688,15 +741,214 @@ pub(crate) fn cmd_push(store: &VmImageStore, name: &str, target: &str) -> Result
             super::po::t("could not read the qcow2 of")
         ))
     })?;
-    let digest = delonix_image::registry::push_oci_artifact(
+    let digest = delonix_image::registry::push_oci_artifact_with_annotations(
         &state_root(),
         target,
         VM_IMAGE_MEDIA_TYPE,
         &data,
+        &annotations_of(&img),
     )?;
     println!("{digest}");
-    let _ = img;
     Ok(())
+}
+
+/// Arguments of `image vm import`, defined ONCE and `flatten`ed into all
+/// three entry points (`vm import`, `image vm import`, `image --vm import`).
+/// Spelling them out per entry point is how those three drift apart — a flag
+/// that works in one place and not another is worse than no flag.
+#[derive(clap::Args, Clone, Debug)]
+pub struct ImportArgs {
+    /// Path to a `.qcow2` (or any format `qemu-img` reads — it is converted).
+    pub source: PathBuf,
+    /// Name to register it under (`image vm ls`).
+    #[arg(short = 't', long = "tag")]
+    pub tag: String,
+    /// The guest does NOT run cloud-init: it is a self-configuring appliance
+    /// (OPNsense, Proxmox, TrueNAS). `vm create` then skips the NoCloud seed
+    /// instead of attaching one nothing in the guest reads.
+    #[arg(long)]
+    pub appliance: bool,
+    /// What this is, for `image vm ls` (e.g. `opnsense`, `proxmox-ve`).
+    #[arg(long)]
+    pub distro: Option<String>,
+    /// Version, for `image vm ls` (e.g. `26.1.2`).
+    #[arg(long)]
+    pub release: Option<String>,
+    /// Recommended vCPUs, applied by `vm create` when `--vcpus` is absent.
+    #[arg(long)]
+    pub default_vcpus: Option<u32>,
+    /// Recommended memory (e.g. `4G`), same rule as `--default-vcpus`.
+    #[arg(long)]
+    pub default_memory: Option<String>,
+    /// Replace an image already registered under this name.
+    #[arg(long)]
+    pub force: bool,
+    /// Store the qcow2 uncompressed (larger, but no decompression cost on
+    /// backing-file reads at runtime) — same flag, same trade-off, as `build`.
+    #[arg(long)]
+    pub no_compress: bool,
+}
+
+/// `image vm import` — registers a disk this engine did not build.
+///
+/// Always goes through `qemu-img convert`, never a plain copy: the source may
+/// be raw, or a qcow2 with a backing file (which would leave the store holding
+/// a reference to a path outside it — a store entry that silently breaks the
+/// day that file moves).
+pub(crate) fn cmd_import(store: &VmImageStore, args: ImportArgs) -> Result<()> {
+    let ImportArgs {
+        source,
+        tag,
+        appliance,
+        distro,
+        release,
+        default_vcpus,
+        default_memory,
+        force,
+        no_compress,
+    } = args;
+    let (source, tag) = (source.as_path(), tag.as_str());
+    if !source.exists() {
+        return Err(Error::Invalid(super::po::tf(
+            "no such file: {source}",
+            &[("source", &source.display().to_string())],
+        )));
+    }
+    let dest = store.qcow2_path(tag);
+    if dest.exists() && !force {
+        return Err(Error::Invalid(super::po::tf(
+            "VM image '{tag}' already exists — pass --force to replace it",
+            &[("tag", tag)],
+        )));
+    }
+    eprintln!(
+        "{}",
+        super::po::tf(
+            "importing {source} as '{tag}'...",
+            &[("source", &source.display().to_string()), ("tag", tag)],
+        )
+    );
+    let tmp = dest.with_extension("importing");
+    let _ = std::fs::remove_file(&tmp);
+    let mut argv: Vec<&str> = vec!["convert", "-O", "qcow2"];
+    if !no_compress {
+        // zstd, and compressed by default, for the same reason the golden
+        // recipe settled on it: a store image is the read-only BACKING FILE of
+        // every VM created from it, so decompression speed is what matters,
+        // and `qemu-img convert` without `-c` would inflate an already
+        // compressed source several-fold on the way in.
+        argv.extend(["-c", "-o", "compression_type=zstd"]);
+    }
+    // `--` so a path starting with `-` stays a path.
+    argv.push("--");
+    let (src_s, tmp_s) = (source.to_string_lossy(), tmp.to_string_lossy());
+    argv.push(&src_s);
+    argv.push(&tmp_s);
+    run_tool("qemu-img", &argv)?;
+    // Rename only after the conversion succeeded: a failed import must not
+    // leave a truncated image registered under a good name.
+    std::fs::rename(&tmp, &dest)?;
+
+    let data = std::fs::read(&dest)?;
+    let img = VmImage {
+        name: tag.to_string(),
+        tag: tag.to_string(),
+        digest: format!("sha256:{}", hex_sha256(&data)),
+        size: data.len() as u64,
+        ubuntu_release: release,
+        k8s_version: None,
+        created_unix: now_unix(),
+        // Nothing is booted or mounted here, so the kernel inside is unknown —
+        // and `None` says exactly that, rather than guessing.
+        kernel_version: None,
+        distro,
+        default_vcpus,
+        default_memory,
+        default_backend: None,
+        cloud_init: Some(!appliance),
+    };
+    store.save(&img)?;
+    println!("{tag}");
+    Ok(())
+}
+
+/// Manifest annotations carrying what the qcow2 blob cannot: the store's own
+/// view of the image. Without these a `vm pull` lands an image with every
+/// metadata field blank — a documented gap for `ubuntu_release`/`k8s_version`,
+/// and a functional bug for `cloud_init`, which decides whether `vm create`
+/// attaches a seed the guest may not be able to read.
+///
+/// Only fields that are actually known are emitted: an absent annotation and
+/// an annotation saying "unknown" are different claims, and the pull side
+/// leaves what it was not told alone.
+pub(crate) fn annotations_of(img: &VmImage) -> std::collections::BTreeMap<String, String> {
+    let mut a = std::collections::BTreeMap::new();
+    let mut put = |k: &str, v: String| {
+        a.insert(format!("io.delonix.vmimage.{k}"), v);
+    };
+    if let Some(v) = &img.distro {
+        put("distro", v.clone());
+    }
+    if let Some(v) = &img.ubuntu_release {
+        put("release", v.clone());
+    }
+    if let Some(v) = &img.k8s_version {
+        put("k8s-version", v.clone());
+    }
+    if let Some(v) = &img.kernel_version {
+        put("kernel-version", v.clone());
+    }
+    if let Some(v) = img.default_vcpus {
+        put("default-vcpus", v.to_string());
+    }
+    if let Some(v) = &img.default_memory {
+        put("default-memory", v.clone());
+    }
+    if let Some(v) = &img.default_backend {
+        put("default-backend", v.clone());
+    }
+    if let Some(v) = img.cloud_init {
+        put("cloud-init", v.to_string());
+    }
+    a
+}
+
+/// Inverse of [`annotations_of`], applied to the metadata a `vm pull` just
+/// built from the blob alone.
+///
+/// A malformed value is IGNORED rather than fatal: a bad `default-vcpus`
+/// should not make an otherwise good image unusable, and the field's own
+/// absence already has well-defined behaviour. `cloud-init` is the one case
+/// where a wrong reading matters, so only the two exact strings count.
+pub(crate) fn apply_pulled_annotations(
+    mut img: VmImage,
+    a: &std::collections::BTreeMap<String, String>,
+) -> VmImage {
+    let get = |k: &str| {
+        a.get(&format!("io.delonix.vmimage.{k}"))
+            .map(|s| s.as_str())
+    };
+    img.distro = get("distro").map(str::to_string).or(img.distro);
+    img.ubuntu_release = get("release").map(str::to_string).or(img.ubuntu_release);
+    img.k8s_version = get("k8s-version").map(str::to_string).or(img.k8s_version);
+    img.kernel_version = get("kernel-version")
+        .map(str::to_string)
+        .or(img.kernel_version);
+    img.default_vcpus = get("default-vcpus")
+        .and_then(|v| v.parse().ok())
+        .or(img.default_vcpus);
+    img.default_memory = get("default-memory")
+        .map(str::to_string)
+        .or(img.default_memory);
+    img.default_backend = get("default-backend")
+        .map(str::to_string)
+        .or(img.default_backend);
+    img.cloud_init = match get("cloud-init") {
+        Some("true") => Some(true),
+        Some("false") => Some(false),
+        _ => img.cloud_init,
+    };
+    img
 }
 
 /// `image vm convert` — flattens/converts a disk between `qcow2` and `raw`
@@ -781,7 +1033,7 @@ pub(crate) fn cmd_pull(store: &VmImageStore, source: &str, name: Option<String>)
             super::output::progress_bar(&label, done, total);
         }
     };
-    let data = delonix_image::registry::pull_oci_artifact_with_progress(
+    let (data, annotations) = delonix_image::registry::pull_oci_artifact_with_meta(
         &state_root(),
         source,
         Some(&on_progress),
@@ -805,7 +1057,12 @@ pub(crate) fn cmd_pull(store: &VmImageStore, source: &str, name: Option<String>)
         default_vcpus: None,
         default_memory: None,
         default_backend: None,
+        // Filled in below from the manifest annotations when the publisher
+        // set them. Left `None` (= assume cloud-init, the historical
+        // behaviour) for an artifact that carries no annotations.
+        cloud_init: None,
     };
+    let img = apply_pulled_annotations(img, &annotations);
     store.save(&img)?;
     println!("{name}");
     Ok(())
@@ -1102,6 +1359,9 @@ fn cmd_build(
         default_vcpus: None,
         default_memory: None,
         default_backend: None,
+        // The golden recipe deliberately leaves cloud-init enabled in the
+        // image so each VM's first boot applies its own hostname/SSH keys.
+        cloud_init: Some(true),
     };
     store.save(&img)?;
     println!("{tag}");
@@ -3156,6 +3416,7 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
             default_vcpus: None,
             default_memory: None,
             default_backend: None,
+            cloud_init: None,
         };
         // Pulled image, no build metadata at all — pre-existing gap, not new.
         assert_eq!(distro_label(&img), "-");
@@ -3308,5 +3569,110 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
         // Unknown tools still get a sentence, just without a package name —
         // never a silent fallthrough to the ENOENT text.
         assert_eq!(super::tool_package("whatever"), None);
+    }
+
+    /// Builds a `VmImage` with every field empty — the shape a `vm pull`
+    /// produces before annotations are applied.
+    fn bare_img() -> VmImage {
+        VmImage {
+            name: "x".to_string(),
+            tag: "x".to_string(),
+            digest: "sha256:x".to_string(),
+            size: 0,
+            ubuntu_release: None,
+            k8s_version: None,
+            created_unix: 0,
+            kernel_version: None,
+            distro: None,
+            default_vcpus: None,
+            default_memory: None,
+            default_backend: None,
+            cloud_init: None,
+        }
+    }
+
+    #[test]
+    fn metadados_antigos_sem_o_campo_continuam_a_carregar_e_contam_como_cloud_init() {
+        // Every `.json` written before `cloud_init` existed. Loading these has
+        // to keep working, AND they have to behave exactly as before — those
+        // images are cloud images, and `vm create` must still seed them.
+        let antigo = r#"{
+            "name": "golden", "tag": "golden", "digest": "sha256:a", "size": 1,
+            "ubuntu_release": "24.04", "k8s_version": "1.34", "created_unix": 0
+        }"#;
+        let img: VmImage = serde_json::from_str(antigo).unwrap();
+        assert_eq!(img.cloud_init, None);
+        assert!(
+            img.uses_cloud_init(),
+            "unknown tem de contar como cloud-init: e o que estas imagens sempre foram"
+        );
+    }
+
+    #[test]
+    fn so_uma_marca_explicita_de_appliance_desliga_o_seed() {
+        let mut img = bare_img();
+        assert!(img.uses_cloud_init());
+        img.cloud_init = Some(true);
+        assert!(img.uses_cloud_init());
+        img.cloud_init = Some(false);
+        assert!(!img.uses_cloud_init());
+    }
+
+    #[test]
+    fn annotations_fazem_round_trip_pelo_push_e_pull() {
+        // The point of the annotations: what the store knows must survive a
+        // push/pull, because the qcow2 blob carries none of it.
+        let mut orig = bare_img();
+        orig.distro = Some("opnsense".to_string());
+        orig.ubuntu_release = Some("26.1.2".to_string());
+        orig.default_vcpus = Some(2);
+        orig.default_memory = Some("2G".to_string());
+        orig.default_backend = Some("libvirt".to_string());
+        orig.cloud_init = Some(false);
+
+        let recuperado = apply_pulled_annotations(bare_img(), &annotations_of(&orig));
+        assert_eq!(recuperado.distro, orig.distro);
+        assert_eq!(recuperado.ubuntu_release, orig.ubuntu_release);
+        assert_eq!(recuperado.default_vcpus, orig.default_vcpus);
+        assert_eq!(recuperado.default_memory, orig.default_memory);
+        assert_eq!(recuperado.default_backend, orig.default_backend);
+        assert_eq!(recuperado.cloud_init, Some(false));
+        assert!(!recuperado.uses_cloud_init());
+    }
+
+    #[test]
+    fn artefacto_sem_annotations_nao_muda_nada() {
+        // Everything published before this existed, and anything pushed by
+        // another tool: the pull must land exactly where it landed before.
+        let vazio = std::collections::BTreeMap::new();
+        let img = apply_pulled_annotations(bare_img(), &vazio);
+        assert_eq!(img.cloud_init, None);
+        assert_eq!(img.distro, None);
+        assert!(img.uses_cloud_init());
+    }
+
+    #[test]
+    fn annotation_malformada_e_ignorada_menos_no_campo_que_decide_o_seed() {
+        let mut a = std::collections::BTreeMap::new();
+        a.insert(
+            "io.delonix.vmimage.default-vcpus".to_string(),
+            "muitos".to_string(),
+        );
+        // Anything that is not exactly "true"/"false" leaves cloud-init
+        // unknown — which falls back to "yes, seed it", the safe reading for
+        // an image we cannot classify.
+        a.insert("io.delonix.vmimage.cloud-init".to_string(), "0".to_string());
+        let img = apply_pulled_annotations(bare_img(), &a);
+        assert_eq!(img.default_vcpus, None);
+        assert_eq!(img.cloud_init, None);
+        assert!(img.uses_cloud_init());
+    }
+
+    #[test]
+    fn annotations_so_carregam_o_que_e_sabido() {
+        // An absent annotation and one saying "unknown" are different claims;
+        // only the first is honest for a field nobody filled in.
+        let a = annotations_of(&bare_img());
+        assert!(a.is_empty(), "nada sabido, nada anunciado: {a:?}");
     }
 }
