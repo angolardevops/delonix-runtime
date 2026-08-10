@@ -238,14 +238,70 @@ check "stack apply" ok "$BIN" stack apply -f "$WORK/delonix-manifest.yaml"
 check "stack apply idempotente" ok "$BIN" stack apply -f "$WORK/delonix-manifest.yaml"
 check "stack describe" ok "$BIN" stack describe -f "$WORK/delonix-manifest.yaml"
 check "volumes describe do manifesto" ok "$BIN" volumes describe "sv-$PFX"
+
+# O ciclo declarativo inteiro (v0.47.0) não tinha UMA verificação aqui: o `plan`,
+# o contrato de exit code que um gate de CI usa, a recusa fail-closed, e o
+# `destroy`. Um manifesto INALTERADO tem de propor ZERO alterações — se propuser,
+# a normalização de algum campo está a divergir dos dois lados, e o sintoma seria
+# deriva eterna em todos os planos.
+check "stack plan (manifesto inalterado, --detailed-exitcode = 0)" ok \
+  "$BIN" stack plan -f "$WORK/delonix-manifest.yaml" --detailed-exitcode
+check "stack plan --fields" ok "$BIN" stack plan -f "$WORK/delonix-manifest.yaml" --fields
+check "stack validate" ok "$BIN" stack validate -f "$WORK/delonix-manifest.yaml"
+check "stack apply --dry-run" ok "$BIN" stack apply -f "$WORK/delonix-manifest.yaml" --dry-run
+# O `--replace` só aceita `Kind/nome`; um valor sem barra tem de ser recusado.
+check "stack apply --replace mal formado recusa" fail \
+  "$BIN" stack apply -f "$WORK/delonix-manifest.yaml" --replace lixo
+check "stack destroy --dry-run" ok "$BIN" stack destroy -f "$WORK/delonix-manifest.yaml" --dry-run
+check "stack destroy" ok "$BIN" stack destroy -f "$WORK/delonix-manifest.yaml"
+# O destroy levou o que a stack possui — o `describe` a seguir tem de correr na
+# mesma (parte do ficheiro, não de um registo), mas os recursos já não existem.
+check "volumes describe depois do destroy recusa" fail "$BIN" volumes describe "sv-$PFX"
 "$BIN" volumes rm "sv-$PFX" >/dev/null 2>&1
 "$BIN" network rm "sn-$PFX" >/dev/null 2>&1
+
+########################################
+section "schema gerado + explain + init"
+########################################
+check "schema print" ok "$BIN" schema print
+check "schema print --kind Container" ok "$BIN" schema print --kind Container
+check "schema print --kind inexistente recusa" fail "$BIN" schema print --kind NaoExiste
+check "explain Kind" ok "$BIN" explain Container
+check "explain campo" ok "$BIN" explain Container.ports
+check "explain campo aninhado" ok "$BIN" explain Pod.containers.image
+check "explain Kind inexistente recusa" fail "$BIN" explain NaoExiste
+check "explain campo inexistente recusa" fail "$BIN" explain Container.naoExiste
+# O schema publicado tem de ser o gerado — o mesmo contrato do teste em Rust,
+# aqui contra o binário desta árvore.
+check "schema publicado == gerado" ok bash -c \
+  "'$BIN' schema print | diff -q - '$(cd "$(dirname "$0")/.." && pwd)/docs/schema/v1/delonix.json'"
+
+INITDIR="$OUT/init-$PFX"; mkdir -p "$INITDIR"
+check "init detecta e gera" ok "$BIN" init "$INITDIR"
+check "init gerou um manifesto" ok test -f "$INITDIR/delonix-manifest.yaml"
+check "o gerado valida" ok "$BIN" stack validate -f "$INITDIR/delonix-manifest.yaml"
+# Sem `--force`, um segundo `init` não pode sobrescrever o que já lá está.
+check "init repetido não sobrescreve" ok "$BIN" init "$INITDIR"
+
+########################################
+section "workload / pod / secret (leitura)"
+########################################
+check "workload ls" ok "$BIN" workload ls
+check "workload ls -o json" ok "$BIN" workload ls -o json
+check "workload describe inexistente recusa" fail "$BIN" workload describe "nao-existe-$PFX"
+check "pod ls" ok "$BIN" pod ls
+check "secret ls" ok "$BIN" secret ls
+check "secret inspect inexistente recusa" fail "$BIN" secret inspect "nao-existe-$PFX"
 
 ########################################
 section "vm (só o que não precisa de hipervisor)"
 ########################################
 check "vm ls" ok "$BIN" vm ls
-check "vm create sem imagem recusa" fail "$BIN" vm create "vm-$PFX" --image /nao/existe.qcow2
+# `--disk`, e não `--image`: a flag `--image` NÃO EXISTE no `vm create`, por isso
+# este check passava — esperava falha e obtinha falha — mas por «unexpected
+# argument», nunca por a imagem não existir. Um teste que passa pela razão errada
+# é pior que um teste em falta: dá cobertura por adquirida.
+check "vm create com disco inexistente recusa" fail "$BIN" vm create "vm-$PFX" --disk /nao/existe.qcow2
 
 ########################################
 section "limpeza"

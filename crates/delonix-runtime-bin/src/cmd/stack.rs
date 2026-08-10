@@ -993,6 +993,26 @@ fn refuse_unallowed(changes: &[Change], replace: &[String]) -> Result<()> {
 }
 
 fn apply(file: Option<PathBuf>, replace: Vec<String>, do_prune: bool) -> Result<()> {
+    // `--replace` is the flag that AUTHORIZES a destructive recreate, so a value
+    // it cannot possibly match is refused here rather than ignored. Accepting
+    // `--replace lixo` in silence gives the illusion of having authorised
+    // something; the recreate is then refused downstream by `refuse_unallowed`,
+    // and the error the user reads talks about the resource, never about the
+    // typo they made. `all` and `<Kind>/<name>` are the two shapes that mean
+    // anything — see `refuse_unallowed`, which also accepts a bare name and is
+    // why one is allowed here too.
+    for r in &replace {
+        let shape_ok = r == "all"
+            || (r.split('/').count() == 2 && r.split('/').all(|p| !p.is_empty()))
+            || (!r.contains('/') && !r.is_empty());
+        if !shape_ok {
+            return Err(delonix_runtime_core::Error::Invalid(super::po::tf(
+                "--replace '{value}': expected `<Kind>/<name>` (e.g. `Container/web`), \
+                 a bare resource name, or `all`",
+                &[("value", r)],
+            )));
+        }
+    }
     let path = manifest::resolve_path(file)?;
     let docs = manifest::load(&path)?;
     // Validate the graph BEFORE touching anything: the `apply` is fail-fast without
@@ -1014,6 +1034,25 @@ fn apply(file: Option<PathBuf>, replace: Vec<String>, do_prune: bool) -> Result<
     // for). Only then start creating.
     let stack = stack_name(&path, None);
     let changes = build_plan(&docs, &stack)?;
+    // A `--replace` that names nothing in this manifest is a typo, and a typo in
+    // the flag that authorises a DESTRUCTIVE recreate has to be loud. Without
+    // this, `--replace Container/wev` reads as authorised, the recreate is then
+    // refused downstream, and the error the user reads names the resource — never
+    // the misspelling that caused it.
+    if !replace.iter().any(|r| r == "all") {
+        for r in &replace {
+            let hits = changes
+                .iter()
+                .any(|c| format!("{}/{}", c.kind, c.name) == *r || c.name == *r);
+            if !hits {
+                return Err(delonix_runtime_core::Error::Invalid(super::po::tf(
+                    "--replace '{value}': no resource with that name in this manifest \
+                     (`stack plan` lists them)",
+                    &[("value", r)],
+                )));
+            }
+        }
+    }
     refuse_unallowed(&changes, &replace)?;
     // A resource that has to be recreated is destroyed FIRST, so the normal
     // creation pass below builds it fresh. Doing it in this order means there is
