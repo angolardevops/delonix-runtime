@@ -148,6 +148,24 @@ struct MountSpec {
 /// interpreted as INJECTED mount options (e.g. `file_mode=0777`).
 /// `mount.cifs(8)` documents `credentials=<file>` for exactly this reason.
 /// Now takes an already-written credentials file path instead.
+///
+/// **What happens when the NAS goes away mid-write, and why it is left that way.**
+/// The only options emitted here are `credentials=` (cifs), `ro`, and the caller's extras
+/// — no `soft`, no `timeo`, no `retrans`. So NFS keeps its own default, `hard`: an
+/// in-flight write does not fail, it **blocks indefinitely** in uninterruptible sleep, and
+/// the process cannot be killed until the server answers. That is the correct default and
+/// is deliberately not changed here — `soft` turns the same outage into an `EIO` in the
+/// middle of a write, which for a database is silent corruption instead of a stall, and
+/// this whole area exists to not lose data.
+///
+/// It is documented because the operator-visible symptom ("the container is wedged and
+/// won't die") points nowhere near the NAS on its own. The escape hatch already exists and
+/// needs no new flag: pass `soft,timeo=50,retrans=2` (or `intr` on old kernels) through the
+/// extra mount options for a workload that would rather see an error than wait.
+///
+/// NOT measured: this host cannot mount NFS/CIFS at all (`mount -t` needs `CAP_SYS_ADMIN`,
+/// unavailable rootless), so the behaviour above is read off the emitted options plus
+/// `nfs(5)`, not observed. See `docs/discovery/46_GAPS_ENCONTRADOS.md` §1, line 12.
 fn build_mount(
     r#type: &str,
     server: &str,
