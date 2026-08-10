@@ -22,7 +22,7 @@ pub mod workload_net;
 
 pub use error::{Error, Result};
 pub use secret::{Secret, SecretStore};
-pub use store::{write_atomic, write_atomic_mode, JsonStore, Store};
+pub use store::{write_atomic, write_atomic_mode, write_private_temp, JsonStore, Store};
 
 /// Are we in the INITIAL user namespace — i.e. is uid 0 here the host's root?
 ///

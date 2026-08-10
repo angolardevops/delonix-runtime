@@ -1591,11 +1591,15 @@ fn kubeadm_init(
             DELONIX_CRI_SOCKET,
             etcd_endpoints,
         )?;
-        let tmp = std::env::temp_dir().join(format!(
-            "delonix-kubeadm-config-{}.yaml",
-            std::process::id()
-        ));
-        std::fs::write(&tmp, &yaml).map_err(|e| {
+        // `write_private_temp`, not `fs::write` to a pid-derived name: `/tmp` is
+        // world-writable and the name was guessable, so another local user could
+        // pre-plant a symlink there and redirect the write, or simply read the
+        // cluster's init configuration while it sat at the ambient umask.
+        let tmp = delonix_runtime_core::write_private_temp(
+            "delonix-kubeadm-config.yaml",
+            yaml.as_bytes(),
+        )
+        .map_err(|e| {
             Error::Invalid(format!(
                 "{}: {e}",
                 super::po::t("writing local kubeadm-config.yaml")
@@ -1751,20 +1755,19 @@ fn fetch_kubeconfig(cp1: &SshTarget, cluster_name: &str) -> Result<PathBuf> {
     // re-audit): `fs::write` + a later `set_permissions` leaves a TOCTOU window — the
     // file is created at umask-default mode (664 under a common umask) for the
     // interval between `create()` and the `chmod` running, and a local
-    // watcher/attacker can win that race. `OpenOptions::mode(0o600)` sets the mode
-    // atomically AT CREATION, the same pattern `ensure_libvirt_network`'s temp-XML
-    // fix already uses elsewhere in this codebase — never a permissive window.
-    {
-        use std::io::Write;
-        use std::os::unix::fs::OpenOptionsExt;
-        let mut f = std::fs::OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .mode(0o600)
-            .open(&dest)?;
-        f.write_all(kubeconfig.as_bytes())?;
-    }
+    // watcher/attacker can win that race.
+    //
+    // The first fix used `OpenOptions::mode(0o600)` with `create(true)`, which
+    // closes that window but has a second, quieter hole: `mode()` applies only
+    // when the file is CREATED. Re-running `cluster apply` over a kubeconfig
+    // left by an older build — one written at 0644 — reopens it and rewrites the
+    // credentials while the permissive mode stays exactly as it was. Writing a
+    // fresh 0600 file and renaming it into place, which is what
+    // `write_atomic_mode` does, gives the right mode every time regardless of
+    // what was there before, replaces any symlink sitting at `dest` instead of
+    // following it, and makes the update atomic so a crash cannot leave half a
+    // kubeconfig behind.
+    delonix_runtime_core::write_atomic_mode(&dest, kubeconfig.as_bytes(), Some(0o600))?;
 
     if let Some(home) = std::env::var_os("HOME") {
         let kube_dir = PathBuf::from(home).join(".kube");
