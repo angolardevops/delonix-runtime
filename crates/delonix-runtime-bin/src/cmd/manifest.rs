@@ -89,7 +89,7 @@ fn filled_spec(doc: &ManifestDoc) -> Result<serde_yaml::Value> {
         "Pod" => cmd::pod::spec_with_defaults(doc),
         "HTTPRoute" => cmd::httproute::spec_with_defaults(doc),
         "Ingress" => cmd::httproute::ingress_spec_with_defaults(doc),
-        "Egress" | "FirewallPolicy" => cmd::firewall::spec_with_defaults(doc),
+        "FirewallPolicy" => cmd::firewall::spec_with_defaults(doc),
         "Container" if doc.spec.get("containers").is_some() => {
             cmd::container::pod_spec_with_defaults(doc)
         }
@@ -299,6 +299,7 @@ pub fn load(path: &Path) -> Result<Vec<ManifestDoc>> {
         if canon != doc.kind {
             doc.kind = canon.to_string();
         }
+        lower_legacy_kind(&mut doc)?;
         if doc.api_version != SUPPORTED_API_VERSION {
             return Err(Error::Invalid(super::po::tf(
                 "{kind} '{name}': unknown apiVersion '{version}' (only '{SUPPORTED_API_VERSION}' is supported)",
@@ -330,7 +331,14 @@ pub fn load(path: &Path) -> Result<Vec<ManifestDoc>> {
         // (which then flow through the normal per-Kind apply). The Stack doc
         // itself does not survive — it becomes its parts.
         if doc.kind == "Stack" {
-            docs.extend(expand_stack(&doc)?);
+            // A Stack's children are built HERE, so they never passed through the
+            // loop's own lowering — a `kind: Stack` with an `egress:` group would
+            // produce `kind: Egress` docs that no handler claims any more, and
+            // they would be dropped in silence. Lower each child on its way out.
+            for mut child in expand_stack(&doc)? {
+                lower_legacy_kind(&mut child)?;
+                docs.push(child);
+            }
         } else if doc.kind == "Workload" {
             // A `kind: Workload` lowers to a synthetic `kind: Container`/`kind: Vm`
             // doc (ADR-0001), which then flows through the normal per-Kind apply —
@@ -347,6 +355,75 @@ pub fn load(path: &Path) -> Result<Vec<ManifestDoc>> {
         )));
     }
     Ok(docs)
+}
+
+/// Rewrites the Kinds that folded into another one.
+///
+/// Kept as ONE function called from both places a document can enter the list
+/// (the top-level loop and a Stack's expanded children), because a lowering that
+/// only covers one of them turns a merged Kind into a document nobody claims —
+/// silently, which is the failure this whole exercise exists to remove.
+fn lower_legacy_kind(doc: &mut ManifestDoc) -> Result<()> {
+    // `kind: Egress` folds into `kind: FirewallPolicy`. The two were the SAME
+    // object: one struct (`firewall::FwDocSpec`), one validator, one apply, one
+    // dataplane — the only difference being where the direction came from. Three
+    // nouns for "network policy" means three places to look during an incident,
+    // and no model anyone knows (k8s NetworkPolicy, AWS security groups, Azure
+    // NSGs) splits inbound from outbound into separate TYPES; they split them
+    // with a field.
+    //
+    // Not in `canonical_kind` because this is not a rename: the direction the old
+    // Kind implied has to be written into the spec, and `canonical_kind` is a
+    // pure name map with no spec to write into.
+    if doc.kind == "Egress" {
+        lower_egress(doc)?;
+    }
+    Ok(())
+}
+
+/// Rewrites a legacy `kind: Egress` into the canonical `kind: FirewallPolicy`,
+/// writing the direction the old Kind used to imply into `spec.direction`.
+///
+/// **Fail-closed on a contradiction.** `kind: Egress` with `direction: ingress`
+/// is not a mistake worth guessing at — it is two statements that cannot both be
+/// true, and silently honouring one of them on a FIREWALL is the worst possible
+/// place to guess. Same treatment `force_microvm_backend` gives a `type: microvm`
+/// that asks for a non-microVM backend.
+fn lower_egress(doc: &mut ManifestDoc) -> Result<()> {
+    let declared = doc.spec.get("direction").and_then(|v| v.as_str());
+    match declared {
+        Some("egress") | None => {}
+        Some(other) => {
+            return Err(Error::Invalid(super::po::tf(
+                "Egress '{name}': spec.direction is '{other}', but `kind: Egress` means \
+                 outbound — write `kind: FirewallPolicy` with the direction you want",
+                &[("name", &doc.metadata.name), ("other", other)],
+            )))
+        }
+    }
+    if declared.is_none() {
+        if let serde_yaml::Value::Mapping(m) = &mut doc.spec {
+            m.insert(
+                serde_yaml::Value::from("direction"),
+                serde_yaml::Value::from("egress"),
+            );
+        } else {
+            // A non-mapping spec has nowhere to put the direction, and letting it
+            // through would reach `apply` as "direction missing" — an error about
+            // a field the user never wrote.
+            return Err(Error::Invalid(super::po::tf(
+                "Egress '{name}': spec must be a mapping",
+                &[("name", &doc.metadata.name)],
+            )));
+        }
+    }
+    super::output::warn(&super::po::tf(
+        "Egress '{name}': `kind: Egress` is deprecated — use `kind: FirewallPolicy` with \
+         `direction: egress` (same fields, same behaviour)",
+        &[("name", &doc.metadata.name)],
+    ));
+    doc.kind = "FirewallPolicy".to_string();
+    Ok(())
 }
 
 /// Filters the documents of a specific `kind` (exact comparison, e.g. `"Container"`).
@@ -654,6 +731,10 @@ spec: { image: alpine, memroy: 2G, restartPolicy: always }
                 // `Ingress` is now the k8s-shaped L7 Ingress (→ HTTPRoute); the
                 // L4 firewall keeps `Egress`/`FirewallPolicy`.
                 "Ingress" => Some(crate::cmd::httproute::INGRESS_SPEC_FIELDS),
+                // `Egress` continua aqui, e tem de continuar: este teste lê os
+                // ficheiros CRUS, antes do `load`, e é lá que o Kind antigo
+                // ainda existe. Os outros ramos por `kind: Egress` foram
+                // apagados porque correm DEPOIS do load, onde ele já não chega.
                 "Egress" | "FirewallPolicy" => Some(crate::cmd::firewall::FW_SPEC_FIELDS),
                 "HTTPRoute" => Some(crate::cmd::httproute::HTTP_ROUTE_SPEC_FIELDS),
                 "Dependency" => Some(crate::cmd::dependency::DEPENDENCY_SPEC_FIELDS),
@@ -812,5 +893,78 @@ spec:
         assert_eq!(docs[2].kind, "Container");
         assert_eq!(docs[2].metadata.name, "db");
         assert_eq!(docs[2].metadata.namespace.as_deref(), Some("data")); // per-item override
+    }
+
+    /// `kind: Egress` e `kind: FirewallPolicy` eram o MESMO objecto — uma
+    /// struct, um validador, um apply, um dataplane. Depois da fusão só há um
+    /// Kind no fim, e o antigo é reescrito com a direcção que implicava.
+    #[test]
+    fn egress_e_reescrito_como_firewallpolicy_com_a_direccao() {
+        let mut doc: ManifestDoc = serde_yaml::from_str(
+            "apiVersion: delonix.io/v1\nkind: Egress\nmetadata: { name: db-out }\nspec: { target: db }\n",
+        )
+        .unwrap();
+        lower_legacy_kind(&mut doc).unwrap();
+        assert_eq!(doc.kind, "FirewallPolicy");
+        assert_eq!(
+            doc.spec.get("direction").unwrap().as_str(),
+            Some("egress"),
+            "a direcção que o Kind antigo implicava tem de ficar escrita no spec"
+        );
+        // Um `direction: egress` já escrito não é duplicado nem alterado.
+        let mut ja: ManifestDoc = serde_yaml::from_str(
+            "apiVersion: delonix.io/v1\nkind: Egress\nmetadata: { name: x }\nspec: { target: db, direction: egress }\n",
+        )
+        .unwrap();
+        lower_legacy_kind(&mut ja).unwrap();
+        assert_eq!(ja.spec.get("direction").unwrap().as_str(), Some("egress"));
+    }
+
+    /// Uma contradicção não se adivinha, e muito menos numa firewall: `kind:
+    /// Egress` com `direction: ingress` são duas afirmações que não podem ser
+    /// ambas verdadeiras. Fail-closed, como o `force_microvm_backend` faz a um
+    /// `type: microvm` que pede outro backend.
+    #[test]
+    fn egress_com_direccao_contraditoria_e_recusado() {
+        let mut doc: ManifestDoc = serde_yaml::from_str(
+            "apiVersion: delonix.io/v1\nkind: Egress\nmetadata: { name: x }\nspec: { target: db, direction: ingress }\n",
+        )
+        .unwrap();
+        let e = lower_legacy_kind(&mut doc).unwrap_err().to_string();
+        assert!(e.contains("ingress"), "{e}");
+        assert!(
+            e.contains("FirewallPolicy"),
+            "a mensagem tem de dizer o que fazer: {e}"
+        );
+    }
+
+    /// Os filhos de um `kind: Stack` são construídos DENTRO do `load` e nunca
+    /// passaram pelo ciclo, por isso um grupo `egress:` produziria documentos
+    /// que nenhum handler reclama — e seriam largados em silêncio, que é
+    /// exactamente a falha que esta fusão existe para tirar.
+    #[test]
+    fn um_grupo_egress_dentro_de_um_stack_tambem_e_reescrito() {
+        let text = "\
+apiVersion: delonix.io/v1
+kind: Stack
+metadata: { name: s }
+spec:
+  egress:
+    - name: dentro
+      spec: { target: db }
+";
+        let p = std::env::temp_dir().join(format!("dlx-stack-egress-{}.yaml", std::process::id()));
+        std::fs::write(&p, text).unwrap();
+        let docs = load(&p).unwrap();
+        let _ = std::fs::remove_file(&p);
+        assert_eq!(docs.len(), 1);
+        assert_eq!(
+            docs[0].kind, "FirewallPolicy",
+            "o filho do Stack ficou por reescrever"
+        );
+        assert_eq!(
+            docs[0].spec.get("direction").unwrap().as_str(),
+            Some("egress")
+        );
     }
 }

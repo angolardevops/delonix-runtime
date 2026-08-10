@@ -17,10 +17,11 @@ spec:
   subnet: 10.219.0.0/24
 ---
 apiVersion: delonix.io/v1
-kind: Egress
+kind: FirewallPolicy
 metadata:
   name: prod-egress
 spec:
+  direction: egress         # era `kind: Egress`
   scope: network            # o `target` é uma REDE, não um container
   target: prod-net
   defaultPolicy: deny        # nega toda a saída excepto o que estiver abaixo (+ DNS)

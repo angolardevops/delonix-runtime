@@ -240,7 +240,7 @@ pub fn run(action: StackCmd) -> Result<()> {
 /// The stack Kinds, in the SAME order as `apply` — whoever reads `describe` sees
 /// the order in which things are created, which is half the diagnosis when an
 /// apply stops halfway.
-const KINDS: [&str; 13] = [
+const KINDS: [&str; 12] = [
     "Secret",
     "Network",
     "Volume",
@@ -250,7 +250,6 @@ const KINDS: [&str; 13] = [
     "Container",
     "Pod",
     "Ingress",
-    "Egress",
     "FirewallPolicy",
     "HTTPRoute",
     "Dependency",
@@ -694,7 +693,7 @@ fn presence(
         // Ingress/Egress have no store of their own — they are firewall directives
         // applied to a target container, not resources with state. The `apply`
         // always applies them (idempotent); here we only note the nature.
-        "Ingress" | "Egress" | "FirewallPolicy" => ("-".into(), "declarative".into()),
+        "Ingress" | "FirewallPolicy" => ("-".into(), "declarative".into()),
         "HTTPRoute" => ("-".into(), "declarative".into()),
         "Dependency" => ("-".into(), "declarative".into()),
         _ => ("?".into(), super::po::t("unsupported kind").into()),
@@ -1254,7 +1253,7 @@ fn validate_graph_with(
                     }
                 }
             }
-            "Egress" | "FirewallPolicy" => {
+            "FirewallPolicy" => {
                 let scope = doc
                     .spec
                     .get("scope")

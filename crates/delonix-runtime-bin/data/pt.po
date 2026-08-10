@@ -3825,3 +3825,14 @@ msgstr "Só o spec deste Kind (ex.: `Container`)."
 
 msgid "`<Kind>[.field[.field…]]`."
 msgstr "`<Kind>[.campo[.campo…]]`."
+
+# fusao Egress -> FirewallPolicy (fase A1)
+
+msgid "Egress '{name}': spec.direction is '{other}', but `kind: Egress` means outbound — write `kind: FirewallPolicy` with the direction you want"
+msgstr "Egress '{name}': o spec.direction é '{other}', mas `kind: Egress` significa saída — escreve `kind: FirewallPolicy` com a direcção que queres"
+
+msgid "Egress '{name}': spec must be a mapping"
+msgstr "Egress '{name}': o spec tem de ser uma mapping"
+
+msgid "Egress '{name}': `kind: Egress` is deprecated — use `kind: FirewallPolicy` with `direction: egress` (same fields, same behaviour)"
+msgstr "Egress '{name}': `kind: Egress` está depreciado — usa `kind: FirewallPolicy` com `direction: egress` (mesmos campos, mesmo comportamento)"

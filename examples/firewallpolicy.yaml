@@ -1,7 +1,7 @@
 # kind: FirewallPolicy — a forma UNIFICADA do firewall declarativo. A direcção
 # vem de `spec.direction` (ingress|egress) em vez do nome do Kind. Resolve a
 # confusão de que, aqui, `kind: Ingress` é firewall L4 (não o Ingress L7/HTTP do
-# k8s). `kind: Ingress`/`kind: Egress` continuam a funcionar como alias — este é
+# k8s). `kind: Egress` continua a ser aceite (é reescrito no load, com aviso) — este é
 # só a superfície unificada equivalente.
 #
 #   delonix stack apply -f examples/firewallpolicy.yaml

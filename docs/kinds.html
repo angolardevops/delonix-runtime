@@ -337,7 +337,7 @@ spec:
 <pre><code># kind: FirewallPolicy — a forma UNIFICADA do firewall declarativo. A direcção
 # vem de `spec.direction` (ingress|egress) em vez do nome do Kind. Resolve a
 # confusão de que, aqui, `kind: Ingress` é firewall L4 (não o Ingress L7/HTTP do
-# k8s). `kind: Ingress`/`kind: Egress` continuam a funcionar como alias — este é
+# k8s). `kind: Egress` continua a ser aceite (é reescrito no load, com aviso) — este é
 # só a superfície unificada equivalente.
 #
 #   delonix stack apply -f examples/firewallpolicy.yaml
@@ -857,8 +857,11 @@ spec:
 #
 # NOTA: `kind: Ingress` já NÃO é firewall — passou a ser o Ingress L7/HTTP estilo
 # k8s (host/path→backend, ver examples/ingress.yaml). Para o firewall inbound usa
-# `kind: FirewallPolicy` com `direction: ingress` (como abaixo). `kind: Egress`
-# (firewall outbound) continua a funcionar.
+# `kind: FirewallPolicy` com `direction: ingress` (como abaixo). E `kind: Egress`
+# FUNDIU-SE aqui: é reescrito no load para `direction: egress`, com aviso de
+# depreciação — havia uma struct, um validador, um apply e um dataplane para os
+# dois, e nenhum modelo conhecido (NetworkPolicy, security groups, NSGs) separa
+# entrada de saída em TIPOS diferentes; separa-as num campo.
 # ---------------------------------------------------------------------------
 # Os recursos que as políticas abaixo referenciam. Estão aqui DE PROPÓSITO: um
 # exemplo que nomeia um container inexistente dá `unresolved reference(s)` a
@@ -898,10 +901,11 @@ spec:
       note: postgres-from-sdn
 ---
 apiVersion: delonix.io/v1
-kind: Egress
+kind: FirewallPolicy
 metadata:
   name: db-outbound
 spec:
+  direction: egress          # era `kind: Egress`
   target: dbapp
   defaultPolicy: deny
   rules:

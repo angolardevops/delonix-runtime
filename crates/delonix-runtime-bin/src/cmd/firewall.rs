@@ -998,12 +998,11 @@ pub fn spec_with_defaults(doc: &ManifestDoc) -> Result<serde_yaml::Value> {
 
 pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
     let (_images, store) = open_stores()?;
-    // NB: `kind: Ingress` is NO LONGER firewall — it is now the k8s-shaped L7/HTTP
-    // Ingress (see `cmd::httproute`). Inbound L4 firewall lives under
-    // `kind: FirewallPolicy` (direction: ingress). `kind: Egress` (outbound) stays.
-    apply_kind(&store, docs, "out")?; // kind: Egress
-                                      // kind: FirewallPolicy — the UNIFIED form (the direction comes from `spec.direction`
-                                      // instead of the Kind name). Applies the SAME logic; the canonical inbound form.
+    // `kind: FirewallPolicy` is now the ONLY firewall Kind. `kind: Ingress` stopped
+    // being firewall a while back (it is the k8s-shaped L7 Ingress, see
+    // `cmd::httproute`), and `kind: Egress` is rewritten into a FirewallPolicy with
+    // `direction: egress` at load time (`manifest::lower_egress`) — so by the time
+    // anything reaches here there is one Kind, one struct and one direction field.
     for doc in manifest::of_kind(docs, "FirewallPolicy") {
         let dir = match doc.spec.get("direction").and_then(|v| v.as_str()) {
             Some("ingress") => "in",
@@ -1016,15 +1015,6 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
             }
         };
         apply_fw_doc(&store, doc, dir)?;
-    }
-    Ok(())
-}
-
-fn apply_kind(store: &Store, docs: &[ManifestDoc], dir: &str) -> Result<()> {
-    // `dir` "in" → the Ingress Kind; "out" → the Egress Kind.
-    let kind = if dir == "in" { "Ingress" } else { "Egress" };
-    for doc in manifest::of_kind(docs, kind) {
-        apply_fw_doc(store, doc, dir)?;
     }
     Ok(())
 }
