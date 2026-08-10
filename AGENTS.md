@@ -3149,6 +3149,61 @@ com um IP só e as regras por-origem dele deixam de valer. As chains por-workloa
 FILTRO, não NAT, por isso compõem-se bem: o delonix decide se o pacote sai do workload, o
 appliance decide o que atravessa a fronteira.
 
+## Imagens base de SO, e o que o host precisa para as construir (v0.48.0)
+
+Cinco variantes do `--no-k8s`: Ubuntu 24.04/26.04, Debian bookworm, Rocky 9 e **Fedora** (novo).
+O Fedora é da família dnf/RPM do Rocky e o código diz isso em vez de o repetir — há teste a
+comparar os passos gerados para os dois campo a campo.
+
+**`--fedora-release` exige `<release>-<build>` (`42-1.1`) e recusa um `42` nu.** Medido: o nome do
+artefacto carrega um build que a versão não determina, e o redirector do Fedora não serve listagem
+de directório. Sem forma fiável de o descobrir, um `42` sozinho parece certo e dá 404 já com
+centenas de MB transferidos — pergunta-se em vez de adivinhar (mesmo princípio dos inputs de ISO
+no workflow das appliances).
+
+**Dois bloqueios de host, e nenhum se adivinha pelo erro que dá** (agora ambos tratados por
+`install.sh --with-image-build`):
+
+- **Sem `isc-dhcp-client` NO HOST**, o appliance do supermin nasce sem cliente DHCP — o
+  `supermin.d/packages` pede-o e o supermin só COPIA do host. O build morre em «Temporary failure
+  resolving 'archive.ubuntu.com'», um erro que parece de rede do host, e o host tem rede.
+- **`/boot/vmlinuz-*` a `0600`** (hardening do Debian/Ubuntu): o supermin copia o kernel do host
+  para o appliance e morre em `cp: cannot open ... Permission denied`. O `chmod 0644` **baixa uma
+  fronteira** (o binário do kernel passa a ser legível por qualquer utilizador local), por isso é
+  opt-in, avisa e diz como reverter — o mesmo tratamento do `--low-ports`.
+
+**`install.sh --production`** aplica os limites que só se atingem em CARGA, cada um por um modo de
+falha concreto: `nf_conntrack_max` (todo o dataplane é nftables com conntrack — cheio, o kernel
+DROPA ligações novas e do lado da aplicação parece perda aleatória), `neigh gc_thresh` (a tabela
+ARP tem 1024 entradas e um nó denso enche-a), `ip_local_port_range` (cada ligação saínte por NAT
+gasta uma porta efémera), `pid_max`/`file-max`/backlogs/`swappiness`. O **`hashsize` do conntrack
+vai por `modprobe.d` porque NÃO é um sysctl** — subir só o max alonga as cadeias do hash em vez de
+escalar. `LimitNOFILE`/`TasksMax` vão para um drop-in do `user@.service`: em rootless os
+containers são filhos dele, e os limites de uma sessão PAM/SSH não lhes chegam.
+
+**Dois bugs reais apanhados a construir**, ambos com teste de regressão:
+
+1. **O `stream_download` não tinha retry nenhum.** A cloud image do Rocky (646 MiB) morreu aos
+   3,8 MiB e a corrida seguinte recomeçava do zero (o `download_*_base` só verifica o ficheiro
+   FINAL). Passa a pedir `Range:` a partir do que está em disco, com 5 tentativas; um 206 é
+   retomado e um servidor que ignore o Range recomeça — a distinção é explícita, porque anexar a
+   um corpo completo produziria lixo silencioso. O que torna isto seguro é o **checksum que todos
+   os chamadores já verificam**: bytes costurados de dois ranges ou dão o hash publicado ou o
+   download é descartado. Provado ao vivo: `resuming download at 3964627 bytes`.
+2. **O reset de `machine-id` quebrava o build no Fedora**: `/var/lib/dbus` não existe lá, o
+   `ln -sf` falhava e levava o `virt-customize` inteiro — a imagem não chegava a existir por causa
+   de um symlink de compatibilidade. Mesma classe da armadilha do AppArmor no Rocky. `mkdir -p`
+   antes do link.
+
+**`image vm ls`/`ls-remote` passaram a dizer o que a imagem É.** O `ls` ganhou `TYPE`
+(`cloud-init`/`appliance`) e `DEFAULTS` (`4cpu/8G`) — as duas coisas que decidem se o `vm create`
+semeia a imagem (e portanto se `--ssh-key` é aceite ou recusado) e com que recursos arranca. O
+`ls-remote` deixou de imprimir só a coluna TAG: lê o manifesto de cada tag (um GET, sem blob) e
+mostra distro/tipo/tamanho das annotations; uma tag cujo manifesto falhe aparece na mesma com `-`.
+O `KERNEL` é agora preenchido também num `import`, por `virt-ls /boot` — e **falha por razão
+estrutural** no OPNsense (FreeBSD) e no TrueNAS (raiz em ZFS), onde o libguestfs não vê `/boot`;
+no Proxmox VE funciona (`vmlinuz-6.17.2-1-pve`, medido).
+
 ## Regra de ouro: fronteira com o PaaS
 
 Este código **não pode depender de nada privado**. Antes de qualquer commit:
