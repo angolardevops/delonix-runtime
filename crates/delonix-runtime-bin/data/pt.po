@@ -4722,3 +4722,205 @@ msgstr "Directório de trabalho em que o processo do container arranca (por omis
 
 msgid "Publish a port, `[hostIp:]hostPort:contPort[/tcp|udp]` or just `port`. Repeatable. SAFE BY DEFAULT: without `hostIp` the port binds to `127.0.0.1` only — reachable from the host itself, NOT from a browser on another machine. Name the address to widen it: `0.0.0.0:8080:80` (every interface), `192.168.1.10:8080:80` (one), or the libvirt gateway to reach it from VMs (see `delonix vm reach`). With `--net host` (the default) the container moves to its own netns with userspace NAT (slirp4netns, like rootless podman); with `--net <network>` it publishes via the ingress (nft DNAT + hostfwd on the single slirp)"
 msgstr "Publica uma porta, `[ipHost:]portaHost:portaContainer[/tcp|udp]` ou só `porta`. Repetível. SEGURO POR OMISSÃO: sem `ipHost` a porta liga-se só a `127.0.0.1` — alcançável do próprio host, NÃO de um browser noutra máquina. Nomeia o endereço para a alargar: `0.0.0.0:8080:80` (todas as interfaces), `192.168.1.10:8080:80` (uma), ou o gateway do libvirt para lhe chegares de uma VM (ver `delonix vm reach`). Com `--net host` (o default) o container muda-se para a sua própria netns com NAT em espaço de utilizador (slirp4netns, como o podman rootless); com `--net <rede>` publica pelo ingress (DNAT nft + hostfwd no slirp único)"
+# scan de imagem VM: recusa clara antes de ir ao registo (bloco C5)
+msgid "'{img}' is a VM image, not a container image — scanning a qcow2 guest filesystem is not implemented. Scan the container images it runs, or inspect the guest yourself (`virt-filesystems`/`guestfish`)."
+msgstr "'{img}' é uma imagem VM, não uma imagem de container — analisar o sistema de ficheiros de um convidado qcow2 não está implementado. Analisa as imagens de container que ela corre, ou inspecciona o convidado à mão (`virt-filesystems`/`guestfish`)."
+
+# delonix init — detector de contexto (bloco C4)
+msgid "detected {evidence} → {what}"
+msgstr "detectado {evidence} → {what}"
+
+msgid "found {evidence} — this project already runs natively with `{cmd}`; generating a second manifest would give it two sources of truth"
+msgstr "encontrei {evidence} — este projecto já corre nativamente com `{cmd}`; gerar um segundo manifesto dava-lhe duas fontes de verdade"
+
+# help dos ARGUMENTOS de `image`, `vm` e `net`
+
+msgid "Build a golden image with NO Kubernetes — just `delonix` itself"
+msgstr "Constrói uma imagem dourada SEM Kubernetes — só o próprio `delonix`"
+
+msgid "Fedora release AND build (e.g. `42-1.1`) — only with `--distro fedora`"
+msgstr "Release E build do Fedora (ex.: `42-1.1`) — só com `--distro fedora`"
+
+msgid "Give the guest network access during `RUN` — VMfile builds only. The golden recipe already decides this with `--offline`"
+msgstr "Dá acesso à rede ao convidado durante os `RUN` — só em builds de VMfile. A receita dourada já decide isto com `--offline`"
+
+msgid "Kernel baked into the image (`uname -r` shape), for `image vm ls`. Omit to let it be probed from the image — which only works where libguestfs can read `/boot` (not FreeBSD, not root-on-ZFS)"
+msgstr "Kernel embutido na imagem (na forma do `uname -r`), para o `image vm ls`. Omite-o para ser sondado a partir da imagem — o que só funciona onde o libguestfs consegue ler o `/boot` (não em FreeBSD, não com raiz em ZFS)"
+
+msgid "Name to register it under (`image vm ls`)"
+msgstr "Nome sob o qual o registar (`image vm ls`)"
+
+msgid "(only with `--vm`) With no argument, pull the official NO-Kubernetes golden instead of the Kubernetes one"
+msgstr "(só com `--vm`) Sem argumento, puxa a dourada oficial SEM Kubernetes em vez da de Kubernetes"
+
+msgid "Output format: `table` (default) or `json` (ADR-0005)"
+msgstr "Formato de saída: `table` (por omissão) ou `json` (ADR-0005)"
+
+msgid "Output format: `table` (default) or `json` (ADR-0005). Works for both `image ls` and `image --vm ls`"
+msgstr "Formato de saída: `table` (por omissão) ou `json` (ADR-0005). Vale para o `image ls` e para o `image --vm ls`"
+
+msgid "Path to a `.qcow2` (or any format `qemu-img` reads — it is converted)"
+msgstr "Caminho para um `.qcow2` (ou qualquer formato que o `qemu-img` leia — é convertido)"
+
+msgid "Recommended memory (e.g. `4G`), same rule as `--default-vcpus`"
+msgstr "Memória recomendada (ex.: `4G`), com a mesma regra do `--default-vcpus`"
+
+msgid "Recommended vCPUs, applied by `vm create` when `--vcpus` is absent"
+msgstr "vCPUs recomendados, aplicados pelo `vm create` quando não vem `--vcpus`"
+
+msgid "Remove it even if a container still uses it"
+msgstr "Remove-a mesmo que um container ainda a use"
+
+msgid "Replace an image already registered under this name"
+msgstr "Substitui uma imagem já registada com este nome"
+
+msgid "Store the qcow2 uncompressed (larger, but no decompression cost on backing-file reads at runtime) — same flag, same trade-off, as `build`"
+msgstr "Guarda o qcow2 sem compressão (maior, mas sem custo de descompressão nas leituras do backing file em runtime) — a mesma flag, e o mesmo compromisso, do `build`"
+
+msgid "The guest does NOT run cloud-init: it is a self-configuring appliance (OPNsense, Proxmox, TrueNAS). `vm create` then skips the NoCloud seed instead of attaching one nothing in the guest reads"
+msgstr "O convidado NÃO corre cloud-init: é uma appliance que se configura sozinha (OPNsense, Proxmox, TrueNAS). O `vm create` passa então a saltar o seed NoCloud, em vez de lhe colar um que nada lá dentro lê"
+
+msgid "Version, for `image vm ls` (e.g. `26.1.2`)"
+msgstr "Versão, para o `image vm ls` (ex.: `26.1.2`)"
+
+msgid "What this is, for `image vm ls` (e.g. `opnsense`, `proxmox-ve`)"
+msgstr "O que isto é, para o `image vm ls` (ex.: `opnsense`, `proxmox-ve`)"
+
+msgid "With no argument, list the official NO-Kubernetes golden's repo instead of the Kubernetes one"
+msgstr "Sem argumento, lista o repositório da dourada oficial SEM Kubernetes em vez do da de Kubernetes"
+
+msgid "With no `source`, list the official NO-Kubernetes golden's repo instead of the Kubernetes one"
+msgstr "Sem `source`, lista o repositório da dourada oficial SEM Kubernetes em vez do da de Kubernetes"
+
+msgid "With no `source`, pull the official NO-Kubernetes golden instead of the Kubernetes one"
+msgstr "Sem `source`, puxa a dourada oficial SEM Kubernetes em vez da de Kubernetes"
+
+msgid "Absolute URL of a qcow2 cloud image to boot this VM from"
+msgstr "URL absoluto de uma cloud image qcow2 a partir da qual arrancar esta VM"
+
+msgid "Absolute URL of a qcow2 cloud image to boot this VM from."
+msgstr "URL absoluto de uma cloud image qcow2 a partir da qual arrancar esta VM."
+
+msgid "Actually run the privileged plan (requires root). Without it: dry-run"
+msgstr "Executa mesmo o plano privilegiado (precisa de root). Sem isto: dry-run"
+
+msgid "A local VM image name (`vm ls`) or a literal `.qcow2`/`.raw` path"
+msgstr "Um nome de imagem VM local (`vm ls`) ou um caminho literal `.qcow2`/`.raw`"
+
+msgid "Also probe a short list of well-known ports (22, 6443, 10250, 80, 443) on each VM's IP and show which respond — a real TCP connect per port, short timeout, run concurrently. Off by default: unlike the rest of `ls` (local state only), this does live network I/O and can add latency, especially for an unreachable/booting VM"
+msgstr "Sonda também uma lista curta de portas conhecidas (22, 6443, 10250, 80, 443) no IP de cada VM e mostra quais respondem — um connect TCP real por porta, com timeout curto, em paralelo. Desligado por omissão: ao contrário do resto do `ls` (só estado local), isto faz I/O de rede ao vivo e pode acrescentar latência, sobretudo para uma VM inalcançável ou a arrancar"
+
+msgid "`cloud-hypervisor`|`libvirt` (omit: the image's `HYPERVISOR` if `--disk` names a local one, else `DELONIX_VM_BACKEND`/`vm default-backend`/auto-detection, in that order)"
+msgstr "`cloud-hypervisor`|`libvirt` (omitir: o `HYPERVISOR` da imagem se o `--disk` nomear uma local, senão `DELONIX_VM_BACKEND`/`vm default-backend`/auto-detecção, por esta ordem)"
+
+msgid "Destination file (default: alongside the source, with the new extension)"
+msgstr "Ficheiro de destino (por omissão: ao lado da origem, com a extensão nova)"
+
+msgid "Do not compress the final qcow2"
+msgstr "Não comprime o qcow2 final"
+
+msgid "Give the guest network access during `RUN` (for `apt-get install` and friends). Off by default: a build that reaches the internet produces a different image depending on when it ran"
+msgstr "Dá acesso à rede ao convidado durante os `RUN` (para `apt-get install` e companhia). Desligado por omissão: um build que vai à internet produz uma imagem diferente conforme o dia em que correu"
+
+msgid "Ingress network for the tap (default: the system ingress network; a custom network must be created first with `delonix network create`)"
+msgstr "Rede de ingress para o tap (por omissão: a rede de ingress do sistema; uma rede personalizada tem de ser criada antes com `delonix network create`)"
+
+msgid "Memory (`\"2G\"`/`\"1024M\"`; default: `1G`, or the image's `MEMORY` when `--disk` names a local image)"
+msgstr "Memória (`\"2G\"`/`\"1024M\"`; por omissão: `1G`, ou o `MEMORY` da imagem quando o `--disk` nomeia uma imagem local)"
+
+msgid "`no`|`on-failure`|`always`"
+msgstr "`no`|`on-failure`|`always`"
+
+msgid "Output format: `table` (default) or `json` (ADR-0005). The `ports_open` field is included only with `--ports` (same as the table column — the probe does live network I/O, off by default)"
+msgstr "Formato de saída: `table` (por omissão) ou `json` (ADR-0005). O campo `ports_open` só vem com `--ports` (tal como a coluna da tabela — a sonda faz I/O de rede ao vivo, e está desligada por omissão)"
+
+msgid "Scaffold a `VMfile` for BUILDING your own qcow2 image, instead of a manifest for RUNNING an existing one. The two are different jobs and this is the same verb for both: `init` starts a project either way"
+msgstr "Gera o esqueleto de um `VMfile` para CONSTRUIR a tua própria imagem qcow2, em vez de um manifesto para CORRER uma já existente. São dois trabalhos diferentes e este é o mesmo verbo para ambos: o `init` começa um projecto nos dois casos"
+
+msgid "Snapshot name"
+msgstr "Nome do snapshot"
+
+msgid "Snapshot name to revert to"
+msgstr "Nome do snapshot para o qual voltar"
+
+msgid "vCPUs (default: 1, or the image's `VCPUS` — see `HYPERVISOR`/`VCPUS` in `delonix vm init --vmfile` — when `--disk` names a local image)"
+msgstr "vCPUs (por omissão: 1, ou o `VCPUS` da imagem — ver `HYPERVISOR`/`VCPUS` em `delonix vm init --vmfile` — quando o `--disk` nomeia uma imagem local)"
+
+msgid "VM subnet(s) to route back (default: auto-detected `virbr*`). Repeatable"
+msgstr "Subnet(s) de VM a rotear de volta (por omissão: as `virbr*` auto-detectadas). Repetível"
+
+msgid "With no `source`, pull the official NO-Kubernetes golden (just the `delonix` engine, rootless-ready) instead of the Kubernetes one"
+msgstr "Sem `source`, puxa a dourada oficial SEM Kubernetes (só o motor `delonix`, pronto a rootless) em vez da de Kubernetes"
+
+msgid "CIDRs for `allowlist` mode (comma-separated), e.g. `10.0.0.0/8,1.1.1.1/32`"
+msgstr "CIDRs para o modo `allowlist` (separados por vírgula), ex.: `10.0.0.0/8,1.1.1.1/32`"
+
+msgid "ContainerFw as JSON, e.g. `{\"enabled\":true,\"policyIn\":\"deny\",\"rules\":[...]}`"
+msgstr "ContainerFw em JSON, ex.: `{\"enabled\":true,\"policyIn\":\"deny\",\"rules\":[...]}`"
+
+msgid "e.g. `github.com` (matches `github.com` and `*.github.com`)"
+msgstr "ex.: `github.com` (casa com `github.com` e com `*.github.com`)"
+
+msgid "Emit JSON instead of a human summary"
+msgstr "Emite JSON em vez de um resumo para humanos"
+
+msgid "Free-form note kept with the rule"
+msgstr "Nota livre guardada com a regra"
+
+msgid "`hostPort:containerPort[/tcp|udp]` or just `port`"
+msgstr "`portaHost:portaContainer[/tcp|udp]` ou só `porta`"
+
+msgid "IP in the infra subnet. Defaults to a deterministic one derived from `name`"
+msgstr "IP na subnet de infra. Por omissão, um determinístico derivado do `name`"
+
+msgid "Name (default: `tunnel-<port>`)"
+msgstr "Nome (por omissão: `tunnel-<porta>`)"
+
+msgid "Netns/container name"
+msgstr "Nome da netns/container"
+
+msgid "Netns/container name (its IP is derived unless `--ip` is given)"
+msgstr "Nome da netns/container (o IP é derivado, a não ser que venha `--ip`)"
+
+msgid "Netns name (typically a container id/short-id)"
+msgstr "Nome da netns (tipicamente um id/short-id de container)"
+
+msgid "Only from this source CIDR (default: anywhere)"
+msgstr "Só a partir deste CIDR de origem (por omissão: de qualquer sítio)"
+
+msgid "Only to this destination CIDR (default: anywhere)"
+msgstr "Só para este CIDR de destino (por omissão: para qualquer sítio)"
+
+msgid "Override the container IP (defaults to the deterministic one from `name`)"
+msgstr "Substitui o IP do container (por omissão, o determinístico derivado do `name`)"
+
+msgid "`pinggy` | `ngrok` | `cloudflare`"
+msgstr "`pinggy` | `ngrok` | `cloudflare`"
+
+msgid "Port mapping `hostPort:containerPort[/tcp|udp]`"
+msgstr "Mapeamento de porta `portaHost:portaContainer[/tcp|udp]`"
+
+msgid "Remove the container's firewall from the ingress"
+msgstr "Remove do ingress a firewall do container"
+
+msgid "Restart policy baked into the units (`no|on-failure[:max]|always|unless-stopped`)"
+msgstr "Política de reinício embutida nas unidades (`no|on-failure[:max]|always|unless-stopped`)"
+
+msgid "`tcp/5432`, `udp/53`, `5432` (any proto), or `tcp/*` (all ports)"
+msgstr "`tcp/5432`, `udp/53`, `5432` (qualquer proto), ou `tcp/*` (todas as portas)"
+
+# help dos comandos novos do bloco C
+msgid "Start the right project for THIS directory: detects and dispatches to `stack init`/`vm init` with the matching template, saying what it detected and why"
+msgstr "Arranca o projecto certo para ESTA pasta: detecta e despacha para o `stack init`/`vm init` com o template adequado, dizendo o que detectou e porquê"
+
+msgid "Print the version (same output as `--version`)."
+msgstr "Imprime a versão (a mesma saída do `--version`)."
+
+msgid "Project directory (default: the current one)."
+msgstr "Pasta do projecto (por omissão: a actual)."
+
+msgid "Force a template instead of the detected one (`stack init -t list` shows them)."
+msgstr "Força um template em vez do detectado (`stack init -t list` mostra-os)."
+
+msgid "Overwrite files that already exist."
+msgstr "Sobrescreve ficheiros que já existam."
