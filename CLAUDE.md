@@ -19,6 +19,18 @@ homóloga ao Docker, distinta do `delonix`/`delonixctl` privados do `delonix-paa
 repo/branch/remote, não afectados por nada aqui). Comandos agrupados semanticamente em vez de
 uma lista plana, um módulo por grupo em `crates/delonix-runtime-bin/src/cmd/`:
 
+- `delonix init` (v0.47.0) — o passo ANTES do `stack init`/`vm init`: olha para o directório,
+  decide qual dos dois chamar e com qual dos onze templates, e **delega** (não gera nada de seu).
+  `cmd/init.rs::detect` é puro sobre os nomes de ficheiro presentes, ordenado do mais específico
+  para o mais genérico — um Django também tem `.py` e um Next.js também tem `package.json`, por
+  isso a regra mais larga não pode ganhar só por ter sido verificada primeiro. **Explica-se
+  sempre** (`detected go.mod → stack init --template go`): um palpite errado que se vê corrige-se
+  com `-t`, um em silêncio produz um projecto que não bate certo com o código ao lado. Um
+  `VMfile` manda para o `vm init`; um `docker-compose.yml` é o caso em que a resposta certa é
+  **não gerar nada** (já corre nativamente com `delonix compose up`, e um 2.º manifesto dava-lhe
+  duas fontes de verdade) — avisa, em vez de gerar na mesma. `delonix version` existe a par da
+  flag porque `<ferramenta> version` é o que se escreve primeiro (git/docker/kubectl/podman
+  respondem todos), e imprime o texto da flag VERBATIM para os dois não poderem divergir.
 - `delonix container` — run/ps/stop/rm/exec/logs/**update**/**describe**/**kill**/**wait**/
   **restart**/**rename**/**port**/**attach** (v0.25.0, Docker/Podman CLI-verb parity). `kill -s
   <signal>` sends an arbitrary signal (name or number) without forcing a `Stopped` status — the
@@ -2909,6 +2921,23 @@ activado por `--l18n=pt`/`DELONIX_L18N=pt`. Regras para não regredir:
   (`run()` → `cmd::output::error`) nunca sequer chamava `t_dyn` — só os 4
   re-execs escondidos o faziam; e `for_each_id` (`stop`/`rm`/... com vários ids)
   tinha o seu próprio `eprintln!` que também nunca passava por ele.
+- **FEITO (v0.47.0): a cobertura passou a ser MEDIDA, e há teste.** Esta secção afirmava que o
+  help do clap se traduz em runtime — e traduz-se; o que nunca tinha sido medido era quanto do
+  catálogo existia. Medido: **103 dos 232 subcomandos** imprimiam o help em EN sob `--l18n=pt`
+  (o grupo `container` inteiro, 28), e **206 descrições de flag**. Fechados os dois, a zero.
+  Dois testes em `main.rs` (`help_i18n_tests`) percorrem a árvore do `clap::Command`:
+  `todo_o_help_de_comando_tem_traducao_pt` é **estrito**, e
+  `o_help_dos_argumentos_so_pode_encolher` é um **ratchet** — falha se o número subir (flag nova
+  sem entrada) E se descer (traduz-se e baixa-se a constante no mesmo commit); um `<=` deixaria
+  a dívida a ler-se como verde. Consultam o CATÁLOGO (`po::has_pt_translation`, `#[cfg(test)]`) e
+  não o `t_help`: em EN o `t_help` devolve o próprio texto e o teste passaria pela razão errada.
+  **A excepção está declarada no código** (`is_same_in_both`) — `Containers: run/ps/stop/...` lê-se
+  igual nas duas línguas, e pedir tradução para isso é como um catálogo ganha ruído.
+  **Armadilha que custou duas passagens**: o `-h` mostra o `about` curto e o `--help` o
+  `long_about`/`long_help` INTEIRO — 8 `long_about` e um `long_help` multi-parágrafo só
+  apareceram depois, e um `grep "^  delonix"` sobre a saída do teste cortava-lhes as linhas
+  seguintes. Ao gerar entradas multi-linha, **não acrescentar `\n` na última linha**: o lookup
+  deixa de bater e o sintoma é o teste passar (a chave existe) com o `--help` a continuar em EN.
 
 ## Auditoria sistemática dos 208 subcomandos (v0.37.0) — 4 caminhos de perda de dados
 
@@ -3052,7 +3081,20 @@ checklist para quem mexer aqui do que como lista de correcções:
   existir, e a frase «No such file or directory» manda o leitor procurar um caminho
   (`vmimage::tool_package`, v0.45.0);
 - **`/sys/fs/cgroup/cgroup.subtree_control` conter `memory`** não é «a MINHA sessão tem
-  delegação» — é do cgroup RAIZ do host, e contém-no sempre (v0.42.2, ver abaixo).
+  delegação» — é do cgroup RAIZ do host, e contém-no sempre (v0.42.2, ver abaixo);
+- **um rootfs já extraído não é um rootfs a extrair** — a 2.ª passagem do re-exec de
+  `--net <rede-custom>` reextraía a imagem INTEIRA para o caminho que a 1.ª acabara de encher.
+  Medido com `pgvector:pg16` (10 296 entradas, 431 MB): 1 526 ms com `--net none` contra
+  3 143 ms com rede custom, e o delta é exactamente uma extracção (1 666 ms à parte); o `strace`
+  concorda, 2 060 canonicalizações do destino contra 1 030. Reextrair por cima de uma árvore
+  preenchida custa preço inteiro — não há poupança acidental. A correcção é **rootless-only de
+  propósito**: como root o `prepare_rootfs` MONTA um overlay, e um mount da 1.ª passagem não é
+  necessariamente visível na namespace onde o re-exec aterra (v0.47.0);
+- **«não está no store de containers» não é «não é local»** — o `image scan` de uma imagem VM
+  anunciava «not local», ia à Docker Hub buscar `library/<nome>` e morria num **401**. Recusa
+  agora com o nome da alternativa; percorrer o sistema de ficheiros de um convidado é outro
+  caminho de SBOM, e um scan que em silêncio não faz nada útil é a falha que o comando existe
+  para evitar (v0.47.0).
 
 **Achado vivo da varredura (v0.42.2)**: `delonix system info` reportava `cgroup2 delegated: yes`
 incondicionalmente, por ler os ficheiros do cgroup raiz do host — o comando que se corre para
