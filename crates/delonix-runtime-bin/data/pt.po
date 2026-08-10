@@ -3929,3 +3929,14 @@ msgstr "nada a migrar"
 
 msgid "sharevolume '{name}': a namespaced record already exists — left alone, resolve it by hand"
 msgstr "sharevolume '{name}': já existe um registo com namespace — deixado como está, resolve-o à mão"
+
+# download com retoma e reconexao por estagnacao
+
+msgid "resuming download at {have} bytes (attempt {attempt})..."
+msgstr "a retomar o download aos {have} bytes (tentativa {attempt})..."
+
+msgid "download slowed to {now} KiB/s (peak {peak}) — reconnecting to resume"
+msgstr "o download caiu para {now} KiB/s (pico {peak}) — a reconectar para retomar"
+
+msgid "GET {url}: gave up after {attempts} attempts ({err}) — partial file kept, a later run resumes from it"
+msgstr "GET {url}: desisti ao fim de {attempts} tentativas ({err}) — o ficheiro parcial fica, uma corrida posterior retoma dele"
