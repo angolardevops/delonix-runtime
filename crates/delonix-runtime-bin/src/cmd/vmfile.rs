@@ -485,6 +485,10 @@ pub(crate) fn build(
     let mut built: std::collections::HashMap<String, PathBuf> = std::collections::HashMap::new();
     let total = vf.stages.len();
     let mut last: Option<PathBuf> = None;
+    // The FINAL stage's base, when it is a local image — what the result
+    // inherits its distro and kernel from. `None` for a URL or a `--from=`
+    // stage, and that absence is the honest answer rather than a guess.
+    let base_meta = store.get(&vf.final_stage().from).ok();
 
     for (i, stage) in vf.stages.iter().enumerate() {
         let label = stage
@@ -556,11 +560,38 @@ pub(crate) fn build(
         // The recipe's own base, not a distro release this builder chose —
         // recording `ubuntu 24.04` for an image built `FROM https://…` would
         // be a guess presented as a fact.
-        ubuntu_release: Some(vf.final_stage().from.clone()),
+        // Inherited from a local base, and the recipe's own `FROM` otherwise.
+        //
+        // Half-inheriting was measurably worse than not inheriting: taking the
+        // distro from the base while leaving this as the FROM ref made
+        // `image vm ls` print `debian/delonix-vm-base:debian-bookworm` in the
+        // DISTRO column — a distro glued to an image name. Either both come
+        // from the base (which knows them, so it is not a guess) or neither
+        // does.
+        ubuntu_release: base_meta
+            .as_ref()
+            .and_then(|b| b.ubuntu_release.clone())
+            .or_else(|| Some(vf.final_stage().from.clone())),
         k8s_version: None,
         created_unix: super::vmimage::now_unix(),
-        kernel_version: None,
-        distro: None,
+        // INHERITED from the base when the `FROM` is a local image, and left
+        // unknown otherwise.
+        //
+        // A build customizes a rootfs; it does not swap the distro or the
+        // kernel. Recording `None` for both meant `image vm ls` — the command
+        // whose whole job is to say what an image IS — showed `-` under KERNEL
+        // and DISTRO for every image this engine built, while showing them for
+        // the very base it was built from. Measured: building `FROM
+        // delonix-vm-base:debian-bookworm` (kernel `6.1.0-52-cloud-amd64`,
+        // distro `debian/bookworm`) produced a row with both columns empty.
+        //
+        // Inheriting only from a LOCAL base is the honest half: a `FROM
+        // https://…` gives nothing to inherit, and guessing a distro from a URL
+        // would be a guess presented as a fact — the same reason
+        // `ubuntu_release` records the recipe's own `FROM` rather than a
+        // release this builder picked.
+        kernel_version: base_meta.as_ref().and_then(|b| b.kernel_version.clone()),
+        distro: base_meta.as_ref().and_then(|b| b.distro.clone()),
         // `VCPUS`/`MEMORY`/`HYPERVISOR` from the VMfile, if given — `vm
         // create` applies them when the disk resolves to this image AND the
         // caller did not already say otherwise (CLI flag, env var, or
