@@ -437,3 +437,51 @@ holder não foi tocado e os 5 mantiveram-se a correr durante toda a sessão.
 3. **§5** — `container describe` a imprimir a namespace (trivial), e depois a decisão de
    fundo sobre que recursos passam a ter namespace de facto.
 4. **§4.3 / §4.4 / §4.5** — por esta ordem.
+
+---
+
+## 8. Bloco B1 — volumes sem perda de dados
+
+Medido antes de mudar, com o inventário completo das escritas de metadados por crate.
+
+| Exigência do B1 | Estado medido | Acção |
+|---|---|---|
+| Escritas de metadados atómicas (temp + `fsync` + modo na criação + rename) | `Store`/`JsonStore`/`delonix-volume`/`ipam.rs` já atómicos; **o `NetworkStore` não** (7 escritas com `fs::write` cru), `delonix-vm` com 2 | ✅ corrigido |
+| `fs::remove_dir_all` não apaga contabilidade primeiro | Já correcto: o `remove` do volume apaga «tudo EXCEPTO os metadados» e só depois o `meta.json`, com a razão do EACCES/subuid escrita no código | ✅ nada a fazer |
+| Directório ilegível ≠ vazio | Já correcto: `Usage { bytes, unreadable }` e `QuotaState { measured }` — medição incompleta é *desconhecida*, nunca zero | ✅ nada a fazer |
+| Volumes de rede: o que acontece a uma escrita em curso quando o NAS desaparece | Lido das opções emitidas: só `credentials=`/`ro`/extras — **sem `soft`/`timeo`/`retrans`**, logo vale o `hard` do NFS | ⚠️ documentado, default mantido |
+
+### 8.1 O `NetworkStore` era o único store do seu próprio crate sem escrita atómica
+
+O `ipam.rs`, no mesmo crate, usa `write_atomic` desde sempre. O `NetworkStore` gravava os
+seus sete registos com `fs::write`, que **trunca** o destino e só depois o enche. Dois modos
+de falha, e o segundo é o mau:
+
+- um corpo multi-linha rasgado perde linhas, e o `get()` ignora chaves em falta **de
+  propósito** (é o que deixa um binário antigo ler um registo novo), por isso a rede volta
+  **degradada** em vez de falhar;
+- o octeto base é pior: o `get()` parseia um número nu como o formato antigo, logo `"142"`
+  truncado a `"14"` continua a ser um octeto **perfeitamente válido**. A rede muda de `/16`
+  em silêncio e todos os containers do prefixo antigo ficam sem se alcançar.
+
+Não é hipotético. Com a correcção revertida, o teste novo apanha leitores concorrentes a
+receber `network 'ov' is corrupted` — repetidamente, em vários threads.
+
+**Ficam duas `fs::write` cruas, e a razão está no código**: os dois sysctls em `/proc`. O
+kernel toma o valor na escrita, não há ficheiro para publicar nem nada para rasgar, e o
+`rename` do `write_atomic` nem sequer é aceite ali.
+
+### 8.2 NFS: um NAS que desaparece bloqueia para sempre — e é o comportamento certo
+
+Sem `soft`/`timeo`, uma escrita em curso não falha: **bloqueia indefinidamente** em sono
+ininterruptível, e o processo não pode ser morto até o servidor responder. O default fica
+como está de propósito — `soft` transforma a mesma falha num `EIO` a meio de uma escrita, o
+que para uma base de dados é corrupção silenciosa em vez de uma paragem, e é exactamente o
+que este bloco existe para evitar.
+
+Documentado porque o sintoma que o operador vê («o container está preso e não morre») não
+aponta para o NAS. A escapatória já existe e não precisa de flag nova: passar
+`soft,timeo=50,retrans=2` nas opções extra de montagem.
+
+**NÃO medido** — este host não monta NFS/CIFS de todo (`mount -t` exige `CAP_SYS_ADMIN`,
+indisponível em rootless). O acima é lido das opções emitidas e do `nfs(5)`, não observado.
