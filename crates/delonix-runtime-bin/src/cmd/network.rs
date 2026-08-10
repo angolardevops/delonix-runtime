@@ -59,6 +59,159 @@ pub(crate) const NETWORK_SPEC_FIELDS: &[&str] = &[
     "driver", "parent", "subnet", "gateway", "vni", "peers", "wgIp", "wg_ip",
 ];
 
+/// Fields the reconciler compares for a `kind: Network`. Only `peers` converges
+/// hot (`NetworkStore::add_overlay_peer`); everything else defines the L2/L3
+/// plane that containers are already attached to, so it is a replace — and a
+/// replace of a network detaches every container on it, which is precisely why
+/// it is refused without `--replace`.
+///
+/// `gateway` is deliberately absent: for a bridge network it is DERIVED from the
+/// base octet and the manifest's field is empty by default, so comparing it
+/// would report a difference on every plan for every network.
+pub(crate) const RECONCILED_NETWORK_FIELDS: &[&str] =
+    &["driver", "parent", "subnet", "vni", "peers"];
+
+fn desired_network_fields(spec: &NetworkSpec) -> std::collections::BTreeMap<String, String> {
+    let mut f = std::collections::BTreeMap::new();
+    f.insert("driver".into(), spec.driver.clone());
+    if let Some(p) = &spec.parent {
+        f.insert("parent".into(), p.clone());
+    }
+    if let Some(s) = &spec.subnet {
+        f.insert("subnet".into(), s.clone());
+    }
+    if let Some(v) = spec.vni {
+        f.insert("vni".into(), v.to_string());
+    }
+    if !spec.peers.is_empty() {
+        let mut peers = spec.peers.clone();
+        peers.sort();
+        f.insert("peers".into(), peers.join(","));
+    }
+    f
+}
+
+fn actual_network_fields(n: &Network) -> std::collections::BTreeMap<String, String> {
+    let mut f = std::collections::BTreeMap::new();
+    f.insert("driver".into(), n.driver.clone());
+    if let Some(p) = &n.parent {
+        f.insert("parent".into(), p.clone());
+    }
+    f.insert("subnet".into(), n.subnet.clone());
+    if let Some(v) = n.vni {
+        f.insert("vni".into(), v.to_string());
+    }
+    if !n.peers.is_empty() {
+        let mut peers = n.peers.clone();
+        peers.sort();
+        f.insert("peers".into(), peers.join(","));
+    }
+    f
+}
+
+/// Destroys a network so the normal creation path can rebuild it. Every
+/// container attached to it loses that attachment — hence the explicit
+/// `--replace`.
+pub(crate) fn remove_for_replace(name: &str) -> Result<()> {
+    let store = NetworkStore::open(state_root())?;
+    cmd_rm(&store, name)
+}
+
+/// Applies the hot part of a plan. Only an overlay's peer list converges
+/// without recreating the network; everything else defines the plane containers
+/// are already attached to.
+pub(crate) fn converge(name: &str, diffs: &[super::reconcile::FieldDiff]) -> Result<()> {
+    let store = NetworkStore::open(state_root())?;
+    for d in diffs {
+        match d.field.as_str() {
+            "peers" => {
+                let (removed, added) =
+                    super::reconcile::list_delta(d.from.as_deref(), d.to.as_deref());
+                for p in &added {
+                    store.add_overlay_peer(name, p)?;
+                }
+                if !removed.is_empty() {
+                    // Say it rather than drop it: `add_overlay_peer` has no
+                    // inverse today, so a peer removed from the manifest stays
+                    // in the FDB. Silently reporting success here would be the
+                    // exact dishonesty this feature exists to remove.
+                    eprintln!(
+                        "{}",
+                        super::po::tf(
+                            "WARNING: network/{name}: peer(s) {peers} were removed from the \
+                             manifest but removing an overlay peer is not implemented — \
+                             recreate the network to drop them",
+                            &[("name", name), ("peers", &removed.join(", "))],
+                        )
+                    );
+                }
+            }
+            other => {
+                return Err(delonix_runtime_core::Error::Invalid(format!(
+                    "network/{name}: '{other}' does not converge hot — bug in \
+                     `reconcile::hot_fields`"
+                )))
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Records that this stack owns the network, and what it last applied.
+pub(crate) fn stamp(
+    name: &str,
+    stack: &str,
+    fields: &std::collections::BTreeMap<String, String>,
+) -> Result<()> {
+    let store = NetworkStore::open(state_root())?;
+    store.set_metadata(
+        name,
+        &[
+            (
+                super::reconcile::STACK_LABEL.to_string(),
+                Some(stack.to_string()),
+            ),
+            (
+                super::reconcile::MANAGED_BY.to_string(),
+                Some("delonix".to_string()),
+            ),
+        ],
+        &[(
+            super::reconcile::LAST_APPLIED.to_string(),
+            Some(super::reconcile::encode_last_applied(fields)),
+        )],
+    )?;
+    Ok(())
+}
+
+pub(crate) fn desired(doc: &ManifestDoc) -> Result<super::reconcile::Desired> {
+    let spec: NetworkSpec = manifest::spec_of(doc)?;
+    Ok(super::reconcile::Desired {
+        kind: "Network".into(),
+        name: doc.metadata.name.clone(),
+        fields: desired_network_fields(&spec),
+        converges: true,
+    })
+}
+
+pub(crate) fn actual() -> Result<Vec<super::reconcile::Actual>> {
+    let store = NetworkStore::open(state_root())?;
+    Ok(store
+        .list()?
+        .into_iter()
+        .map(|n| super::reconcile::Actual {
+            kind: "Network".into(),
+            name: n.name.clone(),
+            fields: actual_network_fields(&n),
+            owner: n.labels.get(super::reconcile::STACK_LABEL).cloned(),
+            last_applied: n
+                .annotations
+                .get(super::reconcile::LAST_APPLIED)
+                .and_then(|raw| super::reconcile::decode_last_applied(raw)),
+        })
+        .collect())
+}
+
 #[derive(Subcommand)]
 pub enum NetworkCmd {
     /// Dashboard (KPIs + table) of the networks — interactive TUI, or `--once` snapshot.
@@ -572,5 +725,25 @@ mod tests {
         assert_eq!(legado.wg_ip.as_deref(), Some("10.9.0.1"));
         let canon: NetworkSpec = serde_yaml::from_str("driver: overlay\nwgIp: 10.9.0.1\n").unwrap();
         assert_eq!(canon.wg_ip.as_deref(), Some("10.9.0.1"));
+    }
+
+    /// Same guard as the sibling Kinds: the documented list is the constant's
+    /// real consumer, so a field cannot start being compared in silence.
+    #[test]
+    fn os_campos_comparados_sao_os_documentados() {
+        let spec: super::NetworkSpec = serde_yaml::from_str(
+            "driver: overlay\nsubnet: 10.42.0.0/16\nvni: 42\npeers: [10.0.0.7]\n",
+        )
+        .unwrap();
+        let f = super::desired_network_fields(&spec);
+        for k in f.keys() {
+            assert!(
+                super::RECONCILED_NETWORK_FIELDS.contains(&k.as_str()),
+                "{k} is compared but undocumented"
+            );
+        }
+        // `gateway` is derived from the base octet and empty in the manifest by
+        // default — comparing it would report a difference on every plan.
+        assert!(!f.contains_key("gateway"));
     }
 }

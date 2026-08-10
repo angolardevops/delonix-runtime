@@ -3668,3 +3668,114 @@ msgstr "O que fazer a um pod que pede mais do que o `--cap-ceiling`: `reject` (o
 # aviso de namespace sem efeito (bloco A2)
 msgid "{kind} '{name}': metadata.namespace has no effect — only Container, Pod and Vm are namespaced (it scopes network isolation, not naming)"
 msgstr "{kind} '{name}': o metadata.namespace não tem efeito — só Container, Pod e Vm têm namespace (delimita o isolamento de rede, não a nomeação)"
+
+# ---------------------------------------------------------------------------
+# Reconciliação declarativa (`stack plan`) — bloco 2 do IaC nativo
+# ---------------------------------------------------------------------------
+
+msgid "Plan for stack \"{stack}\"  (manifest: {path})"
+msgstr "Plano da stack \"{stack}\"  (manifesto: {path})"
+
+msgid "the manifest declares nothing"
+msgstr "o manifesto não declara nada"
+
+msgid "Summary"
+msgstr "Resumo"
+
+msgid "a replace destroys and recreates the resource — `stack apply` refuses it unless you pass `--replace`"
+msgstr "uma recriação destrói e refaz o recurso — o `stack apply` recusa-a a não ser que passes `--replace`"
+
+msgid "`!` = this Kind is ensure-present in this version: `apply` creates it if missing and never updates it"
+msgstr "`!` = este Kind é «garante presente» nesta versão: o `apply` cria-o se faltar e nunca o actualiza"
+
+msgid "Shows what an `apply` WOULD change, without changing anything."
+msgstr "Mostra o que um `apply` MUDARIA, sem mudar nada."
+
+msgid "Stack name (owner of the resources). Default: a `kind: Stack`'s name, else the manifest's directory."
+msgstr "Nome da stack (dono dos recursos). Omissão: o nome de um `kind: Stack`, senão o directório do manifesto."
+
+msgid "Exit 2 when there are changes (0 = none, 1 = error) — the `terraform plan -detailed-exitcode` contract, for a CI drift gate."
+msgstr "Sai com 2 quando há alterações (0 = nenhuma, 1 = erro) — o contrato do `terraform plan -detailed-exitcode`, para um gate de deriva em CI."
+
+msgid "to create"
+msgstr "a criar"
+
+msgid "to adopt"
+msgstr "a adoptar"
+
+msgid "to update"
+msgstr "a actualizar"
+
+msgid "to replace"
+msgstr "a recriar"
+
+msgid "unchanged"
+msgstr "sem alteração"
+
+msgid "to remove"
+msgstr "a remover"
+
+msgid "in conflict"
+msgstr "em conflito"
+
+msgid "not converging"
+msgstr "não convergente"
+
+msgid ""
+"Shows what an `apply` WOULD change, without changing anything.\n"
+"\n"
+"Compares the manifest against the machine and against the last spec this stack applied (a three-way diff, so a field a human set by hand is left alone while a field removed from the manifest is reverted). With the manifest unchanged, whatever it prints IS drift."
+msgstr ""
+"Mostra o que um `apply` MUDARIA, sem mudar nada.\n"
+"\n"
+"Compara o manifesto com a máquina e com o último spec que esta stack aplicou (um diff de 3 vias, por isso um campo que um humano pôs à mão fica intocado, enquanto um campo retirado do manifesto é revertido). Com o manifesto inalterado, o que ele imprimir É deriva."
+
+# apply convergente (bloco 3)
+
+msgid "{key}: {reason} — pass `--replace {key}` (or `--replace all`) to destroy and recreate it"
+msgstr "{key}: {reason} — passa `--replace {key}` (ou `--replace all`) para o destruir e recriar"
+
+msgid "stack apply refused: {n} resource(s) need an explicit decision (nothing was changed)"
+msgstr "stack apply recusado: {n} recurso(s) precisam de uma decisão explícita (nada foi alterado)"
+
+msgid "{kind}/{name}: recreating"
+msgstr "{kind}/{name}: a recriar"
+
+msgid "{kind}/{name}: updating {n} field(s) live"
+msgstr "{kind}/{name}: a actualizar {n} campo(s) a quente"
+
+msgid "WARNING: {kind}/{name}: could not record stack ownership ({err}) — it will be adopted again on the next apply and `--prune` will not see it"
+msgstr "AVISO: {kind}/{name}: não consegui registar a posse da stack ({err}) — será adoptado outra vez no próximo apply e o `--prune` não o vê"
+
+msgid "WARNING: network/{name}: peer(s) {peers} were removed from the manifest but removing an overlay peer is not implemented — recreate the network to drop them"
+msgstr "AVISO: network/{name}: o(s) peer(s) {peers} foram retirados do manifesto mas remover um peer de overlay não está implementado — recria a rede para os tirar"
+
+msgid "Fields compared by `stack plan`, per Kind:"
+msgstr "Campos que o `stack plan` compara, por Kind:"
+
+msgid "Every other Kind ({kinds}) is ensure-present: `apply` creates it if missing and never updates it."
+msgstr "Todos os outros Kinds ({kinds}) são «garante presente»: o `apply` cria-os se faltarem e nunca os actualiza."
+
+msgid "Not compared on a Container, and why: `env` and `command` (the record holds them merged with the image's), `user` (the record stores the resolved uid), `labels` (the engine adds its own)."
+msgstr "Não comparados num Container, e porquê: `env` e `command` (o registo guarda-os fundidos com os da imagem), `user` (o registo guarda o uid resolvido), `labels` (o motor acrescenta as suas)."
+
+msgid "Authorize DESTROYING and recreating a resource whose change does not converge live: `--replace <Kind>/<name>` (repeatable), or `--replace all`. Without it, `apply` refuses and changes nothing."
+msgstr "Autoriza DESTRUIR e recriar um recurso cuja alteração não converge a quente: `--replace <Kind>/<name>` (repetível), ou `--replace all`. Sem isto, o `apply` recusa e não altera nada."
+
+msgid "Print WHICH fields the plan compares, per Kind, and exit. Answers \"why is my change not showing up?\" without reading the source."
+msgstr "Imprime QUE campos o plano compara, por Kind, e sai. Responde a «porque é que a minha alteração não aparece?» sem ler o código."
+
+msgid "does not converge live: {fields}"
+msgstr "não converge a quente: {fields}"
+
+msgid "owned by the stack '{owner}'"
+msgstr "pertence à stack '{owner}'"
+
+msgid "exists and belongs to no stack — will be taken over"
+msgstr "já existe e não pertence a nenhuma stack — vai ser adoptado"
+
+msgid "no longer declared in the manifest"
+msgstr "já não está declarado no manifesto"
+
+msgid "this Kind is ensure-present in this version"
+msgstr "este Kind é «garante presente» nesta versão"
