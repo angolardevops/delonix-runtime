@@ -2252,14 +2252,17 @@ fn ensure_apparmor(profile: &str) -> Result<()> {
 /// Resolve the `-v` mounts (the CLI never builds `Mount` by hand — it delegates
 /// to `VolumeStore`, which already knows how to tell a named volume from a bind
 /// mount from `:ro`).
-fn resolve_mounts(volumes: &[String]) -> Result<Vec<delonix_runtime_core::Mount>> {
+fn resolve_mounts(volumes: &[String], namespace: &str) -> Result<Vec<delonix_runtime_core::Mount>> {
     if volumes.is_empty() {
         return Ok(Vec::new());
     }
     let vstore = VolumeStore::open(super::util::state_root())?;
+    // Namespace-aware: a `ShareVolume` declared in this workload's namespace wins over a
+    // global volume of the same name, and a name that exists in BOTH is refused rather
+    // than guessed (`VolumeStore::resolve_spec_in`).
     volumes
         .iter()
-        .map(|spec| vstore.resolve_spec(spec))
+        .map(|spec| vstore.resolve_spec_in(spec, namespace))
         .collect()
 }
 
@@ -2744,7 +2747,7 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
             }
         }
     }
-    let mut mounts = resolve_mounts(&volumes)?;
+    let mut mounts = resolve_mounts(&volumes, &namespace)?;
     // `--gpus nvidia|all` (upgraded) and `--device vendor.com/class=name`:
     // resolve via CDI BEFORE creating anything — same "fail fast, no
     // leftovers" pattern as the port checks above. `--gpus dri` stays the
@@ -5659,7 +5662,7 @@ fn cmd_update(store: &Store, id: &str, o: UpdateOpts) -> Result<()> {
         }
     }
     for spec in &o.volume_add {
-        let mounts = resolve_mounts(std::slice::from_ref(spec))?;
+        let mounts = resolve_mounts(std::slice::from_ref(spec), &c.namespace)?;
         for m in mounts {
             if c.mounts.iter().any(|x| x.target == m.target) {
                 return Err(Error::Invalid(format!(

@@ -3917,3 +3917,15 @@ msgstr "AVISO: rede '{name}': o manifesto pede {want} mas ela existe como {have}
 
 msgid "appliance"
 msgstr "appliance"
+# sharevolume por namespace + migrate (bloco B2)
+msgid "would migrate sharevolume/{name} to namespace default"
+msgstr "migraria o sharevolume/{name} para a namespace default"
+
+msgid "sharevolume/{name}: migrated to namespace default"
+msgstr "sharevolume/{name}: migrado para a namespace default"
+
+msgid "nothing to migrate"
+msgstr "nada a migrar"
+
+msgid "sharevolume '{name}': a namespaced record already exists — left alone, resolve it by hand"
+msgstr "sharevolume '{name}': já existe um registo com namespace — deixado como está, resolve-o à mão"

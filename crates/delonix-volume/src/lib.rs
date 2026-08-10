@@ -185,6 +185,38 @@ impl VolumeStore {
         Ok(Self { root })
     }
 
+    /// Sub-tree reserved for namespace-scoped volumes: `<root>/volumes/.ns/`.
+    ///
+    /// `.ns` cannot collide with a volume, ever — `valid_name` refuses a leading `.`. That
+    /// is the whole reason for the odd-looking name: every other separator that came to
+    /// mind (`-`, `_`, `.` inside the name) is a LEGAL character in a volume name, so any
+    /// `<ns><sep><name>` encoding is ambiguous. It is the same collision class the compose
+    /// project names already had to solve, and a directory boundary sidesteps it instead of
+    /// encoding around it.
+    const NS_SUBTREE: &'static str = ".ns";
+
+    /// A store rooted at ONE namespace's sub-tree, so every existing method
+    /// (`register_external`, `inspect`, `remove`, quotas) works on it unchanged.
+    pub fn open_scoped(base: impl Into<PathBuf>, namespace: &str) -> Result<Self> {
+        let root = base
+            .into()
+            .join("volumes")
+            .join(Self::NS_SUBTREE)
+            .join(namespace);
+        fs::create_dir_all(&root)?;
+        Ok(Self { root })
+    }
+
+    /// Whether a namespace-scoped volume of this name exists, seen from the UNSCOPED store.
+    fn scoped_exists(&self, namespace: &str, name: &str) -> bool {
+        self.root
+            .join(Self::NS_SUBTREE)
+            .join(namespace)
+            .join(name)
+            .join("meta.json")
+            .exists()
+    }
+
     fn dir(&self, name: &str) -> PathBuf {
         self.root.join(name)
     }
@@ -806,10 +838,51 @@ impl VolumeStore {
         Ok(vol)
     }
 
-    /// Translates a `-v` specification into a [`Mount`].
+    /// `resolve_spec` for a workload in `namespace`.
+    ///
+    /// A named volume resolves in this order, and the order is the whole point:
+    ///
+    /// 1. the namespace's own volume (`.ns/<namespace>/<name>`) — what a `ShareVolume`
+    ///    declared in that namespace registers, so `-v db:/data` in `teamA` reaches
+    ///    `teamA`'s `db` and never `teamB`'s;
+    /// 2. the global volume (`<name>`) — every plain `delonix volumes create`, and every
+    ///    share that predates the scoping. This is the "two read paths" the migration
+    ///    decision asked for: nothing that exists today stops resolving.
+    ///
+    /// **If BOTH exist it REFUSES.** Two different volumes answer to the same `-v db` and
+    /// picking either one silently is how a workload ends up writing into another
+    /// namespace's data. That case is rare, always the result of a half-done migration, and
+    /// the error names the way out.
+    ///
+    /// On-demand creation (the Docker-like behaviour of `-v newname:/x`) stays GLOBAL: a
+    /// name nobody declared is not a namespaced share, and creating it scoped would make
+    /// the same command produce a different volume per namespace by accident.
+    pub fn resolve_spec_in(&self, spec: &str, namespace: &str) -> Result<Mount> {
+        let src = spec.split(':').next().unwrap_or_default();
+        let named = !src.is_empty() && !src.starts_with('/') && !src.starts_with('.');
+        if named && self.scoped_exists(namespace, src) {
+            if self.meta_path(src).exists() {
+                return Err(Error::Invalid(format!(
+                    "volume {src:?} is ambiguous in namespace {namespace:?}: a namespaced \
+                     volume and a global one of the same name both exist. Rename one, or \
+                     finish the migration with `delonix sharevolume migrate`"
+                )));
+            }
+            let scoped = Self {
+                root: self.root.join(Self::NS_SUBTREE).join(namespace),
+            };
+            return scoped.resolve_spec(spec);
+        }
+        self.resolve_spec(spec)
+    }
+
+    /// Translates a `-v` specification into a [`Mount`], with NO namespace scoping.
     ///
     /// - `name:/target[:ro]` → named volume (created if it does not exist);
     /// - `/host:/target[:ro]` (or `./rel`) → *bind mount* of a host path.
+    ///
+    /// Prefer [`Self::resolve_spec_in`] for anything that runs on behalf of a workload:
+    /// this one cannot see a namespaced `ShareVolume`.
     pub fn resolve_spec(&self, spec: &str) -> Result<Mount> {
         let parts: Vec<&str> = spec.split(':').collect();
         if parts.len() < 2 || parts.len() > 3 {
