@@ -93,6 +93,12 @@ jobs:
       - name: Instala toolchain fixada
         run: rustup show
       - run: cargo build --release --locked -p delonix-runtime-bin
+      - name: Dependências do gerador
+        # `gen.py`'s `c4_page`/`architecture_page` render ARCHITECTURE.md with
+        # the `markdown` module. Without it the generator dies with
+        # ModuleNotFoundError and this job fails on a missing dependency rather
+        # than on anything about the docs — which is what happened here.
+        run: python3 -m pip install --break-system-packages markdown
       - name: Regenera o site
         run: python3 docs/gen.py
       - name: O site publicado tem de ser o gerado
