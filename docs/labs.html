@@ -432,7 +432,7 @@ delonix vm ls
 #   delonix vm build --network -t minha-base:1.0 .
 
 # Arrancar a partir dela
-delonix vm create teste --disk-image minha-base:1.0 --ssh-key @~/.ssh/id_ed25519.pub
+delonix vm create teste --disk minha-base:1.0 --ssh-key @~/.ssh/id_ed25519.pub
 
 # …ou a partir de um qcow2 publicado por ti, sem passar pelo store
 delonix vm create outra --url-img https://o-teu-bucket/imagem.qcow2
@@ -461,7 +461,7 @@ delonix vm ls
 #   delonix vm build --network -t my-base:1.0 .
 
 # Boot from it
-delonix vm create test --disk-image my-base:1.0 --ssh-key @~/.ssh/id_ed25519.pub
+delonix vm create test --disk my-base:1.0 --ssh-key @~/.ssh/id_ed25519.pub
 
 # …or from a qcow2 you published yourself, bypassing the store
 delonix vm create other --url-img https://your-bucket/image.qcow2

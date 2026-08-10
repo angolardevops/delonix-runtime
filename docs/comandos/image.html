@@ -448,7 +448,7 @@ Options:
           
   -h, --help
           Print help</code></pre></div>
-<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Construir a imagem VM dourada (descarrega Ubuntu, valida SHA256SUMS, virt-customize)</div><div class='cap lang-en'>Build the golden VM image (downloads Ubuntu, verifies SHA256SUMS, virt-customize)</div><pre><code>delonix image --vm build --name k8s-golden --k8s-version 1.34</code></pre></div>
+<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Construir a imagem VM dourada (descarrega Ubuntu, valida SHA256SUMS, virt-customize)</div><div class='cap lang-en'>Build the golden VM image (downloads Ubuntu, verifies SHA256SUMS, virt-customize)</div><pre><code>delonix image --vm build -t k8s-golden --k8s-version 1.34</code></pre></div>
 <h2 id='apply'><code>image apply</code></h2>
 <p class='intro'>Apply the <code>kind: Image</code> documents of a manifest (<code>pull</code> idempotent by reference; <code>build</code> rebuilds and replaces the tag on each apply)</p>
 <div class='help'><pre><code>Usage: delonix image apply [OPTIONS]

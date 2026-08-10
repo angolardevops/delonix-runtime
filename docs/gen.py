@@ -366,7 +366,7 @@ image + kubeadm/kubelet/kubectl + <code>delonix-cri</code> — a base do <code>d
             ]},
             "build": {"examples": [
                 ("Construir a imagem VM dourada (descarrega Ubuntu, valida SHA256SUMS, virt-customize)",
-                 "delonix image --vm build --name k8s-golden --k8s-version 1.34"),
+                 "delonix image --vm build -t k8s-golden --k8s-version 1.34"),
             ]},
             "apply": {"examples": [("", "delonix image apply -f delonix-manifest.yaml")]},
         },
@@ -486,8 +486,10 @@ automaticamente. É a camada que o <code>delonix cluster kubeadm</code> usa para
                 ('Snapshot para um script ou para o Grafana',
                  "delonix vm dash --json | jq '.tiles'")]},
             "create": {"examples": [
-                ("VM a partir da imagem dourada, com chave SSH",
-                 "delonix vm create --name node1 --image k8s-golden --cpus 2 --memory 4096 --ssh-key @~/.ssh/id_ed25519.pub"),
+                ("VM a partir da imagem dourada, com chave SSH — o nome é POSICIONAL",
+                 "delonix vm create node1 --disk k8s-golden --vcpus 2 --memory 4G --ssh-key @~/.ssh/id_ed25519.pub"),
+                ("Sem `--disk`, usa a imagem VM dourada local — se houver exactamente uma",
+                 "delonix vm create node1 --ssh-key @~/.ssh/id_ed25519.pub"),
             ]},
             "ls": {"examples": [("", "delonix vm ls")]},
             "status": {"examples": [("Reconcilia liveness/IP com o backend", "delonix vm status node1")]},
@@ -1490,13 +1492,37 @@ guessing which of the two you meant, and that the message points at the specific
     },
     "pod": {
         "lab": {"pt": """<p>Cria um pod de 2 containers e confirma que partilham IP —
-alcançam-se por <code>localhost</code>, como no Kubernetes.</p>
-<pre><code>delonix pod create web-pod --container nginx --container redis
+alcançam-se por <code>localhost</code>, como no Kubernetes. Um pod cria-se sempre a
+partir de um manifesto: os membros, as portas e os volumes não cabem em flags sem
+reinventar metade do <code>kind: Pod</code>.</p>
+<pre><code>cat &gt; web-pod.yaml &lt;&lt;'YAML'
+apiVersion: delonix.io/v1
+kind: Pod
+metadata: { name: web-pod }
+spec:
+  network: minha-rede
+  containers:
+    - { name: nginx, image: nginx:alpine }
+    - { name: redis, image: redis:7-alpine }
+YAML
+delonix pod create -f web-pod.yaml
 delonix pod describe web-pod
 delonix pod logs web-pod</code></pre>""",
                 "en": """<p>Create a 2-container pod and confirm they share an IP — reachable via
-<code>localhost</code> from each other, just like in Kubernetes.</p>
-<pre><code>delonix pod create web-pod --container nginx --container redis
+<code>localhost</code> from each other, just like in Kubernetes. A pod is always created
+from a manifest: its members, ports and volumes do not fit in flags without reinventing
+half of <code>kind: Pod</code>.</p>
+<pre><code>cat &gt; web-pod.yaml &lt;&lt;'YAML'
+apiVersion: delonix.io/v1
+kind: Pod
+metadata: { name: web-pod }
+spec:
+  network: my-net
+  containers:
+    - { name: nginx, image: nginx:alpine }
+    - { name: redis, image: redis:7-alpine }
+YAML
+delonix pod create -f web-pod.yaml
 delonix pod describe web-pod
 delonix pod logs web-pod</code></pre>"""},
         "challenge": {"pt": """<p>Escreve o MESMO pod como um <code>kind: Pod</code> num
@@ -1740,12 +1766,12 @@ web 9999</code> (with NO proto given) should only open port 9999. Confirm with
     "egress": {
         "lab": {"pt": """<p>Nega tudo excepto DNS e um destino específico — a política
 <code>allowlist</code> por rede.</p>
-<pre><code>delonix net egress policy minha-rede allowlist --allow 1.1.1.1/32
+<pre><code>delonix net egress net minha-rede allowlist --to 1.1.1.1/32
 delonix container run --rm --net minha-rede alpine wget -qO- https://1.1.1.1
 delonix container run --rm --net minha-rede alpine wget -qO- https://example.com</code></pre>""",
                 "en": """<p>Deny everything except DNS and one specific destination — the
 per-network <code>allowlist</code> policy.</p>
-<pre><code>delonix net egress policy my-net allowlist --allow 1.1.1.1/32
+<pre><code>delonix net egress net my-net allowlist --to 1.1.1.1/32
 delonix container run --rm --net my-net alpine wget -qO- https://1.1.1.1
 delonix container run --rm --net my-net alpine wget -qO- https://example.com</code></pre>"""},
         "challenge": {"pt": """<p>Abre uma ligação de saída de longa duração e só DEPOIS aplica
@@ -2120,7 +2146,10 @@ EXAMPLES_EN = {
     ],
     ("vm", "init"): ["Project with a manifest, ready to run", "Scaffold a VMfile to BUILD your image"],
     ("vm", "dash"): ["VMs-only dashboard (htop-style; `q` to quit)", "Snapshot for a script or for Grafana"],
-    ("vm", "create"): ["VM from the golden image, with an SSH key"],
+    ("vm", "create"): [
+        "VM from the golden image, with an SSH key — the name is POSITIONAL",
+        "With no `--disk`, it uses the local golden VM image — if there is exactly one",
+    ],
     ("vm", "ls"): [""],
     ("vm", "status"): ["Reconciles liveness/IP with the backend"],
     ("vm", "stop"): [""],
@@ -3880,7 +3909,7 @@ delonix vm ls
 #   delonix vm build --network -t minha-base:1.0 .
 
 # Arrancar a partir dela
-delonix vm create teste --disk-image minha-base:1.0 --ssh-key @~/.ssh/id_ed25519.pub
+delonix vm create teste --disk minha-base:1.0 --ssh-key @~/.ssh/id_ed25519.pub
 
 # …ou a partir de um qcow2 publicado por ti, sem passar pelo store
 delonix vm create outra --url-img https://o-teu-bucket/imagem.qcow2
@@ -4083,7 +4112,7 @@ delonix vm ls
 #   delonix vm build --network -t my-base:1.0 .
 
 # Boot from it
-delonix vm create test --disk-image my-base:1.0 --ssh-key @~/.ssh/id_ed25519.pub
+delonix vm create test --disk my-base:1.0 --ssh-key @~/.ssh/id_ed25519.pub
 
 # …or from a qcow2 you published yourself, bypassing the store
 delonix vm create other --url-img https://your-bucket/image.qcow2
