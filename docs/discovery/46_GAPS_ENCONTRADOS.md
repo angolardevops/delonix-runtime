@@ -391,6 +391,32 @@ comando: é a leitura do registo, não uma medição por recurso.)
 ocorrência. O critério de aceitação de A2 («o `describe` mostra sempre a namespace
 efectiva») falha hoje no recurso mais usado dos dois.
 
+### 5.1 O que foi feito, e a decisão de fundo que ficou
+
+**`container describe` passou a imprimir a namespace, sempre** — `default` incluído. Um
+campo que desaparece quando tem o valor de omissão obriga quem lê a adivinhar se o recurso
+não tem namespace ou se ninguém lha atribuiu.
+
+**O silêncio dos restantes Kinds passou a aviso.** `manifest::load` avisa quando
+`metadata.namespace` é escrito num Kind que não o honra, nomeando os que honram. O aviso
+é emitido **antes da expansão do `Stack`**, de propósito: um Stack namespaced propaga a
+namespace a todos os filhos, e avisar depois disparava uma linha por filho para um campo
+que o utilizador nunca escreveu ali. Confirmado ao vivo: um `kind: Network` de topo com
+namespace avisa (EN e PT), um Stack namespaced com três filhos avisa **zero** vezes e a
+namespace chega aos três.
+
+**Decisão registada — namespace é isolamento de rede, não espaço de nomes.** Só
+`Container`/`Pod`/`Vm` a honram porque só um workload com endereço participa nas regras
+que a implementam (`@dlxns_<ns>` + o drop cross-namespace). Dar namespace a `Volume`/
+`Storage`/`Secret` significaria **escopo de NOMEAÇÃO** — dois namespaces poderem ter um
+volume `db` — e isso é uma mudança de chave dos stores com pergunta de migração própria.
+É exactamente o item `Storage`/`ShareVolume` do ciclo, que está marcado como decisão a
+tomar contigo; não foi antecipado aqui.
+
+**Já satisfeito, verificado no código:** os três Kinds que a honram persistem-na
+(`Container.namespace` e `Vm.namespace` com `#[serde(default)]`; o pod deriva-a dos
+registos dos membros) e reconstroem-na no `start` e na recuperação pós-respawn.
+
 ---
 
 ## 6. Estado do host no fim

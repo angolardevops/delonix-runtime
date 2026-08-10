@@ -3664,3 +3664,7 @@ msgstr "TECTO, ao nível do nó, das capabilities de um container, seja o que fo
 
 msgid "What to do with a pod that asks for more than `--cap-ceiling`: `reject` (default, fails CreateContainer so the kubelet reports it) or `clamp` (reduce to the ceiling and log a warning). Overrides `$DELONIX_CRI_CAP_CEILING_MODE`."
 msgstr "O que fazer a um pod que pede mais do que o `--cap-ceiling`: `reject` (omissão, faz o CreateContainer falhar para o kubelet o reportar) ou `clamp` (corta ao tecto e regista um aviso). Prevalece sobre `$DELONIX_CRI_CAP_CEILING_MODE`."
+
+# aviso de namespace sem efeito (bloco A2)
+msgid "{kind} '{name}': metadata.namespace has no effect — only Container, Pod and Vm are namespaced (it scopes network isolation, not naming)"
+msgstr "{kind} '{name}': o metadata.namespace não tem efeito — só Container, Pod e Vm têm namespace (delimita o isolamento de rede, não a nomeação)"
