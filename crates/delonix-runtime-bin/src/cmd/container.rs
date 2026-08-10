@@ -4934,6 +4934,11 @@ fn describe_one(c: &Container) {
     let mut d = output::Describe::new();
     d.field("Name", &c.name);
     d.field("ID", &c.id);
+    // Always shown, `default` included. It decides who can reach this container (the
+    // `@dlxns_<ns>` accept + the cross-namespace `ct new` drop), and `vm describe` has
+    // printed it since namespaces landed — omitting it here made the isolation boundary
+    // invisible on the resource that uses it most.
+    d.field("Namespace", &c.namespace);
     d.field("Image", &c.image);
     d.field("Command", c.command.join(" "));
     d.field_opt("Workdir", c.workdir.as_deref());
