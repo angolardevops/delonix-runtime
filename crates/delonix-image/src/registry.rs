@@ -508,18 +508,34 @@ pub struct RegistryClient {
 }
 
 /// Builds a [`RegistryClient`] for `reference` (reuses credentials and auth).
+/// HTTP client for transfers whose SIZE IS NOT KNOWN IN ADVANCE — image
+/// layers and VM artifacts.
+///
+/// `reqwest`'s `timeout()` bounds the WHOLE request, body included, so a fixed
+/// value is really a bandwidth requirement in disguise: at 600s, anything that
+/// cannot move in ten minutes fails no matter how healthy the connection is.
+/// Measured here, publishing VM images over a ~1.3 MB/s link: 646 MiB
+/// succeeded, and 1.06, 1.22 and 1.45 GiB all failed — the artifact was fine,
+/// the clock ran out.
+///
+/// What we want to catch is a connection that never opens, not one that is
+/// merely long. `reqwest`'s BLOCKING builder has no `read_timeout` (that is
+/// async-only in this version), so the pair available is a short
+/// `connect_timeout` plus a total ceiling generous enough that it only ever
+/// fires on something genuinely stuck: four hours covers the 8 GiB blob cap
+/// even on a link slower than the one measured above.
+fn transfer_client() -> Result<reqwest::blocking::Client> {
+    reqwest::blocking::Client::builder()
+        .user_agent("delonix/0.1")
+        .connect_timeout(Duration::from_secs(30))
+        .timeout(Duration::from_secs(4 * 60 * 60))
+        .build()
+        .map_err(reg_err)
+}
+
 pub fn registry_client(store: &ImageStore, reference: &str) -> Result<RegistryClient> {
     let (host, repo, refr) = parse_reference(reference);
-    let http = reqwest::blocking::Client::builder()
-        .user_agent("delonix/0.1")
-        // 600s (was 120s) — aligned with push_to_registry/push_oci_artifact:
-        // blobs of large images (e.g. kindest/node, several hundred MB)
-        // do not fit in a 120s deadline; `reqwest` cuts the body read
-        // halfway, reported as "error decoding response body" (it is not a
-        // parsing error — it is an interrupted stream read).
-        .timeout(Duration::from_secs(600))
-        .build()
-        .map_err(reg_err)?;
+    let http = transfer_client()?;
     let creds = crate::auth::lookup(store.root(), &host);
     Ok(RegistryClient {
         inner: Client {
@@ -736,12 +752,7 @@ pub fn pull_from_registry_with_creds_full(
     progress: Option<PullProgressCb>,
 ) -> Result<Image> {
     let (host, repo, refr) = parse_reference(reference);
-    let http = reqwest::blocking::Client::builder()
-        .user_agent("delonix/0.1")
-        // 600s — see the same comment in `registry_client`.
-        .timeout(Duration::from_secs(600))
-        .build()
-        .map_err(reg_err)?;
+    let http = transfer_client()?;
     let creds = creds_override.or_else(|| crate::auth::lookup(store.root(), &host));
     let mut c = Client {
         http,
@@ -1012,11 +1023,7 @@ pub fn push_oci_artifact_with_annotations(
     annotations: &BTreeMap<String, String>,
 ) -> Result<String> {
     let (host, repo, refr) = parse_reference(target);
-    let http = reqwest::blocking::Client::builder()
-        .user_agent("delonix/0.1")
-        .timeout(Duration::from_secs(600))
-        .build()
-        .map_err(reg_err)?;
+    let http = transfer_client()?;
     let creds = crate::auth::lookup(root, &host);
     let mut c = Client {
         http,
@@ -1077,11 +1084,7 @@ pub fn push_oci_artifact_with_annotations(
 /// only used for `crate::auth::lookup`.
 pub fn list_remote_tags(root: &std::path::Path, source: &str) -> Result<Vec<String>> {
     let (host, repo, _refr) = parse_reference(source);
-    let http = reqwest::blocking::Client::builder()
-        .user_agent("delonix/0.1")
-        .timeout(Duration::from_secs(600))
-        .build()
-        .map_err(reg_err)?;
+    let http = transfer_client()?;
     let creds = crate::auth::lookup(root, &host);
     let mut c = Client {
         http,
@@ -1179,11 +1182,7 @@ pub fn pull_oci_artifact_with_meta(
     progress: Option<&dyn Fn(u64, Option<u64>)>,
 ) -> Result<(Vec<u8>, BTreeMap<String, String>)> {
     let (host, repo, refr) = parse_reference(source);
-    let http = reqwest::blocking::Client::builder()
-        .user_agent("delonix/0.1")
-        .timeout(Duration::from_secs(600))
-        .build()
-        .map_err(reg_err)?;
+    let http = transfer_client()?;
     let creds = crate::auth::lookup(root, &host);
     let mut c = Client {
         http,
