@@ -6,12 +6,62 @@
 //! already applied before the error STAYS applied (there is no rollback) — same
 //! "ensure present" semantics documented in `cmd::manifest`.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use clap::Subcommand;
 use delonix_runtime_core::Result;
+use serde::Deserialize;
 
 use super::manifest;
+use super::reconcile::{self, Action, Change};
+
+/// The stack that owns the resources of a manifest, in order of precedence:
+/// `--name`, the `metadata.name` of a `kind: Stack` in the file, then the
+/// manifest's parent DIRECTORY name.
+///
+/// The directory is **canonicalized first**, and that is not a detail. `compose`
+/// shipped exactly this bug: `default_project_name` collapsed every project to
+/// `"default"` for a relative path, so `compose down -v` in one project could
+/// delete another project's volume. Worse, the test that should have caught it
+/// encoded the bug — it only ever passed ABSOLUTE paths, while the real
+/// invocation is always relative (`-f delonix-manifest.yaml`).
+///
+/// Falls back to `default` only when there is genuinely no directory name to
+/// take (the filesystem root), never as the result of a path shape.
+pub(crate) fn stack_name(path: &Path, explicit: Option<&str>) -> String {
+    if let Some(n) = explicit.filter(|n| !n.trim().is_empty()) {
+        return n.trim().to_string();
+    }
+    if let Some(n) = stack_kind_name(path) {
+        return n;
+    }
+    std::fs::canonicalize(path)
+        .ok()
+        .and_then(|p| {
+            p.parent()
+                .and_then(|d| d.file_name())
+                .and_then(|d| d.to_str())
+                .map(String::from)
+        })
+        .unwrap_or_else(|| "default".to_string())
+}
+
+/// The `metadata.name` of a `kind: Stack` document, read from the RAW file.
+///
+/// It has to be read raw: `manifest::load` expands a Stack into its children and
+/// the Stack document itself does not survive, so by the time anything else sees
+/// the manifest the name is gone.
+fn stack_kind_name(path: &Path) -> Option<String> {
+    let text = std::fs::read_to_string(path).ok()?;
+    for doc in serde_yaml::Deserializer::from_str(&text) {
+        let v = serde_yaml::Value::deserialize(doc).ok()?;
+        let kind = v.get("kind")?.as_str().unwrap_or_default();
+        if manifest::canonical_kind(kind) == "Stack" {
+            return v.get("metadata")?.get("name")?.as_str().map(str::to_string);
+        }
+    }
+    None
+}
 
 #[derive(Subcommand)]
 pub enum StackCmd {
@@ -47,6 +97,36 @@ pub enum StackCmd {
         /// expanded and Kinds canonicalized, so you see exactly what WOULD run.
         #[arg(long = "dry-run")]
         dry_run: bool,
+        /// Authorize DESTROYING and recreating a resource whose change does not
+        /// converge live: `--replace <Kind>/<name>` (repeatable), or
+        /// `--replace all`. Without it, `apply` refuses and changes nothing.
+        #[arg(long = "replace", value_name = "KIND/NAME")]
+        replace: Vec<String>,
+    },
+    /// Shows what an `apply` WOULD change, without changing anything.
+    ///
+    /// Compares the manifest against the machine and against the last spec this
+    /// stack applied (a three-way diff, so a field a human set by hand is left
+    /// alone while a field removed from the manifest is reverted). With the
+    /// manifest unchanged, whatever it prints IS drift.
+    Plan {
+        #[arg(short = 'f', long = "file")]
+        file: Option<PathBuf>,
+        /// Stack name (owner of the resources). Default: a `kind: Stack`'s name,
+        /// else the manifest's directory.
+        #[arg(long)]
+        name: Option<String>,
+        /// Output format: `table` (default) or `json` (ADR-0005).
+        #[arg(short = 'o', long = "output", value_enum, default_value_t)]
+        output: super::output::OutputFormat,
+        /// Exit 2 when there are changes (0 = none, 1 = error) — the
+        /// `terraform plan -detailed-exitcode` contract, for a CI drift gate.
+        #[arg(long = "detailed-exitcode")]
+        detailed_exitcode: bool,
+        /// Print WHICH fields the plan compares, per Kind, and exit. Answers
+        /// "why is my change not showing up?" without reading the source.
+        #[arg(long = "fields")]
+        fields: bool,
     },
     /// Stack detail in `kubectl describe` style: each resource DECLARED in the
     /// manifest and whether or not it is present on the machine.
@@ -105,16 +185,27 @@ pub fn run(action: StackCmd) -> Result<()> {
     match action {
         // Handled at the top of `run` (it does a `return`).
         StackCmd::Init { .. } => unreachable!("handled above"),
-        StackCmd::Apply { file, dry_run } => {
+        StackCmd::Apply {
+            file,
+            dry_run,
+            replace,
+        } => {
             if dry_run {
                 let path = manifest::resolve_path(file)?;
                 let docs = manifest::load(&path)?;
                 print!("{}", manifest::render_with_defaults(&docs)?);
                 Ok(())
             } else {
-                apply(file)
+                apply(file, replace)
             }
         }
+        StackCmd::Plan {
+            file,
+            name,
+            output,
+            detailed_exitcode,
+            fields,
+        } => plan_cmd(file, name, output, detailed_exitcode, fields),
         StackCmd::Ls { file } => ls(file),
         StackCmd::Describe { file } => describe(file),
         StackCmd::Validate { file } => validate(file),
@@ -144,6 +235,256 @@ const KINDS: [&str; 13] = [
 /// (kind→name→presence→status), reusing exactly the resolution of
 /// `describe` (`presence` queries the real stores; the stack has no registry
 /// of its own, by design — see CLAUDE.md).
+/// The Kinds that CONVERGE in this version — a changed field really is applied.
+/// Everything else in [`KINDS`] stays "ensure present" and the plan says so out
+/// loud (`Action::NotConverged`) instead of leaving the resource out. A plan
+/// that omits a resource reads as «no changes», which is the exact dishonesty
+/// this whole feature exists to remove.
+pub(crate) const CONVERGING_KINDS: [&str; 4] = ["Network", "Volume", "Container", "Pod"];
+
+/// Everything the manifest asks for, in the reconciler's comparable form.
+fn desired_of(docs: &[manifest::ManifestDoc]) -> Result<Vec<reconcile::Desired>> {
+    let mut out = Vec::new();
+    for kind in KINDS {
+        for doc in manifest::of_kind(docs, kind) {
+            out.push(match kind {
+                "Container" => super::container::desired(doc)?,
+                "Volume" => super::volume::desired(doc)?,
+                "Network" => super::network::desired(doc)?,
+                "Pod" => super::pod::desired(doc)?,
+                _ => reconcile::Desired {
+                    kind: kind.to_string(),
+                    name: doc.metadata.name.clone(),
+                    fields: Default::default(),
+                    converges: false,
+                },
+            });
+        }
+    }
+    Ok(out)
+}
+
+/// Everything on the machine, in the same form.
+///
+/// The converging Kinds are enumerated in full (that is what makes pruning
+/// possible). The others are only probed for the names the manifest declares —
+/// there is no way to enumerate, say, every HTTPRoute with an owner, so they can
+/// never be prune candidates, and pretending otherwise would risk deleting
+/// something nobody claimed.
+fn actual_of(docs: &[manifest::ManifestDoc]) -> Result<Vec<reconcile::Actual>> {
+    let mut out = super::container::actual()?;
+    out.extend(super::volume::actual()?);
+    out.extend(super::network::actual()?);
+    out.extend(super::pod::actual()?);
+    let (_, cstore) = super::util::open_stores()?;
+    let containers = cstore.list().unwrap_or_default();
+    for kind in KINDS {
+        if CONVERGING_KINDS.contains(&kind) {
+            continue;
+        }
+        for doc in manifest::of_kind(docs, kind) {
+            let (present, _) = presence(kind, &doc.metadata.name, &containers);
+            if present == "yes" {
+                out.push(reconcile::Actual {
+                    kind: kind.to_string(),
+                    name: doc.metadata.name.clone(),
+                    fields: Default::default(),
+                    owner: None,
+                    last_applied: None,
+                });
+            }
+        }
+    }
+    Ok(out)
+}
+
+/// Reads both sides and decides. The decision itself is
+/// [`reconcile::plan`] — pure, and tested as data.
+pub(crate) fn build_plan(docs: &[manifest::ManifestDoc], stack: &str) -> Result<Vec<Change>> {
+    Ok(reconcile::plan(
+        &desired_of(docs)?,
+        &actual_of(docs)?,
+        stack,
+    ))
+}
+
+/// Which fields the plan compares, per converging Kind.
+///
+/// This exists because the honest answer to «why did my `env:` change not show
+/// up in the plan?» is a list, and making the user read the source for it is the
+/// opposite of the goal. The comparable set is deliberately conservative: a
+/// field whose two sides normalize differently would show as a difference on
+/// EVERY plan, and a plan that always reports drift is worth less than no plan.
+fn print_compared_fields() {
+    println!(
+        "{}",
+        super::po::t("Fields compared by `stack plan`, per Kind:")
+    );
+    println!();
+    let mut t = super::output::Table::new(&["KIND", "FIELDS"]);
+    for (kind, fields) in [
+        ("Container", super::container::RECONCILED_CONTAINER_FIELDS),
+        ("Volume", super::volume::RECONCILED_VOLUME_FIELDS),
+        ("Network", super::network::RECONCILED_NETWORK_FIELDS),
+        ("Pod", super::pod::RECONCILED_POD_FIELDS),
+    ] {
+        t.row(vec![kind.to_string(), fields.join(", ")]);
+    }
+    t.print();
+    println!();
+    println!(
+        "{}",
+        super::po::tf(
+            "Every other Kind ({kinds}) is ensure-present: `apply` creates it if missing and \
+             never updates it.",
+            &[(
+                "kinds",
+                &KINDS
+                    .iter()
+                    .filter(|k| !CONVERGING_KINDS.contains(k))
+                    .copied()
+                    .collect::<Vec<_>>()
+                    .join(", "),
+            )],
+        )
+    );
+    println!(
+        "{}",
+        super::po::t(
+            "Not compared on a Container, and why: `env` and `command` (the record holds them \
+             merged with the image's), `user` (the record stores the resolved uid), `labels` \
+             (the engine adds its own)."
+        )
+    );
+}
+
+fn plan_cmd(
+    file: Option<PathBuf>,
+    name: Option<String>,
+    output: super::output::OutputFormat,
+    detailed_exitcode: bool,
+    fields: bool,
+) -> Result<()> {
+    if fields {
+        print_compared_fields();
+        return Ok(());
+    }
+    let path = manifest::resolve_path(file)?;
+    let docs = manifest::load(&path)?;
+    let stack = stack_name(&path, name.as_deref());
+    let changes = build_plan(&docs, &stack)?;
+    let any = changes.iter().any(|c| c.changed);
+    match output {
+        super::output::OutputFormat::Json => super::output::print_json(&changes)?,
+        super::output::OutputFormat::Table => render_plan(&path, &stack, &changes),
+    }
+    // `terraform plan -detailed-exitcode`'s contract, which is what anyone
+    // wiring this into CI already has in their fingers: 0 = nothing to do,
+    // 2 = there are changes, 1 = the command failed. Opt-in, so the plain
+    // `plan` keeps returning 0 and no existing script changes meaning.
+    if detailed_exitcode && any {
+        std::process::exit(2);
+    }
+    Ok(())
+}
+
+/// The localized justification for a change, composed from the STRUCTURED
+/// fields — never by translating `Change::reason`, which stays English because
+/// it is part of the `-o json` payload (ADR-0005: machine-readable output does
+/// not change with the locale).
+fn explain(c: &Change) -> Option<String> {
+    match c.action {
+        Action::Replace => Some(super::po::tf(
+            "does not converge live: {fields}",
+            &[("fields", &c.cold_fields.join(", "))],
+        )),
+        Action::Conflict => Some(super::po::tf(
+            "owned by the stack '{owner}'",
+            &[("owner", c.owner.as_deref().unwrap_or("?"))],
+        )),
+        Action::Adopt => {
+            Some(super::po::t("exists and belongs to no stack — will be taken over").to_string())
+        }
+        Action::Delete => Some(super::po::t("no longer declared in the manifest").to_string()),
+        Action::NotConverged => {
+            Some(super::po::t("this Kind is ensure-present in this version").to_string())
+        }
+        _ => None,
+    }
+}
+
+/// The human rendering of a plan.
+fn render_plan(path: &Path, stack: &str, changes: &[Change]) {
+    println!(
+        "{}",
+        super::po::tf(
+            "Plan for stack \"{stack}\"  (manifest: {path})",
+            &[("stack", stack), ("path", &path.display().to_string())],
+        )
+    );
+    println!();
+    if changes.is_empty() {
+        println!("  {}", super::po::t("the manifest declares nothing"));
+        return;
+    }
+    for c in changes {
+        let head = format!("  {:<3} {}/{}", c.action.marker(), c.kind, c.name);
+        match explain(c) {
+            Some(r) => println!("{head}  — {r}"),
+            None => println!("{head}"),
+        }
+        for d in &c.diffs {
+            // `∅` for absent on either side: an empty string and «the field is
+            // not there» are different facts, and a diff that renders them the
+            // same sends the reader looking for a change that is not there.
+            let from = d.from.as_deref().unwrap_or("∅");
+            let to = d.to.as_deref().unwrap_or("∅");
+            println!("        {}: {from} → {to}", d.field);
+        }
+    }
+    println!();
+    let s = reconcile::summary(changes);
+    // The counter labels are translated for the human table; the JSON keeps the
+    // stable `snake_case` keys (ADR-0005 — field names never change with the
+    // locale, or every consumer in another language breaks).
+    let parts: Vec<String> = s
+        .iter()
+        .map(|(k, n)| {
+            let label = match *k {
+                "create" => super::po::t("to create"),
+                "adopt" => super::po::t("to adopt"),
+                "update" => super::po::t("to update"),
+                "replace" => super::po::t("to replace"),
+                "unchanged" => super::po::t("unchanged"),
+                "delete" => super::po::t("to remove"),
+                "conflict" => super::po::t("in conflict"),
+                _ => super::po::t("not converging"),
+            };
+            format!("{n} {label}")
+        })
+        .collect();
+    println!("{}: {}", super::po::t("Summary"), parts.join(" · "));
+    if changes.iter().any(|c| c.action == Action::Replace) {
+        println!();
+        println!(
+            "{}",
+            super::po::t(
+                "a replace destroys and recreates the resource — `stack apply` refuses it \
+                 unless you pass `--replace`"
+            )
+        );
+    }
+    if changes.iter().any(|c| c.action == Action::NotConverged) {
+        println!(
+            "{}",
+            super::po::t(
+                "`!` = this Kind is ensure-present in this version: `apply` creates it if \
+                 missing and never updates it"
+            )
+        );
+    }
+}
+
 fn ls(file: Option<PathBuf>) -> Result<()> {
     let path = manifest::resolve_path(file)?;
     let docs = manifest::load(&path)?;
@@ -343,7 +684,49 @@ fn yes_no(b: bool) -> (String, String) {
     }
 }
 
-fn apply(file: Option<PathBuf>) -> Result<()> {
+/// Refuses, before touching anything, whatever this `apply` is not allowed to do.
+///
+/// Runs BEFORE the first creation on purpose. `apply` is fail-fast without
+/// rollback, so a stack containing one resource that needs recreating must not
+/// get half-applied and only then complain — the user would be left with a
+/// partially converged stack and a refusal, which is the worst of both.
+fn refuse_unallowed(changes: &[Change], replace: &[String]) -> Result<()> {
+    let allow_all = replace.iter().any(|r| r == "all");
+    let mut blocked = Vec::new();
+    for c in changes {
+        match c.action {
+            Action::Conflict => blocked.push(format!(
+                "{}/{}: {}",
+                c.kind,
+                c.name,
+                explain(c).unwrap_or_default()
+            )),
+            Action::Replace if !allow_all => {
+                let key = format!("{}/{}", c.kind, c.name);
+                if !replace.iter().any(|r| *r == key || *r == c.name) {
+                    blocked.push(super::po::tf(
+                        "{key}: {reason} — pass `--replace {key}` (or `--replace all`) to \
+                         destroy and recreate it",
+                        &[("key", &key), ("reason", &explain(c).unwrap_or_default())],
+                    ));
+                }
+            }
+            _ => {}
+        }
+    }
+    if blocked.is_empty() {
+        return Ok(());
+    }
+    for b in &blocked {
+        eprintln!("  ✗ {b}");
+    }
+    Err(delonix_runtime_core::Error::Invalid(super::po::tf(
+        "stack apply refused: {n} resource(s) need an explicit decision (nothing was changed)",
+        &[("n", &blocked.len().to_string())],
+    )))
+}
+
+fn apply(file: Option<PathBuf>, replace: Vec<String>) -> Result<()> {
     let path = manifest::resolve_path(file)?;
     let docs = manifest::load(&path)?;
     // Validate the graph BEFORE touching anything: the `apply` is fail-fast without
@@ -360,6 +743,18 @@ fn apply(file: Option<PathBuf>) -> Result<()> {
             &[("n", &issues.len().to_string())],
         )));
     }
+    // Decide EVERYTHING before changing anything, and refuse up front what this
+    // invocation is not allowed to do (a conflict, or a recreation nobody asked
+    // for). Only then start creating.
+    let stack = stack_name(&path, None);
+    let changes = build_plan(&docs, &stack)?;
+    refuse_unallowed(&changes, &replace)?;
+    // A resource that has to be recreated is destroyed FIRST, so the normal
+    // creation pass below builds it fresh. Doing it in this order means there is
+    // exactly one creation path (the one that has always existed), instead of a
+    // second "recreate" path that would drift away from it.
+    destroy_for_replace(&changes)?;
+
     // Secrets first: `Storage.passwordSecret` and `Container.secret` reference them.
     // `base` = the manifest folder, so `fromEnvFile` resolves next to it.
     let base = path.parent().unwrap_or_else(|| std::path::Path::new("."));
@@ -384,10 +779,122 @@ fn apply(file: Option<PathBuf>) -> Result<()> {
     // Tunnel LAST of all: its `localPort` is typically the HTTPRoute proxy's own
     // listening port (see `cmd::tunnel`'s module doc) — must already be up.
     super::tunnel::apply(&docs)?;
+
+    // Everything that exists is now created; converge what differs, and stamp
+    // ownership + the applied spec on all of it. The stamp is what makes the
+    // NEXT plan a three-way diff instead of a two-way one.
+    converge_and_stamp(&docs, &stack, &changes)?;
+
     // After creating everything, say what was created but will NOT work as it
     // appears without a host prerequisite (network mount in rootless, etc.) —
     // it is here, in the real creation flow, that the user needs to know it.
     print_missing_conditions(&docs);
+    Ok(())
+}
+
+/// Destroys the resources the plan marked for recreation (already authorized by
+/// [`refuse_unallowed`]), so the normal creation pass rebuilds them.
+fn destroy_for_replace(changes: &[Change]) -> Result<()> {
+    for c in changes.iter().filter(|c| c.action == Action::Replace) {
+        println!(
+            "{}",
+            super::po::tf(
+                "{kind}/{name}: recreating",
+                &[("kind", &c.kind), ("name", &c.name)],
+            )
+        );
+        match c.kind.as_str() {
+            "Container" => super::container::remove_for_replace(&c.name)?,
+            "Volume" => super::volume::remove_for_replace(&c.name)?,
+            "Network" => super::network::remove_for_replace(&c.name)?,
+            "Pod" => super::pod::remove_pod(&c.name, true)?,
+            other => {
+                return Err(delonix_runtime_core::Error::Invalid(format!(
+                    "{other}/{}: recreation is not implemented for this Kind",
+                    c.name
+                )))
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Applies the hot changes and records ownership + the applied spec.
+///
+/// The stamp is written for EVERY converging resource the manifest declares,
+/// including the ones that came out `NoOp` — a resource created by an older
+/// version has no stamp, and without one it would be re-adopted on every run and
+/// could never be pruned.
+fn converge_and_stamp(
+    docs: &[manifest::ManifestDoc],
+    stack: &str,
+    changes: &[Change],
+) -> Result<()> {
+    for c in changes {
+        if !CONVERGING_KINDS.contains(&c.kind.as_str()) {
+            continue;
+        }
+        if c.action == Action::Update {
+            println!(
+                "{}",
+                super::po::tf(
+                    "{kind}/{name}: updating {n} field(s) live",
+                    &[
+                        ("kind", &c.kind),
+                        ("name", &c.name),
+                        ("n", &c.diffs.len().to_string()),
+                    ],
+                )
+            );
+            match c.kind.as_str() {
+                "Container" => super::container::converge(&c.name, &c.diffs)?,
+                "Volume" => super::volume::converge(&c.name, &c.diffs)?,
+                "Network" => super::network::converge(&c.name, &c.diffs)?,
+                // A Pod has no hot field at all, so the planner can never emit
+                // `Update` for one. Saying so beats a silent no-op if that ever
+                // changes.
+                other => {
+                    return Err(delonix_runtime_core::Error::Invalid(format!(
+                        "{other}/{}: no live update path",
+                        c.name
+                    )))
+                }
+            }
+        }
+    }
+    // Re-derive the desired fields from the manifest (not from the plan): the
+    // stamp must record what was ASKED for, which is also what the next run will
+    // compare against.
+    for d in desired_of(docs)? {
+        if !CONVERGING_KINDS.contains(&d.kind.as_str()) {
+            continue;
+        }
+        let r = match d.kind.as_str() {
+            "Container" => super::container::stamp(&d.name, stack, &d.fields),
+            "Volume" => super::volume::stamp(&d.name, stack, &d.fields),
+            "Network" => super::network::stamp(&d.name, stack, &d.fields),
+            "Pod" => super::pod::stamp(&d.name, stack, &d.fields),
+            _ => Ok(()),
+        };
+        // A stamp that fails must not fail the apply — the resource IS created
+        // and working; what is lost is the ownership record. Say it loudly
+        // instead, because the consequence (it will be re-adopted next run, and
+        // never pruned) is invisible otherwise.
+        if let Err(e) = r {
+            eprintln!(
+                "{}",
+                super::po::tf(
+                    "WARNING: {kind}/{name}: could not record stack ownership ({err}) — it \
+                     will be adopted again on the next apply and `--prune` will not see it",
+                    &[
+                        ("kind", &d.kind),
+                        ("name", &d.name),
+                        ("err", &e.to_string())
+                    ],
+                )
+            );
+        }
+    }
     Ok(())
 }
 
@@ -1130,5 +1637,65 @@ spec: { image: nginx, network: prod-net }
         // prod-net is not in the manifest, but exists on the machine → resolved.
         let issues = validate_graph_with(&d, &["prod-net".to_string()], &[], &[], &[]);
         assert!(issues.is_empty(), "{issues:?}");
+    }
+
+    /// The trap that `compose` actually shipped: `default_project_name`
+    /// collapsed every project to `"default"` for a RELATIVE path, so a
+    /// `down -v` in one project could delete another project's volume. And the
+    /// test that should have caught it encoded the bug — it only ever passed
+    /// ABSOLUTE paths, while the real invocation is always relative
+    /// (`-f delonix-manifest.yaml`). So this one uses the relative form on
+    /// purpose, which is the only form that proves anything.
+    #[test]
+    fn stack_name_vem_do_directorio_mesmo_com_caminho_relativo() {
+        let base = std::env::temp_dir().join(format!("dlx-stackname-{}", std::process::id()));
+        let dir = base.join("o-meu-projecto");
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("delonix-manifest.yaml");
+        std::fs::write(
+            &file,
+            "apiVersion: delonix.io/v1
+kind: Volume
+metadata: { name: v }
+spec: {}
+",
+        )
+        .unwrap();
+
+        let orig = std::env::current_dir().unwrap();
+        std::env::set_current_dir(&dir).unwrap();
+        let relative = super::stack_name(std::path::Path::new("delonix-manifest.yaml"), None);
+        std::env::set_current_dir(orig).unwrap();
+        assert_eq!(
+            relative, "o-meu-projecto",
+            "a relative path must not collapse to a shared default name"
+        );
+
+        // Absolute gives the same answer — the two forms must not disagree.
+        assert_eq!(super::stack_name(&file, None), "o-meu-projecto");
+        // `--name` always wins, and blank is treated as absent rather than as
+        // an empty stack name that would own nothing.
+        assert_eq!(super::stack_name(&file, Some("outro")), "outro");
+        assert_eq!(super::stack_name(&file, Some("  ")), "o-meu-projecto");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// A `kind: Stack` names the stack, and it has to be read from the RAW file:
+    /// `manifest::load` expands a Stack into its children and the Stack document
+    /// itself does not survive the load.
+    #[test]
+    fn um_kind_stack_da_o_nome_e_ganha_ao_directorio() {
+        let dir = std::env::temp_dir().join(format!("dlx-stackkind-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("m.yaml");
+        std::fs::write(
+            &file,
+            "apiVersion: delonix.io/v1\nkind: Stack\nmetadata: { name: loja }\nspec:\n  volumes:\n    - name: v\n      spec: {}\n",
+        )
+        .unwrap();
+        assert_eq!(super::stack_name(&file, None), "loja");
+        // ...but an explicit `--name` still wins over it.
+        assert_eq!(super::stack_name(&file, Some("x")), "x");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

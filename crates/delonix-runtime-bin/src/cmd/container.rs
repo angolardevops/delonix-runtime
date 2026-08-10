@@ -25,7 +25,7 @@ use super::util::{effective_command, find, open_stores, prepare_rootfs, resolve_
 /// declarative command. Pass `detach: false` explicitly in the YAML if you want
 /// the synchronous behavior of the interactive `run`.
 #[derive(Debug, Deserialize, Serialize)]
-struct ContainerSpec {
+pub(crate) struct ContainerSpec {
     pub(crate) image: String,
     #[serde(default = "default_true")]
     pub(crate) detach: bool,
@@ -122,6 +122,370 @@ struct ContainerSpec {
     net_burst: Option<String>,
     #[serde(default, rename = "logDriver")]
     log_driver: Option<String>,
+}
+
+// ---------------------------------------------------------------------------
+// Declarative reconciliation — the comparable form of a container
+// ---------------------------------------------------------------------------
+
+/// The container fields the reconciler compares, and NOTHING else.
+///
+/// The set is deliberately conservative, because the failure mode of getting it
+/// wrong is worse than the gap of leaving a field out: a field whose two sides
+/// normalize differently shows as a difference on EVERY plan, forever, and a
+/// plan that always reports drift is worth less than no plan at all. Each entry
+/// below has a test proving that an unchanged manifest yields no diff.
+///
+/// **Deliberately NOT compared, with the reason** (documented, never silent —
+/// `stack plan` prints this list on request):
+///
+/// - `env` — the record holds the IMAGE's environment merged with the user's
+///   (`c.env = img.config.env` then the `-e` values appended). Comparing it
+///   against `spec.env` would report every image variable as an addition.
+/// - `command` / `entrypoint` — `compose_command` folds the image's
+///   ENTRYPOINT/CMD into the stored command, so the record is not what the
+///   manifest said even when nothing changed.
+/// - `user` — the manifest says `app`, the record stores the resolved
+///   `run_uid`/`run_gid`; mapping back needs the image's `/etc/passwd`.
+/// - `labels` — the engine adds its own (`delonix.io/stack`, pod membership,
+///   compose project), so the record is a superset by construction.
+///
+/// These are gaps in coverage, not in honesty: an `image` change is caught, and
+/// that is the change that matters most. Closing them means normalizing both
+/// sides through the same function, which is its own piece of work.
+pub(crate) const RECONCILED_CONTAINER_FIELDS: &[&str] = &[
+    "image",
+    "ports",
+    "volumes",
+    "memory",
+    "cpus",
+    "privileged",
+    "restartPolicy",
+    "network",
+    "hostname",
+];
+
+/// Renders a persisted [`Mount`] back into the `source:/target[:ro]` form the
+/// manifest uses, so the two sides of a diff are comparable.
+///
+/// Cannot use `VolumeStore::resolve_spec` for this: that function **creates the
+/// volume on demand** (Docker semantics, and correct there), and `plan` is
+/// read-only — computing a plan must never bring a resource into existence.
+/// So the mapping is done here, in the opposite direction and without I/O.
+///
+/// A named volume lives at `<root>/volumes/<name>/_data`; anything else is a
+/// bind and keeps its host path.
+pub(crate) fn mount_to_spec(
+    m: &delonix_runtime_core::Mount,
+    volumes_root: &std::path::Path,
+) -> String {
+    let source = std::path::Path::new(&m.source)
+        .strip_prefix(volumes_root)
+        .ok()
+        .and_then(|rest| {
+            // `<name>/_data` — and only that shape, so a bind that merely
+            // happens to sit under the volumes root is not mistaken for a
+            // named volume.
+            let mut it = rest.components();
+            let name = it.next()?.as_os_str().to_str()?.to_string();
+            match it.next()?.as_os_str().to_str()? {
+                "_data" if it.next().is_none() => Some(name),
+                _ => None,
+            }
+        })
+        .unwrap_or_else(|| m.source.clone());
+    let ro = if m.readonly { ":ro" } else { "" };
+    format!("{source}:{}{ro}", m.target)
+}
+
+/// The manifest side of the same form. Binds are canonicalized (read-only, and
+/// it is what the engine stores) so `./data` and `/abs/data` compare equal;
+/// a path that does not exist yet keeps its literal spelling rather than
+/// failing — the container does not exist yet either, so the diff is moot.
+fn volume_spec_key(spec: &str) -> String {
+    let parts: Vec<&str> = spec.split(':').collect();
+    if parts.len() < 2 {
+        return spec.to_string();
+    }
+    let (src, target) = (parts[0], parts[1]);
+    let ro = if parts.get(2) == Some(&"ro") {
+        ":ro"
+    } else {
+        ""
+    };
+    let src = if src.starts_with('/') || src.starts_with('.') {
+        std::fs::canonicalize(src)
+            .map(|p| p.to_string_lossy().into_owned())
+            .unwrap_or_else(|_| src.to_string())
+    } else {
+        src.to_string()
+    };
+    format!("{src}:{target}{ro}")
+}
+
+/// A `Vec<String>` rendered as one comparable value. Sorted, because the ORDER
+/// of ports and volumes carries no meaning — leaving it unsorted would report a
+/// reordered manifest as a change and, worse, as a `Replace`.
+fn list_key(mut items: Vec<String>) -> String {
+    items.sort();
+    items.join(",")
+}
+
+/// What the manifest asks for, in comparable form.
+pub(crate) fn desired_container_fields(
+    spec: &ContainerSpec,
+) -> std::collections::BTreeMap<String, String> {
+    let mut f = std::collections::BTreeMap::new();
+    f.insert("image".into(), spec.image.clone());
+    // Ranges are expanded at the boundary by `run`, so the record holds
+    // single ports; expand here too or `8000-8001:80-81` would diff against
+    // its own expansion forever.
+    let ports: Vec<String> = spec
+        .ports
+        .iter()
+        .flat_map(|p| delonix_net::expand_publish_range(p).unwrap_or_else(|_| vec![p.clone()]))
+        .collect();
+    f.insert("ports".into(), list_key(ports));
+    f.insert(
+        "volumes".into(),
+        list_key(spec.volumes.iter().map(|v| volume_spec_key(v)).collect()),
+    );
+    // `max` is what the engine stores for "no cap" (cgroup v2's own word).
+    f.insert(
+        "memory".into(),
+        spec.memory.clone().unwrap_or_else(|| "max".into()),
+    );
+    f.insert(
+        "cpus".into(),
+        spec.cpus.clone().unwrap_or_else(|| "1.0".into()),
+    );
+    f.insert("privileged".into(), spec.privileged.to_string());
+    f.insert("restartPolicy".into(), spec.restart.clone());
+    f.insert("network".into(), spec.network.clone());
+    if let Some(h) = &spec.hostname {
+        f.insert("hostname".into(), h.clone());
+    }
+    f
+}
+
+/// The same comparable form, built from the already-normalized [`RunOpts`].
+///
+/// Used by the Pod-shaped `kind: Container` (`spec.containers[]`), which reaches
+/// `RunOpts` through `pod_to_run_opts` — the very function the apply path calls.
+/// Deriving the diff from the same normalization is what stops the two manifest
+/// shapes from disagreeing about what they asked for.
+fn desired_fields_from_run_opts(o: &RunOpts) -> std::collections::BTreeMap<String, String> {
+    let mut f = std::collections::BTreeMap::new();
+    f.insert("image".into(), o.image.clone());
+    let ports: Vec<String> = o
+        .ports
+        .iter()
+        .flat_map(|p| delonix_net::expand_publish_range(p).unwrap_or_else(|_| vec![p.clone()]))
+        .collect();
+    f.insert("ports".into(), list_key(ports));
+    f.insert(
+        "volumes".into(),
+        list_key(o.volumes.iter().map(|v| volume_spec_key(v)).collect()),
+    );
+    f.insert(
+        "memory".into(),
+        o.memory.clone().unwrap_or_else(|| "max".into()),
+    );
+    f.insert(
+        "cpus".into(),
+        o.cpus.clone().unwrap_or_else(|| "1.0".into()),
+    );
+    f.insert("privileged".into(), o.privileged.to_string());
+    f.insert("restartPolicy".into(), o.restart.clone());
+    f.insert("network".into(), o.net.clone());
+    if let Some(h) = &o.hostname {
+        f.insert("hostname".into(), h.clone());
+    }
+    f
+}
+
+/// What the machine actually has, in the same comparable form.
+pub(crate) fn actual_container_fields(
+    c: &delonix_runtime_core::Container,
+    volumes_root: &std::path::Path,
+) -> std::collections::BTreeMap<String, String> {
+    let mut f = std::collections::BTreeMap::new();
+    f.insert("image".into(), c.image.clone());
+    f.insert("ports".into(), list_key(c.ports.clone()));
+    f.insert(
+        "volumes".into(),
+        list_key(
+            c.mounts
+                .iter()
+                .map(|m| mount_to_spec(m, volumes_root))
+                .collect(),
+        ),
+    );
+    f.insert("memory".into(), c.memory_max.clone());
+    f.insert("cpus".into(), c.cpus.clone());
+    f.insert("privileged".into(), c.privileged.to_string());
+    f.insert(
+        "restartPolicy".into(),
+        c.restart_policy.clone().unwrap_or_else(|| "no".into()),
+    );
+    // `net_mode` records the INTENT (`host`/`none`/`<network>`), which is what
+    // the manifest states. `network` alone cannot: it is `None` for both `host`
+    // and a degraded attach, a conflation this record already had to fix once.
+    f.insert(
+        "network".into(),
+        c.net_mode
+            .clone()
+            .or_else(|| c.network.clone())
+            .unwrap_or_else(|| "host".into()),
+    );
+    if let Some(h) = &c.hostname {
+        f.insert("hostname".into(), h.clone());
+    }
+    f
+}
+
+/// Destroys a container so the normal creation path can rebuild it.
+///
+/// `--force`, deliberately: a resource marked for recreation was ALREADY
+/// authorized by the user with `--replace`, and stopping halfway because the
+/// container happens to be running would leave the stack in the one state this
+/// command exists to avoid — half converged, with the refusal arriving after
+/// the destruction of everything before it.
+pub(crate) fn remove_for_replace(name: &str) -> Result<()> {
+    let (images, store) = open_stores()?;
+    cmd_rm(&images, &store, name, true)
+}
+
+/// The HOST port of a publish spec, which is what `--publish-rm` takes.
+///
+/// Three fields means the Docker `hostIp:hostPort:contPort` form, where the host
+/// port is the SECOND — taking the first would hand `--publish-rm` an IP
+/// address, and the unpublish would silently match nothing. That form is exactly
+/// the one the compose path already got wrong once (`127.0.0.1:9000:80` was read
+/// as `hostPort:contPort` and published on every interface).
+fn host_port_of(spec: &str) -> String {
+    let bare = spec.split('/').next().unwrap_or(spec);
+    let parts: Vec<&str> = bare.split(':').collect();
+    match parts.len() {
+        3 => parts[1].to_string(),
+        _ => parts.first().unwrap_or(&bare).to_string(),
+    }
+}
+
+/// Applies the hot part of a plan to a live container — **without changing the
+/// PID**.
+///
+/// Delegates to [`cmd_update`], the very code path `container update` uses, so
+/// the declarative and imperative routes cannot drift apart. That function had
+/// been in the tree, tested, with a caller, for versions; the declarative side
+/// simply never called it, which is why changing a manifest used to do nothing.
+///
+/// Only fields marked hot in `reconcile::hot_fields` reach here — anything else
+/// has already been classified as a `Replace` and refused unless asked for.
+pub(crate) fn converge(name: &str, diffs: &[super::reconcile::FieldDiff]) -> Result<()> {
+    let (_, store) = open_stores()?;
+    let mut o = UpdateOpts::default();
+    for d in diffs {
+        let (removed, added) = super::reconcile::list_delta(d.from.as_deref(), d.to.as_deref());
+        match d.field.as_str() {
+            "ports" => {
+                // `--publish-rm` takes the HOST port, not the whole spec.
+                o.publish_rm.extend(removed.iter().map(|p| host_port_of(p)));
+                o.publish_add.extend(added);
+            }
+            "volumes" => {
+                // `--volume-rm` takes the TARGET path inside the container.
+                o.volume_rm.extend(
+                    removed
+                        .iter()
+                        .filter_map(|v| v.split(':').nth(1).map(String::from)),
+                );
+                o.volume_add.extend(added);
+            }
+            "memory" => o.memory = d.to.clone(),
+            "cpus" => o.cpus = d.to.clone(),
+            "netBps" => match &d.to {
+                Some(v) => o.net_rate = Some(v.clone()),
+                // The manifest dropped the cap: clearing it is the revert, and
+                // it is a different operation from setting it to some value.
+                None => o.net_rate_clear = true,
+            },
+            "netBurst" => o.net_burst = d.to.clone(),
+            other => {
+                return Err(Error::Invalid(format!(
+                    "container/{name}: '{other}' does not converge hot — this is a bug in \
+                     `reconcile::hot_fields`, which promised something the executor cannot do"
+                )))
+            }
+        }
+    }
+    cmd_update(&store, name, o)
+}
+
+/// Records that this stack owns the container, and what it last applied.
+pub(crate) fn stamp(
+    name: &str,
+    stack: &str,
+    fields: &std::collections::BTreeMap<String, String>,
+) -> Result<()> {
+    let (_, store) = open_stores()?;
+    let c = find(&store, name)?;
+    let encoded = super::reconcile::encode_last_applied(fields);
+    store.update(&c.id, |cur| {
+        cur.labels
+            .insert(super::reconcile::STACK_LABEL.into(), stack.to_string());
+        cur.labels
+            .insert(super::reconcile::MANAGED_BY.into(), "delonix".into());
+        cur.annotations
+            .insert(super::reconcile::LAST_APPLIED.into(), encoded.clone());
+        true
+    })?;
+    Ok(())
+}
+
+/// What the manifest declares, for the reconciler.
+///
+/// The Pod-shaped form (`spec.containers[]`) is normalized through the SAME
+/// `pod_to_run_opts` the apply path uses, so the two shapes cannot disagree
+/// about what they asked for.
+pub(crate) fn desired(doc: &ManifestDoc) -> Result<super::reconcile::Desired> {
+    let fields = if doc.spec.get("containers").is_some() {
+        let pod: PodSpec = manifest::spec_of(doc)?;
+        let opts = pod_to_run_opts(&doc.metadata.name, doc.metadata.namespace.clone(), pod)?;
+        desired_fields_from_run_opts(&opts)
+    } else {
+        desired_container_fields(&container_spec_of(doc)?)
+    };
+    Ok(super::reconcile::Desired {
+        kind: "Container".into(),
+        name: doc.metadata.name.clone(),
+        fields,
+        converges: true,
+    })
+}
+
+/// What is on the machine, for the reconciler.
+pub(crate) fn actual() -> Result<Vec<super::reconcile::Actual>> {
+    let (_, store) = open_stores()?;
+    let volumes_root = super::util::state_root().join("volumes");
+    Ok(store
+        .list()?
+        .into_iter()
+        // A pod member is not a `kind: Container` — it belongs to its pod, and
+        // listing it here would make every pod member look like an unmanaged
+        // container the stack should adopt.
+        .filter(|c| c.pod.is_none() && !c.labels.contains_key(super::pod::POD_LABEL))
+        .map(|c| super::reconcile::Actual {
+            kind: "Container".into(),
+            name: c.name.clone(),
+            fields: actual_container_fields(&c, &volumes_root),
+            owner: c.labels.get(super::reconcile::STACK_LABEL).cloned(),
+            last_applied: c
+                .annotations
+                .get(super::reconcile::LAST_APPLIED)
+                .and_then(|raw| super::reconcile::decode_last_applied(raw)),
+        })
+        .collect())
 }
 
 /// Names accepted in the `spec` of `kind: Container` (canonical + aliases), for the
@@ -447,7 +811,7 @@ pub(crate) struct PodSpec {
     pub(crate) network: String,
     /// k8s `restartPolicy`: `Always`|`OnFailure`|`Never` (delonix values also accepted).
     #[serde(default = "default_restart", rename = "restartPolicy")]
-    restart_policy: String,
+    pub(crate) restart_policy: String,
     #[serde(default)]
     hostname: Option<String>,
     /// delonix extension: auto-register an HTTP port in the L7 proxy.
@@ -474,10 +838,13 @@ pub(crate) struct PodSpec {
 /// One entry of `spec.containers[]`.
 #[derive(Debug, Deserialize, Serialize)]
 pub(crate) struct PodContainer {
+    /// k8s member name. Absent → `c<i>` by position, the fallback
+    /// `pod_member_run_opts` uses to build the container name `<pod>-<member>`;
+    /// the reconciler has to reproduce it or every pod would diff against
+    /// itself.
     #[serde(default)]
-    #[allow(dead_code)] // accepted for k8s fidelity; delonix names the whole pod
-    name: Option<String>,
-    image: String,
+    pub(crate) name: Option<String>,
+    pub(crate) image: String,
     /// k8s `command` — overrides the image ENTRYPOINT.
     #[serde(default)]
     command: Vec<String>,
@@ -5097,6 +5464,7 @@ fn describe_one(c: &Container) {
 }
 
 /// Arguments for `container update`, grouped (clippy would complain about the list).
+#[derive(Default)]
 pub(crate) struct UpdateOpts {
     pub(crate) publish_add: Vec<String>,
     pub(crate) publish_rm: Vec<String>,
@@ -5978,6 +6346,128 @@ fn health_monitor_loop(id: String, cfg: HealthConfig) {
 
 #[cfg(test)]
 mod tests {
+    /// **The contract of the whole reconciler**: an unchanged manifest must
+    /// produce ZERO differences. Both sides of the diff are normalized by
+    /// separate functions, and the moment one of them drifts, every plan starts
+    /// reporting phantom drift — a plan that always says «changed» is worth less
+    /// than no plan at all.
+    ///
+    /// So this test builds the record the way `cmd_run` builds it for exactly
+    /// the compared fields and asserts the two maps are equal. It fails if
+    /// either side changes alone, which is the point.
+    #[test]
+    fn manifesto_inalterado_nao_produz_diferenca_nenhuma() {
+        let spec = super::ContainerSpec {
+            image: "nginx:1.27".into(),
+            ports: vec!["8080:80".into()],
+            volumes: vec!["dados:/var/lib".into()],
+            memory: Some("512M".into()),
+            cpus: Some("0.5".into()),
+            privileged: false,
+            restart: "always".into(),
+            network: "interna".into(),
+            hostname: Some("web".into()),
+            ..serde_yaml::from_str::<super::ContainerSpec>("image: nginx:1.27").unwrap()
+        };
+
+        let mut c = delonix_runtime_core::Container::new(
+            "id".into(),
+            "web".into(),
+            "nginx:1.27".into(),
+            vec!["nginx".into()],
+            "512M".into(), // `cmd_run`: eff_memory = memory.unwrap_or("max")
+        );
+        c.ports = vec!["8080:80".into()];
+        c.cpus = "0.5".into();
+        c.privileged = false;
+        c.restart_policy = Some("always".into());
+        c.net_mode = Some("interna".into());
+        c.network = Some("interna".into());
+        c.hostname = Some("web".into());
+        let root = std::path::Path::new("/var/lib/delonix/volumes");
+        c.mounts = vec![delonix_runtime_core::Mount {
+            source: root.join("dados/_data").to_string_lossy().into_owned(),
+            target: "/var/lib".into(),
+            readonly: false,
+            propagation: None,
+        }];
+
+        let desired = super::desired_container_fields(&spec);
+        let actual = super::actual_container_fields(&c, root);
+        assert_eq!(
+            desired, actual,
+            "unchanged manifest must diff to nothing\n desired={desired:#?}\n actual={actual:#?}"
+        );
+        // And the set really is the documented one — a field added to one map
+        // and not the other would show up here before it shows up as drift.
+        let keys: Vec<&str> = desired.keys().map(String::as_str).collect();
+        for k in &keys {
+            assert!(
+                super::RECONCILED_CONTAINER_FIELDS.contains(k),
+                "{k} is compared but undocumented"
+            );
+        }
+    }
+
+    /// A named volume must render back to the NAME the manifest used, never to
+    /// the `_data` path — otherwise every container with a volume looks changed.
+    /// A bind keeps its host path. `resolve_spec` cannot be used for this
+    /// direction: it CREATES the volume, and computing a plan must not create
+    /// anything.
+    #[test]
+    fn mount_to_spec_devolve_o_nome_do_volume_e_o_caminho_de_um_bind() {
+        let root = std::path::Path::new("/var/lib/delonix/volumes");
+        let named = delonix_runtime_core::Mount {
+            source: "/var/lib/delonix/volumes/dados/_data".into(),
+            target: "/var/lib".into(),
+            readonly: false,
+            propagation: None,
+        };
+        assert_eq!(super::mount_to_spec(&named, root), "dados:/var/lib");
+        let ro = delonix_runtime_core::Mount {
+            readonly: true,
+            ..named.clone()
+        };
+        assert_eq!(super::mount_to_spec(&ro, root), "dados:/var/lib:ro");
+        let bind = delonix_runtime_core::Mount {
+            source: "/etc/nginx".into(),
+            target: "/etc/nginx".into(),
+            readonly: true,
+            propagation: None,
+        };
+        assert_eq!(
+            super::mount_to_spec(&bind, root),
+            "/etc/nginx:/etc/nginx:ro"
+        );
+        // A bind that merely SITS under the volumes root is not a named volume:
+        // only the exact `<name>/_data` shape is.
+        let deep = delonix_runtime_core::Mount {
+            source: "/var/lib/delonix/volumes/dados/_data/sub".into(),
+            target: "/x".into(),
+            readonly: false,
+            propagation: None,
+        };
+        assert_eq!(
+            super::mount_to_spec(&deep, root),
+            "/var/lib/delonix/volumes/dados/_data/sub:/x"
+        );
+    }
+
+    /// Ports and volumes are SETS — the order in the manifest carries no
+    /// meaning. Without sorting, moving a line in the YAML would be reported as
+    /// a change and, because `ports` is hot but `volumes` ordering would drag in
+    /// a full-list diff, it would read far more alarming than it is.
+    #[test]
+    fn a_ordem_das_portas_no_manifesto_nao_e_uma_alteracao() {
+        let mk = |ports: Vec<&str>| super::ContainerSpec {
+            ports: ports.into_iter().map(String::from).collect(),
+            ..serde_yaml::from_str::<super::ContainerSpec>("image: nginx").unwrap()
+        };
+        let a = super::desired_container_fields(&mk(vec!["8080:80", "8443:443"]));
+        let b = super::desired_container_fields(&mk(vec!["8443:443", "8080:80"]));
+        assert_eq!(a.get("ports"), b.get("ports"));
+    }
+
     /// `hostAliases` do k8s (um IP, N nomes) tem de dar o mesmo resultado que
     /// N `--add-host`. Sem isto, o MESMO `kind: Container` tinha a
     /// funcionalidade na forma plana e não na forma k8s.
