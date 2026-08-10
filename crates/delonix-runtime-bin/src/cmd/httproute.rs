@@ -628,6 +628,7 @@ fn resolve_config(specs: &[(String, HttpRouteSpec)]) -> Result<Option<ProxyConfi
                     host: rule.host.clone().unwrap_or_default(),
                     path: pr.path.clone(),
                     backend: format!("{ip}:{}", pr.backend.port),
+                    source: name.clone(),
                 });
             }
         }
@@ -650,6 +651,172 @@ fn resolve_config(specs: &[(String, HttpRouteSpec)]) -> Result<Option<ProxyConfi
 
 /// `stack apply` (and auto-registration, later): resolves the HTTPRoutes and
 /// ensures the proxy is serving. Called AFTER the containers exist (needs the IPs).
+/// Fields the reconciler compares for a `kind: HTTPRoute`.
+///
+/// Everything converges hot: `httproute::apply` recomposes the whole config and
+/// SIGHUPs a live proxy — same PID, no downtime. `entrypoints`/`tls` are the
+/// exception in spirit (listeners and TLS are fixed at proxy startup, so
+/// changing them needs an `httproute rm` + apply) and the apply already warns
+/// about that; the plan showing them as an update is not a promise the executor
+/// breaks — the warning is what tells the truth about the listener.
+pub(crate) const RECONCILED_HTTPROUTE_FIELDS: &[&str] = &["entrypoints", "tls", "rules"];
+
+/// One route rendered comparably: host, path and the backend as WRITTEN.
+///
+/// The backend is compared as `service:port`, never as the resolved `ip:port` a
+/// route stores — a container's SDN address changes on a restart, so comparing
+/// addresses would report drift every time a backend was restarted, for a
+/// manifest nobody touched.
+fn route_keys(spec: &HttpRouteSpec) -> String {
+    let mut keys: Vec<String> = Vec::new();
+    for rule in &spec.rules {
+        for p in &rule.paths {
+            keys.push(format!(
+                "{}|{}|{}:{}",
+                rule.host.clone().unwrap_or_default(),
+                p.path,
+                p.backend.service,
+                p.backend.port
+            ));
+        }
+    }
+    keys.sort();
+    keys.join(",")
+}
+
+/// The `tls.mode` a document declares, defaulted the way the apply defaults it.
+fn spec_tls_mode(doc: &ManifestDoc) -> String {
+    spec_of_either(doc)
+        .ok()
+        .and_then(|s| s.tls.and_then(|t| t.mode))
+        .unwrap_or_else(|| "selfSigned".to_string())
+}
+
+/// The spec a document contributes, whichever grammar it is written in.
+///
+/// A `kind: Ingress` is the k8s spelling of the same proxy and goes through the
+/// SAME `parse_and_validate`, contributing routes under its OWN name — so it
+/// converges by exactly this path. Comparing only `HTTPRoute` would have left
+/// the other grammar reported as non-converging for a reason (no provenance)
+/// that stopped being true the moment routes started recording their source.
+fn spec_of_either(doc: &ManifestDoc) -> Result<HttpRouteSpec> {
+    if doc.kind == "Ingress" {
+        ingress_spec_of(doc)
+    } else {
+        manifest::spec_of(doc)
+    }
+}
+
+pub(crate) fn desired(doc: &ManifestDoc) -> Result<super::reconcile::Desired> {
+    let spec: HttpRouteSpec = spec_of_either(doc)?;
+    let mut f = std::collections::BTreeMap::new();
+    let mut eps: Vec<String> = spec
+        .entrypoints
+        .iter()
+        .map(|e| format!("{}{}", e.port, if e.tls { "/tls" } else { "" }))
+        .collect();
+    eps.sort();
+    f.insert("entrypoints".into(), eps.join(","));
+    f.insert(
+        "tls".into(),
+        match &spec.tls {
+            Some(_) => spec_tls_mode(doc),
+            None => String::new(),
+        },
+    );
+    f.insert("rules".into(), route_keys(&spec));
+    Ok(super::reconcile::Desired {
+        // Keyed by the document's OWN kind, so an `Ingress` matches the
+        // `Ingress` half of the actual side and the plan names the Kind the
+        // user wrote.
+        kind: doc.kind.clone(),
+        name: doc.metadata.name.clone(),
+        fields: f,
+        converges: true,
+        // The routes live in the shared proxy config, not in a record of their
+        // own; `source` says who contributed each one, which is enough to
+        // compare but not to own — a prune would have to rewrite a config other
+        // documents also contribute to.
+        ownable: false,
+    })
+}
+
+/// What the running proxy has, per document — readable only because each route
+/// now records its `source`.
+pub(crate) fn actual(docs: &[ManifestDoc]) -> Result<Vec<super::reconcile::Actual>> {
+    let Some(cfg) = ingress_proxy::read_manual_config() else {
+        return Ok(Vec::new());
+    };
+    let mut out = Vec::new();
+    let both: Vec<&ManifestDoc> = manifest::of_kind(docs, "HTTPRoute")
+        .into_iter()
+        .chain(manifest::of_kind(docs, "Ingress"))
+        .collect();
+    for doc in both {
+        let name = &doc.metadata.name;
+        let mine: Vec<&ingress_proxy::Route> =
+            cfg.routes.iter().filter(|r| &r.source == name).collect();
+        if mine.is_empty() {
+            continue; // nothing of this document is applied yet
+        }
+        let mut f = std::collections::BTreeMap::new();
+        let mut eps: Vec<String> = cfg
+            .listeners
+            .iter()
+            .map(|l| format!("{}{}", l.port, if l.tls { "/tls" } else { "" }))
+            .collect();
+        eps.sort();
+        f.insert("entrypoints".into(), eps.join(","));
+        // The stored config holds the MATERIAL (cert/key), not the mode that
+        // produced it — a self-signed cert and one from a Secret are
+        // indistinguishable once generated. So the actual side reports only
+        // WHETHER TLS is on; a change of `mode` with TLS already on is not
+        // visible here, and the apply's own listener warning is what covers it.
+        f.insert(
+            "tls".into(),
+            if cfg.tls.is_some() {
+                spec_tls_mode(doc)
+            } else {
+                String::new()
+            },
+        );
+        // The stored backend is `ip:port`; the manifest names a service. Map it
+        // back through the same container→IP table the apply resolved with, so
+        // the two sides speak the same language.
+        let by_ip = container_ips();
+        let mut keys: Vec<String> = mine
+            .iter()
+            .map(|r| {
+                let backend = by_ip
+                    .iter()
+                    .find(|(_, ip)| r.backend.starts_with(&format!("{ip}:")))
+                    .map(|(svc, ip)| {
+                        format!("{svc}:{}", r.backend.trim_start_matches(&format!("{ip}:")))
+                    })
+                    .unwrap_or_else(|| r.backend.clone());
+                format!("{}|{}|{}", r.host, r.path, backend)
+            })
+            .collect();
+        keys.sort();
+        f.insert("rules".into(), keys.join(","));
+        out.push(super::reconcile::Actual {
+            kind: doc.kind.clone(),
+            name: name.clone(),
+            fields: f,
+            owner: None,
+            last_applied: None,
+        });
+    }
+    Ok(out)
+}
+
+/// Converges: re-apply every HTTPRoute document. The config is COLLECTIVE, so
+/// there is no per-document apply to call — recomposing the whole thing is what
+/// `apply` already does, and it SIGHUPs the live proxy rather than restarting it.
+pub(crate) fn converge_all(docs: &[ManifestDoc]) -> Result<()> {
+    apply(docs)
+}
+
 pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
     let specs = parse_and_validate(docs)?;
     let Some(cfg) = resolve_config(&specs)? else {

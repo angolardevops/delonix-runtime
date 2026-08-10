@@ -17,6 +17,10 @@ never rewritten — supersede them with a new one.
 | [0004](0004-container-checkpoint-restore.md) | Container checkpoint/restore is gated on a rootless-CRIU GO/NO-GO spike | Proposed |
 | [0005](0005-structured-output-json.md) | Structured output (`-o json`) for listing commands | Accepted (contract + first slice) |
 | [0006](0006-workload-type-microvm.md) | `type: microvm` forces the microVM hypervisor (Cloud Hypervisor) | Accepted |
+| [0007](0007-generated-manifest-schema.md) | The manifest schema is GENERATED from the code (`schemars`) | Accepted (implemented) |
+| [0008](0008-proxmox-vm-backend.md) | Add a Proxmox VE backend as a separate crate, and make backends registrable | Proposed |
+| [0009](0009-truenas-storage-provisioner.md) | Provision TrueNAS datasets over its API, as a separate crate | Proposed |
+| [0010](0010-remote-management-api.md) | What it would take for the management API to be remote | Proposed (frames the decision) |
 
 ## Roadmap (from `AGENTS.md` "Universal Runtime" — each phase needs its own accepted ADR)
 

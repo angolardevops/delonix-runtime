@@ -360,9 +360,10 @@ pub fn ingress_table_ruleset() -> String {
     // NOT covered here, and deliberately so: the management sockets. `serve api`,
     // `serve cri` and `serve docker-api` all default to UNIX sockets, not TCP
     // (`unix:///run/delonix-*.sock`), so there is no address for a container to reach.
-    // Guarding a service the holder itself exposes (the internal DNS, the L7 proxy)
-    // would need an `input` chain, which this netns does not have today — recorded as
-    // follow-up rather than half-done here.
+    //
+    // The services the holder itself exposes ARE covered now, by `dlxinput` below —
+    // this comment used to record that as a follow-up, and the follow-up turned out to be
+    // an exploitable bypass (measured, see `docs/discovery/46_GAPS_ENCONTRADOS.md` §4.2).
     let guard = if std::env::var("DELONIX_ALLOW_LINK_LOCAL").ok().as_deref() == Some("1") {
         tracing::warn!(
             "SECURITY WARNING — DELONIX_ALLOW_LINK_LOCAL=1: containers may reach \
@@ -374,6 +375,41 @@ pub fn ingress_table_ruleset() -> String {
         "\x20\x20 ip daddr 169.254.0.0/16 counter drop\n\
          \x20\x20 ip daddr 127.0.0.0/8 counter drop\n"
             .to_string()
+    };
+    // `dlxinput` — the holder's OWN services are not reachable from a container.
+    //
+    // Every policy chain in this table hangs off `forward`, and traffic addressed TO the
+    // holder never goes through `forward` — it goes through `input`, which had no chain at
+    // all. That is a whole side of the node with no policy on it, and it was exploitable:
+    // the L7 proxy listens in this netns, so any container could reach it on its bridge
+    // gateway and be relayed to ANY registered backend — across namespaces, and past a
+    // `ingress policy deny` on the backend (both measured; the proxy→backend leg originates
+    // here, so it never meets `fwcont` either).
+    //
+    // The allowlist is what a container legitimately needs FROM the holder, and nothing
+    // else: the internal DNS, DHCP (the VM leases), ICMP for diagnostics, and the return
+    // traffic of anything the holder itself opened. `tap0` is the host→slirp→holder path,
+    // which is the whole point of an ingress, so it stays open.
+    //
+    // Deliberately keyed on what is ALLOWED, not on the proxy's ports: the listeners are
+    // dynamic (`kind: HTTPRoute` declares its own) and this chain is built once at
+    // `ensure_up`, long before any proxy exists. Enumerating ports would have to be kept in
+    // sync with a moving target — and would leave every FUTURE holder-resident listener
+    // exposed by default, which is the same shape of gap being closed here.
+    let holder_input = if std::env::var("DELONIX_ALLOW_HOLDER_INGRESS")
+        .ok()
+        .as_deref()
+        == Some("1")
+    {
+        tracing::warn!(
+            "SECURITY WARNING — DELONIX_ALLOW_HOLDER_INGRESS=1: containers may reach the \
+             services the holder exposes (the L7 proxy, the internal DNS). Through the proxy \
+             a container reaches ANY registered backend, in ANY namespace, past that \
+             backend's own ingress policy. For debugging only — do NOT use in production."
+        );
+        String::new()
+    } else {
+        "\x20\x20 ct state new counter drop\n".to_string()
     };
     format!(
         "table ip {INGRESS_TABLE} {{\n\
@@ -389,6 +425,15 @@ pub fn ingress_table_ruleset() -> String {
          \x20 chain pre {{ type nat hook prerouting priority -100; }}\n\
          \x20 chain post {{ type nat hook postrouting priority 100; oifname \"tap0\" masquerade; }}\n\
          \x20 chain fwdeny {{ type filter hook forward priority -10; }}\n\
+         \x20 chain dlxinput {{ type filter hook input priority 0;\n\
+         \x20\x20 ct state established,related accept\n\
+         \x20\x20 iifname \"lo\" accept\n\
+         \x20\x20 iifname \"tap0\" accept\n\
+         \x20\x20 udp dport {{ 53, 67, 68 }} accept\n\
+         \x20\x20 tcp dport 53 accept\n\
+         \x20\x20 meta l4proto icmp accept\n\
+         {holder_input}\
+         \x20 }}\n\
          \x20 chain forward {{ type filter hook forward priority 0;{policy}\n\
          \x20\x20 ct state established,related accept\n\
          \x20\x20 ct state invalid drop\n\
@@ -1105,6 +1150,13 @@ const CONTROL_IO_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5
 /// Extracted from `control_loop` so the deadline is exercisable by a test
 /// without standing up a real holder (which would need a userns/netns and would
 /// run `nft` for real).
+/// How long a caller waits for the holder's reply. Generous on purpose: the
+/// holder serializes every mutating command, so under a burst the wait is the
+/// queue ahead of you, not a hang. It is bounded anyway — a caller that waits
+/// forever on a wedged holder is the failure this whole pair of timeouts exists
+/// to avoid.
+const CONTROL_REPLY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
 fn read_control_line(stream: &std::os::unix::net::UnixStream) -> Option<String> {
     use std::io::{BufRead, BufReader};
     // Fail CLOSED: if the deadline cannot be armed we refuse the connection
@@ -1200,6 +1252,17 @@ fn control_loop(listener: std::os::unix::net::UnixListener) -> ! {
             continue;
         }
         let Some(line) = read_control_line(&stream) else {
+            // Say it instead of hanging up mute. A silent close reaches the caller
+            // as an EMPTY reply, and an empty reply used to print an error with
+            // nothing after the colon. The peer that never wrote is usually one
+            // that lost the CPU race under load, not an attacker — it deserves a
+            // sentence it can act on. (The `SO_PEERCRED` mismatch above stays
+            // silent on purpose: that one IS the hostile case, and it gets no
+            // oracle.)
+            let _ = stream.set_write_timeout(Some(CONTROL_IO_TIMEOUT));
+            let _ = stream.write_all(
+                b"err: no command received within the read deadline - the caller was too slow, or hung up\n",
+            );
             continue;
         };
         let line = line.trim().to_string();
@@ -1286,6 +1349,16 @@ fn handle_control(line: &str) -> String {
             };
         }
         ["detach", netns] => do_detach(netns),
+        // Takes the IP out of `@dlxall`/`@dlxns_*`. Its OWN line, and not part of `detach`,
+        // for two reasons: `detach` carries no address, and `unfirewall` (which does) is
+        // also sent by `clear_firewall` for a container that is still very much alive —
+        // hanging the removal there would evict a live peer from the namespace sets.
+        // Additive and sent best-effort, so an older holder just refuses it and behaves
+        // exactly as before (it leaks, as it always did) instead of failing the teardown.
+        ["nsleave", ip] => {
+            ns_set_leave(ip);
+            Ok(())
+        }
         ["cni-del", netns, id, ifname, hex] => do_cni_del(netns, id, ifname, hex),
         // live multi-homing (rootless): connects/disconnects an ADDITIONAL network to a
         // container already running (extra veth to the private network's bridge).
@@ -1860,6 +1933,44 @@ fn do_cni_del(netns: &str, id: &str, ifname: &str, hex: &str) -> Result<()> {
 /// IPs) + `@dlxns_<ns>` (the container's namespace). Beforehand, **removes it from
 /// any previous `@dlxns_*`** — so a re-attach (or namespace change)
 /// stays correct without needing cleanup on detach. Best-effort/idempotent.
+/// Removes `elem` from EVERY `@dlxns_*` set (the set name is the 2nd token of `set X {`).
+/// Shared by join (which moves an IP between namespaces) and leave (which takes it out for
+/// good) — two copies of this scan would drift the day the naming changes.
+fn drop_from_every_ns_set(elem: &str) {
+    let sets = crate::capture("nft", &["list", "sets", "ip", INGRESS_TABLE]).unwrap_or_default();
+    for line in sets.lines() {
+        if let Some(name) = line.split_whitespace().nth(1) {
+            if name.starts_with("dlxns") {
+                run_ok(
+                    "nft",
+                    &["delete", "element", "ip", INGRESS_TABLE, name, elem],
+                );
+            }
+        }
+    }
+}
+
+/// Takes an IP OUT of the namespace sets, on detach. The counterpart `ns_set_join` existed
+/// from the start and this did not, so `@dlxall` only ever grew: measured at **49 elements
+/// for 8 live veths and 5 registered containers** on a development host
+/// (`docs/discovery/46_GAPS_ENCONTRADOS.md` §4.3).
+///
+/// Not a policy leak — `@dlxall` is only ever read to *drop*
+/// (`ip saddr @dlxall ct state new drop`), so a stale element never opens anything. It is
+/// unbounded kernel state and, worse for whoever is debugging, a set that cannot answer the
+/// question it exists to answer: which addresses on this node belong to containers.
+fn ns_set_leave(ip: &str) {
+    if !is_ingress_ip(ip) {
+        return; // only SDN IPs
+    }
+    let elem = format!("{{ {ip} }}");
+    run_ok(
+        "nft",
+        &["delete", "element", "ip", INGRESS_TABLE, DLXALL_SET, &elem],
+    );
+    drop_from_every_ns_set(&elem);
+}
+
 fn ns_set_join(ip: &str, ns: &str) {
     if !is_ingress_ip(ip) {
         return; // only SDN IPs
@@ -1870,17 +1981,7 @@ fn ns_set_join(ip: &str, ns: &str) {
         &["add", "element", "ip", INGRESS_TABLE, DLXALL_SET, &elem],
     );
     // takes the IP out of any previous namespace (set name = 2nd token of "set X {").
-    let sets = crate::capture("nft", &["list", "sets", "ip", INGRESS_TABLE]).unwrap_or_default();
-    for line in sets.lines() {
-        if let Some(name) = line.split_whitespace().nth(1) {
-            if name.starts_with("dlxns") {
-                run_ok(
-                    "nft",
-                    &["delete", "element", "ip", INGRESS_TABLE, name, &elem],
-                );
-            }
-        }
-    }
+    drop_from_every_ns_set(&elem);
     let nsset = dlxns_set(ns);
     run_ok(
         "nft",
@@ -3610,6 +3711,7 @@ pub fn detach_extra_container(id: &str, idx: u32, ip: &str) {
     let netns = sanitize(id);
     let ifname = format!("eth{idx}");
     let _ = control_send(&format!("detach-extra {netns} {ifname}"));
+    let _ = control_send(&format!("nsleave {ip}"));
     crate::ipam::release(&crate::ipam::prefix_of(ip), id); // frees the extra network's lease
 }
 
@@ -3619,6 +3721,7 @@ pub fn detach_container(id: &str, ip: &str) {
     let netns = sanitize(id);
     let _ = control_send(&format!("unfirewall {ip}"));
     let _ = control_send(&format!("detach {netns}"));
+    let _ = control_send(&format!("nsleave {ip}"));
     crate::ipam::release(&crate::ipam::prefix_of(ip), id); // frees the IP lease
     release(id); // removes the ref marker (teardown when it becomes empty)
 }
@@ -4084,8 +4187,17 @@ fn slirp_api(sock: &Path, json: &str) -> Result<String> {
         context: "slirp api write",
         message: e.to_string(),
     })?;
+    // Same class as the control socket's (see `control_send`): a read that FAILS
+    // is not an empty reply. Here the caller that hurts is
+    // `slirp_remove_hostfwd`, which parses this as JSON — an empty string parses
+    // to `Null`, `hostfwd_entries` finds nothing, and the unpublish reports
+    // success having removed NOTHING, leaving the host port held by an entry the
+    // record no longer knows about.
     let mut resp = String::new();
-    let _ = s.read_to_string(&mut resp);
+    s.read_to_string(&mut resp).map_err(|e| Error::Runtime {
+        context: "slirp api read",
+        message: format!("no reply from the slirp api-socket: {e}"),
+    })?;
     Ok(resp)
 }
 
@@ -4281,14 +4393,39 @@ fn control_query(cmd: &str) -> Result<String> {
     for _ in 0..50 {
         match UnixStream::connect(&sock) {
             Ok(mut s) => {
-                let _ = s.set_read_timeout(Some(std::time::Duration::from_secs(5)));
+                let _ = s.set_read_timeout(Some(CONTROL_REPLY_TIMEOUT));
                 s.write_all(format!("{cmd}\n").as_bytes())
                     .map_err(|e| Error::Runtime {
                         context: "control write",
                         message: e.to_string(),
                     })?;
+                // A read that FAILS is not an empty reply. This used to be
+                // `let _ = s.read_to_string(...)`, which threw the error away and
+                // left `resp` empty — so a 5s read timeout was indistinguishable
+                // from a holder that answered with nothing, and both printed an
+                // error with nothing after the colon.
+                //
+                // Measured on this host, and it is not noise — it scales with
+                // concurrency, because `handle_control` is THE serialization
+                // point and a queued caller waits for every attach ahead of it:
+                // 10 concurrent attaches → 0 failures, 20 → 3, 30 → 15.
                 let mut resp = String::new();
-                let _ = s.read_to_string(&mut resp);
+                if let Err(e) = s.read_to_string(&mut resp) {
+                    let timed_out = matches!(
+                        e.kind(),
+                        std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                    );
+                    return Err(Error::Runtime {
+                        context: "ingress control",
+                        message: if timed_out {
+                            format!(
+                                "the control plane did not reply within {CONTROL_REPLY_TIMEOUT:?}                                  - it serializes every network operation, so a burst of                                  concurrent `run`s queues up behind itself. Retry, or start them                                  in smaller batches"
+                            )
+                        } else {
+                            format!("reading the reply failed: {e}")
+                        },
+                    });
+                }
                 let resp = resp.trim();
                 if resp == "ok" {
                     return Ok(String::new());
@@ -4296,9 +4433,24 @@ fn control_query(cmd: &str) -> Result<String> {
                 if let Some(body) = resp.strip_prefix("ok ") {
                     return Ok(body.trim().to_string());
                 }
+                // An EMPTY reply is not an empty error message. The holder closes
+                // the connection without a word in two places (`read_control_line`
+                // giving up, and the `SO_PEERCRED` mismatch), and both used to
+                // surface as a bare `system call `ingress control` failed:` with
+                // nothing after the colon. Measured under load: 16 of 30
+                // concurrent attaches on this host failed exactly like that — an
+                // error with no subject, which is the one thing this codebase
+                // keeps having to remove.
+                let body = resp.trim_start_matches("err:").trim();
                 return Err(Error::Runtime {
                     context: "ingress control",
-                    message: resp.trim_start_matches("err:").trim().to_string(),
+                    message: if body.is_empty() {
+                        "the control plane closed the connection without replying - it is \
+                         likely saturated (or died); check `delonix net netns status` and retry"
+                            .into()
+                    } else {
+                        body.to_string()
+                    },
                 });
             }
             Err(e) => {
@@ -5626,6 +5778,72 @@ Inter-|   Receive                                                |  Transmit
             );
         }
         assert!(joined.iter().all(|c| c.starts_with("netns exec dlx-abc ")));
+    }
+
+    /// The holder's own services are not reachable from a container.
+    ///
+    /// Regression for the measured bypass of §4.2: every policy chain hangs off `forward`,
+    /// and traffic addressed to the holder goes through `input` — so with no `input` chain
+    /// a container reached the L7 proxy on its bridge gateway and was relayed to any
+    /// backend, across namespaces and past the backend's `ingress policy deny`.
+    ///
+    /// Asserts the ORDER, not just the presence: the terminal drop has to be LAST. An
+    /// allowlist entry emitted after it would be dead rule, and the failure mode of that
+    /// mistake is silent (DNS stops working for every container on the node).
+    #[test]
+    fn os_servicos_do_holder_nao_sao_alcancaveis_de_um_container() {
+        let rs = ingress_table_ruleset();
+        // Extracted LINE BY LINE, not by splitting on braces: a `split_once("}")` cuts at
+        // the closing brace of the `{ 53, 67, 68 }` set, not at the end of the chain — the
+        // first version of this test did exactly that and failed on a rule that was there
+        // all along. The chain ends at the first line whose whole content is `}`.
+        let lines: Vec<&str> = rs.lines().collect();
+        let start = lines
+            .iter()
+            .position(|l| l.contains("chain dlxinput"))
+            .expect("the input chain has to exist");
+        let end = start
+            + 1
+            + lines[start + 1..]
+                .iter()
+                .position(|l| l.trim() == "}")
+                .expect("the input chain has to close");
+        let body_lines: Vec<&str> = lines[start..end]
+            .iter()
+            .copied()
+            .filter(|l| !l.trim().is_empty())
+            .collect();
+        let body = body_lines.join("\n");
+        let body = body.as_str();
+        assert!(body.contains("hook input"), "{body}");
+        // What a container legitimately needs FROM the holder — and the host→slirp path.
+        for allowed in [
+            "ct state established,related accept",
+            "iifname \"lo\" accept",
+            "iifname \"tap0\" accept",
+            "udp dport { 53, 67, 68 } accept",
+            "tcp dport 53 accept",
+            "meta l4proto icmp accept",
+        ] {
+            assert!(body.contains(allowed), "missing `{allowed}`: {body}");
+        }
+        // Everything else that is NEW gets dropped, and that rule is the last one.
+        let drop = body
+            .find("ct state new counter drop")
+            .expect("the terminal drop has to exist");
+        assert!(
+            body_lines
+                .last()
+                .expect("a non-empty chain body")
+                .contains("ct state new counter drop"),
+            "the drop must be the LAST rule, or the allowlist after it is dead: {body}"
+        );
+        for allowed in ["dport 53", "iifname \"tap0\""] {
+            assert!(
+                body.find(allowed).expect("allowlist entry") < drop,
+                "`{allowed}` must be evaluated BEFORE the drop: {body}"
+            );
+        }
     }
 
     /// RF-NET-02 — the denials that no user rule can get in front of. The PRIORITY is

@@ -18,7 +18,7 @@ use super::manifest::ManifestDoc;
 
 /// A condition of a resource — `ok=false` is what matters (the missing
 /// prerequisite). `reason` is a short stable code; `message` is actionable.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct Condition {
     pub kind: &'static str,
     pub ok: bool,
@@ -100,8 +100,11 @@ fn spec_str<'a>(doc: &'a ManifestDoc, keys: &[&str]) -> Option<&'a str> {
 /// The conditions of a document. Empty = nothing to flag (the common case).
 pub fn conditions_for(doc: &ManifestDoc, env: &Env) -> Vec<Condition> {
     match doc.kind.as_str() {
-        "Storage" => storage(doc, env),
-        "Volume" => volume(doc, env),
+        "Volume" => {
+            let mut c = volume(doc, env);
+            c.extend(network_share(doc, env));
+            c
+        }
         "Network" => network(doc),
         "Vm" => {
             let mut c = vm(doc, env);
@@ -112,11 +115,24 @@ pub fn conditions_for(doc: &ManifestDoc, env: &Env) -> Vec<Condition> {
     }
 }
 
-/// `Storage.Mounted` — mounting NFS/CIFS/WebDAV needs CAP_SYS_ADMIN and the
-/// right mount helper on the host; without either, the volume is created but the
-/// mount fails silently (best-effort). See `delonix-volume::ensure_mounted`.
-fn storage(doc: &ManifestDoc, env: &Env) -> Vec<Condition> {
-    let ty = spec_str(doc, &["type"]).unwrap_or("nfs");
+/// `Volume.Mounted` — mounting NFS/CIFS/WebDAV needs CAP_SYS_ADMIN and the right
+/// mount helper on the host; without either, the volume is created but the mount
+/// fails silently (best-effort). See `delonix-volume::ensure_mounted`.
+///
+/// **This went SILENT for a while and the silence is the lesson.** It used to be
+/// dispatched by `kind: Storage`, and when that Kind folded into `kind: Volume`
+/// (a network-share block) no document carried the old Kind any more — so the
+/// one condition whose entire job is to say «created, but it does not actually
+/// mount» stopped saying it. The honesty mechanism failed honestly-quietly,
+/// which is the worst way for it to fail. It now reads the BLOCK, and the block
+/// is where the type lives.
+fn network_share(doc: &ManifestDoc, env: &Env) -> Vec<Condition> {
+    let Some(ty) = ["nfs", "cifs", "webdav"]
+        .into_iter()
+        .find(|b| doc.spec.get(b).is_some_and(|v| !v.is_null()))
+    else {
+        return Vec::new();
+    };
     if env.rootless {
         return vec![Condition::bad(
             "Mounted",
@@ -270,25 +286,58 @@ mod tests {
         }
     }
 
+    /// A montagem de rede é declarada por um BLOCO num `kind: Volume` desde que
+    /// o `kind: Storage` se fundiu nele — e é do bloco que o tipo vem.
     #[test]
-    fn storage_rootless_exige_cap_sys_admin() {
-        let c = conditions_for(&doc("Storage", "type: nfs"), &env(true, true, true, true));
+    fn share_de_rede_em_rootless_exige_cap_sys_admin() {
+        let c = conditions_for(
+            &doc("Volume", "nfs: { server: nas, share: /x }"),
+            &env(true, true, true, true),
+        );
         assert_eq!(c.len(), 1);
         assert!(!c[0].ok);
         assert_eq!(c[0].reason, "RequiresCapSysAdmin");
     }
 
     #[test]
-    fn storage_root_sem_helper_assinala_helper_em_falta() {
+    fn share_de_rede_sem_helper_assinala_helper_em_falta() {
         // cifs needs mount.cifs; absent → MountHelperMissing.
         let c = conditions_for(
-            &doc("Storage", "type: cifs"),
+            &doc("Volume", "cifs: { server: nas, share: media }"),
             &env(false, true, false, true),
         );
         assert_eq!(c[0].reason, "MountHelperMissing");
         // with the helper present → OK.
-        let c = conditions_for(&doc("Storage", "type: cifs"), &env(false, true, true, true));
+        let c = conditions_for(
+            &doc("Volume", "cifs: { server: nas, share: media }"),
+            &env(false, true, true, true),
+        );
         assert!(c[0].ok);
+    }
+
+    /// **A regressão que isto fixa.** A condição era despachada por
+    /// `kind: Storage`; quando esse Kind se fundiu no `Volume`, deixou de haver
+    /// documentos com aquele nome e a condição cujo trabalho inteiro é dizer
+    /// «criado, mas não monta» ficou MUDA. Um volume local não a tem; um com
+    /// bloco de rede tem sempre.
+    #[test]
+    fn um_volume_local_nao_tem_condicao_de_montagem_e_um_de_rede_tem() {
+        let local = conditions_for(
+            &doc("Volume", "driver: local"),
+            &env(true, true, true, true),
+        );
+        assert!(
+            local.iter().all(|c| c.kind != "Mounted"),
+            "um volume local não monta nada: {local:?}"
+        );
+        let rede = conditions_for(
+            &doc("Volume", "nfs: { server: nas, share: /x }"),
+            &env(true, true, true, true),
+        );
+        assert!(
+            rede.iter().any(|c| c.kind == "Mounted" && !c.ok),
+            "a condição de montagem voltou a ficar muda: {rede:?}"
+        );
     }
 
     #[test]

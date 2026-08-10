@@ -13,8 +13,8 @@ use super::output;
 use super::util::state_root;
 
 /// `spec` of `kind: Volume` — mirrors the fields of `VolumeCmd::Create`.
-#[derive(Debug, Deserialize, Serialize)]
-struct VolumeSpec {
+#[derive(Debug, Deserialize, Serialize, schemars::JsonSchema)]
+pub(crate) struct VolumeSpec {
     #[serde(default = "default_driver")]
     driver: String,
     device: Option<String>,
@@ -23,6 +23,53 @@ struct VolumeSpec {
     #[serde(rename = "mountOptions", alias = "options")]
     options: Option<String>,
     quota: Option<String>,
+    /// NFS export. One of the three network-share blocks — the block's NAME is
+    /// the type, so a type cannot contradict its own declaration (the same shape
+    /// `kind: Workload` uses for `spec.container`/`spec.vm`).
+    #[serde(default)]
+    nfs: Option<super::storage::NetShareSpec>,
+    /// SMB/CIFS share (Samba, Windows, TrueNAS SMB).
+    #[serde(default)]
+    cifs: Option<super::storage::NetShareSpec>,
+    /// WebDAV (Nextcloud, ownCloud).
+    #[serde(default)]
+    webdav: Option<super::storage::NetShareSpec>,
+}
+
+impl VolumeSpec {
+    /// The network-share block, if any — `(type, block)`.
+    ///
+    /// **Exactly one, or none.** Two blocks are two different mounts asked of
+    /// one volume, and picking by precedence would mount one of them and drop
+    /// the other in silence. Same fail-closed treatment `lower_workload` gives a
+    /// type that brings more than its own block.
+    pub(crate) fn net_share(
+        &self,
+    ) -> Result<Option<(&'static str, &super::storage::NetShareSpec)>> {
+        let present: Vec<(&'static str, &super::storage::NetShareSpec)> = [
+            ("nfs", self.nfs.as_ref()),
+            ("cifs", self.cifs.as_ref()),
+            ("webdav", self.webdav.as_ref()),
+        ]
+        .into_iter()
+        .filter_map(|(k, v)| v.map(|v| (k, v)))
+        .collect();
+        match present.len() {
+            0 => Ok(None),
+            1 => Ok(Some(present[0])),
+            _ => Err(Error::Invalid(super::po::tf(
+                "a volume declares more than one network share ({kinds}) — a volume is one mount",
+                &[(
+                    "kinds",
+                    &present
+                        .iter()
+                        .map(|(k, _)| *k)
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                )],
+            ))),
+        }
+    }
 }
 
 fn default_driver() -> String {
@@ -31,8 +78,175 @@ fn default_driver() -> String {
 
 /// Names accepted in the `kind: Volume` `spec` (canonical + aliases), for the
 /// unknown-field warning.
-pub(crate) const VOLUME_SPEC_FIELDS: &[&str] =
-    &["driver", "device", "mountOptions", "options", "quota"];
+pub(crate) const VOLUME_SPEC_FIELDS: &[&str] = &[
+    "driver",
+    "device",
+    "mountOptions",
+    "options",
+    "quota",
+    // Network-share blocks — `kind: Storage` folded in here.
+    "nfs",
+    "cifs",
+    "webdav",
+];
+
+/// Fields the reconciler compares for a `kind: Volume`. `quota` is the only one
+/// that converges hot (`VolumeStore::set_quota`); changing the driver or the
+/// device of a volume that already holds data is a replace, and a replace of a
+/// volume means the data goes — which is exactly why `apply` refuses it without
+/// `--replace`.
+pub(crate) const RECONCILED_VOLUME_FIELDS: &[&str] = &["driver", "device", "mountOptions", "quota"];
+
+/// The manifest side, in comparable form.
+///
+/// A network-share block is translated through the SAME `share_mount` the apply
+/// uses. Comparing the block's own fields instead would report a difference on
+/// every plan for every network volume — the record stores the derived
+/// driver/device/options, never the friendly declaration.
+fn desired_volume_fields(
+    name: &str,
+    spec: &VolumeSpec,
+) -> Result<std::collections::BTreeMap<String, String>> {
+    let mut f = std::collections::BTreeMap::new();
+    let (driver, device, options) = match spec.net_share()? {
+        Some((kind, block)) => {
+            let m = super::storage::share_mount(name, kind, block)?;
+            (m.driver, Some(m.device), m.options)
+        }
+        None => (
+            spec.driver.clone(),
+            spec.device.clone(),
+            spec.options.clone(),
+        ),
+    };
+    f.insert("driver".into(), driver);
+    if let Some(d) = device {
+        f.insert("device".into(), d);
+    }
+    if let Some(o) = options {
+        f.insert("mountOptions".into(), o);
+    }
+    // The manifest says `10G`, the record stores bytes. Normalize the manifest
+    // side through the SAME parser the creation path uses, or a quota would
+    // read as changed on every plan.
+    if let Some(q) = &spec.quota {
+        if let Some(bytes) = delonix_volume::parse_size_bytes(q) {
+            f.insert("quota".into(), bytes.to_string());
+        }
+    }
+    Ok(f)
+}
+
+/// The machine side, in the same comparable form.
+fn actual_volume_fields(v: &delonix_volume::Volume) -> std::collections::BTreeMap<String, String> {
+    let mut f = std::collections::BTreeMap::new();
+    f.insert("driver".into(), v.driver.clone());
+    if let Some(d) = &v.device {
+        f.insert("device".into(), d.clone());
+    }
+    if let Some(o) = &v.options {
+        f.insert("mountOptions".into(), o.clone());
+    }
+    if let Some(q) = v.quota_bytes {
+        f.insert("quota".into(), q.to_string());
+    }
+    f
+}
+
+/// Destroys a volume so the normal creation path can rebuild it. **This
+/// destroys the data** — which is the whole reason `apply` refuses a volume
+/// replace unless the user names it explicitly.
+pub(crate) fn remove_for_replace(name: &str) -> Result<()> {
+    let store = VolumeStore::open(state_root())?;
+    cmd_rm(&store, name, true)
+}
+
+/// Applies the hot part of a plan. `quota` is the only field that converges
+/// without recreating the volume — and recreating a volume means the data goes,
+/// which is why everything else is a `Replace` that `apply` refuses by default.
+pub(crate) fn converge(name: &str, diffs: &[super::reconcile::FieldDiff]) -> Result<()> {
+    let store = VolumeStore::open(state_root())?;
+    for d in diffs {
+        match d.field.as_str() {
+            "quota" => {
+                // `None` = the manifest dropped the quota, which means REMOVE
+                // the cap, not «leave the old one» — the revert has to be as
+                // real as the set.
+                let bytes = d.to.as_deref().and_then(|v| v.parse::<u64>().ok());
+                // `privileged: false`, the same as `create_volume`'s own call:
+                // the hard ext4-loopback cap belongs to the root model, and a
+                // declarative apply must not quietly take a different route
+                // from the imperative one it mirrors.
+                store.set_quota(name, bytes, None, false)?;
+            }
+            other => {
+                return Err(Error::Invalid(format!(
+                    "volume/{name}: '{other}' does not converge hot — bug in \
+                     `reconcile::hot_fields`"
+                )))
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Records that this stack owns the volume, and what it last applied.
+pub(crate) fn stamp(
+    name: &str,
+    stack: &str,
+    fields: &std::collections::BTreeMap<String, String>,
+) -> Result<()> {
+    let store = VolumeStore::open(state_root())?;
+    store.set_metadata(
+        name,
+        &[
+            (
+                super::reconcile::STACK_LABEL.to_string(),
+                Some(stack.to_string()),
+            ),
+            (
+                super::reconcile::MANAGED_BY.to_string(),
+                Some("delonix".to_string()),
+            ),
+        ],
+        &[(
+            super::reconcile::LAST_APPLIED.to_string(),
+            Some(super::reconcile::encode_last_applied(fields)),
+        )],
+    )?;
+    Ok(())
+}
+
+/// What the manifest declares, for the reconciler.
+pub(crate) fn desired(doc: &ManifestDoc) -> Result<super::reconcile::Desired> {
+    let spec: VolumeSpec = manifest::spec_of(doc)?;
+    Ok(super::reconcile::Desired {
+        kind: "Volume".into(),
+        name: doc.metadata.name.clone(),
+        fields: desired_volume_fields(&doc.metadata.name, &spec)?,
+        converges: true,
+        ownable: true,
+    })
+}
+
+/// What is on the machine, for the reconciler.
+pub(crate) fn actual() -> Result<Vec<super::reconcile::Actual>> {
+    let store = VolumeStore::open(state_root())?;
+    Ok(store
+        .list()?
+        .into_iter()
+        .map(|v| super::reconcile::Actual {
+            kind: "Volume".into(),
+            name: v.name.clone(),
+            fields: actual_volume_fields(&v),
+            owner: v.labels.get(super::reconcile::STACK_LABEL).cloned(),
+            last_applied: v
+                .annotations
+                .get(super::reconcile::LAST_APPLIED)
+                .and_then(|raw| super::reconcile::decode_last_applied(raw)),
+        })
+        .collect())
+}
 
 #[derive(Subcommand)]
 pub enum VolumeCmd {
@@ -159,7 +373,38 @@ pub fn run(action: VolumeCmd) -> Result<()> {
 /// Dry-run: the spec with every `#[serde(default)]` materialized.
 pub fn spec_with_defaults(doc: &ManifestDoc) -> Result<serde_yaml::Value> {
     let spec: VolumeSpec = manifest::spec_of(doc)?;
-    serde_yaml::to_value(spec).map_err(|e| Error::Invalid(format!("dry-run: {e}")))
+    let share = spec.net_share()?;
+    // With a network-share block, the driver and device are DERIVED from it.
+    // Printing the struct's `driver: local` default next to an `nfs:` block
+    // would read as a contradiction — and a dry-run exists to say what will
+    // actually be applied, not what the struct happens to default to.
+    let derived = match share {
+        Some((kind, block)) => Some(super::storage::share_mount(
+            &doc.metadata.name,
+            kind,
+            block,
+        )?),
+        None => None,
+    };
+    let mut v = serde_yaml::to_value(&spec).map_err(|e| Error::Invalid(format!("dry-run: {e}")))?;
+    if let (Some(m), serde_yaml::Value::Mapping(map)) = (derived, &mut v) {
+        map.insert(
+            serde_yaml::Value::from("driver"),
+            serde_yaml::Value::from(m.driver),
+        );
+        map.insert(
+            serde_yaml::Value::from("device"),
+            serde_yaml::Value::from(m.device),
+        );
+        map.insert(
+            serde_yaml::Value::from("mountOptions"),
+            match m.options {
+                Some(o) => serde_yaml::Value::from(o),
+                None => serde_yaml::Value::Null,
+            },
+        );
+    }
+    Ok(v)
 }
 
 pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
@@ -168,14 +413,28 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
         let name = &doc.metadata.name;
         manifest::warn_unknown_fields(doc, VOLUME_SPEC_FIELDS);
         let spec: VolumeSpec = manifest::spec_of(doc)?;
-        create_volume(
-            &store,
-            name,
-            &spec.driver,
-            spec.device,
-            spec.options,
-            spec.quota,
-        )?;
+        // A network share (`spec.nfs`/`cifs`/`webdav`) IS this volume's driver
+        // and device — the friendly declaration that `kind: Storage` used to own.
+        // The credentials file is written here and only here: computing the
+        // mount is pure precisely so a `plan`/`--dry-run` can describe it
+        // without creating anything.
+        let (driver, device, options) = match spec.net_share()? {
+            Some((kind, block)) => {
+                // A typo inside the block would otherwise be swallowed: the
+                // top-level warning only looks at the spec's own keys, and a
+                // `serverr:` in here would silently become "no server".
+                manifest::warn_unknown_fields_in(doc, kind, super::storage::NET_SHARE_FIELDS);
+                super::storage::ensure_share_credentials(name, kind, block)?;
+                let m = super::storage::share_mount(name, kind, block)?;
+                (m.driver, Some(m.device), m.options)
+            }
+            None => (
+                spec.driver.clone(),
+                spec.device.clone(),
+                spec.options.clone(),
+            ),
+        };
+        create_volume(&store, name, &driver, device, options, spec.quota.clone())?;
         println!("volume/{name}: {}", super::po::t("ensured"));
     }
     Ok(())
@@ -697,5 +956,30 @@ mod tests {
     fn usage_com_quota_zero_nao_divide_por_zero() {
         // A quota of 0 would give `inf%`/NaN in the percentage — degrades to raw usage.
         assert_eq!(fmt_usage(100, Some(0)), "100 B / 0 B");
+    }
+
+    /// The documented field list and the code that builds it are two places
+    /// saying the same thing, and this repo has already paid three times for
+    /// letting two such places drift (the docs described `serve docker-api` as
+    /// read-only, `cluster kubeadm` without HA, `network` without a realized
+    /// overlay). This test is the constant's real consumer: it fails the moment
+    /// a field is compared without being documented.
+    #[test]
+    fn os_campos_comparados_sao_os_documentados() {
+        let spec: super::VolumeSpec = serde_yaml::from_str(
+            "driver: nfs\ndevice: nas:/export\nmountOptions: vers=4\nquota: 10G\n",
+        )
+        .unwrap();
+        let f = super::desired_volume_fields("dados", &spec).unwrap();
+        assert_eq!(f.len(), super::RECONCILED_VOLUME_FIELDS.len());
+        for k in f.keys() {
+            assert!(
+                super::RECONCILED_VOLUME_FIELDS.contains(&k.as_str()),
+                "{k} is compared but undocumented"
+            );
+        }
+        // The manifest says `10G`, the record stores bytes — normalizing the
+        // manifest side is what stops a quota from reading as changed forever.
+        assert_eq!(f.get("quota").unwrap(), "10737418240");
     }
 }

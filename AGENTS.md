@@ -2,7 +2,7 @@
 
 Motor de **containers e microVMs daemonless, rootless-first, kernel-native, em Rust**.
 Repositório **público** (`angolardevops/delonix-runtime`, Apache-2.0) — extraído do monorepo
-privado `delonix-paas` (ver [README.md](README.md) para a arquitectura dos 8 crates).
+privado `delonix-paas` (ver [README.md](README.md) para a arquitectura dos 10 crates).
 
 ## Comandos
 
@@ -19,6 +19,18 @@ homóloga ao Docker, distinta do `delonix`/`delonixctl` privados do `delonix-paa
 repo/branch/remote, não afectados por nada aqui). Comandos agrupados semanticamente em vez de
 uma lista plana, um módulo por grupo em `crates/delonix-runtime-bin/src/cmd/`:
 
+- `delonix init` (v0.47.0) — o passo ANTES do `stack init`/`vm init`: olha para o directório,
+  decide qual dos dois chamar e com qual dos onze templates, e **delega** (não gera nada de seu).
+  `cmd/init.rs::detect` é puro sobre os nomes de ficheiro presentes, ordenado do mais específico
+  para o mais genérico — um Django também tem `.py` e um Next.js também tem `package.json`, por
+  isso a regra mais larga não pode ganhar só por ter sido verificada primeiro. **Explica-se
+  sempre** (`detected go.mod → stack init --template go`): um palpite errado que se vê corrige-se
+  com `-t`, um em silêncio produz um projecto que não bate certo com o código ao lado. Um
+  `VMfile` manda para o `vm init`; um `docker-compose.yml` é o caso em que a resposta certa é
+  **não gerar nada** (já corre nativamente com `delonix compose up`, e um 2.º manifesto dava-lhe
+  duas fontes de verdade) — avisa, em vez de gerar na mesma. `delonix version` existe a par da
+  flag porque `<ferramenta> version` é o que se escreve primeiro (git/docker/kubectl/podman
+  respondem todos), e imprime o texto da flag VERBATIM para os dois não poderem divergir.
 - `delonix container` — run/ps/stop/rm/exec/logs/**update**/**describe**/**kill**/**wait**/
   **restart**/**rename**/**port**/**attach** (v0.25.0, Docker/Podman CLI-verb parity). `kill -s
   <signal>` sends an arbitrary signal (name or number) without forcing a `Stopped` status — the
@@ -391,6 +403,131 @@ falhava (código 124). É o mesmo bug que o `exec` já teve e corrigiu — passa
 `user` e a deixar o skip-por-inode do `open_container_ns` decidir. Lição a reter: **`container.
 userns` não é "está num userns diferente do meu"**; nunca o usar para essa pergunta.
 
+## IaC nativo: `stack plan`/`apply` convergente/`destroy` (v0.47.0)
+
+Pedido: tornar o IaC do Delonix aceitável pela comunidade **sem ser Terraform nem Ansible** — que
+não sejam precisos. A revisão que o motivou está em
+[docs/discovery/47_IAC_REVISAO.md](docs/discovery/47_IAC_REVISAO.md).
+
+**O defeito estrutural que isto fecha**: o `apply` só criava. Um recurso existente imprimia
+`already exists, nothing to do` e o comando devolvia **0** — mudar a imagem no manifesto não fazia
+nada e reportava sucesso. Gémeo declarativo do relato desonesto que a v0.37.0 tirou do CLI
+imperativo, e pior, porque o utilizador mudou o ficheiro de propósito. Agrava-o o facto de a
+capacidade já cá estar: o `cmd_update` reconfigura portas/volumes/redes/memória/CPU **a quente sem
+mudar o PID** e o caminho declarativo nunca lhe chamou — 5.ª ocorrência do padrão
+`mount_live`/`set_net_rate`/`update_limits`/`JsonStore::update`.
+
+- **`cmd/reconcile.rs` é PURO** — recebe os dois lados já lidos, devolve `Vec<Change>`; nunca abre
+  um store nem corre um comando. É o que torna testáveis como dados os casos que interessam.
+- **Diff de 3 vias.** O último spec aplicado vive no PRÓPRIO recurso
+  (`delonix.io/last-applied`, o mecanismo do kubectl no sítio do kubectl) — **sem ficheiro de
+  estado**, coerente com o que o projecto já publicou. É o 3.º lado que distingue «tiraste o campo
+  do ficheiro» (reverte) de «alguém pôs isto à mão» (não mexe).
+- **Posse por label** `delonix.io/stack` (mesmo idioma do `POD_LABEL`/`COMPOSE_PROJECT_LABEL`).
+  Um recurso criado à mão é `Adopt` (dispensa um comando `import`); de outra stack é `Conflict` e
+  nunca é tocado; e nem `--prune` nem `destroy` vêem o que não têm a label.
+- **Fail-closed na recriação**: `-/+` nomeia TODOS os campos frios e o `apply` recusa sem
+  `--replace <Kind>/<nome>`, antes da primeira criação (o apply é fail-fast sem rollback — recusar
+  a meio deixaria a stack meio convergida E com erro). `--prune` nunca por omissão, e corre em
+  ÚLTIMO lugar. `destroy` usa a ordem INVERSA de `KINDS`, **derivada** e não escrita 2.ª vez.
+- **`--detailed-exitcode`** (0/2/1) — contrato do `terraform plan`, para um gate de deriva em CI.
+- **Âmbito: 11 dos 12 Kinds convergem** (`CONVERGING_KINDS`) — Network/Volume/ShareVolume/Image/
+  Vm/Container/Pod/FirewallPolicy/HTTPRoute/Ingress/Tunnel. A Fase C fechou os três que a v1
+  deixara de fora (HTTPRoute/Ingress por proveniência no `resolve_config`, Tunnel por separar o
+  spec do status); **esta linha dizia 8 e estava desactualizada pela própria sessão que os
+  acrescentou** — a lista autoritativa é a constante, e `stack plan --fields` imprime-a.
+  **Só o `Secret` fica** «garante presente», e por uma razão que não é falta de atenção: o estado
+  são valores cifrados, e um plano não os decifra para comparar. O plano marca-o `!` — **nunca o
+  omite** (um plano que esconde um recurso lê-se como «sem alterações») — e o `--fields` diz o
+  obstáculo concreto, porque «ainda não converge» lê-se como «ninguém chegou lá». O `Cluster`
+  fica fora do próprio `KINDS` por ser um procedimento remoto e não um recurso local.
+- **`Desired.ownable`** separa «converge» de «é possuível». Uma `Image` é cache partilhada com
+  endereço de conteúdo (o mesmo `alpine:latest` serve todas as stacks — carimbá-la para uma e
+  removê-la quando essa deixasse de a declarar tirava-a debaixo das outras); uma `FirewallPolicy`
+  e uma `ShareVolume` não têm registo próprio onde carimbar. As três convergem e nenhuma é
+  adoptada nem podada. Sem esta distinção, um recurso sem dono aparecia como `Adopt` em TODOS os
+  planos — medido, não suposto.
+- **Três listas de Kinds convergentes têm de concordar, e derivaram uma vez.** O
+  `CONVERGING_KINDS` decide três coisas (se o `actual_of` sonda a presença, se o
+  `converge_and_stamp` aplica, se carimba) e os braços do `match` e a tabela do `--fields` são
+  escritos à parte. Vm/FirewallPolicy/ShareVolume ganharam adaptador e ficaram fora da constante,
+  logo eram SALTADOS — e o sintoma escondeu-se porque o `apply` antigo de cada Kind é idempotente
+  e convergia pelo caminho errado. Há agora teste a exigir as três de acordo nos dois sentidos.
+- **A normalização é o ponto crítico**: se os dois lados não derem a mesma string, tudo aparece
+  como deriva para sempre. O conjunto comparado é conservador, cada Kind tem teste a provar que um
+  manifesto inalterado dá ZERO diferenças, e **`stack plan --fields`** diz o que é comparado e o
+  que não é e porquê (`env`/`command` vêm fundidos com os da imagem, `user` é guardado como uid).
+- `mount_to_spec` é o inverso do `resolve_spec` de propósito — aquele **cria** o volume, e calcular
+  um plano não pode criar nada.
+- **`Volume`/`Network` ganharam `labels`/`annotations`** (`#[serde(default)]`, registos antigos
+  continuam válidos). O `Network` não é serde — é `key=value` com vários escritores, por isso o
+  `set_metadata` reescreve LINHA A LINHA (idioma do `add_overlay_peer`) e promove um registo legado
+  (octeto nu) a `base=<n>`; um valor com newline é **recusado** (partiria o registo em duas linhas).
+
+**Schema GERADO do código (ADR-0007)** — `delonix schema print` + `delonix explain
+Container.ports`, publicado em `docs/schema/v1/delonix.json` com teste a garantir que É o gerado.
+`schemars` é a **2.ª excepção deliberada** à regra de sem-dependências-novas (depois do `ratatui`),
+confinada ao `-bin`, com os 9 crates de motor verificados dep-limpos (`cargo tree -e normal -p <crate>` de cada um, medido: nem `schemars` nem `ratatui` aparecem em nenhum). O schema é tão estrito quanto
+o motor (`additionalProperties: false`, para apanhar o typo num nome de campo), mas a lista de
+aceites vem dos MESMOS `*_SPEC_FIELDS` do `warn_unknown_fields`: a forma agrupada do Container é
+hoisteada antes de o `ContainerSpec` existir, e derivar a estritez só do struct sinalizaria
+manifestos correctos — falso positivo, pior que a lacuna.
+
+**BUG REAL apanhado a validar os `examples/` contra o schema**, num exemplo publicado:
+`env: { POSTGRES_PASSWORD: dev }` (a forma que qualquer pessoa vinda do compose escreve) era aceite
+e **silenciosamente descartada** — o Postgres do `examples/dependency.yaml` arrancava sem password.
+A forma agrupada passa a ser identificada pelas suas chaves (`vars`/`files`/`secrets`/
+`secretFiles`), e uma mapping simples vira `["K=v"]`.
+
+**Fusões de Kinds (18 → 15).** `Egress`→`FirewallPolicy` (partilhavam a struct `FwDocSpec`
+inteira), `Dependency`→açúcar reduzido para `FirewallPolicy` no `load` (fundindo por ALVO, porque
+várias dependências ACUMULAM allows e um documento por dependência faria a última apagar as
+anteriores), `Storage`→bloco `nfs:`/`cifs:`/`webdav:` de `kind: Volume`. Os nomes antigos carregam
+com aviso. **A 4.ª fusão NÃO se fez**: `kind: Container` com `spec.containers` NÃO é um `kind: Pod`
+de um elemento — o primeiro cria um container chamado `<name>`, o segundo cria a netns `pod-<name>`
+e chama-lhe `<name>-c0`; reescrever renomearia o container e partiria o DNS, os backends de
+HTTPRoute e as referências cruzadas. Fica só o aviso de depreciação. **Regra que a fusão do Egress
+revelou**: os filhos de um `kind: Stack` são construídos DENTRO do `load` e não passam pelo ciclo,
+por isso qualquer redução tem de correr nos DOIS caminhos ou um grupo do Stack produz documentos
+que nenhum handler reclama.
+
+**`FirewallPolicy`: duas políticas para o mesmo (alvo, direcção) são RECUSADAS** no
+`validate_graph`. O `apply_fw_doc` substitui as regras de uma direcção, logo a segunda apagava as
+da primeira com ambas a reportar sucesso — e o `validate` dizia «OK». Recusar e não fundir (ao
+contrário da Dependency): uma Dependency declara o acesso de um peer e várias somam-se; uma
+política declara o estado desejado INTEIRO de uma direcção, logo duas são duas respostas à mesma
+pergunta.
+
+**`vm convert` fala com os ecossistemas todos** — `qcow2`/`raw`/`vmdk`/`vdi`/`vhdx`/`vhd`. Este
+motor não ganha um backend por produto (o VirtualBox não coexiste com o KVM, o vSphere/Proxmox são
+APIs remotas, o Hyper-V é Windows), mas uma imagem construída aqui é importada por todos. **`vhd`
+é `vpc` no qemu-img e `.vhd` no ficheiro** — a única combinação em que o nome do formato e a
+extensão divergem, e daí serem duas funções. `--compress` só em qcow2/vmdk, recusado nos outros
+com a lista em vez de um erro do qemu-img. Validado com `qemu-img info` E `file(1)`.
+**VirtualBox/VMware Workstation ficam por fazer**: `VBoxManage`/`vmrun` não existem neste host,
+logo um backend seria código não validável.
+
+**O `vm build` do VMfile foi validado ao vivo pela primeira vez** (o `virt-customize` corre neste
+host; o bloqueio do `/boot/vmlinuz` a 0600 não morde). Build em 13s de uma base local, conteúdo
+confirmado com `virt-cat`. Uma imagem construída passou a HERDAR distro e kernel da base quando o
+`FROM` é local — **herdar metade era medivelmente pior**: com a distro da base e o release a ser
+a ref do FROM, a coluna imprimia `debian/delonix-vm-base:debian-bookworm`.
+
+**O schema dos manifestos passou a ESTÁVEL** em `docs/cli-stability.md` (estava declarado o
+contrário — a CLI mais protegida que o formato que as pessoas põem em git). Guia transversal novo
+em `docs/gitops.md` (plan num PR, apply no merge, gate de deriva, e o que fazer quando um apply
+morre a meio). `scripts/schema-diff.sh` compara campo a campo entre duas tags e sai 1 com
+diferenças.
+
+**Cenário de caos `stack_converge`** (arnês: 20/20), com **dois** containers de propósito — o
+segundo é o CONTROLO, e prova que a convergência tocou só no que o plano nomeou. A primeira versão
+verificava apenas que o PID não mudava, e isso **não prova nada**: um apply que não faz nada também
+deixa o PID intacto. As asserções que valem são o registo ter mudado (`memory_max`) **e** o
+`stack plan --detailed-exitcode` seguinte nada ter a propor. Verificado pela regra do repo, com as
+duas correcções revertidas uma de cada vez: sem `container::converge` falha em «reportou sucesso
+sem convergir a memória (64M)»; sem `refuse_unallowed` falha em «a recusa mexeu no container» — o
+apply destrói-o para o recriar com uma imagem que não existe, e deixa-o sem PID.
+
 ## Manifesto/apply (`delonix-manifest.yaml`)
 
 Manifesto declarativo multi-documento, ao estilo Kubernetes (`apiVersion: delonix.io/v1` /
@@ -644,8 +781,10 @@ Núcleo em `ContainerFw.namespace` + `infra::fw_chain_body`/`ns_set_join`.
     same-ns `1 packet accepted` pela regra `@dlxnse20c4037`, cross-ns + `default`
     `4 packets dropped` pela regra `@dlxall ct state new`. Cenário de caos novo
     (`pod_namespace_isolation`) que **falha com a correcção revertida** e passa com ela.
-  - **O que NÃO foi provado com um guest a sério**: nenhuma imagem deste host arranca em Cloud
-    Hypervisor (a golden é libvirt-only e não há `hypervisor-fw`), por isso o alvo no endereço da
+  - **O que NÃO foi provado com um guest a sério** (nota de 2026-08-05, ULTRAPASSADA em parte: com
+    o EDK2 `CLOUDHV.fd` a golden JÁ arranca em CH — ver «A subnet de uma rede passou a valer»):
+    à data nenhuma imagem deste host arrancava em Cloud
+    Hypervisor (a golden dizia-se libvirt-only por não haver `hypervisor-fw`), por isso o alvo no endereço da
     VM foi um veth real na bridge do holder, não o convidado. O que isso deixa por confirmar é
     apenas o caminho `tap`→guest, que é o mesmo de qualquer VM CH sem namespace nenhuma; a chain,
     o endereço e a decisão do kernel foram exercitados com pacotes verdadeiros.
@@ -1566,6 +1705,70 @@ cair).
 vivo neste host: mascaramento dentro de containers reais (musl E glibc), `docker-api` ponta-a-ponta
 com concorrência, `net flow` (degrada para contadores de veth sem CAP_BPF, e já não cria o caminho
 fixo nem deixa restos), e o `container run` normal sem regressão.
+
+## Tecto de capabilities no CRI (`DELONIX_CRI_CAP_CEILING`, v0.47.0)
+
+Um limite MÁXIMO, definido no nó, para as capabilities de qualquer container criado através do CRI
+— seja o que for que o kubelet peça, incluindo `privileged: true`. `crates/delonix-cri/src/
+cap_ceiling.rs` (`CapCeiling`), configurado por `DELONIX_CRI_CAP_CEILING` / `..._MODE` ou por
+`delonix serve cri --cap-ceiling/--cap-ceiling-mode` (flag > env, mesma precedência do `--addr`).
+
+**Porque no runtime e não só no admission.** Tudo o que chega ao `create_container` já vem
+autorizado: o securityContext é traduzido em flags sem opinião nenhuma (correcto — o runtime não é
+o admission controller). Isso deixa a única barreira entre um `privileged: true` e todas as
+capabilities do kernel numa cadeia de admission que corre noutro processo, noutra máquina, e cuja
+configuração este nó não consegue ver nem verificar. O tecto é a resposta local: vale mesmo com o
+Pod Security mal configurado, com um `crictl` a falar directamente com este socket, ou com um
+static pod que nunca passou pelo API server.
+
+- **Gramática** (`parse`, pura e testada): ausente/vazio/`all` → **sem tecto, comportamento
+  byte-a-byte igual ao anterior**; `none` → capability nenhuma; `default` → o `KEPT_CAPS` do motor;
+  `default,NET_ADMIN` → o baseline mais as nomeadas; lista de nomes (`CAP_` opcional,
+  case-insensitive) → exactamente essas. Um nome desconhecido, um modo desconhecido, ou um valor só
+  com separadores **impedem o servidor de arrancar** (`exit 2` no `delonix-cri`, erro do CLI no
+  `serve cri`, nos dois casos antes de qualquer `bind`) — um tecto que caísse em silêncio para
+  «ilimitado» por causa de um typo era precisamente a falha que isto existe para evitar.
+- **Dois modos, e a assimetria é deliberada**: um pedido EXPLÍCITO acima do tecto (`capabilities.
+  add`, ou `privileged`) é **recusado no `CreateContainer`** com `PermissionDenied` a NOMEAR as
+  capabilities negadas (o kubelet mostra-o no pod de imediato) — `mode=clamp` corta-o e avisa em
+  `warn`, para endurecer um nó cujos PodSpecs não se podem mudar hoje. Mas o **baseline implícito**
+  (o `KEPT_CAPS` que um container recebe sem pedir nada) é reduzido ao tecto **sem erro nos dois
+  modos**: baixar um default que o workload nunca pediu é o que «tecto» significa, e recusar todos
+  os pods do nó porque o default do próprio motor é mais largo que o limite tornaria a
+  funcionalidade inútil.
+- **O clamp não reimplementa a resolução de capabilities** — chama o `resolve_cap_keep` DO MOTOR e
+  intersecta com o tecto, emitindo `--cap-drop ALL` + um `--cap-add` por capability do conjunto
+  final. Por isso o módulo `delonix_runtime::capabilities` passou a ser **público** (`KEPT_CAPS`/
+  `cap_num`/`cap_name`/`all_caps_mask`/`resolve_cap_keep`/`names_from_mask`, movidos do interior do
+  `lib.rs`): uma segunda tabela nome↔número do lado do CRI divergiria no dia em que uma capability
+  fosse acrescentada aqui — a mesma disciplina gerador-e-leitor-partilham-o-formato do
+  `fw_rule_tail`. Há teste de round-trip (`cap_name`↔`cap_num` para 0..=40, e mask→nomes→mask).
+- **Limita SÓ capabilities.** Um pod privilegiado continua a ter `seccomp=unconfined`, `/sys`
+  escrivível e cgroupns próprio — são eixos separados do `--privileged`, e cortar capabilities não
+  torna um pod privilegiado seguro. O módulo di-lo em vez de sugerir um endurecimento que não
+  entrega.
+- **Armadilha apanhada pelo teste, do tipo «um teste pode codificar o bug»**: a primeira versão
+  modelava `privileged` como `resolve_cap_keep(cap_drop, ["ALL"])`, o que parece equivalente e não
+  é — no motor `privileged` **ignora** o `cap_drop` por inteiro (`if privileged { all_caps_mask() }`).
+  O clamp tem de prever o que o motor CONCEDE, não o que discutivelmente devia. Teste dedicado
+  (`privileged_ignora_o_cap_drop_como_no_motor`).
+- **Observabilidade**: banner no arranque (stdout do servidor + `tracing::info`) e o tecto em vigor
+  no `status(verbose)` → `info["capabilityCeiling"]`, legível por `crictl info`. Sem isto, um tecto
+  activo mas invisível seria diagnosticado como «o runtime largou-me as capabilities sem razão». O
+  `warn` do clamp só sai quando um pedido EXPLÍCITO foi cortado (`ceiling_reduces`) — avisar quando
+  só o baseline baixou daria uma linha por cada arranque de container do nó.
+- **Validado ao vivo neste host**: fail-closed nos dois pontos de entrada (valor e modo inválidos,
+  em EN e PT, sem socket criado); servidor `delonix-cri` real a anunciar o tecto expandido; e — o
+  pressuposto central do clamp — o argv emitido aplicado pelo MOTOR real, com o kernel a confirmar
+  `CapEff 0x1001` (CHOWN+NET_ADMIN exactos) contra `0xa0042dfb` do baseline e `0x1ffffffffff` de um
+  `--privileged`. **Não validado com um kubelet/`crictl` real** (nenhum dos dois existe neste host,
+  e `build_client(false)` no `build.rs` não gera stubs de cliente gRPC): o caminho gRPC está coberto
+  pelo teste do `create_container` real + `cap_flags`/`cap_args`, e a camada tonic são três linhas
+  de `blocking(...)`.
+- **Por fazer, deliberadamente**: nada disto toca no `container run` da CLI (lá quem escolhe é o
+  operador, não um pedido remoto — um tecto local seria o utilizador a limitar-se a si mesmo); e
+  `add_ambient_capabilities` do CRI continua sem tradução nenhuma no motor (gap pré-existente,
+  anterior a este trabalho).
 
 ## Auditoria de segurança #2 (código VM desta série: console/rede/cloud-init)
 
@@ -2630,37 +2833,57 @@ sem noção de tenant) — não o "Proxmox Driver" com inventário/scheduler do 
 - Event bus: só decidir o transporte (in-process callback vs. daemon) depois da Fase 3 acima, não
   antes — evita desenhar para um daemon que pode nunca ser aprovado.
 
-## Estado para a próxima sessão (2026-07-27, antes do lançamento público de sexta-feira)
+## Estado para a próxima sessão (2026-08-10)
 
-Release actual: **v0.35.1** (ver `docs/RELEASES.md`). Motor testado sistematicamente por todos os
-grupos de comandos, i18n corrigido (380+ strings), docs (`README.rst`, site, `docs/comparacao.html`)
-sincronizadas com o binário publicado, ficheiros de saúde da comunidade (`CONTRIBUTING.md`/
-`SECURITY.md`/`CODE_OF_CONDUCT.md`/templates de issue/PR) no lugar, roteiro de vídeos em
-`docs/ROTEIRO-VIDEOS.md`. **Pendente, por ordem de valor**:
+> A versão anterior desta secção estava parada em **2026-07-27 / v0.35.1** — onze versões atrás,
+> e era a primeira coisa que uma sessão lia para saber onde as coisas estavam. Uma secção de
+> «estado» desactualizada mente nos dois sentidos: dá por fazer o que já está feito, e por
+> pendente o que já foi fechado. É o mesmo defeito que o `AUDITORIA-E2E.md` teve durante semanas.
 
-1. **Volumes anónimos do `compose`** (`ports:`/`working_dir:`/porta aleatória já fechados em
-   v0.34.0) — precisa de decisão de DESENHO antes de código: um `down` simples remove um volume
-   anónimo, ou só `down -v`? Nomeação determinística por posição na lista (risco de colisão se a
-   ordem mudar) vs. um registo próprio (mais peso). Não avances sem responder a isto primeiro.
-2. **5 itens de namespace/privilégio/protocolo** (eram 6 — «pods e VMs no isolamento» fechou na
-   v0.40.0), cada um candidato a sessão própria — nenhum é
-   "dívida rápida", todos tocam fronteiras que este projecto trata com auditoria dedicada (ver
-   skill `delonix-runtime-sec`): `macvlan`/`ipvlan` realizados fisicamente (mesmo em root, o
-   código nunca foi escrito — distinto do caso rootless, que é limite de CAP_NET_ADMIN, não de
-   código em falta); partilha de PID em pods (`shareProcessNamespace`, toca `spawn()`, já
-   sinalizada como função de risco de ~405 linhas); recuperar VMs num respawn do holder (pods e
-   containers já recuperam desde a v0.41.0); WebSocket/upgrade tunelado no proxy L7 (`httproute`); `exec`/attach interactivo +
-   `--restart` na API `serve docker-api` (a primeira precisa de HTTP hijacking real, a segunda de
-   repensar o modelo de supervisor `fork()` para um servidor multi-thread).
-3. **Gravar os vídeos** — o guião (`docs/ROTEIRO-VIDEOS.md`, 6 episódios, comandos já testados) está
-   pronto; falta só a gravação, que é trabalho do utilizador, não de agente.
+Última tag publicada: **v0.46.0**; o `Cargo.toml` ainda diz `0.46.0` e o branch de trabalho é
+`ciclo-v046-bloco-a`, com **82 commits por publicar**. As notas da **v0.47.0** já estão escritas
+(`docs/releases/v0.47.0.md`) e cobrem os três blocos: o ciclo declarativo (`stack plan`/`apply`
+convergente/`destroy`, schema gerado e estável, 18→15 Kinds), o tecto de capabilities do CRI, e o
+bloco pequeno (`delonix init`/`version`, o `scan` a recusar imagens VM, a extracção a dobrar).
+**Publicar é decisão do dono** — bump + tag `vX.Y.Z`, o CI faz o resto.
 
-**Lição concreta desta sessão, vale repetir**: dívida documentada como "só falta ligar" (`runtime::
-update_limits`, `JsonStore::update`) tinha um bug latente à espera do primeiro chamador real —
-mesmo padrão já visto com `mount_live`/`set_net_rate` numa sessão anterior. Antes de assumir que
-"só falta wiring", grepa por `container.cgroup()` vs `live_cgroup()` (e padrões análogos de caminho
-estático-vs-dinâmico) no código que vais ligar — ver a secção "Falhas silenciosas corrigidas" acima
-para o histórico completo. O agente `revisor` já tem este padrão explícito no seu checklist.
+**Estado verificável hoje** (medido, não afirmado): `cargo build --workspace`, `clippy
+--all-targets` e `fmt` limpos; **443 testes** em 21 suites; arnês de caos **20/20**; a
+documentação sem um único comando ou flag que não exista no binário; i18n a **232/232**
+comandos e **0** descrições de flag por traduzir, com dois testes a travar a regressão.
+
+**Pendente, por ordem de valor:**
+
+1. **Três ADRs em `Proposed`, cada um uma sessão própria** — `0008` (backend Proxmox VE num crate
+   à parte), `0009` (provisionamento de datasets TrueNAS pela API), `0010` (o que seria preciso
+   para a API de gestão ser remota — e cuja conclusão esperada é que **não deve** ser, porque a
+   remoteness pertence ao PaaS). Nenhum deles se começa sem ler o ADR primeiro.
+2. **Volumes anónimos do `compose`** — precisa de decisão de DESENHO antes de código: um `down`
+   simples remove um volume anónimo, ou só `down -v`? Nomeação determinística por posição na
+   lista (risco de colisão se a ordem mudar) vs. um registo próprio (mais peso). Não avances sem
+   responder a isto primeiro.
+3. **5 itens de namespace/privilégio/protocolo**, cada um candidato a sessão própria — nenhum é
+   dívida rápida, todos tocam fronteiras que este projecto trata com auditoria dedicada (skill
+   `delonix-runtime-sec`): `macvlan`/`ipvlan` realizados fisicamente (mesmo em root o código
+   nunca foi escrito — distinto do caso rootless, que é limite de CAP_NET_ADMIN e não de código
+   em falta); partilha de PID em pods (`shareProcessNamespace`, toca no `spawn()`, já sinalizado
+   como função de risco de ~405 linhas); recuperar VMs num respawn do holder (pods e containers já
+   recuperam desde a v0.41.0); WebSocket/upgrade tunelado no proxy L7 (`httproute`); `exec`/attach
+   interactivo + `--restart` na API `serve docker-api` (a primeira precisa de HTTP hijacking real,
+   a segunda de repensar o modelo de supervisor `fork()` para um servidor multi-thread).
+4. **Publicar as imagens de appliance** em `ghcr.io/angolardevops/delonix-vm-appliances` — exige
+   um PAT classic com `write:packages` (o token do `gh` deste host tem só `gist,read:org,repo,
+   workflow`, e o `GITHUB_TOKEN` não cria packages novos de user; ver a lição da golden) — e um
+   workflow de CI que as reconstrua, como o `vm-image.yml` já faz para a golden.
+5. **Gravar os vídeos** — o guião (`docs/ROTEIRO-VIDEOS.md`, 6 episódios, comandos já testados)
+   está pronto; a gravação é trabalho do utilizador, não de agente.
+
+**Lição de método que esta série repetiu três vezes, e vale mais que qualquer dos itens acima:**
+uma verificação só vale o que o seu filtro deixa passar. Um `grep "^  delonix"` sobre a saída de
+um teste cortou-me as linhas seguintes de um bloco multi-parágrafo; um limiar de «mais de 25
+caracteres» escondeu-me o `container ps`; e silenciar o `stderr` de um gerador deixou-o falhar a
+meio com o site escrito por metade. Quando uma medição parecer boa demais, **desliga o filtro e
+volta a contar**.
 
 ## Próximas fases (pedidas, não implementadas — cada uma precisa da sua própria sessão de planeamento)
 
@@ -2719,6 +2942,23 @@ activado por `--l18n=pt`/`DELONIX_L18N=pt`. Regras para não regredir:
   (`run()` → `cmd::output::error`) nunca sequer chamava `t_dyn` — só os 4
   re-execs escondidos o faziam; e `for_each_id` (`stop`/`rm`/... com vários ids)
   tinha o seu próprio `eprintln!` que também nunca passava por ele.
+- **FEITO (v0.47.0): a cobertura passou a ser MEDIDA, e há teste.** Esta secção afirmava que o
+  help do clap se traduz em runtime — e traduz-se; o que nunca tinha sido medido era quanto do
+  catálogo existia. Medido: **103 dos 232 subcomandos** imprimiam o help em EN sob `--l18n=pt`
+  (o grupo `container` inteiro, 28), e **206 descrições de flag**. Fechados os dois, a zero.
+  Dois testes em `main.rs` (`help_i18n_tests`) percorrem a árvore do `clap::Command`:
+  `todo_o_help_de_comando_tem_traducao_pt` é **estrito**, e
+  `o_help_dos_argumentos_so_pode_encolher` é um **ratchet** — falha se o número subir (flag nova
+  sem entrada) E se descer (traduz-se e baixa-se a constante no mesmo commit); um `<=` deixaria
+  a dívida a ler-se como verde. Consultam o CATÁLOGO (`po::has_pt_translation`, `#[cfg(test)]`) e
+  não o `t_help`: em EN o `t_help` devolve o próprio texto e o teste passaria pela razão errada.
+  **A excepção está declarada no código** (`is_same_in_both`) — `Containers: run/ps/stop/...` lê-se
+  igual nas duas línguas, e pedir tradução para isso é como um catálogo ganha ruído.
+  **Armadilha que custou duas passagens**: o `-h` mostra o `about` curto e o `--help` o
+  `long_about`/`long_help` INTEIRO — 8 `long_about` e um `long_help` multi-parágrafo só
+  apareceram depois, e um `grep "^  delonix"` sobre a saída do teste cortava-lhes as linhas
+  seguintes. Ao gerar entradas multi-linha, **não acrescentar `\n` na última linha**: o lookup
+  deixa de bater e o sintoma é o teste passar (a chave existe) com o `--help` a continuar em EN.
 
 ## Auditoria sistemática dos 208 subcomandos (v0.37.0) — 4 caminhos de perda de dados
 
@@ -2862,7 +3102,36 @@ checklist para quem mexer aqui do que como lista de correcções:
   existir, e a frase «No such file or directory» manda o leitor procurar um caminho
   (`vmimage::tool_package`, v0.45.0);
 - **`/sys/fs/cgroup/cgroup.subtree_control` conter `memory`** não é «a MINHA sessão tem
-  delegação» — é do cgroup RAIZ do host, e contém-no sempre (v0.42.2, ver abaixo).
+  delegação» — é do cgroup RAIZ do host, e contém-no sempre (v0.42.2, ver abaixo);
+- **um rootfs já extraído não é um rootfs a extrair** — a 2.ª passagem do re-exec de
+  `--net <rede-custom>` reextraía a imagem INTEIRA para o caminho que a 1.ª acabara de encher.
+  Medido com `pgvector:pg16` (10 296 entradas, 431 MB): 1 526 ms com `--net none` contra
+  3 143 ms com rede custom, e o delta é exactamente uma extracção (1 666 ms à parte); o `strace`
+  concorda, 2 060 canonicalizações do destino contra 1 030. Reextrair por cima de uma árvore
+  preenchida custa preço inteiro — não há poupança acidental. A correcção é **rootless-only de
+  propósito**: como root o `prepare_rootfs` MONTA um overlay, e um mount da 1.ª passagem não é
+  necessariamente visível na namespace onde o re-exec aterra (v0.47.0);
+- **um `read` que FALHA não é uma resposta vazia** — o cliente do socket de controlo fazia
+  `let _ = s.read_to_string(&mut resp)`, descartando o erro, por isso um timeout de leitura e um
+  holder que respondesse nada eram indistinguíveis: os dois davam ``system call `ingress control`
+  failed:`` **sem nada depois dos dois pontos**. E o tecto era 5s enquanto o `handle_control` é O
+  ponto de serialização — um chamador em fila espera por todos os attaches à frente dele. Medido,
+  e escala com a concorrência (não é ruído do host): 10 attaches concorrentes → 0 falhas, 20 → 3,
+  30 → **15**. Com o erro lido e o tecto em 30s: **30/30 em 21s**. Fica registado porque a minha
+  primeira leitura foi «o servidor fecha mudo» e estava ERRADA — o servidor não fechou nada, fomos
+  nós que desistimos (v0.47.0). **A varredura por padrão a seguir encontrou mais dois `let _ =`
+  sobre um `read`, e um deles era pior**: o `slirp_add_hostfwd` tinha 500 ms de tecto no slirp
+  ÚNICO que todo o ingress partilha, e a seguir ao read fazia `if resp.contains("\"error\"")`
+  → senão `Ok(())`. Um timeout deixa `resp` vazio, uma string vazia não contém `"error"`, e a
+  função devolvia **SUCESSO** para um publish que pode nunca ter acontecido. Ali o sintoma era um
+  erro sem sujeito; aqui era um falso sucesso. O `slirp_api` (o outro) devolvia `Ok("")`, que o
+  `slirp_remove_hostfwd` parseia como JSON `Null` e conclui que não há nada a remover — um
+  unpublish a reportar sucesso sem ter removido nada, com a porta do host presa;
+- **«não está no store de containers» não é «não é local»** — o `image scan` de uma imagem VM
+  anunciava «not local», ia à Docker Hub buscar `library/<nome>` e morria num **401**. Recusa
+  agora com o nome da alternativa; percorrer o sistema de ficheiros de um convidado é outro
+  caminho de SBOM, e um scan que em silêncio não faz nada útil é a falha que o comando existe
+  para evitar (v0.47.0).
 
 **Achado vivo da varredura (v0.42.2)**: `delonix system info` reportava `cgroup2 delegated: yes`
 incondicionalmente, por ler os ficheiros do cgroup raiz do host — o comando que se corre para
@@ -2884,6 +3153,197 @@ as portas publicadas morrerem sozinhas quando um consumidor externo lhe passou a
 `unwrap_or_default()` restantes são todos «listar para decidir o que acrescentar», onde vazio
 leva a criar (idempotente) e nunca a apagar.
 
+## Imagens de appliance (OPNsense, Proxmox, TrueNAS) — v0.47.0
+
+Pedido: transformar ISOs de instalação em imagens VM oficiais do Delonix. Scripts em
+`scripts/appliances/` (com README próprio); seis imagens produzidas e registadas.
+
+**O que as separa de tudo o resto no `VmImageStore`: não correm cloud-init.** Instalam-se e
+configuram-se sozinhas, por consola ou interface web. O `vm create` gerava **sempre** um seed
+NoCloud — o próprio comentário dizia «ALWAYS», e para uma cloud image está certo (sem datasource
+o cloud-init salta a fase de rede e a VM fica sem IP). Para um appliance é um ISO que ninguém lê,
+num CD-ROM que muda a lista de dispositivos do convidado sem razão.
+
+- **`VmImage.cloud_init`** (`#[serde(default)]`): `None` — todos os metadados escritos até hoje —
+  conta como `true`, por isso nada muda para as imagens que este motor sempre construiu (há teste
+  a carregar um `.json` antigo e a exigir exactamente isso). Com `Some(false)` o `vm create` salta
+  o seed e **recusa** `--hostname`/`--ssh-key`/`--user-data` a NOMEAR as flags, em vez de as
+  aceitar e deitar fora — a armadilha que este repo já corrigiu três vezes (`--security-opt
+  seccomp=`, `-v …:z`, `--network-alias`). O `describe` mostra a linha `Cloud-init`, senão a
+  recusa lê-se como arbitrária.
+- **`image vm import`** regista um disco que este motor não construiu, nos três pontos de entrada
+  de sempre. Os argumentos vivem num só `ImportArgs` `flatten`ado — escrevê-los três vezes é como
+  esses caminhos divergem. **Comprime com zstd por omissão** (`--no-compress` para não o fazer),
+  pela razão já registada para a golden: uma imagem do store é o backing file read-only de cada VM
+  criada a partir dela. Medido: um `convert` sem `-c` inflava 646 MiB para **2,15 GiB** à entrada.
+- **Metadados no artefacto OCI (annotations do manifesto)** — `push_oci_artifact_with_annotations`
+  / `pull_oci_artifact_with_meta`. Fecha de caminho o gap já documentado de `ubuntu_release`/
+  `k8s_version` desaparecerem num `vm pull`; para o `cloud_init` não era cosmético — um appliance
+  publicado voltava a receber seed do outro lado. Lidas **depois** da verificação do digest, para
+  que annotations de um manifesto adulterado nunca cheguem ao chamador. O `cmd_push` já lia os
+  metadados e fazia `let _ = img;`: era o consumidor que faltava.
+
+**Como cada uma é construída** (nenhuma monta um convidado à mão — cada produto instala-se como se
+instalaria em metal):
+
+| Appliance | Via | Tamanho |
+|---|---|---|
+| OPNsense 26.1.2 | imagem `nano` oficial (já instalada) — zero instalação | 646 MiB |
+| Proxmox VE 9.1 / PBS 4.1 / PMG 9.0 / PDM 1.0 | auto-install nativo (`answer.toml` no ISO) | 1,45 / 1,11 / 1,22 / 1,06 GiB |
+| TrueNAS SCALE 25.10.5 | JSON-RPC do próprio instalador | 2,41 GiB |
+
+**Três achados que custaram uma build cada** (todos por medição, nenhum por leitura):
+
+1. **As imagens `vga`/`serial`/`dvd` do OPNsense NÃO são sistemas instalados** — arrancam em modo
+   live a partir do media (`Root file system: /dev/ufs/OPNsense_Install`, «running in live mode
+   from install media»). São o instalador em forma de disco. Só a **`nano`** tem raiz em
+   `/dev/ufs/OPNsense_Nano`. Escolhi a `serial` primeiro precisamente por assumir o contrário.
+2. **O ISO do Proxmox não se edita no lugar.** `xorriso -boot_image any replay` morre na GPT
+   híbrida (`GPT partitions 1 and 2 overlap by 80 blocks`) e o `keep` produz um ISO que o SeaBIOS
+   não passa de `Booting from DVD/CD...` (confirmado por screendump do próprio ecrã, não deduzido).
+   O `mkiso.sh` extrai a árvore e volta a autorar o ISO a partir da receita
+   `-report_el_torito as_mkisofs` do **próprio original** — que é também o que torna UM script
+   correcto para os quatro produtos: diferem no volume id **e** na geometria (`-partition_hd_cyl`
+   é 110 no VE e **91** no PBS, logo valores fixos teriam produzido ISOs errados). Dispensa o
+   `proxmox-auto-install-assistant`, que aliás é ininstalável neste host (`download.proxmox.com`
+   inacessível daqui, testado).
+3. **O TrueNAS não tem answer file, mas tem API.** A unit `truenas-installer.service` do ISO live
+   é literalmente `python3 -m truenas_installer --server` — um servidor JSON-RPC sobre WebSocket
+   em `:8080`, com `install`/`list_disks`/`system_info`/`shutdown`. Não é preciso reempacotar
+   squashfs nenhum nem conduzir o TUI às cegas.
+
+**Duas armadilhas de método, da família «X não é Y» já catalogada:**
+
+- **Um socket que aceita não é um servidor a responder.** O `hostfwd` do QEMU aceita a ligação TCP
+  quer haja quer não haja algo à escuta no convidado, por isso a sonda `/dev/tcp` dava porta aberta
+  ao primeiro segundo de boot e o handshake WebSocket morria a seguir. Passou a tentar o handshake
+  real em retry.
+- **`modprobe: ERROR:` num log do instalador Proxmox não é uma falha** — é o kernel a encolher os
+  ombros perante hardware ausente. Um guarda `grep -i ERROR:` deu três builds boas por falhadas.
+  Só `ERROR: Installation failed`, `Auto-installation failed` e `unable to continue` são do
+  instalador.
+
+**Validado ao vivo, e a afirmação é «serve», não «arranca»** (`verify-boot.sh`): PBS responde na
+:8007 em ~20s, PMG na :8006 em ~30s, PDM na :8443 em ~20s, TrueNAS na :80 em ~50s, e o PVE na
+:8006 (medido à parte, com `pve login:` na consola). Cada um sobre um overlay, para a sonda nunca
+escrever na imagem. **O OPNsense é a excepção deliberada**: a web UI dele só escuta na LAN, e uma
+sonda pela WAN receberia recusa — que é o comportamento CORRECTO de uma firewall, não uma falha.
+Para ele a prova foi a consola: raiz em `/dev/ufs/OPNsense_Nano`, `LAN (vtnet0) -> 192.168.1.1/24`,
+`WAN (vtnet1) -> DHCP4`, e o fingerprint do certificado HTTPS já gerado.
+
+O caminho appliance do `vm create` foi provado com uma VM libvirt real da imagem OPNsense: 2 vCPU
+e 2 GiB **herdados da imagem**, zero `seed.iso` em disco e zero `cdrom` no XML do domínio.
+
+**Credenciais: conhecidas e públicas** (`root/opnsense` no OPNsense por omissão do fabricante;
+`root`/`truenas_admin` com `delonix-admin` nas restantes, definidas pelo answer file/RPC). Mesma
+natureza da golden k8s — documentadas no README dos scripts, para mudar no primeiro arranque.
+
+**Por fazer**: publicar em `ghcr.io/angolardevops/delonix-vm-appliances` (exige um PAT classic com
+`write:packages` — o token do `gh` deste host tem só `gist,read:org,repo,workflow`, e o
+`GITHUB_TOKEN` não cria packages novos de user, ver a lição da golden); e um workflow de CI que
+reconstrua estas imagens como o `vm-image.yml` já faz para a golden.
+
+## A subnet de uma rede passou a valer, e o que isso abriu (v0.47.0)
+
+Pedido: poder passar CIDRs ao criar VMs/redes (`vpc_cidr`, `public_subnets_cidr`,
+`private_subnets_cidr`, `single_nat_gateway` — o vocabulário do módulo VPC do Terraform), para
+que uma VM OPNsense faça de firewall de uma infra de rede gerida sem quebrar o ingress/egress
+nativo.
+
+**O primeiro degrau era um bug, não uma feature**: `--subnet` e `spec.subnet` eram aceites e
+deitados fora com o driver `bridge` — o único que o rootless realiza. O `create_with_base`
+existia para isso, dizia-o no doc-comment, e tinha **zero chamadores** (5.ª ocorrência do padrão).
+Ver o commit `net: a subnet de uma rede passa a valer`. Fechou de caminho uma **deriva eterna no
+reconciler**: `RECONCILED_NETWORK_FIELDS` já comparava `subnet`, logo um manifesto com `subnet:`
+dava plano `-/+` a cada `stack plan` e o apply nunca o resolvia.
+
+**O que o espaço de endereçamento permite, e porquê**: o registo de uma rede guarda UM OCTETO,
+não um CIDR; tudo o resto (bridge, gateway `.0.1`, range do IPAM) é derivado. Daí `10.<200-254>.
+0.0/16` e nada mais — `172.20.0.0/16` ou um `/20` exigem mudar o formato do registo e o IPAM.
+A recusa nomeia sempre a forma que funciona.
+
+**NO-GO medido, com controlo: o OPNsense não arranca em Cloud Hypervisor.** Nem com o
+`rust-hypervisor-fw` (fica a enumerar PCI, guest nunca sobe) nem com o **EDK2 `CLOUDHV.fd`** do
+fork oficial (`gh release download --repo cloud-hypervisor/edk2`) — nos dois casos zero entradas
+ARP no holder e 100% de perda. **O controlo é o que torna isto uma conclusão e não um palpite**:
+a golden Linux, com o MESMO EDK2, responde em ~15s. Logo o firmware e a plumbing estão bons e o
+problema é o guest FreeBSD. Como o CH é a única via de pôr uma VM na SDN do holder (com libvirt a
+VM vive na `virbr0`, noutro netns), **o OPNsense não pode hoje ser gateway dos containers por essa
+via** — a alternativa é `vm bridge` (privilegiado, EXPERIMENTAL, já validado E2E).
+
+**Achado lateral que corrige uma nota desactualizada**: este documento dizia que a golden k8s é
+«libvirt-only (não há hypervisor-fw)». Com o EDK2 `CLOUDHV.fd` ela **arranca em Cloud Hypervisor**
+— medido nesta sessão, IP na SDN em ~15s.
+
+**Porque é que `single_nat_gateway` é recusado e não aceite-como-no-op**: num nó só não há AZs
+onde espalhar NAT gateways, e uma rede é uma bridge plana, não um conjunto de subnets roteadas.
+Aceitá-lo seria repetir exactamente o bug que esta mesma sessão encontrou. `vpcCidr`/
+`publicSubnets`/`privateSubnets`/`singleNatGateway` dão erro que diz o que existe aqui, antes do
+genérico «unknown field — check the spelling» (quem escreve `singleNatGateway` não errou a
+escrita; tem um modelo mental que não mapeia).
+
+**O ponto técnico para quem continuar** (subnets pública/privada + OPNsense como gateway): hoje
+TUDO o que sai leva masquerade em `oifname "tap0"`. Se as cargas privadas passarem a sair por um
+gateway-appliance, o masquerade tem de acontecer **nele** e não antes — senão vê todo o tráfego
+com um IP só e as regras por-origem dele deixam de valer. As chains por-workload (`fwcont`) são
+FILTRO, não NAT, por isso compõem-se bem: o delonix decide se o pacote sai do workload, o
+appliance decide o que atravessa a fronteira.
+
+## Imagens base de SO, e o que o host precisa para as construir (v0.47.0)
+
+Cinco variantes do `--no-k8s`: Ubuntu 24.04/26.04, Debian bookworm, Rocky 9 e **Fedora** (novo).
+O Fedora é da família dnf/RPM do Rocky e o código diz isso em vez de o repetir — há teste a
+comparar os passos gerados para os dois campo a campo.
+
+**`--fedora-release` exige `<release>-<build>` (`42-1.1`) e recusa um `42` nu.** Medido: o nome do
+artefacto carrega um build que a versão não determina, e o redirector do Fedora não serve listagem
+de directório. Sem forma fiável de o descobrir, um `42` sozinho parece certo e dá 404 já com
+centenas de MB transferidos — pergunta-se em vez de adivinhar (mesmo princípio dos inputs de ISO
+no workflow das appliances).
+
+**Dois bloqueios de host, e nenhum se adivinha pelo erro que dá** (agora ambos tratados por
+`install.sh --with-image-build`):
+
+- **Sem `isc-dhcp-client` NO HOST**, o appliance do supermin nasce sem cliente DHCP — o
+  `supermin.d/packages` pede-o e o supermin só COPIA do host. O build morre em «Temporary failure
+  resolving 'archive.ubuntu.com'», um erro que parece de rede do host, e o host tem rede.
+- **`/boot/vmlinuz-*` a `0600`** (hardening do Debian/Ubuntu): o supermin copia o kernel do host
+  para o appliance e morre em `cp: cannot open ... Permission denied`. O `chmod 0644` **baixa uma
+  fronteira** (o binário do kernel passa a ser legível por qualquer utilizador local), por isso é
+  opt-in, avisa e diz como reverter — o mesmo tratamento do `--low-ports`.
+
+**`install.sh --production`** aplica os limites que só se atingem em CARGA, cada um por um modo de
+falha concreto: `nf_conntrack_max` (todo o dataplane é nftables com conntrack — cheio, o kernel
+DROPA ligações novas e do lado da aplicação parece perda aleatória), `neigh gc_thresh` (a tabela
+ARP tem 1024 entradas e um nó denso enche-a), `ip_local_port_range` (cada ligação saínte por NAT
+gasta uma porta efémera), `pid_max`/`file-max`/backlogs/`swappiness`. O **`hashsize` do conntrack
+vai por `modprobe.d` porque NÃO é um sysctl** — subir só o max alonga as cadeias do hash em vez de
+escalar. `LimitNOFILE`/`TasksMax` vão para um drop-in do `user@.service`: em rootless os
+containers são filhos dele, e os limites de uma sessão PAM/SSH não lhes chegam.
+
+**Dois bugs reais apanhados a construir**, ambos com teste de regressão:
+
+1. **O `stream_download` não tinha retry nenhum.** A cloud image do Rocky (646 MiB) morreu aos
+   3,8 MiB e a corrida seguinte recomeçava do zero (o `download_*_base` só verifica o ficheiro
+   FINAL). Passa a pedir `Range:` a partir do que está em disco, com 5 tentativas; um 206 é
+   retomado e um servidor que ignore o Range recomeça — a distinção é explícita, porque anexar a
+   um corpo completo produziria lixo silencioso. O que torna isto seguro é o **checksum que todos
+   os chamadores já verificam**: bytes costurados de dois ranges ou dão o hash publicado ou o
+   download é descartado. Provado ao vivo: `resuming download at 3964627 bytes`.
+2. **O reset de `machine-id` quebrava o build no Fedora**: `/var/lib/dbus` não existe lá, o
+   `ln -sf` falhava e levava o `virt-customize` inteiro — a imagem não chegava a existir por causa
+   de um symlink de compatibilidade. Mesma classe da armadilha do AppArmor no Rocky. `mkdir -p`
+   antes do link.
+
+**`image vm ls`/`ls-remote` passaram a dizer o que a imagem É.** O `ls` ganhou `TYPE`
+(`cloud-init`/`appliance`) e `DEFAULTS` (`4cpu/8G`) — as duas coisas que decidem se o `vm create`
+semeia a imagem (e portanto se `--ssh-key` é aceite ou recusado) e com que recursos arranca. O
+`ls-remote` deixou de imprimir só a coluna TAG: lê o manifesto de cada tag (um GET, sem blob) e
+mostra distro/tipo/tamanho das annotations; uma tag cujo manifesto falhe aparece na mesma com `-`.
+O `KERNEL` é agora preenchido também num `import`, por `virt-ls /boot` — e **falha por razão
+estrutural** no OPNsense (FreeBSD) e no TrueNAS (raiz em ZFS), onde o libguestfs não vê `/boot`;
+no Proxmox VE funciona (`vmlinuz-6.17.2-1-pve`, medido).
+
 ## Regra de ouro: fronteira com o PaaS
 
 Este código **não pode depender de nada privado**. Antes de qualquer commit:
@@ -2901,7 +3361,7 @@ Este código **não pode depender de nada privado**. Antes de qualquer commit:
    genuína (fica aqui). O broker de control-plane que decide QUANDO publicar portas
    (`Router`, multi-tenant) ficou no lado privado (`delonix-overlay`, em `delonix-paas`).
 
-## Arquitetura (8 crates)
+## Arquitetura (10 crates)
 
 | Crate | Responsabilidade |
 |---|---|
@@ -2912,6 +3372,8 @@ Este código **não pode depender de nada privado**. Antes de qualquer commit:
 | `delonix-vm` | microVMs declarativas — trait `VmBackend` (Cloud Hypervisor ou libvirt) |
 | `delonix-volume` | volumes nomeados e bind mounts |
 | `delonix-cri` | servidor CRI (`runtime.v1`) — permite ao Delonix servir de runtime a um `kubelet` |
+| `delonix-mgmt` | API de gestão LOCAL (HTTP+JSON num socket unix, só o próprio uid) para um control-plane externo, mais o registo Prometheus partilhado e os spans OpenTelemetry. Não é remota, e o `cli-stability.md` diz que não se deve construir automação sobre ela — ver ADR-0010 |
+| `delonix-scan` | SBOM + varredura de CVE (`image scan`, e a imposição de scan-on-pull) |
 
 ## Histórico
 

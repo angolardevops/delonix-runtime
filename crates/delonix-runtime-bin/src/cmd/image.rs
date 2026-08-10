@@ -34,6 +34,104 @@ pub fn spec_with_defaults(doc: &ManifestDoc) -> Result<serde_yaml::Value> {
 /// Field names accepted in the `spec` of `kind: Image`, for the unknown-field warning.
 pub(crate) const IMAGE_SPEC_FIELDS: &[&str] = &["pull", "build"];
 
+/// Fields the reconciler compares for a `kind: Image`.
+///
+/// `ref` converges HOT — «converging» an image means fetching the ref, and
+/// nothing is destroyed doing it. That is the opposite of every other Kind's
+/// cold field, and it follows from what an image IS: shared, content-addressed
+/// cache, not a resource with a lifecycle.
+pub(crate) const RECONCILED_IMAGE_FIELDS: &[&str] = &["ref", "digest"];
+
+/// The reference a `kind: Image` document is ABOUT.
+///
+/// **An image's identity is its ref, never `metadata.name`.** `presence()` used
+/// to resolve the document name, so a `kind: Image` named `web-base` with
+/// `pull: nginx:alpine` reported as absent even with `nginx:alpine` sitting in
+/// the store — measured on this host: `image ls` listed it, the plan said
+/// `+ Image/web-base`. Every `stack ls`/`describe`/`plan` was wrong for any
+/// document whose name was not literally the tag.
+pub(crate) fn image_ref(doc: &ManifestDoc) -> Option<String> {
+    let spec: ImageSpec = manifest::spec_of(doc).ok()?;
+    spec.pull.or_else(|| spec.build.map(|b| b.tag))
+}
+
+/// What the manifest declares, for the reconciler.
+pub(crate) fn desired(doc: &ManifestDoc) -> Result<super::reconcile::Desired> {
+    let spec: ImageSpec = manifest::spec_of(doc)?;
+    let mut f = std::collections::BTreeMap::new();
+    // A BUILT image does not converge, and saying so is the honest answer.
+    // There is no build cache: `apply` reruns the build and replaces the tag
+    // every single time. Reporting `=` would be a lie, and reporting a change on
+    // every plan would make `--detailed-exitcode` return 2 forever in any repo
+    // that builds an image — breaking the drift gate for everyone else.
+    let built = spec.build.is_some();
+    if let Some(r) = image_ref(doc) {
+        f.insert("ref".into(), r.clone());
+        // A ref pinned by digest is the only case where the DESIRED digest is
+        // knowable without asking a registry — and asking one would make
+        // computing a plan a network round-trip. For a moving tag the plan
+        // compares the ref alone; that a tag may have moved upstream is not
+        // something a local plan can see, and pretending otherwise would be
+        // worse than the gap.
+        if let Some((_, digest)) = r.split_once("@sha256:") {
+            f.insert("digest".into(), format!("sha256:{digest}"));
+        }
+    }
+    Ok(super::reconcile::Desired {
+        kind: "Image".into(),
+        name: doc.metadata.name.clone(),
+        fields: f,
+        converges: !built,
+        // Shared content: the same `nginx:alpine` backs every stack on the host.
+        ownable: false,
+    })
+}
+
+/// What is on the machine, for the reconciler — keyed by the DOCUMENT name (that
+/// is what the plan matches on) but resolved by the REF.
+pub(crate) fn actual(docs: &[ManifestDoc]) -> Result<Vec<super::reconcile::Actual>> {
+    let (images, _) = open_stores()?;
+    let mut out = Vec::new();
+    for doc in manifest::of_kind(docs, "Image") {
+        let Some(r) = image_ref(doc) else { continue };
+        let Ok(img) = images.resolve(&r) else {
+            continue;
+        };
+        let mut f = std::collections::BTreeMap::new();
+        f.insert("ref".into(), r);
+        f.insert("digest".into(), img.id.clone());
+        out.push(super::reconcile::Actual {
+            kind: "Image".into(),
+            name: doc.metadata.name.clone(),
+            fields: f,
+            owner: None,
+            last_applied: None,
+        });
+    }
+    Ok(out)
+}
+
+/// Converges an image: fetch the ref. Nothing is destroyed — an image is cache.
+pub(crate) fn converge(name: &str, diffs: &[super::reconcile::FieldDiff]) -> Result<()> {
+    let (images, _) = open_stores()?;
+    for d in diffs {
+        match d.field.as_str() {
+            "ref" | "digest" => {
+                if let Some(r) = &d.to {
+                    resolve_or_pull(&images, r)?;
+                }
+            }
+            other => {
+                return Err(Error::Invalid(format!(
+                    "image/{name}: '{other}' does not converge hot — bug in \
+                     `reconcile::hot_fields`"
+                )))
+            }
+        }
+    }
+    Ok(())
+}
+
 #[derive(Debug, Deserialize, Serialize)]
 struct BuildSpec {
     #[serde(default = "default_context")]
@@ -209,13 +307,20 @@ pub enum ImageCmd {
         name: String,
         target: Option<String>,
     },
-    /// (only with `--vm`) Convert a VM disk between `qcow2` and `raw`.
+    /// (only with `--vm`) Register an existing disk image under a name.
+    Import(super::vmimage::ImportArgs),
+    /// (only with `--vm`) Convert a VM disk to the format another ecosystem
+    /// imports — `qcow2`, `raw`, `vmdk`, `vdi`, `vhdx`, `vhd`.
     Convert {
         source: String,
         #[arg(long = "to", value_enum)]
         to: super::vmimage::ConvertFormat,
         #[arg(short = 'o', long = "output")]
         output: Option<PathBuf>,
+        /// Compress the output. Only `qcow2` and `vmdk` can — refused for the
+        /// others rather than handed to `qemu-img` to fail on.
+        #[arg(long)]
+        compress: bool,
     },
     /// (only with `--vm`) Build the golden VM image (Ubuntu + kubeadm/kubelet/
     /// kubectl + `delonix-cri`).
@@ -231,6 +336,9 @@ pub enum ImageCmd {
         #[arg(long)]
         force: bool,
     },
+    /// (only with `--vm`) Build a VM image: the built-in golden recipe
+    /// (Ubuntu + kubeadm/kubelet/kubectl + `delonix-cri`), or a `VMfile`
+    /// of your own with `-f`.
     Build {
         #[arg(short = 't', long = "tag")]
         tag: String,
@@ -248,6 +356,9 @@ pub enum ImageCmd {
         debian_release: String,
         #[arg(long, default_value = "9")]
         rocky_release: String,
+        /// Fedora release AND build (e.g. `42-1.1`) — only with `--distro fedora`.
+        #[arg(long, default_value = "42-1.1")]
+        fedora_release: String,
         #[arg(long)]
         k8s_version: Option<String>,
         #[arg(long = "extra-package")]
@@ -317,14 +428,22 @@ pub enum VmSub {
     },
     /// Publish a local VM image to an OCI registry.
     Push { name: String, target: String },
-    /// Convert a VM disk between `qcow2` and `raw` — flattened either way,
-    /// ready to boot on either backend.
+    /// Register an existing disk image under a name, so `vm create --disk
+    /// <name>` and `image vm push` can use it.
+    Import(super::vmimage::ImportArgs),
+    /// Convert a VM disk to the format another ecosystem imports — `qcow2`,
+    /// `raw`, `vmdk` (VMware), `vdi` (VirtualBox), `vhdx`/`vhd` (Hyper-V,
+    /// Azure). Flattened either way: the result is a standalone file.
     Convert {
         source: String,
         #[arg(long = "to", value_enum)]
         to: super::vmimage::ConvertFormat,
         #[arg(short = 'o', long = "output")]
         output: Option<PathBuf>,
+        /// Compress the output. Only `qcow2` and `vmdk` can — refused for the
+        /// others rather than handed to `qemu-img` to fail on.
+        #[arg(long)]
+        compress: bool,
     },
     /// Build the golden VM image (Ubuntu + kubeadm/kubelet/kubectl + `delonix-cri`).
     /// Scaffold a `VMfile` (and a cloud-init) for building your own image.
@@ -339,6 +458,9 @@ pub enum VmSub {
         #[arg(long)]
         force: bool,
     },
+    /// Build a VM image: the built-in golden recipe
+    /// (Ubuntu + kubeadm/kubelet/kubectl + `delonix-cri`), or a `VMfile`
+    /// of your own with `-f`.
     Build {
         #[arg(short = 't', long = "tag")]
         tag: String,
@@ -356,6 +478,9 @@ pub enum VmSub {
         debian_release: String,
         #[arg(long, default_value = "9")]
         rocky_release: String,
+        /// Fedora release AND build (e.g. `42-1.1`) — only with `--distro fedora`.
+        #[arg(long, default_value = "42-1.1")]
+        fedora_release: String,
         #[arg(long)]
         k8s_version: Option<String>,
         #[arg(long = "extra-package")]
@@ -430,7 +555,18 @@ pub fn run(vm: bool, action: ImageCmd) -> Result<()> {
             },
             VmSub::LsRemote { source, no_k8s } => VmImageCmd::LsRemote { source, no_k8s },
             VmSub::Push { name, target } => VmImageCmd::Push { name, target },
-            VmSub::Convert { source, to, output } => VmImageCmd::Convert { source, to, output },
+            VmSub::Import(args) => VmImageCmd::Import(args),
+            VmSub::Convert {
+                source,
+                to,
+                output,
+                compress,
+            } => VmImageCmd::Convert {
+                source,
+                to,
+                output,
+                compress,
+            },
             VmSub::Init { name, dir, force } => VmImageCmd::Init { name, dir, force },
             VmSub::Build {
                 tag,
@@ -440,6 +576,7 @@ pub fn run(vm: bool, action: ImageCmd) -> Result<()> {
                 ubuntu_release,
                 debian_release,
                 rocky_release,
+                fedora_release,
                 k8s_version,
                 extra_packages,
                 extra_run,
@@ -457,6 +594,7 @@ pub fn run(vm: bool, action: ImageCmd) -> Result<()> {
                 ubuntu_release,
                 debian_release,
                 rocky_release,
+                fedora_release,
                 k8s_version,
                 extra_packages,
                 extra_run,
@@ -529,6 +667,14 @@ pub fn run(vm: bool, action: ImageCmd) -> Result<()> {
         ImageCmd::Convert { .. } => Err(Error::Invalid(
             super::po::t(
                 "`convert` is only for VM images — use `delonix image --vm convert`",
+            )
+            .into(),
+        )),
+        // Container images come from `delonix image pull`/`build`/`load`; a
+        // disk image is a different kind of thing entirely.
+        ImageCmd::Import(_) => Err(Error::Invalid(
+            super::po::t(
+                "`import` is only for VM images — use `delonix image --vm import` (for a container image tarball, use `delonix image load`)",
             )
             .into(),
         )),
@@ -619,7 +765,18 @@ fn run_vm(action: ImageCmd) -> Result<()> {
                 )
             })?,
         },
-        ImageCmd::Convert { source, to, output } => VmImageCmd::Convert { source, to, output },
+        ImageCmd::Import(args) => VmImageCmd::Import(args),
+        ImageCmd::Convert {
+            source,
+            to,
+            output,
+            compress,
+        } => VmImageCmd::Convert {
+            source,
+            to,
+            output,
+            compress,
+        },
         ImageCmd::Build {
             tag,
             file,
@@ -628,6 +785,7 @@ fn run_vm(action: ImageCmd) -> Result<()> {
             ubuntu_release,
             debian_release,
             rocky_release,
+            fedora_release,
             k8s_version,
             extra_packages,
             extra_run,
@@ -645,6 +803,7 @@ fn run_vm(action: ImageCmd) -> Result<()> {
             ubuntu_release,
             debian_release,
             rocky_release,
+            fedora_release,
             k8s_version,
             extra_packages,
             extra_run,

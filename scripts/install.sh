@@ -21,6 +21,12 @@
 #   --no-binary    só dependências/configuração (usa um binário já instalado)
 #   --with-cri     instala também o delonix-cri (nó Kubernetes)
 #   --low-ports    permite publicar portas <1024 (ex.: 80/443) sem root.
+#   --with-image-build
+#                  instala o que CONSTRUIR imagens VM exige (libguestfs) e
+#                  torna /boot/vmlinuz-* legivel. Ver a seccao dedicada: o
+#                  chmod baixa uma fronteira de seguranca do host.
+#   --production   tuning de ESCALA para um no de producao (conntrack, ARP,
+#                  portas efemeras, fds, pids). Ver a seccao dedicada.
 #   --no-delegate  NÃO escreve o drop-in de delegação de cgroup (ver abaixo).
 #                  NÃO é o default — ver a secção "portas privilegiadas" abaixo.
 #   --insecure-skip-signature
@@ -82,6 +88,8 @@ WITH_BINARY=1
 WITH_CRI=0
 USER_INSTALL=0
 LOW_PORTS=0
+WITH_IMAGE_BUILD=0
+PRODUCTION=0
 SKIP_SIG=0
 
 # `command -v` falha para binários de admin (/usr/sbin) quando o PATH do
@@ -149,6 +157,8 @@ while [ $# -gt 0 ]; do
     --no-binary)  WITH_BINARY=0 ;;
     --with-cri)   WITH_CRI=1 ;;
     --low-ports)  LOW_PORTS=1 ;;
+    --with-image-build) WITH_IMAGE_BUILD=1 ;;
+    --production) PRODUCTION=1 ;;
     --no-delegate) WITH_DELEGATE=0 ;;
     --insecure-skip-signature) SKIP_SIG=1 ;;
     --user)       USER_INSTALL=1 ;;
@@ -619,6 +629,120 @@ SYSCTL
       warn "could not apply net.ipv4.ip_unprivileged_port_start — it retries on next boot"
     fi
   fi
+fi
+
+# ------------------------------------- construir imagens VM (opt-in explicito)
+# `delonix image --vm build` corre `virt-customize`, que constroi um appliance
+# com o supermin. Duas coisas que faltam por omissao num host tipico, e cada uma
+# falha de forma que ninguem adivinha:
+#
+#   isc-dhcp-client — o supermin.d/packages do libguestfs pede-o e o supermin so
+#     COPIA pacotes do host: sem ele instalado AQUI, o appliance nasce sem
+#     cliente DHCP, nunca obtem IP nem DNS, e o build morre em
+#     "Temporary failure resolving 'archive.ubuntu.com'" — um erro que parece de
+#     rede do host, e o host tem rede.
+#
+#   /boot/vmlinuz-* legivel — o supermin copia o kernel do host para o
+#     appliance. Debian/Ubuntu instalam-no 0600, e o build morre em
+#     "cp: cannot open '/boot/vmlinuz-...' for reading: Permission denied".
+#
+# O chmod BAIXA UMA FRONTEIRA: o binario do kernel passa a ser legivel por
+# qualquer utilizador local (o 0600 existe para dificultar exploits que
+# beneficiam de conhecer o kernel exacto). Por isso e opt-in, avisa, e diz como
+# reverter — o mesmo tratamento que `--low-ports` ja tem.
+if [ "$WITH_IMAGE_BUILD" = 1 ]; then
+  optional_dep imgbuild virt-customize "libguestfs-tools|guestfs-tools" "building VM images"
+  optional_dep imgbuild dhclient "isc-dhcp-client|dhcp-client|dhcp" "network in the libguestfs appliance"
+  UNREADABLE_KERNEL=0
+  for k in /boot/vmlinuz-*; do
+    [ -e "$k" ] || continue
+    [ -r "$k" ] || UNREADABLE_KERNEL=1
+  done
+  if [ "$UNREADABLE_KERNEL" = 1 ]; then
+    step imgbuild kernel-readable "making /boot/vmlinuz-* readable (supermin copies it)..."
+    if $SUDO chmod 0644 /boot/vmlinuz-* 2>/dev/null; then
+      stepok imgbuild kernel-readable
+      warn "the host kernel is now world-READABLE (revert: sudo chmod 0600 /boot/vmlinuz-*)"
+    else
+      warn "could not chmod /boot/vmlinuz-* — `image --vm build` will fail in supermin"
+    fi
+  else
+    skip imgbuild kernel-readable
+  fi
+fi
+
+# --------------------------------------- tuning de ESCALA (--production, opt-in)
+# O bloco `99-delonix.conf` acima da correccao do que FALHA num host normal.
+# Este da os limites que so se atingem em CARGA, e cada um foi escolhido por um
+# modo de falha concreto e diagnosticavel — nada de folclore:
+#
+#   nf_conntrack_max — TODO o dataplane deste motor e nftables com conntrack
+#     (o `ct state` das chains por-workload, o NAT do slirp). Cheio, o kernel
+#     DROPA ligacoes novas e escreve "nf_conntrack: table full" no dmesg; do
+#     lado da aplicacao parece perda de pacotes aleatoria.
+#   neigh gc_thresh — a tabela ARP tem 1024 entradas por omissao. Um no com
+#     muitas centenas de containers/VMs na SDN enche-a e o kernel comeca a
+#     descartar vizinhos: trafego que funcionava para de funcionar por
+#     intermitencia ("neighbour: arp_cache: neighbor table overflow").
+#   ip_local_port_range — cada ligacao SAINTE por NAT consome uma porta
+#     efemera. O default comeca em 32768 (~28k portas); um proxy ou um nó com
+#     muito trafego de saida esgota-as e passa a dar EADDRNOTAVAIL.
+#   pid_max / threads-max — muitos containers sao muitos processos; o default
+#     de 32768 pids e baixo para um no denso.
+#   file-max — fds a nivel do sistema (o limite por-processo trata-se abaixo).
+#   tcp_max_syn_backlog + somaxconn — picos de ligacoes novas.
+#   swappiness — trocar memoria de um container para disco degrada latencia de
+#     forma dificil de diagnosticar; o kubelet ate exige swap desligado.
+#
+# LimitNOFILE/TasksMax vao para o `user@.service` porque em ROOTLESS os
+# containers sao filhos dele: os limites do PAM/limits.conf de uma sessao SSH
+# nao se aplicam ao que o systemd --user arranca.
+if [ "$PRODUCTION" = 1 ]; then
+  step kernel production "applying scale limits (conntrack/ARP/ports/fds/pids)..."
+  $SUDO tee /etc/sysctl.d/99-delonix-production.conf >/dev/null <<'SYSCTL'
+# Delonix Runtime — limites de ESCALA para um no de producao (install.sh --production).
+# Reverter: rm este ficheiro e reiniciar (ou `sysctl --system`).
+net.netfilter.nf_conntrack_max = 524288
+net.ipv4.neigh.default.gc_thresh1 = 4096
+net.ipv4.neigh.default.gc_thresh2 = 8192
+net.ipv4.neigh.default.gc_thresh3 = 16384
+net.ipv4.ip_local_port_range = 16384 65535
+net.ipv4.tcp_max_syn_backlog = 8192
+net.core.somaxconn = 8192
+net.core.netdev_max_backlog = 16384
+kernel.pid_max = 262144
+kernel.threads-max = 1048576
+fs.file-max = 2097152
+vm.swappiness = 10
+SYSCTL
+  # `nf_conntrack_max` so existe depois de o modulo estar carregado, e o
+  # `hashsize` NAO e um sysctl — e um parametro do modulo. Sem ele, subir o max
+  # so alonga as cadeias do hash e a procura fica mais lenta em vez de escalar.
+  $SUDO modprobe nf_conntrack 2>/dev/null || true
+  printf 'options nf_conntrack hashsize=131072
+'     | $SUDO tee /etc/modprobe.d/delonix-conntrack.conf >/dev/null
+  printf 'nf_conntrack
+' | $SUDO tee -a /etc/modules-load.d/delonix.conf >/dev/null
+  if $SUDO sysctl -q -p /etc/sysctl.d/99-delonix-production.conf >/dev/null 2>&1; then
+    stepok kernel production
+  else
+    warn "some production sysctls did not apply (module not loaded yet?) — they retry on next boot"
+  fi
+
+  # Limites do systemd --user: e sob ele que os containers rootless correm.
+  step kernel user-limits "raising LimitNOFILE/TasksMax on user@.service..."
+  $SUDO mkdir -p /etc/systemd/system/user@.service.d
+  $SUDO tee /etc/systemd/system/user@.service.d/50-delonix-limits.conf >/dev/null <<'UNIT'
+# Delonix Runtime — limites do systemd --user (install.sh --production).
+# Em rootless os containers sao filhos do user@<uid>.service, por isso os
+# limites de uma sessao PAM/SSH nao lhes chegam.
+[Service]
+LimitNOFILE=1048576
+TasksMax=infinity
+UNIT
+  $SUDO systemctl daemon-reload 2>/dev/null || true
+  stepok kernel user-limits
+  warn "user@.service limits take effect on the NEXT login (or: systemctl restart user@$(id -u "$REAL_USER").service, which kills that user's running workloads)"
 fi
 
 # ------------------------------------------------------------ completion (bash)

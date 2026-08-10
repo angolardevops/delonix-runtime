@@ -3656,3 +3656,1405 @@ msgstr "nenhum (auto-detecção: cloud-hypervisor se instalado, senão libvirt)"
 
 msgid "`convert` is only for VM images — use `delonix image --vm convert`"
 msgstr "`convert` é só para imagens VM — usa `delonix image --vm convert`"
+
+# tecto de capabilities do CRI (`serve cri --cap-ceiling`)
+
+msgid "Node-level UPPER BOUND on container capabilities, whatever the kubelet asks for: a comma-separated list of names (`NET_ADMIN`, `CAP_CHOWN`), or `all` (no bound, the default), `none`, `default` (the engine's default set), or `default,<extra>...`. Overrides `$DELONIX_CRI_CAP_CEILING`. Bounds capabilities ONLY — a privileged pod still gets unconfined seccomp."
+msgstr "TECTO, ao nível do nó, das capabilities de um container, seja o que for que o kubelet pedir: uma lista de nomes separada por vírgulas (`NET_ADMIN`, `CAP_CHOWN`), ou `all` (sem tecto, a omissão), `none`, `default` (o conjunto por omissão do motor), ou `default,<extra>...`. Prevalece sobre `$DELONIX_CRI_CAP_CEILING`. Limita SÓ capabilities — um pod privilegiado continua a ficar com seccomp unconfined."
+
+msgid "What to do with a pod that asks for more than `--cap-ceiling`: `reject` (default, fails CreateContainer so the kubelet reports it) or `clamp` (reduce to the ceiling and log a warning). Overrides `$DELONIX_CRI_CAP_CEILING_MODE`."
+msgstr "O que fazer a um pod que pede mais do que o `--cap-ceiling`: `reject` (omissão, faz o CreateContainer falhar para o kubelet o reportar) ou `clamp` (corta ao tecto e regista um aviso). Prevalece sobre `$DELONIX_CRI_CAP_CEILING_MODE`."
+
+# aviso de namespace sem efeito (bloco A2)
+msgid "{kind} '{name}': metadata.namespace has no effect — only Container, Pod and Vm are namespaced (it scopes network isolation, not naming)"
+msgstr "{kind} '{name}': o metadata.namespace não tem efeito — só Container, Pod e Vm têm namespace (delimita o isolamento de rede, não a nomeação)"
+
+# ---------------------------------------------------------------------------
+# Reconciliação declarativa (`stack plan`) — bloco 2 do IaC nativo
+# ---------------------------------------------------------------------------
+
+msgid "Plan for stack \"{stack}\"  (manifest: {path})"
+msgstr "Plano da stack \"{stack}\"  (manifesto: {path})"
+
+msgid "the manifest declares nothing"
+msgstr "o manifesto não declara nada"
+
+msgid "Summary"
+msgstr "Resumo"
+
+msgid "a replace destroys and recreates the resource — `stack apply` refuses it unless you pass `--replace`"
+msgstr "uma recriação destrói e refaz o recurso — o `stack apply` recusa-a a não ser que passes `--replace`"
+
+msgid "`!` = this Kind is ensure-present in this version: `apply` creates it if missing and never updates it"
+msgstr "`!` = este Kind é «garante presente» nesta versão: o `apply` cria-o se faltar e nunca o actualiza"
+
+msgid "Shows what an `apply` WOULD change, without changing anything."
+msgstr "Mostra o que um `apply` MUDARIA, sem mudar nada."
+
+msgid "Stack name (owner of the resources). Default: a `kind: Stack`'s name, else the manifest's directory."
+msgstr "Nome da stack (dono dos recursos). Omissão: o nome de um `kind: Stack`, senão o directório do manifesto."
+
+msgid "Exit 2 when there are changes (0 = none, 1 = error) — the `terraform plan -detailed-exitcode` contract, for a CI drift gate."
+msgstr "Sai com 2 quando há alterações (0 = nenhuma, 1 = erro) — o contrato do `terraform plan -detailed-exitcode`, para um gate de deriva em CI."
+
+msgid "to create"
+msgstr "a criar"
+
+msgid "to adopt"
+msgstr "a adoptar"
+
+msgid "to update"
+msgstr "a actualizar"
+
+msgid "to replace"
+msgstr "a recriar"
+
+msgid "unchanged"
+msgstr "sem alteração"
+
+msgid "to remove"
+msgstr "a remover"
+
+msgid "in conflict"
+msgstr "em conflito"
+
+msgid "not converging"
+msgstr "não convergente"
+
+msgid ""
+"Shows what an `apply` WOULD change, without changing anything.\n"
+"\n"
+"Compares the manifest against the machine and against the last spec this stack applied (a three-way diff, so a field a human set by hand is left alone while a field removed from the manifest is reverted). With the manifest unchanged, whatever it prints IS drift."
+msgstr ""
+"Mostra o que um `apply` MUDARIA, sem mudar nada.\n"
+"\n"
+"Compara o manifesto com a máquina e com o último spec que esta stack aplicou (um diff de 3 vias, por isso um campo que um humano pôs à mão fica intocado, enquanto um campo retirado do manifesto é revertido). Com o manifesto inalterado, o que ele imprimir É deriva."
+
+# apply convergente (bloco 3)
+
+msgid "{key}: {reason} — pass `--replace {key}` (or `--replace all`) to destroy and recreate it"
+msgstr "{key}: {reason} — passa `--replace {key}` (ou `--replace all`) para o destruir e recriar"
+
+msgid "stack apply refused: {n} resource(s) need an explicit decision (nothing was changed)"
+msgstr "stack apply recusado: {n} recurso(s) precisam de uma decisão explícita (nada foi alterado)"
+
+msgid "{kind}/{name}: recreating"
+msgstr "{kind}/{name}: a recriar"
+
+msgid "{kind}/{name}: updating {n} field(s) live"
+msgstr "{kind}/{name}: a actualizar {n} campo(s) a quente"
+
+msgid "WARNING: {kind}/{name}: could not record stack ownership ({err}) — it will be adopted again on the next apply and `--prune` will not see it"
+msgstr "AVISO: {kind}/{name}: não consegui registar a posse da stack ({err}) — será adoptado outra vez no próximo apply e o `--prune` não o vê"
+
+msgid "WARNING: network/{name}: peer(s) {peers} were removed from the manifest but removing an overlay peer is not implemented — recreate the network to drop them"
+msgstr "AVISO: network/{name}: o(s) peer(s) {peers} foram retirados do manifesto mas remover um peer de overlay não está implementado — recria a rede para os tirar"
+
+msgid "Fields compared by `stack plan`, per Kind:"
+msgstr "Campos que o `stack plan` compara, por Kind:"
+
+msgid "Every other Kind ({kinds}) is ensure-present: `apply` creates it if missing and never updates it."
+msgstr "Todos os outros Kinds ({kinds}) são «garante presente»: o `apply` cria-os se faltarem e nunca os actualiza."
+
+msgid "Not compared on a Container, and why: `env` and `command` (the record holds them merged with the image's), `user` (the record stores the resolved uid), `labels` (the engine adds its own)."
+msgstr "Não comparados num Container, e porquê: `env` e `command` (o registo guarda-os fundidos com os da imagem), `user` (o registo guarda o uid resolvido), `labels` (o motor acrescenta as suas)."
+
+msgid "Authorize DESTROYING and recreating a resource whose change does not converge live: `--replace <Kind>/<name>` (repeatable), or `--replace all`. Without it, `apply` refuses and changes nothing."
+msgstr "Autoriza DESTRUIR e recriar um recurso cuja alteração não converge a quente: `--replace <Kind>/<name>` (repetível), ou `--replace all`. Sem isto, o `apply` recusa e não altera nada."
+
+msgid "Print WHICH fields the plan compares, per Kind, and exit. Answers \"why is my change not showing up?\" without reading the source."
+msgstr "Imprime QUE campos o plano compara, por Kind, e sai. Responde a «porque é que a minha alteração não aparece?» sem ler o código."
+
+msgid "does not converge live: {fields}"
+msgstr "não converge a quente: {fields}"
+
+msgid "owned by the stack '{owner}'"
+msgstr "pertence à stack '{owner}'"
+
+msgid "exists and belongs to no stack — will be taken over"
+msgstr "já existe e não pertence a nenhuma stack — vai ser adoptado"
+
+msgid "no longer declared in the manifest"
+msgstr "já não está declarado no manifesto"
+
+msgid "this Kind is ensure-present in this version"
+msgstr "este Kind é «garante presente» nesta versão"
+
+# destroy / prune (bloco 4)
+
+msgid "{kind}/{name}: removing (no longer in the manifest)"
+msgstr "{kind}/{name}: a remover (já não está no manifesto)"
+
+msgid "{kind}/{name}: removing"
+msgstr "{kind}/{name}: a remover"
+
+msgid "stack \"{stack}\" owns nothing — nothing to remove"
+msgstr "a stack \"{stack}\" não possui nada — nada a remover"
+
+msgid "stack \"{stack}\" would remove {n} resource(s):"
+msgstr "a stack \"{stack}\" removeria {n} recurso(s):"
+
+msgid "Also REMOVE what this stack owns and the manifest no longer declares. Never happens without this flag."
+msgstr "REMOVE também o que esta stack possui e o manifesto já não declara. Nunca acontece sem esta flag."
+
+msgid "Removes everything this stack owns (by the `delonix.io/stack` label)."
+msgstr "Remove tudo o que esta stack possui (pela label `delonix.io/stack`)."
+
+msgid "Stack name. Default: a `kind: Stack`'s name, else the manifest's directory."
+msgstr "Nome da stack. Omissão: o nome de um `kind: Stack`, senão o directório do manifesto."
+
+msgid "List what would be removed, and remove nothing."
+msgstr "Lista o que seria removido, e não remove nada."
+
+# schema / explain (bloco 5, ADR-0007)
+
+msgid "Path"
+msgstr "Caminho"
+
+msgid "Type"
+msgstr "Tipo"
+
+msgid "Description"
+msgstr "Descrição"
+
+msgid "Print the JSON Schema of the manifest (all Kinds, or one)."
+msgstr "Imprime o JSON Schema do manifesto (todos os Kinds, ou um só)."
+
+msgid "Only this Kind's spec (e.g. `Container`)."
+msgstr "Só o spec deste Kind (ex.: `Container`)."
+
+msgid "`<Kind>[.field[.field…]]`."
+msgstr "`<Kind>[.campo[.campo…]]`."
+
+# fusao Egress -> FirewallPolicy (fase A1)
+
+msgid "Egress '{name}': spec.direction is '{other}', but `kind: Egress` means outbound — write `kind: FirewallPolicy` with the direction you want"
+msgstr "Egress '{name}': o spec.direction é '{other}', mas `kind: Egress` significa saída — escreve `kind: FirewallPolicy` com a direcção que queres"
+
+msgid "Egress '{name}': spec must be a mapping"
+msgstr "Egress '{name}': o spec tem de ser uma mapping"
+
+msgid "Egress '{name}': `kind: Egress` is deprecated — use `kind: FirewallPolicy` with `direction: egress` (same fields, same behaviour)"
+msgstr "Egress '{name}': `kind: Egress` está depreciado — usa `kind: FirewallPolicy` com `direction: egress` (mesmos campos, mesmo comportamento)"
+
+# Dependency -> FirewallPolicy e regras por workload (fase A2)
+
+msgid "{kind}/{name}: a rule uses both an address (from/to) and a workload (fromWorkload/toWorkload) — pick one"
+msgstr "{kind}/{name}: uma regra usa ao mesmo tempo um endereço (from/to) e um workload (fromWorkload/toWorkload) — escolhe um"
+
+msgid "workload '{name}' does not exist (a rule names it as the other end)"
+msgstr "o workload '{name}' não existe (uma regra nomeia-o como a outra ponta)"
+
+msgid "workload '{name}' has no address on the SDN (is it on a custom network?) — a rule cannot name it"
+msgstr "o workload '{name}' não tem endereço na SDN (está numa rede custom?) — uma regra não o pode nomear"
+
+msgid "Dependency '{name}': `from` cannot be empty"
+msgstr "Dependency '{name}': o `from` não pode estar vazio"
+
+# fusao Storage -> Volume (fase A3)
+
+msgid "Storage '{name}': `kind: Storage` is deprecated — use `kind: Volume` with a `{block}:` block (same fields, same behaviour)"
+msgstr "Storage '{name}': `kind: Storage` está depreciado — usa `kind: Volume` com um bloco `{block}:` (mesmos campos, mesmo comportamento)"
+
+msgid "Storage '{name}': spec.type is required (nfs|cifs|smb|webdav)"
+msgstr "Storage '{name}': o spec.type é obrigatório (nfs|cifs|smb|webdav)"
+
+msgid "Storage '{name}': unknown type '{other}' (nfs|cifs|smb|webdav)"
+msgstr "Storage '{name}': tipo desconhecido '{other}' (nfs|cifs|smb|webdav)"
+
+msgid "Storage '{name}': spec must be a mapping"
+msgstr "Storage '{name}': o spec tem de ser uma mapping"
+
+msgid "a volume declares more than one network share ({kinds}) — a volume is one mount"
+msgstr "um volume declara mais do que uma partilha de rede ({kinds}) — um volume é uma montagem"
+
+msgid "{kind} '{name}': unknown field '{key}' in spec.{block} — ignored (check the spelling)"
+msgstr "{kind} '{name}': campo desconhecido '{key}' em spec.{block} — ignorado (verifica a escrita)"
+
+# forma-Pod do kind: Container, depreciada mas NAO reescrita (fase A4)
+
+msgid "Container '{name}': `spec.containers[]` on a `kind: Container` is the deprecated spelling — it still runs ONE container, named '{name}'. For containers that share a namespace use `kind: Pod` (its members are named '{name}-<member>', which is why this is not rewritten for you)"
+msgstr "Container '{name}': `spec.containers[]` num `kind: Container` é a forma depreciada — continua a correr UM container, chamado '{name}'. Para containers que partilham namespace usa `kind: Pod` (os membros dele chamam-se '{name}-<membro>', que é a razão de isto não ser reescrito por ti)"
+
+# imagens de appliance (sem cloud-init): import + o que o vm create recusa
+
+msgid "{flags}: this image is an appliance and does not run cloud-init, so these would be silently ignored — configure it on first boot (console or web UI), or pass your own `--seed` if you know the guest reads one"
+msgstr "{flags}: esta imagem é um appliance e não corre cloud-init, por isso seriam ignorados em silêncio — configura-o no primeiro arranque (consola ou interface web), ou passa o teu próprio `--seed` se souberes que o convidado lê um"
+
+msgid "importing {source} as '{tag}'..."
+msgstr "a importar {source} como '{tag}'..."
+
+msgid "no such file: {source}"
+msgstr "não existe o ficheiro: {source}"
+
+msgid "VM image '{tag}' already exists — pass --force to replace it"
+msgstr "a imagem VM '{tag}' já existe — passa --force para a substituir"
+
+msgid "`import` is only for VM images — use `delonix image --vm import` (for a container image tarball, use `delonix image load`)"
+msgstr "`import` é só para imagens VM — usa `delonix image --vm import` (para um tarball de imagem de container, usa `delonix image load`)"
+
+msgid "yes"
+msgstr "sim"
+
+msgid "no (appliance — configure it on first boot)"
+msgstr "não (appliance — configura-o no primeiro arranque)"
+
+msgid "<unknown> (assumed yes)"
+msgstr "<desconhecido> (assume-se que sim)"
+
+# CIDR explicito nas redes + recusa do vocabulario VPC da AWS
+
+msgid "gateway {want}: a bridge network's gateway is always the first address of its subnet ({have}) — omit --gateway"
+msgstr "gateway {want}: o gateway de uma rede bridge é sempre o primeiro endereço da subnet dela ({have}) — omite o --gateway"
+
+msgid "Network '{name}': `{field}` — {why}"
+msgstr "Network '{name}': `{field}` — {why}"
+
+msgid "WARNING: network '{name}': the manifest asks for {want} but it exists as {have} — NOT renumbered (workloads are addressed on it). Remove and recreate it to change the subnet."
+msgstr "AVISO: rede '{name}': o manifesto pede {want} mas ela existe como {have} — NÃO foi renumerada (há workloads endereçados nela). Remove-a e cria-a de novo para mudar a subnet."
+
+# saidas mais informativas do image vm ls / ls-remote
+
+msgid "appliance"
+msgstr "appliance"
+# sharevolume por namespace + migrate (bloco B2)
+msgid "would migrate sharevolume/{name} to namespace default"
+msgstr "migraria o sharevolume/{name} para a namespace default"
+
+msgid "sharevolume/{name}: migrated to namespace default"
+msgstr "sharevolume/{name}: migrado para a namespace default"
+
+msgid "nothing to migrate"
+msgstr "nada a migrar"
+
+msgid "sharevolume '{name}': a namespaced record already exists — left alone, resolve it by hand"
+msgstr "sharevolume '{name}': já existe um registo com namespace — deixado como está, resolve-o à mão"
+
+# download com retoma e reconexao por estagnacao
+
+msgid "resuming download at {have} bytes (attempt {attempt})..."
+msgstr "a retomar o download aos {have} bytes (tentativa {attempt})..."
+
+msgid "download slowed to {now} KiB/s (peak {peak}) — reconnecting to resume"
+msgstr "o download caiu para {now} KiB/s (pico {peak}) — a reconectar para retomar"
+
+msgid "GET {url}: gave up after {attempts} attempts ({err}) — partial file kept, a later run resumes from it"
+msgstr "GET {url}: desisti ao fim de {attempts} tentativas ({err}) — o ficheiro parcial fica, uma corrida posterior retoma dele"
+
+# condicoes no plano (fase B)
+
+msgid "prerequisite"
+msgstr "pré-requisito"
+
+# colisao de politicas de firewall (fase C)
+
+msgid "FirewallPolicy '{name}' and '{first}' both define {direction} for '{target}' — a policy is the WHOLE desired state of a direction, so the second would silently replace the first; merge them into one document"
+msgstr "As FirewallPolicy '{name}' e '{first}' definem ambas {direction} para '{target}' — uma política é o estado desejado INTEIRO de uma direcção, por isso a segunda substituiria a primeira em silêncio; junta-as num só documento"
+
+msgid "{fmt} cannot be compressed — only qcow2 and vmdk can"
+msgstr "{fmt} não pode ser comprimido — só o qcow2 e o vmdk podem"
+
+msgid "Compress the output. Only `qcow2` and `vmdk` can — refused for the others rather than handed to `qemu-img` to fail on."
+msgstr "Comprime a saída. Só o `qcow2` e o `vmdk` podem — recusado nos outros em vez de ser entregue ao `qemu-img` para falhar."
+
+msgid "FirewallPolicy/{name}: changing `target` or `direction` cannot be undone automatically — the previous target keeps its rules. Clear them by hand with `delonix net ingress clear <old-target>` (or `net egress clear`), then apply again"
+msgstr "FirewallPolicy/{name}: mudar o `target` ou a `direction` não se desfaz automaticamente — o alvo anterior fica com as regras. Limpa-as à mão com `delonix net ingress clear <alvo-antigo>` (ou `net egress clear`) e aplica outra vez"
+
+# razoes de nao-convergencia por Kind (fase C)
+
+msgid "The remaining Kinds are ensure-present — `apply` creates them if missing and never updates them. Each for a concrete reason, not for lack of attention:"
+msgstr "Os restantes Kinds são «garante presente» — o `apply` cria-os se faltarem e nunca os actualiza. Cada um por uma razão concreta, não por falta de atenção:"
+
+msgid "the proxy config merges every document into one, with no record of which document produced which route"
+msgstr "a config do proxy funde todos os documentos num só, sem registo de que documento produziu que rota"
+
+msgid "the state is the encrypted values, and a plan will not decrypt them to compare"
+msgstr "o estado são os valores cifrados, e um plano não os decifra para comparar"
+
+msgid "the URL is assigned by the provider — it is status, not spec"
+msgstr "a URL é atribuída pelo provider — é status, não spec"
+
+msgid "not converged in this version"
+msgstr "não converge nesta versão"
+
+# stack wait (fase B)
+
+msgid "Blocks until every declared resource is present and, where it has one, healthy."
+msgstr "Bloqueia até todos os recursos declarados existirem e, onde exista, estarem saudáveis."
+
+msgid "Give up after this many seconds (default 120)."
+msgstr "Desiste ao fim destes segundos (omissão: 120)."
+
+msgid "stack \"{stack}\" is up"
+msgstr "a stack \"{stack}\" está de pé"
+
+msgid "timed out after {secs}s waiting for {n} resource(s)"
+msgstr "esgotou o tempo ao fim de {secs}s à espera de {n} recurso(s)"
+
+msgid "{kind}/{name}: {message}"
+msgstr "{kind}/{name}: {message}"
+
+# help dos comandos introduzidos nesta serie e que ainda so falavam EN
+# (medido: 103 dos 232 subcomandos ficam em EN sob `--l18n=pt`; estes sao os
+# que esta serie acrescentou, e por isso os que lhe cabem)
+
+msgid "JSON Schema of the manifest, GENERATED from the code (ADR-0007)."
+msgstr "JSON Schema do manifesto, GERADO a partir do código (ADR-0007)."
+
+msgid ""
+"Point an editor at it with one comment at the top of the manifest and you get "
+"completion, type checking and the field docs while you type: `# yaml-language-"
+"server: $schema=./delonix.schema.json`"
+msgstr ""
+"Aponta o editor para ele com um comentário no topo do manifesto e ganhas "
+"completação, verificação de tipos e a documentação dos campos enquanto "
+"escreves: `# yaml-language-server: $schema=./delonix.schema.json`"
+
+msgid ""
+"Field reference for a Kind, `kubectl explain` style — from the SAME generated "
+"schema, so it cannot drift from the code."
+msgstr ""
+"Referência de campos de um Kind, ao estilo do `kubectl explain` — a partir do "
+"MESMO schema gerado, por isso não pode divergir do código."
+
+msgid ""
+"`delonix explain Container` · `delonix explain Container.ports` · `delonix "
+"explain Pod.containers.image`"
+msgstr ""
+"`delonix explain Container` · `delonix explain Container.ports` · `delonix "
+"explain Pod.containers.image`"
+
+msgid ""
+"Convert a VM disk to the format another ecosystem imports — `qcow2`, `raw`, "
+"`vmdk` (VMware), `vdi` (VirtualBox), `vhdx`/`vhd` (Hyper-V, Azure). Flattened "
+"either way, so the result is a standalone file with no backing chain. This "
+"engine's own two backends already share `qcow2`/`raw`; the rest exist so an "
+"image built here is importable elsewhere without a backend per product."
+msgstr ""
+"Converte um disco de VM para o formato que outro ecossistema importa — "
+"`qcow2`, `raw`, `vmdk` (VMware), `vdi` (VirtualBox), `vhdx`/`vhd` (Hyper-V, "
+"Azure). Achatado em qualquer dos casos, por isso o resultado é um ficheiro "
+"autónomo, sem cadeia de backing. Os dois backends deste motor já partilham "
+"`qcow2`/`raw`; os restantes existem para que uma imagem construída aqui seja "
+"importável noutro lado sem um backend por produto."
+
+msgid ""
+"Get or set the default VM backend, used by `vm create` when neither `--"
+"backend` nor `DELONIX_VM_BACKEND` is given — above the engine's own auto-"
+"detection heuristic. With no flag, prints the current default (`none` if auto-"
+"detection decides)."
+msgstr ""
+"Lê ou fixa o backend de VM por omissão, usado pelo `vm create` quando não vem "
+"nem `--backend` nem `DELONIX_VM_BACKEND` — acima da heurística de auto-"
+"detecção do próprio motor. Sem flag nenhuma, imprime o que está fixado "
+"(`none` = decide a auto-detecção)."
+
+msgid "Set the persisted default (`cloud-hypervisor` or `libvirt`)."
+msgstr "Fixa o valor persistido (`cloud-hypervisor` ou `libvirt`)."
+
+msgid "Clear the persisted default (fall back to auto-detection)."
+msgstr "Limpa o valor persistido (volta à auto-detecção)."
+
+msgid ""
+"Register an existing disk image under a name, so `vm create --disk <name>` "
+"and `image vm push` can use it."
+msgstr ""
+"Regista um disco já existente sob um nome, para que o `vm create --disk "
+"<nome>` e o `image vm push` o possam usar."
+
+msgid "Move the pre-scoping share records into the `default` namespace."
+msgstr ""
+"Traz os registos de partilha anteriores ao scoping para a namespace `default`."
+
+# help do grupo `container` — 27 subcomandos que ficavam em EN sob `--l18n=pt`
+# (o grupo do dia a dia, e o maior bloco dos 97 medidos)
+
+msgid "Containers: run/ps/stop/rm/exec/logs/update/describe."
+msgstr "Containers: run/ps/stop/rm/exec/logs/update/describe."
+
+msgid "Initialize a project with a Delonixfile + manifest — files ALREADY FILLED IN (images included), ready to use without editing anything."
+msgstr "Inicia um projecto com um Delonixfile + manifesto — ficheiros JÁ PREENCHIDOS (imagens incluídas), prontos a usar sem editar nada."
+
+msgid "Run a container from an image (pulls it if missing)."
+msgstr "Corre um container a partir de uma imagem (puxa-a se faltar)."
+
+msgid "(Re)start stopped/crashed containers, reusing the persistent rootfs (writes made inside the container survive, like in docker) and the same network/ports/volumes as the original `run`. Always detached."
+msgstr "(Re)arranca containers parados/caídos, reaproveitando o rootfs persistente (o que foi escrito lá dentro sobrevive, como no docker) e a mesma rede/portas/volumes do `run` original. Sempre desanexado."
+
+msgid "Stop one or more containers (SIGTERM, then SIGKILL)."
+msgstr "Pára um ou mais containers (SIGTERM, depois SIGKILL)."
+
+msgid "Send a signal to one or more containers (default SIGKILL) — unlike `stop`, does not wait or force a `Stopped` status: the real outcome (e.g. `Crashed` for a `KILL`) is picked up on the next observation."
+msgstr "Envia um sinal a um ou mais containers (por omissão SIGKILL) — ao contrário do `stop`, não espera nem força o estado `Stopped`: o desfecho real (ex.: `Crashed` para um `KILL`) é apanhado na observação seguinte."
+
+msgid "Block until one or more containers exit, then print their exit code (one per line, in the order given)."
+msgstr "Bloqueia até um ou mais containers saírem e imprime o código de saída (um por linha, na ordem dada)."
+
+msgid "Stop then start one or more containers (reuses the persistent rootfs and the original run configuration, like `start`)."
+msgstr "Pára e volta a arrancar um ou mais containers (reaproveita o rootfs persistente e a configuração original, como o `start`)."
+
+msgid "Give a container a new name."
+msgstr "Dá um nome novo a um container."
+
+msgid "Published ports of a container (`hostPort/proto -> containerPort`)."
+msgstr "Portas publicadas de um container (`portaHost/proto -> portaContainer`)."
+
+msgid "Remove one or more containers."
+msgstr "Remove um ou mais containers."
+
+msgid "Suspend a container's processes (cgroup v2 freezer) — the state stays in memory, unlike `stop`. Resume with `unpause`."
+msgstr "Suspende os processos de um container (freezer do cgroup v2) — o estado fica em memória, ao contrário do `stop`. Retoma-se com `unpause`."
+
+msgid "Resume a container suspended with `pause`."
+msgstr "Retoma um container suspenso com `pause`."
+
+msgid "Create an image from a container's CURRENT rootfs state (whatever was written inside becomes a new layer)."
+msgstr "Cria uma imagem a partir do estado ACTUAL do rootfs de um container (o que lá foi escrito passa a ser uma layer nova)."
+
+msgid "Interactive shell inside a container (shortcut for `exec -t`): with no command, it tries `bash` and falls back to `sh`, which exists in any image."
+msgstr "Shell interactiva dentro de um container (atalho para `exec -t`): sem comando, tenta o `bash` e cai para o `sh`, que existe em qualquer imagem."
+
+msgid "Run the image's `HEALTHCHECK` inside the container. Exits with 1 if `unhealthy` — usable in a script/CI."
+msgstr "Corre o `HEALTHCHECK` da imagem dentro do container. Sai com 1 se `unhealthy` — usável num script/CI."
+
+msgid "Processes running inside a container (read from `cgroup.procs`)."
+msgstr "Processos a correr dentro de um container (lidos do `cgroup.procs`)."
+
+msgid "Files changed relative to the image: `A` = created/changed, `D` = deleted."
+msgstr "Ficheiros alterados face à imagem: `A` = criado/alterado, `D` = apagado."
+
+msgid "Copy files between the host and a container. Exactly one side is `container:/path` (e.g. `delonix container cp web:/etc/nginx.conf .`)."
+msgstr "Copia ficheiros entre o host e um container. Exactamente um dos lados é `container:/caminho` (ex.: `delonix container cp web:/etc/nginx.conf .`)."
+
+msgid "Execute a command inside a running container."
+msgstr "Executa um comando dentro de um container a correr."
+
+msgid "Show the full spec of one or more containers (Store JSON)."
+msgstr "Mostra o spec completo de um ou mais containers (JSON do Store)."
+
+msgid "Human-readable detail of one or more containers, `kubectl describe`-style (for humans; use `inspect` for script-consumable JSON)."
+msgstr "Detalhe legível de um ou mais containers, ao estilo do `kubectl describe` (para humanos; para JSON consumível por scripts usa o `inspect`)."
+
+msgid "**Reconfigure a RUNNING container without stopping it** — ports, volumes, networks, and bandwidth cap."
+msgstr "**Reconfigura um container A CORRER sem o parar** — portas, volumes, redes e tecto de largura de banda."
+
+msgid "Resource usage (CPU/memory/PIDs) of the running containers — one sample and exits (no stream). With no IDs, shows all running ones."
+msgstr "Uso de recursos (CPU/memória/PIDs) dos containers a correr — uma amostra e sai (sem stream). Sem ids, mostra todos os que estão a correr."
+
+msgid "Show the logs (detached containers)."
+msgstr "Mostra os logs (containers desanexados)."
+
+msgid "Re-attach to a running container's output stream (same log file `logs -f` reads). Unlike `docker attach`, this is OUTPUT-ONLY: a detached container's stdin has nowhere to go (this engine keeps no live conduit to it once started, unlike a persistent per-container shim) — `-i`/`--stdin` is refused with a clear error instead of silently doing nothing."
+msgstr "Volta a ligar-se ao fluxo de saída de um container a correr (o mesmo ficheiro de log que o `logs -f` lê). Ao contrário do `docker attach`, isto é SÓ-SAÍDA: o stdin de um container desanexado não tem para onde ir (este motor não guarda um canal vivo para ele depois de arrancado, ao contrário de um shim persistente por container) — `-i`/`--stdin` é recusado com um erro claro em vez de não fazer nada em silêncio."
+
+msgid "Apply the `kind: Container` documents of a manifest (idempotent by name — an existing container with that name is neither recreated nor checked for spec drift, see `cmd::manifest`)."
+msgstr "Aplica os documentos `kind: Container` de um manifesto (idempotente por nome — um container existente com esse nome não é recriado nem verificado quanto a deriva de spec, ver `cmd::manifest`)."
+
+msgid "List containers."
+msgstr "Lista os containers."
+
+# help dos grupos `pod`, `image`, `vm` e `compose` (os user-facing dos 75 medidos)
+
+msgid "Real multi-container pods (N containers sharing a netns): create/ls/describe/rm/logs."
+msgstr "Pods multi-container REAIS (N containers a partilhar uma netns): create/ls/describe/rm/logs."
+
+msgid "Create a pod (N containers sharing a netns) from a manifest (`kind: Pod`)."
+msgstr "Cria um pod (N containers a partilhar uma netns) a partir de um manifesto (`kind: Pod`)."
+
+msgid "List the pods (derived from container labels)."
+msgstr "Lista os pods (derivados das labels dos containers)."
+
+msgid "Details of one or more pods (containers + the shared IP), `kubectl` style."
+msgstr "Detalhe de um ou mais pods (containers + o IP partilhado), ao estilo do `kubectl`."
+
+msgid "Remove a pod: stop/remove ALL its containers + the shared netns."
+msgstr "Remove um pod: pára/remove TODOS os seus containers + a netns partilhada."
+
+msgid "Logs of a pod's container (defaults to the first member)."
+msgstr "Logs de um container do pod (por omissão, o primeiro membro)."
+
+msgid "Pull an image from a registry. With `--vm`, no argument = the OFFICIAL Delonix golden VM image."
+msgstr "Puxa uma imagem de um registo. Com `--vm`, sem argumento = a imagem VM dourada OFICIAL do Delonix."
+
+msgid "(only with `--vm`) List the tags available in a remote OCI repository — with no argument, the OFFICIAL Delonix golden image repo."
+msgstr "(só com `--vm`) Lista as tags disponíveis num repositório OCI remoto — sem argumento, o repositório OFICIAL da imagem dourada do Delonix."
+
+msgid "Fetch a VM image from an OCI registry (single-blob artifact) — with no argument, the OFFICIAL Delonix image."
+msgstr "Obtém uma imagem VM de um registo OCI (artefacto de blob único) — sem argumento, a imagem OFICIAL do Delonix."
+
+msgid "List the tags available in a remote OCI repository — with no argument, the OFFICIAL Delonix golden image repo (discover which k8s versions are published before `pull`/`--k8s-version`)."
+msgstr "Lista as tags disponíveis num repositório OCI remoto — sem argumento, o repositório OFICIAL da imagem dourada do Delonix (descobre que versões de k8s estão publicadas antes de um `pull`/`--k8s-version`)."
+
+msgid "List the tags available in a remote OCI repository — with no argument, the OFFICIAL Delonix golden image repo (discover which k8s versions are published before `pull`)."
+msgstr "Lista as tags disponíveis num repositório OCI remoto — sem argumento, o repositório OFICIAL da imagem dourada do Delonix (descobre que versões de k8s estão publicadas antes de um `pull`)."
+
+msgid "Convert a VM disk to the format another ecosystem imports — `qcow2`, `raw`, `vmdk` (VMware), `vdi` (VirtualBox), `vhdx`/`vhd` (Hyper-V, Azure). Flattened either way: the result is a standalone file."
+msgstr "Converte um disco de VM para o formato que outro ecossistema importa — `qcow2`, `raw`, `vmdk` (VMware), `vdi` (VirtualBox), `vhdx`/`vhd` (Hyper-V, Azure). Achatado em qualquer dos casos: o resultado é um ficheiro autónomo."
+
+msgid "(only with `--vm`) Convert a VM disk to the format another ecosystem imports — `qcow2`, `raw`, `vmdk`, `vdi`, `vhdx`, `vhd`."
+msgstr "(só com `--vm`) Converte um disco de VM para o formato que outro ecossistema importa — `qcow2`, `raw`, `vmdk`, `vdi`, `vhdx`, `vhd`."
+
+msgid "(only with `--vm`) Register an existing disk image under a name."
+msgstr "(só com `--vm`) Regista um disco já existente sob um nome."
+
+msgid "Build the golden VM image (Ubuntu + kubeadm/kubelet/kubectl + `delonix-cri`). Scaffold a `VMfile` (and a cloud-init) for building your own image."
+msgstr "Constrói a imagem VM dourada (Ubuntu + kubeadm/kubelet/kubectl + `delonix-cri`). Gera o esqueleto de um `VMfile` (e de um cloud-init) para construíres a tua própria imagem."
+
+msgid "(only with `--vm`) Build the golden VM image (Ubuntu + kubeadm/kubelet/ kubectl + `delonix-cri`). Scaffold a `VMfile` (and a cloud-init) for building your own image."
+msgstr "(só com `--vm`) Constrói a imagem VM dourada (Ubuntu + kubeadm/kubelet/ kubectl + `delonix-cri`). Gera o esqueleto de um `VMfile` (e de um cloud-init) para construíres a tua própria imagem."
+
+msgid "Build a VM image: the built-in golden recipe (Ubuntu + kubeadm/kubelet/kubectl + `delonix-cri`), or a `VMfile` of your own with `-f`."
+msgstr "Constrói uma imagem VM: a receita dourada embutida (Ubuntu + kubeadm/kubelet/kubectl + `delonix-cri`), ou um `VMfile` teu com `-f`."
+
+msgid "(only with `--vm`) Build a VM image: the built-in golden recipe (Ubuntu + kubeadm/kubelet/kubectl + `delonix-cri`), or a `VMfile` of your own with `-f`."
+msgstr "(só com `--vm`) Constrói uma imagem VM: a receita dourada embutida (Ubuntu + kubeadm/kubelet/kubectl + `delonix-cri`), ou um `VMfile` teu com `-f`."
+
+msgid "Which published ports a VM can actually reach, and how to fix the ones it cannot. A port published to the default `127.0.0.1` is invisible to a VM — this lists the libvirt gateways, reads each port's LIVE bind, and for every loopback-only one prints the exact republish command."
+msgstr "Que portas publicadas uma VM alcança de facto, e como corrigir as que não alcança. Uma porta publicada no `127.0.0.1` por omissão é invisível para uma VM — isto lista os gateways do libvirt, lê o bind VIVO de cada porta e, para cada uma que esteja só no loopback, imprime o comando exacto de republicação."
+
+msgid "EXPERIMENTAL (root): give a libvirt VM DIRECT IP reachability to a container SDN network (veth from the host into the holder netns + routes). Defaults to a DRY-RUN; add `--apply` (as root) to establish it."
+msgstr "EXPERIMENTAL (root): dá a uma VM libvirt alcançabilidade DIRECTA por IP a uma rede SDN de containers (veth do host para dentro da netns do holder + rotas). Por omissão é DRY-RUN; acrescenta `--apply` (como root) para a estabelecer."
+
+msgid "Tear down a `vm bridge` (dry-run without `--apply`)."
+msgstr "Desfaz um `vm bridge` (dry-run sem `--apply`)."
+
+msgid "Take a named snapshot (libvirt: a running VM's snapshot is a system checkpoint — memory + disk; `restore` reverts to it). Not yet supported on the cloud-hypervisor backend."
+msgstr "Tira um snapshot com nome (libvirt: o snapshot de uma VM a correr é um checkpoint de sistema — memória + disco; o `restore` volta a ele). Ainda não suportado no backend cloud-hypervisor."
+
+msgid "Revert the VM to a named snapshot."
+msgstr "Volta a VM a um snapshot com nome."
+
+msgid "List the VM's snapshots."
+msgstr "Lista os snapshots da VM."
+
+msgid "Native `docker-compose.yml` support (up/down/ps/logs/config)."
+msgstr "Suporte NATIVO a `docker-compose.yml` (up/down/ps/logs/config)."
+
+msgid "Creates/starts every service — build, then network, then volume, then containers in `depends_on` order (gated on the declared condition)."
+msgstr "Cria/arranca todos os serviços — build, depois rede, depois volume, depois os containers pela ordem do `depends_on` (à espera da condição declarada)."
+
+msgid "Removes every container this project's `up` created (and, with `-v`, its named volumes). Networks/volumes marked `external: true` are NEVER removed."
+msgstr "Remove todos os containers que o `up` deste projecto criou (e, com `-v`, os seus volumes nomeados). Redes/volumes marcados `external: true` NUNCA são removidos."
+
+msgid "Containers of this project (derived from labels)."
+msgstr "Containers deste projecto (derivados das labels)."
+
+msgid "Logs of one service (default: every service, one after another)."
+msgstr "Logs de um serviço (por omissão: todos os serviços, um a seguir ao outro)."
+
+msgid "Validates and prints the resolved project, without creating anything (`docker compose config` equivalent)."
+msgstr "Valida e imprime o projecto resolvido, sem criar nada (equivalente ao `docker compose config`)."
+
+# help de `workload`, `sharevolume`, `secret`, `volumes`, `stack`, `storage`, `system`
+
+msgid "Unified compute layer over containers AND VMs: ls/stop/rm (ADR-0002). Creation stays declarative — see `kind: Workload` (`stack apply`)."
+msgstr "Camada de computação unificada sobre containers E VMs: ls/stop/rm (ADR-0002). A criação continua declarativa — ver `kind: Workload` (`stack apply`)."
+
+msgid "List all workloads — containers AND VMs — in one table (or `-o json`)."
+msgstr "Lista todos os workloads — containers E VMs — numa só tabela (ou `-o json`)."
+
+msgid "Describe a workload by name (routed to the owning backend, kubectl-style)."
+msgstr "Descreve um workload por nome (encaminhado para o backend que o possui, ao estilo do kubectl)."
+
+msgid "Stop a workload by name (routed to the owning backend)."
+msgstr "Pára um workload por nome (encaminhado para o backend que o possui)."
+
+msgid "Remove a workload by name."
+msgstr "Remove um workload por nome."
+
+msgid "An isolated, individually-quota'd slice of a `Storage` — multiple container/vm/pod share ONE NAS export without seeing each other's data."
+msgstr "Uma fatia isolada e com quota própria de uma partilha de rede — vários container/vm/pod partilham UM export de NAS sem verem os dados uns dos outros."
+
+msgid "Apply the `kind: ShareVolume` documents of a manifest (idempotent)."
+msgstr "Aplica os documentos `kind: ShareVolume` de um manifesto (idempotente)."
+
+msgid "List share volumes (parent storage, quota, live usage)."
+msgstr "Lista as fatias de partilha (partilha-mãe, quota, uso ao vivo)."
+
+msgid "Human-readable detail of one share volume."
+msgstr "Detalhe legível de uma fatia de partilha."
+
+msgid "Un-register a share volume. The underlying data (a subdirectory of the parent Storage) is PRESERVED unless `--purge-data` is passed."
+msgstr "Retira do registo uma fatia de partilha. Os dados por baixo (um subdirectório da partilha-mãe) são PRESERVADOS, a não ser que se passe `--purge-data`."
+
+msgid "Create/replace a secret from literals and/or a `.env` file."
+msgstr "Cria/substitui um segredo a partir de literais e/ou de um ficheiro `.env`."
+
+msgid "Show the keys of a secret (values redacted, unless `--reveal`)."
+msgstr "Mostra as chaves de um segredo (valores ocultados, a não ser com `--reveal`)."
+
+msgid "Remove a key from a secret (or the whole secret with `--all`)."
+msgstr "Remove uma chave de um segredo (ou o segredo inteiro, com `--all`)."
+
+msgid "Apply the `kind: Secret` documents from a manifest (declarative — creates the secret without needing `secret create` on the CLI)."
+msgstr "Aplica os documentos `kind: Secret` de um manifesto (declarativo — cria o segredo sem precisar do `secret create` na CLI)."
+
+msgid "Readable detail of one or more volumes, `kubectl describe` style (for humans; use `inspect` for the usual compact view)."
+msgstr "Detalhe legível de um ou mais volumes, ao estilo do `kubectl describe` (para humanos; para a vista compacta do costume usa o `inspect`)."
+
+msgid "Remove a volume. Refuses while a container or a `kind: ShareVolume` still references it (use `--force` to remove it anyway)."
+msgstr "Remove um volume. Recusa enquanto um container ou um `kind: ShareVolume` ainda lhe fizer referência (usa `--force` para o remover à mesma)."
+
+msgid "Apply the `kind: Volume` documents from a manifest (idempotent by name)."
+msgstr "Aplica os documentos `kind: Volume` de um manifesto (idempotente por nome)."
+
+msgid "List the structure the manifest composes (containers, volumes, networks, ...) and whether each resource exists — the tabular summary of `describe`."
+msgstr "Lista a estrutura que o manifesto compõe (containers, volumes, redes, ...) e se cada recurso existe — o resumo tabular do `describe`."
+
+msgid "Stack detail in `kubectl describe` style: each resource DECLARED in the manifest and whether or not it is present on the machine."
+msgstr "Detalhe do stack ao estilo do `kubectl describe`: cada recurso DECLARADO no manifesto e se está ou não presente na máquina."
+
+msgid "Validates the manifest WITHOUT touching anything (dry-run): resolves the cross-references (`Container.network`/`.volumes`, `Vm.network`, `Ingress/Egress. target`) against what the manifest declares PLUS what already exists in the stores. Exits with an error if any reference is left unresolved — it is the safety net against an `apply` that would only fail halfway through (fail-fast, no rollback)."
+msgstr "Valida o manifesto SEM tocar em nada (dry-run): resolve as referências cruzadas (`Container.network`/`.volumes`, `Vm.network`, `Ingress/Egress. target`) contra o que o manifesto declara MAIS o que já existe nos stores. Sai com erro se ficar alguma referência por resolver — é a rede de segurança contra um `apply` que só falharia a meio (fail-fast, sem rollback)."
+
+msgid "Storage/volumes dashboard (KPIs + table) — TUI, or `--once` snapshot."
+msgstr "Dashboard de armazenamento/volumes (KPIs + tabela) — TUI, ou snapshot com `--once`."
+
+msgid "Apply the `kind: Storage` documents from a manifest."
+msgstr "Aplica os documentos `kind: Storage` de um manifesto."
+
+msgid "Diagnose — and, with `--delegate`, fix — cgroup delegation, the prerequisite for `--memory`/`--cpus`/`--pids-limit` to mean anything."
+msgstr "Diagnostica — e, com `--delegate`, corrige — a delegação de cgroup, o pré-requisito para que `--memory`/`--cpus`/`--pids-limit` queiram dizer alguma coisa."
+
+# help do grupo `net` — netns/egress/tunnel/boot, os ultimos 21 dos 103 medidos
+
+msgid "Bring the ingress infra up (idempotent): holder netns + delonix0 + single slirp."
+msgstr "Levanta a infra de ingress (idempotente): netns do holder + delonix0 + slirp único."
+
+msgid "Show the ingress infra status (holder/slirp pids, bridge, refcount)."
+msgstr "Mostra o estado da infra de ingress (pids do holder/slirp, bridge, refcount)."
+
+msgid "Force tear-down of the ingress infra (kills slirp + holder, frees the netns)."
+msgstr "Força a demolição da infra de ingress (mata o slirp + o holder, liberta a netns)."
+
+msgid "Attach a netns to delonix0 via veth (the holder is the netns/veth factory)."
+msgstr "Liga uma netns à delonix0 por veth (o holder é a fábrica de netns/veth)."
+
+msgid "Detach (and destroy) a previously attached netns."
+msgstr "Desliga (e destrói) uma netns previamente ligada."
+
+msgid "Run a command inside an attached netns (exercises the runtime join path)."
+msgstr "Corre um comando dentro de uma netns ligada (exercita o caminho de junção do runtime)."
+
+msgid "Publish a port through the ingress (add_hostfwd + DNAT) to a container."
+msgstr "Publica uma porta através do ingress (add_hostfwd + DNAT) para um container."
+
+msgid "Unpublish a host port from the ingress."
+msgstr "Retira do ingress a publicação de uma porta do host."
+
+msgid "Apply (or clear) a container's parameterizable firewall AT THE INGRESS."
+msgstr "Aplica (ou limpa) a firewall parametrizável de um container NO INGRESS."
+
+msgid "Allow a network's egress to a HOSTNAME (and `*.hostname`), learnt live from DNS answers — the FQDN allowlist nft/CIDR can't express. Repeatable."
+msgstr "Permite a saída de uma rede para um HOSTNAME (e `*.hostname`), aprendido ao vivo das respostas de DNS — a allowlist por FQDN que nft/CIDR não conseguem exprimir. Repetível."
+
+msgid "Show a NETWORK's egress policy: CIDR allowlist, FQDN hosts, and the IPs currently learnt from DNS for those hosts."
+msgstr "Mostra a política de saída de uma REDE: allowlist de CIDR, hosts por FQDN, e os IPs aprendidos do DNS neste momento para esses hosts."
+
+msgid "Remove all outbound rules."
+msgstr "Remove todas as regras de saída."
+
+msgid "Expose a local port to the public internet via pinggy/ngrok/cloudflare (`kind: Tunnel`) — pair with `httproute`'s listening port to route by Host header behind ONE public URL."
+msgstr "Expõe uma porta local à internet pública via pinggy/ngrok/cloudflare (`kind: Tunnel`) — junta-o à porta de escuta do `httproute` para rotear pelo header Host atrás de UMA só URL pública."
+
+msgid "Apply the `kind: Tunnel` documents of a manifest (idempotent)."
+msgstr "Aplica os documentos `kind: Tunnel` de um manifesto (idempotente)."
+
+msgid "One-shot expose of a local port, no manifest needed."
+msgstr "Exposição pontual de uma porta local, sem precisar de manifesto."
+
+msgid "List tunnels (state + public URL)."
+msgstr "Lista os túneis (estado + URL pública)."
+
+msgid "Human-readable detail of one tunnel."
+msgstr "Detalhe legível de um túnel."
+
+msgid "Stop and remove a tunnel."
+msgstr "Pára e remove um túnel."
+
+msgid "Install + enable systemd units for the RUNNING containers, so they come back up when the host boots. Rootless uses user units + linger."
+msgstr "Instala + activa unidades systemd para os containers A CORRER, para que voltem a subir quando o host arrancar. Em rootless usa unidades de utilizador + linger."
+
+msgid "Disable + remove the generated boot units."
+msgstr "Desactiva + remove as unidades de arranque geradas."
+
+msgid "Show boot-persistence status (installed units + mode)."
+msgstr "Mostra o estado da persistência ao arranque (unidades instaladas + modo)."
+
+# long_about (o texto do `--help` longo) dos oito que faltavam
+
+msgid ""
+"**Reconfigure a RUNNING container without stopping it** — ports, volumes, networks, and bandwidth cap.\n"
+"\n"
+"Unlike docker (where changing a port or a volume forces recreating the container), here the dataplane doesn't belong to the process lifecycle: ports are DNAT/hostfwd in front of the network and volumes come in through the kernel's mount API (`open_tree`/`move_mount`) in the mount namespace of the already-live container. The PID doesn't change and the process is never interrupted.\n"
+"\n"
+"The changes are persisted in the registry, so a later `container start` reproduces the new configuration, not the original."
+msgstr ""
+"**Reconfigura um container A CORRER sem o parar** — portas, volumes, redes e tecto de largura de banda.\n"
+"\n"
+"Ao contrário do docker (onde mudar uma porta ou um volume obriga a recriar o container), aqui o dataplane não pertence ao ciclo de vida do processo: as portas são DNAT/hostfwd à frente da rede e os volumes entram pela API de montagem do kernel (`open_tree`/`move_mount`) no namespace de montagem do container já vivo. O PID não muda e o processo nunca é interrompido.\n"
+"\n"
+"As alterações ficam persistidas no registo, por isso um `container start` posterior reproduz a configuração nova, e não a original."
+
+msgid ""
+"Move the pre-scoping share records into the `default` namespace.\n"
+"\n"
+"Records only: the DATA is not moved, because each record carries the path it was created with and moving a tenant's bytes is not something a migration should do behind their back. What changes is where the record lives and that its backing volume becomes `default`-scoped, so `-v <name>` resolves through the namespaced path like every share created from now on."
+msgstr ""
+"Traz os registos de partilha anteriores ao scoping para a namespace `default`.\n"
+"\n"
+"Só os registos: os DADOS não são movidos, porque cada registo carrega o caminho com que foi criado e mover os bytes de um inquilino não é coisa que uma migração deva fazer nas suas costas. O que muda é onde o registo vive e que o volume que o suporta passa a ter âmbito `default`, para que `-v <nome>` resolva pelo caminho com namespace como qualquer partilha criada de agora em diante."
+
+msgid ""
+"JSON Schema of the manifest, GENERATED from the code (ADR-0007).\n"
+"\n"
+"Point an editor at it with one comment at the top of the manifest and you get completion, type checking and the field docs while you type: `# yaml-language-server: $schema=./delonix.schema.json`"
+msgstr ""
+"JSON Schema do manifesto, GERADO a partir do código (ADR-0007).\n"
+"\n"
+"Aponta o editor para ele com um comentário no topo do manifesto e ganhas completação, verificação de tipos e a documentação dos campos enquanto escreves: `# yaml-language-server: $schema=./delonix.schema.json`"
+
+msgid ""
+"Field reference for a Kind, `kubectl explain` style — from the SAME generated schema, so it cannot drift from the code.\n"
+"\n"
+"`delonix explain Container` · `delonix explain Container.ports` · `delonix explain Pod.containers.image`"
+msgstr ""
+"Referência de campos de um Kind, ao estilo do `kubectl explain` — a partir do MESMO schema gerado, por isso não pode divergir do código.\n"
+"\n"
+"`delonix explain Container` · `delonix explain Container.ports` · `delonix explain Pod.containers.image`"
+
+msgid ""
+"Removes everything this stack owns (by the `delonix.io/stack` label).\n"
+"\n"
+"A resource created by hand, or belonging to another stack, is never touched. Removal happens in the REVERSE of the creation order, so a network is not pulled from under the containers still attached to it."
+msgstr ""
+"Remove tudo o que esta stack possui (pela label `delonix.io/stack`).\n"
+"\n"
+"Um recurso criado à mão, ou pertencente a outra stack, nunca é tocado. A remoção faz-se pela ordem INVERSA da criação, para não se tirar uma rede debaixo dos containers que ainda estão ligados a ela."
+
+msgid ""
+"Stack detail in `kubectl describe` style: each resource DECLARED in the manifest and whether or not it is present on the machine.\n"
+"\n"
+"**The stack has no state of its own** — there is no registry of \"stacks\", only a manifest and the resources it creates. That is why this `describe` always starts from the file and goes to confirm each resource against the respective store, instead of inventing a new registry that would drift out of sync (the same reason `cluster ls` derives its state from the container labels).\n"
+"\n"
+"The column that matters is PRESENCE: an `apply` is fail-fast and without rollback, so a half-applied stack is a normal state and this is exactly what it shows."
+msgstr ""
+"Detalhe do stack ao estilo do `kubectl describe`: cada recurso DECLARADO no manifesto e se está ou não presente na máquina.\n"
+"\n"
+"**O stack não tem estado próprio** — não há registo de «stacks», só um manifesto e os recursos que ele cria. É por isso que este `describe` parte sempre do ficheiro e vai confirmar cada recurso ao store respectivo, em vez de inventar um registo novo que ficaria dessincronizado (a mesma razão pela qual o `cluster ls` deriva o seu estado das labels dos containers).\n"
+"\n"
+"A coluna que interessa é a PRESENÇA: um `apply` é fail-fast e sem rollback, por isso uma stack meio aplicada é um estado normal, e é exactamente isso que isto mostra."
+
+msgid ""
+"Blocks until every declared resource is present and, where it has one, healthy.\n"
+"\n"
+"The command an `apply` in CI is missing: `apply` returns as soon as it has created things, which is not the same as the stack working. Exits non-zero on timeout, naming exactly what did not come up."
+msgstr ""
+"Bloqueia até todos os recursos declarados estarem presentes e, onde houver uma, saudáveis.\n"
+"\n"
+"O comando que falta a um `apply` em CI: o `apply` devolve assim que criou as coisas, o que não é o mesmo que a stack estar a funcionar. Sai com código diferente de zero ao esgotar o tempo, nomeando exactamente o que não subiu."
+
+msgid ""
+"Diagnose — and, with `--delegate`, fix — cgroup delegation, the prerequisite for `--memory`/`--cpus`/`--pids-limit` to mean anything.\n"
+"\n"
+"Without it the flags are ACCEPTED and INERT: the container runs with no limit at all. That is the failure mode this command exists for, and it is invisible without asking."
+msgstr ""
+"Diagnostica — e, com `--delegate`, corrige — a delegação de cgroup, o pré-requisito para que `--memory`/`--cpus`/`--pids-limit` queiram dizer alguma coisa.\n"
+"\n"
+"Sem ela as flags são ACEITES e INERTES: o container corre sem limite nenhum. É esse o modo de falha que este comando existe para apanhar, e é invisível sem se perguntar."
+
+# help dos ARGUMENTOS do grupo `container` (86 flags)
+
+msgid "Absolute read IOPS limit from the store's disk"
+msgstr "Limite absoluto de IOPS de leitura no disco do store"
+
+msgid "Absolute read limit from the store's disk (`10mb`, `1g`). Docker's `--device-read-bps`"
+msgstr "Limite absoluto de leitura no disco do store (`10mb`, `1g`). O `--device-read-bps` do Docker"
+
+msgid "Absolute write IOPS limit to the store's disk"
+msgstr "Limite absoluto de IOPS de escrita no disco do store"
+
+msgid "Absolute write limit to the store's disk (`10mb`, `1g`). Docker's `--device-write-bps`"
+msgstr "Limite absoluto de escrita no disco do store (`10mb`, `1g`). O `--device-write-bps` do Docker"
+
+msgid "Add a capability (e.g. `NET_ADMIN`). Repeatable"
+msgstr "Acrescenta uma capability (ex.: `NET_ADMIN`). Repetível"
+
+msgid "Additional environment variables (`KEY=VAL`), repeatable"
+msgstr "Variáveis de ambiente adicionais (`CHAVE=VALOR`), repetível"
+
+msgid "Allocate a pseudo-terminal"
+msgstr "Aloca um pseudo-terminal"
+
+msgid "AppArmor profile to apply (`unconfined`, `delonix-default`, or an already-loaded name). `delonix-default` is loaded automatically"
+msgstr "Perfil AppArmor a aplicar (`unconfined`, `delonix-default`, ou um nome já carregado). O `delonix-default` é carregado automaticamente"
+
+msgid "Attach a host device, `/dev/x[:/dev/y]`. Repeatable. The container's `/dev` is a tmpfs with a curated list (null/zero/tty/...); this adds real host nodes to it, like `docker --device`"
+msgstr "Liga um dispositivo do host, `/dev/x[:/dev/y]`. Repetível. O `/dev` do container é um tmpfs com uma lista curada (null/zero/tty/...); isto acrescenta-lhe nós reais do host, como o `docker --device`"
+
+msgid "Auto-register this container's HTTP port in the L7 proxy under its internal FQDN `<name>.<namespace>.delonix.internal` (reachable via the proxy). Needs `--net <network>`. Removed automatically on `container rm`"
+msgstr "Regista automaticamente a porta HTTP deste container no proxy L7 sob o seu FQDN interno `<nome>.<namespace>.delonix.internal` (alcançável pelo proxy). Precisa de `--net <rede>`. Removido automaticamente no `container rm`"
+
+msgid "Bandwidth cap, in bit/s with a suffix (`10mbit`, `512kbit`, `1gbit`)"
+msgstr "Tecto de largura de banda, em bit/s com sufixo (`10mbit`, `512kbit`, `1gbit`)"
+
+msgid "Burst for the bandwidth cap (default: `32kb`). Only with `--net-rate`"
+msgstr "Burst do tecto de largura de banda (por omissão: `32kb`). Só com `--net-rate`"
+
+msgid "Burst for the bandwidth cap. Only with `--net-bps`"
+msgstr "Burst do tecto de largura de banda. Só com `--net-bps`"
+
+msgid "Command + arguments (default: the image's ENTRYPOINT/CMD)"
+msgstr "Comando + argumentos (por omissão: o ENTRYPOINT/CMD da imagem)"
+
+msgid "Connect the container to an additional network hot (multi-homing). Repeatable"
+msgstr "Liga o container a uma rede adicional a quente (multi-homing). Repetível"
+
+msgid "Container name (default: `dlx-<id>`)"
+msgstr "Nome do container (por omissão: `dlx-<id>`)"
+
+msgid "Container sysctl (`net.core.somaxconn=1024`). Repeatable"
+msgstr "Sysctl do container (`net.core.somaxconn=1024`). Repetível"
+
+msgid "CPU quota (number of cores, e.g. `0.5`, `2`). Default: `1.0`"
+msgstr "Quota de CPU (número de cores, ex.: `0.5`, `2`). Por omissão: `1.0`"
+
+msgid "CPUs the container is pinned to (`cpuset.cpus`, e.g. `0-3`, `0,2`)"
+msgstr "CPUs a que o container fica preso (`cpuset.cpus`, ex.: `0-3`, `0,2`)"
+
+msgid "CRI format in the log file (for the kubelet/`crictl logs`)"
+msgstr "Formato CRI no ficheiro de log (para o kubelet/`crictl logs`)"
+
+msgid "Detection mode: seccomp in log mode (doesn't block), to discover syscalls"
+msgstr "Modo de detecção: seccomp em modo de log (não bloqueia), para descobrir syscalls"
+
+msgid "Disable the automatic activation of the user namespace"
+msgstr "Desliga a activação automática do user namespace"
+
+msgid "Disconnect the container from an additional network. Repeatable"
+msgstr "Desliga o container de uma rede adicional. Repetível"
+
+msgid "Drop a capability. Repeatable"
+msgstr "Retira uma capability. Repetível"
+
+msgid "Egress bandwidth cap (`10mbit`, `512kbit`). Only with `--net <network>`"
+msgstr "Tecto de largura de banda de saída (`10mbit`, `512kbit`). Só com `--net <rede>`"
+
+msgid "Expose GPUs: `all` | `nvidia` | `dri` (expands to the `/dev` nodes)"
+msgstr "Expõe GPUs: `all` | `nvidia` | `dri` (expande para os nós de `/dev`)"
+
+msgid "Extra environment variable (`KEY=VAL`) for this call only, on top of the container's own env. Repeatable"
+msgstr "Variável de ambiente extra (`CHAVE=VALOR`) só para esta chamada, por cima do ambiente do próprio container. Repetível"
+
+msgid "Fixed IP on the network (`--net <network>`), e.g. `10.89.0.10`"
+msgstr "IP fixo na rede (`--net <rede>`), ex.: `10.89.0.10`"
+
+msgid "Follow the log continuously (exits when the container stops)"
+msgstr "Segue o log continuamente (sai quando o container pára)"
+
+msgid "Force (kill it if running)"
+msgstr "Força (mata-o se estiver a correr)"
+
+msgid "Hostname inside the container (UTS namespace + `/etc/hostname`). Default: the container name (docker `--hostname`)"
+msgstr "Hostname dentro do container (UTS namespace + `/etc/hostname`). Por omissão: o nome do container (o `--hostname` do docker)"
+
+msgid "Image (e.g. `alpine:3.19`)"
+msgstr "Imagem (ex.: `alpine:3.19`)"
+
+msgid "Image to use. Omit = fill in with the default image"
+msgstr "Imagem a usar. Omitir = preenche com a imagem por omissão"
+
+msgid "Include stopped/failed ones"
+msgstr "Inclui os parados/falhados"
+
+msgid "Inject a secret from the vault (`name`), as an environment variable. Repeatable. With `--secret-files`, it goes to `/run/secrets/<name>`"
+msgstr "Injecta um segredo do cofre (`nome`), como variável de ambiente. Repetível. Com `--secret-files`, vai para `/run/secrets/<nome>`"
+
+msgid "Interactive (attaches stdin)"
+msgstr "Interactivo (liga o stdin)"
+
+msgid "(internal) init PID of the pod's infra container — join its IPC/UTS namespaces (shared pod IPC + hostname). Set by `delonix pod`"
+msgstr "(interno) PID do init do container de infra do pod — junta-se às suas namespaces IPC/UTS (IPC e hostname partilhados do pod). Definido pelo `delonix pod`"
+
+msgid "Join a pod's netns (`--net <network>`), sharing IP/ports"
+msgstr "Junta-se à netns de um pod (`--net <rede>`), partilhando IP/portas"
+
+msgid "Label (`KEY=VAL`), repeatable — e.g. `io.x-k8s.kind.role=control-plane` enables the dedicated cgroup2 delegation for Kind nodes (see `setup_node_cgroup_ns`)"
+msgstr "Label (`CHAVE=VALOR`), repetível — ex.: `io.x-k8s.kind.role=control-plane` activa a delegação de cgroup2 dedicada aos nós Kind (ver `setup_node_cgroup_ns`)"
+
+msgid "Load variables from a `.env` file (`KEY=VAL` per line). Repeatable"
+msgstr "Carrega variáveis de um ficheiro `.env` (`CHAVE=VALOR` por linha). Repetível"
+
+msgid "Log driver (`json`, `cri`, ...)"
+msgstr "Driver de log (`json`, `cri`, ...)"
+
+msgid "Log file path (overrides the default)"
+msgstr "Caminho do ficheiro de log (substitui o por omissão)"
+
+msgid "Logical ISOLATION namespace (default `default`). Containers in different namespaces cannot reach each other (even on the same network); only a `kind: Dependency` crosses the boundary"
+msgstr "Namespace lógica de ISOLAMENTO (por omissão `default`). Containers em namespaces diferentes não se alcançam (mesmo na mesma rede); só um `kind: Dependency` atravessa a fronteira"
+
+msgid "Memory limit (`64M`, `2G`, `max`). Default: `max` (no cap)"
+msgstr "Limite de memória (`64M`, `2G`, `max`). Por omissão: `max` (sem tecto)"
+
+msgid "Mount a tmpfs (`/path[:options]`). Repeatable"
+msgstr "Monta um tmpfs (`/caminho[:opções]`). Repetível"
+
+msgid "Mount a volume hot, `name:/target[:ro]` or `/host:/target[:ro]`. Repeatable"
+msgstr "Monta um volume a quente, `nome:/destino[:ro]` ou `/host:/destino[:ro]`. Repetível"
+
+msgid "Network: `host` (shares the host's, default), `none` (isolated netns with no connectivity), or the NAME of a network created with `delonix network create`"
+msgstr "Rede: `host` (partilha a do host, por omissão), `none` (netns isolada, sem ligação), ou o NOME de uma rede criada com `delonix network create`"
+
+msgid "New CPU quota hot (number of cores, e.g. `0.5`, `2`)"
+msgstr "Nova quota de CPU a quente (número de cores, ex.: `0.5`, `2`)"
+
+msgid "New memory limit hot (`64M`, `2G`, `max`)"
+msgstr "Novo limite de memória a quente (`64M`, `2G`, `max`)"
+
+msgid "Output format: `table` (default) or `json` (ADR-0005). `json` honors `--all` (same filter as the table) and ignores `--quiet`"
+msgstr "Formato de saída: `table` (por omissão) ou `json` (ADR-0005). O `json` respeita o `--all` (o mesmo filtro da tabela) e ignora o `--quiet`"
+
+msgid "Override the image's ENTRYPOINT (COMMAND becomes the arguments to this binary; `--entrypoint \"\"` clears it and runs just the COMMAND)"
+msgstr "Substitui o ENTRYPOINT da imagem (o COMANDO passa a ser os argumentos deste binário; `--entrypoint \"\"` limpa-o e corre só o COMANDO)"
+
+msgid "Prefix each line with its RFC3339 timestamp. Only available for containers run with `--log-cri` (`container run --log-cri`) — the plain log format is raw bytes with no per-line timestamp to show; a container without it gets a clear error naming the flag, not a silently-blank column"
+msgstr "Prefixa cada linha com o seu timestamp RFC3339. Só disponível para containers corridos com `--log-cri` (`container run --log-cri`) — o formato de log simples são bytes crus, sem timestamp por linha para mostrar; um container sem ele recebe um erro claro a nomear a flag, e não uma coluna vazia em silêncio"
+
+msgid "Print only the IDs (to compose with `stop`/`rm`)"
+msgstr "Imprime só os ids (para compor com `stop`/`rm`)"
+
+msgid "Privileged container (all caps, seccomp off) — trusted workloads"
+msgstr "Container privilegiado (todas as caps, seccomp desligado) — cargas de confiança"
+
+msgid "Publish one more port hot, `hostPort:contPort[/tcp|udp]`. Repeatable"
+msgstr "Publica mais uma porta a quente, `portaHost:portaContainer[/tcp|udp]`. Repetível"
+
+msgid "Read-only rootfs (writes go to tmpfs/volumes)"
+msgstr "Rootfs só de leitura (as escritas vão para tmpfs/volumes)"
+
+msgid "Refused: stdin forwarding isn't supported (see the command's own doc above)"
+msgstr "Recusado: não há reencaminhamento de stdin (ver a documentação do próprio comando, acima)"
+
+msgid "Relative CPU weight (`cpu.weight`, 1–10000) under contention"
+msgstr "Peso relativo de CPU (`cpu.weight`, 1–10000) sob contenção"
+
+msgid "Relative I/O weight (`io.weight`, 1–10000)"
+msgstr "Peso relativo de I/O (`io.weight`, 1–10000)"
+
+msgid "Remove the bandwidth cap"
+msgstr "Remove o tecto de largura de banda"
+
+msgid "Remove the container when the process exits (with `-d`, a detached watcher handles removal when the container dies)"
+msgstr "Remove o container quando o processo sair (com `-d`, um vigia desanexado trata da remoção quando o container morrer)"
+
+msgid "Restart policy (only with `-d`): `no` (default), `on-failure[:max]`, `always`, `unless-stopped`. A detached supervisor (one per container, ephemeral — there's no daemon) becomes the container's parent, captures the real exit code, and restarts it according to the policy"
+msgstr "Política de reinício (só com `-d`): `no` (por omissão), `on-failure[:max]`, `always`, `unless-stopped`. Um supervisor desanexado (um por container, efémero — não há daemon) passa a ser o pai do container, captura o código de saída real, e reinicia-o segundo a política"
+
+msgid "Restrict DNS resolution to these containers (isolation). Repeatable"
+msgstr "Restringe a resolução de DNS a estes containers (isolamento). Repetível"
+
+msgid "Run as this user for this call only: `uid[:gid]` or `name[:group]` (resolved against the container's own `/etc/passwd`/`/etc/group`). Default: the container's own configured user"
+msgstr "Corre como este utilizador só nesta chamada: `uid[:gid]` ou `nome[:grupo]` (resolvido contra o `/etc/passwd`/`/etc/group` do próprio container). Por omissão: o utilizador configurado do container"
+
+msgid "Run in the background and print the ID"
+msgstr "Corre em segundo plano e imprime o id"
+
+msgid "Run the process as this user: `uid[:gid]` or `name[:group]` (docker `--user`). Names are resolved in the image's `/etc/passwd`/`/etc/group`"
+msgstr "Corre o processo como este utilizador: `uid[:gid]` ou `nome[:grupo]` (o `--user` do docker). Os nomes resolvem-se no `/etc/passwd`/`/etc/group` da imagem"
+
+msgid "Seconds until SIGKILL"
+msgstr "Segundos até ao SIGKILL"
+
+msgid "Seconds until SIGKILL, for the `stop` half"
+msgstr "Segundos até ao SIGKILL, na metade do `stop`"
+
+msgid "SELinux context/profile to apply"
+msgstr "Contexto/perfil SELinux a aplicar"
+
+msgid "Share the host's IPC namespace"
+msgstr "Partilha a namespace IPC do host"
+
+msgid "Share the host's PID namespace (`--pid host`)"
+msgstr "Partilha a namespace de PID do host (`--pid host`)"
+
+msgid "Show only lines at or after this Unix timestamp (seconds). Same `--log-cri` requirement as `--tail`"
+msgstr "Mostra só as linhas a partir deste timestamp Unix (segundos). Mesma exigência de `--log-cri` que o `--tail`"
+
+msgid "Show only the last N lines. Requires the container to have been run with `--log-cri` (per-line timestamps needed to find \"the last N\" — see `--timestamps`'s doc for why)"
+msgstr "Mostra só as últimas N linhas. Exige que o container tenha sido corrido com `--log-cri` (são precisos timestamps por linha para encontrar «as últimas N» — ver a documentação do `--timestamps` para saber porquê)"
+
+msgid "Signal name (`KILL`, `SIGKILL`, case-insensitive, `SIG` prefix optional) or number (`9`)"
+msgstr "Nome do sinal (`KILL`, `SIGKILL`, indiferente a maiúsculas, prefixo `SIG` opcional) ou número (`9`)"
+
+msgid "Tag for the new image (e.g. `app:v2`)"
+msgstr "Tag da imagem nova (ex.: `app:v2`)"
+
+msgid "The container resolves NO other container by name"
+msgstr "O container não resolve NENHUM outro container por nome"
+
+msgid "The container's DNS alias on the network. Repeatable"
+msgstr "O alias de DNS do container na rede. Repetível"
+
+msgid "The `--secret`s come in as files in `/run/secrets/` (tmpfs), not env"
+msgstr "Os `--secret` entram como ficheiros em `/run/secrets/` (tmpfs), e não no ambiente"
+
+msgid "Ulimit (`nofile=1024:2048`). Repeatable"
+msgstr "Ulimit (`nofile=1024:2048`). Repetível"
+
+msgid "Unmount hot, by the TARGET path inside the container. Repeatable"
+msgstr "Desmonta a quente, pelo caminho de DESTINO dentro do container. Repetível"
+
+msgid "Unpublish a port hot, by HOST PORT. Repeatable"
+msgstr "Retira a publicação de uma porta a quente, pela PORTA DO HOST. Repetível"
+
+msgid "User namespace: enables the subuid mapping (default in rootless)"
+msgstr "User namespace: activa o mapeamento de subuid (por omissão em rootless)"
+
+msgid "Volume/bind mount, `name:/target[:ro]` or `/host:/target[:ro]`. Repeatable"
+msgstr "Volume/bind mount, `nome:/destino[:ro]` ou `/host:/destino[:ro]`. Repetível"
+
+msgid "Working directory for this call only (default: the container's own configured `workdir`, or `/`)"
+msgstr "Directório de trabalho só para esta chamada (por omissão: o `workdir` configurado do próprio container, ou `/`)"
+
+msgid "Working directory the container's process starts in (default: the image's own configured workdir, or `/`). Persists in the record — an `exec -w` overrides it for that one call only"
+msgstr "Directório de trabalho em que o processo do container arranca (por omissão: o workdir configurado da própria imagem, ou `/`). Fica persistido no registo — um `exec -w` substitui-o só nessa chamada"
+
+msgid "Publish a port, `[hostIp:]hostPort:contPort[/tcp|udp]` or just `port`. Repeatable. SAFE BY DEFAULT: without `hostIp` the port binds to `127.0.0.1` only — reachable from the host itself, NOT from a browser on another machine. Name the address to widen it: `0.0.0.0:8080:80` (every interface), `192.168.1.10:8080:80` (one), or the libvirt gateway to reach it from VMs (see `delonix vm reach`). With `--net host` (the default) the container moves to its own netns with userspace NAT (slirp4netns, like rootless podman); with `--net <network>` it publishes via the ingress (nft DNAT + hostfwd on the single slirp)"
+msgstr "Publica uma porta, `[ipHost:]portaHost:portaContainer[/tcp|udp]` ou só `porta`. Repetível. SEGURO POR OMISSÃO: sem `ipHost` a porta liga-se só a `127.0.0.1` — alcançável do próprio host, NÃO de um browser noutra máquina. Nomeia o endereço para a alargar: `0.0.0.0:8080:80` (todas as interfaces), `192.168.1.10:8080:80` (uma), ou o gateway do libvirt para lhe chegares de uma VM (ver `delonix vm reach`). Com `--net host` (o default) o container muda-se para a sua própria netns com NAT em espaço de utilizador (slirp4netns, como o podman rootless); com `--net <rede>` publica pelo ingress (DNAT nft + hostfwd no slirp único)"
+# scan de imagem VM: recusa clara antes de ir ao registo (bloco C5)
+msgid "'{img}' is a VM image, not a container image — scanning a qcow2 guest filesystem is not implemented. Scan the container images it runs, or inspect the guest yourself (`virt-filesystems`/`guestfish`)."
+msgstr "'{img}' é uma imagem VM, não uma imagem de container — analisar o sistema de ficheiros de um convidado qcow2 não está implementado. Analisa as imagens de container que ela corre, ou inspecciona o convidado à mão (`virt-filesystems`/`guestfish`)."
+
+# delonix init — detector de contexto (bloco C4)
+msgid "detected {evidence} → {what}"
+msgstr "detectado {evidence} → {what}"
+
+msgid "found {evidence} — this project already runs natively with `{cmd}`; generating a second manifest would give it two sources of truth"
+msgstr "encontrei {evidence} — este projecto já corre nativamente com `{cmd}`; gerar um segundo manifesto dava-lhe duas fontes de verdade"
+
+# help dos ARGUMENTOS de `image`, `vm` e `net`
+
+msgid "Build a golden image with NO Kubernetes — just `delonix` itself"
+msgstr "Constrói uma imagem dourada SEM Kubernetes — só o próprio `delonix`"
+
+msgid "Fedora release AND build (e.g. `42-1.1`) — only with `--distro fedora`"
+msgstr "Release E build do Fedora (ex.: `42-1.1`) — só com `--distro fedora`"
+
+msgid "Give the guest network access during `RUN` — VMfile builds only. The golden recipe already decides this with `--offline`"
+msgstr "Dá acesso à rede ao convidado durante os `RUN` — só em builds de VMfile. A receita dourada já decide isto com `--offline`"
+
+msgid "Kernel baked into the image (`uname -r` shape), for `image vm ls`. Omit to let it be probed from the image — which only works where libguestfs can read `/boot` (not FreeBSD, not root-on-ZFS)"
+msgstr "Kernel embutido na imagem (na forma do `uname -r`), para o `image vm ls`. Omite-o para ser sondado a partir da imagem — o que só funciona onde o libguestfs consegue ler o `/boot` (não em FreeBSD, não com raiz em ZFS)"
+
+msgid "Name to register it under (`image vm ls`)"
+msgstr "Nome sob o qual o registar (`image vm ls`)"
+
+msgid "(only with `--vm`) With no argument, pull the official NO-Kubernetes golden instead of the Kubernetes one"
+msgstr "(só com `--vm`) Sem argumento, puxa a dourada oficial SEM Kubernetes em vez da de Kubernetes"
+
+msgid "Output format: `table` (default) or `json` (ADR-0005)"
+msgstr "Formato de saída: `table` (por omissão) ou `json` (ADR-0005)"
+
+msgid "Output format: `table` (default) or `json` (ADR-0005). Works for both `image ls` and `image --vm ls`"
+msgstr "Formato de saída: `table` (por omissão) ou `json` (ADR-0005). Vale para o `image ls` e para o `image --vm ls`"
+
+msgid "Path to a `.qcow2` (or any format `qemu-img` reads — it is converted)"
+msgstr "Caminho para um `.qcow2` (ou qualquer formato que o `qemu-img` leia — é convertido)"
+
+msgid "Recommended memory (e.g. `4G`), same rule as `--default-vcpus`"
+msgstr "Memória recomendada (ex.: `4G`), com a mesma regra do `--default-vcpus`"
+
+msgid "Recommended vCPUs, applied by `vm create` when `--vcpus` is absent"
+msgstr "vCPUs recomendados, aplicados pelo `vm create` quando não vem `--vcpus`"
+
+msgid "Remove it even if a container still uses it"
+msgstr "Remove-a mesmo que um container ainda a use"
+
+msgid "Replace an image already registered under this name"
+msgstr "Substitui uma imagem já registada com este nome"
+
+msgid "Store the qcow2 uncompressed (larger, but no decompression cost on backing-file reads at runtime) — same flag, same trade-off, as `build`"
+msgstr "Guarda o qcow2 sem compressão (maior, mas sem custo de descompressão nas leituras do backing file em runtime) — a mesma flag, e o mesmo compromisso, do `build`"
+
+msgid "The guest does NOT run cloud-init: it is a self-configuring appliance (OPNsense, Proxmox, TrueNAS). `vm create` then skips the NoCloud seed instead of attaching one nothing in the guest reads"
+msgstr "O convidado NÃO corre cloud-init: é uma appliance que se configura sozinha (OPNsense, Proxmox, TrueNAS). O `vm create` passa então a saltar o seed NoCloud, em vez de lhe colar um que nada lá dentro lê"
+
+msgid "Version, for `image vm ls` (e.g. `26.1.2`)"
+msgstr "Versão, para o `image vm ls` (ex.: `26.1.2`)"
+
+msgid "What this is, for `image vm ls` (e.g. `opnsense`, `proxmox-ve`)"
+msgstr "O que isto é, para o `image vm ls` (ex.: `opnsense`, `proxmox-ve`)"
+
+msgid "With no argument, list the official NO-Kubernetes golden's repo instead of the Kubernetes one"
+msgstr "Sem argumento, lista o repositório da dourada oficial SEM Kubernetes em vez do da de Kubernetes"
+
+msgid "With no `source`, list the official NO-Kubernetes golden's repo instead of the Kubernetes one"
+msgstr "Sem `source`, lista o repositório da dourada oficial SEM Kubernetes em vez do da de Kubernetes"
+
+msgid "With no `source`, pull the official NO-Kubernetes golden instead of the Kubernetes one"
+msgstr "Sem `source`, puxa a dourada oficial SEM Kubernetes em vez da de Kubernetes"
+
+msgid "Absolute URL of a qcow2 cloud image to boot this VM from"
+msgstr "URL absoluto de uma cloud image qcow2 a partir da qual arrancar esta VM"
+
+msgid "Actually run the privileged plan (requires root). Without it: dry-run"
+msgstr "Executa mesmo o plano privilegiado (precisa de root). Sem isto: dry-run"
+
+msgid "A local VM image name (`vm ls`) or a literal `.qcow2`/`.raw` path"
+msgstr "Um nome de imagem VM local (`vm ls`) ou um caminho literal `.qcow2`/`.raw`"
+
+msgid "Also probe a short list of well-known ports (22, 6443, 10250, 80, 443) on each VM's IP and show which respond — a real TCP connect per port, short timeout, run concurrently. Off by default: unlike the rest of `ls` (local state only), this does live network I/O and can add latency, especially for an unreachable/booting VM"
+msgstr "Sonda também uma lista curta de portas conhecidas (22, 6443, 10250, 80, 443) no IP de cada VM e mostra quais respondem — um connect TCP real por porta, com timeout curto, em paralelo. Desligado por omissão: ao contrário do resto do `ls` (só estado local), isto faz I/O de rede ao vivo e pode acrescentar latência, sobretudo para uma VM inalcançável ou a arrancar"
+
+msgid "`cloud-hypervisor`|`libvirt` (omit: the image's `HYPERVISOR` if `--disk` names a local one, else `DELONIX_VM_BACKEND`/`vm default-backend`/auto-detection, in that order)"
+msgstr "`cloud-hypervisor`|`libvirt` (omitir: o `HYPERVISOR` da imagem se o `--disk` nomear uma local, senão `DELONIX_VM_BACKEND`/`vm default-backend`/auto-detecção, por esta ordem)"
+
+msgid "Destination file (default: alongside the source, with the new extension)"
+msgstr "Ficheiro de destino (por omissão: ao lado da origem, com a extensão nova)"
+
+msgid "Do not compress the final qcow2"
+msgstr "Não comprime o qcow2 final"
+
+msgid "Give the guest network access during `RUN` (for `apt-get install` and friends). Off by default: a build that reaches the internet produces a different image depending on when it ran"
+msgstr "Dá acesso à rede ao convidado durante os `RUN` (para `apt-get install` e companhia). Desligado por omissão: um build que vai à internet produz uma imagem diferente conforme o dia em que correu"
+
+msgid "Ingress network for the tap (default: the system ingress network; a custom network must be created first with `delonix network create`)"
+msgstr "Rede de ingress para o tap (por omissão: a rede de ingress do sistema; uma rede personalizada tem de ser criada antes com `delonix network create`)"
+
+msgid "Memory (`\"2G\"`/`\"1024M\"`; default: `1G`, or the image's `MEMORY` when `--disk` names a local image)"
+msgstr "Memória (`\"2G\"`/`\"1024M\"`; por omissão: `1G`, ou o `MEMORY` da imagem quando o `--disk` nomeia uma imagem local)"
+
+msgid "`no`|`on-failure`|`always`"
+msgstr "`no`|`on-failure`|`always`"
+
+msgid "Output format: `table` (default) or `json` (ADR-0005). The `ports_open` field is included only with `--ports` (same as the table column — the probe does live network I/O, off by default)"
+msgstr "Formato de saída: `table` (por omissão) ou `json` (ADR-0005). O campo `ports_open` só vem com `--ports` (tal como a coluna da tabela — a sonda faz I/O de rede ao vivo, e está desligada por omissão)"
+
+msgid "Scaffold a `VMfile` for BUILDING your own qcow2 image, instead of a manifest for RUNNING an existing one. The two are different jobs and this is the same verb for both: `init` starts a project either way"
+msgstr "Gera o esqueleto de um `VMfile` para CONSTRUIR a tua própria imagem qcow2, em vez de um manifesto para CORRER uma já existente. São dois trabalhos diferentes e este é o mesmo verbo para ambos: o `init` começa um projecto nos dois casos"
+
+msgid "Snapshot name"
+msgstr "Nome do snapshot"
+
+msgid "Snapshot name to revert to"
+msgstr "Nome do snapshot para o qual voltar"
+
+msgid "vCPUs (default: 1, or the image's `VCPUS` — see `HYPERVISOR`/`VCPUS` in `delonix vm init --vmfile` — when `--disk` names a local image)"
+msgstr "vCPUs (por omissão: 1, ou o `VCPUS` da imagem — ver `HYPERVISOR`/`VCPUS` em `delonix vm init --vmfile` — quando o `--disk` nomeia uma imagem local)"
+
+msgid "VM subnet(s) to route back (default: auto-detected `virbr*`). Repeatable"
+msgstr "Subnet(s) de VM a rotear de volta (por omissão: as `virbr*` auto-detectadas). Repetível"
+
+msgid "With no `source`, pull the official NO-Kubernetes golden (just the `delonix` engine, rootless-ready) instead of the Kubernetes one"
+msgstr "Sem `source`, puxa a dourada oficial SEM Kubernetes (só o motor `delonix`, pronto a rootless) em vez da de Kubernetes"
+
+msgid "CIDRs for `allowlist` mode (comma-separated), e.g. `10.0.0.0/8,1.1.1.1/32`"
+msgstr "CIDRs para o modo `allowlist` (separados por vírgula), ex.: `10.0.0.0/8,1.1.1.1/32`"
+
+msgid "ContainerFw as JSON, e.g. `{\"enabled\":true,\"policyIn\":\"deny\",\"rules\":[...]}`"
+msgstr "ContainerFw em JSON, ex.: `{\"enabled\":true,\"policyIn\":\"deny\",\"rules\":[...]}`"
+
+msgid "e.g. `github.com` (matches `github.com` and `*.github.com`)"
+msgstr "ex.: `github.com` (casa com `github.com` e com `*.github.com`)"
+
+msgid "Emit JSON instead of a human summary"
+msgstr "Emite JSON em vez de um resumo para humanos"
+
+msgid "Free-form note kept with the rule"
+msgstr "Nota livre guardada com a regra"
+
+msgid "`hostPort:containerPort[/tcp|udp]` or just `port`"
+msgstr "`portaHost:portaContainer[/tcp|udp]` ou só `porta`"
+
+msgid "IP in the infra subnet. Defaults to a deterministic one derived from `name`"
+msgstr "IP na subnet de infra. Por omissão, um determinístico derivado do `name`"
+
+msgid "Name (default: `tunnel-<port>`)"
+msgstr "Nome (por omissão: `tunnel-<porta>`)"
+
+msgid "Netns/container name"
+msgstr "Nome da netns/container"
+
+msgid "Netns/container name (its IP is derived unless `--ip` is given)"
+msgstr "Nome da netns/container (o IP é derivado, a não ser que venha `--ip`)"
+
+msgid "Netns name (typically a container id/short-id)"
+msgstr "Nome da netns (tipicamente um id/short-id de container)"
+
+msgid "Only from this source CIDR (default: anywhere)"
+msgstr "Só a partir deste CIDR de origem (por omissão: de qualquer sítio)"
+
+msgid "Only to this destination CIDR (default: anywhere)"
+msgstr "Só para este CIDR de destino (por omissão: para qualquer sítio)"
+
+msgid "Override the container IP (defaults to the deterministic one from `name`)"
+msgstr "Substitui o IP do container (por omissão, o determinístico derivado do `name`)"
+
+msgid "`pinggy` | `ngrok` | `cloudflare`"
+msgstr "`pinggy` | `ngrok` | `cloudflare`"
+
+msgid "Port mapping `hostPort:containerPort[/tcp|udp]`"
+msgstr "Mapeamento de porta `portaHost:portaContainer[/tcp|udp]`"
+
+msgid "Remove the container's firewall from the ingress"
+msgstr "Remove do ingress a firewall do container"
+
+msgid "Restart policy baked into the units (`no|on-failure[:max]|always|unless-stopped`)"
+msgstr "Política de reinício embutida nas unidades (`no|on-failure[:max]|always|unless-stopped`)"
+
+msgid "`tcp/5432`, `udp/53`, `5432` (any proto), or `tcp/*` (all ports)"
+msgstr "`tcp/5432`, `udp/53`, `5432` (qualquer proto), ou `tcp/*` (todas as portas)"
+
+# help dos ARGUMENTOS restantes (build/cluster/compose/pod/secret/stack/
+# storage/sharevolume/volumes/workload/network/system/serve/dash)
+
+msgid "Absolute URL of a qcow2 cloud image to boot this VM from."
+msgstr "URL absoluto de uma cloud image qcow2 a partir da qual arrancar esta VM."
+
+msgid "Accepted for `docker compose` compatibility. Services already start detached here (this engine has no daemon holding them), so this is a no-op rather than an error — every existing script and CI job writes `up -d`, and rejecting it broke all of them for no behavioural gain"
+msgstr "Aceite por compatibilidade com o `docker compose`. Aqui os serviços já arrancam desanexados (este motor não tem daemon a segurá-los), por isso isto não faz nada em vez de dar erro — todos os scripts e jobs de CI que existem escrevem `up -d`, e recusá-lo partia-os a todos sem ganho de comportamento nenhum"
+
+msgid "Additional mount options (`nfs` driver)"
+msgstr "Opções de montagem adicionais (driver `nfs`)"
+
+msgid "Auto-provision N more VMs as a DEDICATED etcd cluster (delonix generates its own CA + certs and bootstraps it) instead of the default `stacked` etcd (co-located with the control-planes). Use an ODD number for a well-defined quorum (3, 5, ...) — 1 is allowed for dev/test but has no HA (a single point of failure). Omit for today's default behavior"
+msgstr "Provisiona automaticamente mais N VMs como cluster etcd DEDICADO (o delonix gera a sua própria CA + certificados e faz-lhe o bootstrap) em vez do etcd `stacked` por omissão (co-localizado com os control-planes). Usa um número ÍMPAR para um quórum bem definido (3, 5, ...) — 1 é aceite para dev/teste mas não tem HA (ponto único de falha). Omite-o para o comportamento por omissão de hoje"
+
+msgid "Build-time variable (`KEY=VALUE`), repeatable — only takes effect for a name the Dockerfile actually declares with `ARG KEY[=default]` (an override with no matching `ARG` is silently ignored, same as Docker)"
+msgstr "Variável de build (`CHAVE=VALOR`), repetível — só tem efeito para um nome que o Dockerfile declare mesmo com `ARG CHAVE[=default]` (um override sem `ARG` correspondente é ignorado em silêncio, tal como no Docker)"
+
+msgid "Bypasses the layer cache entirely (neither reads nor writes it) — same as Docker's `--no-cache`"
+msgstr "Ignora por completo a cache de layers (não a lê nem escreve) — o mesmo que o `--no-cache` do Docker"
+
+msgid "Cluster name (used for `<name>-cp1`/`<name>-w1` VM names and the kubeconfig context). Omit for an auto-generated Angolan name (`<king>-<place>-NN`) — same pattern as auto-named containers and `cluster create` (kind mode)"
+msgstr "Nome do cluster (usado nos nomes de VM `<nome>-cp1`/`<nome>-w1` e no contexto do kubeconfig). Omite-o para um nome angolano gerado automaticamente (`<rei>-<lugar>-NN`) — o mesmo padrão dos containers auto-nomeados e do `cluster create` (modo kind)"
+
+msgid "Device/export (`nfs` driver)"
+msgstr "Dispositivo/export (driver `nfs`)"
+
+msgid "Don't apply anything — print the full manifest with every default filled in (like `kubectl apply --dry-run=client -o yaml`). Stacks are expanded and Kinds canonicalized, so you see exactly what WOULD run"
+msgstr "Não aplica nada — imprime o manifesto completo com todos os defaults preenchidos (como o `kubectl apply --dry-run=client -o yaml`). Os stacks são expandidos e os Kinds canonicalizados, por isso vês exactamente o que CORRERIA"
+
+msgid "Export/share: NFS path (`/mnt/pool/media`), CIFS share name (`media`), or the path in the WebDAV URL (`/remote.php/dav/...`)"
+msgstr "Export/partilha: caminho NFS (`/mnt/pool/media`), nome da partilha CIFS (`media`), ou o caminho no URL WebDAV (`/remote.php/dav/...`)"
+
+msgid "Extra mount options (`vers=4.1,soft`), appended to the derived ones"
+msgstr "Opções de montagem extra (`vers=4.1,soft`), acrescentadas às derivadas"
+
+msgid "Force a template instead of the detected one (`stack init -t list` shows them)"
+msgstr "Força um template em vez do detectado (`stack init -t list` mostra-os)"
+
+msgid "Force (kill) running containers"
+msgstr "Força (mata) os containers a correr"
+
+msgid "Force removal even if running / if backend cleanup refuses"
+msgstr "Força a remoção mesmo a correr / mesmo que a limpeza no backend recuse"
+
+msgid "Gateway (macvlan/ipvlan)"
+msgstr "Gateway (macvlan/ipvlan)"
+
+msgid "`id=<name>,src=<path>` — a secret a `RUN --mount=type=secret,id=<name>` can bind-mount for the duration of that one instruction (never baked into a layer). Repeatable"
+msgstr "`id=<nome>,src=<caminho>` — um segredo que um `RUN --mount=type=secret,id=<nome>` pode montar por bind durante essa instrução apenas (nunca fica cozido numa layer). Repetível"
+
+msgid "`KEY=value` pair. Repeatable"
+msgstr "Par `CHAVE=valor`. Repetível"
+
+msgid "`KEY=value` pairs"
+msgstr "Pares `CHAVE=valor`"
+
+msgid "`linux/<arch>` (e.g. `linux/arm64`) — cross-arch build. Resolves the correct-arch base image and stamps it into the result; actually running a foreign-arch `RUN` needs the host's own binfmt_misc/qemu-user-static already registered (not managed by delonix — a clear preflight error names the missing interpreter instead of a confusing mid-build failure)"
+msgstr "`linux/<arch>` (ex.: `linux/arm64`) — build cross-arch. Resolve a imagem base do arch certo e carimba-o no resultado; correr de facto um `RUN` de outro arch exige que o binfmt_misc/qemu-user-static do próprio host já esteja registado (não é gerido pelo delonix — um erro claro de preflight nomeia o interpretador em falta, em vez de uma falha confusa a meio do build)"
+
+msgid "Load `KEY=value` lines from a file (e.g. `.env`), or `-` to read them from stdin (the value never touches argv/process list)"
+msgstr "Carrega linhas `CHAVE=valor` de um ficheiro (ex.: `.env`), ou `-` para as ler do stdin (o valor nunca passa pelo argv/lista de processos)"
+
+msgid "`local` (default) or `nfs`"
+msgstr "`local` (por omissão) ou `nfs`"
+
+msgid "Namespace that owns the share (default `default`)"
+msgstr "Namespace dona da partilha (por omissão `default`)"
+
+msgid "No short flag (unlike real `docker compose logs -f`) — `-f` is already `--file` on every subcommand of this group, for consistency across `up`/`down`/`ps`/`config`"
+msgstr "Sem flag curta (ao contrário do `docker compose logs -f` real) — o `-f` já é `--file` em todos os subcomandos deste grupo, por coerência entre `up`/`down`/`ps`/`config`"
+
+msgid "Output format: `table` (default, human) or `json` (machine, stable field names — see ADR-0005). `-o json | jq` is the automation path"
+msgstr "Formato de saída: `table` (por omissão, para humanos) ou `json` (para máquinas, com nomes de campo estáveis — ver ADR-0005). O `-o json | jq` é o caminho da automação"
+
+msgid "Overwrite files that already exist"
+msgstr "Sobrescreve ficheiros que já existam"
+
+msgid "Password (cifs/webdav) — prefer `--password-secret` to avoid exposing it"
+msgstr "Password (cifs/webdav) — prefere o `--password-secret` para não a expor"
+
+msgid "Print ONE snapshot as JSON and exit (no TUI, no ANSI) — for scripts/Grafana JSON datasource"
+msgstr "Imprime UMA snapshot em JSON e sai (sem TUI, sem ANSI) — para scripts/datasource JSON do Grafana"
+
+msgid "Prints the resolved project (containers/networks/volumes) and exits without creating anything"
+msgstr "Imprime o projecto resolvido (containers/redes/volumes) e sai sem criar nada"
+
+msgid "Quota (e.g. `2g`) — only applied if `--quota` is given"
+msgstr "Quota (ex.: `2g`) — só aplicada se vier `--quota`"
+
+msgid "Remove it even with live references — DESTROYS the data of whatever is still using it"
+msgstr "Remove-o mesmo com referências vivas — DESTRÓI os dados de quem ainda o estiver a usar"
+
+msgid "Server (host/IP), or the base URL in the `webdav` case"
+msgstr "Servidor (host/IP), ou o URL base no caso do `webdav`"
+
+msgid "Show what would move, change nothing"
+msgstr "Mostra o que seria movido, sem mudar nada"
+
+msgid "Skip the confirmation prompt (REQUIRED when stdin is not a terminal)"
+msgstr "Salta o pedido de confirmação (OBRIGATÓRIO quando o stdin não é um terminal)"
+
+msgid "Snapshot name (default: `YYYYMMDD-HHMMSS`)"
+msgstr "Nome do snapshot (por omissão: `AAAAMMDD-HHMMSS`)"
+
+msgid "Snapshot name (see `snapshot ls`)"
+msgstr "Nome do snapshot (ver `snapshot ls`)"
+
+msgid "Socket address (default: `$DELONIX_DOCKER_ADDR` or `unix:///run/delonix-docker.sock`)"
+msgstr "Endereço do socket (por omissão: `$DELONIX_DOCKER_ADDR` ou `unix:///run/delonix-docker.sock`)"
+
+msgid "Type: `nfs` | `cifs`/`smb` (Samba/Windows) | `webdav` (Nextcloud/ownCloud)"
+msgstr "Tipo: `nfs` | `cifs`/`smb` (Samba/Windows) | `webdav` (Nextcloud/ownCloud)"
+
+msgid "Vault secret with the `password` key (cifs/webdav) — does not leak in shell history"
+msgstr "Segredo do cofre com a chave `password` (cifs/webdav) — não vaza no histórico da shell"
+
+msgid "Wait for every node to report `Ready` (CNI up) before fetching the kubeconfig, then MERGE it into `~/.kube/config` as its own cluster/user/context (named after `--name`) instead of leaving other clusters' contexts untouched only by accident. Without this, the kubeconfig is still written to `<root>/clusters/<name>-kubeconfig.yaml` right after `kubeadm join`, before the CNI has necessarily finished"
+msgstr "Espera que todos os nós reportem `Ready` (CNI de pé) antes de ir buscar o kubeconfig, e FUNDE-O depois no `~/.kube/config` como cluster/user/contexto próprios (com o nome do `--name`), em vez de deixar os contextos dos outros clusters intactos só por acaso. Sem isto, o kubeconfig continua a ser escrito em `<root>/clusters/<nome>-kubeconfig.yaml` logo a seguir ao `kubeadm join`, antes de o CNI ter necessariamente terminado"
+
+msgid "Which container (its short name inside the pod). Default: the first"
+msgstr "Qual container (o nome curto dele dentro do pod). Por omissão: o primeiro"
+
+msgid "Workload name"
+msgstr "Nome do workload"
+
+# help dos comandos novos do bloco C
+msgid "Start the right project for THIS directory: detects and dispatches to `stack init`/`vm init` with the matching template, saying what it detected and why"
+msgstr "Arranca o projecto certo para ESTA pasta: detecta e despacha para o `stack init`/`vm init` com o template adequado, dizendo o que detectou e porquê"
+
+msgid "Print the version (same output as `--version`)."
+msgstr "Imprime a versão (a mesma saída do `--version`)."
+
+msgid "Project directory (default: the current one)."
+msgstr "Pasta do projecto (por omissão: a actual)."
+
+msgid "Force a template instead of the detected one (`stack init -t list` shows them)."
+msgstr "Força um template em vez do detectado (`stack init -t list` mostra-os)."
+
+msgid "Overwrite files that already exist."
+msgstr "Sobrescreve ficheiros que já existam."
+
+# long_help multi-paragrafo do `vm create --url-img`
+
+msgid ""
+"Absolute URL of a qcow2 cloud image to boot this VM from.\n"
+"\n"
+"Downloaded once and cached, so a second `create` from the same URL costs nothing. Verified against a sibling `<url>.sha256` when the publisher offers one; without it, the download is trusted on TLS alone and SAYS SO — someone pointing this at their own bucket deserves to know which of the two they got."
+msgstr ""
+"URL absoluto de uma cloud image qcow2 a partir da qual arrancar esta VM.\n"
+"\n"
+"Descarregada uma vez e guardada em cache, por isso um segundo `create` a partir do mesmo URL não custa nada. Verificada contra um `<url>.sha256` irmão quando o publicador o oferece; sem ele, o download é confiado só ao TLS e ISSO É DITO — quem aponta isto ao seu próprio bucket merece saber qual dos dois casos lhe calhou."

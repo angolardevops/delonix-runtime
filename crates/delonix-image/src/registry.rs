@@ -15,6 +15,7 @@ use oci_spec::image::{
     Descriptor, DescriptorBuilder, Digest, ImageConfiguration, ImageIndex, ImageManifest,
     ImageManifestBuilder, MediaType,
 };
+use std::collections::BTreeMap;
 use std::str::FromStr;
 use std::time::Duration;
 
@@ -973,6 +974,25 @@ pub fn push_oci_artifact(
     layer_media_type: &str,
     data: &[u8],
 ) -> Result<String> {
+    push_oci_artifact_with_annotations(root, target, layer_media_type, data, &BTreeMap::new())
+}
+
+/// Like [`push_oci_artifact`], but records `annotations` on the manifest, so
+/// the pull side can recover metadata that the blob itself does not carry.
+///
+/// A single-blob artifact is just a qcow2: everything the store knows about a
+/// VM image (which distro, whether the guest runs cloud-init, the recommended
+/// vCPU/memory) lived only in the local `.json`, so a `vm pull` produced an
+/// image with those fields blank. Harmless for a cloud image; NOT harmless for
+/// an appliance, where "does this guest run cloud-init" decides whether
+/// `vm create` attaches a seed the guest cannot read.
+pub fn push_oci_artifact_with_annotations(
+    root: &std::path::Path,
+    target: &str,
+    layer_media_type: &str,
+    data: &[u8],
+    annotations: &BTreeMap<String, String>,
+) -> Result<String> {
     let (host, repo, refr) = parse_reference(target);
     let http = reqwest::blocking::Client::builder()
         .user_agent("delonix/0.1")
@@ -1017,6 +1037,12 @@ pub fn push_oci_artifact(
             data.len(),
             &layer_digest,
         )?])
+        .annotations(
+            annotations
+                .iter()
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect::<std::collections::HashMap<String, String>>(),
+        )
         .build()
         .map_err(oci_err)?;
     let manifest_bytes = serde_json::to_vec(&manifest)?;
@@ -1049,6 +1075,66 @@ pub fn list_remote_tags(root: &std::path::Path, source: &str) -> Result<Vec<Stri
     c.list_tags()
 }
 
+/// What a remote artifact says about itself WITHOUT downloading it: the size
+/// and digest of its single layer, plus whatever
+/// [`push_oci_artifact_with_annotations`] stamped on the manifest.
+///
+/// Enough for `image vm ls-remote` to show what a tag actually is — distro,
+/// size, whether it runs cloud-init — instead of a bare list of names that
+/// tells the reader nothing about which one to pull.
+#[derive(Debug, Clone)]
+pub struct RemoteArtifact {
+    pub tag: String,
+    pub digest: String,
+    pub size: u64,
+    pub annotations: BTreeMap<String, String>,
+}
+
+/// Reads one tag's manifest (a single GET, no blob transfer).
+pub fn describe_remote_artifact(
+    root: &std::path::Path,
+    source: &str,
+    tag: &str,
+) -> Result<RemoteArtifact> {
+    let (host, repo, _) = parse_reference(source);
+    let http = reqwest::blocking::Client::builder()
+        .user_agent("delonix/0.1")
+        .timeout(Duration::from_secs(60))
+        .build()
+        .map_err(reg_err)?;
+    let creds = crate::auth::lookup(root, &host);
+    let mut c = Client {
+        http,
+        host,
+        repo,
+        token: None,
+        creds,
+    };
+    let url = c.manifest_url(tag);
+    let bytes = c
+        .fetch(&url, "application/vnd.oci.image.manifest.v1+json")?
+        .bytes()
+        .map_err(reg_err)?
+        .to_vec();
+    let manifest: ImageManifest = serde_json::from_slice(&bytes)
+        .map_err(|e| Error::Registry(format!("invalid artifact manifest: {e}")))?;
+    let layer = manifest
+        .layers()
+        .first()
+        .ok_or_else(|| Error::Registry("artifact manifest has no layers".into()))?;
+    Ok(RemoteArtifact {
+        tag: tag.to_string(),
+        digest: layer.digest().to_string(),
+        size: layer.size() as u64,
+        annotations: manifest
+            .annotations()
+            .clone()
+            .unwrap_or_default()
+            .into_iter()
+            .collect(),
+    })
+}
+
 /// Pull of an artifact published by [`push_oci_artifact`] — resolves the
 /// manifest and returns the bytes of the (single) layer.
 pub fn pull_oci_artifact(root: &std::path::Path, source: &str) -> Result<Vec<u8>> {
@@ -1062,6 +1148,18 @@ pub fn pull_oci_artifact_with_progress(
     source: &str,
     progress: Option<&dyn Fn(u64, Option<u64>)>,
 ) -> Result<Vec<u8>> {
+    pull_oci_artifact_with_meta(root, source, progress).map(|(data, _)| data)
+}
+
+/// Like [`pull_oci_artifact_with_progress`], but also returns the manifest
+/// annotations written by [`push_oci_artifact_with_annotations`] — the only
+/// channel through which a single-blob artifact can carry anything beyond the
+/// blob. Empty for an artifact published without them.
+pub fn pull_oci_artifact_with_meta(
+    root: &std::path::Path,
+    source: &str,
+    progress: Option<&dyn Fn(u64, Option<u64>)>,
+) -> Result<(Vec<u8>, BTreeMap<String, String>)> {
     let (host, repo, refr) = parse_reference(source);
     let http = reqwest::blocking::Client::builder()
         .user_agent("delonix/0.1")
@@ -1105,7 +1203,15 @@ pub fn pull_oci_artifact_with_progress(
             "artifact corrupted or tampered: expected digest {layer_digest}, got {got}"
         )));
     }
-    Ok(data)
+    // Read AFTER the digest check, so annotations from a manifest that failed
+    // verification never reach the caller.
+    let annotations: BTreeMap<String, String> = manifest
+        .annotations()
+        .clone()
+        .unwrap_or_default()
+        .into_iter()
+        .collect();
+    Ok((data, annotations))
 }
 
 #[cfg(test)]

@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Promessa de estabilidade · Delonix Engine</title>
+<script>(function(){try{
+var t=localStorage.getItem('delonix-docs-theme');
+if(t)document.documentElement.setAttribute('data-theme',t);
+var l=localStorage.getItem('delonix-docs-lang');
+if(l)document.documentElement.setAttribute('data-lang',l);
+}catch(e){}})();</script>
+<style>
+:root{--accent:#e8590c;--accent-soft:#fff0e6;--ink:#1a1a2e;--muted:#5a6472;--line:#e6e8ec;
+--bg:#ffffff;--side:#f7f8fa;--code-bg:#0f172a;--code-ink:#e2e8f0;--radius:10px;
+--tok-key:#0550ae;--tok-string:#116329;--tok-comment:#6e7781;--tok-flag:#953800;
+--tok-cmd:#8250df;--tok-ph:#6e7781;--tok-head:#c2410c;--tok-sep:#6e7781}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--ink:#e6e8ee;--muted:#9aa4b2;--line:#252a33;
+--bg:#0d1117;--side:#10151c;--accent-soft:#2a1810;--code-bg:#161b22;--code-ink:#dbe2ea;
+--tok-key:#79c0ff;--tok-string:#7ee787;--tok-comment:#8b949e;--tok-flag:#ffa657;
+--tok-cmd:#d2a8ff;--tok-ph:#8b949e;--tok-head:#ff9a5a;--tok-sep:#8b949e}}
+:root[data-theme="dark"]{--ink:#e6e8ee;--muted:#9aa4b2;--line:#252a33;
+--bg:#0d1117;--side:#10151c;--accent-soft:#2a1810;--code-bg:#161b22;--code-ink:#dbe2ea;
+--tok-key:#79c0ff;--tok-string:#7ee787;--tok-comment:#8b949e;--tok-flag:#ffa657;
+--tok-cmd:#d2a8ff;--tok-ph:#8b949e;--tok-head:#ff9a5a;--tok-sep:#8b949e}
+*{box-sizing:border-box}body{margin:0;font:16px/1.65 -apple-system,'Segoe UI',Roboto,Ubuntu,
+sans-serif;color:var(--ink);background:var(--bg)}
+a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
+.layout{display:grid;grid-template-columns:270px minmax(0,1fr) 240px;max-width:1600px;
+margin:0 auto;min-height:100vh}
+nav.side{width:270px;background:var(--side);border-right:1px solid var(--line);
+padding:1.2rem 1rem 3rem;position:sticky;top:0;height:100vh;overflow-y:auto}
+nav.side .brand{display:flex;align-items:center;gap:.55rem;font-weight:700;font-size:1.12rem;
+margin-bottom:1.1rem;color:var(--ink)}
+nav.side .brand .dot{width:26px;height:26px;border-radius:7px;background:var(--accent);
+display:inline-flex;align-items:center;justify-content:center;color:#fff;font-size:.85rem}
+nav.side h5{margin:1.3rem 0 .3rem;font-size:.72rem;letter-spacing:.09em;text-transform:uppercase;
+color:var(--muted)}
+nav.side a{display:block;padding:.28rem .55rem;border-radius:6px;color:var(--ink);font-size:.93rem}
+nav.side a:hover{background:var(--accent-soft);text-decoration:none}
+nav.side a.on{background:var(--accent-soft);color:var(--accent);font-weight:600}
+nav.side .brand .toggles{display:flex;align-items:center;gap:.4rem;margin-left:auto}
+.theme-toggle{appearance:none;border:1px solid var(--line);background:var(--bg);color:var(--ink);
+border-radius:8px;width:30px;height:30px;flex-shrink:0;display:inline-flex;align-items:center;
+justify-content:center;cursor:pointer;font-size:.95rem;line-height:1}
+.theme-toggle:hover{border-color:var(--accent)}
+.theme-toggle .i-sun{display:none}
+:root[data-theme="dark"] .theme-toggle .i-moon{display:none}
+:root[data-theme="dark"] .theme-toggle .i-sun{display:inline}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .theme-toggle .i-moon{display:none}
+:root:not([data-theme="light"]) .theme-toggle .i-sun{display:inline}}
+.lang-toggle{appearance:none;border:1px solid var(--line);background:var(--bg);color:var(--ink);
+border-radius:8px;height:30px;padding:0 .55rem;flex-shrink:0;display:inline-flex;align-items:center;
+justify-content:center;cursor:pointer;font-size:.72rem;font-weight:700;letter-spacing:.02em;line-height:1}
+.lang-toggle:hover{border-color:var(--accent)}
+.lang-toggle .lbl-pt{display:none}
+:root[data-lang="en"] .lang-toggle .lbl-en{display:none}
+:root[data-lang="en"] .lang-toggle .lbl-pt{display:inline}
+.lang-en{display:none}
+:root[data-lang="en"] .lang-en{display:inline}
+:root[data-lang="en"] .lang-pt{display:none}
+p.lang-en,p.lang-pt,div.lang-en,div.lang-pt{display:none}
+:root[data-lang="en"] p.lang-en,:root[data-lang="en"] div.lang-en{display:block}
+:root:not([data-lang="en"]) p.lang-pt,:root:not([data-lang="en"]) div.lang-pt{display:block}
+main{min-width:0;padding:2.2rem 3rem 5rem;max-width:860px;margin:0 auto}
+main h1{font-size:1.9rem;margin:.2rem 0 .4rem}
+main h2{font-size:1.35rem;margin-top:2.4rem;padding-bottom:.35rem;border-bottom:1px solid var(--line)}
+main h3{font-size:1.05rem;margin-top:1.6rem}
+.tagline{color:var(--muted);font-size:1.05rem;margin-top:0}
+p.intro{font-size:1.02rem;margin:1rem 0}
+p.src-link{margin:.7rem 0 0;font-size:.85rem;color:var(--muted)}
+p.src-link a{font-weight:600}
+code{background:var(--accent-soft);padding:.1em .35em;border-radius:5px;font-size:.9em}
+pre{background:var(--code-bg);color:var(--code-ink);padding:1rem 1.2rem;border-radius:var(--radius);
+overflow-x:auto;font-size:.86rem;line-height:1.55;white-space:pre-wrap;word-break:break-word}
+pre code{background:none;padding:0;color:inherit;font-size:inherit}
+.help pre{border-left:4px solid var(--accent)}
+.tok-key{color:var(--tok-key)}.tok-string{color:var(--tok-string)}
+.tok-comment{color:var(--tok-comment);font-style:italic}
+.tok-flag{color:var(--tok-flag)}.tok-cmd{color:var(--tok-cmd);font-weight:600}
+.tok-ph{color:var(--tok-ph);font-style:italic}.tok-head{color:var(--tok-head);font-weight:700}
+.tok-sep{color:var(--tok-sep)}
+.ex{margin:.9rem 0}.ex .cap{font-size:.88rem;color:var(--muted);margin-bottom:.25rem}
+.ex .out,div.out{margin-top:.4rem}
+.ex .out pre,div.out pre{background:transparent;border:1px dashed var(--line);color:var(--muted);
+padding:.7rem 1rem;font-size:.82rem}
+.ex .out::before,div.out::before{content:"→ resultado";display:block;font-size:.75rem;color:var(--muted);
+margin-bottom:.15rem;letter-spacing:.03em;text-transform:uppercase}
+table{border-collapse:collapse;width:100%;font-size:.92rem}
+td,th{border:1px solid var(--line);padding:.5rem .7rem;text-align:left;vertical-align:top}
+th{background:var(--side)}
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:1rem;margin:1.4rem 0}
+.card{border:1px solid var(--line);border-radius:var(--radius);padding:1rem 1.1rem}
+.card b{display:block;margin-bottom:.25rem}.card a{font-weight:600}
+.card p{margin:.2rem 0 0;font-size:.88rem;color:var(--muted)}
+.arch{display:flex;flex-direction:column;gap:.6rem;margin:1.4rem 0}
+.arch .row{display:flex;gap:.6rem;flex-wrap:wrap}
+.arch .box{flex:1;min-width:150px;border:1.5px solid var(--accent);border-radius:8px;
+padding:.55rem .8rem;font-size:.85rem;background:var(--accent-soft)}
+.arch .box.mut{border-color:var(--line);background:var(--side)}
+.arch .box b{display:block;font-size:.9rem}
+.pill{display:inline-block;background:var(--accent);color:#fff;border-radius:99px;
+padding:.05rem .6rem;font-size:.75rem;font-weight:600;vertical-align:middle}
+.tag{display:inline-block;border-radius:6px;padding:.1rem .5rem;font-size:.82rem;font-weight:600}
+.tag.ok{background:#d8f3dc;color:#1b4332}.tag.mid{background:#fff3bf;color:#5c4a00}
+.tag.no{background:#ffe3e3;color:#7a1420}
+@media (prefers-color-scheme: dark){.tag.ok{background:#0f3d24;color:#8fe3ac}
+.tag.mid{background:#453800;color:#ffe066}.tag.no{background:#4a1015;color:#ffa8a8}}
+.callout{border:1.5px solid var(--accent);border-radius:var(--radius);padding:1rem 1.2rem;margin:1.4rem 0;
+background:var(--accent-soft)}
+.callout.warn{border-color:#e03131;background:#fff0f0}
+.callout.warn b{color:#c92a2a}
+@media (prefers-color-scheme: dark){.callout.warn{background:#3a1414}.callout.warn b{color:#ff8787}}
+.callout p:first-child{margin-top:0}.callout p:last-child{margin-bottom:0}
+footer{margin-top:4rem;color:var(--muted);font-size:.85rem;border-top:1px solid var(--line);padding-top:1rem}
+aside.toc{padding:2.2rem 1.2rem 3rem 0;position:sticky;top:0;height:100vh;overflow-y:auto;font-size:.82rem}
+aside.toc .toc-inner{border-left:1px solid var(--line);padding-left:1rem}
+aside.toc h5{margin:0 0 .5rem;font-size:.72rem;letter-spacing:.09em;text-transform:uppercase;color:var(--muted)}
+aside.toc a{display:block;padding:.2rem 0;color:var(--muted);line-height:1.4}
+aside.toc a:hover{color:var(--accent);text-decoration:none}
+@media (max-width:1200px){.layout{grid-template-columns:270px minmax(0,1fr)}aside.toc{display:none}}
+@media (max-width:840px){.layout{display:block}nav.side{width:100%;height:auto;position:static}
+main{padding:1.4rem 1.2rem 4rem;max-width:none}}
+</style>
+</head>
+<body>
+<div class="layout">
+<nav class="side">
+<div class="brand"><span class="dot">▲</span> Delonix Engine
+<div class="toggles">
+<button class="lang-toggle" type="button" aria-label="Switch language / Mudar idioma" title="EN / PT">
+<span class="lbl-en">EN</span><span class="lbl-pt">PT</span></button>
+<button class="theme-toggle" type="button" aria-label="Alternar tema claro/escuro" title="Tema claro/escuro">
+<span class="i-moon">🌙</span><span class="i-sun">☀️</span></button>
+</div></div>
+<h5><span class='lang-pt'>Documentação</span><span class='lang-en'>Docs</span></h5>
+<a href="index.html"><span class='lang-pt'>Início</span><span class='lang-en'>Home</span></a><a href="cheatsheet.html"><span class='lang-pt'>Cheatsheet</span><span class='lang-en'>Cheatsheet</span></a><a href="kinds.html"><span class='lang-pt'>Kinds e templates</span><span class='lang-en'>Kinds &amp; templates</span></a><a href="gitops.html"><span class='lang-pt'>GitOps e CI</span><span class='lang-en'>GitOps &amp; CI</span></a><a href="estabilidade.html" class="on"><span class='lang-pt'>Promessa de estabilidade</span><span class='lang-en'>Stability promise</span></a><a href="cloud.html"><span class='lang-pt'>cloud-init, cloud-img e CH</span><span class='lang-en'>cloud-init, cloud-img &amp; CH</span></a><a href="labs.html"><span class='lang-pt'>Laboratórios</span><span class='lang-en'>Labs</span></a><a href="arquitectura.html"><span class='lang-pt'>Arquitectura</span><span class='lang-en'>Architecture</span></a><a href="c4.html"><span class='lang-pt'>Modelo C4 e system design</span><span class='lang-en'>C4 model &amp; system design</span></a><a href="cri.html"><span class='lang-pt'>CRI — kubelet sem containerd</span><span class='lang-en'>CRI — kubelet without containerd</span></a><a href="comparacao.html"><span class='lang-pt'>Delonix vs Docker vs Podman</span><span class='lang-en'>Delonix vs Docker vs Podman</span></a><a href="tutorial-delonix-temp.html"><span class='lang-pt'>Projecto completo: Delonix Temp</span><span class='lang-en'>Full project: Delonix Temp</span></a>
+<h5><span class='lang-pt'>Referência CLI</span><span class='lang-en'>CLI reference</span></h5>
+<a href="comandos/init.html">delonix init</a><a href="comandos/container.html">delonix container</a><a href="comandos/workload.html">delonix workload</a><a href="comandos/pod.html">delonix pod</a><a href="comandos/image.html">delonix image</a><a href="comandos/build.html">delonix build</a><a href="comandos/vm.html">delonix vm</a><a href="comandos/volumes.html">delonix volumes</a><a href="comandos/network.html">delonix network</a><a href="comandos/stack.html">delonix stack</a><a href="comandos/compose.html">delonix compose</a><a href="comandos/cluster.html">delonix cluster</a><a href="comandos/secret.html">delonix secret</a><a href="comandos/storage.html">delonix storage</a><a href="comandos/sharevolume.html">delonix sharevolume</a><a href="comandos/ingress.html">delonix net ingress</a><a href="comandos/egress.html">delonix net egress</a><a href="comandos/httproute.html">delonix net httproute</a><a href="comandos/tunnel.html">delonix net tunnel</a><a href="comandos/flow.html">delonix net flow</a><a href="comandos/boot.html">delonix net boot</a><a href="comandos/system.html">delonix system</a><a href="comandos/dash.html">delonix dash</a><a href="comandos/docker-api.html">delonix serve docker-api</a><a href="comandos/kube.html">delonix cluster kube</a><a href="comandos/netns.html">delonix net netns</a><a href="comandos/completion.html">delonix completion</a><a href="comandos/schema.html">delonix schema · explain</a>
+<h5><span class='lang-pt'>Projecto</span><span class='lang-en'>Project</span></h5>
+<a href="https://github.com/angolardevops/delonix-runtime">GitHub</a>
+<a href="https://github.com/angolardevops/delonix-runtime/releases">Releases</a>
+</nav>
+<main>
+<h1 id="promessa-de-estabilidade-da-cli">Promessa de estabilidade da CLI</h1>
+<blockquote>
+<p>Aplica-se a partir da <strong>v0.42.3</strong>, e vale dentro do <code>0.x</code>.</p>
+</blockquote>
+<p>Um motor sem contrato não se automatiza. Quem escreve um <code>Makefile</code>, um passo de
+CI ou um script de deploy precisa de saber o que pode partir num upgrade — e a
+resposta «é 0.x, tudo pode partir» é verdadeira e inútil: garante que ninguém
+depende de nada, o que é o mesmo que ninguém adoptar.</p>
+<p>Isto não é semver 1.0. É a lista do que se compromete e do que não se
+compromete, que é o que falta a maior parte dos projectos em 0.x.</p>
+<h2 id="estavel-nao-quebra-sem-um-major">Estável — não quebra sem um major</h2>
+<p><strong>Os verbos de ciclo de vida de container</strong>, com os nomes e a semântica que
+Docker e Podman lhes dão:</p>
+<pre><code>container run   ps   stop   start   restart   kill   rm   exec   logs
+                wait   inspect   port   rename   pause   unpause
+image     pull  ls   rm    build (delonix build)
+</code></pre>
+<p>Concretamente, garante-se:</p>
+<ul>
+<li><strong>O nome do comando e a ordem dos argumentos posicionais.</strong></li>
+<li><strong>As flags curtas e longas listadas acima e os seus significados</strong> — <code>-d</code>,
+  <code>-p</code>, <code>-v</code>, <code>-e</code>, <code>--name</code>, <code>--rm</code>, <code>-i</code>, <code>-t</code>, <code>--net</code>, <code>--restart</code>,
+  <code>--memory</code>, <code>--cpus</code>, <code>--entrypoint</code>, <code>-w</code>, <code>-u</code>, <code>--add-host</code>, <code>--wait</code>,
+  <code>--health-*</code>.</li>
+<li><strong>Os códigos de saída</strong>: <code>run</code> em primeiro plano devolve o código do próprio
+  workload; <code>exec</code> o do comando; <code>healthcheck</code> sai 1 quando não saudável.</li>
+<li><strong>A saída JSON de <code>inspect</code></strong> — campos podem ser ACRESCENTADOS, nunca removidos
+  nem com o tipo mudado.</li>
+<li><strong>Os atalhos de topo</strong> (<code>ps</code>, <code>run</code>, <code>exec</code>, <code>logs</code>, <code>rm</code>, <code>images</code>), que são
+  literalmente o mesmo comando por reescrita de argv.</li>
+</ul>
+<h2 id="estavel-em-conteudo-nao-em-formato">Estável em conteúdo, não em formato</h2>
+<p><strong>As tabelas de <code>ls</code>/<code>ps</code>.</strong> As colunas podem mudar de largura, de ordem ou
+ganhar irmãs — são feitas para humanos e medem-se pelo conteúdo real. Um script
+que faça <code>awk '{print $3}'</code> sobre elas parte, e isso não conta como quebra de
+contrato.</p>
+<p><strong>Para automação há <code>-o json</code></strong>, e é ele que é estável: um array JSON por
+recurso, campos podem ser ACRESCENTADOS mas não removidos nem com o tipo mudado
+(ADR-0005). Verificado a funcionar nos nove comandos de listagem — <code>container
+ps</code>, <code>image ls</code>, <code>volumes ls</code>, <code>network ls</code>, <code>vm ls</code>, <code>pod ls</code>, <code>secret ls</code>,
+<code>storage ls</code>, <code>workload ls</code>. Também <code>inspect</code> e <code>-q</code>/<code>--quiet</code>.</p>
+<blockquote>
+<p>Uma versão anterior deste documento dizia que <code>-o json</code> estava «por fazer e é a
+lacuna reconhecida aqui». <strong>Estava errado</strong> — existe desde a ADR-0005. É
+exactamente o erro que o <code>paridade-docker-podman.md</code> abre por corrigir: inferir
+ausência a partir de um sintoma, sem ir ver.</p>
+</blockquote>
+<h2 id="o-schema-dos-manifestos-estavel-e-e-o-que-mais-importa">O schema dos manifestos — estável, e é o que mais importa</h2>
+<blockquote>
+<p>Esta secção <strong>substitui</strong> a linha que dizia que o schema «é aditivo na prática,
+mas não é uma promessa». Era o compromisso ao contrário: a CLI estava mais
+protegida que o formato declarativo, quando é o formato que as pessoas põem em
+git e revêem em PR. Um <code>delonix-manifest.yaml</code> só se versiona se se souber que
+não parte sozinho.</p>
+</blockquote>
+<p>Para os Kinds com spec tipado — <strong><code>Container</code>, <code>Pod</code>, <code>Volume</code>, <code>Network</code></strong> —
+garante-se, dentro do <code>0.x</code>:</p>
+<ul>
+<li><strong>Um campo nunca é removido, nem muda de tipo, nem muda de significado.</strong></li>
+<li><strong>Um campo novo é sempre opcional</strong> e tem um default que preserva o
+  comportamento anterior. Um manifesto escrito hoje continua a fazer o mesmo
+  amanhã.</li>
+<li><strong>Um nome antigo que seja renomeado mantém-se aceite como alias</strong> (é o que já
+  acontece com <code>restart</code>→<code>restartPolicy</code>, <code>options</code>→<code>mountOptions</code>,
+  <code>wg_ip</code>→<code>wgIp</code>).</li>
+<li><strong><code>apiVersion: delonix.io/v1</code> só muda com um <code>v2</code></strong>, e um <code>v2</code> não sai sem o
+  <code>v1</code> continuar a ser aceite.</li>
+</ul>
+<p>A verdade não é este texto, é o schema: <strong><code>delonix schema print</code></strong> emite-o a
+partir do próprio código (ADR-0007), e o mesmo ficheiro está publicado em
+<a href="schema/v1/delonix.json"><code>schema/v1/delonix.json</code></a>. Um teste do repositório
+falha se o publicado deixar de ser o gerado, precisamente para esta página não
+voltar a poder mentir.</p>
+<p>Aponta o editor e escreve manifestos com completação e validação:</p>
+<pre><code class="language-yaml"># yaml-language-server: $schema=https://angolardevops.github.io/delonix-runtime/schema/v1/delonix.json
+apiVersion: delonix.io/v1
+kind: Container
+metadata: { name: web }
+spec:
+  image: nginx:1.27
+</code></pre>
+<p>Para saber o que mudou entre duas versões, não há uma página escrita à mão —
+haveria a segunda fonte de verdade que a ADR-0007 aboliu. Há um comando:</p>
+<pre><code class="language-bash">scripts/schema-diff.sh v0.46.0          # dessa tag até à árvore actual
+scripts/schema-diff.sh v0.46.0 v0.47.0  # entre duas tags
+</code></pre>
+<p>Compara campo a campo (nome e tipo), não o JSON cru, e sai <strong>1</strong> quando há
+diferenças — serve directamente como gate de CI. Um campo removido ou com o
+tipo mudado é assinalado como <strong>quebra de contrato</strong>, que é o que esta secção
+promete não acontecer.</p>
+<p><strong>O que fica de fora, e é honesto dizê-lo:</strong> os restantes Kinds
+(<code>Vm</code>, <code>Cluster</code>, <code>ShareVolume</code>, <code>Image</code>, <code>Secret</code>, <code>Ingress</code>,
+<code>FirewallPolicy</code>, <code>HTTPRoute</code>, <code>Tunnel</code>, <code>Workload</code>, <code>Stack</code>) ainda não têm
+schema gerado, e por isso continuam sem promessa. O <code>delonix schema</code>/<code>explain</code>
+diz quais são, em vez de os omitir.</p>
+<blockquote>
+<p><strong>Três Kinds deixaram de existir</strong> nesta série, fundidos no que já faziam:
+<code>Egress</code> → <code>FirewallPolicy</code> com <code>direction: egress</code>; <code>Dependency</code> →
+<code>FirewallPolicy</code> (açúcar, reduzido no load); <code>Storage</code> → <code>kind: Volume</code> com um
+bloco <code>nfs:</code>/<code>cifs:</code>/<code>webdav:</code>. Os nomes antigos continuam a carregar, com
+aviso de depreciação — a regra do «corte limpo» aplica-se a comandos, e um
+manifesto em git merece um degrau em vez de um erro.</p>
+</blockquote>
+<h2 id="nao-estavel-pode-mudar-em-qualquer-versao">NÃO estável — pode mudar em qualquer versão</h2>
+<ul>
+<li><strong><code>serve cri</code>, <code>serve api</code>, <code>serve docker-api</code></strong> — superfícies de protocolo
+  em construção. O <code>docker-api</code> publica a sua cobertura em
+  <code>delonix serve docker-api --matrix</code>, e é essa tabela que diz o que existe
+  hoje, não esta promessa. A <strong>API de gestão</strong> (<code>serve api</code>) é local (socket
+  unix, só o próprio uid) e não tem contrato publicado: não construas automação
+  sobre ela — para isso existe a CLI, com <code>-o json</code>.</li>
+<li><strong><code>cluster</code>, <code>vm</code>, <code>pod</code>, <code>workload</code>, <code>storage</code>, <code>sharevolume</code>, <code>net</code></strong> —
+  a superfície ainda está a assentar. (O <em>schema</em> de <code>kind: Pod</code> é estável, ver
+  acima; o que não é estável é o grupo de comandos <code>delonix pod</code>.)</li>
+<li><strong>Tudo o que começa por <code>net netns</code></strong> — plumbing interno exposto por
+  conveniência de depuração.</li>
+<li><strong>O formato dos ficheiros de estado</strong> em <code>$DELONIX_ROOT</code>. Lê-se pelo <code>inspect</code>,
+  nunca do disco.</li>
+</ul>
+<h2 id="como-uma-quebra-e-feita-quando-tem-de-acontecer">Como uma quebra é feita, quando tem de acontecer</h2>
+<p>Precedente já cumprido pelo projecto: a reorganização da v0.30.0 (<code>netns</code> →
+<code>net netns</code>, <code>cri</code> → <code>serve cri</code>, …) foi um <strong>corte limpo, sem aliases</strong> — a
+forma antiga falha com «unrecognized subcommand», nunca em silêncio.</p>
+<p>Isso mantém-se como regra: <strong>falhar alto</strong>. Um alias de compatibilidade que
+muda de comportamento é pior que um erro.</p>
+<p>E uma lição que custou esta sessão: essa quebra deixou um chamador INTERNO por
+actualizar (o <code>delonix-cri</code> continuou a invocar <code>delonix netns attach</code>), o que
+partiu a criação de pod rootless durante meses — ver
+<a href="cri-conformance.md">cri-conformance.md</a>. Um corte limpo obriga a fazer o grep
+por chamadores em TODO o workspace, não só na documentação.</p>
+<footer><span class='lang-pt'>Delonix Engine · Apache-2.0 · <a href="https://github.com/angolardevops/delonix-runtime">angolardevops/delonix-runtime</a> · Referência gerada do <code>--help</code> real do binário por <code>docs/gen.py</code>.</span><span class='lang-en'>Delonix Engine · Apache-2.0 · <a href="https://github.com/angolardevops/delonix-runtime">angolardevops/delonix-runtime</a> · Reference generated from the real <code>--help</code> of the binary by <code>docs/gen.py</code>.</span></footer>
+</main>
+<aside class="toc" id="pagetoc"><div class="toc-inner"><h5><span class='lang-pt'>Nesta página</span><span class='lang-en'>On this page</span></h5><nav id="toc-nav"></nav></div></aside>
+</div>
+<script>(function(){
+function esc(s){return s.replace(/[&<>]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;'}[c];});}
+
+function tokBash(line){
+  var out='',last=0,m;
+  var re=/(#.*$)|("(?:[^"\\]|\\.)*")|('(?:[^'\\]|\\.)*')|(--?[A-Za-z][\w-]*)|\b(delonix|delonixctl|dlx)\b/g;
+  while((m=re.exec(line))){
+    out+=esc(line.slice(last,m.index));
+    if(m[1])out+='<span class="tok-comment">'+esc(m[1])+'</span>';
+    else if(m[2]||m[3])out+='<span class="tok-string">'+esc(m[0])+'</span>';
+    else if(m[4])out+='<span class="tok-flag">'+esc(m[0])+'</span>';
+    else if(m[5])out+='<span class="tok-cmd">'+esc(m[0])+'</span>';
+    last=re.lastIndex;
+  }
+  return out+esc(line.slice(last));
+}
+function highlightBash(text){return text.split('\n').map(tokBash).join('\n');}
+
+function highlightFlagsPh(line){
+  var out='',last=0,m;
+  var re=/(--?[A-Za-z][\w-]*)|(<[^>]+>)|(\[[^\]]+\])/g;
+  while((m=re.exec(line))){
+    out+=esc(line.slice(last,m.index));
+    if(m[1])out+='<span class="tok-flag">'+esc(m[0])+'</span>';
+    else out+='<span class="tok-ph">'+esc(m[0])+'</span>';
+    last=re.lastIndex;
+  }
+  return out+esc(line.slice(last));
+}
+function highlightHelp(text){
+  return text.split('\n').map(function(line){
+    var mm=line.match(/^(Usage|Commands|Options|Arguments|Examples):(.*)$/);
+    if(mm)return '<span class="tok-head">'+mm[1]+':</span>'+highlightFlagsPh(mm[2]);
+    return highlightFlagsPh(line);
+  }).join('\n');
+}
+function highlightYaml(text){
+  return text.split('\n').map(function(line){
+    if(/^\s*#/.test(line))return '<span class="tok-comment">'+esc(line)+'</span>';
+    if(/^---\s*$/.test(line))return '<span class="tok-sep">'+esc(line)+'</span>';
+    var m=line.match(/^(\s*(?:- )?)([A-Za-z0-9_.-]+)(:)(.*)$/);
+    if(m){
+      var rest=m[4],restHtml=esc(rest);
+      var sm=rest.match(/^(\s*)("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|[^\s#][^#]*?)(\s*(#.*)?)$/);
+      if(sm&&sm[2])restHtml=esc(sm[1])+'<span class="tok-string">'+esc(sm[2])+'</span>'+esc(sm[3]||'');
+      return esc(m[1])+'<span class="tok-key">'+esc(m[2])+'</span>'+esc(m[3])+restHtml;
+    }
+    return esc(line);
+  }).join('\n');
+}
+
+function highlightAll(){
+  document.querySelectorAll('pre > code').forEach(function(code){
+    if(code.dataset.hl)return;
+    code.dataset.hl='1';
+    var pre=code.parentElement;
+    if(pre.closest('.out'))return;
+    var text=code.textContent,html;
+    var isHelp=pre.parentElement&&pre.parentElement.classList.contains('help');
+    if(isHelp)html=highlightHelp(text);
+    else if(/^apiVersion:|\nkind:\s/.test(text))html=highlightYaml(text);
+    else if(pre.closest('.ex')||/^(delonix|delonixctl|dlx)\b/.test(text.trim()))html=highlightBash(text);
+    else return;
+    code.innerHTML=html;
+  });
+}
+
+function visibleHeadingText(h){
+  // A heading pode conter os dois <span class="lang-pt/lang-en"> do bi() —
+  // h.textContent junta os dois, mesmo com um deles escondido por CSS. Usa
+  // só o do idioma activo à data da construção do índice.
+  var lang=document.documentElement.getAttribute('data-lang')||'pt';
+  var want=lang==='en'?'lang-en':'lang-pt';
+  var pick=h.querySelector(':scope > .'+want);
+  return (pick?pick.textContent:h.textContent).trim();
+}
+function isVisibleForLang(el,lang){
+  // Páginas como o index duplicam a secção INTEIRA por idioma (dois <h2>
+  // separados, um por língua) em vez de um <h2> só com dois spans — sem
+  // este filtro o índice listava as duas línguas ao mesmo tempo.
+  var wrap=el.closest('.lang-pt, .lang-en');
+  if(!wrap)return true;
+  return lang==='en'?wrap.classList.contains('lang-en'):wrap.classList.contains('lang-pt');
+}
+function buildToc(){
+  var main=document.querySelector('main'),nav=document.getElementById('toc-nav'),
+      aside=document.getElementById('pagetoc');
+  if(!main||!nav)return;
+  var lang=document.documentElement.getAttribute('data-lang')||'pt';
+  var heads=[].slice.call(main.querySelectorAll('h2')).filter(function(h){
+    return isVisibleForLang(h,lang);
+  });
+  nav.innerHTML='';
+  if(heads.length<2){if(aside)aside.style.display='none';return;}
+  if(aside)aside.style.display='';
+  var used={};
+  heads.forEach(function(h){
+    var label=visibleHeadingText(h);
+    if(!h.id){
+      var slug=label.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/(^-|-$)/g,'')||'sec';
+      while(used[slug])slug+='-x';
+      used[slug]=1;h.id=slug;
+    }
+    var a=document.createElement('a');
+    a.href='#'+h.id;a.textContent=label;
+    nav.appendChild(a);
+  });
+}
+
+function initThemeToggle(){
+  var KEY='delonix-docs-theme',btn=document.querySelector('.theme-toggle');
+  if(!btn)return;
+  btn.addEventListener('click',function(){
+    var sys=matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';
+    var eff=document.documentElement.getAttribute('data-theme')||sys;
+    var next=eff==='dark'?'light':'dark';
+    document.documentElement.setAttribute('data-theme',next);
+    try{localStorage.setItem(KEY,next);}catch(e){}
+  });
+}
+
+function initLangToggle(){
+  var KEY='delonix-docs-lang',btn=document.querySelector('.lang-toggle');
+  if(!btn)return;
+  btn.addEventListener('click',function(){
+    var eff=document.documentElement.getAttribute('data-lang')||'pt';
+    var next=eff==='en'?'pt':'en';
+    document.documentElement.setAttribute('data-lang',next);
+    try{localStorage.setItem(KEY,next);}catch(e){}
+    buildToc();
+  });
+}
+
+document.addEventListener('DOMContentLoaded',function(){
+  initThemeToggle();initLangToggle();buildToc();highlightAll();
+});
+})();</script>
+</body>
+</html>
