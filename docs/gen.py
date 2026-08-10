@@ -115,6 +115,8 @@ SOURCE_FILES = {
     "kube": "kube.rs",
     "netns": "netns.rs",
     "completion": "complete.rs",
+    "schema": "schema.rs",
+    "init": "init.rs",
 }
 SOURCE_BASE_URL = (
     "https://github.com/angolardevops/delonix-runtime/blob/main/"
@@ -135,6 +137,40 @@ def source_link_html(name):
 # ---------------------------------------------------------------- conteúdo
 
 GROUPS = {
+    "init": {
+        "title": "delonix init",
+        "tagline": "Começa o projecto CERTO para este directório — detecta, explica-se, e delega.",
+        "intro": """O <code>stack init</code> já gera um projecto completo e preenchido, e o
+<code>vm init</code> faz o mesmo para uma VM. O que faltava era o passo ANTES desses: saber qual
+deles chamar, e com qual dos onze templates. É esse o trabalho todo aqui — detectar,
+<strong>dizer o que detectou e porquê</strong>, e delegar. Não gera nada de seu.<br><br>
+A detecção é uma função pura sobre os nomes de ficheiro presentes, ordenada do mais específico
+para o mais genérico (um projecto Django também tem <code>.py</code>, e um Next.js também tem
+<code>package.json</code> — a regra mais larga não pode ganhar só por ter sido verificada
+primeiro). E <strong>explica-se sempre</strong>: um palpite errado que se vê é um palpite que se
+corrige com <code>-t</code>; um palpite errado em silêncio produz um projecto que não bate certo
+com o código ao lado.<br><br>
+Há um caso em que a resposta certa é <strong>não gerar nada</strong>: um directório com
+<code>docker-compose.yml</code> já corre nativamente com <code>delonix compose up</code>, e um
+segundo manifesto deixaria o projecto com duas fontes de verdade. O comando di-lo, em vez de
+gerar na mesma.""",
+        "subs": {},
+        "examples": [
+            ("Detecta e gera — a saída diz sempre qual foi a prova",
+             "delonix init",
+             "detected go.mod → stack init --template go\n"
+             "  created: ./Delonixfile\n"
+             "  created: ./delonix-manifest.yaml\n"
+             "  already exists, skipped: ./go.mod  (use --force to overwrite)"),
+            ("Forçar um template em vez do detectado", "delonix init -t django"),
+            ("Ver os templates que existem", "delonix stack init -t list"),
+            ("Um `VMfile` presente manda para o outro gerador", "delonix init"),
+            ("Um projecto compose não é reescrito — é assinalado",
+             "delonix init",
+             "warning found docker-compose.yml — this project already runs natively with "
+             "`delonix compose up`; generating a second manifest would give it two sources of truth"),
+        ],
+    },
     "container": {
         "title": "delonix container",
         "tagline": "Ciclo de vida de containers: run, ps, start, stop, rm, exec, logs, inspect, stats, apply.",
@@ -303,7 +339,17 @@ image + kubeadm/kubelet/kubectl + <code>delonix-cri</code> — a base do <code>d
                  'delonix image --vm init minha-base')]},
             "vm": {"examples": [
                 ('O mesmo grupo de imagens VM, por outro caminho',
-                 'delonix image vm ls')]},
+                 'delonix image vm ls'),
+                ('Registar um disco que NÃO foi construído aqui — o único ponto de '
+                 'entrada para `import`, que não tem forma `delonix vm …`',
+                 'delonix image vm import ./OPNsense-26.1.2.qcow2 -t opnsense:26.1.2 \\\n'
+                 '  --appliance --distro opnsense --release 26.1.2 \\\n'
+                 '  --default-vcpus 2 --default-memory 2G'),
+                ('`--appliance` diz que o convidado se configura sozinho (OPNsense, '
+                 'Proxmox, TrueNAS) — o `vm create` salta o seed NoCloud em vez de lhe '
+                 'colar um ISO que ninguém lá dentro lê, e RECUSA `--hostname`/'
+                 '`--ssh-key` a nomeá-los, em vez de os aceitar e deitar fora',
+                 'delonix vm create fw --disk opnsense:26.1.2')]},
             "logout": {"examples": [
                 ('Esquecer as credenciais desse registo',
                  'delonix image logout ghcr.io')]},
@@ -355,7 +401,7 @@ image + kubeadm/kubelet/kubectl + <code>delonix-cri</code> — a base do <code>d
             ]},
             "build": {"examples": [
                 ("Construir a imagem VM dourada (descarrega Ubuntu, valida SHA256SUMS, virt-customize)",
-                 "delonix image --vm build --name k8s-golden --k8s-version 1.34"),
+                 "delonix image --vm build -t k8s-golden --k8s-version 1.34"),
             ]},
             "apply": {"examples": [("", "delonix image apply -f delonix-manifest.yaml")]},
         },
@@ -391,6 +437,21 @@ O <code>create</code> é idempotente (cria ou auto-recupera) e suporta cloud-ini
 <code>--hostname</code>, <code>--ssh-key</code> e <code>--user-data</code> geram um ISO NoCloud
 automaticamente. É a camada que o <code>delonix cluster kubeadm</code> usa para provisionar nós.""",
         "subs": {
+            "convert": {"examples": [
+                ('Levar uma imagem construída aqui para outro ecossistema',
+                 'delonix vm convert minha-base --to vmdk        # VMware\n'
+                 'delonix vm convert minha-base --to vdi         # VirtualBox\n'
+                 'delonix vm convert minha-base --to vhdx        # Hyper-V / Azure'),
+                ('Comprimir — só `qcow2` e `vmdk` o sabem fazer; nos outros é '
+                 'recusado com a lista, em vez de entregue ao qemu-img para falhar lá',
+                 'delonix vm convert minha-base --to qcow2 --compress')]},
+            "default-backend": {"examples": [
+                ('Fixar o backend que o `vm create` usa quando não lhe dizem nada',
+                 'delonix vm default-backend --set libvirt'),
+                ('Ver o que está fixado (`none` = decide a auto-detecção)',
+                 'delonix vm default-backend'),
+                ('Voltar à auto-detecção',
+                 'delonix vm default-backend --clear')]},
             "snapshots": {"examples": [
                 ('Listar os checkpoints de uma VM',
                  'delonix vm snapshots dev')]},
@@ -460,8 +521,10 @@ automaticamente. É a camada que o <code>delonix cluster kubeadm</code> usa para
                 ('Snapshot para um script ou para o Grafana',
                  "delonix vm dash --json | jq '.tiles'")]},
             "create": {"examples": [
-                ("VM a partir da imagem dourada, com chave SSH",
-                 "delonix vm create --name node1 --image k8s-golden --cpus 2 --memory 4096 --ssh-key @~/.ssh/id_ed25519.pub"),
+                ("VM a partir da imagem dourada, com chave SSH — o nome é POSICIONAL",
+                 "delonix vm create node1 --disk k8s-golden --vcpus 2 --memory 4G --ssh-key @~/.ssh/id_ed25519.pub"),
+                ("Sem `--disk`, usa a imagem VM dourada local — se houver exactamente uma",
+                 "delonix vm create node1 --ssh-key @~/.ssh/id_ed25519.pub"),
             ]},
             "ls": {"examples": [("", "delonix vm ls")]},
             "status": {"examples": [("Reconcilia liveness/IP com o backend", "delonix vm status node1")]},
@@ -479,7 +542,11 @@ automaticamente. É a camada que o <code>delonix cluster kubeadm</code> usa para
         "subs": {
             "snapshot": {"examples": [
                 ('Tirar e listar snapshots de um volume',
-                 'delonix volumes snapshot create dados antes-da-migracao\ndelonix volumes snapshot ls dados')]},
+                 'delonix volumes snapshot create dados antes-da-migracao\ndelonix volumes snapshot ls dados'),
+                ('Voltar a um snapshot (o conteúdo actual do volume é substituído)',
+                 'delonix volumes snapshot restore dados antes-da-migracao'),
+                ('Apagar um snapshot que já não serve',
+                 'delonix volumes snapshot rm dados antes-da-migracao')]},
             "describe": {"examples": [
                 ('Detalhe de um volume (uso, quota, montagens)',
                  'delonix volumes describe dados')]},
@@ -505,8 +572,10 @@ registados no store — o <code>create</code> AVISA alto que a rede não foi rea
                 ('Detalhe de uma rede, estilo kubectl',
                  'delonix network describe minha-rede')]},
             "node": {"examples": [
-                ('Gerir nós de uma rede overlay entre máquinas',
-                 'delonix network node ls')]},
+                ('A chave WireGuard DESTE nó, para dar aos pares do overlay',
+                 'delonix network node init'),
+                ('Só a chave pública, para compor num script',
+                 'delonix network node key')]},
             "dash": {"examples": [
                 ('Dashboard só das redes',
                  'delonix network dash')]},
@@ -524,10 +593,14 @@ registados no store — o <code>create</code> AVISA alto que a rede não foi rea
         "title": "delonix stack",
         "tagline": "Aplica um manifesto inteiro (delonix-manifest.yaml) — todos os Kinds, por ordem.",
         "intro": """O equivalente declarativo do compose, ao estilo Kubernetes: um YAML multi-documento
-(<code>apiVersion: delonix.io/v1</code>) com 5 Kinds — <code>Network</code>, <code>Volume</code>,
-<code>Image</code>, <code>Vm</code>, <code>Container</code> — aplicados por essa ordem de dependência.
-Semântica <em>garante-presente</em> (idempotente por nome), não um reconciliador: sem diffing,
-rollout nem rollback — fail-fast, o que já foi aplicado fica.""",
+(<code>apiVersion: delonix.io/v1</code>) aplicado por ordem de dependência.
+<strong>Converge</strong> em onze dos doze Kinds — muda-se um campo no manifesto e o
+<code>apply</code> aplica-o, a quente e sem mudar o PID quando é possível. Só o
+<code>Secret</code> continua <em>garante-presente</em> (o estado são valores cifrados, e um plano
+não os decifra para comparar), e o <code>plan</code> marca-o com <code>!</code> em vez de o
+esconder. A lista exacta sai de <code>delonix stack plan --fields</code>. Continua fail-fast e
+<strong>sem rollback</strong>: o que já foi aplicado fica, e é o <code>plan</code> seguinte que
+mostra o que faltou. Guia completo de CI e deriva em <a href="../gitops.html">GitOps e CI</a>.""",
         "subs": {
             "validate": {"examples": [
                 ('Validar o manifesto SEM aplicar nada',
@@ -550,7 +623,36 @@ do projecto.</p>"""},
             "apply": {"examples": [
                 ("Aplicar o manifesto por omissão (./delonix-manifest.yaml)", "delonix stack apply"),
                 ("Manifesto explícito", "delonix stack apply -f infra/stack.yaml"),
-            ]},
+                ("Autorizar a recriação de um recurso que não converge a quente",
+                 "delonix stack apply --replace Container/api"),
+                ("Aplicar E remover o que saiu do manifesto", "delonix stack apply --prune"),
+            ], "notes": """<p>Uma alteração que <strong>não converge a quente</strong> (imagem,
+entrypoint, capabilities, driver de um volume) é RECUSADA sem <code>--replace</code>, e nada é
+alterado — recriar significa downtime e, num volume, perder os dados. O <code>plan</code> nomeia
+sempre o campo que a obriga.</p>
+<p>O <code>--prune</code> nunca acontece sozinho, e só toca no que esta stack possui (label
+<code>delonix.io/stack</code>): um recurso criado à mão é invisível para ele.</p>"""},
+            "plan": {"examples": [
+                ("O que um apply mudaria — sem mudar nada", "delonix stack plan"),
+                ("Gate de deriva em CI (sai 2 quando há alterações)",
+                 "delonix stack plan --detailed-exitcode"),
+                ("Para alimentar outra ferramenta", "delonix stack plan -o json"),
+                ("Que campos são comparados, e quais não são e porquê",
+                 "delonix stack plan --fields"),
+            ], "notes": """<p>Compara TRÊS coisas: o manifesto, a máquina, e o último spec que esta
+stack aplicou. É esse terceiro lado que distingue «tiraste este campo do ficheiro» (reverte) de
+«alguém pôs isto à mão com <code>container update</code>» (não mexe). Com o manifesto inalterado,
+o que ele imprimir É deriva.</p>
+<p>Símbolos: <code>+</code> criar · <code>+~</code> adoptar (existe e não é de stack nenhuma) ·
+<code>~</code> actualizar a quente · <code>-/+</code> recriar · <code>-</code> remover ·
+<code>=</code> sem alteração · <code>✗</code> conflito (é de outra stack) · <code>!</code> Kind
+não convergente.</p>"""},
+            "destroy": {"examples": [
+                ("Ver o que seria removido", "delonix stack destroy --dry-run"),
+                ("Remover tudo o que esta stack possui", "delonix stack destroy"),
+            ], "notes": """<p>Remove pela ordem INVERSA da de criação, para não arrancar uma rede
+debaixo dos containers ainda ligados a ela. Só toca no que tem a label
+<code>delonix.io/stack</code>; é idempotente (destruir uma stack já destruída devolve 0).</p>"""},
         },
         "extra": """<h3>Exemplo de manifesto</h3>
 <pre><code>apiVersion: delonix.io/v1
@@ -715,7 +817,7 @@ A password vem do cofre (<code>--password-secret</code>), nunca do argv. Ligado 
     },
     "sharevolume": {
         "title": "delonix sharevolume",
-        "tagline": "Uma fatia ISOLADA e com QUOTA própria de um `Storage` — vários container/vm/pod partilham um NAS.",
+        "tagline": "Uma fatia ISOLADA e com QUOTA própria de uma partilha de rede — vários container/vm/pod partilham um NAS.",
         "intro": """Resolve um problema concreto de multi-tenant: várias cargas a partilhar UM export
 NFS/CIFS/WebDAV, cada uma com o SEU ponto de montagem isolado e a SUA quota, sem se verem. Por baixo
 não há mecanismo de montagem novo nenhum: cada <code>ShareVolume</code> é um SUBDIRECTÓRIO real da
@@ -725,6 +827,10 @@ registado como o seu próprio volume — a isolação é confinamento de caminho
 quota é SOFT (uso medido + alerta) — o caminho HARD (imagem ext4 loopback) precisa de armazenamento de
 bloco local e não compõe com um subdirectório de um mount de rede.""",
         "subs": {
+            "migrate": {"examples": [
+                ('Trazer registos anteriores ao scoping por namespace para a `default` '
+                 '— move só o REGISTO, nunca os bytes de um inquilino',
+                 'delonix sharevolume migrate')]},
             "apply": {"examples": [
                 ("Duas fatias isoladas do mesmo NAS, cada uma com a sua quota",
                  "delonix sharevolume apply -f sharevolume.yaml",
@@ -1032,6 +1138,39 @@ fica desactualizado à mão.""",
             ("Zsh", 'echo \'source <(delonix completion zsh)\' >> ~/.zshrc'),
         ],
     },
+    "schema": {
+        "title": "delonix schema · explain",
+        "tagline": "O schema dos manifestos, gerado do próprio código — e a referência de campos.",
+        "intro": """Um schema escrito à mão diverge do motor, e este repositório já pagou essa
+divergência três vezes. Por isso o schema não se escreve: <strong>gera-se</strong> a partir dos
+mesmos structs que fazem o parsing (ADR-0007), e um teste do repositório falha se o ficheiro
+publicado deixar de ser o gerado.<br><br>
+Aponta o editor para ele com uma linha no topo do manifesto e ganhas completação, verificação de
+tipos e a documentação dos campos enquanto escreves. O <code>explain</code> lê da MESMA fonte,
+para responder no terminal o que o editor mostra em linha.<br><br>
+O schema é <strong>estável</strong> dentro do <code>0.x</code>: um campo nunca é removido nem muda
+de tipo ou de significado, e um campo novo é sempre opcional com um default que preserva o
+comportamento anterior — ver a
+<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/cli-stability.md">promessa
+de estabilidade</a>. Para saber o que mudou entre duas versões há
+<code>scripts/schema-diff.sh</code>, que compara campo a campo e sai 1 com diferenças.""",
+        "subs": {
+            "print": {
+                "desc": "Imprime o JSON Schema do manifesto (todos os Kinds, ou só um).",
+                "flags": [
+                    ("--kind &lt;Kind&gt;", "só o spec deste Kind (ex.: <code>Container</code>)"),
+                ],
+            },
+        },
+        "examples": [
+            ("Publicar o schema para o editor",
+             "delonix schema print > delonix.schema.json"),
+            ("Só um Kind", "delonix schema print --kind Container"),
+            ("O que um Kind aceita", "delonix explain Container"),
+            ("Um campo em concreto", "delonix explain Container.ports"),
+            ("Um campo aninhado", "delonix explain Pod.containers.image"),
+        ],
+    },
 }
 
 # Tradução EN de `tagline`/`intro` por grupo (nível de página, não por
@@ -1128,10 +1267,13 @@ need <code>CAP_NET_ADMIN</code> in the host's init-netns, outside the rootless m
     "stack": {
         "tagline": "Applies a whole manifest (delonix-manifest.yaml) — every Kind, in dependency order.",
         "intro": """The declarative, Kubernetes-style counterpart to compose: a multi-document
-YAML (<code>apiVersion: delonix.io/v1</code>) with 5 Kinds — <code>Network</code>,
-<code>Volume</code>, <code>Image</code>, <code>Vm</code>, <code>Container</code> — applied in that
-dependency order. <em>Ensure-present</em> semantics (idempotent by name), not a reconciler: no
-diffing, rollout or rollback — fail-fast, whatever was already applied stays applied.""",
+YAML (<code>apiVersion: delonix.io/v1</code>) applied in dependency order.
+It <strong>converges</strong> for <code>Container</code>, <code>Pod</code>, <code>Volume</code> and
+<code>Network</code> — change a field in the manifest and <code>apply</code> applies it, live and
+without changing the PID where that is possible; the remaining Kinds stay <em>ensure-present</em>
+and <code>plan</code> marks them <code>!</code> rather than hiding them. Still fail-fast and
+<strong>without rollback</strong>: whatever was applied stays, and the next <code>plan</code> is
+what shows the rest. Full CI and drift guide in <a href="../gitops.html">GitOps &amp; CI</a>.""",
     },
     "compose": {
         "tagline": "NATIVE support for docker-compose.yml (Compose Spec v2.x) — no Docker, no shim, straight into the engine.",
@@ -1174,7 +1316,7 @@ volume. Under the hood it's a <code>delonix-volume</code> volume with a network 
 Network→Volume→<strong>Storage</strong>→Image→Vm→Container). Mounting needs CAP_SYS_ADMIN.""",
     },
     "sharevolume": {
-        "tagline": "An ISOLATED, individually-QUOTA'd slice of a `Storage` — several container/vm/pod share one NAS.",
+        "tagline": "An ISOLATED, individually-QUOTA'd slice of a network share — several container/vm/pod share one NAS.",
         "intro": """Solves a concrete multi-tenant problem: several workloads sharing ONE
 NFS/CIFS/WebDAV export, each with ITS OWN isolated mount point and ITS OWN quota, without seeing
 each other. Under the hood there's no new mount mechanism at all: each <code>ShareVolume</code> is
@@ -1298,6 +1440,38 @@ it's exposed for debugging and integration.""",
 the binary itself for suggestions in real time, from the SAME definition used for parsing — it
 never goes stale by hand.""",
     },
+    "schema": {
+        "tagline": "The manifest schema, generated from the code — and the field reference.",
+        "intro": """A hand-written schema drifts from the engine, and this repository has paid for
+that drift three times. So the schema is not written: it is <strong>generated</strong> from the
+same structs that do the parsing (ADR-0007), and a test fails if the published file stops being
+the generated one.<br><br>
+Point an editor at it with one line at the top of the manifest and you get completion, type
+checking and the field docs as you type. <code>explain</code> reads from the SAME source, so the
+terminal answers what the editor shows inline.<br><br>
+The schema is <strong>stable</strong> within <code>0.x</code>: a field is never removed and never
+changes type or meaning, and a new field is always optional with a default that preserves the
+previous behaviour — see the
+<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/cli-stability.md">stability
+promise</a>. To see what changed between two versions there is
+<code>scripts/schema-diff.sh</code>, which compares field by field and exits 1 on differences.""",
+    },
+    "init": {
+        "tagline": "Start the RIGHT project for this directory — detect, explain, dispatch.",
+        "intro": """<code>stack init</code> already generates a complete, filled-in project, and
+<code>vm init</code> does the same for a VM. What was missing is the step BEFORE those: knowing
+which one to call, and with which of the eleven templates. That is the whole job here — detect,
+<strong>say what was detected and why</strong>, and dispatch. It generates nothing of its own.<br><br>
+Detection is a pure function over the file names present, ordered most-specific first (a Django
+project also has <code>.py</code> files, and a Next.js one also has <code>package.json</code> — the
+broader rule must not win just because it was checked earlier). And it <strong>always explains
+itself</strong>: a wrong guess you can see is a wrong guess you can override with <code>-t</code>,
+while a silent one just produces a project that does not match the code sitting next to it.<br><br>
+There is one case where the right answer is <strong>to generate nothing</strong>: a directory with
+a <code>docker-compose.yml</code> already runs natively under <code>delonix compose up</code>, and
+a second manifest would leave the project with two sources of truth. The command says so instead
+of generating anyway.""",
+    },
 }
 
 
@@ -1370,13 +1544,37 @@ guessing which of the two you meant, and that the message points at the specific
     },
     "pod": {
         "lab": {"pt": """<p>Cria um pod de 2 containers e confirma que partilham IP —
-alcançam-se por <code>localhost</code>, como no Kubernetes.</p>
-<pre><code>delonix pod create web-pod --container nginx --container redis
+alcançam-se por <code>localhost</code>, como no Kubernetes. Um pod cria-se sempre a
+partir de um manifesto: os membros, as portas e os volumes não cabem em flags sem
+reinventar metade do <code>kind: Pod</code>.</p>
+<pre><code>cat &gt; web-pod.yaml &lt;&lt;'YAML'
+apiVersion: delonix.io/v1
+kind: Pod
+metadata: { name: web-pod }
+spec:
+  network: minha-rede
+  containers:
+    - { name: nginx, image: nginx:alpine }
+    - { name: redis, image: redis:7-alpine }
+YAML
+delonix pod create -f web-pod.yaml
 delonix pod describe web-pod
 delonix pod logs web-pod</code></pre>""",
                 "en": """<p>Create a 2-container pod and confirm they share an IP — reachable via
-<code>localhost</code> from each other, just like in Kubernetes.</p>
-<pre><code>delonix pod create web-pod --container nginx --container redis
+<code>localhost</code> from each other, just like in Kubernetes. A pod is always created
+from a manifest: its members, ports and volumes do not fit in flags without reinventing
+half of <code>kind: Pod</code>.</p>
+<pre><code>cat &gt; web-pod.yaml &lt;&lt;'YAML'
+apiVersion: delonix.io/v1
+kind: Pod
+metadata: { name: web-pod }
+spec:
+  network: my-net
+  containers:
+    - { name: nginx, image: nginx:alpine }
+    - { name: redis, image: redis:7-alpine }
+YAML
+delonix pod create -f web-pod.yaml
 delonix pod describe web-pod
 delonix pod logs web-pod</code></pre>"""},
         "challenge": {"pt": """<p>Escreve o MESMO pod como um <code>kind: Pod</code> num
@@ -1620,12 +1818,12 @@ web 9999</code> (with NO proto given) should only open port 9999. Confirm with
     "egress": {
         "lab": {"pt": """<p>Nega tudo excepto DNS e um destino específico — a política
 <code>allowlist</code> por rede.</p>
-<pre><code>delonix net egress policy minha-rede allowlist --allow 1.1.1.1/32
+<pre><code>delonix net egress net minha-rede allowlist --to 1.1.1.1/32
 delonix container run --rm --net minha-rede alpine wget -qO- https://1.1.1.1
 delonix container run --rm --net minha-rede alpine wget -qO- https://example.com</code></pre>""",
                 "en": """<p>Deny everything except DNS and one specific destination — the
 per-network <code>allowlist</code> policy.</p>
-<pre><code>delonix net egress policy my-net allowlist --allow 1.1.1.1/32
+<pre><code>delonix net egress net my-net allowlist --to 1.1.1.1/32
 delonix container run --rm --net my-net alpine wget -qO- https://1.1.1.1
 delonix container run --rm --net my-net alpine wget -qO- https://example.com</code></pre>"""},
         "challenge": {"pt": """<p>Abre uma ligação de saída de longa duração e só DEPOIS aplica
@@ -1943,7 +2141,15 @@ EXAMPLES_EN = {
         "Logs from a specific container (short name inside the pod)",
     ],
     ("image", "init"): ["Scaffold a VMfile (equivalent to vm init --vmfile)"],
-    ("image", "vm"): ["The same VM image group, via another path"],
+    ("image", "vm"): [
+        "The same VM image group, via another path",
+        "Register a disk this engine did NOT build — the only entry point for "
+        "`import`, which has no `delonix vm …` spelling",
+        "`--appliance` says the guest configures itself (OPNsense, Proxmox, TrueNAS) — "
+        "`vm create` then skips the NoCloud seed instead of attaching an ISO nothing "
+        "inside reads, and REFUSES `--hostname`/`--ssh-key` by name rather than "
+        "accepting and discarding them",
+    ],
     ("image", "logout"): ["Forget that registry's credentials"],
     ("image", "login"): ["Authenticate to a registry (the password comes from stdin, out of history)"],
     ("image", "load"): ["Import that tar on the other end"],
@@ -1992,13 +2198,20 @@ EXAMPLES_EN = {
     ],
     ("vm", "init"): ["Project with a manifest, ready to run", "Scaffold a VMfile to BUILD your image"],
     ("vm", "dash"): ["VMs-only dashboard (htop-style; `q` to quit)", "Snapshot for a script or for Grafana"],
-    ("vm", "create"): ["VM from the golden image, with an SSH key"],
+    ("vm", "create"): [
+        "VM from the golden image, with an SSH key — the name is POSITIONAL",
+        "With no `--disk`, it uses the local golden VM image — if there is exactly one",
+    ],
     ("vm", "ls"): [""],
     ("vm", "status"): ["Reconciles liveness/IP with the backend"],
     ("vm", "stop"): [""],
     ("vm", "rm"): [""],
     ("vm", "apply"): [""],
-    ("volumes", "snapshot"): ["Take and list a volume's snapshots"],
+    ("volumes", "snapshot"): [
+        "Take and list a volume's snapshots",
+        "Roll back to a snapshot (the volume's current contents are replaced)",
+        "Delete a snapshot that is no longer useful",
+    ],
     ("volumes", "describe"): ["Volume detail (usage, quota, mounts)"],
     ("volumes", "create"): ["With quota and the nfs driver available"],
     ("volumes", "ls"): [""],
@@ -2006,7 +2219,10 @@ EXAMPLES_EN = {
     ("volumes", "rm"): [""],
     ("volumes", "apply"): [""],
     ("network", "describe"): ["Network detail, kubectl-style"],
-    ("network", "node"): ["Manage nodes of an overlay network between machines"],
+    ("network", "node"): [
+        "This node's WireGuard key, to hand out to the overlay's peers",
+        "Just the public key, for composing in a script",
+    ],
     ("network", "dash"): ["Networks-only dashboard"],
     ("network", "create"): ["Bridge network for a group of services", "Encrypted overlay between nodes (VXLAN + WireGuard)"],
     ("network", "ls"): [""],
@@ -2020,7 +2236,22 @@ EXAMPLES_EN = {
         "COMPLETE stack project (FastAPI): code + Delonixfile + manifest + tests",
         "See the available templates",
     ],
-    ("stack", "apply"): ["Apply the default manifest (./delonix-manifest.yaml)", "Explicit manifest"],
+    ("stack", "apply"): [
+        "Apply the default manifest (./delonix-manifest.yaml)",
+        "Explicit manifest",
+        "Authorize recreating a resource that does not converge live",
+        "Apply AND remove whatever left the manifest",
+    ],
+    ("stack", "plan"): [
+        "What an apply would change — without changing anything",
+        "Drift gate in CI (exits 2 when there are changes)",
+        "To feed another tool",
+        "Which fields are compared, and which are not and why",
+    ],
+    ("stack", "destroy"): [
+        "See what would be removed",
+        "Remove everything this stack owns",
+    ],
     ("compose", "up"): [
         "Bring everything up (build, network, volumes, containers, in `depends_on` order)",
         "Explicit file/project",
@@ -2244,6 +2475,8 @@ def sidebar(active, depth=0):
         ("index.html", "Início", "Home"),
         ("cheatsheet.html", "Cheatsheet", "Cheatsheet"),
         ("kinds.html", "Kinds e templates", "Kinds & templates"),
+        ("gitops.html", "GitOps e CI", "GitOps & CI"),
+        ("estabilidade.html", "Promessa de estabilidade", "Stability promise"),
         ("cloud.html", "cloud-init, cloud-img e CH", "cloud-init, cloud-img & CH"),
         ("labs.html", "Laboratórios", "Labs"),
         ("arquitectura.html", "Arquitectura", "Architecture"),
@@ -2473,7 +2706,7 @@ def page(path, title, body, depth=0):
         f.write(doc)
 
 
-def examples_html(exs, captions_en=None):
+def examples_html(exs, captions_en=None, key=None):
     """Each example is (caption, command) or (caption, command, output) — the
     3rd, optional element is REAL output captured from an actual run (never
     invented), rendered in a dimmer block right under the command so a reader
@@ -2483,6 +2716,15 @@ def examples_html(exs, captions_en=None):
     the caption renders bilingually via `bi()`; without it, the caption
     stays PT-only (unaffected, the default for the ~200 examples not yet
     translated)."""
+    # As duas listas são PARALELAS por posição, e é o suficiente para uma
+    # divergir em silêncio: acrescentar um exemplo sem a legenda EN dava um
+    # `IndexError` cru a meio da geração, deixando o site PARCIALMENTE escrito
+    # com a página velha no lugar. Falha aqui, a dizer qual é a chave.
+    if captions_en is not None and len(captions_en) != len(exs):
+        raise SystemExit(
+            f"EXAMPLES_EN{key!r}: {len(captions_en)} legenda(s) EN para "
+            f"{len(exs)} exemplo(s) — as duas listas são paralelas por posição."
+        )
     parts = []
     for i, ex in enumerate(exs):
         cap, cmd = ex[0], ex[1]
@@ -2521,7 +2763,7 @@ def group_page(name, g):
     _, top_rest = split_help_intro(top_help)
     body.append(f"<div class='help'><pre><code>{html.escape(top_rest)}</code></pre></div>")
     if g.get("examples"):
-        body.append(f"<h2>{bi('span', 'Exemplos', 'Examples')}</h2>" + examples_html(g["examples"], EXAMPLES_EN.get((name, None))))
+        body.append(f"<h2>{bi('span', 'Exemplos', 'Examples')}</h2>" + examples_html(g["examples"], EXAMPLES_EN.get((name, None)), (name, None)))
     if g.get("extra"):
         body.append(g["extra"])
     for sub, meta in g["subs"].items():
@@ -2541,7 +2783,7 @@ def group_page(name, g):
             else:
                 body.append(meta["notes"])
         if meta.get("examples"):
-            body.append(f"<h3>{bi('span', 'Exemplos', 'Examples')}</h3>" + examples_html(meta["examples"], EXAMPLES_EN.get((name, sub))))
+            body.append(f"<h3>{bi('span', 'Exemplos', 'Examples')}</h3>" + examples_html(meta["examples"], EXAMPLES_EN.get((name, sub)), (name, sub)))
     if name in CLI_LABS:
         body.append(lab_challenge_html(CLI_LABS[name]))
     page(f"comandos/{name}.html", g["title"], "\n".join(body), depth=1)
@@ -2588,7 +2830,10 @@ chmod +x ~/.local/bin/delonix
 echo 'source &lt;(delonix completion bash)' &gt;&gt; ~/.bashrc</code></pre>
 
 <h2>Primeiros passos</h2>
-<pre><code># um serviço web na porta 8080, sem root, sem daemon
+<pre><code>delonix version                  # a identidade do build e o que fazer a seguir
+delonix init                     # olha para esta pasta e começa o projecto certo
+
+# um serviço web na porta 8080, sem root, sem daemon
 delonix container run -d --name web -p 8080:80 nginx
 curl localhost:8080
 
@@ -2649,7 +2894,10 @@ chmod +x ~/.local/bin/delonix
 echo 'source &lt;(delonix completion bash)' &gt;&gt; ~/.bashrc</code></pre>
 
 <h2>Getting started</h2>
-<pre><code># a web service on port 8080, no root, no daemon
+<pre><code>delonix version                  # the build's identity, and what to do next
+delonix init                     # looks at this folder and starts the right project
+
+# a web service on port 8080, no root, no daemon
 delonix container run -d --name web -p 8080:80 nginx
 curl localhost:8080
 
@@ -2673,7 +2921,7 @@ delonix container start web      # restarts with the same state</code></pre>
 
 ARCH = """
 <h1>Arquitectura</h1>
-<p class="tagline">8 crates, um binário — e nenhum processo residente.</p>
+<p class="tagline">10 crates, um binário — e nenhum processo residente.</p>
 
 <h2>Visão geral</h2>
 <div class="arch">
@@ -2748,7 +2996,7 @@ projecto.</p>
 
 ARCH_EN = """
 <h1>Architecture</h1>
-<p class="tagline">8 crates, one binary — and no resident process.</p>
+<p class="tagline">10 crates, one binary — and no resident process.</p>
 
 <h2>Overview</h2>
 <div class="arch">
@@ -2989,6 +3237,14 @@ incompatível com um servidor multi-thread)</td></tr>
 <td><strong>Delonix</strong> — ninguém no espaço Docker/Podman cobre isto junto</td></tr>
 <tr><td>Trocar portas/volumes/redes de um container a quente, sem o recriar</td>
 <td><strong>Delonix</strong> — o Docker obriga a recriar</td></tr>
+<tr><td>Versionar a infra em git e ter um <code>plan</code> antes de aplicar, sem Terraform</td>
+<td><strong>Delonix</strong> — <code>stack plan</code>/<code>apply</code>/<code>destroy</code>
+convergem, com diff de 3 vias e <strong>sem ficheiro de estado</strong>. Nem o Docker nem o
+Podman têm equivalente: o <code>compose up</code> dos dois recria o container para mudar um
+campo, e nenhum dos dois te diz o que ia mudar antes de mudar</td></tr>
+<tr><td>Um gate de deriva em CI (falhar o build se a máquina saiu do que o git declara)</td>
+<td><strong>Delonix</strong> — <code>stack plan --detailed-exitcode</code>, o contrato 0/2/1 do
+<code>terraform plan</code>, num comando</td></tr>
 <tr><td>Rede rootless avançada (overlay cifrado entre nós, firewall dirigido por container)</td>
 <td><strong>Delonix</strong> — acima do Podman rootless nestes pontos</td></tr>
 <tr><td>Um motor com anos de produção, comunidade enorme, máxima compatibilidade de ferramentas</td>
@@ -3019,6 +3275,12 @@ paralelismo de estágios do BuildKit real</span></td></tr>
 <td><span class="tag ok">nativo</span></td><td><span class="tag mid">podman-compose</span></td>
 <td><span class="tag ok">nativo (<code>delonix compose</code>), sem Docker — <code>depends_on</code>
 com healthcheck real</span></td></tr>
+<tr><td>IaC declarativo com <code>plan</code> antes do <code>apply</code></td>
+<td><span class="tag no">ausente</span></td><td><span class="tag no">ausente</span></td>
+<td><span class="tag ok"><code>stack plan</code>/<code>apply</code>/<code>destroy</code>: diff de
+3 vias, convergência a quente sem mudar o PID, recusa fail-closed do que obriga a recriar, posse
+por label, <strong>sem ficheiro de estado</strong>, e <code>--detailed-exitcode</code> como gate
+de deriva. Schema gerado do código e estável</span></td></tr>
 <tr><td>API compatível com <code>DOCKER_HOST</code></td>
 <td><span class="tag ok">é a própria</span></td><td><span class="tag ok">compatível</span></td>
 <td><span class="tag mid">ciclo de vida completo do container (create/start/stop/kill/wait/
@@ -3174,6 +3436,15 @@ control-plane</td></tr>
 <td><strong>Delonix</strong> — nobody in the Docker/Podman space covers this together</td></tr>
 <tr><td>Swapping a container's ports/volumes/networks on the fly, with no recreate</td>
 <td><strong>Delonix</strong> — Docker forces a recreate</td></tr>
+<tr><td>Versioning infrastructure in git with a <code>plan</code> before you apply, without
+Terraform</td>
+<td><strong>Delonix</strong> — <code>stack plan</code>/<code>apply</code>/<code>destroy</code>
+converge, with a three-way diff and <strong>no state file</strong>. Neither Docker nor Podman has
+an equivalent: <code>compose up</code> recreates the container to change a field, and neither
+tells you what would change before it changes</td></tr>
+<tr><td>A drift gate in CI (fail the build when the machine left what git declares)</td>
+<td><strong>Delonix</strong> — <code>stack plan --detailed-exitcode</code>, the 0/2/1 contract of
+<code>terraform plan</code>, in one command</td></tr>
 <tr><td>Advanced rootless networking (encrypted inter-node overlay, per-container directed
 firewall)</td>
 <td><strong>Delonix</strong> — ahead of rootless Podman on these points</td></tr>
@@ -3206,6 +3477,13 @@ layer cache (rootless) already work; no real BuildKit
 <td><span class="tag ok">native</span></td><td><span class="tag mid">podman-compose</span></td>
 <td><span class="tag ok">native (<code>delonix compose</code>), no Docker — <code>depends_on</code>
 with a real healthcheck</span></td></tr>
+<tr><td>Declarative IaC with a <code>plan</code> before the <code>apply</code></td>
+<td><span class="tag no">absent</span></td><td><span class="tag no">absent</span></td>
+<td><span class="tag ok"><code>stack plan</code>/<code>apply</code>/<code>destroy</code>:
+three-way diff, hot convergence with the PID unchanged, a fail-closed refusal for anything needing
+a recreate, ownership by label, <strong>no state file</strong>, and
+<code>--detailed-exitcode</code> as a drift gate. Schema generated from the code, and
+stable</span></td></tr>
 <tr><td><code>DOCKER_HOST</code>-compatible API</td>
 <td><span class="tag ok">is the real thing</span></td><td><span class="tag ok">compatible</span></td>
 <td><span class="tag mid">full container lifecycle (create/start/stop/kill/wait/
@@ -3337,6 +3615,21 @@ main{max-width:1280px}
     page("c4.html", "Modelo C4 e system design", body)
 
 
+def md_page(src_name, out_name, title):
+    """Uma página do site a partir de um `.md` do repositório.
+
+    Mesmo caminho markdown→HTML que o `c4_page` já usa para o
+    `ARCHITECTURE.md` — o ficheiro `.md` continua a ser a fonte, legível no
+    GitHub, e o site é gerado dele. Escrever o mesmo texto duas vezes é como
+    uma das duas cópias começa a mentir.
+    """
+    import markdown
+
+    src = open(os.path.join(ROOT, src_name)).read()
+    body = markdown.markdown(src, extensions=["tables", "fenced_code", "toc"])
+    page(out_name, title, body)
+
+
 def subcommands_of(group):
     """(sub, short-help) de cada subcomando de um grupo, lido do `--help` real."""
     out, seen, rows = help_of(*group_argv(group)), False, []
@@ -3408,15 +3701,19 @@ KINDS_DOC = [
     ("Secret", "secret.yaml", "Um segredo do cofre cifrado em repouso. Consumido por <code>run --secret</code>/"
      "<code>--secret-files</code> e por <code>passwordSecret</code> do Storage. Os valores NUNCA ficam no registo do "
      "container em texto — são resolvidos no arranque a partir do NOME."),
-    ("Pod", "pod.yaml", "A forma de Pod do Kubernetes (<code>spec.containers[]</code>) para <code>kind: Container</code> — "
-     "portas/env/resources/securityContext/volumeMounts estruturados. v1 aceita UM container; para vários, "
-     "<code>kind: Pod</code> (ver <code>examples/pod-multi.yaml</code>)."),
+    ("Pod", "pod.yaml", "O schema de Pod do Kubernetes (<code>spec.containers[]</code>) — portas/env/resources/"
+     "securityContext/volumeMounts estruturados. O MESMO schema continua aceite num <code>kind: Container</code>, "
+     "com aviso, e <strong>não é reescrito de propósito</strong>: um <code>kind: Container</code> chamado "
+     "<code>web</code> cria um container <code>web</code>, este cria a netns <code>pod-web</code> cujo membro é "
+     "<code>web-c0</code> — renomear um workload nas costas de quem o escreveu partiria o DNS e os backends de "
+     "HTTPRoute."),
     ("Workload", "workload.yaml", "UM objecto declarativo para os dois tipos de computação: "
      "<code>spec.type: container | vm | pod | microvm</code> + o bloco com o mesmo nome. Baixa para o Kind "
      "correspondente no load — não redefine um único campo, por isso não pode divergir dele."),
     ("Dependency", "dependency.yaml", "Alcançabilidade DIRIGIDA entre containers (ao contrário da rede, que é "
      "bidireccional): <code>from</code> alcança <code>to</code>, e <code>to</code> não fica exposto aos outros. "
-     "Compila para firewall L4 por-container, sem dataplane novo."),
+     "É açúcar reduzido no load para <code>kind: FirewallPolicy</code> — sem dataplane novo. Várias dependências "
+     "para o mesmo alvo ACUMULAM os allows (por isso são fundidas por alvo, e não uma política por dependência)."),
     ("FirewallPolicy", "firewallpolicy.yaml", "Firewall L4 por container, estilo NetworkPolicy do k8s, com a "
      "direcção em <code>spec.direction</code>. Aplicar substitui as regras dessa direcção e deixa a outra intacta."),
     ("Ingress", "ingress.yaml", "Ingress L7 no formato <code>networking.k8s.io/v1</code> (host/path → backend), "
@@ -3430,9 +3727,13 @@ KINDS_DOC = [
     ("Network", "network.yaml", "Uma rede de utilizador. Os containers juntam-se com <code>--net &lt;nome&gt;</code>; "
      "as VMs com <code>network:</code>. Driver <code>bridge</code> é o único a que containers se atacham hoje."),
     ("Volume", "volume.yaml", "Um volume local nomeado — os dados sobrevivem a <code>container rm</code>. Para "
-     "armazenamento de REDE (NFS/SMB/WebDAV) usa antes <code>kind: Storage</code>."),
-    ("Storage", "storage.yaml", "Um volume de REDE montado de um NAS (TrueNAS/Synology/Samba/Nextcloud), estilo "
-     "PersistentVolume do k8s. A password vem do cofre (<code>--password-secret</code>). Montar precisa de CAP_SYS_ADMIN."),
+     "armazenamento de REDE (NFS/SMB/WebDAV) o MESMO Kind leva um bloco <code>nfs:</code>/"
+     "<code>cifs:</code>/<code>webdav:</code> — ver <code>storage.yaml</code>."),
+    ("Volume com bloco de rede", "storage.yaml", "Um volume de REDE montado de um NAS (TrueNAS/Synology/Samba/"
+     "Nextcloud), estilo PersistentVolume do k8s — o bloco <code>nfs:</code>/<code>cifs:</code>/<code>webdav:</code> "
+     "de um <code>kind: Volume</code>. A password vem do cofre (<code>passwordSecret</code>); montar precisa de "
+     "CAP_SYS_ADMIN. <strong>O <code>kind: Storage</code> ainda carrega</strong>, reescrito nisto com aviso de "
+     "depreciação — descreviam a mesma montagem de duas maneiras e aterravam no mesmo store."),
     ("Image", "image.yaml", "Pré-puxa (ou constrói) uma imagem antes dos containers que dependem dela. Com "
      "<code>--vm</code> o mesmo Kind cobre as imagens VM douradas."),
     ("Vm", "vm.yaml", "Uma microVM declarativa (Cloud Hypervisor ou libvirt), com cloud-init por instância. É a "
@@ -3444,15 +3745,19 @@ KINDS_DOC = [
      "<strong>netns</strong> (mesmo IP, <code>localhost</code> entre si), <strong>IPC</strong> e <strong>UTS</strong> "
      "(hostname). A namespace de PID (<code>shareProcessNamespace</code>) é follow-up. Gere-se com "
      "<code>delonix pod create/ls/describe/rm/logs</code>."),
-    ("Ingress / Egress", "firewall.yaml", "Firewall L4 declarativo por direcção (estilo k8s NetworkPolicy). Cada "
-     "documento é o estado desejado de uma direcção de um container-alvo — allowlist + default-deny, idempotente."),
+    ("FirewallPolicy (as duas direcções)", "firewall.yaml", "Firewall L4 declarativo por direcção (estilo k8s "
+     "NetworkPolicy). Cada documento é o estado desejado de UMA direcção de um container-alvo — allowlist + "
+     "default-deny, idempotente. <strong>O <code>kind: Egress</code> deixou de existir</strong>: é "
+     "<code>direction: egress</code> nesta mesma política (partilhavam a struct inteira). Duas políticas para o "
+     "mesmo par (alvo, direcção) são RECUSADAS — a segunda apagaria as regras da primeira com ambas a dizer que "
+     "correu bem."),
     ("HTTPRoute", "httproute.yaml", "Reverse-proxy L7/HTTP embutido — routing por <code>Host</code> + prefixo de "
      "<code>path</code> para containers backend. TLS termina no proxy (self-signed ou <code>secretRef</code>); "
      "reload a quente por SIGHUP."),
     ("Tunnel", "tunnel.yaml", "Expõe UMA porta local à internet pública via pinggy/ngrok/cloudflare — sem conta, "
      "sem IP público. Junta-se ao <code>HTTPRoute</code> apontando <code>localPort</code> para onde o proxy L7 "
      "escuta: uma URL pública, routing por Host do lado de lá para vários backends."),
-    ("ShareVolume", "sharevolume.yaml", "Uma fatia ISOLADA e com quota própria de um <code>Storage</code> — vários "
+    ("ShareVolume", "sharevolume.yaml", "Uma fatia ISOLADA e com quota própria de uma partilha de rede — vários "
      "container/vm/pod partilham UM export NFS/CIFS/WebDAV sem se verem. Cada fatia é um subdirectório real do "
      "mount pai, registado como o seu próprio volume; consome-se com <code>-v &lt;nome&gt;:/destino</code>, sem "
      "nada de novo do lado do consumidor."),
@@ -3464,15 +3769,20 @@ KINDS_DOC_EN = [
     "A secret from the vault, encrypted at rest. Consumed by <code>run --secret</code>/"
     "<code>--secret-files</code> and by Storage's <code>passwordSecret</code>. Values are NEVER kept in the "
     "container's registry as plaintext — they're resolved at startup from the NAME.",
-    "The Kubernetes Pod shape (<code>spec.containers[]</code>) for <code>kind: Container</code> — "
-    "structured ports/env/resources/securityContext/volumeMounts. v1 accepts ONE container; for several, "
-    "use <code>kind: Pod</code> (see <code>examples/pod-multi.yaml</code>).",
+    "The Kubernetes Pod schema (<code>spec.containers[]</code>) — structured "
+    "ports/env/resources/securityContext/volumeMounts. The SAME schema is still accepted on a "
+    "<code>kind: Container</code>, with a warning, and is <strong>deliberately not rewritten for you</strong>: "
+    "a <code>kind: Container</code> named <code>web</code> creates a container <code>web</code>, this creates "
+    "the pod netns <code>pod-web</code> whose member is <code>web-c0</code> — renaming a workload behind your "
+    "back would break DNS and HTTPRoute backends.",
     "ONE declarative object for both kinds of compute: "
     "<code>spec.type: container | vm | pod | microvm</code> plus the block with that same name. Lowers to the "
     "matching Kind on load — it doesn't redefine a single field, so it can never drift from it.",
     "DIRECTED reachability between containers (unlike a network, which is "
     "bidirectional): <code>from</code> reaches <code>to</code>, and <code>to</code> stays unexposed to the "
-    "others. Compiles to a per-container L4 firewall, with no new dataplane.",
+    "others. Sugar lowered on load into <code>kind: FirewallPolicy</code> — no new dataplane. Several "
+    "dependencies on the same target ACCUMULATE their allows, which is why they are merged by target rather "
+    "than one policy per dependency.",
     "Per-container L4 firewall, k8s NetworkPolicy-style, with the "
     "direction in <code>spec.direction</code>. Applying replaces that direction's rules and leaves the other "
     "intact.",
@@ -3488,10 +3798,13 @@ KINDS_DOC_EN = [
     "A user network. Containers join it with <code>--net &lt;name&gt;</code>; "
     "VMs with <code>network:</code>. <code>bridge</code> is the only driver containers can attach to today.",
     "A named local volume — the data survives <code>container rm</code>. For "
-    "NETWORK storage (NFS/SMB/WebDAV) use <code>kind: Storage</code> instead.",
+    "NETWORK storage (NFS/SMB/WebDAV) the SAME Kind takes an <code>nfs:</code>/<code>cifs:</code>/"
+    "<code>webdav:</code> block — see <code>storage.yaml</code>.",
     "A NETWORK volume mounted from a NAS (TrueNAS/Synology/Samba/Nextcloud), "
-    "k8s PersistentVolume-style. The password comes from the vault (<code>--password-secret</code>). Mounting "
-    "needs CAP_SYS_ADMIN.",
+    "k8s PersistentVolume-style — the <code>nfs:</code>/<code>cifs:</code>/<code>webdav:</code> block of a "
+    "<code>kind: Volume</code>. The password comes from the vault (<code>passwordSecret</code>); mounting needs "
+    "CAP_SYS_ADMIN. <strong><code>kind: Storage</code> still loads</strong>, rewritten into this with a "
+    "deprecation warning — the two described the same mount two ways and landed in the same store.",
     "Pre-pulls (or builds) an image before the containers that depend on it. With "
     "<code>--vm</code> the same Kind covers golden VM images.",
     "A declarative microVM (Cloud Hypervisor or libvirt), with per-instance cloud-init. "
@@ -3512,7 +3825,7 @@ KINDS_DOC_EN = [
     "Exposes ONE local port to the public internet via pinggy/ngrok/cloudflare — no "
     "account, no public IP. Pairs with <code>HTTPRoute</code> by pointing <code>localPort</code> at where the "
     "L7 proxy listens: one public URL, Host-based routing on the other end to several backends.",
-    "An ISOLATED, individually-quota'd slice of a <code>Storage</code> — several "
+    "An ISOLATED, individually-quota'd slice of a network share — several "
     "container/vm/pod share ONE NFS/CIFS/WebDAV export without seeing each other. Each slice is a real "
     "subdirectory of the parent mount, registered as its own volume; consumed with "
     "<code>-v &lt;name&gt;:/dest</code>, nothing new on the consumer side.",
@@ -3684,7 +3997,7 @@ delonix vm ls
 #   delonix vm build --network -t minha-base:1.0 .
 
 # Arrancar a partir dela
-delonix vm create teste --disk-image minha-base:1.0 --ssh-key @~/.ssh/id_ed25519.pub
+delonix vm create teste --disk minha-base:1.0 --ssh-key @~/.ssh/id_ed25519.pub
 
 # …ou a partir de um qcow2 publicado por ti, sem passar pelo store
 delonix vm create outra --url-img https://o-teu-bucket/imagem.qcow2
@@ -3887,7 +4200,7 @@ delonix vm ls
 #   delonix vm build --network -t my-base:1.0 .
 
 # Boot from it
-delonix vm create test --disk-image my-base:1.0 --ssh-key @~/.ssh/id_ed25519.pub
+delonix vm create test --disk my-base:1.0 --ssh-key @~/.ssh/id_ed25519.pub
 
 # …or from a qcow2 you published yourself, bypassing the store
 delonix vm create other --url-img https://your-bucket/image.qcow2
@@ -4310,20 +4623,28 @@ def kinds_page():
     body = [f"<h1>Kinds do manifesto</h1>{bi('p', 'Cada Kind com um template COMPLETO e funcional — '
             'todos os campos, com os defaults e um comentário. Aplica um só com '
             '<code>delonix &lt;grupo&gt; apply -f</code>, ou todos de uma vez com <code>delonix stack apply</code> '
-            '(ordem por dependência: Secret → Network → Volume → Storage → ShareVolume → Image → Vm → Container → '
-            'Pod → Ingress/Egress → Dependency → HTTPRoute → Tunnel).',
+            '(ordem por dependência: Secret → Network → Volume → ShareVolume → Image → Vm → Container → '
+            'Pod → Ingress → FirewallPolicy → HTTPRoute → Tunnel).',
             'Each Kind with a COMPLETE, functional template — '
             'every field, with defaults and a comment. Apply just one with '
             '<code>delonix &lt;group&gt; apply -f</code>, or all at once with <code>delonix stack apply</code> '
-            '(dependency order: Secret → Network → Volume → Storage → ShareVolume → Image → Vm → Container → '
-            'Pod → Ingress/Egress → Dependency → HTTPRoute → Tunnel).', cls='tagline')}"]
+            '(dependency order: Secret → Network → Volume → ShareVolume → Image → Vm → Container → '
+            'Pod → Ingress → FirewallPolicy → HTTPRoute → Tunnel).', cls='tagline')}"]
     body.append(bi('p',
-        "Semântica <em>garante-presente</em> (idempotente por nome), não um reconciliador: sem diffing, "
-        "rollout nem rollback — fail-fast, o que já foi aplicado fica. Os templates abaixo são os ficheiros "
-        "reais em <a href='https://github.com/angolardevops/delonix-runtime/tree/main/examples'><code>examples/</code></a>.",
-        "<em>Ensure-present</em> semantics (idempotent by name), not a reconciler: no diffing, "
-        "rollout or rollback — fail-fast, whatever was already applied stays applied. The templates below are the "
-        "real files in <a href='https://github.com/angolardevops/delonix-runtime/tree/main/examples'><code>examples/</code></a>."))
+        "Desde a v0.47.0 o <code>apply</code> <strong>converge</strong>: o <code>stack plan</code> diz o "
+        "que mudaria e porquê, e o <code>apply</code> reconfigura portas, volumes, redes, memória e CPU "
+        "<strong>a quente, sem mudar o PID</strong> — recusando, com o nome do campo, o que obrigaria a "
+        "recriar (a não ser com <code>--replace</code>). Sem ficheiro de estado: o último spec aplicado vive "
+        "no próprio recurso. Continua fail-fast e sem rollback, e é convergência <em>a pedido</em> — não um "
+        "loop. Os templates abaixo são os ficheiros reais em "
+        "<a href='https://github.com/angolardevops/delonix-runtime/tree/main/examples'><code>examples/</code></a>.",
+        "Since v0.47.0 <code>apply</code> <strong>converges</strong>: <code>stack plan</code> says what would "
+        "change and why, and <code>apply</code> reconfigures ports, volumes, networks, memory and CPU "
+        "<strong>hot, with the PID unchanged</strong> — refusing, by field name, anything that would need a "
+        "recreate (unless you pass <code>--replace</code>). No state file: the last applied spec lives on the "
+        "resource itself. Still fail-fast and without rollback, and still convergence <em>on demand</em> — not "
+        "a loop. The templates below are the real files in "
+        "<a href='https://github.com/angolardevops/delonix-runtime/tree/main/examples'><code>examples/</code></a>."))
     for (kind, fname, intro), intro_en in zip(KINDS_DOC, KINDS_DOC_EN):
         anchor = kind.split()[0].lower()
         body.append(f"<h2 id='{anchor}'>{html.escape(kind)}</h2>")
@@ -4657,6 +4978,8 @@ def main():
     c4_page()
     page("cloud.html", "cloud-init, cloud image e Cloud Hypervisor", bi("div", CLOUD, CLOUD_EN))
     labs_page()
+    md_page("gitops.md", "gitops.html", "GitOps e CI")
+    md_page("cli-stability.md", "estabilidade.html", "Promessa de estabilidade")
     page("cri.html", "CRI", bi("div", CRI, CRI_EN))
     page("comparacao.html", "Delonix vs Docker vs Podman", bi("div", COMPARE, COMPARE_EN))
     page("tutorial-delonix-temp.html", "Projecto completo: Delonix Temp", bi("div", TUTORIAL, TUTORIAL_EN))

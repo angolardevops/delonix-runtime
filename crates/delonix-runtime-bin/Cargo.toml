@@ -52,3 +52,4 @@ libc = { workspace = true }
 # não precisa de tty. ratatui traz o crossterm.
 ratatui = "0.29"
 oci-spec = { workspace = true, features = ["runtime"] }
+schemars = { version = "1.2.2", features = ["derive"] }

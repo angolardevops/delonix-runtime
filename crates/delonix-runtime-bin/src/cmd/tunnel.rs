@@ -155,6 +155,89 @@ pub fn run(action: TunnelCmd) -> Result<()> {
     }
 }
 
+/// Fields the reconciler compares for a `kind: Tunnel`.
+///
+/// **The public URL is deliberately absent — it is STATUS.** A provider hands it
+/// out when the agent connects, and a free tier hands out a different one every
+/// time; comparing it would report drift on a manifest nobody touched, which is
+/// the failure mode that makes a plan worth ignoring.
+///
+/// **The token is absent too, and that is a consistency call.** The record keeps
+/// only a HASH of the effective config, so comparing a token would mean opening
+/// the vault to recompute it — and `kind: Secret` is reported as
+/// non-converging precisely because a plan will not decrypt to compare. A token
+/// changed on its own is therefore invisible to the plan; the apply's own
+/// `config_hash` still notices and restarts the agent, so nothing is lost
+/// except the preview.
+pub(crate) const RECONCILED_TUNNEL_FIELDS: &[&str] = &["provider", "localPort", "hostname"];
+
+pub(crate) fn desired(doc: &ManifestDoc) -> Result<super::reconcile::Desired> {
+    let spec: TunnelSpec = manifest::spec_of(doc)?;
+    let mut f = std::collections::BTreeMap::new();
+    f.insert("provider".into(), spec.provider.clone());
+    f.insert("localPort".into(), spec.local_port.to_string());
+    if let Some(h) = &spec.hostname {
+        f.insert("hostname".into(), h.clone());
+    }
+    Ok(super::reconcile::Desired {
+        kind: "Tunnel".into(),
+        name: doc.metadata.name.clone(),
+        fields: f,
+        converges: true,
+        // A `TunnelRecord` carries no labels, so there is nowhere to stamp a
+        // stack — same as a `ShareVolume`. Converged, never adopted or pruned.
+        ownable: false,
+    })
+}
+
+pub(crate) fn actual(docs: &[ManifestDoc]) -> Result<Vec<super::reconcile::Actual>> {
+    let store = record_store()?;
+    let mut out = Vec::new();
+    for doc in manifest::of_kind(docs, "Tunnel") {
+        let Ok(rec) = store.load(&doc.metadata.name) else {
+            continue;
+        };
+        let mut f = std::collections::BTreeMap::new();
+        f.insert("provider".into(), rec.provider.clone());
+        f.insert("localPort".into(), rec.local_port.to_string());
+        if let Some(h) = &rec.hostname {
+            f.insert("hostname".into(), h.clone());
+        }
+        out.push(super::reconcile::Actual {
+            kind: "Tunnel".into(),
+            name: doc.metadata.name.clone(),
+            fields: f,
+            owner: None,
+            last_applied: None,
+        });
+    }
+    Ok(out)
+}
+
+/// Presence for `stack ls`/`describe`/`wait` — same gap as `ShareVolume`: the
+/// Kind was applied and never listed, so nothing asked until now.
+pub(crate) fn presence_of(name: &str) -> (String, String) {
+    match record_store().and_then(|s| s.load(name)) {
+        Ok(rec) => (
+            "yes".into(),
+            rec.public_url.unwrap_or_else(|| rec.provider.clone()),
+        ),
+        Err(_) => ("no".into(), "-".into()),
+    }
+}
+
+/// Converges a tunnel: re-apply the document.
+///
+/// `apply_one` already compares the effective `config_hash` and restarts the
+/// agent when it differs — no provider here supports the hot reload the
+/// HTTPRoute proxy gets from SIGHUP. So converging is applying, and the restart
+/// is inherent: the tunnel comes back with a NEW public URL on a free tier,
+/// which is why the URL is status and not something a manifest can pin.
+pub(crate) fn converge_doc(doc: &ManifestDoc) -> Result<()> {
+    let spec: TunnelSpec = manifest::spec_of(doc)?;
+    apply_one(&doc.metadata.name, &spec)
+}
+
 pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
     for doc in manifest::of_kind(docs, "Tunnel") {
         manifest::warn_unknown_fields(doc, TUNNEL_SPEC_FIELDS);

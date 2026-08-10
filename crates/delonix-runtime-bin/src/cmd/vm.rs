@@ -527,13 +527,13 @@ pub enum VmCmd {
         no_k8s: bool,
     },
     /// Push a local golden VM image to an OCI registry (`vm push <name> <target>`).
-    Push {
-        name: String,
-        target: String,
-    },
-    /// Convert a VM disk between `qcow2` and `raw` — flattened either way,
-    /// ready to boot on either backend (libvirt/QEMU and Cloud Hypervisor
-    /// already share this same pair of formats).
+    Push { name: String, target: String },
+    /// Convert a VM disk to the format another ecosystem imports — `qcow2`,
+    /// `raw`, `vmdk` (VMware), `vdi` (VirtualBox), `vhdx`/`vhd` (Hyper-V,
+    /// Azure). Flattened either way, so the result is a standalone file with
+    /// no backing chain. This engine's own two backends already share
+    /// `qcow2`/`raw`; the rest exist so an image built here is importable
+    /// elsewhere without a backend per product.
     Convert {
         /// A local VM image name (`vm ls`) or a literal `.qcow2`/`.raw` path.
         source: String,
@@ -542,6 +542,10 @@ pub enum VmCmd {
         /// Destination file (default: alongside the source, with the new extension).
         #[arg(short = 'o', long = "output")]
         output: Option<PathBuf>,
+        /// Compress the output. Only `qcow2` and `vmdk` can — refused for the
+        /// others rather than handed to `qemu-img` to fail on.
+        #[arg(long)]
+        compress: bool,
     },
     /// Get or set the default VM backend, used by `vm create` when neither
     /// `--backend` nor `DELONIX_VM_BACKEND` is given — above the engine's own
@@ -587,6 +591,10 @@ pub enum VmCmd {
         #[arg(add = ArgValueCandidates::new(super::complete::vms))]
         name: Option<String>,
     },
+    /// Which published ports a VM can actually reach, and how to fix the ones
+    /// it cannot. A port published to the default `127.0.0.1` is invisible to a
+    /// VM — this lists the libvirt gateways, reads each port's LIVE bind, and
+    /// for every loopback-only one prints the exact republish command.
     Reach,
     /// EXPERIMENTAL (root): give a libvirt VM DIRECT IP reachability to a
     /// container SDN network (veth from the host into the holder netns + routes).
@@ -764,6 +772,100 @@ pub fn spec_with_defaults(doc: &ManifestDoc) -> Result<serde_yaml::Value> {
     serde_yaml::to_value(spec).map_err(|e| Error::Invalid(format!("dry-run: {e}")))
 }
 
+/// Fields the reconciler compares for a `kind: Vm`.
+///
+/// **None of them converge hot, and that is not a gap.** This engine does not
+/// hotplug: changing a VM's vCPUs, memory or disk means booting a different
+/// machine, so every one of these is a `Replace` that `apply` refuses without
+/// `--replace`. Refusing is the point — recreating a VM throws away its overlay
+/// disk, which is everything the guest wrote since it was created.
+pub(crate) const RECONCILED_VM_FIELDS: &[&str] = &["disk", "vcpus", "memory", "network", "backend"];
+
+fn desired_vm_fields(spec: &VmSpec) -> std::collections::BTreeMap<String, String> {
+    let mut f = std::collections::BTreeMap::new();
+    f.insert("disk".into(), spec.disk.clone());
+    f.insert("vcpus".into(), spec.vcpus.to_string());
+    f.insert("memory".into(), spec.memory.clone());
+    f.insert("network".into(), spec.network.clone());
+    if let Some(b) = &spec.backend {
+        f.insert("backend".into(), b.clone());
+    }
+    f
+}
+
+/// What the manifest declares, for the reconciler.
+pub(crate) fn desired(doc: &ManifestDoc) -> Result<super::reconcile::Desired> {
+    let spec: VmSpec = vm_spec_of(doc)?;
+    Ok(super::reconcile::Desired {
+        kind: "Vm".into(),
+        name: doc.metadata.name.clone(),
+        fields: desired_vm_fields(&spec),
+        converges: true,
+        ownable: true,
+    })
+}
+
+/// What is on the machine, for the reconciler.
+///
+/// Reads the STORE and not `delonix_vm::status`: `status` asks the backend
+/// whether the domain is running, which is a shell-out per VM. A plan compares
+/// declared configuration, and none of the compared fields change because a VM
+/// happens to be off — paying a `virsh` round-trip per VM to learn something the
+/// plan does not use would make planning slow for nothing.
+pub(crate) fn actual() -> Result<Vec<super::reconcile::Actual>> {
+    let base = state_root();
+    Ok(delonix_vm::list(&base)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|vm| {
+            let mut f = std::collections::BTreeMap::new();
+            f.insert("disk".into(), vm.disk.clone());
+            f.insert("vcpus".into(), vm.vcpus.to_string());
+            f.insert("memory".into(), vm.memory.clone());
+            f.insert("network".into(), vm.network.clone());
+            f.insert("backend".into(), vm.backend.clone());
+            super::reconcile::Actual {
+                kind: "Vm".into(),
+                name: vm.name.clone(),
+                fields: f,
+                owner: vm.labels.get(super::reconcile::STACK_LABEL).cloned(),
+                last_applied: vm
+                    .annotations
+                    .get(super::reconcile::LAST_APPLIED)
+                    .and_then(|raw| super::reconcile::decode_last_applied(raw)),
+            }
+        })
+        .collect())
+}
+
+/// Records that this stack owns the VM, and what it last applied.
+pub(crate) fn stamp(
+    name: &str,
+    stack: &str,
+    fields: &std::collections::BTreeMap<String, String>,
+) -> Result<()> {
+    let st: delonix_runtime_core::JsonStore<delonix_runtime_core::Vm> =
+        delonix_runtime_core::JsonStore::open(state_root().join("vms"))?;
+    let encoded = super::reconcile::encode_last_applied(fields);
+    st.update(name, |vm| {
+        vm.labels
+            .insert(super::reconcile::STACK_LABEL.into(), stack.to_string());
+        vm.labels
+            .insert(super::reconcile::MANAGED_BY.into(), "delonix".into());
+        vm.annotations
+            .insert(super::reconcile::LAST_APPLIED.into(), encoded.clone());
+        true
+    })?;
+    Ok(())
+}
+
+/// Destroys a VM so the normal creation path can rebuild it. **The overlay disk
+/// goes with it** — everything the guest wrote. That is the whole reason a VM
+/// change is refused without `--replace`.
+pub(crate) fn remove_for_replace(name: &str) -> Result<()> {
+    delonix_vm::remove_force(&state_root(), name)
+}
+
 pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
     let base = state_root();
     for doc in manifest::of_kind(docs, "Vm") {
@@ -914,7 +1016,7 @@ pub fn run(action: VmCmd) -> Result<()> {
                 force,
             });
         }
-        return cmd_init(
+        return init_for(
             super::scaffold::Target::Vm,
             dir,
             name,
@@ -1015,9 +1117,37 @@ pub fn run(action: VmCmd) -> Result<()> {
             // Recorded before `ssh_keys` is moved into the seed, and only for
             // the generated-seed path: a caller who brought their OWN `--seed`
             // decided the accounts themselves, and we would be guessing.
+            //
+            // EXCEPT for an appliance (`cloud_init: false` in the image's
+            // metadata — OPNsense, Proxmox, TrueNAS). Those install and
+            // configure themselves; the seed would be an ISO nothing reads, on
+            // a CD-ROM that changes the guest's device list for no reason.
+            let appliance = image_meta.as_ref().is_some_and(|m| !m.uses_cloud_init());
+            if appliance && seed.is_none() {
+                // Refuse rather than drop: silently ignoring an option the
+                // caller passed is the failure this repo names as its worst.
+                let asked: Vec<&str> = [
+                    (hostname.is_some(), "--hostname"),
+                    (!ssh_keys.is_empty(), "--ssh-key"),
+                    (user_data.is_some(), "--user-data"),
+                ]
+                .iter()
+                .filter(|(given, _)| *given)
+                .map(|(_, flag)| *flag)
+                .collect();
+                if !asked.is_empty() {
+                    return Err(Error::Invalid(super::po::tf(
+                        "{flags}: this image is an appliance and does not run cloud-init, so \
+                         these would be silently ignored — configure it on first boot (console \
+                         or web UI), or pass your own `--seed` if you know the guest reads one",
+                        &[("flags", &asked.join(", "))],
+                    )));
+                }
+            }
             let injected_key = seed.is_none() && !ssh_keys.is_empty();
             let seed = match seed {
                 Some(s) => Some(s),
+                None if appliance => None,
                 None => {
                     let iso = generate_seed_iso(
                         &name,
@@ -1145,9 +1275,14 @@ pub fn run(action: VmCmd) -> Result<()> {
             let store = super::vmimage::VmImageStore::open(super::util::state_root())?;
             super::vmimage::cmd_push(&store, &name, &target)
         }
-        VmCmd::Convert { source, to, output } => {
+        VmCmd::Convert {
+            source,
+            to,
+            output,
+            compress,
+        } => {
             let store = super::vmimage::VmImageStore::open(super::util::state_root())?;
-            super::vmimage::cmd_convert(&store, &source, to, output)
+            super::vmimage::cmd_convert(&store, &source, to, output, compress)
         }
         VmCmd::DefaultBackend { set, clear } => {
             if clear {
@@ -2226,7 +2361,9 @@ pub(crate) fn generate_seed_iso(
 }
 
 /// Handles the `init` of this group (see `cmd::scaffold`).
-fn cmd_init(
+/// The generator behind `vm init`, exposed so `delonix init` can dispatch here once it has
+/// DETECTED a VM project (a `VMfile`) instead of duplicating it.
+pub(crate) fn init_for(
     target: super::scaffold::Target,
     dir: PathBuf,
     name: Option<String>,
@@ -2289,6 +2426,7 @@ mod tests {
             default_vcpus: vcpus,
             default_memory: memory,
             default_backend: backend,
+            cloud_init: None,
         }
     }
 

@@ -74,23 +74,101 @@ pub struct VmImage {
     /// `cmd::vm::resolve_disk_and_defaults`).
     #[serde(default)]
     pub default_backend: Option<String>,
+    /// Whether the guest runs cloud-init. `None` (every image built before
+    /// this field existed) means *unknown* and is treated as `true` — the
+    /// cloud images this engine has always built do run it, so nothing about
+    /// them changes.
+    ///
+    /// `Some(false)` marks an **appliance**: a vendor system that installs and
+    /// configures itself (OPNsense, Proxmox, TrueNAS). For those, `vm create`
+    /// must NOT attach the NoCloud seed it otherwise always builds — an ISO
+    /// nothing reads, on a CD-ROM that changes the guest's device list. And
+    /// `--hostname`/`--ssh-key`/`--user-data` are refused outright rather than
+    /// accepted and silently dropped, which is the failure mode this repo
+    /// names as its worst (see `--security-opt seccomp=`, `-v …:z`,
+    /// `--network-alias` in CLAUDE.md).
+    #[serde(default)]
+    pub cloud_init: Option<bool>,
 }
 
-/// Target format for `image vm convert`. Both are already understood by the
-/// two `delonix_vm::VmBackend`s (libvirt/QEMU and Cloud Hypervisor) — this is
-/// not a per-hypervisor format choice, just `qemu-img convert`'s two shapes.
+impl VmImage {
+    /// True when this image's guest runs cloud-init, so a NoCloud seed is
+    /// worth generating. Unknown (pre-existing metadata) counts as yes: that
+    /// is what those images have always been.
+    pub fn uses_cloud_init(&self) -> bool {
+        self.cloud_init.unwrap_or(true)
+    }
+}
+
+/// Target format for `image vm convert` — **the integration point with every
+/// other hypervisor's ecosystem**.
+///
+/// This engine runs two backends (libvirt/QEMU and Cloud Hypervisor) and will
+/// not grow a backend for every product on the market: VirtualBox does not
+/// coexist with KVM on one host, vSphere and Proxmox are remote datacenter APIs
+/// rather than local hypervisors, and Hyper-V is Windows. But an IMAGE built
+/// here can be imported by all of them, and `qemu-img` already writes every one
+/// of their formats — so the cheap, honest integration is the artifact, not a
+/// driver. Build here, import there.
+///
+/// The mapping is not decorative; each format is what a specific product's
+/// importer expects:
 #[derive(clap::ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ConvertFormat {
+    /// QEMU/KVM, libvirt, Cloud Hypervisor — this engine's own two backends.
     Qcow2,
+    /// Raw sectors: Proxmox VE (its default for LVM/ZFS/Ceph storage), and the
+    /// universal fallback anything can read. Not sparse on a filesystem that
+    /// does not support holes — expect the full virtual size on disk.
     Raw,
+    /// VMware — Workstation, Fusion, ESXi/vSphere.
+    Vmdk,
+    /// VirtualBox.
+    Vdi,
+    /// Hyper-V (Windows 8/2012 and later), and Azure's modern disk format.
+    Vhdx,
+    /// Hyper-V's older VHD (`vpc` in qemu-img's own naming). Kept separate from
+    /// `vhdx` because they are different formats, not spellings — an importer
+    /// that wants one rejects the other.
+    Vhd,
 }
 
 impl ConvertFormat {
+    /// The name `qemu-img -O` knows. **VHD is `vpc` there** — qemu's historical
+    /// name for it — which is exactly the kind of detail a user should not have
+    /// to know to get a file Hyper-V accepts.
     fn as_str(self) -> &'static str {
         match self {
             ConvertFormat::Qcow2 => "qcow2",
             ConvertFormat::Raw => "raw",
+            ConvertFormat::Vmdk => "vmdk",
+            ConvertFormat::Vdi => "vdi",
+            ConvertFormat::Vhdx => "vhdx",
+            ConvertFormat::Vhd => "vpc",
         }
+    }
+
+    /// The file extension the target ecosystem expects — NOT always the same as
+    /// the qemu format name (`vpc` produces a `.vhd`), which is why the two are
+    /// separate functions instead of one string used twice.
+    fn extension(self) -> &'static str {
+        match self {
+            ConvertFormat::Qcow2 => "qcow2",
+            ConvertFormat::Raw => "raw",
+            ConvertFormat::Vmdk => "vmdk",
+            ConvertFormat::Vdi => "vdi",
+            ConvertFormat::Vhdx => "vhdx",
+            ConvertFormat::Vhd => "vhd",
+        }
+    }
+
+    /// Whether the format supports `qemu-img`'s `-c` (compressed) output.
+    ///
+    /// Only qcow2 and vmdk do. Passing `-c` to the others makes `qemu-img` fail
+    /// outright, so this is what keeps `--compress` from turning into a
+    /// confusing tool error on a flag the user was invited to use.
+    fn supports_compression(self) -> bool {
+        matches!(self, ConvertFormat::Qcow2 | ConvertFormat::Vmdk)
     }
 }
 
@@ -101,6 +179,7 @@ pub enum Distro {
     Ubuntu,
     Debian,
     Rocky,
+    Fedora,
 }
 
 impl Distro {
@@ -109,6 +188,7 @@ impl Distro {
             Distro::Ubuntu => "ubuntu",
             Distro::Debian => "debian",
             Distro::Rocky => "rocky",
+            Distro::Fedora => "fedora",
         }
     }
 }
@@ -171,6 +251,10 @@ impl VmImageStore {
                 Self::sanitize(release)
             ),
             Distro::Rocky => format!("rocky-{}-genericcloud-amd64.qcow2", Self::sanitize(release)),
+            Distro::Fedora => format!(
+                "Fedora-Cloud-Base-Generic-{}.x86_64.qcow2",
+                Self::sanitize(release)
+            ),
         };
         self.root.join("_base").join(filename)
     }
@@ -232,7 +316,19 @@ pub enum VmImageCmd {
         /// Destination file (default: alongside the source, with the new extension).
         #[arg(short = 'o', long = "output")]
         output: Option<PathBuf>,
+        /// Compress the output. Only `qcow2` and `vmdk` can — refused for the
+        /// others rather than handed to `qemu-img` to fail on.
+        #[arg(long)]
+        compress: bool,
     },
+    /// Register an existing disk image under a name, so `vm create --disk
+    /// <name>` and `image vm push` can use it.
+    ///
+    /// The counterpart to `build` for a disk this engine did not produce: a
+    /// vendor appliance installed from its own ISO, or an image exported from
+    /// somewhere else. The file is copied into the store as-is — nothing is
+    /// booted, nothing is inspected.
+    Import(ImportArgs),
     /// Pull a VM image from an OCI registry — with no argument, the OFFICIAL
     /// Delonix image (ready for `vm create`/`cluster kubeadm`).
     Pull {
@@ -300,6 +396,13 @@ pub enum VmImageCmd {
         /// rocky`. Rocky currently only supports `--no-k8s` builds.
         #[arg(long, default_value = "9")]
         rocky_release: String,
+        /// Fedora release AND build, as shown on Fedora's download page
+        /// (e.g. `42-1.1`) — only used with `--distro fedora`. The build
+        /// number is not derivable from the release, and Fedora's redirector
+        /// offers no listing to look it up, so it is asked for rather than
+        /// guessed.
+        #[arg(long, default_value = "42-1.1")]
+        fedora_release: String,
         /// Kubernetes version (e.g. `1.31`) — omit to use the latest stable.
         #[arg(long)]
         k8s_version: Option<String>,
@@ -347,7 +450,13 @@ pub fn run(action: VmImageCmd) -> Result<()> {
         VmImageCmd::Ls { output } => cmd_ls(&store, output),
         VmImageCmd::Describe { names } => cmd_describe(&store, &names),
         VmImageCmd::Push { name, target } => cmd_push(&store, &name, &target),
-        VmImageCmd::Convert { source, to, output } => cmd_convert(&store, &source, to, output),
+        VmImageCmd::Convert {
+            source,
+            to,
+            output,
+            compress,
+        } => cmd_convert(&store, &source, to, output, compress),
+        VmImageCmd::Import(args) => cmd_import(&store, args),
         VmImageCmd::Pull {
             source,
             name,
@@ -377,6 +486,7 @@ pub fn run(action: VmImageCmd) -> Result<()> {
             ubuntu_release,
             debian_release,
             rocky_release,
+            fedora_release,
             k8s_version,
             extra_packages,
             extra_run,
@@ -433,6 +543,7 @@ pub fn run(action: VmImageCmd) -> Result<()> {
                 &ubuntu_release,
                 &debian_release,
                 &rocky_release,
+                &fedora_release,
                 k8s_version,
                 extra_packages,
                 extra_run,
@@ -491,6 +602,11 @@ struct VmImageLsRow {
     k8s_version: Option<String>,
     created_unix: u64,
     size_bytes: u64,
+    /// Whether the guest runs cloud-init; `null` for images registered before
+    /// the field existed. Automation reads this to know whether passing
+    /// `--hostname`/`--ssh-key` to `vm create` would be refused.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cloud_init: Option<bool>,
 }
 
 fn cmd_ls(store: &VmImageStore, format: output::OutputFormat) -> Result<()> {
@@ -505,19 +621,35 @@ fn cmd_ls(store: &VmImageStore, format: output::OutputFormat) -> Result<()> {
                 k8s_version: img.k8s_version,
                 created_unix: img.created_unix,
                 size_bytes: img.size,
+                cloud_init: img.cloud_init,
             })
             .collect();
         return output::print_json(&rows);
     }
-    let mut t =
-        output::Table::new(&["NAME", "DISTRO", "KERNEL", "K8S", "CREATED", "SIZE"]).right_align(5);
+    // TYPE and DEFAULTS answer what the reader actually needs before running
+    // `vm create`: whether this image configures itself (and therefore refuses
+    // `--ssh-key`), and what it wants for vCPU/memory. KERNEL/K8S stay — they
+    // are filled whenever they are known, which now includes a `vm pull` (the
+    // manifest annotations carry them) and an `import --kernel-version`.
+    let mut t = output::Table::new(&[
+        "NAME", "DISTRO", "TYPE", "KERNEL", "K8S", "DEFAULTS", "CREATED", "SIZE",
+    ])
+    .right_align(7);
     for img in store.list()? {
         let distro = distro_label(&img);
+        let type_label = image_type_label(match img.cloud_init {
+            Some(true) => Some("true"),
+            Some(false) => Some("false"),
+            None => None,
+        });
+        let defaults = defaults_label(&img);
         t.row(vec![
             img.name,
             distro,
+            type_label,
             img.kernel_version.as_deref().unwrap_or("-").to_string(),
             img.k8s_version.as_deref().unwrap_or("-").to_string(),
+            defaults,
             fmt_local(img.created_unix),
             fmt_size(img.size),
         ]);
@@ -555,6 +687,20 @@ fn describe_one(store: &VmImageStore, img: &VmImage) {
         img.kernel_version.as_deref().unwrap_or("<unknown>"),
     );
     d.field("K8s", img.k8s_version.as_deref().unwrap_or("<unknown>"));
+    // Worth a line of its own: this is what makes `vm create` skip the seed
+    // and refuse `--hostname`/`--ssh-key`, and without it that refusal reads
+    // as arbitrary.
+    d.field(
+        "Cloud-init",
+        match img.cloud_init {
+            Some(true) => super::po::t("yes"),
+            Some(false) => super::po::t("no (appliance — configure it on first boot)"),
+            None => super::po::t("<unknown> (assumed yes)"),
+        },
+    );
+    d.field_opt("Default vCPUs", img.default_vcpus.map(|v| v.to_string()));
+    d.field_opt("Default memory", img.default_memory.clone());
+    d.field_opt("Default backend", img.default_backend.clone());
     let qcow2 = store.qcow2_path(&img.name);
     d.field("Path", qcow2.to_string_lossy());
     // The `size` above is the build/pull one; this is what IS on disk now. If
@@ -663,6 +809,7 @@ pub(crate) fn download_base(
         Distro::Ubuntu => download_ubuntu_base(store, release),
         Distro::Debian => download_debian_base(store, release),
         Distro::Rocky => download_rocky_base(store, release),
+        Distro::Fedora => download_fedora_base(store, release),
     }
 }
 
@@ -688,19 +835,226 @@ pub(crate) fn cmd_push(store: &VmImageStore, name: &str, target: &str) -> Result
             super::po::t("could not read the qcow2 of")
         ))
     })?;
-    let digest = delonix_image::registry::push_oci_artifact(
+    let digest = delonix_image::registry::push_oci_artifact_with_annotations(
         &state_root(),
         target,
         VM_IMAGE_MEDIA_TYPE,
         &data,
+        &annotations_of(&img),
     )?;
     println!("{digest}");
-    let _ = img;
     Ok(())
 }
 
-/// `image vm convert` — flattens/converts a disk between `qcow2` and `raw`
-/// with `qemu-img convert` (same tool `cmd_build`/`vmfile::build` already use
+/// Arguments of `image vm import`, defined ONCE and `flatten`ed into all
+/// three entry points (`vm import`, `image vm import`, `image --vm import`).
+/// Spelling them out per entry point is how those three drift apart — a flag
+/// that works in one place and not another is worse than no flag.
+#[derive(clap::Args, Clone, Debug)]
+pub struct ImportArgs {
+    /// Path to a `.qcow2` (or any format `qemu-img` reads — it is converted).
+    pub source: PathBuf,
+    /// Name to register it under (`image vm ls`).
+    #[arg(short = 't', long = "tag")]
+    pub tag: String,
+    /// The guest does NOT run cloud-init: it is a self-configuring appliance
+    /// (OPNsense, Proxmox, TrueNAS). `vm create` then skips the NoCloud seed
+    /// instead of attaching one nothing in the guest reads.
+    #[arg(long)]
+    pub appliance: bool,
+    /// What this is, for `image vm ls` (e.g. `opnsense`, `proxmox-ve`).
+    #[arg(long)]
+    pub distro: Option<String>,
+    /// Version, for `image vm ls` (e.g. `26.1.2`).
+    #[arg(long)]
+    pub release: Option<String>,
+    /// Recommended vCPUs, applied by `vm create` when `--vcpus` is absent.
+    #[arg(long)]
+    pub default_vcpus: Option<u32>,
+    /// Recommended memory (e.g. `4G`), same rule as `--default-vcpus`.
+    #[arg(long)]
+    pub default_memory: Option<String>,
+    /// Replace an image already registered under this name.
+    #[arg(long)]
+    pub force: bool,
+    /// Store the qcow2 uncompressed (larger, but no decompression cost on
+    /// backing-file reads at runtime) — same flag, same trade-off, as `build`.
+    #[arg(long)]
+    pub no_compress: bool,
+    /// Kernel baked into the image (`uname -r` shape), for `image vm ls`.
+    /// Omit to let it be probed from the image — which only works where
+    /// libguestfs can read `/boot` (not FreeBSD, not root-on-ZFS).
+    #[arg(long)]
+    pub kernel_version: Option<String>,
+}
+
+/// `image vm import` — registers a disk this engine did not build.
+///
+/// Always goes through `qemu-img convert`, never a plain copy: the source may
+/// be raw, or a qcow2 with a backing file (which would leave the store holding
+/// a reference to a path outside it — a store entry that silently breaks the
+/// day that file moves).
+pub(crate) fn cmd_import(store: &VmImageStore, args: ImportArgs) -> Result<()> {
+    let ImportArgs {
+        source,
+        tag,
+        appliance,
+        distro,
+        release,
+        default_vcpus,
+        default_memory,
+        force,
+        no_compress,
+        kernel_version,
+    } = args;
+    let (source, tag) = (source.as_path(), tag.as_str());
+    if !source.exists() {
+        return Err(Error::Invalid(super::po::tf(
+            "no such file: {source}",
+            &[("source", &source.display().to_string())],
+        )));
+    }
+    let dest = store.qcow2_path(tag);
+    if dest.exists() && !force {
+        return Err(Error::Invalid(super::po::tf(
+            "VM image '{tag}' already exists — pass --force to replace it",
+            &[("tag", tag)],
+        )));
+    }
+    eprintln!(
+        "{}",
+        super::po::tf(
+            "importing {source} as '{tag}'...",
+            &[("source", &source.display().to_string()), ("tag", tag)],
+        )
+    );
+    let tmp = dest.with_extension("importing");
+    let _ = std::fs::remove_file(&tmp);
+    let mut argv: Vec<&str> = vec!["convert", "-O", "qcow2"];
+    if !no_compress {
+        // zstd, and compressed by default, for the same reason the golden
+        // recipe settled on it: a store image is the read-only BACKING FILE of
+        // every VM created from it, so decompression speed is what matters,
+        // and `qemu-img convert` without `-c` would inflate an already
+        // compressed source several-fold on the way in.
+        argv.extend(["-c", "-o", "compression_type=zstd"]);
+    }
+    // `--` so a path starting with `-` stays a path.
+    argv.push("--");
+    let (src_s, tmp_s) = (source.to_string_lossy(), tmp.to_string_lossy());
+    argv.push(&src_s);
+    argv.push(&tmp_s);
+    run_tool("qemu-img", &argv)?;
+    // Rename only after the conversion succeeded: a failed import must not
+    // leave a truncated image registered under a good name.
+    std::fs::rename(&tmp, &dest)?;
+
+    let data = std::fs::read(&dest)?;
+    let img = VmImage {
+        name: tag.to_string(),
+        tag: tag.to_string(),
+        digest: format!("sha256:{}", hex_sha256(&data)),
+        size: data.len() as u64,
+        ubuntu_release: release,
+        k8s_version: None,
+        created_unix: now_unix(),
+        // Explicit wins; otherwise probe the image (best-effort — see
+        // `detect_kernel_version`). Never a guess: unknown stays `None`.
+        kernel_version: kernel_version.or_else(|| detect_kernel_version(&dest)),
+        distro,
+        default_vcpus,
+        default_memory,
+        default_backend: None,
+        cloud_init: Some(!appliance),
+    };
+    store.save(&img)?;
+    println!("{tag}");
+    Ok(())
+}
+
+/// Manifest annotations carrying what the qcow2 blob cannot: the store's own
+/// view of the image. Without these a `vm pull` lands an image with every
+/// metadata field blank — a documented gap for `ubuntu_release`/`k8s_version`,
+/// and a functional bug for `cloud_init`, which decides whether `vm create`
+/// attaches a seed the guest may not be able to read.
+///
+/// Only fields that are actually known are emitted: an absent annotation and
+/// an annotation saying "unknown" are different claims, and the pull side
+/// leaves what it was not told alone.
+pub(crate) fn annotations_of(img: &VmImage) -> std::collections::BTreeMap<String, String> {
+    let mut a = std::collections::BTreeMap::new();
+    let mut put = |k: &str, v: String| {
+        a.insert(format!("io.delonix.vmimage.{k}"), v);
+    };
+    if let Some(v) = &img.distro {
+        put("distro", v.clone());
+    }
+    if let Some(v) = &img.ubuntu_release {
+        put("release", v.clone());
+    }
+    if let Some(v) = &img.k8s_version {
+        put("k8s-version", v.clone());
+    }
+    if let Some(v) = &img.kernel_version {
+        put("kernel-version", v.clone());
+    }
+    if let Some(v) = img.default_vcpus {
+        put("default-vcpus", v.to_string());
+    }
+    if let Some(v) = &img.default_memory {
+        put("default-memory", v.clone());
+    }
+    if let Some(v) = &img.default_backend {
+        put("default-backend", v.clone());
+    }
+    if let Some(v) = img.cloud_init {
+        put("cloud-init", v.to_string());
+    }
+    a
+}
+
+/// Inverse of [`annotations_of`], applied to the metadata a `vm pull` just
+/// built from the blob alone.
+///
+/// A malformed value is IGNORED rather than fatal: a bad `default-vcpus`
+/// should not make an otherwise good image unusable, and the field's own
+/// absence already has well-defined behaviour. `cloud-init` is the one case
+/// where a wrong reading matters, so only the two exact strings count.
+pub(crate) fn apply_pulled_annotations(
+    mut img: VmImage,
+    a: &std::collections::BTreeMap<String, String>,
+) -> VmImage {
+    let get = |k: &str| {
+        a.get(&format!("io.delonix.vmimage.{k}"))
+            .map(|s| s.as_str())
+    };
+    img.distro = get("distro").map(str::to_string).or(img.distro);
+    img.ubuntu_release = get("release").map(str::to_string).or(img.ubuntu_release);
+    img.k8s_version = get("k8s-version").map(str::to_string).or(img.k8s_version);
+    img.kernel_version = get("kernel-version")
+        .map(str::to_string)
+        .or(img.kernel_version);
+    img.default_vcpus = get("default-vcpus")
+        .and_then(|v| v.parse().ok())
+        .or(img.default_vcpus);
+    img.default_memory = get("default-memory")
+        .map(str::to_string)
+        .or(img.default_memory);
+    img.default_backend = get("default-backend")
+        .map(str::to_string)
+        .or(img.default_backend);
+    img.cloud_init = match get("cloud-init") {
+        Some("true") => Some(true),
+        Some("false") => Some(false),
+        _ => img.cloud_init,
+    };
+    img
+}
+
+/// `image vm convert` — flattens/converts a disk to the format another
+/// ecosystem imports (`vmdk` for VMware, `vdi` for VirtualBox, `vhdx`/`vhd`
+/// for Hyper-V and Azure, plus this engine's own `qcow2`/`raw`), using
+/// `qemu-img convert` (same tool `cmd_build`/`vmfile::build` already use
 /// to flatten a base image). `source` is tried as a local VM image name
 /// first (so `convert my-image --to raw` works without knowing the qcow2's
 /// on-disk path), falling back to a literal path — never an error to pass a
@@ -710,7 +1064,17 @@ pub(crate) fn cmd_convert(
     source: &str,
     to: ConvertFormat,
     output: Option<PathBuf>,
+    compress: bool,
 ) -> Result<()> {
+    // Refused HERE, not handed to `qemu-img` to reject: the tool's own error for
+    // `-c` on a format that cannot compress says nothing about which formats
+    // can, and the flag was offered by this CLI in the first place.
+    if compress && !to.supports_compression() {
+        return Err(Error::Invalid(super::po::tf(
+            "{fmt} cannot be compressed — only qcow2 and vmdk can",
+            &[("fmt", to.extension())],
+        )));
+    }
     let src_path = {
         let by_name = store.qcow2_path(source);
         if by_name.exists() {
@@ -730,7 +1094,7 @@ pub(crate) fn cmd_convert(
             .file_stem()
             .and_then(|s| s.to_str())
             .unwrap_or("image");
-        src_path.with_file_name(format!("{stem}.{}", to.as_str()))
+        src_path.with_file_name(format!("{stem}.{}", to.extension()))
     });
     if dest == src_path {
         return Err(Error::Invalid(
@@ -751,19 +1115,16 @@ pub(crate) fn cmd_convert(
             ],
         )
     );
-    run_tool(
-        "qemu-img",
-        &[
-            "convert",
-            "-O",
-            to.as_str(),
-            // `--` so a source path starting with `-` is a path, not an option:
-            // `source` here may be a literal path straight from the caller.
-            "--",
-            &src_path.to_string_lossy(),
-            &dest.to_string_lossy(),
-        ],
-    )?;
+    let mut args: Vec<&str> = vec!["convert", "-O", to.as_str()];
+    if compress {
+        args.push("-c");
+    }
+    let (src, dst) = (src_path.to_string_lossy(), dest.to_string_lossy());
+    // `--` so a source path starting with `-` is a path, not an option:
+    // `source` here may be a literal path straight from the caller.
+    args.extend(["--", &src, &dst]);
+    run_tool("qemu-img", &args)?;
+    let _unused = ();
     println!("{}", dest.display());
     Ok(())
 }
@@ -781,7 +1142,7 @@ pub(crate) fn cmd_pull(store: &VmImageStore, source: &str, name: Option<String>)
             super::output::progress_bar(&label, done, total);
         }
     };
-    let data = delonix_image::registry::pull_oci_artifact_with_progress(
+    let (data, annotations) = delonix_image::registry::pull_oci_artifact_with_meta(
         &state_root(),
         source,
         Some(&on_progress),
@@ -805,25 +1166,106 @@ pub(crate) fn cmd_pull(store: &VmImageStore, source: &str, name: Option<String>)
         default_vcpus: None,
         default_memory: None,
         default_backend: None,
+        // Filled in below from the manifest annotations when the publisher
+        // set them. Left `None` (= assume cloud-init, the historical
+        // behaviour) for an artifact that carries no annotations.
+        cloud_init: None,
     };
+    let img = apply_pulled_annotations(img, &annotations);
     store.save(&img)?;
     println!("{name}");
     Ok(())
 }
 
 pub(crate) fn cmd_ls_remote(source: &str) -> Result<()> {
-    let mut tags = delonix_image::registry::list_remote_tags(&state_root(), source)?;
+    let root = state_root();
+    let mut tags = delonix_image::registry::list_remote_tags(&root, source)?;
     tags.sort();
-    // BUG FOUND live: printed one bare tag per line with no header — looked
-    // uncomparable next to every other `ls`-shaped command in this CLI, which
-    // all go through `output::Table` (same convention `image ls`/`vm ls`/
-    // `network ls` already use).
-    let mut t = output::Table::new(&["TAG"]);
+    // A bare list of tags does not answer the question the reader has, which is
+    // "which of these do I want" — so each tag's MANIFEST is read (one GET, no
+    // blob transfer) for its size and for the annotations `image vm push`
+    // stamps: distro/release, and whether the guest runs cloud-init.
+    //
+    // A tag whose manifest cannot be read still gets its row, with `-` in the
+    // columns: a listing that hides a tag because one HTTP call failed would be
+    // worse than one that admits it does not know.
+    let mut t = output::Table::new(&["TAG", "DISTRO", "TYPE", "SIZE"]).right_align(3);
     for tag in tags.iter_mut() {
-        t.row(vec![std::mem::take(tag)]);
+        let tag = std::mem::take(tag);
+        match delonix_image::registry::describe_remote_artifact(&root, source, &tag) {
+            Ok(a) => {
+                let get = |k: &str| {
+                    a.annotations
+                        .get(&format!("io.delonix.vmimage.{k}"))
+                        .map(|s| s.as_str())
+                };
+                let distro = match (get("distro"), get("release")) {
+                    (Some(d), Some(r)) => format!("{d}/{r}"),
+                    (Some(d), None) => d.to_string(),
+                    (None, Some(r)) => r.to_string(),
+                    (None, None) => "-".to_string(),
+                };
+                t.row(vec![
+                    tag,
+                    distro,
+                    image_type_label(get("cloud-init")),
+                    fmt_size(a.size),
+                ]);
+            }
+            Err(_) => t.row(vec![tag, "-".into(), "-".into(), "-".into()]),
+        }
     }
     t.print();
     Ok(())
+}
+
+/// Kernel baked into a disk image this engine did NOT build, read without
+/// booting it.
+///
+/// `cmd_build` reads `/etc/delonix-kernel-version`, a file it writes itself —
+/// useless for an imported image. This lists `/boot` instead and takes the
+/// highest `vmlinuz-<version>` it finds, which is what the guest boots by
+/// default.
+///
+/// Best-effort by design, and quiet when it fails: an appliance may be FreeBSD
+/// (OPNsense), or root on ZFS (TrueNAS), where libguestfs cannot see `/boot` at
+/// all. An empty KERNEL column is honest; failing an import over a display
+/// field would not be.
+fn detect_kernel_version(qcow2: &std::path::Path) -> Option<String> {
+    let out = std::process::Command::new("virt-ls")
+        .args(["-a", &qcow2.to_string_lossy(), "/boot"])
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .filter_map(|l| l.trim().strip_prefix("vmlinuz-"))
+        .filter(|v| !v.is_empty())
+        .map(str::to_string)
+        .max()
+}
+
+/// `2cpu/2G` — what `vm create` will use when `--vcpus`/`--memory` are absent.
+/// `-` when the image recommends nothing (the engine then falls back to 1/1G).
+fn defaults_label(img: &VmImage) -> String {
+    match (img.default_vcpus, img.default_memory.as_deref()) {
+        (Some(c), Some(m)) => format!("{c}cpu/{m}"),
+        (Some(c), None) => format!("{c}cpu"),
+        (None, Some(m)) => m.to_string(),
+        (None, None) => "-".to_string(),
+    }
+}
+
+/// How an image gets configured on first boot, in one word — the difference
+/// that decides whether `vm create` seeds it and whether `--ssh-key` works.
+fn image_type_label(cloud_init: Option<&str>) -> String {
+    match cloud_init {
+        Some("false") => super::po::t("appliance").to_string(),
+        Some("true") => "cloud-init".to_string(),
+        _ => "-".to_string(),
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -834,6 +1276,7 @@ fn cmd_build(
     ubuntu_release: &str,
     debian_release: &str,
     rocky_release: &str,
+    fedora_release: &str,
     k8s_version: Option<String>,
     extra_packages: Vec<String>,
     extra_run: Vec<String>,
@@ -877,14 +1320,12 @@ fn cmd_build(
     // (pkgs.k8s.io's RPM repo has a different URL/GPG scheme, not
     // implemented). Fail closed rather than silently running apt commands
     // against a dnf guest.
-    if distro == Distro::Rocky && !no_k8s {
-        return Err(Error::Invalid(
-            super::po::t(
-                "--distro rocky only supports --no-k8s for now (the k8s path needs the \
+    if matches!(distro, Distro::Rocky | Distro::Fedora) && !no_k8s {
+        return Err(Error::Invalid(super::po::tf(
+            "--distro {distro} only supports --no-k8s for now (the k8s path needs the \
                  pkgs.k8s.io RPM repository, not implemented yet)",
-            )
-            .into(),
-        ));
+            &[("distro", distro.as_str())],
+        )));
     }
     // `k8s_version` goes into a `format!` that becomes a `virt-customize --run-command`
     // (via `k8s_recipes::k8s_host_recipes`) — validating here closes the same security
@@ -902,11 +1343,13 @@ fn cmd_build(
         Distro::Ubuntu => ubuntu_release,
         Distro::Debian => debian_release,
         Distro::Rocky => rocky_release,
+        Distro::Fedora => fedora_release,
     };
     let base = match distro {
         Distro::Ubuntu => download_ubuntu_base(store, ubuntu_release)?,
         Distro::Debian => download_debian_base(store, debian_release)?,
         Distro::Rocky => download_rocky_base(store, rocky_release)?,
+        Distro::Fedora => download_fedora_base(store, fedora_release)?,
     };
 
     let work_dir =
@@ -1102,6 +1545,9 @@ fn cmd_build(
         default_vcpus: None,
         default_memory: None,
         default_backend: None,
+        // The golden recipe deliberately leaves cloud-init enabled in the
+        // image so each VM's first boot applies its own hostname/SSH keys.
+        cloud_init: Some(true),
     };
     store.save(&img)?;
     println!("{tag}");
@@ -1258,6 +1704,88 @@ fn valid_rocky_release(release: &str) -> Result<()> {
     }
 }
 
+/// Fedora Cloud base image.
+///
+/// Fedora's artifact name carries a BUILD number that the release number does
+/// not determine (`42` ships as `42-1.1`), and its download redirector serves
+/// no directory listing — so there is nothing to derive it from. Rather than
+/// guess, `--fedora-release` takes the full `<release>-<build>` exactly as
+/// Fedora's own download page shows it, and says so when given anything else.
+/// Same principle as the Proxmox ISO inputs in the appliance workflow: an
+/// unverifiable guess presented as a fact is worse than asking.
+///
+/// The CHECKSUM is BSD-style (`SHA256 (file) = hash`), the same shape Rocky
+/// uses — `parse_bsd_checksum` is shared, not duplicated.
+pub(crate) fn download_fedora_base(store: &VmImageStore, release: &str) -> Result<PathBuf> {
+    valid_fedora_release(release)?;
+    let cached = store.base_cache_path(Distro::Fedora, release);
+    if cached.exists() {
+        return Ok(cached);
+    }
+    let major = release.split('-').next().unwrap_or(release);
+    let img_name = format!("Fedora-Cloud-Base-Generic-{release}.x86_64.qcow2");
+    let base_url = format!(
+        "https://download.fedoraproject.org/pub/fedora/linux/releases/{major}/Cloud/x86_64/images"
+    );
+    let img_url = format!("{base_url}/{img_name}");
+    let sums_url = format!("{base_url}/Fedora-Cloud-{release}-x86_64-CHECKSUM");
+
+    eprintln!(
+        "{}",
+        super::po::tf("downloading {url}...", &[("url", &img_url)])
+    );
+    let tmp = cached.with_extension("download");
+    stream_download(&img_url, &tmp)?;
+
+    eprintln!("{}", super::po::t("verifying CHECKSUM..."));
+    let sums = http_get_text(&sums_url)?;
+    let expected = parse_bsd_checksum(&sums, &img_name).ok_or_else(|| {
+        Error::Invalid(format!(
+            "{} {img_name}",
+            super::po::t("CHECKSUM has no entry for")
+        ))
+    })?;
+    let got = hex_sha256_file(&tmp)?;
+    if got != expected {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(Error::Invalid(super::po::tf(
+            "invalid checksum for {img_name}: expected {expected}, got {got} — download discarded",
+            &[
+                ("img_name", &img_name),
+                ("expected", &expected),
+                ("got", &got),
+            ],
+        )));
+    }
+    std::fs::rename(&tmp, &cached)?;
+    Ok(cached)
+}
+
+/// `<release>-<build>`, e.g. `42-1.1`. Both parts are numeric; the build may
+/// have several dotted components. Rejecting a bare `42` here is the point:
+/// it looks right and produces a 404 several hundred megabytes later.
+fn valid_fedora_release(release: &str) -> Result<()> {
+    let bad = || {
+        Error::Invalid(super::po::tf(
+            "--fedora-release '{release}' must be `<release>-<build>` as shown on Fedora's \
+             download page (e.g. `42-1.1`) — the build number is not derivable from the release",
+            &[("release", release)],
+        ))
+    };
+    let (major, build) = release.split_once('-').ok_or_else(bad)?;
+    if major.is_empty() || !major.chars().all(|c| c.is_ascii_digit()) {
+        return Err(bad());
+    }
+    if build.is_empty()
+        || !build.chars().all(|c| c.is_ascii_digit() || c == '.')
+        || build.starts_with('.')
+        || build.ends_with('.')
+    {
+        return Err(bad());
+    }
+    Ok(())
+}
+
 /// Same shape as `download_ubuntu_base`/`download_debian_base`, confirmed
 /// live before writing code: the image is `Rocky-<release>-GenericCloud.
 /// latest.x86_64.qcow2` under `pub/rocky/<release>/images/x86_64/` (no
@@ -1321,47 +1849,158 @@ fn parse_bsd_checksum(text: &str, filename: &str) -> Option<String> {
         .map(|s| s.trim().to_string())
 }
 
+/// Downloads `url` to `dest`, RESUMING a partial file and retrying a dropped
+/// connection.
+///
+/// Measured here, and the reason this exists: a Rocky cloud image (646 MiB) died
+/// 3.8 MiB in. The old version had no retry at all — one failed `read()` threw
+/// away everything and the next run started from zero, so on a slow or flaky
+/// link a build was a coin toss. Every caller verifies a checksum afterwards,
+/// which is what makes resuming safe: bytes stitched from two ranges either add
+/// up to the published hash or the download is discarded.
 pub(crate) fn stream_download(url: &str, dest: &Path) -> Result<()> {
+    const ATTEMPTS: u32 = 5;
+    /// How long a sample must run before its rate means anything.
+    const STALL_WINDOW_SECS: f64 = 20.0;
+    /// Bounded: a link that is simply slow must not reconnect forever.
+    const MAX_STALL_RECONNECTS: u32 = 3;
     let client = reqwest::blocking::Client::builder()
         .user_agent("delonix/0.1")
         .timeout(std::time::Duration::from_secs(3600))
         .build()
         .map_err(|e| Error::Invalid(format!("{}: {e}", super::po::t("HTTP client"))))?;
-    let mut resp = client
-        .get(url)
-        .send()
-        .map_err(|e| Error::Invalid(format!("GET {url}: {e}")))?;
-    if !resp.status().is_success() {
-        return Err(Error::Invalid(format!("GET {url}: HTTP {}", resp.status())));
-    }
-    let mut file = std::fs::File::create(dest)?;
-    let mut buf = [0u8; 1 << 20];
-    let mut written: u64 = 0;
-    loop {
-        let n = resp
-            .read(&mut buf)
-            .map_err(|e| Error::Invalid(format!("{}: {e}", super::po::t("reading response"))))?;
-        if n == 0 {
-            break;
+
+    let mut last_err = String::new();
+    let mut stalls: u32 = 0;
+    // A reconnect for slowness is not a failed attempt — it is the same
+    // transfer continuing on (hopefully) a better node, so it must not consume
+    // the retry budget that exists for genuine errors.
+    let mut attempt = 0u32;
+    while attempt < ATTEMPTS + stalls {
+        attempt += 1;
+        // Where a previous attempt stopped. `dest` is the caller's `.download`
+        // temp file, never the final cached image, so a leftover here is always
+        // ours to continue.
+        let have = std::fs::metadata(dest).map(|m| m.len()).unwrap_or(0);
+        let mut req = client.get(url);
+        if have > 0 {
+            req = req.header("Range", format!("bytes={have}-"));
         }
-        written += n as u64;
-        // Ceiling on ACTUAL bytes read, not on the advertised `Content-Length`:
-        // a hostile or misconfigured server can simply keep streaming, and this
-        // writes to disk, so the failure is a full filesystem — on a node that
-        // may be running everything else this host serves. The limit is
-        // deliberately far above any real cloud image (they run 0.5–3 GiB), so
-        // it only ever fires on something that is not an image. Same shape as
-        // the registry blob cap in `delonix-image`.
-        if written > MAX_DOWNLOAD_BYTES {
-            let _ = std::fs::remove_file(dest);
-            return Err(Error::Invalid(format!(
-                "GET {url}: aborted after {written} bytes (over the {MAX_DOWNLOAD_BYTES}-byte limit) \
-                 — the server is streaming more than any expected image"
-            )));
+        let mut resp = match req.send() {
+            Ok(r) => r,
+            Err(e) => {
+                last_err = format!("{e}");
+                continue;
+            }
+        };
+        if !resp.status().is_success() {
+            return Err(Error::Invalid(format!("GET {url}: HTTP {}", resp.status())));
         }
-        file.write_all(&buf[..n])?;
+        // 206 means the server honoured the range and we append; anything else
+        // (a mirror without range support, or a redirect to a fresh object)
+        // means it is sending the whole thing again, so start over.
+        let resuming = have > 0 && resp.status().as_u16() == 206;
+        let mut file = if resuming {
+            std::fs::OpenOptions::new().append(true).open(dest)?
+        } else {
+            std::fs::File::create(dest)?
+        };
+        let mut written: u64 = if resuming { have } else { 0 };
+        if attempt > 1 || resuming {
+            eprintln!(
+                "{}",
+                super::po::tf(
+                    "resuming download at {have} bytes (attempt {attempt})...",
+                    &[
+                        ("have", &written.to_string()),
+                        ("attempt", &attempt.to_string())
+                    ],
+                )
+            );
+        }
+        let mut buf = [0u8; 1 << 20];
+        let mut broke = false;
+        // Stall detection. A CDN redirect can land the connection on a slow
+        // node and keep it there: measured here, a resumed Rocky transfer sat
+        // at 242 KiB/s while a FRESH request to the same URL got 1732 KiB/s —
+        // 7x, same host, same second. Reconnecting used to mean throwing the
+        // whole file away, so it was never worth it; with `Range` resume it
+        // costs nothing, which is what makes this worth doing at all.
+        //
+        // The threshold is RELATIVE to the best window this transfer has seen,
+        // not an absolute number: a uniformly slow link (satellite, rural) must
+        // not reconnect forever chasing a speed it will never reach.
+        let mut window_start = std::time::Instant::now();
+        let mut window_bytes: u64 = 0;
+        let mut best_rate: f64 = 0.0;
+        loop {
+            let n = match resp.read(&mut buf) {
+                Ok(n) => n,
+                Err(e) => {
+                    // Keep what is on disk: the next attempt continues from here.
+                    last_err = format!("{e}");
+                    broke = true;
+                    break;
+                }
+            };
+            if n == 0 {
+                break;
+            }
+            written += n as u64;
+            // Ceiling on ACTUAL bytes read, not on the advertised
+            // `Content-Length`: a hostile or misconfigured server can simply
+            // keep streaming, and this writes to disk, so the failure is a full
+            // filesystem — on a node that may be running everything else this
+            // host serves. Deliberately far above any real cloud image, so it
+            // only ever fires on something that is not an image.
+            if written > MAX_DOWNLOAD_BYTES {
+                let _ = std::fs::remove_file(dest);
+                return Err(Error::Invalid(format!(
+                    "GET {url}: aborted after {written} bytes (over the {MAX_DOWNLOAD_BYTES}-byte limit) \
+                     — the server is streaming more than any expected image"
+                )));
+            }
+            file.write_all(&buf[..n])?;
+
+            window_bytes += n as u64;
+            let elapsed = window_start.elapsed().as_secs_f64();
+            if elapsed >= STALL_WINDOW_SECS {
+                let rate = window_bytes as f64 / elapsed;
+                if rate > best_rate {
+                    best_rate = rate;
+                } else if stalls < MAX_STALL_RECONNECTS && rate < best_rate / 4.0 {
+                    stalls += 1;
+                    eprintln!(
+                        "{}",
+                        super::po::tf(
+                            "download slowed to {now} KiB/s (peak {peak}) — reconnecting to resume",
+                            &[
+                                ("now", &format!("{:.0}", rate / 1024.0)),
+                                ("peak", &format!("{:.0}", best_rate / 1024.0)),
+                            ],
+                        )
+                    );
+                    broke = true;
+                    break;
+                }
+                window_start = std::time::Instant::now();
+                window_bytes = 0;
+            }
+        }
+        if !broke {
+            return Ok(());
+        }
+        file.flush()?;
     }
-    Ok(())
+    Err(Error::Invalid(super::po::tf(
+        "GET {url}: gave up after {attempts} attempts ({err}) — partial file kept, \
+         a later run resumes from it",
+        &[
+            ("url", url),
+            ("attempts", &ATTEMPTS.to_string()),
+            ("err", &last_err),
+        ],
+    )))
 }
 
 /// Ceiling for a single downloaded artifact (cloud image, `.deb`, binary).
@@ -2223,11 +2862,11 @@ fn install_cri_steps(cri_bin: &Path, cri_service: &Path) -> Vec<CustomizeOp> {
 fn shared_account_steps(extra_run: &[String], distro: Distro) -> Vec<CustomizeOp> {
     let sudo_group = match distro {
         Distro::Ubuntu | Distro::Debian => "sudo",
-        Distro::Rocky => "wheel",
+        Distro::Rocky | Distro::Fedora => "wheel",
     };
     let bashrc_path = match distro {
         Distro::Ubuntu | Distro::Debian => "/etc/bash.bashrc",
-        Distro::Rocky => "/etc/bashrc",
+        Distro::Rocky | Distro::Fedora => "/etc/bashrc",
     };
     let mut ops: Vec<CustomizeOp> = Vec::new();
     ops.extend([
@@ -2323,7 +2962,7 @@ fn shared_account_steps(extra_run: &[String], distro: Distro) -> Vec<CustomizeOp
     // not of host preparation.
     let cleanup_cmd = match distro {
         Distro::Ubuntu | Distro::Debian => "apt-get clean && rm -rf /var/lib/apt/lists/*",
-        Distro::Rocky => "dnf clean all",
+        Distro::Rocky | Distro::Fedora => "dnf clean all",
     };
     ops.push(CustomizeOp::RunCommand(cleanup_cmd.into()));
     // BUG FOUND LIVE (delonix cluster kubeadm, multi-VM libvirt NAT): every VM
@@ -2339,8 +2978,16 @@ fn shared_account_steps(extra_run: &[String], distro: Distro) -> Vec<CustomizeOp
     // connectivity mid-`kubeadm init`. Confirmed live: `lab-cp1` and `lab-w1`
     // reported the byte-for-byte identical machine-id. MUST be the very last
     // step (after `--extra-run`/apt cleanup) so nothing after it regenerates one.
+    //
+    // `mkdir -p /var/lib/dbus` FOUND LIVE building Fedora: that directory does
+    // not exist there (dbus reads /etc/machine-id directly), so `ln -sf` failed
+    // and took the whole `virt-customize` run with it — the same class of trap
+    // as the AppArmor step that had to be made Ubuntu-only for Rocky. The
+    // symlink is still created where the directory does exist, because that is
+    // the case the compat matters for.
     ops.push(CustomizeOp::RunCommand(
-        "truncate -s 0 /etc/machine-id && rm -f /var/lib/dbus/machine-id && ln -sf /etc/machine-id /var/lib/dbus/machine-id"
+        "truncate -s 0 /etc/machine-id && rm -f /var/lib/dbus/machine-id && \
+         mkdir -p /var/lib/dbus && ln -sf /etc/machine-id /var/lib/dbus/machine-id"
             .into(),
     ));
     ops
@@ -2370,7 +3017,11 @@ pub(crate) fn rootless_customization_steps(
             "apt-get update && apt-get install -y slirp4netns uidmap nftables iproute2 conntrack"
                 .to_string()
         }
-        Distro::Rocky => {
+        // Fedora is the same dnf/RPM family as Rocky and uses the same package
+        // names — the four that differ from Debian's (`shadow-utils`, `iproute`,
+        // `conntrack-tools`, and the shared `nftables`/`slirp4netns`) are named
+        // identically in Fedora's repos.
+        Distro::Rocky | Distro::Fedora => {
             "dnf install -y slirp4netns shadow-utils nftables iproute conntrack-tools".to_string()
         }
     };
@@ -3092,6 +3743,7 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
             "24.04",
             "bookworm",
             "9",
+            "42-1.1",
             None,
             vec![],
             vec![],
@@ -3156,6 +3808,7 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
             default_vcpus: None,
             default_memory: None,
             default_backend: None,
+            cloud_init: None,
         };
         // Pulled image, no build metadata at all — pre-existing gap, not new.
         assert_eq!(distro_label(&img), "-");
@@ -3216,6 +3869,7 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
                 "24.04",
                 "bookworm",
                 "9",
+                "42-1.1",
                 k8s_version,
                 vec![],
                 vec![],
@@ -3242,6 +3896,7 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
             "24.04",
             "bookworm",
             "9",
+            "42-1.1",
             None,
             vec![],
             vec![],
@@ -3308,5 +3963,280 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
         // Unknown tools still get a sentence, just without a package name —
         // never a silent fallthrough to the ENOENT text.
         assert_eq!(super::tool_package("whatever"), None);
+    }
+
+    /// Builds a `VmImage` with every field empty — the shape a `vm pull`
+    /// produces before annotations are applied.
+    fn bare_img() -> VmImage {
+        VmImage {
+            name: "x".to_string(),
+            tag: "x".to_string(),
+            digest: "sha256:x".to_string(),
+            size: 0,
+            ubuntu_release: None,
+            k8s_version: None,
+            created_unix: 0,
+            kernel_version: None,
+            distro: None,
+            default_vcpus: None,
+            default_memory: None,
+            default_backend: None,
+            cloud_init: None,
+        }
+    }
+
+    #[test]
+    fn metadados_antigos_sem_o_campo_continuam_a_carregar_e_contam_como_cloud_init() {
+        // Every `.json` written before `cloud_init` existed. Loading these has
+        // to keep working, AND they have to behave exactly as before — those
+        // images are cloud images, and `vm create` must still seed them.
+        let antigo = r#"{
+            "name": "golden", "tag": "golden", "digest": "sha256:a", "size": 1,
+            "ubuntu_release": "24.04", "k8s_version": "1.34", "created_unix": 0
+        }"#;
+        let img: VmImage = serde_json::from_str(antigo).unwrap();
+        assert_eq!(img.cloud_init, None);
+        assert!(
+            img.uses_cloud_init(),
+            "unknown tem de contar como cloud-init: e o que estas imagens sempre foram"
+        );
+    }
+
+    #[test]
+    fn so_uma_marca_explicita_de_appliance_desliga_o_seed() {
+        let mut img = bare_img();
+        assert!(img.uses_cloud_init());
+        img.cloud_init = Some(true);
+        assert!(img.uses_cloud_init());
+        img.cloud_init = Some(false);
+        assert!(!img.uses_cloud_init());
+    }
+
+    #[test]
+    fn annotations_fazem_round_trip_pelo_push_e_pull() {
+        // The point of the annotations: what the store knows must survive a
+        // push/pull, because the qcow2 blob carries none of it.
+        let mut orig = bare_img();
+        orig.distro = Some("opnsense".to_string());
+        orig.ubuntu_release = Some("26.1.2".to_string());
+        orig.default_vcpus = Some(2);
+        orig.default_memory = Some("2G".to_string());
+        orig.default_backend = Some("libvirt".to_string());
+        orig.cloud_init = Some(false);
+
+        let recuperado = apply_pulled_annotations(bare_img(), &annotations_of(&orig));
+        assert_eq!(recuperado.distro, orig.distro);
+        assert_eq!(recuperado.ubuntu_release, orig.ubuntu_release);
+        assert_eq!(recuperado.default_vcpus, orig.default_vcpus);
+        assert_eq!(recuperado.default_memory, orig.default_memory);
+        assert_eq!(recuperado.default_backend, orig.default_backend);
+        assert_eq!(recuperado.cloud_init, Some(false));
+        assert!(!recuperado.uses_cloud_init());
+    }
+
+    #[test]
+    fn artefacto_sem_annotations_nao_muda_nada() {
+        // Everything published before this existed, and anything pushed by
+        // another tool: the pull must land exactly where it landed before.
+        let vazio = std::collections::BTreeMap::new();
+        let img = apply_pulled_annotations(bare_img(), &vazio);
+        assert_eq!(img.cloud_init, None);
+        assert_eq!(img.distro, None);
+        assert!(img.uses_cloud_init());
+    }
+
+    #[test]
+    fn annotation_malformada_e_ignorada_menos_no_campo_que_decide_o_seed() {
+        let mut a = std::collections::BTreeMap::new();
+        a.insert(
+            "io.delonix.vmimage.default-vcpus".to_string(),
+            "muitos".to_string(),
+        );
+        // Anything that is not exactly "true"/"false" leaves cloud-init
+        // unknown — which falls back to "yes, seed it", the safe reading for
+        // an image we cannot classify.
+        a.insert("io.delonix.vmimage.cloud-init".to_string(), "0".to_string());
+        let img = apply_pulled_annotations(bare_img(), &a);
+        assert_eq!(img.default_vcpus, None);
+        assert_eq!(img.cloud_init, None);
+        assert!(img.uses_cloud_init());
+    }
+
+    #[test]
+    fn annotations_so_carregam_o_que_e_sabido() {
+        // An absent annotation and one saying "unknown" are different claims;
+        // only the first is honest for a field nobody filled in.
+        let a = annotations_of(&bare_img());
+        assert!(a.is_empty(), "nada sabido, nada anunciado: {a:?}");
+    }
+
+    #[test]
+    fn valid_fedora_release_exige_release_e_build() {
+        // Fedora's artifact name carries a build number the release does not
+        // determine, and its redirector has no listing to look it up in — so a
+        // bare `42` is rejected here rather than 404-ing several hundred
+        // megabytes into the download.
+        assert!(valid_fedora_release("42-1.1").is_ok());
+        assert!(valid_fedora_release("41-1.4").is_ok());
+        assert!(valid_fedora_release("43-1.10.2").is_ok());
+        for bad in [
+            "42", "42-", "-1.1", "abc-1.1", "42-1.1a", "42-.1", "42-1.", "",
+        ] {
+            let e = valid_fedora_release(bad)
+                .expect_err("devia recusar")
+                .to_string();
+            assert!(e.contains("<release>-<build>"), "{bad}: {e}");
+        }
+    }
+
+    #[test]
+    fn fedora_partilha_as_convencoes_rpm_do_rocky() {
+        // Same dnf/RPM family: `wheel` (not `sudo`), `/etc/bashrc` (not
+        // `/etc/bash.bashrc`), `dnf clean all`. Verified against the Rocky
+        // steps rather than restated, so the two cannot drift apart.
+        let bin = PathBuf::from("/tmp/delonix");
+        let fedora = rootless_customization_steps(&[], &bin, Distro::Fedora);
+        let rocky = rootless_customization_steps(&[], &bin, Distro::Rocky);
+        let cmds = |ops: &[CustomizeOp]| -> Vec<String> {
+            ops.iter()
+                .filter_map(|o| match o {
+                    CustomizeOp::RunCommand(c) => Some(c.clone()),
+                    _ => None,
+                })
+                .collect()
+        };
+        let (f, r) = (cmds(&fedora), cmds(&rocky));
+        assert_eq!(f, r, "Fedora e Rocky partilham os passos da familia RPM");
+        assert!(f.iter().any(|c| c.contains("dnf install -y")));
+        assert!(f.iter().any(|c| c.contains("wheel")));
+        assert!(f.iter().any(|c| c.contains("dnf clean all")));
+    }
+
+    #[test]
+    fn fedora_nunca_escreve_perfil_apparmor() {
+        // AppArmor is an Ubuntu-only workaround (the
+        // `kernel.apparmor_restrict_unprivileged_userns` patch); Fedora uses
+        // SELinux and has no /etc/apparmor.d, so writing there would fail the
+        // whole `virt-customize` run — the same trap already fixed for Rocky.
+        let ops = rootless_customization_steps(&[], &PathBuf::from("/tmp/delonix"), Distro::Fedora);
+        assert!(!ops.iter().any(|o| matches!(
+            o,
+            CustomizeOp::RunCommand(c) if c.contains("apparmor")
+        )));
+    }
+
+    #[test]
+    fn fedora_sem_no_k8s_e_rejeitado() {
+        let (store, dir) = tmp_store();
+        let err = cmd_build(
+            &store,
+            "t",
+            Distro::Fedora,
+            "24.04",
+            "bookworm",
+            "9",
+            "42-1.1",
+            None,
+            vec![],
+            vec![],
+            None,
+            true,
+            false,
+            false,
+            None,
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(
+            err.contains("fedora"),
+            "a recusa tem de nomear a distro: {err}"
+        );
+        assert!(err.contains("--no-k8s"), "{err}");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn image_type_label_distingue_appliance_de_cloud_init_e_de_desconhecido() {
+        // The three states are genuinely different and the column must not
+        // collapse them: an appliance REFUSES --ssh-key, a cloud-init image
+        // accepts it, and an unknown one (pre-existing metadata, or a tag
+        // published before annotations existed) is treated as cloud-init but
+        // should not claim to be one.
+        assert_eq!(image_type_label(Some("false")), "appliance");
+        assert_eq!(image_type_label(Some("true")), "cloud-init");
+        assert_eq!(image_type_label(None), "-");
+        assert_eq!(image_type_label(Some("sim")), "-");
+    }
+
+    #[test]
+    fn defaults_label_mostra_so_o_que_a_imagem_recomenda() {
+        let mut img = bare_img();
+        assert_eq!(defaults_label(&img), "-");
+        img.default_vcpus = Some(4);
+        assert_eq!(defaults_label(&img), "4cpu");
+        img.default_memory = Some("8G".into());
+        assert_eq!(defaults_label(&img), "4cpu/8G");
+        img.default_vcpus = None;
+        assert_eq!(defaults_label(&img), "8G");
+    }
+
+    #[test]
+    fn o_reset_do_machine_id_cria_o_dir_do_dbus_antes_de_lhe_apontar() {
+        // Found live on Fedora: /var/lib/dbus does not exist there, so the
+        // `ln -sf` failed and virt-customize aborted the whole build. Every
+        // distro must get a command that cannot fail on a missing directory.
+        for d in [
+            Distro::Ubuntu,
+            Distro::Debian,
+            Distro::Rocky,
+            Distro::Fedora,
+        ] {
+            let ops = shared_account_steps(&[], d);
+            let mid = ops
+                .iter()
+                .filter_map(|o| match o {
+                    CustomizeOp::RunCommand(c) if c.contains("machine-id") => Some(c),
+                    _ => None,
+                })
+                .next_back()
+                .expect("o reset de machine-id tem de existir");
+            assert!(
+                mid.contains("mkdir -p /var/lib/dbus"),
+                "{d:?}: sem mkdir, o ln falha onde o dir nao existe: {mid}"
+            );
+        }
+    }
+
+    /// **`vhd` é `vpc` para o qemu-img, e `.vhd` para quem importa.** É a única
+    /// combinação em que o nome do formato e a extensão divergem, e é
+    /// exactamente o detalhe que um utilizador não devia ter de saber para
+    /// obter um ficheiro que o Hyper-V aceita — daí serem duas funções e não
+    /// uma string usada duas vezes.
+    #[test]
+    fn o_formato_do_qemu_e_a_extensao_do_ecossistema_podem_divergir() {
+        use super::ConvertFormat as F;
+        for (f, qemu, ext) in [
+            (F::Qcow2, "qcow2", "qcow2"),
+            (F::Raw, "raw", "raw"),
+            (F::Vmdk, "vmdk", "vmdk"),
+            (F::Vdi, "vdi", "vdi"),
+            (F::Vhdx, "vhdx", "vhdx"),
+            (F::Vhd, "vpc", "vhd"),
+        ] {
+            assert_eq!(f.as_str(), qemu, "{f:?}");
+            assert_eq!(f.extension(), ext, "{f:?}");
+        }
+    }
+
+    /// Só o qcow2 e o vmdk aceitam o `-c` do qemu-img; passá-lo aos outros faz
+    /// a ferramenta falhar, e o utilizador levaria um erro de tool numa flag
+    /// que lhe foi oferecida.
+    #[test]
+    fn so_dois_formatos_aceitam_compressao() {
+        use super::ConvertFormat as F;
+        assert!(F::Qcow2.supports_compression() && F::Vmdk.supports_compression());
+        for f in [F::Raw, F::Vdi, F::Vhdx, F::Vhd] {
+            assert!(!f.supports_compression(), "{f:?}");
+        }
     }
 }

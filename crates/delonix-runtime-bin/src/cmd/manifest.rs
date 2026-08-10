@@ -80,16 +80,18 @@ fn filled_spec(doc: &ManifestDoc) -> Result<serde_yaml::Value> {
     match doc.kind.as_str() {
         "Network" => cmd::network::spec_with_defaults(doc),
         "Volume" => cmd::volume::spec_with_defaults(doc),
-        "Storage" => cmd::storage::spec_with_defaults(doc),
-        // Secret is intentionally left as raw (no typed round-trip) — no need to
-        // reformat its `stringData` through the renderer.
+        // Secret DOES get a round-trip, and its values are redacted on the way
+        // (`secret::spec_with_defaults`). It used to be the one Kind skipped
+        // here, which made the most sensitive document in the manifest the only
+        // one with no `--dry-run` — the one place you most want to check what
+        // was read before applying was the one place you could not.
+        "Secret" => cmd::secret::spec_with_defaults(doc),
         "Image" => cmd::image::spec_with_defaults(doc),
-        "Dependency" => cmd::dependency::spec_with_defaults(doc),
         "Vm" => cmd::vm::spec_with_defaults(doc),
         "Pod" => cmd::pod::spec_with_defaults(doc),
         "HTTPRoute" => cmd::httproute::spec_with_defaults(doc),
         "Ingress" => cmd::httproute::ingress_spec_with_defaults(doc),
-        "Egress" | "FirewallPolicy" => cmd::firewall::spec_with_defaults(doc),
+        "FirewallPolicy" => cmd::firewall::spec_with_defaults(doc),
         "Container" if doc.spec.get("containers").is_some() => {
             cmd::container::pod_spec_with_defaults(doc)
         }
@@ -251,6 +253,30 @@ fn expand_stack(doc: &ManifestDoc) -> Result<Vec<ManifestDoc>> {
 }
 
 /// Loads ALL the documents (`---`-separated) of a manifest.
+/// Whether `metadata.namespace` does anything on this Kind.
+///
+/// Namespace here is **network isolation** — the `@dlxns_<ns>` accept plus the
+/// cross-namespace `ct state new` drop — so it only means something for a workload that
+/// holds an address: `Container`, `Pod`, `Vm`. `Workload` lowers to one of those and
+/// `Stack` propagates its namespace to the children it expands into, so both carry it.
+///
+/// `ShareVolume` honors it too, and for the OTHER meaning: there it is a naming scope — two
+/// namespaces can hold a share of the same name, each with its own data directory, and
+/// `-v <name>` resolves to the one belonging to the workload's namespace
+/// (`VolumeStore::resolve_spec_in`). That is the only Kind where namespace scopes a NAME
+/// rather than reachability; `Volume`/`Storage`/`Secret` still do not, and `Storage` in
+/// particular is deliberately left global because it is the NAS mount itself — node
+/// infrastructure, not a tenant object.
+///
+/// Takes the CANONICAL kind (`canonical_kind` has already run at the call site), so
+/// `VirtualMachine`/`VM` never reach here as such.
+pub(crate) fn kind_honors_namespace(kind: &str) -> bool {
+    matches!(
+        kind,
+        "Container" | "Pod" | "Vm" | "Workload" | "Stack" | "ShareVolume"
+    )
+}
+
 pub fn load(path: &Path) -> Result<Vec<ManifestDoc>> {
     let text = std::fs::read_to_string(path).map_err(|e| {
         Error::Invalid(format!(
@@ -282,6 +308,7 @@ pub fn load(path: &Path) -> Result<Vec<ManifestDoc>> {
         if canon != doc.kind {
             doc.kind = canon.to_string();
         }
+        lower_legacy_kind(&mut doc)?;
         if doc.api_version != SUPPORTED_API_VERSION {
             return Err(Error::Invalid(super::po::tf(
                 "{kind} '{name}': unknown apiVersion '{version}' (only '{SUPPORTED_API_VERSION}' is supported)",
@@ -293,11 +320,34 @@ pub fn load(path: &Path) -> Result<Vec<ManifestDoc>> {
                 ],
             )));
         }
+        // `metadata.namespace` was accepted on EVERY Kind and honored by three
+        // (`docs/discovery/46_GAPS_ENCONTRADOS.md` §5). On the rest it parsed and went
+        // nowhere — and "accepted and ignored" on an ISOLATION field reads as "isolated"
+        // to whoever wrote it, which is the worst way for a boundary to fail.
+        //
+        // Warned HERE, before the Stack expansion, on purpose: a namespaced Stack
+        // propagates its namespace to every child it expands into, so warning afterwards
+        // would fire once per child for a field the user never wrote on that child. Only
+        // a namespace written on the document itself is worth a word.
+        if doc.metadata.namespace.is_some() && !kind_honors_namespace(&doc.kind) {
+            super::output::warn(&super::po::tf(
+                "{kind} '{name}': metadata.namespace has no effect — only Container, Pod \
+                 and Vm are namespaced (it scopes network isolation, not naming)",
+                &[("kind", &doc.kind), ("name", &doc.metadata.name)],
+            ));
+        }
         // A grouped `kind: Stack` expands into its constituent resource docs
         // (which then flow through the normal per-Kind apply). The Stack doc
         // itself does not survive — it becomes its parts.
         if doc.kind == "Stack" {
-            docs.extend(expand_stack(&doc)?);
+            // A Stack's children are built HERE, so they never passed through the
+            // loop's own lowering — a `kind: Stack` with an `egress:` group would
+            // produce `kind: Egress` docs that no handler claims any more, and
+            // they would be dropped in silence. Lower each child on its way out.
+            for mut child in expand_stack(&doc)? {
+                lower_legacy_kind(&mut child)?;
+                docs.push(child);
+            }
         } else if doc.kind == "Workload" {
             // A `kind: Workload` lowers to a synthetic `kind: Container`/`kind: Vm`
             // doc (ADR-0001), which then flows through the normal per-Kind apply —
@@ -313,7 +363,189 @@ pub fn load(path: &Path) -> Result<Vec<ManifestDoc>> {
             &[("path", &path.display().to_string())],
         )));
     }
+    // `kind: Dependency` lowers to `kind: FirewallPolicy`, LAST and over the whole
+    // list — unlike the per-document lowerings above, it has to see every
+    // Dependency at once, because several pointing at the same target accumulate
+    // into ONE policy (see `dependency::lower_dependencies`). Doing it per
+    // document would silently drop every peer but the last.
+    let lowered = crate::cmd::dependency::lower_dependencies(&docs)?;
+    if !lowered.is_empty() {
+        docs.retain(|d| d.kind != "Dependency");
+        docs.extend(lowered);
+    }
     Ok(docs)
+}
+
+/// Rewrites the Kinds that folded into another one.
+///
+/// Kept as ONE function called from both places a document can enter the list
+/// (the top-level loop and a Stack's expanded children), because a lowering that
+/// only covers one of them turns a merged Kind into a document nobody claims —
+/// silently, which is the failure this whole exercise exists to remove.
+fn lower_legacy_kind(doc: &mut ManifestDoc) -> Result<()> {
+    // `kind: Egress` folds into `kind: FirewallPolicy`. The two were the SAME
+    // object: one struct (`firewall::FwDocSpec`), one validator, one apply, one
+    // dataplane — the only difference being where the direction came from. Three
+    // nouns for "network policy" means three places to look during an incident,
+    // and no model anyone knows (k8s NetworkPolicy, AWS security groups, Azure
+    // NSGs) splits inbound from outbound into separate TYPES; they split them
+    // with a field.
+    //
+    // Not in `canonical_kind` because this is not a rename: the direction the old
+    // Kind implied has to be written into the spec, and `canonical_kind` is a
+    // pure name map with no spec to write into.
+    if doc.kind == "Egress" {
+        lower_egress(doc)?;
+    }
+    // `kind: Storage` folds into `kind: Volume`. Both landed in the SAME
+    // `VolumeStore` and described the same mount two ways — a `Volume` with
+    // `driver: nfs`/`device: nas:/export` IS a `Storage` with
+    // `type: nfs`/`server: nas`/`share: /export`, and nothing said which to use.
+    // `volumes ls` listed both (one store) while `storage ls` listed only some,
+    // so the same question got different answers depending on the command.
+    if doc.kind == "Storage" {
+        lower_storage(doc)?;
+    }
+    // `kind: Container` with `spec.containers[]` — the k8s Pod grammar applied to
+    // a single container. It gets a WARNING and **no rewrite**, unlike the two
+    // above, and the reason is worth writing down because the obvious move here
+    // is wrong.
+    //
+    // The plan for this merge was to rewrite it into `kind: Pod`, on the reading
+    // that a one-element Pod and a pod-shaped Container are the same object.
+    // They are not, and the code says so:
+    //
+    //   * `pod_to_run_opts` builds ONE container named `<metadata.name>`, with
+    //     no shared namespace;
+    //   * `pod::create_pod` creates a shared netns `pod-<name>` and names its
+    //     members `<name>-<member>` (`c0` when unnamed).
+    //
+    // So the rewrite would rename the container — `web` becomes `web-c0` — and
+    // every reference to the old name would break: the internal DNS record, an
+    // `HTTPRoute` backend, a `Dependency`'s `from`/`to`, `stack validate`'s
+    // cross-references. Renaming somebody's running container as a side effect
+    // of a tidy-up is not a merge, it is an outage.
+    //
+    // What is left is the honest half: say it is the deprecated spelling, name
+    // the difference concretely, and change nothing.
+    if doc.kind == "Container" && doc.spec.get("containers").is_some() {
+        super::output::warn(&super::po::tf(
+            "Container '{name}': `spec.containers[]` on a `kind: Container` is the deprecated \
+             spelling — it still runs ONE container, named '{name}'. For containers that share \
+             a namespace use `kind: Pod` (its members are named '{name}-<member>', which is why \
+             this is not rewritten for you)",
+            &[("name", &doc.metadata.name)],
+        ));
+    }
+    Ok(())
+}
+
+/// Rewrites a legacy `kind: Storage` into a `kind: Volume` carrying the matching
+/// network-share block.
+///
+/// A pure spec rewrite: no vault, no credentials file, nothing on disk. Those
+/// belong to the apply — a `--dry-run` that wrote a credentials file would make
+/// planning a side effect.
+fn lower_storage(doc: &mut ManifestDoc) -> Result<()> {
+    let ty = doc
+        .spec
+        .get("type")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| {
+            Error::Invalid(super::po::tf(
+                "Storage '{name}': spec.type is required (nfs|cifs|smb|webdav)",
+                &[("name", &doc.metadata.name)],
+            ))
+        })?
+        .to_string();
+    // `smb` is an alias of `cifs` and always was (`build_mount` maps them to the
+    // same driver); the BLOCK has one name so the two do not become two.
+    let block = match ty.as_str() {
+        "nfs" => "nfs",
+        "cifs" | "smb" => "cifs",
+        "webdav" => "webdav",
+        other => {
+            return Err(Error::Invalid(super::po::tf(
+                "Storage '{name}': unknown type '{other}' (nfs|cifs|smb|webdav)",
+                &[("name", &doc.metadata.name), ("other", other)],
+            )))
+        }
+    };
+    // Warned at the STORAGE level, before the rewrite: a typo named against the
+    // Kind the user actually wrote is worth more than the same typo reported
+    // against a `spec.nfs` block they never typed.
+    warn_unknown_fields(doc, crate::cmd::storage::STORAGE_SPEC_FIELDS);
+    let serde_yaml::Value::Mapping(m) = &doc.spec else {
+        return Err(Error::Invalid(super::po::tf(
+            "Storage '{name}': spec must be a mapping",
+            &[("name", &doc.metadata.name)],
+        )));
+    };
+    let mut inner = serde_yaml::Mapping::new();
+    for (k, v) in m {
+        if k.as_str() == Some("type") {
+            continue;
+        }
+        inner.insert(k.clone(), v.clone());
+    }
+    let mut outer = serde_yaml::Mapping::new();
+    outer.insert(
+        serde_yaml::Value::from(block),
+        serde_yaml::Value::Mapping(inner),
+    );
+    doc.spec = serde_yaml::Value::Mapping(outer);
+    doc.kind = "Volume".to_string();
+    super::output::warn(&super::po::tf(
+        "Storage '{name}': `kind: Storage` is deprecated — use `kind: Volume` with a \
+         `{block}:` block (same fields, same behaviour)",
+        &[("name", &doc.metadata.name), ("block", block)],
+    ));
+    Ok(())
+}
+
+/// Rewrites a legacy `kind: Egress` into the canonical `kind: FirewallPolicy`,
+/// writing the direction the old Kind used to imply into `spec.direction`.
+///
+/// **Fail-closed on a contradiction.** `kind: Egress` with `direction: ingress`
+/// is not a mistake worth guessing at — it is two statements that cannot both be
+/// true, and silently honouring one of them on a FIREWALL is the worst possible
+/// place to guess. Same treatment `force_microvm_backend` gives a `type: microvm`
+/// that asks for a non-microVM backend.
+fn lower_egress(doc: &mut ManifestDoc) -> Result<()> {
+    let declared = doc.spec.get("direction").and_then(|v| v.as_str());
+    match declared {
+        Some("egress") | None => {}
+        Some(other) => {
+            return Err(Error::Invalid(super::po::tf(
+                "Egress '{name}': spec.direction is '{other}', but `kind: Egress` means \
+                 outbound — write `kind: FirewallPolicy` with the direction you want",
+                &[("name", &doc.metadata.name), ("other", other)],
+            )))
+        }
+    }
+    if declared.is_none() {
+        if let serde_yaml::Value::Mapping(m) = &mut doc.spec {
+            m.insert(
+                serde_yaml::Value::from("direction"),
+                serde_yaml::Value::from("egress"),
+            );
+        } else {
+            // A non-mapping spec has nowhere to put the direction, and letting it
+            // through would reach `apply` as "direction missing" — an error about
+            // a field the user never wrote.
+            return Err(Error::Invalid(super::po::tf(
+                "Egress '{name}': spec must be a mapping",
+                &[("name", &doc.metadata.name)],
+            )));
+        }
+    }
+    super::output::warn(&super::po::tf(
+        "Egress '{name}': `kind: Egress` is deprecated — use `kind: FirewallPolicy` with \
+         `direction: egress` (same fields, same behaviour)",
+        &[("name", &doc.metadata.name)],
+    ));
+    doc.kind = "FirewallPolicy".to_string();
+    Ok(())
 }
 
 /// Filters the documents of a specific `kind` (exact comparison, e.g. `"Container"`).
@@ -345,6 +577,34 @@ pub fn spec_of<T: for<'de> Deserialize<'de>>(doc: &ManifestDoc) -> Result<T> {
 /// `known` must contain ALL the accepted names (the canonical one and each `alias`) — there is
 /// a test per Kind that ensures the `examples/` do not trigger any warning,
 /// stopping the drift between this list and the struct.
+/// Like [`warn_unknown_fields`], but for the keys of a NESTED block
+/// (`spec.<block>`).
+///
+/// The top-level warning only ever looks at the spec's own keys, so a typo
+/// inside a block — `serverr:` in a `spec.nfs` — was swallowed and simply became
+/// "no server". The blocks only appeared when `kind: Storage` folded into
+/// `kind: Volume`; before that there was nothing nested to get wrong.
+pub fn warn_unknown_fields_in(doc: &ManifestDoc, block: &str, known: &[&str]) {
+    let Some(serde_yaml::Value::Mapping(m)) = doc.spec.get(block) else {
+        return;
+    };
+    for (k, _) in m {
+        let Some(key) = k.as_str() else { continue };
+        if known.contains(&key) {
+            continue;
+        }
+        super::output::warn(&super::po::tf(
+            "{kind} '{name}': unknown field '{key}' in spec.{block} — ignored (check the spelling)",
+            &[
+                ("kind", &doc.kind),
+                ("name", &doc.metadata.name),
+                ("key", key),
+                ("block", block),
+            ],
+        ));
+    }
+}
+
 pub fn warn_unknown_fields(doc: &ManifestDoc, known: &[&str]) {
     for key in unknown_fields(doc, known) {
         eprintln!(
@@ -489,6 +749,122 @@ spec: { disk: k8s-golden }
         let _ = std::fs::remove_file(&p);
     }
 
+    /// Every Kind survives a round-trip through its typed spec without losing or changing a
+    /// field — proved against the manifests the project SHIPS, not against fixtures written
+    /// to pass.
+    ///
+    /// `filled_spec` is what `--dry-run` prints: the spec re-serialized through the typed
+    /// struct, so every `#[serde(default)]` materializes. If a Kind's `Serialize` drops a
+    /// field its `Deserialize` accepts (or renames one on the way out), feeding the output
+    /// back in produces something DIFFERENT the second time — and the user is looking at a
+    /// dry-run that does not describe what will be applied. Asserting `once == twice`
+    /// catches exactly that asymmetry.
+    ///
+    /// Driven by `examples/`, so a new example is covered the day it lands and nobody has to
+    /// remember to add a case here. `nas-vm-cloud-config.yaml` is skipped by CONTENT (it is
+    /// cloud-init, not a delonix manifest) rather than by name, and the test fails if the
+    /// directory ever stops holding manifests — a green run over zero files would be the
+    /// most comfortable kind of lie.
+    ///
+    /// **What it catches, and what it does not — both measured, not assumed.** Renaming the
+    /// serialization of `NetworkSpec::subnet` (which `examples/network.yaml` sets to
+    /// `10.89.0.0/24`) makes this test FAIL, as it should. Renaming `driver` does NOT, and
+    /// the reason is the blind spot: the example sets `driver: bridge`, which is the
+    /// DEFAULT, so the second pass loses the key, falls back to the same value and the
+    /// asymmetry cancels itself out.
+    ///
+    /// So the guarantee is: no Kind loses a field that some published example sets to a
+    /// NON-default value. A field that every example leaves at its default is not covered
+    /// here, and the way to cover it is to set it in an example — which is worth doing for
+    /// its own sake, since an example that only shows defaults teaches nothing either.
+    #[test]
+    fn os_exemplos_publicados_fazem_round_trip_sem_perder_campos() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
+        let mut files = 0usize;
+        let mut docs_seen = 0usize;
+        let mut kinds = std::collections::BTreeSet::new();
+        for entry in std::fs::read_dir(&dir).expect("examples/ tem de existir") {
+            let path = entry.expect("entrada legivel").path();
+            if path.extension().and_then(|s| s.to_str()) != Some("yaml") {
+                continue;
+            }
+            let text = std::fs::read_to_string(&path).expect("exemplo legivel");
+            if !text.contains("apiVersion: delonix.io/") {
+                continue; // cloud-init e afins: nao sao manifestos deste motor
+            }
+            files += 1;
+            let name = path.file_name().unwrap().to_string_lossy().to_string();
+            // Que o exemplo publicado sequer CARREGUE ja e uma afirmacao que vale a pena.
+            let loaded = load(&path).unwrap_or_else(|e| panic!("{name}: nao carrega: {e}"));
+            for doc in &loaded {
+                docs_seen += 1;
+                kinds.insert(doc.kind.clone());
+                let once = filled_spec(doc)
+                    .unwrap_or_else(|e| panic!("{name}: {} nao serializa: {e}", doc.kind));
+                let mut again = doc.clone();
+                again.spec = once.clone();
+                let twice = filled_spec(&again)
+                    .unwrap_or_else(|e| panic!("{name}: {} nao re-parseia: {e}", doc.kind));
+                assert_eq!(
+                    once, twice,
+                    "{name}: o round-trip de {} mudou o spec — o --dry-run nao descreve o que sera aplicado",
+                    doc.kind
+                );
+            }
+        }
+        assert!(
+            files >= 20,
+            "so {files} exemplos: o filtro esta a comer manifestos"
+        );
+        assert!(
+            docs_seen >= files,
+            "menos documentos que ficheiros ({docs_seen} < {files})"
+        );
+        // Os Kinds com renderizador tipado tem MESMO de aparecer, senao o teste passa por
+        // nao ter exercitado nada deles.
+        for k in ["Container", "Network", "Volume", "Vm", "Pod"] {
+            assert!(
+                kinds.contains(k),
+                "nenhum exemplo cobre o kind {k}: {kinds:?}"
+            );
+        }
+    }
+
+    /// `metadata.namespace` is honored exactly where the engine applies it, and the alias
+    /// forms must not fall through the crack: `kind: VirtualMachine` is canonicalized
+    /// BEFORE the check, so it has to end up on the honored side. Asserting the two
+    /// functions together is the point — checking `kind_honors_namespace("Vm")` alone
+    /// would still pass the day an alias stopped being canonicalized.
+    #[test]
+    fn a_namespace_e_honrada_exactamente_onde_o_motor_a_aplica() {
+        for kind in ["Container", "Pod", "Vm", "Workload", "Stack", "ShareVolume"] {
+            assert!(kind_honors_namespace(kind), "{kind} tem de honrar");
+        }
+        for alias in ["VirtualMachine", "VM", "vm", "pod", "workload"] {
+            assert!(
+                kind_honors_namespace(canonical_kind(alias)),
+                "o alias {alias} tem de chegar canonicalizado ao lado honrado"
+            );
+        }
+        // Sem semantica de namespace hoje: aceitam o campo e nao fazem nada com ele,
+        // que e precisamente o que passa a ser avisado no `load`.
+        for kind in [
+            "Network",
+            "Volume",
+            "Storage",
+            "Secret",
+            "Image",
+            "HTTPRoute",
+            "Ingress",
+            "Egress",
+            "FirewallPolicy",
+            "Dependency",
+            "Cluster",
+        ] {
+            assert!(!kind_honors_namespace(kind), "{kind} nao honra hoje");
+        }
+    }
+
     #[test]
     fn canonical_kind_e_case_insensitive_para_vm() {
         // Any plausible casing from another tool resolves to `Vm`.
@@ -585,6 +961,10 @@ spec: { image: alpine, memroy: 2G, restartPolicy: always }
                 // `Ingress` is now the k8s-shaped L7 Ingress (→ HTTPRoute); the
                 // L4 firewall keeps `Egress`/`FirewallPolicy`.
                 "Ingress" => Some(crate::cmd::httproute::INGRESS_SPEC_FIELDS),
+                // `Egress` continua aqui, e tem de continuar: este teste lê os
+                // ficheiros CRUS, antes do `load`, e é lá que o Kind antigo
+                // ainda existe. Os outros ramos por `kind: Egress` foram
+                // apagados porque correm DEPOIS do load, onde ele já não chega.
                 "Egress" | "FirewallPolicy" => Some(crate::cmd::firewall::FW_SPEC_FIELDS),
                 "HTTPRoute" => Some(crate::cmd::httproute::HTTP_ROUTE_SPEC_FIELDS),
                 "Dependency" => Some(crate::cmd::dependency::DEPENDENCY_SPEC_FIELDS),
@@ -743,5 +1123,129 @@ spec:
         assert_eq!(docs[2].kind, "Container");
         assert_eq!(docs[2].metadata.name, "db");
         assert_eq!(docs[2].metadata.namespace.as_deref(), Some("data")); // per-item override
+    }
+
+    /// `kind: Egress` e `kind: FirewallPolicy` eram o MESMO objecto — uma
+    /// struct, um validador, um apply, um dataplane. Depois da fusão só há um
+    /// Kind no fim, e o antigo é reescrito com a direcção que implicava.
+    #[test]
+    fn egress_e_reescrito_como_firewallpolicy_com_a_direccao() {
+        let mut doc: ManifestDoc = serde_yaml::from_str(
+            "apiVersion: delonix.io/v1\nkind: Egress\nmetadata: { name: db-out }\nspec: { target: db }\n",
+        )
+        .unwrap();
+        lower_legacy_kind(&mut doc).unwrap();
+        assert_eq!(doc.kind, "FirewallPolicy");
+        assert_eq!(
+            doc.spec.get("direction").unwrap().as_str(),
+            Some("egress"),
+            "a direcção que o Kind antigo implicava tem de ficar escrita no spec"
+        );
+        // Um `direction: egress` já escrito não é duplicado nem alterado.
+        let mut ja: ManifestDoc = serde_yaml::from_str(
+            "apiVersion: delonix.io/v1\nkind: Egress\nmetadata: { name: x }\nspec: { target: db, direction: egress }\n",
+        )
+        .unwrap();
+        lower_legacy_kind(&mut ja).unwrap();
+        assert_eq!(ja.spec.get("direction").unwrap().as_str(), Some("egress"));
+    }
+
+    /// Uma contradicção não se adivinha, e muito menos numa firewall: `kind:
+    /// Egress` com `direction: ingress` são duas afirmações que não podem ser
+    /// ambas verdadeiras. Fail-closed, como o `force_microvm_backend` faz a um
+    /// `type: microvm` que pede outro backend.
+    #[test]
+    fn egress_com_direccao_contraditoria_e_recusado() {
+        let mut doc: ManifestDoc = serde_yaml::from_str(
+            "apiVersion: delonix.io/v1\nkind: Egress\nmetadata: { name: x }\nspec: { target: db, direction: ingress }\n",
+        )
+        .unwrap();
+        let e = lower_legacy_kind(&mut doc).unwrap_err().to_string();
+        assert!(e.contains("ingress"), "{e}");
+        assert!(
+            e.contains("FirewallPolicy"),
+            "a mensagem tem de dizer o que fazer: {e}"
+        );
+    }
+
+    /// Os filhos de um `kind: Stack` são construídos DENTRO do `load` e nunca
+    /// passaram pelo ciclo, por isso um grupo `egress:` produziria documentos
+    /// que nenhum handler reclama — e seriam largados em silêncio, que é
+    /// exactamente a falha que esta fusão existe para tirar.
+    #[test]
+    fn um_grupo_egress_dentro_de_um_stack_tambem_e_reescrito() {
+        let text = "\
+apiVersion: delonix.io/v1
+kind: Stack
+metadata: { name: s }
+spec:
+  egress:
+    - name: dentro
+      spec: { target: db }
+";
+        let p = std::env::temp_dir().join(format!("dlx-stack-egress-{}.yaml", std::process::id()));
+        std::fs::write(&p, text).unwrap();
+        let docs = load(&p).unwrap();
+        let _ = std::fs::remove_file(&p);
+        assert_eq!(docs.len(), 1);
+        assert_eq!(
+            docs[0].kind, "FirewallPolicy",
+            "o filho do Stack ficou por reescrever"
+        );
+        assert_eq!(
+            docs[0].spec.get("direction").unwrap().as_str(),
+            Some("egress")
+        );
+    }
+
+    /// `kind: Volume` e `kind: Storage` descreviam a MESMA montagem de duas
+    /// maneiras e acabavam no MESMO store, sem nada a dizer qual usar. O tipo
+    /// passa a ser o NOME do bloco — a forma do `kind: Workload` — por isso um
+    /// tipo não pode contradizer a sua própria declaração.
+    #[test]
+    fn storage_e_reescrito_como_volume_com_o_bloco_do_tipo() {
+        let mut doc: ManifestDoc = serde_yaml::from_str(
+            "apiVersion: delonix.io/v1\nkind: Storage\nmetadata: { name: media }\nspec: { type: nfs, server: 10.0.0.5, share: /pool/media, mountOptions: 'vers=4.1' }\n",
+        )
+        .unwrap();
+        lower_legacy_kind(&mut doc).unwrap();
+        assert_eq!(doc.kind, "Volume");
+        let b = doc.spec.get("nfs").expect("bloco nfs em falta");
+        assert_eq!(b.get("server").unwrap().as_str(), Some("10.0.0.5"));
+        assert_eq!(b.get("mountOptions").unwrap().as_str(), Some("vers=4.1"));
+        // O `type` não sobrevive: passou a ser o nome do bloco.
+        assert!(doc.spec.get("type").is_none());
+        assert!(b.get("type").is_none());
+    }
+
+    /// `smb` sempre foi um alias de `cifs` (o `build_mount` manda os dois para o
+    /// mesmo driver). O bloco tem UM nome, por isso os dois não voltam a ser dois.
+    #[test]
+    fn smb_e_cifs_caem_no_mesmo_bloco() {
+        for ty in ["cifs", "smb"] {
+            let mut doc: ManifestDoc = serde_yaml::from_str(&format!(
+                "apiVersion: delonix.io/v1\nkind: Storage\nmetadata: {{ name: b }}\nspec: {{ type: {ty}, server: nas, share: media }}\n"
+            ))
+            .unwrap();
+            lower_legacy_kind(&mut doc).unwrap();
+            assert!(
+                doc.spec.get("cifs").is_some(),
+                "{ty} não caiu no bloco cifs"
+            );
+        }
+    }
+
+    #[test]
+    fn storage_sem_tipo_ou_com_tipo_desconhecido_e_recusado() {
+        for spec in [
+            "{ server: nas, share: x }",
+            "{ type: gluster, server: nas, share: x }",
+        ] {
+            let mut doc: ManifestDoc = serde_yaml::from_str(&format!(
+                "apiVersion: delonix.io/v1\nkind: Storage\nmetadata: {{ name: b }}\nspec: {spec}\n"
+            ))
+            .unwrap();
+            assert!(lower_legacy_kind(&mut doc).is_err(), "aceitou: {spec}");
+        }
     }
 }

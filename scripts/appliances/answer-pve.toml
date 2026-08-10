@@ -1,0 +1,15 @@
+[global]
+keyboard = "en-us"
+country = "ao"
+fqdn = "pve.delonix.internal"
+mailto = "root@delonix.internal"
+timezone = "Africa/Luanda"
+root-password = "delonix-admin"
+reboot-on-error = false
+
+[network]
+source = "from-dhcp"
+
+[disk-setup]
+filesystem = "ext4"
+disk-list = ["vda"]

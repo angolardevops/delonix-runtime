@@ -603,6 +603,7 @@ pub fn pod_sandbox_status(
 pub fn create_container(
     base: &Path,
     req: CreateContainerRequest,
+    ceiling: crate::CapCeiling,
 ) -> Result<Response<CreateContainerResponse>, Status> {
     let cfg = req
         .config
@@ -621,6 +622,35 @@ pub fn create_container(
         .and_then(|s| s.capabilities.as_ref())
         .map(|c| (c.add_capabilities.clone(), c.drop_capabilities.clone()))
         .unwrap_or_default();
+    // Node capability ceiling (`DELONIX_CRI_CAP_CEILING`) — enforced HERE, at
+    // create, like the rest of the security context (AppArmor profile, the
+    // run_as_group contract): the kubelet then surfaces the refusal on the pod
+    // right away, instead of a container that starts with less privilege than its
+    // spec asked for and fails later for a reason that looks unrelated. In `clamp`
+    // mode `rejected()` is empty by construction and the reduction happens at
+    // start; see `cap_ceiling`.
+    let denied = ceiling.rejected(&cap_add, privileged);
+    if !denied.is_empty() {
+        let asked = if privileged {
+            "privileged: true".to_string()
+        } else {
+            cap_add.join(",")
+        };
+        tracing::warn!(
+            denied = %denied.join(","),
+            requested = %asked,
+            ceiling = %ceiling.describe(),
+            "cri: capability request denied by the node ceiling"
+        );
+        return Err(Status::permission_denied(format!(
+            "capabilities denied by the node ceiling: {} (requested via {}; ceiling: {}). \
+             Lower the pod's securityContext, or widen {} on this node.",
+            denied.join(", "),
+            asked,
+            ceiling.describe(),
+            crate::cap_ceiling::CEILING_ENV,
+        )));
+    }
     let seccomp_unconfined = sc
         .and_then(|s| s.seccomp.as_ref())
         .map(|p| p.profile_type == security_profile::ProfileType::Unconfined as i32)
@@ -746,9 +776,86 @@ pub fn create_container(
     Ok(Response::new(CreateContainerResponse { container_id: id }))
 }
 
+/// The `--cap-*` flags for this container's `delonix run`.
+///
+/// With a node ceiling in force the final set is computed ONCE (engine semantics
+/// ∩ ceiling — see [`crate::cap_ceiling`]) and emitted as `--cap-drop ALL` plus
+/// explicit adds. Without a ceiling the flags are exactly what they always were:
+/// `privileged` keeps its `--cap-add ALL` and the pod's own add/drop lists pass
+/// through verbatim.
+///
+/// NOTE: the ceiling bounds capabilities ONLY. The other facets of `privileged`
+/// (unconfined seccomp, writable `/sys`, its own cgroup namespace) are deliberately
+/// untouched — clamping capabilities does not make a privileged pod safe, and
+/// pretending otherwise would be the more dangerous outcome.
+///
+/// Extracted from the middle of `start_container`'s argv building so that BOTH
+/// paths are testable, including the legacy one: "unchanged when there is no
+/// ceiling" is a claim that deserves a test, not a reading.
+fn cap_flags(rec: &ContainerRec, ceiling: crate::CapCeiling, id: &str) -> Vec<String> {
+    match ceiling.cap_args(&rec.cap_add, &rec.cap_drop, rec.privileged) {
+        Some(capped) => {
+            if ceiling_reduces(&capped, rec) {
+                tracing::warn!(
+                    container = %id,
+                    privileged = rec.privileged,
+                    requested_add = %rec.cap_add.join(","),
+                    ceiling = %ceiling.describe(),
+                    effective = %capped
+                        .chunks(2)
+                        .filter(|p| p[0] == "--cap-add")
+                        .map(|p| p[1].as_str())
+                        .collect::<Vec<_>>()
+                        .join(","),
+                    "cri: capabilities clamped by the node ceiling"
+                );
+            }
+            capped
+        }
+        None => {
+            let mut args = Vec::new();
+            if rec.privileged {
+                args.push("--cap-add".to_string());
+                args.push("ALL".to_string());
+            }
+            for c in &rec.cap_add {
+                args.push("--cap-add".to_string());
+                args.push(c.trim_start_matches("CAP_").to_string());
+            }
+            for c in &rec.cap_drop {
+                args.push("--cap-drop".to_string());
+                args.push(c.trim_start_matches("CAP_").to_string());
+            }
+            args
+        }
+    }
+}
+
+/// Whether the clamped argv takes away something the container EXPLICITLY asked
+/// for — as opposed to merely lowering the engine's implicit default set, which is
+/// the ceiling's ordinary job and would otherwise log a line on every single
+/// container start on the node.
+fn ceiling_reduces(capped: &[String], rec: &ContainerRec) -> bool {
+    if rec.privileged {
+        // `privileged` asks for every capability the kernel has; a ceiling narrow
+        // enough to be expressed as names always gives back less.
+        return true;
+    }
+    let granted: Vec<&str> = capped
+        .chunks(2)
+        .filter(|p| p[0] == "--cap-add")
+        .map(|p| p[1].as_str())
+        .collect();
+    rec.cap_add.iter().any(|c| {
+        let want = c.trim_start_matches("CAP_");
+        !granted.iter().any(|g| g.eq_ignore_ascii_case(want))
+    })
+}
+
 pub fn start_container(
     base: &Path,
     id: String,
+    ceiling: crate::CapCeiling,
 ) -> Result<Response<StartContainerResponse>, Status> {
     let mut rec: ContainerRec = read_rec(&ct_dir(base), &id)?;
     let name = format!("cri-{id}");
@@ -834,26 +941,17 @@ pub fn start_container(
     }
     args.push("--security-opt".into());
     args.push(format!("no-new-privileges={}", rec.no_new_privs));
-    if rec.privileged {
-        args.push("--cap-add".into());
-        args.push("ALL".into());
-        args.push("--security-opt".into());
-        args.push("seccomp=unconfined".into());
-    } else if rec.seccomp_unconfined {
+    // `privileged` implies unconfined seccomp (the engine does the same on its
+    // side), and either way an explicit profile path only applies when nothing
+    // asked for unconfined.
+    if rec.privileged || rec.seccomp_unconfined {
         args.push("--security-opt".into());
         args.push("seccomp=unconfined".into());
     } else if let Some(p) = &rec.seccomp_profile_path {
         args.push("--security-opt".into());
         args.push(format!("seccomp={p}"));
     }
-    for c in &rec.cap_add {
-        args.push("--cap-add".into());
-        args.push(c.trim_start_matches("CAP_").to_string());
-    }
-    for c in &rec.cap_drop {
-        args.push("--cap-drop".into());
-        args.push(c.trim_start_matches("CAP_").to_string());
-    }
+    args.extend(cap_flags(&rec, ceiling, &id));
     if let Some(prof) = &rec.apparmor {
         args.push("--apparmor".into());
         args.push(prof.clone());
@@ -1505,6 +1603,186 @@ fn cri_port_specs(mappings: &[PortMapping]) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A `CreateContainerRequest` carrying the given capability security context.
+    fn req_with_caps(add: &[&str], privileged: bool) -> CreateContainerRequest {
+        CreateContainerRequest {
+            pod_sandbox_id: "sb".into(),
+            config: Some(ContainerConfig {
+                metadata: Some(ContainerMetadata {
+                    name: "app".into(),
+                    attempt: 0,
+                }),
+                image: Some(ImageSpec {
+                    image: "alpine:latest".into(),
+                    ..Default::default()
+                }),
+                linux: Some(LinuxContainerConfig {
+                    security_context: Some(LinuxContainerSecurityContext {
+                        privileged,
+                        capabilities: Some(Capability {
+                            add_capabilities: add.iter().map(|s| s.to_string()).collect(),
+                            ..Default::default()
+                        }),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            }),
+            sandbox_config: None,
+        }
+    }
+
+    fn tmp_base(tag: &str) -> std::path::PathBuf {
+        let p = std::env::temp_dir().join(format!(
+            "dlx-cri-{tag}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&p).unwrap();
+        p
+    }
+
+    /// The ceiling has to bite at CREATE, on the real CRI request path — not just
+    /// in the pure helper. Covers the two shapes a pod uses to ask for privilege
+    /// (`capabilities.add` and `privileged: true`), plus the cases that must still
+    /// go through untouched.
+    #[test]
+    fn create_container_recusa_o_que_o_tecto_do_no_proibe() {
+        let base = tmp_base("ceiling");
+        let ceiling = crate::CapCeiling::parse("default,NET_ADMIN", "reject").unwrap();
+
+        let err = create_container(&base, req_with_caps(&["SYS_ADMIN"], false), ceiling)
+            .expect_err("SYS_ADMIN está acima do tecto");
+        assert_eq!(err.code(), tonic::Code::PermissionDenied);
+        assert!(
+            err.message().contains("SYS_ADMIN"),
+            "o erro tem de nomear a capability negada: {}",
+            err.message()
+        );
+
+        let err = create_container(&base, req_with_caps(&[], true), ceiling)
+            .expect_err("privileged pede tudo, o tecto não dá tudo");
+        assert_eq!(err.code(), tonic::Code::PermissionDenied);
+
+        // Within the ceiling → created normally.
+        create_container(&base, req_with_caps(&["NET_ADMIN"], false), ceiling)
+            .expect("NET_ADMIN está no tecto");
+        // No ceiling → a privileged pod is created exactly as before.
+        create_container(
+            &base,
+            req_with_caps(&[], true),
+            crate::CapCeiling::unlimited(),
+        )
+        .expect("sem tecto nada muda");
+        // `clamp` mode never refuses; the reduction happens at start.
+        let clamp = crate::CapCeiling::parse("default", "clamp").unwrap();
+        create_container(&base, req_with_caps(&["SYS_ADMIN"], true), clamp)
+            .expect("clamp corta, não recusa");
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// The flags `start_container` actually puts on the `delonix run` command line.
+    /// Without a ceiling they must be BYTE-FOR-BYTE the historical ones — the whole
+    /// premise of shipping this is that a node that configures nothing sees no
+    /// change at all.
+    #[test]
+    fn cap_flags_sem_tecto_sao_exactamente_os_de_sempre() {
+        let unlimited = crate::CapCeiling::unlimited();
+
+        let plain = ContainerRec::default();
+        assert!(cap_flags(&plain, unlimited, "x").is_empty());
+
+        let privileged = ContainerRec {
+            privileged: true,
+            ..Default::default()
+        };
+        assert_eq!(cap_flags(&privileged, unlimited, "x"), ["--cap-add", "ALL"]);
+
+        let asks = ContainerRec {
+            cap_add: vec!["CAP_NET_ADMIN".into()],
+            cap_drop: vec!["CAP_CHOWN".into()],
+            ..Default::default()
+        };
+        assert_eq!(
+            cap_flags(&asks, unlimited, "x"),
+            ["--cap-add", "NET_ADMIN", "--cap-drop", "CHOWN"],
+            "o prefixo CAP_ é retirado, tal como sempre foi"
+        );
+    }
+
+    /// ...and with a ceiling, a privileged container's `--cap-add ALL` is REPLACED
+    /// by the bounded set. If this ever emitted `ALL` alongside the clamp, the
+    /// engine's `cap_add ALL` branch would hand back every capability and the
+    /// ceiling would be decorative.
+    #[test]
+    fn cap_flags_com_tecto_substituem_o_cap_add_all_do_privileged() {
+        let ceiling = crate::CapCeiling::parse("CHOWN,NET_ADMIN", "clamp").unwrap();
+        let privileged = ContainerRec {
+            privileged: true,
+            ..Default::default()
+        };
+        let flags = cap_flags(&privileged, ceiling, "x");
+        assert_eq!(
+            flags,
+            [
+                "--cap-drop",
+                "ALL",
+                "--cap-add",
+                "CHOWN",
+                "--cap-add",
+                "NET_ADMIN"
+            ]
+        );
+        assert!(
+            !flags
+                .chunks(2)
+                .any(|p| p[0] == "--cap-add" && p[1] == "ALL"),
+            "um `--cap-add ALL` sobrevivente anularia o tecto por inteiro"
+        );
+    }
+
+    /// `ceiling_reduces` decides whether a clamp is worth a `warn` line: yes when
+    /// the pod asked for something it did not get, no when only the engine's
+    /// implicit default was lowered (which happens on EVERY container start on a
+    /// node with a ceiling, and would drown the log).
+    #[test]
+    fn ceiling_reduces_so_avisa_quando_um_pedido_explicito_foi_cortado() {
+        let capped = vec![
+            "--cap-drop".to_string(),
+            "ALL".to_string(),
+            "--cap-add".to_string(),
+            "CHOWN".to_string(),
+        ];
+        let baseline_only = ContainerRec::default();
+        assert!(!ceiling_reduces(&capped, &baseline_only));
+
+        let asked_and_got = ContainerRec {
+            cap_add: vec!["CAP_CHOWN".to_string()],
+            ..Default::default()
+        };
+        assert!(
+            !ceiling_reduces(&capped, &asked_and_got),
+            "pediu CHOWN e recebeu CHOWN (o prefixo CAP_ não conta como diferença)"
+        );
+
+        let asked_and_lost = ContainerRec {
+            cap_add: vec!["NET_ADMIN".to_string()],
+            ..Default::default()
+        };
+        assert!(ceiling_reduces(&capped, &asked_and_lost));
+
+        let privileged = ContainerRec {
+            privileged: true,
+            ..Default::default()
+        };
+        assert!(ceiling_reduces(&capped, &privileged));
+    }
 
     #[test]
     fn crashed_container_reporta_137_nao_0() {

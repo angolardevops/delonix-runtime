@@ -1,0 +1,1034 @@
+{
+  "$defs": {
+    "ContainerSpec": {
+      "additionalProperties": false,
+      "description": "`spec` for `kind: Container` — mirrors `ContainerCmd::Run` (minus `name`,\nwhich comes from `metadata.name`). **`detach` defaults to `true`** (unlike the\nCLI, where the default is `false`): an `apply`/`stack apply` run in the\nforeground would block waiting for the process to exit — dangerous for a\ndeclarative command. Pass `detach: false` explicitly in the YAML if you want\nthe synchronous behavior of the interactive `run`.",
+      "properties": {
+        "addHost": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "apparmor": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "capAdd": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "capDrop": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "command": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "cpuWeight": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "cpus": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "cpuset": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "detach": {
+          "default": true,
+          "type": "boolean"
+        },
+        "detect": {
+          "default": false,
+          "type": "boolean"
+        },
+        "devices": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "entrypoint": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "env": {
+          "anyOf": [
+            {
+              "default": [],
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "object"
+            }
+          ]
+        },
+        "envFile": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "expose": {
+          "default": null,
+          "description": "HTTP port to auto-register in the L7 proxy (internal FQDN). See `--expose`.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "gpus": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "hostIpc": {
+          "default": false,
+          "type": "boolean"
+        },
+        "hostPid": {
+          "default": false,
+          "type": "boolean"
+        },
+        "hostname": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "image": {
+          "type": "string"
+        },
+        "ioWeight": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "knows": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "labels": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "limits": {},
+        "logDriver": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "memory": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "netBps": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "netBurst": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "network": {
+          "anyOf": [
+            {
+              "default": "host",
+              "type": "string"
+            },
+            {
+              "type": "object"
+            }
+          ]
+        },
+        "networkAlias": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "ports": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "privileged": {
+          "default": false,
+          "type": "boolean"
+        },
+        "readOnly": {
+          "default": false,
+          "type": "boolean"
+        },
+        "resources": {},
+        "restart": {},
+        "restartPolicy": {
+          "default": "no",
+          "description": "`no` (default) | `on-failure[:max]` | `always` | `unless-stopped` —\na detached supervisor becomes the container's parent and restarts it (see\n`run_supervised`). This is what makes a manifest resilient. Canonical\nfield name is `restartPolicy` (uniform with `kind: Vm`); the legacy\n`restart` stays accepted so existing manifests don't break.",
+          "type": "string"
+        },
+        "secret": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "secretFiles": {
+          "default": false,
+          "type": "boolean"
+        },
+        "security": {},
+        "securityOpt": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "selinux": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "storage": {},
+        "sysctl": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "tmpfs": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "ulimit": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "user": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "userns": {
+          "default": false,
+          "type": "boolean"
+        },
+        "volumes": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "image"
+      ],
+      "type": "object"
+    },
+    "HostAlias": {
+      "description": "k8s `hostAliases[]` entry: one IP, N hostnames.",
+      "properties": {
+        "hostnames": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "ip": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "ip"
+      ],
+      "type": "object"
+    },
+    "NetShareSpec": {
+      "description": "A network share, as declared inside a `kind: Volume` (`spec.nfs`,\n`spec.cifs`, `spec.webdav`).\n\nThis is `StorageSpec` minus the `type` field — the type is now the BLOCK's\nname, the same shape `kind: Workload` uses (`spec.container`/`spec.vm`), and\nfor the same reason: a type that names its own block cannot contradict it.\n\n`kind: Volume` and `kind: Storage` used to describe the SAME mount two ways\nand land in the SAME store, with nothing to say which to use — `volumes ls`\nshowed both (one store) while `storage ls` showed only some, so the same\nquestion got different answers depending on the command.",
+      "properties": {
+        "mountOptions": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "password": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "passwordSecret": {
+          "default": null,
+          "description": "Vault secret (`password` key) — preferred over an inline `password`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "readOnly": {
+          "default": false,
+          "type": "boolean"
+        },
+        "server": {
+          "type": "string"
+        },
+        "share": {
+          "type": "string"
+        },
+        "username": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "server",
+        "share"
+      ],
+      "type": "object"
+    },
+    "NetworkSpec": {
+      "additionalProperties": false,
+      "description": "`spec` for `kind: Network` — mirrors the fields of `NetworkCmd::Create`.",
+      "properties": {
+        "driver": {
+          "default": "bridge",
+          "type": "string"
+        },
+        "gateway": {
+          "default": "",
+          "type": "string"
+        },
+        "parent": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "peers": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "subnet": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "vni": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "wgIp": {
+          "description": "Canonical `wgIp` (camelCase, uniform with the rest of the schema); `wg_ip`\nis still accepted (backward compat).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "wg_ip": {}
+      },
+      "type": "object"
+    },
+    "PodCapabilities": {
+      "properties": {
+        "add": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "drop": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "PodContainer": {
+      "description": "One entry of `spec.containers[]`.",
+      "properties": {
+        "args": {
+          "default": [],
+          "description": "k8s `args` — overrides the image CMD.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "command": {
+          "default": [],
+          "description": "k8s `command` — overrides the image ENTRYPOINT.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "env": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/PodEnvVar"
+          },
+          "type": "array"
+        },
+        "image": {
+          "type": "string"
+        },
+        "name": {
+          "default": null,
+          "description": "k8s member name. Absent → `c<i>` by position, the fallback\n`pod_member_run_opts` uses to build the container name `<pod>-<member>`;\nthe reconciler has to reproduce it or every pod would diff against\nitself.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "ports": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/PodPort"
+          },
+          "type": "array"
+        },
+        "resources": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PodResources"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "securityContext": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PodSecurityContext"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "tty": {
+          "default": false,
+          "type": "boolean"
+        },
+        "volumeMounts": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/PodVolumeMount"
+          },
+          "type": "array"
+        },
+        "workingDir": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "image"
+      ],
+      "type": "object"
+    },
+    "PodEmptyDir": {
+      "properties": {
+        "medium": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "PodEnvVar": {
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "value": {
+          "default": "",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
+    "PodHostPath": {
+      "properties": {
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "type": "object"
+    },
+    "PodPort": {
+      "properties": {
+        "containerPort": {
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "hostIP": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "hostPort": {
+          "default": null,
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "protocol": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "containerPort"
+      ],
+      "type": "object"
+    },
+    "PodPvc": {
+      "properties": {
+        "claimName": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "claimName"
+      ],
+      "type": "object"
+    },
+    "PodResourceList": {
+      "properties": {
+        "cpu": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "memory": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "PodResources": {
+      "properties": {
+        "limits": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PodResourceList"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "requests": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PodResourceList"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "type": "object"
+    },
+    "PodSecurityContext": {
+      "properties": {
+        "capabilities": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PodCapabilities"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "privileged": {
+          "default": false,
+          "type": "boolean"
+        },
+        "readOnlyRootFilesystem": {
+          "default": false,
+          "type": "boolean"
+        },
+        "runAsUser": {
+          "default": null,
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "PodSpec": {
+      "additionalProperties": false,
+      "description": "k8s-like Pod spec: `spec.containers[]`. Used by `kind: Container` (Pod shape,\n1 container) AND by `kind: Pod` (N containers sharing the pod's namespaces —\nsee `cmd::pod`).",
+      "properties": {
+        "containers": {
+          "items": {
+            "$ref": "#/$defs/PodContainer"
+          },
+          "type": "array"
+        },
+        "detach": {
+          "default": true,
+          "type": "boolean"
+        },
+        "expose": {
+          "default": null,
+          "description": "delonix extension: auto-register an HTTP port in the L7 proxy.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "hostAliases": {
+          "default": [],
+          "description": "k8s `hostAliases`: extra `/etc/hosts` entries, in the k8s shape\n(`{ip, hostnames[]}`) rather than docker's `name:ip`. Same effect as\n`--add-host`; normalized below.\n\nWired on purpose: without it, the SAME `kind: Container` gained or lost\nthe feature depending on which shape of spec was used — flat had it,\nk8s silently did not.",
+          "items": {
+            "$ref": "#/$defs/HostAlias"
+          },
+          "type": "array"
+        },
+        "hostname": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "network": {
+          "default": "host",
+          "description": "delonix extension: the SDN network the POD's shared netns attaches to.\n\nA `<custom>` name selects that network's bridge. `host`/`none` (the default) mean\n\"the pod's own netns on the default bridge\" — a pod IS a shared netns, so it never\ngets the host's. They are kept as the default because every existing manifest relies\non it; only a custom name changes anything.\n\nWas parsed and **entirely ignored** until v0.47.0: `create_pod` hardcoded `ingress`,\nso a pod declared on a custom network landed on the default bridge in silence.",
+          "type": "string"
+        },
+        "restartPolicy": {
+          "default": "no",
+          "description": "k8s `restartPolicy`: `Always`|`OnFailure`|`Never` (delonix values also accepted).",
+          "type": "string"
+        },
+        "shareProcessNamespace": {
+          "default": false,
+          "description": "k8s `shareProcessNamespace`: the pod's containers see each other's\nprocesses (shared PID namespace). Default `false`, like k8s. Honored by\n`kind: Pod` (see `cmd::pod`); ignored for a single `kind: Container`.",
+          "type": "boolean"
+        },
+        "volumes": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/PodVolume"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "containers"
+      ],
+      "type": "object"
+    },
+    "PodVolume": {
+      "description": "One entry of the Pod-level `spec.volumes[]` (referenced by `volumeMounts`).",
+      "properties": {
+        "emptyDir": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PodEmptyDir"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "hostPath": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PodHostPath"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "name": {
+          "type": "string"
+        },
+        "persistentVolumeClaim": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PodPvc"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "source": {
+          "default": null,
+          "description": "delonix extension: a named `Volume`/`Storage` directly by source string.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
+    "PodVolumeMount": {
+      "properties": {
+        "mountPath": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "readOnly": {
+          "default": false,
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "name",
+        "mountPath"
+      ],
+      "type": "object"
+    },
+    "VolumeSpec": {
+      "additionalProperties": false,
+      "description": "`spec` of `kind: Volume` — mirrors the fields of `VolumeCmd::Create`.",
+      "properties": {
+        "cifs": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NetShareSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "SMB/CIFS share (Samba, Windows, TrueNAS SMB)."
+        },
+        "device": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "driver": {
+          "default": "local",
+          "type": "string"
+        },
+        "mountOptions": {
+          "description": "Canonical `mountOptions` (uniform with `kind: Storage`); `options`\nis still accepted (backward-compat).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "nfs": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NetShareSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "NFS export. One of the three network-share blocks — the block's NAME is\nthe type, so a type cannot contradict its own declaration (the same shape\n`kind: Workload` uses for `spec.container`/`spec.vm`)."
+        },
+        "options": {},
+        "quota": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "webdav": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NetShareSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "WebDAV (Nextcloud, ownCloud)."
+        }
+      },
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "Container"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "properties": {
+          "spec": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/ContainerSpec"
+              },
+              {
+                "$ref": "#/$defs/PodSpec"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "Pod"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "properties": {
+          "spec": {
+            "$ref": "#/$defs/PodSpec"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "Volume"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "properties": {
+          "spec": {
+            "$ref": "#/$defs/VolumeSpec"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "Network"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "properties": {
+          "spec": {
+            "$ref": "#/$defs/NetworkSpec"
+          }
+        }
+      }
+    }
+  ],
+  "properties": {
+    "apiVersion": {
+      "const": "delonix.io/v1"
+    },
+    "kind": {
+      "type": "string"
+    },
+    "metadata": {
+      "properties": {
+        "annotations": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "labels": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "name": {
+          "type": "string"
+        },
+        "namespace": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
+    "spec": {
+      "type": "object"
+    }
+  },
+  "required": [
+    "apiVersion",
+    "kind",
+    "metadata"
+  ],
+  "title": "Delonix manifest (delonix.io/v1)",
+  "type": "object"
+}

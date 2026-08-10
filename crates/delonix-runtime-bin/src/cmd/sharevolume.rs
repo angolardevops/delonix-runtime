@@ -62,11 +62,117 @@ pub const SHAREVOLUME_SPEC_FIELDS: &[&str] = &["storageRef", "quota", "alertPct"
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct ShareRecord {
     name: String,
+    /// Namespace that OWNS this share. Legacy records have no field and deserialize as
+    /// `default`, which is exactly what they were: before scoping there was one flat
+    /// space and everything lived in it.
+    #[serde(default = "ns_default")]
+    namespace: String,
     storage_ref: String,
     mountpoint: String,
     quota_bytes: Option<u64>,
     alert_pct: Option<u8>,
     created_unix: u64,
+}
+
+/// Fields the reconciler compares for a `kind: ShareVolume`.
+///
+/// `quota`/`alertPct` converge hot — they are bookkeeping on a record, applied
+/// by re-running the same `apply_one` that created it. `storageRef` does not:
+/// the share is a SUBDIRECTORY carved out of that parent, so pointing it at a
+/// different NAS export means a different directory, and the data already
+/// written stays in the old one. That is a `Replace`, and `sharevolume migrate`
+/// exists precisely because moving it is a deliberate act.
+pub(crate) const RECONCILED_SHARE_FIELDS: &[&str] = &["storageRef", "quota", "alertPct"];
+
+/// What the manifest declares, for the reconciler.
+pub(crate) fn desired(doc: &ManifestDoc) -> Result<super::reconcile::Desired> {
+    let spec: ShareVolumeSpec = manifest::spec_of(doc)?;
+    let mut f = std::collections::BTreeMap::new();
+    f.insert("storageRef".into(), spec.storage_ref.clone());
+    // The manifest says `5G`, the record stores bytes — normalized through the
+    // SAME parser the creation path uses, or every plan would report a quota as
+    // changed.
+    if let Some(q) = &spec.quota {
+        if let Some(b) = delonix_volume::parse_size_bytes(q) {
+            f.insert("quota".into(), b.to_string());
+        }
+    }
+    if let Some(a) = spec.alert_pct {
+        f.insert("alertPct".into(), a.to_string());
+    }
+    Ok(super::reconcile::Desired {
+        kind: "ShareVolume".into(),
+        name: doc.metadata.name.clone(),
+        fields: f,
+        converges: true,
+        // A `ShareRecord` carries no labels, so there is nowhere to stamp a
+        // stack — and "unowned" would then be its permanent state, making every
+        // plan report an Adopt that changes nothing. Not ownable is the honest
+        // reading of the record as it exists; giving `ShareRecord` a labels
+        // field is the follow-up that would change it.
+        ownable: false,
+    })
+}
+
+/// What is on the machine, for the reconciler.
+///
+/// Looked up per DOCUMENT rather than by listing the store, because a share is
+/// keyed by (namespace, name) and the namespace comes from the document — the
+/// same reason `load_record` takes both. Listing every namespace and guessing
+/// which one a document meant is exactly the confusion `safe_ns` exists to
+/// prevent.
+pub(crate) fn actual(docs: &[ManifestDoc]) -> Result<Vec<super::reconcile::Actual>> {
+    let root = state_root();
+    let mut out = Vec::new();
+    for doc in manifest::of_kind(docs, "ShareVolume") {
+        let ns = doc.metadata.namespace.as_deref().unwrap_or("default");
+        let Ok((rec, _legacy)) = load_record(&root, ns, &doc.metadata.name) else {
+            continue;
+        };
+        let mut f = std::collections::BTreeMap::new();
+        f.insert("storageRef".into(), rec.storage_ref.clone());
+        if let Some(q) = rec.quota_bytes {
+            f.insert("quota".into(), q.to_string());
+        }
+        if let Some(a) = rec.alert_pct {
+            f.insert("alertPct".into(), a.to_string());
+        }
+        out.push(super::reconcile::Actual {
+            kind: "ShareVolume".into(),
+            name: doc.metadata.name.clone(),
+            fields: f,
+            // A share record has no labels of its own. Ownership would need a
+            // field on `ShareRecord`; until then a share is converged but never
+            // adopted or pruned — said out loud rather than half-done.
+            owner: None,
+            last_applied: None,
+        });
+    }
+    Ok(out)
+}
+
+/// Presence for `stack ls`/`describe`/`wait`.
+///
+/// Added when `ShareVolume` finally entered `KINDS` — until then the Kind was
+/// applied and never listed, so nothing ever asked this question. Without the
+/// arm it fell to the «unsupported kind» default, which reads as absent: a
+/// `stack wait` on a manifest whose shares were all up would have waited for
+/// them forever.
+pub(crate) fn presence_of(root: &Path, doc: &ManifestDoc) -> (String, String) {
+    let ns = doc.metadata.namespace.as_deref().unwrap_or("default");
+    match load_record(root, ns, &doc.metadata.name) {
+        Ok((rec, _)) => ("yes".into(), rec.storage_ref),
+        Err(_) => ("no".into(), "-".into()),
+    }
+}
+
+/// Converges a share: re-run the same `apply_one` that created it. Idempotent by
+/// design — it already updates `quota_bytes`/`alert_pct` in place and keeps the
+/// path a share was created with.
+pub(crate) fn converge_doc(doc: &ManifestDoc) -> Result<()> {
+    let spec: ShareVolumeSpec = manifest::spec_of(doc)?;
+    let ns = doc.metadata.namespace.as_deref().unwrap_or("default");
+    apply_one(&state_root(), &doc.metadata.name, &spec, ns)
 }
 
 #[derive(Subcommand)]
@@ -83,58 +189,229 @@ pub enum ShareVolumeCmd {
         output: output::OutputFormat,
     },
     /// Human-readable detail of one share volume.
-    Describe { name: String },
+    Describe {
+        name: String,
+        /// Namespace that owns the share (default `default`).
+        #[arg(long, short = 'n')]
+        namespace: Option<String>,
+    },
     /// Un-register a share volume. The underlying data (a subdirectory of
     /// the parent Storage) is PRESERVED unless `--purge-data` is passed.
     Rm {
         name: String,
         #[arg(long = "purge-data")]
         purge_data: bool,
+        /// Namespace that owns the share (default `default`).
+        #[arg(long, short = 'n')]
+        namespace: Option<String>,
+    },
+    /// Move the pre-scoping share records into the `default` namespace.
+    ///
+    /// Records only: the DATA is not moved, because each record carries the path it was
+    /// created with and moving a tenant's bytes is not something a migration should do
+    /// behind their back. What changes is where the record lives and that its backing
+    /// volume becomes `default`-scoped, so `-v <name>` resolves through the namespaced
+    /// path like every share created from now on.
+    Migrate {
+        /// Show what would move, change nothing.
+        #[arg(long)]
+        dry_run: bool,
     },
 }
 
 pub fn run(action: ShareVolumeCmd) -> Result<()> {
-    let vstore = VolumeStore::open(state_root())?;
-    let sstore = shares_store()?;
+    let root = state_root();
+    let vstore = VolumeStore::open(&root)?;
     match action {
         ShareVolumeCmd::Apply { file } => {
             let path = manifest::resolve_path(file)?;
             let docs = manifest::load(&path)?;
-            apply_with(&vstore, &sstore, &docs)
+            apply_with(&docs)
         }
-        ShareVolumeCmd::Ls { output } => cmd_ls(&vstore, &sstore, output),
-        ShareVolumeCmd::Describe { name } => cmd_describe(&vstore, &sstore, &name),
-        ShareVolumeCmd::Rm { name, purge_data } => cmd_rm(&vstore, &sstore, &name, purge_data),
+        ShareVolumeCmd::Ls { output } => cmd_ls(&root, &vstore, output),
+        ShareVolumeCmd::Describe { name, namespace } => {
+            cmd_describe(&root, &vstore, &name, &namespace.unwrap_or_else(ns_default))
+        }
+        ShareVolumeCmd::Rm {
+            name,
+            purge_data,
+            namespace,
+        } => cmd_rm(
+            &root,
+            &name,
+            purge_data,
+            &namespace.unwrap_or_else(ns_default),
+        ),
+        ShareVolumeCmd::Migrate { dry_run } => cmd_migrate(&root, dry_run),
     }
 }
 
 pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
-    apply_with(&VolumeStore::open(state_root())?, &shares_store()?, docs)
+    apply_with(docs)
 }
 
-fn apply_with(
-    vstore: &VolumeStore,
-    sstore: &JsonStore<ShareRecord>,
-    docs: &[ManifestDoc],
-) -> Result<()> {
+fn apply_with(docs: &[ManifestDoc]) -> Result<()> {
     for doc in manifest::of_kind(docs, "ShareVolume") {
         manifest::warn_unknown_fields(doc, SHAREVOLUME_SPEC_FIELDS);
         let spec: ShareVolumeSpec = manifest::spec_of(doc)?;
-        apply_one(vstore, sstore, &doc.metadata.name, &spec)?;
+        let ns = doc.metadata.namespace.clone().unwrap_or_else(ns_default);
+        apply_one(&state_root(), &doc.metadata.name, &spec, &ns)?;
     }
     Ok(())
 }
 
-fn shares_store() -> Result<JsonStore<ShareRecord>> {
-    JsonStore::open(state_root().join("sharevolumes"))
+fn ns_default() -> String {
+    "default".to_string()
 }
 
-fn apply_one(
-    vstore: &VolumeStore,
-    store: &JsonStore<ShareRecord>,
-    name: &str,
-    spec: &ShareVolumeSpec,
-) -> Result<()> {
+/// The share records of ONE namespace: `sharevolumes/<ns>/`.
+///
+/// A directory per namespace, not a composed key: `JsonStore`'s `safe_key` maps `/` to `-`,
+/// so `<ns>/<name>` would flatten into exactly the kind of ambiguous key
+/// (`a/b-c` and `a-b/c` collide) that the compose project names already had to fix.
+fn shares_store_ns(root: &Path, namespace: &str) -> Result<JsonStore<ShareRecord>> {
+    JsonStore::open(root.join("sharevolumes").join(safe_ns(namespace)))
+}
+
+/// The pre-scoping store: records sitting flat in `sharevolumes/`. Still READ so that
+/// nothing created before this change stops working — the second of the two read paths.
+fn shares_store_legacy(root: &Path) -> Result<JsonStore<ShareRecord>> {
+    JsonStore::open(root.join("sharevolumes"))
+}
+
+/// A namespace safe as ONE path component. Rejects the traversal and separator cases
+/// instead of sanitizing them into something else: a namespace that silently becomes a
+/// different namespace is how a tenant reads another tenant's shares.
+fn safe_ns(namespace: &str) -> String {
+    if namespace.is_empty()
+        || namespace == "."
+        || namespace == ".."
+        || namespace.contains('/')
+        || namespace.starts_with('.')
+    {
+        return "default".to_string();
+    }
+    namespace.to_string()
+}
+
+/// Loads a share, preferring its namespace and falling back to a legacy flat record.
+/// The fallback only applies to `default`: a legacy record was, by definition, unscoped.
+fn load_record(root: &Path, namespace: &str, name: &str) -> Result<(ShareRecord, bool)> {
+    if let Ok(rec) = shares_store_ns(root, namespace)?.load(name) {
+        return Ok((rec, false));
+    }
+    if namespace == "default" {
+        if let Ok(rec) = shares_store_legacy(root)?.load(name) {
+            return Ok((rec, true));
+        }
+    }
+    Err(Error::Invalid(format!(
+        "no such sharevolume: {name} in namespace {namespace} (see `delonix sharevolume ls`)"
+    )))
+}
+
+/// Every share on the node, namespace by namespace, plus the legacy flat ones.
+fn list_all(root: &Path) -> Result<Vec<ShareRecord>> {
+    let mut out = Vec::new();
+    let base = root.join("sharevolumes");
+    // Legacy: records directly under `sharevolumes/` (they report as `default`).
+    if let Ok(st) = shares_store_legacy(root) {
+        out.extend(st.list().unwrap_or_default());
+    }
+    if let Ok(rd) = std::fs::read_dir(&base) {
+        for e in rd.flatten() {
+            if !e.path().is_dir() {
+                continue;
+            }
+            let ns = e.file_name().to_string_lossy().to_string();
+            if let Ok(st) = shares_store_ns(root, &ns) {
+                out.extend(st.list().unwrap_or_default());
+            }
+        }
+    }
+    out.sort_by(|a, b| (&a.namespace, &a.name).cmp(&(&b.namespace, &b.name)));
+    Ok(out)
+}
+
+/// Moves the pre-scoping share records into the `default` namespace.
+///
+/// **Records, not data.** Each record carries the path it was created with, so a migrated
+/// share keeps reading and writing exactly where it already did; moving a tenant's bytes is
+/// not something a migration should do behind their back. What changes is where the record
+/// lives and that its backing volume becomes `default`-scoped, so `-v <name>` resolves
+/// through the namespaced path like every share created from now on.
+///
+/// Order is deliberate, and it is the lesson from the volume-removal bug: the new
+/// registration is written FIRST and the old bookkeeping removed LAST. If it dies in
+/// between, both exist — and `resolve_spec_in` then REFUSES that name as ambiguous instead
+/// of silently picking one, which is a stopped workload with a clear message rather than a
+/// workload writing into the wrong place.
+fn cmd_migrate(root: &Path, dry_run: bool) -> Result<()> {
+    let legacy = shares_store_legacy(root)?;
+    let already = shares_store_ns(root, "default")?;
+    let global = VolumeStore::open(root)?;
+    let scoped = VolumeStore::open_scoped(root, "default")?;
+    let mut moved = 0usize;
+    for rec in legacy.list().unwrap_or_default() {
+        if already.load(&rec.name).is_ok() {
+            super::output::warn(&super::po::tf(
+                "sharevolume '{name}': a namespaced record already exists — left alone, \
+                 resolve it by hand",
+                &[("name", &rec.name)],
+            ));
+            continue;
+        }
+        if dry_run {
+            println!(
+                "{}",
+                super::po::tf(
+                    "would migrate sharevolume/{name} to namespace default",
+                    &[("name", &rec.name)],
+                )
+            );
+            moved += 1;
+            continue;
+        }
+        let mut next = rec.clone();
+        next.namespace = "default".to_string();
+        scoped.register_external(
+            &rec.name,
+            std::path::Path::new(&rec.mountpoint),
+            rec.quota_bytes,
+            rec.alert_pct,
+        )?;
+        already.save(&rec.name, &next)?;
+        legacy.remove(&rec.name)?;
+        // Last: the global bookkeeping dir. `remove` never touches the shared data
+        // (see `register_external`'s doc) — only this store's own directory.
+        let _ = global.remove(&rec.name);
+        println!(
+            "{}",
+            super::po::tf(
+                "sharevolume/{name}: migrated to namespace default",
+                &[("name", &rec.name)],
+            )
+        );
+        moved += 1;
+    }
+    if moved == 0 {
+        println!("{}", super::po::t("nothing to migrate"));
+    }
+    Ok(())
+}
+
+fn apply_one(root: &Path, name: &str, spec: &ShareVolumeSpec, namespace: &str) -> Result<()> {
+    let namespace = safe_ns(namespace);
+    // The parent Storage is NOT namespaced: it is the NAS mount itself, node
+    // infrastructure, and scoping it would mean one mount per namespace of the same
+    // export. What gets scoped is the SHARE carved out of it.
+    let vstore = VolumeStore::open(root)?;
+    // An already-existing share keeps the path it was created with. `apply` is
+    // "ensure present", so recomputing the path on a re-apply would move a legacy
+    // share's data out from under it and orphan every byte already written there —
+    // `sharevolume migrate` is the explicit way to move one, on purpose.
+    let existing = load_record(root, &namespace, name).ok();
+    let legacy = existing.as_ref().map(|(_, l)| *l).unwrap_or(false);
     let parent = vstore.inspect(&spec.storage_ref).map_err(|_| {
         Error::Invalid(super::po::tf(
             "ShareVolume '{name}': storageRef '{storage_ref}' does not exist — create it first \
@@ -158,23 +435,45 @@ fn apply_one(
     // `register_external`'s own name-charset validation runs BEFORE it
     // touches disk — this join can't escape `<parent>/shares/` with a name
     // that will end up being rejected anyway.
-    let subdir = Path::new(&parent.mountpoint).join("shares").join(name);
-    let vol = vstore.register_external(name, &subdir, quota_bytes, spec.alert_pct)?;
+    // New shares live under their namespace: `<storage>/shares/<ns>/<name>`. Without the
+    // namespace component two tenants that both call their share `db` get the SAME
+    // directory — and `rm --purge-data` on one deletes the other's data.
+    let subdir = match &existing {
+        Some((rec, _)) => std::path::PathBuf::from(&rec.mountpoint),
+        None => Path::new(&parent.mountpoint)
+            .join("shares")
+            .join(&namespace)
+            .join(name),
+    };
+    // The backing volume goes in the namespace's own sub-tree so `-v <name>` resolves to
+    // THIS namespace's share (`VolumeStore::resolve_spec_in`). A legacy share keeps its
+    // global registration until `migrate` moves it, so nothing consuming it breaks today.
+    let reg = if legacy {
+        VolumeStore::open(root)?
+    } else {
+        VolumeStore::open_scoped(root, &namespace)?
+    };
+    let vol = reg.register_external(name, &subdir, quota_bytes, spec.alert_pct)?;
 
     // Idempotent re-apply preserves the original `created_unix`.
-    let created_unix = store
-        .load(name)
-        .map(|r| r.created_unix)
-        .unwrap_or_else(|_| output::now_unix());
+    let created_unix = existing
+        .as_ref()
+        .map(|(r, _)| r.created_unix)
+        .unwrap_or_else(output::now_unix);
     let rec = ShareRecord {
         name: name.to_string(),
+        namespace: namespace.clone(),
         storage_ref: spec.storage_ref.clone(),
         mountpoint: vol.mountpoint.clone(),
         quota_bytes,
         alert_pct: spec.alert_pct,
         created_unix,
     };
-    store.save(name, &rec)?;
+    if legacy {
+        shares_store_legacy(root)?.save(name, &rec)?;
+    } else {
+        shares_store_ns(root, &namespace)?.save(name, &rec)?;
+    }
     println!(
         "sharevolume/{name}: {} ({} -> {})",
         super::po::t("ready"),
@@ -200,6 +499,7 @@ fn alert_label(warn: bool, over: bool) -> &'static str {
 #[derive(serde::Serialize)]
 struct ShareVolumeLsRow {
     name: String,
+    namespace: String,
     storage: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     quota_bytes: Option<u64>,
@@ -211,19 +511,16 @@ struct ShareVolumeLsRow {
     mountpoint: String,
 }
 
-fn cmd_ls(
-    vstore: &VolumeStore,
-    sstore: &JsonStore<ShareRecord>,
-    format: output::OutputFormat,
-) -> Result<()> {
+fn cmd_ls(root: &Path, vstore: &VolumeStore, format: output::OutputFormat) -> Result<()> {
     if format == output::OutputFormat::Json {
         let mut rows = Vec::new();
-        for rec in sstore.list()? {
+        for rec in list_all(root)? {
             let path = Path::new(&rec.mountpoint);
             let u = super::volume::measured_usage(path);
             let qs = vstore.quota_state_at_checked(path, rec.quota_bytes, rec.alert_pct);
             rows.push(ShareVolumeLsRow {
                 name: rec.name,
+                namespace: rec.namespace,
                 storage: rec.storage_ref,
                 quota_bytes: rec.quota_bytes,
                 used_bytes: u.bytes,
@@ -236,8 +533,18 @@ fn cmd_ls(
         }
         return output::print_json(&rows);
     }
-    let mut t = output::Table::new(&["NAME", "STORAGE", "QUOTA", "USED", "ALERT", "MOUNTPOINT"]);
-    for rec in sstore.list()? {
+    // Lists EVERY namespace, never just one: a share that exists and is invisible is how
+    // an operator deletes a Storage believing nothing hangs off it.
+    let mut t = output::Table::new(&[
+        "NAMESPACE",
+        "NAME",
+        "STORAGE",
+        "QUOTA",
+        "USED",
+        "ALERT",
+        "MOUNTPOINT",
+    ]);
+    for rec in list_all(root)? {
         let path = Path::new(&rec.mountpoint);
         // MEASURED usage, with the mapped-userns fallback: a tenant's share is
         // written by a container in a mapped userns, so the direct walk hits
@@ -246,6 +553,7 @@ fn cmd_ls(
         let u = super::volume::measured_usage(path);
         let qs = vstore.quota_state_at_checked(path, rec.quota_bytes, rec.alert_pct);
         t.row(vec![
+            rec.namespace,
             rec.name,
             rec.storage_ref,
             rec.quota_bytes
@@ -268,13 +576,8 @@ fn cmd_ls(
     Ok(())
 }
 
-fn cmd_describe(vstore: &VolumeStore, sstore: &JsonStore<ShareRecord>, name: &str) -> Result<()> {
-    let rec = sstore.load(name).map_err(|e| match e {
-        Error::NotFound(n) => Error::Invalid(format!(
-            "no such sharevolume: {n} (see `delonix sharevolume ls`)"
-        )),
-        e => e,
-    })?;
+fn cmd_describe(root: &Path, vstore: &VolumeStore, name: &str, namespace: &str) -> Result<()> {
+    let (rec, _legacy) = load_record(root, namespace, name)?;
     let path = Path::new(&rec.mountpoint);
     let u = super::volume::measured_usage(path);
     let qs = vstore.quota_state_at_checked(path, rec.quota_bytes, rec.alert_pct);
@@ -304,18 +607,15 @@ fn cmd_describe(vstore: &VolumeStore, sstore: &JsonStore<ShareRecord>, name: &st
     Ok(())
 }
 
-fn cmd_rm(
-    vstore: &VolumeStore,
-    sstore: &JsonStore<ShareRecord>,
-    name: &str,
-    purge_data: bool,
-) -> Result<()> {
-    let rec = sstore.load(name).map_err(|e| match e {
-        Error::NotFound(n) => Error::Invalid(format!(
-            "no such sharevolume: {n} (see `delonix sharevolume ls`)"
-        )),
-        e => e,
-    })?;
+fn cmd_rm(root: &Path, name: &str, purge_data: bool, namespace: &str) -> Result<()> {
+    let (rec, legacy) = load_record(root, namespace, name)?;
+    // The bookkeeping lives where the record lives: a scoped share de-registers from its
+    // namespace's volume sub-tree, a legacy one from the global store.
+    let vstore = if legacy {
+        VolumeStore::open(root)?
+    } else {
+        VolumeStore::open_scoped(root, &rec.namespace)?
+    };
     // Best-effort: `remove` only ever deletes THIS store's own bookkeeping
     // dir (see `register_external`'s doc) — the shared data is untouched.
     let _ = vstore.remove(name);
@@ -352,7 +652,11 @@ fn cmd_rm(
             });
         }
     }
-    sstore.remove(name)?;
+    if legacy {
+        shares_store_legacy(root)?.remove(name)?;
+    } else {
+        shares_store_ns(root, &rec.namespace)?.remove(name)?;
+    }
     delonix_runtime_core::events::emit(
         &state_root(),
         "sharevolume",
@@ -403,22 +707,24 @@ mod tests {
                 .as_nanos(),
             seq
         ));
+        // The share store is now the `default` NAMESPACE's, which is where `apply_one`
+        // writes; the flat `sharevolumes/` is the legacy path and only `migrate` touches it.
         (
             VolumeStore::open(&tmp).unwrap(),
-            JsonStore::open(tmp.join("sharevolumes")).unwrap(),
+            JsonStore::open(tmp.join("sharevolumes").join("default")).unwrap(),
             tmp,
         )
     }
 
     #[test]
     fn apply_recusa_storage_ref_inexistente() {
-        let (vstore, sstore, tmp) = stores();
+        let (_vstore, _sstore, tmp) = stores();
         let spec = ShareVolumeSpec {
             storage_ref: "nao-existe".to_string(),
             quota: None,
             alert_pct: None,
         };
-        let err = apply_one(&vstore, &sstore, "sv1", &spec).unwrap_err();
+        let err = apply_one(&tmp, "sv1", &spec, "default").unwrap_err();
         assert!(format!("{err}").contains("storageRef"));
         let _ = std::fs::remove_dir_all(&tmp);
     }
@@ -434,8 +740,8 @@ mod tests {
             quota: Some("1M".to_string()),
             alert_pct: Some(80),
         };
-        apply_one(&vstore, &sstore, "tenant-a", &spec).unwrap();
-        apply_one(&vstore, &sstore, "tenant-b", &spec).unwrap();
+        apply_one(&tmp, "tenant-a", &spec, "default").unwrap();
+        apply_one(&tmp, "tenant-b", &spec, "default").unwrap();
 
         let a = sstore.load("tenant-a").unwrap();
         let b = sstore.load("tenant-b").unwrap();
@@ -449,9 +755,65 @@ mod tests {
 
         // Idempotent re-apply: same name, `created_unix` preserved.
         std::thread::sleep(std::time::Duration::from_millis(5));
-        apply_one(&vstore, &sstore, "tenant-a", &spec).unwrap();
+        apply_one(&tmp, "tenant-a", &spec, "default").unwrap();
         let a2 = sstore.load("tenant-a").unwrap();
         assert_eq!(a.created_unix, a2.created_unix);
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    /// O invariante do B2: dois inquilinos, o MESMO nome, e um purge que nao atravessa a
+    /// fronteira.
+    ///
+    /// Antes do escopo, o caminho dos dados era `<storage>/shares/<nome>` — sem namespace —
+    /// por isso dois `db` partilhavam o directorio e o `--purge-data` de um levava os dados
+    /// do outro. O teste afirma as tres coisas que tem de valer ao mesmo tempo: caminhos
+    /// distintos, `-v db` a resolver para o `db` da SUA namespace, e o purge de um a deixar
+    /// o outro intacto.
+    #[test]
+    fn dois_namespaces_com_o_mesmo_share_nao_se_tocam() {
+        let (vstore, _sstore, tmp) = stores();
+        vstore.create("nas-shared").unwrap();
+        let spec = ShareVolumeSpec {
+            storage_ref: "nas-shared".to_string(),
+            quota: None,
+            alert_pct: None,
+        };
+        apply_one(&tmp, "db", &spec, "teamA").unwrap();
+        apply_one(&tmp, "db", &spec, "teamB").unwrap();
+
+        let (a, _) = load_record(&tmp, "teamA", "db").unwrap();
+        let (b, _) = load_record(&tmp, "teamB", "db").unwrap();
+        assert_ne!(
+            a.mountpoint, b.mountpoint,
+            "cada namespace tem o SEU caminho"
+        );
+        assert!(a.mountpoint.contains("teamA"), "{}", a.mountpoint);
+        assert!(b.mountpoint.contains("teamB"), "{}", b.mountpoint);
+
+        // Dados reais dos dois lados.
+        std::fs::write(Path::new(&a.mountpoint).join("marca"), b"de-A").unwrap();
+        std::fs::write(Path::new(&b.mountpoint).join("marca"), b"de-B").unwrap();
+
+        // `-v db:/data` resolve para o db da namespace de quem monta, nao para o outro.
+        let m = vstore.resolve_spec_in("db:/data", "teamB").unwrap();
+        assert_eq!(m.source, b.mountpoint, "teamB tem de receber o SEU db");
+
+        // O purge de um NAO pode tocar no outro.
+        cmd_rm(&tmp, "db", true, "teamA").unwrap();
+        assert!(
+            !Path::new(&a.mountpoint).exists(),
+            "os dados de teamA tinham de desaparecer"
+        );
+        assert_eq!(
+            std::fs::read(Path::new(&b.mountpoint).join("marca")).unwrap(),
+            b"de-B",
+            "os dados de teamB tinham de ficar INTACTOS"
+        );
+        assert!(
+            load_record(&tmp, "teamB", "db").is_ok(),
+            "o registo de teamB sobrevive"
+        );
 
         let _ = std::fs::remove_dir_all(&tmp);
     }
@@ -465,11 +827,11 @@ mod tests {
             quota: None,
             alert_pct: None,
         };
-        apply_one(&vstore, &sstore, "tenant-a", &spec).unwrap();
+        apply_one(&tmp, "tenant-a", &spec, "default").unwrap();
         let mountpoint = sstore.load("tenant-a").unwrap().mountpoint;
         std::fs::write(Path::new(&mountpoint).join("f"), b"data").unwrap();
 
-        cmd_rm(&vstore, &sstore, "tenant-a", false).unwrap();
+        cmd_rm(&tmp, "tenant-a", false, "default").unwrap();
         assert!(
             sstore.load("tenant-a").is_err(),
             "o registo devia ter desaparecido"
@@ -491,10 +853,10 @@ mod tests {
             quota: None,
             alert_pct: None,
         };
-        apply_one(&vstore, &sstore, "tenant-a", &spec).unwrap();
+        apply_one(&tmp, "tenant-a", &spec, "default").unwrap();
         let mountpoint = sstore.load("tenant-a").unwrap().mountpoint;
 
-        cmd_rm(&vstore, &sstore, "tenant-a", true).unwrap();
+        cmd_rm(&tmp, "tenant-a", true, "default").unwrap();
         assert!(
             !Path::new(&mountpoint).exists(),
             "--purge-data deve apagar o subdirectório"

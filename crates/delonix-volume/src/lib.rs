@@ -11,6 +11,7 @@
 
 use delonix_runtime_core::{write_atomic, Error, Mount, Result};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -41,6 +42,18 @@ pub struct Volume {
     /// Usage percentage above which an alert is raised (default 90).
     #[serde(default)]
     pub alert_pct: Option<u8>,
+    /// Free labels (k8s style) — short, identifying, safe to show in a listing.
+    /// A declarative `apply` stamps ownership here (`delonix.io/stack=<name>`),
+    /// which is what makes `stack destroy`/`--prune` possible without inventing a
+    /// registry of stacks that would drift out of sync. `#[serde(default)]` so
+    /// every `meta.json` already on disk keeps deserializing.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub labels: BTreeMap<String, String>,
+    /// Free annotations — the same idea, for data that is NOT identifying and may
+    /// be large (the reconciler keeps the last applied spec under
+    /// `delonix.io/last-applied` here, never in `labels`).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub annotations: BTreeMap<String, String>,
 }
 
 /// The drivers that mount a network share (as opposed to `local`/loopback).
@@ -172,6 +185,38 @@ impl VolumeStore {
         Ok(Self { root })
     }
 
+    /// Sub-tree reserved for namespace-scoped volumes: `<root>/volumes/.ns/`.
+    ///
+    /// `.ns` cannot collide with a volume, ever — `valid_name` refuses a leading `.`. That
+    /// is the whole reason for the odd-looking name: every other separator that came to
+    /// mind (`-`, `_`, `.` inside the name) is a LEGAL character in a volume name, so any
+    /// `<ns><sep><name>` encoding is ambiguous. It is the same collision class the compose
+    /// project names already had to solve, and a directory boundary sidesteps it instead of
+    /// encoding around it.
+    const NS_SUBTREE: &'static str = ".ns";
+
+    /// A store rooted at ONE namespace's sub-tree, so every existing method
+    /// (`register_external`, `inspect`, `remove`, quotas) works on it unchanged.
+    pub fn open_scoped(base: impl Into<PathBuf>, namespace: &str) -> Result<Self> {
+        let root = base
+            .into()
+            .join("volumes")
+            .join(Self::NS_SUBTREE)
+            .join(namespace);
+        fs::create_dir_all(&root)?;
+        Ok(Self { root })
+    }
+
+    /// Whether a namespace-scoped volume of this name exists, seen from the UNSCOPED store.
+    fn scoped_exists(&self, namespace: &str, name: &str) -> bool {
+        self.root
+            .join(Self::NS_SUBTREE)
+            .join(namespace)
+            .join(name)
+            .join("meta.json")
+            .exists()
+    }
+
     fn dir(&self, name: &str) -> PathBuf {
         self.root.join(name)
     }
@@ -257,6 +302,8 @@ impl VolumeStore {
                 options: None,
                 quota_bytes,
                 alert_pct,
+                labels: BTreeMap::new(),
+                annotations: BTreeMap::new(),
             }
         };
         write_meta(&self.meta_path(name), &vol)?;
@@ -299,11 +346,57 @@ impl VolumeStore {
             options,
             quota_bytes: None,
             alert_pct: None,
+            labels: BTreeMap::new(),
+            annotations: BTreeMap::new(),
         };
         // Mount BEFORE persisting: if NFS fails, we don't leave an orphan volume.
         if let Err(e) = self.ensure_mounted(&vol) {
             let _ = fs::remove_dir_all(self.dir(name));
             return Err(e);
+        }
+        write_meta(&self.meta_path(name), &vol)?;
+        Ok(vol)
+    }
+
+    /// Merges `labels`/`annotations` into an existing volume's metadata and
+    /// persists it. Used by the declarative reconciler to stamp ownership
+    /// (`delonix.io/stack`) and the last applied spec.
+    ///
+    /// MERGES rather than replaces on purpose: a key this caller does not know
+    /// about (set by an older version, or by a different tool) must survive. A
+    /// key whose value is `None` is REMOVED — that is the only way to unstamp a
+    /// volume that left a stack, and it has to be expressible.
+    ///
+    /// Read-modify-write without a lock, which is what every other mutation on
+    /// this store already does (`register_external`, `set_quota`). The window is
+    /// real but pre-existing and not widened here; the `Store<Container>` sibling
+    /// is the one that carries an `flock`.
+    pub fn set_metadata(
+        &self,
+        name: &str,
+        labels: &[(String, Option<String>)],
+        annotations: &[(String, Option<String>)],
+    ) -> Result<Volume> {
+        let mut vol = self.inspect(name)?;
+        for (k, v) in labels {
+            match v {
+                Some(v) => {
+                    vol.labels.insert(k.clone(), v.clone());
+                }
+                None => {
+                    vol.labels.remove(k);
+                }
+            }
+        }
+        for (k, v) in annotations {
+            match v {
+                Some(v) => {
+                    vol.annotations.insert(k.clone(), v.clone());
+                }
+                None => {
+                    vol.annotations.remove(k);
+                }
+            }
         }
         write_meta(&self.meta_path(name), &vol)?;
         Ok(vol)
@@ -745,10 +838,51 @@ impl VolumeStore {
         Ok(vol)
     }
 
-    /// Translates a `-v` specification into a [`Mount`].
+    /// `resolve_spec` for a workload in `namespace`.
+    ///
+    /// A named volume resolves in this order, and the order is the whole point:
+    ///
+    /// 1. the namespace's own volume (`.ns/<namespace>/<name>`) — what a `ShareVolume`
+    ///    declared in that namespace registers, so `-v db:/data` in `teamA` reaches
+    ///    `teamA`'s `db` and never `teamB`'s;
+    /// 2. the global volume (`<name>`) — every plain `delonix volumes create`, and every
+    ///    share that predates the scoping. This is the "two read paths" the migration
+    ///    decision asked for: nothing that exists today stops resolving.
+    ///
+    /// **If BOTH exist it REFUSES.** Two different volumes answer to the same `-v db` and
+    /// picking either one silently is how a workload ends up writing into another
+    /// namespace's data. That case is rare, always the result of a half-done migration, and
+    /// the error names the way out.
+    ///
+    /// On-demand creation (the Docker-like behaviour of `-v newname:/x`) stays GLOBAL: a
+    /// name nobody declared is not a namespaced share, and creating it scoped would make
+    /// the same command produce a different volume per namespace by accident.
+    pub fn resolve_spec_in(&self, spec: &str, namespace: &str) -> Result<Mount> {
+        let src = spec.split(':').next().unwrap_or_default();
+        let named = !src.is_empty() && !src.starts_with('/') && !src.starts_with('.');
+        if named && self.scoped_exists(namespace, src) {
+            if self.meta_path(src).exists() {
+                return Err(Error::Invalid(format!(
+                    "volume {src:?} is ambiguous in namespace {namespace:?}: a namespaced \
+                     volume and a global one of the same name both exist. Rename one, or \
+                     finish the migration with `delonix sharevolume migrate`"
+                )));
+            }
+            let scoped = Self {
+                root: self.root.join(Self::NS_SUBTREE).join(namespace),
+            };
+            return scoped.resolve_spec(spec);
+        }
+        self.resolve_spec(spec)
+    }
+
+    /// Translates a `-v` specification into a [`Mount`], with NO namespace scoping.
     ///
     /// - `name:/target[:ro]` → named volume (created if it does not exist);
     /// - `/host:/target[:ro]` (or `./rel`) → *bind mount* of a host path.
+    ///
+    /// Prefer [`Self::resolve_spec_in`] for anything that runs on behalf of a workload:
+    /// this one cannot see a namespaced `ShareVolume`.
     pub fn resolve_spec(&self, spec: &str) -> Result<Mount> {
         let parts: Vec<&str> = spec.split(':').collect();
         if parts.len() < 2 || parts.len() > 3 {
@@ -964,6 +1098,71 @@ fn is_mounted(path: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A `meta.json` written before this field existed has to keep
+    /// deserializing — otherwise every volume on an upgraded host vanishes from
+    /// `volumes ls` while its bytes stay on disk, which is exactly the
+    /// cross-tenant leak `write_meta`'s own doc-comment warns about.
+    #[test]
+    fn meta_json_sem_labels_continua_a_desserializar() {
+        let legacy =
+            r#"{"name":"dados","mountpoint":"/x/_data","created_unix":1,"driver":"local"}"#;
+        let v: Volume = serde_json::from_str(legacy).unwrap();
+        assert_eq!(v.name, "dados");
+        assert!(v.labels.is_empty() && v.annotations.is_empty());
+        // And a volume with no metadata serializes without the keys at all
+        // (`skip_serializing_if`), so re-writing a legacy record does not grow it.
+        let back = serde_json::to_string(&v).unwrap();
+        assert!(!back.contains("labels"), "{back}");
+        assert!(!back.contains("annotations"), "{back}");
+    }
+
+    /// The trap this repo has paid for four times (`-v` not persisted, `-p` on a
+    /// custom network, extra networks lost on restart, `Container.pod` never
+    /// assigned): state needed to RECONSTRUCT the resource must survive every
+    /// path that rewrites the record. `create`/`create_with` are idempotent and
+    /// re-enter through `inspect`, so ownership stamped by a previous `apply`
+    /// must still be there after a re-`apply` — otherwise `stack destroy` would
+    /// stop recognizing its own volumes.
+    #[test]
+    fn as_labels_sobrevivem_a_um_create_repetido_e_a_set_quota() {
+        let tmp = std::env::temp_dir().join(format!("dlx-vol-labels-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+        let store = VolumeStore::open(&tmp).unwrap();
+        store.create("dados").unwrap();
+        store
+            .set_metadata(
+                "dados",
+                &[("delonix.io/stack".into(), Some("web".into()))],
+                &[("delonix.io/last-applied".into(), Some("{\"a\":1}".into()))],
+            )
+            .unwrap();
+
+        // Re-`apply` of the same manifest: `create` short-circuits via `inspect`.
+        let again = store.create("dados").unwrap();
+        assert_eq!(again.labels.get("delonix.io/stack").unwrap(), "web");
+        assert_eq!(
+            again.annotations.get("delonix.io/last-applied").unwrap(),
+            "{\"a\":1}"
+        );
+
+        // `create_with` takes a different branch (it also calls `ensure_mounted`).
+        let w = store.create_with("dados", "local", None, None).unwrap();
+        assert_eq!(w.labels.get("delonix.io/stack").unwrap(), "web");
+
+        // A `None` value REMOVES the key — the only way to unstamp a volume that
+        // left a stack.
+        let cleared = store
+            .set_metadata("dados", &[("delonix.io/stack".into(), None)], &[])
+            .unwrap();
+        assert!(cleared.labels.is_empty());
+        assert!(
+            cleared.annotations.contains_key("delonix.io/last-applied"),
+            "removing a label must not touch the annotations"
+        );
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
 
     #[test]
     fn bind_option_rejeita_selinux_e_desconhecidas() {

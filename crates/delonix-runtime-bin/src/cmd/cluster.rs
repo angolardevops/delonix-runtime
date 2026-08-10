@@ -2238,6 +2238,7 @@ users:
                 default_vcpus: None,
                 default_memory: None,
                 default_backend: None,
+                cloud_init: Some(true),
             })
             .unwrap();
         assert_eq!(
@@ -2264,6 +2265,7 @@ users:
                 default_vcpus: None,
                 default_memory: None,
                 default_backend: None,
+                cloud_init: Some(true),
             })
             .unwrap();
         assert_eq!(
@@ -2306,6 +2308,7 @@ users:
                 default_vcpus: None,
                 default_memory: None,
                 default_backend: None,
+                cloud_init: Some(true),
             })
             .unwrap();
         assert_eq!(
@@ -2337,6 +2340,7 @@ users:
                     default_vcpus: None,
                     default_memory: None,
                     default_backend: None,
+                    cloud_init: Some(true),
                 })
                 .unwrap();
         }
@@ -2369,6 +2373,7 @@ users:
                     default_vcpus: None,
                     default_memory: None,
                     default_backend: None,
+                    cloud_init: Some(true),
                 })
                 .unwrap();
         }

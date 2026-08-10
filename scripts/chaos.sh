@@ -643,7 +643,88 @@ scen_control_restart() {
 
 # ------------------------------------------------------------------- driver --
 
-ALL=(holder_kill control_restart holder_wedge slirp_kill idempotent_up oom concurrent_attach namespace_isolation pod_namespace_isolation pod_holder_respawn scale abrupt_kill aggregate_ceiling delegated_scope disk_full write_failure)
+# The declarative cycle has to converge WITHOUT restarting the workload, and has
+# to refuse what it cannot converge instead of doing it anyway.
+#
+# TWO containers on purpose. The lesson from the v0.41.0 pod bug is in
+# `CLAUDE.md`: a guard that consults state the loop itself MUTATES is not a
+# guard, and a scenario with one element never reveals it. Here the second
+# container is the control — it must come out of the whole cycle with the SAME
+# pid, proving the converge touched only what the plan said it would.
+scen_stack_converge() {
+  head_ "stack-converge — o apply converge a quente e recusa o que nao converge"
+  local dir="$SANDBOX/stack-converge"
+  rm -rf "$dir"; mkdir -p "$dir"
+  cat > "$dir/m.yaml" <<YAML
+apiVersion: delonix.io/v1
+kind: Container
+metadata: { name: sc1 }
+spec: { image: $IMAGE, command: ["sleep","600"], memory: 64M, network: host }
+---
+apiVersion: delonix.io/v1
+kind: Container
+metadata: { name: sc2 }
+spec: { image: $IMAGE, command: ["sleep","600"], memory: 64M, network: host }
+YAML
+  dlx stack apply -f "$dir/m.yaml" >/dev/null 2>&1
+  sleep 2
+  local p1 p2; p1=$(cpid sc1); p2=$(cpid sc2)
+  [ -z "$p1" ] || [ -z "$p2" ] && { skip "stack-converge" "containers nao arrancaram"; dlx container rm -f sc1 sc2 >/dev/null 2>&1; return; }
+
+  # 1. Um manifesto inalterado nao pode propor nada.
+  if dlx stack plan -f "$dir/m.yaml" --detailed-exitcode >/dev/null 2>&1; then :
+  else bad "stack-converge" "um manifesto inalterado propos alteracoes"; dlx container rm -f sc1 sc2 >/dev/null 2>&1; return; fi
+
+  # 2. Um campo QUENTE converge sem tocar no pid — e sem tocar no outro container.
+  sed -i '0,/memory: 64M/s//memory: 128M/' "$dir/m.yaml"
+  dlx stack apply -f "$dir/m.yaml" >/dev/null 2>&1
+  local a1 a2; a1=$(cpid sc1); a2=$(cpid sc2)
+  # O pid intacto sozinho NAO prova convergencia — um apply que nao faz nada
+  # tambem deixa o pid intacto. A prova e o registo ter mudado E o plano
+  # seguinte nada ter a propor.
+  local m1 m2
+  m1=$(dlx container inspect sc1 2>/dev/null | grep -o '"memory_max"[^,]*' | head -1)
+  m2=$(dlx container inspect sc2 2>/dev/null | grep -o '"memory_max"[^,]*' | head -1)
+  if [ "$p1" != "$a1" ]; then
+    bad "stack-converge" "convergir a memoria reiniciou o container ($p1 -> $a1)"
+  elif [ "$p2" != "$a2" ]; then
+    bad "stack-converge" "o container que nao mudou foi reiniciado ($p2 -> $a2)"
+  elif [[ "$m1" != *128M* ]]; then
+    bad "stack-converge" "o apply reportou sucesso sem convergir a memoria ($m1)"
+  elif [[ "$m2" != *64M* ]]; then
+    bad "stack-converge" "o apply mexeu no container que nao mudou ($m2)"
+  elif ! dlx stack plan -f "$dir/m.yaml" --detailed-exitcode >/dev/null 2>&1; then
+    bad "stack-converge" "o plano continua a propor alteracoes depois do apply"
+  else
+    ok "stack-converge: memoria a quente (pid $p1 intocado, controlo $p2 intocado)"
+  fi
+
+  # 3. Um campo FRIO tem de ser RECUSADO, sem tocar em nada.
+  sed -i "s|image: $IMAGE|image: $IMAGE-inexistente|" "$dir/m.yaml"
+  if dlx stack apply -f "$dir/m.yaml" >/dev/null 2>&1; then
+    bad "stack-converge" "um campo frio foi aplicado sem --replace"
+  else
+    local r1; r1=$(cpid sc1)
+    if [ "$r1" = "$p1" ]; then ok "stack-converge: campo frio recusado, nada tocado"
+    else bad "stack-converge" "a recusa mexeu no container ($p1 -> $r1)"; fi
+  fi
+
+  # 4. O destroy leva o que a stack possui, e SO isso.
+  sed -i "s|image: $IMAGE-inexistente|image: $IMAGE|" "$dir/m.yaml"
+  dlx container run -d --name sc-alheio --net host "$IMAGE" sleep 600 >/dev/null 2>&1
+  dlx stack destroy -f "$dir/m.yaml" >/dev/null 2>&1
+  if dlx container inspect sc1 >/dev/null 2>&1 || dlx container inspect sc2 >/dev/null 2>&1; then
+    bad "stack-converge" "o destroy deixou containers da stack para tras"
+  elif dlx container inspect sc-alheio >/dev/null 2>&1; then
+    ok "stack-converge: destroy levou os da stack e poupou o alheio"
+  else
+    bad "stack-converge" "o destroy apagou um container que a stack nao possui"
+  fi
+  dlx container rm -f sc-alheio >/dev/null 2>&1
+  rm -rf "$dir"
+}
+
+ALL=(holder_kill control_restart holder_wedge slirp_kill idempotent_up oom concurrent_attach namespace_isolation pod_namespace_isolation pod_holder_respawn scale abrupt_kill aggregate_ceiling delegated_scope disk_full write_failure stack_converge)
 
 while [ $# -gt 0 ]; do
   case "$1" in

@@ -975,12 +975,31 @@ struct FwDocRule {
     proto: Option<String>,
     /// Port, range `n-m`, or `*`.
     port: String,
-    /// Source CIDR (Ingress) — the other end of inbound traffic.
+    /// Source CIDR (ingress) — the other end of inbound traffic.
     #[serde(default)]
     from: Option<String>,
-    /// Destination CIDR (Egress) — the other end of outbound traffic.
+    /// Destination CIDR (egress) — the other end of outbound traffic.
     #[serde(default)]
     to: Option<String>,
+    /// Source **by workload name** (ingress), resolved to that container's SDN
+    /// address at apply time.
+    ///
+    /// Exists because **a container's IP is not stable**: it comes from the SDN
+    /// and changes on a restart. A policy written as a CIDR is therefore a policy
+    /// that silently stops matching the workload it was written for — the same
+    /// lesson `vm bridge` already paid for, where the follow-up recorded is
+    /// exactly "discovery by NAME, so as not to depend on dynamic IPs".
+    ///
+    /// A NAME and not a permissive `from` that also accepts names: a value that
+    /// fails to parse as a CIDR falling back to "treat it as a name" would be a
+    /// silent reinterpretation on a security field, which is the one place this
+    /// engine refuses to guess.
+    #[serde(default, rename = "fromWorkload")]
+    from_workload: Option<String>,
+    /// Destination by workload name (egress). Same reasoning as
+    /// [`FwDocRule::from_workload`].
+    #[serde(default, rename = "toWorkload")]
+    to_workload: Option<String>,
     /// `allow` (default) or `deny`.
     #[serde(default)]
     action: Option<String>,
@@ -998,12 +1017,11 @@ pub fn spec_with_defaults(doc: &ManifestDoc) -> Result<serde_yaml::Value> {
 
 pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
     let (_images, store) = open_stores()?;
-    // NB: `kind: Ingress` is NO LONGER firewall — it is now the k8s-shaped L7/HTTP
-    // Ingress (see `cmd::httproute`). Inbound L4 firewall lives under
-    // `kind: FirewallPolicy` (direction: ingress). `kind: Egress` (outbound) stays.
-    apply_kind(&store, docs, "out")?; // kind: Egress
-                                      // kind: FirewallPolicy — the UNIFIED form (the direction comes from `spec.direction`
-                                      // instead of the Kind name). Applies the SAME logic; the canonical inbound form.
+    // `kind: FirewallPolicy` is now the ONLY firewall Kind. `kind: Ingress` stopped
+    // being firewall a while back (it is the k8s-shaped L7 Ingress, see
+    // `cmd::httproute`), and `kind: Egress` is rewritten into a FirewallPolicy with
+    // `direction: egress` at load time (`manifest::lower_egress`) — so by the time
+    // anything reaches here there is one Kind, one struct and one direction field.
     for doc in manifest::of_kind(docs, "FirewallPolicy") {
         let dir = match doc.spec.get("direction").and_then(|v| v.as_str()) {
             Some("ingress") => "in",
@@ -1020,13 +1038,210 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
     Ok(())
 }
 
-fn apply_kind(store: &Store, docs: &[ManifestDoc], dir: &str) -> Result<()> {
-    // `dir` "in" → the Ingress Kind; "out" → the Egress Kind.
-    let kind = if dir == "in" { "Ingress" } else { "Egress" };
-    for doc in manifest::of_kind(docs, kind) {
-        apply_fw_doc(store, doc, dir)?;
+/// Fields the reconciler compares for a `kind: FirewallPolicy`.
+///
+/// `defaultPolicy` and `rules` converge HOT — `apply_fw_doc` already replaces
+/// the whole direction, in place, with no container restart. `target` and
+/// `direction` do not: they IDENTIFY which direction of which container this
+/// policy governs, so changing one leaves the old target's rules exactly where
+/// they were. That is a `Replace`, and the recreation clears the direction on
+/// the old target — which is the only way the change means what it reads like.
+pub(crate) const RECONCILED_FW_FIELDS: &[&str] =
+    &["target", "direction", "defaultPolicy", "rules", "scope"];
+
+/// One rule, rendered as one comparable string.
+///
+/// Sorted by the caller, never here: the ORDER of allow rules in a policy does
+/// not change what it permits (the chain is built from the whole set), so a
+/// reordered manifest must not read as a change.
+fn rule_key(r: &FwDocRule) -> String {
+    format!(
+        "{}|{}|{}|{}|{}",
+        r.action.as_deref().unwrap_or("allow"),
+        r.proto.as_deref().unwrap_or("any"),
+        r.port,
+        r.from.as_deref().or(r.to.as_deref()).unwrap_or(""),
+        r.from_workload
+            .as_deref()
+            .or(r.to_workload.as_deref())
+            .unwrap_or(""),
+    )
+}
+
+/// The same rendering, from a persisted [`FwRule`].
+///
+/// A persisted rule holds the RESOLVED address, never the workload name it may
+/// have come from — so a policy written with `fromWorkload` compares its
+/// resolved `/32` against the record's. That is why the desired side resolves
+/// too (below): comparing a name against an address would report drift on every
+/// plan for every rule that names a peer.
+fn stored_rule_key(r: &delonix_runtime_core::FwRule) -> String {
+    format!("{}|{}|{}|{}|", r.action, r.proto, r.port, r.src)
+}
+
+/// What the manifest declares, for the reconciler.
+pub(crate) fn desired(doc: &ManifestDoc) -> Result<super::reconcile::Desired> {
+    let spec: FwDocSpec = manifest::spec_of(doc)?;
+    let (_images, store) = open_stores()?;
+    let mut f = std::collections::BTreeMap::new();
+    f.insert("target".into(), spec.target.clone());
+    f.insert(
+        "direction".into(),
+        spec.direction.clone().unwrap_or_default(),
+    );
+    f.insert(
+        "scope".into(),
+        spec.scope.clone().unwrap_or_else(|| "container".into()),
+    );
+    f.insert(
+        "defaultPolicy".into(),
+        spec.default_policy.clone().unwrap_or_else(|| "deny".into()),
+    );
+    let mut keys: Vec<String> = Vec::new();
+    for r in &spec.rules {
+        // Resolve a workload name to its address, exactly as the apply will —
+        // the record stores addresses. A workload that does not exist yet
+        // resolves to nothing and the rule compares by name; the policy cannot
+        // have been applied yet either, so there is nothing to be wrong about.
+        let by_name = r.from_workload.clone().or_else(|| r.to_workload.clone());
+        let resolved = by_name
+            .as_deref()
+            .and_then(|w| workload_cidr(&store, w).ok());
+        match resolved {
+            Some(cidr) => keys.push(format!(
+                "{}|{}|{}|{}|",
+                r.action.as_deref().unwrap_or("allow"),
+                r.proto.as_deref().unwrap_or("any"),
+                r.port,
+                cidr
+            )),
+            None => keys.push(rule_key(r)),
+        }
     }
-    Ok(())
+    keys.sort();
+    f.insert("rules".into(), keys.join(","));
+    Ok(super::reconcile::Desired {
+        kind: "FirewallPolicy".into(),
+        name: doc.metadata.name.clone(),
+        fields: f,
+        converges: true,
+        // NOT prunable, and for a different reason than an `Image`: a policy has
+        // no record of its own — it lives on the target container's
+        // `ContainerFw`. Once it leaves the manifest, nothing on disk says which
+        // target and direction it governed, so there is nothing a prune could
+        // safely clear. This matches what the firewall docs already promise
+        // («removing the Dependency does NOT unprotect the `to`»); what changes
+        // is that the plan no longer implies otherwise.
+        ownable: false,
+    })
+}
+
+/// What is on the machine, for the reconciler.
+///
+/// A firewall policy has no record of its own — it lives on the TARGET
+/// container's `ContainerFw`. So the actual side is keyed by the document name
+/// (what the plan matches on) and read from the target named by that document.
+pub(crate) fn actual(docs: &[ManifestDoc]) -> Result<Vec<super::reconcile::Actual>> {
+    let (_images, store) = open_stores()?;
+    let mut out = Vec::new();
+    for doc in manifest::of_kind(docs, "FirewallPolicy") {
+        let Ok(spec) = manifest::spec_of::<FwDocSpec>(doc) else {
+            continue;
+        };
+        let Ok(c) = store.load(&spec.target) else {
+            continue; // target not created yet — the plan will say Create
+        };
+        let Some(fw) = &c.firewall else { continue };
+        let dir = match spec.direction.as_deref() {
+            Some("ingress") => "in",
+            Some("egress") => "out",
+            _ => continue,
+        };
+        let mut f = std::collections::BTreeMap::new();
+        f.insert("target".into(), spec.target.clone());
+        f.insert(
+            "direction".into(),
+            spec.direction.clone().unwrap_or_default(),
+        );
+        f.insert(
+            "scope".into(),
+            spec.scope.clone().unwrap_or_else(|| "container".into()),
+        );
+        let policy = if dir == "in" {
+            &fw.policy_in
+        } else {
+            &fw.policy_out
+        };
+        f.insert(
+            "defaultPolicy".into(),
+            if policy.is_empty() {
+                "deny".into()
+            } else {
+                policy.clone()
+            },
+        );
+        let mut keys: Vec<String> = fw
+            .rules
+            .iter()
+            .filter(|r| r.dir == dir)
+            .map(stored_rule_key)
+            .collect();
+        keys.sort();
+        f.insert("rules".into(), keys.join(","));
+        out.push(super::reconcile::Actual {
+            kind: "FirewallPolicy".into(),
+            name: doc.metadata.name.clone(),
+            fields: f,
+            owner: c.labels.get(super::reconcile::STACK_LABEL).cloned(),
+            last_applied: c
+                .annotations
+                .get(&format!("{}/{}", super::reconcile::LAST_APPLIED, dir))
+                .and_then(|raw| super::reconcile::decode_last_applied(raw)),
+        });
+    }
+    Ok(out)
+}
+
+/// Converges a policy: re-apply the document. `apply_fw_doc` already replaces
+/// the whole direction, so «converging» is exactly «applying» — there is no
+/// partial path to write, and writing one would be a second way to build the
+/// same chain.
+pub(crate) fn converge_doc(doc: &ManifestDoc) -> Result<()> {
+    let (_images, store) = open_stores()?;
+    let dir = match doc.spec.get("direction").and_then(|v| v.as_str()) {
+        Some("ingress") => "in",
+        Some("egress") => "out",
+        _ => return Ok(()),
+    };
+    apply_fw_doc(&store, doc, dir)
+}
+
+/// Resolves a workload name to the `/32` of its SDN address.
+///
+/// Fails LOUDLY when the container has no address, and says why: a workload on
+/// `--net host`/`none` has no address on the SDN for a rule to name, and
+/// producing an empty source instead would silently widen the rule to
+/// `0.0.0.0/0` — turning "allow this one peer" into "allow everyone", which is
+/// the worst possible way for a firewall to fail.
+fn workload_cidr(store: &Store, name: &str) -> Result<String> {
+    let c = store
+        .list()?
+        .into_iter()
+        .find(|c| c.name == name)
+        .ok_or_else(|| {
+            Error::Invalid(super::po::tf(
+                "workload '{name}' does not exist (a rule names it as the other end)",
+                &[("name", name)],
+            ))
+        })?;
+    let ip = c.ip.as_deref().filter(|s| !s.is_empty()).ok_or_else(|| {
+        Error::Invalid(super::po::tf(
+            "workload '{name}' has no address on the SDN (is it on a custom network?) — \
+             a rule cannot name it",
+            &[("name", name)],
+        ))
+    })?;
+    Ok(format!("{ip}/32"))
 }
 
 /// Applies ONE firewall document (Ingress/Egress/FirewallPolicy) in the `dir`
@@ -1086,10 +1301,29 @@ fn apply_fw_doc(store: &Store, doc: &ManifestDoc, dir: &str) -> Result<()> {
                 doc.metadata.name, r.port
             )));
         }
-        let src = r.from.clone().or_else(|| r.to.clone()).unwrap_or_default();
-        if let Err(e) = check_cidr(&src) {
-            return Err(Error::Invalid(format!("{kind}/{}: {e}", doc.metadata.name)));
+        // A rule names the other end EITHER by address or by workload, never
+        // both — two answers to "who is the other end" is a contradiction, and
+        // on a firewall a contradiction is not something to resolve by
+        // precedence.
+        let by_name = r.from_workload.clone().or_else(|| r.to_workload.clone());
+        if by_name.is_some() && (r.from.is_some() || r.to.is_some()) {
+            return Err(Error::Invalid(super::po::tf(
+                "{kind}/{name}: a rule uses both an address (from/to) and a workload \
+                 (fromWorkload/toWorkload) — pick one",
+                &[("kind", kind), ("name", &doc.metadata.name)],
+            )));
         }
+        let src = match &by_name {
+            Some(w) => workload_cidr(store, w)
+                .map_err(|e| Error::Invalid(format!("{kind}/{}: {e}", doc.metadata.name)))?,
+            None => {
+                let s = r.from.clone().or_else(|| r.to.clone()).unwrap_or_default();
+                if let Err(e) = check_cidr(&s) {
+                    return Err(Error::Invalid(format!("{kind}/{}: {e}", doc.metadata.name)));
+                }
+                s
+            }
+        };
         let action = r.action.clone().unwrap_or_else(|| "allow".into());
         if !matches!(action.as_str(), "allow" | "deny") {
             return Err(Error::Invalid(format!(
@@ -1130,39 +1364,6 @@ fn apply_fw_doc(store: &Store, doc: &ManifestDoc, dir: &str) -> Result<()> {
         "{kind}/{}: applied to {} ({n} rule(s), default {policy})",
         doc.metadata.name, spec.target
     );
-    Ok(())
-}
-
-/// **Shared per-container ingress core**: replaces a container's `in` direction
-/// (default-policy + `allow` rules), preserving the outbound rules. Used by
-/// `kind: Dependency` ('A knows B' compiles to: on B, ingress default-deny +
-/// allow of A's IP) without duplicating the `ContainerFw` construction.
-/// The `allows` already come with `dir="in"`.
-pub(crate) fn apply_container_ingress(
-    store: &Store,
-    target: &str,
-    policy: &str,
-    allows: &[FwRule],
-) -> Result<()> {
-    if !matches!(policy, "allow" | "deny") {
-        return Err(Error::Invalid(super::po::tf(
-            "ingress of '{target}': policy must be allow|deny",
-            &[("target", target)],
-        )));
-    }
-    update_locked(store, target, |c| {
-        // Guard only: rejects a container off the SDN. The addresses the firewall is
-        // keyed on come from `container_ips` (primary + every additional network).
-        require_sdn_ip(c)?;
-        let mut fw = c.firewall.clone().unwrap_or_default();
-        fw.enabled = true;
-        fw.rules.retain(|r| r.dir != "in"); // declarative: the `in` direction is replaced
-        fw.policy_in = policy.to_string();
-        fw.rules.extend(allows.iter().cloned());
-        super::container::apply_firewall_everywhere(c, &fw)?;
-        c.firewall = Some(fw);
-        Ok(true)
-    })?;
     Ok(())
 }
 
@@ -1491,6 +1692,8 @@ mod tests {
         );
         // `rules` in scope network.
         let rules = vec![FwDocRule {
+            from_workload: None,
+            to_workload: None,
             proto: None,
             port: "80".into(),
             from: None,

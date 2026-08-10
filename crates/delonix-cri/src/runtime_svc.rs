@@ -11,11 +11,24 @@ use crate::{RUNTIME_NAME, RUNTIME_VERSION};
 pub struct DelonixRuntime {
     pub base: PathBuf,
     pub streamer: crate::streaming::Streamer,
+    /// Node-level upper bound on container capabilities (see [`crate::cap_ceiling`]).
+    /// Carried on the service, not read from the environment where it is needed:
+    /// the value is resolved ONCE at startup, so a malformed setting fails the
+    /// server instead of silently degrading per request.
+    pub cap_ceiling: crate::CapCeiling,
 }
 
 impl DelonixRuntime {
-    pub fn new(base: PathBuf, streamer: crate::streaming::Streamer) -> Self {
-        Self { base, streamer }
+    pub fn new(
+        base: PathBuf,
+        streamer: crate::streaming::Streamer,
+        cap_ceiling: crate::CapCeiling,
+    ) -> Self {
+        Self {
+            base,
+            streamer,
+            cap_ceiling,
+        }
     }
 }
 
@@ -69,8 +82,9 @@ impl RuntimeService for DelonixRuntime {
 
     async fn status(
         &self,
-        _req: Request<StatusRequest>,
+        req: Request<StatusRequest>,
     ) -> Result<Response<StatusResponse>, Status> {
+        let verbose = req.into_inner().verbose;
         let cond = |t: &str, ok: bool, reason: &str, message: &str| RuntimeCondition {
             r#type: t.into(),
             status: ok,
@@ -135,11 +149,19 @@ impl RuntimeService for DelonixRuntime {
                 )
             }
         };
+        // `info` is only populated for a verbose request (CRI contract). The
+        // capability ceiling goes here so an operator can read the policy in force
+        // straight from `crictl info`, instead of trusting that the flag they
+        // wrote in a unit file is the one the running server parsed.
+        let mut info = std::collections::HashMap::new();
+        if verbose {
+            info.insert("capabilityCeiling".to_string(), self.cap_ceiling.describe());
+        }
         Ok(Response::new(StatusResponse {
             status: Some(RuntimeStatus {
                 conditions: vec![runtime_ready, network_ready],
             }),
-            info: Default::default(),
+            info,
             runtime_handlers: vec![],
             features: None,
         }))
@@ -209,7 +231,8 @@ impl RuntimeService for DelonixRuntime {
         r: Request<CreateContainerRequest>,
     ) -> Result<Response<CreateContainerResponse>, Status> {
         let (base, req) = (self.base.clone(), r.into_inner());
-        blocking(move || lifecycle::create_container(&base, req)).await
+        let ceiling = self.cap_ceiling;
+        blocking(move || lifecycle::create_container(&base, req, ceiling)).await
     }
     #[tracing::instrument(name = "cri.start_container", skip_all, fields(
         container = %r.get_ref().container_id,
@@ -219,7 +242,8 @@ impl RuntimeService for DelonixRuntime {
         r: Request<StartContainerRequest>,
     ) -> Result<Response<StartContainerResponse>, Status> {
         let (base, id) = (self.base.clone(), r.into_inner().container_id);
-        blocking(move || lifecycle::start_container(&base, id)).await
+        let ceiling = self.cap_ceiling;
+        blocking(move || lifecycle::start_container(&base, id, ceiling)).await
     }
     #[tracing::instrument(name = "cri.stop_container", skip_all, fields(
         container = %r.get_ref().container_id,
@@ -463,7 +487,7 @@ mod tests {
         ));
         std::fs::create_dir_all(&base).unwrap();
         let streamer = crate::streaming::Streamer::new(base.clone(), "127.0.0.1:0".to_string());
-        let svc = DelonixRuntime::new(base.clone(), streamer);
+        let svc = DelonixRuntime::new(base.clone(), streamer, crate::CapCeiling::unlimited());
 
         let resp = svc
             .status(Request::new(StatusRequest { verbose: false }))

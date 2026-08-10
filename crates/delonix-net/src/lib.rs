@@ -51,7 +51,7 @@ fn default_base() -> u8 {
     if let Some(parent) = path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
-    let _ = std::fs::write(&path, base.to_string());
+    let _ = delonix_runtime_core::write_atomic(&path, base.to_string().as_bytes());
     base
 }
 
@@ -738,6 +738,25 @@ pub struct Network {
     /// `ensure_overlay_wg` brings up the wg and the VXLAN FDB uses the peers' `wg_ip`,
     /// encrypting the transport.
     pub wg_ip: Option<String>,
+    /// Free labels (k8s style) — short, identifying. The declarative reconciler
+    /// stamps ownership here (`delonix.io/stack=<name>`), which is what makes
+    /// `stack destroy`/`--prune` possible without a registry of stacks that would
+    /// drift out of sync.
+    ///
+    /// Persisted as `label.<key>=<value>` lines in the record. A record written
+    /// by an older binary simply has none, and an older binary reading a record
+    /// with them ignores the unknown keys — this file format has always parsed
+    /// `key=value` into a map and only read the keys it knows.
+    pub labels: std::collections::BTreeMap<String, String>,
+    /// Free annotations — same idea, for data that is NOT identifying and may be
+    /// large (the reconciler's `delonix.io/last-applied` lives here, never in
+    /// `labels`). Persisted as `annotation.<key>=<value>`.
+    ///
+    /// The value must not contain a literal newline (it would split the record
+    /// into two lines); `set_metadata` rejects one rather than writing a record
+    /// that reads back as something else. Compact JSON is safe — `serde_json`
+    /// escapes newlines inside strings as `\n`, two characters.
+    pub annotations: std::collections::BTreeMap<String, String>,
 }
 
 /// `bridge` driver (the default case of a user network/`delonix0`).
@@ -776,6 +795,8 @@ impl Network {
             vni: None,
             peers: Vec::new(),
             wg_ip: None,
+            labels: std::collections::BTreeMap::new(),
+            annotations: std::collections::BTreeMap::new(),
         }
     }
 
@@ -794,6 +815,8 @@ impl Network {
             vni: None,
             peers: Vec::new(),
             wg_ip: None,
+            labels: std::collections::BTreeMap::new(),
+            annotations: std::collections::BTreeMap::new(),
         }
     }
 
@@ -830,6 +853,8 @@ impl Network {
             vni: None,
             peers: Vec::new(),
             wg_ip: None,
+            labels: std::collections::BTreeMap::new(),
+            annotations: std::collections::BTreeMap::new(),
         }
     }
 
@@ -896,11 +921,24 @@ impl NetworkStore {
                 kv.insert(k.trim(), v.trim().to_string());
             }
         }
+        // `label.<k>` / `annotation.<k>` — collected in their own pass because they
+        // are the only PREFIXED keys in this format; everything else is a fixed
+        // name. Unknown keys keep being ignored, which is what lets an older
+        // binary read a record written by this one.
+        let mut labels = std::collections::BTreeMap::new();
+        let mut annotations = std::collections::BTreeMap::new();
+        for (k, v) in &kv {
+            if let Some(key) = k.strip_prefix("label.") {
+                labels.insert(key.to_string(), v.clone());
+            } else if let Some(key) = k.strip_prefix("annotation.") {
+                annotations.insert(key.to_string(), v.clone());
+            }
+        }
         let driver = kv
             .get("driver")
             .map(String::as_str)
             .unwrap_or(DRIVER_BRIDGE);
-        match driver {
+        let mut net = match driver {
             DRIVER_MACVLAN | DRIVER_IPVLAN => {
                 let parent = kv.get("parent").cloned().ok_or_else(|| {
                     Error::Invalid(format!("network '{name}' ({driver}) has no parent"))
@@ -909,7 +947,7 @@ impl NetworkStore {
                     Error::Invalid(format!("network '{name}' ({driver}) has no subnet"))
                 })?;
                 let gateway = kv.get("gateway").cloned().unwrap_or_default();
-                Ok(Network::lan(name, driver, &parent, &subnet, &gateway))
+                Network::lan(name, driver, &parent, &subnet, &gateway)
             }
             DRIVER_OVERLAY => {
                 let base: u8 = kv
@@ -932,16 +970,19 @@ impl NetworkStore {
                     .get("wgip")
                     .map(|s| s.trim().to_string())
                     .filter(|s| !s.is_empty());
-                Ok(Network::overlay_with_base(name, base, vni, peers, wg_ip))
+                Network::overlay_with_base(name, base, vni, peers, wg_ip)
             }
             _ => {
                 let base: u8 = kv
                     .get("base")
                     .and_then(|b| b.parse().ok())
                     .ok_or_else(|| Error::Invalid(format!("network '{name}' is corrupted")))?;
-                Ok(Network::user_with_base(name, base))
+                Network::user_with_base(name, base)
             }
-        }
+        };
+        net.labels = labels;
+        net.annotations = annotations;
+        Ok(net)
     }
 
     /// Lists the user networks (does not include the default `bridge`).
@@ -994,8 +1035,59 @@ impl NetworkStore {
                 base + 1
             };
         }
-        std::fs::write(self.path(name), base.to_string())?;
+        delonix_runtime_core::write_atomic(&self.path(name), base.to_string().as_bytes())?;
         self.get(name)
+    }
+
+    /// The base octet a requested `subnet` maps to — `10.<base>.0.0/16` is the
+    /// only shape a bridge network has ever had here, because the on-disk
+    /// record holds ONE OCTET and everything else (bridge name, gateway, IPAM
+    /// range) is derived from it.
+    ///
+    /// Anything else is REFUSED, naming what is supported. Until this existed,
+    /// `--subnet` and `spec.subnet` were accepted and silently dropped for the
+    /// bridge driver: the caller asked for `10.50.0.0/16`, got whatever octet
+    /// the store picked from the network's name hash, and was told nothing.
+    pub fn base_from_subnet(subnet: &str) -> Result<u8> {
+        let lo = delonix_runtime_core::workload_net::WORKLOAD_IPV4_LO.octets()[1];
+        let hi = delonix_runtime_core::workload_net::WORKLOAD_IPV4_HI.octets()[1];
+        let unsupported = |why: &str| {
+            Error::Invalid(format!(
+                "subnet '{subnet}': {why}. A bridge network is always \
+                 `10.<{lo}-{hi}>.0.0/16` (the record holds one octet, and the \
+                 gateway/IPAM are derived from it) — pass one of those, or omit \
+                 --subnet to let the engine pick a free one"
+            ))
+        };
+        let (addr, prefix_len) = subnet
+            .split_once('/')
+            .ok_or_else(|| unsupported("no prefix length"))?;
+        if prefix_len.trim() != "16" {
+            return Err(unsupported("only /16 is supported"));
+        }
+        let octets: Vec<&str> = addr.split('.').collect();
+        if octets.len() != 4 {
+            return Err(unsupported("not an IPv4 network"));
+        }
+        let parsed: Vec<u8> = octets
+            .iter()
+            .map(|o| {
+                o.parse::<u8>()
+                    .map_err(|_| unsupported("not an IPv4 network"))
+            })
+            .collect::<Result<Vec<u8>>>()?;
+        if parsed[0] != 10 {
+            return Err(unsupported("outside the workload address space"));
+        }
+        // A /16 whose host part is not zero is a typo, not an intent — say so
+        // rather than quietly rounding it down to the network address.
+        if parsed[2] != 0 || parsed[3] != 0 {
+            return Err(unsupported("a /16 must end in .0.0"));
+        }
+        if !(lo..=hi).contains(&parsed[1]) {
+            return Err(unsupported("outside the workload address space"));
+        }
+        Ok(parsed[1])
     }
 
     /// Creates a user network with an **explicit base octet** (`10.{base}.0.0/16`).
@@ -1015,14 +1107,108 @@ impl NetworkStore {
             return Err(Error::Invalid(format!("invalid network name: '{name}'")));
         }
         if self.path(name).exists() {
-            return self.get(name);
+            let existing = self.get(name)?;
+            // Idempotent for the SAME subnet (a re-`apply` of an unchanged
+            // manifest must be a no-op), but a different one is a change this
+            // cannot make: the base octet is the network's identity here, and
+            // renumbering a live network would strand every workload already
+            // addressed on it. Say so instead of returning the old one as if
+            // the request had been honoured.
+            if existing.prefix != format!("10.{base}") {
+                return Err(Error::Invalid(format!(
+                    "network '{name}' already exists as {} — a subnet cannot be \
+                     changed in place (workloads are addressed on it); remove it \
+                     and create it again if that is what you want",
+                    existing.subnet
+                )));
+            }
+            return Ok(existing);
         }
-        if !(1..=254).contains(&base) {
+        let lo = delonix_runtime_core::workload_net::WORKLOAD_IPV4_LO.octets()[1];
+        let hi = delonix_runtime_core::workload_net::WORKLOAD_IPV4_HI.octets()[1];
+        if !(lo..=hi).contains(&base) {
             return Err(Error::Invalid(format!(
-                "invalid /16 base octet: {base} (1..=254)"
+                "invalid /16 base octet: {base} (workload space is 10.{lo}..10.{hi})"
             )));
         }
-        std::fs::write(self.path(name), base.to_string())?;
+        // Two networks on the same /16 would share an IPAM range without either
+        // knowing — the second one's allocations would collide with the first's.
+        if let Some(clash) = self
+            .list()?
+            .into_iter()
+            .find(|n| n.prefix == format!("10.{base}"))
+        {
+            return Err(Error::Invalid(format!(
+                "10.{base}.0.0/16 is already used by network '{}'",
+                clash.name
+            )));
+        }
+        delonix_runtime_core::write_atomic(&self.path(name), base.to_string().as_bytes())?;
+        self.get(name)
+    }
+
+    /// Merges `labels`/`annotations` into an existing network's record. A key
+    /// mapped to `None` is REMOVED — the only way to unstamp a network that left
+    /// a stack, so it has to be expressible.
+    ///
+    /// Rewrites the record LINE BY LINE, preserving every line it does not own —
+    /// the same idiom as [`NetworkStore::add_overlay_peer`], and for the same
+    /// reason: this format has several independent writers (`create`,
+    /// `create_overlay`, `create_lan`) and a full re-serialization here would have
+    /// to reproduce all of them correctly forever.
+    ///
+    /// Upgrades a legacy plain-integer record (`create` still writes that form) to
+    /// `base=<n>` on the way, because a bare integer has nowhere to put a key.
+    /// `get()` reads both, so the upgrade is invisible.
+    pub fn set_metadata(
+        &self,
+        name: &str,
+        labels: &[(String, Option<String>)],
+        annotations: &[(String, Option<String>)],
+    ) -> Result<Network> {
+        if name.is_empty() || name == DEFAULT_NET {
+            // The default bridge has no record on disk — there is nothing to stamp,
+            // and silently succeeding would make a stack believe it owns it.
+            return Err(Error::Invalid(
+                "the default 'bridge' network has no record to annotate".into(),
+            ));
+        }
+        for (k, v) in labels.iter().chain(annotations.iter()) {
+            if k.is_empty() || k.contains('=') || k.contains('\n') {
+                return Err(Error::Invalid(format!("invalid metadata key: {k:?}")));
+            }
+            // A literal newline would split the record into two lines and the
+            // second one would read back as a key of its own. Refuse instead of
+            // writing a record that means something else than what was asked.
+            if v.as_deref().is_some_and(|v| v.contains('\n')) {
+                return Err(Error::Invalid(format!(
+                    "metadata value for {k:?} contains a newline"
+                )));
+            }
+        }
+        let raw = std::fs::read_to_string(self.path(name))
+            .map_err(|_| Error::NotFound(format!("network {name}")))?;
+        // Legacy form: the whole record is the base octet.
+        let mut out: Vec<String> = if let Ok(base) = raw.trim().parse::<u8>() {
+            vec![format!("base={base}")]
+        } else {
+            raw.lines()
+                .filter(|l| !l.trim().is_empty())
+                .map(|l| l.to_string())
+                .collect()
+        };
+        let mut upsert = |prefix: &str, pairs: &[(String, Option<String>)]| {
+            for (k, v) in pairs {
+                let head = format!("{prefix}{k}=");
+                out.retain(|l| !l.starts_with(&head));
+                if let Some(v) = v {
+                    out.push(format!("{head}{v}"));
+                }
+            }
+        };
+        upsert("label.", labels);
+        upsert("annotation.", annotations);
+        delonix_runtime_core::write_atomic(&self.path(name), (out.join("\n") + "\n").as_bytes())?;
         self.get(name)
     }
 
@@ -1080,7 +1266,7 @@ impl NetworkStore {
             "driver=overlay\nbase={base}\nvni={vni}\npeers={}\n{wgip_line}",
             peers.join(",")
         );
-        std::fs::write(self.path(name), body)?;
+        delonix_runtime_core::write_atomic(&self.path(name), body.as_bytes())?;
         self.get(name)
     }
 
@@ -1123,10 +1309,7 @@ impl NetworkStore {
         if !out.iter().any(|l| l.starts_with("peers=")) {
             out.push(new_line);
         }
-        std::fs::write(self.path(name), out.join("\n") + "\n").map_err(|e| Error::Runtime {
-            context: "write overlay",
-            message: e.to_string(),
-        })?;
+        delonix_runtime_core::write_atomic(&self.path(name), (out.join("\n") + "\n").as_bytes())?;
         self.get(name)
     }
 
@@ -1187,7 +1370,7 @@ impl NetworkStore {
         );
         let body =
             format!("driver={driver}\nparent={parent}\nsubnet={subnet}\ngateway={gateway}\n");
-        std::fs::write(self.path(name), body)?;
+        delonix_runtime_core::write_atomic(&self.path(name), body.as_bytes())?;
         self.get(name)
     }
 
@@ -1316,6 +1499,9 @@ impl Net {
             )?;
             run("ip", &["link", "set", BRIDGE, "up"])?;
         }
+        // procfs, not a store: the kernel takes the value on write, there is no file to
+        // publish and nothing to tear. `write_atomic` (rename into place) does not even
+        // apply here — /proc rejects it.
         let _ = std::fs::write("/proc/sys/net/ipv4/ip_forward", "1");
 
         if !table_exists() {
@@ -2043,6 +2229,9 @@ impl Net {
     pub fn set_policy(&self, from_ip: &str, to_ip: &str, deny: bool) -> Result<()> {
         self.ensure_bridge()?;
         // the IP filter has to see bridged traffic (as Docker does).
+        // procfs, not a store: the kernel takes the value on write, there is no file to
+        // publish and nothing to tear. `write_atomic` (rename into place) does not even
+        // apply here — /proc rejects it.
         let _ = std::fs::write("/proc/sys/net/bridge/bridge-nf-call-iptables", "1");
         for (a, b) in [(from_ip, to_ip), (to_ip, from_ip)] {
             let needle = format!("ip saddr {a} ip daddr {b} ");
@@ -2446,10 +2635,27 @@ pub fn slirp_add_hostfwd(
     for _ in 0..50 {
         match UnixStream::connect(sock) {
             Ok(mut s) => {
-                let _ = s.set_read_timeout(Some(std::time::Duration::from_millis(500)));
+                // 500ms was too tight for the SINGLE slirp the whole ingress
+                // shares, and the discarded read error made the consequence
+                // silent AND wrong: a timeout left `resp` empty, an empty string
+                // does not contain `"error"`, and the function fell through to
+                // `Ok(())` — reporting a publish that may never have happened.
+                // Same class as the control socket's 5s ceiling, one step worse:
+                // there the symptom was an error with no subject, here it is a
+                // false success.
+                let _ = s.set_read_timeout(Some(std::time::Duration::from_secs(10)));
                 s.write_all(cmd.as_bytes()).map_err(|e| reg_io(&e))?;
                 let mut resp = String::new();
-                let _ = s.read_to_string(&mut resp);
+                if let Err(e) = s.read_to_string(&mut resp) {
+                    return Err(Error::Runtime {
+                        context: "slirp hostfwd",
+                        message: format!(
+                            "port {host_port}: no reply from the slirp api-socket ({e}) - \
+                             the publish may or may not have been applied; check with \
+                             `delonix net ingress ls`"
+                        ),
+                    });
+                }
                 if resp.contains("\"error\"") {
                     // The slirp answers with an opaque `add_hostfwd failed` for every
                     // cause. The overwhelmingly common one in rootless is a port below
@@ -2627,6 +2833,148 @@ pub fn list_connections(ip2name: &std::collections::HashMap<String, String>) -> 
 
 #[cfg(test)]
 mod tests {
+    /// `create` still writes the LEGACY form (the bare base octet), which has
+    /// nowhere to put a key. Stamping ownership has to upgrade it to `base=<n>`
+    /// on the way — and the upgrade must be invisible, i.e. the network keeps the
+    /// exact same bridge/prefix/subnet it had, because containers are already
+    /// attached to them.
+    #[test]
+    fn set_metadata_actualiza_um_registo_legado_sem_mudar_a_rede() {
+        use super::NetworkStore;
+        let tmp = std::env::temp_dir().join(format!("dlx-net-meta-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        let store = NetworkStore::open(&tmp).unwrap();
+        let before = store.create("interna").unwrap();
+        // Precondition: the record really is the legacy bare-integer form.
+        let raw = std::fs::read_to_string(tmp.join("networks/interna")).unwrap();
+        assert!(raw.trim().parse::<u8>().is_ok(), "raw={raw:?}");
+
+        let after = store
+            .set_metadata(
+                "interna",
+                &[("delonix.io/stack".into(), Some("web".into()))],
+                &[(
+                    "delonix.io/last-applied".into(),
+                    Some("{\"subnet\":1}".into()),
+                )],
+            )
+            .unwrap();
+        assert_eq!(after.bridge, before.bridge);
+        assert_eq!(after.subnet, before.subnet);
+        assert_eq!(after.gateway, before.gateway);
+        assert_eq!(after.labels.get("delonix.io/stack").unwrap(), "web");
+        assert_eq!(
+            after.annotations.get("delonix.io/last-applied").unwrap(),
+            "{\"subnet\":1}"
+        );
+        // Re-reading from disk gives the same thing (the upgrade was persisted).
+        let reread = store.get("interna").unwrap();
+        assert_eq!(reread.labels, after.labels);
+        assert_eq!(reread.subnet, before.subnet);
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    /// The record has several independent writers, so `set_metadata` rewrites it
+    /// line by line and must not eat the lines it does not own — an overlay that
+    /// lost its `vni`/`peers` to an ownership stamp would silently stop reaching
+    /// the other nodes.
+    /// REGRESSION: a reader must NEVER observe a partially-written network record.
+    ///
+    /// Every record here was written with a bare `fs::write`, which TRUNCATES the target
+    /// and only then fills it — while `ipam.rs`, in this same crate, had been using
+    /// `write_atomic` all along. Two failure modes, and the second is the nasty one:
+    ///
+    /// * a torn multi-line body loses lines, and `get()` ignores missing keys on purpose
+    ///   (that is what lets an older binary read a newer record), so the network comes back
+    ///   DEGRADED rather than failing;
+    /// * a torn base-octet write is worse — `get()` parses a bare number as the old format,
+    ///   so `"142"` truncated to `"14"` is still a perfectly valid octet. The network
+    ///   silently moves to another /16 and every container on the old prefix goes dark.
+    ///
+    /// Same technique as `store.rs`'s `save_concorrente_nunca_publica_json_corrompido`:
+    /// writers of DIFFERENT sizes so the interleaving is observable. Reverting
+    /// `write_atomic` to `fs::write` makes this fail.
+    #[test]
+    fn escrita_de_rede_nunca_deixa_um_leitor_ver_registo_parcial() {
+        let tmp = std::env::temp_dir().join(format!("dlx-net-atomic-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        let st = NetworkStore::open(&tmp).unwrap();
+        st.create_overlay("ov", 42, &[], None).unwrap();
+
+        std::thread::scope(|sc| {
+            for i in 0..16 {
+                let tmp = tmp.clone();
+                sc.spawn(move || {
+                    let st = NetworkStore::open(&tmp).unwrap();
+                    // Peers of growing length: the body changes size on every write.
+                    let peer = format!("10.0.0.{}={}", i + 1, "k".repeat(i * 9));
+                    let _ = st.add_overlay_peer("ov", &peer);
+                    // Whatever the interleaving, a reader sees a COMPLETE record.
+                    let n = st
+                        .get("ov")
+                        .expect("registo parcial publicado pela escrita");
+                    assert_eq!(n.driver, "overlay", "driver perdido num corpo truncado");
+                    assert_eq!(n.vni, Some(42), "vni perdido num corpo truncado");
+                });
+            }
+        });
+
+        let n = st.get("ov").expect("estado final tem de ser legivel");
+        assert_eq!(n.driver, "overlay");
+        assert_eq!(n.vni, Some(42));
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn set_metadata_preserva_vni_e_peers_de_um_overlay() {
+        use super::NetworkStore;
+        let tmp = std::env::temp_dir().join(format!("dlx-net-ovl-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        let store = NetworkStore::open(&tmp).unwrap();
+        store
+            .create_overlay("malha", 42, &["10.0.0.7".to_string()], Some("10.9.0.1"))
+            .unwrap();
+        let after = store
+            .set_metadata(
+                "malha",
+                &[("delonix.io/stack".into(), Some("infra".into()))],
+                &[],
+            )
+            .unwrap();
+        assert_eq!(after.vni, Some(42));
+        assert_eq!(after.peers, vec!["10.0.0.7".to_string()]);
+        assert_eq!(after.wg_ip.as_deref(), Some("10.9.0.1"));
+        assert_eq!(after.driver, super::DRIVER_OVERLAY);
+        assert_eq!(after.labels.get("delonix.io/stack").unwrap(), "infra");
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    /// A literal newline in a value would split the record in two and the second
+    /// half would read back as a key of its own. Refuse, rather than write a
+    /// record that means something different from what was asked. (Compact JSON
+    /// is safe — `serde_json` escapes newlines as two characters.)
+    #[test]
+    fn set_metadata_recusa_um_valor_com_newline() {
+        use super::NetworkStore;
+        let tmp = std::env::temp_dir().join(format!("dlx-net-nl-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        let store = NetworkStore::open(&tmp).unwrap();
+        store.create("interna").unwrap();
+        assert!(store
+            .set_metadata(
+                "interna",
+                &[("k".into(), Some("linha1\nbase=7".into()))],
+                &[]
+            )
+            .is_err());
+        // The refusal is total: nothing was written.
+        assert!(store.get("interna").unwrap().labels.is_empty());
+        // The default bridge has no record on disk — stamping it would make a
+        // stack believe it owns something it cannot own.
+        assert!(store.set_metadata("bridge", &[], &[]).is_err());
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
     /// The Docker `[hostIp:]hostPort:contPort` form: the address is what lets a
     /// published port answer anything other than the host's own loopback. Before this,
     /// the ONLY way to widen the bind was the undocumented `DELONIX_PUBLISH_ADDR`, and a
@@ -2986,5 +3334,85 @@ mod tests {
         s.remove("alpha").unwrap();
         assert_eq!(s.list().unwrap().len(), 1);
         let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn base_from_subnet_aceita_a_forma_suportada() {
+        assert_eq!(
+            NetworkStore::base_from_subnet("10.200.0.0/16").unwrap(),
+            200
+        );
+        assert_eq!(
+            NetworkStore::base_from_subnet("10.254.0.0/16").unwrap(),
+            254
+        );
+    }
+
+    #[test]
+    fn base_from_subnet_recusa_e_diz_o_que_e_suportado() {
+        // Each of these used to be ACCEPTED and silently dropped, which is the
+        // whole reason this function exists. The message has to name the shape
+        // that works, or the refusal is just a different way of being useless.
+        for bad in [
+            "172.20.0.0/16", // outside the workload space
+            "10.50.0.0/16",  // right shape, wrong range
+            "10.200.0.0/24", // only /16
+            "10.200.0.0",    // no prefix length
+            "10.200.1.0/16", // /16 that does not end in .0.0
+            "banana",
+        ] {
+            let e = NetworkStore::base_from_subnet(bad)
+                .expect_err("devia recusar {bad}")
+                .to_string();
+            assert!(
+                e.contains("10.<200-254>.0.0/16"),
+                "a recusa de {bad} tem de dizer o que e suportado: {e}"
+            );
+        }
+    }
+
+    #[test]
+    fn create_with_base_e_idempotente_mas_nao_renumera() {
+        let dir = std::env::temp_dir().join(format!(
+            "delonix-netstore-test-{}-{}",
+            std::process::id(),
+            fnv32("renumera")
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        let store = NetworkStore::open(&dir).unwrap();
+
+        let a = store.create_with_base("vpc", 210).unwrap();
+        assert_eq!(a.subnet, "10.210.0.0/16");
+        // Same subnet again: a no-op, so re-applying an unchanged manifest works.
+        assert_eq!(store.create_with_base("vpc", 210).unwrap().subnet, a.subnet);
+        // A DIFFERENT one must fail loudly: returning the old network as if the
+        // request had been honoured is exactly the silence being removed here.
+        let e = store.create_with_base("vpc", 211).unwrap_err().to_string();
+        assert!(e.contains("cannot be changed in place"), "{e}");
+
+        // And two networks may not share a /16 — their IPAM ranges would collide.
+        let e = store
+            .create_with_base("outra", 210)
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains("already used by network 'vpc'"), "{e}");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn create_with_base_recusa_fora_do_espaco_de_workload() {
+        let dir = std::env::temp_dir().join(format!(
+            "delonix-netstore-range-{}-{}",
+            std::process::id(),
+            fnv32("range")
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        let store = NetworkStore::open(&dir).unwrap();
+        // 50 is a valid octet but not a valid WORKLOAD one; the old guard was
+        // `1..=254`, which let a network be created where nothing else looks.
+        assert!(store.create_with_base("x", 50).is_err());
+        assert!(store.create_with_base("x", 200).is_ok());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

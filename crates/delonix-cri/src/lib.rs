@@ -23,9 +23,12 @@ use cri::image_service_server::{ImageService, ImageServiceServer};
 use cri::runtime_service_server::RuntimeServiceServer;
 use cri::*;
 
+pub mod cap_ceiling;
 mod runtime_svc;
 pub mod spdy;
 pub mod streaming;
+
+pub use cap_ceiling::{CapCeiling, CeilingMode};
 
 const RUNTIME_NAME: &str = "delonix";
 const RUNTIME_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -271,7 +274,13 @@ async fn metrics_handler() -> impl axum::response::IntoResponse {
     )
 }
 
-pub fn serve_blocking(base: PathBuf, addr: &str) -> Result<(), delonix_runtime_core::Error> {
+/// Serves the CRI socket with the node's capability ceiling in force. See
+/// [`cap_ceiling`] — [`CapCeiling::unlimited`] keeps the historical behavior.
+pub fn serve_blocking(
+    base: PathBuf,
+    addr: &str,
+    ceiling: CapCeiling,
+) -> Result<(), delonix_runtime_core::Error> {
     let path = addr.strip_prefix("unix://").unwrap_or(addr).to_string();
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -365,8 +374,18 @@ pub fn serve_blocking(base: PathBuf, addr: &str) -> Result<(), delonix_runtime_c
             });
         }
 
+        // Announced on both channels the operator may be watching (the terminal,
+        // for `delonix serve cri`; the journal, for `delonix-cri.service`): a
+        // ceiling that is in force but invisible would be diagnosed as "the
+        // runtime dropped my capabilities for no reason".
+        eprintln!(
+            "delonix-cri: capability ceiling: {}",
+            ceiling.describe()
+        );
+        tracing::info!(ceiling = %ceiling.describe(), "delonix-cri: capability ceiling");
+
         let img = DelonixImage { base: base.clone() };
-        let rtsvc = runtime_svc::DelonixRuntime::new(base, streamer);
+        let rtsvc = runtime_svc::DelonixRuntime::new(base, streamer, ceiling);
         tonic::transport::Server::builder()
             .add_service(RuntimeServiceServer::new(rtsvc))
             .add_service(ImageServiceServer::new(img))

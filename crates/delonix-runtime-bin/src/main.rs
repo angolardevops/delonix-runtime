@@ -49,6 +49,27 @@ struct Cli {
 #[allow(clippy::large_enum_variant)]
 #[derive(Subcommand)]
 enum Cmd {
+    /// Start the right project for THIS directory: detects and dispatches to `stack
+    /// init`/`vm init` with the matching template, saying what it detected and why.
+    Init {
+        /// Project directory (default: the current one).
+        dir: Option<std::path::PathBuf>,
+        /// Force a template instead of the detected one (`stack init -t list` shows them).
+        #[arg(short = 't', long)]
+        template: Option<String>,
+        /// Overwrite files that already exist.
+        #[arg(long)]
+        force: bool,
+    },
+    // A subcommand as well as a flag because `<tool> version` is what people type first —
+    // git, docker, kubectl and podman all answer to it. It prints the flag's text VERBATIM
+    // (`long_version_text`), so the two can never drift into saying different things.
+    //
+    // Plain `//`, not `///`: clap turns a doc comment into the user's `--help`, and design
+    // rationale has no business there. Caught by the i18n guard, which demanded a
+    // translation for three paragraphs nobody should have been reading in a help screen.
+    /// Print the version (same output as `--version`).
+    Version,
     /// Containers: run/ps/stop/rm/exec/logs/update/describe.
     Container {
         #[command(subcommand)]
@@ -105,6 +126,24 @@ enum Cmd {
     Sharevolume {
         #[command(subcommand)]
         action: cmd::sharevolume::ShareVolumeCmd,
+    },
+    /// JSON Schema of the manifest, GENERATED from the code (ADR-0007).
+    ///
+    /// Point an editor at it with one comment at the top of the manifest and you
+    /// get completion, type checking and the field docs while you type:
+    /// `# yaml-language-server: $schema=./delonix.schema.json`
+    Schema {
+        #[command(subcommand)]
+        action: cmd::schema::SchemaCmd,
+    },
+    /// Field reference for a Kind, `kubectl explain` style — from the SAME
+    /// generated schema, so it cannot drift from the code.
+    ///
+    /// `delonix explain Container` · `delonix explain Container.ports` ·
+    /// `delonix explain Pod.containers.image`
+    Explain {
+        /// `<Kind>[.field[.field…]]`.
+        path: String,
     },
     /// Apply a whole manifest (`delonix-manifest.yaml`) — every Kind, in dependency order.
     Stack {
@@ -271,8 +310,24 @@ fn run() -> Result<()> {
         Cmd::Secret { action } => cmd::secret::run(action),
         Cmd::Storage { action } => cmd::storage::run(action),
         Cmd::Sharevolume { action } => cmd::sharevolume::run(action),
+        Cmd::Schema { action } => cmd::schema::run(action),
+        Cmd::Explain { path } => cmd::schema::explain(&path),
         Cmd::Stack { action } => cmd::stack::run(action),
         Cmd::Compose { action } => cmd::compose::run(action),
+        // clap prints "<name> <long_version>"; reproduced here so `delonix version` and
+        // `delonix --version` are byte-for-byte identical.
+        Cmd::Init {
+            dir,
+            template,
+            force,
+        } => cmd::init::run(dir, template, force),
+        Cmd::Version => {
+            // CARGO_BIN_NAME, not CARGO_PKG_NAME: the package is `delonix-runtime-bin`
+            // and the binary clap names is `delonix`. Caught by diffing the two outputs —
+            // "byte-for-byte" is the requirement precisely because this misses by one word.
+            println!("{} {}", env!("CARGO_BIN_NAME"), long_version_text());
+            Ok(())
+        }
         Cmd::System { action } => cmd::system::run(action),
         Cmd::Cluster { action } => cmd::cluster::run(action),
         Cmd::Net { action } => cmd::net::run(action),
@@ -424,6 +479,102 @@ fn main() {
         // (same graceful fallback `t_dyn` already guarantees everywhere else).
         cmd::output::error(&cmd::po::t_dyn(&e.to_string()));
         std::process::exit(1);
+    }
+}
+
+/// Every user-facing help string has to have a Portuguese translation, and the
+/// only honest way to know is to walk the built `Command` and ask the catalog.
+///
+/// Measured before this test existed: **103 of the 232 subcommands printed
+/// their help in English under `--l18n=pt`** — the `container` group, the
+/// everyday surface, was 28 of them. The mechanism was never broken (see
+/// `po::translate_help`); what was missing were the catalog entries, and
+/// nothing was watching.
+#[cfg(test)]
+mod help_i18n_tests {
+    use clap::CommandFactory;
+
+    /// Flag descriptions still waiting for a translation. This is a RATCHET, not
+    /// a tolerance: the test fails when the number goes UP (a regression) *and*
+    /// when it goes DOWN (translate some, lower the number in the same commit).
+    /// A plain `<=` would let the debt sit here forever while still reading as
+    /// green.
+    ///
+    /// Measured after the `container` group was translated: 206 → 120.
+    const ARG_HELP_PENDING: usize = 0;
+
+    /// Walks about/long_about of the whole command tree, collecting whatever the
+    /// catalog does not translate.
+    fn untranslated(
+        cmd: &clap::Command,
+        path: &str,
+        out: &mut Vec<String>,
+        args: &mut Vec<String>,
+    ) {
+        for (what, text) in [
+            ("about", cmd.get_about().map(|s| s.to_string())),
+            ("long_about", cmd.get_long_about().map(|s| s.to_string())),
+        ] {
+            let Some(text) = text else { continue };
+            // A string that is the SAME in both languages (`Containers:
+            // run/ps/stop/...`) is not a gap — asking for a translation that
+            // would be identical is how a catalog grows noise.
+            if !crate::cmd::po::has_pt_translation(&text) && !is_same_in_both(&text) {
+                out.push(format!("{path} ({what}): {text}"));
+            }
+        }
+        for arg in cmd.get_arguments() {
+            for (what, text) in [
+                ("help", arg.get_help().map(|s| s.to_string())),
+                ("long_help", arg.get_long_help().map(|s| s.to_string())),
+            ] {
+                let Some(text) = text else { continue };
+                if !crate::cmd::po::has_pt_translation(&text) && !is_same_in_both(&text) {
+                    args.push(format!("{path} --{} ({what}): {text}", arg.get_id()));
+                }
+            }
+        }
+        for sub in cmd.get_subcommands() {
+            if sub.get_name() == "help" {
+                continue;
+            }
+            untranslated(sub, &format!("{path} {}", sub.get_name()), out, args);
+        }
+    }
+
+    /// The short list of strings that read identically in EN and pt_AO — a
+    /// command-name enumeration is the same text in both.
+    fn is_same_in_both(s: &str) -> bool {
+        s.starts_with("Containers: run/ps/stop")
+    }
+
+    /// The command descriptions — what `--help` shows at the top and what the
+    /// parent lists next to each subcommand. Strict: zero tolerated.
+    #[test]
+    fn todo_o_help_de_comando_tem_traducao_pt() {
+        let (mut missing, mut args) = (Vec::new(), Vec::new());
+        untranslated(&super::Cli::command(), "delonix", &mut missing, &mut args);
+        assert!(
+            missing.is_empty(),
+            "{} descrição(ões) de comando sem entrada no pt.po:\n  {}",
+            missing.len(),
+            missing.join("\n  ")
+        );
+    }
+
+    #[test]
+    fn o_help_dos_argumentos_so_pode_encolher() {
+        let (mut missing, mut args) = (Vec::new(), Vec::new());
+        untranslated(&super::Cli::command(), "delonix", &mut missing, &mut args);
+        assert_eq!(
+            args.len(),
+            ARG_HELP_PENDING,
+            "help de argumento por traduzir: {} (esperado {ARG_HELP_PENDING}). \
+             Se subiu, é uma flag nova sem entrada no pt.po; se desceu, baixa a \
+             constante no mesmo commit.\n  {}",
+            args.len(),
+            args.join("\n  ")
+        );
     }
 }
 
