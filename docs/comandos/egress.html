@@ -302,11 +302,11 @@ Options:
 <h2><span class='lang-pt'>Laboratório</span><span class='lang-en'>Lab</span></h2>
 <div class='callout lang-pt'><p>Nega tudo excepto DNS e um destino específico — a política
 <code>allowlist</code> por rede.</p>
-<pre><code>delonix net egress policy minha-rede allowlist --allow 1.1.1.1/32
+<pre><code>delonix net egress net minha-rede allowlist --to 1.1.1.1/32
 delonix container run --rm --net minha-rede alpine wget -qO- https://1.1.1.1
 delonix container run --rm --net minha-rede alpine wget -qO- https://example.com</code></pre></div><div class='callout lang-en'><p>Deny everything except DNS and one specific destination — the
 per-network <code>allowlist</code> policy.</p>
-<pre><code>delonix net egress policy my-net allowlist --allow 1.1.1.1/32
+<pre><code>delonix net egress net my-net allowlist --to 1.1.1.1/32
 delonix container run --rm --net my-net alpine wget -qO- https://1.1.1.1
 delonix container run --rm --net my-net alpine wget -qO- https://example.com</code></pre></div>
 <h2><span class='lang-pt'>Desafio</span><span class='lang-en'>Challenge</span></h2>

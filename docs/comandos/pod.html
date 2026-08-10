@@ -249,12 +249,36 @@ Options:
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Logs do 1.º container do pod</div><div class='cap lang-en'>Logs from the pod&#x27;s 1st container</div><pre><code>delonix pod logs web-app</code></pre></div><div class="ex"><div class='cap lang-pt'>Logs de um container específico (nome curto dentro do pod)</div><div class='cap lang-en'>Logs from a specific container (short name inside the pod)</div><pre><code>delonix pod logs web-app --container sidecar -f</code></pre></div>
 <h2><span class='lang-pt'>Laboratório</span><span class='lang-en'>Lab</span></h2>
 <div class='callout lang-pt'><p>Cria um pod de 2 containers e confirma que partilham IP —
-alcançam-se por <code>localhost</code>, como no Kubernetes.</p>
-<pre><code>delonix pod create web-pod --container nginx --container redis
+alcançam-se por <code>localhost</code>, como no Kubernetes. Um pod cria-se sempre a
+partir de um manifesto: os membros, as portas e os volumes não cabem em flags sem
+reinventar metade do <code>kind: Pod</code>.</p>
+<pre><code>cat &gt; web-pod.yaml &lt;&lt;'YAML'
+apiVersion: delonix.io/v1
+kind: Pod
+metadata: { name: web-pod }
+spec:
+  network: minha-rede
+  containers:
+    - { name: nginx, image: nginx:alpine }
+    - { name: redis, image: redis:7-alpine }
+YAML
+delonix pod create -f web-pod.yaml
 delonix pod describe web-pod
 delonix pod logs web-pod</code></pre></div><div class='callout lang-en'><p>Create a 2-container pod and confirm they share an IP — reachable via
-<code>localhost</code> from each other, just like in Kubernetes.</p>
-<pre><code>delonix pod create web-pod --container nginx --container redis
+<code>localhost</code> from each other, just like in Kubernetes. A pod is always created
+from a manifest: its members, ports and volumes do not fit in flags without reinventing
+half of <code>kind: Pod</code>.</p>
+<pre><code>cat &gt; web-pod.yaml &lt;&lt;'YAML'
+apiVersion: delonix.io/v1
+kind: Pod
+metadata: { name: web-pod }
+spec:
+  network: my-net
+  containers:
+    - { name: nginx, image: nginx:alpine }
+    - { name: redis, image: redis:7-alpine }
+YAML
+delonix pod create -f web-pod.yaml
 delonix pod describe web-pod
 delonix pod logs web-pod</code></pre></div>
 <h2><span class='lang-pt'>Desafio</span><span class='lang-en'>Challenge</span></h2>

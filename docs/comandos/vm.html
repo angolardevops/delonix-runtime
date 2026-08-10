@@ -511,7 +511,7 @@ Options:
 
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)</code></pre></div>
-<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>VM a partir da imagem dourada, com chave SSH</div><div class='cap lang-en'>VM from the golden image, with an SSH key</div><pre><code>delonix vm create --name node1 --image k8s-golden --cpus 2 --memory 4096 --ssh-key @~/.ssh/id_ed25519.pub</code></pre></div>
+<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>VM a partir da imagem dourada, com chave SSH — o nome é POSICIONAL</div><div class='cap lang-en'>VM from the golden image, with an SSH key — the name is POSITIONAL</div><pre><code>delonix vm create node1 --disk k8s-golden --vcpus 2 --memory 4G --ssh-key @~/.ssh/id_ed25519.pub</code></pre></div><div class="ex"><div class='cap lang-pt'>Sem `--disk`, usa a imagem VM dourada local — se houver exactamente uma</div><div class='cap lang-en'>With no `--disk`, it uses the local golden VM image — if there is exactly one</div><pre><code>delonix vm create node1 --ssh-key @~/.ssh/id_ed25519.pub</code></pre></div>
 <h2 id='ls'><code>vm ls</code></h2>
 <p class='intro'>List the VMs</p>
 <div class='help'><pre><code>Usage: delonix vm ls [OPTIONS]
