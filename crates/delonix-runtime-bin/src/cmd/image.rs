@@ -209,6 +209,8 @@ pub enum ImageCmd {
         name: String,
         target: Option<String>,
     },
+    /// (only with `--vm`) Register an existing disk image under a name.
+    Import(super::vmimage::ImportArgs),
     /// (only with `--vm`) Convert a VM disk between `qcow2` and `raw`.
     Convert {
         source: String,
@@ -317,6 +319,9 @@ pub enum VmSub {
     },
     /// Publish a local VM image to an OCI registry.
     Push { name: String, target: String },
+    /// Register an existing disk image under a name, so `vm create --disk
+    /// <name>` and `image vm push` can use it.
+    Import(super::vmimage::ImportArgs),
     /// Convert a VM disk between `qcow2` and `raw` — flattened either way,
     /// ready to boot on either backend.
     Convert {
@@ -430,6 +435,7 @@ pub fn run(vm: bool, action: ImageCmd) -> Result<()> {
             },
             VmSub::LsRemote { source, no_k8s } => VmImageCmd::LsRemote { source, no_k8s },
             VmSub::Push { name, target } => VmImageCmd::Push { name, target },
+            VmSub::Import(args) => VmImageCmd::Import(args),
             VmSub::Convert { source, to, output } => VmImageCmd::Convert { source, to, output },
             VmSub::Init { name, dir, force } => VmImageCmd::Init { name, dir, force },
             VmSub::Build {
@@ -532,6 +538,14 @@ pub fn run(vm: bool, action: ImageCmd) -> Result<()> {
             )
             .into(),
         )),
+        // Container images come from `delonix image pull`/`build`/`load`; a
+        // disk image is a different kind of thing entirely.
+        ImageCmd::Import(_) => Err(Error::Invalid(
+            super::po::t(
+                "`import` is only for VM images — use `delonix image --vm import` (for a container image tarball, use `delonix image load`)",
+            )
+            .into(),
+        )),
         // `init` scaffolds a VMfile, which only describes a VM image — the
         // container equivalent is `delonix build`'s Dockerfile/Delonixfile.
         ImageCmd::Init { .. } => Err(Error::Invalid(
@@ -619,6 +633,7 @@ fn run_vm(action: ImageCmd) -> Result<()> {
                 )
             })?,
         },
+        ImageCmd::Import(args) => VmImageCmd::Import(args),
         ImageCmd::Convert { source, to, output } => VmImageCmd::Convert { source, to, output },
         ImageCmd::Build {
             tag,

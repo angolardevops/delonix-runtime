@@ -1015,9 +1015,37 @@ pub fn run(action: VmCmd) -> Result<()> {
             // Recorded before `ssh_keys` is moved into the seed, and only for
             // the generated-seed path: a caller who brought their OWN `--seed`
             // decided the accounts themselves, and we would be guessing.
+            //
+            // EXCEPT for an appliance (`cloud_init: false` in the image's
+            // metadata — OPNsense, Proxmox, TrueNAS). Those install and
+            // configure themselves; the seed would be an ISO nothing reads, on
+            // a CD-ROM that changes the guest's device list for no reason.
+            let appliance = image_meta.as_ref().is_some_and(|m| !m.uses_cloud_init());
+            if appliance && seed.is_none() {
+                // Refuse rather than drop: silently ignoring an option the
+                // caller passed is the failure this repo names as its worst.
+                let asked: Vec<&str> = [
+                    (hostname.is_some(), "--hostname"),
+                    (!ssh_keys.is_empty(), "--ssh-key"),
+                    (user_data.is_some(), "--user-data"),
+                ]
+                .iter()
+                .filter(|(given, _)| *given)
+                .map(|(_, flag)| *flag)
+                .collect();
+                if !asked.is_empty() {
+                    return Err(Error::Invalid(super::po::tf(
+                        "{flags}: this image is an appliance and does not run cloud-init, so \
+                         these would be silently ignored — configure it on first boot (console \
+                         or web UI), or pass your own `--seed` if you know the guest reads one",
+                        &[("flags", &asked.join(", "))],
+                    )));
+                }
+            }
             let injected_key = seed.is_none() && !ssh_keys.is_empty();
             let seed = match seed {
                 Some(s) => Some(s),
+                None if appliance => None,
                 None => {
                     let iso = generate_seed_iso(
                         &name,
@@ -2289,6 +2317,7 @@ mod tests {
             default_vcpus: vcpus,
             default_memory: memory,
             default_backend: backend,
+            cloud_init: None,
         }
     }
 
