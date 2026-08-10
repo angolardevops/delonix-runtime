@@ -327,21 +327,91 @@ pub fn spec_with_defaults(doc: &ManifestDoc) -> Result<serde_yaml::Value> {
         .map_err(|e| delonix_runtime_core::Error::Invalid(format!("dry-run: {e}")))
 }
 
+/// Refuses the AWS-VPC vocabulary (`terraform-aws-modules/vpc` names) that this
+/// engine does not implement, naming what it DOES have.
+///
+/// A plain "unknown field" warning is right for a typo and wrong for these:
+/// somebody writing `singleNatGateway` has a working mental model, it just
+/// does not map onto a single-node rootless SDN — there are no availability
+/// zones to spread NAT gateways across, and one network is one flat bridge,
+/// not a set of routed subnets. Failing closed keeps the promise this repo
+/// makes everywhere else: an option that is accepted is an option that works.
+fn reject_vpc_vocabulary(doc: &ManifestDoc) -> Result<()> {
+    const NOT_HERE: &[(&str, &str)] = &[
+        (
+            "vpcCidr",
+            "use `subnet: 10.<200-254>.0.0/16` — a network IS the address space here",
+        ),
+        (
+            "cidr",
+            "use `subnet: 10.<200-254>.0.0/16` — a network IS the address space here",
+        ),
+        (
+            "publicSubnets",
+            "not implemented: a network is one flat bridge, and its egress already \
+             goes out through the node's NAT",
+        ),
+        (
+            "privateSubnets",
+            "not implemented: there is no per-subnet routing policy yet — use a \
+             separate network plus `kind: FirewallPolicy` to control who reaches whom",
+        ),
+        (
+            "singleNatGateway",
+            "meaningless on a single node: there are no availability zones to place \
+             NAT gateways in, and egress already shares one NAT",
+        ),
+    ];
+    let serde_yaml::Value::Mapping(map) = &doc.spec else {
+        return Ok(());
+    };
+    for (field, why) in NOT_HERE {
+        if map.contains_key(serde_yaml::Value::String((*field).to_string())) {
+            return Err(delonix_runtime_core::Error::Invalid(super::po::tf(
+                "Network '{name}': `{field}` — {why}",
+                &[("name", &doc.metadata.name), ("field", field), ("why", why)],
+            )));
+        }
+    }
+    Ok(())
+}
+
 pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
     let store = NetworkStore::open(state_root())?;
     for doc in manifest::of_kind(docs, "Network") {
         let name = &doc.metadata.name;
         // Warn about typos BEFORE the early-continue (see container::apply): a
         // re-apply against an already existing network must also see the warning.
+        // Before the generic warning: for these fields "unknown field, check
+        // the spelling" is misleading — the spelling is right, the concept is
+        // the one that does not exist here.
+        reject_vpc_vocabulary(doc)?;
         manifest::warn_unknown_fields(doc, NETWORK_SPEC_FIELDS);
-        if store.get(name).is_ok() {
+        let spec: NetworkSpec = manifest::spec_of(doc)?;
+        if let Ok(existing) = store.get(name) {
+            // "Ensure present" still means we do not renumber a live network —
+            // but now that `subnet` is honoured, staying silent about a spec
+            // that asks for a different one would be the same lie this change
+            // exists to remove.
+            if let Some(want) = spec.subnet.as_deref() {
+                if want != existing.subnet {
+                    eprintln!(
+                        "{}",
+                        super::po::tf(
+                            "WARNING: network '{name}': the manifest asks for {want} but it \
+                             exists as {have} — NOT renumbered (workloads are addressed on it). \
+                             Remove and recreate it to change the subnet.",
+                            &[("name", name), ("want", want), ("have", &existing.subnet)],
+                        )
+                    );
+                }
+            }
             println!(
                 "network/{name}: {}",
                 super::po::t("already exists, nothing to do")
             );
             continue;
         }
-        let spec: NetworkSpec = manifest::spec_of(doc)?;
         create_network(
             &store,
             name,
@@ -408,7 +478,31 @@ pub(crate) fn create_network(
 ) -> Result<Network> {
     match driver {
         "bridge" => {
-            let net = store.create(name)?;
+            // An explicit subnet is HONOURED (or refused, naming what is
+            // supported). Until this was wired, both `--subnet` and the
+            // manifest's `spec.subnet` were accepted and dropped on the floor
+            // for the only driver rootless actually realizes — the caller got
+            // an octet derived from the network's name hash and was told
+            // nothing. `create_with_base` had existed for this the whole time,
+            // with a doc-comment saying so and zero callers.
+            let net = match subnet.as_deref() {
+                Some(s) => {
+                    let base = NetworkStore::base_from_subnet(s)?;
+                    let net = store.create_with_base(name, base)?;
+                    // The gateway is derived, not chosen. Accepting one that
+                    // disagrees would be the same silent lie one layer down.
+                    if !gateway.is_empty() && gateway != net.gateway {
+                        let _ = store.remove(name);
+                        return Err(delonix_runtime_core::Error::Invalid(super::po::tf(
+                            "gateway {want}: a bridge network's gateway is always the first \
+                             address of its subnet ({have}) — omit --gateway",
+                            &[("want", gateway), ("have", &net.gateway)],
+                        )));
+                    }
+                    net
+                }
+                None => store.create(name)?,
+            };
             // Realize it physically (real bridge of the rootless holder) — aligned
             // to the SAME prefix the NetworkStore just decided. If this fails, the
             // declarative record just created above would otherwise be ORPHANED —

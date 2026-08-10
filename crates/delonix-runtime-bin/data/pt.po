@@ -3901,3 +3901,14 @@ msgstr "não (appliance — configura-o no primeiro arranque)"
 
 msgid "<unknown> (assumed yes)"
 msgstr "<desconhecido> (assume-se que sim)"
+
+# CIDR explicito nas redes + recusa do vocabulario VPC da AWS
+
+msgid "gateway {want}: a bridge network's gateway is always the first address of its subnet ({have}) — omit --gateway"
+msgstr "gateway {want}: o gateway de uma rede bridge é sempre o primeiro endereço da subnet dela ({have}) — omite o --gateway"
+
+msgid "Network '{name}': `{field}` — {why}"
+msgstr "Network '{name}': `{field}` — {why}"
+
+msgid "WARNING: network '{name}': the manifest asks for {want} but it exists as {have} — NOT renumbered (workloads are addressed on it). Remove and recreate it to change the subnet."
+msgstr "AVISO: rede '{name}': o manifesto pede {want} mas ela existe como {have} — NÃO foi renumerada (há workloads endereçados nela). Remove-a e cria-a de novo para mudar a subnet."
