@@ -256,6 +256,11 @@ fn hot_fields(kind: &str) -> &'static [&'static str] {
         // container the policy governs, so changing one leaves the old target's
         // rules exactly where they were.
         "FirewallPolicy" => &["defaultPolicy", "rules", "scope"],
+        // Bookkeeping on the share's own record, applied by re-running the same
+        // idempotent `apply_one`. `storageRef` stays cold: the share is a
+        // SUBDIRECTORY of that parent, so repointing it means a different
+        // directory and the bytes already written stay in the old one.
+        "ShareVolume" => &["quota", "alertPct"],
         _ => &[],
     }
 }

@@ -74,6 +74,92 @@ struct ShareRecord {
     created_unix: u64,
 }
 
+/// Fields the reconciler compares for a `kind: ShareVolume`.
+///
+/// `quota`/`alertPct` converge hot — they are bookkeeping on a record, applied
+/// by re-running the same `apply_one` that created it. `storageRef` does not:
+/// the share is a SUBDIRECTORY carved out of that parent, so pointing it at a
+/// different NAS export means a different directory, and the data already
+/// written stays in the old one. That is a `Replace`, and `sharevolume migrate`
+/// exists precisely because moving it is a deliberate act.
+pub(crate) const RECONCILED_SHARE_FIELDS: &[&str] = &["storageRef", "quota", "alertPct"];
+
+/// What the manifest declares, for the reconciler.
+pub(crate) fn desired(doc: &ManifestDoc) -> Result<super::reconcile::Desired> {
+    let spec: ShareVolumeSpec = manifest::spec_of(doc)?;
+    let mut f = std::collections::BTreeMap::new();
+    f.insert("storageRef".into(), spec.storage_ref.clone());
+    // The manifest says `5G`, the record stores bytes — normalized through the
+    // SAME parser the creation path uses, or every plan would report a quota as
+    // changed.
+    if let Some(q) = &spec.quota {
+        if let Some(b) = delonix_volume::parse_size_bytes(q) {
+            f.insert("quota".into(), b.to_string());
+        }
+    }
+    if let Some(a) = spec.alert_pct {
+        f.insert("alertPct".into(), a.to_string());
+    }
+    Ok(super::reconcile::Desired {
+        kind: "ShareVolume".into(),
+        name: doc.metadata.name.clone(),
+        fields: f,
+        converges: true,
+        // A `ShareRecord` carries no labels, so there is nowhere to stamp a
+        // stack — and "unowned" would then be its permanent state, making every
+        // plan report an Adopt that changes nothing. Not ownable is the honest
+        // reading of the record as it exists; giving `ShareRecord` a labels
+        // field is the follow-up that would change it.
+        ownable: false,
+    })
+}
+
+/// What is on the machine, for the reconciler.
+///
+/// Looked up per DOCUMENT rather than by listing the store, because a share is
+/// keyed by (namespace, name) and the namespace comes from the document — the
+/// same reason `load_record` takes both. Listing every namespace and guessing
+/// which one a document meant is exactly the confusion `safe_ns` exists to
+/// prevent.
+pub(crate) fn actual(docs: &[ManifestDoc]) -> Result<Vec<super::reconcile::Actual>> {
+    let root = state_root();
+    let mut out = Vec::new();
+    for doc in manifest::of_kind(docs, "ShareVolume") {
+        let ns = doc.metadata.namespace.as_deref().unwrap_or("default");
+        let Ok((rec, _legacy)) = load_record(&root, ns, &doc.metadata.name) else {
+            continue;
+        };
+        let mut f = std::collections::BTreeMap::new();
+        f.insert("storageRef".into(), rec.storage_ref.clone());
+        if let Some(q) = rec.quota_bytes {
+            f.insert("quota".into(), q.to_string());
+        }
+        if let Some(a) = rec.alert_pct {
+            f.insert("alertPct".into(), a.to_string());
+        }
+        out.push(super::reconcile::Actual {
+            kind: "ShareVolume".into(),
+            name: doc.metadata.name.clone(),
+            fields: f,
+            // A share record has no labels of its own. Ownership would need a
+            // field on `ShareRecord`; until then a share is converged but never
+            // adopted or pruned — said out loud rather than half-done.
+            owner: None,
+            last_applied: None,
+        });
+    }
+    Ok(out)
+}
+
+/// Converges a share: re-run the same `apply_one` that created it. Idempotent by
+/// design — it already updates `quota_bytes`/`alert_pct` in place and keeps the
+/// path a share was created with.
+pub(crate) fn converge_doc(doc: &ManifestDoc) -> Result<()> {
+    let spec: ShareVolumeSpec = manifest::spec_of(doc)?;
+    let ns = doc.metadata.namespace.as_deref().unwrap_or("default");
+    apply_one(&state_root(), &doc.metadata.name, &spec, ns)
+}
+
 #[derive(Subcommand)]
 pub enum ShareVolumeCmd {
     /// Apply the `kind: ShareVolume` documents of a manifest (idempotent).
