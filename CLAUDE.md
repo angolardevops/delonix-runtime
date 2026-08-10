@@ -707,8 +707,10 @@ Núcleo em `ContainerFw.namespace` + `infra::fw_chain_body`/`ns_set_join`.
     same-ns `1 packet accepted` pela regra `@dlxnse20c4037`, cross-ns + `default`
     `4 packets dropped` pela regra `@dlxall ct state new`. Cenário de caos novo
     (`pod_namespace_isolation`) que **falha com a correcção revertida** e passa com ela.
-  - **O que NÃO foi provado com um guest a sério**: nenhuma imagem deste host arranca em Cloud
-    Hypervisor (a golden é libvirt-only e não há `hypervisor-fw`), por isso o alvo no endereço da
+  - **O que NÃO foi provado com um guest a sério** (nota de 2026-08-05, ULTRAPASSADA em parte: com
+    o EDK2 `CLOUDHV.fd` a golden JÁ arranca em CH — ver «A subnet de uma rede passou a valer»):
+    à data nenhuma imagem deste host arrancava em Cloud
+    Hypervisor (a golden dizia-se libvirt-only por não haver `hypervisor-fw`), por isso o alvo no endereço da
     VM foi um veth real na bridge do holder, não o convidado. O que isso deixa por confirmar é
     apenas o caminho `tap`→guest, que é o mesmo de qualquer VM CH sem namespace nenhuma; a chain,
     o endereço e a decisão do kernel foram exercitados com pacotes verdadeiros.
