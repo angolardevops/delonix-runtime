@@ -250,6 +250,9 @@ pub enum ImageCmd {
         debian_release: String,
         #[arg(long, default_value = "9")]
         rocky_release: String,
+        /// Fedora release AND build (e.g. `42-1.1`) — only with `--distro fedora`.
+        #[arg(long, default_value = "42-1.1")]
+        fedora_release: String,
         #[arg(long)]
         k8s_version: Option<String>,
         #[arg(long = "extra-package")]
@@ -361,6 +364,9 @@ pub enum VmSub {
         debian_release: String,
         #[arg(long, default_value = "9")]
         rocky_release: String,
+        /// Fedora release AND build (e.g. `42-1.1`) — only with `--distro fedora`.
+        #[arg(long, default_value = "42-1.1")]
+        fedora_release: String,
         #[arg(long)]
         k8s_version: Option<String>,
         #[arg(long = "extra-package")]
@@ -446,6 +452,7 @@ pub fn run(vm: bool, action: ImageCmd) -> Result<()> {
                 ubuntu_release,
                 debian_release,
                 rocky_release,
+                fedora_release,
                 k8s_version,
                 extra_packages,
                 extra_run,
@@ -463,6 +470,7 @@ pub fn run(vm: bool, action: ImageCmd) -> Result<()> {
                 ubuntu_release,
                 debian_release,
                 rocky_release,
+                fedora_release,
                 k8s_version,
                 extra_packages,
                 extra_run,
@@ -643,6 +651,7 @@ fn run_vm(action: ImageCmd) -> Result<()> {
             ubuntu_release,
             debian_release,
             rocky_release,
+            fedora_release,
             k8s_version,
             extra_packages,
             extra_run,
@@ -660,6 +669,7 @@ fn run_vm(action: ImageCmd) -> Result<()> {
             ubuntu_release,
             debian_release,
             rocky_release,
+            fedora_release,
             k8s_version,
             extra_packages,
             extra_run,
