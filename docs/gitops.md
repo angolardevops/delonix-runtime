@@ -207,6 +207,27 @@ delonix explain Pod.containers.image
 delonix stack apply --dry-run   # o manifesto com TODOS os defaults preenchidos
 ```
 
+## Validado ao vivo, com um container real
+
+O ciclo inteiro, num `DELONIX_ROOT` isolado — e a prova que interessa não é o
+comando devolver 0:
+
+| Passo | Resultado |
+|---|---|
+| `apply` de um manifesto novo | container criado, PID `618350` |
+| `plan` outra vez | «sem alterações» |
+| mudar `memory: 64M` → `128M` | plano diz `~ update`, com os dois valores |
+| `apply` | **PID inalterado (618350)** e o `memory.max` do cgroup REAL passa a `134217728` |
+| mudar a `image` | plano diz `-/+`, nomeando `image` |
+| `apply` sem `--replace` | **RECUSA**, e o PID continua `618350` — nada foi tocado |
+| `container update` por fora | o `plan` seguinte apanha a deriva (`256M → 128M`) |
+| `stack wait` | devolve de imediato |
+| `stack destroy` | container removido, `ps -a` vazio |
+
+O PID inalterado é o ponto: é o que distingue convergência a quente de um
+restart disfarçado, e é a diferença de fundo entre este motor e recriar o
+container como o Docker faria.
+
 ## O que este fluxo não faz
 
 * **Não reconcilia continuamente.** Converge quando lhe chamas. Um loop de
