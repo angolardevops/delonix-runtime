@@ -302,7 +302,14 @@ pub enum VmImageCmd {
     /// Human-readable detail of one or more VM images, `kubectl describe` style.
     Describe { names: Vec<String> },
     /// Publish a local VM image to an OCI registry (single-blob artifact).
-    Push { name: String, target: String },
+    Push {
+        name: String,
+        /// Destination. Omit it for an OFFICIAL repository: which one is
+        /// decided by what the image says about itself (an appliance goes to
+        /// the appliances repo, a Kubernetes golden to the k8s one). Give it
+        /// to publish anywhere else.
+        target: Option<String>,
+    },
     /// Convert a VM disk between `qcow2` (default, per-VM overlay) and `raw`
     /// — flattened (no backing file) either way, ready to boot on either
     /// backend (libvirt/QEMU and Cloud Hypervisor already share this same
@@ -449,7 +456,7 @@ pub fn run(action: VmImageCmd) -> Result<()> {
     match action {
         VmImageCmd::Ls { output } => cmd_ls(&store, output),
         VmImageCmd::Describe { names } => cmd_describe(&store, &names),
-        VmImageCmd::Push { name, target } => cmd_push(&store, &name, &target),
+        VmImageCmd::Push { name, target } => cmd_push(&store, &name, target.as_deref()),
         VmImageCmd::Convert {
             source,
             to,
@@ -470,13 +477,30 @@ pub fn run(action: VmImageCmd) -> Result<()> {
             // claiming it. A user on a real host hit this: `delonix image vm
             // pull --name delonix-vm-k8s:1.34` (no source) errored "required
             // arguments were not provided: <SOURCE>".
-            let src = source.unwrap_or_else(|| default_pull_source(no_k8s).to_string());
+            // A reference WITHOUT a registry (`opnsense:26.1`) is looked up in
+            // the official catalogue; one with a `/` is used verbatim, so the
+            // argument keeps meaning "somewhere of your own".
+            let src = match source {
+                Some(s) => resolve_official_ref(&s),
+                None => default_pull_source(no_k8s).to_string(),
+            };
             cmd_pull(&store, &src, name)
         }
-        VmImageCmd::LsRemote { source, no_k8s } => {
-            let src = source.unwrap_or_else(|| default_pull_source(no_k8s).to_string());
-            cmd_ls_remote(&src)
-        }
+        VmImageCmd::LsRemote { source, no_k8s } => match source {
+            // A bare name resolves against the official catalogue, so
+            // `ls-remote appliances` needs no URL.
+            Some(s) => cmd_ls_remote(&resolve_official_ref(&s)),
+            // `--no-k8s` predates the catalogue and still means "the base
+            // images"; kept working rather than removed.
+            None if no_k8s => cmd_ls_remote(
+                OFFICIAL_REPOS
+                    .iter()
+                    .find(|r| r.key == "base")
+                    .expect("base is in the table")
+                    .repo,
+            ),
+            None => cmd_ls_remote_official(),
+        },
         VmImageCmd::Init { name, dir, force } => cmd_init(&name, dir, force),
         VmImageCmd::Build {
             tag,
@@ -712,6 +736,107 @@ fn describe_one(store: &VmImageStore, img: &VmImage) {
     d.print();
 }
 
+/// A repository the project itself publishes. Having these as DATA rather than
+/// as a pair of constants behind a boolean is what lets `ls-remote`, `pull` and
+/// `push` all agree on what "official" means without any of them taking an
+/// argument — and what makes adding a fourth one a single row instead of a new
+/// flag.
+///
+/// The old shape was `OFFICIAL_VM_IMAGE`/`OFFICIAL_VM_BASE_IMAGE` selected by
+/// `--no-k8s`, which stops working the moment there is a third repository: a
+/// boolean cannot name three things.
+pub(crate) struct OfficialRepo {
+    /// Short name for the CLI and for messages (`k8s`, `base`, `appliances`).
+    pub key: &'static str,
+    /// `host/namespace/name`, never with a tag.
+    pub repo: &'static str,
+    /// What a bare `pull` from this repository should fetch. `None` for a
+    /// repository with no single sensible default — `appliances` holds
+    /// unrelated products, and picking one of them for the user would be a
+    /// guess dressed as a default.
+    pub default_tag: Option<&'static str>,
+    /// One line, for the listing header.
+    pub what: &'static str,
+}
+
+pub(crate) const OFFICIAL_REPOS: &[OfficialRepo] = &[
+    OfficialRepo {
+        key: "k8s",
+        repo: "ghcr.io/angolardevops/delonix-vm-k8s",
+        default_tag: Some("1.34"),
+        what: "golden Kubernetes node (kubeadm/kubelet/kubectl + delonix-cri)",
+    },
+    OfficialRepo {
+        key: "base",
+        repo: "ghcr.io/angolardevops/delonix-vm-base",
+        default_tag: Some("ubuntu-24.04"),
+        what: "base OS images (delonix engine, rootless-ready, no Kubernetes)",
+    },
+    OfficialRepo {
+        key: "appliances",
+        repo: "ghcr.io/angolardevops/delonix-vm-appliances",
+        default_tag: None,
+        what: "vendor appliances (OPNsense, Proxmox, TrueNAS) — no cloud-init",
+    },
+];
+
+/// The official repository a LOCAL image belongs in, decided from what the
+/// image says about itself rather than from a flag: an appliance goes with the
+/// appliances, an image carrying a Kubernetes version with the golden nodes,
+/// anything else with the base images.
+///
+/// This is what lets `image vm push <name>` work with no destination. `None`
+/// when the metadata does not settle it — and then the caller must be told to
+/// name a target instead of having one guessed.
+pub(crate) fn official_repo_for(img: &VmImage) -> Option<&'static OfficialRepo> {
+    let key = if img.cloud_init == Some(false) {
+        "appliances"
+    } else if img.k8s_version.is_some() {
+        "k8s"
+    } else if img.distro.is_some() {
+        "base"
+    } else {
+        return None;
+    };
+    OFFICIAL_REPOS.iter().find(|r| r.key == key)
+}
+
+/// Resolves a reference that names no registry (`opnsense:26.1`) against the
+/// official repositories, so a pull of something the project publishes needs
+/// no URL. A reference WITH a `/` is a real one and is returned untouched —
+/// the parameter keeps meaning "a repository of your own".
+pub(crate) fn resolve_official_ref(reference: &str) -> String {
+    if reference.contains('/') {
+        return reference.to_string();
+    }
+    let name = reference.split(':').next().unwrap_or(reference);
+    // A bare product name is looked up by what the tags are called: the
+    // appliances repository tags its images `opnsense-26.1`, so `opnsense:26.1`
+    // and `opnsense-26.1` both point at the same artifact.
+    for r in OFFICIAL_REPOS {
+        if r.key == name {
+            return match r.default_tag {
+                Some(tag) => format!(
+                    "{}:{}",
+                    r.repo,
+                    reference.split_once(':').map_or(tag, |(_, t)| t)
+                ),
+                None => r.repo.to_string(),
+            };
+        }
+    }
+    // Not a repository key: treat it as a product tag in the appliances repo,
+    // where `<product>:<version>` is spelled `<product>-<version>`.
+    let appliances = OFFICIAL_REPOS
+        .iter()
+        .find(|r| r.key == "appliances")
+        .expect("appliances is in the table");
+    match reference.split_once(':') {
+        Some((prod, ver)) => format!("{}:{prod}-{ver}", appliances.repo),
+        None => format!("{}:{reference}", appliances.repo),
+    }
+}
+
 /// Delonix's OFFICIAL golden VM image (Ubuntu 24.04 + kubeadm/kubelet/
 /// kubectl + delonix-cri as a systemd service) — published and validated with
 /// a byte-identical round-trip; see CLAUDE.md, section "Golden VM image".
@@ -827,8 +952,60 @@ pub(crate) fn default_pull_source(no_k8s: bool) -> &'static str {
     }
 }
 
-pub(crate) fn cmd_push(store: &VmImageStore, name: &str, target: &str) -> Result<()> {
+/// The tag an image takes in its official repository. One repository holds
+/// several products, so the local `<product>:<version>` becomes
+/// `<product>-<version>` — which is also what `resolve_official_ref` undoes on
+/// the way back, so `push` and `pull` agree without either knowing about the
+/// other.
+pub(crate) fn official_tag_for(img: &VmImage, local_name: &str) -> String {
+    // `delonix-vm-base:ubuntu-24.04` publishes as `ubuntu-24.04`: the
+    // repository already carries the family, repeating it in the tag would
+    // read as `delonix-vm-base:delonix-vm-base-ubuntu-24.04`.
+    if let Some(rest) = local_name.strip_prefix("delonix-vm-base:") {
+        return rest.to_string();
+    }
+    if let Some(rest) = local_name.strip_prefix("delonix-vm-k8s:") {
+        return rest.to_string();
+    }
+    match local_name.split_once(':') {
+        Some((prod, ver)) => format!("{prod}-{ver}"),
+        None => match (&img.distro, &img.ubuntu_release) {
+            (Some(d), Some(r)) => format!("{d}-{r}"),
+            _ => local_name.to_string(),
+        },
+    }
+}
+
+pub(crate) fn cmd_push(store: &VmImageStore, name: &str, target: Option<&str>) -> Result<()> {
     let img = store.get(name)?;
+    // With no destination, publish where this image belongs — decided from the
+    // image's own metadata, not from a flag the caller has to remember. A tag
+    // that is not a valid OCI reference is rewritten the way the appliances
+    // repository names them (`opnsense:26.1` → `opnsense-26.1`), because one
+    // repository holds several products.
+    let target = match target {
+        Some(t) => t.to_string(),
+        None => {
+            let repo = official_repo_for(&img).ok_or_else(|| {
+                Error::Invalid(super::po::tf(
+                    "{name}: cannot tell which official repository this belongs in (no distro, \
+                     no k8s version, not marked as an appliance) — name a destination explicitly",
+                    &[("name", name)],
+                ))
+            })?;
+            let tag = official_tag_for(&img, name);
+            let dest = format!("{}:{}", repo.repo, tag);
+            eprintln!(
+                "{}",
+                super::po::tf(
+                    "publishing to the official repository: {dest}",
+                    &[("dest", &dest)]
+                )
+            );
+            dest
+        }
+    };
+    let target = target.as_str();
     let data = std::fs::read(store.qcow2_path(name)).map_err(|e| {
         Error::Invalid(format!(
             "{} '{name}': {e}",
@@ -1174,6 +1351,38 @@ pub(crate) fn cmd_pull(store: &VmImageStore, source: &str, name: Option<String>)
     let img = apply_pulled_annotations(img, &annotations);
     store.save(&img)?;
     println!("{name}");
+    Ok(())
+}
+
+/// `ls-remote` with no argument: every official repository, one after the
+/// other. Listing only one of them (and not saying which) is what made a user
+/// who had just published to another conclude the push had failed.
+pub(crate) fn cmd_ls_remote_official() -> Result<()> {
+    let mut failed = false;
+    for (i, r) in OFFICIAL_REPOS.iter().enumerate() {
+        if i > 0 {
+            println!();
+        }
+        eprintln!(
+            "{}",
+            super::po::tf("{key} — {what}", &[("key", r.key), ("what", r.what)],)
+        );
+        // One unreachable repository must not hide the others: a brand-new
+        // package is private until someone flips it, and 404 is what that
+        // looks like from here.
+        if let Err(e) = cmd_ls_remote(r.repo) {
+            eprintln!("  {e}");
+            failed = true;
+        }
+    }
+    if failed {
+        eprintln!(
+            "{}",
+            super::po::t(
+                "note: a repository that reports \"not found\" may simply be private to these credentials"
+            )
+        );
+    }
     Ok(())
 }
 
@@ -4285,5 +4494,64 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
         assert_eq!(show("localhost:5000/foo:v1"), "localhost:5000/foo");
         assert_eq!(show("localhost:5000/foo"), "localhost:5000/foo");
         assert_eq!(show("alpine:latest"), "alpine");
+    }
+
+    #[test]
+    fn o_repo_oficial_sai_do_que_a_imagem_diz_de_si() {
+        let mut img = bare_img();
+        // Nothing known: must NOT guess a destination.
+        assert!(official_repo_for(&img).is_none());
+        img.distro = Some("ubuntu".into());
+        assert_eq!(official_repo_for(&img).unwrap().key, "base");
+        img.k8s_version = Some("1.34".into());
+        assert_eq!(official_repo_for(&img).unwrap().key, "k8s");
+        // An appliance wins over everything: it is the one that changes how
+        // `vm create` behaves.
+        img.cloud_init = Some(false);
+        assert_eq!(official_repo_for(&img).unwrap().key, "appliances");
+    }
+
+    #[test]
+    fn resolve_official_ref_so_toca_no_que_nao_tem_registo() {
+        // A real reference is left alone — the argument keeps meaning
+        // "a repository of your own".
+        for as_is in [
+            "ghcr.io/outro/coisa:1.0",
+            "docker.io/library/alpine:latest",
+            "localhost:5000/x:v1",
+        ] {
+            assert_eq!(resolve_official_ref(as_is), as_is);
+        }
+        // Repository keys.
+        assert!(resolve_official_ref("appliances").ends_with("delonix-vm-appliances"));
+        assert_eq!(
+            resolve_official_ref("k8s:1.35"),
+            "ghcr.io/angolardevops/delonix-vm-k8s:1.35"
+        );
+        // A product name becomes the appliances repo's `<product>-<version>`.
+        assert_eq!(
+            resolve_official_ref("opnsense:26.1"),
+            "ghcr.io/angolardevops/delonix-vm-appliances:opnsense-26.1"
+        );
+    }
+
+    #[test]
+    fn a_tag_publicada_e_o_inverso_do_que_o_pull_resolve() {
+        // push and pull must agree without either knowing about the other.
+        let mut img = bare_img();
+        img.cloud_init = Some(false);
+        img.distro = Some("opnsense".into());
+        let tag = official_tag_for(&img, "opnsense:26.1");
+        assert_eq!(tag, "opnsense-26.1");
+        let repo = official_repo_for(&img).unwrap();
+        assert_eq!(
+            format!("{}:{}", repo.repo, tag),
+            resolve_official_ref("opnsense:26.1")
+        );
+        // A base image does not repeat the family in the tag.
+        assert_eq!(
+            official_tag_for(&bare_img(), "delonix-vm-base:ubuntu-24.04"),
+            "ubuntu-24.04"
+        );
     }
 }

@@ -527,7 +527,12 @@ pub enum VmCmd {
         no_k8s: bool,
     },
     /// Push a local golden VM image to an OCI registry (`vm push <name> <target>`).
-    Push { name: String, target: String },
+    Push {
+        name: String,
+        /// Destination. Omit it to publish to the OFFICIAL repository this
+        /// image belongs in (decided from the image's own metadata).
+        target: Option<String>,
+    },
     /// Convert a VM disk to the format another ecosystem imports — `qcow2`,
     /// `raw`, `vmdk` (VMware), `vdi` (VirtualBox), `vhdx`/`vhd` (Hyper-V,
     /// Azure). Flattened either way, so the result is a standalone file with
@@ -1262,18 +1267,27 @@ pub fn run(action: VmCmd) -> Result<()> {
             no_k8s,
         } => {
             let store = super::vmimage::VmImageStore::open(super::util::state_root())?;
-            let src =
-                source.unwrap_or_else(|| super::vmimage::default_pull_source(no_k8s).to_string());
+            // Same rule as `image vm pull`: a reference with no registry is
+            // resolved against the official catalogue, one with a `/` is used
+            // as given.
+            let src = match source {
+                Some(s) => super::vmimage::resolve_official_ref(&s),
+                None => super::vmimage::default_pull_source(no_k8s).to_string(),
+            };
             super::vmimage::cmd_pull(&store, &src, name)
         }
-        VmCmd::LsRemote { source, no_k8s } => {
-            let src =
-                source.unwrap_or_else(|| super::vmimage::default_pull_source(no_k8s).to_string());
-            super::vmimage::cmd_ls_remote(&src)
-        }
+        VmCmd::LsRemote { source, no_k8s } => match source {
+            Some(s) => super::vmimage::cmd_ls_remote(&super::vmimage::resolve_official_ref(&s)),
+            None if no_k8s => super::vmimage::cmd_ls_remote(
+                super::vmimage::default_pull_source(true)
+                    .rsplit_once(':')
+                    .map_or(super::vmimage::default_pull_source(true), |(r, _)| r),
+            ),
+            None => super::vmimage::cmd_ls_remote_official(),
+        },
         VmCmd::Push { name, target } => {
             let store = super::vmimage::VmImageStore::open(super::util::state_root())?;
-            super::vmimage::cmd_push(&store, &name, &target)
+            super::vmimage::cmd_push(&store, &name, target.as_deref())
         }
         VmCmd::Convert {
             source,

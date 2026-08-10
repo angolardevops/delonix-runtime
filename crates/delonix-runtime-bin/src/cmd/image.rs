@@ -426,8 +426,12 @@ pub enum VmSub {
         #[arg(long)]
         no_k8s: bool,
     },
-    /// Publish a local VM image to an OCI registry.
-    Push { name: String, target: String },
+    /// Publish a local VM image to an OCI registry. Omit the destination to
+    /// publish to the OFFICIAL repository the image belongs in.
+    Push {
+        name: String,
+        target: Option<String>,
+    },
     /// Register an existing disk image under a name, so `vm create --disk
     /// <name>` and `image vm push` can use it.
     Import(super::vmimage::ImportArgs),
@@ -758,12 +762,9 @@ fn run_vm(action: ImageCmd) -> Result<()> {
         ImageCmd::Push { name, target } => VmImageCmd::Push {
             name,
             // A VM image has no repo_tags from which to infer the destination.
-            target: target.ok_or_else(|| {
-                Error::Invalid(
-                    super::po::t("`image --vm push <name> <dest>`: the destination is required")
-                        .into(),
-                )
-            })?,
+            // No longer required: without it the official repository is
+            // chosen from the image's own metadata (`official_repo_for`).
+            target,
         },
         ImageCmd::Import(args) => VmImageCmd::Import(args),
         ImageCmd::Convert {
