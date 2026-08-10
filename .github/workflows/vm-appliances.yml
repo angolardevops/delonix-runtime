@@ -1,0 +1,176 @@
+# Constrói uma imagem de appliance (OPNsense, Proxmox, TrueNAS) e publica-a no
+# ghcr — as que o `delonix vm create --disk <nome>` usa sem instalação nenhuma.
+#
+# Um produto por execução, de propósito: cada build arranca uma VM com 4-6 GiB
+# e escreve vários GiB em disco, e o runner não tem folga para os fazer em
+# paralelo.
+#
+# Disparo MANUAL — publicar uma imagem oficial é uma decisão explícita.
+#
+# NOTA SOBRE OS ISOs (ler antes de correr): o OPNsense é descarregado e
+# verificado sozinho (o mirror publica checksums e o script lê-os). Os ISOs do
+# Proxmox e do TrueNAS NÃO são descarregáveis da máquina onde isto foi escrito
+# (`download.proxmox.com` está inacessível de lá), por isso o URL e o SHA-256
+# são INPUTS em vez de valores embutidos que ninguém confirmou. O build falha
+# se o checksum não bater — nunca aceita um download por verificar.
+name: VM appliance images
+
+on:
+  workflow_dispatch:
+    inputs:
+      product:
+        description: "Appliance a construir"
+        type: choice
+        options:
+          - opnsense
+          - pve
+          - pbs
+          - pmg
+          - pdm
+          - truenas
+        required: true
+      version:
+        description: "Versão COMPLETA, usada para descarregar e para a tag (ex.: 26.1.2, 9.1, 25.10.5)"
+        required: true
+      iso_url:
+        description: "URL do ISO (obrigatório excepto para opnsense)"
+        default: ""
+      iso_sha256:
+        description: "SHA-256 do ISO (obrigatório excepto para opnsense)"
+        default: ""
+      dest_repo:
+        description: "Repositório OCI de destino"
+        default: "ghcr.io/angolardevops/delonix-vm-appliances"
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Ferramentas
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            protobuf-compiler qemu-system-x86 qemu-utils xorriso python3-venv curl
+          # Sem /dev/kvm os scripts caem para TCG sozinhos; vale registar qual foi.
+          if [ -w /dev/kvm ]; then echo "KVM: disponível"; else echo "KVM: AUSENTE (build em TCG, lento)"; fi
+
+      - name: Espaço em disco
+        run: |
+          # Um build escreve o ISO (~2 GiB), a árvore extraída (~2 GiB) e o
+          # disco da VM (cresce até ~4 GiB). O `/` do runner não tem folga
+          # para isso; `/mnt` tem.
+          df -h / /mnt
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc || true
+          sudo mkdir -p /mnt/appliances && sudo chown "$USER" /mnt/appliances
+          df -h / /mnt
+
+      - name: Instala toolchain fixada
+        run: rustup show
+      - uses: Swatinem/rust-cache@v2
+      - name: Compila delonix
+        run: cargo build --release --locked -p delonix-runtime-bin
+
+      - name: Valida os inputs
+        id: vars
+        run: |
+          set -euo pipefail
+          p='${{ inputs.product }}'
+          if [ "$p" != "opnsense" ]; then
+            test -n '${{ inputs.iso_url }}'    || { echo "::error::iso_url é obrigatório para $p"; exit 1; }
+            test -n '${{ inputs.iso_sha256 }}' || { echo "::error::iso_sha256 é obrigatório para $p"; exit 1; }
+          fi
+          case "$p" in
+            opnsense) echo "name=opnsense" ;;
+            pve)      echo "name=proxmox-ve" ;;
+            pbs)      echo "name=proxmox-backup-server" ;;
+            pmg)      echo "name=proxmox-mail-gateway" ;;
+            pdm)      echo "name=proxmox-datacenter-manager" ;;
+            truenas)  echo "name=truenas-scale" ;;
+          esac >> "$GITHUB_OUTPUT"
+
+      - name: Descarrega e verifica o ISO
+        if: ${{ inputs.product != 'opnsense' }}
+        working-directory: /mnt/appliances
+        run: |
+          set -euo pipefail
+          curl -fL --no-progress-meter -o src.iso '${{ inputs.iso_url }}'
+          # Falha FECHADO: um ISO por verificar nunca chega ao build.
+          echo '${{ inputs.iso_sha256 }}  src.iso' | sha256sum -c -
+
+      - name: Constrói a imagem
+        working-directory: /mnt/appliances
+        env:
+          OUT_DIR: /mnt/appliances
+        run: |
+          set -euo pipefail
+          S="$GITHUB_WORKSPACE/scripts/appliances"
+          case '${{ inputs.product }}' in
+            opnsense) "$S/build-opnsense.sh" '${{ inputs.version }}' ;;
+            truenas)  "$S/build-truenas.sh" /mnt/appliances/src.iso ;;
+            *)        "$S/build-proxmox.sh" '${{ inputs.product }}' /mnt/appliances/src.iso ;;
+          esac
+          rm -f src.iso
+          ls -lh /mnt/appliances/*.qcow2
+
+      - name: Prova que arranca e serve
+        # O OPNsense fica de fora: a web UI dele só escuta na LAN, e uma sonda
+        # pela WAN receberia recusa — o comportamento CORRECTO de uma firewall.
+        if: ${{ inputs.product != 'opnsense' }}
+        working-directory: /mnt/appliances
+        env:
+          OUT_DIR: /mnt/appliances
+        # Nomeia o produto: sem argumento o script verifica todas as imagens
+        # presentes, e uma execução de CI constrói UMA.
+        run: |
+          "$GITHUB_WORKSPACE/scripts/appliances/verify-boot.sh" '${{ inputs.product }}'
+
+      - name: Regista e publica
+        env:
+          DELONIX_ROOT: /mnt/appliances/root
+          # Um PAT com `write:packages` (secret GHCR_TOKEN) tem precedência;
+          # sem ele, o GITHUB_TOKEN — que não CRIA um package novo no namespace
+          # de um user (403), só publica em packages que já existam.
+          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          D=./target/release/delonix
+          N='${{ steps.vars.outputs.name }}'
+          case '${{ inputs.product }}' in
+            opnsense) IMG=/mnt/appliances/opnsense-'${{ inputs.version }}'.qcow2; VCPUS=2; MEM=2G ;;
+            pve)      IMG=/mnt/appliances/pve.qcow2;     VCPUS=4; MEM=4G ;;
+            pbs)      IMG=/mnt/appliances/pbs.qcow2;     VCPUS=2; MEM=2G ;;
+            pmg)      IMG=/mnt/appliances/pmg.qcow2;     VCPUS=2; MEM=2G ;;
+            pdm)      IMG=/mnt/appliances/pdm.qcow2;     VCPUS=2; MEM=2G ;;
+            truenas)  IMG=/mnt/appliances/truenas.qcow2; VCPUS=4; MEM=8G ;;
+          esac
+          # `--appliance`: nenhuma destas corre cloud-init, e sem esta marca o
+          # `vm create` do outro lado voltaria a anexar-lhes um seed NoCloud.
+          $D image vm import $IMG -t "$N:${{ inputs.version }}" --appliance \
+            --distro "$N" --release '${{ inputs.version }}' \
+            --default-vcpus "$VCPUS" --default-memory "$MEM"
+          $D image vm ls
+          echo "${GHCR_TOKEN:-$GITHUB_TOKEN}" | $D image login ghcr.io \
+            -u "${{ github.actor }}" --password-stdin
+          $D image --vm push "$N:${{ inputs.version }}" \
+            "${{ inputs.dest_repo }}:$N-${{ inputs.version }}"
+
+      - name: Sumário
+        run: |
+          {
+            echo "### Appliance publicada"
+            echo
+            echo '```bash'
+            echo "delonix vm pull ${{ inputs.dest_repo }}:${{ steps.vars.outputs.name }}-${{ inputs.version }}"
+            echo "delonix vm create meu-${{ inputs.product }} --disk ${{ steps.vars.outputs.name }}-${{ inputs.version }}"
+            echo '```'
+            echo
+            echo "Não corre cloud-init: configura-a no primeiro arranque (consola ou interface web)."
+          } >> "$GITHUB_STEP_SUMMARY"
