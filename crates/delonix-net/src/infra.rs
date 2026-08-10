@@ -133,6 +133,23 @@ fn control_reachable() -> bool {
 /// Deliberately does NOT auto-restart the infra: killing a live holder frees its
 /// netns, dropping the network of every container attached to the SDN. That is the
 /// operator's call, so the message says exactly what to run instead. PURE.
+/// The actionable message for "this root has no pin, but the user's shared
+/// control socket answers" — two `DELONIX_ROOT`s on one uid.
+///
+/// Pure so the wording is testable: it is the whole value of the branch, and the
+/// branch itself cannot be exercised without two live holders.
+fn foreign_holder_message(sock: &Path, ours: &Path) -> String {
+    format!(
+        "another delonix state root on this user already owns the network infra: `{}` has a \
+         live listener, but there is no pidfile under `{}`. The sockets are per-USER while the \
+         pidfiles are per-ROOT, so rebuilding from here would delete that infra and unplug \
+         every workload on it. Either use that root (unset/point `DELONIX_ROOT` at it), or stop \
+         it deliberately with `delonix net netns down` from the root that owns it.",
+        sock.display(),
+        ours.display()
+    )
+}
+
 fn stale_holder_message(holder_pid: i32, sock: &Path, legacy: Option<&Path>) -> String {
     let cause = match legacy {
         Some(old) => format!(
@@ -667,9 +684,33 @@ pub fn ensure_up() -> Result<()> {
         return Ok(());
     }
 
-    // The pin itself is gone: the namespaces went with it and there is nothing to
-    // salvage. Full rebuild, and the stranded workloads are recovered by restart
-    // (`netns::reconcile_after_respawn`) exactly as before.
+    // The pin is gone *for this root* — and that is NOT the same as "gone for
+    // this user".
+    //
+    // The pidfiles live under `DELONIX_ROOT/ingress/`, per-ROOT; the control
+    // socket and the slirp live in `/tmp/delonix-net-<uid>`, per-UID and
+    // therefore SHARED by every root the same user runs. Two roots on one user
+    // — a `delonix-cri` with its own state dir next to the normal CLI, which is
+    // exactly how this repo runs its own conformance suite — each read their own
+    // (absent) pidfile, each conclude "no infra", and the second one calls
+    // `teardown()`: it deletes the FIRST one's sockets and unplugs every
+    // workload on that netns, in silence.
+    //
+    // Measured 2026-08-10: a conformance run and a normal session collided this
+    // way after a reboot cleared `/tmp`. The suite's holder came up at 07:01:57,
+    // the session's at 07:04:23 and took the socket; every `RunPodSandbox`
+    // afterwards hung for the full 600s spec timeout, and the run reported 79
+    // failures that had nothing to do with conformance.
+    //
+    // So: ask the RESOURCE, not our bookkeeping. A live listener on the shared
+    // socket means somebody owns this user's infra, and destroying it is the
+    // operator's call, never a side effect of a command that wanted a network.
+    if control_reachable() {
+        return Err(Error::Runtime {
+            context: "control socket",
+            message: foreign_holder_message(&control_sock_path(), &ingress_dir()),
+        });
+    }
     teardown();
     std::fs::create_dir_all(ingress_dir()).map_err(|e| Error::Runtime {
         context: "ingress dir",
@@ -5890,5 +5931,26 @@ Inter-|   Receive                                                |  Transmit
         assert!(is_ingress_ip(
             &dhcp_lease_ip("10.240", "52:54:00:11:22:33").unwrap()
         ));
+    }
+
+    /// Dois `DELONIX_ROOT` no mesmo uid: o pidfile é por-ROOT, o socket é
+    /// por-USER, e antes desta correcção o segundo apagava a infra do primeiro.
+    ///
+    /// A mensagem é o valor todo do ramo — o ramo em si não se exercita sem dois
+    /// holders vivos —, por isso é ela que leva o teste: tem de nomear os DOIS
+    /// caminhos (senão quem a lê não sabe qual dos roots é o dono) e tem de
+    /// oferecer as duas saídas reais, usar aquele root ou pará-lo de propósito.
+    #[test]
+    fn a_mensagem_de_root_alheio_nomeia_os_dois_caminhos_e_as_duas_saidas() {
+        let m = super::foreign_holder_message(
+            std::path::Path::new("/tmp/delonix-net-1000/control.sock"),
+            std::path::Path::new("/home/w/cri/state/ingress"),
+        );
+        assert!(m.contains("/tmp/delonix-net-1000/control.sock"));
+        assert!(m.contains("/home/w/cri/state/ingress"));
+        assert!(m.contains("DELONIX_ROOT"));
+        assert!(m.contains("delonix net netns down"));
+        // Nunca sugerir a reconstrução: é isso que destrói a infra alheia.
+        assert!(!m.contains("rebuild it"));
     }
 }
