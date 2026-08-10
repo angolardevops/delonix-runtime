@@ -9,6 +9,13 @@ Type=simple
 ExecStartPre=/bin/mkdir -p /var/lib/delonix
 Environment=DELONIX_ROOT=/var/lib/delonix
 Environment=DELONIX_CRI_ADDR=unix:///run/delonix-cri.sock
+# Tecto de capabilities do nó — limite MÁXIMO das capabilities de qualquer
+# container criado por este CRI, seja o que for que o kubelet pedir (inclui
+# `privileged: true`). Sem estas linhas não há tecto, que é o comportamento
+# histórico. Um valor mal escrito impede o serviço de arrancar, de propósito:
+# um tecto que caísse em silêncio para "ilimitado" seria pior que nenhum.
+#   Environment=DELONIX_CRI_CAP_CEILING=default,NET_ADMIN
+#   Environment=DELONIX_CRI_CAP_CEILING_MODE=reject
 ExecStart=/usr/local/bin/delonix-cri
 Restart=always
 RestartSec=2

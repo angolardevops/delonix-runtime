@@ -3656,3 +3656,11 @@ msgstr "nenhum (auto-detecção: cloud-hypervisor se instalado, senão libvirt)"
 
 msgid "`convert` is only for VM images — use `delonix image --vm convert`"
 msgstr "`convert` é só para imagens VM — usa `delonix image --vm convert`"
+
+# tecto de capabilities do CRI (`serve cri --cap-ceiling`)
+
+msgid "Node-level UPPER BOUND on container capabilities, whatever the kubelet asks for: a comma-separated list of names (`NET_ADMIN`, `CAP_CHOWN`), or `all` (no bound, the default), `none`, `default` (the engine's default set), or `default,<extra>...`. Overrides `$DELONIX_CRI_CAP_CEILING`. Bounds capabilities ONLY — a privileged pod still gets unconfined seccomp."
+msgstr "TECTO, ao nível do nó, das capabilities de um container, seja o que for que o kubelet pedir: uma lista de nomes separada por vírgulas (`NET_ADMIN`, `CAP_CHOWN`), ou `all` (sem tecto, a omissão), `none`, `default` (o conjunto por omissão do motor), ou `default,<extra>...`. Prevalece sobre `$DELONIX_CRI_CAP_CEILING`. Limita SÓ capabilities — um pod privilegiado continua a ficar com seccomp unconfined."
+
+msgid "What to do with a pod that asks for more than `--cap-ceiling`: `reject` (default, fails CreateContainer so the kubelet reports it) or `clamp` (reduce to the ceiling and log a warning). Overrides `$DELONIX_CRI_CAP_CEILING_MODE`."
+msgstr "O que fazer a um pod que pede mais do que o `--cap-ceiling`: `reject` (omissão, faz o CreateContainer falhar para o kubelet o reportar) ou `clamp` (corta ao tecto e regista um aviso). Prevalece sobre `$DELONIX_CRI_CAP_CEILING_MODE`."

@@ -1567,6 +1567,70 @@ vivo neste host: mascaramento dentro de containers reais (musl E glibc), `docker
 com concorrência, `net flow` (degrada para contadores de veth sem CAP_BPF, e já não cria o caminho
 fixo nem deixa restos), e o `container run` normal sem regressão.
 
+## Tecto de capabilities no CRI (`DELONIX_CRI_CAP_CEILING`, v0.47.0)
+
+Um limite MÁXIMO, definido no nó, para as capabilities de qualquer container criado através do CRI
+— seja o que for que o kubelet peça, incluindo `privileged: true`. `crates/delonix-cri/src/
+cap_ceiling.rs` (`CapCeiling`), configurado por `DELONIX_CRI_CAP_CEILING` / `..._MODE` ou por
+`delonix serve cri --cap-ceiling/--cap-ceiling-mode` (flag > env, mesma precedência do `--addr`).
+
+**Porque no runtime e não só no admission.** Tudo o que chega ao `create_container` já vem
+autorizado: o securityContext é traduzido em flags sem opinião nenhuma (correcto — o runtime não é
+o admission controller). Isso deixa a única barreira entre um `privileged: true` e todas as
+capabilities do kernel numa cadeia de admission que corre noutro processo, noutra máquina, e cuja
+configuração este nó não consegue ver nem verificar. O tecto é a resposta local: vale mesmo com o
+Pod Security mal configurado, com um `crictl` a falar directamente com este socket, ou com um
+static pod que nunca passou pelo API server.
+
+- **Gramática** (`parse`, pura e testada): ausente/vazio/`all` → **sem tecto, comportamento
+  byte-a-byte igual ao anterior**; `none` → capability nenhuma; `default` → o `KEPT_CAPS` do motor;
+  `default,NET_ADMIN` → o baseline mais as nomeadas; lista de nomes (`CAP_` opcional,
+  case-insensitive) → exactamente essas. Um nome desconhecido, um modo desconhecido, ou um valor só
+  com separadores **impedem o servidor de arrancar** (`exit 2` no `delonix-cri`, erro do CLI no
+  `serve cri`, nos dois casos antes de qualquer `bind`) — um tecto que caísse em silêncio para
+  «ilimitado» por causa de um typo era precisamente a falha que isto existe para evitar.
+- **Dois modos, e a assimetria é deliberada**: um pedido EXPLÍCITO acima do tecto (`capabilities.
+  add`, ou `privileged`) é **recusado no `CreateContainer`** com `PermissionDenied` a NOMEAR as
+  capabilities negadas (o kubelet mostra-o no pod de imediato) — `mode=clamp` corta-o e avisa em
+  `warn`, para endurecer um nó cujos PodSpecs não se podem mudar hoje. Mas o **baseline implícito**
+  (o `KEPT_CAPS` que um container recebe sem pedir nada) é reduzido ao tecto **sem erro nos dois
+  modos**: baixar um default que o workload nunca pediu é o que «tecto» significa, e recusar todos
+  os pods do nó porque o default do próprio motor é mais largo que o limite tornaria a
+  funcionalidade inútil.
+- **O clamp não reimplementa a resolução de capabilities** — chama o `resolve_cap_keep` DO MOTOR e
+  intersecta com o tecto, emitindo `--cap-drop ALL` + um `--cap-add` por capability do conjunto
+  final. Por isso o módulo `delonix_runtime::capabilities` passou a ser **público** (`KEPT_CAPS`/
+  `cap_num`/`cap_name`/`all_caps_mask`/`resolve_cap_keep`/`names_from_mask`, movidos do interior do
+  `lib.rs`): uma segunda tabela nome↔número do lado do CRI divergiria no dia em que uma capability
+  fosse acrescentada aqui — a mesma disciplina gerador-e-leitor-partilham-o-formato do
+  `fw_rule_tail`. Há teste de round-trip (`cap_name`↔`cap_num` para 0..=40, e mask→nomes→mask).
+- **Limita SÓ capabilities.** Um pod privilegiado continua a ter `seccomp=unconfined`, `/sys`
+  escrivível e cgroupns próprio — são eixos separados do `--privileged`, e cortar capabilities não
+  torna um pod privilegiado seguro. O módulo di-lo em vez de sugerir um endurecimento que não
+  entrega.
+- **Armadilha apanhada pelo teste, do tipo «um teste pode codificar o bug»**: a primeira versão
+  modelava `privileged` como `resolve_cap_keep(cap_drop, ["ALL"])`, o que parece equivalente e não
+  é — no motor `privileged` **ignora** o `cap_drop` por inteiro (`if privileged { all_caps_mask() }`).
+  O clamp tem de prever o que o motor CONCEDE, não o que discutivelmente devia. Teste dedicado
+  (`privileged_ignora_o_cap_drop_como_no_motor`).
+- **Observabilidade**: banner no arranque (stdout do servidor + `tracing::info`) e o tecto em vigor
+  no `status(verbose)` → `info["capabilityCeiling"]`, legível por `crictl info`. Sem isto, um tecto
+  activo mas invisível seria diagnosticado como «o runtime largou-me as capabilities sem razão». O
+  `warn` do clamp só sai quando um pedido EXPLÍCITO foi cortado (`ceiling_reduces`) — avisar quando
+  só o baseline baixou daria uma linha por cada arranque de container do nó.
+- **Validado ao vivo neste host**: fail-closed nos dois pontos de entrada (valor e modo inválidos,
+  em EN e PT, sem socket criado); servidor `delonix-cri` real a anunciar o tecto expandido; e — o
+  pressuposto central do clamp — o argv emitido aplicado pelo MOTOR real, com o kernel a confirmar
+  `CapEff 0x1001` (CHOWN+NET_ADMIN exactos) contra `0xa0042dfb` do baseline e `0x1ffffffffff` de um
+  `--privileged`. **Não validado com um kubelet/`crictl` real** (nenhum dos dois existe neste host,
+  e `build_client(false)` no `build.rs` não gera stubs de cliente gRPC): o caminho gRPC está coberto
+  pelo teste do `create_container` real + `cap_flags`/`cap_args`, e a camada tonic são três linhas
+  de `blocking(...)`.
+- **Por fazer, deliberadamente**: nada disto toca no `container run` da CLI (lá quem escolhe é o
+  operador, não um pedido remoto — um tecto local seria o utilizador a limitar-se a si mesmo); e
+  `add_ambient_capabilities` do CRI continua sem tradução nenhuma no motor (gap pré-existente,
+  anterior a este trabalho).
+
 ## Auditoria de segurança #2 (código VM desta série: console/rede/cloud-init)
 
 Skill `delonix-runtime-sec` corrida sobre a superfície NOVA das v0.7.x (VM
