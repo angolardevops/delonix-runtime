@@ -768,6 +768,100 @@ pub fn spec_with_defaults(doc: &ManifestDoc) -> Result<serde_yaml::Value> {
     serde_yaml::to_value(spec).map_err(|e| Error::Invalid(format!("dry-run: {e}")))
 }
 
+/// Fields the reconciler compares for a `kind: Vm`.
+///
+/// **None of them converge hot, and that is not a gap.** This engine does not
+/// hotplug: changing a VM's vCPUs, memory or disk means booting a different
+/// machine, so every one of these is a `Replace` that `apply` refuses without
+/// `--replace`. Refusing is the point — recreating a VM throws away its overlay
+/// disk, which is everything the guest wrote since it was created.
+pub(crate) const RECONCILED_VM_FIELDS: &[&str] = &["disk", "vcpus", "memory", "network", "backend"];
+
+fn desired_vm_fields(spec: &VmSpec) -> std::collections::BTreeMap<String, String> {
+    let mut f = std::collections::BTreeMap::new();
+    f.insert("disk".into(), spec.disk.clone());
+    f.insert("vcpus".into(), spec.vcpus.to_string());
+    f.insert("memory".into(), spec.memory.clone());
+    f.insert("network".into(), spec.network.clone());
+    if let Some(b) = &spec.backend {
+        f.insert("backend".into(), b.clone());
+    }
+    f
+}
+
+/// What the manifest declares, for the reconciler.
+pub(crate) fn desired(doc: &ManifestDoc) -> Result<super::reconcile::Desired> {
+    let spec: VmSpec = vm_spec_of(doc)?;
+    Ok(super::reconcile::Desired {
+        kind: "Vm".into(),
+        name: doc.metadata.name.clone(),
+        fields: desired_vm_fields(&spec),
+        converges: true,
+        ownable: true,
+    })
+}
+
+/// What is on the machine, for the reconciler.
+///
+/// Reads the STORE and not `delonix_vm::status`: `status` asks the backend
+/// whether the domain is running, which is a shell-out per VM. A plan compares
+/// declared configuration, and none of the compared fields change because a VM
+/// happens to be off — paying a `virsh` round-trip per VM to learn something the
+/// plan does not use would make planning slow for nothing.
+pub(crate) fn actual() -> Result<Vec<super::reconcile::Actual>> {
+    let base = state_root();
+    Ok(delonix_vm::list(&base)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|vm| {
+            let mut f = std::collections::BTreeMap::new();
+            f.insert("disk".into(), vm.disk.clone());
+            f.insert("vcpus".into(), vm.vcpus.to_string());
+            f.insert("memory".into(), vm.memory.clone());
+            f.insert("network".into(), vm.network.clone());
+            f.insert("backend".into(), vm.backend.clone());
+            super::reconcile::Actual {
+                kind: "Vm".into(),
+                name: vm.name.clone(),
+                fields: f,
+                owner: vm.labels.get(super::reconcile::STACK_LABEL).cloned(),
+                last_applied: vm
+                    .annotations
+                    .get(super::reconcile::LAST_APPLIED)
+                    .and_then(|raw| super::reconcile::decode_last_applied(raw)),
+            }
+        })
+        .collect())
+}
+
+/// Records that this stack owns the VM, and what it last applied.
+pub(crate) fn stamp(
+    name: &str,
+    stack: &str,
+    fields: &std::collections::BTreeMap<String, String>,
+) -> Result<()> {
+    let st: delonix_runtime_core::JsonStore<delonix_runtime_core::Vm> =
+        delonix_runtime_core::JsonStore::open(state_root().join("vms"))?;
+    let encoded = super::reconcile::encode_last_applied(fields);
+    st.update(name, |vm| {
+        vm.labels
+            .insert(super::reconcile::STACK_LABEL.into(), stack.to_string());
+        vm.labels
+            .insert(super::reconcile::MANAGED_BY.into(), "delonix".into());
+        vm.annotations
+            .insert(super::reconcile::LAST_APPLIED.into(), encoded.clone());
+        true
+    })?;
+    Ok(())
+}
+
+/// Destroys a VM so the normal creation path can rebuild it. **The overlay disk
+/// goes with it** — everything the guest wrote. That is the whole reason a VM
+/// change is refused without `--replace`.
+pub(crate) fn remove_for_replace(name: &str) -> Result<()> {
+    delonix_vm::remove_force(&state_root(), name)
+}
+
 pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
     let base = state_root();
     for doc in manifest::of_kind(docs, "Vm") {
