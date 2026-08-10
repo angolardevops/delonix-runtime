@@ -1924,11 +1924,12 @@ fn merge_into_local_kubeconfig(source: &Path, cluster_name: &str, dest: &Path) -
             super::po::t("failed to serialize the kubeconfig")
         ))
     })?;
-    std::fs::write(dest, out)?;
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(dest, std::fs::Permissions::from_mode(0o600));
-    }
+    // Mode at creation, never write-then-chmod: this file holds cluster-admin
+    // credentials, and `fs::write` would create it at the umask (0644 on a
+    // default install) for the window before the `chmod` lands. Same fix
+    // `fetch_kubeconfig` already carries a few functions up; this path had been
+    // left on the old shape.
+    delonix_runtime_core::write_atomic_mode(dest, out.as_bytes(), Some(0o600))?;
     println!(
         "{}",
         super::po::tf(

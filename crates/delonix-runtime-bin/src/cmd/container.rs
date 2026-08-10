@@ -2627,8 +2627,31 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
     c.dns_servers = dns;
     c.dns_searches = dns_search;
     c.dns_options = dns_option;
-    c.masked_paths = masked_path;
-    c.readonly_paths = readonly_path;
+    // Without an explicit list, apply runc's default masked/readonly paths. The
+    // engine masks `/proc/sysrq-trigger` and `/proc/kcore` unconditionally (host
+    // CONTROL), but the rest of runc's list — `/proc/timer_list`,
+    // `/proc/sched_debug`, `/proc/interrupts`, `/sys/firmware` — was only ever
+    // applied when the caller named the paths itself. The CRI path was fine (the
+    // kubelet always sends its own list); a plain `container run` leaked host
+    // kernel pointers and timing side-channels that Docker has masked by default
+    // for years. Explicit flags stay authoritative, and `--privileged` opts out
+    // wholesale, both matching Docker/runc semantics.
+    c.masked_paths = if masked_path.is_empty() && !privileged {
+        delonix_runtime::DEFAULT_MASKED_PATHS
+            .iter()
+            .map(|s| s.to_string())
+            .collect()
+    } else {
+        masked_path
+    };
+    c.readonly_paths = if readonly_path.is_empty() && !privileged {
+        delonix_runtime::DEFAULT_READONLY_PATHS
+            .iter()
+            .map(|s| s.to_string())
+            .collect()
+    } else {
+        readonly_path
+    };
     c.sysctls = sysctl;
 
     // ---- network ----
