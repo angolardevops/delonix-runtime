@@ -14,7 +14,7 @@ use delonix_runtime_core::{Error, Result};
 use delonix_volume::VolumeStore;
 use serde::{Deserialize, Serialize};
 
-use super::manifest::{self, ManifestDoc};
+use super::manifest;
 use super::output;
 use super::util::state_root;
 
@@ -90,26 +90,6 @@ pub enum StorageCmd {
     },
 }
 
-/// `spec` of `kind: Storage`.
-#[derive(Debug, Deserialize, Serialize)]
-struct StorageSpec {
-    /// `nfs` | `cifs`/`smb` | `webdav`.
-    r#type: String,
-    server: String,
-    share: String,
-    #[serde(default)]
-    username: Option<String>,
-    #[serde(default)]
-    password: Option<String>,
-    /// Vault secret (`password` key).
-    #[serde(default, rename = "passwordSecret")]
-    password_secret: Option<String>,
-    #[serde(default, rename = "readOnly")]
-    read_only: bool,
-    #[serde(default, rename = "mountOptions")]
-    mount_options: Option<String>,
-}
-
 /// Names accepted in the `kind: Storage` `spec`, for the unknown-field warning.
 pub(crate) const STORAGE_SPEC_FIELDS: &[&str] = &[
     "type",
@@ -122,11 +102,92 @@ pub(crate) const STORAGE_SPEC_FIELDS: &[&str] = &[
     "mountOptions",
 ];
 
+/// A network share, as declared inside a `kind: Volume` (`spec.nfs`,
+/// `spec.cifs`, `spec.webdav`).
+///
+/// This is `StorageSpec` minus the `type` field — the type is now the BLOCK's
+/// name, the same shape `kind: Workload` uses (`spec.container`/`spec.vm`), and
+/// for the same reason: a type that names its own block cannot contradict it.
+///
+/// `kind: Volume` and `kind: Storage` used to describe the SAME mount two ways
+/// and land in the SAME store, with nothing to say which to use — `volumes ls`
+/// showed both (one store) while `storage ls` showed only some, so the same
+/// question got different answers depending on the command.
+#[derive(Debug, Deserialize, Serialize, schemars::JsonSchema)]
+pub(crate) struct NetShareSpec {
+    pub(crate) server: String,
+    pub(crate) share: String,
+    #[serde(default)]
+    pub(crate) username: Option<String>,
+    #[serde(default)]
+    pub(crate) password: Option<String>,
+    /// Vault secret (`password` key) — preferred over an inline `password`.
+    #[serde(default, rename = "passwordSecret")]
+    pub(crate) password_secret: Option<String>,
+    #[serde(default, rename = "readOnly")]
+    pub(crate) read_only: bool,
+    #[serde(default, rename = "mountOptions")]
+    pub(crate) mount_options: Option<String>,
+}
+
+/// Fields accepted inside a network-share block (drift-guard).
+pub(crate) const NET_SHARE_FIELDS: &[&str] = &[
+    "server",
+    "share",
+    "username",
+    "password",
+    "passwordSecret",
+    "readOnly",
+    "mountOptions",
+];
+
+/// Where a share's credentials file lives. Derived, never guessed, from the ONE
+/// place that names it ([`credentials_name`]) — the writer, the remover and this
+/// must not be able to disagree about which file belongs to which name.
+fn credentials_path(name: &str) -> PathBuf {
+    state_root().join("storage").join(credentials_name(name))
+}
+
+/// Whether this share needs a credentials file at all.
+fn needs_credentials(kind: &str, b: &NetShareSpec) -> bool {
+    matches!(kind, "cifs" | "smb")
+        && (b.username.is_some() || b.password.is_some() || b.password_secret.is_some())
+}
+
+/// The mount a share block describes — **pure**: computes the driver, device and
+/// options without touching disk and without opening the secret vault.
+///
+/// That purity is what lets `stack plan`/`--dry-run` describe a network volume
+/// at all: writing a credentials file to compute a plan would make planning a
+/// side effect, and computing a plan must never create anything.
+pub(crate) fn share_mount(name: &str, kind: &str, b: &NetShareSpec) -> Result<MountSpec> {
+    let creds = needs_credentials(kind, b).then(|| credentials_path(name));
+    build_mount(
+        kind,
+        &b.server,
+        &b.share,
+        creds.as_deref(),
+        b.read_only,
+        b.mount_options.as_deref(),
+    )
+}
+
+/// Writes the share's credentials file, if it needs one. The side-effecting half
+/// of [`share_mount`], called only from an apply.
+pub(crate) fn ensure_share_credentials(name: &str, kind: &str, b: &NetShareSpec) -> Result<()> {
+    if !needs_credentials(kind, b) {
+        return Ok(());
+    }
+    let pw = resolve_password(b.password.clone(), b.password_secret.clone())?;
+    write_cifs_credentials(name, b.username.as_deref(), pw.as_deref())?;
+    Ok(())
+}
+
 /// The mount parameters derived from a storage declaration.
-struct MountSpec {
-    driver: String,
-    device: String,
-    options: Option<String>,
+pub(crate) struct MountSpec {
+    pub(crate) driver: String,
+    pub(crate) device: String,
+    pub(crate) options: Option<String>,
 }
 
 /// Builds `(driver, device, options)` from the friendly declaration.
@@ -486,40 +547,14 @@ pub fn run(action: StorageCmd) -> Result<()> {
             );
         }
         StorageCmd::Apply { file } => {
+            // Delegates to the Volume apply, and has to: `load` rewrites every
+            // `kind: Storage` into a `kind: Volume` with a network-share block,
+            // so a filter for `kind: Storage` here would match NOTHING and this
+            // command would silently do nothing at all.
             let path = manifest::resolve_path(file)?;
             let docs = manifest::load(&path)?;
-            apply(&docs)?;
+            super::volume::apply(&docs)?;
         }
-    }
-    Ok(())
-}
-
-/// Applies the `kind: Storage` from a manifest (idempotent by name — the
-/// store's `create_with` does not recreate one that already exists).
-/// Dry-run: the spec with every `#[serde(default)]` materialized.
-pub fn spec_with_defaults(doc: &ManifestDoc) -> Result<serde_yaml::Value> {
-    let spec: StorageSpec = manifest::spec_of(doc)?;
-    serde_yaml::to_value(spec).map_err(|e| Error::Invalid(format!("dry-run: {e}")))
-}
-
-pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
-    let store = VolumeStore::open(state_root())?;
-    for doc in manifest::of_kind(docs, "Storage") {
-        let name = &doc.metadata.name;
-        manifest::warn_unknown_fields(doc, STORAGE_SPEC_FIELDS);
-        let spec: StorageSpec = manifest::spec_of(doc)?;
-        let pw = resolve_password(spec.password, spec.password_secret)?;
-        let creds = write_cifs_credentials(name, spec.username.as_deref(), pw.as_deref())?;
-        let m = build_mount(
-            &spec.r#type,
-            &spec.server,
-            &spec.share,
-            creds.as_deref(),
-            spec.read_only,
-            spec.mount_options.as_deref(),
-        )?;
-        store.create_with(name, &m.driver, Some(m.device), m.options)?;
-        println!("storage/{name}: {} ({})", super::po::t("ensured"), m.driver);
     }
     Ok(())
 }

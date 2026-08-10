@@ -606,12 +606,18 @@ spec:
   mountOptions: null        # mount options, e.g. &quot;vers=4,ro&quot; (only with driver: nfs)  (alias: options)</code></pre>
 <h2 id='storage'>Storage</h2>
 <p class='lang-pt'>Um volume de REDE montado de um NAS (TrueNAS/Synology/Samba/Nextcloud), estilo PersistentVolume do k8s. A password vem do cofre (<code>--password-secret</code>). Montar precisa de CAP_SYS_ADMIN.</p><p class='lang-en'>A NETWORK volume mounted from a NAS (TrueNAS/Synology/Samba/Nextcloud), k8s PersistentVolume-style. The password comes from the vault (<code>--password-secret</code>). Mounting needs CAP_SYS_ADMIN.</p>
-<pre><code># Storage — network folder volumes mounted like Kubernetes PersistentVolumes.
+<pre><code># Network shares mounted as volumes, like Kubernetes PersistentVolumes.
 #
 # A share on a NAS (TrueNAS, Synology, Nextcloud, a plain NFS/Samba box) becomes
 # a named volume that any container mounts with `-v &lt;name&gt;:/path`.
 #
-#   delonix storage apply -f examples/storage.yaml
+# These are `kind: Volume` with a network-share BLOCK (`nfs:`/`cifs:`/`webdav:`).
+# `kind: Storage` still loads — it is rewritten into exactly this, with a
+# deprecation warning — but the two described the same mount two ways and landed
+# in the same store, and nothing said which to use. The block&#x27;s NAME is the type,
+# so a type can no longer contradict its own declaration.
+#
+#   delonix stack apply -f examples/storage.yaml
 #   delonix container run -v media:/srv/media alpine ls /srv/media
 #
 # Each field below is shown with a sensible value; delete what you don&#x27;t need.
@@ -636,45 +642,45 @@ stringData:
   password: troca-me
 ---
 apiVersion: delonix.io/v1
-kind: Storage
+kind: Volume
 metadata:
   name: media
 spec:
-  type: nfs                     # nfs | cifs | smb | webdav
-  server: 10.0.0.5              # NAS host or IP
-  share: /mnt/pool/media        # the NFS export path
-  readOnly: false               # true → mounted read-only
-  mountOptions: &quot;vers=4.1,soft&quot; # extra `mount -o` options (optional)
+  nfs:
+    server: 10.0.0.5              # NAS host or IP
+    share: /mnt/pool/media        # the NFS export path
+    readOnly: false               # true → mounted read-only
+    mountOptions: &quot;vers=4.1,soft&quot; # extra `mount -o` options (optional)
 ---
 # ── SMB / CIFS (Samba, Windows shares, TrueNAS &quot;Windows (SMB) Shares&quot;) ────────
 apiVersion: delonix.io/v1
-kind: Storage
+kind: Volume
 metadata:
   name: backups
 spec:
-  type: cifs                    # `smb` is an alias for `cifs`
-  server: nas.local
-  share: backups                # the SMB share name (no leading slash)
-  username: delonix             # SMB credentials
-  # Prefer a secret over an inline password (it won&#x27;t leak into shell history):
-  #   delonix secret create nas-creds --from-literal password=s3cr3t
-  passwordSecret: nas-creds     # reads key `password` from this secret
-  # password: s3cr3t            # ...or inline (discouraged)
-  readOnly: false
-  mountOptions: &quot;vers=3.0&quot;
+  cifs:
+    server: nas.local
+    share: backups                # the SMB share name (no leading slash)
+    username: delonix             # SMB credentials
+    # Prefer a secret over an inline password (it won&#x27;t leak into shell history):
+    #   delonix secret create nas-creds --from-literal password=s3cr3t
+    passwordSecret: nas-creds     # reads key `password` from this secret
+    # password: s3cr3t            # ...or inline (discouraged)
+    readOnly: false
+    mountOptions: &quot;vers=3.0&quot;
 ---
 # ── WebDAV (Nextcloud / ownCloud) ─────────────────────────────────────────────
 apiVersion: delonix.io/v1
-kind: Storage
+kind: Volume
 metadata:
   name: cloud
 spec:
-  type: webdav
-  server: cloud.example.com     # host, or a full URL (http://host:port) to override the scheme
-  share: /remote.php/dav/files/delonix   # the path within the WebDAV endpoint
-  username: delonix
-  passwordSecret: cloud-creds
-  readOnly: false</code></pre>
+  webdav:
+    server: cloud.example.com     # host, or a full URL (http://host:port) to override the scheme
+    share: /remote.php/dav/files/delonix   # the path within the WebDAV endpoint
+    username: delonix
+    passwordSecret: cloud-creds
+    readOnly: false</code></pre>
 <h2 id='image'>Image</h2>
 <p class='lang-pt'>Pré-puxa (ou constrói) uma imagem antes dos containers que dependem dela. Com <code>--vm</code> o mesmo Kind cobre as imagens VM douradas.</p><p class='lang-en'>Pre-pulls (or builds) an image before the containers that depend on it. With <code>--vm</code> the same Kind covers golden VM images.</p>
 <pre><code># Image — ensure an image is present: either pull it, or build it. Mutually exclusive.

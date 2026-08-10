@@ -80,7 +80,6 @@ fn filled_spec(doc: &ManifestDoc) -> Result<serde_yaml::Value> {
     match doc.kind.as_str() {
         "Network" => cmd::network::spec_with_defaults(doc),
         "Volume" => cmd::volume::spec_with_defaults(doc),
-        "Storage" => cmd::storage::spec_with_defaults(doc),
         // Secret is intentionally left as raw (no typed round-trip) — no need to
         // reformat its `stringData` through the renderer.
         "Image" => cmd::image::spec_with_defaults(doc),
@@ -387,6 +386,78 @@ fn lower_legacy_kind(doc: &mut ManifestDoc) -> Result<()> {
     if doc.kind == "Egress" {
         lower_egress(doc)?;
     }
+    // `kind: Storage` folds into `kind: Volume`. Both landed in the SAME
+    // `VolumeStore` and described the same mount two ways — a `Volume` with
+    // `driver: nfs`/`device: nas:/export` IS a `Storage` with
+    // `type: nfs`/`server: nas`/`share: /export`, and nothing said which to use.
+    // `volumes ls` listed both (one store) while `storage ls` listed only some,
+    // so the same question got different answers depending on the command.
+    if doc.kind == "Storage" {
+        lower_storage(doc)?;
+    }
+    Ok(())
+}
+
+/// Rewrites a legacy `kind: Storage` into a `kind: Volume` carrying the matching
+/// network-share block.
+///
+/// A pure spec rewrite: no vault, no credentials file, nothing on disk. Those
+/// belong to the apply — a `--dry-run` that wrote a credentials file would make
+/// planning a side effect.
+fn lower_storage(doc: &mut ManifestDoc) -> Result<()> {
+    let ty = doc
+        .spec
+        .get("type")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| {
+            Error::Invalid(super::po::tf(
+                "Storage '{name}': spec.type is required (nfs|cifs|smb|webdav)",
+                &[("name", &doc.metadata.name)],
+            ))
+        })?
+        .to_string();
+    // `smb` is an alias of `cifs` and always was (`build_mount` maps them to the
+    // same driver); the BLOCK has one name so the two do not become two.
+    let block = match ty.as_str() {
+        "nfs" => "nfs",
+        "cifs" | "smb" => "cifs",
+        "webdav" => "webdav",
+        other => {
+            return Err(Error::Invalid(super::po::tf(
+                "Storage '{name}': unknown type '{other}' (nfs|cifs|smb|webdav)",
+                &[("name", &doc.metadata.name), ("other", other)],
+            )))
+        }
+    };
+    // Warned at the STORAGE level, before the rewrite: a typo named against the
+    // Kind the user actually wrote is worth more than the same typo reported
+    // against a `spec.nfs` block they never typed.
+    warn_unknown_fields(doc, crate::cmd::storage::STORAGE_SPEC_FIELDS);
+    let serde_yaml::Value::Mapping(m) = &doc.spec else {
+        return Err(Error::Invalid(super::po::tf(
+            "Storage '{name}': spec must be a mapping",
+            &[("name", &doc.metadata.name)],
+        )));
+    };
+    let mut inner = serde_yaml::Mapping::new();
+    for (k, v) in m {
+        if k.as_str() == Some("type") {
+            continue;
+        }
+        inner.insert(k.clone(), v.clone());
+    }
+    let mut outer = serde_yaml::Mapping::new();
+    outer.insert(
+        serde_yaml::Value::from(block),
+        serde_yaml::Value::Mapping(inner),
+    );
+    doc.spec = serde_yaml::Value::Mapping(outer);
+    doc.kind = "Volume".to_string();
+    super::output::warn(&super::po::tf(
+        "Storage '{name}': `kind: Storage` is deprecated — use `kind: Volume` with a \
+         `{block}:` block (same fields, same behaviour)",
+        &[("name", &doc.metadata.name), ("block", block)],
+    ));
     Ok(())
 }
 
@@ -464,6 +535,34 @@ pub fn spec_of<T: for<'de> Deserialize<'de>>(doc: &ManifestDoc) -> Result<T> {
 /// `known` must contain ALL the accepted names (the canonical one and each `alias`) — there is
 /// a test per Kind that ensures the `examples/` do not trigger any warning,
 /// stopping the drift between this list and the struct.
+/// Like [`warn_unknown_fields`], but for the keys of a NESTED block
+/// (`spec.<block>`).
+///
+/// The top-level warning only ever looks at the spec's own keys, so a typo
+/// inside a block — `serverr:` in a `spec.nfs` — was swallowed and simply became
+/// "no server". The blocks only appeared when `kind: Storage` folded into
+/// `kind: Volume`; before that there was nothing nested to get wrong.
+pub fn warn_unknown_fields_in(doc: &ManifestDoc, block: &str, known: &[&str]) {
+    let Some(serde_yaml::Value::Mapping(m)) = doc.spec.get(block) else {
+        return;
+    };
+    for (k, _) in m {
+        let Some(key) = k.as_str() else { continue };
+        if known.contains(&key) {
+            continue;
+        }
+        super::output::warn(&super::po::tf(
+            "{kind} '{name}': unknown field '{key}' in spec.{block} — ignored (check the spelling)",
+            &[
+                ("kind", &doc.kind),
+                ("name", &doc.metadata.name),
+                ("key", key),
+                ("block", block),
+            ],
+        ));
+    }
+}
+
 pub fn warn_unknown_fields(doc: &ManifestDoc, known: &[&str]) {
     for key in unknown_fields(doc, known) {
         eprintln!(
@@ -975,5 +1074,56 @@ spec:
             docs[0].spec.get("direction").unwrap().as_str(),
             Some("egress")
         );
+    }
+
+    /// `kind: Volume` e `kind: Storage` descreviam a MESMA montagem de duas
+    /// maneiras e acabavam no MESMO store, sem nada a dizer qual usar. O tipo
+    /// passa a ser o NOME do bloco — a forma do `kind: Workload` — por isso um
+    /// tipo não pode contradizer a sua própria declaração.
+    #[test]
+    fn storage_e_reescrito_como_volume_com_o_bloco_do_tipo() {
+        let mut doc: ManifestDoc = serde_yaml::from_str(
+            "apiVersion: delonix.io/v1\nkind: Storage\nmetadata: { name: media }\nspec: { type: nfs, server: 10.0.0.5, share: /pool/media, mountOptions: 'vers=4.1' }\n",
+        )
+        .unwrap();
+        lower_legacy_kind(&mut doc).unwrap();
+        assert_eq!(doc.kind, "Volume");
+        let b = doc.spec.get("nfs").expect("bloco nfs em falta");
+        assert_eq!(b.get("server").unwrap().as_str(), Some("10.0.0.5"));
+        assert_eq!(b.get("mountOptions").unwrap().as_str(), Some("vers=4.1"));
+        // O `type` não sobrevive: passou a ser o nome do bloco.
+        assert!(doc.spec.get("type").is_none());
+        assert!(b.get("type").is_none());
+    }
+
+    /// `smb` sempre foi um alias de `cifs` (o `build_mount` manda os dois para o
+    /// mesmo driver). O bloco tem UM nome, por isso os dois não voltam a ser dois.
+    #[test]
+    fn smb_e_cifs_caem_no_mesmo_bloco() {
+        for ty in ["cifs", "smb"] {
+            let mut doc: ManifestDoc = serde_yaml::from_str(&format!(
+                "apiVersion: delonix.io/v1\nkind: Storage\nmetadata: {{ name: b }}\nspec: {{ type: {ty}, server: nas, share: media }}\n"
+            ))
+            .unwrap();
+            lower_legacy_kind(&mut doc).unwrap();
+            assert!(
+                doc.spec.get("cifs").is_some(),
+                "{ty} não caiu no bloco cifs"
+            );
+        }
+    }
+
+    #[test]
+    fn storage_sem_tipo_ou_com_tipo_desconhecido_e_recusado() {
+        for spec in [
+            "{ server: nas, share: x }",
+            "{ type: gluster, server: nas, share: x }",
+        ] {
+            let mut doc: ManifestDoc = serde_yaml::from_str(&format!(
+                "apiVersion: delonix.io/v1\nkind: Storage\nmetadata: {{ name: b }}\nspec: {spec}\n"
+            ))
+            .unwrap();
+            assert!(lower_legacy_kind(&mut doc).is_err(), "aceitou: {spec}");
+        }
     }
 }
