@@ -1,8 +1,32 @@
 # ADR-0009: Provision TrueNAS datasets over its API, as a separate crate
 
-- **Status:** Proposed
+- **Status:** **Accepted** (2026-08-10)
 - **Date:** 2026-08-10
 - **Deciders:** Walter Angolar
+
+## Decision taken
+
+**Accepted.** Of the three ADRs opened in this series it is the one with the
+best evidence-to-risk ratio, and the reason is in its own testing section: the
+TrueNAS appliance built here **boots and serves its API on this host**, so CRUD,
+quota and permissions can be exercised against a real target instead of a mock.
+That is the bar this repository sets before shipping anything that touches
+another machine, and this is the only one of the three that clears it today.
+
+Two conditions attach to the acceptance, and neither is optional:
+
+1. **A `delonix-runtime-sec` pass before it merges.** The ADR names it as an
+   argument; it is now a requirement. Delonix starts holding a credential that
+   can destroy data on another machine — no privilege boundary of ours moves,
+   but the blast radius grows, and that is what the audit exists for.
+2. **The destructive path is proven by a chaos scenario**, not by reading. The
+   ADR's own precedent is the `volumes rm` bug of v0.37.0, where removal deleted
+   the accounting before the data. A deletion that reaches another machine
+   deserves at least the same proof the local one now has.
+
+**What would flip this to Rejected:** if pinning to one TrueNAS major turns out
+to be untenable — if the API shape moves under a minor release. Then the honest
+answer is the ADR's own baseline: keep provisioning manual.
 
 ## Context
 

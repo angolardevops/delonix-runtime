@@ -1,12 +1,36 @@
 # ADR-0010: What it would take for the management API to be remote
 
-- **Status:** Proposed — this ADR frames the decision, it does not take it
+- **Status:** **Rejected** (2026-08-10) — the API stays local, and that is the
+  answer, not a deferral
 - **Date:** 2026-08-10
 - **Deciders:** Walter (owner)
 - **Related:** `crates/delonix-mgmt/src/lib.rs`, `docs/cli-stability.md`
   (`serve api` declared not stable), `docs/discovery/47_IAC_REVISAO.md` §F4/§F5,
   ADR-0008 (a *VM backend* that talks to a remote host — a different question,
   see below).
+
+## Decision taken
+
+**Rejected**, and the ADR itself argued the case: of the three candidate
+consumers it lists, the evidence points at (1) — a fleet control-plane — and
+that is `delonix-paas`. Guardrail #2 puts a notion of tenant on the other side
+of the line, and remoteness without identity, authorization and audit is not
+remoteness worth having.
+
+Rejecting is the outcome with the most work avoided and nothing lost: the socket
+keeps serving its real consumer, `cli-stability.md` already tells everyone else
+not to build on it, and the CLI-over-SSH path that Terraform and Ansible would
+use is built and shipped (`stack plan`/`apply` with `-o json` and
+`--detailed-exitcode`).
+
+**F4 (the API's narrow coverage) closes with this ADR too.** Widening a surface
+whose audience was undecided was only ever worth doing once the audience was
+known; now it is known, and it is one process on the same host. `RunSpecBody`'s
+11 fields against `container run`'s 71 is not a gap — it is the subset that
+consumer needs.
+
+**What would reopen this:** a consumer that is neither the PaaS nor a local
+agent, named concretely and with its own requirements. Not a hypothetical one.
 
 ## Context
 

@@ -2867,10 +2867,25 @@ da CLI **198/198**; a documentação sem um único comando ou flag que não exis
 
 **Pendente, por ordem de valor:**
 
-1. **Três ADRs em `Proposed`, cada um uma sessão própria** — `0008` (backend Proxmox VE num crate
-   à parte), `0009` (provisionamento de datasets TrueNAS pela API), `0010` (o que seria preciso
-   para a API de gestão ser remota — e cuja conclusão esperada é que **não deve** ser, porque a
-   remoteness pertence ao PaaS). Nenhum deles se começa sem ler o ADR primeiro.
+1. **Os três ADRs já estão DECIDIDOS** (2026-08-10), e cada um tem skill própria:
+   - **0008 (backend Proxmox) — aceite em DUAS fases.** A fase 1, o **registo de backends**, entra
+     já: o `backend_for` acaba hoje em `_ => CloudHypervisorBackend`, ou seja um nome desconhecido
+     cai num default em vez de falhar — o guarda-rio #6 partido onde é mais provável haver um typo.
+     É pequeno, puro e testável sem hypervisor. A fase 2, o backend em si, fica **bloqueada num
+     alvo real**, como o spike do kind: não se escreve um backend que nunca se viu arrancar uma VM,
+     e o próprio ADR admite que não é testável aqui. Skill: `.claude/skills/delonix-vm-backend/`.
+   - **0009 (provisionar no TrueNAS) — aceite**, e é o de melhor rácio dos três pela razão que o
+     próprio ADR dá: **o appliance TrueNAS arranca e serve a API neste host**, logo o CRUD, a quota
+     e as permissões exercitam-se contra um alvo REAL. Duas condições não-opcionais: passagem
+     `delonix-runtime-sec` antes do merge (passamos a segurar uma credencial que destrói dados
+     noutra máquina) e o caminho destrutivo provado por cenário de caos, não por leitura — o
+     precedente é o `volumes rm` da v0.37.0. Skill: `.claude/skills/delonix-truenas/`.
+   - **0010 (API de gestão remota) — RECUSADO.** Dos três consumidores que o ADR enumera, a
+     evidência aponta para o control-plane de frota, e isso é o `delonix-paas`: remoteness sem
+     identidade, autorização e auditoria não é remoteness que valha a pena. **Fecha também o F4**
+     (a cobertura estreita da API): alargar uma superfície cuja audiência estava indecisa só valia
+     depois de a audiência ser conhecida — e é um processo no mesmo host. Reabre-se com um
+     consumidor concreto que não seja nem o PaaS nem um agente local.
 2. **Volumes anónimos do `compose`** — precisa de decisão de DESENHO antes de código: um `down`
    simples remove um volume anónimo, ou só `down -v`? Nomeação determinística por posição na
    lista (risco de colisão se a ordem mudar) vs. um registo próprio (mais peso). Não avances sem

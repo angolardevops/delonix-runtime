@@ -18,9 +18,9 @@ never rewritten — supersede them with a new one.
 | [0005](0005-structured-output-json.md) | Structured output (`-o json`) for listing commands | Accepted (contract + first slice) |
 | [0006](0006-workload-type-microvm.md) | `type: microvm` forces the microVM hypervisor (Cloud Hypervisor) | Accepted |
 | [0007](0007-generated-manifest-schema.md) | The manifest schema is GENERATED from the code (`schemars`) | Accepted (implemented) |
-| [0008](0008-proxmox-vm-backend.md) | Add a Proxmox VE backend as a separate crate, and make backends registrable | Proposed |
-| [0009](0009-truenas-storage-provisioner.md) | Provision TrueNAS datasets over its API, as a separate crate | Proposed |
-| [0010](0010-remote-management-api.md) | What it would take for the management API to be remote | Proposed (frames the decision) |
+| [0008](0008-proxmox-vm-backend.md) | Add a Proxmox VE backend as a separate crate, and make backends registrable | **Accepted, in 2 phases** — the registry now, the Proxmox backend blocked on a real host |
+| [0009](0009-truenas-storage-provisioner.md) | Provision TrueNAS datasets over its API, as a separate crate | **Accepted** — with a `runtime-sec` pass and a chaos scenario for the destructive path |
+| [0010](0010-remote-management-api.md) | What it would take for the management API to be remote | **Rejected** — the API stays local; remoteness belongs to the PaaS |
 
 ## Roadmap (from `CLAUDE.md` "Universal Runtime" — each phase needs its own accepted ADR)
 
