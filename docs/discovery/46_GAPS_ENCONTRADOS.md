@@ -159,10 +159,41 @@ entre inquilinos.
 MANUAL — por desenho — e `auto_deregister` não tem superfície de CLI. A recuperação nesta
 sessão foi editar `auto.json` à mão.
 
-**Correcção proposta:** persistir `expose` (e cobrir com o teste de round-trip
-criação→registo→`start`) e, independentemente disso, deixar de condicionar a limpeza a um
-campo do registo — `auto_deregister(&c.name)` é idempotente e barato, deve correr sempre no
-`rm`. A guarda é uma optimização que troca correcção por nada.
+**Estado: consequência CORRIGIDA, causa-raiz AINDA ABERTA.**
+
+A guarda foi removida — `auto_deregister(&c.name)` corre agora sempre no `rm`. É seguro e
+barato: `with_auto_locked` sai sem escrever (e sem recompor o proxy) quando a lista não
+muda, e o contrato da própria função já é «se não estava registado, não faz nada». A
+limpeza passa a depender do **nome**, que temos sempre, em vez de um campo do registo.
+
+Validado ao vivo, mesmo comando antes e depois:
+
+```
+antes (com a guarda)  rm de d46-a/d46-x/d46-y → auto.json ficou com as 3 rotas órfãs
+depois (sem a guarda) rm de d46-fix           → auto.json vazio, proxy parado
+```
+
+Sem teste unitário no ponto de chamada, e a razão é concreta: `with_auto_locked` chama
+`rebuild()`, que fala com o holder e arranca/pára o proxy — um teste do `cargo test` teria
+efeitos colaterais no nó. A prova é a validação ao vivo acima.
+
+**Por resolver: porque é que `expose` não chega ao disco.** Eliminado nesta sessão, para
+não ser repetido:
+
+- o spec do re-exec **leva** o valor — apanhado em voo:
+  `.reexec-<id>.json` → `expose = 8080`;
+- `run_from_spec` (`container.rs:3813`) desserializa o `RunOpts` e passa-o **inteiro** ao
+  `cmd_run` — não há reconstrução campo-a-campo a perdê-lo;
+- `Container::expose` não tem `skip_serializing` (só `#[serde(default)]`), logo seria
+  escrito se estivesse presente;
+- não há nenhum `store.save` em `container.rs` depois da linha 2979 no caminho do `run`;
+- a 2.ª passagem **chega** ao bloco que o grava — prova-o o `c.ip` da linha 2952, que fica
+  correcto no registo.
+
+Resta portanto explicar como a variável local `expose` chega a `None` na 2.ª passagem
+apesar do spec a trazer. O sintoma persiste com a correcção acima aplicada (que não lhe
+toca) e continua a ser observável em uma linha:
+`delonix container run -d --net <rede> --expose 8080 …` seguido de ver `expose` no registo.
 
 ---
 

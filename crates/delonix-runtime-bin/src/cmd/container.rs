@@ -4516,10 +4516,23 @@ pub(crate) fn cmd_rm(images: &ImageStore, store: &Store, id: &str, force: bool) 
     let pid = c.pid;
     runtime::remove(store, &c, force)?;
     unpublish_ports(&c, pid);
-    // De-register from the L7 proxy if it was exposed (`--expose`) — removes the route + SIGHUP.
-    if c.expose.is_some() {
-        super::ingress_proxy::auto_deregister(&c.name);
-    }
+    // De-register from the L7 proxy (`--expose`) — removes the route + SIGHUP.
+    //
+    // UNCONDITIONAL on purpose. This used to be guarded by `c.expose.is_some()`, and the
+    // guard made the call DEAD: `--expose` never reaches disk (measured — the re-exec spec
+    // carries `expose: 8080` into the 2nd pass, but every persisted record has `expose:
+    // null`; see `docs/discovery/46_GAPS_ENCONTRADOS.md` §4.1). So `rm` left the auto-route
+    // behind, pointing at an SDN address that IPAM then hands to SOMEONE ELSE — the next
+    // container to get that IP silently receives traffic addressed to the dead container's
+    // `<name>.<namespace>.delonix.internal`.
+    //
+    // The guard was an optimization that bought nothing and could only cost correctness:
+    // `auto_deregister` is already idempotent and its own contract is "if the container was
+    // not registered, does nothing" — `with_auto_locked` short-circuits without writing (and
+    // without rebuilding the proxy) when the route list is unchanged. Deriving a cleanup from
+    // a record field is exactly the shape that failed here; the container's NAME is the key,
+    // and we have it.
+    super::ingress_proxy::auto_deregister(&c.name);
     let _ = images.unmount_rootfs(&c.id); // unmounts/cleans up the overlay scratch
                                           // Definitive DESTROY of the container's directory (including the flat `rootfs/`).
                                           // `unmount_rootfs` PRESERVES it on purpose (it's the container's state, for
