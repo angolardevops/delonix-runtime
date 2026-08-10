@@ -116,6 +116,7 @@ SOURCE_FILES = {
     "netns": "netns.rs",
     "completion": "complete.rs",
     "schema": "schema.rs",
+    "init": "init.rs",
 }
 SOURCE_BASE_URL = (
     "https://github.com/angolardevops/delonix-runtime/blob/main/"
@@ -136,6 +137,40 @@ def source_link_html(name):
 # ---------------------------------------------------------------- conteúdo
 
 GROUPS = {
+    "init": {
+        "title": "delonix init",
+        "tagline": "Começa o projecto CERTO para este directório — detecta, explica-se, e delega.",
+        "intro": """O <code>stack init</code> já gera um projecto completo e preenchido, e o
+<code>vm init</code> faz o mesmo para uma VM. O que faltava era o passo ANTES desses: saber qual
+deles chamar, e com qual dos onze templates. É esse o trabalho todo aqui — detectar,
+<strong>dizer o que detectou e porquê</strong>, e delegar. Não gera nada de seu.<br><br>
+A detecção é uma função pura sobre os nomes de ficheiro presentes, ordenada do mais específico
+para o mais genérico (um projecto Django também tem <code>.py</code>, e um Next.js também tem
+<code>package.json</code> — a regra mais larga não pode ganhar só por ter sido verificada
+primeiro). E <strong>explica-se sempre</strong>: um palpite errado que se vê é um palpite que se
+corrige com <code>-t</code>; um palpite errado em silêncio produz um projecto que não bate certo
+com o código ao lado.<br><br>
+Há um caso em que a resposta certa é <strong>não gerar nada</strong>: um directório com
+<code>docker-compose.yml</code> já corre nativamente com <code>delonix compose up</code>, e um
+segundo manifesto deixaria o projecto com duas fontes de verdade. O comando di-lo, em vez de
+gerar na mesma.""",
+        "subs": {},
+        "examples": [
+            ("Detecta e gera — a saída diz sempre qual foi a prova",
+             "delonix init",
+             "detected go.mod → stack init --template go\n"
+             "  created: ./Delonixfile\n"
+             "  created: ./delonix-manifest.yaml\n"
+             "  already exists, skipped: ./go.mod  (use --force to overwrite)"),
+            ("Forçar um template em vez do detectado", "delonix init -t django"),
+            ("Ver os templates que existem", "delonix stack init -t list"),
+            ("Um `VMfile` presente manda para o outro gerador", "delonix init"),
+            ("Um projecto compose não é reescrito — é assinalado",
+             "delonix init",
+             "warning found docker-compose.yml — this project already runs natively with "
+             "`delonix compose up`; generating a second manifest would give it two sources of truth"),
+        ],
+    },
     "container": {
         "title": "delonix container",
         "tagline": "Ciclo de vida de containers: run, ps, start, stop, rm, exec, logs, inspect, stats, apply.",
@@ -1419,6 +1454,22 @@ previous behaviour — see the
 <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/cli-stability.md">stability
 promise</a>. To see what changed between two versions there is
 <code>scripts/schema-diff.sh</code>, which compares field by field and exits 1 on differences.""",
+    },
+    "init": {
+        "tagline": "Start the RIGHT project for this directory — detect, explain, dispatch.",
+        "intro": """<code>stack init</code> already generates a complete, filled-in project, and
+<code>vm init</code> does the same for a VM. What was missing is the step BEFORE those: knowing
+which one to call, and with which of the eleven templates. That is the whole job here — detect,
+<strong>say what was detected and why</strong>, and dispatch. It generates nothing of its own.<br><br>
+Detection is a pure function over the file names present, ordered most-specific first (a Django
+project also has <code>.py</code> files, and a Next.js one also has <code>package.json</code> — the
+broader rule must not win just because it was checked earlier). And it <strong>always explains
+itself</strong>: a wrong guess you can see is a wrong guess you can override with <code>-t</code>,
+while a silent one just produces a project that does not match the code sitting next to it.<br><br>
+There is one case where the right answer is <strong>to generate nothing</strong>: a directory with
+a <code>docker-compose.yml</code> already runs natively under <code>delonix compose up</code>, and
+a second manifest would leave the project with two sources of truth. The command says so instead
+of generating anyway.""",
     },
 }
 
@@ -2778,7 +2829,10 @@ chmod +x ~/.local/bin/delonix
 echo 'source &lt;(delonix completion bash)' &gt;&gt; ~/.bashrc</code></pre>
 
 <h2>Primeiros passos</h2>
-<pre><code># um serviço web na porta 8080, sem root, sem daemon
+<pre><code>delonix version                  # a identidade do build e o que fazer a seguir
+delonix init                     # olha para esta pasta e começa o projecto certo
+
+# um serviço web na porta 8080, sem root, sem daemon
 delonix container run -d --name web -p 8080:80 nginx
 curl localhost:8080
 
@@ -2839,7 +2893,10 @@ chmod +x ~/.local/bin/delonix
 echo 'source &lt;(delonix completion bash)' &gt;&gt; ~/.bashrc</code></pre>
 
 <h2>Getting started</h2>
-<pre><code># a web service on port 8080, no root, no daemon
+<pre><code>delonix version                  # the build's identity, and what to do next
+delonix init                     # looks at this folder and starts the right project
+
+# a web service on port 8080, no root, no daemon
 delonix container run -d --name web -p 8080:80 nginx
 curl localhost:8080
 
