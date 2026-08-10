@@ -135,6 +135,33 @@ OOM kills the container, not one process inside it), **and** an aggregate ceilin
 on the parent sized from the host — the thing that stops N containers, none of
 which carry ``-m``, from summing to more than the machine has.
 
+Golden VM images ship known credentials
+=======================================
+
+The golden VM images (``delonix vm pull`` / ``delonix image vm build``) are
+built with a **fixed, publicly known password**: ``root`` and a ``delonix``
+user, both with the password ``delonix``, and ``delonix`` has passwordless
+``sudo``. They are in the build recipe in this repository, so treat them as
+public knowledge, not as a secret.
+
+They exist so that a VM whose network never came up is still reachable from the
+serial console (``delonix vm console <name>``). Everything else authenticates
+with keys: cloud-init injects your ``--ssh-key`` on first boot, and
+``delonix cluster kubeadm`` generates and uses its own.
+
+Because of that, the images ship with **SSH password login disabled**
+(``PasswordAuthentication no``, ``PermitRootLogin prohibit-password``) — the
+password works on the console, not over the network. If you run one of these
+images anywhere reachable, still do the obvious thing::
+
+    # inside the VM, on first login
+    sudo passwd root
+    sudo passwd delonix
+
+Or build your own golden with your own accounts::
+
+    delonix image vm build --extra-run "passwd -l root" ...
+
 Highlights
 ==========
 

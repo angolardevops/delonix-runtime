@@ -410,7 +410,12 @@ fn cmd_prune(all: bool, force: bool) -> Result<()> {
                 .and_then(|(hp, _, _)| hp.parse::<u32>().ok())
         })
         .collect();
-    let rmh = delonix_net::infra::reap_orphan_hostfwds(&live_ports);
+    // Safe to assert authoritative here, and only here: this root's `store` IS
+    // the source of truth for who publishes on this ingress, and `store.list()`
+    // above propagates its error rather than yielding an empty list on failure.
+    let rmh = delonix_net::infra::reap_orphan_hostfwds(
+        delonix_net::infra::AuthoritativeLivePorts::new(&live_ports),
+    );
     // 7) orphan slirps (dead target) — already reaped at the top by `reap_orphan_slirp`.
 
     // 8) EMPTY `dlx-*` networks — auto-created for clusters that have been deleted
