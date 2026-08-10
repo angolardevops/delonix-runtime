@@ -563,15 +563,30 @@ fn cmd_ls(store: &VmImageStore, format: output::OutputFormat) -> Result<()> {
             .collect();
         return output::print_json(&rows);
     }
-    let mut t =
-        output::Table::new(&["NAME", "DISTRO", "KERNEL", "K8S", "CREATED", "SIZE"]).right_align(5);
+    // TYPE and DEFAULTS answer what the reader actually needs before running
+    // `vm create`: whether this image configures itself (and therefore refuses
+    // `--ssh-key`), and what it wants for vCPU/memory. KERNEL/K8S stay — they
+    // are filled whenever they are known, which now includes a `vm pull` (the
+    // manifest annotations carry them) and an `import --kernel-version`.
+    let mut t = output::Table::new(&[
+        "NAME", "DISTRO", "TYPE", "KERNEL", "K8S", "DEFAULTS", "CREATED", "SIZE",
+    ])
+    .right_align(7);
     for img in store.list()? {
         let distro = distro_label(&img);
+        let type_label = image_type_label(match img.cloud_init {
+            Some(true) => Some("true"),
+            Some(false) => Some("false"),
+            None => None,
+        });
+        let defaults = defaults_label(&img);
         t.row(vec![
             img.name,
             distro,
+            type_label,
             img.kernel_version.as_deref().unwrap_or("-").to_string(),
             img.k8s_version.as_deref().unwrap_or("-").to_string(),
+            defaults,
             fmt_local(img.created_unix),
             fmt_size(img.size),
         ]);
@@ -803,6 +818,11 @@ pub struct ImportArgs {
     /// backing-file reads at runtime) — same flag, same trade-off, as `build`.
     #[arg(long)]
     pub no_compress: bool,
+    /// Kernel baked into the image (`uname -r` shape), for `image vm ls`.
+    /// Omit to let it be probed from the image — which only works where
+    /// libguestfs can read `/boot` (not FreeBSD, not root-on-ZFS).
+    #[arg(long)]
+    pub kernel_version: Option<String>,
 }
 
 /// `image vm import` — registers a disk this engine did not build.
@@ -822,6 +842,7 @@ pub(crate) fn cmd_import(store: &VmImageStore, args: ImportArgs) -> Result<()> {
         default_memory,
         force,
         no_compress,
+        kernel_version,
     } = args;
     let (source, tag) = (source.as_path(), tag.as_str());
     if !source.exists() {
@@ -874,9 +895,9 @@ pub(crate) fn cmd_import(store: &VmImageStore, args: ImportArgs) -> Result<()> {
         ubuntu_release: release,
         k8s_version: None,
         created_unix: now_unix(),
-        // Nothing is booted or mounted here, so the kernel inside is unknown —
-        // and `None` says exactly that, rather than guessing.
-        kernel_version: None,
+        // Explicit wins; otherwise probe the image (best-effort — see
+        // `detect_kernel_version`). Never a guess: unknown stays `None`.
+        kernel_version: kernel_version.or_else(|| detect_kernel_version(&dest)),
         distro,
         default_vcpus,
         default_memory,
@@ -1085,18 +1106,94 @@ pub(crate) fn cmd_pull(store: &VmImageStore, source: &str, name: Option<String>)
 }
 
 pub(crate) fn cmd_ls_remote(source: &str) -> Result<()> {
-    let mut tags = delonix_image::registry::list_remote_tags(&state_root(), source)?;
+    let root = state_root();
+    let mut tags = delonix_image::registry::list_remote_tags(&root, source)?;
     tags.sort();
-    // BUG FOUND live: printed one bare tag per line with no header — looked
-    // uncomparable next to every other `ls`-shaped command in this CLI, which
-    // all go through `output::Table` (same convention `image ls`/`vm ls`/
-    // `network ls` already use).
-    let mut t = output::Table::new(&["TAG"]);
+    // A bare list of tags does not answer the question the reader has, which is
+    // "which of these do I want" — so each tag's MANIFEST is read (one GET, no
+    // blob transfer) for its size and for the annotations `image vm push`
+    // stamps: distro/release, and whether the guest runs cloud-init.
+    //
+    // A tag whose manifest cannot be read still gets its row, with `-` in the
+    // columns: a listing that hides a tag because one HTTP call failed would be
+    // worse than one that admits it does not know.
+    let mut t = output::Table::new(&["TAG", "DISTRO", "TYPE", "SIZE"]).right_align(3);
     for tag in tags.iter_mut() {
-        t.row(vec![std::mem::take(tag)]);
+        let tag = std::mem::take(tag);
+        match delonix_image::registry::describe_remote_artifact(&root, source, &tag) {
+            Ok(a) => {
+                let get = |k: &str| {
+                    a.annotations
+                        .get(&format!("io.delonix.vmimage.{k}"))
+                        .map(|s| s.as_str())
+                };
+                let distro = match (get("distro"), get("release")) {
+                    (Some(d), Some(r)) => format!("{d}/{r}"),
+                    (Some(d), None) => d.to_string(),
+                    (None, Some(r)) => r.to_string(),
+                    (None, None) => "-".to_string(),
+                };
+                t.row(vec![
+                    tag,
+                    distro,
+                    image_type_label(get("cloud-init")),
+                    fmt_size(a.size),
+                ]);
+            }
+            Err(_) => t.row(vec![tag, "-".into(), "-".into(), "-".into()]),
+        }
     }
     t.print();
     Ok(())
+}
+
+/// Kernel baked into a disk image this engine did NOT build, read without
+/// booting it.
+///
+/// `cmd_build` reads `/etc/delonix-kernel-version`, a file it writes itself —
+/// useless for an imported image. This lists `/boot` instead and takes the
+/// highest `vmlinuz-<version>` it finds, which is what the guest boots by
+/// default.
+///
+/// Best-effort by design, and quiet when it fails: an appliance may be FreeBSD
+/// (OPNsense), or root on ZFS (TrueNAS), where libguestfs cannot see `/boot` at
+/// all. An empty KERNEL column is honest; failing an import over a display
+/// field would not be.
+fn detect_kernel_version(qcow2: &std::path::Path) -> Option<String> {
+    let out = std::process::Command::new("virt-ls")
+        .args(["-a", &qcow2.to_string_lossy(), "/boot"])
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .filter_map(|l| l.trim().strip_prefix("vmlinuz-"))
+        .filter(|v| !v.is_empty())
+        .map(str::to_string)
+        .max()
+}
+
+/// `2cpu/2G` — what `vm create` will use when `--vcpus`/`--memory` are absent.
+/// `-` when the image recommends nothing (the engine then falls back to 1/1G).
+fn defaults_label(img: &VmImage) -> String {
+    match (img.default_vcpus, img.default_memory.as_deref()) {
+        (Some(c), Some(m)) => format!("{c}cpu/{m}"),
+        (Some(c), None) => format!("{c}cpu"),
+        (None, Some(m)) => m.to_string(),
+        (None, None) => "-".to_string(),
+    }
+}
+
+/// How an image gets configured on first boot, in one word — the difference
+/// that decides whether `vm create` seeds it and whether `--ssh-key` works.
+fn image_type_label(cloud_init: Option<&str>) -> String {
+    match cloud_init {
+        Some("false") => super::po::t("appliance").to_string(),
+        Some("true") => "cloud-init".to_string(),
+        _ => "-".to_string(),
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1157,8 +1254,7 @@ fn cmd_build(
                 "--distro {distro} only supports --no-k8s for now (the k8s path needs the \
                  pkgs.k8s.io RPM repository, not implemented yet)",
                 &[("distro", distro.as_str())],
-            )
-            .into(),
+            ),
         ));
     }
     // `k8s_version` goes into a `format!` that becomes a `virt-customize --run-command`
