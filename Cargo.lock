@@ -749,6 +749,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "delonix-proxmox"
+version = "0.47.2"
+dependencies = [
+ "delonix-runtime-core",
+ "delonix-vm",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "delonix-runtime"
 version = "0.47.2"
 dependencies = [
