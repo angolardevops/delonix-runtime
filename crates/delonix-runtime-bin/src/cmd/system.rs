@@ -24,6 +24,9 @@ pub enum SystemCmd {
         /// Show only the last N (default: all).
         #[arg(short = 'n', long)]
         tail: Option<usize>,
+        /// Output format: `table` (default) or `json` (ADR-0005). With `-f`, `json` streams ONE OBJECT PER LINE (JSONL) — a JSON array would never close on a stream
+        #[arg(short = 'o', long = "output", value_enum, default_value_t)]
+        output: super::output::OutputFormat,
     },
     /// Engine state: rootless?, cgroup delegation, network infra, counts.
     Info,
@@ -99,7 +102,11 @@ pub enum SystemCmd {
 
 pub fn run(action: SystemCmd) -> Result<()> {
     match action {
-        SystemCmd::Events { follow, tail } => cmd_events(follow, tail),
+        SystemCmd::Events {
+            follow,
+            tail,
+            output,
+        } => cmd_events(follow, tail, output),
         SystemCmd::Info => cmd_info(),
         SystemCmd::Setup { delegate } => cmd_setup(delegate),
         SystemCmd::Df => cmd_df(),
@@ -651,12 +658,44 @@ fn cmd_thermal(high: u64, low: u64, floor: u64, interval: u64, once: bool) -> Re
     }
 }
 
-fn cmd_events(follow: bool, tail: Option<usize>) -> Result<()> {
+/// The engine's event log, for humans (`table`) or for machines (`json`).
+///
+/// `-o json` closes a gap that was pure friction: the log is ALREADY
+/// `events.jsonl` on disk, and the only reader of it re-rendered every record
+/// into a padded human line. Anyone automating on top of the engine — the
+/// audience `cli-stability.md` promises `-o json` to — had to either parse
+/// columns or reach behind the CLI into the state directory, which is not a
+/// contract this project makes.
+///
+/// **`-f` streams JSONL, not an array**, and that is deliberate: a JSON array
+/// has to close, and a follow never does. One object per line is what a stream
+/// consumer (`jq -c`, a log shipper) can read incrementally, and it is the same
+/// shape the file itself already has. The non-following form keeps the ADR-0005
+/// array contract that every other `-o json` in this CLI honours.
+fn cmd_events(
+    follow: bool,
+    tail: Option<usize>,
+    output: super::output::OutputFormat,
+) -> Result<()> {
+    use super::output::OutputFormat;
     let root = state_root();
     let evs = events::read(&root);
     let start = tail.map(|n| evs.len().saturating_sub(n)).unwrap_or(0);
-    for e in &evs[start..] {
-        println!("{}", e.to_line());
+    let shown = &evs[start..];
+    match output {
+        OutputFormat::Table => {
+            for e in shown {
+                println!("{}", e.to_line());
+            }
+        }
+        // In follow mode the backlog is streamed as JSONL too, so a consumer
+        // never has to switch parsers halfway through the same invocation.
+        OutputFormat::Json if follow => {
+            for e in shown {
+                print_event_line(e);
+            }
+        }
+        OutputFormat::Json => super::output::print_json(shown)?,
     }
     if !follow {
         return Ok(());
@@ -669,10 +708,22 @@ fn cmd_events(follow: bool, tail: Option<usize>) -> Result<()> {
         let (novos, next) = events::read_from(&root, offset);
         offset = next;
         for e in novos {
-            println!("{}", e.to_line());
+            match output {
+                OutputFormat::Table => println!("{}", e.to_line()),
+                OutputFormat::Json => print_event_line(&e),
+            }
         }
         use std::io::Write;
         let _ = std::io::stdout().flush();
+    }
+}
+
+/// One event as a single JSON line (JSONL). A record that fails to serialize is
+/// SKIPPED rather than printed half-formed: a consumer reading line by line
+/// would take a truncated object as a parse error for the whole stream.
+fn print_event_line(e: &delonix_runtime_core::events::Event) {
+    if let Ok(s) = serde_json::to_string(e) {
+        println!("{s}");
     }
 }
 
