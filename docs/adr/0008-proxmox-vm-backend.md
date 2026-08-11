@@ -192,3 +192,50 @@ Two smaller findings, both worth knowing before writing the first request:
    diagnosis possible — worth remembering as the tool for this.
 
 Both affect all four Proxmox appliances.
+
+## What the spike did NOT settle: the trait assumes a local disk
+
+The API side is a GO — every method has an operation behind it, and the
+lifecycle ran. **The engine side is not, and this is the honest blocker now.**
+Reading `create_with` before writing the first line of the backend:
+
+```rust
+let disk_path = std::fs::canonicalize(&cfg.disk)      // must exist HERE
+    .map_err(|_| Error::Invalid(format!("image not found: {}", cfg.disk)))?;
+let overlay = vmdir.join(format!("{}.qcow2", cfg.name));
+qemu-img create -f qcow2 -b <disk_path> … <overlay>   // a LOCAL overlay
+backend.boot(&vmdir, cfg, &overlay.to_string_lossy(), on)
+```
+
+Every one of those three steps runs **before** any backend is consulted, and
+every one is meaningless for a hypervisor on another machine:
+
+* the base image has to be on the Proxmox node, not on this filesystem — and
+  `canonicalize` fails here first, so the backend never even gets asked;
+* the local overlay is waste: Proxmox manages its own disks (LVM-thin, ZFS, a
+  storage of its own), and a qcow2 made here backs nothing there;
+* `boot(…, overlay: &str, …)` hands over a **local path** as the thing to boot.
+
+So the blocker moved rather than disappeared: it is no longer "no target to
+spike against", it is "**`VmBackend` is not implementable by a remote backend
+without a change to the engine**". Pretending otherwise would mean writing a
+backend that uploads a local overlay to a remote node on every create — a second
+disk model, and slow — purely to satisfy a signature.
+
+A second, smaller instance of the same thing: **`available()` is called during
+auto-detection** (`select_backend` walks the registry asking each). For a local
+backend that is a `which`; for a remote one the only honest answer needs a
+network round trip, so auto-detection would start making HTTP requests to a node
+that may not be configured at all.
+
+**The minimal fix, and it is additive**: a method on the trait with a default —
+something like `fn manages_own_storage(&self) -> bool { false }` — that
+`create_with` consults before the canonicalize/overlay block, plus never
+including a remote backend in auto-detection (it is selected explicitly or not
+at all). No existing signature changes, no existing implementation breaks, and
+the skill's "do not touch the trait" holds in substance: nothing that exists
+today is altered.
+
+**That decision belongs to this ADR and has not been taken.** Phase 2 is
+therefore: (a) decide and land the storage/detection split above; (b) then the
+backend. Writing (b) first would bake the wrong assumption into a crate.
