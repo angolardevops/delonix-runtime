@@ -3507,6 +3507,39 @@ o resultado.** O `build-proxmox.sh` já fazia `wait $QEMU_PID` e estava correcto
 o erro era só dos scripts ad-hoc com `-daemonize` + `sleep`.
 
 
+## `--vnc` decidia se a VM tinha ECRÃ, e não só se tinha VNC (2026-08-11)
+
+Bug do MOTOR, e o mais caro de atribuir de toda esta série porque parecia ser
+das imagens. O `<video>` do XML só era emitido quando `--vnc` estava presente —
+o que confunde duas coisas diferentes: **VNC é acesso remoto a um ecrã; VGA é a
+máquina TER um.** Um domínio sem adaptador de vídeo nenhum é atípico (um
+`virt-install` simples dá sempre um) e há convidados que não arrancam sem ele.
+
+**Medido, e a medição é que resolveu a atribuição de culpa**: TODAS as imagens
+Proxmox — incluindo a ORIGINAL do fabricante, que este repo nunca tocou —
+entram num ciclo `SeaBIOS → GRUB → reset` sob `qemu -vga none`, sem imprimirem
+uma única linha de kernel. Com adaptador, a MESMA imagem arranca e ganha lease
+DHCP. Portanto: não era o `console=tty0`, não era o `dhclient`, não era a
+bridge, não era o `sleep` da captura.
+
+**A consequência é a pior espécie**: `delonix vm create <appliance>` funcionava
+COM `--vnc` e produzia uma máquina que reiniciava em silêncio sem ele. A flag
+que uma pessoa usa para OLHAR para o convidado era o que o fazia funcionar.
+
+O default passa a ser `virtio` num domínio com VNC (como antes, byte a byte) e o
+`vga` simples nos outros — não precisa de driver no convidado, que é o que
+interessa quando ninguém se vai ligar e o adaptador existe só para o firmware e
+o kernel encontrarem consola. `video: none` continua a suprimi-lo.
+
+**A lição de método, e é a que custou horas**: validei quatro imagens com
+`--vnc` porque me era conveniente para depurar, e essa flag era exactamente o
+que mascarava o defeito. **O teste que vale é o comando que o utilizador
+escreve** — não o que é cómodo para quem está a investigar. Cinco hipóteses
+erradas (nome de interface, `/sbin/dhclient`, bridge sem membro, captura com o
+guest vivo, `console=tty0`) antes de comparar duas invocações que só diferiam
+numa flag.
+
+
 ## Regra de ouro: fronteira com o PaaS
 
 Este código **não pode depender de nada privado**. Antes de qualquer commit:
