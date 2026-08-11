@@ -649,7 +649,36 @@ fn registered_backend_ids() -> String {
         .join(", ")
 }
 
+/// Backend names this engine KNOWS but does not register, and why.
+///
+/// The distinction is not pedantry. `delonix-proxmox` exists in this workspace,
+/// implements the trait, and had its API lifecycle proven against a real
+/// Proxmox VE 9.1 (ADR-0008) — what it does not have is a `boot`, because this
+/// engine does not ship a create path it has never watched run. Answering
+/// `--backend proxmox` with «unknown backend» told the operator the opposite of
+/// the truth: that the thing does not exist, rather than that it is not finished.
+///
+/// This table is the honest middle: the name is recognised, the state is named,
+/// and the reader is pointed at the ADR that says what is missing. It is NOT a
+/// registration — nothing here can be selected, and adding a working backend
+/// means putting it in [`BACKENDS`], not here.
+const KNOWN_UNREGISTERED: &[(&str, &str)] = &[(
+    "proxmox",
+    "the Proxmox backend exists (crate `delonix-proxmox`) but is NOT wired up: its \
+     `boot` is unimplemented, so no VM can be created through it. Its API lifecycle is \
+     proven against a real node — see docs/adr/0008-proxmox-vm-backend.md for what is \
+     still missing (a registry the caller can populate, and credentials from a `kind: \
+     Secret`)",
+)];
+
 fn unknown_backend(name: &str) -> Error {
+    let want = name.trim().to_lowercase();
+    if let Some((_, why)) = KNOWN_UNREGISTERED.iter().find(|(id, _)| *id == want) {
+        return Error::Invalid(format!(
+            "VM backend '{}' is not available in this build: {why}",
+            name.trim()
+        ));
+    }
     Error::Invalid(format!(
         "unknown VM backend: '{}' (use {})",
         name.trim(),
@@ -3096,6 +3125,30 @@ mod tests {
             "cloud-hypervisor"
         );
         assert!(select_backend(Some("xpto")).is_err());
+    }
+
+    /// A name this engine knows but does not register must NOT be reported as
+    /// unknown. `delonix-proxmox` is in this workspace and implements the trait;
+    /// telling an operator «unknown backend, use cloud-hypervisor or libvirt»
+    /// says the opposite of what is true, and sends them looking for a crate
+    /// that is right there. Two assertions, because both halves matter: the
+    /// name is recognised, AND it is still refused (fail-closed — nothing about
+    /// this makes an unfinished backend selectable).
+    #[test]
+    fn um_backend_conhecido_mas_nao_registado_nao_se_reporta_como_desconhecido() {
+        let e = unknown_backend("proxmox").to_string();
+        assert!(
+            !e.contains("unknown VM backend"),
+            "o proxmox existe neste workspace — nao pode sair como desconhecido: {e}"
+        );
+        assert!(e.contains("not available in this build"), "{e}");
+        assert!(e.contains("0008"), "a mensagem tem de apontar o ADR: {e}");
+        // Continua a NAO ser seleccionavel.
+        assert!(find_backend("proxmox").is_none());
+        // E um nome que nao existe mesmo continua a dizer que nao existe.
+        let o = unknown_backend("naoexiste").to_string();
+        assert!(o.contains("unknown VM backend"), "{o}");
+        assert!(o.contains("libvirt"), "nomeia os que servem: {o}");
     }
 
     /// `backend_for` answers "what IS running this?", and a wrong answer does
