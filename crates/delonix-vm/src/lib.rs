@@ -537,6 +537,40 @@ pub trait VmBackend {
     fn snapshots(&self, _vm: &Vm) -> Result<Vec<String>> {
         Err(unsupported_snapshot(self.id(), "snapshots"))
     }
+
+    /// `true` when the backend owns its own disks and [`create`] must NOT
+    /// prepare one.
+    ///
+    /// The default is `false`, which is what both local backends are and what
+    /// every existing implementation keeps without changing a line: `create`
+    /// resolves `cfg.disk` on THIS filesystem and builds a thin qcow2 overlay
+    /// for the VM, and `boot` receives that overlay's path.
+    ///
+    /// A backend whose hypervisor is on another machine cannot use any of it —
+    /// the base image lives on that node, and a local overlay backs nothing
+    /// there. Worse, `create` would fail on the local `canonicalize` before the
+    /// backend was ever asked. With `true`, `boot` receives `cfg.disk`
+    /// unchanged and decides for itself what it names on the far side.
+    ///
+    /// This exists because the alternative was uploading a local overlay on
+    /// every create — a second disk model, and slow — purely to satisfy a
+    /// signature (ADR-0008).
+    fn manages_own_storage(&self) -> bool {
+        false
+    }
+
+    /// `true` when auto-detection may pick this backend with nobody asking for
+    /// it by name.
+    ///
+    /// Local backends answer `available()` with a `which`, which is cheap and
+    /// truthful. A REMOTE backend cannot: the only honest answer needs a
+    /// network round trip to a node that may not even be configured, and
+    /// auto-detection is not a place to make HTTP requests. So a remote backend
+    /// returns `false` here and is chosen explicitly (`--backend`,
+    /// `DELONIX_VM_BACKEND`, `vm default-backend`) or not at all.
+    fn auto_selectable(&self) -> bool {
+        true
+    }
 }
 
 /// Fail-closed error for a backend that does not implement snapshot/restore
@@ -641,9 +675,13 @@ pub fn select_backend(want: Option<&str>) -> Result<Box<dyn VmBackend>> {
             Some(b) => Ok((b.new)()),
             None => Err(unknown_backend(other)),
         },
+        // `auto_selectable` first, and it is not an optimization: it is what
+        // keeps auto-detection from making a network request. `available()` of
+        // a remote backend can only answer by asking the far node.
         _ => BACKENDS
             .iter()
             .map(|b| (b.new)())
+            .filter(|b| b.auto_selectable())
             .find(|b| b.available())
             .ok_or_else(|| {
                 Error::Invalid(
@@ -2066,6 +2104,38 @@ pub fn create(base: &Path, cfg: &VmConfig) -> Result<Vm> {
 /// kernel ⇒ libvirt if available). Lives here (not just in the CLI) so every
 /// consumer of this API — `stack apply`/`cluster kubeadm` included — inherits
 /// it for free.
+/// Resolves `cfg.disk` on THIS filesystem and builds the VM's thin qcow2
+/// overlay from it. Extracted from `create_with` so a backend that owns its
+/// storage can skip the whole thing (`manages_own_storage`) instead of the
+/// engine doing local disk work for a hypervisor on another machine.
+fn prepare_local_overlay(
+    vmdir: &Path,
+    cfg: &VmConfig,
+    on: &dyn Fn(CreateStage),
+) -> Result<(std::path::PathBuf, std::path::PathBuf)> {
+    let disk_path = std::fs::canonicalize(&cfg.disk)
+        .map_err(|_| Error::Invalid(format!("image not found: {}", cfg.disk)))?;
+    let overlay = vmdir.join(format!("{}.qcow2", cfg.name));
+    if !overlay.exists() {
+        on(CreateStage::Disk);
+        let bf = disk_backing_format(&disk_path);
+        run_quiet(
+            "qemu-img",
+            &[
+                "create",
+                "-f",
+                "qcow2",
+                "-b",
+                &disk_path.to_string_lossy(),
+                "-F",
+                &bf,
+                &overlay.to_string_lossy(),
+            ],
+        )?;
+    }
+    Ok((disk_path, overlay))
+}
+
 pub fn create_with(base: &Path, cfg: &VmConfig, on: &dyn Fn(CreateStage)) -> Result<Vm> {
     if !valid_vm_name(&cfg.name) {
         return Err(Error::Invalid(format!(
@@ -2160,26 +2230,21 @@ pub fn create_with(base: &Path, cfg: &VmConfig, on: &dyn Fn(CreateStage)) -> Res
         )));
     }
 
-    let disk_path = std::fs::canonicalize(&cfg.disk)
-        .map_err(|_| Error::Invalid(format!("image not found: {}", cfg.disk)))?;
-    let overlay = vmdir.join(format!("{}.qcow2", cfg.name));
-    if !overlay.exists() {
-        on(CreateStage::Disk);
-        let bf = disk_backing_format(&disk_path);
-        run_quiet(
-            "qemu-img",
-            &[
-                "create",
-                "-f",
-                "qcow2",
-                "-b",
-                &disk_path.to_string_lossy(),
-                "-F",
-                &bf,
-                &overlay.to_string_lossy(),
-            ],
-        )?;
-    }
+    // A backend that owns its storage gets `cfg.disk` verbatim and nothing is
+    // prepared here: the local canonicalize would fail on an image that lives
+    // on the remote node, before the backend was ever asked (ADR-0008).
+    // `disk_path` is what the record keeps as the VM's base image; `overlay` is
+    // what `boot` is handed. For a backend that owns its storage they are the
+    // same string the caller wrote — this engine does not get to reinterpret a
+    // name that means something on the far node.
+    let (disk_path, overlay) = if backend.manages_own_storage() {
+        (
+            std::path::PathBuf::from(&cfg.disk),
+            std::path::PathBuf::from(&cfg.disk),
+        )
+    } else {
+        prepare_local_overlay(&vmdir, cfg, on)?
+    };
 
     let boot = match backend.boot(&vmdir, cfg, &overlay.to_string_lossy(), on) {
         Ok(b) => b,
@@ -3347,5 +3412,115 @@ mod tests {
         vm.namespace = "teamA".into();
         assert_eq!(config_from(&vm).namespace.as_deref(), Some("teamA"));
         assert_eq!(vm_namespace_of(&config_from(&vm)), "teamA");
+    }
+
+    /// A backend that exists only to be asked questions — no hypervisor, no
+    /// process, nothing on disk.
+    struct FakeBackend {
+        id: &'static str,
+        available: bool,
+        own_storage: bool,
+        auto: bool,
+    }
+
+    impl VmBackend for FakeBackend {
+        fn id(&self) -> &'static str {
+            self.id
+        }
+        fn available(&self) -> bool {
+            self.available
+        }
+        fn boot(
+            &self,
+            _vmdir: &Path,
+            _cfg: &VmConfig,
+            _overlay: &str,
+            _on: &dyn Fn(CreateStage),
+        ) -> Result<Boot> {
+            unreachable!("these tests never boot")
+        }
+        fn is_running(&self, _vm: &Vm) -> bool {
+            false
+        }
+        fn ip(&self, _vm: &Vm) -> Option<String> {
+            None
+        }
+        fn stop(&self, _vmdir: &Path, _vm: &Vm) -> Result<()> {
+            Ok(())
+        }
+        fn manages_own_storage(&self) -> bool {
+            self.own_storage
+        }
+        fn auto_selectable(&self) -> bool {
+            self.auto
+        }
+    }
+
+    #[test]
+    fn os_dois_backends_de_hoje_mantem_o_comportamento_de_sempre() {
+        // The defaults are what makes this addition invisible to everything
+        // that already exists: both local backends prepare a local overlay and
+        // both may be auto-detected, exactly as before.
+        for b in [
+            Box::new(CloudHypervisorBackend) as Box<dyn VmBackend>,
+            Box::new(LibvirtBackend),
+        ] {
+            assert!(
+                !b.manages_own_storage(),
+                "{} must let the engine prepare the disk",
+                b.id()
+            );
+            assert!(b.auto_selectable(), "{} must stay auto-detectable", b.id());
+        }
+    }
+
+    #[test]
+    fn a_auto_deteccao_salta_um_backend_nao_auto_selecionavel() {
+        // A remote backend cannot answer `available()` without a network round
+        // trip, so auto-detection must never reach it. Written against the
+        // predicate rather than the global registry, which has no remote entry
+        // to exercise yet — the filter is what would let one in.
+        let remote = FakeBackend {
+            id: "remote",
+            available: true,
+            own_storage: true,
+            auto: false,
+        };
+        let local = FakeBackend {
+            id: "local",
+            available: true,
+            own_storage: false,
+            auto: true,
+        };
+        let picked: Vec<&'static str> = [&remote, &local]
+            .into_iter()
+            .filter(|b| b.auto_selectable())
+            .filter(|b| b.available())
+            .map(|b| b.id())
+            .collect();
+        assert_eq!(
+            picked,
+            vec!["local"],
+            "auto-detection must not pick a backend that answers over the network"
+        );
+    }
+
+    #[test]
+    fn um_backend_remoto_recebe_o_disco_tal_como_foi_escrito() {
+        // The point of `manages_own_storage`: `cfg.disk` names something on the
+        // FAR node, so the engine must not canonicalize it here (it would fail
+        // before the backend was asked) nor build an overlay from it.
+        let remote = FakeBackend {
+            id: "remote",
+            available: true,
+            own_storage: true,
+            auto: false,
+        };
+        assert!(remote.manages_own_storage());
+        // And a name that does not exist locally is exactly the normal case.
+        assert!(
+            !std::path::Path::new("local-lvm:vm-100-disk-0").exists(),
+            "the test's premise is that this is not a local path"
+        );
     }
 }
