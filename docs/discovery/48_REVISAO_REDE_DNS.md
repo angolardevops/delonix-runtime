@@ -11,7 +11,14 @@ medido, não deduzido**; onde não houve medição, está dito.
 
 ---
 
-## A1 — CRÍTICO. A descoberta de serviço está partida para aplicações reais
+> **Estado (2026-08-11, mesma sessão).** A1, A2, A4 e A5 estão **CORRIGIDOS e
+> validados ao vivo** — ver «Validação das correcções» no fim. A3, A6, A7 e A9
+> continuam **abertos por decisão**: são modelo, não bug, e mudá-los é breaking;
+> pertencem a um ADR. Esta nota é mantida a par das correcções de propósito —
+> uma tabela de achados que não acompanha o que já foi fechado passa a mentir
+> nos dois sentidos, como o `AUDITORIA-E2E.md` fez durante semanas.
+
+## A1 — CRÍTICO ✅ CORRIGIDO. A descoberta de serviço está partida para aplicações reais
 
 Um container **não consegue falar com outro pelo nome** se usar `getaddrinfo()`
 — o caminho por omissão de Go, Java, Node, Python, curl, wget, nc. Medido:
@@ -44,7 +51,7 @@ manuais e falhar em todas as aplicações.
 autoritativo** (rcode 0, ANCOUNT 0). É a resposta correcta — o IPv6 está
 desligado por desenho desde a v0.37.1 — e é o que o CoreDNS faz.
 
-## A2 — CRÍTICO. Nomes internos vão para fora, e não há resposta negativa própria
+## A2 — CRÍTICO ✅ CORRIGIDO. Nomes internos vão para fora, e não há resposta negativa própria
 
 O servidor **nunca gera uma resposta negativa**. Confirmado por varredura: não
 existe no ficheiro nenhuma construção de NXDOMAIN/SERVFAIL. Portanto todo o
@@ -72,7 +79,7 @@ do upstream, não nosso. O comportamento observável coincide; o custo e a fuga 
 **Correcção**: NXDOMAIN autoritativo para qualquer `.delonix.internal` que o
 índice não conheça, sem nunca reencaminhar esse sufixo.
 
-## A3 — CRÍTICO. O DNS ignora a namespace de quem pergunta
+## A3 — CRÍTICO ⏸ ABERTO (decisão de modelo). O DNS ignora a namespace de quem pergunta
 
 O dataplane isola (medido: `client`@teamA → `webb`@teamB = 100 % de perda), mas o
 plano de nomes não isola nada:
@@ -94,7 +101,7 @@ pergunta.
 índice que já existe, e resolver o nome nu **primeiro dentro da namespace do
 requerente**. É o modelo do `search <ns>.svc.cluster.local` do k8s.
 
-## A4 — GRAVE. Membro de pod em rede custom regista o IP ERRADO → colisão real
+## A4 — GRAVE ✅ CORRIGIDO. Membro de pod em rede custom regista o IP ERRADO → colisão real
 
 Medido, com dois pods:
 
@@ -126,7 +133,7 @@ O `fwmap` está correcto (10.250.0.2 presente) porque
 por isso o isolamento aguenta e o dano fica no DNS. Verificado: `spy`@teamB →
 pod@teamA = 100 % de perda; `client`@teamA → pod = 0 % de perda.
 
-## A5 — MÉDIO (segurança). `forward_dns` aceita a resposta de qualquer origem
+## A5 — MÉDIO (segurança) ✅ CORRIGIDO. `forward_dns` aceita a resposta de qualquer origem
 
 ```rust
 let sock = UdpSocket::bind("0.0.0.0:0")?;   // sem connect()
@@ -223,4 +230,59 @@ Vale registar, para a revisão seguinte não voltar a suspeitar daqui:
 4. **A3** — precisa de desenho (o `peer` tem de descer até ao resolvedor).
 5. **A6/A7/A9** — são decisões de modelo, não bugs; merecem ADR antes de código.
 
-Nada disto foi corrigido nesta passagem: o pedido era identificar.
+---
+
+## Validação das correcções (A1, A2, A4, A5)
+
+Nó novo montado com o binário corrigido (`/tmp/dxb`, pin/controlo/slirp
+próprios), mesmo cenário que produziu cada achado.
+
+**A1 — descoberta de serviço.** O caminho `getaddrinfo`, que era o partido:
+
+```
+antes:  wget -O- http://weba:8080/  → wget: bad address 'weba:8080'
+depois: wget -O- http://weba:8080/  → Connecting to weba:8080 (10.250.9.124:8080)
+antes:  nc -w2 weba 9               → nc: bad address 'weba'
+depois: nc -w2 weba 9               → (liga)
+```
+
+**A1/A2 — no protocolo.** Ambas as respostas passam a ser nossas, com `aa`:
+
+```
+weba AAAA                        → NOERROR, aa, ANSWER: 0, Query time 0 msec   (era SERVFAIL do upstream)
+naoexiste.teamA.delonix.internal → NXDOMAIN, aa,           Query time 0 msec   (era NXDOMAIN do upstream)
+```
+
+**A2 — a prova de que já não sai do nó.** Com o upstream DROPADO por nftables
+(o caso air-gapped, e o que expunha o custo):
+
+| | antes | depois |
+|---|---|---|
+| `nslookup weba` (A+AAAA) | **5,047 s**, `*** Can't find weba: No answer` | **0,034 s**, endereço devolvido |
+| `wget http://weba:8080/` | `bad address` | **0,040 s**, resolve e liga |
+| AAAA de container vivo | **9,03 s** | 0 ms |
+
+~148× no caminho de resolução, e a fuga fecha por construção: uma resposta em
+0 ms com a saída bloqueada não pode ter ido a lado nenhum.
+
+**Não parti a internet** — `example.com` continua a ser encaminhado e resolve
+(`172.66.147.243`), e `.delonix.io` continua deliberadamente fora da nossa zona.
+
+**A4 — colisão eliminada.** Mesmos dois pods de antes:
+
+```
+antes:  p1-a 10.200.0.2 · p1-b 10.200.0.2 · pdef-a 10.200.0.2   (os três iguais)
+depois: p1-a 10.250.0.2 · p1-b 10.250.0.2 · pdef-a 10.200.0.2   (cada um o seu)
+```
+
+E com tráfego real, as duas correcções juntas: `nc -w3 p1-a 8080` a partir de
+outro container resolve por nome **e** chega ao pod certo — `SOU-O-P1`. Antes
+falhava em `bad address`, e o nome apontava para o outro pod.
+
+**Sem regressão de isolamento** (o que mais importava não partir): `spy`@teamB →
+`weba`@teamA e → pod@teamA continuam a 100 % de perda; `client`@teamA → `weba` a
+0 %. `cargo build`/`clippy`/`fmt` limpos e a suite completa do workspace a
+passar; os dois testes de decisão do DNS **falham com a correcção revertida**
+(verificado explicitamente, conforme a regra do repo).
+
+A3, A6, A7 e A9 continuam abertos de propósito — são modelo, não bug.
