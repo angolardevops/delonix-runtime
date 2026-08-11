@@ -2633,6 +2633,13 @@ pub(crate) struct RunOpts {
 /// a `restart` has to be the one it was created with. Every field of this family
 /// that only the creation path read has ended up lost on the first restart —
 /// `-v`, `-p` on a custom network, extra networks, pod membership. Four times.
+///
+/// FIVE, and this comment was the fifth: it said «shared by `cmd_run` and
+/// `cmd_start`» while `cmd_start` never called it. Measured on a running
+/// container — `--dns 1.1.1.1` held until the first `stop`+`start` and then
+/// resolved through the host's resolver, silently. A comment that promises what
+/// the code does not do is worse than no comment: it is the thing a reader
+/// checks INSTEAD of the call sites.
 pub(crate) fn dns_config_of(c: &Container) -> Option<runtime::DnsConfig> {
     let cfg = runtime::DnsConfig {
         servers: c.dns_servers.clone(),
@@ -4648,6 +4655,19 @@ pub(crate) fn cmd_start(images: &ImageStore, store: &Store, id: &str) -> Result<
             .clone()
             .or_else(|| (!slirp_ports.is_empty()).then(|| delonix_net::SLIRP_IP.to_string())),
         dns,
+        // The EXPLICIT resolver the container was created with (`--dns`,
+        // `--dns-search`, `--dns-option`). `dns` above is the resolver of its
+        // NETWORK; this is what the user asked for, and it wins.
+        //
+        // BUG FIXED HERE, measured on a running container: `dns_config_of`'s own
+        // doc-comment says it is «shared by `cmd_run` and `cmd_start` on purpose»
+        // and listed the four times this family of fields was lost on a restart —
+        // and `cmd_start` never called it. A container created with
+        // `--dns 1.1.1.1` resolved through 1.1.1.1 until the first `stop`+`start`,
+        // and then silently through the host's resolver. Fifth occurrence of the
+        // same trap, and the first where the comment promised what the code did
+        // not do.
+        dns_config: dns_config_of(&c),
         // Reproduces the original `run`'s `--user` (the `--hostname` comes from
         // `c.hostname`, read by the engine). Without this, a `start` ran as root.
         run_uid: c.run_uid,
@@ -7470,5 +7490,27 @@ containers:
         // presente uma observação que já não se está a fazer.
         c.status = Status::Stopped;
         assert_eq!(fmt_status_of(&c, None), "Exited (0)");
+    }
+
+    #[test]
+    fn o_dns_explicito_tem_de_chegar_aos_dois_caminhos() {
+        // A guarda contra a 5.ª ocorrencia da armadilha, e contra a sua
+        // reintroducao: `dns_config_of` existe precisamente para o `run` e o
+        // `start` darem o MESMO resolver, e durante quatro versoes so o `run`
+        // lhe chamava — um container criado com `--dns 1.1.1.1` resolvia por ele
+        // ate ao primeiro `stop`+`start`, e a seguir pelo resolver do host, em
+        // silencio.
+        //
+        // O teste e sobre o CODIGO e nao sobre um container porque a alternativa
+        // exige um host: o que se exige e que ambos os construtores de `RunSpec`
+        // passem o campo.
+        let src = include_str!("container.rs");
+        let chamadas = src.matches("dns_config: dns_config_of(&c)").count();
+        assert!(
+            chamadas >= 2,
+            "`dns_config_of` tem de ser passado no `cmd_run` E no `cmd_start` \
+             (encontradas {chamadas} chamadas) — um caminho sem ele perde o \
+             `--dns` no primeiro restart"
+        );
     }
 }
