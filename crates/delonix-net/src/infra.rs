@@ -4684,8 +4684,88 @@ fn dns_server_main() {
     }
 }
 
-/// Response to a DNS query: if it's `A` and the name is of an ingress container/VM,
-/// responds with the IP; otherwise forwards to the upstream.
+const QTYPE_A: u16 = 1;
+const QTYPE_AAAA: u16 = 28;
+const RCODE_NOERROR: u8 = 0;
+const RCODE_NXDOMAIN: u8 = 3;
+
+/// Is this name inside the zone we are AUTHORITATIVE for? A name under
+/// `.delonix.internal` is ours by construction and must NEVER be forwarded: the
+/// upstream cannot know it, so forwarding only leaks every workload and
+/// namespace name of every tenant to an external resolver (`SLIRP_DNS`, then
+/// `1.1.1.1`) and pays that resolver's latency to be told what we already know.
+///
+/// `.delonix.io` is deliberately NOT here: it is a real, publicly resolvable
+/// domain, and claiming authority over it would blackhole it for containers.
+fn is_internal_zone(name: &str) -> bool {
+    let n = name.trim_end_matches('.').to_lowercase();
+    n == "delonix.internal" || n.ends_with(".delonix.internal")
+}
+
+/// What to do with a query. PURE (no I/O), so the decision table is testable on
+/// its own — the part that used to be wrong was the DECISION, not the encoding.
+#[derive(Debug, PartialEq, Eq)]
+enum DnsAction {
+    /// We know this name and the query asks for `A`.
+    Answer([u8; 4]),
+    /// The name exists but has no record of the requested type. An empty
+    /// NOERROR — NOT an error, and the distinction is the whole point: a
+    /// resolver reads NODATA as "no address of this family, carry on" and a
+    /// SERVFAIL as "the lookup failed", which makes `getaddrinfo()` fail the
+    /// WHOLE resolution, `A` record included.
+    NoData,
+    /// Our zone, name unknown. Authoritative negative — never leaves the node.
+    NxDomain,
+    /// Not ours: forward upstream (unchanged behaviour).
+    Forward,
+}
+
+/// BUG FIXED (both halves of the same defect): only `qtype == 1` was ever
+/// answered locally, and NOTHING generated a negative reply — so every `AAAA`,
+/// which `getaddrinfo()` emits ALONGSIDE the `A` for essentially every real
+/// client (Go, Java, Node, Python, curl, nc, wget), was forwarded to the
+/// upstream. For a bare container name the upstream answers SERVFAIL, and both
+/// musl and glibc treat a SERVFAIL in either half as failure of the whole
+/// lookup: measured live, `nslookup -type=a weba` returned the right address
+/// while `wget http://weba:8080/` died with `bad address`. Service discovery
+/// was therefore broken for every client that resolves the normal way, and only
+/// worked for tools asking for `A` explicitly (`ping`, `getent`) — which is why
+/// it survived manual testing.
+fn dns_action(qtype: u16, name: &str, resolved: Option<[u8; 4]>) -> DnsAction {
+    if qtype == QTYPE_A {
+        if let Some(ip) = resolved {
+            return DnsAction::Answer(ip);
+        }
+    } else if resolved.is_some() {
+        // Known name, other type (AAAA and everything else). IPv6 is disabled
+        // node-wide by design (v0.37.1), so "no AAAA" is the TRUTH here, not a
+        // gap — and saying it ourselves costs nothing and leaks nothing.
+        return DnsAction::NoData;
+    }
+    if is_internal_zone(name) {
+        return DnsAction::NxDomain;
+    }
+    DnsAction::Forward
+}
+
+/// Builds an answer-less reply (NODATA when `rcode` is 0, NXDOMAIN when 3),
+/// echoing the question back as the RFC requires. `AA` is set because we really
+/// are authoritative for what we answer this way; `RD` is copied from the query
+/// rather than assumed, so we don't claim the client asked for recursion.
+fn negative_reply(q: &[u8], qend: usize, rcode: u8) -> Vec<u8> {
+    let mut r = Vec::with_capacity(qend);
+    r.extend_from_slice(&q[0..2]); // original ID
+    r.push(0x84 | (q[2] & 0x01)); // QR=1, AA=1, RD copied from the query
+    r.push(0x80 | rcode); // RA=1 + rcode
+    r.extend_from_slice(&[0x00, 0x01]); // QDCOUNT=1
+    r.extend_from_slice(&[0x00, 0x00]); // ANCOUNT=0
+    r.extend_from_slice(&[0x00, 0x00, 0x00, 0x00]); // NSCOUNT=0, ARCOUNT=0
+    r.extend_from_slice(&q[12..qend]); // original question
+    r
+}
+
+/// Response to a DNS query: answers AUTHORITATIVELY for names we know and for
+/// our own zone (positively, or with NODATA/NXDOMAIN); forwards the rest.
 fn handle_dns(q: &[u8]) -> Option<Vec<u8>> {
     // parse the 1st question (offset 12): labels until 0x00, then QTYPE+QCLASS.
     let mut i = 12usize;
@@ -4710,8 +4790,15 @@ fn handle_dns(q: &[u8]) -> Option<Vec<u8>> {
     }
     let qtype = u16::from_be_bytes([q[i], q[i + 1]]);
     let qend = i + 4; // end of the question (QTYPE+QCLASS)
-    if qtype == 1 {
-        if let Some(ip) = dns_resolve(&name) {
+                      // Only the address types (and our own zone) need the index consulted; an
+                      // `MX` for an external domain must not pay for a lookup that cannot match.
+    let resolved = if qtype == QTYPE_A || qtype == QTYPE_AAAA || is_internal_zone(&name) {
+        dns_resolve(&name)
+    } else {
+        None
+    };
+    match dns_action(qtype, &name, resolved) {
+        DnsAction::Answer(ip) => {
             let mut r = Vec::with_capacity(qend + 16);
             r.extend_from_slice(&q[0..2]); // original ID
             r.extend_from_slice(&[0x81, 0x80]); // flags: response + RA
@@ -4724,14 +4811,18 @@ fn handle_dns(q: &[u8]) -> Option<Vec<u8>> {
             r.extend_from_slice(&[0x00, 0x00, 0x00, 0x1e]); // TTL 30s
             r.extend_from_slice(&[0x00, 0x04]); // RDLENGTH 4
             r.extend_from_slice(&ip);
-            return Some(r);
+            Some(r)
+        }
+        DnsAction::NoData => Some(negative_reply(q, qend, RCODE_NOERROR)),
+        DnsAction::NxDomain => Some(negative_reply(q, qend, RCODE_NXDOMAIN)),
+        DnsAction::Forward => {
+            // External name: forwards and, if it's on an FQDN allowlist, learns the
+            // response's A-records into the egress nft set (before returning it).
+            let resp = forward_dns(q)?;
+            snoop_fqdn(&name, &resp);
+            Some(resp)
         }
     }
-    // External name: forwards and, if it's on an FQDN allowlist, learns the
-    // response's A-records into the egress nft set (before returning it).
-    let resp = forward_dns(q)?;
-    snoop_fqdn(&name, &resp);
-    Some(resp)
 }
 
 /// Forwards the raw query to the upstream (the slirp's DNS; fallback 1.1.1.1) and
@@ -4741,9 +4832,17 @@ fn forward_dns(q: &[u8]) -> Option<Vec<u8>> {
     sock.set_read_timeout(Some(std::time::Duration::from_secs(3)))
         .ok()?;
     for up in [crate::SLIRP_DNS, "1.1.1.1"] {
-        if sock.send_to(q, format!("{up}:53")).is_ok() {
+        // `connect()` + `send`/`recv` instead of `send_to`/`recv_from`: the
+        // socket used to accept the FIRST datagram to reach its ephemeral port
+        // from ANYONE (the source was read into `_`, and neither the transaction
+        // id nor the question was checked against what we sent). Any container
+        // able to guess the port within the 3s window could beat the upstream
+        // and have its forged answer handed straight to another container — the
+        // classic off-path poisoning shape. A connected UDP socket makes the
+        // KERNEL drop anything not from this upstream, which costs nothing.
+        if sock.connect(format!("{up}:53")).is_ok() && sock.send(q).is_ok() {
             let mut buf = [0u8; 1500];
-            if let Ok((n, _)) = sock.recv_from(&mut buf) {
+            if let Ok(n) = sock.recv(&mut buf) {
                 return Some(buf[..n].to_vec());
             }
         }
@@ -5968,6 +6067,95 @@ Inter-|   Receive                                                |  Transmit
         // only the suffix → None
         assert_eq!(parse_internal_name(".delonix.internal"), None);
         assert_eq!(parse_internal_name(""), None);
+    }
+
+    const IP: [u8; 4] = [10, 250, 0, 9];
+
+    #[test]
+    fn a_known_name_answers_nodata_not_servfail_for_aaaa() {
+        // THE regression this file exists to prevent. `getaddrinfo()` asks for A
+        // and AAAA together; when the AAAA half was forwarded, the upstream said
+        // SERVFAIL for a bare container name and musl/glibc failed the WHOLE
+        // lookup — `wget http://weba:8080/` died with `bad address` while the A
+        // record resolved perfectly. NoData is what keeps the A half usable.
+        assert_eq!(
+            dns_action(QTYPE_AAAA, "weba", Some(IP)),
+            DnsAction::NoData,
+            "AAAA for a name we know must be answered locally, never forwarded"
+        );
+        assert_eq!(dns_action(QTYPE_A, "weba", Some(IP)), DnsAction::Answer(IP));
+        // Same for a fully-qualified internal name, and for any other type.
+        assert_eq!(
+            dns_action(QTYPE_AAAA, "weba.teamA.delonix.internal", Some(IP)),
+            DnsAction::NoData
+        );
+        assert_eq!(dns_action(15, "weba", Some(IP)), DnsAction::NoData); // MX
+    }
+
+    #[test]
+    fn our_zone_never_leaves_the_node() {
+        // An unknown name under our own zone is OURS to refuse. Forwarding it
+        // leaked every workload and namespace name to an external resolver and
+        // paid its latency (measured: 9.03s per query with the upstream down)
+        // to be told what we already knew.
+        for name in [
+            "naoexiste.teamA.delonix.internal",
+            "weba.teamB.delonix.internal", // right name, WRONG namespace
+            "delonix.internal",
+            "WEBA.TEAMB.DELONIX.INTERNAL.", // case + trailing dot
+        ] {
+            assert_eq!(
+                dns_action(QTYPE_A, name, None),
+                DnsAction::NxDomain,
+                "{name} is in our zone: must be an authoritative NXDOMAIN"
+            );
+            assert_eq!(dns_action(QTYPE_AAAA, name, None), DnsAction::NxDomain);
+        }
+    }
+
+    #[test]
+    fn external_names_are_still_forwarded() {
+        // The other half of the contract: claiming authority too widely would
+        // blackhole the internet for every container. `.delonix.io` is a REAL
+        // public domain and is deliberately NOT ours.
+        for name in [
+            "google.com",
+            "api.github.com",
+            "delonix.io",
+            "web.delonix.io",
+        ] {
+            assert_eq!(dns_action(QTYPE_A, name, None), DnsAction::Forward);
+            assert_eq!(dns_action(QTYPE_AAAA, name, None), DnsAction::Forward);
+        }
+        assert!(!is_internal_zone("notdelonix.internal.example.com"));
+        // ...but a legacy `.delonix.io` name we DO know still answers locally.
+        assert_eq!(
+            dns_action(QTYPE_A, "web.delonix.io", Some(IP)),
+            DnsAction::Answer(IP)
+        );
+    }
+
+    #[test]
+    fn negative_reply_is_a_wellformed_answerless_response() {
+        // question: "weba" A IN, RD set
+        let mut q = vec![0xab, 0xcd, 0x01, 0x00, 0, 1, 0, 0, 0, 0, 0, 0];
+        q.extend_from_slice(&[4, b'w', b'e', b'b', b'a', 0]);
+        q.extend_from_slice(&[0x00, 0x01, 0x00, 0x01]);
+        let qend = q.len();
+        let r = negative_reply(&q, qend, RCODE_NXDOMAIN);
+        assert_eq!(&r[0..2], &[0xab, 0xcd], "the ID must be echoed back");
+        assert_eq!(r[2] & 0x80, 0x80, "QR");
+        assert_eq!(r[2] & 0x04, 0x04, "AA: we are authoritative for this");
+        assert_eq!(r[2] & 0x01, 0x01, "RD copied from the query, not assumed");
+        assert_eq!(r[3] & 0x0f, RCODE_NXDOMAIN);
+        assert_eq!(&r[4..6], &[0, 1], "QDCOUNT=1");
+        assert_eq!(&r[6..8], &[0, 0], "ANCOUNT=0");
+        assert_eq!(&r[12..], &q[12..qend], "the question is echoed verbatim");
+        // NODATA differs from NXDOMAIN ONLY in the rcode — that one nibble is
+        // what tells a resolver "carry on" instead of "the lookup failed".
+        let nd = negative_reply(&q, qend, RCODE_NOERROR);
+        assert_eq!(nd[3] & 0x0f, 0);
+        assert_eq!(nd[..3], r[..3]);
     }
 
     #[test]
