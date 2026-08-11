@@ -47,6 +47,26 @@ jobs:
           mkdir -p dist-release
           cp target/release/delonix     dist-release/delonix-x86_64-linux
           cp target/release/delonix-cri dist-release/delonix-cri-x86_64-linux
+      # O SITE PUBLICADO TEM DE SER O GERADO POR ESTE BINÁRIO.
+      #
+      # Este gate existe no `ci.yml` e disparou na v0.48.0 — e a release saiu na
+      # mesma, porque um workflow não olha para o outro. O resultado foi o site
+      # ao vivo a anunciar uma versão que nunca teve tag e a esconder um comando
+      # novo, durante horas, com o CI vermelho ao lado a dizê-lo.
+      #
+      # Aqui a verificação corre ANTES de qualquer coisa ser publicada, e com o
+      # binário que ESTA release vai entregar — que é o único contra o qual a
+      # pergunta faz sentido.
+      - name: O site publicado tem de ser o gerado (gate de publicação)
+        run: |
+          sudo apt-get install -y python3-markdown || pip install --break-system-packages markdown
+          PATH="$PWD/target/release:$PATH" python3 docs/gen.py
+          if ! git diff --quiet -- docs/; then
+            echo "::error::docs/ está desactualizado face ao binário desta tag."
+            echo "Corre 'python3 docs/gen.py' com um build de release e commita ANTES de cortar a tag."
+            git diff --stat -- docs/
+            exit 1
+          fi
       # Variante x86-64-v3 (AVX2/BMI2/FMA — Zen 2+/Haswell+): o instalador
       # escolhe-a automaticamente quando o CPU a suporta; o genérico continua
       # a ser o fallback universal. target-cpu diferente ⇒ rebuild completo.
