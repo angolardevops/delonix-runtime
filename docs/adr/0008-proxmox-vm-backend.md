@@ -1,7 +1,8 @@
 # ADR-0008: Add a Proxmox VE backend as a separate crate, and make backends registrable
 
-- **Status:** **Accepted, both phases DONE** (phase 1 2026-08-10; phase 2
-  2026-08-11, `boot`/`stop` watched running against a real node)
+- **Status:** **Accepted, fully implemented** (phase 1 2026-08-10; phase 2
+  2026-08-11; decision 2's populable registry and its first caller 2026-08-11,
+  the whole lifecycle watched running through the CLI against a real node)
 - **Date:** 2026-08-10
 - **Deciders:** Walter Angolar
 
@@ -252,6 +253,8 @@ things are already done and one is not:
   handling this ADR's spike identified.
 * `ProxmoxBackend::boot` is **deliberately unimplemented** and says so in its
   own error: the engine does not ship a create path nobody has watched run.
+  *(Superseded the same day — see "Phase 2, done" below: `boot` was written and
+  watched running against a real node.)*
 
 What is genuinely missing is the half of decision 2 that never landed: **the
 registry is a `static` table, so "a registry the caller populates" is not
@@ -267,6 +270,112 @@ the operator the crate does not exist, when it is sitting in the workspace. It
 now names the actual state and points here (`KNOWN_UNREGISTERED`, in
 `delonix-vm`). It remains **refused**: nothing about this makes an unfinished
 backend selectable.
+
+## Decision 2 landed (2026-08-11) — the registry takes a closure
+
+The paragraph above was right that the `static` table was the blocker, and one
+sentence of it explains the whole shape of the fix: `fn() -> Box<dyn VmBackend>`
+has nowhere to receive an endpoint, a node name and a credential. So a
+registration carries a **closure**, and the closure is where a caller's
+configuration lives:
+
+```rust
+pub type BackendFactory = Box<dyn Fn() -> Result<Box<dyn VmBackend>> + Send + Sync>;
+pub fn register_backend(reg: BackendRegistration) -> Result<()>;
+```
+
+`Send + Sync` constrains the CLOSURE, not the trait — no backend implementation
+changed, and the skill's "do not touch the trait" holds literally.
+
+Four properties, each one a refusal or an ordering that a plainer map would not
+have:
+
+* **Registering does no I/O.** The factory is not called, so a node that is
+  unreachable — or simply not there — costs nothing until somebody selects the
+  backend by name.
+* **`auto_selectable` is a field of the REGISTRATION, not just a method on the
+  built backend.** Auto-detection has to answer it *without building*, because
+  construction is where a remote backend authenticates. The old
+  `select_backend` did `.map(build).filter(auto_selectable)` — it built every
+  candidate and threw the wrong ones away, which for a remote backend is
+  precisely the network round trip the flag exists to prevent. Free for the two
+  local backends, which is why nothing noticed.
+* **A third-party registration may not be auto-selectable at all**, and asking
+  for it is refused by name. Auto-detection asks `available()`, and a backend
+  from outside this crate may only be able to answer that over the network.
+* **Names are owned.** An id or alias already belonging to a different backend
+  is refused: the loser would become unreachable by name, silently, which is the
+  same class of failure as the `_ => CloudHypervisorBackend` default this ADR
+  removed. Re-registering the *same* id replaces it, so reconfiguring a target
+  does not leave two entries shadowing each other.
+
+**The first caller is `delonix-runtime-bin`** (`cmd/vmbackends.rs`), called once
+from `run()`. It reads `DELONIX_PROXMOX_URL` / `_NODE` and a credential — a
+`kind: Secret` named by `DELONIX_PROXMOX_SECRET` first, per decision 4 — and
+registers the backend. Environment and not a manifest field because `create_with`
+resolves the backend itself and never receives a target: the registration has to
+be in place *before* the engine is asked.
+
+A misconfigured target is **reported and skipped, not fatal**: a typo in
+`DELONIX_PROXMOX_TOKEN` must not stop `delonix container ls` from running. The
+name then stays unregistered and `--backend proxmox` says how to configure it,
+which is the state the operator is actually in.
+
+`ProxmoxBackend` now holds an `Arc<Client>`, and the registered factory clones
+it. Without that, every `backend_for` — which is once per VM in `vm ls` — meant
+a fresh authenticate plus `GET /nodes`: listing ten VMs was thirty round trips
+where twelve do.
+
+**Watched running end to end through the CLI**, against the `proxmox-ve:9.1`
+appliance this repo builds:
+
+```
+$ delonix vm create pvedemo --backend proxmox --disk local-lvm:1 --memory 512M
+ ✓ defining the domain 📋 0.4s      ✓ starting the VM ▶ 0.8s
+$ delonix vm ls    → pvedemo  1  512M  Running
+$ delonix vm rm pvedemo
+$ GET /nodes/pve/qemu → {"data":[]}
+```
+
+### Three defects the same pass found and fixed
+
+1. **`create_with` deleted `cfg.disk` when a boot failed.** The cleanup was
+   `remove_file(&overlay)`, and with `manages_own_storage` the overlay IS
+   `cfg.disk` verbatim — the name the caller wrote for something on the far
+   node. For today's backend that name is `local-lvm:8` and the unlink simply
+   fails, but the rule cannot rest on the spelling a backend happens to use: a
+   remote backend whose disk reference is a local path would lose the user's
+   base image. **This branch had never been exercised by anything** — no
+   registered backend reached it, which is what a registry nobody can add to
+   costs.
+2. **`mem_mib` was re-implemented in `delonix-proxmox`, and the copy was
+   wrong.** It did not know the k8s `Gi`/`Mi` suffix the engine tolerates, so
+   `memory: 2Gi` meant 2 GiB on libvirt and Cloud Hypervisor and **1 GiB** on
+   Proxmox — silently, and the copy did not warn on an unparseable value either.
+   The engine's `mem_mib` is now `pub` and shared: one definition for everyone
+   who reads the field, the same discipline as `fw_rule_tail`.
+3. **`urlencode` encoded code points, not bytes.** `other as u32` is right only
+   below 0x80: a `ç` in an account name became `%E7` instead of its two UTF-8
+   bytes, and anything above 0xFF produced `%1F600`, which is not
+   percent-encoding at all. A UPID comes back from the node with the account
+   name inside it, so the input was never ours to assume ASCII.
+
+**A method note worth more than any of the three.** The first test written for
+defect (1)'s sibling — the auto-detection ordering — registered the remote
+candidate in the global registry and called `select_backend(None)`. It passed
+with the bug still in: this host has a local backend installed, the walk stops
+at the first entry, and the remote one is never reached either way. The fix was
+to extract `auto_detect(&[BackendRegistration])` and hand the test a table where
+the skipped candidate is actually reached. Each of the three fixes was then
+verified by reverting it and watching its test fail.
+
+### Still open, deliberately
+
+`ip()` returns `None` (it needs the QEMU guest agent inside the guest);
+snapshots use the trait's fail-closed default, though the API supports them and
+the spike exercised one; and the `net0` NIC syntax the spike found refused still
+has not had its own pass — a VM is created on the node's default bridge and
+nothing here configures networking beyond that.
 
 ## Phase 2, done (2026-08-11)
 

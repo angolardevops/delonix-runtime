@@ -350,6 +350,11 @@ fn run() -> Result<()> {
         Err(e) => e.exit(),
     };
     let _ = cli.l18n; // already consumed by the peek (kept in the schema for the help)
+                      // A remote VM backend has to be in the registry BEFORE the engine is
+                      // asked for one: `create_with` resolves the backend itself and never
+                      // receives a target. Free when unconfigured, and it does no I/O even
+                      // when it is — the node is contacted on first use (ADR-0008).
+    cmd::vmbackends::register_configured();
     match cli.cmd {
         Cmd::Container { action } => cmd::container::run(action),
         Cmd::Pod { action } => cmd::pod::run(action),
