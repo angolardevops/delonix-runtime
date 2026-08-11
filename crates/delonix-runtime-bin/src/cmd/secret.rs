@@ -238,9 +238,15 @@ pub fn spec_with_defaults(doc: &ManifestDoc) -> Result<serde_yaml::Value> {
             Some(fe) => {
                 let mut m = serde_yaml::Mapping::new();
                 for (key, var) in fe.pairs() {
+                    // The variable NAME, verbatim — no `$` prefix. A decorated
+                    // `$VAR` is not idempotent: the round-trip test feeds a
+                    // dry-run's output back through the same code, and the
+                    // second pass produced `$$VAR`. A `--dry-run` that does not
+                    // describe what will be applied is worse than none, and the
+                    // field is already called `fromEnv`.
                     m.insert(
                         serde_yaml::Value::from(key),
-                        serde_yaml::Value::from(format!("${var}")),
+                        serde_yaml::Value::from(var),
                     );
                 }
                 serde_yaml::Value::Mapping(m)
