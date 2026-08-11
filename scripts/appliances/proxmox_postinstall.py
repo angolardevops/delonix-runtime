@@ -38,6 +38,39 @@ PASSWORD = sys.argv[2]
 # over an already-fixed image is a no-op rather than a second bridge.
 SCRIPT = r"""
 set -e
+
+# A DHCP CLIENT HAS TO EXIST BEFORE `inet dhcp` MEANS ANYTHING.
+#
+# Measured on a corrected PBS image that came up with no IPv4 at all: the
+# installer configures a static address and never installs one, so
+# `iface vmbr0 inet dhcp` produced
+#
+#   error: vmbr0: cmd '/sbin/dhclient …' failed
+#          ([Errno 2] No such file or directory: '/sbin/dhclient')
+#
+# …while `networking.service` still reported `Finished`. A silent failure of
+# exactly the kind this repo refuses: the service says it is fine, the guest has
+# no address, and nothing anywhere says why. PVE ships the client (it is a
+# hypervisor); PBS, PMG and PDM do not.
+#
+# This runs while the OLD static address is still valid — the build environment
+# is where it works — so there is network to install from, and it is the only
+# window in which there is.
+if ! command -v dhclient >/dev/null 2>&1; then
+  echo "DLX: no DHCP client — installing"
+  export DEBIAN_FRONTEND=noninteractive
+  apt-get update -qq >/dev/null 2>&1 || true
+  apt-get install -y -qq isc-dhcp-client >/dev/null 2>&1 || true
+fi
+# Fail CLOSED. Writing `inet dhcp` into a guest with no client produces an image
+# that boots and never reaches the network — worse than a build that stops here,
+# because the defect only shows up on somebody else's machine.
+command -v dhclient >/dev/null 2>&1 || {
+  echo "DLX: FATAL: no DHCP client and it could not be installed"
+  exit 1
+}
+echo "DLX: dhcp client at $(command -v dhclient)"
+
 IFACE=$(ls /sys/class/net | grep -vE '^(lo|vmbr|tap|fwbr|fwln|fwpr|veth|docker|bonding_masters)$' | head -1)
 echo "DLX: physical nic is $IFACE"
 
