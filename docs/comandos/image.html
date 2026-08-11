@@ -254,6 +254,7 @@ SEE ALSO:
 Commands:
   pull       Fetch a VM image from an OCI registry (single-blob artifact) — with no argument, the OFFICIAL Delonix image
   push       Publish a local VM image to an OCI registry
+  rm         Remove a local VM image (its disk and its metadata)
   build      Build a VM image: the built-in golden recipe, or your own `VMfile`
   import     Register an existing disk image under a name, so `vm create --disk &lt;name&gt;` and `image vm push` can use it
   init       Scaffold a `VMfile` (and a cloud-init) for building your own image
@@ -271,7 +272,7 @@ Options:
           Print help (see a summary with &#x27;-h&#x27;)
 
 COMMAND MAP:
-  Lifecycle    pull · push
+  Lifecycle    rm · pull · push
   Create       import · init · build
   Inspect      ls · describe · ls-remote
   Maintenance  convert
