@@ -157,10 +157,32 @@ work. <code>--watch</code> redraws every 2s.</p>
 <div class='help'><pre><code>Usage: delonix net flow [OPTIONS]
 
 Options:
-      --iface &lt;IFACE&gt;  Watch only this interface (default: auto — every SDN veth)
-      --l18n &lt;en|pt&gt;   Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-  -w, --watch          Refresh continuously (every 2s) instead of printing once
-  -h, --help           Print help</code></pre></div>
+      --iface &lt;IFACE&gt;
+          Watch only this interface (default: auto — every SDN veth)
+
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+  -w, --watch
+          Refresh continuously (every 2s) instead of printing once
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+EXAMPLES:
+  # per-container RX/TX right now
+  delonix net flow
+
+  # keep it on screen, redrawn every 2s
+  delonix net flow -w
+
+  # one veth only, when you already know which container you are chasing
+  delonix net flow --iface vh3f2a91c4
+
+SEE ALSO:
+  delonix container stats · delonix net ingress ls · delonix net netns status
+
+  delonix › net › flow</code></pre></div>
 <h2><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h2><div class="ex"><div class='cap lang-pt'>Uma amostra</div><div class='cap lang-en'>One sample</div><pre><code>sudo delonix net flow</code></pre></div><div class="ex"><div class='cap lang-pt'>Monitorização contínua</div><div class='cap lang-en'>Continuous monitoring</div><pre><code>sudo delonix net flow --watch</code></pre></div>
 <h2><span class='lang-pt'>Laboratório</span><span class='lang-en'>Lab</span></h2>
 <div class='callout lang-pt'><p>Observa tráfego por-container ao vivo enquanto geras carga noutro

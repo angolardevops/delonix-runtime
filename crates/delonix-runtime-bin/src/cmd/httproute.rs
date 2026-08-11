@@ -29,7 +29,7 @@ pub enum HttpRouteCmd {
     /// Apply the HTTPRoutes of a manifest (brings up/reloads the proxy).
     Apply {
         /// Manifest file (default `./delonix-manifest.yaml`).
-        #[arg(short, long)]
+        #[arg(value_hint = clap::ValueHint::FilePath, short, long)]
         file: Option<std::path::PathBuf>,
     },
     /// Stop the proxy and unpublish the ports (teardown).

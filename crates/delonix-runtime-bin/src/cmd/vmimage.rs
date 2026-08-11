@@ -300,9 +300,13 @@ pub enum VmImageCmd {
         output: output::OutputFormat,
     },
     /// Human-readable detail of one or more VM images, `kubectl describe` style.
-    Describe { names: Vec<String> },
+    Describe {
+        #[arg(add = clap_complete::engine::ArgValueCandidates::new(super::complete::vm_images))]
+        names: Vec<String>,
+    },
     /// Publish a local VM image to an OCI registry (single-blob artifact).
     Push {
+        #[arg(add = clap_complete::engine::ArgValueCandidates::new(super::complete::vm_images))]
         name: String,
         /// Destination. Omit it for an OFFICIAL repository: which one is
         /// decided by what the image says about itself (an appliance goes to
@@ -316,12 +320,13 @@ pub enum VmImageCmd {
     /// pair of formats; there is no separate "per-hypervisor" format here).
     Convert {
         /// A local VM image name (`image vm ls`) or a literal `.qcow2`/`.raw` path.
+        #[arg(add = clap_complete::engine::ArgValueCandidates::new(super::complete::vm_images))]
         source: String,
         /// Target format.
         #[arg(long = "to", value_enum)]
         to: ConvertFormat,
         /// Destination file (default: alongside the source, with the new extension).
-        #[arg(short = 'o', long = "output")]
+        #[arg(value_hint = clap::ValueHint::FilePath, short = 'o', long = "output")]
         output: Option<PathBuf>,
         /// Compress the output. Only `qcow2` and `vmdk` can — refused for the
         /// others rather than handed to `qemu-img` to fail on.
@@ -366,7 +371,7 @@ pub enum VmImageCmd {
         #[arg(default_value = "myimage")]
         name: String,
         /// Where to write it (default: the current directory).
-        #[arg(short = 'd', long)]
+        #[arg(value_hint = clap::ValueHint::DirPath, short = 'd', long)]
         dir: Option<PathBuf>,
         /// Overwrite an existing `VMfile`.
         #[arg(long)]
@@ -386,10 +391,10 @@ pub enum VmImageCmd {
         /// recipe and are REFUSED with a VMfile, which describes all of that
         /// itself; accepting and ignoring them is the failure this repo names
         /// as its worst.
-        #[arg(short = 'f', long = "file")]
+        #[arg(value_hint = clap::ValueHint::FilePath, short = 'f', long = "file")]
         file: Option<PathBuf>,
         /// Build context — the directory `COPY` reads from (default: `.`).
-        #[arg(default_value = ".")]
+        #[arg(value_hint = clap::ValueHint::DirPath, default_value = ".")]
         context: PathBuf,
         /// Base distro for the cloud image.
         #[arg(long, value_enum, default_value = "ubuntu")]
@@ -422,7 +427,7 @@ pub enum VmImageCmd {
         /// Explicit path of the `delonix-cri` binary to install (otherwise:
         /// looks next to the current `delonix`, then tries to build from the
         /// workspace if a `Cargo.toml` is detected from the cwd).
-        #[arg(long)]
+        #[arg(value_hint = clap::ValueHint::FilePath, long)]
         cri_bin: Option<PathBuf>,
         /// Do not compress the final qcow2 (larger, but no decompression cost
         /// on backing-file reads at runtime).
@@ -446,7 +451,7 @@ pub enum VmImageCmd {
         /// Explicit path of the `delonix` binary to install when `--no-k8s`
         /// (otherwise: the currently running `delonix`, then a workspace
         /// build, then a verified download from the matching release).
-        #[arg(long)]
+        #[arg(value_hint = clap::ValueHint::FilePath, long)]
         delonix_bin: Option<PathBuf>,
     },
 }
@@ -1083,6 +1088,7 @@ pub(crate) fn cmd_push(store: &VmImageStore, name: &str, target: Option<&str>) -
 #[derive(clap::Args, Clone, Debug)]
 pub struct ImportArgs {
     /// Path to a `.qcow2` (or any format `qemu-img` reads — it is converted).
+    #[arg(value_hint = clap::ValueHint::FilePath)]
     pub source: PathBuf,
     /// Name to register it under (`image vm ls`).
     #[arg(short = 't', long = "tag")]

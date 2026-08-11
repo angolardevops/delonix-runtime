@@ -35,7 +35,7 @@ pub enum SecretCmd {
         #[arg(long = "from-literal")]
         from_literal: Vec<String>,
         /// Load `KEY=value` lines from a file (e.g. `.env`), or `-` to read them from stdin (the value never touches argv/process list).
-        #[arg(long = "from-env-file")]
+        #[arg(value_hint = clap::ValueHint::FilePath, long = "from-env-file")]
         from_env_file: Option<PathBuf>,
     },
     /// List the secrets (name + number of keys; values NEVER shown).
@@ -75,10 +75,12 @@ pub enum SecretCmd {
     /// Rotate the host master key: re-encrypt ALL secrets with a new key.
     /// The values are preserved.
     RotateKey,
-    /// Apply the `kind: Secret` documents from a manifest (declarative — creates
-    /// the secret without needing `secret create` on the CLI).
+    /// Apply the `kind: Secret` documents from a manifest.
+    ///
+    /// Declarative — creates the secret without needing `secret create` on the
+    /// CLI.
     Apply {
-        #[arg(short = 'f', long = "file")]
+        #[arg(value_hint = clap::ValueHint::FilePath, short = 'f', long = "file")]
         file: Option<PathBuf>,
     },
 }

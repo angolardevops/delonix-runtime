@@ -1263,17 +1263,19 @@ pub enum ContainerCmd {
         #[arg(long)]
         json: bool,
     },
-    /// Initialize a project with a Delonixfile + manifest — files ALREADY FILLED IN (images
-    /// included), ready to use without editing anything.
+    /// Initialize a project with a Delonixfile + manifest.
+    ///
+    /// Files ALREADY FILLED IN (images included), ready to use without editing
+    /// anything.
     Init {
         /// Project directory (default: the current one).
-        #[arg(default_value = ".")]
+        #[arg(value_hint = clap::ValueHint::DirPath, default_value = ".")]
         dir: PathBuf,
         /// Project name (default: the directory name).
         #[arg(long)]
         name: Option<String>,
         /// Image to use. Omit = fill in with the default image.
-        #[arg(long)]
+        #[arg(long, add = ArgValueCandidates::new(super::complete::images))]
         image: Option<String>,
         /// Overwrite existing files.
         #[arg(long)]
@@ -1309,7 +1311,7 @@ pub enum ContainerCmd {
         /// Logical ISOLATION namespace (default `default`). Containers in different
         /// namespaces cannot reach each other (even on the same network); only a
         /// `kind: Dependency` crosses the boundary.
-        #[arg(long)]
+        #[arg(long, add = ArgValueCandidates::new(super::complete::namespaces))]
         namespace: Option<String>,
         /// Auto-register this container's HTTP port in the L7 proxy under its internal
         /// FQDN `<name>.<namespace>.delonix.internal` (reachable via the proxy). Needs
@@ -1432,7 +1434,7 @@ pub enum ContainerCmd {
         // ---- secrets & env ----
         /// Inject a secret from the vault (`name`), as an environment variable.
         /// Repeatable. With `--secret-files`, it goes to `/run/secrets/<name>`.
-        #[arg(long)]
+        #[arg(long, add = ArgValueCandidates::new(super::complete::secrets))]
         secret: Vec<String>,
         /// The `--secret`s come in as files in `/run/secrets/` (tmpfs), not env.
         #[arg(long = "secret-files")]
@@ -1521,13 +1523,13 @@ pub enum ContainerCmd {
         #[arg(long = "health-start-period", default_value_t = 0)]
         health_start_period: u64,
         /// Restrict DNS resolution to these containers (isolation). Repeatable.
-        #[arg(long)]
+        #[arg(long, add = ArgValueCandidates::new(super::complete::containers))]
         knows: Vec<String>,
         /// The container resolves NO other container by name.
         #[arg(long = "knows-none")]
         knows_none: bool,
         /// Join a pod's netns (`--net <network>`), sharing IP/ports.
-        #[arg(long)]
+        #[arg(long, add = ArgValueCandidates::new(super::complete::pods))]
         pod: Option<String>,
         /// (internal) init PID of the pod's infra container — join its IPC/UTS
         /// namespaces (shared pod IPC + hostname). Set by `delonix pod`.
@@ -1570,9 +1572,11 @@ pub enum ContainerCmd {
         #[arg(short = 'o', long = "output", value_enum, default_value_t)]
         output: super::output::OutputFormat,
     },
-    /// (Re)start stopped/crashed containers, reusing the persistent rootfs
-    /// (writes made inside the container survive, like in docker) and the same
-    /// network/ports/volumes as the original `run`. Always detached.
+    /// (Re)start stopped/crashed containers. Always detached.
+    ///
+    /// Reuses the persistent rootfs (writes made inside the container
+    /// survive, like in docker) and the same network/ports/volumes as the
+    /// original `run`.
     Start {
         #[arg(required = true, add = ArgValueCandidates::new(super::complete::containers))]
         ids: Vec<String>,
@@ -1585,9 +1589,11 @@ pub enum ContainerCmd {
         #[arg(short, long, default_value_t = 10)]
         time: u64,
     },
-    /// Send a signal to one or more containers (default SIGKILL) — unlike
-    /// `stop`, does not wait or force a `Stopped` status: the real outcome
-    /// (e.g. `Crashed` for a `KILL`) is picked up on the next observation.
+    /// Send a signal to one or more containers (default SIGKILL).
+    ///
+    /// Unlike `stop`, does not wait or force a `Stopped` status: the real
+    /// outcome (e.g. `Crashed` for a `KILL`) is picked up on the next
+    /// observation.
     Kill {
         #[arg(required = true, add = ArgValueCandidates::new(super::complete::containers))]
         ids: Vec<String>,
@@ -1602,8 +1608,10 @@ pub enum ContainerCmd {
         #[arg(required = true, add = ArgValueCandidates::new(super::complete::containers))]
         ids: Vec<String>,
     },
-    /// Stop then start one or more containers (reuses the persistent rootfs
-    /// and the original run configuration, like `start`).
+    /// Stop then start one or more containers.
+    ///
+    /// Reuses the persistent rootfs and the original run configuration, like
+    /// `start`.
     Restart {
         #[arg(required = true, add = ArgValueCandidates::new(super::complete::containers))]
         ids: Vec<String>,
@@ -1630,8 +1638,9 @@ pub enum ContainerCmd {
         #[arg(short, long)]
         force: bool,
     },
-    /// Suspend a container's processes (cgroup v2 freezer) — the state stays
-    /// in memory, unlike `stop`. Resume with `unpause`.
+    /// Suspend a container's processes (cgroup v2 freezer).
+    ///
+    /// The state stays in memory, unlike `stop`. Resume with `unpause`.
     Pause {
         #[arg(required = true, add = ArgValueCandidates::new(super::complete::containers))]
         ids: Vec<String>,
@@ -1649,8 +1658,10 @@ pub enum ContainerCmd {
         /// Tag for the new image (e.g. `app:v2`).
         tag: String,
     },
-    /// Interactive shell inside a container (shortcut for `exec -t`): with no
-    /// command, it tries `bash` and falls back to `sh`, which exists in any image.
+    /// Interactive shell inside a container (shortcut for `exec -t`).
+    ///
+    /// With no command, it tries `bash` and falls back to `sh`, which exists
+    /// in any image.
     Ssh {
         #[arg(add = ArgValueCandidates::new(super::complete::containers))]
         id: String,
@@ -1673,8 +1684,10 @@ pub enum ContainerCmd {
         #[arg(add = ArgValueCandidates::new(super::complete::containers))]
         id: String,
     },
-    /// Copy files between the host and a container. Exactly one side is
-    /// `container:/path` (e.g. `delonix container cp web:/etc/nginx.conf .`).
+    /// Copy files between the host and a container.
+    ///
+    /// Exactly one side is `container:/path` (e.g. `delonix container cp
+    /// web:/etc/nginx.conf .`).
     Cp { src: String, dst: String },
     /// Execute a command inside a running container.
     Exec {
@@ -1707,8 +1720,10 @@ pub enum ContainerCmd {
         #[arg(required = true, add = ArgValueCandidates::new(super::complete::containers))]
         ids: Vec<String>,
     },
-    /// Human-readable detail of one or more containers, `kubectl describe`-style
-    /// (for humans; use `inspect` for script-consumable JSON).
+    /// Human-readable detail of one or more containers, `kubectl
+    /// describe`-style.
+    ///
+    /// For humans; use `inspect` for script-consumable JSON.
     Describe {
         #[arg(required = true, add = ArgValueCandidates::new(super::complete::containers))]
         ids: Vec<String>,
@@ -1741,10 +1756,10 @@ pub enum ContainerCmd {
         #[arg(long = "volume-rm", value_name = "TARGET")]
         volume_rm: Vec<String>,
         /// Connect the container to an additional network hot (multi-homing). Repeatable.
-        #[arg(long = "net-connect", value_name = "NETWORK")]
+        #[arg(long = "net-connect", value_name = "NETWORK", add = ArgValueCandidates::new(super::complete::networks))]
         net_connect: Vec<String>,
         /// Disconnect the container from an additional network. Repeatable.
-        #[arg(long = "net-disconnect", value_name = "NETWORK")]
+        #[arg(long = "net-disconnect", value_name = "NETWORK", add = ArgValueCandidates::new(super::complete::networks))]
         net_disconnect: Vec<String>,
         /// Bandwidth cap, in bit/s with a suffix (`10mbit`, `512kbit`, `1gbit`).
         #[arg(long = "net-rate", value_name = "RATE")]
@@ -1762,8 +1777,9 @@ pub enum ContainerCmd {
         #[arg(short = 'c', long)]
         cpus: Option<String>,
     },
-    /// Resource usage (CPU/memory/PIDs) of the running containers — one
-    /// sample and exits (no stream). With no IDs, shows all running ones.
+    /// Resource usage (CPU/memory/PIDs) of the running containers.
+    ///
+    /// One sample and exits (no stream). With no IDs, shows all running ones.
     Stats {
         #[arg(add = ArgValueCandidates::new(super::complete::containers))]
         ids: Vec<String>,
@@ -1792,12 +1808,13 @@ pub enum ContainerCmd {
         #[arg(long)]
         timestamps: bool,
     },
-    /// Re-attach to a running container's output stream (same log file
-    /// `logs -f` reads). Unlike `docker attach`, this is OUTPUT-ONLY: a
-    /// detached container's stdin has nowhere to go (this engine keeps no
-    /// live conduit to it once started, unlike a persistent per-container
-    /// shim) — `-i`/`--stdin` is refused with a clear error instead of
-    /// silently doing nothing.
+    /// Re-attach to a running container's output stream (output only).
+    ///
+    /// Same log file `logs -f` reads. Unlike `docker attach`, this is
+    /// OUTPUT-ONLY: a detached container's stdin has nowhere to go (this
+    /// engine keeps no live conduit to it once started, unlike a persistent
+    /// per-container shim) — `-i`/`--stdin` is refused with a clear error
+    /// instead of silently doing nothing.
     Attach {
         #[arg(add = ArgValueCandidates::new(super::complete::containers))]
         id: String,
@@ -1809,7 +1826,7 @@ pub enum ContainerCmd {
     /// name — an existing container with that name is neither recreated nor
     /// checked for spec drift, see `cmd::manifest`).
     Apply {
-        #[arg(short = 'f', long = "file")]
+        #[arg(value_hint = clap::ValueHint::FilePath, short = 'f', long = "file")]
         file: Option<PathBuf>,
     },
 }

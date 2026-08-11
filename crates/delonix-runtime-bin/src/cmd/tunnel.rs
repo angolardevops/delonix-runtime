@@ -96,7 +96,7 @@ struct TunnelRecord {
 pub enum TunnelCmd {
     /// Apply the `kind: Tunnel` documents of a manifest (idempotent).
     Apply {
-        #[arg(short, long)]
+        #[arg(value_hint = clap::ValueHint::FilePath, short, long)]
         file: Option<PathBuf>,
     },
     /// One-shot expose of a local port, no manifest needed.
@@ -113,15 +113,21 @@ pub enum TunnelCmd {
         hostname: Option<String>,
         #[arg(long)]
         token: Option<String>,
-        #[arg(long = "token-secret")]
+        #[arg(long = "token-secret", add = clap_complete::engine::ArgValueCandidates::new(super::complete::secrets))]
         token_secret: Option<String>,
     },
     /// List tunnels (state + public URL).
     Ls,
     /// Human-readable detail of one tunnel.
-    Describe { name: String },
+    Describe {
+        #[arg(add = clap_complete::engine::ArgValueCandidates::new(super::complete::tunnels))]
+        name: String,
+    },
     /// Stop and remove a tunnel.
-    Rm { name: String },
+    Rm {
+        #[arg(add = clap_complete::engine::ArgValueCandidates::new(super::complete::tunnels))]
+        name: String,
+    },
 }
 
 pub fn run(action: TunnelCmd) -> Result<()> {
@@ -253,6 +259,24 @@ fn tunnels_dir() -> PathBuf {
 
 fn record_store() -> Result<JsonStore<TunnelRecord>> {
     JsonStore::open(tunnels_dir())
+}
+
+/// Tunnel names, for shell autocompletion (`cmd::complete::tunnels`).
+///
+/// Lives here and not in `complete.rs` because `TunnelRecord`/`record_store`
+/// are this module's business; a completer that re-derived the on-disk layout
+/// would be a second place to keep in sync. Never fails — a TAB with no store
+/// yet is "no suggestions", not an error.
+pub(crate) fn completion_names() -> Vec<String> {
+    let Ok(store) = record_store() else {
+        return Vec::new();
+    };
+    store
+        .list()
+        .unwrap_or_default()
+        .into_iter()
+        .map(|r| r.name)
+        .collect()
 }
 
 fn log_path(name: &str) -> PathBuf {

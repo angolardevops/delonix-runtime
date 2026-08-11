@@ -12,7 +12,7 @@ pub enum KubeCmd {
     /// Generates a `kind: Pod` from a container (or from every member of a
     /// pod) and prints it to stdout.
     Generate {
-        #[arg(add = clap_complete::engine::ArgValueCandidates::new(super::complete::containers))]
+        #[arg(add = clap_complete::engine::ArgValueCandidates::new(super::complete::containers_or_pods))]
         name: String,
     },
 }

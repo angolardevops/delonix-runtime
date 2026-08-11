@@ -174,13 +174,41 @@ of generating anyway.</p>
 <div class='help'><pre><code>Usage: delonix init [OPTIONS] [DIR]
 
 Arguments:
-  [DIR]  Project directory (default: the current one)
+  [DIR]
+          Project directory (default: the current one)
 
 Options:
-      --l18n &lt;en|pt&gt;         Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-  -t, --template &lt;TEMPLATE&gt;  Force a template instead of the detected one (`stack init -t list` shows them)
-      --force                Overwrite files that already exist
-  -h, --help                 Print help</code></pre></div>
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+  -t, --template &lt;TEMPLATE&gt;
+          Force a template instead of the detected one (`stack init -t list` shows them)
+
+      --force
+          Overwrite files that already exist
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+EXAMPLES:
+  # look at this directory and start the right project for it, saying what it
+  # detected and why
+  delonix init
+
+  # a directory other than the current one
+  delonix init ./myapp
+
+  # override the guess when the detection picked the broader rule
+  delonix init -t go
+
+  # regenerate on top of files that already exist
+  delonix init --force
+
+SEE ALSO:
+  delonix stack init · delonix vm init · delonix stack apply · delonix compose
+  up
+
+  delonix › init</code></pre></div>
 <h2><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h2><div class="ex"><div class="cap">Detecta e gera — a saída diz sempre qual foi a prova</div><pre><code>delonix init</code></pre><div class="out"><pre><code>detected go.mod → stack init --template go
   created: ./Delonixfile
   created: ./delonix-manifest.yaml

@@ -57,7 +57,7 @@ pub enum StorageCmd {
         #[arg(long)]
         password: Option<String>,
         /// Vault secret with the `password` key (cifs/webdav) — does not leak in shell history.
-        #[arg(long = "password-secret")]
+        #[arg(long = "password-secret", add = clap_complete::engine::ArgValueCandidates::new(super::complete::secrets))]
         password_secret: Option<String>,
         /// Mount read-only.
         #[arg(long = "read-only")]
@@ -74,18 +74,18 @@ pub enum StorageCmd {
     },
     /// Details of a storage.
     Inspect {
-        #[arg(add = clap_complete::engine::ArgValueCandidates::new(super::complete::volumes))]
+        #[arg(add = clap_complete::engine::ArgValueCandidates::new(super::complete::storages))]
         name: String,
     },
     /// Remove (and unmount) a storage. The DATA stays on the NAS — only the
     /// local mount is torn down, like docker.
     Rm {
-        #[arg(add = clap_complete::engine::ArgValueCandidates::new(super::complete::volumes))]
+        #[arg(add = clap_complete::engine::ArgValueCandidates::new(super::complete::storages))]
         name: String,
     },
     /// Apply the `kind: Storage` documents from a manifest.
     Apply {
-        #[arg(short = 'f', long = "file")]
+        #[arg(value_hint = clap::ValueHint::FilePath, short = 'f', long = "file")]
         file: Option<PathBuf>,
     },
 }

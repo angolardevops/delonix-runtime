@@ -158,23 +158,64 @@ lowers to the matching Kind in <code>manifest::load</code>; see
 <div class='help'><pre><code>Usage: delonix workload [OPTIONS] &lt;COMMAND&gt;
 
 Commands:
-  ls        List all workloads — containers AND VMs — in one table (or `-o json`)
-  describe  Describe a workload by name (routed to the owning backend, kubectl-style)
-  stop      Stop a workload by name (routed to the owning backend)
   rm        Remove a workload by name
+  stop      Stop a workload by name (routed to the owning backend)
+  describe  Describe a workload by name (routed to the owning backend, kubectl-style)
+  ls        List all workloads — containers AND VMs — in one table (or `-o json`)
   help      Print this message or the help of the given subcommand(s)
 
 Options:
-      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-  -h, --help          Print help</code></pre></div>
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+COMMAND MAP:
+  Lifecycle  stop · rm
+  Inspect    ls · describe
+
+EXAMPLES:
+  # containers AND VMs in one table, so you stop guessing which group owns
+  # what
+  delonix workload ls
+
+  # stop something by name — routed to whichever backend owns it
+  delonix workload stop web
+
+SEE ALSO:
+  delonix workload ls · delonix container ps · delonix vm ls · delonix stack
+  apply
+
+  delonix › workload</code></pre></div>
 <h2 id='ls'><code>workload ls</code></h2>
 <p class='intro'>List all workloads — containers AND VMs — in one table (or <code>-o json</code>)</p>
 <div class='help'><pre><code>Usage: delonix workload ls [OPTIONS]
 
 Options:
-      --l18n &lt;en|pt&gt;     Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-  -o, --output &lt;OUTPUT&gt;  Output format: `table` (default, human) or `json` (machine, stable field names — see ADR-0005). `-o json | jq` is the automation path [default: table] [possible values: table, json]
-  -h, --help             Print help</code></pre></div>
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+  -o, --output &lt;OUTPUT&gt;
+          Output format: `table` (default, human) or `json` (machine, stable field names — see ADR-0005). `-o json | jq` is the automation path
+          
+          [default: table]
+          [possible values: table, json]
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+EXAMPLES:
+  # every workload of the node — containers and VMs — in a single table
+  delonix workload ls
+
+  # as JSON, with stable field names, for automation
+  delonix workload ls -o json
+
+SEE ALSO:
+  delonix workload describe · delonix container ps · delonix vm ls
+
+  delonix › workload › ls</code></pre></div>
 <div class='lang-pt'><p><strong>Routing por nome exacto</strong>, fail-closed: um nome inexistente dá
 <code>no such workload</code>; um container E uma vm com o mesmo nome dão <code>ambiguous</code> (aponta
 para o comando específico, nunca adivinha).</p></div><div class='lang-en'><p><strong>Exact-name routing</strong>, fail-closed: a name that
@@ -186,34 +227,79 @@ doesn't exist gives <code>no such workload</code>; a container AND a vm with the
 <div class='help'><pre><code>Usage: delonix workload describe [OPTIONS] &lt;NAME&gt;
 
 Arguments:
-  &lt;NAME&gt;  Workload name
+  &lt;NAME&gt;
+          Workload name
 
 Options:
-      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-  -h, --help          Print help</code></pre></div>
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+EXAMPLES:
+  # the details of a workload, routed to the backend that owns the name
+  delonix workload describe web
+
+SEE ALSO:
+  delonix workload ls · delonix container describe · delonix vm describe
+
+  delonix › workload › describe</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Detalhe do workload, com routing automático para o motor certo</div><div class='cap lang-en'>Workload detail, auto-routed to the right engine</div><pre><code>delonix workload describe web</code></pre></div>
 <h2 id='stop'><code>workload stop</code></h2>
 <p class='intro'>Stop a workload by name (routed to the owning backend)</p>
 <div class='help'><pre><code>Usage: delonix workload stop [OPTIONS] &lt;NAME&gt;
 
 Arguments:
-  &lt;NAME&gt;  Workload name
+  &lt;NAME&gt;
+          Workload name
 
 Options:
-      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-  -h, --help          Print help</code></pre></div>
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+EXAMPLES:
+  # stop by exact name, container or VM — a name owned by both is refused,
+  # never guessed
+  delonix workload stop web
+
+SEE ALSO:
+  delonix workload rm · delonix workload ls · delonix container stop
+
+  delonix › workload › stop</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Parar por nome, seja container ou vm</div><div class='cap lang-en'>Stop by name, whether container or vm</div><pre><code>delonix workload stop web</code></pre></div>
 <h2 id='rm'><code>workload rm</code></h2>
 <p class='intro'>Remove a workload by name</p>
 <div class='help'><pre><code>Usage: delonix workload rm [OPTIONS] &lt;NAME&gt;
 
 Arguments:
-  &lt;NAME&gt;  Workload name
+  &lt;NAME&gt;
+          Workload name
 
 Options:
-  -f, --force         Force removal even if running / if backend cleanup refuses
-      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-  -h, --help          Print help</code></pre></div>
+  -f, --force
+          Force removal even if running / if backend cleanup refuses
+
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+EXAMPLES:
+  # remove a workload by name, whichever backend holds it
+  delonix workload rm web
+
+  # force it even if it is still running or the backend cleanup refuses
+  delonix workload rm -f web
+
+SEE ALSO:
+  delonix workload stop · delonix workload ls · delonix container rm
+
+  delonix › workload › rm</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Remover por nome</div><div class='cap lang-en'>Remove by name</div><pre><code>delonix workload rm -f web</code></pre></div>
 <h2><span class='lang-pt'>Laboratório</span><span class='lang-en'>Lab</span></h2>
 <div class='callout lang-pt'><p>Cria um container normal e observa-o pela lente unificada — o mesmo

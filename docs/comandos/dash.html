@@ -175,10 +175,33 @@ every 30s, so the scrape itself always stays fast.</p>
 <div class='help'><pre><code>Usage: delonix dash [OPTIONS]
 
 Options:
-      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-      --once          Print ONE text snapshot and exit (no TUI) — for scripts/CI; the default when stdout is not a terminal
-      --json          Print ONE snapshot as JSON and exit (no TUI, no ANSI) — for scripts/Grafana JSON datasource
-  -h, --help          Print help</code></pre></div>
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+      --once
+          Print ONE text snapshot and exit (no TUI) — for scripts/CI; the default when stdout is not a terminal
+
+      --json
+          Print ONE snapshot as JSON and exit (no TUI, no ANSI) — for scripts/Grafana JSON datasource
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+EXAMPLES:
+  # an htop-style live view of containers, VMs, networks and volumes
+  delonix dash
+
+  # one text snapshot and exit — the default when stdout is not a terminal
+  delonix dash --once
+
+  # one JSON snapshot, for a script or a Grafana JSON datasource
+  delonix dash --json
+
+SEE ALSO:
+  delonix container dash · delonix vm dash · delonix system info · delonix
+  serve api
+
+  delonix › dash</code></pre></div>
 <h2><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h2><div class="ex"><div class='cap lang-pt'>TUI interactiva</div><div class='cap lang-en'>Interactive TUI</div><pre><code>delonix dash</code></pre></div><div class="ex"><div class='cap lang-pt'>Snapshot único, para um script</div><div class='cap lang-en'>One-off snapshot, for a script</div><pre><code>delonix dash --once</code></pre></div><div class="ex"><div class='cap lang-pt'>JSON, para um datasource ou pipeline</div><div class='cap lang-en'>JSON, for a datasource or pipeline</div><pre><code>delonix dash --json | jq &#x27;.tiles&#x27;</code></pre></div>
 <h2><span class='lang-pt'>Laboratório</span><span class='lang-en'>Lab</span></h2>
 <div class='callout lang-pt'><p>Um ecrã só, sem correr <code>ls</code> em 5 grupos diferentes.</p>

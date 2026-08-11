@@ -311,16 +311,19 @@ pub enum WorkloadCmd {
     /// Describe a workload by name (routed to the owning backend, kubectl-style).
     Describe {
         /// Workload name.
+        #[arg(add = clap_complete::engine::ArgValueCandidates::new(super::complete::workloads))]
         name: String,
     },
     /// Stop a workload by name (routed to the owning backend).
     Stop {
         /// Workload name.
+        #[arg(add = clap_complete::engine::ArgValueCandidates::new(super::complete::workloads))]
         name: String,
     },
     /// Remove a workload by name.
     Rm {
         /// Workload name.
+        #[arg(add = clap_complete::engine::ArgValueCandidates::new(super::complete::workloads))]
         name: String,
         /// Force removal even if running / if backend cleanup refuses.
         #[arg(short, long)]

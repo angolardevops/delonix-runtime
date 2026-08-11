@@ -156,66 +156,141 @@ on.</p>
 <div class='help'><pre><code>Usage: delonix image [OPTIONS] &lt;COMMAND&gt;
 
 Commands:
-  dash       Dashboard (KPIs + table) of images — interactive TUI, or `--once` snapshot
   pull       Pull an image from a registry. With `--vm`, no argument = the OFFICIAL Delonix golden VM image
-  ls-remote  (only with `--vm`) List the tags available in a remote OCI repository — with no argument, the OFFICIAL Delonix golden image repo
-  ls         List local images
-  describe   Human-readable detail of one or more images, `kubectl describe`-style (tags/digest/size/layers + the OCI config: entrypoint/cmd/env/workdir). With `--vm`, describes golden VM images
-  tag        Give another name/tag to a local image (copies nothing — it&#x27;s just a new name for the same content)
-  history    Layers of an image (digest + size), from base to top
-  verify     Verify the cosign signature of a local image against a public key
-  scan       SBOM + CVE scan of an image (reads the layers from the CAS, without running anything). Pulls the image if missing. See `--sbom`, `--fail-on`, `--update`
+  push       Publish a local image to an OCI registry. Without `target`, publishes under the image&#x27;s own reference. With `--vm`, `target` is required
   rm         Remove a local image
-  export     Export an OCI runtime bundle (rootfs + config.json) for `runc`/`crun`
-  save       Save an image to a portable archive (`docker save`&#x27;s counterpart) — the way to move an image to another machine with no registry. The archive is an OCI layout WITH the legacy `manifest.json`, so `delonix image load`, `docker load`, `podman load` and `ctr images import` all read it
-  load       Load an image from an archive produced by `delonix image save`, `docker save` or `podman save` (the counterpart of `save`)
-  apply      Apply the `kind: Image` documents of a manifest (`pull` idempotent by reference; `build` rebuilds and replaces the tag on each apply)
+  describe   Human-readable detail of one or more images, `kubectl describe`-style (tags/digest/size/layers + the OCI config: entrypoint/cmd/env/workdir). With `--vm`, describes golden VM images
+  history    Layers of an image (digest + size), from base to top
+  ls         List local images
+  scan       SBOM + CVE scan of an image (reads the layers from the CAS, without running anything). Pulls the image if missing. See `--sbom`, `--fail-on`, `--update`
+  verify     Verify the cosign signature of a local image against a public key
   login      Authenticate to an OCI registry (stores the credentials in `&lt;root&gt;/auth.json`, docker/podman format). The password ALWAYS comes from stdin — never from an argument (it would end up in the shell history and in /proc)
   logout     Remove the stored credentials of a registry
-  vm         Golden VM images (`&lt;root&gt;/vm-images/`): ls/pull/push/build. Equivalent to `image --vm &lt;cmd&gt;` (old form, kept)
-  push       Publish a local image to an OCI registry. Without `target`, publishes under the image&#x27;s own reference. With `--vm`, `target` is required
-  import     (only with `--vm`) Register an existing disk image under a name
-  convert    (only with `--vm`) Convert a VM disk to the format another ecosystem imports — `qcow2`, `raw`, `vmdk`, `vdi`, `vhdx`, `vhd`
-  init       (only with `--vm`) Build the golden VM image (Ubuntu + kubeadm/kubelet/ kubectl + `delonix-cri`). Scaffold a `VMfile` (and a cloud-init) for building your own image
+  tag        Give another name/tag to a local image (copies nothing — it&#x27;s just a new name for the same content)
+  export     Export an OCI runtime bundle (rootfs + config.json) for `runc`/`crun`
+  load       Load an image from an archive produced by `delonix image save`, `docker save` or `podman save` (the counterpart of `save`)
+  save       Save an image to a portable archive (`docker save`&#x27;s counterpart) — the way to move an image to another machine with no registry. The archive is an OCI layout WITH the legacy `manifest.json`, so `delonix image load`, `docker load`, `podman load` and `ctr images import` all read it
+  apply      Apply the `kind: Image` documents of a manifest (`pull` idempotent by reference; `build` rebuilds and replaces the tag on each apply)
+  dash       Dashboard (KPIs + table) of images — interactive TUI, or `--once` snapshot
   build      (only with `--vm`) Build a VM image: the built-in golden recipe (Ubuntu + kubeadm/kubelet/kubectl + `delonix-cri`), or a `VMfile` of your own with `-f`
+  convert    (only with `--vm`) Convert a VM disk to the format another ecosystem imports — `qcow2`, `raw`, `vmdk`, `vdi`, `vhdx`, `vhd`
+  import     (only with `--vm`) Register an existing disk image under a name
+  init       (only with `--vm`) Build the golden VM image (Ubuntu + kubeadm/kubelet/ kubectl + `delonix-cri`). Scaffold a `VMfile` (and a cloud-init) for building your own image
+  ls-remote  (only with `--vm`) List the tags available in a remote OCI repository — with no argument, the OFFICIAL Delonix golden image repo
+  vm         Golden VM images (`&lt;root&gt;/vm-images/`): ls/pull/push/build. Equivalent to `image --vm &lt;cmd&gt;` (old form, kept)
   help       Print this message or the help of the given subcommand(s)
 
 Options:
-      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-      --vm            Operate on VM images (`&lt;root&gt;/vm-images/`) instead of container images — enables the `push`/`build` subcommands
-  -h, --help          Print help</code></pre></div>
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+      --vm
+          Operate on VM images (`&lt;root&gt;/vm-images/`) instead of container images — enables the `push`/`build` subcommands
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+COMMAND MAP:
+  Lifecycle    pull · rm · push
+  Inspect      ls · describe · history · verify · scan
+  Configure    tag · login · logout
+  Storage      export · save · load
+  Declarative  apply
+  Dashboards   dash
+  Advanced     ls-remote · vm · import · convert · init · build
+
+EXAMPLES:
+  # fetch an image from a registry
+  delonix image pull postgres:16
+
+  # what is on disk, and how much of it
+  delonix image ls
+
+  # golden VM images live in a store of their own, next to the container ones
+  delonix image vm ls
+
+SEE ALSO:
+  delonix build · delonix container run · delonix image vm · delonix image
+  scan
+
+  delonix › image</code></pre></div>
 <h2 id='init'><code>image init</code></h2>
 <p class='intro'>(only with <code>--vm</code>) Build the golden VM image (Ubuntu + kubeadm/kubelet/ kubectl + <code>delonix-cri</code>). Scaffold a <code>VMfile</code> (and a cloud-init) for building your own image</p>
 <div class='help'><pre><code>Usage: delonix image init [OPTIONS] [NAME]
 
 Arguments:
-  [NAME]  Name to use in the scaffold (image tag, hostname, account) [default: myimage]
+  [NAME]
+          Name to use in the scaffold (image tag, hostname, account)
+          
+          [default: myimage]
 
 Options:
-  -d, --dir &lt;DIR&gt;     Where to write it (default: the current directory)
-      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-      --force         Overwrite an existing `VMfile`
-  -h, --help          Print help</code></pre></div>
+  -d, --dir &lt;DIR&gt;
+          Where to write it (default: the current directory)
+
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+      --force
+          Overwrite an existing `VMfile`
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+EXAMPLES:
+  # the same as `image vm init` — this spelling needs the group&#x27;s `--vm` flag
+  delonix image --vm init myimage
+
+SEE ALSO:
+  delonix image vm init · delonix vm init · delonix image vm build
+
+  delonix › image › init</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Scaffold de um VMfile (equivalente a vm init --vmfile)</div><div class='cap lang-en'>Scaffold a VMfile (equivalent to vm init --vmfile)</div><pre><code>delonix image --vm init minha-base</code></pre></div>
 <h2 id='vm'><code>image vm</code></h2>
 <p class='intro'>Golden VM images (<code>&lt;root&gt;/vm-images/</code>): ls/pull/push/build. Equivalent to <code>image --vm &lt;cmd&gt;</code> (old form, kept)</p>
 <div class='help'><pre><code>Usage: delonix image vm [OPTIONS] &lt;COMMAND&gt;
 
 Commands:
-  ls         List the local VM images
-  describe   Human-readable detail of one or more VM images, `kubectl describe`-style
   pull       Fetch a VM image from an OCI registry (single-blob artifact) — with no argument, the OFFICIAL Delonix image
-  ls-remote  List the tags available in a remote OCI repository — with no argument, the OFFICIAL Delonix golden image repo (discover which k8s versions are published before `pull`/`--k8s-version`)
   push       Publish a local VM image to an OCI registry. Omit the destination to publish to the OFFICIAL repository the image belongs in
-  import     Register an existing disk image under a name, so `vm create --disk &lt;name&gt;` and `image vm push` can use it
-  convert    Convert a VM disk to the format another ecosystem imports — `qcow2`, `raw`, `vmdk` (VMware), `vdi` (VirtualBox), `vhdx`/`vhd` (Hyper-V, Azure). Flattened either way: the result is a standalone file
-  init       Build the golden VM image (Ubuntu + kubeadm/kubelet/kubectl + `delonix-cri`). Scaffold a `VMfile` (and a cloud-init) for building your own image
   build      Build a VM image: the built-in golden recipe (Ubuntu + kubeadm/kubelet/kubectl + `delonix-cri`), or a `VMfile` of your own with `-f`
+  import     Register an existing disk image under a name, so `vm create --disk &lt;name&gt;` and `image vm push` can use it
+  init       Build the golden VM image (Ubuntu + kubeadm/kubelet/kubectl + `delonix-cri`). Scaffold a `VMfile` (and a cloud-init) for building your own image
+  describe   Human-readable detail of one or more VM images, `kubectl describe`-style
+  ls         List the local VM images
+  ls-remote  List the tags available in a remote OCI repository — with no argument, the OFFICIAL Delonix golden image repo (discover which k8s versions are published before `pull`/`--k8s-version`)
+  convert    Convert a VM disk to the format another ecosystem imports — `qcow2`, `raw`, `vmdk` (VMware), `vdi` (VirtualBox), `vhdx`/`vhd` (Hyper-V, Azure). Flattened either way: the result is a standalone file
   help       Print this message or the help of the given subcommand(s)
 
 Options:
-      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-  -h, --help          Print help</code></pre></div>
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+COMMAND MAP:
+  Lifecycle    pull · push
+  Create       import · init · build
+  Inspect      ls · describe · ls-remote
+  Maintenance  convert
+
+EXAMPLES:
+  # what golden images this node already has
+  delonix image vm ls
+
+  # fetch the official Kubernetes golden — the destination is known, so no
+  # argument is needed
+  delonix image vm pull
+
+  # build one of your own from a `VMfile`
+  delonix image vm build -f VMfile -t myimage:1
+
+SEE ALSO:
+  delonix vm create · delonix image · delonix cluster kubeadm · delonix vm
+  build
+
+  delonix › image › vm</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>O mesmo grupo de imagens VM, por outro caminho</div><div class='cap lang-en'>The same VM image group, via another path</div><pre><code>delonix image vm ls</code></pre></div><div class="ex"><div class='cap lang-pt'>Registar um disco que NÃO foi construído aqui — o único ponto de entrada para `import`, que não tem forma `delonix vm …`</div><div class='cap lang-en'>Register a disk this engine did NOT build — the only entry point for `import`, which has no `delonix vm …` spelling</div><pre><code>delonix image vm import ./OPNsense-26.1.2.qcow2 -t opnsense:26.1.2 \
   --appliance --distro opnsense --release 26.1.2 \
   --default-vcpus 2 --default-memory 2G</code></pre></div><div class="ex"><div class='cap lang-pt'>`--appliance` diz que o convidado se configura sozinho (OPNsense, Proxmox, TrueNAS) — o `vm create` salta o seed NoCloud em vez de lhe colar um ISO que ninguém lá dentro lê, e RECUSA `--hostname`/`--ssh-key` a nomeá-los, em vez de os aceitar e deitar fora</div><div class='cap lang-en'>`--appliance` says the guest configures itself (OPNsense, Proxmox, TrueNAS) — `vm create` then skips the NoCloud seed instead of attaching an ISO nothing inside reads, and REFUSES `--hostname`/`--ssh-key` by name rather than accepting and discarding them</div><pre><code>delonix vm create fw --disk opnsense:26.1.2</code></pre></div>
@@ -224,240 +299,603 @@ Options:
 <div class='help'><pre><code>Usage: delonix image logout [OPTIONS] &lt;REGISTRY&gt;
 
 Arguments:
-  &lt;REGISTRY&gt;  
+  &lt;REGISTRY&gt;
+          
 
 Options:
-      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-  -h, --help          Print help</code></pre></div>
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+EXAMPLES:
+  # drop the stored credentials of a registry
+  delonix image logout ghcr.io
+
+SEE ALSO:
+  delonix image login · delonix image push
+
+  delonix › image › logout</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Esquecer as credenciais desse registo</div><div class='cap lang-en'>Forget that registry&#x27;s credentials</div><pre><code>delonix image logout ghcr.io</code></pre></div>
 <h2 id='login'><code>image login</code></h2>
 <p class='intro'>Authenticate to an OCI registry (stores the credentials in <code>&lt;root&gt;/auth.json</code>, docker/podman format). The password ALWAYS comes from stdin — never from an argument (it would end up in the shell history and in /proc)</p>
 <div class='help'><pre><code>Usage: delonix image login [OPTIONS] --username &lt;USERNAME&gt; &lt;REGISTRY&gt;
 
 Arguments:
-  &lt;REGISTRY&gt;  Registry (e.g. `ghcr.io`, `docker.io`)
+  &lt;REGISTRY&gt;
+          Registry (e.g. `ghcr.io`, `docker.io`)
 
 Options:
-      --l18n &lt;en|pt&gt;         Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-  -u, --username &lt;USERNAME&gt;  
-      --password-stdin       Read the password/token from stdin (the only supported way)
-  -h, --help                 Print help</code></pre></div>
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+  -u, --username &lt;USERNAME&gt;
+          
+
+      --password-stdin
+          Read the password/token from stdin (the only supported way)
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+EXAMPLES:
+  # authenticate to a registry — the token comes from stdin, never from the
+  # argv, where it would land in the shell history and in /proc
+  printf &#x27;%s&#x27; &quot;$GITHUB_TOKEN&quot; | delonix image login ghcr.io -u angolardevops --password-stdin
+
+  # the same for Docker Hub
+  printf &#x27;%s&#x27; &quot;$DOCKERHUB_TOKEN&quot; | delonix image login docker.io -u myuser --password-stdin
+
+SEE ALSO:
+  delonix image logout · delonix image push · delonix image pull
+
+  delonix › image › login</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Autenticar num registo (a password vem do stdin, fora do histórico)</div><div class='cap lang-en'>Authenticate to a registry (the password comes from stdin, out of history)</div><pre><code>printf &#x27;%s&#x27; &quot;$GHCR_TOKEN&quot; | delonix image login ghcr.io --username aminhaorg</code></pre></div>
 <h2 id='load'><code>image load</code></h2>
 <p class='intro'>Load an image from an archive produced by <code>delonix image save</code>, <code>docker save</code> or <code>podman save</code> (the counterpart of <code>save</code>)</p>
 <div class='help'><pre><code>Usage: delonix image load [OPTIONS] --input &lt;FILE&gt;
 
 Options:
-  -i, --input &lt;FILE&gt;  Archive to read (`.tar`; a `.tar.gz` must be gunzipped first)
-      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-  -h, --help          Print help</code></pre></div>
+  -i, --input &lt;FILE&gt;
+          Archive to read (`.tar`; a `.tar.gz` must be gunzipped first)
+
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+EXAMPLES:
+  # read back an archive written by `save`, `docker save` or `podman save`
+  delonix image load -i postgres-16.tar
+
+  # a gzipped archive has to be gunzipped first
+  gunzip -c nginx.tar.gz &gt; nginx.tar &amp;&amp; delonix image load -i nginx.tar
+
+SEE ALSO:
+  delonix image save · delonix image ls · delonix image pull
+
+  delonix › image › load</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Importar esse tar do outro lado</div><div class='cap lang-en'>Import that tar on the other end</div><pre><code>delonix image load --input app-dev.tar</code></pre></div>
 <h2 id='save'><code>image save</code></h2>
 <p class='intro'>Save an image to a portable archive (<code>docker save</code>&#x27;s counterpart) — the way to move an image to another machine with no registry. The archive is an OCI layout WITH the legacy <code>manifest.json</code>, so <code>delonix image load</code>, <code>docker load</code>, <code>podman load</code> and <code>ctr images import</code> all read it</p>
 <div class='help'><pre><code>Usage: delonix image save [OPTIONS] --output &lt;FILE&gt; &lt;IMAGE&gt;
 
 Arguments:
-  &lt;IMAGE&gt;  
+  &lt;IMAGE&gt;
+          
 
 Options:
-      --l18n &lt;en|pt&gt;   Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-  -o, --output &lt;FILE&gt;  Destination file. Use `-o /dev/stdout` to pipe (e.g. into `gzip`)
-  -h, --help           Print help</code></pre></div>
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+  -o, --output &lt;FILE&gt;
+          Destination file. Use `-o /dev/stdout` to pipe (e.g. into `gzip`)
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+EXAMPLES:
+  # move an image to another machine with no registry in between
+  delonix image save postgres:16 -o postgres-16.tar
+
+  # pipe it straight into gzip instead of writing the plain archive
+  delonix image save nginx -o /dev/stdout | gzip &gt; nginx.tar.gz
+
+SEE ALSO:
+  delonix image load · delonix image push · delonix image export
+
+  delonix › image › save</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Exportar para um tar (para levar para uma máquina sem rede)</div><div class='cap lang-en'>Export to a tar (to carry to a machine with no network)</div><pre><code>delonix image save app:dev --output app-dev.tar</code></pre></div>
 <h2 id='scan'><code>image scan</code></h2>
 <p class='intro'>SBOM + CVE scan of an image (reads the layers from the CAS, without running anything). Pulls the image if missing. See <code>--sbom</code>, <code>--fail-on</code>, <code>--update</code></p>
 <div class='help'><pre><code>Usage: delonix image scan [OPTIONS] [IMAGE]
 
 Arguments:
-  [IMAGE]  Image to scan (optional with `--update`)
+  [IMAGE]
+          Image to scan (optional with `--update`)
 
 Options:
-      --l18n &lt;en|pt&gt;         Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-      --sbom                 List the SBOM (installed packages) instead of scanning
-      --fail-on &lt;SEV&gt;        Fail (exit 1) if there are vulnerabilities &gt;= this severity (low|medium|high|critical) — gate for CI
-      --update               Sync the CVE feed to the local database (used afterwards by each scan)
-      --feed &lt;URL|FICHEIRO&gt;  Feed source for `--update`: URL or file (or $DELONIX_ADVISORY_FEED)
-  -h, --help                 Print help</code></pre></div>
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+      --sbom
+          List the SBOM (installed packages) instead of scanning
+
+      --fail-on &lt;SEV&gt;
+          Fail (exit 1) if there are vulnerabilities &gt;= this severity (low|medium|high|critical) — gate for CI
+
+      --update
+          Sync the CVE feed to the local database (used afterwards by each scan)
+
+      --feed &lt;URL|FICHEIRO&gt;
+          Feed source for `--update`: URL or file (or $DELONIX_ADVISORY_FEED)
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+EXAMPLES:
+  # the CVEs of an image, read from the layers on disk — nothing is executed
+  delonix image scan postgres:16
+
+  # the installed packages (SBOM) instead of the findings
+  delonix image scan --sbom nginx
+
+  # a CI gate: exit 1 if anything high or worse is found
+  delonix image scan --fail-on high ghcr.io/angolardevops/app:1.2.0
+
+  # refresh the local feed first — a scan is only as fresh as the database
+  # behind it
+  delonix image scan --update
+
+SEE ALSO:
+  delonix image describe · delonix image pull · delonix image verify
+
+  delonix › image › scan</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Procurar vulnerabilidades conhecidas numa imagem</div><div class='cap lang-en'>Look for known vulnerabilities in an image</div><pre><code>delonix image scan nginx:alpine</code></pre></div><div class="ex"><div class='cap lang-pt'>Varrer todas as imagens locais</div><div class='cap lang-en'>Scan every local image</div><pre><code>delonix image scan</code></pre></div>
 <h2 id='verify'><code>image verify</code></h2>
 <p class='intro'>Verify the cosign signature of a local image against a public key</p>
 <div class='help'><pre><code>Usage: delonix image verify [OPTIONS] &lt;IMAGE&gt; &lt;PEM&gt;
 
 Arguments:
-  &lt;IMAGE&gt;  
-  &lt;PEM&gt;    Public key in PEM
+  &lt;IMAGE&gt;
+          
+
+  &lt;PEM&gt;
+          Public key in PEM
 
 Options:
-      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-  -h, --help          Print help</code></pre></div>
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+EXAMPLES:
+  # check the cosign signature of an image you already have against the
+  # publisher&#x27;s key
+  delonix image verify ghcr.io/angolardevops/app:1.2.0 cosign.pub
+
+  # the gate to run before promoting a local build to production
+  delonix image verify kaeso-odoo:18 keys/kaeso.pub
+
+SEE ALSO:
+  delonix image pull · delonix image scan · delonix image describe
+
+  delonix › image › verify</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Confirmar a assinatura contra uma chave pública</div><div class='cap lang-en'>Confirm the signature against a public key</div><pre><code>delonix image verify ghcr.io/aminhaorg/app:1.0 chave.pem</code></pre></div>
 <h2 id='history'><code>image history</code></h2>
 <p class='intro'>Layers of an image (digest + size), from base to top</p>
 <div class='help'><pre><code>Usage: delonix image history [OPTIONS] &lt;IMAGE&gt;
 
 Arguments:
-  &lt;IMAGE&gt;  
+  &lt;IMAGE&gt;
+          
 
 Options:
-      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-  -h, --help          Print help</code></pre></div>
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+EXAMPLES:
+  # the layers from base to top, with the digest and size of each
+  delonix image history postgres:16
+
+  # where the size went, before deciding what to change in the Dockerfile
+  delonix image history kaeso-odoo:18
+
+SEE ALSO:
+  delonix image describe · delonix build · delonix image ls
+
+  delonix › image › history</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Que instrução criou cada camada</div><div class='cap lang-en'>Which instruction created each layer</div><pre><code>delonix image history app:dev</code></pre></div>
 <h2 id='tag'><code>image tag</code></h2>
 <p class='intro'>Give another name/tag to a local image (copies nothing — it&#x27;s just a new name for the same content)</p>
 <div class='help'><pre><code>Usage: delonix image tag [OPTIONS] &lt;SOURCE&gt; &lt;TARGET&gt;
 
 Arguments:
-  &lt;SOURCE&gt;  
-  &lt;TARGET&gt;  
+  &lt;SOURCE&gt;
+          
+
+  &lt;TARGET&gt;
+          
 
 Options:
-      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-  -h, --help          Print help</code></pre></div>
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+EXAMPLES:
+  # a second name for the same content — nothing is copied
+  delonix image tag postgres:16 db:stable
+
+  # the shape a locally-built image needs before it can be pushed to your
+  # registry
+  delonix image tag kaeso-odoo:18 ghcr.io/angolardevops/kaeso-odoo:18
+
+SEE ALSO:
+  delonix image push · delonix image ls · delonix image rm
+
+  delonix › image › tag</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Dar um segundo nome à mesma imagem (não copia nada)</div><div class='cap lang-en'>Give the same image a second name (copies nothing)</div><pre><code>delonix image tag app:dev ghcr.io/aminhaorg/app:1.0</code></pre></div>
 <h2 id='describe'><code>image describe</code></h2>
 <p class='intro'>Human-readable detail of one or more images, <code>kubectl describe</code>-style (tags/digest/size/layers + the OCI config: entrypoint/cmd/env/workdir). With <code>--vm</code>, describes golden VM images</p>
 <div class='help'><pre><code>Usage: delonix image describe [OPTIONS] &lt;NAMES&gt;...
 
 Arguments:
-  &lt;NAMES&gt;...  
+  &lt;NAMES&gt;...
+          
 
 Options:
-      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-  -h, --help          Print help</code></pre></div>
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+EXAMPLES:
+  # tags, digest, size, layers and the OCI config (entrypoint/cmd/env/workdir)
+  # in one screen
+  delonix image describe postgres:16
+
+  # several at once, to compare what two images actually run
+  delonix image describe alpine:3.19 redis:7-alpine
+
+SEE ALSO:
+  delonix image ls · delonix image history · delonix image scan
+
+  delonix › image › describe</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Camadas, config e digest de uma imagem</div><div class='cap lang-en'>An image&#x27;s layers, config and digest</div><pre><code>delonix image describe nginx:alpine</code></pre></div>
 <h2 id='ls-remote'><code>image ls-remote</code></h2>
 <p class='intro'>(only with <code>--vm</code>) List the tags available in a remote OCI repository — with no argument, the OFFICIAL Delonix golden image repo</p>
 <div class='help'><pre><code>Usage: delonix image ls-remote [OPTIONS] [SOURCE]
 
 Arguments:
-  [SOURCE]  
+  [SOURCE]
+          
 
 Options:
-      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-      --no-k8s        With no argument, list the official NO-Kubernetes golden&#x27;s repo instead of the Kubernetes one
-  -h, --help          Print help</code></pre></div>
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+      --no-k8s
+          With no argument, list the official NO-Kubernetes golden&#x27;s repo instead of the Kubernetes one
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+EXAMPLES:
+  # the same as `image vm ls-remote` — this spelling needs the group&#x27;s `--vm`
+  # flag
+  delonix image --vm ls-remote
+
+  # the same for the Kubernetes-free golden repo
+  delonix image --vm ls-remote --no-k8s
+
+SEE ALSO:
+  delonix image vm ls-remote · delonix image vm pull · delonix image vm ls
+
+  delonix › image › ls-remote</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Tags publicadas num repositório, sem puxar nada</div><div class='cap lang-en'>Tags published in a repository, without pulling anything</div><pre><code>delonix image ls-remote ghcr.io/aminhaorg/app</code></pre></div>
 <h2 id='dash'><code>image dash</code></h2>
 <p class='intro'>Dashboard (KPIs + table) of images — interactive TUI, or <code>--once</code> snapshot</p>
 <div class='help'><pre><code>Usage: delonix image dash [OPTIONS]
 
 Options:
-      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-      --once          
-      --json          
-  -h, --help          Print help</code></pre></div>
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+      --once
+          
+
+      --json
+          
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+EXAMPLES:
+  # a live view of the image store, htop-style
+  delonix image dash
+
+  # one snapshot, for a log or a terminal that is not a TTY
+  delonix image dash --once
+
+  # the same numbers as JSON, for a script or a Grafana datasource
+  delonix image dash --json
+
+SEE ALSO:
+  delonix image ls · delonix dash · delonix system df
+
+  delonix › image › dash</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Dashboard só das imagens</div><div class='cap lang-en'>Images-only dashboard</div><pre><code>delonix image dash</code></pre></div>
 <h2 id='pull'><code>image pull</code></h2>
 <p class='intro'>Pull an image from a registry. With <code>--vm</code>, no argument = the OFFICIAL Delonix golden VM image</p>
 <div class='help'><pre><code>Usage: delonix image pull [OPTIONS] [IMAGE]
 
 Arguments:
-  [IMAGE]  
+  [IMAGE]
+          
 
 Options:
-      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-      --verify &lt;PEM&gt;  Verify the cosign signature with this public key (PEM) AFTER the pull, and fail if it does not match. Without this, a pull is not authenticated beyond the registry&#x27;s own digest
-      --no-k8s        (only with `--vm`) With no argument, pull the official NO-Kubernetes golden instead of the Kubernetes one
-  -h, --help          Print help</code></pre></div>
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+      --verify &lt;PEM&gt;
+          Verify the cosign signature with this public key (PEM) AFTER the pull, and fail if it does not match. Without this, a pull is not authenticated beyond the registry&#x27;s own digest
+
+      --no-k8s
+          (only with `--vm`) With no argument, pull the official NO-Kubernetes golden instead of the Kubernetes one
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+EXAMPLES:
+  # the common case — repository and tag
+  delonix image pull postgres:16
+
+  # a registry other than Docker Hub — write it out in the reference
+  delonix image pull ghcr.io/angolardevops/kaeso-odoo:18
+
+  # refuse the image unless it carries a cosign signature made by this key
+  delonix image pull --verify cosign.pub ghcr.io/angolardevops/app:1.2.0
+
+SEE ALSO:
+  delonix image ls · delonix image scan · delonix image verify · delonix image
+  vm pull
+
+  delonix › image › pull</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Referência com tag e digest (formato combinado suportado)</div><div class='cap lang-en'>Reference with tag and digest (combined format supported)</div><pre><code>delonix image pull kindest/node:v1.34.0@sha256:7416a6…</code></pre></div>
 <h2 id='ls'><code>image ls</code></h2>
 <p class='intro'>List local images</p>
 <div class='help'><pre><code>Usage: delonix image ls [OPTIONS]
 
 Options:
-      --l18n &lt;en|pt&gt;     Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-  -o, --output &lt;OUTPUT&gt;  Output format: `table` (default) or `json` (ADR-0005). Works for both `image ls` and `image --vm ls` [default: table] [possible values: table, json]
-  -h, --help             Print help</code></pre></div>
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+  -o, --output &lt;OUTPUT&gt;
+          Output format: `table` (default) or `json` (ADR-0005). Works for both `image ls` and `image --vm ls`
+          
+          [default: table]
+          [possible values: table, json]
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+EXAMPLES:
+  # what is on disk, newest first
+  delonix image ls
+
+  # as JSON, for a script to read instead of a table meant for eyes
+  delonix image ls -o json
+
+SEE ALSO:
+  delonix image describe · delonix image history · delonix image rm
+
+  delonix › image › ls</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><pre><code>delonix image ls</code></pre></div>
 <h2 id='rm'><code>image rm</code></h2>
 <p class='intro'>Remove a local image</p>
 <div class='help'><pre><code>Usage: delonix image rm [OPTIONS] &lt;IMAGE&gt;
 
 Arguments:
-  &lt;IMAGE&gt;  
+  &lt;IMAGE&gt;
+          
 
 Options:
-  -f, --force         Remove it even if a container still uses it
-      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-  -h, --help          Print help</code></pre></div>
+  -f, --force
+          Remove it even if a container still uses it
+
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+EXAMPLES:
+  # remove an image nothing is using
+  delonix image rm alpine:3.19
+
+  # remove it even though a container still references it
+  delonix image rm -f odoo:16
+
+SEE ALSO:
+  delonix image ls · delonix container rm · delonix system prune
+
+  delonix › image › rm</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><pre><code>delonix image rm alpine:3.19</code></pre></div>
 <h2 id='export'><code>image export</code></h2>
 <p class='intro'>Export an OCI runtime bundle (rootfs + config.json) for <code>runc</code>/<code>crun</code></p>
 <div class='help'><pre><code>Usage: delonix image export [OPTIONS] &lt;IMAGE&gt; &lt;DIR&gt;
 
 Arguments:
-  &lt;IMAGE&gt;  
-  &lt;DIR&gt;    
+  &lt;IMAGE&gt;
+          
+
+  &lt;DIR&gt;
+          
 
 Options:
-      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-  -h, --help          Print help</code></pre></div>
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+EXAMPLES:
+  # an OCI runtime bundle (rootfs + config.json) that `runc` or `crun` runs
+  # directly
+  delonix image export alpine:latest /tmp/alpine-bundle
+
+  # the directory you then hand to another OCI runtime — this is a bundle to
+  # run, not an archive to ship
+  delonix image export postgres:16 /tmp/pg-bundle
+
+SEE ALSO:
+  delonix image save · delonix image load · delonix container run
+
+  delonix › image › export</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Bundle OCI runtime para correr com runc/crun</div><div class='cap lang-en'>OCI runtime bundle, to run with runc/crun</div><pre><code>delonix image export alpine:3.19 /tmp/bundle &amp;&amp; sudo runc run -b /tmp/bundle teste</code></pre></div>
 <h2 id='push'><code>image push</code></h2>
 <p class='intro'>Publish a local image to an OCI registry. Without <code>target</code>, publishes under the image&#x27;s own reference. With <code>--vm</code>, <code>target</code> is required</p>
 <div class='help'><pre><code>Usage: delonix image push [OPTIONS] &lt;NAME&gt; [TARGET]
 
 Arguments:
-  &lt;NAME&gt;    
-  [TARGET]  
+  &lt;NAME&gt;
+          
+
+  [TARGET]
+          
 
 Options:
-      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-  -h, --help          Print help</code></pre></div>
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+EXAMPLES:
+  # publish under the image&#x27;s own reference
+  delonix image push ghcr.io/angolardevops/app:1.2.0
+
+  # publish a locally-named image under another reference, without tagging it
+  # first
+  delonix image push kaeso-odoo:18 ghcr.io/angolardevops/kaeso-odoo:18
+
+SEE ALSO:
+  delonix image login · delonix image tag · delonix image vm push
+
+  delonix › image › push</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Publicar a imagem VM dourada como artefacto OCI (padrão ORAS)</div><div class='cap lang-en'>Publish the golden VM image as an OCI artifact (ORAS pattern)</div><pre><code>delonix image --vm push k8s-golden ghcr.io/angolardevops/delonix-vm-k8s:1.34</code></pre></div>
 <h2 id='build'><code>image build</code></h2>
 <p class='intro'>(only with <code>--vm</code>) Build a VM image: the built-in golden recipe (Ubuntu + kubeadm/kubelet/kubectl + <code>delonix-cri</code>), or a <code>VMfile</code> of your own with <code>-f</code></p>
 <div class='help'><pre><code>Usage: delonix image build [OPTIONS] --tag &lt;TAG&gt; [CONTEXT]
 
 Arguments:
-  [CONTEXT]  Build context — the directory `COPY` reads from [default: .]
+  [CONTEXT]
+          Build context — the directory `COPY` reads from
+          
+          [default: .]
 
 Options:
       --l18n &lt;en|pt&gt;
           Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
   -t, --tag &lt;TAG&gt;
           
+
   -f, --file &lt;FILE&gt;
           Build from a `VMfile` instead of the built-in golden recipe
+
       --distro &lt;DISTRO&gt;
-          [default: ubuntu] [possible values: ubuntu, debian, rocky, fedora]
+          [default: ubuntu]
+          [possible values: ubuntu, debian, rocky, fedora]
+
       --ubuntu-release &lt;UBUNTU_RELEASE&gt;
           [default: 26.04]
+
       --debian-release &lt;DEBIAN_RELEASE&gt;
           [default: bookworm]
+
       --rocky-release &lt;ROCKY_RELEASE&gt;
           [default: 9]
+
       --fedora-release &lt;FEDORA_RELEASE&gt;
-          Fedora release AND build (e.g. `42-1.1`) — only with `--distro fedora` [default: 42-1.1]
+          Fedora release AND build (e.g. `42-1.1`) — only with `--distro fedora`
+          
+          [default: 42-1.1]
+
       --k8s-version &lt;K8S_VERSION&gt;
           
+
       --extra-package &lt;EXTRA_PACKAGES&gt;
           
+
       --extra-run &lt;EXTRA_RUN&gt;
           
+
       --cri-bin &lt;CRI_BIN&gt;
           
+
       --no-compress
           Do not compress the final qcow2 (larger, but with no decompression cost on backing-file reads at runtime)
+
       --network
           Give the guest network access during `RUN` — VMfile builds only. The golden recipe already decides this with `--offline`
+
       --offline
           Fetch the k8s .deb packages on the HOST (verified) and install them with `dpkg` — the appliance runs without network. No DHCP/DNS needed in the guest
+
       --no-k8s
           Build a golden image with NO Kubernetes — just `delonix` itself
+
       --delonix-bin &lt;DELONIX_BIN&gt;
           
+
   -h, --help
-          Print help</code></pre></div>
+          Print help (see a summary with &#x27;-h&#x27;)
+
+EXAMPLES:
+  # the same as `image vm build` — this spelling needs the group&#x27;s `--vm` flag
+  delonix image --vm build --offline --k8s-version 1.34 -t delonix-vm-k8s:1.34
+
+SEE ALSO:
+  delonix image vm build · delonix image vm init · delonix build
+
+  delonix › image › build</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Construir a imagem VM dourada (descarrega Ubuntu, valida SHA256SUMS, virt-customize)</div><div class='cap lang-en'>Build the golden VM image (downloads Ubuntu, verifies SHA256SUMS, virt-customize)</div><pre><code>delonix image --vm build -t k8s-golden --k8s-version 1.34</code></pre></div>
 <h2 id='apply'><code>image apply</code></h2>
 <p class='intro'>Apply the <code>kind: Image</code> documents of a manifest (<code>pull</code> idempotent by reference; <code>build</code> rebuilds and replaces the tag on each apply)</p>
 <div class='help'><pre><code>Usage: delonix image apply [OPTIONS]
 
 Options:
-  -f, --file &lt;FILE&gt;   
-      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-  -h, --help          Print help</code></pre></div>
+  -f, --file &lt;FILE&gt;
+          
+
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+EXAMPLES:
+  # apply only the `kind: Image` documents of `./delonix-manifest.yaml`,
+  # ignoring the other Kinds
+  delonix image apply
+
+  # from a file of your own
+  delonix image apply -f delonix-manifest.yaml
+
+SEE ALSO:
+  delonix stack apply · delonix stack plan · delonix image pull
+
+  delonix › image › apply</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><pre><code>delonix image apply -f delonix-manifest.yaml</code></pre></div>
 <h2><span class='lang-pt'>Laboratório</span><span class='lang-en'>Lab</span></h2>
 <div class='callout lang-pt'><p>Traz uma imagem, dá-lhe uma tag própria, e olha para o histórico de

@@ -160,19 +160,46 @@ for SSH, and runs the SAME bootstrap — one command, from zero to a cluster run
 <div class='help'><pre><code>Usage: delonix cluster [OPTIONS] &lt;COMMAND&gt;
 
 Commands:
-  init     Initialize a project with the cluster manifests (kind/vm/ssh) — files ALREADY FILLED IN (images included), ready to use without editing anything
   create   Create a local Kubernetes cluster **without a manifest and without Docker** (native kind mode): starts the `kindest/node` nodes in the Delonix engine itself and bootstraps them with `kubeadm`. No flags = 1 control-plane ready to use
-  ls       List the clusters and the state of their nodes [alias: list]
   delete   Remove a kind-mode cluster (stops and deletes the nodes + kubeconfig)
-  load     Load local images into a kind-mode cluster&#x27;s nodes, **without a registry** (the equivalent of `kind load docker-image`): packs each image from the local store and imports it into every running node&#x27;s containerd
-  kube     Generate a Kubernetes manifest from a container/pod already running locally (`kube generate`) — the &quot;ran it locally, now give me the YAML for k8s&quot; path (equivalent to `podman generate kube`)
-  apply    Apply the `kind: Cluster` document(s) of a manifest
   kubeadm  Provision VMs (golden VM image) + `kubeadm` bootstrap — from zero to a working cluster, without writing a manifest by hand
+  init     Initialize a project with the cluster manifests (kind/vm/ssh) — files ALREADY FILLED IN (images included), ready to use without editing anything
+  ls       List the clusters and the state of their nodes [alias: list]
+  load     Load local images into a kind-mode cluster&#x27;s nodes, **without a registry** (the equivalent of `kind load docker-image`): packs each image from the local store and imports it into every running node&#x27;s containerd
+  apply    Apply the `kind: Cluster` document(s) of a manifest
+  kube     Generate a Kubernetes manifest from a container/pod already running locally (`kube generate`) — the &quot;ran it locally, now give me the YAML for k8s&quot; path (equivalent to `podman generate kube`)
   help     Print this message or the help of the given subcommand(s)
 
 Options:
-      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-  -h, --help          Print help</code></pre></div>
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+COMMAND MAP:
+  Lifecycle    create · delete · kubeadm
+  Create       init
+  Inspect      ls
+  Interact     load
+  Declarative  kube · apply
+
+EXAMPLES:
+  # a local Kubernetes cluster with no manifest and no Docker
+  delonix cluster create --name dev
+
+  # what is up, node by node
+  delonix cluster ls
+
+  # from zero to VMs plus kubeadm — above one control-plane the load balancer
+  # comes with it
+  delonix cluster kubeadm --name lab --network k8s --control-plane 3
+
+SEE ALSO:
+  delonix cluster kube generate · delonix stack apply · delonix vm create ·
+  delonix image vm pull
+
+  delonix › cluster</code></pre></div>
 <h2 id='kube'><code>cluster kube</code></h2>
 <p class='intro'>Generate a Kubernetes manifest from a container/pod already running locally (<code>kube generate</code>) — the &quot;ran it locally, now give me the YAML for k8s&quot; path (equivalent to <code>podman generate kube</code>)</p>
 <div class='help'><pre><code>Usage: delonix cluster kube [OPTIONS] &lt;COMMAND&gt;
@@ -182,20 +209,57 @@ Commands:
   help      Print this message or the help of the given subcommand(s)
 
 Options:
-      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-  -h, --help          Print help</code></pre></div>
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+COMMAND MAP:
+  Declarative  generate
+
+EXAMPLES:
+  # the Kubernetes YAML for something you already have running locally
+  delonix cluster kube generate web
+
+SEE ALSO:
+  delonix container describe · delonix pod describe · delonix stack apply
+
+  delonix › cluster › kube</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Gerar manifestos Kubernetes a partir de um recurso Delonix</div><div class='cap lang-en'>Generate Kubernetes manifests from a Delonix resource</div><pre><code>delonix cluster kube generate</code></pre></div>
 <h2 id='load'><code>cluster load</code></h2>
 <p class='intro'>Load local images into a kind-mode cluster&#x27;s nodes, <strong>without a registry</strong> (the equivalent of <code>kind load docker-image</code>): packs each image from the local store and imports it into every running node&#x27;s containerd</p>
 <div class='help'><pre><code>Usage: delonix cluster load [OPTIONS] &lt;IMAGES&gt;...
 
 Arguments:
-  &lt;IMAGES&gt;...  Images to load (`repo:tag`, as they appear in `delonix image ls`)
+  &lt;IMAGES&gt;...
+          Images to load (`repo:tag`, as they appear in `delonix image ls`)
 
 Options:
-      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-      --name &lt;NAME&gt;   Cluster name. Omit when there is only one — with several, this says which
-  -h, --help          Print help</code></pre></div>
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+      --name &lt;NAME&gt;
+          Cluster name. Omit when there is only one — with several, this says which
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+EXAMPLES:
+  # the image you just built, into every node, with no registry in between
+  delonix cluster load myapp:dev
+
+  # several in one go
+  delonix cluster load myapp:dev sidecar:dev
+
+  # say which cluster, when more than one is up
+  delonix cluster load myapp:dev --name dev
+
+SEE ALSO:
+  delonix cluster create · delonix image ls · delonix build · delonix cluster
+  ls
+
+  delonix › cluster › load</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Levar uma imagem local para dentro dos nós (o kind load, sem registo)</div><div class='cap lang-en'>Get a local image into the nodes (kind load, no registry)</div><pre><code>delonix build -t app:dev .
 delonix cluster load app:dev --name lab</code></pre></div>
 <h2 id='delete'><code>cluster delete</code></h2>
@@ -203,17 +267,46 @@ delonix cluster load app:dev --name lab</code></pre></div>
 <div class='help'><pre><code>Usage: delonix cluster delete [OPTIONS]
 
 Options:
-      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-      --name &lt;NAME&gt;   [default: delonix]
-  -h, --help          Print help</code></pre></div>
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+      --name &lt;NAME&gt;
+          [default: delonix]
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+EXAMPLES:
+  # stop and remove the nodes plus the kubeconfig
+  delonix cluster delete --name dev
+
+  # the default cluster, when you never named one
+  delonix cluster delete
+
+SEE ALSO:
+  delonix cluster create · delonix cluster ls · delonix system prune
+
+  delonix › cluster › delete</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Apagar o cluster e os seus nós</div><div class='cap lang-en'>Delete the cluster and its nodes</div><pre><code>delonix cluster delete --name lab</code></pre></div>
 <h2 id='ls'><code>cluster ls</code></h2>
 <p class='intro'>List the clusters and the state of their nodes</p>
 <div class='help'><pre><code>Usage: delonix cluster ls [OPTIONS]
 
 Options:
-      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-  -h, --help          Print help</code></pre></div>
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+EXAMPLES:
+  # clusters and the state of each node, derived from the container labels
+  delonix cluster ls
+
+SEE ALSO:
+  delonix cluster create · delonix cluster delete · delonix container ps
+
+  delonix › cluster › ls</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Que clusters existem neste host</div><div class='cap lang-en'>Which clusters exist on this host</div><pre><code>delonix cluster ls</code></pre></div>
 <h2 id='create'><code>cluster create</code></h2>
 <p class='intro'>Create a local Kubernetes cluster <strong>without a manifest and without Docker</strong> (native kind mode): starts the <code>kindest/node</code> nodes in the Delonix engine itself and bootstraps them with <code>kubeadm</code>. No flags = 1 control-plane ready to use</p>
@@ -222,47 +315,128 @@ Options:
 Options:
       --l18n &lt;en|pt&gt;
           Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
       --name &lt;NAME&gt;
           Cluster name (prefix of the nodes and the kubeconfig). Omit = invents one (Angolan king + place), so two `create`s in a row do not collide
+
       --api-port &lt;API_PORT&gt;
           Host port for the apiserver. Omit = delonix picks a free one (tries 6443; if taken by another cluster, uses a high one)
+
       --workers &lt;WORKERS&gt;
-          Worker nodes to join (0 = control-plane only, untainted — schedules everything) [default: 0]
+          Worker nodes to join (0 = control-plane only, untainted — schedules everything)
+          
+          [default: 0]
+
       --control-planes &lt;CONTROL_PLANES&gt;
-          Cluster control-planes (default 1). More than 1 requires a stable endpoint in front of them (LB) — see the error if you ask for &gt;1 [default: 1]
+          Cluster control-planes (default 1). More than 1 requires a stable endpoint in front of them (LB) — see the error if you ask for &gt;1
+          
+          [default: 1]
+
       --image &lt;IMAGE&gt;
           Node image (default: `kindest/node` pinned by digest)
+
       --pod-subnet &lt;POD_SUBNET&gt;
           [default: 10.244.0.0/16]
+
       --service-subnet &lt;SERVICE_SUBNET&gt;
           [default: 10.96.0.0/12]
+
       --cni &lt;CNI&gt;
-          `default` (kindnet, from the image itself) or `none` (node stays NotReady until you apply yours — plain kubeadm behavior) [default: default]
+          `default` (kindnet, from the image itself) or `none` (node stays NotReady until you apply yours — plain kubeadm behavior)
+          
+          [default: default]
+
   -h, --help
-          Print help</code></pre></div>
+          Print help (see a summary with &#x27;-h&#x27;)
+
+EXAMPLES:
+  # a single node: control-plane untainted, so it schedules everything
+  delonix cluster create --name dev
+
+  # one control-plane and two workers
+  delonix cluster create --name dev --workers 2
+
+  # your own CNI instead of kindnet — the node stays NotReady until you apply
+  # it
+  delonix cluster create --name dev --cni none
+
+  # pin the apiserver to the host port your kubeconfig already expects
+  delonix cluster create --name dev --api-port 6443
+
+SEE ALSO:
+  delonix cluster ls · delonix cluster load · delonix cluster delete · delonix
+  cluster kubeadm
+
+  delonix › cluster › create</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Cluster local em modo kind (containers como nós, sem Docker)</div><div class='cap lang-en'>Local cluster in kind mode (containers as nodes, no Docker)</div><pre><code>delonix cluster create --name lab</code></pre></div><div class="ex"><div class='cap lang-pt'>Com workers</div><div class='cap lang-en'>With workers</div><pre><code>delonix cluster create --name lab --workers 2</code></pre></div>
 <h2 id='init'><code>cluster init</code></h2>
 <p class='intro'>Initialize a project with the cluster manifests (kind/vm/ssh) — files ALREADY FILLED IN (images included), ready to use without editing anything</p>
 <div class='help'><pre><code>Usage: delonix cluster init [OPTIONS] [DIR]
 
 Arguments:
-  [DIR]  Project directory (default: the current one) [default: .]
+  [DIR]
+          Project directory (default: the current one)
+          
+          [default: .]
 
 Options:
-      --l18n &lt;en|pt&gt;   Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-      --name &lt;NAME&gt;    Project name (default: the directory name)
-      --image &lt;IMAGE&gt;  Image to use. Omit = fills in with the default image
-      --force          Overwrite existing files
-  -h, --help           Print help</code></pre></div>
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+      --name &lt;NAME&gt;
+          Project name (default: the directory name)
+
+      --image &lt;IMAGE&gt;
+          Image to use. Omit = fills in with the default image
+
+      --force
+          Overwrite existing files
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+EXAMPLES:
+  # a project with the cluster manifests already filled in
+  delonix cluster init
+
+  # into a directory of its own, named, with the image you intend to run
+  delonix cluster init ./lab --name lab --image nginx:alpine
+
+  # regenerate over a scaffold you already edited
+  delonix cluster init --force
+
+SEE ALSO:
+  delonix cluster apply · delonix cluster create · delonix stack init
+
+  delonix › cluster › init</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Scaffold de um cloud.yaml para cluster apply</div><div class='cap lang-en'>Scaffold a cloud.yaml for cluster apply</div><pre><code>delonix cluster init ./meu-cluster</code></pre></div>
 <h2 id='apply'><code>cluster apply</code></h2>
 <p class='intro'>Apply the <code>kind: Cluster</code> document(s) of a manifest</p>
 <div class='help'><pre><code>Usage: delonix cluster apply [OPTIONS]
 
 Options:
-  -f, --file &lt;FILE&gt;   
-      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-  -h, --help          Print help</code></pre></div>
+  -f, --file &lt;FILE&gt;
+          
+
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+EXAMPLES:
+  # bootstrap the hosts a manifest declares — idempotent, and with no state
+  # file to drift
+  delonix cluster apply -f cloud.yaml
+
+  # the manifest in this directory
+  delonix cluster apply
+
+SEE ALSO:
+  delonix cluster kubeadm · delonix stack apply · delonix stack validate ·
+  delonix cluster ls
+
+  delonix › cluster › apply</code></pre></div>
 <div class='lang-pt'><p>Todas as entradas do manifesto que chegam a comandos remotos
 (<code>controlPlaneEndpoint</code>, subnets, versão) passam por validação estrita antes de qualquer
 interpolação — a injecção de comandos via manifesto foi um dos CRÍTICOS encontrados e fechados na
@@ -278,36 +452,73 @@ project's offensive audit, with tests replicating the exploit.</p></div>
 Options:
       --l18n &lt;en|pt&gt;
           Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
       --name &lt;NAME&gt;
           Cluster name (used for `&lt;name&gt;-cp1`/`&lt;name&gt;-w1` VM names and the kubeconfig context). Omit for an auto-generated Angolan name (`&lt;king&gt;-&lt;place&gt;-NN`) — same pattern as auto-named containers and `cluster create` (kind mode)
+
       --control-plane &lt;CONTROL_PLANE&gt;
           [default: 1]
+
       --workers &lt;WORKERS&gt;
           [default: 2]
+
       --vm-image &lt;VM_IMAGE&gt;
           Tag of the golden VM image (`delonix image --vm ls`). Omit = uses the only local image that exists
+
       --network &lt;NETWORK&gt;
           Already-created network (`delonix network create`) — no magic default
+
       --ssh-key &lt;SSH_KEY&gt;
           Private SSH key to use. Omit = generates a new ed25519 pair in `&lt;root&gt;/clusters/&lt;name&gt;/id_ed25519`
+
       --vcpus &lt;VCPUS&gt;
           [default: 2]
+
       --memory &lt;MEMORY&gt;
           [default: 2G]
+
       --k8s-version &lt;K8S_VERSION&gt;
           
+
       --pod-subnet &lt;POD_SUBNET&gt;
           [default: 10.244.0.0/16]
+
       --service-subnet &lt;SERVICE_SUBNET&gt;
           [default: 10.96.0.0/12]
+
       --boot-timeout &lt;BOOT_TIMEOUT&gt;
-          Seconds to wait for each VM to become reachable over SSH [default: 300]
+          Seconds to wait for each VM to become reachable over SSH
+          
+          [default: 300]
+
       --copy-kubeconfig
           Wait for every node to report `Ready` (CNI up) before fetching the kubeconfig, then MERGE it into `~/.kube/config` as its own cluster/user/context (named after `--name`) instead of leaving other clusters&#x27; contexts untouched only by accident. Without this, the kubeconfig is still written to `&lt;root&gt;/clusters/&lt;name&gt;-kubeconfig.yaml` right after `kubeadm join`, before the CNI has necessarily finished
+
       --etcd-cluster &lt;ETCD_CLUSTER&gt;
           Auto-provision N more VMs as a DEDICATED etcd cluster (delonix generates its own CA + certs and bootstraps it) instead of the default `stacked` etcd (co-located with the control-planes). Use an ODD number for a well-defined quorum (3, 5, ...) — 1 is allowed for dev/test but has no HA (a single point of failure). Omit for today&#x27;s default behavior
+
   -h, --help
-          Print help</code></pre></div>
+          Print help (see a summary with &#x27;-h&#x27;)
+
+EXAMPLES:
+  # VMs from the golden image plus kubeadm, without writing a manifest by hand
+  delonix cluster kubeadm --name lab --network k8s
+
+  # HA: above one control-plane a HAProxy load balancer is provisioned and
+  # used as the endpoint
+  delonix cluster kubeadm --name lab --network k8s --control-plane 3 --workers 3
+
+  # merge the kubeconfig into your own only after every node reports Ready
+  delonix cluster kubeadm --name lab --network k8s --copy-kubeconfig
+
+  # etcd on VMs of its own instead of stacked on the control-planes
+  delonix cluster kubeadm --name lab --network k8s --etcd-cluster 3
+
+SEE ALSO:
+  delonix cluster apply · delonix cluster ls · delonix vm ls · delonix image
+  vm pull
+
+  delonix › cluster › kubeadm</code></pre></div>
 <div class='lang-pt'><p><code>--control-plane &gt; 1</code> provisiona automaticamente uma VM
 extra a correr HAProxy (L4, passthrough — a TLS do apiserver termina sempre no control-plane real)
 à frente da porta 6443 de cada control-plane, e usa-a como <code>controlPlaneEndpoint</code> — sem

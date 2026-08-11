@@ -3372,6 +3372,78 @@ O `KERNEL` é agora preenchido também num `import`, por `virt-ls /boot` — e *
 estrutural** no OPNsense (FreeBSD) e no TrueNAS (raiz em ZFS), onde o libguestfs não vê `/boot`;
 no Proxmox VE funciona (`vmlinuz-6.17.2-1-pve`, medido).
 
+## Provisionar armazenamento numa NAS (`kind: Volume` + `spec.provision`, ADR-0009)
+
+Até aqui um `kind: Volume` com `nfs:` sabia **montar** uma partilha e exigia que alguém a tivesse
+feito à mão. O bloco `provision.truenas` (OPCIONAL — sem ele este Kind comporta-se exactamente como
+antes) cria o dataset, a quota, o dono/modo e o export. **A montagem não muda**: o `server` e o
+`share` são DERIVADOS do que a appliance reportou e seguem o `share_mount`/`ensure_mounted` de
+sempre — não há um segundo mecanismo de montagem. Crate próprio `delonix-truenas`; o
+`delonix-volume` não ganha dependência DIRECTA (a árvore transitiva fica idêntica — as 9 linhas de
+`reqwest`/`hyper`/`tokio` que ela já tinha chegam via `opentelemetry-otlp`, e escrever «o crate de
+motor continua limpo de reqwest» seria falso).
+
+**Exercitado contra uma appliance TrueNAS SCALE 25.10.5 REAL** (a que este repo constrói), e são os
+achados do alvo real que moldam o desenho:
+
+- **Há operações que são jobs assíncronos.** `POST /filesystem/setperm` responde `99` — um id, não
+  um resultado. Tratar esse número como sucesso é reportar permissões aplicadas antes de acontecer
+  o que quer que seja, e um job que falha fá-lo depois, onde ninguém está a olhar.
+- **O endpoint de permissões MUDOU**: `/pool/dataset/permission/id/{id}` é 404 na 25.10, agora é
+  `/filesystem/setperm`. É a razão concreta de o cliente **pinar um major** (`SUPPORTED_MAJOR`) em
+  vez de ser liberal.
+- **A quota tem um MÍNIMO de 1 GiB** — 512 MiB devolve um 422 com três constraints do pydantic.
+  Validado do nosso lado antes de qualquer pedido, e **recusado em vez de arredondado**.
+- **As propriedades numéricas são objectos cujo número pode ser `null`**: sem quota vem
+  `{"parsed": null, "rawvalue": "0"}`. Ler a string transformaria «sem limite» em «limite de zero
+  bytes» — a mesma distinção do `Usage { bytes, unreadable }`. **A quota é sempre RELIDA da NAS**,
+  nunca ecoada do pedido, e é o valor relido que o apply imprime.
+
+**Caminho destrutivo** (`volumes rm --destroy-remote`): o default NUNCA destrói o remoto. A posse é
+um carimbo — `delonix.io/provisioned-by` nas anotações do volume, escrito pelo mesmo `set_metadata`
+que o reconciliador já usa para o `last-applied`, sem registo novo. Sem carimbo não há o que
+destruir e o comando di-lo. O carimbo leva **só referências** (url, dataset, o NOME do segredo); a
+credencial é resolvida de novo na hora de destruir, logo uma chave rodada funciona. **A ordem é o
+remoto primeiro e o registo local em último** — o registo é a única coisa que diz QUAL dataset em
+QUAL appliance pertence a este volume, e apagá-lo à frente deixaria um dataset órfão sem nada a
+apontar-lhe (a regra que a auditoria dos 208 subcomandos deixou escrita).
+
+**Passagem `delonix-runtime-sec`, três achados, dois com exploit reproduzido:**
+
+1. **Pânico remoto no caminho de ERRO** — os resumos de resposta fatiavam a String por índice de
+   BYTE; um corte dentro de um carácter multi-byte entra em pânico (medido: 159 bytes de ASCII mais
+   um `é`). Como o corpo vem do outro lado, qualquer servidor transformava um erro num crash — no
+   código que existe para REPORTAR o que correu mal. `truncate_chars` recua até à fronteira.
+2. **A URL levava a credencial para onde quer que fosse.** O `url:` vem do manifesto e nomeia para
+   onde o segredo é ENVIADO. Que seja configurável é inerente (como o registo de um `docker login`),
+   mas passam a ser recusadas duas formas sem uso legítimo: **`http://` com credencial** (ia em
+   claro) e **userinfo na URL** (uma password no manifesto com outro nome, e a maneira clássica de
+   uma URL se LER como um host e ALCANÇAR outro).
+3. **A adopção não se via.** O `ensure_dataset` alinha a quota do que ENCONTRAR: um manifesto que
+   nomeie `tank/producao` re-limita silenciosamente um dataset que não é dele. Nada do lado da NAS
+   marca um dataset como nosso, logo não se pode impedir aqui — mas passa a **avisar**, que é a
+   diferença entre um comportamento documentado e uma surpresa.
+
+**Cenário de caos `truenas_destroy`** (salta com linha audível sem `DELONIX_CHAOS_TRUENAS_URL/USER/
+PASS`), e cada passo consulta a NAS por HTTP em vez de acreditar no que a CLI diz que fez.
+Verificado pela regra do repo: `if destroy_remote` → `if true` faz falhar «um rm normal destruiu o
+dataset na NAS»; tirar a exigência do carimbo faz falhar «--destroy-remote aceitou um volume sem
+provisionamento».
+
+**Bug do próprio desenho, apanhado a validar**: um `provision:` sem `share:` provisiona o dataset e
+não exporta nada — e derivava-se um bloco `nfs:` na mesma, a tentar montar um export nunca
+publicado. O `Provisioned` passou a dizer se exportou.
+
+**Limitação do host, não do código**: `mount -t nfs` precisa de CAP_SYS_ADMIN, por isso num rootless
+puro o apply de um volume NFS falha no mount (comportamento pré-existente). É por isso que o relato
+do provisionamento sai **antes** do mount — um apply que morresse ali tendo já criado dataset, quota
+e export deixava o operador sem saber que fora criada seja o que for.
+
+**Por fazer**: `cifs:`/SMB (só NFS é provisionado); criar a pool (é decisão de layout de discos
+físicos, não de um manifesto de volume); e um segundo alvo (o bloco é nomeado pelo destino, logo
+entra como chave irmã, não como um `type:` a manter sincronizado).
+
+
 ## Regra de ouro: fronteira com o PaaS
 
 Este código **não pode depender de nada privado**. Antes de qualquer commit:

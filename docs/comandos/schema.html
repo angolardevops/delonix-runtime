@@ -181,16 +181,51 @@ Options:
           Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
 
   -h, --help
-          Print help (see a summary with &#x27;-h&#x27;)</code></pre></div>
+          Print help (see a summary with &#x27;-h&#x27;)
+
+COMMAND MAP:
+  Inspect  print
+
+EXAMPLES:
+  # the schema generated from the code — point an editor at it and the
+  # manifest completes as you type
+  delonix schema print &gt; delonix.schema.json
+
+  # one Kind only
+  delonix schema print --kind Container
+
+SEE ALSO:
+  delonix schema print · delonix explain · delonix stack validate · delonix
+  stack apply
+
+  delonix › schema</code></pre></div>
 <h2><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h2><div class="ex"><div class="cap">Publicar o schema para o editor</div><pre><code>delonix schema print &gt; delonix.schema.json</code></pre></div><div class="ex"><div class="cap">Só um Kind</div><pre><code>delonix schema print --kind Container</code></pre></div><div class="ex"><div class="cap">O que um Kind aceita</div><pre><code>delonix explain Container</code></pre></div><div class="ex"><div class="cap">Um campo em concreto</div><pre><code>delonix explain Container.ports</code></pre></div><div class="ex"><div class="cap">Um campo aninhado</div><pre><code>delonix explain Pod.containers.image</code></pre></div>
 <h2 id='print'><code>schema print</code></h2>
 <p class='intro'>Print the JSON Schema of the manifest (all Kinds, or one)</p>
 <div class='help'><pre><code>Usage: delonix schema print [OPTIONS]
 
 Options:
-      --kind &lt;KIND&gt;   Only this Kind&#x27;s spec (e.g. `Container`)
-      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-  -h, --help          Print help</code></pre></div>
+      --kind &lt;KIND&gt;
+          Only this Kind&#x27;s spec (e.g. `Container`)
+
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+EXAMPLES:
+  # the whole schema, ready for `# yaml-language-server:
+  # $schema=./delonix.schema.json`
+  delonix schema print &gt; delonix.schema.json
+
+  # just one Kind&#x27;s spec, when that is all you are editing
+  delonix schema print --kind Pod
+
+SEE ALSO:
+  delonix explain · delonix stack validate · delonix stack apply
+
+  delonix › schema › print</code></pre></div>
 <footer><span class='lang-pt'>Delonix Engine · Apache-2.0 · <a href="https://github.com/angolardevops/delonix-runtime">angolardevops/delonix-runtime</a> · Referência gerada do <code>--help</code> real do binário por <code>docs/gen.py</code>.</span><span class='lang-en'>Delonix Engine · Apache-2.0 · <a href="https://github.com/angolardevops/delonix-runtime">angolardevops/delonix-runtime</a> · Reference generated from the real <code>--help</code> of the binary by <code>docs/gen.py</code>.</span></footer>
 </main>
 <aside class="toc" id="pagetoc"><div class="toc-inner"><h5><span class='lang-pt'>Nesta página</span><span class='lang-en'>On this page</span></h5><nav id="toc-nav"></nav></div></aside>

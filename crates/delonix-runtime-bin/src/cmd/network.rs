@@ -228,9 +228,11 @@ pub enum NetworkCmd {
         #[arg(short = 'o', long = "output", value_enum, default_value_t)]
         output: output::OutputFormat,
     },
-    /// WireGuard identity of THIS node, for the encrypted VXLAN overlay between nodes
-    /// (`network create --driver overlay`). The private key stays 0600 in
-    /// `<root>/wg/node.key`; the public one is what you hand out to the peers.
+    /// WireGuard identity of THIS node, for the encrypted overlay between nodes.
+    ///
+    /// The VXLAN overlay of `network create --driver overlay`. The private key
+    /// stays 0600 in `<root>/wg/node.key`; the public one is what you hand out
+    /// to the peers.
     Node {
         #[command(subcommand)]
         action: NodeCmd,
@@ -245,7 +247,14 @@ pub enum NetworkCmd {
         /// Host parent NIC (required for macvlan/ipvlan).
         #[arg(long)]
         parent: Option<String>,
-        /// Subnet (required for macvlan/ipvlan, e.g.: `192.168.1.0/24`).
+        /// Subnet. For `bridge`, `10.<200-254>.0.0/16` (only /16); required for
+        /// macvlan/ipvlan, e.g. `192.168.1.0/24`. Omit it and a free one is picked.
+        //
+        // The old text said only "required for macvlan/ipvlan" and stopped
+        // there — from v0.47.0 `bridge` honours it too (`base_from_subnet`),
+        // which is the version that fixed the bug where the flag was accepted
+        // and silently thrown away. Documenting it as macvlan-only left the
+        // most-used driver's newest behaviour invisible.
         #[arg(long)]
         subnet: Option<String>,
         /// Gateway (macvlan/ipvlan).
@@ -266,10 +275,11 @@ pub enum NetworkCmd {
         #[arg(add = ArgValueCandidates::new(super::complete::networks))]
         name: String,
     },
-    /// Readable detail of one or more networks, `kubectl describe` style
-    /// (for humans; use `inspect` for the usual compact view).
+    /// Readable detail of one or more networks, `kubectl describe` style.
+    ///
+    /// For humans; use `inspect` for the usual compact view.
     Describe {
-        #[arg(required = true)]
+        #[arg(required = true, add = ArgValueCandidates::new(super::complete::networks))]
         names: Vec<String>,
     },
     /// Remove a network.
@@ -279,7 +289,7 @@ pub enum NetworkCmd {
     },
     /// Apply the `kind: Network` documents of a manifest (idempotent by name).
     Apply {
-        #[arg(short = 'f', long = "file")]
+        #[arg(value_hint = clap::ValueHint::FilePath, short = 'f', long = "file")]
         file: Option<PathBuf>,
     },
 }
@@ -780,8 +790,10 @@ pub(crate) fn cmd_rm(store: &NetworkStore, name: &str) -> Result<()> {
 /// Subcommands of `network node` — the WireGuard identity of the local node.
 #[derive(clap::Subcommand)]
 pub enum NodeCmd {
-    /// Generate the node key (if it does not exist yet) and print the public one
-    /// with the context of what to do with it. Idempotent.
+    /// Generate the node key and print the public one. Idempotent.
+    ///
+    /// Generated only if it does not exist yet, and printed with the context
+    /// of what to do with it.
     Init,
     /// Print only the public key (for composing in scripts).
     Key,

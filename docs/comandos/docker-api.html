@@ -173,10 +173,34 @@ clear 404.</p>
 <div class='help'><pre><code>Usage: delonix serve docker-api [OPTIONS]
 
 Options:
-      --addr &lt;ADDR&gt;   Socket address (default: `$DELONIX_DOCKER_ADDR` or `unix:///run/delonix-docker.sock`)
-      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-      --matrix        Print the coverage matrix and exit, without serving anything. This layer is a SLICE of the Docker API, and third-party tooling deserves to know where it ends before it hits a 404 mid-run
-  -h, --help          Print help</code></pre></div>
+      --addr &lt;ADDR&gt;
+          Socket address (default: `$DELONIX_DOCKER_ADDR` or `unix:///run/delonix-docker.sock`)
+
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+      --matrix
+          Print the coverage matrix and exit, without serving anything. This layer is a SLICE of the Docker API, and third-party tooling deserves to know where it ends before it hits a 404 mid-run
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+EXAMPLES:
+  # answer `docker ps`/`images`/`info` and the container lifecycle on a unix
+  # socket
+  delonix serve docker-api
+
+  # a socket of your own, then `export
+  # DOCKER_HOST=unix:///tmp/delonix-docker.sock`
+  delonix serve docker-api --addr unix:///tmp/delonix-docker.sock
+
+  # see where the slice ends before third-party tooling hits a 404 mid-run
+  delonix serve docker-api --matrix
+
+SEE ALSO:
+  delonix serve api · delonix compose up · delonix container ps
+
+  delonix › serve › docker-api</code></pre></div>
 <h2><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h2><div class="ex"><div class='cap lang-pt'>Servir no socket por omissão</div><div class='cap lang-en'>Serve on the default socket</div><pre><code>delonix serve docker-api &amp;</code></pre></div><div class="ex"><div class='cap lang-pt'>Um `docker` real a falar com o delonix</div><div class='cap lang-en'>A real `docker` talking to delonix</div><pre><code>DOCKER_HOST=unix:///run/delonix-docker.sock docker ps</code></pre></div><div class="ex"><div class='cap lang-pt'>`docker compose up` apontado ao delonix</div><div class='cap lang-en'>`docker compose up` pointed at delonix</div><pre><code>DOCKER_HOST=unix:///run/delonix-docker.sock docker compose up -d</code></pre></div>
 <h2><span class='lang-pt'>Laboratório</span><span class='lang-en'>Lab</span></h2>
 <div class='callout lang-pt'><p>Aponta o próprio <code>docker</code> CLI para o delonix, sem Docker

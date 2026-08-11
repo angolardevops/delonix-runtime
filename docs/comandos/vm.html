@@ -156,37 +156,70 @@ nodes.</p>
 <div class='help'><pre><code>Usage: delonix vm [OPTIONS] &lt;COMMAND&gt;
 
 Commands:
-  dash             Dashboard (KPIs + table) of the VMs — interactive TUI, or `--once` snapshot
-  init             Bootstrap a project with a VM manifest — files ALREADY FILLED IN (images included), ready to use without editing anything
   create           Create (or auto-recover) a VM
-  build            Build a qcow2 VM image from a `VMfile`
-  pull             Pull a golden VM image from an OCI registry — with no argument, the OFFICIAL Delonix image (ready for `vm create`/`cluster kubeadm`)
-  ls-remote        List the tags available in a remote OCI repository — with no argument, the OFFICIAL Delonix golden image repo (discover which k8s versions are published before `pull`)
-  push             Push a local golden VM image to an OCI registry (`vm push &lt;name&gt; &lt;target&gt;`)
-  convert          Convert a VM disk to the format another ecosystem imports — `qcow2`, `raw`, `vmdk` (VMware), `vdi` (VirtualBox), `vhdx`/`vhd` (Hyper-V, Azure). Flattened either way, so the result is a standalone file with no backing chain. This engine&#x27;s own two backends already share `qcow2`/`raw`; the rest exist so an image built here is importable elsewhere without a backend per product
-  default-backend  Get or set the default VM backend, used by `vm create` when neither `--backend` nor `DELONIX_VM_BACKEND` is given — above the engine&#x27;s own auto-detection heuristic. With no flag, prints the current default (`none` if auto-detection decides)
+  restart          Stop (if running) then start — always a real reboot, unlike `start`. Same recovered-fields limits as `start`
+  rm               Remove the VM (stops + deletes overlay/state)
+  start            Start an existing, stopped VM — idempotent (already running = no-op). Reboots with the base disk/vcpus/memory/network/backend recorded at its last `create`/`start`, reusing the same overlay (disk state preserved). Does NOT restore anything that only ever existed as a `vm create` flag (custom kernel/seed/volumes/static IP/VNC/advanced libvirt knobs) — a VM using those needs the original `vm create` invocation instead (also idempotent/auto-heal)
+  stop             Stop the VM (preserves disk/record)
+  describe         Human-readable detail of one or more VMs, `kubectl describe` style (for humans; use `status` for the usual compact view). Includes the LIVE state — `delonix_vm::status` reconciles liveness/IP with the backend
   ls               List the VMs
+  status           Current state (reconciles liveness/IP with the backend)
   console          Attach to the VM&#x27;s serial console (interactive terminal) — works with no IP (boot logs, login). Escape: Ctrl-] 
   ssh              SSH into a VM by NAME (its IP comes from the record) or straight to an address. With a trailing command, runs it and returns instead of opening a shell
   vnc              Print the VNC address of a graphical VM (created with `--vnc`, libvirt)
-  status           Current state (reconciles liveness/IP with the backend)
-  reach            Which published ports a VM can actually reach, and how to fix the ones it cannot. A port published to the default `127.0.0.1` is invisible to a VM — this lists the libvirt gateways, reads each port&#x27;s LIVE bind, and for every loopback-only one prints the exact republish command
+  default-backend  Get or set the default VM backend, used by `vm create` when neither `--backend` nor `DELONIX_VM_BACKEND` is given — above the engine&#x27;s own auto-detection heuristic. With no flag, prints the current default (`none` if auto-detection decides)
   bridge           EXPERIMENTAL (root): give a libvirt VM DIRECT IP reachability to a container SDN network (veth from the host into the holder netns + routes). Defaults to a DRY-RUN; add `--apply` (as root) to establish it
+  reach            Which published ports a VM can actually reach, and how to fix the ones it cannot. A port published to the default `127.0.0.1` is invisible to a VM — this lists the libvirt gateways, reads each port&#x27;s LIVE bind, and for every loopback-only one prints the exact republish command
   unbridge         Tear down a `vm bridge` (dry-run without `--apply`)
-  describe         Human-readable detail of one or more VMs, `kubectl describe` style (for humans; use `status` for the usual compact view). Includes the LIVE state — `delonix_vm::status` reconciles liveness/IP with the backend
-  stop             Stop the VM (preserves disk/record)
-  start            Start an existing, stopped VM — idempotent (already running = no-op). Reboots with the base disk/vcpus/memory/network/backend recorded at its last `create`/`start`, reusing the same overlay (disk state preserved). Does NOT restore anything that only ever existed as a `vm create` flag (custom kernel/seed/volumes/static IP/VNC/advanced libvirt knobs) — a VM using those needs the original `vm create` invocation instead (also idempotent/auto-heal)
-  restart          Stop (if running) then start — always a real reboot, unlike `start`. Same recovered-fields limits as `start`
-  rm               Remove the VM (stops + deletes overlay/state)
-  snapshot         Take a named snapshot (libvirt: a running VM&#x27;s snapshot is a system checkpoint — memory + disk; `restore` reverts to it). Not yet supported on the cloud-hypervisor backend
-  restore          Revert the VM to a named snapshot
-  snapshots        List the VM&#x27;s snapshots
+  build            Build a qcow2 VM image from a `VMfile`
+  convert          Convert a VM disk to the format another ecosystem imports — `qcow2`, `raw`, `vmdk` (VMware), `vdi` (VirtualBox), `vhdx`/`vhd` (Hyper-V, Azure). Flattened either way, so the result is a standalone file with no backing chain. This engine&#x27;s own two backends already share `qcow2`/`raw`; the rest exist so an image built here is importable elsewhere without a backend per product
+  ls-remote        List the tags available in a remote OCI repository — with no argument, the OFFICIAL Delonix golden image repo (discover which k8s versions are published before `pull`)
+  pull             Pull a golden VM image from an OCI registry — with no argument, the OFFICIAL Delonix image (ready for `vm create`/`cluster kubeadm`)
+  push             Push a local golden VM image to an OCI registry (`vm push &lt;name&gt; &lt;target&gt;`)
   apply            Apply the `kind: Vm` documents of a manifest (`delonix_vm::create` is already idempotent by name — creates or auto-recovers)
+  init             Bootstrap a project with a VM manifest — files ALREADY FILLED IN (images included), ready to use without editing anything
+  restore          Revert the VM to a named snapshot
+  snapshot         Take a named snapshot (libvirt: a running VM&#x27;s snapshot is a system checkpoint — memory + disk; `restore` reverts to it). Not yet supported on the cloud-hypervisor backend
+  snapshots        List the VM&#x27;s snapshots
+  dash             Dashboard (KPIs + table) of the VMs — interactive TUI, or `--once` snapshot
   help             Print this message or the help of the given subcommand(s)
 
 Options:
-      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-  -h, --help          Print help</code></pre></div>
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+COMMAND MAP:
+  Lifecycle    create · stop · start · restart · rm
+  Inspect      ls · status · describe
+  Interact     console · ssh · vnc
+  Configure    default-backend
+  Networking   reach · bridge · unbridge
+  Storage      build · pull · ls-remote · push · convert
+  Declarative  init · apply
+  Maintenance  snapshot · restore · snapshots
+  Dashboards   dash
+
+EXAMPLES:
+  # the official golden image, ready to boot without installing anything
+  delonix vm pull
+
+  # a VM from it, waiting until it has a real IP
+  delonix vm create dev --vcpus 2 --memory 4G --wait
+
+  # what is up, and the address each one got
+  delonix vm ls
+
+  # the boot log and a login, with no IP and no SSH yet
+  delonix vm console dev
+
+SEE ALSO:
+  delonix image vm ls · delonix cluster kubeadm · delonix workload ls ·
+  delonix container run
+
+  delonix › vm</code></pre></div>
 <h2 id='ssh'><code>vm ssh</code></h2>
 <p class='intro'>SSH into a VM by NAME (its IP comes from the record) or straight to an address. With a trailing command, runs it and returns instead of opening a shell.</p>
 <p class='intro'><code>delonix vm ssh dev</code> · <code>delonix vm ssh dev -- systemctl status</code> · <code>delonix vm ssh 192.168.122.50 -l root</code></p>
@@ -212,7 +245,23 @@ Options:
           Private key to authenticate with (`ssh -i`)
 
   -h, --help
-          Print help (see a summary with &#x27;-h&#x27;)</code></pre></div>
+          Print help (see a summary with &#x27;-h&#x27;)
+
+EXAMPLES:
+  # a shell inside the VM — the IP comes from the record, so the name is
+  # enough
+  delonix vm ssh dev
+
+  # one command and out, instead of an interactive shell
+  delonix vm ssh dev -- systemctl status kubelet
+
+  # straight to an address, as another user
+  delonix vm ssh 192.168.122.50 -l root
+
+SEE ALSO:
+  delonix vm console · delonix vm ls · delonix vm create
+
+  delonix › vm › ssh</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Entrar numa VM pelo NOME — o IP vem do registo, e o utilizador por omissão é `delonix` (não o da distro, que existe e não tem a chave)</div><div class='cap lang-en'>Enter a VM by NAME — the IP comes from the record, and the default user is `delonix` (not the distro&#x27;s own, which exists and does not carry the key)</div><pre><code>delonix vm ssh dev</code></pre></div><div class="ex"><div class='cap lang-pt'>Correr um comando e voltar, em vez de abrir uma shell</div><div class='cap lang-en'>Run a command and return, instead of opening a shell</div><pre><code>delonix vm ssh dev -- systemctl is-system-running</code></pre></div><div class="ex"><div class='cap lang-pt'>Ir directamente a um endereço, com outro utilizador e outra chave</div><div class='cap lang-en'>Go straight to an address, with a different user and key</div><pre><code>delonix vm ssh 192.168.122.50 -l root -i ~/.ssh/id_ed25519</code></pre></div>
 <h2 id='convert'><code>vm convert</code></h2>
 <p class='intro'>Convert a VM disk to the format another ecosystem imports — <code>qcow2</code>, <code>raw</code>, <code>vmdk</code> (VMware), <code>vdi</code> (VirtualBox), <code>vhdx</code>/<code>vhd</code> (Hyper-V, Azure). Flattened either way, so the result is a standalone file with no backing chain. This engine&#x27;s own two backends already share <code>qcow2</code>/<code>raw</code>; the rest exist so an image built here is importable elsewhere without a backend per product</p>
@@ -242,7 +291,28 @@ Options:
           Compress the output. Only `qcow2` and `vmdk` can — refused for the others rather than handed to `qemu-img` to fail on
 
   -h, --help
-          Print help (see a summary with &#x27;-h&#x27;)</code></pre></div>
+          Print help (see a summary with &#x27;-h&#x27;)
+
+EXAMPLES:
+  # hand an image built here to VMware, flattened so there is no backing chain
+  # to carry with it
+  delonix vm convert lab:1.0 --to vmdk
+
+  # raw for Proxmox VE&#x27;s LVM/ZFS/Ceph storage, written where you want it
+  delonix vm convert lab:1.0 --to raw -o /srv/lab.raw
+
+  # back to qcow2 and compressed — only qcow2 and vmdk can, the rest are
+  # refused up front
+  delonix vm convert /srv/lab.raw --to qcow2 --compress
+
+  # Hyper-V and Azure take vhdx; the older vhd is a different format, not
+  # another spelling
+  delonix vm convert lab:1.0 --to vhdx
+
+SEE ALSO:
+  delonix vm build · delonix image vm ls · delonix vm push · delonix vm create
+
+  delonix › vm › convert</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class="cap">Levar uma imagem construída aqui para outro ecossistema</div><pre><code>delonix vm convert minha-base --to vmdk        # VMware
 delonix vm convert minha-base --to vdi         # VirtualBox
 delonix vm convert minha-base --to vhdx        # Hyper-V / Azure</code></pre></div><div class="ex"><div class="cap">Comprimir — só `qcow2` e `vmdk` o sabem fazer; nos outros é recusado com a lista, em vez de entregue ao qemu-img para falhar lá</div><pre><code>delonix vm convert minha-base --to qcow2 --compress</code></pre></div>
@@ -251,145 +321,364 @@ delonix vm convert minha-base --to vhdx        # Hyper-V / Azure</code></pre></d
 <div class='help'><pre><code>Usage: delonix vm default-backend [OPTIONS]
 
 Options:
-      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-      --set &lt;SET&gt;     Set the persisted default (`cloud-hypervisor` or `libvirt`)
-      --clear         Clear the persisted default (fall back to auto-detection)
-  -h, --help          Print help</code></pre></div>
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+      --set &lt;SET&gt;
+          Set the persisted default (`cloud-hypervisor` or `libvirt`)
+
+      --clear
+          Clear the persisted default (fall back to auto-detection)
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+EXAMPLES:
+  # which backend `vm create` will pick when nothing on the command line says
+  # otherwise
+  delonix vm default-backend
+
+  # pin libvirt once, instead of passing `--backend` on every create — it is
+  # the backend with snapshots and a NAT address
+  delonix vm default-backend --set libvirt
+
+  # hand the choice back to auto-detection
+  delonix vm default-backend --clear
+
+SEE ALSO:
+  delonix vm create · delonix vm snapshot · delonix vm ls
+
+  delonix › vm › default-backend</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class="cap">Fixar o backend que o `vm create` usa quando não lhe dizem nada</div><pre><code>delonix vm default-backend --set libvirt</code></pre></div><div class="ex"><div class="cap">Ver o que está fixado (`none` = decide a auto-detecção)</div><pre><code>delonix vm default-backend</code></pre></div><div class="ex"><div class="cap">Voltar à auto-detecção</div><pre><code>delonix vm default-backend --clear</code></pre></div>
 <h2 id='snapshots'><code>vm snapshots</code></h2>
 <p class='intro'>List the VM&#x27;s snapshots</p>
 <div class='help'><pre><code>Usage: delonix vm snapshots [OPTIONS] &lt;NAME&gt;
 
 Arguments:
-  &lt;NAME&gt;  
+  &lt;NAME&gt;
+          
 
 Options:
-      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-  -h, --help          Print help</code></pre></div>
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+EXAMPLES:
+  # which checkpoints a VM has, before reverting to one
+  delonix vm snapshots dev
+
+SEE ALSO:
+  delonix vm snapshot · delonix vm restore · delonix vm describe
+
+  delonix › vm › snapshots</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Listar os checkpoints de uma VM</div><div class='cap lang-en'>List a VM&#x27;s checkpoints</div><pre><code>delonix vm snapshots dev</code></pre></div>
 <h2 id='restore'><code>vm restore</code></h2>
 <p class='intro'>Revert the VM to a named snapshot</p>
 <div class='help'><pre><code>Usage: delonix vm restore [OPTIONS] &lt;NAME&gt; &lt;SNAPSHOT&gt;
 
 Arguments:
-  &lt;NAME&gt;      
-  &lt;SNAPSHOT&gt;  Snapshot name to revert to
+  &lt;NAME&gt;
+          
+
+  &lt;SNAPSHOT&gt;
+          Snapshot name to revert to
 
 Options:
-      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-  -h, --help          Print help</code></pre></div>
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+EXAMPLES:
+  # put the VM back exactly as it was when the checkpoint was taken
+  delonix vm restore dev before-upgrade
+
+SEE ALSO:
+  delonix vm snapshot · delonix vm snapshots · delonix vm status
+
+  delonix › vm › restore</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Voltar ao checkpoint</div><div class='cap lang-en'>Roll back to the checkpoint</div><pre><code>delonix vm restore dev antes-do-upgrade</code></pre></div>
 <h2 id='snapshot'><code>vm snapshot</code></h2>
 <p class='intro'>Take a named snapshot (libvirt: a running VM&#x27;s snapshot is a system checkpoint — memory + disk; <code>restore</code> reverts to it). Not yet supported on the cloud-hypervisor backend</p>
 <div class='help'><pre><code>Usage: delonix vm snapshot [OPTIONS] &lt;NAME&gt; &lt;SNAPSHOT&gt;
 
 Arguments:
-  &lt;NAME&gt;      
-  &lt;SNAPSHOT&gt;  Snapshot name
+  &lt;NAME&gt;
+          
+
+  &lt;SNAPSHOT&gt;
+          Snapshot name
 
 Options:
-      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-  -h, --help          Print help</code></pre></div>
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+EXAMPLES:
+  # a checkpoint of a RUNNING libvirt VM before an upgrade — memory and disk,
+  # so `restore` puts it back mid-flight
+  delonix vm snapshot dev before-upgrade
+
+SEE ALSO:
+  delonix vm restore · delonix vm snapshots · delonix vm stop · delonix vm
+  default-backend
+
+  delonix › vm › snapshot</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Checkpoint de sistema (memória + disco) de uma VM A CORRER</div><div class='cap lang-en'>System checkpoint (memory + disk) of a RUNNING VM</div><pre><code>delonix vm snapshot dev antes-do-upgrade</code></pre></div>
 <h2 id='restart'><code>vm restart</code></h2>
 <p class='intro'>Stop (if running) then start — always a real reboot, unlike <code>start</code>. Same recovered-fields limits as <code>start</code></p>
 <div class='help'><pre><code>Usage: delonix vm restart [OPTIONS] &lt;NAME&gt;
 
 Arguments:
-  &lt;NAME&gt;  
+  &lt;NAME&gt;
+          
 
 Options:
-      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-  -h, --help          Print help</code></pre></div>
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+EXAMPLES:
+  # a real reboot — `start` on an already-running VM does nothing, this one
+  # always cycles it
+  delonix vm restart dev
+
+SEE ALSO:
+  delonix vm start · delonix vm stop · delonix vm console · delonix vm status
+
+  delonix › vm › restart</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Reinício forçado (pára e volta a arrancar)</div><div class='cap lang-en'>Forced restart (stops and boots again)</div><pre><code>delonix vm restart dev</code></pre></div>
 <h2 id='start'><code>vm start</code></h2>
 <p class='intro'>Start an existing, stopped VM — idempotent (already running = no-op). Reboots with the base disk/vcpus/memory/network/backend recorded at its last <code>create</code>/<code>start</code>, reusing the same overlay (disk state preserved). Does NOT restore anything that only ever existed as a <code>vm create</code> flag (custom kernel/seed/volumes/static IP/VNC/advanced libvirt knobs) — a VM using those needs the original <code>vm create</code> invocation instead (also idempotent/auto-heal)</p>
 <div class='help'><pre><code>Usage: delonix vm start [OPTIONS] &lt;NAME&gt;
 
 Arguments:
-  &lt;NAME&gt;  
+  &lt;NAME&gt;
+          
 
 Options:
-      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-  -h, --help          Print help</code></pre></div>
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+EXAMPLES:
+  # boot a stopped VM again with the disk, vcpus, memory and backend of its
+  # last create — the overlay is reused, so its disk state survives
+  delonix vm start dev
+
+SEE ALSO:
+  delonix vm stop · delonix vm restart · delonix vm create · delonix vm status
+
+  delonix › vm › start</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Voltar a arrancar uma VM parada, sem repetir as flags do create</div><div class='cap lang-en'>Boot a stopped VM again, without repeating the create flags</div><pre><code>delonix vm start dev</code></pre></div>
 <h2 id='describe'><code>vm describe</code></h2>
 <p class='intro'>Human-readable detail of one or more VMs, <code>kubectl describe</code> style (for humans; use <code>status</code> for the usual compact view). Includes the LIVE state — <code>delonix_vm::status</code> reconciles liveness/IP with the backend</p>
 <div class='help'><pre><code>Usage: delonix vm describe [OPTIONS] &lt;NAMES&gt;...
 
 Arguments:
-  &lt;NAMES&gt;...  
+  &lt;NAMES&gt;...
+          
 
 Options:
-      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-  -h, --help          Print help</code></pre></div>
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+EXAMPLES:
+  # everything the record holds about a VM, plus the live state, kubectl style
+  delonix vm describe dev
+
+  # several at once, to compare how they were created
+  delonix vm describe dev k8s-cp1
+
+SEE ALSO:
+  delonix vm status · delonix vm ls · delonix vm snapshots
+
+  delonix › vm › describe</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Tudo sobre uma VM, estilo kubectl describe</div><div class='cap lang-en'>Everything about a VM, kubectl describe-style</div><pre><code>delonix vm describe dev</code></pre></div>
 <h2 id='unbridge'><code>vm unbridge</code></h2>
 <p class='intro'>Tear down a <code>vm bridge</code> (dry-run without <code>--apply</code>)</p>
 <div class='help'><pre><code>Usage: delonix vm unbridge [OPTIONS] &lt;NETWORK&gt;
 
 Arguments:
-  &lt;NETWORK&gt;  
+  &lt;NETWORK&gt;
+          
 
 Options:
-      --apply         
-      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-  -h, --help          Print help</code></pre></div>
+      --apply
+          
+
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+EXAMPLES:
+  # what the teardown would remove, without removing it
+  delonix vm unbridge app
+
+  # actually tear the veth and the routes down, as root
+  sudo delonix vm unbridge app --apply
+
+SEE ALSO:
+  delonix vm bridge · delonix vm reach · delonix network ls
+
+  delonix › vm › unbridge</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Fechar a ponte VM↔container</div><div class='cap lang-en'>Close the VM↔container bridge</div><pre><code>sudo delonix vm unbridge minha-rede</code></pre></div>
 <h2 id='bridge'><code>vm bridge</code></h2>
 <p class='intro'>EXPERIMENTAL (root): give a libvirt VM DIRECT IP reachability to a container SDN network (veth from the host into the holder netns + routes). Defaults to a DRY-RUN; add <code>--apply</code> (as root) to establish it</p>
 <div class='help'><pre><code>Usage: delonix vm bridge [OPTIONS] &lt;NETWORK&gt;
 
 Arguments:
-  &lt;NETWORK&gt;  
+  &lt;NETWORK&gt;
+          
 
 Options:
-      --l18n &lt;en|pt&gt;           Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-      --vm-subnet &lt;VM_SUBNET&gt;  VM subnet(s) to route back (default: auto-detected `virbr*`). Repeatable
-      --apply                  Actually run the privileged plan (requires root). Without it: dry-run
-  -h, --help                   Print help</code></pre></div>
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+      --vm-subnet &lt;VM_SUBNET&gt;
+          VM subnet(s) to route back (default: auto-detected `virbr*`). Repeatable
+
+      --apply
+          Actually run the privileged plan (requires root). Without it: dry-run
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+EXAMPLES:
+  # read the privileged plan before running any of it — without `--apply` this
+  # only prints
+  delonix vm bridge app
+
+  # establish it as root: the VM then reaches container IPs on that network
+  # directly, no published port needed
+  sudo delonix vm bridge app --apply
+
+  # route back a VM subnet the `virbr*` auto-detection did not find
+  sudo delonix vm bridge app --apply --vm-subnet 192.168.122.0/24
+
+SEE ALSO:
+  delonix vm unbridge · delonix vm reach · delonix network create · delonix vm
+  create
+
+  delonix › vm › bridge</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Ver o plano SEM aplicar (o default é dry-run)</div><div class='cap lang-en'>See the plan WITHOUT applying it (dry-run is the default)</div><pre><code>delonix vm bridge minha-rede</code></pre></div><div class="ex"><div class='cap lang-pt'>Aplicar mesmo — precisa de root, é a excepção deliberada ao rootless</div><div class='cap lang-en'>Actually apply it — needs root, the deliberate exception to rootless</div><pre><code>sudo delonix vm bridge minha-rede --apply</code></pre></div>
 <h2 id='reach'><code>vm reach</code></h2>
 <p class='intro'>Which published ports a VM can actually reach, and how to fix the ones it cannot. A port published to the default <code>127.0.0.1</code> is invisible to a VM — this lists the libvirt gateways, reads each port&#x27;s LIVE bind, and for every loopback-only one prints the exact republish command</p>
 <div class='help'><pre><code>Usage: delonix vm reach [OPTIONS]
 
 Options:
-      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-  -h, --help          Print help</code></pre></div>
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+EXAMPLES:
+  # which published container ports a VM can actually get to, and the exact
+  # republish command for each one that is stuck on loopback
+  delonix vm reach
+
+SEE ALSO:
+  delonix vm bridge · delonix container port · delonix net ingress publish ·
+  delonix vm status
+
+  delonix › vm › reach</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Que portas de container é que as VMs conseguem alcançar</div><div class='cap lang-en'>Which container ports VMs can reach</div><pre><code>delonix vm reach</code></pre></div>
 <h2 id='vnc'><code>vm vnc</code></h2>
 <p class='intro'>Print the VNC address of a graphical VM (created with <code>--vnc</code>, libvirt)</p>
 <div class='help'><pre><code>Usage: delonix vm vnc [OPTIONS] &lt;NAME&gt;
 
 Arguments:
-  &lt;NAME&gt;  
+  &lt;NAME&gt;
+          
 
 Options:
-      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-  -h, --help          Print help</code></pre></div>
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+EXAMPLES:
+  # the address to point a VNC client at, for a VM created with `--vnc` on
+  # libvirt
+  delonix vm vnc dev
+
+SEE ALSO:
+  delonix vm console · delonix vm create · delonix vm status
+
+  delonix › vm › vnc</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Abrir o ecrã gráfico da VM</div><div class='cap lang-en'>Open the VM&#x27;s graphical screen</div><pre><code>delonix vm vnc dev</code></pre></div>
 <h2 id='console'><code>vm console</code></h2>
 <p class='intro'>Attach to the VM&#x27;s serial console (interactive terminal) — works with no IP (boot logs, login). Escape: Ctrl-]</p>
 <div class='help'><pre><code>Usage: delonix vm console [OPTIONS] &lt;NAME&gt;
 
 Arguments:
-  &lt;NAME&gt;  
+  &lt;NAME&gt;
+          
 
 Options:
-      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-  -h, --help          Print help</code></pre></div>
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+EXAMPLES:
+  # watch the boot and log in before there is any IP or SSH — Ctrl-] brings
+  # you back to the host
+  delonix vm console dev
+
+SEE ALSO:
+  delonix vm vnc · delonix vm status · delonix vm create · delonix vm restart
+
+  delonix › vm › console</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Consola série (voltar ao host: Ctrl+])</div><div class='cap lang-en'>Serial console (back to the host: Ctrl+])</div><pre><code>delonix vm console dev</code></pre></div>
 <h2 id='push'><code>vm push</code></h2>
 <p class='intro'>Push a local golden VM image to an OCI registry (<code>vm push &lt;name&gt; &lt;target&gt;</code>)</p>
 <div class='help'><pre><code>Usage: delonix vm push [OPTIONS] &lt;NAME&gt; [TARGET]
 
 Arguments:
-  &lt;NAME&gt;    
-  [TARGET]  Destination. Omit it to publish to the OFFICIAL repository this image belongs in (decided from the image&#x27;s own metadata)
+  &lt;NAME&gt;
+          
+
+  [TARGET]
+          Destination. Omit it to publish to the OFFICIAL repository this image belongs in (decided from the image&#x27;s own metadata)
 
 Options:
-      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-  -h, --help          Print help</code></pre></div>
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+EXAMPLES:
+  # publish an image you built to a registry of your own
+  delonix vm push lab:1.0 ghcr.io/acme/lab:1.0
+
+  # omit the target and it goes to the official repository the image&#x27;s own
+  # metadata names
+  delonix vm push delonix-vm-k8s:1.34
+
+SEE ALSO:
+  delonix vm pull · delonix vm build · delonix vm ls-remote · delonix image vm
+  ls
+
+  delonix › vm › push</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Publicar a tua imagem como artefacto OCI</div><div class='cap lang-en'>Publish your image as an OCI artifact</div><pre><code>printf &#x27;%s&#x27; &quot;$GHCR_TOKEN&quot; | delonix image login ghcr.io --username aminhaorg
 delonix vm push minha-base:1.0 ghcr.io/aminhaorg/minha-base:1.0</code></pre></div>
 <h2 id='ls-remote'><code>vm ls-remote</code></h2>
@@ -397,67 +686,202 @@ delonix vm push minha-base:1.0 ghcr.io/aminhaorg/minha-base:1.0</code></pre></di
 <div class='help'><pre><code>Usage: delonix vm ls-remote [OPTIONS] [SOURCE]
 
 Arguments:
-  [SOURCE]  
+  [SOURCE]
+          
 
 Options:
-      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-      --no-k8s        With no `source`, list the official NO-Kubernetes golden&#x27;s repo instead of the Kubernetes one
-  -h, --help          Print help</code></pre></div>
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+      --no-k8s
+          With no `source`, list the official NO-Kubernetes golden&#x27;s repo instead of the Kubernetes one
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+EXAMPLES:
+  # which Kubernetes versions are published, before spending a pull on one
+  delonix vm ls-remote
+
+  # the tags of the Kubernetes-free golden
+  delonix vm ls-remote --no-k8s
+
+  # any other OCI repository holding VM images
+  delonix vm ls-remote ghcr.io/angolardevops/delonix-vm-base
+
+SEE ALSO:
+  delonix vm pull · delonix image vm ls · delonix vm push
+
+  delonix › vm › ls-remote</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Que versões existem publicadas, antes de puxar</div><div class='cap lang-en'>Which versions are published, before pulling</div><pre><code>delonix vm ls-remote</code></pre></div><div class="ex"><div class='cap lang-pt'>As tags de um repositório teu</div><div class='cap lang-en'>The tags of a repository of yours</div><pre><code>delonix vm ls-remote ghcr.io/aminhaorg/base</code></pre></div>
 <h2 id='pull'><code>vm pull</code></h2>
 <p class='intro'>Pull a golden VM image from an OCI registry — with no argument, the OFFICIAL Delonix image (ready for <code>vm create</code>/<code>cluster kubeadm</code>)</p>
 <div class='help'><pre><code>Usage: delonix vm pull [OPTIONS] [SOURCE]
 
 Arguments:
-  [SOURCE]  OCI reference (default: the official Delonix image)
+  [SOURCE]
+          OCI reference (default: the official Delonix image)
 
 Options:
-      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-      --name &lt;NAME&gt;   Local name (default: derived from the reference)
-      --no-k8s        With no `source`, pull the official NO-Kubernetes golden (just the `delonix` engine, rootless-ready) instead of the Kubernetes one
-  -h, --help          Print help</code></pre></div>
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+      --name &lt;NAME&gt;
+          Local name (default: derived from the reference)
+
+      --no-k8s
+          With no `source`, pull the official NO-Kubernetes golden (just the `delonix` engine, rootless-ready) instead of the Kubernetes one
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+EXAMPLES:
+  # the official Kubernetes golden image, with kubeadm and the CRI already
+  # installed
+  delonix vm pull
+
+  # the Kubernetes-free golden instead — just the engine, rootless-ready
+  delonix vm pull --no-k8s
+
+  # one published tag in particular, under a local name of your own
+  delonix vm pull ghcr.io/angolardevops/delonix-vm-k8s:1.35 --name k8s-1.35
+
+SEE ALSO:
+  delonix vm ls-remote · delonix image vm ls · delonix vm create · delonix
+  cluster kubeadm
+
+  delonix › vm › pull</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>A golden oficial com Kubernetes (sem argumento)</div><div class='cap lang-en'>The official golden image with Kubernetes (no argument)</div><pre><code>delonix vm pull</code></pre></div><div class="ex"><div class='cap lang-pt'>A golden SEM Kubernetes — só o motor, pronta a rootless</div><div class='cap lang-en'>The golden image WITHOUT Kubernetes — just the engine, rootless-ready</div><pre><code>delonix vm pull --no-k8s</code></pre></div><div class="ex"><div class='cap lang-pt'>De um registo teu, com nome local próprio</div><div class='cap lang-en'>From a registry of yours, with your own local name</div><pre><code>delonix vm pull ghcr.io/aminhaorg/base:24.04 --name base:24.04</code></pre></div>
 <h2 id='build'><code>vm build</code></h2>
 <p class='intro'>Build a qcow2 VM image from a <code>VMfile</code></p>
 <div class='help'><pre><code>Usage: delonix vm build [OPTIONS] --tag &lt;TAG&gt; [CONTEXT]
 
 Arguments:
-  [CONTEXT]  Build context — the directory `COPY` reads from [default: .]
+  [CONTEXT]
+          Build context — the directory `COPY` reads from
+          
+          [default: .]
 
 Options:
-      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-  -t, --tag &lt;TAG&gt;     
-  -f, --file &lt;FILE&gt;   The `VMfile` (default: `&lt;context&gt;/VMfile`)
-      --no-compress   Do not compress the final qcow2
-      --network       Give the guest network access during `RUN` (for `apt-get install` and friends). Off by default: a build that reaches the internet produces a different image depending on when it ran
-  -h, --help          Print help</code></pre></div>
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+  -t, --tag &lt;TAG&gt;
+          
+
+  -f, --file &lt;FILE&gt;
+          The `VMfile` (default: `&lt;context&gt;/VMfile`)
+
+      --no-compress
+          Do not compress the final qcow2
+
+      --network
+          Give the guest network access during `RUN` (for `apt-get install` and friends). Off by default: a build that reaches the internet produces a different image depending on when it ran
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+EXAMPLES:
+  # build a bootable qcow2 from the `VMfile` in this directory
+  delonix vm build -t lab:1.0
+
+  # let the guest reach a package mirror during `RUN` — offline is the default
+  # so the same recipe gives the same image tomorrow
+  delonix vm build -t lab:1.0 --network
+
+  # another recipe and another build context
+  delonix vm build -t lab:1.0 -f VMfile.dev ./image
+
+SEE ALSO:
+  delonix vm init · delonix image vm ls · delonix vm create · delonix vm push
+
+  delonix › vm › build</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Construir a partir do VMfile do directório actual</div><div class='cap lang-en'>Build from the current directory&#x27;s VMfile</div><pre><code>delonix vm build -t minha-base:1.0 .</code></pre></div><div class="ex"><div class='cap lang-pt'>VMfile noutro caminho, sem compressão (build mais rápido, imagem maior)</div><div class='cap lang-en'>VMfile at another path, no compression (faster build, larger image)</div><pre><code>delonix vm build -t minha-base:dev -f receitas/VMfile --no-compress .</code></pre></div><div class="ex"><div class='cap lang-pt'>Com rede no convidado — precisa disto para `apt-get install` num RUN (o build deixa de ser reproduzível: o resultado passa a depender do dia)</div><div class='cap lang-en'>With guest networking — needed for `apt-get install` in a RUN (the build stops being reproducible: the result now depends on the day)</div><pre><code>delonix vm build --network -t minha-base:1.0 .</code></pre></div>
 <h2 id='init'><code>vm init</code></h2>
 <p class='intro'>Bootstrap a project with a VM manifest — files ALREADY FILLED IN (images included), ready to use without editing anything</p>
 <div class='help'><pre><code>Usage: delonix vm init [OPTIONS] [DIR]
 
 Arguments:
-  [DIR]  Project directory (default: the current one) [default: .]
+  [DIR]
+          Project directory (default: the current one)
+          
+          [default: .]
 
 Options:
-      --l18n &lt;en|pt&gt;         Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-      --name &lt;NAME&gt;          Project name (default: the directory name)
-      --image &lt;IMAGE&gt;        Image to use. Omit = fills in with the default image
-      --force                Overwrite existing files
-      --vmfile               Scaffold a `VMfile` for BUILDING your own qcow2 image, instead of a manifest for RUNNING an existing one. The two are different jobs and this is the same verb for both: `init` starts a project either way
-  -t, --template &lt;TEMPLATE&gt;  Generate a complete PROJECT for a stack (e.g. `python`) with best practices, instead of the generic scaffold. `--template list` shows the available ones
-      --up                   After generating, build the image, start it, and wait until healthy
-  -h, --help                 Print help</code></pre></div>
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+      --name &lt;NAME&gt;
+          Project name (default: the directory name)
+
+      --image &lt;IMAGE&gt;
+          Image to use. Omit = fills in with the default image
+
+      --force
+          Overwrite existing files
+
+      --vmfile
+          Scaffold a `VMfile` for BUILDING your own qcow2 image, instead of a manifest for RUNNING an existing one. The two are different jobs and this is the same verb for both: `init` starts a project either way
+
+  -t, --template &lt;TEMPLATE&gt;
+          Generate a complete PROJECT for a stack (e.g. `python`) with best practices, instead of the generic scaffold. `--template list` shows the available ones
+
+      --up
+          After generating, build the image, start it, and wait until healthy
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+EXAMPLES:
+  # a `kind: Vm` manifest already filled in, applicable as it is
+  delonix vm init
+
+  # name the project and pin the image it should boot
+  delonix vm init --name lab --image delonix-vm-base:ubuntu-24.04
+
+  # a `VMfile` instead — the recipe for building your own qcow2, not for
+  # running an existing one
+  delonix vm init --vmfile
+
+  # generate into a directory of its own, overwriting what is there
+  delonix vm init ./lab --name lab --force
+
+SEE ALSO:
+  delonix vm apply · delonix vm build · delonix vm create · delonix stack init
+
+  delonix › vm › init</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Projecto com manifesto, pronto a correr</div><div class='cap lang-en'>Project with a manifest, ready to run</div><pre><code>delonix vm init --name lab</code></pre></div><div class="ex"><div class='cap lang-pt'>Scaffold de um VMfile para CONSTRUIR a tua imagem</div><div class='cap lang-en'>Scaffold a VMfile to BUILD your image</div><pre><code>delonix vm init --vmfile --name minha-base</code></pre></div>
 <h2 id='dash'><code>vm dash</code></h2>
 <p class='intro'>Dashboard (KPIs + table) of the VMs — interactive TUI, or <code>--once</code> snapshot</p>
 <div class='help'><pre><code>Usage: delonix vm dash [OPTIONS]
 
 Options:
-      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-      --once          
-      --json          
-  -h, --help          Print help</code></pre></div>
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+      --once
+          
+
+      --json
+          
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+EXAMPLES:
+  # a live TUI of every VM — state, resources and problems, refreshed in place
+  delonix vm dash
+
+  # one snapshot of text, for a terminal that is not interactive
+  delonix vm dash --once
+
+  # the same numbers as JSON, for a script or a dashboard datasource
+  delonix vm dash --json
+
+SEE ALSO:
+  delonix vm ls · delonix vm status · delonix dash · delonix container dash
+
+  delonix › vm › dash</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Dashboard só das VMs (htop-style; `q` sai)</div><div class='cap lang-en'>VMs-only dashboard (htop-style; `q` to quit)</div><pre><code>delonix vm dash</code></pre></div><div class="ex"><div class='cap lang-pt'>Snapshot para um script ou para o Grafana</div><div class='cap lang-en'>Snapshot for a script or for Grafana</div><pre><code>delonix vm dash --json | jq &#x27;.tiles&#x27;</code></pre></div>
 <h2 id='create'><code>vm create</code></h2>
 <p class='intro'>Create (or auto-recover) a VM</p>
@@ -556,60 +980,177 @@ Options:
           [default: 120]
 
   -h, --help
-          Print help (see a summary with &#x27;-h&#x27;)</code></pre></div>
+          Print help (see a summary with &#x27;-h&#x27;)
+
+EXAMPLES:
+  # from the local golden image, blocking until it answers on an address
+  delonix vm create dev --vcpus 2 --memory 4G --wait
+
+  # with your key and hostname applied on the first boot, by cloud-init
+  delonix vm create dev --ssh-key @$HOME/.ssh/id_ed25519.pub --hostname dev --wait
+
+  # a Kubernetes node on libvirt, on a NAT network so the IP is visible and
+  # routable
+  delonix vm create k8s-cp1 --disk delonix-vm-k8s:1.34 --backend libvirt --net-mode nat --vcpus 2 --memory 4G
+
+  # isolated from other namespaces — only cloud-hypervisor puts the tap in the
+  # SDN where that is enforced
+  delonix vm create nas --backend cloud-hypervisor --namespace teamA
+
+SEE ALSO:
+  delonix vm ls · delonix vm console · delonix vm start · delonix image vm
+  pull
+
+  delonix › vm › create</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>VM a partir da imagem dourada, com chave SSH — o nome é POSICIONAL</div><div class='cap lang-en'>VM from the golden image, with an SSH key — the name is POSITIONAL</div><pre><code>delonix vm create node1 --disk k8s-golden --vcpus 2 --memory 4G --ssh-key @~/.ssh/id_ed25519.pub</code></pre></div><div class="ex"><div class='cap lang-pt'>Sem `--disk`, usa a imagem VM dourada local — se houver exactamente uma</div><div class='cap lang-en'>With no `--disk`, it uses the local golden VM image — if there is exactly one</div><pre><code>delonix vm create node1 --ssh-key @~/.ssh/id_ed25519.pub</code></pre></div>
 <h2 id='ls'><code>vm ls</code></h2>
 <p class='intro'>List the VMs</p>
 <div class='help'><pre><code>Usage: delonix vm ls [OPTIONS]
 
 Options:
-      --l18n &lt;en|pt&gt;     Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-      --ports            Also probe a short list of well-known ports (22, 6443, 10250, 80, 443) on each VM&#x27;s IP and show which respond — a real TCP connect per port, short timeout, run concurrently. Off by default: unlike the rest of `ls` (local state only), this does live network I/O and can add latency, especially for an unreachable/booting VM
-  -o, --output &lt;OUTPUT&gt;  Output format: `table` (default) or `json` (ADR-0005). The `ports_open` field is included only with `--ports` (same as the table column — the probe does live network I/O, off by default) [default: table] [possible values: table, json]
-  -h, --help             Print help</code></pre></div>
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+      --ports
+          Also probe a short list of well-known ports (22, 6443, 10250, 80, 443) on each VM&#x27;s IP and show which respond — a real TCP connect per port, short timeout, run concurrently. Off by default: unlike the rest of `ls` (local state only), this does live network I/O and can add latency, especially for an unreachable/booting VM
+
+  -o, --output &lt;OUTPUT&gt;
+          Output format: `table` (default) or `json` (ADR-0005). The `ports_open` field is included only with `--ports` (same as the table column — the probe does live network I/O, off by default)
+          
+          [default: table]
+          [possible values: table, json]
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+EXAMPLES:
+  # every VM, with vcpus, memory, state and the IP it got
+  delonix vm ls
+
+  # also knock on 22/6443/10250/80/443 to see what already answers — live
+  # network I/O, so it is off by default
+  delonix vm ls --ports
+
+  # the same rows as JSON, for a script
+  delonix vm ls -o json
+
+SEE ALSO:
+  delonix vm status · delonix vm describe · delonix vm dash · delonix image vm
+  ls
+
+  delonix › vm › ls</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><pre><code>delonix vm ls</code></pre></div>
 <h2 id='status'><code>vm status</code></h2>
 <p class='intro'>Current state (reconciles liveness/IP with the backend)</p>
 <div class='help'><pre><code>Usage: delonix vm status [OPTIONS] [NAME]
 
 Arguments:
-  [NAME]  VM to query (omit for the state of ALL)
+  [NAME]
+          VM to query (omit for the state of ALL)
 
 Options:
-      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-  -h, --help          Print help</code></pre></div>
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+EXAMPLES:
+  # one VM, with liveness and IP reconciled against the backend rather than
+  # read off a stale record
+  delonix vm status dev
+
+  # the state of all of them at once
+  delonix vm status
+
+SEE ALSO:
+  delonix vm ls · delonix vm describe · delonix vm console
+
+  delonix › vm › status</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Reconcilia liveness/IP com o backend</div><div class='cap lang-en'>Reconciles liveness/IP with the backend</div><pre><code>delonix vm status node1</code></pre></div>
 <h2 id='stop'><code>vm stop</code></h2>
 <p class='intro'>Stop the VM (preserves disk/record)</p>
 <div class='help'><pre><code>Usage: delonix vm stop [OPTIONS] &lt;NAME&gt;
 
 Arguments:
-  &lt;NAME&gt;  
+  &lt;NAME&gt;
+          
 
 Options:
-      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-  -h, --help          Print help</code></pre></div>
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+EXAMPLES:
+  # give the host back its CPU and RAM, keeping the disk and the record — take
+  # any snapshot BEFORE this, the libvirt domain is undefined here
+  delonix vm stop dev
+
+SEE ALSO:
+  delonix vm start · delonix vm snapshot · delonix vm rm · delonix vm ls
+
+  delonix › vm › stop</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><pre><code>delonix vm stop node1</code></pre></div>
 <h2 id='rm'><code>vm rm</code></h2>
 <p class='intro'>Remove the VM (stops + deletes overlay/state)</p>
 <div class='help'><pre><code>Usage: delonix vm rm [OPTIONS] &lt;NAME&gt;
 
 Arguments:
-  &lt;NAME&gt;  
+  &lt;NAME&gt;
+          
 
 Options:
-  -f, --force         Remove the local state even if the libvirt cleanup fails
-      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-  -h, --help          Print help</code></pre></div>
+  -f, --force
+          Remove the local state even if the libvirt cleanup fails
+
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+EXAMPLES:
+  # stop it and delete the overlay and the record
+  delonix vm rm dev
+
+  # drop the local state even when the libvirt cleanup fails, instead of
+  # leaving a record you cannot get rid of
+  delonix vm rm dev --force
+
+SEE ALSO:
+  delonix vm stop · delonix vm ls · delonix vm create · delonix vm snapshots
+
+  delonix › vm › rm</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><pre><code>delonix vm rm node1</code></pre></div>
 <h2 id='apply'><code>vm apply</code></h2>
 <p class='intro'>Apply the <code>kind: Vm</code> documents of a manifest (<code>delonix_vm::create</code> is already idempotent by name — creates or auto-recovers)</p>
 <div class='help'><pre><code>Usage: delonix vm apply [OPTIONS]
 
 Options:
-  -f, --file &lt;FILE&gt;   
-      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-  -h, --help          Print help</code></pre></div>
+  -f, --file &lt;FILE&gt;
+          
+
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+EXAMPLES:
+  # apply the `kind: Vm` documents of ./delonix-manifest.yaml — idempotent by
+  # name, so it creates or recovers
+  delonix vm apply
+
+  # from a manifest of your own
+  delonix vm apply -f examples/vm.yaml
+
+SEE ALSO:
+  delonix vm init · delonix stack apply · delonix stack plan · delonix vm
+  create
+
+  delonix › vm › apply</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><pre><code>delonix vm apply -f delonix-manifest.yaml</code></pre></div>
 <h2><span class='lang-pt'>Laboratório</span><span class='lang-en'>Lab</span></h2>
 <div class='callout lang-pt'><p>Cria uma microVM com cloud-init automático e liga-te por SSH.</p>
