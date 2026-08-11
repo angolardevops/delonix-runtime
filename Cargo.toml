@@ -11,6 +11,7 @@ members = [
     "crates/delonix-cri",
     "crates/delonix-mgmt",
     "crates/delonix-scan",
+    "crates/delonix-truenas",
 ]
 
 [workspace.package]
