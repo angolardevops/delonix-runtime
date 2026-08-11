@@ -585,6 +585,27 @@ pub enum VmCmd {
         #[arg(add = ArgValueCandidates::new(super::complete::vms))]
         name: String,
     },
+    /// SSH into a VM by NAME (its IP comes from the record) or straight to an
+    /// address. With a trailing command, runs it and returns instead of opening
+    /// a shell.
+    ///
+    /// `delonix vm ssh dev` · `delonix vm ssh dev -- systemctl status` ·
+    /// `delonix vm ssh 192.168.122.50 -l root`
+    Ssh {
+        /// VM name (`vm ls`) or an IP/hostname to go to directly.
+        #[arg(add = ArgValueCandidates::new(super::complete::vms))]
+        target: String,
+        /// Login user. Defaults to `delonix` — the account the golden images
+        /// create and the one cloud-init injects `--ssh-key` into.
+        #[arg(short = 'l', long = "user", default_value = "delonix")]
+        user: String,
+        /// Private key to authenticate with (`ssh -i`).
+        #[arg(short = 'i', long = "identity")]
+        identity: Option<PathBuf>,
+        /// Command to run instead of an interactive shell.
+        #[arg(trailing_var_arg = true)]
+        command: Vec<String>,
+    },
     /// Print the VNC address of a graphical VM (created with `--vnc`, libvirt).
     Vnc {
         #[arg(add = ArgValueCandidates::new(super::complete::vms))]
@@ -1374,6 +1395,12 @@ pub fn run(action: VmCmd) -> Result<()> {
         }
         VmCmd::Describe { names } => cmd_describe(&base, &names),
         VmCmd::Console { name } => cmd_console(&base, &name),
+        VmCmd::Ssh {
+            target,
+            user,
+            identity,
+            command,
+        } => cmd_ssh(&base, &target, &user, identity.as_deref(), &command),
         VmCmd::Vnc { name } => cmd_vnc(&base, &name),
         VmCmd::Status { name } => {
             // No argument: the reconciled state of ALL (consistent with
@@ -1861,6 +1888,88 @@ fn wait_for_boot(base: &std::path::Path, name: &str, timeout: std::time::Duratio
 /// `--vnc`, libvirt backend). Cloud Hypervisor has no display — in that case
 /// it points to `vm console` (serial). Opens no client; prints the address
 /// for the user to connect with their own (`vncviewer`, Remmina, ...).
+/// Is this a literal address rather than a VM name? Deliberately narrow: an
+/// IPv4 literal, or anything with a dot or colon in it (a hostname, an IPv6).
+/// `valid_vm_name` forbids `/` and control characters but ALLOWS dots, so a VM
+/// could in principle be called `a.b` — that is why the store is consulted
+/// FIRST and this only decides what to do when the store has nothing.
+fn looks_like_address(s: &str) -> bool {
+    s.contains(':') || s.split('.').count() > 1
+}
+
+/// `vm ssh` — go to a VM by name (the record holds its IP) or straight to an
+/// address.
+///
+/// Why the engine and not "just type ssh": the IP is the thing the user does not
+/// have. It lives in the record, it is only learnt well after `create` (a nat VM
+/// gets its DHCP lease late), and the default account is `delonix` — not the
+/// distro's own (`ubuntu`, `rocky`, `debian`), which EXISTS and does not carry
+/// the key, so guessing it answers `Permission denied (publickey)` and reads
+/// like a broken key instead of a wrong name.
+///
+/// `exec`s: this is a shortcut for a shell, so `ssh` inherits the terminal
+/// whole. Nothing to do after it returns.
+fn cmd_ssh(
+    base: &std::path::Path,
+    target: &str,
+    user: &str,
+    identity: Option<&std::path::Path>,
+    command: &[String],
+) -> Result<()> {
+    // The store decides, and the address heuristic only breaks the tie when it
+    // has nothing — same order as `vm convert`, and for the same reason: a name
+    // the user has is worth more than a shape that looks like an address.
+    let host = match delonix_vm::status(base, target) {
+        Ok(vm) => match vm.ip.as_deref().filter(|s| !s.is_empty()) {
+            Some(ip) => ip.to_string(),
+            None => {
+                return Err(Error::Invalid(super::po::tf(
+                    "VM '{name}' has no IP yet — it is '{status}'. A VM only gets one once it has \
+                     booted AND its network came up; watch it with `delonix vm console {name}`, or \
+                     check `delonix vm ls` again in a moment",
+                    &[("name", target), ("status", &format!("{:?}", vm.status))],
+                )));
+            }
+        },
+        Err(_) if looks_like_address(target) => target.to_string(),
+        Err(e) => return Err(e),
+    };
+
+    let mut cmd = std::process::Command::new("ssh");
+    if let Some(key) = identity {
+        cmd.arg("-i").arg(key);
+    }
+    // A VM is recreated at the same address all the time; a changed host key is
+    // the NORM here, not an attack, and refusing to connect over it would make
+    // this shortcut useless. Said out loud rather than hidden: this is a lab
+    // convenience, and `delonix vm ssh` is not the tool for a host you do not
+    // own.
+    cmd.args([
+        "-o",
+        "StrictHostKeyChecking=no",
+        "-o",
+        "UserKnownHostsFile=/dev/null",
+        "-o",
+        "LogLevel=ERROR",
+    ]);
+    // `--` before the destination: a name starting with `-` would otherwise be
+    // read as an option (the same defence the `ssh`/`scp` of `cluster apply`
+    // got in the first security audit).
+    cmd.arg("--").arg(format!("{user}@{host}"));
+    if !command.is_empty() {
+        cmd.args(command);
+    }
+    use std::os::unix::process::CommandExt;
+    // `exec` and not `spawn`+`wait`: this hands the terminal to ssh whole
+    // (interactive shell, pty, escape handling) and there is nothing to do
+    // afterwards. `exec` only RETURNS on failure — most often ssh not installed.
+    let err = cmd.exec();
+    Err(Error::Runtime {
+        context: "ssh",
+        message: format!("could not run ssh: {err}"),
+    })
+}
+
 fn cmd_vnc(base: &std::path::Path, name: &str) -> Result<()> {
     let vm = delonix_vm::status(base, name)?;
     let backend = vm.backend.as_str();
@@ -2418,7 +2527,8 @@ pub(crate) fn init_for(
 mod tests {
     use super::{
         build_meta_data, build_user_data, fmt_vm_gpu, fmt_vm_status, fmt_vm_uptime,
-        normalize_vm_spec, parse_ip_gateways, parse_ss_binds, resolve_vm_defaults, vm_role, VmSpec,
+        looks_like_address, normalize_vm_spec, parse_ip_gateways, parse_ss_binds,
+        resolve_vm_defaults, vm_role, VmSpec,
     };
     use delonix_runtime_core::Status;
 
@@ -2444,6 +2554,24 @@ mod tests {
         }
     }
 
+    /// A VM name and an address are told apart ONLY when the store has nothing —
+    /// `valid_vm_name` allows dots, so a VM could be called `a.b` and the store
+    /// has to win. This guards the tie-breaker, not the lookup order.
+    #[test]
+    fn looks_like_address_so_decide_o_desempate() {
+        for a in [
+            "192.168.122.50",
+            "10.0.0.1",
+            "nas.local",
+            "fe80::1",
+            "host:2222",
+        ] {
+            assert!(looks_like_address(a), "'{a}' parece um endereço");
+        }
+        for n in ["dev", "demovm", "vm1", "kaeso-odoo18"] {
+            assert!(!looks_like_address(n), "'{n}' é um nome de VM");
+        }
+    }
     #[test]
     fn resolve_vm_defaults_cli_explicito_ganha_a_imagem() {
         let img = image_with_defaults(Some(4), Some("4G".into()), Some("cloud-hypervisor".into()));

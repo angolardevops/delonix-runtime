@@ -31,6 +31,7 @@ pub mod output;
 pub mod pki;
 pub mod po;
 pub mod pod;
+pub mod provision;
 pub mod reconcile;
 pub mod remote;
 pub mod scaffold;
